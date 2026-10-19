@@ -1,0 +1,5 @@
+component_types:
+  - id: longhorn.manager
+    hub: true
+    match: { kind: DaemonSet, name_pattern: ^longhorn-manager$ }
+    chains: [volumes]

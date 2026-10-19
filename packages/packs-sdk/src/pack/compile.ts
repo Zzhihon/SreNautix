@@ -34,6 +34,14 @@ export interface PackSet {
   signals: Map<string, { pack: string; signal: Signal }>;
   cards: Map<string, CardEntry>;
   chains: Map<string, { pack: string; chain: EvidenceChain }>;
+  /** 证据链的排除规则；chain 为证据链全局键 <pack>/<chain id> */
+  excludes: Array<{
+    pack: string;
+    chain: string;
+    index: number;
+    say: { 'zh-CN'?: string; en?: string };
+    when: (ctx: Record<string, unknown>) => unknown;
+  }>;
   rules: Array<{
     pack: string;
     rule: PackRule;
@@ -305,5 +313,19 @@ export async function compilePackSet(loaded: LoadedPack[], opts: CompileOptions)
     }
   }
 
-  return { packs: active, disabled, signals, cards, chains, rules, lock, lockDigest: lockDigest(lock) };
+  // 证据链的排除规则：上下文与规则提议相同，命中时阶段 A 的 disposition 为 ignore
+  const excludes: PackSet['excludes'] = [];
+  for (const [key, { pack, chain }] of chains) {
+    for (const [i, ex] of (chain.excludes ?? []).entries()) {
+      const where = `${key} 的 excludes[${i}]`;
+      const c = ruleEnv.check(ex.cel);
+      if (!c.valid) {
+        throw new PackLintError(where, `CEL 不合法：${c.error?.message ?? ''}`);
+      }
+      const f = ruleEnv.parse(ex.cel);
+      excludes.push({ pack, chain: key, index: i, say: ex.say, when: (ctx) => f(ctx) });
+    }
+  }
+
+  return { packs: active, disabled, signals, cards, chains, rules, excludes, lock, lockDigest: lockDigest(lock) };
 }

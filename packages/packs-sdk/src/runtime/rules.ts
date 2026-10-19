@@ -30,6 +30,42 @@ function plain(v: unknown): unknown {
   return typeof v === 'bigint' ? Number(v) : v;
 }
 
+export interface ExcludeEvaluation {
+  /** 第一条命中的排除规则；没有命中时为 null */
+  hit: { pack: string; chain: string; index: number; say: { 'zh-CN'?: string; en?: string } } | null;
+  /** 求值出错的排除规则，视为不命中 */
+  errors: Array<{ pack: string; chain: string; index: number; error: string }>;
+}
+
+/** 按声明顺序求值本次执行过的证据链（全局键 <pack>/<chain id>）的排除规则 */
+export function evaluateExcludes(set: PackSet, chains: readonly string[], ctx: RuleContext): ExcludeEvaluation {
+  const env = { incident: ctx.incident, root: ctx.root, cards: ctx.cards };
+  const out: ExcludeEvaluation = { hit: null, errors: [] };
+  const wanted = new Set(chains);
+  for (const ex of set.excludes) {
+    if (!wanted.has(ex.chain)) {
+      continue;
+    }
+    try {
+      const v = ex.when(env);
+      if (typeof v !== 'boolean') {
+        throw new TypeError('排除规则的结果不是 bool');
+      }
+      if (v && !out.hit) {
+        out.hit = { pack: ex.pack, chain: ex.chain, index: ex.index, say: ex.say };
+      }
+    } catch (err) {
+      out.errors.push({
+        pack: ex.pack,
+        chain: ex.chain,
+        index: ex.index,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+  return out;
+}
+
 export function evaluateRules(set: PackSet, ctx: RuleContext): RuleEvaluation {
   const out: RuleEvaluation = { proposals: [], errors: [] };
   const env = { incident: ctx.incident, root: ctx.root, cards: ctx.cards };

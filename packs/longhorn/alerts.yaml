@@ -1,0 +1,68 @@
+# 来源：Longhorn 文档 monitoring/alert-rules-example 中的告警名。
+entries:
+  - {
+      id: longhorn-volume-actual-space-used-warning,
+      alertname: LonghornVolumeActualSpaceUsedWarning,
+      role: cause,
+      entity: { kind: PersistentVolumeClaim, name_labels: [pvc], namespace_label: pvc_namespace },
+      chains: [volumes, pvc/pvc-capacity],
+      mixin: other,
+    }
+  - {
+      id: longhorn-volume-status-critical,
+      alertname: LonghornVolumeStatusCritical,
+      role: cause,
+      entity: { kind: PersistentVolumeClaim, name_labels: [pvc], namespace_label: pvc_namespace },
+      chains: [volumes],
+      mixin: other,
+    }
+  - {
+      id: longhorn-volume-status-warning,
+      alertname: LonghornVolumeStatusWarning,
+      role: cause,
+      entity: { kind: PersistentVolumeClaim, name_labels: [pvc], namespace_label: pvc_namespace },
+      chains: [volumes],
+      mixin: other,
+    }
+  - {
+      id: longhorn-node-storage-warning,
+      alertname: LonghornNodeStorageWarning,
+      role: cause,
+      entity: { kind: Node, name_labels: [node] },
+      chains: [volumes],
+      mixin: other,
+    }
+  - {
+      id: longhorn-disk-storage-warning,
+      alertname: LonghornDiskStorageWarning,
+      role: cause,
+      entity: { kind: Node, name_labels: [node] },
+      chains: [volumes],
+      mixin: other,
+    }
+  - {
+      id: longhorn-node-down,
+      alertname: LonghornNodeDown,
+      role: cause,
+      entity: { kind: cluster, name_labels: [alertname] },
+      component_type: longhorn.manager,
+      scope: hub,
+      chains: [volumes, node/node-health],
+      mixin: other,
+    }
+  - {
+      id: longhorn-instance-manager-cpu-usage-warning,
+      alertname: LonghornInstanceManagerCPUUsageWarning,
+      role: symptom,
+      entity: { kind: Node, name_labels: [node] },
+      chains: [volumes],
+      mixin: other,
+    }
+  - {
+      id: longhorn-node-cpu-usage-warning,
+      alertname: LonghornNodeCPUUsageWarning,
+      role: symptom,
+      entity: { kind: Node, name_labels: [node] },
+      chains: [volumes, node/node-health],
+      mixin: other,
+    }

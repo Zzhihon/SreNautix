@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { compilePackSet } from '../src/pack/compile.js';
 import { loadBuiltinPacks } from '../src/pack/sources.js';
-import { evaluateRules } from '../src/runtime/rules.js';
+import { evaluateExcludes, evaluateRules } from '../src/runtime/rules.js';
 import { runPackTests } from '../src/testing/pack-test.js';
 import { CATALOG, PACKS } from './support.js';
 
@@ -39,5 +39,19 @@ describe('_example 包', () => {
         params: { namespace: 'shop', pod: 'web-0' },
       }),
     ]);
+  });
+
+  it('排除规则只对执行过的证据链求值', async () => {
+    const set = await compilePackSet(loadBuiltinPacks(PACKS, ['_example']), { catalog: CATALOG });
+    const ctx = (namespace: string) => ({
+      incident: { id: 'i1' },
+      root: { cluster_id: 'c1', kind: 'Pod', namespace, name: 'web-0', component_type: 'example.web' },
+      cards: {},
+    });
+    const hit = evaluateExcludes(set, ['_example/pod-memory'], ctx('loadtest-7'));
+    expect(hit.errors).toEqual([]);
+    expect(hit.hit).toEqual(expect.objectContaining({ pack: '_example', chain: '_example/pod-memory', index: 0 }));
+    expect(evaluateExcludes(set, ['_example/pod-memory'], ctx('shop')).hit).toBeNull();
+    expect(evaluateExcludes(set, [], ctx('loadtest-7')).hit).toBeNull();
   });
 });

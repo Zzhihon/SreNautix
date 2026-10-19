@@ -4,6 +4,12 @@ chains:
       zh-CN: 容器内存
       en: Container memory
     runbook: container-memory.md
+    # 排除规则：命中时阶段 A 的处置判断为 ignore。示例：压测命名空间里的内存告警不处理
+    excludes:
+      - cel: root.namespace.startsWith("loadtest-")
+        say:
+          zh-CN: 压测命名空间中的内存告警按约定忽略
+          en: Memory alerts in load-test namespaces are ignored by convention
     cards:
       - id: limit-ratio
         title:

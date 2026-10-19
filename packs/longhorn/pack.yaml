@@ -1,0 +1,11 @@
+api_version: srenautix.io/pack/v1
+name: longhorn
+version: 1.0.0
+description: Longhorn（v1.13）：卷的健壮性与容量、节点与磁盘状态
+maturity: stable
+min_srenautix_version: 0.1.0
+depends_on:
+  - pvc
+requires:
+  - metrics.query
+  - metrics.query_range

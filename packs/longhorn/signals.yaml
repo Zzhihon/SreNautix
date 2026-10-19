@@ -1,0 +1,24 @@
+# 指标来自 longhorn-manager（metrics_collector/volume_collector.go、node_collector.go）。
+# 卷指标带 pvc 与 pvc_namespace 标签；PVC 实体按这两个标签选，节点实体按 node 标签选。
+signals:
+  - id: volume_robustness
+    kind: metrics
+    alternatives:
+      - expr: max by (volume, pvc, pvc_namespace, state) (longhorn_volume_robustness{pvc_namespace="$namespace"}) == 1
+  - id: volume_usage_ratio
+    kind: metrics
+    unit: ratio
+    alternatives:
+      - expr: >-
+          max by (volume, pvc, pvc_namespace) (
+            longhorn_volume_actual_size_bytes{pvc_namespace="$namespace"} / longhorn_volume_capacity_bytes{pvc_namespace="$namespace"}
+          )
+  - id: node_storage_ratio
+    kind: metrics
+    unit: ratio
+    alternatives:
+      - expr: max by (node) (longhorn_node_storage_usage_bytes / longhorn_node_storage_capacity_bytes)
+  - id: node_condition
+    kind: metrics
+    alternatives:
+      - expr: min by (node, condition) (longhorn_node_status{condition=~"ready|schedulable"})

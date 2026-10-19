@@ -1,0 +1,91 @@
+chains:
+  - id: volumes
+    title: { zh-CN: Longhorn 卷, en: Longhorn volumes }
+    runbook: longhorn.md
+    cards:
+      - id: robustness
+        title: { zh-CN: 卷健壮性, en: Volume robustness }
+        note:
+          {
+            zh-CN: degraded 表示副本不足，faulted 表示卷不可用,
+            en: 'Degraded means missing replicas, faulted means unusable',
+          }
+        applies_to: { kinds: [PersistentVolumeClaim, Namespace] }
+        refs:
+          - { name: rob, signal: volume_robustness, mode: range }
+        judge:
+          let:
+            - {
+                name: mine,
+                cel: 'entity.kind == "PersistentVolumeClaim" ? rob.filter(s, label(s, "pvc") == entity.name) : rob',
+              }
+            - { name: faulted, cel: 'size(mine.filter(s, label(s, "state") == "faulted"))' }
+            - { name: degraded, cel: 'size(mine.filter(s, label(s, "state") == "degraded"))' }
+            - { name: seen, cel: size(mine) }
+          undeterminable_if:
+            - cel: seen == 0
+              say: { zh-CN: 没有找到这个卷的 Longhorn 指标, en: No Longhorn metrics for this volume }
+          abnormal_if:
+            - cel: faulted > 0
+              say: { zh-CN: '{faulted} 个卷 faulted', en: '{faulted} volumes are faulted' }
+            - cel: degraded > 0
+              say: { zh-CN: '{degraded} 个卷 degraded', en: '{degraded} volumes are degraded' }
+        display:
+          table:
+            rows_from: rob
+            columns:
+              - { header: { zh-CN: PVC, en: PVC }, cel: 'label(row, "pvc")' }
+              - { header: { zh-CN: 状态, en: State }, cel: 'label(row, "state")' }
+        egress: allow
+      - id: usage
+        title: { zh-CN: 卷实际用量, en: Volume actual usage }
+        applies_to: { kinds: [PersistentVolumeClaim, Namespace] }
+        params: { ratio: 0.85 }
+        refs:
+          - { name: used, signal: volume_usage_ratio, mode: range }
+        judge:
+          let:
+            - {
+                name: mine,
+                cel: 'entity.kind == "PersistentVolumeClaim" ? used.filter(s, label(s, "pvc") == entity.name) : used',
+              }
+            - { name: peak, cel: max(mine) }
+          abnormal_if:
+            - cel: peak > params.ratio
+              say: { zh-CN: '卷用量峰值 {peak, number, percent}', en: 'Peak volume usage {peak, number, percent}' }
+        display: { value: peak, unit: percent, threshold: params.ratio }
+        egress: allow
+      - id: nodes
+        title: { zh-CN: 存储节点, en: Storage nodes }
+        applies_to: { kinds: [Node, cluster, PersistentVolumeClaim, Namespace] }
+        params: { ratio: 0.85 }
+        refs:
+          - { name: storage, signal: node_storage_ratio, mode: instant }
+          - { name: cond, signal: node_condition, mode: range }
+        judge:
+          let:
+            - {
+                name: full,
+                cel: 'size(storage.filter(s, (entity.kind != "Node" || label(s, "node") == entity.name) && last(s) > params.ratio))',
+              }
+            - {
+                name: bad,
+                cel: 'size(cond.filter(s, (entity.kind != "Node" || label(s, "node") == entity.name) && min(s) < 1.0))',
+              }
+          abnormal_if:
+            - cel: bad > 0
+              say:
+                {
+                  zh-CN: 'Longhorn 节点有 {bad} 项条件不满足（未就绪或不可调度）',
+                  en: '{bad} Longhorn node conditions are false',
+                }
+            - cel: full > 0
+              say: { zh-CN: '{full} 个节点的 Longhorn 存储将满', en: 'Longhorn storage is nearly full on {full} nodes' }
+        display:
+          table:
+            rows_from: storage
+            sort_by: last(row)
+            columns:
+              - { header: { zh-CN: 节点, en: Node }, cel: 'label(row, "node")' }
+              - { header: { zh-CN: 用量, en: Usage }, cel: last(row), unit: percent }
+        egress: allow

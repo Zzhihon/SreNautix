@@ -1,0 +1,86 @@
+api_version: srenautix.io/pack-test/v1
+interval: 1m
+input_series:
+  - {
+      series: 'longhorn_volume_robustness{node="n1",volume="pvc-1",pvc="data-db-0",pvc_namespace="shop",state="healthy"}',
+      values: '1x20 0x40',
+    }
+  - {
+      series: 'longhorn_volume_robustness{node="n1",volume="pvc-1",pvc="data-db-0",pvc_namespace="shop",state="degraded"}',
+      values: '0x20 1x40',
+    }
+  - {
+      series: 'longhorn_volume_robustness{node="n2",volume="pvc-2",pvc="data-cache-0",pvc_namespace="shop",state="healthy"}',
+      values: '1x60',
+    }
+  - {
+      series: 'longhorn_volume_robustness{node="n2",volume="pvc-2",pvc="data-cache-0",pvc_namespace="shop",state="degraded"}',
+      values: '0x60',
+    }
+  - {
+      series: 'longhorn_volume_capacity_bytes{node="n1",volume="pvc-1",pvc="data-db-0",pvc_namespace="shop"}',
+      values: '10000000000x60',
+    }
+  - {
+      series: 'longhorn_volume_actual_size_bytes{node="n1",volume="pvc-1",pvc="data-db-0",pvc_namespace="shop"}',
+      values: '9200000000x60',
+    }
+  - {
+      series: 'longhorn_volume_capacity_bytes{node="n2",volume="pvc-2",pvc="data-cache-0",pvc_namespace="shop"}',
+      values: '10000000000x60',
+    }
+  - {
+      series: 'longhorn_volume_actual_size_bytes{node="n2",volume="pvc-2",pvc="data-cache-0",pvc_namespace="shop"}',
+      values: '2000000000x60',
+    }
+  - { series: 'longhorn_node_storage_capacity_bytes{node="n1"}', values: '100000000000x60' }
+  - { series: 'longhorn_node_storage_usage_bytes{node="n1"}', values: '92000000000x60' }
+  - { series: 'longhorn_node_storage_capacity_bytes{node="n2"}', values: '100000000000x60' }
+  - { series: 'longhorn_node_storage_usage_bytes{node="n2"}', values: '30000000000x60' }
+  - { series: 'longhorn_node_status{node="n1",condition="ready",condition_reason=""}', values: '1x20 0x10 1x30' }
+  - { series: 'longhorn_node_status{node="n1",condition="schedulable",condition_reason=""}', values: '1x60' }
+  - { series: 'longhorn_node_status{node="n2",condition="ready",condition_reason=""}', values: '1x60' }
+  - { series: 'longhorn_node_status{node="n2",condition="schedulable",condition_reason=""}', values: '1x60' }
+tests:
+  - {
+      name: data-db-0 degraded,
+      eval_time: 40m,
+      card: volumes/robustness,
+      entity: { kind: PersistentVolumeClaim, namespace: shop, name: data-db-0 },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: data-cache-0 healthy,
+      eval_time: 40m,
+      card: volumes/robustness,
+      entity: { kind: PersistentVolumeClaim, namespace: shop, name: data-cache-0 },
+      expect: { verdict: normal },
+    }
+  - {
+      name: data-db-0 用量高,
+      eval_time: 40m,
+      card: volumes/usage,
+      entity: { kind: PersistentVolumeClaim, namespace: shop, name: data-db-0 },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: data-cache-0 用量低,
+      eval_time: 40m,
+      card: volumes/usage,
+      entity: { kind: PersistentVolumeClaim, namespace: shop, name: data-cache-0 },
+      expect: { verdict: normal },
+    }
+  - {
+      name: n1 存储将满且掉线过,
+      eval_time: 40m,
+      card: volumes/nodes,
+      entity: { kind: Node, name: n1 },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: n2 正常,
+      eval_time: 40m,
+      card: volumes/nodes,
+      entity: { kind: Node, name: n2 },
+      expect: { verdict: normal },
+    }

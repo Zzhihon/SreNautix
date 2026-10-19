@@ -55,5 +55,12 @@ export {
   type RunCardInput,
   type RunCardResult,
 } from './runtime/run-card.js';
-export { evaluateRules, type RuleContext, type RuleEvaluation, type RuleProposal } from './runtime/rules.js';
+export {
+  evaluateRules,
+  evaluateExcludes,
+  type RuleContext,
+  type RuleEvaluation,
+  type RuleProposal,
+  type ExcludeEvaluation,
+} from './runtime/rules.js';
 export { runPackTests, FIXTURE_EPOCH, type PackTestReport, type CaseResult } from './testing/pack-test.js';
