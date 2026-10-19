@@ -27,8 +27,6 @@ env:
   OSV_SCANNER_VERSION: v2.7.0
   OSV_SCANNER_SHA256: 160c6253e2922e9e0a6a9771c5c4c40a4b3c6090b34a3cdd5e80c96cc2e4218b
   GOVULNCHECK_VERSION: v1.9.0
-  # 与 deploy/docker/srenautix-spoke.Dockerfile 的构建镜像相同，govulncheck 按发布二进制实际使用的标准库检查
-  RELEASE_GO_VERSION: 1.27.2
 
 jobs:
   detect:
@@ -126,10 +124,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # go.mod 的 toolchain 指令决定 Go 版本，与发布镜像的构建版本相同（workflows 任务检查）
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         if: needs.detect.outputs.go == 'true'
         with:
-          go-version: ${{ env.RELEASE_GO_VERSION }}
+          go-version-file: go.mod
       - name: govulncheck
         if: needs.detect.outputs.go == 'true'
         run: |
@@ -193,6 +192,15 @@ jobs:
         run: |
           if grep -rnE '^\s*-?\s*uses:\s*[^.][^@]*@' .github/workflows | grep -vE '@[0-9a-f]{40}( |$)'; then
             echo "上面的 action 没有按 40 位提交 SHA 固定" >&2
+            exit 1
+          fi
+      - name: spoke 镜像的 Go 版本与 go.mod 的 toolchain 一致
+        if: hashFiles('go.mod') != ''
+        run: |
+          want=$(awk '$1 == "toolchain" {sub(/^go/, "", $2); print $2}' go.mod)
+          got=$(grep -oE 'golang:[0-9]+\.[0-9]+\.[0-9]+' deploy/docker/srenautix-spoke.Dockerfile | head -1 | cut -d: -f2)
+          if [[ -z "$want" || "$want" != "$got" ]]; then
+            echo "go.mod 的 toolchain（${want:-缺失}）与 srenautix-spoke.Dockerfile 的 golang 镜像（${got}）不一致" >&2
             exit 1
           fi
       - name: shellcheck（deploy/ 与 .github/scripts/ 下的脚本）
