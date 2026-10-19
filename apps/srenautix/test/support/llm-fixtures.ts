@@ -36,9 +36,14 @@ export interface ReceivedRequest {
  */
 export class ReplayServer {
   readonly received: ReceivedRequest[] = [];
+  /** 录制模式下转发到上游后得到的响应，按请求顺序 */
+  readonly recorded: LlmFixture[] = [];
   private queue: Array<LlmFixture | 'hang'> = [];
   private server: Server | null = null;
   private port = 0;
+
+  /** upstream 不为 null 时为录制模式：请求转发到上游（例如本地 llama-server 的 …/v1），响应原样返回并保存 */
+  constructor(private readonly upstream: string | null = null) {}
 
   enqueue(...items: Array<LlmFixture | 'hang'>): void {
     this.queue.push(...items);
@@ -57,7 +62,26 @@ export class ReplayServer {
       const chunks: Buffer[] = [];
       req.on('data', (c: Buffer) => chunks.push(c));
       req.on('end', () => {
-        this.received.push({ path: req.url ?? '', headers: req.headers, body: Buffer.concat(chunks).toString('utf8') });
+        const body = Buffer.concat(chunks).toString('utf8');
+        this.received.push({ path: req.url ?? '', headers: req.headers, body });
+        if (this.upstream) {
+          const path = (req.url ?? '').replace(/^\/v1/, '');
+          void fetch(`${this.upstream}${path}`, {
+            method: req.method,
+            headers: { 'content-type': 'application/json' },
+            body: req.method === 'GET' ? undefined : body,
+          }).then(async (up) => {
+            const text = await up.text();
+            this.recorded.push({
+              provenance: { mode: 'recorded', path },
+              status: up.status,
+              body: JSON.parse(text) as unknown,
+            });
+            res.writeHead(up.status, { 'content-type': 'application/json' });
+            res.end(text);
+          });
+          return;
+        }
         const next = this.queue.shift();
         if (next === undefined) {
           res.writeHead(599, { 'content-type': 'application/json' });

@@ -27,6 +27,16 @@ export default defineConfig({
           hookTimeout: 120_000,
         },
       },
+      {
+        // 对真实模型服务运行并录制夹具；需要 SRENAUTIX_LIVE_LLM_BASE_URL，只由 pnpm test:live 运行
+        extends: true,
+        test: {
+          name: 'live',
+          include: ['test/live/**/*.test.ts'],
+          testTimeout: 1_800_000,
+          hookTimeout: 120_000,
+        },
+      },
     ],
   },
 });

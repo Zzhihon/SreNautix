@@ -11,9 +11,10 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run",
+    "test": "vitest run --project unit --project integration",
     "test:unit": "vitest run --project unit",
     "test:integration": "vitest run --project integration",
+    "test:live": "vitest run --project live",
     "start": "node dist/main.js"
   },
   "dependencies": {
