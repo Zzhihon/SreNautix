@@ -64,6 +64,7 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
             description:
               '参数的 JSON Schema（可移植子集：type、properties、required、additionalProperties:false、enum、pattern、minLength、maxLength、minimum、maximum、items）。所有动作的参数另外可以带 verify（见 promqlCondition）。',
             type: 'object',
+            additionalProperties: true,
           },
           conflict_domain: {
             description:
@@ -248,7 +249,7 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
       },
       cluster: { description: '被管集群的 cluster_id。', $ref: '#/$defs/clusterId' },
       incident_version: { description: '提议绑定的事件版本。', type: 'integer', minimum: 1, maximum: 9007199254740991 },
-      root_component: { description: '提议绑定的根因组件。', type: 'string', minLength: 1, maxLength: 253 },
+      root_component: { description: '提议绑定的根因组件（组件键）。', type: 'string', minLength: 1, maxLength: 400 },
       evidence_fingerprint: { description: '提议绑定的证据指纹。', $ref: '#/$defs/sha256' },
       approver_principal: {
         description: '审批人主体。策略自动批准时为 "auto:<规则名>"。',

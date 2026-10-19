@@ -499,7 +499,9 @@ export interface ActionCatalogAction {
   /**
    * 参数的 JSON Schema（可移植子集：type、properties、required、additionalProperties:false、enum、pattern、minLength、maxLength、minimum、maximum、items）。所有动作的参数另外可以带 verify（见 promqlCondition）。
    */
-  params: {};
+  params: {
+    [k: string]: unknown | undefined;
+  };
   /**
    * 冲突域类型。键由执行器根据解析出的目标计算：workload:<ns>/<Kind>/<name>、node:<name>、pg:<ns>/<cluster>、argocd:<ns>/<app>、flux:<ns>/<Kind>/<name>、workflow:<ns>/<template>、gitops:<owner>/<repo>。
    */
@@ -601,7 +603,7 @@ export interface ApprovalAssertion {
    */
   incident_version: number;
   /**
-   * 提议绑定的根因组件。
+   * 提议绑定的根因组件（组件键）。
    */
   root_component: string;
   evidence_fingerprint: ApprovalAssertionSha2561;

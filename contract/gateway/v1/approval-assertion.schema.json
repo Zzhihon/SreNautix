@@ -67,10 +67,10 @@
       "maximum": 9007199254740991
     },
     "root_component": {
-      "description": "提议绑定的根因组件。",
+      "description": "提议绑定的根因组件（组件键）。",
       "type": "string",
       "minLength": 1,
-      "maxLength": 253
+      "maxLength": 400
     },
     "evidence_fingerprint": {
       "description": "提议绑定的证据指纹。",

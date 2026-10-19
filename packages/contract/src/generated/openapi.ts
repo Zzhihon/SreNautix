@@ -1241,7 +1241,9 @@ export type components = {
       /** @description 该动作在其目录等级下可接受的最低档位。 */
       min_tier: components['schemas']['tier'];
       /** @description 参数的 JSON Schema（可移植子集：type、properties、required、additionalProperties:false、enum、pattern、minLength、maxLength、minimum、maximum、items）。所有动作的参数另外可以带 verify（见 promqlCondition）。 */
-      params: Record<string, never>;
+      params: {
+        [key: string]: unknown;
+      };
       prechecks: {
         description: string;
         id: string;
@@ -1329,7 +1331,9 @@ export type components = {
           /** @description 该动作在其目录等级下可接受的最低档位。 */
           min_tier: components['schemas']['tier'];
           /** @description 参数的 JSON Schema（可移植子集：type、properties、required、additionalProperties:false、enum、pattern、minLength、maxLength、minimum、maximum、items）。所有动作的参数另外可以带 verify（见 promqlCondition）。 */
-          params: Record<string, never>;
+          params: {
+            [key: string]: unknown;
+          };
           prechecks: {
             description: string;
             id: string;
@@ -1491,7 +1495,7 @@ export type components = {
       params_hash: components['schemas']['sha256'];
       /** @description 提议 ID（UUID，小写）。 */
       proposal_id: string;
-      /** @description 提议绑定的根因组件。 */
+      /** @description 提议绑定的根因组件（组件键）。 */
       root_component: string;
       /** @description 目标对象的 metadata.uid；gitops_pr 为补丁所基于的 40 位提交 SHA。 */
       target_uid: string;
