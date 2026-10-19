@@ -13,6 +13,7 @@ import type { Catalog } from '../proposals/catalog.js';
 import type { Policies } from '../proposals/policy.js';
 import type { ProposalService, TargetResolver } from '../proposals/service.js';
 import type { PackRuntime } from '../stage-a/packs.js';
+import type { IntegrationRegistry } from './integrations.js';
 import { appendAudit, readAudit, verifyRecords, GENESIS_HASH } from '../store/audit.js';
 import type { AuditExporter } from '../store/audit-export.js';
 import { tx } from '../store/pool.js';
@@ -31,6 +32,7 @@ export interface SystemRouteDeps {
   exporter: AuditExporter;
   worker: { url: string; token: string } | null;
   packs: PackRuntime;
+  integrations: IntegrationRegistry;
 }
 
 const fmt = (d: Date | null | undefined) => (d ? d.toISOString() : null);
@@ -660,12 +662,24 @@ export function registerSystemRoutes(app: FastifyInstance, d: SystemRouteDeps): 
 
   app.get('/v1/integrations', async (req) => {
     await d.auth.reader(req);
-    return [];
+    return d.integrations.list();
   });
 
   app.post('/v1/integrations/:id/test', async (req) => {
-    await d.auth.user(req, 'settings.write');
-    throw notFound(`没有集成实例 ${(req.params as { id: string }).id}`);
+    const c = await d.auth.user(req, 'settings.write');
+    const id = (req.params as { id: string }).id;
+    if (!d.integrations.has(id)) {
+      throw notFound(`没有集成实例 ${id}`);
+    }
+    const r = await d.integrations.test(id);
+    await tx(d.pool, (cl) =>
+      appendAudit(cl, 'integration.test', c.subject.id, {
+        instance_id: id,
+        ok: r.ok,
+        failed: r.results.filter((x) => !x.ok).map((x) => x.capability),
+      }),
+    );
+    return r;
   });
 
   /** worker 持有的页面数据：研判明细、评测、Agent 健康与成本、出境账本、模型路由。server 按角色授权后转发。 */

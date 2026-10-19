@@ -133,6 +133,9 @@ export const serverConfigSchema = z
       })
       .strict()
       .default({ api: ':8080', metrics: ':9090', probes: ':8081' }),
+    // 集成清单目录：控制台"集成"页按它列出已配置的集成实例与能力。不填时取与代码同一发布物中的 integrations/
+    // （仓库根目录；镜像中为 /app/integrations）
+    integrations: z.object({ dir: path.optional() }).strict().default({}),
     // 控制台前端的构建产物（web/console/dist）；--serve=all|console 时由 server 提供
     console: z
       .object({ dir: path.default('/app/web/console/dist') })

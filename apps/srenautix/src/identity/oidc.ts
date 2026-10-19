@@ -53,6 +53,16 @@ export class Oidc {
     return this.config;
   }
 
+  /** 连接测试：重新执行发现（不复用缓存），返回授权端点。身份提供方不可达或元数据不合法时抛出。 */
+  async verify(): Promise<string> {
+    this.config = null;
+    const meta = (await this.cfg()).serverMetadata();
+    if (!meta.authorization_endpoint || !meta.token_endpoint) {
+      throw new OidcError('发现文档缺少 authorization_endpoint 或 token_endpoint');
+    }
+    return meta.authorization_endpoint;
+  }
+
   /** 生成跳转地址并登记一次性状态。returnTo 只接受站内路径。 */
   async start(returnTo: string, maxAge: number | null): Promise<URL> {
     if (!returnTo.startsWith('/') || returnTo.startsWith('//')) {

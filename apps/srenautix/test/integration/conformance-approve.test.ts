@@ -693,5 +693,17 @@ describe('approve/v1 一致性', () => {
     const report = await runApproveConformance(subject, vectors, Date.now());
     expect(report.checks.filter((c) => !c.ok)).toEqual([]);
     expect(report.passed).toBe(true);
+
+    // 集成页的连接测试：飞书经开放平台取得 tenant_access_token，回调按签名校验
+    const t = await api('POST', `/v1/integrations/${encodeURIComponent('notify:feishu')}/test`, {});
+    expect(t.status).toBe(200);
+    expect(t.body).toMatchObject({ ok: true });
+    expect((t.body.results as Array<{ capability: string; ok: boolean }>).map((x) => [x.capability, x.ok])).toEqual([
+      ['notify.send', true],
+      ['notify.edit', true],
+      ['notify.callback_verify', true],
+      ['notify.link', true],
+      ['approve.l_tier', true],
+    ]);
   }, 180_000);
 });

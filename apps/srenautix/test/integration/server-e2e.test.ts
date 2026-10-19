@@ -336,6 +336,79 @@ describe('server 端到端', () => {
     expect(text).toContain('api 重启');
   });
 
+  it('集成页列出配置中启用的集成实例；连接测试逐项检查声明的能力，结果进入列表与治理审计', async () => {
+    const list = await api('GET', '/v1/integrations', { session: true });
+    expect(list.status).toBe(200);
+    conform('/v1/integrations', 'get', list);
+    type Instance = {
+      instance_id: string;
+      manifest: { id: string };
+      secret_refs: string[];
+      last_success_at: string | null;
+      capabilities: Array<{ name: string; verified: boolean; verified_at: string | null; error: string | null }>;
+    };
+    const items = list.body as unknown as Instance[];
+    expect(items.map((x) => [x.instance_id, x.manifest.id])).toEqual([
+      ['ingest:am', 'alertmanager'],
+      ['datasource:prometheus', 'prometheus-api'],
+      ['changes:gitops', 'git'],
+      ['notify:telegram', 'telegram'],
+      ['approve:console', 'console'],
+      ['identity:local-admin', 'local-admin'],
+    ]);
+    // 只有挂载文件的路径，没有内容
+    expect(items[0]!.secret_refs).toEqual([join(ROOT, 'ingest-token')]);
+    expect(JSON.stringify(list.body)).not.toContain(TOKENS.ingest);
+    expect(items[0]!.last_success_at).not.toBeNull();
+    expect(items.flatMap((x) => x.capabilities).every((c) => !c.verified && c.verified_at === null)).toBe(true);
+
+    const test = async (id: string) => {
+      const r = await api('POST', `/v1/integrations/${encodeURIComponent(id)}/test`, { session: true, body: {} });
+      expect(r.status).toBe(200);
+      conform('/v1/integrations/{instance_id}/test', 'post', r);
+      return r.body as unknown as {
+        ok: boolean;
+        results: Array<{ capability: string; ok: boolean; error: string | null }>;
+      };
+    };
+    // git 变更源：真实 fetch 与 changes.list
+    expect(await test('changes:gitops')).toMatchObject({
+      ok: true,
+      results: [{ capability: 'changes.list', ok: true }],
+    });
+    // 告警接入：刚收到过告警；没有配置对账地址，alerts.reconcile 没有服务端探测
+    const am = await test('ingest:am');
+    expect(am.results.map((x) => [x.capability, x.ok])).toEqual([
+      ['alerts.webhook', true],
+      ['alerts.reconcile', false],
+    ]);
+    expect(am.results[1]!.error).toBe('这项能力没有服务端探测');
+    // 指标数据源不可达：每项能力都给出失败原因
+    const prom = await test('datasource:prometheus');
+    expect(prom.ok).toBe(false);
+    expect(prom.results.every((x) => !x.ok && x.error)).toBe(true);
+    // Telegram 的 updates 为 none：不接收按钮回调与 /link
+    const tgr = await test('notify:telegram');
+    expect(tgr.results.find((x) => x.capability === 'notify.callback_verify')).toMatchObject({ ok: false });
+    expect(tgr.results.find((x) => x.capability === 'approve.l_tier')).toMatchObject({ ok: true });
+    expect((await test('approve:console')).results.find((x) => x.capability === 'approve.h_tier')).toMatchObject({
+      ok: true,
+    });
+
+    const after = (await api('GET', '/v1/integrations', { session: true })).body as unknown as Instance[];
+    expect(after.find((x) => x.instance_id === 'changes:gitops')!.capabilities[0]).toMatchObject({
+      name: 'changes.list',
+      verified: true,
+      error: null,
+    });
+    expect(after.find((x) => x.instance_id === 'datasource:prometheus')!.capabilities[0]!.verified).toBe(false);
+    expect((await api('POST', '/v1/integrations/nope/test', { session: true, body: {} })).status).toBe(404);
+    const audit = await db.admin.query<{ n: number }>(
+      "SELECT count(*)::int AS n FROM server.governance_audit WHERE kind = 'integration.test'",
+    );
+    expect(audit.rows[0]!.n).toBe(5);
+  });
+
   it('worker 认领阶段 B 任务，取得输入，提交带幂等键的提议', async () => {
     const claim = await api('POST', '/v1/research/claim', { token: TOKENS.worker, body: { worker_id: 'w1' } });
     expect(claim.status).toBe(200);

@@ -11,6 +11,7 @@ import { parseDuration, parseListen, readSecretFile } from '../config/files.js';
 import { loadServerConfig, type ServerConfig } from '../config/server.js';
 import { changesInWindow, ChangesService } from '../changes/service.js';
 import { ConditionPublisher, serverConditions } from '../console-bff/conditions.js';
+import { IntegrationRegistry } from '../console-bff/integrations.js';
 import { registerIncidentRoutes } from '../console-bff/routes-incidents.js';
 import { apiTokenCaller, registerSystemRoutes } from '../console-bff/routes-system.js';
 import { registerConsoleStatic } from '../console-bff/static.js';
@@ -360,6 +361,15 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
     return r;
   };
 
+  // 变更源：有新变更时立即重算事件（变更进入根因排序的"30 分钟内的变更"一项）
+  const changes = new ChangesService(
+    pool,
+    c.changes.sources,
+    { cacheDir: c.changes.cache_dir, defaultClusterId: c.cluster_id },
+    parseDuration('changes.lookback', c.changes.lookback),
+    () => void pipeline.kick().catch((e: unknown) => logger.error('事件流水线失败', { error: e })),
+  );
+
   // 事件流
   const listener = new OutboxListener(o.pg, 'srenautix-server');
   listener.start();
@@ -459,6 +469,17 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
     exporter,
     worker,
     packs,
+    integrations: IntegrationRegistry.fromConfig({
+      pool,
+      config: c,
+      packs,
+      catalog,
+      evidence: evidenceSource,
+      changes,
+      telegram: notify.telegram?.adapter.client ?? null,
+      feishu: notify.feishu?.client ?? null,
+      oidc,
+    }),
   });
   new SpokeRelay(pool, listener, catalog).registerRoutes(app, auth);
   // 多集群：分支 reader 的出站协议（contract/gateway/v1/reader.openapi.yaml）
@@ -544,14 +565,6 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
     signal,
   );
   every(30_000, () => proposals.expire(), '提议过期检查');
-  // 变更源：有新变更时立即重算事件（变更进入根因排序的"30 分钟内的变更"一项）
-  const changes = new ChangesService(
-    pool,
-    c.changes.sources,
-    { cacheDir: c.changes.cache_dir, defaultClusterId: c.cluster_id },
-    parseDuration('changes.lookback', c.changes.lookback),
-    () => void pipeline.kick().catch((e: unknown) => logger.error('事件流水线失败', { error: e })),
-  );
   if (changes.configured) {
     every(parseDuration('changes.interval', c.changes.interval), () => changes.syncOnce(), '变更源同步');
     void leader

@@ -5,6 +5,7 @@ import type {
   SetWebhookParams,
   TgMessage,
   TgUpdate,
+  TgUser,
 } from './types.js';
 
 /** getUpdates 长轮询的秒数。 */
@@ -147,6 +148,11 @@ export class TelegramClient {
       { offset, limit: 100, timeout: POLL_TIMEOUT_S, allowed_updates: ALLOWED_UPDATES },
       signal,
     );
+  }
+
+  /** 机器人自身的信息（连接测试：token 有效、Bot API 可达）。 */
+  getMe(signal?: AbortSignal): Promise<TgUser> {
+    return this.call('getMe', {}, signal);
   }
 
   async setWebhook(p: SetWebhookParams, signal?: AbortSignal): Promise<void> {

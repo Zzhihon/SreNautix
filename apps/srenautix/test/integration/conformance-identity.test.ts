@@ -69,6 +69,19 @@ describe('identity/v1 一致性', () => {
     const report = await runIdentityConformance(subject, ['u-alice', 'u-bob']);
     expect(report.checks.filter((c) => !c.ok)).toEqual([]);
     expect(report.passed).toBe(true);
+    // 集成页的连接测试：重新发现，返回授权端点；身份提供方不可达时抛出
+    expect(await oidc.verify()).toMatch(new RegExp(`^${idp.issuer}/`));
+    const down = new Oidc(db.server, {
+      issuer: 'http://127.0.0.1:9',
+      clientId: 'x',
+      clientSecret: 'y',
+      scopes: ['openid'],
+      groupsClaim: 'groups',
+      nameClaim: 'name',
+      redirectUri: REDIRECT,
+      allowHttp: true,
+    });
+    await expect(down.verify()).rejects.toThrow();
   });
 
   it('本地管理员：口令加 TOTP，同一时间步只能用一次，重新认证更新 auth_time', async () => {

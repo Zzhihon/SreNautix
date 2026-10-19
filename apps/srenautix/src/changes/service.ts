@@ -173,6 +173,21 @@ export class ChangesService {
     return n;
   }
 
+  /** 连接测试：对一个变更源执行一次 fetch 与最近 1 小时的 changes.list，不写入变更。返回说明，失败时抛出。 */
+  async verify(id: string, now = Date.now()): Promise<string> {
+    const s = this.sources.find((x) => x.cfg.id === id);
+    if (!s) {
+      throw new Error(`没有变更源 ${id}`);
+    }
+    await s.mirror.refresh();
+    const window = { from: toIso(now - 3600_000), to: toIso(now) };
+    const r = await s.adapter.list(
+      { scope: { cluster_id: s.clusterId, namespaces: [], components: [] }, window, limit: 1_000 },
+      window,
+    );
+    return `最近 1 小时 ${r.changes.length}${r.truncated ? '+' : ''} 个变更`;
+  }
+
   async statuses(): Promise<ChangeSourceStatus[]> {
     const r = await this.pool.query<{
       source_id: string;

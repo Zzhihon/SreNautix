@@ -18,7 +18,9 @@ import {
   loadPromqlEngine,
   PrometheusApiAdapter,
   toIso,
+  verifyMetrics,
   type PromqlEngine,
+  type VerifyResult,
 } from '@srenautix/integration-sdk';
 import {
   compileCard,
@@ -422,6 +424,11 @@ export class EvidenceSource {
   /** 最近一次标签档案探测的错误；探测成功时为 null。 */
   get error(): string | null {
     return this.profileError;
+  }
+
+  /** 连接测试：对数据源逐项执行能力探测（integration-sdk 的 verifyMetrics）。 */
+  verify(now = Date.now()): Promise<VerifyResult> {
+    return verifyMetrics(this.adapter, now);
   }
 
   async dataSource(now: number): Promise<EvidenceDataSource> {

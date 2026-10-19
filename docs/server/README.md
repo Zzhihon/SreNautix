@@ -173,6 +173,21 @@ changes:
 - 同步只在主实例上进行；有新变更时立即重算事件。某个变更源同步失败时发布 `DatasourceUnavailable` 条件（subject `changes:<id>`），其他变更源不受影响。
 - 镜像中需要 `git`（ssh 克隆还需要 `ssh`）。
 
+## 集成页
+
+`GET /v1/integrations` 按 server 配置列出已启用的集成实例，每个实例对应 `integrations/` 中的一个清单（`integrations.dir`，不填时为与代码同一发布物中的 `integrations/`，镜像中 `/app/integrations`）：
+
+| 实例 | 清单 | 连接测试（`POST /v1/integrations/{id}/test`，admin） |
+|---|---|---|
+| `ingest:<id>` | alertmanager、grafana-alerting、nightingale、generic-webhook | `alerts.webhook`：静默阈值内收到过告警；Alertmanager 配置了对账地址时 `alerts.reconcile` 请求 `/api/v2/status` |
+| `datasource:prometheus` | prometheus-api | integration-sdk 的 verifyMetrics，逐项探测 |
+| `changes:<id>` | git | fetch 后列出最近 1 小时的变更 |
+| `notify:telegram`、`notify:feishu` | telegram、feishu | Bot API `getMe`、飞书 tenant_access_token；回调校验与 `/link` 按配置判断 |
+| `approve:console` | console | 审批签名密钥；H 档在 standard 配置为口令加 TOTP 重新认证，compliance 配置要求 WebAuthn |
+| `identity:local-admin`、`identity:oidc` | local-admin、oidc | OIDC 重新执行发现 |
+
+清单中声明、但没有服务端探测的能力在结果中写明"这项能力没有服务端探测"。每次测试的结果保存在内存中，列表据此给出 `verified`；测试写入治理审计（`integration.test`）。`secret_refs` 只列出挂载文件的路径，不读出内容。
+
 ## 阶段 B 的输入与查询模板
 
 worker 认领任务后读取 `GET /v1/research/tasks/{run_id}/context`（worker 的服务 token），字段与 `contract/schemas/eval-snapshot.schema.json` 的 `Context` 对应：
