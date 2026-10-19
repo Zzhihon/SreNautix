@@ -4,7 +4,7 @@ suite: scenarios-kind
 type: scenario
 cluster_id: kind
 authored_by: maintainer
-truth_source: {kind: injected, principal: null, ref: deploy/kind/scenarios/db-oom-crashloop}
+truth_source: { kind: injected, principal: null, ref: deploy/kind/scenarios/db-oom-crashloop }
 truth:
   # postgres 是根因组件；触发 OOM 的报表任务同样算命中
   root_components: [StatefulSet:shop/postgres, Job:shop/report-batch]
@@ -20,4 +20,4 @@ scenario:
     - component: Deployment:shop/web
       description: 同一时刻的无关发布（镜像 nginx 1.29 → 1.31），在 30 分钟变更窗口内，不能成为 top-1
   background_noise: _background.yaml
-  window: {before: 30m, after: 30m}
+  window: { before: 30m, after: 30m }

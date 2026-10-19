@@ -4,7 +4,7 @@ suite: scenarios-kind
 type: scenario
 cluster_id: kind
 authored_by: maintainer
-truth_source: {kind: injected, principal: null, ref: deploy/kind/scenarios/node-notready-storm}
+truth_source: { kind: injected, principal: null, ref: deploy/kind/scenarios/node-notready-storm }
 truth:
   root_components: [Node:srenautix-worker2]
   granularity: node
@@ -17,4 +17,4 @@ scenario:
   silent_root: false
   distractors: []
   background_noise: _background.yaml
-  window: {before: 30m, after: 30m}
+  window: { before: 30m, after: 30m }

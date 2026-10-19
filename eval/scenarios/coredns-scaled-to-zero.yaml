@@ -4,7 +4,7 @@ suite: scenarios-kind
 type: scenario
 cluster_id: kind
 authored_by: maintainer
-truth_source: {kind: injected, principal: null, ref: deploy/kind/scenarios/coredns-scaled-to-zero}
+truth_source: { kind: injected, principal: null, ref: deploy/kind/scenarios/coredns-scaled-to-zero }
 truth:
   root_components: [Deployment:kube-system/coredns]
   granularity: workload
@@ -20,4 +20,4 @@ scenario:
     - component: StatefulSet:shop/postgres
       description: 数据库本身正常，api 只是解析不到它的地址
   background_noise: _background.yaml
-  window: {before: 30m, after: 30m}
+  window: { before: 30m, after: 30m }

@@ -4,7 +4,7 @@ suite: scenarios-kind
 type: scenario
 cluster_id: kind
 authored_by: maintainer
-truth_source: {kind: injected, principal: null, ref: deploy/kind/scenarios/hpa-at-max}
+truth_source: { kind: injected, principal: null, ref: deploy/kind/scenarios/hpa-at-max }
 truth:
   root_components: [HorizontalPodAutoscaler:shop/api, Deployment:traffic/loadgen]
   granularity: workload
@@ -18,4 +18,4 @@ scenario:
   silent_root: false
   distractors: []
   background_noise: _background.yaml
-  window: {before: 30m, after: 30m}
+  window: { before: 30m, after: 30m }
