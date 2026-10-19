@@ -4,8 +4,10 @@
 
 | 触发 | 中心镜像与分支镜像 | chart |
 |---|---|---|
-| main 上的每个提交 | `sha-<7 位提交>` | `<Chart.version>-main.<运行序号>.g<7 位提交>` |
+| 每 30 分钟，main 的最新提交（该提交的 chart 已发布时跳过）；手动 `gh workflow run release.yml --ref main` | `sha-<7 位提交>` | `<Chart.version>-main.<提交时间 UTC，年月日时分秒>.g<7 位提交>` |
 | tag `vX.Y.Z` | `sha-<7 位提交>`、`X.Y.Z`、`X.Y` | `X.Y.Z`，并附带离线包 |
+
+main 不按推送触发发布：推送频率高于一次发布的耗时，同一并发组只保留一个排队中的运行，排队的运行会不断被更新的推送替换。定时发布取运行时 main 的最新提交，同一提交的 chart 版本号固定，已发布的提交不会重复构建。需要立即发布时手动触发。
 
 - 镜像：`ghcr.io/zzhihon/srenautix`、`ghcr.io/zzhihon/srenautix-spoke`，linux/amd64 与 linux/arm64。
 - chart：`oci://ghcr.io/zzhihon/charts/srenautix`；打包时 `appVersion` 写成本次镜像的标签，chart 默认就拉取同一次构建的镜像。
@@ -16,8 +18,10 @@
 | 工作流 | 触发 | 内容 |
 |---|---|---|
 | `ci.yml` | PR、main | TS 的 lint、契约生成检查、类型检查、测试（真实的 Prometheus、Alertmanager、VictoriaMetrics、MinIO、PostgreSQL）；Go 的 gofmt、vet、生成结果检查、envtest 测试；govulncheck 与 osv-scanner；chart 的 lint、kubeconform、helm-unittest；actionlint、shellcheck、action 固定检查；两个镜像的构建检查 |
-| `release.yml` | main、`v*` tag | 调用 `image.yml` 构建两个镜像，打包并推送 chart，tag 上构建离线包并附加到 Release |
+| `release.yml` | 每 30 分钟（main）、`v*` tag、手动 | 调用 `image.yml` 构建两个镜像，打包并推送 chart，tag 上构建离线包并附加到 Release |
 | `image.yml` | 被 `release.yml` 调用 | 多架构构建与推送、cosign 无密钥签名、syft 生成 SPDX 与 CycloneDX SBOM 并以 cosign 证明附加、GitHub 构建溯源证明 |
+
+签名与两种 SBOM 证明由 `.github/scripts/cosign-sign-attest.sh` 完成：签名与每种证明分别检查，已经存在的跳过（构建可复现，同一提交得到同一个 digest，Rekor 拒绝重复记录）；获取 GitHub Actions OIDC token 偶尔返回错误页，每次 cosign 调用最多重试 4 次。
 | `kind-e2e.yml` | 手动、每晚、`deploy/kind` 变更 | 在 Kind 上安装完整环境，逐个注入级联故障场景并检查预期告警 |
 
 ## 依赖固定

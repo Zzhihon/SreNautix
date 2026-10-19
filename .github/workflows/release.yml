@@ -1,11 +1,15 @@
-# 发布：main 上的每个提交与 v* tag 都构建并推送两个多架构镜像与 Helm chart（OCI），全部 cosign 签名。
-# 标签：镜像 sha-<短 SHA>，tag 上另加 <版本> 与 <主>.<次>；chart 在 main 上为 <Chart.version>-main.<序号>.g<短 SHA>，tag 上为 <版本>。
+# 发布：构建并推送两个多架构镜像与 Helm chart（OCI），全部 cosign 签名。
+# 触发：v* tag；每 30 分钟发布一次 main 的最新提交（该提交的 chart 已发布时跳过）；手动 workflow_dispatch。
+# main 的推送频率高于一次发布的耗时，按推送触发会让排队中的运行不断被替换，所以不按推送触发。
+# 标签：镜像 sha-<短 SHA>，tag 上另加 <版本> 与 <主>.<次>；
+# chart 在 main 上为 <Chart.version>-main.<提交时间 UTC，年月日时分秒>.g<短 SHA>（同一提交的版本号固定），tag 上为 <版本>。
 name: release
 
 on:
   push:
-    branches: [main]
     tags: ['v*']
+  schedule:
+    - cron: "*/30 * * * *"
   workflow_dispatch:
 
 permissions:
@@ -18,9 +22,14 @@ concurrency:
 jobs:
   detect:
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: read
     outputs:
       hub: ${{ steps.detect.outputs.hub }}
       spoke: ${{ steps.detect.outputs.spoke }}
+      chart_version: ${{ steps.version.outputs.chart }}
+      published: ${{ steps.published.outputs.published }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -33,10 +42,40 @@ jobs:
           if [[ -f apps/srenautix/package.json && -d packs && -f web/console/package.json ]]; then hub=true; fi
           echo "hub=$hub" >>"$GITHUB_OUTPUT"
           echo "spoke=$([[ -d cmd/srenautix-spoke ]] && echo true || echo false)" >>"$GITHUB_OUTPUT"
+      - name: 计算 chart 版本
+        id: version
+        run: |
+          base=$(yq '.version' deploy/helm/srenautix/Chart.yaml)
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            chart_version="${GITHUB_REF_NAME#v}"
+          else
+            stamp=$(TZ=UTC git log -1 --format=%cd --date=format-local:%Y%m%d%H%M%S)
+            chart_version="${base}-main.${stamp}.g${GITHUB_SHA::7}"
+          fi
+          echo "chart=$chart_version" >>"$GITHUB_OUTPUT"
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: v4.3.1
+      # 定时运行时，main 的最新提交已经发布过（chart 已存在）就不再重复构建
+      - name: 检查本提交是否已发布
+        id: published
+        env:
+          CHART_VERSION: ${{ steps.version.outputs.chart }}
+          GH_ACTOR: ${{ github.actor }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "$GH_TOKEN" | helm registry login ghcr.io -u "$GH_ACTOR" --password-stdin >/dev/null
+          if [[ "$GITHUB_EVENT_NAME" == schedule ]] &&
+            helm show chart oci://ghcr.io/zzhihon/charts/srenautix --version "$CHART_VERSION" >/dev/null 2>&1; then
+            echo "chart ${CHART_VERSION} 已发布，跳过"
+            echo "published=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "published=false" >>"$GITHUB_OUTPUT"
+          fi
 
   hub:
     needs: detect
-    if: needs.detect.outputs.hub == 'true'
+    if: needs.detect.outputs.hub == 'true' && needs.detect.outputs.published != 'true'
     permissions:
       contents: read
       packages: write
@@ -49,7 +88,7 @@ jobs:
 
   spoke:
     needs: detect
-    if: needs.detect.outputs.spoke == 'true'
+    if: needs.detect.outputs.spoke == 'true' && needs.detect.outputs.published != 'true'
     permissions:
       contents: read
       packages: write
@@ -61,7 +100,7 @@ jobs:
       dockerfile: deploy/docker/srenautix-spoke.Dockerfile
 
   chart:
-    needs: [hub, spoke]
+    needs: [detect, hub, spoke]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
@@ -80,23 +119,18 @@ jobs:
           version: v4.3.1
       - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
 
-      - name: 计算 chart 版本
+      - name: chart 与镜像的版本
         id: version
         env:
           IMAGE_VERSION: ${{ needs.hub.outputs.version }}
           SPOKE_VERSION: ${{ needs.spoke.outputs.version }}
+          CHART_VERSION: ${{ needs.detect.outputs.chart_version }}
         run: |
           if [[ "$IMAGE_VERSION" != "$SPOKE_VERSION" ]]; then
             echo "两个镜像的版本不一致：$IMAGE_VERSION / $SPOKE_VERSION" >&2
             exit 1
           fi
-          base=$(yq '.version' deploy/helm/srenautix/Chart.yaml)
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            chart_version="${GITHUB_REF_NAME#v}"
-          else
-            chart_version="${base}-main.${GITHUB_RUN_NUMBER}.g${GITHUB_SHA::7}"
-          fi
-          echo "chart=$chart_version" >>"$GITHUB_OUTPUT"
+          echo "chart=$CHART_VERSION" >>"$GITHUB_OUTPUT"
           echo "app=$IMAGE_VERSION" >>"$GITHUB_OUTPUT"
 
       - name: 打包 chart（appVersion 指向本次构建的镜像标签）
