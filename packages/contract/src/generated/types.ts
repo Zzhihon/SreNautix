@@ -1804,6 +1804,25 @@ export interface EvidenceResult {
    * <pack>/<chain>/<card>；区分性检查产生的卡为 check/<hypothesis id>/<n>
    */
   card_id: string;
+  title: LocalizedText3;
+  /**
+   * 展示用阈值线
+   */
+  threshold: number | null;
+  /**
+   * 每个查询引用的降采样序列（每条不超过 300 点），用于迷你图与实时重跑的并排对比。points 中每项为 [unix 秒, 值或 null]
+   */
+  series: {
+    /**
+     * 卡片中的引用名
+     */
+    ref: string;
+    labels: Labels;
+    /**
+     * @maxItems 300
+     */
+    points: [number, number | null][];
+  }[];
   entity: null | EntityRef;
   window: TimeWindow;
   verdict: Verdict;
@@ -1827,6 +1846,13 @@ export interface EvidenceResult {
    */
   anomaly_started_at?: null | Timestamp;
   evaluated_at: Timestamp;
+}
+/**
+ * 取自卡片定义，结果脱离定义也能展示
+ */
+export interface LocalizedText3 {
+  'zh-CN'?: string;
+  en?: string;
 }
 export interface EvidenceReason {
   /**

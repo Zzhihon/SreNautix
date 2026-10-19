@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: SreNautix hub API
-  version: 2.1.0
+  version: 2.2.0
   license:
     name: Apache-2.0
     identifier: Apache-2.0
@@ -129,6 +129,65 @@ paths:
           description: 当前会话
           content: { application/json: { schema: { $ref: '#/components/schemas/Session' } } }
         '401': { $ref: '#/components/responses/Error' }
+  /v1/auth/providers:
+    get:
+      tags: [auth]
+      operationId: listAuthProviders
+      description: 登录页显示的登录方式
+      security: []
+      x-srenautix-roles: [anonymous]
+      x-srenautix-external: false
+      responses:
+        '200':
+          description: 登录方式
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [local_admin, oidc, profile]
+                properties:
+                  local_admin:
+                    type: object
+                    additionalProperties: false
+                    required: [enabled, break_glass]
+                    properties:
+                      enabled: { type: boolean }
+                      break_glass: { type: boolean, description: SSO 已验证通过，本地管理员只作为紧急入口 }
+                  oidc:
+                    oneOf:
+                      - { type: 'null' }
+                      - type: object
+                        additionalProperties: false
+                        required: [display_name]
+                        properties:
+                          display_name: { type: string }
+                  profile: { $ref: '#/components/schemas/Profile' }
+  /v1/auth/reauth:
+    post:
+      tags: [auth]
+      operationId: reauthLocal
+      description: 本地管理员的重新认证（口令加 TOTP），更新会话的 auth_time；OIDC 用户改用 `oidc/start?max_age=0`
+      x-srenautix-roles: [admin]
+      x-srenautix-external: false
+      parameters: [{ $ref: '#/components/parameters/Csrf' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [password, totp]
+              properties:
+                password: { type: string }
+                totp: { type: string, pattern: '^[0-9]{6}$' }
+      responses:
+        '200':
+          description: 已重新认证
+          content: { application/json: { schema: { $ref: '#/components/schemas/Session' } } }
+        '401': { $ref: '#/components/responses/Error' }
+        '423': { $ref: '#/components/responses/Error' }
   /v1/auth/logout:
     post:
       tags: [auth]
@@ -163,8 +222,9 @@ paths:
       tags: [incidents]
       operationId: listIncidents
       description: |
-        事件收件箱，按 first_firing_at 从新到旧。被抑制的事件不隐藏，由 include_suppressed 控制是否返回明细；
-        响应头 `X-Suppressed-Count` 给出被折叠的数量。feedback=pending 表示最近一次完成的研判还没有反馈或反馈已过期。
+        事件收件箱，按 first_firing_at 从新到旧。被抑制的事件不隐藏：suppressed=false（默认）时不返回明细，
+        只在 suppressed_count 中计数。feedback=pending 表示最近一次完成的研判还没有反馈或反馈已过期。
+        blind_spans 给出查询时段内接入静默或观测失明的时段，供收件箱画盲区色带。
       x-srenautix-roles: [viewer, responder, approver, auditor, admin]
       x-srenautix-external: true
       parameters:
@@ -173,16 +233,40 @@ paths:
         - { name: from, in: query, schema: { type: string, format: date-time } }
         - { name: to, in: query, schema: { type: string, format: date-time } }
         - { name: severity, in: query, schema: { $ref: './schemas/common.schema.json#/$defs/Severity' } }
+        - { name: disposition, in: query, schema: { $ref: './schemas/common.schema.json#/$defs/Disposition' } }
         - { name: component, in: query, schema: { $ref: './schemas/common.schema.json#/$defs/ComponentKey' } }
         - { name: feedback, in: query, schema: { type: string, enum: [pending, given, all], default: all } }
-        - { name: include_suppressed, in: query, schema: { type: boolean, default: false } }
+        - { name: suppressed, in: query, schema: { type: boolean, default: false } }
+        - { name: q, in: query, description: 按标签、根因组件与告警名搜索, schema: { type: string, maxLength: 200 } }
+        - { name: cursor, in: query, schema: { type: string } }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 100 } }
       responses:
         '200':
           description: 事件摘要
           content:
             application/json:
-              schema: { type: array, items: { $ref: '#/components/schemas/IncidentSummary' } }
+              schema:
+                type: object
+                additionalProperties: false
+                required: [items, suppressed_count, blind_spans, next_cursor]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/IncidentSummary' } }
+                  suppressed_count: { type: integer, minimum: 0 }
+                  blind_spans:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: false
+                      required: [cluster_id, kind, from, to, reason]
+                      properties:
+                        cluster_id: { $ref: './schemas/common.schema.json#/$defs/ClusterId' }
+                        kind: { type: string, enum: [ingest_silent, observability_blind, state_store_degraded] }
+                        from: { $ref: './schemas/common.schema.json#/$defs/Timestamp' }
+                        to:
+                          description: 仍在持续时为 null
+                          oneOf: [{ type: 'null' }, { $ref: './schemas/common.schema.json#/$defs/Timestamp' }]
+                        reason: { type: string }
+                  next_cursor: { type: [string, 'null'] }
         '400': { $ref: '#/components/responses/Error' }
         '401': { $ref: '#/components/responses/Error' }
   /v1/incidents/{incident_ref}:
@@ -215,6 +299,54 @@ paths:
         '200':
           description: 阶段 A 报告
           content: { application/json: { schema: { $ref: './schemas/stage-a-report.schema.json' } } }
+        '404': { $ref: '#/components/responses/Error' }
+  /v1/incidents/{incident_ref}/evidence:
+    parameters: [{ $ref: '#/components/parameters/IncidentRef' }]
+    get:
+      tags: [evidence]
+      operationId: getEvidenceSnapshot
+      description: 研判当时保存的证据卡结果（模型所见的快照）；不填 run_id 时取最新阶段 A 报告的卡
+      x-srenautix-roles: [viewer, responder, approver, auditor, admin]
+      x-srenautix-external: true
+      parameters:
+        - { name: run_id, in: query, schema: { $ref: './schemas/common.schema.json#/$defs/Uuid' } }
+      responses:
+        '200':
+          description: 证据卡结果，按异常、无法判定、正常排序
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: './schemas/evidence-result.schema.json' } }
+        '404': { $ref: '#/components/responses/Error' }
+  /v1/incidents/{incident_ref}/timeline:
+    parameters: [{ $ref: '#/components/parameters/IncidentRef' }]
+    get:
+      tags: [incidents]
+      operationId: getIncidentTimeline
+      description: 事件时间线（一条泳道）：告警触发与恢复、变更、异常卡、研判与提议的状态变化
+      x-srenautix-roles: [viewer, responder, approver, auditor, admin]
+      x-srenautix-external: true
+      responses:
+        '200':
+          description: 按时间排列
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/TimelineEntry' } }
+        '404': { $ref: '#/components/responses/Error' }
+  /v1/incidents/{incident_ref}/subgraph:
+    parameters: [{ $ref: '#/components/parameters/IncidentRef' }]
+    get:
+      tags: [incidents]
+      operationId: getIncidentSubgraph
+      description: 根因子图：根因加不超过 hops 跳的邻居，取该事件版本使用的拓扑版本；边带来源与置信度
+      x-srenautix-roles: [viewer, responder, approver, auditor, admin]
+      x-srenautix-external: true
+      parameters:
+        - { name: hops, in: query, schema: { type: integer, minimum: 1, maximum: 2, default: 2 } }
+        - { name: version, in: query, schema: { type: integer, minimum: 1 } }
+      responses:
+        '200':
+          description: 子图
+          content: { application/json: { schema: { $ref: '#/components/schemas/Subgraph' } } }
         '404': { $ref: '#/components/responses/Error' }
   /v1/incidents/{incident_ref}/research:
     parameters: [{ $ref: '#/components/parameters/IncidentRef' }]
@@ -276,6 +408,73 @@ paths:
           description: 研判清单与出境清单
           content: { application/json: { schema: { $ref: './schemas/research-manifest.schema.json' } } }
         '404': { $ref: '#/components/responses/Error' }
+  /v1/runs/{run_id}/prompt/raw:
+    parameters: [{ $ref: '#/components/parameters/RunId' }]
+    get:
+      tags: [research]
+      operationId: getRawPrompts
+      description: 脱敏前的原始提示词（worker 未保存原文时返回 404），每次读取都写入治理审计
+      x-srenautix-roles: [auditor, admin]
+      x-srenautix-external: false
+      responses:
+        '200':
+          description: 每次模型调用的原始提示词
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: false
+                  required: [seq, phase, messages]
+                  properties:
+                    seq: { type: integer, minimum: 1 }
+                    phase: { type: string }
+                    messages:
+                      type: array
+                      items:
+                        type: object
+                        additionalProperties: false
+                        required: [role, content]
+                        properties:
+                          role: { type: string, enum: [system, developer, user, assistant, tool] }
+                          content: { type: string }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /v1/runs/{run_id}/eval-case:
+    parameters: [{ $ref: '#/components/parameters/RunId' }]
+    post:
+      tags: [eval]
+      operationId: promoteEvalCase
+      description: 把这次研判所属的事件加入评测用例：固化查询邻域（DESIGN §14.2），进入"稍后标注"队列
+      x-srenautix-roles: [responder, approver, admin]
+      x-srenautix-external: false
+      parameters: [{ $ref: '#/components/parameters/Csrf' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [case_type, suite]
+              properties:
+                case_type: { type: string, enum: [incident, benign, abstain] }
+                suite: { type: string, minLength: 1 }
+      responses:
+        '201':
+          description: 已创建用例
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [case_id, snapshot_status]
+                properties:
+                  case_id: { type: string }
+                  snapshot_status: { type: string, enum: [queued, frozen] }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
   /v1/incidents/{incident_ref}/evidence/rerun:
     parameters: [{ $ref: '#/components/parameters/IncidentRef' }]
     post:
@@ -335,10 +534,11 @@ paths:
       operationId: createFeedback
       description: |
         追加一条反馈。渠道和主体取自认证上下文：控制台会话为 console，Grafana 插件转发时为 grafana，
-        聊天渠道桥转发时带签名的渠道回调。verdict 与 disposition_verdict 至少填一个；root_component 必须是本次研判拓扑中的组件
+        聊天渠道桥转发时带签名的渠道回调。verdict 与 disposition_verdict 至少填一个；root_component 必须是本次研判拓扑中的组件。
+        进行中的事件同样接受反馈
       x-srenautix-roles: [responder, approver, admin]
       x-srenautix-external: false
-      parameters: [{ $ref: '#/components/parameters/Csrf' }]
+      parameters: [{ $ref: '#/components/parameters/CsrfOptional' }, { $ref: '#/components/parameters/OnBehalfOf' }]
       requestBody:
         required: true
         content:
@@ -396,13 +596,98 @@ paths:
     get:
       tags: [proposals]
       operationId: getProposal
+      description: 提议全文，加上审批页按顺序展示的机器推导字段；预检由服务端在本次请求时重新执行
       x-srenautix-roles: [viewer, responder, approver, auditor, admin]
       x-srenautix-external: true
       responses:
         '200':
-          description: 提议全文
-          content: { application/json: { schema: { $ref: './schemas/proposal.schema.json' } } }
+          description: 提议详情
+          content: { application/json: { schema: { $ref: '#/components/schemas/ProposalDetail' } } }
         '404': { $ref: '#/components/responses/Error' }
+  /v1/catalog/actions:
+    get:
+      tags: [proposals]
+      operationId: listCatalogActions
+      description: 生效的动作目录（结构以 contract/gateway/ 的动作目录 schema 为准），以及每个动作在各集群的启用状态
+      x-srenautix-roles: [viewer, responder, approver, auditor, admin]
+      x-srenautix-external: true
+      responses:
+        '200':
+          description: 动作目录
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [catalog, enabled]
+                properties:
+                  catalog: { type: object }
+                  enabled:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: false
+                      required: [cluster_id, action, namespaces, auto]
+                      properties:
+                        cluster_id: { $ref: './schemas/common.schema.json#/$defs/ClusterId' }
+                        action: { type: string }
+                        namespaces: { type: array, items: { type: string } }
+                        auto: { type: boolean }
+  /v1/clusters:
+    get:
+      tags: [health]
+      operationId: listClusters
+      x-srenautix-roles: [viewer, responder, approver, auditor, admin]
+      x-srenautix-external: false
+      responses:
+        '200':
+          description: 集群
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Cluster' } }
+  /v1/clusters/{cluster_id}:
+    parameters:
+      - {
+          name: cluster_id,
+          in: path,
+          required: true,
+          schema: { $ref: './schemas/common.schema.json#/$defs/ClusterId' },
+        }
+    get:
+      tags: [health]
+      operationId: getCluster
+      x-srenautix-roles: [viewer, responder, approver, auditor, admin]
+      x-srenautix-external: false
+      responses:
+        '200':
+          description: 集群详情
+          content: { application/json: { schema: { $ref: '#/components/schemas/Cluster' } } }
+        '404': { $ref: '#/components/responses/Error' }
+  /v1/search:
+    get:
+      tags: [incidents]
+      operationId: search
+      x-srenautix-roles: [viewer, responder, approver, auditor, admin]
+      x-srenautix-external: false
+      parameters:
+        - { name: q, in: query, required: true, schema: { type: string, minLength: 1, maxLength: 200 } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 50, default: 20 } }
+      responses:
+        '200':
+          description: 事件、组件、提议的匹配项
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: false
+                  required: [kind, id, title, cluster_id]
+                  properties:
+                    kind: { type: string, enum: [incident, component, proposal] }
+                    id: { type: string }
+                    title: { type: string }
+                    cluster_id: { $ref: './schemas/common.schema.json#/$defs/ClusterId' }
   /v1/proposals/{proposal_id}/approve:
     parameters: [{ $ref: '#/components/parameters/ProposalId' }]
     post:
@@ -594,7 +879,19 @@ components:
     bearer:
       type: http
       scheme: bearer
+      description: |
+        两类 token：
+        - API token（外部调用方）：只能调用 x-srenautix-external=true 的操作，写操作只有提议。
+        - Grafana 插件 token：插件后端代理只读接口与 createFeedback，必须带 X-SreNautix-On-Behalf-Of（Grafana 用户的邮箱）；
+          server 把它映射到已绑定的用户，按该用户的角色授权，但只放行 GET 与 createFeedback，反馈的 channel 记为 grafana。
+          映射不到已绑定用户时返回 403。
   parameters:
+    OnBehalfOf:
+      name: X-SreNautix-On-Behalf-Of
+      in: header
+      required: false
+      description: 只用于 Grafana 插件 token：Grafana 用户的邮箱
+      schema: { type: string, format: email }
     IncidentRef:
       name: incident_ref
       in: path
@@ -629,22 +926,194 @@ components:
         application/json:
           schema: { $ref: './schemas/common.schema.json#/$defs/Error' }
   schemas:
+    Profile:
+      type: string
+      description: 安装配置（DESIGN §1.3）
+      enum: [observe, standard, compliance]
     Session:
       type: object
       additionalProperties: false
-      required: [principal, roles, provider, auth_time, expires_at, csrf_token, break_glass]
+      required: [principal, roles, provider, profile, local_admin, auth_time, expires_at, csrf_token, break_glass]
       properties:
         principal: { $ref: './schemas/common.schema.json#/$defs/Principal' }
         roles:
           type: array
+          description: 角色绑定与作用域
           items: { $ref: './integrations/identity/v1/identity.schema.json#/$defs/RoleBinding' }
         provider: { type: string }
-        auth_time: { $ref: './schemas/common.schema.json#/$defs/Timestamp' }
+        profile: { $ref: '#/components/schemas/Profile' }
+        local_admin: { type: boolean }
+        auth_time:
+          description: 最近一次认证或重新认证的时间；H 档审批要求在 5 分钟内
+          $ref: './schemas/common.schema.json#/$defs/Timestamp'
         expires_at: { $ref: './schemas/common.schema.json#/$defs/Timestamp' }
         csrf_token: { type: string }
         break_glass:
           type: boolean
           description: 本地管理员作为紧急入口登录；页面显示横幅
+    TimelineEntry:
+      type: object
+      additionalProperties: false
+      required: [at, kind, text, ref, untrusted]
+      properties:
+        at: { $ref: './schemas/common.schema.json#/$defs/Timestamp' }
+        kind:
+          type: string
+          enum:
+            [
+              alert_firing,
+              alert_resolved,
+              change,
+              card_abnormal,
+              incident_merged,
+              incident_split,
+              stage_a,
+              research_concluded,
+              proposal,
+              execution,
+              feedback,
+            ]
+        text: { type: string }
+        ref: { type: [string, 'null'], description: 关联对象的 id（alert_id、change_id、run_id、proposal_id 等） }
+        untrusted: { type: boolean, description: text 含告警、日志或变更来源的原文，只作为文本显示 }
+    Subgraph:
+      type: object
+      additionalProperties: false
+      required: [topology_version, root, nodes, edges]
+      properties:
+        topology_version: { type: integer, minimum: 0 }
+        root:
+          oneOf: [{ type: 'null' }, { $ref: './schemas/common.schema.json#/$defs/ComponentKey' }]
+        nodes:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [component, kind, namespace, name, role, alerts, hops]
+            properties:
+              component: { $ref: './schemas/common.schema.json#/$defs/ComponentKey' }
+              kind: { type: string }
+              namespace: { type: [string, 'null'] }
+              name: { type: string }
+              role: { type: string, enum: [root, candidate, member, neighbor] }
+              alerts: { type: array, items: { type: string }, description: 该组件上的成员告警 alert_id }
+              hops: { type: integer, minimum: 0, maximum: 2 }
+        edges:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [from, to, relation, provenance, confidence, scope]
+            properties:
+              from: { $ref: './schemas/common.schema.json#/$defs/ComponentKey' }
+              to: { $ref: './schemas/common.schema.json#/$defs/ComponentKey' }
+              relation: { type: string }
+              provenance: { $ref: './schemas/topology-event.schema.json#/$defs/Provenance' }
+              confidence: { type: number, minimum: 0, maximum: 1 }
+              scope: { type: string, enum: [instance, service] }
+    ProposalDetail:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          proposal,
+          target_state,
+          prechecks,
+          prechecked_at,
+          blast_radius,
+          conflict_domain,
+          queue_position,
+          verify,
+          undo,
+          policy_rule,
+          model_rationale,
+        ]
+      properties:
+        proposal: { $ref: './schemas/proposal.schema.json' }
+        target_state:
+          type: object
+          additionalProperties: false
+          required: [exists, uid, resource_version, summary]
+          properties:
+            exists: { type: boolean }
+            uid: { type: [string, 'null'] }
+            resource_version: { type: [string, 'null'] }
+            summary: { type: string, description: 例如副本数、就绪数、cordon 状态 }
+        prechecks:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [name, passed, detail]
+            properties:
+              name: { type: string }
+              passed: { type: boolean }
+              detail: { type: string }
+        prechecked_at: { $ref: './schemas/common.schema.json#/$defs/Timestamp' }
+        blast_radius:
+          type: object
+          additionalProperties: false
+          required: [summary, objects, within_limit]
+          properties:
+            summary: { type: string }
+            objects: { type: array, items: { type: string } }
+            within_limit: { type: boolean }
+        conflict_domain: { type: string }
+        queue_position: { type: [integer, 'null'], minimum: 1 }
+        verify:
+          type: object
+          additionalProperties: false
+          required: [condition, window]
+          properties:
+            condition: { type: string }
+            window: { $ref: './schemas/common.schema.json#/$defs/Duration' }
+        undo:
+          type: object
+          additionalProperties: false
+          required: [kind, description]
+          properties:
+            kind: { type: string, enum: [auto_restore, controller_rebuild, compensation, none] }
+            description: { type: string }
+        policy_rule: { type: string, description: 决定审批档位的策略规则 }
+        model_rationale:
+          type: [string, 'null']
+          description: 模型给出的理由，标注"模型生成，未经验证"；规则或人工提议时为 null
+    Cluster:
+      type: object
+      additionalProperties: false
+      required: [cluster_id, display_name, reader, gateway, freeze, informer_synced_at, proposal_only, conditions]
+      properties:
+        cluster_id: { $ref: './schemas/common.schema.json#/$defs/ClusterId' }
+        display_name: { type: string }
+        reader: { $ref: '#/components/schemas/SpokeStatus' }
+        gateway:
+          oneOf: [{ type: 'null' }, { $ref: '#/components/schemas/SpokeStatus' }]
+        freeze:
+          type: object
+          additionalProperties: false
+          required: [frozen, observed_at]
+          properties:
+            frozen: { type: boolean }
+            observed_at: { $ref: './schemas/common.schema.json#/$defs/Timestamp' }
+        informer_synced_at:
+          oneOf: [{ type: 'null' }, { $ref: './schemas/common.schema.json#/$defs/Timestamp' }]
+        proposal_only:
+          type: boolean
+          description: 准入自检未通过、gateway 未部署或冻结时为 true；所有页面显示红色的"仅提议"
+        conditions: { type: array, items: { $ref: './schemas/condition.schema.json' } }
+    SpokeStatus:
+      type: object
+      additionalProperties: false
+      required: [connected, version, last_seen_at, admission_selfcheck]
+      properties:
+        connected: { type: boolean }
+        version: { type: [string, 'null'] }
+        last_seen_at:
+          oneOf: [{ type: 'null' }, { $ref: './schemas/common.schema.json#/$defs/Timestamp' }]
+        admission_selfcheck:
+          type: [string, 'null']
+          description: 只对 gateway 有意义
+          enum: [passed, failed, unknown, null]
     IncidentSummary:
       type: object
       additionalProperties: false
@@ -756,6 +1225,7 @@ components:
           started_at,
           finished_at,
           stop_reason,
+          steps,
           evidence,
           output,
           llm_calls,
@@ -782,6 +1252,18 @@ components:
         stop_reason:
           type: [string, 'null']
           enum: [leader_supported, no_change, step_limit, deadline, budget, model_unavailable, null]
+        steps:
+          type: array
+          description: 状态机每一步的起止时间，供运行明细的瀑布图使用
+          items:
+            type: object
+            additionalProperties: false
+            required: [state, started_at, finished_at]
+            properties:
+              state: { $ref: '#/components/schemas/ResearchState' }
+              started_at: { $ref: './schemas/common.schema.json#/$defs/Timestamp' }
+              finished_at:
+                oneOf: [{ type: 'null' }, { $ref: './schemas/common.schema.json#/$defs/Timestamp' }]
         evidence:
           type: array
           description: 本次研判的全部证据卡结果（含区分性检查产生的卡）
@@ -833,9 +1315,11 @@ components:
     ToolCall:
       type: object
       additionalProperties: false
-      required: [seq, tool, arguments, window, limit_applied, result_size, truncated, duration_ms, error, result_ref]
+      required:
+        [seq, tool, arguments, window, limit_applied, result_size, truncated, duration_ms, error, result_ref, at]
       properties:
         seq: { type: integer, minimum: 1 }
+        at: { $ref: './schemas/common.schema.json#/$defs/Timestamp', description: 开始时间 }
         tool: { type: string }
         arguments: { type: object }
         window:

@@ -4,8 +4,8 @@ import { SCHEMAS } from './generated/schemas.js';
 
 export const SCHEMA_BASE = 'https://srenautix.io/contract/';
 
-// contract/ 中的扩展关键字，只作为标注，不参与校验
-const ANNOTATION_KEYWORDS = ['x-srenautix-dynamic-enum', 'x-srenautix-portable', 'x-srenautix-secret-ref'];
+// contract/ 中的扩展关键字，只作为标注，不参与校验；tsType 给 json-schema-to-typescript 指定元组类型
+const ANNOTATION_KEYWORDS = ['x-srenautix-dynamic-enum', 'x-srenautix-portable', 'x-srenautix-secret-ref', 'tsType'];
 
 function createAjv(): Ajv2020 {
   const ajv = new Ajv2020({ allErrors: true, strict: true, strictRequired: false, allowUnionTypes: true });

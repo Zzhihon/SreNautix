@@ -1,5 +1,5 @@
 // 本文件由 packages/contract/scripts/gen.ts 从 contract/ 生成，不要手工修改。
-export const CONTRACT_VERSION = '2.1.0';
+export const CONTRACT_VERSION = '2.2.0';
 
 export const SCHEMAS: Record<string, Record<string, unknown>> = {
   'https://srenautix.io/contract/integrations/alerts/v1/alerts.schema.json': {
@@ -1849,13 +1849,16 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
     required: [
       'ref',
       'card_id',
+      'title',
       'entity',
       'window',
       'verdict',
       'display_state',
       'reason',
       'value',
+      'threshold',
       'table',
+      'series',
       'queries',
       'egress',
       'evaluated_at',
@@ -1865,7 +1868,37 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
       card_id: {
         type: 'string',
         description: '<pack>/<chain>/<card>；区分性检查产生的卡为 check/<hypothesis id>/<n>',
-        pattern: '^[a-z0-9][a-z0-9_.-]*/[a-z0-9][a-z0-9_.-]*/[a-z0-9][a-z0-9_-]*$',
+        pattern: '^[a-z0-9_][a-z0-9_.-]*/[a-z0-9][a-z0-9_.-]*/[a-z0-9][a-z0-9_-]*$',
+      },
+      title: {
+        description: '取自卡片定义，结果脱离定义也能展示',
+        $ref: 'evidence-card.schema.json#/$defs/LocalizedText',
+      },
+      threshold: { type: ['number', 'null'], description: '展示用阈值线' },
+      series: {
+        type: 'array',
+        description:
+          '每个查询引用的降采样序列（每条不超过 300 点），用于迷你图与实时重跑的并排对比。points 中每项为 [unix 秒, 值或 null]',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['ref', 'labels', 'points'],
+          properties: {
+            ref: { type: 'string', description: '卡片中的引用名' },
+            labels: { $ref: 'common.schema.json#/$defs/Labels' },
+            points: {
+              type: 'array',
+              maxItems: 300,
+              items: {
+                type: 'array',
+                tsType: '[number, number | null]',
+                prefixItems: [{ type: 'number' }, { type: ['number', 'null'] }],
+                items: false,
+                minItems: 2,
+              },
+            },
+          },
+        },
       },
       entity: { oneOf: [{ type: 'null' }, { $ref: 'common.schema.json#/$defs/EntityRef' }] },
       window: { $ref: 'common.schema.json#/$defs/TimeWindow' },

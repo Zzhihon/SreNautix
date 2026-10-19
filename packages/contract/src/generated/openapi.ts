@@ -131,6 +131,40 @@ export type paths = {
     patch?: never;
     trace?: never;
   };
+  '/v1/auth/providers': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** @description 登录页显示的登录方式 */
+    get: operations['listAuthProviders'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/auth/reauth': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** @description 本地管理员的重新认证（口令加 TOTP），更新会话的 auth_time；OIDC 用户改用 `oidc/start?max_age=0` */
+    post: operations['reauthLocal'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/v1/auth/session': {
     parameters: {
       query?: never;
@@ -139,6 +173,57 @@ export type paths = {
       cookie?: never;
     };
     get: operations['getSession'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/catalog/actions': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** @description 生效的动作目录（结构以 contract/gateway/ 的动作目录 schema 为准），以及每个动作在各集群的启用状态 */
+    get: operations['listCatalogActions'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/clusters': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations['listClusters'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/clusters/{cluster_id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        cluster_id: components['schemas']['ClusterId'];
+      };
+      cookie?: never;
+    };
+    get: operations['getCluster'];
     put?: never;
     post?: never;
     delete?: never;
@@ -227,8 +312,9 @@ export type paths = {
       cookie?: never;
     };
     /**
-     * @description 事件收件箱，按 first_firing_at 从新到旧。被抑制的事件不隐藏，由 include_suppressed 控制是否返回明细；
-     *     响应头 `X-Suppressed-Count` 给出被折叠的数量。feedback=pending 表示最近一次完成的研判还没有反馈或反馈已过期。
+     * @description 事件收件箱，按 first_firing_at 从新到旧。被抑制的事件不隐藏：suppressed=false（默认）时不返回明细，
+     *     只在 suppressed_count 中计数。feedback=pending 表示最近一次完成的研判还没有反馈或反馈已过期。
+     *     blind_spans 给出查询时段内接入静默或观测失明的时段，供收件箱画盲区色带。
      */
     get: operations['listIncidents'];
     put?: never;
@@ -250,6 +336,26 @@ export type paths = {
       cookie?: never;
     };
     get: operations['getIncident'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/incidents/{incident_ref}/evidence': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description incident_id、稳定标签或别名；标签放进路径时按 RFC 3986 编码 */
+        incident_ref: components['parameters']['IncidentRef'];
+      };
+      cookie?: never;
+    };
+    /** @description 研判当时保存的证据卡结果（模型所见的快照）；不填 run_id 时取最新阶段 A 报告的卡 */
+    get: operations['getEvidenceSnapshot'];
     put?: never;
     post?: never;
     delete?: never;
@@ -295,7 +401,8 @@ export type paths = {
     put?: never;
     /**
      * @description 追加一条反馈。渠道和主体取自认证上下文：控制台会话为 console，Grafana 插件转发时为 grafana，
-     *     聊天渠道桥转发时带签名的渠道回调。verdict 与 disposition_verdict 至少填一个；root_component 必须是本次研判拓扑中的组件
+     *     聊天渠道桥转发时带签名的渠道回调。verdict 与 disposition_verdict 至少填一个；root_component 必须是本次研判拓扑中的组件。
+     *     进行中的事件同样接受反馈
      */
     post: operations['createFeedback'];
     delete?: never;
@@ -344,6 +451,46 @@ export type paths = {
     patch?: never;
     trace?: never;
   };
+  '/v1/incidents/{incident_ref}/subgraph': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description incident_id、稳定标签或别名；标签放进路径时按 RFC 3986 编码 */
+        incident_ref: components['parameters']['IncidentRef'];
+      };
+      cookie?: never;
+    };
+    /** @description 根因子图：根因加不超过 hops 跳的邻居，取该事件版本使用的拓扑版本；边带来源与置信度 */
+    get: operations['getIncidentSubgraph'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/incidents/{incident_ref}/timeline': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description incident_id、稳定标签或别名；标签放进路径时按 RFC 3986 编码 */
+        incident_ref: components['parameters']['IncidentRef'];
+      };
+      cookie?: never;
+    };
+    /** @description 事件时间线（一条泳道）：告警触发与恢复、变更、异常卡、研判与提议的状态变化 */
+    get: operations['getIncidentTimeline'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/v1/proposals': {
     parameters: {
       query?: never;
@@ -373,6 +520,7 @@ export type paths = {
       };
       cookie?: never;
     };
+    /** @description 提议全文，加上审批页按顺序展示的机器推导字段；预检由服务端在本次请求时重新执行 */
     get: operations['getProposal'];
     put?: never;
     post?: never;
@@ -461,6 +609,25 @@ export type paths = {
     patch?: never;
     trace?: never;
   };
+  '/v1/runs/{run_id}/eval-case': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        run_id: components['parameters']['RunId'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** @description 把这次研判所属的事件加入评测用例：固化查询邻域（DESIGN §14.2），进入"稍后标注"队列 */
+    post: operations['promoteEvalCase'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/v1/runs/{run_id}/manifest': {
     parameters: {
       query?: never;
@@ -471,6 +638,41 @@ export type paths = {
       cookie?: never;
     };
     get: operations['getResearchManifest'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/runs/{run_id}/prompt/raw': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        run_id: components['parameters']['RunId'];
+      };
+      cookie?: never;
+    };
+    /** @description 脱敏前的原始提示词（worker 未保存原文时返回 404），每次读取都写入治理审计 */
+    get: operations['getRawPrompts'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/search': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations['search'];
     put?: never;
     post?: never;
     delete?: never;
@@ -577,6 +779,20 @@ export type components = {
      * @enum {string}
      */
     Channel: 'console' | 'grafana' | 'telegram' | 'feishu' | 'dingtalk' | 'wecom' | 'slack' | 'api' | 'mcp';
+    Cluster: {
+      cluster_id: components['schemas']['ClusterId'];
+      conditions: components['schemas']['condition.schema'][];
+      display_name: string;
+      freeze: {
+        frozen: boolean;
+        observed_at: components['schemas']['Timestamp'];
+      };
+      gateway: null | components['schemas']['SpokeStatus'];
+      informer_synced_at: null | components['schemas']['Timestamp'];
+      /** @description 准入自检未通过、gateway 未部署或冻结时为 true；所有页面显示红色的"仅提议" */
+      proposal_only: boolean;
+      reader: components['schemas']['SpokeStatus'];
+    };
     /**
      * ClusterId
      * @description 集群标识，所有键都带它（DESIGN §2.2）
@@ -658,6 +874,11 @@ export type components = {
      * @enum {string}
      */
     Disposition: 'act' | 'ignore' | 'escalate' | 'undetermined';
+    /**
+     * Duration
+     * @description Prometheus 风格的时长，例如 30s、5m、2h、7d
+     */
+    Duration: string;
     /**
      * Egress
      * @description 卡片级出境控制（DESIGN §8.4）：allow 原样进入提示词；redact 脱敏后进入；never 不进入提示词
@@ -986,10 +1207,21 @@ export type components = {
       queries: components['schemas']['QueryRecord'][];
       reason: components['schemas']['Reason'];
       ref: components['schemas']['EvidenceRef'];
+      /** @description 每个查询引用的降采样序列（每条不超过 300 点），用于迷你图与实时重跑的并排对比。points 中每项为 [unix 秒, 值或 null] */
+      series: {
+        labels: components['schemas']['Labels'];
+        points: [number, number | null][];
+        /** @description 卡片中的引用名 */
+        ref: string;
+      }[];
       table: null | {
         head: string[];
         rows: string[][];
       };
+      /** @description 展示用阈值线 */
+      threshold: number | null;
+      /** @description 取自卡片定义，结果脱离定义也能展示 */
+      title: components['schemas']['LocalizedText'];
       /** @description 主值的展示文本 */
       value: string | null;
       verdict: components['schemas']['Verdict'];
@@ -1346,6 +1578,11 @@ export type components = {
       seq: number;
       usage: components['schemas']['Usage'];
     };
+    /** LocalizedText */
+    LocalizedText: {
+      en?: string;
+      'zh-CN'?: string;
+    };
     /** IncidentMember */
     Member: {
       alert_id: string;
@@ -1415,6 +1652,11 @@ export type components = {
       groups: string[];
       id: string;
     };
+    /**
+     * @description 安装配置（DESIGN §1.3）
+     * @enum {string}
+     */
+    Profile: 'observe' | 'standard' | 'compliance';
     /**
      * Proposal
      * @description server 持有的提议（DESIGN §2.4、§9）。提交时带幂等键，并绑定 {incident_version, root_component, evidence_fingerprint}；三者任一变化即标为 stale，gateway 执行前经中心再检查一次。审批断言、工单与 ActionExecution 的格式以 contract/gateway/ 为准
@@ -1572,6 +1814,42 @@ export type components = {
       research_run_id: null | components['schemas']['Uuid'];
       rule_id: string | null;
     };
+    ProposalDetail: {
+      blast_radius: {
+        objects: string[];
+        summary: string;
+        within_limit: boolean;
+      };
+      conflict_domain: string;
+      /** @description 模型给出的理由，标注"模型生成，未经验证"；规则或人工提议时为 null */
+      model_rationale: string | null;
+      /** @description 决定审批档位的策略规则 */
+      policy_rule: string;
+      prechecked_at: components['schemas']['Timestamp'];
+      prechecks: {
+        detail: string;
+        name: string;
+        passed: boolean;
+      }[];
+      proposal: components['schemas']['proposal.schema'];
+      queue_position: number | null;
+      target_state: {
+        exists: boolean;
+        resource_version: string | null;
+        /** @description 例如副本数、就绪数、cordon 状态 */
+        summary: string;
+        uid: string | null;
+      };
+      undo: {
+        description: string;
+        /** @enum {string} */
+        kind: 'auto_restore' | 'controller_rebuild' | 'compensation' | 'none';
+      };
+      verify: {
+        condition: string;
+        window: components['schemas']['Duration'];
+      };
+    };
     /**
      * ProposalDraft
      * @description 研判产生的提议草稿，经 server 的提议中转写入 proposals
@@ -1584,6 +1862,12 @@ export type components = {
       /** @description 提议中转接受后的 id；被拒绝时为 null */
       proposal_id: null | components['schemas']['Uuid'];
     };
+    /**
+     * EdgeProvenance
+     * @description 边的来源（DESIGN §4.2）
+     * @enum {string}
+     */
+    Provenance: 'structural' | 'runtime' | 'config_ref' | 'network_policy' | 'naming';
     /** EvidenceQueryRecord */
     QueryRecord: {
       capability: string;
@@ -1881,6 +2165,12 @@ export type components = {
       run_id: components['schemas']['Uuid'];
       started_at: components['schemas']['Timestamp'];
       state: components['schemas']['ResearchState'];
+      /** @description 状态机每一步的起止时间，供运行明细的瀑布图使用 */
+      steps: {
+        finished_at: null | components['schemas']['Timestamp'];
+        started_at: components['schemas']['Timestamp'];
+        state: components['schemas']['ResearchState'];
+      }[];
       /** @enum {string|null} */
       stop_reason: 'leader_supported' | 'no_change' | 'step_limit' | 'deadline' | 'budget' | 'model_unavailable' | null;
       summary: string | null;
@@ -1981,13 +2271,17 @@ export type components = {
       role_prior: number;
     };
     Session: {
+      /** @description 最近一次认证或重新认证的时间；H 档审批要求在 5 分钟内 */
       auth_time: components['schemas']['Timestamp'];
       /** @description 本地管理员作为紧急入口登录；页面显示横幅 */
       break_glass: boolean;
       csrf_token: string;
       expires_at: components['schemas']['Timestamp'];
+      local_admin: boolean;
       principal: components['schemas']['Principal'];
+      profile: components['schemas']['Profile'];
       provider: string;
+      /** @description 角色绑定与作用域 */
       roles: components['schemas']['RoleBinding'][];
     };
     /**
@@ -1997,6 +2291,16 @@ export type components = {
     Severity: 'critical' | 'warning' | 'info';
     /** Sha256 */
     Sha256: string;
+    SpokeStatus: {
+      /**
+       * @description 只对 gateway 有意义
+       * @enum {string|null}
+       */
+      admission_selfcheck: 'passed' | 'failed' | 'unknown' | null;
+      connected: boolean;
+      last_seen_at: null | components['schemas']['Timestamp'];
+      version: string | null;
+    };
     /**
      * StageAReport
      * @description 阶段 A 的确定性报告（DESIGN §7.1）：不调用模型，不经过 worker。事件创建或版本变化后立即生成
@@ -2067,6 +2371,30 @@ export type components = {
       | 'expired'
       | 'stale'
       | 'duplicate';
+    Subgraph: {
+      edges: {
+        confidence: number;
+        from: components['schemas']['ComponentKey'];
+        provenance: components['schemas']['Provenance'];
+        relation: string;
+        /** @enum {string} */
+        scope: 'instance' | 'service';
+        to: components['schemas']['ComponentKey'];
+      }[];
+      nodes: {
+        /** @description 该组件上的成员告警 alert_id */
+        alerts: string[];
+        component: components['schemas']['ComponentKey'];
+        hops: number;
+        kind: string;
+        name: string;
+        namespace: string | null;
+        /** @enum {string} */
+        role: 'root' | 'candidate' | 'member' | 'neighbor';
+      }[];
+      root: null | components['schemas']['ComponentKey'];
+      topology_version: number;
+    };
     /**
      * ProposalTarget
      * @description 由机器从事件与动作的目标解析规则推导，模型给出的目标必须等于推导结果
@@ -2079,6 +2407,27 @@ export type components = {
       name: string;
       namespace: string | null;
       uid: string | null;
+    };
+    TimelineEntry: {
+      at: components['schemas']['Timestamp'];
+      /** @enum {string} */
+      kind:
+        | 'alert_firing'
+        | 'alert_resolved'
+        | 'change'
+        | 'card_abnormal'
+        | 'incident_merged'
+        | 'incident_split'
+        | 'stage_a'
+        | 'research_concluded'
+        | 'proposal'
+        | 'execution'
+        | 'feedback';
+      /** @description 关联对象的 id（alert_id、change_id、run_id、proposal_id 等） */
+      ref: string | null;
+      text: string;
+      /** @description text 含告警、日志或变更来源的原文，只作为文本显示 */
+      untrusted: boolean;
     };
     /**
      * Timestamp
@@ -2093,6 +2442,8 @@ export type components = {
     };
     ToolCall: {
       arguments: Record<string, never>;
+      /** @description 开始时间 */
+      at: components['schemas']['Timestamp'];
       duration_ms: number;
       error: string | null;
       limit_applied: number | null;
@@ -2143,6 +2494,8 @@ export type components = {
     CsrfOptional: string;
     /** @description incident_id、稳定标签或别名；标签放进路径时按 RFC 3986 编码 */
     IncidentRef: string;
+    /** @description 只用于 Grafana 插件 token：Grafana 用户的邮箱 */
+    OnBehalfOf: string;
     ProposalId: components['schemas']['Uuid'];
     RunId: components['schemas']['Uuid'];
   };
@@ -2339,6 +2692,67 @@ export interface operations {
       };
     };
   };
+  listAuthProviders: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 登录方式 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            local_admin: {
+              /** @description SSO 已验证通过，本地管理员只作为紧急入口 */
+              break_glass: boolean;
+              enabled: boolean;
+            };
+            oidc: null | {
+              display_name: string;
+            };
+            profile: components['schemas']['Profile'];
+          };
+        };
+      };
+    };
+  };
+  reauthLocal: {
+    parameters: {
+      query?: never;
+      header: {
+        'X-CSRF-Token': components['parameters']['Csrf'];
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          password: string;
+          totp: string;
+        };
+      };
+    };
+    responses: {
+      /** @description 已重新认证 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Session'];
+        };
+      };
+      401: components['responses']['Error'];
+      423: components['responses']['Error'];
+    };
+  };
   getSession: {
     parameters: {
       query?: never;
@@ -2358,6 +2772,77 @@ export interface operations {
         };
       };
       401: components['responses']['Error'];
+    };
+  };
+  listCatalogActions: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 动作目录 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            catalog: Record<string, never>;
+            enabled: {
+              action: string;
+              auto: boolean;
+              cluster_id: components['schemas']['ClusterId'];
+              namespaces: string[];
+            }[];
+          };
+        };
+      };
+    };
+  };
+  listClusters: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 集群 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Cluster'][];
+        };
+      };
+    };
+  };
+  getCluster: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        cluster_id: components['schemas']['ClusterId'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 集群详情 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Cluster'];
+        };
+      };
+      404: components['responses']['Error'];
     };
   };
   listConditions: {
@@ -2465,12 +2950,16 @@ export interface operations {
       query?: {
         cluster_id?: components['schemas']['ClusterId'];
         component?: components['schemas']['ComponentKey'];
+        cursor?: string;
+        disposition?: components['schemas']['Disposition'];
         feedback?: 'pending' | 'given' | 'all';
         from?: string;
-        include_suppressed?: boolean;
         limit?: number;
+        /** @description 按标签、根因组件与告警名搜索 */
+        q?: string;
         severity?: components['schemas']['Severity'];
         state?: 'firing' | 'resolved' | 'all';
+        suppressed?: boolean;
         to?: string;
       };
       header?: never;
@@ -2485,7 +2974,20 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          'application/json': components['schemas']['IncidentSummary'][];
+          'application/json': {
+            blind_spans: {
+              cluster_id: components['schemas']['ClusterId'];
+              from: components['schemas']['Timestamp'];
+              /** @enum {string} */
+              kind: 'ingest_silent' | 'observability_blind' | 'state_store_degraded';
+              reason: string;
+              /** @description 仍在持续时为 null */
+              to: null | components['schemas']['Timestamp'];
+            }[];
+            items: components['schemas']['IncidentSummary'][];
+            next_cursor: string | null;
+            suppressed_count: number;
+          };
         };
       };
       400: components['responses']['Error'];
@@ -2517,6 +3019,32 @@ export interface operations {
         };
       };
       401: components['responses']['Error'];
+      404: components['responses']['Error'];
+    };
+  };
+  getEvidenceSnapshot: {
+    parameters: {
+      query?: {
+        run_id?: components['schemas']['Uuid'];
+      };
+      header?: never;
+      path: {
+        /** @description incident_id、稳定标签或别名；标签放进路径时按 RFC 3986 编码 */
+        incident_ref: components['parameters']['IncidentRef'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 证据卡结果，按异常、无法判定、正常排序 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['evidence-result.schema'][];
+        };
+      };
       404: components['responses']['Error'];
     };
   };
@@ -2585,8 +3113,11 @@ export interface operations {
   createFeedback: {
     parameters: {
       query?: never;
-      header: {
-        'X-CSRF-Token': components['parameters']['Csrf'];
+      header?: {
+        /** @description 会话认证时必填；Bearer 认证时不需要 */
+        'X-CSRF-Token'?: components['parameters']['CsrfOptional'];
+        /** @description 只用于 Grafana 插件 token：Grafana 用户的邮箱 */
+        'X-SreNautix-On-Behalf-Of'?: components['parameters']['OnBehalfOf'];
       };
       path: {
         /** @description incident_id、稳定标签或别名；标签放进路径时按 RFC 3986 编码 */
@@ -2692,6 +3223,57 @@ export interface operations {
       404: components['responses']['Error'];
     };
   };
+  getIncidentSubgraph: {
+    parameters: {
+      query?: {
+        hops?: number;
+        version?: number;
+      };
+      header?: never;
+      path: {
+        /** @description incident_id、稳定标签或别名；标签放进路径时按 RFC 3986 编码 */
+        incident_ref: components['parameters']['IncidentRef'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 子图 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Subgraph'];
+        };
+      };
+      404: components['responses']['Error'];
+    };
+  };
+  getIncidentTimeline: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description incident_id、稳定标签或别名；标签放进路径时按 RFC 3986 编码 */
+        incident_ref: components['parameters']['IncidentRef'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 按时间排列 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['TimelineEntry'][];
+        };
+      };
+      404: components['responses']['Error'];
+    };
+  };
   listProposals: {
     parameters: {
       query?: {
@@ -2767,13 +3349,13 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description 提议全文 */
+      /** @description 提议详情 */
       200: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          'application/json': components['schemas']['proposal.schema'];
+          'application/json': components['schemas']['ProposalDetail'];
         };
       };
       404: components['responses']['Error'];
@@ -2898,6 +3480,44 @@ export interface operations {
       404: components['responses']['Error'];
     };
   };
+  promoteEvalCase: {
+    parameters: {
+      query?: never;
+      header: {
+        'X-CSRF-Token': components['parameters']['Csrf'];
+      };
+      path: {
+        run_id: components['parameters']['RunId'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          /** @enum {string} */
+          case_type: 'incident' | 'benign' | 'abstain';
+          suite: string;
+        };
+      };
+    };
+    responses: {
+      /** @description 已创建用例 */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            case_id: string;
+            /** @enum {string} */
+            snapshot_status: 'queued' | 'frozen';
+          };
+        };
+      };
+      404: components['responses']['Error'];
+      409: components['responses']['Error'];
+    };
+  };
   getResearchManifest: {
     parameters: {
       query?: never;
@@ -2919,6 +3539,67 @@ export interface operations {
         };
       };
       404: components['responses']['Error'];
+    };
+  };
+  getRawPrompts: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        run_id: components['parameters']['RunId'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 每次模型调用的原始提示词 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            messages: {
+              content: string;
+              /** @enum {string} */
+              role: 'system' | 'developer' | 'user' | 'assistant' | 'tool';
+            }[];
+            phase: string;
+            seq: number;
+          }[];
+        };
+      };
+      403: components['responses']['Error'];
+      404: components['responses']['Error'];
+    };
+  };
+  search: {
+    parameters: {
+      query: {
+        limit?: number;
+        q: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 事件、组件、提议的匹配项 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            cluster_id: components['schemas']['ClusterId'];
+            id: string;
+            /** @enum {string} */
+            kind: 'incident' | 'component' | 'proposal';
+            title: string;
+          }[];
+        };
+      };
     };
   };
 }
