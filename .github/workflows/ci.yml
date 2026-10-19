@@ -22,6 +22,9 @@ env:
   KUBECONFORM_SHA256: 9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883
   # deploy/kind/versions.env 中 KIND_VERSION 对应的 kind-linux-amd64
   KIND_SHA256: aee6151561422756b764a4ae28e7f44cda5af5a9eead3cc9985112b1de8d8e0d
+  # Grafana 插件 e2e 使用的官方发行包（grafana-<版本>.linux-amd64.tar.gz）
+  GRAFANA_VERSION: 13.2.4
+  GRAFANA_SHA256: c48765988fd88572607e4ea670251af8a8e64ab3e360d0f3cf67a6f3587b92ab
   PROMETHEUS_VERSION: 3.15.0
   PROMETHEUS_SHA256: 2a542df32eac02ee17b9d844fb2aa1de00dafa5476579ba8a3ba862e9d572ea0
   ACTIONLINT_VERSION: 1.7.12
@@ -40,6 +43,7 @@ jobs:
       go: ${{ steps.detect.outputs.go }}
       hub: ${{ steps.detect.outputs.hub }}
       spoke: ${{ steps.detect.outputs.spoke }}
+      console_e2e: ${{ steps.detect.outputs.console_e2e }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -56,6 +60,7 @@ jobs:
             echo "go=$(has go.mod)"
             echo "hub=$hub"
             echo "spoke=$(has cmd/srenautix-spoke)"
+            echo "console_e2e=$(has web/console/playwright.config.ts)"
           } >>"$GITHUB_OUTPUT"
 
   ts:
@@ -196,6 +201,59 @@ jobs:
           helm unittest --help >/dev/null
       - name: lint、渲染校验与 helm-unittest
         run: deploy/helm/check.sh
+
+  # 控制台与 Grafana 插件的 Playwright e2e（ADR 0073）：真实的 server、一次性 PostgreSQL、envtest、
+  # OIDC 身份源与 Grafana 官方发行包；种子数据只经真实接口写入
+  e2e:
+    needs: detect
+    if: needs.detect.outputs.console_e2e == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: 安装依赖（冻结锁文件）
+        run: pnpm install --frozen-lockfile
+      - name: 安装测试用的 PostgreSQL 与其他服务二进制
+        run: .github/scripts/install-test-binaries.sh "$RUNNER_TEMP/testbin"
+      - name: 下载 envtest（kube-apiserver、etcd）
+        run: make envtest-assets
+      - name: 安装 Chromium 的系统依赖
+        run: pnpm --filter @srenautix/console exec playwright install-deps chromium
+      - name: 控制台 e2e
+        run: pnpm --filter @srenautix/console e2e
+      - name: 安装 Grafana（官方发行包，校验 sha256）
+        if: hashFiles('plugins/grafana-app/playwright.config.ts') != ''
+        run: |
+          curl -fsSLo grafana.tgz "https://dl.grafana.com/oss/release/grafana-${GRAFANA_VERSION}.linux-amd64.tar.gz"
+          echo "${GRAFANA_SHA256}  grafana.tgz" | sha256sum --check
+          mkdir -p "$RUNNER_TEMP/grafana"
+          tar -xzf grafana.tgz -C "$RUNNER_TEMP/grafana" --strip-components=1
+          rm grafana.tgz
+          echo "SRENAUTIX_GRAFANA_HOME=$RUNNER_TEMP/grafana" >>"$GITHUB_ENV"
+      - name: Grafana 插件 e2e
+        if: hashFiles('plugins/grafana-app/playwright.config.ts') != ''
+        run: |
+          pnpm --filter @srenautix/grafana-app build
+          pnpm --filter @srenautix/grafana-app e2e
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: failure()
+        with:
+          name: e2e-results
+          path: |
+            .scratch/console-e2e/results
+            .scratch/grafana-e2e/results
+          if-no-files-found: ignore
 
   # 在真实的 kube-apiserver 上对每份 values 做 server-side dry-run（准入策略、CEL、RBAC 的完整校验）
   helm-server-dry-run:
