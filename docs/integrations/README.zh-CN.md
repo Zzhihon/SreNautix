@@ -68,7 +68,7 @@ owner: srenautix-maintainers
 | `runLogsConformance` | `logs.match` 实现 | 子串匹配只在指定命名空间内且新的在前、RE2 正则、按 Pod 与容器过滤、行数上限与截断标记、时间窗口（含终点）、没有匹配时为空 |
 | `runTracesConformance` | `TempoAdapter` | 按状态与属性搜索、按 trace id 读取完整链路（父子关系与状态）、条数上限 |
 | `runChangesConformance` | `changes.list` 实现 | 契约形状与排序、窗口边界、`change_id` 唯一、按组件过滤、条数上限、空窗口、回放时钟窗口 |
-| `runApproveConformance` | 渠道适配器 | 签名测试向量；未绑定账号被拒绝；篡改的回调在签名校验处被拒绝；过期回调被拒绝；审批成功后重放同一回调被拒绝；同一内容编辑两次是幂等的 |
+| `runApproveConformance` | 渠道适配器 | 签名测试向量；未绑定账号被拒绝；来源校验（请求体签名的渠道：篡改过请求体的回调被拒绝；只靠请求头共享密钥的渠道，例如 Telegram webhook：密钥错误的回调被拒绝）；过期回调被拒绝；审批成功后重放同一回调被拒绝；同一内容编辑两次是幂等的 |
 | `runIdentityConformance` | 身份集成 | 认证结果符合契约；同一用户两次登录得到同一主体 id，不同用户不同；组映射；重新认证更新 `auth_time` |
 | `runModelConformance` | 模型路由 | 方言档案：基本调用与 usage、严格 JSON Schema、原生工具调用、推理通道、中文、上下文长度；结果写成 `DialectProfile` |
 | `runClockConformance` | 任意读取适配器 | 回放时钟窗口：窗口之外的时刻、区间与回看都被拒绝（`ClockWindowViolation`） |

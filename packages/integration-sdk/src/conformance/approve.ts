@@ -3,7 +3,9 @@
 // - 未绑定的账号点击批准必须被拒绝（not_linked）；
 // - 同一回调重放必须被拒绝（replayed 或 already_decided），不能产生第二次审批；
 // - 过期的回调必须被拒绝（expired）；
-// - 篡改过的回调必须在签名校验处被拒绝；
+// - 来源校验：对请求体签名的渠道（飞书），篡改过的回调必须在签名校验处被拒绝；
+//   只靠请求头共享密钥的渠道（Telegram webhook 的 X-Telegram-Bot-Api-Secret-Token），请求体没有签名，
+//   改为检查密钥错误的回调在来源校验处被拒绝；
 // - 编辑是幂等的：同一内容编辑两次，第二次不报错，也不改变消息。
 // 被测对象由渠道实现提供（服务端的 Telegram、飞书适配器），在它自己的集成测试里用真实的状态库运行本套件。
 
@@ -25,6 +27,13 @@ export interface SignatureVector {
 
 export interface ApproveSubject {
   name: string;
+  /**
+   * 回调的可信依据：body_signature 表示请求体带签名；
+   * transport_secret 表示只校验请求头里的共享密钥，请求体没有签名
+   */
+  readonly authenticity: 'body_signature' | 'transport_secret';
+  /** authenticity 为 transport_secret 时必须提供：返回同一回调、但共享密钥换成错误值的副本 */
+  forgeSecret?(raw: RawCallback): RawCallback;
   /** 只做签名与来源校验，不做业务处理 */
   verify(raw: RawCallback, nowMs: number): Promise<boolean>;
   /** 构造一条点击"批准"按钮的回调，渠道原生格式并已签名；proposal 由被测对象事先建好（L 档、待审批） */
@@ -71,11 +80,24 @@ export async function runApproveConformance(
     expectEq('结果', await s.deliver(raw, nowMs), 'not_linked');
     return 'not_linked';
   });
-  await c.run('tampered', '篡改过的回调在签名校验处拒绝', async () => {
+  const forged = s.authenticity === 'body_signature' ? '篡改过请求体的回调' : '共享密钥错误的回调';
+  await c.run('tampered', `${forged}在来源校验处拒绝`, async () => {
     await s.link('conformance-tamper');
     const raw = await s.approveCallback({ channelUserId: 'conformance-tamper', nowMs });
-    expectEq('结果', await s.deliver(tamper(raw), nowMs), 'bad_signature');
-    return 'bad_signature';
+    let bad: RawCallback;
+    if (s.authenticity === 'body_signature') {
+      bad = tamper(raw);
+    } else {
+      if (!s.forgeSecret) {
+        throw new Error('authenticity 为 transport_secret 时必须提供 forgeSecret');
+      }
+      bad = s.forgeSecret(raw);
+      if (bad.body !== raw.body || JSON.stringify(bad.headers) === JSON.stringify(raw.headers)) {
+        throw new Error('forgeSecret 必须只修改请求头中的共享密钥');
+      }
+    }
+    expectEq('结果', await s.deliver(bad, nowMs), 'bad_signature');
+    return `${forged}：bad_signature`;
   });
   await c.run('expired', '过期的回调拒绝', async () => {
     await s.link('conformance-late');
