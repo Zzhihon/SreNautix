@@ -10,6 +10,7 @@ import { logger } from './log.js';
  *   main.js --role=server|worker|mcp --config=/etc/srenautix/config.yaml [--serve=all|api|console]
  *   main.js db bootstrap|contract --config=…
  *   main.js audit verify --config=…
+ *   main.js eval [import-seed] …（参数见 eval/cli.ts 与 docs/eval/）
  *
  * 每个角色的实现是 roles/<role>.js 的 run(argv)；worker 与 mcp 由 hub-worker 维护。
  */
@@ -26,6 +27,13 @@ const ROLES = ['server', 'worker', 'mcp'] as const;
 type Role = (typeof ROLES)[number];
 
 async function main(): Promise<void> {
+  // 评测子命令有自己的参数（--cases、--compare、--runs 等），在严格的 parseArgs 之前分出；
+  // 门禁不通过时以 1 退出，供 CI 与发布判定
+  if (process.argv[2] === 'eval') {
+    const { runEvalCli } = await import('./eval/cli.js');
+    const r = await runEvalCli(process.argv.slice(3));
+    process.exit(r.gatePassed === false ? 1 : 0);
+  }
   const { values, positionals } = parseArgs({
     allowPositionals: true,
     options: {
