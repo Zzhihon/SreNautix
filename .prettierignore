@@ -6,6 +6,8 @@ pnpm-lock.yaml
 # 录制的外部载荷与上游 CRD 保持原样
 **/test/fixtures/
 test/crds/
+# srenautix eval 生成的成绩单保持命令输出的原样
+eval/reports/
 .scratch/
 .work/
 packages/integration-sdk/wasm/
