@@ -1,0 +1,11 @@
+# 观测自身（DESIGN §3.2 的 meta 角色）：抓取、写入、规则求值与告警投递的缺口。
+# 这些卡异常时，依赖同一数据源的其他卡的"正常"可能来自缺数据。
+api_version: srenautix.io/pack/v1
+name: observability-self
+version: 1.0.0
+description: 观测自身：抓取目标、kube-state-metrics、时序库写入与存储、规则求值、告警投递；同时适用于 Prometheus 与 VictoriaMetrics/vmalert
+maturity: stable
+min_srenautix_version: 0.1.0
+requires:
+  - metrics.query
+  - metrics.query_range

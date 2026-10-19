@@ -1,0 +1,166 @@
+chains:
+  - id: scrape
+    title: { zh-CN: 抓取, en: Scraping }
+    runbook: observability.md
+    cards:
+      - id: targets-down
+        title: { zh-CN: 抓取失败的目标, en: Failed scrape targets }
+        applies_to: { kinds: [cluster, Pod, Service, Namespace] }
+        refs:
+          - { name: targets, signal: scrape_targets, mode: instant }
+          - { name: down, signal: scrape_targets_down, mode: instant, empty_is: normal }
+        judge:
+          let:
+            - { name: jobs, cel: size(down) }
+          abnormal_if:
+            - cel: jobs > 0
+              say: { zh-CN: '{jobs} 个抓取任务在窗口内有失败的目标', en: '{jobs} scrape jobs had failing targets' }
+        display:
+          value: double(jobs)
+          unit: count
+          table:
+            rows_from: down
+            sort_by: last(row)
+            columns:
+              - { header: { zh-CN: 抓取任务, en: Job }, cel: 'label(row, "job")' }
+              - { header: { zh-CN: 失败目标, en: Down }, cel: last(row), unit: count }
+        egress: allow
+      - id: kube-state-metrics
+        title: { zh-CN: kube-state-metrics 的 list/watch 错误, en: kube-state-metrics list/watch errors }
+        applies_to: { kinds: [cluster, Pod, Service, Namespace] }
+        params: { ratio: 0.01 }
+        refs:
+          - { name: ratio, signal: ksm_list_watch_error_ratio, mode: range }
+        judge:
+          let:
+            - { name: peak, cel: max(ratio) }
+          abnormal_if:
+            - cel: peak > params.ratio
+              say:
+                {
+                  zh-CN: 'list/watch 错误比例峰值 {peak, number, percent}',
+                  en: 'Peak list/watch error ratio {peak, number, percent}',
+                }
+        display: { value: peak, unit: percent, threshold: params.ratio }
+        egress: allow
+
+  - id: prometheus-tsdb
+    title: { zh-CN: 时序库写入与存储, en: TSDB ingestion and storage }
+    runbook: observability.md
+    cards:
+      - id: ingestion
+        title: { zh-CN: 样本写入速率, en: Sample ingestion rate }
+        note: { zh-CN: 写入速率降到 0 时，所有指标卡都会缺数据, en: When ingestion stops every metric card lacks data }
+        applies_to: { kinds: [cluster, Pod, Service, Namespace] }
+        refs:
+          - { name: rate, signal: tsdb_ingest_rate, mode: range }
+        judge:
+          let:
+            - { name: low, cel: min(rate) }
+            - { name: anomaly_started_at, cel: 'first_below(rate, 0.000001)' }
+          abnormal_if:
+            - cel: low <= 0.0
+              say: { zh-CN: 窗口内有时段没有写入任何样本, en: No samples were ingested for part of the window }
+        display: { value: low, unit: per_second }
+        egress: allow
+      - id: storage
+        title: { zh-CN: 存储错误与配置重载, en: Storage errors and config reloads }
+        applies_to: { kinds: [cluster, Pod, Service, Namespace] }
+        refs:
+          - { name: rate, signal: tsdb_ingest_rate, mode: instant }
+          - { name: failures, signal: tsdb_storage_failures, mode: instant, empty_is: normal }
+          - { name: remote, signal: remote_write_failed, mode: instant, empty_is: normal }
+          - { name: reload, signal: config_reload_ok, mode: instant, empty_is: normal }
+        judge:
+          let:
+            - { name: storageErrors, cel: size(failures) }
+            - { name: remoteFailing, cel: size(remote) }
+            - { name: reloadFailed, cel: 'size(reload.filter(s, last(s) < 1.0))' }
+          abnormal_if:
+            - cel: storageErrors > 0
+              say:
+                {
+                  zh-CN: '{storageErrors} 个时序库实例有存储错误（压缩、重载或错误日志）',
+                  en: '{storageErrors} TSDB instances reported storage errors',
+                }
+            - cel: remoteFailing > 0
+              say:
+                {
+                  zh-CN: '{remoteFailing} 个远程写入目标在丢样本',
+                  en: '{remoteFailing} remote write targets are dropping samples',
+                }
+            - cel: reloadFailed > 0
+              say:
+                { zh-CN: 配置重载失败，运行中的是旧配置, en: A config reload failed; the old config is still running }
+        egress: allow
+
+  - id: rule-evaluation
+    title: { zh-CN: 规则求值, en: Rule evaluation }
+    runbook: observability.md
+    cards:
+      - id: failures
+        title: { zh-CN: 规则求值失败与漏算, en: Rule evaluation failures and missed iterations }
+        note:
+          { zh-CN: 规则求值失败或漏算时，告警可能没有触发, en: Failing or missed rule evaluations can silence alerts }
+        applies_to: { kinds: [cluster, Pod, Service, Namespace] }
+        refs:
+          - { name: groups, signal: rule_groups, mode: instant }
+          - { name: failed, signal: rule_failures, mode: instant, empty_is: normal }
+          - { name: missed, signal: rule_iterations_missed, mode: instant, empty_is: normal }
+        judge:
+          let:
+            - { name: failedGroups, cel: size(failed) }
+            - { name: missedGroups, cel: size(missed) }
+          abnormal_if:
+            - cel: failedGroups > 0
+              say: { zh-CN: '{failedGroups} 个规则组求值失败', en: '{failedGroups} rule groups failed to evaluate' }
+            - cel: missedGroups > 0
+              say: { zh-CN: '{missedGroups} 个规则组漏算', en: '{missedGroups} rule groups missed iterations' }
+        display:
+          table:
+            rows_from: failed
+            columns:
+              - { header: { zh-CN: 规则组, en: Group }, cel: 'label(row, "rule_group") + label(row, "group")' }
+              - { header: { zh-CN: 失败次数, en: Failures }, cel: last(row), unit: count }
+        egress: allow
+
+  - id: alert-delivery
+    title: { zh-CN: 告警投递, en: Alert delivery }
+    runbook: observability.md
+    cards:
+      - id: rules-to-alertmanager
+        title: { zh-CN: 规则引擎发往 Alertmanager, en: Rule engine to Alertmanager }
+        applies_to: { kinds: [cluster, Pod, Service, Namespace] }
+        refs:
+          - { name: sent, signal: alerts_sent, mode: instant }
+          - { name: errors, signal: alerts_send_errors, mode: instant, empty_is: normal }
+        judge:
+          let:
+            - { name: failing, cel: size(errors) }
+          abnormal_if:
+            - cel: failing > 0
+              say: { zh-CN: '发往 {failing} 个 Alertmanager 时出错', en: 'Sending to {failing} Alertmanagers failed' }
+        egress: allow
+      - id: notifications
+        title: { zh-CN: Alertmanager 通知, en: Alertmanager notifications }
+        applies_to: { kinds: [cluster, Pod, Service, Namespace] }
+        refs:
+          - { name: total, signal: alertmanager_notifications, mode: instant }
+          - { name: failed, signal: alertmanager_notifications_failed, mode: instant, empty_is: normal }
+          - { name: reload, signal: alertmanager_config_reload_ok, mode: instant, empty_is: normal }
+        judge:
+          let:
+            - { name: failing, cel: size(failed) }
+            - { name: reloadFailed, cel: 'size(reload.filter(s, last(s) < 1.0))' }
+          abnormal_if:
+            - cel: failing > 0
+              say: { zh-CN: '{failing} 种通知渠道发送失败', en: '{failing} notification integrations failed' }
+            - cel: reloadFailed > 0
+              say: { zh-CN: Alertmanager 配置重载失败, en: An Alertmanager config reload failed }
+        display:
+          table:
+            rows_from: failed
+            columns:
+              - { header: { zh-CN: 渠道, en: Integration }, cel: 'label(row, "integration")' }
+              - { header: { zh-CN: 失败次数, en: Failures }, cel: last(row), unit: count }
+        egress: allow

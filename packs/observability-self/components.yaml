@@ -1,0 +1,19 @@
+component_types:
+  - id: observability.prometheus
+    match: { kind: StatefulSet, name_pattern: ^prometheus- }
+    chains: [prometheus-tsdb, rule-evaluation, scrape]
+  - id: observability.alertmanager
+    match: { kind: StatefulSet, name_pattern: ^alertmanager- }
+    chains: [alert-delivery]
+  - id: observability.prometheus-operator
+    match: { kind: Deployment, name_pattern: (prometheus-operator|kube-prometheus-stack-operator)$ }
+    chains: [scrape]
+  - id: observability.kube-state-metrics
+    match: { kind: Deployment, name_pattern: kube-state-metrics$ }
+    chains: [scrape]
+  - id: observability.victoriametrics
+    match: { kind: Deployment, name_pattern: ^(vmsingle-|victoria-metrics) }
+    chains: [prometheus-tsdb, scrape]
+  - id: observability.vmalert
+    match: { kind: Deployment, name_pattern: ^vmalert- }
+    chains: [rule-evaluation, alert-delivery]

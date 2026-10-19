@@ -1,0 +1,70 @@
+# VictoriaMetrics 与 vmalert 栈，一切正常。信号选中 VictoriaMetrics 的备选；
+# kube-state-metrics 没有出过错，result="error" 的序列不存在。
+api_version: srenautix.io/pack-test/v1
+interval: 1m
+input_series:
+  - { series: 'up{job="node",instance="a"}', values: '1x60' }
+  - { series: 'up{job="app",instance="b"}', values: '1x60' }
+  - { series: 'kube_state_metrics_list_total{result="success"}', values: '0+95x60' }
+  - { series: 'kube_state_metrics_watch_total{result="success"}', values: '0+100x60' }
+  - { series: 'vm_rows_inserted_total{instance="vm",type="promremotewrite"}', values: '0+6000x60' }
+  - { series: 'vm_log_messages_total{instance="vm",level="info"}', values: '0+3x60' }
+  - { series: 'vmalert_config_last_reload_successful{job="vmalert",instance="va"}', values: '1x60' }
+  - { series: 'vmalert_iteration_total{group="g1"}', values: '0+1x60' }
+  - { series: 'vmalert_alerting_rules_errors_total{group="g1"}', values: '0x60' }
+  - { series: 'vmalert_iteration_missed_total{group="g1"}', values: '0x60' }
+  - { series: 'vmalert_alerts_sent_total{addr="am:9093"}', values: '0+3x60' }
+  - { series: 'vmalert_alerts_send_errors_total{addr="am:9093"}', values: '0x60' }
+  - { series: 'alertmanager_notifications_total{integration="telegram"}', values: '0+3x60' }
+  - { series: 'alertmanager_notifications_failed_total{integration="telegram"}', values: '0x60' }
+  - { series: 'alertmanager_config_last_reload_successful{instance="am"}', values: '1x60' }
+tests:
+  - {
+      name: 目标都在线,
+      eval_time: 40m,
+      card: scrape/targets-down,
+      entity: { kind: cluster, name: c1 },
+      expect: { verdict: normal },
+    }
+  - {
+      name: ksm 没有错误,
+      eval_time: 40m,
+      card: scrape/kube-state-metrics,
+      entity: { kind: cluster, name: c1 },
+      expect: { verdict: normal },
+    }
+  - {
+      name: 写入正常,
+      eval_time: 40m,
+      card: prometheus-tsdb/ingestion,
+      entity: { kind: cluster, name: c1 },
+      expect: { verdict: normal },
+    }
+  - {
+      name: 没有存储错误,
+      eval_time: 40m,
+      card: prometheus-tsdb/storage,
+      entity: { kind: cluster, name: c1 },
+      expect: { verdict: normal },
+    }
+  - {
+      name: 规则求值正常,
+      eval_time: 40m,
+      card: rule-evaluation/failures,
+      entity: { kind: cluster, name: c1 },
+      expect: { verdict: normal },
+    }
+  - {
+      name: 发送正常,
+      eval_time: 40m,
+      card: alert-delivery/rules-to-alertmanager,
+      entity: { kind: cluster, name: c1 },
+      expect: { verdict: normal },
+    }
+  - {
+      name: 通知正常,
+      eval_time: 40m,
+      card: alert-delivery/notifications,
+      entity: { kind: cluster, name: c1 },
+      expect: { verdict: normal },
+    }

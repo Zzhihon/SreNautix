@@ -1,0 +1,95 @@
+# Prometheus 与 VictoriaMetrics/vmalert 的同类指标写成备选：先 Prometheus，再 VictoriaMetrics。
+# 过滤型信号（以 > 0 结尾）在指标不存在时等于没有命中；存在性信号决定卡片有没有数据。
+signals:
+  - id: scrape_targets
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: count by (job) (up)
+  - id: scrape_targets_down
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: count by (job) (max_over_time((up == 0)[$window:]))
+  - id: ksm_list_watch_error_ratio
+    kind: metrics
+    unit: ratio
+    alternatives:
+      # 没有出过错时 result="error" 的序列可能不存在，按 0 计
+      - expr: >-
+          (
+            (sum(rate(kube_state_metrics_list_total{result="error"}[$rate_window])) or vector(0))
+            + (sum(rate(kube_state_metrics_watch_total{result="error"}[$rate_window])) or vector(0))
+          )
+          / (sum(rate(kube_state_metrics_list_total[$rate_window])) + sum(rate(kube_state_metrics_watch_total[$rate_window])))
+  - id: tsdb_ingest_rate
+    kind: metrics
+    unit: per_second
+    alternatives:
+      - expr: sum(rate(prometheus_tsdb_head_samples_appended_total[$rate_window]))
+      - expr: sum(rate(vm_rows_inserted_total[$rate_window]))
+  - id: tsdb_storage_failures
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: >-
+          sum by (instance) (
+            increase(prometheus_tsdb_compactions_failed_total[$window]) + increase(prometheus_tsdb_reloads_failures_total[$window])
+          ) > 0
+      # VictoriaMetrics 没有对应的压缩失败计数，用它自己的 error 级别以上日志计数
+      - expr: sum by (instance) (increase(vm_log_messages_total{level=~"error|fatal|panic"}[$window])) > 0
+  - id: remote_write_failed
+    kind: metrics
+    unit: per_second
+    alternatives:
+      - expr: sum by (instance, remote_name) (rate(prometheus_remote_storage_samples_failed_total[$rate_window])) > 0
+      - expr: sum by (instance, url) (rate(vmagent_remotewrite_requests_total{status_code!~"2.."}[$rate_window])) > 0
+  - id: config_reload_ok
+    kind: metrics
+    alternatives:
+      - expr: min by (job, instance) (min_over_time(prometheus_config_last_reload_successful[$window]))
+      - expr: min by (job, instance) (min_over_time(vmalert_config_last_reload_successful[$window]))
+  - id: rule_groups
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: count(prometheus_rule_group_last_duration_seconds)
+      - expr: count(vmalert_iteration_total)
+  - id: rule_failures
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: sum by (rule_group) (increase(prometheus_rule_evaluation_failures_total[$window])) > 0
+      - expr: sum by (group) (increase(vmalert_alerting_rules_errors_total[$window])) > 0
+  - id: rule_iterations_missed
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: sum by (rule_group) (increase(prometheus_rule_group_iterations_missed_total[$window])) > 0
+      - expr: sum by (group) (increase(vmalert_iteration_missed_total[$window])) > 0
+  - id: alerts_sent
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: sum(increase(prometheus_notifications_sent_total[$window]))
+      - expr: sum(increase(vmalert_alerts_sent_total[$window]))
+  - id: alerts_send_errors
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: sum by (alertmanager) (increase(prometheus_notifications_errors_total[$window])) > 0
+      - expr: sum by (addr) (increase(vmalert_alerts_send_errors_total[$window])) > 0
+  - id: alertmanager_notifications
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: sum by (integration) (increase(alertmanager_notifications_total[$window]))
+  - id: alertmanager_notifications_failed
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: sum by (integration) (increase(alertmanager_notifications_failed_total[$window])) > 0
+  - id: alertmanager_config_reload_ok
+    kind: metrics
+    alternatives:
+      - expr: min by (instance) (min_over_time(alertmanager_config_last_reload_successful[$window]))
