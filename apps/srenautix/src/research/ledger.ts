@@ -39,7 +39,11 @@ export interface ModelHypothesis {
   refuting: string[];
 }
 
-/** 假设的范围：根因组件，以及子图中与它相连、置信度不低于 τ 的直接邻居 */
+/**
+ * 假设的范围：根因组件本身，它直接依赖的对象（边 from=根因，置信度不低于 τ，例如挂载的 PVC、所在节点），
+ * 以及它拥有的对象（owned_by 指向根因，例如 Deployment 的 Pod）。调用根因的上游（边 to=根因 的其他关系）
+ * 只会表现出症状，它们的异常卡不能证明根因。
+ */
 export function scopeOf(root: string, subgraph: Subgraph): Set<string> {
   const out = new Set([root]);
   for (const e of subgraph.edges) {
@@ -48,7 +52,7 @@ export function scopeOf(root: string, subgraph: Subgraph): Set<string> {
     }
     if (e.from === root) {
       out.add(e.to);
-    } else if (e.to === root) {
+    } else if (e.to === root && e.relation === 'owned_by') {
       out.add(e.from);
     }
   }

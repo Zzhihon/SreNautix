@@ -105,7 +105,7 @@ export async function runEval(p: EvalPlan): Promise<EvalOutcome> {
           route: routeId,
           run: i,
           state: res.state,
-          level: out?.conclusion.level ?? null,
+          conclusion_level: out?.conclusion.level ?? null,
           tokens: used,
         });
       }

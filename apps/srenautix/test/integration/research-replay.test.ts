@@ -11,8 +11,8 @@ import { startVictoria, type Victoria } from '../support/victoria.js';
 
 // 用 test/live/research.live.test.ts 在本地 llama.cpp（Qwen3 1.7B）上录制的模型响应回放完整的阶段 B：
 // 模型响应按顺序回放，只读工具真实执行（真实的 MCP 服务器与 VictoriaMetrics）。
-// 小模型的输出有很多问题（父子环、type 写错、工具参数缺字段、修复建议 id 不合格式、提议目标不在拓扑中），
-// 这里验证代码对每一处问题的处理。
+// 小模型的输出有很多问题（父子环、type 写错、工具参数缺字段、编造的查询语法、结论超出输出上限、
+// 修复建议 id 不合格式、提议目标不在拓扑中），这里验证代码对每一处问题的处理。
 
 const recorded = JSON.parse(
   readFileSync(resolve(import.meta.dirname, '../fixtures/llm/research/pvc-full.json'), 'utf8'),
@@ -63,45 +63,51 @@ describe('录制的研判回放', () => {
     const v = validatorFor('schemas/research-output.schema.json');
     expect(v(out), JSON.stringify(v.errors)).toBe(true);
 
-    // 结论：postgres 的数据卷卡在范围内异常、早于症状；web 的发布假设被它自己的正常错误率卡推翻（竞争假设已检验）
+    // 结论：数据卷卡在范围内异常、早于症状；但全部检查都失败，没有检验过任何竞争假设，只能是 likely
     expect(out.conclusion).toMatchObject({
-      level: 'evidence_consistent',
-      root_component: 'StatefulSet:shop/postgres',
+      level: 'likely',
+      root_component: 'PersistentVolumeClaim:shop/data-postgres-0',
       consistency: {
         entity_in_scope: true,
         onset_precedes_symptom: true,
         no_contrary_normal: true,
-        competitor_tested: true,
+        competitor_tested: false,
       },
     });
+    expect(res.stopReason).toBe('no_change');
     const notes = out.validation_notes.join('\n');
     expect(notes).toMatch(/构成环/);
     expect(notes).toMatch(/type 写成 query，目标是只读工具，已改为 tool/);
     expect(notes).toMatch(/args_json 经 jsonrepair 修复/);
-    // pod_restart 的目标 Pod:shop/data-postgres-0 不在拓扑中：删除；没有有效提议时 act 改为 escalate（critical）
-    expect(notes).toMatch(/提议 pod_restart：目标 Pod:shop\/data-postgres-0 不在本次研判的拓扑中/);
+    expect(notes).toMatch(/假设 h1 没有检验过任何竞争假设/);
+    // pod_restart 的目标是占位符 Pod:shop/<pod-name>：删除；没有有效提议时 act 改为 escalate（critical）
+    expect(notes).toMatch(/提议 pod_restart：目标 Pod:shop\/<pod-name> 不在本次研判的拓扑中/);
+    expect(notes).toMatch(/处置为 act 但没有有效的提议或规则提议，改为 escalate/);
     expect(out.proposals).toEqual([]);
     expect(out.disposition).toBe('escalate');
     // 修复建议的 id 不合格式，按字段挽救时整条删除
     expect(out.recommendations).toEqual([]);
 
-    // 检查：参数缺字段的 pod_get 被 MCP 服务器按输入 schema 拒绝（失败，不计入检验过）；
-    // query 真实查询 VictoriaMetrics，结果由小模型判定成卡
+    // 检查：参数缺字段的 pod_get 被 MCP 服务器按输入 schema 拒绝；编造的查询语法被 VictoriaMetrics 拒绝；
+    // 失败的检查不产生卡，也不算检验过
     expect(out.next_checks.map((c) => [c.hypothesis_id, c.template, c.outcome])).toEqual([
       ['h1', 'metrics.pod_get', 'failed'],
       ['h2', 'metrics.pod_get', 'failed'],
-      ['h1', 'metrics.query', 'inconclusive'],
-      ['h2', 'metrics.query', 'inconclusive'],
+      ['h3', 'metrics.pod_get', 'failed'],
+      ['h1', 'metrics.query', 'failed'],
+      ['h2', 'metrics.query', 'failed'],
+      ['h3', 'metrics.query', 'failed'],
     ]);
-    expect(out.next_checks.filter((c) => c.outcome !== 'failed').every((c) => c.result_ref !== null)).toBe(true);
+    expect(out.next_checks.every((c) => c.result_ref === null)).toBe(true);
     expect(
       sink.tools.filter((t) => t.tool === 'metrics.pod_get').every((t) => t.error?.includes('Input validation error')),
     ).toBe(true);
-    expect(mcp.calls.filter((c) => c.tool === 'query')).toHaveLength(2);
-    const judged = res.book.allCards.filter((c) => c.judgedBy === 'model');
-    expect(judged.map((c) => c.result.reason.kind)).toEqual(['model_judged', 'model_judged']);
+    expect(
+      sink.tools.filter((t) => t.tool === 'metrics.query').every((t) => t.error?.includes('cannot recognize')),
+    ).toBe(true);
+    expect(mcp.calls.filter((c) => c.tool === 'query')).toHaveLength(3);
 
-    // 状态机与调用记录
+    // 状态机与调用记录：conclude 第一次输出超出上限被截断，带上错误重新请求后成功
     expect(sink.steps.map((s) => s.state)).toEqual([
       'hypothesize',
       'discriminate',
@@ -109,14 +115,12 @@ describe('录制的研判回放', () => {
       'discriminate',
       'conclude',
     ]);
-    expect(sink.llm.map((c) => [c.phase, c.outcome])).toEqual([
-      ['hypothesize', 'succeeded'],
-      ['hypothesize', 'succeeded'],
-      ['compress', 'succeeded'],
-      ['compress', 'succeeded'],
-      ['conclude', 'succeeded'],
+    expect(sink.llm.map((c) => [c.phase, c.outcome, c.repairStep])).toEqual([
+      ['hypothesize', 'succeeded', 'validate'],
+      ['hypothesize', 'succeeded', 'validate'],
+      ['conclude', 'retried', 'parse'],
+      ['conclude', 'succeeded', 'reask'],
     ]);
-    expect(sink.llm.at(-1)?.repairStep).toBe('field_salvage');
     expect(res.session.egress.every((e) => e.in_domain)).toBe(true);
     expect(res.ledger.input).toBe(sink.llm.reduce((a, c) => a + c.usage.input_tokens, 0));
   });

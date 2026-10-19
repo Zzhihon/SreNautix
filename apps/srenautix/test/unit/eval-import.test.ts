@@ -152,7 +152,7 @@ describe('旧版种子导入', () => {
     );
     expect(d?.c).toMatchObject({
       type: 'abstain',
-      truth: { disposition: 'undetermined', forbid_evidence_consistent: true },
+      truth: { root_components: [], disposition: null, forbid_evidence_consistent: true },
       derived_from: { removed_cards: ['legacy/db-disk/1'] },
     });
     expect(d?.s.context.stage_a.cards.map((x) => x.card_id)).toEqual([

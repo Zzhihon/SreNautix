@@ -1,5 +1,5 @@
 import { createHash, generateKeyPairSync } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
@@ -244,6 +244,7 @@ afterAll(async () => {
   await as?.close();
   await srv?.stop();
   await db?.close();
+  rmSync(ROOT, { recursive: true, force: true });
 });
 
 describe('mcp 角色', () => {

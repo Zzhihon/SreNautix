@@ -324,7 +324,7 @@ export class WorkerService {
       incident_id: inc.incident_id,
       state: res.state,
       stop: res.stopReason,
-      level: output?.conclusion.level ?? null,
+      conclusion_level: output?.conclusion.level ?? null,
       tokens: res.ledger.input + res.ledger.output,
     });
     return res.state;

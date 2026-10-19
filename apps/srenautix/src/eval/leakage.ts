@@ -103,7 +103,8 @@ export function deriveAbstain(
         root_components: [],
         granularity: null,
         mechanism: null,
-        disposition: 'undetermined',
+        // 标准答案是结论弃权；处置判断取决于严重度（critical 且根因无法判定时为 escalate），不计入处置准确率
+        disposition: null,
         forbid_evidence_consistent: true,
       },
       truth_source: { kind: 'human', principal: null, ref: `derived:${c.case_id}` },

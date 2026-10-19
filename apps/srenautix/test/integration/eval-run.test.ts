@@ -59,14 +59,19 @@ describe('录制的评测回放', () => {
     expect(current.server.pending).toBe(0);
     expect(current.out.runs).toHaveLength(6);
     expect(current.out.runs.every((r) => r.state === 'completed')).toBe(true);
-    // 场景用例三次都命中根因集合；abstain 用例上模型以 api 的症状卡为支持给出了 evidence_consistent（误报，正确地被计入）
+    // 场景用例三次都以数据卷为根因（根因集合含 postgres 与它的数据卷，集合评分算命中），结论为 likely；
+    // abstain 用例去掉了根因组件上的异常卡，api 的症状卡不在 postgres 假设的范围内，三次都弃权（inconclusive）
     const scenarioRuns = current.out.runs.filter((r) => r.caseId === 'scenario:pvc-full');
-    // 根因集合含 postgres 与它的数据卷，两者都算命中（集合评分）
-    expect(scenarioRuns.map((r) => r.top[0])).toEqual([
-      'StatefulSet:shop/postgres',
-      'StatefulSet:shop/postgres',
-      'PersistentVolumeClaim:shop/data-postgres-0',
+    expect(scenarioRuns.map((r) => [r.top[0], r.level])).toEqual([
+      ['PersistentVolumeClaim:shop/data-postgres-0', 'likely'],
+      ['PersistentVolumeClaim:shop/data-postgres-0', 'likely'],
+      ['PersistentVolumeClaim:shop/data-postgres-0', 'likely'],
     ]);
+    const abstainRuns = current.out.runs.filter((r) => r.caseId === 'abstain:scenario:pvc-full');
+    expect(abstainRuns.map((r) => r.level)).toEqual(['inconclusive', 'inconclusive', 'inconclusive']);
+    // abstain 用例中只读工具的结果由小模型判定成卡（每次运行一次）
+    const judges = current.server.received.filter((x) => x.body.includes('判定只读工具的检查结果'));
+    expect(judges).toHaveLength(3);
     const report = buildReport(
       {
         codeSha: 'test',
@@ -84,10 +89,14 @@ describe('录制的评测回放', () => {
     expect(v(report), JSON.stringify(v.errors)).toBe(true);
     const row = report.rows[0];
     expect(row?.top1).toMatchObject({ numerator: 3, denominator: 3 });
-    expect(row?.pass_pow_k).toMatchObject({ numerator: 1, denominator: 2 });
-    expect(row?.reliability.find((x) => x.level === 'evidence_consistent')).toMatchObject({
-      precision: { numerator: 2, denominator: 5 },
-      demoted: true,
+    expect(row?.pass_pow_k).toMatchObject({ numerator: 2, denominator: 2 });
+    expect(row?.coverage).toMatchObject({ numerator: 3, denominator: 6 });
+    expect(row?.reliability.find((x) => x.level === 'likely')).toMatchObject({
+      precision: { numerator: 3, denominator: 3 },
+      demoted: false,
+    });
+    expect(row?.reliability.find((x) => x.level === 'inconclusive')).toMatchObject({
+      precision: { numerator: 3, denominator: 3 },
     });
     expect(row?.snapshot_miss_rate).not.toBeNull();
 

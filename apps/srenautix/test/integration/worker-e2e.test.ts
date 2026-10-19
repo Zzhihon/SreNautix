@@ -1,5 +1,5 @@
 import { createHash, generateKeyPairSync } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { stringify } from 'yaml';
@@ -191,6 +191,7 @@ afterAll(async () => {
   await srv?.stop();
   await model?.stop();
   await db?.close();
+  rmSync(ROOT, { recursive: true, force: true });
   if (LIVE && model) {
     mkdirSync(resolve(FIXTURE, '..'), { recursive: true });
     writeFileSync(

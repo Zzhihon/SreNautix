@@ -67,10 +67,24 @@ describe('证据簿', () => {
 });
 
 describe('假设账本', () => {
-  it('范围：根因与置信度不低于 τ 的直接邻居', () => {
+  it('范围：根因、它直接依赖的对象与它拥有的对象；调用它的上游不在范围内', () => {
     expect([...scopeOf(PG, subgraph())].sort()).toEqual(
-      [API, 'Node:node-a', 'PersistentVolumeClaim:shop/data-postgres-0', PG].sort(),
+      ['Node:node-a', 'PersistentVolumeClaim:shop/data-postgres-0', PG].sort(),
     );
+    const owned = {
+      ...subgraph(),
+      edges: [
+        {
+          from: 'Pod:shop/api-1',
+          to: API,
+          relation: 'owned_by',
+          provenance: 'structural' as const,
+          confidence: 1,
+          scope: 'instance' as const,
+        },
+      ],
+    };
+    expect([...scopeOf(API, owned)].sort()).toEqual(['Pod:shop/api-1', API].sort());
   });
 
   it('范围内的异常卡支持；不存在的引用被删除并记录', () => {
