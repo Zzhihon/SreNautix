@@ -1,10 +1,4 @@
-import { defineConfig } from 'vitest/config';
+import { mergeConfig } from 'vitest/config';
+import { baseConfig } from '../../vitest.base.js';
 
-export default defineConfig({
-  resolve: {
-    conditions: ['@srenautix/source'],
-  },
-  test: {
-    include: ['test/**/*.test.ts'],
-  },
-});
+export default mergeConfig(baseConfig, {});

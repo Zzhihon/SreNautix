@@ -1,0 +1,276 @@
+// 根因排序（DESIGN §5）。得分 = 0.40×症状覆盖率（按路径置信度加权）+ 0.15×先于症状触发 + 0.20×角色先验
+//   + 0.15×30 分钟内的变更 − 0.10×长期告警惩罚；深度只用于平分。
+// 覆盖率规则：能解释全部症状的候选排在没有解释全部症状的候选之前，不受其余各项影响。
+// 第一与第二候选同层且分差小于 δ 时根因有歧义，两者的证据链都执行。
+import type { AlertRole, ChangeEvent, ComponentKey, EntityRef, IncidentRoot, RootCandidate } from '@srenautix/contract';
+import { changeComponents, changeExplains, dependsOn, type AlertGroup, type PreparedAlert } from './converge.js';
+import { isNamespacePseudo } from './keys.js';
+import type { ResolvedRcaParams } from './params.js';
+import { parseTime } from './time.js';
+import type { TopologyGraph } from './topology/graph.js';
+
+export interface ProbeResult {
+  component: ComponentKey;
+  abnormal: boolean;
+  card_id: string;
+  /** 异常起始时间（unix 毫秒）；不知道时为 null */
+  anomaly_started_at: number | null;
+}
+
+export interface RankInput {
+  group: AlertGroup;
+  graph: TopologyGraph;
+  params: ResolvedRcaParams;
+  /** 沉默根因探测卡的结果（见 silentRootTargets） */
+  probes?: readonly ProbeResult[];
+}
+
+export interface RankedCandidate extends RootCandidate {
+  /** 0：解释了全部症状；1：没有 */
+  layer: number;
+  entity: EntityRef | null;
+}
+
+export interface Ranking {
+  candidates: RankedCandidate[];
+  root: IncidentRoot;
+}
+
+interface Draft {
+  component: ComponentKey;
+  source: RootCandidate['source'];
+  roles: Set<AlertRole>;
+  own: PreparedAlert[];
+  changes: ChangeEvent[];
+  probe: ProbeResult | undefined;
+}
+
+const SOURCE_RANK: Record<RootCandidate['source'], number> = { alert: 0, change: 1, hub: 2, probe: 3, symptom: 4 };
+
+export function rankRoot(input: RankInput): Ranking {
+  const { group, graph, params } = input;
+  const drafts = new Map<ComponentKey, Draft>();
+  const draft = (component: ComponentKey, source: RootCandidate['source']): Draft => {
+    let d = drafts.get(component);
+    if (!d) {
+      d = { component, source, roles: new Set(), own: [], changes: [], probe: undefined };
+      drafts.set(component, d);
+    } else if (SOURCE_RANK[source] < SOURCE_RANK[d.source]) {
+      d.source = source;
+    }
+    return d;
+  };
+  const role = (x: PreparedAlert) => x.alert.classification.role;
+
+  for (const x of group.alerts) {
+    if (x.component !== null && (role(x) === 'cause' || role(x) === 'change')) {
+      draft(x.component, 'alert');
+    }
+  }
+  for (const c of group.changes) {
+    for (const comp of changeComponents(c, graph)) {
+      draft(comp, 'change').changes.push(c);
+    }
+  }
+  for (const h of group.hubs) {
+    draft(h, 'hub');
+  }
+  for (const p of input.probes ?? []) {
+    if (p.abnormal) {
+      draft(p.component, 'probe').probe = p;
+    }
+  }
+  if (drafts.size === 0) {
+    // 没有原因、变更与探测结果：症状所在组件作为候选；只剩 forecast 时用 forecast 所在组件
+    const pool = group.alerts.filter((x) => role(x) !== 'forecast');
+    for (const x of pool.length > 0 ? pool : group.alerts) {
+      if (x.component !== null) {
+        draft(x.component, 'symptom');
+      }
+    }
+  }
+  // 候选自己的告警
+  for (const x of group.alerts) {
+    const d = x.component === null ? undefined : drafts.get(x.component);
+    if (d) {
+      d.own.push(x);
+      d.roles.add(role(x));
+    }
+  }
+
+  const symptoms = group.alerts.filter((x) => role(x) === 'symptom');
+  const groupStart = Math.min(...group.alerts.map((x) => x.start));
+  const out: RankedCandidate[] = [];
+  for (const d of drafts.values()) {
+    // forecast 与 meta 不能成为活动事件的根因：只有这两种自有告警、也没有变更与探测支持的组件不参与排序，
+    // 整个分组只有这些告警时除外
+    const onlyWeak = d.own.length > 0 && d.own.every((x) => role(x) === 'forecast' || role(x) === 'meta');
+    if (onlyWeak && d.changes.length === 0 && !d.probe && d.source !== 'symptom' && d.source !== 'hub') {
+      continue;
+    }
+    const explained: Array<{ id: string; conf: number; start: number }> = [];
+    for (const s of symptoms) {
+      let conf = s.component === d.component ? 1 : (s.rankReach?.components.get(d.component) ?? 0);
+      for (const c of d.changes) {
+        conf = Math.max(conf, changeExplains(c, s, graph, params, 'rank'));
+      }
+      for (const o of d.own) {
+        conf = Math.max(conf, dependsOn(s, o, graph, 'rank'));
+      }
+      if (conf > 0) {
+        explained.push({ id: s.alert.alert_id, conf, start: s.start });
+      }
+    }
+    const causeOnsets = d.own.filter((x) => role(x) === 'cause' || role(x) === 'change').map((x) => x.start);
+    const onsets = [
+      ...causeOnsets,
+      ...d.changes.map((c) => parseTime(c.time)),
+      ...(d.probe?.anomaly_started_at != null ? [d.probe.anomaly_started_at] : []),
+    ];
+    const onset =
+      onsets.length > 0 ? Math.min(...onsets) : d.own.length > 0 ? Math.min(...d.own.map((x) => x.start)) : null;
+    const coverage = symptoms.length === 0 ? 0 : explained.reduce((a, e) => a + e.conf, 0) / symptoms.length;
+    const precedence =
+      explained.length === 0 || onset === null
+        ? 0
+        : explained.filter((e) => e.start >= onset).length / explained.length;
+    const priors = [...d.roles].map((r) => params.rolePriors[r]);
+    if (d.changes.length > 0) priors.push(params.rolePriors.change);
+    if (d.probe || d.source === 'hub') priors.push(params.rolePriors.cause);
+    const rolePrior = priors.length > 0 ? Math.max(...priors) : 0;
+    const recentChange =
+      d.roles.has('change') ||
+      d.changes.some((c) => {
+        const t = parseTime(c.time);
+        return t >= groupStart - params.changeWindowMs;
+      })
+        ? 1
+        : 0;
+    const chronic = d.own.length === 0 ? 0 : d.own.filter((x) => x.alert.classification.chronic).length / d.own.length;
+    const w = params.weights;
+    const score =
+      w.coverage * coverage +
+      w.precedence * precedence +
+      w.role_prior * rolePrior +
+      w.recent_change * recentChange -
+      w.chronic_penalty * chronic;
+    const fullyExplains = symptoms.length > 0 && explained.length === symptoms.length;
+    out.push({
+      component: d.component,
+      score: round(score),
+      terms: {
+        coverage: round(coverage),
+        precedence: round(precedence),
+        role_prior: round(rolePrior),
+        recent_change: recentChange,
+        chronic_penalty: round(chronic),
+      },
+      depth: graph.depth(d.component),
+      explains: explained.map((e) => e.id).sort(),
+      source: d.source,
+      layer: fullyExplains ? 0 : 1,
+      entity: candidateEntity(d, graph, group.alerts[0]!.alert.cluster_id),
+    });
+  }
+
+  out.sort(
+    (a, b) =>
+      a.layer - b.layer ||
+      b.score - a.score ||
+      b.depth - a.depth ||
+      Number(isNamespacePseudo(a.component)) - Number(isNamespacePseudo(b.component)) ||
+      a.component.localeCompare(b.component),
+  );
+  const top = out.slice(0, params.topK);
+  const first = top[0];
+  const second = top[1];
+  const margin = first && second ? round(first.score - second.score) : null;
+  return {
+    candidates: top,
+    root: {
+      component: first?.component ?? null,
+      entity: first?.entity ?? null,
+      ambiguous: Boolean(first && second && first.layer === second.layer && margin! < params.ambiguityMargin),
+      margin,
+      silent_root: first?.source === 'probe' || first?.source === 'hub',
+    },
+  };
+}
+
+function round(v: number): number {
+  return Math.round(v * 1e6) / 1e6;
+}
+
+/** 候选最具体的实体：最早的原因或变更告警的实体，其次变更目标对象，再次最早的其他告警的实体 */
+function candidateEntity(d: Draft, graph: TopologyGraph, clusterId: string): EntityRef | null {
+  const byStart = [...d.own].filter((x) => x.alert.entity !== null).sort((a, b) => a.start - b.start);
+  const cause = byStart.find(
+    (x) => x.alert.classification.role === 'cause' || x.alert.classification.role === 'change',
+  );
+  if (cause) {
+    return cause.alert.entity;
+  }
+  const target = d.changes.flatMap((c) => c.targets).find((t) => graph.has(t));
+  if (target) {
+    const n = graph.node(target)!;
+    return { cluster_id: clusterId, kind: n.kind, namespace: n.namespace, name: n.name, uid: n.uid };
+  }
+  return byStart[0]?.alert.entity ?? null;
+}
+
+export interface ProbeRequest {
+  /** upstream：症状上游组件的探测卡；namespace_pvc：命名空间内 StatefulSet PVC 的容量探测；namespace_logs：ENOSPC 日志卡 */
+  reason: 'upstream' | 'namespace_pvc' | 'namespace_logs';
+  component: ComponentKey;
+  /** 具体对象，例如 PVC */
+  object: ComponentKey | null;
+  namespace: string | null;
+  confidence: number;
+}
+
+/**
+ * 沉默根因（DESIGN §5）：症状存在但没有指向原因的告警时，返回需要执行探测卡的目标。
+ * 结果由阶段 A 执行对应的探测卡后，以 ProbeResult 传回 rankRoot
+ */
+export function silentRootTargets(group: AlertGroup, graph: TopologyGraph): ProbeRequest[] {
+  const role = (x: PreparedAlert) => x.alert.classification.role;
+  if (group.alerts.some((x) => role(x) === 'cause' || role(x) === 'change') || group.changes.length > 0) {
+    return [];
+  }
+  const symptoms = group.alerts.filter((x) => role(x) === 'symptom');
+  const own = new Set(group.alerts.map((x) => x.component));
+  const upstream = new Map<ComponentKey, number>();
+  for (const s of symptoms) {
+    for (const [comp, conf] of s.rankReach?.components ?? []) {
+      if (!own.has(comp)) {
+        upstream.set(comp, Math.max(upstream.get(comp) ?? 0, conf));
+      }
+    }
+  }
+  const out: ProbeRequest[] = [...upstream]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([component, confidence]) => ({ reason: 'upstream', component, object: null, namespace: null, confidence }));
+  const namespaces = new Set(
+    symptoms.map((s) => s.alert.entity?.namespace ?? s.alert.labels.namespace).filter((n): n is string => Boolean(n)),
+  );
+  for (const ns of [...namespaces].sort()) {
+    for (const node of graph.allNodes()) {
+      if (node.kind !== 'StatefulSet' || node.namespace !== ns) {
+        continue;
+      }
+      const pvcs = new Set<ComponentKey>();
+      for (const m of graph.membersOf(node.key)) {
+        for (const e of graph.dependencies(m)) {
+          if (e.relation === 'mounts') {
+            pvcs.add(e.to);
+          }
+        }
+      }
+      for (const pvc of [...pvcs].sort()) {
+        out.push({ reason: 'namespace_pvc', component: node.key, object: pvc, namespace: ns, confidence: 1 });
+      }
+    }
+    out.push({ reason: 'namespace_logs', component: `Namespace:${ns}`, object: null, namespace: ns, confidence: 1 });
+  }
+  return out;
+}

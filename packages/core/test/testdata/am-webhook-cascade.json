@@ -1,0 +1,123 @@
+{
+  "version": "4",
+  "groupKey": "{}/{severity=~\"critical|warning\"}:{}",
+  "truncatedAlerts": 0,
+  "status": "firing",
+  "receiver": "srenautix",
+  "groupLabels": {},
+  "commonLabels": { "prometheus": "monitoring/kube-prometheus-stack-prometheus" },
+  "commonAnnotations": {},
+  "externalURL": "http://alertmanager.monitoring:9093",
+  "alerts": [
+    {
+      "status": "firing",
+      "labels": {
+        "alertname": "KubeContainerOOMKilled",
+        "container": "postgres",
+        "namespace": "shop",
+        "pod": "pg-1",
+        "severity": "critical",
+        "job": "kube-state-metrics",
+        "prometheus": "monitoring/kube-prometheus-stack-prometheus"
+      },
+      "annotations": { "summary": "Container postgres in shop/pg-1 was OOMKilled." },
+      "startsAt": "2026-10-15T10:01:00Z",
+      "endsAt": "0001-01-01T00:00:00Z",
+      "generatorURL": "http://prometheus.monitoring:9090/graph?g0.expr=kube_pod_container_status_last_terminated_reason",
+      "fingerprint": "6d2c1a0b9e8f7d61"
+    },
+    {
+      "status": "firing",
+      "labels": {
+        "alertname": "ApiErrorRatioHigh",
+        "deployment": "api",
+        "namespace": "shop",
+        "severity": "critical",
+        "prometheus": "monitoring/kube-prometheus-stack-prometheus"
+      },
+      "annotations": { "summary": "api 5xx ratio above 5%." },
+      "startsAt": "2026-10-15T10:02:00Z",
+      "endsAt": "0001-01-01T00:00:00Z",
+      "generatorURL": "http://prometheus.monitoring:9090/graph?g0.expr=http_requests_total",
+      "fingerprint": "1a2b3c4d5e6f7081"
+    },
+    {
+      "status": "firing",
+      "labels": {
+        "alertname": "WorkerJobFailuresHigh",
+        "deployment": "worker",
+        "namespace": "shop",
+        "severity": "warning",
+        "prometheus": "monitoring/kube-prometheus-stack-prometheus"
+      },
+      "annotations": { "summary": "worker jobs failing." },
+      "startsAt": "2026-10-15T10:03:00Z",
+      "endsAt": "0001-01-01T00:00:00Z",
+      "generatorURL": "http://prometheus.monitoring:9090/graph?g0.expr=worker_jobs_failed_total",
+      "fingerprint": "2b3c4d5e6f708192"
+    },
+    {
+      "status": "firing",
+      "labels": {
+        "alertname": "FrontendErrorRatioHigh",
+        "deployment": "frontend",
+        "namespace": "web",
+        "severity": "warning",
+        "prometheus": "monitoring/kube-prometheus-stack-prometheus"
+      },
+      "annotations": { "summary": "frontend 5xx ratio above 5%." },
+      "startsAt": "2026-10-15T10:03:30Z",
+      "endsAt": "0001-01-01T00:00:00Z",
+      "generatorURL": "http://prometheus.monitoring:9090/graph?g0.expr=nginx_http_requests_total",
+      "fingerprint": "3c4d5e6f708192a3"
+    },
+    {
+      "status": "firing",
+      "labels": {
+        "alertname": "KubePodCrashLooping",
+        "container": "postgres",
+        "namespace": "shop",
+        "pod": "pg-1",
+        "reason": "CrashLoopBackOff",
+        "severity": "warning",
+        "job": "kube-state-metrics",
+        "prometheus": "monitoring/kube-prometheus-stack-prometheus"
+      },
+      "annotations": { "summary": "Pod is crash looping." },
+      "startsAt": "2026-10-15T10:16:00Z",
+      "endsAt": "0001-01-01T00:00:00Z",
+      "generatorURL": "http://prometheus.monitoring:9090/graph?g0.expr=kube_pod_container_status_waiting_reason",
+      "fingerprint": "4d5e6f708192a3b4"
+    },
+    {
+      "status": "firing",
+      "labels": {
+        "alertname": "KubePersistentVolumeFillingUp",
+        "namespace": "shop",
+        "persistentvolumeclaim": "data-search-0",
+        "severity": "warning",
+        "job": "kubelet",
+        "metrics_path": "/metrics",
+        "prometheus": "monitoring/kube-prometheus-stack-prometheus"
+      },
+      "annotations": { "summary": "PersistentVolume is filling up." },
+      "startsAt": "2026-10-15T10:05:00Z",
+      "endsAt": "0001-01-01T00:00:00Z",
+      "generatorURL": "http://prometheus.monitoring:9090/graph?g0.expr=predict_linear",
+      "fingerprint": "5e6f708192a3b4c5"
+    },
+    {
+      "status": "firing",
+      "labels": {
+        "alertname": "Watchdog",
+        "severity": "none",
+        "prometheus": "monitoring/kube-prometheus-stack-prometheus"
+      },
+      "annotations": { "summary": "An alert that should always be firing." },
+      "startsAt": "2026-10-15T00:00:00Z",
+      "endsAt": "0001-01-01T00:00:00Z",
+      "generatorURL": "http://prometheus.monitoring:9090/graph?g0.expr=vector%281%29",
+      "fingerprint": "6f708192a3b4c5d6"
+    }
+  ]
+}

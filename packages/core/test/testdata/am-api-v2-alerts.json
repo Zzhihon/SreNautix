@@ -1,0 +1,52 @@
+[
+  {
+    "annotations": { "summary": "Kubernetes node is not ready." },
+    "endsAt": "2026-10-15T13:09:00.000Z",
+    "fingerprint": "0a1b2c3d4e5f6071",
+    "receivers": [{ "name": "srenautix" }],
+    "startsAt": "2026-10-15T13:00:00.000Z",
+    "status": { "inhibitedBy": [], "silencedBy": [], "state": "active" },
+    "updatedAt": "2026-10-15T13:05:00.000Z",
+    "generatorURL": "http://prometheus.monitoring:9090/graph?g0.expr=kube_node_status_condition",
+    "labels": {
+      "alertname": "KubeNodeNotReady",
+      "condition": "Ready",
+      "job": "kube-state-metrics",
+      "node": "node-1",
+      "severity": "warning",
+      "status": "true"
+    }
+  },
+  {
+    "annotations": { "summary": "Deployment has not matched the expected number of replicas." },
+    "endsAt": "2026-10-15T13:09:00.000Z",
+    "fingerprint": "1b2c3d4e5f607182",
+    "receivers": [{ "name": "srenautix" }],
+    "startsAt": "2026-10-15T13:02:00.000Z",
+    "status": { "inhibitedBy": ["0a1b2c3d4e5f6071"], "silencedBy": [], "state": "suppressed" },
+    "updatedAt": "2026-10-15T13:05:00.000Z",
+    "generatorURL": "http://prometheus.monitoring:9090/graph?g0.expr=kube_deployment_spec_replicas",
+    "labels": {
+      "alertname": "KubeDeploymentReplicasMismatch",
+      "deployment": "api",
+      "job": "kube-state-metrics",
+      "namespace": "shop",
+      "severity": "warning"
+    }
+  },
+  {
+    "annotations": { "summary": "Custom check without catalog entry." },
+    "endsAt": "2026-10-15T13:09:00.000Z",
+    "fingerprint": "2c3d4e5f60718293",
+    "receivers": [{ "name": "srenautix" }],
+    "startsAt": "2026-10-15T13:03:00.000Z",
+    "status": { "inhibitedBy": [], "silencedBy": ["9f8e7d6c-0000-4000-8000-000000000001"], "state": "suppressed" },
+    "updatedAt": "2026-10-15T13:05:00.000Z",
+    "generatorURL": "http://prometheus.monitoring:9090/graph?g0.expr=ledger_lag_seconds",
+    "labels": {
+      "alertname": "LedgerLagHigh",
+      "namespace": "shop",
+      "severity": "info"
+    }
+  }
+]

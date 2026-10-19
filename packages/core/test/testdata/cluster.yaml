@@ -1,0 +1,322 @@
+# kubectl get namespaces,nodes,deployments,replicasets,statefulsets,daemonsets,pods,services,endpoints,ingresses,
+#   persistentvolumeclaims,persistentvolumes,configmaps,networkpolicies,clusters.postgresql.cnpg.io -A -o yaml
+# 精简后的导出：shop 命名空间有 CNPG 集群 pg、api、worker、search；web 命名空间有 frontend（刚完成一次发布）
+apiVersion: v1
+kind: List
+items:
+  - apiVersion: v1
+    kind: Namespace
+    metadata: { name: shop, labels: { kubernetes.io/metadata.name: shop, team: commerce } }
+  - apiVersion: v1
+    kind: Namespace
+    metadata: { name: web, labels: { kubernetes.io/metadata.name: web } }
+  - apiVersion: v1
+    kind: Namespace
+    metadata: { name: kube-system, labels: { kubernetes.io/metadata.name: kube-system } }
+  - apiVersion: v1
+    kind: Node
+    metadata: { name: node-1, uid: 0d6f1e8a-0001-4c1a-9a43-1f1a2b3c4d01, labels: { kubernetes.io/hostname: node-1 } }
+  - apiVersion: v1
+    kind: Node
+    metadata: { name: node-2, uid: 0d6f1e8a-0002-4c1a-9a43-1f1a2b3c4d02, labels: { kubernetes.io/hostname: node-2 } }
+  - apiVersion: v1
+    kind: Node
+    metadata: { name: node-3, uid: 0d6f1e8a-0003-4c1a-9a43-1f1a2b3c4d03, labels: { kubernetes.io/hostname: node-3 } }
+
+  # kube-system：CoreDNS 与 Cilium
+  - apiVersion: apps/v1
+    kind: Deployment
+    metadata: { name: coredns, namespace: kube-system, uid: 6a1c0000-0000-4000-8000-00000000c0d1, labels: { k8s-app: kube-dns } }
+    spec: { replicas: 1, selector: { matchLabels: { k8s-app: kube-dns } } }
+  - apiVersion: apps/v1
+    kind: ReplicaSet
+    metadata:
+      name: coredns-5d78c9869d
+      namespace: kube-system
+      uid: 6a1c0000-0000-4000-8000-00000000c0d2
+      labels: { k8s-app: kube-dns, pod-template-hash: 5d78c9869d }
+      ownerReferences: [{ apiVersion: apps/v1, kind: Deployment, name: coredns, uid: 6a1c0000-0000-4000-8000-00000000c0d1, controller: true }]
+  - apiVersion: v1
+    kind: Pod
+    metadata:
+      name: coredns-5d78c9869d-7xk2p
+      namespace: kube-system
+      uid: 6a1c0000-0000-4000-8000-00000000c0d3
+      labels: { k8s-app: kube-dns, pod-template-hash: 5d78c9869d }
+      ownerReferences: [{ apiVersion: apps/v1, kind: ReplicaSet, name: coredns-5d78c9869d, uid: 6a1c0000-0000-4000-8000-00000000c0d2, controller: true }]
+    spec: { nodeName: node-1, containers: [{ name: coredns, image: registry.k8s.io/coredns/coredns:v1.11.3 }] }
+  - apiVersion: v1
+    kind: Service
+    metadata: { name: kube-dns, namespace: kube-system, uid: 6a1c0000-0000-4000-8000-00000000c0d4, labels: { k8s-app: kube-dns } }
+    spec: { selector: { k8s-app: kube-dns }, ports: [{ name: dns, port: 53, protocol: UDP }] }
+  - apiVersion: apps/v1
+    kind: DaemonSet
+    metadata: { name: cilium, namespace: kube-system, uid: 6a1c0000-0000-4000-8000-0000000c1100, labels: { k8s-app: cilium } }
+    spec: { selector: { matchLabels: { k8s-app: cilium } } }
+  - apiVersion: v1
+    kind: Pod
+    metadata:
+      name: cilium-4hq8m
+      namespace: kube-system
+      uid: 6a1c0000-0000-4000-8000-0000000c1101
+      labels: { k8s-app: cilium }
+      ownerReferences: [{ apiVersion: apps/v1, kind: DaemonSet, name: cilium, uid: 6a1c0000-0000-4000-8000-0000000c1100, controller: true }]
+    spec: { nodeName: node-1, containers: [{ name: cilium-agent, image: quay.io/cilium/cilium:v1.16.3 }] }
+  - apiVersion: v1
+    kind: Pod
+    metadata:
+      name: cilium-9zt2c
+      namespace: kube-system
+      uid: 6a1c0000-0000-4000-8000-0000000c1102
+      labels: { k8s-app: cilium }
+      ownerReferences: [{ apiVersion: apps/v1, kind: DaemonSet, name: cilium, uid: 6a1c0000-0000-4000-8000-0000000c1100, controller: true }]
+    spec: { nodeName: node-2, containers: [{ name: cilium-agent, image: quay.io/cilium/cilium:v1.16.3 }] }
+  - apiVersion: v1
+    kind: Pod
+    metadata:
+      name: cilium-x7w4d
+      namespace: kube-system
+      uid: 6a1c0000-0000-4000-8000-0000000c1103
+      labels: { k8s-app: cilium }
+      ownerReferences: [{ apiVersion: apps/v1, kind: DaemonSet, name: cilium, uid: 6a1c0000-0000-4000-8000-0000000c1100, controller: true }]
+    spec: { nodeName: node-3, containers: [{ name: cilium-agent, image: quay.io/cilium/cilium:v1.16.3 }] }
+
+  # shop：CNPG 集群 pg（主库 pg-1 在 node-3，副本 pg-2 在 node-2）
+  - apiVersion: postgresql.cnpg.io/v1
+    kind: Cluster
+    metadata: { name: pg, namespace: shop, uid: 7b2d0000-0000-4000-8000-000000000p00 }
+    spec: { instances: 2, storage: { size: 20Gi } }
+  - apiVersion: v1
+    kind: Pod
+    metadata:
+      name: pg-1
+      namespace: shop
+      uid: 7b2d0000-0000-4000-8000-000000000p01
+      labels: { cnpg.io/cluster: pg, cnpg.io/instanceName: pg-1, cnpg.io/instanceRole: primary, role: primary }
+      ownerReferences: [{ apiVersion: postgresql.cnpg.io/v1, kind: Cluster, name: pg, uid: 7b2d0000-0000-4000-8000-000000000p00, controller: true }]
+    spec:
+      nodeName: node-3
+      containers: [{ name: postgres, image: ghcr.io/cloudnative-pg/postgresql:16.4 }]
+      volumes: [{ name: pgdata, persistentVolumeClaim: { claimName: pg-1 } }]
+  - apiVersion: v1
+    kind: Pod
+    metadata:
+      name: pg-2
+      namespace: shop
+      uid: 7b2d0000-0000-4000-8000-000000000p02
+      labels: { cnpg.io/cluster: pg, cnpg.io/instanceName: pg-2, cnpg.io/instanceRole: replica, role: replica }
+      ownerReferences: [{ apiVersion: postgresql.cnpg.io/v1, kind: Cluster, name: pg, uid: 7b2d0000-0000-4000-8000-000000000p00, controller: true }]
+    spec:
+      nodeName: node-2
+      containers: [{ name: postgres, image: ghcr.io/cloudnative-pg/postgresql:16.4 }]
+      volumes: [{ name: pgdata, persistentVolumeClaim: { claimName: pg-2 } }]
+  - apiVersion: v1
+    kind: PersistentVolumeClaim
+    metadata:
+      name: pg-1
+      namespace: shop
+      uid: 7b2d0000-0000-4000-8000-000000000v01
+      ownerReferences: [{ apiVersion: postgresql.cnpg.io/v1, kind: Cluster, name: pg, uid: 7b2d0000-0000-4000-8000-000000000p00, controller: true }]
+    spec: { volumeName: pvc-7b2d0001 }
+  - apiVersion: v1
+    kind: PersistentVolumeClaim
+    metadata:
+      name: pg-2
+      namespace: shop
+      uid: 7b2d0000-0000-4000-8000-000000000v02
+      ownerReferences: [{ apiVersion: postgresql.cnpg.io/v1, kind: Cluster, name: pg, uid: 7b2d0000-0000-4000-8000-000000000p00, controller: true }]
+    spec: { volumeName: pvc-7b2d0002 }
+  - apiVersion: v1
+    kind: PersistentVolume
+    metadata: { name: pvc-7b2d0001, uid: 7b2d0000-0000-4000-8000-000000000w01 }
+    spec: { csi: { driver: rbd.csi.ceph.com, volumeHandle: v-0001 }, claimRef: { namespace: shop, name: pg-1 } }
+  - apiVersion: v1
+    kind: PersistentVolume
+    metadata: { name: pvc-7b2d0002, uid: 7b2d0000-0000-4000-8000-000000000w02 }
+    spec: { csi: { driver: rbd.csi.ceph.com, volumeHandle: v-0002 }, claimRef: { namespace: shop, name: pg-2 } }
+  - apiVersion: v1
+    kind: Service
+    metadata:
+      name: pg-rw
+      namespace: shop
+      uid: 7b2d0000-0000-4000-8000-000000000s01
+      ownerReferences: [{ apiVersion: postgresql.cnpg.io/v1, kind: Cluster, name: pg, uid: 7b2d0000-0000-4000-8000-000000000p00, controller: true }]
+    spec: { selector: { cnpg.io/cluster: pg, cnpg.io/instanceRole: primary }, ports: [{ port: 5432 }] }
+  - apiVersion: v1
+    kind: Service
+    metadata:
+      name: pg-ro
+      namespace: shop
+      uid: 7b2d0000-0000-4000-8000-000000000s02
+      ownerReferences: [{ apiVersion: postgresql.cnpg.io/v1, kind: Cluster, name: pg, uid: 7b2d0000-0000-4000-8000-000000000p00, controller: true }]
+    spec: { selector: { cnpg.io/cluster: pg, cnpg.io/instanceRole: replica }, ports: [{ port: 5432 }] }
+
+  # shop：api（2 副本，分别在 node-1、node-2）
+  - apiVersion: apps/v1
+    kind: Deployment
+    metadata: { name: api, namespace: shop, uid: 8c3e0000-0000-4000-8000-0000000a0000, labels: { app: api } }
+    spec: { replicas: 2, selector: { matchLabels: { app: api } } }
+  - apiVersion: apps/v1
+    kind: ReplicaSet
+    metadata:
+      name: api-7c9d8f6b4
+      namespace: shop
+      uid: 8c3e0000-0000-4000-8000-0000000a0001
+      labels: { app: api, pod-template-hash: 7c9d8f6b4 }
+      ownerReferences: [{ apiVersion: apps/v1, kind: Deployment, name: api, uid: 8c3e0000-0000-4000-8000-0000000a0000, controller: true }]
+  - apiVersion: v1
+    kind: Pod
+    metadata:
+      name: api-7c9d8f6b4-k2x9q
+      namespace: shop
+      uid: 8c3e0000-0000-4000-8000-0000000a0002
+      labels: { app: api, pod-template-hash: 7c9d8f6b4 }
+      ownerReferences: [{ apiVersion: apps/v1, kind: ReplicaSet, name: api-7c9d8f6b4, uid: 8c3e0000-0000-4000-8000-0000000a0001, controller: true }]
+    spec:
+      nodeName: node-1
+      containers:
+        - name: api
+          image: registry.example.org/shop/api:1.42.0
+          env:
+            - { name: DATABASE_HOST, value: pg-rw }
+            - { name: DATABASE_PASSWORD, valueFrom: { secretKeyRef: { name: pg-app, key: password } } }
+            - { name: SELF_URL, value: 'http://api:8080' }
+  - apiVersion: v1
+    kind: Pod
+    metadata:
+      name: api-7c9d8f6b4-m7v3t
+      namespace: shop
+      uid: 8c3e0000-0000-4000-8000-0000000a0003
+      labels: { app: api, pod-template-hash: 7c9d8f6b4 }
+      ownerReferences: [{ apiVersion: apps/v1, kind: ReplicaSet, name: api-7c9d8f6b4, uid: 8c3e0000-0000-4000-8000-0000000a0001, controller: true }]
+    spec:
+      nodeName: node-2
+      containers:
+        - name: api
+          image: registry.example.org/shop/api:1.42.0
+          env:
+            - { name: DATABASE_HOST, value: pg-rw }
+            - { name: DATABASE_PASSWORD, valueFrom: { secretKeyRef: { name: pg-app, key: password } } }
+            - { name: SELF_URL, value: 'http://api:8080' }
+  - apiVersion: v1
+    kind: Service
+    metadata: { name: api, namespace: shop, uid: 8c3e0000-0000-4000-8000-0000000a0010 }
+    spec: { selector: { app: api }, ports: [{ port: 8080 }] }
+
+  # shop：worker 经 ConfigMap 引用数据库；NetworkPolicy 只允许它出站到 pg
+  - apiVersion: apps/v1
+    kind: Deployment
+    metadata: { name: worker, namespace: shop, uid: 8c3e0000-0000-4000-8000-0000000b0000, labels: { app: worker } }
+    spec: { replicas: 1, selector: { matchLabels: { app: worker } } }
+  - apiVersion: apps/v1
+    kind: ReplicaSet
+    metadata:
+      name: worker-6b5f4d8c9
+      namespace: shop
+      uid: 8c3e0000-0000-4000-8000-0000000b0001
+      labels: { app: worker, pod-template-hash: 6b5f4d8c9 }
+      ownerReferences: [{ apiVersion: apps/v1, kind: Deployment, name: worker, uid: 8c3e0000-0000-4000-8000-0000000b0000, controller: true }]
+  - apiVersion: v1
+    kind: Pod
+    metadata:
+      name: worker-6b5f4d8c9-q1w2e
+      namespace: shop
+      uid: 8c3e0000-0000-4000-8000-0000000b0002
+      labels: { app: worker, pod-template-hash: 6b5f4d8c9 }
+      ownerReferences: [{ apiVersion: apps/v1, kind: ReplicaSet, name: worker-6b5f4d8c9, uid: 8c3e0000-0000-4000-8000-0000000b0001, controller: true }]
+    spec:
+      nodeName: node-2
+      containers:
+        - name: worker
+          image: registry.example.org/shop/worker:1.42.0
+          envFrom: [{ configMapRef: { name: worker-config } }]
+  - apiVersion: v1
+    kind: ConfigMap
+    metadata: { name: worker-config, namespace: shop }
+    data:
+      DB_URL: 'postgresql://app@pg-rw.shop.svc:5432/app?sslmode=require'
+      CACHE_ADDR: 'cache:6379'
+  - apiVersion: networking.k8s.io/v1
+    kind: NetworkPolicy
+    metadata: { name: worker-egress, namespace: shop }
+    spec:
+      podSelector: { matchLabels: { app: worker } }
+      policyTypes: [Egress]
+      egress:
+        - to: [{ podSelector: { matchLabels: { cnpg.io/cluster: pg } } }]
+          ports: [{ port: 5432, protocol: TCP }]
+
+  # shop：search（StatefulSet，PVC 不归 StatefulSet 所有）
+  - apiVersion: apps/v1
+    kind: StatefulSet
+    metadata: { name: search, namespace: shop, uid: 8c3e0000-0000-4000-8000-0000000c0000, labels: { app: search } }
+    spec: { replicas: 1, selector: { matchLabels: { app: search } } }
+  - apiVersion: v1
+    kind: Pod
+    metadata:
+      name: search-0
+      namespace: shop
+      uid: 8c3e0000-0000-4000-8000-0000000c0001
+      labels: { app: search }
+      ownerReferences: [{ apiVersion: apps/v1, kind: StatefulSet, name: search, uid: 8c3e0000-0000-4000-8000-0000000c0000, controller: true }]
+    spec:
+      nodeName: node-1
+      containers: [{ name: search, image: registry.example.org/shop/search:8.15.0 }]
+      volumes: [{ name: data, persistentVolumeClaim: { claimName: data-search-0 } }]
+  - apiVersion: v1
+    kind: PersistentVolumeClaim
+    metadata: { name: data-search-0, namespace: shop, uid: 8c3e0000-0000-4000-8000-0000000c0002, labels: { app: search } }
+    spec: { volumeName: pvc-8c3e0001 }
+  - apiVersion: v1
+    kind: PersistentVolume
+    metadata: { name: pvc-8c3e0001, uid: 8c3e0000-0000-4000-8000-0000000c0003 }
+    spec: { csi: { driver: rbd.csi.ceph.com, volumeHandle: v-0003 }, claimRef: { namespace: shop, name: data-search-0 } }
+
+  # web：frontend，09:58 发布了新 ReplicaSet frontend-9a8b7c6d5，旧 ReplicaSet 已缩到 0
+  - apiVersion: apps/v1
+    kind: Deployment
+    metadata: { name: frontend, namespace: web, uid: 9d4f0000-0000-4000-8000-0000000f0000, labels: { app: frontend } }
+    spec: { replicas: 1, selector: { matchLabels: { app: frontend } } }
+  - apiVersion: apps/v1
+    kind: ReplicaSet
+    metadata:
+      name: frontend-5f6d7e8a9
+      namespace: web
+      uid: 9d4f0000-0000-4000-8000-0000000f0001
+      labels: { app: frontend, pod-template-hash: 5f6d7e8a9 }
+      ownerReferences: [{ apiVersion: apps/v1, kind: Deployment, name: frontend, uid: 9d4f0000-0000-4000-8000-0000000f0000, controller: true }]
+    spec: { replicas: 0 }
+  - apiVersion: apps/v1
+    kind: ReplicaSet
+    metadata:
+      name: frontend-9a8b7c6d5
+      namespace: web
+      uid: 9d4f0000-0000-4000-8000-0000000f0002
+      labels: { app: frontend, pod-template-hash: 9a8b7c6d5 }
+      ownerReferences: [{ apiVersion: apps/v1, kind: Deployment, name: frontend, uid: 9d4f0000-0000-4000-8000-0000000f0000, controller: true }]
+    spec: { replicas: 1 }
+  - apiVersion: v1
+    kind: Pod
+    metadata:
+      name: frontend-9a8b7c6d5-p4n8z
+      namespace: web
+      uid: 9d4f0000-0000-4000-8000-0000000f0003
+      labels: { app: frontend, pod-template-hash: 9a8b7c6d5 }
+      ownerReferences: [{ apiVersion: apps/v1, kind: ReplicaSet, name: frontend-9a8b7c6d5, uid: 9d4f0000-0000-4000-8000-0000000f0002, controller: true }]
+    spec:
+      nodeName: node-3
+      containers:
+        - name: frontend
+          image: registry.example.org/web/frontend:2.7.0
+          env: [{ name: API_URL, value: 'http://api.shop.svc.cluster.local:8080' }]
+  - apiVersion: v1
+    kind: Service
+    metadata: { name: frontend, namespace: web, uid: 9d4f0000-0000-4000-8000-0000000f0010 }
+    spec: { selector: { app: frontend }, ports: [{ port: 80 }] }
+  - apiVersion: networking.k8s.io/v1
+    kind: Ingress
+    metadata: { name: frontend, namespace: web, uid: 9d4f0000-0000-4000-8000-0000000f0020 }
+    spec:
+      rules:
+        - host: shop.example.org
+          http: { paths: [{ path: /, pathType: Prefix, backend: { service: { name: frontend, port: { number: 80 } } } }] }
