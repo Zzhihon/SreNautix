@@ -40,26 +40,27 @@ export class StageAService {
     const alerts = await alertsById(this.pool, memberIds);
     const ac = new AbortController();
     const timer = setTimeout(() => ac.abort(new Error('阶段 A 证据卡超过期限')), EVIDENCE_DEADLINE_MS);
-    let cards;
+    let run;
     try {
-      cards = await this.evidence.run(inc, alerts, ac.signal);
+      run = await this.evidence.run(inc, alerts, ac.signal);
     } finally {
       clearTimeout(timer);
     }
+    const cards = run.cards;
     const observed = verdictFingerprint(cards);
     const st = await this.pool.query<{ fingerprint_state: FingerprintState | null }>(
       'SELECT fingerprint_state FROM server.incidents WHERE incident_id = $1',
       [inc.incident_id],
     );
     const fp = observeFingerprint(st.rows[0]?.fingerprint_state ?? null, observed);
-    const excludedBy = this.rules.excluded(inc, alerts);
+    const excludedBy = this.rules.excluded(inc, alerts, run);
     const now = await this.pool.query<{ now: Date }>('SELECT now() AS now');
     const base = {
       incident: inc,
       alerts,
       cards,
       excludedBy,
-      runbooks: this.evidence.runbooks(inc),
+      runbooks: run.runbooks,
       degraded: false,
       fingerprint: fp.state.current,
       now: (now.rows[0] as { now: Date }).now,
@@ -94,7 +95,7 @@ export class StageAService {
     // 提议必须绑定到一个根因组件；没有根因的事件不出规则提议
     const root = inc.root.component;
     if (!inc.suppressed && !excludedBy && root !== null) {
-      for (const hit of this.rules.evaluate(inc, cards)) {
+      for (const hit of this.rules.evaluate(inc, alerts, run)) {
         try {
           const r = await this.proposals.create(
             { source: 'rule', callerId: `${hit.pack}/${hit.ruleId}` },

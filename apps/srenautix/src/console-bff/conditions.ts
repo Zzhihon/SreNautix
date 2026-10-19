@@ -106,6 +106,12 @@ export interface ServerObservations {
   lastWatchdogAt: Date | null;
   startedAt: Date;
   reconcileOk: boolean | null;
+  /** 证据卡指标数据源最近一次标签档案探测的错误；可达时为 null。 */
+  evidenceDatasourceError: string | null;
+  /** 校验不通过（或 pack.lock 不一致）没有加载的包。 */
+  packFailures: Array<{ name: string; error: string }>;
+  /** 必须的能力缺失或依赖的包被禁用而禁用的包。 */
+  packsDisabled: Array<{ name: string; reason: string }>;
   degraded: boolean;
   storm: boolean;
   budgetRatio: number;
@@ -147,6 +153,19 @@ export function serverConditions(o: ServerObservations): Observed[] {
       reason: o.reconcileOk ? 'Reachable' : 'ReconcileFailed',
       message: o.reconcileOk ? '' : '告警对账读取 Alertmanager 或 Prometheus 失败',
     });
+  }
+  out.push({
+    type: 'DatasourceUnavailable',
+    subject: 'evidence-metrics',
+    active: o.evidenceDatasourceError !== null,
+    reason: o.evidenceDatasourceError !== null ? 'ProbeFailed' : 'Reachable',
+    message: o.evidenceDatasourceError !== null ? `证据卡的指标数据源不可用：${o.evidenceDatasourceError}` : '',
+  });
+  for (const f of o.packFailures) {
+    out.push({ type: 'PackLoadFailed', subject: f.name, active: true, reason: 'LintFailed', message: f.error });
+  }
+  for (const d of o.packsDisabled) {
+    out.push({ type: 'PackLoadFailed', subject: d.name, active: true, reason: 'Disabled', message: d.reason });
   }
   out.push({
     type: 'StateStoreDegraded',

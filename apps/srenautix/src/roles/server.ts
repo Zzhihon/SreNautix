@@ -1,5 +1,5 @@
 import { createServer, type Server } from 'node:http';
-import { AlertCatalog, DEFAULT_RCA_PARAMS, type ResolvedRcaParams } from '@srenautix/core';
+import type { ResolvedRcaParams } from '@srenautix/core';
 import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
 import { createApp } from '../api/http.js';
@@ -34,7 +34,7 @@ import { ServerMetrics, startMetricsServer } from '../metrics.js';
 import { ServerNotifyActions } from '../notify/actions.js';
 import { NotifyService } from '../notify/index.js';
 import { PgMessageSource } from '../notify/source.js';
-import { Catalog } from '../proposals/catalog.js';
+import { Catalog, DEFAULT_CATALOG_PATH } from '../proposals/catalog.js';
 import { FeedbackService } from '../proposals/feedback.js';
 import { Policies } from '../proposals/policy.js';
 import { ProposalService } from '../proposals/service.js';
@@ -42,7 +42,8 @@ import { SpokeRelay } from '../proposals/spoke.js';
 import { Scheduler } from '../scheduler/admission.js';
 import { WorkerEventMirror } from '../scheduler/worker-events.js';
 import { DegradedLane } from '../stage-a/degraded.js';
-import { NoPackEvidence, NoPackRules } from '../stage-a/no-packs.js';
+import { PackEvidence, PackRules } from '../stage-a/pack-evidence.js';
+import { EvidenceSource, PackRuntime } from '../stage-a/packs.js';
 import { StageAService } from '../stage-a/service.js';
 import { loadEd25519Private } from '../store/audit.js';
 import { AuditExporter, s3Client } from '../store/audit-export.js';
@@ -155,10 +156,43 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
   let policies = Policies.load(c.policies_dir);
   const topology = new TopologyStore(pool);
   const targets = new TopologyTargets(pool);
-  const alertCatalog = new AlertCatalog([]);
-  const params = (): ResolvedRcaParams => DEFAULT_RCA_PARAMS;
-  const evidence = new NoPackEvidence();
-  const rules = new NoPackRules();
+  const prom = c.datasources.prometheus;
+  const packs = await PackRuntime.load({
+    dirs: c.packs.dirs,
+    only: c.packs.only ?? null,
+    lockFile: c.packs.lock_file ?? null,
+    catalogPath: DEFAULT_CATALOG_PATH,
+    capabilities: new Set(['metrics.query', 'metrics.query_range', 'metrics.series']),
+  });
+  logger.info('领域包已加载', {
+    packs: packs.set.packs.map((p) => p.name),
+    disabled: packs.set.disabled,
+    failed: packs.failures.map((f) => f.name),
+    lock_digest: packs.set.lockDigest,
+  });
+  const alertCatalog = packs.alertCatalog();
+  const rcaParams = packs.rcaParams();
+  const params = (): ResolvedRcaParams => rcaParams;
+  const evidenceSource = await EvidenceSource.create({
+    id: 'prometheus',
+    url: prom.url,
+    dialect: prom.dialect,
+    bearerTokenFile: prom.bearer_token_file ?? null,
+    timeoutMs: parseDuration('datasources.prometheus.timeout', prom.timeout),
+  });
+  const evidenceOptions = {
+    locale: c.stage_a.language === 'zh' ? ('zh-CN' as const) : ('en' as const),
+    concurrency: prom.concurrency,
+    queryTimeoutMs: parseDuration('datasources.prometheus.timeout', prom.timeout),
+  };
+  const evidence = new PackEvidence(
+    packs,
+    evidenceSource,
+    (clusterId, key) => topology.componentType(clusterId, key),
+    evidenceOptions,
+    metrics,
+  );
+  const rules = new PackRules(packs, metrics);
 
   // 提议与审批
   const ap = c.approvals;
@@ -234,7 +268,7 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
   });
 
   // 降级通道
-  const degradedLane = new DegradedLane(
+  const degradedLane: DegradedLane = new DegradedLane(
     {
       clusterId: c.cluster_id,
       prefix: c.notify.prefix,
@@ -244,7 +278,14 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
     },
     alertCatalog,
     params,
-    evidence,
+    // 降级通道不查状态库：组件类型取最后一轮成功对账时的内存拓扑
+    new PackEvidence(
+      packs,
+      evidenceSource,
+      async (_clusterId: string, key: string): Promise<string | null> => degradedLane.componentTypeOf(key),
+      evidenceOptions,
+      metrics,
+    ),
     notify,
     metrics,
   );
@@ -379,6 +420,7 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
     topology,
     exporter,
     worker,
+    packs,
   });
   new SpokeRelay(pool, listener, catalog).registerRoutes(app, auth);
   // 多集群：分支 reader 的出站协议（contract/gateway/v1/reader.openapi.yaml）
@@ -528,6 +570,8 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
       clusterId: c.cluster_id,
       kubeconfigPath: c.topology.kubeconfig,
       signal,
+      componentTypes: packs.componentTypes(),
+      conventions: packs.conventions(),
     });
   }
 
@@ -557,6 +601,10 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
           lastWatchdogAt: ingest.lastWatchdogAt,
           startedAt,
           reconcileOk,
+          // 标签档案按需重新探测（失败时每 60 秒、成功时每小时）
+          evidenceDatasourceError: await evidenceSource.dataSource(Date.now()).then(() => evidenceSource.error),
+          packFailures: packs.failures,
+          packsDisabled: packs.set.disabled,
           degraded,
           storm: scheduler.stormMode,
           budgetRatio: scheduler.budgetRatio,

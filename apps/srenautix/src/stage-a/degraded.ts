@@ -50,6 +50,11 @@ export class DegradedLane {
     private readonly metrics: ServerMetrics,
   ) {}
 
+  /** 最后一轮成功对账时拓扑节点的组件类型（降级期间证据链按它选择）。 */
+  componentTypeOf(key: string): string | null {
+    return this.nodes.find((n) => n.key === key)?.component_type ?? null;
+  }
+
   /** 每轮成功对账后保存起点。 */
   snapshot(state: {
     alerts: Alert[];
@@ -123,16 +128,16 @@ export class DegradedLane {
       }
       const memberIds = new Set(inc.members.filter((m) => m.left_version === null).map((m) => m.alert_id));
       const own = alerts.filter((a) => memberIds.has(a.alert_id));
-      const cards = await this.evidence.run(inc, own, AbortSignal.timeout(40_000));
+      const run = await this.evidence.run(inc, own, AbortSignal.timeout(40_000));
       const report: StageAReport = buildReport({
         incident: inc,
         alerts: own,
-        cards,
+        cards: run.cards,
         ruleActions: 0,
         excludedBy: null,
-        runbooks: this.evidence.runbooks(inc),
+        runbooks: run.runbooks,
         ruleProposalIds: [],
-        fingerprint: verdictFingerprint(cards),
+        fingerprint: verdictFingerprint(run.cards),
         degraded: true,
         now,
       });

@@ -95,9 +95,41 @@ audit:
 
 1. webhook 写入 `alert_state` 与接入日志，经 `NOTIFY` 唤醒主实例；60 秒对账补回遗漏并结束告警源中已经没有的告警。
 2. 事件引擎用 packages/core 重算并对账事件，写入版本、成员、别名与 outbox。
-3. 每个新版本立即出阶段 A：证据卡、规则提议、确定性的处置判断，发布 `stage_a.reported`，消息就地更新。证据卡与规则提议经 `stage-a/ports.ts` 的接口由领域包运行时（packages/packs-sdk）提供；该运行时接入 server 之前，阶段 A 只有收敛后的事件、根因候选、时间线与处置判断。
+3. 每个新版本立即出阶段 A：证据卡、规则提议、确定性的处置判断，发布 `stage_a.reported`，消息就地更新（见下面的"阶段 A 与领域包"）。
 4. 按触发原因（新事件、根因变化、严重度升高、证据指纹变化）经准入进入阶段 B 队列，worker 认领后研判；研判事件经 server 的事件流发布，消息再次更新。
 5. 提议经审批签发断言，分支 gateway 长轮询取走工单并推回执行事件。
+
+## 阶段 A 与领域包
+
+server 启动时用 packages/packs-sdk 加载 `packs.dirs` 下的领域包（每个子目录一个包；`packs.only` 不填时加载除 `_` 开头的示例包以外的全部包），编译 CEL 与 PromQL，并从中取得：
+
+| 内容 | 用途 |
+|---|---|
+| `alerts.yaml` | 告警目录：角色分类、实体映射、告警声明的证据链 |
+| `components.yaml` | 组件类型与 Operator 约定边，写进 informer 拓扑节点的 `component_type` |
+| `rca-params.yaml` | 根因排序参数，按包的加载顺序叠加在默认值之上 |
+| `chains.yaml`、`signals.yaml` | 阶段 A 执行的证据卡 |
+| `rules.yaml` | 规则提议 |
+
+阶段 A 执行哪些卡：
+
+1. 根因（有歧义时前两个候选）的组件类型声明的证据链，实体为根因组件。
+2. 每个成员告警的告警目录条目声明的证据链，实体为告警解析出的实体。
+3. 只执行 `applies_to.kinds` 包含实体类型的卡；同一张卡对同一实体只执行一次，根因的卡排在前面。
+
+卡片窗口以事件首次触发时间为锚点，终点不晚于当前时间。取数经 `datasources.prometheus`（`concurrency` 张卡同时执行，单个查询超时 `timeout`），标签档案每小时自动探测一次，信号备选的选择缓存 10 分钟。整个证据链的期限是 40 秒，超过期限时未完成的卡不进入报告。PG 不可用时降级通道照样执行证据卡，组件类型取最后一次成功对账时的拓扑。
+
+规则提议的 CEL 上下文：`incident`（id、version、severity、全部成员共有的 labels、alerts）、`root`（根因实体与组件类型）、`cards`（卡片全局 id → verdict、display_state、value、reason_kind；同一张卡对多个实体执行时取根因上的结果）。
+
+加载失败的处理：
+
+- 单个包校验不通过（例如规则引用了动作目录中没有的动作）：只禁用这个包，其余包照常加载。
+- `requires` 中的能力缺失，或者依赖的包被禁用：整个包禁用；`optional` 中的能力缺失时相应的卡显示"能力缺失"。
+- 配置了 `packs.lock_file` 而加载的内容与之不一致：不加载任何包。
+
+以上情况都发布 `PackLoadFailed` 条件（subject 为包名），控制台"领域包"页（`GET /v1/packs`）列出原因。证据数据源的标签档案探测失败时发布 `DatasourceUnavailable`（subject `evidence-metrics`），查询按规范标签名照常发出。
+
+`chains.yaml` 的 `excludes`（排除规则）由 packs-sdk 编译与求值；packs-sdk 提供这一部分之前，阶段 A 不据此判定 `ignore`，加载时对声明了排除规则的证据链给出警告。
 
 ## 本地运行与控制台 e2e
 

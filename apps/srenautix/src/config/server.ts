@@ -151,7 +151,10 @@ export const serverConfigSchema = z
         watchdog_alertname: 'Watchdog',
         reconcile: { enabled: true, interval: '60s' },
       }),
-    packs: z.object({ dirs: z.array(path).min(1), lock_file: path.optional() }).strict(),
+    // dirs 下的每个子目录是一个领域包；only 不填时加载除 `_` 开头（示例包）以外的全部包
+    packs: z
+      .object({ dirs: z.array(path).min(1), only: z.array(z.string().min(1)).optional(), lock_file: path.optional() })
+      .strict(),
     datasources: z
       .object({
         prometheus: z

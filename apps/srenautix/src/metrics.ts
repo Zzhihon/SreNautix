@@ -98,6 +98,27 @@ export class ServerMetrics extends BaseMetrics {
     registers: [this.registry],
   });
 
+  readonly evidenceCards = new Counter({
+    name: 'srenautix_stage_a_evidence_cards_total',
+    help: '阶段 A 与实时重跑执行的证据卡，按显示状态（runtime_error 表示卡没有执行）',
+    labelNames: ['display_state'] as const,
+    registers: [this.registry],
+  });
+
+  readonly evidenceCardSeconds = new Histogram({
+    name: 'srenautix_stage_a_evidence_card_seconds',
+    help: '单张证据卡的执行时长（取数与判定）',
+    buckets: [0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 20],
+    registers: [this.registry],
+  });
+
+  readonly ruleErrors = new Counter({
+    name: 'srenautix_stage_a_rule_errors_total',
+    help: '规则提议求值出错的次数，按规则 <pack>/<rule id>',
+    labelNames: ['rule'] as const,
+    registers: [this.registry],
+  });
+
   readonly researchAdmissions = new Counter({
     name: 'srenautix_research_admissions_total',
     help: '阶段 B 入队判定，按结果（queued、coalesced、capped、storm、budget、duplicate）',

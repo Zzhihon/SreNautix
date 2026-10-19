@@ -174,6 +174,17 @@ export class TopologyStore implements NodeLookup {
     return { nodes: all.nodes.filter((n) => seen.has(n.key)), edges: [...edges.values()], version: all.version };
   }
 
+  /** 当前节点上由领域包 components.yaml 匹配出的组件类型；节点不存在或没有匹配时为 null。 */
+  async componentType(clusterId: string, key: string): Promise<string | null> {
+    const r = await this.pool.query<{ t: string | null }>(
+      `SELECT body->>'component_type' AS t FROM server.topology_events
+        WHERE cluster_id = $1 AND item = 'node' AND key = $2 AND valid_to IS NULL AND op = 'node_upsert'
+        ORDER BY seq DESC LIMIT 1`,
+      [clusterId, key],
+    );
+    return r.rows[0]?.t ?? null;
+  }
+
   /** NodeLookup：当前节点，或 24 小时内删除的墓碑。 */
   async find(
     clusterId: string,

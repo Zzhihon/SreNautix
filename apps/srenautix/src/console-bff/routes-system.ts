@@ -1,10 +1,7 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
 import type { Condition, Proposal } from '@srenautix/contract';
-import { assertValid } from '@srenautix/contract';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type pg from 'pg';
-import { parse as parseYaml } from 'yaml';
 import { badRequest, HttpError, notFound } from '../api/errors.js';
 import type { ServerConfig } from '../config/server.js';
 import type { Auth } from '../identity/auth.js';
@@ -15,6 +12,7 @@ import type { ServiceCaller } from '../identity/callers.js';
 import type { Catalog } from '../proposals/catalog.js';
 import type { Policies } from '../proposals/policy.js';
 import type { ProposalService, TargetResolver } from '../proposals/service.js';
+import type { PackRuntime } from '../stage-a/packs.js';
 import { appendAudit, readAudit, verifyRecords, GENESIS_HASH } from '../store/audit.js';
 import type { AuditExporter } from '../store/audit-export.js';
 import { tx } from '../store/pool.js';
@@ -32,6 +30,7 @@ export interface SystemRouteDeps {
   topology: TopologyStore;
   exporter: AuditExporter;
   worker: { url: string; token: string } | null;
+  packs: PackRuntime;
 }
 
 const fmt = (d: Date | null | undefined) => (d ? d.toISOString() : null);
@@ -655,12 +654,8 @@ export function registerSystemRoutes(app: FastifyInstance, d: SystemRouteDeps): 
 
   app.get('/v1/packs', async (req) => {
     await d.auth.reader(req);
-    const lockFile = d.config.packs.lock_file;
-    const lock =
-      lockFile && existsSync(lockFile)
-        ? assertValid('schemas/pack.schema.json#/$defs/PackLock', parseYaml(readFileSync(lockFile, 'utf8')))
-        : { api_version: 'srenautix.io/pack-lock/v1', packs: [], layers: [] };
-    return { pack_lock: lock, packs: [] };
+    // pack_lock 为实际加载内容的锁（配置了 lock_file 时，不一致的情况下任何包都不加载）
+    return { pack_lock: d.packs.set.lock, packs: d.packs.statuses() };
   });
 
   app.get('/v1/integrations', async (req) => {
