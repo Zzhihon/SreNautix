@@ -1,0 +1,304 @@
+{
+ "report_id": "e8e2e9d7-bd90-4f0b-bce8-7db93bf88928",
+ "created_at": "2026-10-19T22:08:08.231Z",
+ "code_sha": "ea7a0c31e36b6051777a0fc847f849256270a266",
+ "pack_lock": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+ "mode": "snapshot",
+ "case_set": "scenario",
+ "runs_per_case": 3,
+ "rows": [
+  {
+   "route_id": "local",
+   "model": "qwen3-1.7b",
+   "pack_timing": "all",
+   "top1": {
+    "numerator": 3,
+    "denominator": 3,
+    "value": 1,
+    "ci_low": 1,
+    "ci_high": 1
+   },
+   "recall_at_3": {
+    "numerator": 3,
+    "denominator": 3,
+    "value": 1,
+    "ci_low": 1,
+    "ci_high": 1
+   },
+   "pass_at_1": {
+    "numerator": 2,
+    "denominator": 2,
+    "value": 1,
+    "ci_low": 1,
+    "ci_high": 1
+   },
+   "pass_pow_k": {
+    "numerator": 2,
+    "denominator": 2,
+    "value": 1,
+    "ci_low": 1,
+    "ci_high": 1
+   },
+   "run_agreement": {
+    "numerator": 2,
+    "denominator": 2,
+    "value": 1,
+    "ci_low": 1,
+    "ci_high": 1
+   },
+   "coverage": {
+    "numerator": 3,
+    "denominator": 6,
+    "value": 0.5,
+    "ci_low": 0,
+    "ci_high": 1
+   },
+   "selective_accuracy": {
+    "numerator": 3,
+    "denominator": 3,
+    "value": 1,
+    "ci_low": 1,
+    "ci_high": 1
+   },
+   "disposition_accuracy": {
+    "numerator": 3,
+    "denominator": 3,
+    "value": 1,
+    "ci_low": 1,
+    "ci_high": 1
+   },
+   "reliability": [
+    {
+     "level": "evidence_consistent",
+     "precision": {
+      "numerator": 0,
+      "denominator": 0,
+      "value": null,
+      "ci_low": null,
+      "ci_high": null
+     },
+     "demoted": false
+    },
+    {
+     "level": "likely",
+     "precision": {
+      "numerator": 3,
+      "denominator": 3,
+      "value": 1,
+      "ci_low": 1,
+      "ci_high": 1
+     },
+     "demoted": false
+    },
+    {
+     "level": "inconclusive",
+     "precision": {
+      "numerator": 3,
+      "denominator": 3,
+      "value": 1,
+      "ci_low": 1,
+      "ci_high": 1
+     },
+     "demoted": false
+    },
+    {
+     "level": "undetermined",
+     "precision": {
+      "numerator": 0,
+      "denominator": 0,
+      "value": null,
+      "ci_low": null,
+      "ci_high": null
+     },
+     "demoted": false
+    }
+   ],
+   "provider_fingerprints": [
+    "fp:9e5ea52a8e22162b"
+   ],
+   "benign_false_positive": {
+    "numerator": 0,
+    "denominator": 0,
+    "value": null,
+    "ci_low": null,
+    "ci_high": null
+   },
+   "undetermined_ratio": {
+    "numerator": 3,
+    "denominator": 6,
+    "value": 0.5,
+    "ci_low": 0,
+    "ci_high": 1
+   },
+   "structured_output_failure": {
+    "numerator": 0,
+    "denominator": 6,
+    "value": 0,
+    "ci_low": 0,
+    "ci_high": 0
+   },
+   "cost_per_case": {
+    "currency": "CNY",
+    "mean": 0,
+    "p90": 0
+   },
+   "snapshot_miss_rate": 0.5,
+   "by_granularity": {
+    "workload": {
+     "numerator": 3,
+     "denominator": 3,
+     "value": 1,
+     "ci_low": 1,
+     "ci_high": 1
+    }
+   }
+  },
+  {
+   "route_id": "local",
+   "model": "qwen3-1.7b",
+   "pack_timing": "pack_before_incident",
+   "top1": {
+    "numerator": 3,
+    "denominator": 3,
+    "value": 1,
+    "ci_low": 1,
+    "ci_high": 1
+   },
+   "recall_at_3": {
+    "numerator": 3,
+    "denominator": 3,
+    "value": 1,
+    "ci_low": 1,
+    "ci_high": 1
+   },
+   "pass_at_1": {
+    "numerator": 2,
+    "denominator": 2,
+    "value": 1,
+    "ci_low": 1,
+    "ci_high": 1
+   },
+   "pass_pow_k": {
+    "numerator": 2,
+    "denominator": 2,
+    "value": 1,
+    "ci_low": 1,
+    "ci_high": 1
+   },
+   "run_agreement": {
+    "numerator": 2,
+    "denominator": 2,
+    "value": 1,
+    "ci_low": 1,
+    "ci_high": 1
+   },
+   "coverage": {
+    "numerator": 3,
+    "denominator": 6,
+    "value": 0.5,
+    "ci_low": 0,
+    "ci_high": 1
+   },
+   "selective_accuracy": {
+    "numerator": 3,
+    "denominator": 3,
+    "value": 1,
+    "ci_low": 1,
+    "ci_high": 1
+   },
+   "disposition_accuracy": {
+    "numerator": 3,
+    "denominator": 3,
+    "value": 1,
+    "ci_low": 1,
+    "ci_high": 1
+   },
+   "reliability": [
+    {
+     "level": "evidence_consistent",
+     "precision": {
+      "numerator": 0,
+      "denominator": 0,
+      "value": null,
+      "ci_low": null,
+      "ci_high": null
+     },
+     "demoted": false
+    },
+    {
+     "level": "likely",
+     "precision": {
+      "numerator": 3,
+      "denominator": 3,
+      "value": 1,
+      "ci_low": 1,
+      "ci_high": 1
+     },
+     "demoted": false
+    },
+    {
+     "level": "inconclusive",
+     "precision": {
+      "numerator": 3,
+      "denominator": 3,
+      "value": 1,
+      "ci_low": 1,
+      "ci_high": 1
+     },
+     "demoted": false
+    },
+    {
+     "level": "undetermined",
+     "precision": {
+      "numerator": 0,
+      "denominator": 0,
+      "value": null,
+      "ci_low": null,
+      "ci_high": null
+     },
+     "demoted": false
+    }
+   ],
+   "provider_fingerprints": [
+    "fp:9e5ea52a8e22162b"
+   ],
+   "benign_false_positive": {
+    "numerator": 0,
+    "denominator": 0,
+    "value": null,
+    "ci_low": null,
+    "ci_high": null
+   },
+   "undetermined_ratio": {
+    "numerator": 3,
+    "denominator": 6,
+    "value": 0.5,
+    "ci_low": 0,
+    "ci_high": 1
+   },
+   "structured_output_failure": {
+    "numerator": 0,
+    "denominator": 6,
+    "value": 0,
+    "ci_low": 0,
+    "ci_high": 0
+   },
+   "cost_per_case": {
+    "currency": "CNY",
+    "mean": 0,
+    "p90": 0
+   },
+   "snapshot_miss_rate": 0.5,
+   "by_granularity": {
+    "workload": {
+     "numerator": 3,
+     "denominator": 3,
+     "value": 1,
+     "ci_low": 1,
+     "ci_high": 1
+    }
+   }
+  }
+ ],
+ "gate": null
+}
