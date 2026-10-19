@@ -32,6 +32,73 @@ export type paths = {
     patch?: never;
     trace?: never;
   };
+  '/v1/agent/cost': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations['getAgentCost'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/agent/health': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** @description P0 记分卡（DESIGN 附录 A）与运行指标 */
+    get: operations['getAgentHealth'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/api-tokens': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations['listApiTokens'];
+    put?: never;
+    post: operations['createApiToken'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/api-tokens/{token_id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        token_id: string;
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    delete: operations['deleteApiToken'];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/v1/approvals/batch': {
     parameters: {
       query?: never;
@@ -43,6 +110,39 @@ export type paths = {
     put?: never;
     /** @description 批量审批只允许同类型、同集群、L 档的提议；每个提议独立处理，逐项返回结果 */
     post: operations['batchApprove'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/audit/chains': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations['listAuditChains'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/audit/records': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** @description 执行链的记录结构见 contract/gateway/v1/audit-record.schema.json；治理链的记录结构见 docs/server/audit.md */
+    get: operations['listAuditRecords'];
+    put?: never;
+    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -181,6 +281,23 @@ export type paths = {
     patch?: never;
     trace?: never;
   };
+  '/v1/auth/webauthn/assertion-options': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** @description 合规配置下 H 档审批的通行密钥挑战；挑战绑定提议的 params_hash 与绑定字段，只能用一次 */
+    post: operations['webauthnAssertionOptions'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/v1/catalog/actions': {
     parameters: {
       query?: never;
@@ -193,6 +310,43 @@ export type paths = {
     put?: never;
     post?: never;
     delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/chat-links': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** @description 当前用户的聊天账号绑定 */
+    get: operations['listChatLinks'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/chat-links/{channel}/{channel_user_id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        channel: components['schemas']['Channel'];
+        channel_user_id: string;
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /** @description 解除绑定；本人或有 settings.write 权限的主体可以操作，写入治理审计 */
+    delete: operations['deleteChatLink'];
     options?: never;
     head?: never;
     patch?: never;
@@ -249,6 +403,55 @@ export type paths = {
     patch?: never;
     trace?: never;
   };
+  '/v1/egress/ledger': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations['getEgressLedger'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/eval/cases': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations['listEvalCases'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/eval/estimate': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** @description 运行前的成本估算，不调用模型 */
+    post: operations['estimateEval'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/v1/eval/reports': {
     parameters: {
       query?: never;
@@ -283,6 +486,22 @@ export type paths = {
     patch?: never;
     trace?: never;
   };
+  '/v1/eval/trend': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations['getEvalTrend'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/v1/events': {
     parameters: {
       query?: never;
@@ -296,6 +515,23 @@ export type paths = {
      *     每条事件的 SSE id 为它的游标，断线后用 Last-Event-ID 续传。投递语义是至少一次，消费者按 event_id 幂等处理
      */
     get: operations['listEvents'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/freeze': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** @description 硬停止（srenautix-freeze）的状态与操作说明；控制台只读，修改只能用 kubectl 或 GitOps */
+    get: operations['getFreeze'];
     put?: never;
     post?: never;
     delete?: never;
@@ -491,6 +727,162 @@ export type paths = {
     patch?: never;
     trace?: never;
   };
+  '/v1/ingest/{source_id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        source_id: string;
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * @description 告警接入（DESIGN §3.1）。每个接入源有自己的 bearer token；请求体按接入源的类型解析：Alertmanager 或 Grafana 的 webhook、
+     *     夜莺事件、通用 JSON（按 JSONPath 映射）。状态库不可用时走降级路径，返回 202
+     */
+    post: operations['ingestAlerts'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/integrations': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations['listIntegrations'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/integrations/{instance_id}/test': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        instance_id: string;
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** @description 服务端连接测试：逐项执行声明能力的 verify() */
+    post: operations['testIntegration'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/models/routes': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations['listModelRoutes'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/packs': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations['listPacks'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/pause': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** @description 软暂停：server 扣住工单，不下发 */
+    get: operations['getPause'];
+    put: operations['setPause'];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/permissions/explain': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** @description 逐条列出每个角色绑定是否匹配；解释其他主体时需要 users.read */
+    post: operations['explainPermission'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/policies': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations['getPolicies'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/policies/simulate': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** @description 选定动作和目标，查看结果和需要谁审批；不产生提议 */
+    post: operations['simulatePolicy'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/v1/proposals': {
     parameters: {
       query?: never;
@@ -590,6 +982,23 @@ export type paths = {
     patch?: never;
     trace?: never;
   };
+  '/v1/role-bindings': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** @description 来自 Git 的角色绑定；revision 是 git-sync 写入的提交 SHA，没有时为全部文件内容的 sha256 */
+    get: operations['listRoleBindings'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/v1/runs/{run_id}': {
     parameters: {
       query?: never;
@@ -665,6 +1074,25 @@ export type paths = {
     patch?: never;
     trace?: never;
   };
+  '/v1/runs/{run_id}/prompts': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        run_id: components['parameters']['RunId'];
+      };
+      cookie?: never;
+    };
+    /** @description 脱敏后的提示词，研判运行明细使用 */
+    get: operations['getRedactedPrompts'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/v1/search': {
     parameters: {
       query?: never;
@@ -681,10 +1109,334 @@ export type paths = {
     patch?: never;
     trace?: never;
   };
+  '/v1/settings': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations['getSettings'];
+    put: operations['putSettings'];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/topology/coverage': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** @description 覆盖表（DESIGN §4.4），控制台拓扑页的默认视图 */
+    get: operations['getTopologyCoverage'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/topology/diff': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations['getTopologyDiff'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/topology/neighborhood': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations['getTopologyNeighborhood'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/topology/overrides/pr': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** @description 为未映射的告警生成拓扑覆盖规则的 PR；只推送到 srenautix/* 分支，从不合并 */
+    post: operations['createTopologyOverridePr'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/users': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations['listUsers'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
 };
 export type webhooks = Record<string, never>;
 export type components = {
   schemas: {
+    action: {
+      /**
+       * @description allowed 只允许出现在 reversible 与 reversible_recreatable 动作上（不变量 7）。
+       * @enum {string}
+       */
+      auto_execution: 'allowed' | 'forbidden';
+      blast_radius: {
+        /** @description L 档允许的最大爆炸半径；超过时需要 H 档。 */
+        l_tier_max: number;
+        method: string;
+        /** @enum {string} */
+        unit: 'pods' | 'nodes' | 'objects' | 'repositories';
+      };
+      /**
+       * @description 冲突域类型。键由执行器根据解析出的目标计算：workload:<ns>/<Kind>/<name>、node:<name>、pg:<ns>/<cluster>、argocd:<ns>/<app>、flux:<ns>/<Kind>/<name>、workflow:<ns>/<template>、gitops:<owner>/<repo>。
+       * @enum {string}
+       */
+      conflict_domain: 'workload' | 'node' | 'pg' | 'argocd' | 'flux' | 'workflow' | 'gitops';
+      /**
+       * @description 只用于 reversible_recreatable：可重建条件在执行时不成立时的等级。
+       * @constant
+       */
+      fallback_level?: 'irreversible';
+      /** @description 等级降为 fallback_level 时可接受的最低档位。 */
+      fallback_min_tier?: components['schemas']['tier'];
+      id: string;
+      level: components['schemas']['level'];
+      /** @description 该动作在其目录等级下可接受的最低档位。 */
+      min_tier: components['schemas']['tier'];
+      /** @description 参数的 JSON Schema（可移植子集：type、properties、required、additionalProperties:false、enum、pattern、minLength、maxLength、minimum、maximum、items）。所有动作的参数另外可以带 verify（见 promqlCondition）。 */
+      params: Record<string, never>;
+      prechecks: {
+        description: string;
+        id: string;
+        /** @enum {string} */
+        kind: 'k8s' | 'pdb' | 'promql' | 'git';
+      }[];
+      /** @description 只用于 reversible_recreatable：执行时重新核对的可重建条件。 */
+      recreatable_conditions?: {
+        /** @constant */
+        controller_managed: true;
+        min_ready_replicas: number;
+        /** @constant */
+        pdb_headroom: true;
+      };
+      target: components['schemas']['target'];
+      title: string;
+      undo: {
+        /** @description compensate 时提议的补偿动作 ID。 */
+        compensation_action?: string;
+        description: string;
+        /**
+         * @description restore：自动恢复原状态（reversible）；recreate：由控制器重建（reversible_recreatable）；compensate：补偿需要再次审批（compensable）；none：无法撤销（irreversible）。
+         * @enum {string}
+         */
+        kind: 'restore' | 'recreate' | 'compensate' | 'none';
+      };
+      verify: {
+        checks: {
+          description: string;
+          id: string;
+          /** @enum {string} */
+          kind: 'k8s' | 'git';
+        }[];
+        window_seconds: number;
+      };
+      /** @description 执行与撤销会产生的全部 Kubernetes 写入。RBAC 与准入策略由此生成；gitops_pr 只写 Git，此列表为空。 */
+      writes: {
+        group: string;
+        resource: string;
+        subresource?: string;
+        /** @enum {string} */
+        verb: 'create' | 'patch';
+      }[];
+    };
+    /**
+     * ActionCatalog
+     * @description 动作目录（DESIGN §9.1）。目录只描述动作本身；哪些动作启用、作用于哪些命名空间、能否自动执行由 gateway 策略决定。
+     */
+    'action-catalog.schema': {
+      actions: components['schemas']['action'][];
+      /** @constant */
+      version: 1;
+      $defs: {
+        /** @enum {string} */
+        level: 'reversible' | 'reversible_recreatable' | 'compensable' | 'irreversible';
+        /** @enum {string} */
+        tier: 'L' | 'H';
+        action: {
+          /**
+           * @description allowed 只允许出现在 reversible 与 reversible_recreatable 动作上（不变量 7）。
+           * @enum {string}
+           */
+          auto_execution: 'allowed' | 'forbidden';
+          blast_radius: {
+            /** @description L 档允许的最大爆炸半径；超过时需要 H 档。 */
+            l_tier_max: number;
+            method: string;
+            /** @enum {string} */
+            unit: 'pods' | 'nodes' | 'objects' | 'repositories';
+          };
+          /**
+           * @description 冲突域类型。键由执行器根据解析出的目标计算：workload:<ns>/<Kind>/<name>、node:<name>、pg:<ns>/<cluster>、argocd:<ns>/<app>、flux:<ns>/<Kind>/<name>、workflow:<ns>/<template>、gitops:<owner>/<repo>。
+           * @enum {string}
+           */
+          conflict_domain: 'workload' | 'node' | 'pg' | 'argocd' | 'flux' | 'workflow' | 'gitops';
+          /**
+           * @description 只用于 reversible_recreatable：可重建条件在执行时不成立时的等级。
+           * @constant
+           */
+          fallback_level?: 'irreversible';
+          /** @description 等级降为 fallback_level 时可接受的最低档位。 */
+          fallback_min_tier?: components['schemas']['tier'];
+          id: string;
+          level: components['schemas']['level'];
+          /** @description 该动作在其目录等级下可接受的最低档位。 */
+          min_tier: components['schemas']['tier'];
+          /** @description 参数的 JSON Schema（可移植子集：type、properties、required、additionalProperties:false、enum、pattern、minLength、maxLength、minimum、maximum、items）。所有动作的参数另外可以带 verify（见 promqlCondition）。 */
+          params: Record<string, never>;
+          prechecks: {
+            description: string;
+            id: string;
+            /** @enum {string} */
+            kind: 'k8s' | 'pdb' | 'promql' | 'git';
+          }[];
+          /** @description 只用于 reversible_recreatable：执行时重新核对的可重建条件。 */
+          recreatable_conditions?: {
+            /** @constant */
+            controller_managed: true;
+            min_ready_replicas: number;
+            /** @constant */
+            pdb_headroom: true;
+          };
+          target: components['schemas']['target'];
+          title: string;
+          undo: {
+            /** @description compensate 时提议的补偿动作 ID。 */
+            compensation_action?: string;
+            description: string;
+            /**
+             * @description restore：自动恢复原状态（reversible）；recreate：由控制器重建（reversible_recreatable）；compensate：补偿需要再次审批（compensable）；none：无法撤销（irreversible）。
+             * @enum {string}
+             */
+            kind: 'restore' | 'recreate' | 'compensate' | 'none';
+          };
+          verify: {
+            checks: {
+              description: string;
+              id: string;
+              /** @enum {string} */
+              kind: 'k8s' | 'git';
+            }[];
+            window_seconds: number;
+          };
+          /** @description 执行与撤销会产生的全部 Kubernetes 写入。RBAC 与准入策略由此生成；gitops_pr 只写 Git，此列表为空。 */
+          writes: {
+            group: string;
+            resource: string;
+            subresource?: string;
+            /** @enum {string} */
+            verb: 'create' | 'patch';
+          }[];
+        };
+        target: {
+          group: string;
+          kind: string;
+          /** @description 目标可以是多种类型时列出全部（例如 Deployment 与 StatefulSet）。 */
+          kinds?: {
+            group: string;
+            kind: string;
+            resource: string;
+            version: string;
+          }[];
+          namespaced: boolean;
+          resource: string;
+          version: string;
+        };
+        /** @description 执行后校验条件：窗口结束时做一次即时查询，结果中的每个样本都必须满足 value <op> threshold。查询结果为空时按 on_empty 处理。 */
+        promqlCondition: {
+          id: string;
+          /**
+           * @default fail
+           * @enum {string}
+           */
+          on_empty: 'fail' | 'pass';
+          /** @enum {string} */
+          op: 'lt' | 'le' | 'gt' | 'ge' | 'eq' | 'ne';
+          query: string;
+          threshold: number;
+        };
+      };
+    };
+    AgentHealth: {
+      consecutive_days_met: number;
+      required_days: number;
+      runtime: {
+        budget_cutoff_ratio: number | null;
+        fallback_ratio: number | null;
+        rerun_p95: number | null;
+        untested_competitor_ratio: number | null;
+        zero_tool_ratio: number | null;
+      };
+      scorecard: {
+        /** @enum {string} */
+        comparator: 'lt' | 'le' | 'ge' | 'eq';
+        denominator: number | null;
+        /** @description 只作为诊断指标公开，不计入达标 */
+        diagnostic: boolean;
+        met: boolean | null;
+        /** @enum {string} */
+        metric:
+          | 'untested_competitor_ratio'
+          | 'research_runs_p95'
+          | 'feedback_per_week'
+          | 'replay_top1'
+          | 'benign_false_positive'
+          | 'real_closed_loops'
+          | 'out_of_catalog_writes'
+          | 'portability_top1'
+          | 'zero_tool_ratio';
+        numerator: number | null;
+        threshold: number;
+        value: number | null;
+      }[];
+      since: components['schemas']['Timestamp'];
+    };
     /**
      * AlertRole
      * @description 告警角色（DESIGN §3.2）：cause 原因；change 变更；symptom 症状；forecast 预测，不能成为活动事件的根因，也不能连接两个分组；meta 观测缺口
@@ -697,6 +1449,15 @@ export type components = {
       from_incident_id: components['schemas']['Uuid'];
       from_label: components['schemas']['IncidentLabel'];
       merged_at: components['schemas']['Timestamp'];
+    };
+    ApiToken: {
+      created_at: components['schemas']['Timestamp'];
+      created_by: string;
+      expires_at: null | components['schemas']['Timestamp'];
+      id: string;
+      last_used_at: null | components['schemas']['Timestamp'];
+      name: string;
+      scopes: 'propose'[];
     };
     /**
      * ApprovalAssertion
@@ -867,6 +1628,16 @@ export type components = {
      * @enum {string}
      */
     Channel: 'console' | 'grafana' | 'telegram' | 'feishu' | 'dingtalk' | 'wecom' | 'slack' | 'api' | 'mcp';
+    ChatLink: {
+      channel: components['schemas']['Channel'];
+      channel_user_id: string;
+      linked_at: components['schemas']['Timestamp'];
+      /**
+       * @description code 为 /link 绑定码；identity 为同一身份源自动绑定
+       * @enum {string}
+       */
+      method: 'code' | 'identity';
+    };
     Cluster: {
       cluster_id: components['schemas']['ClusterId'];
       conditions: components['schemas']['condition.schema'][];
@@ -963,11 +1734,36 @@ export type components = {
      * @enum {string}
      */
     Disposition: 'act' | 'ignore' | 'escalate' | 'undetermined';
+    Drift: {
+      detail: string | null;
+      in_sync: boolean;
+      live_sha: string | null;
+    };
     /**
      * Duration
      * @description Prometheus 风格的时长，例如 30s、5m、2h、7d
      */
     Duration: string;
+    /**
+     * TopologyEdge
+     * @description from 依赖 to：to 的故障沿边反向传播到 from
+     */
+    Edge: {
+      /** @description 默认值由来源决定（structural 1.0、runtime 0.9 并随过期衰减、config_ref 0.7、network_policy 0.6、naming 0.3）。低于归并阈值 τ=0.6 的边只参与候选排序 */
+      confidence: number;
+      /** @description 边的依据，例如 ownerReference、env DATABASE_HOST=pg-rw、Tempo 服务图 */
+      evidence: string;
+      from: components['schemas']['ComponentKey'];
+      provenance: components['schemas']['Provenance'];
+      /** @description 关系名，例如 owned_by、runs_on、mounts、bound_to、provisioned_by、selects、routes_to、calls、references、egress_to、operator_convention、named_like */
+      relation: string;
+      /**
+       * @description instance：只把同一实例的故障联系起来（Pod→节点、Pod→PVC→PV→CSI）；service：沿服务依赖传播
+       * @enum {string}
+       */
+      scope: 'instance' | 'service';
+      to: components['schemas']['ComponentKey'];
+    };
     /**
      * Egress
      * @description 卡片级出境控制（DESIGN §8.4）：allow 原样进入提示词；redact 脱敏后进入；never 不进入提示词
@@ -1063,6 +1859,37 @@ export type components = {
           waived_cases: string[];
         };
       };
+    };
+    EvalCase: {
+      case_id: string;
+      created_at: components['schemas']['Timestamp'];
+      excluded: {
+        /** @enum {string} */
+        kind: 'incident_report' | 'feedback' | 'same_root_conclusion' | 'pack_knowledge' | 'retrieved_case';
+        reason: string;
+        ref: string;
+      }[];
+      incident_id: null | components['schemas']['Uuid'];
+      label: string;
+      last_results: {
+        passes: number;
+        route_id: string;
+        runs: number;
+        top1_hit: boolean | null;
+      }[];
+      /** @enum {string} */
+      pack_timing: 'pack_before_incident' | 'pack_after_incident';
+      /** @enum {string} */
+      snapshot_status: 'queued' | 'frozen';
+      suite: string;
+      truth: {
+        disposition: null | components['schemas']['Disposition'];
+        /** @enum {string|null} */
+        granularity: 'pod' | 'workload' | 'component' | 'node' | null;
+        root_components: components['schemas']['ComponentKey'][];
+      };
+      /** @enum {string} */
+      type: 'incident' | 'feedback' | 'benign' | 'abstain' | 'scenario';
     };
     /**
      * OutboxEvent
@@ -1319,7 +2146,7 @@ export type components = {
         /** EvidenceReason */
         Reason: {
           /**
-           * @description rule：命中判定规则；no_data：查询没有样本；partial_data：部分查询没有样本；source_error：数据源报错或超时；capability_missing：所需能力不可用；observability_gap：依赖的目标有 meta 告警；evaluation_error：CEL 求值出错；all_clear：没有命中任何规则
+           * @description rule：命中判定规则；no_data：查询没有样本；partial_data：部分查询没有样本；source_error：数据源报错或超时；capability_missing：所需能力不可用；observability_gap：依赖的目标有 meta 告警；evaluation_error：CEL 求值出错；all_clear：没有命中任何规则；model_judged：只读工具的结果没有 CEL 判定，由小模型对照 refutes_if 判定（可以支持 likely，不能单独支撑 evidence_consistent，展示时标注模型判定）
            * @enum {string}
            */
           kind:
@@ -1330,7 +2157,8 @@ export type components = {
             | 'capability_missing'
             | 'observability_gap'
             | 'evaluation_error'
-            | 'all_clear';
+            | 'all_clear'
+            | 'model_judged';
           text: string;
         };
         /** EvidenceQueryRecord */
@@ -1456,6 +2284,72 @@ export type components = {
       /** @description n<100 时 -0.10，n≥100 时 -0.05 */
       threshold: number;
       waived_cases: string[];
+    };
+    /**
+     * GatewayPolicy
+     * @description gateway 策略，来自 Git，经 ConfigMap 挂载（DESIGN §2.1）。只能启用目录中的动作；准入策略与 RBAC 按同一份策略生成。
+     */
+    'gateway-policy.schema': {
+      /** @description 启用的动作。未列出的动作不生成 RBAC 与准入策略，工单直接被拒绝。 */
+      actions: {
+        /** @description 自动执行只允许用于目录中 auto_execution=allowed 的动作，否则策略加载失败（不变量 7）。 */
+        auto_execution?: {
+          /** @description 自动执行的命名空间，必须是 namespaces 的子集；命名空间级动作必填，集群级动作不填。 */
+          namespaces?: string[];
+          /** @description 允许自动批准的规则名；断言 approver_principal 为 auto:<规则名>。 */
+          rules: string[];
+        };
+        id: string;
+        /** @description 允许的目标命名空间；命名空间级动作必填，集群级动作（节点）不填。 */
+        namespaces?: string[];
+      }[];
+      /** @description 审批人的作用域（DESIGN §13 approver 角色）。gateway 按目标所在的命名空间核对。 */
+      approvers: {
+        /** @enum {string} */
+        max_tier: 'L' | 'H';
+        /** @description "*" 表示全部命名空间（含集群级目标）。 */
+        namespaces: string[];
+        principal: string;
+      }[];
+      /** @description 本集群的 cluster_id，必须与断言的 cluster 相同。 */
+      cluster: string;
+      /** @description gitops_pr 的仓库与路径白名单。 */
+      gitops?: {
+        repositories: {
+          base: string;
+          /** @description 允许修改的路径前缀（以 / 结尾表示目录）或完整路径。 */
+          paths: string[];
+          repository: string;
+        }[];
+      };
+      /** @default 6 */
+      max_auto_executions_per_hour: number;
+      /** @description SreNautix 自己的依赖集合（DESIGN §9.1 自我保护）。目标落在其中时一律按 irreversible 加 H 档处理，并且不自动执行。gateway 所在节点自动计入。 */
+      self_dependencies?: {
+        namespaces?: string[];
+        nodes?: string[];
+        pg_clusters?: {
+          name: string;
+          namespace: string;
+        }[];
+      };
+      /** @constant */
+      version: 1;
+      /** @description workflow_submit 的模板白名单：名称、sha256(JCS(WorkflowTemplate.spec)) 与 ServiceAccount 都必须一致。 */
+      workflow_templates?: {
+        name: string;
+        namespace: string;
+        /** @description 参数名到约束；提交的参数必须恰好是这些名称。 */
+        parameters: {
+          [key: string]: {
+            enum?: string[];
+            max_length?: number;
+            pattern?: string;
+          };
+        };
+        service_account: string;
+        sha256: string;
+      }[];
     };
     /** OutboxEventHeader */
     Header: {
@@ -1642,6 +2536,88 @@ export type components = {
       /** @enum {unknown} */
       type: 'incident.created' | 'incident.updated' | 'incident.resolved';
     } & components['schemas']['Header'];
+    IngestResult: {
+      accepted: number;
+      degraded: boolean;
+      /** @description 被丢弃的告警数（Watchdog、severity=none、SreNautix 自身告警等） */
+      dropped: number;
+    };
+    /**
+     * IntegrationManifest
+     * @description 集成清单 integration.yaml（DESIGN §10.1）。一项能力只有在清单里声明过、并且 verify() 通过，才算可用。控制台的集成页由清单生成
+     */
+    'integration-manifest.schema': {
+      /** @constant */
+      api_version: 'srenautix.io/integration/v1';
+      capabilities: {
+        name: string;
+        /** @enum {string} */
+        stability: 'alpha' | 'beta' | 'stable';
+      }[];
+      /** @enum {string} */
+      category:
+        'alerts' | 'metrics' | 'logs' | 'traces' | 'changes' | 'notify' | 'approve' | 'identity' | 'model' | 'execute';
+      /** @description 实例配置的 JSON Schema。密钥字段只写挂载文件的引用，用 x-srenautix-secret-ref: true 标出 */
+      config_schema: {
+        [key: string]: unknown;
+      };
+      /** @description 实现的契约，例如 metrics/v1 */
+      contract: string;
+      /** @description 真实部署报告的链接 */
+      deployment_reports?: string[];
+      /**
+       * @description 按方向分级（DESIGN §10.2）：approve、authenticate 只能是核心或官方；execute 只能是核心
+       * @enum {string}
+       */
+      direction: 'read' | 'notify' | 'approve' | 'authenticate' | 'execute';
+      display_name?: string;
+      id: string;
+      owner: string;
+      /** @description 凭证需要的最小权限；启动时探测凭证是否超出，超出时降级为 warn 或只提议 */
+      required_scopes: string[];
+      /** @description 测过的后端版本矩阵 */
+      tested_versions: {
+        backend: string;
+        /**
+         * @description 徽章上注明的验证方式
+         * @enum {string}
+         */
+        verification: 'kind_e2e' | 'testcontainers' | 'recorded_fixtures' | 'live_smoke';
+        versions: string[];
+      }[];
+      /**
+       * @description official_candidate：没有真实部署报告的官方级集成，不称为支持
+       * @enum {string}
+       */
+      tier: 'core' | 'official' | 'official_candidate' | 'community' | 'mcp_bridge';
+    };
+    IntegrationInstance: {
+      capabilities: {
+        error: string | null;
+        /** @enum {string} */
+        maturity: 'alpha' | 'beta' | 'stable';
+        name: string;
+        verified: boolean;
+        verified_at: null | components['schemas']['Timestamp'];
+      }[];
+      error_ratio_1h: number | null;
+      git_source: {
+        path: string;
+        repo: string;
+        sha: string;
+      };
+      instance_id: string;
+      last_success_at: null | components['schemas']['Timestamp'];
+      manifest: components['schemas']['integration-manifest.schema'];
+      /** @description 凭证超出 requiredScopes，集成降级为 warn 或只提议 */
+      over_privileged: boolean;
+      /** @description 只有挂载文件的引用，永远不含密钥内容 */
+      secret_refs: string[];
+      used_by: {
+        actions: string[];
+        chains: string[];
+      };
+    };
     /** Labels */
     Labels: {
       [key: string]: string;
@@ -1689,6 +2665,35 @@ export type components = {
       /** @enum {string} */
       status: 'firing' | 'resolved';
     };
+    ModelRouteStatus: {
+      base_url_host: string;
+      /** @enum {string} */
+      breaker: 'closed' | 'open' | 'half_open';
+      /** @enum {string|null} */
+      breaker_reason: 'failures' | 'latency' | 'failure_domain' | null;
+      dialect_profile: string;
+      egress_categories: string[];
+      failure_domain: components['schemas']['ComponentKey'][];
+      health: {
+        error_ratio_1h: number | null;
+        p50_ms: number | null;
+      };
+      in_domain: boolean;
+      limits: {
+        daily_cost: number | null;
+        per_incident_cost: number | null;
+      };
+      model: string;
+      price: {
+        currency: string;
+        input_per_mtok: number;
+        output_per_mtok: number;
+      };
+      provider_fingerprint: string | null;
+      provider_retention: string | null;
+      route_id: string;
+      structured_failure_ratio: number | null;
+    };
     /** EvalModelRow */
     ModelRow: {
       benign_false_positive: components['schemas']['Ratio'];
@@ -1717,7 +2722,9 @@ export type components = {
     };
     /** NextCheck */
     NextCheck: {
-      args: Record<string, never>;
+      args: {
+        [key: string]: unknown;
+      };
       hypothesis_id: string;
       /** @enum {string} */
       outcome: 'not_run' | 'supports' | 'refutes' | 'inconclusive' | 'failed';
@@ -1729,11 +2736,76 @@ export type components = {
       /** @enum {string} */
       type: 'query' | 'tool';
     };
+    /** TopologyNode */
+    Node: {
+      /** @description 领域包 components.yaml 匹配到的组件类型 */
+      component_type: string | null;
+      /** @description 集群枢纽（CoreDNS、CNI、apiserver、存储）：只有在出现针对它的证据，或至少 3 个独立依赖方同时失败时才吸收症状 */
+      hub: boolean;
+      key: components['schemas']['ComponentKey'];
+      kind: string;
+      labels: components['schemas']['Labels'];
+      name: string;
+      namespace: string | null;
+      uid: string | null;
+    };
     /**
      * OutboxOwner
      * @enum {string}
      */
     Owner: 'server' | 'worker';
+    /**
+     * PackLock
+     * @description pack.lock：每个包与用户层的内容哈希；每次研判和评测都记录 lock 本身的哈希
+     */
+    PackLock: {
+      /** @constant */
+      api_version: 'srenautix.io/pack-lock/v1';
+      layers: {
+        digest: components['schemas']['Sha256'];
+        path: string;
+      }[];
+      packs: {
+        digest: components['schemas']['Sha256'];
+        name: string;
+        /** @description builtin、git+<url>@<sha> 或 oci://<ref>@<digest> */
+        source: string;
+        version: string;
+      }[];
+    };
+    PackStatus: {
+      ci: null | {
+        passed: boolean;
+        report_url: string | null;
+      };
+      digest: components['schemas']['Sha256'];
+      disabled_capabilities: string[];
+      /** @enum {string} */
+      layer: 'builtin' | 'user';
+      load_error: string | null;
+      loaded: boolean;
+      /** @enum {string} */
+      maturity: 'stable' | 'beta' | 'draft';
+      name: string;
+      ref: string;
+      /** @enum {string} */
+      source: 'git' | 'oci' | 'builtin';
+      user_layer_lines: number | null;
+      version: string;
+    };
+    PauseState: {
+      by: string | null;
+      expires_at: null | components['schemas']['Timestamp'];
+      held_count: number;
+      paused: boolean;
+      reason: string | null;
+      since: null | components['schemas']['Timestamp'];
+    };
+    PermissionTarget: {
+      cluster: string;
+      labels: components['schemas']['Labels'];
+      namespace: string | null;
+    };
     /**
      * Principal
      * @description 已认证的主体（DESIGN §10.3 identity 契约输出）
@@ -1783,7 +2855,9 @@ export type components = {
        * @enum {string}
        */
       level: 'reversible' | 'reversible_recreatable' | 'compensable' | 'irreversible';
-      params: Record<string, never>;
+      params: {
+        [key: string]: unknown;
+      };
       params_hash: components['schemas']['Sha256'];
       policy_checks: {
         detail: string;
@@ -1878,7 +2952,9 @@ export type components = {
           expected_effect: string;
           hypothesis_id: string | null;
           incident_id: components['schemas']['Uuid'];
-          params: Record<string, never>;
+          params: {
+            [key: string]: unknown;
+          };
           research_run_id: null | components['schemas']['Uuid'];
           rule_id: string | null;
         };
@@ -1901,7 +2977,9 @@ export type components = {
       expected_effect: string;
       hypothesis_id: string | null;
       incident_id: components['schemas']['Uuid'];
-      params: Record<string, never>;
+      params: {
+        [key: string]: unknown;
+      };
       research_run_id: null | components['schemas']['Uuid'];
       rule_id: string | null;
     };
@@ -1949,7 +3027,9 @@ export type components = {
       action_id: string;
       expected_effect: string;
       hypothesis_id: string;
-      params: Record<string, never>;
+      params: {
+        [key: string]: unknown;
+      };
       /** @description 提议中转接受后的 id；被拒绝时为 null */
       proposal_id: null | components['schemas']['Uuid'];
     };
@@ -1984,7 +3064,7 @@ export type components = {
     /** EvidenceReason */
     Reason: {
       /**
-       * @description rule：命中判定规则；no_data：查询没有样本；partial_data：部分查询没有样本；source_error：数据源报错或超时；capability_missing：所需能力不可用；observability_gap：依赖的目标有 meta 告警；evaluation_error：CEL 求值出错；all_clear：没有命中任何规则
+       * @description rule：命中判定规则；no_data：查询没有样本；partial_data：部分查询没有样本；source_error：数据源报错或超时；capability_missing：所需能力不可用；observability_gap：依赖的目标有 meta 告警；evaluation_error：CEL 求值出错；all_clear：没有命中任何规则；model_judged：只读工具的结果没有 CEL 判定，由小模型对照 refutes_if 判定（可以支持 likely，不能单独支撑 evidence_consistent，展示时标注模型判定）
        * @enum {string}
        */
       kind:
@@ -1995,7 +3075,8 @@ export type components = {
         | 'capability_missing'
         | 'observability_gap'
         | 'evaluation_error'
-        | 'all_clear';
+        | 'all_clear'
+        | 'model_judged';
       text: string;
     };
     /** @description H 档服务签名必须携带的重新认证凭据（OIDC max_age）。auth_time 不晚于 assertion.issued_at，且两者相差不超过 300 秒。 */
@@ -2132,7 +3213,9 @@ export type components = {
         };
         /** NextCheck */
         NextCheck: {
-          args: Record<string, never>;
+          args: {
+            [key: string]: unknown;
+          };
           hypothesis_id: string;
           /** @enum {string} */
           outcome: 'not_run' | 'supports' | 'refutes' | 'inconclusive' | 'failed';
@@ -2175,7 +3258,9 @@ export type components = {
           action_id: string;
           expected_effect: string;
           hypothesis_id: string;
-          params: Record<string, never>;
+          params: {
+            [key: string]: unknown;
+          };
           /** @description 提议中转接受后的 id；被拒绝时为 null */
           proposal_id: null | components['schemas']['Uuid'];
         };
@@ -2295,6 +3380,8 @@ export type components = {
      */
     ResearchState:
       'queued' | 'hypothesize' | 'discriminate' | 'conclude' | 'completed' | 'stage_a_only' | 'failed' | 'superseded';
+    /** @enum {string} */
+    role: 'viewer' | 'responder' | 'approver' | 'auditor' | 'admin' | 'sys-admin' | 'security-admin';
     /**
      * RoleBinding
      * @description (主体, 角色, 作用域)，来自 Git
@@ -2358,6 +3445,11 @@ export type components = {
       };
       seed: number | null;
     };
+    scope: {
+      clusters: string[];
+      component_labels: components['schemas']['Labels'];
+      namespaces: string[];
+    };
     /**
      * RootScoreTerms
      * @description 根因得分的各项（DESIGN §5），每项在 [0,1] 内，乘以 rca-params 中的权重后求和
@@ -2392,6 +3484,33 @@ export type components = {
       provider: string;
       /** @description 角色绑定与作用域 */
       roles: components['schemas']['RoleBinding'][];
+    };
+    Settings: {
+      channels: {
+        enabled: boolean;
+        id: string;
+        kind: components['schemas']['Channel'];
+        rate_per_min: number;
+        target: string;
+      }[];
+      /** @enum {string} */
+      locale: 'zh-CN' | 'en';
+      retention: {
+        incidents_days: number;
+        raw_prompt_days: number;
+        research_days: number;
+      };
+      subscriptions: {
+        channel_id: string;
+        filter: {
+          cluster_id: string | null;
+          component: string | null;
+          /** @enum {string|null} */
+          severity: 'critical' | 'warning' | 'info' | null;
+        };
+        id: string;
+      }[];
+      time_zone: string;
     };
     /**
      * Severity
@@ -2505,6 +3624,25 @@ export type components = {
       root: null | components['schemas']['ComponentKey'];
       topology_version: number;
     };
+    subject: {
+      /** @enum {string} */
+      kind: 'user' | 'group';
+      name: string;
+    };
+    target: {
+      group: string;
+      kind: string;
+      /** @description 目标可以是多种类型时列出全部（例如 Deployment 与 StatefulSet）。 */
+      kinds?: {
+        group: string;
+        kind: string;
+        resource: string;
+        version: string;
+      }[];
+      namespaced: boolean;
+      resource: string;
+      version: string;
+    };
     /**
      * ProposalTarget
      * @description 由机器从事件与动作的目标解析规则推导，模型给出的目标必须等于推导结果
@@ -2554,7 +3692,9 @@ export type components = {
       to: components['schemas']['Timestamp'];
     };
     ToolCall: {
-      arguments: Record<string, never>;
+      arguments: {
+        [key: string]: unknown;
+      };
       /** @description 开始时间 */
       at: components['schemas']['Timestamp'];
       duration_ms: number;
@@ -2567,6 +3707,28 @@ export type components = {
       tool: string;
       truncated: boolean;
       window: null | components['schemas']['TimeWindow'];
+    };
+    TopologyCoverage: {
+      components: {
+        chains: string[];
+        component: components['schemas']['ComponentKey'];
+        /** @enum {string} */
+        discovered_by: 'informer' | 'ksm_history' | 'pack' | 'user' | 'runtime';
+        mapped_alerts: string[];
+        type: string | null;
+      }[];
+      components_without_chains: components['schemas']['ComponentKey'][];
+      suggestions: string[];
+      topology_version: number;
+      /** @description 14 天内出现过、没有映射到组件的告警名 */
+      unmapped_alerts: {
+        alertname: string;
+        confidence: number;
+        count_14d: number;
+        expr: string | null;
+        suggested_component: null | components['schemas']['ComponentKey'];
+        suggested_role: components['schemas']['AlertRole'];
+      }[];
     };
     /**
      * ModelUsage
@@ -2664,6 +3826,138 @@ export interface operations {
       503: components['responses']['Error'];
     };
   };
+  getAgentCost: {
+    parameters: {
+      query: {
+        from?: string;
+        group_by: 'day' | 'incident' | 'model';
+        to?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 成本 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            currency: string;
+            daily_budget: number | null;
+            items: {
+              cost: number;
+              input_tokens: number;
+              key: string;
+              label: string;
+              output_tokens: number;
+              runs: number;
+            }[];
+          };
+        };
+      };
+    };
+  };
+  getAgentHealth: {
+    parameters: {
+      query?: {
+        window?: components['schemas']['Duration'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 记分卡 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AgentHealth'];
+        };
+      };
+    };
+  };
+  listApiTokens: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description API token（只有提议权限） */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiToken'][];
+        };
+      };
+    };
+  };
+  createApiToken: {
+    parameters: {
+      query?: never;
+      header: {
+        'X-CSRF-Token': components['parameters']['Csrf'];
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          expires_at: null | components['schemas']['Timestamp'];
+          name: string;
+        };
+      };
+    };
+    responses: {
+      /** @description 明文 token 只在这里返回一次 */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            api_token: components['schemas']['ApiToken'];
+            token: string;
+          };
+        };
+      };
+    };
+  };
+  deleteApiToken: {
+    parameters: {
+      query?: never;
+      header: {
+        'X-CSRF-Token': components['parameters']['Csrf'];
+      };
+      path: {
+        token_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 已删除 */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      404: components['responses']['Error'];
+    };
+  };
   batchApprove: {
     parameters: {
       query?: never;
@@ -2693,6 +3987,76 @@ export interface operations {
         };
       };
       400: components['responses']['Error'];
+    };
+  };
+  listAuditChains: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 执行链（每个集群一条）与治理链 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            /** @enum {string} */
+            chain: 'execution' | 'governance';
+            cluster_id: null | components['schemas']['ClusterId'];
+            export_lag_seconds: number | null;
+            head_hash: string | null;
+            head_seq: number;
+            lag_threshold_seconds: number;
+            sink: {
+              /** @enum {string} */
+              kind: 's3' | 'minio' | 'pg';
+              location: string;
+              retention_days: number | null;
+              worm: boolean;
+            };
+            verified: {
+              at: null | components['schemas']['Timestamp'];
+              error: string | null;
+              ok: boolean;
+            };
+          }[];
+        };
+      };
+    };
+  };
+  listAuditRecords: {
+    parameters: {
+      query: {
+        chain: 'execution' | 'governance';
+        cluster_id?: components['schemas']['ClusterId'];
+        cursor?: string;
+        limit?: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 审计记录 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            items: {
+              [key: string]: unknown;
+            }[];
+            next_cursor: string | null;
+          };
+        };
+      };
     };
   };
   createLinkCode: {
@@ -2896,6 +4260,38 @@ export interface operations {
       401: components['responses']['Error'];
     };
   };
+  webauthnAssertionOptions: {
+    parameters: {
+      query?: never;
+      header: {
+        'X-CSRF-Token': components['parameters']['Csrf'];
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          proposal_id: components['schemas']['Uuid'];
+        };
+      };
+    };
+    responses: {
+      /** @description PublicKeyCredentialRequestOptionsJSON */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            [key: string]: unknown;
+          };
+        };
+      };
+      404: components['responses']['Error'];
+      409: components['responses']['Error'];
+    };
+  };
   listCatalogActions: {
     parameters: {
       query?: never;
@@ -2912,7 +4308,7 @@ export interface operations {
         };
         content: {
           'application/json': {
-            catalog: Record<string, never>;
+            catalog: components['schemas']['action-catalog.schema'];
             enabled: {
               action: string;
               auto: boolean;
@@ -2922,6 +4318,51 @@ export interface operations {
           };
         };
       };
+    };
+  };
+  listChatLinks: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 绑定 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ChatLink'][];
+        };
+      };
+    };
+  };
+  deleteChatLink: {
+    parameters: {
+      query?: never;
+      header: {
+        'X-CSRF-Token': components['parameters']['Csrf'];
+      };
+      path: {
+        channel: components['schemas']['Channel'];
+        channel_user_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 已解除 */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      403: components['responses']['Error'];
+      404: components['responses']['Error'];
     };
   };
   listClusters: {
@@ -2990,6 +4431,103 @@ export interface operations {
       401: components['responses']['Error'];
     };
   };
+  getEgressLedger: {
+    parameters: {
+      query?: {
+        from?: string;
+        route_id?: string;
+        to?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 出境账本 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            at: components['schemas']['Timestamp'];
+            bytes: number;
+            categories: string[];
+            in_domain: boolean;
+            incident_id: components['schemas']['Uuid'];
+            redaction_hits: number;
+            route_id: string;
+            run_id: components['schemas']['Uuid'];
+          }[];
+        };
+      };
+    };
+  };
+  listEvalCases: {
+    parameters: {
+      query?: {
+        cursor?: string;
+        limit?: number;
+        mode?: 'snapshot' | 'reconstructed';
+        suite?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 用例（含被排除的材料） */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            items: components['schemas']['EvalCase'][];
+            next_cursor: string | null;
+          };
+        };
+      };
+    };
+  };
+  estimateEval: {
+    parameters: {
+      query?: never;
+      header: {
+        'X-CSRF-Token': components['parameters']['Csrf'];
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          routes: string[];
+          runs_per_case: number;
+          suite: string;
+        };
+      };
+    };
+    responses: {
+      /** @description 估算 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            calls: number;
+            cases: number;
+            cost: number;
+            currency: string;
+            input_tokens: number;
+          };
+        };
+      };
+    };
+  };
   listEvalReports: {
     parameters: {
       query?: {
@@ -3036,6 +4574,39 @@ export interface operations {
       404: components['responses']['Error'];
     };
   };
+  getEvalTrend: {
+    parameters: {
+      query?: {
+        mode?: 'snapshot' | 'reconstructed';
+        suite?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 按版本的成绩趋势 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            code_sha: string;
+            created_at: components['schemas']['Timestamp'];
+            gate_passed: boolean | null;
+            rows: {
+              model: string;
+              route_id: string;
+              top1: components['schemas']['Ratio'];
+            }[];
+            version: string;
+          }[];
+        };
+      };
+    };
+  };
   listEvents: {
     parameters: {
       query?: {
@@ -3065,6 +4636,37 @@ export interface operations {
         };
       };
       400: components['responses']['Error'];
+    };
+  };
+  getFreeze: {
+    parameters: {
+      query: {
+        cluster_id: components['schemas']['ClusterId'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 熔断开关 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            cluster_id: components['schemas']['ClusterId'];
+            configmap: string;
+            frozen: boolean;
+            instructions: {
+              gitops_path: string;
+              kubectl: string;
+            };
+            observed_at: components['schemas']['Timestamp'];
+          };
+        };
+      };
     };
   };
   listIncidents: {
@@ -3396,6 +4998,325 @@ export interface operations {
       404: components['responses']['Error'];
     };
   };
+  ingestAlerts: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        source_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          [key: string]: unknown;
+        };
+      };
+    };
+    responses: {
+      /** @description 已接收 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['IngestResult'];
+        };
+      };
+      /** @description 状态库降级，已在内存中处理 */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['IngestResult'];
+        };
+      };
+      400: components['responses']['Error'];
+      401: components['responses']['Error'];
+      404: components['responses']['Error'];
+    };
+  };
+  listIntegrations: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 集成实例 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['IntegrationInstance'][];
+        };
+      };
+    };
+  };
+  testIntegration: {
+    parameters: {
+      query?: never;
+      header: {
+        'X-CSRF-Token': components['parameters']['Csrf'];
+      };
+      path: {
+        instance_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 测试结果 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            ok: boolean;
+            results: {
+              capability: string;
+              duration_ms: number;
+              error: string | null;
+              ok: boolean;
+            }[];
+          };
+        };
+      };
+      404: components['responses']['Error'];
+    };
+  };
+  listModelRoutes: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 模型路由、健康状况、故障域与出境类别 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ModelRouteStatus'][];
+        };
+      };
+    };
+  };
+  listPacks: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 领域包与 pack.lock */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            pack_lock: components['schemas']['PackLock'];
+            packs: components['schemas']['PackStatus'][];
+          };
+        };
+      };
+    };
+  };
+  getPause: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 软暂停状态 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['PauseState'];
+        };
+      };
+    };
+  };
+  setPause: {
+    parameters: {
+      query?: never;
+      header: {
+        'X-CSRF-Token': components['parameters']['Csrf'];
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          expires_at: null | components['schemas']['Timestamp'];
+          paused: boolean;
+          reason: string | null;
+        };
+      };
+    };
+    responses: {
+      /** @description 新的软暂停状态 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['PauseState'];
+        };
+      };
+    };
+  };
+  explainPermission: {
+    parameters: {
+      query?: never;
+      header: {
+        'X-CSRF-Token': components['parameters']['Csrf'];
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          permission: string;
+          subject: null | {
+            groups: string[];
+            id: string;
+          };
+          target: null | components['schemas']['PermissionTarget'];
+          /** @enum {string|null} */
+          tier: 'L' | 'H' | null;
+        };
+      };
+    };
+    responses: {
+      /** @description 授权解释 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            allowed: boolean;
+            entries: {
+              binding: components['schemas']['RoleBinding'];
+              file: string;
+              grants_permission: boolean;
+              reason: string;
+              scope_match: boolean;
+              subject_match: boolean;
+              tier_ok: boolean;
+            }[];
+            permission: string;
+            revision: string;
+            subject: {
+              groups: string[];
+              id: string;
+            };
+            target: null | components['schemas']['PermissionTarget'];
+            /** @enum {string|null} */
+            tier: 'L' | 'H' | null;
+          };
+        };
+      };
+      403: components['responses']['Error'];
+    };
+  };
+  getPolicies: {
+    parameters: {
+      query: {
+        cluster_id: components['schemas']['ClusterId'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 从 Git 渲染出的生效策略、仓库 SHA 与漂移 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            drift: components['schemas']['Drift'];
+            rendered: components['schemas']['gateway-policy.schema'];
+            repo: string;
+            sha: string;
+          };
+        };
+      };
+    };
+  };
+  simulatePolicy: {
+    parameters: {
+      query?: never;
+      header: {
+        'X-CSRF-Token': components['parameters']['Csrf'];
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          action: string;
+          cluster_id: components['schemas']['ClusterId'];
+          params: {
+            [key: string]: unknown;
+          };
+          target: {
+            kind: string;
+            name: string;
+            namespace: string | null;
+          };
+        };
+      };
+    };
+    responses: {
+      /** @description 模拟结果 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            allowed: boolean;
+            approvers: {
+              role: string;
+              subject: string;
+            }[];
+            auto: boolean;
+            /** @enum {string|null} */
+            level: 'reversible' | 'reversible_recreatable' | 'compensable' | 'irreversible' | null;
+            reasons: string[];
+            rules: string[];
+            /** @enum {string|null} */
+            tier: 'L' | 'H' | null;
+          };
+        };
+      };
+    };
+  };
   listProposals: {
     parameters: {
       query?: {
@@ -3499,6 +5420,13 @@ export interface operations {
         'application/json': {
           /** @description H 档必须等于 target.display */
           confirm_target: string | null;
+          /**
+           * @description 合规配置下 H 档的通行密钥断言（navigator.credentials.get 的 PublicKeyCredential JSON），
+           *     挑战来自 POST /v1/auth/webauthn/assertion-options；其余情况为 null
+           */
+          webauthn: null | {
+            [key: string]: unknown;
+          };
         };
       };
     };
@@ -3577,6 +5505,37 @@ export interface operations {
       };
       404: components['responses']['Error'];
       409: components['responses']['Error'];
+    };
+  };
+  listRoleBindings: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 角色绑定 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            /** @description RoleBinding 的全部字段，加上它所在的文件 */
+            bindings: {
+              file: string;
+              /** @enum {string} */
+              max_risk_tier?: 'L' | 'H';
+              role: components['schemas']['role'];
+              scope: components['schemas']['scope'];
+              subject: components['schemas']['subject'];
+            }[];
+            revision: string;
+          };
+        };
+      };
     };
   };
   getResearchRun: {
@@ -3695,6 +5654,38 @@ export interface operations {
       404: components['responses']['Error'];
     };
   };
+  getRedactedPrompts: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        run_id: components['parameters']['RunId'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 每次模型调用的脱敏后提示词 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            messages: {
+              content: string;
+              /** @enum {string} */
+              role: 'system' | 'developer' | 'user' | 'assistant' | 'tool';
+            }[];
+            phase: string;
+            redaction_hits: number;
+            seq: number;
+          }[];
+        };
+      };
+      404: components['responses']['Error'];
+    };
+  };
   search: {
     parameters: {
       query: {
@@ -3719,6 +5710,195 @@ export interface operations {
             /** @enum {string} */
             kind: 'incident' | 'component' | 'proposal';
             title: string;
+          }[];
+        };
+      };
+    };
+  };
+  getSettings: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 设置 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Settings'];
+        };
+      };
+    };
+  };
+  putSettings: {
+    parameters: {
+      query?: never;
+      header: {
+        'X-CSRF-Token': components['parameters']['Csrf'];
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['Settings'];
+      };
+    };
+    responses: {
+      /** @description 新的设置 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Settings'];
+        };
+      };
+      400: components['responses']['Error'];
+    };
+  };
+  getTopologyCoverage: {
+    parameters: {
+      query: {
+        cluster_id: components['schemas']['ClusterId'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 覆盖表 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['TopologyCoverage'];
+        };
+      };
+    };
+  };
+  getTopologyDiff: {
+    parameters: {
+      query: {
+        cluster_id: components['schemas']['ClusterId'];
+        /** @description 拓扑版本 */
+        from: number;
+        to: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 两个版本之间的差异 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            added_edges: components['schemas']['Edge'][];
+            added_nodes: components['schemas']['Node'][];
+            removed_edges: components['schemas']['Edge'][];
+            removed_nodes: components['schemas']['Node'][];
+          };
+        };
+      };
+    };
+  };
+  getTopologyNeighborhood: {
+    parameters: {
+      query: {
+        at?: string;
+        cluster_id: components['schemas']['ClusterId'];
+        component: components['schemas']['ComponentKey'];
+        hops?: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 邻域图，每条边标注来源 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Subgraph'];
+        };
+      };
+    };
+  };
+  createTopologyOverridePr: {
+    parameters: {
+      query?: never;
+      header: {
+        'X-CSRF-Token': components['parameters']['Csrf'];
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          alertname: string;
+          cluster_id: components['schemas']['ClusterId'];
+          component: components['schemas']['ComponentKey'];
+          role: components['schemas']['AlertRole'];
+        };
+      };
+    };
+    responses: {
+      /** @description 已开 PR */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            branch: string;
+            head_sha: string;
+            pr_url: string;
+          };
+        };
+      };
+      409: components['responses']['Error'];
+    };
+  };
+  listUsers: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 登录过的用户（最近登录在前） */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            chat_links: components['schemas']['ChatLink'][];
+            display_name: string;
+            first_login_at: components['schemas']['Timestamp'];
+            groups: string[];
+            last_login_at: components['schemas']['Timestamp'];
+            principal_id: string;
+            provider: string;
+            roles: components['schemas']['RoleBinding'][];
           }[];
         };
       };

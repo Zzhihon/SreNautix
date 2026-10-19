@@ -1543,7 +1543,7 @@ export interface Alert {
    */
   source: 'alertmanager' | 'grafana' | 'nightingale' | 'generic' | 'reconcile';
   /**
-   * 去掉 alertstate、alertgroup、__name__ 之后的标签集按键排序的 FNV-1a 64 位哈希，16 位十六进制
+   * 去掉 alertstate、alertgroup、__name__ 之后按键排序，依次写入 key、0xff、value、0xff 的 UTF-8 字节，取 FNV-1a 64 位哈希，16 位小写十六进制；空标签集为 cbf29ce484222325
    */
   fingerprint: string;
   alertname: string;
@@ -1908,7 +1908,9 @@ export interface NextCheck {
   hypothesis_id: string;
   type: 'query' | 'tool';
   template: string;
-  args: {};
+  args: {
+    [k: string]: unknown | undefined;
+  };
   refutes_if: string;
   purpose: string;
   /**
@@ -1947,7 +1949,9 @@ export interface Recommendation {
  */
 export interface ProposalDraft {
   action_id: string;
-  params: {};
+  params: {
+    [k: string]: unknown | undefined;
+  };
   hypothesis_id: string;
   expected_effect: string;
   /**
@@ -1993,7 +1997,9 @@ export interface Proposal {
    * 策略允许自动执行：等级为 reversible 或 reversible_recreatable、在策略允许的命名空间与动作内、未超过每小时上限。自动批准的断言 approver_principal 为 auto:<规则名>
    */
   auto_eligible: boolean;
-  params: {};
+  params: {
+    [k: string]: unknown | undefined;
+  };
   params_hash: Sha256;
   /**
    * 参数规范化版本，取值与审批断言的 canon_version 一致：jcs-sha256-v1 表示 RFC 8785 JCS、UTF-8、SHA-256、小写十六进制并带 sha256: 前缀
@@ -2326,7 +2332,7 @@ export interface LocalizedText3 {
 }
 export interface EvidenceReason {
   /**
-   * rule：命中判定规则；no_data：查询没有样本；partial_data：部分查询没有样本；source_error：数据源报错或超时；capability_missing：所需能力不可用；observability_gap：依赖的目标有 meta 告警；evaluation_error：CEL 求值出错；all_clear：没有命中任何规则
+   * rule：命中判定规则；no_data：查询没有样本；partial_data：部分查询没有样本；source_error：数据源报错或超时；capability_missing：所需能力不可用；observability_gap：依赖的目标有 meta 告警；evaluation_error：CEL 求值出错；all_clear：没有命中任何规则；model_judged：只读工具的结果没有 CEL 判定，由小模型对照 refutes_if 判定（可以支持 likely，不能单独支撑 evidence_consistent，展示时标注模型判定）
    */
   kind:
     | 'rule'
@@ -2336,7 +2342,8 @@ export interface EvidenceReason {
     | 'capability_missing'
     | 'observability_gap'
     | 'evaluation_error'
-    | 'all_clear';
+    | 'all_clear'
+    | 'model_judged';
   text: string;
 }
 export interface EvidenceQueryRecord {
@@ -2415,7 +2422,9 @@ export interface IntegrationManifest {
   /**
    * 实例配置的 JSON Schema。密钥字段只写挂载文件的引用，用 x-srenautix-secret-ref: true 标出
    */
-  config_schema: {};
+  config_schema: {
+    [k: string]: unknown | undefined;
+  };
   /**
    * 凭证需要的最小权限；启动时探测凭证是否超出，超出时降级为 warn 或只提议
    */
@@ -2497,7 +2506,9 @@ export interface QueryTemplate {
   /**
    * 参数的 JSON Schema（可移植子集）
    */
-  args: {};
+  args: {
+    [k: string]: unknown | undefined;
+  };
   description: string;
   card?: EvidenceCardDefinition1;
 }
@@ -2619,7 +2630,9 @@ export interface PackRule {
   /**
    * 参数值为 CEL 表达式文本
    */
-  params: {};
+  params: {
+    [k: string]: string | undefined;
+  };
   expected_effect?: LocalizedText;
 }
 /**
@@ -2689,7 +2702,11 @@ export interface PackUserLayer {
    * <chain>/<card> → 参数覆盖
    */
   params?: {
-    [k: string]: {} | undefined;
+    [k: string]:
+      | {
+          [k: string]: unknown | undefined;
+        }
+      | undefined;
   };
   /**
    * 禁用的条目：alerts/<id>、chains/<id>、chains/<id>/<card>、checks/<id>、rules/<id>
@@ -2734,12 +2751,16 @@ export interface ChaosFile {
     {
       apiVersion: string;
       kind: string;
-      metadata: {};
+      metadata: {
+        [k: string]: unknown | undefined;
+      };
     },
     ...{
       apiVersion: string;
       kind: string;
-      metadata: {};
+      metadata: {
+        [k: string]: unknown | undefined;
+      };
     }[],
   ];
   duration: Duration;
@@ -2850,7 +2871,9 @@ export interface ProposalCreate {
   incident_id: Uuid;
   binding: ProposalBinding;
   action: string;
-  params: {};
+  params: {
+    [k: string]: unknown | undefined;
+  };
   research_run_id: null | Uuid;
   rule_id: string | null;
   hypothesis_id: string | null;

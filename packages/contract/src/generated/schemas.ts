@@ -1,5 +1,5 @@
 // 本文件由 packages/contract/scripts/gen.ts 从 contract/ 生成，不要手工修改。
-export const CONTRACT_VERSION = '2.3.0';
+export const CONTRACT_VERSION = '2.4.0';
 
 export const SCHEMAS: Record<string, Record<string, unknown>> = {
   'https://srenautix.io/contract/gateway/v1/action-catalog.schema.json': {
@@ -1670,7 +1670,8 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
       },
       fingerprint: {
         type: 'string',
-        description: '去掉 alertstate、alertgroup、__name__ 之后的标签集按键排序的 FNV-1a 64 位哈希，16 位十六进制',
+        description:
+          '去掉 alertstate、alertgroup、__name__ 之后按键排序，依次写入 key、0xff、value、0xff 的 UTF-8 字节，取 FNV-1a 64 位哈希，16 位小写十六进制；空标签集为 cbf29ce484222325',
         pattern: '^[0-9a-f]{16}$',
       },
       alertname: { type: 'string', minLength: 1 },
@@ -2556,7 +2557,7 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
           kind: {
             type: 'string',
             description:
-              'rule：命中判定规则；no_data：查询没有样本；partial_data：部分查询没有样本；source_error：数据源报错或超时；capability_missing：所需能力不可用；observability_gap：依赖的目标有 meta 告警；evaluation_error：CEL 求值出错；all_clear：没有命中任何规则',
+              'rule：命中判定规则；no_data：查询没有样本；partial_data：部分查询没有样本；source_error：数据源报错或超时；capability_missing：所需能力不可用；observability_gap：依赖的目标有 meta 告警；evaluation_error：CEL 求值出错；all_clear：没有命中任何规则；model_judged：只读工具的结果没有 CEL 判定，由小模型对照 refutes_if 判定（可以支持 likely，不能单独支撑 evidence_consistent，展示时标注模型判定）',
             enum: [
               'rule',
               'no_data',
@@ -2566,6 +2567,7 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
               'observability_gap',
               'evaluation_error',
               'all_clear',
+              'model_judged',
             ],
           },
           text: { type: 'string', maxLength: 1000 },
@@ -2937,6 +2939,7 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
       },
       config_schema: {
         type: 'object',
+        additionalProperties: true,
         description: '实例配置的 JSON Schema。密钥字段只写挂载文件的引用，用 x-srenautix-secret-ref: true 标出',
       },
       required_scopes: {
@@ -3052,7 +3055,7 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
         properties: {
           id: { type: 'string', pattern: '^[a-z0-9][a-z0-9_.-]*$' },
           signal: { type: 'string' },
-          args: { type: 'object', description: '参数的 JSON Schema（可移植子集）' },
+          args: { type: 'object', additionalProperties: true, description: '参数的 JSON Schema（可移植子集）' },
           description: { type: 'string' },
           card: { $ref: 'evidence-card.schema.json', description: '结果按这张卡判定' },
         },
@@ -3176,7 +3179,7 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
           title: { $ref: 'evidence-card.schema.json#/$defs/LocalizedText' },
           when: { type: 'string', description: 'CEL，可引用 incident、root、cards（卡片 id → 结论）' },
           action: { type: 'string' },
-          params: { type: 'object', description: '参数值为 CEL 表达式文本' },
+          params: { type: 'object', additionalProperties: { type: 'string' }, description: '参数值为 CEL 表达式文本' },
           expected_effect: { $ref: 'evidence-card.schema.json#/$defs/LocalizedText' },
         },
       },
@@ -3287,7 +3290,7 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
           params: {
             type: 'object',
             description: '<chain>/<card> → 参数覆盖',
-            additionalProperties: { type: 'object' },
+            additionalProperties: { type: 'object', additionalProperties: true },
           },
           disable: {
             type: 'array',
@@ -3338,7 +3341,11 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
             items: {
               type: 'object',
               required: ['apiVersion', 'kind', 'metadata'],
-              properties: { apiVersion: { type: 'string' }, kind: { type: 'string' }, metadata: { type: 'object' } },
+              properties: {
+                apiVersion: { type: 'string' },
+                kind: { type: 'string' },
+                metadata: { type: 'object', additionalProperties: true },
+              },
             },
           },
           duration: { $ref: 'common.schema.json#/$defs/Duration' },
@@ -3541,7 +3548,7 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
         description:
           '策略允许自动执行：等级为 reversible 或 reversible_recreatable、在策略允许的命名空间与动作内、未超过每小时上限。自动批准的断言 approver_principal 为 auto:<规则名>',
       },
-      params: { type: 'object' },
+      params: { type: 'object', additionalProperties: true },
       params_hash: { $ref: 'common.schema.json#/$defs/Sha256' },
       canon_version: {
         type: 'string',
@@ -3676,7 +3683,7 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
           incident_id: { $ref: 'common.schema.json#/$defs/Uuid' },
           binding: { $ref: '#/$defs/Binding' },
           action: { type: 'string' },
-          params: { type: 'object' },
+          params: { type: 'object', additionalProperties: true },
           research_run_id: { oneOf: [{ type: 'null' }, { $ref: 'common.schema.json#/$defs/Uuid' }] },
           rule_id: { type: ['string', 'null'] },
           hypothesis_id: { type: ['string', 'null'], pattern: '^h[1-9]$' },
@@ -3874,7 +3881,7 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
           hypothesis_id: { type: 'string', pattern: '^h[1-9]$' },
           type: { type: 'string', enum: ['query', 'tool'] },
           template: { type: 'string' },
-          args: { type: 'object' },
+          args: { type: 'object', additionalProperties: true },
           refutes_if: { type: 'string', maxLength: 300 },
           purpose: { type: 'string', maxLength: 300 },
           result_ref: {
@@ -3931,7 +3938,7 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
         required: ['action_id', 'params', 'hypothesis_id', 'expected_effect', 'proposal_id'],
         properties: {
           action_id: { type: 'string' },
-          params: { type: 'object' },
+          params: { type: 'object', additionalProperties: true },
           hypothesis_id: { type: 'string', pattern: '^h[1-9]$' },
           expected_effect: { type: 'string', maxLength: 300 },
           proposal_id: {

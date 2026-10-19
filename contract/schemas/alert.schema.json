@@ -39,7 +39,7 @@
     },
     "fingerprint": {
       "type": "string",
-      "description": "去掉 alertstate、alertgroup、__name__ 之后的标签集按键排序的 FNV-1a 64 位哈希，16 位十六进制",
+      "description": "去掉 alertstate、alertgroup、__name__ 之后按键排序，依次写入 key、0xff、value、0xff 的 UTF-8 字节，取 FNV-1a 64 位哈希，16 位小写十六进制；空标签集为 cbf29ce484222325",
       "pattern": "^[0-9a-f]{16}$"
     },
     "alertname": { "type": "string", "minLength": 1 },

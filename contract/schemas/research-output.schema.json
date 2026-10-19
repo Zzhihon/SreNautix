@@ -112,7 +112,7 @@
         "hypothesis_id": { "type": "string", "pattern": "^h[1-9]$" },
         "type": { "type": "string", "enum": ["query", "tool"] },
         "template": { "type": "string" },
-        "args": { "type": "object" },
+        "args": { "type": "object", "additionalProperties": true },
         "refutes_if": { "type": "string", "maxLength": 300 },
         "purpose": { "type": "string", "maxLength": 300 },
         "result_ref": {
@@ -176,7 +176,7 @@
       "required": ["action_id", "params", "hypothesis_id", "expected_effect", "proposal_id"],
       "properties": {
         "action_id": { "type": "string" },
-        "params": { "type": "object" },
+        "params": { "type": "object", "additionalProperties": true },
         "hypothesis_id": { "type": "string", "pattern": "^h[1-9]$" },
         "expected_effect": { "type": "string", "maxLength": 300 },
         "proposal_id": {

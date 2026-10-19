@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: SreNautix hub API
-  version: 2.3.0
+  version: 2.4.0
   license:
     name: Apache-2.0
     identifier: Apache-2.0
@@ -28,6 +28,10 @@ tags:
   - name: proposals
   - name: events
   - name: eval
+  - name: ingest
+  - name: topology
+  - name: system
+  - name: governance
 paths:
   /healthz:
     get:
@@ -621,7 +625,7 @@ paths:
                 additionalProperties: false
                 required: [catalog, enabled]
                 properties:
-                  catalog: { type: object }
+                  catalog: { $ref: './gateway/v1/action-catalog.schema.json' }
                   enabled:
                     type: array
                     items:
@@ -707,11 +711,16 @@ paths:
             schema:
               type: object
               additionalProperties: false
-              required: [confirm_target]
+              required: [confirm_target, webauthn]
               properties:
                 confirm_target:
                   type: [string, 'null']
                   description: H 档必须等于 target.display
+                webauthn:
+                  description: |
+                    合规配置下 H 档的通行密钥断言（navigator.credentials.get 的 PublicKeyCredential JSON），
+                    挑战来自 POST /v1/auth/webauthn/assertion-options；其余情况为 null
+                  oneOf: [{ type: 'null' }, { type: object, additionalProperties: true }]
       responses:
         '200':
           description: 已签发
@@ -869,6 +878,898 @@ paths:
         '200':
           description: 成绩单
           content: { application/json: { schema: { $ref: './schemas/eval-report.schema.json' } } }
+        '404': { $ref: '#/components/responses/Error' }
+  /v1/ingest/{source_id}:
+    parameters:
+      - { name: source_id, in: path, required: true, schema: { type: string, pattern: '^[a-z0-9][a-z0-9-]*$' } }
+    post:
+      tags: [ingest]
+      operationId: ingestAlerts
+      description: |
+        告警接入（DESIGN §3.1）。每个接入源有自己的 bearer token；请求体按接入源的类型解析：Alertmanager 或 Grafana 的 webhook、
+        夜莺事件、通用 JSON（按 JSONPath 映射）。状态库不可用时走降级路径，返回 202
+      security: [{ bearer: [] }]
+      x-srenautix-roles: [ingest-source]
+      x-srenautix-external: false
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        '200':
+          description: 已接收
+          content: { application/json: { schema: { $ref: '#/components/schemas/IngestResult' } } }
+        '202':
+          description: 状态库降级，已在内存中处理
+          content: { application/json: { schema: { $ref: '#/components/schemas/IngestResult' } } }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /v1/auth/webauthn/assertion-options:
+    post:
+      tags: [auth]
+      operationId: webauthnAssertionOptions
+      description: 合规配置下 H 档审批的通行密钥挑战；挑战绑定提议的 params_hash 与绑定字段，只能用一次
+      x-srenautix-roles: [approver, admin]
+      x-srenautix-external: false
+      parameters: [{ $ref: '#/components/parameters/Csrf' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [proposal_id]
+              properties:
+                proposal_id: { $ref: './schemas/common.schema.json#/$defs/Uuid' }
+      responses:
+        '200':
+          description: PublicKeyCredentialRequestOptionsJSON
+          content: { application/json: { schema: { type: object, additionalProperties: true } } }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+  /v1/runs/{run_id}/prompts:
+    parameters: [{ $ref: '#/components/parameters/RunId' }]
+    get:
+      tags: [research]
+      operationId: getRedactedPrompts
+      description: 脱敏后的提示词，研判运行明细使用
+      x-srenautix-roles: [viewer, responder, approver, auditor, admin]
+      x-srenautix-external: false
+      responses:
+        '200':
+          description: 每次模型调用的脱敏后提示词
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: false
+                  required: [seq, phase, messages, redaction_hits]
+                  properties:
+                    seq: { type: integer, minimum: 1 }
+                    phase: { type: string }
+                    redaction_hits: { type: integer, minimum: 0 }
+                    messages:
+                      type: array
+                      items:
+                        type: object
+                        additionalProperties: false
+                        required: [role, content]
+                        properties:
+                          role: { type: string, enum: [system, developer, user, assistant, tool] }
+                          content: { type: string }
+        '404': { $ref: '#/components/responses/Error' }
+  /v1/role-bindings:
+    get:
+      tags: [governance]
+      operationId: listRoleBindings
+      description: 来自 Git 的角色绑定；revision 是 git-sync 写入的提交 SHA，没有时为全部文件内容的 sha256
+      x-srenautix-roles: [admin, auditor]
+      x-srenautix-external: false
+      responses:
+        '200':
+          description: 角色绑定
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [revision, bindings]
+                properties:
+                  revision: { type: string }
+                  bindings:
+                    type: array
+                    description: RoleBinding 的全部字段，加上它所在的文件
+                    items:
+                      type: object
+                      additionalProperties: false
+                      required: [subject, role, scope, file]
+                      properties:
+                        subject:
+                          {
+                            $ref: './integrations/identity/v1/identity.schema.json#/$defs/RoleBinding/properties/subject',
+                          }
+                        role:
+                          { $ref: './integrations/identity/v1/identity.schema.json#/$defs/RoleBinding/properties/role' }
+                        scope:
+                          {
+                            $ref: './integrations/identity/v1/identity.schema.json#/$defs/RoleBinding/properties/scope',
+                          }
+                        max_risk_tier: { type: string, enum: [L, H] }
+                        file: { type: string }
+  /v1/permissions/explain:
+    post:
+      tags: [governance]
+      operationId: explainPermission
+      description: 逐条列出每个角色绑定是否匹配；解释其他主体时需要 users.read
+      x-srenautix-roles: [viewer, responder, approver, auditor, admin]
+      x-srenautix-external: false
+      parameters: [{ $ref: '#/components/parameters/Csrf' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [subject, permission, target, tier]
+              properties:
+                subject:
+                  oneOf:
+                    - { type: 'null' }
+                    - type: object
+                      additionalProperties: false
+                      required: [id, groups]
+                      properties:
+                        id: { type: string }
+                        groups: { type: array, items: { type: string } }
+                permission: { type: string }
+                target: { oneOf: [{ type: 'null' }, { $ref: '#/components/schemas/PermissionTarget' }] }
+                tier: { type: [string, 'null'], enum: [L, H, null] }
+      responses:
+        '200':
+          description: 授权解释
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [allowed, subject, permission, target, tier, revision, entries]
+                properties:
+                  allowed: { type: boolean }
+                  subject:
+                    type: object
+                    additionalProperties: false
+                    required: [id, groups]
+                    properties:
+                      id: { type: string }
+                      groups: { type: array, items: { type: string } }
+                  permission: { type: string }
+                  target: { oneOf: [{ type: 'null' }, { $ref: '#/components/schemas/PermissionTarget' }] }
+                  tier: { type: [string, 'null'], enum: [L, H, null] }
+                  revision: { type: string }
+                  entries:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: false
+                      required: [binding, file, subject_match, grants_permission, scope_match, tier_ok, reason]
+                      properties:
+                        binding: { $ref: './integrations/identity/v1/identity.schema.json#/$defs/RoleBinding' }
+                        file: { type: string }
+                        subject_match: { type: boolean }
+                        grants_permission: { type: boolean }
+                        scope_match: { type: boolean }
+                        tier_ok: { type: boolean }
+                        reason: { type: string }
+        '403': { $ref: '#/components/responses/Error' }
+  /v1/users:
+    get:
+      tags: [governance]
+      operationId: listUsers
+      x-srenautix-roles: [admin, auditor]
+      x-srenautix-external: false
+      responses:
+        '200':
+          description: 登录过的用户（最近登录在前）
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: false
+                  required:
+                    [principal_id, display_name, provider, groups, roles, chat_links, first_login_at, last_login_at]
+                  properties:
+                    principal_id: { type: string }
+                    display_name: { type: string }
+                    provider: { type: string }
+                    groups: { type: array, items: { type: string } }
+                    roles:
+                      {
+                        type: array,
+                        items: { $ref: './integrations/identity/v1/identity.schema.json#/$defs/RoleBinding' },
+                      }
+                    chat_links: { type: array, items: { $ref: '#/components/schemas/ChatLink' } }
+                    first_login_at: { $ref: './schemas/common.schema.json#/$defs/Timestamp' }
+                    last_login_at: { $ref: './schemas/common.schema.json#/$defs/Timestamp' }
+  /v1/chat-links:
+    get:
+      tags: [auth]
+      operationId: listChatLinks
+      description: 当前用户的聊天账号绑定
+      x-srenautix-roles: [viewer, responder, approver, auditor, admin]
+      x-srenautix-external: false
+      responses:
+        '200':
+          description: 绑定
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/ChatLink' } } } }
+  /v1/chat-links/{channel}/{channel_user_id}:
+    parameters:
+      - { name: channel, in: path, required: true, schema: { $ref: './schemas/common.schema.json#/$defs/Channel' } }
+      - { name: channel_user_id, in: path, required: true, schema: { type: string } }
+    delete:
+      tags: [auth]
+      operationId: deleteChatLink
+      description: 解除绑定；本人或有 settings.write 权限的主体可以操作，写入治理审计
+      x-srenautix-roles: [viewer, responder, approver, auditor, admin]
+      x-srenautix-external: false
+      parameters: [{ $ref: '#/components/parameters/Csrf' }]
+      responses:
+        '204': { description: 已解除 }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /v1/eval/cases:
+    get:
+      tags: [eval]
+      operationId: listEvalCases
+      x-srenautix-roles: [viewer, responder, approver, auditor, admin]
+      x-srenautix-external: false
+      parameters:
+        - { name: suite, in: query, schema: { type: string } }
+        - { name: mode, in: query, schema: { type: string, enum: [snapshot, reconstructed] } }
+        - { name: cursor, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 100 } }
+      responses:
+        '200':
+          description: 用例（含被排除的材料）
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [items, next_cursor]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/EvalCase' } }
+                  next_cursor: { type: [string, 'null'] }
+  /v1/eval/trend:
+    get:
+      tags: [eval]
+      operationId: getEvalTrend
+      x-srenautix-roles: [viewer, responder, approver, auditor, admin]
+      x-srenautix-external: false
+      parameters:
+        - { name: suite, in: query, schema: { type: string } }
+        - { name: mode, in: query, schema: { type: string, enum: [snapshot, reconstructed] } }
+      responses:
+        '200':
+          description: 按版本的成绩趋势
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: false
+                  required: [version, code_sha, created_at, rows, gate_passed]
+                  properties:
+                    version: { type: string }
+                    code_sha: { type: string }
+                    created_at: { $ref: './schemas/common.schema.json#/$defs/Timestamp' }
+                    rows:
+                      type: array
+                      items:
+                        type: object
+                        additionalProperties: false
+                        required: [route_id, model, top1]
+                        properties:
+                          route_id: { type: string }
+                          model: { type: string }
+                          top1: { $ref: './schemas/eval-report.schema.json#/$defs/Ratio' }
+                    gate_passed: { type: [boolean, 'null'] }
+  /v1/eval/estimate:
+    post:
+      tags: [eval]
+      operationId: estimateEval
+      description: 运行前的成本估算，不调用模型
+      x-srenautix-roles: [responder, approver, admin]
+      x-srenautix-external: false
+      parameters: [{ $ref: '#/components/parameters/Csrf' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [suite, routes, runs_per_case]
+              properties:
+                suite: { type: string }
+                routes: { type: array, minItems: 1, items: { type: string } }
+                runs_per_case: { type: integer, minimum: 1, maximum: 10 }
+      responses:
+        '200':
+          description: 估算
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [cases, calls, input_tokens, cost, currency]
+                properties:
+                  cases: { type: integer, minimum: 0 }
+                  calls: { type: integer, minimum: 0 }
+                  input_tokens: { type: integer, minimum: 0 }
+                  cost: { type: number, minimum: 0 }
+                  currency: { type: string }
+  /v1/agent/health:
+    get:
+      tags: [eval]
+      operationId: getAgentHealth
+      description: P0 记分卡（DESIGN 附录 A）与运行指标
+      x-srenautix-roles: [viewer, responder, approver, auditor, admin]
+      x-srenautix-external: false
+      parameters:
+        - { name: window, in: query, schema: { $ref: './schemas/common.schema.json#/$defs/Duration' } }
+      responses:
+        '200':
+          description: 记分卡
+          content: { application/json: { schema: { $ref: '#/components/schemas/AgentHealth' } } }
+  /v1/agent/cost:
+    get:
+      tags: [eval]
+      operationId: getAgentCost
+      x-srenautix-roles: [viewer, responder, approver, auditor, admin]
+      x-srenautix-external: false
+      parameters:
+        - { name: group_by, in: query, required: true, schema: { type: string, enum: [day, incident, model] } }
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+      responses:
+        '200':
+          description: 成本
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [currency, daily_budget, items]
+                properties:
+                  currency: { type: string }
+                  daily_budget: { type: [number, 'null'] }
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: false
+                      required: [key, label, input_tokens, output_tokens, cost, runs]
+                      properties:
+                        key: { type: string }
+                        label: { type: string }
+                        input_tokens: { type: integer, minimum: 0 }
+                        output_tokens: { type: integer, minimum: 0 }
+                        cost: { type: number, minimum: 0 }
+                        runs: { type: integer, minimum: 0 }
+  /v1/egress/ledger:
+    get:
+      tags: [eval]
+      operationId: getEgressLedger
+      x-srenautix-roles: [auditor, admin]
+      x-srenautix-external: false
+      parameters:
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+        - { name: route_id, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: 出境账本
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: false
+                  required: [at, run_id, incident_id, route_id, in_domain, categories, bytes, redaction_hits]
+                  properties:
+                    at: { $ref: './schemas/common.schema.json#/$defs/Timestamp' }
+                    run_id: { $ref: './schemas/common.schema.json#/$defs/Uuid' }
+                    incident_id: { $ref: './schemas/common.schema.json#/$defs/Uuid' }
+                    route_id: { type: string }
+                    in_domain: { type: boolean }
+                    categories: { type: array, items: { type: string } }
+                    bytes: { type: integer, minimum: 0 }
+                    redaction_hits: { type: integer, minimum: 0 }
+  /v1/topology/coverage:
+    get:
+      tags: [topology]
+      operationId: getTopologyCoverage
+      description: 覆盖表（DESIGN §4.4），控制台拓扑页的默认视图
+      x-srenautix-roles: [viewer, responder, approver, auditor, admin]
+      x-srenautix-external: false
+      parameters:
+        - {
+            name: cluster_id,
+            in: query,
+            required: true,
+            schema: { $ref: './schemas/common.schema.json#/$defs/ClusterId' },
+          }
+      responses:
+        '200':
+          description: 覆盖表
+          content: { application/json: { schema: { $ref: '#/components/schemas/TopologyCoverage' } } }
+  /v1/topology/overrides/pr:
+    post:
+      tags: [topology]
+      operationId: createTopologyOverridePr
+      description: 为未映射的告警生成拓扑覆盖规则的 PR；只推送到 srenautix/* 分支，从不合并
+      x-srenautix-roles: [admin]
+      x-srenautix-external: false
+      parameters: [{ $ref: '#/components/parameters/Csrf' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [cluster_id, alertname, component, role]
+              properties:
+                cluster_id: { $ref: './schemas/common.schema.json#/$defs/ClusterId' }
+                alertname: { type: string }
+                component: { $ref: './schemas/common.schema.json#/$defs/ComponentKey' }
+                role: { $ref: './schemas/common.schema.json#/$defs/AlertRole' }
+      responses:
+        '201':
+          description: 已开 PR
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [pr_url, branch, head_sha]
+                properties:
+                  pr_url: { type: string }
+                  branch: { type: string, pattern: '^srenautix/' }
+                  head_sha: { type: string }
+        '409': { $ref: '#/components/responses/Error' }
+  /v1/topology/neighborhood:
+    get:
+      tags: [topology]
+      operationId: getTopologyNeighborhood
+      x-srenautix-roles: [viewer, responder, approver, auditor, admin]
+      x-srenautix-external: false
+      parameters:
+        - {
+            name: cluster_id,
+            in: query,
+            required: true,
+            schema: { $ref: './schemas/common.schema.json#/$defs/ClusterId' },
+          }
+        - {
+            name: component,
+            in: query,
+            required: true,
+            schema: { $ref: './schemas/common.schema.json#/$defs/ComponentKey' },
+          }
+        - { name: at, in: query, schema: { type: string, format: date-time } }
+        - { name: hops, in: query, schema: { type: integer, minimum: 1, maximum: 2, default: 2 } }
+      responses:
+        '200':
+          description: 邻域图，每条边标注来源
+          content: { application/json: { schema: { $ref: '#/components/schemas/Subgraph' } } }
+  /v1/topology/diff:
+    get:
+      tags: [topology]
+      operationId: getTopologyDiff
+      x-srenautix-roles: [viewer, responder, approver, auditor, admin]
+      x-srenautix-external: false
+      parameters:
+        - {
+            name: cluster_id,
+            in: query,
+            required: true,
+            schema: { $ref: './schemas/common.schema.json#/$defs/ClusterId' },
+          }
+        - { name: from, in: query, required: true, description: 拓扑版本, schema: { type: integer, minimum: 0 } }
+        - { name: to, in: query, required: true, schema: { type: integer, minimum: 0 } }
+      responses:
+        '200':
+          description: 两个版本之间的差异
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [added_nodes, removed_nodes, added_edges, removed_edges]
+                properties:
+                  added_nodes: { type: array, items: { $ref: './schemas/topology-event.schema.json#/$defs/Node' } }
+                  removed_nodes: { type: array, items: { $ref: './schemas/topology-event.schema.json#/$defs/Node' } }
+                  added_edges: { type: array, items: { $ref: './schemas/topology-event.schema.json#/$defs/Edge' } }
+                  removed_edges: { type: array, items: { $ref: './schemas/topology-event.schema.json#/$defs/Edge' } }
+  /v1/integrations:
+    get:
+      tags: [system]
+      operationId: listIntegrations
+      x-srenautix-roles: [viewer, responder, approver, auditor, admin]
+      x-srenautix-external: false
+      responses:
+        '200':
+          description: 集成实例
+          content:
+            {
+              application/json:
+                { schema: { type: array, items: { $ref: '#/components/schemas/IntegrationInstance' } } },
+            }
+  /v1/integrations/{instance_id}/test:
+    parameters:
+      - { name: instance_id, in: path, required: true, schema: { type: string } }
+    post:
+      tags: [system]
+      operationId: testIntegration
+      description: 服务端连接测试：逐项执行声明能力的 verify()
+      x-srenautix-roles: [admin]
+      x-srenautix-external: false
+      parameters: [{ $ref: '#/components/parameters/Csrf' }]
+      responses:
+        '200':
+          description: 测试结果
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [ok, results]
+                properties:
+                  ok: { type: boolean }
+                  results:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: false
+                      required: [capability, ok, duration_ms, error]
+                      properties:
+                        capability: { type: string }
+                        ok: { type: boolean }
+                        duration_ms: { type: integer, minimum: 0 }
+                        error: { type: [string, 'null'] }
+        '404': { $ref: '#/components/responses/Error' }
+  /v1/packs:
+    get:
+      tags: [system]
+      operationId: listPacks
+      x-srenautix-roles: [viewer, responder, approver, auditor, admin]
+      x-srenautix-external: false
+      responses:
+        '200':
+          description: 领域包与 pack.lock
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [pack_lock, packs]
+                properties:
+                  pack_lock: { $ref: './schemas/pack.schema.json#/$defs/PackLock' }
+                  packs: { type: array, items: { $ref: '#/components/schemas/PackStatus' } }
+  /v1/policies:
+    get:
+      tags: [system]
+      operationId: getPolicies
+      x-srenautix-roles: [viewer, responder, approver, auditor, admin]
+      x-srenautix-external: false
+      parameters:
+        - {
+            name: cluster_id,
+            in: query,
+            required: true,
+            schema: { $ref: './schemas/common.schema.json#/$defs/ClusterId' },
+          }
+      responses:
+        '200':
+          description: 从 Git 渲染出的生效策略、仓库 SHA 与漂移
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [repo, sha, drift, rendered]
+                properties:
+                  repo: { type: string }
+                  sha: { type: string }
+                  drift: { $ref: '#/components/schemas/Drift' }
+                  rendered: { $ref: './gateway/v1/gateway-policy.schema.json' }
+  /v1/policies/simulate:
+    post:
+      tags: [system]
+      operationId: simulatePolicy
+      description: 选定动作和目标，查看结果和需要谁审批；不产生提议
+      x-srenautix-roles: [viewer, responder, approver, auditor, admin]
+      x-srenautix-external: false
+      parameters: [{ $ref: '#/components/parameters/Csrf' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [cluster_id, action, target, params]
+              properties:
+                cluster_id: { $ref: './schemas/common.schema.json#/$defs/ClusterId' }
+                action: { type: string }
+                target:
+                  type: object
+                  additionalProperties: false
+                  required: [kind, namespace, name]
+                  properties:
+                    kind: { type: string }
+                    namespace: { type: [string, 'null'] }
+                    name: { type: string }
+                params: { type: object, additionalProperties: true }
+      responses:
+        '200':
+          description: 模拟结果
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [allowed, level, tier, auto, approvers, rules, reasons]
+                properties:
+                  allowed: { type: boolean }
+                  level:
+                    {
+                      type: [string, 'null'],
+                      enum: [reversible, reversible_recreatable, compensable, irreversible, null],
+                    }
+                  tier: { type: [string, 'null'], enum: [L, H, null] }
+                  auto: { type: boolean }
+                  approvers:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: false
+                      required: [subject, role]
+                      properties:
+                        subject: { type: string }
+                        role: { type: string }
+                  rules: { type: array, items: { type: string } }
+                  reasons: { type: array, items: { type: string } }
+  /v1/pause:
+    get:
+      tags: [system]
+      operationId: getPause
+      description: 软暂停：server 扣住工单，不下发
+      x-srenautix-roles: [viewer, responder, approver, auditor, admin]
+      x-srenautix-external: false
+      responses:
+        '200':
+          description: 软暂停状态
+          content: { application/json: { schema: { $ref: '#/components/schemas/PauseState' } } }
+    put:
+      tags: [system]
+      operationId: setPause
+      x-srenautix-roles: [admin]
+      x-srenautix-external: false
+      parameters: [{ $ref: '#/components/parameters/Csrf' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [paused, reason, expires_at]
+              properties:
+                paused: { type: boolean }
+                reason: { type: [string, 'null'], maxLength: 500 }
+                expires_at: { oneOf: [{ type: 'null' }, { $ref: './schemas/common.schema.json#/$defs/Timestamp' }] }
+      responses:
+        '200':
+          description: 新的软暂停状态
+          content: { application/json: { schema: { $ref: '#/components/schemas/PauseState' } } }
+  /v1/freeze:
+    get:
+      tags: [system]
+      operationId: getFreeze
+      description: 硬停止（srenautix-freeze）的状态与操作说明；控制台只读，修改只能用 kubectl 或 GitOps
+      x-srenautix-roles: [viewer, responder, approver, auditor, admin]
+      x-srenautix-external: false
+      parameters:
+        - {
+            name: cluster_id,
+            in: query,
+            required: true,
+            schema: { $ref: './schemas/common.schema.json#/$defs/ClusterId' },
+          }
+      responses:
+        '200':
+          description: 熔断开关
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [cluster_id, frozen, configmap, observed_at, instructions]
+                properties:
+                  cluster_id: { $ref: './schemas/common.schema.json#/$defs/ClusterId' }
+                  frozen: { type: boolean }
+                  configmap: { type: string }
+                  observed_at: { $ref: './schemas/common.schema.json#/$defs/Timestamp' }
+                  instructions:
+                    type: object
+                    additionalProperties: false
+                    required: [kubectl, gitops_path]
+                    properties:
+                      kubectl: { type: string }
+                      gitops_path: { type: string }
+  /v1/models/routes:
+    get:
+      tags: [system]
+      operationId: listModelRoutes
+      x-srenautix-roles: [viewer, responder, approver, auditor, admin]
+      x-srenautix-external: false
+      responses:
+        '200':
+          description: 模型路由、健康状况、故障域与出境类别
+          content:
+            { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/ModelRouteStatus' } } } }
+  /v1/audit/chains:
+    get:
+      tags: [governance]
+      operationId: listAuditChains
+      x-srenautix-roles: [auditor, admin]
+      x-srenautix-external: false
+      responses:
+        '200':
+          description: 执行链（每个集群一条）与治理链
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: false
+                  required:
+                    [chain, cluster_id, sink, head_seq, head_hash, verified, export_lag_seconds, lag_threshold_seconds]
+                  properties:
+                    chain: { type: string, enum: [execution, governance] }
+                    cluster_id: { oneOf: [{ type: 'null' }, { $ref: './schemas/common.schema.json#/$defs/ClusterId' }] }
+                    sink:
+                      type: object
+                      additionalProperties: false
+                      required: [kind, location, worm, retention_days]
+                      properties:
+                        kind: { type: string, enum: [s3, minio, pg] }
+                        location: { type: string }
+                        worm: { type: boolean }
+                        retention_days: { type: [integer, 'null'] }
+                    head_seq: { type: integer, minimum: 0 }
+                    head_hash: { type: [string, 'null'] }
+                    verified:
+                      type: object
+                      additionalProperties: false
+                      required: [ok, at, error]
+                      properties:
+                        ok: { type: boolean }
+                        at: { oneOf: [{ type: 'null' }, { $ref: './schemas/common.schema.json#/$defs/Timestamp' }] }
+                        error: { type: [string, 'null'] }
+                    export_lag_seconds: { type: [number, 'null'] }
+                    lag_threshold_seconds: { type: number }
+  /v1/audit/records:
+    get:
+      tags: [governance]
+      operationId: listAuditRecords
+      description: 执行链的记录结构见 contract/gateway/v1/audit-record.schema.json；治理链的记录结构见 docs/server/audit.md
+      x-srenautix-roles: [auditor, admin]
+      x-srenautix-external: false
+      parameters:
+        - { name: chain, in: query, required: true, schema: { type: string, enum: [execution, governance] } }
+        - { name: cluster_id, in: query, schema: { $ref: './schemas/common.schema.json#/$defs/ClusterId' } }
+        - { name: cursor, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 100 } }
+      responses:
+        '200':
+          description: 审计记录
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [items, next_cursor]
+                properties:
+                  items: { type: array, items: { type: object, additionalProperties: true } }
+                  next_cursor: { type: [string, 'null'] }
+  /v1/settings:
+    get:
+      tags: [governance]
+      operationId: getSettings
+      x-srenautix-roles: [viewer, responder, approver, auditor, admin]
+      x-srenautix-external: false
+      responses:
+        '200':
+          description: 设置
+          content: { application/json: { schema: { $ref: '#/components/schemas/Settings' } } }
+    put:
+      tags: [governance]
+      operationId: putSettings
+      x-srenautix-roles: [admin]
+      x-srenautix-external: false
+      parameters: [{ $ref: '#/components/parameters/Csrf' }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/Settings' } } }
+      responses:
+        '200':
+          description: 新的设置
+          content: { application/json: { schema: { $ref: '#/components/schemas/Settings' } } }
+        '400': { $ref: '#/components/responses/Error' }
+  /v1/api-tokens:
+    get:
+      tags: [governance]
+      operationId: listApiTokens
+      x-srenautix-roles: [admin]
+      x-srenautix-external: false
+      responses:
+        '200':
+          description: API token（只有提议权限）
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/ApiToken' } } } }
+    post:
+      tags: [governance]
+      operationId: createApiToken
+      x-srenautix-roles: [admin]
+      x-srenautix-external: false
+      parameters: [{ $ref: '#/components/parameters/Csrf' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [name, expires_at]
+              properties:
+                name: { type: string, minLength: 1, maxLength: 100 }
+                expires_at: { oneOf: [{ type: 'null' }, { $ref: './schemas/common.schema.json#/$defs/Timestamp' }] }
+      responses:
+        '201':
+          description: 明文 token 只在这里返回一次
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [token, api_token]
+                properties:
+                  token: { type: string }
+                  api_token: { $ref: '#/components/schemas/ApiToken' }
+  /v1/api-tokens/{token_id}:
+    parameters:
+      - { name: token_id, in: path, required: true, schema: { type: string } }
+    delete:
+      tags: [governance]
+      operationId: deleteApiToken
+      x-srenautix-roles: [admin]
+      x-srenautix-external: false
+      parameters: [{ $ref: '#/components/parameters/Csrf' }]
+      responses:
+        '204': { description: 已删除 }
         '404': { $ref: '#/components/responses/Error' }
 components:
   securitySchemes:
@@ -1321,7 +2222,7 @@ components:
         seq: { type: integer, minimum: 1 }
         at: { $ref: './schemas/common.schema.json#/$defs/Timestamp', description: 开始时间 }
         tool: { type: string }
-        arguments: { type: object }
+        arguments: { type: object, additionalProperties: true }
         window:
           oneOf: [{ type: 'null' }, { $ref: './schemas/common.schema.json#/$defs/TimeWindow' }]
         limit_applied: { type: [integer, 'null'] }
@@ -1334,3 +2235,389 @@ components:
           oneOf: [{ type: 'null' }, { $ref: './schemas/common.schema.json#/$defs/EvidenceRef' }]
     ApprovalEnvelope:
       $ref: './gateway/v1/approval-envelope.schema.json'
+    IngestResult:
+      type: object
+      additionalProperties: false
+      required: [accepted, dropped, degraded]
+      properties:
+        accepted: { type: integer, minimum: 0 }
+        dropped:
+          { type: integer, minimum: 0, description: 被丢弃的告警数（Watchdog、severity=none、SreNautix 自身告警等） }
+        degraded: { type: boolean }
+    ChatLink:
+      type: object
+      additionalProperties: false
+      required: [channel, channel_user_id, method, linked_at]
+      properties:
+        channel: { $ref: './schemas/common.schema.json#/$defs/Channel' }
+        channel_user_id: { type: string }
+        method:
+          { type: string, enum: [code, identity], description: code 为 /link 绑定码；identity 为同一身份源自动绑定 }
+        linked_at: { $ref: './schemas/common.schema.json#/$defs/Timestamp' }
+    PermissionTarget:
+      type: object
+      additionalProperties: false
+      required: [cluster, namespace, labels]
+      properties:
+        cluster: { type: string }
+        namespace: { type: [string, 'null'] }
+        labels: { $ref: './schemas/common.schema.json#/$defs/Labels' }
+    EvalCase:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          case_id,
+          suite,
+          type,
+          incident_id,
+          label,
+          created_at,
+          truth,
+          pack_timing,
+          excluded,
+          snapshot_status,
+          last_results,
+        ]
+      properties:
+        case_id: { type: string }
+        suite: { type: string }
+        type: { type: string, enum: [incident, feedback, benign, abstain, scenario] }
+        incident_id: { oneOf: [{ type: 'null' }, { $ref: './schemas/common.schema.json#/$defs/Uuid' }] }
+        label: { type: string }
+        created_at: { $ref: './schemas/common.schema.json#/$defs/Timestamp' }
+        truth:
+          type: object
+          additionalProperties: false
+          required: [root_components, granularity, disposition]
+          properties:
+            root_components: { type: array, items: { $ref: './schemas/common.schema.json#/$defs/ComponentKey' } }
+            granularity: { type: [string, 'null'], enum: [pod, workload, component, node, null] }
+            disposition: { oneOf: [{ type: 'null' }, { $ref: './schemas/common.schema.json#/$defs/Disposition' }] }
+        pack_timing: { type: string, enum: [pack_before_incident, pack_after_incident] }
+        excluded:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [kind, ref, reason]
+            properties:
+              kind:
+                {
+                  type: string,
+                  enum: [incident_report, feedback, same_root_conclusion, pack_knowledge, retrieved_case],
+                }
+              ref: { type: string }
+              reason: { type: string }
+        snapshot_status: { type: string, enum: [queued, frozen] }
+        last_results:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [route_id, passes, runs, top1_hit]
+            properties:
+              route_id: { type: string }
+              passes: { type: integer, minimum: 0 }
+              runs: { type: integer, minimum: 0 }
+              top1_hit: { type: [boolean, 'null'] }
+    AgentHealth:
+      type: object
+      additionalProperties: false
+      required: [since, consecutive_days_met, required_days, scorecard, runtime]
+      properties:
+        since: { $ref: './schemas/common.schema.json#/$defs/Timestamp' }
+        consecutive_days_met: { type: integer, minimum: 0 }
+        required_days: { type: integer, minimum: 1 }
+        scorecard:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [metric, value, threshold, comparator, met, numerator, denominator, diagnostic]
+            properties:
+              metric:
+                type: string
+                enum:
+                  [
+                    untested_competitor_ratio,
+                    research_runs_p95,
+                    feedback_per_week,
+                    replay_top1,
+                    benign_false_positive,
+                    real_closed_loops,
+                    out_of_catalog_writes,
+                    portability_top1,
+                    zero_tool_ratio,
+                  ]
+              value: { type: [number, 'null'] }
+              threshold: { type: number }
+              comparator: { type: string, enum: [lt, le, ge, eq] }
+              met: { type: [boolean, 'null'] }
+              numerator: { type: [number, 'null'] }
+              denominator: { type: [number, 'null'] }
+              diagnostic: { type: boolean, description: 只作为诊断指标公开，不计入达标 }
+        runtime:
+          type: object
+          additionalProperties: false
+          required: [zero_tool_ratio, untested_competitor_ratio, rerun_p95, budget_cutoff_ratio, fallback_ratio]
+          properties:
+            zero_tool_ratio: { type: [number, 'null'] }
+            untested_competitor_ratio: { type: [number, 'null'] }
+            rerun_p95: { type: [number, 'null'] }
+            budget_cutoff_ratio: { type: [number, 'null'] }
+            fallback_ratio: { type: [number, 'null'] }
+    TopologyCoverage:
+      type: object
+      additionalProperties: false
+      required: [topology_version, components, unmapped_alerts, components_without_chains, suggestions]
+      properties:
+        topology_version: { type: integer, minimum: 0 }
+        components:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [component, type, discovered_by, chains, mapped_alerts]
+            properties:
+              component: { $ref: './schemas/common.schema.json#/$defs/ComponentKey' }
+              type: { type: [string, 'null'] }
+              discovered_by: { type: string, enum: [informer, ksm_history, pack, user, runtime] }
+              chains: { type: array, items: { type: string } }
+              mapped_alerts: { type: array, items: { type: string } }
+        unmapped_alerts:
+          type: array
+          description: 14 天内出现过、没有映射到组件的告警名
+          items:
+            type: object
+            additionalProperties: false
+            required: [alertname, count_14d, suggested_role, confidence, suggested_component, expr]
+            properties:
+              alertname: { type: string }
+              count_14d: { type: integer, minimum: 0 }
+              suggested_role: { $ref: './schemas/common.schema.json#/$defs/AlertRole' }
+              confidence: { type: number, minimum: 0, maximum: 1 }
+              suggested_component:
+                { oneOf: [{ type: 'null' }, { $ref: './schemas/common.schema.json#/$defs/ComponentKey' }] }
+              expr: { type: [string, 'null'] }
+        components_without_chains: { type: array, items: { $ref: './schemas/common.schema.json#/$defs/ComponentKey' } }
+        suggestions: { type: array, items: { type: string } }
+    IntegrationInstance:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          instance_id,
+          manifest,
+          git_source,
+          secret_refs,
+          last_success_at,
+          error_ratio_1h,
+          used_by,
+          capabilities,
+          over_privileged,
+        ]
+      properties:
+        instance_id: { type: string }
+        manifest: { $ref: './schemas/integration-manifest.schema.json' }
+        git_source:
+          type: object
+          additionalProperties: false
+          required: [repo, path, sha]
+          properties:
+            repo: { type: string }
+            path: { type: string }
+            sha: { type: string }
+        secret_refs: { type: array, items: { type: string }, description: 只有挂载文件的引用，永远不含密钥内容 }
+        last_success_at: { oneOf: [{ type: 'null' }, { $ref: './schemas/common.schema.json#/$defs/Timestamp' }] }
+        error_ratio_1h: { type: [number, 'null'] }
+        used_by:
+          type: object
+          additionalProperties: false
+          required: [chains, actions]
+          properties:
+            chains: { type: array, items: { type: string } }
+            actions: { type: array, items: { type: string } }
+        capabilities:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [name, maturity, verified, verified_at, error]
+            properties:
+              name: { type: string }
+              maturity: { type: string, enum: [alpha, beta, stable] }
+              verified: { type: boolean }
+              verified_at: { oneOf: [{ type: 'null' }, { $ref: './schemas/common.schema.json#/$defs/Timestamp' }] }
+              error: { type: [string, 'null'] }
+        over_privileged: { type: boolean, description: 凭证超出 requiredScopes，集成降级为 warn 或只提议 }
+    PackStatus:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          name,
+          version,
+          source,
+          ref,
+          digest,
+          maturity,
+          layer,
+          loaded,
+          load_error,
+          disabled_capabilities,
+          ci,
+          user_layer_lines,
+        ]
+      properties:
+        name: { type: string }
+        version: { type: string }
+        source: { type: string, enum: [git, oci, builtin] }
+        ref: { type: string }
+        digest: { $ref: './schemas/common.schema.json#/$defs/Sha256' }
+        maturity: { type: string, enum: [stable, beta, draft] }
+        layer: { type: string, enum: [builtin, user] }
+        loaded: { type: boolean }
+        load_error: { type: [string, 'null'] }
+        disabled_capabilities: { type: array, items: { type: string } }
+        ci:
+          oneOf:
+            - { type: 'null' }
+            - type: object
+              additionalProperties: false
+              required: [passed, report_url]
+              properties:
+                passed: { type: boolean }
+                report_url: { type: [string, 'null'] }
+        user_layer_lines: { type: [integer, 'null'] }
+    Drift:
+      type: object
+      additionalProperties: false
+      required: [in_sync, live_sha, detail]
+      properties:
+        in_sync: { type: boolean }
+        live_sha: { type: [string, 'null'] }
+        detail: { type: [string, 'null'] }
+    PauseState:
+      type: object
+      additionalProperties: false
+      required: [paused, reason, by, since, expires_at, held_count]
+      properties:
+        paused: { type: boolean }
+        reason: { type: [string, 'null'] }
+        by: { type: [string, 'null'] }
+        since: { oneOf: [{ type: 'null' }, { $ref: './schemas/common.schema.json#/$defs/Timestamp' }] }
+        expires_at: { oneOf: [{ type: 'null' }, { $ref: './schemas/common.schema.json#/$defs/Timestamp' }] }
+        held_count: { type: integer, minimum: 0 }
+    ModelRouteStatus:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          route_id,
+          model,
+          dialect_profile,
+          base_url_host,
+          in_domain,
+          failure_domain,
+          breaker,
+          breaker_reason,
+          health,
+          structured_failure_ratio,
+          price,
+          limits,
+          egress_categories,
+          provider_retention,
+          provider_fingerprint,
+        ]
+      properties:
+        route_id: { type: string }
+        model: { type: string }
+        dialect_profile: { type: string }
+        base_url_host: { type: string }
+        in_domain: { type: boolean }
+        failure_domain: { type: array, items: { $ref: './schemas/common.schema.json#/$defs/ComponentKey' } }
+        breaker: { type: string, enum: [closed, open, half_open] }
+        breaker_reason: { type: [string, 'null'], enum: [failures, latency, failure_domain, null] }
+        health:
+          type: object
+          additionalProperties: false
+          required: [p50_ms, error_ratio_1h]
+          properties:
+            p50_ms: { type: [number, 'null'] }
+            error_ratio_1h: { type: [number, 'null'] }
+        structured_failure_ratio: { type: [number, 'null'] }
+        price:
+          type: object
+          additionalProperties: false
+          required: [input_per_mtok, output_per_mtok, currency]
+          properties:
+            input_per_mtok: { type: number, minimum: 0 }
+            output_per_mtok: { type: number, minimum: 0 }
+            currency: { type: string }
+        limits:
+          type: object
+          additionalProperties: false
+          required: [per_incident_cost, daily_cost]
+          properties:
+            per_incident_cost: { type: [number, 'null'] }
+            daily_cost: { type: [number, 'null'] }
+        egress_categories: { type: array, items: { type: string } }
+        provider_retention: { type: [string, 'null'] }
+        provider_fingerprint: { type: [string, 'null'] }
+    Settings:
+      type: object
+      additionalProperties: false
+      required: [channels, retention, locale, time_zone, subscriptions]
+      properties:
+        channels:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [id, kind, target, enabled, rate_per_min]
+            properties:
+              id: { type: string }
+              kind: { $ref: './schemas/common.schema.json#/$defs/Channel' }
+              target: { type: string }
+              enabled: { type: boolean }
+              rate_per_min: { type: number, minimum: 0 }
+        retention:
+          type: object
+          additionalProperties: false
+          required: [incidents_days, research_days, raw_prompt_days]
+          properties:
+            incidents_days: { type: integer, minimum: 1 }
+            research_days: { type: integer, minimum: 1 }
+            raw_prompt_days: { type: integer, minimum: 0 }
+        locale: { type: string, enum: [zh-CN, en] }
+        time_zone: { type: string }
+        subscriptions:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [id, filter, channel_id]
+            properties:
+              id: { type: string }
+              filter:
+                type: object
+                additionalProperties: false
+                required: [cluster_id, severity, component]
+                properties:
+                  cluster_id: { type: [string, 'null'] }
+                  severity: { type: [string, 'null'], enum: [critical, warning, info, null] }
+                  component: { type: [string, 'null'] }
+              channel_id: { type: string }
+    ApiToken:
+      type: object
+      additionalProperties: false
+      required: [id, name, scopes, created_by, created_at, last_used_at, expires_at]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        scopes: { type: array, items: { type: string, enum: [propose] } }
+        created_by: { type: string }
+        created_at: { $ref: './schemas/common.schema.json#/$defs/Timestamp' }
+        last_used_at: { oneOf: [{ type: 'null' }, { $ref: './schemas/common.schema.json#/$defs/Timestamp' }] }
+        expires_at: { oneOf: [{ type: 'null' }, { $ref: './schemas/common.schema.json#/$defs/Timestamp' }] }

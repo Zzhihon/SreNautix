@@ -104,7 +104,7 @@
       "properties": {
         "kind": {
           "type": "string",
-          "description": "rule：命中判定规则；no_data：查询没有样本；partial_data：部分查询没有样本；source_error：数据源报错或超时；capability_missing：所需能力不可用；observability_gap：依赖的目标有 meta 告警；evaluation_error：CEL 求值出错；all_clear：没有命中任何规则",
+          "description": "rule：命中判定规则；no_data：查询没有样本；partial_data：部分查询没有样本；source_error：数据源报错或超时；capability_missing：所需能力不可用；observability_gap：依赖的目标有 meta 告警；evaluation_error：CEL 求值出错；all_clear：没有命中任何规则；model_judged：只读工具的结果没有 CEL 判定，由小模型对照 refutes_if 判定（可以支持 likely，不能单独支撑 evidence_consistent，展示时标注模型判定）",
           "enum": [
             "rule",
             "no_data",
@@ -113,7 +113,8 @@
             "capability_missing",
             "observability_gap",
             "evaluation_error",
-            "all_clear"
+            "all_clear",
+            "model_judged"
           ]
         },
         "text": { "type": "string", "maxLength": 1000 }

@@ -74,6 +74,7 @@
     },
     "config_schema": {
       "type": "object",
+      "additionalProperties": true,
       "description": "实例配置的 JSON Schema。密钥字段只写挂载文件的引用，用 x-srenautix-secret-ref: true 标出"
     },
     "required_scopes": {

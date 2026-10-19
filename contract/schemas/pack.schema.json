@@ -107,7 +107,7 @@
       "properties": {
         "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_.-]*$" },
         "signal": { "type": "string" },
-        "args": { "type": "object", "description": "参数的 JSON Schema（可移植子集）" },
+        "args": { "type": "object", "additionalProperties": true, "description": "参数的 JSON Schema（可移植子集）" },
         "description": { "type": "string" },
         "card": {
           "$ref": "evidence-card.schema.json",
@@ -247,6 +247,7 @@
         "action": { "type": "string" },
         "params": {
           "type": "object",
+          "additionalProperties": { "type": "string" },
           "description": "参数值为 CEL 表达式文本"
         },
         "expected_effect": { "$ref": "evidence-card.schema.json#/$defs/LocalizedText" }
@@ -359,7 +360,7 @@
         "params": {
           "type": "object",
           "description": "<chain>/<card> → 参数覆盖",
-          "additionalProperties": { "type": "object" }
+          "additionalProperties": { "type": "object", "additionalProperties": true }
         },
         "disable": {
           "type": "array",
@@ -419,7 +420,7 @@
             "properties": {
               "apiVersion": { "type": "string" },
               "kind": { "type": "string" },
-              "metadata": { "type": "object" }
+              "metadata": { "type": "object", "additionalProperties": true }
             }
           }
         },

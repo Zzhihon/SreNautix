@@ -67,7 +67,7 @@
       "type": "boolean",
       "description": "策略允许自动执行：等级为 reversible 或 reversible_recreatable、在策略允许的命名空间与动作内、未超过每小时上限。自动批准的断言 approver_principal 为 auto:<规则名>"
     },
-    "params": { "type": "object" },
+    "params": { "type": "object", "additionalProperties": true },
     "params_hash": { "$ref": "common.schema.json#/$defs/Sha256" },
     "canon_version": {
       "type": "string",
@@ -209,7 +209,7 @@
         "incident_id": { "$ref": "common.schema.json#/$defs/Uuid" },
         "binding": { "$ref": "#/$defs/Binding" },
         "action": { "type": "string" },
-        "params": { "type": "object" },
+        "params": { "type": "object", "additionalProperties": true },
         "research_run_id": { "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/Uuid" }] },
         "rule_id": { "type": ["string", "null"] },
         "hypothesis_id": { "type": ["string", "null"], "pattern": "^h[1-9]$" },
