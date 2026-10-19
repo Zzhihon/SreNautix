@@ -88,7 +88,24 @@ jobs:
 
       - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
 
+      # 构建可复现：同一份源码得到同一个 digest，Rekor 会拒绝重复的签名记录。
+      # digest 已有本工作流在同一 ref 上的有效签名时跳过签名与证明。
+      - name: 检查 digest 是否已签名
+        id: signed
+        env:
+          REF: ${{ env.IMAGE }}@${{ steps.build.outputs.digest }}
+          IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/image.yml@${{ github.ref }}
+        run: |
+          if cosign verify --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            --certificate-identity "$IDENTITY" "$REF" >/dev/null 2>&1; then
+            echo "$REF 已有有效签名，跳过签名与 SBOM 证明"
+            echo "done=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "done=false" >>"$GITHUB_OUTPUT"
+          fi
+
       - name: cosign 无密钥签名
+        if: steps.signed.outputs.done != 'true'
         env:
           REF: ${{ env.IMAGE }}@${{ steps.build.outputs.digest }}
         run: cosign sign --yes "$REF"
@@ -112,6 +129,7 @@ jobs:
           upload-release-assets: false
 
       - name: 以 cosign 证明附加两种 SBOM
+        if: steps.signed.outputs.done != 'true'
         env:
           REF: ${{ env.IMAGE }}@${{ steps.build.outputs.digest }}
         run: |
