@@ -24,7 +24,9 @@ import { registerAuthRoutes } from '../identity/routes.js';
 import { Sessions } from '../identity/sessions.js';
 import { IncidentEngine } from '../incident/engine.js';
 import { IncidentPipeline, listenIngest } from '../incident/pipeline.js';
-import { reconcileOnce, startReconcileLoop } from '../ingest/reconcile.js';
+import { reconcileFromReader, reconcileOnce, startReconcileLoop } from '../ingest/reconcile.js';
+import { ReaderProtocol } from '../topology/protocol.js';
+import { ReaderClock, ReaderRequestQueue, registerReaderRoutes } from '../topology/reader-routes.js';
 import { IngestService } from '../ingest/service.js';
 import { configureLog, logger } from '../log.js';
 import type { RoleArgs } from '../main.js';
@@ -379,6 +381,32 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
     worker,
   });
   new SpokeRelay(pool, listener, catalog).registerRoutes(app, auth);
+  // 多集群：分支 reader 的出站协议（contract/gateway/v1/reader.openapi.yaml）
+  const readerProtocol = new ReaderProtocol();
+  const readerClock = new ReaderClock();
+  const readerRequests = new ReaderRequestQueue(pool, readerProtocol);
+  registerReaderRoutes(app, {
+    pool,
+    auth,
+    store: topology,
+    protocol: readerProtocol,
+    requests: readerRequests,
+    clock: readerClock,
+    onAlertSnapshot: async (clusterId, snap) => {
+      const r = await reconcileFromReader(
+        pool,
+        clusterId,
+        snap,
+        ingest,
+        metrics,
+        c.ingest.self_label,
+        c.ingest.watchdog_alertname,
+      );
+      if (r.added || r.resolved) {
+        logger.info('reader 告警对账修正', { cluster_id: clusterId, added: r.added, resolved: r.resolved });
+      }
+    },
+  });
   notify.registerRoutes(app);
 
   const listen =

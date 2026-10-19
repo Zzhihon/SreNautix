@@ -84,28 +84,52 @@ export async function reconcileOnce(
     )) as PromVector;
     const firingFps = new Set(firing.data.result.map((s) => fingerprint(identityLabels(s.metric))));
     for (const s of forState.data.result) {
-      const labels = identityLabels(s.metric);
-      const fp = fingerprint(labels);
-      if (!firingFps.has(fp) || remote.has(fp) || !labels.alertname) {
-        continue;
+      const r = firingRuleAlert(s.metric, new Date(Number(s.value[1]) * 1000));
+      if (r && firingFps.has(r.fingerprint) && !remote.has(r.fingerprint)) {
+        remote.set(r.fingerprint, r);
       }
-      const activeAt = Number(s.value[1]);
-      remote.set(fp, {
-        source: 'reconcile',
-        labels,
-        annotations: {},
-        severity: normalizeSeverity(labels.severity),
-        status: 'firing',
-        suppressed: 'none',
-        startsAt: new Date(activeAt * 1000),
-        endsAt: null,
-        generatorUrl: null,
-        fingerprint: fp,
-        alertname: labels.alertname,
-      });
     }
     ok.push('prometheus');
   }
+  return applyRemote(pool, clusterId, remote, ok, ingest, metrics, selfLabel, watchdog);
+}
+
+/** 规则引擎报告为触发中的一个告警（ALERTS_FOR_STATE 或 reader 的规则快照）。没有告警名时为 null。 */
+export function firingRuleAlert(metric: Record<string, string>, activeAt: Date): RawAlert | null {
+  const labels = identityLabels(metric);
+  if (!labels.alertname) {
+    return null;
+  }
+  return {
+    source: 'reconcile',
+    labels,
+    annotations: {},
+    severity: normalizeSeverity(labels.severity),
+    status: 'firing',
+    suppressed: 'none',
+    startsAt: activeAt,
+    endsAt: null,
+    generatorUrl: null,
+    fingerprint: fingerprint(labels),
+    alertname: labels.alertname,
+  };
+}
+
+/**
+ * 用告警源的完整视图修正本地状态：补写本地没有的触发中告警；complete 为非空（全部来源都读取成功且没有截断）时，
+ * 结束本地触发、告警源中已经没有的告警。
+ */
+export async function applyRemote(
+  pool: pg.Pool,
+  clusterId: string,
+  remote: Map<string, RawAlert>,
+  complete: string[],
+  ingest: IngestService,
+  metrics: ServerMetrics,
+  selfLabel: string,
+  watchdog: string,
+): Promise<ReconcileResult> {
+  const ok = complete;
   const kept = [...remote.values()].filter((a) => a.labels[selfLabel] === undefined && a.alertname !== watchdog);
   const local = await firingAlertIds(pool, clusterId);
   const localFps = new Set([...local.values()].map((v) => v.fingerprint));
@@ -134,6 +158,52 @@ export async function reconcileOnce(
   metrics.reconcileRepairs.inc({ kind: 'added' }, missing.length);
   metrics.reconcileRepairs.inc({ kind: 'resolved' }, resolved);
   return { added: missing.length, resolved, sources: ok };
+}
+
+/** reader 推送的告警对账快照（协议 AlertReconcileSnapshot）。 */
+export interface ReaderAlertSnapshot {
+  taken_at: string;
+  alertmanager: { status: 'ok' | 'error'; truncated: boolean; items: unknown[] } | null;
+  rules: {
+    status: 'ok' | 'error';
+    truncated: boolean;
+    items: Array<{ labels: Record<string, string>; state: 'pending' | 'firing'; active_at: string | null }>;
+  } | null;
+}
+
+/**
+ * 多集群：分支 reader 每 60 秒推送本集群 Alertmanager 与规则引擎的快照，按同样的规则对账。
+ * 只有全部部分都读取成功且没有截断时，才据此结束告警源中已经没有的告警。
+ */
+export async function reconcileFromReader(
+  pool: pg.Pool,
+  clusterId: string,
+  snap: ReaderAlertSnapshot,
+  ingest: IngestService,
+  metrics: ServerMetrics,
+  selfLabel: string,
+  watchdog: string,
+): Promise<ReconcileResult> {
+  const now = new Date(snap.taken_at);
+  const remote = new Map<string, RawAlert>();
+  for (const a of snap.alertmanager?.status === 'ok' ? snap.alertmanager.items : []) {
+    const r = fromAlertmanager(a as AlertmanagerAlert, 'reconcile', now);
+    if (r.status === 'firing') {
+      remote.set(r.fingerprint, r);
+    }
+  }
+  for (const s of snap.rules?.status === 'ok' ? snap.rules.items : []) {
+    if (s.state !== 'firing' || !s.active_at) {
+      continue;
+    }
+    const r = firingRuleAlert(s.labels, new Date(s.active_at));
+    if (r && !remote.has(r.fingerprint)) {
+      remote.set(r.fingerprint, r);
+    }
+  }
+  const parts = [snap.alertmanager, snap.rules].filter((p) => p !== null);
+  const complete = parts.length > 0 && parts.every((p) => p?.status === 'ok' && !p.truncated);
+  return applyRemote(pool, clusterId, remote, complete ? ['reader'] : [], ingest, metrics, selfLabel, watchdog);
 }
 
 export function startReconcileLoop(
