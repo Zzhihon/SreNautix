@@ -1,5 +1,0 @@
-{
-  "source": "bot token 无效时 Bot API 返回 401",
-  "request": { "method": "POST", "path": "/bot<token>/sendMessage" },
-  "response": { "status": 401, "body": { "ok": false, "error_code": 401, "description": "Unauthorized" } }
-}

@@ -33,15 +33,25 @@ interface Route {
 
 const FIXTURES = resolve(import.meta.dirname, '../fixtures');
 
-/** 读取 test/fixtures/<dir>/<name>.json 中的录制响应（字段 response）。 */
+/** 有集成清单的渠道（integrations/<渠道>/）的录制夹具与签名向量只保存一份，在清单目录中。 */
+const INTEGRATION_FIXTURES = new Set(['telegram', 'feishu']);
+
+/** 夹具目录：渠道为 integrations/<dir>/fixtures，其余为 test/fixtures/<dir>。 */
+export function fixtureDir(dir: string): string {
+  return INTEGRATION_FIXTURES.has(dir)
+    ? resolve(import.meta.dirname, '../../../../integrations', dir, 'fixtures')
+    : join(FIXTURES, dir);
+}
+
+/** 读取 <夹具目录>/<name>.json 中的录制响应（字段 response）。 */
 export function fixture(dir: string, name: string): FixtureResponse {
-  const f = JSON.parse(readFileSync(join(FIXTURES, dir, `${name}.json`), 'utf8')) as { response: FixtureResponse };
+  const f = JSON.parse(readFileSync(join(fixtureDir(dir), `${name}.json`), 'utf8')) as { response: FixtureResponse };
   return f.response;
 }
 
 /** 读取整个夹具文件。 */
 export function fixtureFile<T>(dir: string, name: string): T {
-  return JSON.parse(readFileSync(join(FIXTURES, dir, name), 'utf8')) as T;
+  return JSON.parse(readFileSync(join(fixtureDir(dir), name), 'utf8')) as T;
 }
 
 export class FixtureServer {

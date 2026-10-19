@@ -1,5 +1,0 @@
-{
-  "source": "PATCH /open-apis/im/v1/messages/:message_id（更新已发送的消息卡片）",
-  "request": { "method": "PATCH", "path": "/open-apis/im/v1/messages/om_dc13264520392913993dd051dba21dcf" },
-  "response": { "status": 200, "body": { "code": 0, "msg": "success", "data": {} } }
-}

@@ -1,8 +1,0 @@
-{
-  "source": "Bot API 对已被删除的消息执行 editMessageText 返回 400",
-  "request": { "method": "POST", "path": "/bot<token>/editMessageText" },
-  "response": {
-    "status": 400,
-    "body": { "ok": false, "error_code": 400, "description": "Bad Request: message to edit not found" }
-  }
-}

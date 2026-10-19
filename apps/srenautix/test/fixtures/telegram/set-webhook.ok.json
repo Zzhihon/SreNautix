@@ -1,5 +1,0 @@
-{
-  "source": "https://core.telegram.org/bots/api#setwebhook：成功时 result 为 true",
-  "request": { "method": "POST", "path": "/bot<token>/setWebhook" },
-  "response": { "status": 200, "body": { "ok": true, "result": true, "description": "Webhook was set" } }
-}

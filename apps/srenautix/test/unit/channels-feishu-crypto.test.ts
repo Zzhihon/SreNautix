@@ -7,7 +7,7 @@ import { feishuButtonKey } from '../../src/notify/index.js';
 
 /** 向量由 openssl 与 shasum 独立生成，见夹具文件的 source。 */
 const v = JSON.parse(
-  readFileSync(resolve(import.meta.dirname, '../fixtures/feishu/signature-vectors.json'), 'utf8'),
+  readFileSync(resolve(import.meta.dirname, '../../../../integrations/feishu/fixtures/signature-vectors.json'), 'utf8'),
 ) as {
   official_decrypt: { encrypt_key: string; encrypt: string; plaintext: string };
   encrypt_key: string;
