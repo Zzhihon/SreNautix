@@ -1,0 +1,146 @@
+chains:
+  - id: pvc-capacity
+    title: { zh-CN: 持久卷容量, en: Persistent volume capacity }
+    runbook: pvc.md
+    cards:
+      - id: usage
+        title: { zh-CN: 卷使用率, en: Volume usage }
+        applies_to: { kinds: [PersistentVolumeClaim, Pod, StatefulSet, Deployment] }
+        params: { used_ratio: 0.85 }
+        refs:
+          - { name: used, signal: pvc_used_ratio, mode: range }
+        judge:
+          let:
+            - { name: peak, cel: max(used) }
+            - { name: anomaly_started_at, cel: 'first_above(used, params.used_ratio)' }
+          abnormal_if:
+            - cel: peak > params.used_ratio
+              say: { zh-CN: '卷使用率峰值 {peak, number, percent}', en: 'Peak volume usage {peak, number, percent}' }
+        display:
+          value: peak
+          unit: percent
+          threshold: params.used_ratio
+          table:
+            rows_from: used
+            sort_by: max(row)
+            columns:
+              - { header: { zh-CN: PVC, en: PVC }, cel: 'label(row, "persistentvolumeclaim")' }
+              - { header: { zh-CN: 峰值, en: Peak }, cel: max(row), unit: percent }
+        egress: allow
+      - id: inodes
+        title: { zh-CN: inode 使用率, en: Inode usage }
+        applies_to: { kinds: [PersistentVolumeClaim, Pod, StatefulSet, Deployment] }
+        params: { used_ratio: 0.9 }
+        refs:
+          - { name: used, signal: pvc_inodes_used_ratio, mode: range }
+        judge:
+          let:
+            - { name: peak, cel: max(used) }
+          abnormal_if:
+            - cel: peak > params.used_ratio
+              say: { zh-CN: 'inode 使用率峰值 {peak, number, percent}', en: 'Peak inode usage {peak, number, percent}' }
+        display: { value: peak, unit: percent, threshold: params.used_ratio }
+        egress: allow
+      - id: fill-forecast
+        title: { zh-CN: 写满预测, en: Fill forecast }
+        note:
+          { zh-CN: 按近 6 小时趋势，预计 hours 小时内写满判为异常, en: Volumes predicted to fill within the horizon }
+        applies_to: { kinds: [PersistentVolumeClaim, Pod, StatefulSet, Deployment] }
+        params: { hours: 24 }
+        refs:
+          - { name: hours, signal: pvc_hours_to_full, mode: instant, empty_is: normal }
+          - { name: used, signal: pvc_used_ratio, mode: instant }
+        judge:
+          let:
+            - { name: soon, cel: 'size(hours.filter(s, last(s) < double(params.hours)))' }
+          abnormal_if:
+            - cel: soon > 0
+              say: { zh-CN: '{soon} 个卷预计 24 小时内写满', en: '{soon} volumes will fill within the horizon' }
+        display:
+          table:
+            rows_from: hours
+            sort_by: -last(row)
+            columns:
+              - { header: { zh-CN: PVC, en: PVC }, cel: 'label(row, "persistentvolumeclaim")' }
+              - { header: { zh-CN: 小时, en: Hours }, cel: last(row) }
+        egress: allow
+      - id: claim-pending
+        title: { zh-CN: PVC 未绑定, en: PVC not bound }
+        applies_to: { kinds: [PersistentVolumeClaim] }
+        refs:
+          - { name: pending, signal: pvc_phase_pending, mode: range }
+        judge:
+          let:
+            - { name: stuck, cel: 'min(pending) >= 1.0' }
+          abnormal_if:
+            - cel: stuck
+              say: { zh-CN: PVC 在整个窗口内 Pending，没有绑定到卷, en: The PVC stayed pending for the whole window }
+        egress: allow
+      - id: volume-phase
+        title: { zh-CN: PV 状态, en: PV phase }
+        applies_to: { kinds: [PersistentVolume] }
+        refs:
+          - { name: phase, signal: pv_phase_bad, mode: range }
+        judge:
+          let:
+            - { name: bad, cel: 'size(phase.filter(s, max(s) >= 1.0))' }
+          abnormal_if:
+            - cel: bad > 0
+              say: { zh-CN: PV 处于 Failed 或 Pending, en: The PV is Failed or Pending }
+        display:
+          table:
+            rows_from: phase
+            columns:
+              - { header: { zh-CN: 状态, en: Phase }, cel: 'label(row, "phase")' }
+        egress: allow
+      - id: namespace-volumes
+        title: { zh-CN: 命名空间内最满的卷, en: Fullest volumes in the namespace }
+        note:
+          zh-CN: 沉默根因探测：命名空间出现错误、但没有指向原因的告警时执行，结果异常的卷加入根因候选
+          en: Silent root cause probe for namespaces with errors but no cause alert
+        applies_to: { kinds: [Namespace] }
+        probe: true
+        params: { used_ratio: 0.85 }
+        refs:
+          - { name: top, signal: namespace_pvc_used_ratio, mode: instant }
+        judge:
+          let:
+            - { name: peak, cel: max(top) }
+          abnormal_if:
+            - cel: peak > params.used_ratio
+              say:
+                {
+                  zh-CN: '命名空间内最满的卷已用 {peak, number, percent}',
+                  en: 'The fullest volume is {peak, number, percent} used',
+                }
+        display:
+          value: peak
+          unit: percent
+          table:
+            rows_from: top
+            sort_by: last(row)
+            columns:
+              - { header: { zh-CN: PVC, en: PVC }, cel: 'label(row, "persistentvolumeclaim")' }
+              - { header: { zh-CN: 使用率, en: Used }, cel: last(row), unit: percent }
+        egress: allow
+      - id: enospc-logs
+        title: { zh-CN: 磁盘写满日志, en: Disk full log lines }
+        applies_to: { kinds: [Pod, Namespace] }
+        probe: true
+        requires: [logs.match]
+        refs:
+          - { name: ns, signal: namespace_active, mode: instant }
+          - { name: lines, signal: enospc_log_lines, mode: logs, limit: 20, empty_is: normal }
+        judge:
+          let:
+            - { name: hits, cel: size(lines) }
+          abnormal_if:
+            - cel: hits > 0
+              say: { zh-CN: '窗口内有 {hits} 行磁盘写满日志', en: '{hits} disk-full log lines in the window' }
+        display:
+          table:
+            rows_from: lines
+            columns:
+              - { header: { zh-CN: Pod, en: Pod }, cel: 'label(row, "pod")' }
+              - { header: { zh-CN: 日志, en: Line }, cel: row.line }
+        egress: redact

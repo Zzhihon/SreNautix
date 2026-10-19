@@ -1,0 +1,183 @@
+api_version: srenautix.io/pack-test/v1
+interval: 1m
+input_series:
+  - { series: 'kube_namespace_status_phase{namespace="shop",phase="Active"}', values: '1x60' }
+  - { series: 'kube_namespace_status_phase{namespace="calm",phase="Active"}', values: '1x60' }
+  # data-db-0：挂在 db-0 上，持续增长到 95%
+  - {
+      series: 'kube_pod_spec_volumes_persistentvolumeclaims_info{namespace="shop",pod="db-0",volume="data",persistentvolumeclaim="data-db-0"}',
+      values: '1x60',
+    }
+  - {
+      series: 'kubelet_volume_stats_capacity_bytes{namespace="shop",persistentvolumeclaim="data-db-0"}',
+      values: '10000000000x60',
+    }
+  - {
+      series: 'kubelet_volume_stats_used_bytes{namespace="shop",persistentvolumeclaim="data-db-0"}',
+      values: '7000000000+40000000x60',
+    }
+  - {
+      series: 'kubelet_volume_stats_available_bytes{namespace="shop",persistentvolumeclaim="data-db-0"}',
+      values: '3000000000-40000000x60',
+    }
+  - { series: 'kubelet_volume_stats_inodes{namespace="shop",persistentvolumeclaim="data-db-0"}', values: '1000000x60' }
+  - {
+      series: 'kubelet_volume_stats_inodes_used{namespace="shop",persistentvolumeclaim="data-db-0"}',
+      values: '950000x60',
+    }
+  # data-cache-0：挂在 cache-0 上，平稳
+  - {
+      series: 'kube_pod_spec_volumes_persistentvolumeclaims_info{namespace="calm",pod="cache-0",volume="data",persistentvolumeclaim="data-cache-0"}',
+      values: '1x60',
+    }
+  - {
+      series: 'kubelet_volume_stats_capacity_bytes{namespace="calm",persistentvolumeclaim="data-cache-0"}',
+      values: '10000000000x60',
+    }
+  - {
+      series: 'kubelet_volume_stats_used_bytes{namespace="calm",persistentvolumeclaim="data-cache-0"}',
+      values: '2000000000x60',
+    }
+  - {
+      series: 'kubelet_volume_stats_available_bytes{namespace="calm",persistentvolumeclaim="data-cache-0"}',
+      values: '8000000000x60',
+    }
+  - {
+      series: 'kubelet_volume_stats_inodes{namespace="calm",persistentvolumeclaim="data-cache-0"}',
+      values: '1000000x60',
+    }
+  - {
+      series: 'kubelet_volume_stats_inodes_used{namespace="calm",persistentvolumeclaim="data-cache-0"}',
+      values: '10000x60',
+    }
+  - {
+      series: 'kube_persistentvolumeclaim_status_phase{namespace="shop",persistentvolumeclaim="logs-new",phase="Pending"}',
+      values: '1x60',
+    }
+  - {
+      series: 'kube_persistentvolumeclaim_status_phase{namespace="calm",persistentvolumeclaim="data-cache-0",phase="Pending"}',
+      values: '0x60',
+    }
+  - { series: 'kube_persistentvolume_status_phase{persistentvolume="pv-broken",phase="Failed"}', values: '0x20 1x40' }
+  - { series: 'kube_persistentvolume_status_phase{persistentvolume="pv-ok",phase="Failed"}', values: '0x60' }
+  - { series: 'kube_persistentvolume_status_phase{persistentvolume="pv-ok",phase="Pending"}', values: '0x60' }
+input_logs:
+  - labels: { namespace: shop, pod: db-0, container: postgres }
+    lines:
+      - { offset: 35m, line: 'PANIC: could not write to file "pg_wal/xlogtemp.31": No space left on device' }
+  - labels: { namespace: calm, pod: cache-0, container: redis }
+    lines:
+      - { offset: 35m, line: 'Background saving started' }
+tests:
+  - {
+      name: PVC 实体用量高,
+      eval_time: 40m,
+      card: pvc-capacity/usage,
+      entity: { kind: PersistentVolumeClaim, namespace: shop, name: data-db-0 },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: Pod 挂载的卷用量高,
+      eval_time: 40m,
+      card: pvc-capacity/usage,
+      entity: { kind: Pod, namespace: shop, name: db-0 },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: StatefulSet 汇总卷,
+      eval_time: 40m,
+      card: pvc-capacity/usage,
+      entity: { kind: StatefulSet, namespace: shop, name: db },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: 卷用量平稳,
+      eval_time: 40m,
+      card: pvc-capacity/usage,
+      entity: { kind: Pod, namespace: calm, name: cache-0 },
+      expect: { verdict: normal },
+    }
+  - {
+      name: inode 将满,
+      eval_time: 40m,
+      card: pvc-capacity/inodes,
+      entity: { kind: PersistentVolumeClaim, namespace: shop, name: data-db-0 },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: inode 充足,
+      eval_time: 40m,
+      card: pvc-capacity/inodes,
+      entity: { kind: PersistentVolumeClaim, namespace: calm, name: data-cache-0 },
+      expect: { verdict: normal },
+    }
+  - {
+      name: 预计很快写满,
+      eval_time: 40m,
+      card: pvc-capacity/fill-forecast,
+      entity: { kind: Pod, namespace: shop, name: db-0 },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: 没有在增长,
+      eval_time: 40m,
+      card: pvc-capacity/fill-forecast,
+      entity: { kind: Pod, namespace: calm, name: cache-0 },
+      expect: { verdict: normal },
+    }
+  - {
+      name: PVC 一直未绑定,
+      eval_time: 40m,
+      card: pvc-capacity/claim-pending,
+      entity: { kind: PersistentVolumeClaim, namespace: shop, name: logs-new },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: PVC 已绑定,
+      eval_time: 40m,
+      card: pvc-capacity/claim-pending,
+      entity: { kind: PersistentVolumeClaim, namespace: calm, name: data-cache-0 },
+      expect: { verdict: normal },
+    }
+  - {
+      name: PV 失败,
+      eval_time: 40m,
+      card: pvc-capacity/volume-phase,
+      entity: { kind: PersistentVolume, name: pv-broken },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: PV 正常,
+      eval_time: 40m,
+      card: pvc-capacity/volume-phase,
+      entity: { kind: PersistentVolume, name: pv-ok },
+      expect: { verdict: normal },
+    }
+  - {
+      name: 命名空间探测发现满卷,
+      eval_time: 40m,
+      card: pvc-capacity/namespace-volumes,
+      entity: { kind: Namespace, namespace: shop, name: shop },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: 命名空间探测正常,
+      eval_time: 40m,
+      card: pvc-capacity/namespace-volumes,
+      entity: { kind: Namespace, namespace: calm, name: calm },
+      expect: { verdict: normal },
+    }
+  - {
+      name: ENOSPC 日志,
+      eval_time: 40m,
+      card: pvc-capacity/enospc-logs,
+      entity: { kind: Pod, namespace: shop, name: db-0 },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: 没有 ENOSPC 日志,
+      eval_time: 40m,
+      card: pvc-capacity/enospc-logs,
+      entity: { kind: Namespace, namespace: calm, name: calm },
+      expect: { verdict: normal },
+    }

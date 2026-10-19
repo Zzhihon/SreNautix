@@ -1,0 +1,11 @@
+api_version: srenautix.io/pack/v1
+name: pvc
+version: 1.0.0
+description: 持久卷：容量与 inode、写满预测、PV 与 PVC 状态，以及命名空间出错时的卷容量探测与 ENOSPC 日志
+maturity: stable
+min_srenautix_version: 0.1.0
+requires:
+  - metrics.query
+  - metrics.query_range
+optional:
+  - logs.match
