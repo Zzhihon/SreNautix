@@ -33,7 +33,7 @@ tests:
     template: templates/gateway/admission.yaml
     set:
       profile: standard
-    documentSelector: {path: "spec.matchConditions[0].name", value: gateway-only}
+    documentSelector: {path: "$[?(@.kind == 'ValidatingAdmissionPolicy')].metadata.name", value: t-srenautix-gateway-baseline}
     asserts:
       - equal:
           path: spec.matchConditions[0].expression
@@ -45,7 +45,7 @@ tests:
     template: templates/gateway/admission.yaml
     set:
       profile: standard
-    documentSelector: {path: "spec.matchConditions[0].name", value: gateway-only}
+    documentSelector: {path: "$[?(@.kind == 'ValidatingAdmissionPolicy')].metadata.name", value: t-srenautix-gateway-baseline}
     asserts:
       - matchRegex: {path: 'spec.validations[0].expression', pattern: 'admissionregistration\.k8s\.io'}
       - matchRegex: {path: 'spec.validations[0].expression', pattern: 'rbac\.authorization\.k8s\.io'}
@@ -58,7 +58,7 @@ tests:
     set:
       profile: standard
       roles.gateway.actions: [node_cordon]
-    documentSelector: {path: "spec.matchConditions[0].name", value: gateway-only}
+    documentSelector: {path: "$[?(@.kind == 'ValidatingAdmissionPolicy')].metadata.name", value: t-srenautix-gateway-baseline}
     asserts:
       - matchRegex: {path: 'spec.validations[3].expression', pattern: '"/nodes"'}
       - notMatchRegex: {path: 'spec.validations[3].expression', pattern: '"/pods"'}

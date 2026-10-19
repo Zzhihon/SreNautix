@@ -27,6 +27,8 @@ env:
   OSV_SCANNER_VERSION: v2.7.0
   OSV_SCANNER_SHA256: 160c6253e2922e9e0a6a9771c5c4c40a4b3c6090b34a3cdd5e80c96cc2e4218b
   GOVULNCHECK_VERSION: v1.9.0
+  # 与 deploy/docker/srenautix-spoke.Dockerfile 的构建镜像相同，govulncheck 按发布二进制实际使用的标准库检查
+  RELEASE_GO_VERSION: 1.27.2
 
 jobs:
   detect:
@@ -74,6 +76,8 @@ jobs:
           yq -e '.onlyBuiltDependencies | length > 0' pnpm-workspace.yaml
       - name: 安装依赖（冻结锁文件）
         run: pnpm install --frozen-lockfile
+      - name: 安装测试用的 Prometheus、Alertmanager、VictoriaMetrics、MinIO、PostgreSQL
+        run: .github/scripts/install-test-binaries.sh "$RUNNER_TEMP/testbin"
       - name: lint
         run: pnpm lint
       - name: 契约生成结果与仓库一致
@@ -125,7 +129,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         if: needs.detect.outputs.go == 'true'
         with:
-          go-version-file: go.mod
+          go-version: ${{ env.RELEASE_GO_VERSION }}
       - name: govulncheck
         if: needs.detect.outputs.go == 'true'
         run: |
@@ -191,8 +195,8 @@ jobs:
             echo "上面的 action 没有按 40 位提交 SHA 固定" >&2
             exit 1
           fi
-      - name: shellcheck（deploy/ 下的脚本）
-        run: git ls-files 'deploy/**/*.sh' | xargs ./shellcheck
+      - name: shellcheck（deploy/ 与 .github/scripts/ 下的脚本）
+        run: git ls-files 'deploy/**/*.sh' '.github/scripts/*.sh' | xargs ./shellcheck
 
   images:
     needs: detect
