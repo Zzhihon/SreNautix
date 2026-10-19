@@ -27,6 +27,18 @@ export interface TelegramUpdatesDeps {
   now: () => number;
 }
 
+/**
+ * webhook 请求的来源校验：Telegram 不对更新正文签名，可信来源只靠 X-Telegram-Bot-Api-Secret-Token 头等于
+ * setWebhook 时给出的 secret_token（常数时间比较）。
+ */
+export function webhookSecretMatches(header: string | string[] | undefined, secret: string): boolean {
+  const want = Buffer.from(secret);
+  const got = Buffer.from(typeof header === 'string' ? header : '');
+  return got.length === want.length && timingSafeEqual(got, want);
+}
+
+export const WEBHOOK_SECRET_HEADER = SECRET_HEADER;
+
 function displayName(u: TgUser): string {
   return u.username ? `@${u.username}` : `${u.first_name}${u.last_name ? ` ${u.last_name}` : ''}`;
 }
@@ -206,11 +218,8 @@ export class TelegramUpdates {
 
   /** webhook 模式：Telegram 推送更新，X-Telegram-Bot-Api-Secret-Token 必须等于 setWebhook 时给出的 secret_token。 */
   registerWebhook(app: FastifyInstance, secret: string): void {
-    const want = Buffer.from(secret);
     app.post(WEBHOOK_PATH, async (req, reply) => {
-      const got = req.headers[SECRET_HEADER];
-      const g = Buffer.from(typeof got === 'string' ? got : '');
-      if (g.length !== want.length || !timingSafeEqual(g, want)) {
+      if (!webhookSecretMatches(req.headers[SECRET_HEADER], secret)) {
         throw unauthorized('webhook secret 不匹配');
       }
       await this.handle(req.body as TgUpdate);

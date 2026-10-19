@@ -78,6 +78,11 @@ export interface BuildOptions {
   pg: PgConfig;
   /** 不监听指标与探针端口（测试）。 */
   noAuxListeners?: boolean;
+  /**
+   * 测试用：通知与渠道回调使用的时钟（飞书回调的 5 分钟时效、编辑间隔与令牌桶）。状态库中的时间（提议 TTL 等）
+   * 仍取 PostgreSQL 的 now()。
+   */
+  now?: () => number;
   /** 测试用：API 端口覆盖配置。 */
   apiListen?: { host: string; port: number };
   /**
@@ -282,6 +287,7 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
     actions: new ServerNotifyActions(pool, proposals, feedback, chatLinks),
     metrics,
     isLeader: () => leader.isLeader(),
+    ...(o.now ? { now: o.now } : {}),
   });
 
   // 降级通道
