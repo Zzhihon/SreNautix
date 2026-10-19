@@ -8,6 +8,7 @@ import { useState } from 'react';
 import type { Proposal, ProposalDetail } from '../contract';
 import { AppLink, qk, useUiEnv } from '../data';
 import { useI18n } from '../i18n';
+import type { WebAuthnAssertion } from '../port';
 import { Button, ErrorBox, KeyValue, Mono } from '../primitives/basic';
 import { Collapsible } from '../primitives/overlays';
 import { TextAreaField, TextField } from '../primitives/form';
@@ -23,10 +24,10 @@ export interface ReauthHook {
 }
 
 export interface PasskeyHook {
-  /** 合规配置的 H 档要求通行密钥。 */
+  /** 合规配置下为 true：H 档审批要求通行密钥签名（L 档不需要）。 */
   needed: boolean;
   /** 用审批人的通行密钥签名，返回 WebAuthn 断言。 */
-  sign: (proposalId: string) => Promise<unknown>;
+  sign: (proposalId: string) => Promise<WebAuthnAssertion>;
 }
 
 const UNDOABLE_PHASES: ReadonlySet<string> = new Set(['verifying', 'verified']);
@@ -80,7 +81,7 @@ export function ApprovalSheet({
       if (!actions) {
         throw new Error(t('approval.no_actions'));
       }
-      const webauthn = passkey?.needed ? await passkey.sign(p.proposal_id) : null;
+      const webauthn = passkey?.needed && p.tier === 'H' ? await passkey.sign(p.proposal_id) : null;
       return actions.approve(p.proposal_id, { confirm_target: p.tier === 'H' ? typed : null, webauthn });
     },
     onSuccess: refresh,
@@ -327,7 +328,7 @@ export function ApprovalSheet({
                   <Button onClick={reauth.begin}>{t('approval.reauth')}</Button>
                 </div>
               )}
-              {passkey?.needed && (
+              {passkey?.needed && p.tier === 'H' && (
                 <p className={styles.dim}>
                   <KeyRound aria-hidden="true" width={14} height={14} /> {t('approval.passkey_needed')}
                 </p>

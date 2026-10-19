@@ -73,10 +73,7 @@ export function createHubPort(o: HubPortOptions): DataPort {
     approve: async (id, body) => {
       const r = await c.POST('/v1/proposals/{proposal_id}/approve', {
         params: { path: { proposal_id: id }, header: csrfHeader },
-        body:
-          body.webauthn === null
-            ? { confirm_target: body.confirm_target }
-            : (body as { confirm_target: string | null }),
+        body: { confirm_target: body.confirm_target, webauthn: body.webauthn },
       });
       return unwrap<{ proposal: Proposal }>('approveProposal', r).proposal;
     },

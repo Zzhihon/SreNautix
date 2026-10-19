@@ -8,7 +8,7 @@ export type { Formatters, I18n, Locale, MessageValues, Messages } from './i18n';
 export { ApiError } from './port';
 export { createHubClientFor, createHubPort } from './hubPort';
 export type { HubPortOptions } from './hubPort';
-export type { ActionPort, DataPort, IncidentQuery, ProposalQuery } from './port';
+export type { ActionPort, DataPort, IncidentQuery, ProposalQuery, WebAuthnAssertion } from './port';
 export * from './contract';
 export {
   AppLink,

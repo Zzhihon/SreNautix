@@ -34,6 +34,9 @@ export interface IncidentQuery {
   limit?: number;
 }
 
+/** WebAuthn 断言（AuthenticationResponseJSON），由宿主的通行密钥钩子生成，原样提交给中心。 */
+export type WebAuthnAssertion = Record<string, unknown>;
+
 export interface ProposalQuery {
   incident_id?: string;
   state?: Proposal['state'];
@@ -75,7 +78,7 @@ export interface DataPort {
 
 export interface ActionPort {
   /** approveProposal；H 档必须带 confirm_target，合规配置的 H 档附通行密钥断言。 */
-  approve(id: string, body: { confirm_target: string | null; webauthn: unknown }): Promise<Proposal>;
+  approve(id: string, body: { confirm_target: string | null; webauthn: WebAuthnAssertion | null }): Promise<Proposal>;
   /** rejectProposal；理由必填。 */
   reject(id: string, reason: string): Promise<Proposal>;
   /** undoProposal。 */
