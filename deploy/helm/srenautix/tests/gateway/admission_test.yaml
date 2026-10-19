@@ -41,6 +41,20 @@ tests:
       - equal: {path: spec.failurePolicy, value: Fail}
       - equal: {path: spec.paramKind, value: {apiVersion: v1, kind: ConfigMap}}
 
+  - it: 兜底策略匹配全部资源与子资源（"*/*" 不能与其他资源同时列出）
+    template: templates/gateway/admission.yaml
+    set:
+      profile: standard
+    documentSelector: {path: "$[?(@.kind == 'ValidatingAdmissionPolicy')].metadata.name", value: t-srenautix-gateway-baseline}
+    asserts:
+      - equal:
+          path: spec.matchConstraints.resourceRules
+          value:
+            - apiGroups: ["*"]
+              apiVersions: ["*"]
+              operations: [CREATE, UPDATE, DELETE, CONNECT]
+              resources: ["*/*"]
+
   - it: 兜底策略拒绝准入配置、RBAC、Secret、token 与熔断开关的写入
     template: templates/gateway/admission.yaml
     set:

@@ -23,7 +23,8 @@ spec:
       - apiGroups: ["*"]
         apiVersions: ["*"]
         operations: [CREATE, UPDATE, DELETE, CONNECT]
-        resources: ["*", "*/*"]
+        # "*/*" 匹配全部资源及其子资源；apiserver 不允许与其他资源同时列出
+        resources: ["*/*"]
   matchConditions:
     - name: gateway-only
       expression: request.userInfo.username == {{ $username | quote }}

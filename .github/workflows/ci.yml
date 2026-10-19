@@ -20,6 +20,8 @@ env:
   HELM_UNITTEST_SHA256: 48e86ecc1467b009630e5954375e5d8494139f73b466df5fe8c04fa45b634939
   KUBECONFORM_VERSION: v0.8.0
   KUBECONFORM_SHA256: 9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883
+  # deploy/kind/versions.env 中 KIND_VERSION 对应的 kind-linux-amd64
+  KIND_SHA256: aee6151561422756b764a4ae28e7f44cda5af5a9eead3cc9985112b1de8d8e0d
   PROMETHEUS_VERSION: 3.15.0
   PROMETHEUS_SHA256: 2a542df32eac02ee17b9d844fb2aa1de00dafa5476579ba8a3ba862e9d572ea0
   ACTIONLINT_VERSION: 1.7.12
@@ -194,6 +196,27 @@ jobs:
           helm unittest --help >/dev/null
       - name: lint、渲染校验与 helm-unittest
         run: deploy/helm/check.sh
+
+  # 在真实的 kube-apiserver 上对每份 values 做 server-side dry-run（准入策略、CEL、RBAC 的完整校验）
+  helm-server-dry-run:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: ${{ env.HELM_VERSION }}
+      - name: 创建单节点 Kind 集群（版本见 deploy/kind/versions.env）
+        run: |
+          source deploy/kind/versions.env
+          curl -fsSLo kind "https://github.com/kubernetes-sigs/kind/releases/download/${KIND_VERSION}/kind-linux-amd64"
+          echo "${KIND_SHA256}  kind" | sha256sum --check
+          chmod +x kind
+          ./kind create cluster --name dry-run --image "$KIND_NODE_IMAGE" --wait 120s
+      - name: server-side dry-run
+        run: deploy/helm/server-dry-run.sh
 
   workflows:
     runs-on: ubuntu-24.04
