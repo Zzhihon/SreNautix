@@ -40,17 +40,24 @@ async function waitReady(url: string, timeoutMs: number): Promise<void> {
 
 export interface Proc {
   url: string;
+  /** stderr 的最后 80 行（测试失败时写进错误信息）。 */
+  log(): string;
   stop(): Promise<void>;
 }
 
-function start(bin: string, args: string[], dir: string): ChildProcess {
+function start(bin: string, args: string[], dir: string): { p: ChildProcess; log: () => string } {
   const path = join(BIN, bin);
   if (!existsSync(path)) {
     throw new Error(`找不到 ${path}；按 docs/server/testing.md 下载`);
   }
   const p = spawn(path, args, { cwd: dir, stdio: ['ignore', 'ignore', 'pipe'] });
-  p.stderr?.resume();
-  return p;
+  const lines: string[] = [];
+  p.stderr?.setEncoding('utf8');
+  p.stderr?.on('data', (chunk: string) => {
+    lines.push(...chunk.split('\n').filter(Boolean));
+    lines.splice(0, Math.max(0, lines.length - 80));
+  });
+  return { p, log: () => `${bin}（退出码 ${p.exitCode ?? '运行中'}）stderr：\n${lines.join('\n')}` };
 }
 
 function stopper(p: ChildProcess, dir: string): () => Promise<void> {
@@ -90,7 +97,7 @@ export async function startAlertmanager(webhookUrl: string, token: string): Prom
       '',
     ].join('\n'),
   );
-  const p = start(
+  const { p, log } = start(
     'alertmanager',
     [
       '--config.file=am.yml',
@@ -99,13 +106,14 @@ export async function startAlertmanager(webhookUrl: string, token: string): Prom
       // 单实例：关闭 HA 集群。开启集群时 Alertmanager 在 gossip 稳定（settle）之前不发送任何通知，
       // 这段等待随机器快慢变化，会让 webhook 迟到几十秒
       '--cluster.listen-address=',
-      '--log.level=warn',
+      // debug 记录收到的告警与每次分组发送，测试超时时据此判断卡在哪一段
+      '--log.level=debug',
     ],
     dir,
   );
   const url = `http://127.0.0.1:${port}`;
   await waitReady(`${url}/-/ready`, 20_000);
-  return { url, stop: stopper(p, dir) };
+  return { url, log, stop: stopper(p, dir) };
 }
 
 /** Prometheus：只有一组告警规则，评估间隔 1 秒，发往给定的 Alertmanager。 */
@@ -128,7 +136,7 @@ export async function startPrometheus(rules: string, alertmanagerUrl: string): P
       '',
     ].join('\n'),
   );
-  const p = start(
+  const { p, log } = start(
     'prometheus',
     [
       '--config.file=prom.yml',
@@ -140,13 +148,15 @@ export async function startPrometheus(rules: string, alertmanagerUrl: string): P
   );
   const url = `http://127.0.0.1:${port}`;
   await waitReady(`${url}/-/ready`, 30_000);
-  return { url, stop: stopper(p, dir) };
+  return { url, log, stop: stopper(p, dir) };
 }
 
 export async function until<T>(
   what: string,
   fn: () => Promise<T | null | undefined | false>,
   timeoutMs = 30_000,
+  /** 超时时附在错误信息里的现场（各组件看到的状态、日志）。 */
+  diagnose?: () => Promise<string>,
 ): Promise<T> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
@@ -155,7 +165,7 @@ export async function until<T>(
       return v;
     }
     if (Date.now() > deadline) {
-      throw new Error(`等待 ${what} 超时`);
+      throw new Error(`等待 ${what} 超时${diagnose ? `\n${await diagnose()}` : ''}`);
     }
     await new Promise((r) => setTimeout(r, 250));
   }

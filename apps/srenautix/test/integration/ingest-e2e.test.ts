@@ -45,6 +45,27 @@ let prom: Proc;
 let ingest: IngestService;
 const metrics = new ServerMetrics('server', false);
 const received: unknown[] = [];
+const responses: string[] = [];
+
+/** 链路上每一段看到的状态：Prometheus 的告警、Alertmanager 的告警、server 收到的 webhook 与两个进程的日志。 */
+async function pipelineState(): Promise<string> {
+  const get = async (url: string) => {
+    try {
+      const r = await fetch(url, { signal: AbortSignal.timeout(3000) });
+      return `${r.status} ${(await r.text()).slice(0, 1500)}`;
+    } catch (e) {
+      return e instanceof Error ? e.message : String(e);
+    }
+  };
+  return [
+    `Prometheus /api/v1/alerts：${await get(`${prom.url}/api/v1/alerts`)}`,
+    `Prometheus /api/v1/alertmanagers：${await get(`${prom.url}/api/v1/alertmanagers`)}`,
+    `Alertmanager /api/v2/alerts：${await get(`${am.url}/api/v2/alerts`)}`,
+    `server 收到的 webhook：${received.length} 次，响应 ${responses.join('；') || '无'}`,
+    prom.log(),
+    am.log(),
+  ].join('\n');
+}
 
 beforeAll(async () => {
   db = await newTestDb();
@@ -70,6 +91,11 @@ beforeAll(async () => {
       received.push(req.body);
     }
   });
+  app.addHook('onResponse', async (req, reply) => {
+    if (req.url.startsWith('/v1/ingest/')) {
+      responses.push(`${new Date().toISOString()} ${reply.statusCode} ${Math.round(reply.elapsedTime)}ms`);
+    }
+  });
   ingest.registerRoutes(app);
   const addr = await app.listen({ host: '127.0.0.1', port: 0 });
   am = await startAlertmanager(`${addr}/v1/ingest/am`, TOKEN);
@@ -86,10 +112,15 @@ afterAll(async () => {
 
 describe('接入链路', () => {
   it('Alertmanager 的 webhook 写入告警状态，Watchdog 只记录时间', async () => {
-    const alerts = await until('两条告警进入 alert_state', async () => {
-      const a = await activeAlerts(db.server, 'c1', 0);
-      return a.length >= 2 ? a : null;
-    });
+    const alerts = await until(
+      '两条告警进入 alert_state',
+      async () => {
+        const a = await activeAlerts(db.server, 'c1', 0);
+        return a.length >= 2 ? a : null;
+      },
+      30_000,
+      pipelineState,
+    );
     const names = alerts.map((a) => a.alertname).sort();
     expect(names).toEqual(['DemoErrorRatio', 'DemoPodCrashLooping']);
     const crash = alerts.find((a) => a.alertname === 'DemoPodCrashLooping');
