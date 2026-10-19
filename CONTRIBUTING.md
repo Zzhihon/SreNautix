@@ -6,7 +6,7 @@ SreNautix is in the design stage. Design discussion is welcome in issues. Code c
 
 | Path | License | What you need |
 |---|---|---|
-| `contract/`, `packages/packs-sdk`, `packages/integration-sdk`, `packages/ui`, `packages/contract`, `plugins/`, `packs/` | Apache-2.0 | A DCO sign-off on every commit (`git commit -s`, which adds `Signed-off-by: Your Name <email>`). By signing off you certify the [Developer Certificate of Origin 1.1](https://developercertificate.org/). |
+| `contract/`, `packages/packs-sdk`, `packages/integration-sdk`, `packages/ui`, `packages/contract`, `plugins/`, `packs/`, `integrations/` | Apache-2.0 | A DCO sign-off on every commit (`git commit -s`, which adds `Signed-off-by: Your Name <email>`). By signing off you certify the [Developer Certificate of Origin 1.1](https://developercertificate.org/). |
 | Everything else (server-side code) | AGPL-3.0-or-later | Sign the [CLA](CLA.md) once, by commenting on your first pull request: `I have read the CLA Document and I hereby sign the CLA`. |
 
 A pull request that touches both kinds of paths needs both.

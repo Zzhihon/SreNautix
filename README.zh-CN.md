@@ -35,6 +35,6 @@ SreNautix 的处理流程：
 ## 许可
 
 - 服务端代码：[AGPL-3.0-or-later](LICENSE)。
-- `contract/`、`packages/{packs-sdk,integration-sdk,ui,contract}`、`plugins/`、`packs/`：[Apache-2.0](LICENSE.Apache-2.0)。
+- `contract/`、`packages/{packs-sdk,integration-sdk,ui,contract}`、`plugins/`、`packs/`、`integrations/`：[Apache-2.0](LICENSE.Apache-2.0)。
 
 为 AGPL 代码贡献需要签署 [CLA](CLA.md)；为 Apache-2.0 部分贡献只需 DCO 签名。详见 [CONTRIBUTING.md](CONTRIBUTING.md)。

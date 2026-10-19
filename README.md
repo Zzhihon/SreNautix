@@ -31,6 +31,6 @@ The design documents are in Chinese for now. English versions will be published 
 ## License
 
 - Server-side code: [AGPL-3.0-or-later](LICENSE).
-- `contract/`, `packages/{packs-sdk,integration-sdk,ui,contract}`, `plugins/`, `packs/`: [Apache-2.0](LICENSE.Apache-2.0).
+- `contract/`, `packages/{packs-sdk,integration-sdk,ui,contract}`, `plugins/`, `packs/`, `integrations/`: [Apache-2.0](LICENSE.Apache-2.0).
 
 Contributions to AGPL-licensed code require signing the [CLA](CLA.md). Contributions to Apache-2.0 parts only need a DCO sign-off. See [CONTRIBUTING.md](CONTRIBUTING.md).
