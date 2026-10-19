@@ -1,0 +1,6 @@
+SreNautix
+Copyright 2026 Zzhihon and SreNautix contributors.
+
+SreNautix is derived from an internal Ops-Agent prototype written by the same author for a self-hosted production Kubernetes cluster.
+
+Server-side code is licensed under the GNU Affero General Public License v3.0 or later (see LICENSE). The paths listed in README.md are licensed under the Apache License 2.0 (see LICENSE.Apache-2.0).
