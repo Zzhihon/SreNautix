@@ -23,6 +23,8 @@ export class Auth {
     private readonly callers: CallerRegistry,
     private bindings: Bindings,
     private readonly publicOrigin: string,
+    /** 控制台创建的 API token（存在 PG，只有提议权限）；不在调用方文件中的 token 再查这里。 */
+    private readonly apiTokens: ((token: string) => Promise<ServiceCaller | null>) | null = null,
   ) {}
 
   setBindings(b: Bindings): void {
@@ -37,7 +39,10 @@ export class Auth {
     const header = req.headers.authorization;
     if (header) {
       const m = /^Bearer\s+(\S+)$/i.exec(header);
-      const c = m ? this.callers.authenticate(m[1] as string) : null;
+      let c = m ? this.callers.authenticate(m[1] as string) : null;
+      if (!c && m && this.apiTokens) {
+        c = await this.apiTokens(m[1] as string);
+      }
       if (!c) {
         throw unauthorized('未知的 bearer token');
       }

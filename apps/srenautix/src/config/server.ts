@@ -107,6 +107,7 @@ export const serverConfigSchema = z
       })
       .strict()
       .default({ password_file: '/etc/srenautix/secrets/db/password', pool_size: 10 }),
+    // 事件引擎、调度器与 Telegram 长轮询单活：single 为单副本部署；lease 用 Kubernetes Lease 选主
     leader: z
       .discriminatedUnion('mode', [
         z.object({ mode: z.literal('single') }).strict(),
@@ -120,6 +121,10 @@ export const serverConfigSchema = z
           .strict(),
       ])
       .default({ mode: 'single' }),
+    // worker 的内部 API（事件流与研判明细）；server 以 token_file 中的 token 调用
+    worker: z.object({ url, token_file: path }).strict().optional(),
+    // 各集群 gateway 的生效策略（Git 挂载，与 gateway 同一份内容）
+    policies_dir: path.optional(),
     ingest: z
       .object({
         sources: z.array(ingestSource).default([]),

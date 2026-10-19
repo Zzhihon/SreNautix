@@ -135,7 +135,8 @@ export function ed25519Public(raw32B64u: string): KeyObject {
 }
 
 export function publicKeyB64u(k: KeyObject): string {
-  const jwk = createPublicKey(k).export({ format: 'jwk' }) as { x: string };
+  const pub = k.type === 'public' ? k : createPublicKey(k);
+  const jwk = pub.export({ format: 'jwk' }) as { x: string };
   return jwk.x;
 }
 

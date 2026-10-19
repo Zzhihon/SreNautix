@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { TopologyEdge, TopologyEvent, TopologyNode } from '@srenautix/contract';
+import canonicalize from 'canonicalize';
 import type pg from 'pg';
 import type { NodeLookup } from '../alerts/resolve.js';
 import { tx, type Queryable } from '../store/pool.js';
@@ -8,6 +9,11 @@ const TOMBSTONE_MS = 24 * 3600_000;
 
 export function edgeKey(e: Pick<TopologyEdge, 'from' | 'relation' | 'to'>): string {
   return `${e.from}|${e.relation}|${e.to}`;
+}
+
+/** 两个节点或边的内容是否相同（与键的顺序无关）。 */
+export function sameContent(a: unknown, b: unknown): boolean {
+  return canonicalize(a) === canonicalize(b);
 }
 
 export interface TopologyChange {
@@ -32,16 +38,19 @@ export class TopologyStore implements NodeLookup {
     if (!changes.length) {
       return 0;
     }
-    return tx(this.pool, async (c) => {
-      await c.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`srenautix.topology.${clusterId}`]);
-      let n = 0;
-      for (const ch of changes) {
-        if (await this.applyOne(c, clusterId, ch)) {
-          n++;
-        }
+    return tx(this.pool, (c) => this.applyIn(c, clusterId, changes));
+  }
+
+  /** 在调用方的事务里应用一批变更（reader 推送时与序号记录写在同一个事务里）；返回实际产生的事件数。 */
+  async applyIn(c: Queryable, clusterId: string, changes: readonly TopologyChange[]): Promise<number> {
+    await c.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`srenautix.topology.${clusterId}`]);
+    let n = 0;
+    for (const ch of changes) {
+      if (await this.applyOne(c, clusterId, ch)) {
+        n++;
       }
-      return n;
-    });
+    }
+    return n;
   }
 
   private async applyOne(c: Queryable, clusterId: string, ch: TopologyChange): Promise<boolean> {
@@ -65,7 +74,8 @@ export class TopologyStore implements NodeLookup {
     );
     const cur = open.rows[0];
     const isUpsert = ch.op.endsWith('_upsert');
-    if (isUpsert && cur && JSON.stringify(cur.body) === JSON.stringify(body)) {
+    // jsonb 不保留键的顺序，按 JCS 规范化后比较内容
+    if (isUpsert && cur && sameContent(cur.body, body)) {
       return false;
     }
     if (!isUpsert && !cur) {
@@ -193,8 +203,9 @@ export class TopologyStore implements NodeLookup {
     clusterId: string,
     item: 'node' | 'edge',
     source: TopologyEvent['source'],
+    c: Queryable = this.pool,
   ): Promise<Map<string, TopologyNode | TopologyEdge>> {
-    const r = await this.pool.query<{ key: string; body: TopologyNode | TopologyEdge }>(
+    const r = await c.query<{ key: string; body: TopologyNode | TopologyEdge }>(
       `SELECT key, body FROM server.topology_events
         WHERE cluster_id = $1 AND item = $2 AND source = $3 AND valid_to IS NULL AND op LIKE '%_upsert'`,
       [clusterId, item, source],

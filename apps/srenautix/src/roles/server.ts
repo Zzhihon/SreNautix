@@ -1,0 +1,592 @@
+import { createServer, type Server } from 'node:http';
+import { AlertCatalog, DEFAULT_RCA_PARAMS, type ResolvedRcaParams } from '@srenautix/core';
+import type { FastifyInstance } from 'fastify';
+import type pg from 'pg';
+import { createApp } from '../api/http.js';
+import { leaseLeader, singleLeader, type Leader } from '../api/leader.js';
+import { registerProposalRoutes } from '../api/routes-proposals.js';
+import { registerResearchRoutes } from '../api/routes-research.js';
+import { pgConfigFromEnv } from '../config/database.js';
+import { parseDuration, parseListen, readSecretFile } from '../config/files.js';
+import { loadServerConfig, type ServerConfig } from '../config/server.js';
+import { ConditionPublisher, serverConditions } from '../console-bff/conditions.js';
+import { registerIncidentRoutes } from '../console-bff/routes-incidents.js';
+import { apiTokenCaller, registerSystemRoutes } from '../console-bff/routes-system.js';
+import { registerEvents } from '../events/http.js';
+import { OutboxListener } from '../events/listener.js';
+import { Auth } from '../identity/auth.js';
+import { Bindings, scopeMatches } from '../identity/bindings.js';
+import { CallerRegistry } from '../identity/callers.js';
+import { ChatLinks } from '../identity/chat-links.js';
+import { LocalAdmin } from '../identity/local-admin.js';
+import { Oidc } from '../identity/oidc.js';
+import { registerAuthRoutes } from '../identity/routes.js';
+import { Sessions } from '../identity/sessions.js';
+import { IncidentEngine } from '../incident/engine.js';
+import { IncidentPipeline, listenIngest } from '../incident/pipeline.js';
+import { reconcileOnce, startReconcileLoop } from '../ingest/reconcile.js';
+import { IngestService } from '../ingest/service.js';
+import { configureLog, logger } from '../log.js';
+import type { RoleArgs } from '../main.js';
+import { ServerMetrics, startMetricsServer } from '../metrics.js';
+import { ServerNotifyActions } from '../notify/actions.js';
+import { NotifyService } from '../notify/index.js';
+import { PgMessageSource } from '../notify/source.js';
+import { Catalog } from '../proposals/catalog.js';
+import { FeedbackService } from '../proposals/feedback.js';
+import { Policies } from '../proposals/policy.js';
+import { ProposalService } from '../proposals/service.js';
+import { SpokeRelay } from '../proposals/spoke.js';
+import { Scheduler } from '../scheduler/admission.js';
+import { WorkerEventMirror } from '../scheduler/worker-events.js';
+import { DegradedLane } from '../stage-a/degraded.js';
+import { NoPackEvidence, NoPackRules } from '../stage-a/no-packs.js';
+import { StageAService } from '../stage-a/service.js';
+import { loadEd25519Private } from '../store/audit.js';
+import { AuditExporter, s3Client } from '../store/audit-export.js';
+import { purgeIdempotencyKeys } from '../store/idempotency.js';
+import { migrateExpand, migrationsReady } from '../store/migrate.js';
+import type { OutboxEvent } from '../store/outbox.js';
+import { createPool, type PgConfig } from '../store/pool.js';
+import { startInformerTopology } from '../topology/informer.js';
+import { TopologyStore } from '../topology/store.js';
+import { TopologyTargets } from '../topology/targets.js';
+import { serverTracks } from './server-schema.js';
+
+export interface ServerHandle {
+  app: FastifyInstance;
+  pool: pg.Pool;
+  config: ServerConfig;
+  metrics: ServerMetrics;
+  notify: NotifyService;
+  pipeline: IncidentPipeline;
+  ingest: IngestService;
+  proposals: ProposalService;
+  leader: Leader;
+  /** API 实际监听的地址（端口为 0 时由系统分配）。 */
+  apiUrl: string;
+  stop(): Promise<void>;
+}
+
+export interface BuildOptions {
+  config: ServerConfig;
+  pg: PgConfig;
+  /** 不监听指标与探针端口（测试）。 */
+  noAuxListeners?: boolean;
+  /** 测试用：API 端口覆盖配置。 */
+  apiListen?: { host: string; port: number };
+}
+
+/** 状态库里的抑制规则：matchers 是标签等值条件，全部满足的告警被抑制（只影响 SreNautix 自己的消息与研判）。 */
+async function suppressedAlertIds(c: pg.PoolClient | pg.Pool, clusterId: string, ids: string[]): Promise<Set<string>> {
+  if (!ids.length) {
+    return new Set();
+  }
+  const r = await c.query<{ alert_id: string }>(
+    `SELECT a.alert_id FROM server.alert_state a
+      WHERE a.alert_id = ANY($2::text[]) AND (a.suppressed <> 'none' OR EXISTS (
+        SELECT 1 FROM server.suppressions s WHERE s.cluster_id = $1 AND s.expires_at > now() AND a.labels @> s.matchers))`,
+    [clusterId, ids],
+  );
+  return new Set(r.rows.map((x) => x.alert_id));
+}
+
+/** 组装 server 角色的全部组件并启动 HTTP 接口与后台循环。 */
+export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
+  const c = o.config;
+  configureLog(c.log_level, { role: 'server', cluster_id: c.cluster_id });
+  const metrics = new ServerMetrics('server', !o.noAuxListeners);
+  const pool = createPool(o.pg, 'srenautix-server', c.database.pool_size);
+  const applied = await migrateExpand(pool, 'server', serverTracks);
+  if (applied.length) {
+    logger.info('扩展迁移完成', { applied });
+  }
+  const startedAt = new Date();
+  const abort = new AbortController();
+  const signal = abort.signal;
+  const publicOrigin = new URL(c.public_url).origin;
+
+  // 身份
+  let bindings = Bindings.load(c.identity.bindings_dir);
+  const callers = CallerRegistry.load(c.callers.tokens_file);
+  const sessionPolicy = {
+    idleMs: parseDuration('identity.session_idle', c.identity.session_idle),
+    absoluteMs: parseDuration('identity.session_absolute', c.identity.session_absolute),
+  };
+  const sessions = new Sessions(pool, sessionPolicy);
+  const auth = new Auth(sessions, callers, bindings, publicOrigin, (t) => apiTokenCaller(pool, t));
+  const lockout = {
+    maxFailures: c.identity.lockout_failures,
+    windowMs: parseDuration('identity.lockout_window', c.identity.lockout_window),
+    durationMs: parseDuration('identity.lockout_duration', c.identity.lockout_duration),
+  };
+  const localAdmin = c.identity.local_admin
+    ? new LocalAdmin(
+        pool,
+        {
+          username: c.identity.local_admin.username,
+          passwordHash: readSecretFile(
+            'identity.local_admin.password_hash_file',
+            c.identity.local_admin.password_hash_file,
+          ),
+          totpSecret: readSecretFile('identity.local_admin.totp_secret_file', c.identity.local_admin.totp_secret_file),
+        },
+        lockout,
+      )
+    : null;
+  const oidc = c.identity.oidc
+    ? new Oidc(pool, {
+        issuer: c.identity.oidc.issuer,
+        clientId: c.identity.oidc.client_id,
+        clientSecret: readSecretFile('identity.oidc.client_secret_file', c.identity.oidc.client_secret_file),
+        scopes: c.identity.oidc.scopes,
+        groupsClaim: c.identity.oidc.groups_claim,
+        nameClaim: c.identity.oidc.name_claim,
+        redirectUri: `${c.public_url.replace(/\/+$/, '')}/v1/auth/oidc/callback`,
+        allowHttp: c.identity.oidc.issuer.startsWith('http://'),
+      })
+    : null;
+  const chatLinks = new ChatLinks(pool);
+
+  // 领域数据
+  const catalog = Catalog.load();
+  let policies = Policies.load(c.policies_dir);
+  const topology = new TopologyStore(pool);
+  const targets = new TopologyTargets(pool);
+  const alertCatalog = new AlertCatalog([]);
+  const params = (): ResolvedRcaParams => DEFAULT_RCA_PARAMS;
+  const evidence = new NoPackEvidence();
+  const rules = new NoPackRules();
+
+  // 提议与审批
+  const ap = c.approvals;
+  const proposals = new ProposalService(
+    pool,
+    catalog,
+    {
+      profile: c.profile,
+      signingKey: ap ? loadEd25519Private(readSecretFile('approvals.signing_key_file', ap.signing_key_file)) : null,
+      keyId: ap?.key_id ?? 'none',
+      assertionTtlMs: ap ? parseDuration('approvals.assertion_ttl', ap.assertion_ttl) : 15 * 60_000,
+      proposalTtlMs: ap ? parseDuration('approvals.proposal_ttl', ap.proposal_ttl) : 2 * 3600_000,
+      proposalTtlCapMs: ap ? parseDuration('approvals.proposal_ttl_cap', ap.proposal_ttl_cap) : 24 * 3600_000,
+      hReauthMaxAgeMs: ap ? parseDuration('approvals.h_reauth_max_age', ap.h_reauth_max_age) : 5 * 60_000,
+    },
+    () => bindings,
+    targets,
+    () => policies,
+    metrics,
+  );
+  const feedback = new FeedbackService(pool, metrics);
+
+  // 研判调度
+  const sc = c.scheduler;
+  const scheduler = new Scheduler(
+    pool,
+    {
+      slots: sc.slots,
+      criticalReserved: sc.critical_reserved,
+      maxRunsPerIncident: sc.max_runs_per_incident,
+      runWindowMs: parseDuration('scheduler.run_window', sc.run_window),
+      stageTimeoutMs: parseDuration('scheduler.stage_timeout', sc.stage_timeout),
+      stormActiveAlerts: sc.storm_active_alerts,
+      stormNewIncidents: sc.storm_new_incidents,
+      stormWindowMs: parseDuration('scheduler.storm_window', sc.storm_window),
+      stormTopRoots: sc.storm_top_roots,
+      maxRecoveries: 2,
+    },
+    metrics,
+  );
+
+  // 领导者
+  const leader =
+    c.leader.mode === 'lease'
+      ? leaseLeader({
+          namespace: c.leader.namespace,
+          name: c.leader.name,
+          durationMs: parseDuration('leader.duration', c.leader.duration),
+          kubeconfigPath: c.topology.kubeconfig,
+        })
+      : singleLeader();
+
+  // 通知
+  const source = new PgMessageSource(
+    pool,
+    {
+      prefix: c.notify.prefix,
+      consoleUrl: c.public_url,
+      severities: c.notify.severities,
+      resolvedRetentionMs: parseDuration('notify.resolved_retention', c.notify.resolved_retention),
+    },
+    proposals,
+    feedback,
+  );
+  const notify = new NotifyService({
+    pool,
+    config: c.notify,
+    publicUrl: c.public_url,
+    source,
+    actions: new ServerNotifyActions(pool, proposals, feedback, chatLinks),
+    metrics,
+    isLeader: () => leader.isLeader(),
+  });
+
+  // 降级通道
+  const degradedLane = new DegradedLane(
+    {
+      clusterId: c.cluster_id,
+      prefix: c.notify.prefix,
+      consoleUrl: c.public_url,
+      language: c.stage_a.language,
+      severities: c.notify.severities,
+    },
+    alertCatalog,
+    params,
+    evidence,
+    notify,
+    metrics,
+  );
+
+  // 接入
+  const ingest = new IngestService(
+    pool,
+    c.ingest.sources,
+    { clusterId: c.cluster_id, selfLabel: c.ingest.self_label, watchdogAlertname: c.ingest.watchdog_alertname },
+    { catalog: alertCatalog, nodes: topology, ksm: null, ruleExpr: () => undefined, chronic: () => false },
+    metrics,
+    (_clusterId, raws) => {
+      degradedLane.ingest(raws, new Date());
+      void degradedLane.run(new Date()).catch((e: unknown) => logger.error('降级通道发送失败', { error: e }));
+    },
+  );
+
+  // 事件引擎与阶段 A
+  const engine = new IncidentEngine({
+    pool,
+    topology,
+    params,
+    changes: async () => [],
+    probes: async () => [],
+    stale: proposals,
+    metrics,
+    suppressedAlertIds: (cl, clusterId, ids) => suppressedAlertIds(cl as pg.PoolClient, clusterId, ids),
+  });
+  const stageA = new StageAService(pool, evidence, rules, proposals, metrics);
+  let degraded = false;
+  const pipeline = new IncidentPipeline(c.cluster_id, engine, stageA, scheduler, pool, metrics, {
+    changed: () => notify.syncNow(),
+    degraded: (_id, e) => {
+      degraded = true;
+      logger.error('状态库不可用，进入降级通道', { error: e.message });
+    },
+    recovered: () => {
+      degraded = false;
+      degradedLane.recovered();
+      void ingest.backfill().then((n) => logger.info('降级期间的告警已补写', { alerts: n }));
+      void notify.backfill().then((n) => logger.info('降级期间的消息已补写', { messages: n }));
+    },
+  });
+  const origRecompute = engine.recompute.bind(engine);
+  engine.recompute = async (clusterId: string) => {
+    const r = await origRecompute(clusterId);
+    degradedLane.snapshot(r.state);
+    return r;
+  };
+
+  // 事件流
+  const listener = new OutboxListener(o.pg, 'srenautix-server');
+  listener.start();
+
+  const workerToken = c.worker ? readSecretFile('worker.token_file', c.worker.token_file) : null;
+  const worker = c.worker && workerToken ? { url: c.worker.url.replace(/\/+$/, ''), token: workerToken } : null;
+
+  // 审计
+  const s3 = c.audit.s3;
+  const exporter = new AuditExporter(
+    pool,
+    s3
+      ? {
+          client: s3Client({
+            endpoint: s3.endpoint,
+            region: s3.region,
+            bucket: s3.bucket,
+            prefix: s3.prefix,
+            accessKey: readSecretFile('audit.s3.access_key_file', s3.access_key_file),
+            secretKey: readSecretFile('audit.s3.secret_key_file', s3.secret_key_file),
+            forcePathStyle: s3.force_path_style,
+          }),
+          bucket: s3.bucket,
+          prefix: s3.prefix,
+        }
+      : null,
+    loadEd25519Private(readSecretFile('audit.checkpoint_key_file', c.audit.checkpoint_key_file)),
+    `${c.cluster_id}-governance`,
+  );
+  let auditStatus = { sink: (s3 ? 's3' : 'pg') as 's3' | 'pg', lagSeconds: 0 };
+  exporter.runLoop(30_000, parseDuration('audit.checkpoint_interval', c.audit.checkpoint_interval), signal, (st) => {
+    auditStatus = st;
+    metrics.auditExportLag.set({ chain: 'governance' }, st.lagSeconds);
+  });
+
+  // HTTP
+  const app = await createApp({ bodyLimit: 8 << 20, trustProxy: true });
+  app.get('/healthz', async () => ({ status: 'ok' }));
+  app.get('/readyz', async (_req, reply) => {
+    const ok = await migrationsReady(pool, 'server', serverTracks);
+    return reply.code(ok ? 200 : 503).send({ status: ok ? 'ready' : 'not_ready' });
+  });
+  registerAuthRoutes(app, {
+    pool,
+    sessions,
+    auth,
+    localAdmin,
+    oidc,
+    chatLinks,
+    profile: c.profile,
+    publicUrl: c.public_url,
+    metrics,
+  });
+  ingest.registerRoutes(app);
+  registerEvents(app, {
+    pool,
+    schema: 'server',
+    owner: 'server',
+    listener,
+    onServed: (mode, n) => metrics.eventsServed.inc({ mode }, n),
+    authorize: async (req) => {
+      const { scopes } = await auth.reader(req);
+      if (scopes === 'all') {
+        return () => true;
+      }
+      return (e: OutboxEvent) =>
+        scopes.some((b) => b.scope.clusters.includes('*') || b.scope.clusters.includes(e.cluster_id)) ||
+        scopes.some((b) => scopeMatches(b, { cluster: e.cluster_id, namespace: null, labels: {} }));
+    },
+  });
+  registerProposalRoutes(app, { pool, auth, proposals, catalog, policies: () => policies });
+  registerResearchRoutes(app, { pool, auth, scheduler, topology, feedback, catalog, listener, worker });
+  registerIncidentRoutes(app, { pool, auth, feedback, topology, evidence, worker });
+  registerSystemRoutes(app, {
+    pool,
+    auth,
+    config: c,
+    catalog,
+    policies: () => policies,
+    proposals,
+    targets,
+    topology,
+    exporter,
+    worker,
+  });
+  new SpokeRelay(pool, listener, catalog).registerRoutes(app, auth);
+  notify.registerRoutes(app);
+
+  const listen =
+    o.apiListen ??
+    (() => {
+      const l = parseListen('listen.api', c.listen.api);
+      return { host: l.host ?? '0.0.0.0', port: l.port };
+    })();
+  const apiUrl = await app.listen({ host: listen.host, port: listen.port });
+  const aux: Server[] = [];
+  if (!o.noAuxListeners) {
+    const m = parseListen('listen.metrics', c.listen.metrics);
+    aux.push(startMetricsServer(metrics.registry, m.host, m.port));
+    const p = parseListen('listen.probes', c.listen.probes);
+    const probes = createServer((req, res) => {
+      if (req.url === '/healthz') {
+        res.writeHead(200).end('ok');
+        return;
+      }
+      if (req.url === '/readyz') {
+        migrationsReady(pool, 'server', serverTracks)
+          .then((ok) => res.writeHead(ok ? 200 : 503).end(ok ? 'ready' : 'not ready'))
+          .catch((e: Error) => res.writeHead(503).end(e.message));
+        return;
+      }
+      res.writeHead(404).end();
+    });
+    probes.listen(p.port, p.host);
+    aux.push(probes);
+  }
+
+  // 后台循环（只在主实例上做事）
+  const timers: NodeJS.Timeout[] = [];
+  const every = (ms: number, fn: () => Promise<unknown>, what: string) => {
+    const t = setInterval(() => {
+      if (!leader.isLeader()) {
+        return;
+      }
+      fn().catch((e: unknown) => logger.error(`${what}失败，下一轮重试`, { error: e }));
+    }, ms);
+    t.unref();
+    timers.push(t);
+  };
+  every(15_000, () => pipeline.kick(), '事件流水线');
+  listenIngest(
+    o.pg,
+    () => {
+      if (leader.isLeader()) {
+        void pipeline.kick().catch((e: unknown) => logger.error('事件流水线失败', { error: e }));
+      }
+    },
+    signal,
+  );
+  every(30_000, () => proposals.expire(), '提议过期检查');
+  every(3600_000, () => purgeIdempotencyKeys(pool), '幂等键清理');
+  every(3600_000, () => sessions.purgeExpired(), '会话清理');
+  every(
+    60_000,
+    async () => {
+      const d = await scheduler.queueDepth();
+      for (const [k, v] of Object.entries(d)) {
+        metrics.researchQueue.set({ state: k }, v);
+      }
+    },
+    '队列指标',
+  );
+  // 角色绑定与策略来自 Git 挂载，定期重新加载
+  every(
+    60_000,
+    async () => {
+      bindings = Bindings.load(c.identity.bindings_dir);
+      auth.setBindings(bindings);
+      policies = Policies.load(c.policies_dir);
+    },
+    '重新加载角色绑定与策略',
+  );
+
+  let reconcileOk: boolean | null = null;
+  const rc = c.ingest.reconcile;
+  if (rc.enabled && (rc.alertmanager_url || rc.prometheus_url)) {
+    const bearer = rc.bearer_token_file
+      ? readSecretFile('ingest.reconcile.bearer_token_file', rc.bearer_token_file)
+      : null;
+    startReconcileLoop(
+      parseDuration('ingest.reconcile.interval', rc.interval),
+      signal,
+      async () => {
+        if (!leader.isLeader()) {
+          return { added: 0, resolved: 0, sources: [] };
+        }
+        return reconcileOnce(
+          pool,
+          c.cluster_id,
+          {
+            alertmanagerUrl: rc.alertmanager_url ?? null,
+            prometheusUrl: rc.prometheus_url ?? null,
+            bearerToken: bearer,
+            timeoutMs: 10_000,
+          },
+          ingest,
+          metrics,
+          c.ingest.self_label,
+          c.ingest.watchdog_alertname,
+        );
+      },
+      metrics,
+      (ok) => (reconcileOk = ok),
+    );
+  }
+
+  if (worker) {
+    new WorkerEventMirror(pool, worker.url, worker.token, () => notify.syncNow()).run(signal);
+  }
+
+  let informer: Awaited<ReturnType<typeof startInformerTopology>> | null = null;
+  if (c.topology.source === 'informer') {
+    informer = startInformerTopology({
+      store: topology,
+      clusterId: c.cluster_id,
+      kubeconfigPath: c.topology.kubeconfig,
+      signal,
+    });
+  }
+
+  const conditions = new ConditionPublisher(pool, 'server', c.cluster_id, metrics);
+  every(
+    15_000,
+    async () => {
+      const srcs = await pool.query<{ source_id: string; last_received_at: Date }>(
+        'SELECT source_id, last_received_at FROM server.ingest_sources',
+      );
+      const fails = await pool.query<{ channel: string; last_error: string }>(
+        'SELECT channel, max(last_error) AS last_error FROM server.notify_messages WHERE last_error IS NOT NULL AND delivered_hash IS DISTINCT FROM desired_hash AND attempts >= 3 GROUP BY channel',
+      );
+      const restored = await pool.query<{ v: string | null }>(
+        "SELECT value #>> '{}' AS v FROM server.system_state WHERE key = 'restored_at'",
+      );
+      const frozen = await pool.query<{ cluster_id: string }>(
+        'SELECT cluster_id FROM server.spoke_status WHERE conditions @> \'[{"type":"Freeze","status":"True"}]\'',
+      );
+      await conditions.publish(
+        serverConditions({
+          ingestSources: c.ingest.sources.map((s) => ({
+            id: s.id,
+            lastReceivedAt: srcs.rows.find((x) => x.source_id === s.id)?.last_received_at ?? null,
+          })),
+          silenceThresholdMs: parseDuration('ingest.silence_threshold', c.ingest.silence_threshold),
+          lastWatchdogAt: ingest.lastWatchdogAt,
+          startedAt,
+          reconcileOk,
+          degraded,
+          storm: scheduler.stormMode,
+          budgetRatio: scheduler.budgetRatio,
+          audit: {
+            ...auditStatus,
+            thresholdSeconds: parseDuration('audit.export_lag_threshold', c.audit.export_lag_threshold) / 1000,
+          },
+          channelFailures: fails.rows.map((f) => ({ channel: f.channel, error: f.last_error })),
+          restoredAt: restored.rows[0]?.v ? new Date(restored.rows[0].v) : null,
+          frozenClusters: frozen.rows.map((x) => x.cluster_id),
+          now: new Date(),
+        }),
+      );
+    },
+    '状态条件',
+  );
+
+  await notify.start(signal);
+  void leader
+    .acquired()
+    .then(() => pipeline.kick().catch((e: unknown) => logger.error('事件流水线失败', { error: e })));
+  logger.info('server 已启动', { api: apiUrl, profile: c.profile, cluster_id: c.cluster_id });
+
+  return {
+    app,
+    pool,
+    config: c,
+    metrics,
+    notify,
+    pipeline,
+    ingest,
+    proposals,
+    leader,
+    apiUrl,
+    async stop() {
+      abort.abort();
+      timers.forEach(clearInterval);
+      await notify.stop();
+      await informer?.stop();
+      await leader.stop();
+      await app.close();
+      for (const s of aux) {
+        s.close();
+      }
+      await listener.stop();
+      await pool.end();
+    },
+  };
+}
+
+/** `--role=server` 入口。 */
+export async function run(args: RoleArgs): Promise<void> {
+  const config = loadServerConfig(args.configPath);
+  const h = await buildServer({ config, pg: pgConfigFromEnv(process.env, config.database.password_file) });
+  const shutdown = (sig: string) => {
+    logger.info('收到信号，停止 server', { signal: sig });
+    void h.stop().then(() => process.exit(0));
+  };
+  process.once('SIGTERM', () => shutdown('SIGTERM'));
+  process.once('SIGINT', () => shutdown('SIGINT'));
+}

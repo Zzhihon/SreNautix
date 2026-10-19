@@ -139,5 +139,14 @@ CREATE TABLE server.suppressions (
 );
 `,
     },
+    {
+      version: 2,
+      name: 'evidence fingerprint hysteresis state',
+      phase: 'expand',
+      sql: `
+-- 证据指纹的迟滞状态（packages/core observeFingerprint）：连续两次一致才视为变化
+ALTER TABLE server.incidents ADD COLUMN fingerprint_state jsonb;
+`,
+    },
   ],
 };
