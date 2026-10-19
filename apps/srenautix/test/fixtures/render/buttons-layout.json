@@ -1,0 +1,187 @@
+{
+  "name": "按钮按提议分行：L 档有批准与拒绝，H 档只有在控制台确认，已执行的可撤销，事件有控制台链接",
+  "kind": "incident",
+  "channels": ["telegram", "feishu"],
+  "chat": { "chat": "-1001234567890", "language": "zh" },
+  "results": [],
+  "storm": null,
+  "input": {
+    "incidentId": "6f1c2a9e-8b3d-4c1e-9a7f-2d5e8b4c1a01",
+    "clusterId": "prod",
+    "label": "Deployment:shop/worker:2026-10-16T10:00:00Z",
+    "severity": "critical",
+    "state": "firing",
+    "firstFiringAt": "2026-10-16T10:00:00Z",
+    "endedAt": null,
+    "lane": "urgent",
+    "language": "zh",
+    "message": {
+      "incident_id": "6f1c2a9e-8b3d-4c1e-9a7f-2d5e8b4c1a01",
+      "incident_version": 3,
+      "prefix": "",
+      "severity": "critical",
+      "title": "Deployment shop/worker 不可用",
+      "banner": null,
+      "sections": [
+        {
+          "kind": "remedy",
+          "blocks": [
+            {
+              "type": "list_item",
+              "text": "#1 pod_restart（L 档）→ shop/worker-a · 待审批",
+              "source": null,
+              "model_generated": false
+            },
+            {
+              "type": "list_item",
+              "text": "#2 workload_rolling_restart（L 档）→ shop/Deployment/worker · 待审批",
+              "source": null,
+              "model_generated": false
+            },
+            {
+              "type": "list_item",
+              "text": "#3 cnpg_switchover（H 档）→ data/pg-2 · 需在控制台审批",
+              "source": null,
+              "model_generated": false
+            },
+            {
+              "type": "list_item",
+              "text": "#4 node_cordon → node-3 · 已生效",
+              "source": null,
+              "model_generated": false
+            },
+            {
+              "type": "list_item",
+              "text": "#6 workload_scale → shop/Deployment/web · 校验中",
+              "source": null,
+              "model_generated": false
+            }
+          ]
+        }
+      ],
+      "buttons": [
+        { "kind": "approve", "label": "批准 #1", "callback": "p1:approve", "url": null },
+        { "kind": "reject", "label": "拒绝 #1", "callback": "p1:reject", "url": null },
+        { "kind": "approve", "label": "批准 #2", "callback": "p2:approve", "url": null },
+        { "kind": "reject", "label": "拒绝 #2", "callback": "p2:reject", "url": null },
+        {
+          "kind": "open_console",
+          "label": "在控制台确认 #3",
+          "callback": null,
+          "url": "https://console.example.com/proposals/00000000-0000-4000-8000-000000000003"
+        },
+        { "kind": "undo", "label": "撤销 #4", "callback": "p4:undo", "url": null },
+        { "kind": "undo", "label": "撤销 #6", "callback": "p6:undo", "url": null },
+        {
+          "kind": "open_console",
+          "label": "在控制台打开事件",
+          "callback": null,
+          "url": "https://console.example.com/incidents/6f1c2a9e-8b3d-4c1e-9a7f-2d5e8b4c1a01"
+        }
+      ]
+    },
+    "targets": [
+      {
+        "key": "p1:approve",
+        "kind": "approve",
+        "incidentId": "6f1c2a9e-8b3d-4c1e-9a7f-2d5e8b4c1a01",
+        "incidentVersion": 3,
+        "proposalId": "00000000-0000-4000-8000-000000000001",
+        "tier": "L",
+        "researchRunId": null,
+        "rootComponent": null,
+        "disposition": null,
+        "choices": []
+      },
+      {
+        "key": "p1:reject",
+        "kind": "reject",
+        "incidentId": "6f1c2a9e-8b3d-4c1e-9a7f-2d5e8b4c1a01",
+        "incidentVersion": 3,
+        "proposalId": "00000000-0000-4000-8000-000000000001",
+        "tier": "L",
+        "researchRunId": null,
+        "rootComponent": null,
+        "disposition": null,
+        "choices": []
+      },
+      {
+        "key": "p2:approve",
+        "kind": "approve",
+        "incidentId": "6f1c2a9e-8b3d-4c1e-9a7f-2d5e8b4c1a01",
+        "incidentVersion": 3,
+        "proposalId": "00000000-0000-4000-8000-000000000002",
+        "tier": "L",
+        "researchRunId": null,
+        "rootComponent": null,
+        "disposition": null,
+        "choices": []
+      },
+      {
+        "key": "p2:reject",
+        "kind": "reject",
+        "incidentId": "6f1c2a9e-8b3d-4c1e-9a7f-2d5e8b4c1a01",
+        "incidentVersion": 3,
+        "proposalId": "00000000-0000-4000-8000-000000000002",
+        "tier": "L",
+        "researchRunId": null,
+        "rootComponent": null,
+        "disposition": null,
+        "choices": []
+      },
+      {
+        "key": "p4:undo",
+        "kind": "undo",
+        "incidentId": "6f1c2a9e-8b3d-4c1e-9a7f-2d5e8b4c1a01",
+        "incidentVersion": 3,
+        "proposalId": "00000000-0000-4000-8000-000000000004",
+        "tier": "L",
+        "researchRunId": null,
+        "rootComponent": null,
+        "disposition": null,
+        "choices": []
+      },
+      {
+        "key": "p6:undo",
+        "kind": "undo",
+        "incidentId": "6f1c2a9e-8b3d-4c1e-9a7f-2d5e8b4c1a01",
+        "incidentVersion": 3,
+        "proposalId": "00000000-0000-4000-8000-000000000006",
+        "tier": "L",
+        "researchRunId": null,
+        "rootComponent": null,
+        "disposition": null,
+        "choices": []
+      }
+    ]
+  },
+  "expect": {
+    "contains": [
+      "[严重] Deployment shop/worker 不可用",
+      "未恢复 · 事件 Deployment:shop/worker:2026-10-16T10:00:00Z",
+      "首次触发 2026-10-16 10:00 UTC",
+      "3. 解决方案"
+    ],
+    "not_contains": ["控制台："],
+    "buttons": [
+      ["批准 #1", "拒绝 #1"],
+      ["批准 #2", "拒绝 #2"],
+      ["在控制台确认 #3"],
+      ["撤销 #4"],
+      ["撤销 #6"],
+      ["在控制台打开事件"]
+    ],
+    "url_buttons": 2,
+    "max_units": 4096,
+    "feishu_buttons": [
+      "批准 #1",
+      "拒绝 #1",
+      "批准 #2",
+      "拒绝 #2",
+      "在控制台确认 #3",
+      "撤销 #4",
+      "撤销 #6",
+      "在控制台打开事件"
+    ]
+  }
+}

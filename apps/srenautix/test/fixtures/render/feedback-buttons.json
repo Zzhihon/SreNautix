@@ -1,0 +1,124 @@
+{
+  "name": "两个反馈维度各占一行：根因（结论对 / 结论错）在前，处置判断（处置对 / 处置错）在后；恢复后有一键确认",
+  "kind": "incident",
+  "channels": ["telegram", "feishu"],
+  "chat": { "chat": "-1001234567890", "language": "zh" },
+  "results": [],
+  "storm": null,
+  "input": {
+    "incidentId": "6f1c2a9e-8b3d-4c1e-9a7f-2d5e8b4c1a07",
+    "clusterId": "prod",
+    "label": "postgres.cluster:data/pg:2026-10-16T10:00:00Z",
+    "severity": "critical",
+    "state": "resolved",
+    "firstFiringAt": "2026-10-16T10:00:00Z",
+    "endedAt": "2026-10-16T10:40:00Z",
+    "lane": "recovery",
+    "language": "zh",
+    "message": {
+      "incident_id": "6f1c2a9e-8b3d-4c1e-9a7f-2d5e8b4c1a07",
+      "incident_version": 2,
+      "prefix": "",
+      "severity": "critical",
+      "title": "PostgreSQL data/pg 主库重启",
+      "banner": null,
+      "sections": [
+        {
+          "kind": "root_cause",
+          "blocks": [
+            {
+              "type": "text",
+              "text": "根因 postgres.cluster:data/pg（可能）：WAL 归档写满磁盘后主库重启。",
+              "source": null,
+              "model_generated": true
+            },
+            {
+              "type": "text",
+              "text": "已反馈：对 · alice · 2026-10-16 10:21 UTC",
+              "source": null,
+              "model_generated": false
+            }
+          ]
+        }
+      ],
+      "buttons": [
+        { "kind": "feedback_confirm", "label": "结论对", "callback": "fb:ok", "url": null },
+        { "kind": "feedback_reject", "label": "结论错", "callback": "fb:bad", "url": null },
+        { "kind": "disposition_confirm", "label": "处置对", "callback": "dp:ok", "url": null },
+        { "kind": "disposition_reject", "label": "处置错", "callback": "dp:bad", "url": null },
+        { "kind": "resolved_confirm", "label": "确认已恢复", "callback": "rs", "url": null }
+      ]
+    },
+    "targets": [
+      {
+        "key": "fb:ok",
+        "kind": "feedback_confirm",
+        "incidentId": "6f1c2a9e-8b3d-4c1e-9a7f-2d5e8b4c1a07",
+        "incidentVersion": 2,
+        "proposalId": null,
+        "tier": null,
+        "researchRunId": "6f1c2e8a-3b9d-4c1e-9f3a-1b2c3d4e5f60",
+        "rootComponent": "postgres.cluster:data/pg",
+        "disposition": null,
+        "choices": []
+      },
+      {
+        "key": "fb:bad",
+        "kind": "feedback_reject",
+        "incidentId": "6f1c2a9e-8b3d-4c1e-9a7f-2d5e8b4c1a07",
+        "incidentVersion": 2,
+        "proposalId": null,
+        "tier": null,
+        "researchRunId": "6f1c2e8a-3b9d-4c1e-9f3a-1b2c3d4e5f60",
+        "rootComponent": null,
+        "disposition": null,
+        "choices": ["postgres.cluster:data/pg", "Node:node-3", "PersistentVolumeClaim:data/pgdata-pg-1"]
+      },
+      {
+        "key": "dp:ok",
+        "kind": "disposition_confirm",
+        "incidentId": "6f1c2a9e-8b3d-4c1e-9a7f-2d5e8b4c1a07",
+        "incidentVersion": 2,
+        "proposalId": null,
+        "tier": null,
+        "researchRunId": "6f1c2e8a-3b9d-4c1e-9f3a-1b2c3d4e5f60",
+        "rootComponent": null,
+        "disposition": "escalate",
+        "choices": []
+      },
+      {
+        "key": "dp:bad",
+        "kind": "disposition_reject",
+        "incidentId": "6f1c2a9e-8b3d-4c1e-9a7f-2d5e8b4c1a07",
+        "incidentVersion": 2,
+        "proposalId": null,
+        "tier": null,
+        "researchRunId": "6f1c2e8a-3b9d-4c1e-9f3a-1b2c3d4e5f60",
+        "rootComponent": null,
+        "disposition": null,
+        "choices": []
+      },
+      {
+        "key": "rs",
+        "kind": "resolved_confirm",
+        "incidentId": "6f1c2a9e-8b3d-4c1e-9a7f-2d5e8b4c1a07",
+        "incidentVersion": 2,
+        "proposalId": null,
+        "tier": null,
+        "researchRunId": null,
+        "rootComponent": null,
+        "disposition": null,
+        "choices": []
+      }
+    ]
+  },
+  "expect": {
+    "contains": [
+      "已恢复 · 事件 postgres.cluster:data/pg:2026-10-16T10:00:00Z",
+      "已反馈：对 · alice · 2026-10-16 10:21 UTC",
+      "【模型生成】根因 postgres.cluster:data/pg"
+    ],
+    "buttons": [["结论对", "结论错"], ["处置对", "处置错"], ["确认已恢复"]],
+    "feishu_buttons": ["结论对", "结论错", "处置对", "处置错", "确认已恢复"]
+  }
+}

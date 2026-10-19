@@ -1,0 +1,90 @@
+{
+  "name": "最近操作：最多 5 条，新的在前，写明时间、操作人、操作与结果",
+  "kind": "incident",
+  "channels": ["telegram", "feishu"],
+  "chat": { "chat": "-1001234567890", "language": "zh" },
+  "results": [
+    {
+      "at": "2026-10-16T10:06:00Z",
+      "actor": "@alice",
+      "action": "feedback_root",
+      "ok": true,
+      "code": null,
+      "message": "已记录：结论错（真实根因 Node:node-3）"
+    },
+    {
+      "at": "2026-10-16T10:05:00Z",
+      "actor": "@bob",
+      "action": "reject_timeout",
+      "ok": false,
+      "code": "reason_timeout",
+      "message": "5 分钟内未填写原因，未提交"
+    },
+    {
+      "at": "2026-10-16T10:04:00Z",
+      "actor": "@bob",
+      "action": "approve",
+      "ok": false,
+      "code": "already_decided",
+      "message": "已被 alice 批准"
+    },
+    {
+      "at": "2026-10-16T10:03:00Z",
+      "actor": "@alice",
+      "action": "approve",
+      "ok": true,
+      "code": null,
+      "message": "已批准，审批断言已签发"
+    },
+    {
+      "at": "2026-10-16T10:02:00Z",
+      "actor": "@alice",
+      "action": "undo",
+      "ok": false,
+      "code": "unavailable",
+      "message": "暂时无法处理，可重试"
+    },
+    {
+      "at": "2026-10-16T10:01:00Z",
+      "actor": "@carol",
+      "action": "feedback_root",
+      "ok": true,
+      "code": null,
+      "message": "已记录：结论对"
+    }
+  ],
+  "storm": null,
+  "input": {
+    "incidentId": "6f1c2a9e-8b3d-4c1e-9a7f-2d5e8b4c1a08",
+    "clusterId": "prod",
+    "label": "Node:node-3:2026-10-16T10:00:00Z",
+    "severity": "warning",
+    "state": "firing",
+    "firstFiringAt": "2026-10-16T10:00:00Z",
+    "endedAt": null,
+    "lane": "edit",
+    "language": "zh",
+    "message": {
+      "incident_id": "6f1c2a9e-8b3d-4c1e-9a7f-2d5e8b4c1a08",
+      "incident_version": 1,
+      "prefix": "",
+      "severity": "warning",
+      "title": "节点 node-3 磁盘压力",
+      "banner": null,
+      "sections": [],
+      "buttons": []
+    },
+    "targets": []
+  },
+  "expect": {
+    "order": [
+      "最近操作",
+      "10:06 UTC @alice 反馈根因：已记录：结论错（真实根因 Node:node-3）",
+      "10:05 UTC @bob 拒绝：5 分钟内未填写原因，未提交",
+      "10:04 UTC @bob 批准：已被 alice 批准",
+      "10:02 UTC @alice 撤销：暂时无法处理，可重试"
+    ],
+    "not_contains": ["@carol"],
+    "buttons": []
+  }
+}

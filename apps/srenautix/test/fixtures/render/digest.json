@@ -1,0 +1,65 @@
+{
+  "name": "风暴汇总：逐行列出事件与待审批数，带控制台链接按钮",
+  "kind": "digest",
+  "channels": ["telegram", "feishu"],
+  "chat": { "chat": "-1001234567890", "language": "zh" },
+  "prefix": "[影子]",
+  "input": {
+    "stormId": 7,
+    "startedAt": "2026-10-16T10:00:00Z",
+    "consoleUrl": "https://console.example.com/",
+    "members": [
+      {
+        "incidentId": "6f1c2a9e-8b3d-4c1e-9a7f-2d5e8b4c1b01",
+        "label": "Node:node-3:2026-10-16T10:00:00Z",
+        "severity": "critical",
+        "state": "firing",
+        "title": "节点 node-3 NotReady",
+        "pendingApprovals": 2
+      },
+      {
+        "incidentId": "6f1c2a9e-8b3d-4c1e-9a7f-2d5e8b4c1b02",
+        "label": "Deployment:shop/api:2026-10-16T10:00:00Z",
+        "severity": "warning",
+        "state": "firing",
+        "title": "api 副本不可用",
+        "pendingApprovals": 0
+      },
+      {
+        "incidentId": "6f1c2a9e-8b3d-4c1e-9a7f-2d5e8b4c1b03",
+        "label": "Deployment:shop/web:2026-10-16T10:00:00Z",
+        "severity": "warning",
+        "state": "resolved",
+        "title": "web 副本不可用",
+        "pendingApprovals": 1
+      },
+      {
+        "incidentId": "6f1c2a9e-8b3d-4c1e-9a7f-2d5e8b4c1b04",
+        "label": "Namespace:shop:2026-10-16T10:00:00Z",
+        "severity": "info",
+        "state": "firing",
+        "title": "shop 命名空间告警",
+        "pendingApprovals": 0
+      }
+    ]
+  },
+  "expect": {
+    "starts_with": "[影子] 事件风暴：自 10:00 UTC 起 4 个事件",
+    "order": [
+      "各事件消息已静默发送。",
+      "1. ",
+      "[严重] 节点 node-3 NotReady",
+      "待审批 2 个",
+      "2. ",
+      "无待审批提议",
+      "3. ",
+      "已恢复",
+      "待审批 1 个",
+      "4. "
+    ],
+    "buttons": [["在控制台打开"]],
+    "url_buttons": 1,
+    "max_units": 4096,
+    "feishu_buttons": ["在控制台打开"]
+  }
+}

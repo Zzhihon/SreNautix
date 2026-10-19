@@ -1,0 +1,8 @@
+{
+  "source": "发送或更新触发频率限制时返回 230020",
+  "request": { "method": "POST", "path": "/open-apis/im/v1/messages" },
+  "response": {
+    "status": 400,
+    "body": { "code": 230020, "msg": "This operation triggers the frequency limit.", "data": {} }
+  }
+}

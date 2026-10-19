@@ -1,0 +1,40 @@
+{
+  "name": "模型研判中：只有头部与横幅，没有报告各段；影子部署前缀在最前面",
+  "kind": "incident",
+  "channels": ["telegram", "feishu"],
+  "chat": { "chat": "-1001234567890", "language": "zh" },
+  "results": [],
+  "storm": null,
+  "input": {
+    "incidentId": "6f1c2a9e-8b3d-4c1e-9a7f-2d5e8b4c1a04",
+    "clusterId": "prod",
+    "label": "postgres.cluster:data/pg:2026-10-18T07:30:00Z",
+    "severity": "critical",
+    "state": "firing",
+    "firstFiringAt": "2026-10-18T07:31:12Z",
+    "endedAt": null,
+    "lane": "urgent",
+    "language": "zh",
+    "message": {
+      "incident_id": "6f1c2a9e-8b3d-4c1e-9a7f-2d5e8b4c1a04",
+      "incident_version": 1,
+      "prefix": "[影子]",
+      "severity": "critical",
+      "title": "PostgreSQL data/pg 主库重启",
+      "banner": "模型研判中",
+      "sections": [
+        { "kind": "situation", "blocks": [] },
+        { "kind": "root_cause", "blocks": [] }
+      ],
+      "buttons": []
+    },
+    "targets": []
+  },
+  "expect": {
+    "starts_with": "[影子] [严重] PostgreSQL data/pg 主库重启",
+    "contains": ["模型研判中", "首次触发 2026-10-18 07:31 UTC"],
+    "not_contains": ["1. 现状与背景", "2. 问题根源", "4. 相关证据"],
+    "entities": [{ "type": "bold", "text": "模型研判中" }],
+    "buttons": []
+  }
+}

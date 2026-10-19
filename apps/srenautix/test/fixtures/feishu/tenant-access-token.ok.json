@@ -1,0 +1,17 @@
+{
+  "source": "POST /open-apis/auth/v3/tenant_access_token/internal（自建应用获取 tenant_access_token），expire 单位为秒",
+  "request": {
+    "method": "POST",
+    "path": "/open-apis/auth/v3/tenant_access_token/internal",
+    "body": { "app_id": "cli_a5fb0ae6a4000000", "app_secret": "test-app-secret" }
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "code": 0,
+      "msg": "ok",
+      "tenant_access_token": "t-g1044ghJRUIJJ5ELPZ5GDKJJ2ZN7CYJ6NXHLLONE",
+      "expire": 7200
+    }
+  }
+}

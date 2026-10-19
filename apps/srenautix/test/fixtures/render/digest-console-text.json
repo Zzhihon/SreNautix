@@ -1,0 +1,30 @@
+{
+  "name": "风暴汇总在控制台没有公网 https 地址时以文字给出链接，没有任何按钮",
+  "kind": "digest",
+  "channels": ["telegram", "feishu"],
+  "chat": { "chat": "-1001234567890", "language": "en" },
+  "prefix": "",
+  "input": {
+    "stormId": 3,
+    "startedAt": "2026-10-16T10:00:00Z",
+    "consoleUrl": "http://srenautix.srenautix.svc:8080/",
+    "members": [
+      {
+        "incidentId": "6f1c2a9e-8b3d-4c1e-9a7f-2d5e8b4c1b05",
+        "label": "Node:node-1:2026-10-16T10:00:00Z",
+        "severity": "critical",
+        "state": "firing",
+        "title": "node-1 NotReady",
+        "pendingApprovals": 1
+      }
+    ]
+  },
+  "expect": {
+    "starts_with": "Incident storm: 1 incidents since 10:00 UTC",
+    "contains": ["1 awaiting approval", "Console: http://srenautix.srenautix.svc:8080/"],
+    "buttons": [],
+    "url_buttons": 0,
+    "entities": [{ "type": "code", "text": "http://srenautix.srenautix.svc:8080/" }],
+    "feishu_buttons": []
+  }
+}

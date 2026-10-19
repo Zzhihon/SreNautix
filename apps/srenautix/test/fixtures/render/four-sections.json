@@ -1,0 +1,88 @@
+{
+  "name": "事故报告按四段排列：现状与背景、问题根源、解决方案、相关证据；证据中的原文是引用块并注明来源",
+  "kind": "incident",
+  "channels": ["telegram", "feishu"],
+  "chat": { "chat": "-1001234567890", "language": "zh" },
+  "results": [],
+  "storm": null,
+  "input": {
+    "incidentId": "6f1c2a9e-8b3d-4c1e-9a7f-2d5e8b4c1a03",
+    "clusterId": "prod",
+    "label": "Deployment:shop/gateway:2026-10-18T07:30:00Z",
+    "severity": "warning",
+    "state": "firing",
+    "firstFiringAt": "2026-10-18T07:30:00Z",
+    "endedAt": null,
+    "lane": "edit",
+    "language": "zh",
+    "message": {
+      "incident_id": "6f1c2a9e-8b3d-4c1e-9a7f-2d5e8b4c1a03",
+      "incident_version": 2,
+      "prefix": "",
+      "severity": "warning",
+      "title": "gateway-2 停在初始化阶段",
+      "banner": null,
+      "sections": [
+        {
+          "kind": "situation",
+          "blocks": [
+            {
+              "type": "text",
+              "text": "gateway-2 自 07:28 停在初始化阶段，主容器未启动；其余 2 个副本承担全部流量。",
+              "source": null,
+              "model_generated": false
+            }
+          ]
+        },
+        {
+          "kind": "root_cause",
+          "blocks": [
+            {
+              "type": "text",
+              "text": "根因 Deployment:shop/gateway（证据一致）：迁移执行后回滚到旧镜像，旧镜像的初始化容器一直等待旧 schema 版本。",
+              "source": null,
+              "model_generated": true
+            }
+          ]
+        },
+        {
+          "kind": "remedy",
+          "blocks": [
+            { "type": "list_item", "text": "前滚到与当前 schema 匹配的镜像", "source": null, "model_generated": true }
+          ]
+        },
+        {
+          "kind": "evidence",
+          "blocks": [
+            {
+              "type": "list_item",
+              "text": "异常 · Pod 初始化超时 · gateway-2 Init:0/1 持续 25 分钟",
+              "source": null,
+              "model_generated": false
+            },
+            {
+              "type": "quote",
+              "text": "waiting for migrations: schema version 41 != 42",
+              "source": "Loki {namespace=\"shop\", pod=\"gateway-2\"}",
+              "model_generated": false
+            }
+          ]
+        }
+      ],
+      "buttons": []
+    },
+    "targets": []
+  },
+  "expect": {
+    "order": ["[警告] gateway-2 停在初始化阶段", "1. 现状与背景", "2. 问题根源", "3. 解决方案", "4. 相关证据"],
+    "contains": [
+      "gateway-2 自 07:28 停在初始化阶段",
+      "【模型生成】根因 Deployment:shop/gateway",
+      "- 【模型生成】前滚到与当前 schema 匹配的镜像",
+      "来源：Loki {namespace=\"shop\", pod=\"gateway-2\"}"
+    ],
+    "entities": [{ "type": "blockquote", "text": "waiting for migrations: schema version 41 != 42" }],
+    "buttons": [],
+    "max_units": 4096
+  }
+}

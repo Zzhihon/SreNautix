@@ -1,0 +1,66 @@
+{
+  "name": "超长时先省略优先级低的段：相关证据先于解决方案被省略，头部与按钮保留",
+  "kind": "incident",
+  "channels": ["telegram"],
+  "chat": { "chat": "-1001234567890", "language": "zh" },
+  "results": [],
+  "storm": null,
+  "input": {
+    "incidentId": "6f1c2a9e-8b3d-4c1e-9a7f-2d5e8b4c1a05",
+    "clusterId": "prod",
+    "label": "postgres.cluster:data/pg:2026-10-16T10:00:00Z",
+    "severity": "critical",
+    "state": "firing",
+    "firstFiringAt": "2026-10-16T10:00:00Z",
+    "endedAt": null,
+    "lane": "edit",
+    "language": "zh",
+    "message": {
+      "incident_id": "6f1c2a9e-8b3d-4c1e-9a7f-2d5e8b4c1a05",
+      "incident_version": 4,
+      "prefix": "",
+      "severity": "critical",
+      "title": "连接池耗尽",
+      "banner": null,
+      "sections": [
+        {
+          "kind": "remedy",
+          "blocks": [
+            { "type": "text", "text": { "$repeat": "建", "times": 790 }, "source": null, "model_generated": false },
+            { "type": "text", "text": { "$repeat": "议", "times": 790 }, "source": null, "model_generated": false },
+            { "type": "text", "text": { "$repeat": "案", "times": 790 }, "source": null, "model_generated": false }
+          ]
+        },
+        {
+          "kind": "evidence",
+          "blocks": [
+            { "type": "text", "text": { "$repeat": "证", "times": 790 }, "source": null, "model_generated": false },
+            { "type": "text", "text": { "$repeat": "据", "times": 790 }, "source": null, "model_generated": false },
+            { "type": "text", "text": { "$repeat": "链", "times": 790 }, "source": null, "model_generated": false }
+          ]
+        }
+      ],
+      "buttons": [{ "kind": "approve", "label": "批准 #1", "callback": "p1", "url": null }]
+    },
+    "targets": [
+      {
+        "key": "p1",
+        "kind": "approve",
+        "incidentId": "6f1c2a9e-8b3d-4c1e-9a7f-2d5e8b4c1a05",
+        "incidentVersion": 4,
+        "proposalId": "00000000-0000-4000-8000-000000000011",
+        "tier": "L",
+        "researchRunId": null,
+        "rootComponent": null,
+        "disposition": null,
+        "choices": []
+      }
+    ]
+  },
+  "expect": {
+    "contains": ["[严重] 连接池耗尽", "3. 解决方案", "4. 相关证据已省略，见控制台"],
+    "not_contains": ["3. 解决方案已省略"],
+    "buttons": [["批准 #1"]],
+    "max_units": 4096
+  }
+}

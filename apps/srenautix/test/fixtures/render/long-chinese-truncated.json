@@ -1,0 +1,257 @@
+{
+  "name": "超长中文与 BMP 之外的字符：按优先级省略到 4096 个 UTF-16 单位以内，实体不越界，按钮全部保留",
+  "kind": "incident",
+  "channels": ["telegram"],
+  "chat": { "chat": "-1001234567890", "language": "zh" },
+  "results": [
+    {
+      "at": "2026-10-16T10:00:00Z",
+      "actor": "alice",
+      "action": "approve",
+      "ok": false,
+      "code": "already_decided",
+      "message": { "$repeat": "已经由其他人处理", "times": 30 }
+    },
+    {
+      "at": "2026-10-16T10:01:00Z",
+      "actor": "alice",
+      "action": "approve",
+      "ok": false,
+      "code": "already_decided",
+      "message": { "$repeat": "已经由其他人处理", "times": 30 }
+    },
+    {
+      "at": "2026-10-16T10:02:00Z",
+      "actor": "alice",
+      "action": "approve",
+      "ok": false,
+      "code": "already_decided",
+      "message": { "$repeat": "已经由其他人处理", "times": 30 }
+    },
+    {
+      "at": "2026-10-16T10:03:00Z",
+      "actor": "alice",
+      "action": "approve",
+      "ok": false,
+      "code": "already_decided",
+      "message": { "$repeat": "已经由其他人处理", "times": 30 }
+    },
+    {
+      "at": "2026-10-16T10:04:00Z",
+      "actor": "alice",
+      "action": "approve",
+      "ok": false,
+      "code": "already_decided",
+      "message": { "$repeat": "已经由其他人处理", "times": 30 }
+    },
+    {
+      "at": "2026-10-16T10:05:00Z",
+      "actor": "alice",
+      "action": "approve",
+      "ok": false,
+      "code": "already_decided",
+      "message": { "$repeat": "已经由其他人处理", "times": 30 }
+    }
+  ],
+  "storm": null,
+  "input": {
+    "incidentId": "6f1c2a9e-8b3d-4c1e-9a7f-2d5e8b4c1a06",
+    "clusterId": "prod",
+    "label": { "$repeat": "长", "times": 300 },
+    "severity": "critical",
+    "state": "firing",
+    "firstFiringAt": "2026-10-16T10:00:00Z",
+    "endedAt": null,
+    "lane": "edit",
+    "language": "zh",
+    "message": {
+      "incident_id": "6f1c2a9e-8b3d-4c1e-9a7f-2d5e8b4c1a06",
+      "incident_version": 7,
+      "prefix": "",
+      "severity": "critical",
+      "title": { "$repeat": "数据库连接池耗尽导致请求排队，", "times": 20 },
+      "banner": null,
+      "sections": [
+        {
+          "kind": "situation",
+          "blocks": [
+            {
+              "type": "text",
+              "text": { "$repeat": "锁等待链 🔒 ", "times": 200 },
+              "source": null,
+              "model_generated": false
+            },
+            {
+              "type": "text",
+              "text": { "$repeat": "排队 😀 ", "times": 200 },
+              "source": null,
+              "model_generated": false
+            },
+            { "type": "text", "text": { "$repeat": "超时", "times": 400 }, "source": null, "model_generated": false }
+          ]
+        },
+        {
+          "kind": "root_cause",
+          "blocks": [
+            {
+              "type": "text",
+              "text": { "$repeat": "锁等待链 🔒 ", "times": 200 },
+              "source": null,
+              "model_generated": true
+            },
+            { "type": "text", "text": { "$repeat": "根", "times": 790 }, "source": null, "model_generated": true },
+            { "type": "text", "text": { "$repeat": "因", "times": 790 }, "source": null, "model_generated": true }
+          ]
+        },
+        {
+          "kind": "remedy",
+          "blocks": [
+            {
+              "type": "list_item",
+              "text": { "$repeat": "调大连接池并限制慢查询", "times": 20 },
+              "source": null,
+              "model_generated": true
+            },
+            {
+              "type": "list_item",
+              "text": { "$repeat": "修改集群配置中的 max_connections；", "times": 20 },
+              "source": null,
+              "model_generated": true
+            }
+          ]
+        },
+        {
+          "kind": "evidence",
+          "blocks": [
+            {
+              "type": "quote",
+              "text": { "$repeat": "FATAL: sorry, too many clients already 😀\n", "times": 40 },
+              "source": "Loki {namespace=\"data\"}",
+              "model_generated": false
+            }
+          ]
+        }
+      ],
+      "buttons": [
+        { "kind": "approve", "label": "批准 #1", "callback": "p1", "url": null },
+        { "kind": "approve", "label": "批准 #2", "callback": "p2", "url": null },
+        { "kind": "approve", "label": "批准 #3", "callback": "p3", "url": null },
+        { "kind": "approve", "label": "批准 #4", "callback": "p4", "url": null },
+        { "kind": "approve", "label": "批准 #5", "callback": "p5", "url": null },
+        { "kind": "approve", "label": "批准 #6", "callback": "p6", "url": null },
+        { "kind": "approve", "label": "批准 #7", "callback": "p7", "url": null },
+        { "kind": "approve", "label": "批准 #8", "callback": "p8", "url": null }
+      ]
+    },
+    "targets": [
+      {
+        "key": "p1",
+        "kind": "approve",
+        "incidentId": "6f1c2a9e-8b3d-4c1e-9a7f-2d5e8b4c1a06",
+        "incidentVersion": 7,
+        "proposalId": "00000000-0000-4000-8000-000000000021",
+        "tier": "L",
+        "researchRunId": null,
+        "rootComponent": null,
+        "disposition": null,
+        "choices": []
+      },
+      {
+        "key": "p2",
+        "kind": "approve",
+        "incidentId": "6f1c2a9e-8b3d-4c1e-9a7f-2d5e8b4c1a06",
+        "incidentVersion": 7,
+        "proposalId": "00000000-0000-4000-8000-000000000022",
+        "tier": "L",
+        "researchRunId": null,
+        "rootComponent": null,
+        "disposition": null,
+        "choices": []
+      },
+      {
+        "key": "p3",
+        "kind": "approve",
+        "incidentId": "6f1c2a9e-8b3d-4c1e-9a7f-2d5e8b4c1a06",
+        "incidentVersion": 7,
+        "proposalId": "00000000-0000-4000-8000-000000000023",
+        "tier": "L",
+        "researchRunId": null,
+        "rootComponent": null,
+        "disposition": null,
+        "choices": []
+      },
+      {
+        "key": "p4",
+        "kind": "approve",
+        "incidentId": "6f1c2a9e-8b3d-4c1e-9a7f-2d5e8b4c1a06",
+        "incidentVersion": 7,
+        "proposalId": "00000000-0000-4000-8000-000000000024",
+        "tier": "L",
+        "researchRunId": null,
+        "rootComponent": null,
+        "disposition": null,
+        "choices": []
+      },
+      {
+        "key": "p5",
+        "kind": "approve",
+        "incidentId": "6f1c2a9e-8b3d-4c1e-9a7f-2d5e8b4c1a06",
+        "incidentVersion": 7,
+        "proposalId": "00000000-0000-4000-8000-000000000025",
+        "tier": "L",
+        "researchRunId": null,
+        "rootComponent": null,
+        "disposition": null,
+        "choices": []
+      },
+      {
+        "key": "p6",
+        "kind": "approve",
+        "incidentId": "6f1c2a9e-8b3d-4c1e-9a7f-2d5e8b4c1a06",
+        "incidentVersion": 7,
+        "proposalId": "00000000-0000-4000-8000-000000000026",
+        "tier": "L",
+        "researchRunId": null,
+        "rootComponent": null,
+        "disposition": null,
+        "choices": []
+      },
+      {
+        "key": "p7",
+        "kind": "approve",
+        "incidentId": "6f1c2a9e-8b3d-4c1e-9a7f-2d5e8b4c1a06",
+        "incidentVersion": 7,
+        "proposalId": "00000000-0000-4000-8000-000000000027",
+        "tier": "L",
+        "researchRunId": null,
+        "rootComponent": null,
+        "disposition": null,
+        "choices": []
+      },
+      {
+        "key": "p8",
+        "kind": "approve",
+        "incidentId": "6f1c2a9e-8b3d-4c1e-9a7f-2d5e8b4c1a06",
+        "incidentVersion": 7,
+        "proposalId": "00000000-0000-4000-8000-000000000028",
+        "tier": "L",
+        "researchRunId": null,
+        "rootComponent": null,
+        "disposition": null,
+        "choices": []
+      }
+    ]
+  },
+  "expect": {
+    "contains": [
+      "[严重] 数据库连接池耗尽导致请求排队，",
+      "1. 现状与背景",
+      "2. 问题根源已省略，见控制台",
+      "3. 解决方案已省略，见控制台",
+      "4. 相关证据已省略，见控制台",
+      "最近操作已省略，见控制台"
+    ],
+    "buttons": [["批准 #1"], ["批准 #2"], ["批准 #3"], ["批准 #4"], ["批准 #5"], ["批准 #6"], ["批准 #7"], ["批准 #8"]],
+    "max_units": 4096
+  }
+}

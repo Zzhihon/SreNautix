@@ -1,0 +1,26 @@
+{
+  "source": "https://core.telegram.org/bots/api#message：webhook 推送的 Update（对机器人提示消息的回复）。reply_to_message 与 text 由测试替换",
+  "update": {
+    "update_id": 870011,
+    "message": {
+      "message_id": 305,
+      "from": {
+        "id": 111111,
+        "is_bot": false,
+        "first_name": "Alice",
+        "username": "alice_oncall",
+        "language_code": "zh-hans"
+      },
+      "chat": { "id": -1001234567890, "title": "oncall", "type": "supergroup" },
+      "date": 1792400040,
+      "reply_to_message": {
+        "message_id": 102,
+        "from": { "id": 7000000001, "is_bot": true, "first_name": "SreNautix", "username": "srenautix_test_bot" },
+        "chat": { "id": -1001234567890, "title": "oncall", "type": "supergroup" },
+        "date": 1792400010,
+        "text": "@alice_oncall，请回复本消息填写拒绝原因"
+      },
+      "text": "目标副本只剩 1 个，先扩容再重启"
+    }
+  }
+}

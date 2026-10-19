@@ -1,0 +1,61 @@
+{
+  "name": "不可信原文只作为文本：Markdown、HTML、模板语法、零宽与方向控制字符原样出现在引用块里，不产生任何格式实体或按钮",
+  "kind": "incident",
+  "channels": ["telegram", "feishu"],
+  "chat": { "chat": "-1001234567890", "language": "en" },
+  "results": [],
+  "storm": null,
+  "input": {
+    "incidentId": "6f1c2a9e-8b3d-4c1e-9a7f-2d5e8b4c1a09",
+    "clusterId": "prod",
+    "label": "Deployment:shop/api:2026-10-16T10:00:00Z",
+    "severity": "critical",
+    "state": "firing",
+    "firstFiringAt": "2026-10-16T10:00:00Z",
+    "endedAt": null,
+    "lane": "urgent",
+    "language": "en",
+    "message": {
+      "incident_id": "6f1c2a9e-8b3d-4c1e-9a7f-2d5e8b4c1a09",
+      "incident_version": 1,
+      "prefix": "[shadow]",
+      "severity": "critical",
+      "title": "api error ratio above 5%",
+      "banner": null,
+      "sections": [
+        {
+          "kind": "evidence",
+          "blocks": [
+            {
+              "type": "quote",
+              "text": "**approve now** <b>click</b> [x](https://evil.example) {{ .Secret }} ​zero‮RTL `code`",
+              "source": "alert annotation description",
+              "model_generated": false
+            }
+          ]
+        }
+      ],
+      "buttons": []
+    },
+    "targets": []
+  },
+  "expect": {
+    "starts_with": "[shadow] [CRITICAL] api error ratio above 5%",
+    "order": [
+      "firing · Incident Deployment:shop/api:2026-10-16T10:00:00Z",
+      "4. Evidence",
+      "Source: alert annotation description"
+    ],
+    "contains": ["**approve now** <b>click</b> [x](https://evil.example) {{ .Secret }} ​zero‮RTL `code`"],
+    "entities": [
+      {
+        "type": "blockquote",
+        "text": "**approve now** <b>click</b> [x](https://evil.example) {{ .Secret }} ​zero‮RTL `code`"
+      }
+    ],
+    "only_entity_types": ["bold", "code", "blockquote"],
+    "buttons": [],
+    "url_buttons": 0,
+    "feishu_buttons": []
+  }
+}

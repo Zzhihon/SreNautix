@@ -1,0 +1,5 @@
+{
+  "source": "更新已撤回的消息时返回 230011",
+  "request": { "method": "PATCH", "path": "/open-apis/im/v1/messages/om_dc13264520392913993dd051dba21dcf" },
+  "response": { "status": 400, "body": { "code": 230011, "msg": "The message was withdrawn.", "data": {} } }
+}

@@ -1,0 +1,47 @@
+{
+  "name": "控制台没有公网 https 地址：不放 URL 按钮，链接以等宽文字给出；没有回调按钮时键盘为空",
+  "kind": "incident",
+  "channels": ["telegram", "feishu"],
+  "chat": { "chat": "-1001234567890", "language": "zh" },
+  "results": [],
+  "storm": null,
+  "input": {
+    "incidentId": "6f1c2a9e-8b3d-4c1e-9a7f-2d5e8b4c1a02",
+    "clusterId": "prod",
+    "label": "Deployment:shop/worker:2026-10-16T10:00:00Z",
+    "severity": "warning",
+    "state": "firing",
+    "firstFiringAt": "2026-10-16T10:00:00Z",
+    "endedAt": null,
+    "lane": "urgent",
+    "language": "zh",
+    "message": {
+      "incident_id": "6f1c2a9e-8b3d-4c1e-9a7f-2d5e8b4c1a02",
+      "incident_version": 1,
+      "prefix": "",
+      "severity": "warning",
+      "title": "Deployment shop/worker 重启频繁",
+      "banner": null,
+      "sections": [],
+      "buttons": [
+        {
+          "kind": "open_console",
+          "label": "在控制台打开事件",
+          "callback": null,
+          "url": "http://localhost:8080/incidents/6f1c2a9e-8b3d-4c1e-9a7f-2d5e8b4c1a02"
+        }
+      ]
+    },
+    "targets": []
+  },
+  "expect": {
+    "contains": [
+      "[警告] Deployment shop/worker 重启频繁",
+      "控制台：http://localhost:8080/incidents/6f1c2a9e-8b3d-4c1e-9a7f-2d5e8b4c1a02"
+    ],
+    "buttons": [],
+    "url_buttons": 0,
+    "entities": [{ "type": "code", "text": "http://localhost:8080/incidents/6f1c2a9e-8b3d-4c1e-9a7f-2d5e8b4c1a02" }],
+    "feishu_buttons": []
+  }
+}

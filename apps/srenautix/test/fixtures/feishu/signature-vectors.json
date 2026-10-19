@@ -1,0 +1,32 @@
+{
+  "source": "加密载荷用 openssl enc -aes-256-cbc 生成（key = sha256(encrypt_key)，IV 前置后 base64），签名用 shasum -a 256 计算 timestamp + nonce + encrypt_key + 原始请求体；按钮回调值的签名用 openssl dgst -hmac 计算。均不经过 SreNautix 的代码",
+  "official_decrypt": {
+    "source": "飞书开放平台“配置 Encrypt Key”文档的示例",
+    "encrypt_key": "test key",
+    "encrypt": "P37w+VZImNgPEO1RBhJ6RtKl7n6zymIbEG1pReEzghk=",
+    "plaintext": "hello world"
+  },
+  "encrypt_key": "srenautix-test-encrypt-key",
+  "verification_token": "v3rificati0nT0kenForTests",
+  "app_secret": "test-app-secret",
+  "button": { "short_id": "Fsh0rtIdAbCdEf12", "signature": "1xYaq1n9bxEclGWQ" },
+  "now_ms": 1792400000000,
+  "card_action": {
+    "headers": {
+      "X-Lark-Request-Timestamp": "1792400000",
+      "X-Lark-Request-Nonce": "c8f9a1b2",
+      "X-Lark-Signature": "43c4a7ff0751d7f743a0b75dd270283222d10bb4e044aa77f5b2379e6a28555e"
+    },
+    "body": "{\"encrypt\":\"AQIDBAUGBwgJCgsMDQ4PEDEgJg0dWzmydNB677qpIJ1tziHY5TUqA/jeCbGuJf7asJFfOtMTJZzIL4XIYt897apLgJVdnkDEpRMbrYQh6hjpyz1DZQ3dkQ6o3WiUAeTmuPr/giHbODkv+IYYPtlVYBH5DVtwn8XowPjyho7hhuhnAdxug8qx09Rt+M8Z/lUA8MYDGw6jAIGC3JcJHFbuhXDvabxqzx0L5jCQ+ZIUyDhbai0FH5xhByp5Glfk3WVSXiyx4ax0GK1z2uRdaf4Kst7h98ez/MQj13bIJnIoypCiMIfJT2pQo3KONaZgQxaDySd6QvqijPQJy+ObJvriaZiYsC9z6uVRUSUhqyknjfiUQ5GImn82YirDlg5WfcvTKH38v0a4oP22mPilzLSHaQyz0hrjD41sJVjVuzM/f9PGTZKATuNoqPABmvSDT1ZvGUAqlk1Z+j9bM4cS3UHe3FlVOQfqD5iN6cvdqlp5zRtowh1lz2BCVMBcxPF4tuKovI+seUKTiqVwdnVU1wQ7H8zzJvY1ur39QaEzQswYqVqqgHyfUBTN9N/tiJPg8hPd+++T6O0k8RQPeqFTRYMvcT9mM8yMKfcPW4JThGxinO6lKAE4tmyLk/jDR7fPEUF6LGPTGgVLrAApgl9htpOaWDiJgT+D3wUMtBeN6HEuM6Us9UiW9irpbQHMtoMqCbWXwq2gom+ZrMmydhL0BC9bboPBaVrZlfsylMNFU4OFIkCn85GR/woqsRUlL2m9NVITvKhgmGaP1/3mx4F8p91Z2ZdkTSi8y++40mFQv2KTIePZ7mEaVsLi5GQ81CiOiSM7Xz3BTwtiwDKpJBrMGxz8DngviFGct7DcLvU/Z3kZ8b4JuU43TgvXAJzS3l9Nnxw/ub+RI+uufpOujsJPlsw9ViZ36bk6Jmp81MVa/YdD21fhdp/gOoB1mWwxNyZ44GPm+chZFwRhPs5zW4dTyPjEnw==\"}",
+    "plaintext": "{\"schema\":\"2.0\",\"header\":{\"event_id\":\"f7984f25108f8137722bb63cee927e66\",\"token\":\"v3rificati0nT0kenForTests\",\"create_time\":\"1792400000000000\",\"event_type\":\"card.action.trigger\",\"tenant_key\":\"2df73991750a7aaa\",\"app_id\":\"cli_a5fb0ae6a4000000\"},\"event\":{\"operator\":{\"tenant_key\":\"2df73991750a7aaa\",\"user_id\":\"8673abcd\",\"open_id\":\"ou_3c14f3a59eaf2825dbe25359f15e1001\",\"union_id\":\"on_cad4860e7af114fb4ff6c5d496d1001\"},\"token\":\"c-295ee57216a5dc9de90fefd0aadb4b1d7d000000\",\"action\":{\"value\":{\"k\":\"Fsh0rtIdAbCdEf12\",\"s\":\"1xYaq1n9bxEclGWQ\"},\"tag\":\"button\",\"name\":\"b_Fsh0rtIdAbCdEf12\"},\"host\":\"im_message\",\"context\":{\"open_message_id\":\"om_574d639e4a44e4dd646eaf628e2f0001\",\"open_chat_id\":\"oc_e4d2605ca917e695f54f11aaf56f0001\"}}}"
+  },
+  "url_verification": {
+    "headers": {
+      "X-Lark-Request-Timestamp": "1792400000",
+      "X-Lark-Request-Nonce": "c8f9a1b2",
+      "X-Lark-Signature": "04871c2164a3e24fba1d1581a721d93f64a803a8147794b7bbf6f9c7554e6b09"
+    },
+    "body": "{\"encrypt\":\"AQIDBAUGBwgJCgsMDQ4PENesAtfMeYwmLXcRsQR7dFfdPMWcsgJQZLNsp4AWvTmo0H+uRyPdpfLBmUdzvId7BBTQWMspU6Yz+5upqAZqlS7pKpkZ6zt2+5krsSHGircOLZaQp6T/muo+2VfiBwNtIw==\"}",
+    "plaintext": "{\"challenge\":\"ajls384kdjx98XX\",\"token\":\"v3rificati0nT0kenForTests\",\"type\":\"url_verification\"}"
+  }
+}
