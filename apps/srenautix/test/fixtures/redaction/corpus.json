@@ -1,0 +1,90 @@
+{
+  "description": "出站脱敏的 CI 语料（DESIGN §8.4）。secrets 中的每一项植入到 carriers 的每个模板里，断言脱敏后的提示词中不再出现该值；benign 中的文本必须原样保留。示例凭证取自各服务方文档的公开示例值或按格式规则构造，均不是真实凭证。凭证形状的值拆成 parts 存放，测试时拼接，避免仓库扫描把夹具当成泄露的凭证",
+  "carriers": [
+    "{value}",
+    "level=error msg=\"auth failed\" detail={value}",
+    "{\"env\":[{\"name\":\"X\",\"value\":\"{value}\"}],\"note\":\"{value}\"}",
+    "用户反馈：{value}，请尽快处理",
+    "2026-10-20T02:00:00Z ERROR request body: {\"payload\": \"{value}\"}"
+  ],
+  "secrets": [
+    { "kind": "cloud_ak", "label": "AWS 访问密钥 ID（AWS 文档示例）", "value": ["AKIA", "IOSFODNN7EXAMPLE"] },
+    {
+      "kind": "kv_secret",
+      "label": "AWS 私有访问密钥（AWS 文档示例，键值形式）",
+      "value": ["aws_secret_access_key=", "wJalrXUtnFEMI/K7MDENG/", "bPxRfiCYEXAMPLEKEY"],
+      "secret": ["wJalrXUtnFEMI/K7MDENG/", "bPxRfiCYEXAMPLEKEY"]
+    },
+    { "kind": "cloud_ak", "label": "阿里云 AccessKey ID", "value": ["LTAI", "5tQx8P2kB3vF9mZc7HdA"] },
+    {
+      "kind": "kv_secret",
+      "label": "阿里云 AccessKey Secret（键值形式）",
+      "value": ["AccessKeySecret: ", "8bJ3kQ0xZr9WmT2v", "Lp5NcYh7Ue4sDa"],
+      "secret": ["8bJ3kQ0xZr9WmT2v", "Lp5NcYh7Ue4sDa"]
+    },
+    { "kind": "cloud_ak", "label": "腾讯云 SecretId", "value": ["AKID", "z8krbsJ5yKBZQpn74WFkmLPx3gnPhESA"] },
+    {
+      "kind": "kv_secret",
+      "label": "腾讯云 SecretKey（键值形式）",
+      "value": ["SecretKey=", "Gu5t9xGARNpq86cd", "98joQYCN3Cozk1qA"],
+      "secret": ["Gu5t9xGARNpq86cd", "98joQYCN3Cozk1qA"]
+    },
+    {
+      "kind": "cloud_ak",
+      "label": "火山引擎 AccessKeyId",
+      "value": ["AKLT", "YjQ5ZmM3NTk0ZWQxNDE0YmFiOWNkMGQ2NjM2OTk4MmE"]
+    },
+    { "kind": "cloud_ak", "label": "Google API key", "value": ["AIza", "SyD-9tSrke72PouQMnMX-a7eZSW0jkFMBWY"] },
+    { "kind": "api_token", "label": "OpenAI 风格 API key", "value": ["sk-", "proj-4fJk2LmN8pQrS6tUvWxYz0aBcDeFgHiJ"] },
+    { "kind": "api_token", "label": "GitHub PAT", "value": ["ghp", "_16C7e42F292c6912E7710c838347Ae178B4a"] },
+    {
+      "kind": "jwt",
+      "label": "JWT（jwt.io 示例）",
+      "value": [
+        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9",
+        ".eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ",
+        ".SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
+      ]
+    },
+    {
+      "kind": "dsn",
+      "label": "PostgreSQL DSN",
+      "value": ["postgres://app:", "S3cr3t-Pa55", "@pg-rw.shop.svc:5432/orders?sslmode=require"],
+      "secret": ["S3cr3t-Pa55"]
+    },
+    {
+      "kind": "dsn",
+      "label": "Redis URL",
+      "value": ["redis://default:", "r3disPassw0rd", "@redis-master:6379/0"],
+      "secret": ["r3disPassw0rd"]
+    },
+    {
+      "kind": "bearer",
+      "label": "Authorization 头",
+      "value": ["Authorization: Bearer ", "9f8e7d6c5b4a39281706f5e4d3c2b1a0"],
+      "secret": ["9f8e7d6c5b4a39281706f5e4d3c2b1a0"]
+    },
+    { "kind": "kv_secret", "label": "密码键值", "value": ["password=", "Hunter2!xyz"], "secret": ["Hunter2!xyz"] },
+    { "kind": "cn_id", "label": "身份证号（GB 11643 标准示例）", "value": ["11010519491231002X"] },
+    { "kind": "phone", "label": "手机号", "value": ["13812345678"] },
+    { "kind": "phone", "label": "带国家码的手机号", "value": ["+86 139-1234-5678"], "secret": ["1234-5678"] },
+    { "kind": "bank_card", "label": "银联卡号（Luhn 有效）", "value": ["6222021234567890128"] },
+    {
+      "kind": "bank_card",
+      "label": "带空格的卡号（Luhn 有效）",
+      "value": ["6217 0012 3456 7890 122"],
+      "secret": ["3456 7890 122"]
+    },
+    { "kind": "bank_card", "label": "Visa 测试卡号", "value": ["4111111111111111"] }
+  ],
+  "benign": [
+    "ts=1792435822000000000 level=info msg=\"request done\" duration_ms=231",
+    "trace_id=4bf92f3577b34da6a3ce929d0e0e4736 span_id=00f067aa0ba902b7",
+    "pod shop/api-7d9c8b6f5-x2k4q restarted 3 times; image sha256:3b5c1d2e4f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c",
+    "sum(rate(http_requests_total{job=\"api\",code=~\"5..\"}[5m])) / sum(rate(http_requests_total{job=\"api\"}[5m]))",
+    "incident 2b0f8a4e-6c1d-4f3a-9e5b-7d2c1a0f9e8b version 3 at 2026-10-20T02:00:00Z",
+    "PVC data-postgres-0 used 98.7% (102400000000 bytes)",
+    "订单号 202610200001234，处理耗时 1234 毫秒",
+    "token bucket refill rate 20/min, tokens=5"
+  ]
+}

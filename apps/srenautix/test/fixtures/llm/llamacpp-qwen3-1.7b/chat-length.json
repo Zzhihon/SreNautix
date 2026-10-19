@@ -1,0 +1,57 @@
+{
+  "provenance": {
+    "provider": "llamacpp-qwen3-1.7b",
+    "model": "qwen3-1.7b",
+    "base_url_kind": "local",
+    "recorded_at": "2026-10-19T18:50:18.549Z",
+    "path": "/chat/completions"
+  },
+  "request": {
+    "model": "qwen3-1.7b",
+    "messages": [
+      {
+        "role": "user",
+        "content": "Explain how PostgreSQL WAL archiving works."
+      }
+    ],
+    "max_completion_tokens": 32
+  },
+  "status": 200,
+  "body": {
+    "choices": [
+      {
+        "finish_reason": "length",
+        "index": 0,
+        "message": {
+          "role": "assistant",
+          "content": "",
+          "reasoning_content": "Okay, I need to explain how PostgreSQL's WAL archiving works. Let me start by recalling what I know about WAL in PostgreSQL. WAL stands for"
+        }
+      }
+    ],
+    "created": 1792435818,
+    "model": "qwen3-1.7b",
+    "system_fingerprint": "b11738-f174553e1",
+    "object": "chat.completion",
+    "usage": {
+      "completion_tokens": 32,
+      "prompt_tokens": 17,
+      "total_tokens": 49,
+      "prompt_tokens_details": {
+        "cached_tokens": 16
+      }
+    },
+    "id": "chatcmpl-lbJceLtgxbkQcRImNxOh23pxDGLP8B8c",
+    "timings": {
+      "cache_n": 16,
+      "prompt_n": 1,
+      "prompt_ms": 20.185,
+      "prompt_per_token_ms": 20.185,
+      "prompt_per_second": 49.54173891503592,
+      "predicted_n": 32,
+      "predicted_ms": 507.008,
+      "predicted_per_token_ms": 16.355096774193548,
+      "predicted_per_second": 61.14301943953547
+    }
+  }
+}

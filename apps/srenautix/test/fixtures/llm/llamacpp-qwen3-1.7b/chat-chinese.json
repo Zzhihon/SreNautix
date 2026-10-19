@@ -1,0 +1,58 @@
+{
+  "provenance": {
+    "provider": "llamacpp-qwen3-1.7b",
+    "model": "qwen3-1.7b",
+    "base_url_kind": "local",
+    "recorded_at": "2026-10-19T18:50:22.744Z",
+    "path": "/chat/completions"
+  },
+  "request": {
+    "model": "qwen3-1.7b",
+    "messages": [
+      {
+        "role": "user",
+        "content": "仓库里原有十七箱苹果，上午运走了五箱，下午又运进来八箱。请只回答现在仓库里有几箱苹果，用阿拉伯数字，不要写其他内容。"
+      }
+    ],
+    "max_completion_tokens": 2048,
+    "temperature": 0
+  },
+  "status": 200,
+  "body": {
+    "choices": [
+      {
+        "finish_reason": "stop",
+        "index": 0,
+        "message": {
+          "role": "assistant",
+          "content": "20",
+          "reasoning_content": "好的，我现在要解决这个问题。题目是说仓库里原来有十七箱苹果，上午运走了五箱，下午又运进来八箱。现在问现在仓库里有多少箱苹果。\n\n首先，我需要理清楚整个过程的变化。原来的数量是17箱。然后上午运走了5箱，所以这时候的数量应该是原来的17减去5，对吧？17减5等于12，所以运走之后剩下12箱。\n\n接下来是下午，又运来了8箱。这时候需要把之前剩下的12箱加上运来的8箱。所以12加8等于20。这样算下来，现在仓库里应该有20箱苹果。\n\n不过，我得再仔细检查一遍，确保没有算错。原来的17箱，减去5箱，确实是12。然后加上8箱，12加8确实是20。看起来没问题。有没有可能哪里漏掉了？比如有没有其他因素？题目里只提到了运走和运来的数量，没有提到其他损耗或者增加，所以应该没问题。\n\n所以最终的答案应该是20。\n"
+        }
+      }
+    ],
+    "created": 1792435822,
+    "model": "qwen3-1.7b",
+    "system_fingerprint": "b11738-f174553e1",
+    "object": "chat.completion",
+    "usage": {
+      "completion_tokens": 234,
+      "prompt_tokens": 48,
+      "total_tokens": 282,
+      "prompt_tokens_details": {
+        "cached_tokens": 0
+      }
+    },
+    "id": "chatcmpl-UplW3Pm3YnEqpfvyy5o198ycf60S2qha",
+    "timings": {
+      "cache_n": 0,
+      "prompt_n": 48,
+      "prompt_ms": 284.328,
+      "prompt_per_token_ms": 5.9235,
+      "prompt_per_second": 168.8191103232886,
+      "predicted_n": 234,
+      "predicted_ms": 3899.539,
+      "predicted_per_token_ms": 16.736218884120174,
+      "predicted_per_second": 59.750652577137956
+    }
+  }
+}
