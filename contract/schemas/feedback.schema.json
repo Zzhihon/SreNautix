@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://srenautix.io/contract/schemas/feedback.schema.json",
+  "title": "Feedback",
+  "description": "一条反馈（DESIGN §11），表只追加，同一事件以 created_at 最新的一条为准。两个维度：verdict 评价根因结论，disposition_verdict 评价处置判断。verdict=rejected 且 root_component=null 表示只否定结论、真实根因未知：不生成回放用例也不作为参考案例，计入准确率与校准统计，记为一次未命中。只有 linked=true（已绑定账号）的反馈进入评测的标准答案",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "feedback_id",
+    "incident_id",
+    "incident_version",
+    "research_run_id",
+    "verdict",
+    "root_component",
+    "disposition_verdict",
+    "disposition",
+    "mechanism",
+    "reason",
+    "principal_id",
+    "channel",
+    "linked",
+    "implicit",
+    "stale",
+    "created_at"
+  ],
+  "properties": {
+    "feedback_id": { "$ref": "common.schema.json#/$defs/Uuid" },
+    "incident_id": { "$ref": "common.schema.json#/$defs/Uuid" },
+    "incident_version": { "type": "integer", "minimum": 1 },
+    "research_run_id": {
+      "description": "反馈针对的研判；针对阶段 A 报告时为 null",
+      "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/Uuid" }]
+    },
+    "verdict": {
+      "type": ["string", "null"],
+      "description": "根因结论是否正确；只评价处置判断时为 null",
+      "enum": ["confirmed", "rejected", null]
+    },
+    "root_component": {
+      "description": "verdict=rejected 时人工给出的真实根因组件，从本次研判的拓扑组件中选择；不知道时为 null",
+      "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/ComponentKey" }]
+    },
+    "disposition_verdict": {
+      "type": ["string", "null"],
+      "description": "处置判断是否正确；只评价根因时为 null",
+      "enum": ["confirmed", "rejected", null]
+    },
+    "disposition": {
+      "description": "disposition_verdict=rejected 时人工给出的正确处置判断",
+      "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/Disposition" }]
+    },
+    "mechanism": { "type": ["string", "null"], "maxLength": 600 },
+    "reason": { "type": ["string", "null"], "maxLength": 500 },
+    "principal_id": { "type": "string", "minLength": 1 },
+    "channel": { "$ref": "common.schema.json#/$defs/Channel" },
+    "linked": {
+      "type": "boolean",
+      "description": "提交者是已绑定的账号（控制台登录或聊天账号经 /link 绑定）"
+    },
+    "implicit": {
+      "type": ["string", "null"],
+      "description": "隐式反馈的来源：批准、拒绝、撤销自动记为对应反馈；resolved_confirm 是事件恢复时的一键确认。显式反馈为 null",
+      "enum": ["approved", "rejected", "undone", "resolved_confirm", null]
+    },
+    "stale": {
+      "type": "boolean",
+      "description": "反馈之后又有研判完成（读取时计算）"
+    },
+    "created_at": { "$ref": "common.schema.json#/$defs/Timestamp" }
+  },
+  "$defs": {
+    "FeedbackCreate": {
+      "title": "FeedbackCreate",
+      "description": "提交反馈的请求体。channel 与主体由认证上下文决定，请求体不含",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "research_run_id",
+        "verdict",
+        "root_component",
+        "disposition_verdict",
+        "disposition",
+        "mechanism",
+        "reason"
+      ],
+      "properties": {
+        "research_run_id": {
+          "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/Uuid" }]
+        },
+        "verdict": { "type": ["string", "null"], "enum": ["confirmed", "rejected", null] },
+        "root_component": {
+          "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/ComponentKey" }]
+        },
+        "disposition_verdict": { "type": ["string", "null"], "enum": ["confirmed", "rejected", null] },
+        "disposition": {
+          "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/Disposition" }]
+        },
+        "mechanism": { "type": ["string", "null"], "maxLength": 600 },
+        "reason": { "type": ["string", "null"], "maxLength": 500 }
+      }
+    }
+  }
+}

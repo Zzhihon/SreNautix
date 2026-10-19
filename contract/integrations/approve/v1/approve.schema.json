@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://srenautix.io/contract/integrations/approve/v1/approve.schema.json",
+  "title": "ApproveContract",
+  "description": "approve 集成契约 v1（DESIGN §9.2、§10.3）。审批渠道只能是核心或官方级。渠道把已验证签名、已绑定账号的审批动作交给 server，由 server 签发审批断言（格式见 contract/gateway/）。一致性测试：签名测试向量、重放和过期回调必须被拒绝、未绑定账号必须被拒绝、编辑是幂等的。聊天渠道只能审批 L 档",
+  "$defs": {
+    "ApprovalAction": {
+      "title": "ApprovalAction",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["proposal_id", "decision", "reason", "principal_id", "channel", "nonce", "issued_at", "expires_at"],
+      "properties": {
+        "proposal_id": { "$ref": "../../../schemas/common.schema.json#/$defs/Uuid" },
+        "decision": { "type": "string", "enum": ["approve", "reject"] },
+        "reason": {
+          "type": ["string", "null"],
+          "description": "拒绝必须填写理由",
+          "maxLength": 500
+        },
+        "principal_id": { "type": "string", "description": "绑定后的主体 id" },
+        "channel": { "$ref": "../../../schemas/common.schema.json#/$defs/Channel" },
+        "nonce": { "type": "string", "minLength": 16, "description": "防重放" },
+        "issued_at": { "$ref": "../../../schemas/common.schema.json#/$defs/Timestamp" },
+        "expires_at": { "$ref": "../../../schemas/common.schema.json#/$defs/Timestamp" }
+      }
+    },
+    "ApprovalOutcome": {
+      "title": "ApprovalOutcome",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["proposal_id", "outcome", "message", "assertion_id"],
+      "properties": {
+        "proposal_id": { "$ref": "../../../schemas/common.schema.json#/$defs/Uuid" },
+        "outcome": {
+          "type": "string",
+          "enum": [
+            "approved",
+            "rejected",
+            "already_decided",
+            "expired",
+            "stale",
+            "tier_requires_console",
+            "not_linked",
+            "forbidden",
+            "replayed",
+            "not_found"
+          ]
+        },
+        "message": { "type": "string" },
+        "assertion_id": {
+          "oneOf": [{ "type": "null" }, { "$ref": "../../../schemas/common.schema.json#/$defs/Uuid" }]
+        }
+      }
+    }
+  }
+}

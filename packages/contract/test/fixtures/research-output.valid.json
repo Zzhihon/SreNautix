@@ -1,0 +1,68 @@
+{
+  "disposition": "act",
+  "conclusion": {
+    "level": "evidence_consistent",
+    "hypothesis_id": "h1",
+    "root_component": "postgres.cluster:shop/pg",
+    "undetermined_reason": null,
+    "consistency": {
+      "entity_in_scope": true,
+      "onset_precedes_symptom": true,
+      "no_contrary_normal": true,
+      "competitor_tested": true
+    }
+  },
+  "hypotheses": [
+    {
+      "id": "h1",
+      "parent_id": null,
+      "root_component": "postgres.cluster:shop/pg",
+      "mechanism": "primary OOMKilled, clients lose connections",
+      "supporting": ["card:1", "alert:1"],
+      "refuting": [],
+      "status": "supported"
+    },
+    {
+      "id": "h2",
+      "parent_id": null,
+      "root_component": "Deployment:web/frontend",
+      "mechanism": "frontend rollout broke checkout",
+      "supporting": [],
+      "refuting": ["card:4"],
+      "status": "refuted"
+    }
+  ],
+  "next_checks": [
+    {
+      "hypothesis_id": "h2",
+      "type": "query",
+      "template": "workload/error-ratio-by-revision",
+      "args": { "namespace": "web", "name": "frontend" },
+      "refutes_if": "new revision error ratio equals old revision",
+      "purpose": "separate rollout from database cause",
+      "result_ref": "card:4",
+      "outcome": "refutes"
+    }
+  ],
+  "situation": "Checkout errors since 10:21; database primary restarted.",
+  "summary": "Database primary OOMKilled; raise memory limit.",
+  "recommendations": [
+    {
+      "id": "r1",
+      "kind": "mitigation",
+      "title": "Raise memory limit",
+      "rationale": "OOMKilled at 2Gi",
+      "steps": ["Edit the Cluster resources"],
+      "owner": "platform",
+      "risk": "low",
+      "risk_note": null,
+      "runbook_ref": "postgres/oom.md#memory",
+      "action_id": null,
+      "hypothesis_id": "h1",
+      "evidence_refs": ["card:1"],
+      "generated_by": "model"
+    }
+  ],
+  "proposals": [],
+  "validation_notes": ["dropped evidence ref card:99 (not in run)"]
+}

@@ -1,0 +1,18 @@
+{
+  "feedback_id": "5e7f9a52-4f0e-4b64-9e8e-1c2d3e4f5a6b",
+  "incident_id": "0b7f9a52-4f0e-4b64-9e8e-1c2d3e4f5a6b",
+  "incident_version": 3,
+  "research_run_id": "6e7f9a52-4f0e-4b64-9e8e-1c2d3e4f5a6b",
+  "verdict": "rejected",
+  "root_component": null,
+  "disposition_verdict": "confirmed",
+  "disposition": null,
+  "mechanism": null,
+  "reason": "root unknown, not the database",
+  "principal_id": "oidc:alice",
+  "channel": "telegram",
+  "linked": true,
+  "implicit": null,
+  "stale": false,
+  "created_at": "2026-10-15T11:00:00Z"
+}

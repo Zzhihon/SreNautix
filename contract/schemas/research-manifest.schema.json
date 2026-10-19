@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://srenautix.io/contract/schemas/research-manifest.schema.json",
+  "title": "ResearchManifest",
+  "description": "研判清单（DESIGN §8.5）：复现一次研判需要的全部版本信息，以及出境清单（§8.4）。后处理部分可以基于已保存的响应精确重放；重新采样模型得到的是一个分布",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "run_id",
+    "incident_id",
+    "incident_version",
+    "code_sha",
+    "pack_lock",
+    "contract_version",
+    "prompt_hashes",
+    "routes",
+    "topology_version",
+    "snapshot_id",
+    "redaction_version",
+    "retrieved_cases",
+    "retrieved_knowledge",
+    "evidence_map",
+    "egress"
+  ],
+  "properties": {
+    "run_id": { "$ref": "common.schema.json#/$defs/Uuid" },
+    "incident_id": { "$ref": "common.schema.json#/$defs/Uuid" },
+    "incident_version": { "type": "integer", "minimum": 1 },
+    "code_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "pack_lock": { "$ref": "common.schema.json#/$defs/Sha256" },
+    "contract_version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+    "prompt_hashes": {
+      "type": "object",
+      "description": "阶段名 → 提示词哈希",
+      "additionalProperties": { "$ref": "common.schema.json#/$defs/Sha256" }
+    },
+    "routes": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/RouteUse" }
+    },
+    "topology_version": { "type": "integer", "minimum": 0 },
+    "snapshot_id": { "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/Uuid" }] },
+    "redaction_version": { "type": "string" },
+    "retrieved_cases": { "type": "array", "items": { "type": "string" } },
+    "retrieved_knowledge": { "type": "array", "items": { "type": "string" } },
+    "evidence_map": {
+      "type": "array",
+      "description": "研判运行内的证据引用（card:n、alert:n、change:n）到定义与实体的映射",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["ref", "target"],
+        "properties": {
+          "ref": { "$ref": "common.schema.json#/$defs/EvidenceRef" },
+          "target": { "type": "string", "description": "card_id@实体键、alert_id 或 change_id" }
+        }
+      }
+    },
+    "egress": {
+      "type": "array",
+      "description": "出境清单：每次出站模型请求带出了哪些类别的数据",
+      "items": { "$ref": "#/$defs/EgressEntry" }
+    }
+  },
+  "$defs": {
+    "RouteUse": {
+      "title": "RouteUse",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["phase", "route_id", "model", "dialect_profile", "provider_fingerprint", "sampling", "seed"],
+      "properties": {
+        "phase": { "type": "string", "enum": ["hypothesize", "conclude", "compress", "still_consistent", "repair"] },
+        "route_id": { "type": "string" },
+        "model": { "type": "string" },
+        "dialect_profile": { "type": "string" },
+        "provider_fingerprint": { "type": ["string", "null"] },
+        "sampling": {
+          "type": "object",
+          "additionalProperties": { "type": ["number", "string", "boolean"] }
+        },
+        "seed": { "type": ["integer", "null"] }
+      }
+    },
+    "EgressEntry": {
+      "title": "EgressEntry",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["route_id", "in_domain", "categories", "redaction_hits", "bytes"],
+      "properties": {
+        "route_id": { "type": "string" },
+        "in_domain": { "type": "boolean" },
+        "categories": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["metrics", "logs", "traces", "events", "topology", "changes", "alerts", "knowledge"]
+          }
+        },
+        "redaction_hits": { "type": "integer", "minimum": 0 },
+        "bytes": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

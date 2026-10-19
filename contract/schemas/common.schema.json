@@ -1,0 +1,141 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://srenautix.io/contract/schemas/common.schema.json",
+  "title": "Common",
+  "description": "各契约共用的定义。本文件只有 $defs，不描述任何顶层实例。",
+  "$defs": {
+    "Uuid": {
+      "title": "Uuid",
+      "type": "string",
+      "format": "uuid"
+    },
+    "Timestamp": {
+      "title": "Timestamp",
+      "description": "RFC 3339 UTC 时间",
+      "type": "string",
+      "format": "date-time"
+    },
+    "Duration": {
+      "title": "Duration",
+      "description": "Prometheus 风格的时长，例如 30s、5m、2h、7d",
+      "type": "string",
+      "pattern": "^([0-9]+(ms|s|m|h|d|w))+$"
+    },
+    "ClusterId": {
+      "title": "ClusterId",
+      "description": "集群标识，所有键都带它（DESIGN §2.2）",
+      "type": "string",
+      "pattern": "^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$"
+    },
+    "Labels": {
+      "title": "Labels",
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "Severity": {
+      "title": "Severity",
+      "type": "string",
+      "enum": ["critical", "warning", "info"]
+    },
+    "AlertRole": {
+      "title": "AlertRole",
+      "description": "告警角色（DESIGN §3.2）：cause 原因；change 变更；symptom 症状；forecast 预测，不能成为活动事件的根因，也不能连接两个分组；meta 观测缺口",
+      "type": "string",
+      "enum": ["cause", "change", "symptom", "forecast", "meta"]
+    },
+    "ComponentKey": {
+      "title": "ComponentKey",
+      "description": "拓扑节点的键：命名空间内的对象为 <kind>:<namespace>/<name>，集群级对象为 <kind>:<name>。kind 是 Kubernetes 的 Kind（如 Pod、Node）或领域包声明的组件类型（如 postgres.cluster）。命名空间伪组件写作 Namespace:<namespace>",
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9.-]*:([a-z0-9]([-a-z0-9]*[a-z0-9])?/)?[A-Za-z0-9]([-A-Za-z0-9_.]*[A-Za-z0-9])?$",
+      "maxLength": 400
+    },
+    "EntityRef": {
+      "title": "EntityRef",
+      "description": "一个 Kubernetes 对象或领域包组件实例。uid 在实体解析成功时填写",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cluster_id", "kind", "namespace", "name", "uid"],
+      "properties": {
+        "cluster_id": { "$ref": "#/$defs/ClusterId" },
+        "kind": { "type": "string", "minLength": 1 },
+        "namespace": { "type": ["string", "null"] },
+        "name": { "type": "string", "minLength": 1 },
+        "uid": { "type": ["string", "null"] }
+      }
+    },
+    "TimeWindow": {
+      "title": "TimeWindow",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["from", "to"],
+      "properties": {
+        "from": { "$ref": "#/$defs/Timestamp" },
+        "to": { "$ref": "#/$defs/Timestamp" }
+      }
+    },
+    "Disposition": {
+      "title": "Disposition",
+      "description": "处置判断：act 处理；ignore 忽略；escalate 升级；undetermined 无法判定",
+      "type": "string",
+      "enum": ["act", "ignore", "escalate", "undetermined"]
+    },
+    "ConclusionLevel": {
+      "title": "ConclusionLevel",
+      "description": "结论阶梯（DESIGN §7.3）。evidence_consistent 只能由代码判定",
+      "type": "string",
+      "enum": ["evidence_consistent", "likely", "inconclusive", "undetermined"]
+    },
+    "Verdict": {
+      "title": "Verdict",
+      "description": "证据卡的三种结论",
+      "type": "string",
+      "enum": ["normal", "abnormal", "undeterminable"]
+    },
+    "Egress": {
+      "title": "Egress",
+      "description": "卡片级出境控制（DESIGN §8.4）：allow 原样进入提示词；redact 脱敏后进入；never 不进入提示词",
+      "type": "string",
+      "enum": ["allow", "redact", "never"]
+    },
+    "Channel": {
+      "title": "Channel",
+      "description": "提交渠道。console 为控制台，grafana 为 Grafana 嵌入，api 与 mcp 为外部调用方，其余为聊天渠道",
+      "type": "string",
+      "enum": ["console", "grafana", "telegram", "feishu", "dingtalk", "wecom", "slack", "api", "mcp"]
+    },
+    "Principal": {
+      "title": "Principal",
+      "description": "已认证的主体（DESIGN §10.3 identity 契约输出）",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "display_name", "groups"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "display_name": { "type": "string" },
+        "groups": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "Sha256": {
+      "title": "Sha256",
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "EvidenceRef": {
+      "title": "EvidenceRef",
+      "description": "研判运行内的证据引用：card:<n> 指本次运行的第 n 张证据卡结果（含区分性检查产生的卡），alert:<n> 指事件成员告警，change:<n> 指关联的变更。编号由研判清单映射到定义和实体",
+      "type": "string",
+      "pattern": "^(card|alert|change):[1-9][0-9]{0,3}$"
+    },
+    "Error": {
+      "title": "Error",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["error", "message"],
+      "properties": {
+        "error": { "type": "string", "description": "机器可读的错误码" },
+        "message": { "type": "string" }
+      }
+    }
+  }
+}

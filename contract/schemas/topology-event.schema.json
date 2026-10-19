@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://srenautix.io/contract/schemas/topology-event.schema.json",
+  "title": "TopologyEvent",
+  "description": "事件溯源拓扑中的一条事件（DESIGN §4.1）。节点或边在 [valid_from, valid_to) 内有效；同一节点或边的新事件到达时，上一条的 valid_to 被设为新事件的 valid_from。删除事件只关闭区间。按时刻 t 查询拓扑时取 valid_from <= t 且 (valid_to 为空或 t < valid_to) 的全部节点和边",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["event_id", "cluster_id", "seq", "op", "valid_from", "valid_to", "source", "node", "edge"],
+  "properties": {
+    "event_id": { "$ref": "common.schema.json#/$defs/Uuid" },
+    "cluster_id": { "$ref": "common.schema.json#/$defs/ClusterId" },
+    "seq": { "type": "integer", "minimum": 1, "description": "集群内单调递增，也是拓扑版本号" },
+    "op": { "type": "string", "enum": ["node_upsert", "node_delete", "edge_upsert", "edge_delete"] },
+    "valid_from": { "$ref": "common.schema.json#/$defs/Timestamp" },
+    "valid_to": {
+      "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/Timestamp" }]
+    },
+    "source": {
+      "type": "string",
+      "description": "informer：reader 或 server 的 informer；ksm_history：从 kube-state-metrics 历史重建；pack：领域包声明的 Operator 约定；user：用户声明的覆盖；runtime：运行时观测（服务图、Hubble 等）",
+      "enum": ["informer", "ksm_history", "pack", "user", "runtime"]
+    },
+    "node": {
+      "description": "op 为 node_* 时填写",
+      "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/Node" }]
+    },
+    "edge": {
+      "description": "op 为 edge_* 时填写",
+      "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/Edge" }]
+    }
+  },
+  "$defs": {
+    "Node": {
+      "title": "TopologyNode",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "kind", "namespace", "name", "uid", "labels", "component_type", "hub"],
+      "properties": {
+        "key": { "$ref": "common.schema.json#/$defs/ComponentKey" },
+        "kind": { "type": "string", "minLength": 1 },
+        "namespace": { "type": ["string", "null"] },
+        "name": { "type": "string", "minLength": 1 },
+        "uid": { "type": ["string", "null"] },
+        "labels": { "$ref": "common.schema.json#/$defs/Labels" },
+        "component_type": {
+          "type": ["string", "null"],
+          "description": "领域包 components.yaml 匹配到的组件类型"
+        },
+        "hub": {
+          "type": "boolean",
+          "description": "集群枢纽（CoreDNS、CNI、apiserver、存储）：只有在出现针对它的证据，或至少 3 个独立依赖方同时失败时才吸收症状"
+        }
+      }
+    },
+    "Edge": {
+      "title": "TopologyEdge",
+      "description": "from 依赖 to：to 的故障沿边反向传播到 from",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["from", "to", "relation", "provenance", "confidence", "scope", "evidence"],
+      "properties": {
+        "from": { "$ref": "common.schema.json#/$defs/ComponentKey" },
+        "to": { "$ref": "common.schema.json#/$defs/ComponentKey" },
+        "relation": {
+          "type": "string",
+          "description": "关系名，例如 owned_by、runs_on、mounts、bound_to、provisioned_by、selects、routes_to、calls、references、egress_to、operator_convention、named_like"
+        },
+        "provenance": { "$ref": "#/$defs/Provenance" },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "默认值由来源决定（structural 1.0、runtime 0.9 并随过期衰减、config_ref 0.7、network_policy 0.6、naming 0.3）。低于归并阈值 τ=0.6 的边只参与候选排序"
+        },
+        "scope": {
+          "type": "string",
+          "description": "instance：只把同一实例的故障联系起来（Pod→节点、Pod→PVC→PV→CSI）；service：沿服务依赖传播",
+          "enum": ["instance", "service"]
+        },
+        "evidence": {
+          "type": "string",
+          "description": "边的依据，例如 ownerReference、env DATABASE_HOST=pg-rw、Tempo 服务图",
+          "maxLength": 500
+        }
+      }
+    },
+    "Provenance": {
+      "title": "EdgeProvenance",
+      "description": "边的来源（DESIGN §4.2）",
+      "type": "string",
+      "enum": ["structural", "runtime", "config_ref", "network_policy", "naming"]
+    }
+  }
+}

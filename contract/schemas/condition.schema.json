@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://srenautix.io/contract/schemas/condition.schema.json",
+  "title": "Condition",
+  "description": "带类型的状态条件（DESIGN §12.4），驱动每个页面顶部的状态条。每个判定都附带影响它的条件",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["type", "status", "role", "cluster_id", "subject", "reason", "message", "since"],
+  "properties": {
+    "type": {
+      "type": "string",
+      "enum": [
+        "IngestSilent",
+        "WatchdogMissing",
+        "DatasourceUnavailable",
+        "ModelRouteBreakerOpen",
+        "AdmissionSelfTestFailed",
+        "PackLoadFailed",
+        "BudgetCutoffHigh",
+        "ChannelDeliveryFailed",
+        "AuditExportLagging",
+        "ClockSkew",
+        "StateStoreDegraded",
+        "Restored",
+        "Frozen",
+        "StormMode"
+      ]
+    },
+    "status": {
+      "type": "string",
+      "description": "true 表示该问题正在发生",
+      "enum": ["true", "false"]
+    },
+    "role": { "type": "string", "enum": ["server", "worker", "mcp", "reader", "gateway"] },
+    "cluster_id": {
+      "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/ClusterId" }]
+    },
+    "subject": {
+      "type": ["string", "null"],
+      "description": "条件涉及的对象，例如集成实例 id、路由 id、领域包名"
+    },
+    "reason": { "type": "string" },
+    "message": { "type": "string" },
+    "since": { "$ref": "common.schema.json#/$defs/Timestamp" }
+  }
+}

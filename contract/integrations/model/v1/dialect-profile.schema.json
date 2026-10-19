@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://srenautix.io/contract/integrations/model/v1/dialect-profile.schema.json",
+  "title": "ModelContract",
+  "description": "model 集成契约 v1（DESIGN §8）：路由与方言档案。启动时和评测时逐条路由测量能力，结果写入方言档案",
+  "$defs": {
+    "Route": {
+      "title": "ModelRoute",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "base_url",
+        "api",
+        "model",
+        "dialect_profile",
+        "price",
+        "failure_domain",
+        "in_domain",
+        "tier",
+        "retention_terms"
+      ],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+        "base_url": { "type": "string", "format": "uri" },
+        "api": { "type": "string", "enum": ["responses", "chat_completions"] },
+        "model": { "type": "string" },
+        "dialect_profile": { "type": "string" },
+        "price": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["currency", "input_per_mtok", "output_per_mtok", "cached_input_per_mtok"],
+          "properties": {
+            "currency": { "type": "string", "enum": ["USD", "CNY"] },
+            "input_per_mtok": { "type": "number", "minimum": 0 },
+            "output_per_mtok": { "type": "number", "minimum": 0 },
+            "cached_input_per_mtok": { "type": ["number", "null"], "minimum": 0 }
+          }
+        },
+        "failure_domain": {
+          "type": "array",
+          "description": "这条路由依赖的被管拓扑组件；事件涉及这些组件时提前打开熔断器",
+          "items": { "$ref": "../../../schemas/common.schema.json#/$defs/ComponentKey" }
+        },
+        "in_domain": { "type": "boolean", "description": "服务方是否在境内" },
+        "tier": { "type": "string", "enum": ["small", "large"] },
+        "retention_terms": { "type": "string", "description": "服务方的数据保留条款" }
+      }
+    },
+    "DialectProfile": {
+      "title": "DialectProfile",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "strict_json_schema",
+        "native_tools",
+        "reasoning_channel",
+        "context_tokens",
+        "chinese",
+        "tokenizer",
+        "measured_at",
+        "provider_fingerprint"
+      ],
+      "properties": {
+        "id": { "type": "string" },
+        "strict_json_schema": { "type": "boolean" },
+        "native_tools": { "type": "boolean" },
+        "reasoning_channel": {
+          "type": "string",
+          "description": "推理模型只约束最终输出",
+          "enum": ["none", "separate_field", "inline_tags"]
+        },
+        "context_tokens": { "type": "integer", "minimum": 1024 },
+        "chinese": { "type": "string", "enum": ["native", "adequate", "poor"] },
+        "tokenizer": {
+          "type": "string",
+          "description": "没有公开分词器时用字节估算并按实际 usage 校准",
+          "enum": ["tiktoken_o200k", "tiktoken_cl100k", "byte_estimate"]
+        },
+        "measured_at": { "$ref": "../../../schemas/common.schema.json#/$defs/Timestamp" },
+        "provider_fingerprint": {
+          "type": ["string", "null"],
+          "description": "服务方的模型指纹；变化时告警，该路由的回放分数作废"
+        }
+      }
+    },
+    "Usage": {
+      "title": "ModelUsage",
+      "description": "计量依据服务方返回的 usage",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["input_tokens", "cached_input_tokens", "output_tokens", "reasoning_tokens"],
+      "properties": {
+        "input_tokens": { "type": "integer", "minimum": 0 },
+        "cached_input_tokens": { "type": "integer", "minimum": 0 },
+        "output_tokens": { "type": "integer", "minimum": 0 },
+        "reasoning_tokens": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

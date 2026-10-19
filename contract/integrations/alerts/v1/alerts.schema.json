@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://srenautix.io/contract/integrations/alerts/v1/alerts.schema.json",
+  "title": "AlertsContract",
+  "description": "alerts 集成契约 v1（DESIGN §3.1）。webhook 是主路径；每 60 秒用 Alertmanager v2 GET /api/v2/alerts 与 ALERTS / ALERTS_FOR_STATE 对账。通用 webhook 用 JSONPath 把字段映射到 AlertmanagerAlert",
+  "$defs": {
+    "AlertmanagerWebhook": {
+      "title": "AlertmanagerWebhook",
+      "description": "Alertmanager webhook 请求体 version 4",
+      "type": "object",
+      "required": [
+        "version",
+        "status",
+        "receiver",
+        "groupLabels",
+        "commonLabels",
+        "commonAnnotations",
+        "externalURL",
+        "alerts"
+      ],
+      "properties": {
+        "version": { "const": "4" },
+        "groupKey": { "type": "string" },
+        "truncatedAlerts": { "type": "integer", "minimum": 0 },
+        "status": { "type": "string", "enum": ["firing", "resolved"] },
+        "receiver": { "type": "string" },
+        "groupLabels": { "$ref": "../../../schemas/common.schema.json#/$defs/Labels" },
+        "commonLabels": { "$ref": "../../../schemas/common.schema.json#/$defs/Labels" },
+        "commonAnnotations": { "$ref": "../../../schemas/common.schema.json#/$defs/Labels" },
+        "externalURL": { "type": "string" },
+        "alerts": { "type": "array", "items": { "$ref": "#/$defs/AlertmanagerAlert" } }
+      }
+    },
+    "AlertmanagerAlert": {
+      "title": "AlertmanagerAlert",
+      "description": "webhook 中的告警，以及 GET /api/v2/alerts 返回的 GettableAlert 的公共部分。endsAt 为零值时间或晚于当前时间表示仍在触发",
+      "type": "object",
+      "required": ["labels", "annotations", "startsAt"],
+      "properties": {
+        "status": {
+          "description": "webhook 中为字符串；API v2 中为对象",
+          "oneOf": [
+            { "type": "string", "enum": ["firing", "resolved"] },
+            {
+              "type": "object",
+              "required": ["state"],
+              "properties": {
+                "state": { "type": "string", "enum": ["active", "suppressed", "unprocessed"] },
+                "silencedBy": { "type": "array", "items": { "type": "string" } },
+                "inhibitedBy": { "type": "array", "items": { "type": "string" } }
+              }
+            }
+          ]
+        },
+        "labels": { "$ref": "../../../schemas/common.schema.json#/$defs/Labels" },
+        "annotations": { "$ref": "../../../schemas/common.schema.json#/$defs/Labels" },
+        "startsAt": { "type": "string" },
+        "endsAt": { "type": "string" },
+        "generatorURL": { "type": "string" },
+        "fingerprint": { "type": "string" }
+      }
+    },
+    "GenericMapping": {
+      "title": "GenericWebhookMapping",
+      "description": "通用 webhook 的 JSONPath 映射，每个路径相对单条告警",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["alerts_path", "alertname", "status", "starts_at", "labels"],
+      "properties": {
+        "alerts_path": { "type": "string" },
+        "alertname": { "type": "string" },
+        "status": { "type": "string" },
+        "firing_values": { "type": "array", "items": { "type": "string" } },
+        "starts_at": { "type": "string" },
+        "ends_at": { "type": "string" },
+        "severity": { "type": "string" },
+        "labels": { "type": "string" },
+        "annotations": { "type": "string" }
+      }
+    }
+  }
+}

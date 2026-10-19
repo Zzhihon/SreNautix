@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://srenautix.io/contract/schemas/alert-catalog-entry.schema.json",
+  "title": "AlertCatalogEntry",
+  "description": "告警目录中的一个条目（DESIGN §3.2），写在领域包的 alerts.yaml 中。同一告警名可以有多个条目，用 match_labels 区分变体（例如同名告警的 warning 与 critical 规则），查找时取 match_labels 最具体的条目",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "alertname", "role", "entity"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "包内唯一",
+      "pattern": "^[a-z0-9][a-z0-9_.-]*$"
+    },
+    "alertname": { "type": "string", "minLength": 1 },
+    "match_labels": {
+      "description": "变体的标签等值条件，全部满足才命中",
+      "$ref": "common.schema.json#/$defs/Labels"
+    },
+    "expr": {
+      "type": "string",
+      "description": "上游规则的表达式，用于按表达式复核角色与 CI 覆盖检查"
+    },
+    "role": { "$ref": "common.schema.json#/$defs/AlertRole" },
+    "role_confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "default": 1
+    },
+    "entity": { "$ref": "#/$defs/EntityMapping" },
+    "component_type": {
+      "type": "string",
+      "description": "告警直接归属的组件类型（components.yaml 声明）；不填时归属解析出的实体本身"
+    },
+    "scope": {
+      "type": "string",
+      "description": "作用范围（DESIGN §4.3）。hub 表示集群枢纽（CoreDNS、CNI、apiserver、存储）的告警",
+      "enum": ["instance", "service", "hub"],
+      "default": "instance"
+    },
+    "chains": {
+      "type": "array",
+      "description": "该告警触发的证据链 <pack>/<chain id>",
+      "items": { "type": "string" }
+    },
+    "mixin": {
+      "type": "string",
+      "description": "来源 mixin，用于覆盖率统计",
+      "enum": ["kubernetes", "node", "etcd", "prometheus", "alertmanager", "kube-state-metrics", "other"]
+    }
+  },
+  "$defs": {
+    "EntityMapping": {
+      "title": "AlertEntityMapping",
+      "description": "从告警标签取实体。name_labels 按顺序取第一个非空的标签；node 类实体的 instance 标签会去掉端口",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "name_labels"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "description": "Kubernetes Kind（Pod、Node、PersistentVolumeClaim、Deployment 等）或 cluster 表示整个集群"
+        },
+        "namespace_label": { "type": "string", "default": "namespace" },
+        "name_labels": { "type": "array", "minItems": 1, "items": { "type": "string" } }
+      }
+    }
+  }
+}

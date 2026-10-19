@@ -1,0 +1,216 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://srenautix.io/contract/schemas/incident.schema.json",
+  "title": "Incident",
+  "description": "持久化的事件（DESIGN §2.2、§5）。每次对账按确定性规则重算一次，再与已持久化的事件对账；成员或根因变化时 incident_version 加一",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "incident_id",
+    "cluster_id",
+    "label",
+    "incident_version",
+    "state",
+    "severity",
+    "first_firing_at",
+    "ended_at",
+    "root",
+    "candidates",
+    "members",
+    "components",
+    "changes",
+    "aliases",
+    "split_from",
+    "merged_into",
+    "suppressed",
+    "observability_blind",
+    "topology_version",
+    "created_at",
+    "updated_at"
+  ],
+  "properties": {
+    "incident_id": { "$ref": "common.schema.json#/$defs/Uuid" },
+    "cluster_id": { "$ref": "common.schema.json#/$defs/ClusterId" },
+    "label": { "$ref": "#/$defs/IncidentLabel" },
+    "incident_version": { "type": "integer", "minimum": 1 },
+    "state": { "type": "string", "enum": ["firing", "resolved", "merged"] },
+    "severity": { "$ref": "common.schema.json#/$defs/Severity" },
+    "first_firing_at": { "$ref": "common.schema.json#/$defs/Timestamp" },
+    "ended_at": {
+      "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/Timestamp" }]
+    },
+    "root": { "$ref": "#/$defs/Root" },
+    "candidates": {
+      "type": "array",
+      "description": "前 k 个候选根因，按得分从高到低",
+      "items": { "$ref": "#/$defs/RootCandidate" }
+    },
+    "members": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/Member" }
+    },
+    "components": {
+      "type": "array",
+      "description": "成员告警涉及的组件，根因在前",
+      "items": { "$ref": "common.schema.json#/$defs/ComponentKey" }
+    },
+    "changes": {
+      "type": "array",
+      "description": "首次触发前 30 分钟到结束之间、触及事件组件的变更",
+      "items": {
+        "$ref": "../integrations/changes/v1/changes.schema.json#/$defs/ChangeEvent"
+      }
+    },
+    "aliases": {
+      "type": "array",
+      "description": "合并进本事件的旧事件（incident_aliases：from → into）。旧 URL 与旧标签经别名解析到本事件",
+      "items": { "$ref": "#/$defs/Alias" }
+    },
+    "split_from": {
+      "description": "本事件由哪个事件拆分而来",
+      "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/Uuid" }]
+    },
+    "merged_into": {
+      "description": "state=merged 时指向吸收本事件的事件",
+      "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/Uuid" }]
+    },
+    "suppressed": {
+      "type": "boolean",
+      "description": "命中 SreNautix 自己的抑制规则，或全部触发中的成员都被告警源静默。只影响 SreNautix 的消息与研判"
+    },
+    "observability_blind": {
+      "type": "boolean",
+      "description": "至少 50% 的证据卡没有数据（DESIGN §7.1）"
+    },
+    "topology_version": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "本版本使用的拓扑事件 seq"
+    },
+    "created_at": { "$ref": "common.schema.json#/$defs/Timestamp" },
+    "updated_at": { "$ref": "common.schema.json#/$defs/Timestamp" }
+  },
+  "$defs": {
+    "IncidentLabel": {
+      "title": "IncidentLabel",
+      "description": "稳定标签 <根组件>:<首次触发时间取整到 10 分钟>，同一标签冲突时追加 ~2、~3",
+      "type": "string",
+      "pattern": "^.+:[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]0:00Z(~[0-9]+)?$"
+    },
+    "Root": {
+      "title": "IncidentRoot",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["component", "entity", "ambiguous", "margin", "silent_root"],
+      "properties": {
+        "component": {
+          "description": "排名第一的候选；没有候选时为 null",
+          "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/ComponentKey" }]
+        },
+        "entity": {
+          "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/EntityRef" }]
+        },
+        "ambiguous": {
+          "type": "boolean",
+          "description": "第一与第二候选的分差小于 δ（默认 0.1）；两个候选的证据链都执行"
+        },
+        "margin": {
+          "type": ["number", "null"],
+          "description": "第一与第二候选的分差；只有一个候选时为 null"
+        },
+        "silent_root": {
+          "type": "boolean",
+          "description": "根因由沉默根因探测卡加入，没有指向它的告警"
+        }
+      }
+    },
+    "RootCandidate": {
+      "title": "RootCandidate",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["component", "score", "terms", "depth", "explains", "source"],
+      "properties": {
+        "component": { "$ref": "common.schema.json#/$defs/ComponentKey" },
+        "score": { "type": "number" },
+        "terms": { "$ref": "#/$defs/ScoreTerms" },
+        "depth": {
+          "type": "integer",
+          "description": "在折叠强连通分量后的依赖图上的深度，只用于平分时排序"
+        },
+        "explains": {
+          "type": "array",
+          "description": "能解释的症状告警 alert_id",
+          "items": { "type": "string" }
+        },
+        "source": {
+          "type": "string",
+          "description": "alert：有指向它的 cause/change 告警；change：有触及它的变更；probe：沉默根因探测卡异常；symptom：只有症状告警",
+          "enum": ["alert", "change", "probe", "symptom"]
+        }
+      }
+    },
+    "ScoreTerms": {
+      "title": "RootScoreTerms",
+      "description": "根因得分的各项（DESIGN §5），每项在 [0,1] 内，乘以 rca-params 中的权重后求和",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["coverage", "precedence", "role_prior", "recent_change", "chronic_penalty"],
+      "properties": {
+        "coverage": { "type": "number", "minimum": 0, "maximum": 1 },
+        "precedence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "role_prior": { "type": "number", "minimum": 0, "maximum": 1 },
+        "recent_change": { "type": "number", "minimum": 0, "maximum": 1 },
+        "chronic_penalty": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "Member": {
+      "title": "IncidentMember",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "alert_id",
+        "alertname",
+        "role",
+        "component",
+        "severity",
+        "status",
+        "starts_at",
+        "ends_at",
+        "joined_version",
+        "left_version"
+      ],
+      "properties": {
+        "alert_id": { "type": "string" },
+        "alertname": { "type": "string" },
+        "role": { "$ref": "common.schema.json#/$defs/AlertRole" },
+        "component": {
+          "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/ComponentKey" }]
+        },
+        "severity": { "$ref": "common.schema.json#/$defs/Severity" },
+        "status": { "type": "string", "enum": ["firing", "resolved"] },
+        "starts_at": { "$ref": "common.schema.json#/$defs/Timestamp" },
+        "ends_at": {
+          "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/Timestamp" }]
+        },
+        "joined_version": { "type": "integer", "minimum": 1 },
+        "left_version": {
+          "type": ["integer", "null"],
+          "minimum": 1,
+          "description": "拆分时离开本事件的版本；仍是成员时为 null"
+        }
+      }
+    },
+    "Alias": {
+      "title": "IncidentAlias",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["from_incident_id", "from_label", "at_version", "merged_at"],
+      "properties": {
+        "from_incident_id": { "$ref": "common.schema.json#/$defs/Uuid" },
+        "from_label": { "$ref": "#/$defs/IncidentLabel" },
+        "at_version": { "type": "integer", "minimum": 1 },
+        "merged_at": { "$ref": "common.schema.json#/$defs/Timestamp" }
+      }
+    }
+  }
+}

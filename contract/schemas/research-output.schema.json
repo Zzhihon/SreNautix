@@ -1,0 +1,189 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://srenautix.io/contract/schemas/research-output.schema.json",
+  "title": "ResearchOutput",
+  "description": "一次研判经代码校验后的输出（DESIGN §7.2、§7.3），由 worker 写入 research_runs 并随 research.concluded 发布。模型直接输出的部分见 contract/model/；本结构加入假设账本状态、区分性检查结果、代码判定的结论阶梯和校验记录",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "disposition",
+    "conclusion",
+    "hypotheses",
+    "next_checks",
+    "situation",
+    "summary",
+    "recommendations",
+    "proposals",
+    "validation_notes"
+  ],
+  "properties": {
+    "disposition": { "$ref": "common.schema.json#/$defs/Disposition" },
+    "conclusion": { "$ref": "#/$defs/Conclusion" },
+    "hypotheses": {
+      "type": "array",
+      "maxItems": 6,
+      "items": { "$ref": "#/$defs/Hypothesis" }
+    },
+    "next_checks": {
+      "type": "array",
+      "maxItems": 12,
+      "items": { "$ref": "#/$defs/NextCheck" }
+    },
+    "situation": { "type": "string", "maxLength": 300 },
+    "summary": { "type": "string", "maxLength": 400 },
+    "recommendations": {
+      "type": "array",
+      "maxItems": 12,
+      "items": { "$ref": "#/$defs/Recommendation" }
+    },
+    "proposals": {
+      "type": "array",
+      "maxItems": 3,
+      "items": { "$ref": "#/$defs/ProposalDraft" }
+    },
+    "validation_notes": {
+      "type": "array",
+      "description": "代码校验的修改记录：删除的无效证据引用、删除的目录外提议、降级的结论等",
+      "items": { "type": "string" }
+    }
+  },
+  "$defs": {
+    "Conclusion": {
+      "title": "ResearchConclusion",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["level", "hypothesis_id", "root_component", "undetermined_reason", "consistency"],
+      "properties": {
+        "level": { "$ref": "common.schema.json#/$defs/ConclusionLevel" },
+        "hypothesis_id": { "type": ["string", "null"], "pattern": "^h[1-9]$" },
+        "root_component": {
+          "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/ComponentKey" }]
+        },
+        "undetermined_reason": { "type": ["string", "null"], "maxLength": 400 },
+        "consistency": { "$ref": "#/$defs/ConsistencyChecks" }
+      }
+    },
+    "ConsistencyChecks": {
+      "title": "ConsistencyChecks",
+      "description": "evidence_consistent 的四个条件逐项结果（DESIGN §7.3）；四项全为 true 才是 evidence_consistent",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entity_in_scope", "onset_precedes_symptom", "no_contrary_normal", "competitor_tested"],
+      "properties": {
+        "entity_in_scope": { "type": "boolean" },
+        "onset_precedes_symptom": { "type": "boolean" },
+        "no_contrary_normal": { "type": "boolean" },
+        "competitor_tested": { "type": "boolean" }
+      }
+    },
+    "Hypothesis": {
+      "title": "Hypothesis",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "parent_id", "root_component", "mechanism", "supporting", "refuting", "status"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^h[1-9]$" },
+        "parent_id": { "type": ["string", "null"], "pattern": "^h[1-9]$" },
+        "root_component": { "$ref": "common.schema.json#/$defs/ComponentKey" },
+        "mechanism": { "type": "string", "maxLength": 600 },
+        "supporting": {
+          "type": "array",
+          "maxItems": 12,
+          "items": { "$ref": "common.schema.json#/$defs/EvidenceRef" }
+        },
+        "refuting": {
+          "type": "array",
+          "maxItems": 12,
+          "items": { "$ref": "common.schema.json#/$defs/EvidenceRef" }
+        },
+        "status": {
+          "type": "string",
+          "description": "假设账本状态：pending 待检验；supported 支持；refuted 推翻；inconclusive 检验后仍无法判定",
+          "enum": ["pending", "supported", "refuted", "inconclusive"]
+        }
+      }
+    },
+    "NextCheck": {
+      "title": "NextCheck",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["hypothesis_id", "type", "template", "args", "refutes_if", "purpose", "result_ref", "outcome"],
+      "properties": {
+        "hypothesis_id": { "type": "string", "pattern": "^h[1-9]$" },
+        "type": { "type": "string", "enum": ["query", "tool"] },
+        "template": { "type": "string" },
+        "args": { "type": "object" },
+        "refutes_if": { "type": "string", "maxLength": 300 },
+        "purpose": { "type": "string", "maxLength": 300 },
+        "result_ref": {
+          "description": "控制器执行后得到的卡；未执行时为 null",
+          "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/EvidenceRef" }]
+        },
+        "outcome": {
+          "type": "string",
+          "enum": ["not_run", "supports", "refutes", "inconclusive", "failed"]
+        }
+      }
+    },
+    "Recommendation": {
+      "title": "Recommendation",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "title",
+        "rationale",
+        "steps",
+        "owner",
+        "risk",
+        "risk_note",
+        "runbook_ref",
+        "action_id",
+        "hypothesis_id",
+        "evidence_refs",
+        "generated_by"
+      ],
+      "properties": {
+        "id": { "type": "string", "pattern": "^r[0-9]{1,2}$" },
+        "kind": { "type": "string", "enum": ["mitigation", "root_fix", "prevention", "investigation"] },
+        "title": { "type": "string", "maxLength": 120 },
+        "rationale": { "type": "string", "maxLength": 400 },
+        "steps": { "type": "array", "minItems": 1, "maxItems": 8, "items": { "type": "string", "maxLength": 500 } },
+        "owner": { "type": "string", "enum": ["platform", "app", "vendor", "oncall"] },
+        "risk": { "type": "string", "enum": ["low", "medium", "high"] },
+        "risk_note": { "type": ["string", "null"], "maxLength": 300 },
+        "runbook_ref": { "type": ["string", "null"] },
+        "action_id": { "type": ["string", "null"] },
+        "hypothesis_id": { "type": "string", "pattern": "^h[1-9]$" },
+        "evidence_refs": {
+          "type": "array",
+          "maxItems": 8,
+          "items": { "$ref": "common.schema.json#/$defs/EvidenceRef" }
+        },
+        "generated_by": {
+          "type": "string",
+          "description": "model 的建议在消息与控制台中标注模型生成",
+          "enum": ["model", "rule"]
+        }
+      }
+    },
+    "ProposalDraft": {
+      "title": "ProposalDraft",
+      "description": "研判产生的提议草稿，经 server 的提议中转写入 proposals",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action_id", "params", "hypothesis_id", "expected_effect", "proposal_id"],
+      "properties": {
+        "action_id": { "type": "string" },
+        "params": { "type": "object" },
+        "hypothesis_id": { "type": "string", "pattern": "^h[1-9]$" },
+        "expected_effect": { "type": "string", "maxLength": 300 },
+        "proposal_id": {
+          "description": "提议中转接受后的 id；被拒绝时为 null",
+          "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/Uuid" }]
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://srenautix.io/contract/schemas/integration-manifest.schema.json",
+  "title": "IntegrationManifest",
+  "description": "集成清单 integration.yaml（DESIGN §10.1）。一项能力只有在清单里声明过、并且 verify() 通过，才算可用。控制台的集成页由清单生成",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "api_version",
+    "id",
+    "category",
+    "direction",
+    "tier",
+    "contract",
+    "capabilities",
+    "tested_versions",
+    "config_schema",
+    "required_scopes",
+    "owner"
+  ],
+  "properties": {
+    "api_version": { "const": "srenautix.io/integration/v1" },
+    "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+    "display_name": { "type": "string" },
+    "category": {
+      "type": "string",
+      "enum": ["alerts", "metrics", "logs", "traces", "changes", "notify", "approve", "identity", "model", "execute"]
+    },
+    "direction": {
+      "type": "string",
+      "description": "按方向分级（DESIGN §10.2）：approve、authenticate 只能是核心或官方；execute 只能是核心",
+      "enum": ["read", "notify", "approve", "authenticate", "execute"]
+    },
+    "tier": {
+      "type": "string",
+      "description": "official_candidate：没有真实部署报告的官方级集成，不称为支持",
+      "enum": ["core", "official", "official_candidate", "community", "mcp_bridge"]
+    },
+    "contract": {
+      "type": "string",
+      "description": "实现的契约，例如 metrics/v1",
+      "pattern": "^[a-z]+/v[0-9]+$"
+    },
+    "capabilities": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "stability"],
+        "properties": {
+          "name": { "type": "string", "pattern": "^[a-z]+\\.[a-z_]+$" },
+          "stability": { "type": "string", "enum": ["alpha", "beta", "stable"] }
+        }
+      }
+    },
+    "tested_versions": {
+      "type": "array",
+      "description": "测过的后端版本矩阵",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["backend", "versions", "verification"],
+        "properties": {
+          "backend": { "type": "string" },
+          "versions": { "type": "array", "items": { "type": "string" } },
+          "verification": {
+            "type": "string",
+            "description": "徽章上注明的验证方式",
+            "enum": ["kind_e2e", "testcontainers", "recorded_fixtures", "live_smoke"]
+          }
+        }
+      }
+    },
+    "config_schema": {
+      "type": "object",
+      "description": "实例配置的 JSON Schema。密钥字段只写挂载文件的引用，用 x-srenautix-secret-ref: true 标出"
+    },
+    "required_scopes": {
+      "type": "array",
+      "description": "凭证需要的最小权限；启动时探测凭证是否超出，超出时降级为 warn 或只提议",
+      "items": { "type": "string" }
+    },
+    "owner": { "type": "string" },
+    "deployment_reports": {
+      "type": "array",
+      "description": "真实部署报告的链接",
+      "items": { "type": "string" }
+    }
+  }
+}

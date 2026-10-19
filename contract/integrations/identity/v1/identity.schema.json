@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://srenautix.io/contract/integrations/identity/v1/identity.schema.json",
+  "title": "IdentityContract",
+  "description": "identity 集成契约 v1（DESIGN §10.3、§13）。身份集成只能是核心或官方级，输出 Principal{id, groups/departments}；组或部门映射到 Git 中的角色绑定",
+  "$defs": {
+    "AuthenticatedPrincipal": {
+      "title": "AuthenticatedPrincipal",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["principal", "provider", "auth_time", "mfa", "external_ids"],
+      "properties": {
+        "principal": { "$ref": "../../../schemas/common.schema.json#/$defs/Principal" },
+        "provider": { "type": "string", "description": "身份集成实例 id，例如 oidc、local-admin" },
+        "auth_time": {
+          "description": "最近一次认证时间；H 档审批要求 5 分钟内",
+          "$ref": "../../../schemas/common.schema.json#/$defs/Timestamp"
+        },
+        "mfa": { "type": "boolean" },
+        "external_ids": {
+          "type": "object",
+          "description": "可用于自动绑定聊天账号的外部 id，例如飞书 union_id",
+          "additionalProperties": { "type": "string" }
+        }
+      }
+    },
+    "RoleBinding": {
+      "title": "RoleBinding",
+      "description": "(主体, 角色, 作用域)，来自 Git",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["subject", "role", "scope"],
+      "properties": {
+        "subject": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "name"],
+          "properties": {
+            "kind": { "type": "string", "enum": ["user", "group"] },
+            "name": { "type": "string" }
+          }
+        },
+        "role": {
+          "type": "string",
+          "enum": ["viewer", "responder", "approver", "auditor", "admin", "sys-admin", "security-admin"]
+        },
+        "scope": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["clusters", "namespaces", "component_labels"],
+          "properties": {
+            "clusters": { "type": "array", "items": { "type": "string" } },
+            "namespaces": { "type": "array", "items": { "type": "string" } },
+            "component_labels": { "$ref": "../../../schemas/common.schema.json#/$defs/Labels" }
+          }
+        },
+        "max_risk_tier": {
+          "type": "string",
+          "description": "approver 的风险上限",
+          "enum": ["L", "H"]
+        }
+      }
+    }
+  }
+}

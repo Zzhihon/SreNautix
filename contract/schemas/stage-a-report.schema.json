@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://srenautix.io/contract/schemas/stage-a-report.schema.json",
+  "title": "StageAReport",
+  "description": "阶段 A 的确定性报告（DESIGN §7.1）：不调用模型，不经过 worker。事件创建或版本变化后立即生成",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "report_id",
+    "incident_id",
+    "incident_version",
+    "disposition",
+    "disposition_reason",
+    "candidates",
+    "ambiguous",
+    "cards",
+    "evidence_fingerprint",
+    "observability_blind",
+    "timeline",
+    "runbooks",
+    "rule_proposals",
+    "degraded",
+    "rendered_at"
+  ],
+  "properties": {
+    "report_id": { "$ref": "common.schema.json#/$defs/Uuid" },
+    "incident_id": { "$ref": "common.schema.json#/$defs/Uuid" },
+    "incident_version": { "type": "integer", "minimum": 1 },
+    "disposition": { "$ref": "common.schema.json#/$defs/Disposition" },
+    "disposition_reason": {
+      "type": "string",
+      "description": "suppressed：命中抑制规则；pack_exclude：命中领域包的排除规则；forecast_or_chronic_only：只有 forecast 和长期告警；rule_action：有动作明确的规则提议；critical_ambiguous：critical 且根因有歧义；observability_blind：观测失明；default：其余情况",
+      "enum": [
+        "suppressed",
+        "pack_exclude",
+        "forecast_or_chronic_only",
+        "rule_action",
+        "critical_ambiguous",
+        "observability_blind",
+        "default"
+      ]
+    },
+    "candidates": {
+      "type": "array",
+      "items": { "$ref": "incident.schema.json#/$defs/RootCandidate" }
+    },
+    "ambiguous": { "type": "boolean" },
+    "cards": {
+      "type": "array",
+      "description": "证据卡的判定向量；正常卡表示被排除嫌疑",
+      "items": { "$ref": "evidence-result.schema.json" }
+    },
+    "evidence_fingerprint": {
+      "description": "判定向量的指纹（带迟滞，见 docs/core/convergence.md）",
+      "$ref": "common.schema.json#/$defs/Sha256"
+    },
+    "observability_blind": { "type": "boolean" },
+    "timeline": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["at", "kind", "text", "ref"],
+        "properties": {
+          "at": { "$ref": "common.schema.json#/$defs/Timestamp" },
+          "kind": { "type": "string", "enum": ["alert_firing", "alert_resolved", "change", "card_abnormal"] },
+          "text": { "type": "string" },
+          "ref": { "type": ["string", "null"] }
+        }
+      }
+    },
+    "runbooks": {
+      "type": "array",
+      "items": { "type": "string", "description": "<pack>/<runbook 文件>#<锚点>" }
+    },
+    "rule_proposals": {
+      "type": "array",
+      "items": { "$ref": "common.schema.json#/$defs/Uuid" }
+    },
+    "degraded": {
+      "type": "boolean",
+      "description": "状态库降级：PG 不可用时在内存中生成，消息带降级横幅"
+    },
+    "rendered_at": { "$ref": "common.schema.json#/$defs/Timestamp" }
+  }
+}

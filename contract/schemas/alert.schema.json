@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://srenautix.io/contract/schemas/alert.schema.json",
+  "title": "Alert",
+  "description": "接入层归一化后的一个告警实例：一个标签集的一次触发（DESIGN §3）。时间一律取告警源的时间戳",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "alert_id",
+    "cluster_id",
+    "source",
+    "fingerprint",
+    "alertname",
+    "labels",
+    "annotations",
+    "severity",
+    "status",
+    "suppressed",
+    "starts_at",
+    "ends_at",
+    "generator_url",
+    "classification",
+    "entity",
+    "entity_resolution",
+    "component",
+    "received_at"
+  ],
+  "properties": {
+    "alert_id": {
+      "type": "string",
+      "description": "<fingerprint>@<starts_at 的 unix 秒>，同一标签集的每次触发各有一个",
+      "pattern": "^[0-9a-f]{16}@[0-9]+$"
+    },
+    "cluster_id": { "$ref": "common.schema.json#/$defs/ClusterId" },
+    "source": {
+      "type": "string",
+      "description": "接入来源。reconcile 表示由 60 秒对账从 Alertmanager API 或 ALERTS 重建",
+      "enum": ["alertmanager", "grafana", "nightingale", "generic", "reconcile"]
+    },
+    "fingerprint": {
+      "type": "string",
+      "description": "去掉 alertstate、alertgroup、__name__ 之后的标签集按键排序的 FNV-1a 64 位哈希，16 位十六进制",
+      "pattern": "^[0-9a-f]{16}$"
+    },
+    "alertname": { "type": "string", "minLength": 1 },
+    "labels": { "$ref": "common.schema.json#/$defs/Labels" },
+    "annotations": { "$ref": "common.schema.json#/$defs/Labels" },
+    "severity": { "$ref": "common.schema.json#/$defs/Severity" },
+    "status": { "type": "string", "enum": ["firing", "resolved"] },
+    "suppressed": {
+      "type": "string",
+      "description": "告警源报告的抑制状态。只用于展示和阶段 A 的 disposition，SreNautix 从不改变告警路由",
+      "enum": ["none", "silenced", "inhibited"]
+    },
+    "starts_at": { "$ref": "common.schema.json#/$defs/Timestamp" },
+    "ends_at": {
+      "description": "告警恢复时间；仍在触发时为 null",
+      "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/Timestamp" }]
+    },
+    "generator_url": { "type": ["string", "null"] },
+    "classification": { "$ref": "#/$defs/Classification" },
+    "entity": {
+      "description": "解析出的实体；解析失败时为 null，告警归入命名空间伪组件",
+      "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/EntityRef" }]
+    },
+    "entity_resolution": {
+      "type": "string",
+      "description": "实体解析命中的层（DESIGN §3.3）：informer 缓存、24 小时墓碑、kube-state-metrics 历史；labels 表示告警自带 entity 标签；unresolved 表示未解析",
+      "enum": ["labels", "informer", "tombstone", "ksm_history", "unresolved"]
+    },
+    "component": {
+      "description": "告警归属的拓扑节点；无法映射时为命名空间伪组件 Namespace:<namespace>，连 namespace 标签也没有时为 null",
+      "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/ComponentKey" }]
+    },
+    "received_at": { "$ref": "common.schema.json#/$defs/Timestamp" }
+  },
+  "$defs": {
+    "Classification": {
+      "title": "AlertClassification",
+      "description": "角色分类结果与依据（DESIGN §3.2）",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "source", "confidence", "catalog_entry", "chronic"],
+      "properties": {
+        "role": { "$ref": "common.schema.json#/$defs/AlertRole" },
+        "source": {
+          "type": "string",
+          "description": "label：告警自带 role 标签；catalog：告警目录条目；expression：按规则表达式分类；default：没有任何依据时按 symptom 处理",
+          "enum": ["label", "catalog", "expression", "default"]
+        },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "catalog_entry": {
+          "type": ["string", "null"],
+          "description": "命中的告警目录条目 <pack>/<entry id>"
+        },
+        "chronic": {
+          "type": "boolean",
+          "description": "长期告警：同一告警名 × 实体在 7 天内的触发率超过阈值"
+        }
+      }
+    }
+  }
+}

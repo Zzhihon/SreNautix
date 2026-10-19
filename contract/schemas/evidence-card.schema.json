@@ -1,0 +1,189 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://srenautix.io/contract/schemas/evidence-card.schema.json",
+  "title": "EvidenceCardDefinition",
+  "description": "证据卡定义（DESIGN §6.1），写在领域包 chains.yaml 的证据链中。卡片只包含数据：信号引用、时间窗口、params、CEL 判定、声明式展示和链接。CEL 只在 TypeScript 运行时求值，求值成本有上限",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "title", "refs", "judge", "egress"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "证据链内唯一；全局 id 为 <pack>/<chain>/<id>",
+      "pattern": "^[a-z0-9][a-z0-9_-]*$"
+    },
+    "title": { "$ref": "#/$defs/LocalizedText" },
+    "note": {
+      "description": "这张卡展示什么、怎么读",
+      "$ref": "#/$defs/LocalizedText"
+    },
+    "applies_to": {
+      "type": "object",
+      "description": "卡片对哪些实体执行；不填时对证据链所属组件执行",
+      "additionalProperties": false,
+      "properties": {
+        "kinds": { "type": "array", "items": { "type": "string" } },
+        "component_types": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "window": { "$ref": "#/$defs/Window" },
+    "params": {
+      "type": "object",
+      "description": "可由用户层覆盖的参数及默认值，在查询模板中写作 $params.<名字>，在 CEL 中写作 params.<名字>",
+      "additionalProperties": { "type": ["number", "string", "boolean"] }
+    },
+    "refs": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/SignalRef" }
+    },
+    "judge": { "$ref": "#/$defs/Judge" },
+    "display": { "$ref": "#/$defs/Display" },
+    "links": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/Link" }
+    },
+    "egress": { "$ref": "common.schema.json#/$defs/Egress" },
+    "probe": {
+      "type": "boolean",
+      "default": false,
+      "description": "沉默根因探测卡：症状存在但没有指向原因的告警时，对上游组件执行，结果异常的组件加入根因候选"
+    },
+    "requires": {
+      "type": "array",
+      "description": "卡片需要的集成能力，例如 metrics.query_range、logs.match。能力不可用时卡片显示 capability_missing",
+      "items": { "type": "string", "pattern": "^[a-z]+\\.[a-z_]+$" }
+    }
+  },
+  "$defs": {
+    "LocalizedText": {
+      "title": "LocalizedText",
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "zh-CN": { "type": "string" },
+        "en": { "type": "string" }
+      }
+    },
+    "Window": {
+      "title": "CardWindow",
+      "description": "相对事件锚点（首次触发时间）的窗口",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["before", "after"],
+      "properties": {
+        "before": { "$ref": "common.schema.json#/$defs/Duration" },
+        "after": { "$ref": "common.schema.json#/$defs/Duration" }
+      }
+    },
+    "SignalRef": {
+      "title": "CardSignalRef",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "signal", "mode"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "在 CEL 中引用的名字",
+          "pattern": "^[a-z][a-zA-Z0-9_]*$"
+        },
+        "signal": {
+          "type": "string",
+          "description": "signals.yaml 中的信号 <pack>/<signal id>；同包内可省略 <pack>/"
+        },
+        "mode": { "type": "string", "enum": ["range", "instant", "logs", "traces"] },
+        "params": {
+          "type": "object",
+          "additionalProperties": { "type": ["number", "string", "boolean"] }
+        },
+        "limit": { "type": "integer", "minimum": 1, "maximum": 1000 }
+      }
+    },
+    "Judge": {
+      "title": "CardJudge",
+      "description": "先求 undeterminable_if，命中即为无法判定；再按顺序求 abnormal_if，命中第一条即为异常；都不命中为正常。表达式出错时为无法判定。没有任何样本永远不是正常",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["abnormal_if"],
+      "properties": {
+        "abnormal_if": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/Rule" }
+        },
+        "undeterminable_if": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/Rule" }
+        }
+      }
+    },
+    "Rule": {
+      "title": "CardRule",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cel", "say"],
+      "properties": {
+        "cel": { "type": "string", "minLength": 1 },
+        "say": {
+          "description": "命中时的理由，ICU MessageFormat，可引用 CEL 变量",
+          "$ref": "#/$defs/LocalizedText"
+        }
+      }
+    },
+    "Display": {
+      "title": "CardDisplay",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "value": { "type": "string", "description": "主值的 CEL 表达式" },
+        "unit": {
+          "type": "string",
+          "enum": ["none", "percent", "ratio", "bytes", "seconds", "count", "per_second"]
+        },
+        "threshold": { "type": "string", "description": "图上阈值线的 CEL 表达式" },
+        "table": { "$ref": "#/$defs/TableTemplate" }
+      }
+    },
+    "TableTemplate": {
+      "title": "CardTableTemplate",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rows_from", "columns"],
+      "properties": {
+        "rows_from": { "type": "string", "description": "每个序列或日志行一行的引用名" },
+        "columns": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["header", "cel"],
+            "properties": {
+              "header": { "$ref": "#/$defs/LocalizedText" },
+              "cel": { "type": "string" },
+              "unit": { "type": "string" }
+            }
+          }
+        },
+        "sort_by": { "type": "string" },
+        "limit": { "type": "integer", "minimum": 1, "maximum": 50, "default": 8 }
+      }
+    },
+    "Link": {
+      "title": "CardLink",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "label"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "description": "explore：按卡片的查询生成数据源浏览链接；dashboard：看板；runbook：领域包内的 runbook",
+          "enum": ["explore", "dashboard", "runbook"]
+        },
+        "label": { "$ref": "#/$defs/LocalizedText" },
+        "target": { "type": "string", "description": "dashboard 的 uid 或 runbook 的 <文件>#<锚点>" }
+      }
+    }
+  }
+}

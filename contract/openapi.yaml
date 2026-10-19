@@ -1,0 +1,853 @@
+openapi: 3.1.0
+info:
+  title: SreNautix hub API
+  version: 2.0.0
+  license:
+    name: Apache-2.0
+    identifier: Apache-2.0
+  description: |
+    中心（server 角色）的 HTTP API。控制台 BFF、Grafana 插件、聊天渠道桥、MCP 与外部调用方都以本文件为准。
+    - 认证：控制台使用服务端会话（cookie `__Host-srenautix_session`，HttpOnly，SameSite=Strict），改变状态的请求必须带
+      `X-CSRF-Token` 并校验 Origin；外部调用方使用 `Authorization: Bearer <API token>`，API token 只有提议权限。
+    - 授权：每个操作的 `x-srenautix-roles` 列出允许的角色（DESIGN §13），`x-srenautix-external` 标出外部调用方
+      （MCP、API token）是否可以调用。外部调用方只能提议，不能审批，也不能修改策略。存在未分类的操作时 CI 失败。
+    - 事件引用 `{incident_ref}` 接受 incident_id（UUID）、稳定标签或别名表中的旧标签与旧 id；按别名解析时返回合并后的事件。
+    - 时间一律为 RFC 3339 UTC 字符串。参数或请求体不合法返回 400；依赖不可用返回 503。
+servers:
+  - url: /
+security:
+  - session: []
+  - bearer: []
+tags:
+  - name: health
+  - name: auth
+  - name: incidents
+  - name: research
+  - name: evidence
+  - name: feedback
+  - name: proposals
+  - name: events
+  - name: eval
+paths:
+  /healthz:
+    get:
+      tags: [health]
+      operationId: getHealthz
+      security: []
+      x-srenautix-roles: [anonymous]
+      x-srenautix-external: true
+      responses:
+        '200': { description: 进程存活 }
+  /readyz:
+    get:
+      tags: [health]
+      operationId: getReadyz
+      security: []
+      x-srenautix-roles: [anonymous]
+      x-srenautix-external: true
+      responses:
+        '200': { description: 迁移完成，可以服务 }
+        '503': { $ref: '#/components/responses/Error' }
+  /v1/conditions:
+    get:
+      tags: [health]
+      operationId: listConditions
+      description: 全部角色发布的状态条件（DESIGN §12.4），驱动状态条
+      x-srenautix-roles: [viewer, responder, approver, auditor, admin]
+      x-srenautix-external: false
+      parameters:
+        - { name: cluster_id, in: query, schema: { $ref: './schemas/common.schema.json#/$defs/ClusterId' } }
+      responses:
+        '200':
+          description: 当前条件
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: './schemas/condition.schema.json' } }
+        '401': { $ref: '#/components/responses/Error' }
+  /v1/auth/login:
+    post:
+      tags: [auth]
+      operationId: loginLocal
+      description: 本地管理员登录（只用于首次引导与紧急入口），必须带 TOTP。失败到一定次数会锁定。成功后设置会话 cookie
+      security: []
+      x-srenautix-roles: [anonymous]
+      x-srenautix-external: false
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [username, password, totp]
+              properties:
+                username: { type: string }
+                password: { type: string }
+                totp: { type: string, pattern: '^[0-9]{6}$' }
+      responses:
+        '200':
+          description: 已登录
+          content: { application/json: { schema: { $ref: '#/components/schemas/Session' } } }
+        '401': { $ref: '#/components/responses/Error' }
+        '423': { $ref: '#/components/responses/Error' }
+  /v1/auth/oidc/start:
+    get:
+      tags: [auth]
+      operationId: startOidc
+      security: []
+      x-srenautix-roles: [anonymous]
+      x-srenautix-external: false
+      parameters:
+        - { name: return_to, in: query, schema: { type: string } }
+        - name: max_age
+          in: query
+          description: 重新认证时传 0，用于 H 档审批（5 分钟内重新认证）
+          schema: { type: integer, minimum: 0 }
+      responses:
+        '302': { description: 跳转到身份提供方 }
+  /v1/auth/oidc/callback:
+    get:
+      tags: [auth]
+      operationId: oidcCallback
+      security: []
+      x-srenautix-roles: [anonymous]
+      x-srenautix-external: false
+      parameters:
+        - { name: code, in: query, required: true, schema: { type: string } }
+        - { name: state, in: query, required: true, schema: { type: string } }
+      responses:
+        '302': { description: 设置会话后跳回 }
+        '400': { $ref: '#/components/responses/Error' }
+  /v1/auth/session:
+    get:
+      tags: [auth]
+      operationId: getSession
+      x-srenautix-roles: [viewer, responder, approver, auditor, admin]
+      x-srenautix-external: false
+      responses:
+        '200':
+          description: 当前会话
+          content: { application/json: { schema: { $ref: '#/components/schemas/Session' } } }
+        '401': { $ref: '#/components/responses/Error' }
+  /v1/auth/logout:
+    post:
+      tags: [auth]
+      operationId: logout
+      x-srenautix-roles: [viewer, responder, approver, auditor, admin]
+      x-srenautix-external: false
+      parameters: [{ $ref: '#/components/parameters/Csrf' }]
+      responses:
+        '204': { description: 已退出 }
+  /v1/auth/link-code:
+    post:
+      tags: [auth]
+      operationId: createLinkCode
+      description: 生成一次性聊天账号绑定码，在聊天里发送 `/link <code>` 完成绑定（DESIGN §9.2）
+      x-srenautix-roles: [viewer, responder, approver, auditor, admin]
+      x-srenautix-external: false
+      parameters: [{ $ref: '#/components/parameters/Csrf' }]
+      responses:
+        '201':
+          description: 绑定码
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [code, expires_at]
+                properties:
+                  code: { type: string, pattern: '^[A-Z0-9]{8}$' }
+                  expires_at: { $ref: './schemas/common.schema.json#/$defs/Timestamp' }
+  /v1/incidents:
+    get:
+      tags: [incidents]
+      operationId: listIncidents
+      description: |
+        事件收件箱，按 first_firing_at 从新到旧。被抑制的事件不隐藏，由 include_suppressed 控制是否返回明细；
+        响应头 `X-Suppressed-Count` 给出被折叠的数量。feedback=pending 表示最近一次完成的研判还没有反馈或反馈已过期。
+      x-srenautix-roles: [viewer, responder, approver, auditor, admin]
+      x-srenautix-external: true
+      parameters:
+        - { name: cluster_id, in: query, schema: { $ref: './schemas/common.schema.json#/$defs/ClusterId' } }
+        - { name: state, in: query, schema: { type: string, enum: [firing, resolved, all], default: firing } }
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+        - { name: severity, in: query, schema: { $ref: './schemas/common.schema.json#/$defs/Severity' } }
+        - { name: component, in: query, schema: { $ref: './schemas/common.schema.json#/$defs/ComponentKey' } }
+        - { name: feedback, in: query, schema: { type: string, enum: [pending, given, all], default: all } }
+        - { name: include_suppressed, in: query, schema: { type: boolean, default: false } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 100 } }
+      responses:
+        '200':
+          description: 事件摘要
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/IncidentSummary' } }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+  /v1/incidents/{incident_ref}:
+    parameters: [{ $ref: '#/components/parameters/IncidentRef' }]
+    get:
+      tags: [incidents]
+      operationId: getIncident
+      x-srenautix-roles: [viewer, responder, approver, auditor, admin]
+      x-srenautix-external: true
+      parameters:
+        - name: version
+          in: query
+          description: 取指定版本；不填为最新版本
+          schema: { type: integer, minimum: 1 }
+      responses:
+        '200':
+          description: 事件全文
+          content: { application/json: { schema: { $ref: './schemas/incident.schema.json' } } }
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /v1/incidents/{incident_ref}/stage-a:
+    parameters: [{ $ref: '#/components/parameters/IncidentRef' }]
+    get:
+      tags: [incidents]
+      operationId: getStageAReport
+      description: 最新的阶段 A 报告
+      x-srenautix-roles: [viewer, responder, approver, auditor, admin]
+      x-srenautix-external: true
+      responses:
+        '200':
+          description: 阶段 A 报告
+          content: { application/json: { schema: { $ref: './schemas/stage-a-report.schema.json' } } }
+        '404': { $ref: '#/components/responses/Error' }
+  /v1/incidents/{incident_ref}/research:
+    parameters: [{ $ref: '#/components/parameters/IncidentRef' }]
+    get:
+      tags: [research]
+      operationId: listResearchRuns
+      x-srenautix-roles: [viewer, responder, approver, auditor, admin]
+      x-srenautix-external: true
+      responses:
+        '200':
+          description: 该事件的全部研判（新的在前）
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/ResearchRunSummary' } }
+        '404': { $ref: '#/components/responses/Error' }
+    post:
+      tags: [research]
+      operationId: requestResearch
+      description: 人工请求重新研判（reason=manual）。受每个事件每 6 小时最多 3 次的绝对上限约束，超过时返回 429
+      x-srenautix-roles: [responder, approver, admin]
+      x-srenautix-external: false
+      parameters: [{ $ref: '#/components/parameters/Csrf' }]
+      responses:
+        '202':
+          description: 已入队或与已有触发合并
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [run_id, merged]
+                properties:
+                  run_id: { $ref: './schemas/common.schema.json#/$defs/Uuid' }
+                  merged: { type: boolean, description: 与同一 (incident_id, incident_version, reason) 的已有触发合并 }
+        '404': { $ref: '#/components/responses/Error' }
+        '429': { $ref: '#/components/responses/Error' }
+  /v1/runs/{run_id}:
+    parameters: [{ $ref: '#/components/parameters/RunId' }]
+    get:
+      tags: [research]
+      operationId: getResearchRun
+      description: 研判运行明细。原始提示词只对 auditor 和 admin 可见，其余角色看到脱敏后的内容
+      x-srenautix-roles: [viewer, responder, approver, auditor, admin]
+      x-srenautix-external: true
+      responses:
+        '200':
+          description: 研判全文
+          content: { application/json: { schema: { $ref: '#/components/schemas/ResearchRun' } } }
+        '404': { $ref: '#/components/responses/Error' }
+  /v1/runs/{run_id}/manifest:
+    parameters: [{ $ref: '#/components/parameters/RunId' }]
+    get:
+      tags: [research]
+      operationId: getResearchManifest
+      x-srenautix-roles: [viewer, responder, approver, auditor, admin]
+      x-srenautix-external: false
+      responses:
+        '200':
+          description: 研判清单与出境清单
+          content: { application/json: { schema: { $ref: './schemas/research-manifest.schema.json' } } }
+        '404': { $ref: '#/components/responses/Error' }
+  /v1/incidents/{incident_ref}/evidence/rerun:
+    parameters: [{ $ref: '#/components/parameters/IncidentRef' }]
+    post:
+      tags: [evidence]
+      operationId: rerunEvidence
+      description: |
+        控制台的"实时重跑"：只重跑这次研判时声明过的证据卡，在限定窗口内、按用户作用域执行；不提供通用数据源代理
+        （DESIGN 附录 C）。结果并排显示，并标注"非模型所见"，不写入研判
+      x-srenautix-roles: [responder, approver, admin]
+      x-srenautix-external: false
+      parameters: [{ $ref: '#/components/parameters/Csrf' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [run_id, refs, window_to]
+              properties:
+                run_id:
+                  description: 取这次研判声明的卡；为 null 时取最新阶段 A 报告的卡
+                  oneOf: [{ type: 'null' }, { $ref: './schemas/common.schema.json#/$defs/Uuid' }]
+                refs:
+                  type: array
+                  minItems: 1
+                  maxItems: 50
+                  items: { $ref: './schemas/common.schema.json#/$defs/EvidenceRef' }
+                window_to:
+                  description: 窗口终点，不得晚于当前时间；窗口长度沿用卡片定义
+                  $ref: './schemas/common.schema.json#/$defs/Timestamp'
+      responses:
+        '200':
+          description: 重跑结果
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: './schemas/evidence-result.schema.json' } }
+        '400': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '429': { $ref: '#/components/responses/Error' }
+  /v1/incidents/{incident_ref}/feedback:
+    parameters: [{ $ref: '#/components/parameters/IncidentRef' }]
+    get:
+      tags: [feedback]
+      operationId: listFeedback
+      x-srenautix-roles: [viewer, responder, approver, auditor, admin]
+      x-srenautix-external: true
+      responses:
+        '200':
+          description: 反馈（新的在前）
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: './schemas/feedback.schema.json' } }
+    post:
+      tags: [feedback]
+      operationId: createFeedback
+      description: |
+        追加一条反馈。渠道和主体取自认证上下文：控制台会话为 console，Grafana 插件转发时为 grafana，
+        聊天渠道桥转发时带签名的渠道回调。verdict 与 disposition_verdict 至少填一个；root_component 必须是本次研判拓扑中的组件
+      x-srenautix-roles: [responder, approver, admin]
+      x-srenautix-external: false
+      parameters: [{ $ref: '#/components/parameters/Csrf' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: './schemas/feedback.schema.json#/$defs/FeedbackCreate' }
+      responses:
+        '201':
+          description: 已记录
+          content: { application/json: { schema: { $ref: './schemas/feedback.schema.json' } } }
+        '400': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+  /v1/proposals:
+    get:
+      tags: [proposals]
+      operationId: listProposals
+      x-srenautix-roles: [viewer, responder, approver, auditor, admin]
+      x-srenautix-external: true
+      parameters:
+        - { name: incident_id, in: query, schema: { $ref: './schemas/common.schema.json#/$defs/Uuid' } }
+        - { name: state, in: query, schema: { $ref: './schemas/proposal.schema.json#/$defs/State' } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 50 } }
+      responses:
+        '200':
+          description: 提议（新的在前）
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: './schemas/proposal.schema.json' } }
+    post:
+      tags: [proposals]
+      operationId: createProposal
+      description: |
+        提议中转。source 由认证上下文决定：控制台会话为 human，API token 与 MCP 为 external，worker 的服务身份为 research。
+        相同幂等键的未结束提议存在时返回 200 与已有提议；绑定字段与事件当前状态不一致时返回 409
+      x-srenautix-roles: [responder, approver, admin, service-worker]
+      x-srenautix-external: true
+      parameters: [{ $ref: '#/components/parameters/CsrfOptional' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: './schemas/proposal.schema.json#/$defs/ProposalCreate' }
+      responses:
+        '200':
+          description: 幂等命中，返回已有提议
+          content: { application/json: { schema: { $ref: './schemas/proposal.schema.json' } } }
+        '201':
+          description: 已创建。策略拒绝时同样返回 201，state=rejected_by_policy
+          content: { application/json: { schema: { $ref: './schemas/proposal.schema.json' } } }
+        '400': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+        '429': { $ref: '#/components/responses/Error' }
+  /v1/proposals/{proposal_id}:
+    parameters: [{ $ref: '#/components/parameters/ProposalId' }]
+    get:
+      tags: [proposals]
+      operationId: getProposal
+      x-srenautix-roles: [viewer, responder, approver, auditor, admin]
+      x-srenautix-external: true
+      responses:
+        '200':
+          description: 提议全文
+          content: { application/json: { schema: { $ref: './schemas/proposal.schema.json' } } }
+        '404': { $ref: '#/components/responses/Error' }
+  /v1/proposals/{proposal_id}/approve:
+    parameters: [{ $ref: '#/components/parameters/ProposalId' }]
+    post:
+      tags: [proposals]
+      operationId: approveProposal
+      description: |
+        审批并签发审批断言（格式见 contract/gateway/v1/approval-envelope.schema.json）。
+        L 档可经聊天渠道（已绑定账号）或控制台审批；H 档只能在控制台，并且 5 分钟内重新认证过，请求体必须带 confirm_target。
+        审批人的作用域按目标 UID 所在的命名空间计算
+      x-srenautix-roles: [approver, admin]
+      x-srenautix-external: false
+      parameters: [{ $ref: '#/components/parameters/Csrf' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [confirm_target]
+              properties:
+                confirm_target:
+                  type: [string, 'null']
+                  description: H 档必须等于 target.display
+      responses:
+        '200':
+          description: 已签发
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [proposal, envelope]
+                properties:
+                  proposal: { $ref: './schemas/proposal.schema.json' }
+                  envelope: { $ref: '#/components/schemas/ApprovalEnvelope' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+  /v1/proposals/{proposal_id}/reject:
+    parameters: [{ $ref: '#/components/parameters/ProposalId' }]
+    post:
+      tags: [proposals]
+      operationId: rejectProposal
+      x-srenautix-roles: [approver, admin]
+      x-srenautix-external: false
+      parameters: [{ $ref: '#/components/parameters/Csrf' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 1, maxLength: 500 }
+      responses:
+        '200':
+          description: 已拒绝
+          content: { application/json: { schema: { $ref: './schemas/proposal.schema.json' } } }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+  /v1/proposals/{proposal_id}/undo:
+    parameters: [{ $ref: '#/components/parameters/ProposalId' }]
+    post:
+      tags: [proposals]
+      operationId: undoProposal
+      description: 请求撤销已执行的 reversible 动作；由 gateway 在冲突域内串行执行
+      x-srenautix-roles: [approver, admin]
+      x-srenautix-external: false
+      parameters: [{ $ref: '#/components/parameters/Csrf' }]
+      responses:
+        '202':
+          description: 撤销已排队
+          content: { application/json: { schema: { $ref: './schemas/proposal.schema.json' } } }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+  /v1/approvals/batch:
+    post:
+      tags: [proposals]
+      operationId: batchApprove
+      description: 批量审批只允许同类型、同集群、L 档的提议；每个提议独立处理，逐项返回结果
+      x-srenautix-roles: [approver, admin]
+      x-srenautix-external: false
+      parameters: [{ $ref: '#/components/parameters/Csrf' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [proposal_ids]
+              properties:
+                proposal_ids:
+                  type: array
+                  minItems: 1
+                  maxItems: 20
+                  items: { $ref: './schemas/common.schema.json#/$defs/Uuid' }
+      responses:
+        '200':
+          description: 逐项结果
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [results]
+                properties:
+                  results:
+                    type: array
+                    items: { $ref: './integrations/approve/v1/approve.schema.json#/$defs/ApprovalOutcome' }
+        '400': { $ref: '#/components/responses/Error' }
+  /v1/events:
+    get:
+      tags: [events]
+      operationId: listEvents
+      description: |
+        事件流（DESIGN §2.3）。按游标读取 server 与 worker 两张 outbox 合并后的事件。
+        `Accept: application/json` 时长轮询：没有新事件时最多等待 wait 秒；`Accept: text/event-stream` 时为 SSE，
+        每条事件的 SSE id 为它的游标，断线后用 Last-Event-ID 续传。投递语义是至少一次，消费者按 event_id 幂等处理
+      x-srenautix-roles: [viewer, responder, approver, auditor, admin, service-worker]
+      x-srenautix-external: false
+      parameters:
+        - name: after
+          in: query
+          description: 游标，形如 server:<seq>,worker:<seq>；不填时从当前位置开始
+          schema: { type: string, pattern: '^((server|worker):[0-9]+)(,(server|worker):[0-9]+)?$' }
+        - {
+            name: types,
+            in: query,
+            style: form,
+            explode: false,
+            schema: { type: array, items: { $ref: './schemas/events.schema.json#/$defs/EventType' } },
+          }
+        - { name: wait, in: query, schema: { type: integer, minimum: 0, maximum: 60, default: 25 } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 1000, default: 200 } }
+      responses:
+        '200':
+          description: 事件批次
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [events, cursor]
+                properties:
+                  events: { type: array, items: { $ref: './schemas/events.schema.json' } }
+                  cursor: { type: string }
+            text/event-stream:
+              schema: { type: string }
+        '400': { $ref: '#/components/responses/Error' }
+  /v1/eval/reports:
+    get:
+      tags: [eval]
+      operationId: listEvalReports
+      x-srenautix-roles: [viewer, responder, approver, auditor, admin]
+      x-srenautix-external: false
+      parameters:
+        - { name: mode, in: query, schema: { type: string, enum: [snapshot, reconstructed] } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+      responses:
+        '200':
+          description: 成绩单（新的在前）
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: './schemas/eval-report.schema.json' } }
+  /v1/eval/reports/{report_id}:
+    parameters:
+      - { name: report_id, in: path, required: true, schema: { $ref: './schemas/common.schema.json#/$defs/Uuid' } }
+    get:
+      tags: [eval]
+      operationId: getEvalReport
+      x-srenautix-roles: [viewer, responder, approver, auditor, admin]
+      x-srenautix-external: false
+      responses:
+        '200':
+          description: 成绩单
+          content: { application/json: { schema: { $ref: './schemas/eval-report.schema.json' } } }
+        '404': { $ref: '#/components/responses/Error' }
+components:
+  securitySchemes:
+    session:
+      type: apiKey
+      in: cookie
+      name: __Host-srenautix_session
+    bearer:
+      type: http
+      scheme: bearer
+  parameters:
+    IncidentRef:
+      name: incident_ref
+      in: path
+      required: true
+      description: incident_id、稳定标签或别名；标签放进路径时按 RFC 3986 编码
+      schema: { type: string, minLength: 1 }
+    RunId:
+      name: run_id
+      in: path
+      required: true
+      schema: { $ref: './schemas/common.schema.json#/$defs/Uuid' }
+    ProposalId:
+      name: proposal_id
+      in: path
+      required: true
+      schema: { $ref: './schemas/common.schema.json#/$defs/Uuid' }
+    Csrf:
+      name: X-CSRF-Token
+      in: header
+      required: true
+      schema: { type: string, minLength: 1 }
+    CsrfOptional:
+      name: X-CSRF-Token
+      in: header
+      required: false
+      description: 会话认证时必填；Bearer 认证时不需要
+      schema: { type: string }
+  responses:
+    Error:
+      description: 错误
+      content:
+        application/json:
+          schema: { $ref: './schemas/common.schema.json#/$defs/Error' }
+  schemas:
+    Session:
+      type: object
+      additionalProperties: false
+      required: [principal, roles, provider, auth_time, expires_at, csrf_token, break_glass]
+      properties:
+        principal: { $ref: './schemas/common.schema.json#/$defs/Principal' }
+        roles:
+          type: array
+          items: { $ref: './integrations/identity/v1/identity.schema.json#/$defs/RoleBinding' }
+        provider: { type: string }
+        auth_time: { $ref: './schemas/common.schema.json#/$defs/Timestamp' }
+        expires_at: { $ref: './schemas/common.schema.json#/$defs/Timestamp' }
+        csrf_token: { type: string }
+        break_glass:
+          type: boolean
+          description: 本地管理员作为紧急入口登录；页面显示横幅
+    IncidentSummary:
+      type: object
+      additionalProperties: false
+      required:
+        - incident_id
+        - cluster_id
+        - label
+        - incident_version
+        - state
+        - severity
+        - root_component
+        - ambiguous
+        - first_firing_at
+        - ended_at
+        - disposition
+        - conclusion_level
+        - research_fresh_at
+        - pending_approvals
+        - feedback
+        - merged_from_count
+        - split_from
+        - suppressed
+        - observability_blind
+        - updated_at
+      properties:
+        incident_id: { $ref: './schemas/common.schema.json#/$defs/Uuid' }
+        cluster_id: { $ref: './schemas/common.schema.json#/$defs/ClusterId' }
+        label: { $ref: './schemas/incident.schema.json#/$defs/IncidentLabel' }
+        incident_version: { type: integer, minimum: 1 }
+        state: { type: string, enum: [firing, resolved, merged] }
+        severity: { $ref: './schemas/common.schema.json#/$defs/Severity' }
+        root_component:
+          oneOf: [{ type: 'null' }, { $ref: './schemas/common.schema.json#/$defs/ComponentKey' }]
+        ambiguous: { type: boolean }
+        first_firing_at: { $ref: './schemas/common.schema.json#/$defs/Timestamp' }
+        ended_at:
+          oneOf: [{ type: 'null' }, { $ref: './schemas/common.schema.json#/$defs/Timestamp' }]
+        disposition:
+          description: 最近一次研判的处置判断；只有阶段 A 时取阶段 A 的
+          oneOf: [{ type: 'null' }, { $ref: './schemas/common.schema.json#/$defs/Disposition' }]
+        conclusion_level:
+          oneOf: [{ type: 'null' }, { $ref: './schemas/common.schema.json#/$defs/ConclusionLevel' }]
+        research_fresh_at:
+          description: 最近一次研判或阶段 A 报告的时间
+          oneOf: [{ type: 'null' }, { $ref: './schemas/common.schema.json#/$defs/Timestamp' }]
+        pending_approvals: { type: integer, minimum: 0 }
+        feedback:
+          description: 最新一条反馈；没有时为 null
+          oneOf: [{ type: 'null' }, { $ref: './schemas/feedback.schema.json' }]
+        merged_from_count: { type: integer, minimum: 0 }
+        split_from:
+          oneOf: [{ type: 'null' }, { $ref: './schemas/common.schema.json#/$defs/Uuid' }]
+        suppressed: { type: boolean }
+        observability_blind: { type: boolean }
+        updated_at: { $ref: './schemas/common.schema.json#/$defs/Timestamp' }
+    ResearchState:
+      type: string
+      description: |
+        queued 已入队；hypothesize / discriminate / conclude 阶段 B 的三步；completed 完成；
+        stage_a_only 跳过阶段 B（熔断、预算、风暴、故障域）；failed 失败；superseded 被同一事件更新的触发取代
+      enum: [queued, hypothesize, discriminate, conclude, completed, stage_a_only, failed, superseded]
+    ResearchRunSummary:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          run_id,
+          incident_id,
+          incident_version,
+          reason,
+          state,
+          disposition,
+          conclusion_level,
+          root_component,
+          summary,
+          started_at,
+          finished_at,
+        ]
+      properties:
+        run_id: { $ref: './schemas/common.schema.json#/$defs/Uuid' }
+        incident_id: { $ref: './schemas/common.schema.json#/$defs/Uuid' }
+        incident_version: { type: integer, minimum: 1 }
+        reason: { $ref: './schemas/events.schema.json#/$defs/ResearchReason' }
+        state: { $ref: '#/components/schemas/ResearchState' }
+        disposition:
+          oneOf: [{ type: 'null' }, { $ref: './schemas/common.schema.json#/$defs/Disposition' }]
+        conclusion_level:
+          oneOf: [{ type: 'null' }, { $ref: './schemas/common.schema.json#/$defs/ConclusionLevel' }]
+        root_component:
+          oneOf: [{ type: 'null' }, { $ref: './schemas/common.schema.json#/$defs/ComponentKey' }]
+        summary: { type: [string, 'null'] }
+        started_at: { $ref: './schemas/common.schema.json#/$defs/Timestamp' }
+        finished_at:
+          oneOf: [{ type: 'null' }, { $ref: './schemas/common.schema.json#/$defs/Timestamp' }]
+    ResearchRun:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          run_id,
+          incident_id,
+          incident_version,
+          reason,
+          state,
+          disposition,
+          conclusion_level,
+          root_component,
+          summary,
+          started_at,
+          finished_at,
+          stop_reason,
+          evidence,
+          output,
+          llm_calls,
+          tool_calls,
+          budget,
+          error,
+        ]
+      properties:
+        run_id: { $ref: './schemas/common.schema.json#/$defs/Uuid' }
+        incident_id: { $ref: './schemas/common.schema.json#/$defs/Uuid' }
+        incident_version: { type: integer, minimum: 1 }
+        reason: { $ref: './schemas/events.schema.json#/$defs/ResearchReason' }
+        state: { $ref: '#/components/schemas/ResearchState' }
+        disposition:
+          oneOf: [{ type: 'null' }, { $ref: './schemas/common.schema.json#/$defs/Disposition' }]
+        conclusion_level:
+          oneOf: [{ type: 'null' }, { $ref: './schemas/common.schema.json#/$defs/ConclusionLevel' }]
+        root_component:
+          oneOf: [{ type: 'null' }, { $ref: './schemas/common.schema.json#/$defs/ComponentKey' }]
+        summary: { type: [string, 'null'] }
+        started_at: { $ref: './schemas/common.schema.json#/$defs/Timestamp' }
+        finished_at:
+          oneOf: [{ type: 'null' }, { $ref: './schemas/common.schema.json#/$defs/Timestamp' }]
+        stop_reason:
+          type: [string, 'null']
+          enum: [leader_supported, no_change, step_limit, deadline, budget, model_unavailable, null]
+        evidence:
+          type: array
+          description: 本次研判的全部证据卡结果（含区分性检查产生的卡）
+          items: { $ref: './schemas/evidence-result.schema.json' }
+        output:
+          oneOf: [{ type: 'null' }, { $ref: './schemas/research-output.schema.json' }]
+        llm_calls: { type: array, items: { $ref: '#/components/schemas/LlmCall' } }
+        tool_calls: { type: array, items: { $ref: '#/components/schemas/ToolCall' } }
+        budget:
+          type: object
+          additionalProperties: false
+          required: [estimated_input_tokens, input_tokens, output_tokens, cost, currency]
+          properties:
+            estimated_input_tokens: { type: integer, minimum: 0 }
+            input_tokens: { type: integer, minimum: 0 }
+            output_tokens: { type: integer, minimum: 0 }
+            cost: { type: number, minimum: 0 }
+            currency: { type: string }
+        error:
+          oneOf:
+            - { type: 'null' }
+            - type: object
+              additionalProperties: false
+              required: [kind, message]
+              properties:
+                kind: { type: string }
+                message: { type: string }
+    LlmCall:
+      type: object
+      additionalProperties: false
+      required:
+        [seq, phase, route_id, model, prompt_hash, outcome, repair_step, usage, cost, duration_ms, redaction_hits, at]
+      properties:
+        seq: { type: integer, minimum: 1 }
+        phase: { type: string, enum: [hypothesize, conclude, compress, still_consistent, repair] }
+        route_id: { type: string }
+        model: { type: string }
+        prompt_hash: { $ref: './schemas/common.schema.json#/$defs/Sha256' }
+        outcome: { type: string, enum: [succeeded, retried, switched, failed] }
+        repair_step:
+          type: [string, 'null']
+          description: 修复阶梯中最终成功或失败的一级
+          enum: [parse, jsonrepair, validate, field_salvage, reask, next_route, deterministic_only, null]
+        usage: { $ref: './integrations/model/v1/dialect-profile.schema.json#/$defs/Usage' }
+        cost: { type: number, minimum: 0 }
+        duration_ms: { type: integer, minimum: 0 }
+        redaction_hits: { type: integer, minimum: 0 }
+        at: { $ref: './schemas/common.schema.json#/$defs/Timestamp' }
+    ToolCall:
+      type: object
+      additionalProperties: false
+      required: [seq, tool, arguments, window, limit_applied, result_size, truncated, duration_ms, error, result_ref]
+      properties:
+        seq: { type: integer, minimum: 1 }
+        tool: { type: string }
+        arguments: { type: object }
+        window:
+          oneOf: [{ type: 'null' }, { $ref: './schemas/common.schema.json#/$defs/TimeWindow' }]
+        limit_applied: { type: [integer, 'null'] }
+        result_size: { type: integer, minimum: 0 }
+        truncated: { type: boolean }
+        duration_ms: { type: integer, minimum: 0 }
+        error: { type: [string, 'null'] }
+        result_ref:
+          description: 工具结果判定成的卡
+          oneOf: [{ type: 'null' }, { $ref: './schemas/common.schema.json#/$defs/EvidenceRef' }]
+    ApprovalEnvelope:
+      type: object
+      description: 审批断言及其签名证明，结构以 contract/gateway/v1/approval-envelope.schema.json 为准

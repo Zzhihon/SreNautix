@@ -1,0 +1,221 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://srenautix.io/contract/schemas/proposal.schema.json",
+  "title": "Proposal",
+  "description": "server 持有的提议（DESIGN §2.4、§9）。提交时带幂等键，并绑定 {incident_version, root_component, evidence_fingerprint}；三者任一变化即标为 stale，gateway 执行前经中心再检查一次。审批断言、工单与 ActionExecution 的格式以 contract/gateway/ 为准",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "proposal_id",
+    "idempotency_key",
+    "cluster_id",
+    "incident_id",
+    "binding",
+    "source",
+    "research_run_id",
+    "rule_id",
+    "caller_id",
+    "action",
+    "level",
+    "tier",
+    "auto_eligible",
+    "params",
+    "params_hash",
+    "canon_version",
+    "target",
+    "hypothesis_id",
+    "evidence_refs",
+    "expected_effect",
+    "state",
+    "policy_checks",
+    "approval",
+    "execution",
+    "ttl_expires_at",
+    "first_delivered_at",
+    "created_at",
+    "updated_at"
+  ],
+  "properties": {
+    "proposal_id": { "$ref": "common.schema.json#/$defs/Uuid" },
+    "idempotency_key": {
+      "description": "sha256(JCS([incident_id, run_id 或 rule_id 或 caller_id, action, canonical_params]))",
+      "$ref": "common.schema.json#/$defs/Sha256"
+    },
+    "cluster_id": { "$ref": "common.schema.json#/$defs/ClusterId" },
+    "incident_id": { "$ref": "common.schema.json#/$defs/Uuid" },
+    "binding": { "$ref": "#/$defs/Binding" },
+    "source": {
+      "type": "string",
+      "description": "research：阶段 B 研判；rule：领域包规则提议；human：控制台人工提议；external：MCP 或 API 调用方（只能提议）",
+      "enum": ["research", "rule", "human", "external"]
+    },
+    "research_run_id": { "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/Uuid" }] },
+    "rule_id": { "type": ["string", "null"], "description": "<pack>/<rule id>" },
+    "caller_id": { "type": ["string", "null"], "description": "human 为主体 id，external 为调用方 id" },
+    "action": { "type": "string", "description": "动作目录中的动作 id" },
+    "level": {
+      "type": "string",
+      "description": "动作等级（DESIGN §9.1），取值与 contract/gateway/v1/approval-assertion 的 level 一致（packages/contract 的测试核对）；满足可重建条件的 pod_restart 为 reversible_recreatable",
+      "enum": ["reversible", "reversible_recreatable", "compensable", "irreversible"]
+    },
+    "tier": {
+      "type": "string",
+      "description": "审批档位（DESIGN §9.2），取值与审批断言的 tier 一致",
+      "enum": ["L", "H"]
+    },
+    "auto_eligible": {
+      "type": "boolean",
+      "description": "策略允许自动执行：等级为 reversible 或 reversible_recreatable、在策略允许的命名空间与动作内、未超过每小时上限。自动批准的断言 approver_principal 为 auto:<规则名>"
+    },
+    "params": { "type": "object" },
+    "params_hash": { "$ref": "common.schema.json#/$defs/Sha256" },
+    "canon_version": {
+      "type": "string",
+      "description": "参数规范化版本，取值与审批断言的 canon_version 一致：jcs-sha256-v1 表示 RFC 8785 JCS、UTF-8、SHA-256、小写十六进制并带 sha256: 前缀",
+      "enum": ["jcs-sha256-v1"]
+    },
+    "target": { "$ref": "#/$defs/Target" },
+    "hypothesis_id": { "type": ["string", "null"], "pattern": "^h[1-9]$" },
+    "evidence_refs": {
+      "type": "array",
+      "items": { "$ref": "common.schema.json#/$defs/EvidenceRef" }
+    },
+    "expected_effect": { "type": "string", "maxLength": 300 },
+    "state": { "$ref": "#/$defs/State" },
+    "policy_checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "passed", "detail"],
+        "properties": {
+          "name": { "type": "string" },
+          "passed": { "type": "boolean" },
+          "detail": { "type": "string" }
+        }
+      }
+    },
+    "approval": {
+      "description": "审批或拒绝的记录；断言本体见 contract/gateway/",
+      "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/ApprovalRecord" }]
+    },
+    "execution": {
+      "description": "gateway 推回的 ActionExecution 摘要；phase 取值以 contract/gateway/ 的 ActionExecution 为准",
+      "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/ExecutionSummary" }]
+    },
+    "ttl_expires_at": {
+      "description": "提议 TTL 从第一次成功送达时开始计算，并且有硬上限；未送达时为 null",
+      "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/Timestamp" }]
+    },
+    "first_delivered_at": {
+      "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/Timestamp" }]
+    },
+    "created_at": { "$ref": "common.schema.json#/$defs/Timestamp" },
+    "updated_at": { "$ref": "common.schema.json#/$defs/Timestamp" }
+  },
+  "$defs": {
+    "Binding": {
+      "title": "ProposalBinding",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["incident_version", "root_component", "evidence_fingerprint"],
+      "properties": {
+        "incident_version": { "type": "integer", "minimum": 1 },
+        "root_component": { "$ref": "common.schema.json#/$defs/ComponentKey" },
+        "evidence_fingerprint": { "$ref": "common.schema.json#/$defs/Sha256" }
+      }
+    },
+    "Target": {
+      "title": "ProposalTarget",
+      "description": "由机器从事件与动作的目标解析规则推导，模型给出的目标必须等于推导结果",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cluster_id", "kind", "namespace", "name", "uid", "display"],
+      "properties": {
+        "cluster_id": { "$ref": "common.schema.json#/$defs/ClusterId" },
+        "kind": { "type": "string" },
+        "namespace": { "type": ["string", "null"] },
+        "name": { "type": "string" },
+        "uid": { "type": ["string", "null"] },
+        "display": { "type": "string", "description": "H 档审批时要输入的目标名" }
+      }
+    },
+    "State": {
+      "title": "ProposalState",
+      "description": "rejected_by_policy 策略拒绝；awaiting_approval 待审批；approved 已签发审批断言、等待 gateway 拉取；dispatched gateway 已拉取，后续进度见 execution；rejected 人工拒绝；expired TTL 或审批过期；stale 绑定字段变化；duplicate 与未结束的提议幂等键相同；held 被软暂停扣住",
+      "type": "string",
+      "enum": [
+        "rejected_by_policy",
+        "awaiting_approval",
+        "approved",
+        "held",
+        "dispatched",
+        "rejected",
+        "expired",
+        "stale",
+        "duplicate"
+      ]
+    },
+    "ApprovalRecord": {
+      "title": "ApprovalRecord",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["decision", "principal_id", "channel", "reason", "assertion_id", "at"],
+      "properties": {
+        "decision": { "type": "string", "enum": ["approved", "rejected", "auto"] },
+        "principal_id": { "type": "string" },
+        "channel": {
+          "type": "string",
+          "description": "Channel 的取值，或策略自动批准时的 auto",
+          "enum": ["console", "grafana", "telegram", "feishu", "dingtalk", "wecom", "slack", "api", "mcp", "auto"]
+        },
+        "reason": { "type": ["string", "null"], "maxLength": 500 },
+        "assertion_id": {
+          "description": "签发的审批断言 id；拒绝时为 null",
+          "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/Uuid" }]
+        },
+        "at": { "$ref": "common.schema.json#/$defs/Timestamp" }
+      }
+    },
+    "ExecutionSummary": {
+      "title": "ExecutionSummary",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["execution_id", "phase", "queue_position", "updated_at"],
+      "properties": {
+        "execution_id": { "type": "string" },
+        "phase": { "type": "string" },
+        "queue_position": { "type": ["integer", "null"], "minimum": 1 },
+        "updated_at": { "$ref": "common.schema.json#/$defs/Timestamp" }
+      }
+    },
+    "ProposalCreate": {
+      "title": "ProposalCreate",
+      "description": "提交提议的请求体。source、caller_id 由认证上下文决定；目标由 server 推导",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "incident_id",
+        "binding",
+        "action",
+        "params",
+        "research_run_id",
+        "rule_id",
+        "hypothesis_id",
+        "evidence_refs",
+        "expected_effect"
+      ],
+      "properties": {
+        "incident_id": { "$ref": "common.schema.json#/$defs/Uuid" },
+        "binding": { "$ref": "#/$defs/Binding" },
+        "action": { "type": "string" },
+        "params": { "type": "object" },
+        "research_run_id": { "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/Uuid" }] },
+        "rule_id": { "type": ["string", "null"] },
+        "hypothesis_id": { "type": ["string", "null"], "pattern": "^h[1-9]$" },
+        "evidence_refs": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/EvidenceRef" } },
+        "expected_effect": { "type": "string", "maxLength": 300 }
+      }
+    }
+  }
+}

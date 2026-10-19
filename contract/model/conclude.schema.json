@@ -1,0 +1,105 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://srenautix.io/contract/model/conclude.schema.json",
+  "title": "ConcludeOutput",
+  "description": "阶段 B conclude 步骤的模型输出（DESIGN §7.2）。遵守可移植 schema 子集（§8.2）。结论阶梯的档位由代码判定，不由模型输出",
+  "x-srenautix-portable": true,
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "disposition",
+    "hypothesis_id",
+    "undetermined_reason",
+    "situation",
+    "summary",
+    "recommendations",
+    "proposals"
+  ],
+  "properties": {
+    "disposition": { "type": "string", "enum": ["act", "ignore", "escalate", "undetermined"] },
+    "hypothesis_id": {
+      "type": ["string", "null"],
+      "description": "选中的假设；为 null 时 undetermined_reason 必须非空",
+      "enum": ["h1", "h2", "h3", "h4", "h5", "h6", null]
+    },
+    "undetermined_reason": { "type": ["string", "null"], "maxLength": 400 },
+    "situation": {
+      "type": "string",
+      "description": "现状与背景，三句以内：发生了什么、影响范围、当前状态",
+      "maxLength": 300
+    },
+    "summary": {
+      "type": "string",
+      "description": "一到两句：根因结论（或无法判定的原因）与第一步该做什么",
+      "maxLength": 400
+    },
+    "recommendations": {
+      "type": "array",
+      "maxItems": 12,
+      "description": "按 mitigation、root_fix、prevention、investigation 排列，每类最多 3 条",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "kind",
+          "title",
+          "rationale",
+          "steps",
+          "owner",
+          "risk",
+          "risk_note",
+          "runbook_ref",
+          "action_id",
+          "hypothesis_id",
+          "evidence_refs"
+        ],
+        "properties": {
+          "id": { "type": "string", "pattern": "^r[0-9]{1,2}$" },
+          "kind": { "type": "string", "enum": ["mitigation", "root_fix", "prevention", "investigation"] },
+          "title": { "type": "string", "maxLength": 120 },
+          "rationale": { "type": "string", "maxLength": 400 },
+          "steps": { "type": "array", "minItems": 1, "maxItems": 8, "items": { "type": "string", "maxLength": 500 } },
+          "owner": { "type": "string", "enum": ["platform", "app", "vendor", "oncall"] },
+          "risk": { "type": "string", "enum": ["low", "medium", "high"] },
+          "risk_note": { "type": ["string", "null"], "maxLength": 300 },
+          "runbook_ref": {
+            "type": ["string", "null"],
+            "description": "<pack>/<runbook 文件>#<锚点>",
+            "x-srenautix-dynamic-enum": "runbooks"
+          },
+          "action_id": {
+            "type": ["string", "null"],
+            "description": "能由动作目录中的动作完成时填写",
+            "x-srenautix-dynamic-enum": "actions"
+          },
+          "hypothesis_id": { "type": "string", "enum": ["h1", "h2", "h3", "h4", "h5", "h6"] },
+          "evidence_refs": {
+            "type": "array",
+            "maxItems": 8,
+            "items": { "type": "string", "x-srenautix-dynamic-enum": "evidence_refs" }
+          }
+        }
+      }
+    },
+    "proposals": {
+      "type": "array",
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["action_id", "params_json", "hypothesis_id", "expected_effect"],
+        "properties": {
+          "action_id": { "type": "string", "x-srenautix-dynamic-enum": "actions" },
+          "params_json": {
+            "type": "string",
+            "description": "动作参数的 JSON 文本，按动作目录中该动作的参数 schema 校验；目标由机器推导，模型给出的目标必须等于推导结果",
+            "maxLength": 2000
+          },
+          "hypothesis_id": { "type": "string", "enum": ["h1", "h2", "h3", "h4", "h5", "h6"] },
+          "expected_effect": { "type": "string", "maxLength": 300 }
+        }
+      }
+    }
+  }
+}

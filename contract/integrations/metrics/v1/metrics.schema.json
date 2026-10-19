@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://srenautix.io/contract/integrations/metrics/v1/metrics.schema.json",
+  "title": "MetricsContract",
+  "description": "metrics 集成契约 v1（DESIGN §10.3）。能力：metrics.query、metrics.query_range、metrics.series、metrics.rules、metrics.label_profile。查询方言由 dialect 声明。适配器必须遵守回放时钟窗口：查询时刻与区间不得超出请求给出的 clock_window",
+  "$defs": {
+    "QueryRequest": {
+      "title": "MetricsQueryRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["expr", "dialect", "time", "clock_window", "timeout_ms"],
+      "properties": {
+        "expr": { "type": "string" },
+        "dialect": { "type": "string", "enum": ["promql", "metricsql"] },
+        "time": { "$ref": "../../../schemas/common.schema.json#/$defs/Timestamp" },
+        "clock_window": { "$ref": "../../../schemas/common.schema.json#/$defs/TimeWindow" },
+        "timeout_ms": { "type": "integer", "minimum": 1, "maximum": 60000 }
+      }
+    },
+    "QueryRangeRequest": {
+      "title": "MetricsQueryRangeRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["expr", "dialect", "window", "step_seconds", "clock_window", "timeout_ms", "max_series"],
+      "properties": {
+        "expr": { "type": "string" },
+        "dialect": { "type": "string", "enum": ["promql", "metricsql"] },
+        "window": { "$ref": "../../../schemas/common.schema.json#/$defs/TimeWindow" },
+        "step_seconds": { "type": "integer", "minimum": 1 },
+        "clock_window": { "$ref": "../../../schemas/common.schema.json#/$defs/TimeWindow" },
+        "timeout_ms": { "type": "integer", "minimum": 1, "maximum": 60000 },
+        "max_series": { "type": "integer", "minimum": 1, "maximum": 10000 }
+      }
+    },
+    "QueryResult": {
+      "title": "MetricsQueryResult",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["series", "truncated", "warnings"],
+      "properties": {
+        "series": { "type": "array", "items": { "$ref": "#/$defs/Series" } },
+        "truncated": { "type": "boolean" },
+        "warnings": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "Series": {
+      "title": "MetricSeries",
+      "description": "times 为 unix 毫秒；values 与 times 一一对应，缺失点为 null",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["labels", "times", "values"],
+      "properties": {
+        "labels": { "$ref": "../../../schemas/common.schema.json#/$defs/Labels" },
+        "times": { "type": "array", "items": { "type": "integer" } },
+        "values": { "type": "array", "items": { "type": ["number", "null"] } }
+      }
+    },
+    "SeriesRequest": {
+      "title": "MetricsSeriesRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["match", "window", "limit"],
+      "properties": {
+        "match": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+        "window": { "$ref": "../../../schemas/common.schema.json#/$defs/TimeWindow" },
+        "limit": { "type": "integer", "minimum": 1, "maximum": 10000 }
+      }
+    },
+    "SeriesResult": {
+      "title": "MetricsSeriesResult",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["series", "truncated"],
+      "properties": {
+        "series": { "type": "array", "items": { "$ref": "../../../schemas/common.schema.json#/$defs/Labels" } },
+        "truncated": { "type": "boolean" }
+      }
+    },
+    "RulesResult": {
+      "title": "MetricsRulesResult",
+      "description": "告警规则，用于按表达式分类未知告警（DESIGN §3.2）",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rules"],
+      "properties": {
+        "rules": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["group", "name", "expr", "for", "labels", "annotations"],
+            "properties": {
+              "group": { "type": "string" },
+              "name": { "type": "string" },
+              "expr": { "type": "string" },
+              "for": { "type": ["string", "null"] },
+              "labels": { "$ref": "../../../schemas/common.schema.json#/$defs/Labels" },
+              "annotations": { "$ref": "../../../schemas/common.schema.json#/$defs/Labels" }
+            }
+          }
+        }
+      }
+    },
+    "LabelProfile": {
+      "title": "LabelProfile",
+      "description": "自动探测的标签档案（DESIGN §6.2）：每个逻辑字段在该数据源中对应的标签名",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["namespace", "pod", "container", "node", "cluster", "scrape_interval_seconds", "tenant"],
+      "properties": {
+        "namespace": { "type": "string", "description": "例如 namespace、kubernetes_namespace、k8s_namespace_name" },
+        "pod": { "type": "string" },
+        "container": { "type": "string" },
+        "node": { "type": "string" },
+        "cluster": { "type": ["string", "null"], "description": "外部标签 cluster；单集群时为 null" },
+        "scrape_interval_seconds": { "type": "integer", "minimum": 1 },
+        "tenant": { "type": ["string", "null"], "description": "Mimir 等多租户后端的租户" }
+      }
+    }
+  }
+}

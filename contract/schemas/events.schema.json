@@ -1,0 +1,301 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://srenautix.io/contract/schemas/events.schema.json",
+  "title": "OutboxEvent",
+  "description": "事件流中的一条事件（DESIGN §2.3）。每个所有者（server、worker）各有一张只追加的 outbox，与状态变更写在同一事务里。消费者按游标调用 GET /v1/events?after=，投递语义是至少一次，按 event_id 幂等处理。type 决定 payload 的结构",
+  "oneOf": [
+    { "$ref": "#/$defs/IncidentUpserted" },
+    { "$ref": "#/$defs/IncidentMerged" },
+    { "$ref": "#/$defs/IncidentSplit" },
+    { "$ref": "#/$defs/StageAReported" },
+    { "$ref": "#/$defs/ResearchQueued" },
+    { "$ref": "#/$defs/ResearchConcluded" },
+    { "$ref": "#/$defs/ResearchFailed" },
+    { "$ref": "#/$defs/ProposalChanged" },
+    { "$ref": "#/$defs/ApprovalIssued" },
+    { "$ref": "#/$defs/ExecutionUpdated" },
+    { "$ref": "#/$defs/FeedbackRecorded" },
+    { "$ref": "#/$defs/ConditionChanged" }
+  ],
+  "$defs": {
+    "EventType": {
+      "title": "OutboxEventType",
+      "type": "string",
+      "enum": [
+        "incident.created",
+        "incident.updated",
+        "incident.resolved",
+        "incident.merged",
+        "incident.split",
+        "stage_a.reported",
+        "research.queued",
+        "research.concluded",
+        "research.failed",
+        "proposal.created",
+        "proposal.updated",
+        "approval.issued",
+        "execution.updated",
+        "feedback.recorded",
+        "condition.changed"
+      ]
+    },
+    "Owner": {
+      "title": "OutboxOwner",
+      "type": "string",
+      "enum": ["server", "worker"]
+    },
+    "Header": {
+      "title": "OutboxEventHeader",
+      "type": "object",
+      "required": ["seq", "event_id", "owner", "schema_version", "cluster_id", "occurred_at"],
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "所有者 outbox 内单调递增；游标形如 <owner>:<seq>"
+        },
+        "event_id": { "$ref": "common.schema.json#/$defs/Uuid" },
+        "owner": { "$ref": "#/$defs/Owner" },
+        "schema_version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+        "cluster_id": { "$ref": "common.schema.json#/$defs/ClusterId" },
+        "occurred_at": { "$ref": "common.schema.json#/$defs/Timestamp" }
+      }
+    },
+    "IncidentUpserted": {
+      "title": "IncidentUpsertedEvent",
+      "allOf": [{ "$ref": "#/$defs/Header" }],
+      "type": "object",
+      "required": ["type", "payload"],
+      "properties": {
+        "type": { "enum": ["incident.created", "incident.updated", "incident.resolved"] },
+        "payload": { "$ref": "incident.schema.json" }
+      }
+    },
+    "IncidentMerged": {
+      "title": "IncidentMergedEvent",
+      "allOf": [{ "$ref": "#/$defs/Header" }],
+      "type": "object",
+      "required": ["type", "payload"],
+      "properties": {
+        "type": { "const": "incident.merged" },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["from_incident_id", "into_incident_id", "into_version"],
+          "properties": {
+            "from_incident_id": { "$ref": "common.schema.json#/$defs/Uuid" },
+            "into_incident_id": { "$ref": "common.schema.json#/$defs/Uuid" },
+            "into_version": { "type": "integer", "minimum": 1 }
+          }
+        }
+      }
+    },
+    "IncidentSplit": {
+      "title": "IncidentSplitEvent",
+      "allOf": [{ "$ref": "#/$defs/Header" }],
+      "type": "object",
+      "required": ["type", "payload"],
+      "properties": {
+        "type": { "const": "incident.split" },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["from_incident_id", "from_version", "new_incident_ids"],
+          "properties": {
+            "from_incident_id": { "$ref": "common.schema.json#/$defs/Uuid" },
+            "from_version": { "type": "integer", "minimum": 1 },
+            "new_incident_ids": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/Uuid" } }
+          }
+        }
+      }
+    },
+    "StageAReported": {
+      "title": "StageAReportedEvent",
+      "allOf": [{ "$ref": "#/$defs/Header" }],
+      "type": "object",
+      "required": ["type", "payload"],
+      "properties": {
+        "type": { "const": "stage_a.reported" },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "incident_id",
+            "incident_version",
+            "report_id",
+            "disposition",
+            "evidence_fingerprint",
+            "degraded"
+          ],
+          "properties": {
+            "incident_id": { "$ref": "common.schema.json#/$defs/Uuid" },
+            "incident_version": { "type": "integer", "minimum": 1 },
+            "report_id": { "$ref": "common.schema.json#/$defs/Uuid" },
+            "disposition": { "$ref": "common.schema.json#/$defs/Disposition" },
+            "evidence_fingerprint": { "$ref": "common.schema.json#/$defs/Sha256" },
+            "degraded": {
+              "type": "boolean",
+              "description": "状态库降级时在内存中生成"
+            }
+          }
+        }
+      }
+    },
+    "ResearchQueued": {
+      "title": "ResearchQueuedEvent",
+      "allOf": [{ "$ref": "#/$defs/Header" }],
+      "type": "object",
+      "required": ["type", "payload"],
+      "properties": {
+        "type": { "const": "research.queued" },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["incident_id", "incident_version", "reason", "run_id"],
+          "properties": {
+            "incident_id": { "$ref": "common.schema.json#/$defs/Uuid" },
+            "incident_version": { "type": "integer", "minimum": 1 },
+            "reason": { "$ref": "#/$defs/ResearchReason" },
+            "run_id": { "$ref": "common.schema.json#/$defs/Uuid" }
+          }
+        }
+      }
+    },
+    "ResearchReason": {
+      "title": "ResearchReason",
+      "description": "触发研判的原因；(incident_id, incident_version, reason) 是触发的唯一键",
+      "type": "string",
+      "enum": [
+        "new_incident",
+        "fingerprint_changed",
+        "root_changed",
+        "severity_raised",
+        "feedback",
+        "manual",
+        "model_recovered",
+        "resumed"
+      ]
+    },
+    "ResearchConcluded": {
+      "title": "ResearchConcludedEvent",
+      "allOf": [{ "$ref": "#/$defs/Header" }],
+      "type": "object",
+      "required": ["type", "payload"],
+      "properties": {
+        "type": { "const": "research.concluded" },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["incident_id", "incident_version", "run_id", "evidence_fingerprint", "output"],
+          "properties": {
+            "incident_id": { "$ref": "common.schema.json#/$defs/Uuid" },
+            "incident_version": { "type": "integer", "minimum": 1 },
+            "run_id": { "$ref": "common.schema.json#/$defs/Uuid" },
+            "evidence_fingerprint": { "$ref": "common.schema.json#/$defs/Sha256" },
+            "output": { "$ref": "research-output.schema.json" }
+          }
+        }
+      }
+    },
+    "ResearchFailed": {
+      "title": "ResearchFailedEvent",
+      "allOf": [{ "$ref": "#/$defs/Header" }],
+      "type": "object",
+      "required": ["type", "payload"],
+      "properties": {
+        "type": { "const": "research.failed" },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["incident_id", "incident_version", "run_id", "kind", "message"],
+          "properties": {
+            "incident_id": { "$ref": "common.schema.json#/$defs/Uuid" },
+            "incident_version": { "type": "integer", "minimum": 1 },
+            "run_id": { "$ref": "common.schema.json#/$defs/Uuid" },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "model_unavailable",
+                "breaker_open",
+                "budget_exhausted",
+                "deadline",
+                "invalid_output",
+                "datasource",
+                "internal"
+              ]
+            },
+            "message": { "type": "string" }
+          }
+        }
+      }
+    },
+    "ProposalChanged": {
+      "title": "ProposalChangedEvent",
+      "allOf": [{ "$ref": "#/$defs/Header" }],
+      "type": "object",
+      "required": ["type", "payload"],
+      "properties": {
+        "type": { "enum": ["proposal.created", "proposal.updated"] },
+        "payload": { "$ref": "proposal.schema.json" }
+      }
+    },
+    "ApprovalIssued": {
+      "title": "ApprovalIssuedEvent",
+      "allOf": [{ "$ref": "#/$defs/Header" }],
+      "type": "object",
+      "required": ["type", "payload"],
+      "properties": {
+        "type": { "const": "approval.issued" },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["proposal_id", "assertion_id", "tier", "expires_at"],
+          "properties": {
+            "proposal_id": { "$ref": "common.schema.json#/$defs/Uuid" },
+            "assertion_id": { "$ref": "common.schema.json#/$defs/Uuid" },
+            "tier": { "type": "string", "enum": ["L", "H"] },
+            "expires_at": { "$ref": "common.schema.json#/$defs/Timestamp" }
+          }
+        }
+      }
+    },
+    "ExecutionUpdated": {
+      "title": "ExecutionUpdatedEvent",
+      "allOf": [{ "$ref": "#/$defs/Header" }],
+      "type": "object",
+      "required": ["type", "payload"],
+      "properties": {
+        "type": { "const": "execution.updated" },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["proposal_id", "execution"],
+          "properties": {
+            "proposal_id": { "$ref": "common.schema.json#/$defs/Uuid" },
+            "execution": { "$ref": "proposal.schema.json#/$defs/ExecutionSummary" }
+          }
+        }
+      }
+    },
+    "FeedbackRecorded": {
+      "title": "FeedbackRecordedEvent",
+      "allOf": [{ "$ref": "#/$defs/Header" }],
+      "type": "object",
+      "required": ["type", "payload"],
+      "properties": {
+        "type": { "const": "feedback.recorded" },
+        "payload": { "$ref": "feedback.schema.json" }
+      }
+    },
+    "ConditionChanged": {
+      "title": "ConditionChangedEvent",
+      "allOf": [{ "$ref": "#/$defs/Header" }],
+      "type": "object",
+      "required": ["type", "payload"],
+      "properties": {
+        "type": { "const": "condition.changed" },
+        "payload": { "$ref": "condition.schema.json" }
+      }
+    }
+  }
+}

@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://srenautix.io/contract/integrations/logs/v1/logs.schema.json",
+  "title": "LogsContract",
+  "description": "logs 集成契约 v1（DESIGN §6.2、§10.3）。每个日志集成都必须实现 logs.match；原生查询 logs.query 为可选。日志内容是不可信文本，只作为文本显示",
+  "$defs": {
+    "MatchRequest": {
+      "title": "LogsMatchRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["selector", "contains", "regex", "window", "limit", "clock_window"],
+      "properties": {
+        "selector": { "$ref": "#/$defs/K8sSelector" },
+        "contains": {
+          "type": ["string", "null"],
+          "description": "子串匹配；与 regex 二选一，另一个为 null"
+        },
+        "regex": { "type": ["string", "null"], "description": "RE2 正则" },
+        "window": { "$ref": "../../../schemas/common.schema.json#/$defs/TimeWindow" },
+        "limit": { "type": "integer", "minimum": 1, "maximum": 1000 },
+        "clock_window": { "$ref": "../../../schemas/common.schema.json#/$defs/TimeWindow" }
+      }
+    },
+    "K8sSelector": {
+      "title": "LogsK8sSelector",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cluster_id", "namespace", "pods", "containers", "labels"],
+      "properties": {
+        "cluster_id": { "$ref": "../../../schemas/common.schema.json#/$defs/ClusterId" },
+        "namespace": { "type": "string" },
+        "pods": {
+          "type": "array",
+          "description": "Pod 名；空数组表示命名空间内全部 Pod",
+          "items": { "type": "string" }
+        },
+        "containers": { "type": "array", "items": { "type": "string" } },
+        "labels": { "$ref": "../../../schemas/common.schema.json#/$defs/Labels" }
+      }
+    },
+    "QueryRequest": {
+      "title": "LogsQueryRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["query", "dialect", "window", "limit", "clock_window"],
+      "properties": {
+        "query": { "type": "string" },
+        "dialect": { "type": "string", "enum": ["logql", "logsql", "lucene", "sls"] },
+        "window": { "$ref": "../../../schemas/common.schema.json#/$defs/TimeWindow" },
+        "limit": { "type": "integer", "minimum": 1, "maximum": 1000 },
+        "clock_window": { "$ref": "../../../schemas/common.schema.json#/$defs/TimeWindow" }
+      }
+    },
+    "Result": {
+      "title": "LogsResult",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["lines", "truncated"],
+      "properties": {
+        "lines": { "type": "array", "items": { "$ref": "#/$defs/Line" } },
+        "truncated": { "type": "boolean" }
+      }
+    },
+    "Line": {
+      "title": "LogLine",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["time", "labels", "line"],
+      "properties": {
+        "time": { "$ref": "../../../schemas/common.schema.json#/$defs/Timestamp" },
+        "labels": { "$ref": "../../../schemas/common.schema.json#/$defs/Labels" },
+        "line": { "type": "string", "maxLength": 8192 }
+      }
+    }
+  }
+}

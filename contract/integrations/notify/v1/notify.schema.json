@@ -1,0 +1,113 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://srenautix.io/contract/integrations/notify/v1/notify.schema.json",
+  "title": "NotifyContract",
+  "description": "notify 集成契约 v1（DESIGN §10.3、§11）。能力：notify.send、notify.edit、notify.callback_verify、notify.link。一个事件只对应一条消息，内容变化时就地编辑；同一条消息的多次编辑只保留最新一次。消息中的不可信文本放在引用块中并注明来源",
+  "$defs": {
+    "Message": {
+      "title": "NotifyMessage",
+      "description": "渠道无关的消息，渠道适配器负责转义和渲染。四段：现状与背景、问题根源、解决方案、相关证据",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["incident_id", "incident_version", "prefix", "severity", "title", "sections", "buttons", "banner"],
+      "properties": {
+        "incident_id": { "$ref": "../../../schemas/common.schema.json#/$defs/Uuid" },
+        "incident_version": { "type": "integer", "minimum": 1 },
+        "prefix": { "type": "string", "description": "部署配置的消息前缀，例如影子部署的标记" },
+        "severity": { "$ref": "../../../schemas/common.schema.json#/$defs/Severity" },
+        "title": { "type": "string", "maxLength": 200 },
+        "sections": { "type": "array", "items": { "$ref": "#/$defs/Section" } },
+        "buttons": { "type": "array", "items": { "$ref": "#/$defs/Button" } },
+        "banner": {
+          "type": ["string", "null"],
+          "description": "降级横幅，例如状态库降级、模型研判中、模型输出无效"
+        }
+      }
+    },
+    "Section": {
+      "title": "NotifySection",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "blocks"],
+      "properties": {
+        "kind": { "type": "string", "enum": ["situation", "root_cause", "remedy", "evidence"] },
+        "blocks": { "type": "array", "items": { "$ref": "#/$defs/Block" } }
+      }
+    },
+    "Block": {
+      "title": "NotifyBlock",
+      "description": "text 是 SreNautix 渲染的模板文本；quote 是引用的不可信原文，source 注明来源；model_generated=true 的块标注模型生成",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "text", "source", "model_generated"],
+      "properties": {
+        "type": { "type": "string", "enum": ["text", "quote", "list_item"] },
+        "text": { "type": "string" },
+        "source": { "type": ["string", "null"] },
+        "model_generated": { "type": "boolean" }
+      }
+    },
+    "Button": {
+      "title": "NotifyButton",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "label", "callback", "url"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "approve",
+            "reject",
+            "open_console",
+            "undo",
+            "feedback_confirm",
+            "feedback_reject",
+            "disposition_confirm",
+            "disposition_reject",
+            "resolved_confirm"
+          ]
+        },
+        "label": { "type": "string" },
+        "callback": { "type": ["string", "null"], "description": "回调数据，由 server 签名" },
+        "url": { "type": ["string", "null"] }
+      }
+    },
+    "SendResult": {
+      "title": "NotifySendResult",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["channel_message_id", "delivered_at"],
+      "properties": {
+        "channel_message_id": { "type": "string" },
+        "delivered_at": { "$ref": "../../../schemas/common.schema.json#/$defs/Timestamp" }
+      }
+    },
+    "Callback": {
+      "title": "NotifyCallback",
+      "description": "渠道回调。重放和过期的回调必须被拒绝；未绑定账号的审批和反馈必须被拒绝",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["channel", "channel_user_id", "channel_message_id", "callback", "received_at", "signature_valid"],
+      "properties": {
+        "channel": { "$ref": "../../../schemas/common.schema.json#/$defs/Channel" },
+        "channel_user_id": { "type": "string" },
+        "channel_message_id": { "type": "string" },
+        "callback": { "type": "string" },
+        "received_at": { "$ref": "../../../schemas/common.schema.json#/$defs/Timestamp" },
+        "signature_valid": { "type": "boolean" }
+      }
+    },
+    "LinkRequest": {
+      "title": "NotifyLinkRequest",
+      "description": "聊天账号绑定：控制台登录后获取一次性绑定码，在聊天里发送 /link <code>",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["channel", "channel_user_id", "code"],
+      "properties": {
+        "channel": { "$ref": "../../../schemas/common.schema.json#/$defs/Channel" },
+        "channel_user_id": { "type": "string" },
+        "code": { "type": "string", "pattern": "^[A-Z0-9]{8}$" }
+      }
+    }
+  }
+}

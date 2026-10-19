@@ -1,0 +1,106 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://srenautix.io/contract/schemas/eval-report.schema.json",
+  "title": "EvalReport",
+  "description": "回放与评测的成绩单（DESIGN §14），按模型 × 用例集给出。对外公布时始终同时给出分子和分母；snapshot 与 reconstructed 两种模式的成绩分开报告",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["report_id", "created_at", "code_sha", "pack_lock", "mode", "case_set", "runs_per_case", "rows", "gate"],
+  "properties": {
+    "report_id": { "$ref": "common.schema.json#/$defs/Uuid" },
+    "created_at": { "$ref": "common.schema.json#/$defs/Timestamp" },
+    "code_sha": { "type": "string" },
+    "pack_lock": { "$ref": "common.schema.json#/$defs/Sha256" },
+    "mode": { "type": "string", "enum": ["snapshot", "reconstructed"] },
+    "case_set": { "type": "string" },
+    "runs_per_case": { "type": "integer", "minimum": 1 },
+    "rows": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/ModelRow" }
+    },
+    "gate": {
+      "description": "发布门禁结果；只评测、不做比较时为 null",
+      "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/Gate" }]
+    }
+  },
+  "$defs": {
+    "Ratio": {
+      "title": "EvalRatio",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["numerator", "denominator", "value", "ci_low", "ci_high"],
+      "properties": {
+        "numerator": { "type": "number", "minimum": 0 },
+        "denominator": { "type": "number", "minimum": 0 },
+        "value": { "type": ["number", "null"] },
+        "ci_low": { "type": ["number", "null"], "description": "聚类自助法 90% 置信区间下界" },
+        "ci_high": { "type": ["number", "null"] }
+      }
+    },
+    "ModelRow": {
+      "title": "EvalModelRow",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "route_id",
+        "model",
+        "pack_timing",
+        "top1",
+        "recall_at_3",
+        "pass_pow_k",
+        "disposition_accuracy",
+        "benign_false_positive",
+        "undetermined_ratio",
+        "structured_output_failure",
+        "cost_per_case",
+        "snapshot_miss_rate",
+        "by_granularity"
+      ],
+      "properties": {
+        "route_id": { "type": "string" },
+        "model": { "type": "string" },
+        "pack_timing": {
+          "type": "string",
+          "description": "领域包早于事件或晚于事件，分两组报告",
+          "enum": ["pack_before_incident", "pack_after_incident", "all"]
+        },
+        "top1": { "$ref": "#/$defs/Ratio" },
+        "recall_at_3": { "$ref": "#/$defs/Ratio" },
+        "pass_pow_k": { "$ref": "#/$defs/Ratio" },
+        "disposition_accuracy": { "$ref": "#/$defs/Ratio" },
+        "benign_false_positive": { "$ref": "#/$defs/Ratio" },
+        "undetermined_ratio": { "$ref": "#/$defs/Ratio" },
+        "structured_output_failure": { "$ref": "#/$defs/Ratio" },
+        "cost_per_case": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["currency", "mean", "p90"],
+          "properties": {
+            "currency": { "type": "string" },
+            "mean": { "type": "number", "minimum": 0 },
+            "p90": { "type": "number", "minimum": 0 }
+          }
+        },
+        "snapshot_miss_rate": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+        "by_granularity": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/Ratio" }
+        }
+      }
+    },
+    "Gate": {
+      "title": "EvalGate",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["baseline_report_id", "regressed_cases", "waived_cases", "paired_delta_low", "threshold", "passed"],
+      "properties": {
+        "baseline_report_id": { "$ref": "common.schema.json#/$defs/Uuid" },
+        "regressed_cases": { "type": "array", "items": { "type": "string" } },
+        "waived_cases": { "type": "array", "items": { "type": "string" } },
+        "paired_delta_low": { "type": "number", "description": "新减旧的单侧 90% 下界" },
+        "threshold": { "type": "number", "description": "n<100 时 -0.10，n≥100 时 -0.05" },
+        "passed": { "type": "boolean" }
+      }
+    }
+  }
+}

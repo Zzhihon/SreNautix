@@ -1,0 +1,116 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://srenautix.io/contract/integrations/traces/v1/traces.schema.json",
+  "title": "TracesContract",
+  "description": "traces 集成契约 v1（DESIGN §10.3）。能力：traces.search、traces.trace、traces.service_graph。服务图产生 provenance=runtime 的拓扑边",
+  "$defs": {
+    "SearchRequest": {
+      "title": "TracesSearchRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["query", "dialect", "window", "limit", "clock_window"],
+      "properties": {
+        "query": { "type": "string" },
+        "dialect": { "type": "string", "enum": ["traceql", "jaeger", "skywalking"] },
+        "window": { "$ref": "../../../schemas/common.schema.json#/$defs/TimeWindow" },
+        "limit": { "type": "integer", "minimum": 1, "maximum": 500 },
+        "clock_window": { "$ref": "../../../schemas/common.schema.json#/$defs/TimeWindow" }
+      }
+    },
+    "SearchResult": {
+      "title": "TracesSearchResult",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["hits", "truncated"],
+      "properties": {
+        "hits": { "type": "array", "items": { "$ref": "#/$defs/TraceHit" } },
+        "truncated": { "type": "boolean" }
+      }
+    },
+    "TraceHit": {
+      "title": "TraceHit",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["trace_id", "root_service", "root_name", "start", "duration_ms", "attributes"],
+      "properties": {
+        "trace_id": { "type": "string" },
+        "root_service": { "type": "string" },
+        "root_name": { "type": "string" },
+        "start": { "$ref": "../../../schemas/common.schema.json#/$defs/Timestamp" },
+        "duration_ms": { "type": "number", "minimum": 0 },
+        "attributes": { "$ref": "../../../schemas/common.schema.json#/$defs/Labels" }
+      }
+    },
+    "TraceRequest": {
+      "title": "TraceRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["trace_id", "max_spans"],
+      "properties": {
+        "trace_id": { "type": "string" },
+        "max_spans": { "type": "integer", "minimum": 1, "maximum": 5000 }
+      }
+    },
+    "Trace": {
+      "title": "Trace",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["trace_id", "spans", "truncated"],
+      "properties": {
+        "trace_id": { "type": "string" },
+        "spans": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "span_id",
+              "parent_span_id",
+              "service",
+              "name",
+              "start",
+              "duration_ms",
+              "status",
+              "attributes"
+            ],
+            "properties": {
+              "span_id": { "type": "string" },
+              "parent_span_id": { "type": ["string", "null"] },
+              "service": { "type": "string" },
+              "name": { "type": "string" },
+              "start": { "$ref": "../../../schemas/common.schema.json#/$defs/Timestamp" },
+              "duration_ms": { "type": "number", "minimum": 0 },
+              "status": { "type": "string", "enum": ["ok", "error", "unset"] },
+              "attributes": { "$ref": "../../../schemas/common.schema.json#/$defs/Labels" }
+            }
+          }
+        },
+        "truncated": { "type": "boolean" }
+      }
+    },
+    "ServiceGraph": {
+      "title": "ServiceGraph",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["window", "edges"],
+      "properties": {
+        "window": { "$ref": "../../../schemas/common.schema.json#/$defs/TimeWindow" },
+        "edges": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["client", "server", "requests", "errors", "last_seen"],
+            "properties": {
+              "client": { "type": "string" },
+              "server": { "type": "string" },
+              "requests": { "type": "number", "minimum": 0 },
+              "errors": { "type": "number", "minimum": 0 },
+              "last_seen": { "$ref": "../../../schemas/common.schema.json#/$defs/Timestamp" }
+            }
+          }
+        }
+      }
+    }
+  }
+}

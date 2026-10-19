@@ -1,0 +1,107 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://srenautix.io/contract/schemas/evidence-result.schema.json",
+  "title": "EvidenceResult",
+  "description": "一张证据卡在一次研判（或阶段 A 报告）中的结果（DESIGN §6.1）。三种结论之外另有显示状态 capability_missing：所需的数据源能力不可用，和没有数据区分开",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "ref",
+    "card_id",
+    "entity",
+    "window",
+    "verdict",
+    "display_state",
+    "reason",
+    "value",
+    "table",
+    "queries",
+    "egress",
+    "evaluated_at"
+  ],
+  "properties": {
+    "ref": { "$ref": "common.schema.json#/$defs/EvidenceRef" },
+    "card_id": {
+      "type": "string",
+      "description": "<pack>/<chain>/<card>；区分性检查产生的卡为 check/<hypothesis id>/<n>",
+      "pattern": "^[a-z0-9][a-z0-9_.-]*/[a-z0-9][a-z0-9_.-]*/[a-z0-9][a-z0-9_-]*$"
+    },
+    "entity": {
+      "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/EntityRef" }]
+    },
+    "window": { "$ref": "common.schema.json#/$defs/TimeWindow" },
+    "verdict": { "$ref": "common.schema.json#/$defs/Verdict" },
+    "display_state": {
+      "type": "string",
+      "description": "verdict 为 undeterminable 且原因是所需能力不可用时为 capability_missing，其余与 verdict 相同",
+      "enum": ["normal", "abnormal", "undeterminable", "capability_missing"]
+    },
+    "reason": { "$ref": "#/$defs/Reason" },
+    "value": { "type": ["string", "null"], "description": "主值的展示文本" },
+    "table": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["head", "rows"],
+          "properties": {
+            "head": { "type": "array", "items": { "type": "string" } },
+            "rows": { "type": "array", "items": { "type": "array", "items": { "type": "string" } } }
+          }
+        }
+      ]
+    },
+    "queries": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/QueryRecord" }
+    },
+    "egress": { "$ref": "common.schema.json#/$defs/Egress" },
+    "anomaly_started_at": {
+      "description": "异常的起始时间，用于 evidence_consistent 判定中的时间条件；无法确定时为 null",
+      "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/Timestamp" }]
+    },
+    "evaluated_at": { "$ref": "common.schema.json#/$defs/Timestamp" }
+  },
+  "$defs": {
+    "Reason": {
+      "title": "EvidenceReason",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "text"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "description": "rule：命中判定规则；no_data：查询没有样本；partial_data：部分查询没有样本；source_error：数据源报错或超时；capability_missing：所需能力不可用；observability_gap：依赖的目标有 meta 告警；evaluation_error：CEL 求值出错；all_clear：没有命中任何规则",
+          "enum": [
+            "rule",
+            "no_data",
+            "partial_data",
+            "source_error",
+            "capability_missing",
+            "observability_gap",
+            "evaluation_error",
+            "all_clear"
+          ]
+        },
+        "text": { "type": "string", "maxLength": 1000 }
+      }
+    },
+    "QueryRecord": {
+      "title": "EvidenceQueryRecord",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "integration", "capability", "query", "sample_count", "truncated", "error", "duration_ms"],
+      "properties": {
+        "name": { "type": "string" },
+        "integration": { "type": "string", "description": "集成实例 id" },
+        "capability": { "type": "string" },
+        "query": { "type": "string", "description": "实际执行的查询文本" },
+        "sample_count": { "type": "integer", "minimum": 0 },
+        "truncated": { "type": "boolean" },
+        "error": { "type": ["string", "null"] },
+        "duration_ms": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

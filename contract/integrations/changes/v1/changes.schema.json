@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://srenautix.io/contract/integrations/changes/v1/changes.schema.json",
+  "title": "ChangesContract",
+  "description": "changes 集成契约 v1（DESIGN §10.3）：changes.list(scope, window) → ChangeEvent[]。每个适配器都要把变更映射到拓扑节点：Argo CD 用 status.resources，Flux 用 inventory，CI 用镜像 digest 关联到运行中的 Pod，通用 git 适配器按仓库路径声明。适配器必须遵守回放时钟窗口：只返回 window 内的变更",
+  "$defs": {
+    "ListRequest": {
+      "title": "ChangesListRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scope", "window"],
+      "properties": {
+        "scope": { "$ref": "#/$defs/Scope" },
+        "window": { "$ref": "../../../schemas/common.schema.json#/$defs/TimeWindow" },
+        "limit": { "type": "integer", "minimum": 1, "maximum": 1000, "default": 200 }
+      }
+    },
+    "Scope": {
+      "title": "ChangesScope",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cluster_id", "namespaces", "components"],
+      "properties": {
+        "cluster_id": { "$ref": "../../../schemas/common.schema.json#/$defs/ClusterId" },
+        "namespaces": {
+          "type": "array",
+          "description": "空数组表示不按命名空间过滤",
+          "items": { "type": "string" }
+        },
+        "components": {
+          "type": "array",
+          "description": "空数组表示不按组件过滤",
+          "items": { "$ref": "../../../schemas/common.schema.json#/$defs/ComponentKey" }
+        }
+      }
+    },
+    "ListResponse": {
+      "title": "ChangesListResponse",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["changes", "truncated"],
+      "properties": {
+        "changes": { "type": "array", "items": { "$ref": "#/$defs/ChangeEvent" } },
+        "truncated": { "type": "boolean" }
+      }
+    },
+    "ChangeEvent": {
+      "title": "ChangeEvent",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["change_id", "source", "kind", "refs", "revision", "actor", "time", "link", "targets", "summary"],
+      "properties": {
+        "change_id": {
+          "type": "string",
+          "description": "<source>:<来源内唯一标识>，用于去重"
+        },
+        "source": {
+          "type": "string",
+          "description": "集成实例 id，例如 argocd、flux、k8s-rollout、github"
+        },
+        "kind": {
+          "type": "string",
+          "description": "rollout：新 ReplicaSet/ControllerRevision；config：挂载的 ConfigMap 版本变化；cordon；scale：HPA 或手动扩缩；gitops_sync：Argo/Flux 同步；ci_deploy：CI 部署；operator：Operator 发起的切换或升级；other",
+          "enum": ["rollout", "config", "cordon", "scale", "gitops_sync", "ci_deploy", "operator", "other"]
+        },
+        "refs": {
+          "type": "array",
+          "description": "来源中的引用，例如 Application 名、PR 号、流水线运行 id",
+          "items": { "type": "string" }
+        },
+        "revision": { "type": ["string", "null"] },
+        "actor": { "type": ["string", "null"] },
+        "time": { "$ref": "../../../schemas/common.schema.json#/$defs/Timestamp" },
+        "link": { "type": ["string", "null"] },
+        "targets": {
+          "type": "array",
+          "description": "变更触及的拓扑节点",
+          "items": { "$ref": "../../../schemas/common.schema.json#/$defs/ComponentKey" }
+        },
+        "summary": {
+          "type": "string",
+          "description": "不可信文本，只作为文本显示",
+          "maxLength": 500
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,79 @@
+{
+  "incident_id": "0b7f9a52-4f0e-4b64-9e8e-1c2d3e4f5a6b",
+  "cluster_id": "kind-demo",
+  "label": "postgres.cluster:shop/pg:2026-10-15T10:20:00Z",
+  "incident_version": 3,
+  "state": "firing",
+  "severity": "critical",
+  "first_firing_at": "2026-10-15T10:21:30Z",
+  "ended_at": null,
+  "root": {
+    "component": "postgres.cluster:shop/pg",
+    "entity": { "cluster_id": "kind-demo", "kind": "Pod", "namespace": "shop", "name": "pg-1", "uid": "7c1e" },
+    "ambiguous": false,
+    "margin": 0.31,
+    "silent_root": false
+  },
+  "candidates": [
+    {
+      "component": "postgres.cluster:shop/pg",
+      "score": 0.79,
+      "terms": { "coverage": 1, "precedence": 1, "role_prior": 0.8, "recent_change": 0, "chronic_penalty": 0 },
+      "depth": 3,
+      "explains": ["a1b2c3d4e5f60718@1760523690"],
+      "source": "alert"
+    },
+    {
+      "component": "Deployment:web/frontend",
+      "score": 0.48,
+      "terms": { "coverage": 0, "precedence": 1, "role_prior": 1, "recent_change": 1, "chronic_penalty": 0 },
+      "depth": 0,
+      "explains": [],
+      "source": "change"
+    }
+  ],
+  "members": [
+    {
+      "alert_id": "0f1e2d3c4b5a6978@1760523690",
+      "alertname": "KubePodCrashLooping",
+      "role": "cause",
+      "component": "postgres.cluster:shop/pg",
+      "severity": "warning",
+      "status": "firing",
+      "starts_at": "2026-10-15T10:21:30Z",
+      "ends_at": null,
+      "joined_version": 1,
+      "left_version": null
+    }
+  ],
+  "components": ["postgres.cluster:shop/pg", "Deployment:shop/api"],
+  "changes": [
+    {
+      "change_id": "k8s-rollout:web/frontend-6d9f",
+      "source": "k8s-rollout",
+      "kind": "rollout",
+      "refs": ["ReplicaSet/frontend-6d9f"],
+      "revision": "7",
+      "actor": null,
+      "time": "2026-10-15T10:18:00Z",
+      "link": null,
+      "targets": ["Deployment:web/frontend"],
+      "summary": "new ReplicaSet frontend-6d9f"
+    }
+  ],
+  "aliases": [
+    {
+      "from_incident_id": "2a7f9a52-4f0e-4b64-9e8e-1c2d3e4f5a6b",
+      "from_label": "Deployment:shop/api:2026-10-15T10:20:00Z",
+      "at_version": 2,
+      "merged_at": "2026-10-15T10:24:00Z"
+    }
+  ],
+  "split_from": null,
+  "merged_into": null,
+  "suppressed": false,
+  "observability_blind": false,
+  "topology_version": 1841,
+  "created_at": "2026-10-15T10:22:00Z",
+  "updated_at": "2026-10-15T10:24:00Z"
+}
