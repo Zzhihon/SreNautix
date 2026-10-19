@@ -501,7 +501,7 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
               description: '自动执行只允许用于目录中 auto_execution=allowed 的动作，否则策略加载失败（不变量 7）。',
               type: 'object',
               additionalProperties: false,
-              required: ['rules', 'namespaces'],
+              required: ['rules'],
               properties: {
                 rules: {
                   description: '允许自动批准的规则名；断言 approver_principal 为 auto:<规则名>。',
@@ -510,6 +510,7 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
                   items: { type: 'string', pattern: '^[a-z][a-z0-9_-]{0,62}$' },
                 },
                 namespaces: {
+                  description: '自动执行的命名空间，必须是 namespaces 的子集；命名空间级动作必填，集群级动作不填。',
                   type: 'array',
                   minItems: 1,
                   items: { type: 'string', pattern: '^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$' },

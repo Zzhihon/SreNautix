@@ -794,9 +794,11 @@ export interface GatewayPolicy {
        */
       rules: [string, ...string[]];
       /**
+       * 自动执行的命名空间，必须是 namespaces 的子集；命名空间级动作必填，集群级动作不填。
+       *
        * @minItems 1
        */
-      namespaces: [string, ...string[]];
+      namespaces?: [string, ...string[]];
     };
   }[];
   max_auto_executions_per_hour?: number;
