@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: SreNautix hub API
-  version: 2.5.0
+  version: 2.5.1
   license:
     name: Apache-2.0
     identifier: Apache-2.0
@@ -1027,7 +1027,7 @@ paths:
                       properties:
                         id: { type: string }
                         groups: { type: array, items: { type: string } }
-                permission: { type: string }
+                permission: { $ref: '#/components/schemas/Permission' }
                 target: { oneOf: [{ type: 'null' }, { $ref: '#/components/schemas/PermissionTarget' }] }
                 tier: { type: [string, 'null'], enum: [L, H, null] }
       responses:
@@ -1048,7 +1048,7 @@ paths:
                     properties:
                       id: { type: string }
                       groups: { type: array, items: { type: string } }
-                  permission: { type: string }
+                  permission: { $ref: '#/components/schemas/Permission' }
                   target: { oneOf: [{ type: 'null' }, { $ref: '#/components/schemas/PermissionTarget' }] }
                   tier: { type: [string, 'null'], enum: [L, H, null] }
                   revision: { type: string }
@@ -2254,6 +2254,28 @@ components:
         method:
           { type: string, enum: [code, identity], description: code 为 /link 绑定码；identity 为同一身份源自动绑定 }
         linked_at: { $ref: './schemas/common.schema.json#/$defs/Timestamp' }
+    Permission:
+      type: string
+      description: 角色绑定授予的权限名（DESIGN §13）；server 只接受这 16 个取值，其他值返回 400
+      enum:
+        [
+          read,
+          feedback,
+          propose,
+          research.request,
+          evidence.rerun,
+          approve,
+          reject,
+          undo,
+          audit.read,
+          prompt.raw,
+          users.read,
+          settings.write,
+          suppression.write,
+          pause.write,
+          eval.write,
+          api_tokens.write,
+        ]
     PermissionTarget:
       type: object
       additionalProperties: false

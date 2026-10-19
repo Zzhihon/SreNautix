@@ -2853,6 +2853,27 @@ export type components = {
       reason: string | null;
       since: null | components['schemas']['Timestamp'];
     };
+    /**
+     * @description 角色绑定授予的权限名（DESIGN §13）；server 只接受这 16 个取值，其他值返回 400
+     * @enum {string}
+     */
+    Permission:
+      | 'read'
+      | 'feedback'
+      | 'propose'
+      | 'research.request'
+      | 'evidence.rerun'
+      | 'approve'
+      | 'reject'
+      | 'undo'
+      | 'audit.read'
+      | 'prompt.raw'
+      | 'users.read'
+      | 'settings.write'
+      | 'suppression.write'
+      | 'pause.write'
+      | 'eval.write'
+      | 'api_tokens.write';
     PermissionTarget: {
       cluster: string;
       labels: components['schemas']['Labels'];
@@ -5248,7 +5269,7 @@ export interface operations {
     requestBody: {
       content: {
         'application/json': {
-          permission: string;
+          permission: components['schemas']['Permission'];
           subject: null | {
             groups: string[];
             id: string;
@@ -5277,7 +5298,7 @@ export interface operations {
               subject_match: boolean;
               tier_ok: boolean;
             }[];
-            permission: string;
+            permission: components['schemas']['Permission'];
             revision: string;
             subject: {
               groups: string[];
