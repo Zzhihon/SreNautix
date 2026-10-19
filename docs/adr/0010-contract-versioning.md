@@ -11,6 +11,7 @@ SreNautix 的 server、worker、控制台、Grafana 插件、Go 写的 spoke 与
    - 主版本：删除字段、收紧取值、改变字段含义。API 与事件兼容上一个主版本（DESIGN §19）。
    - 次版本：新增可选字段、新增枚举值、新增事件类型或接口。
    - 修订号：只改描述。
+   - SreNautix 第一个正式版本发布之前，没有需要兼容的已部署版本：这期间不兼容的修改也只升次版本号，提交说明用 Conventional Commits 的 `!` 标出，并通知所有依赖方。
    - outbox 事件的 `schema_version` 取 `contract/VERSION`；集成契约在目录名里带自己的版本（`contract/integrations/<kind>/v1`），和整体版本号相互独立。
 3. **`$id`**：每个文件的 `$id` 是 `https://srenautix.io/contract/<相对 contract/ 的路径>`，生成器校验这一点；跨文件一律用相对路径引用。
 4. **2.0.0 相对 1.5.0 的变化**：
