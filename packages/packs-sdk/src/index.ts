@@ -64,3 +64,14 @@ export {
   type ExcludeEvaluation,
 } from './runtime/rules.js';
 export { runPackTests, FIXTURE_EPOCH, type PackTestReport, type CaseResult } from './testing/pack-test.js';
+export { replaySnapshot, type ReplayReport, type ReplayCaseResult } from './testing/replay.js';
+export { recordSnapshot } from './testing/record.js';
+export {
+  checkCoverage,
+  renderUpstreamRules,
+  loadChartPin,
+  type CoverageReport,
+  type UpstreamRule,
+} from './testing/upstream-rules.js';
+export { runDoctor, type DoctorReport } from './doctor.js';
+export { runPackCli } from './cli.js';

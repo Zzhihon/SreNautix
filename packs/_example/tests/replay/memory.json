@@ -1,0 +1,246 @@
+{
+  "api_version": "srenautix.io/query-snapshot/v1",
+  "snapshot_id": "04878299-4cb7-4057-ab04-1524b54ec636",
+  "recorded_at": "2026-10-19T21:45:28.257Z",
+  "clock_window": {
+    "from": "2025-12-31T00:10:00.000Z",
+    "to": "2026-01-01T00:50:00.000Z"
+  },
+  "ids": {
+    "metrics": "metrics",
+    "logs": null,
+    "traces": null
+  },
+  "capabilities": ["metrics.query", "metrics.query_range", "metrics.series"],
+  "metrics_dialects": ["promql"],
+  "label_profile": {
+    "namespace": "namespace",
+    "pod": "pod",
+    "container": "container",
+    "node": "node",
+    "cluster": null,
+    "scrape_interval_seconds": 60,
+    "tenant": null
+  },
+  "logs_profile": null,
+  "entries": [
+    {
+      "op": "metric_exists",
+      "request": {
+        "name": "example:container_memory_limit:ratio",
+        "window": {
+          "from": "2025-12-31T23:50:00.000Z",
+          "to": "2026-01-01T00:50:00.000Z"
+        }
+      },
+      "result": false
+    },
+    {
+      "op": "metric_exists",
+      "request": {
+        "name": "container_memory_working_set_bytes",
+        "window": {
+          "from": "2025-12-31T23:50:00.000Z",
+          "to": "2026-01-01T00:50:00.000Z"
+        }
+      },
+      "result": true
+    },
+    {
+      "op": "metric_exists",
+      "request": {
+        "name": "kube_pod_container_resource_limits",
+        "window": {
+          "from": "2025-12-31T23:50:00.000Z",
+          "to": "2026-01-01T00:50:00.000Z"
+        }
+      },
+      "result": true
+    },
+    {
+      "op": "metric_exists",
+      "request": {
+        "name": "container_oom_events_total",
+        "window": {
+          "from": "2025-12-31T23:50:00.000Z",
+          "to": "2026-01-01T00:50:00.000Z"
+        }
+      },
+      "result": true
+    },
+    {
+      "op": "query_range",
+      "request": {
+        "expr": "max by (namespace, pod, container) (container_memory_working_set_bytes{container!=\"\",container!=\"POD\",namespace=\"shop\",pod=\"web-0\"} / on (namespace, pod, container) kube_pod_container_resource_limits{namespace=\"shop\",pod=\"web-0\",resource=\"memory\"})",
+        "dialect": "promql",
+        "window": {
+          "from": "2026-01-01T00:10:00.000Z",
+          "to": "2026-01-01T00:45:00.000Z"
+        },
+        "step_seconds": 60,
+        "timeout_ms": 10000,
+        "max_series": 200
+      },
+      "result": {
+        "series": [
+          {
+            "labels": {
+              "container": "web",
+              "namespace": "shop",
+              "pod": "web-0"
+            },
+            "times": [
+              1767226200000, 1767226260000, 1767226320000, 1767226380000, 1767226440000, 1767226500000, 1767226560000,
+              1767226620000, 1767226680000, 1767226740000, 1767226800000, 1767226860000, 1767226920000, 1767226980000,
+              1767227040000, 1767227100000, 1767227160000, 1767227220000, 1767227280000, 1767227340000, 1767227400000,
+              1767227460000, 1767227520000, 1767227580000, 1767227640000, 1767227700000, 1767227760000, 1767227820000,
+              1767227880000, 1767227940000, 1767228000000, 1767228060000, 1767228120000, 1767228180000, 1767228240000,
+              1767228300000
+            ],
+            "values": [
+              0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.96, 0.96, 0.96, 0.96, 0.96, 0.96, 0.96, 0.96, 0.96,
+              0.96, 0.96, 0.96, 0.96, 0.96, 0.96, 0.96, 0.96, 0.96, 0.96, 0.96, 0.96, 0.96, 0.96, 0.96, 0.96, 0.96
+            ]
+          }
+        ],
+        "truncated": false,
+        "warnings": []
+      }
+    },
+    {
+      "op": "query",
+      "request": {
+        "expr": "sum by (namespace, pod, container) (increase(container_oom_events_total{container!=\"\",namespace=\"shop\",pod=\"web-0\"}[35m])) > 0",
+        "dialect": "promql",
+        "time": "2026-01-01T00:45:00.000Z",
+        "timeout_ms": 10000
+      },
+      "result": {
+        "series": [],
+        "truncated": false,
+        "warnings": []
+      }
+    },
+    {
+      "op": "query_range",
+      "request": {
+        "expr": "max by (namespace, pod, container) (container_memory_working_set_bytes{container!=\"\",container!=\"POD\",namespace=\"shop\",pod=\"web-1\"} / on (namespace, pod, container) kube_pod_container_resource_limits{namespace=\"shop\",pod=\"web-1\",resource=\"memory\"})",
+        "dialect": "promql",
+        "window": {
+          "from": "2026-01-01T00:10:00.000Z",
+          "to": "2026-01-01T00:45:00.000Z"
+        },
+        "step_seconds": 60,
+        "timeout_ms": 10000,
+        "max_series": 200
+      },
+      "result": {
+        "series": [
+          {
+            "labels": {
+              "container": "web",
+              "namespace": "shop",
+              "pod": "web-1"
+            },
+            "times": [
+              1767226200000, 1767226260000, 1767226320000, 1767226380000, 1767226440000, 1767226500000, 1767226560000,
+              1767226620000, 1767226680000, 1767226740000, 1767226800000, 1767226860000, 1767226920000, 1767226980000,
+              1767227040000, 1767227100000, 1767227160000, 1767227220000, 1767227280000, 1767227340000, 1767227400000,
+              1767227460000, 1767227520000, 1767227580000, 1767227640000, 1767227700000, 1767227760000, 1767227820000,
+              1767227880000, 1767227940000, 1767228000000, 1767228060000, 1767228120000, 1767228180000, 1767228240000,
+              1767228300000
+            ],
+            "values": [
+              0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3,
+              0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3
+            ]
+          }
+        ],
+        "truncated": false,
+        "warnings": []
+      }
+    },
+    {
+      "op": "query",
+      "request": {
+        "expr": "sum by (namespace, pod, container) (increase(container_oom_events_total{container!=\"\",namespace=\"shop\",pod=\"web-1\"}[35m])) > 0",
+        "dialect": "promql",
+        "time": "2026-01-01T00:45:00.000Z",
+        "timeout_ms": 10000
+      },
+      "result": {
+        "series": [],
+        "truncated": false,
+        "warnings": []
+      }
+    },
+    {
+      "op": "query",
+      "request": {
+        "expr": "max by (namespace, pod, container) (container_memory_working_set_bytes{container!=\"\",container!=\"POD\",namespace=\"shop\",pod=\"web-0\"} / on (namespace, pod, container) kube_pod_container_resource_limits{namespace=\"shop\",pod=\"web-0\",resource=\"memory\"})",
+        "dialect": "promql",
+        "time": "2026-01-01T00:50:00.000Z",
+        "timeout_ms": 10000
+      },
+      "result": {
+        "series": [
+          {
+            "labels": {
+              "container": "web",
+              "namespace": "shop",
+              "pod": "web-0"
+            },
+            "times": [1767228600000],
+            "values": [0.96]
+          }
+        ],
+        "truncated": false,
+        "warnings": []
+      }
+    }
+  ],
+  "cases": [
+    {
+      "card": "_example/pod-memory/limit-ratio",
+      "entity": {
+        "cluster_id": "recorded",
+        "kind": "Pod",
+        "namespace": "shop",
+        "name": "web-0"
+      },
+      "anchor": "2026-01-01T00:40:00.000Z",
+      "expect": {
+        "verdict": "abnormal",
+        "display_state": "abnormal"
+      }
+    },
+    {
+      "card": "_example/pod-memory/limit-ratio",
+      "entity": {
+        "cluster_id": "recorded",
+        "kind": "Pod",
+        "namespace": "shop",
+        "name": "web-1"
+      },
+      "anchor": "2026-01-01T00:40:00.000Z",
+      "expect": {
+        "verdict": "normal",
+        "display_state": "normal"
+      }
+    },
+    {
+      "card": "_example/checks/memory-headroom",
+      "entity": {
+        "cluster_id": "recorded",
+        "kind": "Pod",
+        "namespace": "shop",
+        "name": "web-0"
+      },
+      "anchor": "2026-01-01T00:40:00.000Z",
+      "expect": {
+        "verdict": "abnormal",
+        "display_state": "abnormal"
+      }
+    }
+  ]
+}
