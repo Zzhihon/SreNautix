@@ -9,9 +9,9 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
-    "test": "pnpm run browsers && PLAYWRIGHT_BROWSERS_PATH=../../.scratch/ms-playwright vitest run",
-    "browsers": "PLAYWRIGHT_BROWSERS_PATH=../../.scratch/ms-playwright playwright install --only-shell chromium",
-    "e2e": "PLAYWRIGHT_BROWSERS_PATH=../../.scratch/ms-playwright playwright test"
+    "test": "pnpm run browsers && vitest run",
+    "browsers": "tsx ../../packages/ui/scripts/browsers.ts",
+    "e2e": "tsx ../../packages/ui/scripts/browsers.ts --full && playwright test"
   },
   "dependencies": {
     "@simplewebauthn/browser": "14.0.0",

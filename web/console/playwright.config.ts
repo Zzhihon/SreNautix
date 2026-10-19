@@ -1,4 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
+import { BROWSERS_PATH } from '../../packages/ui/scripts/browsers-path';
+
+process.env.PLAYWRIGHT_BROWSERS_PATH = BROWSERS_PATH;
 
 // 后端由 global-setup 启动（真实 server、PostgreSQL 与 envtest）；baseURL 在 global-setup 之后写入环境变量，
 // 所以测试里通过 e2e/state.ts 读取控制台地址。登录一次后复用会话（server 拒绝同一个 TOTP 码被使用两次）。
