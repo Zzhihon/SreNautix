@@ -121,15 +121,8 @@ jobs:
             echo "helm push 没有输出 digest" >&2
             exit 1
           fi
-          ref="ghcr.io/zzhihon/charts/srenautix@${digest}"
-          identity="https://github.com/${GITHUB_REPOSITORY}/.github/workflows/release.yml@${GITHUB_REF}"
-          # 同一个 digest 已有本工作流的有效签名时不再签名（Rekor 拒绝重复记录）
-          if cosign verify --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-            --certificate-identity "$identity" "$ref" >/dev/null 2>&1; then
-            echo "$ref 已有有效签名"
-          else
-            cosign sign --yes "$ref"
-          fi
+          .github/scripts/cosign-sign-attest.sh "ghcr.io/zzhihon/charts/srenautix@${digest}" \
+            "https://github.com/${GITHUB_REPOSITORY}/.github/workflows/release.yml@${GITHUB_REF}"
           echo "digest=$digest" >>"$GITHUB_OUTPUT"
 
       - name: chart 构建溯源证明
