@@ -50,6 +50,7 @@
     "@types/pg": "8.23.1",
     "oidc-provider": "9.12.2",
     "tough-cookie": "6.0.2",
+    "tsx": "4.23.15",
     "typescript": "5.9.3",
     "vitest": "5.0.5"
   }
