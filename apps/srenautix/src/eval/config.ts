@@ -1,0 +1,157 @@
+import { readFileSync } from 'node:fs';
+import { parse } from 'yaml';
+import { z } from 'zod';
+import type { ModelRoute } from '@srenautix/contract';
+import { readSecretFile } from '../config/files.js';
+import { DEFAULT_BUDGET, type BudgetConfig } from '../llm/budget.js';
+import type { McpServerConfig } from '../tools/mcp.js';
+
+// 评测配置（srenautix eval 的 --config / --compare 参数）：模型路由、出站策略与 reconstructed 模式的只读 MCP 服务器。
+//
+//   language: zh
+//   allow_cross_border: false
+//   honeytokens_file: /etc/srenautix/secrets/honeytokens   # 每行一个蜜标，可省略
+//   routes:
+//     - id: primary
+//       base_url: https://llm.example.com/v1
+//       api: responses
+//       model: some-model
+//       dialect_profile: openai-responses
+//       price: { currency: USD, input_per_mtok: 1.25, output_per_mtok: 10, cached_input_per_mtok: 0.125 }
+//       failure_domain: []
+//       in_domain: true
+//       tier: large
+//       retention_terms: "…"
+//       api_key_file: /etc/srenautix/secrets/llm/key     # 或 api_key_env: LLM_API_KEY
+//   mcp: []
+
+const route = z
+  .object({
+    id: z.string().regex(/^[a-z0-9][a-z0-9-]*$/),
+    base_url: z.string().url(),
+    api: z.enum(['responses', 'chat_completions']),
+    model: z.string().min(1),
+    dialect_profile: z.string().min(1),
+    price: z
+      .object({
+        currency: z.enum(['USD', 'CNY']),
+        input_per_mtok: z.number().min(0),
+        output_per_mtok: z.number().min(0),
+        cached_input_per_mtok: z.number().min(0).nullable(),
+      })
+      .strict(),
+    failure_domain: z.array(z.string()).default([]),
+    in_domain: z.boolean(),
+    tier: z.enum(['small', 'large']),
+    retention_terms: z.string(),
+    api_key_env: z.string().optional(),
+    api_key_file: z.string().optional(),
+    context_tokens: z.number().int().min(1024).optional(),
+  })
+  .strict()
+  .refine(
+    (r) => (r.api_key_env === undefined) !== (r.api_key_file === undefined),
+    '每条路由必须且只能给出 api_key_env 或 api_key_file 之一',
+  );
+
+const mcpTool = z
+  .object({
+    name: z.string().min(1),
+    range: z
+      .object({ from: z.string(), to: z.string(), format: z.enum(['unix', 'rfc3339']) })
+      .strict()
+      .optional(),
+    instant: z
+      .object({ at: z.string(), format: z.enum(['unix', 'rfc3339']) })
+      .strict()
+      .optional(),
+    step: z.string().optional(),
+    lines: z.string().optional(),
+    live: z.boolean(),
+    result: z.enum(['prometheus', 'json', 'text', 'lines']),
+  })
+  .strict();
+
+const schema = z
+  .object({
+    language: z.enum(['zh', 'en']).default('zh'),
+    allow_cross_border: z.boolean().default(false),
+    honeytokens_file: z.string().optional(),
+    routes: z.array(route).min(1),
+    mcp: z
+      .array(
+        z
+          .object({
+            id: z.string().regex(/^[a-z0-9][a-z0-9-]*$/),
+            url: z.string().url(),
+            bearer_token_file: z.string().optional(),
+            tools: z.array(mcpTool).min(1),
+          })
+          .strict(),
+      )
+      .default([]),
+    budget: z
+      .object({
+        per_research_input_tokens: z.number().int().min(1000).optional(),
+        call_timeout_seconds: z.number().int().min(5).max(600).optional(),
+      })
+      .strict()
+      .default({}),
+  })
+  .strict();
+
+export interface EvalRouteConfig {
+  route: ModelRoute;
+  apiKey: string;
+  contextTokens: number | null;
+}
+
+export interface EvalConfig {
+  language: 'zh' | 'en';
+  allowCrossBorder: boolean;
+  honeytokens: string[];
+  routes: EvalRouteConfig[];
+  mcp: McpServerConfig[];
+  budget: BudgetConfig;
+  callTimeoutMs: number;
+}
+
+export function loadEvalConfig(path: string, env: Record<string, string | undefined> = process.env): EvalConfig {
+  const raw = schema.parse(parse(readFileSync(path, 'utf8')));
+  const routes = raw.routes.map((r): EvalRouteConfig => {
+    const { api_key_env, api_key_file, context_tokens, ...rest } = r;
+    let apiKey: string;
+    if (api_key_env !== undefined) {
+      const v = env[api_key_env];
+      if (!v) {
+        throw new Error(`路由 ${r.id} 的密钥环境变量 ${api_key_env} 没有设置`);
+      }
+      apiKey = v;
+    } else {
+      apiKey = readSecretFile(`路由 ${r.id} 的 api_key_file`, api_key_file as string);
+    }
+    return { route: rest, apiKey, contextTokens: context_tokens ?? null };
+  });
+  return {
+    language: raw.language,
+    allowCrossBorder: raw.allow_cross_border,
+    honeytokens: raw.honeytokens_file
+      ? readFileSync(raw.honeytokens_file, 'utf8')
+          .split('\n')
+          .map((x) => x.trim())
+          .filter(Boolean)
+      : [],
+    routes,
+    mcp: raw.mcp.map((m) => ({
+      id: m.id,
+      url: m.url,
+      bearerToken: m.bearer_token_file ? readSecretFile(`MCP 服务器 ${m.id} 的 token`, m.bearer_token_file) : null,
+      tools: m.tools,
+    })),
+    budget: {
+      ...DEFAULT_BUDGET,
+      perResearchInputTokens: raw.budget.per_research_input_tokens ?? DEFAULT_BUDGET.perResearchInputTokens,
+    },
+    callTimeoutMs: (raw.budget.call_timeout_seconds ?? 90) * 1000,
+  };
+}

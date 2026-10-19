@@ -56,6 +56,12 @@ importers:
       '@srenautix/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@srenautix/integration-sdk':
+        specifier: workspace:*
+        version: link:../../packages/integration-sdk
+      '@srenautix/packs-sdk':
+        specifier: workspace:*
+        version: link:../../packages/packs-sdk
       ajv:
         specifier: 8.20.0
         version: 8.20.0
@@ -98,6 +104,9 @@ importers:
       prom-client:
         specifier: 15.1.3
         version: 15.1.3
+      pure-rand:
+        specifier: 8.4.2
+        version: 8.4.2
       yaml:
         specifier: 2.9.1
         version: 2.9.1
@@ -4037,6 +4046,9 @@ packages:
   punycode@2.3.1:
     resolution: {integrity: sha512-vYt7UD1U9Wg6138shLtLOvdAu+8DsC/ilFtEVHcH+wydcSpNE20AfSOduf6MkRFahL5FY7X1oU7nKVZFtfq8Fg==}
     engines: {node: '>=6'}
+
+  pure-rand@8.4.2:
+    resolution: {integrity: sha512-vvuOGgcuPJAirlHvuQw1TrOiw7ptaIXXmIbNuiNOY6lNGJJH49PQ1Kj4nd783nPdQhQdicgOjVI2yI/9BD6/Ng==}
 
   qified@0.10.1:
     resolution: {integrity: sha512-+Owyggi9IxT1ePKGafcI87ubSmxol6smwJ+RAHDQlx9+9cPwFWDiKFFCPuWhr9ignlGpZ9vDQLw67N4dcTVFEA==}
@@ -9070,6 +9082,8 @@ snapshots:
       once: 1.4.0
 
   punycode@2.3.1: {}
+
+  pure-rand@8.4.2: {}
 
   qified@0.10.1:
     dependencies:

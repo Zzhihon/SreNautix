@@ -1,0 +1,314 @@
+import { randomUUID } from 'node:crypto';
+import type { ConclusionLevel, EvalCase, EvalGate, EvalModelRow, EvalRatio, EvalReport } from '@srenautix/contract';
+import { isLabeled, scoreRun, type RunRecord, type Scored } from './score.js';
+import { clusteredRatio, gateThreshold, pairedDelta, quantile, type Cluster } from './stats.js';
+
+// 成绩单（契约 eval-report）：每条路由一行，另按领域包早于或晚于事件分组各一行。
+// 每个比例都给出分子、分母与聚类自助法 90% 置信区间。
+
+export const EVIDENCE_CONSISTENT_FLOOR = 0.85;
+
+const LEVELS: readonly ConclusionLevel[] = ['evidence_consistent', 'likely', 'inconclusive', 'undetermined'];
+
+interface CaseRuns {
+  c: EvalCase;
+  runs: RunRecord[];
+  scored: Scored[];
+}
+
+function group(cases: readonly EvalCase[], runs: readonly RunRecord[]): CaseRuns[] {
+  const byCase = new Map<string, RunRecord[]>();
+  for (const r of runs) {
+    byCase.set(r.caseId, [...(byCase.get(r.caseId) ?? []), r]);
+  }
+  return cases
+    .filter(isLabeled)
+    .filter((c) => byCase.has(c.case_id))
+    .map((c) => {
+      const rs = (byCase.get(c.case_id) as RunRecord[]).sort((a, b) => a.run - b.run);
+      return { c, runs: rs, scored: rs.map((r) => scoreRun(c, r)) };
+    });
+}
+
+function ratio(items: CaseRuns[], f: (x: CaseRuns) => Cluster, seed: number): EvalRatio {
+  return clusteredRatio(items.map(f), seed);
+}
+
+function count(xs: Scored[], pick: (s: Scored) => boolean, filter: (s: Scored) => boolean = () => true): Cluster {
+  const f = xs.filter(filter);
+  return { numerator: f.filter(pick).length, denominator: f.length };
+}
+
+/** 一组运行（同一路由、同一领域包时序分组）的成绩行 */
+export function modelRow(
+  routeId: string,
+  model: string,
+  packTiming: EvalModelRow['pack_timing'],
+  items: CaseRuns[],
+  k: number,
+  seed: number,
+): EvalModelRow {
+  const runs = items.flatMap((x) => x.runs);
+  const rootOnly = (s: Scored) => s.rootScored;
+  const costs = items.map((x) => x.runs.reduce((a, r) => a + r.cost, 0) / x.runs.length).sort((a, b) => a - b);
+  const misses = runs.map((r) => r.missRate).filter((m): m is number => m !== null);
+  const granularities = [
+    ...new Set(items.map((x) => x.c.truth.granularity).filter((g): g is NonNullable<typeof g> => g !== null)),
+  ];
+  const reliability = LEVELS.map((level) => {
+    const precision = ratio(
+      items,
+      (x) => {
+        const at = x.scored.filter((_, i) => x.runs[i]?.level === level);
+        return { numerator: at.filter((s) => s.correct).length, denominator: at.length };
+      },
+      seed,
+    );
+    const demoted =
+      level === 'evidence_consistent' && precision.ci_low !== null && precision.ci_low < EVIDENCE_CONSISTENT_FLOOR;
+    return { level, precision, demoted };
+  });
+  return {
+    route_id: routeId,
+    model,
+    pack_timing: packTiming,
+    top1: ratio(items, (x) => count(x.scored, (s) => s.top1, rootOnly), seed),
+    recall_at_3: ratio(items, (x) => count(x.scored, (s) => s.recall3, rootOnly), seed),
+    pass_at_1: ratio(items, (x) => ({ numerator: x.scored[0]?.correct ? 1 : 0, denominator: 1 }), seed),
+    pass_pow_k: ratio(
+      items,
+      (x) => ({ numerator: x.scored.length >= k && x.scored.every((s) => s.correct) ? 1 : 0, denominator: 1 }),
+      seed,
+    ),
+    run_agreement: ratio(
+      items,
+      (x) => {
+        const first = x.runs[0] as RunRecord;
+        const same = x.runs.every(
+          (r) => (r.top[0] ?? null) === (first.top[0] ?? null) && r.disposition === first.disposition,
+        );
+        return { numerator: same ? 1 : 0, denominator: 1 };
+      },
+      seed,
+    ),
+    coverage: ratio(items, (x) => count(x.scored, (s) => !s.abstained), seed),
+    selective_accuracy: ratio(
+      items,
+      (x) =>
+        count(
+          x.scored,
+          (s) => s.top1,
+          (s) => s.rootScored && !s.abstained,
+        ),
+      seed,
+    ),
+    disposition_accuracy: ratio(
+      items,
+      (x) =>
+        count(
+          x.scored,
+          (s) => s.dispositionCorrect,
+          (s) => s.dispositionScored,
+        ),
+      seed,
+    ),
+    reliability,
+    provider_fingerprints: [...new Set(runs.flatMap((r) => r.fingerprints))].sort(),
+    benign_false_positive: ratio(
+      items.filter((x) => x.c.type === 'benign'),
+      (x) => count(x.scored, (s) => s.falsePositive),
+      seed,
+    ),
+    undetermined_ratio: ratio(items, (x) => count(x.scored, (s) => s.abstained), seed),
+    structured_output_failure: ratio(
+      items,
+      (x) => ({ numerator: x.runs.filter((r) => r.structuredFailure).length, denominator: x.runs.length }),
+      seed,
+    ),
+    cost_per_case: {
+      currency: runs[0]?.currency ?? 'USD',
+      mean: costs.length ? costs.reduce((a, b) => a + b, 0) / costs.length : 0,
+      p90: costs.length ? quantile(costs, 0.9) : 0,
+    },
+    snapshot_miss_rate: misses.length ? misses.reduce((a, b) => a + b, 0) / misses.length : null,
+    by_granularity: Object.fromEntries(
+      granularities.map((g) => [
+        g,
+        ratio(
+          items.filter((x) => x.c.truth.granularity === g),
+          (x) => count(x.scored, (s) => s.top1, rootOnly),
+          seed,
+        ),
+      ]),
+    ),
+  };
+}
+
+export interface ReportMeta {
+  codeSha: string;
+  packLock: string;
+  mode: 'snapshot' | 'reconstructed';
+  caseSet: string;
+  runsPerCase: number;
+  seed: number;
+}
+
+export function buildRows(
+  cases: readonly EvalCase[],
+  runs: readonly RunRecord[],
+  k: number,
+  seed: number,
+): EvalModelRow[] {
+  const rows: EvalModelRow[] = [];
+  const routes = [...new Set(runs.map((r) => r.routeId))];
+  for (const routeId of routes) {
+    const rs = runs.filter((r) => r.routeId === routeId);
+    const model = rs[0]?.model ?? '';
+    const items = group(cases, rs);
+    rows.push(modelRow(routeId, model, 'all', items, k, seed));
+    for (const t of ['pack_before_incident', 'pack_after_incident'] as const) {
+      const sub = items.filter((x) => x.c.pack_timing === t);
+      if (sub.length) {
+        rows.push(modelRow(routeId, model, t, sub, k, seed));
+      }
+    }
+  }
+  return rows;
+}
+
+export function buildReport(
+  meta: ReportMeta,
+  cases: readonly EvalCase[],
+  runs: readonly RunRecord[],
+  gate: EvalGate | null,
+): EvalReport {
+  return {
+    report_id: randomUUID(),
+    created_at: new Date().toISOString(),
+    code_sha: meta.codeSha,
+    pack_lock: meta.packLock,
+    mode: meta.mode,
+    case_set: meta.caseSet,
+    runs_per_case: meta.runsPerCase,
+    rows: buildRows(cases, runs, meta.runsPerCase, meta.seed),
+    gate,
+  };
+}
+
+/** 一个用例在一组运行中的正确率与 pass^k */
+function perCase(
+  cases: readonly EvalCase[],
+  runs: readonly RunRecord[],
+  k: number,
+): Map<string, { rate: number; passK: boolean }> {
+  const out = new Map<string, { rate: number; passK: boolean }>();
+  for (const x of group(cases, runs)) {
+    const correct = x.scored.filter((s) => s.correct).length;
+    out.set(x.c.case_id, {
+      rate: correct / x.scored.length,
+      passK: x.scored.length >= k && correct === x.scored.length,
+    });
+  }
+  return out;
+}
+
+/**
+ * 发布门禁（DESIGN §14.4）：在相同用例上配对比较。
+ * 1. 基线 pass^k 通过、候选不通过的用例必须为零，或在 waived 中逐条豁免；
+ * 2. 新减旧的单侧 90% 下界不低于阈值（n < 100 时 −10 个百分点，n ≥ 100 时 −5 个百分点）。
+ */
+export function evaluateGate(
+  baselineReportId: string,
+  cases: readonly EvalCase[],
+  baseline: readonly RunRecord[],
+  candidate: readonly RunRecord[],
+  k: number,
+  waived: readonly string[],
+  seed: number,
+): EvalGate {
+  const b = perCase(cases, baseline, k);
+  const c = perCase(cases, candidate, k);
+  const paired = [...b.keys()].filter((id) => c.has(id)).sort();
+  const regressed = paired.filter((id) => b.get(id)?.passK && !c.get(id)?.passK);
+  const d = pairedDelta(
+    paired.map((id) => ({
+      baseline: (b.get(id) as { rate: number }).rate,
+      candidate: (c.get(id) as { rate: number }).rate,
+    })),
+    seed,
+  );
+  const threshold = gateThreshold(d.n);
+  const unwaived = regressed.filter((id) => !waived.includes(id));
+  return {
+    baseline_report_id: baselineReportId,
+    paired_cases: d.n,
+    regressed_cases: regressed,
+    waived_cases: regressed.filter((id) => waived.includes(id)),
+    paired_delta: d.delta,
+    paired_delta_low: d.low,
+    threshold,
+    passed: unwaived.length === 0 && d.low >= threshold,
+  };
+}
+
+function fmtRatio(r: EvalRatio): string {
+  if (r.value === null) {
+    return `— (0/${r.denominator})`;
+  }
+  const pct = (v: number) => `${(v * 100).toFixed(1)}%`;
+  const ci = r.ci_low === null || r.ci_high === null ? '' : ` [${pct(r.ci_low)}, ${pct(r.ci_high)}]`;
+  return `${pct(r.value)} (${r.numerator}/${r.denominator})${ci}`;
+}
+
+/** 成绩单的 Markdown 文本（eval/reports/<名称>.md）；每个比例都写出分子、分母与置信区间 */
+export function renderMarkdown(report: EvalReport, title: string): string {
+  const lines: string[] = [
+    `# ${title}`,
+    '',
+    `- 报告：\`${report.report_id}\`，${report.created_at}`,
+    `- 代码：\`${report.code_sha}\`，领域包锁：\`${report.pack_lock}\``,
+    `- 回放模式：${report.mode}；用例集：${report.case_set}；每个用例运行 ${report.runs_per_case} 次`,
+    '- 置信区间：聚类自助法（用例为聚类），90%',
+    '',
+    '## 成绩',
+    '',
+    '| 路由 | 模型 | 领域包时序 | top-1 | 召回@3 | pass@1 | pass^k | 运行一致 | 覆盖率 | 选择性准确率 | 处置准确率 | 良性误报 | 无法判定 | 结构化输出失败 | 每用例成本（均值 / p90） | 快照未命中 |',
+    '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|',
+  ];
+  for (const r of report.rows) {
+    lines.push(
+      `| ${r.route_id} | ${r.model} | ${r.pack_timing} | ${fmtRatio(r.top1)} | ${fmtRatio(r.recall_at_3)} | ${fmtRatio(r.pass_at_1)} | ${fmtRatio(r.pass_pow_k)} | ${fmtRatio(r.run_agreement)} | ${fmtRatio(r.coverage)} | ${fmtRatio(r.selective_accuracy)} | ${fmtRatio(r.disposition_accuracy)} | ${fmtRatio(r.benign_false_positive)} | ${fmtRatio(r.undetermined_ratio)} | ${fmtRatio(r.structured_output_failure)} | ${r.cost_per_case.mean.toFixed(4)} / ${r.cost_per_case.p90.toFixed(4)} ${r.cost_per_case.currency} | ${r.snapshot_miss_rate === null ? '—' : `${(r.snapshot_miss_rate * 100).toFixed(1)}%`} |`,
+    );
+  }
+  lines.push('', '## 可靠性表（结论档位的精确率）', '', '| 路由 | 档位 | 精确率 | 降级 |', '|---|---|---|---|');
+  for (const r of report.rows.filter((x) => x.pack_timing === 'all')) {
+    for (const x of r.reliability) {
+      lines.push(
+        `| ${r.route_id} | ${x.level} | ${fmtRatio(x.precision)} | ${x.demoted ? `是（下界低于 ${EVIDENCE_CONSISTENT_FLOOR * 100}%）` : '否'} |`,
+      );
+    }
+  }
+  const granular = report.rows.filter((x) => x.pack_timing === 'all' && Object.keys(x.by_granularity).length);
+  if (granular.length) {
+    lines.push('', '## 按粒度的 top-1', '', '| 路由 | 粒度 | top-1 |', '|---|---|---|');
+    for (const r of granular) {
+      for (const [g, v] of Object.entries(r.by_granularity)) {
+        lines.push(`| ${r.route_id} | ${g} | ${fmtRatio(v as EvalRatio)} |`);
+      }
+    }
+  }
+  if (report.gate) {
+    const g = report.gate;
+    lines.push(
+      '',
+      '## 发布门禁',
+      '',
+      `- 基线报告：\`${g.baseline_report_id}\`；配对用例 ${g.paired_cases} 个`,
+      `- 新减旧：${(g.paired_delta * 100).toFixed(1)} 个百分点，单侧 90% 下界 ${(g.paired_delta_low * 100).toFixed(1)} 个百分点，阈值 ${(g.threshold * 100).toFixed(0)} 个百分点`,
+      `- 之前 pass^k 通过、现在失败的用例：${g.regressed_cases.length ? g.regressed_cases.map((x) => `\`${x}\``).join('、') : '无'}`,
+      `- 豁免：${g.waived_cases.length ? g.waived_cases.map((x) => `\`${x}\``).join('、') : '无'}`,
+      `- 结果：${g.passed ? '通过' : '不通过'}`,
+    );
+  }
+  return `${lines.join('\n')}\n`;
+}
