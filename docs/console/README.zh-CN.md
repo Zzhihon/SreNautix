@@ -52,7 +52,7 @@ pnpm --filter @srenautix/console build    # 产出 web/console/dist，由 server
 SRENAUTIX_ENVTEST_DIR=<envtest 二进制目录> pnpm --filter @srenautix/console e2e
 ```
 
-测试启动一次性 PostgreSQL（`SRENAUTIX_PG_BIN`，默认 Homebrew 的 postgresql@18）、envtest、server 角色与 `vite preview`，种子全部经真实接口写入，见 ADR 0073。调试时可以先运行 `node --conditions=@srenautix/source --import tsx e2e/run-hub.ts` 保持后端运行，再用 `SRENAUTIX_E2E_REUSE_HUB=1` 运行测试。
+测试启动一次性 PostgreSQL（`SRENAUTIX_PG_BIN`，默认 Homebrew 的 postgresql@18）、envtest 与 server 角色（同时提供接口与 `web/console/dist`），种子全部经真实接口写入，见 ADR 0073。调试时可以先运行 `node --conditions=@srenautix/source --import tsx e2e/run-hub.ts` 保持后端运行，再用 `SRENAUTIX_E2E_REUSE_HUB=1` 运行测试。
 
 ## Grafana 插件
 
@@ -63,3 +63,5 @@ SRENAUTIX_ENVTEST_DIR=<envtest 二进制目录> pnpm --filter @srenautix/console
 ```bash
 SRENAUTIX_ENVTEST_DIR=<envtest 二进制目录> pnpm --filter @srenautix/grafana-app e2e
 ```
+
+后端额外启动一个 OIDC 身份源：Grafana 管理员的邮箱对应其中一个账号，测试先让该账号在控制台登录一次，server 才会接受插件代表这个邮箱发出的请求。调试时可以运行 `node --conditions=@srenautix/source --import tsx e2e/run-stack.ts` 保持整套环境运行。
