@@ -88,12 +88,12 @@ spec:
           annotations:
             summary: gateway 的准入自检未通过，gateway 已转为只提议
         - alert: SreNautixGatewayNeedsHuman
-          expr: sum by (namespace, action) (increase(srenautix_gateway_executions_total{phase="needs_human", {{ $sel }}}[1h])) > 0
+          expr: max by (namespace) (srenautix_gateway_needs_human{ {{- $sel -}} }) > 0
           labels:
             severity: critical
             {{- toYaml $labels | nindent 12 }}
           annotations:
-            summary: "动作 {{ "{{" }} $labels.action {{ "}}" }} 执行后校验失败且无法撤销，需要人工处理"
+            summary: "有 {{ "{{" }} $value {{ "}}" }} 个执行处于 needs_human 或 indeterminate，需要人工处理"
         - alert: SreNautixAuditExportLag
           expr: max by (namespace, chain) (srenautix_audit_export_lag_seconds{ {{- $sel -}} }) > 900
           for: 5m

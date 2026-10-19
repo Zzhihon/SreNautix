@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # chart 的离线检查：对每份 values 执行 helm lint、渲染并用 kubeconform 校验 schema，最后运行 helm-unittest。
-# 用法：deploy/helm/check.sh [chart 目录]；需要 helm（含 unittest 插件）与 kubeconform。
+# 用法：deploy/helm/check.sh [chart 目录]；需要 helm（含 unittest 插件）、kubeconform、yq 与 promtool。
 #
 # gateway 的准入策略与 RBAC 来自 internal/spoke/gateway/admission 生成器写入的 files/admission/。
 # 生成结果存在时检查全部配置；不存在时只检查不含 gateway 的配置，并输出 GitHub Actions 警告。
@@ -37,6 +37,14 @@ for f in "${values_files[@]}"; do
   kubeconform -strict -summary -kubernetes-version "$kube_version" \
     -schema-location default -schema-location "$crd_catalog" "$out_dir/$name.yaml"
 done
+
+echo "==> promtool check rules（自身告警规则）"
+helm template ci "$chart_dir" --namespace srenautix --kube-version "$kube_version" \
+  -f "$chart_dir/ci/base/required.yaml" -f "$chart_dir/values-observe.yaml" \
+  --set selfMonitoring.prometheusRule.enabled=true --set selfMonitoring.receiver=oncall \
+  --set selfMonitoring.routeLabels.team=platform --show-only templates/self-monitoring.yaml |
+  yq 'select(.kind == "PrometheusRule") | .spec' >"$out_dir/self-rules.yaml"
+promtool check rules "$out_dir/self-rules.yaml"
 
 echo "==> helm unittest, gateway=${with_gateway}"
 helm unittest --strict "${test_globs[@]}" "$chart_dir"
