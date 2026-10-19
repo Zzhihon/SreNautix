@@ -9,9 +9,13 @@ import { ActionsPage, ApprovalPage, type QueueTab } from './pages/actions';
 import { ClusterPage, ClustersPage } from './pages/clusters';
 import { EvalPage, type EvalMode } from './pages/eval';
 import { LoginPage } from './pages/LoginPage';
+import { AuditPage, SettingsPage, UsersPage } from './pages/governance';
+import { HealthPage, type CostGroup } from './pages/health';
 import { IncidentPage, InboxPage, RunPage } from './pages/oncall';
-import { RawPromptsPage } from './pages/RawPromptsPage';
+import { PromptsPage } from './pages/RawPromptsPage';
 import { SearchPage } from './pages/SearchPage';
+import { IntegrationsPage, ModelsPage, PacksPage, PoliciesPage } from './pages/system';
+import { TopologyPage, type TopologyView } from './pages/topology';
 import { AppFrame } from './frame';
 import { SESSION_KEY } from './session';
 
@@ -128,9 +132,67 @@ const rawPromptsRoute = createRoute({
   path: 'runs/$runId/prompts/raw',
   component: function Raw() {
     const { runId } = rawPromptsRoute.useParams();
-    return <RawPromptsPage runId={runId} />;
+    return <PromptsPage runId={runId} raw />;
   },
 });
+
+const promptsRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: 'runs/$runId/prompts',
+  component: function Prompts() {
+    const { runId } = promptsRoute.useParams();
+    return <PromptsPage runId={runId} raw={false} />;
+  },
+});
+
+const COST_GROUPS = ['day', 'incident', 'model'] as const satisfies readonly CostGroup[];
+
+const healthRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: 'health',
+  validateSearch: (s: Record<string, unknown>): ClusterSearch & { cost?: CostGroup } => ({
+    cluster: str(s.cluster),
+    cost: maybeOneOf(s.cost, COST_GROUPS),
+  }),
+  component: function Health() {
+    const { cost } = healthRoute.useSearch();
+    return <HealthPage cost={cost ?? 'day'} />;
+  },
+});
+
+const TOPOLOGY_VIEWS = ['coverage', 'neighborhood', 'diff'] as const satisfies readonly TopologyView[];
+
+const topologyRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: 'topology',
+  validateSearch: (s: Record<string, unknown>): ClusterSearch & { view?: TopologyView } => ({
+    cluster: str(s.cluster),
+    view: maybeOneOf(s.view, TOPOLOGY_VIEWS),
+  }),
+  component: function Topology() {
+    const { cluster, view } = topologyRoute.useSearch();
+    return <TopologyPage cluster={cluster} view={view ?? 'coverage'} />;
+  },
+});
+
+const integrationsRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: 'integrations',
+  component: IntegrationsPage,
+});
+const packsRoute = createRoute({ getParentRoute: () => appRoute, path: 'packs', component: PacksPage });
+const policiesRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: 'policies',
+  component: function Policies() {
+    const { cluster } = appRoute.useSearch();
+    return <PoliciesPage cluster={cluster} />;
+  },
+});
+const modelsRoute = createRoute({ getParentRoute: () => appRoute, path: 'models', component: ModelsPage });
+const auditRoute = createRoute({ getParentRoute: () => appRoute, path: 'audit', component: AuditPage });
+const usersRoute = createRoute({ getParentRoute: () => appRoute, path: 'users', component: UsersPage });
+const settingsRoute = createRoute({ getParentRoute: () => appRoute, path: 'settings', component: SettingsPage });
 
 const QUEUE_TABS = ['pending', 'running', 'history'] as const satisfies readonly QueueTab[];
 
@@ -214,6 +276,16 @@ export const routeTree = rootRoute.addChildren([
     clustersRoute,
     clusterRoute,
     searchRoute,
+    promptsRoute,
+    healthRoute,
+    topologyRoute,
+    integrationsRoute,
+    packsRoute,
+    policiesRoute,
+    modelsRoute,
+    auditRoute,
+    usersRoute,
+    settingsRoute,
   ]),
 ]);
 

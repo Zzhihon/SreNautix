@@ -30,6 +30,27 @@
   grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
   gap: 12px;
 }
+.statGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 10px;
+}
+.row {
+  display: flex;
+  gap: 10px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+.code {
+  display: block;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: var(--sn-font-mono);
+  font-size: 12.5px;
+  background: var(--sn-raise);
+  padding: 8px;
+  border-radius: 4px;
+}
 .filterSelect {
   max-width: 420px;
 }

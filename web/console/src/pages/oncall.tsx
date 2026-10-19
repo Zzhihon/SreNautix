@@ -132,7 +132,9 @@ export function RunPage({ runId }: { runId: string }) {
     <RunView
       runId={runId}
       now={now}
-      promptHref={(seq, isRaw) => (isRaw ? (raw ? `/runs/${runId}/prompts/raw#call-${seq}` : null) : null)}
+      promptHref={(seq, isRaw) =>
+        isRaw ? (raw ? `/runs/${runId}/prompts/raw#call-${seq}` : null) : `/runs/${runId}/prompts#call-${seq}`
+      }
       actions={write ? <EvalCaseButton runId={runId} /> : undefined}
     />
   );

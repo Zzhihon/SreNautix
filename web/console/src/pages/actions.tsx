@@ -26,6 +26,7 @@ import {
 import { useMemo, useState } from 'react';
 import { hub, ok, type Session } from '../api';
 import { useNow } from '../now';
+import { passkeyHook } from '../passkey';
 import { useRefreshSession, useSession, reauthNeeded } from '../session';
 import styles from './pages.module.css';
 
@@ -281,7 +282,7 @@ export function ApprovalPage({ proposalId }: { proposalId: string }) {
       <ApprovalView
         proposalId={proposalId}
         reauth={{ needed: reauthNeeded(session, now), begin }}
-        passkey={null}
+        passkey={session.profile === 'compliance' ? passkeyHook(true) : null}
         now={now}
       />
       <LocalReauth open={reauthOpen} onOpenChange={setReauthOpen} />
