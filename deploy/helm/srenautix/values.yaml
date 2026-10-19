@@ -126,6 +126,9 @@ roles:
       - rollout_pause
       - rollout_resume
       - pod_restart
+    # 启用 workflow_submit 时必填：`srenautix-spoke admission workflow-allowlist --policy=<Git 中的 gateway 策略>`
+    # 输出的 ValidatingAdmissionPolicy 原文（模板白名单与参数约束），chart 按动作目录中的策略同样渲染并绑定
+    workflowAllowlistPolicy: ""
     # 收到 SIGTERM 后等进行中的动作完成
     terminationGracePeriodSeconds: 600
     # 本地审计暂存卷
@@ -412,6 +415,8 @@ imagePolicy:
   issuer: https://token.actions.githubusercontent.com
   # 镜像由可复用工作流 image.yml 签名，证书主体是该工作流的路径
   subjectRegExp: ^https://github\.com/Zzhihon/SreNautix/\.github/workflows/image\.yml@refs/(heads/main|tags/v.+)$
+  # 隔离网络中引用离线包里的 TrustRoot（trustroot.yaml，名称 srenautix-sigstore）；为空时使用公共 Sigstore
+  trustRootRef: ""
 
 # 额外的只读 RBAC 规则，追加到 server、worker、mcp、reader（不允许包含 secrets）
 rbac:

@@ -1,0 +1,60 @@
+# 启用 workflow_submit：workflowAllowlistPolicy 是
+# `srenautix-spoke admission workflow-allowlist --policy=ci/fixtures/gateway-policy-workflows.yaml` 的输出原文
+profile: standard
+roles:
+  gateway:
+    actions: [workflow_submit, workflow_terminate]
+    workflowAllowlistPolicy: |
+      apiVersion: admissionregistration.k8s.io/v1
+      kind: ValidatingAdmissionPolicy
+      metadata:
+        annotations:
+          srenautix.io/description: workflow_submit：模板与参数必须在 gateway 策略的 workflow_templates 白名单中（模板内容的 sha256 与 ServiceAccount 由 gateway 在执行前核对）
+        labels:
+          app.kubernetes.io/component: gateway-admission
+          app.kubernetes.io/name: srenautix
+        name: '{{ include "srenautix.fullname" . }}-gateway-workflow-allowlist'
+      spec:
+        failurePolicy: Fail
+        matchConditions:
+          - expression: request.userInfo.username == '{{ include "srenautix.gateway.username" . }}'
+            name: gateway-only
+        matchConstraints:
+          resourceRules:
+            - apiGroups:
+                - argoproj.io
+              apiVersions:
+                - v1alpha1
+              operations:
+                - CREATE
+              resources:
+                - workflows
+            - apiGroups:
+                - srenautix.io
+              apiVersions:
+                - v1
+              operations:
+                - CREATE
+              resources:
+                - actionexecutions
+        paramKind:
+          apiVersion: v1
+          kind: ConfigMap
+        validations:
+          - expression: '!variables.isRecord || object.metadata.?labels.orValue({})[?''srenautix.io/admission-probe''].orValue('''') != ''workflow-allowlist'''
+            message: admission self-check probe denied by workflow-allowlist
+          - expression: variables.isRecord || params.?data.?frozen.orValue('true') == 'false'
+            message: srenautix-freeze is frozen or missing, gateway writes are proposal-only
+          - expression: |-
+              variables.isRecord || (has(object.spec.workflowTemplateRef) && has(object.spec.workflowTemplateRef.name) && (
+              (request.namespace == "ops" &&
+              object.spec.workflowTemplateRef.name == "restart-cache" &&
+              size(variables.params) == 1 &&
+              variables.params.exists_one(p, p.name == "target") &&
+              variables.params.exists(p, p.name == "target" && has(p.value) && p.value in ["cache-a", "cache-b"]))))
+            message: gateway may only submit an allowlisted WorkflowTemplate with parameters that match its allowlist entry
+        variables:
+          - expression: request.resource.group == 'srenautix.io' && request.resource.resource == 'actionexecutions'
+            name: isRecord
+          - expression: object.spec.?arguments.?parameters.orValue([])
+            name: params

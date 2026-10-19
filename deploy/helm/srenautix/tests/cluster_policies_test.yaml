@@ -1,0 +1,60 @@
+suite: PriorityClass、ResourceQuota 与镜像签名策略
+templates:
+  - templates/cluster-policies.yaml
+values:
+  - ../ci/base/required.yaml
+release:
+  name: t
+  namespace: srenautix
+capabilities:
+  majorVersion: "1"
+  minorVersion: "34"
+tests:
+  - it: 默认不创建 PriorityClass、ResourceQuota 与镜像签名策略
+    set:
+      profile: observe
+    asserts:
+      - hasDocuments: {count: 0}
+
+  - it: ClusterImagePolicy 校验两个镜像的发布工作流签名
+    set:
+      profile: observe
+      imagePolicy.enabled: true
+    documentSelector: {path: kind, value: ClusterImagePolicy}
+    asserts:
+      - equal:
+          path: spec.images
+          value:
+            - glob: "ghcr.io/zzhihon/srenautix**"
+            - glob: "ghcr.io/zzhihon/srenautix-spoke**"
+      - equal: {path: 'spec.authorities[0].keyless.url', value: https://fulcio.sigstore.dev}
+      - equal:
+          path: 'spec.authorities[0].keyless.identities[0].issuer'
+          value: https://token.actions.githubusercontent.com
+
+  - it: 隔离网络中引用离线 TrustRoot，镜像地址随 global.imageRegistry 变化
+    set:
+      profile: observe
+      imagePolicy.enabled: true
+      imagePolicy.trustRootRef: srenautix-sigstore
+      global.imageRegistry: registry.example.internal/srenautix
+    documentSelector: {path: kind, value: ClusterImagePolicy}
+    asserts:
+      - equal: {path: 'spec.authorities[0].keyless.trustRootRef', value: srenautix-sigstore}
+      - equal: {path: 'spec.authorities[0].ctlog.trustRootRef', value: srenautix-sigstore}
+      - notExists: {path: 'spec.authorities[0].keyless.url'}
+      - equal:
+          path: 'spec.images[0].glob'
+          value: "registry.example.internal/srenautix/zzhihon/srenautix**"
+
+  - it: PriorityClass 与 ResourceQuota
+    set:
+      profile: observe
+      priorityClass.create: true
+      priorityClass.value: 1000
+      resourceQuota.enabled: true
+    asserts:
+      - equal: {path: value, value: 1000}
+        documentSelector: {path: kind, value: PriorityClass}
+      - equal: {path: spec.hard.persistentvolumeclaims, value: "10"}
+        documentSelector: {path: kind, value: ResourceQuota}

@@ -71,13 +71,24 @@ spec:
     name: srenautix-freeze
     namespace: {{ .Release.Namespace }}
     parameterNotFoundAction: Deny
+{{- $sources := list }}
 {{- range $file := $cat.policies }}
 {{- $path := printf "files/admission/%s" $file }}
 {{- $raw := $.Files.Get $path }}
 {{- if not $raw }}
 {{- fail (printf "动作目录引用的策略文件 %s 不存在" $path) }}
 {{- end }}
-{{- $rendered := tpl $raw $ }}
+{{- $sources = append $sources (dict "path" $path "raw" $raw) }}
+{{- end }}
+{{- if has "workflow_submit" .Values.roles.gateway.actions }}
+{{- if not .Values.roles.gateway.workflowAllowlistPolicy }}
+{{- fail "启用 workflow_submit 时必须设置 roles.gateway.workflowAllowlistPolicy（srenautix-spoke admission workflow-allowlist 的输出）" }}
+{{- end }}
+{{- $sources = append $sources (dict "path" "roles.gateway.workflowAllowlistPolicy" "raw" .Values.roles.gateway.workflowAllowlistPolicy) }}
+{{- end }}
+{{- range $src := $sources }}
+{{- $path := $src.path }}
+{{- $rendered := tpl $src.raw $ }}
 {{- $policy := $rendered | fromYaml }}
 {{- if or (hasKey $policy "Error") (ne ($policy.kind | default "") "ValidatingAdmissionPolicy") }}
 {{- fail (printf "%s 必须恰好包含一个 ValidatingAdmissionPolicy 文档" $path) }}

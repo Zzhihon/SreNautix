@@ -96,6 +96,32 @@ tests:
           pattern: system:serviceaccount:srenautix:t-srenautix-gateway
       - equal: {path: spec.failurePolicy, value: Fail}
 
+  - it: 启用 workflow_submit 时加载工作流模板白名单策略并绑定熔断开关
+    template: templates/gateway/admission.yaml
+    values:
+      - ../../ci/workflows-values.yaml
+    asserts:
+      - containsDocument:
+          kind: ValidatingAdmissionPolicy
+          apiVersion: admissionregistration.k8s.io/v1
+          name: t-srenautix-gateway-workflow-allowlist
+          any: true
+      - equal:
+          path: spec.paramRef
+          value:
+            name: srenautix-freeze
+            namespace: srenautix
+            parameterNotFoundAction: Deny
+        documentSelector: {path: "$[?(@.kind == 'ValidatingAdmissionPolicyBinding')].metadata.name", value: t-srenautix-gateway-workflow-allowlist}
+
+  - it: 启用 workflow_submit 但没有白名单策略时渲染失败
+    template: templates/gateway/admission.yaml
+    set:
+      profile: standard
+      roles.gateway.actions: [workflow_submit]
+    asserts:
+      - failedTemplate: {errorPattern: 必须设置 roles.gateway.workflowAllowlistPolicy}
+
   - it: observe 配置不生成准入策略与熔断开关
     set:
       profile: observe

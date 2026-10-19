@@ -31,6 +31,8 @@ tuf_home=$(mktemp -d "$out_root/.tuf.XXXXXX")
 HOME="$tuf_home" cosign initialize
 cp "$tuf_home/.sigstore/root/tuf-repo-cdn.sigstore.dev/targets/trusted_root.json" "$work/trusted_root.json"
 rm -rf "$tuf_home"
+# 同一份信任根转成 policy-controller 的 TrustRoot，合规配置在隔离网络中用 imagePolicy.trustRootRef 引用
+jq -f "$script_dir/trustroot.jq" --arg name srenautix-sigstore "$work/trusted_root.json" | yq -P >"$work/trustroot.yaml"
 
 verify_signed() {
   local ref=$1 identity_re=$2

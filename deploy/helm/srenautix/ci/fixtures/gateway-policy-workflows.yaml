@@ -1,0 +1,14 @@
+version: 1
+cluster: default
+approvers:
+  - {principal: "oidc:root", namespaces: ["*"], max_tier: H}
+actions:
+  - id: workflow_submit
+    namespaces: [ops]
+workflow_templates:
+  - namespace: ops
+    name: restart-cache
+    sha256: sha256:0000000000000000000000000000000000000000000000000000000000000000
+    service_account: workflow-runner
+    parameters:
+      target: {enum: [cache-a, cache-b]}

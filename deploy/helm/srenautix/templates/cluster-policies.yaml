@@ -44,10 +44,18 @@ spec:
     {{- end }}
   authorities:
     - keyless:
+        {{- if $ip.trustRootRef }}
+        trustRootRef: {{ $ip.trustRootRef }}
+        {{- else }}
         url: https://fulcio.sigstore.dev
+        {{- end }}
         identities:
           - issuer: {{ $ip.issuer }}
             subjectRegExp: {{ $ip.subjectRegExp | quote }}
       ctlog:
+        {{- if $ip.trustRootRef }}
+        trustRootRef: {{ $ip.trustRootRef }}
+        {{- else }}
         url: https://rekor.sigstore.dev
+        {{- end }}
 {{- end }}
