@@ -1,0 +1,105 @@
+# 每个信号先用 CloudNativePG 实例自带的指标（cnpg_*），再用 postgres_exporter 的指标（pg_*）。
+# $selector：Cluster 实体展开为 namespace + pod=~"<cluster>-[0-9]+"；Pod 实体展开为 namespace + pod。
+signals:
+  - id: instance_up
+    kind: metrics
+    alternatives:
+      - expr: max by (namespace, pod) (cnpg_collector_up{$selector})
+      - expr: max by (namespace, pod) (pg_up{$selector})
+  - id: in_recovery
+    kind: metrics
+    alternatives:
+      - expr: max by (namespace, pod) (cnpg_pg_replication_in_recovery{$selector})
+      - expr: max by (namespace, pod) (pg_replication_is_replica{$selector})
+  - id: replication_lag_seconds
+    kind: metrics
+    unit: seconds
+    alternatives:
+      - expr: max by (namespace, pod) (cnpg_pg_replication_lag{$selector})
+      - expr: max by (namespace, pod) (pg_replication_lag{$selector})
+  - id: connections_ratio
+    kind: metrics
+    unit: ratio
+    alternatives:
+      - expr: >-
+          sum by (namespace, pod) (cnpg_backends_total{$selector})
+          / max by (namespace, pod) (cnpg_pg_settings_setting{$selector, name="max_connections"})
+      - expr: >-
+          sum by (namespace, pod) (pg_stat_activity_count{$selector})
+          / max by (namespace, pod) (pg_settings_max_connections{$selector})
+  - id: connections_by_application
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: topk(8, sum by (application_name, state) (cnpg_backends_total{$selector}))
+      - expr: topk(8, sum by (datname, state) (pg_stat_activity_count{$selector}))
+  - id: longest_transaction_seconds
+    kind: metrics
+    unit: seconds
+    alternatives:
+      - expr: max by (namespace, pod) (cnpg_backends_max_tx_duration_seconds{$selector})
+      - expr: max by (namespace, pod) (pg_stat_activity_max_tx_duration{$selector})
+  - id: backends_waiting
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: max by (namespace, pod) (max_over_time(cnpg_backends_waiting_total{$selector}[$window])) > 0
+  - id: rollback_ratio
+    kind: metrics
+    unit: ratio
+    alternatives:
+      - expr: >-
+          sum by (namespace, pod, datname) (rate(cnpg_pg_stat_database_xact_rollback{$selector}[$rate_window]))
+          / (
+            sum by (namespace, pod, datname) (rate(cnpg_pg_stat_database_xact_commit{$selector}[$rate_window]))
+            + sum by (namespace, pod, datname) (rate(cnpg_pg_stat_database_xact_rollback{$selector}[$rate_window]))
+          )
+      - expr: >-
+          sum by (namespace, pod, datname) (rate(pg_stat_database_xact_rollback{$selector}[$rate_window]))
+          / (
+            sum by (namespace, pod, datname) (rate(pg_stat_database_xact_commit{$selector}[$rate_window]))
+            + sum by (namespace, pod, datname) (rate(pg_stat_database_xact_rollback{$selector}[$rate_window]))
+          )
+  - id: deadlocks
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: sum by (namespace, pod, datname) (increase(cnpg_pg_stat_database_deadlocks{$selector}[$window])) > 0
+      - expr: sum by (namespace, pod, datname) (increase(pg_stat_database_deadlocks{$selector}[$window])) > 0
+  - id: wal_archived_count
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: max by (namespace, pod) (cnpg_pg_stat_archiver_archived_count{$selector})
+  - id: wal_archive_failures
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: max by (namespace, pod) (increase(cnpg_pg_stat_archiver_failed_count{$selector}[$window])) > 0
+  - id: wal_ready_segments
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: max by (namespace, pod) (cnpg_collector_pg_wal_archive_status{$selector, value="ready"})
+  - id: wal_dir_bytes
+    kind: metrics
+    unit: bytes
+    alternatives:
+      - expr: max by (namespace, pod) (cnpg_collector_pg_wal{$selector, value="size"})
+  - id: last_backup_age_seconds
+    kind: metrics
+    unit: seconds
+    alternatives:
+      # 0 表示还没有成功的备份，不计入
+      - expr: time() - max by (namespace) (cnpg_collector_last_available_backup_timestamp{$selector} > 0)
+  - id: last_backup_failed
+    kind: metrics
+    alternatives:
+      - expr: >-
+          max by (namespace) (cnpg_collector_last_failed_backup_timestamp{$selector})
+          > max by (namespace) (cnpg_collector_last_available_backup_timestamp{$selector})
+  - id: postgres_error_lines
+    kind: logs
+    alternatives:
+      - expr: (FATAL|PANIC|out of shared memory|could not write|terminating connection due to administrator command)
+        dialect: logs_match

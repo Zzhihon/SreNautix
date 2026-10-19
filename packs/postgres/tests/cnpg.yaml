@@ -1,0 +1,228 @@
+# 两个 CNPG 集群：shop/pg 在第 20 分钟故障转移并出现各类压力，calm/db 一切正常。
+# 时间零点 2026-01-01T00:00:00Z（unix 1767225600）。
+api_version: srenautix.io/pack-test/v1
+interval: 1m
+input_series:
+  # ---------- shop/pg ----------
+  - { series: 'cnpg_collector_up{namespace="shop",pod="pg-1"}', values: '1x20 0x5 1x35' }
+  - { series: 'cnpg_collector_up{namespace="shop",pod="pg-2"}', values: '1x60' }
+  - { series: 'cnpg_pg_replication_in_recovery{namespace="shop",pod="pg-1"}', values: '0x20 1x40' }
+  - { series: 'cnpg_pg_replication_in_recovery{namespace="shop",pod="pg-2"}', values: '1x20 0x40' }
+  - { series: 'cnpg_pg_replication_lag{namespace="shop",pod="pg-1"}', values: '0x20 120x5 2x35' }
+  - { series: 'cnpg_pg_replication_lag{namespace="shop",pod="pg-2"}', values: '1x60' }
+  - {
+      series: 'cnpg_backends_total{namespace="shop",pod="pg-2",datname="app",usename="app",application_name="web",state="active"}',
+      values: '20x20 90x40',
+    }
+  - {
+      series: 'cnpg_backends_total{namespace="shop",pod="pg-2",datname="app",usename="app",application_name="web",state="idle"}',
+      values: '10x60',
+    }
+  - {
+      series: 'cnpg_backends_total{namespace="shop",pod="pg-1",datname="app",usename="app",application_name="web",state="idle"}',
+      values: '5x60',
+    }
+  - { series: 'cnpg_pg_settings_setting{namespace="shop",pod="pg-1",name="max_connections"}', values: '100x60' }
+  - { series: 'cnpg_pg_settings_setting{namespace="shop",pod="pg-2",name="max_connections"}', values: '100x60' }
+  - { series: 'cnpg_backends_max_tx_duration_seconds{namespace="shop",pod="pg-2"}', values: '0x20 0+60x40' }
+  - { series: 'cnpg_backends_waiting_total{namespace="shop",pod="pg-2"}', values: '0x20 7x40' }
+  - { series: 'cnpg_pg_stat_database_xact_commit{namespace="shop",pod="pg-2",datname="app"}', values: '0+1000x60' }
+  - {
+      series: 'cnpg_pg_stat_database_xact_rollback{namespace="shop",pod="pg-2",datname="app"}',
+      values: '0x20 0+300x40',
+    }
+  - { series: 'cnpg_pg_stat_database_deadlocks{namespace="shop",pod="pg-2",datname="app"}', values: '0x30 3x30' }
+  - { series: 'cnpg_pg_stat_archiver_archived_count{namespace="shop",pod="pg-2"}', values: '100x60' }
+  - { series: 'cnpg_pg_stat_archiver_failed_count{namespace="shop",pod="pg-2"}', values: '0x20 0+2x40' }
+  - { series: 'cnpg_collector_pg_wal_archive_status{namespace="shop",pod="pg-2",value="ready"}', values: '0x20 0+3x40' }
+  - {
+      series: 'cnpg_collector_pg_wal{namespace="shop",pod="pg-2",value="size"}',
+      values: '1000000000x20 1000000000+500000000x40',
+    }
+  - { series: 'cnpg_collector_last_available_backup_timestamp{namespace="shop",pod="pg-2"}', values: '1767052800x60' }
+  - { series: 'cnpg_collector_last_failed_backup_timestamp{namespace="shop",pod="pg-2"}', values: '1767222000x60' }
+  # ---------- calm/db ----------
+  - { series: 'cnpg_collector_up{namespace="calm",pod="db-1"}', values: '1x60' }
+  - { series: 'cnpg_collector_up{namespace="calm",pod="db-2"}', values: '1x60' }
+  - { series: 'cnpg_pg_replication_in_recovery{namespace="calm",pod="db-1"}', values: '0x60' }
+  - { series: 'cnpg_pg_replication_in_recovery{namespace="calm",pod="db-2"}', values: '1x60' }
+  - { series: 'cnpg_pg_replication_lag{namespace="calm",pod="db-1"}', values: '0x60' }
+  - { series: 'cnpg_pg_replication_lag{namespace="calm",pod="db-2"}', values: '0.5x60' }
+  - {
+      series: 'cnpg_backends_total{namespace="calm",pod="db-1",datname="app",usename="app",application_name="api",state="active"}',
+      values: '10x60',
+    }
+  - { series: 'cnpg_pg_settings_setting{namespace="calm",pod="db-1",name="max_connections"}', values: '100x60' }
+  - { series: 'cnpg_backends_max_tx_duration_seconds{namespace="calm",pod="db-1"}', values: '2x60' }
+  - { series: 'cnpg_backends_waiting_total{namespace="calm",pod="db-1"}', values: '0x60' }
+  - { series: 'cnpg_pg_stat_database_xact_commit{namespace="calm",pod="db-1",datname="app"}', values: '0+1000x60' }
+  - { series: 'cnpg_pg_stat_database_xact_rollback{namespace="calm",pod="db-1",datname="app"}', values: '0+5x60' }
+  - { series: 'cnpg_pg_stat_database_deadlocks{namespace="calm",pod="db-1",datname="app"}', values: '0x60' }
+  - { series: 'cnpg_pg_stat_archiver_archived_count{namespace="calm",pod="db-1"}', values: '0+1x60' }
+  - { series: 'cnpg_pg_stat_archiver_failed_count{namespace="calm",pod="db-1"}', values: '0x60' }
+  - { series: 'cnpg_collector_pg_wal_archive_status{namespace="calm",pod="db-1",value="ready"}', values: '0x60' }
+  - { series: 'cnpg_collector_pg_wal{namespace="calm",pod="db-1",value="size"}', values: '500000000x60' }
+  - { series: 'cnpg_collector_last_available_backup_timestamp{namespace="calm",pod="db-1"}', values: '1767218400x60' }
+  - { series: 'cnpg_collector_last_failed_backup_timestamp{namespace="calm",pod="db-1"}', values: '1767117600x60' }
+input_logs:
+  - labels: { namespace: shop, pod: pg-1, container: postgres }
+    lines:
+      - { offset: 20m, line: 'FATAL:  terminating connection due to administrator command' }
+  - labels: { namespace: calm, pod: db-1, container: postgres }
+    lines:
+      - { offset: 20m, line: 'LOG:  checkpoint complete' }
+tests:
+  - {
+      name: shop/pg 主库切换,
+      eval_time: 40m,
+      card: availability/primary-changes,
+      entity: { kind: Cluster, namespace: shop, name: pg },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: calm/db 主库稳定,
+      eval_time: 40m,
+      card: availability/primary-changes,
+      entity: { kind: Cluster, namespace: calm, name: db },
+      expect: { verdict: normal },
+    }
+  - {
+      name: shop/pg 实例掉线,
+      eval_time: 40m,
+      card: availability/instances-up,
+      entity: { kind: Cluster, namespace: shop, name: pg },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: calm/db 实例在线,
+      eval_time: 40m,
+      card: availability/instances-up,
+      entity: { kind: Cluster, namespace: calm, name: db },
+      expect: { verdict: normal },
+    }
+  - {
+      name: shop/pg 复制延迟,
+      eval_time: 40m,
+      card: availability/replication-lag,
+      entity: { kind: Cluster, namespace: shop, name: pg },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: calm/db 复制跟上,
+      eval_time: 40m,
+      card: availability/replication-lag,
+      entity: { kind: Cluster, namespace: calm, name: db },
+      expect: { verdict: normal },
+    }
+  - {
+      name: pg-1 有 FATAL 日志,
+      eval_time: 40m,
+      card: availability/error-logs,
+      entity: { kind: Pod, namespace: shop, name: pg-1 },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: db-1 没有错误日志,
+      eval_time: 40m,
+      card: availability/error-logs,
+      entity: { kind: Pod, namespace: calm, name: db-1 },
+      expect: { verdict: normal },
+    }
+  - {
+      name: shop/pg 连接将满,
+      eval_time: 40m,
+      card: saturation/connections,
+      entity: { kind: Cluster, namespace: shop, name: pg },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: calm/db 连接充足,
+      eval_time: 40m,
+      card: saturation/connections,
+      entity: { kind: Cluster, namespace: calm, name: db },
+      expect: { verdict: normal },
+    }
+  - {
+      name: shop/pg 长事务,
+      eval_time: 40m,
+      card: saturation/long-transactions,
+      entity: { kind: Cluster, namespace: shop, name: pg },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: calm/db 没有长事务,
+      eval_time: 40m,
+      card: saturation/long-transactions,
+      entity: { kind: Cluster, namespace: calm, name: db },
+      expect: { verdict: normal },
+    }
+  - {
+      name: shop/pg 锁等待与死锁,
+      eval_time: 40m,
+      card: saturation/lock-waits,
+      entity: { kind: Cluster, namespace: shop, name: pg },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: calm/db 没有锁等待,
+      eval_time: 40m,
+      card: saturation/lock-waits,
+      entity: { kind: Cluster, namespace: calm, name: db },
+      expect: { verdict: normal },
+    }
+  - {
+      name: shop/pg 回滚多,
+      eval_time: 40m,
+      card: saturation/rollbacks,
+      entity: { kind: Cluster, namespace: shop, name: pg },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: calm/db 回滚少,
+      eval_time: 40m,
+      card: saturation/rollbacks,
+      entity: { kind: Cluster, namespace: calm, name: db },
+      expect: { verdict: normal },
+    }
+  - {
+      name: shop/pg 归档失败,
+      eval_time: 40m,
+      card: wal/archiving,
+      entity: { kind: Cluster, namespace: shop, name: pg },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: calm/db 归档正常,
+      eval_time: 40m,
+      card: wal/archiving,
+      entity: { kind: Cluster, namespace: calm, name: db },
+      expect: { verdict: normal },
+    }
+  - {
+      name: shop/pg pg_wal 过大,
+      eval_time: 40m,
+      card: wal/wal-dir,
+      entity: { kind: Cluster, namespace: shop, name: pg },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: calm/db pg_wal 正常,
+      eval_time: 40m,
+      card: wal/wal-dir,
+      entity: { kind: Cluster, namespace: calm, name: db },
+      expect: { verdict: normal },
+    }
+  - {
+      name: shop/pg 备份失败且过期,
+      eval_time: 40m,
+      card: backup/freshness,
+      entity: { kind: Cluster, namespace: shop, name: pg },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: calm/db 备份新鲜,
+      eval_time: 40m,
+      card: backup/freshness,
+      entity: { kind: Cluster, namespace: calm, name: db },
+      expect: { verdict: normal },
+    }

@@ -1,0 +1,304 @@
+# 来源：CloudNativePG cluster chart（cloudnative-pg/charts，cluster-v0.9.0，告警带 namespace 与 cnpg_cluster 标签）
+# 与 postgres_exporter 的 postgres_mixin（v0.20.1）。
+entries:
+  # ---------- CloudNativePG ----------
+  - {
+      id: cnpg-cluster-offline,
+      alertname: CNPGClusterOffline,
+      role: cause,
+      entity: { kind: Cluster, name_labels: [cnpg_cluster] },
+      component_type: postgres.cnpg-cluster,
+      chains: [availability, saturation],
+      mixin: other,
+    }
+  - {
+      id: cnpg-instance-metrics-absent,
+      alertname: CNPGInstanceMetricsAbsent,
+      role: meta,
+      entity: { kind: Pod, name_labels: [pod] },
+      chains: [availability],
+      mixin: other,
+    }
+  - {
+      id: cnpg-cluster-ha-critical,
+      alertname: CNPGClusterHACritical,
+      role: cause,
+      entity: { kind: Cluster, name_labels: [cnpg_cluster] },
+      component_type: postgres.cnpg-cluster,
+      chains: [availability],
+      mixin: other,
+    }
+  - {
+      id: cnpg-cluster-ha-warning,
+      alertname: CNPGClusterHAWarning,
+      role: cause,
+      entity: { kind: Cluster, name_labels: [cnpg_cluster] },
+      component_type: postgres.cnpg-cluster,
+      chains: [availability],
+      mixin: other,
+    }
+  - {
+      id: cnpg-cluster-high-connections-critical,
+      alertname: CNPGClusterHighConnectionsCritical,
+      role: symptom,
+      entity: { kind: Cluster, name_labels: [cnpg_cluster] },
+      component_type: postgres.cnpg-cluster,
+      chains: [saturation],
+      mixin: other,
+    }
+  - {
+      id: cnpg-cluster-high-connections-warning,
+      alertname: CNPGClusterHighConnectionsWarning,
+      role: symptom,
+      entity: { kind: Cluster, name_labels: [cnpg_cluster] },
+      component_type: postgres.cnpg-cluster,
+      chains: [saturation],
+      mixin: other,
+    }
+  - {
+      id: cnpg-cluster-high-replication-lag,
+      alertname: CNPGClusterHighReplicationLag,
+      role: symptom,
+      entity: { kind: Cluster, name_labels: [cnpg_cluster] },
+      component_type: postgres.cnpg-cluster,
+      chains: [availability, wal],
+      mixin: other,
+    }
+  - {
+      id: cnpg-cluster-physical-replication-lag-critical,
+      alertname: CNPGClusterPhysicalReplicationLagCritical,
+      role: symptom,
+      entity: { kind: Cluster, name_labels: [cnpg_cluster] },
+      component_type: postgres.cnpg-cluster,
+      chains: [availability, wal],
+      mixin: other,
+    }
+  - {
+      id: cnpg-cluster-physical-replication-lag-warning,
+      alertname: CNPGClusterPhysicalReplicationLagWarning,
+      role: symptom,
+      entity: { kind: Cluster, name_labels: [cnpg_cluster] },
+      component_type: postgres.cnpg-cluster,
+      chains: [availability, wal],
+      mixin: other,
+    }
+  - {
+      id: cnpg-cluster-low-disk-space-critical,
+      alertname: CNPGClusterLowDiskSpaceCritical,
+      role: cause,
+      entity: { kind: Cluster, name_labels: [cnpg_cluster] },
+      component_type: postgres.cnpg-cluster,
+      chains: [pvc/pvc-capacity, wal],
+      mixin: other,
+    }
+  - {
+      id: cnpg-cluster-low-disk-space-warning,
+      alertname: CNPGClusterLowDiskSpaceWarning,
+      role: cause,
+      entity: { kind: Cluster, name_labels: [cnpg_cluster] },
+      component_type: postgres.cnpg-cluster,
+      chains: [pvc/pvc-capacity, wal],
+      mixin: other,
+    }
+  - {
+      id: cnpg-cluster-instances-on-same-node,
+      alertname: CNPGClusterInstancesOnSameNode,
+      role: symptom,
+      role_confidence: 0.6,
+      entity: { kind: Cluster, name_labels: [cnpg_cluster] },
+      component_type: postgres.cnpg-cluster,
+      chains: [availability],
+      mixin: other,
+    }
+  - {
+      id: cnpg-cluster-zone-spread-warning,
+      alertname: CNPGClusterZoneSpreadWarning,
+      role: symptom,
+      role_confidence: 0.6,
+      entity: { kind: Cluster, name_labels: [cnpg_cluster] },
+      component_type: postgres.cnpg-cluster,
+      chains: [availability],
+      mixin: other,
+    }
+  - {
+      id: cnpg-logical-replication-errors,
+      alertname: CNPGClusterLogicalReplicationErrors,
+      role: symptom,
+      entity: { kind: Cluster, name_labels: [cnpg_cluster, cluster] },
+      component_type: postgres.cnpg-cluster,
+      chains: [availability],
+      mixin: other,
+    }
+  - {
+      id: cnpg-logical-replication-errors-critical,
+      alertname: CNPGClusterLogicalReplicationErrorsCritical,
+      role: symptom,
+      entity: { kind: Cluster, name_labels: [cnpg_cluster, cluster] },
+      component_type: postgres.cnpg-cluster,
+      chains: [availability],
+      mixin: other,
+    }
+  - {
+      id: cnpg-logical-replication-lagging,
+      alertname: CNPGClusterLogicalReplicationLagging,
+      role: symptom,
+      entity: { kind: Cluster, name_labels: [cnpg_cluster, cluster] },
+      component_type: postgres.cnpg-cluster,
+      chains: [availability],
+      mixin: other,
+    }
+  - {
+      id: cnpg-logical-replication-lagging-critical,
+      alertname: CNPGClusterLogicalReplicationLaggingCritical,
+      role: symptom,
+      entity: { kind: Cluster, name_labels: [cnpg_cluster, cluster] },
+      component_type: postgres.cnpg-cluster,
+      chains: [availability],
+      mixin: other,
+    }
+  - {
+      id: cnpg-logical-replication-stopped,
+      alertname: CNPGClusterLogicalReplicationStopped,
+      role: cause,
+      entity: { kind: Cluster, name_labels: [cnpg_cluster, cluster] },
+      component_type: postgres.cnpg-cluster,
+      chains: [availability],
+      mixin: other,
+    }
+  - {
+      id: cnpg-logical-replication-stopped-critical,
+      alertname: CNPGClusterLogicalReplicationStoppedCritical,
+      role: cause,
+      entity: { kind: Cluster, name_labels: [cnpg_cluster, cluster] },
+      component_type: postgres.cnpg-cluster,
+      chains: [availability],
+      mixin: other,
+    }
+
+  # ---------- postgres_exporter mixin ----------
+  - {
+      id: postgresql-down,
+      alertname: PostgreSQLDown,
+      role: cause,
+      entity: { kind: Pod, name_labels: [pod] },
+      component_type: postgres.instance,
+      chains: [availability],
+      mixin: other,
+    }
+  - {
+      id: postgresql-max-connections-reached,
+      alertname: PostgreSQLMaxConnectionsReached,
+      role: cause,
+      entity: { kind: Pod, name_labels: [pod] },
+      component_type: postgres.instance,
+      chains: [saturation],
+      mixin: other,
+    }
+  - {
+      id: postgresql-high-connections,
+      alertname: PostgreSQLHighConnections,
+      role: symptom,
+      entity: { kind: Pod, name_labels: [pod] },
+      component_type: postgres.instance,
+      chains: [saturation],
+      mixin: other,
+    }
+  - {
+      id: postgresql-slow-queries,
+      alertname: PostgreSQLSlowQueries,
+      role: symptom,
+      entity: { kind: Pod, name_labels: [pod] },
+      component_type: postgres.instance,
+      chains: [saturation],
+      mixin: other,
+    }
+  - {
+      id: postgresql-qps,
+      alertname: PostgreSQLQPS,
+      role: symptom,
+      entity: { kind: Pod, name_labels: [pod] },
+      component_type: postgres.instance,
+      chains: [saturation],
+      mixin: other,
+    }
+  - {
+      id: postgresql-cache-hit-ratio,
+      alertname: PostgreSQLCacheHitRatio,
+      role: symptom,
+      entity: { kind: Pod, name_labels: [pod] },
+      component_type: postgres.instance,
+      chains: [saturation],
+      mixin: other,
+    }
+  - {
+      id: postgres-too-many-rollbacks,
+      alertname: PostgresHasTooManyRollbacks,
+      role: symptom,
+      entity: { kind: Pod, name_labels: [pod] },
+      component_type: postgres.instance,
+      chains: [saturation],
+      mixin: other,
+    }
+  - {
+      id: postgres-high-deadlocks,
+      alertname: PostgresHasHighDeadLocks,
+      role: cause,
+      entity: { kind: Pod, name_labels: [pod] },
+      component_type: postgres.instance,
+      chains: [saturation],
+      mixin: other,
+    }
+  - {
+      id: postgres-too-many-locks,
+      alertname: PostgresAcquiredTooManyLocks,
+      role: cause,
+      entity: { kind: Pod, name_labels: [pod] },
+      component_type: postgres.instance,
+      chains: [saturation],
+      mixin: other,
+    }
+  - {
+      id: postgres-replication-slot-unused,
+      alertname: PostgresHasReplicationSlotUsed,
+      role: cause,
+      entity: { kind: Pod, name_labels: [pod] },
+      component_type: postgres.instance,
+      chains: [wal],
+      mixin: other,
+    }
+  - {
+      id: postgres-replication-role-changed,
+      alertname: PostgresReplicationRoleChanged,
+      role: change,
+      entity: { kind: Pod, name_labels: [pod] },
+      component_type: postgres.instance,
+      chains: [availability],
+      mixin: other,
+    }
+  - {
+      id: postgres-exporter-errors,
+      alertname: PostgresHasExporterErrors,
+      role: meta,
+      entity: { kind: Pod, name_labels: [pod] },
+      component_type: postgres.instance,
+      chains: [observability-self/scrape],
+      mixin: other,
+    }
+  - {
+      id: postgres-tables-not-vacuumed,
+      alertname: PostgresTablesNotVaccumed,
+      role: symptom,
+      entity: { kind: Pod, name_labels: [pod] },
+      component_type: postgres.instance,
+      chains: [saturation],
+      mixin: other,
+    }
+  - {
+      id: postgres-too-many-checkpoints-requested,
+      alertname: PostgresTooManyCheckpointsRequested,
+      role: symptom,
+      entity: { kind: Pod, name_labels: [pod] },
+      component_type: postgres.instance,
+      chains: [wal],
+      mixin: other,
+    }

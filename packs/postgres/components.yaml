@@ -1,0 +1,14 @@
+component_types:
+  - id: postgres.cnpg-cluster
+    match: { kind: Cluster, api_group: postgresql.cnpg.io }
+    chains: [availability, saturation, wal, backup]
+  - id: postgres.instance
+    match: { kind: StatefulSet, labels: { app.kubernetes.io/name: postgresql } }
+    chains: [availability, saturation]
+# CNPG 的约定：<cluster>-rw、-ro、-r 三个 Service 指向同名 Cluster；应用连这些 Service 时，故障沿这条边归并到 Cluster
+conventions:
+  - id: cnpg-service-to-cluster
+    from: { kind: Service, name_pattern: ^(.+)-(rw|ro|r)$ }
+    to: { kind: Cluster, name: $1 }
+    relation: routes_to
+    scope: service

@@ -1,0 +1,253 @@
+chains:
+  - id: availability
+    title: { zh-CN: 可用性与复制, en: Availability and replication }
+    runbook: postgres.md
+    cards:
+      - id: primary-changes
+        title: { zh-CN: 主库切换, en: Primary changes }
+        note:
+          {
+            zh-CN: 各实例 in_recovery（0 为主库）在窗口内的变化；有变化说明发生了切换或故障转移,
+            en: Changes of in_recovery mean a switchover or failover,
+          }
+        applies_to: { kinds: [Cluster, Pod, StatefulSet] }
+        refs:
+          - { name: roles, signal: in_recovery, mode: range }
+        judge:
+          let:
+            - { name: changes, cel: size(transitions(roles)) }
+            - { name: primaries, cel: 'size(roles.filter(s, last(s) == 0.0))' }
+          abnormal_if:
+            - cel: changes > 0
+              say:
+                {
+                  zh-CN: '窗口内实例角色变化 {changes} 次（主库切换）',
+                  en: 'Instance roles changed {changes} times (primary change)',
+                }
+            - cel: primaries > 1
+              say:
+                {
+                  zh-CN: '同时有 {primaries} 个实例自认为主库',
+                  en: '{primaries} instances consider themselves primary',
+                }
+        display:
+          table:
+            rows_from: roles
+            columns:
+              - { header: { zh-CN: 实例, en: Instance }, cel: 'label(row, "pod")' }
+              - { header: { zh-CN: 当前角色, en: Role }, cel: 'last(row) == 0.0 ? "primary" : "replica"' }
+        egress: allow
+      - id: instances-up
+        title: { zh-CN: 实例在线, en: Instances up }
+        applies_to: { kinds: [Cluster, Pod, StatefulSet] }
+        refs:
+          - { name: up, signal: instance_up, mode: range }
+        judge:
+          let:
+            - { name: down, cel: 'size(up.filter(s, min(s) < 1.0))' }
+            - { name: anomaly_started_at, cel: 'first_below(up, 1.0)' }
+          abnormal_if:
+            - cel: down > 0
+              say: { zh-CN: '{down} 个实例在窗口内不可用', en: '{down} instances were down in the window' }
+        display:
+          value: double(down)
+          unit: count
+          table:
+            rows_from: up
+            columns:
+              - { header: { zh-CN: 实例, en: Instance }, cel: 'label(row, "pod")' }
+              - { header: { zh-CN: 最低, en: Min }, cel: min(row) }
+        egress: allow
+      - id: replication-lag
+        title: { zh-CN: 复制延迟, en: Replication lag }
+        applies_to: { kinds: [Cluster, Pod, StatefulSet] }
+        params: { lag_seconds: 15 }
+        refs:
+          - { name: lag, signal: replication_lag_seconds, mode: range }
+        judge:
+          let:
+            - { name: peak, cel: max(lag) }
+            - { name: anomaly_started_at, cel: 'first_above(lag, double(params.lag_seconds))' }
+          abnormal_if:
+            - cel: peak > double(params.lag_seconds)
+              say: { zh-CN: '复制延迟峰值 {peak, number} 秒', en: 'Peak replication lag {peak, number} s' }
+        display: { value: peak, unit: seconds, threshold: double(params.lag_seconds) }
+        egress: allow
+      - id: error-logs
+        title: { zh-CN: FATAL 与 PANIC 日志, en: FATAL and PANIC logs }
+        applies_to: { kinds: [Pod] }
+        requires: [logs.match]
+        refs:
+          - { name: up, signal: instance_up, mode: instant }
+          - { name: lines, signal: postgres_error_lines, mode: logs, limit: 30, empty_is: normal }
+        judge:
+          let:
+            - { name: hits, cel: size(lines) }
+          abnormal_if:
+            - cel: hits > 0
+              say:
+                {
+                  zh-CN: '窗口内有 {hits} 行 FATAL、PANIC 或资源不足日志',
+                  en: '{hits} FATAL, PANIC or resource error lines',
+                }
+        display:
+          table:
+            rows_from: lines
+            limit: 8
+            columns:
+              - { header: { zh-CN: 日志, en: Line }, cel: row.line }
+        egress: redact
+
+  - id: saturation
+    title: { zh-CN: 饱和度, en: Saturation }
+    runbook: postgres.md
+    cards:
+      - id: connections
+        title: { zh-CN: 连接占 max_connections, en: Connections vs max_connections }
+        applies_to: { kinds: [Cluster, Pod, StatefulSet] }
+        params: { ratio: 0.85 }
+        refs:
+          - { name: ratio, signal: connections_ratio, mode: range }
+          - { name: byApp, signal: connections_by_application, mode: instant, empty_is: normal }
+        judge:
+          let:
+            - { name: peak, cel: max(ratio) }
+            - { name: anomaly_started_at, cel: 'first_above(ratio, params.ratio)' }
+          abnormal_if:
+            - cel: peak > params.ratio
+              say:
+                { zh-CN: '连接占用峰值 {peak, number, percent}', en: 'Peak connection usage {peak, number, percent}' }
+        display:
+          value: peak
+          unit: percent
+          threshold: params.ratio
+          table:
+            rows_from: byApp
+            sort_by: last(row)
+            columns:
+              - {
+                  header: { zh-CN: 应用或库, en: Application or database },
+                  cel: 'label(row, "application_name") + label(row, "datname")',
+                }
+              - { header: { zh-CN: 状态, en: State }, cel: 'label(row, "state")' }
+              - { header: { zh-CN: 连接, en: Connections }, cel: last(row), unit: count }
+        egress: allow
+      - id: long-transactions
+        title: { zh-CN: 最长事务, en: Longest transaction }
+        note: { zh-CN: 长事务阻止 VACUUM 并长期持有锁, en: Long transactions block vacuum and hold locks }
+        applies_to: { kinds: [Cluster, Pod, StatefulSet] }
+        params: { seconds: 300 }
+        refs:
+          - { name: tx, signal: longest_transaction_seconds, mode: range }
+        judge:
+          let:
+            - { name: peak, cel: max(tx) }
+          abnormal_if:
+            - cel: peak > double(params.seconds)
+              say: { zh-CN: '最长事务 {peak, number} 秒', en: 'Longest transaction {peak, number} s' }
+        display: { value: peak, unit: seconds }
+        egress: allow
+      - id: lock-waits
+        title: { zh-CN: 锁等待与死锁, en: Lock waits and deadlocks }
+        applies_to: { kinds: [Cluster, Pod, StatefulSet] }
+        refs:
+          - { name: ratio, signal: connections_ratio, mode: instant }
+          - { name: waiting, signal: backends_waiting, mode: instant, empty_is: normal }
+          - { name: deadlocks, signal: deadlocks, mode: instant, empty_is: normal }
+        judge:
+          let:
+            - { name: waits, cel: 'size(waiting) > 0 ? max(waiting) : 0.0' }
+            - { name: deadlockDbs, cel: size(deadlocks) }
+          abnormal_if:
+            - cel: deadlockDbs > 0
+              say: { zh-CN: '{deadlockDbs} 个数据库在窗口内出现死锁', en: 'Deadlocks in {deadlockDbs} databases' }
+            - cel: waits > 0.0
+              say: { zh-CN: '最多 {waits, number} 个后端在等锁', en: 'Up to {waits, number} backends waited for locks' }
+        egress: allow
+      - id: rollbacks
+        title: { zh-CN: 回滚比例, en: Rollback ratio }
+        applies_to: { kinds: [Cluster, Pod, StatefulSet] }
+        params: { ratio: 0.1 }
+        refs:
+          - { name: ratio, signal: rollback_ratio, mode: range }
+        judge:
+          let:
+            - { name: peak, cel: max(ratio) }
+          abnormal_if:
+            - cel: peak > params.ratio
+              say: { zh-CN: '回滚比例峰值 {peak, number, percent}', en: 'Peak rollback ratio {peak, number, percent}' }
+        display: { value: peak, unit: percent, threshold: params.ratio }
+        egress: allow
+
+  - id: wal
+    title: { zh-CN: WAL 与归档, en: WAL and archiving }
+    runbook: postgres.md
+    cards:
+      - id: archiving
+        title: { zh-CN: WAL 归档, en: WAL archiving }
+        note:
+          {
+            zh-CN: 归档失败或待归档段堆积时，pg_wal 会持续增长直到写满卷,
+            en: Failed archiving lets pg_wal grow until the volume is full,
+          }
+        applies_to: { kinds: [Cluster, Pod] }
+        params: { ready_segments: 10 }
+        refs:
+          - { name: archived, signal: wal_archived_count, mode: instant }
+          - { name: failures, signal: wal_archive_failures, mode: instant, empty_is: normal }
+          - { name: ready, signal: wal_ready_segments, mode: range, empty_is: normal }
+        judge:
+          let:
+            - { name: failing, cel: size(failures) }
+            - { name: backlog, cel: 'size(ready) > 0 ? max(ready) : 0.0' }
+          abnormal_if:
+            - cel: failing > 0
+              say: { zh-CN: '{failing} 个实例归档失败', en: 'Archiving failed on {failing} instances' }
+            - cel: backlog > double(params.ready_segments)
+              say:
+                {
+                  zh-CN: '待归档 WAL 段最多 {backlog, number} 个',
+                  en: 'Up to {backlog, number} WAL segments waiting for archiving',
+                }
+        egress: allow
+      - id: wal-dir
+        title: { zh-CN: pg_wal 大小, en: pg_wal size }
+        applies_to: { kinds: [Cluster, Pod] }
+        params: { bytes: 8589934592 }
+        refs:
+          - { name: size, signal: wal_dir_bytes, mode: range }
+        judge:
+          let:
+            - { name: peak, cel: max(size) }
+          abnormal_if:
+            - cel: peak > double(params.bytes)
+              say: { zh-CN: 'pg_wal 峰值 {peak, number} 字节', en: 'Peak pg_wal size {peak, number} bytes' }
+        display: { value: peak, unit: bytes }
+        egress: allow
+
+  - id: backup
+    title: { zh-CN: 备份, en: Backups }
+    runbook: postgres.md
+    cards:
+      - id: freshness
+        title: { zh-CN: 最近备份, en: Latest backup }
+        applies_to: { kinds: [Cluster] }
+        params: { max_hours: 36 }
+        refs:
+          - { name: age, signal: last_backup_age_seconds, mode: instant }
+          - { name: failed, signal: last_backup_failed, mode: instant, empty_is: normal }
+        judge:
+          let:
+            - { name: hours, cel: last(age) / 3600.0 }
+            - { name: lastFailed, cel: size(failed) > 0 }
+          abnormal_if:
+            - cel: lastFailed
+              say: { zh-CN: 最近一次备份失败, en: The latest backup failed }
+            - cel: hours > double(params.max_hours)
+              say:
+                {
+                  zh-CN: '最近一次成功备份在 {hours, number} 小时前',
+                  en: 'The latest successful backup is {hours, number} hours old',
+                }
+        display: { value: last(age), unit: seconds }
+        egress: allow

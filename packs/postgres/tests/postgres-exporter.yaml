@@ -1,0 +1,73 @@
+# 只有 postgres_exporter（Bitnami 等 Helm chart 部署的 StatefulSet）：信号选中 pg_* 备选。
+api_version: srenautix.io/pack-test/v1
+interval: 1m
+input_series:
+  - { series: 'pg_up{namespace="data",pod="postgresql-0"}', values: '1x20 0x10 1x30' }
+  - { series: 'pg_up{namespace="data",pod="pgsql-0"}', values: '1x60' }
+  - { series: 'pg_replication_is_replica{namespace="data",pod="postgresql-0"}', values: '0x60' }
+  - { series: 'pg_replication_is_replica{namespace="data",pod="pgsql-0"}', values: '0x60' }
+  - {
+      series: 'pg_stat_activity_count{namespace="data",pod="postgresql-0",datname="app",state="active"}',
+      values: '95x60',
+    }
+  - { series: 'pg_settings_max_connections{namespace="data",pod="postgresql-0"}', values: '100x60' }
+  - { series: 'pg_stat_activity_count{namespace="data",pod="pgsql-0",datname="app",state="active"}', values: '20x60' }
+  - { series: 'pg_settings_max_connections{namespace="data",pod="pgsql-0"}', values: '100x60' }
+  - {
+      series: 'pg_stat_activity_max_tx_duration{namespace="data",pod="postgresql-0",datname="app",state="active"}',
+      values: '900x60',
+    }
+  - {
+      series: 'pg_stat_activity_max_tx_duration{namespace="data",pod="pgsql-0",datname="app",state="active"}',
+      values: '1x60',
+    }
+tests:
+  - {
+      name: 实例掉线,
+      eval_time: 40m,
+      card: availability/instances-up,
+      entity: { kind: StatefulSet, namespace: data, name: postgresql },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: 实例在线,
+      eval_time: 40m,
+      card: availability/instances-up,
+      entity: { kind: StatefulSet, namespace: data, name: pgsql },
+      expect: { verdict: normal },
+    }
+  - {
+      name: 单实例没有切换,
+      eval_time: 40m,
+      card: availability/primary-changes,
+      entity: { kind: StatefulSet, namespace: data, name: pgsql },
+      expect: { verdict: normal },
+    }
+  - {
+      name: 连接将满,
+      eval_time: 40m,
+      card: saturation/connections,
+      entity: { kind: StatefulSet, namespace: data, name: postgresql },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: 连接充足,
+      eval_time: 40m,
+      card: saturation/connections,
+      entity: { kind: StatefulSet, namespace: data, name: pgsql },
+      expect: { verdict: normal },
+    }
+  - {
+      name: 长事务,
+      eval_time: 40m,
+      card: saturation/long-transactions,
+      entity: { kind: Pod, namespace: data, name: postgresql-0 },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: 没有长事务,
+      eval_time: 40m,
+      card: saturation/long-transactions,
+      entity: { kind: Pod, namespace: data, name: pgsql-0 },
+      expect: { verdict: normal },
+    }
