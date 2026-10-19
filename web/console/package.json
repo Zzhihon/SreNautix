@@ -1,0 +1,38 @@
+{
+  "name": "@srenautix/console",
+  "version": "0.1.0",
+  "private": true,
+  "description": "SreNautix console: single-page app served by the server role",
+  "license": "AGPL-3.0-or-later",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "PLAYWRIGHT_BROWSERS_PATH=../../.scratch/ms-playwright vitest run",
+    "e2e": "PLAYWRIGHT_BROWSERS_PATH=../../.scratch/ms-playwright playwright test"
+  },
+  "dependencies": {
+    "@simplewebauthn/browser": "14.0.0",
+    "@srenautix/contract": "workspace:*",
+    "@srenautix/ui": "workspace:*",
+    "@tanstack/react-query": "5.104.5",
+    "@tanstack/react-router": "1.170.45",
+    "lucide-react": "1.59.0",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.1",
+    "@testing-library/react": "16.3.3",
+    "@types/node": "22.20.5",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.1.2",
+    "@vitest/browser-playwright": "5.0.5",
+    "otpauth": "9.5.2",
+    "playwright": "1.64.1",
+    "vite": "8.3.4",
+    "vitest": "5.0.5"
+  }
+}
