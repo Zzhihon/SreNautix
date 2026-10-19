@@ -103,6 +103,24 @@ describe('黄金夹具', () => {
   });
 });
 
+describe('与 contract/gateway 一致', () => {
+  const read = (p: string) => JSON.parse(readFileSync(join(contractDir, p), 'utf8'));
+  const assertion = read('gateway/v1/approval-assertion.schema.json');
+  const proposal = read('schemas/proposal.schema.json');
+
+  it('提议的 level、tier、canon_version 取值与审批断言相同', () => {
+    expect(proposal.properties.level.enum).toEqual(assertion.$defs.level.enum);
+    expect(proposal.properties.tier.enum).toEqual(assertion.$defs.tier.enum);
+    expect(proposal.properties.canon_version.enum).toEqual(assertion.properties.canon_version.enum);
+  });
+
+  it('提议绑定的指纹与集群取值规则与审批断言相同', () => {
+    const common = read('schemas/common.schema.json');
+    expect(common.$defs.Sha256.pattern).toBe(assertion.$defs.sha256.pattern);
+    expect(common.$defs.ClusterId.pattern).toBe(assertion.$defs.clusterId.pattern);
+  });
+});
+
 // DESIGN §8.2：扁平结构；所有字段必填；additionalProperties:false；使用枚举；不使用 oneOf
 function portableViolations(node: unknown, path: string, out: string[]): void {
   if (Array.isArray(node)) {

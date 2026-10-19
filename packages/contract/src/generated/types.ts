@@ -1,4 +1,51 @@
 // 本文件由 packages/contract/scripts/gen.ts 从 contract/ 生成，不要手工修改。
+export type ActionCatalogLevel = 'reversible' | 'reversible_recreatable' | 'compensable' | 'irreversible';
+/**
+ * 该动作在其目录等级下可接受的最低档位。
+ */
+export type ActionCatalogTier = 'L' | 'H';
+/**
+ * 等级降为 fallback_level 时可接受的最低档位。
+ */
+export type ActionCatalogTier1 = 'L' | 'H';
+export type ActionCatalogTier2 = 'L' | 'H';
+/**
+ * 动作等级（DESIGN §9.1）：提议时按目录等级与目标状态确定。pod_restart 满足可重建条件时为 reversible_recreatable，否则为 irreversible。
+ */
+export type ApprovalAssertionLevel = 'reversible' | 'reversible_recreatable' | 'compensable' | 'irreversible';
+/**
+ * 风险档位（DESIGN §9.2）。
+ */
+export type ApprovalAssertionTier = 'L' | 'H';
+/**
+ * "sha256:" 加 sha256(JCS(params)) 的小写十六进制。
+ */
+export type ApprovalAssertionSha256 = string;
+/**
+ * 被管集群的 cluster_id。
+ */
+export type ApprovalAssertionClusterId = string;
+/**
+ * 提议绑定的证据指纹。
+ */
+export type ApprovalAssertionSha2561 = string;
+/**
+ * 签发时间，UTC，RFC 3339，以 Z 结尾。
+ */
+export type ApprovalAssertionTimestamp = string;
+/**
+ * 审批的过期时间，与提议的 TTL 相互独立。
+ */
+export type ApprovalAssertionTimestamp1 = string;
+export type ApprovalAssertionLevel1 = 'reversible' | 'reversible_recreatable' | 'compensable' | 'irreversible';
+export type ApprovalAssertionTier1 = 'L' | 'H';
+export type ApprovalAssertionSha2562 = string;
+export type ApprovalAssertionClusterId1 = string;
+export type ApprovalAssertionTimestamp2 = string;
+/**
+ * RFC 4648 §5 base64url，不带填充。
+ */
+export type ApprovalEnvelopeBase64Url = string;
 export type Uuid = string;
 /**
  * 提交渠道。console 为控制台，grafana 为 Grafana 嵌入，api 与 mcp 为外部调用方，其余为聊天渠道
@@ -240,6 +287,26 @@ export type Sha2562 = string;
 export type EdgeProvenance = 'structural' | 'runtime' | 'config_ref' | 'network_policy' | 'naming';
 
 export interface SrenautixContractIndex {
+  ActionCatalog?: ActionCatalog;
+  ActionCatalogLevel?: ActionCatalogLevel;
+  ActionCatalogTier?: ActionCatalogTier2;
+  ActionCatalogAction?: ActionCatalogAction;
+  ActionCatalogTarget?: ActionCatalogTarget;
+  ActionCatalogPromqlCondition?: ActionCatalogPromqlCondition;
+  ApprovalAssertion?: ApprovalAssertion;
+  ApprovalAssertionLevel?: ApprovalAssertionLevel1;
+  ApprovalAssertionTier?: ApprovalAssertionTier1;
+  ApprovalAssertionSha256?: ApprovalAssertionSha2562;
+  ApprovalAssertionClusterId?: ApprovalAssertionClusterId1;
+  ApprovalAssertionTimestamp?: ApprovalAssertionTimestamp2;
+  ApprovalEnvelope?: ApprovalEnvelope;
+  ApprovalEnvelopeBase64url?: ApprovalEnvelopeBase64Url;
+  ApprovalEnvelopeServiceProof?: ApprovalEnvelopeServiceProof;
+  ApprovalEnvelopeReauth?: ApprovalEnvelopeReauth;
+  ApprovalEnvelopeWebauthnProof?: ApprovalEnvelopeWebauthnProof;
+  ApproverKeys?: ApproverKeys;
+  ExecutionAuditRecord?: ExecutionAuditRecord;
+  GatewayPolicy?: GatewayPolicy;
   AlertmanagerWebhook?: AlertmanagerWebhook;
   AlertmanagerAlert?: AlertmanagerAlert;
   GenericWebhookMapping?: GenericWebhookMapping;
@@ -395,6 +462,407 @@ export interface SrenautixContractIndex {
   TopologyNode?: TopologyNode;
   TopologyEdge?: TopologyEdge;
   EdgeProvenance?: EdgeProvenance;
+}
+/**
+ * 动作目录（DESIGN §9.1）。目录只描述动作本身；哪些动作启用、作用于哪些命名空间、能否自动执行由 gateway 策略决定。
+ */
+export interface ActionCatalog {
+  version: 1;
+  /**
+   * @minItems 1
+   */
+  actions: [ActionCatalogAction, ...ActionCatalogAction[]];
+}
+export interface ActionCatalogAction {
+  id: string;
+  title: string;
+  level: ActionCatalogLevel;
+  /**
+   * 只用于 reversible_recreatable：可重建条件在执行时不成立时的等级。
+   */
+  fallback_level?: 'irreversible';
+  /**
+   * 只用于 reversible_recreatable：执行时重新核对的可重建条件。
+   */
+  recreatable_conditions?: {
+    controller_managed: true;
+    min_ready_replicas: number;
+    pdb_headroom: true;
+  };
+  min_tier: ActionCatalogTier;
+  fallback_min_tier?: ActionCatalogTier1;
+  /**
+   * allowed 只允许出现在 reversible 与 reversible_recreatable 动作上（不变量 7）。
+   */
+  auto_execution: 'allowed' | 'forbidden';
+  target: ActionCatalogTarget;
+  /**
+   * 参数的 JSON Schema（可移植子集：type、properties、required、additionalProperties:false、enum、pattern、minLength、maxLength、minimum、maximum、items）。所有动作的参数另外可以带 verify（见 promqlCondition）。
+   */
+  params: {};
+  /**
+   * 冲突域类型。键由执行器根据解析出的目标计算：workload:<ns>/<Kind>/<name>、node:<name>、pg:<ns>/<cluster>、argocd:<ns>/<app>、flux:<ns>/<Kind>/<name>、workflow:<ns>/<template>、gitops:<owner>/<repo>。
+   */
+  conflict_domain: 'workload' | 'node' | 'pg' | 'argocd' | 'flux' | 'workflow' | 'gitops';
+  prechecks: {
+    id: string;
+    kind: 'k8s' | 'pdb' | 'promql' | 'git';
+    description: string;
+  }[];
+  verify: {
+    window_seconds: number;
+    checks: {
+      id: string;
+      kind: 'k8s' | 'git';
+      description: string;
+    }[];
+  };
+  undo: {
+    /**
+     * restore：自动恢复原状态（reversible）；recreate：由控制器重建（reversible_recreatable）；compensate：补偿需要再次审批（compensable）；none：无法撤销（irreversible）。
+     */
+    kind: 'restore' | 'recreate' | 'compensate' | 'none';
+    description: string;
+    /**
+     * compensate 时提议的补偿动作 ID。
+     */
+    compensation_action?: string;
+  };
+  blast_radius: {
+    unit: 'pods' | 'nodes' | 'objects' | 'repositories';
+    method: string;
+    /**
+     * L 档允许的最大爆炸半径；超过时需要 H 档。
+     */
+    l_tier_max: number;
+  };
+  /**
+   * 执行与撤销会产生的全部 Kubernetes 写入。RBAC 与准入策略由此生成；gitops_pr 只写 Git，此列表为空。
+   */
+  writes: {
+    group: string;
+    resource: string;
+    subresource?: string;
+    verb: 'create' | 'patch';
+  }[];
+}
+export interface ActionCatalogTarget {
+  group: string;
+  version: string;
+  kind: string;
+  resource: string;
+  namespaced: boolean;
+  /**
+   * 目标可以是多种类型时列出全部（例如 Deployment 与 StatefulSet）。
+   */
+  kinds?: {
+    group: string;
+    version: string;
+    kind: string;
+    resource: string;
+  }[];
+}
+/**
+ * 执行后校验条件：窗口结束时做一次即时查询，结果中的每个样本都必须满足 value <op> threshold。查询结果为空时按 on_empty 处理。
+ */
+export interface ActionCatalogPromqlCondition {
+  id: string;
+  query: string;
+  op: 'lt' | 'le' | 'gt' | 'ge' | 'eq' | 'ne';
+  threshold: number;
+  on_empty?: 'fail' | 'pass';
+}
+/**
+ * 审批断言 v1（DESIGN §9.2）。字段集合固定为 15 个，全部必填。签名覆盖的是 approval-envelope 中定义的签名输入，签名输入包含本断言的 JCS（RFC 8785）规范化形式。
+ */
+export interface ApprovalAssertion {
+  /**
+   * 提议 ID（UUID，小写）。
+   */
+  proposal_id: string;
+  /**
+   * 动作目录中的动作 ID。
+   */
+  action: string;
+  level: ApprovalAssertionLevel;
+  tier: ApprovalAssertionTier;
+  params_hash: ApprovalAssertionSha256;
+  /**
+   * 规范化版本：jcs-sha256-v1 表示 RFC 8785 JCS、UTF-8 编码、SHA-256、小写十六进制并带 "sha256:" 前缀。
+   */
+  canon_version: 'jcs-sha256-v1';
+  /**
+   * 目标对象的 metadata.uid；gitops_pr 为补丁所基于的 40 位提交 SHA。
+   */
+  target_uid: string;
+  cluster: ApprovalAssertionClusterId;
+  /**
+   * 提议绑定的事件版本。
+   */
+  incident_version: number;
+  /**
+   * 提议绑定的根因组件。
+   */
+  root_component: string;
+  evidence_fingerprint: ApprovalAssertionSha2561;
+  /**
+   * 审批人主体。策略自动批准时为 "auto:<规则名>"。
+   */
+  approver_principal: string;
+  /**
+   * 审批渠道。策略自动批准时为 auto。
+   */
+  channel: string;
+  issued_at: ApprovalAssertionTimestamp;
+  expires_at: ApprovalAssertionTimestamp1;
+}
+/**
+ * 审批断言及其签名证明。服务签名（service_ed25519）由 server 的服务签名密钥签发；通行密钥签名（webauthn_ed25519）由审批人的 WebAuthn 凭据签发。签名输入与校验步骤见 docs/adr/0020-approval-assertion-format.md。
+ */
+export interface ApprovalEnvelope {
+  assertion: ApprovalAssertion;
+  proof: ApprovalEnvelopeServiceProof | ApprovalEnvelopeWebauthnProof;
+}
+/**
+ * 服务签名。签名输入为 ASCII "srenautix-approval-v1" 加一个换行符 0x0A，再接 JCS(statement) 的 UTF-8 字节；statement 为 {"assertion": assertion}，H 档时为 {"assertion": assertion, "reauth": reauth}。
+ */
+export interface ApprovalEnvelopeServiceProof {
+  type: 'service_ed25519';
+  /**
+   * 服务签名公钥的 ID，对应 approver-keys 中 use=service 的条目。
+   */
+  key_id: string;
+  /**
+   * Ed25519 签名（64 字节）的 base64url。
+   */
+  signature: ApprovalEnvelopeBase64Url;
+  reauth?: ApprovalEnvelopeReauth;
+}
+/**
+ * H 档服务签名必须携带的重新认证凭据（OIDC max_age）。auth_time 不晚于 assertion.issued_at，且两者相差不超过 300 秒。
+ */
+export interface ApprovalEnvelopeReauth {
+  method: 'oidc_max_age' | 'local_totp';
+  auth_time: string;
+  /**
+   * "sha256:" 加服务端会话 ID 的 SHA-256，用于在治理审计链中关联会话。
+   */
+  session_hash: string;
+}
+/**
+ * 通行密钥签名（COSE alg -8，EdDSA/Ed25519）。clientDataJSON 的 challenge 为 sha256(JCS(assertion)) 原始 32 字节的 base64url；签名覆盖 authenticatorData 与 sha256(clientDataJSON) 的拼接。
+ */
+export interface ApprovalEnvelopeWebauthnProof {
+  type: 'webauthn_ed25519';
+  credential_id: ApprovalEnvelopeBase64Url;
+  authenticator_data: ApprovalEnvelopeBase64Url;
+  client_data_json: ApprovalEnvelopeBase64Url;
+  signature: ApprovalEnvelopeBase64Url;
+}
+/**
+ * gateway 信任的签名公钥，来自 Git，经 ConfigMap 挂载。service 条目是 server 的服务签名公钥；webauthn 条目是审批人通行密钥的公钥（合规配置）。
+ */
+export interface ApproverKeys {
+  version: 1;
+  /**
+   * WebAuthn 依赖方设置；存在 webauthn 条目时必填。
+   */
+  webauthn?: {
+    rp_id: string;
+    /**
+     * @minItems 1
+     */
+    origins: [string, ...string[]];
+  };
+  /**
+   * @minItems 1
+   */
+  keys: [
+    (
+      | {
+          use: 'service';
+          key_id: string;
+          /**
+           * Ed25519 公钥 32 字节的 base64url（不带填充）。
+           */
+          public_key: string;
+          /**
+           * 该密钥签发的断言 issued_at 必须早于此时间；用于轮换。
+           */
+          not_after?: string;
+        }
+      | {
+          use: 'webauthn';
+          credential_id: string;
+          principal: string;
+          public_key: string;
+        }
+    ),
+    ...(
+      | {
+          use: 'service';
+          key_id: string;
+          /**
+           * Ed25519 公钥 32 字节的 base64url（不带填充）。
+           */
+          public_key: string;
+          /**
+           * 该密钥签发的断言 issued_at 必须早于此时间；用于轮换。
+           */
+          not_after?: string;
+        }
+      | {
+          use: 'webauthn';
+          credential_id: string;
+          principal: string;
+          public_key: string;
+        }
+    )[],
+  ];
+}
+/**
+ * 执行审计链的一行 JSONL（DESIGN §16.3）。hash = "sha256:" + hex(sha256(JCS(去掉 hash 字段后的记录)))；prev_hash 为上一条记录的 hash，第一条记录的 prev_hash 为 "sha256:" 加 64 个 0。checkpoint 记录为它之前的链头签名：signature 是审计签名密钥（Ed25519）对 "srenautix-audit-checkpoint-v1\n" + cluster + "\n" + (seq-1) 的十进制 + "\n" + prev_hash 的 UTF-8 字节的签名。
+ */
+export interface ExecutionAuditRecord {
+  seq: number;
+  prev_hash: string;
+  chain: 'execution';
+  cluster: string;
+  at: string;
+  type: 'phase' | 'write' | 'checkpoint';
+  execution_id?: string;
+  proposal_id?: string;
+  action?: string;
+  phase?: string;
+  reason?: string;
+  approver?: {
+    principal: string;
+    channel: string;
+  };
+  assertion_hash?: string;
+  attempt_id?: string;
+  target?: {
+    group?: string;
+    resource?: string;
+    subresource?: string;
+    namespace?: string;
+    name?: string;
+    uid?: string;
+  };
+  /**
+   * type=write：一次 Kubernetes 或 Git 写入，与 apiserver 审计日志按 attempt_id、目标与时间关联。
+   */
+  write?: {
+    verb: string;
+    outcome: 'succeeded' | 'failed';
+    detail?: string;
+  };
+  checkpoint?: {
+    key_id: string;
+    signature: string;
+  };
+  hash: string;
+}
+/**
+ * gateway 策略，来自 Git，经 ConfigMap 挂载（DESIGN §2.1）。只能启用目录中的动作；准入策略与 RBAC 按同一份策略生成。
+ */
+export interface GatewayPolicy {
+  version: 1;
+  /**
+   * 本集群的 cluster_id，必须与断言的 cluster 相同。
+   */
+  cluster: string;
+  /**
+   * 启用的动作。未列出的动作不生成 RBAC 与准入策略，工单直接被拒绝。
+   */
+  actions: {
+    id: string;
+    /**
+     * 允许的目标命名空间；命名空间级动作必填，集群级动作（节点）不填。
+     *
+     * @minItems 1
+     */
+    namespaces?: [string, ...string[]];
+    /**
+     * 自动执行只允许用于目录中 auto_execution=allowed 的动作，否则策略加载失败（不变量 7）。
+     */
+    auto_execution?: {
+      /**
+       * 允许自动批准的规则名；断言 approver_principal 为 auto:<规则名>。
+       *
+       * @minItems 1
+       */
+      rules: [string, ...string[]];
+      /**
+       * @minItems 1
+       */
+      namespaces: [string, ...string[]];
+    };
+  }[];
+  max_auto_executions_per_hour?: number;
+  /**
+   * SreNautix 自己的依赖集合（DESIGN §9.1 自我保护）。目标落在其中时一律按 irreversible 加 H 档处理，并且不自动执行。gateway 所在节点自动计入。
+   */
+  self_dependencies?: {
+    namespaces?: string[];
+    nodes?: string[];
+    pg_clusters?: {
+      namespace: string;
+      name: string;
+    }[];
+  };
+  /**
+   * 审批人的作用域（DESIGN §13 approver 角色）。gateway 按目标所在的命名空间核对。
+   */
+  approvers: {
+    principal: string;
+    /**
+     * "*" 表示全部命名空间（含集群级目标）。
+     *
+     * @minItems 1
+     */
+    namespaces: [string, ...string[]];
+    max_tier: 'L' | 'H';
+  }[];
+  /**
+   * workflow_submit 的模板白名单：名称、sha256(JCS(WorkflowTemplate.spec)) 与 ServiceAccount 都必须一致。
+   */
+  workflow_templates?: {
+    namespace: string;
+    name: string;
+    sha256: string;
+    service_account: string;
+    /**
+     * 参数名到约束；提交的参数必须恰好是这些名称。
+     */
+    parameters: {
+      [k: string]:
+        | {
+            /**
+             * @minItems 1
+             */
+            enum?: [string, ...string[]];
+            pattern?: string;
+            max_length?: number;
+          }
+        | undefined;
+    };
+  }[];
+  /**
+   * gitops_pr 的仓库与路径白名单。
+   */
+  gitops?: {
+    repositories: {
+      repository: string;
+      base: string;
+      /**
+       * 允许修改的路径前缀（以 / 结尾表示目录）或完整路径。
+       *
+       * @minItems 1
+       */
+      paths: [string, ...string[]];
+    }[];
+  };
 }
 /**
  * Alertmanager webhook 请求体 version 4

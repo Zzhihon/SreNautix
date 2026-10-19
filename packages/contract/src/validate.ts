@@ -8,7 +8,14 @@ export const SCHEMA_BASE = 'https://srenautix.io/contract/';
 const ANNOTATION_KEYWORDS = ['x-srenautix-dynamic-enum', 'x-srenautix-portable', 'x-srenautix-secret-ref', 'tsType'];
 
 function createAjv(): Ajv2020 {
-  const ajv = new Ajv2020({ allErrors: true, strict: true, strictRequired: false, allowUnionTypes: true });
+  // strictTypes 关闭：allOf 引用之外并列 maxLength 等写法合法，Ajv 的类型推断无法跨 allOf 识别
+  const ajv = new Ajv2020({
+    allErrors: true,
+    strict: true,
+    strictRequired: false,
+    strictTypes: false,
+    allowUnionTypes: true,
+  });
   addFormats.default(ajv);
   for (const keyword of ANNOTATION_KEYWORDS) {
     ajv.addKeyword({ keyword, schemaType: ['string', 'boolean'] });

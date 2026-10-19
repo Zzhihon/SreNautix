@@ -698,8 +698,94 @@ export type components = {
       from_label: components['schemas']['IncidentLabel'];
       merged_at: components['schemas']['Timestamp'];
     };
-    /** @description 审批断言及其签名证明，结构以 contract/gateway/v1/approval-envelope.schema.json 为准 */
-    ApprovalEnvelope: Record<string, never>;
+    /**
+     * ApprovalAssertion
+     * @description 审批断言 v1（DESIGN §9.2）。字段集合固定为 15 个，全部必填。签名覆盖的是 approval-envelope 中定义的签名输入，签名输入包含本断言的 JCS（RFC 8785）规范化形式。
+     */
+    'approval-assertion.schema': {
+      /** @description 动作目录中的动作 ID。 */
+      action: string;
+      /** @description 审批人主体。策略自动批准时为 "auto:<规则名>"。 */
+      approver_principal: string;
+      /**
+       * @description 规范化版本：jcs-sha256-v1 表示 RFC 8785 JCS、UTF-8 编码、SHA-256、小写十六进制并带 "sha256:" 前缀。
+       * @enum {string}
+       */
+      canon_version: 'jcs-sha256-v1';
+      /** @description 审批渠道。策略自动批准时为 auto。 */
+      channel: string;
+      /** @description 被管集群的 cluster_id。 */
+      cluster: components['schemas']['clusterId'];
+      /** @description 提议绑定的证据指纹。 */
+      evidence_fingerprint: components['schemas']['sha256'];
+      /** @description 审批的过期时间，与提议的 TTL 相互独立。 */
+      expires_at: components['schemas']['timestamp'];
+      /** @description 提议绑定的事件版本。 */
+      incident_version: number;
+      /** @description 签发时间，UTC，RFC 3339，以 Z 结尾。 */
+      issued_at: components['schemas']['timestamp'];
+      /** @description 动作等级（DESIGN §9.1）：提议时按目录等级与目标状态确定。pod_restart 满足可重建条件时为 reversible_recreatable，否则为 irreversible。 */
+      level: components['schemas']['level'];
+      /** @description "sha256:" 加 sha256(JCS(params)) 的小写十六进制。 */
+      params_hash: components['schemas']['sha256'];
+      /** @description 提议 ID（UUID，小写）。 */
+      proposal_id: string;
+      /** @description 提议绑定的根因组件。 */
+      root_component: string;
+      /** @description 目标对象的 metadata.uid；gitops_pr 为补丁所基于的 40 位提交 SHA。 */
+      target_uid: string;
+      /** @description 风险档位（DESIGN §9.2）。 */
+      tier: components['schemas']['tier'];
+      $defs: {
+        /** @enum {string} */
+        level: 'reversible' | 'reversible_recreatable' | 'compensable' | 'irreversible';
+        /** @enum {string} */
+        tier: 'L' | 'H';
+        sha256: string;
+        clusterId: string;
+        timestamp: string;
+      };
+    };
+    /**
+     * ApprovalEnvelope
+     * @description 审批断言及其签名证明。服务签名（service_ed25519）由 server 的服务签名密钥签发；通行密钥签名（webauthn_ed25519）由审批人的 WebAuthn 凭据签发。签名输入与校验步骤见 docs/adr/0020-approval-assertion-format.md。
+     */
+    'approval-envelope.schema': {
+      assertion: components['schemas']['approval-assertion.schema'];
+      proof: components['schemas']['serviceProof'] | components['schemas']['webauthnProof'];
+      $defs: {
+        /** @description RFC 4648 §5 base64url，不带填充。 */
+        base64url: string;
+        /** @description 服务签名。签名输入为 ASCII "srenautix-approval-v1" 加一个换行符 0x0A，再接 JCS(statement) 的 UTF-8 字节；statement 为 {"assertion": assertion}，H 档时为 {"assertion": assertion, "reauth": reauth}。 */
+        serviceProof: {
+          /** @description 服务签名公钥的 ID，对应 approver-keys 中 use=service 的条目。 */
+          key_id: string;
+          reauth?: components['schemas']['reauth'];
+          /** @description Ed25519 签名（64 字节）的 base64url。 */
+          signature: components['schemas']['base64url'];
+          /** @constant */
+          type: 'service_ed25519';
+        };
+        /** @description H 档服务签名必须携带的重新认证凭据（OIDC max_age）。auth_time 不晚于 assertion.issued_at，且两者相差不超过 300 秒。 */
+        reauth: {
+          auth_time: string;
+          /** @enum {string} */
+          method: 'oidc_max_age' | 'local_totp';
+          /** @description "sha256:" 加服务端会话 ID 的 SHA-256，用于在治理审计链中关联会话。 */
+          session_hash: string;
+        };
+        /** @description 通行密钥签名（COSE alg -8，EdDSA/Ed25519）。clientDataJSON 的 challenge 为 sha256(JCS(assertion)) 原始 32 字节的 base64url；签名覆盖 authenticatorData 与 sha256(clientDataJSON) 的拼接。 */
+        webauthnProof: {
+          authenticator_data: components['schemas']['base64url'];
+          client_data_json: components['schemas']['base64url'];
+          credential_id: components['schemas']['base64url'];
+          signature: components['schemas']['base64url'];
+          /** @constant */
+          type: 'webauthn_ed25519';
+        };
+      };
+    };
+    ApprovalEnvelope: components['schemas']['approval-envelope.schema'];
     /** ApprovalIssuedEvent */
     ApprovalIssued: {
       payload: {
@@ -745,6 +831,8 @@ export type components = {
       principal_id: string;
       reason: string | null;
     };
+    /** @description RFC 4648 §5 base64url，不带填充。 */
+    base64url: string;
     /** ProposalBinding */
     Binding: {
       evidence_fingerprint: components['schemas']['Sha256'];
@@ -793,6 +881,7 @@ export type components = {
       proposal_only: boolean;
       reader: components['schemas']['SpokeStatus'];
     };
+    clusterId: string;
     /**
      * ClusterId
      * @description 集群标识，所有键都带它（DESIGN §2.2）
@@ -1557,6 +1646,8 @@ export type components = {
     Labels: {
       [key: string]: string;
     };
+    /** @enum {string} */
+    level: 'reversible' | 'reversible_recreatable' | 'compensable' | 'irreversible';
     LlmCall: {
       at: components['schemas']['Timestamp'];
       cost: number;
@@ -1906,6 +1997,14 @@ export type components = {
         | 'evaluation_error'
         | 'all_clear';
       text: string;
+    };
+    /** @description H 档服务签名必须携带的重新认证凭据（OIDC max_age）。auth_time 不晚于 assertion.issued_at，且两者相差不超过 300 秒。 */
+    reauth: {
+      auth_time: string;
+      /** @enum {string} */
+      method: 'oidc_max_age' | 'local_totp';
+      /** @description "sha256:" 加服务端会话 ID 的 SHA-256，用于在治理审计链中关联会话。 */
+      session_hash: string;
     };
     /** Recommendation */
     Recommendation: {
@@ -2270,6 +2369,16 @@ export type components = {
       recent_change: number;
       role_prior: number;
     };
+    /** @description 服务签名。签名输入为 ASCII "srenautix-approval-v1" 加一个换行符 0x0A，再接 JCS(statement) 的 UTF-8 字节；statement 为 {"assertion": assertion}，H 档时为 {"assertion": assertion, "reauth": reauth}。 */
+    serviceProof: {
+      /** @description 服务签名公钥的 ID，对应 approver-keys 中 use=service 的条目。 */
+      key_id: string;
+      reauth?: components['schemas']['reauth'];
+      /** @description Ed25519 签名（64 字节）的 base64url。 */
+      signature: components['schemas']['base64url'];
+      /** @constant */
+      type: 'service_ed25519';
+    };
     Session: {
       /** @description 最近一次认证或重新认证的时间；H 档审批要求在 5 分钟内 */
       auth_time: components['schemas']['Timestamp'];
@@ -2289,6 +2398,7 @@ export type components = {
      * @enum {string}
      */
     Severity: 'critical' | 'warning' | 'info';
+    sha256: string;
     /** Sha256 */
     Sha256: string;
     SpokeStatus: {
@@ -2408,6 +2518,8 @@ export type components = {
       namespace: string | null;
       uid: string | null;
     };
+    /** @enum {string} */
+    tier: 'L' | 'H';
     TimelineEntry: {
       at: components['schemas']['Timestamp'];
       /** @enum {string} */
@@ -2429,6 +2541,7 @@ export type components = {
       /** @description text 含告警、日志或变更来源的原文，只作为文本显示 */
       untrusted: boolean;
     };
+    timestamp: string;
     /**
      * Timestamp
      * Format: date-time
@@ -2476,6 +2589,15 @@ export type components = {
      * @enum {string}
      */
     Verdict: 'normal' | 'abnormal' | 'undeterminable';
+    /** @description 通行密钥签名（COSE alg -8，EdDSA/Ed25519）。clientDataJSON 的 challenge 为 sha256(JCS(assertion)) 原始 32 字节的 base64url；签名覆盖 authenticatorData 与 sha256(clientDataJSON) 的拼接。 */
+    webauthnProof: {
+      authenticator_data: components['schemas']['base64url'];
+      client_data_json: components['schemas']['base64url'];
+      credential_id: components['schemas']['base64url'];
+      signature: components['schemas']['base64url'];
+      /** @constant */
+      type: 'webauthn_ed25519';
+    };
   };
   responses: {
     /** @description 错误 */
@@ -3388,7 +3510,7 @@ export interface operations {
         };
         content: {
           'application/json': {
-            envelope: components['schemas']['ApprovalEnvelope'];
+            envelope: components['schemas']['approval-envelope.schema'];
             proposal: components['schemas']['proposal.schema'];
           };
         };

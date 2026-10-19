@@ -44,6 +44,19 @@ function load(path: string): SchemaFile {
   return { path, rel, json };
 }
 
+const pascal = (s: string) => s.replace(/(^|[-_])([a-z])/g, (_, __, c: string) => c.toUpperCase());
+
+// 没有 title 的 $defs 以 <文件 title><定义名> 命名，避免不同文件的同名定义冲突。只改生成时读入的副本
+function withDefTitles(f: SchemaFile): SchemaFile['json'] {
+  const defs = Object.fromEntries(
+    Object.entries(f.json.$defs ?? {}).map(([name, def]) => [
+      name,
+      def.title === undefined ? { ...def, title: f.json.title + pascal(name) } : def,
+    ]),
+  );
+  return f.json.$defs === undefined ? f.json : { ...f.json, $defs: defs };
+}
+
 // 有顶层实例定义的文件（type、oneOf、allOf 之一）
 function describesInstance(json: Record<string, unknown>): boolean {
   return 'type' in json || 'oneOf' in json || 'allOf' in json || 'const' in json;
@@ -61,12 +74,14 @@ async function genTypes(files: SchemaFile[]): Promise<string> {
     seen.set(title, ref);
     properties[title] = { $ref: ref };
   };
+  const titled = new Map(files.map((f) => [f.path, withDefTitles(f)]));
   for (const f of files) {
-    if (describesInstance(f.json)) {
-      add(f.json.title, `./${f.rel}`);
+    const json = titled.get(f.path)!;
+    if (describesInstance(json)) {
+      add(json.title, `./${f.rel}`);
     }
-    for (const [name, def] of Object.entries(f.json.$defs ?? {})) {
-      add(def.title ?? name, `./${f.rel}#/$defs/${name}`);
+    for (const [name, def] of Object.entries(json.$defs ?? {})) {
+      add(def.title!, `./${f.rel}#/$defs/${name}`);
     }
   }
   const root: JSONSchema = {
@@ -77,6 +92,19 @@ async function genTypes(files: SchemaFile[]): Promise<string> {
   };
   const ts = await compile(root, 'SrenautixContractIndex', {
     cwd: contractDir,
+    $refOptions: {
+      resolve: {
+        file: {
+          read: (file: { url: string }) => {
+            const json = titled.get(fileURLToPath(new URL(file.url, 'file://')));
+            if (json === undefined) {
+              throw new Error(`引用了 contract/ 之外或不存在的文件：${file.url}`);
+            }
+            return JSON.stringify(json);
+          },
+        },
+      },
+    },
     bannerComment: '',
     additionalProperties: false,
     unreachableDefinitions: false,

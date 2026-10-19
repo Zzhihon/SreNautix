@@ -1333,5 +1333,4 @@ components:
           description: 工具结果判定成的卡
           oneOf: [{ type: 'null' }, { $ref: './schemas/common.schema.json#/$defs/EvidenceRef' }]
     ApprovalEnvelope:
-      type: object
-      description: 审批断言及其签名证明，结构以 contract/gateway/v1/approval-envelope.schema.json 为准
+      $ref: './gateway/v1/approval-envelope.schema.json'
