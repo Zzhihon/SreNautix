@@ -3,8 +3,9 @@
 // 编译为 wasm，由 promql-wasm/ 在构建时生成到 wasm/。适配器用它检查回放时钟窗口，
 // packs-sdk 用它做 lint、标签档案改写和夹具展开。
 
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
 
 export type Dialect = 'promql' | 'metricsql';
 
@@ -109,6 +110,11 @@ let loading: Promise<PromqlEngine> | undefined;
 export function loadPromqlEngine(): Promise<PromqlEngine> {
   loading ??= (async () => {
     const dir = new URL('../../wasm/', import.meta.url);
+    if (!existsSync(new URL('promql.wasm', dir)) || !existsSync(new URL('wasm_exec.cjs', dir))) {
+      throw new Error(
+        `${fileURLToPath(dir)} 中没有 promql.wasm；先执行 pnpm --filter @srenautix/integration-sdk run build:wasm（pnpm -r test 与 build 会按依赖顺序先构建）`,
+      );
+    }
     const require = createRequire(import.meta.url);
     // Go 自带的 wasm 运行胶水，构建时从 $(go env GOROOT)/lib/wasm 复制
     require(new URL('wasm_exec.cjs', dir).pathname);

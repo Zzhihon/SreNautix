@@ -20,7 +20,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "pnpm --filter @srenautix/integration-sdk run build:wasm && vitest run"
+    "test": "vitest run"
   },
   "dependencies": {
     "@formatjs/icu-messageformat-parser": "3.5.21",

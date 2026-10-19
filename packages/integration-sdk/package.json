@@ -17,7 +17,7 @@
     "backends.json"
   ],
   "scripts": {
-    "build:wasm": "mkdir -p wasm && cd promql-wasm && GOOS=js GOARCH=wasm go build -trimpath -ldflags='-s -w' -o ../wasm/promql.wasm . && cp \"$(go env GOROOT)/lib/wasm/wasm_exec.js\" ../wasm/wasm_exec.cjs",
+    "build:wasm": "mkdir -p wasm && cd promql-wasm && GOOS=js GOARCH=wasm go build -trimpath -ldflags='-s -w' -o ../wasm/promql.wasm . && install -m 0644 \"$(go env GOROOT)/lib/wasm/wasm_exec.js\" ../wasm/wasm_exec.cjs",
     "build": "pnpm run build:wasm && tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "pnpm run build:wasm && vitest run"
