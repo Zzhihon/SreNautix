@@ -230,10 +230,31 @@ function MyChatLinks() {
   );
 }
 
+// 角色绑定授予的权限（server 的授权模型）；契约里这个字段只写了 string，取值写在这里并请契约补上枚举
+const PERMISSIONS = [
+  'read',
+  'feedback',
+  'propose',
+  'research.request',
+  'evidence.rerun',
+  'approve',
+  'reject',
+  'undo',
+  'audit.read',
+  'prompt.raw',
+  'users.read',
+  'settings.write',
+  'suppression.write',
+  'pause.write',
+  'eval.write',
+  'api_tokens.write',
+] as const;
+type Permission = (typeof PERMISSIONS)[number];
+
 function ExplainPanel() {
   const { t } = useI18n();
   const [subject, setSubject] = useState('');
-  const [permission, setPermission] = useState('approveProposal');
+  const [permission, setPermission] = useState<Permission>('approve');
   const [cluster, setCluster] = useState('');
   const [namespace, setNamespace] = useState('');
   const [tier, setTier] = useState<'' | 'L' | 'H'>('');
@@ -267,11 +288,11 @@ function ExplainPanel() {
           value={subject}
           onChange={(e) => setSubject(e.currentTarget.value)}
         />
-        <TextField
+        <SelectField
           label={t('users.permission')}
           value={permission}
-          onChange={(e) => setPermission(e.currentTarget.value)}
-          required
+          onChange={(e) => setPermission(e.currentTarget.value as Permission)}
+          options={PERMISSIONS.map((p) => ({ value: p, label: `${t(`users.perm.${p}`)}（${p}）` }))}
         />
         <TextField label={t('policies.cluster')} value={cluster} onChange={(e) => setCluster(e.currentTarget.value)} />
         <TextField

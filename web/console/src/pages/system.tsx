@@ -289,7 +289,9 @@ export function PacksPage() {
 
 function Simulator({ cluster, actions }: { cluster: string; actions: string[] }) {
   const { t } = useI18n();
-  const [action, setAction] = useState(actions[0] ?? '');
+  // 动作目录异步加载：没有手动选择时取第一个启用的动作
+  const [picked, setAction] = useState('');
+  const action = picked || actions[0] || '';
   const [kind, setKind] = useState('Pod');
   const [namespace, setNamespace] = useState('');
   const [name, setName] = useState('');

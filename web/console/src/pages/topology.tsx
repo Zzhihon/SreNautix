@@ -166,11 +166,19 @@ function CoverageView({ cluster }: { cluster: string }) {
               label={t('topology.coverage')}
               rowTone={(r) => (r.chains.length === 0 ? 'warn' : undefined)}
               empty={
-                <EmptyState
-                  kind="none"
-                  title={t('topology.no_components_title')}
-                  because={t('topology.no_components')}
-                />
+                c.topology_version === 0 ? (
+                  <EmptyState
+                    kind="degraded"
+                    title={t('topology.no_topology_title')}
+                    because={t('topology.no_topology')}
+                  />
+                ) : (
+                  <EmptyState
+                    kind="none"
+                    title={t('topology.no_components_title')}
+                    because={t('topology.no_components', { v: c.topology_version })}
+                  />
+                )
               }
             />
           </Panel>
