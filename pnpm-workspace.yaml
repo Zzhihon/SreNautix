@@ -1,0 +1,9 @@
+packages:
+  - packages/*
+  - apps/*
+  - web/*
+  - plugins/*
+
+# 依赖安装脚本只对白名单内的包执行（DESIGN §16.5）
+onlyBuiltDependencies:
+  - esbuild

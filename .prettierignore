@@ -1,0 +1,16 @@
+pnpm-lock.yaml
+**/dist/
+**/coverage/
+**/src/generated/
+**/testdata/
+.scratch/
+*.md
+architecture.svg
+LICENSE*
+# Go 与 Helm 部分由各自的工具格式化
+contract/gateway/
+cmd/
+internal/
+test/invariants/
+deploy/
+.github/

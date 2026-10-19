@@ -1,0 +1,29 @@
+{
+  "name": "@srenautix/core",
+  "version": "0.1.0",
+  "description": "SreNautix 的确定性核心：告警目录与分类、实体解析、事件溯源拓扑、收敛与根因排序、证据指纹",
+  "license": "AGPL-3.0-or-later",
+  "type": "module",
+  "exports": {
+    ".": {
+      "@srenautix/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@srenautix/contract": "workspace:*",
+    "canonicalize": "5.1.0"
+  },
+  "devDependencies": {
+    "yaml": "2.9.1"
+  }
+}
