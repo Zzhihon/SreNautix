@@ -1,0 +1,35 @@
+# 通用 git 适配器：覆盖 GitHub、GitLab、Gitee、Gitea 等任何 git 服务；读取本地克隆在窗口内的提交，按路径前缀映射到拓扑节点。
+api_version: srenautix.io/integration/v1
+id: git
+display_name: 通用 git
+category: changes
+direction: read
+tier: core
+contract: changes/v1
+capabilities:
+  - { name: changes.list, stability: stable }
+tested_versions:
+  - { backend: git, versions: ['2.39', '2.50'], verification: testcontainers }
+config_schema:
+  type: object
+  additionalProperties: false
+  required: [url, ref, paths]
+  properties:
+    url: { type: string, description: 克隆地址（https 或 ssh） }
+    ref: { type: string, description: 远端跟踪分支，例如 origin/main }
+    deploy_key_file: { type: string, x-srenautix-secret-ref: true, description: 只读部署密钥 }
+    http_token_file: { type: string, x-srenautix-secret-ref: true, description: 只读访问令牌（https 克隆） }
+    link_template: { type: string, description: '提交页面的链接模板，{sha} 替换为提交号' }
+    paths:
+      type: array
+      items:
+        type: object
+        additionalProperties: false
+        required: [prefix, targets, kind]
+        properties:
+          prefix: { type: string }
+          targets: { type: array, items: { type: string } }
+          kind: { type: string, enum: [rollout, config, gitops_sync, ci_deploy, other] }
+required_scopes:
+  - 'git:read（只读部署密钥或只读令牌）'
+owner: srenautix-maintainers

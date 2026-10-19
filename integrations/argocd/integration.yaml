@@ -1,0 +1,21 @@
+api_version: srenautix.io/integration/v1
+id: argocd
+display_name: Argo CD
+category: changes
+direction: read
+tier: core
+contract: changes/v1
+capabilities:
+  - { name: changes.list, stability: stable }
+tested_versions:
+  - { backend: argo-cd, versions: ['3.5.5'], verification: kind_e2e }
+config_schema:
+  type: object
+  additionalProperties: false
+  required: [namespace]
+  properties:
+    namespace: { type: string, description: Application 所在命名空间；变更按 status.resources 映射到拓扑节点 }
+    ui_url: { type: string, format: uri, description: 生成变更链接用 }
+required_scopes:
+  - 'argoproj.io:list,watch applications'
+owner: srenautix-maintainers

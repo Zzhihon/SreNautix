@@ -10,11 +10,16 @@ import { x as untar } from 'tar';
 interface BackendSpec {
   version: string;
   url: string;
+  /** os-arch → 发行包里的平台名；不填时就用 os-arch */
+  platforms?: Record<string, string>;
+  /** 平台无关的单个文件，sha256 的键为 any */
+  file?: boolean;
   binaries: Record<string, string>;
   sha256: Record<string, string>;
 }
 
-export type BackendName = 'prometheus' | 'victoria-metrics' | 'loki' | 'tempo' | 'helm';
+export type BackendName =
+  'prometheus' | 'victoria-metrics' | 'loki' | 'tempo' | 'helm' | 'llama-server' | 'qwen2.5-0.5b-instruct-gguf';
 
 const SPECS = JSON.parse(readFileSync(new URL('../../backends.json', import.meta.url), 'utf8')) as Record<
   BackendName,
@@ -73,23 +78,31 @@ const fill = (s: string, v: Record<string, string>) => s.replace(/\{(\w+)\}/g, (
 export async function ensureBackend(name: BackendName): Promise<Record<string, string>> {
   const spec = SPECS[name];
   const { os, arch } = platform();
-  const vars = { version: spec.version, os, arch };
-  const target = join(backendsDir(), `${name}-${spec.version}-${os}-${arch}`);
+  const key = spec.file ? 'any' : `${os}-${arch}`;
+  const vars = { version: spec.version, os, arch, platform: spec.platforms?.[key] ?? key };
+  const target = join(backendsDir(), `${name}-${spec.version}-${key}`);
   const paths = Object.fromEntries(
     Object.entries(spec.binaries).map(([bin, rel]) => [bin, join(target, fill(rel, vars))]),
   );
   if (Object.values(paths).every((p) => existsSync(p))) {
     return paths;
   }
-  const expected = spec.sha256[`${os}-${arch}`];
+  const expected = spec.sha256[key];
   if (!expected) {
-    throw new Error(`backends.json 没有 ${name} ${os}-${arch} 的 sha256`);
+    throw new Error(`backends.json 没有 ${name} ${key} 的 sha256`);
   }
   const url = fill(spec.url, vars);
   const body = await fetchVerified(url, expected);
   const staging = `${target}.partial`;
   rmSync(staging, { recursive: true, force: true });
   mkdirSync(staging, { recursive: true });
+  if (spec.file) {
+    // 单个数据文件（例如模型权重），不解压
+    writeFileSync(join(staging, Object.values(spec.binaries)[0]!), body);
+    rmSync(target, { recursive: true, force: true });
+    renameSync(staging, target);
+    return paths;
+  }
   if (url.endsWith('.zip')) {
     new AdmZip(body).extractAllTo(staging, true);
   } else {

@@ -1,0 +1,37 @@
+api_version: srenautix.io/integration/v1
+id: loki
+display_name: Grafana Loki
+category: logs
+direction: read
+tier: core
+contract: logs/v1
+capabilities:
+  - { name: logs.match, stability: stable }
+  - { name: logs.query, stability: stable }
+tested_versions:
+  - { backend: loki, versions: ['3.7.8'], verification: testcontainers }
+  - { backend: loki-chart, versions: ['7.3.0'], verification: kind_e2e }
+config_schema:
+  type: object
+  additionalProperties: false
+  required: [url, labels]
+  properties:
+    url: { type: string, format: uri }
+    tenant: { type: string }
+    bearer_token_file: { type: string, x-srenautix-secret-ref: true }
+    ca_file: { type: string }
+    tls_server_name: { type: string }
+    labels:
+      type: object
+      additionalProperties: false
+      required: [namespace, pod, container]
+      description: 日志流上的 Kubernetes 标签名，因采集器而异
+      properties:
+        namespace: { type: string }
+        pod: { type: string }
+        container: { type: string }
+        cluster: { type: string }
+required_scopes:
+  - loki:GET /loki/api/v1/query_range
+  - loki:GET /loki/api/v1/labels
+owner: srenautix-maintainers

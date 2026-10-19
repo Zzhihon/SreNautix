@@ -1,0 +1,29 @@
+# Thanos Query 实现 Prometheus HTTP API，复用 prometheus-api 适配器；rules 来自 Thanos Ruler 或各 sidecar。
+api_version: srenautix.io/integration/v1
+id: thanos
+display_name: Thanos
+category: metrics
+direction: read
+tier: official_candidate
+contract: metrics/v1
+capabilities:
+  - { name: metrics.query, stability: beta }
+  - { name: metrics.query_range, stability: beta }
+  - { name: metrics.series, stability: beta }
+  - { name: metrics.rules, stability: alpha }
+  - { name: metrics.label_profile, stability: beta }
+tested_versions:
+  - { backend: thanos, versions: ['0.39'], verification: testcontainers }
+config_schema:
+  type: object
+  additionalProperties: false
+  required: [url]
+  properties:
+    url: { type: string, format: uri }
+    bearer_token_file: { type: string, x-srenautix-secret-ref: true }
+    ca_file: { type: string }
+    partial_response:
+      { type: boolean, default: false, description: 允许部分 store 不可用时返回结果；返回时证据卡记为 partial_data }
+required_scopes:
+  - 'thanos:GET /api/v1/*'
+owner: srenautix-maintainers

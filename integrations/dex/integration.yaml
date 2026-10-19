@@ -1,0 +1,27 @@
+# 经 Dex 接入 LDAP/AD 与飞书、钉钉、企业微信 SSO。对 server 来说仍是 OIDC（identity.oidc 段指向 Dex），这里声明 Dex 连接器的测试矩阵与组映射。
+api_version: srenautix.io/integration/v1
+id: dex
+display_name: Dex（LDAP、飞书、钉钉、企业微信 SSO）
+category: identity
+direction: authenticate
+tier: official_candidate
+contract: identity/v1
+capabilities:
+  - { name: identity.authenticate, stability: beta }
+  - { name: identity.groups, stability: beta }
+tested_versions:
+  - { backend: dex, versions: ['2.44'], verification: testcontainers }
+  - { backend: openldap, versions: ['2.6'], verification: testcontainers }
+config_schema:
+  type: object
+  additionalProperties: false
+  required: [issuer, client_id, client_secret_file]
+  properties:
+    issuer: { type: string, format: uri }
+    client_id: { type: string }
+    client_secret_file: { type: string, x-srenautix-secret-ref: true }
+    connector: { type: string, enum: [ldap, feishu, dingtalk, wecom] }
+    groups_claim: { type: string, default: groups }
+required_scopes:
+  - 'oidc:openid profile email groups'
+owner: srenautix-maintainers

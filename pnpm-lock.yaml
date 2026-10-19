@@ -188,6 +188,9 @@ importers:
       adm-zip:
         specifier: 0.6.1
         version: 0.6.1
+      openai:
+        specifier: 7.39.0
+        version: 7.39.0(@aws-sdk/credential-provider-node@3.972.86)(@smithy/signature-v4@5.7.4)(undici@8.12.3)(ws@8.22.0)(zod@4.6.7)
       tar:
         specifier: 7.5.22
         version: 7.5.22

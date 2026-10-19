@@ -1,0 +1,23 @@
+# 配置即 server 配置 ingest.sources 中 kind: nightingale 的一项（夜莺的回调地址）。
+api_version: srenautix.io/integration/v1
+id: nightingale
+display_name: 夜莺 Nightingale
+category: alerts
+direction: read
+tier: official_candidate
+contract: alerts/v1
+capabilities:
+  - { name: alerts.webhook, stability: beta }
+tested_versions:
+  - { backend: nightingale, versions: ['8'], verification: recorded_fixtures }
+config_schema:
+  type: object
+  additionalProperties: false
+  required: [id, kind, token_file]
+  properties:
+    id: { type: string }
+    kind: { const: nightingale }
+    token_file: { type: string, x-srenautix-secret-ref: true }
+    cluster_id: { type: string }
+required_scopes: []
+owner: srenautix-maintainers

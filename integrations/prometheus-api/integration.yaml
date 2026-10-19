@@ -1,0 +1,44 @@
+api_version: srenautix.io/integration/v1
+id: prometheus-api
+display_name: Prometheus HTTP API（Prometheus、VictoriaMetrics）
+category: metrics
+direction: read
+tier: core
+contract: metrics/v1
+capabilities:
+  - { name: metrics.query, stability: stable }
+  - { name: metrics.query_range, stability: stable }
+  - { name: metrics.series, stability: stable }
+  - { name: metrics.rules, stability: stable }
+  - { name: metrics.label_profile, stability: beta }
+# testcontainers 一项：一致性测试用 backends.json 固定版本、校验过 sha256 的上游二进制启动真实后端
+tested_versions:
+  - { backend: prometheus, versions: ['3.15.0'], verification: testcontainers }
+  - { backend: kube-prometheus-stack, versions: ['92.10.1'], verification: kind_e2e }
+  - { backend: victoria-metrics, versions: ['1.154.0'], verification: testcontainers }
+config_schema:
+  type: object
+  additionalProperties: false
+  required: [url, dialects]
+  properties:
+    url: { type: string, format: uri }
+    dialects: { type: array, items: { type: string, enum: [promql, metricsql] }, minItems: 1 }
+    tenant: { type: string, description: Mimir 等多租户后端的租户（X-Scope-OrgID） }
+    bearer_token_file: { type: string, x-srenautix-secret-ref: true }
+    basic_auth:
+      type: object
+      additionalProperties: false
+      required: [username, password_file]
+      properties:
+        username: { type: string }
+        password_file: { type: string, x-srenautix-secret-ref: true }
+    ca_file: { type: string }
+    tls_server_name: { type: string }
+    cluster_label: { type: string, description: 外部标签 cluster 的名字；不填时自动探测 }
+required_scopes:
+  - prometheus:GET /api/v1/query
+  - prometheus:GET /api/v1/query_range
+  - prometheus:GET /api/v1/series
+  - prometheus:GET /api/v1/labels
+  - prometheus:GET /api/v1/rules
+owner: srenautix-maintainers

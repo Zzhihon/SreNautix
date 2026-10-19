@@ -1,0 +1,22 @@
+# 配置即 server 配置的 identity.local_admin 段。本地管理员只用于首次引导，配置好 OIDC 之后移除这一段。
+api_version: srenautix.io/integration/v1
+id: local-admin
+display_name: 本地管理员（首次引导）
+category: identity
+direction: authenticate
+tier: core
+contract: identity/v1
+capabilities:
+  - { name: identity.authenticate, stability: stable }
+tested_versions:
+  - { backend: srenautix-server, versions: [main], verification: testcontainers }
+config_schema:
+  type: object
+  additionalProperties: false
+  required: [username, password_hash_file, totp_secret_file]
+  properties:
+    username: { type: string }
+    password_hash_file: { type: string, x-srenautix-secret-ref: true }
+    totp_secret_file: { type: string, x-srenautix-secret-ref: true }
+required_scopes: []
+owner: srenautix-maintainers

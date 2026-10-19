@@ -1,0 +1,25 @@
+api_version: srenautix.io/integration/v1
+id: skywalking
+display_name: Apache SkyWalking
+category: traces
+direction: read
+tier: official_candidate
+contract: traces/v1
+capabilities:
+  - { name: traces.search, stability: beta }
+  - { name: traces.trace, stability: beta }
+  - { name: traces.service_graph, stability: beta }
+tested_versions:
+  - { backend: skywalking-oap, versions: ['10.3'], verification: testcontainers }
+config_schema:
+  type: object
+  additionalProperties: false
+  required: [url]
+  properties:
+    url: { type: string, format: uri, description: OAP 的 GraphQL 地址 }
+    username: { type: string }
+    password_file: { type: string, x-srenautix-secret-ref: true }
+    service_name_template: { type: string, description: 'SkyWalking 服务名到工作负载的映射，例如 {namespace}::{name}' }
+required_scopes:
+  - 'skywalking:GraphQL queryBasicTraces, queryTrace, getServiceTopology'
+owner: srenautix-maintainers

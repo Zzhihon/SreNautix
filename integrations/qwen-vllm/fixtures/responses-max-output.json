@@ -1,0 +1,47 @@
+{
+  "provenance": {
+    "provider": "llamacpp-qwen3-1.7b",
+    "model": "qwen3-1.7b",
+    "base_url_kind": "local",
+    "recorded_at": "2026-10-19T18:49:43.538Z",
+    "path": "/responses"
+  },
+  "request": {
+    "model": "qwen3-1.7b",
+    "input": "Explain how PostgreSQL WAL archiving works.",
+    "max_output_tokens": 32,
+    "store": false
+  },
+  "status": 200,
+  "body": {
+    "completed_at": 1792435783,
+    "created_at": 1792435783,
+    "id": "resp_lQhY9RSxKZ1vFcgpxtuQKxl1H3I3uOhW",
+    "model": "qwen3-1.7b",
+    "object": "response",
+    "output": [
+      {
+        "id": "rs_sUZeKq1bANUqN2OqhjxYbXOeV6C059zr",
+        "summary": [],
+        "type": "reasoning",
+        "content": [
+          {
+            "text": "Okay, I need to explain how PostgreSQL's WAL archiving works. Let me start by recalling what I know about WAL in PostgreSQL. WAL stands for",
+            "type": "reasoning_text"
+          }
+        ],
+        "encrypted_content": "",
+        "status": "completed"
+      }
+    ],
+    "status": "completed",
+    "usage": {
+      "input_tokens": 17,
+      "output_tokens": 32,
+      "total_tokens": 49,
+      "input_tokens_details": {
+        "cached_tokens": 0
+      }
+    }
+  }
+}

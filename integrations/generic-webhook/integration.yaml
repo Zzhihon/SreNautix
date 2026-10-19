@@ -1,0 +1,39 @@
+# 配置即 server 配置 ingest.sources 中 kind: generic 的一项。mapping 用 JSONPath：alerts 选出告警数组，其余路径相对每条告警求值。
+api_version: srenautix.io/integration/v1
+id: generic-webhook
+display_name: 通用告警 webhook（JSONPath 映射）
+category: alerts
+direction: read
+tier: core
+contract: alerts/v1
+capabilities:
+  - { name: alerts.webhook, stability: stable }
+tested_versions:
+  - { backend: kube-prometheus-stack-grafana, versions: ['92.10.1'], verification: kind_e2e }
+  - { backend: grafana-alerting, versions: ['12'], verification: recorded_fixtures }
+config_schema:
+  type: object
+  additionalProperties: false
+  required: [id, kind, token_file, mapping]
+  properties:
+    id: { type: string }
+    kind: { const: generic }
+    token_file: { type: string, x-srenautix-secret-ref: true }
+    cluster_id: { type: string }
+    mapping:
+      type: object
+      additionalProperties: false
+      required: [alerts, alertname, status, starts_at]
+      properties:
+        alerts: { type: string }
+        alertname: { type: string }
+        status: { type: string }
+        firing_value: { type: string, default: firing }
+        starts_at: { type: string }
+        ends_at: { type: string }
+        labels: { type: string }
+        annotations: { type: string }
+        severity: { type: string }
+        generator_url: { type: string }
+required_scopes: []
+owner: srenautix-maintainers

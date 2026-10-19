@@ -1,0 +1,25 @@
+# Jenkins 的部署：构建产出的镜像 digest（构建参数或归档的 digest 文件）关联到运行中的 Pod。
+api_version: srenautix.io/integration/v1
+id: jenkins
+display_name: Jenkins
+category: changes
+direction: read
+tier: official_candidate
+contract: changes/v1
+capabilities:
+  - { name: changes.list, stability: alpha }
+tested_versions:
+  - { backend: jenkins, versions: ['2.528 LTS'], verification: testcontainers }
+config_schema:
+  type: object
+  additionalProperties: false
+  required: [url, jobs, username, api_token_file]
+  properties:
+    url: { type: string, format: uri }
+    jobs: { type: array, items: { type: string }, minItems: 1 }
+    username: { type: string }
+    api_token_file: { type: string, x-srenautix-secret-ref: true }
+    digest_parameter: { type: string, description: 记录镜像 digest 的构建参数或归档文件名 }
+required_scopes:
+  - 'jenkins:Overall/Read, Job/Read'
+owner: srenautix-maintainers

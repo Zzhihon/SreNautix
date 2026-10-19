@@ -1,0 +1,24 @@
+api_version: srenautix.io/integration/v1
+id: jaeger
+display_name: Jaeger
+category: traces
+direction: read
+tier: official_candidate
+contract: traces/v1
+capabilities:
+  - { name: traces.search, stability: beta }
+  - { name: traces.trace, stability: beta }
+  - { name: traces.service_graph, stability: alpha }
+tested_versions:
+  - { backend: jaeger, versions: ['2.11'], verification: testcontainers }
+config_schema:
+  type: object
+  additionalProperties: false
+  required: [url]
+  properties:
+    url: { type: string, format: uri, description: Jaeger Query 的 HTTP API 地址 }
+    bearer_token_file: { type: string, x-srenautix-secret-ref: true }
+    ca_file: { type: string }
+required_scopes:
+  - 'jaeger:GET /api/v3/traces, /api/v3/services'
+owner: srenautix-maintainers

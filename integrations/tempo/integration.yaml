@@ -1,0 +1,28 @@
+api_version: srenautix.io/integration/v1
+id: tempo
+display_name: Grafana Tempo
+category: traces
+direction: read
+tier: core
+contract: traces/v1
+capabilities:
+  - { name: traces.search, stability: stable }
+  - { name: traces.trace, stability: stable }
+  - { name: traces.service_graph, stability: beta }
+tested_versions:
+  - { backend: tempo, versions: ['3.1.0'], verification: testcontainers }
+  - { backend: tempo-chart, versions: ['1.24.4'], verification: kind_e2e }
+config_schema:
+  type: object
+  additionalProperties: false
+  required: [url]
+  properties:
+    url: { type: string, format: uri }
+    tenant: { type: string }
+    bearer_token_file: { type: string, x-srenautix-secret-ref: true }
+    ca_file: { type: string }
+    metrics_integration: { type: string, description: 服务图指标所在的 metrics 集成实例 id }
+required_scopes:
+  - tempo:GET /api/search
+  - tempo:GET /api/v2/traces/{id}
+owner: srenautix-maintainers

@@ -1,0 +1,21 @@
+# Flux 的变更：Kustomization、HelmRelease 的 lastAppliedRevision 变化，按 status.inventory 映射到拓扑节点。
+api_version: srenautix.io/integration/v1
+id: flux
+display_name: Flux
+category: changes
+direction: read
+tier: official_candidate
+contract: changes/v1
+capabilities:
+  - { name: changes.list, stability: beta }
+tested_versions:
+  - { backend: flux2, versions: ['2.7'], verification: kind_e2e }
+config_schema:
+  type: object
+  additionalProperties: false
+  properties:
+    namespaces: { type: array, items: { type: string } }
+required_scopes:
+  - 'kustomize.toolkit.fluxcd.io:list,watch kustomizations'
+  - 'helm.toolkit.fluxcd.io:list,watch helmreleases'
+owner: srenautix-maintainers

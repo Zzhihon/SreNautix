@@ -1,0 +1,22 @@
+# 控制台渠道：事件卡片与审批在 SreNautix 自己的控制台里完成，签名校验由会话与 CSRF 令牌承担。
+api_version: srenautix.io/integration/v1
+id: console
+display_name: SreNautix 控制台
+category: approve
+direction: approve
+tier: core
+contract: approve/v1
+capabilities:
+  - { name: notify.send, stability: stable }
+  - { name: notify.edit, stability: stable }
+  - { name: approve.l_tier, stability: beta }
+  - { name: approve.h_tier, stability: beta }
+tested_versions:
+  - { backend: srenautix-server, versions: [main], verification: testcontainers }
+config_schema:
+  type: object
+  additionalProperties: false
+  properties:
+    public_url: { type: string, format: uri, description: 消息里控制台链接的前缀 }
+required_scopes: []
+owner: srenautix-maintainers

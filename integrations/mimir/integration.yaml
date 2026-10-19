@@ -1,0 +1,28 @@
+# Mimir 实现 Prometheus HTTP API，复用 prometheus-api 适配器，tenant 填 X-Scope-OrgID。
+api_version: srenautix.io/integration/v1
+id: mimir
+display_name: Grafana Mimir
+category: metrics
+direction: read
+tier: official_candidate
+contract: metrics/v1
+capabilities:
+  - { name: metrics.query, stability: beta }
+  - { name: metrics.query_range, stability: beta }
+  - { name: metrics.series, stability: beta }
+  - { name: metrics.rules, stability: beta }
+  - { name: metrics.label_profile, stability: beta }
+tested_versions:
+  - { backend: mimir, versions: ['2.17'], verification: testcontainers }
+config_schema:
+  type: object
+  additionalProperties: false
+  required: [url, tenant]
+  properties:
+    url: { type: string, format: uri, description: 'Prometheus API 前缀，例如 http://mimir-query-frontend/prometheus' }
+    tenant: { type: string }
+    bearer_token_file: { type: string, x-srenautix-secret-ref: true }
+    ca_file: { type: string }
+required_scopes:
+  - 'mimir:GET /prometheus/api/v1/*'
+owner: srenautix-maintainers

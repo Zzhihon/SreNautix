@@ -1,0 +1,38 @@
+# Elasticsearch 与 OpenSearch 共用一个适配器：logs.match 翻译为 _search 的 bool 查询加 match_phrase。
+api_version: srenautix.io/integration/v1
+id: elasticsearch
+display_name: Elasticsearch / OpenSearch
+category: logs
+direction: read
+tier: official_candidate
+contract: logs/v1
+capabilities:
+  - { name: logs.match, stability: beta }
+  - { name: logs.query, stability: alpha }
+tested_versions:
+  - { backend: elasticsearch, versions: ['8.19', '9.2'], verification: testcontainers }
+  - { backend: opensearch, versions: ['2.19', '3.3'], verification: testcontainers }
+config_schema:
+  type: object
+  additionalProperties: false
+  required: [url, index, fields]
+  properties:
+    url: { type: string, format: uri }
+    index: { type: string, description: 索引或别名模式，例如 logs-* }
+    username: { type: string }
+    password_file: { type: string, x-srenautix-secret-ref: true }
+    api_key_file: { type: string, x-srenautix-secret-ref: true }
+    ca_file: { type: string }
+    fields:
+      type: object
+      additionalProperties: false
+      required: [time, message, namespace, pod, container]
+      properties:
+        time: { type: string }
+        message: { type: string }
+        namespace: { type: string }
+        pod: { type: string }
+        container: { type: string }
+required_scopes:
+  - 'elasticsearch:read on the configured index pattern'
+owner: srenautix-maintainers

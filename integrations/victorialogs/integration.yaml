@@ -1,0 +1,32 @@
+api_version: srenautix.io/integration/v1
+id: victorialogs
+display_name: VictoriaLogs
+category: logs
+direction: read
+tier: official_candidate
+contract: logs/v1
+capabilities:
+  - { name: logs.match, stability: beta }
+  - { name: logs.query, stability: alpha }
+tested_versions:
+  - { backend: victoria-logs, versions: ['1.36'], verification: testcontainers }
+config_schema:
+  type: object
+  additionalProperties: false
+  required: [url, fields]
+  properties:
+    url: { type: string, format: uri }
+    account_id: { type: string }
+    project_id: { type: string }
+    bearer_token_file: { type: string, x-srenautix-secret-ref: true }
+    fields:
+      type: object
+      additionalProperties: false
+      required: [namespace, pod, container]
+      properties:
+        namespace: { type: string }
+        pod: { type: string }
+        container: { type: string }
+required_scopes:
+  - 'victorialogs:GET /select/logsql/query'
+owner: srenautix-maintainers

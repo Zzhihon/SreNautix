@@ -1,0 +1,42 @@
+{
+  "receiver": "srenautix",
+  "status": "firing",
+  "alerts": [
+    {
+      "status": "firing",
+      "labels": {
+        "alertname": "DemoPodCrashLooping",
+        "namespace": "shop",
+        "pod": "api-7d9f8-x2k4p",
+        "severity": "critical"
+      },
+      "annotations": {
+        "description": "容器 api 反复重启",
+        "summary": "api 重启"
+      },
+      "startsAt": "2026-10-19T18:52:28.494Z",
+      "endsAt": "0001-01-01T00:00:00Z",
+      "generatorURL": "http://prometheus.example:9090/graph?g0.expr=vector%281%29+%3E+0&g0.tab=1",
+      "fingerprint": "289e17a4f7f550bc"
+    }
+  ],
+  "notification_reason": "first notification",
+  "groupLabels": {
+    "alertname": "DemoPodCrashLooping"
+  },
+  "commonLabels": {
+    "alertname": "DemoPodCrashLooping",
+    "namespace": "shop",
+    "pod": "api-7d9f8-x2k4p",
+    "severity": "critical"
+  },
+  "commonAnnotations": {
+    "description": "容器 api 反复重启",
+    "summary": "api 重启"
+  },
+  "routeLabels": {},
+  "externalURL": "http://alertmanager.example:9093",
+  "version": "4",
+  "groupKey": "{}:{alertname=\"DemoPodCrashLooping\"}",
+  "truncatedAlerts": 0
+}

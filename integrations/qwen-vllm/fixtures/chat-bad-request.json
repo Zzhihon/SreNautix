@@ -1,0 +1,21 @@
+{
+  "provenance": {
+    "provider": "llamacpp-qwen3-1.7b",
+    "model": "qwen3-1.7b",
+    "base_url_kind": "local",
+    "recorded_at": "2026-10-19T18:50:22.750Z",
+    "path": "/chat/completions"
+  },
+  "request": {
+    "model": "qwen3-1.7b",
+    "messages": "not-an-array"
+  },
+  "status": 400,
+  "body": {
+    "error": {
+      "code": 400,
+      "message": "Expected 'messages' to be an array",
+      "type": "invalid_request_error"
+    }
+  }
+}

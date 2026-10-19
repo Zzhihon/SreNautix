@@ -1,0 +1,23 @@
+# Kubernetes 的发布与事件：新 ReplicaSet/ControllerRevision、挂载的 ConfigMap 版本变化、cordon、HPA 扩缩。
+# 拓扑本身由 reader 的 informer 维护（DESIGN §4），不经过集成契约；这里只声明变更流。
+api_version: srenautix.io/integration/v1
+id: kubernetes
+display_name: Kubernetes 发布与事件
+category: changes
+direction: read
+tier: core
+contract: changes/v1
+capabilities:
+  - { name: changes.list, stability: stable }
+tested_versions:
+  - { backend: kubernetes, versions: ['1.35'], verification: kind_e2e }
+config_schema:
+  type: object
+  additionalProperties: false
+  properties:
+    namespaces: { type: array, items: { type: string }, description: 空数组表示全部命名空间 }
+required_scopes:
+  - 'apps:list,watch replicasets,controllerrevisions,deployments,statefulsets,daemonsets'
+  - 'core:list,watch events,nodes,configmaps(只读名称与 resourceVersion)'
+  - 'autoscaling:list,watch horizontalpodautoscalers'
+owner: srenautix-maintainers

@@ -1,0 +1,29 @@
+# OpenAI 兼容的 Responses 方言（POST /v1/responses）。方言档案在启动与评测时逐条路由测量（DESIGN §8），由 runModelConformance 实现。
+api_version: srenautix.io/integration/v1
+id: openai-compatible-responses
+display_name: OpenAI 兼容 · Responses
+category: model
+direction: read
+tier: core
+contract: model/v1
+capabilities:
+  - { name: model.responses, stability: stable }
+  - { name: model.strict_json_schema, stability: beta }
+  - { name: model.native_tools, stability: beta }
+  - { name: model.dialect_probe, stability: stable }
+tested_versions:
+  - { backend: llama-server, versions: [b11742], verification: testcontainers }
+  - { backend: openai, versions: [responses-2026], verification: recorded_fixtures }
+config_schema:
+  type: object
+  additionalProperties: false
+  required: [base_url, model, api_key_file]
+  properties:
+    base_url: { type: string, format: uri }
+    model: { type: string }
+    api_key_file: { type: string, x-srenautix-secret-ref: true }
+    ca_file: { type: string }
+    timeout_ms: { type: integer, minimum: 1000 }
+required_scopes:
+  - 'model:POST /v1/responses'
+owner: srenautix-maintainers

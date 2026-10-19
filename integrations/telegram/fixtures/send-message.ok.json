@@ -1,0 +1,17 @@
+{
+  "source": "https://core.telegram.org/bots/api#sendmessage：成功时 result 为发出的 Message",
+  "request": { "method": "POST", "path": "/bot<token>/sendMessage" },
+  "response": {
+    "status": 200,
+    "body": {
+      "ok": true,
+      "result": {
+        "message_id": 101,
+        "from": { "id": 7000000001, "is_bot": true, "first_name": "SreNautix", "username": "srenautix_test_bot" },
+        "chat": { "id": -1001234567890, "title": "oncall", "type": "supergroup" },
+        "date": 1792400000,
+        "text": "[严重] Deployment shop/worker 不可用"
+      }
+    }
+  }
+}

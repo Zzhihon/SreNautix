@@ -1,0 +1,26 @@
+api_version: srenautix.io/integration/v1
+id: dingtalk
+display_name: 钉钉
+category: notify
+direction: notify
+tier: official_candidate
+contract: notify/v1
+capabilities:
+  - { name: notify.send, stability: beta }
+  - { name: notify.edit, stability: alpha }
+  - { name: notify.callback_verify, stability: alpha }
+  - { name: notify.link, stability: alpha }
+tested_versions:
+  - { backend: dingtalk-open-platform, versions: ['v1.0'], verification: recorded_fixtures }
+config_schema:
+  type: object
+  additionalProperties: false
+  required: [client_id, client_secret_file, robot_code, chats]
+  properties:
+    client_id: { type: string }
+    client_secret_file: { type: string, x-srenautix-secret-ref: true }
+    robot_code: { type: string }
+    chats: { type: array, minItems: 1, items: { type: string }, description: openConversationId 列表 }
+required_scopes:
+  - 'dingtalk:企业内部应用机器人发送与更新互动卡片'
+owner: srenautix-maintainers

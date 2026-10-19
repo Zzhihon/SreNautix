@@ -1,0 +1,54 @@
+# 配置即 server 配置的 notify.feishu 段。fixtures/signature-vectors.json 是回调签名与解密的共享测试向量。
+api_version: srenautix.io/integration/v1
+id: feishu
+display_name: 飞书（审批卡片）
+category: approve
+direction: approve
+tier: core
+contract: approve/v1
+capabilities:
+  - { name: notify.send, stability: stable }
+  - { name: notify.edit, stability: stable }
+  - { name: notify.callback_verify, stability: stable }
+  - { name: notify.link, stability: stable }
+  - { name: approve.l_tier, stability: beta }
+tested_versions:
+  - { backend: feishu-open-platform, versions: ['im/v1', 'card/v2'], verification: recorded_fixtures }
+  - { backend: feishu-open-platform, versions: ['im/v1', 'card/v2'], verification: live_smoke }
+config_schema:
+  type: object
+  additionalProperties: false
+  required: [app_id, app_secret_file, verification_token_file, chats]
+  properties:
+    enabled: { type: boolean, default: false }
+    api_base:
+      {
+        type: string,
+        format: uri,
+        default: 'https://open.feishu.cn',
+        description: Lark 国际版为 https://open.larksuite.com,
+      }
+    app_id: { type: string }
+    app_secret_file: { type: string, x-srenautix-secret-ref: true }
+    encrypt_key_file: { type: string, x-srenautix-secret-ref: true, description: 配置后回调必须加密并带签名 }
+    verification_token_file: { type: string, x-srenautix-secret-ref: true }
+    chats:
+      type: array
+      minItems: 1
+      items:
+        type: object
+        additionalProperties: false
+        required: [chat_id]
+        properties:
+          chat_id: { type: string }
+          language: { type: string, enum: [zh, en], default: zh }
+    messages_per_minute: { type: integer, minimum: 1, maximum: 100, default: 100 }
+    messages_per_second: { type: integer, minimum: 1, maximum: 5, default: 5 }
+    edit_gap: { type: string, default: 1s }
+    auto_link_union_id:
+      { type: boolean, default: false, description: 聊天账号与控制台使用同一个飞书身份源时按 union_id 自动绑定 }
+required_scopes:
+  - 'im:message'
+  - 'im:message:send_as_bot'
+  - 'im:chat:readonly'
+owner: srenautix-maintainers

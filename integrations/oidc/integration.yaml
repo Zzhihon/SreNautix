@@ -1,0 +1,28 @@
+# 配置即 server 配置的 identity.oidc 段。LDAP/AD 与飞书、钉钉、企业微信 SSO 经 Dex 或 Keycloak 接入，对 server 来说都是 OIDC。
+api_version: srenautix.io/integration/v1
+id: oidc
+display_name: OIDC
+category: identity
+direction: authenticate
+tier: core
+contract: identity/v1
+capabilities:
+  - { name: identity.authenticate, stability: stable }
+  - { name: identity.groups, stability: stable }
+  - { name: identity.reauth, stability: beta }
+tested_versions:
+  - { backend: node-oidc-provider, versions: ['9.12.2'], verification: testcontainers }
+config_schema:
+  type: object
+  additionalProperties: false
+  required: [issuer, client_id, client_secret_file]
+  properties:
+    issuer: { type: string, format: uri }
+    client_id: { type: string }
+    client_secret_file: { type: string, x-srenautix-secret-ref: true }
+    scopes: { type: array, items: { type: string }, default: [openid, profile, email, groups] }
+    groups_claim: { type: string, default: groups }
+    name_claim: { type: string, default: preferred_username }
+required_scopes:
+  - 'oidc:openid profile email groups'
+owner: srenautix-maintainers

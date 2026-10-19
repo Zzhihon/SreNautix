@@ -64,5 +64,35 @@
       "linux-amd64": "a7f81ce08007091b86d8bd696eb4d86b8d0f2e1b9f6c714be62f82f96a594496",
       "linux-arm64": "440cf7add0aee27ebc93fada965523c1dc2e0ab340d4348da2215737fc0d76ad"
     }
+  },
+  "llama-server": {
+    "version": "b11742",
+    "url": "https://github.com/ggml-org/llama.cpp/releases/download/{version}/llama-{version}-bin-{platform}.tar.gz",
+    "platforms": {
+      "darwin-amd64": "macos-x64",
+      "darwin-arm64": "macos-arm64",
+      "linux-amd64": "ubuntu-x64",
+      "linux-arm64": "ubuntu-arm64"
+    },
+    "binaries": {
+      "llama-server": "llama-{version}/llama-server"
+    },
+    "sha256": {
+      "darwin-amd64": "4a6c9c1308b4d1953ae9c758319176bc7237a2f2179d03c7feb86bf67a5efcf8",
+      "darwin-arm64": "574ad2e53af1aac14e90d5aa72e81a8d67c549822f00a9af91fcf8be099ace08",
+      "linux-amd64": "81b7895ec1730a33da6f9973a65ec5be5a83147768e290b6405779e0707422c1",
+      "linux-arm64": "263700393b5a0f3547ca313ef6040c25482b569dc6aa387bf5a8ecb9949b159e"
+    }
+  },
+  "qwen2.5-0.5b-instruct-gguf": {
+    "version": "q4_k_m",
+    "url": "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf",
+    "file": true,
+    "binaries": {
+      "model": "qwen2.5-0.5b-instruct-q4_k_m.gguf"
+    },
+    "sha256": {
+      "any": "74a4da8c9fdbcd15bd1f6d01d621410d31c6fc00986f5eb687824e7b93d7a9db"
+    }
   }
 }

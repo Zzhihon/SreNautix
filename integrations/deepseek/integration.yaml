@@ -1,0 +1,27 @@
+# DeepSeek 档案：Chat Completions 方言，推理内容在 reasoning_content 字段，严格 JSON Schema 不可用时退回 json_object 加校验重试。
+api_version: srenautix.io/integration/v1
+id: deepseek
+display_name: DeepSeek
+category: model
+direction: read
+tier: core
+contract: model/v1
+capabilities:
+  - { name: model.chat, stability: stable }
+  - { name: model.native_tools, stability: beta }
+  - { name: model.dialect_probe, stability: stable }
+tested_versions:
+  - { backend: deepseek-api, versions: [deepseek-chat, deepseek-reasoner], verification: recorded_fixtures }
+  - { backend: deepseek-api, versions: [deepseek-chat, deepseek-reasoner], verification: live_smoke }
+config_schema:
+  type: object
+  additionalProperties: false
+  required: [model, api_key_file]
+  properties:
+    base_url: { type: string, format: uri, default: 'https://api.deepseek.com' }
+    model: { type: string, enum: [deepseek-chat, deepseek-reasoner] }
+    api_key_file: { type: string, x-srenautix-secret-ref: true }
+    timeout_ms: { type: integer, minimum: 1000 }
+required_scopes:
+  - 'model:POST /chat/completions'
+owner: srenautix-maintainers

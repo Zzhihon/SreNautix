@@ -1,0 +1,29 @@
+# OpenAI 兼容的 Chat Completions 方言（POST /v1/chat/completions），覆盖 vLLM、SGLang、llama.cpp、Ollama 与多数境内服务方。
+api_version: srenautix.io/integration/v1
+id: openai-compatible-chat
+display_name: OpenAI 兼容 · Chat Completions
+category: model
+direction: read
+tier: core
+contract: model/v1
+capabilities:
+  - { name: model.chat, stability: stable }
+  - { name: model.strict_json_schema, stability: beta }
+  - { name: model.native_tools, stability: beta }
+  - { name: model.dialect_probe, stability: stable }
+tested_versions:
+  - { backend: llama-server, versions: [b11742], verification: testcontainers }
+  - { backend: openai, versions: [chat-completions-2026], verification: recorded_fixtures }
+config_schema:
+  type: object
+  additionalProperties: false
+  required: [base_url, model, api_key_file]
+  properties:
+    base_url: { type: string, format: uri }
+    model: { type: string }
+    api_key_file: { type: string, x-srenautix-secret-ref: true }
+    ca_file: { type: string }
+    timeout_ms: { type: integer, minimum: 1000 }
+required_scopes:
+  - 'model:POST /v1/chat/completions'
+owner: srenautix-maintainers

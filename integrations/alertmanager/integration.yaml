@@ -1,0 +1,27 @@
+# 配置即 server 配置 ingest.sources 中 kind: alertmanager 的一项；60 秒对账使用 ingest.reconcile.alertmanager_url。
+# 建议这个接收器的 group_wait ≤30s。
+api_version: srenautix.io/integration/v1
+id: alertmanager
+display_name: Prometheus Alertmanager
+category: alerts
+direction: read
+tier: core
+contract: alerts/v1
+capabilities:
+  - { name: alerts.webhook, stability: stable }
+  - { name: alerts.reconcile, stability: stable }
+tested_versions:
+  - { backend: kube-prometheus-stack, versions: ['92.10.1'], verification: kind_e2e }
+  - { backend: alertmanager, versions: ['0.34.1'], verification: testcontainers }
+config_schema:
+  type: object
+  additionalProperties: false
+  required: [id, kind, token_file]
+  properties:
+    id: { type: string }
+    kind: { const: alertmanager }
+    token_file: { type: string, x-srenautix-secret-ref: true, description: webhook 的 bearer token 所在文件 }
+    cluster_id: { type: string }
+required_scopes:
+  - 'alertmanager:GET /api/v2/alerts'
+owner: srenautix-maintainers

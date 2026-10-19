@@ -1,0 +1,24 @@
+# GitLab CI 的部署：成功的 deployment 与流水线产出的镜像 digest 关联到运行中的 Pod。仓库提交本身由通用 git 适配器覆盖。
+api_version: srenautix.io/integration/v1
+id: gitlab
+display_name: GitLab CI
+category: changes
+direction: read
+tier: official_candidate
+contract: changes/v1
+capabilities:
+  - { name: changes.list, stability: beta }
+tested_versions:
+  - { backend: gitlab-ce, versions: ['18'], verification: testcontainers }
+config_schema:
+  type: object
+  additionalProperties: false
+  required: [url, projects, token_file]
+  properties:
+    url: { type: string, format: uri }
+    projects: { type: array, items: { type: string }, minItems: 1 }
+    token_file: { type: string, x-srenautix-secret-ref: true, description: read_api 范围的访问令牌 }
+    ca_file: { type: string }
+required_scopes:
+  - 'gitlab:read_api'
+owner: srenautix-maintainers

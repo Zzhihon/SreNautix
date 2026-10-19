@@ -1,0 +1,23 @@
+# 配置即 server 配置 ingest.sources 中 kind: grafana 的一项（Grafana 统一告警的 webhook 联系点）。
+api_version: srenautix.io/integration/v1
+id: grafana-alerting
+display_name: Grafana 告警
+category: alerts
+direction: read
+tier: official_candidate
+contract: alerts/v1
+capabilities:
+  - { name: alerts.webhook, stability: beta }
+tested_versions:
+  - { backend: grafana, versions: ['12'], verification: recorded_fixtures }
+config_schema:
+  type: object
+  additionalProperties: false
+  required: [id, kind, token_file]
+  properties:
+    id: { type: string }
+    kind: { const: grafana }
+    token_file: { type: string, x-srenautix-secret-ref: true }
+    cluster_id: { type: string }
+required_scopes: []
+owner: srenautix-maintainers

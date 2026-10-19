@@ -1,0 +1,64 @@
+{
+  "provenance": {
+    "provider": "llamacpp-qwen3-1.7b",
+    "model": "qwen3-1.7b",
+    "base_url_kind": "local",
+    "recorded_at": "2026-10-19T18:50:12.900Z",
+    "path": "/chat/completions"
+  },
+  "request": {
+    "model": "qwen3-1.7b",
+    "messages": [
+      {
+        "role": "system",
+        "content": "Output only JSON conforming to this schema: {\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"component\",\"verdict\",\"refs\"],\"properties\":{\"component\":{\"type\":\"string\",\"enum\":[\"Deployment:shop/api\",\"StatefulSet:shop/postgres\"]},\"verdict\":{\"type\":\"string\",\"enum\":[\"abnormal\",\"normal\"]},\"refs\":{\"type\":\"array\",\"items\":{\"type\":\"string\",\"enum\":[\"card:1\",\"card:2\"]}}}}"
+      },
+      {
+        "role": "user",
+        "content": "card:1 says the api Deployment error rate is 30% since 10:02. card:2 says postgres connections are at 100% since 10:00. Which component is the root cause? Answer in JSON."
+      }
+    ],
+    "max_completion_tokens": 4096,
+    "response_format": {
+      "type": "json_object"
+    }
+  },
+  "status": 200,
+  "body": {
+    "choices": [
+      {
+        "finish_reason": "stop",
+        "index": 0,
+        "message": {
+          "role": "assistant",
+          "content": "{\"component\":\"Deployment:shop/api\",\"verdict\":\"abnormal\",\"refs\":[\"card:1\"]}",
+          "reasoning_content": "Okay, let me try to figure this out. The user is asking which component is the root cause based on the two cards provided.\n\nFirst, the problem statement says that card:1 mentions the API Deployment has an error rate of 30% since 10:02. Card:2 states that PostgreSQL connections are at 100% since 10:00. The components are either Deployment:shop/api or StatefulSet:shop/postgres.\n\nSo, the API Deployment is causing the error rate to be 30%, which is a problem. The PostgreSQL connections are at 100%, but the component here is the StatefulSet for PostgreSQL. However, the error rate in the API is a separate issue. The root cause would be the API Deployment because it's the one with the error rate. But wait, the user is asking which component is the root cause. The answer needs to be either the Deployment or the StatefulSet. Since the API Deployment is the one with the error rate, that's the root cause. The PostgreSQL connections being at 100% might be a separate issue, but the error rate in the API is more directly causing the problem. So the component should be Deployment:shop/api with verdict \"abnormal\" and the refs would be card:1. The other card is about PostgreSQL, but the root cause is the API deployment.\n"
+        }
+      }
+    ],
+    "created": 1792435812,
+    "model": "qwen3-1.7b",
+    "system_fingerprint": "b11738-f174553e1",
+    "object": "chat.completion",
+    "usage": {
+      "completion_tokens": 312,
+      "prompt_tokens": 158,
+      "total_tokens": 470,
+      "prompt_tokens_details": {
+        "cached_tokens": 0
+      }
+    },
+    "id": "chatcmpl-1LiA206bIVKURRrPJDGhrmwDA75mxfWD",
+    "timings": {
+      "cache_n": 0,
+      "prompt_n": 158,
+      "prompt_ms": 129.415,
+      "prompt_per_token_ms": 0.8190822784810126,
+      "prompt_per_second": 1220.8785689448675,
+      "predicted_n": 312,
+      "predicted_ms": 5491.725,
+      "predicted_per_token_ms": 17.658279742765274,
+      "predicted_per_second": 56.63065794445279
+    }
+  }
+}

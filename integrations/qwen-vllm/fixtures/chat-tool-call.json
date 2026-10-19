@@ -1,0 +1,87 @@
+{
+  "provenance": {
+    "provider": "llamacpp-qwen3-1.7b",
+    "model": "qwen3-1.7b",
+    "base_url_kind": "local",
+    "recorded_at": "2026-10-19T18:50:18.006Z",
+    "path": "/chat/completions"
+  },
+  "request": {
+    "model": "qwen3-1.7b",
+    "messages": [
+      {
+        "role": "user",
+        "content": "Check the current value of up{job=\"api\"} with the tool."
+      }
+    ],
+    "max_completion_tokens": 4096,
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "metrics_query",
+          "description": "Run an instant PromQL query.",
+          "parameters": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["query"],
+            "properties": {
+              "query": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    ],
+    "tool_choice": "required"
+  },
+  "status": 200,
+  "body": {
+    "choices": [
+      {
+        "finish_reason": "tool_calls",
+        "index": 0,
+        "message": {
+          "role": "assistant",
+          "content": "",
+          "reasoning_content": "Okay, the user wants to check the current value of up{job=\"api\"} using the tool. Let me see. The available tool is metrics_query, which runs an instant PromQL query. The parameters require a query string.\n\nThe user's query is specific: they want the current value of the metric up{job=\"api\"}. In PromQL, the current value would be obtained by using the instant() function, but sometimes people just use the metric name directly. Wait, but the instant() function is used to get the current value of a metric. So maybe the correct query is instant(up{job=\"api\"}). However, I need to check if the tool expects the query to be in a specific format.\n\nThe function's parameters require a \"query\" string. So the user's request is to run a PromQL query that returns the current value of up{job=\"api\"}. The correct PromQL for that would be instant(up{job=\"api\"}). But I should make sure that the tool accepts that query. The function's description says it runs an instant PromQL query, so I think that's the right approach.\n\nTherefore, the tool call should be metrics_query with the argument {\"query\": \"instant(up{job=\\\"api\\\"})\"}.\n",
+          "tool_calls": [
+            {
+              "type": "function",
+              "function": {
+                "name": "metrics_query",
+                "arguments": "{\"query\": \"instant(up{job=\\\"api\\\"})\"}"
+              },
+              "id": "KH2oFpCflhhxVCq9uZMg9jc6JNQOXGBr"
+            }
+          ]
+        }
+      }
+    ],
+    "created": 1792435818,
+    "model": "qwen3-1.7b",
+    "system_fingerprint": "b11738-f174553e1",
+    "object": "chat.completion",
+    "usage": {
+      "completion_tokens": 290,
+      "prompt_tokens": 167,
+      "total_tokens": 457,
+      "prompt_tokens_details": {
+        "cached_tokens": 166
+      }
+    },
+    "id": "chatcmpl-Si3vTxD6LgCkgouCwU7BcNAaBdy9br5m",
+    "timings": {
+      "cache_n": 166,
+      "prompt_n": 1,
+      "prompt_ms": 31.665,
+      "prompt_per_token_ms": 31.665,
+      "prompt_per_second": 31.580609505763462,
+      "predicted_n": 290,
+      "predicted_ms": 4943.005,
+      "predicted_per_token_ms": 17.103823529411766,
+      "predicted_per_second": 58.46645916805668
+    }
+  }
+}

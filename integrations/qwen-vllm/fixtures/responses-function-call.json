@@ -1,0 +1,74 @@
+{
+  "provenance": {
+    "provider": "llamacpp-qwen3-1.7b",
+    "model": "qwen3-1.7b",
+    "base_url_kind": "local",
+    "recorded_at": "2026-10-19T18:49:42.923Z",
+    "path": "/responses"
+  },
+  "request": {
+    "model": "qwen3-1.7b",
+    "input": "Check the current value of up{job=\"api\"} with the tool.",
+    "max_output_tokens": 4096,
+    "store": false,
+    "tools": [
+      {
+        "type": "function",
+        "name": "metrics_query",
+        "description": "Run an instant PromQL query.",
+        "parameters": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["query"],
+          "properties": {
+            "query": {
+              "type": "string"
+            }
+          }
+        },
+        "strict": false
+      }
+    ],
+    "tool_choice": "required"
+  },
+  "status": 200,
+  "body": {
+    "completed_at": 1792435782,
+    "created_at": 1792435782,
+    "id": "resp_eH491uCAUGbskCWmXyBBeNrhFff34LoK",
+    "model": "qwen3-1.7b",
+    "object": "response",
+    "output": [
+      {
+        "id": "rs_gbGbWEuQajn41jl7hj3d4q4EfRy5BBoV",
+        "summary": [],
+        "type": "reasoning",
+        "content": [
+          {
+            "text": "Okay, the user wants to check the current value of up{job=\"api\"} using the tool. Let me see. The available tool is metrics_query, which runs an instant PromQL query. The parameters require a query string.\n\nThe user's query is specific: they want the current value of the metric up with the job set to api. In Prometheus, the up metric is typically monitored by the kubelet or similar components, and the job label might be set to \"api\" for the API server. \n\nSo, the correct PromQL query would be up{job=\"api\"}. I need to make sure that the query is correctly formatted. The metrics_query function requires the \"query\" parameter, so I'll structure the tool call with that exact query. \n\nI should check if there are any other parameters needed, but the function only requires the query. No other parameters are necessary here. Therefore, the tool call should be straightforward.\n",
+            "type": "reasoning_text"
+          }
+        ],
+        "encrypted_content": "",
+        "status": "completed"
+      },
+      {
+        "id": "fc_HY8NJbVlY7xi4K7JmSMbWeElCwU6P1eo",
+        "type": "function_call",
+        "status": "completed",
+        "arguments": "{\"query\": \"up{job=\\\"api\\\"}\"}",
+        "call_id": "call_HY8NJbVlY7xi4K7JmSMbWeElCwU6P1eo",
+        "name": "metrics_query"
+      }
+    ],
+    "status": "completed",
+    "usage": {
+      "input_tokens": 167,
+      "output_tokens": 221,
+      "total_tokens": 388,
+      "input_tokens_details": {
+        "cached_tokens": 0
+      }
+    }
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "source": "卡片回调 card.action.trigger（schema 2.0，未配置 Encrypt Key 时的明文请求体）。action.value、context.open_chat_id、header.create_time 由测试按场景替换",
+  "body": {
+    "schema": "2.0",
+    "header": {
+      "event_id": "a1b2c3d4e5f60718293a4b5c6d7e8f90",
+      "token": "v3rificati0nT0kenForTests",
+      "create_time": "1792400000000000",
+      "event_type": "card.action.trigger",
+      "tenant_key": "2df73991750a7aaa",
+      "app_id": "cli_a5fb0ae6a4000000"
+    },
+    "event": {
+      "operator": {
+        "tenant_key": "2df73991750a7aaa",
+        "user_id": "8673abcd",
+        "open_id": "ou_3c14f3a59eaf2825dbe25359f15e1001",
+        "union_id": "on_cad4860e7af114fb4ff6c5d496d1001"
+      },
+      "token": "c-295ee57216a5dc9de90fefd0aadb4b1d7d000000",
+      "action": {
+        "value": { "k": "Fsh0rtIdAbCdEf12", "s": "1xYaq1n9bxEclGWQ" },
+        "tag": "button",
+        "name": "b_Fsh0rtIdAbCdEf12"
+      },
+      "host": "im_message",
+      "context": {
+        "open_message_id": "om_574d639e4a44e4dd646eaf628e2f0001",
+        "open_chat_id": "oc_e4d2605ca917e695f54f11aaf56f0001"
+      }
+    }
+  }
+}

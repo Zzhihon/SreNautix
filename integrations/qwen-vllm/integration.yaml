@@ -1,0 +1,30 @@
+# vLLM 上的 Qwen 档案：自托管、境内。严格 JSON Schema 走 guided decoding；工具调用需要 vLLM 以 --enable-auto-tool-choice 与 hermes 解析器启动。
+# 方言探测在 CI 中用 llama.cpp 加载 Qwen2.5 GGUF 小模型执行；部署到 vLLM 时由启动探测重新测量方言档案。
+api_version: srenautix.io/integration/v1
+id: qwen-vllm
+display_name: Qwen（vLLM）
+category: model
+direction: read
+tier: core
+contract: model/v1
+capabilities:
+  - { name: model.chat, stability: stable }
+  - { name: model.strict_json_schema, stability: beta }
+  - { name: model.native_tools, stability: beta }
+  - { name: model.dialect_probe, stability: stable }
+tested_versions:
+  - { backend: llama-server, versions: ['b11742 + Qwen2.5-0.5B-Instruct Q4_K_M'], verification: testcontainers }
+config_schema:
+  type: object
+  additionalProperties: false
+  required: [base_url, model]
+  properties:
+    base_url: { type: string, format: uri }
+    model: { type: string, description: 'vLLM 的 --served-model-name，例如 Qwen3-32B' }
+    api_key_file: { type: string, x-srenautix-secret-ref: true, description: vLLM 以 --api-key 启动时填写 }
+    ca_file: { type: string }
+    timeout_ms: { type: integer, minimum: 1000 }
+required_scopes:
+  - 'model:POST /v1/chat/completions'
+  - 'model:GET /v1/models'
+owner: srenautix-maintainers
