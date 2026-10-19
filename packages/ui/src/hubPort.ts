@@ -2,12 +2,13 @@
 // 共用这一份实现，区别只在 baseUrl：控制台直接访问中心，插件经插件后端的资源路径转发（只读与反馈）。
 // 非 2xx 一律抛出 ApiError，保留状态码与契约错误码。
 
-import { createHubClient } from '@srenautix/contract';
-import type { Middleware } from 'openapi-fetch';
+import type { HubPaths } from '@srenautix/contract';
+import createClient, { type Client, type Middleware } from 'openapi-fetch';
 import type { Proposal } from './contract';
 import { ApiError, type ActionPort, type DataPort } from './port';
 
-type HubClient = ReturnType<typeof createHubClient>;
+// 只引用契约的类型：@srenautix/contract 的运行时入口带着全部 JSON Schema 与 Ajv，浏览器端不需要
+type HubClient = Client<HubPaths>;
 
 interface Outcome {
   data?: unknown;
@@ -47,14 +48,14 @@ export interface HubPortOptions {
 }
 
 export function createHubClientFor(o: Pick<HubPortOptions, 'baseUrl' | 'csrf' | 'fetch'>): HubClient {
-  const client = createHubClient({ baseUrl: o.baseUrl, fetch: o.fetch, credentials: 'same-origin' });
+  const client = createClient<HubPaths>({ baseUrl: o.baseUrl, fetch: o.fetch, credentials: 'same-origin' });
   const csrf: Middleware = {
     onRequest({ request }) {
-      if (request.method !== 'GET') {
-        const token = o.csrf();
-        if (token !== null) {
-          request.headers.set('X-CSRF-Token', token);
-        }
+      const token = o.csrf();
+      if (request.method !== 'GET' && token !== null) {
+        request.headers.set('X-CSRF-Token', token);
+      } else {
+        request.headers.delete('X-CSRF-Token');
       }
       return request;
     },

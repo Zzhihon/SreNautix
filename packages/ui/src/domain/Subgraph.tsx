@@ -3,7 +3,7 @@
 
 import { Background, Handle, Position, ReactFlow, type Edge, type Node, type NodeProps } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import ELK from 'elkjs/lib/elk.bundled.js';
+import type { ELK as ElkApi } from 'elkjs/lib/elk-api.js';
 import { useEffect, useState } from 'react';
 import type { IncidentSubgraph } from '../contract';
 import { useI18n } from '../i18n';
@@ -17,7 +17,13 @@ type SubData = { n: SubNode; roleText: string; alertsText: string };
 
 const NODE_W = 180;
 const NODE_H = 52;
-const elk = new ELK();
+
+// elkjs 打包后约 1.5 MB，只有打开事件详情时才加载
+let elkPromise: Promise<ElkApi> | null = null;
+function loadElk(): Promise<ElkApi> {
+  elkPromise ??= import('elkjs/lib/elk.bundled.js').then((m) => new m.default());
+  return elkPromise;
+}
 
 function ComponentNode({ data }: NodeProps<Node<SubData>>) {
   const l = componentLabel(data.n.component);
@@ -40,6 +46,7 @@ const nodeTypes = { component: ComponentNode };
 
 /** elkjs 分层布局，返回每个节点的左上角坐标。 */
 export async function layoutSubgraph(g: IncidentSubgraph): Promise<Map<string, { x: number; y: number }>> {
+  const elk = await loadElk();
   const res = await elk.layout({
     id: 'root',
     layoutOptions: {
