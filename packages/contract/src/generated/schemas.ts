@@ -1,5 +1,5 @@
 // 本文件由 packages/contract/scripts/gen.ts 从 contract/ 生成，不要手工修改。
-export const CONTRACT_VERSION = '2.2.0';
+export const CONTRACT_VERSION = '2.3.0';
 
 export const SCHEMAS: Record<string, Record<string, unknown>> = {
   'https://srenautix.io/contract/gateway/v1/action-catalog.schema.json': {
@@ -2797,8 +2797,8 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
           source: {
             type: 'string',
             description:
-              'alert：有指向它的 cause/change 告警；change：有触及它的变更；probe：沉默根因探测卡异常；symptom：只有症状告警',
-            enum: ['alert', 'change', 'probe', 'symptom'],
+              'alert：有指向它的 cause/change 告警；change：有触及它的变更；hub：没有告警的集群枢纽，至少 3 个独立依赖方同时出现告警；probe：沉默根因探测卡异常；symptom：只有症状告警',
+            enum: ['alert', 'change', 'hub', 'probe', 'symptom'],
           },
         },
       },
