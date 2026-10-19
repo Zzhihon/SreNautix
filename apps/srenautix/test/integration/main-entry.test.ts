@@ -29,6 +29,22 @@ describe('main.ts', () => {
     expect(r.out).not.toContain("Unknown option '--cases'");
   });
 
+  it('pack 子命令交给领域包命令：lint 仓库的 _example 包通过', () => {
+    // 动作目录的默认路径相对于工作目录（镜像中为 /app），这里显式给出
+    const r = main([
+      'pack',
+      'lint',
+      '--packs',
+      resolve(APP, '../../packs'),
+      '--only',
+      '_example',
+      '--catalog',
+      resolve(APP, '../../contract/gateway/v1/action-catalog.yaml'),
+    ]);
+    expect(r.status, r.out).toBe(0);
+    expect(main(['pack']).status).toBe(2);
+  });
+
   it('角色参数仍然严格解析', () => {
     const r = main(['--role=nope']);
     expect(r.status).toBe(1);

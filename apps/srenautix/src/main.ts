@@ -11,6 +11,7 @@ import { logger } from './log.js';
  *   main.js db bootstrap|contract --config=…
  *   main.js audit verify --config=…
  *   main.js eval [import-seed] …（参数见 eval/cli.ts 与 docs/eval/）
+ *   main.js pack lint|lock|test|record|doctor …（packages/packs-sdk 的 runPackCli，见 docs/packs/）
  *
  * 每个角色的实现是 roles/<role>.js 的 run(argv)；worker 与 mcp 由 hub-worker 维护。
  */
@@ -33,6 +34,11 @@ async function main(): Promise<void> {
     const { runEvalCli } = await import('./eval/cli.js');
     const r = await runEvalCli(process.argv.slice(3));
     process.exit(r.gatePassed === false ? 1 : 0);
+  }
+  // 领域包子命令（lint、lock、test、record、doctor）由 packs-sdk 实现，参数同样在严格解析之前分出
+  if (process.argv[2] === 'pack') {
+    const { runPackCli } = await import('@srenautix/packs-sdk');
+    process.exit(await runPackCli(process.argv.slice(3)));
   }
   const { values, positionals } = parseArgs({
     allowPositionals: true,
