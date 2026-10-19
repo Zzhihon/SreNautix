@@ -1,5 +1,5 @@
 // 控制台 e2e 的真实后端：一次性 PostgreSQL、envtest（真实 etcd 与 kube-apiserver）、真实的 server 角色
-// （apps/srenautix 的入口，按生产方式用配置文件启动），以及 vite preview 提供构建后的控制台并把 /v1 转发到 server。
+// （apps/srenautix 的入口，按生产方式用配置文件启动，同时提供构建后的控制台页面），可选的真实 OIDC 身份提供方。
 // 种子数据全部经真实接口写入：Kubernetes 对象写进 apiserver 由 server 的 informer 读到；告警经 Alertmanager
 // webhook 接入；提议由 worker 身份经 /v1/research/claim 与 /v1/proposals 提交；集群状态由 gateway 心跳上报。
 
@@ -12,6 +12,7 @@ import { Secret, TOTP } from 'otpauth';
 import { stringify } from 'yaml';
 import { hashPassword } from '../../../apps/srenautix/src/identity/password.ts';
 import { ADMIN_TOKEN, startEnvTest, type EnvTest } from '../../../apps/srenautix/test/support/envtest.ts';
+import { startIdp, type TestAccount, type TestIdp } from '../../../apps/srenautix/test/support/oidc.ts';
 import { startCluster, type TestCluster } from '../../../apps/srenautix/test/support/pg-cluster.ts';
 
 export const REPO = resolve(import.meta.dirname, '../../..');
@@ -239,13 +240,27 @@ export interface Running {
   stop(): Promise<void>;
 }
 
-export async function startHub(): Promise<Running> {
+export interface HubOptions {
+  /** 启动真实的 OIDC 身份提供方（node-oidc-provider），server 以它为 OIDC 登录；bindings 追加到角色绑定。 */
+  oidc?: {
+    accounts: TestAccount[];
+    bindings: Array<{
+      subject: { kind: 'user' | 'group'; name: string };
+      role: string;
+      scope: { clusters: string[]; namespaces: string[] };
+    }>;
+  };
+}
+
+export async function startHub(opts: HubOptions = {}): Promise<Running> {
   rmSync(SCRATCH, { recursive: true, force: true });
   mkdirSync(SCRATCH, { recursive: true });
   const procs: ChildProcess[] = [];
   let pg: TestCluster | null = null;
   let kubeEnv: EnvTest | null = null;
+  let idp: TestIdp | null = null;
   const stop = async () => {
+    await idp?.close();
     for (const p of procs.reverse()) {
       if (p.exitCode === null) {
         await new Promise<void>((res) => {
@@ -268,8 +283,9 @@ export async function startHub(): Promise<Running> {
     await seedKube(kubeEnv);
 
     const apiPort = await freePort();
-    const consolePort = await freePort();
-    const consoleUrl = `http://localhost:${consolePort}`;
+    // 浏览器在 localhost 上接受 Secure 与 __Host- 前缀的 cookie（安全上下文），所以对外地址用 localhost
+    const consoleUrl = `http://localhost:${apiPort}`;
+    idp = opts.oidc ? await startIdp(`${consoleUrl}/v1/auth/oidc/callback`, opts.oidc.accounts) : null;
     const totp = new TOTP({ secret: new Secret({ size: 20 }), digits: 6, period: 30, algorithm: 'SHA1' });
     const signing = generateKeyPairSync('ed25519');
     const checkpoint = generateKeyPairSync('ed25519');
@@ -278,8 +294,9 @@ export async function startHub(): Promise<Running> {
       profile: 'standard',
       log_level: 'info',
       public_url: consoleUrl,
+      console: { dir: join(REPO, 'web', 'console', 'dist') },
       listen: {
-        api: `127.0.0.1:${apiPort}`,
+        api: `localhost:${apiPort}`,
         metrics: `127.0.0.1:${await freePort()}`,
         probes: `127.0.0.1:${await freePort()}`,
       },
@@ -332,6 +349,15 @@ export async function startHub(): Promise<Running> {
           password_hash_file: file('admin.hash', await hashPassword(ADMIN.password)),
           totp_secret_file: file('admin.totp', totp.secret.base32),
         },
+        ...(idp
+          ? {
+              oidc: {
+                issuer: idp.issuer,
+                client_id: idp.clientId,
+                client_secret_file: file('oidc-client-secret', idp.clientSecret),
+              },
+            }
+          : {}),
         bindings_dir: resolve(
           file(
             'bindings/admin.yaml',
@@ -342,6 +368,7 @@ export async function startHub(): Promise<Running> {
                   role: 'admin',
                   scope: { clusters: ['*'], namespaces: ['*'] },
                 },
+                ...(opts.oidc?.bindings ?? []),
               ],
             }),
           ),
@@ -373,28 +400,11 @@ export async function startHub(): Promise<Running> {
       app,
     );
     procs.push(server);
-    const apiUrl = `http://127.0.0.1:${apiPort}`;
+    const apiUrl = consoleUrl;
     await waitOk(`${apiUrl}/readyz`, 'server 就绪');
 
-    // 构建后的控制台由 vite preview 提供，/v1 转发到 server（与同源部署等价：cookie 与 Origin 都是控制台地址）
-    const web = join(REPO, 'web', 'console');
-    const preview = spawnLogged(
-      'preview',
-      process.execPath,
-      [
-        join(REPO, 'node_modules', 'vite', 'bin', 'vite.js'),
-        'preview',
-        '--port',
-        String(consolePort),
-        '--strictPort',
-        '--host',
-        'localhost',
-      ],
-      { SRENAUTIX_HUB_URL: apiUrl },
-      web,
-    );
-    procs.push(preview);
-    await waitOk(`${consoleUrl}/`, 'vite preview 就绪');
+    // 控制台由 server 自己提供（console.dir 指向构建产物），与生产部署相同：页面、/v1 与 cookie 同源
+    await waitOk(`${consoleUrl}/`, '控制台页面');
 
     // ---- 经真实接口写入种子数据 ----
     const api = apiClient(apiUrl);
