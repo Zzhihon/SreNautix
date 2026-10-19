@@ -10,6 +10,7 @@
 | `v1/action-catalog.schema.json`、`v1/action-catalog.yaml` | 动作目录：等级、档位、目标、参数、冲突域、预检、校验、撤销、爆炸半径、写入 |
 | `v1/gateway-policy.schema.json` | gateway 策略：启用的动作与命名空间、自动执行、自身依赖、审批人作用域、工作流模板白名单、GitOps 仓库白名单 |
 | `v1/openapi.yaml` | 工单协议：长轮询拉取工单、推送执行事件、复核绑定、心跳 |
+| `v1/reader.openapi.yaml` | reader 协议：会话、拓扑快照与事件、告警对账快照、长轮询领取读取请求并回传结果、心跳 |
 | `v1/crd/srenautix.io_actionexecutions.yaml` | `ActionExecution` CRD（执行状态与阶段） |
 | `v1/audit-record.schema.json` | 执行审计链的一行记录 |
 | `v1/testvectors/approval-vectors.json` | 规范化、哈希、签名与每个校验原因码的黄金向量，Go 与 TS 必须给出相同结果 |

@@ -1,0 +1,585 @@
+openapi: 3.1.0
+info:
+  title: SreNautix hub ⇄ spoke reader protocol
+  version: 1.0.0
+  description: |
+    中心（hub，server 角色）提供、分支 reader 调用的接口（DESIGN §1.1、§3.1、§3.3、§4.1、§6.1、§15.1）。
+    reader 只发起出站请求：推送拓扑事件与快照、推送告警对账快照、长轮询领取中心的读取请求（声明式证据查询、
+    kube-state-metrics 历史重建、实体解析）并回传结果、上报心跳。中心不持有任何成员集群的凭证。
+
+    鉴权与 gateway 的工单协议相同：每个分支一个 bearer token，请求头 X-SreNautix-Cluster 必须等于 token 对应的集群。
+
+    拓扑的同步：
+    - 集群内拓扑事件的 seq 连续递增。中心记录已连续接受的最大 seq（topology_seq）。
+    - reader 每次连接（hello）都上传完整快照，快照的 seq 不小于中心返回的 topology_seq；随后只推送 seq 大于快照 seq 的事件。
+    - 中心收到 seq 不连续的事件时返回 409 topology_seq_gap，reader 重新上传快照。
+    - seq 不大于 topology_seq 的事件已被快照或之前的推送覆盖，中心忽略它们（同一批中其余事件照常接受）。
+    - 快照按 snapshot_id 分段上传，全部分段到齐后中心一次应用：快照中不存在的节点和边在 taken_at 关闭，存在的保持或打开。
+    - 事件按 event_id 去重；重复推送同一批事件不会产生第二次变更。
+
+    读取请求：
+    - 中心只下发由领域包证据卡模板渲染的查询：template_id + content_hash + 参数；查询文本由 reader 按挂载的模板清单渲染。
+    - 中心在收到某请求的结果、或请求超过 deadline 后不再下发它。结果按 request_id 去重。
+  license:
+    name: Apache-2.0
+    identifier: Apache-2.0
+servers:
+  - url: https://srenautix.example
+security:
+  - spokeToken: []
+paths:
+  /v1/spoke/reader/hello:
+    post:
+      operationId: readerHello
+      summary: reader 建立会话，取回中心已接受的拓扑序号
+      parameters:
+        - $ref: '#/components/parameters/Cluster'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ReaderHello'}
+      responses:
+        '200':
+          description: 会话信息
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReaderSession'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '401': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '503': {$ref: '#/components/responses/Problem'}
+  /v1/spoke/reader/topology/snapshot:
+    put:
+      operationId: putTopologySnapshot
+      summary: 上传完整拓扑快照的一个分段；全部分段到齐后中心一次应用
+      parameters:
+        - $ref: '#/components/parameters/Cluster'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/TopologySnapshotPart'}
+      responses:
+        '200':
+          description: 已接受；complete 为 true 表示快照已应用
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/TopologyAck'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '401': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+        '503': {$ref: '#/components/responses/Problem'}
+  /v1/spoke/reader/topology/events:
+    post:
+      operationId: pushTopologyEvents
+      summary: 推送拓扑事件（按 seq 连续，按 event_id 去重）
+      parameters:
+        - $ref: '#/components/parameters/Cluster'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [events]
+              properties:
+                events:
+                  type: array
+                  minItems: 1
+                  maxItems: 1000
+                  items: {$ref: '../../schemas/topology-event.schema.json'}
+      responses:
+        '200':
+          description: 已接受
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/TopologyAck'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '401': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '409':
+          description: topology_seq_gap（第一条事件的 seq 大于 topology_seq + 1）或 resync_required（中心的拓扑状态已重置）；reader 重新上传快照
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Problem'}
+        '503': {$ref: '#/components/responses/Problem'}
+  /v1/spoke/reader/alerts:
+    post:
+      operationId: pushAlertReconcile
+      summary: 推送告警对账快照（每 60 秒一次，DESIGN §3.1）
+      parameters:
+        - $ref: '#/components/parameters/Cluster'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AlertReconcileSnapshot'}
+      responses:
+        '200':
+          description: 已接受
+          content:
+            application/json:
+              schema: {$ref: 'openapi.yaml#/components/schemas/HubClock'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '401': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '503': {$ref: '#/components/responses/Problem'}
+  /v1/spoke/reader/requests:
+    get:
+      operationId: pullReaderRequests
+      summary: 长轮询领取中心的读取请求
+      parameters:
+        - $ref: '#/components/parameters/Cluster'
+        - name: wait
+          in: query
+          required: false
+          schema: {type: integer, minimum: 0, maximum: 60, default: 30}
+        - name: max
+          in: query
+          required: false
+          schema: {type: integer, minimum: 1, maximum: 100, default: 20}
+      responses:
+        '200':
+          description: 请求列表（可以为空）
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReaderRequestBatch'}
+        '401': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '503': {$ref: '#/components/responses/Problem'}
+  /v1/spoke/reader/results:
+    post:
+      operationId: pushReaderResults
+      summary: 回传读取请求的结果（按 request_id 去重）
+      parameters:
+        - $ref: '#/components/parameters/Cluster'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [results]
+              properties:
+                results:
+                  type: array
+                  minItems: 1
+                  maxItems: 100
+                  items: {$ref: '#/components/schemas/ReaderResult'}
+      responses:
+        '200':
+          description: 每个结果的处理情况
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [accepted, duplicates]
+                properties:
+                  accepted: {type: array, items: {type: string}}
+                  duplicates: {type: array, items: {type: string}}
+        '400': {$ref: '#/components/responses/Problem'}
+        '401': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '503': {$ref: '#/components/responses/Problem'}
+  /v1/spoke/reader/heartbeat:
+    post:
+      operationId: readerHeartbeat
+      summary: 上报 reader 的状态条件、apiserver 时间参考与拓扑版本
+      parameters:
+        - $ref: '#/components/parameters/Cluster'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ReaderHeartbeat'}
+      responses:
+        '200':
+          description: 中心时间
+          content:
+            application/json:
+              schema: {$ref: 'openapi.yaml#/components/schemas/HubClock'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '401': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '503': {$ref: '#/components/responses/Problem'}
+components:
+  securitySchemes:
+    spokeToken:
+      type: http
+      scheme: bearer
+  parameters:
+    Cluster:
+      name: X-SreNautix-Cluster
+      in: header
+      required: true
+      schema: {$ref: 'openapi.yaml#/components/schemas/ClusterId'}
+  responses:
+    Problem:
+      description: 错误
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Problem'}
+  schemas:
+    Problem:
+      $ref: 'openapi.yaml#/components/schemas/Problem'
+    Timestamp:
+      $ref: 'openapi.yaml#/components/schemas/Timestamp'
+    Uuid:
+      $ref: 'openapi.yaml#/components/schemas/Uuid'
+    Labels:
+      type: object
+      additionalProperties: {type: string}
+    ReaderHello:
+      type: object
+      additionalProperties: false
+      required: [reader_id, version, boot_id]
+      properties:
+        reader_id:
+          description: reader Pod 名。
+          type: string
+          minLength: 1
+        version: {type: string}
+        boot_id:
+          description: 进程启动时生成，每次重启不同。
+          $ref: '#/components/schemas/Uuid'
+    ReaderSession:
+      allOf:
+        - $ref: 'openapi.yaml#/components/schemas/HubClock'
+        - type: object
+          required: [topology_seq]
+          properties:
+            topology_seq:
+              description: 中心已连续接受的最大拓扑序号；没有接受过任何事件时为 0。reader 的新快照与事件序号都大于它。
+              type: integer
+              minimum: 0
+    TopologyAck:
+      allOf:
+        - $ref: 'openapi.yaml#/components/schemas/HubClock'
+        - type: object
+          required: [topology_seq, complete]
+          properties:
+            topology_seq: {type: integer, minimum: 0}
+            complete:
+              description: 事件推送时恒为 true；快照分段上传时，全部分段到齐并应用后为 true。
+              type: boolean
+    SnapshotNode:
+      type: object
+      additionalProperties: false
+      required: [node, valid_from]
+      properties:
+        node: {$ref: '../../schemas/topology-event.schema.json#/$defs/Node'}
+        valid_from: {$ref: '#/components/schemas/Timestamp'}
+    SnapshotEdge:
+      type: object
+      additionalProperties: false
+      required: [edge, valid_from]
+      properties:
+        edge: {$ref: '../../schemas/topology-event.schema.json#/$defs/Edge'}
+        valid_from: {$ref: '#/components/schemas/Timestamp'}
+    TopologySnapshotPart:
+      type: object
+      additionalProperties: false
+      required: [snapshot_id, seq, taken_at, part, parts, nodes, edges]
+      properties:
+        snapshot_id: {$ref: '#/components/schemas/Uuid'}
+        seq:
+          description: 快照对应的拓扑序号；中心应用快照后 topology_seq 等于它。
+          type: integer
+          minimum: 0
+        taken_at: {$ref: '#/components/schemas/Timestamp'}
+        part: {type: integer, minimum: 1}
+        parts: {type: integer, minimum: 1}
+        nodes:
+          type: array
+          maxItems: 5000
+          items: {$ref: '#/components/schemas/SnapshotNode'}
+        edges:
+          type: array
+          maxItems: 5000
+          items: {$ref: '#/components/schemas/SnapshotEdge'}
+    AlertmanagerAlert:
+      description: Alertmanager v2 GET /api/v2/alerts 中对账需要的字段，原样转发。
+      type: object
+      required: [fingerprint, labels, annotations, startsAt, endsAt, updatedAt, status]
+      properties:
+        fingerprint: {type: string}
+        labels: {$ref: '#/components/schemas/Labels'}
+        annotations: {$ref: '#/components/schemas/Labels'}
+        startsAt: {type: string}
+        endsAt: {type: string}
+        updatedAt: {type: string}
+        generatorURL: {type: string}
+        status:
+          type: object
+          required: [state, silencedBy, inhibitedBy]
+          properties:
+            state: {type: string, enum: [active, suppressed, unprocessed]}
+            silencedBy: {type: [array, 'null'], items: {type: string}}
+            inhibitedBy: {type: [array, 'null'], items: {type: string}}
+    RuleAlert:
+      description: 本地指标后端中 ALERTS 的一条（标签不含 __name__ 与 alertstate），active_at 取自 ALERTS_FOR_STATE。
+      type: object
+      additionalProperties: false
+      required: [labels, state, active_at]
+      properties:
+        labels: {$ref: '#/components/schemas/Labels'}
+        state: {type: string, enum: [pending, firing]}
+        active_at:
+          oneOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+    AlertmanagerPart:
+      type: object
+      additionalProperties: false
+      required: [status, truncated, items]
+      properties:
+        status: {type: string, enum: [ok, error]}
+        error: {type: string}
+        truncated:
+          description: 为 true 时条目被截断；status 为 error 或 truncated 为 true 时，中心不据此判断告警已消失。
+          type: boolean
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/AlertmanagerAlert'}
+    RulesPart:
+      type: object
+      additionalProperties: false
+      required: [status, truncated, items]
+      properties:
+        status: {type: string, enum: [ok, error]}
+        error: {type: string}
+        truncated: {type: boolean}
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/RuleAlert'}
+    AlertReconcileSnapshot:
+      type: object
+      additionalProperties: false
+      required: [cluster_id, taken_at, alertmanager, rules]
+      properties:
+        cluster_id: {$ref: 'openapi.yaml#/components/schemas/ClusterId'}
+        taken_at:
+          description: apiserver 参考时间。
+          $ref: '#/components/schemas/Timestamp'
+        alertmanager:
+          description: 没有配置本集群 Alertmanager 时为 null。
+          oneOf:
+            - $ref: '#/components/schemas/AlertmanagerPart'
+            - type: 'null'
+        rules:
+          description: 没有配置本地指标后端时为 null。
+          oneOf:
+            - $ref: '#/components/schemas/RulesPart'
+            - type: 'null'
+    DeclaredQuery:
+      description: 声明式证据查询。time 与 start/end/step 二选一。
+      type: object
+      additionalProperties: false
+      required: [datasource, template_id, content_hash, params]
+      properties:
+        datasource: {type: string, minLength: 1}
+        template_id: {type: string, minLength: 1}
+        content_hash: {$ref: 'openapi.yaml#/components/schemas/Sha256'}
+        params:
+          type: object
+          additionalProperties:
+            oneOf:
+              - type: string
+              - type: number
+              - type: array
+                items: {type: string}
+        time: {$ref: '#/components/schemas/Timestamp'}
+        start: {$ref: '#/components/schemas/Timestamp'}
+        end: {$ref: '#/components/schemas/Timestamp'}
+        step: {type: string, pattern: '^([0-9]+(ms|s|m|h|d|w|y))+$'}
+        timeout: {type: string, pattern: '^([0-9]+(ms|s|m|h|d|w|y))+$'}
+    HistoryRequest:
+      description: 用 kube-state-metrics 历史重建 [from, to) 的拓扑。
+      type: object
+      additionalProperties: false
+      required: [from, to]
+      properties:
+        from: {$ref: '#/components/schemas/Timestamp'}
+        to: {$ref: '#/components/schemas/Timestamp'}
+    ResolveRequest:
+      description: 实体解析（DESIGN §3.3）：按 pod_ip 或 component 查找时刻 at 的实体，依次查 informer 缓存、24 小时墓碑、kube-state-metrics 历史。
+      type: object
+      additionalProperties: false
+      required: [at]
+      properties:
+        pod_ip: {type: string}
+        component: {type: string}
+        at: {$ref: '#/components/schemas/Timestamp'}
+    ReaderRequest:
+      type: object
+      additionalProperties: false
+      required: [request_id, kind, deadline]
+      properties:
+        request_id: {$ref: '#/components/schemas/Uuid'}
+        kind: {type: string, enum: [query, ksm_history, resolve]}
+        deadline: {$ref: '#/components/schemas/Timestamp'}
+        query: {$ref: '#/components/schemas/DeclaredQuery'}
+        history: {$ref: '#/components/schemas/HistoryRequest'}
+        resolve: {$ref: '#/components/schemas/ResolveRequest'}
+    ReaderRequestBatch:
+      allOf:
+        - $ref: 'openapi.yaml#/components/schemas/HubClock'
+        - type: object
+          required: [requests]
+          properties:
+            requests:
+              type: array
+              items: {$ref: '#/components/schemas/ReaderRequest'}
+    ReaderError:
+      type: object
+      additionalProperties: false
+      required: [error, message]
+      properties:
+        error:
+          description: undeclared_template、content_hash_mismatch、bad_params、bad_range、response_too_large、timeout、concurrency_limit、breaker_open、backend_error、unknown_datasource、deadline_exceeded
+          type: string
+          pattern: '^[a-z][a-z0-9_]*$'
+        message: {type: string}
+    Sample:
+      type: object
+      additionalProperties: false
+      required: [t, v]
+      properties:
+        t: {type: integer, description: 毫秒时间戳}
+        v: {type: string, description: Prometheus 风格的取值文本，可以是 NaN、+Inf}
+    Series:
+      type: object
+      additionalProperties: false
+      required: [labels, samples]
+      properties:
+        labels: {$ref: '#/components/schemas/Labels'}
+        samples:
+          type: array
+          items: {$ref: '#/components/schemas/Sample'}
+    QueryResult:
+      type: object
+      additionalProperties: false
+      required: [status, series, truncated, clamped, warnings, executed_at, duration_ms]
+      properties:
+        status: {type: string, enum: [ok, error]}
+        error: {$ref: '#/components/schemas/ReaderError'}
+        rendered: {type: string, description: reader 渲染出的查询文本}
+        result_type: {type: string, enum: [vector, matrix, scalar, string]}
+        series:
+          type: array
+          items: {$ref: '#/components/schemas/Series'}
+        truncated: {type: boolean, description: 序列数超过上限，按标签集排序后截断}
+        clamped:
+          description: 被限制调整过的项：range（起点后移）、step（步长提高）
+          type: array
+          items: {type: string, enum: [range, step]}
+        warnings:
+          type: array
+          items: {type: string}
+        effective_start: {$ref: '#/components/schemas/Timestamp'}
+        effective_end: {$ref: '#/components/schemas/Timestamp'}
+        effective_step: {type: string}
+        executed_at: {$ref: '#/components/schemas/Timestamp'}
+        duration_ms: {type: integer, minimum: 0}
+    HistoryResult:
+      type: object
+      additionalProperties: false
+      required: [status, from, to, step, truncated, missing_metrics, events]
+      properties:
+        status: {type: string, enum: [ok, error]}
+        error: {$ref: '#/components/schemas/ReaderError'}
+        from: {$ref: '#/components/schemas/Timestamp'}
+        to: {$ref: '#/components/schemas/Timestamp'}
+        step: {type: string}
+        truncated: {type: boolean}
+        missing_metrics:
+          description: 窗口内没有任何序列的 kube-state-metrics 指标
+          type: array
+          items: {type: string}
+        events:
+          description: source=ksm_history 的拓扑事件；seq 在本次结果内从 1 编排，event_id 由集群、操作、节点或边、valid_from 确定
+          type: array
+          items: {$ref: '../../schemas/topology-event.schema.json'}
+    ResolveResult:
+      type: object
+      additionalProperties: false
+      required: [status, layer, node, node_name, root_owner]
+      properties:
+        status: {type: string, enum: [ok, error]}
+        error: {$ref: '#/components/schemas/ReaderError'}
+        layer:
+          description: 命中的层；unresolved 表示没有找到
+          type: string
+          enum: [informer, tombstone, ksm_history, unresolved]
+        node:
+          oneOf:
+            - $ref: '../../schemas/topology-event.schema.json#/$defs/Node'
+            - type: 'null'
+        node_name: {type: ['string', 'null'], description: Pod 所在节点}
+        root_owner: {type: ['string', 'null'], description: Pod 的顶层 owner 组件键}
+    ReaderResult:
+      type: object
+      additionalProperties: false
+      required: [request_id, kind]
+      properties:
+        request_id: {$ref: '#/components/schemas/Uuid'}
+        kind: {type: string, enum: [query, ksm_history, resolve]}
+        query: {$ref: '#/components/schemas/QueryResult'}
+        history: {$ref: '#/components/schemas/HistoryResult'}
+        resolve: {$ref: '#/components/schemas/ResolveResult'}
+    ReaderCondition:
+      type: object
+      additionalProperties: false
+      required: [type, status, reason, since]
+      properties:
+        type:
+          type: string
+          enum: [InformersFresh, TunnelConnected, ClockSkew, QueryManifest, Datasource, AlertReconcile]
+        status: {type: string, enum: ['True', 'False', 'Unknown']}
+        reason: {type: string}
+        message: {type: string, maxLength: 4096}
+        since: {$ref: '#/components/schemas/Timestamp'}
+    ReaderHeartbeat:
+      type: object
+      additionalProperties: false
+      required: [reader_id, version, boot_id, topology_seq, conditions, clock]
+      properties:
+        reader_id: {type: string}
+        version: {type: string}
+        boot_id: {$ref: '#/components/schemas/Uuid'}
+        topology_seq:
+          description: reader 本地拓扑的最新序号
+          type: integer
+          minimum: 0
+        conditions:
+          type: array
+          items: {$ref: '#/components/schemas/ReaderCondition'}
+        clock:
+          description: apiserver 时钟参考（DESIGN §3.1、§15.5）。PG 不可用时中心用 apiserver_time 加上自本次心跳以来经过的单调时长作为当前时间。
+          type: object
+          additionalProperties: false
+          required: [apiserver_time, offset_seconds, uncertainty_seconds, measured_at]
+          properties:
+            apiserver_time:
+              description: 发送心跳时的 apiserver 参考时间（本地时间加测得的偏移量）
+              $ref: '#/components/schemas/Timestamp'
+            offset_seconds:
+              description: apiserver 时间减去 reader 本地时间
+              type: number
+            uncertainty_seconds: {type: number, minimum: 0}
+            measured_at: {$ref: '#/components/schemas/Timestamp'}
+        query_manifest:
+          description: 挂载的查询模板清单；未挂载时为 null
+          oneOf:
+            - type: object
+              additionalProperties: false
+              required: [pack_lock, templates]
+              properties:
+                pack_lock: {$ref: 'openapi.yaml#/components/schemas/Sha256'}
+                templates: {type: integer, minimum: 0}
+            - type: 'null'
