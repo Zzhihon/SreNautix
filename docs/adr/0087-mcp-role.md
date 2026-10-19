@@ -16,4 +16,4 @@ DESIGN §9.3 与 §16.4：MCP 服务默认关闭、只在集群内可达；作�
 ## 结果
 
 - 集成测试用真实的 OAuth 授权服务器（node-oidc-provider，client_credentials 加 Resource Indicators，ES256 JWT 访问令牌）、真实的 server 与 PostgreSQL、MCP SDK 客户端，覆盖：无令牌 401 与元数据、签给其他资源的令牌、未登记客户端、Origin、工具清单只有读取与提议、只读作用域不能提议、提议进入审批与去重、中心按命名空间拒绝、限速与熔断。
-- MCP 调用的治理审计由中心记录外部调用方的请求；本服务只输出结构化日志。
+- MCP 调用的治理审计由中心记录：server 把 `channel: mcp` 调用方的每个请求写入治理链（`kind: mcp.call`，含路由、响应码、幂等键、创建的 proposal_id 或被拒绝的原因，格式见 `docs/server/audit.md`），在响应发出之前写入；本服务只输出结构化日志。

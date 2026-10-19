@@ -1,4 +1,4 @@
-import type { Alert, Feedback, Incident } from '@srenautix/contract';
+import type { Alert, EvidenceResult, Feedback, Incident } from '@srenautix/contract';
 import { parseKey } from '@srenautix/core';
 import { Ajv2020, type ValidateFunction } from 'ajv/dist/2020.js';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
@@ -354,7 +354,27 @@ export function registerResearchRoutes(app: FastifyInstance, d: ResearchRouteDep
       if (path.endsWith('/prompt/raw') && res.ok) {
         await tx(d.pool, (c) => appendAudit(c, 'prompt.raw.read', actor, { run_id: runId }));
       }
+      if (path === '/v1/runs/:run_id' && res.ok) {
+        return reply.type('application/json').send(await withStageACards(JSON.parse(text) as RunDetail));
+      }
       return reply.code(res.status).type('application/json').send(text);
     });
   }
+
+  /**
+   * worker 的运行明细只含区分性检查产生的卡；控制台需要整次研判的证据，server 在前面合并该事件版本的阶段 A 卡。
+   * 阶段 A 卡保留报告中的编号，检查卡的编号在其后，按 ref 去重。
+   */
+  const withStageACards = async (run: RunDetail): Promise<RunDetail> => {
+    const report = await latestStageA(d.pool, run.incident_id, run.incident_version);
+    const stageA = report?.cards ?? [];
+    const refs = new Set(stageA.map((c) => c.ref));
+    return { ...run, evidence: [...stageA, ...run.evidence.filter((c) => !refs.has(c.ref))] };
+  };
+}
+
+interface RunDetail {
+  incident_id: string;
+  incident_version: number;
+  evidence: EvidenceResult[];
 }

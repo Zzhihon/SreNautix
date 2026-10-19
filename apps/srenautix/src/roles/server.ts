@@ -19,6 +19,7 @@ import { Auth } from '../identity/auth.js';
 import { Bindings, scopeMatches } from '../identity/bindings.js';
 import { CallerRegistry } from '../identity/callers.js';
 import { ChatLinks, usersByEmail } from '../identity/chat-links.js';
+import { registerMcpAudit } from '../identity/mcp-audit.js';
 import { LocalAdmin } from '../identity/local-admin.js';
 import { Oidc } from '../identity/oidc.js';
 import { registerAuthRoutes } from '../identity/routes.js';
@@ -389,6 +390,8 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
 
   // HTTP
   const app = await createApp({ bodyLimit: 8 << 20, trustProxy: true });
+  // 在注册路由之前加上，覆盖全部接口
+  registerMcpAudit(app, pool, () => callers);
   app.get('/healthz', async () => ({ status: 'ok' }));
   app.get('/readyz', async (_req, reply) => {
     const ok = await migrationsReady(pool, 'server', serverTracks);

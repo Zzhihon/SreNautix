@@ -20,6 +20,18 @@ server 维护治理审计链（DESIGN §16.3），记录登录与失败、角色
 
 追加记录与对应的状态变更写在同一个事务里，用事务级 advisory lock 串行化链头，并发写入时 `seq` 连续、链不分叉。
 
+`kind` 的取值：
+
+| `kind` | 内容 |
+|---|---|
+| `auth.login`、`auth.login_failed`、`auth.reauth`、`auth.logout` | 登录、失败、重新认证与登出 |
+| `chat.link_code`、`chat.unlink` | 聊天账号绑定 |
+| `approval.issued`、`approval.rejected` | 审批断言的签发与拒绝 |
+| `api_token.create`、`api_token.revoke` | 控制台 API token |
+| `settings.update`、`pause.set` | 设置与软暂停 |
+| `prompt.raw.read` | 读取原始提示词（`data.run_id`） |
+| `mcp.call` | MCP 调用方（调用方文件中 `kind: external, channel: mcp` 的 token）的每个请求：`caller_id`、`method`、`route`、`params`、`status`、`idempotency_key`，创建提议时带 `proposal_id`，被拒绝时带 `error`（错误码与原因）。记录在响应发出之前写入，写入失败时请求以 500 结束 |
+
 ## 检查点
 
 导出循环每隔 `checkpoint_interval` 为链头签一个检查点：

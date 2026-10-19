@@ -10,6 +10,7 @@ import { hashPassword } from '../../src/identity/password.js';
 import { buildMcpRole, parseMcpConfig, type McpHandle } from '../../src/roles/mcp.js';
 import { buildServer, type ServerHandle } from '../../src/roles/server.js';
 import { serverTracks } from '../../src/roles/server-schema.js';
+import { GENESIS_HASH, readAudit, verifyRecords } from '../../src/store/audit.js';
 import { migrateExpand } from '../../src/store/migrate.js';
 import { TopologyStore } from '../../src/topology/store.js';
 import { newTestDb, type TestDb } from '../support/db.js';
@@ -356,6 +357,33 @@ describe('mcp 角色', () => {
     expect(denied.isError).toBe(true);
     expect(String(denied.body.error)).toMatch(/HTTP 40[34]/);
     await oc.close();
+
+    // 治理链记录 MCP 调用方的每个请求：提议的创建（含重复提交）与被拒绝，以及读取
+    const audit = await readAudit(db.admin, 0, 1000);
+    const calls = audit
+      .filter((r) => r.kind === 'mcp.call')
+      .map(
+        (r) =>
+          r.data as {
+            caller_id: string;
+            method: string;
+            route: string;
+            status: number;
+            proposal_id?: string;
+            error?: string;
+          },
+      );
+    const proposes = calls.filter((x) => x.method === 'POST' && x.route === '/v1/proposals');
+    expect(proposes.filter((x) => x.caller_id === 'holmes').map((x) => x.proposal_id)).toEqual([
+      pa.proposal_id,
+      pa.proposal_id,
+    ]);
+    // other 的命名空间之外：中心在读取事件时就拒绝，拒绝的响应码与原因进入审计
+    const rejected = calls.find((x) => x.caller_id === 'other' && x.status >= 400);
+    expect(rejected).toMatchObject({ error: expect.stringMatching(/^not_found: /) });
+    expect(calls.some((x) => x.caller_id === 'holmes' && x.method === 'GET')).toBe(true);
+    expect(audit.find((r) => r.kind === 'mcp.call')?.actor).toMatch(/^service:(holmes|other)$/);
+    expect(verifyRecords(audit, { seq: 0, hash: GENESIS_HASH })).toBeNull();
   });
 
   it('每个调用方独立限速；多次被拒绝的调用方被熔断', async () => {

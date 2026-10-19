@@ -167,6 +167,8 @@ worker 认领任务后读取 `GET /v1/research/tasks/{run_id}/context`（worker 
 - `component` 必须是子图中的节点，或事件的组件与候选根因（包括命名空间伪组件）；否则 400。
 - server 在该组件上执行模板附带的卡，窗口以事件首次触发时间为锚点，返回 `EvidenceResult`（卡片 id 为 `<pack>/templates/<template id>`）。数据源不可用时照常返回，结论为无法判定。
 
+研判运行明细（`GET /v1/runs/{run_id}`）由 worker 持有，server 按研判所属事件的读取作用域转发，并在 `evidence` 前面合并该事件版本的阶段 A 卡（阶段 A 卡保留报告中的编号，worker 的检查卡编号在其后）。
+
 ## 本地运行与控制台 e2e
 
 控制台的 Playwright e2e 可以这样启动一个真实的 server：

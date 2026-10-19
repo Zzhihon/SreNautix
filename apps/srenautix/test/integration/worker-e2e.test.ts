@@ -14,6 +14,7 @@ import { buildWorker, type WorkerHandle } from '../../src/roles/worker.js';
 import { schemaIsolationViolations, DEFAULT_DB_ROLES } from '../../src/store/bootstrap.js';
 import { migrateExpand } from '../../src/store/migrate.js';
 import { TopologyStore } from '../../src/topology/store.js';
+import { responseErrors } from '../support/contract.js';
 import { newTestDb, type TestDb } from '../support/db.js';
 import { ReplayServer, type LlmFixture } from '../support/llm-fixtures.js';
 import { freePort, until } from '../support/monitoring.js';
@@ -227,7 +228,10 @@ describe('server 与 worker 端到端', () => {
       LIVE ? 1_200_000 : 60_000,
     );
     const run = runs[0] as { run_id: string; state: string; incident_id: string };
-    expect(run.state).toBe('completed');
+    const why = await db.admin.query<{ error: unknown }>('SELECT error FROM server.research_runs WHERE run_id = $1', [
+      run.run_id,
+    ]);
+    expect(run.state, JSON.stringify(why.rows[0]?.error)).toBe('completed');
     // worker schema 的研判记录与模型调用
     const w = await db.admin.query<{ state: string; input_tokens: number; output: { conclusion: { level: string } } }>(
       'SELECT state, input_tokens, output FROM worker.research_runs WHERE run_id = $1',
@@ -266,6 +270,53 @@ describe('server 与 worker 端到端', () => {
     ).json()) as { llm_calls: unknown[]; steps: Array<{ state: string }> };
     expect(detail.llm_calls.length).toBeGreaterThanOrEqual(2);
     expect(detail.steps.map((s) => s.state)).toContain('conclude');
+    // 经 server 读取的运行明细：worker 的检查卡之前合并该事件版本的阶段 A 卡，符合契约。
+    // 本用例的模型响应是录制的，事件不能改变，所以没有领域包；在该版本的阶段 A 报告里加一张卡
+    // （编号接在 worker 的卡之后，避免与检查卡重号），再经 server 读取
+    const workerOnly = (detail as unknown as { evidence: Array<{ ref: string }> }).evidence;
+    const nextRef = `card:${Math.max(0, ...workerOnly.map((c) => Number(c.ref.slice(5)))) + 1}`;
+    const now = new Date().toISOString();
+    const stageACard = {
+      ref: nextRef,
+      card_id: '_example/pod-memory/limit-ratio',
+      title: { 'zh-CN': 'working set 占 limit', en: 'Working set vs limit' },
+      threshold: 0.9,
+      series: [],
+      entity: { cluster_id: 'c1', kind: 'Pod', namespace: 'shop', name: 'api-7d9f8-x2k4p', uid: 'uid-pod-api' },
+      window: { from: now, to: now },
+      verdict: 'undeterminable',
+      display_state: 'undeterminable',
+      reason: { kind: 'source_error', text: '数据源不可达' },
+      value: null,
+      table: null,
+      queries: [],
+      egress: 'allow',
+      anomaly_started_at: null,
+      evaluated_at: now,
+    };
+    await db.admin.query(
+      `UPDATE server.stage_a_reports s SET body = jsonb_set(s.body, '{cards}', (s.body->'cards') || $2::jsonb)
+         FROM server.research_runs r
+        WHERE r.run_id = $1 AND r.incident_id = s.incident_id AND r.incident_version = s.incident_version`,
+      [run.run_id, JSON.stringify([stageACard])],
+    );
+    const stageA = await db.admin.query<{ body: { cards: Array<{ ref: string }> } }>(
+      `SELECT s.body FROM server.stage_a_reports s JOIN server.research_runs r
+         ON r.incident_id = s.incident_id AND r.incident_version = s.incident_version WHERE r.run_id = $1`,
+      [run.run_id],
+    );
+    const stageACards = stageA.rows[0]?.body.cards ?? [];
+    expect(stageACards.map((c) => c.ref)).toContain(nextRef);
+    const viaServer = await fetch(`${srv.apiUrl}/v1/runs/${run.run_id}`, {
+      headers: { authorization: `Bearer ${TOKENS.worker}` },
+    });
+    expect(viaServer.status).toBe(200);
+    const merged = (await viaServer.json()) as { evidence: Array<{ ref: string }> };
+    expect(merged.evidence.map((c) => c.ref)).toEqual([
+      ...stageACards.map((c) => c.ref),
+      ...workerOnly.map((c) => c.ref).filter((r) => !stageACards.some((c) => c.ref === r)),
+    ]);
+    expect(responseErrors('/v1/runs/{run_id}', 'get', 200, merged)).toBeNull();
     // 每日用量
     const u = await db.admin.query<{ tokens: number }>('SELECT tokens FROM worker.daily_usage');
     expect(u.rows[0]?.tokens).toBeGreaterThan(0);
