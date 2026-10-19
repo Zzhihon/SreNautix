@@ -1,0 +1,15 @@
+api_version: srenautix.io/pack-test/v1
+interval: 1m
+input_series:
+  - {
+      series: 'envoy_listener_ssl_certificate_expiration_unix_time_seconds{envoy_listener_address="0.0.0.0_10443"}',
+      values: '1772409600x60',
+    }
+tests:
+  - {
+      name: 证书充足,
+      eval_time: 40m,
+      card: routes/listener-certs,
+      entity: { kind: cluster, name: c1 },
+      expect: { verdict: normal },
+    }

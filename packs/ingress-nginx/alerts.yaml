@@ -1,0 +1,35 @@
+# ingress-nginx chart 的 controller.metrics.prometheusRule 默认为空；以下为 chart values 示例中的告警名。
+entries:
+  - {
+      id: nginx-config-failed,
+      alertname: NGINXConfigFailed,
+      role: change,
+      entity: { kind: Pod, name_labels: [pod] },
+      component_type: ingress-nginx.controller,
+      chains: [ingress],
+      mixin: other,
+    }
+  - {
+      id: nginx-certificate-expiry,
+      alertname: NGINXCertificateExpiry,
+      role: cause,
+      entity: { kind: Ingress, name_labels: [ingress], namespace_label: exported_namespace },
+      chains: [ingress, cert-manager/certificate],
+      mixin: other,
+    }
+  - {
+      id: nginx-too-many-500s,
+      alertname: NGINXTooMany500s,
+      role: symptom,
+      entity: { kind: Ingress, name_labels: [ingress], namespace_label: exported_namespace },
+      chains: [ingress],
+      mixin: other,
+    }
+  - {
+      id: nginx-too-many-400s,
+      alertname: NGINXTooMany400s,
+      role: symptom,
+      entity: { kind: Ingress, name_labels: [ingress], namespace_label: exported_namespace },
+      chains: [ingress],
+      mixin: other,
+    }

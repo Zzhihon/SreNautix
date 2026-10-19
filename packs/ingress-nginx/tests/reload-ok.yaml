@@ -1,0 +1,15 @@
+api_version: srenautix.io/pack-test/v1
+interval: 1m
+input_series:
+  - {
+      series: 'nginx_ingress_controller_config_last_reload_successful{namespace="ingress-nginx",pod="c-1"}',
+      values: '1x60',
+    }
+tests:
+  - {
+      name: 配置重载成功,
+      eval_time: 40m,
+      card: ingress/reload,
+      entity: { kind: cluster, name: c1 },
+      expect: { verdict: normal },
+    }

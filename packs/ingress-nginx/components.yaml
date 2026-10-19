@@ -1,0 +1,5 @@
+component_types:
+  - id: ingress-nginx.controller
+    hub: true
+    match: { kind: Deployment, name_pattern: ingress-nginx-controller$ }
+    chains: [ingress]

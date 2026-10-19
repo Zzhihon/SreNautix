@@ -1,0 +1,20 @@
+# 指标来自 Envoy 代理（charts/gateway-addons-helm 的看板使用同一组指标）。
+# Envoy Gateway 给每条路由规则生成一个集群，名称为 <路由类型>/<命名空间>/<路由名>/rule/<序号>。
+signals:
+  - id: route_upstream_5xx_ratio
+    kind: metrics
+    unit: ratio
+    alternatives:
+      - expr: >-
+          sum by (envoy_cluster_name) (rate(envoy_cluster_upstream_rq_xx{envoy_cluster_name=~".+route/$namespace/.+", envoy_response_code_class="5"}[$rate_window]))
+          / sum by (envoy_cluster_name) (rate(envoy_cluster_upstream_rq_total{envoy_cluster_name=~".+route/$namespace/.+"}[$rate_window]))
+  - id: route_healthy_endpoints
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: min by (envoy_cluster_name) (envoy_cluster_membership_healthy{envoy_cluster_name=~".+route/$namespace/.+"})
+  - id: listener_cert_seconds_to_expiry
+    kind: metrics
+    unit: seconds
+    alternatives:
+      - expr: min by (envoy_listener_address) (envoy_listener_ssl_certificate_expiration_unix_time_seconds) - time()

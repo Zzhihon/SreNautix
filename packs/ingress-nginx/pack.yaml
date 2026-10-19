@@ -1,0 +1,11 @@
+api_version: srenautix.io/pack/v1
+name: ingress-nginx
+version: 1.0.0
+description: ingress-nginx（controller-v1.15）：按 Ingress 的 5xx 比例与延迟、配置重载
+maturity: stable
+min_srenautix_version: 0.1.0
+depends_on:
+  - cert-manager
+requires:
+  - metrics.query
+  - metrics.query_range

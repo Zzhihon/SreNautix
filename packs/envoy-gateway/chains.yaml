@@ -1,0 +1,72 @@
+chains:
+  - id: routes
+    title: { zh-CN: Envoy Gateway 路由, en: Envoy Gateway routes }
+    runbook: envoy-gateway.md
+    cards:
+      - id: upstream-errors
+        title: { zh-CN: 上游 5xx 比例, en: Upstream 5xx ratio }
+        note:
+          {
+            zh-CN: HTTPRoute 实体只看自己的路由规则；命名空间实体看其中全部路由,
+            en: An HTTPRoute checks its own rules; a namespace checks all routes,
+          }
+        applies_to: { kinds: [HTTPRoute, Namespace, Service] }
+        params: { ratio: 0.05 }
+        refs:
+          - { name: ratio, signal: route_upstream_5xx_ratio, mode: range }
+        judge:
+          let:
+            - name: mine
+              cel: 'entity.kind == "HTTPRoute" ? ratio.filter(s, label(s, "envoy_cluster_name").contains("/" + entity.namespace + "/" + entity.name + "/rule/")) : ratio'
+            - { name: peak, cel: max(mine) }
+            - { name: anomaly_started_at, cel: 'first_above(mine, params.ratio)' }
+          abnormal_if:
+            - cel: peak > params.ratio
+              say:
+                {
+                  zh-CN: '上游 5xx 比例峰值 {peak, number, percent}',
+                  en: 'Peak upstream 5xx ratio {peak, number, percent}',
+                }
+        display:
+          value: peak
+          unit: percent
+          threshold: params.ratio
+          table:
+            rows_from: ratio
+            sort_by: max(row)
+            columns:
+              - { header: { zh-CN: 路由规则, en: Route rule }, cel: 'label(row, "envoy_cluster_name")' }
+              - { header: { zh-CN: 峰值, en: Peak }, cel: max(row), unit: percent }
+        egress: allow
+      - id: endpoints
+        title: { zh-CN: 健康端点, en: Healthy endpoints }
+        applies_to: { kinds: [HTTPRoute, Namespace, Service] }
+        refs:
+          - { name: healthy, signal: route_healthy_endpoints, mode: range }
+        judge:
+          let:
+            - name: mine
+              cel: 'entity.kind == "HTTPRoute" ? healthy.filter(s, label(s, "envoy_cluster_name").contains("/" + entity.namespace + "/" + entity.name + "/rule/")) : healthy'
+            - { name: empty, cel: 'size(mine.filter(s, min(s) < 1.0))' }
+          abnormal_if:
+            - cel: empty > 0
+              say:
+                { zh-CN: '{empty} 条路由规则在窗口内没有健康端点', en: '{empty} route rules had no healthy endpoints' }
+        egress: allow
+      - id: listener-certs
+        title: { zh-CN: 监听器证书, en: Listener certificates }
+        applies_to: { kinds: [HTTPRoute, Namespace, Service, cluster] }
+        params: { days: 14 }
+        refs:
+          - { name: expiry, signal: listener_cert_seconds_to_expiry, mode: instant }
+        judge:
+          let:
+            - { name: soonest, cel: 'min(expiry) / 86400.0' }
+          abnormal_if:
+            - cel: soonest < double(params.days)
+              say:
+                {
+                  zh-CN: '最近的监听器证书 {soonest, number} 天后到期',
+                  en: 'The nearest listener certificate expires in {soonest, number} days',
+                }
+        egress: allow

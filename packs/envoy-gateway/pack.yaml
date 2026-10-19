@@ -1,0 +1,9 @@
+api_version: srenautix.io/pack/v1
+name: envoy-gateway
+version: 1.0.0
+description: Envoy Gateway（v1.9）：按 HTTPRoute 的上游 5xx 比例与健康端点、监听器证书到期
+maturity: stable
+min_srenautix_version: 0.1.0
+requires:
+  - metrics.query
+  - metrics.query_range

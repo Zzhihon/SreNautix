@@ -1,0 +1,83 @@
+api_version: srenautix.io/pack-test/v1
+interval: 1m
+input_series:
+  - {
+      series: 'nginx_ingress_controller_requests{namespace="ingress-nginx",exported_namespace="shop",ingress="web",status="200"}',
+      values: '0+900x60',
+    }
+  - {
+      series: 'nginx_ingress_controller_requests{namespace="ingress-nginx",exported_namespace="shop",ingress="web",status="502"}',
+      values: '0x20 0+100x40',
+    }
+  - {
+      series: 'nginx_ingress_controller_requests{namespace="ingress-nginx",exported_namespace="shop",ingress="api",status="200"}',
+      values: '0+600x60',
+    }
+  - {
+      series: 'nginx_ingress_controller_requests{namespace="ingress-nginx",exported_namespace="shop",ingress="api",status="500"}',
+      values: '0+1x60',
+    }
+  - {
+      series: 'nginx_ingress_controller_request_duration_seconds_bucket{namespace="ingress-nginx",exported_namespace="shop",ingress="web",le="0.5"}',
+      values: '0+100x60',
+    }
+  - {
+      series: 'nginx_ingress_controller_request_duration_seconds_bucket{namespace="ingress-nginx",exported_namespace="shop",ingress="web",le="10"}',
+      values: '0+1000x60',
+    }
+  - {
+      series: 'nginx_ingress_controller_request_duration_seconds_bucket{namespace="ingress-nginx",exported_namespace="shop",ingress="web",le="+Inf"}',
+      values: '0+1000x60',
+    }
+  - {
+      series: 'nginx_ingress_controller_request_duration_seconds_bucket{namespace="ingress-nginx",exported_namespace="shop",ingress="api",le="0.5"}',
+      values: '0+600x60',
+    }
+  - {
+      series: 'nginx_ingress_controller_request_duration_seconds_bucket{namespace="ingress-nginx",exported_namespace="shop",ingress="api",le="10"}',
+      values: '0+600x60',
+    }
+  - {
+      series: 'nginx_ingress_controller_request_duration_seconds_bucket{namespace="ingress-nginx",exported_namespace="shop",ingress="api",le="+Inf"}',
+      values: '0+600x60',
+    }
+  - {
+      series: 'nginx_ingress_controller_config_last_reload_successful{namespace="ingress-nginx",pod="c-1"}',
+      values: '1x30 0x30',
+    }
+tests:
+  - {
+      name: web 5xx 多,
+      eval_time: 40m,
+      card: ingress/errors,
+      entity: { kind: Ingress, namespace: shop, name: web },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: api 5xx 少,
+      eval_time: 40m,
+      card: ingress/errors,
+      entity: { kind: Ingress, namespace: shop, name: api },
+      expect: { verdict: normal },
+    }
+  - {
+      name: web 延迟高,
+      eval_time: 40m,
+      card: ingress/latency,
+      entity: { kind: Ingress, namespace: shop, name: web },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: api 延迟低,
+      eval_time: 40m,
+      card: ingress/latency,
+      entity: { kind: Ingress, namespace: shop, name: api },
+      expect: { verdict: normal },
+    }
+  - {
+      name: 配置重载失败,
+      eval_time: 40m,
+      card: ingress/reload,
+      entity: { kind: Ingress, namespace: shop, name: web },
+      expect: { verdict: abnormal },
+    }

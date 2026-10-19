@@ -1,0 +1,67 @@
+chains:
+  - id: ingress
+    title: { zh-CN: ingress-nginx, en: ingress-nginx }
+    runbook: ingress-nginx.md
+    cards:
+      - id: errors
+        title: { zh-CN: 5xx 比例, en: 5xx ratio }
+        note:
+          {
+            zh-CN: Ingress 实体只看自己；命名空间实体看其中全部 Ingress,
+            en: An Ingress checks itself; a namespace checks all ingresses,
+          }
+        applies_to: { kinds: [Ingress, Namespace, Service] }
+        params: { ratio: 0.05 }
+        refs:
+          - { name: ratio, signal: ingress_5xx_ratio, mode: range }
+        judge:
+          let:
+            - {
+                name: mine,
+                cel: 'entity.kind == "Ingress" ? ratio.filter(s, label(s, "ingress") == entity.name) : ratio',
+              }
+            - { name: peak, cel: max(mine) }
+            - { name: anomaly_started_at, cel: 'first_above(mine, params.ratio)' }
+          abnormal_if:
+            - cel: peak > params.ratio
+              say: { zh-CN: '5xx 比例峰值 {peak, number, percent}', en: 'Peak 5xx ratio {peak, number, percent}' }
+        display:
+          value: peak
+          unit: percent
+          threshold: params.ratio
+          table:
+            rows_from: ratio
+            sort_by: max(row)
+            columns:
+              - { header: { zh-CN: Ingress, en: Ingress }, cel: 'label(row, "ingress")' }
+              - { header: { zh-CN: 峰值, en: Peak }, cel: max(row), unit: percent }
+        egress: allow
+      - id: latency
+        title: { zh-CN: p99 延迟, en: p99 latency }
+        applies_to: { kinds: [Ingress, Namespace, Service] }
+        params: { seconds: 2 }
+        refs:
+          - { name: p99, signal: ingress_latency_p99, mode: range }
+        judge:
+          let:
+            - { name: mine, cel: 'entity.kind == "Ingress" ? p99.filter(s, label(s, "ingress") == entity.name) : p99' }
+            - { name: peak, cel: max(mine) }
+          abnormal_if:
+            - cel: peak > double(params.seconds)
+              say: { zh-CN: 'p99 延迟峰值 {peak, number} 秒', en: 'Peak p99 latency {peak, number} s' }
+        display: { value: peak, unit: seconds }
+        egress: allow
+      - id: reload
+        title: { zh-CN: 配置重载, en: Config reload }
+        note: { zh-CN: 重载失败时控制器继续使用旧配置，新的 Ingress 变更不生效, en: Failed reloads keep the old config }
+        applies_to: { kinds: [Ingress, Namespace, Service, Deployment, cluster] }
+        refs:
+          - { name: ok, signal: config_reload_ok, mode: instant }
+        judge:
+          let:
+            - { name: failed, cel: 'size(ok.filter(s, last(s) < 1.0))' }
+          abnormal_if:
+            - cel: failed > 0
+              say:
+                { zh-CN: '{failed} 个控制器 Pod 配置重载失败', en: 'Config reload failed on {failed} controller pods' }
+        egress: allow

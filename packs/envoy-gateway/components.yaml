@@ -1,0 +1,8 @@
+component_types:
+  - id: envoy-gateway.proxy
+    hub: true
+    match: { kind: Deployment, namespaces: [envoy-gateway-system], name_pattern: ^envoy- }
+    chains: [routes]
+  - id: envoy-gateway.httproute
+    match: { kind: HTTPRoute, api_group: gateway.networking.k8s.io }
+    chains: [routes]

@@ -1,0 +1,27 @@
+# Envoy Gateway 不带默认告警规则；以下为 gateway-addons-helm 用户常配的告警名。
+entries:
+  - {
+      id: envoy-upstream-5xx,
+      alertname: EnvoyUpstreamHighErrorRate,
+      role: symptom,
+      entity: { kind: Namespace, name_labels: [namespace] },
+      chains: [routes],
+      mixin: other,
+    }
+  - {
+      id: envoy-no-healthy-upstream,
+      alertname: EnvoyNoHealthyUpstream,
+      role: cause,
+      entity: { kind: Namespace, name_labels: [namespace] },
+      chains: [routes],
+      mixin: other,
+    }
+  - {
+      id: envoy-listener-cert-expiry,
+      alertname: EnvoyListenerCertificateExpiry,
+      role: cause,
+      entity: { kind: cluster, name_labels: [envoy_listener_address] },
+      component_type: envoy-gateway.proxy,
+      chains: [routes],
+      mixin: other,
+    }

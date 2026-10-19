@@ -1,0 +1,67 @@
+# 时间零点 2026-01-01T00:00:00Z（unix 1767225600）。
+api_version: srenautix.io/pack-test/v1
+interval: 1m
+input_series:
+  - { series: 'envoy_cluster_upstream_rq_total{envoy_cluster_name="httproute/shop/web/rule/0"}', values: '0+1000x60' }
+  - {
+      series: 'envoy_cluster_upstream_rq_xx{envoy_cluster_name="httproute/shop/web/rule/0",envoy_response_code_class="5"}',
+      values: '0x20 0+200x40',
+    }
+  - {
+      series: 'envoy_cluster_upstream_rq_xx{envoy_cluster_name="httproute/shop/web/rule/0",envoy_response_code_class="2"}',
+      values: '0+800x60',
+    }
+  - { series: 'envoy_cluster_upstream_rq_total{envoy_cluster_name="httproute/shop/api/rule/0"}', values: '0+1000x60' }
+  - {
+      series: 'envoy_cluster_upstream_rq_xx{envoy_cluster_name="httproute/shop/api/rule/0",envoy_response_code_class="5"}',
+      values: '0+1x60',
+    }
+  - {
+      series: 'envoy_cluster_upstream_rq_xx{envoy_cluster_name="httproute/shop/api/rule/0",envoy_response_code_class="2"}',
+      values: '0+999x60',
+    }
+  - {
+      series: 'envoy_cluster_membership_healthy{envoy_cluster_name="httproute/shop/web/rule/0"}',
+      values: '2x20 0x10 2x30',
+    }
+  - { series: 'envoy_cluster_membership_healthy{envoy_cluster_name="httproute/shop/api/rule/0"}', values: '3x60' }
+  - {
+      series: 'envoy_listener_ssl_certificate_expiration_unix_time_seconds{envoy_listener_address="0.0.0.0_10443"}',
+      values: '1767487800x60',
+    }
+tests:
+  - {
+      name: web 上游 5xx 多,
+      eval_time: 40m,
+      card: routes/upstream-errors,
+      entity: { kind: HTTPRoute, namespace: shop, name: web },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: api 上游正常,
+      eval_time: 40m,
+      card: routes/upstream-errors,
+      entity: { kind: HTTPRoute, namespace: shop, name: api },
+      expect: { verdict: normal },
+    }
+  - {
+      name: web 没有健康端点,
+      eval_time: 40m,
+      card: routes/endpoints,
+      entity: { kind: HTTPRoute, namespace: shop, name: web },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: api 端点健康,
+      eval_time: 40m,
+      card: routes/endpoints,
+      entity: { kind: HTTPRoute, namespace: shop, name: api },
+      expect: { verdict: normal },
+    }
+  - {
+      name: 证书 3 天后到期,
+      eval_time: 40m,
+      card: routes/listener-certs,
+      entity: { kind: cluster, name: c1 },
+      expect: { verdict: abnormal },
+    }

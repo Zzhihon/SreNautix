@@ -1,0 +1,27 @@
+# 指标来自 ingress-nginx 控制器（docs/user-guide/monitoring.md）。
+# 请求指标的 exported_namespace 与 ingress 标签指 Ingress 对象；Prometheus 抓取时 namespace 被控制器所在命名空间占用。
+signals:
+  - id: ingress_requests
+    kind: metrics
+    unit: per_second
+    alternatives:
+      - expr: sum by (exported_namespace, ingress) (rate(nginx_ingress_controller_requests{exported_namespace="$namespace"}[$rate_window]))
+  - id: ingress_5xx_ratio
+    kind: metrics
+    unit: ratio
+    alternatives:
+      - expr: >-
+          sum by (exported_namespace, ingress) (rate(nginx_ingress_controller_requests{exported_namespace="$namespace", status=~"5.."}[$rate_window]))
+          / sum by (exported_namespace, ingress) (rate(nginx_ingress_controller_requests{exported_namespace="$namespace"}[$rate_window]))
+  - id: ingress_latency_p99
+    kind: metrics
+    unit: seconds
+    alternatives:
+      - expr: >-
+          histogram_quantile(0.99, sum by (le, exported_namespace, ingress) (
+            rate(nginx_ingress_controller_request_duration_seconds_bucket{exported_namespace="$namespace"}[$rate_window])
+          ))
+  - id: config_reload_ok
+    kind: metrics
+    alternatives:
+      - expr: min by (namespace, pod) (min_over_time(nginx_ingress_controller_config_last_reload_successful[$window]))
