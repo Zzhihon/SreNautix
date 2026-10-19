@@ -37,8 +37,10 @@ spec:
   validations:
     - expression: '!variables.isRecord || object.metadata.?labels.orValue({})[?''srenautix.io/admission-probe''].orValue('''') != ''argocd-applications'''
       message: admission self-check probe denied by argocd-applications
+      reason: Forbidden
     - expression: variables.isRecord || params.?data.?frozen.orValue('true') == 'false'
       message: srenautix-freeze is frozen or missing, gateway writes are proposal-only
+      reason: Forbidden
     - expression: |-
         variables.isRecord || (object.metadata.?labels == oldObject.metadata.?labels &&
         object.metadata.?ownerReferences == oldObject.metadata.?ownerReferences &&
@@ -47,8 +49,10 @@ spec:
         variables.annNew.all(k, k in ["srenautix.io/execution-id"] || k in variables.annOld) &&
         (!('srenautix.io/execution-id' in variables.annNew) || variables.annNew['srenautix.io/execution-id'].matches('^[0-9a-f]{32}$')))
       message: gateway may only add its execution annotations; labels, owners, finalizers and other annotations must not change
+      reason: Forbidden
     - expression: variables.isRecord || ((variables.specUnchanged && (variables.startsPinnedSync || variables.terminatesRunningOperation)) || variables.togglesAutosync)
       message: gateway may only start a sync pinned to a commit SHA without prune, force or dry run, terminate a running operation, or toggle spec.syncPolicy.automated.enabled
+      reason: Forbidden
   variables:
     - expression: request.resource.group == 'srenautix.io' && request.resource.resource == 'actionexecutions'
       name: isRecord

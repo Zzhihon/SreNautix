@@ -45,8 +45,10 @@ spec:
   validations:
     - expression: '!variables.isRecord || object.metadata.?labels.orValue({})[?''srenautix.io/admission-probe''].orValue('''') != ''flux-objects'''
       message: admission self-check probe denied by flux-objects
+      reason: Forbidden
     - expression: variables.isRecord || params.?data.?frozen.orValue('true') == 'false'
       message: srenautix-freeze is frozen or missing, gateway writes are proposal-only
+      reason: Forbidden
     - expression: |-
         variables.isRecord || (object.metadata.?labels == oldObject.metadata.?labels &&
         object.metadata.?ownerReferences == oldObject.metadata.?ownerReferences &&
@@ -55,10 +57,13 @@ spec:
         variables.annNew.all(k, k in ["srenautix.io/execution-id", "reconcile.fluxcd.io/requestedAt"] || k in variables.annOld) &&
         (!('srenautix.io/execution-id' in variables.annNew) || variables.annNew['srenautix.io/execution-id'].matches('^[0-9a-f]{32}$')))
       message: gateway may only add its execution annotations; labels, owners, finalizers and other annotations must not change
+      reason: Forbidden
     - expression: variables.isRecord || (variables.specSame)
       message: gateway may only change spec.suspend of a Flux Kustomization or HelmRelease
+      reason: Forbidden
     - expression: variables.isRecord || (object.?status == oldObject.?status)
       message: gateway may not change the status of a Flux object
+      reason: Forbidden
   variables:
     - expression: request.resource.group == 'srenautix.io' && request.resource.resource == 'actionexecutions'
       name: isRecord

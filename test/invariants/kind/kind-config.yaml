@@ -1,0 +1,30 @@
+# 不变量测试的 Kind 集群：单个控制面节点，kube-apiserver 开启审计日志（Metadata 级别，记录全部写请求），
+# 审计日志经 extraMounts 写到宿主机的 ${AUDIT_DIR}，测试从那里读取。run.sh 用 envsubst 填入 AUDIT_DIR。
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: control-plane
+    extraMounts:
+      - hostPath: ${AUDIT_DIR}
+        containerPath: /var/log/kubernetes/audit
+      - hostPath: ${POLICY_FILE}
+        containerPath: /etc/kubernetes/audit-policy.yaml
+        readOnly: true
+    kubeadmConfigPatches:
+      - |
+        kind: ClusterConfiguration
+        apiServer:
+          extraArgs:
+            audit-policy-file: /etc/kubernetes/audit-policy.yaml
+            audit-log-path: /var/log/kubernetes/audit/audit.log
+            audit-log-mode: blocking
+          extraVolumes:
+            - name: audit-policy
+              hostPath: /etc/kubernetes/audit-policy.yaml
+              mountPath: /etc/kubernetes/audit-policy.yaml
+              readOnly: true
+              pathType: File
+            - name: audit-log
+              hostPath: /var/log/kubernetes/audit
+              mountPath: /var/log/kubernetes/audit
+              pathType: DirectoryOrCreate

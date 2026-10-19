@@ -123,7 +123,42 @@ func (e *Engine) gate(ctx context.Context) (bool, []string) {
 	} else {
 		e.setCondition(metrics.ConditionApiserverThrottled, false, "none", "")
 	}
+	e.probeBranchProtection(ctx)
 	return len(reasons) > 0, reasons
+}
+
+// probeBranchProtection 在启用 gitops_pr 时探测白名单中每个仓库 base 分支的分支保护（不变量 12）。
+// 没有分支保护时条件为 False，gitops_pr 的预检 branch_protection 拒绝执行；不影响其他动作。
+func (e *Engine) probeBranchProtection(ctx context.Context) {
+	pol := e.currentPolicy()
+	if _, ok := pol.Action("gitops_pr"); !ok {
+		return
+	}
+	if e.d.GitHub == nil {
+		e.setCondition(metrics.ConditionGitHubBranchProtection, false, "not_configured", "gitops_pr is enabled without a GitHub App")
+		return
+	}
+	var unprotected []string
+	for _, r := range pol.GitOps.Repositories {
+		repo, err := e.d.GitHub.Repo(r.Repository)
+		if err != nil {
+			e.setCondition(metrics.ConditionGitHubBranchProtection, false, "probe_failed", err.Error())
+			return
+		}
+		ok, err := repo.Protected(ctx, r.Base)
+		if err != nil {
+			e.setCondition(metrics.ConditionGitHubBranchProtection, false, "probe_failed", err.Error())
+			return
+		}
+		if !ok {
+			unprotected = append(unprotected, r.Repository+"@"+r.Base)
+		}
+	}
+	if len(unprotected) > 0 {
+		e.setCondition(metrics.ConditionGitHubBranchProtection, false, "unprotected", strings.Join(unprotected, ", "))
+		return
+	}
+	e.setCondition(metrics.ConditionGitHubBranchProtection, true, "protected", "")
 }
 
 // safetyCheck 更新只提议状态并发送心跳。

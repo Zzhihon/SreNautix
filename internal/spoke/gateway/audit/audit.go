@@ -369,6 +369,16 @@ func (c *Chain) Flush(ctx context.Context) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if len(c.pending) == 0 {
+		// 没有积压时探测审计汇是否可写入（存储桶可访问），让空闲时的不可用也能被发现
+		ok, err := c.sink.Client.BucketExists(ctx, c.sink.Bucket)
+		if err == nil && !ok {
+			err = fmt.Errorf("audit: bucket %s does not exist", c.sink.Bucket)
+		}
+		if err != nil {
+			c.healthy, c.lastErr = false, err
+			return err
+		}
+		c.healthy, c.lastErr = true, nil
 		return nil
 	}
 	var buf bytes.Buffer

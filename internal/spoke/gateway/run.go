@@ -13,7 +13,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -36,63 +36,92 @@ import (
 	"github.com/Zzhihon/SreNautix/internal/spoke/tunnel"
 )
 
-// FileConfig 是 /etc/srenautix/config.yaml 中 gateway 使用的部分（chart 渲染）。
+// FileConfig 是 gateway 的 /etc/srenautix/config.yaml（chart 渲染，格式见 docs/gateway/README.md）。
+// 未知字段使加载失败。
 type FileConfig struct {
-	Role      string `json:"role"`
+	ClusterID string `json:"cluster_id"`
 	Profile   string `json:"profile"`
-	ClusterID string `json:"clusterId"`
-	Release   struct {
-		Name      string `json:"name"`
-		Namespace string `json:"namespace"`
-	} `json:"release"`
-	Listen struct {
+	Namespace string `json:"namespace"`
+	Listen    struct {
 		Metrics string `json:"metrics"`
 		Probes  string `json:"probes"`
 	} `json:"listen"`
-	SecretsDir string `json:"secretsDir"`
-	Hub        struct {
+	Hub struct {
 		URL       string `json:"url"`
-		TokenFile string `json:"tokenFile"`
-		CAFile    string `json:"caFile"`
+		TokenFile string `json:"token_file"`
+		CAFile    string `json:"ca_file"`
 	} `json:"hub"`
 	Audit struct {
-		Sink       string `json:"sink"`
-		Bucket     string `json:"bucket"`
+		CheckpointKeyFile string `json:"checkpoint_key_file"`
+		CheckpointKeyID   string `json:"checkpoint_key_id"`
+		StagingDir        string `json:"staging_dir"`
+		S3                struct {
+			Endpoint       string `json:"endpoint"`
+			Region         string `json:"region"`
+			Bucket         string `json:"bucket"`
+			AccessKeyFile  string `json:"access_key_file"`
+			SecretKeyFile  string `json:"secret_key_file"`
+			ForcePathStyle bool   `json:"force_path_style"`
+		} `json:"s3"`
 		ObjectLock struct {
 			Enabled       bool   `json:"enabled"`
 			Mode          string `json:"mode"`
-			RetentionDays int    `json:"retentionDays"`
-		} `json:"objectLock"`
-		Endpoint       string `json:"endpoint"`
-		Region         string `json:"region"`
-		CredentialsDir string `json:"credentialsDir"`
+			RetentionDays int    `json:"retention_days"`
+		} `json:"object_lock"`
 	} `json:"audit"`
 	Gateway struct {
-		LeaseName             string `json:"leaseName"`
-		AuditStagingDir       string `json:"auditStagingDir"`
-		PolicyFile            string `json:"policyFile"`
-		ApproverKeysFile      string `json:"approverKeysFile"`
-		AdmissionPolicyPrefix string `json:"admissionPolicyPrefix"`
-		AuditSigningKeyFile   string `json:"auditSigningKeyFile"`
-		AuditSigningKeyID     string `json:"auditSigningKeyId"`
-		MetricsURL            string `json:"metricsURL"`
-		GitHubAppDir          string `json:"githubAppDir"`
-		GitHubAPI             string `json:"githubAPI"`
-		MaxConcurrent         int    `json:"maxConcurrent"`
+		LeaseName             string `json:"lease_name"`
+		PolicyFile            string `json:"policy_file"`
+		ApproverKeysFile      string `json:"approver_keys_file"`
+		AdmissionPolicyPrefix string `json:"admission_policy_prefix"`
+		MetricsURL            string `json:"metrics_url"`
+		GitHubAppDir          string `json:"github_app_dir"`
+		GitHubAPI             string `json:"github_api"`
+		MaxConcurrent         int    `json:"max_concurrent"`
 	} `json:"gateway"`
 }
 
-func required(fields map[string]string) error {
+// LoadConfig 读取并校验配置文件；缺少任何必填项时失败。
+func LoadConfig(path string) (*FileConfig, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var fc FileConfig
+	if err := yaml.UnmarshalStrict(raw, &fc); err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	if fc.Audit.CheckpointKeyID == "" {
+		fc.Audit.CheckpointKeyID = "gateway"
+	}
+	if fc.Gateway.MaxConcurrent == 0 {
+		fc.Gateway.MaxConcurrent = 4
+	}
+	if fc.Gateway.GitHubAPI == "" {
+		fc.Gateway.GitHubAPI = "https://api.github.com"
+	}
 	var missing []string
-	for k, v := range fields {
+	for k, v := range map[string]string{
+		"cluster_id": fc.ClusterID, "namespace": fc.Namespace, "listen.metrics": fc.Listen.Metrics, "listen.probes": fc.Listen.Probes,
+		"hub.url": fc.Hub.URL, "hub.token_file": fc.Hub.TokenFile, "audit.checkpoint_key_file": fc.Audit.CheckpointKeyFile,
+		"audit.staging_dir": fc.Audit.StagingDir, "audit.s3.endpoint": fc.Audit.S3.Endpoint, "audit.s3.bucket": fc.Audit.S3.Bucket,
+		"audit.s3.access_key_file": fc.Audit.S3.AccessKeyFile, "audit.s3.secret_key_file": fc.Audit.S3.SecretKeyFile,
+		"gateway.lease_name": fc.Gateway.LeaseName, "gateway.policy_file": fc.Gateway.PolicyFile,
+		"gateway.approver_keys_file": fc.Gateway.ApproverKeysFile, "gateway.admission_policy_prefix": fc.Gateway.AdmissionPolicyPrefix,
+		"gateway.metrics_url": fc.Gateway.MetricsURL,
+	} {
 		if v == "" {
 			missing = append(missing, k)
 		}
 	}
 	if len(missing) > 0 {
-		return fmt.Errorf("gateway config is missing %s", strings.Join(missing, ", "))
+		sort.Strings(missing)
+		return nil, fmt.Errorf("%s is missing %s", path, strings.Join(missing, ", "))
 	}
-	return nil
+	if m := fc.Audit.ObjectLock.Mode; fc.Audit.ObjectLock.Enabled && m != "GOVERNANCE" && m != "COMPLIANCE" {
+		return nil, fmt.Errorf("%s: audit.object_lock.mode must be GOVERNANCE or COMPLIANCE, got %q", path, m)
+	}
+	return &fc, nil
 }
 
 // LoadSigningKey 读取 PKCS#8 PEM 格式的 Ed25519 私钥（openssl genpkey -algorithm ed25519）。
@@ -116,8 +145,8 @@ func LoadSigningKey(path string) (ed25519.PrivateKey, error) {
 	return ek, nil
 }
 
-func readSecret(dir, name string) (string, error) {
-	b, err := os.ReadFile(filepath.Join(dir, name))
+func readSecret(path string) (string, error) {
+	b, err := os.ReadFile(path)
 	if err != nil {
 		return "", err
 	}
@@ -131,37 +160,14 @@ func Run(ctx context.Context, version string, args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	raw, err := os.ReadFile(*configPath)
+	fc, err := LoadConfig(*configPath)
 	if err != nil {
 		return err
 	}
-	var fc FileConfig
-	if err := yaml.Unmarshal(raw, &fc); err != nil {
-		return fmt.Errorf("%s: %w", *configPath, err)
-	}
 	g := fc.Gateway
-	if g.AuditSigningKeyID == "" {
-		g.AuditSigningKeyID = "gateway"
-	}
-	if g.MaxConcurrent == 0 {
-		g.MaxConcurrent = 4
-	}
 	podName, nodeName := os.Getenv("POD_NAME"), os.Getenv("NODE_NAME")
-	if fc.Role != "gateway" {
-		return fmt.Errorf("%s is for role %q", *configPath, fc.Role)
-	}
-	if err := required(map[string]string{
-		"clusterId": fc.ClusterID, "release.namespace": fc.Release.Namespace,
-		"listen.metrics": fc.Listen.Metrics, "listen.probes": fc.Listen.Probes, "hub.url": fc.Hub.URL, "hub.tokenFile": fc.Hub.TokenFile,
-		"audit.bucket": fc.Audit.Bucket, "audit.endpoint": fc.Audit.Endpoint, "audit.credentialsDir": fc.Audit.CredentialsDir,
-		"gateway.leaseName": g.LeaseName, "gateway.auditStagingDir": g.AuditStagingDir, "gateway.policyFile": g.PolicyFile,
-		"gateway.approverKeysFile": g.ApproverKeysFile, "gateway.admissionPolicyPrefix": g.AdmissionPolicyPrefix,
-		"gateway.auditSigningKeyFile": g.AuditSigningKeyFile, "gateway.metricsURL": g.MetricsURL, "POD_NAME": podName, "NODE_NAME": nodeName,
-	}); err != nil {
-		return err
-	}
-	if fc.Audit.Sink != "minio" && fc.Audit.Sink != "s3" {
-		return fmt.Errorf("gateway requires audit.sink minio or s3, got %q", fc.Audit.Sink)
+	if podName == "" || nodeName == "" {
+		return errors.New("POD_NAME and NODE_NAME must be set from the downward API")
 	}
 	m := metrics.New(version)
 	cat, err := catalog.Load()
@@ -180,21 +186,25 @@ func Run(ctx context.Context, version string, args []string) error {
 	if err != nil {
 		return err
 	}
-	access, err := readSecret(fc.Audit.CredentialsDir, "accessKey")
+	access, err := readSecret(fc.Audit.S3.AccessKeyFile)
 	if err != nil {
 		return err
 	}
-	secret, err := readSecret(fc.Audit.CredentialsDir, "secretKey")
+	secret, err := readSecret(fc.Audit.S3.SecretKeyFile)
 	if err != nil {
 		return err
 	}
-	endpoint := strings.TrimPrefix(strings.TrimPrefix(fc.Audit.Endpoint, "https://"), "http://")
+	endpoint := strings.TrimPrefix(strings.TrimPrefix(fc.Audit.S3.Endpoint, "https://"), "http://")
+	lookup := minio.BucketLookupDNS
+	if fc.Audit.S3.ForcePathStyle {
+		lookup = minio.BucketLookupPath
+	}
 	s3, err := minio.New(endpoint, &minio.Options{Creds: credentials.NewStaticV4(access, secret, ""),
-		Secure: strings.HasPrefix(fc.Audit.Endpoint, "https://"), Region: fc.Audit.Region})
+		Secure: strings.HasPrefix(fc.Audit.S3.Endpoint, "https://"), Region: fc.Audit.S3.Region, BucketLookup: lookup})
 	if err != nil {
 		return err
 	}
-	key, err := LoadSigningKey(g.AuditSigningKeyFile)
+	key, err := LoadSigningKey(fc.Audit.CheckpointKeyFile)
 	if err != nil {
 		return err
 	}
@@ -202,9 +212,9 @@ func Run(ctx context.Context, version string, args []string) error {
 	if fc.Audit.ObjectLock.Mode == "COMPLIANCE" {
 		mode = minio.Compliance
 	}
-	chain, err := audit.Open(ctx, audit.Options{Cluster: fc.ClusterID, Dir: g.AuditStagingDir, CheckpointEvery: 100,
-		Signer: audit.Signer{KeyID: g.AuditSigningKeyID, Key: key},
-		Sink:   audit.SinkConfig{Client: s3, Bucket: fc.Audit.Bucket, ObjectLock: fc.Audit.ObjectLock.Enabled, Mode: mode, RetentionDays: fc.Audit.ObjectLock.RetentionDays}})
+	chain, err := audit.Open(ctx, audit.Options{Cluster: fc.ClusterID, Dir: fc.Audit.StagingDir, CheckpointEvery: 100,
+		Signer: audit.Signer{KeyID: fc.Audit.CheckpointKeyID, Key: key},
+		Sink:   audit.SinkConfig{Client: s3, Bucket: fc.Audit.S3.Bucket, ObjectLock: fc.Audit.ObjectLock.Enabled, Mode: mode, RetentionDays: fc.Audit.ObjectLock.RetentionDays}})
 	if err != nil {
 		return err
 	}
@@ -215,11 +225,7 @@ func Run(ctx context.Context, version string, args []string) error {
 	}
 	var app *github.App
 	if g.GitHubAppDir != "" {
-		api := g.GitHubAPI
-		if api == "" {
-			api = "https://api.github.com"
-		}
-		if app, err = github.Load(g.GitHubAppDir, api, 15*time.Second); err != nil {
+		if app, err = github.Load(g.GitHubAppDir, g.GitHubAPI, 15*time.Second); err != nil {
 			return err
 		}
 	}
@@ -231,13 +237,13 @@ func Run(ctx context.Context, version string, args []string) error {
 		return err
 	}
 	eng, err = engine.New(engine.Config{
-		Cluster: fc.ClusterID, Namespace: fc.Release.Namespace, Identity: podName, NodeName: nodeName, LeaseName: g.LeaseName, Version: version,
+		Cluster: fc.ClusterID, Namespace: fc.Namespace, Identity: podName, NodeName: nodeName, LeaseName: g.LeaseName, Version: version,
 		PolicyFile: g.PolicyFile, KeysFile: g.ApproverKeysFile, AdmissionPolicyPrefix: g.AdmissionPolicyPrefix,
 		RequireWebAuthnForH: fc.Profile == "compliance", MaxConcurrent: g.MaxConcurrent,
 		SafetyInterval: 15 * time.Second, PullWait: 30 * time.Second, PushInterval: 2 * time.Second, FlushInterval: 5 * time.Second,
 		MaxClockSkew: 5 * time.Second, ThrottleHold: time.Minute,
 		LeaseDuration: 15 * time.Second, RenewDeadline: 10 * time.Second, RetryPeriod: 2 * time.Second,
-	}, engine.Deps{Kube: kc, Hub: hub, Catalog: cat, Executors: execs, Audit: chain, Verify: vc, Metrics: m, Clock: clock.RealClock{}})
+	}, engine.Deps{Kube: kc, Hub: hub, Catalog: cat, Executors: execs, Audit: chain, Verify: vc, Metrics: m, Clock: clock.RealClock{}, GitHub: app})
 	if err != nil {
 		return err
 	}

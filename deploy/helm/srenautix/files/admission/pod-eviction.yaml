@@ -37,8 +37,10 @@ spec:
   validations:
     - expression: '!variables.isRecord || object.metadata.?labels.orValue({})[?''srenautix.io/admission-probe''].orValue('''') != ''pod-eviction'''
       message: admission self-check probe denied by pod-eviction
+      reason: Forbidden
     - expression: variables.isRecord || params.?data.?frozen.orValue('true') == 'false'
       message: srenautix-freeze is frozen or missing, gateway writes are proposal-only
+      reason: Forbidden
     - expression: |-
         variables.isRecord || (object.metadata.?name == optional.of(request.name) &&
         object.?deleteOptions.?preconditions.?uid.orValue('') != '' &&
@@ -46,6 +48,7 @@ spec:
         !object.?deleteOptions.?propagationPolicy.hasValue() &&
         !object.?deleteOptions.?orphanDependents.hasValue())
       message: gateway evictions must name the Pod, carry its UID precondition and keep the default grace period and deletion semantics
+      reason: Forbidden
   variables:
     - expression: request.resource.group == 'srenautix.io' && request.resource.resource == 'actionexecutions'
       name: isRecord

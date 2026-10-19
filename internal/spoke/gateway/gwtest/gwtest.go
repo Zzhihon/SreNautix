@@ -29,6 +29,7 @@ import (
 	"github.com/Zzhihon/SreNautix/internal/spoke/gateway/engine"
 	"github.com/Zzhihon/SreNautix/internal/spoke/gateway/execution"
 	"github.com/Zzhihon/SreNautix/internal/spoke/gateway/executor"
+	"github.com/Zzhihon/SreNautix/internal/spoke/gateway/github"
 	"github.com/Zzhihon/SreNautix/internal/spoke/gateway/kube"
 	"github.com/Zzhihon/SreNautix/internal/spoke/gateway/metrics"
 	"github.com/Zzhihon/SreNautix/internal/spoke/gateway/policy"
@@ -66,6 +67,8 @@ type Env struct {
 	SigningKey ed25519.PrivateKey
 	Clock      *clocktesting.FakeClock
 	Actions    []string
+	// GitHubApp 不为 nil 时交给 gitops_pr 执行器。
+	GitHubApp *github.App
 }
 
 // DefaultPolicy 是测试用的 gateway 策略：启用常用动作，payments 中的 pod_restart、workload_scale 允许自动执行。
@@ -183,12 +186,17 @@ type Gateway struct {
 	once    sync.Once
 }
 
-// Build 用环境中的依赖构造引擎（不启动）。
-func (e *Env) Build(o Options) (*engine.Engine, *audit.Chain, *metrics.Metrics) {
-	return Build(e.T, e.Kube.Gateway(), Config{HubURL: e.Hub.Server.URL, TokenFile: e.TokenFile, MinIOEndpoint: e.MinIO.Endpoint(),
+// Config 返回引擎的连接设置（子进程把它写成 JSON 读取）。
+func (e *Env) Config(o Options) Config {
+	return Config{HubURL: e.Hub.Server.URL, TokenFile: e.TokenFile, MinIOEndpoint: e.MinIO.Endpoint(),
 		MinIOAccess: e.MinIO.AccessKey, MinIOSecret: e.MinIO.SecretKey, PrometheusURL: e.Prometheus.URL, PolicyFile: e.PolicyFile,
 		KeysFile: e.KeysFile, StagingDir: firstNonEmpty(o.StagingDir, filepath.Join(e.Dir, "staging")), SigningKey: e.SigningKey,
-		Identity: firstNonEmpty(o.Identity, "gateway-0")}, clockFor(e, o), o.Fault)
+		Identity: firstNonEmpty(o.Identity, "gateway-0")}
+}
+
+// Build 用环境中的依赖构造引擎（不启动）。
+func (e *Env) Build(o Options) (*engine.Engine, *audit.Chain, *metrics.Metrics) {
+	return Build(e.T, e.Kube.Gateway(), e.Config(o), clockFor(e, o), o.Fault, e.GitHubApp)
 }
 
 func clockFor(e *Env, o Options) clock.Clock {
@@ -222,7 +230,7 @@ type Config struct {
 }
 
 // Build 构造引擎及其依赖。
-func Build(t testing.TB, rc *rest.Config, c Config, clk clock.Clock, fault func(point, executionID string)) (*engine.Engine, *audit.Chain, *metrics.Metrics) {
+func Build(t testing.TB, rc *rest.Config, c Config, clk clock.Clock, fault func(point, executionID string), app *github.App) (*engine.Engine, *audit.Chain, *metrics.Metrics) {
 	t.Helper()
 	ctx := context.Background()
 	cat, err := catalog.Load()
@@ -254,7 +262,7 @@ func Build(t testing.TB, rc *rest.Config, c Config, clk clock.Clock, fault func(
 	m := metrics.New("test")
 	var eng *engine.Engine
 	execs, err := executor.Registry(&executor.Deps{Kube: kc, Catalog: cat, Policy: func() *policy.Policy { return eng.Policy() },
-		Now: func() time.Time { return clk.Now().UTC() }, Poll: 100 * time.Millisecond})
+		GitHub: app, Now: func() time.Time { return clk.Now().UTC() }, Poll: 100 * time.Millisecond})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -264,7 +272,7 @@ func Build(t testing.TB, rc *rest.Config, c Config, clk clock.Clock, fault func(
 		SafetyInterval: time.Second, PullWait: time.Second, PushInterval: 300 * time.Millisecond, FlushInterval: 500 * time.Millisecond,
 		MaxClockSkew: 5 * time.Second, ThrottleHold: time.Minute,
 		LeaseDuration: 4 * time.Second, RenewDeadline: 3 * time.Second, RetryPeriod: 500 * time.Millisecond, Fault: fault,
-	}, engine.Deps{Kube: kc, Hub: hub, Catalog: cat, Executors: execs, Audit: chain, Verify: vc, Metrics: m, Clock: clk})
+	}, engine.Deps{Kube: kc, Hub: hub, Catalog: cat, Executors: execs, Audit: chain, Verify: vc, Metrics: m, Clock: clk, GitHub: app})
 	if err != nil {
 		t.Fatal(err)
 	}

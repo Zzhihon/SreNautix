@@ -147,19 +147,29 @@ func SplitDocs(t testing.TB, raw []byte) [][]byte {
 	}
 }
 
-// Start 启动 kube-apiserver 与 etcd，安装 CRD 并创建命名空间。
+// existingCluster 表示在已有集群（Kind，见 test/invariants/kind）上运行：envtest 读取同一个环境变量 USE_EXISTING_CLUSTER，
+// 使用 KUBECONFIG 指向的集群，只安装 CRD。apiserver 的审计日志由 Kind 配置开启，路径由 SRENAUTIX_APISERVER_AUDIT_LOG 给出。
+func existingCluster() bool { return os.Getenv("USE_EXISTING_CLUSTER") == "true" }
+
+// Start 启动 kube-apiserver 与 etcd（或连接已有集群），安装 CRD 并创建命名空间。
 func Start(t testing.TB, opts Options) *Env {
 	t.Helper()
-	RequireEnv(t, "KUBEBUILDER_ASSETS")
-	// envtest 的 etcd 数据目录与证书放在 TMPDIR 下，指向仓库内被忽略的目录
-	tmp := filepath.Join(Root(), ".scratch", "tmp")
-	if err := os.MkdirAll(tmp, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("TMPDIR", tmp)
 	env := &envtest.Environment{CRDs: CRDs(t), ErrorIfCRDPathMissing: true}
 	e := &Env{}
-	if opts.Audit {
+	if existingCluster() {
+		if opts.Audit {
+			e.AuditLog = RequireEnv(t, "SRENAUTIX_APISERVER_AUDIT_LOG")
+		}
+	} else {
+		RequireEnv(t, "KUBEBUILDER_ASSETS")
+		// envtest 的 etcd 数据目录与证书放在 TMPDIR 下，指向仓库内被忽略的目录
+		tmp := filepath.Join(Root(), ".scratch", "tmp")
+		if err := os.MkdirAll(tmp, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("TMPDIR", tmp)
+	}
+	if opts.Audit && !existingCluster() {
 		dir := Scratch(t, "audit")
 		policy := filepath.Join(dir, "policy.yaml")
 		if err := os.WriteFile(policy, []byte(auditPolicy), 0o644); err != nil {

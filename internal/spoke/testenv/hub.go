@@ -169,6 +169,16 @@ func (h *Hub) Offer(t tunnel.Ticket) {
 		IncidentVersion: t.Proposal.IncidentVersion, RootComponent: t.Proposal.RootComponent, EvidenceFingerprint: t.Proposal.EvidenceFingerprint}
 }
 
+// LastOffered 返回最近加入的工单的提议 ID。
+func (h *Hub) LastOffered() string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if len(h.pending) == 0 {
+		return ""
+	}
+	return h.pending[len(h.pending)-1].Proposal.ProposalID
+}
+
 // Redeliver 让已确认拉取的工单再被下发一次（模拟中心重复下发）。
 func (h *Hub) Redeliver(ticketID string) {
 	h.mu.Lock()

@@ -37,8 +37,10 @@ spec:
   validations:
     - expression: '!variables.isRecord || object.metadata.?labels.orValue({})[?''srenautix.io/admission-probe''].orValue('''') != ''workload-statefulsets'''
       message: admission self-check probe denied by workload-statefulsets
+      reason: Forbidden
     - expression: variables.isRecord || params.?data.?frozen.orValue('true') == 'false'
       message: srenautix-freeze is frozen or missing, gateway writes are proposal-only
+      reason: Forbidden
     - expression: |-
         variables.isRecord || (object.metadata.?labels == oldObject.metadata.?labels &&
         object.metadata.?ownerReferences == oldObject.metadata.?ownerReferences &&
@@ -47,6 +49,7 @@ spec:
         variables.annNew.all(k, k in ["srenautix.io/execution-id"] || k in variables.annOld) &&
         (!('srenautix.io/execution-id' in variables.annNew) || variables.annNew['srenautix.io/execution-id'].matches('^[0-9a-f]{32}$')))
       message: gateway may only add its execution annotations; labels, owners, finalizers and other annotations must not change
+      reason: Forbidden
     - expression: |-
         variables.isRecord || (object.spec.?selector == oldObject.spec.?selector &&
         object.spec.?template == oldObject.spec.?template &&
@@ -59,6 +62,7 @@ spec:
         object.spec.?ordinals == oldObject.spec.?ordinals &&
         object.spec.?volumeClaimTemplates == oldObject.spec.?volumeClaimTemplates)
       message: gateway may only change spec.replicas of a StatefulSet
+      reason: Forbidden
   variables:
     - expression: request.resource.group == 'srenautix.io' && request.resource.resource == 'actionexecutions'
       name: isRecord

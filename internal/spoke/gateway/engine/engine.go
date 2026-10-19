@@ -22,6 +22,7 @@ import (
 	"github.com/Zzhihon/SreNautix/internal/spoke/gateway/catalog"
 	"github.com/Zzhihon/SreNautix/internal/spoke/gateway/execution"
 	"github.com/Zzhihon/SreNautix/internal/spoke/gateway/executor"
+	"github.com/Zzhihon/SreNautix/internal/spoke/gateway/github"
 	"github.com/Zzhihon/SreNautix/internal/spoke/gateway/kube"
 	"github.com/Zzhihon/SreNautix/internal/spoke/gateway/metrics"
 	"github.com/Zzhihon/SreNautix/internal/spoke/gateway/policy"
@@ -74,6 +75,8 @@ type Deps struct {
 	Metrics   *metrics.Metrics
 	// Clock 用于审批与提议的时效、校验时间窗的等待；测试用可推进的时钟。
 	Clock clock.Clock
+	// GitHub 是 gitops_pr 使用的 GitHub App；没有配置时为 nil。
+	GitHub *github.App
 }
 
 // Engine 是 gateway 的主实例逻辑。

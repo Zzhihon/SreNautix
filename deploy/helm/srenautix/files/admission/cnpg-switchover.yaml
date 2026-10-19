@@ -37,8 +37,10 @@ spec:
   validations:
     - expression: '!variables.isRecord || object.metadata.?labels.orValue({})[?''srenautix.io/admission-probe''].orValue('''') != ''cnpg-switchover'''
       message: admission self-check probe denied by cnpg-switchover
+      reason: Forbidden
     - expression: variables.isRecord || params.?data.?frozen.orValue('true') == 'false'
       message: srenautix-freeze is frozen or missing, gateway writes are proposal-only
+      reason: Forbidden
     - expression: |-
         variables.isRecord || (has(object.status.targetPrimary) && has(object.status.instanceNames) &&
         object.status.targetPrimary in object.status.instanceNames &&
@@ -46,6 +48,7 @@ spec:
         (object.status.?phase == oldObject.status.?phase || object.status.?phase == optional.of('Switchover in progress')) &&
         object.spec == oldObject.spec && variables.otherStatusUnchanged)
       message: gateway may only switch the target primary of a Cluster to one of its instances
+      reason: Forbidden
   variables:
     - expression: request.resource.group == 'srenautix.io' && request.resource.resource == 'actionexecutions'
       name: isRecord

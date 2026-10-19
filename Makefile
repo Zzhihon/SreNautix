@@ -11,7 +11,7 @@ VERSION             ?= $(shell git describe --tags --always --dirty 2>/dev/null 
 # 生成结果所在的路径；gateway-generate-check 要求重新生成后这些路径没有差异
 GATEWAY_GENERATED := contract/gateway/v1/crd contract/gateway/v1/testvectors deploy/helm/srenautix/crds deploy/helm/srenautix/files/admission
 
-.PHONY: go-build go-vet go-test gateway-generate gateway-generate-check envtest-assets
+.PHONY: go-build go-vet go-test gateway-generate gateway-generate-check envtest-assets invariants-kind
 
 go-build:
 	CGO_ENABLED=0 $(GO) build -trimpath -ldflags "-s -w -X main.version=$(VERSION)" -o bin/srenautix-spoke ./cmd/srenautix-spoke
@@ -45,4 +45,8 @@ gateway-generate-check: gateway-generate
 go-test: $(SETUP_ENVTEST) go-vet gateway-generate-check
 	mkdir -p $(GO_TMPDIR)
 	TMPDIR=$(GO_TMPDIR) KUBEBUILDER_ASSETS="$$($(SETUP_ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(ENVTEST_DIR) -p path)" \
-		$(GO) test -count=1 ./...
+		$(GO) test -count=1 -timeout 30m ./...
+
+# gateway 不变量测试在 Kind 上运行（每个不变量一个新集群，不变量 8 默认 1000 轮），见 test/invariants/README.md
+invariants-kind:
+	test/invariants/kind/run.sh $(INVARIANTS)

@@ -37,8 +37,10 @@ spec:
   validations:
     - expression: '!variables.isRecord || object.metadata.?labels.orValue({})[?''srenautix.io/admission-probe''].orValue('''') != ''hpa-bounds'''
       message: admission self-check probe denied by hpa-bounds
+      reason: Forbidden
     - expression: variables.isRecord || params.?data.?frozen.orValue('true') == 'false'
       message: srenautix-freeze is frozen or missing, gateway writes are proposal-only
+      reason: Forbidden
     - expression: |-
         variables.isRecord || (object.metadata.?labels == oldObject.metadata.?labels &&
         object.metadata.?ownerReferences == oldObject.metadata.?ownerReferences &&
@@ -47,12 +49,14 @@ spec:
         variables.annNew.all(k, k in ["srenautix.io/execution-id"] || k in variables.annOld) &&
         (!('srenautix.io/execution-id' in variables.annNew) || variables.annNew['srenautix.io/execution-id'].matches('^[0-9a-f]{32}$')))
       message: gateway may only add its execution annotations; labels, owners, finalizers and other annotations must not change
+      reason: Forbidden
     - expression: |-
         variables.isRecord || (object.spec.?scaleTargetRef == oldObject.spec.?scaleTargetRef &&
         object.spec.?metrics == oldObject.spec.?metrics &&
         object.spec.?behavior == oldObject.spec.?behavior &&
         object.spec.?minReplicas.orValue(1) <= object.spec.maxReplicas)
       message: gateway may only change spec.minReplicas and spec.maxReplicas of a HorizontalPodAutoscaler
+      reason: Forbidden
   variables:
     - expression: request.resource.group == 'srenautix.io' && request.resource.resource == 'actionexecutions'
       name: isRecord

@@ -281,18 +281,21 @@ func buildPolicy(opts Options, short, comment string, rules []resourceRule, vars
 	for _, v := range vars {
 		variables = append(variables, map[string]any{"name": v[0], "expression": v[1]})
 	}
+	// 拒绝一律返回 403 Forbidden（不变量 2："失控 gateway"的写入被准入拒绝）
 	validations := []any{
 		map[string]any{
 			"expression": "!variables.isRecord || object.metadata.?labels.orValue({})[?'" + ProbeLabel + "'].orValue('') != '" + short + "'",
 			"message":    "admission self-check probe denied by " + short,
+			"reason":     "Forbidden",
 		},
 		map[string]any{
 			"expression": "variables.isRecord || params.?data.?frozen.orValue('true') == 'false'",
 			"message":    "srenautix-freeze is frozen or missing, gateway writes are proposal-only",
+			"reason":     "Forbidden",
 		},
 	}
 	for _, v := range vals {
-		validations = append(validations, map[string]any{"expression": "variables.isRecord || (" + v.expr + ")", "message": v.msg})
+		validations = append(validations, map[string]any{"expression": "variables.isRecord || (" + v.expr + ")", "message": v.msg, "reason": "Forbidden"})
 	}
 	return map[string]any{
 		"apiVersion": "admissionregistration.k8s.io/v1",
