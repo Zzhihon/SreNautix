@@ -176,31 +176,33 @@ export async function startEnvTest(): Promise<EnvTest> {
   );
   const apiLog = tail(api, 'kube-apiserver');
   procs.push(api);
+  const stop = async () => {
+    for (const p of [...procs].reverse()) {
+      await new Promise<void>((res) => {
+        if (p.exitCode !== null || p.signalCode !== null) {
+          res();
+          return;
+        }
+        p.once('exit', () => res());
+        p.kill('SIGTERM');
+      });
+    }
+    rmSync(dir, { recursive: true, force: true });
+  };
   const server = `https://127.0.0.1:${apiPort}`;
-  await waitReady(`${server}/readyz`, { authorization: `Bearer ${ADMIN_TOKEN}` }, 60_000, [
-    { p: etcd, log: etcdLog },
-    { p: api, log: apiLog },
-  ]);
+  try {
+    await waitReady(`${server}/readyz`, { authorization: `Bearer ${ADMIN_TOKEN}` }, 60_000, [
+      { p: etcd, log: etcdLog },
+      { p: api, log: apiLog },
+    ]);
+  } catch (e) {
+    // 启动失败时同样停止进程并删除数据目录
+    await stop();
+    throw e;
+  }
   const adminKubeconfig = join(dir, 'admin.kubeconfig');
   const readerKubeconfig = join(dir, 'reader.kubeconfig');
   writeFileSync(adminKubeconfig, kubeconfig(server, ADMIN_TOKEN));
   writeFileSync(readerKubeconfig, kubeconfig(server, READER_TOKEN));
-  return {
-    server,
-    adminKubeconfig,
-    readerKubeconfig,
-    async stop() {
-      for (const p of procs.reverse()) {
-        await new Promise<void>((res) => {
-          if (p.exitCode !== null) {
-            res();
-            return;
-          }
-          p.once('exit', () => res());
-          p.kill('SIGTERM');
-        });
-      }
-      rmSync(dir, { recursive: true, force: true });
-    },
-  };
+  return { server, adminKubeconfig, readerKubeconfig, stop };
 }
