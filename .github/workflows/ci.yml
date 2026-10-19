@@ -224,6 +224,8 @@ jobs:
               exit 1
             fi
           done
+      - name: Kind 场景与标准答案一致，并满足 EvalTruth
+        run: deploy/kind/check-scenarios.sh
       - name: shellcheck（deploy/ 与 .github/scripts/ 下的脚本）
         run: git ls-files 'deploy/**/*.sh' '.github/scripts/*.sh' | xargs ./shellcheck -x
 

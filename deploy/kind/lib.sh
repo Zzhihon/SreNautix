@@ -43,7 +43,7 @@ wait_alerts() {
     while true; do
       state=$(prom_query "ALERTS{alertname=\"$name\"}" | jq -r '[.data.result[].metric.alertstate] | unique | join(",")')
       if [[ -n "$state" ]]; then
-        log "告警 $name 已出现（$state）"
+        log "告警 ${name} 已出现（${state}）"
         break
       fi
       ((SECONDS < deadline)) || die "等待告警 $name 超时（${timeout}s）"

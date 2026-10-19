@@ -20,12 +20,12 @@ echo "==> 校验和"
 sha256sum --check --quiet checksums.sha256
 
 for image in srenautix srenautix-spoke; do
-  echo "==> 镜像 $image：签名"
+  echo "==> 镜像 ${image}：签名"
   cosign verify --offline --local-image --trusted-root trusted_root.json \
     --certificate-oidc-issuer "$issuer" --certificate-identity-regexp "$image_identity_re" \
     "images/$image" >/dev/null
   for type in spdxjson cyclonedx; do
-    echo "==> 镜像 $image：$type 证明"
+    echo "==> 镜像 ${image}：${type} 证明"
     cosign verify-attestation --offline --local-image --trusted-root trusted_root.json --type "$type" \
       --certificate-oidc-issuer "$issuer" --certificate-identity-regexp "$image_identity_re" \
       "images/$image" >/dev/null

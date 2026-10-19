@@ -1,17 +1,23 @@
-id: coredns-scaled-to-zero
-kind: scenario
+case_id: scenario:coredns-scaled-to-zero
+version: 1
+suite: scenarios-kind
+type: scenario
 cluster_id: kind
-summary: CoreDNS 缩到 0，集群内名称解析全部失败；api 按 Service 名连接数据库失败并进入 CrashLoopBackOff，CoreDNS 自身没有告警
-expected_alerts: [KubePodCrashLooping]
+authored_by: maintainer
+truth_source: {kind: injected, principal: null, ref: deploy/kind/scenarios/coredns-scaled-to-zero}
 truth:
   root_components: [Deployment:kube-system/coredns]
   granularity: workload
   mechanism: 集群 DNS 没有可用副本，所有依赖 Service 名的连接失败
   disposition: escalate
+  forbid_evidence_consistent: false
+scenario:
+  summary: CoreDNS 缩到 0，集群内名称解析全部失败；api 按 Service 名连接数据库失败并进入 CrashLoopBackOff，CoreDNS 自身没有告警
+  expected_alerts: [KubePodCrashLooping]
   # 根因上没有告警，需要对集群枢纽执行探测卡（DESIGN §4.3、§5）
   silent_root: true
-distractors:
-  - component: StatefulSet:shop/postgres
-    description: 数据库本身正常，api 只是解析不到它的地址
-background_noise: _background.yaml
-window: {before: 30m, after: 30m}
+  distractors:
+    - component: StatefulSet:shop/postgres
+      description: 数据库本身正常，api 只是解析不到它的地址
+  background_noise: _background.yaml
+  window: {before: 30m, after: 30m}

@@ -21,7 +21,7 @@ require docker kind kubectl helm jq yq
 if kind get clusters | grep -qx "$CLUSTER_NAME"; then
   log "Kind 集群 $CLUSTER_NAME 已存在，沿用"
 else
-  log "创建 Kind 集群 $CLUSTER_NAME（$KIND_NODE_IMAGE）"
+  log "创建 Kind 集群 ${CLUSTER_NAME}（${KIND_NODE_IMAGE}）"
   kind create cluster --name "$CLUSTER_NAME" --image "$KIND_NODE_IMAGE" --config "$KIND_DIR/kind-config.yaml" --wait 180s
 fi
 
@@ -34,7 +34,7 @@ helm repo update >/dev/null
 
 hi() {
   local release=$1 chart=$2 version=$3 ns=$4 values=$5
-  log "安装 $release（$chart $version）"
+  log "安装 ${release}（${chart} ${version}）"
   helm --kube-context "$KUBE_CONTEXT" upgrade --install "$release" "$chart" --version "$version" \
     --namespace "$ns" --create-namespace -f "$KIND_DIR/values/$values" --wait --timeout 15m
 }
@@ -44,7 +44,7 @@ hi loki grafana/loki "$LOKI_CHART_VERSION" monitoring loki.yaml
 hi tempo grafana/tempo "$TEMPO_CHART_VERSION" monitoring tempo.yaml
 hi alloy grafana/alloy "$ALLOY_CHART_VERSION" monitoring alloy.yaml
 hi metrics-server metrics-server/metrics-server "$METRICS_SERVER_CHART_VERSION" kube-system metrics-server.yaml
-log "安装 CNPG operator（cloudnative-pg $CNPG_CHART_VERSION）"
+log "安装 CNPG operator（cloudnative-pg ${CNPG_CHART_VERSION}）"
 helm --kube-context "$KUBE_CONTEXT" upgrade --install cnpg cnpg/cloudnative-pg --version "$CNPG_CHART_VERSION" \
   --namespace cnpg-system --create-namespace --wait --timeout 10m
 

@@ -1,15 +1,21 @@
-id: hpa-at-max
-kind: scenario
+case_id: scenario:hpa-at-max
+version: 1
+suite: scenarios-kind
+type: scenario
 cluster_id: kind
-summary: 外部流量增加到 12 个不间断请求的客户端，api 的 CPU 持续超过目标，HPA 扩到上限 4 后无法继续扩容
-expected_alerts: [KubeHpaMaxedOut]
+authored_by: maintainer
+truth_source: {kind: injected, principal: null, ref: deploy/kind/scenarios/hpa-at-max}
 truth:
   root_components: [HorizontalPodAutoscaler:shop/api, Deployment:traffic/loadgen]
   granularity: workload
   mechanism: 负载超过 HPA 上限能承载的容量，HPA 停在 maxReplicas
   # 可逆动作 hpa_bounds_set 提高上限
   disposition: act
+  forbid_evidence_consistent: false
+scenario:
+  summary: 外部流量增加到 12 个不间断请求的客户端，api 的 CPU 持续超过目标，HPA 扩到上限 4 后无法继续扩容
+  expected_alerts: [KubeHpaMaxedOut]
   silent_root: false
-distractors: []
-background_noise: _background.yaml
-window: {before: 30m, after: 30m}
+  distractors: []
+  background_noise: _background.yaml
+  window: {before: 30m, after: 30m}

@@ -1,14 +1,20 @@
-id: node-notready-storm
-kind: scenario
+case_id: scenario:node-notready-storm
+version: 1
+suite: scenarios-kind
+type: scenario
 cluster_id: kind
-summary: 停止 srenautix-worker2 的 kubelet，节点 NotReady；5 分钟后其上的 Pod 被驱逐并在其余节点重建，api、web 副本不足
-expected_alerts: [KubeNodeNotReady, KubeNodeUnreachable]
+authored_by: maintainer
+truth_source: {kind: injected, principal: null, ref: deploy/kind/scenarios/node-notready-storm}
 truth:
   root_components: [Node:srenautix-worker2]
   granularity: node
-  mechanism: 节点上的 kubelet 停止，节点失联，其上的 Pod 被驱逐（Pod 风暴）
+  mechanism: 节点上的 kubelet 停止，节点失联，其上的 Pod 被驱逐并在其余节点重建（Pod 风暴）
   disposition: escalate
+  forbid_evidence_consistent: false
+scenario:
+  summary: 停止 srenautix-worker2 的 kubelet，节点 NotReady；5 分钟后其上的 Pod 被驱逐，api、web 副本不足
+  expected_alerts: [KubeNodeNotReady, KubeNodeUnreachable]
   silent_root: false
-distractors: []
-background_noise: _background.yaml
-window: {before: 30m, after: 30m}
+  distractors: []
+  background_noise: _background.yaml
+  window: {before: 30m, after: 30m}

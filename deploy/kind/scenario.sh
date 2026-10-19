@@ -21,7 +21,7 @@ usage() { sed -n '2,12p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2; exit 2;
 
 load() {
   local name=$1 file="$KIND_DIR/scenarios/$1/scenario.sh"
-  [[ -f "$file" ]] || die "没有场景 $name（$file）"
+  [[ -f "$file" ]] || die "没有场景 ${name}（${file}）"
   [[ -f "$REPO_ROOT/eval/scenarios/$name.yaml" ]] || die "场景 $name 缺少标准答案 eval/scenarios/$name.yaml"
   # shellcheck source=/dev/null
   source "$file"

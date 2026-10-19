@@ -36,6 +36,6 @@ if [[ "$chart" == oci://* ]]; then
   args+=(--version "${SRENAUTIX_CHART_VERSION:?使用 OCI chart 时需要 SRENAUTIX_CHART_VERSION}")
 fi
 
-log "安装 SreNautix（$chart）"
+log "安装 SreNautix（${chart}）"
 helm --kube-context "$KUBE_CONTEXT" upgrade --install srenautix "$chart" --namespace "$ns" "${args[@]}" --wait --timeout 15m
 k -n "$ns" get pods -o wide

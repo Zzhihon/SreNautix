@@ -1,14 +1,20 @@
-id: bad-config-rollout
-kind: scenario
+case_id: scenario:bad-config-rollout
+version: 1
+suite: scenarios-kind
+type: scenario
 cluster_id: kind
-summary: checkout 发布改为挂载 checkout-config-v2，其中 mode 无效；新 Pod 启动即退出，发布卡住，旧 Pod 继续服务
-expected_alerts: [KubePodCrashLooping]
+authored_by: maintainer
+truth_source: {kind: injected, principal: null, ref: deploy/kind/scenarios/bad-config-rollout}
 truth:
   root_components: [Deployment:shop/checkout, ConfigMap:shop/checkout-config-v2]
   granularity: workload
-  mechanism: 错误的配置随发布上线，新 ReplicaSet 的 Pod 读取无效配置后退出
+  mechanism: 错误的配置随发布上线，新 ReplicaSet 的 Pod 读取无效配置后退出，发布卡住
   disposition: act
+  forbid_evidence_consistent: false
+scenario:
+  summary: checkout 发布改为挂载 checkout-config-v2，其中 mode 无效；新 Pod 启动即退出，发布卡住，旧 Pod 继续服务
+  expected_alerts: [KubePodCrashLooping]
   silent_root: false
-distractors: []
-background_noise: _background.yaml
-window: {before: 30m, after: 30m}
+  distractors: []
+  background_noise: _background.yaml
+  window: {before: 30m, after: 30m}
