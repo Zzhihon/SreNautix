@@ -76,7 +76,8 @@ beforeAll(async () => {
   mkdirSync(scratch, { recursive: true });
 });
 afterAll(async () => {
-  await prom.stop();
+  // beforeAll 启动失败时 prom 未赋值
+  await prom?.stop();
 });
 
 describe('srenautix pack', () => {

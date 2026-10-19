@@ -25,7 +25,8 @@ beforeAll(async () => {
   ]);
 });
 afterAll(async () => {
-  await loki.stop();
+  // beforeAll 启动失败时 loki 未赋值
+  await loki?.stop();
 });
 
 describe('LokiAdapter', () => {

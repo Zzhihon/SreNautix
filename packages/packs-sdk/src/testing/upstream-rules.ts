@@ -4,10 +4,16 @@
 // - 按规则自己的标签选出的条目，角色为 forecast 当且仅当规则表达式（经官方解析器解析）调用了 predict_linear。
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { AlertCatalogEntry } from '@srenautix/contract';
-import { backendsDir, ensureBackend, fetchVerified, loadPromqlEngine } from '@srenautix/integration-sdk';
+import {
+  backendsDir,
+  ensureBackend,
+  fetchVerified,
+  loadPromqlEngine,
+  placeAtomically,
+} from '@srenautix/integration-sdk';
 import { parseAllDocuments } from 'yaml';
 
 interface ChartPin {
@@ -30,12 +36,12 @@ export function loadChartPin(path: string): ChartPin {
 
 /** 下载（校验 sha256）并用固定版本的 Helm 以默认 values 渲染 chart，返回全部告警规则 */
 export async function renderUpstreamRules(pin: ChartPin): Promise<UpstreamRule[]> {
-  const dir = join(backendsDir(), 'charts');
-  mkdirSync(dir, { recursive: true });
-  const tgz = join(dir, `${pin.name}-${pin.version}.tgz`);
-  if (!existsSync(tgz)) {
-    writeFileSync(tgz, await fetchVerified(pin.url, pin.sha256));
-  }
+  // 与后端二进制相同：下载到临时目录，带完整标记原子落位，并发安全
+  const target = join(backendsDir(), 'charts', `${pin.name}-${pin.version}`);
+  const tgz = join(target, 'chart.tgz');
+  await placeAtomically(target, async (staging) => {
+    writeFileSync(join(staging, 'chart.tgz'), await fetchVerified(pin.url, pin.sha256));
+  });
   const { helm } = await ensureBackend('helm');
   const rendered = execFileSync(helm!, ['template', 'kps', tgz, '--namespace', 'monitoring'], {
     encoding: 'utf8',

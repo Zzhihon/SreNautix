@@ -14,28 +14,37 @@ import { TempoAdapter } from '../src/traces/tempo.js';
 
 const MIN = 60_000;
 const NOW = Math.floor(Date.now() / 1000) * 1000;
-let prom: TsdbInstance;
-let vm: TsdbInstance;
-let loki: RunningProcess;
-let tempo: RunningProcess;
+let prom: TsdbInstance | undefined;
+let vm: TsdbInstance | undefined;
+let loki: RunningProcess | undefined;
+let tempo: RunningProcess | undefined;
 
 beforeAll(async () => {
-  [prom, vm, loki, tempo] = await Promise.all([
+  // 并行启动；任何一个失败时，已启动的实例保留下来由 afterAll 停止，再报告第一个错误
+  const r = await Promise.allSettled([
     startPrometheus(conformanceMetricSeries()),
     startVictoriaMetrics(conformanceMetricSeries()),
     startLoki(conformanceLogStreams()),
     startTempo(conformanceSpans(NOW)),
   ]);
+  prom = r[0].status === 'fulfilled' ? r[0].value : undefined;
+  vm = r[1].status === 'fulfilled' ? r[1].value : undefined;
+  loki = r[2].status === 'fulfilled' ? r[2].value : undefined;
+  tempo = r[3].status === 'fulfilled' ? r[3].value : undefined;
+  const failed = r.find((x) => x.status === 'rejected');
+  if (failed) {
+    throw failed.reason;
+  }
 });
 afterAll(async () => {
-  await Promise.all([prom.stop(), vm.stop(), loki.stop(), tempo.stop()]);
+  await Promise.all([prom?.stop(), vm?.stop(), loki?.stop(), tempo?.stop()]);
 });
 
 const failures = (r: { checks: Array<{ ok: boolean }> }) => r.checks.filter((c) => !c.ok);
 
 describe('一致性测试：读取类', () => {
   it('metrics/v1：Prometheus 与 VictoriaMetrics', async () => {
-    for (const b of [prom, vm]) {
+    for (const b of [prom!, vm!]) {
       const r = await runMetricsConformance(new PrometheusApiAdapter({ id: b.kind, url: b.url, dialects: ['promql'] }));
       expect(failures(r)).toEqual([]);
     }
@@ -44,7 +53,7 @@ describe('一致性测试：读取类', () => {
   it('logs/v1：Loki 的 logs.match', async () => {
     const a = new LokiAdapter({
       id: 'loki',
-      url: loki.url,
+      url: loki!.url,
       labels: { namespace: 'namespace', pod: 'pod', container: 'container', cluster: null },
     });
     const r = await runLogsConformance({ name: 'loki', match: (req) => a.match(req) });
@@ -52,7 +61,7 @@ describe('一致性测试：读取类', () => {
   });
 
   it('traces/v1：Tempo', async () => {
-    const r = await runTracesConformance(new TempoAdapter({ id: 'tempo', url: tempo.url }), NOW);
+    const r = await runTracesConformance(new TempoAdapter({ id: 'tempo', url: tempo!.url }), NOW);
     expect(failures(r)).toEqual([]);
   });
 

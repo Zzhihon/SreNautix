@@ -116,11 +116,22 @@ interface Env {
 }
 
 async function startEnv(fx: Fixtures, intervalSeconds: number, withLoki: boolean): Promise<Env> {
-  const [prom, vm, loki] = await Promise.all([
+  const started = await Promise.allSettled([
     startPrometheus(fx.metrics),
     startVictoriaMetrics(fx.metrics),
     withLoki || fx.logs.length ? startLoki(fx.logs) : Promise.resolve(null),
   ]);
+  const failed = started.find((r) => r.status === 'rejected');
+  if (failed) {
+    // 已启动的后端先停止，再报告第一个启动错误
+    await Promise.all(started.map((r) => (r.status === 'fulfilled' ? r.value?.stop() : undefined)));
+    throw failed.reason;
+  }
+  const [prom, vm, loki] = started.map((r) => (r as PromiseFulfilledResult<unknown>).value) as [
+    TsdbInstance,
+    TsdbInstance,
+    RunningProcess | null,
+  ];
   const profile = profileFor(intervalSeconds);
   const ds = (b: Backend, t: TsdbInstance) =>
     new LiveDataSource({

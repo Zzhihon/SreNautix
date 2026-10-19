@@ -34,7 +34,8 @@ beforeAll(async () => {
   ]);
 });
 afterAll(async () => {
-  await tempo.stop();
+  // beforeAll 启动失败时 tempo 未赋值
+  await tempo?.stop();
 });
 
 describe('TempoAdapter', () => {

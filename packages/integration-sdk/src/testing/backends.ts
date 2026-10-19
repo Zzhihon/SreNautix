@@ -2,7 +2,21 @@
 // pack test、一致性测试和本包自己的测试都用这些二进制，不使用任何替身。
 
 import { createHash } from 'node:crypto';
-import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  closeSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  openSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+  writeSync,
+} from 'node:fs';
+import { hostname } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import AdmZip from 'adm-zip';
 import { x as untar } from 'tar';
@@ -85,6 +99,90 @@ export async function fetchVerified(url: string, sha256: string): Promise<Buffer
 
 const fill = (s: string, v: Record<string, string>) => s.replace(/\{(\w+)\}/g, (_, k: string) => v[k]!);
 
+/** 目录内容完整的标记：只在解压、校验全部完成之后写入，随目录一起原子落位 */
+const COMPLETE = '.complete';
+/** 锁的持有者已经退出，或锁超过这个时长没有更新，视为残留 */
+const LOCK_STALE_MS = 30 * 60_000;
+
+function lockIsStale(lock: string): boolean {
+  let pid: number;
+  let mtime: number;
+  try {
+    pid = Number(readFileSync(lock, 'utf8').split('\n')[0]);
+    mtime = statSync(lock).mtimeMs;
+  } catch {
+    // 读取时锁已被释放
+    return false;
+  }
+  if (Date.now() - mtime > LOCK_STALE_MS) {
+    return true;
+  }
+  if (!Number.isInteger(pid) || pid <= 0) {
+    return false;
+  }
+  try {
+    process.kill(pid, 0);
+    return false;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === 'ESRCH';
+  }
+}
+
+/**
+ * 跨进程的文件锁（O_EXCL 创建锁文件）。vitest 的文件级并行与 pnpm -r 的包级并行会同时下载同一个后端，
+ * 由它串行化；持有者退出或超时后的残留锁被清除。
+ */
+export async function withFileLock<T>(lock: string, f: () => Promise<T>): Promise<T> {
+  mkdirSync(dirname(lock), { recursive: true });
+  for (;;) {
+    try {
+      const fd = openSync(lock, 'wx');
+      writeSync(fd, `${process.pid}\n${hostname()}\n`);
+      closeSync(fd);
+      break;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') {
+        throw err;
+      }
+      if (lockIsStale(lock)) {
+        rmSync(lock, { force: true });
+        continue;
+      }
+      await new Promise((r) => setTimeout(r, 250));
+    }
+  }
+  try {
+    return await f();
+  } finally {
+    rmSync(lock, { force: true });
+  }
+}
+
+/**
+ * 把 build 在临时目录里生成的内容原子落位到 target：临时目录与 target 同在一个父目录下，
+ * build 完成后写入完整标记，再 rename。target 已存在但没有完整标记时（中断留下的残缺目录、旧缓存）先删除。
+ */
+export async function placeAtomically(target: string, build: (staging: string) => Promise<void>): Promise<void> {
+  if (existsSync(join(target, COMPLETE))) {
+    return;
+  }
+  await withFileLock(`${target}.lock`, async () => {
+    if (existsSync(join(target, COMPLETE))) {
+      return;
+    }
+    mkdirSync(dirname(target), { recursive: true });
+    const staging = mkdtempSync(`${target}.partial-`);
+    try {
+      await build(staging);
+      writeFileSync(join(staging, COMPLETE), `${new Date().toISOString()}\n`);
+      rmSync(target, { recursive: true, force: true });
+      renameSync(staging, target);
+    } finally {
+      rmSync(staging, { recursive: true, force: true });
+    }
+  });
+}
+
 /** 确保二进制已下载并校验，返回 二进制名 → 绝对路径 */
 export async function ensureBackend(name: BackendName): Promise<Record<string, string>> {
   const spec = SPECS[name];
@@ -92,47 +190,42 @@ export async function ensureBackend(name: BackendName): Promise<Record<string, s
   const key = spec.file ? 'any' : `${os}-${arch}`;
   const vars = { version: spec.version, os, arch, platform: spec.platforms?.[key] ?? key };
   const target = join(backendsDir(), `${name}-${spec.version}-${key}`);
-  const paths = Object.fromEntries(
-    Object.entries(spec.binaries).map(([bin, rel]) => [bin, join(target, fill(rel, vars))]),
-  );
-  if (Object.values(paths).every((p) => existsSync(p))) {
-    return paths;
-  }
+  const rel = Object.fromEntries(Object.entries(spec.binaries).map(([bin, r]) => [bin, fill(r, vars)]));
   const expected = spec.sha256[key];
   if (!expected) {
     throw new Error(`backends.json 没有 ${name} ${key} 的 sha256`);
   }
   const url = fill(spec.url, vars);
-  const body = await fetchVerified(url, expected);
-  const staging = `${target}.partial`;
-  rmSync(staging, { recursive: true, force: true });
-  mkdirSync(staging, { recursive: true });
-  if (spec.file || spec.executable) {
-    // 单个文件（模型权重或可执行文件），不解压
-    const single = join(staging, fill(Object.values(spec.binaries)[0]!, vars));
-    writeFileSync(single, body);
-    if (spec.executable) {
-      chmodSync(single, 0o755);
+
+  await placeAtomically(target, async (staging) => {
+    const body = await fetchVerified(url, expected);
+    if (spec.file || spec.executable) {
+      // 单个文件（模型权重或可执行文件），不解压
+      writeFileSync(join(staging, Object.values(rel)[0]!), body);
+    } else if (url.endsWith('.zip')) {
+      new AdmZip(body).extractAllTo(staging, true);
+    } else {
+      const archive = join(staging, '.archive.tar.gz');
+      writeFileSync(archive, body);
+      await untar({ file: archive, cwd: staging });
+      rmSync(archive);
     }
-    rmSync(target, { recursive: true, force: true });
-    renameSync(staging, target);
-    return paths;
-  }
-  if (url.endsWith('.zip')) {
-    new AdmZip(body).extractAllTo(staging, true);
-  } else {
-    const archive = join(staging, '.archive.tar.gz');
-    writeFileSync(archive, body);
-    await untar({ file: archive, cwd: staging });
-    rmSync(archive);
-  }
-  rmSync(target, { recursive: true, force: true });
-  renameSync(staging, target);
+    for (const r of Object.values(rel)) {
+      const p = join(staging, r);
+      if (!existsSync(p)) {
+        throw new Error(`${url} 解压后缺少 ${r}`);
+      }
+      if (!spec.file) {
+        chmodSync(p, 0o755);
+      }
+    }
+  });
+
+  const paths = Object.fromEntries(Object.entries(rel).map(([bin, r]) => [bin, join(target, r)]));
   for (const p of Object.values(paths)) {
     if (!existsSync(p)) {
-      throw new Error(`${url} 解压后缺少 ${p}`);
+      throw new Error(`${target} 带有完整标记但缺少 ${p}；删除该目录后重试`);
     }
-    chmodSync(p, 0o755);
   }
   return paths;
 }

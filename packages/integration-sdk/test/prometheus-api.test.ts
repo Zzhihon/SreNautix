@@ -26,7 +26,9 @@ const clock = { from: toIso(T0), to: toIso(T0 + 60 * MIN) };
 
 const backends: TsdbInstance[] = [];
 beforeAll(async () => {
-  backends.push(await startPrometheus(fixtures), await startVictoriaMetrics(fixtures));
+  // 逐个放入，启动失败时已启动的实例仍会在 afterAll 中停止
+  backends.push(await startPrometheus(fixtures));
+  backends.push(await startVictoriaMetrics(fixtures));
 });
 afterAll(async () => {
   await Promise.all(backends.map((b) => b.stop()));

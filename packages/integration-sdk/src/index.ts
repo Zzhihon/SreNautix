@@ -19,7 +19,15 @@ export {
 } from './metrics/label-profile.js';
 export { LokiAdapter, logqlString, re2Escape, type LokiConfig } from './logs/loki.js';
 export { TempoAdapter, type TempoConfig } from './traces/tempo.js';
-export { ensureBackend, backendVersion, backendsDir, fetchVerified, type BackendName } from './testing/backends.js';
+export {
+  ensureBackend,
+  backendVersion,
+  backendsDir,
+  fetchVerified,
+  placeAtomically,
+  withFileLock,
+  type BackendName,
+} from './testing/backends.js';
 export { freePort, startProcess, type RunningProcess } from './testing/process.js';
 export {
   startPrometheus,

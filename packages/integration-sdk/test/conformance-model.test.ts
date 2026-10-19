@@ -7,7 +7,8 @@ beforeAll(async () => {
   llama = await startLlamaServer(4096);
 });
 afterAll(async () => {
-  await llama.stop();
+  // beforeAll 启动失败时 llama 未赋值
+  await llama?.stop();
 });
 
 // llama-server b11742 的 /v1/responses 不执行 text.format 的 json_schema 约束，测得 strict_json_schema=false；
