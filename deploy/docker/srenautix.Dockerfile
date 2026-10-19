@@ -5,13 +5,21 @@
 
 ARG NODE_BUILDER=docker.io/library/node:24.22.0-trixie-slim@sha256:7f486cabe892bff8fef04c0f7da8dba84a560be3e4e2740b7a86afc57ebec315
 ARG NODE_RUNTIME=gcr.io/distroless/nodejs24-debian13:nonroot@sha256:59c479c9b8c123e66047315c968aa2d35e31ae5149c856e4110a79c8b3563f0b
+# integration-sdk 把 PromQL 与 MetricsQL 解析器编译成 wasm，构建阶段需要 Go；版本与 go.mod 的 toolchain 相同
+ARG GO_TOOLCHAIN=docker.io/library/golang:1.27.2-trixie@sha256:47667934874913a449b96faa7ef4777fa285d9ec29126ee80ed61c45b7cccf0e
+
+FROM ${GO_TOOLCHAIN} AS go
 
 FROM ${NODE_BUILDER} AS build
 ARG SOURCE_DATE_EPOCH
+COPY --from=go /usr/local/go /usr/local/go
 ENV CI=true \
     COREPACK_ENABLE_DOWNLOAD_PROMPT=0 \
     PNPM_HOME=/pnpm \
-    PATH=/pnpm:$PATH
+    GOTOOLCHAIN=local \
+    GOMODCACHE=/go/pkg/mod \
+    GOCACHE=/root/.cache/go-build \
+    PATH=/pnpm:/usr/local/go/bin:$PATH
 WORKDIR /src
 # pnpm 版本取自根目录 package.json 的 packageManager 字段
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
@@ -23,7 +31,9 @@ COPY . .
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
     pnpm install --frozen-lockfile --offline
 # 构建中心进程及其依赖的工作区包；控制台前端由 server 进程提供，与中心进程一起构建
-RUN pnpm --filter "./apps/srenautix..." --filter "./web/console..." run --if-present build
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    pnpm --filter "./apps/srenautix..." --filter "./web/console..." run --if-present build
 # 镜像内的目录与仓库一致：/app/apps/srenautix（只含运行时依赖）、/app/contract（动作目录等契约文件）、
 # /app/packs（内置领域包）、/app/web/console/dist（控制台静态文件）
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
