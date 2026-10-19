@@ -53,6 +53,39 @@ const ingestSource = z.discriminatedUnion('kind', [
     .strict(),
 ]);
 
+/** 通用 git 变更源（integrations/git）：克隆地址、跟踪分支、只读凭证与路径映射。 */
+const changesSource = z
+  .object({
+    id: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,62}$/),
+    kind: z.literal('git'),
+    // 变更所属的集群；不填时为本 server 的 cluster_id
+    cluster_id: clusterId.optional(),
+    url: z.string().min(1),
+    ref: z.string().min(1).default('origin/main'),
+    // https 克隆的只读令牌，以 Basic 认证发送（用户名 http_username）
+    http_token_file: path.optional(),
+    http_username: z.string().min(1).default('x-access-token'),
+    // ssh 克隆的只读部署密钥与 known_hosts（必须给出，不自动信任主机密钥）
+    deploy_key_file: path.optional(),
+    known_hosts_file: path.optional(),
+    link_template: z.string().optional(),
+    paths: z
+      .array(
+        z
+          .object({
+            prefix: z.string().min(1),
+            targets: z.array(z.string().min(1)).min(1),
+            kind: z.enum(['rollout', 'config', 'gitops_sync', 'ci_deploy', 'other']),
+          })
+          .strict(),
+      )
+      .min(1),
+  })
+  .strict()
+  .refine((s) => !s.deploy_key_file || s.known_hosts_file, {
+    message: 'deploy_key_file 需要同时给出 known_hosts_file',
+  });
+
 const telegram = z
   .object({
     enabled: z.boolean().default(false),
@@ -180,6 +213,18 @@ export const serverConfigSchema = z
       })
       .strict()
       .default({ source: 'informer' }),
+    // 变更源（changes/v1，DESIGN §5 的"30 分钟内的变更"）：server 维护只读克隆，定期 fetch 后按路径映射到拓扑节点
+    changes: z
+      .object({
+        sources: z.array(changesSource).default([]),
+        // 克隆的存放目录（每个变更源一个子目录，可以是 emptyDir）
+        cache_dir: path.default('/var/lib/srenautix/changes'),
+        interval: duration.default('60s'),
+        // 首次同步与每次同步回看的时长（与上一次同步重叠，按 change_id 去重）
+        lookback: duration.default('24h'),
+      })
+      .strict()
+      .default({ sources: [], cache_dir: '/var/lib/srenautix/changes', interval: '60s', lookback: '24h' }),
     stage_a: z
       .object({ language: z.enum(['zh', 'en']).default('zh'), top_k: z.number().int().min(1).max(10).default(3) })
       .strict()

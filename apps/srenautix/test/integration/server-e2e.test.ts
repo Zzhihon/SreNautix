@@ -24,6 +24,7 @@ import { TopologyStore } from '../../src/topology/store.js';
 import { serverTracks } from '../../src/roles/server-schema.js';
 import { responseErrors } from '../support/contract.js';
 import { newTestDb, type TestDb } from '../support/db.js';
+import { GitRepo } from '../support/git.js';
 import { exampleWithTemplate } from '../support/packs.js';
 import { fixture, FixtureServer } from '../support/fixture-server.js';
 import { until } from '../support/monitoring.js';
@@ -50,6 +51,7 @@ let totp: TOTP;
 let signingPub = '';
 let cookie = '';
 let csrf = '';
+let rolloutSha = '';
 
 const file = (name: string, content: string) => {
   const p = join(ROOT, name);
@@ -139,6 +141,15 @@ beforeAll(async () => {
   file('console/assets/index-3f9a1c.js', 'console.log(1)');
   file('console/favicon.svg', '<svg xmlns="http://www.w3.org/2000/svg"/>');
   const consoleDir = join(ROOT, 'console');
+  // 变更源：告警前 5 分钟的一次发布，触及 Deployment shop/api
+  const gitops = new GitRepo(join(ROOT, 'gitops'));
+  gitops.commit('README.md', 'gitops\n', 'init', Date.now() - 3 * 3600_000);
+  rolloutSha = gitops.commit(
+    'apps/shop/api/deployment.yaml',
+    'replicas: 3\n',
+    'roll out api v2',
+    Date.now() - 5 * 60_000,
+  );
   const config = parseServerConfig({
     cluster_id: 'c1',
     profile: 'standard',
@@ -164,6 +175,23 @@ beforeAll(async () => {
     console: { dir: consoleDir },
     datasources: { prometheus: { url: 'http://127.0.0.1:9' } },
     topology: { source: 'off' },
+    changes: {
+      cache_dir: join(ROOT, 'changes-cache'),
+      sources: [
+        {
+          id: 'gitops',
+          kind: 'git',
+          url: gitops.dir,
+          paths: [
+            {
+              prefix: 'apps/shop/api/',
+              targets: ['Deployment:shop/api', 'Pod:shop/api-7d9f8-x2k4p', 'Namespace:shop'],
+              kind: 'gitops_sync',
+            },
+          ],
+        },
+      ],
+    },
     notify: {
       prefix: '[影子]',
       telegram: {
@@ -280,6 +308,10 @@ describe('server 端到端', () => {
     incidentId = (list.body as unknown as { items: Array<{ incident_id: string }> }).items[0]!.incident_id;
     const inc = await api('GET', `/v1/incidents/${incidentId}`, { session: true });
     conform('/v1/incidents/{incident_ref}', 'get', inc);
+    // 变更源在启动时同步：告警前 5 分钟的发布进入事件的变更列表
+    expect((inc.body as unknown as { changes: Array<{ change_id: string; summary: string }> }).changes).toEqual([
+      expect.objectContaining({ change_id: `gitops:${rolloutSha}`, summary: 'roll out api v2' }),
+    ]);
     const byLabel = await api(
       'GET',
       `/v1/incidents/${encodeURIComponent((inc.body as unknown as { label: string }).label)}`,

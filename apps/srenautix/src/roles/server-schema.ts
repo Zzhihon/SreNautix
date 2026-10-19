@@ -1,3 +1,4 @@
+import { changesTrack } from '../changes/migrations.js';
 import { consoleTrack } from '../console-bff/migrations.js';
 import { identityTrack } from '../identity/migrations.js';
 import { incidentTrack } from '../incident/migrations.js';
@@ -18,4 +19,5 @@ export const serverTracks: readonly Track[] = [
   proposalsTrack,
   notifyTrack,
   consoleTrack,
+  changesTrack,
 ];

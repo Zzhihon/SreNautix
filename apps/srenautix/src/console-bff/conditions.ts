@@ -1,4 +1,5 @@
 import type { Condition } from '@srenautix/contract';
+import type { ChangeSourceStatus } from '../changes/service.js';
 import type pg from 'pg';
 import { logger } from '../log.js';
 import type { BaseMetrics } from '../metrics.js';
@@ -108,6 +109,8 @@ export interface ServerObservations {
   reconcileOk: boolean | null;
   /** 证据卡指标数据源最近一次标签档案探测的错误；可达时为 null。 */
   evidenceDatasourceError: string | null;
+  /** 变更源最近一次同步的结果。 */
+  changeSources: ChangeSourceStatus[];
   /** 校验不通过（或 pack.lock 不一致）没有加载的包。 */
   packFailures: Array<{ name: string; error: string }>;
   /** 必须的能力缺失或依赖的包被禁用而禁用的包。 */
@@ -161,6 +164,17 @@ export function serverConditions(o: ServerObservations): Observed[] {
     reason: o.evidenceDatasourceError !== null ? 'ProbeFailed' : 'Reachable',
     message: o.evidenceDatasourceError !== null ? `证据卡的指标数据源不可用：${o.evidenceDatasourceError}` : '',
   });
+  for (const s of o.changeSources) {
+    // 最近一次同步失败（晚于最近一次成功）时成立；从未同步成功也算
+    const failing = s.lastError !== null && (s.lastSyncedAt === null || (s.lastErrorAt ?? 0) > s.lastSyncedAt);
+    out.push({
+      type: 'DatasourceUnavailable',
+      subject: `changes:${s.id}`,
+      active: failing,
+      reason: failing ? 'SyncFailed' : 'Reachable',
+      message: failing ? `变更源 ${s.id} 同步失败：${s.lastError}` : '',
+    });
+  }
   for (const f of o.packFailures) {
     out.push({ type: 'PackLoadFailed', subject: f.name, active: true, reason: 'LintFailed', message: f.error });
   }

@@ -9,6 +9,7 @@ import { registerResearchRoutes } from '../api/routes-research.js';
 import { pgConfigFromEnv } from '../config/database.js';
 import { parseDuration, parseListen, readSecretFile } from '../config/files.js';
 import { loadServerConfig, type ServerConfig } from '../config/server.js';
+import { changesInWindow, ChangesService } from '../changes/service.js';
 import { ConditionPublisher, serverConditions } from '../console-bff/conditions.js';
 import { registerIncidentRoutes } from '../console-bff/routes-incidents.js';
 import { apiTokenCaller, registerSystemRoutes } from '../console-bff/routes-system.js';
@@ -331,7 +332,7 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
     pool,
     topology,
     params,
-    changes: async () => [],
+    changes: (clusterId, from, to) => changesInWindow(pool, clusterId, from, to),
     probes: async () => [],
     stale: proposals,
     metrics,
@@ -543,6 +544,21 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
     signal,
   );
   every(30_000, () => proposals.expire(), '提议过期检查');
+  // 变更源：有新变更时立即重算事件（变更进入根因排序的"30 分钟内的变更"一项）
+  const changes = new ChangesService(
+    pool,
+    c.changes.sources,
+    { cacheDir: c.changes.cache_dir, defaultClusterId: c.cluster_id },
+    parseDuration('changes.lookback', c.changes.lookback),
+    () => void pipeline.kick().catch((e: unknown) => logger.error('事件流水线失败', { error: e })),
+  );
+  if (changes.configured) {
+    every(parseDuration('changes.interval', c.changes.interval), () => changes.syncOnce(), '变更源同步');
+    void leader
+      .acquired()
+      .then(() => changes.syncOnce())
+      .catch((e: unknown) => logger.error('变更源同步失败', { error: e }));
+  }
   every(3600_000, () => purgeIdempotencyKeys(pool), '幂等键清理');
   every(3600_000, () => sessions.purgeExpired(), '会话清理');
   every(
@@ -643,6 +659,7 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
           reconcileOk,
           // 标签档案按需重新探测（失败时每 60 秒、成功时每小时）
           evidenceDatasourceError: await evidenceSource.dataSource(Date.now()).then(() => evidenceSource.error),
+          changeSources: await changes.statuses(),
           packFailures: packs.failures,
           packsDisabled: packs.set.disabled,
           degraded,
