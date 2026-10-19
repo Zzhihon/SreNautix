@@ -40,6 +40,8 @@ gateway-generate-check: gateway-generate
 	@test -z "$$(git status --porcelain --untracked-files=all -- $(GATEWAY_GENERATED))" || \
 		{ git status --porcelain --untracked-files=all -- $(GATEWAY_GENERATED); echo "generated files are not committed"; exit 1; }
 
+# 集成测试还需要真实的 Prometheus 与 MinIO：SRENAUTIX_TEST_BIN（含 prometheus）与 SRENAUTIX_MINIO_BIN，
+# Linux 上由 .github/scripts/install-test-binaries.sh 安装；缺少时相关测试直接失败。
 go-test: $(SETUP_ENVTEST) go-vet gateway-generate-check
 	mkdir -p $(GO_TMPDIR)
 	TMPDIR=$(GO_TMPDIR) KUBEBUILDER_ASSETS="$$($(SETUP_ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(ENVTEST_DIR) -p path)" \
