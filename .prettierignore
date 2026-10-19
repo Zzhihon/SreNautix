@@ -3,7 +3,11 @@ pnpm-lock.yaml
 **/coverage/
 **/src/generated/
 **/testdata/
+# 录制的外部载荷与上游 CRD 保持原样
+**/test/fixtures/
+test/crds/
 .scratch/
+.work/
 *.md
 architecture.svg
 LICENSE*
