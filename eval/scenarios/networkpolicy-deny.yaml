@@ -1,0 +1,16 @@
+id: networkpolicy-deny
+kind: scenario
+cluster_id: kind
+summary: 新增的出站策略 api-egress-lockdown 只放行 DNS，api 到 postgres 的连接被拒绝，api 进入 CrashLoopBackOff
+expected_alerts: [KubePodCrashLooping]
+truth:
+  root_components: [NetworkPolicy:shop/api-egress-lockdown]
+  granularity: component
+  mechanism: NetworkPolicy 拒绝 api 的出站流量，数据库连接超时
+  disposition: escalate
+  silent_root: true
+distractors:
+  - component: StatefulSet:shop/postgres
+    description: 数据库本身正常
+background_noise: _background.yaml
+window: {before: 30m, after: 30m}

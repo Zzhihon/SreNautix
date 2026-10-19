@@ -213,7 +213,7 @@ jobs:
             exit 1
           fi
       - name: shellcheck（deploy/ 与 .github/scripts/ 下的脚本）
-        run: git ls-files 'deploy/**/*.sh' '.github/scripts/*.sh' | xargs ./shellcheck
+        run: git ls-files 'deploy/**/*.sh' '.github/scripts/*.sh' | xargs ./shellcheck -x
 
   images:
     needs: detect

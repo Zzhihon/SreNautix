@@ -1,0 +1,17 @@
+# 演示业务与故障场景的镜像，按 digest 固定；清单中只写短名
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+images:
+  - name: postgres
+    newName: docker.io/library/postgres
+    digest: sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
+  - name: busybox
+    newName: docker.io/library/busybox
+    digest: sha256:bdf57e528e45e4433820e045b29b4597825a1c9e38353532d90a01445013f82e
+  - name: nginx
+    newName: docker.io/library/nginx
+    digest: sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de
+  # 无关发布（干扰项）把 web 切换到这个镜像
+  - name: nginx-next
+    newName: docker.io/library/nginx
+    digest: sha256:892bb2152464f0c5d8972593a5f5afaf8054552580b699d95f8ff4af08c2d33d

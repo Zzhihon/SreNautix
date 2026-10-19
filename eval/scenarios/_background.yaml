@@ -1,0 +1,11 @@
+# 所有场景共用的背景噪声（deploy/kind/workloads/background.yaml），各场景文件按名称引用
+background_noise:
+  - component: CronJob:batch/nightly-export
+    alerts: [KubeJobFailed]
+    description: 每 5 分钟一次的导出任务，约三分之一失败，是长期告警
+  - component: Deployment:batch/flaky-worker
+    alerts: []
+    description: 每 15 分钟退出一次，零散的容器重启
+  - component: Deployment:traffic/loadgen
+    alerts: []
+    description: 外部客户端，持续以每秒约 1 次的速率访问 web

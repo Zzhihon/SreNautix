@@ -1,0 +1,12 @@
+# 单进程 Tempo；metrics-generator 生成服务图指标并写入 Prometheus（拓扑的运行时观测边，DESIGN §4.2）
+fullnameOverride: tempo
+tempo:
+  reportingEnabled: false
+  retention: 48h
+  metricsGenerator:
+    enabled: true
+    remoteWriteUrl: http://kps-prometheus.monitoring.svc:9090/api/v1/write
+  overrides:
+    defaults:
+      metrics_generator:
+        processors: [service-graphs]

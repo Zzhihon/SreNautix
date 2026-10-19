@@ -1,0 +1,17 @@
+id: db-oom-crashloop
+kind: scenario
+cluster_id: kind
+summary: 报表任务的大排序让 postgres 超过内存上限被 OOM 终止并反复重启，api 的数据库连接检查失败进入 CrashLoopBackOff；同时 web 发布了新镜像
+expected_alerts: [KubePodCrashLooping]
+truth:
+  # postgres 是根因组件；触发 OOM 的报表任务同样算命中
+  root_components: [StatefulSet:shop/postgres, Job:shop/report-batch]
+  granularity: workload
+  mechanism: 数据库内存超过上限被 OOM 终止（OOMKilled），依赖它的 api 连接失败后 CrashLoop
+  disposition: escalate
+  silent_root: false
+distractors:
+  - component: Deployment:shop/web
+    description: 同一时刻的无关发布（镜像 nginx 1.29 → 1.31），在 30 分钟变更窗口内，不能成为 top-1
+background_noise: _background.yaml
+window: {before: 30m, after: 30m}

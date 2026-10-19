@@ -1,0 +1,60 @@
+# Kind 上的 SreNautix：standard 配置，gateway 冻结；单实例 CNPG 与小型 MinIO 节省资源
+profile: standard
+clusterId: kind
+
+datasources:
+  prometheus: {url: http://kps-prometheus.monitoring.svc:9090}
+  alertmanager: {url: http://kps-alertmanager.monitoring.svc:9093}
+  loki: {url: http://loki.monitoring.svc:3100}
+  tempo: {url: http://tempo.monitoring.svc:3200}
+
+secrets:
+  serviceSigningKey: {existingSecret: srenautix-service-signing}
+
+freeze:
+  frozen: true
+
+roles:
+  server:
+    resources:
+      requests: {cpu: 100m, memory: 256Mi}
+      limits: {cpu: "1", memory: 1Gi}
+  worker:
+    resources:
+      requests: {cpu: 100m, memory: 256Mi}
+      limits: {cpu: "1", memory: 1Gi}
+
+database:
+  cnpg:
+    instances: 1
+    allowSingleInstance: true
+    storage: {size: 2Gi}
+    resources:
+      requests: {cpu: 100m, memory: 256Mi}
+
+audit:
+  minio:
+    storage: {size: 2Gi}
+    resources:
+      requests: {cpu: 20m, memory: 128Mi}
+
+selfMonitoring:
+  serviceMonitor: {enabled: true}
+  prometheusRule: {enabled: true}
+  dashboard: {enabled: true, namespace: monitoring}
+  receiver: platform-oncall
+  routeLabels: {team: platform}
+
+alertmanagerConfig:
+  enabled: true
+  # Kind 中的值班接收方是 monitoring/alert-sink（workloads/alert-sink.yaml），收到的告警写入它的日志
+  selfReceiverSpec:
+    webhookConfigs:
+      - url: http://alert-sink.monitoring.svc:8080/cgi-bin/alerts
+        sendResolved: true
+
+networkPolicy:
+  datasourcesEgressTo:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: monitoring

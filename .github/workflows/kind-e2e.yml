@@ -1,0 +1,103 @@
+# 在 Kind 上拉起完整环境（kube-prometheus-stack、Loki、Tempo、演示业务与背景噪声、SreNautix），
+# 逐个注入级联故障场景，确认每个场景的预期告警出现，再恢复。
+name: kind-e2e
+
+on:
+  workflow_dispatch:
+    inputs:
+      scenarios:
+        description: 以空格分隔的场景名；为空时运行全部
+        required: false
+        default: ""
+  schedule:
+    - cron: "17 19 * * *"
+  push:
+    branches: [main]
+    paths:
+      - deploy/kind/**
+      - deploy/helm/**
+      - eval/scenarios/**
+      - .github/workflows/kind-e2e.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kind-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # kind 的版本在 deploy/kind/versions.env；这里是对应的 linux-amd64 二进制的 sha256
+  KIND_SHA256: aee6151561422756b764a4ae28e7f44cda5af5a9eead3cc9985112b1de8d8e0d
+  YQ_VERSION: v4.54.1
+  YQ_SHA256: 8e34fc298390875de416e6a4afcb8cabeceb25d9aa8506c1a2f9353cf702ea5f
+
+jobs:
+  e2e:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: v4.3.1
+      - name: 安装 kind 与 yq（校验 sha256）
+        run: |
+          source deploy/kind/versions.env
+          mkdir -p "$HOME/.local/bin"
+          curl -fsSLo "$HOME/.local/bin/kind" "https://github.com/kubernetes-sigs/kind/releases/download/${KIND_VERSION}/kind-linux-amd64"
+          echo "${KIND_SHA256}  $HOME/.local/bin/kind" | sha256sum --check
+          curl -fsSLo "$HOME/.local/bin/yq" "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_amd64"
+          echo "${YQ_SHA256}  $HOME/.local/bin/yq" | sha256sum --check
+          chmod +x "$HOME/.local/bin/kind" "$HOME/.local/bin/yq"
+          echo "$HOME/.local/bin" >>"$GITHUB_PATH"
+      - name: 确认本次提交的两个镜像已经发布
+        id: images
+        run: |
+          tag="sha-${GITHUB_SHA::7}"
+          ok=true
+          for image in srenautix srenautix-spoke; do
+            if ! docker manifest inspect "ghcr.io/zzhihon/${image}:${tag}" >/dev/null 2>&1; then
+              echo "::notice::ghcr.io/zzhihon/${image}:${tag} 不存在，本次只验证环境与故障场景"
+              ok=false
+            fi
+          done
+          echo "srenautix=$ok" >>"$GITHUB_OUTPUT"
+          echo "tag=$tag" >>"$GITHUB_OUTPUT"
+      - name: 拉起 Kind 环境
+        env:
+          SRENAUTIX_VERSION: ${{ steps.images.outputs.tag }}
+        run: |
+          if [[ "${{ steps.images.outputs.srenautix }}" == true ]]; then
+            deploy/kind/up.sh
+          else
+            deploy/kind/up.sh --no-srenautix
+          fi
+      - name: 运行级联故障场景
+        env:
+          SCENARIOS: ${{ github.event.inputs.scenarios }}
+          SCENARIO_STATE_DIR: ${{ runner.temp }}/scenarios
+          HOLD: "120"
+        run: |
+          list=${SCENARIOS:-$(deploy/kind/scenario.sh list | tr '\n' ' ')}
+          for s in $list; do
+            echo "::group::$s"
+            deploy/kind/scenario.sh run "$s"
+            echo "::endgroup::"
+          done
+      - name: 收集诊断信息
+        if: always()
+        run: |
+          mkdir -p "$RUNNER_TEMP/diag"
+          kubectl --context kind-srenautix get nodes,pods -A -o wide >"$RUNNER_TEMP/diag/pods.txt" 2>&1 || true
+          kubectl --context kind-srenautix get events -A --sort-by=.lastTimestamp >"$RUNNER_TEMP/diag/events.txt" 2>&1 || true
+          kubectl --context kind-srenautix -n srenautix logs -l app.kubernetes.io/part-of=srenautix --all-containers --tail=500 >"$RUNNER_TEMP/diag/srenautix.log" 2>&1 || true
+          cp -R "$RUNNER_TEMP/scenarios" "$RUNNER_TEMP/diag/" 2>/dev/null || true
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: kind-e2e-diagnostics
+          path: ${{ runner.temp }}/diag
+          if-no-files-found: ignore

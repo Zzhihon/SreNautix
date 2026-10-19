@@ -1,0 +1,313 @@
+# 演示业务 shop：web → api → postgres，另有独立的 checkout。
+# 依赖关系对 SreNautix 可见的方式：web 的 nginx 配置引用 api 的 Service 名，api 与 checkout 的环境变量引用 postgres。
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: shop
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: postgres-auth
+  namespace: shop
+type: Opaque
+stringData:
+  # 演示用的固定口令，只存在于 Kind 集群
+  password: shop-demo-password
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: shop
+  labels: {app: postgres}
+spec:
+  selector: {app: postgres}
+  ports:
+    - {name: pg, port: 5432, targetPort: 5432}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: shop
+  labels: {app: postgres}
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels: {app: postgres}
+  template:
+    metadata:
+      labels: {app: postgres}
+    spec:
+      containers:
+        - name: postgres
+          image: postgres
+          args: [-c, shared_buffers=32MB, -c, max_connections=60]
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: postgres-auth, key: password}
+            - name: POSTGRES_DB
+              value: shop
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          ports:
+            - {name: pg, containerPort: 5432}
+          readinessProbe:
+            exec:
+              command: [pg_isready, -U, postgres, -h, 127.0.0.1]
+            periodSeconds: 5
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            # 内存上限较小：数据库 OOM 场景中的大查询会触发整个容器被 OOM 终止
+            limits: {cpu: "1", memory: 256Mi}
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: 1Gi
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: api-nginx
+  namespace: shop
+data:
+  default.conf: |
+    server {
+      listen 8080;
+      # 每个请求现场压缩商品目录，CPU 消耗与请求量成正比（HPA 达到上限场景依赖这一点）
+      gzip on;
+      gzip_comp_level 9;
+      gzip_min_length 0;
+      gzip_types text/plain;
+      location = /healthz { return 200 "ok\n"; }
+      location = /catalog {
+        alias /data/catalog.txt;
+        default_type text/plain;
+      }
+    }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api
+  namespace: shop
+  labels: {app: api}
+spec:
+  selector: {app: api}
+  ports:
+    - {name: http, port: 8080, targetPort: 8080}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  namespace: shop
+  labels: {app: api}
+spec:
+  selector:
+    matchLabels: {app: api}
+  template:
+    metadata:
+      labels: {app: api}
+    spec:
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: srenautix.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels: {app: api}
+      initContainers:
+        - name: catalog
+          image: busybox
+          command: [sh, -c, "seq 1 300000 | sed 's/$/ catalog item/' > /data/catalog.txt"]
+          volumeMounts:
+            - {name: data, mountPath: /data}
+      containers:
+        - name: http
+          image: nginx
+          ports:
+            - {name: http, containerPort: 8080}
+          readinessProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 5
+          resources:
+            requests: {cpu: 100m, memory: 32Mi}
+            limits: {cpu: 500m, memory: 128Mi}
+          volumeMounts:
+            - {name: data, mountPath: /data}
+            - {name: nginx, mountPath: /etc/nginx/conf.d}
+        # 应用的数据库连接检查：连不上 postgres 时存活探针失败，容器重启，反复失败后进入 CrashLoopBackOff
+        - name: db-check
+          image: postgres
+          command: [sh, -c, "trap 'exit 0' TERM; while true; do sleep 3600 & wait; done"]
+          env:
+            - name: DB_HOST
+              value: postgres.shop.svc
+          livenessProbe:
+            exec:
+              command: [sh, -c, 'pg_isready -h "$DB_HOST" -p 5432 -t 2']
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 4
+            failureThreshold: 3
+          readinessProbe:
+            exec:
+              command: [sh, -c, 'pg_isready -h "$DB_HOST" -p 5432 -t 2']
+            periodSeconds: 5
+            timeoutSeconds: 4
+          resources:
+            requests: {cpu: 10m, memory: 16Mi}
+            limits: {cpu: 100m, memory: 64Mi}
+      volumes:
+        - {name: data, emptyDir: {}}
+        - {name: nginx, configMap: {name: api-nginx}}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: api
+  namespace: shop
+spec:
+  scaleTargetRef: {apiVersion: apps/v1, kind: Deployment, name: api}
+  minReplicas: 2
+  maxReplicas: 4
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target: {type: Utilization, averageUtilization: 60}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: api
+  namespace: shop
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: {app: api}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: web-nginx
+  namespace: shop
+data:
+  default.conf: |
+    server {
+      listen 8080;
+      location = /healthz { return 200 "ok\n"; }
+      location / {
+        proxy_pass http://api.shop.svc:8080/catalog;
+        proxy_set_header Accept-Encoding gzip;
+      }
+    }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: web
+  namespace: shop
+  labels: {app: web}
+spec:
+  selector: {app: web}
+  ports:
+    - {name: http, port: 8080, targetPort: 8080}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  namespace: shop
+  labels: {app: web}
+spec:
+  replicas: 2
+  selector:
+    matchLabels: {app: web}
+  template:
+    metadata:
+      labels: {app: web}
+    spec:
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: srenautix.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels: {app: web}
+      containers:
+        - name: web
+          image: nginx
+          ports:
+            - {name: http, containerPort: 8080}
+          readinessProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 5
+          resources:
+            requests: {cpu: 20m, memory: 16Mi}
+            limits: {cpu: 200m, memory: 64Mi}
+          volumeMounts:
+            - {name: nginx, mountPath: /etc/nginx/conf.d}
+      volumes:
+        - {name: nginx, configMap: {name: web-nginx}}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: checkout-config
+  namespace: shop
+data:
+  mode: ok
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: checkout
+  namespace: shop
+  labels: {app: checkout}
+spec:
+  replicas: 2
+  # 发布卡住的判定时间较短，错误配置发布场景中 Deployment 很快进入 ProgressDeadlineExceeded
+  progressDeadlineSeconds: 120
+  strategy:
+    rollingUpdate: {maxUnavailable: 0, maxSurge: 1}
+  selector:
+    matchLabels: {app: checkout}
+  template:
+    metadata:
+      labels: {app: checkout}
+    spec:
+      containers:
+        - name: checkout
+          image: busybox
+          command:
+            - sh
+            - -c
+            - |
+              mode=$(cat /config/mode)
+              if [ "$mode" != ok ]; then
+                echo "checkout: invalid mode '$mode' in /config/mode" >&2
+                exit 1
+              fi
+              echo "checkout: started with mode=$mode, database $DB_HOST"
+              trap 'exit 0' TERM
+              while true; do sleep 3600 & wait; done
+          env:
+            - name: DB_HOST
+              value: postgres.shop.svc
+          resources:
+            requests: {cpu: 10m, memory: 8Mi}
+            limits: {cpu: 50m, memory: 32Mi}
+          volumeMounts:
+            - {name: config, mountPath: /config}
+      volumes:
+        - {name: config, configMap: {name: checkout-config}}

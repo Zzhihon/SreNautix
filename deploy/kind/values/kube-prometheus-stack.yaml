@@ -1,0 +1,58 @@
+# Kind 上的 kube-prometheus-stack：告警规则保持上游原样（SreNautix 的 alerts-kps 目录按它覆盖），
+# 只关闭 Kind 中不可达的控制面组件抓取，并让 Prometheus 与 Alertmanager 选择所有命名空间的 CR。
+fullnameOverride: kps
+
+kubeEtcd: {enabled: false}
+kubeControllerManager: {enabled: false}
+kubeScheduler: {enabled: false}
+kubeProxy: {enabled: false}
+
+prometheus:
+  prometheusSpec:
+    retention: 2d
+    scrapeInterval: 15s
+    evaluationInterval: 15s
+    # Tempo 的 metrics-generator 写入服务图指标
+    enableRemoteWriteReceiver: true
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    probeSelectorNilUsesHelmValues: false
+    resources:
+      requests: {cpu: 200m, memory: 1Gi}
+
+alertmanager:
+  alertmanagerSpec:
+    # SreNautix chart 生成的 AlertmanagerConfig 在 srenautix 命名空间；不按命名空间改写匹配条件
+    alertmanagerConfigSelector: {}
+    alertmanagerConfigNamespaceSelector: {}
+    alertmanagerConfigMatcherStrategy:
+      type: None
+  config:
+    route:
+      receiver: "null"
+      group_by: [alertname, namespace]
+      group_wait: 30s
+      group_interval: 1m
+      repeat_interval: 4h
+      routes:
+        - receiver: "null"
+          matchers: ['alertname = "Watchdog"']
+    receivers:
+      - name: "null"
+
+grafana:
+  adminPassword: srenautix-kind
+  sidecar:
+    dashboards:
+      enabled: true
+      searchNamespace: ALL
+  additionalDataSources:
+    - name: Loki
+      type: loki
+      uid: loki
+      url: http://loki.monitoring.svc:3100
+    - name: Tempo
+      type: tempo
+      uid: tempo
+      url: http://tempo.monitoring.svc:3200

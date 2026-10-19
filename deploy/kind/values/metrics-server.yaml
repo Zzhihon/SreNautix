@@ -1,0 +1,4 @@
+# HPA 达到上限场景依赖 metrics-server；Kind 的 kubelet 证书是自签的
+args:
+  - --kubelet-insecure-tls
+  - --kubelet-preferred-address-types=InternalIP

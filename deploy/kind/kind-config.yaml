@@ -1,0 +1,21 @@
+# 1 个控制面 + 3 个工作节点。节点 NotReady 场景停止其中一个工作节点的 kubelet，
+# 其余两个节点承载被驱逐的 Pod；PG 的两个实例分布在不同节点。
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: srenautix
+networking:
+  # kindnet 实现 NetworkPolicy，NetworkPolicy 拒绝流量场景依赖它
+  disableDefaultCNI: false
+nodes:
+  - role: control-plane
+    labels:
+      ingress-ready: "true"
+  - role: worker
+    labels:
+      srenautix.io/zone: a
+  - role: worker
+    labels:
+      srenautix.io/zone: b
+  - role: worker
+    labels:
+      srenautix.io/zone: c

@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: checkout-config-v2
+  namespace: shop
+data:
+  mode: turbo

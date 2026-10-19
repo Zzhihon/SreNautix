@@ -1,0 +1,53 @@
+# SreNautix 自身告警的接收方（Kind 中代替值班渠道）：把收到的 webhook 原文写到标准输出，经 Alloy 进入 Loki
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alert-sink
+  namespace: monitoring
+data:
+  alerts: |
+    #!/bin/sh
+    body=$(head -c "${CONTENT_LENGTH:-0}")
+    echo "self-alert: $body" > /proc/1/fd/1
+    printf 'Status: 200 OK\r\nContent-Type: text/plain\r\n\r\nok\n'
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: alert-sink
+  namespace: monitoring
+  labels: {app: alert-sink}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: alert-sink}
+  template:
+    metadata:
+      labels: {app: alert-sink}
+    spec:
+      containers:
+        - name: httpd
+          image: busybox
+          command: [httpd, -f, -p, "8080", -h, /www]
+          ports:
+            - {name: http, containerPort: 8080}
+          resources:
+            requests: {cpu: 5m, memory: 8Mi}
+            limits: {cpu: 50m, memory: 16Mi}
+          volumeMounts:
+            - {name: cgi, mountPath: /www/cgi-bin}
+      volumes:
+        - name: cgi
+          configMap:
+            name: alert-sink
+            defaultMode: 0755
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: alert-sink
+  namespace: monitoring
+spec:
+  selector: {app: alert-sink}
+  ports:
+    - {name: http, port: 8080, targetPort: http}

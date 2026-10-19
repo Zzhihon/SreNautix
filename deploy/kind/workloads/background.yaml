@@ -1,0 +1,101 @@
+# 背景流量与背景噪声，所有场景期间持续存在：
+# - traffic/loadgen：外部客户端，持续以低速率访问 web（HPA 场景把它调到高速率）；
+# - batch/nightly-export：每 5 分钟一次，约三分之一失败（KubeJobFailed 的长期告警）；
+# - batch/flaky-worker：每 15 分钟退出一次（零散的重启）。
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: traffic
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: loadgen
+  namespace: traffic
+  labels: {app: loadgen}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: loadgen}
+  template:
+    metadata:
+      labels: {app: loadgen}
+    spec:
+      containers:
+        - name: loadgen
+          image: busybox
+          command:
+            - sh
+            - -c
+            - |
+              trap 'exit 0' TERM
+              while true; do
+                wget -q -T 5 -O /dev/null http://web.shop.svc:8080/ || echo "loadgen: request failed"
+                sleep "$INTERVAL"
+              done
+          env:
+            - name: INTERVAL
+              value: "1"
+          resources:
+            requests: {cpu: 10m, memory: 8Mi}
+            limits: {cpu: 200m, memory: 32Mi}
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: batch
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: nightly-export
+  namespace: batch
+spec:
+  schedule: "*/5 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 2
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      ttlSecondsAfterFinished: 1200
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: export
+              image: busybox
+              command:
+                - sh
+                - -c
+                - |
+                  if [ $(( $(date +%s) / 300 % 3 )) -eq 0 ]; then
+                    echo "export: upstream bucket returned 503" >&2
+                    exit 1
+                  fi
+                  echo "export: done"
+              resources:
+                requests: {cpu: 10m, memory: 8Mi}
+                limits: {cpu: 50m, memory: 16Mi}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: flaky-worker
+  namespace: batch
+  labels: {app: flaky-worker}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: flaky-worker}
+  template:
+    metadata:
+      labels: {app: flaky-worker}
+    spec:
+      containers:
+        - name: worker
+          image: busybox
+          command: [sh, -c, "echo 'worker: started'; sleep 900; echo 'worker: lost lease, exiting' >&2; exit 1"]
+          resources:
+            requests: {cpu: 5m, memory: 8Mi}
+            limits: {cpu: 20m, memory: 16Mi}

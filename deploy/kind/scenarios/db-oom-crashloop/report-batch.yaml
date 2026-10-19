@@ -1,0 +1,35 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: report-batch
+  namespace: shop
+  labels: {app: report-batch}
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels: {app: report-batch}
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: report
+          image: postgres
+          command:
+            - sh
+            - -c
+            - |
+              # 月度报表：对两千万行做全量排序；数据库重启后继续重试
+              while true; do
+                psql -h postgres.shop.svc -U postgres -d shop -v ON_ERROR_STOP=1 \
+                  -c "SET work_mem = '2GB'" \
+                  -c "SELECT count(*) FROM (SELECT md5(g::text) AS k FROM generate_series(1, 20000000) g ORDER BY k) s" \
+                  || echo "report-batch: query failed, retrying" >&2
+                sleep 5
+              done
+          env:
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef: {name: postgres-auth, key: password}
+          resources:
+            requests: {cpu: 10m, memory: 16Mi}
+            limits: {cpu: 100m, memory: 64Mi}
