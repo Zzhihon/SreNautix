@@ -11,13 +11,13 @@ import { PackEvidence, PackRules } from '../../src/stage-a/pack-evidence.js';
 import { EvidenceSource, PackRuntime } from '../../src/stage-a/packs.js';
 import { TopologyStore } from '../../src/topology/store.js';
 import { newTestDb, type TestDb } from '../support/db.js';
+import { exampleWithTemplate, PACKS } from '../support/packs.js';
 
 /**
  * 阶段 A 接入领域包运行时：真实 Prometheus（夹具回填成块）、仓库中的 _example 包、真实的拓扑存储。
  * 证据链按告警目录条目与根因的组件类型选择，规则提议引用动作目录中的动作。
  */
 const REPO = resolve(import.meta.dirname, '../../../..');
-const PACKS = join(REPO, 'packs');
 const SCRATCH = join(REPO, '.scratch', `stage-a-packs-${process.pid}`);
 const CAPS = new Set(['metrics.query', 'metrics.query_range', 'metrics.series'] as const);
 
@@ -142,6 +142,7 @@ let prom: TsdbInstance;
 let rt: PackRuntime;
 let evidence: PackEvidence;
 let rules: PackRules;
+let source: EvidenceSource;
 const metrics = new ServerMetrics('server', false);
 
 beforeAll(async () => {
@@ -173,7 +174,7 @@ beforeAll(async () => {
       },
     },
   ]);
-  const source = await EvidenceSource.create({
+  source = await EvidenceSource.create({
     id: 'prometheus',
     url: prom.url,
     dialect: 'promql',
@@ -358,5 +359,78 @@ describe('领域包加载失败', () => {
       loaded: false,
       load_error: expect.stringContaining('metrics.query_range'),
     });
+  });
+});
+
+describe('阶段 B 的领域包材料', () => {
+  let tpl: PackRuntime;
+  let tplEvidence: PackEvidence;
+
+  beforeAll(async () => {
+    tpl = await PackRuntime.load({
+      dirs: [exampleWithTemplate(join(SCRATCH, 'tpl'))],
+      only: ['_example'],
+      lockFile: null,
+      catalogPath: DEFAULT_CATALOG_PATH,
+      capabilities: CAPS,
+    });
+    tplEvidence = new PackEvidence(
+      tpl,
+      source,
+      async () => null,
+      { locale: 'zh-CN', concurrency: 2, queryTimeoutMs: 10_000 },
+      metrics,
+    );
+  });
+
+  it('查询模板按附带的卡在真实数据上判定，参数覆盖卡片默认值', async () => {
+    expect(tpl.templates.map((t) => [t.id, t.description])).toEqual([
+      ['_example/memory-ratio', '容器 working set 占 limit 的峰值，超过 limit_ratio 判为异常'],
+    ]);
+    const inc = incident({ kind: 'Pod', namespace: 'shop', name: 'web-0' });
+    const entity = { cluster_id: 'east', kind: 'Pod', namespace: 'shop', name: 'web-0', uid: 'uid-web-0' };
+    const hot = await tplEvidence.runTemplate(
+      inc,
+      '_example/memory-ratio',
+      { limit_ratio: 0.9 },
+      entity,
+      Date.now(),
+      AbortSignal.timeout(30_000),
+    );
+    expect(hot).toMatchObject({
+      card_id: '_example/templates/memory-ratio',
+      verdict: 'abnormal',
+      reason: { kind: 'rule' },
+    });
+    expect(hot.entity).toEqual(entity);
+    const cool = await tplEvidence.runTemplate(
+      inc,
+      '_example/memory-ratio',
+      { limit_ratio: 0.97 },
+      entity,
+      Date.now(),
+      AbortSignal.timeout(30_000),
+    );
+    expect(cool.verdict).toBe('normal');
+    await expect(
+      tplEvidence.runTemplate(inc, '_example/nope', {}, entity, Date.now(), AbortSignal.timeout(30_000)),
+    ).rejects.toThrow(/没有查询模板/);
+  });
+
+  it('知识条目按组件类型选择，文本取指定语言，id 带包名', () => {
+    const zh = tpl.knowledge(new Set(['example.web']), 'zh-CN');
+    expect(zh).toEqual([
+      {
+        id: '_example/working-set-vs-rss',
+        components: ['example.web'],
+        text: expect.stringContaining('working set'),
+        learned_from: ['https://kubernetes.io/docs/concepts/scheduling-eviction/node-pressure-eviction/'],
+        learned_at: '2026-01-01T00:00:00Z',
+        source: 'human',
+      },
+    ]);
+    expect(zh[0]!.text).toMatch(/kubelet 按 working set/);
+    expect(tpl.knowledge(new Set(['example.web']), 'en')[0]!.text).toMatch(/^The kubelet evicts/);
+    expect(tpl.knowledge(new Set(['other.type']), 'zh-CN')).toEqual([]);
   });
 });

@@ -1,0 +1,29 @@
+
+# 追加到 _example 副本的 signals.yaml：一个查询模板，参数 limit_ratio 覆盖卡片默认值
+templates:
+  - id: memory-ratio
+    signal: container_memory_limit_ratio
+    description: 容器 working set 占 limit 的峰值，超过 limit_ratio 判为异常
+    args:
+      type: object
+      additionalProperties: false
+      required: [limit_ratio]
+      properties:
+        limit_ratio: { type: number, minimum: 0, maximum: 1 }
+    card:
+      id: memory-ratio
+      title: { zh-CN: working set 占 limit, en: Working set vs limit }
+      applies_to: { kinds: [Pod, Deployment, StatefulSet] }
+      params: { limit_ratio: 0.9 }
+      refs:
+        - { name: mem, signal: container_memory_limit_ratio, mode: range }
+      judge:
+        let:
+          - { name: peak, cel: max(mem) }
+        abnormal_if:
+          - cel: peak > params.limit_ratio
+            say:
+              zh-CN: '峰值 {peak, number, percent} 超过阈值'
+              en: 'Peak {peak, number, percent} exceeds the threshold'
+      display: { value: peak, unit: percent, threshold: params.limit_ratio }
+      egress: allow

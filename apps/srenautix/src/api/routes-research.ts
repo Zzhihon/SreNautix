@@ -1,4 +1,6 @@
 import type { Alert, Feedback, Incident } from '@srenautix/contract';
+import { parseKey } from '@srenautix/core';
+import { Ajv2020, type ValidateFunction } from 'ajv/dist/2020.js';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type pg from 'pg';
 import type { OutboxListener } from '../events/listener.js';
@@ -9,10 +11,13 @@ import { alertsById } from '../ingest/store.js';
 import type { Catalog } from '../proposals/catalog.js';
 import type { FeedbackService } from '../proposals/feedback.js';
 import { LeaseLost, type Scheduler } from '../scheduler/admission.js';
+import type { PackEvidence } from '../stage-a/pack-evidence.js';
+import type { CompiledTemplate, PackRuntime } from '../stage-a/packs.js';
 import { appendAudit } from '../store/audit.js';
 import { tx } from '../store/pool.js';
 import type { TopologyStore } from '../topology/store.js';
 import { badRequest, forbidden, HttpError, notFound } from './errors.js';
+import { referenceCases } from './research-materials.js';
 
 export interface ResearchRouteDeps {
   pool: pg.Pool;
@@ -24,6 +29,25 @@ export interface ResearchRouteDeps {
   listener: OutboxListener;
   /** worker 的内部 API 与 server 调用它的 token；未配置时研判明细不可用。 */
   worker: { url: string; token: string } | null;
+  /** 领域包：知识条目、查询模板与 pack.lock。 */
+  packs: PackRuntime;
+  /** 查询模板的执行（阶段 A 的证据卡运行时）。 */
+  templates: Pick<PackEvidence, 'runTemplate'>;
+  /** 知识条目的语言。 */
+  locale: 'zh-CN' | 'en';
+}
+
+const ajv = new Ajv2020({ allErrors: true, strict: false });
+const validators = new WeakMap<CompiledTemplate, ValidateFunction>();
+
+/** 模板参数的校验器（按模板缓存）。 */
+function argsValidator(t: CompiledTemplate): ValidateFunction {
+  let v = validators.get(t);
+  if (!v) {
+    v = ajv.compile(t.args);
+    validators.set(t, v);
+  }
+  return v;
 }
 
 /**
@@ -104,11 +128,11 @@ export function registerResearchRoutes(app: FastifyInstance, d: ResearchRouteDep
   });
 
   /** worker 的研判输入：事件（该版本）、成员告警、阶段 A 报告、研判时刻的两跳拓扑邻域、反馈、动作目录。 */
-  app.get('/v1/research/tasks/:run_id/context', async (req) => {
-    await worker(req);
+  /** 研判任务对应的事件版本与研判时刻的两跳拓扑邻域。 */
+  const taskInput = async (runId: string) => {
     const r = await d.pool.query<{ incident_id: string; incident_version: number; reason: string }>(
       'SELECT incident_id, incident_version, reason FROM server.research_queue WHERE run_id = $1',
-      [(req.params as { run_id: string }).run_id],
+      [runId],
     );
     const t = r.rows[0];
     if (!t) {
@@ -118,16 +142,31 @@ export function registerResearchRoutes(app: FastifyInstance, d: ResearchRouteDep
     if (!incident) {
       throw notFound('事件版本不存在');
     }
+    const keys = [...new Set([...incident.components, ...incident.candidates.map((c) => c.component)])];
+    const topo = await d.topology.neighborhood(incident.cluster_id, keys, new Date(incident.updated_at), 2);
+    return { task: t, incident, topo };
+  };
+
+  app.get('/v1/research/tasks/:run_id/context', async (req) => {
+    await worker(req);
+    const runId = (req.params as { run_id: string }).run_id;
+    const { task: t, incident, topo } = await taskInput(runId);
     const alerts: Alert[] = await alertsById(
       d.pool,
       incident.members.filter((m) => m.left_version === null).map((m) => m.alert_id),
     );
     const stageA = await latestStageA(d.pool, t.incident_id, t.incident_version);
-    const keys = [...new Set([...incident.components, ...incident.candidates.map((c) => c.component)])];
-    const topo = await d.topology.neighborhood(incident.cluster_id, keys, new Date(incident.updated_at), 2);
     const feedback: Feedback[] = await d.feedback.list(t.incident_id);
+    const types = new Set(topo.nodes.map((n) => n.component_type).filter((x): x is string => x !== null));
+    const cases = await referenceCases(d.pool, {
+      clusterId: incident.cluster_id,
+      incidentId: incident.incident_id,
+      keys: new Set(topo.nodes.map((n) => n.key)),
+      namespaces: new Set(topo.nodes.map((n) => n.namespace).filter((x): x is string => x !== null)),
+      before: new Date(),
+    });
     return {
-      run_id: (req.params as { run_id: string }).run_id,
+      run_id: runId,
       reason: t.reason,
       incident,
       alerts,
@@ -135,7 +174,56 @@ export function registerResearchRoutes(app: FastifyInstance, d: ResearchRouteDep
       topology: { version: topo.version, nodes: topo.nodes, edges: topo.edges },
       feedback,
       catalog: d.catalog.raw,
+      knowledge: d.packs.knowledge(types, d.locale),
+      cases,
+      templates: d.packs.templates.map((x) => ({ id: x.id, description: x.description, args: x.args })),
+      pack_lock: d.packs.set.lockDigest,
     };
+  });
+
+  /**
+   * 区分性检查的查询模板由 server 执行（server 持有领域包运行时与证据数据源，worker 不直接访问数据源）：
+   * 在 component（研判子图中的节点，或事件的组件与候选根因；通常是假设的根因）上执行模板附带的卡，
+   * 参数按模板的 schema 校验后覆盖卡片默认参数。
+   */
+  app.post('/v1/research/tasks/:run_id/query', async (req) => {
+    await worker(req);
+    const body = (req.body ?? {}) as { template?: unknown; args?: unknown; component?: unknown };
+    if (typeof body.template !== 'string' || typeof body.component !== 'string') {
+      throw badRequest('需要 template 与 component');
+    }
+    const args = body.args ?? {};
+    if (!args || typeof args !== 'object' || Array.isArray(args)) {
+      throw badRequest('args 必须是 JSON 对象');
+    }
+    const { incident, topo } = await taskInput((req.params as { run_id: string }).run_id);
+    const template = d.packs.templates.find((t) => t.id === body.template);
+    if (!template) {
+      throw notFound(`没有查询模板 ${body.template}`);
+    }
+    const valid = argsValidator(template);
+    if (!valid(args)) {
+      throw badRequest(`参数不符合模板 ${template.id} 的 schema：${ajv.errorsText(valid.errors)}`);
+    }
+    const params: Record<string, number | string | boolean> = {};
+    for (const [k, v] of Object.entries(args)) {
+      if (typeof v !== 'number' && typeof v !== 'string' && typeof v !== 'boolean') {
+        throw badRequest(`参数 ${k} 必须是数字、字符串或布尔值`);
+      }
+      params[k] = v;
+    }
+    // 子图节点，或事件的组件与候选根因（命名空间伪组件 Namespace:<ns> 不是拓扑节点）
+    const component = body.component;
+    const node = topo.nodes.find((n) => n.key === component);
+    const own = incident.components.includes(component) || incident.candidates.some((c) => c.component === component);
+    if (!node && !own) {
+      throw badRequest(`组件 ${component} 不在本次研判的子图中`);
+    }
+    const k = parseKey(component);
+    const entity = node
+      ? { cluster_id: incident.cluster_id, kind: node.kind, namespace: node.namespace, name: node.name, uid: node.uid }
+      : { cluster_id: incident.cluster_id, kind: k.kind, namespace: k.namespace, name: k.name, uid: null };
+    return d.templates.runTemplate(incident, template.id, params, entity, Date.now(), AbortSignal.timeout(30_000));
   });
 
   app.get('/v1/incidents/:ref/research', async (req) => {

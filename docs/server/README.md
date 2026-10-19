@@ -147,6 +147,26 @@ server 启动时用 packages/packs-sdk 加载 `packs.dirs` 下的领域包（每
 
 排除规则（`chains.yaml` 的 `excludes`）只在本次执行过的证据链上求值，上下文与规则提议相同；按声明顺序第一条命中时 disposition 为 `ignore`，报告中记录规则引用 `<pack>/<chain id>#excludes[<序号>]`。求值出错的规则不命中，计入 `srenautix_stage_a_rule_errors_total`。
 
+## 阶段 B 的输入与查询模板
+
+worker 认领任务后读取 `GET /v1/research/tasks/{run_id}/context`（worker 的服务 token），字段与 `contract/schemas/eval-snapshot.schema.json` 的 `Context` 对应：
+
+| 字段 | 内容 |
+|---|---|
+| `incident`、`alerts`、`stage_a`、`feedback` | 该事件版本、成员告警、阶段 A 报告、反馈 |
+| `topology` | 研判时刻根因与组件两跳内的节点与边 |
+| `catalog` | 动作目录 |
+| `knowledge` | 领域包 `knowledge/*.yaml` 中与子图组件类型相关的条目（`components` 为空的通用条目总是包含），文本取配置项 `stage_a.language` 对应的语言，id 为 `<pack>/<entry id>` |
+| `cases` | 参考案例：同集群已结束、经已绑定账号的人工反馈确认根因的事件（confirmed 取反馈评价版本的根因，rejected 取反馈给出的真实根因，真实根因未知的不取），根因在子图中或与子图节点同一命名空间，按结束时间从新到旧最多 10 个 |
+| `templates` | 区分性检查可用的查询模板（`signals.yaml` 的 `templates`，只含附带卡的模板）：`id`（`<pack>/<template id>`）、`description`、`args`（参数的 JSON Schema） |
+| `pack_lock` | 加载的领域包的 pack.lock 摘要，写入研判清单 |
+
+查询模板由 server 执行，worker 不直接访问数据源：`POST /v1/research/tasks/{run_id}/query`，请求体 `{template, args, component}`。
+
+- `args` 按模板的 schema 校验，值必须是数字、字符串或布尔值，覆盖卡片默认参数；不合法返回 400。
+- `component` 必须是子图中的节点，或事件的组件与候选根因（包括命名空间伪组件）；否则 400。
+- server 在该组件上执行模板附带的卡，窗口以事件首次触发时间为锚点，返回 `EvidenceResult`（卡片 id 为 `<pack>/templates/<template id>`）。数据源不可用时照常返回，结论为无法判定。
+
 ## 本地运行与控制台 e2e
 
 控制台的 Playwright e2e 可以这样启动一个真实的 server：

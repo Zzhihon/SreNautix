@@ -1,4 +1,5 @@
 import { createHash, generateKeyPairSync, randomUUID } from 'node:crypto';
+import { validatorFor } from '@srenautix/contract';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { Secret, TOTP } from 'otpauth';
@@ -6,6 +7,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { stringify } from 'yaml';
 import { parseServerConfig } from '../../src/config/server.js';
 import { upsertUser } from '../../src/identity/chat-links.js';
+import { HubClient } from '../../src/research/hub.js';
+import { HubQueryRunner } from '../../src/research/hub-query.js';
 import { SESSION_COOKIE } from '../../src/identity/sessions.js';
 import { hashPassword } from '../../src/identity/password.js';
 import {
@@ -21,6 +24,7 @@ import { TopologyStore } from '../../src/topology/store.js';
 import { serverTracks } from '../../src/roles/server-schema.js';
 import { responseErrors } from '../support/contract.js';
 import { newTestDb, type TestDb } from '../support/db.js';
+import { exampleWithTemplate } from '../support/packs.js';
 import { fixture, FixtureServer } from '../support/fixture-server.js';
 import { until } from '../support/monitoring.js';
 
@@ -156,7 +160,7 @@ beforeAll(async () => {
       sources: [{ id: 'am', kind: 'alertmanager', token_file: file('ingest-token', TOKENS.ingest) }],
       reconcile: { enabled: false },
     },
-    packs: { dirs: [resolve(file('packs/.keep', ''), '..')] },
+    packs: { dirs: [exampleWithTemplate(join(ROOT, 'packs'))], only: ['_example'] },
     console: { dir: consoleDir },
     datasources: { prometheus: { url: 'http://127.0.0.1:9' } },
     topology: { source: 'off' },
@@ -309,7 +313,53 @@ describe('server 端到端', () => {
     const c = ctx.body as unknown as {
       incident: { incident_version: number; root: { component: string } };
       stage_a: { evidence_fingerprint: string };
+      knowledge: unknown[];
+      cases: unknown[];
+      templates: Array<{ id: string; description: string; args: Record<string, unknown> }>;
+      pack_lock: string;
+      topology: { nodes: Array<{ key: string }> };
     };
+    // 领域包材料：查询模板（由 server 执行）、pack.lock 摘要；子图中没有 example.web 组件，知识条目为空；没有参考案例
+    expect(c.templates).toEqual([
+      expect.objectContaining({ id: '_example/memory-ratio', args: expect.objectContaining({ type: 'object' }) }),
+    ]);
+    expect(c.pack_lock).toMatch(/^sha256:[0-9a-f]{64}$/);
+    expect(c.knowledge).toEqual([]);
+    expect(c.cases).toEqual([]);
+    const query = (body: unknown) =>
+      api('POST', `/v1/research/tasks/${task.run_id}/query`, { token: TOKENS.worker, body });
+    const component = c.incident.root.component;
+    expect((await query({ template: '_example/nope', args: {}, component })).status).toBe(404);
+    expect((await query({ template: '_example/memory-ratio', args: { limit_ratio: 2 }, component })).status).toBe(400);
+    expect(
+      (await query({ template: '_example/memory-ratio', args: { limit_ratio: 0.5 }, component: 'Node:elsewhere' }))
+        .status,
+    ).toBe(400);
+    // 证据数据源不可达：卡照常返回，结论为无法判定
+    const card = await query({ template: '_example/memory-ratio', args: { limit_ratio: 0.5 }, component });
+    expect(card.status).toBe(200);
+    expect(card.body).toMatchObject({ card_id: '_example/templates/memory-ratio', verdict: 'undeterminable' });
+    expect(validatorFor('schemas/evidence-result.schema.json')(card.body)).toBe(true);
+    // worker 侧的查询执行器经同一接口执行；server 拒绝的请求成为无法判定的卡，原因写进卡的说明
+    const runner = new HubQueryRunner(new HubClient(srv.apiUrl, TOKENS.worker), task.run_id);
+    const t = c.templates[0]!;
+    const rctx = {
+      hypothesisId: 'h1',
+      rootComponent: component,
+      bounds: { from: 0, to: Date.now() },
+      signal: AbortSignal.timeout(30_000),
+    };
+    expect(await runner.run(t, { limit_ratio: 0.5 }, rctx)).toMatchObject({
+      card_id: '_example/templates/memory-ratio',
+    });
+    const refused = await runner.run(t, { limit_ratio: 2 }, rctx);
+    expect(refused).toMatchObject({ verdict: 'undeterminable', reason: { kind: 'evaluation_error' } });
+    expect(refused.reason.text).toContain('参数不符合模板');
+    expect(validatorFor('schemas/evidence-result.schema.json')(refused)).toBe(true);
+    // 研判队列接口只对 worker 开放
+    expect((await api('POST', `/v1/research/tasks/${task.run_id}/query`, { session: true, body: {} })).status).toBe(
+      403,
+    );
     const create = {
       incident_id: incidentId,
       binding: {

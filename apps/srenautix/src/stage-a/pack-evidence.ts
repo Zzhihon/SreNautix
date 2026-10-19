@@ -34,6 +34,8 @@ export interface PackEvidenceOptions {
 interface Planned {
   card: string;
   entity: EntityRef;
+  /** 覆盖卡片默认参数（查询模板的参数） */
+  params?: Record<string, number | string | boolean>;
 }
 
 /** 数据源的查询回看：卡片窗口之前再留 24 小时，供 rate 等函数的回看范围使用。 */
@@ -157,6 +159,34 @@ export class PackEvidence implements EvidenceRunner {
     return wanted.map((c) => out.find((x) => x.ref === c.ref)).filter((x): x is EvidenceResult => x !== undefined);
   }
 
+  /**
+   * 阶段 B 区分性检查的查询模板：在 entity 上执行模板附带的卡，参数覆盖卡片默认参数。
+   * 窗口以事件首次触发时间为锚点，终点不晚于 now。模板不存在或卡没有执行（例如窗口为空）时抛出。
+   */
+  async runTemplate(
+    inc: Incident,
+    templateId: string,
+    args: Record<string, number | string | boolean>,
+    entity: EntityRef,
+    now: number,
+    signal: AbortSignal,
+  ): Promise<EvidenceResult> {
+    const t = this.rt.templates.find((x) => x.id === templateId);
+    if (!t) {
+      throw new Error(`没有查询模板 ${templateId}`);
+    }
+    const [r] = await this.execute(
+      [{ card: t.card, entity, params: args }],
+      Date.parse(inc.first_firing_at),
+      now,
+      signal,
+    );
+    if (!r) {
+      throw new Error(`查询模板 ${templateId} 没有执行（见 server 日志）`);
+    }
+    return { ...r, ref: 'card:1' };
+  }
+
   private runbooks(chains: string[]): string[] {
     const out: string[] = [];
     for (const ck of chains) {
@@ -208,6 +238,7 @@ export class PackEvidence implements EvidenceRunner {
           clock: { from: toIso(anchor - before - LOOKBACK_MS), to: toIso(now) },
           locale: this.o.locale,
           timeoutMs: this.o.queryTimeoutMs,
+          ...(p.params ? { params: p.params } : {}),
         });
         this.metrics.evidenceCards.inc({ display_state: r.display_state });
         this.metrics.evidenceCardSeconds.observe((performance.now() - started) / 1000);

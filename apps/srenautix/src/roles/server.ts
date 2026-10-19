@@ -423,7 +423,19 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
     },
   });
   registerProposalRoutes(app, { pool, auth, proposals, catalog, policies: () => policies });
-  registerResearchRoutes(app, { pool, auth, scheduler, topology, feedback, catalog, listener, worker });
+  registerResearchRoutes(app, {
+    pool,
+    auth,
+    scheduler,
+    topology,
+    feedback,
+    catalog,
+    listener,
+    worker,
+    packs,
+    templates: evidence,
+    locale: evidenceOptions.locale,
+  });
   registerIncidentRoutes(app, { pool, auth, feedback, topology, evidence, worker });
   registerSystemRoutes(app, {
     pool,

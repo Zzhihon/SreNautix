@@ -1,5 +1,6 @@
 import type {
   Alert,
+  EvidenceResult,
   Feedback,
   Incident,
   Proposal,
@@ -9,6 +10,7 @@ import type {
   TopologyNode,
 } from '@srenautix/contract';
 import type { CatalogAction } from '../proposals/catalog.js';
+import type { CheckTemplate, KnowledgeItem, ReferenceCase } from './types.js';
 
 // worker 调用中心 server 的内部接口（worker 的服务 token；server 代为执行队列的 SKIP LOCKED，worker 没有 server schema 的权限）。
 
@@ -32,6 +34,14 @@ export interface TaskContext {
   topology: { version: number; nodes: TopologyNode[]; edges: TopologyEdge[] };
   feedback: Feedback[];
   catalog: { version: 1; actions: CatalogAction[] };
+  /** 与子图组件类型相关的知识条目 */
+  knowledge: KnowledgeItem[];
+  /** 同集群已解决、经人工确认根因的参考案例 */
+  cases: ReferenceCase[];
+  /** 区分性检查可用的查询模板（由 server 执行，见 runTemplate） */
+  templates: CheckTemplate[];
+  /** 加载的领域包的 pack.lock 摘要，写入研判清单 */
+  pack_lock: string;
 }
 
 export class HubError extends Error {
@@ -108,6 +118,23 @@ export class HubClient {
   async context(runId: string): Promise<TaskContext> {
     const r = await this.call<TaskContext>('GET', `/v1/research/tasks/${runId}/context`, undefined);
     return r.body as TaskContext;
+  }
+
+  /** 区分性检查的查询模板由 server 执行：在 component 上执行模板附带的卡，返回判定后的卡（ref 由证据簿重新分配） */
+  async runTemplate(
+    runId: string,
+    template: string,
+    args: Record<string, unknown>,
+    component: string,
+    signal: AbortSignal,
+  ): Promise<EvidenceResult> {
+    const r = await this.call<EvidenceResult>(
+      'POST',
+      `/v1/research/tasks/${runId}/query`,
+      { template, args, component },
+      { timeoutMs: 45_000, signal },
+    );
+    return r.body as EvidenceResult;
   }
 
   async reportBudget(usedRatio: number): Promise<void> {

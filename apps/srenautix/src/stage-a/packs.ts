@@ -21,7 +21,9 @@ import {
   type PromqlEngine,
 } from '@srenautix/integration-sdk';
 import {
+  compileCard,
   compilePackSet,
+  createBaseEnvironment,
   LiveDataSource,
   loadActionCatalog,
   loadPackDir,
@@ -30,6 +32,8 @@ import {
   PackLockMismatch,
   resolveSignal,
   type Capability,
+  type CardDefinition,
+  type CardEntry,
   type EvidenceDataSource,
   type LoadedPack,
   type PackSet,
@@ -95,9 +99,81 @@ function failureOf(dir: string, name: string, source: string, error: string): Pa
   };
 }
 
+/** 阶段 B 输入中的知识条目（与 contract/schemas/eval-snapshot.schema.json 的 Knowledge 同形）。 */
+export interface KnowledgeEntry {
+  id: string;
+  components: string[];
+  text: string;
+  learned_from: string[];
+  learned_at: string | null;
+  source: 'human' | 'model';
+}
+
+/** 区分性检查可用的查询模板（signals.yaml 的 templates），按模板附带的卡判定。 */
+export interface CompiledTemplate {
+  /** 全局 id <pack>/<template id> */
+  id: string;
+  pack: string;
+  description: string;
+  /** 参数的 JSON Schema（可移植子集） */
+  args: Record<string, unknown>;
+  /** set.cards 中的卡片键 <pack>/templates/<template id> */
+  card: string;
+}
+
+const REF_KIND: Record<string, string> = { range: 'metrics', instant: 'metrics', logs: 'logs', traces: 'traces' };
+
+/**
+ * 编译查询模板：模板引用的信号与卡的每个引用都必须存在且类型相符，卡的 CEL 按阶段 A 的同一套环境编译。
+ * 编译后的卡加入 set.cards（键 <pack>/templates/<id>），由 runCard 执行。没有附带卡的模板无法判定，不提供给阶段 B。
+ */
+function compileTemplates(set: PackSet): CompiledTemplate[] {
+  const base = createBaseEnvironment();
+  const out: CompiledTemplate[] = [];
+  const signalKey = (pack: string, ref: string, where: string) => {
+    const key = ref.includes('/') ? ref : `${pack}/${ref}`;
+    if (!set.signals.has(key)) {
+      throw new PackLintError(where, `引用的信号 ${ref} 不存在或所在的包被禁用`);
+    }
+    return key;
+  };
+  for (const p of set.packs) {
+    for (const t of p.content.signals.templates ?? []) {
+      const where = `${p.dir}/signals.yaml：templates ${t.id}`;
+      signalKey(p.name, t.signal, where);
+      if (!t.card) {
+        logger.warn('查询模板没有附带卡，无法判定，不提供给阶段 B', { pack: p.name, template: t.id });
+        continue;
+      }
+      const def = t.card as CardDefinition;
+      const signals: Record<string, string> = {};
+      for (const r of def.refs) {
+        const key = signalKey(p.name, r.signal, where);
+        const kind = set.signals.get(key)!.signal.kind;
+        if (REF_KIND[r.mode] !== kind) {
+          throw new PackLintError(where, `引用 ${r.name} 的模式 ${r.mode} 与信号 ${key} 的类型 ${kind} 不符`);
+        }
+        signals[r.name] = key;
+      }
+      const key = `${p.name}/templates/${t.id}`;
+      const entry: CardEntry = {
+        key,
+        pack: p.name,
+        chain: null,
+        def,
+        compiled: compileCard(base, def, { where }),
+        signals,
+      };
+      set.cards.set(key, entry);
+      out.push({ id: `${p.name}/${t.id}`, pack: p.name, description: t.description, args: t.args, card: key });
+    }
+  }
+  return out;
+}
+
 /**
  * 领域包运行时（DESIGN §6.3）：加载并编译全部包，提供告警目录、组件类型、Operator 约定边、根因排序参数，
- * 以及阶段 A 执行证据卡与规则提议所需的包集合。
+ * 阶段 A 执行证据卡与规则提议所需的包集合，以及阶段 B 的查询模板与知识条目。
  *
  * 单个包校验不通过时只禁用这个包并发布 PackLoadFailed 条件，其余包照常加载；pack.lock 不一致时不加载任何包。
  */
@@ -108,6 +184,7 @@ export class PackRuntime {
     private readonly inputs: LoadedPack[],
     readonly failures: PackFailure[],
     private readonly capabilities: ReadonlySet<Capability>,
+    readonly templates: CompiledTemplate[],
   ) {}
 
   static async load(o: PackRuntimeOptions): Promise<PackRuntime> {
@@ -147,7 +224,8 @@ export class PackRuntime {
           capabilities: o.capabilities,
           ...(expectedLock ? { expectedLock } : {}),
         });
-        return new PackRuntime(set, active, failures, o.capabilities);
+        const templates = compileTemplates(set);
+        return new PackRuntime(set, active, failures, o.capabilities, templates);
       } catch (e) {
         if (e instanceof PackLockMismatch) {
           logger.error('pack.lock 与加载的领域包不一致，不加载任何包', { error: e.message });
@@ -157,6 +235,7 @@ export class PackRuntime {
             [],
             [...failures, ...active.map((p) => failureOf(p.dir, p.name, p.source, e.message))],
             o.capabilities,
+            [],
           );
         }
         if (!(e instanceof PackLintError)) {
@@ -174,6 +253,34 @@ export class PackRuntime {
         active = active.filter((p) => p !== culprit);
       }
     }
+  }
+
+  /**
+   * 与这些组件类型相关的知识条目（knowledge/*.yaml）：components 为空的通用条目，或 components 与之有交集的条目。
+   * 文本取 language 对应的语言，没有时取另一种语言。id 为 <pack>/<entry id>。
+   */
+  knowledge(componentTypes: ReadonlySet<string>, language: 'zh-CN' | 'en'): KnowledgeEntry[] {
+    const out: KnowledgeEntry[] = [];
+    for (const p of this.set.packs) {
+      for (const file of Object.values(p.content.knowledge)) {
+        for (const e of file.entries) {
+          const comps = e.components ?? [];
+          if (comps.length && !comps.some((c) => componentTypes.has(c))) {
+            continue;
+          }
+          const other = language === 'zh-CN' ? 'en' : 'zh-CN';
+          out.push({
+            id: `${p.name}/${e.id}`,
+            components: comps,
+            text: e.text[language] ?? e.text[other] ?? '',
+            learned_from: e.learned_from,
+            learned_at: e.learned_at ?? null,
+            source: e.source,
+          });
+        }
+      }
+    }
+    return out;
   }
 
   /** 告警目录（按包的加载顺序，同样具体时先声明的包优先）。 */

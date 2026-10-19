@@ -15,6 +15,7 @@ import type { NewEvent } from '../store/outbox.js';
 import type { Tool } from '../tools/box.js';
 import { runStageB, type ResearchLimits, type ResearchRunResult, type ResearchState } from './controller.js';
 import { HubError, type ClaimedTask, type HubClient, type TaskContext } from './hub.js';
+import { HubQueryRunner } from './hub-query.js';
 import type { WorkerMetrics } from './metrics.js';
 import type { Language } from '../prompts/index.js';
 import type { WorkerStore } from './store.js';
@@ -133,9 +134,10 @@ export function toResearchCase(ctx: TaskContext, tools: Tool[], now: number): Re
     feedback: ctx.feedback,
     actions: actions as unknown as ResearchCase['actions'],
     runbooks: ctx.stage_a.runbooks,
-    knowledge: [],
-    cases: [],
-    templates: [],
+    knowledge: ctx.knowledge,
+    // 只用研判开始之前已解决的案例（与回放的防泄漏规则相同）
+    cases: ctx.cases.filter((c) => Date.parse(c.resolved_at) < now),
+    templates: ctx.templates,
     tools: tools.map((t) => ({ name: t.name, description: t.description, parameters: t.parameters })),
     asOf: new Date(now).toISOString(),
   };
@@ -146,13 +148,6 @@ export function proposalKey(incidentId: string, runId: string, action: string, p
   return createHash('sha256')
     .update(`${incidentId}\n${runId}\n${action}\n${canonicalize(params)}`)
     .digest('hex');
-}
-
-/** 研判输入的摘要：中心尚未提供 pack.lock 时，以动作目录与 runbook 列表的规范 JSON 摘要代替 */
-function inputsDigest(ctx: TaskContext): string {
-  return `sha256:${createHash('sha256')
-    .update(canonicalize({ catalog: ctx.catalog, runbooks: ctx.stage_a.runbooks }) as string)
-    .digest('hex')}`;
 }
 
 export class WorkerService {
@@ -237,8 +232,8 @@ export class WorkerService {
     const toolSet = await d.tools();
     let res: ResearchRunResult;
     const steps: Array<{ state: string; started_at: string; finished_at: string | null }> = [];
+    const rc = toResearchCase(ctx, toolSet.tools, Date.now());
     try {
-      const rc = toResearchCase(ctx, toolSet.tools, Date.now());
       const deadline = Math.min(d.limits.deadlineMs, Date.parse(task.deadline_at) - Date.now());
       res = await runStageB(
         { runId: task.run_id, rc, previous, signal },
@@ -248,7 +243,7 @@ export class WorkerService {
           language: d.language,
           limits: { ...d.limits, deadlineMs: deadline },
           tools: toolSet.tools,
-          query: null,
+          query: new HubQueryRunner(d.hub, task.run_id),
           replay: false,
           now: () => Date.now(),
         },
@@ -270,7 +265,7 @@ export class WorkerService {
     }
     await toolSet.close();
     const output = res.output ? await this.submitProposals(task, ctx, res.output) : null;
-    const manifest = this.manifest(task, ctx, res);
+    const manifest = this.manifest(task, ctx, rc, res);
     const events: NewEvent[] = output
       ? [
           {
@@ -410,22 +405,22 @@ export class WorkerService {
     return { ...out, proposals, validation_notes: notes };
   }
 
-  private manifest(task: ClaimedTask, ctx: TaskContext, res: ResearchRunResult): ResearchManifest {
+  private manifest(task: ClaimedTask, ctx: TaskContext, rc: ResearchCase, res: ResearchRunResult): ResearchManifest {
     const phases = Object.keys(res.promptHashes);
     return {
       run_id: task.run_id,
       incident_id: ctx.incident.incident_id,
       incident_version: ctx.incident.incident_version,
       code_sha: this.d.codeSha,
-      pack_lock: inputsDigest(ctx),
+      pack_lock: ctx.pack_lock,
       contract_version: CONTRACT_VERSION,
       prompt_hashes: Object.fromEntries(phases.map((p) => [p, res.promptHashes[p] as string])),
       routes: res.session.routeUses,
       topology_version: ctx.topology.version,
       snapshot_id: null,
       redaction_version: REDACTION_VERSION,
-      retrieved_cases: [],
-      retrieved_knowledge: [],
+      retrieved_cases: rc.cases.map((c) => c.incident_id),
+      retrieved_knowledge: rc.knowledge.map((k) => k.id),
       evidence_map: res.book.evidenceMap(),
       egress: res.session.egress,
     };
