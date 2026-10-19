@@ -647,7 +647,7 @@ actions:
         base: {type: string, minLength: 1, maxLength: 255}
         title: {type: string, minLength: 1, maxLength: 120}
         body: {type: string, maxLength: 8192}
-        patch: {type: string, minLength: 1, maxLength: 65536, description: unified diff；只允许修改策略中该仓库的路径白名单}
+        patch: {type: string, minLength: 1, maxLength: 65536, description: git diff 格式的补丁（每个文件带 diff --git 头）；只允许修改策略中该仓库的路径白名单}
     conflict_domain: gitops
     prechecks:
       - {id: base_head, kind: git, description: base 分支当前的提交 SHA 等于断言的 target_uid（绑定 head SHA）}
