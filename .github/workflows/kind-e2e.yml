@@ -22,9 +22,10 @@ on:
 permissions:
   contents: read
 
+# 一次完整运行约一小时；main 上的新提交排队等待，不打断进行中的场景
 concurrency:
   group: kind-e2e-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 env:
   # kind 的版本在 deploy/kind/versions.env；这里是对应的 linux-amd64 二进制的 sha256
