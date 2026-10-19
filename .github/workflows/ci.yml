@@ -111,7 +111,10 @@ jobs:
             echo "$unformatted" >&2
             exit 1
           fi
-      # go-test 依次执行 go vet、测试向量检查与 envtest 测试（见 Makefile）
+      # 安装后通过 GITHUB_ENV 导出 SRENAUTIX_TEST_BIN、SRENAUTIX_MINIO_BIN、SRENAUTIX_PG_BIN 给后续步骤
+      - name: 安装测试用的 Prometheus、Alertmanager、VictoriaMetrics、MinIO、PostgreSQL
+        run: .github/scripts/install-test-binaries.sh "$RUNNER_TEMP/testbin"
+      # go-test 依次执行 go vet、生成结果检查与 envtest 测试（见 Makefile）
       - name: go vet 与 envtest 测试
         run: make go-test
       - name: 生成结果与仓库一致
