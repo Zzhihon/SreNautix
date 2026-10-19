@@ -7,6 +7,8 @@
 {{- $config := include "srenautix.roleConfig" (dict "ctx" $ "role" $role) }}
 {{- $secrets := include "srenautix.roleSecrets" (dict "ctx" $ "role" $role) | fromYamlArray }}
 {{- $replicas := ternary 1 (int ($r.replicas | default 1)) (eq $role "gateway") }}
+{{- $ports := include "srenautix.rolePorts" (dict "role" $role) | fromYaml }}
+{{- $probePort := include "srenautix.portName" (dict "ports" $ports "port" $ports.probes) }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -99,25 +101,31 @@ spec:
             {{- toYaml . | nindent 12 }}
             {{- end }}
           ports:
+            {{- if gt (int $ports.http) 0 }}
             - name: http
-              containerPort: 8080
+              containerPort: {{ $ports.http }}
               protocol: TCP
+            {{- end }}
+            {{- if ne (int $ports.metrics) (int $ports.http) }}
             - name: metrics
-              containerPort: 9090
+              containerPort: {{ $ports.metrics }}
               protocol: TCP
+            {{- end }}
+            {{- if and (ne (int $ports.probes) (int $ports.http)) (ne (int $ports.probes) (int $ports.metrics)) }}
             - name: probes
-              containerPort: 8081
+              containerPort: {{ $ports.probes }}
               protocol: TCP
+            {{- end }}
           startupProbe:
-            httpGet: {path: /healthz, port: probes}
+            httpGet: {path: /healthz, port: {{ $probePort }}}
             periodSeconds: 5
             failureThreshold: 60
           livenessProbe:
-            httpGet: {path: /healthz, port: probes}
+            httpGet: {path: /healthz, port: {{ $probePort }}}
             periodSeconds: 10
             failureThreshold: 3
           readinessProbe:
-            httpGet: {path: /readyz, port: probes}
+            httpGet: {path: {{ $ports.ready }}, port: {{ $probePort }}}
             periodSeconds: 5
             failureThreshold: 3
           resources:
@@ -140,7 +148,17 @@ spec:
             - name: audit-staging
               mountPath: /var/lib/srenautix/audit-staging
             {{- end }}
+            {{- if and (eq $role "reader") $.Values.roles.reader.queryManifestConfigMap }}
+            - name: query-manifest
+              mountPath: /etc/srenautix/query-manifest
+              readOnly: true
+            {{- end }}
             {{- if eq $role "server" }}
+            {{- if include "srenautix.roleEnabled" (dict "ctx" $ "role" "gateway") }}
+            - name: policies
+              mountPath: /etc/srenautix/policies
+              readOnly: true
+            {{- end }}
             - name: bindings
               mountPath: /etc/srenautix/bindings
               readOnly: true
@@ -164,14 +182,31 @@ spec:
             sizeLimit: 256Mi
         {{- range $s := $secrets }}
         - name: secret-{{ $s.key | lower }}
+          {{- if $s.configMap }}
+          configMap:
+            name: {{ $s.configMap }}
+          {{- else }}
           secret:
             secretName: {{ $s.secretName }}
+          {{- end }}
             # 0440
             defaultMode: 288
             {{- with $s.items }}
             items:
               {{- toYaml . | nindent 14 }}
             {{- end }}
+        {{- end }}
+        {{- if and (eq $role "reader") $.Values.roles.reader.queryManifestConfigMap }}
+        - name: query-manifest
+          configMap:
+            name: {{ $.Values.roles.reader.queryManifestConfigMap }}
+            items:
+              - {key: queries.yaml, path: queries.yaml}
+        {{- end }}
+        {{- if and (eq $role "server") (include "srenautix.roleEnabled" (dict "ctx" $ "role" "gateway")) }}
+        - name: policies
+          configMap:
+            name: {{ include "srenautix.policyConfigMap" $ }}
         {{- end }}
         {{- if eq $role "gateway" }}
         - name: audit-staging

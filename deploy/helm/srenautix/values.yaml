@@ -11,6 +11,11 @@ clusterId: default
 # 消息与通知中的控制台链接前缀；为空时取 ingress 的第一个主机名（https），没有 ingress 时取 server 的集群内地址
 publicUrl: ""
 
+# 镜像对应的 40 位提交 SHA，worker 写进每次研判的清单（DESIGN §8.5）。
+# 发布的 chart 由 release 工作流写在 Chart 注解 srenautix.io/code-sha 中，这里为空时取注解；
+# 使用仓库中的 chart 与自己构建的镜像时填写
+codeSha: ""
+
 global:
   # 非空时替换两个镜像的仓库主机名，用于离线安装的私有仓库
   imageRegistry: ""
@@ -73,6 +78,9 @@ roles:
     resources:
       requests: {cpu: 200m, memory: 1Gi}
       limits: {cpu: "2", memory: 1Gi}
+    # 与 chart 生成的 worker 配置深度合并（键见 apps/srenautix/src/research/config.ts）。
+    # 必须给出 llm.routes（模型路由，api_key_file 指向 /etc/srenautix/secrets/llm/<键>）与 budget.daily_tokens；
+    # cluster_id、code_sha、hub、inbound、database、listen 由 chart 生成
     config: {}
     extraEnv: []
     nodeSelector: {}
@@ -88,7 +96,12 @@ roles:
     resources:
       requests: {cpu: 100m, memory: 256Mi}
       limits: {cpu: 500m, memory: 512Mi}
+    # 与 chart 生成的 mcp 配置深度合并（键见 apps/srenautix/src/roles/mcp.ts）。
+    # 必须给出 public_url、authorization_server 与 clients（每个客户端的 hub_token_file 是中心登记的外部调用方 token）；
+    # enabled、listen、hub_url 由 chart 生成
     config: {}
+    # 外部调用方 token 所在的 Secret，挂载到 /etc/srenautix/secrets/mcp-clients/
+    clientTokensSecret: ""
     extraEnv: []
     nodeSelector: {}
     tolerations: []
@@ -103,6 +116,10 @@ roles:
     resources:
       requests: {cpu: 50m, memory: 128Mi}
       limits: {cpu: 500m, memory: 256Mi}
+    # 声明的证据查询清单（键 queries.yaml）所在的 ConfigMap；为空时 reader 拒绝声明查询
+    queryManifestConfigMap: ""
+    # 与 chart 生成的 reader 配置深度合并（键见 internal/spoke/reader/config.go）；
+    # cluster_id、listen、hub、datasources、alerts、history、query_manifest 由 chart 生成
     config: {}
     extraEnv: []
     nodeSelector: {}
@@ -126,6 +143,18 @@ roles:
       - rollout_pause
       - rollout_resume
       - pod_restart
+    # 本集群的 gateway 策略（contract/gateway/v1/gateway-policy.schema.json，DESIGN §2.1 中由 Git 管理）。
+    # content 为策略 YAML 原文；existingConfigMap 为已存在的 ConfigMap（键 <clusterId>.yaml，可另有键 REVISION），二选一。
+    # server 以同一份内容核对提议（policies_dir）
+    policy:
+      content: ""
+      existingConfigMap: ""
+    # gateway 信任的签名公钥（contract/gateway/v1/approver-keys.schema.json）：server 的服务签名公钥与审批人通行密钥。
+    # content 为 YAML 原文；或已存在的 ConfigMap / Secret（键 approver-keys.yaml），三选一
+    approverKeys:
+      content: ""
+      existingConfigMap: ""
+      existingSecret: ""
     # 启用 workflow_submit 时必填：`srenautix-spoke admission workflow-allowlist --policy=<Git 中的 gateway 策略>`
     # 输出的 ValidatingAdmissionPolicy 原文（模板白名单与参数约束），chart 按动作目录中的策略同样渲染并绑定
     workflowAllowlistPolicy: ""
@@ -137,6 +166,7 @@ roles:
       storageClass: ""
     # 与 PG 实例的反亲和：preferred | required | none
     pgAntiAffinity: preferred
+    # 与 chart 生成的 gateway 配置深度合并（键见 internal/spoke/gateway/run.go）
     config: {}
     extraEnv: []
     nodeSelector: {}
@@ -213,9 +243,18 @@ identity:
 approvals:
   keyId: default
 
-# 服务调用方。chart 为 worker、reader、gateway 各生成一个 bearer token，
-# server 的调用方文件只保存 token 的 sha256；extra 中的条目原样追加（外部调用方只能提议）
+# 角色之间的服务 token。键：worker、reader、gateway（各自调用 server），server（server 调用 worker 的内部 API），
+# server.sha256（server token 的 sha256，worker 用它校验来访）。
+# existingSecret 为空时由 chart 生成，升级时用 lookup 沿用；Argo CD 等 GitOps 渲染时 lookup 为空，每次渲染都会得到新 token，
+# 这种部署必须提供 existingSecret（例如 SealedSecret）
+serviceTokens:
+  existingSecret: ""
+
+# server 的服务调用方文件（键 callers.yaml，格式见 apps/srenautix/src/identity/callers.ts），只保存 token 的 sha256。
+# existingSecret 为空时由 chart 按 serviceTokens 生成，并追加 extra 中的条目（外部调用方只能提议）；
+# 提供 serviceTokens.existingSecret 时也必须提供本项
 callers:
+  existingSecret: ""
   extra: []
   # - id: holmes
   #   kind: external
@@ -230,8 +269,8 @@ secrets:
   llm: {existingSecret: ""}
   # 渠道 token（Telegram bot token、飞书 app secret 等），只挂到 server
   channels: {existingSecret: ""}
-  # 服务签名密钥（只签 L 档审批）：键 private.pem（Ed25519，PKCS#8）只挂到 server，public.pem 挂到 gateway。
-  # observe 以外的配置必填
+  # 服务签名密钥（只签 L 档审批）：键 private.pem（Ed25519，PKCS#8），只挂到 server；
+  # 对应的公钥写进 roles.gateway.approverKeys（use: service）。observe 以外的配置必填
   serviceSigningKey: {existingSecret: ""}
   # 治理审计链检查点签名密钥（键 private.pem，Ed25519），只挂到 server；为空时由 chart 生成并保留
   auditSigningKey: {existingSecret: ""}
@@ -244,11 +283,10 @@ database:
   # cnpg：在本命名空间创建 CNPG Cluster（需要已安装 CNPG operator）；external：使用外部 PostgreSQL 16+
   mode: cnpg
   name: srenautix
-  # 每个角色一个库角色；server 与 worker 各自拥有一个 schema，mcp 没有 schema（DESIGN §2.1）
+  # 每个角色一个库角色，server 与 worker 各自拥有一个 schema（DESIGN §2.1）；mcp 不连接数据库
   roles:
     server: {username: srenautix_server}
     worker: {username: srenautix_worker}
-    mcp: {username: srenautix_mcp}
   external:
     host: ""
     port: 5432
@@ -260,7 +298,6 @@ database:
     passwordSecrets:
       server: ""
       worker: ""
-      mcp: ""
     # 数据库管理员凭证（键 username、password）。设置后 chart 运行 db bootstrap Job 建库角色与 schema；
     # 为空时由数据库管理员手动执行一次 `srenautix db bootstrap`
     adminSecret: ""
@@ -289,7 +326,6 @@ database:
     passwordSecrets:
       server: ""
       worker: ""
-      mcp: ""
 
 # 审计汇：执行链（gateway）与治理链（server）以 JSONL 哈希链写入对象存储
 audit:
@@ -306,7 +342,11 @@ audit:
     endpoint: ""
     region: ""
     forcePathStyle: true
-    # 含 accessKey、secretKey 两个键；server 与 gateway 共用
+    # 每个角色的凭证 Secret（键 accessKey、secretKey）：server 写治理链（前缀 governance/），gateway 写执行链（前缀 execution/），
+    # 建议两个账号分别只能写自己的前缀；某个角色未设置时使用 existingSecret
+    existingSecrets:
+      server: ""
+      gateway: ""
     existingSecret: ""
   minio:
     image:

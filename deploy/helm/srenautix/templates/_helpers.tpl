@@ -186,7 +186,42 @@ priorityClassName: {{ . }}
 {{- if eq $sink "minio" -}}
 {{- printf "%s-audit-%s" (include "srenautix.minio.name" .ctx) .role -}}
 {{- else if eq $sink "s3" -}}
-{{- .ctx.Values.audit.s3.existingSecret -}}
+{{- $s3 := .ctx.Values.audit.s3 -}}
+{{- default $s3.existingSecret (index ($s3.existingSecrets | default dict) .role) -}}
+{{- end -}}
+{{- end -}}
+
+{{/* 镜像对应的 40 位提交 SHA：values.codeSha，为空时取发布时写入的 Chart 注解 srenautix.io/code-sha */}}
+{{- define "srenautix.codeSha" -}}
+{{- $annotations := .Chart.Annotations | default dict -}}
+{{- default (index $annotations "srenautix.io/code-sha" | default "") .Values.codeSha -}}
+{{- end -}}
+
+{{/*
+各角色进程的监听端口（与各角色读取配置的代码一致）：
+- server、worker：API 8080、指标 9090、探针 8081（/healthz、/readyz）
+- mcp：API 8080（/healthz 也在这里）、指标 9090
+- reader：一个端口 8080，同时提供 API、/metrics、/healthz、/readyz
+- gateway：指标 9090、探针 8081
+输出 YAML：http（0 表示没有）、metrics、probes、ready（就绪探针路径）
+*/}}
+{{- define "srenautix.rolePorts" -}}
+{{- $ports := dict
+  "server" (dict "http" 8080 "metrics" 9090 "probes" 8081 "ready" "/readyz")
+  "worker" (dict "http" 8080 "metrics" 9090 "probes" 8081 "ready" "/readyz")
+  "mcp" (dict "http" 8080 "metrics" 9090 "probes" 8080 "ready" "/healthz")
+  "reader" (dict "http" 8080 "metrics" 8080 "probes" 8080 "ready" "/readyz")
+  "gateway" (dict "http" 0 "metrics" 9090 "probes" 8081 "ready" "/readyz")
+-}}
+{{- index $ports .role | toYaml -}}
+{{- end -}}
+
+{{/* 容器端口号对应的端口名：http、metrics、probes 中第一个使用该端口号的名称 */}}
+{{- define "srenautix.portName" -}}
+{{- $p := .ports -}}
+{{- if and (gt (int $p.http) 0) (eq (int $p.http) (int .port)) -}}http
+{{- else if eq (int $p.metrics) (int .port) -}}metrics
+{{- else -}}probes
 {{- end -}}
 {{- end -}}
 

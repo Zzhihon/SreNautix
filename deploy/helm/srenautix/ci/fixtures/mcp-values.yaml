@@ -1,0 +1,13 @@
+# check-role-configs.sh 叠加在每份 values 上：打开 mcp 与 reader，使五个角色的配置都被渲染
+roles:
+  reader:
+    enabled: true
+  mcp:
+    enabled: true
+    clientTokensSecret: srenautix-mcp-clients
+    config:
+      public_url: http://ci-srenautix-mcp.srenautix.svc:8080/mcp
+      authorization_server: https://sso.example.com
+      clients:
+        - client_id: holmes
+          hub_token_file: /etc/srenautix/secrets/mcp-clients/holmes

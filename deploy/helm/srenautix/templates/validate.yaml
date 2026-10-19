@@ -16,10 +16,34 @@
 {{- fail "必须设置 datasources.prometheus.url（证据卡查询与 ALERTS 对账）" }}
 {{- end }}
 {{- if and (ne $v.profile "observe") (not $v.secrets.serviceSigningKey.existingSecret) }}
-{{- fail "observe 以外的配置必须设置 secrets.serviceSigningKey.existingSecret（键 private.pem、public.pem 的 Ed25519 密钥对）" }}
+{{- fail "observe 以外的配置必须设置 secrets.serviceSigningKey.existingSecret（键 private.pem 的 Ed25519 私钥）" }}
 {{- end }}
-{{- if and $on.gateway (not $v.secrets.serviceSigningKey.existingSecret) }}
-{{- fail "启用 gateway 时必须设置 secrets.serviceSigningKey.existingSecret，gateway 用其中的 public.pem 校验审批签名" }}
+
+{{- /* 服务 token 与调用方文件：二者由同一组 token 推导，提供已有的 token 时调用方文件也必须由用户提供 */}}
+{{- if and $v.serviceTokens.existingSecret (not $v.callers.existingSecret) }}
+{{- fail "设置 serviceTokens.existingSecret 时必须同时设置 callers.existingSecret（callers.yaml 中是这些 token 的 sha256）" }}
+{{- end }}
+
+{{- /* worker：模型路由与预算由用户给出，code_sha 由发布写入或 values.codeSha */}}
+{{- if $on.worker }}
+{{- if not (regexMatch "^[0-9a-f]{40}$" (include "srenautix.codeSha" .)) }}
+{{- fail "worker 需要镜像对应的 40 位提交 SHA：使用发布的 chart（Chart 注解 srenautix.io/code-sha），或设置 codeSha" }}
+{{- end }}
+{{- $wc := $v.roles.worker.config | default dict }}
+{{- if not (and $wc.llm $wc.llm.routes) }}
+{{- fail "worker 需要 roles.worker.config.llm.routes（至少一条模型路由，api_key_file 指向 /etc/srenautix/secrets/llm/<键>）" }}
+{{- end }}
+{{- if not (and $wc.budget $wc.budget.daily_tokens) }}
+{{- fail "worker 需要 roles.worker.config.budget.daily_tokens（每日 token 上限）" }}
+{{- end }}
+{{- end }}
+
+{{- /* mcp：资源标识、授权服务器与客户端由用户给出 */}}
+{{- if $on.mcp }}
+{{- $mc := $v.roles.mcp.config | default dict }}
+{{- if or (not $mc.public_url) (not $mc.authorization_server) (not $mc.clients) }}
+{{- fail "mcp 需要 roles.mcp.config.public_url、authorization_server 与 clients" }}
+{{- end }}
 {{- end }}
 {{- if $v.identity.oidc.enabled }}
 {{- if or (not $v.identity.oidc.issuer) (not $v.identity.oidc.clientId) (not $v.identity.oidc.existingSecret) }}
@@ -52,7 +76,7 @@
 {{- if not $v.database.external.host }}
 {{- fail "database.mode=external 时必须设置 database.external.host" }}
 {{- end }}
-{{- range $role := list "server" "worker" "mcp" }}
+{{- range $role := splitList " " (include "srenautix.dbRoles" .) }}
 {{- if and (index $on $role) (not (index $v.database.external.passwordSecrets $role)) }}
 {{- fail (printf "database.mode=external 时必须设置 database.external.passwordSecrets.%s" $role) }}
 {{- end }}
@@ -72,8 +96,13 @@
 {{- fail (printf "audit.sink 必须是 minio、s3、pg 之一，当前为 %q" $sink) }}
 {{- end }}
 {{- if eq $sink "s3" }}
-{{- if or (not $v.audit.s3.endpoint) (not $v.audit.s3.existingSecret) }}
-{{- fail "audit.sink=s3 时必须设置 audit.s3.endpoint 与 audit.s3.existingSecret" }}
+{{- if not $v.audit.s3.endpoint }}
+{{- fail "audit.sink=s3 时必须设置 audit.s3.endpoint" }}
+{{- end }}
+{{- range $role := list "server" "gateway" }}
+{{- if and (index $on $role) (not (include "srenautix.audit.credentialsSecret" (dict "ctx" $ "role" $role))) }}
+{{- fail (printf "audit.sink=s3 时必须设置 audit.s3.existingSecrets.%s 或 audit.s3.existingSecret" $role) }}
+{{- end }}
 {{- end }}
 {{- end }}
 {{- if not (has $lockMode (list "GOVERNANCE" "COMPLIANCE")) }}
@@ -87,6 +116,33 @@
 {{- end }}
 {{- if not $v.roles.gateway.actions }}
 {{- fail "启用 gateway 时 roles.gateway.actions 不能为空" }}
+{{- end }}
+{{- if eq $sink "pg" }}
+{{- fail "启用 gateway 时审计必须写入对象存储（audit.sink=minio 或 s3），执行链不写入 PG" }}
+{{- end }}
+{{- $gw := $v.roles.gateway }}
+{{- if eq (len (compact (list $gw.policy.content $gw.policy.existingConfigMap))) 0 }}
+{{- fail "启用 gateway 时必须提供 roles.gateway.policy.content 或 roles.gateway.policy.existingConfigMap（本集群的 gateway 策略）" }}
+{{- end }}
+{{- if and $gw.policy.content $gw.policy.existingConfigMap }}
+{{- fail "roles.gateway.policy.content 与 existingConfigMap 只能设置一个" }}
+{{- end }}
+{{- if ne (len (compact (list $gw.approverKeys.content $gw.approverKeys.existingConfigMap $gw.approverKeys.existingSecret))) 1 }}
+{{- fail "启用 gateway 时 roles.gateway.approverKeys 的 content、existingConfigMap、existingSecret 必须恰好设置一个（gateway 信任的签名公钥）" }}
+{{- end }}
+{{- if $gw.policy.content }}
+{{- $policy := $gw.policy.content | fromYaml }}
+{{- if hasKey $policy "Error" }}
+{{- fail (printf "roles.gateway.policy.content 不是合法的 YAML：%s" $policy.Error) }}
+{{- end }}
+{{- if ne (toString $policy.cluster) $v.clusterId }}
+{{- fail (printf "gateway 策略的 cluster（%v）必须等于 clusterId（%s）" $policy.cluster $v.clusterId) }}
+{{- end }}
+{{- range $a := ($policy.actions | default list) }}
+{{- if not (has $a.id $gw.actions) }}
+{{- fail (printf "gateway 策略启用了动作 %s，但 roles.gateway.actions 中没有它，准入策略与 RBAC 不会安装，gateway 的自检会失败" $a.id) }}
+{{- end }}
+{{- end }}
 {{- end }}
 {{- if not (has $v.roles.gateway.pgAntiAffinity (list "preferred" "required" "none")) }}
 {{- fail "roles.gateway.pgAntiAffinity 必须是 preferred、required、none 之一" }}

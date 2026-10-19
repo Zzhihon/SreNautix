@@ -42,13 +42,17 @@ spec:
   selector:
     {{- include "srenautix.selectorLabels" (dict "ctx" $ "role" $role) | nindent 4 }}
   ports:
+    {{- $ports := include "srenautix.rolePorts" (dict "role" $role) | fromYaml }}
+    {{- if gt (int $ports.http) 0 }}
     - name: http
       port: 8080
       targetPort: http
       protocol: TCP
+    {{- end }}
+    # ServiceMonitor 按端口名 metrics 抓取；reader 的指标与 API 在同一个容器端口
     - name: metrics
       port: 9090
-      targetPort: metrics
+      targetPort: {{ include "srenautix.portName" (dict "ports" $ports "port" $ports.metrics) }}
       protocol: TCP
 {{- if and $.Values.podDisruptionBudget.enabled (gt $replicas 1) }}
 ---

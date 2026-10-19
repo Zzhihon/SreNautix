@@ -156,7 +156,47 @@ tests:
     set:
       audit.sink: pg
     asserts:
-      - failedTemplate: {errorPattern: 合规配置要求审计写入开启对象锁的对象存储}
+      - failedTemplate: {errorPattern: 审计必须写入对象存储}
+
+  - it: worker 需要 40 位提交 SHA
+    set:
+      profile: observe
+      codeSha: ""
+    asserts:
+      - failedTemplate: {errorPattern: 40 位提交 SHA}
+
+  - it: worker 需要模型路由
+    set:
+      profile: observe
+      roles.worker.config: null
+    asserts:
+      - failedTemplate: {errorPattern: roles.worker.config.llm.routes}
+
+  - it: 提供已有的服务 token 时必须同时提供调用方文件
+    set:
+      profile: observe
+      serviceTokens.existingSecret: my-tokens
+    asserts:
+      - failedTemplate: {errorPattern: 必须同时设置 callers.existingSecret}
+
+  - it: 外部 S3：只启用 server 时只需要 server 的凭证
+    set:
+      profile: observe
+      audit.sink: s3
+      audit.s3.endpoint: https://s3.example.com
+      audit.s3.existingSecrets.server: gov
+      networkPolicy.auditEgressTo:
+        - ipBlock: {cidr: 203.0.113.10/32}
+    asserts:
+      - hasDocuments: {count: 0}
+
+  - it: 外部 S3：缺少某个角色的凭证时渲染失败
+    set:
+      profile: observe
+      audit.sink: s3
+      audit.s3.endpoint: https://s3.example.com
+    asserts:
+      - failedTemplate: {errorPattern: audit.s3.existingSecrets.server 或 audit.s3.existingSecret}
 
   - it: 合规配置要求 COMPLIANCE 模式的对象锁与 180 天保留
     values:

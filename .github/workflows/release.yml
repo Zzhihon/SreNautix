@@ -133,12 +133,15 @@ jobs:
           echo "chart=$CHART_VERSION" >>"$GITHUB_OUTPUT"
           echo "app=$IMAGE_VERSION" >>"$GITHUB_OUTPUT"
 
-      - name: 打包 chart（appVersion 指向本次构建的镜像标签）
+      # appVersion 指向本次构建的镜像标签；注解 srenautix.io/code-sha 是镜像的构建提交，worker 写进研判清单
+      - name: 打包 chart
         env:
           CHART_VERSION: ${{ steps.version.outputs.chart }}
           APP_VERSION: ${{ steps.version.outputs.app }}
         run: |
+          yq -i ".annotations.\"srenautix.io/code-sha\" = \"${GITHUB_SHA}\"" deploy/helm/srenautix/Chart.yaml
           helm package deploy/helm/srenautix --version "$CHART_VERSION" --app-version "$APP_VERSION" -d dist
+          helm show chart "dist/srenautix-${CHART_VERSION}.tgz" | yq -e ".annotations.\"srenautix.io/code-sha\" == \"${GITHUB_SHA}\""
 
       - name: 推送 chart 并签名
         id: push

@@ -17,13 +17,51 @@ tests:
     asserts:
       - equal: {path: spec.policyTypes, value: [Ingress, Egress]}
 
-  - it: worker 只开放指标端口，不接受其他入站
+  - it: worker 的 API 只接受 server，另外开放指标与探针端口
     set:
       profile: observe
     documentSelector: {path: metadata.name, value: t-srenautix-worker}
     asserts:
-      - lengthEqual: {path: spec.ingress, count: 1}
-      - equal: {path: 'spec.ingress[0].ports[0].port', value: 9090}
+      - lengthEqual: {path: spec.ingress, count: 3}
+      - equal:
+          path: 'spec.ingress[0]'
+          value:
+            from:
+              - podSelector:
+                  matchLabels:
+                    app.kubernetes.io/component: server
+                    app.kubernetes.io/instance: t
+                    app.kubernetes.io/name: srenautix
+            ports:
+              - {port: 8080, protocol: TCP}
+      - equal: {path: 'spec.ingress[1].ports[0].port', value: 9090}
+      - equal: {path: 'spec.ingress[2].ports[0].port', value: 8081}
+
+  - it: reader 的指标与探针都在 8080
+    set:
+      profile: observe
+      roles.reader.enabled: true
+    documentSelector: {path: metadata.name, value: t-srenautix-reader}
+    asserts:
+      - equal: {path: 'spec.ingress[0].ports[0].port', value: 8080}
+      - equal: {path: 'spec.ingress[1].ports[0].port', value: 8080}
+
+  - it: server 可以访问 worker 的内部 API
+    set:
+      profile: observe
+    documentSelector: {path: metadata.name, value: t-srenautix-server}
+    asserts:
+      - contains:
+          path: spec.egress
+          content:
+            to:
+              - podSelector:
+                  matchLabels:
+                    app.kubernetes.io/component: worker
+                    app.kubernetes.io/instance: t
+                    app.kubernetes.io/name: srenautix
+            ports:
+              - {port: 8080, protocol: TCP}
 
   - it: 只有 worker 可以访问模型端点
     set:

@@ -86,9 +86,13 @@ tests:
           path: spec.template.spec.volumes[?(@.name=="secret-audit-store")].secret.secretName
           value: t-srenautix-minio-audit-gateway
       - equal:
-          path: spec.template.spec.volumes[?(@.name=="secret-service-signing")].secret.items
+          path: spec.template.spec.volumes[?(@.name=="secret-approver-keys")].configMap.name
+          value: t-srenautix-approver-keys
+      - equal:
+          path: spec.template.spec.volumes[?(@.name=="secret-policy")].configMap.items
           value:
-            - {key: public.pem, path: public.pem}
+            - {key: default.yaml, path: default.yaml}
+      - notExists: {path: 'spec.template.spec.volumes[?(@.name=="secret-service-signing")]'}
       - equal:
           path: spec.template.spec.volumes[?(@.name=="secret-service-token")].secret.items
           value:

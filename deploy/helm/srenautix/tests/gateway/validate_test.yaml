@@ -53,3 +53,38 @@ tests:
       roles.gateway.pgAntiAffinity: sometimes
     asserts:
       - failedTemplate: {errorPattern: roles.gateway.pgAntiAffinity 必须是}
+
+  - it: 启用 gateway 时必须提供策略
+    set:
+      profile: standard
+      roles.gateway.policy.content: ""
+    asserts:
+      - failedTemplate: {errorPattern: roles.gateway.policy.content 或 roles.gateway.policy.existingConfigMap}
+
+  - it: 审批人公钥的来源只能有一个
+    set:
+      profile: standard
+      roles.gateway.approverKeys.existingSecret: keys
+    asserts:
+      - failedTemplate: {errorPattern: 必须恰好设置一个}
+
+  - it: 策略的 cluster 必须等于 clusterId
+    set:
+      profile: standard
+      clusterId: prod
+    asserts:
+      - failedTemplate: {errorPattern: 必须等于 clusterId}
+
+  - it: 策略启用的动作必须在 roles.gateway.actions 中
+    set:
+      profile: standard
+      roles.gateway.actions: [node_cordon]
+    asserts:
+      - failedTemplate: {errorPattern: roles.gateway.actions 中没有它}
+
+  - it: gateway 的执行链不能写入 PG
+    set:
+      profile: standard
+      audit.sink: pg
+    asserts:
+      - failedTemplate: {errorPattern: 执行链不写入 PG}

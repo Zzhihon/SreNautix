@@ -16,6 +16,13 @@ roles:
     replicas: 2
   mcp:
     enabled: true
+    clientTokensSecret: srenautix-mcp-clients
+    config:
+      public_url: http://ci-srenautix-mcp.srenautix.svc:8080/mcp
+      authorization_server: https://sso.example.com
+      clients:
+        - client_id: holmes
+          hub_token_file: /etc/srenautix/secrets/mcp-clients/holmes
   gateway:
     actions:
       - node_cordon

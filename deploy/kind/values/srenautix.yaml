@@ -10,6 +10,7 @@ datasources:
 
 secrets:
   serviceSigningKey: {existingSecret: srenautix-service-signing}
+  llm: {existingSecret: srenautix-llm}
 
 freeze:
   frozen: true
@@ -27,6 +28,40 @@ roles:
     resources:
       requests: {cpu: 100m, memory: 256Mi}
       limits: {cpu: "1", memory: 1Gi}
+    # 模型路由按实际服务修改（SRENAUTIX_LLM_SECRET 提供密钥）
+    config:
+      llm:
+        probe_on_start: false
+        routes:
+          - id: primary
+            base_url: https://api.openai.com/v1
+            api: responses
+            model: gpt-5
+            dialect_profile: openai-responses
+            price: {currency: USD, input_per_mtok: 1.25, output_per_mtok: 10, cached_input_per_mtok: 0.125}
+            in_domain: false
+            tier: large
+            retention_terms: 30 days
+            api_key_file: /etc/srenautix/secrets/llm/api_key
+      budget:
+        daily_tokens: 2000000
+  gateway:
+    # 与 deploy/kind 场景中的 shop 业务对应；Kind 中 gateway 冻结，只提议
+    policy:
+      content: |
+        version: 1
+        cluster: kind
+        approvers:
+          - {principal: "local:admin", namespaces: ["*"], max_tier: H}
+        actions:
+          - {id: node_cordon}
+          - {id: node_uncordon}
+          - {id: workload_scale, namespaces: [shop]}
+          - {id: rollout_pause, namespaces: [shop]}
+          - {id: rollout_resume, namespaces: [shop]}
+          - {id: pod_restart, namespaces: [shop]}
+        self_dependencies:
+          namespaces: [srenautix, monitoring]
 
 database:
   cnpg:

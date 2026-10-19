@@ -1,4 +1,6 @@
-# 每份 values 都必须给出的部署事实；check.sh 与 helm-unittest 把它叠加在被测 values 之前
+# 每份 values 都必须给出的部署事实；check.sh、server-dry-run.sh 与 helm-unittest 把它叠加在被测 values 之前
+codeSha: 0123456789abcdef0123456789abcdef01234567
+
 datasources:
   prometheus:
     url: http://prometheus-operated.monitoring.svc:9090
@@ -6,4 +8,40 @@ datasources:
     url: http://alertmanager-operated.monitoring.svc:9093
 
 secrets:
+  llm: {existingSecret: srenautix-llm}
   serviceSigningKey: {existingSecret: srenautix-service-signing}
+
+roles:
+  worker:
+    config:
+      llm:
+        routes:
+          - id: primary
+            base_url: https://llm.example.com/v1
+            api: chat_completions
+            model: example-large
+            dialect_profile: openai-chat
+            price: {currency: USD, input_per_mtok: 1, output_per_mtok: 4, cached_input_per_mtok: null}
+            in_domain: false
+            tier: large
+            retention_terms: 30 days
+            api_key_file: /etc/srenautix/secrets/llm/api_key
+      budget:
+        daily_tokens: 15000000
+  gateway:
+    policy:
+      content: |
+        version: 1
+        cluster: default
+        approvers:
+          - {principal: "oidc:sre-lead", namespaces: ["*"], max_tier: H}
+        actions:
+          - {id: node_cordon}
+          - {id: node_uncordon}
+          - {id: workload_scale, namespaces: [shop]}
+          - {id: pod_restart, namespaces: [shop]}
+    approverKeys:
+      content: |
+        version: 1
+        keys:
+          - {use: service, key_id: default, public_key: 11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo}

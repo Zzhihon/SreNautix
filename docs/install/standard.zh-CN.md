@@ -18,7 +18,8 @@
 
 - Kubernetes ≥1.30（ValidatingAdmissionPolicy GA）。
 - CNPG operator，或外部 PostgreSQL 16+。
-- 服务签名密钥 Secret（键 `private.pem`、`public.pem`，生成方法见 [README.zh-CN.md](README.zh-CN.md)）。
+- 服务签名密钥 Secret（键 `private.pem`）与对应的公钥，生成方法见 [README.zh-CN.md](README.zh-CN.md)。
+- 本集群的 gateway 策略（`contract/gateway/v1/gateway-policy.schema.json`）：`cluster` 等于 `clusterId`，启用的动作都在 `roles.gateway.actions` 中。
 
 ## 安装
 
@@ -47,9 +48,45 @@ identity:
     clientId: srenautix
     existingSecret: srenautix-oidc          # 键 client_secret
 roles:
+  worker:
+    config:
+      llm:
+        routes:
+          - id: primary
+            base_url: https://llm.example.com/v1
+            api: chat_completions
+            model: example-large
+            dialect_profile: openai-chat
+            price: {currency: USD, input_per_mtok: 1, output_per_mtok: 4, cached_input_per_mtok: null}
+            in_domain: false
+            tier: large
+            retention_terms: 30 days
+            api_key_file: /etc/srenautix/secrets/llm/api_key
+      budget:
+        daily_tokens: 15000000
   gateway:
     actions: [node_cordon, node_uncordon, workload_scale, rollout_pause, rollout_resume, pod_restart]
+    policy:
+      # 或 existingConfigMap：由 GitOps 同步的 ConfigMap，键 <clusterId>.yaml
+      content: |
+        version: 1
+        cluster: prod
+        approvers:
+          - {principal: "oidc:sre-lead", namespaces: ["*"], max_tier: H}
+        actions:
+          - {id: node_cordon}
+          - {id: node_uncordon}
+          - {id: workload_scale, namespaces: [shop]}
+          - {id: pod_restart, namespaces: [shop]}
+    approverKeys:
+      # 或 existingConfigMap / existingSecret（键 approver-keys.yaml）
+      content: |
+        version: 1
+        keys:
+          - {use: service, key_id: default, public_key: <服务签名公钥的 base64url>}
 ```
+
+外部 S3 审计汇建议为两条审计链各建一个账号：server 只能写 `governance/`，gateway 只能写 `execution/`，分别放在 `audit.s3.existingSecrets.server` 与 `audit.s3.existingSecrets.gateway`（键 `accessKey`、`secretKey`）。
 
 ## 启用的动作
 

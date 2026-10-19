@@ -1,7 +1,12 @@
 {{/*
 各角色的配置文件、挂载的 Secret 与环境变量。
-server 的配置由 chart 按部署事实生成（键与 apps/srenautix/src/config/server.ts 一致），再与 roles.server.config 深度合并；
-其余角色的配置就是 roles.<角色>.config。
+每个角色的配置都由 chart 按部署事实生成（地址、端口、挂载路径、集群 id），键与各角色读取配置的代码一致：
+  server   apps/srenautix/src/config/server.ts
+  worker   apps/srenautix/src/research/config.ts
+  mcp      apps/srenautix/src/roles/mcp.ts
+  reader   internal/spoke/reader/config.go
+  gateway  internal/spoke/gateway/run.go
+再与 roles.<角色>.config 深度合并，同名键以用户值为准。
 */}}
 {{- define "srenautix.secretsDir" -}}/etc/srenautix/secrets{{- end -}}
 
@@ -15,9 +20,17 @@ server 的配置由 chart 按部署事实生成（键与 apps/srenautix/src/conf
 {{- end -}}
 {{- end -}}
 
-{{/* chart 生成的 Secret 名称 */}}
-{{- define "srenautix.serviceTokensSecret" -}}{{ include "srenautix.fullname" . }}-service-tokens{{- end -}}
-{{- define "srenautix.callersSecret" -}}{{ include "srenautix.fullname" . }}-callers{{- end -}}
+{{- define "srenautix.roleUrl" -}}
+{{- printf "http://%s.%s.svc:8080" (include "srenautix.roleName" .) .ctx.Release.Namespace -}}
+{{- end -}}
+
+{{/* chart 生成或用户提供的 Secret 与 ConfigMap 名称 */}}
+{{- define "srenautix.serviceTokensSecret" -}}
+{{- default (printf "%s-service-tokens" (include "srenautix.fullname" .)) .Values.serviceTokens.existingSecret -}}
+{{- end -}}
+{{- define "srenautix.callersSecret" -}}
+{{- default (printf "%s-callers" (include "srenautix.fullname" .)) .Values.callers.existingSecret -}}
+{{- end -}}
 {{- define "srenautix.ingestTokensSecret" -}}
 {{- default (printf "%s-ingest-tokens" (include "srenautix.fullname" .)) .Values.ingest.existingSecret -}}
 {{- end -}}
@@ -30,17 +43,22 @@ server 的配置由 chart 按部署事实生成（键与 apps/srenautix/src/conf
 {{- define "srenautix.bindingsConfigMap" -}}
 {{- default (printf "%s-bindings" (include "srenautix.fullname" .)) .Values.identity.bindingsConfigMap -}}
 {{- end -}}
+{{- define "srenautix.policyConfigMap" -}}
+{{- default (printf "%s-gateway-policy" (include "srenautix.fullname" .)) .Values.roles.gateway.policy.existingConfigMap -}}
+{{- end -}}
+{{- define "srenautix.policyFile" -}}{{ .Values.clusterId }}.yaml{{- end -}}
 
 {{/* 使用数据库的角色 */}}
-{{- define "srenautix.dbRoles" -}}server worker mcp{{- end -}}
+{{- define "srenautix.dbRoles" -}}server worker{{- end -}}
 
 {{/*
-角色挂载的 Secret（设计 §1.1 的持有关系），返回 YAML 列表 [{key, secretName, items?}]，
-挂载到 /etc/srenautix/secrets/<key>/。
+角色挂载的 Secret 与 ConfigMap，返回 YAML 列表 [{key, secretName | configMap, items?}]，挂载到 /etc/srenautix/secrets/<key>/。
+持有关系见设计 §1.1。
 */}}
 {{- define "srenautix.roleSecrets" -}}
 {{- $v := .ctx.Values -}}
 {{- $role := .role -}}
+{{- $tokens := include "srenautix.serviceTokensSecret" .ctx -}}
 {{- $out := list -}}
 {{- if has $role (splitList " " (include "srenautix.dbRoles" .)) -}}
 {{- $out = append $out (dict "key" "db" "secretName" (include "srenautix.pg.passwordSecret" .) "items" (list (dict "key" "password" "path" "password"))) -}}
@@ -49,12 +67,21 @@ server 的配置由 chart 按部署事实生成（键与 apps/srenautix/src/conf
 {{- $out = append $out (dict "key" "db-ca" "secretName" $ca "items" (list (dict "key" "ca.crt" "path" "ca.crt"))) -}}
 {{- end -}}
 {{- end -}}
-{{- if has $role (list "worker" "mcp" "reader" "gateway") -}}
-{{- $out = append $out (dict "key" "service-token" "secretName" (include "srenautix.serviceTokensSecret" .ctx) "items" (list (dict "key" $role "path" "token"))) -}}
+{{- if has $role (list "worker" "reader" "gateway") -}}
+{{- $out = append $out (dict "key" "service-token" "secretName" $tokens "items" (list (dict "key" $role "path" "token"))) -}}
+{{- end -}}
+{{- if eq $role "worker" -}}
+{{- $out = append $out (dict "key" "worker-inbound" "secretName" $tokens "items" (list (dict "key" "server.sha256" "path" "sha256"))) -}}
+{{- with $v.secrets.llm.existingSecret -}}
+{{- $out = append $out (dict "key" "llm" "secretName" .) -}}
+{{- end -}}
 {{- end -}}
 {{- if eq $role "server" -}}
+{{- if include "srenautix.roleEnabled" (dict "ctx" .ctx "role" "worker") -}}
+{{- $out = append $out (dict "key" "worker-client" "secretName" $tokens "items" (list (dict "key" "server" "path" "token"))) -}}
+{{- end -}}
 {{- $out = append $out (dict "key" "ingest" "secretName" (include "srenautix.ingestTokensSecret" .ctx)) -}}
-{{- $out = append $out (dict "key" "callers" "secretName" (include "srenautix.callersSecret" .ctx)) -}}
+{{- $out = append $out (dict "key" "callers" "secretName" (include "srenautix.callersSecret" .ctx) "items" (list (dict "key" "callers.yaml" "path" "callers.yaml"))) -}}
 {{- $out = append $out (dict "key" "audit-key" "secretName" (include "srenautix.auditKeySecret" .ctx) "items" (list (dict "key" "private.pem" "path" "private.pem"))) -}}
 {{- with $v.secrets.channels.existingSecret -}}
 {{- $out = append $out (dict "key" "channels" "secretName" .) -}}
@@ -69,16 +96,20 @@ server 的配置由 chart 按部署事实生成（键与 apps/srenautix/src/conf
 {{- $out = append $out (dict "key" "service-signing" "secretName" . "items" (list (dict "key" "private.pem" "path" "private.pem"))) -}}
 {{- end -}}
 {{- end -}}
+{{- if eq $role "mcp" -}}
+{{- with $v.roles.mcp.clientTokensSecret -}}
+{{- $out = append $out (dict "key" "mcp-clients" "secretName" .) -}}
+{{- end -}}
+{{- end -}}
 {{- if eq $role "gateway" -}}
 {{- $out = append $out (dict "key" "audit-key" "secretName" (include "srenautix.gatewayAuditKeySecret" .ctx) "items" (list (dict "key" "private.pem" "path" "private.pem"))) -}}
-{{- with $v.secrets.serviceSigningKey.existingSecret -}}
-{{- $out = append $out (dict "key" "service-signing" "secretName" . "items" (list (dict "key" "public.pem" "path" "public.pem"))) -}}
+{{- $keys := $v.roles.gateway.approverKeys -}}
+{{- if $keys.existingSecret -}}
+{{- $out = append $out (dict "key" "approver-keys" "secretName" $keys.existingSecret "items" (list (dict "key" "approver-keys.yaml" "path" "approver-keys.yaml"))) -}}
+{{- else -}}
+{{- $out = append $out (dict "key" "approver-keys" "configMap" (default (printf "%s-approver-keys" (include "srenautix.fullname" .ctx)) $keys.existingConfigMap) "items" (list (dict "key" "approver-keys.yaml" "path" "approver-keys.yaml"))) -}}
 {{- end -}}
-{{- end -}}
-{{- if eq $role "worker" -}}
-{{- with $v.secrets.llm.existingSecret -}}
-{{- $out = append $out (dict "key" "llm" "secretName" .) -}}
-{{- end -}}
+{{- $out = append $out (dict "key" "policy" "configMap" (include "srenautix.policyConfigMap" .ctx) "items" (list (dict "key" (include "srenautix.policyFile" .ctx) "path" (include "srenautix.policyFile" .ctx)))) -}}
 {{- end -}}
 {{- if has $role (list "server" "worker" "reader") -}}
 {{- with $v.secrets.datasources.existingSecret -}}
@@ -129,6 +160,14 @@ leader:
   mode: lease
   namespace: {{ .Release.Namespace }}
   name: {{ include "srenautix.roleName" (dict "ctx" . "role" "server") }}-leader
+{{- if include "srenautix.roleEnabled" (dict "ctx" . "role" "worker") }}
+worker:
+  url: {{ include "srenautix.roleUrl" (dict "ctx" . "role" "worker") }}
+  token_file: {{ $dir }}/worker-client/token
+{{- end }}
+{{- if include "srenautix.roleEnabled" (dict "ctx" . "role" "gateway") }}
+policies_dir: /etc/srenautix/policies
+{{- end }}
 ingest:
   sources:
     {{- range $s := $v.ingest.sources }}
@@ -196,16 +235,98 @@ audit:
   {{- end }}
 {{- end -}}
 
+{{/* worker 的配置（未合并 roles.worker.config） */}}
+{{- define "srenautix.workerConfig" -}}
+{{- $dir := include "srenautix.secretsDir" . -}}
+cluster_id: {{ .Values.clusterId }}
+code_sha: {{ include "srenautix.codeSha" . | quote }}
+listen:
+  api: ":8080"
+  metrics: ":9090"
+  probes: ":8081"
+database:
+  password_file: {{ $dir }}/db/password
+hub:
+  url: {{ include "srenautix.roleUrl" (dict "ctx" . "role" "server") }}
+  token_file: {{ $dir }}/service-token/token
+inbound:
+  token_sha256_file: {{ $dir }}/worker-inbound/sha256
+{{- end -}}
+
+{{/* mcp 的配置（未合并 roles.mcp.config） */}}
+{{- define "srenautix.mcpConfig" -}}
+enabled: true
+listen:
+  api: ":8080"
+  metrics: ":9090"
+hub_url: {{ include "srenautix.roleUrl" (dict "ctx" . "role" "server") }}
+{{- end -}}
+
+{{/* reader 的配置（未合并 roles.reader.config） */}}
+{{- define "srenautix.readerConfig" -}}
+{{- $v := .Values -}}
+cluster_id: {{ $v.clusterId }}
+listen: ":8080"
+hub:
+  url: {{ include "srenautix.roleUrl" (dict "ctx" . "role" "server") }}
+  token_file: {{ include "srenautix.secretsDir" . }}/service-token/token
+datasources:
+  - name: metrics
+    url: {{ $v.datasources.prometheus.url }}
+alerts:
+  metrics_datasource: metrics
+  {{- with $v.datasources.alertmanager.url }}
+  alertmanager_url: {{ . }}
+  {{- end }}
+history:
+  datasource: metrics
+{{- if $v.roles.reader.queryManifestConfigMap }}
+query_manifest: /etc/srenautix/query-manifest/queries.yaml
+{{- end }}
+{{- end -}}
+
+{{/* gateway 的配置（未合并 roles.gateway.config） */}}
+{{- define "srenautix.gatewayConfig" -}}
+{{- $v := .Values -}}
+{{- $dir := include "srenautix.secretsDir" . -}}
+{{- $sink := include "srenautix.auditSink" . -}}
+cluster_id: {{ $v.clusterId }}
+profile: {{ $v.profile }}
+namespace: {{ .Release.Namespace }}
+listen:
+  metrics: ":9090"
+  probes: ":8081"
+hub:
+  url: {{ include "srenautix.roleUrl" (dict "ctx" . "role" "server") }}
+  token_file: {{ $dir }}/service-token/token
+audit:
+  checkpoint_key_file: {{ $dir }}/audit-key/private.pem
+  staging_dir: /var/lib/srenautix/audit-staging
+  s3:
+    endpoint: {{ include "srenautix.audit.endpoint" . }}
+    region: {{ default "us-east-1" $v.audit.s3.region }}
+    bucket: {{ $v.audit.bucket }}
+    access_key_file: {{ $dir }}/audit-store/accessKey
+    secret_key_file: {{ $dir }}/audit-store/secretKey
+    force_path_style: {{ or (eq $sink "minio") $v.audit.s3.forcePathStyle }}
+  object_lock:
+    enabled: {{ $v.audit.objectLock.enabled }}
+    mode: {{ include "srenautix.auditLockMode" . }}
+    retention_days: {{ int $v.audit.objectLock.retentionDays }}
+gateway:
+  lease_name: {{ include "srenautix.roleName" (dict "ctx" . "role" "gateway") }}
+  policy_file: {{ $dir }}/policy/{{ include "srenautix.policyFile" . }}
+  approver_keys_file: {{ $dir }}/approver-keys/approver-keys.yaml
+  admission_policy_prefix: {{ include "srenautix.fullname" . }}
+  metrics_url: {{ $v.datasources.prometheus.url }}
+{{- end -}}
+
 {{/* 角色最终写入 config.yaml 的内容；调用方式：include "srenautix.roleConfig" (dict "ctx" $ "role" "server") */}}
 {{- define "srenautix.roleConfig" -}}
 {{- $user := deepCopy ((index .ctx.Values.roles .role).config | default dict) -}}
-{{- if eq .role "server" -}}
-{{- $base := include "srenautix.serverConfig" .ctx | fromYaml -}}
+{{- $base := include (printf "srenautix.%sConfig" .role) .ctx | fromYaml -}}
 {{- if hasKey $base "Error" -}}
-{{- fail (printf "server 配置渲染失败：%s" $base.Error) -}}
+{{- fail (printf "%s 配置渲染失败：%s" .role $base.Error) -}}
 {{- end -}}
 {{- toYaml (mustMergeOverwrite $base $user) -}}
-{{- else -}}
-{{- toYaml $user -}}
-{{- end -}}
 {{- end -}}

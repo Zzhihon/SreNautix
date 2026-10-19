@@ -62,7 +62,7 @@ spec:
     initdb:
       database: {{ $db.name }}
       owner: srenautix_owner
-  # 三个库角色的属性与 srenautix db bootstrap 一致（LOGIN、NOINHERIT、无特权），密码由 CNPG 维护
+  # server 与 worker 的库角色属性与 srenautix db bootstrap 一致（LOGIN、NOINHERIT、无特权），密码由 CNPG 维护
   managed:
     roles:
       {{- range $role := $dbRoles }}
@@ -103,7 +103,7 @@ spec:
 {{- if $admin }}
 {{- $name := printf "%s-db-bootstrap-%d" (include "srenautix.fullname" .) .Release.Revision }}
 ---
-# 以数据库管理员执行 srenautix db bootstrap：建三个库角色（已存在时跳过）、两个 schema 并收回 PUBLIC 权限。
+# 以数据库管理员执行 srenautix db bootstrap：建库角色（已存在时跳过）、server 与 worker 两个 schema 并收回 PUBLIC 权限。
 # 可以重复执行；每个 revision 一个 Job，PG 尚未就绪时按 backoffLimit 重试，server 在此之前以失败重启。
 apiVersion: batch/v1
 kind: Job

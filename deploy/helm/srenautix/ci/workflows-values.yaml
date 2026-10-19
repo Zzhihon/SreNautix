@@ -4,6 +4,22 @@ profile: standard
 roles:
   gateway:
     actions: [workflow_submit, workflow_terminate]
+    policy:
+      content: |
+        version: 1
+        cluster: default
+        approvers:
+          - {principal: "oidc:sre-lead", namespaces: ["*"], max_tier: H}
+        actions:
+          - {id: workflow_submit, namespaces: [ops]}
+          - {id: workflow_terminate, namespaces: [ops]}
+        workflow_templates:
+          - namespace: ops
+            name: restart-cache
+            sha256: sha256:0000000000000000000000000000000000000000000000000000000000000000
+            service_account: workflow-runner
+            parameters:
+              target: {enum: [cache-a, cache-b]}
     workflowAllowlistPolicy: |
       apiVersion: admissionregistration.k8s.io/v1
       kind: ValidatingAdmissionPolicy

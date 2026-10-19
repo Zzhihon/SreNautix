@@ -80,15 +80,57 @@ tests:
       - matchRegex: {path: 'data["config.yaml"]', pattern: 'silence_threshold: 15m'}
       - matchRegex: {path: 'data["config.yaml"]', pattern: 'self_label: srenautix_self'}
 
-  - it: 其他角色的配置就是 roles.<角色>.config
+  - it: worker 的配置由 chart 生成 hub、inbound、code_sha，与 roles.worker.config 合并
     set:
       profile: observe
-      roles.worker.config:
-        budget: {daily_tokens: 15000000}
     documentSelector: {path: metadata.name, value: t-srenautix-worker-config}
     asserts:
-      - equal:
-          path: 'data["config.yaml"]'
-          value: |
-            budget:
-              daily_tokens: 15000000
+      - matchRegex: {path: 'data["config.yaml"]', pattern: '(?m)^code_sha: "?0123456789abcdef0123456789abcdef01234567"?$'}
+      - matchRegex: {path: 'data["config.yaml"]', pattern: 'url: http://t-srenautix-server\.srenautix\.svc:8080'}
+      - matchRegex: {path: 'data["config.yaml"]', pattern: 'token_file: /etc/srenautix/secrets/service-token/token'}
+      - matchRegex: {path: 'data["config.yaml"]', pattern: 'token_sha256_file: /etc/srenautix/secrets/worker-inbound/sha256'}
+      - matchRegex: {path: 'data["config.yaml"]', pattern: 'daily_tokens: 15000000'}
+      - matchRegex: {path: 'data["config.yaml"]', pattern: 'dialect_profile: openai-chat'}
+
+  - it: server 的配置写明 worker 的地址与 server→worker token
+    set:
+      profile: observe
+    documentSelector: {path: metadata.name, value: t-srenautix-server-config}
+    asserts:
+      - matchRegex: {path: 'data["config.yaml"]', pattern: 'url: http://t-srenautix-worker\.srenautix\.svc:8080'}
+      - matchRegex: {path: 'data["config.yaml"]', pattern: 'token_file: /etc/srenautix/secrets/worker-client/token'}
+
+  - it: reader 的配置由 chart 生成，只有一个监听端口
+    set:
+      profile: observe
+      roles.reader.enabled: true
+      roles.reader.queryManifestConfigMap: srenautix-queries
+    documentSelector: {path: metadata.name, value: t-srenautix-reader-config}
+    asserts:
+      - matchRegex: {path: 'data["config.yaml"]', pattern: '(?m)^listen: :8080$'}
+      - matchRegex: {path: 'data["config.yaml"]', pattern: '(?m)^cluster_id: default$'}
+      - matchRegex: {path: 'data["config.yaml"]', pattern: 'metrics_datasource: metrics'}
+      - matchRegex: {path: 'data["config.yaml"]', pattern: 'query_manifest: /etc/srenautix/query-manifest/queries\.yaml'}
+
+  - it: gateway 的配置由 chart 生成，必填项齐全
+    set:
+      profile: standard
+    documentSelector: {path: metadata.name, value: t-srenautix-gateway-config}
+    asserts:
+      - matchRegex: {path: 'data["config.yaml"]', pattern: 'policy_file: /etc/srenautix/secrets/policy/default\.yaml'}
+      - matchRegex: {path: 'data["config.yaml"]', pattern: 'approver_keys_file: /etc/srenautix/secrets/approver-keys/approver-keys\.yaml'}
+      - matchRegex: {path: 'data["config.yaml"]', pattern: 'admission_policy_prefix: t-srenautix'}
+      - matchRegex: {path: 'data["config.yaml"]', pattern: 'lease_name: t-srenautix-gateway'}
+      - matchRegex: {path: 'data["config.yaml"]', pattern: 'staging_dir: /var/lib/srenautix/audit-staging'}
+      - matchRegex: {path: 'data["config.yaml"]', pattern: '(?m)^namespace: srenautix$'}
+      - matchRegex: {path: 'data["config.yaml"]', pattern: 'metrics_url: http://prometheus-operated\.monitoring\.svc:9090'}
+
+  - it: reader 的 Service 把指标端口指向容器的 http 端口
+    set:
+      profile: observe
+      roles.reader.enabled: true
+    documentSelector: {path: "$[?(@.kind == 'Service')].metadata.name", value: t-srenautix-reader}
+    asserts:
+      - contains:
+          path: spec.ports
+          content: {name: metrics, port: 9090, targetPort: http, protocol: TCP}

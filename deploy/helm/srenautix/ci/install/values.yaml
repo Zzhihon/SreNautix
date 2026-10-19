@@ -1,0 +1,43 @@
+# 安装测试（deploy/helm/install-e2e.sh）叠加在 values-standard.yaml 之上的部署事实：
+# 本地构建的镜像、单实例 CNPG、Kind 中的最小 Prometheus、本地管理员与模型密钥
+image:
+  hub: {repository: srenautix.local/srenautix, tag: e2e, pullPolicy: Never}
+  spoke: {repository: srenautix.local/srenautix-spoke, tag: e2e, pullPolicy: Never}
+
+datasources:
+  prometheus: {url: http://prometheus.monitoring.svc:9090}
+  alertmanager: {url: ""}
+
+identity:
+  localAdmin:
+    existingSecret: srenautix-local-admin
+
+database:
+  cnpg:
+    instances: 1
+    allowSingleInstance: true
+    storage: {size: 1Gi}
+    resources:
+      requests: {cpu: 100m, memory: 256Mi}
+
+audit:
+  minio:
+    storage: {size: 1Gi}
+
+roles:
+  server:
+    resources:
+      requests: {cpu: 100m, memory: 256Mi}
+  worker:
+    resources:
+      requests: {cpu: 100m, memory: 256Mi}
+    config:
+      llm:
+        # 模型端点在测试环境中不可达，启动时不探测
+        probe_on_start: false
+
+networkPolicy:
+  datasourcesEgressTo:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: monitoring
