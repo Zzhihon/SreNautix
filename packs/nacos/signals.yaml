@@ -1,0 +1,22 @@
+# 指标来自 Nacos 服务端（core、config 模块的 MetricsMonitor，经 /nacos/actuator/prometheus 暴露）。
+signals:
+  - id: exceptions
+    kind: metrics
+    unit: count
+    alternatives:
+      # name 为异常类别，例如 unhealth（数据库不健康）、illegalArgument、nacosException
+      - expr: sum by (namespace, pod, name) (increase(nacos_exception_total{$selector}[$window])) > 0
+  - id: long_connections
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: max by (namespace, pod) (nacos_monitor{$selector, name="longConnection"})
+  - id: heap_ratio
+    kind: metrics
+    unit: ratio
+    alternatives:
+      - expr: >-
+          max by (namespace, pod) (
+            sum by (namespace, pod) (jvm_memory_used_bytes{$selector, area="heap"})
+            / sum by (namespace, pod) (jvm_memory_max_bytes{$selector, area="heap"} > 0)
+          )

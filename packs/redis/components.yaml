@@ -1,0 +1,4 @@
+component_types:
+  - id: redis.instance
+    match: { kind: StatefulSet, name_pattern: (redis|valkey|dragonfly) }
+    chains: [redis]

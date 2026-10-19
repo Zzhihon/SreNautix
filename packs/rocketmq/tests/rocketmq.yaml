@@ -1,0 +1,56 @@
+api_version: srenautix.io/pack-test/v1
+interval: 1m
+input_series:
+  - {
+      series: 'rocketmq_group_diff{namespace="mq",group="billing",topic="orders",countOfOnlineConsumers="2",msgModel="1"}',
+      values: '100x20 100+800x40',
+    }
+  - {
+      series: 'rocketmq_brokeruntime_commitlog_disk_ratio{namespace="mq",cluster="c",brokerIP="10.0.0.5",brokerHost="b-0",des="",boottime="",broker_version="5"}',
+      values: '0.7x20 0.9x40',
+    }
+  - {
+      series: 'rocketmq_brokeruntime_send_threadpoolqueue_headwait_timemills{namespace="mq",cluster="c",brokerIP="10.0.0.5",brokerHost="b-0",des="",boottime="",broker_version="5"}',
+      values: '5x20 800x40',
+    }
+  - {
+      series: 'rocketmq_group_diff{namespace="calm",group="audit",topic="events",countOfOnlineConsumers="2",msgModel="1"}',
+      values: '20x60',
+    }
+  - {
+      series: 'rocketmq_brokeruntime_commitlog_disk_ratio{namespace="calm",cluster="c",brokerIP="10.0.1.5",brokerHost="b-0",des="",boottime="",broker_version="5"}',
+      values: '0.3x60',
+    }
+  - {
+      series: 'rocketmq_brokeruntime_send_threadpoolqueue_headwait_timemills{namespace="calm",cluster="c",brokerIP="10.0.1.5",brokerHost="b-0",des="",boottime="",broker_version="5"}',
+      values: '2x60',
+    }
+tests:
+  - {
+      name: 积压增长,
+      eval_time: 40m,
+      card: rocketmq/consumer-lag,
+      entity: { kind: Namespace, namespace: mq, name: mq },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: 积压平稳,
+      eval_time: 40m,
+      card: rocketmq/consumer-lag,
+      entity: { kind: Namespace, namespace: calm, name: calm },
+      expect: { verdict: normal },
+    }
+  - {
+      name: 磁盘将满且排队,
+      eval_time: 40m,
+      card: rocketmq/broker,
+      entity: { kind: Namespace, namespace: mq, name: mq },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: broker 正常,
+      eval_time: 40m,
+      card: rocketmq/broker,
+      entity: { kind: Namespace, namespace: calm, name: calm },
+      expect: { verdict: normal },
+    }

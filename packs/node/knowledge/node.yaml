@@ -1,0 +1,17 @@
+entries:
+  - id: eviction-thresholds
+    text:
+      zh-CN: kubelet 在 memory.available、nodefs.available、imagefs.available 低于驱逐阈值时设置相应的 Pressure 条件并开始驱逐 Pod，先驱逐超出 requests 最多的 Pod。
+      en: The kubelet sets pressure conditions and evicts pods when memory.available or nodefs.available drop below eviction thresholds, starting with pods furthest above their requests.
+    learned_from:
+      - https://kubernetes.io/docs/concepts/scheduling-eviction/node-pressure-eviction/
+    learned_at: '2026-01-01T00:00:00Z'
+    source: human
+  - id: node-unreachable-taint
+    text:
+      zh-CN: 节点失联后 node-lifecycle 控制器加上 unreachable 污点；默认 300 秒后其上的 Pod 被驱逐，StatefulSet 的 Pod 在节点确认下线前不会在别处重建。
+      en: An unreachable node gets the unreachable taint; pods are evicted after 300 s by default, and StatefulSet pods are not recreated elsewhere until the node is confirmed gone.
+    learned_from:
+      - https://kubernetes.io/docs/concepts/architecture/nodes/#node-status
+    learned_at: '2026-01-01T00:00:00Z'
+    source: human

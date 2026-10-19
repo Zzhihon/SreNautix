@@ -1,0 +1,4 @@
+component_types:
+  - id: rocketmq.broker
+    match: { kind: StatefulSet, name_pattern: (rocketmq|broker) }
+    chains: [rocketmq]

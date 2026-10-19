@@ -1,0 +1,68 @@
+chains:
+  - id: mysql
+    title: { zh-CN: MySQL, en: MySQL }
+    runbook: mysql.md
+    cards:
+      - id: availability
+        title: { zh-CN: 在线与连接, en: Availability and connections }
+        applies_to: { kinds: [Pod, StatefulSet] }
+        params: { ratio: 0.85 }
+        refs:
+          - { name: up, signal: up, mode: range }
+          - { name: conn, signal: connections_ratio, mode: range, empty_is: normal }
+        judge:
+          let:
+            - { name: down, cel: 'size(up.filter(s, min(s) < 1.0))' }
+            - { name: peak, cel: 'size(conn) > 0 ? max(conn) : 0.0' }
+            - { name: anomaly_started_at, cel: 'first_below(up, 1.0)' }
+          abnormal_if:
+            - cel: down > 0
+              say: { zh-CN: '{down} 个实例在窗口内不可用', en: '{down} instances were down' }
+            - cel: peak > params.ratio
+              say:
+                {
+                  zh-CN: '连接占 max_connections 峰值 {peak, number, percent}',
+                  en: 'Peak connections {peak, number, percent} of max_connections',
+                }
+        egress: allow
+      - id: replication
+        title: { zh-CN: 复制, en: Replication }
+        note:
+          {
+            zh-CN: 异步复制看 IO/SQL 线程与延迟，Galera 看 wsrep_ready,
+            en: 'Async replication threads and lag, or Galera wsrep_ready',
+          }
+        applies_to: { kinds: [Pod, StatefulSet] }
+        params: { lag_seconds: 30 }
+        refs:
+          - { name: up, signal: up, mode: instant }
+          - { name: threads, signal: replication_threads, mode: range, empty_is: normal }
+          - { name: lag, signal: replication_lag_seconds, mode: range, empty_is: normal }
+          - { name: galera, signal: galera_ready, mode: instant, empty_is: normal }
+        judge:
+          let:
+            - { name: stopped, cel: 'size(threads.filter(s, min(s) < 1.0))' }
+            - { name: peakLag, cel: 'size(lag) > 0 ? max(lag) : 0.0' }
+            - { name: galeraDown, cel: 'size(galera.filter(s, last(s) < 1.0))' }
+          abnormal_if:
+            - cel: stopped > 0
+              say: { zh-CN: '{stopped} 个副本的复制线程停止', en: 'Replication stopped on {stopped} replicas' }
+            - cel: galeraDown > 0
+              say: { zh-CN: '{galeraDown} 个 Galera 节点未就绪', en: '{galeraDown} Galera nodes are not ready' }
+            - cel: peakLag > double(params.lag_seconds)
+              say: { zh-CN: '复制延迟峰值 {peakLag, number} 秒', en: 'Peak replication lag {peakLag, number} s' }
+        egress: allow
+      - id: slow-queries
+        title: { zh-CN: 慢查询, en: Slow queries }
+        applies_to: { kinds: [Pod, StatefulSet] }
+        params: { per_second: 1 }
+        refs:
+          - { name: slow, signal: slow_queries, mode: range }
+        judge:
+          let:
+            - { name: peak, cel: max(slow) }
+          abnormal_if:
+            - cel: peak > double(params.per_second)
+              say: { zh-CN: '慢查询峰值 {peak, number} 次/秒', en: 'Peak slow queries {peak, number}/s' }
+        display: { value: peak, unit: per_second }
+        egress: allow

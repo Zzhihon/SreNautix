@@ -1,0 +1,51 @@
+chains:
+  - id: nacos
+    title: { zh-CN: Nacos, en: Nacos }
+    runbook: nacos.md
+    cards:
+      - id: exceptions
+        title: { zh-CN: 服务端异常, en: Server exceptions }
+        note:
+          { zh-CN: unhealth 表示 Nacos 认为外部数据库不健康, en: unhealth means Nacos considers its database unhealthy }
+        applies_to: { kinds: [Pod, StatefulSet] }
+        refs:
+          - { name: conns, signal: long_connections, mode: instant }
+          - { name: errors, signal: exceptions, mode: instant, empty_is: normal }
+        judge:
+          let:
+            - { name: dbUnhealthy, cel: 'size(errors.filter(s, label(s, "name") == "unhealth"))' }
+            - { name: kinds, cel: size(errors) }
+          abnormal_if:
+            - cel: dbUnhealthy > 0
+              say: { zh-CN: Nacos 判定外部数据库不健康, en: Nacos reports its database as unhealthy }
+            - cel: kinds > 0
+              say: { zh-CN: '窗口内出现 {kinds} 类服务端异常', en: '{kinds} kinds of server exceptions in the window' }
+        display:
+          table:
+            rows_from: errors
+            columns:
+              - { header: { zh-CN: 异常, en: Exception }, cel: 'label(row, "name")' }
+              - { header: { zh-CN: 次数, en: Count }, cel: last(row), unit: count }
+        egress: allow
+      - id: connections-heap
+        title: { zh-CN: 长连接与 JVM 堆, en: Long connections and JVM heap }
+        applies_to: { kinds: [Pod, StatefulSet] }
+        params: { heap_ratio: 0.9 }
+        refs:
+          - { name: conns, signal: long_connections, mode: range }
+          - { name: heap, signal: heap_ratio, mode: range, empty_is: normal }
+        judge:
+          let:
+            - { name: dropped, cel: 'size(conns.filter(s, size(s.values) > 1 && min(s) < s.values[0] * 0.5))' }
+            - { name: heapPeak, cel: 'size(heap) > 0 ? max(heap) : 0.0' }
+          abnormal_if:
+            - cel: dropped > 0
+              say:
+                {
+                  zh-CN: '{dropped} 个节点的长连接数在窗口内跌掉一半以上',
+                  en: 'Long connections halved on {dropped} nodes',
+                }
+            - cel: heapPeak > params.heap_ratio
+              say:
+                { zh-CN: 'JVM 堆占用峰值 {heapPeak, number, percent}', en: 'Peak JVM heap {heapPeak, number, percent}' }
+        egress: allow

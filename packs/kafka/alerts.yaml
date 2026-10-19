@@ -1,0 +1,44 @@
+# kafka_exporter 不带告警规则；以下为 awesome-prometheus-alerts 中 Kafka 一节与 Strimzi 示例规则的告警名。
+entries:
+  - {
+      id: kafka-topics-replicas,
+      alertname: KafkaTopicsReplicas,
+      role: cause,
+      entity: { kind: Namespace, name_labels: [namespace] },
+      chains: [kafka],
+      mixin: other,
+    }
+  - {
+      id: kafka-consumers-group,
+      alertname: KafkaConsumersGroup,
+      role: symptom,
+      entity: { kind: Namespace, name_labels: [namespace] },
+      chains: [kafka],
+      mixin: other,
+    }
+  - {
+      id: kafka-under-replicated-partitions,
+      alertname: UnderReplicatedPartitions,
+      role: cause,
+      entity: { kind: Pod, name_labels: [pod] },
+      component_type: kafka.broker,
+      chains: [kafka],
+      mixin: other,
+    }
+  - {
+      id: kafka-offline-partitions,
+      alertname: OfflinePartitions,
+      role: cause,
+      entity: { kind: Pod, name_labels: [pod] },
+      component_type: kafka.broker,
+      chains: [kafka],
+      mixin: other,
+    }
+  - {
+      id: kafka-consumer-lag,
+      alertname: KafkaConsumerLag,
+      role: symptom,
+      entity: { kind: Namespace, name_labels: [namespace] },
+      chains: [kafka],
+      mixin: other,
+    }

@@ -1,0 +1,9 @@
+api_version: srenautix.io/pack/v1
+name: mysql
+version: 1.0.0
+description: MySQL（mysqld_exporter v0.20）：在线、连接、复制与 Galera 状态、慢查询
+maturity: stable
+min_srenautix_version: 0.1.0
+requires:
+  - metrics.query
+  - metrics.query_range

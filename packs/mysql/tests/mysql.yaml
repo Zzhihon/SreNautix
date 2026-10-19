@@ -1,0 +1,73 @@
+api_version: srenautix.io/pack-test/v1
+interval: 1m
+input_series:
+  # shop/db：db-0 主库，db-1 副本；第 20 分钟起复制停止、连接打满、慢查询增多
+  - { series: 'mysql_up{namespace="shop",pod="db-0"}', values: '1x60' }
+  - { series: 'mysql_up{namespace="shop",pod="db-1"}', values: '1x60' }
+  - { series: 'mysql_global_status_threads_connected{namespace="shop",pod="db-0"}', values: '100x20 145x40' }
+  - { series: 'mysql_global_variables_max_connections{namespace="shop",pod="db-0"}', values: '151x60' }
+  - { series: 'mysql_slave_status_slave_io_running{namespace="shop",pod="db-1"}', values: '1x20 0x40' }
+  - { series: 'mysql_slave_status_slave_sql_running{namespace="shop",pod="db-1"}', values: '1x60' }
+  - { series: 'mysql_slave_status_seconds_behind_master{namespace="shop",pod="db-1"}', values: '0x20 0+10x40' }
+  - { series: 'mysql_slave_status_sql_delay{namespace="shop",pod="db-1"}', values: '0x60' }
+  - { series: 'mysql_global_status_slow_queries{namespace="shop",pod="db-0"}', values: '0x20 0+300x40' }
+  # calm/app：单实例正常
+  - { series: 'mysql_up{namespace="calm",pod="app-0"}', values: '1x60' }
+  - { series: 'mysql_global_status_threads_connected{namespace="calm",pod="app-0"}', values: '10x60' }
+  - { series: 'mysql_global_variables_max_connections{namespace="calm",pod="app-0"}', values: '151x60' }
+  - { series: 'mysql_global_status_slow_queries{namespace="calm",pod="app-0"}', values: '0+1x60' }
+  # galera/gc：一个节点未就绪
+  - { series: 'mysql_up{namespace="galera",pod="gc-0"}', values: '1x60' }
+  - { series: 'mysql_up{namespace="galera",pod="gc-1"}', values: '1x60' }
+  - { series: 'mysql_global_status_wsrep_ready{namespace="galera",pod="gc-0"}', values: '1x60' }
+  - { series: 'mysql_global_status_wsrep_ready{namespace="galera",pod="gc-1"}', values: '1x20 0x40' }
+tests:
+  - {
+      name: 连接将满,
+      eval_time: 40m,
+      card: mysql/availability,
+      entity: { kind: StatefulSet, namespace: shop, name: db },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: app 正常,
+      eval_time: 40m,
+      card: mysql/availability,
+      entity: { kind: StatefulSet, namespace: calm, name: app },
+      expect: { verdict: normal },
+    }
+  - {
+      name: 复制停止,
+      eval_time: 40m,
+      card: mysql/replication,
+      entity: { kind: StatefulSet, namespace: shop, name: db },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: Galera 节点未就绪,
+      eval_time: 40m,
+      card: mysql/replication,
+      entity: { kind: StatefulSet, namespace: galera, name: gc },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: 单实例没有复制,
+      eval_time: 40m,
+      card: mysql/replication,
+      entity: { kind: StatefulSet, namespace: calm, name: app },
+      expect: { verdict: normal },
+    }
+  - {
+      name: 慢查询多,
+      eval_time: 40m,
+      card: mysql/slow-queries,
+      entity: { kind: Pod, namespace: shop, name: db-0 },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: 慢查询少,
+      eval_time: 40m,
+      card: mysql/slow-queries,
+      entity: { kind: Pod, namespace: calm, name: app-0 },
+      expect: { verdict: normal },
+    }

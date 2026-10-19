@@ -1,0 +1,31 @@
+# 指标来自 oliver006/redis_exporter（exporter/exporter.go）。exporter 以 sidecar 运行时 pod 标签就是 Redis 的 Pod。
+signals:
+  - id: up
+    kind: metrics
+    alternatives:
+      - expr: max by (namespace, pod) (redis_up{$selector})
+  - id: master_link_up
+    kind: metrics
+    alternatives:
+      # 只有副本有这个指标
+      - expr: min by (namespace, pod) (min_over_time(redis_master_link_up{$selector}[$window]))
+  - id: memory_ratio
+    kind: metrics
+    unit: ratio
+    alternatives:
+      - expr: max by (namespace, pod) (redis_memory_used_bytes{$selector} / (redis_memory_max_bytes{$selector} > 0))
+  - id: evictions
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: sum by (namespace, pod) (increase(redis_evicted_keys_total{$selector}[$window])) > 0
+  - id: connections_ratio
+    kind: metrics
+    unit: ratio
+    alternatives:
+      - expr: max by (namespace, pod) (redis_connected_clients{$selector} / redis_config_maxclients{$selector})
+  - id: rejected_connections
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: sum by (namespace, pod) (increase(redis_rejected_connections_total{$selector}[$window])) > 0

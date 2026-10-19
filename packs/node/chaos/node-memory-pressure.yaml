@@ -1,0 +1,30 @@
+api_version: srenautix.io/chaos/v1
+id: node-memory-pressure
+title:
+  zh-CN: 在一个节点上占满内存，触发 MemoryPressure 与驱逐
+  en: Exhaust memory on one node to trigger MemoryPressure and evictions
+requires:
+  - chaos-mesh
+manifests:
+  - apiVersion: chaos-mesh.org/v1alpha1
+    kind: StressChaos
+    metadata:
+      name: node-memory-pressure
+      namespace: chaos-drill
+    spec:
+      mode: one
+      selector:
+        namespaces: [chaos-drill]
+        labelSelectors: { app: memory-hog }
+      stressors:
+        memory:
+          workers: 4
+          size: 90%
+      duration: 10m
+duration: 10m
+expect:
+  root_kind: Node
+  disposition: escalate
+  alerts:
+    - KubeNodePressure
+    - NodeMemoryHighUtilization

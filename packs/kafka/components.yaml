@@ -1,0 +1,7 @@
+component_types:
+  - id: kafka.cluster
+    match: { kind: Kafka, api_group: kafka.strimzi.io }
+    chains: [kafka]
+  - id: kafka.broker
+    match: { kind: StatefulSet, name_pattern: kafka }
+    chains: [kafka]

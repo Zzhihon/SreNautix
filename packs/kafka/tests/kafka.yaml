@@ -1,0 +1,58 @@
+api_version: srenautix.io/pack-test/v1
+interval: 1m
+input_series:
+  - { series: 'kafka_brokers{namespace="stream"}', values: '3x20 2x10 3x30' }
+  - {
+      series: 'kafka_topic_partition_under_replicated_partition{namespace="stream",topic="orders",partition="0"}',
+      values: '0x20 1x40',
+    }
+  - {
+      series: 'kafka_topic_partition_under_replicated_partition{namespace="stream",topic="orders",partition="1"}',
+      values: '0x60',
+    }
+  - {
+      series: 'kafka_consumergroup_lag{namespace="stream",consumergroup="billing",topic="orders",partition="0"}',
+      values: '100x20 100+500x40',
+    }
+  - {
+      series: 'kafka_consumergroup_lag{namespace="stream",consumergroup="audit",topic="orders",partition="0"}',
+      values: '10x60',
+    }
+  - { series: 'kafka_brokers{namespace="calm"}', values: '3x60' }
+  - {
+      series: 'kafka_topic_partition_under_replicated_partition{namespace="calm",topic="events",partition="0"}',
+      values: '0x60',
+    }
+  - {
+      series: 'kafka_consumergroup_lag{namespace="calm",consumergroup="indexer",topic="events",partition="0"}',
+      values: '50x60',
+    }
+tests:
+  - {
+      name: broker 掉线且副本不同步,
+      eval_time: 40m,
+      card: kafka/brokers,
+      entity: { kind: Namespace, namespace: stream, name: stream },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: broker 正常,
+      eval_time: 40m,
+      card: kafka/brokers,
+      entity: { kind: Namespace, namespace: calm, name: calm },
+      expect: { verdict: normal },
+    }
+  - {
+      name: 积压持续增长,
+      eval_time: 40m,
+      card: kafka/consumer-lag,
+      entity: { kind: Namespace, namespace: stream, name: stream },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: 积压平稳,
+      eval_time: 40m,
+      card: kafka/consumer-lag,
+      entity: { kind: Namespace, namespace: calm, name: calm },
+      expect: { verdict: normal },
+    }

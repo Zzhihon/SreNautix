@@ -1,0 +1,17 @@
+# 指标来自 danielqsj/kafka_exporter（kafka_exporter.go）。exporter 连接整个 Kafka 集群，按 exporter 所在命名空间选。
+signals:
+  - id: brokers
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: max by (namespace) (kafka_brokers{namespace="$namespace"})
+  - id: under_replicated_partitions
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: sum by (namespace, topic) (kafka_topic_partition_under_replicated_partition{namespace="$namespace"}) > 0
+  - id: consumergroup_lag
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: sum by (namespace, consumergroup, topic) (kafka_consumergroup_lag{namespace="$namespace"})

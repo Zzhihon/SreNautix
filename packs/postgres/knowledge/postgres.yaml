@@ -1,0 +1,28 @@
+entries:
+  - id: lock-table-exhaustion
+    components: [postgres.cnpg-cluster, postgres.instance]
+    text:
+      zh-CN: 共享锁表的容量是 max_locks_per_transaction × (max_connections + max_prepared_transactions)；单个事务触达大量分区或 chunk 时会占满锁表，其他会话报 out of shared memory（53200），主库健康检查随之失败并可能触发故障转移。
+      en: The shared lock table holds max_locks_per_transaction × (max_connections + max_prepared_transactions) entries; one transaction touching many partitions can exhaust it, making other sessions fail with 53200 and health checks fail.
+    learned_from:
+      - https://www.postgresql.org/docs/current/runtime-config-locks.html
+    learned_at: '2026-01-01T00:00:00Z'
+    source: human
+  - id: wal-archive-backpressure
+    components: [postgres.cnpg-cluster]
+    text:
+      zh-CN: 归档命令失败时 PostgreSQL 保留全部未归档的 WAL 段，pg_wal 持续增长直到写满卷；写满后主库停止接受写入。
+      en: When archive_command fails, PostgreSQL keeps every unarchived WAL segment and pg_wal grows until the volume is full.
+    learned_from:
+      - https://www.postgresql.org/docs/current/continuous-archiving.html
+    learned_at: '2026-01-01T00:00:00Z'
+    source: human
+  - id: cnpg-fencing-and-failover
+    components: [postgres.cnpg-cluster]
+    text:
+      zh-CN: CloudNativePG 的主库不可用超过 failoverDelay 后提升同步程度最高的副本；切换期间 -rw Service 没有就绪端点，应用连接全部失败。
+      en: CloudNativePG promotes the most advanced replica after failoverDelay; the -rw Service has no ready endpoints during the switch.
+    learned_from:
+      - https://cloudnative-pg.io/documentation/current/failover/
+    learned_at: '2026-01-01T00:00:00Z'
+    source: human

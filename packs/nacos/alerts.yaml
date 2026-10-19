@@ -1,0 +1,29 @@
+# Nacos 文档 monitor-guide 中 Prometheus 告警示例的告警名。
+entries:
+  - {
+      id: nacos-down,
+      alertname: NacosDown,
+      role: cause,
+      entity: { kind: Pod, name_labels: [pod, instance] },
+      component_type: nacos.server,
+      chains: [nacos],
+      mixin: other,
+    }
+  - {
+      id: nacos-db-unhealthy,
+      alertname: NacosDatabaseUnhealthy,
+      role: cause,
+      entity: { kind: Pod, name_labels: [pod, instance] },
+      component_type: nacos.server,
+      chains: [nacos],
+      mixin: other,
+    }
+  - {
+      id: nacos-jvm-heap-high,
+      alertname: NacosJvmHeapHigh,
+      role: symptom,
+      entity: { kind: Pod, name_labels: [pod, instance] },
+      component_type: nacos.server,
+      chains: [nacos],
+      mixin: other,
+    }

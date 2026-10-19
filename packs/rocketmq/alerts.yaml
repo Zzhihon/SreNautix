@@ -1,0 +1,34 @@
+# 来源：apache/rocketmq-exporter 仓库 example.rules 中的告警名。
+entries:
+  - {
+      id: rocketmq-send-tps-too-high,
+      alertname: SendTPSTooHigh,
+      role: symptom,
+      entity: { kind: Namespace, name_labels: [namespace] },
+      chains: [rocketmq],
+      mixin: other,
+    }
+  - {
+      id: rocketmq-consumer-fallen-behind,
+      alertname: ConsumerFallingBehind,
+      role: symptom,
+      entity: { kind: Namespace, name_labels: [namespace] },
+      chains: [rocketmq],
+      mixin: other,
+    }
+  - {
+      id: rocketmq-group-get-latency,
+      alertname: GroupGetLatencyByStoretime,
+      role: symptom,
+      entity: { kind: Namespace, name_labels: [namespace] },
+      chains: [rocketmq],
+      mixin: other,
+    }
+  - {
+      id: rocketmq-disk-ratio-high,
+      alertname: DiskRatioTooHigh,
+      role: cause,
+      entity: { kind: Namespace, name_labels: [namespace] },
+      chains: [rocketmq],
+      mixin: other,
+    }

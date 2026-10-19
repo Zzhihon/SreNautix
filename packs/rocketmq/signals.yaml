@@ -1,0 +1,17 @@
+# 指标来自 apache/rocketmq-exporter（collector/RMQMetricsCollector.java）。exporter 连接 NameServer，按 exporter 所在命名空间选。
+signals:
+  - id: group_diff
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: sum by (namespace, group, topic) (rocketmq_group_diff{namespace="$namespace"})
+  - id: commitlog_disk_ratio
+    kind: metrics
+    unit: ratio
+    alternatives:
+      - expr: max by (namespace, brokerIP) (rocketmq_brokeruntime_commitlog_disk_ratio{namespace="$namespace"})
+  - id: send_queue_wait_ms
+    kind: metrics
+    unit: milliseconds
+    alternatives:
+      - expr: max by (namespace, brokerIP) (rocketmq_brokeruntime_send_threadpoolqueue_headwait_timemills{namespace="$namespace"})

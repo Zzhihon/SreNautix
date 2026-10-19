@@ -1,0 +1,71 @@
+chains:
+  - id: redis
+    title: { zh-CN: Redis, en: Redis }
+    runbook: redis.md
+    cards:
+      - id: availability
+        title: { zh-CN: 在线与主从连接, en: Availability and replication link }
+        applies_to: { kinds: [Pod, StatefulSet, Deployment] }
+        refs:
+          - { name: up, signal: up, mode: range }
+          - { name: link, signal: master_link_up, mode: instant, empty_is: normal }
+        judge:
+          let:
+            - { name: down, cel: 'size(up.filter(s, min(s) < 1.0))' }
+            - { name: linkDown, cel: 'size(link.filter(s, last(s) < 1.0))' }
+            - { name: anomaly_started_at, cel: 'first_below(up, 1.0)' }
+          abnormal_if:
+            - cel: down > 0
+              say: { zh-CN: '{down} 个实例在窗口内不可用', en: '{down} instances were down' }
+            - cel: linkDown > 0
+              say: { zh-CN: '{linkDown} 个副本与主库断开', en: '{linkDown} replicas lost their master link' }
+        egress: allow
+      - id: memory
+        title: { zh-CN: 内存与淘汰, en: Memory and evictions }
+        applies_to: { kinds: [Pod, StatefulSet, Deployment] }
+        params: { ratio: 0.9 }
+        refs:
+          - { name: up, signal: up, mode: instant }
+          - { name: mem, signal: memory_ratio, mode: range, empty_is: normal }
+          - { name: evicted, signal: evictions, mode: instant, empty_is: normal }
+        judge:
+          let:
+            - { name: peak, cel: 'size(mem) > 0 ? max(mem) : 0.0' }
+            - { name: evictedKeys, cel: 'size(evicted) > 0 ? sum(evicted) : 0.0' }
+          abnormal_if:
+            - cel: evictedKeys > 0.0
+              say: { zh-CN: '窗口内淘汰 {evictedKeys, number} 个 key', en: '{evictedKeys, number} keys were evicted' }
+            - cel: peak > params.ratio
+              say:
+                {
+                  zh-CN: '内存占 maxmemory 峰值 {peak, number, percent}',
+                  en: 'Peak memory {peak, number, percent} of maxmemory',
+                }
+        display: { value: peak, unit: percent, threshold: params.ratio }
+        egress: allow
+      - id: connections
+        title: { zh-CN: 连接, en: Connections }
+        applies_to: { kinds: [Pod, StatefulSet, Deployment] }
+        params: { ratio: 0.85 }
+        refs:
+          - { name: ratio, signal: connections_ratio, mode: range }
+          - { name: rejected, signal: rejected_connections, mode: instant, empty_is: normal }
+        judge:
+          let:
+            - { name: peak, cel: max(ratio) }
+            - { name: rejectedCount, cel: 'size(rejected) > 0 ? sum(rejected) : 0.0' }
+          abnormal_if:
+            - cel: rejectedCount > 0.0
+              say:
+                {
+                  zh-CN: '拒绝了 {rejectedCount, number} 个连接',
+                  en: '{rejectedCount, number} connections were rejected',
+                }
+            - cel: peak > params.ratio
+              say:
+                {
+                  zh-CN: '连接占 maxclients 峰值 {peak, number, percent}',
+                  en: 'Peak connections {peak, number, percent} of maxclients',
+                }
+        display: { value: peak, unit: percent, threshold: params.ratio }
+        egress: allow

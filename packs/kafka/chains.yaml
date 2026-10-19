@@ -1,0 +1,57 @@
+chains:
+  - id: kafka
+    title: { zh-CN: Kafka, en: Kafka }
+    runbook: kafka.md
+    cards:
+      - id: brokers
+        title: { zh-CN: broker 与副本同步, en: Brokers and replica sync }
+        applies_to: { kinds: [Kafka, StatefulSet, Namespace] }
+        params: { expected_brokers: 3 }
+        refs:
+          - { name: brokers, signal: brokers, mode: range }
+          - { name: urp, signal: under_replicated_partitions, mode: instant, empty_is: normal }
+        judge:
+          let:
+            - { name: fewest, cel: min(brokers) }
+            - { name: topics, cel: size(urp) }
+            - { name: anomaly_started_at, cel: 'first_below(brokers, double(params.expected_brokers))' }
+          abnormal_if:
+            - cel: fewest < double(params.expected_brokers)
+              say: { zh-CN: 'broker 最少时只有 {fewest, number} 个', en: 'As few as {fewest, number} brokers were up' }
+            - cel: topics > 0
+              say:
+                {
+                  zh-CN: '{topics} 个 topic 有副本不同步的分区',
+                  en: '{topics} topics have under-replicated partitions',
+                }
+        egress: allow
+      - id: consumer-lag
+        title: { zh-CN: 消费组积压, en: Consumer group lag }
+        note: { zh-CN: 积压在窗口内持续增长，或超过 max_lag 条, en: Lag that keeps growing or exceeds the threshold }
+        applies_to: { kinds: [Kafka, StatefulSet, Namespace, Deployment] }
+        params: { max_lag: 100000 }
+        refs:
+          - { name: lag, signal: consumergroup_lag, mode: range }
+        judge:
+          let:
+            - { name: peak, cel: max(lag) }
+            - {
+                name: growing,
+                cel: 'size(lag.filter(s, size(s.values) > 1 && last(s) > s.values[0] * 2.0 && last(s) > 1000.0))',
+              }
+          abnormal_if:
+            - cel: peak > double(params.max_lag)
+              say: { zh-CN: '最大积压 {peak, number} 条', en: 'Peak lag {peak, number} messages' }
+            - cel: growing > 0
+              say: { zh-CN: '{growing} 个消费组的积压在窗口内翻倍', en: 'Lag doubled for {growing} consumer groups' }
+        display:
+          value: peak
+          unit: count
+          table:
+            rows_from: lag
+            sort_by: last(row)
+            columns:
+              - { header: { zh-CN: 消费组, en: Group }, cel: 'label(row, "consumergroup")' }
+              - { header: { zh-CN: topic, en: Topic }, cel: 'label(row, "topic")' }
+              - { header: { zh-CN: 积压, en: Lag }, cel: last(row), unit: count }
+        egress: allow

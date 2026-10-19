@@ -1,0 +1,32 @@
+api_version: srenautix.io/chaos/v1
+id: fill-volume
+title:
+  zh-CN: 写满一个 PVC，应用随之写入失败
+  en: Fill a PVC until the application fails to write
+manifests:
+  - apiVersion: batch/v1
+    kind: Job
+    metadata:
+      name: fill-volume
+      namespace: chaos-drill
+    spec:
+      backoffLimit: 0
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: fill
+              image: busybox:1.37
+              command: ['sh', '-c', 'dd if=/dev/zero of=/data/fill bs=1M || true; sleep 600']
+              volumeMounts:
+                - { name: data, mountPath: /data }
+          volumes:
+            - name: data
+              persistentVolumeClaim: { claimName: drill-data }
+duration: 10m
+expect:
+  root_kind: PersistentVolumeClaim
+  root_name_pattern: ^drill-data$
+  disposition: escalate
+  alerts:
+    - KubePersistentVolumeFillingUp

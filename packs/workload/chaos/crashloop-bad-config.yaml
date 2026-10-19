@@ -1,0 +1,31 @@
+api_version: srenautix.io/chaos/v1
+id: crashloop-bad-config
+title:
+  zh-CN: 发布一个启动即退出的版本，造成 CrashLoopBackOff
+  en: Roll out a version that exits on start, causing CrashLoopBackOff
+manifests:
+  - apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: chaos-crashloop
+      namespace: chaos-drill
+    spec:
+      replicas: 2
+      selector:
+        matchLabels: { app: chaos-crashloop }
+      template:
+        metadata:
+          labels: { app: chaos-crashloop }
+        spec:
+          containers:
+            - name: app
+              image: busybox:1.37
+              command: ['sh', '-c', 'echo "missing required setting DATABASE_URL" >&2; exit 1']
+duration: 10m
+expect:
+  root_kind: Deployment
+  root_name_pattern: ^chaos-crashloop$
+  disposition: escalate
+  alerts:
+    - KubePodCrashLooping
+    - KubeDeploymentReplicasMismatch

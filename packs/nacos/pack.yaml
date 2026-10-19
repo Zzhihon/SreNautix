@@ -1,0 +1,9 @@
+api_version: srenautix.io/pack/v1
+name: nacos
+version: 1.0.0
+description: Nacos（3.2，Spring Boot actuator 的 Prometheus 指标）：服务端异常、长连接与 JVM 堆
+maturity: stable
+min_srenautix_version: 0.1.0
+requires:
+  - metrics.query
+  - metrics.query_range

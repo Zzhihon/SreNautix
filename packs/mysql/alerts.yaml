@@ -1,0 +1,74 @@
+# 来源：prometheus/mysqld_exporter v0.20.0 的 mysqld-mixin/alerts（general.yaml、galera.yaml）。
+entries:
+  - {
+      id: mysql-down,
+      alertname: MySQLDown,
+      role: cause,
+      entity: { kind: Pod, name_labels: [pod, instance] },
+      component_type: mysql.instance,
+      chains: [mysql],
+      mixin: other,
+    }
+  - {
+      id: mysql-galera-not-ready,
+      alertname: MySQLGaleraNotReady,
+      role: cause,
+      entity: { kind: Pod, name_labels: [pod, instance] },
+      component_type: mysql.instance,
+      chains: [mysql],
+      mixin: other,
+    }
+  - {
+      id: mysql-galera-out-of-sync,
+      alertname: MySQLGaleraOutOfSync,
+      role: cause,
+      entity: { kind: Pod, name_labels: [pod, instance] },
+      component_type: mysql.instance,
+      chains: [mysql],
+      mixin: other,
+    }
+  - {
+      id: mysql-galera-donor-falling-behind,
+      alertname: MySQLGaleraDonorFallingBehind,
+      role: symptom,
+      entity: { kind: Pod, name_labels: [pod, instance] },
+      component_type: mysql.instance,
+      chains: [mysql],
+      mixin: other,
+    }
+  - {
+      id: mysql-replication-not-running,
+      alertname: MySQLReplicationNotRunning,
+      role: cause,
+      entity: { kind: Pod, name_labels: [pod, instance] },
+      component_type: mysql.instance,
+      chains: [mysql],
+      mixin: other,
+    }
+  - {
+      id: mysql-replication-lag,
+      alertname: MySQLReplicationLag,
+      role: forecast,
+      entity: { kind: Pod, name_labels: [pod, instance] },
+      component_type: mysql.instance,
+      chains: [mysql],
+      mixin: other,
+    }
+  - {
+      id: mysql-heartbeat-lag,
+      alertname: MySQLHeartbeatLag,
+      role: forecast,
+      entity: { kind: Pod, name_labels: [pod, instance] },
+      component_type: mysql.instance,
+      chains: [mysql],
+      mixin: other,
+    }
+  - {
+      id: mysql-innodb-log-waits,
+      alertname: MySQLInnoDBLogWaits,
+      role: symptom,
+      entity: { kind: Pod, name_labels: [pod, instance] },
+      component_type: mysql.instance,
+      chains: [mysql],
+      mixin: other,
+    }

@@ -1,0 +1,4 @@
+component_types:
+  - id: nacos.server
+    match: { kind: StatefulSet, name_pattern: nacos }
+    chains: [nacos]

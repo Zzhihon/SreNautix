@@ -1,0 +1,64 @@
+api_version: srenautix.io/pack-test/v1
+interval: 1m
+input_series:
+  # cache-0 主库，cache-1 副本：第 20 分钟起内存打满、淘汰、连接被拒，副本断开
+  - { series: 'redis_up{namespace="shop",pod="cache-0"}', values: '1x60' }
+  - { series: 'redis_up{namespace="shop",pod="cache-1"}', values: '1x60' }
+  - { series: 'redis_master_link_up{namespace="shop",pod="cache-1"}', values: '1x20 0x40' }
+  - { series: 'redis_memory_used_bytes{namespace="shop",pod="cache-0"}', values: '500000000x20 990000000x40' }
+  - { series: 'redis_memory_max_bytes{namespace="shop",pod="cache-0"}', values: '1000000000x60' }
+  - { series: 'redis_evicted_keys_total{namespace="shop",pod="cache-0"}', values: '0x20 0+100x40' }
+  - { series: 'redis_connected_clients{namespace="shop",pod="cache-0"}', values: '9900x60' }
+  - { series: 'redis_config_maxclients{namespace="shop",pod="cache-0"}', values: '10000x60' }
+  - { series: 'redis_rejected_connections_total{namespace="shop",pod="cache-0"}', values: '0x30 0+5x30' }
+  # session-0：正常
+  - { series: 'redis_up{namespace="calm",pod="session-0"}', values: '1x60' }
+  - { series: 'redis_memory_used_bytes{namespace="calm",pod="session-0"}', values: '100000000x60' }
+  - { series: 'redis_memory_max_bytes{namespace="calm",pod="session-0"}', values: '1000000000x60' }
+  - { series: 'redis_evicted_keys_total{namespace="calm",pod="session-0"}', values: '0x60' }
+  - { series: 'redis_connected_clients{namespace="calm",pod="session-0"}', values: '50x60' }
+  - { series: 'redis_config_maxclients{namespace="calm",pod="session-0"}', values: '10000x60' }
+  - { series: 'redis_rejected_connections_total{namespace="calm",pod="session-0"}', values: '0x60' }
+tests:
+  - {
+      name: 副本与主库断开,
+      eval_time: 40m,
+      card: redis/availability,
+      entity: { kind: StatefulSet, namespace: shop, name: cache },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: session 在线,
+      eval_time: 40m,
+      card: redis/availability,
+      entity: { kind: StatefulSet, namespace: calm, name: session },
+      expect: { verdict: normal },
+    }
+  - {
+      name: 内存打满并淘汰,
+      eval_time: 40m,
+      card: redis/memory,
+      entity: { kind: Pod, namespace: shop, name: cache-0 },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: session 内存正常,
+      eval_time: 40m,
+      card: redis/memory,
+      entity: { kind: Pod, namespace: calm, name: session-0 },
+      expect: { verdict: normal },
+    }
+  - {
+      name: 连接被拒,
+      eval_time: 40m,
+      card: redis/connections,
+      entity: { kind: Pod, namespace: shop, name: cache-0 },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: session 连接正常,
+      eval_time: 40m,
+      card: redis/connections,
+      entity: { kind: Pod, namespace: calm, name: session-0 },
+      expect: { verdict: normal },
+    }

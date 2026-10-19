@@ -1,0 +1,29 @@
+api_version: srenautix.io/chaos/v1
+id: primary-kill
+title:
+  zh-CN: 杀掉 CNPG 主库 Pod，触发故障转移
+  en: Kill the CNPG primary pod to trigger a failover
+requires:
+  - chaos-mesh
+  - cloudnative-pg
+manifests:
+  - apiVersion: chaos-mesh.org/v1alpha1
+    kind: PodChaos
+    metadata:
+      name: cnpg-primary-kill
+      namespace: chaos-drill
+    spec:
+      action: pod-kill
+      mode: one
+      selector:
+        namespaces: [chaos-drill]
+        labelSelectors:
+          cnpg.io/cluster: drill-pg
+          cnpg.io/instanceRole: primary
+duration: 5m
+expect:
+  root_kind: Cluster
+  root_name_pattern: ^drill-pg$
+  disposition: escalate
+  alerts:
+    - CNPGClusterHAWarning

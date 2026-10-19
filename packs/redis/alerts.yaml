@@ -1,0 +1,55 @@
+# redis_exporter 不带告警规则；以下为 awesome-prometheus-alerts 中 Redis 一节的告警名。
+entries:
+  - {
+      id: redis-down,
+      alertname: RedisDown,
+      role: cause,
+      entity: { kind: Pod, name_labels: [pod] },
+      component_type: redis.instance,
+      chains: [redis],
+      mixin: other,
+    }
+  - {
+      id: redis-missing-master,
+      alertname: RedisMissingMaster,
+      role: cause,
+      entity: { kind: Namespace, name_labels: [namespace] },
+      chains: [redis],
+      mixin: other,
+    }
+  - {
+      id: redis-disconnected-slaves,
+      alertname: RedisDisconnectedSlaves,
+      role: symptom,
+      entity: { kind: Pod, name_labels: [pod] },
+      component_type: redis.instance,
+      chains: [redis],
+      mixin: other,
+    }
+  - {
+      id: redis-out-of-configured-maxmemory,
+      alertname: RedisOutOfConfiguredMaxmemory,
+      role: cause,
+      entity: { kind: Pod, name_labels: [pod] },
+      component_type: redis.instance,
+      chains: [redis],
+      mixin: other,
+    }
+  - {
+      id: redis-too-many-connections,
+      alertname: RedisTooManyConnections,
+      role: symptom,
+      entity: { kind: Pod, name_labels: [pod] },
+      component_type: redis.instance,
+      chains: [redis],
+      mixin: other,
+    }
+  - {
+      id: redis-rejected-connections,
+      alertname: RedisRejectedConnections,
+      role: cause,
+      entity: { kind: Pod, name_labels: [pod] },
+      component_type: redis.instance,
+      chains: [redis],
+      mixin: other,
+    }

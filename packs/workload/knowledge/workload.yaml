@@ -1,0 +1,25 @@
+entries:
+  - id: exit-code-137
+    text:
+      zh-CN: 退出码 137 表示进程被 SIGKILL 终止；终止原因为 OOMKilled 时是内存超过 limit，否则多为存活探针失败或节点驱逐。
+      en: Exit code 137 means SIGKILL; with reason OOMKilled the container exceeded its memory limit, otherwise a liveness probe or eviction killed it.
+    learned_from:
+      - https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/
+    learned_at: '2026-01-01T00:00:00Z'
+    source: human
+  - id: init-containers-do-not-retry-forever
+    text:
+      zh-CN: init 容器按顺序执行，前一个不结束后一个不会开始；等待外部依赖的 init 容器若用一次性检查或超长超时实现，依赖恢复后也不会自行结束，需要重建 Pod。
+      en: Init containers run in order; one that waits on a dependency with a single long check will not finish after the dependency recovers, so the pod must be recreated.
+    learned_from:
+      - https://kubernetes.io/docs/concepts/workloads/pods/init-containers/
+    learned_at: '2026-01-01T00:00:00Z'
+    source: human
+  - id: cfs-throttling-with-headroom
+    text:
+      zh-CN: 平均 CPU 用量远低于 limit 时仍可能被 CFS 限流：突发负载在一个 100 毫秒周期内用完配额就会被暂停到下个周期。
+      en: CFS throttling can happen below the average limit because bursts exhaust the quota within a 100 ms period.
+    learned_from:
+      - https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+    learned_at: '2026-01-01T00:00:00Z'
+    source: human

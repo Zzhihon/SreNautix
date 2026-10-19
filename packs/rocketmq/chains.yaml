@@ -1,0 +1,62 @@
+chains:
+  - id: rocketmq
+    title: { zh-CN: RocketMQ, en: RocketMQ }
+    runbook: rocketmq.md
+    cards:
+      - id: consumer-lag
+        title: { zh-CN: 消费组积压, en: Consumer group lag }
+        applies_to: { kinds: [Namespace, StatefulSet, Deployment] }
+        params: { max_lag: 100000 }
+        refs:
+          - { name: diff, signal: group_diff, mode: range }
+        judge:
+          let:
+            - { name: peak, cel: max(diff) }
+            - {
+                name: growing,
+                cel: 'size(diff.filter(s, size(s.values) > 1 && last(s) > s.values[0] * 2.0 && last(s) > 1000.0))',
+              }
+          abnormal_if:
+            - cel: peak > double(params.max_lag)
+              say: { zh-CN: '最大积压 {peak, number} 条', en: 'Peak lag {peak, number} messages' }
+            - cel: growing > 0
+              say: { zh-CN: '{growing} 个消费组的积压在窗口内翻倍', en: 'Lag doubled for {growing} consumer groups' }
+        display:
+          table:
+            rows_from: diff
+            sort_by: last(row)
+            columns:
+              - { header: { zh-CN: 消费组, en: Group }, cel: 'label(row, "group")' }
+              - { header: { zh-CN: topic, en: Topic }, cel: 'label(row, "topic")' }
+              - { header: { zh-CN: 积压, en: Lag }, cel: last(row), unit: count }
+        egress: allow
+      - id: broker
+        title: { zh-CN: broker 磁盘与发送排队, en: Broker disk and send queue }
+        note:
+          {
+            zh-CN: 提交日志磁盘超过 disk_ratio 时 broker 拒绝写入；发送线程池排队过久说明 broker 写入跟不上,
+            en: Commit log disk usage and send queue wait,
+          }
+        applies_to: { kinds: [Namespace, StatefulSet] }
+        params: { disk_ratio: 0.85, wait_ms: 200 }
+        refs:
+          - { name: disk, signal: commitlog_disk_ratio, mode: range }
+          - { name: wait, signal: send_queue_wait_ms, mode: range, empty_is: normal }
+        judge:
+          let:
+            - { name: diskPeak, cel: max(disk) }
+            - { name: waitPeak, cel: 'size(wait) > 0 ? max(wait) : 0.0' }
+          abnormal_if:
+            - cel: diskPeak > params.disk_ratio
+              say:
+                {
+                  zh-CN: '提交日志磁盘占用峰值 {diskPeak, number, percent}',
+                  en: 'Peak commit log disk usage {diskPeak, number, percent}',
+                }
+            - cel: waitPeak > double(params.wait_ms)
+              say:
+                {
+                  zh-CN: '发送线程池排队峰值 {waitPeak, number} 毫秒',
+                  en: 'Peak send queue wait {waitPeak, number} ms',
+                }
+        egress: allow

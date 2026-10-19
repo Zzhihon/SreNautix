@@ -1,0 +1,9 @@
+api_version: srenautix.io/pack/v1
+name: redis
+version: 1.0.0
+description: Redis（redis_exporter v1.94，同样适用于 Valkey 与 Dragonfly 的兼容指标）：在线与主从、内存与淘汰、连接
+maturity: stable
+min_srenautix_version: 0.1.0
+requires:
+  - metrics.query
+  - metrics.query_range

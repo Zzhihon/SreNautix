@@ -1,0 +1,55 @@
+api_version: srenautix.io/pack-test/v1
+interval: 1m
+input_series:
+  - {
+      series: 'nacos_monitor{namespace="mw",pod="nacos-0",module="core",name="longConnection"}',
+      values: '1000x20 300x40',
+    }
+  - { series: 'nacos_exception_total{namespace="mw",pod="nacos-0",name="unhealth"}', values: '0x20 0+3x40' }
+  - {
+      series: 'jvm_memory_used_bytes{namespace="mw",pod="nacos-0",area="heap",id="G1 Old Gen"}',
+      values: '1900000000x60',
+    }
+  - {
+      series: 'jvm_memory_max_bytes{namespace="mw",pod="nacos-0",area="heap",id="G1 Old Gen"}',
+      values: '2000000000x60',
+    }
+  - { series: 'nacos_monitor{namespace="calm",pod="nacos-0",module="core",name="longConnection"}', values: '500x60' }
+  - { series: 'nacos_exception_total{namespace="calm",pod="nacos-0",name="unhealth"}', values: '0x60' }
+  - {
+      series: 'jvm_memory_used_bytes{namespace="calm",pod="nacos-0",area="heap",id="G1 Old Gen"}',
+      values: '500000000x60',
+    }
+  - {
+      series: 'jvm_memory_max_bytes{namespace="calm",pod="nacos-0",area="heap",id="G1 Old Gen"}',
+      values: '2000000000x60',
+    }
+tests:
+  - {
+      name: 数据库不健康,
+      eval_time: 40m,
+      card: nacos/exceptions,
+      entity: { kind: StatefulSet, namespace: mw, name: nacos },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: 没有异常,
+      eval_time: 40m,
+      card: nacos/exceptions,
+      entity: { kind: StatefulSet, namespace: calm, name: nacos },
+      expect: { verdict: normal },
+    }
+  - {
+      name: 长连接骤降且堆将满,
+      eval_time: 40m,
+      card: nacos/connections-heap,
+      entity: { kind: StatefulSet, namespace: mw, name: nacos },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: 连接与堆正常,
+      eval_time: 40m,
+      card: nacos/connections-heap,
+      entity: { kind: StatefulSet, namespace: calm, name: nacos },
+      expect: { verdict: normal },
+    }

@@ -1,0 +1,9 @@
+api_version: srenautix.io/pack/v1
+name: rocketmq
+version: 1.0.0
+description: RocketMQ（apache/rocketmq-exporter）：消费组积压、broker 提交日志磁盘与发送线程池排队
+maturity: stable
+min_srenautix_version: 0.1.0
+requires:
+  - metrics.query
+  - metrics.query_range

@@ -1,0 +1,4 @@
+component_types:
+  - id: mysql.instance
+    match: { kind: StatefulSet, name_pattern: (mysql|mariadb|percona) }
+    chains: [mysql]

@@ -1,0 +1,9 @@
+api_version: srenautix.io/pack/v1
+name: kafka
+version: 1.0.0
+description: Kafka（kafka_exporter v1.10）：broker 数、副本同步、消费组积压
+maturity: stable
+min_srenautix_version: 0.1.0
+requires:
+  - metrics.query
+  - metrics.query_range
