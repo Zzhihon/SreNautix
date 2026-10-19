@@ -24,6 +24,7 @@ export const TOKENS = {
   ingest: 'ingest-token-console-e2e-0123456789',
   worker: 'worker-token-console-e2e-0123456789',
   gateway: 'gateway-token-console-e2e-0123456789',
+  grafana: 'grafana-token-console-e2e-0123456789',
 };
 
 /** 写给测试进程的运行信息。 */
@@ -225,6 +226,14 @@ function expectStatus(what: string, r: { status: number; body: unknown }, ...ok:
   }
 }
 
+/** server 角色运行前需要的构建产物：阶段 A 的证据卡用 integration-sdk 的 PromQL wasm 解析查询。 */
+export function buildServerDeps(): void {
+  execFileSync('pnpm', ['--filter', '@srenautix/integration-sdk', 'run', 'build:wasm'], {
+    cwd: REPO,
+    stdio: 'inherit',
+  });
+}
+
 export interface Running {
   state: HubState;
   stop(): Promise<void>;
@@ -305,6 +314,7 @@ export async function startHub(): Promise<Running> {
           stringify({
             callers: [
               { id: 'worker', kind: 'worker', token_sha256: sha(TOKENS.worker) },
+              { id: 'grafana', kind: 'grafana', token_sha256: sha(TOKENS.grafana) },
               {
                 id: `gw-${CLUSTER}`,
                 kind: 'spoke',

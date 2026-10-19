@@ -4,7 +4,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { REPO, startHub, STATE_FILE } from './hub';
+import { buildServerDeps, REPO, startHub, STATE_FILE } from './hub';
 
 export default async function globalSetup(): Promise<() => Promise<void>> {
   if (process.env.SRENAUTIX_E2E_REUSE_HUB === '1') {
@@ -13,6 +13,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     }
     return async () => undefined;
   }
+  buildServerDeps();
   execFileSync(process.execPath, [resolve(REPO, 'node_modules/vite/bin/vite.js'), 'build'], {
     cwd: resolve(REPO, 'web/console'),
     stdio: 'inherit',
