@@ -31,6 +31,7 @@ export {
 export { startLoki, type FixtureLogStream } from './testing/loki.js';
 export { startTempo, type FixtureSpan } from './testing/tempo.js';
 export { startLlamaServer, type LlamaServer } from './testing/llama.js';
+export { startOciRegistry, type OciRegistry } from './testing/registry.js';
 export {
   loadIntegrationManifest,
   loadIntegrationManifests,

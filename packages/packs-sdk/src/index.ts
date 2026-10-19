@@ -19,6 +19,16 @@ export { loadLayerFile, applyLayers, type LoadedLayer } from './pack/layers.js';
 export { computeLock, lockDigest, verifyLock, PackLockMismatch } from './pack/lock.js';
 export { loadActionCatalog, type ActionCatalog, type CatalogAction } from './pack/catalog.js';
 export { loadBuiltinPacks, loadGitPack } from './pack/sources.js';
+export {
+  loadOciPack,
+  CosignVerifier,
+  OciPackError,
+  PACK_ARTIFACT_TYPE,
+  type OciPackVerifier,
+  type CosignVerifierOptions,
+  type OciPullOptions,
+  type LoadedOciPack,
+} from './pack/oci.js';
 export { compilePackSet, type PackSet, type CardEntry, type CompileOptions } from './pack/compile.js';
 export {
   selectorFor,

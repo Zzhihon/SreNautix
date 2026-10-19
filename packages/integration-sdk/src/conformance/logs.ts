@@ -38,9 +38,7 @@ export function conformanceLogStreams(): FixtureLogStream[] {
 
 export interface LogsSubject {
   name: string;
-  match(
-    req: LogsMatchRequest,
-  ): Promise<{
+  match(req: LogsMatchRequest): Promise<{
     lines: Array<{ time: string; labels: Record<string, string | undefined>; line: string }>;
     truncated: boolean;
   }>;

@@ -14,12 +14,23 @@ interface BackendSpec {
   platforms?: Record<string, string>;
   /** 平台无关的单个文件，sha256 的键为 any */
   file?: boolean;
+  /** 按平台发布的单个可执行文件（不是压缩包），sha256 的键为 os-arch */
+  executable?: boolean;
   binaries: Record<string, string>;
   sha256: Record<string, string>;
 }
 
 export type BackendName =
-  'prometheus' | 'victoria-metrics' | 'loki' | 'tempo' | 'helm' | 'llama-server' | 'qwen2.5-0.5b-instruct-gguf';
+  | 'prometheus'
+  | 'victoria-metrics'
+  | 'loki'
+  | 'tempo'
+  | 'helm'
+  | 'llama-server'
+  | 'qwen2.5-0.5b-instruct-gguf'
+  | 'cosign'
+  | 'oras'
+  | 'zot';
 
 const SPECS = JSON.parse(readFileSync(new URL('../../backends.json', import.meta.url), 'utf8')) as Record<
   BackendName,
@@ -96,9 +107,13 @@ export async function ensureBackend(name: BackendName): Promise<Record<string, s
   const staging = `${target}.partial`;
   rmSync(staging, { recursive: true, force: true });
   mkdirSync(staging, { recursive: true });
-  if (spec.file) {
-    // 单个数据文件（例如模型权重），不解压
-    writeFileSync(join(staging, Object.values(spec.binaries)[0]!), body);
+  if (spec.file || spec.executable) {
+    // 单个文件（模型权重或可执行文件），不解压
+    const single = join(staging, fill(Object.values(spec.binaries)[0]!, vars));
+    writeFileSync(single, body);
+    if (spec.executable) {
+      chmodSync(single, 0o755);
+    }
     rmSync(target, { recursive: true, force: true });
     renameSync(staging, target);
     return paths;
