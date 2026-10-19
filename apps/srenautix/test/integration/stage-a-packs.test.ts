@@ -213,8 +213,10 @@ describe('阶段 A 的领域包证据链', () => {
       ['oom', 'prometheus', null],
     ]);
     expect(mem.series.length).toBeGreaterThan(0);
+    expect(run.chains).toEqual(['_example/pod-memory']);
     expect(run.runbooks).toEqual(['_example/container-memory.md']);
     expect(run.rootComponentType).toBeNull();
+    expect(rules.excluded(inc, alerts, run)).toBeNull();
 
     const hits = rules.evaluate(inc, alerts, run);
     expect(hits).toEqual([
@@ -238,6 +240,19 @@ describe('阶段 A 的领域包证据链', () => {
       ['_example/pod-memory/limit-ratio', 'normal', 'all_clear'],
     ]);
     expect(rules.evaluate(inc, [], run)).toEqual([]);
+  });
+
+  it('执行过的证据链上的排除规则命中时返回规则引用', () => {
+    const run = {
+      cards: [],
+      chains: ['_example/pod-memory'],
+      runbooks: [],
+      rootComponentType: null,
+    };
+    const loadtest = incident({ kind: 'Pod', namespace: 'loadtest-7', name: 'web-0' });
+    expect(rules.excluded(loadtest, [], run)).toBe('_example/pod-memory#excludes[0]');
+    // 没有执行这条证据链时不求值它的排除规则
+    expect(rules.excluded(loadtest, [], { ...run, chains: [] })).toBeNull();
   });
 
   it('实时重跑只重跑已声明过的卡，编号沿用原结果', async () => {

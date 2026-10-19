@@ -5,6 +5,7 @@ import { Secret, TOTP } from 'otpauth';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { stringify } from 'yaml';
 import { parseServerConfig } from '../../src/config/server.js';
+import { upsertUser } from '../../src/identity/chat-links.js';
 import { SESSION_COOKIE } from '../../src/identity/sessions.js';
 import { hashPassword } from '../../src/identity/password.js';
 import {
@@ -33,6 +34,7 @@ const TOKENS = {
   ingest: 'ingest-token-e2e-0123456789abcdef',
   worker: 'worker-token-e2e-0123456789abcdef',
   gateway: 'gateway-token-e2e-0123456789abcdef',
+  grafana: 'grafana-token-e2e-0123456789abcdef',
   bot: '123456:TEST-bot-token',
 };
 const sha = (s: string) => createHash('sha256').update(s).digest('hex');
@@ -128,6 +130,11 @@ beforeAll(async () => {
   const signing = generateKeyPairSync('ed25519');
   signingPub = publicKeyB64u(signing.publicKey);
   const checkpoint = generateKeyPairSync('ed25519');
+  // 控制台构建产物的最小样本：index.html、带哈希的资源、根目录文件
+  file('console/index.html', '<!doctype html><title>SreNautix</title><div id="root"></div>');
+  file('console/assets/index-3f9a1c.js', 'console.log(1)');
+  file('console/favicon.svg', '<svg xmlns="http://www.w3.org/2000/svg"/>');
+  const consoleDir = join(ROOT, 'console');
   const config = parseServerConfig({
     cluster_id: 'c1',
     profile: 'standard',
@@ -150,6 +157,7 @@ beforeAll(async () => {
       reconcile: { enabled: false },
     },
     packs: { dirs: [resolve(file('packs/.keep', ''), '..')] },
+    console: { dir: consoleDir },
     datasources: { prometheus: { url: 'http://127.0.0.1:9' } },
     topology: { source: 'off' },
     notify: {
@@ -173,6 +181,7 @@ beforeAll(async () => {
           callers: [
             { id: 'worker', kind: 'worker', token_sha256: sha(TOKENS.worker) },
             { id: 'gw-c1', kind: 'spoke', role: 'gateway', cluster_id: 'c1', token_sha256: sha(TOKENS.gateway) },
+            { id: 'grafana', kind: 'grafana', token_sha256: sha(TOKENS.grafana) },
           ],
         }),
       ),
@@ -193,6 +202,11 @@ beforeAll(async () => {
                 role: 'admin',
                 scope: { clusters: ['*'], namespaces: ['*'] },
               },
+              {
+                subject: { kind: 'group', name: 'shop-oncall' },
+                role: 'responder',
+                scope: { clusters: ['*'], namespaces: ['shop'] },
+              },
             ],
           }),
         ),
@@ -211,6 +225,7 @@ beforeAll(async () => {
     pg: db.serverConfig,
     noAuxListeners: true,
     apiListen: { host: '127.0.0.1', port: 0 },
+    serve: 'all',
   });
   const login = await fetch(`${srv.apiUrl}/v1/auth/login`, {
     method: 'POST',
@@ -496,6 +511,78 @@ describe('server 端到端', () => {
     conform('/v1/incidents/{incident_ref}/feedback', 'get', list);
     // 批准产生了一条隐式反馈
     expect((list.body as unknown as Array<{ implicit: string | null }>).map((x) => x.implicit)).toContain('approved');
+  });
+
+  it('Grafana 插件按邮箱映射到已登录的用户授权，只放行读取与 createFeedback', async () => {
+    // 两个用户经 OIDC 登录过：alice 在 shop-oncall 组；bob 没有任何角色绑定
+    await upsertUser(db.server, { id: 'oidc:alice', display_name: 'Alice', groups: ['shop-oncall'] }, 'oidc', {
+      email: 'Alice@Example.test',
+    });
+    await upsertUser(db.server, { id: 'oidc:bob', display_name: 'Bob', groups: [] }, 'oidc', {
+      email: 'bob@example.test',
+    });
+    const as = (email: string | null) => {
+      const headers: Record<string, string> = {};
+      if (email) {
+        headers['x-srenautix-on-behalf-of'] = email;
+      }
+      return { token: TOKENS.grafana, headers };
+    };
+    const got = await api('GET', `/v1/incidents/${incidentId}`, as('alice@example.test'));
+    expect(got.status).toBe(200);
+    conform('/v1/incidents/{incident_ref}', 'get', got);
+    expect((await api('GET', `/v1/incidents/${incidentId}`, as(null))).status).toBe(403);
+    expect((await api('GET', `/v1/incidents/${incidentId}`, as('nobody@example.test'))).status).toBe(403);
+    // 映射到的用户没有读取权限
+    expect((await api('GET', `/v1/incidents/${incidentId}`, as('bob@example.test'))).status).toBe(403);
+
+    const inc = got.body as unknown as { components: string[] };
+    const fb = await api('POST', `/v1/incidents/${incidentId}/feedback`, {
+      ...as('alice@example.test'),
+      body: {
+        research_run_id: null,
+        verdict: 'confirmed',
+        root_component: inc.components[0],
+        disposition_verdict: null,
+        disposition: null,
+        mechanism: null,
+        reason: null,
+      },
+    });
+    expect(fb.status).toBe(201);
+    conform('/v1/incidents/{incident_ref}/feedback', 'post', fb);
+    expect(fb.body).toMatchObject({ channel: 'grafana', principal_id: 'oidc:alice' });
+    // 其余写操作一律拒绝，即使用户的角色允许
+    const research = await api('POST', `/v1/incidents/${incidentId}/research`, {
+      ...as('alice@example.test'),
+      body: {},
+    });
+    expect(research.status).toBe(403);
+  });
+
+  it('控制台静态文件：资源长期缓存，前端路由返回 index.html 并带 CSP，接口路径不回落到前端', async () => {
+    const asset = await fetch(`${srv.apiUrl}/assets/index-3f9a1c.js`);
+    expect(asset.status).toBe(200);
+    expect(asset.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
+    expect(asset.headers.get('content-type')).toMatch(/^text\/javascript/);
+    expect(await asset.text()).toBe('console.log(1)');
+
+    const icon = await fetch(`${srv.apiUrl}/favicon.svg`);
+    expect(icon.headers.get('content-type')).toBe('image/svg+xml');
+    expect(icon.headers.get('cache-control')).toBe('no-cache');
+
+    for (const path of ['/', `/incidents/${incidentId}`, '/settings/packs?tab=lock']) {
+      const page = await fetch(`${srv.apiUrl}${path}`);
+      expect(page.status).toBe(200);
+      expect(page.headers.get('cache-control')).toBe('no-store');
+      expect(page.headers.get('content-security-policy')).toContain("style-src 'self' 'unsafe-inline'");
+      expect(await page.text()).toContain('<div id="root">');
+    }
+    expect((await fetch(`${srv.apiUrl}/assets/missing.js`)).status).toBe(404);
+    expect((await fetch(`${srv.apiUrl}/assets/..%2f..%2fcallers.yaml`)).status).toBe(404);
+    const unknownApi = await fetch(`${srv.apiUrl}/v1/no-such-endpoint`);
+    expect(unknownApi.status).toBe(404);
+    expect(unknownApi.headers.get('content-type')).toMatch(/^application\/json/);
   });
 
   it('事件流按游标返回全部类型，长轮询在没有新事件时等待', async () => {

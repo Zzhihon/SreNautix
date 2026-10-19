@@ -83,9 +83,25 @@ audit:
 
 | 端口 | 内容 |
 |---|---|
-| `listen.api`（默认 :8080） | 全部 `/v1/*` 接口、webhook、渠道回调、`/healthz`、`/readyz` |
+| `listen.api`（默认 :8080） | 全部 `/v1/*` 接口、webhook、渠道回调、`/healthz`、`/readyz`、控制台前端 |
 | `listen.metrics`（默认 :9090） | `/metrics`（`srenautix_*`） |
 | `listen.probes`（默认 :8081） | `/healthz`、`/readyz` |
+
+## 控制台前端与 `--serve`
+
+控制台前端（`web/console` 的构建产物，镜像内 `/app/web/console/dist`，配置项 `console.dir`）由 server 在 API 端口上提供：
+
+- `/assets/*`：带内容哈希的文件，`Cache-Control: public, max-age=31536000, immutable`。
+- 目录根部的其他文件（例如 favicon）：`Cache-Control: no-cache`。
+- 其余不以 `/v1/`、`/healthz`、`/readyz`、`/metrics` 开头的 GET 返回 `index.html`（前端路由），`Cache-Control: no-store`，带 CSP `default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'`（uPlot 与 Radix 使用内联 style 属性）。
+
+| `--serve` | 内容 |
+|---|---|
+| `all`（默认） | 接口、控制台前端、单活工作 |
+| `api` | 接口与单活工作，不提供控制台前端（不需要 `console.dir`） |
+| `console` | 接口与控制台前端；不参与选主、不运行 informer，用于单独扩容控制台的 Deployment |
+
+`console.dir` 中没有 `index.html` 时，`all` 与 `console` 启动失败。
 
 ## 单活工作
 
@@ -129,7 +145,7 @@ server 启动时用 packages/packs-sdk 加载 `packs.dirs` 下的领域包（每
 
 以上情况都发布 `PackLoadFailed` 条件（subject 为包名），控制台"领域包"页（`GET /v1/packs`）列出原因。证据数据源的标签档案探测失败时发布 `DatasourceUnavailable`（subject `evidence-metrics`），查询按规范标签名照常发出。
 
-`chains.yaml` 的 `excludes`（排除规则）由 packs-sdk 编译与求值；packs-sdk 提供这一部分之前，阶段 A 不据此判定 `ignore`，加载时对声明了排除规则的证据链给出警告。
+排除规则（`chains.yaml` 的 `excludes`）只在本次执行过的证据链上求值，上下文与规则提议相同；按声明顺序第一条命中时 disposition 为 `ignore`，报告中记录规则引用 `<pack>/<chain id>#excludes[<序号>]`。求值出错的规则不命中，计入 `srenautix_stage_a_rule_errors_total`。
 
 ## 本地运行与控制台 e2e
 
@@ -137,7 +153,7 @@ server 启动时用 packages/packs-sdk 加载 `packs.dirs` 下的领域包（每
 
 1. 用 `apps/srenautix/test/support/pg-cluster.ts` 的方式（`initdb` + `pg_ctl`）或任意 PostgreSQL 16+，执行 `db bootstrap`，为三个角色设置口令。
 2. 按上面的最小配置写 YAML：`topology.source: off`、`ingest.reconcile.enabled: false`、不配置 `worker`；`public_url` 设为控制台的 Origin（CSRF 校验以它为准）。
-3. `PGHOST=127.0.0.1 PGSSLMODE=disable PGUSER=srenautix_server … node apps/srenautix/dist/main.js --role=server --config=…`。
+3. `PGHOST=127.0.0.1 PGSSLMODE=disable PGUSER=srenautix_server … node apps/srenautix/dist/main.js --role=server --config=…`。用 `console.dir` 指向 `web/console/dist` 时 server 直接提供控制台前端；用 `vite preview` 代理 `/v1` 时加 `--serve=api`。
 4. 登录：`POST /v1/auth/login {username, password, totp}`，响应设置 `__Host-srenautix_session` cookie 并返回 `csrf_token`。
 5. 写入告警：`POST /v1/ingest/<source_id>`（`Authorization: Bearer <该接入源的 token>`），请求体为 Alertmanager webhook（`apps/srenautix/test/fixtures/alertmanager/` 中有录制样本）。几秒内出现事件与阶段 A 报告。
 6. 写入研判结果：研判由 worker 产生。没有 worker 时，可以用 worker 的服务 token 调 `POST /v1/research/claim` 认领任务、`GET /v1/research/tasks/{run_id}/context` 取输入、`POST /v1/proposals` 提交提议。

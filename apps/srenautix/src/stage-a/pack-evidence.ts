@@ -3,6 +3,7 @@ import { parseKey } from '@srenautix/core';
 import { toIso } from '@srenautix/integration-sdk';
 import {
   durationSeconds,
+  evaluateExcludes,
   evaluateRules,
   runCard,
   DEFAULT_WINDOW,
@@ -129,6 +130,7 @@ export class PackEvidence implements EvidenceRunner {
     const cards = await this.execute(plan, Date.parse(inc.first_firing_at), Date.now(), signal);
     return {
       cards: cards.map((c, i) => ({ ...c, ref: `card:${i + 1}` })),
+      chains: chainsRun,
       runbooks: this.runbooks(chainsRun),
       rootComponentType,
     };
@@ -262,10 +264,11 @@ export class PackRules implements RuleProposer {
     private readonly metrics: ServerMetrics,
   ) {}
 
-  evaluate(inc: Incident, alerts: Alert[], run: EvidenceRun): RuleHit[] {
+  /** 规则提议与排除规则共用的 CEL 上下文；没有根因实体时为 null（两者都不求值）。 */
+  private context(inc: Incident, alerts: Alert[], run: EvidenceRun): RuleContext | null {
     const root = inc.root.entity;
-    if (!root || !this.rt.set.rules.length) {
-      return [];
+    if (!root) {
+      return null;
     }
     const cards: RuleContext['cards'] = {};
     // 同一张卡对多个实体执行时，以根因实体上的结果为准（根因的卡排在前面）
@@ -277,7 +280,7 @@ export class PackRules implements RuleProposer {
         reason_kind: c.reason.kind,
       };
     }
-    const ev = evaluateRules(this.rt.set, {
+    return {
       incident: {
         id: inc.incident_id,
         version: inc.incident_version,
@@ -298,7 +301,15 @@ export class PackRules implements RuleProposer {
         component_type: run.rootComponentType ?? '',
       },
       cards,
-    });
+    };
+  }
+
+  evaluate(inc: Incident, alerts: Alert[], run: EvidenceRun): RuleHit[] {
+    const ctx = this.context(inc, alerts, run);
+    if (!ctx || !this.rt.set.rules.length) {
+      return [];
+    }
+    const ev = evaluateRules(this.rt.set, ctx);
     for (const e of ev.errors) {
       this.metrics.ruleErrors.inc({ rule: `${e.pack}/${e.rule_id}` });
       logger.warn('规则提议求值出错', { incident_id: inc.incident_id, rule: `${e.pack}/${e.rule_id}`, error: e.error });
@@ -316,11 +327,18 @@ export class PackRules implements RuleProposer {
     });
   }
 
-  /**
-   * 排除规则（chains.yaml 的 excludes）由 packages/packs-sdk 编译与求值；packs-sdk 提供之前，
-   * 声明了排除规则的包在加载时给出警告，这里不做排除。
-   */
-  excluded(_inc: Incident, _alerts: Alert[], _run: EvidenceRun): string | null {
-    return null;
+  /** 执行过的证据链上的排除规则，按声明顺序取第一条命中；求值出错的规则不命中。 */
+  excluded(inc: Incident, alerts: Alert[], run: EvidenceRun): string | null {
+    const ctx = this.context(inc, alerts, run);
+    if (!ctx || !run.chains.length) {
+      return null;
+    }
+    const ev = evaluateExcludes(this.rt.set, run.chains, ctx);
+    for (const e of ev.errors) {
+      const ref = `${e.chain}#excludes[${e.index}]`;
+      this.metrics.ruleErrors.inc({ rule: ref });
+      logger.warn('排除规则求值出错', { incident_id: inc.incident_id, rule: ref, error: e.error });
+    }
+    return ev.hit ? `${ev.hit.chain}#excludes[${ev.hit.index}]` : null;
   }
 }

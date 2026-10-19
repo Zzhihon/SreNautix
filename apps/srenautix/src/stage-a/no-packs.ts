@@ -7,7 +7,7 @@ import type { EvidenceRun, EvidenceRunner, RuleHit, RuleProposer } from './ports
  */
 export class NoPackEvidence implements EvidenceRunner {
   async run(_incident: Incident, _alerts: Alert[], _signal: AbortSignal): Promise<EvidenceRun> {
-    return { cards: [], runbooks: [], rootComponentType: null };
+    return { cards: [], chains: [], runbooks: [], rootComponentType: null };
   }
 
   async rerun(

@@ -3,7 +3,7 @@ import type { ResolvedRcaParams } from '@srenautix/core';
 import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
 import { createApp } from '../api/http.js';
-import { leaseLeader, singleLeader, type Leader } from '../api/leader.js';
+import { leaseLeader, neverLeader, singleLeader, type Leader } from '../api/leader.js';
 import { registerProposalRoutes } from '../api/routes-proposals.js';
 import { registerResearchRoutes } from '../api/routes-research.js';
 import { pgConfigFromEnv } from '../config/database.js';
@@ -12,12 +12,13 @@ import { loadServerConfig, type ServerConfig } from '../config/server.js';
 import { ConditionPublisher, serverConditions } from '../console-bff/conditions.js';
 import { registerIncidentRoutes } from '../console-bff/routes-incidents.js';
 import { apiTokenCaller, registerSystemRoutes } from '../console-bff/routes-system.js';
+import { registerConsoleStatic } from '../console-bff/static.js';
 import { registerEvents } from '../events/http.js';
 import { OutboxListener } from '../events/listener.js';
 import { Auth } from '../identity/auth.js';
 import { Bindings, scopeMatches } from '../identity/bindings.js';
 import { CallerRegistry } from '../identity/callers.js';
-import { ChatLinks } from '../identity/chat-links.js';
+import { ChatLinks, usersByEmail } from '../identity/chat-links.js';
 import { LocalAdmin } from '../identity/local-admin.js';
 import { Oidc } from '../identity/oidc.js';
 import { registerAuthRoutes } from '../identity/routes.js';
@@ -78,6 +79,11 @@ export interface BuildOptions {
   noAuxListeners?: boolean;
   /** 测试用：API 端口覆盖配置。 */
   apiListen?: { host: string; port: number };
+  /**
+   * all：接口、控制台与单活工作；api：不提供控制台静态文件；console：接口与控制台，不参与选主、
+   * 不运行 informer（控制台单独扩容的副本，DESIGN §1.1）。命令行默认 all；在进程内组装（测试）时默认 api。
+   */
+  serve?: 'all' | 'api' | 'console';
 }
 
 /** 状态库里的抑制规则：matchers 是标签等值条件，全部满足的告警被抑制（只影响 SreNautix 自己的消息与研判）。 */
@@ -97,7 +103,8 @@ async function suppressedAlertIds(c: pg.PoolClient | pg.Pool, clusterId: string,
 /** 组装 server 角色的全部组件并启动 HTTP 接口与后台循环。 */
 export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
   const c = o.config;
-  configureLog(c.log_level, { role: 'server', cluster_id: c.cluster_id });
+  const serve = o.serve ?? 'api';
+  configureLog(c.log_level, { role: 'server', cluster_id: c.cluster_id, serve });
   const metrics = new ServerMetrics('server', !o.noAuxListeners);
   const pool = createPool(o.pg, 'srenautix-server', c.database.pool_size);
   const applied = await migrateExpand(pool, 'server', serverTracks);
@@ -117,7 +124,14 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
     absoluteMs: parseDuration('identity.session_absolute', c.identity.session_absolute),
   };
   const sessions = new Sessions(pool, sessionPolicy);
-  const auth = new Auth(sessions, callers, bindings, publicOrigin, (t) => apiTokenCaller(pool, t));
+  const auth = new Auth(
+    sessions,
+    callers,
+    bindings,
+    publicOrigin,
+    (t) => apiTokenCaller(pool, t),
+    (email) => usersByEmail(pool, email),
+  );
   const lockout = {
     maxFailures: c.identity.lockout_failures,
     windowMs: parseDuration('identity.lockout_window', c.identity.lockout_window),
@@ -236,14 +250,16 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
 
   // 领导者
   const leader =
-    c.leader.mode === 'lease'
-      ? leaseLeader({
-          namespace: c.leader.namespace,
-          name: c.leader.name,
-          durationMs: parseDuration('leader.duration', c.leader.duration),
-          kubeconfigPath: c.topology.kubeconfig,
-        })
-      : singleLeader();
+    serve === 'console'
+      ? neverLeader()
+      : c.leader.mode === 'lease'
+        ? leaseLeader({
+            namespace: c.leader.namespace,
+            name: c.leader.name,
+            durationMs: parseDuration('leader.duration', c.leader.duration),
+            kubeconfigPath: c.topology.kubeconfig,
+          })
+        : singleLeader();
 
   // 通知
   const source = new PgMessageSource(
@@ -450,6 +466,9 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
     },
   });
   notify.registerRoutes(app);
+  if (serve !== 'api') {
+    registerConsoleStatic(app, c.console.dir);
+  }
 
   const listen =
     o.apiListen ??
@@ -564,7 +583,7 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
   }
 
   let informer: Awaited<ReturnType<typeof startInformerTopology>> | null = null;
-  if (c.topology.source === 'informer') {
+  if (c.topology.source === 'informer' && serve !== 'console') {
     informer = startInformerTopology({
       store: topology,
       clusterId: c.cluster_id,
@@ -658,7 +677,11 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
 /** `--role=server` 入口。 */
 export async function run(args: RoleArgs): Promise<void> {
   const config = loadServerConfig(args.configPath);
-  const h = await buildServer({ config, pg: pgConfigFromEnv(process.env, config.database.password_file) });
+  const h = await buildServer({
+    config,
+    pg: pgConfigFromEnv(process.env, config.database.password_file),
+    serve: args.serve,
+  });
   const shutdown = (sig: string) => {
     logger.info('收到信号，停止 server', { signal: sig });
     void h.stop().then(() => process.exit(0));

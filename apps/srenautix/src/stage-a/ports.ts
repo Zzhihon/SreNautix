@@ -4,6 +4,8 @@ import type { Alert, EvidenceResult, Incident, LocalizedText } from '@srenautix/
 export interface EvidenceRun {
   /** 每张卡的结果编号 card:<n> 在本次运行内唯一；根因的卡在前。 */
   cards: EvidenceResult[];
+  /** 执行过的证据链全局键 <pack>/<chain id>（排除规则只在这些证据链上求值）。 */
+  chains: string[];
   /** 执行过的证据链对应的 runbook 引用 <pack>/<runbook 文件>#<锚点>。 */
   runbooks: string[];
   /** 根因组件匹配到的组件类型（components.yaml）；没有根因或没有匹配时为 null。 */
@@ -39,6 +41,9 @@ export interface RuleHit {
 export interface RuleProposer {
   /** 领域包的确定性规则（when 为 CEL，引用 incident、root、cards）；只能引用目录中已有的动作。 */
   evaluate(incident: Incident, alerts: Alert[], run: EvidenceRun): RuleHit[];
-  /** 执行过的证据链中，排除规则（chains.yaml 的 excludes）命中时返回规则 id（disposition=ignore）。 */
+  /**
+   * 执行过的证据链中，排除规则（chains.yaml 的 excludes）命中时返回规则的引用
+   * `<pack>/<chain id>#excludes[<序号>]`（disposition=ignore）。
+   */
   excluded(incident: Incident, alerts: Alert[], run: EvidenceRun): string | null;
 }

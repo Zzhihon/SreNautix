@@ -104,7 +104,7 @@ bindings:
     max_risk_tier: L                            # 只对有审批权限的角色有意义
 ```
 
-- `user` 的 `name` 是主体 id：OIDC 用户为 `oidc:<sub>`，本地管理员为 `local:<用户名>`，Grafana 插件转发的用户为 `grafana:<登录名>`。本地管理员属于组 `srenautix:local-admin`。
+- `user` 的 `name` 是主体 id：OIDC 用户为 `oidc:<sub>`，本地管理员为 `local:<用户名>`。本地管理员属于组 `srenautix:local-admin`。Grafana 插件转发的请求以映射到的 OIDC 用户为主体（见下文"Grafana 插件"）。
 - `group` 的 `name` 是 ID Token 中 `groups_claim` 的取值。
 - 目录中的 `REVISION` 文件（git-sync 等工具写入的提交 SHA）作为版本显示；没有这个文件时，版本是全部文件内容的 sha256。
 - 未知字段、未知角色或格式错误都会让 server 启动失败。
@@ -153,7 +153,17 @@ callers:
   - { id: grafana, kind: grafana, token_sha256: … }
 ```
 
-外部调用方只能提议，不能审批，也不能修改策略。Grafana 插件转发时在 `X-SreNautix-User` 与 `X-SreNautix-Groups` 中给出 Grafana 用户，按角色绑定授权。
+外部调用方只能提议，不能审批，也不能修改策略。
+
+### Grafana 插件
+
+插件后端用调用方文件中 `kind: grafana` 的 token 转发请求，并在 `X-SreNautix-On-Behalf-Of` 中给出当前 Grafana 用户的邮箱：
+
+1. server 用邮箱（不区分大小写）查找登录过控制台的用户，匹配 OIDC ID Token 的 `email` 声明。用户需要先用 OIDC 登录一次控制台。
+2. 恰好匹配一个用户时，以该用户为主体、用最近一次登录时的组按角色绑定授权；没有邮箱、匹配不到或匹配到多个用户时返回 403。
+3. 只放行 GET 与提交反馈（`POST /v1/incidents/{ref}/feedback`），其余写操作即使用户的角色允许也返回 403。反馈的 `channel` 记为 `grafana`。
+
+插件自己声明的用户名或组不参与授权。
 
 ## 聊天账号绑定
 

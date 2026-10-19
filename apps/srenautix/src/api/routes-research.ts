@@ -2,12 +2,15 @@ import type { Alert, Feedback, Incident } from '@srenautix/contract';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type pg from 'pg';
 import type { OutboxListener } from '../events/listener.js';
-import type { Auth } from '../identity/auth.js';
+import { incidentTarget, visible } from '../console-bff/routes-incidents.js';
+import { principalOf, type Auth } from '../identity/auth.js';
 import { incidentVersion, latestStageA, resolveIncidentRef } from '../incident/read.js';
 import { alertsById } from '../ingest/store.js';
 import type { Catalog } from '../proposals/catalog.js';
 import type { FeedbackService } from '../proposals/feedback.js';
 import { LeaseLost, type Scheduler } from '../scheduler/admission.js';
+import { appendAudit } from '../store/audit.js';
+import { tx } from '../store/pool.js';
 import type { TopologyStore } from '../topology/store.js';
 import { badRequest, forbidden, HttpError, notFound } from './errors.js';
 
@@ -215,13 +218,42 @@ export function registerResearchRoutes(app: FastifyInstance, d: ResearchRouteDep
     return reply.code(202).send({ run_id: r.runId, merged: r.outcome === 'duplicate' });
   });
 
-  /** 研判运行明细由 worker 持有，server 按调用方作用域转发（原始提示词只对 auditor 与 admin）。 */
-  for (const path of ['/v1/runs/:run_id', '/v1/runs/:run_id/manifest', '/v1/runs/:run_id/prompt/raw']) {
+  /** 研判所属事件的授权对象（经 server 的研判镜像找到事件）；没有这次研判时为 404。 */
+  const runTarget = async (runId: string) => {
+    const r = await d.pool.query<{ body: Incident }>(
+      `SELECT i.body FROM server.research_runs r JOIN server.incidents i ON i.incident_id = r.incident_id
+        WHERE r.run_id::text = $1`,
+      [runId],
+    );
+    const row = r.rows[0];
+    if (!row) {
+      throw notFound('没有这次研判');
+    }
+    return incidentTarget(row.body);
+  };
+
+  /**
+   * 研判运行明细由 worker 持有，server 按调用方对研判所属事件的读取作用域转发。
+   * 原始提示词只对有 prompt.raw 权限的角色（auditor、admin），每次成功读取都写入治理审计。
+   */
+  for (const path of [
+    '/v1/runs/:run_id',
+    '/v1/runs/:run_id/manifest',
+    '/v1/runs/:run_id/prompts',
+    '/v1/runs/:run_id/prompt/raw',
+  ]) {
     app.get(path, async (req, reply) => {
+      const runId = (req.params as { run_id: string }).run_id;
+      const target = await runTarget(runId);
+      let actor: string;
       if (path.endsWith('/prompt/raw')) {
-        await d.auth.user(req, 'prompt.raw');
+        actor = principalOf(await d.auth.user(req, 'prompt.raw', target));
       } else {
-        await d.auth.reader(req);
+        const { caller, scopes } = await d.auth.reader(req);
+        if (!visible(scopes, target)) {
+          throw notFound('没有这次研判');
+        }
+        actor = principalOf(caller);
       }
       if (!d.worker) {
         throw new HttpError(503, 'unavailable', '没有配置 worker，研判明细不可用');
@@ -231,6 +263,9 @@ export function registerResearchRoutes(app: FastifyInstance, d: ResearchRouteDep
         signal: AbortSignal.timeout(10_000),
       });
       const text = await res.text();
+      if (path.endsWith('/prompt/raw') && res.ok) {
+        await tx(d.pool, (c) => appendAudit(c, 'prompt.raw.read', actor, { run_id: runId }));
+      }
       return reply.code(res.status).type('application/json').send(text);
     });
   }

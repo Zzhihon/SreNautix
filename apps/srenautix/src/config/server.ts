@@ -100,6 +100,11 @@ export const serverConfigSchema = z
       })
       .strict()
       .default({ api: ':8080', metrics: ':9090', probes: ':8081' }),
+    // 控制台前端的构建产物（web/console/dist）；--serve=all|console 时由 server 提供
+    console: z
+      .object({ dir: path.default('/app/web/console/dist') })
+      .strict()
+      .default({ dir: '/app/web/console/dist' }),
     database: z
       .object({
         password_file: path.default('/etc/srenautix/secrets/db/password'),

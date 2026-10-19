@@ -147,11 +147,6 @@ export class PackRuntime {
           capabilities: o.capabilities,
           ...(expectedLock ? { expectedLock } : {}),
         });
-        for (const [key, ch] of set.chains) {
-          if (ch.chain.excludes?.length) {
-            logger.warn('证据链声明了排除规则，packs-sdk 还不能求值，阶段 A 暂不据此排除', { chain: key });
-          }
-        }
         return new PackRuntime(set, active, failures, o.capabilities);
       } catch (e) {
         if (e instanceof PackLockMismatch) {

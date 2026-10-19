@@ -14,6 +14,11 @@ export function singleLeader(): Leader {
   return { isLeader: () => true, acquired: async () => undefined, stop: async () => undefined };
 }
 
+/** 只提供控制台的副本（--serve=console）：不参与选主，从不做单活工作。 */
+export function neverLeader(): Leader {
+  return { isLeader: () => false, acquired: () => new Promise(() => undefined), stop: async () => undefined };
+}
+
 /**
  * 用 Kubernetes Lease 选主（DESIGN §15.2：事件引擎、调度器与 Telegram 长轮询单活）。持有者身份是 Pod 名；
  * 每 duration/3 续约一次，续约失败或被别人取得时立即放弃主身份，单活工作在下一次检查时停止。

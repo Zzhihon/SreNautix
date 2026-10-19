@@ -12,10 +12,18 @@ export type Caller =
 
 const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
+/** Grafana 插件转发时唯一允许的写操作：createFeedback。 */
+const GRAFANA_WRITES = new Set(['POST /v1/incidents/:ref/feedback']);
+
+const EMAIL = /^[^\s@]+@[^\s@]+$/;
+
 /**
  * 认证与授权。控制台用服务端会话（cookie），改变状态的请求校验 Origin 与 CSRF token；
  * 服务调用方（worker、分支、外部提议方、Grafana 插件）用 bearer token。
- * Grafana 插件转发时在 X-SreNautix-User / X-SreNautix-Groups 中给出 Grafana 用户，按角色绑定授权。
+ *
+ * Grafana 插件（调用方文件中 kind: grafana 的 token）转发时带 X-SreNautix-On-Behalf-Of（Grafana 用户的邮箱）：
+ * server 把邮箱映射到登录过 SreNautix 的用户（OIDC 的 email 声明），按该用户的角色绑定授权；
+ * 映射不到或映射到多个用户时返回 403。只放行 GET 与 createFeedback。
  */
 export class Auth {
   constructor(
@@ -25,6 +33,8 @@ export class Auth {
     private readonly publicOrigin: string,
     /** 控制台创建的 API token（存在 PG，只有提议权限）；不在调用方文件中的 token 再查这里。 */
     private readonly apiTokens: ((token: string) => Promise<ServiceCaller | null>) | null = null,
+    /** 邮箱 → 登录过的用户（按小写比较）；没有配置时 Grafana 插件的请求一律 403。 */
+    private readonly usersByEmail: ((email: string) => Promise<Subject[]>) | null = null,
   ) {}
 
   setBindings(b: Bindings): void {
@@ -47,18 +57,23 @@ export class Auth {
         throw unauthorized('未知的 bearer token');
       }
       if (c.kind === 'grafana') {
-        const user = req.headers['x-srenautix-user'];
-        if (typeof user !== 'string' || !user.trim()) {
-          throw unauthorized('Grafana 插件转发时必须带 X-SreNautix-User');
+        if (req.method !== 'GET' && !GRAFANA_WRITES.has(`${req.method} ${req.routeOptions.url ?? ''}`)) {
+          throw forbidden('Grafana 插件只能调用读取接口与 createFeedback');
         }
-        const groups =
-          typeof req.headers['x-srenautix-groups'] === 'string'
-            ? (req.headers['x-srenautix-groups'] as string)
-                .split(',')
-                .map((g) => g.trim())
-                .filter(Boolean)
-            : [];
-        return { kind: 'grafana', caller: c, subject: { id: `grafana:${user.trim()}`, groups }, channel: 'grafana' };
+        const raw = req.headers['x-srenautix-on-behalf-of'];
+        const email = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
+        if (!EMAIL.test(email)) {
+          throw forbidden('Grafana 插件转发时必须在 X-SreNautix-On-Behalf-Of 中给出用户邮箱');
+        }
+        const users = this.usersByEmail ? await this.usersByEmail(email) : [];
+        if (users.length !== 1) {
+          throw forbidden(
+            users.length
+              ? `邮箱 ${email} 对应多个用户`
+              : `邮箱 ${email} 没有对应的 SreNautix 用户（需要先登录一次控制台）`,
+          );
+        }
+        return { kind: 'grafana', caller: c, subject: users[0] as Subject, channel: 'grafana' };
       }
       return { kind: 'service', caller: c };
     }

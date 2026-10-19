@@ -1,6 +1,7 @@
 import { createHash, randomInt } from 'node:crypto';
 import type pg from 'pg';
 import { tx } from '../store/pool.js';
+import type { Subject } from './bindings.js';
 
 const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const CODE_TTL_S = 600;
@@ -132,6 +133,15 @@ export class ChatLinks {
 }
 
 /** 用户首次或再次登录：记录主体与外部 id（union_id 用于自动绑定）。 */
+/** 邮箱（OIDC 的 email 声明，按小写比较）对应的已登录用户；组取最近一次登录时的值。 */
+export async function usersByEmail(pool: pg.Pool, email: string): Promise<Subject[]> {
+  const r = await pool.query<{ principal_id: string; groups: string[] }>(
+    "SELECT principal_id, groups FROM server.users WHERE lower(external_ids->>'email') = $1 ORDER BY principal_id",
+    [email.toLowerCase()],
+  );
+  return r.rows.map((u) => ({ id: u.principal_id, groups: u.groups }));
+}
+
 export async function upsertUser(
   pool: pg.Pool,
   p: { id: string; display_name: string; groups: string[] },
