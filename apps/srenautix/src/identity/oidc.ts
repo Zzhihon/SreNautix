@@ -35,6 +35,11 @@ export class Oidc {
     private readonly s: OidcSettings,
   ) {}
 
+  /** 登录页显示的名称：身份提供方的主机名。 */
+  get displayName(): string {
+    return new URL(this.s.issuer).host;
+  }
+
   private async cfg(): Promise<client.Configuration> {
     if (!this.config) {
       this.config = await client.discovery(

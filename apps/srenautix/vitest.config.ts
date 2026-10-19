@@ -1,10 +1,10 @@
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
+  // 工作区内的包直接使用源码（package.json exports 的 @srenautix/source 条件）；测试在 Node 环境运行，取 ssr 的解析条件
   resolve: {
     conditions: ['@srenautix/source'],
   },
-  // 测试在 SSR 环境中运行，工作区包的源码入口也要按这个条件解析
   ssr: {
     resolve: {
       conditions: ['@srenautix/source'],

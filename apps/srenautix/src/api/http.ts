@@ -6,7 +6,7 @@ import { HttpError } from './errors.js';
 export interface AppOptions {
   /** 请求体上限（字节）；webhook 载荷可能较大。 */
   bodyLimit: number;
-  /** 信任的反向代理层数，用于取客户端地址。 */
+  /** 是否信任反向代理的 X-Forwarded-* 头，用于取客户端地址。 */
   trustProxy: boolean;
 }
 
@@ -15,7 +15,7 @@ export interface AppOptions {
  * 原始请求体保留在 req.rawBody（webhook 签名校验需要原文）。
  */
 export async function createApp(o: AppOptions): Promise<FastifyInstance> {
-  const app = Fastify({ logger: false, bodyLimit: o.bodyLimit, trustProxy: o.trustProxy, disableRequestLogging: true });
+  const app = Fastify({ logger: false, bodyLimit: o.bodyLimit, trustProxy: o.trustProxy });
   await app.register(cookie);
 
   app.removeAllContentTypeParsers();

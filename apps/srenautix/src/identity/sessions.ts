@@ -73,8 +73,13 @@ function fromRow(r: Row): Session {
 export class Sessions {
   constructor(
     private readonly pool: pg.Pool,
-    private readonly policy: SessionPolicy,
+    readonly policy: SessionPolicy,
   ) {}
+
+  /** 会话实际失效的时间：空闲截止与累计截止中较早的一个。 */
+  effectiveExpiry(s: Session): Date {
+    return new Date(Math.min(s.lastSeenAt.getTime() + this.policy.idleMs, s.expiresAt.getTime()));
+  }
 
   async create(p: AuthenticatedPrincipal, breakGlass: boolean): Promise<{ id: string; session: Session }> {
     const id = randomBytes(32).toString('base64url');

@@ -78,15 +78,9 @@ export class LocalAdmin {
     };
   }
 
-  /** 已登录的本地管理员用 TOTP 重新认证（H 档审批）。 */
-  async reauth(code: string): Promise<Date | null> {
-    const now = await this.dbNow();
-    const counter = this.matchTotp(code, now);
-    if (counter === null || !(await this.consumeCounter(this.cfg.username, counter))) {
-      await this.fail(this.cfg.username);
-      return null;
-    }
-    return now;
+  /** 已登录的本地管理员用口令加 TOTP 重新认证（H 档审批）；与登录共用失败计数与锁定。 */
+  async reauth(password: string, code: string): Promise<LoginResult> {
+    return this.login(this.cfg.username, password, code);
   }
 
   private matchTotp(code: string, now: Date): number | null {
@@ -114,24 +108,23 @@ export class LocalAdmin {
     return until && until > now ? until : null;
   }
 
-  /** 记一次失败，返回锁定截止时间（未锁定为 null）。 */
+  /** 记一次失败；这次失败触发锁定时返回锁定截止时间，否则为 null。 */
   private async fail(username: string): Promise<Date | null> {
     return tx(this.pool, async (c) => {
-      const r = await c.query<{ locked_until: Date | null }>(
+      await c.query(
         `INSERT INTO server.login_attempts AS a (username, failures, window_started_at)
          VALUES ($1, 1, now())
          ON CONFLICT (username) DO UPDATE SET
            failures = CASE WHEN a.window_started_at < now() - make_interval(secs => $2) THEN 1 ELSE a.failures + 1 END,
-           window_started_at = CASE WHEN a.window_started_at < now() - make_interval(secs => $2) THEN now() ELSE a.window_started_at END
-         RETURNING locked_until`,
+           window_started_at = CASE WHEN a.window_started_at < now() - make_interval(secs => $2) THEN now() ELSE a.window_started_at END`,
         [username, this.lockout.windowMs / 1000],
       );
-      const lock = await c.query<{ locked_until: Date | null }>(
+      const lock = await c.query<{ locked_until: Date }>(
         `UPDATE server.login_attempts SET locked_until = now() + make_interval(secs => $3), failures = 0, window_started_at = now()
           WHERE username = $1 AND failures >= $2 RETURNING locked_until`,
         [username, this.lockout.maxFailures, this.lockout.durationMs / 1000],
       );
-      return lock.rows[0]?.locked_until ?? r.rows[0]?.locked_until ?? null;
+      return lock.rows[0]?.locked_until ?? null;
     });
   }
 
