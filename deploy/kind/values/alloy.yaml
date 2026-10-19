@@ -3,6 +3,7 @@ fullnameOverride: alloy
 controller:
   type: deployment
   replicas: 1
+  nodeSelector: {srenautix.io/zone: a}
 alloy:
   configMap:
     create: true

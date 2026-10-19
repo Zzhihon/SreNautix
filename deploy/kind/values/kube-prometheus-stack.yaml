@@ -7,8 +7,18 @@ kubeControllerManager: {enabled: false}
 kubeScheduler: {enabled: false}
 kubeProxy: {enabled: false}
 
+# 监控组件固定在 zone a（srenautix-worker）；节点 NotReady 场景停止 zone b 的节点，监控不受影响
+prometheusOperator:
+  nodeSelector: {srenautix.io/zone: a}
+  admissionWebhooks:
+    patch:
+      nodeSelector: {srenautix.io/zone: a}
+kube-state-metrics:
+  nodeSelector: {srenautix.io/zone: a}
+
 prometheus:
   prometheusSpec:
+    nodeSelector: {srenautix.io/zone: a}
     retention: 2d
     scrapeInterval: 15s
     evaluationInterval: 15s
@@ -23,6 +33,7 @@ prometheus:
 
 alertmanager:
   alertmanagerSpec:
+    nodeSelector: {srenautix.io/zone: a}
     # SreNautix chart 生成的 AlertmanagerConfig 在 srenautix 命名空间；不按命名空间改写匹配条件
     alertmanagerConfigSelector: {}
     alertmanagerConfigNamespaceSelector: {}
@@ -42,6 +53,7 @@ alertmanager:
       - name: "null"
 
 grafana:
+  nodeSelector: {srenautix.io/zone: a}
   adminPassword: srenautix-kind
   sidecar:
     dashboards:

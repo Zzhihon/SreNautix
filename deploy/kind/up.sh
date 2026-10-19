@@ -46,7 +46,7 @@ hi alloy grafana/alloy "$ALLOY_CHART_VERSION" monitoring alloy.yaml
 hi metrics-server metrics-server/metrics-server "$METRICS_SERVER_CHART_VERSION" kube-system metrics-server.yaml
 log "安装 CNPG operator（cloudnative-pg ${CNPG_CHART_VERSION}）"
 helm --kube-context "$KUBE_CONTEXT" upgrade --install cnpg cnpg/cloudnative-pg --version "$CNPG_CHART_VERSION" \
-  --namespace cnpg-system --create-namespace --wait --timeout 10m
+  --namespace cnpg-system --create-namespace -f "$KIND_DIR/values/cloudnative-pg.yaml" --wait --timeout 10m
 
 log "部署演示业务 shop 与背景噪声"
 k apply -k "$KIND_DIR/workloads"

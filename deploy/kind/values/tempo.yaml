@@ -1,5 +1,6 @@
 # 单进程 Tempo；metrics-generator 生成服务图指标并写入 Prometheus（拓扑的运行时观测边，DESIGN §4.2）
 fullnameOverride: tempo
+nodeSelector: {srenautix.io/zone: a}
 tempo:
   reportingEnabled: false
   retention: 48h

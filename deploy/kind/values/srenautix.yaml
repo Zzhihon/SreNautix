@@ -14,6 +14,10 @@ secrets:
 freeze:
   frozen: true
 
+# SreNautix 与监控一起固定在 zone a；节点 NotReady 场景停止 zone b 的节点
+global:
+  nodeSelector: {srenautix.io/zone: a}
+
 roles:
   server:
     resources:
