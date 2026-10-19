@@ -5,7 +5,17 @@
   "description": "用例的查询邻域快照（DESIGN §14.2 snapshot 模式）：用例被提升时固化研判所需的全部输入与两跳以内组件的数据源调用结果。回放只从快照读取（VCR）；快照中没有的调用返回不可用并计入未命中率。日常研判不录制快照",
   "type": "object",
   "additionalProperties": false,
-  "required": ["snapshot_id", "case_id", "format_version", "window", "as_of", "context", "calls", "created_at", "source"],
+  "required": [
+    "snapshot_id",
+    "case_id",
+    "format_version",
+    "window",
+    "as_of",
+    "context",
+    "calls",
+    "created_at",
+    "source"
+  ],
   "properties": {
     "snapshot_id": { "$ref": "common.schema.json#/$defs/Uuid" },
     "case_id": { "type": "string" },
@@ -46,7 +56,17 @@
       "description": "阶段 B 的输入（与 worker 从中心读取的研判上下文同形）。卡片判定、拓扑与动作目录都是固化时的结果",
       "type": "object",
       "additionalProperties": false,
-      "required": ["incident", "stage_a", "subgraph", "alerts", "actions", "runbooks", "knowledge", "cases", "templates"],
+      "required": [
+        "incident",
+        "stage_a",
+        "subgraph",
+        "alerts",
+        "actions",
+        "runbooks",
+        "knowledge",
+        "cases",
+        "templates"
+      ],
       "properties": {
         "incident": { "$ref": "incident.schema.json" },
         "stage_a": { "$ref": "stage-a-report.schema.json" },
