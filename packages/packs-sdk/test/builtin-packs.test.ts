@@ -24,11 +24,21 @@ describe('内置领域包', () => {
     expect(report.stale).toEqual([]);
     expect(report.forecastMismatch).toEqual([]);
   });
-
-  it('stable 的包：每张卡都有夹具，在 Prometheus 与 VictoriaMetrics 上结论一致，自动测试全部通过', async () => {
-    const set = await compilePackSet(loadBuiltinPacks(PACKS), { catalog: CATALOG });
-    const report = await runPackTests({ set });
-    expect(report.cases.filter((c) => !c.passed)).toEqual([]);
-    expect(report.packs.filter((p) => !p.passed)).toEqual([]);
-  });
 });
+
+// 每个包单独一个测试，各自启动后端，并发执行（vitest 的 maxConcurrency）
+const names = loadBuiltinPacks(PACKS).map((p) => p.name);
+const shared = compilePackSet(loadBuiltinPacks(PACKS), { catalog: CATALOG });
+
+describe.concurrent(
+  'stable 的包：每张卡都有夹具，在 Prometheus 与 VictoriaMetrics 上结论一致，自动测试全部通过',
+  () => {
+    it.each(names)('%s', async (name) => {
+      const set = await shared;
+      const report = await runPackTests({ set, packs: [name] });
+      expect(report.cases.filter((c) => !c.passed)).toEqual([]);
+      expect(report.packs.filter((p) => !p.passed)).toEqual([]);
+      expect(report.packs.map((p) => p.name)).toEqual([name]);
+    });
+  },
+);
