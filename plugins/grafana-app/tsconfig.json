@@ -1,7 +1,8 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "rootDir": ".",
+    "rootDir": "../..",
+    "allowImportingTsExtensions": true,
     "noEmit": true,
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "module": "ESNext",

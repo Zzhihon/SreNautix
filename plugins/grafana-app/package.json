@@ -8,10 +8,10 @@
   "scripts": {
     "build": "tsc --noEmit && vite build && pnpm run build:backend",
     "build:frontend": "vite build",
-    "build:backend": "node scripts/build-backend.ts",
+    "build:backend": "node --import tsx scripts/build-backend.ts",
     "typecheck": "tsc --noEmit",
     "test": "go vet ./pkg/... && go test ./pkg/...",
-    "e2e": "PLAYWRIGHT_BROWSERS_PATH=../../.scratch/ms-playwright playwright test"
+    "e2e": "tsx ../../packages/ui/scripts/browsers.ts --full && playwright test"
   },
   "dependencies": {
     "@srenautix/contract": "workspace:*",
@@ -31,6 +31,8 @@
     "react": "19.3.1",
     "react-dom": "19.3.1",
     "rxjs": "7.8.2",
+    "tsx": "4.23.15",
+    "yaml": "2.9.1",
     "vite": "8.3.4",
     "vite-plugin-css-injected-by-js": "5.0.2"
   }
