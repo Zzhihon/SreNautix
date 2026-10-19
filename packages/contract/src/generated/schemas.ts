@@ -2207,7 +2207,7 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
       'window',
       'as_of',
       'context',
-      'calls',
+      'queries',
       'created_at',
       'source',
     ],
@@ -2221,10 +2221,9 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
       },
       as_of: { $ref: 'common.schema.json#/$defs/Timestamp' },
       context: { $ref: '#/$defs/Context' },
-      calls: {
-        type: 'array',
-        description: '数据源调用的录制结果（VCR 条目），按 (capability, request) 唯一',
-        items: { $ref: '#/$defs/Call' },
+      queries: {
+        description: '数据源调用的录制结果（VCR），与领域包的 pack test --replay 使用同一种查询快照',
+        $ref: '#/$defs/QuerySnapshot',
       },
       created_at: { $ref: 'common.schema.json#/$defs/Timestamp' },
       source: {
@@ -2363,26 +2362,98 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
           source: { type: 'string', enum: ['human', 'model'] },
         },
       },
-      Call: {
-        title: 'EvalSnapshotCall',
+      QuerySnapshot: {
+        title: 'QuerySnapshot',
+        description:
+          '查询快照 srenautix.io/query-snapshot/v1：请求按去掉 clock_window 之后的规范 JSON（JCS）与操作名组成键，回放时按键读取，没有的请求为快照未命中',
         type: 'object',
         additionalProperties: false,
-        required: ['key', 'capability', 'request', 'status', 'error', 'result', 'downsampled'],
+        required: [
+          'api_version',
+          'snapshot_id',
+          'recorded_at',
+          'clock_window',
+          'ids',
+          'capabilities',
+          'metrics_dialects',
+          'label_profile',
+          'logs_profile',
+          'entries',
+          'cases',
+        ],
         properties: {
-          key: { type: 'string', description: 'sha256(capability + JCS(request)) 的十六进制前 32 位；回放时按它查找' },
-          capability: {
-            type: 'string',
-            description:
-              '集成能力，例如 metrics.query_range、metrics.query、logs.match、traces.search、traces.trace，或只读工具名',
-            pattern: '^[a-z][a-z0-9_.-]*$',
+          api_version: { const: 'srenautix.io/query-snapshot/v1' },
+          snapshot_id: { type: 'string' },
+          recorded_at: { $ref: 'common.schema.json#/$defs/Timestamp' },
+          clock_window: { $ref: 'common.schema.json#/$defs/TimeWindow' },
+          ids: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['metrics', 'logs', 'traces'],
+            properties: {
+              metrics: { type: ['string', 'null'] },
+              logs: { type: ['string', 'null'] },
+              traces: { type: ['string', 'null'] },
+            },
           },
-          request: { type: 'object', description: '规范化后的请求（时间为 unix 秒）' },
-          status: { type: 'string', enum: ['ok', 'error'] },
-          error: { type: ['string', 'null'] },
-          result: { description: '结果原样保存，形状由能力的集成契约决定；失败时为 null' },
-          downsampled: {
-            type: 'boolean',
-            description: '结果是降采样后的原始序列（每点前 5 分钟的最小、最大、平均）。依赖它的卡标注为重建',
+          capabilities: {
+            type: 'array',
+            items: {
+              type: 'string',
+              enum: [
+                'metrics.query',
+                'metrics.query_range',
+                'metrics.series',
+                'logs.match',
+                'logs.query',
+                'traces.search',
+              ],
+            },
+          },
+          metrics_dialects: { type: 'array', items: { type: 'string', enum: ['promql', 'metricsql'] } },
+          label_profile: {
+            oneOf: [{ type: 'null' }, { $ref: '../integrations/metrics/v1/metrics.schema.json#/$defs/LabelProfile' }],
+          },
+          logs_profile: {
+            type: ['object', 'null'],
+            additionalProperties: false,
+            required: ['namespace', 'pod', 'container', 'cluster'],
+            properties: {
+              namespace: { type: 'string' },
+              pod: { type: 'string' },
+              container: { type: 'string' },
+              cluster: { type: ['string', 'null'] },
+            },
+          },
+          entries: {
+            type: 'array',
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['op', 'request'],
+              properties: {
+                op: {
+                  type: 'string',
+                  enum: ['query', 'query_range', 'metric_exists', 'logs_match', 'logs_query', 'traces_search'],
+                },
+                request: { type: 'object', description: '集成契约的请求，去掉 clock_window' },
+                result: { description: '集成契约的结果；有 error 时不填' },
+                error: {
+                  type: 'object',
+                  additionalProperties: false,
+                  required: ['kind', 'message'],
+                  properties: {
+                    kind: { type: 'string', enum: ['datasource', 'capability_missing'] },
+                    message: { type: 'string' },
+                  },
+                },
+              },
+            },
+          },
+          cases: {
+            type: 'array',
+            description: 'pack test 的期望（卡片、实体、锚点、期望判定）；评测快照为空',
+            items: { type: 'object' },
           },
         },
       },

@@ -397,7 +397,7 @@ export interface SrenautixContractIndex {
   EvalSnapshotContext?: EvalSnapshotContext;
   EvalKnowledge?: EvalKnowledge;
   EvalReferenceCase?: EvalReferenceCase;
-  EvalSnapshotCall?: EvalSnapshotCall;
+  QuerySnapshot?: QuerySnapshot1;
   OutboxEvent?: OutboxEvent;
   OutboxEventType?: OutboxEventType;
   OutboxOwner?: OutboxOwner;
@@ -1959,10 +1959,7 @@ export interface EvalSnapshot {
   window: TimeWindow1;
   as_of: Timestamp;
   context: EvalSnapshotContext;
-  /**
-   * 数据源调用的录制结果（VCR 条目），按 (capability, request) 唯一
-   */
-  calls: EvalSnapshotCall[];
+  queries: QuerySnapshot;
   created_at: Timestamp;
   source: {
     /**
@@ -2308,31 +2305,97 @@ export interface EvalReferenceCase {
   resolved_at: Timestamp;
   source: 'human' | 'model';
 }
-export interface EvalSnapshotCall {
-  /**
-   * sha256(capability + JCS(request)) 的十六进制前 32 位；回放时按它查找
-   */
-  key: string;
-  /**
-   * 集成能力，例如 metrics.query_range、metrics.query、logs.match、traces.search、traces.trace，或只读工具名
-   */
-  capability: string;
-  /**
-   * 规范化后的请求（时间为 unix 秒）
-   */
-  request: {};
-  status: 'ok' | 'error';
-  error: string | null;
-  /**
-   * 结果原样保存，形状由能力的集成契约决定；失败时为 null
-   */
-  result: {
-    [k: string]: unknown | undefined;
+/**
+ * 数据源调用的录制结果（VCR），与领域包的 pack test --replay 使用同一种查询快照
+ */
+export interface QuerySnapshot {
+  api_version: 'srenautix.io/query-snapshot/v1';
+  snapshot_id: string;
+  recorded_at: Timestamp;
+  clock_window: TimeWindow;
+  ids: {
+    metrics: string | null;
+    logs: string | null;
+    traces: string | null;
   };
+  capabilities: (
+    'metrics.query' | 'metrics.query_range' | 'metrics.series' | 'logs.match' | 'logs.query' | 'traces.search'
+  )[];
+  metrics_dialects: ('promql' | 'metricsql')[];
+  label_profile: null | LabelProfile;
+  logs_profile: {
+    namespace: string;
+    pod: string;
+    container: string;
+    cluster: string | null;
+  } | null;
+  entries: {
+    op: 'query' | 'query_range' | 'metric_exists' | 'logs_match' | 'logs_query' | 'traces_search';
+    /**
+     * 集成契约的请求，去掉 clock_window
+     */
+    request: {};
+    /**
+     * 集成契约的结果；有 error 时不填
+     */
+    result?: {
+      [k: string]: unknown | undefined;
+    };
+    error?: {
+      kind: 'datasource' | 'capability_missing';
+      message: string;
+    };
+  }[];
   /**
-   * 结果是降采样后的原始序列（每点前 5 分钟的最小、最大、平均）。依赖它的卡标注为重建
+   * pack test 的期望（卡片、实体、锚点、期望判定）；评测快照为空
    */
-  downsampled: boolean;
+  cases: {}[];
+}
+/**
+ * 查询快照 srenautix.io/query-snapshot/v1：请求按去掉 clock_window 之后的规范 JSON（JCS）与操作名组成键，回放时按键读取，没有的请求为快照未命中
+ */
+export interface QuerySnapshot1 {
+  api_version: 'srenautix.io/query-snapshot/v1';
+  snapshot_id: string;
+  recorded_at: Timestamp;
+  clock_window: TimeWindow;
+  ids: {
+    metrics: string | null;
+    logs: string | null;
+    traces: string | null;
+  };
+  capabilities: (
+    'metrics.query' | 'metrics.query_range' | 'metrics.series' | 'logs.match' | 'logs.query' | 'traces.search'
+  )[];
+  metrics_dialects: ('promql' | 'metricsql')[];
+  label_profile: null | LabelProfile;
+  logs_profile: {
+    namespace: string;
+    pod: string;
+    container: string;
+    cluster: string | null;
+  } | null;
+  entries: {
+    op: 'query' | 'query_range' | 'metric_exists' | 'logs_match' | 'logs_query' | 'traces_search';
+    /**
+     * 集成契约的请求，去掉 clock_window
+     */
+    request: {};
+    /**
+     * 集成契约的结果；有 error 时不填
+     */
+    result?: {
+      [k: string]: unknown | undefined;
+    };
+    error?: {
+      kind: 'datasource' | 'capability_missing';
+      message: string;
+    };
+  }[];
+  /**
+   * pack test 的期望（卡片、实体、锚点、期望判定）；评测快照为空
+   */
+  cases: {}[];
 }
 export interface OutboxEventHeader {
   /**
