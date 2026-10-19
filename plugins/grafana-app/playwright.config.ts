@@ -11,5 +11,9 @@ export default defineConfig({
   expect: { timeout: 20_000 },
   workers: 1,
   reporter: [['list']],
-  use: { ...devices['Desktop Chrome'], trace: 'retain-on-failure' },
+  use: { ...devices['Desktop Chrome'], trace: 'retain-on-failure', locale: 'zh-CN' },
+  projects: [
+    { name: 'oidc', testMatch: /oidc\.setup\.ts/ },
+    { name: 'grafana', dependencies: ['oidc'], testMatch: /plugin\.spec\.ts/ },
+  ],
 });

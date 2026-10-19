@@ -189,7 +189,8 @@ export default function App(props: AppRootProps<AppSettings>) {
   const tokens = useMemo(() => tokensFromGrafana(theme), [theme]);
   const [qc] = useState(() => new QueryClient({ defaultOptions: { queries: { staleTime: 10_000, retry: 1 } } }));
   const settings = props.meta.jsonData ?? {};
-  const base = props.basename;
+  // 路由前缀固定为 /a/<插件 id>：Grafana 13 的 props.basename 带着当前完整路径（打开详情时会把详情路径当成前缀）
+  const base = `/a/${props.meta.id}`;
   const consoleUrl = (settings.consoleUrl ?? '').replace(/\/$/, '');
   const env = useMemo<UiEnv>(() => {
     const links: Links = {
