@@ -1,0 +1,196 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://srenautix.io/contract/gateway/v1/action-catalog.schema.json",
+  "title": "ActionCatalog",
+  "description": "动作目录（DESIGN §9.1）。目录只描述动作本身；哪些动作启用、作用于哪些命名空间、能否自动执行由 gateway 策略决定。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "actions"],
+  "properties": {
+    "version": {"const": 1},
+    "actions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/action"}
+    }
+  },
+  "$defs": {
+    "level": {
+      "type": "string",
+      "enum": ["reversible", "reversible_recreatable", "compensable", "irreversible"]
+    },
+    "tier": {"type": "string", "enum": ["L", "H"]},
+    "action": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id", "title", "level", "min_tier", "auto_execution", "target", "params", "conflict_domain",
+        "prechecks", "verify", "undo", "blast_radius", "writes"
+      ],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-z][a-z0-9_]{0,62}$"},
+        "title": {"type": "string", "minLength": 1},
+        "level": {"$ref": "#/$defs/level"},
+        "fallback_level": {
+          "description": "只用于 reversible_recreatable：可重建条件在执行时不成立时的等级。",
+          "const": "irreversible"
+        },
+        "recreatable_conditions": {
+          "description": "只用于 reversible_recreatable：执行时重新核对的可重建条件。",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["controller_managed", "min_ready_replicas", "pdb_headroom"],
+          "properties": {
+            "controller_managed": {"const": true},
+            "min_ready_replicas": {"type": "integer", "minimum": 2},
+            "pdb_headroom": {"const": true}
+          }
+        },
+        "min_tier": {
+          "description": "该动作在其目录等级下可接受的最低档位。",
+          "$ref": "#/$defs/tier"
+        },
+        "fallback_min_tier": {
+          "description": "等级降为 fallback_level 时可接受的最低档位。",
+          "$ref": "#/$defs/tier"
+        },
+        "auto_execution": {
+          "description": "allowed 只允许出现在 reversible 与 reversible_recreatable 动作上（不变量 7）。",
+          "type": "string",
+          "enum": ["allowed", "forbidden"]
+        },
+        "target": {"$ref": "#/$defs/target"},
+        "params": {
+          "description": "参数的 JSON Schema（可移植子集：type、properties、required、additionalProperties:false、enum、pattern、minLength、maxLength、minimum、maximum、items）。所有动作的参数另外可以带 verify（见 promqlCondition）。",
+          "type": "object"
+        },
+        "conflict_domain": {
+          "description": "冲突域类型。键由执行器根据解析出的目标计算：workload:<ns>/<Kind>/<name>、node:<name>、pg:<ns>/<cluster>、argocd:<ns>/<app>、flux:<ns>/<Kind>/<name>、workflow:<ns>/<template>、gitops:<owner>/<repo>。",
+          "type": "string",
+          "enum": ["workload", "node", "pg", "argocd", "flux", "workflow", "gitops"]
+        },
+        "prechecks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "kind", "description"],
+            "properties": {
+              "id": {"type": "string", "pattern": "^[a-z][a-z0-9_]{0,62}$"},
+              "kind": {"type": "string", "enum": ["k8s", "pdb", "promql", "git"]},
+              "description": {"type": "string", "minLength": 1}
+            }
+          }
+        },
+        "verify": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["window_seconds", "checks"],
+          "properties": {
+            "window_seconds": {"type": "integer", "minimum": 0, "maximum": 3600},
+            "checks": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["id", "kind", "description"],
+                "properties": {
+                  "id": {"type": "string", "pattern": "^[a-z][a-z0-9_]{0,62}$"},
+                  "kind": {"type": "string", "enum": ["k8s", "git"]},
+                  "description": {"type": "string", "minLength": 1}
+                }
+              }
+            }
+          }
+        },
+        "undo": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "description"],
+          "properties": {
+            "kind": {
+              "description": "restore：自动恢复原状态（reversible）；recreate：由控制器重建（reversible_recreatable）；compensate：补偿需要再次审批（compensable）；none：无法撤销（irreversible）。",
+              "type": "string",
+              "enum": ["restore", "recreate", "compensate", "none"]
+            },
+            "description": {"type": "string", "minLength": 1},
+            "compensation_action": {
+              "description": "compensate 时提议的补偿动作 ID。",
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_]{0,62}$"
+            }
+          }
+        },
+        "blast_radius": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["unit", "method", "l_tier_max"],
+          "properties": {
+            "unit": {"type": "string", "enum": ["pods", "nodes", "objects", "repositories"]},
+            "method": {"type": "string", "minLength": 1},
+            "l_tier_max": {
+              "description": "L 档允许的最大爆炸半径；超过时需要 H 档。",
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "writes": {
+          "description": "执行与撤销会产生的全部 Kubernetes 写入。RBAC 与准入策略由此生成；gitops_pr 只写 Git，此列表为空。",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["group", "resource", "verb"],
+            "properties": {
+              "group": {"type": "string"},
+              "resource": {"type": "string", "minLength": 1},
+              "subresource": {"type": "string"},
+              "verb": {"type": "string", "enum": ["create", "patch"]}
+            }
+          }
+        }
+      }
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["group", "version", "kind", "resource", "namespaced"],
+      "properties": {
+        "group": {"type": "string"},
+        "version": {"type": "string", "minLength": 1},
+        "kind": {"type": "string", "minLength": 1},
+        "resource": {"type": "string", "minLength": 1},
+        "namespaced": {"type": "boolean"},
+        "kinds": {
+          "description": "目标可以是多种类型时列出全部（例如 Deployment 与 StatefulSet）。",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["group", "version", "kind", "resource"],
+            "properties": {
+              "group": {"type": "string"},
+              "version": {"type": "string"},
+              "kind": {"type": "string"},
+              "resource": {"type": "string"}
+            }
+          }
+        }
+      }
+    },
+    "promqlCondition": {
+      "description": "执行后校验条件：窗口结束时做一次即时查询，结果中的每个样本都必须满足 value <op> threshold。查询结果为空时按 on_empty 处理。",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "query", "op", "threshold"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-z][a-z0-9_]{0,62}$"},
+        "query": {"type": "string", "minLength": 1, "maxLength": 1024},
+        "op": {"type": "string", "enum": ["lt", "le", "gt", "ge", "eq", "ne"]},
+        "threshold": {"type": "number"},
+        "on_empty": {"type": "string", "enum": ["fail", "pass"], "default": "fail"}
+      }
+    }
+  }
+}

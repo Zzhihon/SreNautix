@@ -1,0 +1,2690 @@
+{
+  "approver_keys": {
+    "keys": [
+      {
+        "key_id": "service-2026-10",
+        "public_key": "v7Tr59Wn4mOAzmoJIFzW8JmeK1r9TKuuNaNrE2jEqrw",
+        "use": "service"
+      },
+      {
+        "key_id": "service-2026-01",
+        "not_after": "2026-10-01T00:00:00Z",
+        "public_key": "lh7JCPNymFe4VIfxeEwGP76j38-Q1sFKgyTgd23Sjgw",
+        "use": "service"
+      },
+      {
+        "credential_id": "Y3JlZGVudGlhbC1hbGljZS0wMDAx",
+        "principal": "oidc:alice@example.org",
+        "public_key": "sp_Ww3RS5qz8F1s4rr_rkn4d7sMrCBwX1OUYjzvYMbQ",
+        "use": "webauthn"
+      },
+      {
+        "credential_id": "Y3JlZGVudGlhbC1ib2ItMDAwMQ",
+        "principal": "oidc:bob@example.org",
+        "public_key": "RXvfgnXTCOg1JP1UL_CP_os8UVUdgkReoERNuePD-jM",
+        "use": "webauthn"
+      }
+    ],
+    "version": 1,
+    "webauthn": {
+      "origins": [
+        "https://console.srenautix.example"
+      ],
+      "rp_id": "console.srenautix.example"
+    }
+  },
+  "canon_version": "jcs-sha256-v1",
+  "canonicalization": [
+    {
+      "canonical": "{\"\\r\":\"Carriage Return\",\"1\":\"One\",\"\":\"Control\",\"ö\":\"Latin Small Letter O With Diaeresis\",\"€\":\"Euro Sign\",\"😀\":\"Emoji: Grinning Face\",\"דּ\":\"Hebrew Letter Dalet With Dagesh\"}",
+      "input": "{\"\\u20ac\":\"Euro Sign\",\"\\u000d\":\"Carriage Return\",\"\\ufb33\":\"Hebrew Letter Dalet With Dagesh\",\"1\":\"One\",\"\\ud83d\\ude00\":\"Emoji: Grinning Face\",\"\\u0080\":\"Control\",\"\\u00f6\":\"Latin Small Letter O With Diaeresis\"}",
+      "name": "key_order_utf16",
+      "sha256": "sha256:5e321556d22018a9656991a9e94f77ec175fa193e52a2429d312f8419ec8b08c"
+    },
+    {
+      "canonical": "{\"numbers\":[333333333.3333333,1e+30,4.5,0.002,1e-27,0,9007199254740991,1e+21,1e-7]}",
+      "input": "{\"numbers\":[333333333.33333329,1E30,4.50,2e-3,0.000000000000000000000000001,-0,9007199254740991,1e21,1e-7]}",
+      "name": "numbers_es6",
+      "sha256": "sha256:d93242cb1cf97fbcf573f6d78a6633692f40ce18ef93dfae0e337f0445c08c42"
+    },
+    {
+      "canonical": "{\"emoji\":\"😀\",\"ls\":\"\u2028\",\"string\":\"€$\\u000f\\nA'B\\\"\\\\\\\\\\\"/\"}",
+      "input": "{\"string\":\"\\u20ac$\\u000F\\u000aA'\\u0042\\u0022\\u005c\\u005c\\u0022/\",\"emoji\":\"\\ud83d\\ude00\",\"ls\":\"\\u2028\"}",
+      "name": "string_escapes",
+      "sha256": "sha256:a2696ae976d3d5527027486d57bdeff2adaee77110e54d4ddfcc76b644304904"
+    },
+    {
+      "canonical": "{\"literals\":[null,true,false],\"nested\":{\"a\":{},\"b\":[{\"c\":2,\"d\":1}]}}",
+      "input": "{\"literals\":[null,true,false],\"nested\":{\"b\":[{\"d\":1,\"c\":2}],\"a\":{}}}",
+      "name": "literals_nested",
+      "sha256": "sha256:071a327f38bb5f97c43a0c6e67e9635e524b8f9635d0ff378bacf8f776ed490d"
+    },
+    {
+      "canonical": "{\"a\":[1,2],\"b\":1}",
+      "input": "{ \"b\" : 1 ,\n \"a\" : [ 1 , 2 ] }",
+      "name": "whitespace",
+      "sha256": "sha256:94a786c3662bc7beeb598efa7d8cb58d7bea25d6c275ea9785a0230ff1f8c2ba"
+    }
+  ],
+  "canonicalization_errors": [
+    {
+      "input": "{\"a\":1,\"a\":2}",
+      "name": "duplicate_key"
+    }
+  ],
+  "envelopes": [
+    {
+      "name": "service_l_valid",
+      "description": "L 档服务签名，全部绑定一致",
+      "envelope": {
+        "assertion": {
+          "action": "workload_scale",
+          "approver_principal": "oidc:alice@example.org",
+          "canon_version": "jcs-sha256-v1",
+          "channel": "telegram",
+          "cluster": "prod-east",
+          "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+          "expires_at": "2026-10-20T08:30:00Z",
+          "incident_version": 7,
+          "issued_at": "2026-10-20T08:00:00Z",
+          "level": "reversible",
+          "params_hash": "sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad",
+          "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+          "root_component": "payments/checkout",
+          "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e",
+          "tier": "L"
+        },
+        "proof": {
+          "key_id": "service-2026-10",
+          "signature": "JArgqClrUz1th-OViD81iT6Pdy6wwNFUIB1uEDs1Z0UPDCROafdRtcOFnbiUOJqRjFdQ-9K7_534QDz3eQcpBQ",
+          "type": "service_ed25519"
+        }
+      },
+      "binding": {
+        "action": "workload_scale",
+        "cluster": "prod-east",
+        "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+        "incident_version": 7,
+        "params": {
+          "kind": "Deployment",
+          "name": "checkout",
+          "namespace": "payments",
+          "replicas": 3
+        },
+        "proposal_expires_at": "2026-10-20T09:00:00Z",
+        "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+        "root_component": "payments/checkout",
+        "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e"
+      },
+      "now": "2026-10-20T08:05:00Z",
+      "restored_at": null,
+      "require_webauthn_for_h": false,
+      "assertion_canonical": "{\"action\":\"workload_scale\",\"approver_principal\":\"oidc:alice@example.org\",\"canon_version\":\"jcs-sha256-v1\",\"channel\":\"telegram\",\"cluster\":\"prod-east\",\"evidence_fingerprint\":\"sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee\",\"expires_at\":\"2026-10-20T08:30:00Z\",\"incident_version\":7,\"issued_at\":\"2026-10-20T08:00:00Z\",\"level\":\"reversible\",\"params_hash\":\"sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad\",\"proposal_id\":\"6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c\",\"root_component\":\"payments/checkout\",\"target_uid\":\"0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e\",\"tier\":\"L\"}",
+      "assertion_hash": "sha256:629be3c008c340d3e8b3c8db75d9c4c320c4fbc20832b4620f4bb9f0c2c18496",
+      "execution_id": "108c89d0d32462a84d9937f43ab2b591",
+      "signing_input_b64url": "c3JlbmF1dGl4LWFwcHJvdmFsLXYxCnsiYXNzZXJ0aW9uIjp7ImFjdGlvbiI6Indvcmtsb2FkX3NjYWxlIiwiYXBwcm92ZXJfcHJpbmNpcGFsIjoib2lkYzphbGljZUBleGFtcGxlLm9yZyIsImNhbm9uX3ZlcnNpb24iOiJqY3Mtc2hhMjU2LXYxIiwiY2hhbm5lbCI6InRlbGVncmFtIiwiY2x1c3RlciI6InByb2QtZWFzdCIsImV2aWRlbmNlX2ZpbmdlcnByaW50Ijoic2hhMjU2OjhmNWExNjdhMzgxN2NhODVlMWU5ZjUyYWVmMThiY2Y5YjQ3ZmFhNDA5ZmQ2YjE3ZGNlMWE3ZDkxMjkyZTQ4ZWUiLCJleHBpcmVzX2F0IjoiMjAyNi0xMC0yMFQwODozMDowMFoiLCJpbmNpZGVudF92ZXJzaW9uIjo3LCJpc3N1ZWRfYXQiOiIyMDI2LTEwLTIwVDA4OjAwOjAwWiIsImxldmVsIjoicmV2ZXJzaWJsZSIsInBhcmFtc19oYXNoIjoic2hhMjU2OjdhNDM2NGEwYTUxMTQ3OWE3NTM2M2I0ZWEyODI1ZTc1YjhlYmM1ODQxZTY3YmNiZDdjMDZjZjgxMzg5MjIyYWQiLCJwcm9wb3NhbF9pZCI6IjZmMWMyYThlLTRiN2QtNGUyYS05YzNmLTFkMmUzZjRhNWI2YyIsInJvb3RfY29tcG9uZW50IjoicGF5bWVudHMvY2hlY2tvdXQiLCJ0YXJnZXRfdWlkIjoiMGI5YzVlN2EtM2YxZC00YzJiLThhNmUtNWQ0YzNiMmExZjBlIiwidGllciI6IkwifX0",
+      "expect_error": ""
+    },
+    {
+      "name": "service_h_valid_reauth",
+      "description": "H 档服务签名，携带 90 秒前的重新认证",
+      "envelope": {
+        "assertion": {
+          "action": "workload_scale",
+          "approver_principal": "oidc:alice@example.org",
+          "canon_version": "jcs-sha256-v1",
+          "channel": "console",
+          "cluster": "prod-east",
+          "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+          "expires_at": "2026-10-20T08:30:00Z",
+          "incident_version": 7,
+          "issued_at": "2026-10-20T08:00:00Z",
+          "level": "reversible",
+          "params_hash": "sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad",
+          "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+          "root_component": "payments/checkout",
+          "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e",
+          "tier": "H"
+        },
+        "proof": {
+          "key_id": "service-2026-10",
+          "reauth": {
+            "auth_time": "2026-10-20T07:58:30Z",
+            "method": "oidc_max_age",
+            "session_hash": "sha256:63c97ac44bdcec8219df75129488cf6315fe040768612c48e91b48d848b6f108"
+          },
+          "signature": "caLfjwyQ7n5aNXhAT49cbSca6ZdR9_RUxbKAD_7mtHMkoOXB2s3d1yaIwVAD5nYepZvPuWd29kPa13o43_U1Bw",
+          "type": "service_ed25519"
+        }
+      },
+      "binding": {
+        "action": "workload_scale",
+        "cluster": "prod-east",
+        "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+        "incident_version": 7,
+        "params": {
+          "kind": "Deployment",
+          "name": "checkout",
+          "namespace": "payments",
+          "replicas": 3
+        },
+        "proposal_expires_at": "2026-10-20T09:00:00Z",
+        "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+        "root_component": "payments/checkout",
+        "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e"
+      },
+      "now": "2026-10-20T08:05:00Z",
+      "restored_at": null,
+      "require_webauthn_for_h": false,
+      "assertion_canonical": "{\"action\":\"workload_scale\",\"approver_principal\":\"oidc:alice@example.org\",\"canon_version\":\"jcs-sha256-v1\",\"channel\":\"console\",\"cluster\":\"prod-east\",\"evidence_fingerprint\":\"sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee\",\"expires_at\":\"2026-10-20T08:30:00Z\",\"incident_version\":7,\"issued_at\":\"2026-10-20T08:00:00Z\",\"level\":\"reversible\",\"params_hash\":\"sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad\",\"proposal_id\":\"6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c\",\"root_component\":\"payments/checkout\",\"target_uid\":\"0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e\",\"tier\":\"H\"}",
+      "assertion_hash": "sha256:7e3c2d8d9c8b978e1cd73ecd62ac3c11f498d652cc87683267e0619e6e740095",
+      "execution_id": "f35a5595d1aceb43354c14d9c673c677",
+      "signing_input_b64url": "c3JlbmF1dGl4LWFwcHJvdmFsLXYxCnsiYXNzZXJ0aW9uIjp7ImFjdGlvbiI6Indvcmtsb2FkX3NjYWxlIiwiYXBwcm92ZXJfcHJpbmNpcGFsIjoib2lkYzphbGljZUBleGFtcGxlLm9yZyIsImNhbm9uX3ZlcnNpb24iOiJqY3Mtc2hhMjU2LXYxIiwiY2hhbm5lbCI6ImNvbnNvbGUiLCJjbHVzdGVyIjoicHJvZC1lYXN0IiwiZXZpZGVuY2VfZmluZ2VycHJpbnQiOiJzaGEyNTY6OGY1YTE2N2EzODE3Y2E4NWUxZTlmNTJhZWYxOGJjZjliNDdmYWE0MDlmZDZiMTdkY2UxYTdkOTEyOTJlNDhlZSIsImV4cGlyZXNfYXQiOiIyMDI2LTEwLTIwVDA4OjMwOjAwWiIsImluY2lkZW50X3ZlcnNpb24iOjcsImlzc3VlZF9hdCI6IjIwMjYtMTAtMjBUMDg6MDA6MDBaIiwibGV2ZWwiOiJyZXZlcnNpYmxlIiwicGFyYW1zX2hhc2giOiJzaGEyNTY6N2E0MzY0YTBhNTExNDc5YTc1MzYzYjRlYTI4MjVlNzViOGViYzU4NDFlNjdiY2JkN2MwNmNmODEzODkyMjJhZCIsInByb3Bvc2FsX2lkIjoiNmYxYzJhOGUtNGI3ZC00ZTJhLTljM2YtMWQyZTNmNGE1YjZjIiwicm9vdF9jb21wb25lbnQiOiJwYXltZW50cy9jaGVja291dCIsInRhcmdldF91aWQiOiIwYjljNWU3YS0zZjFkLTRjMmItOGE2ZS01ZDRjM2IyYTFmMGUiLCJ0aWVyIjoiSCJ9LCJyZWF1dGgiOnsiYXV0aF90aW1lIjoiMjAyNi0xMC0yMFQwNzo1ODozMFoiLCJtZXRob2QiOiJvaWRjX21heF9hZ2UiLCJzZXNzaW9uX2hhc2giOiJzaGEyNTY6NjNjOTdhYzQ0YmRjZWM4MjE5ZGY3NTEyOTQ4OGNmNjMxNWZlMDQwNzY4NjEyYzQ4ZTkxYjQ4ZDg0OGI2ZjEwOCJ9fQ",
+      "expect_error": ""
+    },
+    {
+      "name": "service_h_missing_reauth",
+      "description": "H 档服务签名没有重新认证凭据",
+      "envelope": {
+        "assertion": {
+          "action": "workload_scale",
+          "approver_principal": "oidc:alice@example.org",
+          "canon_version": "jcs-sha256-v1",
+          "channel": "console",
+          "cluster": "prod-east",
+          "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+          "expires_at": "2026-10-20T08:30:00Z",
+          "incident_version": 7,
+          "issued_at": "2026-10-20T08:00:00Z",
+          "level": "reversible",
+          "params_hash": "sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad",
+          "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+          "root_component": "payments/checkout",
+          "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e",
+          "tier": "H"
+        },
+        "proof": {
+          "key_id": "service-2026-10",
+          "signature": "jmZcJ_4CT9lPITC0BRHKvcZXOXXtVbKLuKuxbF-NjKlvLjCk8TzcH7KtKRdmIp8Gyl0P3h9AuiWyI4lx4Yy9Dg",
+          "type": "service_ed25519"
+        }
+      },
+      "binding": {
+        "action": "workload_scale",
+        "cluster": "prod-east",
+        "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+        "incident_version": 7,
+        "params": {
+          "kind": "Deployment",
+          "name": "checkout",
+          "namespace": "payments",
+          "replicas": 3
+        },
+        "proposal_expires_at": "2026-10-20T09:00:00Z",
+        "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+        "root_component": "payments/checkout",
+        "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e"
+      },
+      "now": "2026-10-20T08:05:00Z",
+      "restored_at": null,
+      "require_webauthn_for_h": false,
+      "assertion_canonical": "{\"action\":\"workload_scale\",\"approver_principal\":\"oidc:alice@example.org\",\"canon_version\":\"jcs-sha256-v1\",\"channel\":\"console\",\"cluster\":\"prod-east\",\"evidence_fingerprint\":\"sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee\",\"expires_at\":\"2026-10-20T08:30:00Z\",\"incident_version\":7,\"issued_at\":\"2026-10-20T08:00:00Z\",\"level\":\"reversible\",\"params_hash\":\"sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad\",\"proposal_id\":\"6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c\",\"root_component\":\"payments/checkout\",\"target_uid\":\"0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e\",\"tier\":\"H\"}",
+      "assertion_hash": "sha256:7e3c2d8d9c8b978e1cd73ecd62ac3c11f498d652cc87683267e0619e6e740095",
+      "execution_id": "f35a5595d1aceb43354c14d9c673c677",
+      "signing_input_b64url": "c3JlbmF1dGl4LWFwcHJvdmFsLXYxCnsiYXNzZXJ0aW9uIjp7ImFjdGlvbiI6Indvcmtsb2FkX3NjYWxlIiwiYXBwcm92ZXJfcHJpbmNpcGFsIjoib2lkYzphbGljZUBleGFtcGxlLm9yZyIsImNhbm9uX3ZlcnNpb24iOiJqY3Mtc2hhMjU2LXYxIiwiY2hhbm5lbCI6ImNvbnNvbGUiLCJjbHVzdGVyIjoicHJvZC1lYXN0IiwiZXZpZGVuY2VfZmluZ2VycHJpbnQiOiJzaGEyNTY6OGY1YTE2N2EzODE3Y2E4NWUxZTlmNTJhZWYxOGJjZjliNDdmYWE0MDlmZDZiMTdkY2UxYTdkOTEyOTJlNDhlZSIsImV4cGlyZXNfYXQiOiIyMDI2LTEwLTIwVDA4OjMwOjAwWiIsImluY2lkZW50X3ZlcnNpb24iOjcsImlzc3VlZF9hdCI6IjIwMjYtMTAtMjBUMDg6MDA6MDBaIiwibGV2ZWwiOiJyZXZlcnNpYmxlIiwicGFyYW1zX2hhc2giOiJzaGEyNTY6N2E0MzY0YTBhNTExNDc5YTc1MzYzYjRlYTI4MjVlNzViOGViYzU4NDFlNjdiY2JkN2MwNmNmODEzODkyMjJhZCIsInByb3Bvc2FsX2lkIjoiNmYxYzJhOGUtNGI3ZC00ZTJhLTljM2YtMWQyZTNmNGE1YjZjIiwicm9vdF9jb21wb25lbnQiOiJwYXltZW50cy9jaGVja291dCIsInRhcmdldF91aWQiOiIwYjljNWU3YS0zZjFkLTRjMmItOGE2ZS01ZDRjM2IyYTFmMGUiLCJ0aWVyIjoiSCJ9fQ",
+      "expect_error": "reauth_required"
+    },
+    {
+      "name": "service_h_stale_reauth",
+      "description": "重新认证早于签发 5 分钟以上",
+      "envelope": {
+        "assertion": {
+          "action": "workload_scale",
+          "approver_principal": "oidc:alice@example.org",
+          "canon_version": "jcs-sha256-v1",
+          "channel": "console",
+          "cluster": "prod-east",
+          "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+          "expires_at": "2026-10-20T08:30:00Z",
+          "incident_version": 7,
+          "issued_at": "2026-10-20T08:00:00Z",
+          "level": "reversible",
+          "params_hash": "sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad",
+          "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+          "root_component": "payments/checkout",
+          "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e",
+          "tier": "H"
+        },
+        "proof": {
+          "key_id": "service-2026-10",
+          "reauth": {
+            "auth_time": "2026-10-20T07:54:59Z",
+            "method": "oidc_max_age",
+            "session_hash": "sha256:63c97ac44bdcec8219df75129488cf6315fe040768612c48e91b48d848b6f108"
+          },
+          "signature": "9XoFtQ6oP3jOgCznlN5vwlG5ndZWlfAzlA0wakwi9SbMgCVhWZektuWQmcJnSlLQuKmPIkw5gK_giagQSYELBw",
+          "type": "service_ed25519"
+        }
+      },
+      "binding": {
+        "action": "workload_scale",
+        "cluster": "prod-east",
+        "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+        "incident_version": 7,
+        "params": {
+          "kind": "Deployment",
+          "name": "checkout",
+          "namespace": "payments",
+          "replicas": 3
+        },
+        "proposal_expires_at": "2026-10-20T09:00:00Z",
+        "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+        "root_component": "payments/checkout",
+        "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e"
+      },
+      "now": "2026-10-20T08:05:00Z",
+      "restored_at": null,
+      "require_webauthn_for_h": false,
+      "assertion_canonical": "{\"action\":\"workload_scale\",\"approver_principal\":\"oidc:alice@example.org\",\"canon_version\":\"jcs-sha256-v1\",\"channel\":\"console\",\"cluster\":\"prod-east\",\"evidence_fingerprint\":\"sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee\",\"expires_at\":\"2026-10-20T08:30:00Z\",\"incident_version\":7,\"issued_at\":\"2026-10-20T08:00:00Z\",\"level\":\"reversible\",\"params_hash\":\"sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad\",\"proposal_id\":\"6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c\",\"root_component\":\"payments/checkout\",\"target_uid\":\"0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e\",\"tier\":\"H\"}",
+      "assertion_hash": "sha256:7e3c2d8d9c8b978e1cd73ecd62ac3c11f498d652cc87683267e0619e6e740095",
+      "execution_id": "f35a5595d1aceb43354c14d9c673c677",
+      "signing_input_b64url": "c3JlbmF1dGl4LWFwcHJvdmFsLXYxCnsiYXNzZXJ0aW9uIjp7ImFjdGlvbiI6Indvcmtsb2FkX3NjYWxlIiwiYXBwcm92ZXJfcHJpbmNpcGFsIjoib2lkYzphbGljZUBleGFtcGxlLm9yZyIsImNhbm9uX3ZlcnNpb24iOiJqY3Mtc2hhMjU2LXYxIiwiY2hhbm5lbCI6ImNvbnNvbGUiLCJjbHVzdGVyIjoicHJvZC1lYXN0IiwiZXZpZGVuY2VfZmluZ2VycHJpbnQiOiJzaGEyNTY6OGY1YTE2N2EzODE3Y2E4NWUxZTlmNTJhZWYxOGJjZjliNDdmYWE0MDlmZDZiMTdkY2UxYTdkOTEyOTJlNDhlZSIsImV4cGlyZXNfYXQiOiIyMDI2LTEwLTIwVDA4OjMwOjAwWiIsImluY2lkZW50X3ZlcnNpb24iOjcsImlzc3VlZF9hdCI6IjIwMjYtMTAtMjBUMDg6MDA6MDBaIiwibGV2ZWwiOiJyZXZlcnNpYmxlIiwicGFyYW1zX2hhc2giOiJzaGEyNTY6N2E0MzY0YTBhNTExNDc5YTc1MzYzYjRlYTI4MjVlNzViOGViYzU4NDFlNjdiY2JkN2MwNmNmODEzODkyMjJhZCIsInByb3Bvc2FsX2lkIjoiNmYxYzJhOGUtNGI3ZC00ZTJhLTljM2YtMWQyZTNmNGE1YjZjIiwicm9vdF9jb21wb25lbnQiOiJwYXltZW50cy9jaGVja291dCIsInRhcmdldF91aWQiOiIwYjljNWU3YS0zZjFkLTRjMmItOGE2ZS01ZDRjM2IyYTFmMGUiLCJ0aWVyIjoiSCJ9LCJyZWF1dGgiOnsiYXV0aF90aW1lIjoiMjAyNi0xMC0yMFQwNzo1NDo1OVoiLCJtZXRob2QiOiJvaWRjX21heF9hZ2UiLCJzZXNzaW9uX2hhc2giOiJzaGEyNTY6NjNjOTdhYzQ0YmRjZWM4MjE5ZGY3NTEyOTQ4OGNmNjMxNWZlMDQwNzY4NjEyYzQ4ZTkxYjQ4ZDg0OGI2ZjEwOCJ9fQ",
+      "expect_error": "reauth_stale"
+    },
+    {
+      "name": "service_h_reauth_after_issue",
+      "description": "重新认证时间晚于签发时间",
+      "envelope": {
+        "assertion": {
+          "action": "workload_scale",
+          "approver_principal": "oidc:alice@example.org",
+          "canon_version": "jcs-sha256-v1",
+          "channel": "console",
+          "cluster": "prod-east",
+          "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+          "expires_at": "2026-10-20T08:30:00Z",
+          "incident_version": 7,
+          "issued_at": "2026-10-20T08:00:00Z",
+          "level": "reversible",
+          "params_hash": "sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad",
+          "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+          "root_component": "payments/checkout",
+          "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e",
+          "tier": "H"
+        },
+        "proof": {
+          "key_id": "service-2026-10",
+          "reauth": {
+            "auth_time": "2026-10-20T08:00:01Z",
+            "method": "oidc_max_age",
+            "session_hash": "sha256:63c97ac44bdcec8219df75129488cf6315fe040768612c48e91b48d848b6f108"
+          },
+          "signature": "DvOC-JSxSTibHzt3fzjAuUiwz7Tfh_1Kjn24TgLht4CHfBToV1aq6VHX85emRAlhfUceQawTPz3AY5K4ANJEAA",
+          "type": "service_ed25519"
+        }
+      },
+      "binding": {
+        "action": "workload_scale",
+        "cluster": "prod-east",
+        "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+        "incident_version": 7,
+        "params": {
+          "kind": "Deployment",
+          "name": "checkout",
+          "namespace": "payments",
+          "replicas": 3
+        },
+        "proposal_expires_at": "2026-10-20T09:00:00Z",
+        "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+        "root_component": "payments/checkout",
+        "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e"
+      },
+      "now": "2026-10-20T08:05:00Z",
+      "restored_at": null,
+      "require_webauthn_for_h": false,
+      "assertion_canonical": "{\"action\":\"workload_scale\",\"approver_principal\":\"oidc:alice@example.org\",\"canon_version\":\"jcs-sha256-v1\",\"channel\":\"console\",\"cluster\":\"prod-east\",\"evidence_fingerprint\":\"sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee\",\"expires_at\":\"2026-10-20T08:30:00Z\",\"incident_version\":7,\"issued_at\":\"2026-10-20T08:00:00Z\",\"level\":\"reversible\",\"params_hash\":\"sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad\",\"proposal_id\":\"6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c\",\"root_component\":\"payments/checkout\",\"target_uid\":\"0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e\",\"tier\":\"H\"}",
+      "assertion_hash": "sha256:7e3c2d8d9c8b978e1cd73ecd62ac3c11f498d652cc87683267e0619e6e740095",
+      "execution_id": "f35a5595d1aceb43354c14d9c673c677",
+      "signing_input_b64url": "c3JlbmF1dGl4LWFwcHJvdmFsLXYxCnsiYXNzZXJ0aW9uIjp7ImFjdGlvbiI6Indvcmtsb2FkX3NjYWxlIiwiYXBwcm92ZXJfcHJpbmNpcGFsIjoib2lkYzphbGljZUBleGFtcGxlLm9yZyIsImNhbm9uX3ZlcnNpb24iOiJqY3Mtc2hhMjU2LXYxIiwiY2hhbm5lbCI6ImNvbnNvbGUiLCJjbHVzdGVyIjoicHJvZC1lYXN0IiwiZXZpZGVuY2VfZmluZ2VycHJpbnQiOiJzaGEyNTY6OGY1YTE2N2EzODE3Y2E4NWUxZTlmNTJhZWYxOGJjZjliNDdmYWE0MDlmZDZiMTdkY2UxYTdkOTEyOTJlNDhlZSIsImV4cGlyZXNfYXQiOiIyMDI2LTEwLTIwVDA4OjMwOjAwWiIsImluY2lkZW50X3ZlcnNpb24iOjcsImlzc3VlZF9hdCI6IjIwMjYtMTAtMjBUMDg6MDA6MDBaIiwibGV2ZWwiOiJyZXZlcnNpYmxlIiwicGFyYW1zX2hhc2giOiJzaGEyNTY6N2E0MzY0YTBhNTExNDc5YTc1MzYzYjRlYTI4MjVlNzViOGViYzU4NDFlNjdiY2JkN2MwNmNmODEzODkyMjJhZCIsInByb3Bvc2FsX2lkIjoiNmYxYzJhOGUtNGI3ZC00ZTJhLTljM2YtMWQyZTNmNGE1YjZjIiwicm9vdF9jb21wb25lbnQiOiJwYXltZW50cy9jaGVja291dCIsInRhcmdldF91aWQiOiIwYjljNWU3YS0zZjFkLTRjMmItOGE2ZS01ZDRjM2IyYTFmMGUiLCJ0aWVyIjoiSCJ9LCJyZWF1dGgiOnsiYXV0aF90aW1lIjoiMjAyNi0xMC0yMFQwODowMDowMVoiLCJtZXRob2QiOiJvaWRjX21heF9hZ2UiLCJzZXNzaW9uX2hhc2giOiJzaGEyNTY6NjNjOTdhYzQ0YmRjZWM4MjE5ZGY3NTEyOTQ4OGNmNjMxNWZlMDQwNzY4NjEyYzQ4ZTkxYjQ4ZDg0OGI2ZjEwOCJ9fQ",
+      "expect_error": "reauth_stale"
+    },
+    {
+      "name": "service_h_compliance_requires_webauthn",
+      "description": "合规配置下 H 档必须用通行密钥",
+      "envelope": {
+        "assertion": {
+          "action": "workload_scale",
+          "approver_principal": "oidc:alice@example.org",
+          "canon_version": "jcs-sha256-v1",
+          "channel": "console",
+          "cluster": "prod-east",
+          "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+          "expires_at": "2026-10-20T08:30:00Z",
+          "incident_version": 7,
+          "issued_at": "2026-10-20T08:00:00Z",
+          "level": "reversible",
+          "params_hash": "sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad",
+          "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+          "root_component": "payments/checkout",
+          "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e",
+          "tier": "H"
+        },
+        "proof": {
+          "key_id": "service-2026-10",
+          "reauth": {
+            "auth_time": "2026-10-20T07:58:30Z",
+            "method": "oidc_max_age",
+            "session_hash": "sha256:63c97ac44bdcec8219df75129488cf6315fe040768612c48e91b48d848b6f108"
+          },
+          "signature": "caLfjwyQ7n5aNXhAT49cbSca6ZdR9_RUxbKAD_7mtHMkoOXB2s3d1yaIwVAD5nYepZvPuWd29kPa13o43_U1Bw",
+          "type": "service_ed25519"
+        }
+      },
+      "binding": {
+        "action": "workload_scale",
+        "cluster": "prod-east",
+        "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+        "incident_version": 7,
+        "params": {
+          "kind": "Deployment",
+          "name": "checkout",
+          "namespace": "payments",
+          "replicas": 3
+        },
+        "proposal_expires_at": "2026-10-20T09:00:00Z",
+        "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+        "root_component": "payments/checkout",
+        "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e"
+      },
+      "now": "2026-10-20T08:05:00Z",
+      "restored_at": null,
+      "require_webauthn_for_h": true,
+      "assertion_canonical": "{\"action\":\"workload_scale\",\"approver_principal\":\"oidc:alice@example.org\",\"canon_version\":\"jcs-sha256-v1\",\"channel\":\"console\",\"cluster\":\"prod-east\",\"evidence_fingerprint\":\"sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee\",\"expires_at\":\"2026-10-20T08:30:00Z\",\"incident_version\":7,\"issued_at\":\"2026-10-20T08:00:00Z\",\"level\":\"reversible\",\"params_hash\":\"sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad\",\"proposal_id\":\"6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c\",\"root_component\":\"payments/checkout\",\"target_uid\":\"0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e\",\"tier\":\"H\"}",
+      "assertion_hash": "sha256:7e3c2d8d9c8b978e1cd73ecd62ac3c11f498d652cc87683267e0619e6e740095",
+      "execution_id": "f35a5595d1aceb43354c14d9c673c677",
+      "signing_input_b64url": "c3JlbmF1dGl4LWFwcHJvdmFsLXYxCnsiYXNzZXJ0aW9uIjp7ImFjdGlvbiI6Indvcmtsb2FkX3NjYWxlIiwiYXBwcm92ZXJfcHJpbmNpcGFsIjoib2lkYzphbGljZUBleGFtcGxlLm9yZyIsImNhbm9uX3ZlcnNpb24iOiJqY3Mtc2hhMjU2LXYxIiwiY2hhbm5lbCI6ImNvbnNvbGUiLCJjbHVzdGVyIjoicHJvZC1lYXN0IiwiZXZpZGVuY2VfZmluZ2VycHJpbnQiOiJzaGEyNTY6OGY1YTE2N2EzODE3Y2E4NWUxZTlmNTJhZWYxOGJjZjliNDdmYWE0MDlmZDZiMTdkY2UxYTdkOTEyOTJlNDhlZSIsImV4cGlyZXNfYXQiOiIyMDI2LTEwLTIwVDA4OjMwOjAwWiIsImluY2lkZW50X3ZlcnNpb24iOjcsImlzc3VlZF9hdCI6IjIwMjYtMTAtMjBUMDg6MDA6MDBaIiwibGV2ZWwiOiJyZXZlcnNpYmxlIiwicGFyYW1zX2hhc2giOiJzaGEyNTY6N2E0MzY0YTBhNTExNDc5YTc1MzYzYjRlYTI4MjVlNzViOGViYzU4NDFlNjdiY2JkN2MwNmNmODEzODkyMjJhZCIsInByb3Bvc2FsX2lkIjoiNmYxYzJhOGUtNGI3ZC00ZTJhLTljM2YtMWQyZTNmNGE1YjZjIiwicm9vdF9jb21wb25lbnQiOiJwYXltZW50cy9jaGVja291dCIsInRhcmdldF91aWQiOiIwYjljNWU3YS0zZjFkLTRjMmItOGE2ZS01ZDRjM2IyYTFmMGUiLCJ0aWVyIjoiSCJ9LCJyZWF1dGgiOnsiYXV0aF90aW1lIjoiMjAyNi0xMC0yMFQwNzo1ODozMFoiLCJtZXRob2QiOiJvaWRjX21heF9hZ2UiLCJzZXNzaW9uX2hhc2giOiJzaGEyNTY6NjNjOTdhYzQ0YmRjZWM4MjE5ZGY3NTEyOTQ4OGNmNjMxNWZlMDQwNzY4NjEyYzQ4ZTkxYjQ4ZDg0OGI2ZjEwOCJ9fQ",
+      "expect_error": "webauthn_required"
+    },
+    {
+      "name": "tampered_proposal_id",
+      "description": "签名后修改 proposal_id",
+      "envelope": {
+        "assertion": {
+          "action": "workload_scale",
+          "approver_principal": "oidc:alice@example.org",
+          "canon_version": "jcs-sha256-v1",
+          "channel": "telegram",
+          "cluster": "prod-east",
+          "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+          "expires_at": "2026-10-20T08:30:00Z",
+          "incident_version": 7,
+          "issued_at": "2026-10-20T08:00:00Z",
+          "level": "reversible",
+          "params_hash": "sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad",
+          "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6d",
+          "root_component": "payments/checkout",
+          "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e",
+          "tier": "L"
+        },
+        "proof": {
+          "key_id": "service-2026-10",
+          "signature": "JArgqClrUz1th-OViD81iT6Pdy6wwNFUIB1uEDs1Z0UPDCROafdRtcOFnbiUOJqRjFdQ-9K7_534QDz3eQcpBQ",
+          "type": "service_ed25519"
+        }
+      },
+      "binding": {
+        "action": "workload_scale",
+        "cluster": "prod-east",
+        "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+        "incident_version": 7,
+        "params": {
+          "kind": "Deployment",
+          "name": "checkout",
+          "namespace": "payments",
+          "replicas": 3
+        },
+        "proposal_expires_at": "2026-10-20T09:00:00Z",
+        "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+        "root_component": "payments/checkout",
+        "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e"
+      },
+      "now": "2026-10-20T08:05:00Z",
+      "restored_at": null,
+      "require_webauthn_for_h": false,
+      "assertion_canonical": "{\"action\":\"workload_scale\",\"approver_principal\":\"oidc:alice@example.org\",\"canon_version\":\"jcs-sha256-v1\",\"channel\":\"telegram\",\"cluster\":\"prod-east\",\"evidence_fingerprint\":\"sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee\",\"expires_at\":\"2026-10-20T08:30:00Z\",\"incident_version\":7,\"issued_at\":\"2026-10-20T08:00:00Z\",\"level\":\"reversible\",\"params_hash\":\"sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad\",\"proposal_id\":\"6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6d\",\"root_component\":\"payments/checkout\",\"target_uid\":\"0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e\",\"tier\":\"L\"}",
+      "assertion_hash": "sha256:638e853b480f96b6196f2a606609fbb9eb6f7a91ae8713212e77b34e553d6b97",
+      "execution_id": "902b3e797905b88b09f6ed4fb9d7bf6c",
+      "signing_input_b64url": "c3JlbmF1dGl4LWFwcHJvdmFsLXYxCnsiYXNzZXJ0aW9uIjp7ImFjdGlvbiI6Indvcmtsb2FkX3NjYWxlIiwiYXBwcm92ZXJfcHJpbmNpcGFsIjoib2lkYzphbGljZUBleGFtcGxlLm9yZyIsImNhbm9uX3ZlcnNpb24iOiJqY3Mtc2hhMjU2LXYxIiwiY2hhbm5lbCI6InRlbGVncmFtIiwiY2x1c3RlciI6InByb2QtZWFzdCIsImV2aWRlbmNlX2ZpbmdlcnByaW50Ijoic2hhMjU2OjhmNWExNjdhMzgxN2NhODVlMWU5ZjUyYWVmMThiY2Y5YjQ3ZmFhNDA5ZmQ2YjE3ZGNlMWE3ZDkxMjkyZTQ4ZWUiLCJleHBpcmVzX2F0IjoiMjAyNi0xMC0yMFQwODozMDowMFoiLCJpbmNpZGVudF92ZXJzaW9uIjo3LCJpc3N1ZWRfYXQiOiIyMDI2LTEwLTIwVDA4OjAwOjAwWiIsImxldmVsIjoicmV2ZXJzaWJsZSIsInBhcmFtc19oYXNoIjoic2hhMjU2OjdhNDM2NGEwYTUxMTQ3OWE3NTM2M2I0ZWEyODI1ZTc1YjhlYmM1ODQxZTY3YmNiZDdjMDZjZjgxMzg5MjIyYWQiLCJwcm9wb3NhbF9pZCI6IjZmMWMyYThlLTRiN2QtNGUyYS05YzNmLTFkMmUzZjRhNWI2ZCIsInJvb3RfY29tcG9uZW50IjoicGF5bWVudHMvY2hlY2tvdXQiLCJ0YXJnZXRfdWlkIjoiMGI5YzVlN2EtM2YxZC00YzJiLThhNmUtNWQ0YzNiMmExZjBlIiwidGllciI6IkwifX0",
+      "expect_error": "bad_signature"
+    },
+    {
+      "name": "tampered_action",
+      "description": "签名后修改 action",
+      "envelope": {
+        "assertion": {
+          "action": "workload_rolling_restart",
+          "approver_principal": "oidc:alice@example.org",
+          "canon_version": "jcs-sha256-v1",
+          "channel": "telegram",
+          "cluster": "prod-east",
+          "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+          "expires_at": "2026-10-20T08:30:00Z",
+          "incident_version": 7,
+          "issued_at": "2026-10-20T08:00:00Z",
+          "level": "reversible",
+          "params_hash": "sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad",
+          "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+          "root_component": "payments/checkout",
+          "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e",
+          "tier": "L"
+        },
+        "proof": {
+          "key_id": "service-2026-10",
+          "signature": "JArgqClrUz1th-OViD81iT6Pdy6wwNFUIB1uEDs1Z0UPDCROafdRtcOFnbiUOJqRjFdQ-9K7_534QDz3eQcpBQ",
+          "type": "service_ed25519"
+        }
+      },
+      "binding": {
+        "action": "workload_scale",
+        "cluster": "prod-east",
+        "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+        "incident_version": 7,
+        "params": {
+          "kind": "Deployment",
+          "name": "checkout",
+          "namespace": "payments",
+          "replicas": 3
+        },
+        "proposal_expires_at": "2026-10-20T09:00:00Z",
+        "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+        "root_component": "payments/checkout",
+        "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e"
+      },
+      "now": "2026-10-20T08:05:00Z",
+      "restored_at": null,
+      "require_webauthn_for_h": false,
+      "assertion_canonical": "{\"action\":\"workload_rolling_restart\",\"approver_principal\":\"oidc:alice@example.org\",\"canon_version\":\"jcs-sha256-v1\",\"channel\":\"telegram\",\"cluster\":\"prod-east\",\"evidence_fingerprint\":\"sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee\",\"expires_at\":\"2026-10-20T08:30:00Z\",\"incident_version\":7,\"issued_at\":\"2026-10-20T08:00:00Z\",\"level\":\"reversible\",\"params_hash\":\"sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad\",\"proposal_id\":\"6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c\",\"root_component\":\"payments/checkout\",\"target_uid\":\"0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e\",\"tier\":\"L\"}",
+      "assertion_hash": "sha256:e3dee89b97b9c0783a267f3965a3063b46861dea14845fb27d6bc2015c6d876b",
+      "execution_id": "46814f7d56d4a3a646a720e295a39911",
+      "signing_input_b64url": "c3JlbmF1dGl4LWFwcHJvdmFsLXYxCnsiYXNzZXJ0aW9uIjp7ImFjdGlvbiI6Indvcmtsb2FkX3JvbGxpbmdfcmVzdGFydCIsImFwcHJvdmVyX3ByaW5jaXBhbCI6Im9pZGM6YWxpY2VAZXhhbXBsZS5vcmciLCJjYW5vbl92ZXJzaW9uIjoiamNzLXNoYTI1Ni12MSIsImNoYW5uZWwiOiJ0ZWxlZ3JhbSIsImNsdXN0ZXIiOiJwcm9kLWVhc3QiLCJldmlkZW5jZV9maW5nZXJwcmludCI6InNoYTI1Njo4ZjVhMTY3YTM4MTdjYTg1ZTFlOWY1MmFlZjE4YmNmOWI0N2ZhYTQwOWZkNmIxN2RjZTFhN2Q5MTI5MmU0OGVlIiwiZXhwaXJlc19hdCI6IjIwMjYtMTAtMjBUMDg6MzA6MDBaIiwiaW5jaWRlbnRfdmVyc2lvbiI6NywiaXNzdWVkX2F0IjoiMjAyNi0xMC0yMFQwODowMDowMFoiLCJsZXZlbCI6InJldmVyc2libGUiLCJwYXJhbXNfaGFzaCI6InNoYTI1Njo3YTQzNjRhMGE1MTE0NzlhNzUzNjNiNGVhMjgyNWU3NWI4ZWJjNTg0MWU2N2JjYmQ3YzA2Y2Y4MTM4OTIyMmFkIiwicHJvcG9zYWxfaWQiOiI2ZjFjMmE4ZS00YjdkLTRlMmEtOWMzZi0xZDJlM2Y0YTViNmMiLCJyb290X2NvbXBvbmVudCI6InBheW1lbnRzL2NoZWNrb3V0IiwidGFyZ2V0X3VpZCI6IjBiOWM1ZTdhLTNmMWQtNGMyYi04YTZlLTVkNGMzYjJhMWYwZSIsInRpZXIiOiJMIn19",
+      "expect_error": "bad_signature"
+    },
+    {
+      "name": "tampered_level",
+      "description": "签名后修改 level",
+      "envelope": {
+        "assertion": {
+          "action": "workload_scale",
+          "approver_principal": "oidc:alice@example.org",
+          "canon_version": "jcs-sha256-v1",
+          "channel": "telegram",
+          "cluster": "prod-east",
+          "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+          "expires_at": "2026-10-20T08:30:00Z",
+          "incident_version": 7,
+          "issued_at": "2026-10-20T08:00:00Z",
+          "level": "irreversible",
+          "params_hash": "sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad",
+          "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+          "root_component": "payments/checkout",
+          "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e",
+          "tier": "L"
+        },
+        "proof": {
+          "key_id": "service-2026-10",
+          "signature": "JArgqClrUz1th-OViD81iT6Pdy6wwNFUIB1uEDs1Z0UPDCROafdRtcOFnbiUOJqRjFdQ-9K7_534QDz3eQcpBQ",
+          "type": "service_ed25519"
+        }
+      },
+      "binding": {
+        "action": "workload_scale",
+        "cluster": "prod-east",
+        "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+        "incident_version": 7,
+        "params": {
+          "kind": "Deployment",
+          "name": "checkout",
+          "namespace": "payments",
+          "replicas": 3
+        },
+        "proposal_expires_at": "2026-10-20T09:00:00Z",
+        "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+        "root_component": "payments/checkout",
+        "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e"
+      },
+      "now": "2026-10-20T08:05:00Z",
+      "restored_at": null,
+      "require_webauthn_for_h": false,
+      "assertion_canonical": "{\"action\":\"workload_scale\",\"approver_principal\":\"oidc:alice@example.org\",\"canon_version\":\"jcs-sha256-v1\",\"channel\":\"telegram\",\"cluster\":\"prod-east\",\"evidence_fingerprint\":\"sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee\",\"expires_at\":\"2026-10-20T08:30:00Z\",\"incident_version\":7,\"issued_at\":\"2026-10-20T08:00:00Z\",\"level\":\"irreversible\",\"params_hash\":\"sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad\",\"proposal_id\":\"6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c\",\"root_component\":\"payments/checkout\",\"target_uid\":\"0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e\",\"tier\":\"L\"}",
+      "assertion_hash": "sha256:a0228e2218a7d1829aeb5fdd3f139e0d38c87aa8cedb1cfd9061fda29d6cc985",
+      "execution_id": "47fef447bf5e878a8682db5fbb0d1b15",
+      "signing_input_b64url": "c3JlbmF1dGl4LWFwcHJvdmFsLXYxCnsiYXNzZXJ0aW9uIjp7ImFjdGlvbiI6Indvcmtsb2FkX3NjYWxlIiwiYXBwcm92ZXJfcHJpbmNpcGFsIjoib2lkYzphbGljZUBleGFtcGxlLm9yZyIsImNhbm9uX3ZlcnNpb24iOiJqY3Mtc2hhMjU2LXYxIiwiY2hhbm5lbCI6InRlbGVncmFtIiwiY2x1c3RlciI6InByb2QtZWFzdCIsImV2aWRlbmNlX2ZpbmdlcnByaW50Ijoic2hhMjU2OjhmNWExNjdhMzgxN2NhODVlMWU5ZjUyYWVmMThiY2Y5YjQ3ZmFhNDA5ZmQ2YjE3ZGNlMWE3ZDkxMjkyZTQ4ZWUiLCJleHBpcmVzX2F0IjoiMjAyNi0xMC0yMFQwODozMDowMFoiLCJpbmNpZGVudF92ZXJzaW9uIjo3LCJpc3N1ZWRfYXQiOiIyMDI2LTEwLTIwVDA4OjAwOjAwWiIsImxldmVsIjoiaXJyZXZlcnNpYmxlIiwicGFyYW1zX2hhc2giOiJzaGEyNTY6N2E0MzY0YTBhNTExNDc5YTc1MzYzYjRlYTI4MjVlNzViOGViYzU4NDFlNjdiY2JkN2MwNmNmODEzODkyMjJhZCIsInByb3Bvc2FsX2lkIjoiNmYxYzJhOGUtNGI3ZC00ZTJhLTljM2YtMWQyZTNmNGE1YjZjIiwicm9vdF9jb21wb25lbnQiOiJwYXltZW50cy9jaGVja291dCIsInRhcmdldF91aWQiOiIwYjljNWU3YS0zZjFkLTRjMmItOGE2ZS01ZDRjM2IyYTFmMGUiLCJ0aWVyIjoiTCJ9fQ",
+      "expect_error": "bad_signature"
+    },
+    {
+      "name": "tampered_tier",
+      "description": "签名后修改 tier",
+      "envelope": {
+        "assertion": {
+          "action": "workload_scale",
+          "approver_principal": "oidc:alice@example.org",
+          "canon_version": "jcs-sha256-v1",
+          "channel": "telegram",
+          "cluster": "prod-east",
+          "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+          "expires_at": "2026-10-20T08:30:00Z",
+          "incident_version": 7,
+          "issued_at": "2026-10-20T08:00:00Z",
+          "level": "reversible",
+          "params_hash": "sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad",
+          "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+          "root_component": "payments/checkout",
+          "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e",
+          "tier": "H"
+        },
+        "proof": {
+          "key_id": "service-2026-10",
+          "signature": "JArgqClrUz1th-OViD81iT6Pdy6wwNFUIB1uEDs1Z0UPDCROafdRtcOFnbiUOJqRjFdQ-9K7_534QDz3eQcpBQ",
+          "type": "service_ed25519"
+        }
+      },
+      "binding": {
+        "action": "workload_scale",
+        "cluster": "prod-east",
+        "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+        "incident_version": 7,
+        "params": {
+          "kind": "Deployment",
+          "name": "checkout",
+          "namespace": "payments",
+          "replicas": 3
+        },
+        "proposal_expires_at": "2026-10-20T09:00:00Z",
+        "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+        "root_component": "payments/checkout",
+        "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e"
+      },
+      "now": "2026-10-20T08:05:00Z",
+      "restored_at": null,
+      "require_webauthn_for_h": false,
+      "assertion_canonical": "{\"action\":\"workload_scale\",\"approver_principal\":\"oidc:alice@example.org\",\"canon_version\":\"jcs-sha256-v1\",\"channel\":\"telegram\",\"cluster\":\"prod-east\",\"evidence_fingerprint\":\"sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee\",\"expires_at\":\"2026-10-20T08:30:00Z\",\"incident_version\":7,\"issued_at\":\"2026-10-20T08:00:00Z\",\"level\":\"reversible\",\"params_hash\":\"sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad\",\"proposal_id\":\"6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c\",\"root_component\":\"payments/checkout\",\"target_uid\":\"0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e\",\"tier\":\"H\"}",
+      "assertion_hash": "sha256:5b85869a64677976065073daf91b9fddb34eab10b4cb8d3dc037789067769840",
+      "execution_id": "26f59d4aa09db91f30e4b02667f258da",
+      "signing_input_b64url": "c3JlbmF1dGl4LWFwcHJvdmFsLXYxCnsiYXNzZXJ0aW9uIjp7ImFjdGlvbiI6Indvcmtsb2FkX3NjYWxlIiwiYXBwcm92ZXJfcHJpbmNpcGFsIjoib2lkYzphbGljZUBleGFtcGxlLm9yZyIsImNhbm9uX3ZlcnNpb24iOiJqY3Mtc2hhMjU2LXYxIiwiY2hhbm5lbCI6InRlbGVncmFtIiwiY2x1c3RlciI6InByb2QtZWFzdCIsImV2aWRlbmNlX2ZpbmdlcnByaW50Ijoic2hhMjU2OjhmNWExNjdhMzgxN2NhODVlMWU5ZjUyYWVmMThiY2Y5YjQ3ZmFhNDA5ZmQ2YjE3ZGNlMWE3ZDkxMjkyZTQ4ZWUiLCJleHBpcmVzX2F0IjoiMjAyNi0xMC0yMFQwODozMDowMFoiLCJpbmNpZGVudF92ZXJzaW9uIjo3LCJpc3N1ZWRfYXQiOiIyMDI2LTEwLTIwVDA4OjAwOjAwWiIsImxldmVsIjoicmV2ZXJzaWJsZSIsInBhcmFtc19oYXNoIjoic2hhMjU2OjdhNDM2NGEwYTUxMTQ3OWE3NTM2M2I0ZWEyODI1ZTc1YjhlYmM1ODQxZTY3YmNiZDdjMDZjZjgxMzg5MjIyYWQiLCJwcm9wb3NhbF9pZCI6IjZmMWMyYThlLTRiN2QtNGUyYS05YzNmLTFkMmUzZjRhNWI2YyIsInJvb3RfY29tcG9uZW50IjoicGF5bWVudHMvY2hlY2tvdXQiLCJ0YXJnZXRfdWlkIjoiMGI5YzVlN2EtM2YxZC00YzJiLThhNmUtNWQ0YzNiMmExZjBlIiwidGllciI6IkgifX0",
+      "expect_error": "bad_signature"
+    },
+    {
+      "name": "tampered_params_hash",
+      "description": "签名后修改 params_hash",
+      "envelope": {
+        "assertion": {
+          "action": "workload_scale",
+          "approver_principal": "oidc:alice@example.org",
+          "canon_version": "jcs-sha256-v1",
+          "channel": "telegram",
+          "cluster": "prod-east",
+          "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+          "expires_at": "2026-10-20T08:30:00Z",
+          "incident_version": 7,
+          "issued_at": "2026-10-20T08:00:00Z",
+          "level": "reversible",
+          "params_hash": "sha256:7bef2fba1409e22302c42ca34d4ec592f163403688f93d4b27ca3d3f631ca7da",
+          "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+          "root_component": "payments/checkout",
+          "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e",
+          "tier": "L"
+        },
+        "proof": {
+          "key_id": "service-2026-10",
+          "signature": "JArgqClrUz1th-OViD81iT6Pdy6wwNFUIB1uEDs1Z0UPDCROafdRtcOFnbiUOJqRjFdQ-9K7_534QDz3eQcpBQ",
+          "type": "service_ed25519"
+        }
+      },
+      "binding": {
+        "action": "workload_scale",
+        "cluster": "prod-east",
+        "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+        "incident_version": 7,
+        "params": {
+          "kind": "Deployment",
+          "name": "checkout",
+          "namespace": "payments",
+          "replicas": 3
+        },
+        "proposal_expires_at": "2026-10-20T09:00:00Z",
+        "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+        "root_component": "payments/checkout",
+        "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e"
+      },
+      "now": "2026-10-20T08:05:00Z",
+      "restored_at": null,
+      "require_webauthn_for_h": false,
+      "assertion_canonical": "{\"action\":\"workload_scale\",\"approver_principal\":\"oidc:alice@example.org\",\"canon_version\":\"jcs-sha256-v1\",\"channel\":\"telegram\",\"cluster\":\"prod-east\",\"evidence_fingerprint\":\"sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee\",\"expires_at\":\"2026-10-20T08:30:00Z\",\"incident_version\":7,\"issued_at\":\"2026-10-20T08:00:00Z\",\"level\":\"reversible\",\"params_hash\":\"sha256:7bef2fba1409e22302c42ca34d4ec592f163403688f93d4b27ca3d3f631ca7da\",\"proposal_id\":\"6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c\",\"root_component\":\"payments/checkout\",\"target_uid\":\"0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e\",\"tier\":\"L\"}",
+      "assertion_hash": "sha256:cecf28aa7a8cf562ddf7608e12c4d200a8d825f5ecf676a1200e0e86484ce632",
+      "execution_id": "d0a26f9c155ff221141f5ad1fe2ca423",
+      "signing_input_b64url": "c3JlbmF1dGl4LWFwcHJvdmFsLXYxCnsiYXNzZXJ0aW9uIjp7ImFjdGlvbiI6Indvcmtsb2FkX3NjYWxlIiwiYXBwcm92ZXJfcHJpbmNpcGFsIjoib2lkYzphbGljZUBleGFtcGxlLm9yZyIsImNhbm9uX3ZlcnNpb24iOiJqY3Mtc2hhMjU2LXYxIiwiY2hhbm5lbCI6InRlbGVncmFtIiwiY2x1c3RlciI6InByb2QtZWFzdCIsImV2aWRlbmNlX2ZpbmdlcnByaW50Ijoic2hhMjU2OjhmNWExNjdhMzgxN2NhODVlMWU5ZjUyYWVmMThiY2Y5YjQ3ZmFhNDA5ZmQ2YjE3ZGNlMWE3ZDkxMjkyZTQ4ZWUiLCJleHBpcmVzX2F0IjoiMjAyNi0xMC0yMFQwODozMDowMFoiLCJpbmNpZGVudF92ZXJzaW9uIjo3LCJpc3N1ZWRfYXQiOiIyMDI2LTEwLTIwVDA4OjAwOjAwWiIsImxldmVsIjoicmV2ZXJzaWJsZSIsInBhcmFtc19oYXNoIjoic2hhMjU2OjdiZWYyZmJhMTQwOWUyMjMwMmM0MmNhMzRkNGVjNTkyZjE2MzQwMzY4OGY5M2Q0YjI3Y2EzZDNmNjMxY2E3ZGEiLCJwcm9wb3NhbF9pZCI6IjZmMWMyYThlLTRiN2QtNGUyYS05YzNmLTFkMmUzZjRhNWI2YyIsInJvb3RfY29tcG9uZW50IjoicGF5bWVudHMvY2hlY2tvdXQiLCJ0YXJnZXRfdWlkIjoiMGI5YzVlN2EtM2YxZC00YzJiLThhNmUtNWQ0YzNiMmExZjBlIiwidGllciI6IkwifX0",
+      "expect_error": "bad_signature"
+    },
+    {
+      "name": "tampered_target_uid",
+      "description": "签名后修改 target_uid",
+      "envelope": {
+        "assertion": {
+          "action": "workload_scale",
+          "approver_principal": "oidc:alice@example.org",
+          "canon_version": "jcs-sha256-v1",
+          "channel": "telegram",
+          "cluster": "prod-east",
+          "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+          "expires_at": "2026-10-20T08:30:00Z",
+          "incident_version": 7,
+          "issued_at": "2026-10-20T08:00:00Z",
+          "level": "reversible",
+          "params_hash": "sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad",
+          "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+          "root_component": "payments/checkout",
+          "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0f",
+          "tier": "L"
+        },
+        "proof": {
+          "key_id": "service-2026-10",
+          "signature": "JArgqClrUz1th-OViD81iT6Pdy6wwNFUIB1uEDs1Z0UPDCROafdRtcOFnbiUOJqRjFdQ-9K7_534QDz3eQcpBQ",
+          "type": "service_ed25519"
+        }
+      },
+      "binding": {
+        "action": "workload_scale",
+        "cluster": "prod-east",
+        "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+        "incident_version": 7,
+        "params": {
+          "kind": "Deployment",
+          "name": "checkout",
+          "namespace": "payments",
+          "replicas": 3
+        },
+        "proposal_expires_at": "2026-10-20T09:00:00Z",
+        "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+        "root_component": "payments/checkout",
+        "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e"
+      },
+      "now": "2026-10-20T08:05:00Z",
+      "restored_at": null,
+      "require_webauthn_for_h": false,
+      "assertion_canonical": "{\"action\":\"workload_scale\",\"approver_principal\":\"oidc:alice@example.org\",\"canon_version\":\"jcs-sha256-v1\",\"channel\":\"telegram\",\"cluster\":\"prod-east\",\"evidence_fingerprint\":\"sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee\",\"expires_at\":\"2026-10-20T08:30:00Z\",\"incident_version\":7,\"issued_at\":\"2026-10-20T08:00:00Z\",\"level\":\"reversible\",\"params_hash\":\"sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad\",\"proposal_id\":\"6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c\",\"root_component\":\"payments/checkout\",\"target_uid\":\"0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0f\",\"tier\":\"L\"}",
+      "assertion_hash": "sha256:3547bcb51940cb22ba824d87ee684326fab08b16f14d3c1113573fdb1715dc8b",
+      "execution_id": "1b91c0c35ee0eba68f2306f924054aa2",
+      "signing_input_b64url": "c3JlbmF1dGl4LWFwcHJvdmFsLXYxCnsiYXNzZXJ0aW9uIjp7ImFjdGlvbiI6Indvcmtsb2FkX3NjYWxlIiwiYXBwcm92ZXJfcHJpbmNpcGFsIjoib2lkYzphbGljZUBleGFtcGxlLm9yZyIsImNhbm9uX3ZlcnNpb24iOiJqY3Mtc2hhMjU2LXYxIiwiY2hhbm5lbCI6InRlbGVncmFtIiwiY2x1c3RlciI6InByb2QtZWFzdCIsImV2aWRlbmNlX2ZpbmdlcnByaW50Ijoic2hhMjU2OjhmNWExNjdhMzgxN2NhODVlMWU5ZjUyYWVmMThiY2Y5YjQ3ZmFhNDA5ZmQ2YjE3ZGNlMWE3ZDkxMjkyZTQ4ZWUiLCJleHBpcmVzX2F0IjoiMjAyNi0xMC0yMFQwODozMDowMFoiLCJpbmNpZGVudF92ZXJzaW9uIjo3LCJpc3N1ZWRfYXQiOiIyMDI2LTEwLTIwVDA4OjAwOjAwWiIsImxldmVsIjoicmV2ZXJzaWJsZSIsInBhcmFtc19oYXNoIjoic2hhMjU2OjdhNDM2NGEwYTUxMTQ3OWE3NTM2M2I0ZWEyODI1ZTc1YjhlYmM1ODQxZTY3YmNiZDdjMDZjZjgxMzg5MjIyYWQiLCJwcm9wb3NhbF9pZCI6IjZmMWMyYThlLTRiN2QtNGUyYS05YzNmLTFkMmUzZjRhNWI2YyIsInJvb3RfY29tcG9uZW50IjoicGF5bWVudHMvY2hlY2tvdXQiLCJ0YXJnZXRfdWlkIjoiMGI5YzVlN2EtM2YxZC00YzJiLThhNmUtNWQ0YzNiMmExZjBmIiwidGllciI6IkwifX0",
+      "expect_error": "bad_signature"
+    },
+    {
+      "name": "tampered_cluster",
+      "description": "签名后修改 cluster",
+      "envelope": {
+        "assertion": {
+          "action": "workload_scale",
+          "approver_principal": "oidc:alice@example.org",
+          "canon_version": "jcs-sha256-v1",
+          "channel": "telegram",
+          "cluster": "prod-west",
+          "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+          "expires_at": "2026-10-20T08:30:00Z",
+          "incident_version": 7,
+          "issued_at": "2026-10-20T08:00:00Z",
+          "level": "reversible",
+          "params_hash": "sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad",
+          "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+          "root_component": "payments/checkout",
+          "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e",
+          "tier": "L"
+        },
+        "proof": {
+          "key_id": "service-2026-10",
+          "signature": "JArgqClrUz1th-OViD81iT6Pdy6wwNFUIB1uEDs1Z0UPDCROafdRtcOFnbiUOJqRjFdQ-9K7_534QDz3eQcpBQ",
+          "type": "service_ed25519"
+        }
+      },
+      "binding": {
+        "action": "workload_scale",
+        "cluster": "prod-east",
+        "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+        "incident_version": 7,
+        "params": {
+          "kind": "Deployment",
+          "name": "checkout",
+          "namespace": "payments",
+          "replicas": 3
+        },
+        "proposal_expires_at": "2026-10-20T09:00:00Z",
+        "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+        "root_component": "payments/checkout",
+        "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e"
+      },
+      "now": "2026-10-20T08:05:00Z",
+      "restored_at": null,
+      "require_webauthn_for_h": false,
+      "assertion_canonical": "{\"action\":\"workload_scale\",\"approver_principal\":\"oidc:alice@example.org\",\"canon_version\":\"jcs-sha256-v1\",\"channel\":\"telegram\",\"cluster\":\"prod-west\",\"evidence_fingerprint\":\"sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee\",\"expires_at\":\"2026-10-20T08:30:00Z\",\"incident_version\":7,\"issued_at\":\"2026-10-20T08:00:00Z\",\"level\":\"reversible\",\"params_hash\":\"sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad\",\"proposal_id\":\"6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c\",\"root_component\":\"payments/checkout\",\"target_uid\":\"0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e\",\"tier\":\"L\"}",
+      "assertion_hash": "sha256:47d4fefd871a7f0871e4a901b87a4ffdb309ddc4abf664a8a595de309eaab7b7",
+      "execution_id": "dfbeb22b783d0eea4ef211d63df023d7",
+      "signing_input_b64url": "c3JlbmF1dGl4LWFwcHJvdmFsLXYxCnsiYXNzZXJ0aW9uIjp7ImFjdGlvbiI6Indvcmtsb2FkX3NjYWxlIiwiYXBwcm92ZXJfcHJpbmNpcGFsIjoib2lkYzphbGljZUBleGFtcGxlLm9yZyIsImNhbm9uX3ZlcnNpb24iOiJqY3Mtc2hhMjU2LXYxIiwiY2hhbm5lbCI6InRlbGVncmFtIiwiY2x1c3RlciI6InByb2Qtd2VzdCIsImV2aWRlbmNlX2ZpbmdlcnByaW50Ijoic2hhMjU2OjhmNWExNjdhMzgxN2NhODVlMWU5ZjUyYWVmMThiY2Y5YjQ3ZmFhNDA5ZmQ2YjE3ZGNlMWE3ZDkxMjkyZTQ4ZWUiLCJleHBpcmVzX2F0IjoiMjAyNi0xMC0yMFQwODozMDowMFoiLCJpbmNpZGVudF92ZXJzaW9uIjo3LCJpc3N1ZWRfYXQiOiIyMDI2LTEwLTIwVDA4OjAwOjAwWiIsImxldmVsIjoicmV2ZXJzaWJsZSIsInBhcmFtc19oYXNoIjoic2hhMjU2OjdhNDM2NGEwYTUxMTQ3OWE3NTM2M2I0ZWEyODI1ZTc1YjhlYmM1ODQxZTY3YmNiZDdjMDZjZjgxMzg5MjIyYWQiLCJwcm9wb3NhbF9pZCI6IjZmMWMyYThlLTRiN2QtNGUyYS05YzNmLTFkMmUzZjRhNWI2YyIsInJvb3RfY29tcG9uZW50IjoicGF5bWVudHMvY2hlY2tvdXQiLCJ0YXJnZXRfdWlkIjoiMGI5YzVlN2EtM2YxZC00YzJiLThhNmUtNWQ0YzNiMmExZjBlIiwidGllciI6IkwifX0",
+      "expect_error": "bad_signature"
+    },
+    {
+      "name": "tampered_incident_version",
+      "description": "签名后修改 incident_version",
+      "envelope": {
+        "assertion": {
+          "action": "workload_scale",
+          "approver_principal": "oidc:alice@example.org",
+          "canon_version": "jcs-sha256-v1",
+          "channel": "telegram",
+          "cluster": "prod-east",
+          "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+          "expires_at": "2026-10-20T08:30:00Z",
+          "incident_version": 8,
+          "issued_at": "2026-10-20T08:00:00Z",
+          "level": "reversible",
+          "params_hash": "sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad",
+          "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+          "root_component": "payments/checkout",
+          "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e",
+          "tier": "L"
+        },
+        "proof": {
+          "key_id": "service-2026-10",
+          "signature": "JArgqClrUz1th-OViD81iT6Pdy6wwNFUIB1uEDs1Z0UPDCROafdRtcOFnbiUOJqRjFdQ-9K7_534QDz3eQcpBQ",
+          "type": "service_ed25519"
+        }
+      },
+      "binding": {
+        "action": "workload_scale",
+        "cluster": "prod-east",
+        "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+        "incident_version": 7,
+        "params": {
+          "kind": "Deployment",
+          "name": "checkout",
+          "namespace": "payments",
+          "replicas": 3
+        },
+        "proposal_expires_at": "2026-10-20T09:00:00Z",
+        "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+        "root_component": "payments/checkout",
+        "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e"
+      },
+      "now": "2026-10-20T08:05:00Z",
+      "restored_at": null,
+      "require_webauthn_for_h": false,
+      "assertion_canonical": "{\"action\":\"workload_scale\",\"approver_principal\":\"oidc:alice@example.org\",\"canon_version\":\"jcs-sha256-v1\",\"channel\":\"telegram\",\"cluster\":\"prod-east\",\"evidence_fingerprint\":\"sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee\",\"expires_at\":\"2026-10-20T08:30:00Z\",\"incident_version\":8,\"issued_at\":\"2026-10-20T08:00:00Z\",\"level\":\"reversible\",\"params_hash\":\"sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad\",\"proposal_id\":\"6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c\",\"root_component\":\"payments/checkout\",\"target_uid\":\"0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e\",\"tier\":\"L\"}",
+      "assertion_hash": "sha256:0e43a8e762878e721bdd8d561f01e4f82ff1409a8a096c299bf2443042ae22a2",
+      "execution_id": "2bfc9808e020731b235fe58c1e6d8c02",
+      "signing_input_b64url": "c3JlbmF1dGl4LWFwcHJvdmFsLXYxCnsiYXNzZXJ0aW9uIjp7ImFjdGlvbiI6Indvcmtsb2FkX3NjYWxlIiwiYXBwcm92ZXJfcHJpbmNpcGFsIjoib2lkYzphbGljZUBleGFtcGxlLm9yZyIsImNhbm9uX3ZlcnNpb24iOiJqY3Mtc2hhMjU2LXYxIiwiY2hhbm5lbCI6InRlbGVncmFtIiwiY2x1c3RlciI6InByb2QtZWFzdCIsImV2aWRlbmNlX2ZpbmdlcnByaW50Ijoic2hhMjU2OjhmNWExNjdhMzgxN2NhODVlMWU5ZjUyYWVmMThiY2Y5YjQ3ZmFhNDA5ZmQ2YjE3ZGNlMWE3ZDkxMjkyZTQ4ZWUiLCJleHBpcmVzX2F0IjoiMjAyNi0xMC0yMFQwODozMDowMFoiLCJpbmNpZGVudF92ZXJzaW9uIjo4LCJpc3N1ZWRfYXQiOiIyMDI2LTEwLTIwVDA4OjAwOjAwWiIsImxldmVsIjoicmV2ZXJzaWJsZSIsInBhcmFtc19oYXNoIjoic2hhMjU2OjdhNDM2NGEwYTUxMTQ3OWE3NTM2M2I0ZWEyODI1ZTc1YjhlYmM1ODQxZTY3YmNiZDdjMDZjZjgxMzg5MjIyYWQiLCJwcm9wb3NhbF9pZCI6IjZmMWMyYThlLTRiN2QtNGUyYS05YzNmLTFkMmUzZjRhNWI2YyIsInJvb3RfY29tcG9uZW50IjoicGF5bWVudHMvY2hlY2tvdXQiLCJ0YXJnZXRfdWlkIjoiMGI5YzVlN2EtM2YxZC00YzJiLThhNmUtNWQ0YzNiMmExZjBlIiwidGllciI6IkwifX0",
+      "expect_error": "bad_signature"
+    },
+    {
+      "name": "tampered_root_component",
+      "description": "签名后修改 root_component",
+      "envelope": {
+        "assertion": {
+          "action": "workload_scale",
+          "approver_principal": "oidc:alice@example.org",
+          "canon_version": "jcs-sha256-v1",
+          "channel": "telegram",
+          "cluster": "prod-east",
+          "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+          "expires_at": "2026-10-20T08:30:00Z",
+          "incident_version": 7,
+          "issued_at": "2026-10-20T08:00:00Z",
+          "level": "reversible",
+          "params_hash": "sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad",
+          "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+          "root_component": "payments/gateway",
+          "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e",
+          "tier": "L"
+        },
+        "proof": {
+          "key_id": "service-2026-10",
+          "signature": "JArgqClrUz1th-OViD81iT6Pdy6wwNFUIB1uEDs1Z0UPDCROafdRtcOFnbiUOJqRjFdQ-9K7_534QDz3eQcpBQ",
+          "type": "service_ed25519"
+        }
+      },
+      "binding": {
+        "action": "workload_scale",
+        "cluster": "prod-east",
+        "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+        "incident_version": 7,
+        "params": {
+          "kind": "Deployment",
+          "name": "checkout",
+          "namespace": "payments",
+          "replicas": 3
+        },
+        "proposal_expires_at": "2026-10-20T09:00:00Z",
+        "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+        "root_component": "payments/checkout",
+        "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e"
+      },
+      "now": "2026-10-20T08:05:00Z",
+      "restored_at": null,
+      "require_webauthn_for_h": false,
+      "assertion_canonical": "{\"action\":\"workload_scale\",\"approver_principal\":\"oidc:alice@example.org\",\"canon_version\":\"jcs-sha256-v1\",\"channel\":\"telegram\",\"cluster\":\"prod-east\",\"evidence_fingerprint\":\"sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee\",\"expires_at\":\"2026-10-20T08:30:00Z\",\"incident_version\":7,\"issued_at\":\"2026-10-20T08:00:00Z\",\"level\":\"reversible\",\"params_hash\":\"sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad\",\"proposal_id\":\"6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c\",\"root_component\":\"payments/gateway\",\"target_uid\":\"0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e\",\"tier\":\"L\"}",
+      "assertion_hash": "sha256:41d45e3ad5535402210b6cbbce091e5863c7b660e01bd297413ce6ac495cec78",
+      "execution_id": "0563760130af7520fb1cb6c152466887",
+      "signing_input_b64url": "c3JlbmF1dGl4LWFwcHJvdmFsLXYxCnsiYXNzZXJ0aW9uIjp7ImFjdGlvbiI6Indvcmtsb2FkX3NjYWxlIiwiYXBwcm92ZXJfcHJpbmNpcGFsIjoib2lkYzphbGljZUBleGFtcGxlLm9yZyIsImNhbm9uX3ZlcnNpb24iOiJqY3Mtc2hhMjU2LXYxIiwiY2hhbm5lbCI6InRlbGVncmFtIiwiY2x1c3RlciI6InByb2QtZWFzdCIsImV2aWRlbmNlX2ZpbmdlcnByaW50Ijoic2hhMjU2OjhmNWExNjdhMzgxN2NhODVlMWU5ZjUyYWVmMThiY2Y5YjQ3ZmFhNDA5ZmQ2YjE3ZGNlMWE3ZDkxMjkyZTQ4ZWUiLCJleHBpcmVzX2F0IjoiMjAyNi0xMC0yMFQwODozMDowMFoiLCJpbmNpZGVudF92ZXJzaW9uIjo3LCJpc3N1ZWRfYXQiOiIyMDI2LTEwLTIwVDA4OjAwOjAwWiIsImxldmVsIjoicmV2ZXJzaWJsZSIsInBhcmFtc19oYXNoIjoic2hhMjU2OjdhNDM2NGEwYTUxMTQ3OWE3NTM2M2I0ZWEyODI1ZTc1YjhlYmM1ODQxZTY3YmNiZDdjMDZjZjgxMzg5MjIyYWQiLCJwcm9wb3NhbF9pZCI6IjZmMWMyYThlLTRiN2QtNGUyYS05YzNmLTFkMmUzZjRhNWI2YyIsInJvb3RfY29tcG9uZW50IjoicGF5bWVudHMvZ2F0ZXdheSIsInRhcmdldF91aWQiOiIwYjljNWU3YS0zZjFkLTRjMmItOGE2ZS01ZDRjM2IyYTFmMGUiLCJ0aWVyIjoiTCJ9fQ",
+      "expect_error": "bad_signature"
+    },
+    {
+      "name": "tampered_evidence_fingerprint",
+      "description": "签名后修改 evidence_fingerprint",
+      "envelope": {
+        "assertion": {
+          "action": "workload_scale",
+          "approver_principal": "oidc:alice@example.org",
+          "canon_version": "jcs-sha256-v1",
+          "channel": "telegram",
+          "cluster": "prod-east",
+          "evidence_fingerprint": "sha256:9fc48f8fa8e96df41a66122ae08c797905256e0cfdb3f28aacf48bd11540b55b",
+          "expires_at": "2026-10-20T08:30:00Z",
+          "incident_version": 7,
+          "issued_at": "2026-10-20T08:00:00Z",
+          "level": "reversible",
+          "params_hash": "sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad",
+          "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+          "root_component": "payments/checkout",
+          "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e",
+          "tier": "L"
+        },
+        "proof": {
+          "key_id": "service-2026-10",
+          "signature": "JArgqClrUz1th-OViD81iT6Pdy6wwNFUIB1uEDs1Z0UPDCROafdRtcOFnbiUOJqRjFdQ-9K7_534QDz3eQcpBQ",
+          "type": "service_ed25519"
+        }
+      },
+      "binding": {
+        "action": "workload_scale",
+        "cluster": "prod-east",
+        "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+        "incident_version": 7,
+        "params": {
+          "kind": "Deployment",
+          "name": "checkout",
+          "namespace": "payments",
+          "replicas": 3
+        },
+        "proposal_expires_at": "2026-10-20T09:00:00Z",
+        "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+        "root_component": "payments/checkout",
+        "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e"
+      },
+      "now": "2026-10-20T08:05:00Z",
+      "restored_at": null,
+      "require_webauthn_for_h": false,
+      "assertion_canonical": "{\"action\":\"workload_scale\",\"approver_principal\":\"oidc:alice@example.org\",\"canon_version\":\"jcs-sha256-v1\",\"channel\":\"telegram\",\"cluster\":\"prod-east\",\"evidence_fingerprint\":\"sha256:9fc48f8fa8e96df41a66122ae08c797905256e0cfdb3f28aacf48bd11540b55b\",\"expires_at\":\"2026-10-20T08:30:00Z\",\"incident_version\":7,\"issued_at\":\"2026-10-20T08:00:00Z\",\"level\":\"reversible\",\"params_hash\":\"sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad\",\"proposal_id\":\"6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c\",\"root_component\":\"payments/checkout\",\"target_uid\":\"0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e\",\"tier\":\"L\"}",
+      "assertion_hash": "sha256:06b4b03a455c33fe35c2f25b084859e69297aa008df882263815c1903b99c223",
+      "execution_id": "0e9ac4aa497599c57ad6b3f88b5b8fb7",
+      "signing_input_b64url": "c3JlbmF1dGl4LWFwcHJvdmFsLXYxCnsiYXNzZXJ0aW9uIjp7ImFjdGlvbiI6Indvcmtsb2FkX3NjYWxlIiwiYXBwcm92ZXJfcHJpbmNpcGFsIjoib2lkYzphbGljZUBleGFtcGxlLm9yZyIsImNhbm9uX3ZlcnNpb24iOiJqY3Mtc2hhMjU2LXYxIiwiY2hhbm5lbCI6InRlbGVncmFtIiwiY2x1c3RlciI6InByb2QtZWFzdCIsImV2aWRlbmNlX2ZpbmdlcnByaW50Ijoic2hhMjU2OjlmYzQ4ZjhmYThlOTZkZjQxYTY2MTIyYWUwOGM3OTc5MDUyNTZlMGNmZGIzZjI4YWFjZjQ4YmQxMTU0MGI1NWIiLCJleHBpcmVzX2F0IjoiMjAyNi0xMC0yMFQwODozMDowMFoiLCJpbmNpZGVudF92ZXJzaW9uIjo3LCJpc3N1ZWRfYXQiOiIyMDI2LTEwLTIwVDA4OjAwOjAwWiIsImxldmVsIjoicmV2ZXJzaWJsZSIsInBhcmFtc19oYXNoIjoic2hhMjU2OjdhNDM2NGEwYTUxMTQ3OWE3NTM2M2I0ZWEyODI1ZTc1YjhlYmM1ODQxZTY3YmNiZDdjMDZjZjgxMzg5MjIyYWQiLCJwcm9wb3NhbF9pZCI6IjZmMWMyYThlLTRiN2QtNGUyYS05YzNmLTFkMmUzZjRhNWI2YyIsInJvb3RfY29tcG9uZW50IjoicGF5bWVudHMvY2hlY2tvdXQiLCJ0YXJnZXRfdWlkIjoiMGI5YzVlN2EtM2YxZC00YzJiLThhNmUtNWQ0YzNiMmExZjBlIiwidGllciI6IkwifX0",
+      "expect_error": "bad_signature"
+    },
+    {
+      "name": "tampered_approver_principal",
+      "description": "签名后修改 approver_principal",
+      "envelope": {
+        "assertion": {
+          "action": "workload_scale",
+          "approver_principal": "oidc:bob@example.org",
+          "canon_version": "jcs-sha256-v1",
+          "channel": "telegram",
+          "cluster": "prod-east",
+          "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+          "expires_at": "2026-10-20T08:30:00Z",
+          "incident_version": 7,
+          "issued_at": "2026-10-20T08:00:00Z",
+          "level": "reversible",
+          "params_hash": "sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad",
+          "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+          "root_component": "payments/checkout",
+          "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e",
+          "tier": "L"
+        },
+        "proof": {
+          "key_id": "service-2026-10",
+          "signature": "JArgqClrUz1th-OViD81iT6Pdy6wwNFUIB1uEDs1Z0UPDCROafdRtcOFnbiUOJqRjFdQ-9K7_534QDz3eQcpBQ",
+          "type": "service_ed25519"
+        }
+      },
+      "binding": {
+        "action": "workload_scale",
+        "cluster": "prod-east",
+        "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+        "incident_version": 7,
+        "params": {
+          "kind": "Deployment",
+          "name": "checkout",
+          "namespace": "payments",
+          "replicas": 3
+        },
+        "proposal_expires_at": "2026-10-20T09:00:00Z",
+        "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+        "root_component": "payments/checkout",
+        "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e"
+      },
+      "now": "2026-10-20T08:05:00Z",
+      "restored_at": null,
+      "require_webauthn_for_h": false,
+      "assertion_canonical": "{\"action\":\"workload_scale\",\"approver_principal\":\"oidc:bob@example.org\",\"canon_version\":\"jcs-sha256-v1\",\"channel\":\"telegram\",\"cluster\":\"prod-east\",\"evidence_fingerprint\":\"sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee\",\"expires_at\":\"2026-10-20T08:30:00Z\",\"incident_version\":7,\"issued_at\":\"2026-10-20T08:00:00Z\",\"level\":\"reversible\",\"params_hash\":\"sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad\",\"proposal_id\":\"6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c\",\"root_component\":\"payments/checkout\",\"target_uid\":\"0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e\",\"tier\":\"L\"}",
+      "assertion_hash": "sha256:c538e774927b1b93d71968899cfe7cec376076a960985d79564b7abcc1025a67",
+      "execution_id": "19f2c2b4f2c98c8b48a3bbc55f74bddd",
+      "signing_input_b64url": "c3JlbmF1dGl4LWFwcHJvdmFsLXYxCnsiYXNzZXJ0aW9uIjp7ImFjdGlvbiI6Indvcmtsb2FkX3NjYWxlIiwiYXBwcm92ZXJfcHJpbmNpcGFsIjoib2lkYzpib2JAZXhhbXBsZS5vcmciLCJjYW5vbl92ZXJzaW9uIjoiamNzLXNoYTI1Ni12MSIsImNoYW5uZWwiOiJ0ZWxlZ3JhbSIsImNsdXN0ZXIiOiJwcm9kLWVhc3QiLCJldmlkZW5jZV9maW5nZXJwcmludCI6InNoYTI1Njo4ZjVhMTY3YTM4MTdjYTg1ZTFlOWY1MmFlZjE4YmNmOWI0N2ZhYTQwOWZkNmIxN2RjZTFhN2Q5MTI5MmU0OGVlIiwiZXhwaXJlc19hdCI6IjIwMjYtMTAtMjBUMDg6MzA6MDBaIiwiaW5jaWRlbnRfdmVyc2lvbiI6NywiaXNzdWVkX2F0IjoiMjAyNi0xMC0yMFQwODowMDowMFoiLCJsZXZlbCI6InJldmVyc2libGUiLCJwYXJhbXNfaGFzaCI6InNoYTI1Njo3YTQzNjRhMGE1MTE0NzlhNzUzNjNiNGVhMjgyNWU3NWI4ZWJjNTg0MWU2N2JjYmQ3YzA2Y2Y4MTM4OTIyMmFkIiwicHJvcG9zYWxfaWQiOiI2ZjFjMmE4ZS00YjdkLTRlMmEtOWMzZi0xZDJlM2Y0YTViNmMiLCJyb290X2NvbXBvbmVudCI6InBheW1lbnRzL2NoZWNrb3V0IiwidGFyZ2V0X3VpZCI6IjBiOWM1ZTdhLTNmMWQtNGMyYi04YTZlLTVkNGMzYjJhMWYwZSIsInRpZXIiOiJMIn19",
+      "expect_error": "bad_signature"
+    },
+    {
+      "name": "tampered_channel",
+      "description": "签名后修改 channel",
+      "envelope": {
+        "assertion": {
+          "action": "workload_scale",
+          "approver_principal": "oidc:alice@example.org",
+          "canon_version": "jcs-sha256-v1",
+          "channel": "console",
+          "cluster": "prod-east",
+          "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+          "expires_at": "2026-10-20T08:30:00Z",
+          "incident_version": 7,
+          "issued_at": "2026-10-20T08:00:00Z",
+          "level": "reversible",
+          "params_hash": "sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad",
+          "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+          "root_component": "payments/checkout",
+          "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e",
+          "tier": "L"
+        },
+        "proof": {
+          "key_id": "service-2026-10",
+          "signature": "JArgqClrUz1th-OViD81iT6Pdy6wwNFUIB1uEDs1Z0UPDCROafdRtcOFnbiUOJqRjFdQ-9K7_534QDz3eQcpBQ",
+          "type": "service_ed25519"
+        }
+      },
+      "binding": {
+        "action": "workload_scale",
+        "cluster": "prod-east",
+        "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+        "incident_version": 7,
+        "params": {
+          "kind": "Deployment",
+          "name": "checkout",
+          "namespace": "payments",
+          "replicas": 3
+        },
+        "proposal_expires_at": "2026-10-20T09:00:00Z",
+        "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+        "root_component": "payments/checkout",
+        "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e"
+      },
+      "now": "2026-10-20T08:05:00Z",
+      "restored_at": null,
+      "require_webauthn_for_h": false,
+      "assertion_canonical": "{\"action\":\"workload_scale\",\"approver_principal\":\"oidc:alice@example.org\",\"canon_version\":\"jcs-sha256-v1\",\"channel\":\"console\",\"cluster\":\"prod-east\",\"evidence_fingerprint\":\"sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee\",\"expires_at\":\"2026-10-20T08:30:00Z\",\"incident_version\":7,\"issued_at\":\"2026-10-20T08:00:00Z\",\"level\":\"reversible\",\"params_hash\":\"sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad\",\"proposal_id\":\"6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c\",\"root_component\":\"payments/checkout\",\"target_uid\":\"0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e\",\"tier\":\"L\"}",
+      "assertion_hash": "sha256:e374b5b2f48b4416941d1064d8f7d0f40359099a930366dd87cbf87ac2cd7fba",
+      "execution_id": "5125c95c08cd85a952f7db603ea23ed6",
+      "signing_input_b64url": "c3JlbmF1dGl4LWFwcHJvdmFsLXYxCnsiYXNzZXJ0aW9uIjp7ImFjdGlvbiI6Indvcmtsb2FkX3NjYWxlIiwiYXBwcm92ZXJfcHJpbmNpcGFsIjoib2lkYzphbGljZUBleGFtcGxlLm9yZyIsImNhbm9uX3ZlcnNpb24iOiJqY3Mtc2hhMjU2LXYxIiwiY2hhbm5lbCI6ImNvbnNvbGUiLCJjbHVzdGVyIjoicHJvZC1lYXN0IiwiZXZpZGVuY2VfZmluZ2VycHJpbnQiOiJzaGEyNTY6OGY1YTE2N2EzODE3Y2E4NWUxZTlmNTJhZWYxOGJjZjliNDdmYWE0MDlmZDZiMTdkY2UxYTdkOTEyOTJlNDhlZSIsImV4cGlyZXNfYXQiOiIyMDI2LTEwLTIwVDA4OjMwOjAwWiIsImluY2lkZW50X3ZlcnNpb24iOjcsImlzc3VlZF9hdCI6IjIwMjYtMTAtMjBUMDg6MDA6MDBaIiwibGV2ZWwiOiJyZXZlcnNpYmxlIiwicGFyYW1zX2hhc2giOiJzaGEyNTY6N2E0MzY0YTBhNTExNDc5YTc1MzYzYjRlYTI4MjVlNzViOGViYzU4NDFlNjdiY2JkN2MwNmNmODEzODkyMjJhZCIsInByb3Bvc2FsX2lkIjoiNmYxYzJhOGUtNGI3ZC00ZTJhLTljM2YtMWQyZTNmNGE1YjZjIiwicm9vdF9jb21wb25lbnQiOiJwYXltZW50cy9jaGVja291dCIsInRhcmdldF91aWQiOiIwYjljNWU3YS0zZjFkLTRjMmItOGE2ZS01ZDRjM2IyYTFmMGUiLCJ0aWVyIjoiTCJ9fQ",
+      "expect_error": "bad_signature"
+    },
+    {
+      "name": "tampered_issued_at",
+      "description": "签名后修改 issued_at",
+      "envelope": {
+        "assertion": {
+          "action": "workload_scale",
+          "approver_principal": "oidc:alice@example.org",
+          "canon_version": "jcs-sha256-v1",
+          "channel": "telegram",
+          "cluster": "prod-east",
+          "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+          "expires_at": "2026-10-20T08:30:00Z",
+          "incident_version": 7,
+          "issued_at": "2026-10-20T08:01:00Z",
+          "level": "reversible",
+          "params_hash": "sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad",
+          "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+          "root_component": "payments/checkout",
+          "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e",
+          "tier": "L"
+        },
+        "proof": {
+          "key_id": "service-2026-10",
+          "signature": "JArgqClrUz1th-OViD81iT6Pdy6wwNFUIB1uEDs1Z0UPDCROafdRtcOFnbiUOJqRjFdQ-9K7_534QDz3eQcpBQ",
+          "type": "service_ed25519"
+        }
+      },
+      "binding": {
+        "action": "workload_scale",
+        "cluster": "prod-east",
+        "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+        "incident_version": 7,
+        "params": {
+          "kind": "Deployment",
+          "name": "checkout",
+          "namespace": "payments",
+          "replicas": 3
+        },
+        "proposal_expires_at": "2026-10-20T09:00:00Z",
+        "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+        "root_component": "payments/checkout",
+        "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e"
+      },
+      "now": "2026-10-20T08:05:00Z",
+      "restored_at": null,
+      "require_webauthn_for_h": false,
+      "assertion_canonical": "{\"action\":\"workload_scale\",\"approver_principal\":\"oidc:alice@example.org\",\"canon_version\":\"jcs-sha256-v1\",\"channel\":\"telegram\",\"cluster\":\"prod-east\",\"evidence_fingerprint\":\"sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee\",\"expires_at\":\"2026-10-20T08:30:00Z\",\"incident_version\":7,\"issued_at\":\"2026-10-20T08:01:00Z\",\"level\":\"reversible\",\"params_hash\":\"sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad\",\"proposal_id\":\"6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c\",\"root_component\":\"payments/checkout\",\"target_uid\":\"0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e\",\"tier\":\"L\"}",
+      "assertion_hash": "sha256:d56c987083a3768c8e74df0df67b57a1b8b563c7783d6a89206e881a3c90333d",
+      "execution_id": "042149f46e98e39795c2b53ccc46810c",
+      "signing_input_b64url": "c3JlbmF1dGl4LWFwcHJvdmFsLXYxCnsiYXNzZXJ0aW9uIjp7ImFjdGlvbiI6Indvcmtsb2FkX3NjYWxlIiwiYXBwcm92ZXJfcHJpbmNpcGFsIjoib2lkYzphbGljZUBleGFtcGxlLm9yZyIsImNhbm9uX3ZlcnNpb24iOiJqY3Mtc2hhMjU2LXYxIiwiY2hhbm5lbCI6InRlbGVncmFtIiwiY2x1c3RlciI6InByb2QtZWFzdCIsImV2aWRlbmNlX2ZpbmdlcnByaW50Ijoic2hhMjU2OjhmNWExNjdhMzgxN2NhODVlMWU5ZjUyYWVmMThiY2Y5YjQ3ZmFhNDA5ZmQ2YjE3ZGNlMWE3ZDkxMjkyZTQ4ZWUiLCJleHBpcmVzX2F0IjoiMjAyNi0xMC0yMFQwODozMDowMFoiLCJpbmNpZGVudF92ZXJzaW9uIjo3LCJpc3N1ZWRfYXQiOiIyMDI2LTEwLTIwVDA4OjAxOjAwWiIsImxldmVsIjoicmV2ZXJzaWJsZSIsInBhcmFtc19oYXNoIjoic2hhMjU2OjdhNDM2NGEwYTUxMTQ3OWE3NTM2M2I0ZWEyODI1ZTc1YjhlYmM1ODQxZTY3YmNiZDdjMDZjZjgxMzg5MjIyYWQiLCJwcm9wb3NhbF9pZCI6IjZmMWMyYThlLTRiN2QtNGUyYS05YzNmLTFkMmUzZjRhNWI2YyIsInJvb3RfY29tcG9uZW50IjoicGF5bWVudHMvY2hlY2tvdXQiLCJ0YXJnZXRfdWlkIjoiMGI5YzVlN2EtM2YxZC00YzJiLThhNmUtNWQ0YzNiMmExZjBlIiwidGllciI6IkwifX0",
+      "expect_error": "bad_signature"
+    },
+    {
+      "name": "tampered_expires_at",
+      "description": "签名后修改 expires_at",
+      "envelope": {
+        "assertion": {
+          "action": "workload_scale",
+          "approver_principal": "oidc:alice@example.org",
+          "canon_version": "jcs-sha256-v1",
+          "channel": "telegram",
+          "cluster": "prod-east",
+          "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+          "expires_at": "2026-10-20T09:30:00Z",
+          "incident_version": 7,
+          "issued_at": "2026-10-20T08:00:00Z",
+          "level": "reversible",
+          "params_hash": "sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad",
+          "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+          "root_component": "payments/checkout",
+          "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e",
+          "tier": "L"
+        },
+        "proof": {
+          "key_id": "service-2026-10",
+          "signature": "JArgqClrUz1th-OViD81iT6Pdy6wwNFUIB1uEDs1Z0UPDCROafdRtcOFnbiUOJqRjFdQ-9K7_534QDz3eQcpBQ",
+          "type": "service_ed25519"
+        }
+      },
+      "binding": {
+        "action": "workload_scale",
+        "cluster": "prod-east",
+        "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+        "incident_version": 7,
+        "params": {
+          "kind": "Deployment",
+          "name": "checkout",
+          "namespace": "payments",
+          "replicas": 3
+        },
+        "proposal_expires_at": "2026-10-20T09:00:00Z",
+        "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+        "root_component": "payments/checkout",
+        "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e"
+      },
+      "now": "2026-10-20T08:05:00Z",
+      "restored_at": null,
+      "require_webauthn_for_h": false,
+      "assertion_canonical": "{\"action\":\"workload_scale\",\"approver_principal\":\"oidc:alice@example.org\",\"canon_version\":\"jcs-sha256-v1\",\"channel\":\"telegram\",\"cluster\":\"prod-east\",\"evidence_fingerprint\":\"sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee\",\"expires_at\":\"2026-10-20T09:30:00Z\",\"incident_version\":7,\"issued_at\":\"2026-10-20T08:00:00Z\",\"level\":\"reversible\",\"params_hash\":\"sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad\",\"proposal_id\":\"6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c\",\"root_component\":\"payments/checkout\",\"target_uid\":\"0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e\",\"tier\":\"L\"}",
+      "assertion_hash": "sha256:986bfcfcfd2259cf97ec2b1e956b31d08eaf1aedfda83b5ac01042d82dfad5db",
+      "execution_id": "22f9f812a7e5c084890003294928bfaa",
+      "signing_input_b64url": "c3JlbmF1dGl4LWFwcHJvdmFsLXYxCnsiYXNzZXJ0aW9uIjp7ImFjdGlvbiI6Indvcmtsb2FkX3NjYWxlIiwiYXBwcm92ZXJfcHJpbmNpcGFsIjoib2lkYzphbGljZUBleGFtcGxlLm9yZyIsImNhbm9uX3ZlcnNpb24iOiJqY3Mtc2hhMjU2LXYxIiwiY2hhbm5lbCI6InRlbGVncmFtIiwiY2x1c3RlciI6InByb2QtZWFzdCIsImV2aWRlbmNlX2ZpbmdlcnByaW50Ijoic2hhMjU2OjhmNWExNjdhMzgxN2NhODVlMWU5ZjUyYWVmMThiY2Y5YjQ3ZmFhNDA5ZmQ2YjE3ZGNlMWE3ZDkxMjkyZTQ4ZWUiLCJleHBpcmVzX2F0IjoiMjAyNi0xMC0yMFQwOTozMDowMFoiLCJpbmNpZGVudF92ZXJzaW9uIjo3LCJpc3N1ZWRfYXQiOiIyMDI2LTEwLTIwVDA4OjAwOjAwWiIsImxldmVsIjoicmV2ZXJzaWJsZSIsInBhcmFtc19oYXNoIjoic2hhMjU2OjdhNDM2NGEwYTUxMTQ3OWE3NTM2M2I0ZWEyODI1ZTc1YjhlYmM1ODQxZTY3YmNiZDdjMDZjZjgxMzg5MjIyYWQiLCJwcm9wb3NhbF9pZCI6IjZmMWMyYThlLTRiN2QtNGUyYS05YzNmLTFkMmUzZjRhNWI2YyIsInJvb3RfY29tcG9uZW50IjoicGF5bWVudHMvY2hlY2tvdXQiLCJ0YXJnZXRfdWlkIjoiMGI5YzVlN2EtM2YxZC00YzJiLThhNmUtNWQ0YzNiMmExZjBlIiwidGllciI6IkwifX0",
+      "expect_error": "bad_signature"
+    },
+    {
+      "name": "binding_proposal_id",
+      "description": "工单的 proposal_id 与断言不一致",
+      "envelope": {
+        "assertion": {
+          "action": "workload_scale",
+          "approver_principal": "oidc:alice@example.org",
+          "canon_version": "jcs-sha256-v1",
+          "channel": "telegram",
+          "cluster": "prod-east",
+          "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+          "expires_at": "2026-10-20T08:30:00Z",
+          "incident_version": 7,
+          "issued_at": "2026-10-20T08:00:00Z",
+          "level": "reversible",
+          "params_hash": "sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad",
+          "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+          "root_component": "payments/checkout",
+          "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e",
+          "tier": "L"
+        },
+        "proof": {
+          "key_id": "service-2026-10",
+          "signature": "JArgqClrUz1th-OViD81iT6Pdy6wwNFUIB1uEDs1Z0UPDCROafdRtcOFnbiUOJqRjFdQ-9K7_534QDz3eQcpBQ",
+          "type": "service_ed25519"
+        }
+      },
+      "binding": {
+        "action": "workload_scale",
+        "cluster": "prod-east",
+        "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+        "incident_version": 7,
+        "params": {
+          "kind": "Deployment",
+          "name": "checkout",
+          "namespace": "payments",
+          "replicas": 3
+        },
+        "proposal_expires_at": "2026-10-20T09:00:00Z",
+        "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6d",
+        "root_component": "payments/checkout",
+        "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e"
+      },
+      "now": "2026-10-20T08:05:00Z",
+      "restored_at": null,
+      "require_webauthn_for_h": false,
+      "assertion_canonical": "{\"action\":\"workload_scale\",\"approver_principal\":\"oidc:alice@example.org\",\"canon_version\":\"jcs-sha256-v1\",\"channel\":\"telegram\",\"cluster\":\"prod-east\",\"evidence_fingerprint\":\"sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee\",\"expires_at\":\"2026-10-20T08:30:00Z\",\"incident_version\":7,\"issued_at\":\"2026-10-20T08:00:00Z\",\"level\":\"reversible\",\"params_hash\":\"sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad\",\"proposal_id\":\"6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c\",\"root_component\":\"payments/checkout\",\"target_uid\":\"0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e\",\"tier\":\"L\"}",
+      "assertion_hash": "sha256:629be3c008c340d3e8b3c8db75d9c4c320c4fbc20832b4620f4bb9f0c2c18496",
+      "execution_id": "108c89d0d32462a84d9937f43ab2b591",
+      "signing_input_b64url": "c3JlbmF1dGl4LWFwcHJvdmFsLXYxCnsiYXNzZXJ0aW9uIjp7ImFjdGlvbiI6Indvcmtsb2FkX3NjYWxlIiwiYXBwcm92ZXJfcHJpbmNpcGFsIjoib2lkYzphbGljZUBleGFtcGxlLm9yZyIsImNhbm9uX3ZlcnNpb24iOiJqY3Mtc2hhMjU2LXYxIiwiY2hhbm5lbCI6InRlbGVncmFtIiwiY2x1c3RlciI6InByb2QtZWFzdCIsImV2aWRlbmNlX2ZpbmdlcnByaW50Ijoic2hhMjU2OjhmNWExNjdhMzgxN2NhODVlMWU5ZjUyYWVmMThiY2Y5YjQ3ZmFhNDA5ZmQ2YjE3ZGNlMWE3ZDkxMjkyZTQ4ZWUiLCJleHBpcmVzX2F0IjoiMjAyNi0xMC0yMFQwODozMDowMFoiLCJpbmNpZGVudF92ZXJzaW9uIjo3LCJpc3N1ZWRfYXQiOiIyMDI2LTEwLTIwVDA4OjAwOjAwWiIsImxldmVsIjoicmV2ZXJzaWJsZSIsInBhcmFtc19oYXNoIjoic2hhMjU2OjdhNDM2NGEwYTUxMTQ3OWE3NTM2M2I0ZWEyODI1ZTc1YjhlYmM1ODQxZTY3YmNiZDdjMDZjZjgxMzg5MjIyYWQiLCJwcm9wb3NhbF9pZCI6IjZmMWMyYThlLTRiN2QtNGUyYS05YzNmLTFkMmUzZjRhNWI2YyIsInJvb3RfY29tcG9uZW50IjoicGF5bWVudHMvY2hlY2tvdXQiLCJ0YXJnZXRfdWlkIjoiMGI5YzVlN2EtM2YxZC00YzJiLThhNmUtNWQ0YzNiMmExZjBlIiwidGllciI6IkwifX0",
+      "expect_error": "binding_proposal_id"
+    },
+    {
+      "name": "binding_action",
+      "description": "工单的 action 与断言不一致",
+      "envelope": {
+        "assertion": {
+          "action": "workload_scale",
+          "approver_principal": "oidc:alice@example.org",
+          "canon_version": "jcs-sha256-v1",
+          "channel": "telegram",
+          "cluster": "prod-east",
+          "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+          "expires_at": "2026-10-20T08:30:00Z",
+          "incident_version": 7,
+          "issued_at": "2026-10-20T08:00:00Z",
+          "level": "reversible",
+          "params_hash": "sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad",
+          "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+          "root_component": "payments/checkout",
+          "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e",
+          "tier": "L"
+        },
+        "proof": {
+          "key_id": "service-2026-10",
+          "signature": "JArgqClrUz1th-OViD81iT6Pdy6wwNFUIB1uEDs1Z0UPDCROafdRtcOFnbiUOJqRjFdQ-9K7_534QDz3eQcpBQ",
+          "type": "service_ed25519"
+        }
+      },
+      "binding": {
+        "action": "workload_rolling_restart",
+        "cluster": "prod-east",
+        "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+        "incident_version": 7,
+        "params": {
+          "kind": "Deployment",
+          "name": "checkout",
+          "namespace": "payments",
+          "replicas": 3
+        },
+        "proposal_expires_at": "2026-10-20T09:00:00Z",
+        "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+        "root_component": "payments/checkout",
+        "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e"
+      },
+      "now": "2026-10-20T08:05:00Z",
+      "restored_at": null,
+      "require_webauthn_for_h": false,
+      "assertion_canonical": "{\"action\":\"workload_scale\",\"approver_principal\":\"oidc:alice@example.org\",\"canon_version\":\"jcs-sha256-v1\",\"channel\":\"telegram\",\"cluster\":\"prod-east\",\"evidence_fingerprint\":\"sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee\",\"expires_at\":\"2026-10-20T08:30:00Z\",\"incident_version\":7,\"issued_at\":\"2026-10-20T08:00:00Z\",\"level\":\"reversible\",\"params_hash\":\"sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad\",\"proposal_id\":\"6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c\",\"root_component\":\"payments/checkout\",\"target_uid\":\"0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e\",\"tier\":\"L\"}",
+      "assertion_hash": "sha256:629be3c008c340d3e8b3c8db75d9c4c320c4fbc20832b4620f4bb9f0c2c18496",
+      "execution_id": "108c89d0d32462a84d9937f43ab2b591",
+      "signing_input_b64url": "c3JlbmF1dGl4LWFwcHJvdmFsLXYxCnsiYXNzZXJ0aW9uIjp7ImFjdGlvbiI6Indvcmtsb2FkX3NjYWxlIiwiYXBwcm92ZXJfcHJpbmNpcGFsIjoib2lkYzphbGljZUBleGFtcGxlLm9yZyIsImNhbm9uX3ZlcnNpb24iOiJqY3Mtc2hhMjU2LXYxIiwiY2hhbm5lbCI6InRlbGVncmFtIiwiY2x1c3RlciI6InByb2QtZWFzdCIsImV2aWRlbmNlX2ZpbmdlcnByaW50Ijoic2hhMjU2OjhmNWExNjdhMzgxN2NhODVlMWU5ZjUyYWVmMThiY2Y5YjQ3ZmFhNDA5ZmQ2YjE3ZGNlMWE3ZDkxMjkyZTQ4ZWUiLCJleHBpcmVzX2F0IjoiMjAyNi0xMC0yMFQwODozMDowMFoiLCJpbmNpZGVudF92ZXJzaW9uIjo3LCJpc3N1ZWRfYXQiOiIyMDI2LTEwLTIwVDA4OjAwOjAwWiIsImxldmVsIjoicmV2ZXJzaWJsZSIsInBhcmFtc19oYXNoIjoic2hhMjU2OjdhNDM2NGEwYTUxMTQ3OWE3NTM2M2I0ZWEyODI1ZTc1YjhlYmM1ODQxZTY3YmNiZDdjMDZjZjgxMzg5MjIyYWQiLCJwcm9wb3NhbF9pZCI6IjZmMWMyYThlLTRiN2QtNGUyYS05YzNmLTFkMmUzZjRhNWI2YyIsInJvb3RfY29tcG9uZW50IjoicGF5bWVudHMvY2hlY2tvdXQiLCJ0YXJnZXRfdWlkIjoiMGI5YzVlN2EtM2YxZC00YzJiLThhNmUtNWQ0YzNiMmExZjBlIiwidGllciI6IkwifX0",
+      "expect_error": "binding_action"
+    },
+    {
+      "name": "binding_params",
+      "description": "工单的 params 与断言不一致",
+      "envelope": {
+        "assertion": {
+          "action": "workload_scale",
+          "approver_principal": "oidc:alice@example.org",
+          "canon_version": "jcs-sha256-v1",
+          "channel": "telegram",
+          "cluster": "prod-east",
+          "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+          "expires_at": "2026-10-20T08:30:00Z",
+          "incident_version": 7,
+          "issued_at": "2026-10-20T08:00:00Z",
+          "level": "reversible",
+          "params_hash": "sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad",
+          "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+          "root_component": "payments/checkout",
+          "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e",
+          "tier": "L"
+        },
+        "proof": {
+          "key_id": "service-2026-10",
+          "signature": "JArgqClrUz1th-OViD81iT6Pdy6wwNFUIB1uEDs1Z0UPDCROafdRtcOFnbiUOJqRjFdQ-9K7_534QDz3eQcpBQ",
+          "type": "service_ed25519"
+        }
+      },
+      "binding": {
+        "action": "workload_scale",
+        "cluster": "prod-east",
+        "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+        "incident_version": 7,
+        "params": {
+          "kind": "Deployment",
+          "name": "checkout",
+          "namespace": "payments",
+          "replicas": 30
+        },
+        "proposal_expires_at": "2026-10-20T09:00:00Z",
+        "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+        "root_component": "payments/checkout",
+        "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e"
+      },
+      "now": "2026-10-20T08:05:00Z",
+      "restored_at": null,
+      "require_webauthn_for_h": false,
+      "assertion_canonical": "{\"action\":\"workload_scale\",\"approver_principal\":\"oidc:alice@example.org\",\"canon_version\":\"jcs-sha256-v1\",\"channel\":\"telegram\",\"cluster\":\"prod-east\",\"evidence_fingerprint\":\"sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee\",\"expires_at\":\"2026-10-20T08:30:00Z\",\"incident_version\":7,\"issued_at\":\"2026-10-20T08:00:00Z\",\"level\":\"reversible\",\"params_hash\":\"sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad\",\"proposal_id\":\"6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c\",\"root_component\":\"payments/checkout\",\"target_uid\":\"0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e\",\"tier\":\"L\"}",
+      "assertion_hash": "sha256:629be3c008c340d3e8b3c8db75d9c4c320c4fbc20832b4620f4bb9f0c2c18496",
+      "execution_id": "108c89d0d32462a84d9937f43ab2b591",
+      "signing_input_b64url": "c3JlbmF1dGl4LWFwcHJvdmFsLXYxCnsiYXNzZXJ0aW9uIjp7ImFjdGlvbiI6Indvcmtsb2FkX3NjYWxlIiwiYXBwcm92ZXJfcHJpbmNpcGFsIjoib2lkYzphbGljZUBleGFtcGxlLm9yZyIsImNhbm9uX3ZlcnNpb24iOiJqY3Mtc2hhMjU2LXYxIiwiY2hhbm5lbCI6InRlbGVncmFtIiwiY2x1c3RlciI6InByb2QtZWFzdCIsImV2aWRlbmNlX2ZpbmdlcnByaW50Ijoic2hhMjU2OjhmNWExNjdhMzgxN2NhODVlMWU5ZjUyYWVmMThiY2Y5YjQ3ZmFhNDA5ZmQ2YjE3ZGNlMWE3ZDkxMjkyZTQ4ZWUiLCJleHBpcmVzX2F0IjoiMjAyNi0xMC0yMFQwODozMDowMFoiLCJpbmNpZGVudF92ZXJzaW9uIjo3LCJpc3N1ZWRfYXQiOiIyMDI2LTEwLTIwVDA4OjAwOjAwWiIsImxldmVsIjoicmV2ZXJzaWJsZSIsInBhcmFtc19oYXNoIjoic2hhMjU2OjdhNDM2NGEwYTUxMTQ3OWE3NTM2M2I0ZWEyODI1ZTc1YjhlYmM1ODQxZTY3YmNiZDdjMDZjZjgxMzg5MjIyYWQiLCJwcm9wb3NhbF9pZCI6IjZmMWMyYThlLTRiN2QtNGUyYS05YzNmLTFkMmUzZjRhNWI2YyIsInJvb3RfY29tcG9uZW50IjoicGF5bWVudHMvY2hlY2tvdXQiLCJ0YXJnZXRfdWlkIjoiMGI5YzVlN2EtM2YxZC00YzJiLThhNmUtNWQ0YzNiMmExZjBlIiwidGllciI6IkwifX0",
+      "expect_error": "binding_params_hash"
+    },
+    {
+      "name": "binding_target_uid",
+      "description": "工单的 target_uid 与断言不一致",
+      "envelope": {
+        "assertion": {
+          "action": "workload_scale",
+          "approver_principal": "oidc:alice@example.org",
+          "canon_version": "jcs-sha256-v1",
+          "channel": "telegram",
+          "cluster": "prod-east",
+          "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+          "expires_at": "2026-10-20T08:30:00Z",
+          "incident_version": 7,
+          "issued_at": "2026-10-20T08:00:00Z",
+          "level": "reversible",
+          "params_hash": "sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad",
+          "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+          "root_component": "payments/checkout",
+          "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e",
+          "tier": "L"
+        },
+        "proof": {
+          "key_id": "service-2026-10",
+          "signature": "JArgqClrUz1th-OViD81iT6Pdy6wwNFUIB1uEDs1Z0UPDCROafdRtcOFnbiUOJqRjFdQ-9K7_534QDz3eQcpBQ",
+          "type": "service_ed25519"
+        }
+      },
+      "binding": {
+        "action": "workload_scale",
+        "cluster": "prod-east",
+        "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+        "incident_version": 7,
+        "params": {
+          "kind": "Deployment",
+          "name": "checkout",
+          "namespace": "payments",
+          "replicas": 3
+        },
+        "proposal_expires_at": "2026-10-20T09:00:00Z",
+        "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+        "root_component": "payments/checkout",
+        "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0f"
+      },
+      "now": "2026-10-20T08:05:00Z",
+      "restored_at": null,
+      "require_webauthn_for_h": false,
+      "assertion_canonical": "{\"action\":\"workload_scale\",\"approver_principal\":\"oidc:alice@example.org\",\"canon_version\":\"jcs-sha256-v1\",\"channel\":\"telegram\",\"cluster\":\"prod-east\",\"evidence_fingerprint\":\"sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee\",\"expires_at\":\"2026-10-20T08:30:00Z\",\"incident_version\":7,\"issued_at\":\"2026-10-20T08:00:00Z\",\"level\":\"reversible\",\"params_hash\":\"sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad\",\"proposal_id\":\"6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c\",\"root_component\":\"payments/checkout\",\"target_uid\":\"0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e\",\"tier\":\"L\"}",
+      "assertion_hash": "sha256:629be3c008c340d3e8b3c8db75d9c4c320c4fbc20832b4620f4bb9f0c2c18496",
+      "execution_id": "108c89d0d32462a84d9937f43ab2b591",
+      "signing_input_b64url": "c3JlbmF1dGl4LWFwcHJvdmFsLXYxCnsiYXNzZXJ0aW9uIjp7ImFjdGlvbiI6Indvcmtsb2FkX3NjYWxlIiwiYXBwcm92ZXJfcHJpbmNpcGFsIjoib2lkYzphbGljZUBleGFtcGxlLm9yZyIsImNhbm9uX3ZlcnNpb24iOiJqY3Mtc2hhMjU2LXYxIiwiY2hhbm5lbCI6InRlbGVncmFtIiwiY2x1c3RlciI6InByb2QtZWFzdCIsImV2aWRlbmNlX2ZpbmdlcnByaW50Ijoic2hhMjU2OjhmNWExNjdhMzgxN2NhODVlMWU5ZjUyYWVmMThiY2Y5YjQ3ZmFhNDA5ZmQ2YjE3ZGNlMWE3ZDkxMjkyZTQ4ZWUiLCJleHBpcmVzX2F0IjoiMjAyNi0xMC0yMFQwODozMDowMFoiLCJpbmNpZGVudF92ZXJzaW9uIjo3LCJpc3N1ZWRfYXQiOiIyMDI2LTEwLTIwVDA4OjAwOjAwWiIsImxldmVsIjoicmV2ZXJzaWJsZSIsInBhcmFtc19oYXNoIjoic2hhMjU2OjdhNDM2NGEwYTUxMTQ3OWE3NTM2M2I0ZWEyODI1ZTc1YjhlYmM1ODQxZTY3YmNiZDdjMDZjZjgxMzg5MjIyYWQiLCJwcm9wb3NhbF9pZCI6IjZmMWMyYThlLTRiN2QtNGUyYS05YzNmLTFkMmUzZjRhNWI2YyIsInJvb3RfY29tcG9uZW50IjoicGF5bWVudHMvY2hlY2tvdXQiLCJ0YXJnZXRfdWlkIjoiMGI5YzVlN2EtM2YxZC00YzJiLThhNmUtNWQ0YzNiMmExZjBlIiwidGllciI6IkwifX0",
+      "expect_error": "binding_target_uid"
+    },
+    {
+      "name": "binding_cluster",
+      "description": "工单的 cluster 与断言不一致",
+      "envelope": {
+        "assertion": {
+          "action": "workload_scale",
+          "approver_principal": "oidc:alice@example.org",
+          "canon_version": "jcs-sha256-v1",
+          "channel": "telegram",
+          "cluster": "prod-east",
+          "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+          "expires_at": "2026-10-20T08:30:00Z",
+          "incident_version": 7,
+          "issued_at": "2026-10-20T08:00:00Z",
+          "level": "reversible",
+          "params_hash": "sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad",
+          "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+          "root_component": "payments/checkout",
+          "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e",
+          "tier": "L"
+        },
+        "proof": {
+          "key_id": "service-2026-10",
+          "signature": "JArgqClrUz1th-OViD81iT6Pdy6wwNFUIB1uEDs1Z0UPDCROafdRtcOFnbiUOJqRjFdQ-9K7_534QDz3eQcpBQ",
+          "type": "service_ed25519"
+        }
+      },
+      "binding": {
+        "action": "workload_scale",
+        "cluster": "prod-west",
+        "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+        "incident_version": 7,
+        "params": {
+          "kind": "Deployment",
+          "name": "checkout",
+          "namespace": "payments",
+          "replicas": 3
+        },
+        "proposal_expires_at": "2026-10-20T09:00:00Z",
+        "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+        "root_component": "payments/checkout",
+        "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e"
+      },
+      "now": "2026-10-20T08:05:00Z",
+      "restored_at": null,
+      "require_webauthn_for_h": false,
+      "assertion_canonical": "{\"action\":\"workload_scale\",\"approver_principal\":\"oidc:alice@example.org\",\"canon_version\":\"jcs-sha256-v1\",\"channel\":\"telegram\",\"cluster\":\"prod-east\",\"evidence_fingerprint\":\"sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee\",\"expires_at\":\"2026-10-20T08:30:00Z\",\"incident_version\":7,\"issued_at\":\"2026-10-20T08:00:00Z\",\"level\":\"reversible\",\"params_hash\":\"sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad\",\"proposal_id\":\"6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c\",\"root_component\":\"payments/checkout\",\"target_uid\":\"0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e\",\"tier\":\"L\"}",
+      "assertion_hash": "sha256:629be3c008c340d3e8b3c8db75d9c4c320c4fbc20832b4620f4bb9f0c2c18496",
+      "execution_id": "108c89d0d32462a84d9937f43ab2b591",
+      "signing_input_b64url": "c3JlbmF1dGl4LWFwcHJvdmFsLXYxCnsiYXNzZXJ0aW9uIjp7ImFjdGlvbiI6Indvcmtsb2FkX3NjYWxlIiwiYXBwcm92ZXJfcHJpbmNpcGFsIjoib2lkYzphbGljZUBleGFtcGxlLm9yZyIsImNhbm9uX3ZlcnNpb24iOiJqY3Mtc2hhMjU2LXYxIiwiY2hhbm5lbCI6InRlbGVncmFtIiwiY2x1c3RlciI6InByb2QtZWFzdCIsImV2aWRlbmNlX2ZpbmdlcnByaW50Ijoic2hhMjU2OjhmNWExNjdhMzgxN2NhODVlMWU5ZjUyYWVmMThiY2Y5YjQ3ZmFhNDA5ZmQ2YjE3ZGNlMWE3ZDkxMjkyZTQ4ZWUiLCJleHBpcmVzX2F0IjoiMjAyNi0xMC0yMFQwODozMDowMFoiLCJpbmNpZGVudF92ZXJzaW9uIjo3LCJpc3N1ZWRfYXQiOiIyMDI2LTEwLTIwVDA4OjAwOjAwWiIsImxldmVsIjoicmV2ZXJzaWJsZSIsInBhcmFtc19oYXNoIjoic2hhMjU2OjdhNDM2NGEwYTUxMTQ3OWE3NTM2M2I0ZWEyODI1ZTc1YjhlYmM1ODQxZTY3YmNiZDdjMDZjZjgxMzg5MjIyYWQiLCJwcm9wb3NhbF9pZCI6IjZmMWMyYThlLTRiN2QtNGUyYS05YzNmLTFkMmUzZjRhNWI2YyIsInJvb3RfY29tcG9uZW50IjoicGF5bWVudHMvY2hlY2tvdXQiLCJ0YXJnZXRfdWlkIjoiMGI5YzVlN2EtM2YxZC00YzJiLThhNmUtNWQ0YzNiMmExZjBlIiwidGllciI6IkwifX0",
+      "expect_error": "binding_cluster"
+    },
+    {
+      "name": "binding_incident_version",
+      "description": "工单的 incident_version 与断言不一致",
+      "envelope": {
+        "assertion": {
+          "action": "workload_scale",
+          "approver_principal": "oidc:alice@example.org",
+          "canon_version": "jcs-sha256-v1",
+          "channel": "telegram",
+          "cluster": "prod-east",
+          "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+          "expires_at": "2026-10-20T08:30:00Z",
+          "incident_version": 7,
+          "issued_at": "2026-10-20T08:00:00Z",
+          "level": "reversible",
+          "params_hash": "sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad",
+          "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+          "root_component": "payments/checkout",
+          "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e",
+          "tier": "L"
+        },
+        "proof": {
+          "key_id": "service-2026-10",
+          "signature": "JArgqClrUz1th-OViD81iT6Pdy6wwNFUIB1uEDs1Z0UPDCROafdRtcOFnbiUOJqRjFdQ-9K7_534QDz3eQcpBQ",
+          "type": "service_ed25519"
+        }
+      },
+      "binding": {
+        "action": "workload_scale",
+        "cluster": "prod-east",
+        "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+        "incident_version": 8,
+        "params": {
+          "kind": "Deployment",
+          "name": "checkout",
+          "namespace": "payments",
+          "replicas": 3
+        },
+        "proposal_expires_at": "2026-10-20T09:00:00Z",
+        "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+        "root_component": "payments/checkout",
+        "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e"
+      },
+      "now": "2026-10-20T08:05:00Z",
+      "restored_at": null,
+      "require_webauthn_for_h": false,
+      "assertion_canonical": "{\"action\":\"workload_scale\",\"approver_principal\":\"oidc:alice@example.org\",\"canon_version\":\"jcs-sha256-v1\",\"channel\":\"telegram\",\"cluster\":\"prod-east\",\"evidence_fingerprint\":\"sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee\",\"expires_at\":\"2026-10-20T08:30:00Z\",\"incident_version\":7,\"issued_at\":\"2026-10-20T08:00:00Z\",\"level\":\"reversible\",\"params_hash\":\"sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad\",\"proposal_id\":\"6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c\",\"root_component\":\"payments/checkout\",\"target_uid\":\"0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e\",\"tier\":\"L\"}",
+      "assertion_hash": "sha256:629be3c008c340d3e8b3c8db75d9c4c320c4fbc20832b4620f4bb9f0c2c18496",
+      "execution_id": "108c89d0d32462a84d9937f43ab2b591",
+      "signing_input_b64url": "c3JlbmF1dGl4LWFwcHJvdmFsLXYxCnsiYXNzZXJ0aW9uIjp7ImFjdGlvbiI6Indvcmtsb2FkX3NjYWxlIiwiYXBwcm92ZXJfcHJpbmNpcGFsIjoib2lkYzphbGljZUBleGFtcGxlLm9yZyIsImNhbm9uX3ZlcnNpb24iOiJqY3Mtc2hhMjU2LXYxIiwiY2hhbm5lbCI6InRlbGVncmFtIiwiY2x1c3RlciI6InByb2QtZWFzdCIsImV2aWRlbmNlX2ZpbmdlcnByaW50Ijoic2hhMjU2OjhmNWExNjdhMzgxN2NhODVlMWU5ZjUyYWVmMThiY2Y5YjQ3ZmFhNDA5ZmQ2YjE3ZGNlMWE3ZDkxMjkyZTQ4ZWUiLCJleHBpcmVzX2F0IjoiMjAyNi0xMC0yMFQwODozMDowMFoiLCJpbmNpZGVudF92ZXJzaW9uIjo3LCJpc3N1ZWRfYXQiOiIyMDI2LTEwLTIwVDA4OjAwOjAwWiIsImxldmVsIjoicmV2ZXJzaWJsZSIsInBhcmFtc19oYXNoIjoic2hhMjU2OjdhNDM2NGEwYTUxMTQ3OWE3NTM2M2I0ZWEyODI1ZTc1YjhlYmM1ODQxZTY3YmNiZDdjMDZjZjgxMzg5MjIyYWQiLCJwcm9wb3NhbF9pZCI6IjZmMWMyYThlLTRiN2QtNGUyYS05YzNmLTFkMmUzZjRhNWI2YyIsInJvb3RfY29tcG9uZW50IjoicGF5bWVudHMvY2hlY2tvdXQiLCJ0YXJnZXRfdWlkIjoiMGI5YzVlN2EtM2YxZC00YzJiLThhNmUtNWQ0YzNiMmExZjBlIiwidGllciI6IkwifX0",
+      "expect_error": "binding_incident_version"
+    },
+    {
+      "name": "binding_root_component",
+      "description": "工单的 root_component 与断言不一致",
+      "envelope": {
+        "assertion": {
+          "action": "workload_scale",
+          "approver_principal": "oidc:alice@example.org",
+          "canon_version": "jcs-sha256-v1",
+          "channel": "telegram",
+          "cluster": "prod-east",
+          "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+          "expires_at": "2026-10-20T08:30:00Z",
+          "incident_version": 7,
+          "issued_at": "2026-10-20T08:00:00Z",
+          "level": "reversible",
+          "params_hash": "sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad",
+          "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+          "root_component": "payments/checkout",
+          "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e",
+          "tier": "L"
+        },
+        "proof": {
+          "key_id": "service-2026-10",
+          "signature": "JArgqClrUz1th-OViD81iT6Pdy6wwNFUIB1uEDs1Z0UPDCROafdRtcOFnbiUOJqRjFdQ-9K7_534QDz3eQcpBQ",
+          "type": "service_ed25519"
+        }
+      },
+      "binding": {
+        "action": "workload_scale",
+        "cluster": "prod-east",
+        "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+        "incident_version": 7,
+        "params": {
+          "kind": "Deployment",
+          "name": "checkout",
+          "namespace": "payments",
+          "replicas": 3
+        },
+        "proposal_expires_at": "2026-10-20T09:00:00Z",
+        "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+        "root_component": "payments/gateway",
+        "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e"
+      },
+      "now": "2026-10-20T08:05:00Z",
+      "restored_at": null,
+      "require_webauthn_for_h": false,
+      "assertion_canonical": "{\"action\":\"workload_scale\",\"approver_principal\":\"oidc:alice@example.org\",\"canon_version\":\"jcs-sha256-v1\",\"channel\":\"telegram\",\"cluster\":\"prod-east\",\"evidence_fingerprint\":\"sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee\",\"expires_at\":\"2026-10-20T08:30:00Z\",\"incident_version\":7,\"issued_at\":\"2026-10-20T08:00:00Z\",\"level\":\"reversible\",\"params_hash\":\"sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad\",\"proposal_id\":\"6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c\",\"root_component\":\"payments/checkout\",\"target_uid\":\"0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e\",\"tier\":\"L\"}",
+      "assertion_hash": "sha256:629be3c008c340d3e8b3c8db75d9c4c320c4fbc20832b4620f4bb9f0c2c18496",
+      "execution_id": "108c89d0d32462a84d9937f43ab2b591",
+      "signing_input_b64url": "c3JlbmF1dGl4LWFwcHJvdmFsLXYxCnsiYXNzZXJ0aW9uIjp7ImFjdGlvbiI6Indvcmtsb2FkX3NjYWxlIiwiYXBwcm92ZXJfcHJpbmNpcGFsIjoib2lkYzphbGljZUBleGFtcGxlLm9yZyIsImNhbm9uX3ZlcnNpb24iOiJqY3Mtc2hhMjU2LXYxIiwiY2hhbm5lbCI6InRlbGVncmFtIiwiY2x1c3RlciI6InByb2QtZWFzdCIsImV2aWRlbmNlX2ZpbmdlcnByaW50Ijoic2hhMjU2OjhmNWExNjdhMzgxN2NhODVlMWU5ZjUyYWVmMThiY2Y5YjQ3ZmFhNDA5ZmQ2YjE3ZGNlMWE3ZDkxMjkyZTQ4ZWUiLCJleHBpcmVzX2F0IjoiMjAyNi0xMC0yMFQwODozMDowMFoiLCJpbmNpZGVudF92ZXJzaW9uIjo3LCJpc3N1ZWRfYXQiOiIyMDI2LTEwLTIwVDA4OjAwOjAwWiIsImxldmVsIjoicmV2ZXJzaWJsZSIsInBhcmFtc19oYXNoIjoic2hhMjU2OjdhNDM2NGEwYTUxMTQ3OWE3NTM2M2I0ZWEyODI1ZTc1YjhlYmM1ODQxZTY3YmNiZDdjMDZjZjgxMzg5MjIyYWQiLCJwcm9wb3NhbF9pZCI6IjZmMWMyYThlLTRiN2QtNGUyYS05YzNmLTFkMmUzZjRhNWI2YyIsInJvb3RfY29tcG9uZW50IjoicGF5bWVudHMvY2hlY2tvdXQiLCJ0YXJnZXRfdWlkIjoiMGI5YzVlN2EtM2YxZC00YzJiLThhNmUtNWQ0YzNiMmExZjBlIiwidGllciI6IkwifX0",
+      "expect_error": "binding_root_component"
+    },
+    {
+      "name": "binding_evidence_fingerprint",
+      "description": "工单的 evidence_fingerprint 与断言不一致",
+      "envelope": {
+        "assertion": {
+          "action": "workload_scale",
+          "approver_principal": "oidc:alice@example.org",
+          "canon_version": "jcs-sha256-v1",
+          "channel": "telegram",
+          "cluster": "prod-east",
+          "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+          "expires_at": "2026-10-20T08:30:00Z",
+          "incident_version": 7,
+          "issued_at": "2026-10-20T08:00:00Z",
+          "level": "reversible",
+          "params_hash": "sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad",
+          "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+          "root_component": "payments/checkout",
+          "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e",
+          "tier": "L"
+        },
+        "proof": {
+          "key_id": "service-2026-10",
+          "signature": "JArgqClrUz1th-OViD81iT6Pdy6wwNFUIB1uEDs1Z0UPDCROafdRtcOFnbiUOJqRjFdQ-9K7_534QDz3eQcpBQ",
+          "type": "service_ed25519"
+        }
+      },
+      "binding": {
+        "action": "workload_scale",
+        "cluster": "prod-east",
+        "evidence_fingerprint": "sha256:9fc48f8fa8e96df41a66122ae08c797905256e0cfdb3f28aacf48bd11540b55b",
+        "incident_version": 7,
+        "params": {
+          "kind": "Deployment",
+          "name": "checkout",
+          "namespace": "payments",
+          "replicas": 3
+        },
+        "proposal_expires_at": "2026-10-20T09:00:00Z",
+        "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+        "root_component": "payments/checkout",
+        "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e"
+      },
+      "now": "2026-10-20T08:05:00Z",
+      "restored_at": null,
+      "require_webauthn_for_h": false,
+      "assertion_canonical": "{\"action\":\"workload_scale\",\"approver_principal\":\"oidc:alice@example.org\",\"canon_version\":\"jcs-sha256-v1\",\"channel\":\"telegram\",\"cluster\":\"prod-east\",\"evidence_fingerprint\":\"sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee\",\"expires_at\":\"2026-10-20T08:30:00Z\",\"incident_version\":7,\"issued_at\":\"2026-10-20T08:00:00Z\",\"level\":\"reversible\",\"params_hash\":\"sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad\",\"proposal_id\":\"6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c\",\"root_component\":\"payments/checkout\",\"target_uid\":\"0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e\",\"tier\":\"L\"}",
+      "assertion_hash": "sha256:629be3c008c340d3e8b3c8db75d9c4c320c4fbc20832b4620f4bb9f0c2c18496",
+      "execution_id": "108c89d0d32462a84d9937f43ab2b591",
+      "signing_input_b64url": "c3JlbmF1dGl4LWFwcHJvdmFsLXYxCnsiYXNzZXJ0aW9uIjp7ImFjdGlvbiI6Indvcmtsb2FkX3NjYWxlIiwiYXBwcm92ZXJfcHJpbmNpcGFsIjoib2lkYzphbGljZUBleGFtcGxlLm9yZyIsImNhbm9uX3ZlcnNpb24iOiJqY3Mtc2hhMjU2LXYxIiwiY2hhbm5lbCI6InRlbGVncmFtIiwiY2x1c3RlciI6InByb2QtZWFzdCIsImV2aWRlbmNlX2ZpbmdlcnByaW50Ijoic2hhMjU2OjhmNWExNjdhMzgxN2NhODVlMWU5ZjUyYWVmMThiY2Y5YjQ3ZmFhNDA5ZmQ2YjE3ZGNlMWE3ZDkxMjkyZTQ4ZWUiLCJleHBpcmVzX2F0IjoiMjAyNi0xMC0yMFQwODozMDowMFoiLCJpbmNpZGVudF92ZXJzaW9uIjo3LCJpc3N1ZWRfYXQiOiIyMDI2LTEwLTIwVDA4OjAwOjAwWiIsImxldmVsIjoicmV2ZXJzaWJsZSIsInBhcmFtc19oYXNoIjoic2hhMjU2OjdhNDM2NGEwYTUxMTQ3OWE3NTM2M2I0ZWEyODI1ZTc1YjhlYmM1ODQxZTY3YmNiZDdjMDZjZjgxMzg5MjIyYWQiLCJwcm9wb3NhbF9pZCI6IjZmMWMyYThlLTRiN2QtNGUyYS05YzNmLTFkMmUzZjRhNWI2YyIsInJvb3RfY29tcG9uZW50IjoicGF5bWVudHMvY2hlY2tvdXQiLCJ0YXJnZXRfdWlkIjoiMGI5YzVlN2EtM2YxZC00YzJiLThhNmUtNWQ0YzNiMmExZjBlIiwidGllciI6IkwifX0",
+      "expect_error": "binding_evidence_fingerprint"
+    },
+    {
+      "name": "expired",
+      "description": "审批已过期",
+      "envelope": {
+        "assertion": {
+          "action": "workload_scale",
+          "approver_principal": "oidc:alice@example.org",
+          "canon_version": "jcs-sha256-v1",
+          "channel": "telegram",
+          "cluster": "prod-east",
+          "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+          "expires_at": "2026-10-20T08:30:00Z",
+          "incident_version": 7,
+          "issued_at": "2026-10-20T08:00:00Z",
+          "level": "reversible",
+          "params_hash": "sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad",
+          "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+          "root_component": "payments/checkout",
+          "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e",
+          "tier": "L"
+        },
+        "proof": {
+          "key_id": "service-2026-10",
+          "signature": "JArgqClrUz1th-OViD81iT6Pdy6wwNFUIB1uEDs1Z0UPDCROafdRtcOFnbiUOJqRjFdQ-9K7_534QDz3eQcpBQ",
+          "type": "service_ed25519"
+        }
+      },
+      "binding": {
+        "action": "workload_scale",
+        "cluster": "prod-east",
+        "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+        "incident_version": 7,
+        "params": {
+          "kind": "Deployment",
+          "name": "checkout",
+          "namespace": "payments",
+          "replicas": 3
+        },
+        "proposal_expires_at": "2026-10-20T09:00:00Z",
+        "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+        "root_component": "payments/checkout",
+        "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e"
+      },
+      "now": "2026-10-20T08:30:00Z",
+      "restored_at": null,
+      "require_webauthn_for_h": false,
+      "assertion_canonical": "{\"action\":\"workload_scale\",\"approver_principal\":\"oidc:alice@example.org\",\"canon_version\":\"jcs-sha256-v1\",\"channel\":\"telegram\",\"cluster\":\"prod-east\",\"evidence_fingerprint\":\"sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee\",\"expires_at\":\"2026-10-20T08:30:00Z\",\"incident_version\":7,\"issued_at\":\"2026-10-20T08:00:00Z\",\"level\":\"reversible\",\"params_hash\":\"sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad\",\"proposal_id\":\"6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c\",\"root_component\":\"payments/checkout\",\"target_uid\":\"0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e\",\"tier\":\"L\"}",
+      "assertion_hash": "sha256:629be3c008c340d3e8b3c8db75d9c4c320c4fbc20832b4620f4bb9f0c2c18496",
+      "execution_id": "108c89d0d32462a84d9937f43ab2b591",
+      "signing_input_b64url": "c3JlbmF1dGl4LWFwcHJvdmFsLXYxCnsiYXNzZXJ0aW9uIjp7ImFjdGlvbiI6Indvcmtsb2FkX3NjYWxlIiwiYXBwcm92ZXJfcHJpbmNpcGFsIjoib2lkYzphbGljZUBleGFtcGxlLm9yZyIsImNhbm9uX3ZlcnNpb24iOiJqY3Mtc2hhMjU2LXYxIiwiY2hhbm5lbCI6InRlbGVncmFtIiwiY2x1c3RlciI6InByb2QtZWFzdCIsImV2aWRlbmNlX2ZpbmdlcnByaW50Ijoic2hhMjU2OjhmNWExNjdhMzgxN2NhODVlMWU5ZjUyYWVmMThiY2Y5YjQ3ZmFhNDA5ZmQ2YjE3ZGNlMWE3ZDkxMjkyZTQ4ZWUiLCJleHBpcmVzX2F0IjoiMjAyNi0xMC0yMFQwODozMDowMFoiLCJpbmNpZGVudF92ZXJzaW9uIjo3LCJpc3N1ZWRfYXQiOiIyMDI2LTEwLTIwVDA4OjAwOjAwWiIsImxldmVsIjoicmV2ZXJzaWJsZSIsInBhcmFtc19oYXNoIjoic2hhMjU2OjdhNDM2NGEwYTUxMTQ3OWE3NTM2M2I0ZWEyODI1ZTc1YjhlYmM1ODQxZTY3YmNiZDdjMDZjZjgxMzg5MjIyYWQiLCJwcm9wb3NhbF9pZCI6IjZmMWMyYThlLTRiN2QtNGUyYS05YzNmLTFkMmUzZjRhNWI2YyIsInJvb3RfY29tcG9uZW50IjoicGF5bWVudHMvY2hlY2tvdXQiLCJ0YXJnZXRfdWlkIjoiMGI5YzVlN2EtM2YxZC00YzJiLThhNmUtNWQ0YzNiMmExZjBlIiwidGllciI6IkwifX0",
+      "expect_error": "expired"
+    },
+    {
+      "name": "not_yet_valid",
+      "description": "签发时间超前 gateway 时间 5 秒以上",
+      "envelope": {
+        "assertion": {
+          "action": "workload_scale",
+          "approver_principal": "oidc:alice@example.org",
+          "canon_version": "jcs-sha256-v1",
+          "channel": "telegram",
+          "cluster": "prod-east",
+          "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+          "expires_at": "2026-10-20T08:30:00Z",
+          "incident_version": 7,
+          "issued_at": "2026-10-20T08:00:00Z",
+          "level": "reversible",
+          "params_hash": "sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad",
+          "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+          "root_component": "payments/checkout",
+          "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e",
+          "tier": "L"
+        },
+        "proof": {
+          "key_id": "service-2026-10",
+          "signature": "JArgqClrUz1th-OViD81iT6Pdy6wwNFUIB1uEDs1Z0UPDCROafdRtcOFnbiUOJqRjFdQ-9K7_534QDz3eQcpBQ",
+          "type": "service_ed25519"
+        }
+      },
+      "binding": {
+        "action": "workload_scale",
+        "cluster": "prod-east",
+        "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+        "incident_version": 7,
+        "params": {
+          "kind": "Deployment",
+          "name": "checkout",
+          "namespace": "payments",
+          "replicas": 3
+        },
+        "proposal_expires_at": "2026-10-20T09:00:00Z",
+        "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+        "root_component": "payments/checkout",
+        "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e"
+      },
+      "now": "2026-10-20T07:59:54Z",
+      "restored_at": null,
+      "require_webauthn_for_h": false,
+      "assertion_canonical": "{\"action\":\"workload_scale\",\"approver_principal\":\"oidc:alice@example.org\",\"canon_version\":\"jcs-sha256-v1\",\"channel\":\"telegram\",\"cluster\":\"prod-east\",\"evidence_fingerprint\":\"sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee\",\"expires_at\":\"2026-10-20T08:30:00Z\",\"incident_version\":7,\"issued_at\":\"2026-10-20T08:00:00Z\",\"level\":\"reversible\",\"params_hash\":\"sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad\",\"proposal_id\":\"6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c\",\"root_component\":\"payments/checkout\",\"target_uid\":\"0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e\",\"tier\":\"L\"}",
+      "assertion_hash": "sha256:629be3c008c340d3e8b3c8db75d9c4c320c4fbc20832b4620f4bb9f0c2c18496",
+      "execution_id": "108c89d0d32462a84d9937f43ab2b591",
+      "signing_input_b64url": "c3JlbmF1dGl4LWFwcHJvdmFsLXYxCnsiYXNzZXJ0aW9uIjp7ImFjdGlvbiI6Indvcmtsb2FkX3NjYWxlIiwiYXBwcm92ZXJfcHJpbmNpcGFsIjoib2lkYzphbGljZUBleGFtcGxlLm9yZyIsImNhbm9uX3ZlcnNpb24iOiJqY3Mtc2hhMjU2LXYxIiwiY2hhbm5lbCI6InRlbGVncmFtIiwiY2x1c3RlciI6InByb2QtZWFzdCIsImV2aWRlbmNlX2ZpbmdlcnByaW50Ijoic2hhMjU2OjhmNWExNjdhMzgxN2NhODVlMWU5ZjUyYWVmMThiY2Y5YjQ3ZmFhNDA5ZmQ2YjE3ZGNlMWE3ZDkxMjkyZTQ4ZWUiLCJleHBpcmVzX2F0IjoiMjAyNi0xMC0yMFQwODozMDowMFoiLCJpbmNpZGVudF92ZXJzaW9uIjo3LCJpc3N1ZWRfYXQiOiIyMDI2LTEwLTIwVDA4OjAwOjAwWiIsImxldmVsIjoicmV2ZXJzaWJsZSIsInBhcmFtc19oYXNoIjoic2hhMjU2OjdhNDM2NGEwYTUxMTQ3OWE3NTM2M2I0ZWEyODI1ZTc1YjhlYmM1ODQxZTY3YmNiZDdjMDZjZjgxMzg5MjIyYWQiLCJwcm9wb3NhbF9pZCI6IjZmMWMyYThlLTRiN2QtNGUyYS05YzNmLTFkMmUzZjRhNWI2YyIsInJvb3RfY29tcG9uZW50IjoicGF5bWVudHMvY2hlY2tvdXQiLCJ0YXJnZXRfdWlkIjoiMGI5YzVlN2EtM2YxZC00YzJiLThhNmUtNWQ0YzNiMmExZjBlIiwidGllciI6IkwifX0",
+      "expect_error": "not_yet_valid"
+    },
+    {
+      "name": "issued_before_restore",
+      "description": "签发时间早于恢复标记",
+      "envelope": {
+        "assertion": {
+          "action": "workload_scale",
+          "approver_principal": "oidc:alice@example.org",
+          "canon_version": "jcs-sha256-v1",
+          "channel": "telegram",
+          "cluster": "prod-east",
+          "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+          "expires_at": "2026-10-20T08:30:00Z",
+          "incident_version": 7,
+          "issued_at": "2026-10-20T08:00:00Z",
+          "level": "reversible",
+          "params_hash": "sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad",
+          "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+          "root_component": "payments/checkout",
+          "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e",
+          "tier": "L"
+        },
+        "proof": {
+          "key_id": "service-2026-10",
+          "signature": "JArgqClrUz1th-OViD81iT6Pdy6wwNFUIB1uEDs1Z0UPDCROafdRtcOFnbiUOJqRjFdQ-9K7_534QDz3eQcpBQ",
+          "type": "service_ed25519"
+        }
+      },
+      "binding": {
+        "action": "workload_scale",
+        "cluster": "prod-east",
+        "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+        "incident_version": 7,
+        "params": {
+          "kind": "Deployment",
+          "name": "checkout",
+          "namespace": "payments",
+          "replicas": 3
+        },
+        "proposal_expires_at": "2026-10-20T09:00:00Z",
+        "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+        "root_component": "payments/checkout",
+        "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e"
+      },
+      "now": "2026-10-20T08:05:00Z",
+      "restored_at": "2026-10-20T08:00:00Z",
+      "require_webauthn_for_h": false,
+      "assertion_canonical": "{\"action\":\"workload_scale\",\"approver_principal\":\"oidc:alice@example.org\",\"canon_version\":\"jcs-sha256-v1\",\"channel\":\"telegram\",\"cluster\":\"prod-east\",\"evidence_fingerprint\":\"sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee\",\"expires_at\":\"2026-10-20T08:30:00Z\",\"incident_version\":7,\"issued_at\":\"2026-10-20T08:00:00Z\",\"level\":\"reversible\",\"params_hash\":\"sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad\",\"proposal_id\":\"6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c\",\"root_component\":\"payments/checkout\",\"target_uid\":\"0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e\",\"tier\":\"L\"}",
+      "assertion_hash": "sha256:629be3c008c340d3e8b3c8db75d9c4c320c4fbc20832b4620f4bb9f0c2c18496",
+      "execution_id": "108c89d0d32462a84d9937f43ab2b591",
+      "signing_input_b64url": "c3JlbmF1dGl4LWFwcHJvdmFsLXYxCnsiYXNzZXJ0aW9uIjp7ImFjdGlvbiI6Indvcmtsb2FkX3NjYWxlIiwiYXBwcm92ZXJfcHJpbmNpcGFsIjoib2lkYzphbGljZUBleGFtcGxlLm9yZyIsImNhbm9uX3ZlcnNpb24iOiJqY3Mtc2hhMjU2LXYxIiwiY2hhbm5lbCI6InRlbGVncmFtIiwiY2x1c3RlciI6InByb2QtZWFzdCIsImV2aWRlbmNlX2ZpbmdlcnByaW50Ijoic2hhMjU2OjhmNWExNjdhMzgxN2NhODVlMWU5ZjUyYWVmMThiY2Y5YjQ3ZmFhNDA5ZmQ2YjE3ZGNlMWE3ZDkxMjkyZTQ4ZWUiLCJleHBpcmVzX2F0IjoiMjAyNi0xMC0yMFQwODozMDowMFoiLCJpbmNpZGVudF92ZXJzaW9uIjo3LCJpc3N1ZWRfYXQiOiIyMDI2LTEwLTIwVDA4OjAwOjAwWiIsImxldmVsIjoicmV2ZXJzaWJsZSIsInBhcmFtc19oYXNoIjoic2hhMjU2OjdhNDM2NGEwYTUxMTQ3OWE3NTM2M2I0ZWEyODI1ZTc1YjhlYmM1ODQxZTY3YmNiZDdjMDZjZjgxMzg5MjIyYWQiLCJwcm9wb3NhbF9pZCI6IjZmMWMyYThlLTRiN2QtNGUyYS05YzNmLTFkMmUzZjRhNWI2YyIsInJvb3RfY29tcG9uZW50IjoicGF5bWVudHMvY2hlY2tvdXQiLCJ0YXJnZXRfdWlkIjoiMGI5YzVlN2EtM2YxZC00YzJiLThhNmUtNWQ0YzNiMmExZjBlIiwidGllciI6IkwifX0",
+      "expect_error": "issued_before_restore"
+    },
+    {
+      "name": "issued_after_restore",
+      "description": "签发时间晚于恢复标记",
+      "envelope": {
+        "assertion": {
+          "action": "workload_scale",
+          "approver_principal": "oidc:alice@example.org",
+          "canon_version": "jcs-sha256-v1",
+          "channel": "telegram",
+          "cluster": "prod-east",
+          "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+          "expires_at": "2026-10-20T08:30:00Z",
+          "incident_version": 7,
+          "issued_at": "2026-10-20T08:00:00Z",
+          "level": "reversible",
+          "params_hash": "sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad",
+          "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+          "root_component": "payments/checkout",
+          "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e",
+          "tier": "L"
+        },
+        "proof": {
+          "key_id": "service-2026-10",
+          "signature": "JArgqClrUz1th-OViD81iT6Pdy6wwNFUIB1uEDs1Z0UPDCROafdRtcOFnbiUOJqRjFdQ-9K7_534QDz3eQcpBQ",
+          "type": "service_ed25519"
+        }
+      },
+      "binding": {
+        "action": "workload_scale",
+        "cluster": "prod-east",
+        "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+        "incident_version": 7,
+        "params": {
+          "kind": "Deployment",
+          "name": "checkout",
+          "namespace": "payments",
+          "replicas": 3
+        },
+        "proposal_expires_at": "2026-10-20T09:00:00Z",
+        "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+        "root_component": "payments/checkout",
+        "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e"
+      },
+      "now": "2026-10-20T08:05:00Z",
+      "restored_at": "2026-10-20T07:59:59Z",
+      "require_webauthn_for_h": false,
+      "assertion_canonical": "{\"action\":\"workload_scale\",\"approver_principal\":\"oidc:alice@example.org\",\"canon_version\":\"jcs-sha256-v1\",\"channel\":\"telegram\",\"cluster\":\"prod-east\",\"evidence_fingerprint\":\"sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee\",\"expires_at\":\"2026-10-20T08:30:00Z\",\"incident_version\":7,\"issued_at\":\"2026-10-20T08:00:00Z\",\"level\":\"reversible\",\"params_hash\":\"sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad\",\"proposal_id\":\"6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c\",\"root_component\":\"payments/checkout\",\"target_uid\":\"0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e\",\"tier\":\"L\"}",
+      "assertion_hash": "sha256:629be3c008c340d3e8b3c8db75d9c4c320c4fbc20832b4620f4bb9f0c2c18496",
+      "execution_id": "108c89d0d32462a84d9937f43ab2b591",
+      "signing_input_b64url": "c3JlbmF1dGl4LWFwcHJvdmFsLXYxCnsiYXNzZXJ0aW9uIjp7ImFjdGlvbiI6Indvcmtsb2FkX3NjYWxlIiwiYXBwcm92ZXJfcHJpbmNpcGFsIjoib2lkYzphbGljZUBleGFtcGxlLm9yZyIsImNhbm9uX3ZlcnNpb24iOiJqY3Mtc2hhMjU2LXYxIiwiY2hhbm5lbCI6InRlbGVncmFtIiwiY2x1c3RlciI6InByb2QtZWFzdCIsImV2aWRlbmNlX2ZpbmdlcnByaW50Ijoic2hhMjU2OjhmNWExNjdhMzgxN2NhODVlMWU5ZjUyYWVmMThiY2Y5YjQ3ZmFhNDA5ZmQ2YjE3ZGNlMWE3ZDkxMjkyZTQ4ZWUiLCJleHBpcmVzX2F0IjoiMjAyNi0xMC0yMFQwODozMDowMFoiLCJpbmNpZGVudF92ZXJzaW9uIjo3LCJpc3N1ZWRfYXQiOiIyMDI2LTEwLTIwVDA4OjAwOjAwWiIsImxldmVsIjoicmV2ZXJzaWJsZSIsInBhcmFtc19oYXNoIjoic2hhMjU2OjdhNDM2NGEwYTUxMTQ3OWE3NTM2M2I0ZWEyODI1ZTc1YjhlYmM1ODQxZTY3YmNiZDdjMDZjZjgxMzg5MjIyYWQiLCJwcm9wb3NhbF9pZCI6IjZmMWMyYThlLTRiN2QtNGUyYS05YzNmLTFkMmUzZjRhNWI2YyIsInJvb3RfY29tcG9uZW50IjoicGF5bWVudHMvY2hlY2tvdXQiLCJ0YXJnZXRfdWlkIjoiMGI5YzVlN2EtM2YxZC00YzJiLThhNmUtNWQ0YzNiMmExZjBlIiwidGllciI6IkwifX0",
+      "expect_error": ""
+    },
+    {
+      "name": "proposal_expired",
+      "description": "提议的 TTL 已过，审批仍在有效期内",
+      "envelope": {
+        "assertion": {
+          "action": "workload_scale",
+          "approver_principal": "oidc:alice@example.org",
+          "canon_version": "jcs-sha256-v1",
+          "channel": "telegram",
+          "cluster": "prod-east",
+          "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+          "expires_at": "2026-10-20T08:30:00Z",
+          "incident_version": 7,
+          "issued_at": "2026-10-20T08:00:00Z",
+          "level": "reversible",
+          "params_hash": "sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad",
+          "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+          "root_component": "payments/checkout",
+          "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e",
+          "tier": "L"
+        },
+        "proof": {
+          "key_id": "service-2026-10",
+          "signature": "JArgqClrUz1th-OViD81iT6Pdy6wwNFUIB1uEDs1Z0UPDCROafdRtcOFnbiUOJqRjFdQ-9K7_534QDz3eQcpBQ",
+          "type": "service_ed25519"
+        }
+      },
+      "binding": {
+        "action": "workload_scale",
+        "cluster": "prod-east",
+        "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+        "incident_version": 7,
+        "params": {
+          "kind": "Deployment",
+          "name": "checkout",
+          "namespace": "payments",
+          "replicas": 3
+        },
+        "proposal_expires_at": "2026-10-20T08:04:00Z",
+        "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+        "root_component": "payments/checkout",
+        "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e"
+      },
+      "now": "2026-10-20T08:05:00Z",
+      "restored_at": null,
+      "require_webauthn_for_h": false,
+      "assertion_canonical": "{\"action\":\"workload_scale\",\"approver_principal\":\"oidc:alice@example.org\",\"canon_version\":\"jcs-sha256-v1\",\"channel\":\"telegram\",\"cluster\":\"prod-east\",\"evidence_fingerprint\":\"sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee\",\"expires_at\":\"2026-10-20T08:30:00Z\",\"incident_version\":7,\"issued_at\":\"2026-10-20T08:00:00Z\",\"level\":\"reversible\",\"params_hash\":\"sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad\",\"proposal_id\":\"6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c\",\"root_component\":\"payments/checkout\",\"target_uid\":\"0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e\",\"tier\":\"L\"}",
+      "assertion_hash": "sha256:629be3c008c340d3e8b3c8db75d9c4c320c4fbc20832b4620f4bb9f0c2c18496",
+      "execution_id": "108c89d0d32462a84d9937f43ab2b591",
+      "signing_input_b64url": "c3JlbmF1dGl4LWFwcHJvdmFsLXYxCnsiYXNzZXJ0aW9uIjp7ImFjdGlvbiI6Indvcmtsb2FkX3NjYWxlIiwiYXBwcm92ZXJfcHJpbmNpcGFsIjoib2lkYzphbGljZUBleGFtcGxlLm9yZyIsImNhbm9uX3ZlcnNpb24iOiJqY3Mtc2hhMjU2LXYxIiwiY2hhbm5lbCI6InRlbGVncmFtIiwiY2x1c3RlciI6InByb2QtZWFzdCIsImV2aWRlbmNlX2ZpbmdlcnByaW50Ijoic2hhMjU2OjhmNWExNjdhMzgxN2NhODVlMWU5ZjUyYWVmMThiY2Y5YjQ3ZmFhNDA5ZmQ2YjE3ZGNlMWE3ZDkxMjkyZTQ4ZWUiLCJleHBpcmVzX2F0IjoiMjAyNi0xMC0yMFQwODozMDowMFoiLCJpbmNpZGVudF92ZXJzaW9uIjo3LCJpc3N1ZWRfYXQiOiIyMDI2LTEwLTIwVDA4OjAwOjAwWiIsImxldmVsIjoicmV2ZXJzaWJsZSIsInBhcmFtc19oYXNoIjoic2hhMjU2OjdhNDM2NGEwYTUxMTQ3OWE3NTM2M2I0ZWEyODI1ZTc1YjhlYmM1ODQxZTY3YmNiZDdjMDZjZjgxMzg5MjIyYWQiLCJwcm9wb3NhbF9pZCI6IjZmMWMyYThlLTRiN2QtNGUyYS05YzNmLTFkMmUzZjRhNWI2YyIsInJvb3RfY29tcG9uZW50IjoicGF5bWVudHMvY2hlY2tvdXQiLCJ0YXJnZXRfdWlkIjoiMGI5YzVlN2EtM2YxZC00YzJiLThhNmUtNWQ0YzNiMmExZjBlIiwidGllciI6IkwifX0",
+      "expect_error": "proposal_expired"
+    },
+    {
+      "name": "expires_before_issue",
+      "description": "expires_at 不晚于 issued_at",
+      "envelope": {
+        "assertion": {
+          "action": "workload_scale",
+          "approver_principal": "oidc:alice@example.org",
+          "canon_version": "jcs-sha256-v1",
+          "channel": "telegram",
+          "cluster": "prod-east",
+          "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+          "expires_at": "2026-10-20T08:00:00Z",
+          "incident_version": 7,
+          "issued_at": "2026-10-20T08:00:00Z",
+          "level": "reversible",
+          "params_hash": "sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad",
+          "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+          "root_component": "payments/checkout",
+          "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e",
+          "tier": "L"
+        },
+        "proof": {
+          "key_id": "service-2026-10",
+          "signature": "ni3R4KOP-K7JL1NAmmv7EgclULhQR5COFzNlqNnO5oUVTYgX1k1q5yAbkE-l_BIti0r7KA4FXLdBJYZUWgiCDg",
+          "type": "service_ed25519"
+        }
+      },
+      "binding": {
+        "action": "workload_scale",
+        "cluster": "prod-east",
+        "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+        "incident_version": 7,
+        "params": {
+          "kind": "Deployment",
+          "name": "checkout",
+          "namespace": "payments",
+          "replicas": 3
+        },
+        "proposal_expires_at": "2026-10-20T09:00:00Z",
+        "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+        "root_component": "payments/checkout",
+        "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e"
+      },
+      "now": "2026-10-20T08:05:00Z",
+      "restored_at": null,
+      "require_webauthn_for_h": false,
+      "assertion_canonical": "{\"action\":\"workload_scale\",\"approver_principal\":\"oidc:alice@example.org\",\"canon_version\":\"jcs-sha256-v1\",\"channel\":\"telegram\",\"cluster\":\"prod-east\",\"evidence_fingerprint\":\"sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee\",\"expires_at\":\"2026-10-20T08:00:00Z\",\"incident_version\":7,\"issued_at\":\"2026-10-20T08:00:00Z\",\"level\":\"reversible\",\"params_hash\":\"sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad\",\"proposal_id\":\"6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c\",\"root_component\":\"payments/checkout\",\"target_uid\":\"0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e\",\"tier\":\"L\"}",
+      "assertion_hash": "sha256:79259be5caf8dc47198518f370b0c5fd136e2fc86d9f4dbfb904774f7d233f29",
+      "execution_id": "c33ef8f147fbc7da47dea4ab48c729c7",
+      "signing_input_b64url": "c3JlbmF1dGl4LWFwcHJvdmFsLXYxCnsiYXNzZXJ0aW9uIjp7ImFjdGlvbiI6Indvcmtsb2FkX3NjYWxlIiwiYXBwcm92ZXJfcHJpbmNpcGFsIjoib2lkYzphbGljZUBleGFtcGxlLm9yZyIsImNhbm9uX3ZlcnNpb24iOiJqY3Mtc2hhMjU2LXYxIiwiY2hhbm5lbCI6InRlbGVncmFtIiwiY2x1c3RlciI6InByb2QtZWFzdCIsImV2aWRlbmNlX2ZpbmdlcnByaW50Ijoic2hhMjU2OjhmNWExNjdhMzgxN2NhODVlMWU5ZjUyYWVmMThiY2Y5YjQ3ZmFhNDA5ZmQ2YjE3ZGNlMWE3ZDkxMjkyZTQ4ZWUiLCJleHBpcmVzX2F0IjoiMjAyNi0xMC0yMFQwODowMDowMFoiLCJpbmNpZGVudF92ZXJzaW9uIjo3LCJpc3N1ZWRfYXQiOiIyMDI2LTEwLTIwVDA4OjAwOjAwWiIsImxldmVsIjoicmV2ZXJzaWJsZSIsInBhcmFtc19oYXNoIjoic2hhMjU2OjdhNDM2NGEwYTUxMTQ3OWE3NTM2M2I0ZWEyODI1ZTc1YjhlYmM1ODQxZTY3YmNiZDdjMDZjZjgxMzg5MjIyYWQiLCJwcm9wb3NhbF9pZCI6IjZmMWMyYThlLTRiN2QtNGUyYS05YzNmLTFkMmUzZjRhNWI2YyIsInJvb3RfY29tcG9uZW50IjoicGF5bWVudHMvY2hlY2tvdXQiLCJ0YXJnZXRfdWlkIjoiMGI5YzVlN2EtM2YxZC00YzJiLThhNmUtNWQ0YzNiMmExZjBlIiwidGllciI6IkwifX0",
+      "expect_error": "expires_before_issue"
+    },
+    {
+      "name": "unknown_key",
+      "description": "key_id 不在信任列表中",
+      "envelope": {
+        "assertion": {
+          "action": "workload_scale",
+          "approver_principal": "oidc:alice@example.org",
+          "canon_version": "jcs-sha256-v1",
+          "channel": "telegram",
+          "cluster": "prod-east",
+          "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+          "expires_at": "2026-10-20T08:30:00Z",
+          "incident_version": 7,
+          "issued_at": "2026-10-20T08:00:00Z",
+          "level": "reversible",
+          "params_hash": "sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad",
+          "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+          "root_component": "payments/checkout",
+          "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e",
+          "tier": "L"
+        },
+        "proof": {
+          "key_id": "service-unknown",
+          "signature": "ADmRw5DWAde14arKzlC1xNdcfeKxWQUimxyl-bURANhPrXeOIiWhgzhk19IFe0QneYJfVrAjKZUDx4ndc4tzCQ",
+          "type": "service_ed25519"
+        }
+      },
+      "binding": {
+        "action": "workload_scale",
+        "cluster": "prod-east",
+        "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+        "incident_version": 7,
+        "params": {
+          "kind": "Deployment",
+          "name": "checkout",
+          "namespace": "payments",
+          "replicas": 3
+        },
+        "proposal_expires_at": "2026-10-20T09:00:00Z",
+        "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+        "root_component": "payments/checkout",
+        "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e"
+      },
+      "now": "2026-10-20T08:05:00Z",
+      "restored_at": null,
+      "require_webauthn_for_h": false,
+      "assertion_canonical": "{\"action\":\"workload_scale\",\"approver_principal\":\"oidc:alice@example.org\",\"canon_version\":\"jcs-sha256-v1\",\"channel\":\"telegram\",\"cluster\":\"prod-east\",\"evidence_fingerprint\":\"sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee\",\"expires_at\":\"2026-10-20T08:30:00Z\",\"incident_version\":7,\"issued_at\":\"2026-10-20T08:00:00Z\",\"level\":\"reversible\",\"params_hash\":\"sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad\",\"proposal_id\":\"6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c\",\"root_component\":\"payments/checkout\",\"target_uid\":\"0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e\",\"tier\":\"L\"}",
+      "assertion_hash": "sha256:629be3c008c340d3e8b3c8db75d9c4c320c4fbc20832b4620f4bb9f0c2c18496",
+      "execution_id": "108c89d0d32462a84d9937f43ab2b591",
+      "signing_input_b64url": "c3JlbmF1dGl4LWFwcHJvdmFsLXYxCnsiYXNzZXJ0aW9uIjp7ImFjdGlvbiI6Indvcmtsb2FkX3NjYWxlIiwiYXBwcm92ZXJfcHJpbmNpcGFsIjoib2lkYzphbGljZUBleGFtcGxlLm9yZyIsImNhbm9uX3ZlcnNpb24iOiJqY3Mtc2hhMjU2LXYxIiwiY2hhbm5lbCI6InRlbGVncmFtIiwiY2x1c3RlciI6InByb2QtZWFzdCIsImV2aWRlbmNlX2ZpbmdlcnByaW50Ijoic2hhMjU2OjhmNWExNjdhMzgxN2NhODVlMWU5ZjUyYWVmMThiY2Y5YjQ3ZmFhNDA5ZmQ2YjE3ZGNlMWE3ZDkxMjkyZTQ4ZWUiLCJleHBpcmVzX2F0IjoiMjAyNi0xMC0yMFQwODozMDowMFoiLCJpbmNpZGVudF92ZXJzaW9uIjo3LCJpc3N1ZWRfYXQiOiIyMDI2LTEwLTIwVDA4OjAwOjAwWiIsImxldmVsIjoicmV2ZXJzaWJsZSIsInBhcmFtc19oYXNoIjoic2hhMjU2OjdhNDM2NGEwYTUxMTQ3OWE3NTM2M2I0ZWEyODI1ZTc1YjhlYmM1ODQxZTY3YmNiZDdjMDZjZjgxMzg5MjIyYWQiLCJwcm9wb3NhbF9pZCI6IjZmMWMyYThlLTRiN2QtNGUyYS05YzNmLTFkMmUzZjRhNWI2YyIsInJvb3RfY29tcG9uZW50IjoicGF5bWVudHMvY2hlY2tvdXQiLCJ0YXJnZXRfdWlkIjoiMGI5YzVlN2EtM2YxZC00YzJiLThhNmUtNWQ0YzNiMmExZjBlIiwidGllciI6IkwifX0",
+      "expect_error": "unknown_key"
+    },
+    {
+      "name": "wrong_key_same_id",
+      "description": "用另一把私钥冒用受信任的 key_id",
+      "envelope": {
+        "assertion": {
+          "action": "workload_scale",
+          "approver_principal": "oidc:alice@example.org",
+          "canon_version": "jcs-sha256-v1",
+          "channel": "telegram",
+          "cluster": "prod-east",
+          "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+          "expires_at": "2026-10-20T08:30:00Z",
+          "incident_version": 7,
+          "issued_at": "2026-10-20T08:00:00Z",
+          "level": "reversible",
+          "params_hash": "sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad",
+          "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+          "root_component": "payments/checkout",
+          "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e",
+          "tier": "L"
+        },
+        "proof": {
+          "key_id": "service-2026-10",
+          "signature": "ADmRw5DWAde14arKzlC1xNdcfeKxWQUimxyl-bURANhPrXeOIiWhgzhk19IFe0QneYJfVrAjKZUDx4ndc4tzCQ",
+          "type": "service_ed25519"
+        }
+      },
+      "binding": {
+        "action": "workload_scale",
+        "cluster": "prod-east",
+        "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+        "incident_version": 7,
+        "params": {
+          "kind": "Deployment",
+          "name": "checkout",
+          "namespace": "payments",
+          "replicas": 3
+        },
+        "proposal_expires_at": "2026-10-20T09:00:00Z",
+        "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+        "root_component": "payments/checkout",
+        "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e"
+      },
+      "now": "2026-10-20T08:05:00Z",
+      "restored_at": null,
+      "require_webauthn_for_h": false,
+      "assertion_canonical": "{\"action\":\"workload_scale\",\"approver_principal\":\"oidc:alice@example.org\",\"canon_version\":\"jcs-sha256-v1\",\"channel\":\"telegram\",\"cluster\":\"prod-east\",\"evidence_fingerprint\":\"sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee\",\"expires_at\":\"2026-10-20T08:30:00Z\",\"incident_version\":7,\"issued_at\":\"2026-10-20T08:00:00Z\",\"level\":\"reversible\",\"params_hash\":\"sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad\",\"proposal_id\":\"6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c\",\"root_component\":\"payments/checkout\",\"target_uid\":\"0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e\",\"tier\":\"L\"}",
+      "assertion_hash": "sha256:629be3c008c340d3e8b3c8db75d9c4c320c4fbc20832b4620f4bb9f0c2c18496",
+      "execution_id": "108c89d0d32462a84d9937f43ab2b591",
+      "signing_input_b64url": "c3JlbmF1dGl4LWFwcHJvdmFsLXYxCnsiYXNzZXJ0aW9uIjp7ImFjdGlvbiI6Indvcmtsb2FkX3NjYWxlIiwiYXBwcm92ZXJfcHJpbmNpcGFsIjoib2lkYzphbGljZUBleGFtcGxlLm9yZyIsImNhbm9uX3ZlcnNpb24iOiJqY3Mtc2hhMjU2LXYxIiwiY2hhbm5lbCI6InRlbGVncmFtIiwiY2x1c3RlciI6InByb2QtZWFzdCIsImV2aWRlbmNlX2ZpbmdlcnByaW50Ijoic2hhMjU2OjhmNWExNjdhMzgxN2NhODVlMWU5ZjUyYWVmMThiY2Y5YjQ3ZmFhNDA5ZmQ2YjE3ZGNlMWE3ZDkxMjkyZTQ4ZWUiLCJleHBpcmVzX2F0IjoiMjAyNi0xMC0yMFQwODozMDowMFoiLCJpbmNpZGVudF92ZXJzaW9uIjo3LCJpc3N1ZWRfYXQiOiIyMDI2LTEwLTIwVDA4OjAwOjAwWiIsImxldmVsIjoicmV2ZXJzaWJsZSIsInBhcmFtc19oYXNoIjoic2hhMjU2OjdhNDM2NGEwYTUxMTQ3OWE3NTM2M2I0ZWEyODI1ZTc1YjhlYmM1ODQxZTY3YmNiZDdjMDZjZjgxMzg5MjIyYWQiLCJwcm9wb3NhbF9pZCI6IjZmMWMyYThlLTRiN2QtNGUyYS05YzNmLTFkMmUzZjRhNWI2YyIsInJvb3RfY29tcG9uZW50IjoicGF5bWVudHMvY2hlY2tvdXQiLCJ0YXJnZXRfdWlkIjoiMGI5YzVlN2EtM2YxZC00YzJiLThhNmUtNWQ0YzNiMmExZjBlIiwidGllciI6IkwifX0",
+      "expect_error": "bad_signature"
+    },
+    {
+      "name": "retired_key",
+      "description": "轮换后的旧密钥签发了 not_after 之后的断言",
+      "envelope": {
+        "assertion": {
+          "action": "workload_scale",
+          "approver_principal": "oidc:alice@example.org",
+          "canon_version": "jcs-sha256-v1",
+          "channel": "telegram",
+          "cluster": "prod-east",
+          "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+          "expires_at": "2026-10-20T08:30:00Z",
+          "incident_version": 7,
+          "issued_at": "2026-10-20T08:00:00Z",
+          "level": "reversible",
+          "params_hash": "sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad",
+          "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+          "root_component": "payments/checkout",
+          "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e",
+          "tier": "L"
+        },
+        "proof": {
+          "key_id": "service-2026-01",
+          "signature": "O8MIclkiBWUBKLzqJD8zHgX0EYMTmG9VGqcMFSLy1megts1eUOFDW6fXkP57GY_E0x35Z-2Fx2BJ9dh3yXOCAg",
+          "type": "service_ed25519"
+        }
+      },
+      "binding": {
+        "action": "workload_scale",
+        "cluster": "prod-east",
+        "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+        "incident_version": 7,
+        "params": {
+          "kind": "Deployment",
+          "name": "checkout",
+          "namespace": "payments",
+          "replicas": 3
+        },
+        "proposal_expires_at": "2026-10-20T09:00:00Z",
+        "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+        "root_component": "payments/checkout",
+        "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e"
+      },
+      "now": "2026-10-20T08:05:00Z",
+      "restored_at": null,
+      "require_webauthn_for_h": false,
+      "assertion_canonical": "{\"action\":\"workload_scale\",\"approver_principal\":\"oidc:alice@example.org\",\"canon_version\":\"jcs-sha256-v1\",\"channel\":\"telegram\",\"cluster\":\"prod-east\",\"evidence_fingerprint\":\"sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee\",\"expires_at\":\"2026-10-20T08:30:00Z\",\"incident_version\":7,\"issued_at\":\"2026-10-20T08:00:00Z\",\"level\":\"reversible\",\"params_hash\":\"sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad\",\"proposal_id\":\"6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c\",\"root_component\":\"payments/checkout\",\"target_uid\":\"0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e\",\"tier\":\"L\"}",
+      "assertion_hash": "sha256:629be3c008c340d3e8b3c8db75d9c4c320c4fbc20832b4620f4bb9f0c2c18496",
+      "execution_id": "108c89d0d32462a84d9937f43ab2b591",
+      "signing_input_b64url": "c3JlbmF1dGl4LWFwcHJvdmFsLXYxCnsiYXNzZXJ0aW9uIjp7ImFjdGlvbiI6Indvcmtsb2FkX3NjYWxlIiwiYXBwcm92ZXJfcHJpbmNpcGFsIjoib2lkYzphbGljZUBleGFtcGxlLm9yZyIsImNhbm9uX3ZlcnNpb24iOiJqY3Mtc2hhMjU2LXYxIiwiY2hhbm5lbCI6InRlbGVncmFtIiwiY2x1c3RlciI6InByb2QtZWFzdCIsImV2aWRlbmNlX2ZpbmdlcnByaW50Ijoic2hhMjU2OjhmNWExNjdhMzgxN2NhODVlMWU5ZjUyYWVmMThiY2Y5YjQ3ZmFhNDA5ZmQ2YjE3ZGNlMWE3ZDkxMjkyZTQ4ZWUiLCJleHBpcmVzX2F0IjoiMjAyNi0xMC0yMFQwODozMDowMFoiLCJpbmNpZGVudF92ZXJzaW9uIjo3LCJpc3N1ZWRfYXQiOiIyMDI2LTEwLTIwVDA4OjAwOjAwWiIsImxldmVsIjoicmV2ZXJzaWJsZSIsInBhcmFtc19oYXNoIjoic2hhMjU2OjdhNDM2NGEwYTUxMTQ3OWE3NTM2M2I0ZWEyODI1ZTc1YjhlYmM1ODQxZTY3YmNiZDdjMDZjZjgxMzg5MjIyYWQiLCJwcm9wb3NhbF9pZCI6IjZmMWMyYThlLTRiN2QtNGUyYS05YzNmLTFkMmUzZjRhNWI2YyIsInJvb3RfY29tcG9uZW50IjoicGF5bWVudHMvY2hlY2tvdXQiLCJ0YXJnZXRfdWlkIjoiMGI5YzVlN2EtM2YxZC00YzJiLThhNmUtNWQ0YzNiMmExZjBlIiwidGllciI6IkwifX0",
+      "expect_error": "key_expired"
+    },
+    {
+      "name": "schema_extra_field",
+      "description": "断言带有字段列表之外的字段",
+      "envelope": {
+        "assertion": {
+          "action": "workload_scale",
+          "approver_principal": "oidc:alice@example.org",
+          "canon_version": "jcs-sha256-v1",
+          "channel": "telegram",
+          "cluster": "prod-east",
+          "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+          "expires_at": "2026-10-20T08:30:00Z",
+          "incident_version": 7,
+          "issued_at": "2026-10-20T08:00:00Z",
+          "level": "reversible",
+          "note": "extra",
+          "params_hash": "sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad",
+          "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+          "root_component": "payments/checkout",
+          "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e",
+          "tier": "L"
+        },
+        "proof": {
+          "key_id": "service-2026-10",
+          "signature": "JArgqClrUz1th-OViD81iT6Pdy6wwNFUIB1uEDs1Z0UPDCROafdRtcOFnbiUOJqRjFdQ-9K7_534QDz3eQcpBQ",
+          "type": "service_ed25519"
+        }
+      },
+      "binding": {
+        "action": "workload_scale",
+        "cluster": "prod-east",
+        "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+        "incident_version": 7,
+        "params": {
+          "kind": "Deployment",
+          "name": "checkout",
+          "namespace": "payments",
+          "replicas": 3
+        },
+        "proposal_expires_at": "2026-10-20T09:00:00Z",
+        "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+        "root_component": "payments/checkout",
+        "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e"
+      },
+      "now": "2026-10-20T08:05:00Z",
+      "restored_at": null,
+      "require_webauthn_for_h": false,
+      "assertion_canonical": "{\"action\":\"workload_scale\",\"approver_principal\":\"oidc:alice@example.org\",\"canon_version\":\"jcs-sha256-v1\",\"channel\":\"telegram\",\"cluster\":\"prod-east\",\"evidence_fingerprint\":\"sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee\",\"expires_at\":\"2026-10-20T08:30:00Z\",\"incident_version\":7,\"issued_at\":\"2026-10-20T08:00:00Z\",\"level\":\"reversible\",\"note\":\"extra\",\"params_hash\":\"sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad\",\"proposal_id\":\"6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c\",\"root_component\":\"payments/checkout\",\"target_uid\":\"0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e\",\"tier\":\"L\"}",
+      "assertion_hash": "sha256:44e15baf7e7cfdb1cdc228f4947fe5ac5407d5c18cf1d42a0bb9797ac31d063e",
+      "execution_id": "74dc4914b4c52e5967ac509c63a58213",
+      "signing_input_b64url": "c3JlbmF1dGl4LWFwcHJvdmFsLXYxCnsiYXNzZXJ0aW9uIjp7ImFjdGlvbiI6Indvcmtsb2FkX3NjYWxlIiwiYXBwcm92ZXJfcHJpbmNpcGFsIjoib2lkYzphbGljZUBleGFtcGxlLm9yZyIsImNhbm9uX3ZlcnNpb24iOiJqY3Mtc2hhMjU2LXYxIiwiY2hhbm5lbCI6InRlbGVncmFtIiwiY2x1c3RlciI6InByb2QtZWFzdCIsImV2aWRlbmNlX2ZpbmdlcnByaW50Ijoic2hhMjU2OjhmNWExNjdhMzgxN2NhODVlMWU5ZjUyYWVmMThiY2Y5YjQ3ZmFhNDA5ZmQ2YjE3ZGNlMWE3ZDkxMjkyZTQ4ZWUiLCJleHBpcmVzX2F0IjoiMjAyNi0xMC0yMFQwODozMDowMFoiLCJpbmNpZGVudF92ZXJzaW9uIjo3LCJpc3N1ZWRfYXQiOiIyMDI2LTEwLTIwVDA4OjAwOjAwWiIsImxldmVsIjoicmV2ZXJzaWJsZSIsIm5vdGUiOiJleHRyYSIsInBhcmFtc19oYXNoIjoic2hhMjU2OjdhNDM2NGEwYTUxMTQ3OWE3NTM2M2I0ZWEyODI1ZTc1YjhlYmM1ODQxZTY3YmNiZDdjMDZjZjgxMzg5MjIyYWQiLCJwcm9wb3NhbF9pZCI6IjZmMWMyYThlLTRiN2QtNGUyYS05YzNmLTFkMmUzZjRhNWI2YyIsInJvb3RfY29tcG9uZW50IjoicGF5bWVudHMvY2hlY2tvdXQiLCJ0YXJnZXRfdWlkIjoiMGI5YzVlN2EtM2YxZC00YzJiLThhNmUtNWQ0YzNiMmExZjBlIiwidGllciI6IkwifX0",
+      "expect_error": "schema_invalid"
+    },
+    {
+      "name": "schema_canon_version",
+      "description": "不支持的 canon_version",
+      "envelope": {
+        "assertion": {
+          "action": "workload_scale",
+          "approver_principal": "oidc:alice@example.org",
+          "canon_version": "jcs-sha256-v2",
+          "channel": "telegram",
+          "cluster": "prod-east",
+          "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+          "expires_at": "2026-10-20T08:30:00Z",
+          "incident_version": 7,
+          "issued_at": "2026-10-20T08:00:00Z",
+          "level": "reversible",
+          "params_hash": "sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad",
+          "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+          "root_component": "payments/checkout",
+          "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e",
+          "tier": "L"
+        },
+        "proof": {
+          "key_id": "service-2026-10",
+          "signature": "d6qaGfqRzCqUEaF2g5pJZY8TJ0FPExgMN1452-9gIpEGtuI53ncRh59e3ei-a0LED8i7yj5qlrAgUDVnRyiDBA",
+          "type": "service_ed25519"
+        }
+      },
+      "binding": {
+        "action": "workload_scale",
+        "cluster": "prod-east",
+        "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+        "incident_version": 7,
+        "params": {
+          "kind": "Deployment",
+          "name": "checkout",
+          "namespace": "payments",
+          "replicas": 3
+        },
+        "proposal_expires_at": "2026-10-20T09:00:00Z",
+        "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+        "root_component": "payments/checkout",
+        "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e"
+      },
+      "now": "2026-10-20T08:05:00Z",
+      "restored_at": null,
+      "require_webauthn_for_h": false,
+      "assertion_canonical": "{\"action\":\"workload_scale\",\"approver_principal\":\"oidc:alice@example.org\",\"canon_version\":\"jcs-sha256-v2\",\"channel\":\"telegram\",\"cluster\":\"prod-east\",\"evidence_fingerprint\":\"sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee\",\"expires_at\":\"2026-10-20T08:30:00Z\",\"incident_version\":7,\"issued_at\":\"2026-10-20T08:00:00Z\",\"level\":\"reversible\",\"params_hash\":\"sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad\",\"proposal_id\":\"6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c\",\"root_component\":\"payments/checkout\",\"target_uid\":\"0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e\",\"tier\":\"L\"}",
+      "assertion_hash": "sha256:72f688a96f0786e19c86e5dd0117f61494817c351448fe6e36e82de190fd2d72",
+      "execution_id": "8cec037be4b7a2ae0f2a219e7471c96e",
+      "signing_input_b64url": "c3JlbmF1dGl4LWFwcHJvdmFsLXYxCnsiYXNzZXJ0aW9uIjp7ImFjdGlvbiI6Indvcmtsb2FkX3NjYWxlIiwiYXBwcm92ZXJfcHJpbmNpcGFsIjoib2lkYzphbGljZUBleGFtcGxlLm9yZyIsImNhbm9uX3ZlcnNpb24iOiJqY3Mtc2hhMjU2LXYyIiwiY2hhbm5lbCI6InRlbGVncmFtIiwiY2x1c3RlciI6InByb2QtZWFzdCIsImV2aWRlbmNlX2ZpbmdlcnByaW50Ijoic2hhMjU2OjhmNWExNjdhMzgxN2NhODVlMWU5ZjUyYWVmMThiY2Y5YjQ3ZmFhNDA5ZmQ2YjE3ZGNlMWE3ZDkxMjkyZTQ4ZWUiLCJleHBpcmVzX2F0IjoiMjAyNi0xMC0yMFQwODozMDowMFoiLCJpbmNpZGVudF92ZXJzaW9uIjo3LCJpc3N1ZWRfYXQiOiIyMDI2LTEwLTIwVDA4OjAwOjAwWiIsImxldmVsIjoicmV2ZXJzaWJsZSIsInBhcmFtc19oYXNoIjoic2hhMjU2OjdhNDM2NGEwYTUxMTQ3OWE3NTM2M2I0ZWEyODI1ZTc1YjhlYmM1ODQxZTY3YmNiZDdjMDZjZjgxMzg5MjIyYWQiLCJwcm9wb3NhbF9pZCI6IjZmMWMyYThlLTRiN2QtNGUyYS05YzNmLTFkMmUzZjRhNWI2YyIsInJvb3RfY29tcG9uZW50IjoicGF5bWVudHMvY2hlY2tvdXQiLCJ0YXJnZXRfdWlkIjoiMGI5YzVlN2EtM2YxZC00YzJiLThhNmUtNWQ0YzNiMmExZjBlIiwidGllciI6IkwifX0",
+      "expect_error": "schema_invalid"
+    },
+    {
+      "name": "webauthn_h_valid",
+      "description": "H 档通行密钥签名",
+      "envelope": {
+        "assertion": {
+          "action": "workload_scale",
+          "approver_principal": "oidc:alice@example.org",
+          "canon_version": "jcs-sha256-v1",
+          "channel": "console",
+          "cluster": "prod-east",
+          "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+          "expires_at": "2026-10-20T08:30:00Z",
+          "incident_version": 7,
+          "issued_at": "2026-10-20T08:00:00Z",
+          "level": "reversible",
+          "params_hash": "sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad",
+          "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+          "root_component": "payments/checkout",
+          "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e",
+          "tier": "H"
+        },
+        "proof": {
+          "authenticator_data": "hUDpHa9EEiY5-8tyF70Larkr5U33X77O4fpuKlNoFPYFAAAAAA",
+          "client_data_json": "eyJjaGFsbGVuZ2UiOiJmand0alp5TGw0NGMxejdOWXF3OEVmU1kxbExNaDJneVotQmhubTUwQUpVIiwiY3Jvc3NPcmlnaW4iOmZhbHNlLCJvcmlnaW4iOiJodHRwczovL2NvbnNvbGUuc3JlbmF1dGl4LmV4YW1wbGUiLCJ0eXBlIjoid2ViYXV0aG4uZ2V0In0",
+          "credential_id": "Y3JlZGVudGlhbC1hbGljZS0wMDAx",
+          "signature": "ibWiLkKgOQjO8w3iSoBUN_TZu0_OU22M4xSmWwb1loxfz0NwQoVDUpF-9ZfkGHuvEnRQPfGjRGIwhyxHhefGBA",
+          "type": "webauthn_ed25519"
+        }
+      },
+      "binding": {
+        "action": "workload_scale",
+        "cluster": "prod-east",
+        "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+        "incident_version": 7,
+        "params": {
+          "kind": "Deployment",
+          "name": "checkout",
+          "namespace": "payments",
+          "replicas": 3
+        },
+        "proposal_expires_at": "2026-10-20T09:00:00Z",
+        "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+        "root_component": "payments/checkout",
+        "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e"
+      },
+      "now": "2026-10-20T08:05:00Z",
+      "restored_at": null,
+      "require_webauthn_for_h": true,
+      "assertion_canonical": "{\"action\":\"workload_scale\",\"approver_principal\":\"oidc:alice@example.org\",\"canon_version\":\"jcs-sha256-v1\",\"channel\":\"console\",\"cluster\":\"prod-east\",\"evidence_fingerprint\":\"sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee\",\"expires_at\":\"2026-10-20T08:30:00Z\",\"incident_version\":7,\"issued_at\":\"2026-10-20T08:00:00Z\",\"level\":\"reversible\",\"params_hash\":\"sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad\",\"proposal_id\":\"6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c\",\"root_component\":\"payments/checkout\",\"target_uid\":\"0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e\",\"tier\":\"H\"}",
+      "assertion_hash": "sha256:7e3c2d8d9c8b978e1cd73ecd62ac3c11f498d652cc87683267e0619e6e740095",
+      "execution_id": "f35a5595d1aceb43354c14d9c673c677",
+      "expect_error": ""
+    },
+    {
+      "name": "webauthn_origin",
+      "description": "origin 不在白名单中",
+      "envelope": {
+        "assertion": {
+          "action": "workload_scale",
+          "approver_principal": "oidc:alice@example.org",
+          "canon_version": "jcs-sha256-v1",
+          "channel": "console",
+          "cluster": "prod-east",
+          "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+          "expires_at": "2026-10-20T08:30:00Z",
+          "incident_version": 7,
+          "issued_at": "2026-10-20T08:00:00Z",
+          "level": "reversible",
+          "params_hash": "sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad",
+          "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+          "root_component": "payments/checkout",
+          "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e",
+          "tier": "H"
+        },
+        "proof": {
+          "authenticator_data": "hUDpHa9EEiY5-8tyF70Larkr5U33X77O4fpuKlNoFPYFAAAAAA",
+          "client_data_json": "eyJjaGFsbGVuZ2UiOiJmand0alp5TGw0NGMxejdOWXF3OEVmU1kxbExNaDJneVotQmhubTUwQUpVIiwiY3Jvc3NPcmlnaW4iOmZhbHNlLCJvcmlnaW4iOiJodHRwczovL2V2aWwuZXhhbXBsZSIsInR5cGUiOiJ3ZWJhdXRobi5nZXQifQ",
+          "credential_id": "Y3JlZGVudGlhbC1hbGljZS0wMDAx",
+          "signature": "2q-Sufmp_F2E9gM9l9KslaR1hI8g0D915gB-OuslOPwVK7-lliVisPpFXURQt2kdX0IB_aWlyWA-3bgajzPbCQ",
+          "type": "webauthn_ed25519"
+        }
+      },
+      "binding": {
+        "action": "workload_scale",
+        "cluster": "prod-east",
+        "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+        "incident_version": 7,
+        "params": {
+          "kind": "Deployment",
+          "name": "checkout",
+          "namespace": "payments",
+          "replicas": 3
+        },
+        "proposal_expires_at": "2026-10-20T09:00:00Z",
+        "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+        "root_component": "payments/checkout",
+        "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e"
+      },
+      "now": "2026-10-20T08:05:00Z",
+      "restored_at": null,
+      "require_webauthn_for_h": false,
+      "assertion_canonical": "{\"action\":\"workload_scale\",\"approver_principal\":\"oidc:alice@example.org\",\"canon_version\":\"jcs-sha256-v1\",\"channel\":\"console\",\"cluster\":\"prod-east\",\"evidence_fingerprint\":\"sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee\",\"expires_at\":\"2026-10-20T08:30:00Z\",\"incident_version\":7,\"issued_at\":\"2026-10-20T08:00:00Z\",\"level\":\"reversible\",\"params_hash\":\"sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad\",\"proposal_id\":\"6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c\",\"root_component\":\"payments/checkout\",\"target_uid\":\"0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e\",\"tier\":\"H\"}",
+      "assertion_hash": "sha256:7e3c2d8d9c8b978e1cd73ecd62ac3c11f498d652cc87683267e0619e6e740095",
+      "execution_id": "f35a5595d1aceb43354c14d9c673c677",
+      "expect_error": "webauthn_origin"
+    },
+    {
+      "name": "webauthn_rp_id",
+      "description": "rpIdHash 不是依赖方",
+      "envelope": {
+        "assertion": {
+          "action": "workload_scale",
+          "approver_principal": "oidc:alice@example.org",
+          "canon_version": "jcs-sha256-v1",
+          "channel": "console",
+          "cluster": "prod-east",
+          "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+          "expires_at": "2026-10-20T08:30:00Z",
+          "incident_version": 7,
+          "issued_at": "2026-10-20T08:00:00Z",
+          "level": "reversible",
+          "params_hash": "sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad",
+          "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+          "root_component": "payments/checkout",
+          "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e",
+          "tier": "H"
+        },
+        "proof": {
+          "authenticator_data": "nBgN4M1pnueIl8R8_bPn7h11kG4xt3RqR0fepTaQmDcFAAAAAA",
+          "client_data_json": "eyJjaGFsbGVuZ2UiOiJmand0alp5TGw0NGMxejdOWXF3OEVmU1kxbExNaDJneVotQmhubTUwQUpVIiwiY3Jvc3NPcmlnaW4iOmZhbHNlLCJvcmlnaW4iOiJodHRwczovL2NvbnNvbGUuc3JlbmF1dGl4LmV4YW1wbGUiLCJ0eXBlIjoid2ViYXV0aG4uZ2V0In0",
+          "credential_id": "Y3JlZGVudGlhbC1hbGljZS0wMDAx",
+          "signature": "oCQ60Zmu4dOvkgjZz59urptqOl1-G7WRIPVF1Cslq3mSaokRoG8fnVebEP9bV9LdjWJ8wV2TdT0T5nHfg5dKBg",
+          "type": "webauthn_ed25519"
+        }
+      },
+      "binding": {
+        "action": "workload_scale",
+        "cluster": "prod-east",
+        "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+        "incident_version": 7,
+        "params": {
+          "kind": "Deployment",
+          "name": "checkout",
+          "namespace": "payments",
+          "replicas": 3
+        },
+        "proposal_expires_at": "2026-10-20T09:00:00Z",
+        "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+        "root_component": "payments/checkout",
+        "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e"
+      },
+      "now": "2026-10-20T08:05:00Z",
+      "restored_at": null,
+      "require_webauthn_for_h": false,
+      "assertion_canonical": "{\"action\":\"workload_scale\",\"approver_principal\":\"oidc:alice@example.org\",\"canon_version\":\"jcs-sha256-v1\",\"channel\":\"console\",\"cluster\":\"prod-east\",\"evidence_fingerprint\":\"sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee\",\"expires_at\":\"2026-10-20T08:30:00Z\",\"incident_version\":7,\"issued_at\":\"2026-10-20T08:00:00Z\",\"level\":\"reversible\",\"params_hash\":\"sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad\",\"proposal_id\":\"6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c\",\"root_component\":\"payments/checkout\",\"target_uid\":\"0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e\",\"tier\":\"H\"}",
+      "assertion_hash": "sha256:7e3c2d8d9c8b978e1cd73ecd62ac3c11f498d652cc87683267e0619e6e740095",
+      "execution_id": "f35a5595d1aceb43354c14d9c673c677",
+      "expect_error": "webauthn_rp_id"
+    },
+    {
+      "name": "webauthn_no_user_verification",
+      "description": "没有 UV 标志",
+      "envelope": {
+        "assertion": {
+          "action": "workload_scale",
+          "approver_principal": "oidc:alice@example.org",
+          "canon_version": "jcs-sha256-v1",
+          "channel": "console",
+          "cluster": "prod-east",
+          "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+          "expires_at": "2026-10-20T08:30:00Z",
+          "incident_version": 7,
+          "issued_at": "2026-10-20T08:00:00Z",
+          "level": "reversible",
+          "params_hash": "sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad",
+          "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+          "root_component": "payments/checkout",
+          "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e",
+          "tier": "H"
+        },
+        "proof": {
+          "authenticator_data": "hUDpHa9EEiY5-8tyF70Larkr5U33X77O4fpuKlNoFPYBAAAAAA",
+          "client_data_json": "eyJjaGFsbGVuZ2UiOiJmand0alp5TGw0NGMxejdOWXF3OEVmU1kxbExNaDJneVotQmhubTUwQUpVIiwiY3Jvc3NPcmlnaW4iOmZhbHNlLCJvcmlnaW4iOiJodHRwczovL2NvbnNvbGUuc3JlbmF1dGl4LmV4YW1wbGUiLCJ0eXBlIjoid2ViYXV0aG4uZ2V0In0",
+          "credential_id": "Y3JlZGVudGlhbC1hbGljZS0wMDAx",
+          "signature": "vIG9_Y3xehuLMnz5-ZOl33JT8x94hixUCKwuJHO2lgYQMJW19RAm_OYl8OR8GK9LyANAvyQkRYFIt4tHhR3HCQ",
+          "type": "webauthn_ed25519"
+        }
+      },
+      "binding": {
+        "action": "workload_scale",
+        "cluster": "prod-east",
+        "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+        "incident_version": 7,
+        "params": {
+          "kind": "Deployment",
+          "name": "checkout",
+          "namespace": "payments",
+          "replicas": 3
+        },
+        "proposal_expires_at": "2026-10-20T09:00:00Z",
+        "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+        "root_component": "payments/checkout",
+        "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e"
+      },
+      "now": "2026-10-20T08:05:00Z",
+      "restored_at": null,
+      "require_webauthn_for_h": false,
+      "assertion_canonical": "{\"action\":\"workload_scale\",\"approver_principal\":\"oidc:alice@example.org\",\"canon_version\":\"jcs-sha256-v1\",\"channel\":\"console\",\"cluster\":\"prod-east\",\"evidence_fingerprint\":\"sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee\",\"expires_at\":\"2026-10-20T08:30:00Z\",\"incident_version\":7,\"issued_at\":\"2026-10-20T08:00:00Z\",\"level\":\"reversible\",\"params_hash\":\"sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad\",\"proposal_id\":\"6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c\",\"root_component\":\"payments/checkout\",\"target_uid\":\"0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e\",\"tier\":\"H\"}",
+      "assertion_hash": "sha256:7e3c2d8d9c8b978e1cd73ecd62ac3c11f498d652cc87683267e0619e6e740095",
+      "execution_id": "f35a5595d1aceb43354c14d9c673c677",
+      "expect_error": "webauthn_flags"
+    },
+    {
+      "name": "webauthn_wrong_type",
+      "description": "clientData.type 不是 webauthn.get",
+      "envelope": {
+        "assertion": {
+          "action": "workload_scale",
+          "approver_principal": "oidc:alice@example.org",
+          "canon_version": "jcs-sha256-v1",
+          "channel": "console",
+          "cluster": "prod-east",
+          "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+          "expires_at": "2026-10-20T08:30:00Z",
+          "incident_version": 7,
+          "issued_at": "2026-10-20T08:00:00Z",
+          "level": "reversible",
+          "params_hash": "sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad",
+          "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+          "root_component": "payments/checkout",
+          "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e",
+          "tier": "H"
+        },
+        "proof": {
+          "authenticator_data": "hUDpHa9EEiY5-8tyF70Larkr5U33X77O4fpuKlNoFPYFAAAAAA",
+          "client_data_json": "eyJjaGFsbGVuZ2UiOiJmand0alp5TGw0NGMxejdOWXF3OEVmU1kxbExNaDJneVotQmhubTUwQUpVIiwiY3Jvc3NPcmlnaW4iOmZhbHNlLCJvcmlnaW4iOiJodHRwczovL2NvbnNvbGUuc3JlbmF1dGl4LmV4YW1wbGUiLCJ0eXBlIjoid2ViYXV0aG4uY3JlYXRlIn0",
+          "credential_id": "Y3JlZGVudGlhbC1hbGljZS0wMDAx",
+          "signature": "_gsyjsoW-1tWgs0N_GLpHRz8dYJ4TVlrUnYVdFDwLe48eJt0rVfTJb7_O3vz_5yy47_Tgkdvv-Bpp8Xl3iJOAg",
+          "type": "webauthn_ed25519"
+        }
+      },
+      "binding": {
+        "action": "workload_scale",
+        "cluster": "prod-east",
+        "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+        "incident_version": 7,
+        "params": {
+          "kind": "Deployment",
+          "name": "checkout",
+          "namespace": "payments",
+          "replicas": 3
+        },
+        "proposal_expires_at": "2026-10-20T09:00:00Z",
+        "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+        "root_component": "payments/checkout",
+        "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e"
+      },
+      "now": "2026-10-20T08:05:00Z",
+      "restored_at": null,
+      "require_webauthn_for_h": false,
+      "assertion_canonical": "{\"action\":\"workload_scale\",\"approver_principal\":\"oidc:alice@example.org\",\"canon_version\":\"jcs-sha256-v1\",\"channel\":\"console\",\"cluster\":\"prod-east\",\"evidence_fingerprint\":\"sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee\",\"expires_at\":\"2026-10-20T08:30:00Z\",\"incident_version\":7,\"issued_at\":\"2026-10-20T08:00:00Z\",\"level\":\"reversible\",\"params_hash\":\"sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad\",\"proposal_id\":\"6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c\",\"root_component\":\"payments/checkout\",\"target_uid\":\"0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e\",\"tier\":\"H\"}",
+      "assertion_hash": "sha256:7e3c2d8d9c8b978e1cd73ecd62ac3c11f498d652cc87683267e0619e6e740095",
+      "execution_id": "f35a5595d1aceb43354c14d9c673c677",
+      "expect_error": "webauthn_bad_client_data"
+    },
+    {
+      "name": "webauthn_challenge_other_assertion",
+      "description": "challenge 是另一份断言的哈希",
+      "envelope": {
+        "assertion": {
+          "action": "workload_scale",
+          "approver_principal": "oidc:alice@example.org",
+          "canon_version": "jcs-sha256-v1",
+          "channel": "console",
+          "cluster": "prod-east",
+          "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+          "expires_at": "2026-10-20T08:30:00Z",
+          "incident_version": 7,
+          "issued_at": "2026-10-20T08:00:00Z",
+          "level": "reversible",
+          "params_hash": "sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad",
+          "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+          "root_component": "payments/checkout",
+          "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e",
+          "tier": "H"
+        },
+        "proof": {
+          "authenticator_data": "hUDpHa9EEiY5-8tyF70Larkr5U33X77O4fpuKlNoFPYFAAAAAA",
+          "client_data_json": "eyJjaGFsbGVuZ2UiOiJZcHZqd0FqRFFOUG9zOGpiZGRuRXd5REUtOElJTXJSaUQwdTU4TUxCaEpZIiwiY3Jvc3NPcmlnaW4iOmZhbHNlLCJvcmlnaW4iOiJodHRwczovL2NvbnNvbGUuc3JlbmF1dGl4LmV4YW1wbGUiLCJ0eXBlIjoid2ViYXV0aG4uZ2V0In0",
+          "credential_id": "Y3JlZGVudGlhbC1hbGljZS0wMDAx",
+          "signature": "pQwcwa8SyyrgdcrSuL2KZty3GiLF7erSQuJTeGgfloIhr9VZg3rmQFXx40F4qE4FRYbrTevHD_btboNwWoDXBg",
+          "type": "webauthn_ed25519"
+        }
+      },
+      "binding": {
+        "action": "workload_scale",
+        "cluster": "prod-east",
+        "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+        "incident_version": 7,
+        "params": {
+          "kind": "Deployment",
+          "name": "checkout",
+          "namespace": "payments",
+          "replicas": 3
+        },
+        "proposal_expires_at": "2026-10-20T09:00:00Z",
+        "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+        "root_component": "payments/checkout",
+        "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e"
+      },
+      "now": "2026-10-20T08:05:00Z",
+      "restored_at": null,
+      "require_webauthn_for_h": false,
+      "assertion_canonical": "{\"action\":\"workload_scale\",\"approver_principal\":\"oidc:alice@example.org\",\"canon_version\":\"jcs-sha256-v1\",\"channel\":\"console\",\"cluster\":\"prod-east\",\"evidence_fingerprint\":\"sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee\",\"expires_at\":\"2026-10-20T08:30:00Z\",\"incident_version\":7,\"issued_at\":\"2026-10-20T08:00:00Z\",\"level\":\"reversible\",\"params_hash\":\"sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad\",\"proposal_id\":\"6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c\",\"root_component\":\"payments/checkout\",\"target_uid\":\"0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e\",\"tier\":\"H\"}",
+      "assertion_hash": "sha256:7e3c2d8d9c8b978e1cd73ecd62ac3c11f498d652cc87683267e0619e6e740095",
+      "execution_id": "f35a5595d1aceb43354c14d9c673c677",
+      "expect_error": "webauthn_challenge_mismatch"
+    },
+    {
+      "name": "webauthn_principal_mismatch",
+      "description": "凭据属于另一个审批人",
+      "envelope": {
+        "assertion": {
+          "action": "workload_scale",
+          "approver_principal": "oidc:alice@example.org",
+          "canon_version": "jcs-sha256-v1",
+          "channel": "console",
+          "cluster": "prod-east",
+          "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+          "expires_at": "2026-10-20T08:30:00Z",
+          "incident_version": 7,
+          "issued_at": "2026-10-20T08:00:00Z",
+          "level": "reversible",
+          "params_hash": "sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad",
+          "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+          "root_component": "payments/checkout",
+          "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e",
+          "tier": "H"
+        },
+        "proof": {
+          "authenticator_data": "hUDpHa9EEiY5-8tyF70Larkr5U33X77O4fpuKlNoFPYFAAAAAA",
+          "client_data_json": "eyJjaGFsbGVuZ2UiOiJmand0alp5TGw0NGMxejdOWXF3OEVmU1kxbExNaDJneVotQmhubTUwQUpVIiwiY3Jvc3NPcmlnaW4iOmZhbHNlLCJvcmlnaW4iOiJodHRwczovL2NvbnNvbGUuc3JlbmF1dGl4LmV4YW1wbGUiLCJ0eXBlIjoid2ViYXV0aG4uZ2V0In0",
+          "credential_id": "Y3JlZGVudGlhbC1ib2ItMDAwMQ",
+          "signature": "B-ZKTBhQ1bHnYh7bLezw6u4L-aybzTx3zN8BJMZik-RWVusqYE2_1CtA_EAdsKzEH-Y-ZX1xn9H--8Ftyo4YDw",
+          "type": "webauthn_ed25519"
+        }
+      },
+      "binding": {
+        "action": "workload_scale",
+        "cluster": "prod-east",
+        "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+        "incident_version": 7,
+        "params": {
+          "kind": "Deployment",
+          "name": "checkout",
+          "namespace": "payments",
+          "replicas": 3
+        },
+        "proposal_expires_at": "2026-10-20T09:00:00Z",
+        "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+        "root_component": "payments/checkout",
+        "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e"
+      },
+      "now": "2026-10-20T08:05:00Z",
+      "restored_at": null,
+      "require_webauthn_for_h": false,
+      "assertion_canonical": "{\"action\":\"workload_scale\",\"approver_principal\":\"oidc:alice@example.org\",\"canon_version\":\"jcs-sha256-v1\",\"channel\":\"console\",\"cluster\":\"prod-east\",\"evidence_fingerprint\":\"sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee\",\"expires_at\":\"2026-10-20T08:30:00Z\",\"incident_version\":7,\"issued_at\":\"2026-10-20T08:00:00Z\",\"level\":\"reversible\",\"params_hash\":\"sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad\",\"proposal_id\":\"6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c\",\"root_component\":\"payments/checkout\",\"target_uid\":\"0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e\",\"tier\":\"H\"}",
+      "assertion_hash": "sha256:7e3c2d8d9c8b978e1cd73ecd62ac3c11f498d652cc87683267e0619e6e740095",
+      "execution_id": "f35a5595d1aceb43354c14d9c673c677",
+      "expect_error": "webauthn_principal_mismatch"
+    },
+    {
+      "name": "webauthn_unknown_credential",
+      "description": "凭据未登记",
+      "envelope": {
+        "assertion": {
+          "action": "workload_scale",
+          "approver_principal": "oidc:alice@example.org",
+          "canon_version": "jcs-sha256-v1",
+          "channel": "console",
+          "cluster": "prod-east",
+          "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+          "expires_at": "2026-10-20T08:30:00Z",
+          "incident_version": 7,
+          "issued_at": "2026-10-20T08:00:00Z",
+          "level": "reversible",
+          "params_hash": "sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad",
+          "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+          "root_component": "payments/checkout",
+          "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e",
+          "tier": "H"
+        },
+        "proof": {
+          "authenticator_data": "hUDpHa9EEiY5-8tyF70Larkr5U33X77O4fpuKlNoFPYFAAAAAA",
+          "client_data_json": "eyJjaGFsbGVuZ2UiOiJmand0alp5TGw0NGMxejdOWXF3OEVmU1kxbExNaDJneVotQmhubTUwQUpVIiwiY3Jvc3NPcmlnaW4iOmZhbHNlLCJvcmlnaW4iOiJodHRwczovL2NvbnNvbGUuc3JlbmF1dGl4LmV4YW1wbGUiLCJ0eXBlIjoid2ViYXV0aG4uZ2V0In0",
+          "credential_id": "Y3JlZGVudGlhbC11bmtub3du",
+          "signature": "ibWiLkKgOQjO8w3iSoBUN_TZu0_OU22M4xSmWwb1loxfz0NwQoVDUpF-9ZfkGHuvEnRQPfGjRGIwhyxHhefGBA",
+          "type": "webauthn_ed25519"
+        }
+      },
+      "binding": {
+        "action": "workload_scale",
+        "cluster": "prod-east",
+        "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+        "incident_version": 7,
+        "params": {
+          "kind": "Deployment",
+          "name": "checkout",
+          "namespace": "payments",
+          "replicas": 3
+        },
+        "proposal_expires_at": "2026-10-20T09:00:00Z",
+        "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+        "root_component": "payments/checkout",
+        "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e"
+      },
+      "now": "2026-10-20T08:05:00Z",
+      "restored_at": null,
+      "require_webauthn_for_h": false,
+      "assertion_canonical": "{\"action\":\"workload_scale\",\"approver_principal\":\"oidc:alice@example.org\",\"canon_version\":\"jcs-sha256-v1\",\"channel\":\"console\",\"cluster\":\"prod-east\",\"evidence_fingerprint\":\"sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee\",\"expires_at\":\"2026-10-20T08:30:00Z\",\"incident_version\":7,\"issued_at\":\"2026-10-20T08:00:00Z\",\"level\":\"reversible\",\"params_hash\":\"sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad\",\"proposal_id\":\"6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c\",\"root_component\":\"payments/checkout\",\"target_uid\":\"0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e\",\"tier\":\"H\"}",
+      "assertion_hash": "sha256:7e3c2d8d9c8b978e1cd73ecd62ac3c11f498d652cc87683267e0619e6e740095",
+      "execution_id": "f35a5595d1aceb43354c14d9c673c677",
+      "expect_error": "webauthn_unknown_credential"
+    },
+    {
+      "name": "webauthn_bad_signature",
+      "description": "用另一把私钥伪造 alice 的签名",
+      "envelope": {
+        "assertion": {
+          "action": "workload_scale",
+          "approver_principal": "oidc:alice@example.org",
+          "canon_version": "jcs-sha256-v1",
+          "channel": "console",
+          "cluster": "prod-east",
+          "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+          "expires_at": "2026-10-20T08:30:00Z",
+          "incident_version": 7,
+          "issued_at": "2026-10-20T08:00:00Z",
+          "level": "reversible",
+          "params_hash": "sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad",
+          "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+          "root_component": "payments/checkout",
+          "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e",
+          "tier": "H"
+        },
+        "proof": {
+          "authenticator_data": "hUDpHa9EEiY5-8tyF70Larkr5U33X77O4fpuKlNoFPYFAAAAAA",
+          "client_data_json": "eyJjaGFsbGVuZ2UiOiJmand0alp5TGw0NGMxejdOWXF3OEVmU1kxbExNaDJneVotQmhubTUwQUpVIiwiY3Jvc3NPcmlnaW4iOmZhbHNlLCJvcmlnaW4iOiJodHRwczovL2NvbnNvbGUuc3JlbmF1dGl4LmV4YW1wbGUiLCJ0eXBlIjoid2ViYXV0aG4uZ2V0In0",
+          "credential_id": "Y3JlZGVudGlhbC1hbGljZS0wMDAx",
+          "signature": "B-ZKTBhQ1bHnYh7bLezw6u4L-aybzTx3zN8BJMZik-RWVusqYE2_1CtA_EAdsKzEH-Y-ZX1xn9H--8Ftyo4YDw",
+          "type": "webauthn_ed25519"
+        }
+      },
+      "binding": {
+        "action": "workload_scale",
+        "cluster": "prod-east",
+        "evidence_fingerprint": "sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee",
+        "incident_version": 7,
+        "params": {
+          "kind": "Deployment",
+          "name": "checkout",
+          "namespace": "payments",
+          "replicas": 3
+        },
+        "proposal_expires_at": "2026-10-20T09:00:00Z",
+        "proposal_id": "6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c",
+        "root_component": "payments/checkout",
+        "target_uid": "0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e"
+      },
+      "now": "2026-10-20T08:05:00Z",
+      "restored_at": null,
+      "require_webauthn_for_h": false,
+      "assertion_canonical": "{\"action\":\"workload_scale\",\"approver_principal\":\"oidc:alice@example.org\",\"canon_version\":\"jcs-sha256-v1\",\"channel\":\"console\",\"cluster\":\"prod-east\",\"evidence_fingerprint\":\"sha256:8f5a167a3817ca85e1e9f52aef18bcf9b47faa409fd6b17dce1a7d91292e48ee\",\"expires_at\":\"2026-10-20T08:30:00Z\",\"incident_version\":7,\"issued_at\":\"2026-10-20T08:00:00Z\",\"level\":\"reversible\",\"params_hash\":\"sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad\",\"proposal_id\":\"6f1c2a8e-4b7d-4e2a-9c3f-1d2e3f4a5b6c\",\"root_component\":\"payments/checkout\",\"target_uid\":\"0b9c5e7a-3f1d-4c2b-8a6e-5d4c3b2a1f0e\",\"tier\":\"H\"}",
+      "assertion_hash": "sha256:7e3c2d8d9c8b978e1cd73ecd62ac3c11f498d652cc87683267e0619e6e740095",
+      "execution_id": "f35a5595d1aceb43354c14d9c673c677",
+      "expect_error": "webauthn_bad_signature"
+    }
+  ],
+  "generator": "hack/gen-gateway-vectors",
+  "keys": {
+    "service-2026-01": {
+      "public_key": "lh7JCPNymFe4VIfxeEwGP76j38-Q1sFKgyTgd23Sjgw",
+      "seed_hex": "3a452ac282cd5fe71d7a34e7f720be2eaff2ba0663eb6e656baa79ba646a0942"
+    },
+    "service-2026-10": {
+      "public_key": "v7Tr59Wn4mOAzmoJIFzW8JmeK1r9TKuuNaNrE2jEqrw",
+      "seed_hex": "0c3e09c6ebcf7db38a24490a3e41dbea6711435422dabe38c0b892e3ca96e864"
+    },
+    "untrusted": {
+      "public_key": "VZwBsjgAA-g32APe5LUm2E1w_hsvHcvL0tWbJ7Lqz8Y",
+      "seed_hex": "a4513c1e8922ad6ee381ce0cfa19c15aac9c92759aa304ca5d6bef974693deaa"
+    },
+    "webauthn-alice": {
+      "public_key": "sp_Ww3RS5qz8F1s4rr_rkn4d7sMrCBwX1OUYjzvYMbQ",
+      "seed_hex": "9b0fb9e8c84036a1ae06762269cd501b50fc9c6d03e0eac84cc67db1f986ad90"
+    },
+    "webauthn-bob": {
+      "public_key": "RXvfgnXTCOg1JP1UL_CP_os8UVUdgkReoERNuePD-jM",
+      "seed_hex": "e64bf1c00408f1a67f9ac588916d8e78b1b575ced75700b54f6db58fb30dea29"
+    }
+  },
+  "params_hash": [
+    {
+      "canonical": "{\"namespace\":\"ci\",\"parameters\":{},\"template\":\"drain-queue\"}",
+      "name": "empty_parameters",
+      "params": {
+        "namespace": "ci",
+        "parameters": {},
+        "template": "drain-queue"
+      },
+      "params_hash": "sha256:f75f68cd7a7db612612fbfeed3424b0af582b43205bcc80ec776fe92333197cf"
+    },
+    {
+      "canonical": "{\"namespace\":\"observability\",\"pod\":\"vmagent-0\"}",
+      "name": "pod_restart",
+      "params": {
+        "namespace": "observability",
+        "pod": "vmagent-0"
+      },
+      "params_hash": "sha256:c888c68591d9a5c756922a27327177c6b3247db3c04e9ac4c16e5c2c67d07a99"
+    },
+    {
+      "canonical": "{\"base\":\"main\",\"patch\":\"--- a/x\\n+++ b/x\\n\",\"repository\":\"acme/infra\",\"title\":\"调高 HPA 上限 — ü\"}",
+      "name": "unicode_title",
+      "params": {
+        "base": "main",
+        "patch": "--- a/x\n+++ b/x\n",
+        "repository": "acme/infra",
+        "title": "调高 HPA 上限 — ü"
+      },
+      "params_hash": "sha256:eee92de6c8284dddb19ed4706b6f8311376fa8304ca114589fe3e7622a5e7b94"
+    },
+    {
+      "canonical": "{\"kind\":\"Deployment\",\"name\":\"drill\",\"namespace\":\"drill\",\"replicas\":2,\"verify\":[{\"id\":\"never\",\"op\":\"lt\",\"query\":\"vector(1)\",\"threshold\":0}]}",
+      "name": "with_verify",
+      "params": {
+        "kind": "Deployment",
+        "name": "drill",
+        "namespace": "drill",
+        "replicas": 2,
+        "verify": [
+          {
+            "id": "never",
+            "op": "lt",
+            "query": "vector(1)",
+            "threshold": 0
+          }
+        ]
+      },
+      "params_hash": "sha256:696004b1267ab042632451e98303a79ed84f052101ba6823212c49354a820bb0"
+    },
+    {
+      "canonical": "{\"kind\":\"Deployment\",\"name\":\"checkout\",\"namespace\":\"payments\",\"replicas\":3}",
+      "name": "workload_scale",
+      "params": {
+        "kind": "Deployment",
+        "name": "checkout",
+        "namespace": "payments",
+        "replicas": 3
+      },
+      "params_hash": "sha256:7a4364a0a511479a75363b4ea2825e75b8ebc5841e67bcbd7c06cf81389222ad"
+    }
+  ],
+  "service_prefix": "srenautix-approval-v1\n",
+  "version": 1
+}

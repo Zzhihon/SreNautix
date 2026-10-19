@@ -1,0 +1,663 @@
+# SreNautix 内置动作目录（contract/gateway/v1，schema：action-catalog.schema.json）。
+# gateway 构建时嵌入本文件；策略（Git 挂载）只能从中启用子集，不能定义新动作。
+# 每个动作的参数另外可以带 verify：执行后校验的 PromQL 条件（action-catalog.schema.json#/$defs/promqlCondition），
+# 它是 params 的一部分，计入 params_hash，由审批人一并批准。
+version: 1
+actions:
+  # ---------- 工作负载 ----------
+  - id: pod_restart
+    title: 经 Eviction API 重建单个 Pod（受 PDB 约束）
+    level: reversible_recreatable
+    fallback_level: irreversible
+    recreatable_conditions:
+      controller_managed: true
+      min_ready_replicas: 2
+      pdb_headroom: true
+    min_tier: L
+    fallback_min_tier: L
+    auto_execution: allowed
+    target: {group: "", version: v1, kind: Pod, resource: pods, namespaced: true}
+    params:
+      type: object
+      additionalProperties: false
+      required: [namespace, pod]
+      properties:
+        namespace: {type: string, minLength: 1, maxLength: 63}
+        pod: {type: string, minLength: 1, maxLength: 253}
+    conflict_domain: workload
+    prechecks:
+      - {id: target_uid, kind: k8s, description: Pod 的 UID 与 resourceVersion 与提议时一致，否则判为 stale}
+      - {id: controller_managed, kind: k8s, description: Pod 由 Deployment、StatefulSet、DaemonSet 或 ReplicaSet 管理（可重建条件）}
+      - {id: ready_replicas, kind: k8s, description: 控制器除目标外至少还有 2 个就绪副本（可重建条件）}
+      - {id: pdb_headroom, kind: pdb, description: 匹配该 Pod 的每个 PDB 都有余量；目标未就绪时不占用余量（可重建条件）}
+    verify:
+      window_seconds: 300
+      checks:
+        - {id: replaced, kind: k8s, description: 原 Pod 已移除，控制器有新的就绪 Pod，就绪副本数回到驱逐前}
+    undo: {kind: recreate, description: 由控制器重建，无需撤销}
+    blast_radius: {unit: pods, method: 单个 Pod, l_tier_max: 1}
+    writes:
+      - {group: "", resource: pods, subresource: eviction, verb: create}
+
+  - id: workload_rolling_restart
+    title: 逐个驱逐工作负载的全部 Pod（不修改 Pod 模板）
+    level: irreversible
+    min_tier: L
+    auto_execution: forbidden
+    target:
+      group: apps
+      version: v1
+      kind: Deployment
+      resource: deployments
+      namespaced: true
+      kinds:
+        - {group: apps, version: v1, kind: Deployment, resource: deployments}
+        - {group: apps, version: v1, kind: StatefulSet, resource: statefulsets}
+    params:
+      type: object
+      additionalProperties: false
+      required: [namespace, kind, name]
+      properties:
+        namespace: {type: string, minLength: 1, maxLength: 63}
+        kind: {type: string, enum: [Deployment, StatefulSet]}
+        name: {type: string, minLength: 1, maxLength: 253}
+    conflict_domain: workload
+    prechecks:
+      - {id: target_uid, kind: k8s, description: 工作负载的 UID 与 resourceVersion 与提议时一致}
+      - {id: no_rollout, kind: k8s, description: 没有进行中的 rollout}
+      - {id: pdb_headroom, kind: pdb, description: L 档要求每个匹配的 PDB 都有余量；没有余量时需要 H 档}
+    verify:
+      window_seconds: 600
+      checks:
+        - {id: all_replaced, kind: k8s, description: 驱逐前的 Pod 全部被替换，就绪副本数等于期望值}
+    undo: {kind: none, description: 不可撤销；校验失败转为 needs_human}
+    blast_radius: {unit: pods, method: 工作负载的全部 Pod，逐个驱逐, l_tier_max: 10}
+    writes:
+      - {group: "", resource: pods, subresource: eviction, verb: create}
+
+  - id: workload_scale
+    title: 调整 Deployment 或 StatefulSet 的副本数
+    level: reversible
+    min_tier: L
+    auto_execution: allowed
+    target:
+      group: apps
+      version: v1
+      kind: Deployment
+      resource: deployments
+      namespaced: true
+      kinds:
+        - {group: apps, version: v1, kind: Deployment, resource: deployments}
+        - {group: apps, version: v1, kind: StatefulSet, resource: statefulsets}
+    params:
+      type: object
+      additionalProperties: false
+      required: [namespace, kind, name, replicas]
+      properties:
+        namespace: {type: string, minLength: 1, maxLength: 63}
+        kind: {type: string, enum: [Deployment, StatefulSet]}
+        name: {type: string, minLength: 1, maxLength: 253}
+        replicas: {type: integer, minimum: 0, maximum: 1000}
+    conflict_domain: workload
+    prechecks:
+      - {id: target_uid, kind: k8s, description: 工作负载的 UID 与 resourceVersion 与提议时一致}
+      - {id: no_hpa, kind: k8s, description: 没有 HorizontalPodAutoscaler 以该工作负载为目标（有 HPA 时使用 hpa_bounds_set）}
+      - {id: replicas_differ, kind: k8s, description: 目标副本数与当前副本数不同}
+    verify:
+      window_seconds: 300
+      checks:
+        - {id: replicas_ready, kind: k8s, description: spec.replicas 为目标值，就绪副本数达到目标值}
+    undo: {kind: restore, description: 恢复执行前的副本数}
+    blast_radius: {unit: pods, method: 目标副本数与当前副本数之差的绝对值, l_tier_max: 5}
+    writes:
+      - {group: apps, resource: deployments, verb: patch}
+      - {group: apps, resource: statefulsets, verb: patch}
+
+  - id: hpa_bounds_set
+    title: 设置 HorizontalPodAutoscaler 的上下限
+    level: reversible
+    min_tier: L
+    auto_execution: allowed
+    target: {group: autoscaling, version: v2, kind: HorizontalPodAutoscaler, resource: horizontalpodautoscalers, namespaced: true}
+    params:
+      type: object
+      additionalProperties: false
+      required: [namespace, name, min_replicas, max_replicas]
+      properties:
+        namespace: {type: string, minLength: 1, maxLength: 63}
+        name: {type: string, minLength: 1, maxLength: 253}
+        min_replicas: {type: integer, minimum: 1, maximum: 1000}
+        max_replicas: {type: integer, minimum: 1, maximum: 1000}
+    conflict_domain: workload
+    prechecks:
+      - {id: target_uid, kind: k8s, description: HPA 的 UID 与 resourceVersion 与提议时一致}
+      - {id: bounds_valid, kind: k8s, description: min_replicas 不大于 max_replicas，且与当前上下限不同}
+    verify:
+      window_seconds: 300
+      checks:
+        - {id: bounds_applied, kind: k8s, description: spec.minReplicas 与 spec.maxReplicas 为目标值}
+    undo: {kind: restore, description: 恢复执行前的上下限}
+    blast_radius: {unit: pods, method: 新旧上下限变化量的最大值, l_tier_max: 5}
+    writes:
+      - {group: autoscaling, resource: horizontalpodautoscalers, verb: patch}
+
+  - id: rollout_pause
+    title: 暂停 Deployment 的 rollout
+    level: reversible
+    min_tier: L
+    auto_execution: allowed
+    target: {group: apps, version: v1, kind: Deployment, resource: deployments, namespaced: true}
+    params:
+      type: object
+      additionalProperties: false
+      required: [namespace, name]
+      properties:
+        namespace: {type: string, minLength: 1, maxLength: 63}
+        name: {type: string, minLength: 1, maxLength: 253}
+    conflict_domain: workload
+    prechecks:
+      - {id: target_uid, kind: k8s, description: Deployment 的 UID 与 resourceVersion 与提议时一致}
+      - {id: not_paused, kind: k8s, description: spec.paused 当前不是 true}
+    verify:
+      window_seconds: 60
+      checks:
+        - {id: paused, kind: k8s, description: spec.paused 为 true}
+    undo: {kind: restore, description: 恢复 spec.paused 的原值}
+    blast_radius: {unit: objects, method: 单个 Deployment, l_tier_max: 1}
+    writes:
+      - {group: apps, resource: deployments, verb: patch}
+
+  - id: rollout_resume
+    title: 恢复已暂停的 Deployment rollout
+    level: reversible
+    min_tier: L
+    auto_execution: allowed
+    target: {group: apps, version: v1, kind: Deployment, resource: deployments, namespaced: true}
+    params:
+      type: object
+      additionalProperties: false
+      required: [namespace, name]
+      properties:
+        namespace: {type: string, minLength: 1, maxLength: 63}
+        name: {type: string, minLength: 1, maxLength: 253}
+    conflict_domain: workload
+    prechecks:
+      - {id: target_uid, kind: k8s, description: Deployment 的 UID 与 resourceVersion 与提议时一致}
+      - {id: paused, kind: k8s, description: spec.paused 当前为 true}
+    verify:
+      window_seconds: 60
+      checks:
+        - {id: resumed, kind: k8s, description: spec.paused 不再为 true}
+    undo: {kind: restore, description: 恢复 spec.paused 的原值}
+    blast_radius: {unit: objects, method: 单个 Deployment, l_tier_max: 1}
+    writes:
+      - {group: apps, resource: deployments, verb: patch}
+
+  - id: cronjob_suspend
+    title: 暂停 CronJob 的调度
+    level: reversible
+    min_tier: L
+    auto_execution: allowed
+    target: {group: batch, version: v1, kind: CronJob, resource: cronjobs, namespaced: true}
+    params:
+      type: object
+      additionalProperties: false
+      required: [namespace, name]
+      properties:
+        namespace: {type: string, minLength: 1, maxLength: 63}
+        name: {type: string, minLength: 1, maxLength: 253}
+    conflict_domain: workload
+    prechecks:
+      - {id: target_uid, kind: k8s, description: CronJob 的 UID 与 resourceVersion 与提议时一致}
+      - {id: not_suspended, kind: k8s, description: spec.suspend 当前不是 true}
+    verify:
+      window_seconds: 60
+      checks:
+        - {id: suspended, kind: k8s, description: spec.suspend 为 true}
+    undo: {kind: restore, description: 恢复 spec.suspend 的原值}
+    blast_radius: {unit: objects, method: 单个 CronJob, l_tier_max: 1}
+    writes:
+      - {group: batch, resource: cronjobs, verb: patch}
+
+  - id: cronjob_resume
+    title: 恢复 CronJob 的调度
+    level: reversible
+    min_tier: L
+    auto_execution: allowed
+    target: {group: batch, version: v1, kind: CronJob, resource: cronjobs, namespaced: true}
+    params:
+      type: object
+      additionalProperties: false
+      required: [namespace, name]
+      properties:
+        namespace: {type: string, minLength: 1, maxLength: 63}
+        name: {type: string, minLength: 1, maxLength: 253}
+    conflict_domain: workload
+    prechecks:
+      - {id: target_uid, kind: k8s, description: CronJob 的 UID 与 resourceVersion 与提议时一致}
+      - {id: suspended, kind: k8s, description: spec.suspend 当前为 true}
+    verify:
+      window_seconds: 60
+      checks:
+        - {id: resumed, kind: k8s, description: spec.suspend 不再为 true}
+    undo: {kind: restore, description: 恢复 spec.suspend 的原值}
+    blast_radius: {unit: objects, method: 单个 CronJob, l_tier_max: 1}
+    writes:
+      - {group: batch, resource: cronjobs, verb: patch}
+
+  # ---------- 节点 ----------
+  - id: node_cordon
+    title: 将节点标为不可调度（不驱逐现有 Pod）
+    level: reversible
+    min_tier: L
+    auto_execution: allowed
+    target: {group: "", version: v1, kind: Node, resource: nodes, namespaced: false}
+    params:
+      type: object
+      additionalProperties: false
+      required: [node]
+      properties:
+        node: {type: string, minLength: 1, maxLength: 253}
+    conflict_domain: node
+    prechecks:
+      - {id: target_uid, kind: k8s, description: 节点的 UID 与 resourceVersion 与提议时一致}
+      - {id: not_control_plane, kind: k8s, description: 不是控制面节点}
+      - {id: schedulable, kind: k8s, description: 节点当前可调度}
+      - {id: capacity_remains, kind: k8s, description: cordon 后集群中至少还有一个就绪且可调度的同类节点（同一组 node-role 标签）}
+    verify:
+      window_seconds: 60
+      checks:
+        - {id: cordoned, kind: k8s, description: spec.unschedulable 为 true，节点带 srenautix.io/cordoned-by}
+    undo: {kind: restore, description: 解除本次 cordon（只撤销 SreNautix 自己做的 cordon）}
+    blast_radius: {unit: nodes, method: 单个节点, l_tier_max: 1}
+    writes:
+      - {group: "", resource: nodes, verb: patch}
+
+  - id: node_uncordon
+    title: 解除 SreNautix 做过的节点 cordon
+    level: reversible
+    min_tier: L
+    auto_execution: allowed
+    target: {group: "", version: v1, kind: Node, resource: nodes, namespaced: false}
+    params:
+      type: object
+      additionalProperties: false
+      required: [node]
+      properties:
+        node: {type: string, minLength: 1, maxLength: 253}
+    conflict_domain: node
+    prechecks:
+      - {id: target_uid, kind: k8s, description: 节点的 UID 与 resourceVersion 与提议时一致}
+      - {id: cordoned_by_srenautix, kind: k8s, description: 节点不可调度，且带有 SreNautix 写入的 srenautix.io/cordoned-by}
+      - {id: node_healthy, kind: k8s, description: 节点 Ready，没有 MemoryPressure、DiskPressure、PIDPressure}
+    verify:
+      window_seconds: 60
+      checks:
+        - {id: uncordoned, kind: k8s, description: spec.unschedulable 不再为 true，srenautix.io/cordoned-by 已移除}
+    undo: {kind: restore, description: 重新 cordon 并恢复 srenautix.io/cordoned-by}
+    blast_radius: {unit: nodes, method: 单个节点, l_tier_max: 1}
+    writes:
+      - {group: "", resource: nodes, verb: patch}
+
+  # ---------- 数据库 ----------
+  - id: cnpg_replica_restart
+    title: 经 Eviction API 重建一个 CNPG 副本实例 Pod
+    level: irreversible
+    min_tier: H
+    auto_execution: forbidden
+    target: {group: "", version: v1, kind: Pod, resource: pods, namespaced: true}
+    params:
+      type: object
+      additionalProperties: false
+      required: [namespace, cluster, instance]
+      properties:
+        namespace: {type: string, minLength: 1, maxLength: 63}
+        cluster: {type: string, minLength: 1, maxLength: 253}
+        instance: {type: string, minLength: 1, maxLength: 253}
+    conflict_domain: pg
+    prechecks:
+      - {id: target_uid, kind: k8s, description: 实例 Pod 的 UID 与 resourceVersion 与提议时一致}
+      - {id: target_is_replica, kind: k8s, description: 目标带 cnpg.io/instanceRole=replica，且不是 status.currentPrimary}
+      - {id: primary_ready, kind: k8s, description: 当前主库 Pod 就绪}
+      - {id: other_replica_ready, kind: k8s, description: 除目标外至少还有一个就绪的副本}
+    verify:
+      window_seconds: 900
+      checks:
+        - {id: instance_ready, kind: k8s, description: 实例 Pod 已重建并就绪，角色仍为 replica}
+    undo: {kind: none, description: 不可撤销；校验失败转为 needs_human}
+    blast_radius: {unit: pods, method: 单个实例 Pod, l_tier_max: 1}
+    writes:
+      - {group: "", resource: pods, subresource: eviction, verb: create}
+
+  - id: cnpg_switchover
+    title: 把 CNPG 主库切换到指定的副本（同 kubectl cnpg promote）
+    level: compensable
+    min_tier: H
+    auto_execution: forbidden
+    target: {group: postgresql.cnpg.io, version: v1, kind: Cluster, resource: clusters, namespaced: true}
+    params:
+      type: object
+      additionalProperties: false
+      required: [namespace, cluster, target_instance]
+      properties:
+        namespace: {type: string, minLength: 1, maxLength: 63}
+        cluster: {type: string, minLength: 1, maxLength: 253}
+        target_instance: {type: string, minLength: 1, maxLength: 253}
+    conflict_domain: pg
+    prechecks:
+      - {id: target_uid, kind: k8s, description: Cluster 的 UID 与 resourceVersion 与提议时一致}
+      - {id: cluster_healthy, kind: k8s, description: status.phase 为 Cluster in healthy state}
+      - {id: target_is_replica, kind: k8s, description: 目标在 status.instanceNames 中、角色为 replica、就绪且未被隔离}
+    verify:
+      window_seconds: 600
+      checks:
+        - {id: promoted, kind: k8s, description: status.currentPrimary 为目标实例，目标 Pod 角色为 primary 且就绪，phase 回到健康}
+    undo: {kind: compensate, description: 再次切换回原主库，需要再次审批, compensation_action: cnpg_switchover}
+    blast_radius: {unit: objects, method: 单个 Cluster 的主库, l_tier_max: 0}
+    writes:
+      - {group: postgresql.cnpg.io, resource: clusters, subresource: status, verb: patch}
+
+  # ---------- Argo CD ----------
+  - id: argocd_app_sync
+    title: 按固定的 40 位提交 SHA 同步一个 Argo CD Application
+    level: irreversible
+    min_tier: H
+    auto_execution: forbidden
+    target: {group: argoproj.io, version: v1alpha1, kind: Application, resource: applications, namespaced: true}
+    params:
+      type: object
+      additionalProperties: false
+      required: [namespace, application, revision]
+      properties:
+        namespace: {type: string, minLength: 1, maxLength: 63}
+        application: {type: string, minLength: 1, maxLength: 253}
+        revision: {type: string, pattern: "^[0-9a-f]{40}$"}
+    conflict_domain: argocd
+    prechecks:
+      - {id: target_uid, kind: k8s, description: Application 的 UID 与 resourceVersion 与提议时一致}
+      - {id: no_operation, kind: k8s, description: 没有进行中的 operation}
+      - {id: single_source, kind: k8s, description: 单源 Application}
+      - {id: revision_is_target, kind: k8s, description: revision 等于 status.sync.revision（targetRevision 当前解析到的提交）}
+    verify:
+      window_seconds: 600
+      checks:
+        - {id: synced, kind: k8s, description: operationState 为 Succeeded，同步的 revision 为目标，sync 为 Synced，health 为 Healthy}
+    undo: {kind: none, description: 不可撤销；校验失败转为 needs_human}
+    blast_radius: {unit: objects, method: Application 管理的资源数（status.resources）, l_tier_max: 0}
+    writes:
+      - {group: argoproj.io, resource: applications, verb: patch}
+
+  - id: argocd_app_terminate_operation
+    title: 终止 Argo CD Application 正在运行的操作
+    level: irreversible
+    min_tier: L
+    auto_execution: forbidden
+    target: {group: argoproj.io, version: v1alpha1, kind: Application, resource: applications, namespaced: true}
+    params:
+      type: object
+      additionalProperties: false
+      required: [namespace, application]
+      properties:
+        namespace: {type: string, minLength: 1, maxLength: 63}
+        application: {type: string, minLength: 1, maxLength: 253}
+    conflict_domain: argocd
+    prechecks:
+      - {id: target_uid, kind: k8s, description: Application 的 UID 与 resourceVersion 与提议时一致}
+      - {id: operation_running, kind: k8s, description: status.operationState.phase 为 Running}
+    verify:
+      window_seconds: 120
+      checks:
+        - {id: terminated, kind: k8s, description: status.operationState.phase 为 Failed、Error 或 Terminating 之后的终态}
+    undo: {kind: none, description: 不可撤销；校验失败转为 needs_human}
+    blast_radius: {unit: objects, method: 单个 Application 的一次操作, l_tier_max: 1}
+    writes:
+      - {group: argoproj.io, resource: applications, verb: patch}
+
+  - id: argocd_autosync_suspend
+    title: 暂停 Argo CD Application 的自动同步（automated.enabled=false）
+    level: reversible
+    min_tier: L
+    auto_execution: allowed
+    target: {group: argoproj.io, version: v1alpha1, kind: Application, resource: applications, namespaced: true}
+    params:
+      type: object
+      additionalProperties: false
+      required: [namespace, application]
+      properties:
+        namespace: {type: string, minLength: 1, maxLength: 63}
+        application: {type: string, minLength: 1, maxLength: 253}
+    conflict_domain: argocd
+    prechecks:
+      - {id: target_uid, kind: k8s, description: Application 的 UID 与 resourceVersion 与提议时一致}
+      - {id: autosync_enabled, kind: k8s, description: spec.syncPolicy.automated 存在且 enabled 不是 false}
+    verify:
+      window_seconds: 60
+      checks:
+        - {id: autosync_suspended, kind: k8s, description: spec.syncPolicy.automated.enabled 为 false}
+    undo: {kind: restore, description: 恢复 spec.syncPolicy.automated.enabled 的原值}
+    blast_radius: {unit: objects, method: 单个 Application, l_tier_max: 1}
+    writes:
+      - {group: argoproj.io, resource: applications, verb: patch}
+
+  - id: argocd_autosync_resume
+    title: 恢复 Argo CD Application 的自动同步（automated.enabled=true）
+    level: reversible
+    min_tier: L
+    auto_execution: allowed
+    target: {group: argoproj.io, version: v1alpha1, kind: Application, resource: applications, namespaced: true}
+    params:
+      type: object
+      additionalProperties: false
+      required: [namespace, application]
+      properties:
+        namespace: {type: string, minLength: 1, maxLength: 63}
+        application: {type: string, minLength: 1, maxLength: 253}
+    conflict_domain: argocd
+    prechecks:
+      - {id: target_uid, kind: k8s, description: Application 的 UID 与 resourceVersion 与提议时一致}
+      - {id: autosync_suspended, kind: k8s, description: spec.syncPolicy.automated.enabled 为 false}
+    verify:
+      window_seconds: 60
+      checks:
+        - {id: autosync_enabled, kind: k8s, description: spec.syncPolicy.automated.enabled 为 true}
+    undo: {kind: restore, description: 恢复 spec.syncPolicy.automated.enabled 的原值}
+    blast_radius: {unit: objects, method: 单个 Application, l_tier_max: 1}
+    writes:
+      - {group: argoproj.io, resource: applications, verb: patch}
+
+  # ---------- Flux ----------
+  - id: flux_suspend
+    title: 暂停 Flux Kustomization 或 HelmRelease 的调和
+    level: reversible
+    min_tier: L
+    auto_execution: allowed
+    target:
+      group: kustomize.toolkit.fluxcd.io
+      version: v1
+      kind: Kustomization
+      resource: kustomizations
+      namespaced: true
+      kinds:
+        - {group: kustomize.toolkit.fluxcd.io, version: v1, kind: Kustomization, resource: kustomizations}
+        - {group: helm.toolkit.fluxcd.io, version: v2, kind: HelmRelease, resource: helmreleases}
+    params:
+      type: object
+      additionalProperties: false
+      required: [namespace, kind, name]
+      properties:
+        namespace: {type: string, minLength: 1, maxLength: 63}
+        kind: {type: string, enum: [Kustomization, HelmRelease]}
+        name: {type: string, minLength: 1, maxLength: 253}
+    conflict_domain: flux
+    prechecks:
+      - {id: target_uid, kind: k8s, description: 对象的 UID 与 resourceVersion 与提议时一致}
+      - {id: not_suspended, kind: k8s, description: spec.suspend 当前不是 true}
+    verify:
+      window_seconds: 60
+      checks:
+        - {id: suspended, kind: k8s, description: spec.suspend 为 true}
+    undo: {kind: restore, description: 恢复 spec.suspend 的原值}
+    blast_radius: {unit: objects, method: 单个 Flux 对象, l_tier_max: 1}
+    writes:
+      - {group: kustomize.toolkit.fluxcd.io, resource: kustomizations, verb: patch}
+      - {group: helm.toolkit.fluxcd.io, resource: helmreleases, verb: patch}
+
+  - id: flux_resume
+    title: 恢复 Flux Kustomization 或 HelmRelease 的调和
+    level: reversible
+    min_tier: L
+    auto_execution: allowed
+    target:
+      group: kustomize.toolkit.fluxcd.io
+      version: v1
+      kind: Kustomization
+      resource: kustomizations
+      namespaced: true
+      kinds:
+        - {group: kustomize.toolkit.fluxcd.io, version: v1, kind: Kustomization, resource: kustomizations}
+        - {group: helm.toolkit.fluxcd.io, version: v2, kind: HelmRelease, resource: helmreleases}
+    params:
+      type: object
+      additionalProperties: false
+      required: [namespace, kind, name]
+      properties:
+        namespace: {type: string, minLength: 1, maxLength: 63}
+        kind: {type: string, enum: [Kustomization, HelmRelease]}
+        name: {type: string, minLength: 1, maxLength: 253}
+    conflict_domain: flux
+    prechecks:
+      - {id: target_uid, kind: k8s, description: 对象的 UID 与 resourceVersion 与提议时一致}
+      - {id: suspended, kind: k8s, description: spec.suspend 当前为 true}
+    verify:
+      window_seconds: 60
+      checks:
+        - {id: resumed, kind: k8s, description: spec.suspend 不再为 true}
+    undo: {kind: restore, description: 恢复 spec.suspend 的原值}
+    blast_radius: {unit: objects, method: 单个 Flux 对象, l_tier_max: 1}
+    writes:
+      - {group: kustomize.toolkit.fluxcd.io, resource: kustomizations, verb: patch}
+      - {group: helm.toolkit.fluxcd.io, resource: helmreleases, verb: patch}
+
+  - id: flux_reconcile
+    title: 请求 Flux 立即调和 Kustomization 或 HelmRelease（reconcile.fluxcd.io/requestedAt）
+    level: irreversible
+    min_tier: L
+    auto_execution: forbidden
+    target:
+      group: kustomize.toolkit.fluxcd.io
+      version: v1
+      kind: Kustomization
+      resource: kustomizations
+      namespaced: true
+      kinds:
+        - {group: kustomize.toolkit.fluxcd.io, version: v1, kind: Kustomization, resource: kustomizations}
+        - {group: helm.toolkit.fluxcd.io, version: v2, kind: HelmRelease, resource: helmreleases}
+    params:
+      type: object
+      additionalProperties: false
+      required: [namespace, kind, name]
+      properties:
+        namespace: {type: string, minLength: 1, maxLength: 63}
+        kind: {type: string, enum: [Kustomization, HelmRelease]}
+        name: {type: string, minLength: 1, maxLength: 253}
+    conflict_domain: flux
+    prechecks:
+      - {id: target_uid, kind: k8s, description: 对象的 UID 与 resourceVersion 与提议时一致}
+      - {id: not_suspended, kind: k8s, description: spec.suspend 不是 true}
+    verify:
+      window_seconds: 300
+      checks:
+        - {id: handled_ready, kind: k8s, description: status.lastHandledReconcileAt 等于本次请求，Ready 条件为 True}
+    undo: {kind: none, description: 不可撤销；校验失败转为 needs_human}
+    blast_radius: {unit: objects, method: 单个 Flux 对象, l_tier_max: 1}
+    writes:
+      - {group: kustomize.toolkit.fluxcd.io, resource: kustomizations, verb: patch}
+      - {group: helm.toolkit.fluxcd.io, resource: helmreleases, verb: patch}
+
+  # ---------- Argo Workflows ----------
+  - id: workflow_submit
+    title: 按 Git 白名单中的 WorkflowTemplate 提交 Workflow
+    level: irreversible
+    min_tier: H
+    auto_execution: forbidden
+    target: {group: argoproj.io, version: v1alpha1, kind: WorkflowTemplate, resource: workflowtemplates, namespaced: true}
+    params:
+      type: object
+      additionalProperties: false
+      required: [namespace, template, parameters]
+      properties:
+        namespace: {type: string, minLength: 1, maxLength: 63}
+        template: {type: string, minLength: 1, maxLength: 253}
+        parameters:
+          type: object
+          description: 参数名到字符串值；名称与取值由白名单中该模板的参数 schema 约束
+    conflict_domain: workflow
+    prechecks:
+      - {id: target_uid, kind: k8s, description: WorkflowTemplate 的 UID 与 resourceVersion 与提议时一致}
+      - {id: allowlisted, kind: k8s, description: 模板在白名单中，sha256(JCS(spec)) 与 ServiceAccount 与白名单一致}
+      - {id: parameters_schema, kind: k8s, description: 参数符合白名单中该模板的参数 schema}
+    verify:
+      window_seconds: 1800
+      checks:
+        - {id: succeeded, kind: k8s, description: 提交的 Workflow（带 srenautix.io/execution-id）phase 为 Succeeded}
+    undo: {kind: none, description: 不可撤销；校验失败转为 needs_human}
+    blast_radius: {unit: objects, method: 单个 Workflow, l_tier_max: 0}
+    writes:
+      - {group: argoproj.io, resource: workflows, verb: create}
+
+  - id: workflow_terminate
+    title: 终止运行中的 Argo Workflow（spec.shutdown=Terminate）
+    level: irreversible
+    min_tier: H
+    auto_execution: forbidden
+    target: {group: argoproj.io, version: v1alpha1, kind: Workflow, resource: workflows, namespaced: true}
+    params:
+      type: object
+      additionalProperties: false
+      required: [namespace, workflow]
+      properties:
+        namespace: {type: string, minLength: 1, maxLength: 63}
+        workflow: {type: string, minLength: 1, maxLength: 253}
+    conflict_domain: workflow
+    prechecks:
+      - {id: target_uid, kind: k8s, description: Workflow 的 UID 与 resourceVersion 与提议时一致}
+      - {id: running, kind: k8s, description: status.phase 为 Running 或 Pending，spec.shutdown 未设置}
+    verify:
+      window_seconds: 300
+      checks:
+        - {id: ended, kind: k8s, description: status.phase 为 Failed 或 Error}
+    undo: {kind: none, description: 不可撤销；校验失败转为 needs_human}
+    blast_radius: {unit: objects, method: 单个 Workflow, l_tier_max: 0}
+    writes:
+      - {group: argoproj.io, resource: workflows, verb: patch}
+
+  # ---------- GitOps ----------
+  - id: gitops_pr
+    title: 以 GitHub App 在 srenautix/ 分支上提交补丁并开 PR（从不合并）
+    level: compensable
+    min_tier: H
+    auto_execution: forbidden
+    target: {group: srenautix.io, version: v1, kind: GitRepository, resource: gitrepositories, namespaced: false}
+    params:
+      type: object
+      additionalProperties: false
+      required: [repository, base, title, patch]
+      properties:
+        repository: {type: string, pattern: "^[A-Za-z0-9-]{1,39}/[A-Za-z0-9._-]{1,100}$"}
+        base: {type: string, minLength: 1, maxLength: 255}
+        title: {type: string, minLength: 1, maxLength: 120}
+        body: {type: string, maxLength: 8192}
+        patch: {type: string, minLength: 1, maxLength: 65536, description: unified diff；只允许修改策略中该仓库的路径白名单}
+    conflict_domain: gitops
+    prechecks:
+      - {id: base_head, kind: git, description: base 分支当前的提交 SHA 等于断言的 target_uid（绑定 head SHA）}
+      - {id: branch_protection, kind: git, description: 启动时探测到 base 分支有分支保护，否则 gitops_pr 停用}
+      - {id: patch_paths, kind: git, description: 补丁只触及策略中的路径白名单，没有二进制改动与可执行文件模式}
+      - {id: patch_applies, kind: git, description: 补丁能干净地应用到 base}
+    verify:
+      window_seconds: 0
+      checks:
+        - {id: pr_open, kind: git, description: srenautix/ 分支上的 PR 已创建，head 为本次提交}
+    undo: {kind: compensate, description: 关闭 PR 或提交 revert PR，需要再次审批, compensation_action: gitops_pr}
+    blast_radius: {unit: repositories, method: 单个仓库的一个 PR, l_tier_max: 0}
+    writes: []

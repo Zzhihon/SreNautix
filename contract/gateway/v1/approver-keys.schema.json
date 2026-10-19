@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://srenautix.io/contract/gateway/v1/approver-keys.schema.json",
+  "title": "ApproverKeys",
+  "description": "gateway 信任的签名公钥，来自 Git，经 ConfigMap 挂载。service 条目是 server 的服务签名公钥；webauthn 条目是审批人通行密钥的公钥（合规配置）。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "keys"],
+  "properties": {
+    "version": {"const": 1},
+    "webauthn": {
+      "description": "WebAuthn 依赖方设置；存在 webauthn 条目时必填。",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rp_id", "origins"],
+      "properties": {
+        "rp_id": {"type": "string", "minLength": 1, "maxLength": 253},
+        "origins": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"type": "string", "pattern": "^https://[^/]+$"}
+        }
+      }
+    },
+    "keys": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["use", "key_id", "public_key"],
+            "properties": {
+              "use": {"const": "service"},
+              "key_id": {"type": "string", "pattern": "^[A-Za-z0-9._:-]{1,128}$"},
+              "public_key": {
+                "description": "Ed25519 公钥 32 字节的 base64url（不带填充）。",
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_-]{43}$"
+              },
+              "not_after": {
+                "description": "该密钥签发的断言 issued_at 必须早于此时间；用于轮换。",
+                "type": "string",
+                "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["use", "credential_id", "principal", "public_key"],
+            "properties": {
+              "use": {"const": "webauthn"},
+              "credential_id": {"type": "string", "pattern": "^[A-Za-z0-9_-]+$", "minLength": 1, "maxLength": 1366},
+              "principal": {"type": "string", "minLength": 1, "maxLength": 512},
+              "public_key": {"type": "string", "pattern": "^[A-Za-z0-9_-]{43}$"}
+            }
+          }
+        ]
+      }
+    }
+  }
+}

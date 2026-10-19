@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://srenautix.io/contract/gateway/v1/audit-record.schema.json",
+  "title": "ExecutionAuditRecord",
+  "description": "执行审计链的一行 JSONL（DESIGN §16.3）。hash = \"sha256:\" + hex(sha256(JCS(去掉 hash 字段后的记录)))；prev_hash 为上一条记录的 hash，第一条记录的 prev_hash 为 \"sha256:\" 加 64 个 0。checkpoint 记录为它之前的链头签名：signature 是审计签名密钥（Ed25519）对 \"srenautix-audit-checkpoint-v1\\n\" + cluster + \"\\n\" + (seq-1) 的十进制 + \"\\n\" + prev_hash 的 UTF-8 字节的签名。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["seq", "prev_hash", "chain", "cluster", "at", "type", "hash"],
+  "properties": {
+    "seq": {"type": "integer", "minimum": 1},
+    "prev_hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "chain": {"const": "execution"},
+    "cluster": {"type": "string"},
+    "at": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,9})?Z$"},
+    "type": {"type": "string", "enum": ["phase", "write", "checkpoint"]},
+    "execution_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+    "proposal_id": {"type": "string"},
+    "action": {"type": "string"},
+    "phase": {"type": "string"},
+    "reason": {"type": "string"},
+    "approver": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["principal", "channel"],
+      "properties": {"principal": {"type": "string"}, "channel": {"type": "string"}}
+    },
+    "assertion_hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "attempt_id": {"type": "string"},
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "group": {"type": "string"},
+        "resource": {"type": "string"},
+        "subresource": {"type": "string"},
+        "namespace": {"type": "string"},
+        "name": {"type": "string"},
+        "uid": {"type": "string"}
+      }
+    },
+    "write": {
+      "description": "type=write：一次 Kubernetes 或 Git 写入，与 apiserver 审计日志按 attempt_id、目标与时间关联。",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["verb", "outcome"],
+      "properties": {
+        "verb": {"type": "string"},
+        "outcome": {"type": "string", "enum": ["succeeded", "failed"]},
+        "detail": {"type": "string"}
+      }
+    },
+    "checkpoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key_id", "signature"],
+      "properties": {
+        "key_id": {"type": "string"},
+        "signature": {"type": "string", "pattern": "^[A-Za-z0-9_-]{86}$"}
+      }
+    },
+    "hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+  }
+}

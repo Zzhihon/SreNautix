@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://srenautix.io/contract/gateway/v1/approval-envelope.schema.json",
+  "title": "ApprovalEnvelope",
+  "description": "审批断言及其签名证明。服务签名（service_ed25519）由 server 的服务签名密钥签发；通行密钥签名（webauthn_ed25519）由审批人的 WebAuthn 凭据签发。签名输入与校验步骤见 docs/adr/0020-approval-assertion-format.md。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["assertion", "proof"],
+  "properties": {
+    "assertion": {
+      "$ref": "approval-assertion.schema.json"
+    },
+    "proof": {
+      "oneOf": [
+        {"$ref": "#/$defs/serviceProof"},
+        {"$ref": "#/$defs/webauthnProof"}
+      ]
+    }
+  },
+  "$defs": {
+    "base64url": {
+      "description": "RFC 4648 §5 base64url，不带填充。",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]*$"
+    },
+    "serviceProof": {
+      "description": "服务签名。签名输入为 ASCII \"srenautix-approval-v1\" 加一个换行符 0x0A，再接 JCS(statement) 的 UTF-8 字节；statement 为 {\"assertion\": assertion}，H 档时为 {\"assertion\": assertion, \"reauth\": reauth}。",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "key_id", "signature"],
+      "properties": {
+        "type": {"const": "service_ed25519"},
+        "key_id": {
+          "description": "服务签名公钥的 ID，对应 approver-keys 中 use=service 的条目。",
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._:-]{1,128}$"
+        },
+        "signature": {
+          "description": "Ed25519 签名（64 字节）的 base64url。",
+          "allOf": [{"$ref": "#/$defs/base64url"}],
+          "minLength": 86,
+          "maxLength": 86
+        },
+        "reauth": {"$ref": "#/$defs/reauth"}
+      }
+    },
+    "reauth": {
+      "description": "H 档服务签名必须携带的重新认证凭据（OIDC max_age）。auth_time 不晚于 assertion.issued_at，且两者相差不超过 300 秒。",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["method", "auth_time", "session_hash"],
+      "properties": {
+        "method": {"type": "string", "enum": ["oidc_max_age", "local_totp"]},
+        "auth_time": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,9})?Z$"
+        },
+        "session_hash": {
+          "description": "\"sha256:\" 加服务端会话 ID 的 SHA-256，用于在治理审计链中关联会话。",
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        }
+      }
+    },
+    "webauthnProof": {
+      "description": "通行密钥签名（COSE alg -8，EdDSA/Ed25519）。clientDataJSON 的 challenge 为 sha256(JCS(assertion)) 原始 32 字节的 base64url；签名覆盖 authenticatorData 与 sha256(clientDataJSON) 的拼接。",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "credential_id", "authenticator_data", "client_data_json", "signature"],
+      "properties": {
+        "type": {"const": "webauthn_ed25519"},
+        "credential_id": {"allOf": [{"$ref": "#/$defs/base64url"}], "minLength": 1, "maxLength": 1366},
+        "authenticator_data": {"allOf": [{"$ref": "#/$defs/base64url"}], "minLength": 50},
+        "client_data_json": {"allOf": [{"$ref": "#/$defs/base64url"}], "minLength": 1},
+        "signature": {"allOf": [{"$ref": "#/$defs/base64url"}], "minLength": 86, "maxLength": 86}
+      }
+    }
+  }
+}

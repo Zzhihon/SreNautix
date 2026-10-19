@@ -1,0 +1,365 @@
+openapi: 3.1.0
+info:
+  title: SreNautix hub ⇄ spoke ticket protocol
+  version: 1.0.0
+  description: |
+    中心（hub，server 角色）提供、分支 gateway 调用的接口（DESIGN §1.2 第 5 步、§2.3、§9.4、§15.1）。
+    分支只发起出站请求：长轮询拉取已批准的工单、推送执行事件、执行前复核绑定、上报心跳。
+    中心不持有任何成员集群的凭证。
+
+    幂等：
+    - 同一工单可以被重复下发；gateway 以确定性的 execution_id 作为 ActionExecution 的名称，重复下发不会产生第二次执行。
+    - 执行事件按 event_id 去重，投递语义为至少一次；中心以 (execution_id, seq) 排序。
+    - 中心在收到某工单 phase=pulled 的事件后不再下发该工单。
+
+    鉴权：每个分支一个 bearer token（挂载文件），中心以 token 确定 cluster_id；请求头 X-SreNautix-Cluster 必须与之相同。
+  license:
+    name: Apache-2.0
+    identifier: Apache-2.0
+servers:
+  - url: https://srenautix.example
+security:
+  - spokeToken: []
+paths:
+  /v1/spoke/tickets:
+    get:
+      operationId: pullTickets
+      summary: 长轮询拉取本集群已批准、尚未被确认拉取的工单
+      parameters:
+        - $ref: '#/components/parameters/Cluster'
+        - name: wait
+          in: query
+          description: 没有工单时最长等待的秒数；0 表示立即返回。
+          required: false
+          schema: {type: integer, minimum: 0, maximum: 60, default: 30}
+        - name: max
+          in: query
+          required: false
+          schema: {type: integer, minimum: 1, maximum: 100, default: 20}
+      responses:
+        '200':
+          description: 工单列表（可以为空）
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/TicketBatch'}
+        '401': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '503': {$ref: '#/components/responses/Problem'}
+  /v1/spoke/events:
+    post:
+      operationId: pushEvents
+      summary: 推送执行事件（至少一次，按 event_id 去重）
+      parameters:
+        - $ref: '#/components/parameters/Cluster'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [events]
+              properties:
+                events:
+                  type: array
+                  minItems: 1
+                  maxItems: 500
+                  items: {$ref: '#/components/schemas/ExecutionEvent'}
+      responses:
+        '200':
+          description: 每个事件的处理结果；duplicates 中的事件此前已接受
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [accepted, duplicates]
+                properties:
+                  accepted:
+                    type: array
+                    items: {type: string}
+                  duplicates:
+                    type: array
+                    items: {type: string}
+        '400': {$ref: '#/components/responses/Problem'}
+        '401': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '503': {$ref: '#/components/responses/Problem'}
+  /v1/spoke/proposals/{proposal_id}/binding:
+    get:
+      operationId: getBinding
+      summary: 执行前复核提议绑定的事件版本、根因与证据指纹（DESIGN §2.4）
+      parameters:
+        - $ref: '#/components/parameters/Cluster'
+        - name: proposal_id
+          in: path
+          required: true
+          schema: {type: string, pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'}
+      responses:
+        '200':
+          description: 当前绑定
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Binding'}
+        '401': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
+        '503': {$ref: '#/components/responses/Problem'}
+  /v1/spoke/heartbeat:
+    post:
+      operationId: heartbeat
+      summary: 上报 gateway 状态条件、冲突域排队与时钟偏差；返回中心时间与恢复标记
+      parameters:
+        - $ref: '#/components/parameters/Cluster'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/Heartbeat'}
+      responses:
+        '200':
+          description: 中心状态
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/HubStatus'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '401': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '503': {$ref: '#/components/responses/Problem'}
+components:
+  securitySchemes:
+    spokeToken:
+      type: http
+      scheme: bearer
+  parameters:
+    Cluster:
+      name: X-SreNautix-Cluster
+      in: header
+      required: true
+      schema: {$ref: '#/components/schemas/ClusterId'}
+  responses:
+    Problem:
+      description: 错误
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Problem'}
+  schemas:
+    ClusterId:
+      type: string
+      pattern: '^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$'
+    Timestamp:
+      type: string
+      pattern: '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,9})?Z$'
+    Uuid:
+      type: string
+      pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+    Sha256:
+      type: string
+      pattern: '^sha256:[0-9a-f]{64}$'
+    Problem:
+      type: object
+      additionalProperties: false
+      required: [code, message]
+      properties:
+        code: {type: string, pattern: '^[a-z][a-z0-9_]*$'}
+        message: {type: string}
+    HubClock:
+      type: object
+      required: [server_time, restored_at]
+      properties:
+        server_time:
+          description: 中心的当前时间（PG now()）。
+          $ref: '#/components/schemas/Timestamp'
+        restored_at:
+          description: 最近一次从备份恢复的恢复标记（DESIGN §15.3）；gateway 拒绝 issued_at 不晚于它的断言。没有恢复过时为 null。
+          oneOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+    TicketBatch:
+      allOf:
+        - $ref: '#/components/schemas/HubClock'
+        - type: object
+          required: [tickets]
+          properties:
+            tickets:
+              type: array
+              items: {$ref: '#/components/schemas/Ticket'}
+    TargetRef:
+      type: object
+      additionalProperties: false
+      required: [group, version, kind, name, uid]
+      properties:
+        group: {type: string}
+        version: {type: string}
+        kind: {type: string}
+        namespace: {type: string}
+        name: {type: string}
+        uid:
+          description: metadata.uid；gitops_pr 为 base 分支被批准时的提交 SHA。
+          type: string
+    Proposal:
+      type: object
+      additionalProperties: false
+      required:
+        - proposal_id
+        - action
+        - params
+        - target
+        - incident_id
+        - incident_version
+        - root_component
+        - evidence_fingerprint
+        - idempotency_key
+        - source
+        - proposal_expires_at
+      properties:
+        proposal_id: {$ref: '#/components/schemas/Uuid'}
+        action: {type: string, pattern: '^[a-z][a-z0-9_]{0,62}$'}
+        params:
+          description: 动作参数；sha256(JCS(params)) 必须等于断言的 params_hash。
+          type: object
+        target: {$ref: '#/components/schemas/TargetRef'}
+        incident_id: {$ref: '#/components/schemas/Uuid'}
+        incident_version: {type: integer, minimum: 1}
+        root_component: {type: string}
+        evidence_fingerprint: {$ref: '#/components/schemas/Sha256'}
+        idempotency_key: {$ref: '#/components/schemas/Sha256'}
+        source: {type: string, enum: [rule, research, human, external]}
+        proposal_expires_at:
+          description: 提议的 TTL（从第一次送达开始计算，有硬上限），与审批的 expires_at 相互独立。
+          $ref: '#/components/schemas/Timestamp'
+    Ticket:
+      type: object
+      additionalProperties: false
+      required: [ticket_id, cluster, proposal, envelope, delivered_at]
+      properties:
+        ticket_id: {$ref: '#/components/schemas/Uuid'}
+        cluster: {$ref: '#/components/schemas/ClusterId'}
+        proposal: {$ref: '#/components/schemas/Proposal'}
+        envelope: {$ref: 'approval-envelope.schema.json'}
+        delivered_at: {$ref: '#/components/schemas/Timestamp'}
+    Phase:
+      type: string
+      enum:
+        - pulled
+        - prechecked
+        - executing
+        - verifying
+        - verified
+        - failed
+        - verify_failed
+        - reverted
+        - awaiting_compensation_approval
+        - needs_human
+        - stale
+        - expired
+        - rejected
+        - indeterminate
+    ExecutionEvent:
+      type: object
+      additionalProperties: false
+      required: [event_id, execution_id, ticket_id, proposal_id, seq, phase, at, reason]
+      properties:
+        event_id:
+          description: 十六进制 sha256("srenautix-event-v1\n" + execution_id + "\n" + seq) 的前 32 位。
+          type: string
+          pattern: '^[0-9a-f]{32}$'
+        execution_id: {type: string, pattern: '^[0-9a-f]{32}$'}
+        ticket_id: {$ref: '#/components/schemas/Uuid'}
+        proposal_id: {$ref: '#/components/schemas/Uuid'}
+        seq: {type: integer, minimum: 1}
+        phase: {$ref: '#/components/schemas/Phase'}
+        at: {$ref: '#/components/schemas/Timestamp'}
+        reason: {type: string, pattern: '^[a-z][a-z0-9_]*$'}
+        message: {type: string, maxLength: 4096}
+        requires:
+          description: 需要中心做的后续处理：human_approval（自动执行被拒绝，转人工审批）、tier_h（需要 H 档重新审批）、reapproval（等级变化，需要重新提议）。
+          type: string
+          enum: [human_approval, tier_h, reapproval]
+        queue_position:
+          description: phase=pulled 时在冲突域队列中的位置（从 1 开始）。
+          type: integer
+          minimum: 1
+        audit:
+          type: object
+          additionalProperties: false
+          required: [seq, hash]
+          properties:
+            seq: {type: integer, minimum: 1}
+            hash: {$ref: '#/components/schemas/Sha256'}
+        compensation:
+          type: object
+          additionalProperties: false
+          required: [action, params, reason]
+          properties:
+            action: {type: string}
+            params: {type: object}
+            reason: {type: string}
+    Binding:
+      allOf:
+        - $ref: '#/components/schemas/HubClock'
+        - type: object
+          required: [proposal_id, state, incident_version, root_component, evidence_fingerprint]
+          properties:
+            proposal_id: {$ref: '#/components/schemas/Uuid'}
+            state: {type: string, enum: [current, stale, withdrawn, expired]}
+            incident_version: {type: integer, minimum: 1}
+            root_component: {type: string}
+            evidence_fingerprint: {$ref: '#/components/schemas/Sha256'}
+    Condition:
+      type: object
+      additionalProperties: false
+      required: [type, status, reason, since]
+      properties:
+        type:
+          type: string
+          enum: [AdmissionSelfCheck, Freeze, AuditSink, ClockSkew, Leader, ApiserverThrottled, GitHubBranchProtection, PolicyLoaded]
+        status: {type: string, enum: ['True', 'False', 'Unknown']}
+        reason: {type: string}
+        message: {type: string, maxLength: 4096}
+        since: {$ref: '#/components/schemas/Timestamp'}
+    Heartbeat:
+      type: object
+      additionalProperties: false
+      required: [gateway_id, version, leader, propose_only, conditions, queue, clock_skew_seconds]
+      properties:
+        gateway_id:
+          description: gateway Pod 名（Lease 身份）。
+          type: string
+        version: {type: string}
+        leader: {type: boolean}
+        propose_only:
+          description: 为 true 时 gateway 不认领新工单；中心在所有页面上把该集群显示为"仅提议"。
+          type: boolean
+        conditions:
+          type: array
+          items: {$ref: '#/components/schemas/Condition'}
+        queue:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [conflict_domain, queued]
+            properties:
+              conflict_domain: {type: string}
+              active_execution_id: {type: string, pattern: '^[0-9a-f]{32}$'}
+              queued:
+                description: 排队中的 execution_id，按执行顺序。
+                type: array
+                items: {type: string, pattern: '^[0-9a-f]{32}$'}
+        clock_skew_seconds:
+          type: object
+          additionalProperties: false
+          required: [apiserver]
+          properties:
+            apiserver: {type: number}
+            ntp: {type: number}
+    HubStatus:
+      allOf:
+        - $ref: '#/components/schemas/HubClock'
+        - type: object
+          required: [soft_paused]
+          properties:
+            soft_paused:
+              description: 控制台的软暂停：中心扣住工单不下发（DESIGN §12.2）。
+              type: boolean

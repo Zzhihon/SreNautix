@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://srenautix.io/contract/gateway/v1/approval-assertion.schema.json",
+  "title": "ApprovalAssertion",
+  "description": "审批断言 v1（DESIGN §9.2）。字段集合固定为 15 个，全部必填。签名覆盖的是 approval-envelope 中定义的签名输入，签名输入包含本断言的 JCS（RFC 8785）规范化形式。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "proposal_id",
+    "action",
+    "level",
+    "tier",
+    "params_hash",
+    "canon_version",
+    "target_uid",
+    "cluster",
+    "incident_version",
+    "root_component",
+    "evidence_fingerprint",
+    "approver_principal",
+    "channel",
+    "issued_at",
+    "expires_at"
+  ],
+  "properties": {
+    "proposal_id": {
+      "description": "提议 ID（UUID，小写）。",
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "action": {
+      "description": "动作目录中的动作 ID。",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{0,62}$"
+    },
+    "level": {
+      "description": "动作等级（DESIGN §9.1）：提议时按目录等级与目标状态确定。pod_restart 满足可重建条件时为 reversible_recreatable，否则为 irreversible。",
+      "$ref": "#/$defs/level"
+    },
+    "tier": {
+      "description": "风险档位（DESIGN §9.2）。",
+      "$ref": "#/$defs/tier"
+    },
+    "params_hash": {
+      "description": "\"sha256:\" 加 sha256(JCS(params)) 的小写十六进制。",
+      "$ref": "#/$defs/sha256"
+    },
+    "canon_version": {
+      "description": "规范化版本：jcs-sha256-v1 表示 RFC 8785 JCS、UTF-8 编码、SHA-256、小写十六进制并带 \"sha256:\" 前缀。",
+      "type": "string",
+      "enum": ["jcs-sha256-v1"]
+    },
+    "target_uid": {
+      "description": "目标对象的 metadata.uid；gitops_pr 为补丁所基于的 40 位提交 SHA。",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "cluster": {
+      "description": "被管集群的 cluster_id。",
+      "$ref": "#/$defs/clusterId"
+    },
+    "incident_version": {
+      "description": "提议绑定的事件版本。",
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "root_component": {
+      "description": "提议绑定的根因组件。",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 253
+    },
+    "evidence_fingerprint": {
+      "description": "提议绑定的证据指纹。",
+      "$ref": "#/$defs/sha256"
+    },
+    "approver_principal": {
+      "description": "审批人主体。策略自动批准时为 \"auto:<规则名>\"。",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512
+    },
+    "channel": {
+      "description": "审批渠道。策略自动批准时为 auto。",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_-]{0,31}$"
+    },
+    "issued_at": {
+      "description": "签发时间，UTC，RFC 3339，以 Z 结尾。",
+      "$ref": "#/$defs/timestamp"
+    },
+    "expires_at": {
+      "description": "审批的过期时间，与提议的 TTL 相互独立。",
+      "$ref": "#/$defs/timestamp"
+    }
+  },
+  "$defs": {
+    "level": {
+      "type": "string",
+      "enum": ["reversible", "reversible_recreatable", "compensable", "irreversible"]
+    },
+    "tier": {
+      "type": "string",
+      "enum": ["L", "H"]
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "clusterId": {
+      "type": "string",
+      "pattern": "^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$"
+    },
+    "timestamp": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,9})?Z$"
+    }
+  }
+}
