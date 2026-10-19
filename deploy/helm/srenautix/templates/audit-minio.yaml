@@ -176,20 +176,20 @@ data:
       fi
     done
 ---
-# 每次安装和升级后创建存储桶、设置默认保留期、更新两个服务账号
+# 创建存储桶、设置默认保留期、更新 server 与 gateway 的服务账号。每个 revision 一个普通 Job（不是 Helm 钩子）：
+# gateway 启动时要求这两个账号已经存在，钩子要等全部工作负载就绪后才执行，会与 gateway 互相等待；
+# 作为普通 Job 与工作负载同时创建，账号就绪之前 gateway 以失败重启
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: {{ $name }}-setup
+  name: {{ $name }}-setup-{{ .Release.Revision }}
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "srenautix.labels" . | nindent 4 }}
     app.kubernetes.io/component: audit-store-setup
-  annotations:
-    helm.sh/hook: post-install,post-upgrade
-    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
 spec:
-  backoffLimit: 10
+  backoffLimit: 30
+  ttlSecondsAfterFinished: 86400
   template:
     metadata:
       labels:

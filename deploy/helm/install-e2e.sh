@@ -32,6 +32,10 @@ diagnose() {
   k get pods -A -o wide >"$work/pods.txt" 2>&1 || true
   k -n "$ns" describe pods >"$work/describe.txt" 2>&1 || true
   k -n "$ns" get events --sort-by=.lastTimestamp >"$work/events.txt" 2>&1 || true
+  k -n "$ns" get clusters.postgresql.cnpg.io -o yaml >"$work/pg-cluster.yaml" 2>&1 || true
+  k -n "$ns" get jobs,pvc,secrets -o wide >"$work/jobs-pvc-secrets.txt" 2>&1 || true
+  k -n cnpg-system logs deployment/cnpg-cloudnative-pg --tail=300 >"$work/cnpg-operator.log" 2>&1 || true
+  yq '.status' "$work/pg-cluster.yaml" >&2 || true
   for p in $(k -n "$ns" get pods -o name 2>/dev/null); do
     k -n "$ns" logs "$p" --all-containers --tail=300 >"$work/$(basename "$p").log" 2>&1 || true
     k -n "$ns" logs "$p" --all-containers --previous --tail=300 >"$work/$(basename "$p").previous.log" 2>&1 || true

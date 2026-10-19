@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.19
+# syntax=docker/dockerfile:1.19@sha256:b6afd42430b15f2d2a4c5a02b919e98a525b785b1aaff16747d2f623364e39b6
 # SreNautix 分支镜像：reader、gateway 两个角色（--role=reader|gateway）。
 # 构建上下文是仓库根目录：docker buildx build -f deploy/docker/srenautix-spoke.Dockerfile .
 # 在构建平台上交叉编译，不经过 QEMU；-trimpath、空 buildid 与 SOURCE_DATE_EPOCH 保证可复现。

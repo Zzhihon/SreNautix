@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.19
+# syntax=docker/dockerfile:1.19@sha256:b6afd42430b15f2d2a4c5a02b919e98a525b785b1aaff16747d2f623364e39b6
 # SreNautix 中心镜像：server、worker、mcp 三个角色（--role=server|worker|mcp）。
 # 构建上下文是仓库根目录：docker buildx build -f deploy/docker/srenautix.Dockerfile .
 # 基础镜像按 digest 固定；可复现构建依赖 SOURCE_DATE_EPOCH 与 buildx 的 rewrite-timestamp。
@@ -33,7 +33,7 @@ RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
 # 构建中心进程及其依赖的工作区包；控制台前端由 server 进程提供，与中心进程一起构建
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    pnpm --filter "./apps/srenautix..." --filter "./web/console..." run --if-present build
+    pnpm --filter "{./apps/srenautix}..." --filter "{./web/console}..." run --if-present build
 # 镜像内的目录与仓库一致：/app/apps/srenautix（只含运行时依赖）、/app/contract（动作目录等契约文件）、
 # /app/packs（内置领域包）、/app/web/console/dist（控制台静态文件）。
 # pnpm 9 的 deploy 需要读取包的元数据，不能离线执行；安装的每个第三方包的版本仍取自 pnpm-lock.yaml，
@@ -62,5 +62,8 @@ ENV NODE_ENV=production \
 WORKDIR /app
 COPY --from=build --chown=65532:65532 /out/app /app
 USER 65532:65532
+# 冒烟检查：在运行镜像中加载三个角色的全部模块与运维子命令，缺少任何依赖（例如工作区包没有构建产物）都让构建失败；
+# 再用不存在的配置启动 server，要求进程走到读取配置这一步并报配置错误
+RUN ["/nodejs/bin/node", "--input-type=module", "-e", "for (const m of ['roles/server.js', 'roles/worker.js', 'roles/mcp.js', 'commands.js']) { await import('/app/apps/srenautix/dist/' + m); } const { existsSync } = await import('node:fs'); for (const p of ['/app/contract/gateway/v1/action-catalog.yaml', '/app/packs', '/app/web/console/dist/index.html']) { if (!existsSync(p)) { throw new Error('missing ' + p); } } const { spawnSync } = await import('node:child_process'); const r = spawnSync('/nodejs/bin/node', ['/app/apps/srenautix/dist/main.js', '--role=server', '--config=/nonexistent/config.yaml'], { encoding: 'utf8' }); if (r.status === 0 || !r.stdout.concat(r.stderr).includes('ConfigError')) { throw new Error('server did not reach config loading: ' + r.stdout + r.stderr); } console.log('smoke ok');"]
 EXPOSE 8080 8081 9090
 ENTRYPOINT ["/nodejs/bin/node", "/app/apps/srenautix/dist/main.js"]
