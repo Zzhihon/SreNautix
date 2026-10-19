@@ -1,0 +1,20 @@
+# 本地工作区
+.claude/
+.scratch/
+.work/
+
+# 依赖与构建产物
+node_modules/
+dist/
+coverage/
+/bin/
+*.tsbuildinfo
+
+# 测试与工具缓存
+.envtest/
+playwright-report/
+test-results/
+
+# 本地密钥与环境
+.env
+*.pem
