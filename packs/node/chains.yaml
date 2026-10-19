@@ -1,0 +1,223 @@
+chains:
+  - id: node-health
+    title: { zh-CN: 节点状态, en: Node health }
+    runbook: node.md
+    cards:
+      - id: conditions
+        title: { zh-CN: Ready 与资源压力, en: Ready and pressure conditions }
+        applies_to: { kinds: [Node] }
+        refs:
+          - { name: ready, signal: node_ready, mode: range }
+          - { name: pressure, signal: node_pressure, mode: range, empty_is: normal }
+        judge:
+          let:
+            - { name: notReady, cel: 'min(ready) < 1.0' }
+            - { name: pressured, cel: size(pressure) }
+            - { name: anomaly_started_at, cel: 'first_below(ready, 1.0)' }
+          abnormal_if:
+            - cel: notReady
+              say:
+                { zh-CN: '节点 {entity_name} 在窗口内 NotReady', en: 'Node {entity_name} was NotReady in the window' }
+            - cel: pressured > 0
+              say: { zh-CN: '节点有 {pressured} 种资源压力', en: 'The node reported {pressured} pressure conditions' }
+        display:
+          table:
+            rows_from: pressure
+            columns:
+              - { header: { zh-CN: 压力, en: Condition }, cel: 'label(row, "condition")' }
+        egress: allow
+      - id: cpu-memory
+        title: { zh-CN: CPU 与内存, en: CPU and memory }
+        applies_to: { kinds: [Node] }
+        params: { cpu_ratio: 0.9, memory_ratio: 0.9 }
+        refs:
+          - { name: cpu, signal: node_cpu_usage, mode: range }
+          - { name: mem, signal: node_memory_usage, mode: range }
+        judge:
+          let:
+            - { name: cpuPeak, cel: max(cpu) }
+            - { name: memPeak, cel: max(mem) }
+          abnormal_if:
+            - cel: cpuPeak > params.cpu_ratio
+              say: { zh-CN: 'CPU 峰值 {cpuPeak, number, percent}', en: 'Peak CPU {cpuPeak, number, percent}' }
+            - cel: memPeak > params.memory_ratio
+              say: { zh-CN: '内存峰值 {memPeak, number, percent}', en: 'Peak memory {memPeak, number, percent}' }
+        display: { value: cpuPeak, unit: percent, threshold: params.cpu_ratio }
+        egress: allow
+      - id: neighbours
+        title: { zh-CN: 同节点 CPU 用量最大的 Pod, en: Top CPU pods on the node }
+        note:
+          {
+            zh-CN: 单个 Pod 的 CPU 超过 cores 核时判为吵闹邻居,
+            en: A pod above the core threshold is a noisy neighbour,
+          }
+        applies_to: { kinds: [Node] }
+        params: { cores: 2 }
+        refs:
+          - { name: top, signal: node_top_pods_cpu, mode: instant }
+        judge:
+          let:
+            - { name: noisy, cel: 'size(top.filter(s, last(s) > double(params.cores)))' }
+          abnormal_if:
+            - cel: noisy > 0
+              say:
+                {
+                  zh-CN: '{noisy} 个 Pod 的 CPU 超过 {entity_name} 上的阈值',
+                  en: '{noisy} pods exceed the CPU threshold',
+                }
+        display:
+          table:
+            rows_from: top
+            sort_by: last(row)
+            columns:
+              - { header: { zh-CN: 命名空间, en: Namespace }, cel: 'label(row, "namespace")' }
+              - { header: { zh-CN: Pod, en: Pod }, cel: 'label(row, "pod")' }
+              - { header: { zh-CN: CPU 核, en: Cores }, cel: last(row) }
+        egress: allow
+
+  - id: node-filesystem
+    title: { zh-CN: 文件系统与磁盘, en: Filesystems and disks }
+    runbook: node.md
+    cards:
+      - id: space
+        title: { zh-CN: 文件系统余量, en: Filesystem headroom }
+        applies_to: { kinds: [Node] }
+        params: { avail_ratio: 0.1 }
+        refs:
+          - { name: avail, signal: node_fs_avail_ratio, mode: range }
+        judge:
+          let:
+            - { name: low, cel: min(avail) }
+            - { name: anomaly_started_at, cel: 'first_below(avail, params.avail_ratio)' }
+          abnormal_if:
+            - cel: low < params.avail_ratio
+              say: { zh-CN: '最低余量 {low, number, percent}', en: 'Lowest headroom {low, number, percent}' }
+        display:
+          value: low
+          unit: percent
+          threshold: params.avail_ratio
+          table:
+            rows_from: avail
+            sort_by: -min(row)
+            columns:
+              - { header: { zh-CN: 挂载点, en: Mountpoint }, cel: 'label(row, "mountpoint")' }
+              - { header: { zh-CN: 最低余量, en: Lowest }, cel: min(row), unit: percent }
+        egress: allow
+      - id: fill-forecast
+        title: { zh-CN: 写满预测, en: Fill forecast }
+        note:
+          {
+            zh-CN: 按近 6 小时趋势，预计 hours 小时内写满判为异常,
+            en: Filesystems predicted to fill within the horizon,
+          }
+        applies_to: { kinds: [Node] }
+        params: { hours: 24 }
+        refs:
+          - { name: hours, signal: node_fs_hours_to_full, mode: instant, empty_is: normal }
+          - { name: avail, signal: node_fs_avail_ratio, mode: instant }
+        judge:
+          let:
+            - { name: soon, cel: 'size(hours.filter(s, last(s) < double(params.hours)))' }
+          abnormal_if:
+            - cel: soon > 0
+              say:
+                {
+                  zh-CN: '{soon} 个文件系统预计 {entity_name} 上 24 小时内写满',
+                  en: '{soon} filesystems will fill within the horizon',
+                }
+        display:
+          table:
+            rows_from: hours
+            sort_by: -last(row)
+            columns:
+              - { header: { zh-CN: 挂载点, en: Mountpoint }, cel: 'label(row, "mountpoint")' }
+              - { header: { zh-CN: 小时, en: Hours }, cel: last(row) }
+        egress: allow
+      - id: readonly
+        title: { zh-CN: 只读或设备错误, en: Read-only or device errors }
+        applies_to: { kinds: [Node] }
+        refs:
+          - { name: ro, signal: node_fs_readonly, mode: range, empty_is: normal }
+          - { name: avail, signal: node_fs_avail_ratio, mode: instant }
+        judge:
+          let:
+            - { name: bad, cel: size(ro) }
+          abnormal_if:
+            - cel: bad > 0
+              say: { zh-CN: '{bad} 个文件系统只读或有设备错误', en: '{bad} filesystems are read-only or erroring' }
+        display:
+          table:
+            rows_from: ro
+            columns:
+              - { header: { zh-CN: 挂载点, en: Mountpoint }, cel: 'label(row, "mountpoint")' }
+        egress: allow
+      - id: disk-io
+        title: { zh-CN: 磁盘忙比例, en: Disk busy ratio }
+        applies_to: { kinds: [Node] }
+        params: { busy_ratio: 0.9 }
+        refs:
+          - { name: busy, signal: node_disk_busy, mode: range }
+        judge:
+          let:
+            - { name: peak, cel: max(busy) }
+          abnormal_if:
+            - cel: peak > params.busy_ratio
+              say: { zh-CN: '磁盘忙比例峰值 {peak, number, percent}', en: 'Peak disk busy {peak, number, percent}' }
+        display: { value: peak, unit: percent, threshold: params.busy_ratio }
+        egress: allow
+
+  - id: node-network
+    title: { zh-CN: 节点网络, en: Node network }
+    runbook: node.md
+    cards:
+      - id: errors
+        title: { zh-CN: 网卡错误, en: NIC errors }
+        applies_to: { kinds: [Node] }
+        params: { errors_per_second: 1 }
+        refs:
+          - { name: errs, signal: node_network_errors, mode: range }
+        judge:
+          let:
+            - { name: peak, cel: max(errs) }
+          abnormal_if:
+            - cel: peak > double(params.errors_per_second)
+              say: { zh-CN: '网卡错误峰值 {peak, number} 个/秒', en: 'Peak NIC errors {peak, number}/s' }
+        display: { value: peak, unit: per_second }
+        egress: allow
+      - id: conntrack
+        title: { zh-CN: conntrack 占用, en: Conntrack usage }
+        applies_to: { kinds: [Node] }
+        params: { ratio: 0.9 }
+        refs:
+          - { name: ct, signal: node_conntrack_ratio, mode: range }
+        judge:
+          let:
+            - { name: peak, cel: max(ct) }
+          abnormal_if:
+            - cel: peak > params.ratio
+              say: { zh-CN: 'conntrack 峰值 {peak, number, percent}', en: 'Peak conntrack {peak, number, percent}' }
+        display: { value: peak, unit: percent, threshold: params.ratio }
+        egress: allow
+
+  - id: node-time
+    title: { zh-CN: 时钟, en: Clock }
+    runbook: node.md
+    cards:
+      - id: clock
+        title: { zh-CN: 时钟偏差与同步, en: Clock offset and sync }
+        applies_to: { kinds: [Node] }
+        params: { offset_seconds: 0.05 }
+        refs:
+          - { name: offset, signal: node_time_offset, mode: range }
+          - { name: synced, signal: node_time_synced, mode: range }
+        judge:
+          let:
+            - { name: peak, cel: max(offset) }
+            - { name: unsynced, cel: 'min(synced) < 1.0' }
+          abnormal_if:
+            - cel: unsynced
+              say: { zh-CN: 时钟未同步, en: The clock is not synchronised }
+            - cel: peak > params.offset_seconds
+              say: { zh-CN: '时钟偏差峰值 {peak, number} 秒', en: 'Peak clock offset {peak, number} s' }
+        display: { value: peak, unit: seconds }
+        egress: allow

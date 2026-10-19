@@ -1,0 +1,210 @@
+# n1 出问题，n2 正常。node-exporter 指标不带 node 标签，经 kube_pod_info 关联到节点。
+api_version: srenautix.io/pack-test/v1
+interval: 1m
+input_series:
+  - { series: 'kube_pod_info{namespace="monitoring",pod="ne-1",node="n1"}', values: '1x60' }
+  - { series: 'kube_pod_info{namespace="monitoring",pod="ne-2",node="n2"}', values: '1x60' }
+  - { series: 'kube_pod_info{namespace="shop",pod="hog",node="n1"}', values: '1x60' }
+  - { series: 'kube_pod_info{namespace="shop",pod="calm",node="n2"}', values: '1x60' }
+  - { series: 'kube_node_status_condition{node="n1",condition="Ready",status="true"}', values: '1x20 0x10 1x30' }
+  - { series: 'kube_node_status_condition{node="n2",condition="Ready",status="true"}', values: '1x60' }
+  - { series: 'kube_node_status_condition{node="n1",condition="MemoryPressure",status="true"}', values: '0x20 1x40' }
+  - { series: 'kube_node_status_condition{node="n2",condition="MemoryPressure",status="true"}', values: '0x60' }
+  - { series: 'container_cpu_usage_seconds_total{namespace="shop",pod="hog",container="app"}', values: '0+180x60' }
+  - { series: 'container_cpu_usage_seconds_total{namespace="shop",pod="calm",container="app"}', values: '0+30x60' }
+  - { series: 'node_cpu_seconds_total{namespace="monitoring",pod="ne-1",cpu="0",mode="idle"}', values: '0+3x60' }
+  - { series: 'node_cpu_seconds_total{namespace="monitoring",pod="ne-2",cpu="0",mode="idle"}', values: '0+54x60' }
+  - { series: 'node_memory_MemTotal_bytes{namespace="monitoring",pod="ne-1"}', values: '16000000000x60' }
+  - {
+      series: 'node_memory_MemAvailable_bytes{namespace="monitoring",pod="ne-1"}',
+      values: '8000000000x20 800000000x40',
+    }
+  - { series: 'node_memory_MemTotal_bytes{namespace="monitoring",pod="ne-2"}', values: '16000000000x60' }
+  - { series: 'node_memory_MemAvailable_bytes{namespace="monitoring",pod="ne-2"}', values: '8000000000x60' }
+  - {
+      series: 'node_filesystem_size_bytes{namespace="monitoring",pod="ne-1",mountpoint="/",fstype="xfs",device="/dev/sda1"}',
+      values: '200000000000x60',
+    }
+  - {
+      series: 'node_filesystem_avail_bytes{namespace="monitoring",pod="ne-1",mountpoint="/",fstype="xfs",device="/dev/sda1"}',
+      values: '100000000000-1700000000x60',
+    }
+  - {
+      series: 'node_filesystem_size_bytes{namespace="monitoring",pod="ne-2",mountpoint="/",fstype="xfs",device="/dev/sda1"}',
+      values: '200000000000x60',
+    }
+  - {
+      series: 'node_filesystem_avail_bytes{namespace="monitoring",pod="ne-2",mountpoint="/",fstype="xfs",device="/dev/sda1"}',
+      values: '150000000000x60',
+    }
+  - {
+      series: 'node_filesystem_readonly{namespace="monitoring",pod="ne-1",mountpoint="/",fstype="xfs",device="/dev/sda1"}',
+      values: '0x30 1x30',
+    }
+  - {
+      series: 'node_filesystem_device_error{namespace="monitoring",pod="ne-1",mountpoint="/",fstype="xfs",device="/dev/sda1"}',
+      values: '0x60',
+    }
+  - {
+      series: 'node_filesystem_readonly{namespace="monitoring",pod="ne-2",mountpoint="/",fstype="xfs",device="/dev/sda1"}',
+      values: '0x60',
+    }
+  - {
+      series: 'node_filesystem_device_error{namespace="monitoring",pod="ne-2",mountpoint="/",fstype="xfs",device="/dev/sda1"}',
+      values: '0x60',
+    }
+  - { series: 'node_disk_io_time_seconds_total{namespace="monitoring",pod="ne-1",device="sda"}', values: '0+58x60' }
+  - { series: 'node_disk_io_time_seconds_total{namespace="monitoring",pod="ne-2",device="sda"}', values: '0+6x60' }
+  - { series: 'node_network_receive_errs_total{namespace="monitoring",pod="ne-1",device="eth0"}', values: '0+600x60' }
+  - { series: 'node_network_transmit_errs_total{namespace="monitoring",pod="ne-1",device="eth0"}', values: '0x60' }
+  - { series: 'node_network_receive_errs_total{namespace="monitoring",pod="ne-2",device="eth0"}', values: '0x60' }
+  - { series: 'node_network_transmit_errs_total{namespace="monitoring",pod="ne-2",device="eth0"}', values: '0x60' }
+  - { series: 'node_nf_conntrack_entries{namespace="monitoring",pod="ne-1"}', values: '95000x60' }
+  - { series: 'node_nf_conntrack_entries_limit{namespace="monitoring",pod="ne-1"}', values: '100000x60' }
+  - { series: 'node_nf_conntrack_entries{namespace="monitoring",pod="ne-2"}', values: '10000x60' }
+  - { series: 'node_nf_conntrack_entries_limit{namespace="monitoring",pod="ne-2"}', values: '100000x60' }
+  - { series: 'node_timex_offset_seconds{namespace="monitoring",pod="ne-1"}', values: '0.2x60' }
+  - { series: 'node_timex_sync_status{namespace="monitoring",pod="ne-1"}', values: '0x60' }
+  - { series: 'node_timex_offset_seconds{namespace="monitoring",pod="ne-2"}', values: '0.001x60' }
+  - { series: 'node_timex_sync_status{namespace="monitoring",pod="ne-2"}', values: '1x60' }
+tests:
+  - {
+      name: n1 NotReady 且内存压力,
+      eval_time: 40m,
+      card: node-health/conditions,
+      entity: { kind: Node, name: n1 },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: n2 Ready,
+      eval_time: 40m,
+      card: node-health/conditions,
+      entity: { kind: Node, name: n2 },
+      expect: { verdict: normal },
+    }
+  - {
+      name: n1 CPU 打满,
+      eval_time: 40m,
+      card: node-health/cpu-memory,
+      entity: { kind: Node, name: n1 },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: n2 CPU 与内存有余量,
+      eval_time: 40m,
+      card: node-health/cpu-memory,
+      entity: { kind: Node, name: n2 },
+      expect: { verdict: normal },
+    }
+  - {
+      name: n1 有吵闹邻居,
+      eval_time: 40m,
+      card: node-health/neighbours,
+      entity: { kind: Node, name: n1 },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: n2 没有吵闹邻居,
+      eval_time: 40m,
+      card: node-health/neighbours,
+      entity: { kind: Node, name: n2 },
+      expect: { verdict: normal },
+    }
+  - {
+      name: n1 根盘余量低,
+      eval_time: 40m,
+      card: node-filesystem/space,
+      entity: { kind: Node, name: n1 },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: n2 根盘充足,
+      eval_time: 40m,
+      card: node-filesystem/space,
+      entity: { kind: Node, name: n2 },
+      expect: { verdict: normal },
+    }
+  - {
+      name: n1 预计很快写满,
+      eval_time: 40m,
+      card: node-filesystem/fill-forecast,
+      entity: { kind: Node, name: n1 },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: n2 没有在下降,
+      eval_time: 40m,
+      card: node-filesystem/fill-forecast,
+      entity: { kind: Node, name: n2 },
+      expect: { verdict: normal },
+    }
+  - {
+      name: n1 根盘只读,
+      eval_time: 40m,
+      card: node-filesystem/readonly,
+      entity: { kind: Node, name: n1 },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: n2 可写,
+      eval_time: 40m,
+      card: node-filesystem/readonly,
+      entity: { kind: Node, name: n2 },
+      expect: { verdict: normal },
+    }
+  - {
+      name: n1 磁盘打满,
+      eval_time: 40m,
+      card: node-filesystem/disk-io,
+      entity: { kind: Node, name: n1 },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: n2 磁盘空闲,
+      eval_time: 40m,
+      card: node-filesystem/disk-io,
+      entity: { kind: Node, name: n2 },
+      expect: { verdict: normal },
+    }
+  - {
+      name: n1 网卡错误,
+      eval_time: 40m,
+      card: node-network/errors,
+      entity: { kind: Node, name: n1 },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: n2 没有网卡错误,
+      eval_time: 40m,
+      card: node-network/errors,
+      entity: { kind: Node, name: n2 },
+      expect: { verdict: normal },
+    }
+  - {
+      name: n1 conntrack 将满,
+      eval_time: 40m,
+      card: node-network/conntrack,
+      entity: { kind: Node, name: n1 },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: n2 conntrack 充足,
+      eval_time: 40m,
+      card: node-network/conntrack,
+      entity: { kind: Node, name: n2 },
+      expect: { verdict: normal },
+    }
+  - {
+      name: n1 时钟未同步,
+      eval_time: 40m,
+      card: node-time/clock,
+      entity: { kind: Node, name: n1 },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: n2 时钟正常,
+      eval_time: 40m,
+      card: node-time/clock,
+      entity: { kind: Node, name: n2 },
+      expect: { verdict: normal },
+    }

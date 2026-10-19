@@ -1,0 +1,9 @@
+api_version: srenautix.io/pack/v1
+name: kubernetes-core
+version: 1.0.0
+description: Kubernetes 控制面：apiserver、etcd、调度器、controller-manager、kube-proxy 与集群枢纽组件
+maturity: stable
+min_srenautix_version: 0.1.0
+requires:
+  - metrics.query
+  - metrics.query_range

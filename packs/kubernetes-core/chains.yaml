@@ -1,0 +1,160 @@
+chains:
+  - id: apiserver
+    title: { zh-CN: apiserver, en: API server }
+    runbook: control-plane.md
+    cards:
+      - id: errors
+        title: { zh-CN: apiserver 5xx 比例, en: API server 5xx ratio }
+        note: { zh-CN: 全部请求中 5xx 的比例峰值；超过 error_ratio 判为异常, en: Peak share of 5xx responses }
+        applies_to: { kinds: [cluster] }
+        params: { error_ratio: 0.05 }
+        refs:
+          - { name: ratio, signal: apiserver_error_ratio, mode: range }
+        judge:
+          let:
+            - { name: peak, cel: max(ratio) }
+            - { name: anomaly_started_at, cel: 'first_above(ratio, params.error_ratio)' }
+          abnormal_if:
+            - cel: peak > params.error_ratio
+              say: { zh-CN: '5xx 比例峰值 {peak, number, percent}', en: 'Peak 5xx ratio {peak, number, percent}' }
+        display: { value: peak, unit: percent, threshold: params.error_ratio }
+        egress: allow
+      - id: latency
+        title: { zh-CN: apiserver p99 延迟, en: API server p99 latency }
+        applies_to: { kinds: [cluster] }
+        params: { p99_seconds: 1 }
+        refs:
+          - { name: p99, signal: apiserver_latency_p99, mode: range }
+        judge:
+          let:
+            - { name: peak, cel: max(p99) }
+          abnormal_if:
+            - cel: peak > double(params.p99_seconds)
+              say: { zh-CN: 'p99 延迟峰值 {peak, number} 秒', en: 'Peak p99 latency {peak, number} s' }
+        display: { value: peak, unit: seconds }
+        egress: allow
+      - id: instances
+        title: { zh-CN: apiserver 实例在线, en: API server instances up }
+        applies_to: { kinds: [cluster] }
+        refs:
+          - { name: up, signal: apiserver_instances_up, mode: range }
+        judge:
+          let:
+            - { name: down, cel: 'size(up.filter(s, min(s) < 1.0))' }
+          abnormal_if:
+            - cel: down > 0
+              say: { zh-CN: '{down} 个 apiserver 实例在窗口内掉线', en: '{down} API server instances went down' }
+        display:
+          value: double(down)
+          unit: count
+          table:
+            rows_from: up
+            columns:
+              - { header: { zh-CN: 实例, en: Instance }, cel: 'label(row, "instance")' }
+              - { header: { zh-CN: 最低, en: Min }, cel: min(row) }
+        egress: allow
+
+  - id: etcd
+    title: { zh-CN: etcd, en: etcd }
+    runbook: control-plane.md
+    cards:
+      - id: leader
+        title: { zh-CN: leader 与切换, en: Leader and elections }
+        applies_to: { kinds: [cluster, Pod] }
+        refs:
+          - { name: hasLeader, signal: etcd_has_leader, mode: range }
+          - { name: changes, signal: etcd_leader_changes, mode: instant }
+        judge:
+          let:
+            - { name: noLeader, cel: 'min(hasLeader) < 1.0' }
+            - { name: elections, cel: last(changes) }
+          abnormal_if:
+            - cel: noLeader
+              say: { zh-CN: 窗口内有成员没有 leader, en: A member had no leader in the window }
+            - cel: elections >= 1.0
+              say: { zh-CN: 'leader 切换 {elections, number} 次', en: '{elections, number} leader changes' }
+        display: { value: elections, unit: count }
+        egress: allow
+      - id: disk
+        title: { zh-CN: WAL fsync p99, en: WAL fsync p99 }
+        note:
+          { zh-CN: etcd 写盘延迟；超过 fsync_seconds 时 leader 选举与 apiserver 写入都会变慢, en: etcd disk latency }
+        applies_to: { kinds: [cluster, Pod] }
+        params: { fsync_seconds: 0.5 }
+        refs:
+          - { name: fsync, signal: etcd_wal_fsync_p99, mode: range }
+        judge:
+          let:
+            - { name: peak, cel: max(fsync) }
+            - { name: anomaly_started_at, cel: 'first_above(fsync, params.fsync_seconds)' }
+          abnormal_if:
+            - cel: peak > params.fsync_seconds
+              say: { zh-CN: 'fsync p99 峰值 {peak, number} 秒', en: 'Peak fsync p99 {peak, number} s' }
+        display: { value: peak, unit: seconds, threshold: params.fsync_seconds }
+        egress: allow
+      - id: quota
+        title: { zh-CN: 数据库占配额, en: Database size vs quota }
+        applies_to: { kinds: [cluster, Pod] }
+        params: { quota_ratio: 0.8 }
+        refs:
+          - { name: ratio, signal: etcd_db_quota_ratio, mode: instant }
+        judge:
+          let:
+            - { name: now, cel: last(ratio) }
+          abnormal_if:
+            - cel: now > params.quota_ratio
+              say: { zh-CN: '数据库已占配额 {now, number, percent}', en: 'Database at {now, number, percent} of quota' }
+        display: { value: now, unit: percent }
+        egress: allow
+
+  - id: control-plane
+    title: { zh-CN: 控制面组件, en: Control plane components }
+    runbook: control-plane.md
+    cards:
+      - id: components-up
+        title:
+          {
+            zh-CN: 调度器、controller-manager、kube-proxy、DNS 在线,
+            en: 'Scheduler, controller manager, kube-proxy and DNS up',
+          }
+        applies_to: { kinds: [cluster] }
+        refs:
+          - { name: up, signal: control_plane_up, mode: range }
+        judge:
+          let:
+            - { name: down, cel: 'size(up.filter(s, min(s) < 1.0))' }
+          abnormal_if:
+            - cel: down > 0
+              say:
+                {
+                  zh-CN: '{down} 个控制面组件在窗口内有实例掉线',
+                  en: '{down} control plane components had instances down',
+                }
+        display:
+          value: double(down)
+          unit: count
+          table:
+            rows_from: up
+            columns:
+              - { header: { zh-CN: 组件, en: Component }, cel: 'label(row, "job")' }
+              - { header: { zh-CN: 最低, en: Min }, cel: min(row) }
+        egress: allow
+      - id: pending-pods
+        title: { zh-CN: Pending 的 Pod, en: Pending pods }
+        note:
+          {
+            zh-CN: 窗口内 Pending Pod 数的最小值超过 pending 时判为异常（持续无法调度，排除短暂的 Pending）,
+            en: Pods stuck pending for the whole window,
+          }
+        applies_to: { kinds: [cluster] }
+        params: { pending: 0 }
+        refs:
+          - { name: pending, signal: pending_pods, mode: range }
+        judge:
+          let:
+            - { name: floor, cel: min(pending) }
+          abnormal_if:
+            - cel: floor > double(params.pending)
+              say: { zh-CN: '窗口内始终有 {floor, number} 个 Pod Pending', en: '{floor, number} pods stayed pending' }
+        display: { value: floor, unit: count }
+        egress: allow

@@ -1,0 +1,9 @@
+api_version: srenautix.io/pack/v1
+name: node
+version: 1.0.0
+description: 节点：状态与压力、CPU 与内存、文件系统与磁盘、网络、时钟，以及同节点的吵闹邻居
+maturity: stable
+min_srenautix_version: 0.1.0
+requires:
+  - metrics.query
+  - metrics.query_range

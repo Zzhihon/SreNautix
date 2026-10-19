@@ -1,0 +1,128 @@
+# node-exporter 的指标默认不带 node 标签（instance 是 Pod IP 与端口）。每个 node-exporter 信号有两个备选：
+# 1. 抓取时已把节点名写进 node 标签（probe 检查确实存在）；
+# 2. 通过 kube_pod_info 按 exporter 所在 Pod 关联到节点。
+# $selector 对节点实体展开为 node="<节点名>"。
+signals:
+  - id: node_ready
+    kind: metrics
+    alternatives:
+      - expr: max by (node) (kube_node_status_condition{$selector, condition="Ready", status="true"})
+  - id: node_pressure
+    kind: metrics
+    alternatives:
+      - expr: max by (node, condition) (kube_node_status_condition{$selector, condition=~"MemoryPressure|DiskPressure|PIDPressure", status="true"}) == 1
+  - id: node_cpu_usage
+    kind: metrics
+    unit: ratio
+    alternatives:
+      - expr: 1 - avg by (node) (rate(node_cpu_seconds_total{$selector, mode="idle"}[$rate_window]))
+        probe: count(node_cpu_seconds_total{node!=""})
+      - expr: >-
+          1 - avg by (node) (
+            rate(node_cpu_seconds_total{mode="idle"}[$rate_window])
+            * on (namespace, pod) group_left (node) max by (namespace, pod, node) (kube_pod_info{$selector})
+          )
+  - id: node_memory_usage
+    kind: metrics
+    unit: ratio
+    alternatives:
+      - expr: 1 - max by (node) (node_memory_MemAvailable_bytes{$selector} / node_memory_MemTotal_bytes{$selector})
+        probe: count(node_memory_MemAvailable_bytes{node!=""})
+      - expr: >-
+          1 - max by (node) (
+            (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)
+            * on (namespace, pod) group_left (node) max by (namespace, pod, node) (kube_pod_info{$selector})
+          )
+  - id: node_top_pods_cpu
+    kind: metrics
+    unit: cores
+    alternatives:
+      - expr: >-
+          topk(5,
+            sum by (namespace, pod) (rate(container_cpu_usage_seconds_total{container!="", container!="POD"}[$rate_window]))
+            * on (namespace, pod) group_left (node) max by (namespace, pod, node) (kube_pod_info{$selector})
+          )
+  - id: node_fs_avail_ratio
+    kind: metrics
+    unit: ratio
+    alternatives:
+      - expr: >-
+          min by (node, mountpoint) (
+            node_filesystem_avail_bytes{$selector, fstype!~"tmpfs|overlay|squashfs|nsfs|ramfs|fuse.*", mountpoint!=""}
+            / node_filesystem_size_bytes{$selector, fstype!~"tmpfs|overlay|squashfs|nsfs|ramfs|fuse.*", mountpoint!=""}
+          )
+        probe: count(node_filesystem_avail_bytes{node!=""})
+      - expr: >-
+          min by (node, mountpoint) (
+            (
+              node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs|nsfs|ramfs|fuse.*", mountpoint!=""}
+              / node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs|nsfs|ramfs|fuse.*", mountpoint!=""}
+            )
+            * on (namespace, pod) group_left (node) max by (namespace, pod, node) (kube_pod_info{$selector})
+          )
+  - id: node_fs_hours_to_full
+    kind: metrics
+    unit: hours
+    alternatives:
+      # 按近 6 小时趋势预测，只保留余量在下降的文件系统；值为预计写满前的小时数
+      - expr: >-
+          min by (node, mountpoint) (
+            (
+              node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs|nsfs|ramfs|fuse.*", mountpoint!=""}
+              / -(deriv(node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs|nsfs|ramfs|fuse.*", mountpoint!=""}[6h]) < 0)
+              / 3600
+            )
+            * on (namespace, pod) group_left (node) max by (namespace, pod, node) (kube_pod_info{$selector})
+          )
+  - id: node_fs_readonly
+    kind: metrics
+    alternatives:
+      - expr: >-
+          max by (node, mountpoint) (
+            (node_filesystem_readonly{fstype!~"tmpfs|overlay|squashfs|nsfs|ramfs|fuse.*", mountpoint!=""} + node_filesystem_device_error{fstype!~"tmpfs|overlay|squashfs|nsfs|ramfs|fuse.*", mountpoint!=""})
+            * on (namespace, pod) group_left (node) max by (namespace, pod, node) (kube_pod_info{$selector})
+          ) > 0
+  - id: node_disk_busy
+    kind: metrics
+    unit: ratio
+    alternatives:
+      - expr: >-
+          max by (node, device) (
+            rate(node_disk_io_time_seconds_total[$rate_window])
+            * on (namespace, pod) group_left (node) max by (namespace, pod, node) (kube_pod_info{$selector})
+          )
+  - id: node_network_errors
+    kind: metrics
+    unit: per_second
+    alternatives:
+      - expr: >-
+          sum by (node, device) (
+            (rate(node_network_receive_errs_total{device!~"veth.*|lo|cali.*|lxc.*|cilium.*|flannel.*"}[$rate_window]) + rate(node_network_transmit_errs_total{device!~"veth.*|lo|cali.*|lxc.*|cilium.*|flannel.*"}[$rate_window]))
+            * on (namespace, pod) group_left (node) max by (namespace, pod, node) (kube_pod_info{$selector})
+          )
+  - id: node_conntrack_ratio
+    kind: metrics
+    unit: ratio
+    alternatives:
+      - expr: >-
+          max by (node) (
+            (node_nf_conntrack_entries / node_nf_conntrack_entries_limit)
+            * on (namespace, pod) group_left (node) max by (namespace, pod, node) (kube_pod_info{$selector})
+          )
+  - id: node_time_offset
+    kind: metrics
+    unit: seconds
+    alternatives:
+      - expr: >-
+          max by (node) (
+            abs(node_timex_offset_seconds)
+            * on (namespace, pod) group_left (node) max by (namespace, pod, node) (kube_pod_info{$selector})
+          )
+  - id: node_time_synced
+    kind: metrics
+    alternatives:
+      - expr: >-
+          min by (node) (
+            node_timex_sync_status
+            * on (namespace, pod) group_left (node) max by (namespace, pod, node) (kube_pod_info{$selector})
+          )

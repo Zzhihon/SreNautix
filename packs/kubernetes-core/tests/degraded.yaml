@@ -1,0 +1,82 @@
+api_version: srenautix.io/pack-test/v1
+interval: 1m
+input_series:
+  # 第 20 分钟起 5xx 占 1/11
+  - { series: 'apiserver_request_total{code="200",verb="GET"}', values: '0+100x60' }
+  - { series: 'apiserver_request_total{code="500",verb="GET"}', values: '0x20 0+10x40' }
+  # 全部请求落在 1–5 秒
+  - { series: 'apiserver_request_duration_seconds_bucket{verb="GET",le="0.1"}', values: '0x60' }
+  - { series: 'apiserver_request_duration_seconds_bucket{verb="GET",le="1"}', values: '0x60' }
+  - { series: 'apiserver_request_duration_seconds_bucket{verb="GET",le="5"}', values: '0+100x60' }
+  - { series: 'apiserver_request_duration_seconds_bucket{verb="GET",le="+Inf"}', values: '0+100x60' }
+  - { series: 'up{job="apiserver",instance="10.0.0.1:6443"}', values: '1x60' }
+  - { series: 'up{job="apiserver",instance="10.0.0.2:6443"}', values: '1x20 0x10 1x30' }
+  - { series: 'up{job="kube-scheduler",instance="10.0.0.1:10259"}', values: '1x20 0x10 1x30' }
+  - { series: 'up{job="kube-controller-manager",instance="10.0.0.1:10257"}', values: '1x60' }
+  - { series: 'etcd_server_has_leader{instance="10.0.0.1:2381"}', values: '1x20 0x3 1x37' }
+  - { series: 'etcd_server_leader_changes_seen_total{instance="10.0.0.1:2381"}', values: '3x20 4x3 5x37' }
+  - { series: 'etcd_disk_wal_fsync_duration_seconds_bucket{instance="10.0.0.1:2381",le="0.01"}', values: '0x60' }
+  - { series: 'etcd_disk_wal_fsync_duration_seconds_bucket{instance="10.0.0.1:2381",le="0.5"}', values: '0x60' }
+  - { series: 'etcd_disk_wal_fsync_duration_seconds_bucket{instance="10.0.0.1:2381",le="4"}', values: '0+50x60' }
+  - { series: 'etcd_disk_wal_fsync_duration_seconds_bucket{instance="10.0.0.1:2381",le="+Inf"}', values: '0+50x60' }
+  - { series: 'etcd_mvcc_db_total_size_in_bytes{instance="10.0.0.1:2381"}', values: '1900000000x60' }
+  - { series: 'etcd_server_quota_backend_bytes{instance="10.0.0.1:2381"}', values: '2147483648x60' }
+  - { series: 'kube_pod_status_phase{namespace="shop",pod="web-0",phase="Pending"}', values: '1x60' }
+  - { series: 'kube_pod_status_phase{namespace="shop",pod="web-1",phase="Pending"}', values: '1x60' }
+tests:
+  - {
+      name: 5xx 比例超过 5%,
+      eval_time: 40m,
+      card: apiserver/errors,
+      entity: { kind: cluster, name: c1 },
+      expect: { verdict: abnormal, reason_kind: rule },
+    }
+  - {
+      name: p99 延迟超过 1 秒,
+      eval_time: 40m,
+      card: apiserver/latency,
+      entity: { kind: cluster, name: c1 },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: 一个实例掉线,
+      eval_time: 40m,
+      card: apiserver/instances,
+      entity: { kind: cluster, name: c1 },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: 失去 leader 并发生切换,
+      eval_time: 40m,
+      card: etcd/leader,
+      entity: { kind: cluster, name: c1 },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: fsync 慢,
+      eval_time: 40m,
+      card: etcd/disk,
+      entity: { kind: cluster, name: c1 },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: 接近配额,
+      eval_time: 40m,
+      card: etcd/quota,
+      entity: { kind: cluster, name: c1 },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: 调度器掉线,
+      eval_time: 40m,
+      card: control-plane/components-up,
+      entity: { kind: cluster, name: c1 },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: 持续 Pending,
+      eval_time: 40m,
+      card: control-plane/pending-pods,
+      entity: { kind: cluster, name: c1 },
+      expect: { verdict: abnormal },
+    }

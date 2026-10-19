@@ -126,7 +126,7 @@ export function compileCard(base: Environment, def: CardDefinition, opts: Compil
         }
       }
     }
-    const cost = estimateCost(parsed.ast as never, refNames);
+    const cost = estimateCost(parsed.ast as never, new Set([...refNames, ...letNames]));
     if (cost > COST_BUDGET) {
       fail(`${what} 的求值成本上界 ${cost} 超过 ${COST_BUDGET}：${source}`);
     }

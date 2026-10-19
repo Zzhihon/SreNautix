@@ -1,0 +1,29 @@
+# 控制面组件与集群枢纽（DESIGN §4.3）：枢纽只有在出现针对它的证据，或至少 3 个独立依赖方同时失败时才吸收症状。
+component_types:
+  - id: kubernetes.apiserver
+    hub: true
+    match: { kind: Pod, namespaces: [kube-system], labels: { component: kube-apiserver } }
+    chains: [apiserver]
+  - id: kubernetes.etcd
+    hub: true
+    match: { kind: Pod, namespaces: [kube-system], labels: { component: etcd } }
+    chains: [etcd]
+  - id: kubernetes.scheduler
+    match: { kind: Pod, namespaces: [kube-system], labels: { component: kube-scheduler } }
+    chains: [control-plane]
+  - id: kubernetes.controller-manager
+    match: { kind: Pod, namespaces: [kube-system], labels: { component: kube-controller-manager } }
+    chains: [control-plane]
+  - id: kubernetes.kube-proxy
+    hub: true
+    match: { kind: DaemonSet, namespaces: [kube-system], name_pattern: ^kube-proxy$ }
+    chains: [control-plane]
+  - id: kubernetes.coredns
+    hub: true
+    match: { kind: Deployment, namespaces: [kube-system], name_pattern: ^(coredns|rke2-coredns-rke2-coredns|kube-dns)$ }
+    chains: [control-plane]
+  - id: kubernetes.cni
+    hub: true
+    match:
+      { kind: DaemonSet, name_pattern: ^(cilium|calico-node|kube-flannel-ds|canal|rke2-canal|kube-router|weave-net)$ }
+    chains: [control-plane]

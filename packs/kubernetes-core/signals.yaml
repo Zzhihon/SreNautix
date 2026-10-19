@@ -1,0 +1,47 @@
+# 控制面指标按指标名选择，不依赖抓取任务的 job 名（各发行版命名不同）。
+signals:
+  - id: apiserver_error_ratio
+    kind: metrics
+    unit: ratio
+    alternatives:
+      - expr: >-
+          sum(rate(apiserver_request_total{code=~"5.."}[$rate_window]))
+          / sum(rate(apiserver_request_total[$rate_window]))
+  - id: apiserver_latency_p99
+    kind: metrics
+    unit: seconds
+    alternatives:
+      - expr: >-
+          histogram_quantile(0.99, sum by (le) (rate(apiserver_request_duration_seconds_bucket{verb!~"WATCH|CONNECT"}[$rate_window])))
+  - id: apiserver_instances_up
+    kind: metrics
+    alternatives:
+      - expr: max by (instance) (up{job=~"apiserver|kube-apiserver"})
+  - id: etcd_has_leader
+    kind: metrics
+    alternatives:
+      - expr: min by (instance) (etcd_server_has_leader)
+  - id: etcd_leader_changes
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: max(increase(etcd_server_leader_changes_seen_total[$window]))
+  - id: etcd_wal_fsync_p99
+    kind: metrics
+    unit: seconds
+    alternatives:
+      - expr: histogram_quantile(0.99, sum by (le, instance) (rate(etcd_disk_wal_fsync_duration_seconds_bucket[$rate_window])))
+  - id: etcd_db_quota_ratio
+    kind: metrics
+    unit: ratio
+    alternatives:
+      - expr: max by (instance) (etcd_mvcc_db_total_size_in_bytes / etcd_server_quota_backend_bytes)
+  - id: control_plane_up
+    kind: metrics
+    alternatives:
+      - expr: min by (job) (up{job=~"kube-scheduler|kube-controller-manager|kube-proxy|kube-dns|coredns"})
+  - id: pending_pods
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: sum(kube_pod_status_phase{phase="Pending"})

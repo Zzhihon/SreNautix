@@ -1,0 +1,80 @@
+api_version: srenautix.io/pack-test/v1
+interval: 1m
+input_series:
+  - { series: 'apiserver_request_total{code="200",verb="GET"}', values: '0+100x60' }
+  - { series: 'apiserver_request_total{code="500",verb="GET"}', values: '0x60' }
+  - { series: 'apiserver_request_duration_seconds_bucket{verb="GET",le="0.1"}', values: '0+100x60' }
+  - { series: 'apiserver_request_duration_seconds_bucket{verb="GET",le="1"}', values: '0+100x60' }
+  - { series: 'apiserver_request_duration_seconds_bucket{verb="GET",le="5"}', values: '0+100x60' }
+  - { series: 'apiserver_request_duration_seconds_bucket{verb="GET",le="+Inf"}', values: '0+100x60' }
+  - { series: 'up{job="apiserver",instance="10.0.0.1:6443"}', values: '1x60' }
+  - { series: 'up{job="apiserver",instance="10.0.0.2:6443"}', values: '1x60' }
+  - { series: 'up{job="kube-scheduler",instance="10.0.0.1:10259"}', values: '1x60' }
+  - { series: 'up{job="kube-controller-manager",instance="10.0.0.1:10257"}', values: '1x60' }
+  - { series: 'etcd_server_has_leader{instance="10.0.0.1:2381"}', values: '1x60' }
+  - { series: 'etcd_server_leader_changes_seen_total{instance="10.0.0.1:2381"}', values: '3x60' }
+  - { series: 'etcd_disk_wal_fsync_duration_seconds_bucket{instance="10.0.0.1:2381",le="0.01"}', values: '0+50x60' }
+  - { series: 'etcd_disk_wal_fsync_duration_seconds_bucket{instance="10.0.0.1:2381",le="0.5"}', values: '0+50x60' }
+  - { series: 'etcd_disk_wal_fsync_duration_seconds_bucket{instance="10.0.0.1:2381",le="4"}', values: '0+50x60' }
+  - { series: 'etcd_disk_wal_fsync_duration_seconds_bucket{instance="10.0.0.1:2381",le="+Inf"}', values: '0+50x60' }
+  - { series: 'etcd_mvcc_db_total_size_in_bytes{instance="10.0.0.1:2381"}', values: '300000000x60' }
+  - { series: 'etcd_server_quota_backend_bytes{instance="10.0.0.1:2381"}', values: '2147483648x60' }
+  - { series: 'kube_pod_status_phase{namespace="shop",pod="web-0",phase="Pending"}', values: '1x5 0x55' }
+  - { series: 'kube_pod_status_phase{namespace="shop",pod="web-0",phase="Running"}', values: '0x5 1x55' }
+tests:
+  - {
+      name: 5xx 比例为零,
+      eval_time: 40m,
+      card: apiserver/errors,
+      entity: { kind: cluster, name: c1 },
+      expect: { verdict: normal },
+    }
+  - {
+      name: p99 延迟低,
+      eval_time: 40m,
+      card: apiserver/latency,
+      entity: { kind: cluster, name: c1 },
+      expect: { verdict: normal },
+    }
+  - {
+      name: 实例都在线,
+      eval_time: 40m,
+      card: apiserver/instances,
+      entity: { kind: cluster, name: c1 },
+      expect: { verdict: normal },
+    }
+  - {
+      name: leader 稳定,
+      eval_time: 40m,
+      card: etcd/leader,
+      entity: { kind: cluster, name: c1 },
+      expect: { verdict: normal },
+    }
+  - {
+      name: fsync 快,
+      eval_time: 40m,
+      card: etcd/disk,
+      entity: { kind: cluster, name: c1 },
+      expect: { verdict: normal },
+    }
+  - {
+      name: 配额充足,
+      eval_time: 40m,
+      card: etcd/quota,
+      entity: { kind: cluster, name: c1 },
+      expect: { verdict: normal },
+    }
+  - {
+      name: 组件在线,
+      eval_time: 40m,
+      card: control-plane/components-up,
+      entity: { kind: cluster, name: c1 },
+      expect: { verdict: normal },
+    }
+  - {
+      name: 短暂 Pending 不算,
+      eval_time: 40m,
+      card: control-plane/pending-pods,
+      entity: { kind: cluster, name: c1 },
+      expect: { verdict: normal },
+    }

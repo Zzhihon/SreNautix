@@ -1,0 +1,25 @@
+# 抓取时已写入 node 标签的环境：信号选中第一个备选，不需要 kube_pod_info。
+api_version: srenautix.io/pack-test/v1
+interval: 30s
+input_series:
+  - { series: 'node_cpu_seconds_total{node="n3",cpu="0",mode="idle"}', values: '0+1.5x120' }
+  - { series: 'node_memory_MemTotal_bytes{node="n3"}', values: '16000000000x120' }
+  - { series: 'node_memory_MemAvailable_bytes{node="n3"}', values: '8000000000x120' }
+  - { series: 'node_cpu_seconds_total{node="n4",cpu="0",mode="idle"}', values: '0+28x120' }
+  - { series: 'node_memory_MemTotal_bytes{node="n4"}', values: '16000000000x120' }
+  - { series: 'node_memory_MemAvailable_bytes{node="n4"}', values: '8000000000x120' }
+tests:
+  - {
+      name: n3 CPU 打满,
+      eval_time: 40m,
+      card: node-health/cpu-memory,
+      entity: { kind: Node, name: n3 },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: n4 有余量,
+      eval_time: 40m,
+      card: node-health/cpu-memory,
+      entity: { kind: Node, name: n4 },
+      expect: { verdict: normal },
+    }

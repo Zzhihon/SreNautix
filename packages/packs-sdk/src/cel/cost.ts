@@ -93,7 +93,10 @@ export function estimateCost(n: Node, refs: ReadonlySet<string>): number {
     if (name === 'any_point') {
       return 1 + estimateCost(args[0]!, refs) + S * P * estimateCost(args[2]!, refs);
     }
-    const own = LINEAR_FUNCS.has(name) ? S * P : name === 'join' ? S * S : 1;
+    // 参数是宏的迭代变量（单条序列）时线性函数只扫描一条序列；引用与 let 变量按整组序列计
+    const first = args[0];
+    const single = first !== undefined && first.op === 'id' && typeof first.args === 'string' && !refs.has(first.args);
+    const own = LINEAR_FUNCS.has(name) ? (single ? P : S * P) : name === 'join' ? S * S : 1;
     return own + args.reduce((a, x) => a + estimateCost(x, refs), 0);
   }
   return 1 + children(n).reduce((a, x) => a + estimateCost(x, refs), 0);
