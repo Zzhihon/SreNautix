@@ -64,10 +64,9 @@ function stopper(p: ChildProcess, dir: string): () => Promise<void> {
     });
 }
 
-/** Alertmanager：一个 webhook 接收器，group_wait 1 秒，带 bearer token。 */
+/** Alertmanager（单实例，不组集群）：一个 webhook 接收器，group_wait 1 秒，带 bearer token。 */
 export async function startAlertmanager(webhookUrl: string, token: string): Promise<Proc> {
   const port = await freePort();
-  const cport = await freePort();
   const dir = join(ROOT, `am-${process.pid}-${port}`);
   mkdirSync(dir, { recursive: true });
   writeFileSync(
@@ -97,8 +96,9 @@ export async function startAlertmanager(webhookUrl: string, token: string): Prom
       '--config.file=am.yml',
       `--storage.path=${join(dir, 'data')}`,
       `--web.listen-address=127.0.0.1:${port}`,
-      `--cluster.listen-address=127.0.0.1:${cport}`,
-      '--cluster.advertise-address=127.0.0.1:' + cport,
+      // 单实例：关闭 HA 集群。开启集群时 Alertmanager 在 gossip 稳定（settle）之前不发送任何通知，
+      // 这段等待随机器快慢变化，会让 webhook 迟到几十秒
+      '--cluster.listen-address=',
       '--log.level=warn',
     ],
     dir,
