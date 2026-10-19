@@ -1,0 +1,15 @@
+api_version: srenautix.io/pack-test/v1
+interval: 1m
+input_series:
+  - {
+      series: 'argocd_cluster_connection_status{server="https://kubernetes.default.svc",name="in-cluster"}',
+      values: '1x60',
+    }
+tests:
+  - {
+      name: 目标集群都连通,
+      eval_time: 40m,
+      card: application/clusters,
+      entity: { kind: cluster, name: c1 },
+      expect: { verdict: normal },
+    }

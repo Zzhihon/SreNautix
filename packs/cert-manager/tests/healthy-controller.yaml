@@ -1,0 +1,17 @@
+api_version: srenautix.io/pack-test/v1
+interval: 1m
+input_series:
+  - { series: 'certmanager_controller_sync_call_count{controller="certificates-issuing"}', values: '0+10x60' }
+  - { series: 'certmanager_controller_sync_error_count{controller="certificates-issuing"}', values: '0x60' }
+  - {
+      series: 'certmanager_http_acme_client_request_count{scheme="https",host="acme-v02.api.letsencrypt.org",action="new_order",method="POST",status="201"}',
+      values: '0+1x60',
+    }
+tests:
+  - {
+      name: 签发正常,
+      eval_time: 40m,
+      card: certificate/issuance-errors,
+      entity: { kind: Namespace, namespace: calm, name: calm },
+      expect: { verdict: normal },
+    }

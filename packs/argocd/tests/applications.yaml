@@ -1,0 +1,71 @@
+api_version: srenautix.io/pack-test/v1
+interval: 1m
+input_series:
+  - {
+      series: 'argocd_app_info{namespace="argocd",name="shop",project="default",dest_namespace="shop",health_status="Degraded",sync_status="OutOfSync"}',
+      values: '1x60',
+    }
+  - {
+      series: 'argocd_app_info{namespace="argocd",name="calm",project="default",dest_namespace="calm",health_status="Healthy",sync_status="Synced"}',
+      values: '1x60',
+    }
+  - {
+      series: 'argocd_app_sync_total{namespace="argocd",name="shop",project="default",phase="Failed",dry_run="false"}',
+      values: '0x20 1x40',
+    }
+  - {
+      series: 'argocd_app_sync_total{namespace="argocd",name="calm",project="default",phase="Succeeded",dry_run="false"}',
+      values: '0x20 1x40',
+    }
+  - { series: 'argocd_app_condition{namespace="argocd",name="shop",condition="SyncError"}', values: '0x20 1x40' }
+  - {
+      series: 'argocd_cluster_connection_status{server="https://kubernetes.default.svc",name="in-cluster"}',
+      values: '1x60',
+    }
+  - {
+      series: 'argocd_cluster_connection_status{server="https://edge.example:6443",name="edge"}',
+      values: '1x20 0x10 1x30',
+    }
+tests:
+  - {
+      name: shop 不健康且未同步,
+      eval_time: 40m,
+      card: application/status,
+      entity: { kind: Application, namespace: argocd, name: shop },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: calm 健康且已同步,
+      eval_time: 40m,
+      card: application/status,
+      entity: { kind: Application, namespace: argocd, name: calm },
+      expect: { verdict: normal },
+    }
+  - {
+      name: 没有这个应用,
+      eval_time: 40m,
+      card: application/status,
+      entity: { kind: Application, namespace: argocd, name: ghost },
+      expect: { verdict: undeterminable, reason_kind: rule },
+    }
+  - {
+      name: shop 同步失败,
+      eval_time: 40m,
+      card: application/sync-failures,
+      entity: { kind: Application, namespace: argocd, name: shop },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: calm 同步成功,
+      eval_time: 40m,
+      card: application/sync-failures,
+      entity: { kind: Application, namespace: argocd, name: calm },
+      expect: { verdict: normal },
+    }
+  - {
+      name: 目标集群断开过,
+      eval_time: 40m,
+      card: application/clusters,
+      entity: { kind: cluster, name: c1 },
+      expect: { verdict: abnormal },
+    }

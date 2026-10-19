@@ -1,0 +1,10 @@
+component_types:
+  - id: flux.kustomization
+    match: { kind: Kustomization, api_group: kustomize.toolkit.fluxcd.io }
+    chains: [reconciliation]
+  - id: flux.helmrelease
+    match: { kind: HelmRelease, api_group: helm.toolkit.fluxcd.io }
+    chains: [reconciliation]
+  - id: flux.source
+    match: { kind: GitRepository, api_group: source.toolkit.fluxcd.io }
+    chains: [reconciliation]

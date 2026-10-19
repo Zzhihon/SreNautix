@@ -1,0 +1,76 @@
+chains:
+  - id: certificate
+    title: { zh-CN: 证书, en: Certificates }
+    runbook: cert-manager.md
+    cards:
+      - id: expiry
+        title: { zh-CN: 证书到期与就绪, en: Certificate expiry and readiness }
+        note:
+          zh-CN: 不足 days 天到期、未就绪或已过续期时间点仍未续期的证书；Certificate 实体只看自己，命名空间实体看全部
+          en: 'Certificates close to expiry, not ready, or past their renewal time'
+        applies_to: { kinds: [Certificate, Namespace] }
+        params: { days: 7 }
+        refs:
+          - { name: expiry, signal: certificate_seconds_to_expiry, mode: instant }
+          - { name: notReady, signal: certificate_not_ready, mode: instant, empty_is: normal }
+          - { name: overdue, signal: certificate_renewal_overdue, mode: instant, empty_is: normal }
+        judge:
+          let:
+            - {
+                name: mine,
+                cel: 'entity.kind == "Certificate" ? expiry.filter(s, label(s, "name") == entity.name) : expiry',
+              }
+            - { name: soonest, cel: 'min(mine) / 86400.0' }
+            - name: notReadyCount
+              cel: 'size(notReady.filter(s, entity.kind != "Certificate" || label(s, "name") == entity.name))'
+            - name: overdueCount
+              cel: 'size(overdue.filter(s, entity.kind != "Certificate" || label(s, "name") == entity.name))'
+          abnormal_if:
+            - cel: soonest < double(params.days)
+              say:
+                {
+                  zh-CN: '最近的证书 {soonest, number} 天后到期',
+                  en: 'The nearest certificate expires in {soonest, number} days',
+                }
+            - cel: notReadyCount > 0
+              say: { zh-CN: '{notReadyCount} 个证书未就绪', en: '{notReadyCount} certificates are not ready' }
+            - cel: overdueCount > 0
+              say:
+                {
+                  zh-CN: '{overdueCount} 个证书已过续期时间点仍未续期',
+                  en: '{overdueCount} certificates are past their renewal time',
+                }
+        display:
+          value: soonest
+          table:
+            rows_from: expiry
+            sort_by: -last(row)
+            columns:
+              - { header: { zh-CN: 证书, en: Certificate }, cel: 'label(row, "name")' }
+              - { header: { zh-CN: 剩余, en: Remaining }, cel: last(row), unit: seconds }
+        egress: allow
+      - id: issuance-errors
+        title: { zh-CN: 签发错误, en: Issuance errors }
+        applies_to: { kinds: [Certificate, Namespace, Deployment] }
+        refs:
+          - { name: calls, signal: controller_sync_calls, mode: instant }
+          - { name: sync, signal: controller_sync_errors, mode: instant, empty_is: normal }
+          - { name: acme, signal: acme_request_errors, mode: instant, empty_is: normal }
+        judge:
+          let:
+            - { name: syncErrors, cel: 'size(sync) > 0 ? sum(sync) : 0.0' }
+            - { name: acmeErrors, cel: 'size(acme) > 0 ? sum(acme) : 0.0' }
+          abnormal_if:
+            - cel: acmeErrors > 0.0
+              say: { zh-CN: 'ACME 请求失败 {acmeErrors, number} 次', en: '{acmeErrors, number} failed ACME requests' }
+            - cel: syncErrors > 0.0
+              say:
+                { zh-CN: '控制器同步出错 {syncErrors, number} 次', en: '{syncErrors, number} controller sync errors' }
+        display:
+          table:
+            rows_from: acme
+            columns:
+              - { header: { zh-CN: ACME 服务, en: ACME host }, cel: 'label(row, "host")' }
+              - { header: { zh-CN: 状态码, en: Status }, cel: 'label(row, "status")' }
+              - { header: { zh-CN: 次数, en: Count }, cel: last(row), unit: count }
+        egress: allow

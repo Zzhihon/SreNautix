@@ -1,0 +1,7 @@
+component_types:
+  - id: cert-manager.certificate
+    match: { kind: Certificate, api_group: cert-manager.io }
+    chains: [certificate]
+  - id: cert-manager.controller
+    match: { kind: Deployment, name_pattern: ^cert-manager$ }
+    chains: [certificate]

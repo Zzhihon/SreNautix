@@ -1,0 +1,20 @@
+# 指标来自 argocd-application-controller（docs/operator-manual/metrics.md）。
+# argocd_app_info 的 namespace 标签是 Application 对象所在命名空间，dest_namespace 是部署目标命名空间。
+signals:
+  - id: app_info
+    kind: metrics
+    alternatives:
+      - expr: max by (namespace, name, health_status, sync_status) (argocd_app_info{namespace="$namespace"})
+  - id: app_sync_failures
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: sum by (namespace, name, phase) (increase(argocd_app_sync_total{namespace="$namespace", phase!="Succeeded", dry_run!="true"}[$window])) > 0
+  - id: app_conditions
+    kind: metrics
+    alternatives:
+      - expr: max by (namespace, name, condition) (argocd_app_condition{namespace="$namespace", condition=~".*Error|.*Warning"}) > 0
+  - id: cluster_connection
+    kind: metrics
+    alternatives:
+      - expr: min by (server, name) (min_over_time(argocd_cluster_connection_status[$window]))

@@ -1,0 +1,19 @@
+# Flux 推荐用 Notification Controller 发送事件；以下为 flux2-monitoring-example 与社区规则中常用的告警名。
+entries:
+  - {
+      id: flux-reconciliation-failure,
+      alertname: ReconciliationFailure,
+      role: change,
+      entity: { kind: Kustomization, name_labels: [name], namespace_label: exported_namespace },
+      chains: [reconciliation],
+      mixin: other,
+    }
+  - {
+      id: flux-resource-suspended,
+      alertname: FluxResourceSuspended,
+      role: change,
+      role_confidence: 0.6,
+      entity: { kind: Kustomization, name_labels: [name], namespace_label: exported_namespace },
+      chains: [reconciliation],
+      mixin: other,
+    }

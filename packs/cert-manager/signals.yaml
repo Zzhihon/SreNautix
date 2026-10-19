@@ -1,0 +1,33 @@
+# 指标来自 cert-manager 控制器（internal/collectors/certificate_collector.go、pkg/metrics/metrics.go）。
+# 查询取实体所在命名空间的全部证书；Certificate 实体在判定中按 name 标签筛出自己。
+signals:
+  - id: certificate_seconds_to_expiry
+    kind: metrics
+    unit: seconds
+    alternatives:
+      - expr: min by (namespace, name) (certmanager_certificate_expiration_timestamp_seconds{namespace="$namespace"}) - time()
+  - id: certificate_not_ready
+    kind: metrics
+    alternatives:
+      - expr: max by (namespace, name) (certmanager_certificate_ready_status{namespace="$namespace", condition=~"False|Unknown"}) == 1
+  - id: certificate_renewal_overdue
+    kind: metrics
+    unit: seconds
+    alternatives:
+      # 已过续期时间点仍未续期的秒数
+      - expr: (time() - max by (namespace, name) (certmanager_certificate_renewal_timestamp_seconds{namespace="$namespace"})) > 0
+  - id: controller_sync_errors
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: sum by (controller) (increase(certmanager_controller_sync_error_count[$window])) > 0
+  - id: acme_request_errors
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: sum by (host, status) (increase(certmanager_http_acme_client_request_count{status!~"2.."}[$window])) > 0
+  - id: controller_sync_calls
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: sum(increase(certmanager_controller_sync_call_count[$window]))

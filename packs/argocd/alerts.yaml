@@ -1,0 +1,39 @@
+# Argo CD 官方不带告警规则；以下为 Argo CD 文档示例与社区 mixin（adinhodovic/argo-cd-mixin）中常用的告警名。
+entries:
+  - {
+      id: argocd-app-health-degraded,
+      alertname: ArgoCdAppUnhealthy,
+      role: symptom,
+      entity: { kind: Application, name_labels: [name] },
+      component_type: argocd.application,
+      chains: [application],
+      mixin: other,
+    }
+  - {
+      id: argocd-app-out-of-sync,
+      alertname: ArgoCdAppOutOfSync,
+      role: change,
+      entity: { kind: Application, name_labels: [name] },
+      component_type: argocd.application,
+      chains: [application],
+      mixin: other,
+    }
+  - {
+      id: argocd-app-sync-failed,
+      alertname: ArgoCdAppSyncFailed,
+      role: change,
+      entity: { kind: Application, name_labels: [name] },
+      component_type: argocd.application,
+      chains: [application],
+      mixin: other,
+    }
+  - {
+      id: argocd-app-autosync-disabled,
+      alertname: ArgoCdAppAutoSyncDisabled,
+      role: change,
+      role_confidence: 0.6,
+      entity: { kind: Application, name_labels: [name] },
+      component_type: argocd.application,
+      chains: [application],
+      mixin: other,
+    }

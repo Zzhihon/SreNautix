@@ -1,0 +1,9 @@
+api_version: srenautix.io/pack/v1
+name: flux
+version: 1.0.0
+description: Flux（v2.9）：Kustomization、HelmRelease 与源对象的就绪、暂停与调和耗时；指标来自 kube-state-metrics 的自定义资源状态（gotk_resource_info）与控制器自身
+maturity: stable
+min_srenautix_version: 0.1.0
+requires:
+  - metrics.query
+  - metrics.query_range

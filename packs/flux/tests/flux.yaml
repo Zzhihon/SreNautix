@@ -1,0 +1,79 @@
+api_version: srenautix.io/pack-test/v1
+interval: 1m
+input_series:
+  - {
+      series: 'gotk_resource_info{exported_namespace="flux-system",name="apps",customresource_kind="Kustomization",ready="False",suspended="false"}',
+      values: '0x20 1x40',
+    }
+  - {
+      series: 'gotk_resource_info{exported_namespace="flux-system",name="apps",customresource_kind="Kustomization",ready="True",suspended="false"}',
+      values: '1x20 0x40',
+    }
+  - {
+      series: 'gotk_resource_info{exported_namespace="flux-system",name="infra",customresource_kind="Kustomization",ready="True",suspended="false"}',
+      values: '1x60',
+    }
+  - {
+      series: 'gotk_resource_info{exported_namespace="flux-system",name="redis",customresource_kind="HelmRelease",ready="True",suspended="true"}',
+      values: '1x60',
+    }
+  - {
+      series: 'gotk_reconcile_duration_seconds_bucket{exported_namespace="flux-system",kind="Kustomization",name="apps",le="10"}',
+      values: '0+1x60',
+    }
+  - {
+      series: 'gotk_reconcile_duration_seconds_bucket{exported_namespace="flux-system",kind="Kustomization",name="apps",le="120"}',
+      values: '0+2x60',
+    }
+  - {
+      series: 'gotk_reconcile_duration_seconds_bucket{exported_namespace="flux-system",kind="Kustomization",name="apps",le="+Inf"}',
+      values: '0+2x60',
+    }
+  - {
+      series: 'gotk_reconcile_duration_seconds_bucket{exported_namespace="calm",kind="Kustomization",name="calm",le="10"}',
+      values: '0+2x60',
+    }
+  - {
+      series: 'gotk_reconcile_duration_seconds_bucket{exported_namespace="calm",kind="Kustomization",name="calm",le="120"}',
+      values: '0+2x60',
+    }
+  - {
+      series: 'gotk_reconcile_duration_seconds_bucket{exported_namespace="calm",kind="Kustomization",name="calm",le="+Inf"}',
+      values: '0+2x60',
+    }
+tests:
+  - {
+      name: apps 未就绪,
+      eval_time: 40m,
+      card: reconciliation/readiness,
+      entity: { kind: Kustomization, namespace: flux-system, name: apps },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: infra 就绪,
+      eval_time: 40m,
+      card: reconciliation/readiness,
+      entity: { kind: Kustomization, namespace: flux-system, name: infra },
+      expect: { verdict: normal },
+    }
+  - {
+      name: redis 被暂停,
+      eval_time: 40m,
+      card: reconciliation/readiness,
+      entity: { kind: HelmRelease, namespace: flux-system, name: redis },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: 调和变慢,
+      eval_time: 40m,
+      card: reconciliation/duration,
+      entity: { kind: Namespace, namespace: flux-system, name: flux-system },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: 调和快,
+      eval_time: 40m,
+      card: reconciliation/duration,
+      entity: { kind: Namespace, namespace: calm, name: calm },
+      expect: { verdict: normal },
+    }

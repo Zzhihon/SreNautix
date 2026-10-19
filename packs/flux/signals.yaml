@@ -1,0 +1,18 @@
+# gotk_resource_info 按 fluxcd/flux2-monitoring-example 的 kube-state-metrics customResourceState 配置生成：
+# exported_namespace 是 Flux 对象所在命名空间，customresource_kind 是对象类型，ready、suspended、revision 来自状态。
+signals:
+  - id: resource_info
+    kind: metrics
+    alternatives:
+      - expr: >-
+          max by (exported_namespace, name, customresource_kind, ready, suspended) (
+            gotk_resource_info{exported_namespace="$namespace"}
+          )
+  - id: reconcile_duration_p99
+    kind: metrics
+    unit: seconds
+    alternatives:
+      - expr: >-
+          histogram_quantile(0.99, sum by (le, kind, name) (
+            rate(gotk_reconcile_duration_seconds_bucket{exported_namespace="$namespace"}[$rate_window])
+          ))

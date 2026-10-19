@@ -1,0 +1,7 @@
+component_types:
+  - id: argocd.application
+    match: { kind: Application, api_group: argoproj.io }
+    chains: [application]
+  - id: argocd.application-controller
+    match: { kind: StatefulSet, name_pattern: argocd-application-controller$ }
+    chains: [application]

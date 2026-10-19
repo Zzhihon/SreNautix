@@ -1,0 +1,9 @@
+api_version: srenautix.io/pack/v1
+name: cert-manager
+version: 1.0.0
+description: cert-manager（v1.21）：证书到期、就绪状态、控制器同步错误与 ACME 请求错误
+maturity: stable
+min_srenautix_version: 0.1.0
+requires:
+  - metrics.query
+  - metrics.query_range

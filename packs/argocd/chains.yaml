@@ -1,0 +1,99 @@
+chains:
+  - id: application
+    title: { zh-CN: Argo CD 应用, en: Argo CD applications }
+    runbook: argocd.md
+    cards:
+      - id: status
+        title: { zh-CN: 健康与同步状态, en: Health and sync status }
+        note:
+          {
+            zh-CN: Application 实体只看自己；命名空间实体看其中全部应用,
+            en: An Application entity checks itself; a namespace checks all applications,
+          }
+        applies_to: { kinds: [Application, Namespace] }
+        refs:
+          - { name: info, signal: app_info, mode: instant }
+        judge:
+          let:
+            - {
+                name: mine,
+                cel: 'entity.kind == "Application" ? info.filter(s, label(s, "name") == entity.name) : info',
+              }
+            - {
+                name: degraded,
+                cel: 'size(mine.filter(s, label(s, "health_status") in ["Degraded", "Missing", "Unknown"]))',
+              }
+            - { name: outOfSync, cel: 'size(mine.filter(s, label(s, "sync_status") != "Synced"))' }
+            - { name: seen, cel: size(mine) }
+          undeterminable_if:
+            - cel: seen == 0
+              say: { zh-CN: 没有找到这个应用的指标, en: No metrics for this application }
+          abnormal_if:
+            - cel: degraded > 0
+              say: { zh-CN: '{degraded} 个应用不健康', en: '{degraded} applications are unhealthy' }
+            - cel: outOfSync > 0
+              say: { zh-CN: '{outOfSync} 个应用未同步', en: '{outOfSync} applications are out of sync' }
+        display:
+          table:
+            rows_from: info
+            columns:
+              - { header: { zh-CN: 应用, en: Application }, cel: 'label(row, "name")' }
+              - { header: { zh-CN: 健康, en: Health }, cel: 'label(row, "health_status")' }
+              - { header: { zh-CN: 同步, en: Sync }, cel: 'label(row, "sync_status")' }
+        egress: allow
+      - id: sync-failures
+        title: { zh-CN: 同步失败与应用条件, en: Sync failures and conditions }
+        applies_to: { kinds: [Application, Namespace] }
+        refs:
+          - { name: info, signal: app_info, mode: instant }
+          - { name: failed, signal: app_sync_failures, mode: instant, empty_is: normal }
+          - { name: conditions, signal: app_conditions, mode: instant, empty_is: normal }
+        judge:
+          let:
+            - {
+                name: failures,
+                cel: 'size(failed.filter(s, entity.kind != "Application" || label(s, "name") == entity.name))',
+              }
+            - {
+                name: errors,
+                cel: 'size(conditions.filter(s, entity.kind != "Application" || label(s, "name") == entity.name))',
+              }
+          abnormal_if:
+            - cel: failures > 0
+              say:
+                {
+                  zh-CN: '{failures} 个应用在窗口内同步失败',
+                  en: '{failures} applications failed to sync in the window',
+                }
+            - cel: errors > 0
+              say:
+                {
+                  zh-CN: '{errors} 个应用有错误或警告条件',
+                  en: '{errors} applications have error or warning conditions',
+                }
+        display:
+          table:
+            rows_from: failed
+            columns:
+              - { header: { zh-CN: 应用, en: Application }, cel: 'label(row, "name")' }
+              - { header: { zh-CN: 结果, en: Phase }, cel: 'label(row, "phase")' }
+              - { header: { zh-CN: 次数, en: Count }, cel: last(row), unit: count }
+        egress: allow
+      - id: clusters
+        title: { zh-CN: 目标集群连接, en: Destination cluster connections }
+        applies_to: { kinds: [Application, Namespace, cluster] }
+        refs:
+          - { name: conn, signal: cluster_connection, mode: instant }
+        judge:
+          let:
+            - { name: lost, cel: 'size(conn.filter(s, last(s) < 1.0))' }
+          abnormal_if:
+            - cel: lost > 0
+              say: { zh-CN: '{lost} 个目标集群在窗口内断开', en: '{lost} destination clusters lost connection' }
+        display:
+          table:
+            rows_from: conn
+            columns:
+              - { header: { zh-CN: 集群, en: Cluster }, cel: 'label(row, "server")' }
+              - { header: { zh-CN: 最低, en: Min }, cel: last(row) }
+        egress: allow

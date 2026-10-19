@@ -1,0 +1,38 @@
+# cert-manager 官方 chart 不带告警规则；以下条目对应 cert-manager 文档与社区 mixin（imusmanmalik/cert-manager-mixin）中常用的告警名。
+entries:
+  - {
+      id: cert-manager-absent,
+      alertname: CertManagerAbsent,
+      role: meta,
+      entity: { kind: cluster, name_labels: [alertname] },
+      component_type: cert-manager.controller,
+      chains: [certificate],
+      mixin: other,
+    }
+  - {
+      id: cert-manager-cert-expiry-soon,
+      alertname: CertManagerCertExpirySoon,
+      role: cause,
+      entity: { kind: Certificate, name_labels: [name] },
+      component_type: cert-manager.certificate,
+      chains: [certificate],
+      mixin: other,
+    }
+  - {
+      id: cert-manager-cert-not-ready,
+      alertname: CertManagerCertNotReady,
+      role: cause,
+      entity: { kind: Certificate, name_labels: [name] },
+      component_type: cert-manager.certificate,
+      chains: [certificate],
+      mixin: other,
+    }
+  - {
+      id: cert-manager-hitting-rate-limits,
+      alertname: CertManagerHittingRateLimits,
+      role: cause,
+      entity: { kind: cluster, name_labels: [host] },
+      component_type: cert-manager.controller,
+      chains: [certificate],
+      mixin: other,
+    }

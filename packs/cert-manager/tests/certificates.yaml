@@ -1,0 +1,72 @@
+# 时间零点 2026-01-01T00:00:00Z（unix 1767225600）。eval_time 40m 时窗口结束于 50m（unix 1767228600）。
+api_version: srenautix.io/pack-test/v1
+interval: 1m
+input_series:
+  # web-tls：3 天后到期且已过续期点；api-tls：60 天后到期
+  - {
+      series: 'certmanager_certificate_expiration_timestamp_seconds{namespace="shop",name="web-tls",issuer_name="le",issuer_kind="ClusterIssuer",issuer_group="cert-manager.io"}',
+      values: '1767487800x60',
+    }
+  - {
+      series: 'certmanager_certificate_renewal_timestamp_seconds{namespace="shop",name="web-tls",issuer_name="le",issuer_kind="ClusterIssuer",issuer_group="cert-manager.io"}',
+      values: '1766000000x60',
+    }
+  - {
+      series: 'certmanager_certificate_ready_status{namespace="shop",name="web-tls",condition="False",issuer_name="le",issuer_kind="ClusterIssuer",issuer_group="cert-manager.io"}',
+      values: '1x60',
+    }
+  - {
+      series: 'certmanager_certificate_ready_status{namespace="shop",name="web-tls",condition="True",issuer_name="le",issuer_kind="ClusterIssuer",issuer_group="cert-manager.io"}',
+      values: '0x60',
+    }
+  - {
+      series: 'certmanager_certificate_expiration_timestamp_seconds{namespace="calm",name="api-tls",issuer_name="le",issuer_kind="ClusterIssuer",issuer_group="cert-manager.io"}',
+      values: '1772409600x60',
+    }
+  - {
+      series: 'certmanager_certificate_renewal_timestamp_seconds{namespace="calm",name="api-tls",issuer_name="le",issuer_kind="ClusterIssuer",issuer_group="cert-manager.io"}',
+      values: '1770000000x60',
+    }
+  - {
+      series: 'certmanager_certificate_ready_status{namespace="calm",name="api-tls",condition="True",issuer_name="le",issuer_kind="ClusterIssuer",issuer_group="cert-manager.io"}',
+      values: '1x60',
+    }
+  - {
+      series: 'certmanager_certificate_ready_status{namespace="calm",name="api-tls",condition="False",issuer_name="le",issuer_kind="ClusterIssuer",issuer_group="cert-manager.io"}',
+      values: '0x60',
+    }
+  - { series: 'certmanager_controller_sync_call_count{controller="certificates-issuing"}', values: '0+10x60' }
+  - { series: 'certmanager_controller_sync_error_count{controller="certificates-issuing"}', values: '0x20 0+1x40' }
+  - {
+      series: 'certmanager_http_acme_client_request_count{scheme="https",host="acme-v02.api.letsencrypt.org",action="new_order",method="POST",status="429"}',
+      values: '0x20 0+1x40',
+    }
+tests:
+  - {
+      name: 证书快到期且未就绪,
+      eval_time: 40m,
+      card: certificate/expiry,
+      entity: { kind: Certificate, namespace: shop, name: web-tls },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: 证书充足,
+      eval_time: 40m,
+      card: certificate/expiry,
+      entity: { kind: Certificate, namespace: calm, name: api-tls },
+      expect: { verdict: normal },
+    }
+  - {
+      name: 命名空间汇总,
+      eval_time: 40m,
+      card: certificate/expiry,
+      entity: { kind: Namespace, namespace: shop, name: shop },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: ACME 限流,
+      eval_time: 40m,
+      card: certificate/issuance-errors,
+      entity: { kind: Namespace, namespace: shop, name: shop },
+      expect: { verdict: abnormal },
+    }

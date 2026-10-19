@@ -1,0 +1,55 @@
+chains:
+  - id: reconciliation
+    title: { zh-CN: Flux 调和, en: Flux reconciliation }
+    runbook: flux.md
+    cards:
+      - id: readiness
+        title: { zh-CN: 就绪与暂停, en: Ready and suspended }
+        note:
+          {
+            zh-CN: Flux 对象实体只看自己；命名空间实体看其中全部对象,
+            en: A Flux object checks itself; a namespace checks all objects,
+          }
+        applies_to: { kinds: [Kustomization, HelmRelease, GitRepository, HelmRepository, OCIRepository, Namespace] }
+        refs:
+          - { name: info, signal: resource_info, mode: range }
+        judge:
+          let:
+            - {
+                name: mine,
+                cel: 'entity.kind == "Namespace" ? info : info.filter(s, label(s, "name") == entity.name && label(s, "customresource_kind") == entity.kind)',
+              }
+            - { name: notReady, cel: 'size(mine.filter(s, label(s, "ready") != "True" && last(s) > 0.0))' }
+            - { name: suspended, cel: 'size(mine.filter(s, label(s, "suspended") == "true" && last(s) > 0.0))' }
+            - { name: seen, cel: size(mine) }
+          undeterminable_if:
+            - cel: seen == 0
+              say: { zh-CN: 没有找到这个 Flux 对象的状态指标, en: No state metrics for this Flux object }
+          abnormal_if:
+            - cel: notReady > 0
+              say: { zh-CN: '{notReady} 个 Flux 对象未就绪', en: '{notReady} Flux objects are not ready' }
+            - cel: suspended > 0
+              say: { zh-CN: '{suspended} 个 Flux 对象被暂停', en: '{suspended} Flux objects are suspended' }
+        display:
+          table:
+            rows_from: info
+            columns:
+              - { header: { zh-CN: 类型, en: Kind }, cel: 'label(row, "customresource_kind")' }
+              - { header: { zh-CN: 名称, en: Name }, cel: 'label(row, "name")' }
+              - { header: { zh-CN: 就绪, en: Ready }, cel: 'label(row, "ready")' }
+              - { header: { zh-CN: 暂停, en: Suspended }, cel: 'label(row, "suspended")' }
+        egress: allow
+      - id: duration
+        title: { zh-CN: 调和耗时, en: Reconcile duration }
+        applies_to: { kinds: [Kustomization, HelmRelease, GitRepository, HelmRepository, OCIRepository, Namespace] }
+        params: { seconds: 60 }
+        refs:
+          - { name: p99, signal: reconcile_duration_p99, mode: range }
+        judge:
+          let:
+            - { name: peak, cel: max(p99) }
+          abnormal_if:
+            - cel: peak > double(params.seconds)
+              say: { zh-CN: '调和 p99 耗时峰值 {peak, number} 秒', en: 'Peak reconcile p99 {peak, number} s' }
+        display: { value: peak, unit: seconds }
+        egress: allow

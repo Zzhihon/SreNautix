@@ -1,0 +1,9 @@
+api_version: srenautix.io/pack/v1
+name: argocd
+version: 1.0.0
+description: Argo CD（v3.5）：应用健康与同步状态、同步失败、应用条件与集群连接；变更流由 Argo CD 集成提供
+maturity: stable
+min_srenautix_version: 0.1.0
+requires:
+  - metrics.query
+  - metrics.query_range
