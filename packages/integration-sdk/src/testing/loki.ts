@@ -20,7 +20,13 @@ export async function startLoki(streams: FixtureLogStream[]): Promise<RunningPro
   const [http, grpc] = [await freePort(), await freePort()];
   const config = {
     auth_enabled: false,
-    server: { http_listen_address: '127.0.0.1', http_listen_port: http, grpc_listen_address: '127.0.0.1', grpc_listen_port: grpc, log_level: 'warn' },
+    server: {
+      http_listen_address: '127.0.0.1',
+      http_listen_port: http,
+      grpc_listen_address: '127.0.0.1',
+      grpc_listen_port: grpc,
+      log_level: 'warn',
+    },
     common: {
       instance_addr: '127.0.0.1',
       path_prefix: dir,
@@ -29,7 +35,15 @@ export async function startLoki(streams: FixtureLogStream[]): Promise<RunningPro
       ring: { kvstore: { store: 'inmemory' } },
     },
     schema_config: {
-      configs: [{ from: '2020-01-01', store: 'tsdb', object_store: 'filesystem', schema: 'v13', index: { prefix: 'index_', period: '24h' } }],
+      configs: [
+        {
+          from: '2020-01-01',
+          store: 'tsdb',
+          object_store: 'filesystem',
+          schema: 'v13',
+          index: { prefix: 'index_', period: '24h' },
+        },
+      ],
     },
     limits_config: {
       reject_old_samples: false,

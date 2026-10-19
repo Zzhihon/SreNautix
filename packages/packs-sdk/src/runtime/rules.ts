@@ -42,9 +42,7 @@ export function evaluateRules(set: PackSet, ctx: RuleContext): RuleEvaluation {
       if (!hit) {
         continue;
       }
-      const params = Object.fromEntries(
-        Object.entries(r.rule.params as Record<string, string>).map(([k, expr]) => [k, plain(r.params[k]!(env))]),
-      );
+      const params = Object.fromEntries(Object.keys(r.rule.params).map((k) => [k, plain(r.params[k]!(env))]));
       out.proposals.push({ pack: r.pack, rule_id: r.rule.id, action: r.rule.action, params, title: r.rule.title });
     } catch (err) {
       out.errors.push({ pack: r.pack, rule_id: r.rule.id, error: err instanceof Error ? err.message : String(err) });

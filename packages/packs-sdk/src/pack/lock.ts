@@ -19,7 +19,12 @@ export function computeLock(packs: LoadedPack[], layers: LoadedLayer[]): PackLoc
     api_version: 'srenautix.io/pack-lock/v1',
     packs: [...packs]
       .sort((a, b) => (a.name < b.name ? -1 : 1))
-      .map((p) => ({ name: p.name, version: p.content.manifest.version, source: p.source, digest: packDigest(p.files) })),
+      .map((p) => ({
+        name: p.name,
+        version: p.content.manifest.version,
+        source: p.source,
+        digest: packDigest(p.files),
+      })),
     layers: layers.map((l) => ({ path: l.path, digest: `sha256:${l.sha256}` })),
   };
   return assertValid<PackLock>('schemas/pack.schema.json#/$defs/PackLock', lock);
@@ -54,7 +59,9 @@ export function verifyLock(expected: PackLock, actual: PackLock): void {
     }
   }
   if (canonicalize(expected.layers) !== canonicalize(actual.layers)) {
-    diff.push(`用户层：期望 ${expected.layers.map((l) => l.path).join(', ')}，实际 ${actual.layers.map((l) => l.path).join(', ')}（或内容已变）`);
+    diff.push(
+      `用户层：期望 ${expected.layers.map((l) => l.path).join(', ')}，实际 ${actual.layers.map((l) => l.path).join(', ')}（或内容已变）`,
+    );
   }
   throw new PackLockMismatch(diff.join('；'));
 }

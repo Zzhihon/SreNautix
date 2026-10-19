@@ -70,7 +70,13 @@ export async function resolveSignal(
     }
     // 探测只关心指标名：实体用占位值，集群范围的选择器，不注入集群标签，参数取占位值 1
     const ctx: RenderContext = {
-      entity: { cluster_id: '', kind: 'cluster', namespace: 'srenautix-probe', name: 'srenautix-probe', node: 'srenautix-probe' },
+      entity: {
+        cluster_id: '',
+        kind: 'cluster',
+        namespace: 'srenautix-probe',
+        name: 'srenautix-probe',
+        node: 'srenautix-probe',
+      },
       params: Object.fromEntries([...alt.expr.matchAll(/\$params\.([a-zA-Z_][a-zA-Z0-9_]*)/g)].map((m) => [m[1]!, 1])),
       windowSeconds: probeWindowSeconds,
       profile: { ...ds.labelProfile, cluster: null },

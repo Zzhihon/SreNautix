@@ -86,8 +86,18 @@ export async function runCard(input: RunCardInput): Promise<RunCardResult> {
     const sk = e.signals[r.name]!;
     const res = input.resolutions.get(sk);
     const started = Date.now();
-    const params = { ...(e.def.params ?? {}), ...(input.params ?? {}), ...(r.params ?? {}) } as Record<string, number | string | boolean>;
-    const record = (capability: string, query: string, sampleCount: number, truncated: boolean, error: string | null, integration: string | null) =>
+    const params = { ...(e.def.params ?? {}), ...(input.params ?? {}), ...(r.params ?? {}) } as Record<
+      string,
+      number | string | boolean
+    >;
+    const record = (
+      capability: string,
+      query: string,
+      sampleCount: number,
+      truncated: boolean,
+      error: string | null,
+      integration: string | null,
+    ) =>
       queries.push({
         name: r.name,
         integration: integration ?? '',
@@ -149,16 +159,31 @@ export async function runCard(input: RunCardInput): Promise<RunCardResult> {
             throw new RenderError('logs.match 需要实体的命名空间');
           }
           const pods = input.entity.kind === 'Pod' ? [input.entity.name] : [];
-          const regex = substitute(alt.expr, { entity: input.entity, params, windowSeconds: (w.to - w.from) / 1000, profile: input.ds.labelProfile ?? lintProfile() });
+          const regex = substitute(alt.expr, {
+            entity: input.entity,
+            params,
+            windowSeconds: (w.to - w.from) / 1000,
+            profile: input.ds.labelProfile ?? lintProfile(),
+          });
           const out = await input.ds.logsMatch({
-            selector: { cluster_id: input.entity.cluster_id, namespace: input.entity.namespace, pods, containers: [], labels: {} },
+            selector: {
+              cluster_id: input.entity.cluster_id,
+              namespace: input.entity.namespace,
+              pods,
+              containers: [],
+              labels: {},
+            },
             contains: null,
             regex,
             window,
             limit,
             clock_window: input.clock,
           });
-          refs[r.name] = { kind: 'logs', lines: out.lines.map((l) => ({ time: Date.parse(l.time), labels: l.labels, line: l.line })), truncated: out.truncated };
+          refs[r.name] = {
+            kind: 'logs',
+            lines: out.lines.map((l) => ({ time: Date.parse(l.time), labels: l.labels, line: l.line })),
+            truncated: out.truncated,
+          };
           record('logs.match', regex, out.lines.length, out.truncated, null, input.ds.ids.logs);
         } else {
           const lp = input.ds.logsProfile;
@@ -172,12 +197,27 @@ export async function runCard(input: RunCardInput): Promise<RunCardResult> {
             profile: input.ds.labelProfile ?? lintProfile(),
           });
           const out = await input.ds.logsQuery({ query, dialect: 'logql', window, limit, clock_window: input.clock });
-          refs[r.name] = { kind: 'logs', lines: out.lines.map((l) => ({ time: Date.parse(l.time), labels: l.labels, line: l.line })), truncated: out.truncated };
+          refs[r.name] = {
+            kind: 'logs',
+            lines: out.lines.map((l) => ({ time: Date.parse(l.time), labels: l.labels, line: l.line })),
+            truncated: out.truncated,
+          };
           record('logs.query', query, out.lines.length, out.truncated, null, input.ds.ids.logs);
         }
       } else {
-        const query = substitute(alt.expr, { entity: input.entity, params, windowSeconds: (w.to - w.from) / 1000, profile: input.ds.labelProfile ?? lintProfile() });
-        const out = await input.ds.tracesSearch({ query, dialect: 'traceql', window, limit: r.limit ?? 20, clock_window: input.clock });
+        const query = substitute(alt.expr, {
+          entity: input.entity,
+          params,
+          windowSeconds: (w.to - w.from) / 1000,
+          profile: input.ds.labelProfile ?? lintProfile(),
+        });
+        const out = await input.ds.tracesSearch({
+          query,
+          dialect: 'traceql',
+          window,
+          limit: r.limit ?? 20,
+          clock_window: input.clock,
+        });
         refs[r.name] = {
           kind: 'traces',
           traces: out.hits.map((h) => ({ ...h, start: Date.parse(h.start) })),
@@ -201,7 +241,12 @@ export async function runCard(input: RunCardInput): Promise<RunCardResult> {
   const judgeInput: JudgeInput = {
     refs,
     ...(input.params ? { params: input.params } : {}),
-    entity: { cluster_id: input.entity.cluster_id, kind: input.entity.kind, namespace: input.entity.namespace, name: input.entity.name },
+    entity: {
+      cluster_id: input.entity.cluster_id,
+      kind: input.entity.kind,
+      namespace: input.entity.namespace,
+      name: input.entity.name,
+    },
     window: { from: w.from / 1000, to: w.to / 1000, anchor: input.anchor / 1000 },
     ...(input.locale ? { locale: input.locale } : {}),
   };
@@ -209,7 +254,16 @@ export async function runCard(input: RunCardInput): Promise<RunCardResult> {
   return {
     judgeInput,
     card_id: e.key,
-    entity: { cluster_id: input.entity.cluster_id, kind: input.entity.kind, namespace: input.entity.namespace, name: input.entity.name, uid: null },
+    title: e.def.title,
+    threshold: outcome.threshold,
+    series: sketches(refs),
+    entity: {
+      cluster_id: input.entity.cluster_id,
+      kind: input.entity.kind,
+      namespace: input.entity.namespace,
+      name: input.entity.name,
+      uid: null,
+    },
     window,
     verdict: outcome.verdict,
     display_state: outcome.display_state,
@@ -225,8 +279,45 @@ export async function runCard(input: RunCardInput): Promise<RunCardResult> {
   };
 }
 
+const SKETCH_POINTS = 300;
+const SKETCH_SERIES = 20;
+
+/** 迷你图用的降采样序列：每个指标引用最多 20 条，每条最多 300 点（等间隔抽取，保留首尾） */
+function sketches(refs: Record<string, RefData>): EvidenceResult['series'] {
+  const out: EvidenceResult['series'] = [];
+  for (const [ref, d] of Object.entries(refs)) {
+    if (d.kind !== 'metrics') {
+      continue;
+    }
+    for (const s of d.series.slice(0, SKETCH_SERIES)) {
+      const n = s.times.length;
+      const idx =
+        n <= SKETCH_POINTS
+          ? s.times.map((_, i) => i)
+          : Array.from({ length: SKETCH_POINTS }, (_, i) => Math.round((i * (n - 1)) / (SKETCH_POINTS - 1)));
+      out.push({
+        ref,
+        labels: s.labels,
+        points: idx.map((i) => {
+          const v = s.values[i]!;
+          return [s.times[i]! / 1000, v === null || Number.isFinite(v) ? v : null] as [number, number | null];
+        }),
+      });
+    }
+  }
+  return out;
+}
+
 function lintProfile(): LabelProfile {
-  return { namespace: 'namespace', pod: 'pod', container: 'container', node: 'node', cluster: null, scrape_interval_seconds: 30, tenant: null };
+  return {
+    namespace: 'namespace',
+    pod: 'pod',
+    container: 'container',
+    node: 'node',
+    cluster: null,
+    scrape_interval_seconds: 30,
+    tenant: null,
+  };
 }
 
 /** LogQL 流选择器中的实体匹配器 */

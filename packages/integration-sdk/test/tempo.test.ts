@@ -11,7 +11,15 @@ const TRACE = '0af7651916cd43dd8448eb211c80319c';
 let tempo: RunningProcess;
 beforeAll(async () => {
   tempo = await startTempo([
-    { trace_id: TRACE, span_id: 'b7ad6b7169203331', service: 'web', name: 'GET /cart', start: NOW - 120_000, duration_ms: 812, attributes: { 'http.route': '/cart' } },
+    {
+      trace_id: TRACE,
+      span_id: 'b7ad6b7169203331',
+      service: 'web',
+      name: 'GET /cart',
+      start: NOW - 120_000,
+      duration_ms: 812,
+      attributes: { 'http.route': '/cart' },
+    },
     {
       trace_id: TRACE,
       span_id: '00f067aa0ba902b7',
@@ -38,7 +46,15 @@ describe('TempoAdapter', () => {
     let hits: Awaited<ReturnType<TempoAdapter['search']>>['hits'] = [];
     // 写入后要等 live-store 消费完才能查到
     for (let i = 0; i < 60 && hits.length === 0; i++) {
-      hits = (await a.search({ query: '{ status = error }', dialect: 'traceql', window: clock, limit: 5, clock_window: clock })).hits;
+      hits = (
+        await a.search({
+          query: '{ status = error }',
+          dialect: 'traceql',
+          window: clock,
+          limit: 5,
+          clock_window: clock,
+        })
+      ).hits;
       if (!hits.length) {
         await new Promise((r) => setTimeout(r, 1000));
       }

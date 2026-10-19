@@ -22,11 +22,22 @@ describe('_example 包', () => {
     const ev = evaluateRules(set, {
       incident: { id: 'i1' },
       root: { cluster_id: 'c1', kind: 'Pod', namespace: 'shop', name: 'web-0', component_type: 'example.web' },
-      cards: { '_example/pod-memory/limit-ratio': { verdict: 'abnormal', display_state: 'abnormal', value: '95%', reason_kind: 'rule' } },
+      cards: {
+        '_example/pod-memory/limit-ratio': {
+          verdict: 'abnormal',
+          display_state: 'abnormal',
+          value: '95%',
+          reason_kind: 'rule',
+        },
+      },
     });
     expect(ev.errors).toEqual([]);
     expect(ev.proposals).toEqual([
-      expect.objectContaining({ rule_id: 'oom-restart-pod', action: 'pod_restart', params: { namespace: 'shop', pod: 'web-0' } }),
+      expect.objectContaining({
+        rule_id: 'oom-restart-pod',
+        action: 'pod_restart',
+        params: { namespace: 'shop', pod: 'web-0' },
+      }),
     ]);
   });
 });

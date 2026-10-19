@@ -21,7 +21,7 @@ input_series:
   - series: container_oom_events_total{namespace="shop",pod="web-2",container="web"}
     values: 0x30 1x30
 input_logs:
-  - labels: {namespace: shop, pod: web-2, container: web}
+  - labels: { namespace: shop, pod: web-2, container: web }
     lines:
       - offset: 31m
         line: 'fatal error: runtime: out of memory'
@@ -29,46 +29,46 @@ tests:
   - name: 内存峰值超过 limit 的 90%
     eval_time: 40m
     card: pod-memory/limit-ratio
-    entity: {kind: Pod, namespace: shop, name: web-0}
-    expect: {verdict: abnormal, reason_kind: rule}
+    entity: { kind: Pod, namespace: shop, name: web-0 }
+    expect: { verdict: abnormal, reason_kind: rule }
   - name: 内存平稳
     eval_time: 40m
     card: pod-memory/limit-ratio
-    entity: {kind: Pod, namespace: shop, name: web-1}
-    expect: {verdict: normal, reason_kind: all_clear}
+    entity: { kind: Pod, namespace: shop, name: web-1 }
+    expect: { verdict: normal, reason_kind: all_clear }
   - name: 内存不高但被 OOM 终止
     eval_time: 40m
     card: pod-memory/limit-ratio
-    entity: {kind: Pod, namespace: shop, name: web-2}
-    expect: {verdict: abnormal, reason_kind: rule}
+    entity: { kind: Pod, namespace: shop, name: web-2 }
+    expect: { verdict: abnormal, reason_kind: rule }
   - name: StatefulSet 汇总全部 Pod
     eval_time: 40m
     card: pod-memory/limit-ratio
-    entity: {kind: StatefulSet, namespace: shop, name: web}
-    expect: {verdict: abnormal}
+    entity: { kind: StatefulSet, namespace: shop, name: web }
+    expect: { verdict: abnormal }
   - name: 调高阈值后正常
     eval_time: 40m
     card: pod-memory/limit-ratio
-    entity: {kind: Pod, namespace: shop, name: web-0}
-    params: {limit_ratio: 0.97}
-    expect: {verdict: normal}
+    entity: { kind: Pod, namespace: shop, name: web-0 }
+    params: { limit_ratio: 0.97 }
+    expect: { verdict: normal }
   - name: 窗口结束时余量不足
     eval_time: 40m
     card: checks/memory-headroom
-    entity: {kind: Pod, namespace: shop, name: web-0}
-    expect: {verdict: abnormal}
+    entity: { kind: Pod, namespace: shop, name: web-0 }
+    expect: { verdict: abnormal }
   - name: 窗口结束时余量充足
     eval_time: 40m
     card: checks/memory-headroom
-    entity: {kind: Pod, namespace: shop, name: web-1}
-    expect: {verdict: normal}
+    entity: { kind: Pod, namespace: shop, name: web-1 }
+    expect: { verdict: normal }
   - name: 有内存不足日志
     eval_time: 40m
     card: pod-memory/oom-logs
-    entity: {kind: Pod, namespace: shop, name: web-2}
-    expect: {verdict: abnormal}
+    entity: { kind: Pod, namespace: shop, name: web-2 }
+    expect: { verdict: abnormal }
   - name: 没有内存不足日志
     eval_time: 40m
     card: pod-memory/oom-logs
-    entity: {kind: Pod, namespace: shop, name: web-1}
-    expect: {verdict: normal}
+    entity: { kind: Pod, namespace: shop, name: web-1 }
+    expect: { verdict: normal }

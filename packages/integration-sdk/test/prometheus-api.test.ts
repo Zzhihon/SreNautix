@@ -1,7 +1,12 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { PrometheusApiAdapter } from '../src/metrics/prometheus-api.js';
 import { ClockWindowViolation, DatasourceError } from '../src/errors.js';
-import { startPrometheus, startVictoriaMetrics, type FixtureMetricSeries, type TsdbInstance } from '../src/testing/tsdb.js';
+import {
+  startPrometheus,
+  startVictoriaMetrics,
+  type FixtureMetricSeries,
+  type TsdbInstance,
+} from '../src/testing/tsdb.js';
 import { toIso } from '../src/clock.js';
 
 // 2026-01-01T00:00:00Z 起每分钟一个点，共 60 分钟
@@ -30,7 +35,11 @@ afterAll(async () => {
 describe.each(['prometheus', 'victoria-metrics'] as const)('Prometheus API 适配器（%s）', (kind) => {
   const adapter = () => {
     const b = backends.find((x) => x.kind === kind)!;
-    return new PrometheusApiAdapter({ id: kind, url: b.url, dialects: kind === 'prometheus' ? ['promql'] : ['promql', 'metricsql'] });
+    return new PrometheusApiAdapter({
+      id: kind,
+      url: b.url,
+      dialects: kind === 'prometheus' ? ['promql'] : ['promql', 'metricsql'],
+    });
   };
 
   it('query 与 query_range 返回同样的数据', async () => {
@@ -72,20 +81,44 @@ describe.each(['prometheus', 'victoria-metrics'] as const)('Prometheus API 适�
     ).rejects.toThrow(ClockWindowViolation);
     // 区间 [1h] 回看到时钟窗口之前
     await expect(
-      a.query({ expr: 'rate(up[1h])', dialect: 'promql', time: toIso(T0 + 30 * MIN), clock_window: clock, timeout_ms: 1000 }),
+      a.query({
+        expr: 'rate(up[1h])',
+        dialect: 'promql',
+        time: toIso(T0 + 30 * MIN),
+        clock_window: clock,
+        timeout_ms: 1000,
+      }),
     ).rejects.toThrow(ClockWindowViolation);
     await expect(
-      a.query({ expr: 'up offset -10m', dialect: 'promql', time: toIso(T0 + 55 * MIN), clock_window: clock, timeout_ms: 1000 }),
+      a.query({
+        expr: 'up offset -10m',
+        dialect: 'promql',
+        time: toIso(T0 + 55 * MIN),
+        clock_window: clock,
+        timeout_ms: 1000,
+      }),
     ).rejects.toThrow(ClockWindowViolation);
     await expect(
-      a.query({ expr: 'up @ 1767225600', dialect: 'promql', time: toIso(T0 + 55 * MIN), clock_window: clock, timeout_ms: 1000 }),
+      a.query({
+        expr: 'up @ 1767225600',
+        dialect: 'promql',
+        time: toIso(T0 + 55 * MIN),
+        clock_window: clock,
+        timeout_ms: 1000,
+      }),
     ).rejects.toThrow(ClockWindowViolation);
   });
 
   it('方言不匹配时报错', async () => {
     if (kind === 'prometheus') {
       await expect(
-        adapter().query({ expr: 'rate(up)', dialect: 'metricsql', time: toIso(T0 + 30 * MIN), clock_window: clock, timeout_ms: 1000 }),
+        adapter().query({
+          expr: 'rate(up)',
+          dialect: 'metricsql',
+          time: toIso(T0 + 30 * MIN),
+          clock_window: clock,
+          timeout_ms: 1000,
+        }),
       ).rejects.toThrow(DatasourceError);
     } else {
       const r = await adapter().query({

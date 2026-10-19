@@ -124,12 +124,23 @@ export async function compilePackSet(loaded: LoadedPack[], opts: CompileOptions)
       }
       s.alternatives.forEach((a, i) => {
         if (a.recording_rule && i === s.alternatives.length - 1) {
-          throw new PackLintError(`${p.dir}/signals.yaml`, `信号 ${s.id} 的最后一个备选依赖录制规则；录制规则可选，最后一个备选必须是原始表达式`);
+          throw new PackLintError(
+            `${p.dir}/signals.yaml`,
+            `信号 ${s.id} 的最后一个备选依赖录制规则；录制规则可选，最后一个备选必须是原始表达式`,
+          );
         }
         const d = a.dialect ?? 'promql';
-        const ok = s.kind === 'metrics' ? d === 'promql' || d === 'metricsql' : s.kind === 'logs' ? d === 'logql' || d === 'logs_match' : d === 'traceql';
+        const ok =
+          s.kind === 'metrics'
+            ? d === 'promql' || d === 'metricsql'
+            : s.kind === 'logs'
+              ? d === 'logql' || d === 'logs_match'
+              : d === 'traceql';
         if (!ok) {
-          throw new PackLintError(`${p.dir}/signals.yaml`, `信号 ${s.id} 的备选 ${i} 方言 ${d} 与信号类型 ${s.kind} 不符`);
+          throw new PackLintError(
+            `${p.dir}/signals.yaml`,
+            `信号 ${s.id} 的备选 ${i} 方言 ${d} 与信号类型 ${s.kind} 不符`,
+          );
         }
       });
       signals.set(key, { pack: p.name, signal: s });
@@ -180,7 +191,10 @@ export async function compilePackSet(loaded: LoadedPack[], opts: CompileOptions)
                 throw new Error(`range 模式的查询结果必须是瞬时向量，实际为 ${a.type}`);
               }
             } catch (err) {
-              throw new PackLintError(where, `信号 ${sk} 的备选 ${i}（实体类型 ${kind}）：${err instanceof Error ? err.message : String(err)}`);
+              throw new PackLintError(
+                where,
+                `信号 ${sk} 的备选 ${i}（实体类型 ${kind}）：${err instanceof Error ? err.message : String(err)}`,
+              );
             }
           }
         }

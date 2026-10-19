@@ -61,7 +61,9 @@ export async function ensureBackend(name: BackendName): Promise<Record<string, s
   const { os, arch } = platform();
   const vars = { version: spec.version, os, arch };
   const target = join(backendsDir(), `${name}-${spec.version}-${os}-${arch}`);
-  const paths = Object.fromEntries(Object.entries(spec.binaries).map(([bin, rel]) => [bin, join(target, fill(rel, vars))]));
+  const paths = Object.fromEntries(
+    Object.entries(spec.binaries).map(([bin, rel]) => [bin, join(target, fill(rel, vars))]),
+  );
   if (Object.values(paths).every((p) => existsSync(p))) {
     return paths;
   }

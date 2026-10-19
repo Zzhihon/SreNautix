@@ -61,15 +61,27 @@ export class PromqlEngine {
     if (!out.ok) {
       throw new QuerySyntaxError(dialect, expr, out.error);
     }
-    const { ok: _ok, error: _error, ...analysis } = out;
-    return analysis;
+    return {
+      type: out.type,
+      selectors: out.selectors,
+      functions: out.functions,
+      labels: out.labels,
+      normalized: out.normalized,
+      lookback_ms: out.lookback_ms,
+      lookahead_ms: out.lookahead_ms,
+      has_at: out.has_at,
+    };
   }
 
   /**
    * 按标签档案改写查询：rename 改写标签名（匹配器、by/without、on/ignoring/group_*、
    * label_replace/label_join 的标签参数）；inject 给每个选择器加等值匹配器（例如外部标签 cluster）
    */
-  rewrite(expr: string, dialect: Dialect, spec: { rename: Record<string, string>; inject: Record<string, string> }): string {
+  rewrite(
+    expr: string,
+    dialect: Dialect,
+    spec: { rename: Record<string, string>; inject: Record<string, string> },
+  ): string {
     const out = JSON.parse(this.api.rewrite(expr, dialect, JSON.stringify(spec))) as {
       ok: boolean;
       error: string;
@@ -100,8 +112,10 @@ export function loadPromqlEngine(): Promise<PromqlEngine> {
     const require = createRequire(import.meta.url);
     // Go 自带的 wasm 运行胶水，构建时从 $(go env GOROOT)/lib/wasm 复制
     require(new URL('wasm_exec.cjs', dir).pathname);
+    // tsconfig 不含 DOM 库，WebAssembly 的类型在这里按用到的部分声明
     const g = globalThis as unknown as {
-      Go: new () => { importObject: WebAssembly.Imports; run(i: WebAssembly.Instance): Promise<void> };
+      Go: new () => { importObject: object; run(i: object): Promise<void> };
+      WebAssembly: { instantiate(bytes: Uint8Array, imports: object): Promise<{ instance: object }> };
       __srenautixPromql?: WasmApi;
       __srenautixPromqlReady?: () => void;
     };
@@ -109,7 +123,7 @@ export function loadPromqlEngine(): Promise<PromqlEngine> {
       g.__srenautixPromqlReady = resolve;
     });
     const go = new g.Go();
-    const { instance } = await WebAssembly.instantiate(readFileSync(new URL('promql.wasm', dir)), go.importObject);
+    const { instance } = await g.WebAssembly.instantiate(readFileSync(new URL('promql.wasm', dir)), go.importObject);
     void go.run(instance);
     await ready;
     if (!g.__srenautixPromql) {

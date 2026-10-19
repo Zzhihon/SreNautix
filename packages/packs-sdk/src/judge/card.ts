@@ -203,7 +203,10 @@ export function compileCard(base: Environment, def: CardDefinition, opts: Compil
 
 const SYSTEM_TEXT: Record<Exclude<ReasonKind, 'rule'>, Record<Locale, string>> = {
   no_data: { 'zh-CN': '查询没有样本', en: 'The queries returned no samples' },
-  partial_data: { 'zh-CN': '部分查询没有样本，不能判定为正常', en: 'Some queries returned no samples; cannot conclude normal' },
+  partial_data: {
+    'zh-CN': '部分查询没有样本，不能判定为正常',
+    en: 'Some queries returned no samples; cannot conclude normal',
+  },
   source_error: { 'zh-CN': '数据源读取失败', en: 'The data source failed' },
   capability_missing: { 'zh-CN': '所需的数据源能力不可用', en: 'A required data source capability is unavailable' },
   observability_gap: { 'zh-CN': '依赖的观测目标有缺口', en: 'The observed target has an observability gap' },
@@ -323,7 +326,10 @@ export function judgeCard(card: CompiledCard, input: JudgeInput): CardOutcome {
       super(detail);
     }
   }
-  const run = (e: CompiledExpr, c: Record<string, unknown>): { ok: true; v: unknown } | { ok: false; a: Availability } => {
+  const run = (
+    e: CompiledExpr,
+    c: Record<string, unknown>,
+  ): { ok: true; v: unknown } | { ok: false; a: Availability } => {
     const b = blocked(e.ids);
     if (!b.ok) {
       return { ok: false, a: b };
@@ -408,10 +414,17 @@ export function judgeCard(card: CompiledCard, input: JudgeInput): CardOutcome {
         continue;
       }
       if (bool(rule.expr, r.v)) {
-        return { verdict: 'abnormal', display_state: 'abnormal', reason: { kind: 'rule', text: say(rule.say) }, ...decorate() };
+        return {
+          verdict: 'abnormal',
+          display_state: 'abnormal',
+          reason: { kind: 'rule', text: say(rule.say) },
+          ...decorate(),
+        };
       }
     }
-    const badRefs = def.refs.map((r) => avail.get(r.name)!).filter((a): a is Exclude<Availability, { ok: true }> => !a.ok);
+    const badRefs = def.refs
+      .map((r) => avail.get(r.name)!)
+      .filter((a): a is Exclude<Availability, { ok: true }> => !a.ok);
     const gaps = [...skipped.filter((a): a is Exclude<Availability, { ok: true }> => !a.ok), ...badRefs];
     if (gaps.length) {
       const err = gaps.find((g) => g.kind === 'source_error');
@@ -430,7 +443,12 @@ export function judgeCard(card: CompiledCard, input: JudgeInput): CardOutcome {
     return { verdict: 'normal', display_state: 'normal', reason: sys('all_clear'), ...decorate() };
   } catch (err) {
     if (err instanceof EvalFailure) {
-      return { verdict: 'undeterminable', display_state: 'undeterminable', reason: sys('evaluation_error', err.detail), ...empty };
+      return {
+        verdict: 'undeterminable',
+        display_state: 'undeterminable',
+        reason: sys('evaluation_error', err.detail),
+        ...empty,
+      };
     }
     throw err;
   }

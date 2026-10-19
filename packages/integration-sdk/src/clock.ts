@@ -36,8 +36,6 @@ export function assertWindowInClock(window: TimeWindow, clock: TimeWindow): void
 /** PromQL 的区间与 offset 会读取查询时刻之前的数据：回看量也必须落在时钟窗口内 */
 export function assertLookbackInClock(evalFromMs: number, lookbackMs: number, clock: TimeWindow): void {
   if (evalFromMs - lookbackMs < toMillis(clock.from)) {
-    throw new ClockWindowViolation(
-      `查询回看到 ${toIso(evalFromMs - lookbackMs)}，早于时钟窗口起点 ${clock.from}`,
-    );
+    throw new ClockWindowViolation(`查询回看到 ${toIso(evalFromMs - lookbackMs)}，早于时钟窗口起点 ${clock.from}`);
   }
 }

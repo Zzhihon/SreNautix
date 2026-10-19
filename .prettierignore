@@ -8,6 +8,7 @@ pnpm-lock.yaml
 test/crds/
 .scratch/
 .work/
+packages/integration-sdk/wasm/
 *.md
 architecture.svg
 LICENSE*

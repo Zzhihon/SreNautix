@@ -67,8 +67,17 @@ export class PrometheusApiAdapter {
     return this.engine;
   }
 
-  private async call<T>(path: string, params: URLSearchParams, timeoutMs: number, method: 'GET' | 'POST' = 'POST'): Promise<ApiResponse<T>> {
-    const r = await this.http.request(method, path, method === 'GET' ? { query: params, timeoutMs } : { form: params, timeoutMs });
+  private async call<T>(
+    path: string,
+    params: URLSearchParams,
+    timeoutMs: number,
+    method: 'GET' | 'POST' = 'POST',
+  ): Promise<ApiResponse<T>> {
+    const r = await this.http.request(
+      method,
+      path,
+      method === 'GET' ? { query: params, timeoutMs } : { form: params, timeoutMs },
+    );
     let body: ApiResponse<T>;
     try {
       body = JSON.parse(r.text) as ApiResponse<T>;
@@ -76,7 +85,10 @@ export class PrometheusApiAdapter {
       throw new DatasourceError(this.config.id, `${path} 返回 HTTP ${r.status}：${r.text.slice(0, 500)}`);
     }
     if (r.status < 200 || r.status >= 300 || body.status !== 'success') {
-      throw new DatasourceError(this.config.id, `${path} 返回 HTTP ${r.status}：${body.errorType ?? ''} ${body.error ?? r.text.slice(0, 500)}`);
+      throw new DatasourceError(
+        this.config.id,
+        `${path} 返回 HTTP ${r.status}：${body.errorType ?? ''} ${body.error ?? r.text.slice(0, 500)}`,
+      );
     }
     return body;
   }

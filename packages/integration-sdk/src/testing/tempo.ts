@@ -26,7 +26,13 @@ export async function startTempo(spans: FixtureSpan[]): Promise<RunningProcess> 
   const dir = mkdtempSync(join(root, 'tempo-'));
   const [http, grpc, otlp] = [await freePort(), await freePort(), await freePort()];
   const config = {
-    server: { http_listen_address: '127.0.0.1', http_listen_port: http, grpc_listen_address: '127.0.0.1', grpc_listen_port: grpc, log_level: 'warn' },
+    server: {
+      http_listen_address: '127.0.0.1',
+      http_listen_port: http,
+      grpc_listen_address: '127.0.0.1',
+      grpc_listen_port: grpc,
+      log_level: 'warn',
+    },
     distributor: { receivers: { otlp: { protocols: { http: { endpoint: `127.0.0.1:${otlp}` } } } } },
     storage: { trace: { backend: 'local', local: { path: join(dir, 'traces') }, wal: { path: join(dir, 'wal') } } },
     usage_report: { reporting_enabled: false },

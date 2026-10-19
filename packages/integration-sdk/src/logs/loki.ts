@@ -52,7 +52,7 @@ export class LokiAdapter {
       matchers.push(`${l.container}=~${logqlString(sel.containers.map(re2Escape).join('|'))}`);
     }
     for (const [k, v] of Object.entries(sel.labels).sort(([a], [b]) => (a < b ? -1 : 1))) {
-      matchers.push(`${k}=${logqlString(v)}`);
+      matchers.push(`${k}=${logqlString(v ?? '')}`);
     }
     if ((req.contains === null) === (req.regex === null)) {
       throw new TypeError('logs.match 的 contains 与 regex 必须二选一');

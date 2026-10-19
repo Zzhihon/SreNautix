@@ -20,7 +20,7 @@ import {
   type TsdbInstance,
 } from '@srenautix/integration-sdk';
 import { judgeCard } from '../judge/card.js';
-import type { RefData } from '../judge/data.js';
+import { denseLabels, type RefData } from '../judge/data.js';
 import type { PackSet } from '../pack/compile.js';
 import { LiveDataSource, type EvidenceDataSource } from '../runtime/datasource.js';
 import { durationSeconds, runCard, type RunCardResult } from '../runtime/run-card.js';
@@ -74,7 +74,9 @@ function expandFixtures(engine: PromqlEngine, file: PackTestFile, where: string)
         return [];
       }
       if (v === 'stale') {
-        throw new Error(`${where}：夹具不支持 stale；VictoriaMetrics 的导入接口不接受 staleness marker，序列结束请省略后面的点`);
+        throw new Error(
+          `${where}：夹具不支持 stale；VictoriaMetrics 的导入接口不接受 staleness marker，序列结束请省略后面的点`,
+        );
       }
       const num = v === 'NaN' ? Number.NaN : v === '+Inf' ? Infinity : v === '-Inf' ? -Infinity : v;
       return [{ t: FIXTURE_EPOCH + i * step, v: num }];
@@ -83,7 +85,7 @@ function expandFixtures(engine: PromqlEngine, file: PackTestFile, where: string)
   });
   let lastLog = 0;
   const logs = (file.input_logs ?? []).map((s) => ({
-    labels: s.labels,
+    labels: denseLabels(s.labels),
     lines: s.lines.map((l) => {
       const t = FIXTURE_EPOCH + durationSeconds(l.offset) * 1000;
       lastLog = Math.max(lastLog, t - FIXTURE_EPOCH);
@@ -94,7 +96,15 @@ function expandFixtures(engine: PromqlEngine, file: PackTestFile, where: string)
 }
 
 function profileFor(intervalSeconds: number): LabelProfile {
-  return { namespace: 'namespace', pod: 'pod', container: 'container', node: 'node', cluster: null, scrape_interval_seconds: intervalSeconds, tenant: null };
+  return {
+    namespace: 'namespace',
+    pod: 'pod',
+    container: 'container',
+    node: 'node',
+    cluster: null,
+    scrape_interval_seconds: intervalSeconds,
+    tenant: null,
+  };
 }
 
 const LOGS_PROFILE = { namespace: 'namespace', pod: 'pod', container: 'container', cluster: null };
@@ -105,31 +115,65 @@ interface Env {
   ds: Record<Backend, EvidenceDataSource>;
 }
 
-async function startEnv(fx: Fixtures, intervalSeconds: number): Promise<Env> {
+async function startEnv(fx: Fixtures, intervalSeconds: number, withLoki: boolean): Promise<Env> {
   const [prom, vm, loki] = await Promise.all([
     startPrometheus(fx.metrics),
     startVictoriaMetrics(fx.metrics),
-    fx.logs.length ? startLoki(fx.logs) : Promise.resolve(null),
+    withLoki || fx.logs.length ? startLoki(fx.logs) : Promise.resolve(null),
   ]);
   const profile = profileFor(intervalSeconds);
   const ds = (b: Backend, t: TsdbInstance) =>
     new LiveDataSource({
-      metrics: { adapter: new PrometheusApiAdapter({ id: b, url: t.url, dialects: b === 'prometheus' ? ['promql'] : ['promql', 'metricsql'] }), profile },
+      metrics: {
+        adapter: new PrometheusApiAdapter({
+          id: b,
+          url: t.url,
+          dialects: b === 'prometheus' ? ['promql'] : ['promql', 'metricsql'],
+        }),
+        profile,
+      },
       ...(loki
-        ? { logs: { adapter: new LokiAdapter({ id: 'loki', url: loki.url, labels: LOGS_PROFILE }), profile: LOGS_PROFILE } }
+        ? {
+            logs: {
+              adapter: new LokiAdapter({ id: 'loki', url: loki.url, labels: LOGS_PROFILE }),
+              profile: LOGS_PROFILE,
+            },
+          }
         : {}),
     });
-  return { tsdb: { prometheus: prom, 'victoria-metrics': vm }, loki, ds: { prometheus: ds('prometheus', prom), 'victoria-metrics': ds('victoria-metrics', vm) } };
+  return {
+    tsdb: { prometheus: prom, 'victoria-metrics': vm },
+    loki,
+    ds: { prometheus: ds('prometheus', prom), 'victoria-metrics': ds('victoria-metrics', vm) },
+  };
 }
 
 async function stopEnv(env: Env): Promise<void> {
   await Promise.all([env.tsdb.prometheus.stop(), env.tsdb['victoria-metrics'].stop(), env.loki?.stop()]);
 }
 
-async function resolveAll(set: PackSet, signalKeys: Set<string>, ds: EvidenceDataSource, engine: PromqlEngine, at: number, clock: { from: string; to: string }) {
+async function resolveAll(
+  set: PackSet,
+  signalKeys: Set<string>,
+  ds: EvidenceDataSource,
+  engine: PromqlEngine,
+  at: number,
+  clock: { from: string; to: string },
+) {
   const out = new Map<string, SignalResolution>();
   for (const k of signalKeys) {
-    out.set(k, await resolveSignal(k, set.signals.get(k)!.signal, ds, engine, toIso(at), clock, Math.max(3600, (at - FIXTURE_EPOCH) / 1000)));
+    out.set(
+      k,
+      await resolveSignal(
+        k,
+        set.signals.get(k)!.signal,
+        ds,
+        engine,
+        toIso(at),
+        clock,
+        Math.max(3600, (at - FIXTURE_EPOCH) / 1000),
+      ),
+    );
   }
   return out;
 }
@@ -168,7 +212,7 @@ export async function runPackTests(opts: PackTestOptions): Promise<PackTestRepor
       const where = `${pack.name}/tests/${file}`;
       const fx = expandFixtures(engine, tf, where);
       const interval = durationSeconds(tf.interval);
-      const env = await startEnv(fx, interval);
+      const env = await startEnv(fx, interval, false);
       try {
         const end = FIXTURE_EPOCH + fx.spanMs;
         const clock = { from: toIso(FIXTURE_EPOCH - 30 * DAY), to: toIso(end + 30 * DAY) };
@@ -187,7 +231,12 @@ export async function runPackTests(opts: PackTestOptions): Promise<PackTestRepor
         for (const t of tf.tests) {
           const key = cardKeyFor(pack.name, t.card);
           covered.add(key);
-          const entity = { cluster_id: 'pack-test', kind: t.entity.kind, namespace: t.entity.namespace ?? null, name: t.entity.name };
+          const entity = {
+            cluster_id: 'pack-test',
+            kind: t.entity.kind,
+            namespace: t.entity.namespace ?? null,
+            name: t.entity.name,
+          };
           const anchor = FIXTURE_EPOCH + durationSeconds(t.eval_time) * 1000;
           const results: CaseResult['results'] = {};
           const failures: string[] = [];
@@ -221,9 +270,20 @@ export async function runPackTests(opts: PackTestOptions): Promise<PackTestRepor
           const p = results.prometheus!;
           const v = results['victoria-metrics']!;
           if (p.verdict !== v.verdict || p.display_state !== v.display_state || p.reason_kind !== v.reason_kind) {
-            failures.push(`Prometheus 与 VictoriaMetrics 的结论不一致：${p.verdict}/${p.reason_kind} 对 ${v.verdict}/${v.reason_kind}`);
+            failures.push(
+              `Prometheus 与 VictoriaMetrics 的结论不一致：${p.verdict}/${p.reason_kind} 对 ${v.verdict}/${v.reason_kind}`,
+            );
           }
-          cases.push({ pack: pack.name, file, name: t.name, card: key, kind: 'fixture', passed: !failures.length, results, failure: failures.join('；') || null });
+          cases.push({
+            pack: pack.name,
+            file,
+            name: t.name,
+            card: key,
+            kind: 'fixture',
+            passed: !failures.length,
+            results,
+            failure: failures.join('；') || null,
+          });
         }
       } finally {
         await stopEnv(env);
@@ -232,7 +292,9 @@ export async function runPackTests(opts: PackTestOptions): Promise<PackTestRepor
 
     // 无数据：在空后端上执行每张卡（信号按全部夹具探测的结果选备选）
     if (cardKeys.length) {
-      const env = await startEnv({ metrics: [], logs: [], spanMs: 3600_000 }, 60);
+      // 有日志卡的包同时启动空的 Loki，无数据测试才能覆盖日志引用
+      const usesLogs = cardKeys.some((k) => set.cards.get(k)!.def.refs.some((r) => r.mode === 'logs'));
+      const env = await startEnv({ metrics: [], logs: [], spanMs: 3600_000 }, 60, usesLogs);
       try {
         const end = FIXTURE_EPOCH + 3600_000;
         const clock = { from: toIso(FIXTURE_EPOCH - 30 * DAY), to: toIso(end + 30 * DAY) };
@@ -245,17 +307,41 @@ export async function runPackTests(opts: PackTestOptions): Promise<PackTestRepor
             }),
           );
           const kind = e.def.applies_to?.kinds?.[0] ?? 'Pod';
-          const entity = { cluster_id: 'pack-test', kind, namespace: kind === 'Node' || kind === 'cluster' ? null : 'srenautix-nodata', name: 'srenautix-nodata' };
+          const entity = {
+            cluster_id: 'pack-test',
+            kind,
+            namespace: kind === 'Node' || kind === 'cluster' ? null : 'srenautix-nodata',
+            name: 'srenautix-nodata',
+          };
           const results: CaseResult['results'] = {};
           const failures: string[] = [];
           for (const b of BACKENDS) {
-            const r = await runCard({ set, card: key, entity, anchor: end - 600_000, now: Number.MAX_SAFE_INTEGER, ds: env.ds[b], engine, resolutions: firstAlt, clock });
+            const r = await runCard({
+              set,
+              card: key,
+              entity,
+              anchor: end - 600_000,
+              now: Number.MAX_SAFE_INTEGER,
+              ds: env.ds[b],
+              engine,
+              resolutions: firstAlt,
+              clock,
+            });
             results[b] = summary(r);
             if (r.verdict !== 'undeterminable') {
               failures.push(`${b}：没有数据时得出 ${r.verdict}（${r.reason.text}）；没有任何样本永远不是正常`);
             }
           }
-          cases.push({ pack: pack.name, file: '(自动)', name: '无数据', card: key, kind: 'nodata', passed: !failures.length, results, failure: failures.join('；') || null });
+          cases.push({
+            pack: pack.name,
+            file: '(自动)',
+            name: '无数据',
+            card: key,
+            kind: 'nodata',
+            passed: !failures.length,
+            results,
+            failure: failures.join('；') || null,
+          });
         }
       } finally {
         await stopEnv(env);
@@ -288,13 +374,25 @@ export async function runPackTests(opts: PackTestOptions): Promise<PackTestRepor
             card: key,
             kind,
             passed: ok,
-            results: { prometheus: { verdict: out.verdict, display_state: out.display_state, reason_kind: out.reason.kind, reason: out.reason.text } },
+            results: {
+              prometheus: {
+                verdict: out.verdict,
+                display_state: out.display_state,
+                reason_kind: out.reason.kind,
+                reason: out.reason.text,
+              },
+            },
             failure: ok ? null : `引用 ${ref.name} ${kind === 'partial_nodata' ? '没有数据' : '报错'}时得出 normal`,
           });
         }
       }
       // 全部必需引用报错：无法判定，原因为数据源报错
-      const allErr = Object.fromEntries(e.def.refs.map((x) => [x.name, required.includes(x) ? ({ kind: 'error', message: '注入的数据源错误' } as RefData) : r.refs[x.name]!]));
+      const allErr = Object.fromEntries(
+        e.def.refs.map((x) => [
+          x.name,
+          required.includes(x) ? ({ kind: 'error', message: '注入的数据源错误' } as RefData) : r.refs[x.name]!,
+        ]),
+      );
       const out = rejudge(allErr);
       const ok = out.verdict !== 'normal' && (out.verdict === 'abnormal' || out.reason.kind === 'source_error');
       cases.push({
@@ -304,7 +402,14 @@ export async function runPackTests(opts: PackTestOptions): Promise<PackTestRepor
         card: key,
         kind: 'datasource_error',
         passed: ok,
-        results: { prometheus: { verdict: out.verdict, display_state: out.display_state, reason_kind: out.reason.kind, reason: out.reason.text } },
+        results: {
+          prometheus: {
+            verdict: out.verdict,
+            display_state: out.display_state,
+            reason_kind: out.reason.kind,
+            reason: out.reason.text,
+          },
+        },
         failure: ok ? null : `全部必需引用报错时得出 ${out.verdict}/${out.reason.kind}`,
       });
     }
@@ -312,7 +417,12 @@ export async function runPackTests(opts: PackTestOptions): Promise<PackTestRepor
     const maturity = pack.content.manifest.maturity;
     const uncovered = maturity === 'stable' ? cardKeys.filter((k) => !covered.has(k)) : [];
     const packCases = cases.filter((c) => c.pack === pack.name);
-    packsOut.push({ name: pack.name, maturity, uncovered, passed: !uncovered.length && packCases.every((c) => c.passed) });
+    packsOut.push({
+      name: pack.name,
+      maturity,
+      uncovered,
+      passed: !uncovered.length && packCases.every((c) => c.passed),
+    });
   }
   return { packs: packsOut, cases, passed: packsOut.every((p) => p.passed) };
 }

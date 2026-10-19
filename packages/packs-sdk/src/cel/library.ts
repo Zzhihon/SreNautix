@@ -90,9 +90,7 @@ function firstCross(list: unknown[], pred: (v: number) => boolean, fn: string): 
 }
 
 function points(list: unknown[]) {
-  return asSeriesList(list, 'points').flatMap((s) =>
-    s.values.map((v, i) => ({ t: s.times[i]!, v, labels: s.labels })),
-  );
+  return asSeriesList(list, 'points').flatMap((s) => s.values.map((v, i) => ({ t: s.times[i]!, v, labels: s.labels })));
 }
 
 // cel-js 的宏在解析期展开；any_point 复用库内的上下文分叉机制（与 cel.bind 相同）
@@ -240,8 +238,12 @@ export function createBaseEnvironment(): Environment {
       return out;
     })
     // 第一个越过阈值的点的时间（unix 秒），用于 anomaly_started_at；没有这样的点时不可求值
-    .registerFunction('first_above(list, double): double', (l: unknown[], th: number) => firstCross(l, (v) => v > th, 'first_above'))
-    .registerFunction('first_below(list, double): double', (l: unknown[], th: number) => firstCross(l, (v) => v < th, 'first_below'))
+    .registerFunction('first_above(list, double): double', (l: unknown[], th: number) =>
+      firstCross(l, (v) => v > th, 'first_above'),
+    )
+    .registerFunction('first_below(list, double): double', (l: unknown[], th: number) =>
+      firstCross(l, (v) => v < th, 'first_below'),
+    )
     .registerFunction('label(map, string): string', (s: unknown, name: string) => {
       const labels = (s as { labels?: Record<string, string> }).labels;
       if (!labels) {

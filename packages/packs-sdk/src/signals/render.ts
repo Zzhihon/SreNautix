@@ -138,7 +138,12 @@ export function substitute(template: string, ctx: RenderContext): string {
 }
 
 /** 渲染一个指标备选：替换变量 → 严格解析 → 按标签档案改写并注入集群标签 */
-export function renderMetrics(engine: PromqlEngine, alt: SignalAlternative, ctx: RenderContext, template = alt.expr): string {
+export function renderMetrics(
+  engine: PromqlEngine,
+  alt: SignalAlternative,
+  ctx: RenderContext,
+  template = alt.expr,
+): string {
   const dialect = alt.dialect ?? 'promql';
   if (dialect !== 'promql' && dialect !== 'metricsql') {
     throw new RenderError(`指标信号不支持方言 ${dialect}`);

@@ -103,7 +103,10 @@ export function loadPackDir(dir: string, source: string): LoadedPack {
       (parts.length === 1 && TOP_FILES.has(rel)) ||
       (parts.length === 2 && SUBDIRS[parts[0]!]?.test(parts[1]!) === true) ||
       // tests/ 下可以带夹具录制（replay 快照）
-      (parts.length === 3 && parts[0] === 'tests' && parts[1] === 'replay' && /^[a-z0-9][a-z0-9_-]*\.json$/.test(parts[2]!));
+      (parts.length === 3 &&
+        parts[0] === 'tests' &&
+        parts[1] === 'replay' &&
+        /^[a-z0-9][a-z0-9_-]*\.json$/.test(parts[2]!));
     if (!ok) {
       throw new PackLintError(join(dir, rel), '领域包只能包含约定的数据文件');
     }
@@ -116,7 +119,9 @@ export function loadPackDir(dir: string, source: string): LoadedPack {
   };
   const sub = <T>(d: string, read: (abs: string) => T): Record<string, T> =>
     Object.fromEntries(
-      files.filter((f) => f.path.startsWith(`${d}/`) && f.path.split('/').length === 2).map((f) => [f.path.slice(d.length + 1), read(f.abs)]),
+      files
+        .filter((f) => f.path.startsWith(`${d}/`) && f.path.split('/').length === 2)
+        .map((f) => [f.path.slice(d.length + 1), read(f.abs)]),
     );
 
   const manifest = readYaml<PackManifest>(join(dir, 'pack.yaml'), PACK_SCHEMA);
@@ -132,7 +137,9 @@ export function loadPackDir(dir: string, source: string): LoadedPack {
     knowledge: sub('knowledge', (p) => readYaml<KnowledgeFile>(p, `${PACK_SCHEMA}#/$defs/KnowledgeFile`)),
     runbooks: sub('runbooks', (p) => readFileSync(p, 'utf8')),
     prompts: sub('prompts', (p) => readFileSync(p, 'utf8')),
-    action_requests: opt<ActionRequestsFile>('action-requests.yaml', `${PACK_SCHEMA}#/$defs/ActionRequestsFile`, { requests: [] }),
+    action_requests: opt<ActionRequestsFile>('action-requests.yaml', `${PACK_SCHEMA}#/$defs/ActionRequestsFile`, {
+      requests: [],
+    }),
     chaos: sub('chaos', (p) => readYaml<ChaosFile>(p, `${PACK_SCHEMA}#/$defs/ChaosFile`)),
     tests: sub('tests', (p) => readYaml<PackTestFile>(p, `${PACK_SCHEMA}#/$defs/PackTestFile`)),
   };

@@ -17,12 +17,7 @@ import type {
 import type { LokiAdapter, PrometheusApiAdapter, TempoAdapter } from '@srenautix/integration-sdk';
 
 export type Capability =
-  | 'metrics.query'
-  | 'metrics.query_range'
-  | 'metrics.series'
-  | 'logs.match'
-  | 'logs.query'
-  | 'traces.search';
+  'metrics.query' | 'metrics.query_range' | 'metrics.series' | 'logs.match' | 'logs.query' | 'traces.search';
 
 export interface LogsLabelProfile {
   namespace: string;
@@ -102,7 +97,10 @@ export class LiveDataSource implements EvidenceDataSource {
   }
   async metricExists(name: string, window: TimeWindow, clock: TimeWindow) {
     this.need('metrics.series');
-    const r = await this.s.metrics!.adapter.series({ match: [`{__name__=${JSON.stringify(name)}}`], window, limit: 1 }, clock);
+    const r = await this.s.metrics!.adapter.series(
+      { match: [`{__name__=${JSON.stringify(name)}}`], window, limit: 1 },
+      clock,
+    );
     return r.series.length > 0;
   }
   logsMatch(req: LogsMatchRequest) {

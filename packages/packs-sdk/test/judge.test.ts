@@ -141,9 +141,9 @@ describe('series library', () => {
   });
   it('ratio 与 join', () => {
     expect(run('ratio(a, b) > 0.5', m(series('x', [3])), m(series('x', [4])))).toBe('abnormal');
-    expect(run('max(join(a, b, "/")) > 0.8', m(series('x', [3]), series('y', [1])), m(series('x', [4]), series('y', [1])))).toBe(
-      'abnormal',
-    );
+    expect(
+      run('max(join(a, b, "/")) > 0.8', m(series('x', [3]), series('y', [1])), m(series('x', [4]), series('y', [1]))),
+    ).toBe('abnormal');
   });
   it('cel.bind 局部绑定', () => {
     expect(run('cel.bind(m, max(a), m > 2.0 && m < 4.0)', m(series('x', [3])))).toBe('abnormal');
@@ -152,9 +152,9 @@ describe('series library', () => {
     expect(run('max(a.filter(s, label(s, "pod") == "zz")) > 0.0', m(series('x', [3])))).toBe('undeterminable');
   });
   it('成本超限的表达式在编译时拒绝', () => {
-    expect(() =>
-      compileCard(base, mk('a.exists(s, points(a).exists(p, p.v > 1.0))'), { where: 'cost' }),
-    ).toThrow(/求值成本上界/);
+    expect(() => compileCard(base, mk('a.exists(s, points(a).exists(p, p.v > 1.0))'), { where: 'cost' })).toThrow(
+      /求值成本上界/,
+    );
   });
   it('类型错误在编译时拒绝', () => {
     expect(() => compileCard(base, mk('max(a) > "x"'), { where: 'type' })).toThrow(/CEL 不合法/);

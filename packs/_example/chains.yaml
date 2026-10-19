@@ -51,20 +51,20 @@ chains:
           table:
             rows_from: mem
             columns:
-              - header: {zh-CN: Pod, en: Pod}
+              - header: { zh-CN: Pod, en: Pod }
                 cel: label(row, "pod")
-              - header: {zh-CN: 容器, en: Container}
+              - header: { zh-CN: 容器, en: Container }
                 cel: label(row, "container")
-              - header: {zh-CN: 峰值, en: Peak}
+              - header: { zh-CN: 峰值, en: Peak }
                 cel: max(row)
                 unit: percent
             sort_by: max(row)
             limit: 5
         links:
           - kind: explore
-            label: {zh-CN: 指标, en: Metrics}
+            label: { zh-CN: 指标, en: Metrics }
           - kind: runbook
-            label: {zh-CN: 处置手册, en: Runbook}
+            label: { zh-CN: 处置手册, en: Runbook }
             target: container-memory.md#处置
         egress: allow
       - id: oom-logs
@@ -97,7 +97,7 @@ chains:
           table:
             rows_from: lines
             columns:
-              - header: {zh-CN: 日志, en: Line}
+              - header: { zh-CN: 日志, en: Line }
                 cel: row.line
             limit: 8
         egress: redact

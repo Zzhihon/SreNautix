@@ -1,7 +1,14 @@
 // traces/v1 的核心级适配器：Tempo。traces.search 执行 TraceQL；traces.trace 读取单条链路；
 // traces.service_graph 读取 metrics-generator 写入指标库的服务图指标。
 
-import type { ServiceGraph, TimeWindow, Trace, TraceHit, TracesSearchRequest, TracesSearchResult } from '@srenautix/contract';
+import type {
+  ServiceGraph,
+  TimeWindow,
+  Trace,
+  TraceHit,
+  TracesSearchRequest,
+  TracesSearchResult,
+} from '@srenautix/contract';
 import { assertWindowInClock, toIso, toMillis } from '../clock.js';
 import { DatasourceError } from '../errors.js';
 import { HttpClient, type HttpAuthConfig } from '../http.js';
@@ -123,7 +130,12 @@ export class TempoAdapter {
             name: s.name,
             start: new Date(Number(start / 1_000_000n)).toISOString(),
             duration_ms: Number(BigInt(s.endTimeUnixNano) - start) / 1e6,
-            status: code === 2 || code === 'STATUS_CODE_ERROR' ? 'error' : code === 1 || code === 'STATUS_CODE_OK' ? 'ok' : 'unset',
+            status:
+              code === 2 || code === 'STATUS_CODE_ERROR'
+                ? 'error'
+                : code === 1 || code === 'STATUS_CODE_OK'
+                  ? 'ok'
+                  : 'unset',
             attributes: Object.fromEntries((s.attributes ?? []).map((a) => [a.key, attrValue(a.value)])),
           };
         }),
@@ -131,7 +143,11 @@ export class TempoAdapter {
     });
     spans.sort((a, b) => (a.start < b.start ? -1 : a.start > b.start ? 1 : 0));
     const truncated = spans.length > maxSpans;
-    return { trace_id: traceId.toLowerCase().padStart(32, '0'), spans: truncated ? spans.slice(0, maxSpans) : spans, truncated } as Trace;
+    return {
+      trace_id: traceId.toLowerCase().padStart(32, '0'),
+      spans: truncated ? spans.slice(0, maxSpans) : spans,
+      truncated,
+    } as Trace;
   }
 
   /** 服务图：Tempo metrics-generator 写入的 traces_service_graph_request_total 与 *_failed_total */
@@ -143,7 +159,7 @@ export class TempoAdapter {
     const req = await q(`sum by (client, server) (increase(traces_service_graph_request_total[${range}]))`);
     const failed = await q(`sum by (client, server) (increase(traces_service_graph_request_failed_total[${range}]))`);
     const last = await q(`max by (client, server) (timestamp(traces_service_graph_request_total))`);
-    const key = (l: Record<string, string>) => `${l['client']}\u0000${l['server']}`;
+    const key = (l: Record<string, string | undefined>) => `${l['client']}\u0000${l['server']}`;
     const errors = new Map(failed.series.map((s) => [key(s.labels), s.values[0] ?? 0]));
     const seen = new Map(last.series.map((s) => [key(s.labels), s.values[0] ?? null]));
     return {

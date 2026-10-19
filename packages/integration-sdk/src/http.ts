@@ -68,7 +68,10 @@ export class HttpClient {
         ...(this.dispatcher ? { dispatcher: this.dispatcher } : {}),
       } as RequestInit);
     } catch (err) {
-      throw new DatasourceError(this.integration, `${method} ${path} 失败：${err instanceof Error ? err.message : String(err)}`);
+      throw new DatasourceError(
+        this.integration,
+        `${method} ${path} 失败：${err instanceof Error ? err.message : String(err)}`,
+      );
     }
     return { status: res.status, text: await res.text() };
   }

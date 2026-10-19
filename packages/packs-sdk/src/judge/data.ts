@@ -1,15 +1,18 @@
 // 证据卡判定的输入数据：每个引用名对应一次查询的结果。
 // 指标序列的时间为 unix 毫秒，缺失点为 null（与 metrics/v1 契约一致）。
 
+// 标签与契约的 Labels 一致：索引访问可能为 undefined
+export type LabelMap = Record<string, string | undefined>;
+
 export interface MetricSeries {
-  labels: Record<string, string>;
+  labels: LabelMap;
   times: number[];
   values: Array<number | null>;
 }
 
 export interface LogLine {
   time: number;
-  labels: Record<string, string>;
+  labels: LabelMap;
   line: string;
 }
 
@@ -19,7 +22,7 @@ export interface TraceHit {
   root_name: string;
   start: number;
   duration_ms: number;
-  attributes: Record<string, string>;
+  attributes: LabelMap;
 }
 
 export type RefData =
@@ -60,5 +63,9 @@ export function toCelSeries(s: MetricSeries): CelSeries {
       values.push(v);
     }
   });
-  return { labels: s.labels, times, values };
+  return { labels: denseLabels(s.labels), times, values };
+}
+
+export function denseLabels(l: LabelMap): Record<string, string> {
+  return Object.fromEntries(Object.entries(l).filter((e): e is [string, string] => e[1] !== undefined));
 }

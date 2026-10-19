@@ -47,9 +47,14 @@ describe('PromqlEngine', () => {
 
   it('给每个选择器注入集群标签', () => {
     expect(
-      engine.rewrite('up{job="a"} / on (job) group_left kube_info{cluster="b"}', 'promql', { rename: {}, inject: { cluster: "c1" } }),
+      engine.rewrite('up{job="a"} / on (job) group_left kube_info{cluster="b"}', 'promql', {
+        rename: {},
+        inject: { cluster: 'c1' },
+      }),
     ).toBe('up{cluster="c1",job="a"} / on (job) group_left () kube_info{cluster="b"}');
-    expect(engine.rewrite('rate(x)', 'metricsql', { rename: {}, inject: { cluster: 'c1' } })).toBe('rate(x{cluster="c1"})');
+    expect(engine.rewrite('rate(x)', 'metricsql', { rename: {}, inject: { cluster: 'c1' } })).toBe(
+      'rate(x{cluster="c1"})',
+    );
   });
 
   it('回看范围', () => {

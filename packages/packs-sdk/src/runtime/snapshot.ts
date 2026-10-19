@@ -59,9 +59,13 @@ export class SnapshotMiss extends DatasourceError {
   }
 }
 
+/** 去掉 clock_window 的请求：同一请求在不同的回放时钟窗口下命中同一条录制 */
+function withoutClock(request: unknown): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(request as Record<string, unknown>).filter(([k]) => k !== 'clock_window'));
+}
+
 function key(op: Op, request: unknown): string {
-  const { clock_window: _clock, ...rest } = request as Record<string, unknown>;
-  return `${op}\u0000${canonicalize(rest)}`;
+  return `${op}\u0000${canonicalize(withoutClock(request))}`;
 }
 
 /** 包装一个数据源，录制所有请求与结果 */
@@ -89,7 +93,7 @@ export class RecordingDataSource implements EvidenceDataSource {
 
   private async rec<T>(op: Op, request: unknown, run: () => Promise<T>): Promise<T> {
     const k = key(op, request);
-    const { clock_window: _c, ...stored } = request as Record<string, unknown>;
+    const stored = withoutClock(request);
     try {
       const result = await run();
       if (!this.seen.has(k)) {
