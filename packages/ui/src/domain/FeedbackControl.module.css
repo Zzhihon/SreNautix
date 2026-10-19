@@ -1,0 +1,77 @@
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.axis {
+  display: grid;
+  grid-template-columns: 6.5em minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+.axisLabel {
+  color: var(--sn-dim);
+  font-size: 12.5px;
+}
+.shown {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-weight: 500;
+}
+.btns {
+  display: inline-flex;
+  gap: 6px;
+}
+.yes,
+.no {
+  border: 1px solid var(--sn-line);
+  background: var(--sn-raise);
+  color: var(--sn-text);
+  border-radius: 5px;
+  padding: 3px 14px;
+  cursor: pointer;
+  font-weight: 600;
+  min-height: 32px;
+}
+.yes[aria-pressed='true'] {
+  background: var(--sn-ok-soft);
+  border-color: var(--sn-ok);
+  color: var(--sn-ok);
+}
+.no[aria-pressed='true'] {
+  background: var(--sn-bad-soft);
+  border-color: var(--sn-bad);
+  color: var(--sn-bad);
+}
+.yes:disabled,
+.no:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.more {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 8px;
+}
+.actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.hint,
+.note {
+  color: var(--sn-dim);
+  font-size: 12px;
+}
+.given {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  font-size: 13px;
+}
+.readonly {
+  color: var(--sn-dim);
+  font-size: 13px;
+}

@@ -1,0 +1,33 @@
+.root {
+  color: var(--sn-text);
+  font-family: var(--sn-font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  font-variant-numeric: tabular-nums;
+}
+
+.root :where(button, input, select, textarea) {
+  font: inherit;
+  color: inherit;
+}
+
+.root :focus-visible {
+  outline: 2px solid var(--sn-focus);
+  outline-offset: 2px;
+}
+
+.root :where(h1, h2, h3, h4, p) {
+  margin: 0;
+}
+
+.layer {
+  position: relative;
+  z-index: 1000;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .root * {
+    animation-duration: 0s !important;
+    transition-duration: 0s !important;
+  }
+}

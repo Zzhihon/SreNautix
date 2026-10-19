@@ -1,0 +1,53 @@
+.wrap {
+  height: 260px;
+  border: 1px solid var(--sn-line);
+  border-radius: 6px;
+  background: var(--sn-bg);
+  --xy-edge-stroke: var(--sn-edge);
+  --xy-edge-label-background-color: var(--sn-panel);
+  --xy-edge-label-color: var(--sn-dim);
+  --xy-background-pattern-color: var(--sn-line-soft);
+}
+.node {
+  width: 180px;
+  height: 52px;
+  border: 1px solid var(--sn-line);
+  border-radius: 6px;
+  background: var(--sn-panel);
+  color: var(--sn-text);
+  padding: 6px 10px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  font-size: 12px;
+}
+.node[data-role='root'] {
+  border: 2px solid var(--sn-bad);
+}
+.node[data-role='candidate'] {
+  border: 2px dashed var(--sn-warn);
+}
+.node[data-role='neighbor'] {
+  border-style: dashed;
+  color: var(--sn-dim);
+}
+.name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sub {
+  color: var(--sn-dim);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.handle {
+  opacity: 0;
+}
+.weak {
+  opacity: 0.5;
+  stroke-dasharray: 4 3;
+}

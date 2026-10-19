@@ -1,0 +1,103 @@
+.wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  align-items: center;
+  font-size: 13px;
+}
+.waterfall {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.wrow {
+  display: grid;
+  grid-template-columns: minmax(120px, 220px) minmax(0, 1fr) 72px;
+  gap: 8px;
+  align-items: center;
+  font-size: 12.5px;
+}
+.wlabel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wtrack {
+  position: relative;
+  height: 14px;
+  background: var(--sn-raise);
+  border-radius: 3px;
+}
+.wbar {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  border-radius: 2px;
+  background: var(--sn-dim);
+}
+.wbar[data-kind='llm'],
+.legend [data-kind='llm']::before {
+  background: var(--sn-model);
+}
+.wbar[data-kind='tool'],
+.legend [data-kind='tool']::before {
+  background: var(--sn-info);
+}
+.legend [data-kind='step']::before {
+  background: var(--sn-dim);
+}
+.wdur {
+  text-align: right;
+  font-family: var(--sn-font-mono);
+  font-size: 12px;
+  color: var(--sn-dim);
+}
+.legend {
+  display: flex;
+  gap: 14px;
+  font-size: 12px;
+  color: var(--sn-dim);
+  margin-top: 6px;
+}
+.legend span::before {
+  content: '';
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  margin-right: 4px;
+  vertical-align: -1px;
+}
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 12px;
+}
+.egress {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+}
+.egress li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}
+.dim {
+  color: var(--sn-dim);
+}
+.warn {
+  color: var(--sn-warn);
+}
+.bad {
+  color: var(--sn-bad);
+}

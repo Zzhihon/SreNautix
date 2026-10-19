@@ -1,0 +1,106 @@
+.sheet {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 720px;
+}
+.stateRow {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.fields {
+  font-size: 14px;
+}
+.inline {
+  display: inline-flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.dim {
+  color: var(--sn-dim);
+  font-size: 12.5px;
+}
+.check {
+  display: inline-flex;
+  gap: 6px;
+  align-items: baseline;
+  color: var(--sn-bad);
+  font-size: 13px;
+}
+.check[data-passed] {
+  color: var(--sn-ok);
+}
+.check > span:last-child {
+  color: var(--sn-text);
+}
+.check svg {
+  width: 13px;
+  height: 13px;
+  flex: none;
+  align-self: center;
+}
+.checkWord {
+  font-size: 12px;
+  white-space: nowrap;
+}
+.bad {
+  color: var(--sn-bad);
+  font-size: 12.5px;
+}
+.rationale {
+  font-size: 13px;
+  overflow-wrap: anywhere;
+  margin: 4px 0;
+}
+.receipt h3 {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  position: sticky;
+  bottom: 0;
+  background: var(--sn-panel);
+  padding: 10px 0;
+  border-top: 1px solid var(--sn-line);
+}
+.buttons {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.reauth {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  border: 1px solid var(--sn-warn);
+  background: var(--sn-warn-soft);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 13px;
+}
+.external {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 44px;
+  border-radius: 6px;
+  background: var(--sn-focus);
+  color: var(--sn-on-strong);
+  font-weight: 600;
+  text-decoration: none;
+}
