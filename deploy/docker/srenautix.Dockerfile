@@ -24,9 +24,12 @@ RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
     pnpm install --frozen-lockfile --offline
 # 构建中心进程及其依赖的工作区包；控制台前端由 server 进程提供，与中心进程一起构建
 RUN pnpm --filter "./apps/srenautix..." --filter "./web/console..." run --if-present build
-# 只保留运行时依赖
+# 镜像内的目录与仓库一致：/app/apps/srenautix（只含运行时依赖）、/app/contract（动作目录等契约文件）、
+# /app/packs（内置领域包）、/app/web/console/dist（控制台静态文件）
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
-    pnpm --filter ./apps/srenautix deploy --prod --offline /out/app \
+    pnpm --filter ./apps/srenautix deploy --prod --offline /out/app/apps/srenautix \
+    && cp -R contract /out/app/contract \
+    && cp -R packs /out/app/packs \
     && mkdir -p /out/app/web/console \
     && cp -R web/console/dist /out/app/web/console/dist
 # 统一文件时间戳，保证同一提交的构建结果逐字节一致
@@ -48,4 +51,4 @@ WORKDIR /app
 COPY --from=build --chown=65532:65532 /out/app /app
 USER 65532:65532
 EXPOSE 8080 8081 9090
-ENTRYPOINT ["/nodejs/bin/node", "/app/dist/main.js"]
+ENTRYPOINT ["/nodejs/bin/node", "/app/apps/srenautix/dist/main.js"]

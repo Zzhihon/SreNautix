@@ -1,6 +1,8 @@
 suite: gateway 与 standard、compliance 配置的工作负载
 templates:
   - templates/deployments.yaml
+values:
+  - ../../ci/base/required.yaml
 release:
   name: t
   namespace: srenautix
@@ -69,21 +71,29 @@ tests:
     asserts:
       - notExists: {path: spec.template.spec.affinity}
 
-  - it: gateway 只挂载审计凭证与审计签名密钥，不挂载模型、渠道、数据源凭证
+  - it: gateway 只挂载自己的 token、审批公钥、执行链签名密钥与审计汇凭证，不挂载模型、渠道、数据源与数据库凭证
     set:
       profile: standard
       secrets.llm.existingSecret: llm
       secrets.channels.existingSecret: channels
       secrets.datasources.existingSecret: ds
-      secrets.auditSigningKey.existingSecret: audit-sign
     documentSelector: {path: metadata.name, value: t-srenautix-gateway}
     asserts:
       - equal:
-          path: spec.template.spec.volumes[?(@.name=="secret-auditsigningkey")].secret.secretName
-          value: audit-sign
+          path: spec.template.spec.volumes[?(@.name=="secret-audit-key")].secret.secretName
+          value: t-srenautix-gateway-audit-key
       - equal:
           path: spec.template.spec.volumes[?(@.name=="secret-audit-store")].secret.secretName
           value: t-srenautix-minio-audit-gateway
+      - equal:
+          path: spec.template.spec.volumes[?(@.name=="secret-service-signing")].secret.items
+          value:
+            - {key: public.pem, path: public.pem}
+      - equal:
+          path: spec.template.spec.volumes[?(@.name=="secret-service-token")].secret.items
+          value:
+            - {key: gateway, path: token}
+      - notExists: {path: 'spec.template.spec.containers[0].env[?(@.name=="PGUSER")]'}
       - notExists: {path: 'spec.template.spec.volumes[?(@.name=="secret-llm")]'}
       - notExists: {path: 'spec.template.spec.volumes[?(@.name=="secret-channels")]'}
       - notExists: {path: 'spec.template.spec.volumes[?(@.name=="secret-datasources")]'}

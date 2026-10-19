@@ -2,6 +2,8 @@ suite: gateway 的准入策略与熔断开关（不变量 2、3、11）
 templates:
   - templates/gateway/admission.yaml
   - templates/gateway/gateway-extra.yaml
+values:
+  - ../../ci/base/required.yaml
 release:
   name: t
   namespace: srenautix

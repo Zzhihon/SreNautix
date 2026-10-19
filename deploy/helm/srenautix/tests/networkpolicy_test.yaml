@@ -1,6 +1,8 @@
 suite: NetworkPolicy
 templates:
   - templates/networkpolicy.yaml
+values:
+  - ../ci/base/required.yaml
 release:
   name: t
   namespace: srenautix

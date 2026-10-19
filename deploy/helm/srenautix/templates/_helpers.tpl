@@ -139,6 +139,15 @@ priorityClassName: {{ . }}
 {{- if eq .Values.database.mode "cnpg" -}}verify-full{{- else -}}{{ .Values.database.external.sslmode }}{{- end -}}
 {{- end -}}
 
+{{/* 数据库管理员凭证 Secret（键 username、password），db bootstrap Job 使用；为空表示由管理员手动初始化 */}}
+{{- define "srenautix.pg.adminSecret" -}}
+{{- if eq .Values.database.mode "cnpg" -}}
+{{- printf "%s-superuser" (include "srenautix.pg.clusterName" .) -}}
+{{- else -}}
+{{- .Values.database.external.adminSecret -}}
+{{- end -}}
+{{- end -}}
+
 {{/* 某个库角色的密码 Secret 名称；调用方式：include "srenautix.pg.passwordSecret" (dict "ctx" $ "role" "server") */}}
 {{- define "srenautix.pg.passwordSecret" -}}
 {{- $db := .ctx.Values.database -}}
@@ -152,7 +161,7 @@ priorityClassName: {{ . }}
 {{- define "srenautix.pg.caSecret" -}}
 {{- if eq .Values.database.mode "cnpg" -}}
 {{- printf "%s-ca" (include "srenautix.pg.clusterName" .) -}}
-{{- else -}}
+{{- else if eq .Values.database.external.sslmode "verify-full" -}}
 {{- .Values.database.external.caSecret -}}
 {{- end -}}
 {{- end -}}
@@ -188,5 +197,15 @@ priorityClassName: {{ . }}
 {{- index $existing.data .key | b64dec -}}
 {{- else -}}
 {{- randAlphaNum (int .length) -}}
+{{- end -}}
+{{- end -}}
+
+{{/* 已存在的 Secret 中的 Ed25519 私钥（键 private.pem），不存在时生成 */}}
+{{- define "srenautix.persistentKey" -}}
+{{- $existing := lookup "v1" "Secret" .ctx.Release.Namespace .name -}}
+{{- if and $existing (hasKey $existing.data "private.pem") -}}
+{{- index $existing.data "private.pem" | b64dec | trim -}}
+{{- else -}}
+{{- genPrivateKey "ed25519" | trim -}}
 {{- end -}}
 {{- end -}}

@@ -1,8 +1,9 @@
-{{- if eq .Values.database.mode "cnpg" }}
 {{- $db := .Values.database }}
+{{- $dbRoles := splitList " " (include "srenautix.dbRoles" .) }}
+{{- if eq $db.mode "cnpg" }}
 {{- $c := $db.cnpg }}
 {{- $cluster := include "srenautix.pg.clusterName" . }}
-{{- range $role := list "server" "worker" }}
+{{- range $role := $dbRoles }}
 {{- if not (index $c.passwordSecrets $role) }}
 {{- $secret := include "srenautix.pg.passwordSecret" (dict "ctx" $ "role" $role) }}
 ---
@@ -39,6 +40,8 @@ spec:
   imageName: {{ . }}
   {{- end }}
   primaryUpdateStrategy: unsupervised
+  # db bootstrap Job 以超级用户建库角色的 schema 与权限；各角色只用自己的库角色连接
+  enableSuperuserAccess: true
   {{- with $c.resources }}
   resources:
     {{- toYaml . | nindent 4 }}
@@ -59,20 +62,17 @@ spec:
     initdb:
       database: {{ $db.name }}
       owner: srenautix_owner
-      # 每个角色只能在自己创建的 schema 中读写；跨角色读取走 API 或事件流（设计 §2.1）
-      postInitApplicationSQL:
-        - REVOKE ALL ON DATABASE {{ $db.name }} FROM PUBLIC
-        - REVOKE ALL ON SCHEMA public FROM PUBLIC
-        - CREATE ROLE srenautix_schema_creator NOLOGIN
-        - GRANT CONNECT, CREATE ON DATABASE {{ $db.name }} TO srenautix_schema_creator
+  # 三个库角色的属性与 srenautix db bootstrap 一致（LOGIN、NOINHERIT、无特权），密码由 CNPG 维护
   managed:
     roles:
-      {{- range $role := list "server" "worker" }}
+      {{- range $role := $dbRoles }}
       - name: {{ (index $db.roles $role).username }}
         ensure: present
         login: true
-        inherit: true
-        inRoles: [srenautix_schema_creator]
+        inherit: false
+        superuser: false
+        createdb: false
+        createrole: false
         passwordSecret:
           name: {{ include "srenautix.pg.passwordSecret" (dict "ctx" $ "role" $role) }}
       {{- end }}
@@ -98,4 +98,96 @@ spec:
   backup:
     {{- toYaml . | nindent 4 }}
   {{- end }}
+{{- end }}
+{{- $admin := include "srenautix.pg.adminSecret" . }}
+{{- if $admin }}
+{{- $name := printf "%s-db-bootstrap-%d" (include "srenautix.fullname" .) .Release.Revision }}
+---
+# 以数据库管理员执行 srenautix db bootstrap：建三个库角色（已存在时跳过）、两个 schema 并收回 PUBLIC 权限。
+# 可以重复执行；每个 revision 一个 Job，PG 尚未就绪时按 backoffLimit 重试，server 在此之前以失败重启。
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "srenautix.labels" . | nindent 4 }}
+    app.kubernetes.io/component: db-bootstrap
+spec:
+  backoffLimit: 30
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "srenautix.name" . }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: db-bootstrap
+        app.kubernetes.io/part-of: srenautix
+    spec:
+      restartPolicy: OnFailure
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        {{- include "srenautix.podSecurityContext" . | nindent 8 }}
+      {{- include "srenautix.imagePullSecrets" . | nindent 6 }}
+      {{- with .Values.global.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.global.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: bootstrap
+          image: {{ include "srenautix.image" (dict "ctx" $ "image" .Values.image.hub) }}
+          imagePullPolicy: {{ .Values.image.hub.pullPolicy }}
+          args: [db, bootstrap, --admin-password-file=/etc/srenautix/secrets/db-admin/password]
+          env:
+            - name: PGHOST
+              value: {{ include "srenautix.pg.host" . | quote }}
+            - name: PGPORT
+              value: {{ include "srenautix.pg.port" . | quote }}
+            - name: PGDATABASE
+              value: {{ $db.name | quote }}
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef: {name: {{ $admin }}, key: username}
+            - name: PGSSLMODE
+              value: {{ include "srenautix.pg.sslmode" . | quote }}
+            {{- if include "srenautix.pg.caSecret" . }}
+            - name: PGSSLROOTCERT
+              value: /etc/srenautix/secrets/db-ca/ca.crt
+            {{- end }}
+          resources:
+            requests: {cpu: 10m, memory: 64Mi}
+            limits: {cpu: 500m, memory: 256Mi}
+          securityContext:
+            {{- include "srenautix.containerSecurityContext" . | nindent 12 }}
+          volumeMounts:
+            - name: admin
+              mountPath: /etc/srenautix/secrets/db-admin
+              readOnly: true
+            {{- if include "srenautix.pg.caSecret" . }}
+            - name: ca
+              mountPath: /etc/srenautix/secrets/db-ca
+              readOnly: true
+            {{- end }}
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: admin
+          secret:
+            secretName: {{ $admin }}
+            items:
+              - {key: password, path: password}
+        {{- if include "srenautix.pg.caSecret" . }}
+        - name: ca
+          secret:
+            secretName: {{ include "srenautix.pg.caSecret" . }}
+            items:
+              - {key: ca.crt, path: ca.crt}
+        {{- end }}
+        - name: tmp
+          emptyDir: {}
 {{- end }}

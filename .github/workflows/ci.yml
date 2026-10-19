@@ -44,10 +44,13 @@ jobs:
         id: detect
         run: |
           has() { [[ -e "$1" ]] && echo true || echo false; }
+          # 中心镜像包含 server/worker/mcp、内置领域包与控制台，三者都在仓库中才构建
+          hub=false
+          if [[ -f apps/srenautix/package.json && -d packs && -f web/console/package.json ]]; then hub=true; fi
           {
             echo "ts=$(has pnpm-lock.yaml)"
             echo "go=$(has go.mod)"
-            echo "hub=$(has apps/srenautix/package.json)"
+            echo "hub=$hub"
             echo "spoke=$(has cmd/srenautix-spoke)"
           } >>"$GITHUB_OUTPUT"
 

@@ -9,6 +9,36 @@
 {{- if not $on.server }}
 {{- fail "server 是必需的角色，不能关闭" }}
 {{- end }}
+{{- if not (regexMatch "^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$" $v.clusterId) }}
+{{- fail (printf "clusterId 只能包含小写字母、数字与连字符：%q" $v.clusterId) }}
+{{- end }}
+{{- if not $v.datasources.prometheus.url }}
+{{- fail "必须设置 datasources.prometheus.url（证据卡查询与 ALERTS 对账）" }}
+{{- end }}
+{{- if and (ne $v.profile "observe") (not $v.secrets.serviceSigningKey.existingSecret) }}
+{{- fail "observe 以外的配置必须设置 secrets.serviceSigningKey.existingSecret（键 private.pem、public.pem 的 Ed25519 密钥对）" }}
+{{- end }}
+{{- if and $on.gateway (not $v.secrets.serviceSigningKey.existingSecret) }}
+{{- fail "启用 gateway 时必须设置 secrets.serviceSigningKey.existingSecret，gateway 用其中的 public.pem 校验审批签名" }}
+{{- end }}
+{{- if $v.identity.oidc.enabled }}
+{{- if or (not $v.identity.oidc.issuer) (not $v.identity.oidc.clientId) (not $v.identity.oidc.existingSecret) }}
+{{- fail "identity.oidc.enabled=true 时必须设置 issuer、clientId 与 existingSecret" }}
+{{- end }}
+{{- end }}
+{{- $sourceIds := list }}
+{{- range $s := $v.ingest.sources }}
+{{- if not (has $s.kind (list "alertmanager" "grafana" "nightingale" "generic")) }}
+{{- fail (printf "ingest.sources 中 %q 的 kind 必须是 alertmanager、grafana、nightingale、generic 之一" $s.id) }}
+{{- end }}
+{{- if not (regexMatch "^[a-z0-9]([-a-z0-9_]{0,61}[a-z0-9])?$" (toString $s.id)) }}
+{{- fail (printf "ingest.sources 的 id 只能包含小写字母、数字、连字符与下划线：%q" (toString $s.id)) }}
+{{- end }}
+{{- $sourceIds = append $sourceIds $s.id }}
+{{- end }}
+{{- if ne (len $sourceIds) (len ($sourceIds | uniq)) }}
+{{- fail "ingest.sources 的 id 不能重复" }}
+{{- end }}
 
 {{- /* 数据库 */}}
 {{- if not (has $v.database.mode (list "cnpg" "external")) }}
@@ -22,13 +52,16 @@
 {{- if not $v.database.external.host }}
 {{- fail "database.mode=external 时必须设置 database.external.host" }}
 {{- end }}
-{{- range $role := list "server" "worker" }}
+{{- range $role := list "server" "worker" "mcp" }}
 {{- if and (index $on $role) (not (index $v.database.external.passwordSecrets $role)) }}
 {{- fail (printf "database.mode=external 时必须设置 database.external.passwordSecrets.%s" $role) }}
 {{- end }}
 {{- end }}
-{{- if and (has $v.database.external.sslmode (list "verify-ca" "verify-full")) (not $v.database.external.caSecret) }}
-{{- fail "sslmode 为 verify-ca 或 verify-full 时必须设置 database.external.caSecret" }}
+{{- if not (has $v.database.external.sslmode (list "disable" "require" "verify-full")) }}
+{{- fail "database.external.sslmode 必须是 disable、require、verify-full 之一" }}
+{{- end }}
+{{- if and (eq $v.database.external.sslmode "verify-full") (not $v.database.external.caSecret) }}
+{{- fail "sslmode=verify-full 时必须设置 database.external.caSecret" }}
 {{- end }}
 {{- end }}
 

@@ -23,5 +23,7 @@ gateway 只提议、不执行。解除冻结只能用 kubectl 或 GitOps：
 
 控制台与 webhook 入口：
   kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "srenautix.roleName" (dict "ctx" $ "role" "server") }} 8080:8080
-Alertmanager webhook 地址：
-  http://{{ include "srenautix.roleName" (dict "ctx" $ "role" "server") }}.{{ .Release.Namespace }}.svc:8080/v1/ingest/alertmanager
+告警接入地址（每个接入源一个，Authorization: Bearer <Secret {{ include "srenautix.ingestTokensSecret" . }} 中同名键的值>）：
+{{- range $s := .Values.ingest.sources }}
+  {{ $s.kind }}：http://{{ include "srenautix.roleName" (dict "ctx" $ "role" "server") }}.{{ $.Release.Namespace }}.svc:8080/v1/ingest/{{ $s.id }}
+{{- end }}

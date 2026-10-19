@@ -1,6 +1,8 @@
 suite: gateway 的配置校验
 templates:
   - templates/validate.yaml
+values:
+  - ../../ci/base/required.yaml
 release:
   name: t
   namespace: srenautix

@@ -19,7 +19,7 @@ if [[ -f "$chart_dir/files/admission/index.yaml" ]]; then
   values_files=(values-observe.yaml values-standard.yaml values-compliance.yaml)
   while IFS= read -r f; do
     values_files+=("ci/$(basename "$f")")
-  done < <(find "$chart_dir/ci" -name '*.yaml' | sort)
+  done < <(find "$chart_dir/ci" -maxdepth 1 -name '*.yaml' | sort)
   test_globs=(-f 'tests/*_test.yaml' -f 'tests/gateway/*_test.yaml')
 else
   with_gateway=false
@@ -31,9 +31,9 @@ fi
 for f in "${values_files[@]}"; do
   name=$(basename "$f" .yaml)
   echo "==> $f"
-  helm lint --strict --kube-version "$kube_version" "$chart_dir" -f "$chart_dir/$f"
-  helm template ci "$chart_dir" --namespace srenautix --kube-version "$kube_version" -f "$chart_dir/$f" \
-    >"$out_dir/$name.yaml"
+  helm lint --strict --kube-version "$kube_version" "$chart_dir" -f "$chart_dir/ci/base/required.yaml" -f "$chart_dir/$f"
+  helm template ci "$chart_dir" --namespace srenautix --kube-version "$kube_version" \
+    -f "$chart_dir/ci/base/required.yaml" -f "$chart_dir/$f" >"$out_dir/$name.yaml"
   kubeconform -strict -summary -kubernetes-version "$kube_version" \
     -schema-location default -schema-location "$crd_catalog" "$out_dir/$name.yaml"
 done

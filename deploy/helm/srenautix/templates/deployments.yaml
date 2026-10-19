@@ -92,6 +92,9 @@ spec:
                   resource: limits.memory
                   divisor: "1"
             {{- end }}
+            {{- if has $role (splitList " " (include "srenautix.dbRoles" $)) }}
+            {{- include "srenautix.pgEnv" (dict "ctx" $ "role" $role) | nindent 12 }}
+            {{- end }}
             {{- with $r.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -137,6 +140,21 @@ spec:
             - name: audit-staging
               mountPath: /var/lib/srenautix/audit-staging
             {{- end }}
+            {{- if eq $role "server" }}
+            - name: bindings
+              mountPath: /etc/srenautix/bindings
+              readOnly: true
+            {{- range $cm := $.Values.packs.userConfigMaps }}
+            - name: pack-{{ $cm }}
+              mountPath: /etc/srenautix/packs/{{ $cm }}
+              readOnly: true
+            {{- end }}
+            {{- if $.Values.packs.lockConfigMap }}
+            - name: pack-lock
+              mountPath: /etc/srenautix/pack-lock
+              readOnly: true
+            {{- end }}
+            {{- end }}
       volumes:
         - name: config
           configMap:
@@ -159,6 +177,23 @@ spec:
         - name: audit-staging
           persistentVolumeClaim:
             claimName: {{ $name }}-audit-staging
+        {{- end }}
+        {{- if eq $role "server" }}
+        - name: bindings
+          configMap:
+            name: {{ include "srenautix.bindingsConfigMap" $ }}
+        {{- range $cm := $.Values.packs.userConfigMaps }}
+        - name: pack-{{ $cm }}
+          configMap:
+            name: {{ $cm }}
+        {{- end }}
+        {{- if $.Values.packs.lockConfigMap }}
+        - name: pack-lock
+          configMap:
+            name: {{ $.Values.packs.lockConfigMap }}
+            items:
+              - {key: pack.lock, path: pack.lock}
+        {{- end }}
         {{- end }}
 {{- end }}
 {{- end }}

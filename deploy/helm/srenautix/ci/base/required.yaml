@@ -1,0 +1,9 @@
+# 每份 values 都必须给出的部署事实；check.sh 与 helm-unittest 把它叠加在被测 values 之前
+datasources:
+  prometheus:
+    url: http://prometheus-operated.monitoring.svc:9090
+  alertmanager:
+    url: http://alertmanager-operated.monitoring.svc:9093
+
+secrets:
+  serviceSigningKey: {existingSecret: srenautix-service-signing}

@@ -2,6 +2,8 @@ suite: PostgreSQL 与审计汇
 templates:
   - templates/database.yaml
   - templates/audit-minio.yaml
+values:
+  - ../ci/base/required.yaml
 release:
   name: t
   namespace: srenautix

@@ -1,6 +1,8 @@
 suite: 角色的 ServiceAccount、配置、Service 与 PDB
 templates:
   - templates/role-resources.yaml
+values:
+  - ../ci/base/required.yaml
 release:
   name: t
   namespace: srenautix
@@ -26,46 +28,67 @@ tests:
       - containsDocument: {kind: PodDisruptionBudget, apiVersion: policy/v1, name: t-srenautix-server}
         not: true
 
-  - it: server 的配置带数据库、审计、治理与熔断开关
+  - it: server 的配置由部署事实生成，键与 server 配置 schema 一致
     set:
       profile: standard
     documentSelector: {path: metadata.name, value: t-srenautix-server-config}
     asserts:
-      - matchRegex: {path: 'data["config.yaml"]', pattern: 'host: t-srenautix-pg-rw\.srenautix\.svc'}
-      - matchRegex: {path: 'data["config.yaml"]', pattern: 'user: srenautix_server'}
-      - matchRegex: {path: 'data["config.yaml"]', pattern: 'sink: minio'}
-      - matchRegex: {path: 'data["config.yaml"]', pattern: 'configMap: srenautix-freeze'}
-      - matchRegex: {path: 'data["config.yaml"]', pattern: 'separationOfDuties: false'}
+      - matchRegex: {path: 'data["config.yaml"]', pattern: '(?m)^cluster_id: default$'}
+      - matchRegex: {path: 'data["config.yaml"]', pattern: '(?m)^public_url: http://t-srenautix-server\.srenautix\.svc:8080$'}
+      - matchRegex: {path: 'data["config.yaml"]', pattern: 'token_file: /etc/srenautix/secrets/ingest/alertmanager'}
+      - matchRegex: {path: 'data["config.yaml"]', pattern: 'tokens_file: /etc/srenautix/secrets/callers/callers\.yaml'}
+      - matchRegex: {path: 'data["config.yaml"]', pattern: 'signing_key_file: /etc/srenautix/secrets/service-signing/private\.pem'}
+      - matchRegex: {path: 'data["config.yaml"]', pattern: 'checkpoint_key_file: /etc/srenautix/secrets/audit-key/private\.pem'}
+      - matchRegex: {path: 'data["config.yaml"]', pattern: 'endpoint: http://t-srenautix-minio\.srenautix\.svc:9000'}
+      - matchRegex: {path: 'data["config.yaml"]', pattern: '(?m)^  source: reader$'}
+      - matchRegex: {path: 'data["config.yaml"]', pattern: '(?m)^  - /app/packs$'}
 
-  - it: worker 的配置不包含审计、治理与熔断开关
-    set:
-      profile: standard
-    documentSelector: {path: metadata.name, value: t-srenautix-worker-config}
-    asserts:
-      - matchRegex: {path: 'data["config.yaml"]', pattern: 'user: srenautix_worker'}
-      - notMatchRegex: {path: 'data["config.yaml"]', pattern: 'audit:'}
-      - notMatchRegex: {path: 'data["config.yaml"]', pattern: 'governance:'}
-      - notMatchRegex: {path: 'data["config.yaml"]', pattern: 'freeze:'}
-
-  - it: 合规配置的治理选项全部取最严格的值
-    values:
-      - ../values-compliance.yaml
-    documentSelector: {path: metadata.name, value: t-srenautix-server-config}
-    asserts:
-      - matchRegex: {path: 'data["config.yaml"]', pattern: 'separationOfDuties: true'}
-      - matchRegex: {path: 'data["config.yaml"]', pattern: 'requirePasskey: true'}
-      - matchRegex: {path: 'data["config.yaml"]', pattern: 'allowSelfApproval: false'}
-      - matchRegex: {path: 'data["config.yaml"]', pattern: 'mode: COMPLIANCE'}
-
-  - it: 角色与全局 config 合并进 config.yaml，角色的值优先
+  - it: observe 配置的审计写入 PG，没有审批签名，拓扑由 server 的 informer 读取
     set:
       profile: observe
-      config:
-        locale: zh-CN
-        budget: {dailyTokens: 1000}
+      secrets.serviceSigningKey.existingSecret: ""
+    documentSelector: {path: metadata.name, value: t-srenautix-server-config}
+    asserts:
+      - notMatchRegex: {path: 'data["config.yaml"]', pattern: 's3:'}
+      - notMatchRegex: {path: 'data["config.yaml"]', pattern: 'approvals:'}
+      - matchRegex: {path: 'data["config.yaml"]', pattern: '(?m)^  source: informer$'}
+
+  - it: publicUrl 为空且启用 ingress 时取第一个主机名
+    set:
+      profile: observe
+      roles.server.ingress.enabled: true
+      roles.server.ingress.hosts:
+        - host: srenautix.example.com
+    documentSelector: {path: metadata.name, value: t-srenautix-server-config}
+    asserts:
+      - matchRegex: {path: 'data["config.yaml"]', pattern: '(?m)^public_url: https://srenautix\.example\.com$'}
+
+  - it: roles.server.config 与生成的配置深度合并，同名键以用户值为准
+    set:
+      profile: observe
+      roles.server.config:
+        notify:
+          prefix: "[影子]"
+        scheduler:
+          slots: 6
+        ingest:
+          silence_threshold: 15m
+    documentSelector: {path: metadata.name, value: t-srenautix-server-config}
+    asserts:
+      - matchRegex: {path: 'data["config.yaml"]', pattern: "prefix: '\\[影子\\]'"}
+      - matchRegex: {path: 'data["config.yaml"]', pattern: 'slots: 6'}
+      - matchRegex: {path: 'data["config.yaml"]', pattern: 'silence_threshold: 15m'}
+      - matchRegex: {path: 'data["config.yaml"]', pattern: 'self_label: srenautix_self'}
+
+  - it: 其他角色的配置就是 roles.<角色>.config
+    set:
+      profile: observe
       roles.worker.config:
-        budget: {dailyTokens: 15000000}
+        budget: {daily_tokens: 15000000}
     documentSelector: {path: metadata.name, value: t-srenautix-worker-config}
     asserts:
-      - matchRegex: {path: 'data["config.yaml"]', pattern: 'locale: zh-CN'}
-      - matchRegex: {path: 'data["config.yaml"]', pattern: 'dailyTokens: 15000000'}
+      - equal:
+          path: 'data["config.yaml"]'
+          value: |
+            budget:
+              daily_tokens: 15000000

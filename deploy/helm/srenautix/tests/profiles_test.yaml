@@ -1,6 +1,8 @@
 suite: 安装配置与角色开关
 templates:
   - templates/deployments.yaml
+values:
+  - ../ci/base/required.yaml
 release:
   name: t
   namespace: srenautix
@@ -135,6 +137,36 @@ tests:
           path: spec.template.spec.tolerations
           value:
             - {key: dedicated, operator: Exists, effect: NoSchedule}
+
+  - it: server 只挂载服务签名私钥，worker 挂载自己的服务 token，二者各用自己的库角色
+    set:
+      profile: observe
+    asserts:
+      - equal:
+          path: spec.template.spec.volumes[?(@.name=="secret-service-signing")].secret.items
+          value:
+            - {key: private.pem, path: private.pem}
+        documentSelector: {path: metadata.name, value: t-srenautix-server}
+      - equal:
+          path: spec.template.spec.containers[0].env[?(@.name=="PGUSER")].value
+          value: srenautix_server
+        documentSelector: {path: metadata.name, value: t-srenautix-server}
+      - equal:
+          path: spec.template.spec.containers[0].env[?(@.name=="PGSSLROOTCERT")].value
+          value: /etc/srenautix/secrets/db-ca/ca.crt
+        documentSelector: {path: metadata.name, value: t-srenautix-server}
+      - equal:
+          path: spec.template.spec.containers[0].env[?(@.name=="PGUSER")].value
+          value: srenautix_worker
+        documentSelector: {path: metadata.name, value: t-srenautix-worker}
+      - equal:
+          path: spec.template.spec.volumes[?(@.name=="secret-service-token")].secret.items
+          value:
+            - {key: worker, path: token}
+        documentSelector: {path: metadata.name, value: t-srenautix-worker}
+      - notExists:
+          path: spec.template.spec.volumes[?(@.name=="secret-service-signing")]
+        documentSelector: {path: metadata.name, value: t-srenautix-worker}
 
   - it: 只有 worker 挂载模型密钥，只有 server 挂载渠道 token
     set:

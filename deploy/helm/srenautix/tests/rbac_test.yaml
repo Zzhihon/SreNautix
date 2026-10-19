@@ -1,6 +1,8 @@
 suite: 只读角色的 RBAC（不变量 1）
 templates:
   - templates/rbac.yaml
+values:
+  - ../ci/base/required.yaml
 release:
   name: t
   namespace: srenautix

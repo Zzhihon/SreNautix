@@ -1,6 +1,8 @@
 suite: 自身监控
 templates:
   - templates/self-monitoring.yaml
+values:
+  - ../ci/base/required.yaml
 release:
   name: t
   namespace: srenautix

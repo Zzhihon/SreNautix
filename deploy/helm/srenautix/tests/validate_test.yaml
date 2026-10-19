@@ -1,6 +1,8 @@
 suite: 配置校验
 templates:
   - templates/validate.yaml
+values:
+  - ../ci/base/required.yaml
 release:
   name: t
   namespace: srenautix
@@ -20,6 +22,51 @@ tests:
       roles.server.enabled: false
     asserts:
       - failedTemplate: {errorPattern: server 是必需的角色}
+
+  - it: 必须给出 Prometheus 地址
+    set:
+      profile: observe
+      datasources.prometheus.url: ""
+    asserts:
+      - failedTemplate: {errorPattern: 必须设置 datasources.prometheus.url}
+
+  - it: observe 以外的配置必须提供服务签名密钥
+    set:
+      profile: standard
+      roles.gateway.enabled: false
+      secrets.serviceSigningKey.existingSecret: ""
+    asserts:
+      - failedTemplate: {errorPattern: 必须设置 secrets.serviceSigningKey.existingSecret}
+
+  - it: observe 配置不需要服务签名密钥
+    set:
+      profile: observe
+      secrets.serviceSigningKey.existingSecret: ""
+    asserts:
+      - hasDocuments: {count: 0}
+
+  - it: clusterId 必须是 DNS 标签
+    set:
+      profile: observe
+      clusterId: Prod_1
+    asserts:
+      - failedTemplate: {errorPattern: clusterId 只能包含}
+
+  - it: 接入源 id 不能重复
+    set:
+      profile: observe
+      ingest.sources:
+        - {id: am, kind: alertmanager}
+        - {id: am, kind: grafana}
+    asserts:
+      - failedTemplate: {errorPattern: id 不能重复}
+
+  - it: OIDC 需要 issuer、clientId 与 Secret
+    set:
+      profile: observe
+      identity.oidc.enabled: true
+    asserts:
+      - failedTemplate: {errorPattern: identity.oidc.enabled=true 时必须设置}
 
   - it: CNPG 默认至少 2 个实例
     set:

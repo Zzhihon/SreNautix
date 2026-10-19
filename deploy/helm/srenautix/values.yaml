@@ -5,8 +5,11 @@
 # observe | standard | compliance
 profile: standard
 
-# 所有事件键、拓扑和审计记录都带 cluster_id
+# 所有事件键、拓扑和审计记录都带 cluster_id（小写字母、数字与连字符）
 clusterId: default
+
+# 消息与通知中的控制台链接前缀；为空时取 ingress 的第一个主机名（https），没有 ingress 时取 server 的集群内地址
+publicUrl: ""
 
 global:
   # 非空时替换两个镜像的仓库主机名，用于离线安装的私有仓库
@@ -53,6 +56,8 @@ roles:
       hosts: []
       # - host: srenautix.example.com
       tls: []
+    # 与 chart 生成的 server 配置深度合并（键见 apps/srenautix/src/config/server.ts），
+    # 用于 notify（Telegram、飞书）、stage_a、scheduler 等业务设置；同名键以这里为准
     config: {}
     extraEnv: []
     nodeSelector: {}
@@ -154,25 +159,81 @@ governance:
   # H 档审批要求的重新认证时间窗（秒）
   highTierReauthMaxAgeSeconds: 300
 
-# 数据源地址，写入各角色配置；凭证放在 secrets.datasources
+# 数据源地址。server 用 prometheus 做证据卡查询与 ALERTS 对账，用 alertmanager 做 60 秒对账；
+# worker 与 reader 的数据源配置写在各自的 roles.<角色>.config 中
 datasources:
-  prometheus: {url: ""}
+  prometheus:
+    url: ""
+    # promql | metricsql
+    dialect: promql
   alertmanager: {url: ""}
   loki: {url: ""}
   tempo: {url: ""}
+
+# 告警接入源（server 的 ingest.sources）。每个接入源一个 bearer token，
+# 挂载为 /etc/srenautix/secrets/ingest/<id>；kind：alertmanager | grafana | nightingale | generic
+ingest:
+  sources:
+    - {id: alertmanager, kind: alertmanager}
+  # 已存在的 Secret，键为接入源 id；为空时由 chart 生成并在升级时保留
+  existingSecret: ""
+
+# 领域包：内置包在镜像的 /app/packs；用户层的包以 ConfigMap 挂载，按列出的顺序合并（组织在前、集群在后）
+packs:
+  userConfigMaps: []
+  # 含 pack.lock 的 ConfigMap（键 pack.lock）；为空时由 server 在启动时计算
+  lockConfigMap: ""
+
+identity:
+  # 本地管理员（只用于首次引导与紧急入口）。Secret 的两个键：
+  #   password_hash：`srenautix admin hash-password` 输出的 scrypt 哈希
+  #   totp_secret：base32 的 TOTP 密钥
+  # existingSecret 为空时不启用本地管理员
+  localAdmin:
+    username: admin
+    existingSecret: ""
+  oidc:
+    enabled: false
+    issuer: ""
+    clientId: ""
+    scopes: [openid, profile, email, groups]
+    groupsClaim: groups
+    nameClaim: preferred_username
+    # 含 client_secret 键的 Secret
+    existingSecret: ""
+  # 角色绑定（DESIGN §13）：文件名 → 内容，渲染成 ConfigMap 挂载到 /etc/srenautix/bindings；
+  # bindingsConfigMap 非空时改用这个已存在的 ConfigMap（例如由 GitOps 同步）
+  bindings: {}
+  bindingsConfigMap: ""
+
+# L 档审批的服务签名（server 签名，gateway 校验）
+approvals:
+  keyId: default
+
+# 服务调用方。chart 为 worker、reader、gateway 各生成一个 bearer token，
+# server 的调用方文件只保存 token 的 sha256；extra 中的条目原样追加（外部调用方只能提议）
+callers:
+  extra: []
+  # - id: holmes
+  #   kind: external
+  #   channel: api
+  #   actions: [workload_scale]
+  #   namespaces: [shop]
+  #   token_sha256: <64 位十六进制>
 
 # 已存在的 Secret 名称。chart 按设计 §1.1 决定哪些角色挂载哪些 Secret，挂载路径为 /etc/srenautix/secrets/<键>/
 secrets:
   # 模型密钥，只挂到 worker
   llm: {existingSecret: ""}
-  # 渠道 token（Telegram、飞书等），只挂到 server
+  # 渠道 token（Telegram bot token、飞书 app secret 等），只挂到 server
   channels: {existingSecret: ""}
-  # OIDC 客户端，只挂到 server
-  oidc: {existingSecret: ""}
-  # 服务签名密钥（只签 L 档审批），只挂到 server
+  # 服务签名密钥（只签 L 档审批）：键 private.pem（Ed25519，PKCS#8）只挂到 server，public.pem 挂到 gateway。
+  # observe 以外的配置必填
   serviceSigningKey: {existingSecret: ""}
-  # 审计检查点签名密钥：server（治理链）与 gateway（执行链）
+  # 治理审计链检查点签名密钥（键 private.pem，Ed25519），只挂到 server；为空时由 chart 生成并保留
   auditSigningKey: {existingSecret: ""}
+  # 执行审计链检查点签名密钥（键 private.pem，Ed25519），只挂到 gateway；为空时由 chart 生成并保留
+  gatewayAuditSigningKey: {existingSecret: ""}
   # 数据源只读凭证：server、worker、reader
   datasources: {existingSecret: ""}
 
@@ -180,20 +241,26 @@ database:
   # cnpg：在本命名空间创建 CNPG Cluster（需要已安装 CNPG operator）；external：使用外部 PostgreSQL 16+
   mode: cnpg
   name: srenautix
-  # 每个角色一个库角色
+  # 每个角色一个库角色；server 与 worker 各自拥有一个 schema，mcp 没有 schema（DESIGN §2.1）
   roles:
     server: {username: srenautix_server}
     worker: {username: srenautix_worker}
+    mcp: {username: srenautix_mcp}
   external:
     host: ""
     port: 5432
+    # disable | require | verify-full
     sslmode: verify-full
-    # 含 ca.crt 的 Secret，sslmode 为 verify-ca / verify-full 时必填
+    # 含 ca.crt 的 Secret，sslmode=verify-full 时必填
     caSecret: ""
     # 每个角色的密码 Secret（键 password）
     passwordSecrets:
       server: ""
       worker: ""
+      mcp: ""
+    # 数据库管理员凭证（键 username、password）。设置后 chart 运行 db bootstrap Job 建库角色与 schema；
+    # 为空时由数据库管理员手动执行一次 `srenautix db bootstrap`
+    adminSecret: ""
   cnpg:
     instances: 2
     # 设计要求至少 2 个实例；单实例只用于明确接受风险的部署
@@ -219,6 +286,7 @@ database:
     passwordSecrets:
       server: ""
       worker: ""
+      mcp: ""
 
 # 审计汇：执行链（gateway）与治理链（server）以 JSONL 哈希链写入对象存储
 audit:
@@ -348,6 +416,3 @@ imagePolicy:
 # 额外的只读 RBAC 规则，追加到 server、worker、mcp、reader（不允许包含 secrets）
 rbac:
   extraReadRules: []
-
-# 所有角色共用的配置片段，与各角色的 config 合并写入 config.yaml
-config: {}

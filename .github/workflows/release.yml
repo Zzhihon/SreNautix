@@ -28,7 +28,10 @@ jobs:
       - name: 检查两个镜像的源码是否已在仓库中
         id: detect
         run: |
-          echo "hub=$([[ -f apps/srenautix/package.json ]] && echo true || echo false)" >>"$GITHUB_OUTPUT"
+          # 中心镜像包含 server/worker/mcp、内置领域包与控制台，三者都在仓库中才构建
+          hub=false
+          if [[ -f apps/srenautix/package.json && -d packs && -f web/console/package.json ]]; then hub=true; fi
+          echo "hub=$hub" >>"$GITHUB_OUTPUT"
           echo "spoke=$([[ -d cmd/srenautix-spoke ]] && echo true || echo false)" >>"$GITHUB_OUTPUT"
 
   hub:

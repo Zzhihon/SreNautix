@@ -56,7 +56,7 @@
 {{- $_ := set $rules "worker" (dict "ingress" (list $metricsIn) "egress" $workerEgress) }}
 
 {{- $mcpIn := dict "from" (list (dict "namespaceSelector" dict)) "ports" (list (dict "protocol" "TCP" "port" 8080)) }}
-{{- $_ := set $rules "mcp" (dict "ingress" (list $mcpIn $metricsIn) "egress" (list $dns $api $toServer)) }}
+{{- $_ := set $rules "mcp" (dict "ingress" (list $mcpIn $metricsIn) "egress" (list $dns $pgEgress $api $toServer)) }}
 
 {{- $_ := set $rules "reader" (dict "ingress" (list $metricsIn) "egress" (list $dns $api $toServer $datasources)) }}
 
@@ -86,9 +86,29 @@ spec:
 {{- end }}
 {{- end }}
 
+{{- $bootstrapPeer := dict "podSelector" (dict "matchLabels" (merge (dict "app.kubernetes.io/component" "db-bootstrap") (deepCopy $base))) }}
+{{- if include "srenautix.pg.adminSecret" . }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "srenautix.fullname" . }}-db-bootstrap
+  namespace: {{ $ns }}
+  labels:
+    {{- include "srenautix.labels" . | nindent 4 }}
+    app.kubernetes.io/component: db-bootstrap
+spec:
+  podSelector:
+    {{- toYaml $bootstrapPeer.podSelector | nindent 4 }}
+  policyTypes: [Ingress, Egress]
+  egress:
+    - {{- toYaml $dns | nindent 6 }}
+    - {{- toYaml $pgEgress | nindent 6 }}
+{{- end }}
+
 {{- if eq .Values.database.mode "cnpg" }}
 ---
-# PG 实例：只接受 server、worker、同一 Cluster 的实例与 CNPG operator 的连接
+# PG 实例：只接受 server、worker、mcp、db bootstrap、同一 Cluster 的实例与 CNPG operator 的连接
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -105,6 +125,8 @@ spec:
     - from:
         - {{- toYaml (index $peer "server") | nindent 10 }}
         - {{- toYaml (index $peer "worker") | nindent 10 }}
+        - {{- toYaml (index $peer "mcp") | nindent 10 }}
+        - {{- toYaml $bootstrapPeer | nindent 10 }}
       ports:
         - {protocol: TCP, port: 5432}
     - from:

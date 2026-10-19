@@ -153,6 +153,13 @@ data:
 
 {{- $am := .Values.alertmanagerConfig }}
 {{- if $am.enabled }}
+{{- $amSource := "" }}
+{{- range $s := .Values.ingest.sources }}
+{{- if and (eq $s.kind "alertmanager") (not $amSource) }}{{- $amSource = $s.id }}{{- end }}
+{{- end }}
+{{- if not $amSource }}
+{{- fail "alertmanagerConfig.enabled=true 时 ingest.sources 中至少要有一个 kind=alertmanager 的接入源" }}
+{{- end }}
 ---
 # 告警路由到 SreNautix；自身告警先匹配第一条子路由，送到 SreNautix 以外的接收方
 apiVersion: monitoring.coreos.com/v1alpha1
@@ -180,7 +187,13 @@ spec:
   receivers:
     - name: {{ $am.receiverName }}
       webhookConfigs:
-        - url: http://{{ include "srenautix.roleName" (dict "ctx" $ "role" "server") }}.{{ $ns }}.svc:8080/v1/ingest/alertmanager
+        - url: http://{{ include "srenautix.roleName" (dict "ctx" $ "role" "server") }}.{{ $ns }}.svc:8080/v1/ingest/{{ $amSource }}
           sendResolved: true
+          httpConfig:
+            authorization:
+              type: Bearer
+              credentials:
+                name: {{ include "srenautix.ingestTokensSecret" . }}
+                key: {{ $amSource }}
     - {{- toYaml (merge (dict "name" $sm.receiver) (deepCopy $am.selfReceiverSpec)) | nindent 6 }}
 {{- end }}
