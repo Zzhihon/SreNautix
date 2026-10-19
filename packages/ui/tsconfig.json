@@ -9,5 +9,5 @@
     "jsx": "react-jsx",
     "types": ["vite/client", "@vitest/browser-playwright"]
   },
-  "include": ["src", "test", "vite.config.ts"]
+  "include": ["src", "test", "scripts", "vite.config.ts"]
 }
