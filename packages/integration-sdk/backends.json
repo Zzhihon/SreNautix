@@ -1,0 +1,55 @@
+{
+  "prometheus": {
+    "version": "3.15.0",
+    "url": "https://github.com/prometheus/prometheus/releases/download/v{version}/prometheus-{version}.{os}-{arch}.tar.gz",
+    "binaries": {
+      "prometheus": "prometheus-{version}.{os}-{arch}/prometheus",
+      "promtool": "prometheus-{version}.{os}-{arch}/promtool"
+    },
+    "sha256": {
+      "darwin-amd64": "2d79e744c2d7e505db936fbc898e05abc74fcb6e437c25befd26e9c9f00aa58b",
+      "darwin-arm64": "920df4d17e78b3b0175af144eb318b0c74d1cf7b1d1251b326966f0e81977260",
+      "linux-amd64": "2a542df32eac02ee17b9d844fb2aa1de00dafa5476579ba8a3ba862e9d572ea0",
+      "linux-arm64": "f1f90ec08e849d494ca66c611470afc50192f0355f1a61c33f2cbde02d067823"
+    }
+  },
+  "victoria-metrics": {
+    "version": "1.154.0",
+    "url": "https://github.com/VictoriaMetrics/VictoriaMetrics/releases/download/v{version}/victoria-metrics-{os}-{arch}-v{version}.tar.gz",
+    "binaries": {
+      "victoria-metrics": "victoria-metrics-prod"
+    },
+    "sha256": {
+      "darwin-amd64": "8356724c5c02d46f07f6b8dc353ca50e4a4cdf951caedb13f5e20d248b6fde83",
+      "darwin-arm64": "8599fe6254c2601666f729b98abffea4892762c91e1f67e421590e2d64566797",
+      "linux-amd64": "2ba3edae969a4b52a55e78d2721067541b0ee94774190dbd87fea0602aa57b8f",
+      "linux-arm64": "6dbeb72f924007ebb9abadfd8a555a420950af13631bb32143c5f4e5010dec2d"
+    }
+  },
+  "loki": {
+    "version": "3.7.8",
+    "url": "https://github.com/grafana/loki/releases/download/v{version}/loki-{os}-{arch}.zip",
+    "binaries": {
+      "loki": "loki-{os}-{arch}"
+    },
+    "sha256": {
+      "darwin-amd64": "313d03f8f2d88bcfd79e11dec52655997805f8c94d12ac26efe555b478a09674",
+      "darwin-arm64": "95d830437482aba989a7d7a65be3c618a67a6e46f6e614544cc4b9ce09f499a1",
+      "linux-amd64": "62aea42c9cba52cd1642b3666ab37019a0ce4c24ab50b07e85dccc8d812f7d61",
+      "linux-arm64": "a874c10ffefe4d66c914b8aac8897159451d3026469598341aa03c76084697de"
+    }
+  },
+  "tempo": {
+    "version": "3.1.0",
+    "url": "https://github.com/grafana/tempo/releases/download/v{version}/tempo_{version}_{os}_{arch}.tar.gz",
+    "binaries": {
+      "tempo": "tempo"
+    },
+    "sha256": {
+      "darwin-amd64": "4459d55672712d88529d9e4e2975e57f66356b57261bc4f3b35e78ee88725c79",
+      "darwin-arm64": "0511d3d7fb959312ae6e3b269f469942e9fc4839e53f01c07cc65844f312eb0c",
+      "linux-amd64": "9604ab46348270a42954801bba91cd65335e16568ef886bdf71b988fdcb7ac4e",
+      "linux-arm64": "e4092dcf2b93e141be77e300b539f6c5cceefa9803417d7d635c6797d9bc19ad"
+    }
+  }
+}

@@ -1,0 +1,2 @@
+# 构建时由 promql-wasm/ 生成
+/wasm/

@@ -1,0 +1,35 @@
+{
+  "name": "@srenautix/integration-sdk",
+  "version": "0.1.0",
+  "description": "SreNautix 集成 SDK：集成清单、各类集成契约的接口、参考适配器、回放时钟窗口、一致性测试套件与测试用真实后端",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": {
+      "@srenautix/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "wasm",
+    "backends.json"
+  ],
+  "scripts": {
+    "build:wasm": "mkdir -p wasm && cd promql-wasm && GOOS=js GOARCH=wasm go build -trimpath -ldflags='-s -w' -o ../wasm/promql.wasm . && cp \"$(go env GOROOT)/lib/wasm/wasm_exec.js\" ../wasm/wasm_exec.cjs",
+    "build": "pnpm run build:wasm && tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "pnpm run build:wasm && vitest run"
+  },
+  "dependencies": {
+    "@srenautix/contract": "workspace:*",
+    "adm-zip": "0.6.1",
+    "tar": "7.5.22",
+    "undici": "8.12.3",
+    "yaml": "2.9.1"
+  },
+  "devDependencies": {
+    "@types/adm-zip": "0.6.0"
+  }
+}
