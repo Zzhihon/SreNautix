@@ -47,8 +47,14 @@
         "pack_timing",
         "top1",
         "recall_at_3",
+        "pass_at_1",
         "pass_pow_k",
+        "run_agreement",
+        "coverage",
+        "selective_accuracy",
         "disposition_accuracy",
+        "reliability",
+        "provider_fingerprints",
         "benign_false_positive",
         "undetermined_ratio",
         "structured_output_failure",
@@ -64,10 +70,42 @@
           "description": "领域包早于事件或晚于事件，分两组报告",
           "enum": ["pack_before_incident", "pack_after_incident", "all"]
         },
-        "top1": { "$ref": "#/$defs/Ratio" },
-        "recall_at_3": { "$ref": "#/$defs/Ratio" },
-        "pass_pow_k": { "$ref": "#/$defs/Ratio" },
+        "top1": {
+          "description": "top-1 落在根因集合内的运行占比（分母为有根因的用例的全部运行）",
+          "$ref": "#/$defs/Ratio"
+        },
+        "recall_at_3": { "description": "前 3 个候选覆盖根因集合的运行占比", "$ref": "#/$defs/Ratio" },
+        "pass_at_1": { "description": "每个用例第一次运行命中的占比", "$ref": "#/$defs/Ratio" },
+        "pass_pow_k": { "description": "k 次运行全部命中的用例占比（k 为 runs_per_case）", "$ref": "#/$defs/Ratio" },
+        "run_agreement": {
+          "description": "同一用例的多次运行给出相同根因与相同处置判断的用例占比",
+          "$ref": "#/$defs/Ratio"
+        },
+        "coverage": {
+          "description": "没有弃权（结论不是 undetermined 或 inconclusive）的运行占比",
+          "$ref": "#/$defs/Ratio"
+        },
+        "selective_accuracy": { "description": "不弃权的运行中 top-1 命中的占比", "$ref": "#/$defs/Ratio" },
         "disposition_accuracy": { "$ref": "#/$defs/Ratio" },
+        "reliability": {
+          "type": "array",
+          "description": "可靠性表：结论阶梯每一档的精确率（DESIGN §14.4）；evidence_consistent 的精确率下界低于 0.85 时该档自动降级",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["level", "precision", "demoted"],
+            "properties": {
+              "level": { "$ref": "common.schema.json#/$defs/ConclusionLevel" },
+              "precision": { "$ref": "#/$defs/Ratio" },
+              "demoted": { "type": "boolean" }
+            }
+          }
+        },
+        "provider_fingerprints": {
+          "type": "array",
+          "description": "评测期间观察到的服务方指纹；与路由当前指纹不同的成绩作废",
+          "items": { "type": "string" }
+        },
         "benign_false_positive": { "$ref": "#/$defs/Ratio" },
         "undetermined_ratio": { "$ref": "#/$defs/Ratio" },
         "structured_output_failure": { "$ref": "#/$defs/Ratio" },
@@ -92,11 +130,26 @@
       "title": "EvalGate",
       "type": "object",
       "additionalProperties": false,
-      "required": ["baseline_report_id", "regressed_cases", "waived_cases", "paired_delta_low", "threshold", "passed"],
+      "required": [
+        "baseline_report_id",
+        "paired_cases",
+        "regressed_cases",
+        "waived_cases",
+        "paired_delta",
+        "paired_delta_low",
+        "threshold",
+        "passed"
+      ],
       "properties": {
         "baseline_report_id": { "$ref": "common.schema.json#/$defs/Uuid" },
-        "regressed_cases": { "type": "array", "items": { "type": "string" } },
+        "paired_cases": { "type": "integer", "minimum": 0, "description": "两份报告共有的用例数 n" },
+        "regressed_cases": {
+          "type": "array",
+          "description": "基线 pass^k 通过、候选不通过的用例；不在 waived_cases 中的任何一条都使门禁失败",
+          "items": { "type": "string" }
+        },
         "waived_cases": { "type": "array", "items": { "type": "string" } },
+        "paired_delta": { "type": "number", "description": "新减旧的 top-1 差值（按用例配对）" },
         "paired_delta_low": { "type": "number", "description": "新减旧的单侧 90% 下界" },
         "threshold": { "type": "number", "description": "n<100 时 -0.10，n≥100 时 -0.05" },
         "passed": { "type": "boolean" }

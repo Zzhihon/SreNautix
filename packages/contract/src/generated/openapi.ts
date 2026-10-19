@@ -1836,6 +1836,8 @@ export type components = {
             mean: number;
             p90: number;
           };
+          /** @description 没有弃权（结论不是 undetermined 或 inconclusive）的运行占比 */
+          coverage: components['schemas']['Ratio'];
           disposition_accuracy: components['schemas']['Ratio'];
           model: string;
           /**
@@ -1843,20 +1845,42 @@ export type components = {
            * @enum {string}
            */
           pack_timing: 'pack_before_incident' | 'pack_after_incident' | 'all';
+          /** @description 每个用例第一次运行命中的占比 */
+          pass_at_1: components['schemas']['Ratio'];
+          /** @description k 次运行全部命中的用例占比（k 为 runs_per_case） */
           pass_pow_k: components['schemas']['Ratio'];
+          /** @description 评测期间观察到的服务方指纹；与路由当前指纹不同的成绩作废 */
+          provider_fingerprints: string[];
+          /** @description 前 3 个候选覆盖根因集合的运行占比 */
           recall_at_3: components['schemas']['Ratio'];
+          /** @description 可靠性表：结论阶梯每一档的精确率（DESIGN §14.4）；evidence_consistent 的精确率下界低于 0.85 时该档自动降级 */
+          reliability: {
+            demoted: boolean;
+            level: components['schemas']['ConclusionLevel'];
+            precision: components['schemas']['Ratio'];
+          }[];
           route_id: string;
+          /** @description 同一用例的多次运行给出相同根因与相同处置判断的用例占比 */
+          run_agreement: components['schemas']['Ratio'];
+          /** @description 不弃权的运行中 top-1 命中的占比 */
+          selective_accuracy: components['schemas']['Ratio'];
           snapshot_miss_rate: number | null;
           structured_output_failure: components['schemas']['Ratio'];
+          /** @description top-1 落在根因集合内的运行占比（分母为有根因的用例的全部运行） */
           top1: components['schemas']['Ratio'];
           undetermined_ratio: components['schemas']['Ratio'];
         };
         /** EvalGate */
         Gate: {
           baseline_report_id: components['schemas']['Uuid'];
+          /** @description 两份报告共有的用例数 n */
+          paired_cases: number;
+          /** @description 新减旧的 top-1 差值（按用例配对） */
+          paired_delta: number;
           /** @description 新减旧的单侧 90% 下界 */
           paired_delta_low: number;
           passed: boolean;
+          /** @description 基线 pass^k 通过、候选不通过的用例；不在 waived_cases 中的任何一条都使门禁失败 */
           regressed_cases: string[];
           /** @description n<100 时 -0.10，n≥100 时 -0.05 */
           threshold: number;
@@ -2281,9 +2305,14 @@ export type components = {
     /** EvalGate */
     Gate: {
       baseline_report_id: components['schemas']['Uuid'];
+      /** @description 两份报告共有的用例数 n */
+      paired_cases: number;
+      /** @description 新减旧的 top-1 差值（按用例配对） */
+      paired_delta: number;
       /** @description 新减旧的单侧 90% 下界 */
       paired_delta_low: number;
       passed: boolean;
+      /** @description 基线 pass^k 通过、候选不通过的用例；不在 waived_cases 中的任何一条都使门禁失败 */
       regressed_cases: string[];
       /** @description n<100 时 -0.10，n≥100 时 -0.05 */
       threshold: number;
@@ -2709,6 +2738,8 @@ export type components = {
         mean: number;
         p90: number;
       };
+      /** @description 没有弃权（结论不是 undetermined 或 inconclusive）的运行占比 */
+      coverage: components['schemas']['Ratio'];
       disposition_accuracy: components['schemas']['Ratio'];
       model: string;
       /**
@@ -2716,11 +2747,28 @@ export type components = {
        * @enum {string}
        */
       pack_timing: 'pack_before_incident' | 'pack_after_incident' | 'all';
+      /** @description 每个用例第一次运行命中的占比 */
+      pass_at_1: components['schemas']['Ratio'];
+      /** @description k 次运行全部命中的用例占比（k 为 runs_per_case） */
       pass_pow_k: components['schemas']['Ratio'];
+      /** @description 评测期间观察到的服务方指纹；与路由当前指纹不同的成绩作废 */
+      provider_fingerprints: string[];
+      /** @description 前 3 个候选覆盖根因集合的运行占比 */
       recall_at_3: components['schemas']['Ratio'];
+      /** @description 可靠性表：结论阶梯每一档的精确率（DESIGN §14.4）；evidence_consistent 的精确率下界低于 0.85 时该档自动降级 */
+      reliability: {
+        demoted: boolean;
+        level: components['schemas']['ConclusionLevel'];
+        precision: components['schemas']['Ratio'];
+      }[];
       route_id: string;
+      /** @description 同一用例的多次运行给出相同根因与相同处置判断的用例占比 */
+      run_agreement: components['schemas']['Ratio'];
+      /** @description 不弃权的运行中 top-1 命中的占比 */
+      selective_accuracy: components['schemas']['Ratio'];
       snapshot_miss_rate: number | null;
       structured_output_failure: components['schemas']['Ratio'];
+      /** @description top-1 落在根因集合内的运行占比（分母为有根因的用例的全部运行） */
       top1: components['schemas']['Ratio'];
       undetermined_ratio: components['schemas']['Ratio'];
     };

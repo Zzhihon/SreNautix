@@ -98,6 +98,30 @@ export type Sha256 = string;
  */
 export type EvidenceRef = string;
 /**
+ * RFC 3339 UTC 时间
+ */
+export type Timestamp2 = string;
+/**
+ * RFC 3339 UTC 时间
+ */
+export type Timestamp3 = string;
+/**
+ * 根因的粒度，从细到粗：pod < workload < component < node
+ */
+export type EvalGranularity = 'pod' | 'workload' | 'component' | 'node';
+/**
+ * 稳定标签 <根组件>:<首次触发时间取整到 10 分钟>，同一标签冲突时追加 ~2、~3
+ */
+export type IncidentLabel = string;
+/**
+ * 判定向量的指纹（带迟滞，见 docs/core/convergence.md）
+ */
+export type Sha2561 = string;
+/**
+ * 边的来源（DESIGN §4.2）
+ */
+export type EdgeProvenance = 'structural' | 'runtime' | 'config_ref' | 'network_policy' | 'naming';
+/**
  * 事件流中的一条事件（DESIGN §2.3）。每个所有者（server、worker）各有一张只追加的 outbox，与状态变更写在同一事务里。消费者按游标调用 GET /v1/events?after=，投递语义是至少一次，按 event_id 幂等处理。type 决定 payload 的结构
  */
 export type OutboxEvent =
@@ -118,10 +142,6 @@ export type IncidentUpsertedEvent = OutboxEventHeader & {
   payload: Incident;
 };
 export type OutboxOwner = 'server' | 'worker';
-/**
- * 稳定标签 <根组件>:<首次触发时间取整到 10 分钟>，同一标签冲突时追加 ~2、~3
- */
-export type IncidentLabel = string;
 export type IncidentMergedEvent = OutboxEventHeader & {
   type: 'incident.merged';
   payload: {
@@ -207,7 +227,7 @@ export type ProposalChangedEvent = OutboxEventHeader & {
 /**
  * sha256(JCS([incident_id, run_id 或 rule_id 或 caller_id, action, canonical_params]))
  */
-export type Sha2561 = string;
+export type Sha2562 = string;
 /**
  * rejected_by_policy 策略拒绝；awaiting_approval 待审批；approved 已签发审批断言、等待 gateway 拉取；dispatched gateway 已拉取，后续进度见 execution；rejected 人工拒绝；expired TTL 或审批过期；stale 绑定字段变化；duplicate 与未结束的提议幂等键相同；held 被软暂停扣住
  */
@@ -277,14 +297,6 @@ export type Duration2 = string;
  * Prometheus 风格的时长，例如 30s、5m、2h、7d
  */
 export type Duration3 = string;
-/**
- * 判定向量的指纹（带迟滞，见 docs/core/convergence.md）
- */
-export type Sha2562 = string;
-/**
- * 边的来源（DESIGN §4.2）
- */
-export type EdgeProvenance = 'structural' | 'runtime' | 'config_ref' | 'network_policy' | 'naming';
 
 export interface SrenautixContractIndex {
   ActionCatalog?: ActionCatalog;
@@ -373,10 +385,19 @@ export interface SrenautixContractIndex {
   EvidenceRef?: EvidenceRef;
   Error?: Error;
   Condition?: Condition;
+  EvalCase?: EvalCase;
+  EvalGranularity?: EvalGranularity;
+  EvalTruth?: EvalTruth;
+  EvalLeakage?: EvalLeakage;
   EvalReport?: EvalReport;
-  EvalRatio?: EvalRatio;
+  EvalRatio?: EvalRatio7;
   EvalModelRow?: EvalModelRow;
   EvalGate?: EvalGate;
+  EvalSnapshot?: EvalSnapshot;
+  EvalSnapshotContext?: EvalSnapshotContext;
+  EvalKnowledge?: EvalKnowledge;
+  EvalReferenceCase?: EvalReferenceCase;
+  EvalSnapshotCall?: EvalSnapshotCall;
   OutboxEvent?: OutboxEvent;
   OutboxEventType?: OutboxEventType;
   OutboxOwner?: OutboxOwner;
@@ -395,7 +416,7 @@ export interface SrenautixContractIndex {
   FeedbackRecordedEvent?: FeedbackRecordedEvent;
   ConditionChangedEvent?: ConditionChangedEvent;
   EvidenceCardDefinition?: EvidenceCardDefinition;
-  LocalizedText?: LocalizedText;
+  LocalizedText?: LocalizedText1;
   CardWindow?: CardWindow;
   CardSignalRef?: CardSignalRef;
   CardBinding?: CardBinding;
@@ -1648,6 +1669,104 @@ export interface Condition {
   since: Timestamp;
 }
 /**
+ * 一个回放评测用例（DESIGN §14.1）：标准答案、防泄漏所需的标识与时间、对应的快照。用例只追加；修改标准答案时新建版本，旧版本保留以便复现历史成绩
+ */
+export interface EvalCase {
+  /**
+   * 用例集内唯一，例如 incident:<incident_id>、benign:<label>、abstain:<基础用例>、scenario:<名称>
+   */
+  case_id: string;
+  /**
+   * 标准答案的版本；同一 case_id 以最大版本为准
+   */
+  version: number;
+  /**
+   * 用例集，例如 reference、scenarios-kind、benign
+   */
+  suite: string;
+  /**
+   * incident：真实事件；feedback：来自已绑定账号且给出根因的反馈；benign：被人工忽略或平静时段注入的告警；abstain：去掉根因异常卡后的反事实快照；scenario：Kind 上注入的级联故障
+   */
+  type: 'incident' | 'feedback' | 'benign' | 'abstain' | 'scenario';
+  cluster_id: ClusterId;
+  /**
+   * 用例对应的事件；从外部导入、还没有事件身份时为 null
+   */
+  incident_id: null | Uuid;
+  /**
+   * 事件的稳定标签或导入时的原始键，只用于展示
+   */
+  label: string;
+  started_at: Timestamp2;
+  as_of: Timestamp3;
+  truth: EvalTruth;
+  truth_source: {
+    /**
+     * human：人工标注；feedback：已绑定账号的反馈；knowledge：事故复盘（经人工确认）；injected：场景注入的根因；imported：从外部种子导入的标准答案
+     */
+    kind: 'human' | 'feedback' | 'knowledge' | 'injected' | 'imported';
+    principal: string | null;
+    /**
+     * 反馈 id、复盘条目 id 或导入来源的记录引用
+     */
+    ref: string | null;
+  };
+  leakage: EvalLeakage;
+  /**
+   * 领域包（知识、证据链、runbook）早于事件还是晚于事件；分两组报告
+   */
+  pack_timing: 'pack_before_incident' | 'pack_after_incident';
+  /**
+   * snapshot 模式的快照；只能用 reconstructed 模式回放时为 null
+   */
+  snapshot_id: null | Uuid;
+  /**
+   * abstain 用例：基础用例与被去掉的卡
+   */
+  derived_from: {
+    case_id: string;
+    removed_cards: string[];
+  } | null;
+  /**
+   * scenario 用例的作者类型：maintainer 由维护者编写（存在作者偏差，单独报告）；external 外部贡献
+   */
+  authored_by: 'maintainer' | 'external' | null;
+  created_at: Timestamp;
+}
+export interface EvalTruth {
+  /**
+   * 根因集合：落在集合内即为命中。benign 与 abstain 为空
+   */
+  root_components: ComponentKey[];
+  granularity: null | EvalGranularity;
+  mechanism: string | null;
+  /**
+   * 正确的处置判断；benign 为 ignore，abstain 为 undetermined
+   */
+  disposition: null | Disposition;
+  /**
+   * benign 与 abstain 用例为 true：出现 evidence_consistent 即为误报
+   */
+  forbid_evidence_consistent: boolean;
+}
+/**
+ * 防泄漏（DESIGN §14.3）：回放时从检索与上下文中排除的材料
+ */
+export interface EvalLeakage {
+  /**
+   * 该事件自己与别名，以及同一根因的历史结论所在的事件
+   */
+  exclude_incident_ids: Uuid[];
+  /**
+   * 该事件自己的事故报告、反馈与复盘条目的引用
+   */
+  exclude_refs: string[];
+  /**
+   * 领域包知识、证据链、runbook 的 learned_from 中代表这个用例的取值（incident_id、标签、外部引用）；回放时排除来自该用例的部分
+   */
+  learned_from_keys: string[];
+}
+/**
  * 回放与评测的成绩单（DESIGN §14），按模型 × 用例集给出。对外公布时始终同时给出分子和分母；snapshot 与 reconstructed 两种模式的成绩分开报告
  */
 export interface EvalReport {
@@ -1672,12 +1791,28 @@ export interface EvalModelRow {
    */
   pack_timing: 'pack_before_incident' | 'pack_after_incident' | 'all';
   top1: EvalRatio;
-  recall_at_3: EvalRatio;
-  pass_pow_k: EvalRatio;
-  disposition_accuracy: EvalRatio;
-  benign_false_positive: EvalRatio;
-  undetermined_ratio: EvalRatio;
-  structured_output_failure: EvalRatio;
+  recall_at_3: EvalRatio1;
+  pass_at_1: EvalRatio2;
+  pass_pow_k: EvalRatio3;
+  run_agreement: EvalRatio4;
+  coverage: EvalRatio5;
+  selective_accuracy: EvalRatio6;
+  disposition_accuracy: EvalRatio7;
+  /**
+   * 可靠性表：结论阶梯每一档的精确率（DESIGN §14.4）；evidence_consistent 的精确率下界低于 0.85 时该档自动降级
+   */
+  reliability: {
+    level: ConclusionLevel;
+    precision: EvalRatio7;
+    demoted: boolean;
+  }[];
+  /**
+   * 评测期间观察到的服务方指纹；与路由当前指纹不同的成绩作废
+   */
+  provider_fingerprints: string[];
+  benign_false_positive: EvalRatio7;
+  undetermined_ratio: EvalRatio7;
+  structured_output_failure: EvalRatio7;
   cost_per_case: {
     currency: string;
     mean: number;
@@ -1685,10 +1820,101 @@ export interface EvalModelRow {
   };
   snapshot_miss_rate: number | null;
   by_granularity: {
-    [k: string]: EvalRatio | undefined;
+    [k: string]: EvalRatio7 | undefined;
   };
 }
+/**
+ * top-1 落在根因集合内的运行占比（分母为有根因的用例的全部运行）
+ */
 export interface EvalRatio {
+  numerator: number;
+  denominator: number;
+  value: number | null;
+  /**
+   * 聚类自助法 90% 置信区间下界
+   */
+  ci_low: number | null;
+  ci_high: number | null;
+}
+/**
+ * 前 3 个候选覆盖根因集合的运行占比
+ */
+export interface EvalRatio1 {
+  numerator: number;
+  denominator: number;
+  value: number | null;
+  /**
+   * 聚类自助法 90% 置信区间下界
+   */
+  ci_low: number | null;
+  ci_high: number | null;
+}
+/**
+ * 每个用例第一次运行命中的占比
+ */
+export interface EvalRatio2 {
+  numerator: number;
+  denominator: number;
+  value: number | null;
+  /**
+   * 聚类自助法 90% 置信区间下界
+   */
+  ci_low: number | null;
+  ci_high: number | null;
+}
+/**
+ * k 次运行全部命中的用例占比（k 为 runs_per_case）
+ */
+export interface EvalRatio3 {
+  numerator: number;
+  denominator: number;
+  value: number | null;
+  /**
+   * 聚类自助法 90% 置信区间下界
+   */
+  ci_low: number | null;
+  ci_high: number | null;
+}
+/**
+ * 同一用例的多次运行给出相同根因与相同处置判断的用例占比
+ */
+export interface EvalRatio4 {
+  numerator: number;
+  denominator: number;
+  value: number | null;
+  /**
+   * 聚类自助法 90% 置信区间下界
+   */
+  ci_low: number | null;
+  ci_high: number | null;
+}
+/**
+ * 没有弃权（结论不是 undetermined 或 inconclusive）的运行占比
+ */
+export interface EvalRatio5 {
+  numerator: number;
+  denominator: number;
+  value: number | null;
+  /**
+   * 聚类自助法 90% 置信区间下界
+   */
+  ci_low: number | null;
+  ci_high: number | null;
+}
+/**
+ * 不弃权的运行中 top-1 命中的占比
+ */
+export interface EvalRatio6 {
+  numerator: number;
+  denominator: number;
+  value: number | null;
+  /**
+   * 聚类自助法 90% 置信区间下界
+   */
+  ci_low: number | null;
+  ci_high: number | null;
+}
+export interface EvalRatio7 {
   numerator: number;
   denominator: number;
   value: number | null;
@@ -1700,8 +1926,19 @@ export interface EvalRatio {
 }
 export interface EvalGate {
   baseline_report_id: Uuid;
+  /**
+   * 两份报告共有的用例数 n
+   */
+  paired_cases: number;
+  /**
+   * 基线 pass^k 通过、候选不通过的用例；不在 waived_cases 中的任何一条都使门禁失败
+   */
   regressed_cases: string[];
   waived_cases: string[];
+  /**
+   * 新减旧的 top-1 差值（按用例配对）
+   */
+  paired_delta: number;
   /**
    * 新减旧的单侧 90% 下界
    */
@@ -1712,16 +1949,93 @@ export interface EvalGate {
   threshold: number;
   passed: boolean;
 }
-export interface OutboxEventHeader {
+/**
+ * 用例的查询邻域快照（DESIGN §14.2 snapshot 模式）：用例被提升时固化研判所需的全部输入与两跳以内组件的数据源调用结果。回放只从快照读取（VCR）；快照中没有的调用返回不可用并计入未命中率。日常研判不录制快照
+ */
+export interface EvalSnapshot {
+  snapshot_id: Uuid;
+  case_id: string;
+  format_version: 1;
+  window: TimeWindow1;
+  as_of: Timestamp;
+  context: EvalSnapshotContext;
   /**
-   * 所有者 outbox 内单调递增；游标形如 <owner>:<seq>
+   * 数据源调用的录制结果（VCR 条目），按 (capability, request) 唯一
    */
-  seq: number;
-  event_id: Uuid;
-  owner: OutboxOwner;
-  schema_version: string;
-  cluster_id: ClusterId;
-  occurred_at: Timestamp;
+  calls: EvalSnapshotCall[];
+  created_at: Timestamp;
+  source: {
+    /**
+     * promoted：控制台或 API 提升用例时固化；imported：从外部种子导入；scenario：场景运行后固化
+     */
+    kind: 'promoted' | 'imported' | 'scenario';
+    /**
+     * 导入来源（格式名、版本、文件与记录）
+     */
+    ref: string | null;
+    code_sha: string | null;
+    pack_lock: null | Sha256;
+  };
+}
+/**
+ * 快照窗口：工具与查询模板只能查询这个窗口内的数据
+ */
+export interface TimeWindow1 {
+  from: Timestamp;
+  to: Timestamp;
+}
+/**
+ * 阶段 B 的输入（与 worker 从中心读取的研判上下文同形）。卡片判定、拓扑与动作目录都是固化时的结果
+ */
+export interface EvalSnapshotContext {
+  incident: Incident;
+  stage_a: StageAReport;
+  /**
+   * 根因两跳内的拓扑（与 OpenAPI 的 Subgraph 同形）
+   */
+  subgraph: {
+    topology_version: number;
+    root: null | ComponentKey;
+    nodes: {
+      component: ComponentKey;
+      kind: string;
+      namespace: string | null;
+      name: string;
+      role: 'root' | 'candidate' | 'member' | 'neighbor';
+      alerts: string[];
+      hops: number;
+    }[];
+    edges: {
+      from: ComponentKey;
+      to: ComponentKey;
+      relation: string;
+      provenance: EdgeProvenance;
+      confidence: number;
+      scope: 'instance' | 'service';
+    }[];
+  };
+  alerts: Alert[];
+  /**
+   * 固化时本集群启用、可用于这个事件的动作
+   */
+  actions: ActionCatalogAction[];
+  runbooks: string[];
+  /**
+   * 可检索的知识条目（带 learned_from，回放时按用例排除）
+   */
+  knowledge: EvalKnowledge[];
+  /**
+   * 可检索的参考案例（回放时只取 resolved_at 早于用例开始时间的）
+   */
+  cases: EvalReferenceCase[];
+  /**
+   * 区分性检查可用的查询模板
+   */
+  templates: {
+    id: string;
+    description: string;
+    args: {};
+  }[];
 }
 /**
  * 持久化的事件（DESIGN §2.2、§5）。每次对账按确定性规则重算一次，再与已持久化的事件对账；成员或根因变化时 incident_version 加一
@@ -1842,6 +2156,194 @@ export interface IncidentAlias {
   from_label: IncidentLabel;
   at_version: number;
   merged_at: Timestamp;
+}
+/**
+ * 阶段 A 的确定性报告（DESIGN §7.1）：不调用模型，不经过 worker。事件创建或版本变化后立即生成
+ */
+export interface StageAReport {
+  report_id: Uuid;
+  incident_id: Uuid;
+  incident_version: number;
+  disposition: Disposition;
+  /**
+   * suppressed：命中抑制规则；pack_exclude：命中领域包的排除规则；forecast_or_chronic_only：只有 forecast 和长期告警；rule_action：有动作明确的规则提议；critical_ambiguous：critical 且根因有歧义；observability_blind：观测失明；default：其余情况
+   */
+  disposition_reason:
+    | 'suppressed'
+    | 'pack_exclude'
+    | 'forecast_or_chronic_only'
+    | 'rule_action'
+    | 'critical_ambiguous'
+    | 'observability_blind'
+    | 'default';
+  candidates: RootCandidate[];
+  ambiguous: boolean;
+  /**
+   * 证据卡的判定向量；正常卡表示被排除嫌疑
+   */
+  cards: EvidenceResult[];
+  evidence_fingerprint: Sha2561;
+  observability_blind: boolean;
+  timeline: {
+    at: Timestamp;
+    kind: 'alert_firing' | 'alert_resolved' | 'change' | 'card_abnormal';
+    text: string;
+    ref: string | null;
+  }[];
+  /**
+   * Items: <pack>/<runbook 文件>#<锚点>
+   */
+  runbooks: string[];
+  rule_proposals: Uuid[];
+  /**
+   * 状态库降级：PG 不可用时在内存中生成，消息带降级横幅
+   */
+  degraded: boolean;
+  rendered_at: Timestamp;
+}
+/**
+ * 一张证据卡在一次研判（或阶段 A 报告）中的结果（DESIGN §6.1）。三种结论之外另有显示状态 capability_missing：所需的数据源能力不可用，和没有数据区分开
+ */
+export interface EvidenceResult {
+  ref: EvidenceRef;
+  /**
+   * <pack>/<chain>/<card>；区分性检查产生的卡为 check/<hypothesis id>/<n>
+   */
+  card_id: string;
+  title: LocalizedText;
+  /**
+   * 展示用阈值线
+   */
+  threshold: number | null;
+  /**
+   * 每个查询引用的降采样序列（每条不超过 300 点），用于迷你图与实时重跑的并排对比。points 中每项为 [unix 秒, 值或 null]
+   */
+  series: {
+    /**
+     * 卡片中的引用名
+     */
+    ref: string;
+    labels: Labels;
+    /**
+     * @maxItems 300
+     */
+    points: [number, number | null][];
+  }[];
+  entity: null | EntityRef;
+  window: TimeWindow;
+  verdict: Verdict;
+  /**
+   * verdict 为 undeterminable 且原因是所需能力不可用时为 capability_missing，其余与 verdict 相同
+   */
+  display_state: 'normal' | 'abnormal' | 'undeterminable' | 'capability_missing';
+  reason: EvidenceReason;
+  /**
+   * 主值的展示文本
+   */
+  value: string | null;
+  table: null | {
+    head: string[];
+    rows: string[][];
+  };
+  queries: EvidenceQueryRecord[];
+  egress: Egress;
+  /**
+   * 异常的起始时间，用于 evidence_consistent 判定中的时间条件；无法确定时为 null
+   */
+  anomaly_started_at?: null | Timestamp;
+  evaluated_at: Timestamp;
+}
+/**
+ * 取自卡片定义，结果脱离定义也能展示
+ */
+export interface LocalizedText {
+  'zh-CN'?: string;
+  en?: string;
+}
+export interface EvidenceReason {
+  /**
+   * rule：命中判定规则；no_data：查询没有样本；partial_data：部分查询没有样本；source_error：数据源报错或超时；capability_missing：所需能力不可用；observability_gap：依赖的目标有 meta 告警；evaluation_error：CEL 求值出错；all_clear：没有命中任何规则；model_judged：只读工具的结果没有 CEL 判定，由小模型对照 refutes_if 判定（可以支持 likely，不能单独支撑 evidence_consistent，展示时标注模型判定）
+   */
+  kind:
+    | 'rule'
+    | 'no_data'
+    | 'partial_data'
+    | 'source_error'
+    | 'capability_missing'
+    | 'observability_gap'
+    | 'evaluation_error'
+    | 'all_clear'
+    | 'model_judged';
+  text: string;
+}
+export interface EvidenceQueryRecord {
+  name: string;
+  /**
+   * 集成实例 id
+   */
+  integration: string;
+  capability: string;
+  /**
+   * 实际执行的查询文本
+   */
+  query: string;
+  sample_count: number;
+  truncated: boolean;
+  error: string | null;
+  duration_ms: number;
+}
+export interface EvalKnowledge {
+  id: string;
+  components: string[];
+  text: string;
+  learned_from: string[];
+  learned_at: null | Timestamp;
+  source: 'human' | 'model';
+}
+export interface EvalReferenceCase {
+  incident_id: string;
+  label: string;
+  root_component: ComponentKey;
+  mechanism: string | null;
+  resolved_at: Timestamp;
+  source: 'human' | 'model';
+}
+export interface EvalSnapshotCall {
+  /**
+   * sha256(capability + JCS(request)) 的十六进制前 32 位；回放时按它查找
+   */
+  key: string;
+  /**
+   * 集成能力，例如 metrics.query_range、metrics.query、logs.match、traces.search、traces.trace，或只读工具名
+   */
+  capability: string;
+  /**
+   * 规范化后的请求（时间为 unix 秒）
+   */
+  request: {};
+  status: 'ok' | 'error';
+  error: string | null;
+  /**
+   * 结果原样保存，形状由能力的集成契约决定；失败时为 null
+   */
+  result: {
+    [k: string]: unknown | undefined;
+  };
+  /**
+   * 结果是降采样后的原始序列（每点前 5 分钟的最小、最大、平均）。依赖它的卡标注为重建
+   */
+  downsampled: boolean;
+}
+export interface OutboxEventHeader {
+  /**
+   * 所有者 outbox 内单调递增；游标形如 <owner>:<seq>
+   */
+  seq: number;
+  event_id: Uuid;
+  owner: OutboxOwner;
+  schema_version: string;
+  cluster_id: ClusterId;
+  occurred_at: Timestamp;
 }
 /**
  * 一次研判经代码校验后的输出（DESIGN §7.2、§7.3），由 worker 写入 research_runs 并随 research.concluded 发布。模型直接输出的部分见 contract/model/；本结构加入假设账本状态、区分性检查结果、代码判定的结论阶梯和校验记录
@@ -1966,7 +2468,7 @@ export interface ProposalDraft {
  */
 export interface Proposal {
   proposal_id: Uuid;
-  idempotency_key: Sha2561;
+  idempotency_key: Sha2562;
   cluster_id: ClusterId;
   incident_id: Uuid;
   binding: ProposalBinding;
@@ -2125,8 +2627,8 @@ export interface EvidenceCardDefinition {
    * 证据链内唯一；全局 id 为 <pack>/<chain>/<id>
    */
   id: string;
-  title: LocalizedText;
-  note?: LocalizedText1;
+  title: LocalizedText1;
+  note?: LocalizedText2;
   /**
    * 卡片对哪些实体执行；不填时对证据链所属组件执行
    */
@@ -2158,14 +2660,14 @@ export interface EvidenceCardDefinition {
    */
   requires?: string[];
 }
-export interface LocalizedText {
+export interface LocalizedText1 {
   'zh-CN'?: string;
   en?: string;
 }
 /**
  * 这张卡展示什么、怎么读
  */
-export interface LocalizedText1 {
+export interface LocalizedText2 {
   'zh-CN'?: string;
   en?: string;
 }
@@ -2218,12 +2720,12 @@ export interface CardBinding {
 }
 export interface CardRule {
   cel: string;
-  say: LocalizedText2;
+  say: LocalizedText3;
 }
 /**
  * 命中时的理由，ICU MessageFormat，可引用 CEL 变量
  */
-export interface LocalizedText2 {
+export interface LocalizedText3 {
   'zh-CN'?: string;
   en?: string;
 }
@@ -2249,12 +2751,12 @@ export interface CardTableTemplate {
    */
   columns: [
     {
-      header: LocalizedText;
+      header: LocalizedText1;
       cel: string;
       unit?: string;
     },
     ...{
-      header: LocalizedText;
+      header: LocalizedText1;
       cel: string;
       unit?: string;
     }[],
@@ -2267,102 +2769,11 @@ export interface CardLink {
    * explore：按卡片的查询生成数据源浏览链接；dashboard：看板；runbook：领域包内的 runbook
    */
   kind: 'explore' | 'dashboard' | 'runbook';
-  label: LocalizedText;
+  label: LocalizedText1;
   /**
    * dashboard 的 uid 或 runbook 的 <文件>#<锚点>
    */
   target?: string;
-}
-/**
- * 一张证据卡在一次研判（或阶段 A 报告）中的结果（DESIGN §6.1）。三种结论之外另有显示状态 capability_missing：所需的数据源能力不可用，和没有数据区分开
- */
-export interface EvidenceResult {
-  ref: EvidenceRef;
-  /**
-   * <pack>/<chain>/<card>；区分性检查产生的卡为 check/<hypothesis id>/<n>
-   */
-  card_id: string;
-  title: LocalizedText3;
-  /**
-   * 展示用阈值线
-   */
-  threshold: number | null;
-  /**
-   * 每个查询引用的降采样序列（每条不超过 300 点），用于迷你图与实时重跑的并排对比。points 中每项为 [unix 秒, 值或 null]
-   */
-  series: {
-    /**
-     * 卡片中的引用名
-     */
-    ref: string;
-    labels: Labels;
-    /**
-     * @maxItems 300
-     */
-    points: [number, number | null][];
-  }[];
-  entity: null | EntityRef;
-  window: TimeWindow;
-  verdict: Verdict;
-  /**
-   * verdict 为 undeterminable 且原因是所需能力不可用时为 capability_missing，其余与 verdict 相同
-   */
-  display_state: 'normal' | 'abnormal' | 'undeterminable' | 'capability_missing';
-  reason: EvidenceReason;
-  /**
-   * 主值的展示文本
-   */
-  value: string | null;
-  table: null | {
-    head: string[];
-    rows: string[][];
-  };
-  queries: EvidenceQueryRecord[];
-  egress: Egress;
-  /**
-   * 异常的起始时间，用于 evidence_consistent 判定中的时间条件；无法确定时为 null
-   */
-  anomaly_started_at?: null | Timestamp;
-  evaluated_at: Timestamp;
-}
-/**
- * 取自卡片定义，结果脱离定义也能展示
- */
-export interface LocalizedText3 {
-  'zh-CN'?: string;
-  en?: string;
-}
-export interface EvidenceReason {
-  /**
-   * rule：命中判定规则；no_data：查询没有样本；partial_data：部分查询没有样本；source_error：数据源报错或超时；capability_missing：所需能力不可用；observability_gap：依赖的目标有 meta 告警；evaluation_error：CEL 求值出错；all_clear：没有命中任何规则；model_judged：只读工具的结果没有 CEL 判定，由小模型对照 refutes_if 判定（可以支持 likely，不能单独支撑 evidence_consistent，展示时标注模型判定）
-   */
-  kind:
-    | 'rule'
-    | 'no_data'
-    | 'partial_data'
-    | 'source_error'
-    | 'capability_missing'
-    | 'observability_gap'
-    | 'evaluation_error'
-    | 'all_clear'
-    | 'model_judged';
-  text: string;
-}
-export interface EvidenceQueryRecord {
-  name: string;
-  /**
-   * 集成实例 id
-   */
-  integration: string;
-  capability: string;
-  /**
-   * 实际执行的查询文本
-   */
-  query: string;
-  sample_count: number;
-  truncated: boolean;
-  error: string | null;
-  duration_ms: number;
 }
 /**
  * 提交反馈的请求体。channel 与主体由认证上下文决定，请求体不含
@@ -2522,8 +2933,8 @@ export interface EvidenceCardDefinition1 {
    * 证据链内唯一；全局 id 为 <pack>/<chain>/<id>
    */
   id: string;
-  title: LocalizedText;
-  note?: LocalizedText1;
+  title: LocalizedText1;
+  note?: LocalizedText2;
   /**
    * 卡片对哪些实体执行；不填时对证据链所属组件执行
    */
@@ -2601,7 +3012,7 @@ export interface ChainsFile {
 }
 export interface EvidenceChain {
   id: string;
-  title: LocalizedText;
+  title: LocalizedText1;
   runbook?: string;
   /**
    * @minItems 1
@@ -2623,7 +3034,7 @@ export interface RulesFile {
  */
 export interface PackRule {
   id: string;
-  title: LocalizedText;
+  title: LocalizedText1;
   /**
    * CEL，可引用 incident、root、cards（卡片 id → 结论）
    */
@@ -2635,7 +3046,7 @@ export interface PackRule {
   params: {
     [k: string]: string | undefined;
   };
-  expected_effect?: LocalizedText;
+  expected_effect?: LocalizedText1;
 }
 /**
  * 根因排序参数（DESIGN §5）。修改需要通过回放门禁
@@ -2671,7 +3082,7 @@ export interface KnowledgeFile {
   entries: {
     id: string;
     components?: string[];
-    text: LocalizedText;
+    text: LocalizedText1;
     /**
      * 来源事件 incident_id 或外部引用；回放时排除来自该用例的部分
      */
@@ -2741,7 +3152,7 @@ export interface PackUserLayer {
 export interface ChaosFile {
   api_version: 'srenautix.io/chaos/v1';
   id: string;
-  title: LocalizedText;
+  title: LocalizedText1;
   /**
    * 实验需要的集群组件，例如 chaos-mesh
    */
@@ -2936,50 +3347,6 @@ export interface EgressEntry {
   categories: ('metrics' | 'logs' | 'traces' | 'events' | 'topology' | 'changes' | 'alerts' | 'knowledge')[];
   redaction_hits: number;
   bytes: number;
-}
-/**
- * 阶段 A 的确定性报告（DESIGN §7.1）：不调用模型，不经过 worker。事件创建或版本变化后立即生成
- */
-export interface StageAReport {
-  report_id: Uuid;
-  incident_id: Uuid;
-  incident_version: number;
-  disposition: Disposition;
-  /**
-   * suppressed：命中抑制规则；pack_exclude：命中领域包的排除规则；forecast_or_chronic_only：只有 forecast 和长期告警；rule_action：有动作明确的规则提议；critical_ambiguous：critical 且根因有歧义；observability_blind：观测失明；default：其余情况
-   */
-  disposition_reason:
-    | 'suppressed'
-    | 'pack_exclude'
-    | 'forecast_or_chronic_only'
-    | 'rule_action'
-    | 'critical_ambiguous'
-    | 'observability_blind'
-    | 'default';
-  candidates: RootCandidate[];
-  ambiguous: boolean;
-  /**
-   * 证据卡的判定向量；正常卡表示被排除嫌疑
-   */
-  cards: EvidenceResult[];
-  evidence_fingerprint: Sha2562;
-  observability_blind: boolean;
-  timeline: {
-    at: Timestamp;
-    kind: 'alert_firing' | 'alert_resolved' | 'change' | 'card_abnormal';
-    text: string;
-    ref: string | null;
-  }[];
-  /**
-   * Items: <pack>/<runbook 文件>#<锚点>
-   */
-  runbooks: string[];
-  rule_proposals: Uuid[];
-  /**
-   * 状态库降级：PG 不可用时在内存中生成，消息带降级横幅
-   */
-  degraded: boolean;
-  rendered_at: Timestamp;
 }
 /**
  * 事件溯源拓扑中的一条事件（DESIGN §4.1）。节点或边在 [valid_from, valid_to) 内有效；同一节点或边的新事件到达时，上一条的 valid_to 被设为新事件的 valid_from。删除事件只关闭区间。按时刻 t 查询拓扑时取 valid_from <= t 且 (valid_to 为空或 t < valid_to) 的全部节点和边

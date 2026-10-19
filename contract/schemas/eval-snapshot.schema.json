@@ -1,0 +1,183 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://srenautix.io/contract/schemas/eval-snapshot.schema.json",
+  "title": "EvalSnapshot",
+  "description": "用例的查询邻域快照（DESIGN §14.2 snapshot 模式）：用例被提升时固化研判所需的全部输入与两跳以内组件的数据源调用结果。回放只从快照读取（VCR）；快照中没有的调用返回不可用并计入未命中率。日常研判不录制快照",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["snapshot_id", "case_id", "format_version", "window", "as_of", "context", "calls", "created_at", "source"],
+  "properties": {
+    "snapshot_id": { "$ref": "common.schema.json#/$defs/Uuid" },
+    "case_id": { "type": "string" },
+    "format_version": { "type": "integer", "const": 1 },
+    "window": {
+      "description": "快照窗口：工具与查询模板只能查询这个窗口内的数据",
+      "$ref": "common.schema.json#/$defs/TimeWindow"
+    },
+    "as_of": { "$ref": "common.schema.json#/$defs/Timestamp" },
+    "context": { "$ref": "#/$defs/Context" },
+    "calls": {
+      "type": "array",
+      "description": "数据源调用的录制结果（VCR 条目），按 (capability, request) 唯一",
+      "items": { "$ref": "#/$defs/Call" }
+    },
+    "created_at": { "$ref": "common.schema.json#/$defs/Timestamp" },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "ref", "code_sha", "pack_lock"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "description": "promoted：控制台或 API 提升用例时固化；imported：从外部种子导入；scenario：场景运行后固化",
+          "enum": ["promoted", "imported", "scenario"]
+        },
+        "ref": { "type": ["string", "null"], "description": "导入来源（格式名、版本、文件与记录）" },
+        "code_sha": { "type": ["string", "null"] },
+        "pack_lock": {
+          "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/Sha256" }]
+        }
+      }
+    }
+  },
+  "$defs": {
+    "Context": {
+      "title": "EvalSnapshotContext",
+      "description": "阶段 B 的输入（与 worker 从中心读取的研判上下文同形）。卡片判定、拓扑与动作目录都是固化时的结果",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["incident", "stage_a", "subgraph", "alerts", "actions", "runbooks", "knowledge", "cases", "templates"],
+      "properties": {
+        "incident": { "$ref": "incident.schema.json" },
+        "stage_a": { "$ref": "stage-a-report.schema.json" },
+        "subgraph": {
+          "type": "object",
+          "description": "根因两跳内的拓扑（与 OpenAPI 的 Subgraph 同形）",
+          "additionalProperties": false,
+          "required": ["topology_version", "root", "nodes", "edges"],
+          "properties": {
+            "topology_version": { "type": "integer", "minimum": 0 },
+            "root": { "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/ComponentKey" }] },
+            "nodes": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["component", "kind", "namespace", "name", "role", "alerts", "hops"],
+                "properties": {
+                  "component": { "$ref": "common.schema.json#/$defs/ComponentKey" },
+                  "kind": { "type": "string" },
+                  "namespace": { "type": ["string", "null"] },
+                  "name": { "type": "string" },
+                  "role": { "type": "string", "enum": ["root", "candidate", "member", "neighbor"] },
+                  "alerts": { "type": "array", "items": { "type": "string" } },
+                  "hops": { "type": "integer", "minimum": 0, "maximum": 2 }
+                }
+              }
+            },
+            "edges": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["from", "to", "relation", "provenance", "confidence", "scope"],
+                "properties": {
+                  "from": { "$ref": "common.schema.json#/$defs/ComponentKey" },
+                  "to": { "$ref": "common.schema.json#/$defs/ComponentKey" },
+                  "relation": { "type": "string" },
+                  "provenance": { "$ref": "topology-event.schema.json#/$defs/Provenance" },
+                  "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+                  "scope": { "type": "string", "enum": ["instance", "service"] }
+                }
+              }
+            }
+          }
+        },
+        "alerts": { "type": "array", "items": { "$ref": "alert.schema.json" } },
+        "actions": {
+          "type": "array",
+          "description": "固化时本集群启用、可用于这个事件的动作",
+          "items": { "$ref": "../gateway/v1/action-catalog.schema.json#/$defs/action" }
+        },
+        "runbooks": { "type": "array", "items": { "type": "string" } },
+        "knowledge": {
+          "type": "array",
+          "description": "可检索的知识条目（带 learned_from，回放时按用例排除）",
+          "items": { "$ref": "#/$defs/Knowledge" }
+        },
+        "cases": {
+          "type": "array",
+          "description": "可检索的参考案例（回放时只取 resolved_at 早于用例开始时间的）",
+          "items": { "$ref": "#/$defs/ReferenceCase" }
+        },
+        "templates": {
+          "type": "array",
+          "description": "区分性检查可用的查询模板",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "description", "args"],
+            "properties": {
+              "id": { "type": "string" },
+              "description": { "type": "string" },
+              "args": { "type": "object" }
+            }
+          }
+        }
+      }
+    },
+    "Knowledge": {
+      "title": "EvalKnowledge",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "components", "text", "learned_from", "learned_at", "source"],
+      "properties": {
+        "id": { "type": "string" },
+        "components": { "type": "array", "items": { "type": "string" } },
+        "text": { "type": "string" },
+        "learned_from": { "type": "array", "items": { "type": "string" } },
+        "learned_at": { "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/Timestamp" }] },
+        "source": { "type": "string", "enum": ["human", "model"] }
+      }
+    },
+    "ReferenceCase": {
+      "title": "EvalReferenceCase",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["incident_id", "label", "root_component", "mechanism", "resolved_at", "source"],
+      "properties": {
+        "incident_id": { "type": "string" },
+        "label": { "type": "string" },
+        "root_component": { "$ref": "common.schema.json#/$defs/ComponentKey" },
+        "mechanism": { "type": ["string", "null"] },
+        "resolved_at": { "$ref": "common.schema.json#/$defs/Timestamp" },
+        "source": { "type": "string", "enum": ["human", "model"] }
+      }
+    },
+    "Call": {
+      "title": "EvalSnapshotCall",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "capability", "request", "status", "error", "result", "downsampled"],
+      "properties": {
+        "key": {
+          "type": "string",
+          "description": "sha256(capability + JCS(request)) 的十六进制前 32 位；回放时按它查找"
+        },
+        "capability": {
+          "type": "string",
+          "description": "集成能力，例如 metrics.query_range、metrics.query、logs.match、traces.search、traces.trace，或只读工具名",
+          "pattern": "^[a-z][a-z0-9_.-]*$"
+        },
+        "request": { "type": "object", "description": "规范化后的请求（时间为 unix 秒）" },
+        "status": { "type": "string", "enum": ["ok", "error"] },
+        "error": { "type": ["string", "null"] },
+        "result": { "description": "结果原样保存，形状由能力的集成契约决定；失败时为 null" },
+        "downsampled": {
+          "type": "boolean",
+          "description": "结果是降采样后的原始序列（每点前 5 分钟的最小、最大、平均）。依赖它的卡标注为重建"
+        }
+      }
+    }
+  }
+}
