@@ -1,0 +1,411 @@
+# 时间零点 2026-01-01T00:00:00Z（unix 1767225600），每分钟一个点；eval_time 40m 时默认窗口为 10m–50m。
+api_version: srenautix.io/pack-test/v1
+interval: 1m
+input_series:
+  # ---------- Pod ----------
+  - { series: 'kube_pod_info{namespace="shop",pod="web-7d9f8c6b5d-x2k9p",node="n1"}', values: '1x60' }
+  - { series: 'kube_pod_info{namespace="shop",pod="api-6c8d7f9b4c-q7w2z",node="n2"}', values: '1x60' }
+  - { series: 'kube_pod_info{namespace="shop",pod="img-5f6d7c8b9a-r4t6y",node="n2"}', values: '1x60' }
+  - { series: 'kube_pod_info{namespace="shop",pod="init-5d8f7c9b6d-k2m4n",node="n2"}', values: '1x60' }
+  - { series: 'kube_pod_info{namespace="batch",pod="worker-0",node=""}', values: '1x60' }
+  # web：第 20 分钟后反复 OOM、CrashLoopBackOff、未就绪、CPU 限流
+  - {
+      series: 'kube_pod_container_status_restarts_total{namespace="shop",pod="web-7d9f8c6b5d-x2k9p",container="web"}',
+      values: '0x20 0+1x40',
+    }
+  - {
+      series: 'kube_pod_container_status_waiting_reason{namespace="shop",pod="web-7d9f8c6b5d-x2k9p",container="web",reason="CrashLoopBackOff"}',
+      values: '_x25 1x35',
+    }
+  - {
+      series: 'kube_pod_container_status_last_terminated_reason{namespace="shop",pod="web-7d9f8c6b5d-x2k9p",container="web",reason="OOMKilled"}',
+      values: '_x21 1x39',
+    }
+  - {
+      series: 'container_memory_working_set_bytes{namespace="shop",pod="web-7d9f8c6b5d-x2k9p",container="web"}',
+      values: '950000000x60',
+    }
+  - {
+      series: 'kube_pod_container_resource_limits{namespace="shop",pod="web-7d9f8c6b5d-x2k9p",container="web",resource="memory",unit="byte"}',
+      values: '1000000000x60',
+    }
+  - {
+      series: 'container_oom_events_total{namespace="shop",pod="web-7d9f8c6b5d-x2k9p",container="web"}',
+      values: '0x20 0+1x40',
+    }
+  - {
+      series: 'container_cpu_cfs_periods_total{namespace="shop",pod="web-7d9f8c6b5d-x2k9p",container="web"}',
+      values: '0+600x60',
+    }
+  - {
+      series: 'container_cpu_cfs_throttled_periods_total{namespace="shop",pod="web-7d9f8c6b5d-x2k9p",container="web"}',
+      values: '0+300x60',
+    }
+  - {
+      series: 'kube_pod_status_ready{namespace="shop",pod="web-7d9f8c6b5d-x2k9p",condition="true"}',
+      values: '1x20 0x40',
+    }
+  - { series: 'kube_pod_status_phase{namespace="shop",pod="web-7d9f8c6b5d-x2k9p",phase="Pending"}', values: '0x60' }
+  # api：一切正常（重启计数停在 2，没有增长）
+  - {
+      series: 'kube_pod_container_status_restarts_total{namespace="shop",pod="api-6c8d7f9b4c-q7w2z",container="api"}',
+      values: '2x60',
+    }
+  - {
+      series: 'container_memory_working_set_bytes{namespace="shop",pod="api-6c8d7f9b4c-q7w2z",container="api"}',
+      values: '400000000x60',
+    }
+  - {
+      series: 'kube_pod_container_resource_limits{namespace="shop",pod="api-6c8d7f9b4c-q7w2z",container="api",resource="memory",unit="byte"}',
+      values: '1000000000x60',
+    }
+  - {
+      series: 'container_oom_events_total{namespace="shop",pod="api-6c8d7f9b4c-q7w2z",container="api"}',
+      values: '0x60',
+    }
+  - {
+      series: 'container_cpu_cfs_periods_total{namespace="shop",pod="api-6c8d7f9b4c-q7w2z",container="api"}',
+      values: '0+600x60',
+    }
+  - {
+      series: 'container_cpu_cfs_throttled_periods_total{namespace="shop",pod="api-6c8d7f9b4c-q7w2z",container="api"}',
+      values: '0x60',
+    }
+  - { series: 'kube_pod_status_ready{namespace="shop",pod="api-6c8d7f9b4c-q7w2z",condition="true"}', values: '1x60' }
+  - { series: 'kube_pod_status_phase{namespace="shop",pod="api-6c8d7f9b4c-q7w2z",phase="Pending"}', values: '0x60' }
+  - {
+      series: 'kube_pod_init_container_status_running{namespace="shop",pod="api-6c8d7f9b4c-q7w2z",container="wait-db"}',
+      values: '0x60',
+    }
+  # img：拉取镜像失败
+  - {
+      series: 'kube_pod_container_status_waiting_reason{namespace="shop",pod="img-5f6d7c8b9a-r4t6y",container="img",reason="ImagePullBackOff"}',
+      values: '1x60',
+    }
+  # init：init 容器从第 5 分钟起一直在运行
+  - {
+      series: 'kube_pod_init_container_status_running{namespace="shop",pod="init-5d8f7c9b6d-k2m4n",container="wait-db"}',
+      values: '0x5 1x55',
+    }
+  # worker-0：一直 Pending，无法调度
+  - { series: 'kube_pod_status_phase{namespace="batch",pod="worker-0",phase="Pending"}', values: '1x60' }
+  - { series: 'kube_pod_status_unschedulable{namespace="batch",pod="worker-0"}', values: '1x60' }
+
+  # ---------- PDB ----------
+  - {
+      series: 'kube_poddisruptionbudget_status_desired_healthy{namespace="shop",poddisruptionbudget="web"}',
+      values: '2x60',
+    }
+  - {
+      series: 'kube_poddisruptionbudget_status_current_healthy{namespace="shop",poddisruptionbudget="web"}',
+      values: '2x20 1x40',
+    }
+  - {
+      series: 'kube_poddisruptionbudget_status_desired_healthy{namespace="shop",poddisruptionbudget="api"}',
+      values: '1x60',
+    }
+  - {
+      series: 'kube_poddisruptionbudget_status_current_healthy{namespace="shop",poddisruptionbudget="api"}',
+      values: '2x60',
+    }
+
+  # ---------- 发布 ----------
+  - { series: 'kube_deployment_spec_replicas{namespace="shop",deployment="web"}', values: '3x60' }
+  - { series: 'kube_deployment_status_replicas_available{namespace="shop",deployment="web"}', values: '3x30 2x30' }
+  - { series: 'kube_deployment_metadata_generation{namespace="shop",deployment="web"}', values: '4x30 5x30' }
+  - { series: 'kube_deployment_spec_replicas{namespace="shop",deployment="api"}', values: '2x60' }
+  - { series: 'kube_deployment_status_replicas_available{namespace="shop",deployment="api"}', values: '2x60' }
+  - { series: 'kube_deployment_metadata_generation{namespace="shop",deployment="api"}', values: '7x60' }
+  - { series: 'kube_statefulset_replicas{namespace="shop",statefulset="db"}', values: '3x60' }
+  - { series: 'kube_statefulset_status_replicas_ready{namespace="shop",statefulset="db"}', values: '3x60' }
+  - { series: 'kube_statefulset_status_replicas_updated{namespace="shop",statefulset="db"}', values: '2x60' }
+  - { series: 'kube_statefulset_metadata_generation{namespace="shop",statefulset="db"}', values: '3x60' }
+  - { series: 'kube_statefulset_replicas{namespace="shop",statefulset="cache"}', values: '2x60' }
+  - { series: 'kube_statefulset_status_replicas_ready{namespace="shop",statefulset="cache"}', values: '2x60' }
+  - { series: 'kube_statefulset_status_replicas_updated{namespace="shop",statefulset="cache"}', values: '2x60' }
+  - { series: 'kube_statefulset_metadata_generation{namespace="shop",statefulset="cache"}', values: '1x60' }
+  - {
+      series: 'kube_daemonset_status_number_unavailable{namespace="kube-system",daemonset="agent"}',
+      values: '0x20 1x40',
+    }
+  - { series: 'kube_daemonset_status_number_misscheduled{namespace="kube-system",daemonset="agent"}', values: '0x60' }
+  - { series: 'kube_daemonset_metadata_generation{namespace="kube-system",daemonset="agent"}', values: '2x60' }
+  - { series: 'kube_daemonset_status_number_unavailable{namespace="kube-system",daemonset="logs"}', values: '0x60' }
+  - { series: 'kube_daemonset_status_number_misscheduled{namespace="kube-system",daemonset="logs"}', values: '0x60' }
+  - { series: 'kube_daemonset_metadata_generation{namespace="kube-system",daemonset="logs"}', values: '1x60' }
+
+  # ---------- Job ----------
+  - { series: 'kube_job_status_failed{namespace="batch",job_name="migrate"}', values: '0x20 1x40' }
+  - { series: 'kube_job_status_active{namespace="batch",job_name="migrate"}', values: '0x60' }
+  - { series: 'kube_job_status_start_time{namespace="batch",job_name="migrate"}', values: '1767226200x60' }
+  # report：13 小时前开始，仍在运行
+  - { series: 'kube_job_status_failed{namespace="batch",job_name="report"}', values: '0x60' }
+  - { series: 'kube_job_status_active{namespace="batch",job_name="report"}', values: '1x60' }
+  - { series: 'kube_job_status_start_time{namespace="batch",job_name="report"}', values: '1767178800x60' }
+  - { series: 'kube_job_status_failed{namespace="batch",job_name="nightly"}', values: '0x60' }
+  - { series: 'kube_job_status_active{namespace="batch",job_name="nightly"}', values: '1x40 0x20' }
+  - { series: 'kube_job_status_start_time{namespace="batch",job_name="nightly"}', values: '1767226800x60' }
+
+  # ---------- 容量 ----------
+  - {
+      series: 'kube_horizontalpodautoscaler_status_current_replicas{namespace="shop",horizontalpodautoscaler="web"}',
+      values: '6x20 10x40',
+    }
+  - {
+      series: 'kube_horizontalpodautoscaler_spec_max_replicas{namespace="shop",horizontalpodautoscaler="web"}',
+      values: '10x60',
+    }
+  - {
+      series: 'kube_horizontalpodautoscaler_status_current_replicas{namespace="shop",horizontalpodautoscaler="api"}',
+      values: '3x60',
+    }
+  - {
+      series: 'kube_horizontalpodautoscaler_spec_max_replicas{namespace="shop",horizontalpodautoscaler="api"}',
+      values: '10x60',
+    }
+  - {
+      series: 'kube_resourcequota{namespace="shop",resourcequota="compute",resource="requests.cpu",type="used"}',
+      values: '9.5x60',
+    }
+  - {
+      series: 'kube_resourcequota{namespace="shop",resourcequota="compute",resource="requests.cpu",type="hard"}',
+      values: '10x60',
+    }
+  - {
+      series: 'kube_resourcequota{namespace="batch",resourcequota="compute",resource="requests.cpu",type="used"}',
+      values: '2x60',
+    }
+  - {
+      series: 'kube_resourcequota{namespace="batch",resourcequota="compute",resource="requests.cpu",type="hard"}',
+      values: '10x60',
+    }
+  - { series: 'kube_pod_status_phase{namespace="shop",pod="web-7d9f8c6b5d-x2k9p",phase="Running"}', values: '1x60' }
+  - { series: 'kube_pod_status_phase{namespace="shop",pod="api-6c8d7f9b4c-q7w2z",phase="Running"}', values: '1x60' }
+  - {
+      series: 'kube_pod_container_resource_requests{namespace="shop",pod="web-7d9f8c6b5d-x2k9p",container="web",node="n1",resource="cpu",unit="core"}',
+      values: '3.8x60',
+    }
+  - {
+      series: 'kube_pod_container_resource_requests{namespace="shop",pod="api-6c8d7f9b4c-q7w2z",container="api",node="n2",resource="cpu",unit="core"}',
+      values: '1x60',
+    }
+  - { series: 'kube_node_status_allocatable{node="n1",resource="cpu",unit="core"}', values: '4x60' }
+  - { series: 'kube_node_status_allocatable{node="n2",resource="cpu",unit="core"}', values: '4x60' }
+tests:
+  - {
+      name: web 重启并 CrashLoop,
+      eval_time: 40m,
+      card: pod-restarts/restarts,
+      entity: { kind: Pod, namespace: shop, name: web-7d9f8c6b5d-x2k9p },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: api 没有新的重启,
+      eval_time: 40m,
+      card: pod-restarts/restarts,
+      entity: { kind: Pod, namespace: shop, name: api-6c8d7f9b4c-q7w2z },
+      expect: { verdict: normal },
+    }
+  - {
+      name: Deployment web 汇总其 Pod,
+      eval_time: 40m,
+      card: pod-restarts/restarts,
+      entity: { kind: Deployment, namespace: shop, name: web },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: web OOM,
+      eval_time: 40m,
+      card: pod-restarts/memory,
+      entity: { kind: Pod, namespace: shop, name: web-7d9f8c6b5d-x2k9p },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: api 内存正常,
+      eval_time: 40m,
+      card: pod-restarts/memory,
+      entity: { kind: Pod, namespace: shop, name: api-6c8d7f9b4c-q7w2z },
+      expect: { verdict: normal },
+    }
+  - {
+      name: web 被限流,
+      eval_time: 40m,
+      card: pod-restarts/throttling,
+      entity: { kind: Pod, namespace: shop, name: web-7d9f8c6b5d-x2k9p },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: api 没有限流,
+      eval_time: 40m,
+      card: pod-restarts/throttling,
+      entity: { kind: Pod, namespace: shop, name: api-6c8d7f9b4c-q7w2z },
+      expect: { verdict: normal },
+    }
+  - {
+      name: web 未就绪,
+      eval_time: 40m,
+      card: pod-restarts/readiness,
+      entity: { kind: Pod, namespace: shop, name: web-7d9f8c6b5d-x2k9p },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: api 就绪,
+      eval_time: 40m,
+      card: pod-restarts/readiness,
+      entity: { kind: Pod, namespace: shop, name: api-6c8d7f9b4c-q7w2z },
+      expect: { verdict: normal },
+    }
+  - {
+      name: worker-0 无法调度,
+      eval_time: 40m,
+      card: pod-pending/pending,
+      entity: { kind: Pod, namespace: batch, name: worker-0 },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: api 不 Pending,
+      eval_time: 40m,
+      card: pod-pending/pending,
+      entity: { kind: Pod, namespace: shop, name: api-6c8d7f9b4c-q7w2z },
+      expect: { verdict: normal },
+    }
+  - {
+      name: img 拉取镜像失败,
+      eval_time: 40m,
+      card: pod-pending/waiting,
+      entity: { kind: Pod, namespace: shop, name: img-5f6d7c8b9a-r4t6y },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: api 没有等待,
+      eval_time: 40m,
+      card: pod-pending/waiting,
+      entity: { kind: Pod, namespace: shop, name: api-6c8d7f9b4c-q7w2z },
+      expect: { verdict: normal },
+    }
+  - {
+      name: init 容器卡住,
+      eval_time: 40m,
+      card: pod-pending/init-stuck,
+      entity: { kind: Pod, namespace: shop, name: init-5d8f7c9b6d-k2m4n },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: init 容器已完成,
+      eval_time: 40m,
+      card: pod-pending/init-stuck,
+      entity: { kind: Pod, namespace: shop, name: api-6c8d7f9b4c-q7w2z },
+      expect: { verdict: normal },
+    }
+  - {
+      name: PDB 健康副本不足,
+      eval_time: 40m,
+      card: pod-pending/pdb,
+      entity: { kind: PodDisruptionBudget, namespace: shop, name: web },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: PDB 有余量,
+      eval_time: 40m,
+      card: pod-pending/pdb,
+      entity: { kind: PodDisruptionBudget, namespace: shop, name: api },
+      expect: { verdict: normal },
+    }
+  - {
+      name: web 发布未完成,
+      eval_time: 40m,
+      card: rollout/deployment,
+      entity: { kind: Deployment, namespace: shop, name: web },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: api 稳定,
+      eval_time: 40m,
+      card: rollout/deployment,
+      entity: { kind: Deployment, namespace: shop, name: api },
+      expect: { verdict: normal },
+    }
+  - {
+      name: db 有旧版本副本,
+      eval_time: 40m,
+      card: rollout/statefulset,
+      entity: { kind: StatefulSet, namespace: shop, name: db },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: cache 稳定,
+      eval_time: 40m,
+      card: rollout/statefulset,
+      entity: { kind: StatefulSet, namespace: shop, name: cache },
+      expect: { verdict: normal },
+    }
+  - {
+      name: agent 有不可用 Pod,
+      eval_time: 40m,
+      card: rollout/daemonset,
+      entity: { kind: DaemonSet, namespace: kube-system, name: agent },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: logs 稳定,
+      eval_time: 40m,
+      card: rollout/daemonset,
+      entity: { kind: DaemonSet, namespace: kube-system, name: logs },
+      expect: { verdict: normal },
+    }
+  - {
+      name: migrate 失败,
+      eval_time: 40m,
+      card: job/status,
+      entity: { kind: Job, namespace: batch, name: migrate },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: report 运行过久,
+      eval_time: 40m,
+      card: job/status,
+      entity: { kind: Job, namespace: batch, name: report },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: nightly 正常结束,
+      eval_time: 40m,
+      card: job/status,
+      entity: { kind: Job, namespace: batch, name: nightly },
+      expect: { verdict: normal },
+    }
+  - {
+      name: web 顶到 HPA 上限,
+      eval_time: 40m,
+      card: capacity/hpa,
+      entity: { kind: HorizontalPodAutoscaler, namespace: shop, name: web },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: api 未到上限,
+      eval_time: 40m,
+      card: capacity/hpa,
+      entity: { kind: HorizontalPodAutoscaler, namespace: shop, name: api },
+      expect: { verdict: normal },
+    }
+  - {
+      name: shop 配额将满,
+      eval_time: 40m,
+      card: capacity/quota,
+      entity: { kind: Namespace, namespace: shop, name: shop },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: batch 配额充足,
+      eval_time: 40m,
+      card: capacity/quota,
+      entity: { kind: Namespace, namespace: batch, name: batch },
+      expect: { verdict: normal },
+    }
+  - {
+      name: n1 requests 将满,
+      eval_time: 40m,
+      card: capacity/node-requests,
+      entity: { kind: cluster, name: c1 },
+      expect: { verdict: abnormal },
+    }

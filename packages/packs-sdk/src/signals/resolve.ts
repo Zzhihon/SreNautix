@@ -7,6 +7,12 @@ import { DatasourceError, toIso, toMillis, type PromqlEngine } from '@srenautix/
 import type { Capability, EvidenceDataSource } from '../runtime/datasource.js';
 import { renderMetrics, type RenderContext } from './render.js';
 
+/**
+ * 备选未被选中的原因：capability 数据源没有所需能力；dialect 方言不被接受；missing_metric 指标在探测窗口内不存在；
+ * probe probe 查询没有结果；error 探测时数据源报错
+ */
+export type RejectCause = 'capability' | 'dialect' | 'missing_metric' | 'probe' | 'error';
+
 export interface SignalResolution {
   /** <pack>/<signal id> */
   signal: string;
@@ -15,7 +21,7 @@ export interface SignalResolution {
   index: number | null;
   alternative: SignalAlternative | null;
   /** 每个备选未被选中的原因 */
-  rejected: Array<{ index: number; reason: string }>;
+  rejected: Array<{ index: number; cause: RejectCause; reason: string; capability?: Capability }>;
 }
 
 /** 备选需要的数据源能力 */
@@ -43,7 +49,7 @@ export async function resolveSignal(
   for (const [i, alt] of signal.alternatives.entries()) {
     const cap = alternativeCapability(signal.kind, alt);
     if (!ds.capabilities.has(cap)) {
-      rejected.push({ index: i, reason: `数据源没有能力 ${cap}` });
+      rejected.push({ index: i, cause: 'capability', reason: `数据源没有能力 ${cap}`, capability: cap });
       continue;
     }
     if (signal.kind !== 'metrics') {
@@ -51,18 +57,18 @@ export async function resolveSignal(
       const okDialect =
         signal.kind === 'logs' ? d === 'logs_match' || (d === 'logql' && ds.ids.logs !== null) : d === 'traceql';
       if (!okDialect) {
-        rejected.push({ index: i, reason: `数据源不接受方言 ${d ?? '未声明'}` });
+        rejected.push({ index: i, cause: 'dialect', reason: `数据源不接受方言 ${d ?? '未声明'}` });
         continue;
       }
       return { signal: key, kind: signal.kind, index: i, alternative: alt, rejected };
     }
     const dialect = alt.dialect ?? 'promql';
     if (dialect !== 'promql' && dialect !== 'metricsql') {
-      rejected.push({ index: i, reason: `指标信号不支持方言 ${dialect}` });
+      rejected.push({ index: i, cause: 'dialect', reason: `指标信号不支持方言 ${dialect}` });
       continue;
     }
     if (!ds.metricsDialects.has(dialect)) {
-      rejected.push({ index: i, reason: `数据源不接受 ${dialect}` });
+      rejected.push({ index: i, cause: 'dialect', reason: `数据源不接受 ${dialect}` });
       continue;
     }
     if (!ds.labelProfile) {
@@ -98,20 +104,20 @@ export async function resolveSignal(
         }
       }
       if (missing.length) {
-        rejected.push({ index: i, reason: `指标不存在：${missing.join('、')}` });
+        rejected.push({ index: i, cause: 'missing_metric', reason: `指标不存在：${missing.join('、')}` });
         continue;
       }
       if (alt.probe) {
         const probe = renderMetrics(engine, { ...alt, expr: alt.probe }, ctx);
         const r = await ds.query({ expr: probe, dialect, time: at, clock_window: clock, timeout_ms: 10_000 });
         if (!r.series.length) {
-          rejected.push({ index: i, reason: `probe 没有结果：${probe}` });
+          rejected.push({ index: i, cause: 'probe', reason: `probe 没有结果：${probe}` });
           continue;
         }
       }
     } catch (err) {
       if (err instanceof DatasourceError) {
-        rejected.push({ index: i, reason: `探测失败：${err.message}` });
+        rejected.push({ index: i, cause: 'error', reason: `探测失败：${err.message}` });
         continue;
       }
       throw err;

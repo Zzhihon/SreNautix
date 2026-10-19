@@ -111,10 +111,18 @@ export async function runCard(input: RunCardInput): Promise<RunCardResult> {
 
     if (!res?.alternative) {
       const why = res ? res.rejected.map((x) => `备选 ${x.index}：${x.reason}`).join('；') : '信号没有探测';
-      // 所有备选都因能力缺失被拒绝时显示能力缺失，否则为数据源侧没有这个信号
-      const caps = res?.rejected.filter((x) => x.reason.startsWith('数据源没有能力')) ?? [];
-      if (res && caps.length === res.rejected.length && caps.length > 0) {
-        refs[r.name] = { kind: 'capability_missing', capability: caps[0]!.reason.replace('数据源没有能力 ', '') };
+      const all = (c: string) => !!res && res.rejected.length > 0 && res.rejected.every((x) => x.cause === c);
+      if (all('capability')) {
+        // 所有备选都因能力缺失被拒绝：显示能力缺失
+        refs[r.name] = { kind: 'capability_missing', capability: res!.rejected[0]!.capability! };
+      } else if (all('missing_metric') && (r.empty_is ?? 'no_data') === 'normal') {
+        // 过滤型引用的指标不存在：等于没有命中（例如 kube-state-metrics 只在容器等待时才输出等待原因）
+        refs[r.name] =
+          res!.kind === 'logs'
+            ? { kind: 'logs', lines: [], truncated: false }
+            : res!.kind === 'traces'
+              ? { kind: 'traces', traces: [], truncated: false }
+              : { kind: 'metrics', series: [], truncated: false };
       } else {
         refs[r.name] = { kind: 'error', message: `信号 ${sk} 没有可用备选（${why}）` };
       }

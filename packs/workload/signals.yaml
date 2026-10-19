@@ -1,0 +1,170 @@
+# Pod 级信号用 $selector：Pod 实体展开为 namespace + pod，工作负载实体展开为 namespace + 按控制器命名规则匹配的 pod。
+# 工作负载级信号用 $namespace 与 $name，标签名取 kube-state-metrics 的约定。
+signals:
+  - id: pod_info
+    kind: metrics
+    alternatives:
+      - expr: max by (namespace, pod, node) (kube_pod_info{$selector})
+  - id: container_restarts
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: sum by (namespace, pod, container) (increase(kube_pod_container_status_restarts_total{$selector}[$window]))
+  - id: container_last_terminated
+    kind: metrics
+    alternatives:
+      - expr: max by (namespace, pod, container, reason) (kube_pod_container_status_last_terminated_reason{$selector}) == 1
+  - id: container_crashloop
+    kind: metrics
+    alternatives:
+      - expr: max by (namespace, pod, container) (max_over_time(kube_pod_container_status_waiting_reason{$selector, reason="CrashLoopBackOff"}[$window])) == 1
+  - id: container_waiting_other
+    kind: metrics
+    alternatives:
+      - expr: max by (namespace, pod, container, reason) (max_over_time(kube_pod_container_status_waiting_reason{$selector, reason!="CrashLoopBackOff", reason!="ContainerCreating"}[$window])) == 1
+  - id: container_memory_limit_ratio
+    kind: metrics
+    unit: ratio
+    alternatives:
+      - expr: >-
+          max by (namespace, pod, container) (
+            container_memory_working_set_bytes{$selector, container!="", container!="POD"}
+            / on (namespace, pod, container)
+            kube_pod_container_resource_limits{$selector, resource="memory"}
+          )
+  - id: container_oom_events
+    kind: metrics
+    alternatives:
+      - expr: sum by (namespace, pod, container) (increase(container_oom_events_total{$selector, container!=""}[$window])) > 0
+      - expr: max by (namespace, pod, container) (max_over_time(kube_pod_container_status_last_terminated_reason{$selector, reason="OOMKilled"}[$window])) > 0
+  - id: container_cpu_throttled_ratio
+    kind: metrics
+    unit: ratio
+    alternatives:
+      - expr: >-
+          sum by (namespace, pod, container) (rate(container_cpu_cfs_throttled_periods_total{$selector, container!=""}[$rate_window]))
+          / sum by (namespace, pod, container) (rate(container_cpu_cfs_periods_total{$selector, container!=""}[$rate_window]))
+  - id: pod_ready
+    kind: metrics
+    alternatives:
+      - expr: max by (namespace, pod) (kube_pod_status_ready{$selector, condition="true"})
+  - id: pod_pending
+    kind: metrics
+    alternatives:
+      - expr: max by (namespace, pod) (kube_pod_status_phase{$selector, phase="Pending"})
+  - id: pod_unschedulable
+    kind: metrics
+    alternatives:
+      - expr: max by (namespace, pod) (max_over_time(kube_pod_status_unschedulable{$selector}[$window])) == 1
+  - id: init_container_running
+    kind: metrics
+    alternatives:
+      - expr: max by (namespace, pod, container) (kube_pod_init_container_status_running{$selector})
+  - id: init_container_waiting
+    kind: metrics
+    alternatives:
+      - expr: max by (namespace, pod, container, reason) (max_over_time(kube_pod_init_container_status_waiting_reason{$selector}[$window])) == 1
+  - id: pdb_missing_healthy
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: >-
+          max by (namespace, poddisruptionbudget) (
+            kube_poddisruptionbudget_status_desired_healthy{namespace="$namespace", poddisruptionbudget="$name"}
+            - kube_poddisruptionbudget_status_current_healthy{namespace="$namespace", poddisruptionbudget="$name"}
+          )
+  - id: deployment_unavailable
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: >-
+          max by (namespace, deployment) (
+            kube_deployment_spec_replicas{namespace="$namespace", deployment="$name"}
+            - kube_deployment_status_replicas_available{namespace="$namespace", deployment="$name"}
+          )
+  - id: deployment_spec_changes
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: max by (namespace, deployment) (changes(kube_deployment_metadata_generation{namespace="$namespace", deployment="$name"}[$window]))
+  - id: statefulset_not_ready
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: >-
+          max by (namespace, statefulset) (
+            kube_statefulset_replicas{namespace="$namespace", statefulset="$name"}
+            - kube_statefulset_status_replicas_ready{namespace="$namespace", statefulset="$name"}
+          )
+  - id: statefulset_not_updated
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: >-
+          max by (namespace, statefulset) (
+            kube_statefulset_replicas{namespace="$namespace", statefulset="$name"}
+            - kube_statefulset_status_replicas_updated{namespace="$namespace", statefulset="$name"}
+          )
+  - id: statefulset_spec_changes
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: max by (namespace, statefulset) (changes(kube_statefulset_metadata_generation{namespace="$namespace", statefulset="$name"}[$window]))
+  - id: daemonset_unavailable
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: >-
+          max by (namespace, daemonset) (
+            kube_daemonset_status_number_unavailable{namespace="$namespace", daemonset="$name"}
+            + kube_daemonset_status_number_misscheduled{namespace="$namespace", daemonset="$name"}
+          )
+  - id: daemonset_spec_changes
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: max by (namespace, daemonset) (changes(kube_daemonset_metadata_generation{namespace="$namespace", daemonset="$name"}[$window]))
+  - id: job_failed
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: max by (namespace, job_name) (kube_job_status_failed{namespace="$namespace", job_name="$name"})
+  - id: job_active_seconds
+    kind: metrics
+    unit: seconds
+    alternatives:
+      # 仍在运行的 Job 已运行的秒数；没有在运行时没有序列
+      - expr: >-
+          max by (namespace, job_name) (
+            time() - kube_job_status_start_time{namespace="$namespace", job_name="$name"}
+            and on (namespace, job_name) kube_job_status_active{namespace="$namespace", job_name="$name"} > 0
+          )
+  - id: hpa_at_max
+    kind: metrics
+    unit: ratio
+    alternatives:
+      - expr: >-
+          max by (namespace, horizontalpodautoscaler) (
+            kube_horizontalpodautoscaler_status_current_replicas{namespace="$namespace", horizontalpodautoscaler="$name"}
+            / kube_horizontalpodautoscaler_spec_max_replicas{namespace="$namespace", horizontalpodautoscaler="$name"}
+          )
+  - id: quota_usage
+    kind: metrics
+    unit: ratio
+    alternatives:
+      - expr: >-
+          max by (namespace, resourcequota, resource) (kube_resourcequota{namespace="$namespace", type="used"})
+          / max by (namespace, resourcequota, resource) (kube_resourcequota{namespace="$namespace", type="hard"} > 0)
+  - id: node_requests_ratio
+    kind: metrics
+    unit: ratio
+    alternatives:
+      # 只有 Pending 与 Running 的 Pod 占用节点容量；kube-state-metrics 对已结束的 Pod 也保留 requests 序列
+      - expr: >-
+          topk(5,
+            sum by (node, resource) (
+              kube_pod_container_resource_requests{resource=~"cpu|memory"}
+              * on (namespace, pod) group_left () max by (namespace, pod) (kube_pod_status_phase{phase=~"Pending|Running"} == 1)
+            )
+            / on (node, resource) group_left () max by (node, resource) (kube_node_status_allocatable{resource=~"cpu|memory"})
+          )

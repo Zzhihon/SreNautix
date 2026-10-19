@@ -1,0 +1,376 @@
+chains:
+  - id: pod-restarts
+    title: { zh-CN: 重启与资源, en: Restarts and resources }
+    runbook: workload.md
+    cards:
+      - id: restarts
+        title: { zh-CN: 重启与终止原因, en: Restarts and termination reasons }
+        note:
+          {
+            zh-CN: 窗口内的重启次数、CrashLoopBackOff 与最近一次终止原因,
+            en: 'Restarts, CrashLoopBackOff and the last termination reason',
+          }
+        applies_to: { kinds: [Pod, Deployment, StatefulSet, DaemonSet] }
+        params: { restarts: 0 }
+        refs:
+          - { name: restarts, signal: container_restarts, mode: instant }
+          - { name: crash, signal: container_crashloop, mode: instant, empty_is: normal }
+          - { name: reasons, signal: container_last_terminated, mode: instant, empty_is: normal }
+        judge:
+          let:
+            - { name: total, cel: sum(restarts) }
+            - { name: looping, cel: size(crash) }
+          abnormal_if:
+            - cel: looping > 0
+              say:
+                { zh-CN: '{looping} 个容器处于 CrashLoopBackOff', en: '{looping} containers are in CrashLoopBackOff' }
+            - cel: total > double(params.restarts)
+              say: { zh-CN: '窗口内重启 {total, number} 次', en: '{total, number} restarts in the window' }
+        display:
+          value: total
+          unit: count
+          table:
+            rows_from: reasons
+            columns:
+              - { header: { zh-CN: Pod, en: Pod }, cel: 'label(row, "pod")' }
+              - { header: { zh-CN: 容器, en: Container }, cel: 'label(row, "container")' }
+              - { header: { zh-CN: 最近终止原因, en: Last termination }, cel: 'label(row, "reason")' }
+        egress: allow
+      - id: memory
+        title: { zh-CN: 内存占 limit 与 OOM, en: Memory vs limit and OOM }
+        applies_to: { kinds: [Pod, Deployment, StatefulSet, DaemonSet] }
+        params: { limit_ratio: 0.9 }
+        refs:
+          - { name: mem, signal: container_memory_limit_ratio, mode: range }
+          - { name: oom, signal: container_oom_events, mode: instant, empty_is: normal }
+        judge:
+          let:
+            - { name: peak, cel: max(mem) }
+            - { name: ooms, cel: count(oom) }
+            - { name: anomaly_started_at, cel: 'first_above(mem, params.limit_ratio)' }
+          abnormal_if:
+            - cel: ooms > 0
+              say: { zh-CN: '{ooms} 个容器被 OOM 终止', en: '{ooms} containers were OOM-killed' }
+            - cel: peak > params.limit_ratio
+              say: { zh-CN: 'working set 峰值 {peak, number, percent}', en: 'Peak working set {peak, number, percent}' }
+        display:
+          value: peak
+          unit: percent
+          threshold: params.limit_ratio
+          table:
+            rows_from: mem
+            sort_by: max(row)
+            limit: 5
+            columns:
+              - { header: { zh-CN: Pod, en: Pod }, cel: 'label(row, "pod")' }
+              - { header: { zh-CN: 容器, en: Container }, cel: 'label(row, "container")' }
+              - { header: { zh-CN: 峰值, en: Peak }, cel: max(row), unit: percent }
+        egress: allow
+      - id: throttling
+        title: { zh-CN: CPU 限流, en: CPU throttling }
+        note: { zh-CN: 被 CFS 限流的周期占比；超过 25% 时延迟会明显上升, en: Share of throttled CFS periods }
+        applies_to: { kinds: [Pod, Deployment, StatefulSet, DaemonSet] }
+        params: { ratio: 0.25 }
+        refs:
+          - { name: thr, signal: container_cpu_throttled_ratio, mode: range }
+        judge:
+          let:
+            - { name: peak, cel: max(thr) }
+          abnormal_if:
+            - cel: peak > params.ratio
+              say: { zh-CN: '限流比例峰值 {peak, number, percent}', en: 'Peak throttling {peak, number, percent}' }
+        display: { value: peak, unit: percent, threshold: params.ratio }
+        egress: allow
+      - id: readiness
+        title: { zh-CN: 就绪, en: Readiness }
+        applies_to: { kinds: [Pod, Deployment, StatefulSet, DaemonSet] }
+        refs:
+          - { name: ready, signal: pod_ready, mode: range }
+        judge:
+          let:
+            - { name: notReady, cel: 'size(ready.filter(s, min(s) < 1.0))' }
+            - { name: anomaly_started_at, cel: 'first_below(ready, 1.0)' }
+          abnormal_if:
+            - cel: notReady > 0
+              say: { zh-CN: '{notReady} 个 Pod 在窗口内未就绪', en: '{notReady} pods were not ready in the window' }
+        display:
+          value: double(notReady)
+          unit: count
+          table:
+            rows_from: ready
+            columns:
+              - { header: { zh-CN: Pod, en: Pod }, cel: 'label(row, "pod")' }
+              - { header: { zh-CN: 最低, en: Min }, cel: min(row) }
+        egress: allow
+
+  - id: pod-pending
+    title: { zh-CN: 调度与启动, en: Scheduling and startup }
+    runbook: workload.md
+    cards:
+      - id: pending
+        title: { zh-CN: 持续 Pending, en: Stuck pending }
+        applies_to: { kinds: [Pod, Deployment, StatefulSet, DaemonSet] }
+        refs:
+          - { name: pending, signal: pod_pending, mode: range }
+          - { name: unsched, signal: pod_unschedulable, mode: instant, empty_is: normal }
+        judge:
+          let:
+            - { name: stuck, cel: 'size(pending.filter(s, min(s) >= 1.0))' }
+            - { name: unschedulable, cel: size(unsched) }
+          abnormal_if:
+            - cel: unschedulable > 0
+              say: { zh-CN: '{unschedulable} 个 Pod 无法调度', en: '{unschedulable} pods are unschedulable' }
+            - cel: stuck > 0
+              say:
+                { zh-CN: '{stuck} 个 Pod 在整个窗口内 Pending', en: '{stuck} pods stayed pending for the whole window' }
+        display: { value: double(stuck), unit: count }
+        egress: allow
+      - id: waiting
+        title: { zh-CN: 容器等待原因, en: Container waiting reasons }
+        note:
+          {
+            zh-CN: 'ImagePullBackOff、CreateContainerConfigError 等（CrashLoopBackOff 在重启卡）',
+            en: 'ImagePullBackOff, CreateContainerConfigError and similar',
+          }
+        applies_to: { kinds: [Pod, Deployment, StatefulSet, DaemonSet] }
+        refs:
+          - { name: info, signal: pod_info, mode: instant }
+          - { name: waiting, signal: container_waiting_other, mode: instant, empty_is: normal }
+        judge:
+          let:
+            - { name: n, cel: size(waiting) }
+          abnormal_if:
+            - cel: n > 0
+              say: { zh-CN: '{n} 个容器在等待（拉取镜像或配置错误）', en: '{n} containers are waiting' }
+        display:
+          table:
+            rows_from: waiting
+            columns:
+              - { header: { zh-CN: Pod, en: Pod }, cel: 'label(row, "pod")' }
+              - { header: { zh-CN: 容器, en: Container }, cel: 'label(row, "container")' }
+              - { header: { zh-CN: 原因, en: Reason }, cel: 'label(row, "reason")' }
+        egress: allow
+      - id: init-stuck
+        title: { zh-CN: 卡住的 init 容器, en: Stuck init containers }
+        note:
+          {
+            zh-CN: init 容器在整个窗口内一直运行或等待；常见于等待的依赖已经恢复、但 init 容器没有重试,
+            en: An init container ran or waited for the whole window,
+          }
+        applies_to: { kinds: [Pod, Deployment, StatefulSet, DaemonSet] }
+        window: { before: 15m, after: 1m }
+        refs:
+          - { name: info, signal: pod_info, mode: instant }
+          - { name: running, signal: init_container_running, mode: range, empty_is: normal }
+          - { name: waiting, signal: init_container_waiting, mode: instant, empty_is: normal }
+        judge:
+          let:
+            - { name: stuckRunning, cel: 'size(running.filter(s, min(s) >= 1.0))' }
+            - { name: stuckWaiting, cel: size(waiting) }
+          abnormal_if:
+            - cel: stuckRunning > 0
+              say:
+                {
+                  zh-CN: '{stuckRunning} 个 init 容器运行超过 15 分钟没有结束',
+                  en: '{stuckRunning} init containers ran for over 15 minutes',
+                }
+            - cel: stuckWaiting > 0
+              say: { zh-CN: '{stuckWaiting} 个 init 容器在等待', en: '{stuckWaiting} init containers are waiting' }
+        display:
+          table:
+            rows_from: running
+            columns:
+              - { header: { zh-CN: Pod, en: Pod }, cel: 'label(row, "pod")' }
+              - { header: { zh-CN: init 容器, en: Init container }, cel: 'label(row, "container")' }
+        egress: allow
+      - id: pdb
+        title: { zh-CN: PDB 健康副本, en: PDB healthy pods }
+        applies_to: { kinds: [PodDisruptionBudget] }
+        refs:
+          - { name: missing, signal: pdb_missing_healthy, mode: range }
+        judge:
+          let:
+            - { name: lack, cel: last(missing) }
+          abnormal_if:
+            - cel: lack > 0.0
+              say:
+                { zh-CN: '健康副本比要求少 {lack, number} 个', en: '{lack, number} fewer healthy pods than required' }
+        display: { value: lack, unit: count }
+        egress: allow
+
+  - id: rollout
+    title: { zh-CN: 发布进度, en: Rollout progress }
+    runbook: workload.md
+    cards:
+      - id: deployment
+        title: { zh-CN: Deployment 发布, en: Deployment rollout }
+        applies_to: { kinds: [Deployment] }
+        refs:
+          - { name: unavailable, signal: deployment_unavailable, mode: range }
+          - { name: changes, signal: deployment_spec_changes, mode: instant }
+        judge:
+          let:
+            - { name: missing, cel: last(unavailable) }
+            - { name: specChanges, cel: last(changes) }
+          abnormal_if:
+            - cel: missing > 0.0
+              say:
+                {
+                  zh-CN: '窗口结束时仍有 {missing, number} 个副本不可用',
+                  en: '{missing, number} replicas still unavailable',
+                }
+            - cel: specChanges > 0.0
+              say:
+                {
+                  zh-CN: '窗口内 spec 变更 {specChanges, number} 次',
+                  en: 'The spec changed {specChanges, number} times in the window',
+                }
+        display: { value: missing, unit: count }
+        egress: allow
+      - id: statefulset
+        title: { zh-CN: StatefulSet 发布, en: StatefulSet rollout }
+        applies_to: { kinds: [StatefulSet] }
+        refs:
+          - { name: notReady, signal: statefulset_not_ready, mode: range }
+          - { name: notUpdated, signal: statefulset_not_updated, mode: instant }
+          - { name: changes, signal: statefulset_spec_changes, mode: instant }
+        judge:
+          let:
+            - { name: missing, cel: last(notReady) }
+            - { name: stale, cel: last(notUpdated) }
+            - { name: specChanges, cel: last(changes) }
+          abnormal_if:
+            - cel: missing > 0.0
+              say:
+                {
+                  zh-CN: '窗口结束时仍有 {missing, number} 个副本未就绪',
+                  en: '{missing, number} replicas still not ready',
+                }
+            - cel: stale > 0.0
+              say:
+                { zh-CN: '{stale, number} 个副本还是旧版本', en: '{stale, number} replicas still run the old revision' }
+            - cel: specChanges > 0.0
+              say:
+                {
+                  zh-CN: '窗口内 spec 变更 {specChanges, number} 次',
+                  en: 'The spec changed {specChanges, number} times in the window',
+                }
+        display: { value: missing, unit: count }
+        egress: allow
+      - id: daemonset
+        title: { zh-CN: DaemonSet 发布, en: DaemonSet rollout }
+        applies_to: { kinds: [DaemonSet] }
+        refs:
+          - { name: unavailable, signal: daemonset_unavailable, mode: range }
+          - { name: changes, signal: daemonset_spec_changes, mode: instant }
+        judge:
+          let:
+            - { name: missing, cel: last(unavailable) }
+            - { name: specChanges, cel: last(changes) }
+          abnormal_if:
+            - cel: missing > 0.0
+              say:
+                {
+                  zh-CN: '{missing, number} 个节点上的 Pod 不可用或调度错误',
+                  en: '{missing, number} pods unavailable or misscheduled',
+                }
+            - cel: specChanges > 0.0
+              say:
+                {
+                  zh-CN: '窗口内 spec 变更 {specChanges, number} 次',
+                  en: 'The spec changed {specChanges, number} times in the window',
+                }
+        display: { value: missing, unit: count }
+        egress: allow
+
+  - id: job
+    title: { zh-CN: Job, en: Job }
+    runbook: workload.md
+    cards:
+      - id: status
+        title: { zh-CN: Job 失败与运行时长, en: Job failures and duration }
+        applies_to: { kinds: [Job] }
+        params: { max_hours: 12 }
+        refs:
+          - { name: failed, signal: job_failed, mode: instant }
+          - { name: active, signal: job_active_seconds, mode: instant, empty_is: normal }
+        judge:
+          let:
+            - { name: failures, cel: last(failed) }
+            - { name: longRunning, cel: 'size(active.filter(s, last(s) > double(params.max_hours) * 3600.0))' }
+          abnormal_if:
+            - cel: failures > 0.0
+              say: { zh-CN: 'Job 失败 {failures, number} 次', en: 'The job failed {failures, number} times' }
+            - cel: longRunning > 0
+              say: { zh-CN: Job 运行超过 12 小时仍未结束, en: The job has been running for over 12 hours }
+        display: { value: failures, unit: count }
+        egress: allow
+
+  - id: capacity
+    title: { zh-CN: 容量, en: Capacity }
+    runbook: workload.md
+    cards:
+      - id: hpa
+        title: { zh-CN: HPA 上限, en: HPA ceiling }
+        applies_to: { kinds: [HorizontalPodAutoscaler] }
+        refs:
+          - { name: ratio, signal: hpa_at_max, mode: range }
+        judge:
+          let:
+            - { name: peak, cel: max(ratio) }
+          abnormal_if:
+            - cel: peak >= 1.0
+              say: { zh-CN: 副本数顶到 HPA 上限, en: Replicas reached the HPA maximum }
+        display: { value: peak, unit: percent }
+        egress: allow
+      - id: quota
+        title: { zh-CN: 命名空间配额, en: Namespace quota }
+        applies_to: { kinds: [ResourceQuota, Namespace, Pod, Deployment, StatefulSet, DaemonSet] }
+        params: { ratio: 0.9 }
+        refs:
+          - { name: usage, signal: quota_usage, mode: instant }
+        judge:
+          let:
+            - { name: peak, cel: max(usage) }
+          abnormal_if:
+            - cel: peak > params.ratio
+              say: { zh-CN: '配额最高占用 {peak, number, percent}', en: 'Highest quota usage {peak, number, percent}' }
+        display:
+          value: peak
+          unit: percent
+          table:
+            rows_from: usage
+            sort_by: last(row)
+            columns:
+              - { header: { zh-CN: 配额, en: Quota }, cel: 'label(row, "resourcequota")' }
+              - { header: { zh-CN: 资源, en: Resource }, cel: 'label(row, "resource")' }
+              - { header: { zh-CN: 占用, en: Used }, cel: last(row), unit: percent }
+        egress: allow
+      - id: node-requests
+        title: { zh-CN: 节点 requests 占可分配量, en: Node requests vs allocatable }
+        note: { zh-CN: 超过 90% 时新 Pod 无法调度, en: Above 90% new pods cannot be scheduled }
+        applies_to: { kinds: [cluster, Node, Pod, Deployment, StatefulSet, DaemonSet] }
+        params: { ratio: 0.9 }
+        refs:
+          - { name: req, signal: node_requests_ratio, mode: instant }
+        judge:
+          let:
+            - { name: peak, cel: max(req) }
+          abnormal_if:
+            - cel: peak > params.ratio
+              say:
+                {
+                  zh-CN: '节点 requests 最高占 {peak, number, percent}',
+                  en: 'Highest node requests {peak, number, percent}',
+                }
+        display:
+          value: peak
+          unit: percent
+          table:
+            rows_from: req
+            sort_by: last(row)
+            columns:
+              - { header: { zh-CN: 节点, en: Node }, cel: 'label(row, "node")' }
+              - { header: { zh-CN: 资源, en: Resource }, cel: 'label(row, "resource")' }
+              - { header: { zh-CN: 占比, en: Ratio }, cel: last(row), unit: percent }
+        egress: allow

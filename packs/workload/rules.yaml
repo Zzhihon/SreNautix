@@ -1,0 +1,19 @@
+# init 容器卡住（例如等待的依赖已经恢复，但 init 容器没有重试）时，重建 Pod 让它重新执行 init。
+# pod_restart 经 Eviction API 执行，受 PDB 约束；gateway 执行时重新核对可重建条件
+# （控制器管理、至少 2 个就绪副本、PDB 有余量），不满足时转为人工审批。
+rules:
+  - id: stuck-init-recreate-pod
+    title:
+      zh-CN: 重建 init 容器卡住的 Pod
+      en: Recreate a pod whose init container is stuck
+    when: >-
+      root.kind == "Pod"
+      && "workload/pod-pending/init-stuck" in cards
+      && cards["workload/pod-pending/init-stuck"].verdict == "abnormal"
+    action: pod_restart
+    params:
+      namespace: root.namespace
+      pod: root.name
+    expected_effect:
+      zh-CN: 控制器重建 Pod，init 容器重新执行并完成，Pod 进入 Running
+      en: The controller recreates the pod and the init container completes

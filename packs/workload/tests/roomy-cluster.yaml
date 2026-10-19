@@ -1,0 +1,24 @@
+# 节点 requests 有余量；已结束的 Pod 仍保留 requests 序列，但不计入
+api_version: srenautix.io/pack-test/v1
+interval: 1m
+input_series:
+  - { series: 'kube_pod_status_phase{namespace="shop",pod="a",phase="Running"}', values: '1x60' }
+  - { series: 'kube_pod_status_phase{namespace="shop",pod="done",phase="Running"}', values: '0x60' }
+  - { series: 'kube_pod_status_phase{namespace="shop",pod="done",phase="Succeeded"}', values: '1x60' }
+  - {
+      series: 'kube_pod_container_resource_requests{namespace="shop",pod="a",container="a",node="n1",resource="cpu",unit="core"}',
+      values: '1x60',
+    }
+  - {
+      series: 'kube_pod_container_resource_requests{namespace="shop",pod="done",container="d",node="n1",resource="cpu",unit="core"}',
+      values: '3x60',
+    }
+  - { series: 'kube_node_status_allocatable{node="n1",resource="cpu",unit="core"}', values: '4x60' }
+tests:
+  - {
+      name: requests 有余量,
+      eval_time: 40m,
+      card: capacity/node-requests,
+      entity: { kind: cluster, name: c1 },
+      expect: { verdict: normal },
+    }
