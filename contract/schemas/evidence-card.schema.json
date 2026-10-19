@@ -97,7 +97,27 @@
           "type": "object",
           "additionalProperties": { "type": ["number", "string", "boolean"] }
         },
-        "limit": { "type": "integer", "minimum": 1, "maximum": 1000 }
+        "limit": { "type": "integer", "minimum": 1, "maximum": 1000 },
+        "empty_is": {
+          "type": "string",
+          "description": "no_data：没有序列视为缺数据，引用它的规则不可求值，卡片不能判为正常；normal：过滤型查询（例如 ... > 0），没有序列表示没有命中。每张卡至少有一个 no_data 引用（加载时校验）",
+          "enum": ["no_data", "normal"],
+          "default": "no_data"
+        }
+      }
+    },
+    "Binding": {
+      "title": "CardBinding",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "cel"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "保留名 anomaly_started_at（unix 秒）用于填写 EvidenceResult 的同名字段",
+          "pattern": "^[a-z][a-zA-Z0-9_]*$"
+        },
+        "cel": { "type": "string", "minLength": 1 }
       }
     },
     "Judge": {
@@ -107,6 +127,11 @@
       "additionalProperties": false,
       "required": ["abnormal_if"],
       "properties": {
+        "let": {
+          "type": "array",
+          "description": "按顺序求值的绑定；结果可在 undeterminable_if、abnormal_if、display.value、display.threshold、表格列和 say 的 ICU 参数中引用",
+          "items": { "$ref": "#/$defs/Binding" }
+        },
         "abnormal_if": {
           "type": "array",
           "minItems": 1,

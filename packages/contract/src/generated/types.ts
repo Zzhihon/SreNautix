@@ -331,6 +331,7 @@ export interface SrenautixContractIndex {
   LocalizedText?: LocalizedText;
   CardWindow?: CardWindow;
   CardSignalRef?: CardSignalRef;
+  CardBinding?: CardBinding;
   CardJudge?: CardJudge;
   CardRule?: CardRule;
   CardDisplay?: CardDisplay;
@@ -369,6 +370,8 @@ export interface SrenautixContractIndex {
   KnowledgeFile?: KnowledgeFile;
   ActionRequestsFile?: ActionRequestsFile;
   PackUserLayer?: PackUserLayer;
+  ChaosFile?: ChaosFile;
+  PackTestFile?: PackTestFile;
   PackLock?: PackLock;
   Proposal?: Proposal;
   ProposalBinding?: ProposalBinding;
@@ -1709,16 +1712,31 @@ export interface CardSignalRef {
     [k: string]: number | string | boolean | undefined;
   };
   limit?: number;
+  /**
+   * no_data：没有序列视为缺数据，引用它的规则不可求值，卡片不能判为正常；normal：过滤型查询（例如 ... > 0），没有序列表示没有命中。每张卡至少有一个 no_data 引用（加载时校验）
+   */
+  empty_is?: 'no_data' | 'normal';
 }
 /**
  * 先求 undeterminable_if，命中即为无法判定；再按顺序求 abnormal_if，命中第一条即为异常；都不命中为正常。表达式出错时为无法判定。没有任何样本永远不是正常
  */
 export interface CardJudge {
   /**
+   * 按顺序求值的绑定；结果可在 undeterminable_if、abnormal_if、display.value、display.threshold、表格列和 say 的 ICU 参数中引用
+   */
+  let?: CardBinding[];
+  /**
    * @minItems 1
    */
   abnormal_if: [CardRule, ...CardRule[]];
   undeterminable_if?: CardRule[];
+}
+export interface CardBinding {
+  /**
+   * 保留名 anomaly_started_at（unix 秒）用于填写 EvidenceResult 的同名字段
+   */
+  name: string;
+  cel: string;
 }
 export interface CardRule {
   cel: string;
@@ -1913,7 +1931,7 @@ export interface IntegrationManifest {
   deployment_reports?: string[];
 }
 /**
- * 领域包的 pack.yaml（DESIGN §6.3）。领域包只包含数据，不包含可执行代码；其余文件的结构见本文件的 $defs：signals.yaml → SignalsFile，components.yaml → ComponentsFile，alerts.yaml → AlertsFile，chains.yaml → ChainsFile，checks.yaml → ChecksFile，rules.yaml → RulesFile，rca-params.yaml → RcaParams，knowledge/*.yaml → KnowledgeFile，action-requests.yaml → ActionRequestsFile，用户层文件 → UserLayer，pack.lock → PackLock
+ * 领域包的 pack.yaml（DESIGN §6.3）。领域包只包含数据，不包含可执行代码；其余文件的结构见本文件的 $defs：signals.yaml → SignalsFile，components.yaml → ComponentsFile，alerts.yaml → AlertsFile，chains.yaml → ChainsFile，checks.yaml → ChecksFile，rules.yaml → RulesFile，rca-params.yaml → RcaParams，knowledge/*.yaml → KnowledgeFile，action-requests.yaml → ActionRequestsFile，chaos/*.yaml → ChaosFile，tests/*.yaml → PackTestFile，用户层文件 → UserLayer，pack.lock → PackLock
  */
 export interface PackManifest {
   api_version: 'srenautix.io/pack/v1';
@@ -2201,6 +2219,114 @@ export interface PackUserLayer {
     rules?: PackRule[];
   };
   rca_params?: RcaParams;
+}
+/**
+ * 面向预发集群的混沌实验配方（DESIGN §14.5）。只包含声明式的 Kubernetes 对象（例如 Chaos Mesh 资源）与期望，不包含脚本
+ */
+export interface ChaosFile {
+  api_version: 'srenautix.io/chaos/v1';
+  id: string;
+  title: LocalizedText;
+  /**
+   * 实验需要的集群组件，例如 chaos-mesh
+   */
+  requires?: string[];
+  /**
+   * @minItems 1
+   */
+  manifests: [
+    {
+      apiVersion: string;
+      kind: string;
+      metadata: {};
+    },
+    ...{
+      apiVersion: string;
+      kind: string;
+      metadata: {};
+    }[],
+  ];
+  duration: Duration;
+  expect: {
+    /**
+     * 期望的根因对象 Kind 或组件类型
+     */
+    root_kind: string;
+    root_name_pattern?: string;
+    disposition: Disposition;
+    alerts?: string[];
+  };
+}
+/**
+ * 领域包测试（DESIGN §6.3）。input_series 使用 promtool 的序列写法，在 Prometheus 与 VictoriaMetrics 上各跑一遍，结论必须一致
+ */
+export interface PackTestFile {
+  api_version: 'srenautix.io/pack-test/v1';
+  interval: Duration;
+  input_series?: {
+    /**
+     * 例如 kube_pod_info{namespace="shop",pod="pg-1"}
+     */
+    series: string;
+    /**
+     * promtool 的展开写法，例如 0+1x10 _ stale
+     */
+    values: string;
+  }[];
+  input_logs?: {
+    labels: Labels;
+    lines: {
+      offset: Duration;
+      line: string;
+    }[];
+  }[];
+  /**
+   * @minItems 1
+   */
+  tests: [
+    {
+      name: string;
+      eval_time: Duration;
+      /**
+       * <chain>/<card> 或 checks/<id>
+       */
+      card: string;
+      entity: {
+        kind: string;
+        namespace?: string | null;
+        name: string;
+      };
+      params?: {
+        [k: string]: number | string | boolean | undefined;
+      };
+      expect: {
+        verdict: Verdict;
+        display_state?: 'normal' | 'abnormal' | 'undeterminable' | 'capability_missing';
+        reason_kind?: string;
+      };
+    },
+    ...{
+      name: string;
+      eval_time: Duration;
+      /**
+       * <chain>/<card> 或 checks/<id>
+       */
+      card: string;
+      entity: {
+        kind: string;
+        namespace?: string | null;
+        name: string;
+      };
+      params?: {
+        [k: string]: number | string | boolean | undefined;
+      };
+      expect: {
+        verdict: Verdict;
+        display_state?: 'normal' | 'abnormal' | 'undeterminable' | 'capability_missing';
+        reason_kind?: string;
+      };
+    }[],
+  ];
 }
 /**
  * pack.lock：每个包与用户层的内容哈希；每次研判和评测都记录 lock 本身的哈希

@@ -1,5 +1,5 @@
 // 本文件由 packages/contract/scripts/gen.ts 从 contract/ 生成，不要手工修改。
-export const CONTRACT_VERSION = '2.0.0';
+export const CONTRACT_VERSION = '2.1.0';
 
 export const SCHEMAS: Record<string, Record<string, unknown>> = {
   'https://srenautix.io/contract/integrations/alerts/v1/alerts.schema.json': {
@@ -1734,6 +1734,27 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
           mode: { type: 'string', enum: ['range', 'instant', 'logs', 'traces'] },
           params: { type: 'object', additionalProperties: { type: ['number', 'string', 'boolean'] } },
           limit: { type: 'integer', minimum: 1, maximum: 1000 },
+          empty_is: {
+            type: 'string',
+            description:
+              'no_data：没有序列视为缺数据，引用它的规则不可求值，卡片不能判为正常；normal：过滤型查询（例如 ... > 0），没有序列表示没有命中。每张卡至少有一个 no_data 引用（加载时校验）',
+            enum: ['no_data', 'normal'],
+            default: 'no_data',
+          },
+        },
+      },
+      Binding: {
+        title: 'CardBinding',
+        type: 'object',
+        additionalProperties: false,
+        required: ['name', 'cel'],
+        properties: {
+          name: {
+            type: 'string',
+            description: '保留名 anomaly_started_at（unix 秒）用于填写 EvidenceResult 的同名字段',
+            pattern: '^[a-z][a-zA-Z0-9_]*$',
+          },
+          cel: { type: 'string', minLength: 1 },
         },
       },
       Judge: {
@@ -1744,6 +1765,12 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
         additionalProperties: false,
         required: ['abnormal_if'],
         properties: {
+          let: {
+            type: 'array',
+            description:
+              '按顺序求值的绑定；结果可在 undeterminable_if、abnormal_if、display.value、display.threshold、表格列和 say 的 ICU 参数中引用',
+            items: { $ref: '#/$defs/Binding' },
+          },
           abnormal_if: { type: 'array', minItems: 1, items: { $ref: '#/$defs/Rule' } },
           undeterminable_if: { type: 'array', items: { $ref: '#/$defs/Rule' } },
         },
@@ -2279,7 +2306,7 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
     $id: 'https://srenautix.io/contract/schemas/pack.schema.json',
     title: 'PackManifest',
     description:
-      '领域包的 pack.yaml（DESIGN §6.3）。领域包只包含数据，不包含可执行代码；其余文件的结构见本文件的 $defs：signals.yaml → SignalsFile，components.yaml → ComponentsFile，alerts.yaml → AlertsFile，chains.yaml → ChainsFile，checks.yaml → ChecksFile，rules.yaml → RulesFile，rca-params.yaml → RcaParams，knowledge/*.yaml → KnowledgeFile，action-requests.yaml → ActionRequestsFile，用户层文件 → UserLayer，pack.lock → PackLock',
+      '领域包的 pack.yaml（DESIGN §6.3）。领域包只包含数据，不包含可执行代码；其余文件的结构见本文件的 $defs：signals.yaml → SignalsFile，components.yaml → ComponentsFile，alerts.yaml → AlertsFile，chains.yaml → ChainsFile，checks.yaml → ChecksFile，rules.yaml → RulesFile，rca-params.yaml → RcaParams，knowledge/*.yaml → KnowledgeFile，action-requests.yaml → ActionRequestsFile，chaos/*.yaml → ChaosFile，tests/*.yaml → PackTestFile，用户层文件 → UserLayer，pack.lock → PackLock',
     type: 'object',
     additionalProperties: false,
     required: ['api_version', 'name', 'version', 'maturity', 'requires'],
@@ -2644,6 +2671,123 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
             },
           },
           rca_params: { $ref: '#/$defs/RcaParams' },
+        },
+      },
+      ChaosFile: {
+        title: 'ChaosFile',
+        description:
+          '面向预发集群的混沌实验配方（DESIGN §14.5）。只包含声明式的 Kubernetes 对象（例如 Chaos Mesh 资源）与期望，不包含脚本',
+        type: 'object',
+        additionalProperties: false,
+        required: ['api_version', 'id', 'title', 'manifests', 'duration', 'expect'],
+        properties: {
+          api_version: { const: 'srenautix.io/chaos/v1' },
+          id: { type: 'string', pattern: '^[a-z0-9][a-z0-9_-]*$' },
+          title: { $ref: 'evidence-card.schema.json#/$defs/LocalizedText' },
+          requires: { type: 'array', description: '实验需要的集群组件，例如 chaos-mesh', items: { type: 'string' } },
+          manifests: {
+            type: 'array',
+            minItems: 1,
+            items: {
+              type: 'object',
+              required: ['apiVersion', 'kind', 'metadata'],
+              properties: { apiVersion: { type: 'string' }, kind: { type: 'string' }, metadata: { type: 'object' } },
+            },
+          },
+          duration: { $ref: 'common.schema.json#/$defs/Duration' },
+          expect: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['root_kind', 'disposition'],
+            properties: {
+              root_kind: { type: 'string', description: '期望的根因对象 Kind 或组件类型' },
+              root_name_pattern: { type: 'string' },
+              disposition: { $ref: 'common.schema.json#/$defs/Disposition' },
+              alerts: { type: 'array', items: { type: 'string' } },
+            },
+          },
+        },
+      },
+      PackTestFile: {
+        title: 'PackTestFile',
+        description:
+          '领域包测试（DESIGN §6.3）。input_series 使用 promtool 的序列写法，在 Prometheus 与 VictoriaMetrics 上各跑一遍，结论必须一致',
+        type: 'object',
+        additionalProperties: false,
+        required: ['api_version', 'interval', 'tests'],
+        properties: {
+          api_version: { const: 'srenautix.io/pack-test/v1' },
+          interval: { $ref: 'common.schema.json#/$defs/Duration' },
+          input_series: {
+            type: 'array',
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['series', 'values'],
+              properties: {
+                series: { type: 'string', description: '例如 kube_pod_info{namespace="shop",pod="pg-1"}' },
+                values: { type: 'string', description: 'promtool 的展开写法，例如 0+1x10 _ stale' },
+              },
+            },
+          },
+          input_logs: {
+            type: 'array',
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['labels', 'lines'],
+              properties: {
+                labels: { $ref: 'common.schema.json#/$defs/Labels' },
+                lines: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    additionalProperties: false,
+                    required: ['offset', 'line'],
+                    properties: { offset: { $ref: 'common.schema.json#/$defs/Duration' }, line: { type: 'string' } },
+                  },
+                },
+              },
+            },
+          },
+          tests: {
+            type: 'array',
+            minItems: 1,
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['name', 'eval_time', 'card', 'entity', 'expect'],
+              properties: {
+                name: { type: 'string' },
+                eval_time: { $ref: 'common.schema.json#/$defs/Duration' },
+                card: { type: 'string', description: '<chain>/<card> 或 checks/<id>' },
+                entity: {
+                  type: 'object',
+                  additionalProperties: false,
+                  required: ['kind', 'name'],
+                  properties: {
+                    kind: { type: 'string' },
+                    namespace: { type: ['string', 'null'] },
+                    name: { type: 'string' },
+                  },
+                },
+                params: { type: 'object', additionalProperties: { type: ['number', 'string', 'boolean'] } },
+                expect: {
+                  type: 'object',
+                  additionalProperties: false,
+                  required: ['verdict'],
+                  properties: {
+                    verdict: { $ref: 'common.schema.json#/$defs/Verdict' },
+                    display_state: {
+                      type: 'string',
+                      enum: ['normal', 'abnormal', 'undeterminable', 'capability_missing'],
+                    },
+                    reason_kind: { type: 'string' },
+                  },
+                },
+              },
+            },
+          },
         },
       },
       PackLock: {

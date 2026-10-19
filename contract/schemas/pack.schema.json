@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://srenautix.io/contract/schemas/pack.schema.json",
   "title": "PackManifest",
-  "description": "领域包的 pack.yaml（DESIGN §6.3）。领域包只包含数据，不包含可执行代码；其余文件的结构见本文件的 $defs：signals.yaml → SignalsFile，components.yaml → ComponentsFile，alerts.yaml → AlertsFile，chains.yaml → ChainsFile，checks.yaml → ChecksFile，rules.yaml → RulesFile，rca-params.yaml → RcaParams，knowledge/*.yaml → KnowledgeFile，action-requests.yaml → ActionRequestsFile，用户层文件 → UserLayer，pack.lock → PackLock",
+  "description": "领域包的 pack.yaml（DESIGN §6.3）。领域包只包含数据，不包含可执行代码；其余文件的结构见本文件的 $defs：signals.yaml → SignalsFile，components.yaml → ComponentsFile，alerts.yaml → AlertsFile，chains.yaml → ChainsFile，checks.yaml → ChecksFile，rules.yaml → RulesFile，rca-params.yaml → RcaParams，knowledge/*.yaml → KnowledgeFile，action-requests.yaml → ActionRequestsFile，chaos/*.yaml → ChaosFile，tests/*.yaml → PackTestFile，用户层文件 → UserLayer，pack.lock → PackLock",
   "type": "object",
   "additionalProperties": false,
   "required": ["api_version", "name", "version", "maturity", "requires"],
@@ -393,6 +393,135 @@
           }
         },
         "rca_params": { "$ref": "#/$defs/RcaParams" }
+      }
+    },
+    "ChaosFile": {
+      "title": "ChaosFile",
+      "description": "面向预发集群的混沌实验配方（DESIGN §14.5）。只包含声明式的 Kubernetes 对象（例如 Chaos Mesh 资源）与期望，不包含脚本",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["api_version", "id", "title", "manifests", "duration", "expect"],
+      "properties": {
+        "api_version": { "const": "srenautix.io/chaos/v1" },
+        "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$" },
+        "title": { "$ref": "evidence-card.schema.json#/$defs/LocalizedText" },
+        "requires": {
+          "type": "array",
+          "description": "实验需要的集群组件，例如 chaos-mesh",
+          "items": { "type": "string" }
+        },
+        "manifests": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["apiVersion", "kind", "metadata"],
+            "properties": {
+              "apiVersion": { "type": "string" },
+              "kind": { "type": "string" },
+              "metadata": { "type": "object" }
+            }
+          }
+        },
+        "duration": { "$ref": "common.schema.json#/$defs/Duration" },
+        "expect": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["root_kind", "disposition"],
+          "properties": {
+            "root_kind": { "type": "string", "description": "期望的根因对象 Kind 或组件类型" },
+            "root_name_pattern": { "type": "string" },
+            "disposition": { "$ref": "common.schema.json#/$defs/Disposition" },
+            "alerts": { "type": "array", "items": { "type": "string" } }
+          }
+        }
+      }
+    },
+    "PackTestFile": {
+      "title": "PackTestFile",
+      "description": "领域包测试（DESIGN §6.3）。input_series 使用 promtool 的序列写法，在 Prometheus 与 VictoriaMetrics 上各跑一遍，结论必须一致",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["api_version", "interval", "tests"],
+      "properties": {
+        "api_version": { "const": "srenautix.io/pack-test/v1" },
+        "interval": { "$ref": "common.schema.json#/$defs/Duration" },
+        "input_series": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["series", "values"],
+            "properties": {
+              "series": { "type": "string", "description": "例如 kube_pod_info{namespace=\"shop\",pod=\"pg-1\"}" },
+              "values": { "type": "string", "description": "promtool 的展开写法，例如 0+1x10 _ stale" }
+            }
+          }
+        },
+        "input_logs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["labels", "lines"],
+            "properties": {
+              "labels": { "$ref": "common.schema.json#/$defs/Labels" },
+              "lines": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["offset", "line"],
+                  "properties": {
+                    "offset": { "$ref": "common.schema.json#/$defs/Duration" },
+                    "line": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "tests": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "eval_time", "card", "entity", "expect"],
+            "properties": {
+              "name": { "type": "string" },
+              "eval_time": { "$ref": "common.schema.json#/$defs/Duration" },
+              "card": { "type": "string", "description": "<chain>/<card> 或 checks/<id>" },
+              "entity": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["kind", "name"],
+                "properties": {
+                  "kind": { "type": "string" },
+                  "namespace": { "type": ["string", "null"] },
+                  "name": { "type": "string" }
+                }
+              },
+              "params": {
+                "type": "object",
+                "additionalProperties": { "type": ["number", "string", "boolean"] }
+              },
+              "expect": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["verdict"],
+                "properties": {
+                  "verdict": { "$ref": "common.schema.json#/$defs/Verdict" },
+                  "display_state": {
+                    "type": "string",
+                    "enum": ["normal", "abnormal", "undeterminable", "capability_missing"]
+                  },
+                  "reason_kind": { "type": "string" }
+                }
+              }
+            }
+          }
+        }
       }
     },
     "PackLock": {

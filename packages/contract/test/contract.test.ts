@@ -3,7 +3,7 @@ import { join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { parse } from 'yaml';
-import { assertValid, ContractViolation, SCHEMAS, validatorFor } from '../src/index.js';
+import { assertValid, CONTRACT_VERSION, ContractViolation, SCHEMAS, validatorFor } from '../src/index.js';
 
 const contractDir = resolve(fileURLToPath(import.meta.url), '../../../../contract');
 const fixture = (name: string): Record<string, unknown> =>
@@ -15,6 +15,19 @@ function walk(dir: string): string[] {
     return statSync(p).isDirectory() ? walk(p) : n.endsWith('.schema.json') ? [p] : [];
   });
 }
+
+describe('版本', () => {
+  it('contract/VERSION、OpenAPI 与包版本一致', () => {
+    const version = readFileSync(join(contractDir, 'VERSION'), 'utf8').trim();
+    const doc = parse(readFileSync(join(contractDir, 'openapi.yaml'), 'utf8')) as { info: { version: string } };
+    const pkg = JSON.parse(readFileSync(resolve(contractDir, '../packages/contract/package.json'), 'utf8')) as {
+      version: string;
+    };
+    expect(doc.info.version).toBe(version);
+    expect(pkg.version).toBe(version);
+    expect(CONTRACT_VERSION).toBe(version);
+  });
+});
 
 describe('schema 注册', () => {
   it('contract/ 下的每个 schema 都内嵌并在严格模式下编译', () => {
