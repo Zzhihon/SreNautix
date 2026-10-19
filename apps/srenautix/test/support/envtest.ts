@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { generateKeyPairSync } from 'node:crypto';
-import { copyFileSync, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { join, resolve } from 'node:path';
 
@@ -169,24 +169,4 @@ export async function startEnvTest(): Promise<EnvTest> {
       rmSync(dir, { recursive: true, force: true });
     },
   };
-}
-
-/**
- * reader 协议文件所在目录。contract/gateway/v1/reader.openapi.yaml 合入之前，测试用 SRENAUTIX_READER_PROTOCOL
- * 指向的草稿与仓库中的 openapi.yaml 拼成同样的目录结构（放在 .scratch 下，相对引用照常解析）。
- */
-export function readerProtocolDir(): string {
-  const repo = resolve(import.meta.dirname, '../../../../contract/gateway/v1');
-  if (existsSync(join(repo, 'reader.openapi.yaml'))) {
-    return repo;
-  }
-  const draft = process.env.SRENAUTIX_READER_PROTOCOL;
-  if (!draft || !existsSync(draft)) {
-    throw new Error('contract/gateway/v1/reader.openapi.yaml 尚未合入，用 SRENAUTIX_READER_PROTOCOL 指定协议草稿');
-  }
-  const dir = join(ROOT, 'reader-protocol', 'contract', 'gateway', 'v1');
-  mkdirSync(dir, { recursive: true });
-  copyFileSync(draft, join(dir, 'reader.openapi.yaml'));
-  copyFileSync(join(repo, 'openapi.yaml'), join(dir, 'openapi.yaml'));
-  return dir;
 }

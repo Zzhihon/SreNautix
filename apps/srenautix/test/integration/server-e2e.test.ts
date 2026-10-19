@@ -1,5 +1,5 @@
 import { createHash, generateKeyPairSync, randomUUID } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { Secret, TOTP } from 'otpauth';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -226,6 +226,7 @@ afterAll(async () => {
   await srv?.stop();
   await tg?.stop();
   await db?.close();
+  rmSync(ROOT, { recursive: true, force: true });
 });
 
 describe('server 端到端', () => {

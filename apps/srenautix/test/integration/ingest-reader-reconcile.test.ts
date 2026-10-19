@@ -1,5 +1,3 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
 import { AlertCatalog } from '@srenautix/core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { reconcileFromReader, type ReaderAlertSnapshot } from '../../src/ingest/reconcile.js';
@@ -48,9 +46,6 @@ const firing = async () =>
 beforeAll(async () => {
   db = await newTestDb();
   await migrateExpand(db.server, 'server', serverTracks);
-  const dir = resolve(import.meta.dirname, '../../../../.scratch', `reader-reconcile-${process.pid}`);
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, 'token'), 'unused-token-0123456789');
   ingest = new IngestService(
     db.server,
     [],

@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { AlertCatalog } from '@srenautix/core';
 import type { FastifyInstance } from 'fastify';
@@ -81,6 +81,7 @@ afterAll(async () => {
   await am?.stop();
   await app?.close();
   await db?.close();
+  rmSync(resolve(import.meta.dirname, '../../../../.scratch', `ingest-token-${process.pid}`), { force: true });
 });
 
 describe('接入链路', () => {

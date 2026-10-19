@@ -21,7 +21,6 @@ import {
 } from '../../src/topology/reader-routes.js';
 import { TopologyStore } from '../../src/topology/store.js';
 import { newTestDb, type TestDb } from '../support/db.js';
-import { readerProtocolDir } from '../support/envtest.js';
 
 const TOKEN = 'reader-token-prod-0123456789abcdef';
 const OTHER = 'reader-token-dev-0123456789abcdef';
@@ -65,7 +64,7 @@ beforeAll(async () => {
   db = await newTestDb();
   await migrateExpand(db.server, 'server', [storeTrack, identityTrack, topologyTrack]);
   store = new TopologyStore(db.server);
-  const protocol = new ReaderProtocol(readerProtocolDir());
+  const protocol = new ReaderProtocol();
   queue = new ReaderRequestQueue(db.server, protocol);
   const callers = new CallerRegistry([
     { id: 'reader-prod', kind: 'spoke', role: 'reader', cluster_id: 'prod', token_sha256: tokenDigest(TOKEN) },
