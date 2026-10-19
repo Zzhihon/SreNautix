@@ -51,5 +51,18 @@
       "linux-amd64": "9604ab46348270a42954801bba91cd65335e16568ef886bdf71b988fdcb7ac4e",
       "linux-arm64": "e4092dcf2b93e141be77e300b539f6c5cceefa9803417d7d635c6797d9bc19ad"
     }
+  },
+  "helm": {
+    "version": "3.19.0",
+    "url": "https://get.helm.sh/helm-v{version}-{os}-{arch}.tar.gz",
+    "binaries": {
+      "helm": "{os}-{arch}/helm"
+    },
+    "sha256": {
+      "darwin-amd64": "09a108c0abda42e45af172be65c49125354bf7cd178dbe10435e94540e49c7b9",
+      "darwin-arm64": "31513e1193da4eb4ae042eb5f98ef9aca7890cfa136f4707c8d4f70e2115bef6",
+      "linux-amd64": "a7f81ce08007091b86d8bd696eb4d86b8d0f2e1b9f6c714be62f82f96a594496",
+      "linux-arm64": "440cf7add0aee27ebc93fada965523c1dc2e0ab340d4348da2215737fc0d76ad"
+    }
   }
 }

@@ -1,0 +1,1225 @@
+# 每个条目：告警名、角色、实体映射、作用范围、证据链、来源 mixin。
+# 同名告警只有在角色不同时才按 match_labels 拆成变体（例如 PVC 写满的 critical 变体描述当前状态，属于 cause；
+# warning 变体用 predict_linear 预测，属于 forecast）。Watchdog 与 severity=none 的告警在接入时丢弃，这里只为覆盖率登记。
+entries:
+  # ---------- Alertmanager ----------
+  - {
+      id: alertmanager-failed-reload,
+      alertname: AlertmanagerFailedReload,
+      role: cause,
+      entity: { kind: Pod, name_labels: [pod] },
+      chains: [observability-self/alert-delivery],
+      mixin: alertmanager,
+    }
+  - {
+      id: alertmanager-members-inconsistent,
+      alertname: AlertmanagerMembersInconsistent,
+      role: symptom,
+      entity: { kind: Pod, name_labels: [pod] },
+      chains: [observability-self/alert-delivery],
+      mixin: alertmanager,
+    }
+  - {
+      id: alertmanager-failed-to-send-alerts,
+      alertname: AlertmanagerFailedToSendAlerts,
+      role: symptom,
+      entity: { kind: Pod, name_labels: [pod] },
+      chains: [observability-self/alert-delivery],
+      mixin: alertmanager,
+    }
+  - {
+      id: alertmanager-cluster-failed-to-send-alerts,
+      alertname: AlertmanagerClusterFailedToSendAlerts,
+      role: symptom,
+      entity: { kind: Service, name_labels: [service] },
+      scope: service,
+      chains: [observability-self/alert-delivery],
+      mixin: alertmanager,
+    }
+  - {
+      id: alertmanager-config-inconsistent,
+      alertname: AlertmanagerConfigInconsistent,
+      role: change,
+      entity: { kind: Service, name_labels: [service] },
+      scope: service,
+      chains: [observability-self/alert-delivery],
+      mixin: alertmanager,
+    }
+  - {
+      id: alertmanager-cluster-down,
+      alertname: AlertmanagerClusterDown,
+      role: cause,
+      entity: { kind: Service, name_labels: [service] },
+      scope: service,
+      chains: [observability-self/alert-delivery],
+      mixin: alertmanager,
+    }
+  - {
+      id: alertmanager-cluster-crashlooping,
+      alertname: AlertmanagerClusterCrashlooping,
+      role: cause,
+      entity: { kind: Service, name_labels: [service] },
+      scope: service,
+      chains: [observability-self/alert-delivery],
+      mixin: alertmanager,
+    }
+  - {
+      id: alertmanager-cluster-failed-peers,
+      alertname: AlertmanagerClusterFailedPeers,
+      role: symptom,
+      entity: { kind: Pod, name_labels: [pod] },
+      chains: [observability-self/alert-delivery],
+      mixin: alertmanager,
+    }
+  - {
+      id: config-reloader-sidecar-errors,
+      alertname: ConfigReloaderSidecarErrors,
+      role: cause,
+      entity: { kind: Pod, name_labels: [pod] },
+      chains: [observability-self/scrape],
+      mixin: other,
+    }
+
+  # ---------- etcd ----------
+  - {
+      id: etcd-members-down,
+      alertname: etcdMembersDown,
+      role: cause,
+      entity: { kind: cluster, name_labels: [job] },
+      component_type: kubernetes.etcd,
+      scope: hub,
+      chains: [kubernetes-core/etcd],
+      mixin: etcd,
+    }
+  - {
+      id: etcd-insufficient-members,
+      alertname: etcdInsufficientMembers,
+      role: cause,
+      entity: { kind: cluster, name_labels: [job] },
+      component_type: kubernetes.etcd,
+      scope: hub,
+      chains: [kubernetes-core/etcd],
+      mixin: etcd,
+    }
+  - {
+      id: etcd-no-leader,
+      alertname: etcdNoLeader,
+      role: cause,
+      entity: { kind: Pod, name_labels: [pod] },
+      component_type: kubernetes.etcd,
+      scope: hub,
+      chains: [kubernetes-core/etcd],
+      mixin: etcd,
+    }
+  - {
+      id: etcd-high-number-of-leader-changes,
+      alertname: etcdHighNumberOfLeaderChanges,
+      role: symptom,
+      entity: { kind: cluster, name_labels: [job] },
+      component_type: kubernetes.etcd,
+      scope: hub,
+      chains: [kubernetes-core/etcd],
+      mixin: etcd,
+    }
+  - {
+      id: etcd-high-number-of-failed-grpc-requests,
+      alertname: etcdHighNumberOfFailedGRPCRequests,
+      role: symptom,
+      entity: { kind: Pod, name_labels: [pod] },
+      component_type: kubernetes.etcd,
+      scope: hub,
+      chains: [kubernetes-core/etcd],
+      mixin: etcd,
+    }
+  - {
+      id: etcd-grpc-requests-slow,
+      alertname: etcdGRPCRequestsSlow,
+      role: symptom,
+      entity: { kind: Pod, name_labels: [pod] },
+      component_type: kubernetes.etcd,
+      scope: hub,
+      chains: [kubernetes-core/etcd],
+      mixin: etcd,
+    }
+  - {
+      id: etcd-member-communication-slow,
+      alertname: etcdMemberCommunicationSlow,
+      role: symptom,
+      entity: { kind: Pod, name_labels: [pod] },
+      component_type: kubernetes.etcd,
+      scope: hub,
+      chains: [kubernetes-core/etcd],
+      mixin: etcd,
+    }
+  - {
+      id: etcd-high-number-of-failed-proposals,
+      alertname: etcdHighNumberOfFailedProposals,
+      role: symptom,
+      entity: { kind: Pod, name_labels: [pod] },
+      component_type: kubernetes.etcd,
+      scope: hub,
+      chains: [kubernetes-core/etcd],
+      mixin: etcd,
+    }
+  - {
+      id: etcd-high-fsync-durations,
+      alertname: etcdHighFsyncDurations,
+      role: cause,
+      entity: { kind: Pod, name_labels: [pod] },
+      component_type: kubernetes.etcd,
+      scope: hub,
+      chains: [kubernetes-core/etcd, node/node-filesystem],
+      mixin: etcd,
+    }
+  - {
+      id: etcd-high-commit-durations,
+      alertname: etcdHighCommitDurations,
+      role: cause,
+      entity: { kind: Pod, name_labels: [pod] },
+      component_type: kubernetes.etcd,
+      scope: hub,
+      chains: [kubernetes-core/etcd, node/node-filesystem],
+      mixin: etcd,
+    }
+  - {
+      id: etcd-database-quota-low-space,
+      alertname: etcdDatabaseQuotaLowSpace,
+      role: cause,
+      entity: { kind: Pod, name_labels: [pod] },
+      component_type: kubernetes.etcd,
+      scope: hub,
+      chains: [kubernetes-core/etcd],
+      mixin: etcd,
+    }
+  - {
+      id: etcd-excessive-database-growth,
+      alertname: etcdExcessiveDatabaseGrowth,
+      role: forecast,
+      entity: { kind: Pod, name_labels: [pod] },
+      component_type: kubernetes.etcd,
+      scope: hub,
+      chains: [kubernetes-core/etcd],
+      mixin: etcd,
+    }
+  - {
+      id: etcd-database-high-fragmentation-ratio,
+      alertname: etcdDatabaseHighFragmentationRatio,
+      role: symptom,
+      entity: { kind: Pod, name_labels: [pod] },
+      component_type: kubernetes.etcd,
+      scope: hub,
+      chains: [kubernetes-core/etcd],
+      mixin: etcd,
+    }
+
+  # ---------- general.rules ----------
+  - {
+      id: target-down,
+      alertname: TargetDown,
+      role: meta,
+      entity: { kind: Service, name_labels: [service] },
+      scope: service,
+      chains: [observability-self/scrape],
+      mixin: other,
+    }
+  - { id: watchdog, alertname: Watchdog, role: meta, entity: { kind: cluster, name_labels: [alertname] }, mixin: other }
+  - {
+      id: info-inhibitor,
+      alertname: InfoInhibitor,
+      role: meta,
+      entity: { kind: cluster, name_labels: [alertname] },
+      mixin: other,
+    }
+
+  # ---------- kube-apiserver SLO ----------
+  - {
+      id: kube-api-error-budget-burn,
+      alertname: KubeAPIErrorBudgetBurn,
+      role: symptom,
+      entity: { kind: cluster, name_labels: [alertname] },
+      component_type: kubernetes.apiserver,
+      scope: hub,
+      chains: [kubernetes-core/apiserver],
+      mixin: kubernetes,
+    }
+
+  # ---------- kube-state-metrics ----------
+  - {
+      id: kube-state-metrics-list-errors,
+      alertname: KubeStateMetricsListErrors,
+      role: meta,
+      entity: { kind: cluster, name_labels: [alertname] },
+      component_type: observability.kube-state-metrics,
+      chains: [observability-self/scrape],
+      mixin: kube-state-metrics,
+    }
+  - {
+      id: kube-state-metrics-watch-errors,
+      alertname: KubeStateMetricsWatchErrors,
+      role: meta,
+      entity: { kind: cluster, name_labels: [alertname] },
+      component_type: observability.kube-state-metrics,
+      chains: [observability-self/scrape],
+      mixin: kube-state-metrics,
+    }
+  - {
+      id: kube-state-metrics-sharding-mismatch,
+      alertname: KubeStateMetricsShardingMismatch,
+      role: meta,
+      entity: { kind: cluster, name_labels: [alertname] },
+      component_type: observability.kube-state-metrics,
+      chains: [observability-self/scrape],
+      mixin: kube-state-metrics,
+    }
+  - {
+      id: kube-state-metrics-shards-missing,
+      alertname: KubeStateMetricsShardsMissing,
+      role: meta,
+      entity: { kind: cluster, name_labels: [alertname] },
+      component_type: observability.kube-state-metrics,
+      chains: [observability-self/scrape],
+      mixin: kube-state-metrics,
+    }
+
+  # ---------- kubernetes-apps ----------
+  - {
+      id: kube-pod-crash-looping,
+      alertname: KubePodCrashLooping,
+      role: cause,
+      entity: { kind: Pod, name_labels: [pod] },
+      chains: [workload/pod-restarts],
+      mixin: kubernetes,
+    }
+  - {
+      id: kube-pod-not-ready,
+      alertname: KubePodNotReady,
+      role: symptom,
+      entity: { kind: Pod, name_labels: [pod] },
+      chains: [workload/pod-pending, workload/pod-restarts],
+      mixin: kubernetes,
+    }
+  - {
+      id: kube-deployment-generation-mismatch,
+      alertname: KubeDeploymentGenerationMismatch,
+      role: change,
+      entity: { kind: Deployment, name_labels: [deployment] },
+      chains: [workload/rollout],
+      mixin: kubernetes,
+    }
+  - {
+      id: kube-deployment-replicas-mismatch,
+      alertname: KubeDeploymentReplicasMismatch,
+      role: symptom,
+      entity: { kind: Deployment, name_labels: [deployment] },
+      chains: [workload/rollout, workload/pod-pending],
+      mixin: kubernetes,
+    }
+  - {
+      id: kube-deployment-rollout-stuck,
+      alertname: KubeDeploymentRolloutStuck,
+      role: change,
+      entity: { kind: Deployment, name_labels: [deployment] },
+      chains: [workload/rollout],
+      mixin: kubernetes,
+    }
+  - {
+      id: kube-statefulset-replicas-mismatch,
+      alertname: KubeStatefulSetReplicasMismatch,
+      role: symptom,
+      entity: { kind: StatefulSet, name_labels: [statefulset] },
+      chains: [workload/rollout, workload/pod-pending],
+      mixin: kubernetes,
+    }
+  - {
+      id: kube-statefulset-generation-mismatch,
+      alertname: KubeStatefulSetGenerationMismatch,
+      role: change,
+      entity: { kind: StatefulSet, name_labels: [statefulset] },
+      chains: [workload/rollout],
+      mixin: kubernetes,
+    }
+  - {
+      id: kube-statefulset-update-not-rolled-out,
+      alertname: KubeStatefulSetUpdateNotRolledOut,
+      role: change,
+      entity: { kind: StatefulSet, name_labels: [statefulset] },
+      chains: [workload/rollout],
+      mixin: kubernetes,
+    }
+  - {
+      id: kube-daemonset-rollout-stuck,
+      alertname: KubeDaemonSetRolloutStuck,
+      role: change,
+      entity: { kind: DaemonSet, name_labels: [daemonset] },
+      chains: [workload/rollout],
+      mixin: kubernetes,
+    }
+  - {
+      id: kube-container-waiting,
+      alertname: KubeContainerWaiting,
+      role: cause,
+      entity: { kind: Pod, name_labels: [pod] },
+      chains: [workload/pod-pending],
+      mixin: kubernetes,
+    }
+  - {
+      id: kube-daemonset-not-scheduled,
+      alertname: KubeDaemonSetNotScheduled,
+      role: symptom,
+      entity: { kind: DaemonSet, name_labels: [daemonset] },
+      chains: [workload/pod-pending],
+      mixin: kubernetes,
+    }
+  - {
+      id: kube-daemonset-misscheduled,
+      alertname: KubeDaemonSetMisScheduled,
+      role: symptom,
+      entity: { kind: DaemonSet, name_labels: [daemonset] },
+      chains: [workload/rollout],
+      mixin: kubernetes,
+    }
+  - {
+      id: kube-job-not-completed,
+      alertname: KubeJobNotCompleted,
+      role: symptom,
+      entity: { kind: Job, name_labels: [job_name] },
+      chains: [workload/job],
+      mixin: kubernetes,
+    }
+  - {
+      id: kube-job-failed,
+      alertname: KubeJobFailed,
+      role: cause,
+      entity: { kind: Job, name_labels: [job_name] },
+      chains: [workload/job],
+      mixin: kubernetes,
+    }
+  - {
+      id: kube-hpa-replicas-mismatch,
+      alertname: KubeHpaReplicasMismatch,
+      role: symptom,
+      entity: { kind: HorizontalPodAutoscaler, name_labels: [horizontalpodautoscaler] },
+      chains: [workload/capacity],
+      mixin: kubernetes,
+    }
+  - {
+      id: kube-hpa-maxed-out,
+      alertname: KubeHpaMaxedOut,
+      role: symptom,
+      entity: { kind: HorizontalPodAutoscaler, name_labels: [horizontalpodautoscaler] },
+      chains: [workload/capacity],
+      mixin: kubernetes,
+    }
+  - {
+      id: kube-pdb-not-enough-healthy-pods,
+      alertname: KubePdbNotEnoughHealthyPods,
+      role: symptom,
+      entity: { kind: PodDisruptionBudget, name_labels: [poddisruptionbudget] },
+      chains: [workload/pod-pending],
+      mixin: kubernetes,
+    }
+
+  # ---------- kubernetes-resources ----------
+  - {
+      id: kube-cpu-overcommit,
+      alertname: KubeCPUOvercommit,
+      role: symptom,
+      entity: { kind: cluster, name_labels: [alertname] },
+      chains: [workload/capacity],
+      mixin: kubernetes,
+    }
+  - {
+      id: kube-memory-overcommit,
+      alertname: KubeMemoryOvercommit,
+      role: symptom,
+      entity: { kind: cluster, name_labels: [alertname] },
+      chains: [workload/capacity],
+      mixin: kubernetes,
+    }
+  - {
+      id: kube-cpu-quota-overcommit,
+      alertname: KubeCPUQuotaOvercommit,
+      role: symptom,
+      entity: { kind: cluster, name_labels: [alertname] },
+      chains: [workload/capacity],
+      mixin: kubernetes,
+    }
+  - {
+      id: kube-memory-quota-overcommit,
+      alertname: KubeMemoryQuotaOvercommit,
+      role: symptom,
+      entity: { kind: cluster, name_labels: [alertname] },
+      chains: [workload/capacity],
+      mixin: kubernetes,
+    }
+  - {
+      id: kube-quota-almost-full,
+      alertname: KubeQuotaAlmostFull,
+      role: symptom,
+      entity: { kind: ResourceQuota, name_labels: [resourcequota] },
+      chains: [workload/capacity],
+      mixin: kubernetes,
+    }
+  - {
+      id: kube-quota-fully-used,
+      alertname: KubeQuotaFullyUsed,
+      role: cause,
+      entity: { kind: ResourceQuota, name_labels: [resourcequota] },
+      chains: [workload/capacity],
+      mixin: kubernetes,
+    }
+  - {
+      id: kube-quota-exceeded,
+      alertname: KubeQuotaExceeded,
+      role: cause,
+      entity: { kind: ResourceQuota, name_labels: [resourcequota] },
+      chains: [workload/capacity],
+      mixin: kubernetes,
+    }
+  - {
+      id: cpu-throttling-high,
+      alertname: CPUThrottlingHigh,
+      role: symptom,
+      entity: { kind: Pod, name_labels: [pod] },
+      chains: [workload/pod-restarts],
+      mixin: kubernetes,
+    }
+
+  # ---------- kubernetes-storage ----------
+  - {
+      id: kube-persistent-volume-filling-up,
+      alertname: KubePersistentVolumeFillingUp,
+      match_labels: { severity: critical },
+      role: cause,
+      entity: { kind: PersistentVolumeClaim, name_labels: [persistentvolumeclaim] },
+      chains: [pvc/pvc-capacity],
+      mixin: kubernetes,
+    }
+  - {
+      id: kube-persistent-volume-filling-up-forecast,
+      alertname: KubePersistentVolumeFillingUp,
+      match_labels: { severity: warning },
+      role: forecast,
+      entity: { kind: PersistentVolumeClaim, name_labels: [persistentvolumeclaim] },
+      chains: [pvc/pvc-capacity],
+      mixin: kubernetes,
+    }
+  - {
+      id: kube-persistent-volume-inodes-filling-up,
+      alertname: KubePersistentVolumeInodesFillingUp,
+      match_labels: { severity: critical },
+      role: cause,
+      entity: { kind: PersistentVolumeClaim, name_labels: [persistentvolumeclaim] },
+      chains: [pvc/pvc-capacity],
+      mixin: kubernetes,
+    }
+  - {
+      id: kube-persistent-volume-inodes-filling-up-forecast,
+      alertname: KubePersistentVolumeInodesFillingUp,
+      match_labels: { severity: warning },
+      role: forecast,
+      entity: { kind: PersistentVolumeClaim, name_labels: [persistentvolumeclaim] },
+      chains: [pvc/pvc-capacity],
+      mixin: kubernetes,
+    }
+  - {
+      id: kube-persistent-volume-errors,
+      alertname: KubePersistentVolumeErrors,
+      role: cause,
+      entity: { kind: PersistentVolume, name_labels: [persistentvolume] },
+      chains: [pvc/pvc-capacity],
+      mixin: kubernetes,
+    }
+
+  # ---------- kube-apiserver ----------
+  - {
+      id: kube-client-certificate-expiration,
+      alertname: KubeClientCertificateExpiration,
+      role: cause,
+      entity: { kind: cluster, name_labels: [alertname] },
+      component_type: kubernetes.apiserver,
+      scope: hub,
+      chains: [kubernetes-core/apiserver],
+      mixin: kubernetes,
+    }
+  - {
+      id: kube-aggregated-api-errors,
+      alertname: KubeAggregatedAPIErrors,
+      role: symptom,
+      entity: { kind: cluster, name_labels: [name] },
+      component_type: kubernetes.apiserver,
+      scope: hub,
+      chains: [kubernetes-core/apiserver],
+      mixin: kubernetes,
+    }
+  - {
+      id: kube-aggregated-api-down,
+      alertname: KubeAggregatedAPIDown,
+      role: cause,
+      entity: { kind: cluster, name_labels: [name] },
+      component_type: kubernetes.apiserver,
+      scope: hub,
+      chains: [kubernetes-core/apiserver],
+      mixin: kubernetes,
+    }
+  - {
+      id: kube-api-down,
+      alertname: KubeAPIDown,
+      role: cause,
+      entity: { kind: cluster, name_labels: [alertname] },
+      component_type: kubernetes.apiserver,
+      scope: hub,
+      chains: [kubernetes-core/apiserver],
+      mixin: kubernetes,
+    }
+  - {
+      id: kube-api-instance-unreachable,
+      alertname: KubeAPIInstanceUnreachable,
+      role: cause,
+      entity: { kind: cluster, name_labels: [instance] },
+      component_type: kubernetes.apiserver,
+      scope: hub,
+      chains: [kubernetes-core/apiserver],
+      mixin: kubernetes,
+    }
+  - {
+      id: kube-api-terminated-requests,
+      alertname: KubeAPITerminatedRequests,
+      role: symptom,
+      entity: { kind: cluster, name_labels: [alertname] },
+      component_type: kubernetes.apiserver,
+      scope: hub,
+      chains: [kubernetes-core/apiserver],
+      mixin: kubernetes,
+    }
+
+  # ---------- 控制面其余组件 ----------
+  - {
+      id: kube-controller-manager-down,
+      alertname: KubeControllerManagerDown,
+      role: cause,
+      entity: { kind: cluster, name_labels: [alertname] },
+      component_type: kubernetes.controller-manager,
+      scope: hub,
+      chains: [kubernetes-core/control-plane],
+      mixin: kubernetes,
+    }
+  - {
+      id: kube-controller-manager-instance-unreachable,
+      alertname: KubeControllerManagerInstanceUnreachable,
+      role: cause,
+      entity: { kind: cluster, name_labels: [instance] },
+      component_type: kubernetes.controller-manager,
+      scope: hub,
+      chains: [kubernetes-core/control-plane],
+      mixin: kubernetes,
+    }
+  - {
+      id: kube-proxy-down,
+      alertname: KubeProxyDown,
+      role: cause,
+      entity: { kind: cluster, name_labels: [alertname] },
+      component_type: kubernetes.kube-proxy,
+      scope: hub,
+      chains: [kubernetes-core/control-plane],
+      mixin: kubernetes,
+    }
+  - {
+      id: kube-proxy-instance-unreachable,
+      alertname: KubeProxyInstanceUnreachable,
+      role: cause,
+      entity: { kind: Pod, name_labels: [pod] },
+      component_type: kubernetes.kube-proxy,
+      scope: hub,
+      chains: [kubernetes-core/control-plane],
+      mixin: kubernetes,
+    }
+  - {
+      id: kube-scheduler-down,
+      alertname: KubeSchedulerDown,
+      role: cause,
+      entity: { kind: cluster, name_labels: [alertname] },
+      component_type: kubernetes.scheduler,
+      scope: hub,
+      chains: [kubernetes-core/control-plane],
+      mixin: kubernetes,
+    }
+  - {
+      id: kube-scheduler-instance-unreachable,
+      alertname: KubeSchedulerInstanceUnreachable,
+      role: cause,
+      entity: { kind: cluster, name_labels: [instance] },
+      component_type: kubernetes.scheduler,
+      scope: hub,
+      chains: [kubernetes-core/control-plane],
+      mixin: kubernetes,
+    }
+  - {
+      id: kube-version-mismatch,
+      alertname: KubeVersionMismatch,
+      role: change,
+      entity: { kind: cluster, name_labels: [alertname] },
+      chains: [kubernetes-core/control-plane],
+      mixin: kubernetes,
+    }
+  - {
+      id: kube-client-errors,
+      alertname: KubeClientErrors,
+      role: symptom,
+      entity: { kind: cluster, name_labels: [instance] },
+      chains: [kubernetes-core/apiserver],
+      mixin: kubernetes,
+    }
+
+  # ---------- kubelet 与节点状态 ----------
+  - {
+      id: kube-node-not-ready,
+      alertname: KubeNodeNotReady,
+      role: cause,
+      entity: { kind: Node, name_labels: [node] },
+      chains: [node/node-health],
+      mixin: kubernetes,
+    }
+  - {
+      id: kube-node-pressure,
+      alertname: KubeNodePressure,
+      role: cause,
+      entity: { kind: Node, name_labels: [node] },
+      chains: [node/node-health],
+      mixin: kubernetes,
+    }
+  - {
+      id: kube-node-unreachable,
+      alertname: KubeNodeUnreachable,
+      role: cause,
+      entity: { kind: Node, name_labels: [node] },
+      chains: [node/node-health],
+      mixin: kubernetes,
+    }
+  - {
+      id: kubelet-too-many-pods,
+      alertname: KubeletTooManyPods,
+      role: symptom,
+      entity: { kind: Node, name_labels: [node] },
+      chains: [node/node-health],
+      mixin: kubernetes,
+    }
+  - {
+      id: kube-node-readiness-flapping,
+      alertname: KubeNodeReadinessFlapping,
+      role: cause,
+      entity: { kind: Node, name_labels: [node] },
+      chains: [node/node-health],
+      mixin: kubernetes,
+    }
+  - {
+      id: kube-node-eviction,
+      alertname: KubeNodeEviction,
+      role: symptom,
+      entity: { kind: Node, name_labels: [node] },
+      chains: [node/node-health],
+      mixin: kubernetes,
+    }
+  - {
+      id: kubelet-pleg-duration-high,
+      alertname: KubeletPlegDurationHigh,
+      role: symptom,
+      entity: { kind: Node, name_labels: [node] },
+      chains: [node/node-health],
+      mixin: kubernetes,
+    }
+  - {
+      id: kubelet-pod-startup-latency-high,
+      alertname: KubeletPodStartUpLatencyHigh,
+      role: symptom,
+      entity: { kind: Node, name_labels: [node, instance] },
+      chains: [node/node-health],
+      mixin: kubernetes,
+    }
+  - {
+      id: kubelet-client-certificate-expiration,
+      alertname: KubeletClientCertificateExpiration,
+      role: cause,
+      entity: { kind: Node, name_labels: [node, instance] },
+      chains: [node/node-health],
+      mixin: kubernetes,
+    }
+  - {
+      id: kubelet-server-certificate-expiration,
+      alertname: KubeletServerCertificateExpiration,
+      role: cause,
+      entity: { kind: Node, name_labels: [node, instance] },
+      chains: [node/node-health],
+      mixin: kubernetes,
+    }
+  - {
+      id: kubelet-client-certificate-renewal-errors,
+      alertname: KubeletClientCertificateRenewalErrors,
+      role: cause,
+      entity: { kind: Node, name_labels: [node, instance] },
+      chains: [node/node-health],
+      mixin: kubernetes,
+    }
+  - {
+      id: kubelet-server-certificate-renewal-errors,
+      alertname: KubeletServerCertificateRenewalErrors,
+      role: cause,
+      entity: { kind: Node, name_labels: [node, instance] },
+      chains: [node/node-health],
+      mixin: kubernetes,
+    }
+  - {
+      id: kubelet-instance-unreachable,
+      alertname: KubeletInstanceUnreachable,
+      role: cause,
+      entity: { kind: Node, name_labels: [node, instance] },
+      chains: [node/node-health],
+      mixin: kubernetes,
+    }
+  - {
+      id: kubelet-down,
+      alertname: KubeletDown,
+      role: cause,
+      entity: { kind: cluster, name_labels: [alertname] },
+      scope: hub,
+      chains: [node/node-health],
+      mixin: kubernetes,
+    }
+
+  # ---------- node-exporter ----------
+  - {
+      id: node-filesystem-space-filling-up,
+      alertname: NodeFilesystemSpaceFillingUp,
+      role: forecast,
+      entity: { kind: Node, name_labels: [node, instance] },
+      chains: [node/node-filesystem],
+      mixin: node,
+    }
+  - {
+      id: node-filesystem-almost-out-of-space,
+      alertname: NodeFilesystemAlmostOutOfSpace,
+      role: cause,
+      entity: { kind: Node, name_labels: [node, instance] },
+      chains: [node/node-filesystem],
+      mixin: node,
+    }
+  - {
+      id: node-filesystem-files-filling-up,
+      alertname: NodeFilesystemFilesFillingUp,
+      role: forecast,
+      entity: { kind: Node, name_labels: [node, instance] },
+      chains: [node/node-filesystem],
+      mixin: node,
+    }
+  - {
+      id: node-filesystem-almost-out-of-files,
+      alertname: NodeFilesystemAlmostOutOfFiles,
+      role: cause,
+      entity: { kind: Node, name_labels: [node, instance] },
+      chains: [node/node-filesystem],
+      mixin: node,
+    }
+  - {
+      id: node-network-receive-errs,
+      alertname: NodeNetworkReceiveErrs,
+      role: cause,
+      entity: { kind: Node, name_labels: [node, instance] },
+      chains: [node/node-network],
+      mixin: node,
+    }
+  - {
+      id: node-network-transmit-errs,
+      alertname: NodeNetworkTransmitErrs,
+      role: cause,
+      entity: { kind: Node, name_labels: [node, instance] },
+      chains: [node/node-network],
+      mixin: node,
+    }
+  - {
+      id: node-high-number-conntrack-entries-used,
+      alertname: NodeHighNumberConntrackEntriesUsed,
+      role: cause,
+      entity: { kind: Node, name_labels: [node, instance] },
+      chains: [node/node-network],
+      mixin: node,
+    }
+  - {
+      id: node-textfile-collector-scrape-error,
+      alertname: NodeTextFileCollectorScrapeError,
+      role: meta,
+      entity: { kind: Node, name_labels: [node, instance] },
+      chains: [observability-self/scrape],
+      mixin: node,
+    }
+  - {
+      id: node-clock-skew-detected,
+      alertname: NodeClockSkewDetected,
+      role: cause,
+      entity: { kind: Node, name_labels: [node, instance] },
+      chains: [node/node-time],
+      mixin: node,
+    }
+  - {
+      id: node-clock-not-synchronising,
+      alertname: NodeClockNotSynchronising,
+      role: cause,
+      entity: { kind: Node, name_labels: [node, instance] },
+      chains: [node/node-time],
+      mixin: node,
+    }
+  - {
+      id: node-raid-degraded,
+      alertname: NodeRAIDDegraded,
+      role: cause,
+      entity: { kind: Node, name_labels: [node, instance] },
+      chains: [node/node-filesystem],
+      mixin: node,
+    }
+  - {
+      id: node-raid-disk-failure,
+      alertname: NodeRAIDDiskFailure,
+      role: cause,
+      entity: { kind: Node, name_labels: [node, instance] },
+      chains: [node/node-filesystem],
+      mixin: node,
+    }
+  - {
+      id: node-file-descriptor-limit,
+      alertname: NodeFileDescriptorLimit,
+      role: cause,
+      entity: { kind: Node, name_labels: [node, instance] },
+      chains: [node/node-health],
+      mixin: node,
+    }
+  - {
+      id: node-cpu-high-usage,
+      alertname: NodeCPUHighUsage,
+      role: symptom,
+      entity: { kind: Node, name_labels: [node, instance] },
+      chains: [node/node-health],
+      mixin: node,
+    }
+  - {
+      id: node-system-saturation,
+      alertname: NodeSystemSaturation,
+      role: symptom,
+      entity: { kind: Node, name_labels: [node, instance] },
+      chains: [node/node-health],
+      mixin: node,
+    }
+  - {
+      id: node-memory-major-pages-faults,
+      alertname: NodeMemoryMajorPagesFaults,
+      role: symptom,
+      entity: { kind: Node, name_labels: [node, instance] },
+      chains: [node/node-health],
+      mixin: node,
+    }
+  - {
+      id: node-memory-high-utilization,
+      alertname: NodeMemoryHighUtilization,
+      role: cause,
+      entity: { kind: Node, name_labels: [node, instance] },
+      chains: [node/node-health],
+      mixin: node,
+    }
+  - {
+      id: node-disk-io-saturation,
+      alertname: NodeDiskIOSaturation,
+      role: cause,
+      entity: { kind: Node, name_labels: [node, instance] },
+      chains: [node/node-filesystem],
+      mixin: node,
+    }
+  - {
+      id: node-systemd-service-failed,
+      alertname: NodeSystemdServiceFailed,
+      role: cause,
+      entity: { kind: Node, name_labels: [node, instance] },
+      chains: [node/node-health],
+      mixin: node,
+    }
+  - {
+      id: node-systemd-service-crashlooping,
+      alertname: NodeSystemdServiceCrashlooping,
+      role: cause,
+      entity: { kind: Node, name_labels: [node, instance] },
+      chains: [node/node-health],
+      mixin: node,
+    }
+  - {
+      id: node-bonding-degraded,
+      alertname: NodeBondingDegraded,
+      role: cause,
+      entity: { kind: Node, name_labels: [node, instance] },
+      chains: [node/node-network],
+      mixin: node,
+    }
+  - {
+      id: node-network-interface-flapping,
+      alertname: NodeNetworkInterfaceFlapping,
+      role: cause,
+      entity: { kind: Node, name_labels: [node, instance] },
+      chains: [node/node-network],
+      mixin: node,
+    }
+
+  # ---------- prometheus-operator ----------
+  - {
+      id: prometheus-operator-list-errors,
+      alertname: PrometheusOperatorListErrors,
+      role: symptom,
+      entity: { kind: Namespace, name_labels: [namespace] },
+      component_type: observability.prometheus-operator,
+      chains: [observability-self/scrape],
+      mixin: other,
+    }
+  - {
+      id: prometheus-operator-watch-errors,
+      alertname: PrometheusOperatorWatchErrors,
+      role: symptom,
+      entity: { kind: Namespace, name_labels: [namespace] },
+      component_type: observability.prometheus-operator,
+      chains: [observability-self/scrape],
+      mixin: other,
+    }
+  - {
+      id: prometheus-operator-sync-failed,
+      alertname: PrometheusOperatorSyncFailed,
+      role: symptom,
+      entity: { kind: Namespace, name_labels: [namespace] },
+      component_type: observability.prometheus-operator,
+      chains: [observability-self/scrape],
+      mixin: other,
+    }
+  - {
+      id: prometheus-operator-reconcile-errors,
+      alertname: PrometheusOperatorReconcileErrors,
+      role: symptom,
+      entity: { kind: Namespace, name_labels: [namespace] },
+      component_type: observability.prometheus-operator,
+      chains: [observability-self/scrape],
+      mixin: other,
+    }
+  - {
+      id: prometheus-operator-status-update-errors,
+      alertname: PrometheusOperatorStatusUpdateErrors,
+      role: symptom,
+      entity: { kind: Namespace, name_labels: [namespace] },
+      component_type: observability.prometheus-operator,
+      chains: [observability-self/scrape],
+      mixin: other,
+    }
+  - {
+      id: prometheus-operator-node-lookup-errors,
+      alertname: PrometheusOperatorNodeLookupErrors,
+      role: symptom,
+      entity: { kind: Pod, name_labels: [pod] },
+      component_type: observability.prometheus-operator,
+      chains: [observability-self/scrape],
+      mixin: other,
+    }
+  - {
+      id: prometheus-operator-not-ready,
+      alertname: PrometheusOperatorNotReady,
+      role: cause,
+      entity: { kind: Namespace, name_labels: [namespace] },
+      component_type: observability.prometheus-operator,
+      chains: [observability-self/scrape],
+      mixin: other,
+    }
+  - {
+      id: prometheus-operator-rejected-resources,
+      alertname: PrometheusOperatorRejectedResources,
+      role: cause,
+      entity: { kind: Pod, name_labels: [pod] },
+      component_type: observability.prometheus-operator,
+      chains: [observability-self/scrape],
+      mixin: other,
+    }
+
+  # ---------- Prometheus ----------
+  - {
+      id: prometheus-bad-config,
+      alertname: PrometheusBadConfig,
+      role: cause,
+      entity: { kind: Pod, name_labels: [pod] },
+      chains: [observability-self/prometheus-tsdb],
+      mixin: prometheus,
+    }
+  - {
+      id: prometheus-sd-refresh-failure,
+      alertname: PrometheusSDRefreshFailure,
+      role: meta,
+      entity: { kind: Pod, name_labels: [pod] },
+      chains: [observability-self/scrape],
+      mixin: prometheus,
+    }
+  - {
+      id: prometheus-kubernetes-list-watch-failures,
+      alertname: PrometheusKubernetesListWatchFailures,
+      role: meta,
+      entity: { kind: Pod, name_labels: [pod] },
+      chains: [observability-self/scrape],
+      mixin: prometheus,
+    }
+  - {
+      id: prometheus-notification-queue-running-full,
+      alertname: PrometheusNotificationQueueRunningFull,
+      role: forecast,
+      entity: { kind: Pod, name_labels: [pod] },
+      chains: [observability-self/alert-delivery],
+      mixin: prometheus,
+    }
+  - {
+      id: prometheus-error-sending-alerts-to-some-alertmanagers,
+      alertname: PrometheusErrorSendingAlertsToSomeAlertmanagers,
+      role: symptom,
+      entity: { kind: Pod, name_labels: [pod] },
+      chains: [observability-self/alert-delivery],
+      mixin: prometheus,
+    }
+  - {
+      id: prometheus-not-connected-to-alertmanagers,
+      alertname: PrometheusNotConnectedToAlertmanagers,
+      role: cause,
+      entity: { kind: Pod, name_labels: [pod] },
+      chains: [observability-self/alert-delivery],
+      mixin: prometheus,
+    }
+  - {
+      id: prometheus-tsdb-reloads-failing,
+      alertname: PrometheusTSDBReloadsFailing,
+      role: cause,
+      entity: { kind: Pod, name_labels: [pod] },
+      chains: [observability-self/prometheus-tsdb],
+      mixin: prometheus,
+    }
+  - {
+      id: prometheus-tsdb-compactions-failing,
+      alertname: PrometheusTSDBCompactionsFailing,
+      role: cause,
+      entity: { kind: Pod, name_labels: [pod] },
+      chains: [observability-self/prometheus-tsdb],
+      mixin: prometheus,
+    }
+  - {
+      id: prometheus-not-ingesting-samples,
+      alertname: PrometheusNotIngestingSamples,
+      role: meta,
+      entity: { kind: Pod, name_labels: [pod] },
+      chains: [observability-self/prometheus-tsdb],
+      mixin: prometheus,
+    }
+  - {
+      id: prometheus-duplicate-timestamps,
+      alertname: PrometheusDuplicateTimestamps,
+      role: meta,
+      entity: { kind: Pod, name_labels: [pod] },
+      chains: [observability-self/scrape],
+      mixin: prometheus,
+    }
+  - {
+      id: prometheus-out-of-order-timestamps,
+      alertname: PrometheusOutOfOrderTimestamps,
+      role: meta,
+      entity: { kind: Pod, name_labels: [pod] },
+      chains: [observability-self/scrape],
+      mixin: prometheus,
+    }
+  - {
+      id: prometheus-remote-storage-failures,
+      alertname: PrometheusRemoteStorageFailures,
+      role: cause,
+      entity: { kind: Pod, name_labels: [pod] },
+      chains: [observability-self/prometheus-tsdb],
+      mixin: prometheus,
+    }
+  - {
+      id: prometheus-remote-write-behind,
+      alertname: PrometheusRemoteWriteBehind,
+      role: symptom,
+      entity: { kind: Pod, name_labels: [pod] },
+      chains: [observability-self/prometheus-tsdb],
+      mixin: prometheus,
+    }
+  - {
+      id: prometheus-remote-write-desired-shards,
+      alertname: PrometheusRemoteWriteDesiredShards,
+      role: symptom,
+      entity: { kind: Pod, name_labels: [pod] },
+      chains: [observability-self/prometheus-tsdb],
+      mixin: prometheus,
+    }
+  - {
+      id: prometheus-rule-failures,
+      alertname: PrometheusRuleFailures,
+      role: meta,
+      entity: { kind: Pod, name_labels: [pod] },
+      chains: [observability-self/rule-evaluation],
+      mixin: prometheus,
+    }
+  - {
+      id: prometheus-missing-rule-evaluations,
+      alertname: PrometheusMissingRuleEvaluations,
+      role: meta,
+      entity: { kind: Pod, name_labels: [pod] },
+      chains: [observability-self/rule-evaluation],
+      mixin: prometheus,
+    }
+  - {
+      id: prometheus-target-limit-hit,
+      alertname: PrometheusTargetLimitHit,
+      role: meta,
+      entity: { kind: Pod, name_labels: [pod] },
+      chains: [observability-self/scrape],
+      mixin: prometheus,
+    }
+  - {
+      id: prometheus-label-limit-hit,
+      alertname: PrometheusLabelLimitHit,
+      role: meta,
+      entity: { kind: Pod, name_labels: [pod] },
+      chains: [observability-self/scrape],
+      mixin: prometheus,
+    }
+  - {
+      id: prometheus-scrape-body-size-limit-hit,
+      alertname: PrometheusScrapeBodySizeLimitHit,
+      role: meta,
+      entity: { kind: Pod, name_labels: [pod] },
+      chains: [observability-self/scrape],
+      mixin: prometheus,
+    }
+  - {
+      id: prometheus-scrape-sample-limit-hit,
+      alertname: PrometheusScrapeSampleLimitHit,
+      role: meta,
+      entity: { kind: Pod, name_labels: [pod] },
+      chains: [observability-self/scrape],
+      mixin: prometheus,
+    }
+  - {
+      id: prometheus-target-sync-failure,
+      alertname: PrometheusTargetSyncFailure,
+      role: meta,
+      entity: { kind: Pod, name_labels: [pod] },
+      chains: [observability-self/scrape],
+      mixin: prometheus,
+    }
+  - {
+      id: prometheus-high-query-load,
+      alertname: PrometheusHighQueryLoad,
+      role: symptom,
+      entity: { kind: Pod, name_labels: [pod] },
+      chains: [observability-self/prometheus-tsdb],
+      mixin: prometheus,
+    }
+  - {
+      id: prometheus-error-sending-alerts-to-any-alertmanager,
+      alertname: PrometheusErrorSendingAlertsToAnyAlertmanager,
+      role: cause,
+      entity: { kind: Pod, name_labels: [pod] },
+      chains: [observability-self/alert-delivery],
+      mixin: prometheus,
+    }

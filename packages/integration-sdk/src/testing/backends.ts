@@ -14,7 +14,7 @@ interface BackendSpec {
   sha256: Record<string, string>;
 }
 
-export type BackendName = 'prometheus' | 'victoria-metrics' | 'loki' | 'tempo';
+export type BackendName = 'prometheus' | 'victoria-metrics' | 'loki' | 'tempo' | 'helm';
 
 const SPECS = JSON.parse(readFileSync(new URL('../../backends.json', import.meta.url), 'utf8')) as Record<
   BackendName,
@@ -53,6 +53,20 @@ export function backendsDir(): string {
   }
 }
 
+/** 下载并校验 sha256；不符时报错 */
+export async function fetchVerified(url: string, sha256: string): Promise<Buffer> {
+  const res = await fetch(url);
+  if (!res.ok) {
+    throw new Error(`下载 ${url} 失败：HTTP ${res.status}`);
+  }
+  const body = Buffer.from(await res.arrayBuffer());
+  const actual = createHash('sha256').update(body).digest('hex');
+  if (actual !== sha256) {
+    throw new Error(`${url} 的 sha256 不符：期望 ${sha256}，实际 ${actual}`);
+  }
+  return body;
+}
+
 const fill = (s: string, v: Record<string, string>) => s.replace(/\{(\w+)\}/g, (_, k: string) => v[k]!);
 
 /** 确保二进制已下载并校验，返回 二进制名 → 绝对路径 */
@@ -72,15 +86,7 @@ export async function ensureBackend(name: BackendName): Promise<Record<string, s
     throw new Error(`backends.json 没有 ${name} ${os}-${arch} 的 sha256`);
   }
   const url = fill(spec.url, vars);
-  const res = await fetch(url);
-  if (!res.ok) {
-    throw new Error(`下载 ${url} 失败：HTTP ${res.status}`);
-  }
-  const body = Buffer.from(await res.arrayBuffer());
-  const actual = createHash('sha256').update(body).digest('hex');
-  if (actual !== expected) {
-    throw new Error(`${url} 的 sha256 不符：期望 ${expected}，实际 ${actual}`);
-  }
+  const body = await fetchVerified(url, expected);
   const staging = `${target}.partial`;
   rmSync(staging, { recursive: true, force: true });
   mkdirSync(staging, { recursive: true });

@@ -1,0 +1,16 @@
+# kube-prometheus-stack 的告警目录（DESIGN §3.2）：kubernetes-mixin、node-mixin、etcd、Prometheus、
+# Alertmanager、prometheus-operator 的全部告警名。CI 按固定版本渲染 chart 的 PrometheusRule，要求 100% 覆盖，
+# 并核对 forecast 与表达式中的 predict_linear 一致。
+api_version: srenautix.io/pack/v1
+name: alerts-kps
+version: 1.0.0
+description: kube-prometheus-stack 92.10.1 全部告警的角色、实体映射与证据链
+maturity: stable
+min_srenautix_version: 0.1.0
+depends_on:
+  - kubernetes-core
+  - node
+  - workload
+  - pvc
+  - observability-self
+requires: []
