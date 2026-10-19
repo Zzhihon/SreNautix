@@ -1,0 +1,9 @@
+# 根因排序参数（DESIGN §5）。示例包沿用默认值；修改需要通过回放门禁。
+weights:
+  coverage: 0.4
+  precedence: 0.15
+  role_prior: 0.2
+  recent_change: 0.15
+  chronic_penalty: 0.1
+merge_threshold: 0.6
+ambiguity_margin: 0.1

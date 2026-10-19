@@ -1,8 +1,6 @@
 // metrics/v1 的核心级适配器：Prometheus HTTP API（在 Prometheus 与 VictoriaMetrics 上测试）。
 // 每个请求先检查回放时钟窗口（含查询的回看范围），再发出。
 
-import { readFileSync } from 'node:fs';
-import { Agent } from 'undici';
 import type {
   MetricSeries,
   MetricsQueryRangeRequest,
@@ -15,20 +13,15 @@ import type {
 } from '@srenautix/contract';
 import { assertInstantInClock, assertLookbackInClock, assertWindowInClock, toMillis } from '../clock.js';
 import { ClockWindowViolation, DatasourceError } from '../errors.js';
+import { HttpClient, type HttpAuthConfig } from '../http.js';
 import { loadPromqlEngine, type Dialect, type PromqlEngine } from '../promql/engine.js';
 
-export interface PrometheusApiConfig {
+export interface PrometheusApiConfig extends HttpAuthConfig {
   /** 实例 id，用于报错与记录 */
   id: string;
   url: string;
   /** 后端接受的查询方言；VictoriaMetrics 也接受 promql */
   dialects: Dialect[];
-  /** 多租户后端（Mimir 等）的租户，作为 X-Scope-OrgID 发送 */
-  tenant?: string | null;
-  /** 挂载文件中的 bearer token */
-  bearer_token_file?: string | null;
-  basic_auth?: { username: string; password_file: string } | null;
-  ca_file?: string | null;
 }
 
 type ApiValue = [number, string];
@@ -62,21 +55,11 @@ function parseSample(v: string): number {
 const unixSeconds = (ts: string) => (toMillis(ts) / 1000).toFixed(3);
 
 export class PrometheusApiAdapter {
-  private readonly headers: Record<string, string> = {};
-  private readonly dispatcher: Agent | undefined;
+  private readonly http: HttpClient;
   private engine: PromqlEngine | undefined;
 
   constructor(readonly config: PrometheusApiConfig) {
-    if (config.tenant) {
-      this.headers['X-Scope-OrgID'] = config.tenant;
-    }
-    if (config.bearer_token_file) {
-      this.headers['Authorization'] = `Bearer ${readFileSync(config.bearer_token_file, 'utf8').trim()}`;
-    } else if (config.basic_auth) {
-      const pw = readFileSync(config.basic_auth.password_file, 'utf8').trim();
-      this.headers['Authorization'] = `Basic ${Buffer.from(`${config.basic_auth.username}:${pw}`).toString('base64')}`;
-    }
-    this.dispatcher = config.ca_file ? new Agent({ connect: { ca: readFileSync(config.ca_file, 'utf8') } }) : undefined;
+    this.http = new HttpClient(config.id, config.url, config);
   }
 
   private async promql(): Promise<PromqlEngine> {
@@ -84,29 +67,16 @@ export class PrometheusApiAdapter {
     return this.engine;
   }
 
-  private async call<T>(path: string, params: URLSearchParams, timeoutMs: number): Promise<ApiResponse<T>> {
-    const url = `${this.config.url.replace(/\/$/, '')}${path}`;
-    let res: Response;
-    try {
-      res = await fetch(url, {
-        method: 'POST',
-        headers: { ...this.headers, 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: params.toString(),
-        signal: AbortSignal.timeout(timeoutMs),
-        ...(this.dispatcher ? { dispatcher: this.dispatcher } : {}),
-      } as RequestInit);
-    } catch (err) {
-      throw new DatasourceError(this.config.id, `${path} 请求失败：${err instanceof Error ? err.message : String(err)}`);
-    }
-    const text = await res.text();
+  private async call<T>(path: string, params: URLSearchParams, timeoutMs: number, method: 'GET' | 'POST' = 'POST'): Promise<ApiResponse<T>> {
+    const r = await this.http.request(method, path, method === 'GET' ? { query: params, timeoutMs } : { form: params, timeoutMs });
     let body: ApiResponse<T>;
     try {
-      body = JSON.parse(text) as ApiResponse<T>;
+      body = JSON.parse(r.text) as ApiResponse<T>;
     } catch {
-      throw new DatasourceError(this.config.id, `${path} 返回 HTTP ${res.status}：${text.slice(0, 500)}`);
+      throw new DatasourceError(this.config.id, `${path} 返回 HTTP ${r.status}：${r.text.slice(0, 500)}`);
     }
-    if (!res.ok || body.status !== 'success') {
-      throw new DatasourceError(this.config.id, `${path} 返回 HTTP ${res.status}：${body.errorType ?? ''} ${body.error ?? text.slice(0, 500)}`);
+    if (r.status < 200 || r.status >= 300 || body.status !== 'success') {
+      throw new DatasourceError(this.config.id, `${path} 返回 HTTP ${r.status}：${body.errorType ?? ''} ${body.error ?? r.text.slice(0, 500)}`);
     }
     return body;
   }
@@ -188,7 +158,8 @@ export class PrometheusApiAdapter {
     assertWindowInClock(window, clock);
     const params = new URLSearchParams({ start: unixSeconds(window.from), end: unixSeconds(window.to) });
     match.forEach((m) => params.append('match[]', m));
-    return (await this.call<string[]>(`/api/v1/label/${encodeURIComponent(name)}/values`, params, 30_000)).data;
+    // 标签值接口只接受 GET
+    return (await this.call<string[]>(`/api/v1/label/${encodeURIComponent(name)}/values`, params, 30_000, 'GET')).data;
   }
 
   async rules(): Promise<MetricsRulesResult> {
@@ -204,7 +175,7 @@ export class PrometheusApiAdapter {
           annotations?: Record<string, string>;
         }>;
       }>;
-    }>('/api/v1/rules', new URLSearchParams({ type: 'alert' }), 30_000);
+    }>('/api/v1/rules', new URLSearchParams({ type: 'alert' }), 30_000, 'GET');
     return {
       rules: body.data.groups.flatMap((g) =>
         g.rules

@@ -144,6 +144,15 @@ func toJSON(v any) string {
 	return string(b)
 }
 
+func sortedMapKeys(m map[string]string) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
 func sortedKeys(m map[string]struct{}) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {
@@ -303,7 +312,14 @@ func labelArgIndexes(fn string, argc int) []int {
 	return nil
 }
 
-func renamePromQL(input string, m map[string]string) renameOut {
+// rewriteSpec：rename 按标签档案改写标签名；inject 给每个选择器加等值匹配器（已有同名匹配器的选择器不加）
+type rewriteSpec struct {
+	Rename map[string]string `json:"rename"`
+	Inject map[string]string `json:"inject"`
+}
+
+func renamePromQL(input string, spec rewriteSpec) renameOut {
+	m := spec.Rename
 	expr, err := promParser.ParseExpr(input)
 	if err != nil {
 		return renameOut{Error: err.Error()}
@@ -311,9 +327,16 @@ func renamePromQL(input string, m map[string]string) renameOut {
 	parser.Inspect(expr, func(node parser.Node, _ []parser.Node) error {
 		switch n := node.(type) {
 		case *parser.VectorSelector:
+			present := map[string]bool{}
 			for _, lm := range n.LabelMatchers {
 				if to, ok := m[lm.Name]; ok {
 					lm.Name = to
+				}
+				present[lm.Name] = true
+			}
+			for _, k := range sortedMapKeys(spec.Inject) {
+				if !present[k] {
+					n.LabelMatchers = append(n.LabelMatchers, labels.MustNewMatcher(labels.MatchEqual, k, spec.Inject[k]))
 				}
 			}
 		case *parser.AggregateExpr:
@@ -341,7 +364,8 @@ func renamePromQL(input string, m map[string]string) renameOut {
 	return renameOut{OK: true, Expr: out}
 }
 
-func renameMetricsQL(input string, m map[string]string) renameOut {
+func renameMetricsQL(input string, spec rewriteSpec) renameOut {
+	m := spec.Rename
 	expr, err := metricsql.Parse(input)
 	if err != nil {
 		return renameOut{Error: err.Error()}
@@ -350,9 +374,16 @@ func renameMetricsQL(input string, m map[string]string) renameOut {
 		switch n := e.(type) {
 		case *metricsql.MetricExpr:
 			for gi := range n.LabelFilterss {
+				present := map[string]bool{}
 				for fi := range n.LabelFilterss[gi] {
 					if to, ok := m[n.LabelFilterss[gi][fi].Label]; ok {
 						n.LabelFilterss[gi][fi].Label = to
+					}
+					present[n.LabelFilterss[gi][fi].Label] = true
+				}
+				for _, k := range sortedMapKeys(spec.Inject) {
+					if !present[k] {
+						n.LabelFilterss[gi] = append(n.LabelFilterss[gi], metricsql.LabelFilter{Label: k, Value: spec.Inject[k]})
 					}
 				}
 			}
@@ -424,15 +455,15 @@ func main() {
 		}
 		return toJSON(analyzePromQL(args[0].String()))
 	}))
-	api.Set("renameLabels", js.FuncOf(func(_ js.Value, args []js.Value) any {
-		m := map[string]string{}
-		if err := json.Unmarshal([]byte(args[2].String()), &m); err != nil {
+	api.Set("rewrite", js.FuncOf(func(_ js.Value, args []js.Value) any {
+		spec := rewriteSpec{}
+		if err := json.Unmarshal([]byte(args[2].String()), &spec); err != nil {
 			panic(err)
 		}
 		if dialectArg(args) == "metricsql" {
-			return toJSON(renameMetricsQL(args[0].String(), m))
+			return toJSON(renameMetricsQL(args[0].String(), spec))
 		}
-		return toJSON(renamePromQL(args[0].String(), m))
+		return toJSON(renamePromQL(args[0].String(), spec))
 	}))
 	api.Set("parseSeries", js.FuncOf(func(_ js.Value, args []js.Value) any {
 		return toJSON(parseSeries(args[0].String()))

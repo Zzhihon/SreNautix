@@ -1,0 +1,18 @@
+# 规则提议只能引用动作目录（contract/gateway/v1/action-catalog.yaml）中已有的动作。
+# when 与参数值都是 CEL：incident 是事件，root 是根因实体，cards 是本次研判的卡片结果（键为卡片全局 id）。
+rules:
+  - id: oom-restart-pod
+    title:
+      zh-CN: 重建反复 OOM 的 Pod
+      en: Recreate a pod that keeps getting OOM-killed
+    when: >-
+      root.kind == "Pod"
+      && "_example/pod-memory/limit-ratio" in cards
+      && cards["_example/pod-memory/limit-ratio"].verdict == "abnormal"
+    action: pod_restart
+    params:
+      namespace: root.namespace
+      pod: root.name
+    expected_effect:
+      zh-CN: 控制器重建 Pod，内存回到基线；可重建条件不满足时转为人工审批
+      en: The controller recreates the pod and memory returns to baseline

@@ -158,7 +158,7 @@ export function compileCard(base: Environment, def: CardDefinition, opts: Compil
     return { text, formats };
   };
 
-  const rules = (list: CardDefinition['judge']['abnormal_if'] | undefined, what: string) =>
+  const rules = (list: CardDefinition['judge']['undeterminable_if'], what: string) =>
     (list ?? []).map((r, i) => ({
       expr: compile(r.cel, `${what}[${i}]`),
       say: message(r.say, `${what}[${i}]`),
@@ -240,7 +240,10 @@ function truncate(d: RefData): unknown[] {
   }
 }
 
-function toCelScalar(v: number | string | boolean): number | string | boolean {
+function toCelScalar(k: string, v: number | string | boolean | undefined): number | string | boolean {
+  if (v === undefined) {
+    throw new TypeError(`参数 ${k} 没有值`);
+  }
   return v;
 }
 
@@ -291,7 +294,7 @@ export function judgeCard(card: CompiledCard, input: JudgeInput): CardOutcome {
 
   const ctx: Record<string, unknown> = {
     params: Object.fromEntries(
-      Object.entries({ ...(def.params ?? {}), ...(input.params ?? {}) }).map(([k, v]) => [k, toCelScalar(v)]),
+      Object.entries({ ...(def.params ?? {}), ...(input.params ?? {}) }).map(([k, v]) => [k, toCelScalar(k, v)]),
     ),
     entity: {
       cluster_id: input.entity.cluster_id,

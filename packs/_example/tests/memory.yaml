@@ -1,0 +1,74 @@
+# 夹具在 Prometheus 与 VictoriaMetrics 上各跑一遍，结论必须一致。
+# 时间零点为 2026-01-01T00:00:00Z，每 interval 一个点；eval_time 是事件锚点。
+api_version: srenautix.io/pack-test/v1
+interval: 1m
+input_series:
+  # web-0：内存在第 20 分钟后上升到 limit 的 95%
+  - series: container_memory_working_set_bytes{namespace="shop",pod="web-0",container="web"}
+    values: 500000000x20 520000000+22000000x19 950000000x20
+  - series: kube_pod_container_resource_limits{namespace="shop",pod="web-0",container="web",resource="memory",unit="byte"}
+    values: 1000000000x61
+  # web-1：一直在 40%
+  - series: container_memory_working_set_bytes{namespace="shop",pod="web-1",container="web"}
+    values: 400000000x61
+  - series: kube_pod_container_resource_limits{namespace="shop",pod="web-1",container="web",resource="memory",unit="byte"}
+    values: 1000000000x61
+  # web-2：内存不高，但在第 31 分钟被 OOM 终止
+  - series: container_memory_working_set_bytes{namespace="shop",pod="web-2",container="web"}
+    values: 300000000x61
+  - series: kube_pod_container_resource_limits{namespace="shop",pod="web-2",container="web",resource="memory",unit="byte"}
+    values: 1000000000x61
+  - series: container_oom_events_total{namespace="shop",pod="web-2",container="web"}
+    values: 0x30 1x30
+input_logs:
+  - labels: {namespace: shop, pod: web-2, container: web}
+    lines:
+      - offset: 31m
+        line: 'fatal error: runtime: out of memory'
+tests:
+  - name: 内存峰值超过 limit 的 90%
+    eval_time: 40m
+    card: pod-memory/limit-ratio
+    entity: {kind: Pod, namespace: shop, name: web-0}
+    expect: {verdict: abnormal, reason_kind: rule}
+  - name: 内存平稳
+    eval_time: 40m
+    card: pod-memory/limit-ratio
+    entity: {kind: Pod, namespace: shop, name: web-1}
+    expect: {verdict: normal, reason_kind: all_clear}
+  - name: 内存不高但被 OOM 终止
+    eval_time: 40m
+    card: pod-memory/limit-ratio
+    entity: {kind: Pod, namespace: shop, name: web-2}
+    expect: {verdict: abnormal, reason_kind: rule}
+  - name: StatefulSet 汇总全部 Pod
+    eval_time: 40m
+    card: pod-memory/limit-ratio
+    entity: {kind: StatefulSet, namespace: shop, name: web}
+    expect: {verdict: abnormal}
+  - name: 调高阈值后正常
+    eval_time: 40m
+    card: pod-memory/limit-ratio
+    entity: {kind: Pod, namespace: shop, name: web-0}
+    params: {limit_ratio: 0.97}
+    expect: {verdict: normal}
+  - name: 窗口结束时余量不足
+    eval_time: 40m
+    card: checks/memory-headroom
+    entity: {kind: Pod, namespace: shop, name: web-0}
+    expect: {verdict: abnormal}
+  - name: 窗口结束时余量充足
+    eval_time: 40m
+    card: checks/memory-headroom
+    entity: {kind: Pod, namespace: shop, name: web-1}
+    expect: {verdict: normal}
+  - name: 有内存不足日志
+    eval_time: 40m
+    card: pod-memory/oom-logs
+    entity: {kind: Pod, namespace: shop, name: web-2}
+    expect: {verdict: abnormal}
+  - name: 没有内存不足日志
+    eval_time: 40m
+    card: pod-memory/oom-logs
+    entity: {kind: Pod, namespace: shop, name: web-1}
+    expect: {verdict: normal}

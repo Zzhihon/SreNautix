@@ -29,17 +29,34 @@ describe('PromqlEngine', () => {
 
   it('按标签档案改写标签名', () => {
     expect(
-      engine.renameLabels(
+      engine.rewrite(
         'label_replace(sum by (namespace, pod) (rate(x{namespace="a"}[5m])), "dst", "$1", "pod", "(.*)")',
         'promql',
-        { namespace: 'k8s_namespace_name', pod: 'k8s_pod_name' },
+        { rename: { namespace: 'k8s_namespace_name', pod: 'k8s_pod_name' }, inject: {} },
       ),
     ).toBe(
       'label_replace(sum by (k8s_namespace_name, k8s_pod_name) (rate(x{k8s_namespace_name="a"}[5m])), "dst", "$1", "k8s_pod_name", "(.*)")',
     );
-    expect(engine.renameLabels('sum(rate(x{namespace="a"})) by (namespace)', 'metricsql', { namespace: 'kubernetes_namespace' })).toBe(
-      'sum(rate(x{kubernetes_namespace="a"})) by(kubernetes_namespace)',
-    );
+    expect(
+      engine.rewrite('sum(rate(x{namespace="a"})) by (namespace)', 'metricsql', {
+        rename: { namespace: 'kubernetes_namespace' },
+        inject: {},
+      }),
+    ).toBe('sum(rate(x{kubernetes_namespace="a"})) by(kubernetes_namespace)');
+  });
+
+  it('给每个选择器注入集群标签', () => {
+    expect(
+      engine.rewrite('up{job="a"} / on (job) group_left kube_info{cluster="b"}', 'promql', { rename: {}, inject: { cluster: "c1" } }),
+    ).toBe('up{cluster="c1",job="a"} / on (job) group_left () kube_info{cluster="b"}');
+    expect(engine.rewrite('rate(x)', 'metricsql', { rename: {}, inject: { cluster: 'c1' } })).toBe('rate(x{cluster="c1"})');
+  });
+
+  it('回看范围', () => {
+    expect(engine.analyze('rate(x[10m] offset 5m)', 'promql').lookback_ms).toBe(15 * 60_000);
+    expect(engine.analyze('max_over_time(rate(x[5m])[1h:1m])', 'promql').lookback_ms).toBe(65 * 60_000);
+    expect(engine.analyze('x offset -10m', 'promql').lookahead_ms).toBe(10 * 60_000);
+    expect(engine.analyze('x', 'promql').lookback_ms).toBe(5 * 60_000);
   });
 
   it('展开 promtool 的 input_series 写法', () => {

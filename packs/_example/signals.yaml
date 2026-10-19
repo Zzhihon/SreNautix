@@ -1,0 +1,28 @@
+# 信号与备选。模板一律用规范标签名（namespace、pod、container、node），运行时按数据源的标签档案改写。
+signals:
+  - id: container_memory_limit_ratio
+    kind: metrics
+    unit: ratio
+    alternatives:
+      # 录制规则可选：存在时优先使用
+      - expr: max by (namespace, pod, container) (example:container_memory_limit:ratio{$selector})
+        recording_rule: true
+      # 原始表达式兜底
+      - expr: >-
+          max by (namespace, pod, container) (
+            container_memory_working_set_bytes{$selector, container!="", container!="POD"}
+            / on (namespace, pod, container)
+            kube_pod_container_resource_limits{$selector, resource="memory"}
+          )
+  - id: container_oom_events
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: sum by (namespace, pod, container) (increase(container_oom_events_total{$selector, container!=""}[$window])) > 0
+      # 旧版 cAdvisor 没有 container_oom_events_total，用最近一次终止原因代替
+      - expr: max by (namespace, pod, container) (max_over_time(kube_pod_container_status_last_terminated_reason{$selector, reason="OOMKilled"}[$window])) > 0
+  - id: oom_log_lines
+    kind: logs
+    alternatives:
+      - expr: (?i)(out of memory|oomkilled|cannot allocate memory)
+        dialect: logs_match

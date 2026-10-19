@@ -1,0 +1,6 @@
+# 动作启用申请：经 Git PR 合入策略之后才生效。
+requests:
+  - action: pod_restart
+    namespaces: [example-shop]
+    auto: false
+    reason: 示例应用的单个 Pod 反复 OOM 时，由控制器重建

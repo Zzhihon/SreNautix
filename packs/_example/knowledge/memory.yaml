@@ -1,0 +1,10 @@
+entries:
+  - id: working-set-vs-rss
+    components: [example.web]
+    text:
+      zh-CN: kubelet 按 working set 驱逐和判定 OOM，working set 包含活跃的页缓存；只看 RSS 会低估内存压力。
+      en: The kubelet evicts on working set, which includes active page cache; RSS alone understates memory pressure.
+    learned_from:
+      - https://kubernetes.io/docs/concepts/scheduling-eviction/node-pressure-eviction/
+    learned_at: '2026-01-01T00:00:00Z'
+    source: human

@@ -1,0 +1,103 @@
+chains:
+  - id: pod-memory
+    title:
+      zh-CN: 容器内存
+      en: Container memory
+    runbook: container-memory.md
+    cards:
+      - id: limit-ratio
+        title:
+          zh-CN: working set 占 limit
+          en: Working set vs limit
+        note:
+          zh-CN: 容器内存 working set 占 limit 的峰值；超过 limit_ratio 判为异常，同时列出 OOM 的容器
+          en: Peak working set as a share of the memory limit; also lists OOM-killed containers
+        applies_to:
+          kinds: [Pod, Deployment, StatefulSet]
+        window:
+          before: 30m
+          after: 5m
+        params:
+          limit_ratio: 0.9
+        refs:
+          - name: mem
+            signal: container_memory_limit_ratio
+            mode: range
+          - name: oom
+            signal: container_oom_events
+            mode: instant
+            empty_is: normal
+        judge:
+          let:
+            - name: peak
+              cel: max(mem)
+            - name: ooms
+              cel: count(oom)
+            - name: anomaly_started_at
+              cel: first_above(mem, params.limit_ratio)
+          abnormal_if:
+            - cel: ooms > 0
+              say:
+                zh-CN: '{ooms} 个容器在窗口内被 OOM 终止'
+                en: '{ooms} containers were OOM-killed in the window'
+            - cel: peak > params.limit_ratio
+              say:
+                zh-CN: 'working set 峰值 {peak, number, percent} 超过 limit 的 90%'
+                en: 'Peak working set {peak, number, percent} exceeds 90% of the limit'
+        display:
+          value: peak
+          unit: percent
+          threshold: params.limit_ratio
+          table:
+            rows_from: mem
+            columns:
+              - header: {zh-CN: Pod, en: Pod}
+                cel: label(row, "pod")
+              - header: {zh-CN: 容器, en: Container}
+                cel: label(row, "container")
+              - header: {zh-CN: 峰值, en: Peak}
+                cel: max(row)
+                unit: percent
+            sort_by: max(row)
+            limit: 5
+        links:
+          - kind: explore
+            label: {zh-CN: 指标, en: Metrics}
+          - kind: runbook
+            label: {zh-CN: 处置手册, en: Runbook}
+            target: container-memory.md#处置
+        egress: allow
+      - id: oom-logs
+        title:
+          zh-CN: 内存不足日志
+          en: Out-of-memory log lines
+        applies_to:
+          kinds: [Pod]
+        refs:
+          - name: lines
+            signal: oom_log_lines
+            mode: logs
+            limit: 20
+            empty_is: normal
+          - name: mem
+            signal: container_memory_limit_ratio
+            mode: range
+        judge:
+          let:
+            - name: hits
+              cel: size(lines)
+          abnormal_if:
+            - cel: hits > 0
+              say:
+                zh-CN: '窗口内有 {hits} 行内存不足日志'
+                en: '{hits} out-of-memory log lines in the window'
+        display:
+          value: double(hits)
+          unit: count
+          table:
+            rows_from: lines
+            columns:
+              - header: {zh-CN: 日志, en: Line}
+                cel: row.line
+            limit: 8
+        egress: redact

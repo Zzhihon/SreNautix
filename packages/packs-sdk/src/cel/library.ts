@@ -75,6 +75,20 @@ function applyOp(op: string, a: number, b: number): number | null {
   }
 }
 
+function firstCross(list: unknown[], pred: (v: number) => boolean, fn: string): number {
+  let best = Infinity;
+  for (const s of asSeriesList(list, fn)) {
+    const i = s.values.findIndex(pred);
+    if (i >= 0) {
+      best = Math.min(best, s.times[i]!);
+    }
+  }
+  if (best === Infinity) {
+    throw new NoSamplesError(`${fn}() 的越线点`);
+  }
+  return best;
+}
+
 function points(list: unknown[]) {
   return asSeriesList(list, 'points').flatMap((s) =>
     s.values.map((v, i) => ({ t: s.times[i]!, v, labels: s.labels })),
@@ -225,6 +239,9 @@ export function createBaseEnvironment(): Environment {
       }
       return out;
     })
+    // 第一个越过阈值的点的时间（unix 秒），用于 anomaly_started_at；没有这样的点时不可求值
+    .registerFunction('first_above(list, double): double', (l: unknown[], th: number) => firstCross(l, (v) => v > th, 'first_above'))
+    .registerFunction('first_below(list, double): double', (l: unknown[], th: number) => firstCross(l, (v) => v < th, 'first_below'))
     .registerFunction('label(map, string): string', (s: unknown, name: string) => {
       const labels = (s as { labels?: Record<string, string> }).labels;
       if (!labels) {

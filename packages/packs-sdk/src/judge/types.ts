@@ -1,63 +1,10 @@
-// 证据卡定义的 TypeScript 视图，结构与 contract/schemas/evidence-card.schema.json 一致。
+// 证据卡判定的类型。卡片定义来自契约（contract/schemas/evidence-card.schema.json）。
+
+import type { EvidenceCardDefinition, LocalizedText } from '@srenautix/contract';
 
 export type Locale = 'zh-CN' | 'en';
-export type LocalizedText = Partial<Record<Locale, string>>;
-
-export interface CardRule {
-  cel: string;
-  say: LocalizedText;
-}
-
-export interface CardLet {
-  name: string;
-  cel: string;
-}
-
-export interface CardRef {
-  name: string;
-  signal: string;
-  mode: 'range' | 'instant' | 'logs' | 'traces';
-  params?: Record<string, number | string | boolean>;
-  limit?: number;
-  /** no_data：没有序列视为缺数据；normal：过滤型查询，没有序列表示没有命中 */
-  empty_is?: 'no_data' | 'normal';
-}
-
-export interface CardTableColumn {
-  header: LocalizedText;
-  cel: string;
-  unit?: string;
-}
-
-export interface CardDefinition {
-  id: string;
-  title: LocalizedText;
-  note?: LocalizedText;
-  applies_to?: { kinds?: string[]; component_types?: string[] };
-  window?: { before: string; after: string };
-  params?: Record<string, number | string | boolean>;
-  refs: CardRef[];
-  judge: {
-    let?: CardLet[];
-    abnormal_if: CardRule[];
-    undeterminable_if?: CardRule[];
-  };
-  display?: {
-    value?: string;
-    unit?: 'none' | 'percent' | 'ratio' | 'bytes' | 'seconds' | 'count' | 'per_second';
-    threshold?: string;
-    table?: {
-      rows_from: string;
-      columns: CardTableColumn[];
-      sort_by?: string;
-      limit?: number;
-    };
-  };
-  links?: Array<{ kind: 'explore' | 'dashboard' | 'runbook'; label: LocalizedText; target?: string }>;
-  egress: 'allow' | 'redact' | 'never';
-  probe?: boolean;
-  requires?: string[];
-}
+export type { LocalizedText };
+export type CardDefinition = EvidenceCardDefinition;
 
 export type Verdict = 'normal' | 'abnormal' | 'undeterminable';
 export type DisplayState = Verdict | 'capability_missing';

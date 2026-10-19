@@ -1,0 +1,8 @@
+component_types:
+  - id: example.web
+    match:
+      kind: Deployment
+      labels:
+        app.kubernetes.io/part-of: example-shop
+    chains:
+      - pod-memory

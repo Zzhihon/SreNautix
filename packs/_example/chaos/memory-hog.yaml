@@ -1,0 +1,30 @@
+api_version: srenautix.io/chaos/v1
+id: memory-hog
+title:
+  zh-CN: 让示例应用的一个 Pod 内存打满
+  en: Exhaust memory in one pod of the example app
+requires:
+  - chaos-mesh
+manifests:
+  - apiVersion: chaos-mesh.org/v1alpha1
+    kind: StressChaos
+    metadata:
+      name: example-memory-hog
+      namespace: example-shop
+    spec:
+      mode: one
+      selector:
+        labelSelectors:
+          app.kubernetes.io/name: web
+      stressors:
+        memory:
+          workers: 1
+          size: 95%
+      duration: 10m
+duration: 10m
+expect:
+  root_kind: Pod
+  root_name_pattern: ^web-
+  disposition: act
+  alerts:
+    - ExampleContainerMemoryHigh

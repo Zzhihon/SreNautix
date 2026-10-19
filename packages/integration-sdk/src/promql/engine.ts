@@ -43,7 +43,7 @@ export class QuerySyntaxError extends Error {
 
 interface WasmApi {
   analyze(expr: string, dialect: Dialect): string;
-  renameLabels(expr: string, dialect: Dialect, map: string): string;
+  rewrite(expr: string, dialect: Dialect, spec: string): string;
   parseSeries(desc: string): string;
 }
 
@@ -65,9 +65,12 @@ export class PromqlEngine {
     return analysis;
   }
 
-  /** 按标签档案改写标签名：匹配器、by/without、on/ignoring/group_*、label_replace/label_join 的标签参数 */
-  renameLabels(expr: string, dialect: Dialect, map: Record<string, string>): string {
-    const out = JSON.parse(this.api.renameLabels(expr, dialect, JSON.stringify(map))) as {
+  /**
+   * 按标签档案改写查询：rename 改写标签名（匹配器、by/without、on/ignoring/group_*、
+   * label_replace/label_join 的标签参数）；inject 给每个选择器加等值匹配器（例如外部标签 cluster）
+   */
+  rewrite(expr: string, dialect: Dialect, spec: { rename: Record<string, string>; inject: Record<string, string> }): string {
+    const out = JSON.parse(this.api.rewrite(expr, dialect, JSON.stringify(spec))) as {
       ok: boolean;
       error: string;
       expr: string;

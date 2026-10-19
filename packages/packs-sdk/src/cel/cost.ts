@@ -23,6 +23,8 @@ const LINEAR_FUNCS = new Set([
   'transitions',
   'top_share',
   'ratio',
+  'first_above',
+  'first_below',
 ]);
 const COMPREHENSIONS = new Set(['exists', 'all', 'exists_one', 'map', 'filter']);
 

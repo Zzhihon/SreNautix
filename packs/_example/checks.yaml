@@ -1,0 +1,29 @@
+checks:
+  - id: memory-headroom
+    title:
+      zh-CN: 内存余量
+      en: Memory headroom
+    note:
+      zh-CN: 事件结束时 working set 占 limit 的最大值；用于排除内存问题
+      en: Highest working set to limit ratio at the end of the window
+    applies_to:
+      kinds: [Pod, Deployment, StatefulSet]
+    params:
+      limit_ratio: 0.9
+    refs:
+      - name: mem
+        signal: container_memory_limit_ratio
+        mode: instant
+    judge:
+      let:
+        - name: now
+          cel: last(mem)
+      abnormal_if:
+        - cel: now > params.limit_ratio
+          say:
+            zh-CN: '当前 {now, number, percent}，内存余量不足'
+            en: 'Currently {now, number, percent}; little memory headroom left'
+    display:
+      value: now
+      unit: percent
+    egress: allow
