@@ -1783,9 +1783,10 @@ components:
       description: |
         两类 token：
         - API token（外部调用方）：只能调用 x-srenautix-external=true 的操作，写操作只有提议。
-        - Grafana 插件 token：插件后端代理只读接口与 createFeedback，必须带 X-SreNautix-On-Behalf-Of（Grafana 用户的邮箱）；
-          server 把它映射到已绑定的用户，按该用户的角色授权，但只放行 GET 与 createFeedback，反馈的 channel 记为 grafana。
-          映射不到已绑定用户时返回 403。
+        - Grafana 插件 token：登记在 server 的调用方文件（callers.tokens_file，kind: grafana）中，不是控制台创建的 API token。
+          插件后端代理只读接口与 createFeedback，必须带 X-SreNautix-On-Behalf-Of（Grafana 用户的邮箱）；server 按 OIDC ID Token
+          的 email 声明（不区分大小写）把它映射到登录过控制台的用户，按该用户的角色绑定授权，但只放行 GET 与 createFeedback，
+          反馈的 channel 记为 grafana。没有邮箱、映射不到或映射到多个用户时返回 403。
   parameters:
     OnBehalfOf:
       name: X-SreNautix-On-Behalf-Of
