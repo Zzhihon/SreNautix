@@ -277,10 +277,12 @@ export class NotifyEngine {
       }
     }
     const at = new Date(this.opts.now());
-    const first = await this.store.markDelivered(row.id, externalId, row.desiredHash, at);
+    await this.store.markDelivered(row.id, externalId, row.desiredHash, at);
     if (row.kind === 'incident') {
       this.known.set(msgKey(a.channel, row.chat, row.incidentId as string), { externalId, hash: row.desiredHash });
-      if (first) {
+      // 每次发出或编辑成功都报告消息中的提议：后来加入已有消息（编辑）的提议也要开始计算 TTL。
+      // 提议中转只记录每个提议第一次送达的时间，重复报告没有影响
+      if (row.proposalIds.length) {
         await this.source.delivered(row.incidentId as string, row.proposalIds, at);
       }
     }

@@ -203,7 +203,7 @@ describe('NotifyService', () => {
 });
 
 describe('投递引擎（Telegram，录制夹具）', () => {
-  it('新事件发一条消息，首次送达回写；内容变化就地编辑，编辑间隔内的变化合并为最新内容', async () => {
+  it('新事件发一条消息，每次送达都回写消息中的提议；内容变化就地编辑，编辑间隔内的变化合并为最新内容', async () => {
     const d = incident();
     source.items = [d];
     await engine.syncOnce();
@@ -229,7 +229,11 @@ describe('投递引擎（Telegram，录制夹具）', () => {
     expect(edited()).toHaveLength(1);
     expect(edited()[0]!.message_id).toBe(101);
     expect(String(edited()[0]!.text)).toContain('第二次变化');
-    expect(source.delivered_).toHaveLength(1);
+    // 编辑成功同样回写：之后加入已有消息的提议由此开始计算 TTL（提议中转只记录第一次送达）
+    expect(source.delivered_).toEqual([
+      { incidentId: d.incidentId, proposalIds: [d.targets[0]!.proposalId] },
+      { incidentId: d.incidentId, proposalIds: [d.targets[0]!.proposalId] },
+    ]);
 
     // 期望不变时不再编辑
     now += 10_000;
