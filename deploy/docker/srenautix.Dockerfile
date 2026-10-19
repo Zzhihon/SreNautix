@@ -13,7 +13,10 @@ FROM ${GO_TOOLCHAIN} AS go
 FROM ${NODE_BUILDER} AS build
 ARG SOURCE_DATE_EPOCH
 COPY --from=go /usr/local/go /usr/local/go
+# node 的 slim 镜像没有 CA 证书，Go 下载模块需要校验 proxy.golang.org 的证书
+COPY --from=go /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 ENV CI=true \
+    SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt \
     COREPACK_ENABLE_DOWNLOAD_PROMPT=0 \
     PNPM_HOME=/pnpm \
     GOTOOLCHAIN=local \
