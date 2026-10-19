@@ -69,6 +69,12 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
+      # integration-sdk 把 PromQL 与 MetricsQL 解析器编译成 wasm，Go 版本取根目录 go.mod 的 toolchain
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        if: needs.detect.outputs.go == 'true'
+        with:
+          go-version-file: go.mod
+          cache: false
       - name: 确认依赖安装脚本有白名单
         run: |
           yq -e '.onlyBuiltDependencies | length > 0' pnpm-workspace.yaml
