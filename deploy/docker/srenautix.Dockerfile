@@ -35,9 +35,11 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     pnpm --filter "./apps/srenautix..." --filter "./web/console..." run --if-present build
 # 镜像内的目录与仓库一致：/app/apps/srenautix（只含运行时依赖）、/app/contract（动作目录等契约文件）、
-# /app/packs（内置领域包）、/app/web/console/dist（控制台静态文件）
+# /app/packs（内置领域包）、/app/web/console/dist（控制台静态文件）。
+# pnpm 9 的 deploy 需要读取包的元数据，不能离线执行；安装的每个第三方包的版本仍取自 pnpm-lock.yaml，
+# 内容按锁文件中的 integrity 校验。
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
-    pnpm --filter ./apps/srenautix deploy --prod --offline /out/app/apps/srenautix \
+    pnpm --filter ./apps/srenautix deploy --prod /out/app/apps/srenautix \
     && cp -R contract /out/app/contract \
     && cp -R packs /out/app/packs \
     && mkdir -p /out/app/web/console \
