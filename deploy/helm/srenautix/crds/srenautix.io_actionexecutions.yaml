@@ -1,0 +1,393 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.1
+  name: actionexecutions.srenautix.io
+spec:
+  group: srenautix.io
+  names:
+    categories:
+    - srenautix
+    kind: ActionExecution
+    listKind: ActionExecutionList
+    plural: actionexecutions
+    shortNames:
+    - ae
+    singular: actionexecution
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.action
+      name: Action
+      type: string
+    - jsonPath: .spec.target.name
+      name: Target
+      type: string
+    - jsonPath: .spec.tier
+      name: Tier
+      type: string
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.reason
+      name: Reason
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1
+    schema:
+      openAPIV3Schema:
+        description: ActionExecution 是一次已批准动作在本集群中的执行。
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: Spec 是不可修改的工单内容。
+            properties:
+              action:
+                pattern: ^[a-z][a-z0-9_]{0,62}$
+                type: string
+              approvalExpiresAt:
+                format: date-time
+                type: string
+              approver:
+                description: Approver 是批准者。
+                properties:
+                  channel:
+                    type: string
+                  principal:
+                    type: string
+                required:
+                - channel
+                - principal
+                type: object
+              assertionHash:
+                pattern: ^sha256:[0-9a-f]{64}$
+                type: string
+              canonVersion:
+                enum:
+                - jcs-sha256-v1
+                type: string
+              cluster:
+                maxLength: 63
+                type: string
+              conflictDomain:
+                maxLength: 512
+                type: string
+              envelope:
+                description: ApprovalEnvelope 的 JSON 原文，供重启后与审计时重新校验。
+                maxLength: 65536
+                type: string
+              executionId:
+                description: 十六进制 sha256("srenautix-execution-v1\n" + proposal_id
+                  + "\n" + assertion_hash) 的前 32 位。
+                pattern: ^[0-9a-f]{32}$
+                type: string
+              incident:
+                description: Incident 是提议绑定的事件。
+                properties:
+                  evidenceFingerprint:
+                    type: string
+                  id:
+                    type: string
+                  rootComponent:
+                    type: string
+                  version:
+                    format: int64
+                    type: integer
+                required:
+                - evidenceFingerprint
+                - id
+                - rootComponent
+                - version
+                type: object
+              level:
+                enum:
+                - reversible
+                - reversible_recreatable
+                - compensable
+                - irreversible
+                type: string
+              params:
+                description: 动作参数原文。
+                type: object
+                x-kubernetes-preserve-unknown-fields: true
+              paramsHash:
+                pattern: ^sha256:[0-9a-f]{64}$
+                type: string
+              proposalExpiresAt:
+                format: date-time
+                type: string
+              proposalId:
+                pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+                type: string
+              pulledAt:
+                format: date-time
+                type: string
+              target:
+                description: TargetRef 是目标对象。
+                properties:
+                  group:
+                    type: string
+                  kind:
+                    type: string
+                  name:
+                    type: string
+                  namespace:
+                    type: string
+                  resource:
+                    type: string
+                  uid:
+                    type: string
+                  version:
+                    type: string
+                required:
+                - group
+                - kind
+                - name
+                - resource
+                - uid
+                - version
+                type: object
+              ticketId:
+                maxLength: 64
+                type: string
+              tier:
+                enum:
+                - L
+                - H
+                type: string
+            required:
+            - action
+            - approvalExpiresAt
+            - approver
+            - assertionHash
+            - canonVersion
+            - cluster
+            - conflictDomain
+            - envelope
+            - executionId
+            - incident
+            - level
+            - params
+            - paramsHash
+            - proposalExpiresAt
+            - proposalId
+            - pulledAt
+            - target
+            - ticketId
+            - tier
+            type: object
+            x-kubernetes-validations:
+            - message: spec is immutable
+              rule: self == oldSelf
+          status:
+            description: Status 是执行状态。
+            properties:
+              attemptId:
+                description: 本次副作用尝试的 ID，在副作用之前写入。
+                type: string
+              blastRadius:
+                format: int64
+                type: integer
+              compensation:
+                description: Compensation 是 compensable 动作校验失败后建议的补偿动作，需要再次审批。
+                properties:
+                  action:
+                    type: string
+                  params:
+                    type: object
+                    x-kubernetes-preserve-unknown-fields: true
+                  reason:
+                    type: string
+                required:
+                - action
+                - params
+                - reason
+                type: object
+              effectiveLevel:
+                description: 执行前重新核对后的等级（pod_restart 不满足可重建条件时为 irreversible）。
+                enum:
+                - reversible
+                - reversible_recreatable
+                - compensable
+                - irreversible
+                type: string
+              executedAt:
+                format: date-time
+                type: string
+              finishedAt:
+                format: date-time
+                type: string
+              history:
+                items:
+                  description: HistoryEntry 是一次阶段迁移；每条对应一个推回中心的执行事件。
+                  properties:
+                    at:
+                      format: date-time
+                      type: string
+                    auditHash:
+                      type: string
+                    auditSeq:
+                      format: int64
+                      type: integer
+                    message:
+                      type: string
+                    phase:
+                      type: string
+                    reason:
+                      type: string
+                    requires:
+                      type: string
+                    seq:
+                      format: int64
+                      type: integer
+                  required:
+                  - at
+                  - phase
+                  - seq
+                  type: object
+                type: array
+              holder:
+                description: 写入 executing 的 gateway Pod 名（Lease 身份）。
+                type: string
+              message:
+                maxLength: 4096
+                type: string
+              phase:
+                enum:
+                - pulled
+                - prechecked
+                - executing
+                - verifying
+                - verified
+                - failed
+                - verify_failed
+                - reverted
+                - awaiting_compensation_approval
+                - needs_human
+                - stale
+                - expired
+                - rejected
+                - indeterminate
+                type: string
+              prechecks:
+                items:
+                  description: CheckResult 是一项预检或校验的结果。
+                  properties:
+                    detail:
+                      type: string
+                    id:
+                      type: string
+                    kind:
+                      enum:
+                      - k8s
+                      - pdb
+                      - promql
+                      - git
+                      - policy
+                      - hub
+                      type: string
+                    passed:
+                      type: boolean
+                  required:
+                  - id
+                  - kind
+                  - passed
+                  type: object
+                type: array
+              progress:
+                description: 分步执行的动作已经开始的步骤（例如逐个驱逐时的 Pod UID），在每一步的副作用之前写入。
+                items:
+                  type: string
+                type: array
+              pushedSeq:
+                description: 中心已确认的最大事件序号。
+                format: int64
+                type: integer
+              reason:
+                description: 进入当前阶段的原因码（小写下划线）。
+                type: string
+              snapshot:
+                description: 执行前的目标状态（resourceVersion 与撤销、校验所需的原值）。
+                type: object
+                x-kubernetes-preserve-unknown-fields: true
+              undo:
+                description: Undo 是撤销的尝试记录。
+                properties:
+                  attemptId:
+                    type: string
+                  detail:
+                    type: string
+                  finishedAt:
+                    format: date-time
+                    type: string
+                  startedAt:
+                    format: date-time
+                    type: string
+                type: object
+              verification:
+                description: Verification 是执行后校验的结果。
+                properties:
+                  checks:
+                    items:
+                      description: CheckResult 是一项预检或校验的结果。
+                      properties:
+                        detail:
+                          type: string
+                        id:
+                          type: string
+                        kind:
+                          enum:
+                          - k8s
+                          - pdb
+                          - promql
+                          - git
+                          - policy
+                          - hub
+                          type: string
+                        passed:
+                          type: boolean
+                      required:
+                      - id
+                      - kind
+                      - passed
+                      type: object
+                    type: array
+                  passed:
+                    type: boolean
+                required:
+                - passed
+                type: object
+              verifyDueAt:
+                format: date-time
+                type: string
+            type: object
+        required:
+        - spec
+        type: object
+        x-kubernetes-validations:
+        - message: metadata.name must equal spec.executionId
+          rule: self.metadata.name == self.spec.executionId
+    served: true
+    storage: true
+    subresources:
+      status: {}

@@ -1,0 +1,51 @@
+# 由 internal/spoke/gateway/admission 生成（make gateway-generate），不要手工修改。
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  annotations:
+    srenautix.io/description: pod_restart、workload_rolling_restart、cnpg_replica_restart：Eviction 必须与 Pod 同名、带 UID 前置条件，不缩短优雅终止时间，不改变删除传播
+  labels:
+    app.kubernetes.io/component: gateway-admission
+    app.kubernetes.io/name: srenautix
+  name: '{{ include "srenautix.fullname" . }}-gateway-pod-eviction'
+spec:
+  failurePolicy: Fail
+  matchConditions:
+    - expression: request.userInfo.username == '{{ include "srenautix.gateway.username" . }}'
+      name: gateway-only
+  matchConstraints:
+    resourceRules:
+      - apiGroups:
+          - ""
+        apiVersions:
+          - v1
+        operations:
+          - CREATE
+        resources:
+          - pods/eviction
+      - apiGroups:
+          - srenautix.io
+        apiVersions:
+          - v1
+        operations:
+          - CREATE
+        resources:
+          - actionexecutions
+  paramKind:
+    apiVersion: v1
+    kind: ConfigMap
+  validations:
+    - expression: '!variables.isRecord || object.metadata.?labels.orValue({})[?''srenautix.io/admission-probe''].orValue('''') != ''pod-eviction'''
+      message: admission self-check probe denied by pod-eviction
+    - expression: variables.isRecord || params.?data.?frozen.orValue('true') == 'false'
+      message: srenautix-freeze is frozen or missing, gateway writes are proposal-only
+    - expression: |-
+        variables.isRecord || (object.metadata.?name == optional.of(request.name) &&
+        object.?deleteOptions.?preconditions.?uid.orValue('') != '' &&
+        !object.?deleteOptions.?gracePeriodSeconds.hasValue() &&
+        !object.?deleteOptions.?propagationPolicy.hasValue() &&
+        !object.?deleteOptions.?orphanDependents.hasValue())
+      message: gateway evictions must name the Pod, carry its UID precondition and keep the default grace period and deletion semantics
+  variables:
+    - expression: request.resource.group == 'srenautix.io' && request.resource.resource == 'actionexecutions'
+      name: isRecord

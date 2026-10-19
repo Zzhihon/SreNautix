@@ -1,0 +1,68 @@
+# 由 internal/spoke/gateway/admission 生成（make gateway-generate），不要手工修改。
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  annotations:
+    srenautix.io/description: node_cordon、node_uncordon：Node 只改 spec.unschedulable 与 srenautix.io/cordoned-by；控制面节点不能被 cordon
+  labels:
+    app.kubernetes.io/component: gateway-admission
+    app.kubernetes.io/name: srenautix
+  name: '{{ include "srenautix.fullname" . }}-gateway-node-scheduling'
+spec:
+  failurePolicy: Fail
+  matchConditions:
+    - expression: request.userInfo.username == '{{ include "srenautix.gateway.username" . }}'
+      name: gateway-only
+  matchConstraints:
+    resourceRules:
+      - apiGroups:
+          - ""
+        apiVersions:
+          - v1
+        operations:
+          - UPDATE
+        resources:
+          - nodes
+      - apiGroups:
+          - srenautix.io
+        apiVersions:
+          - v1
+        operations:
+          - CREATE
+        resources:
+          - actionexecutions
+  paramKind:
+    apiVersion: v1
+    kind: ConfigMap
+  validations:
+    - expression: '!variables.isRecord || object.metadata.?labels.orValue({})[?''srenautix.io/admission-probe''].orValue('''') != ''node-scheduling'''
+      message: admission self-check probe denied by node-scheduling
+    - expression: variables.isRecord || params.?data.?frozen.orValue('true') == 'false'
+      message: srenautix-freeze is frozen or missing, gateway writes are proposal-only
+    - expression: |-
+        variables.isRecord || (object.metadata.?labels == oldObject.metadata.?labels &&
+        object.metadata.?ownerReferences == oldObject.metadata.?ownerReferences &&
+        object.metadata.?finalizers == oldObject.metadata.?finalizers &&
+        variables.annOld.all(k, k in ["srenautix.io/execution-id", "srenautix.io/cordoned-by"] || (k in variables.annNew && variables.annNew[k] == variables.annOld[k])) &&
+        variables.annNew.all(k, k in ["srenautix.io/execution-id", "srenautix.io/cordoned-by"] || k in variables.annOld) &&
+        (!('srenautix.io/execution-id' in variables.annNew) || variables.annNew['srenautix.io/execution-id'].matches('^[0-9a-f]{32}$')))
+      message: gateway may only add its execution annotations; labels, owners, finalizers and other annotations must not change
+    - expression: |-
+        variables.isRecord || (object.spec.?podCIDR == oldObject.spec.?podCIDR &&
+        object.spec.?podCIDRs == oldObject.spec.?podCIDRs &&
+        object.spec.?providerID == oldObject.spec.?providerID &&
+        object.spec.?taints == oldObject.spec.?taints &&
+        object.spec.?configSource == oldObject.spec.?configSource &&
+        object.spec.?externalID == oldObject.spec.?externalID)
+      message: gateway may only change spec.unschedulable of a Node
+    - expression: variables.isRecord || (!object.spec.?unschedulable.orValue(false) || !('node-role.kubernetes.io/control-plane' in oldObject.metadata.?labels.orValue({})))
+      message: gateway may not cordon a control-plane node
+    - expression: variables.isRecord || (!('srenautix.io/cordoned-by' in variables.annNew) || variables.annNew['srenautix.io/cordoned-by'].matches('^[0-9a-f]{32}$'))
+      message: srenautix.io/cordoned-by must name an execution id
+  variables:
+    - expression: request.resource.group == 'srenautix.io' && request.resource.resource == 'actionexecutions'
+      name: isRecord
+    - expression: oldObject.metadata.?annotations.orValue({})
+      name: annOld
+    - expression: object.metadata.?annotations.orValue({})
+      name: annNew

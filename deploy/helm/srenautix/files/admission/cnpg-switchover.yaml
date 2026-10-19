@@ -1,0 +1,98 @@
+# 由 internal/spoke/gateway/admission 生成（make gateway-generate），不要手工修改。
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  annotations:
+    srenautix.io/description: cnpg_switchover：Cluster status 只改 kubectl cnpg promote 写入的字段，targetPrimary 必须是现有实例
+  labels:
+    app.kubernetes.io/component: gateway-admission
+    app.kubernetes.io/name: srenautix
+  name: '{{ include "srenautix.fullname" . }}-gateway-cnpg-switchover'
+spec:
+  failurePolicy: Fail
+  matchConditions:
+    - expression: request.userInfo.username == '{{ include "srenautix.gateway.username" . }}'
+      name: gateway-only
+  matchConstraints:
+    resourceRules:
+      - apiGroups:
+          - postgresql.cnpg.io
+        apiVersions:
+          - v1
+        operations:
+          - UPDATE
+        resources:
+          - clusters/status
+      - apiGroups:
+          - srenautix.io
+        apiVersions:
+          - v1
+        operations:
+          - CREATE
+        resources:
+          - actionexecutions
+  paramKind:
+    apiVersion: v1
+    kind: ConfigMap
+  validations:
+    - expression: '!variables.isRecord || object.metadata.?labels.orValue({})[?''srenautix.io/admission-probe''].orValue('''') != ''cnpg-switchover'''
+      message: admission self-check probe denied by cnpg-switchover
+    - expression: variables.isRecord || params.?data.?frozen.orValue('true') == 'false'
+      message: srenautix-freeze is frozen or missing, gateway writes are proposal-only
+    - expression: |-
+        variables.isRecord || (has(object.status.targetPrimary) && has(object.status.instanceNames) &&
+        object.status.targetPrimary in object.status.instanceNames &&
+        object.status.?targetPrimary != oldObject.status.?targetPrimary &&
+        (object.status.?phase == oldObject.status.?phase || object.status.?phase == optional.of('Switchover in progress')) &&
+        object.spec == oldObject.spec && variables.otherStatusUnchanged)
+      message: gateway may only switch the target primary of a Cluster to one of its instances
+  variables:
+    - expression: request.resource.group == 'srenautix.io' && request.resource.resource == 'actionexecutions'
+      name: isRecord
+    - expression: |-
+        object.status.?availableArchitectures == oldObject.status.?availableArchitectures &&
+        object.status.?certificates == oldObject.status.?certificates &&
+        object.status.?cloudNativePGCommitHash == oldObject.status.?cloudNativePGCommitHash &&
+        object.status.?cloudNativePGOperatorHash == oldObject.status.?cloudNativePGOperatorHash &&
+        object.status.?configMapResourceVersion == oldObject.status.?configMapResourceVersion &&
+        object.status.?currentPrimary == oldObject.status.?currentPrimary &&
+        object.status.?currentPrimaryFailingSinceTimestamp == oldObject.status.?currentPrimaryFailingSinceTimestamp &&
+        object.status.?currentPrimaryTimestamp == oldObject.status.?currentPrimaryTimestamp &&
+        object.status.?danglingPVC == oldObject.status.?danglingPVC &&
+        object.status.?demotionToken == oldObject.status.?demotionToken &&
+        object.status.?firstRecoverabilityPoint == oldObject.status.?firstRecoverabilityPoint &&
+        object.status.?firstRecoverabilityPointByMethod == oldObject.status.?firstRecoverabilityPointByMethod &&
+        object.status.?healthyPVC == oldObject.status.?healthyPVC &&
+        object.status.?image == oldObject.status.?image &&
+        object.status.?initializingPVC == oldObject.status.?initializingPVC &&
+        object.status.?instanceNames == oldObject.status.?instanceNames &&
+        object.status.?instances == oldObject.status.?instances &&
+        object.status.?instancesReportedState == oldObject.status.?instancesReportedState &&
+        object.status.?instancesStatus == oldObject.status.?instancesStatus &&
+        object.status.?jobCount == oldObject.status.?jobCount &&
+        object.status.?lastFailedBackup == oldObject.status.?lastFailedBackup &&
+        object.status.?lastPromotionToken == oldObject.status.?lastPromotionToken &&
+        object.status.?lastSuccessfulBackup == oldObject.status.?lastSuccessfulBackup &&
+        object.status.?lastSuccessfulBackupByMethod == oldObject.status.?lastSuccessfulBackupByMethod &&
+        object.status.?latestGeneratedNode == oldObject.status.?latestGeneratedNode &&
+        object.status.?managedRolesStatus == oldObject.status.?managedRolesStatus &&
+        object.status.?onlineUpdateEnabled == oldObject.status.?onlineUpdateEnabled &&
+        object.status.?pgDataImageInfo == oldObject.status.?pgDataImageInfo &&
+        object.status.?pluginStatus == oldObject.status.?pluginStatus &&
+        object.status.?podSelectorRefs == oldObject.status.?podSelectorRefs &&
+        object.status.?poolerIntegrations == oldObject.status.?poolerIntegrations &&
+        object.status.?pvcCount == oldObject.status.?pvcCount &&
+        object.status.?readService == oldObject.status.?readService &&
+        object.status.?readyInstances == oldObject.status.?readyInstances &&
+        object.status.?resizingPVC == oldObject.status.?resizingPVC &&
+        object.status.?secretsResourceVersion == oldObject.status.?secretsResourceVersion &&
+        object.status.?selector == oldObject.status.?selector &&
+        object.status.?switchReplicaClusterStatus == oldObject.status.?switchReplicaClusterStatus &&
+        object.status.?systemID == oldObject.status.?systemID &&
+        object.status.?tablespacesStatus == oldObject.status.?tablespacesStatus &&
+        object.status.?targetPgDataImageInfo == oldObject.status.?targetPgDataImageInfo &&
+        object.status.?timelineID == oldObject.status.?timelineID &&
+        object.status.?topology == oldObject.status.?topology &&
+        object.status.?unusablePVC == oldObject.status.?unusablePVC &&
+        object.status.?writeService == oldObject.status.?writeService
+      name: otherStatusUnchanged

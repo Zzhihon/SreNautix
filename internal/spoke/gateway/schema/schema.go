@@ -28,8 +28,20 @@ const (
 var (
 	once     sync.Once
 	compiled map[string]*jsonschema.Schema
+	compiler *jsonschema.Compiler
+	defsMu   sync.Mutex
 	initErr  error
 )
+
+// GetDef 返回某个 schema 文件中 $defs/<def> 的编译结果。
+func GetDef(name, def string) (*jsonschema.Schema, error) {
+	if _, err := Get(name); err != nil {
+		return nil, err
+	}
+	defsMu.Lock()
+	defer defsMu.Unlock()
+	return compiler.Compile(contract.SchemaBase + name + "#/$defs/" + def)
+}
 
 func load() {
 	c := jsonschema.NewCompiler()
@@ -60,6 +72,7 @@ func load() {
 		names = append(names, e.Name())
 	}
 	compiled = map[string]*jsonschema.Schema{}
+	compiler = c
 	for _, n := range names {
 		s, err := c.Compile(contract.SchemaBase + n)
 		if err != nil {

@@ -1,0 +1,118 @@
+# 由 internal/spoke/gateway/admission 生成（make gateway-generate），不要手工修改。
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  annotations:
+    srenautix.io/description: workflow_submit、workflow_terminate：新建的 Workflow 只引用 WorkflowTemplate 并传入普通参数，带执行 ID 标签；修改只设置 spec.shutdown=Terminate。模板白名单与参数约束由 workflow-allowlist 策略检查
+  labels:
+    app.kubernetes.io/component: gateway-admission
+    app.kubernetes.io/name: srenautix
+  name: '{{ include "srenautix.fullname" . }}-gateway-argo-workflows'
+spec:
+  failurePolicy: Fail
+  matchConditions:
+    - expression: request.userInfo.username == '{{ include "srenautix.gateway.username" . }}'
+      name: gateway-only
+  matchConstraints:
+    resourceRules:
+      - apiGroups:
+          - argoproj.io
+        apiVersions:
+          - v1alpha1
+        operations:
+          - CREATE
+          - UPDATE
+        resources:
+          - workflows
+      - apiGroups:
+          - srenautix.io
+        apiVersions:
+          - v1
+        operations:
+          - CREATE
+        resources:
+          - actionexecutions
+  paramKind:
+    apiVersion: v1
+    kind: ConfigMap
+  validations:
+    - expression: '!variables.isRecord || object.metadata.?labels.orValue({})[?''srenautix.io/admission-probe''].orValue('''') != ''argo-workflows'''
+      message: admission self-check probe denied by argo-workflows
+    - expression: variables.isRecord || params.?data.?frozen.orValue('true') == 'false'
+      message: srenautix-freeze is frozen or missing, gateway writes are proposal-only
+    - expression: |-
+        variables.isRecord || (request.operation != 'CREATE' ||
+        (has(object.spec.workflowTemplateRef) && has(object.spec.workflowTemplateRef.name) &&
+        !object.spec.workflowTemplateRef.?clusterScope.orValue(false) && variables.referenceOnly && !has(object.status)))
+      message: gateway may only submit a namespaced WorkflowTemplate reference with arguments
+    - expression: |-
+        variables.isRecord || (request.operation != 'CREATE' ||
+        (!object.spec.?arguments.?artifacts.hasValue() &&
+        variables.params.all(p, has(p.value) && !has(p.default) && !has(p.description) && !has(p.enum) && !has(p.globalName) && !has(p.valueFrom))))
+      message: gateway may only pass plain name/value parameters
+    - expression: |-
+        variables.isRecord || (request.operation != 'CREATE' ||
+        object.metadata.?labels.orValue({})[?'srenautix.io/execution-id'].orValue('').matches('^[0-9a-f]{32}$'))
+      message: workflows submitted by gateway must carry the srenautix.io/execution-id label
+    - expression: |-
+        variables.isRecord || (request.operation != 'UPDATE' ||
+        (object.spec.?shutdown == optional.of('Terminate') &&
+        object.spec.?activeDeadlineSeconds == oldObject.spec.?activeDeadlineSeconds &&
+        object.spec.?affinity == oldObject.spec.?affinity &&
+        object.spec.?archiveLogs == oldObject.spec.?archiveLogs &&
+        object.spec.?artifactGC == oldObject.spec.?artifactGC &&
+        object.spec.?artifactRepositoryRef == oldObject.spec.?artifactRepositoryRef &&
+        object.spec.?automountServiceAccountToken == oldObject.spec.?automountServiceAccountToken &&
+        object.spec.?dnsConfig == oldObject.spec.?dnsConfig &&
+        object.spec.?dnsPolicy == oldObject.spec.?dnsPolicy &&
+        object.spec.?entrypoint == oldObject.spec.?entrypoint &&
+        object.spec.?executor == oldObject.spec.?executor &&
+        object.spec.?executorPlugins == oldObject.spec.?executorPlugins &&
+        object.spec.?hooks == oldObject.spec.?hooks &&
+        object.spec.?hostAliases == oldObject.spec.?hostAliases &&
+        object.spec.?hostNetwork == oldObject.spec.?hostNetwork &&
+        object.spec.?imagePullSecrets == oldObject.spec.?imagePullSecrets &&
+        object.spec.?metrics == oldObject.spec.?metrics &&
+        object.spec.?nodeSelector == oldObject.spec.?nodeSelector &&
+        object.spec.?onExit == oldObject.spec.?onExit &&
+        object.spec.?parallelism == oldObject.spec.?parallelism &&
+        object.spec.?podDisruptionBudget == oldObject.spec.?podDisruptionBudget &&
+        object.spec.?podGC == oldObject.spec.?podGC &&
+        object.spec.?podMetadata == oldObject.spec.?podMetadata &&
+        object.spec.?podPriorityClassName == oldObject.spec.?podPriorityClassName &&
+        object.spec.?podResources == oldObject.spec.?podResources &&
+        object.spec.?podSpecPatch == oldObject.spec.?podSpecPatch &&
+        object.spec.?priority == oldObject.spec.?priority &&
+        object.spec.?resourceClaims == oldObject.spec.?resourceClaims &&
+        object.spec.?retryStrategy == oldObject.spec.?retryStrategy &&
+        object.spec.?schedulerName == oldObject.spec.?schedulerName &&
+        object.spec.?securityContext == oldObject.spec.?securityContext &&
+        object.spec.?serviceAccountName == oldObject.spec.?serviceAccountName &&
+        object.spec.?suspend == oldObject.spec.?suspend &&
+        object.spec.?synchronization == oldObject.spec.?synchronization &&
+        object.spec.?templateDefaults == oldObject.spec.?templateDefaults &&
+        object.spec.?templates == oldObject.spec.?templates &&
+        object.spec.?tolerations == oldObject.spec.?tolerations &&
+        object.spec.?ttlStrategy == oldObject.spec.?ttlStrategy &&
+        object.spec.?volumeClaimGC == oldObject.spec.?volumeClaimGC &&
+        object.spec.?volumeClaimTemplates == oldObject.spec.?volumeClaimTemplates &&
+        object.spec.?volumes == oldObject.spec.?volumes &&
+        object.spec.?workflowMetadata == oldObject.spec.?workflowMetadata &&
+        object.spec.?arguments == oldObject.spec.?arguments &&
+        object.spec.?workflowTemplateRef == oldObject.spec.?workflowTemplateRef &&
+        object.metadata.?labels == oldObject.metadata.?labels &&
+        variables.annOld.all(k, k in ["srenautix.io/execution-id"] || (k in variables.annNew && variables.annNew[k] == variables.annOld[k])) &&
+        variables.annNew.all(k, k in ["srenautix.io/execution-id"] || k in variables.annOld) &&
+        object.?status == oldObject.?status))
+      message: gateway may only set spec.shutdown=Terminate on an existing Workflow
+  variables:
+    - expression: request.resource.group == 'srenautix.io' && request.resource.resource == 'actionexecutions'
+      name: isRecord
+    - expression: oldObject.metadata.?annotations.orValue({})
+      name: annOld
+    - expression: object.metadata.?annotations.orValue({})
+      name: annNew
+    - expression: object.spec.?arguments.?parameters.orValue([])
+      name: params
+    - expression: '!has(object.spec.activeDeadlineSeconds) && !has(object.spec.affinity) && !has(object.spec.archiveLogs) && !has(object.spec.artifactGC) && !has(object.spec.artifactRepositoryRef) && !has(object.spec.automountServiceAccountToken) && !has(object.spec.dnsConfig) && !has(object.spec.dnsPolicy) && !has(object.spec.entrypoint) && !has(object.spec.executor) && !has(object.spec.executorPlugins) && !has(object.spec.hooks) && !has(object.spec.hostAliases) && !has(object.spec.hostNetwork) && !has(object.spec.imagePullSecrets) && !has(object.spec.metrics) && !has(object.spec.nodeSelector) && !has(object.spec.onExit) && !has(object.spec.parallelism) && !has(object.spec.podDisruptionBudget) && !has(object.spec.podGC) && !has(object.spec.podMetadata) && !has(object.spec.podPriorityClassName) && !has(object.spec.podResources) && !has(object.spec.podSpecPatch) && !has(object.spec.priority) && !has(object.spec.resourceClaims) && !has(object.spec.retryStrategy) && !has(object.spec.schedulerName) && !has(object.spec.securityContext) && !has(object.spec.serviceAccountName) && !has(object.spec.suspend) && !has(object.spec.synchronization) && !has(object.spec.templateDefaults) && !has(object.spec.templates) && !has(object.spec.tolerations) && !has(object.spec.ttlStrategy) && !has(object.spec.volumeClaimGC) && !has(object.spec.volumeClaimTemplates) && !has(object.spec.volumes) && !has(object.spec.workflowMetadata) && !has(object.spec.shutdown)'
+      name: referenceOnly

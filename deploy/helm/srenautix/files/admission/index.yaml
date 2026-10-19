@@ -1,0 +1,487 @@
+# 由 internal/spoke/gateway/admission 生成（make gateway-generate），不要手工修改。
+actions:
+  argocd_app_sync:
+    policies:
+      - argocd-applications.yaml
+    rules:
+      - apiGroups:
+          - argoproj.io
+        resources:
+          - applications
+        verbs:
+          - get
+          - list
+          - patch
+          - watch
+  argocd_app_terminate_operation:
+    policies:
+      - argocd-applications.yaml
+    rules:
+      - apiGroups:
+          - argoproj.io
+        resources:
+          - applications
+        verbs:
+          - get
+          - list
+          - patch
+          - watch
+  argocd_autosync_resume:
+    policies:
+      - argocd-applications.yaml
+    rules:
+      - apiGroups:
+          - argoproj.io
+        resources:
+          - applications
+        verbs:
+          - get
+          - list
+          - patch
+          - watch
+  argocd_autosync_suspend:
+    policies:
+      - argocd-applications.yaml
+    rules:
+      - apiGroups:
+          - argoproj.io
+        resources:
+          - applications
+        verbs:
+          - get
+          - list
+          - patch
+          - watch
+  cnpg_replica_restart:
+    policies:
+      - pod-eviction.yaml
+    rules:
+      - apiGroups:
+          - ""
+        resources:
+          - pods
+        verbs:
+          - get
+          - list
+          - watch
+      - apiGroups:
+          - ""
+        resources:
+          - pods/eviction
+        verbs:
+          - create
+      - apiGroups:
+          - policy
+        resources:
+          - poddisruptionbudgets
+        verbs:
+          - get
+          - list
+          - watch
+      - apiGroups:
+          - postgresql.cnpg.io
+        resources:
+          - clusters
+        verbs:
+          - get
+          - list
+          - watch
+  cnpg_switchover:
+    policies:
+      - cnpg-switchover.yaml
+    rules:
+      - apiGroups:
+          - ""
+        resources:
+          - pods
+        verbs:
+          - get
+          - list
+          - watch
+      - apiGroups:
+          - postgresql.cnpg.io
+        resources:
+          - clusters
+        verbs:
+          - get
+          - list
+          - watch
+      - apiGroups:
+          - postgresql.cnpg.io
+        resources:
+          - clusters/status
+        verbs:
+          - patch
+  cronjob_resume:
+    policies:
+      - cronjob-suspend.yaml
+    rules:
+      - apiGroups:
+          - batch
+        resources:
+          - cronjobs
+        verbs:
+          - get
+          - list
+          - patch
+          - watch
+  cronjob_suspend:
+    policies:
+      - cronjob-suspend.yaml
+    rules:
+      - apiGroups:
+          - batch
+        resources:
+          - cronjobs
+        verbs:
+          - get
+          - list
+          - patch
+          - watch
+  flux_reconcile:
+    policies:
+      - flux-objects.yaml
+    rules:
+      - apiGroups:
+          - helm.toolkit.fluxcd.io
+        resources:
+          - helmreleases
+        verbs:
+          - get
+          - list
+          - patch
+          - watch
+      - apiGroups:
+          - kustomize.toolkit.fluxcd.io
+        resources:
+          - kustomizations
+        verbs:
+          - get
+          - list
+          - patch
+          - watch
+  flux_resume:
+    policies:
+      - flux-objects.yaml
+    rules:
+      - apiGroups:
+          - helm.toolkit.fluxcd.io
+        resources:
+          - helmreleases
+        verbs:
+          - get
+          - list
+          - patch
+          - watch
+      - apiGroups:
+          - kustomize.toolkit.fluxcd.io
+        resources:
+          - kustomizations
+        verbs:
+          - get
+          - list
+          - patch
+          - watch
+  flux_suspend:
+    policies:
+      - flux-objects.yaml
+    rules:
+      - apiGroups:
+          - helm.toolkit.fluxcd.io
+        resources:
+          - helmreleases
+        verbs:
+          - get
+          - list
+          - patch
+          - watch
+      - apiGroups:
+          - kustomize.toolkit.fluxcd.io
+        resources:
+          - kustomizations
+        verbs:
+          - get
+          - list
+          - patch
+          - watch
+  gitops_pr:
+    policies: []
+    rules: null
+  hpa_bounds_set:
+    policies:
+      - hpa-bounds.yaml
+    rules:
+      - apiGroups:
+          - autoscaling
+        resources:
+          - horizontalpodautoscalers
+        verbs:
+          - get
+          - list
+          - patch
+          - watch
+  node_cordon:
+    policies:
+      - node-scheduling.yaml
+    rules:
+      - apiGroups:
+          - ""
+        resources:
+          - nodes
+        verbs:
+          - get
+          - list
+          - patch
+          - watch
+  node_uncordon:
+    policies:
+      - node-scheduling.yaml
+    rules:
+      - apiGroups:
+          - ""
+        resources:
+          - nodes
+        verbs:
+          - get
+          - list
+          - patch
+          - watch
+  pod_restart:
+    policies:
+      - pod-eviction.yaml
+    rules:
+      - apiGroups:
+          - ""
+        resources:
+          - pods
+        verbs:
+          - get
+          - list
+          - watch
+      - apiGroups:
+          - ""
+        resources:
+          - pods/eviction
+        verbs:
+          - create
+      - apiGroups:
+          - apps
+        resources:
+          - daemonsets
+        verbs:
+          - get
+          - list
+          - watch
+      - apiGroups:
+          - apps
+        resources:
+          - deployments
+        verbs:
+          - get
+          - list
+          - watch
+      - apiGroups:
+          - apps
+        resources:
+          - replicasets
+        verbs:
+          - get
+          - list
+          - watch
+      - apiGroups:
+          - apps
+        resources:
+          - statefulsets
+        verbs:
+          - get
+          - list
+          - watch
+      - apiGroups:
+          - policy
+        resources:
+          - poddisruptionbudgets
+        verbs:
+          - get
+          - list
+          - watch
+  rollout_pause:
+    policies:
+      - workload-deployments.yaml
+    rules:
+      - apiGroups:
+          - apps
+        resources:
+          - deployments
+        verbs:
+          - get
+          - list
+          - patch
+          - watch
+  rollout_resume:
+    policies:
+      - workload-deployments.yaml
+    rules:
+      - apiGroups:
+          - apps
+        resources:
+          - deployments
+        verbs:
+          - get
+          - list
+          - patch
+          - watch
+  workflow_submit:
+    policies:
+      - argo-workflows.yaml
+    rules:
+      - apiGroups:
+          - argoproj.io
+        resources:
+          - workflows
+        verbs:
+          - create
+          - get
+          - list
+          - watch
+      - apiGroups:
+          - argoproj.io
+        resources:
+          - workflowtemplates
+        verbs:
+          - get
+          - list
+          - watch
+  workflow_terminate:
+    policies:
+      - argo-workflows.yaml
+    rules:
+      - apiGroups:
+          - argoproj.io
+        resources:
+          - workflows
+        verbs:
+          - get
+          - list
+          - patch
+          - watch
+  workload_rolling_restart:
+    policies:
+      - pod-eviction.yaml
+    rules:
+      - apiGroups:
+          - ""
+        resources:
+          - pods
+        verbs:
+          - get
+          - list
+          - watch
+      - apiGroups:
+          - ""
+        resources:
+          - pods/eviction
+        verbs:
+          - create
+      - apiGroups:
+          - apps
+        resources:
+          - daemonsets
+        verbs:
+          - get
+          - list
+          - watch
+      - apiGroups:
+          - apps
+        resources:
+          - deployments
+        verbs:
+          - get
+          - list
+          - watch
+      - apiGroups:
+          - apps
+        resources:
+          - replicasets
+        verbs:
+          - get
+          - list
+          - watch
+      - apiGroups:
+          - apps
+        resources:
+          - statefulsets
+        verbs:
+          - get
+          - list
+          - watch
+      - apiGroups:
+          - policy
+        resources:
+          - poddisruptionbudgets
+        verbs:
+          - get
+          - list
+          - watch
+  workload_scale:
+    policies:
+      - workload-deployments.yaml
+      - workload-statefulsets.yaml
+    rules:
+      - apiGroups:
+          - ""
+        resources:
+          - pods
+        verbs:
+          - get
+          - list
+          - watch
+      - apiGroups:
+          - apps
+        resources:
+          - daemonsets
+        verbs:
+          - get
+          - list
+          - watch
+      - apiGroups:
+          - apps
+        resources:
+          - deployments
+        verbs:
+          - get
+          - list
+          - patch
+          - watch
+      - apiGroups:
+          - apps
+        resources:
+          - replicasets
+        verbs:
+          - get
+          - list
+          - watch
+      - apiGroups:
+          - apps
+        resources:
+          - statefulsets
+        verbs:
+          - get
+          - list
+          - patch
+          - watch
+      - apiGroups:
+          - autoscaling
+        resources:
+          - horizontalpodautoscalers
+        verbs:
+          - get
+          - list
+          - watch
+      - apiGroups:
+          - policy
+        resources:
+          - poddisruptionbudgets
+        verbs:
+          - get
+          - list
+          - watch
