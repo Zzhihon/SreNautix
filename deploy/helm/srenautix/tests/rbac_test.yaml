@@ -1,0 +1,89 @@
+suite: 只读角色的 RBAC（不变量 1）
+templates:
+  - templates/rbac.yaml
+release:
+  name: t
+  namespace: srenautix
+capabilities:
+  majorVersion: "1"
+  minorVersion: "34"
+tests:
+  - it: worker 只读，不能读 Secret、ConfigMap 与 Pod 日志
+    set:
+      profile: observe
+    documentSelector: {path: "$[?(@.kind == 'ClusterRole')].metadata.name", value: t-srenautix-worker-read}
+    asserts:
+      - isKind: {of: ClusterRole}
+      - notMatchRegex: {path: 'rules[0].resources[*]', pattern: '^(secrets|configmaps|pods/log)$'}
+      - notExists: {path: 'rules[?(@.verbs[*] == "create")]'}
+      - notExists: {path: 'rules[?(@.verbs[*] == "update")]'}
+      - notExists: {path: 'rules[?(@.verbs[*] == "patch")]'}
+      - notExists: {path: 'rules[?(@.verbs[*] == "delete")]'}
+      - notExists: {path: 'rules[?(@.resources[*] == "secrets")]'}
+      - notExists: {path: 'rules[?(@.apiGroups[*] == "*")]'}
+
+  - it: server 读取 ConfigMap 名称与 Pod 日志，但不读 Secret
+    set:
+      profile: observe
+    documentSelector: {path: "$[?(@.kind == 'ClusterRole')].metadata.name", value: t-srenautix-server-read}
+    asserts:
+      - contains: {path: 'rules[0].resources', content: configmaps}
+      - contains: {path: 'rules[0].resources', content: pods/log}
+      - notExists: {path: 'rules[?(@.resources[*] == "secrets")]'}
+      - notExists: {path: 'rules[?(@.verbs[*] == "create")]'}
+
+  - it: server.clusterRead=false 时 server 没有集群读权限
+    set:
+      profile: observe
+      roles.server.clusterRead: false
+    asserts:
+      - containsDocument: {kind: ClusterRole, apiVersion: rbac.authorization.k8s.io/v1, name: t-srenautix-server-read}
+        not: true
+
+  - it: mcp 与 worker 一样只读且不读 ConfigMap
+    set:
+      profile: observe
+      roles.mcp.enabled: true
+    documentSelector: {path: "$[?(@.kind == 'ClusterRole')].metadata.name", value: t-srenautix-mcp-read}
+    asserts:
+      - notExists: {path: 'rules[?(@.resources[*] == "configmaps")]'}
+      - notExists: {path: 'rules[?(@.resources[*] == "secrets")]'}
+      - notExists: {path: 'rules[?(@.verbs[*] == "patch")]'}
+
+  - it: extraReadRules 追加到只读角色
+    set:
+      profile: observe
+      rbac.extraReadRules:
+        - apiGroups: [example.com]
+          resources: [widgets]
+          verbs: [get, list, watch]
+    documentSelector: {path: "$[?(@.kind == 'ClusterRole')].metadata.name", value: t-srenautix-worker-read}
+    asserts:
+      - contains:
+          path: rules
+          content:
+            apiGroups: [example.com]
+            resources: [widgets]
+            verbs: [get, list, watch]
+
+  - it: extraReadRules 不允许 secrets
+    set:
+      profile: observe
+      rbac.extraReadRules:
+        - apiGroups: [""]
+          resources: [secrets]
+          verbs: [get]
+    asserts:
+      - failedTemplate:
+          errorPattern: 不允许授予资源 "secrets"
+
+  - it: extraReadRules 不允许写动词
+    set:
+      profile: observe
+      rbac.extraReadRules:
+        - apiGroups: [example.com]
+          resources: [widgets]
+          verbs: [get, patch]
+    asserts:
+      - failedTemplate:
+          errorPattern: 只允许 get、list、watch

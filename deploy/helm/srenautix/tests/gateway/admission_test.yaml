@@ -1,0 +1,101 @@
+suite: gateway 的准入策略与熔断开关（不变量 2、3、11）
+templates:
+  - templates/gateway/admission.yaml
+  - templates/gateway/gateway-extra.yaml
+release:
+  name: t
+  namespace: srenautix
+capabilities:
+  majorVersion: "1"
+  minorVersion: "34"
+tests:
+  - it: 熔断开关默认冻结
+    template: templates/gateway/gateway-extra.yaml
+    set:
+      profile: standard
+    documentSelector: {path: metadata.name, value: srenautix-freeze}
+    asserts:
+      - isKind: {of: ConfigMap}
+      - equal: {path: data.frozen, value: "true"}
+
+  - it: freeze.frozen=false 时解除冻结
+    template: templates/gateway/gateway-extra.yaml
+    set:
+      profile: standard
+      freeze.frozen: false
+    documentSelector: {path: metadata.name, value: srenautix-freeze}
+    asserts:
+      - equal: {path: data.frozen, value: "false"}
+
+  - it: 兜底策略只匹配 gateway 的 ServiceAccount
+    template: templates/gateway/admission.yaml
+    set:
+      profile: standard
+    documentSelector: {path: "spec.matchConditions[0].name", value: gateway-only}
+    asserts:
+      - equal:
+          path: spec.matchConditions[0].expression
+          value: request.userInfo.username == "system:serviceaccount:srenautix:t-srenautix-gateway"
+      - equal: {path: spec.failurePolicy, value: Fail}
+      - equal: {path: spec.paramKind, value: {apiVersion: v1, kind: ConfigMap}}
+
+  - it: 兜底策略拒绝准入配置、RBAC、Secret、token 与熔断开关的写入
+    template: templates/gateway/admission.yaml
+    set:
+      profile: standard
+    documentSelector: {path: "spec.matchConditions[0].name", value: gateway-only}
+    asserts:
+      - matchRegex: {path: 'spec.validations[0].expression', pattern: 'admissionregistration\.k8s\.io'}
+      - matchRegex: {path: 'spec.validations[0].expression', pattern: 'rbac\.authorization\.k8s\.io'}
+      - matchRegex: {path: 'spec.validations[0].expression', pattern: "'/secrets'"}
+      - matchRegex: {path: 'spec.validations[0].expression', pattern: "'/serviceaccounts/token'"}
+      - matchRegex: {path: 'spec.validations[1].expression', pattern: "srenautix-freeze"}
+
+  - it: 兜底策略的可写资源列表来自启用的动作
+    template: templates/gateway/admission.yaml
+    set:
+      profile: standard
+      roles.gateway.actions: [node_cordon]
+    documentSelector: {path: "spec.matchConditions[0].name", value: gateway-only}
+    asserts:
+      - matchRegex: {path: 'spec.validations[3].expression', pattern: '"/nodes"'}
+      - notMatchRegex: {path: 'spec.validations[3].expression', pattern: '"/pods"'}
+      - notMatchRegex: {path: 'spec.validations[3].expression', pattern: 'apps/'}
+
+  - it: 每个策略的 Binding 以 paramRef 引用 srenautix-freeze，ConfigMap 缺失时拒绝
+    template: templates/gateway/admission.yaml
+    set:
+      profile: standard
+    documentSelector: {path: kind, value: ValidatingAdmissionPolicyBinding, matchMany: true}
+    asserts:
+      - equal: {path: spec.validationActions, value: [Deny]}
+
+  - it: 兜底策略的 Binding 引用熔断开关
+    template: templates/gateway/admission.yaml
+    set:
+      profile: standard
+    documentSelector: {path: spec.policyName, value: t-srenautix-gateway-baseline}
+    asserts:
+      - equal:
+          path: spec.paramRef
+          value:
+            name: srenautix-freeze
+            namespace: srenautix
+            parameterNotFoundAction: Deny
+
+  - it: 生成的策略都只匹配 gateway 的 ServiceAccount
+    template: templates/gateway/admission.yaml
+    set:
+      profile: standard
+    documentSelector: {path: kind, value: ValidatingAdmissionPolicy, matchMany: true}
+    asserts:
+      - matchRegex:
+          path: spec.matchConditions[0].expression
+          pattern: system:serviceaccount:srenautix:t-srenautix-gateway
+      - equal: {path: spec.failurePolicy, value: Fail}
+
+  - it: observe 配置不生成准入策略与熔断开关
+    set:
+      profile: observe
+    asserts:
+      - hasDocuments: {count: 0}

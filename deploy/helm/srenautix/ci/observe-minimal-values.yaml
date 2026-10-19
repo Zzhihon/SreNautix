@@ -1,0 +1,2 @@
+# 等同于 helm install --set profile=observe：其余开关全部按 profile 取默认值
+profile: observe

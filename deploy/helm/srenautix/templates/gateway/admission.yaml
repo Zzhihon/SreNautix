@@ -1,0 +1,105 @@
+{{- if include "srenautix.roleEnabled" (dict "ctx" $ "role" "gateway") }}
+{{- $fullname := include "srenautix.fullname" . }}
+{{- $username := include "srenautix.gateway.username" . }}
+{{- $cat := include "srenautix.gateway.catalog" . | fromYaml }}
+{{- $writable := include "srenautix.gateway.writableResources" . }}
+# 兜底策略：只约束 gateway 的 ServiceAccount。
+# 1. 目录之外的资源一律拒绝写入；准入配置、RBAC、Secret、ServiceAccount token 与熔断开关永远拒绝。
+# 2. srenautix-freeze 以 paramRef 引用：frozen=true 或 ConfigMap 缺失时拒绝目录内的全部写入，
+#    gateway 自己的 ActionExecution、Lease、Event 记录在冻结时仍可写入。
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: {{ $fullname }}-gateway-baseline
+  labels:
+    {{- include "srenautix.roleLabels" (dict "ctx" $ "role" "gateway") | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  paramKind:
+    apiVersion: v1
+    kind: ConfigMap
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["*"]
+        apiVersions: ["*"]
+        operations: [CREATE, UPDATE, DELETE, CONNECT]
+        resources: ["*", "*/*"]
+  matchConditions:
+    - name: gateway-only
+      expression: request.userInfo.username == {{ $username | quote }}
+  variables:
+    - name: target
+      expression: >-
+        request.resource.group + '/' + request.resource.resource +
+        (request.subResource != '' ? '/' + request.subResource : '')
+    - name: ownRecord
+      expression: >-
+        variables.target in ['srenautix.io/actionexecutions', 'srenautix.io/actionexecutions/status',
+        'coordination.k8s.io/leases']
+    - name: bookkeeping
+      expression: >-
+        (variables.ownRecord && request.namespace == {{ .Release.Namespace | quote }}) ||
+        variables.target in ['/events', 'events.k8s.io/events',
+        'authorization.k8s.io/selfsubjectaccessreviews', 'authorization.k8s.io/selfsubjectrulesreviews']
+  validations:
+    - expression: >-
+        !(request.resource.group in ['rbac.authorization.k8s.io', 'admissionregistration.k8s.io',
+        'authentication.k8s.io', 'certificates.k8s.io']) &&
+        !(variables.target in ['/secrets', '/serviceaccounts', '/serviceaccounts/token'])
+      message: gateway may never write admission configuration, RBAC, Secrets or ServiceAccount tokens
+    - expression: >-
+        !(variables.target == '/configmaps' && request.name == 'srenautix-freeze')
+      message: gateway may never modify the srenautix-freeze ConfigMap
+    - expression: "!variables.ownRecord || request.namespace == '{{ .Release.Namespace }}'"
+      message: gateway may only write ActionExecutions and Leases in its own namespace
+    - expression: variables.target in {{ $writable }}
+      messageExpression: "'gateway may only write resources in the action catalog, got ' + variables.target"
+    - expression: >-
+        variables.bookkeeping || params.?data.?frozen.orValue('true') == 'false'
+      message: srenautix-freeze is frozen, gateway writes are proposal-only
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: {{ $fullname }}-gateway-baseline
+  labels:
+    {{- include "srenautix.roleLabels" (dict "ctx" $ "role" "gateway") | nindent 4 }}
+spec:
+  policyName: {{ $fullname }}-gateway-baseline
+  validationActions: [Deny]
+  paramRef:
+    name: srenautix-freeze
+    namespace: {{ .Release.Namespace }}
+    parameterNotFoundAction: Deny
+{{- range $file := $cat.policies }}
+{{- $path := printf "files/admission/%s" $file }}
+{{- $raw := $.Files.Get $path }}
+{{- if not $raw }}
+{{- fail (printf "动作目录引用的策略文件 %s 不存在" $path) }}
+{{- end }}
+{{- $rendered := tpl $raw $ }}
+{{- $policy := $rendered | fromYaml }}
+{{- if or (hasKey $policy "Error") (ne ($policy.kind | default "") "ValidatingAdmissionPolicy") }}
+{{- fail (printf "%s 必须恰好包含一个 ValidatingAdmissionPolicy 文档" $path) }}
+{{- end }}
+---
+# 生成自 {{ $path }}
+{{ $rendered | trim }}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: {{ $policy.metadata.name }}
+  labels:
+    {{- include "srenautix.roleLabels" (dict "ctx" $ "role" "gateway") | nindent 4 }}
+spec:
+  policyName: {{ $policy.metadata.name }}
+  validationActions: [Deny]
+  {{- if $policy.spec.paramKind }}
+  paramRef:
+    name: srenautix-freeze
+    namespace: {{ $.Release.Namespace }}
+    parameterNotFoundAction: Deny
+  {{- end }}
+{{- end }}
+{{- end }}

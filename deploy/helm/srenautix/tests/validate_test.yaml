@@ -1,0 +1,158 @@
+suite: 配置校验
+templates:
+  - templates/validate.yaml
+release:
+  name: t
+  namespace: srenautix
+capabilities:
+  majorVersion: "1"
+  minorVersion: "34"
+tests:
+  - it: observe 默认配置通过校验
+    set:
+      profile: observe
+    asserts:
+      - hasDocuments: {count: 0}
+
+  - it: server 不能关闭
+    set:
+      profile: observe
+      roles.server.enabled: false
+    asserts:
+      - failedTemplate: {errorPattern: server 是必需的角色}
+
+  - it: CNPG 默认至少 2 个实例
+    set:
+      profile: observe
+      database.cnpg.instances: 1
+    asserts:
+      - failedTemplate: {errorPattern: 至少为 2}
+
+  - it: 显式接受风险后允许单实例
+    set:
+      profile: observe
+      database.cnpg.instances: 1
+      database.cnpg.allowSingleInstance: true
+    asserts:
+      - hasDocuments: {count: 0}
+
+  - it: 外部 PostgreSQL 必须给出地址与密码 Secret
+    set:
+      profile: observe
+      database.mode: external
+    asserts:
+      - failedTemplate: {errorPattern: 必须设置 database.external.host}
+
+  - it: 外部 PostgreSQL 使用 verify-full 时必须给出 CA
+    set:
+      profile: observe
+      database.mode: external
+      database.external.host: pg.example.com
+      database.external.passwordSecrets.server: a
+      database.external.passwordSecrets.worker: b
+    asserts:
+      - failedTemplate: {errorPattern: 必须设置 database.external.caSecret}
+
+  - it: 开启自身告警时必须指定 SreNautix 以外的接收方
+    set:
+      profile: observe
+      selfMonitoring.prometheusRule.enabled: true
+    asserts:
+      - failedTemplate: {errorPattern: 必须设置 selfMonitoring.receiver}
+
+  - it: 自身告警需要路由标签
+    set:
+      profile: observe
+      selfMonitoring.prometheusRule.enabled: true
+      selfMonitoring.receiver: platform-oncall
+    asserts:
+      - failedTemplate: {errorPattern: selfMonitoring.routeLabels 不能为空}
+
+  - it: 自身告警的接收方不能是 SreNautix 自己
+    set:
+      profile: observe
+      selfMonitoring.prometheusRule.enabled: true
+      selfMonitoring.receiver: srenautix
+      selfMonitoring.routeLabels.team: platform
+    asserts:
+      - failedTemplate: {errorPattern: 不能是 SreNautix 自己的接收方}
+
+  - it: 自身告警的 webhook 不能指向 SreNautix server
+    set:
+      profile: observe
+      selfMonitoring.prometheusRule.enabled: true
+      selfMonitoring.receiver: platform-oncall
+      selfMonitoring.routeLabels.team: platform
+      alertmanagerConfig.enabled: true
+      alertmanagerConfig.selfReceiverSpec:
+        webhookConfigs:
+          - url: http://t-srenautix-server.srenautix.svc:8080/v1/ingest/alertmanager
+    asserts:
+      - failedTemplate: {errorPattern: 指向 SreNautix server}
+
+  - it: 自身告警发往其他接收方时通过
+    set:
+      profile: observe
+      selfMonitoring.prometheusRule.enabled: true
+      selfMonitoring.receiver: platform-oncall
+      selfMonitoring.routeLabels.team: platform
+      alertmanagerConfig.enabled: true
+      alertmanagerConfig.selfReceiverSpec:
+        webhookConfigs:
+          - url: http://oncall-bridge.monitoring.svc:8080/alerts
+    asserts:
+      - hasDocuments: {count: 0}
+
+  - it: 合规配置不允许审计写入 PG
+    values:
+      - ../values-compliance.yaml
+    set:
+      audit.sink: pg
+    asserts:
+      - failedTemplate: {errorPattern: 合规配置要求审计写入开启对象锁的对象存储}
+
+  - it: 合规配置要求 COMPLIANCE 模式的对象锁与 180 天保留
+    values:
+      - ../values-compliance.yaml
+    set:
+      audit.objectLock.retentionDays: 30
+    asserts:
+      - failedTemplate: {errorPattern: retentionDays≥180}
+
+  - it: 合规配置要求专用节点池
+    values:
+      - ../values-compliance.yaml
+    set:
+      global.nodeSelector: null
+    asserts:
+      - failedTemplate: {errorPattern: 合规配置要求专用节点池}
+
+  - it: 合规配置不允许放宽治理选项
+    values:
+      - ../values-compliance.yaml
+    set:
+      governance.allowSelfApproval: true
+    asserts:
+      - failedTemplate: {errorPattern: 合规配置不允许关闭三权分立}
+
+  - it: 合规配置要求镜像签名校验
+    values:
+      - ../values-compliance.yaml
+    set:
+      imagePolicy.enabled: false
+    asserts:
+      - failedTemplate: {errorPattern: 合规配置要求开启 imagePolicy}
+
+  - it: 外部 S3 审计汇需要地址与凭证
+    set:
+      profile: observe
+      audit.sink: s3
+    asserts:
+      - failedTemplate: {errorPattern: audit.sink=s3 时必须设置}
+
+  - it: Cilium FQDN 策略需要模型域名
+    set:
+      profile: observe
+      networkPolicy.cilium.enabled: true
+    asserts:
+      - failedTemplate: {errorPattern: 必须列出 networkPolicy.cilium.modelFQDNs}

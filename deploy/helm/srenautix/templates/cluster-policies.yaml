@@ -1,0 +1,53 @@
+{{- if .Values.priorityClass.create }}
+---
+# PriorityClass 的取值由安装方决定，不应高于集群中已有的运维组件
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: {{ default (include "srenautix.fullname" .) .Values.priorityClass.name }}
+  labels:
+    {{- include "srenautix.labels" . | nindent 4 }}
+value: {{ int .Values.priorityClass.value }}
+globalDefault: false
+preemptionPolicy: PreemptLowerPriority
+description: SreNautix 全部角色
+{{- end }}
+
+{{- if .Values.resourceQuota.enabled }}
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: {{ include "srenautix.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "srenautix.labels" . | nindent 4 }}
+spec:
+  hard:
+    {{- toYaml .Values.resourceQuota.hard | nindent 4 }}
+{{- end }}
+
+{{- if include "srenautix.imagePolicyEnabled" . }}
+{{- $ip := .Values.imagePolicy }}
+---
+# policy-controller：两个 SreNautix 镜像必须带有发布工作流的 cosign 无密钥签名
+apiVersion: policy.sigstore.dev/v1beta1
+kind: ClusterImagePolicy
+metadata:
+  name: {{ include "srenautix.fullname" . }}
+  labels:
+    {{- include "srenautix.labels" . | nindent 4 }}
+spec:
+  images:
+    {{- range $img := list .Values.image.hub .Values.image.spoke }}
+    - glob: {{ printf "%s**" (include "srenautix.image" (dict "ctx" $ "image" (dict "repository" $img.repository "digest" "x")) | trimSuffix "@x") | quote }}
+    {{- end }}
+  authorities:
+    - keyless:
+        url: https://fulcio.sigstore.dev
+        identities:
+          - issuer: {{ $ip.issuer }}
+            subjectRegExp: {{ $ip.subjectRegExp | quote }}
+      ctlog:
+        url: https://rekor.sigstore.dev
+{{- end }}

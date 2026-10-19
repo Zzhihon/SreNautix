@@ -1,0 +1,71 @@
+suite: 角色的 ServiceAccount、配置、Service 与 PDB
+templates:
+  - templates/role-resources.yaml
+release:
+  name: t
+  namespace: srenautix
+capabilities:
+  majorVersion: "1"
+  minorVersion: "34"
+tests:
+  - it: 多副本的角色生成 PDB，单副本的不生成
+    set:
+      profile: observe
+      roles.server.replicas: 2
+    asserts:
+      - containsDocument: {kind: PodDisruptionBudget, apiVersion: policy/v1, name: t-srenautix-server, any: true}
+      - containsDocument: {kind: PodDisruptionBudget, apiVersion: policy/v1, name: t-srenautix-worker}
+        not: true
+
+  - it: podDisruptionBudget.enabled=false 时不生成 PDB
+    set:
+      profile: observe
+      roles.server.replicas: 2
+      podDisruptionBudget.enabled: false
+    asserts:
+      - containsDocument: {kind: PodDisruptionBudget, apiVersion: policy/v1, name: t-srenautix-server}
+        not: true
+
+  - it: server 的配置带数据库、审计、治理与熔断开关
+    set:
+      profile: standard
+    documentSelector: {path: metadata.name, value: t-srenautix-server-config}
+    asserts:
+      - matchRegex: {path: 'data["config.yaml"]', pattern: 'host: t-srenautix-pg-rw\.srenautix\.svc'}
+      - matchRegex: {path: 'data["config.yaml"]', pattern: 'user: srenautix_server'}
+      - matchRegex: {path: 'data["config.yaml"]', pattern: 'sink: minio'}
+      - matchRegex: {path: 'data["config.yaml"]', pattern: 'configMap: srenautix-freeze'}
+      - matchRegex: {path: 'data["config.yaml"]', pattern: 'separationOfDuties: false'}
+
+  - it: worker 的配置不包含审计、治理与熔断开关
+    set:
+      profile: standard
+    documentSelector: {path: metadata.name, value: t-srenautix-worker-config}
+    asserts:
+      - matchRegex: {path: 'data["config.yaml"]', pattern: 'user: srenautix_worker'}
+      - notMatchRegex: {path: 'data["config.yaml"]', pattern: 'audit:'}
+      - notMatchRegex: {path: 'data["config.yaml"]', pattern: 'governance:'}
+      - notMatchRegex: {path: 'data["config.yaml"]', pattern: 'freeze:'}
+
+  - it: 合规配置的治理选项全部取最严格的值
+    values:
+      - ../values-compliance.yaml
+    documentSelector: {path: metadata.name, value: t-srenautix-server-config}
+    asserts:
+      - matchRegex: {path: 'data["config.yaml"]', pattern: 'separationOfDuties: true'}
+      - matchRegex: {path: 'data["config.yaml"]', pattern: 'requirePasskey: true'}
+      - matchRegex: {path: 'data["config.yaml"]', pattern: 'allowSelfApproval: false'}
+      - matchRegex: {path: 'data["config.yaml"]', pattern: 'mode: COMPLIANCE'}
+
+  - it: 角色与全局 config 合并进 config.yaml，角色的值优先
+    set:
+      profile: observe
+      config:
+        locale: zh-CN
+        budget: {dailyTokens: 1000}
+      roles.worker.config:
+        budget: {dailyTokens: 15000000}
+    documentSelector: {path: metadata.name, value: t-srenautix-worker-config}
+    asserts:
+      - matchRegex: {path: 'data["config.yaml"]', pattern: 'locale: zh-CN'}
+      - matchRegex: {path: 'data["config.yaml"]', pattern: 'dailyTokens: 15000000'}

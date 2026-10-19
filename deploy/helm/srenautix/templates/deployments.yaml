@@ -1,0 +1,164 @@
+{{- range $role := list "server" "worker" "mcp" "reader" "gateway" }}
+{{- if include "srenautix.roleEnabled" (dict "ctx" $ "role" $role) }}
+{{- $r := index $.Values.roles $role }}
+{{- $name := include "srenautix.roleName" (dict "ctx" $ "role" $role) }}
+{{- $spoke := has $role (list "reader" "gateway") }}
+{{- $image := ternary $.Values.image.spoke $.Values.image.hub $spoke }}
+{{- $config := include "srenautix.roleConfig" (dict "ctx" $ "role" $role) }}
+{{- $secrets := include "srenautix.roleSecrets" (dict "ctx" $ "role" $role) | fromYamlArray }}
+{{- $replicas := ternary 1 (int ($r.replicas | default 1)) (eq $role "gateway") }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "srenautix.roleLabels" (dict "ctx" $ "role" $role) | nindent 4 }}
+spec:
+  replicas: {{ $replicas }}
+  revisionHistoryLimit: 5
+  {{- if eq $role "gateway" }}
+  # gateway 单副本；Lease 只用于选主隔离，Recreate 保证新旧实例不会同时执行
+  strategy:
+    type: Recreate
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "srenautix.selectorLabels" (dict "ctx" $ "role" $role) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "srenautix.selectorLabels" (dict "ctx" $ "role" $role) | nindent 8 }}
+        app.kubernetes.io/part-of: srenautix
+        {{- with (merge (deepCopy ($r.podLabels | default dict)) ($.Values.global.podLabels | default dict)) }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      annotations:
+        checksum/config: {{ $config | sha256sum }}
+        {{- with (merge (deepCopy ($r.podAnnotations | default dict)) ($.Values.global.podAnnotations | default dict)) }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ $name }}
+      automountServiceAccountToken: true
+      enableServiceLinks: false
+      {{- if eq $role "gateway" }}
+      terminationGracePeriodSeconds: {{ $r.terminationGracePeriodSeconds }}
+      {{- end }}
+      securityContext:
+        {{- include "srenautix.podSecurityContext" $ | nindent 8 }}
+      {{- include "srenautix.imagePullSecrets" $ | nindent 6 }}
+      {{- include "srenautix.scheduling" (dict "ctx" $ "role" $role) | nindent 6 }}
+      {{- $affinity := deepCopy ($r.affinity | default dict) }}
+      {{- if and (eq $role "gateway") (eq $.Values.database.mode "cnpg") (ne $r.pgAntiAffinity "none") }}
+      {{- $term := dict "labelSelector" (dict "matchLabels" (dict "cnpg.io/cluster" (include "srenautix.pg.clusterName" $))) "topologyKey" "kubernetes.io/hostname" }}
+      {{- $pgAnti := dict }}
+      {{- if eq $r.pgAntiAffinity "required" }}
+      {{- $pgAnti = dict "podAntiAffinity" (dict "requiredDuringSchedulingIgnoredDuringExecution" (list $term)) }}
+      {{- else }}
+      {{- $pgAnti = dict "podAntiAffinity" (dict "preferredDuringSchedulingIgnoredDuringExecution" (list (dict "weight" 100 "podAffinityTerm" $term))) }}
+      {{- end }}
+      {{- $affinity = mustMergeOverwrite $pgAnti $affinity }}
+      {{- end }}
+      {{- with $affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: {{ $role }}
+          image: {{ include "srenautix.image" (dict "ctx" $ "image" $image) }}
+          imagePullPolicy: {{ $image.pullPolicy }}
+          args:
+            - --role={{ $role }}
+            - --config=/etc/srenautix/config.yaml
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            {{- if $spoke }}
+            - name: GOMEMLIMIT
+              valueFrom:
+                resourceFieldRef:
+                  resource: limits.memory
+                  divisor: "1"
+            {{- end }}
+            {{- with $r.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+            - name: metrics
+              containerPort: 9090
+              protocol: TCP
+            - name: probes
+              containerPort: 8081
+              protocol: TCP
+          startupProbe:
+            httpGet: {path: /healthz, port: probes}
+            periodSeconds: 5
+            failureThreshold: 60
+          livenessProbe:
+            httpGet: {path: /healthz, port: probes}
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: {path: /readyz, port: probes}
+            periodSeconds: 5
+            failureThreshold: 3
+          resources:
+            {{- toYaml $r.resources | nindent 12 }}
+          securityContext:
+            {{- include "srenautix.containerSecurityContext" $ | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/srenautix/config.yaml
+              subPath: config.yaml
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+            {{- range $s := $secrets }}
+            - name: secret-{{ $s.key | lower }}
+              mountPath: {{ include "srenautix.secretsDir" $ }}/{{ $s.key }}
+              readOnly: true
+            {{- end }}
+            {{- if eq $role "gateway" }}
+            - name: audit-staging
+              mountPath: /var/lib/srenautix/audit-staging
+            {{- end }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ $name }}-config
+        - name: tmp
+          emptyDir:
+            sizeLimit: 256Mi
+        {{- range $s := $secrets }}
+        - name: secret-{{ $s.key | lower }}
+          secret:
+            secretName: {{ $s.secretName }}
+            # 0440
+            defaultMode: 288
+            {{- with $s.items }}
+            items:
+              {{- toYaml . | nindent 14 }}
+            {{- end }}
+        {{- end }}
+        {{- if eq $role "gateway" }}
+        - name: audit-staging
+          persistentVolumeClaim:
+            claimName: {{ $name }}-audit-staging
+        {{- end }}
+{{- end }}
+{{- end }}

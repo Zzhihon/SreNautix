@@ -1,0 +1,67 @@
+suite: 自身监控
+templates:
+  - templates/self-monitoring.yaml
+release:
+  name: t
+  namespace: srenautix
+capabilities:
+  majorVersion: "1"
+  minorVersion: "34"
+set:
+  profile: observe
+  selfMonitoring:
+    serviceMonitor: {enabled: true}
+    prometheusRule: {enabled: true}
+    dashboard: {enabled: true}
+    receiver: platform-oncall
+    routeLabels: {team: platform}
+tests:
+  - it: 每条自身告警都带 srenautix_self 与路由标签
+    documentSelector: {path: kind, value: PrometheusRule}
+    asserts:
+      - equal: {path: 'spec.groups[0].rules[*].labels.srenautix_self', value: "true"}
+      - equal: {path: 'spec.groups[0].rules[*].labels.team', value: platform}
+
+  - it: 自身告警只使用 srenautix_ 前缀的指标与 up
+    documentSelector: {path: kind, value: PrometheusRule}
+    asserts:
+      - matchRegex: {path: 'spec.groups[0].rules[*].expr', pattern: '(srenautix_[a-z_]+|up)\{'}
+
+  - it: 阶段 A p95 告警阈值为 60 秒
+    documentSelector: {path: kind, value: PrometheusRule}
+    asserts:
+      - contains:
+          path: spec.groups[0].rules
+          content:
+            alert: SreNautixStageALatencyHigh
+          any: true
+
+  - it: 每个启用的角色一个 ServiceMonitor
+    asserts:
+      - containsDocument: {kind: ServiceMonitor, apiVersion: monitoring.coreos.com/v1, name: t-srenautix-server, any: true}
+      - containsDocument: {kind: ServiceMonitor, apiVersion: monitoring.coreos.com/v1, name: t-srenautix-worker, any: true}
+
+  - it: 看板 ConfigMap 带 Grafana sidecar 标签并包含看板 JSON
+    documentSelector: {path: kind, value: ConfigMap}
+    asserts:
+      - equal: {path: metadata.labels.grafana_dashboard, value: "1"}
+      - matchRegex: {path: 'data["srenautix-self.json"]', pattern: '"uid": "srenautix-self"'}
+
+  - it: AlertmanagerConfig 把自身告警送到其他接收方，其余送到 SreNautix
+    set:
+      alertmanagerConfig.enabled: true
+      alertmanagerConfig.selfReceiverSpec:
+        webhookConfigs:
+          - url: http://oncall-bridge.monitoring.svc:8080/alerts
+    documentSelector: {path: kind, value: AlertmanagerConfig}
+    asserts:
+      - equal: {path: spec.route.receiver, value: srenautix}
+      - equal: {path: 'spec.route.routes[0].receiver', value: platform-oncall}
+      - equal:
+          path: 'spec.route.routes[0].matchers[0]'
+          value: {name: srenautix_self, value: "true", matchType: "="}
+      - equal: {path: 'spec.route.routes[0].continue', value: false}
+      - equal: {path: spec.route.groupWait, value: 30s}
+      - equal:
+          path: 'spec.receivers[0].webhookConfigs[0].url'
+          value: http://t-srenautix-server.srenautix.svc:8080/v1/ingest/alertmanager

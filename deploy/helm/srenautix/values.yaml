@@ -1,0 +1,353 @@
+# SreNautix Helm values。
+# 三种安装配置的预设见 values-observe.yaml、values-standard.yaml、values-compliance.yaml；
+# 也可以只写 --set profile=observe，未显式设置的开关按 profile 取默认值（见 templates/_profile.tpl）。
+
+# observe | standard | compliance
+profile: standard
+
+# 所有事件键、拓扑和审计记录都带 cluster_id
+clusterId: default
+
+global:
+  # 非空时替换两个镜像的仓库主机名，用于离线安装的私有仓库
+  imageRegistry: ""
+  imagePullSecrets: []
+  # 对所有角色生效的调度约束，与各角色自己的设置合并（合规配置要求专用节点池）
+  nodeSelector: {}
+  tolerations: []
+  podLabels: {}
+  podAnnotations: {}
+
+image:
+  hub:
+    repository: ghcr.io/zzhihon/srenautix
+    # 为空时使用 Chart.appVersion
+    tag: ""
+    # 非空时按 digest 拉取，忽略 tag
+    digest: ""
+    pullPolicy: IfNotPresent
+  spoke:
+    repository: ghcr.io/zzhihon/srenautix-spoke
+    tag: ""
+    digest: ""
+    pullPolicy: IfNotPresent
+
+# 每个角色的 enabled 为 null 时按 profile 决定：
+# observe：server、worker；standard 与 compliance：再加 reader、gateway；mcp 在三种配置下默认关闭。
+roles:
+  server:
+    enabled: null
+    replicas: 1
+    # 单集群安装时 server 直接读取本集群（只读、不含 Secret）
+    clusterRead: true
+    resources:
+      requests: {cpu: 200m, memory: 512Mi}
+      limits: {cpu: "1", memory: 1Gi}
+    service:
+      type: ClusterIP
+      annotations: {}
+    ingress:
+      enabled: false
+      className: ""
+      annotations: {}
+      hosts: []
+      # - host: srenautix.example.com
+      tls: []
+    config: {}
+    extraEnv: []
+    nodeSelector: {}
+    tolerations: []
+    affinity: {}
+    topologySpreadConstraints: []
+    priorityClassName: ""
+    podLabels: {}
+    podAnnotations: {}
+  worker:
+    enabled: null
+    replicas: 1
+    resources:
+      requests: {cpu: 200m, memory: 1Gi}
+      limits: {cpu: "2", memory: 1Gi}
+    config: {}
+    extraEnv: []
+    nodeSelector: {}
+    tolerations: []
+    affinity: {}
+    topologySpreadConstraints: []
+    priorityClassName: ""
+    podLabels: {}
+    podAnnotations: {}
+  mcp:
+    enabled: null
+    replicas: 1
+    resources:
+      requests: {cpu: 100m, memory: 256Mi}
+      limits: {cpu: 500m, memory: 512Mi}
+    config: {}
+    extraEnv: []
+    nodeSelector: {}
+    tolerations: []
+    affinity: {}
+    topologySpreadConstraints: []
+    priorityClassName: ""
+    podLabels: {}
+    podAnnotations: {}
+  reader:
+    enabled: null
+    replicas: 1
+    resources:
+      requests: {cpu: 50m, memory: 128Mi}
+      limits: {cpu: 500m, memory: 256Mi}
+    config: {}
+    extraEnv: []
+    nodeSelector: {}
+    tolerations: []
+    affinity: {}
+    topologySpreadConstraints: []
+    priorityClassName: ""
+    podLabels: {}
+    podAnnotations: {}
+  gateway:
+    enabled: null
+    # gateway 固定单副本 + Recreate（设计 §9.4），这里没有 replicas
+    resources:
+      requests: {cpu: 50m, memory: 128Mi}
+      limits: {cpu: 500m, memory: 256Mi}
+    # 启用的动作；每个动作对应准入策略（files/admission/）与 RBAC（templates/gateway/_catalog.tpl）
+    actions:
+      - node_cordon
+      - node_uncordon
+      - workload_scale
+      - rollout_pause
+      - rollout_resume
+      - pod_restart
+    # 收到 SIGTERM 后等进行中的动作完成
+    terminationGracePeriodSeconds: 600
+    # 本地审计暂存卷
+    auditStaging:
+      size: 1Gi
+      storageClass: ""
+    # 与 PG 实例的反亲和：preferred | required | none
+    pgAntiAffinity: preferred
+    config: {}
+    extraEnv: []
+    nodeSelector: {}
+    tolerations: []
+    affinity: {}
+    priorityClassName: ""
+    podLabels: {}
+    podAnnotations: {}
+
+# 熔断开关 srenautix-freeze：准入策略以 paramRef 引用，ConfigMap 缺失时拒绝 gateway 的全部写入。
+# frozen=true 时 gateway 只提议、不执行。
+freeze:
+  frozen: true
+
+# 治理选项；null 按 profile 取值，合规配置不允许放宽
+governance:
+  # 三权分立：admin 拆成 sys-admin 与 security-admin
+  separationOfDuties: null
+  # H 档审批必须使用通行密钥
+  requirePasskey: null
+  # 提议人能否审批自己的 L 档提议
+  allowSelfApproval: null
+  # H 档审批要求的重新认证时间窗（秒）
+  highTierReauthMaxAgeSeconds: 300
+
+# 数据源地址，写入各角色配置；凭证放在 secrets.datasources
+datasources:
+  prometheus: {url: ""}
+  alertmanager: {url: ""}
+  loki: {url: ""}
+  tempo: {url: ""}
+
+# 已存在的 Secret 名称。chart 按设计 §1.1 决定哪些角色挂载哪些 Secret，挂载路径为 /etc/srenautix/secrets/<键>/
+secrets:
+  # 模型密钥，只挂到 worker
+  llm: {existingSecret: ""}
+  # 渠道 token（Telegram、飞书等），只挂到 server
+  channels: {existingSecret: ""}
+  # OIDC 客户端，只挂到 server
+  oidc: {existingSecret: ""}
+  # 服务签名密钥（只签 L 档审批），只挂到 server
+  serviceSigningKey: {existingSecret: ""}
+  # 审计检查点签名密钥：server（治理链）与 gateway（执行链）
+  auditSigningKey: {existingSecret: ""}
+  # 数据源只读凭证：server、worker、reader
+  datasources: {existingSecret: ""}
+
+database:
+  # cnpg：在本命名空间创建 CNPG Cluster（需要已安装 CNPG operator）；external：使用外部 PostgreSQL 16+
+  mode: cnpg
+  name: srenautix
+  # 每个角色一个库角色
+  roles:
+    server: {username: srenautix_server}
+    worker: {username: srenautix_worker}
+  external:
+    host: ""
+    port: 5432
+    sslmode: verify-full
+    # 含 ca.crt 的 Secret，sslmode 为 verify-ca / verify-full 时必填
+    caSecret: ""
+    # 每个角色的密码 Secret（键 password）
+    passwordSecrets:
+      server: ""
+      worker: ""
+  cnpg:
+    instances: 2
+    # 设计要求至少 2 个实例；单实例只用于明确接受风险的部署
+    allowSingleInstance: false
+    # 为空时使用 CNPG operator 的默认 PostgreSQL 镜像
+    imageName: ""
+    storage:
+      size: 10Gi
+      storageClass: ""
+    resources:
+      requests: {cpu: 250m, memory: 1Gi}
+      limits: {}
+    parameters: {}
+    # preferred | required
+    podAntiAffinityType: preferred
+    nodeSelector: {}
+    tolerations: []
+    # CNPG operator 所在命名空间，NetworkPolicy 放行它访问实例
+    operatorNamespace: cnpg-system
+    # 原样传给 Cluster.spec.backup
+    backup: {}
+    # 已存在的密码 Secret（类型 kubernetes.io/basic-auth）；为空时由 chart 生成并保留
+    passwordSecrets:
+      server: ""
+      worker: ""
+
+# 审计汇：执行链（gateway）与治理链（server）以 JSONL 哈希链写入对象存储
+audit:
+  # minio：在本命名空间部署小型 MinIO；s3：外部 S3 兼容存储；pg：写入 PG 独立表（只限 observe / standard，控制台持续提示风险）
+  # 为 null 时按 profile 决定：observe 为 pg，standard 与 compliance 为 minio
+  sink: null
+  bucket: srenautix-audit
+  objectLock:
+    enabled: true
+    # GOVERNANCE | COMPLIANCE；为 null 时 compliance 为 COMPLIANCE，其余为 GOVERNANCE
+    mode: null
+    retentionDays: 180
+  s3:
+    endpoint: ""
+    region: ""
+    forcePathStyle: true
+    # 含 accessKey、secretKey 两个键；server 与 gateway 共用
+    existingSecret: ""
+  minio:
+    image:
+      repository: cgr.dev/chainguard/minio
+      digest: sha256:2915cb406f38ed6ff9634de0a3e4a9423e2dda06a6f1aca18f8c968aa37a01f6
+    clientImage:
+      repository: cgr.dev/chainguard/minio-client
+      digest: sha256:f4ffdb6d79586e6255d138641ab5e6b0dca8f188df4291fd62a3278785bbe468
+    storage:
+      size: 10Gi
+      storageClass: ""
+    resources:
+      requests: {cpu: 50m, memory: 256Mi}
+      limits: {cpu: 500m, memory: 512Mi}
+    nodeSelector: {}
+    tolerations: []
+
+# 自身监控：PrometheusRule、ServiceMonitor 与 Grafana 看板
+selfMonitoring:
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+    labels: {}
+  prometheusRule:
+    enabled: false
+    labels: {}
+  dashboard:
+    enabled: false
+    # Grafana sidecar 识别的标签
+    labels:
+      grafana_dashboard: "1"
+    # 为空时放在发布所在命名空间
+    namespace: ""
+  # 自身告警必须发往 SreNautix 以外的接收方。每条告警都带 srenautix_self="true" 与下面的路由标签，
+  # 在 Alertmanager 中把这些标签路由到 receiver 指定的接收方。
+  receiver: ""
+  routeLabels: {}
+
+# 可选：用 prometheus-operator 的 AlertmanagerConfig 把告警路由到 SreNautix。
+# 自身告警（srenautix_self="true"）先路由到 selfMonitoring.receiver，SreNautix 的 webhook 路由排除它们。
+alertmanagerConfig:
+  enabled: false
+  labels: {}
+  # SreNautix webhook 接收方的名称
+  receiverName: srenautix
+  groupWait: 30s
+  groupInterval: 1m
+  repeatInterval: 4h
+  # selfMonitoring.receiver 的接收方配置（AlertmanagerConfig receivers[] 的一项，不含 name）
+  selfReceiverSpec: {}
+
+networkPolicy:
+  enabled: true
+  # kube-apiserver 的地址段；为空时放行到任意地址的 apiServerPorts
+  apiServerCIDRs: []
+  apiServerPorts: [443, 6443]
+  dns:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: kube-system
+    podSelector:
+      matchLabels:
+        k8s-app: kube-dns
+  # 可以访问 server HTTP 端口（webhook、控制台）的来源；为空时允许任意来源
+  serverIngressFrom: []
+  # 可以抓取指标端口的来源
+  metricsIngressFrom:
+    - namespaceSelector: {}
+  # 数据源（Prometheus、Alertmanager、Loki、Tempo）所在位置，server、worker、reader 可以访问
+  datasourcesEgressTo: []
+  # 模型端点，只有 worker 可以访问；为空时放行到任意地址的 443
+  modelsEgressTo: []
+  # 聊天渠道（Telegram、飞书等）与 OIDC 提供方，只有 server 可以访问；为空时放行到任意地址的 443
+  channelsEgressTo: []
+  # gateway 执行后校验使用的本地指标端点
+  gatewayMetricsEgressTo: []
+  # 外部 S3 审计汇（audit.sink=s3）
+  auditEgressTo: []
+  # Cilium 环境下为 worker 生成按 FQDN 限制的出站策略
+  cilium:
+    enabled: false
+    modelFQDNs: []
+
+podDisruptionBudget:
+  enabled: true
+
+# 默认不使用 PriorityClass；create=true 时创建一个并用于所有角色
+priorityClass:
+  create: false
+  name: ""
+  value: 0
+
+resourceQuota:
+  enabled: false
+  hard:
+    requests.cpu: "4"
+    requests.memory: 8Gi
+    limits.cpu: "8"
+    limits.memory: 12Gi
+    persistentvolumeclaims: "10"
+    requests.storage: 60Gi
+
+# policy-controller 的 ClusterImagePolicy，校验两个镜像的 cosign 无密钥签名（合规配置默认开启）
+imagePolicy:
+  enabled: null
+  issuer: https://token.actions.githubusercontent.com
+  # 镜像由可复用工作流 image.yml 签名，证书主体是该工作流的路径
+  subjectRegExp: ^https://github\.com/Zzhihon/SreNautix/\.github/workflows/image\.yml@refs/(heads/main|tags/v.+)$
+
+# 额外的只读 RBAC 规则，追加到 server、worker、mcp、reader（不允许包含 secrets）
+rbac:
+  extraReadRules: []
+
+# 所有角色共用的配置片段，与各角色的 config 合并写入 config.yaml
+config: {}

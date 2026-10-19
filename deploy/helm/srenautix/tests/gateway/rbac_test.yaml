@@ -1,0 +1,57 @@
+suite: gateway 的 RBAC（不变量 4）
+templates:
+  - templates/rbac.yaml
+release:
+  name: t
+  namespace: srenautix
+capabilities:
+  majorVersion: "1"
+  minorVersion: "34"
+tests:
+  - it: gateway 的写权限只来自动作目录，不含 Secret、ServiceAccount、RBAC、准入配置与通配符
+    set:
+      profile: standard
+    documentSelector: {path: "$[?(@.kind == 'ClusterRole')].metadata.name", value: t-srenautix-gateway-actions}
+    asserts:
+      - isKind: {of: ClusterRole}
+      - notExists: {path: 'rules[?(@.resources[*] == "secrets")]'}
+      - notExists: {path: 'rules[?(@.resources[*] == "serviceaccounts")]'}
+      - notExists: {path: 'rules[?(@.resources[*] == "serviceaccounts/token")]'}
+      - notExists: {path: 'rules[?(@.apiGroups[*] == "rbac.authorization.k8s.io")]'}
+      - notExists: {path: 'rules[?(@.apiGroups[*] == "admissionregistration.k8s.io")]'}
+      - notExists: {path: 'rules[?(@.apiGroups[*] == "*")]'}
+      - notExists: {path: 'rules[?(@.resources[*] == "*")]'}
+      - notExists: {path: 'rules[?(@.verbs[*] == "*")]'}
+      - notExists: {path: 'rules[?(@.verbs[*] == "escalate")]'}
+      - notExists: {path: 'rules[?(@.verbs[*] == "bind")]'}
+      - notExists: {path: 'rules[?(@.verbs[*] == "impersonate")]'}
+
+  - it: gateway 的集群读权限不含 Secret 与 ConfigMap
+    set:
+      profile: standard
+    documentSelector: {path: "$[?(@.kind == 'ClusterRole')].metadata.name", value: t-srenautix-gateway-read}
+    asserts:
+      - notExists: {path: 'rules[?(@.resources[*] == "secrets")]'}
+      - notExists: {path: 'rules[?(@.resources[*] == "configmaps")]'}
+      - notExists: {path: 'rules[?(@.verbs[*] == "patch")]'}
+
+  - it: gateway 在本命名空间只能读取熔断开关，不能修改
+    set:
+      profile: standard
+    documentSelector: {path: "$[?(@.kind == 'Role')].metadata.name", value: t-srenautix-gateway}
+    asserts:
+      - contains:
+          path: rules
+          content:
+            apiGroups: [""]
+            resources: [configmaps]
+            resourceNames: [srenautix-freeze]
+            verbs: [get, list, watch]
+      - notExists: {path: 'rules[?(@.resources[*] == "secrets")]'}
+
+  - it: 不在目录中的动作渲染失败
+    set:
+      profile: standard
+      roles.gateway.actions: [delete_everything]
+    asserts:
+      - failedTemplate: {errorPattern: 不在动作目录中}

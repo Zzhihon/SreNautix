@@ -1,0 +1,127 @@
+{{- include "srenautix.assertSafeRules" (dict "rules" .Values.rbac.extraReadRules "source" "rbac.extraReadRules") }}
+{{- range $rule := .Values.rbac.extraReadRules }}
+{{- range $verb := $rule.verbs }}
+{{- if not (has $verb (list "get" "list" "watch")) }}
+{{- fail (printf "rbac.extraReadRules 只允许 get、list、watch，当前包含 %q" $verb) }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- /* 各角色的集群只读权限：worker 与 mcp 不读 ConfigMap 和 Pod 日志（设计 §1.1、§8.4） */}}
+{{- $read := dict
+  "server" (dict "configmaps" true "logs" true "enabled" .Values.roles.server.clusterRead)
+  "worker" (dict "configmaps" false "logs" false "enabled" true)
+  "mcp" (dict "configmaps" false "logs" false "enabled" true)
+  "reader" (dict "configmaps" true "logs" true "enabled" true)
+  "gateway" (dict "configmaps" false "logs" false "enabled" true)
+}}
+{{- range $role := list "server" "worker" "mcp" "reader" "gateway" }}
+{{- if include "srenautix.roleEnabled" (dict "ctx" $ "role" $role) }}
+{{- $name := include "srenautix.roleName" (dict "ctx" $ "role" $role) }}
+{{- $opt := index $read $role }}
+{{- if $opt.enabled }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $name }}-read
+  labels:
+    {{- include "srenautix.roleLabels" (dict "ctx" $ "role" $role) | nindent 4 }}
+rules:
+  {{- include "srenautix.readRules" (dict "ctx" $ "configmaps" $opt.configmaps "logs" $opt.logs) | nindent 2 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $name }}-read
+  labels:
+    {{- include "srenautix.roleLabels" (dict "ctx" $ "role" $role) | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $name }}-read
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}
+    namespace: {{ $.Release.Namespace }}
+{{- end }}
+{{- if has $role (list "server" "reader" "gateway") }}
+---
+# 本命名空间内：选主用的 Lease、熔断开关的只读访问；gateway 另有 ActionExecution 与 Event
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $name }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "srenautix.roleLabels" (dict "ctx" $ "role" $role) | nindent 4 }}
+rules:
+  - apiGroups: [coordination.k8s.io]
+    resources: [leases]
+    verbs: [get, list, watch, create, update, patch]
+  - apiGroups: [""]
+    resources: [configmaps]
+    resourceNames: [srenautix-freeze]
+    verbs: [get, list, watch]
+  {{- if eq $role "gateway" }}
+  - apiGroups: [srenautix.io]
+    resources: [actionexecutions]
+    verbs: [get, list, watch, create, update, patch]
+  - apiGroups: [srenautix.io]
+    resources: [actionexecutions/status]
+    verbs: [get, update, patch]
+  {{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $name }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "srenautix.roleLabels" (dict "ctx" $ "role" $role) | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $name }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}
+    namespace: {{ $.Release.Namespace }}
+{{- end }}
+{{- if eq $role "gateway" }}
+{{- $cat := include "srenautix.gateway.catalog" $ | fromYaml }}
+---
+# gateway 的写权限只来自动作目录（files/admission/index.yaml），渲染时已排除 Secret、RBAC、准入配置与 token
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $name }}-actions
+  labels:
+    {{- include "srenautix.roleLabels" (dict "ctx" $ "role" $role) | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: [events]
+    verbs: [create, patch]
+  - apiGroups: [events.k8s.io]
+    resources: [events]
+    verbs: [create, patch]
+  {{- with $cat.rules }}
+  {{- toYaml . | nindent 2 }}
+  {{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $name }}-actions
+  labels:
+    {{- include "srenautix.roleLabels" (dict "ctx" $ "role" $role) | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $name }}-actions
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}
+    namespace: {{ $.Release.Namespace }}
+{{- end }}
+{{- end }}
+{{- end }}

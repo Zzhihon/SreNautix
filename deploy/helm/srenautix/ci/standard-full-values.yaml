@@ -1,0 +1,62 @@
+# 标准配置，打开所有可选资源
+profile: standard
+
+roles:
+  server:
+    replicas: 2
+    ingress:
+      enabled: true
+      className: nginx
+      hosts:
+        - host: srenautix.example.com
+      tls:
+        - hosts: [srenautix.example.com]
+          secretName: srenautix-tls
+  worker:
+    replicas: 2
+  mcp:
+    enabled: true
+  gateway:
+    actions:
+      - node_cordon
+      - node_uncordon
+      - workload_scale
+      - rollout_pause
+      - rollout_resume
+      - pod_restart
+      - cnpg_switchover
+
+secrets:
+  llm: {existingSecret: srenautix-llm}
+  channels: {existingSecret: srenautix-channels}
+  oidc: {existingSecret: srenautix-oidc}
+  serviceSigningKey: {existingSecret: srenautix-service-signing}
+  auditSigningKey: {existingSecret: srenautix-audit-signing}
+  datasources: {existingSecret: srenautix-datasources}
+
+datasources:
+  prometheus: {url: http://prometheus-operated.monitoring.svc:9090}
+  alertmanager: {url: http://alertmanager-operated.monitoring.svc:9093}
+  loki: {url: http://loki.monitoring.svc:3100}
+  tempo: {url: http://tempo.monitoring.svc:3200}
+
+selfMonitoring:
+  serviceMonitor: {enabled: true}
+  prometheusRule: {enabled: true}
+  dashboard: {enabled: true}
+  receiver: platform-oncall
+  routeLabels:
+    team: platform
+
+alertmanagerConfig:
+  enabled: true
+  selfReceiverSpec:
+    webhookConfigs:
+      - url: http://oncall-bridge.monitoring.svc:8080/alerts
+
+priorityClass:
+  create: true
+  value: 100000
+
+resourceQuota:
+  enabled: true

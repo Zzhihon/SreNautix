@@ -1,0 +1,27 @@
+SreNautix {{ .Chart.AppVersion }} 已安装到命名空间 {{ .Release.Namespace }}，安装配置：{{ .Values.profile }}。
+
+启用的角色：
+{{- range $role := list "server" "worker" "mcp" "reader" "gateway" }}
+{{- if include "srenautix.roleEnabled" (dict "ctx" $ "role" $role) }}
+  - {{ $role }}
+{{- end }}
+{{- end }}
+
+{{- if include "srenautix.roleEnabled" (dict "ctx" $ "role" "gateway") }}
+
+gateway 熔断开关 srenautix-freeze：frozen={{ .Values.freeze.frozen }}。
+{{- if .Values.freeze.frozen }}
+gateway 只提议、不执行。解除冻结只能用 kubectl 或 GitOps：
+  kubectl -n {{ .Release.Namespace }} patch configmap srenautix-freeze --type merge -p '{"data":{"frozen":"false"}}'
+{{- end }}
+{{- end }}
+
+{{- if eq (include "srenautix.auditSink" .) "pg" }}
+
+注意：审计写入 PG 的独立表，没有对象锁保护。控制台会持续提示这一风险。
+{{- end }}
+
+控制台与 webhook 入口：
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "srenautix.roleName" (dict "ctx" $ "role" "server") }} 8080:8080
+Alertmanager webhook 地址：
+  http://{{ include "srenautix.roleName" (dict "ctx" $ "role" "server") }}.{{ .Release.Namespace }}.svc:8080/v1/ingest/alertmanager

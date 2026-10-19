@@ -1,0 +1,22 @@
+# 观察模式：server、worker、PG；不部署 gateway，不做任何写操作。
+# 安装后 1 小时内用过去 14 天的数据给出成绩单（设计 §14.5）。
+profile: observe
+
+roles:
+  server: {enabled: true}
+  worker: {enabled: true}
+  mcp: {enabled: false}
+  reader: {enabled: false}
+  gateway: {enabled: false}
+
+governance:
+  separationOfDuties: false
+  requirePasskey: false
+  allowSelfApproval: true
+
+# 观察模式没有执行链；治理链写入 PG 的独立表
+audit:
+  sink: pg
+
+imagePolicy:
+  enabled: false

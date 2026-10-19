@@ -1,0 +1,29 @@
+# 标准配置：观察模式加上 reader 与 gateway，适合 2–50 人的团队。
+# gateway 默认冻结（只提议），解除冻结见 docs/install/standard.zh-CN.md。
+profile: standard
+
+roles:
+  server: {enabled: true}
+  worker: {enabled: true}
+  mcp: {enabled: false}
+  reader: {enabled: true}
+  gateway: {enabled: true}
+
+freeze:
+  frozen: true
+
+governance:
+  separationOfDuties: false
+  requirePasskey: false
+  allowSelfApproval: true
+
+# 审计以 JSONL 哈希链写入开启对象锁的 MinIO
+audit:
+  sink: minio
+  objectLock:
+    enabled: true
+    mode: GOVERNANCE
+    retentionDays: 180
+
+imagePolicy:
+  enabled: false

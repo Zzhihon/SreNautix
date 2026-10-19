@@ -1,0 +1,78 @@
+suite: NetworkPolicy
+templates:
+  - templates/networkpolicy.yaml
+release:
+  name: t
+  namespace: srenautix
+capabilities:
+  majorVersion: "1"
+  minorVersion: "34"
+tests:
+  - it: 每个启用的角色都有入站与出站策略
+    set:
+      profile: observe
+    documentSelector: {path: "$[?(@.metadata.labels['app.kubernetes.io/component'] == 'worker')].kind", value: NetworkPolicy}
+    asserts:
+      - equal: {path: spec.policyTypes, value: [Ingress, Egress]}
+
+  - it: worker 只开放指标端口，不接受其他入站
+    set:
+      profile: observe
+    documentSelector: {path: metadata.name, value: t-srenautix-worker}
+    asserts:
+      - lengthEqual: {path: spec.ingress, count: 1}
+      - equal: {path: 'spec.ingress[0].ports[0].port', value: 9090}
+
+  - it: 只有 worker 可以访问模型端点
+    set:
+      profile: observe
+      networkPolicy.modelsEgressTo:
+        - ipBlock: {cidr: 198.51.100.7/32}
+    asserts:
+      - contains:
+          path: spec.egress
+          content:
+            to:
+              - ipBlock: {cidr: 198.51.100.7/32}
+        documentSelector: {path: metadata.name, value: t-srenautix-worker}
+      - notContains:
+          path: spec.egress
+          content:
+            to:
+              - ipBlock: {cidr: 198.51.100.7/32}
+        documentSelector: {path: metadata.name, value: t-srenautix-server}
+
+  - it: PG 实例只接受 server、worker、自身实例与 CNPG operator
+    set:
+      profile: observe
+    documentSelector: {path: metadata.name, value: t-srenautix-pg}
+    asserts:
+      - equal: {path: spec.policyTypes, value: [Ingress]}
+      - equal:
+          path: 'spec.ingress[0].from[0].podSelector.matchLabels["app.kubernetes.io/component"]'
+          value: server
+      - equal:
+          path: 'spec.ingress[0].from[1].podSelector.matchLabels["app.kubernetes.io/component"]'
+          value: worker
+      - equal:
+          path: 'spec.ingress[2].from[0].namespaceSelector.matchLabels["kubernetes.io/metadata.name"]'
+          value: cnpg-system
+
+  - it: Cilium 开启时 worker 改用 FQDN 出站策略
+    set:
+      profile: observe
+      networkPolicy.cilium.enabled: true
+      networkPolicy.cilium.modelFQDNs: [api.example-llm.com]
+    asserts:
+      - containsDocument: {kind: CiliumNetworkPolicy, apiVersion: cilium.io/v2, name: t-srenautix-worker-models, any: true}
+      - equal:
+          path: 'spec.egress[1].toFQDNs[0].matchName'
+          value: api.example-llm.com
+        documentSelector: {path: kind, value: CiliumNetworkPolicy}
+
+  - it: networkPolicy.enabled=false 时不生成策略
+    set:
+      profile: observe
+      networkPolicy.enabled: false
+    asserts:
+      - hasDocuments: {count: 0}

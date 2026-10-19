@@ -1,0 +1,101 @@
+{{- if eq .Values.database.mode "cnpg" }}
+{{- $db := .Values.database }}
+{{- $c := $db.cnpg }}
+{{- $cluster := include "srenautix.pg.clusterName" . }}
+{{- range $role := list "server" "worker" }}
+{{- if not (index $c.passwordSecrets $role) }}
+{{- $secret := include "srenautix.pg.passwordSecret" (dict "ctx" $ "role" $role) }}
+---
+# 库角色 {{ $role }} 的密码；首次安装时生成，之后的升级沿用已有值
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $secret }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "srenautix.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: database
+    cnpg.io/reload: "true"
+  annotations:
+    helm.sh/resource-policy: keep
+type: kubernetes.io/basic-auth
+stringData:
+  username: {{ (index $db.roles $role).username }}
+  password: {{ include "srenautix.persistentRandom" (dict "ctx" $ "name" $secret "key" "password" "length" 32) | quote }}
+{{- end }}
+{{- end }}
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: {{ $cluster }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "srenautix.labels" . | nindent 4 }}
+    app.kubernetes.io/component: database
+spec:
+  instances: {{ $c.instances }}
+  {{- with $c.imageName }}
+  imageName: {{ . }}
+  {{- end }}
+  primaryUpdateStrategy: unsupervised
+  {{- with $c.resources }}
+  resources:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  postgresql:
+    {{- with $c.parameters }}
+    parameters:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+    {{- if gt (int $c.instances) 1 }}
+    # 同步复制为 preferred：单个副本故障时不阻塞写入（设计 §15.2）
+    synchronous:
+      method: any
+      number: 1
+      dataDurability: preferred
+    {{- end }}
+  bootstrap:
+    initdb:
+      database: {{ $db.name }}
+      owner: srenautix_owner
+      # 每个角色只能在自己创建的 schema 中读写；跨角色读取走 API 或事件流（设计 §2.1）
+      postInitApplicationSQL:
+        - REVOKE ALL ON DATABASE {{ $db.name }} FROM PUBLIC
+        - REVOKE ALL ON SCHEMA public FROM PUBLIC
+        - CREATE ROLE srenautix_schema_creator NOLOGIN
+        - GRANT CONNECT, CREATE ON DATABASE {{ $db.name }} TO srenautix_schema_creator
+  managed:
+    roles:
+      {{- range $role := list "server" "worker" }}
+      - name: {{ (index $db.roles $role).username }}
+        ensure: present
+        login: true
+        inherit: true
+        inRoles: [srenautix_schema_creator]
+        passwordSecret:
+          name: {{ include "srenautix.pg.passwordSecret" (dict "ctx" $ "role" $role) }}
+      {{- end }}
+  storage:
+    size: {{ $c.storage.size }}
+    {{- with $c.storage.storageClass }}
+    storageClass: {{ . }}
+    {{- end }}
+  affinity:
+    enablePodAntiAffinity: true
+    topologyKey: kubernetes.io/hostname
+    podAntiAffinityType: {{ $c.podAntiAffinityType }}
+    {{- $ns := merge (deepCopy ($c.nodeSelector | default dict)) (.Values.global.nodeSelector | default dict) }}
+    {{- with $ns }}
+    nodeSelector:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+    {{- with (concat (.Values.global.tolerations | default list) ($c.tolerations | default list)) }}
+    tolerations:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+  {{- with $c.backup }}
+  backup:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+{{- end }}

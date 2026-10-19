@@ -1,0 +1,35 @@
+# 外部 PostgreSQL、外部 S3 审计汇、Cilium FQDN 出站策略
+profile: standard
+
+database:
+  mode: external
+  external:
+    host: pg.db.example.internal
+    caSecret: srenautix-pg-ca
+    passwordSecrets:
+      server: srenautix-pg-server
+      worker: srenautix-pg-worker
+
+audit:
+  sink: s3
+  s3:
+    endpoint: https://s3.example.com
+    region: cn-north-1
+    forcePathStyle: false
+    existingSecret: srenautix-audit-s3
+
+networkPolicy:
+  apiServerCIDRs: [10.0.0.1/32]
+  datasourcesEgressTo:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: monitoring
+  auditEgressTo:
+    - ipBlock:
+        cidr: 203.0.113.10/32
+  cilium:
+    enabled: true
+    modelFQDNs: [api.example-llm.com]
+
+global:
+  imageRegistry: registry.example.internal

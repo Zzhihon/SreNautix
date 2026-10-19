@@ -1,0 +1,19 @@
+apiVersion: v2
+name: srenautix
+description: SreNautix 的全部角色（server、worker、mcp、reader、gateway）与 observe / standard / compliance 三种安装配置
+type: application
+# chart 与 SreNautix 共用一个版本号；发布工作流按 tag 或提交改写 version 与 appVersion
+version: 0.1.0
+appVersion: "0.1.0"
+# 观察模式支持 1.27 及以上；启用 gateway 时模板会再检查 ≥1.30
+kubeVersion: ">=1.27.0-0"
+home: https://github.com/Zzhihon/SreNautix
+sources:
+  - https://github.com/Zzhihon/SreNautix
+keywords:
+  - sre
+  - incident
+  - kubernetes
+  - aiops
+annotations:
+  artifacthub.io/license: AGPL-3.0-or-later

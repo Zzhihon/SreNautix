@@ -1,0 +1,45 @@
+# 合规配置：标准配置加上三权分立、通行密钥、WORM 审计、专用节点池与镜像签名校验。
+# 安装前需要准备：带污点的专用节点池、policy-controller、对象存储（或使用内置 MinIO）。
+profile: compliance
+
+roles:
+  server: {enabled: true}
+  worker: {enabled: true}
+  mcp: {enabled: false}
+  reader: {enabled: true}
+  gateway:
+    enabled: true
+    pgAntiAffinity: required
+
+freeze:
+  frozen: true
+
+governance:
+  separationOfDuties: true
+  requirePasskey: true
+  allowSelfApproval: false
+
+audit:
+  sink: minio
+  objectLock:
+    enabled: true
+    mode: COMPLIANCE
+    retentionDays: 180
+
+# 专用节点池：按实际节点池的标签与污点修改
+global:
+  nodeSelector:
+    srenautix.io/pool: srenautix
+  tolerations:
+    - key: srenautix.io/pool
+      operator: Equal
+      value: srenautix
+      effect: NoSchedule
+
+database:
+  cnpg:
+    instances: 2
+    podAntiAffinityType: required
+
+imagePolicy:
+  enabled: true

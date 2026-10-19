@@ -1,0 +1,202 @@
+{{- if .Values.networkPolicy.enabled }}
+{{- $np := .Values.networkPolicy }}
+{{- $ns := .Release.Namespace }}
+{{- $base := dict "app.kubernetes.io/name" (include "srenautix.name" .) "app.kubernetes.io/instance" .Release.Name }}
+{{- $peer := dict }}
+{{- range $role := list "server" "worker" "mcp" "reader" "gateway" }}
+{{- $_ := set $peer $role (dict "podSelector" (dict "matchLabels" (merge (dict "app.kubernetes.io/component" $role) (deepCopy $base)))) }}
+{{- end }}
+{{- $pgPeer := dict "podSelector" (dict "matchLabels" (dict "cnpg.io/cluster" (include "srenautix.pg.clusterName" .))) }}
+{{- $minioPeer := dict "podSelector" (dict "matchLabels" (merge (dict "app.kubernetes.io/component" "audit-store") (deepCopy $base))) }}
+{{- $minioSetupPeer := dict "podSelector" (dict "matchLabels" (merge (dict "app.kubernetes.io/component" "audit-store-setup") (deepCopy $base))) }}
+{{- $dns := dict "to" (list (dict "namespaceSelector" $np.dns.namespaceSelector "podSelector" $np.dns.podSelector)) "ports" (list (dict "protocol" "UDP" "port" 53) (dict "protocol" "TCP" "port" 53)) }}
+{{- $apiPorts := list }}
+{{- range $p := $np.apiServerPorts }}{{- $apiPorts = append $apiPorts (dict "protocol" "TCP" "port" (int $p)) }}{{- end }}
+{{- $api := dict "ports" $apiPorts }}
+{{- if $np.apiServerCIDRs }}
+{{- $to := list }}
+{{- range $c := $np.apiServerCIDRs }}{{- $to = append $to (dict "ipBlock" (dict "cidr" $c)) }}{{- end }}
+{{- $_ := set $api "to" $to }}
+{{- end }}
+{{- $https := list (dict "protocol" "TCP" "port" 443) }}
+{{- $datasources := dict "to" (list (dict "namespaceSelector" dict)) }}
+{{- with $np.datasourcesEgressTo }}{{- $datasources = dict "to" . }}{{- end }}
+{{- $sink := include "srenautix.auditSink" . }}
+{{- $auditEgress := list }}
+{{- if eq $sink "minio" }}
+{{- $auditEgress = list (dict "to" (list $minioPeer) "ports" (list (dict "protocol" "TCP" "port" 9000))) }}
+{{- else if eq $sink "s3" }}
+{{- $auditEgress = list (dict "to" $np.auditEgressTo) }}
+{{- end }}
+{{- $pgEgress := dict "to" (list $pgPeer) "ports" (list (dict "protocol" "TCP" "port" (include "srenautix.pg.port" . | int))) }}
+{{- if eq .Values.database.mode "external" }}
+{{- $pgEgress = dict "ports" (list (dict "protocol" "TCP" "port" (include "srenautix.pg.port" . | int))) }}
+{{- end }}
+{{- $toServer := dict "to" (list (index $peer "server")) "ports" (list (dict "protocol" "TCP" "port" 8080)) }}
+{{- $metricsIn := dict "from" $np.metricsIngressFrom "ports" (list (dict "protocol" "TCP" "port" 9090)) }}
+
+{{- /* 每个角色的入站与出站规则 */}}
+{{- $rules := dict }}
+{{- $serverIn := dict "ports" (list (dict "protocol" "TCP" "port" 8080)) }}
+{{- with $np.serverIngressFrom }}{{- $_ := set $serverIn "from" . }}{{- end }}
+{{- $serverEgress := list $dns $pgEgress $datasources }}
+{{- if .Values.roles.server.clusterRead }}{{- $serverEgress = append $serverEgress $api }}{{- end }}
+{{- $channels := dict "ports" $https }}
+{{- with $np.channelsEgressTo }}{{- $_ := set $channels "to" . }}{{- end }}
+{{- $serverEgress = append $serverEgress $channels }}
+{{- $serverEgress = concat $serverEgress $auditEgress }}
+{{- $_ := set $rules "server" (dict "ingress" (list $serverIn $metricsIn) "egress" $serverEgress) }}
+
+{{- $workerEgress := list $dns $pgEgress $datasources $api $toServer }}
+{{- if not $np.cilium.enabled }}
+{{- $models := dict "ports" $https }}
+{{- with $np.modelsEgressTo }}{{- $models = dict "to" . }}{{- end }}
+{{- $workerEgress = append $workerEgress $models }}
+{{- end }}
+{{- $_ := set $rules "worker" (dict "ingress" (list $metricsIn) "egress" $workerEgress) }}
+
+{{- $mcpIn := dict "from" (list (dict "namespaceSelector" dict)) "ports" (list (dict "protocol" "TCP" "port" 8080)) }}
+{{- $_ := set $rules "mcp" (dict "ingress" (list $mcpIn $metricsIn) "egress" (list $dns $api $toServer)) }}
+
+{{- $_ := set $rules "reader" (dict "ingress" (list $metricsIn) "egress" (list $dns $api $toServer $datasources)) }}
+
+{{- $gatewayEgress := concat (list $dns $api $toServer) $auditEgress }}
+{{- with $np.gatewayMetricsEgressTo }}{{- $gatewayEgress = append $gatewayEgress (dict "to" .) }}{{- end }}
+{{- $_ := set $rules "gateway" (dict "ingress" (list $metricsIn) "egress" $gatewayEgress) }}
+
+{{- range $role := list "server" "worker" "mcp" "reader" "gateway" }}
+{{- if include "srenautix.roleEnabled" (dict "ctx" $ "role" $role) }}
+{{- $r := index $rules $role }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "srenautix.roleName" (dict "ctx" $ "role" $role) }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "srenautix.roleLabels" (dict "ctx" $ "role" $role) | nindent 4 }}
+spec:
+  podSelector:
+    {{- toYaml (index $peer $role).podSelector | nindent 4 }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    {{- toYaml $r.ingress | nindent 4 }}
+  egress:
+    {{- toYaml $r.egress | nindent 4 }}
+{{- end }}
+{{- end }}
+
+{{- if eq .Values.database.mode "cnpg" }}
+---
+# PG 实例：只接受 server、worker、同一 Cluster 的实例与 CNPG operator 的连接
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "srenautix.pg.clusterName" . }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "srenautix.labels" . | nindent 4 }}
+    app.kubernetes.io/component: database
+spec:
+  podSelector:
+    {{- toYaml $pgPeer.podSelector | nindent 4 }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - {{- toYaml (index $peer "server") | nindent 10 }}
+        - {{- toYaml (index $peer "worker") | nindent 10 }}
+      ports:
+        - {protocol: TCP, port: 5432}
+    - from:
+        - {{- toYaml $pgPeer | nindent 10 }}
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.database.cnpg.operatorNamespace }}
+      ports:
+        - {protocol: TCP, port: 8000}
+        - {protocol: TCP, port: 5432}
+    - from:
+        {{- toYaml $np.metricsIngressFrom | nindent 8 }}
+      ports:
+        - {protocol: TCP, port: 9187}
+{{- end }}
+
+{{- if eq $sink "minio" }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "srenautix.minio.name" . }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "srenautix.labels" . | nindent 4 }}
+    app.kubernetes.io/component: audit-store
+spec:
+  podSelector:
+    {{- toYaml $minioPeer.podSelector | nindent 4 }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - {{- toYaml (index $peer "server") | nindent 10 }}
+        - {{- toYaml (index $peer "gateway") | nindent 10 }}
+        - {{- toYaml $minioSetupPeer | nindent 10 }}
+      ports:
+        - {protocol: TCP, port: 9000}
+  egress:
+    - {{- toYaml $dns | nindent 6 }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "srenautix.minio.name" . }}-setup
+  namespace: {{ $ns }}
+  labels:
+    {{- include "srenautix.labels" . | nindent 4 }}
+    app.kubernetes.io/component: audit-store-setup
+spec:
+  podSelector:
+    {{- toYaml $minioSetupPeer.podSelector | nindent 4 }}
+  policyTypes: [Ingress, Egress]
+  egress:
+    - {{- toYaml $dns | nindent 6 }}
+    - to:
+        - {{- toYaml $minioPeer | nindent 10 }}
+      ports:
+        - {protocol: TCP, port: 9000}
+{{- end }}
+
+{{- if and $np.cilium.enabled (include "srenautix.roleEnabled" (dict "ctx" $ "role" "worker")) }}
+---
+# worker 只能按 FQDN 访问模型端点（设计 §8.4）；其余出站由上面的 NetworkPolicy 约束
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ include "srenautix.roleName" (dict "ctx" $ "role" "worker") }}-models
+  namespace: {{ $ns }}
+  labels:
+    {{- include "srenautix.roleLabels" (dict "ctx" $ "role" "worker") | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      {{- toYaml (index $peer "worker").podSelector.matchLabels | nindent 6 }}
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - {port: "53", protocol: ANY}
+          rules:
+            dns:
+              - matchPattern: "*"
+    - toFQDNs:
+        {{- range $f := $np.cilium.modelFQDNs }}
+        - matchName: {{ $f | quote }}
+        {{- end }}
+      toPorts:
+        - ports:
+            - {port: "443", protocol: TCP}
+{{- end }}
+{{- end }}

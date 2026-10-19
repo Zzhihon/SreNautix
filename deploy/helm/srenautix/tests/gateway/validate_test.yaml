@@ -1,0 +1,53 @@
+suite: gateway 的配置校验
+templates:
+  - templates/validate.yaml
+release:
+  name: t
+  namespace: srenautix
+capabilities:
+  majorVersion: "1"
+  minorVersion: "34"
+tests:
+  - it: standard 默认配置通过校验
+    set:
+      profile: standard
+    asserts:
+      - hasDocuments: {count: 0}
+
+  - it: compliance 预设通过校验
+    values:
+      - ../../values-compliance.yaml
+    asserts:
+      - hasDocuments: {count: 0}
+
+  - it: Kubernetes 低于 1.30 时不能启用 gateway
+    set:
+      profile: standard
+    capabilities:
+      majorVersion: "1"
+      minorVersion: "29"
+    asserts:
+      - failedTemplate: {errorPattern: 启用 gateway 需要 Kubernetes ≥1.30}
+
+  - it: Kubernetes 低于 1.30 时可以用观察模式
+    set:
+      profile: observe
+    capabilities:
+      majorVersion: "1"
+      minorVersion: "29"
+    asserts:
+      - hasDocuments: {count: 0}
+
+  - it: 动作列表为空时渲染失败
+    set:
+      profile: standard
+      roles.gateway.actions: []
+    asserts:
+      - failedTemplate: {errorPattern: roles.gateway.actions 不能为空}
+
+  - it: pgAntiAffinity 只接受 preferred、required、none
+    set:
+      profile: standard
+      roles.gateway.pgAntiAffinity: sometimes
+    asserts:
+      - failedTemplate: {errorPattern: roles.gateway.pgAntiAffinity 必须是}

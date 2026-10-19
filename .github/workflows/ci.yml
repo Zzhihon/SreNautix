@@ -1,0 +1,225 @@
+# 每个 PR 与 main 上的提交：TS 与 Go 的检查和测试、契约生成检查、依赖漏洞门禁、chart 检查、工作流检查、镜像构建检查。
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  HELM_VERSION: v4.3.1
+  HELM_UNITTEST_VERSION: v1.2.1
+  HELM_UNITTEST_SHA256: 48e86ecc1467b009630e5954375e5d8494139f73b466df5fe8c04fa45b634939
+  KUBECONFORM_VERSION: v0.8.0
+  KUBECONFORM_SHA256: 9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883
+  ACTIONLINT_VERSION: 1.7.12
+  ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+  SHELLCHECK_VERSION: v0.11.0
+  SHELLCHECK_SHA256: 8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198
+  OSV_SCANNER_VERSION: v2.7.0
+  OSV_SCANNER_SHA256: 160c6253e2922e9e0a6a9771c5c4c40a4b3c6090b34a3cdd5e80c96cc2e4218b
+  GOVULNCHECK_VERSION: v1.9.0
+
+jobs:
+  detect:
+    runs-on: ubuntu-24.04
+    outputs:
+      ts: ${{ steps.detect.outputs.ts }}
+      go: ${{ steps.detect.outputs.go }}
+      hub: ${{ steps.detect.outputs.hub }}
+      spoke: ${{ steps.detect.outputs.spoke }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: 检查仓库中已有的部分
+        id: detect
+        run: |
+          has() { [[ -e "$1" ]] && echo true || echo false; }
+          {
+            echo "ts=$(has pnpm-lock.yaml)"
+            echo "go=$(has go.mod)"
+            echo "hub=$(has apps/srenautix/package.json)"
+            echo "spoke=$(has cmd/srenautix-spoke)"
+          } >>"$GITHUB_OUTPUT"
+
+  ts:
+    needs: detect
+    if: needs.detect.outputs.ts == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # pnpm 版本取自 package.json 的 packageManager
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: 确认依赖安装脚本有白名单
+        run: |
+          yq -e '.onlyBuiltDependencies | length > 0' pnpm-workspace.yaml
+      - name: 安装依赖（冻结锁文件）
+        run: pnpm install --frozen-lockfile
+      - name: lint
+        run: pnpm lint
+      - name: 契约生成结果与仓库一致
+        run: pnpm contract:check
+      - name: typecheck
+        run: pnpm typecheck
+      - name: test
+        run: pnpm test
+
+  go:
+    needs: detect
+    if: needs.detect.outputs.go == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: gofmt
+        run: |
+          unformatted=$(git ls-files -z '*.go' | xargs -0 gofmt -l)
+          if [[ -n "$unformatted" ]]; then
+            echo "以下文件未经 gofmt：" >&2
+            echo "$unformatted" >&2
+            exit 1
+          fi
+      # go-test 依次执行 go vet、测试向量检查与 envtest 测试（见 Makefile）
+      - name: go vet 与 envtest 测试
+        run: make go-test
+      - name: 生成结果与仓库一致
+        run: |
+          if grep -qE '^generate-check:' Makefile; then
+            make generate-check
+          else
+            echo "Makefile 中还没有 generate-check 目标"
+          fi
+
+  vuln:
+    needs: detect
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        if: needs.detect.outputs.go == 'true'
+        with:
+          go-version-file: go.mod
+      - name: govulncheck
+        if: needs.detect.outputs.go == 'true'
+        run: |
+          go install "golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION}"
+          "$(go env GOPATH)/bin/govulncheck" ./...
+      - name: osv-scanner（pnpm-lock.yaml、go.mod）
+        run: |
+          curl -fsSLo osv-scanner "https://github.com/google/osv-scanner/releases/download/${OSV_SCANNER_VERSION}/osv-scanner_linux_amd64"
+          echo "${OSV_SCANNER_SHA256}  osv-scanner" | sha256sum --check
+          chmod +x osv-scanner
+          lockfiles=()
+          for f in pnpm-lock.yaml go.mod; do
+            [[ -f "$f" ]] && lockfiles+=(--lockfile "$f")
+          done
+          ./osv-scanner scan source "${lockfiles[@]}"
+
+  helm:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: ${{ env.HELM_VERSION }}
+      - name: 安装 helm-unittest 与 kubeconform（校验 sha256）
+        run: |
+          plugin_dir="$(helm env HELM_PLUGINS)/helm-unittest"
+          mkdir -p "$plugin_dir" "$HOME/.local/bin"
+          ver=${HELM_UNITTEST_VERSION#v}
+          curl -fsSLo unittest.tgz "https://github.com/helm-unittest/helm-unittest/releases/download/${HELM_UNITTEST_VERSION}/helm-unittest-linux-amd64-${ver}.tgz"
+          echo "${HELM_UNITTEST_SHA256}  unittest.tgz" | sha256sum --check
+          tar -xzf unittest.tgz -C "$plugin_dir"
+          curl -fsSLo kubeconform.tgz "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
+          echo "${KUBECONFORM_SHA256}  kubeconform.tgz" | sha256sum --check
+          tar -xzf kubeconform.tgz -C "$HOME/.local/bin" kubeconform
+          echo "$HOME/.local/bin" >>"$GITHUB_PATH"
+          helm unittest --help >/dev/null
+      - name: lint、渲染校验与 helm-unittest
+        run: deploy/helm/check.sh
+
+  workflows:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: 安装 actionlint 与 shellcheck（校验 sha256）
+        run: |
+          curl -fsSLo actionlint.tgz "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          echo "${ACTIONLINT_SHA256}  actionlint.tgz" | sha256sum --check
+          tar -xzf actionlint.tgz actionlint
+          curl -fsSLo shellcheck.txz "https://github.com/koalaman/shellcheck/releases/download/${SHELLCHECK_VERSION}/shellcheck-${SHELLCHECK_VERSION}.linux.x86_64.tar.xz"
+          echo "${SHELLCHECK_SHA256}  shellcheck.txz" | sha256sum --check
+          tar -xJf shellcheck.txz --strip-components=1 "shellcheck-${SHELLCHECK_VERSION}/shellcheck"
+      - name: actionlint（含工作流内的 shell）
+        run: ./actionlint -shellcheck ./shellcheck
+      - name: 所有 action 都按提交 SHA 固定
+        run: |
+          if grep -rnE '^\s*-?\s*uses:\s*[^.][^@]*@' .github/workflows | grep -vE '@[0-9a-f]{40}( |$)'; then
+            echo "上面的 action 没有按 40 位提交 SHA 固定" >&2
+            exit 1
+          fi
+      - name: shellcheck（deploy/ 下的脚本）
+        run: git ls-files 'deploy/**/*.sh' | xargs ./shellcheck
+
+  images:
+    needs: detect
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: srenautix
+            dockerfile: deploy/docker/srenautix.Dockerfile
+            present: hub
+          - name: srenautix-spoke
+            dockerfile: deploy/docker/srenautix-spoke.Dockerfile
+            present: spoke
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: needs.detect.outputs[matrix.present] == 'true'
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        if: needs.detect.outputs[matrix.present] == 'true'
+      - name: 构建镜像（不推送）
+        if: needs.detect.outputs[matrix.present] == 'true'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64
+          push: false
+          outputs: type=cacheonly
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,scope=${{ matrix.name }},mode=max

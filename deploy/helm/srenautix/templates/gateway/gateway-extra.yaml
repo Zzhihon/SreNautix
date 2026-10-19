@@ -1,0 +1,33 @@
+{{- if include "srenautix.roleEnabled" (dict "ctx" $ "role" "gateway") }}
+{{- $name := include "srenautix.roleName" (dict "ctx" $ "role" "gateway") }}
+# 熔断开关（设计 §9.4、不变量 11）：名称固定，准入策略以 paramRef 引用。
+# 只能用 kubectl 或 GitOps 修改；frozen 不等于 "false" 时 gateway 只提议、不执行。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: srenautix-freeze
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "srenautix.roleLabels" (dict "ctx" $ "role" "gateway") | nindent 4 }}
+data:
+  frozen: {{ ternary "true" "false" (.Values.freeze.frozen | default false) | quote }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $name }}-audit-staging
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "srenautix.roleLabels" (dict "ctx" $ "role" "gateway") | nindent 4 }}
+  annotations:
+    # 本地审计暂存可能含有尚未补写到审计汇的记录，卸载时保留
+    helm.sh/resource-policy: keep
+spec:
+  accessModes: [ReadWriteOnce]
+  {{- with .Values.roles.gateway.auditStaging.storageClass }}
+  storageClassName: {{ . }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.roles.gateway.auditStaging.size }}
+{{- end }}

@@ -1,0 +1,183 @@
+{
+  "uid": "srenautix-self",
+  "title": "SreNautix / 自身健康",
+  "tags": ["srenautix"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "1m",
+  "time": {"from": "now-24h", "to": "now"},
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "label": "数据源",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {}
+      },
+      {
+        "name": "namespace",
+        "label": "命名空间",
+        "type": "query",
+        "datasource": {"type": "prometheus", "uid": "${datasource}"},
+        "query": {"query": "label_values(srenautix_build_info, namespace)", "refId": "ns"},
+        "definition": "label_values(srenautix_build_info, namespace)",
+        "refresh": 2,
+        "current": {}
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "table",
+      "title": "各角色版本",
+      "gridPos": {"x": 0, "y": 0, "w": 12, "h": 6},
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "targets": [
+        {"refId": "A", "expr": "max by (role, version, pod) (srenautix_build_info{namespace=\"$namespace\"})", "instant": true, "format": "table"}
+      ]
+    },
+    {
+      "id": 2,
+      "type": "table",
+      "title": "当前成立的状态条件",
+      "description": "设计 §12.4 的显性失败条件；控制台顶部状态条使用同一组条件。",
+      "gridPos": {"x": 12, "y": 0, "w": 12, "h": 6},
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "targets": [
+        {"refId": "A", "expr": "max by (role, type) (srenautix_condition{namespace=\"$namespace\"}) == 1", "instant": true, "format": "table"}
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "距上次收到告警的时长",
+      "gridPos": {"x": 0, "y": 6, "w": 8, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []},
+      "targets": [
+        {"refId": "A", "expr": "time() - max by (source) (srenautix_ingest_last_received_timestamp_seconds{namespace=\"$namespace\"})", "legendFormat": "{{source}}"}
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "阶段 A 发出延迟 p95",
+      "description": "SLO：从首次触发到发出，p95 ≤60 秒。",
+      "gridPos": {"x": 8, "y": 6, "w": 8, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "fieldConfig": {"defaults": {"unit": "s", "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 60}]}}, "overrides": []},
+      "targets": [
+        {"refId": "A", "expr": "histogram_quantile(0.95, sum by (le) (rate(srenautix_stage_a_latency_seconds_bucket{namespace=\"$namespace\"}[30m])))", "legendFormat": "p95"}
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "渠道投递失败（15 分钟）",
+      "gridPos": {"x": 16, "y": 6, "w": 8, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "targets": [
+        {"refId": "A", "expr": "sum by (channel) (increase(srenautix_notify_delivery_failures_total{namespace=\"$namespace\"}[15m]))", "legendFormat": "{{channel}}"}
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "研判质量",
+      "description": "结论中仍有未检验竞争假设的比例（考核指标，阈值 10%）与零工具调用比例（诊断指标）。",
+      "gridPos": {"x": 0, "y": 14, "w": 8, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "max": 1}, "overrides": []},
+      "targets": [
+        {"refId": "A", "expr": "max(srenautix_research_untested_competitor_ratio{namespace=\"$namespace\"})", "legendFormat": "未检验竞争假设"},
+        {"refId": "B", "expr": "max(srenautix_research_zero_tool_ratio{namespace=\"$namespace\"})", "legendFormat": "零工具调用"}
+      ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "每个事件的研判次数 p95",
+      "gridPos": {"x": 8, "y": 14, "w": 8, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "targets": [
+        {"refId": "A", "expr": "histogram_quantile(0.95, sum by (le) (rate(srenautix_incident_research_runs_bucket{namespace=\"$namespace\"}[1d])))", "legendFormat": "p95"}
+      ]
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "模型预算与熔断",
+      "gridPos": {"x": 16, "y": 14, "w": 8, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "targets": [
+        {"refId": "A", "expr": "max(srenautix_llm_budget_used_ratio{scope=\"daily\", namespace=\"$namespace\"})", "legendFormat": "每日预算已用比例"},
+        {"refId": "B", "expr": "max by (route) (srenautix_llm_breaker_open{namespace=\"$namespace\"})", "legendFormat": "熔断 {{route}}"}
+      ]
+    },
+    {
+      "id": 9,
+      "type": "stat",
+      "title": "gateway 状态",
+      "description": "冻结时只提议、不执行；准入自检未通过时同样只提议。",
+      "gridPos": {"x": 0, "y": 22, "w": 8, "h": 6},
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {"type": "value", "options": {"0": {"text": "否"}, "1": {"text": "是"}}}
+          ]
+        },
+        "overrides": []
+      },
+      "targets": [
+        {"refId": "A", "expr": "max(srenautix_gateway_frozen{namespace=\"$namespace\"})", "legendFormat": "已冻结", "instant": true},
+        {"refId": "B", "expr": "min(srenautix_admission_selfcheck_ok{namespace=\"$namespace\"})", "legendFormat": "准入自检通过", "instant": true}
+      ]
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "动作执行（1 小时）",
+      "gridPos": {"x": 8, "y": 22, "w": 16, "h": 6},
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "targets": [
+        {"refId": "A", "expr": "sum by (action, phase) (increase(srenautix_gateway_executions_total{namespace=\"$namespace\"}[1h]))", "legendFormat": "{{action}} {{phase}}"}
+      ]
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "审计导出延迟",
+      "gridPos": {"x": 0, "y": 28, "w": 8, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []},
+      "targets": [
+        {"refId": "A", "expr": "max by (chain) (srenautix_audit_export_lag_seconds{namespace=\"$namespace\"})", "legendFormat": "{{chain}}"}
+      ]
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "时钟偏差",
+      "gridPos": {"x": 8, "y": 28, "w": 8, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []},
+      "targets": [
+        {"refId": "A", "expr": "max by (peer) (srenautix_clock_skew_seconds{namespace=\"$namespace\"})", "legendFormat": "{{peer}}"}
+      ]
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "已绑定账号的反馈（每周）",
+      "gridPos": {"x": 16, "y": 28, "w": 8, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "targets": [
+        {"refId": "A", "expr": "sum(increase(srenautix_feedback_total{linked=\"true\", namespace=\"$namespace\"}[7d]))", "legendFormat": "反馈"}
+      ]
+    }
+  ]
+}

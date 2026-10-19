@@ -1,0 +1,126 @@
+suite: PostgreSQL 与审计汇
+templates:
+  - templates/database.yaml
+  - templates/audit-minio.yaml
+release:
+  name: t
+  namespace: srenautix
+capabilities:
+  majorVersion: "1"
+  minorVersion: "34"
+tests:
+  - it: CNPG Cluster 默认 2 个实例、实例之间反亲和、同步复制为 preferred
+    template: templates/database.yaml
+    set:
+      profile: observe
+    documentSelector: {path: kind, value: Cluster}
+    asserts:
+      - equal: {path: spec.instances, value: 2}
+      - equal: {path: spec.affinity.enablePodAntiAffinity, value: true}
+      - equal: {path: spec.affinity.podAntiAffinityType, value: preferred}
+      - equal:
+          path: spec.postgresql.synchronous
+          value: {method: any, number: 1, dataDurability: preferred}
+
+  - it: 每个角色一个库角色，密码来自各自的 Secret
+    template: templates/database.yaml
+    set:
+      profile: observe
+    documentSelector: {path: kind, value: Cluster}
+    asserts:
+      - equal:
+          path: spec.managed.roles[0].name
+          value: srenautix_server
+      - equal:
+          path: spec.managed.roles[0].passwordSecret.name
+          value: t-srenautix-pg-server
+      - equal:
+          path: spec.managed.roles[1].name
+          value: srenautix_worker
+      - equal:
+          path: spec.managed.roles[1].passwordSecret.name
+          value: t-srenautix-pg-worker
+
+  - it: 生成的密码 Secret 在卸载时保留
+    template: templates/database.yaml
+    set:
+      profile: observe
+    documentSelector: {path: metadata.name, value: t-srenautix-pg-server}
+    asserts:
+      - isKind: {of: Secret}
+      - equal: {path: type, value: kubernetes.io/basic-auth}
+      - equal: {path: 'metadata.annotations["helm.sh/resource-policy"]', value: keep}
+      - equal: {path: stringData.username, value: srenautix_server}
+
+  - it: 单实例时不配置同步复制
+    template: templates/database.yaml
+    set:
+      profile: observe
+      database.cnpg.instances: 1
+      database.cnpg.allowSingleInstance: true
+    documentSelector: {path: kind, value: Cluster}
+    asserts:
+      - notExists: {path: spec.postgresql.synchronous}
+
+  - it: 外部 PostgreSQL 不创建 Cluster
+    template: templates/database.yaml
+    set:
+      profile: observe
+      database.mode: external
+      database.external.host: pg.example.com
+      database.external.sslmode: require
+      database.external.passwordSecrets.server: a
+      database.external.passwordSecrets.worker: b
+    asserts:
+      - hasDocuments: {count: 0}
+
+  - it: observe 配置的审计写入 PG，不部署 MinIO
+    template: templates/audit-minio.yaml
+    set:
+      profile: observe
+    asserts:
+      - hasDocuments: {count: 0}
+
+  - it: MinIO 存储桶开启对象锁，默认保留期来自 audit.objectLock
+    template: templates/audit-minio.yaml
+    set:
+      profile: observe
+      audit.sink: minio
+    documentSelector: {path: kind, value: ConfigMap}
+    asserts:
+      - matchRegex: {path: 'data["setup.sh"]', pattern: 'mc mb --ignore-existing --with-lock'}
+      - matchRegex: {path: 'data["setup.sh"]', pattern: 'mc retention set --default'}
+
+  - it: MinIO 的写入账号没有删除对象与绕过保留期的权限
+    template: templates/audit-minio.yaml
+    set:
+      profile: observe
+      audit.sink: minio
+    documentSelector: {path: kind, value: ConfigMap}
+    asserts:
+      - notMatchRegex: {path: 'data["writer-policy.json"]', pattern: 'DeleteObject'}
+      - notMatchRegex: {path: 'data["writer-policy.json"]', pattern: 'BypassGovernanceRetention'}
+      - notMatchRegex: {path: 'data["writer-policy.json"]', pattern: '"s3:\*"'}
+
+  - it: 合规配置的对象锁使用 COMPLIANCE 模式
+    template: templates/audit-minio.yaml
+    values:
+      - ../values-compliance.yaml
+    documentSelector: {path: kind, value: Job}
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: LOCK_MODE, value: COMPLIANCE}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: LOCK_DAYS, value: "180"}
+
+  - it: MinIO 以非 root 运行，镜像按 digest 固定
+    template: templates/audit-minio.yaml
+    set:
+      profile: observe
+      audit.sink: minio
+    documentSelector: {path: kind, value: StatefulSet}
+    asserts:
+      - equal: {path: spec.template.spec.securityContext.runAsNonRoot, value: true}
+      - matchRegex: {path: 'spec.template.spec.containers[0].image', pattern: '^cgr\.dev/chainguard/minio@sha256:[0-9a-f]{64}$'}

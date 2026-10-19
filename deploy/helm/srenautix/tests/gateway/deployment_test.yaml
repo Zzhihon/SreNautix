@@ -1,0 +1,107 @@
+suite: gateway 与 standard、compliance 配置的工作负载
+templates:
+  - templates/deployments.yaml
+release:
+  name: t
+  namespace: srenautix
+capabilities:
+  majorVersion: "1"
+  minorVersion: "34"
+tests:
+  - it: profile=standard 部署 server、worker、reader、gateway，mcp 默认关闭
+    set:
+      profile: standard
+    asserts:
+      - containsDocument: {kind: Deployment, apiVersion: apps/v1, name: t-srenautix-server, any: true}
+      - containsDocument: {kind: Deployment, apiVersion: apps/v1, name: t-srenautix-worker, any: true}
+      - containsDocument: {kind: Deployment, apiVersion: apps/v1, name: t-srenautix-reader, any: true}
+      - containsDocument: {kind: Deployment, apiVersion: apps/v1, name: t-srenautix-gateway, any: true}
+      - containsDocument: {kind: Deployment, apiVersion: apps/v1, name: t-srenautix-mcp}
+        not: true
+
+  - it: gateway 使用 spoke 镜像，固定单副本、Recreate，并挂载本地审计暂存卷
+    set:
+      profile: standard
+      roles.gateway.replicas: 3
+    documentSelector: {path: metadata.name, value: t-srenautix-gateway}
+    asserts:
+      - equal: {path: "spec.template.spec.containers[0].image", value: "ghcr.io/zzhihon/srenautix-spoke:0.1.0"}
+      - contains: {path: "spec.template.spec.containers[0].args", content: --role=gateway}
+      - equal: {path: spec.replicas, value: 1}
+      - equal: {path: spec.strategy.type, value: Recreate}
+      - equal: {path: spec.template.spec.terminationGracePeriodSeconds, value: 600}
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: audit-staging
+            persistentVolumeClaim:
+              claimName: t-srenautix-gateway-audit-staging
+      - equal:
+          path: spec.template.spec.containers[0].resources
+          value:
+            requests: {cpu: 50m, memory: 128Mi}
+            limits: {cpu: 500m, memory: 256Mi}
+
+  - it: gateway 与 PG 实例默认设置 preferred 反亲和
+    set:
+      profile: standard
+    documentSelector: {path: metadata.name, value: t-srenautix-gateway}
+    asserts:
+      - equal:
+          path: spec.template.spec.affinity.podAntiAffinity.preferredDuringSchedulingIgnoredDuringExecution[0].podAffinityTerm.labelSelector.matchLabels
+          value:
+            cnpg.io/cluster: t-srenautix-pg
+
+  - it: pgAntiAffinity=required 生成硬性反亲和，none 不生成
+    set:
+      profile: standard
+      roles.gateway.pgAntiAffinity: required
+    documentSelector: {path: metadata.name, value: t-srenautix-gateway}
+    asserts:
+      - exists:
+          path: spec.template.spec.affinity.podAntiAffinity.requiredDuringSchedulingIgnoredDuringExecution
+
+  - it: pgAntiAffinity=none 不生成反亲和
+    set:
+      profile: standard
+      roles.gateway.pgAntiAffinity: none
+    documentSelector: {path: metadata.name, value: t-srenautix-gateway}
+    asserts:
+      - notExists: {path: spec.template.spec.affinity}
+
+  - it: gateway 只挂载审计凭证与审计签名密钥，不挂载模型、渠道、数据源凭证
+    set:
+      profile: standard
+      secrets.llm.existingSecret: llm
+      secrets.channels.existingSecret: channels
+      secrets.datasources.existingSecret: ds
+      secrets.auditSigningKey.existingSecret: audit-sign
+    documentSelector: {path: metadata.name, value: t-srenautix-gateway}
+    asserts:
+      - equal:
+          path: spec.template.spec.volumes[?(@.name=="secret-auditsigningkey")].secret.secretName
+          value: audit-sign
+      - equal:
+          path: spec.template.spec.volumes[?(@.name=="secret-audit-store")].secret.secretName
+          value: t-srenautix-minio-audit-gateway
+      - notExists: {path: 'spec.template.spec.volumes[?(@.name=="secret-llm")]'}
+      - notExists: {path: 'spec.template.spec.volumes[?(@.name=="secret-channels")]'}
+      - notExists: {path: 'spec.template.spec.volumes[?(@.name=="secret-datasources")]'}
+      - notExists: {path: 'spec.template.spec.volumes[?(@.name=="secret-db")]'}
+
+  - it: 合规配置的专用节点池约束作用于所有角色
+    values:
+      - ../../values-compliance.yaml
+    documentSelector: {path: kind, value: Deployment, matchMany: true}
+    asserts:
+      - equal:
+          path: spec.template.spec.nodeSelector
+          value:
+            srenautix.io/pool: srenautix
+      - contains:
+          path: spec.template.spec.tolerations
+          content:
+            key: srenautix.io/pool
+            operator: Equal
+            value: srenautix
+            effect: NoSchedule

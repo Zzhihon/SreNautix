@@ -1,0 +1,186 @@
+{{- $sm := .Values.selfMonitoring }}
+{{- $ns := .Release.Namespace }}
+{{- $fullname := include "srenautix.fullname" . }}
+{{- if $sm.serviceMonitor.enabled }}
+{{- range $role := list "server" "worker" "mcp" "reader" "gateway" }}
+{{- if include "srenautix.roleEnabled" (dict "ctx" $ "role" $role) }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "srenautix.roleName" (dict "ctx" $ "role" $role) }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "srenautix.roleLabels" (dict "ctx" $ "role" $role) | nindent 4 }}
+    {{- with $sm.serviceMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "srenautix.selectorLabels" (dict "ctx" $ "role" $role) | nindent 6 }}
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: {{ $sm.serviceMonitor.interval }}
+{{- end }}
+{{- end }}
+{{- end }}
+
+{{- if $sm.prometheusRule.enabled }}
+{{- $sel := printf "namespace=%q" $ns }}
+{{- $labels := merge (dict "srenautix_self" "true") (deepCopy $sm.routeLabels) }}
+---
+# 自身告警：全部带 srenautix_self="true"，SreNautix 的接入层丢弃这类告警；
+# 路由标签把它们送到 selfMonitoring.receiver（SreNautix 以外的接收方）。
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ $fullname }}-self
+  namespace: {{ $ns }}
+  labels:
+    {{- include "srenautix.labels" . | nindent 4 }}
+    {{- with $sm.prometheusRule.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: srenautix-self
+      rules:
+        - alert: SreNautixComponentDown
+          expr: max by (namespace, job) (up{job=~"{{ $fullname }}-.*", {{ $sel }}}) == 0
+          for: 5m
+          labels:
+            severity: critical
+            {{- toYaml $labels | nindent 12 }}
+          annotations:
+            summary: "SreNautix {{ "{{" }} $labels.job {{ "}}" }} 的指标端点不可达"
+        - alert: SreNautixIngestSilent
+          expr: time() - max by (namespace) (srenautix_ingest_last_received_timestamp_seconds{ {{- $sel -}} }) > 900
+          for: 5m
+          labels:
+            severity: critical
+            {{- toYaml $labels | nindent 12 }}
+          annotations:
+            summary: SreNautix 超过 15 分钟没有收到任何告警（Watchdog 也没有到达）
+        - alert: SreNautixStageALatencyHigh
+          expr: histogram_quantile(0.95, sum by (namespace, le) (rate(srenautix_stage_a_latency_seconds_bucket{ {{- $sel -}} }[30m]))) > 60
+          for: 15m
+          labels:
+            severity: warning
+            {{- toYaml $labels | nindent 12 }}
+          annotations:
+            summary: 阶段 A 报告 p95 超过 60 秒
+        - alert: SreNautixConditionActive
+          expr: max by (namespace, role, type) (srenautix_condition{ {{- $sel -}} }) == 1
+          for: 10m
+          labels:
+            severity: warning
+            {{- toYaml $labels | nindent 12 }}
+          annotations:
+            summary: "SreNautix {{ "{{" }} $labels.role {{ "}}" }} 的状态条件 {{ "{{" }} $labels.type {{ "}}" }} 持续成立"
+        - alert: SreNautixAdmissionSelfCheckFailed
+          expr: max by (namespace) (srenautix_admission_selfcheck_ok{ {{- $sel -}} }) == 0
+          for: 2m
+          labels:
+            severity: critical
+            {{- toYaml $labels | nindent 12 }}
+          annotations:
+            summary: gateway 的准入自检未通过，gateway 已转为只提议
+        - alert: SreNautixGatewayNeedsHuman
+          expr: sum by (namespace, action) (increase(srenautix_gateway_executions_total{phase="needs_human", {{ $sel }}}[1h])) > 0
+          labels:
+            severity: critical
+            {{- toYaml $labels | nindent 12 }}
+          annotations:
+            summary: "动作 {{ "{{" }} $labels.action {{ "}}" }} 执行后校验失败且无法撤销，需要人工处理"
+        - alert: SreNautixAuditExportLag
+          expr: max by (namespace, chain) (srenautix_audit_export_lag_seconds{ {{- $sel -}} }) > 900
+          for: 5m
+          labels:
+            severity: warning
+            {{- toYaml $labels | nindent 12 }}
+          annotations:
+            summary: "审计链 {{ "{{" }} $labels.chain {{ "}}" }} 导出延迟超过 15 分钟"
+        - alert: SreNautixClockSkew
+          expr: max by (namespace, peer) (abs(srenautix_clock_skew_seconds{ {{- $sel -}} })) > 2
+          for: 5m
+          labels:
+            severity: warning
+            {{- toYaml $labels | nindent 12 }}
+          annotations:
+            summary: "与 {{ "{{" }} $labels.peer {{ "}}" }} 的时钟偏差超过 2 秒"
+        - alert: SreNautixLLMBudgetHigh
+          expr: max by (namespace) (srenautix_llm_budget_used_ratio{scope="daily", {{ $sel }}}) > 0.8
+          labels:
+            severity: warning
+            {{- toYaml $labels | nindent 12 }}
+          annotations:
+            summary: 模型每日预算已用超过 80%，warning 事件只出阶段 A
+        - alert: SreNautixNotifyDeliveryFailing
+          expr: sum by (namespace, channel) (increase(srenautix_notify_delivery_failures_total{ {{- $sel -}} }[15m])) > 5
+          labels:
+            severity: warning
+            {{- toYaml $labels | nindent 12 }}
+          annotations:
+            summary: "渠道 {{ "{{" }} $labels.channel {{ "}}" }} 投递持续失败"
+        - alert: SreNautixUntestedCompetitorRatioHigh
+          expr: max by (namespace) (srenautix_research_untested_competitor_ratio{ {{- $sel -}} }) > 0.1
+          for: 1d
+          labels:
+            severity: warning
+            {{- toYaml $labels | nindent 12 }}
+          annotations:
+            summary: 结论中仍有未检验竞争假设的比例超过 10%
+{{- end }}
+
+{{- if $sm.dashboard.enabled }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $fullname }}-dashboard
+  namespace: {{ default $ns $sm.dashboard.namespace }}
+  labels:
+    {{- include "srenautix.labels" . | nindent 4 }}
+    {{- with $sm.dashboard.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+data:
+  srenautix-self.json: |-
+    {{- .Files.Get "files/dashboards/srenautix-self.json" | nindent 4 }}
+{{- end }}
+
+{{- $am := .Values.alertmanagerConfig }}
+{{- if $am.enabled }}
+---
+# 告警路由到 SreNautix；自身告警先匹配第一条子路由，送到 SreNautix 以外的接收方
+apiVersion: monitoring.coreos.com/v1alpha1
+kind: AlertmanagerConfig
+metadata:
+  name: {{ $fullname }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "srenautix.labels" . | nindent 4 }}
+    {{- with $am.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  route:
+    receiver: {{ $am.receiverName }}
+    groupBy: [alertname, namespace]
+    groupWait: {{ $am.groupWait }}
+    groupInterval: {{ $am.groupInterval }}
+    repeatInterval: {{ $am.repeatInterval }}
+    routes:
+      - receiver: {{ $sm.receiver }}
+        matchers:
+          - {name: srenautix_self, value: "true", matchType: "="}
+        continue: false
+  receivers:
+    - name: {{ $am.receiverName }}
+      webhookConfigs:
+        - url: http://{{ include "srenautix.roleName" (dict "ctx" $ "role" "server") }}.{{ $ns }}.svc:8080/v1/ingest/alertmanager
+          sendResolved: true
+    - {{- toYaml (merge (dict "name" $sm.receiver) (deepCopy $am.selfReceiverSpec)) | nindent 6 }}
+{{- end }}

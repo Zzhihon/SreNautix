@@ -1,0 +1,168 @@
+suite: 安装配置与角色开关
+templates:
+  - templates/deployments.yaml
+release:
+  name: t
+  namespace: srenautix
+capabilities:
+  majorVersion: "1"
+  minorVersion: "34"
+tests:
+  - it: profile=observe 只部署 server 与 worker
+    set:
+      profile: observe
+    asserts:
+      - containsDocument: {kind: Deployment, apiVersion: apps/v1, name: t-srenautix-server, any: true}
+      - containsDocument: {kind: Deployment, apiVersion: apps/v1, name: t-srenautix-worker, any: true}
+      - containsDocument: {kind: Deployment, apiVersion: apps/v1, name: t-srenautix-gateway}
+        not: true
+      - containsDocument: {kind: Deployment, apiVersion: apps/v1, name: t-srenautix-reader}
+        not: true
+      - containsDocument: {kind: Deployment, apiVersion: apps/v1, name: t-srenautix-mcp}
+        not: true
+
+  - it: 显式开关覆盖 profile 的默认值
+    set:
+      profile: observe
+      roles.mcp.enabled: true
+      roles.reader.enabled: true
+      roles.worker.enabled: false
+    asserts:
+      - containsDocument: {kind: Deployment, apiVersion: apps/v1, name: t-srenautix-mcp, any: true}
+      - containsDocument: {kind: Deployment, apiVersion: apps/v1, name: t-srenautix-reader, any: true}
+      - containsDocument: {kind: Deployment, apiVersion: apps/v1, name: t-srenautix-worker}
+        not: true
+
+  - it: 不认识的 profile 渲染失败
+    set:
+      profile: aggressive
+    asserts:
+      - failedTemplate:
+          errorPattern: profile 必须是 observe、standard、compliance 之一
+
+  - it: hub 角色使用 srenautix 镜像，spoke 角色使用 srenautix-spoke 镜像，按角色传入 --role
+    set:
+      profile: observe
+      roles.reader.enabled: true
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: ghcr.io/zzhihon/srenautix:0.1.0
+        documentSelector: {path: metadata.name, value: t-srenautix-server}
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: ghcr.io/zzhihon/srenautix-spoke:0.1.0
+        documentSelector: {path: metadata.name, value: t-srenautix-reader}
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --role=reader
+        documentSelector: {path: metadata.name, value: t-srenautix-reader}
+
+  - it: digest 优先于 tag，global.imageRegistry 替换仓库主机名
+    set:
+      profile: observe
+      global.imageRegistry: registry.example.internal
+      image.hub.digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: registry.example.internal/zzhihon/srenautix@sha256:0000000000000000000000000000000000000000000000000000000000000000
+        documentSelector: {path: metadata.name, value: t-srenautix-worker}
+
+  - it: 所有容器以非 root、只读根文件系统运行
+    set:
+      profile: observe
+      roles.mcp.enabled: true
+      roles.reader.enabled: true
+    documentSelector: {path: kind, value: Deployment, matchMany: true}
+    asserts:
+      - equal: {path: spec.template.spec.securityContext.runAsNonRoot, value: true}
+      - equal: {path: "spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem", value: true}
+      - equal: {path: "spec.template.spec.containers[0].securityContext.allowPrivilegeEscalation", value: false}
+
+  - it: 参考资源与设计 §17 一致
+    set:
+      profile: observe
+      roles.reader.enabled: true
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].resources
+          value:
+            requests: {cpu: 200m, memory: 512Mi}
+            limits: {cpu: "1", memory: 1Gi}
+        documentSelector: {path: metadata.name, value: t-srenautix-server}
+      - equal:
+          path: spec.template.spec.containers[0].resources
+          value:
+            requests: {cpu: 200m, memory: 1Gi}
+            limits: {cpu: "2", memory: 1Gi}
+        documentSelector: {path: metadata.name, value: t-srenautix-worker}
+      - equal:
+          path: spec.template.spec.containers[0].resources
+          value:
+            requests: {cpu: 50m, memory: 128Mi}
+            limits: {cpu: 500m, memory: 256Mi}
+        documentSelector: {path: metadata.name, value: t-srenautix-reader}
+
+  - it: PriorityClass create=true 时所有角色使用它
+    set:
+      profile: observe
+      priorityClass.create: true
+    documentSelector: {path: kind, value: Deployment, matchMany: true}
+    asserts:
+      - equal: {path: spec.template.spec.priorityClassName, value: t-srenautix}
+
+  - it: 默认不设置 PriorityClass
+    set:
+      profile: observe
+    documentSelector: {path: kind, value: Deployment, matchMany: true}
+    asserts:
+      - notExists: {path: spec.template.spec.priorityClassName}
+
+  - it: 角色的调度设置与 global 合并
+    set:
+      profile: observe
+      global.nodeSelector: {pool: ops}
+      global.tolerations:
+        - {key: dedicated, operator: Exists, effect: NoSchedule}
+      roles.worker.nodeSelector: {zone: a}
+    documentSelector: {path: metadata.name, value: t-srenautix-worker}
+    asserts:
+      - equal:
+          path: spec.template.spec.nodeSelector
+          value: {pool: ops, zone: a}
+      - equal:
+          path: spec.template.spec.tolerations
+          value:
+            - {key: dedicated, operator: Exists, effect: NoSchedule}
+
+  - it: 只有 worker 挂载模型密钥，只有 server 挂载渠道 token
+    set:
+      profile: observe
+      secrets.llm.existingSecret: llm
+      secrets.channels.existingSecret: channels
+    asserts:
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: secret-llm
+            secret: {secretName: llm, defaultMode: 288}
+        documentSelector: {path: metadata.name, value: t-srenautix-worker}
+      - notContains:
+          path: spec.template.spec.volumes
+          content:
+            name: secret-channels
+            secret: {secretName: channels, defaultMode: 288}
+        documentSelector: {path: metadata.name, value: t-srenautix-worker}
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: secret-channels
+            secret: {secretName: channels, defaultMode: 288}
+        documentSelector: {path: metadata.name, value: t-srenautix-server}
+      - notContains:
+          path: spec.template.spec.volumes
+          content:
+            name: secret-llm
+            secret: {secretName: llm, defaultMode: 288}
+        documentSelector: {path: metadata.name, value: t-srenautix-server}

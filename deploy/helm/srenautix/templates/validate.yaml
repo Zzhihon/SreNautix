@@ -1,0 +1,119 @@
+{{- /* 渲染前的配置校验：任何一项不满足都直接失败 */}}
+{{- $v := .Values }}
+{{- $profile := include "srenautix.profile" . | fromYaml }}
+{{- $on := dict }}
+{{- range $role := list "server" "worker" "mcp" "reader" "gateway" }}
+{{- $_ := set $on $role (include "srenautix.roleEnabled" (dict "ctx" $ "role" $role) | eq "true") }}
+{{- end }}
+
+{{- if not $on.server }}
+{{- fail "server 是必需的角色，不能关闭" }}
+{{- end }}
+
+{{- /* 数据库 */}}
+{{- if not (has $v.database.mode (list "cnpg" "external")) }}
+{{- fail (printf "database.mode 必须是 cnpg 或 external，当前为 %q" $v.database.mode) }}
+{{- end }}
+{{- if eq $v.database.mode "cnpg" }}
+{{- if and (lt (int $v.database.cnpg.instances) 2) (not $v.database.cnpg.allowSingleInstance) }}
+{{- fail "database.cnpg.instances 至少为 2（设计 §15.2）；单实例需要显式设置 database.cnpg.allowSingleInstance=true" }}
+{{- end }}
+{{- else }}
+{{- if not $v.database.external.host }}
+{{- fail "database.mode=external 时必须设置 database.external.host" }}
+{{- end }}
+{{- range $role := list "server" "worker" }}
+{{- if and (index $on $role) (not (index $v.database.external.passwordSecrets $role)) }}
+{{- fail (printf "database.mode=external 时必须设置 database.external.passwordSecrets.%s" $role) }}
+{{- end }}
+{{- end }}
+{{- if and (has $v.database.external.sslmode (list "verify-ca" "verify-full")) (not $v.database.external.caSecret) }}
+{{- fail "sslmode 为 verify-ca 或 verify-full 时必须设置 database.external.caSecret" }}
+{{- end }}
+{{- end }}
+
+{{- /* 审计汇 */}}
+{{- $sink := include "srenautix.auditSink" . }}
+{{- $lockMode := include "srenautix.auditLockMode" . }}
+{{- if not (has $sink (list "minio" "s3" "pg")) }}
+{{- fail (printf "audit.sink 必须是 minio、s3、pg 之一，当前为 %q" $sink) }}
+{{- end }}
+{{- if eq $sink "s3" }}
+{{- if or (not $v.audit.s3.endpoint) (not $v.audit.s3.existingSecret) }}
+{{- fail "audit.sink=s3 时必须设置 audit.s3.endpoint 与 audit.s3.existingSecret" }}
+{{- end }}
+{{- end }}
+{{- if not (has $lockMode (list "GOVERNANCE" "COMPLIANCE")) }}
+{{- fail "audit.objectLock.mode 必须是 GOVERNANCE 或 COMPLIANCE" }}
+{{- end }}
+
+{{- /* gateway */}}
+{{- if $on.gateway }}
+{{- if not (semverCompare ">=1.30.0-0" .Capabilities.KubeVersion.Version) }}
+{{- fail (printf "启用 gateway 需要 Kubernetes ≥1.30（ValidatingAdmissionPolicy GA），当前为 %s；请使用 observe 配置" .Capabilities.KubeVersion.Version) }}
+{{- end }}
+{{- if not $v.roles.gateway.actions }}
+{{- fail "启用 gateway 时 roles.gateway.actions 不能为空" }}
+{{- end }}
+{{- if not (has $v.roles.gateway.pgAntiAffinity (list "preferred" "required" "none")) }}
+{{- fail "roles.gateway.pgAntiAffinity 必须是 preferred、required、none 之一" }}
+{{- end }}
+{{- end }}
+
+{{- /* 合规配置：设计 §1.3、§16.3、§16.5 的强度要求 */}}
+{{- if eq $v.profile "compliance" }}
+{{- if eq $sink "pg" }}
+{{- fail "合规配置要求审计写入开启对象锁的对象存储（audit.sink=minio 或 s3）" }}
+{{- end }}
+{{- if or (not $v.audit.objectLock.enabled) (ne $lockMode "COMPLIANCE") (lt (int $v.audit.objectLock.retentionDays) 180) }}
+{{- fail "合规配置要求 audit.objectLock.enabled=true、mode=COMPLIANCE、retentionDays≥180" }}
+{{- end }}
+{{- if or (not $v.global.nodeSelector) (not $v.global.tolerations) }}
+{{- fail "合规配置要求专用节点池：设置 global.nodeSelector 与 global.tolerations" }}
+{{- end }}
+{{- $g := include "srenautix.governance" . | fromYaml }}
+{{- if or (not $g.separationOfDuties) (not $g.requirePasskey) $g.allowSelfApproval }}
+{{- fail "合规配置不允许关闭三权分立、通行密钥，也不允许提议人审批自己的提议" }}
+{{- end }}
+{{- if not (include "srenautix.imagePolicyEnabled" .) }}
+{{- fail "合规配置要求开启 imagePolicy（policy-controller 镜像签名校验）" }}
+{{- end }}
+{{- end }}
+
+{{- /* 自身告警不得路由到 SreNautix（设计 §11、§15.5） */}}
+{{- $sm := $v.selfMonitoring }}
+{{- if $sm.prometheusRule.enabled }}
+{{- if not $sm.receiver }}
+{{- fail "selfMonitoring.prometheusRule.enabled=true 时必须设置 selfMonitoring.receiver（SreNautix 以外的接收方）" }}
+{{- end }}
+{{- if not $sm.routeLabels }}
+{{- fail "selfMonitoring.routeLabels 不能为空：自身告警需要路由标签把它们送到 selfMonitoring.receiver" }}
+{{- end }}
+{{- if hasKey $sm.routeLabels "srenautix_self" }}
+{{- fail "selfMonitoring.routeLabels 不能覆盖 srenautix_self" }}
+{{- end }}
+{{- end }}
+{{- if and ($sm.prometheusRule.enabled) (eq $sm.receiver $v.alertmanagerConfig.receiverName) }}
+{{- fail (printf "selfMonitoring.receiver 不能是 SreNautix 自己的接收方 %q" $v.alertmanagerConfig.receiverName) }}
+{{- end }}
+{{- if $v.alertmanagerConfig.enabled }}
+{{- if or (not $sm.receiver) (eq $sm.receiver $v.alertmanagerConfig.receiverName) }}
+{{- fail "alertmanagerConfig.enabled=true 时 selfMonitoring.receiver 必须是 SreNautix 以外的接收方" }}
+{{- end }}
+{{- if not $v.alertmanagerConfig.selfReceiverSpec }}
+{{- fail "alertmanagerConfig.enabled=true 时必须设置 alertmanagerConfig.selfReceiverSpec" }}
+{{- end }}
+{{- $server := include "srenautix.roleName" (dict "ctx" $ "role" "server") }}
+{{- range $hook := ($v.alertmanagerConfig.selfReceiverSpec.webhookConfigs | default list) }}
+{{- if contains $server (toString $hook.url) }}
+{{- fail (printf "自身告警的接收方 webhook %q 指向 SreNautix server，自身告警必须发往其他接收方" (toString $hook.url)) }}
+{{- end }}
+{{- end }}
+{{- end }}
+
+{{- if and $v.networkPolicy.cilium.enabled (not $v.networkPolicy.cilium.modelFQDNs) $on.worker }}
+{{- fail "networkPolicy.cilium.enabled=true 时必须列出 networkPolicy.cilium.modelFQDNs" }}
+{{- end }}
+{{- if and (eq $sink "s3") $v.networkPolicy.enabled (not $v.networkPolicy.auditEgressTo) }}
+{{- fail "audit.sink=s3 且启用 NetworkPolicy 时必须设置 networkPolicy.auditEgressTo" }}
+{{- end }}
