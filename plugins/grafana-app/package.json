@@ -1,0 +1,37 @@
+{
+  "name": "@srenautix/grafana-app",
+  "version": "0.1.0",
+  "private": true,
+  "description": "SreNautix Grafana app plugin: inbox, incident detail and research run pages with feedback; approval opens the SreNautix console",
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "build": "tsc --noEmit && vite build && pnpm run build:backend",
+    "build:frontend": "vite build",
+    "build:backend": "node scripts/build-backend.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "go vet ./pkg/... && go test ./pkg/...",
+    "e2e": "PLAYWRIGHT_BROWSERS_PATH=../../.scratch/ms-playwright playwright test"
+  },
+  "dependencies": {
+    "@srenautix/contract": "workspace:*",
+    "@srenautix/ui": "workspace:*",
+    "@tanstack/react-query": "5.104.5"
+  },
+  "devDependencies": {
+    "@grafana/data": "13.2.4",
+    "@grafana/runtime": "13.2.4",
+    "@grafana/ui": "13.2.4",
+    "@playwright/test": "1.64.1",
+    "@types/node": "22.20.5",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.1.2",
+    "playwright": "1.64.1",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "rxjs": "7.8.2",
+    "vite": "8.3.4",
+    "vite-plugin-css-injected-by-js": "5.0.2"
+  }
+}

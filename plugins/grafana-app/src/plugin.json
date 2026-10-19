@@ -1,0 +1,31 @@
+{
+  "$schema": "https://raw.githubusercontent.com/grafana/grafana/main/docs/sources/developers/plugins/plugin.schema.json",
+  "type": "app",
+  "name": "SreNautix",
+  "id": "srenautix-console-app",
+  "backend": true,
+  "executable": "gpx_srenautix_console_app",
+  "info": {
+    "keywords": ["srenautix", "aiops", "incidents", "sre"],
+    "description": "SreNautix incidents inside Grafana: inbox, incident detail and research runs, with feedback. Approvals open the SreNautix console.",
+    "author": { "name": "SreNautix contributors" },
+    "links": [{ "name": "Source", "url": "https://github.com/Zzhihon/SreNautix" }],
+    "logos": { "small": "img/logo.svg", "large": "img/logo.svg" },
+    "screenshots": [],
+    "version": "%VERSION%",
+    "updated": "%TODAY%"
+  },
+  "includes": [
+    {
+      "type": "page",
+      "name": "Incidents",
+      "path": "/a/%PLUGIN_ID%/incidents",
+      "addToNav": true,
+      "defaultNav": true
+    }
+  ],
+  "dependencies": {
+    "grafanaDependency": ">=11.6.11 <12 || >=12.0.10 <12.1 || >=12.1.7 <12.2 || >=12.2.5",
+    "plugins": []
+  }
+}
