@@ -9,7 +9,8 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
-    "test": "PLAYWRIGHT_BROWSERS_PATH=../../.scratch/ms-playwright vitest run",
+    "test": "pnpm run browsers && PLAYWRIGHT_BROWSERS_PATH=../../.scratch/ms-playwright vitest run",
+    "browsers": "PLAYWRIGHT_BROWSERS_PATH=../../.scratch/ms-playwright playwright install --only-shell chromium",
     "e2e": "PLAYWRIGHT_BROWSERS_PATH=../../.scratch/ms-playwright playwright test"
   },
   "dependencies": {

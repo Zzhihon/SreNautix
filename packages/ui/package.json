@@ -30,8 +30,8 @@
   "scripts": {
     "build": "vite build && tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
-    "test": "PLAYWRIGHT_BROWSERS_PATH=../../.scratch/ms-playwright vitest run",
-    "browsers": "PLAYWRIGHT_BROWSERS_PATH=../../.scratch/ms-playwright playwright install chromium-headless-shell"
+    "test": "pnpm run browsers && PLAYWRIGHT_BROWSERS_PATH=../../.scratch/ms-playwright vitest run",
+    "browsers": "PLAYWRIGHT_BROWSERS_PATH=../../.scratch/ms-playwright playwright install --only-shell chromium"
   },
   "peerDependencies": {
     "@grafana/data": ">=12.1.7",
