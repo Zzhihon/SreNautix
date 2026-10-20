@@ -7,7 +7,7 @@
 ## 决定
 
 1. **引擎**：使用 `@marcbachmann/cel-js`（纯 TypeScript、无运行时依赖、支持自定义函数与宏、标准 `cel.bind`）。CEL 的 `let` 是保留字，判定层用 `judge.let` 声明有序绑定，表达式内部的局部绑定用 `cel.bind`。
-2. **函数库**：聚合 `max`、`min`、`last`、`sum`、`count`、`none`；序列 `points`、`any_point`（宏）、`transitions`、`top_share`、`join`、`ratio`、`first_above`、`first_below`；展示 `label`、`abs`、`fmt_*`。序列在 CEL 中是 `{labels, times, values}`。多条序列的 `last` 取各序列最后一个点中的最大值，结果与后端返回序列的顺序无关，Prometheus 与 VictoriaMetrics 因此得出相同结论。
+2. **函数库**：聚合 `max`、`max_in`（时间区间内的最大值）、`min`、`last`、`sum`、`count`、`none`；序列 `points`、`any_point`（宏）、`transitions`、`top_share`、`join`、`ratio`、`first_above`、`first_below`；展示 `label`、`abs`、`fmt_*`。序列在 CEL 中是 `{labels, times, values}`。多条序列的 `last` 取各序列最后一个点中的最大值，结果与后端返回序列的顺序无关，Prometheus 与 VictoriaMetrics 因此得出相同结论。
 3. **成本上界**：进入 CEL 之前把输入截断到每个引用 200 条序列、每条 1500 个点、日志 200 行；加载时按 AST 计算最坏情况下的求值步数（推导式按元素数相乘，单序列参数在推导式内部按点数计），超过 2000 万步的表达式拒绝加载。解析限制：AST 400 个节点、深度 40。
 4. **判定顺序**：能力缺失 → `capability_missing`；所有 `no_data` 语义的引用都没有样本或报错 → 无法判定；按序求 `let`；`undeterminable_if`；`abnormal_if` 命中第一条 → 异常；都不命中时，有规则因缺数据无法求值、或有 `no_data` 引用缺数据或报错 → 无法判定（`partial_data`、`source_error`），否则正常。缺样本之外的求值错误 → `evaluation_error`。
 5. **`empty_is`**：引用默认 `no_data`；`normal` 表示空集合是正常结果，用于过滤型查询。过滤型引用的指标在数据源中不存在时同样视为空集合（信号解析记录原因 `missing_metric`）。没有任何样本的卡片永远不会得出正常。

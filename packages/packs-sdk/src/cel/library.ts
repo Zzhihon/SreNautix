@@ -1,5 +1,5 @@
 // 证据卡 CEL 运行时的函数库（DESIGN §6.1）：
-// - 聚合：max/min/last/sum/count/none
+// - 聚合：max/min/last/sum/count/none、max_in（时间区间内的最大值）
 // - 序列：points、any_point、transitions、top_share、join、ratio
 // - 展示：fmt_pct/fmt_bytes/fmt_secs/fmt_num、label
 // let 在判定层声明（judge.let），表达式内的局部绑定用 CEL 标准的 cel.bind。
@@ -174,6 +174,16 @@ export function createBaseEnvironment(): Environment {
   env
     .registerFunction('max(list): double', (l: unknown[]) => Math.max(...allValues(l, 'max')))
     .registerFunction('max(map): double', (s: unknown) => Math.max(...seriesValues(s, 'max')))
+    // 时间在 [from, to) 内的点的最大值（unix 秒），用于事件开始前后的对比；没有这样的点时不可求值
+    .registerFunction('max_in(list, double, double): double', (l: unknown[], from: number, to: number) => {
+      const v = asSeriesList(l, 'max_in').flatMap((s) =>
+        s.values.filter((_, i) => s.times[i]! >= from && s.times[i]! < to),
+      );
+      if (!v.length) {
+        throw new NoSamplesError('max_in() 区间内的点');
+      }
+      return Math.max(...v);
+    })
     .registerFunction('min(list): double', (l: unknown[]) => Math.min(...allValues(l, 'min')))
     .registerFunction('min(map): double', (s: unknown) => Math.min(...seriesValues(s, 'min')))
     // 多条序列时取各序列最后一个点中的最大值，结果与后端返回序列的顺序无关

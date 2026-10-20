@@ -374,3 +374,176 @@ chains:
               - { header: { zh-CN: 资源, en: Resource }, cel: 'label(row, "resource")' }
               - { header: { zh-CN: 占比, en: Ratio }, cel: last(row), unit: percent }
         egress: allow
+
+  # 发布：新 Pod 是否卡在 init 容器（例如等待数据库迁移）、新旧 ReplicaSet 的就绪、就绪 Pod 运行的版本、迁移 Job、
+  # 发布前后的错误率与延迟。gitops 包的发布回退模板依据这些卡片判断是否适用。
+  - id: release
+    title: { zh-CN: 发布, en: Release }
+    runbook: workload.md
+    cards:
+      - id: init-waiting
+        title: { zh-CN: 卡在 init 容器的 Pod, en: Pods stuck in an init container }
+        note:
+          zh-CN: 窗口内 init 容器处于运行状态超过 params.minutes 分钟的 Pod；等待数据库迁移的 init 容器在迁移没有完成或镜像与库不兼容时会一直等待
+          en: Pods whose init container ran longer than params.minutes minutes in the window, for example waiting for a database migration
+        applies_to: { kinds: [Pod, Deployment, StatefulSet, DaemonSet] }
+        window: { before: 30m, after: 30m }
+        params: { minutes: 10 }
+        refs:
+          - { name: pods, signal: pod_info, mode: instant }
+          - { name: running, signal: init_running_minutes, mode: instant, empty_is: normal }
+          - { name: waiting, signal: init_container_waiting, mode: instant, empty_is: normal }
+        judge:
+          let:
+            - { name: stuck, cel: 'size(running.filter(s, last(s) > double(params.minutes)))' }
+            - { name: crashing, cel: size(waiting) }
+            - { name: longest, cel: 'count(running) > 0 ? max(running) : 0.0' }
+          abnormal_if:
+            - cel: stuck > 0
+              say:
+                {
+                  zh-CN: '{stuck} 个 Pod 的 init 容器运行超过 {longest, number} 分钟',
+                  en: '{stuck} pods kept an init container running for up to {longest, number} minutes',
+                }
+            - cel: crashing > 0
+              say: { zh-CN: '{crashing} 个 init 容器在反复失败', en: '{crashing} init containers keep failing' }
+        display:
+          value: longest
+          unit: count
+          table:
+            rows_from: running
+            sort_by: last(row)
+            columns:
+              - { header: { zh-CN: Pod, en: Pod }, cel: 'label(row, "pod")' }
+              - { header: { zh-CN: init 容器, en: Init container }, cel: 'label(row, "container")' }
+              - { header: { zh-CN: 分钟, en: Minutes }, cel: last(row), unit: count }
+        egress: allow
+      - id: replicasets
+        title: { zh-CN: 新旧 ReplicaSet 的就绪, en: Old and new ReplicaSets }
+        note:
+          zh-CN: Deployment 的各 ReplicaSet 在窗口末尾的期望与就绪副本数；有期望副本却没有全部就绪的 ReplicaSet 说明滚动停在半路
+          en: Desired and ready replicas of each ReplicaSet at the end of the window; a ReplicaSet short of ready replicas means the rollout stopped midway
+        applies_to: { kinds: [Deployment] }
+        window: { before: 30m, after: 30m }
+        refs:
+          - { name: desired, signal: replicaset_desired, mode: instant }
+          - { name: missing, signal: replicaset_missing_ready, mode: instant, empty_is: normal }
+        judge:
+          let:
+            - { name: active, cel: 'size(desired.filter(s, last(s) > 0.0))' }
+            - { name: short, cel: count(missing) }
+          abnormal_if:
+            - cel: short > 0
+              say:
+                {
+                  zh-CN: '{short} 个 ReplicaSet 没有达到期望的就绪副本数（{active} 个 ReplicaSet 有期望副本）',
+                  en: '{short} ReplicaSets are short of ready replicas ({active} have desired replicas)',
+                }
+        display:
+          value: short
+          unit: count
+          table:
+            rows_from: desired
+            columns:
+              - { header: { zh-CN: ReplicaSet, en: ReplicaSet }, cel: 'label(row, "replicaset")' }
+              - { header: { zh-CN: 期望, en: Desired }, cel: last(row), unit: count }
+        egress: allow
+      - id: serving-versions
+        title: { zh-CN: 就绪 Pod 运行的版本, en: Versions run by ready pods }
+        note:
+          zh-CN: 命名空间内就绪 Pod 运行的镜像 digest；超过一个说明发布或回退没有完成，数量最多的就是正在服务的版本
+          en: Image digests run by ready pods in the namespace; more than one means a release or rollback is incomplete
+        applies_to: { kinds: [Pod, Deployment, StatefulSet, DaemonSet] }
+        window: { before: 30m, after: 30m }
+        refs:
+          - { name: images, signal: ready_pod_images, mode: instant }
+        judge:
+          let:
+            - { name: versions, cel: count(images) }
+          abnormal_if:
+            - cel: versions > 1
+              say: { zh-CN: '就绪 Pod 同时运行 {versions} 个版本', en: 'Ready pods run {versions} different versions' }
+        display:
+          value: versions
+          unit: count
+          table:
+            rows_from: images
+            sort_by: last(row)
+            columns:
+              - { header: { zh-CN: 镜像, en: Image }, cel: 'label(row, "image_id")' }
+              - { header: { zh-CN: 就绪 Pod, en: Ready pods }, cel: last(row), unit: count }
+        egress: allow
+      - id: migration-jobs
+        title: { zh-CN: 迁移 Job, en: Migration jobs }
+        note:
+          zh-CN: 命名空间内名字匹配 params.job_pattern 的 Job 在窗口末尾是否失败或仍在运行
+          en: Whether jobs matching params.job_pattern failed or are still running at the end of the window
+        applies_to: { kinds: [Pod, Deployment, StatefulSet, DaemonSet, Job] }
+        window: { before: 60m, after: 30m }
+        params: { job_pattern: '.*migrat.*' }
+        refs:
+          - { name: pods, signal: pod_info, mode: instant }
+          - { name: failed, signal: job_failed_matching, mode: instant, empty_is: normal }
+          - { name: active, signal: job_active_matching, mode: instant, empty_is: normal }
+        judge:
+          let:
+            - { name: failures, cel: count(failed) }
+            - { name: running, cel: count(active) }
+          abnormal_if:
+            - cel: failures > 0
+              say: { zh-CN: '{failures} 个迁移 Job 失败', en: '{failures} migration jobs failed' }
+        display:
+          value: running
+          unit: count
+          table:
+            rows_from: failed
+            columns:
+              - { header: { zh-CN: Job, en: Job }, cel: 'label(row, "job_name")' }
+        egress: allow
+      # 开始之前与之后各自取峰值对比；任何一侧没有点时不可求值
+      - id: errors-before-after
+        title: { zh-CN: 开始前后的 5xx 比例, en: 5xx ratio before and after the start }
+        note:
+          zh-CN: 事件开始前后 HTTP 5xx 比例的峰值；之后的峰值超过 params.error_ratio 且超过之前的 params.factor 倍时判为异常
+          en: Peak HTTP 5xx ratio before and after the incident started; abnormal when the later peak exceeds params.error_ratio and params.factor times the earlier peak
+        applies_to: { kinds: [Deployment, StatefulSet, DaemonSet] }
+        window: { before: 30m, after: 30m }
+        params: { factor: 2.0, error_ratio: 0.01 }
+        refs:
+          - { name: errors, signal: http_error_ratio, mode: range }
+        judge:
+          let:
+            - { name: e0, cel: 'max_in(errors, window.from, window.anchor)' }
+            - { name: e1, cel: 'max_in(errors, window.anchor, window.to + 1.0)' }
+          abnormal_if:
+            - cel: e1 > params.error_ratio && e1 > params.factor * e0
+              say:
+                {
+                  zh-CN: '5xx 比例的峰值由开始之前的 {e0, number, percent} 升到 {e1, number, percent}',
+                  en: 'Peak 5xx ratio rose from {e0, number, percent} before the start to {e1, number, percent}',
+                }
+        display: { value: e1, unit: percent, threshold: params.error_ratio }
+        egress: allow
+      - id: latency-before-after
+        title: { zh-CN: 开始前后的 p95 延迟, en: p95 latency before and after the start }
+        note:
+          zh-CN: 事件开始前后 HTTP p95 延迟的峰值；之后的峰值超过之前的 params.factor 倍时判为异常
+          en: Peak HTTP p95 latency before and after the incident started; abnormal when the later peak exceeds params.factor times the earlier peak
+        applies_to: { kinds: [Deployment, StatefulSet, DaemonSet] }
+        window: { before: 30m, after: 30m }
+        params: { factor: 2.0 }
+        refs:
+          - { name: latency, signal: http_latency_p95, mode: range }
+        judge:
+          let:
+            - { name: l0, cel: 'max_in(latency, window.from, window.anchor)' }
+            - { name: l1, cel: 'max_in(latency, window.anchor, window.to + 1.0)' }
+          abnormal_if:
+            - cel: l1 > params.factor * l0
+              say:
+                {
+                  zh-CN: 'p95 延迟的峰值由开始之前的 {l0, number} 秒升到 {l1, number} 秒',
+                  en: 'Peak p95 latency rose from {l0, number} s before the start to {l1, number} s',
+                }
+        display: { value: l1, unit: seconds }
+        egress: allow

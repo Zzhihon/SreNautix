@@ -14,6 +14,7 @@ interface Node {
 
 const LINEAR_FUNCS = new Set([
   'max',
+  'max_in',
   'min',
   'last',
   'sum',

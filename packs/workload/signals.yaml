@@ -168,3 +168,74 @@ signals:
             )
             / on (node, resource) group_left () max by (node, resource) (kube_node_status_allocatable{resource=~"cpu|memory"})
           )
+
+  # ---- 发布（chains.yaml 的 release 链） ----
+  # init 容器在窗口内处于运行状态的分钟数（1 分钟分辨率的子查询）
+  - id: init_running_minutes
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: >-
+          max by (namespace, pod, container) (
+            count_over_time((max by (namespace, pod, container) (kube_pod_init_container_status_running{$selector}) == 1)[$window:1m])
+          )
+  # Deployment 的各 ReplicaSet：期望副本数与就绪副本数
+  - id: replicaset_desired
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: >-
+          max by (namespace, replicaset) (
+            kube_replicaset_spec_replicas{namespace="$namespace"}
+            * on (namespace, replicaset) group_left ()
+            max by (namespace, replicaset) (kube_replicaset_owner{namespace="$namespace", owner_kind="Deployment", owner_name="$name"})
+          )
+  # 期望副本数减就绪副本数，只保留缺副本的 ReplicaSet
+  - id: replicaset_missing_ready
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: >-
+          max by (namespace, replicaset) (
+            (
+              kube_replicaset_spec_replicas{namespace="$namespace"}
+              - on (namespace, replicaset) kube_replicaset_status_ready_replicas{namespace="$namespace"}
+            )
+            * on (namespace, replicaset) group_left ()
+            max by (namespace, replicaset) (kube_replicaset_owner{namespace="$namespace", owner_kind="Deployment", owner_name="$name"})
+          ) > 0
+  # 命名空间内就绪 Pod 运行的镜像 digest（image_id）与各自的 Pod 数
+  - id: ready_pod_images
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: >-
+          count by (image_id) (
+            max by (namespace, pod, image_id) (kube_pod_container_info{namespace="$namespace", image_id=~".*sha256:.*"})
+            * on (namespace, pod) group_left ()
+            (max by (namespace, pod) (kube_pod_status_ready{namespace="$namespace", condition="true"}) == 1)
+          )
+  # 命名空间内名字匹配的 Job：失败与仍在运行
+  - id: job_failed_matching
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: max by (namespace, job_name) (kube_job_status_failed{namespace="$namespace", job_name=~"$params.job_pattern"}) > 0
+  - id: job_active_matching
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: max by (namespace, job_name) (kube_job_status_active{namespace="$namespace", job_name=~"$params.job_pattern"}) > 0
+  # 应用的 HTTP 5xx 比例与 p95 延迟（发布前后对比）；指标名按 Prometheus 客户端库的惯例
+  - id: http_error_ratio
+    kind: metrics
+    unit: ratio
+    alternatives:
+      - expr: >-
+          sum(rate(http_requests_total{$selector, code=~"5.."}[$rate_window]))
+          / sum(rate(http_requests_total{$selector}[$rate_window]))
+  - id: http_latency_p95
+    kind: metrics
+    unit: seconds
+    alternatives:
+      - expr: histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{$selector}[$rate_window])))

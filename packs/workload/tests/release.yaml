@@ -1,0 +1,200 @@
+# 发布链（release）：rel 命名空间的 api 在第 30 分钟发布新版本，新 Pod 卡在等待迁移的 init 容器，迁移 Job 失败，
+# worker 已经换成新镜像、api 仍是旧镜像，开始之后 5xx 与延迟上升；calm 命名空间的 web 一切正常。
+# eval_time 30m 时窗口为 0m–60m（迁移 Job 卡片为 -30m–60m）。
+api_version: srenautix.io/pack-test/v1
+interval: 1m
+input_series:
+  # ---------- rel：api ----------
+  - { series: 'kube_pod_info{namespace="rel",pod="api-5f7b8c9d6e-k2m4n",node="n1"}', values: '1x59' }
+  - { series: 'kube_pod_info{namespace="rel",pod="api-5f7b8c9d6e-p7q8r",node="n2"}', values: '1x59' }
+  - { series: 'kube_pod_info{namespace="rel",pod="api-7c8d9e0f1a-x2z4w",node="n2"}', values: '1x59' }
+  - { series: 'kube_pod_info{namespace="rel",pod="worker-6d8b9c7f5a-m3n5p",node="n1"}', values: '1x59' }
+  # 新 Pod 从第 10 分钟起一直在 init 容器 wait-for-migrations 中
+  - {
+      series: 'kube_pod_init_container_status_running{namespace="rel",pod="api-7c8d9e0f1a-x2z4w",container="wait-for-migrations"}',
+      values: '0x9 1x49',
+    }
+  - {
+      series: 'kube_pod_init_container_status_running{namespace="rel",pod="api-5f7b8c9d6e-k2m4n",container="wait-for-migrations"}',
+      values: '0x59',
+    }
+  # 旧 ReplicaSet 2/2 就绪，新 ReplicaSet 0/1
+  - {
+      series: 'kube_replicaset_owner{namespace="rel",replicaset="api-5f7b8c9d6e",owner_kind="Deployment",owner_name="api"}',
+      values: '1x59',
+    }
+  - {
+      series: 'kube_replicaset_owner{namespace="rel",replicaset="api-7c8d9e0f1a",owner_kind="Deployment",owner_name="api"}',
+      values: '1x59',
+    }
+  - { series: 'kube_replicaset_spec_replicas{namespace="rel",replicaset="api-5f7b8c9d6e"}', values: '2x59' }
+  - { series: 'kube_replicaset_status_ready_replicas{namespace="rel",replicaset="api-5f7b8c9d6e"}', values: '2x59' }
+  - { series: 'kube_replicaset_spec_replicas{namespace="rel",replicaset="api-7c8d9e0f1a"}', values: '1x59' }
+  - { series: 'kube_replicaset_status_ready_replicas{namespace="rel",replicaset="api-7c8d9e0f1a"}', values: '0x59' }
+  # 就绪的 api 运行旧镜像 aaaa，就绪的 worker 运行新镜像 bbbb，卡住的新 Pod 未就绪
+  - {
+      series: 'kube_pod_container_info{namespace="rel",pod="api-5f7b8c9d6e-k2m4n",container="api",image_id="registry.example/shop@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}',
+      values: '1x59',
+    }
+  - {
+      series: 'kube_pod_container_info{namespace="rel",pod="api-5f7b8c9d6e-p7q8r",container="api",image_id="registry.example/shop@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}',
+      values: '1x59',
+    }
+  - {
+      series: 'kube_pod_container_info{namespace="rel",pod="api-7c8d9e0f1a-x2z4w",container="api",image_id="registry.example/shop@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}',
+      values: '1x59',
+    }
+  - {
+      series: 'kube_pod_container_info{namespace="rel",pod="worker-6d8b9c7f5a-m3n5p",container="worker",image_id="registry.example/shop@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}',
+      values: '1x59',
+    }
+  - { series: 'kube_pod_status_ready{namespace="rel",pod="api-5f7b8c9d6e-k2m4n",condition="true"}', values: '1x59' }
+  - { series: 'kube_pod_status_ready{namespace="rel",pod="api-5f7b8c9d6e-p7q8r",condition="true"}', values: '1x59' }
+  - { series: 'kube_pod_status_ready{namespace="rel",pod="api-7c8d9e0f1a-x2z4w",condition="true"}', values: '0x59' }
+  - { series: 'kube_pod_status_ready{namespace="rel",pod="worker-6d8b9c7f5a-m3n5p",condition="true"}', values: '1x59' }
+  # 迁移 Job 在第 20 分钟失败
+  - { series: 'kube_job_status_failed{namespace="rel",job_name="api-migrate-7c8d"}', values: '0x19 1x40' }
+  - { series: 'kube_job_status_active{namespace="rel",job_name="api-migrate-7c8d"}', values: '1x19 0x40' }
+  # 每秒 10 个请求；5xx 开始之前约 0.17%，之后约 4.8%
+  - { series: 'http_requests_total{namespace="rel",pod="api-5f7b8c9d6e-k2m4n",code="200"}', values: '0+600x59' }
+  - { series: 'http_requests_total{namespace="rel",pod="api-5f7b8c9d6e-k2m4n",code="500"}', values: '0+1x29 30+30x29' }
+  # p95 开始之前约 0.095 秒，之后约 0.48 秒
+  - {
+      series: 'http_request_duration_seconds_bucket{namespace="rel",pod="api-5f7b8c9d6e-k2m4n",le="0.1"}',
+      values: '0+600x29 17400+60x29',
+    }
+  - {
+      series: 'http_request_duration_seconds_bucket{namespace="rel",pod="api-5f7b8c9d6e-k2m4n",le="0.5"}',
+      values: '0+600x59',
+    }
+  - {
+      series: 'http_request_duration_seconds_bucket{namespace="rel",pod="api-5f7b8c9d6e-k2m4n",le="+Inf"}',
+      values: '0+600x59',
+    }
+
+  # ---------- calm：web ----------
+  - { series: 'kube_pod_info{namespace="calm",pod="web-6b7c8d9e0f-a2b4c",node="n1"}', values: '1x59' }
+  - { series: 'kube_pod_info{namespace="calm",pod="web-6b7c8d9e0f-d5f7g",node="n2"}', values: '1x59' }
+  # init 容器只在开头运行了几分钟
+  - {
+      series: 'kube_pod_init_container_status_running{namespace="calm",pod="web-6b7c8d9e0f-a2b4c",container="wait-db"}',
+      values: '1x2 0x56',
+    }
+  - {
+      series: 'kube_replicaset_owner{namespace="calm",replicaset="web-6b7c8d9e0f",owner_kind="Deployment",owner_name="web"}',
+      values: '1x59',
+    }
+  - { series: 'kube_replicaset_spec_replicas{namespace="calm",replicaset="web-6b7c8d9e0f"}', values: '2x59' }
+  - { series: 'kube_replicaset_status_ready_replicas{namespace="calm",replicaset="web-6b7c8d9e0f"}', values: '2x59' }
+  - {
+      series: 'kube_pod_container_info{namespace="calm",pod="web-6b7c8d9e0f-a2b4c",container="web",image_id="registry.example/web@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}',
+      values: '1x59',
+    }
+  - {
+      series: 'kube_pod_container_info{namespace="calm",pod="web-6b7c8d9e0f-d5f7g",container="web",image_id="registry.example/web@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}',
+      values: '1x59',
+    }
+  - { series: 'kube_pod_status_ready{namespace="calm",pod="web-6b7c8d9e0f-a2b4c",condition="true"}', values: '1x59' }
+  - { series: 'kube_pod_status_ready{namespace="calm",pod="web-6b7c8d9e0f-d5f7g",condition="true"}', values: '1x59' }
+  # 迁移 Job 已成功结束
+  - { series: 'kube_job_status_failed{namespace="calm",job_name="web-migrate-6b7c"}', values: '0x59' }
+  - { series: 'kube_job_status_active{namespace="calm",job_name="web-migrate-6b7c"}', values: '0x59' }
+  - { series: 'http_requests_total{namespace="calm",pod="web-6b7c8d9e0f-a2b4c",code="200"}', values: '0+600x59' }
+  - { series: 'http_requests_total{namespace="calm",pod="web-6b7c8d9e0f-a2b4c",code="500"}', values: '0+1x59' }
+  - {
+      series: 'http_request_duration_seconds_bucket{namespace="calm",pod="web-6b7c8d9e0f-a2b4c",le="0.1"}',
+      values: '0+600x59',
+    }
+  - {
+      series: 'http_request_duration_seconds_bucket{namespace="calm",pod="web-6b7c8d9e0f-a2b4c",le="0.5"}',
+      values: '0+600x59',
+    }
+  - {
+      series: 'http_request_duration_seconds_bucket{namespace="calm",pod="web-6b7c8d9e0f-a2b4c",le="+Inf"}',
+      values: '0+600x59',
+    }
+tests:
+  - {
+      name: api 的新 Pod 卡在等待迁移,
+      eval_time: 30m,
+      card: release/init-waiting,
+      entity: { kind: Deployment, namespace: rel, name: api },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: web 的 init 容器正常结束,
+      eval_time: 30m,
+      card: release/init-waiting,
+      entity: { kind: Deployment, namespace: calm, name: web },
+      expect: { verdict: normal },
+    }
+  - {
+      name: api 的新 ReplicaSet 没有就绪,
+      eval_time: 30m,
+      card: release/replicasets,
+      entity: { kind: Deployment, namespace: rel, name: api },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: web 的 ReplicaSet 全部就绪,
+      eval_time: 30m,
+      card: release/replicasets,
+      entity: { kind: Deployment, namespace: calm, name: web },
+      expect: { verdict: normal },
+    }
+  - {
+      name: rel 同时运行两个版本,
+      eval_time: 30m,
+      card: release/serving-versions,
+      entity: { kind: Deployment, namespace: rel, name: api },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: calm 只运行一个版本,
+      eval_time: 30m,
+      card: release/serving-versions,
+      entity: { kind: Deployment, namespace: calm, name: web },
+      expect: { verdict: normal },
+    }
+  - {
+      name: rel 的迁移 Job 失败,
+      eval_time: 30m,
+      card: release/migration-jobs,
+      entity: { kind: Deployment, namespace: rel, name: api },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: calm 的迁移 Job 成功,
+      eval_time: 30m,
+      card: release/migration-jobs,
+      entity: { kind: Deployment, namespace: calm, name: web },
+      expect: { verdict: normal },
+    }
+  - {
+      name: api 开始之后 5xx 上升,
+      eval_time: 30m,
+      card: release/errors-before-after,
+      entity: { kind: Deployment, namespace: rel, name: api },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: web 的 5xx 没有变化,
+      eval_time: 30m,
+      card: release/errors-before-after,
+      entity: { kind: Deployment, namespace: calm, name: web },
+      expect: { verdict: normal },
+    }
+  - {
+      name: api 开始之后延迟上升,
+      eval_time: 30m,
+      card: release/latency-before-after,
+      entity: { kind: Deployment, namespace: rel, name: api },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: web 的延迟没有变化,
+      eval_time: 30m,
+      card: release/latency-before-after,
+      entity: { kind: Deployment, namespace: calm, name: web },
+      expect: { verdict: normal },
+    }
