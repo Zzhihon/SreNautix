@@ -597,6 +597,9 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
     protocol: readerProtocol,
     requests: readerRequests,
     clock: readerClock,
+    onHealth: c.detectors.enabled
+      ? (clusterId, objects, complete, observedAt) => detectors!.report(clusterId, objects, complete, observedAt)
+      : null,
     onAlertSnapshot: async (clusterId, snap) => {
       const r = await reconcileFromReader(
         pool,

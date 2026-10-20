@@ -160,7 +160,8 @@ export function objectHealth(objects: readonly K8sObject[], firstSeen: FirstSeen
         }
         const owner = ownerOf(o);
         const statuses = (o.status?.containerStatuses as ContainerStatus[] | undefined) ?? [];
-        const crash = statuses.find((s) => s.state?.waiting?.reason === 'CrashLoopBackOff');
+        const initStatuses = (o.status?.initContainerStatuses as ContainerStatus[] | undefined) ?? [];
+        const crash = [...initStatuses, ...statuses].find((s) => s.state?.waiting?.reason === 'CrashLoopBackOff');
         if (crash) {
           out.push({
             ...b,
@@ -175,7 +176,7 @@ export function objectHealth(objects: readonly K8sObject[], firstSeen: FirstSeen
         if (phase !== 'Pending') {
           break;
         }
-        const inits = (o.status?.initContainerStatuses as ContainerStatus[] | undefined) ?? [];
+        const inits = initStatuses;
         const initSpec = (o.spec?.initContainers as unknown[] | undefined) ?? [];
         const stuckInit = inits.find((s) => s.state?.terminated?.reason !== 'Completed');
         if (initSpec.length > 0 && (stuckInit || inits.length < initSpec.length)) {
@@ -293,7 +294,6 @@ export function objectHealth(objects: readonly K8sObject[], firstSeen: FirstSeen
             reason: failed.reason ?? 'Failed',
             message: clip(failed.message),
             owner: ownerOf(o),
-            details: { failed: num(o.status?.failed) },
           });
         }
         break;

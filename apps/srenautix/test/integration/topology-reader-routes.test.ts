@@ -3,6 +3,7 @@ import type { TopologyEvent, TopologyNode } from '@srenautix/contract';
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from '../../src/api/http.js';
+import type { ObjectHealth } from '../../src/detectors/health.js';
 import { Auth } from '../../src/identity/auth.js';
 import { Bindings } from '../../src/identity/bindings.js';
 import { CallerRegistry, tokenDigest } from '../../src/identity/callers.js';
@@ -34,6 +35,7 @@ const H = (token = TOKEN, cluster = 'prod') => ({
 
 let db: TestDb;
 let app: FastifyInstance;
+const healthReports: Array<{ cluster: string; objects: ObjectHealth[]; complete: boolean; observedAt: Date }> = [];
 let store: TopologyStore;
 let queue: ReaderRequestQueue;
 const clock = new ReaderClock();
@@ -88,6 +90,9 @@ beforeAll(async () => {
     clock,
     onAlertSnapshot: async (cluster, s) => {
       snapshots.push({ cluster, s });
+    },
+    onHealth: async (cluster, objects, complete, observedAt) => {
+      healthReports.push({ cluster, objects, complete, observedAt });
     },
   });
   await app.ready();
@@ -304,6 +309,46 @@ describe('告警对账与心跳', () => {
       payload: { ...snap, cluster_id: 'dev' },
     });
     expect(wrong.statusCode).toBe(400);
+  });
+
+  it('对象健康上报（集群状态检测器）：按契约校验，消息脱敏后交给检测器，回应 204；不合契约的 400', async () => {
+    const obj = {
+      key: 'Pod:shop/api-1-x',
+      kind: 'Pod',
+      namespace: 'shop',
+      name: 'api-1-x',
+      uid: 'u-1',
+      state: 'pod_init',
+      since: '2026-10-20T16:24:36Z',
+      reason: 'PodInitializing',
+      message: 'waiting: password=hunter2-very-secret token=ghp_abcdefghijklmnopqrstuvwxyz0123456789',
+      owner: 'Deployment:shop/api',
+      details: { init_container: 'wait-migrations' },
+    };
+    const r = await app.inject({
+      method: 'POST',
+      url: '/v1/spoke/reader/health',
+      headers: H(),
+      payload: { reader_id: 'reader-0', observed_at: '2026-10-20T16:40:00Z', complete: true, objects: [obj] },
+    });
+    expect(r.statusCode).toBe(204);
+    const got = healthReports.at(-1)!;
+    expect(got).toMatchObject({ cluster: 'prod', complete: true });
+    expect(got.observedAt.toISOString()).toBe('2026-10-20T16:40:00.000Z');
+    expect(got.objects[0]).toMatchObject({ key: 'Pod:shop/api-1-x', state: 'pod_init', owner: 'Deployment:shop/api' });
+    expect(got.objects[0]!.message).not.toContain('ghp_abcdefghijklmnopqrstuvwxyz0123456789');
+    const bad = await app.inject({
+      method: 'POST',
+      url: '/v1/spoke/reader/health',
+      headers: H(),
+      payload: {
+        reader_id: 'reader-0',
+        observed_at: '2026-10-20T16:40:00Z',
+        complete: true,
+        objects: [{ ...obj, state: 'bogus' }],
+      },
+    });
+    expect(bad.statusCode).toBe(400);
   });
 
   it('心跳记录状态与条件，apiserver 时钟随单调时长前进', async () => {

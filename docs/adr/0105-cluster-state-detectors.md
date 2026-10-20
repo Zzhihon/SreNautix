@@ -6,7 +6,7 @@
 
 ## 决定
 
-1. **分工**：对象状态由看得见对象的一方上报：多集群由 reader（`POST /v1/spoke/reader/health`，reader 协议的 ReaderHealth，spoke-gateway ADR 0035），单集群由 server 自己的 informer（`detectors/health.ts`，同一套判定）。上报只列出"现在不健康"的对象与进入该状态的时间（`since`），不判断阈值；阈值、命名空间过滤、去重与合成告警只在 server 上做，改阈值不需要动 reader。
+1. **分工**：对象状态由看得见对象的一方上报：多集群由 reader（`POST /v1/spoke/reader/health`，reader 协议的 ReaderHealth，契约 2.12.0，reader 一侧见 spoke-gateway 的 ADR 0035），单集群由 server 自己的 informer（`detectors/health.ts`，同一套判定）。上报只列出"现在不健康"的对象与进入该状态的时间（`since`），不判断阈值；阈值、命名空间过滤、去重与合成告警只在 server 上做，改阈值不需要动 reader。
 2. **状态与 since**：
    - `pod_pending`：Pending，没有待完成的 init 容器（未调度、拉镜像、创建容器）；since 为 PodScheduled=False 的时间，否则为创建时间；
    - `pod_init`：有 init 容器未完成；since 为创建时间与 Initialized 条件变化时间中较晚的；

@@ -10,6 +10,8 @@ import { logger } from '../log.js';
 import { tx, type Queryable } from '../store/pool.js';
 import { ReaderProtocol } from './protocol.js';
 import { edgeKey, sameContent, type TopologyChange, type TopologyStore } from './store.js';
+import type { ObjectHealth } from '../detectors/health.js';
+import { redactText } from '../llm/redact.js';
 
 /** 协议错误：响应体为 Problem {code, message}。 */
 class Problem extends Error {
@@ -250,6 +252,9 @@ export class ReaderClock {
   }
 }
 
+/** 处理函数返回它时回应 204 */
+const NO_CONTENT = Symbol('no-content');
+
 export interface ReaderRouteDeps {
   pool: pg.Pool;
   auth: Auth;
@@ -259,6 +264,9 @@ export interface ReaderRouteDeps {
   clock: ReaderClock;
   /** 告警对账快照交给接入层；部分来源报错或被截断时由接入层决定不据此结束告警。 */
   onAlertSnapshot(clusterId: string, snapshot: AlertReconcileSnapshot): Promise<void>;
+  /** 集群状态检测器的对象状态上报（ADR 0105）；检测器关闭时为 null，上报照常接受、不处理 */
+  onHealth?:
+    ((clusterId: string, objects: ObjectHealth[], complete: boolean, observedAt: Date) => Promise<void>) | null;
 }
 
 interface Cursor {
@@ -302,7 +310,8 @@ export function registerReaderRoutes(app: FastifyInstance, deps: ReaderRouteDeps
             `X-SreNautix-Cluster 必须等于 token 对应的集群 ${caller.caller.cluster_id}`,
           );
         }
-        return reply.send(await fn(caller.caller.cluster_id, req));
+        const result = await fn(caller.caller.cluster_id, req);
+        return result === NO_CONTENT ? reply.code(204).send() : reply.send(result);
       } catch (e) {
         if (e instanceof Problem) {
           return reply.code(e.status).send({ code: e.code, message: e.message });
@@ -543,6 +552,22 @@ export function registerReaderRoutes(app: FastifyInstance, deps: ReaderRouteDeps
     handle(async (clusterId, req) => {
       const b = body<{ results: ReaderResultWire[] }>(req, protocol.requestBody('/v1/spoke/reader/results', 'post'));
       return deps.requests.complete(clusterId, b.results);
+    }),
+  );
+
+  app.post(
+    '/v1/spoke/reader/health',
+    handle(async (clusterId, req) => {
+      const b = body<{ reader_id: string; observed_at: string; complete: boolean; objects: ObjectHealth[] }>(
+        req,
+        protocol.component('ReaderHealth'),
+      );
+      if (deps.onHealth) {
+        // Kubernetes 的原文由中心脱敏后保存
+        const objects = b.objects.map((o) => ({ ...o, message: redactText(o.message).text }));
+        await deps.onHealth(clusterId, objects, b.complete, new Date(b.observed_at));
+      }
+      return NO_CONTENT;
     }),
   );
 

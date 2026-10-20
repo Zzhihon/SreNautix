@@ -127,6 +127,26 @@ paths:
         '401': {$ref: '#/components/responses/Problem'}
         '403': {$ref: '#/components/responses/Problem'}
         '503': {$ref: '#/components/responses/Problem'}
+  /v1/spoke/reader/health:
+    post:
+      operationId: pushObjectHealth
+      summary: 上报当前不健康的对象（集群状态检测器，每 30 秒一次）
+      description: |
+        reader 只上报"现在不健康的对象"与进入该状态的时间，不判断阈值；中心按自己的检测器阈值合成告警（source detector）。
+        complete 为 false 时（informer 未同步、对象超过 2000 个），中心不据此清除已有的发现。
+      parameters:
+        - $ref: '#/components/parameters/Cluster'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ReaderHealth'}
+      responses:
+        '204': {description: 已接受}
+        '400': {$ref: '#/components/responses/Problem'}
+        '401': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '503': {$ref: '#/components/responses/Problem'}
   /v1/spoke/reader/requests:
     get:
       operationId: pullReaderRequests
@@ -532,6 +552,75 @@ components:
         query: {$ref: '#/components/schemas/QueryResult'}
         history: {$ref: '#/components/schemas/HistoryResult'}
         resolve: {$ref: '#/components/schemas/ResolveResult'}
+    ReaderHealth:
+      type: object
+      additionalProperties: false
+      required: [reader_id, observed_at, complete, objects]
+      properties:
+        reader_id: {type: string}
+        observed_at:
+          description: 判定时的 apiserver 参考时间
+          $ref: '#/components/schemas/Timestamp'
+        complete:
+          description: informer 已同步，且 objects 列出了全部不健康的对象
+          type: boolean
+        objects:
+          type: array
+          maxItems: 2000
+          items: {$ref: '#/components/schemas/ObjectHealth'}
+    ObjectHealth:
+      description: |
+        一个当前不健康的对象。各状态的判定与 since：
+        - pod_pending：phase Pending，且没有 init 容器或 init 容器都已完成（未调度、拉镜像、创建容器）；since 取 PodScheduled 条件变为 False 的时间，没有该条件时取 creationTimestamp。
+        - pod_init：有 init 容器未完成；since 取 creationTimestamp，Initialized 条件为 False 的 lastTransitionTime 更晚时取它。
+        - crash_loop：任一容器（含 init 容器）waiting.reason 为 CrashLoopBackOff；since 取 reader 第一次看到该状态的时间（reader 重启后从重启时间算）。
+        - rollout_stalled：Deployment 的 Progressing 条件 reason 为 ProgressDeadlineExceeded（since 取该条件的 lastTransitionTime），或 updatedReplicas、availableReplicas 小于 spec.replicas；StatefulSet 的 currentRevision 与 updateRevision 不同或 readyReplicas 小于 spec.replicas；DaemonSet 的 updatedNumberScheduled 或 numberAvailable 小于 desiredNumberScheduled。除 ProgressDeadlineExceeded 外，since 取 reader 第一次看到不一致的时间。
+        - pdb_blocking：status.disruptionsAllowed 为 0 且 expectedPods 大于 0；since 取 DisruptionAllowed 条件的 lastTransitionTime。
+        - job_failed：Failed 条件为 True；since 取该条件的 lastTransitionTime。
+        同一对象可能同时处于多个状态，每个状态一项。
+      type: object
+      additionalProperties: false
+      required: [key, kind, namespace, name, uid, state, since, reason, message, owner]
+      properties:
+        key: {$ref: '../../schemas/common.schema.json#/$defs/ComponentKey'}
+        kind: {type: string, enum: [Pod, Deployment, StatefulSet, DaemonSet, Job, PodDisruptionBudget]}
+        namespace: {type: string, minLength: 1}
+        name: {type: string, minLength: 1}
+        uid: {type: string, minLength: 1}
+        state: {type: string, enum: [pod_pending, pod_init, crash_loop, rollout_stalled, pdb_blocking, job_failed]}
+        since: {$ref: '#/components/schemas/Timestamp'}
+        reason:
+          description: Kubernetes 给出的原因（Unschedulable、ContainerCreating、ImagePullBackOff、CrashLoopBackOff、ProgressDeadlineExceeded、InsufficientPods、BackoffLimitExceeded 等）；没有时为空字符串
+          type: string
+          maxLength: 256
+        message:
+          description: Kubernetes 给出的原文（截断到 1024 个字符），由中心脱敏
+          type: string
+          maxLength: 1024
+        owner:
+          description: Pod 的顶层属主工作负载（经 ReplicaSet 解析到 Deployment，以及 StatefulSet、DaemonSet、Job）；没有属主时为 null，非 Pod 对象为 null
+          oneOf:
+            - $ref: '../../schemas/common.schema.json#/$defs/ComponentKey'
+            - type: 'null'
+        targets:
+          description: PodDisruptionBudget 选中的 Pod 的顶层属主工作负载（去重、排序）；只用于 pdb_blocking
+          type: array
+          items: {$ref: '../../schemas/common.schema.json#/$defs/ComponentKey'}
+        details:
+          type: object
+          additionalProperties: false
+          properties:
+            init_container: {type: string}
+            container: {type: string}
+            restarts: {type: integer, minimum: 0}
+            desired: {type: integer, minimum: 0}
+            updated: {type: integer, minimum: 0}
+            ready: {type: integer, minimum: 0}
+            available: {type: integer, minimum: 0}
+            disruptions_allowed: {type: integer, minimum: 0}
+            expected_pods: {type: integer, minimum: 0}
+            current_healthy: {type: integer, minimum: 0}
+            desired_healthy: {type: integer, minimum: 0}
     ReaderCondition:
       type: object
       additionalProperties: false
