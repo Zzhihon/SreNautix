@@ -158,8 +158,13 @@ roles:
     # 启用 workflow_submit 时必填：`srenautix-spoke admission workflow-allowlist --policy=<Git 中的 gateway 策略>`
     # 输出的 ValidatingAdmissionPolicy 原文（模板白名单与参数约束），chart 按动作目录中的策略同样渲染并绑定
     workflowAllowlistPolicy: ""
-    # 收到 SIGTERM 后等进行中的动作完成
-    terminationGracePeriodSeconds: 600
+    # 启用 gitops_pr 时必填：GitHub App 凭证的 Secret（键 app-id、installation-id、slug、private-key.pem），
+    # 挂载为 gateway.github_app_dir；GitHub Enterprise 时设置 apiUrl
+    githubApp:
+      existingSecret: ""
+      apiUrl: ""
+    # 收到 SIGTERM 后不再认领工单，等进行中的执行、校验与撤销完成；至少覆盖动作目录中最长的校验时间窗（1800 秒）
+    terminationGracePeriodSeconds: 1860
     # 本地审计暂存卷
     auditStaging:
       size: 1Gi
@@ -423,6 +428,8 @@ networkPolicy:
   channelsEgressTo: []
   # gateway 执行后校验使用的本地指标端点
   gatewayMetricsEgressTo: []
+  # GitHub API（gitops_pr），只有 gateway 可以访问；为空时放行到任意地址的 443
+  githubEgressTo: []
   # 外部 S3 审计汇（audit.sink=s3）
   auditEgressTo: []
   # Cilium 环境下为 worker 生成按 FQDN 限制的出站策略

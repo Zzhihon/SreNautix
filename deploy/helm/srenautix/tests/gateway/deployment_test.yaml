@@ -31,13 +31,49 @@ tests:
       - contains: {path: "spec.template.spec.containers[0].args", content: --role=gateway}
       - equal: {path: spec.replicas, value: 1}
       - equal: {path: spec.strategy.type, value: Recreate}
-      - equal: {path: spec.template.spec.terminationGracePeriodSeconds, value: 600}
+      - equal: {path: spec.template.spec.terminationGracePeriodSeconds, value: 1860}
       - contains:
           path: spec.template.spec.volumes
           content:
             name: audit-staging
             persistentVolumeClaim:
               claimName: t-srenautix-gateway-audit-staging
+
+  - it: gateway 由 downward API 注入 POD_NAME 与 NODE_NAME（缺少时 gateway 启动失败）
+    set:
+      profile: standard
+    documentSelector: {path: metadata.name, value: t-srenautix-gateway}
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: POD_NAME
+            valueFrom: {fieldRef: {fieldPath: metadata.name}}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: NODE_NAME
+            valueFrom: {fieldRef: {fieldPath: spec.nodeName}}
+
+  - it: githubApp.existingSecret 挂载 GitHub App 凭证
+    set:
+      profile: standard
+      roles.gateway.githubApp.existingSecret: gh-app
+    documentSelector: {path: metadata.name, value: t-srenautix-gateway}
+    asserts:
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: secret-github-app
+            secret:
+              secretName: gh-app
+              defaultMode: 288
+              items:
+                - {key: app-id, path: app-id}
+                - {key: installation-id, path: installation-id}
+                - {key: slug, path: slug}
+                - {key: private-key.pem, path: private-key.pem}
+          any: true
       - equal:
           path: spec.template.spec.containers[0].resources
           value:

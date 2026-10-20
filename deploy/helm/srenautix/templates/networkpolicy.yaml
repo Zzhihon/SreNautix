@@ -77,6 +77,11 @@
 {{- else }}
 {{- $gatewayEgress = append $gatewayEgress $datasources }}
 {{- end }}
+{{- if .Values.roles.gateway.githubApp.existingSecret }}
+{{- $github := dict "ports" $https }}
+{{- with $np.githubEgressTo }}{{- $_ := set $github "to" . }}{{- end }}
+{{- $gatewayEgress = append $gatewayEgress $github }}
+{{- end }}
 {{- $_ := set $rules "gateway" (dict "ingress" (list (index $metricsIn "gateway") (index $probesIn "gateway")) "egress" $gatewayEgress) }}
 
 {{- range $role := list "server" "worker" "mcp" "reader" "gateway" }}

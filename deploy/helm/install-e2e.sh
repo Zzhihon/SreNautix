@@ -116,4 +116,18 @@ while true; do
   sleep 10
 done
 
+log "检查 gateway 的 downward API 环境变量与选主 Lease（身份为 Pod 名）"
+gateway_pod=$(k -n "$ns" get pod -l app.kubernetes.io/component=gateway -o jsonpath='{.items[0].metadata.name}')
+for var in POD_NAME:metadata.name NODE_NAME:spec.nodeName; do
+  path=$(k -n "$ns" get pod "$gateway_pod" -o json |
+    jq -r --arg name "${var%%:*}" '.spec.containers[0].env[] | select(.name == $name) | .valueFrom.fieldRef.fieldPath // empty')
+  [[ "$path" == "${var#*:}" ]] || { log "gateway 的 ${var%%:*} 应来自 fieldRef ${var#*:}，实际为 ${path:-未注入}"; exit 1; }
+done
+deadline=$((SECONDS + 120))
+until [[ "$(k -n "$ns" get lease srenautix-gateway -o jsonpath='{.spec.holderIdentity}' 2>/dev/null)" == "$gateway_pod" ]]; do
+  ((SECONDS < deadline)) || { log "Lease srenautix-gateway 的持有者不是 $gateway_pod"; exit 1; }
+  sleep 5
+done
+log "gateway ${gateway_pod} 持有 Lease srenautix-gateway"
+
 log "安装测试通过"

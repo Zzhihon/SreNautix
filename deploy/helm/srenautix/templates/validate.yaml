@@ -159,6 +159,12 @@
 {{- end }}
 {{- end }}
 {{- end }}
+{{- if and (has "gitops_pr" $gw.actions) (not $gw.githubApp.existingSecret) }}
+{{- fail "启用 gitops_pr 时必须设置 roles.gateway.githubApp.existingSecret（GitHub App 的 app-id、installation-id、slug、private-key.pem）" }}
+{{- end }}
+{{- if lt (int $gw.terminationGracePeriodSeconds) 1800 }}
+{{- fail (printf "roles.gateway.terminationGracePeriodSeconds=%v 小于动作目录中最长的校验时间窗（1800 秒），停机时进行中的校验会被中断" $gw.terminationGracePeriodSeconds) }}
+{{- end }}
 {{- if not (has $v.roles.gateway.pgAntiAffinity (list "preferred" "required" "none")) }}
 {{- fail "roles.gateway.pgAntiAffinity 必须是 preferred、required、none 之一" }}
 {{- end }}

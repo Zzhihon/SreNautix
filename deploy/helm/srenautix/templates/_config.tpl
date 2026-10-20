@@ -110,6 +110,9 @@
 {{- $out = append $out (dict "key" "approver-keys" "configMap" (default (printf "%s-approver-keys" (include "srenautix.fullname" .ctx)) $keys.existingConfigMap) "items" (list (dict "key" "approver-keys.yaml" "path" "approver-keys.yaml"))) -}}
 {{- end -}}
 {{- $out = append $out (dict "key" "policy" "configMap" (include "srenautix.policyConfigMap" .ctx) "items" (list (dict "key" (include "srenautix.policyFile" .ctx) "path" (include "srenautix.policyFile" .ctx)))) -}}
+{{- with $v.roles.gateway.githubApp.existingSecret -}}
+{{- $out = append $out (dict "key" "github-app" "secretName" . "items" (list (dict "key" "app-id" "path" "app-id") (dict "key" "installation-id" "path" "installation-id") (dict "key" "slug" "path" "slug") (dict "key" "private-key.pem" "path" "private-key.pem"))) -}}
+{{- end -}}
 {{- end -}}
 {{- if has $role (list "server" "worker" "reader") -}}
 {{- with $v.secrets.datasources.existingSecret -}}
@@ -319,6 +322,12 @@ gateway:
   approver_keys_file: {{ $dir }}/approver-keys/approver-keys.yaml
   admission_policy_prefix: {{ include "srenautix.fullname" . }}
   metrics_url: {{ $v.datasources.prometheus.url }}
+  {{- if $v.roles.gateway.githubApp.existingSecret }}
+  github_app_dir: {{ $dir }}/github-app
+  {{- with $v.roles.gateway.githubApp.apiUrl }}
+  github_api: {{ . }}
+  {{- end }}
+  {{- end }}
 {{- end -}}
 
 {{/* 角色最终写入 config.yaml 的内容；调用方式：include "srenautix.roleConfig" (dict "ctx" $ "role" "server") */}}

@@ -64,7 +64,7 @@ chart 为五个角色生成配置文件（地址、端口、挂载路径、集�
 |---|---|---|
 | worker | `llm.routes`（模型路由，`api_key_file` 指向 `/etc/srenautix/secrets/llm/<键>`）、`budget.daily_tokens` | `apps/srenautix/src/research/config.ts` |
 | mcp | `public_url`、`authorization_server`、`clients`（外部调用方 token 放在 `roles.mcp.clientTokensSecret`） | `apps/srenautix/src/roles/mcp.ts` |
-| gateway | `roles.gateway.policy`（本集群的 gateway 策略）、`roles.gateway.approverKeys` | `internal/spoke/gateway/run.go` |
+| gateway | `roles.gateway.policy`（本集群的 gateway 策略）、`roles.gateway.approverKeys`；启用 `gitops_pr` 时加 `roles.gateway.githubApp.existingSecret`（键 `app-id`、`installation-id`、`slug`、`private-key.pem`） | `internal/spoke/gateway/run.go`、`docs/gateway/README.md` |
 | reader | 无；声明的证据查询清单放在 `roles.reader.queryManifestConfigMap` | `internal/spoke/reader/config.go` |
 | server | 无；通知渠道等写在 `roles.server.config` | `apps/srenautix/src/config/server.ts` |
 

@@ -22,6 +22,20 @@ tests:
     asserts:
       - hasDocuments: {count: 0}
 
+  - it: 启用 gitops_pr 时必须提供 GitHub App 凭证
+    set:
+      profile: standard
+      roles.gateway.actions: [node_cordon, node_uncordon, workload_scale, pod_restart, gitops_pr]
+    asserts:
+      - failedTemplate: {errorPattern: 启用 gitops_pr 时必须设置 roles.gateway.githubApp.existingSecret}
+
+  - it: 停机宽限期必须覆盖最长的校验时间窗
+    set:
+      profile: standard
+      roles.gateway.terminationGracePeriodSeconds: 600
+    asserts:
+      - failedTemplate: {errorPattern: 小于动作目录中最长的校验时间窗}
+
   - it: Kubernetes 低于 1.30 时不能启用 gateway
     set:
       profile: standard
