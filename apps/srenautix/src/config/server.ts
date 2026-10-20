@@ -53,22 +53,19 @@ const ingestSource = z.discriminatedUnion('kind', [
     .strict(),
 ]);
 
-/** 通用 git 变更源（integrations/git）：克隆地址、跟踪分支、只读凭证与路径映射。 */
+/**
+ * 托管在 GitHub 上的仓库作为变更源（integrations/github）：经 GitHub App 的安装令牌用 REST API 读取分支上的提交与改动的文件，
+ * 按路径前缀映射到拓扑节点。hub 镜像不带 git，通用 git 远端暂不支持（ADR 0096）。
+ */
 const changesSource = z
   .object({
     id: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,62}$/),
-    kind: z.literal('git'),
+    kind: z.literal('github'),
     // 变更所属的集群；不填时为本 server 的 cluster_id
     cluster_id: clusterId.optional(),
-    url: z.string().min(1),
-    ref: z.string().min(1).default('origin/main'),
-    // https 克隆的只读令牌，以 Basic 认证发送（用户名 http_username）
-    http_token_file: path.optional(),
-    http_username: z.string().min(1).default('x-access-token'),
-    // ssh 克隆的只读部署密钥与 known_hosts（必须给出，不自动信任主机密钥）
-    deploy_key_file: path.optional(),
-    known_hosts_file: path.optional(),
-    link_template: z.string().optional(),
+    // owner/name
+    repo: z.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/),
+    branch: z.string().min(1).default('main'),
     paths: z
       .array(
         z
@@ -81,10 +78,7 @@ const changesSource = z
       )
       .min(1),
   })
-  .strict()
-  .refine((s) => !s.deploy_key_file || s.known_hosts_file, {
-    message: 'deploy_key_file 需要同时给出 known_hosts_file',
-  });
+  .strict();
 
 /** GitHub App（安装令牌，不用个人令牌）：拓扑覆盖 PR、事件 issue 与 GitHub 变更源共用。 */
 const githubApp = z
@@ -285,14 +279,12 @@ export const serverConfigSchema = z
     changes: z
       .object({
         sources: z.array(changesSource).default([]),
-        // 克隆的存放目录（每个变更源一个子目录，可以是 emptyDir）
-        cache_dir: path.default('/var/lib/srenautix/changes'),
         interval: duration.default('60s'),
         // 首次同步与每次同步回看的时长（与上一次同步重叠，按 change_id 去重）
         lookback: duration.default('24h'),
       })
       .strict()
-      .default({ sources: [], cache_dir: '/var/lib/srenautix/changes', interval: '60s', lookback: '24h' }),
+      .default({ sources: [], interval: '60s', lookback: '24h' }),
     github_app: githubApp.optional(),
     // 需要人跟进的事件在 GitHub 开 issue（ADR 0095）；默认关闭
     issues: z
@@ -433,13 +425,23 @@ export function loadServerConfig(path: string): ServerConfig {
 }
 
 /**
- * 解析之前的兼容：2.5 版的 topology.override_pr.github（App 身份与仓库写在一起）迁移到 github_app 与 topology.override_pr。
+ * 解析之前的兼容与明确拒绝：
+ * - kind: git 的变更源不支持（hub 镜像不带 git，ADR 0096），给出改用 kind: github 的说明；
+ * - 2.5 版的 topology.override_pr.github（App 身份与仓库写在一起）迁移到 github_app 与 topology.override_pr。
  */
 function upgradeRaw(raw: unknown): unknown {
   if (!raw || typeof raw !== 'object') {
     return raw;
   }
   const r = structuredClone(raw) as Record<string, unknown>;
+  const changes = r.changes as { sources?: Array<{ id?: unknown; kind?: unknown }> } | undefined;
+  for (const src of changes?.sources ?? []) {
+    if (src?.kind === 'git') {
+      throw new ConfigError(
+        `变更源 ${String(src.id)}：kind: git 不支持（hub 镜像不带 git，ADR 0096）。托管在 GitHub 上的仓库改用 kind: github（repo、branch、paths，经 github_app 读取）`,
+      );
+    }
+  }
   const topo = r.topology as { override_pr?: { github?: Record<string, unknown> } } | undefined;
   const legacy = topo?.override_pr?.github;
   if (legacy && typeof legacy === 'object') {
@@ -480,6 +482,9 @@ export function parseServerConfig(raw: unknown): ServerConfig {
   if (!c.github_app) {
     if (c.issues?.enabled) {
       throw new ConfigError('issues.enabled 需要 github_app（GitHub App 的安装令牌，不用个人令牌）');
+    }
+    if (c.changes.sources.length) {
+      throw new ConfigError('kind: github 的变更源需要 github_app');
     }
   }
   const srcIds = c.changes.sources.map((x) => x.id);

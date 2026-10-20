@@ -183,8 +183,8 @@ export class IntegrationRegistry {
     for (const s of c.changes.sources) {
       specs.push({
         instanceId: `changes:${s.id}`,
-        manifestId: 'git',
-        secretRefs: [s.http_token_file, s.deploy_key_file, s.known_hosts_file].filter((x): x is string => !!x),
+        manifestId: 'github',
+        secretRefs: c.github_app ? [c.github_app.private_key_file] : [],
         usedBy: { chains: [], actions: [] },
         lastSuccess: async () => (await d.changes.statuses()).find((x) => x.id === s.id)?.lastSyncedAt ?? null,
         probe: async () => ({ 'changes.list': await attempt(() => d.changes.verify(s.id)) }),

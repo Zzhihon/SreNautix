@@ -176,29 +176,27 @@ packs:
 
 ## 变更源
 
-事件引擎把首次触发前 30 分钟内、触及事件组件的变更放进事件（`incident.changes`），并作为根因排序的一项（DESIGN §5）。变更来自配置的变更源，目前支持通用 git（`integrations/git`，GitHub、GitLab、Gitee、Gitea 等）：
+事件引擎把首次触发前 30 分钟内、触及事件组件的变更放进事件（`incident.changes`），并作为根因排序的一项（DESIGN §5）。变更来自配置的变更源。hub 镜像不带 git，变更源只支持托管在 GitHub 上的仓库（`integrations/github`，ADR 0096），经 `github_app` 的安装令牌用 REST API 读取：
 
 ```yaml
+github_app: { app_id: "123456", installation_id: "7890", private_key_file: /etc/srenautix/secrets/github-app/private-key.pem }
 changes:
-  cache_dir: /var/lib/srenautix/changes   # 每个变更源一个只读克隆，可以是 emptyDir
-  interval: 60s                           # 同步间隔
-  lookback: 24h                           # 每次同步回看的时长，按 change_id 去重
+  interval: 60s          # 同步间隔
+  lookback: 24h          # 每次同步回看的时长，按 change_id 去重
   sources:
     - id: gitops
-      kind: git
-      url: https://git.example.com/org/gitops.git
-      ref: origin/main
-      http_token_file: /etc/srenautix/secrets/changes/gitops-token   # 只读令牌，以 Basic 认证发送（用户名 http_username，默认 x-access-token）
-      link_template: https://git.example.com/org/gitops/commit/{sha}
+      kind: github
+      repo: acme/gitops
+      branch: main
       paths:
         - { prefix: apps/shop/api/, targets: ['Deployment:shop/api'], kind: gitops_sync }
 ```
 
-- ssh 克隆用 `deploy_key_file`，必须同时给出 `known_hosts_file`，只信任其中的主机密钥。
-- 凭证经环境变量交给 git，不出现在命令行参数中。克隆不检出文件（`--no-checkout --filter=blob:none`），只读取提交与路径。
+- 每次同步读取分支在回看窗口内的提交（`GET /repos/{repo}/commits`，按页读取，最多 1000 个），再读取每个提交的 diff（`GET /repos/{repo}/commits/{sha}`）中改动的文件，按路径前缀映射到拓扑节点；读过的提交不重复读取。合并提交不取（与 `git log --no-merges` 相同），时间取提交时间，链接为提交在 GitHub 上的页面。
+- App 需要该仓库的 Contents 只读权限。
 - 多集群时用 `cluster_id` 指定变更所属的集群，不填时为 server 的 `cluster_id`。
 - 同步只在主实例上进行；有新变更时立即重算事件。某个变更源同步失败时发布 `DatasourceUnavailable` 条件（subject `changes:<id>`），其他变更源不受影响。
-- 镜像中需要 `git`（ssh 克隆还需要 `ssh`）。
+- `kind: git`（通用 git 远端）不支持，配置时 server 启动失败并说明改用 `kind: github`；`changes.cache_dir` 不再使用。
 
 ## 拓扑覆盖
 

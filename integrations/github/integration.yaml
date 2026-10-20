@@ -1,0 +1,34 @@
+# GitHub 仓库作为变更源（server，ADR 0096）：经 GitHub App 的安装令牌用 REST API 读取分支上的提交与改动的文件，
+# 按路径前缀映射到拓扑节点。hub 镜像不带 git，托管在 GitHub 上的仓库用这个适配器；其他 git 远端暂不支持。
+api_version: srenautix.io/integration/v1
+id: github
+display_name: GitHub 仓库
+category: changes
+direction: read
+tier: official_candidate
+contract: changes/v1
+capabilities:
+  - { name: changes.list, stability: beta }
+tested_versions:
+  - { backend: github-rest-api, versions: ['2022-11-28'], verification: recorded_fixtures }
+config_schema:
+  type: object
+  additionalProperties: false
+  required: [repo, branch, paths]
+  properties:
+    repo: { type: string, description: 'owner/name' }
+    branch: { type: string, description: 只看这个分支 }
+    cluster_id: { type: string, description: 变更所属的集群；不填时为 server 的集群 }
+    paths:
+      type: array
+      items:
+        type: object
+        additionalProperties: false
+        required: [prefix, targets, kind]
+        properties:
+          prefix: { type: string }
+          targets: { type: array, items: { type: string } }
+          kind: { type: string, enum: [rollout, config, gitops_sync, ci_deploy, other] }
+required_scopes:
+  - 'github-app:contents:read（server 配置的 github_app 安装令牌）'
+owner: srenautix-maintainers

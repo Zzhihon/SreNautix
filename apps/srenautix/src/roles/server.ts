@@ -439,7 +439,7 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
   const changes = new ChangesService(
     pool,
     c.changes.sources,
-    { cacheDir: c.changes.cache_dir, defaultClusterId: c.cluster_id },
+    { github, defaultClusterId: c.cluster_id },
     parseDuration('changes.lookback', c.changes.lookback),
     () => void pipeline.kick().catch((e: unknown) => logger.error('事件流水线失败', { error: e })),
   );

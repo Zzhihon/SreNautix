@@ -24,7 +24,7 @@ import { TopologyStore } from '../../src/topology/store.js';
 import { serverTracks } from '../../src/roles/server-schema.js';
 import { responseErrors } from '../support/contract.js';
 import { newTestDb, type TestDb } from '../support/db.js';
-import { GitRepo } from '../support/git.js';
+import { FakeGitHub } from '../support/github.js';
 import { exampleWithTemplate } from '../support/packs.js';
 import { fixture, FixtureServer } from '../support/fixture-server.js';
 import { until } from '../support/monitoring.js';
@@ -52,6 +52,7 @@ let signingPub = '';
 let cookie = '';
 let csrf = '';
 let rolloutSha = '';
+let gh: FakeGitHub;
 
 const file = (name: string, content: string) => {
   const p = join(ROOT, name);
@@ -142,14 +143,15 @@ beforeAll(async () => {
   file('console/favicon.svg', '<svg xmlns="http://www.w3.org/2000/svg"/>');
   const consoleDir = join(ROOT, 'console');
   // 变更源：告警前 5 分钟的一次发布，触及 Deployment shop/api
-  const gitops = new GitRepo(join(ROOT, 'gitops'));
-  gitops.commit('README.md', 'gitops\n', 'init', Date.now() - 3 * 3600_000);
-  rolloutSha = gitops.commit(
-    'apps/shop/api/deployment.yaml',
-    'replicas: 3\n',
-    'roll out api v2',
-    Date.now() - 5 * 60_000,
-  );
+  const ghApp = generateKeyPairSync('rsa', { modulusLength: 2048 });
+  gh = new FakeGitHub('1001', '2002', ghApp.publicKey, 'acme/gitops');
+  await gh.start();
+  gh.commit('main', { message: 'init', date: new Date(Date.now() - 3 * 3600_000), files: ['README.md'] });
+  rolloutSha = gh.commit('main', {
+    message: 'roll out api v2',
+    date: new Date(Date.now() - 5 * 60_000),
+    files: ['apps/shop/api/deployment.yaml'],
+  });
   const config = parseServerConfig({
     cluster_id: 'c1',
     profile: 'standard',
@@ -175,13 +177,18 @@ beforeAll(async () => {
     console: { dir: consoleDir },
     datasources: { prometheus: { url: 'http://127.0.0.1:9' } },
     topology: { source: 'off' },
+    github_app: {
+      api_base: gh.url,
+      app_id: '1001',
+      installation_id: '2002',
+      private_key_file: file('github-app.pem', ghApp.privateKey.export({ format: 'pem', type: 'pkcs8' }) as string),
+    },
     changes: {
-      cache_dir: join(ROOT, 'changes-cache'),
       sources: [
         {
           id: 'gitops',
-          kind: 'git',
-          url: gitops.dir,
+          kind: 'github',
+          repo: 'acme/gitops',
           paths: [
             {
               prefix: 'apps/shop/api/',
@@ -272,6 +279,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await srv?.stop();
   await tg?.stop();
+  await gh?.stop();
   await db?.close();
   rmSync(ROOT, { recursive: true, force: true });
 });
@@ -368,7 +376,7 @@ describe('server 端到端', () => {
     expect(items.map((x) => [x.instance_id, x.manifest.id])).toEqual([
       ['ingest:am', 'alertmanager'],
       ['datasource:prometheus', 'prometheus-api'],
-      ['changes:gitops', 'git'],
+      ['changes:gitops', 'github'],
       ['notify:telegram', 'telegram'],
       ['approve:console', 'console'],
       ['identity:local-admin', 'local-admin'],
@@ -388,7 +396,7 @@ describe('server 端到端', () => {
         results: Array<{ capability: string; ok: boolean; error: string | null }>;
       };
     };
-    // git 变更源：真实 fetch 与 changes.list
+    // GitHub 变更源：经 App 令牌读取提交与 diff
     expect(await test('changes:gitops')).toMatchObject({
       ok: true,
       results: [{ capability: 'changes.list', ok: true }],

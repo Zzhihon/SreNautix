@@ -249,7 +249,10 @@ export class FakeGitHub {
       }
       const since = u.searchParams.get('since');
       const until = u.searchParams.get('until');
-      const inWindow = all.filter((c) => (!since || c.date >= since) && (!until || c.date <= until));
+      const inWindow = all.filter(
+        (c) =>
+          (!since || Date.parse(c.date) >= Date.parse(since)) && (!until || Date.parse(c.date) <= Date.parse(until)),
+      );
       const per = Number(u.searchParams.get('per_page') ?? 30);
       const page = Number(u.searchParams.get('page') ?? 1);
       const slice = inWindow.slice((page - 1) * per, page * per);

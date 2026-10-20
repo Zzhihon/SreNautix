@@ -1,15 +1,10 @@
-import { execFile } from 'node:child_process';
-import { existsSync, mkdirSync } from 'node:fs';
-import { join } from 'node:path';
-import { promisify } from 'node:util';
 import type { ChangeEvent } from '@srenautix/contract';
-import { DatasourceError, GitChangesAdapter, toIso } from '@srenautix/integration-sdk';
+import { DatasourceError, toIso } from '@srenautix/integration-sdk';
 import type pg from 'pg';
-import { readSecretFile } from '../config/files.js';
 import type { ServerConfig } from '../config/server.js';
+import type { GitHubApp } from '../github/app.js';
 import { logger } from '../log.js';
-
-const run = promisify(execFile);
+import { GitHubChangesAdapter } from './github.js';
 
 export type ChangeSourceConfig = ServerConfig['changes']['sources'][number];
 
@@ -22,96 +17,29 @@ export interface ChangeSourceStatus {
 }
 
 /**
- * 一个 git 变更源的只读克隆：首次 clone（--no-checkout，不下载文件内容，只需要提交与树），之后每次同步 fetch。
- * 凭证经环境变量交给 git，不出现在命令行参数中：https 令牌以 GIT_CONFIG_* 设置 http.extraHeader，
- * ssh 部署密钥经 GIT_SSH_COMMAND，并且只信任 known_hosts_file 中的主机密钥。
- */
-class GitMirror {
-  constructor(
-    readonly dir: string,
-    private readonly s: ChangeSourceConfig,
-  ) {}
-
-  private env(): NodeJS.ProcessEnv {
-    const env: NodeJS.ProcessEnv = { ...process.env, GIT_TERMINAL_PROMPT: '0' };
-    if (this.s.http_token_file) {
-      const token = readSecretFile(`changes.sources.${this.s.id}.http_token_file`, this.s.http_token_file);
-      const basic = Buffer.from(`${this.s.http_username}:${token}`).toString('base64');
-      env.GIT_CONFIG_COUNT = '1';
-      env.GIT_CONFIG_KEY_0 = 'http.extraHeader';
-      env.GIT_CONFIG_VALUE_0 = `Authorization: Basic ${basic}`;
-    }
-    if (this.s.deploy_key_file) {
-      env.GIT_SSH_COMMAND = [
-        'ssh',
-        '-i',
-        this.s.deploy_key_file,
-        '-o IdentitiesOnly=yes',
-        '-o StrictHostKeyChecking=yes',
-        `-o UserKnownHostsFile=${this.s.known_hosts_file}`,
-      ].join(' ');
-    }
-    return env;
-  }
-
-  private async git(args: string[]): Promise<void> {
-    try {
-      await run('git', args, { env: this.env(), timeout: 120_000, maxBuffer: 16 * 1024 * 1024 });
-    } catch (e) {
-      const err = e as { stderr?: string; message: string };
-      // 错误信息可能含有克隆地址，不含凭证（凭证只在环境变量中）
-      throw new DatasourceError(
-        this.s.id,
-        `git ${args[0] === '-C' ? args[2] : args[0]} 失败：${(err.stderr || err.message).trim().slice(0, 500)}`,
-      );
-    }
-  }
-
-  async refresh(): Promise<void> {
-    if (!existsSync(join(this.dir, '.git'))) {
-      mkdirSync(this.dir, { recursive: true });
-      await this.git(['clone', '--quiet', '--no-checkout', '--filter=blob:none', this.s.url, this.dir]);
-      return;
-    }
-    await this.git(['-C', this.dir, 'fetch', '--quiet', '--prune', 'origin']);
-  }
-}
-
-/**
- * 变更源同步（changes/v1，DESIGN §5）：每个变更源维护只读克隆，定期 fetch，再用 integration-sdk 的 git 适配器
- * 读取回看窗口内触及映射路径的提交，按 change_id 去重写入 server.change_events。有新变更时调用 onNew（重算事件）。
+ * 变更源同步（changes/v1，DESIGN §5）：每个变更源是 GitHub 上的一个仓库分支，经 GitHub App 的 REST API 读取回看窗口内
+ * 触及映射路径的提交（ADR 0096），按 change_id 去重写入 server.change_events。有新变更时调用 onNew（重算事件）。
  * 单个变更源失败只记录在它的状态中，不影响其他变更源。
  */
 export class ChangesService {
-  private readonly sources: Array<{
-    cfg: ChangeSourceConfig;
-    clusterId: string;
-    mirror: GitMirror;
-    adapter: GitChangesAdapter;
-  }>;
+  private readonly sources: Array<{ cfg: ChangeSourceConfig; clusterId: string; adapter: GitHubChangesAdapter }>;
 
   constructor(
     private readonly pool: pg.Pool,
     sources: readonly ChangeSourceConfig[],
-    o: { cacheDir: string; defaultClusterId: string },
+    o: { github: GitHubApp | null; defaultClusterId: string },
     private readonly lookbackMs: number,
     private readonly onNew: () => void,
   ) {
-    this.sources = sources.map((cfg) => {
-      const mirror = new GitMirror(join(o.cacheDir, cfg.id), cfg);
-      return {
-        cfg,
-        clusterId: cfg.cluster_id ?? o.defaultClusterId,
-        mirror,
-        adapter: new GitChangesAdapter({
-          id: cfg.id,
-          repo_dir: mirror.dir,
-          ref: cfg.ref,
-          link_template: cfg.link_template ?? null,
-          paths: cfg.paths,
-        }),
-      };
-    });
+    const gh = o.github;
+    if (sources.length && !gh) {
+      throw new Error('GitHub 变更源需要 github_app');
+    }
+    this.sources = sources.map((cfg) => ({
+      cfg,
+      clusterId: cfg.cluster_id ?? o.defaultClusterId,
+      adapter: new GitHubChangesAdapter(gh!, { id: cfg.id, repo: cfg.repo, branch: cfg.branch, paths: cfg.paths }),
+    }));
   }
 
   get configured(): boolean {
@@ -124,12 +52,7 @@ export class ChangesService {
     let added = 0;
     for (const s of this.sources) {
       try {
-        await s.mirror.refresh();
-        const window = { from: toIso(now - this.lookbackMs), to: toIso(now) };
-        const r = await s.adapter.list(
-          { scope: { cluster_id: s.clusterId, namespaces: [], components: [] }, window, limit: 5_000 },
-          window,
-        );
+        const r = await s.adapter.list({ from: toIso(now - this.lookbackMs), to: toIso(now) }, 5_000);
         if (r.truncated) {
           logger.warn('变更源在回看窗口内的变更超过上限，只取最新的部分', { source: s.cfg.id });
         }
@@ -173,18 +96,13 @@ export class ChangesService {
     return n;
   }
 
-  /** 连接测试：对一个变更源执行一次 fetch 与最近 1 小时的 changes.list，不写入变更。返回说明，失败时抛出。 */
+  /** 连接测试：对一个变更源读取最近 1 小时的 changes.list，不写入变更。返回说明，失败时抛出。 */
   async verify(id: string, now = Date.now()): Promise<string> {
     const s = this.sources.find((x) => x.cfg.id === id);
     if (!s) {
       throw new Error(`没有变更源 ${id}`);
     }
-    await s.mirror.refresh();
-    const window = { from: toIso(now - 3600_000), to: toIso(now) };
-    const r = await s.adapter.list(
-      { scope: { cluster_id: s.clusterId, namespaces: [], components: [] }, window, limit: 1_000 },
-      window,
-    );
+    const r = await s.adapter.list({ from: toIso(now - 3600_000), to: toIso(now) }, 1_000);
     return `最近 1 小时 ${r.changes.length}${r.truncated ? '+' : ''} 个变更`;
   }
 

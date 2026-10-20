@@ -43,6 +43,7 @@ const CANDIDATES = [
   'jaeger',
   'flux',
   'gitlab',
+  'github',
   'jenkins',
   'dingtalk',
   'wecom',
