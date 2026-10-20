@@ -107,8 +107,6 @@ for role in server worker reader gateway; do
   [[ "${ready:-0}" -ge 1 ]] || { log "srenautix-$role 没有就绪的副本"; exit 1; }
   log "srenautix-${role}：${ready} 个副本就绪"
 done
-# 之后 server 不应再有读取 worker 事件流失败的日志（启动时 worker 尚未就绪的重试不计入）
-ready_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
 log "检查 gateway 的准入自检与熔断开关（从 monitoring 命名空间读取指标）"
 deadline=$((SECONDS + 180))
@@ -164,6 +162,10 @@ k -n "$ns" exec deploy/srenautix-server -c server -- /nodejs/bin/node -e \
      .then(async (r) => { if (r.status !== 200) { console.error('HTTP ' + r.status + ' ' + (await r.text())); process.exit(1); } })
      .catch((e) => { console.error(e.cause?.code ?? e.message); process.exit(1); });" ||
   { log "server 读取 worker 的 /v1/events 失败"; exit 1; }
+# 之后 server 不应再有读取 worker 事件流失败的日志。worker 刚就绪时，server 在它就绪之前发起的那次请求
+# 可能在连接超时（约 10 秒）后才记录失败，再留出一次重试的时间，从这之后开始计
+sleep 20
+ready_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
 log "注入一条告警，等待阶段 B 的研判经 worker 事件流回到 server"
 # 模型端点在测试环境中不可达（ci/base/required.yaml 的示例路由），worker 的模型调用失败后研判以 stage_a_only 或 failed 结束；
