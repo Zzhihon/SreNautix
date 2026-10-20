@@ -1,116 +1,21 @@
-import { createHash, createPrivateKey, type KeyObject } from 'node:crypto';
-import { SignJWT } from 'jose';
+import { createHash } from 'node:crypto';
 import { HttpError } from '../api/errors.js';
+import { GitHubError, type GitHubApp } from '../github/app.js';
 import { addOverride, type TopologyOverride } from './overrides.js';
 
-export interface GitHubAppSettings {
-  apiBase: string;
-  appId: string;
-  installationId: string;
-  /** GitHub App 私钥（PEM） */
-  privateKey: string;
+/** 覆盖规则 PR 的仓库：每个集群一个文件 <dir>/<cluster_id>.yaml */
+export interface OverrideRepo {
   /** owner/name */
   repo: string;
   baseBranch: string;
-  /** 仓库中覆盖文件所在的目录；每个集群一个文件 <dir>/<cluster_id>.yaml */
   dir: string;
 }
 
 export interface OverridePrResult {
   pr_url: string;
+  pr_number: number;
   branch: string;
   head_sha: string;
-}
-
-class GitHubError extends Error {
-  constructor(
-    readonly status: number,
-    readonly op: string,
-    message: string,
-  ) {
-    super(`GitHub ${op} 返回 HTTP ${status}：${message}`);
-    this.name = 'GitHubError';
-  }
-}
-
-/**
- * 以 GitHub App 身份访问仓库：用 App 私钥签 JWT（RS256，有效 9 分钟）换取安装令牌（1 小时，提前 5 分钟刷新）。
- * 只用到的接口：读取分支与文件、建分支、写文件、开 PR；App 只需要该仓库的 contents 与 pull_requests 写权限。
- */
-export class GitHubApp {
-  private readonly key: KeyObject;
-  private token: { value: string; expiresAt: number } | null = null;
-
-  constructor(
-    private readonly s: GitHubAppSettings,
-    private readonly now: () => number = Date.now,
-  ) {
-    this.key = createPrivateKey(s.privateKey);
-  }
-
-  private async jwt(): Promise<string> {
-    const iat = Math.floor(this.now() / 1000) - 60;
-    return new SignJWT({})
-      .setProtectedHeader({ alg: 'RS256' })
-      .setIssuer(this.s.appId)
-      .setIssuedAt(iat)
-      .setExpirationTime(iat + 540)
-      .sign(this.key);
-  }
-
-  private async installationToken(): Promise<string> {
-    if (this.token && this.token.expiresAt - this.now() > 5 * 60_000) {
-      return this.token.value;
-    }
-    const body = await this.call<{ token: string; expires_at: string }>(
-      'POST',
-      `/app/installations/${this.s.installationId}/access_tokens`,
-      undefined,
-      `Bearer ${await this.jwt()}`,
-      'installation_token',
-    );
-    this.token = { value: body.token, expiresAt: Date.parse(body.expires_at) };
-    return body.token;
-  }
-
-  private async call<T>(method: string, path: string, body: unknown, auth: string, op: string): Promise<T> {
-    let res: Response;
-    try {
-      res = await fetch(`${this.s.apiBase.replace(/\/+$/, '')}${path}`, {
-        method,
-        headers: {
-          accept: 'application/vnd.github+json',
-          authorization: auth,
-          'x-github-api-version': '2022-11-28',
-          'user-agent': 'srenautix',
-          ...(body === undefined ? {} : { 'content-type': 'application/json' }),
-        },
-        body: body === undefined ? undefined : JSON.stringify(body),
-        signal: AbortSignal.timeout(15_000),
-      });
-    } catch (e) {
-      throw new GitHubError(0, op, `不可达：${(e as Error).message}`);
-    }
-    const text = await res.text();
-    if (!res.ok) {
-      let message = text.slice(0, 300);
-      try {
-        message = (JSON.parse(text) as { message?: string }).message ?? message;
-      } catch {
-        // 非 JSON 的错误页，原样截取
-      }
-      throw new GitHubError(res.status, op, message);
-    }
-    return (text ? JSON.parse(text) : null) as T;
-  }
-
-  async api<T>(method: string, path: string, body: unknown, op: string): Promise<T> {
-    return this.call<T>(method, path, body, `token ${await this.installationToken()}`, op);
-  }
-
-  get settings(): GitHubAppSettings {
-    return this.s;
-  }
 }
 
 function slug(s: string): string {
@@ -131,10 +36,12 @@ function slug(s: string): string {
  */
 export async function createOverridePr(
   gh: GitHubApp,
+  s: OverrideRepo,
   o: TopologyOverride,
   requestedBy: string,
+  /** 关联的事件 issue（例如 #12 或 owner/name#12）；PR 描述里写 Refs，GitHub 在 issue 上显示关联 */
+  refs: string | null = null,
 ): Promise<OverridePrResult> {
-  const s = gh.settings;
   const path = `${s.dir.replace(/\/+$/, '')}/${o.cluster_id}.yaml`;
   const digest = createHash('sha256').update(JSON.stringify(o)).digest('hex').slice(0, 8);
   const branch = `srenautix/topology-override-${slug(o.cluster_id)}-${slug(o.alertname)}-${digest}`;
@@ -187,7 +94,7 @@ export async function createOverridePr(
       },
       'put_file',
     );
-    const pr = await gh.api<{ html_url: string }>(
+    const pr = await gh.api<{ html_url: string; number: number }>(
       'POST',
       `/repos/${s.repo}/pulls`,
       {
@@ -203,12 +110,13 @@ export async function createOverridePr(
           `- 角色：${o.role}`,
           '',
           '合并后 server 在下一次重新加载拓扑覆盖目录时生效。',
+          ...(refs ? ['', `Refs ${refs}`] : []),
         ].join('\n'),
         maintainer_can_modify: true,
       },
       'create_pull',
     );
-    return { pr_url: pr.html_url, branch, head_sha: put.commit.sha };
+    return { pr_url: pr.html_url, pr_number: pr.number, branch, head_sha: put.commit.sha };
   } catch (e) {
     if (e instanceof GitHubError) {
       const why =

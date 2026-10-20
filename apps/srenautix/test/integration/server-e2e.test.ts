@@ -347,7 +347,7 @@ describe('server 端到端', () => {
     expect(r.status).toBe(503);
     expect(r.body).toMatchObject({
       error: 'unavailable',
-      message: expect.stringContaining('topology.override_pr.github'),
+      message: expect.stringContaining('没有配置 github_app 与 topology.override_pr'),
     });
     const bad = await api('POST', '/v1/topology/overrides/pr', { session: true, body: { ...body, role: 'boss' } });
     expect(bad.status).toBe(400);

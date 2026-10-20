@@ -1183,7 +1183,10 @@ export type paths = {
     };
     get?: never;
     put?: never;
-    /** @description 为未映射的告警生成拓扑覆盖规则的 PR；只推送到 srenautix/* 分支，从不合并 */
+    /**
+     * @description 为未映射的告警生成拓扑覆盖规则的 PR；只推送到 srenautix/* 分支，从不合并。
+     *     给出 incident_id 且开启了事件 issue 时，先确保该事件有 issue，PR 描述写 `Refs #<issue>`，issue 里回链 PR
+     */
     post: operations['createTopologyOverridePr'];
     delete?: never;
     options?: never;
@@ -5929,6 +5932,8 @@ export interface operations {
           alertname: string;
           cluster_id: components['schemas']['ClusterId'];
           component: components['schemas']['ComponentKey'];
+          /** @description 引出这条规则的事件；PR 与该事件的 issue 互相关联 */
+          incident_id?: components['schemas']['Uuid'];
           role: components['schemas']['AlertRole'];
         };
       };
@@ -5943,10 +5948,13 @@ export interface operations {
           'application/json': {
             branch: string;
             head_sha: string;
+            /** @description 关联的事件 issue；没有给出 incident_id、没有开启事件 issue，或 issue 暂时没能开出时为 null */
+            issue_url: string | null;
             pr_url: string;
           };
         };
       };
+      404: components['responses']['Error'];
       409: components['responses']['Error'];
     };
   };

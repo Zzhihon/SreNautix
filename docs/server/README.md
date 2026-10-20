@@ -219,22 +219,62 @@ alerts:
 控制台拓扑页的"未映射告警"可以直接发起覆盖规则的 PR（`POST /v1/topology/overrides/pr`，admin）。server 以 GitHub App 身份在 `srenautix/*` 分支上修改 `<dir>/<cluster_id>.yaml` 并开 PR，从不合并：
 
 ```yaml
+github_app:                                            # 见下面的"GitHub App"
+  app_id: "123456"
+  installation_id: "7890"
+  private_key_file: /etc/srenautix/secrets/github-app/private-key.pem
 topology:
   overrides_dir: /etc/srenautix/topology-overrides     # 挂载仓库中的 <dir>
   override_pr:
-    github:
-      app_id: "123456"
-      installation_id: "7890"
-      private_key_file: /etc/srenautix/secrets/github-app/private-key.pem
-      repo: acme/gitops
-      base_branch: main
-      dir: srenautix/topology-overrides
+    repo: acme/gitops
+    base_branch: main
+    dir: srenautix/topology-overrides
 ```
 
-- App 只需要该仓库的 Contents 与 Pull requests 读写权限。安装令牌由 App 私钥签的 JWT 换取，1 小时有效，到期前刷新。
-- 没有配置 `override_pr.github` 时接口返回 503，说明需要在 Git 中直接修改覆盖文件；App 身份无效、没有安装到仓库、没有仓库权限或 GitHub 不可达时同样返回 503 并说明是哪一种。
+- 没有配置 `github_app` 与 `topology.override_pr` 时接口返回 503，说明需要在 Git 中直接修改覆盖文件；App 身份无效、没有安装到仓库、没有仓库权限或 GitHub 不可达时同样返回 503 并说明是哪一种。
 - 基础分支上已有同一集群、同一告警名的规则，或这条规则的 PR 已经开过（分支已存在）时返回 409。
+- 请求带 `incident_id` 并开启了事件 issue 时，先确保该事件有 issue，PR 描述写 `Refs #<issue>`，issue 里回链 PR；响应的 `issue_url` 为该 issue（暂时没能开出时为 null，issue 开出后补上 Refs）。见下面的"事件 issue"。
 - 每次发起写入治理审计（`topology.override_pr`）。
+- 2.5 版的写法 `topology.override_pr.github`（App 身份与仓库写在一起）仍然接受，解析时迁移到 `github_app` 与 `topology.override_pr`。
+
+## GitHub App
+
+拓扑覆盖 PR、事件 issue 与 GitHub 变更源都用同一个 GitHub App 的安装令牌（不用个人令牌）：App 私钥签的 RS256 JWT 换取安装令牌，1 小时有效，到期前 5 分钟刷新。
+
+```yaml
+github_app:
+  api_base: https://api.github.com          # GitHub Enterprise 时改为 https://<host>/api/v3
+  app_id: "123456"
+  installation_id: "7890"
+  private_key_file: /etc/srenautix/secrets/github-app/private-key.pem
+```
+
+App 需要的仓库权限：拓扑覆盖 PR 要 Contents 与 Pull requests 读写；事件 issue 要 Issues 读写，以及 Pull requests 读写（给 PR 补 Refs）；GitHub 变更源要 Contents 只读。
+
+## 事件 issue
+
+需要人跟进的事件在配置的仓库里开 issue，让 DevOps 看到问题（ADR 0095）。默认关闭：
+
+```yaml
+issues:
+  enabled: true
+  repo: acme/ops
+  labels: [srenautix]          # 默认 srenautix
+  title_prefix: "[影子]"        # 不填时取 notify.prefix
+  max_per_hour: 6              # 每个仓库每小时最多新开的 issue 数
+  lookback: 6h                 # 只为最近这段时间内更新过的事件开 issue
+  interval: 30s                # 后台循环（登记、开出、评论、重试）
+```
+
+- **什么时候开**：阶段 A 或已完成的研判的处置判断为 `escalate`；或者有需要改仓库的修复提议（带 `incident_id` 的拓扑覆盖 PR、`gitops_pr` 提议）。被抑制、已合并的事件不开。
+- **内容**：事件（标签、严重度、集群、状态）、开 issue 的原因、处置判断、根因候选、结论（研判的摘要与结论档位，没有研判时说明是阶段 A 的确定性报告）、关键证据卡（异常的在前，最多 6 张：判定、值、说明）、控制台链接。正文第一行是事件标记 `<!-- srenautix:incident=<id> -->`。
+- **去重**：每个事件最多一个 issue（`server.github_issues` 以 incident_id 为主键）。开 issue 的请求超时或连接断开时，重试先按事件标记在仓库中找回已开的 issue，不重复开。
+- **后续进展**：issue 开出之后结束的研判、事件恢复、关联的 PR 与 gitops_pr 提议各追加一条评论，按 (事件, 键) 去重；评论同样带标记，重试时找回已写入的评论。
+- **关联**：server 发起的拓扑覆盖 PR 与 gitops_pr 提议的参数描述里写 `Refs #<issue>`（跨仓库时 `owner/name#<issue>`），GitHub 在 issue 上显示关联；PR 先于 issue 开出时，issue 开出后给 PR 描述补上 Refs（`github.pr_refs`）。gitops_pr 的 Refs 在创建提议时写入参数，随参数一起被审批；幂等键按调用方给出的参数计算。
+- **限速**：最近 1 小时已开满 `max_per_hour` 个 issue 时，新的事件记为 `skipped`，只记录（`github.issue_skipped`、`srenautix_github_issues_total{outcome="skipped_rate_limit"}`、日志），之后不再为它开 issue。评论不受限速。
+- **失败与重试**：GitHub 返回错误或不可达时按退避重试（30 秒起，每次翻倍，最长 30 分钟），最多 8 次，用尽后记为 `failed`（`github.issue_failed`）。最近 1 小时内重试 3 次以上或放弃的 issue 与评论使状态条显示 `ChannelDeliveryFailed`（channel `github-issues`）。
+- 主实例运行后台循环；控制台发起拓扑覆盖 PR、提交 gitops_pr 提议时在当前副本上立即尝试开一次。每次开出、跳过、放弃、评论与补 Refs 写入治理审计。
+- 指标：`srenautix_github_issues_total{repo,outcome}`（opened、skipped_rate_limit、retry、failed）、`srenautix_github_issue_comments_total{repo,outcome}`（posted、retry、failed）。
 
 ## 集成页
 

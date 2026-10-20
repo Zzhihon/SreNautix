@@ -12,7 +12,8 @@ import { activeAlerts } from '../../src/ingest/store.js';
 import { ServerMetrics } from '../../src/metrics.js';
 import { serverTracks } from '../../src/roles/server-schema.js';
 import { migrateExpand } from '../../src/store/migrate.js';
-import { createOverridePr, GitHubApp } from '../../src/topology/override-pr.js';
+import { GitHubApp } from '../../src/github/app.js';
+import { createOverridePr, type OverrideRepo } from '../../src/topology/override-pr.js';
 import { parseOverridesFile, TopologyOverrides } from '../../src/topology/overrides.js';
 import { TopologyStore } from '../../src/topology/store.js';
 import { parseServerConfig } from '../../src/config/server.js';
@@ -47,11 +48,14 @@ const client = (over: Partial<ConstructorParameters<typeof GitHubApp>[0]> = {}) 
     appId: '123456',
     installationId: '7890',
     privateKey: pem,
-    repo: REPO,
-    baseBranch: 'main',
-    dir: DIR,
     ...over,
   });
+const target = (over: Partial<OverrideRepo> = {}): OverrideRepo => ({
+  repo: REPO,
+  baseBranch: 'main',
+  dir: DIR,
+  ...over,
+});
 
 beforeAll(async () => {
   gh = new FakeGitHub('123456', '7890', app.publicKey, REPO);
@@ -71,7 +75,7 @@ describe('拓扑覆盖的 PR', () => {
   let branch = '';
 
   it('新文件：在 srenautix/* 分支上写入覆盖文件并开 PR，从不改动基础分支', async () => {
-    const r = await createOverridePr(client(), override, 'oidc:alice');
+    const r = await createOverridePr(client(), target(), override, 'oidc:alice');
     expect(r.branch).toMatch(/^srenautix\/topology-override-prod-kafkaconsumerlag-[0-9a-f]{8}$/);
     expect(r.pr_url).toBe(`https://github.example.test/${REPO}/pull/1`);
     expect(r.head_sha).toBe(gh.heads.get(r.branch));
@@ -87,10 +91,10 @@ describe('拓扑覆盖的 PR', () => {
   });
 
   it('同一条规则的 PR 已开过：409；合并后基础分支已有这条规则：409', async () => {
-    const again = createOverridePr(client(), override, 'oidc:alice');
+    const again = createOverridePr(client(), target(), override, 'oidc:alice');
     await expect(again).rejects.toMatchObject({ status: 409, message: expect.stringContaining('已经开过') });
     gh.merge(branch);
-    const merged = createOverridePr(client(), override, 'oidc:alice');
+    const merged = createOverridePr(client(), target(), override, 'oidc:alice');
     await expect(merged).rejects.toMatchObject({ status: 409, message: expect.stringContaining('已有集群 prod') });
   });
 
@@ -101,7 +105,7 @@ describe('拓扑覆盖的 PR', () => {
       component: 'StatefulSet:cache/redis',
       role: 'symptom' as const,
     };
-    const r = await createOverridePr(client(), second, 'oidc:bob');
+    const r = await createOverridePr(client(), target(), second, 'oidc:bob');
     const file = parseOverridesFile('prod.yaml', gh.branches.get(r.branch)!.get(`${DIR}/prod.yaml`)!);
     expect(file.alerts.map((a) => a.alertname)).toEqual(['KafkaConsumerLag', 'RedisEvictions']);
   });
@@ -112,15 +116,15 @@ describe('拓扑覆盖的 PR', () => {
       type: 'pkcs8',
     }) as string;
     const third = { ...override, alertname: 'Third' };
-    const cases: Array<[Partial<ConstructorParameters<typeof GitHubApp>[0]>, RegExp]> = [
-      [{ privateKey: other }, /GitHub App 身份无效或没有安装到仓库/],
-      [{ installationId: '1' }, /GitHub App 身份无效或没有安装到仓库/],
-      [{ repo: 'acme/other' }, /没有仓库 acme\/other 的权限/],
-      [{ baseBranch: 'release' }, /分支 release 不存在/],
-      [{ apiBase: 'http://127.0.0.1:9' }, /GitHub 不可达/],
+    const cases: Array<[Partial<ConstructorParameters<typeof GitHubApp>[0]>, Partial<OverrideRepo>, RegExp]> = [
+      [{ privateKey: other }, {}, /GitHub App 身份无效或没有安装到仓库/],
+      [{ installationId: '1' }, {}, /GitHub App 身份无效或没有安装到仓库/],
+      [{}, { repo: 'acme/other' }, /没有仓库 acme\/other 的权限/],
+      [{}, { baseBranch: 'release' }, /分支 release 不存在/],
+      [{ apiBase: 'http://127.0.0.1:9' }, {}, /GitHub 不可达/],
     ];
-    for (const [over, why] of cases) {
-      const p = createOverridePr(client(over), third, 'oidc:alice');
+    for (const [over, repoOver, why] of cases) {
+      const p = createOverridePr(client(over), target(repoOver), third, 'oidc:alice');
       await expect(p).rejects.toBeInstanceOf(HttpError);
       await expect(p).rejects.toMatchObject({ status: 503, message: expect.stringMatching(why) });
     }
@@ -153,6 +157,7 @@ describe('控制台接口 POST /v1/topology/overrides/pr', () => {
       topology: {
         source: 'off',
         overrides_dir: resolve(file('overrides/.keep', ''), '..'),
+        // 2.5 版的写法（App 身份与仓库写在一起）：解析时迁移到 github_app 与 topology.override_pr
         override_pr: {
           github: {
             api_base: gh.url,

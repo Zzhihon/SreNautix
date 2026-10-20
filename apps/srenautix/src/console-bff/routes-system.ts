@@ -2,6 +2,7 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import type { Condition, Proposal } from '@srenautix/contract';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type pg from 'pg';
+import { z } from 'zod';
 import { badRequest, HttpError, notFound } from '../api/errors.js';
 import type { ServerConfig } from '../config/server.js';
 import type { Auth } from '../identity/auth.js';
@@ -13,7 +14,9 @@ import type { Catalog } from '../proposals/catalog.js';
 import type { Policies } from '../proposals/policy.js';
 import type { ProposalService, TargetResolver } from '../proposals/service.js';
 import type { PackRuntime } from '../stage-a/packs.js';
-import { createOverridePr, type GitHubApp } from '../topology/override-pr.js';
+import { GitHubApp } from '../github/app.js';
+import type { IssueService } from '../github/issues.js';
+import { createOverridePr } from '../topology/override-pr.js';
 import { overrideSchema } from '../topology/overrides.js';
 import type { IntegrationRegistry } from './integrations.js';
 import { appendAudit, readAudit, verifyRecords, GENESIS_HASH } from '../store/audit.js';
@@ -35,12 +38,17 @@ export interface SystemRouteDeps {
   worker: { url: string; token: string } | null;
   packs: PackRuntime;
   integrations: IntegrationRegistry;
-  /** 开覆盖规则 PR 的 GitHub App；没有配置时为 null */
+  /** GitHub App（github_app）；没有配置时为 null */
   github: GitHubApp | null;
+  /** 事件 issue（issues.enabled）；关闭时为 null */
+  issues: IssueService | null;
 }
 
 /** contract/openapi.yaml 的 createTopologyOverridePr 请求体 */
-const overridePrBody = overrideSchema.omit({ match_labels: true }).strict();
+const overridePrBody = overrideSchema
+  .omit({ match_labels: true })
+  .extend({ incident_id: z.string().uuid().optional() })
+  .strict();
 
 const fmt = (d: Date | null | undefined) => (d ? d.toISOString() : null);
 
@@ -488,17 +496,46 @@ export function registerSystemRoutes(app: FastifyInstance, d: SystemRouteDeps): 
     if (!parsed.success) {
       throw badRequest(parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('；'));
     }
-    if (!d.github) {
+    const target = d.config.topology.override_pr;
+    if (!d.github || !target) {
       throw new HttpError(
         503,
         'unavailable',
-        '没有配置 GitHub App（topology.override_pr.github），不能发起覆盖规则的 PR；在 Git 中直接修改拓扑覆盖文件' +
+        '没有配置 github_app 与 topology.override_pr，不能发起覆盖规则的 PR；在 Git 中直接修改拓扑覆盖文件' +
           (d.config.topology.overrides_dir ? `（server 从 ${d.config.topology.overrides_dir} 加载）` : ''),
       );
     }
-    const o = { ...parsed.data };
-    const r = await createOverridePr(d.github, o, c.subject.id);
-    await tx(d.pool, (cl) => appendAudit(cl, 'topology.override_pr', c.subject.id, { ...o, ...r }));
+    const { incident_id: incidentId, ...o } = parsed.data;
+    if (incidentId) {
+      const inc = await d.pool.query('SELECT 1 FROM server.incidents WHERE incident_id = $1', [incidentId]);
+      if (!inc.rowCount) {
+        throw notFound(`没有事件 ${incidentId}`);
+      }
+    }
+    // 需要改仓库的修复提议：先确保事件有 issue，PR 描述写 Refs（ADR 0095）
+    const issue = incidentId && d.issues ? await d.issues.ensure(incidentId, 'repo_change') : null;
+    const refs = issue ? GitHubApp.ref(target.repo, issue.repo, issue.number) : null;
+    const pr = await createOverridePr(
+      d.github,
+      { repo: target.repo, baseBranch: target.base_branch, dir: target.dir },
+      o,
+      c.subject.id,
+      refs,
+    );
+    if (incidentId && d.issues) {
+      await d.issues.link(incidentId, {
+        kind: 'pull',
+        url: pr.pr_url,
+        title: `topology: map ${o.alertname} (${o.cluster_id}) to ${o.component}`,
+        repo: target.repo,
+        number: pr.pr_number,
+        refsInBody: refs !== null,
+      });
+    }
+    const r = { pr_url: pr.pr_url, branch: pr.branch, head_sha: pr.head_sha, issue_url: issue?.url ?? null };
+    await tx(d.pool, (cl) =>
+      appendAudit(cl, 'topology.override_pr', c.subject.id, { ...o, incident_id: incidentId ?? null, ...r }),
+    );
     return reply.code(201).send(r);
   });
 

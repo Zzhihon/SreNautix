@@ -134,7 +134,32 @@ interface Row {
   ttl_expires_at: Date | null;
 }
 
+/** 需要改仓库的提议（gitops_pr）关联事件 issue：开 PR 之前确保 issue 存在，PR 描述写 Refs，issue 里回链提议（ADR 0095） */
+export interface ProposalIssueHook {
+  /** 确保事件有 issue，返回从 fromRepo 引用它的写法；不能开出时为 null */
+  refFor(incidentId: string, fromRepo: string): Promise<string | null>;
+  /** 提议创建之后在 issue 里回链 */
+  linked(p: Proposal, refsInBody: boolean): Promise<void>;
+}
+
+/** gitops_pr 的参数描述里追加 Refs（不超过目录的 8192 字符上限，已有时不重复） */
+export function withRefs(params: Record<string, unknown>, ref: string): Record<string, unknown> {
+  const line = `Refs ${ref}`;
+  const body = typeof params.body === 'string' ? params.body : '';
+  if (body.includes(line)) {
+    return params;
+  }
+  const next = body ? `${body}\n\n${line}` : line;
+  return next.length > 8192 ? params : { ...params, body: next };
+}
+
 export class ProposalService {
+  private issueHook: ProposalIssueHook | null = null;
+
+  setIssueHook(h: ProposalIssueHook | null): void {
+    this.issueHook = h;
+  }
+
   constructor(
     private readonly pool: pg.Pool,
     private readonly catalog: Catalog,
@@ -170,6 +195,26 @@ export class ProposalService {
    * 策略不通过时同样创建，state=rejected_by_policy（201）。
    */
   async create(caller: ProposalCaller, body: ProposalCreate): Promise<{ status: 200 | 201; proposal: Proposal }> {
+    const hook = body.action === 'gitops_pr' ? this.issueHook : null;
+    const repo = (body.params as { repository?: unknown }).repository;
+    if (!hook || typeof repo !== 'string') {
+      return this.createIn(caller, body, body.params);
+    }
+    // 幂等键按调用方给出的参数计算；描述里的 Refs 是 server 追加的
+    const ref = await hook.refFor(body.incident_id, repo);
+    const params = ref ? withRefs(body.params as Record<string, unknown>, ref) : body.params;
+    const out = await this.createIn(caller, body, params);
+    if (out.status === 201) {
+      await hook.linked(out.proposal, ref !== null && params !== body.params);
+    }
+    return out;
+  }
+
+  private async createIn(
+    caller: ProposalCaller,
+    body: ProposalCreate,
+    params: ProposalCreate['params'],
+  ): Promise<{ status: 200 | 201; proposal: Proposal }> {
     const a = this.catalog.get(body.action);
     const binding = await currentBinding(this.pool, body.incident_id);
     if (!binding) {
@@ -192,7 +237,7 @@ export class ProposalService {
       const checks: Proposal['policy_checks'] = [];
       const check = (name: string, passed: boolean, detail: string) => checks.push({ name, passed, detail });
       check('catalog', !!a, a ? `动作 ${a.id} 在目录中` : `动作 ${body.action} 不在目录中`);
-      const paramErr = a ? this.catalog.validateParams(a.id, body.params) : '动作不在目录中';
+      const paramErr = a ? this.catalog.validateParams(a.id, params) : '动作不在目录中';
       check('params_schema', paramErr === null, paramErr ?? '参数符合目录 schema');
       let target: Proposal['target'] = {
         cluster_id: binding.clusterId,
@@ -206,7 +251,7 @@ export class ProposalService {
       let tier: 'L' | 'H' = 'H';
       let autoRule: string | null = null;
       if (a && paramErr === null) {
-        const t = this.targetOf(a, body.params as Record<string, unknown>, binding.clusterId);
+        const t = this.targetOf(a, params as Record<string, unknown>, binding.clusterId);
         const info = await this.targets.resolve(binding.clusterId, t.kind, t.namespace, t.name);
         target = {
           cluster_id: t.cluster_id,
@@ -280,8 +325,8 @@ export class ProposalService {
         level,
         tier,
         auto_eligible: autoRule !== null,
-        params: body.params,
-        params_hash: paramsHash(body.params),
+        params,
+        params_hash: paramsHash(params),
         canon_version: CANON_VERSION,
         target,
         hypothesis_id: body.hypothesis_id,

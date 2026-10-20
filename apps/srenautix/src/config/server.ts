@@ -86,6 +86,18 @@ const changesSource = z
     message: 'deploy_key_file 需要同时给出 known_hosts_file',
   });
 
+/** GitHub App（安装令牌，不用个人令牌）：拓扑覆盖 PR、事件 issue 与 GitHub 变更源共用。 */
+const githubApp = z
+  .object({
+    api_base: url.default('https://api.github.com'),
+    app_id: z.string().regex(/^\d+$/),
+    installation_id: z.string().regex(/^\d+$/),
+    private_key_file: path,
+  })
+  .strict();
+
+const repoName = z.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/);
+
 // OCI 来源的领域包：固定到 digest，先用 cosign 校验签名（公钥，或 keyless 的证书身份与签发方）再用 oras 拉取
 const ociPackSource = z
   .object({
@@ -256,22 +268,13 @@ export const serverConfigSchema = z
         kubeconfig: path.optional(),
         // 拓扑覆盖文件所在的 Git 挂载目录（每 60 秒重新加载）；不填时没有覆盖规则
         overrides_dir: path.optional(),
-        // 控制台为未映射告警开覆盖规则 PR 用的 GitHub App；不填时该接口返回 503 并说明原因
+        // 控制台为未映射告警开覆盖规则 PR 的仓库（用 github_app 的身份）；不填时该接口返回 503 并说明原因
         override_pr: z
           .object({
-            github: z
-              .object({
-                api_base: url.default('https://api.github.com'),
-                app_id: z.string().regex(/^\d+$/),
-                installation_id: z.string().regex(/^\d+$/),
-                private_key_file: path,
-                // owner/name
-                repo: z.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/),
-                base_branch: z.string().min(1).default('main'),
-                // 仓库中覆盖文件的目录（与 overrides_dir 挂载的是同一个目录）
-                dir: z.string().min(1).default('srenautix/topology-overrides'),
-              })
-              .strict(),
+            repo: repoName,
+            base_branch: z.string().min(1).default('main'),
+            // 仓库中覆盖文件的目录（与 overrides_dir 挂载的是同一个目录）
+            dir: z.string().min(1).default('srenautix/topology-overrides'),
           })
           .strict()
           .optional(),
@@ -290,6 +293,24 @@ export const serverConfigSchema = z
       })
       .strict()
       .default({ sources: [], cache_dir: '/var/lib/srenautix/changes', interval: '60s', lookback: '24h' }),
+    github_app: githubApp.optional(),
+    // 需要人跟进的事件在 GitHub 开 issue（ADR 0095）；默认关闭
+    issues: z
+      .object({
+        enabled: z.boolean().default(false),
+        repo: repoName,
+        labels: z.array(z.string().min(1)).default(['srenautix']),
+        // 标题前缀；不填时取 notify.prefix（影子期间为 "[影子]"）
+        title_prefix: z.string().optional(),
+        // 每个仓库每小时最多新开的 issue 数；超出时只记录、不开
+        max_per_hour: z.number().int().min(1).max(100).default(6),
+        // 开启时只为最近这段时间内更新过的事件开 issue，不回补历史事件
+        lookback: duration.default('6h'),
+        // 后台循环的间隔：登记、开出、追加评论与重试
+        interval: duration.default('30s'),
+      })
+      .strict()
+      .optional(),
     stage_a: z
       .object({ language: z.enum(['zh', 'en']).default('zh'), top_k: z.number().int().min(1).max(10).default(3) })
       .strict()
@@ -411,8 +432,32 @@ export function loadServerConfig(path: string): ServerConfig {
   return parseServerConfig(raw);
 }
 
+/**
+ * 解析之前的兼容：2.5 版的 topology.override_pr.github（App 身份与仓库写在一起）迁移到 github_app 与 topology.override_pr。
+ */
+function upgradeRaw(raw: unknown): unknown {
+  if (!raw || typeof raw !== 'object') {
+    return raw;
+  }
+  const r = structuredClone(raw) as Record<string, unknown>;
+  const topo = r.topology as { override_pr?: { github?: Record<string, unknown> } } | undefined;
+  const legacy = topo?.override_pr?.github;
+  if (legacy && typeof legacy === 'object') {
+    const { api_base, app_id, installation_id, private_key_file, repo, base_branch, dir } = legacy;
+    if (r.github_app === undefined) {
+      r.github_app = Object.fromEntries(
+        Object.entries({ api_base, app_id, installation_id, private_key_file }).filter(([, v]) => v !== undefined),
+      );
+    }
+    topo!.override_pr = Object.fromEntries(
+      Object.entries({ repo, base_branch, dir }).filter(([, v]) => v !== undefined),
+    ) as typeof legacy;
+  }
+  return r;
+}
+
 export function parseServerConfig(raw: unknown): ServerConfig {
-  const r = serverConfigSchema.safeParse(raw);
+  const r = serverConfigSchema.safeParse(upgradeRaw(raw));
   if (!r.success) {
     throw new ConfigError(
       `server 配置不合法：${r.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('；')}`,
@@ -431,6 +476,15 @@ export function parseServerConfig(raw: unknown): ServerConfig {
   }
   if (c.scheduler.critical_reserved >= c.scheduler.slots) {
     throw new ConfigError('scheduler.critical_reserved 必须小于 slots');
+  }
+  if (!c.github_app) {
+    if (c.issues?.enabled) {
+      throw new ConfigError('issues.enabled 需要 github_app（GitHub App 的安装令牌，不用个人令牌）');
+    }
+  }
+  const srcIds = c.changes.sources.map((x) => x.id);
+  if (new Set(srcIds).size !== srcIds.length) {
+    throw new ConfigError('changes.sources 的 id 不能重复');
   }
   return c;
 }

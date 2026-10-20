@@ -59,7 +59,8 @@ import { migrateExpand, migrationsReady } from '../store/migrate.js';
 import type { OutboxEvent } from '../store/outbox.js';
 import { createPool, type PgConfig } from '../store/pool.js';
 import { startInformerTopology } from '../topology/informer.js';
-import { GitHubApp } from '../topology/override-pr.js';
+import { GitHubApp } from '../github/app.js';
+import { IssueService } from '../github/issues.js';
 import { TopologyOverrides } from '../topology/overrides.js';
 import { TopologyStore } from '../topology/store.js';
 import { TopologyTargets } from '../topology/targets.js';
@@ -74,6 +75,8 @@ export interface ServerHandle {
   pipeline: IncidentPipeline;
   ingest: IngestService;
   proposals: ProposalService;
+  /** 事件 issue（issues.enabled）；关闭时为 null */
+  issues: IssueService | null;
   leader: Leader;
   /** API 实际监听的地址（端口为 0 时由系统分配）。 */
   apiUrl: string;
@@ -187,18 +190,33 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
   const loadOverrides = () =>
     c.topology.overrides_dir ? TopologyOverrides.load(c.topology.overrides_dir) : TopologyOverrides.empty();
   let overrides = loadOverrides();
-  const gh = c.topology.override_pr?.github;
+  // GitHub App（安装令牌）：拓扑覆盖 PR、事件 issue、GitHub 变更源共用
+  const gh = c.github_app;
   const github = gh
     ? new GitHubApp({
         apiBase: gh.api_base,
         appId: gh.app_id,
         installationId: gh.installation_id,
-        privateKey: readSecretFile('topology.override_pr.github.private_key_file', gh.private_key_file),
-        repo: gh.repo,
-        baseBranch: gh.base_branch,
-        dir: gh.dir,
+        privateKey: readSecretFile('github_app.private_key_file', gh.private_key_file),
       })
     : null;
+  const issues =
+    github && c.issues?.enabled
+      ? new IssueService(
+          pool,
+          github,
+          {
+            repo: c.issues.repo,
+            labels: c.issues.labels,
+            titlePrefix: (c.issues.title_prefix ?? c.notify.prefix).trim(),
+            maxPerHour: c.issues.max_per_hour,
+            lookbackMs: parseDuration('issues.lookback', c.issues.lookback),
+            consoleUrl: c.public_url,
+            language: c.stage_a.language,
+          },
+          metrics,
+        )
+      : null;
   const prom = c.datasources.prometheus;
   const packs = await PackRuntime.load({
     dirs: c.packs.dirs,
@@ -526,6 +544,7 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
     worker,
     packs,
     github,
+    issues,
     integrations: IntegrationRegistry.fromConfig({
       pool,
       config: c,
@@ -629,6 +648,25 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
       .acquired()
       .then(() => changes.syncOnce())
       .catch((e: unknown) => logger.error('变更源同步失败', { error: e }));
+  }
+  // 事件 issue（ADR 0095）：主实例每 issues.interval 登记、开出、追加进展评论并给关联的 PR 补 Refs；gitops_pr 提议同样关联
+  if (issues) {
+    proposals.setIssueHook({
+      refFor: async (incidentId, fromRepo) => {
+        const i = await issues.ensure(incidentId, 'repo_change');
+        return i ? GitHubApp.ref(fromRepo, i.repo, i.number) : null;
+      },
+      linked: (p, refsInBody) =>
+        issues.link(p.incident_id, {
+          kind: 'proposal',
+          url: `${c.public_url.replace(/\/+$/, '')}/proposals/${p.proposal_id}`,
+          title: `${p.action}: ${String((p.params as { title?: unknown }).title ?? p.target.display)}`,
+          repo: null,
+          number: null,
+          refsInBody,
+        }),
+    });
+    every(parseDuration('issues.interval', c.issues!.interval), () => issues.runOnce(), '事件 issue');
   }
   every(3600_000, () => purgeIdempotencyKeys(pool), '幂等键清理');
   every(3600_000, () => sessions.purgeExpired(), '会话清理');
@@ -743,7 +781,10 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
             ...auditStatus,
             thresholdSeconds: parseDuration('audit.export_lag_threshold', c.audit.export_lag_threshold) / 1000,
           },
-          channelFailures: fails.rows.map((f) => ({ channel: f.channel, error: f.last_error })),
+          channelFailures: [
+            ...fails.rows.map((f) => ({ channel: f.channel, error: f.last_error })),
+            ...(issues ? await issueFailures(pool) : []),
+          ],
           restoredAt: restored.rows[0]?.v ? new Date(restored.rows[0].v) : null,
           frozenClusters: frozen.rows.map((x) => x.cluster_id),
           now: new Date(),
@@ -769,6 +810,7 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
     pipeline,
     ingest,
     proposals,
+    issues,
     leader,
     apiUrl,
     async stop() {
@@ -801,4 +843,18 @@ export async function run(args: RoleArgs): Promise<void> {
   };
   process.once('SIGTERM', () => shutdown('SIGTERM'));
   process.once('SIGINT', () => shutdown('SIGINT'));
+}
+
+/** 事件 issue 的投递问题（状态条显示为 ChannelDeliveryFailed，channel 为 github-issues）：最近 1 小时重试 3 次以上或放弃的 issue 与评论 */
+async function issueFailures(pool: pg.Pool): Promise<Array<{ channel: string; error: string }>> {
+  const r = await pool.query<{ last_error: string }>(
+    `SELECT last_error FROM (
+       SELECT last_error, updated_at AS at FROM server.github_issues
+        WHERE last_error IS NOT NULL AND (state = 'failed' OR (state = 'pending' AND attempts >= 3))
+       UNION ALL
+       SELECT last_error, next_attempt_at AS at FROM server.github_issue_comments
+        WHERE posted_at IS NULL AND attempts >= 3 AND last_error IS NOT NULL) x
+      WHERE at > now() - interval '1 hour' ORDER BY at DESC LIMIT 1`,
+  );
+  return r.rows.map((x) => ({ channel: 'github-issues', error: x.last_error }));
 }

@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: SreNautix hub API
-  version: 2.6.0
+  version: 2.7.0
   license:
     name: Apache-2.0
     identifier: Apache-2.0
@@ -1317,7 +1317,9 @@ paths:
     post:
       tags: [topology]
       operationId: createTopologyOverridePr
-      description: 为未映射的告警生成拓扑覆盖规则的 PR；只推送到 srenautix/* 分支，从不合并
+      description: |
+        为未映射的告警生成拓扑覆盖规则的 PR；只推送到 srenautix/* 分支，从不合并。
+        给出 incident_id 且开启了事件 issue 时，先确保该事件有 issue，PR 描述写 `Refs #<issue>`，issue 里回链 PR
       x-srenautix-roles: [admin]
       x-srenautix-external: false
       parameters: [{ $ref: '#/components/parameters/Csrf' }]
@@ -1334,6 +1336,9 @@ paths:
                 alertname: { type: string }
                 component: { $ref: './schemas/common.schema.json#/$defs/ComponentKey' }
                 role: { $ref: './schemas/common.schema.json#/$defs/AlertRole' }
+                incident_id:
+                  $ref: './schemas/common.schema.json#/$defs/Uuid'
+                  description: 引出这条规则的事件；PR 与该事件的 issue 互相关联
       responses:
         '201':
           description: 已开 PR
@@ -1342,11 +1347,15 @@ paths:
               schema:
                 type: object
                 additionalProperties: false
-                required: [pr_url, branch, head_sha]
+                required: [pr_url, branch, head_sha, issue_url]
                 properties:
                   pr_url: { type: string }
                   branch: { type: string, pattern: '^srenautix/' }
                   head_sha: { type: string }
+                  issue_url:
+                    type: [string, 'null']
+                    description: 关联的事件 issue；没有给出 incident_id、没有开启事件 issue，或 issue 暂时没能开出时为 null
+        '404': { $ref: '#/components/responses/Error' }
         '409': { $ref: '#/components/responses/Error' }
   /v1/topology/neighborhood:
     get:

@@ -1,0 +1,59 @@
+import type { Track } from '../store/migrate.js';
+
+export const githubTrack: Track = {
+  track: 'github',
+  migrations: [
+    {
+      version: 1,
+      name: 'incident issues, their progress comments and linked pull requests',
+      phase: 'expand',
+      sql: `
+-- 每个事件最多一个 issue（ADR 0095）：pending 等待开出或重试，open 已开，skipped 因限速只记录，failed 重试用尽
+CREATE TABLE server.github_issues (
+  incident_id uuid PRIMARY KEY,
+  repo text NOT NULL,
+  state text NOT NULL CHECK (state IN ('pending', 'open', 'skipped', 'failed')),
+  reason text NOT NULL CHECK (reason IN ('escalate', 'repo_change')),
+  number integer,
+  url text,
+  attempts integer NOT NULL DEFAULT 0,
+  next_attempt_at timestamptz NOT NULL DEFAULT now(),
+  last_error text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  opened_at timestamptz,
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX github_issues_opened_idx ON server.github_issues (repo, opened_at) WHERE state = 'open';
+CREATE INDEX github_issues_due_idx ON server.github_issues (next_attempt_at) WHERE state = 'pending';
+
+-- issue 上的进展评论：按 (事件, 键) 去重，失败按退避重试
+CREATE TABLE server.github_issue_comments (
+  incident_id uuid NOT NULL,
+  key text NOT NULL,
+  body text NOT NULL,
+  posted_at timestamptz,
+  url text,
+  attempts integer NOT NULL DEFAULT 0,
+  next_attempt_at timestamptz NOT NULL DEFAULT now(),
+  last_error text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (incident_id, key)
+);
+CREATE INDEX github_issue_comments_due_idx ON server.github_issue_comments (next_attempt_at) WHERE posted_at IS NULL;
+
+-- 与事件关联的 PR（server 的拓扑覆盖 PR、gateway 的 gitops_pr 提议）：PR 描述写 Refs，issue 里回链
+CREATE TABLE server.github_issue_links (
+  incident_id uuid NOT NULL,
+  kind text NOT NULL CHECK (kind IN ('pull', 'proposal')),
+  url text NOT NULL,
+  repo text,
+  number integer,
+  title text NOT NULL,
+  refs_in_body boolean NOT NULL DEFAULT false,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (incident_id, url)
+);
+`,
+    },
+  ],
+};

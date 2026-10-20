@@ -31,7 +31,9 @@ server 维护治理审计链（DESIGN §16.3），记录登录与失败、角色
 | `settings.update`、`pause.set` | 设置与软暂停 |
 | `prompt.raw.read` | 读取原始提示词（`data.run_id`） |
 | `integration.test` | 集成实例的连接测试（实例、是否通过、失败的能力） |
-| `topology.override_pr` | 为未映射告警发起的覆盖规则 PR（规则、分支、PR 地址、提交） |
+| `topology.override_pr` | 为未映射告警发起的覆盖规则 PR（规则、分支、PR 地址、提交、关联的事件与 issue） |
+| `github.issue_opened`、`github.issue_skipped`、`github.issue_failed` | 事件 issue 的开出（仓库、编号、地址、原因、是否按标记找回）、因限速跳过、重试用尽 |
+| `github.issue_comment`、`github.pr_refs` | 事件 issue 上的进展评论（键、地址），给关联的 PR 补 Refs |
 | `mcp.call` | MCP 调用方（调用方文件中 `kind: external, channel: mcp` 的 token）的每个请求：`caller_id`、`method`、`route`、`params`、`status`、`idempotency_key`，创建提议时带 `proposal_id`，被拒绝时带 `error`（错误码与原因）。记录在响应发出之前写入，写入失败时请求以 500 结束 |
 
 ## 检查点

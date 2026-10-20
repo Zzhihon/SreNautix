@@ -42,6 +42,20 @@ export class BaseMetrics {
 
 /** server 角色的指标。 */
 export class ServerMetrics extends BaseMetrics {
+  readonly githubIssues = new Counter({
+    name: 'srenautix_github_issues_total',
+    help: '事件 issue 的处理结果（opened、skipped_rate_limit、retry、failed）',
+    labelNames: ['repo', 'outcome'] as const,
+    registers: [this.registry],
+  });
+
+  readonly githubComments = new Counter({
+    name: 'srenautix_github_issue_comments_total',
+    help: '事件 issue 上的进展评论与 PR 回链（posted、retry、failed）',
+    labelNames: ['repo', 'outcome'] as const,
+    registers: [this.registry],
+  });
+
   readonly ingestLastReceived = new Gauge({
     name: 'srenautix_ingest_last_received_timestamp_seconds',
     help: '每个接入源最近一次收到有效载荷的时间',

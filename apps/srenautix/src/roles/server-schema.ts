@@ -1,5 +1,6 @@
 import { changesTrack } from '../changes/migrations.js';
 import { consoleTrack } from '../console-bff/migrations.js';
+import { githubTrack } from '../github/migrations.js';
 import { identityTrack } from '../identity/migrations.js';
 import { incidentTrack } from '../incident/migrations.js';
 import { ingestTrack } from '../ingest/migrations.js';
@@ -20,4 +21,5 @@ export const serverTracks: readonly Track[] = [
   notifyTrack,
   consoleTrack,
   changesTrack,
+  githubTrack,
 ];
