@@ -85,7 +85,8 @@ export class PackEvidence implements EvidenceRunner {
     private readonly metrics: ServerMetrics,
   ) {}
 
-  async run(inc: Incident, alerts: Alert[], signal: AbortSignal): Promise<EvidenceRun> {
+  /** now：评估时刻（默认当前时间）；评测与回放传入快照的 as_of，卡片窗口与信号探测都不晚于它 */
+  async run(inc: Incident, alerts: Alert[], signal: AbortSignal, now = Date.now()): Promise<EvidenceRun> {
     const plan: Planned[] = [];
     const seen = new Set<string>();
     const chainsRun: string[] = [];
@@ -157,7 +158,7 @@ export class PackEvidence implements EvidenceRunner {
       }
     }
 
-    const cards = await this.execute(plan, Date.parse(inc.first_firing_at), Date.now(), signal);
+    const cards = await this.execute(plan, Date.parse(inc.first_firing_at), now, signal);
     return {
       cards: cards.map((c, i) => ({ ...c, ref: `card:${i + 1}` })),
       chains: chainsRun,
@@ -239,9 +240,17 @@ export class PackEvidence implements EvidenceRunner {
     if (!plan.length) {
       return [];
     }
-    const ds: EvidenceDataSource = await this.source.dataSource(now);
+    // 标签档案与信号备选在卡片窗口的终点探测（不晚于 now）：事件开始两小时之后重跑或回放时，
+    // 按事件当时的数据选择备选，不按墙上时钟（否则 [当前−2h, 当前] 内没有序列，每张卡都是 source_error）
+    const windowEnd = Math.max(
+      ...plan.map(
+        (p) => anchor + durationSeconds((this.rt.set.cards.get(p.card)!.def.window ?? DEFAULT_WINDOW).after) * 1000,
+      ),
+    );
+    const probeAt = Math.min(now, windowEnd);
+    const ds: EvidenceDataSource = await this.source.dataSource(probeAt);
     const keys = new Set(plan.flatMap((p) => Object.values(this.rt.set.cards.get(p.card)!.signals)));
-    const resolutions: Map<string, SignalResolution> = await this.source.resolve(this.rt.set, keys, ds, now);
+    const resolutions: Map<string, SignalResolution> = await this.source.resolve(this.rt.set, keys, ds, probeAt);
     type Done = Omit<EvidenceResult, 'ref'>;
     const results = await pool(plan, this.o.concurrency, signal, async (p): Promise<Done | null> => {
       const e = this.rt.set.cards.get(p.card)!;

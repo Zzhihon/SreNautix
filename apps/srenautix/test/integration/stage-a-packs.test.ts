@@ -317,6 +317,30 @@ describe('阶段 A 的领域包证据链', () => {
     ]);
   });
 
+  it('事件开始数小时后评估（回放、重启后补跑）：信号在卡片窗口的终点探测，不按墙上时钟', async () => {
+    // 新的数据源：标签档案与信号备选都没有缓存。数据只到 T；评估时刻是 T 之后 5 小时
+    const fresh = await EvidenceSource.create({
+      id: 'prometheus',
+      url: prom.url,
+      dialect: 'promql',
+      bearerTokenFile: null,
+      timeoutMs: 10_000,
+    });
+    const later = new PackEvidence(
+      rt,
+      fresh,
+      async () => null,
+      { locale: 'zh-CN', concurrency: 4, queryTimeoutMs: 10_000 },
+      metrics,
+    );
+    const inc = incident({ kind: 'Pod', namespace: 'shop', name: 'web-0' });
+    const run = await later.run(inc, [memoryAlert('web-0')], AbortSignal.timeout(30_000), T + 5 * 60 * MIN);
+    expect(run.cards.map((c) => [c.card_id, c.verdict, c.reason.kind])).toEqual([
+      ['_example/pod-memory/limit-ratio', 'abnormal', 'rule'],
+      ['_example/pod-memory/oom-logs', 'undeterminable', 'capability_missing'],
+    ]);
+  });
+
   it('实时重跑只重跑已声明过的卡，编号沿用原结果', async () => {
     const inc = incident({ kind: 'Pod', namespace: 'shop', name: 'web-0' });
     const run = await evidence.run(inc, [memoryAlert('web-0')], AbortSignal.timeout(30_000));

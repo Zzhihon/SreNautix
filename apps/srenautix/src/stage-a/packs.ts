@@ -465,6 +465,8 @@ const RESOLUTION_TTL_MS = 10 * 60_000;
 /**
  * 证据卡的指标数据源：Prometheus HTTP API 适配器、自动探测的标签档案与信号备选的选择结果。
  * 标签档案每小时重新探测，探测失败时 60 秒后重试；信号备选的选择缓存 10 分钟，探测失败的结果不缓存。
+ * 探测的时刻 at 由调用方给出（卡片窗口的终点，不晚于当前时间），在 [at−2h, at] 内探测：事件结束后重跑、回放
+ * 历史事件时按事件当时的数据选择备选，而不是按墙上时钟。缓存的有效期按墙上时钟计，缓存键带上探测时刻所在的小时。
  */
 export class EvidenceSource {
   private readonly adapter: PrometheusApiAdapter;
@@ -500,14 +502,14 @@ export class EvidenceSource {
     return verifyMetrics(this.adapter, now);
   }
 
-  async dataSource(now: number): Promise<EvidenceDataSource> {
+  async dataSource(at: number, wall = Date.now()): Promise<EvidenceDataSource> {
     const due = this.profileError ? PROFILE_RETRY_MS : PROFILE_REFRESH_MS;
-    if (this.live && now - this.profileAt < due) {
+    if (this.live && wall - this.profileAt < due) {
       return this.live;
     }
     let profile = CANONICAL_PROFILE;
     try {
-      profile = await detectLabelProfile(this.adapter, toIso(now), { from: toIso(now - 2 * 3600_000), to: toIso(now) });
+      profile = await detectLabelProfile(this.adapter, toIso(at), { from: toIso(at - 2 * 3600_000), to: toIso(at) });
       this.profileError = null;
     } catch (e) {
       if (!(e instanceof DatasourceError)) {
@@ -516,18 +518,20 @@ export class EvidenceSource {
       this.profileError = e.message;
       logger.warn('证据数据源的标签档案探测失败，按规范标签名查询', { datasource: this.s.id, error: e.message });
     }
-    this.profileAt = now;
+    this.profileAt = wall;
     this.live = new LiveDataSource({ metrics: { adapter: this.adapter, profile } });
     return this.live;
   }
 
   /** 信号键 → 选中的备选。 */
-  async resolve(set: PackSet, keys: Iterable<string>, ds: EvidenceDataSource, now: number) {
+  async resolve(set: PackSet, keys: Iterable<string>, ds: EvidenceDataSource, at: number, wall = Date.now()) {
     const out = new Map<string, SignalResolution>();
-    const clock = { from: toIso(now - 2 * 3600_000), to: toIso(now) };
+    const clock = { from: toIso(at - 2 * 3600_000), to: toIso(at) };
+    const hour = Math.floor(at / 3600_000);
     for (const k of keys) {
-      const hit = this.resolutions.get(k);
-      if (hit && now - hit.at < RESOLUTION_TTL_MS) {
+      const cacheKey = `${k}@${hour}`;
+      const hit = this.resolutions.get(cacheKey);
+      if (hit && wall - hit.at < RESOLUTION_TTL_MS) {
         out.set(k, hit.r);
         continue;
       }
@@ -535,9 +539,14 @@ export class EvidenceSource {
       if (!sig) {
         continue;
       }
-      const r = await resolveSignal(k, sig.signal, ds, this.engine, toIso(now), clock);
+      const r = await resolveSignal(k, sig.signal, ds, this.engine, toIso(at), clock);
       if (!r.rejected.some((x) => x.reason.startsWith('探测失败'))) {
-        this.resolutions.set(k, { at: now, r });
+        this.resolutions.set(cacheKey, { at: wall, r });
+        for (const [key, v] of this.resolutions) {
+          if (wall - v.at >= RESOLUTION_TTL_MS) {
+            this.resolutions.delete(key);
+          }
+        }
       }
       out.set(k, r);
     }
