@@ -7,7 +7,7 @@
 ## 决定
 
 1. **备选按优先级探测**：信号的每个备选是一条查询。加载时逐个探测，选中第一个可用的，按数据源记录：指标备选要求渲染后查询中的每个指标名在探测窗口内都有序列，声明了 `probe` 时 probe 还要非空；日志、链路备选要求数据源具备对应能力与方言。`recording_rule: true` 的备选不能是最后一个。被拒绝的原因（`capability`、`dialect`、`missing_metric`、`probe`、`error`）由 `srenautix pack doctor` 列出。
-2. **标签档案**：模板只用规范名（`namespace`、`pod`、`container`、`node`、`persistentvolumeclaim`）。启动时对每个指标数据源探测各逻辑字段实际使用的标签名、外部标签 `cluster` 的名字、抓取间隔与租户；`$rate_window` 取 `max(60s, 4 × 抓取间隔)`。
+2. **标签档案**：模板只用规范名（`namespace`、`pod`、`container`、`node`、`persistentvolumeclaim`）。启动时对每个指标数据源探测各逻辑字段实际使用的标签名、外部标签 `cluster` 的名字、抓取间隔与租户；`$rate_window` 取 `max(60s, 4 × 抓取间隔)`。给每个选择器注入的 cluster 匹配器是 `cluster=~"<集群>|"`：带这个标签的序列只取本集群的，不带的也保留。外部标签由采集端加上，聚合型录制规则（`max by`、`sum by`）的结果不带它，只按等值匹配会把这些序列全部排除。
 3. **官方解析器**：Prometheus（`promql/parser`，v0.313.0）与 VictoriaMetrics（`metricsql`，v0.87.5）的 Go 解析器编译为一个 wasm 模块，随 `integration-sdk` 发布，提供分析（选择器、函数、标签、回看与前看、`@` 修饰符）、改写（按档案重命名标签、注入 cluster 匹配器）与 promtool 序列写法的解析。构建需要 Go，版本由 `packages/integration-sdk/promql-wasm/go.mod` 决定。
 4. **严格检查**：`lint` 对每个备选按 `applies_to` 的每种实体渲染并用对应方言的解析器解析；禁止 `@` 修饰符；`range` 模式的结果必须是瞬时向量。回放时钟窗口检查使用同一解析器算出的回看量。
 

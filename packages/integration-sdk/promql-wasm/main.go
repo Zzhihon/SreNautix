@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"regexp"
 	"sort"
 	"syscall/js"
 	"time"
@@ -312,10 +313,17 @@ func labelArgIndexes(fn string, argc int) []int {
 	return nil
 }
 
-// rewriteSpec：rename 按标签档案改写标签名；inject 给每个选择器加等值匹配器（已有同名匹配器的选择器不加）
+// rewriteSpec：rename 按标签档案改写标签名；inject 给每个选择器加匹配器（已有同名匹配器的选择器不加）。
+// 注入的是正则 "<值>|"：带这个标签的序列只取等于该值的，不带这个标签的序列也保留。
+// 外部标签（例如 cluster）由采集端加上，聚合型录制规则（max by、sum by）的结果不带它；只按等值匹配会把这些序列全部排除
 type rewriteSpec struct {
 	Rename map[string]string `json:"rename"`
 	Inject map[string]string `json:"inject"`
+}
+
+// injectPattern：等于 v 或标签不存在（空值）；PromQL 与 MetricsQL 的正则匹配都是整串锚定
+func injectPattern(v string) string {
+	return regexp.QuoteMeta(v) + "|"
 }
 
 func renamePromQL(input string, spec rewriteSpec) renameOut {
@@ -336,7 +344,7 @@ func renamePromQL(input string, spec rewriteSpec) renameOut {
 			}
 			for _, k := range sortedMapKeys(spec.Inject) {
 				if !present[k] {
-					n.LabelMatchers = append(n.LabelMatchers, labels.MustNewMatcher(labels.MatchEqual, k, spec.Inject[k]))
+					n.LabelMatchers = append(n.LabelMatchers, labels.MustNewMatcher(labels.MatchRegexp, k, injectPattern(spec.Inject[k])))
 				}
 			}
 		case *parser.AggregateExpr:
@@ -383,7 +391,10 @@ func renameMetricsQL(input string, spec rewriteSpec) renameOut {
 				}
 				for _, k := range sortedMapKeys(spec.Inject) {
 					if !present[k] {
-						n.LabelFilterss[gi] = append(n.LabelFilterss[gi], metricsql.LabelFilter{Label: k, Value: spec.Inject[k]})
+						n.LabelFilterss[gi] = append(
+							n.LabelFilterss[gi],
+							metricsql.LabelFilter{Label: k, Value: injectPattern(spec.Inject[k]), IsRegexp: true},
+						)
 					}
 				}
 			}

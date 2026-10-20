@@ -45,15 +45,19 @@ describe('PromqlEngine', () => {
     ).toBe('sum(rate(x{kubernetes_namespace="a"})) by(kubernetes_namespace)');
   });
 
-  it('给每个选择器注入集群标签', () => {
+  it('给每个选择器注入集群标签：等于该值或不带这个标签（聚合型录制规则的结果没有外部标签）', () => {
     expect(
       engine.rewrite('up{job="a"} / on (job) group_left kube_info{cluster="b"}', 'promql', {
         rename: {},
         inject: { cluster: 'c1' },
       }),
-    ).toBe('up{cluster="c1",job="a"} / on (job) group_left () kube_info{cluster="b"}');
+    ).toBe('up{cluster=~"c1|",job="a"} / on (job) group_left () kube_info{cluster="b"}');
     expect(engine.rewrite('rate(x)', 'metricsql', { rename: {}, inject: { cluster: 'c1' } })).toBe(
-      'rate(x{cluster="c1"})',
+      'rate(x{cluster=~"c1|"})',
+    );
+    // 值中的正则元字符按字面量匹配
+    expect(engine.rewrite('up', 'promql', { rename: {}, inject: { cluster: 'prod.eu-1' } })).toBe(
+      'up{cluster=~"prod\\\\.eu-1|"}',
     );
   });
 
