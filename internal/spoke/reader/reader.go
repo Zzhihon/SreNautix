@@ -27,6 +27,7 @@ import (
 
 	"github.com/Zzhihon/SreNautix/internal/spoke/reader/alerts"
 	"github.com/Zzhihon/SreNautix/internal/spoke/reader/clock"
+	"github.com/Zzhihon/SreNautix/internal/spoke/reader/health"
 	"github.com/Zzhihon/SreNautix/internal/spoke/reader/history"
 	"github.com/Zzhihon/SreNautix/internal/spoke/reader/hub"
 	"github.com/Zzhihon/SreNautix/internal/spoke/reader/kube"
@@ -46,16 +47,18 @@ type Reader struct {
 	bootID   string
 	log      *slog.Logger
 
-	reg      *prometheus.Registry
-	clock    *clock.APIServer
-	watcher  *kube.Watcher
-	store    *topology.Store
-	exec     *query.Executor
-	ksm      *history.Rebuilder
-	recon    *alerts.Reconciler
-	resolver *Resolver
-	hub      *hub.Client
-	syncer   *hub.Syncer
+	reg       *prometheus.Registry
+	clock     *clock.APIServer
+	watcher   *kube.Watcher
+	store     *topology.Store
+	exec      *query.Executor
+	ksm       *history.Rebuilder
+	recon     *alerts.Reconciler
+	resolver  *Resolver
+	hub       *hub.Client
+	syncer    *hub.Syncer
+	health    *health.Scanner
+	unhealthy *prometheus.GaugeVec
 
 	mu    sync.Mutex
 	conds map[string]hub.Condition
@@ -127,6 +130,11 @@ func New(cfg *Config, rc *rest.Config, version, readerID string, log *slog.Logge
 		return nil, err
 	}
 	rep := topology.NewReporter(reg, log)
+	rd.health = health.NewScanner()
+	rd.health.Problems = func(ps []topology.Problem) { rep.Report("health", ps) }
+	rd.unhealthy = prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "srenautix_reader_unhealthy_objects",
+		Help: "最近一次上报中按状态计的不健康对象数（集群状态检测器）。"}, []string{"state"})
+	reg.MustRegister(rd.unhealthy)
 	if cfg.History != nil {
 		h := cfg.History
 		rd.ksm, err = history.New(history.Config{Datasource: h.Datasource, Matchers: h.Matchers, Step: time.Duration(h.Step), Chunk: time.Duration(h.Chunk),
@@ -281,6 +289,7 @@ func (rd *Reader) Serve(ctx context.Context, ln net.Listener) error {
 		})
 	})
 	loop(func() { rd.heartbeatLoop(ctx) })
+	loop(func() { rd.healthLoop(ctx) })
 	loop(func() { rd.requestLoop(ctx) })
 	if rd.recon != nil {
 		loop(func() {
@@ -333,6 +342,38 @@ func (rd *Reader) heartbeat() hub.Heartbeat {
 		hb.QueryManifest = &hub.ManifestReport{PackLock: m.PackLock, Templates: len(m.Queries)}
 	}
 	return hb
+}
+
+// HealthReport 判定当前不健康的对象。informer 不新鲜时 complete 为 false，中心不据此清除已有的发现（ADR 0035）。
+func (rd *Reader) HealthReport() health.Report {
+	objs, complete := rd.health.Scan(rd.watcher, rd.clock.Now())
+	if ok, _ := rd.watcher.Fresh(); !ok {
+		complete = false
+	}
+	counts := map[string]int{}
+	for _, o := range objs {
+		counts[o.State]++
+	}
+	for _, s := range []string{health.PodPending, health.PodInit, health.CrashLoop, health.RolloutStalled, health.PDBBlocking, health.JobFailed} {
+		rd.unhealthy.WithLabelValues(s).Set(float64(counts[s]))
+	}
+	return health.Report{ReaderID: rd.readerID, ObservedAt: rd.clock.Now().UTC(), Complete: complete, Objects: objs}
+}
+
+func (rd *Reader) healthLoop(ctx context.Context) {
+	t := time.NewTicker(orDefault(rd.cfg.HealthInterval, 30*time.Second))
+	defer t.Stop()
+	for {
+		if err := rd.hub.PushHealth(ctx, rd.HealthReport()); err != nil && ctx.Err() == nil {
+			rd.syncer.Errors().WithLabelValues("health").Inc()
+			rd.log.Warn("push object health failed", "error", err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
 }
 
 func (rd *Reader) heartbeatLoop(ctx context.Context) {

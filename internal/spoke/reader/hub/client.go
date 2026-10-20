@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/Zzhihon/SreNautix/internal/spoke/reader/health"
 	"github.com/Zzhihon/SreNautix/internal/spoke/tunnel"
 )
 
@@ -78,6 +79,11 @@ func (c *Client) PushResults(ctx context.Context, b ResultBatch) (*PushResult, e
 		return nil, err
 	}
 	return &out, nil
+}
+
+// PushHealth 上报当前不健康的对象（集群状态检测器）。
+func (c *Client) PushHealth(ctx context.Context, r health.Report) error {
+	return c.t.Do(ctx, http.MethodPost, "/v1/spoke/reader/health", nil, r, nil, 0)
 }
 
 // SendHeartbeat 上报心跳。

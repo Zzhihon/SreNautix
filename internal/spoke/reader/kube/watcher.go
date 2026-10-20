@@ -15,6 +15,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	policyv1 "k8s.io/api/policy/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -143,6 +144,8 @@ func (w *Watcher) Start(ctx context.Context) error {
 		{name: "daemonsets", kind: "DaemonSet", informer: f.Apps().V1().DaemonSets().Informer(), extract: generic("DaemonSet")},
 		{name: "jobs", kind: "Job", informer: f.Batch().V1().Jobs().Informer(), extract: generic("Job"), affectsPods: true, affectsNP: true},
 		{name: "cronjobs", kind: "CronJob", informer: f.Batch().V1().CronJobs().Informer(), extract: generic("CronJob")},
+		// PodDisruptionBudget 只用于集群状态检测器（不进拓扑）
+		{name: "poddisruptionbudgets", kind: "PodDisruptionBudget", informer: f.Policy().V1().PodDisruptionBudgets().Informer()},
 		{name: "endpointslices", kind: "EndpointSlice", informer: f.Discovery().V1().EndpointSlices().Informer(),
 			extract: func(o any) topology.Contribution { return topology.EndpointSlice(o.(*discoveryv1.EndpointSlice)) }},
 		{name: "ingresses", kind: "Ingress", informer: f.Networking().V1().Ingresses().Informer(),
@@ -544,4 +547,42 @@ func (w *Watcher) Object(kind, namespace, name string) (metav1.Object, bool) {
 		return nil, false
 	}
 	return obj.(metav1.Object), true
+}
+
+// ── health.Source（集群状态检测器）──────────────────────────────
+
+// ListPods 实现 health.Source。
+func (w *Watcher) ListPods() []*corev1.Pod {
+	out, _ := w.pods.List(labels.Everything())
+	return out
+}
+
+// ListDeployments 实现 health.Source。
+func (w *Watcher) ListDeployments() []*appsv1.Deployment {
+	out, _ := w.factory.Apps().V1().Deployments().Lister().List(labels.Everything())
+	return out
+}
+
+// ListStatefulSets 实现 health.Source。
+func (w *Watcher) ListStatefulSets() []*appsv1.StatefulSet {
+	out, _ := w.factory.Apps().V1().StatefulSets().Lister().List(labels.Everything())
+	return out
+}
+
+// ListDaemonSets 实现 health.Source。
+func (w *Watcher) ListDaemonSets() []*appsv1.DaemonSet {
+	out, _ := w.factory.Apps().V1().DaemonSets().Lister().List(labels.Everything())
+	return out
+}
+
+// ListJobs 实现 health.Source。
+func (w *Watcher) ListJobs() []*batchv1.Job {
+	out, _ := w.jobs.List(labels.Everything())
+	return out
+}
+
+// ListPDBs 实现 health.Source。
+func (w *Watcher) ListPDBs() []*policyv1.PodDisruptionBudget {
+	out, _ := w.factory.Policy().V1().PodDisruptionBudgets().Lister().List(labels.Everything())
+	return out
 }

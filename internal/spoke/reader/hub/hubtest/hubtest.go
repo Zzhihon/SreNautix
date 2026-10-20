@@ -60,6 +60,7 @@ type Server struct {
 	hellos        []map[string]any
 	heartbeats    []map[string]any
 	alerts        []map[string]any
+	health        []map[string]any
 
 	queue        []Request
 	results      map[string]map[string]any
@@ -178,6 +179,10 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 	out.SetBodyBytes(rec.Body.Bytes())
 	if err := openapi3filter.ValidateResponse(r.Context(), out); err != nil {
 		s.violate("%s %s: hub response does not match contract: %v\n%s", r.Method, r.URL.Path, err, rec.Body.String())
+	} else if rec.Code == http.StatusNoContent {
+		if rec.Body.Len() != 0 {
+			s.violate("%s %s: 204 with a body", r.Method, r.URL.Path)
+		}
 	} else if loc, err := responseLoc(route.Path, r.Method, route.Operation, rec.Code); err != nil {
 		s.violate("%s %s: %v", r.Method, r.URL.Path, err)
 	} else if err := s.bodies.validate(loc, rec.Body.Bytes()); err != nil {
@@ -244,6 +249,11 @@ func (s *Server) dispatch(w http.ResponseWriter, r *http.Request, op string, bod
 		s.heartbeats = append(s.heartbeats, in)
 		s.mu.Unlock()
 		reply(w, clock(nil))
+	case "pushObjectHealth":
+		s.mu.Lock()
+		s.health = append(s.health, in)
+		s.mu.Unlock()
+		w.WriteHeader(http.StatusNoContent)
 	case "pullReaderRequests":
 		s.pull(w, r)
 	case "pushReaderResults":
@@ -607,6 +617,16 @@ func (s *Server) LastAlerts() map[string]any {
 		return nil
 	}
 	return s.alerts[len(s.alerts)-1]
+}
+
+// LastHealth 返回最近一次对象健康状态上报。
+func (s *Server) LastHealth() map[string]any {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.health) == 0 {
+		return nil
+	}
+	return s.health[len(s.health)-1]
 }
 
 // SortedKeys 返回 map 的键，按字典序。

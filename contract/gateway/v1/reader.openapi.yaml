@@ -598,12 +598,12 @@ components:
           type: string
           maxLength: 1024
         owner:
-          description: Pod 的顶层属主工作负载（经 ReplicaSet 解析到 Deployment，以及 StatefulSet、DaemonSet、Job）；没有属主时为 null，非 Pod 对象为 null
+          description: Pod 沿 controller 链的顶层 owner，与拓扑的组件相同（经 ReplicaSet 到 Deployment，Job 到 CronJob，静态 Pod 到 Node，CNPG 实例到 Cluster）；没有 controller 时为 null，非 Pod 对象为 null
           oneOf:
             - $ref: '../../schemas/common.schema.json#/$defs/ComponentKey'
             - type: 'null'
         targets:
-          description: PodDisruptionBudget 选中的 Pod 的顶层属主工作负载（去重、排序）；只用于 pdb_blocking
+          description: PodDisruptionBudget 选中的 Pod 的顶层 owner（没有 controller 的 Pod 为它自己，去重、排序）；只用于 pdb_blocking
           type: array
           items: {$ref: '../../schemas/common.schema.json#/$defs/ComponentKey'}
         details:

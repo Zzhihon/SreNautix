@@ -203,6 +203,7 @@ history:
 crd_rediscover: 1s
 clock_interval: 2s
 heartbeat_interval: 1s
+health_interval: 1s
 `, filepath.Join(dir, "kubeconfig"), h.URL(), filepath.Join(dir, "token"), prom.URL, filepath.Join(dir, "queries.yaml"), am.URL)
 	writeFile(t, filepath.Join(dir, "config.yaml"), []byte(cfgYAML))
 	cfg, err := reader.LoadConfig(filepath.Join(dir, "config.yaml"))
@@ -392,6 +393,11 @@ heartbeat_interval: 1s
 		al := h.LastAlerts()
 		if al == nil || al["alertmanager"].(map[string]any)["status"] != "ok" || al["rules"].(map[string]any)["status"] != "ok" {
 			return fmt.Errorf("alert snapshot %v", al)
+		}
+		// 对象健康状态按契约上报（中心逐个校验请求体）；informer 新鲜时为完整上报
+		hl := h.LastHealth()
+		if hl == nil || hl["complete"] != true || hl["reader_id"] != "reader-0" {
+			return fmt.Errorf("object health report %v", hl)
 		}
 		return nil
 	})

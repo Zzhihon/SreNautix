@@ -9,6 +9,7 @@ reader 是分支镜像 `srenautix-spoke` 的只读角色（`--role=reader`），
 | 声明式证据查询 | 只执行查询模板清单中声明过的模板，带范围、步长、序列数、字节、超时、并发与熔断限制 | [ADR 0032](../adr/0032-declared-evidence-queries.md) |
 | 历史重建与实体解析 | 用 kube-state-metrics 历史重建过去的拓扑；按 informer 缓存 → 24 小时墓碑 → kube-state-metrics 历史解析 Pod IP 与组件 | [ADR 0033](../adr/0033-ksm-history-topology.md) |
 | 时钟参考 | 测量本地时钟与 apiserver 的偏差，心跳上报 apiserver 参考时间 | ADR 0031 |
+| 对象健康状态 | 每 30 秒上报当前不健康的对象（Pending、Init、CrashLoop、rollout 停滞、PDB 阻塞驱逐、Job 失败）与进入该状态的时间，阈值由中心的集群状态检测器判断 | [ADR 0035](../adr/0035-reader-object-health.md) |
 
 ## 运行
 
@@ -61,6 +62,7 @@ history:                           # kube-state-metrics 历史重建
 crd_rediscover: 1m
 clock_interval: 1m
 heartbeat_interval: 15s
+health_interval: 30s               # 上报不健康对象的间隔
 request_workers: 16
 ```
 
@@ -140,6 +142,7 @@ reader 超过 `topology.reader_offline_after`（server 配置，默认 60 秒，
 | `srenautix_reader_topology_events_total{op}` | 产生的拓扑事件数 |
 | `srenautix_topology_invalid_keys_total{source,kind}` | 无法生成合法组件键而跳过的对象次数；`source` 是 informer 资源名或 kube-state-metrics 指标名，非法的 kind 记为 `invalid`（ADR 0034） |
 | `srenautix_topology_extract_errors_total{source}` | 字段无法解析或提取出错而跳过的对象次数 |
+| `srenautix_reader_unhealthy_objects{state}` | 最近一次上报中各状态的不健康对象数（ADR 0035） |
 | `srenautix_reader_topology_nodes`、`srenautix_reader_topology_edges` | 当前节点数与边数 |
 | `srenautix_reader_tombstones` | 保留中的墓碑数 |
 | `srenautix_reader_topology_pushed_seq` | 中心已确认的拓扑序号 |

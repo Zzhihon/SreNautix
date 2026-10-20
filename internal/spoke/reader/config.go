@@ -86,6 +86,8 @@ type Config struct {
 	ClockInterval Duration `json:"clock_interval"`
 	// HeartbeatInterval 是心跳间隔
 	HeartbeatInterval Duration `json:"heartbeat_interval"`
+	// HealthInterval 是上报不健康对象（集群状态检测器）的间隔，默认 30 秒
+	HealthInterval Duration `json:"health_interval"`
 	// RequestWorkers 是同时执行的读取请求数
 	RequestWorkers int `json:"request_workers"`
 }
