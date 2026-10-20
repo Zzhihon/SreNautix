@@ -126,3 +126,43 @@ tests:
     asserts:
       - equal: {path: spec.template.spec.securityContext.runAsNonRoot, value: true}
       - matchRegex: {path: 'spec.template.spec.containers[0].image', pattern: '^cgr\.dev/chainguard/minio@sha256:[0-9a-f]{64}$'}
+
+  - it: db-bootstrap 与 MinIO 初始化 Job 的资源默认内存 request 等于 limit
+    set:
+      profile: standard
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].resources
+          value:
+            requests: {cpu: 10m, memory: 256Mi}
+            limits: {cpu: 500m, memory: 256Mi}
+        template: templates/database.yaml
+        documentSelector: {path: kind, value: Job}
+      - equal:
+          path: spec.template.spec.containers[0].resources
+          value:
+            requests: {cpu: 10m, memory: 128Mi}
+            limits: {cpu: 200m, memory: 128Mi}
+        template: templates/audit-minio.yaml
+        documentSelector: {path: kind, value: Job}
+
+  - it: db-bootstrap 与 MinIO 初始化 Job 的资源可以由 values 设置
+    set:
+      profile: standard
+      database.bootstrapResources:
+        requests: {cpu: 50m, memory: 300Mi}
+        limits: {cpu: 50m, memory: 300Mi}
+      audit.minio.setupResources:
+        requests: {cpu: 20m, memory: 96Mi}
+        limits: {cpu: 20m, memory: 96Mi}
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].resources.limits
+          value: {cpu: 50m, memory: 300Mi}
+        template: templates/database.yaml
+        documentSelector: {path: kind, value: Job}
+      - equal:
+          path: spec.template.spec.containers[0].resources.requests
+          value: {cpu: 20m, memory: 96Mi}
+        template: templates/audit-minio.yaml
+        documentSelector: {path: kind, value: Job}

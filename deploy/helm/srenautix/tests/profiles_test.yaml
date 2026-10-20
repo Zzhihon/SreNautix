@@ -343,3 +343,28 @@ tests:
     documentSelector: {path: metadata.name, value: t-srenautix-server}
     asserts:
       - notExists: {path: spec.template.spec.initContainers}
+
+  - it: wait-for-schema 的资源默认内存 request 等于 limit，可以由 values 设置
+    set:
+      profile: standard
+      database.waitForSchemaResources:
+        requests: {cpu: 5m, memory: 96Mi}
+        limits: {cpu: 100m, memory: 96Mi}
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[0].resources
+          value:
+            requests: {cpu: 5m, memory: 96Mi}
+            limits: {cpu: 100m, memory: 96Mi}
+        documentSelector: {path: metadata.name, value: t-srenautix-worker}
+
+  - it: wait-for-schema 的默认资源
+    set:
+      profile: standard
+    documentSelector: {path: metadata.name, value: t-srenautix-server}
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[0].resources
+          value:
+            requests: {cpu: 10m, memory: 128Mi}
+            limits: {cpu: 200m, memory: 128Mi}

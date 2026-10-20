@@ -160,8 +160,7 @@ spec:
               value: /etc/srenautix/secrets/db-ca/ca.crt
             {{- end }}
           resources:
-            requests: {cpu: 10m, memory: 64Mi}
-            limits: {cpu: 500m, memory: 256Mi}
+            {{- toYaml .Values.database.bootstrapResources | nindent 12 }}
           securityContext:
             {{- include "srenautix.containerSecurityContext" . | nindent 12 }}
           volumeMounts:

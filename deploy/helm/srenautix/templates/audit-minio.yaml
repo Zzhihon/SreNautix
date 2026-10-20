@@ -243,8 +243,7 @@ spec:
                 secretKeyRef: {name: {{ $secret }}, key: secretKey}
             {{- end }}
           resources:
-            requests: {cpu: 10m, memory: 32Mi}
-            limits: {cpu: 200m, memory: 128Mi}
+            {{- toYaml $m.setupResources | nindent 12 }}
           securityContext:
             {{- include "srenautix.containerSecurityContext" . | nindent 12 }}
           volumeMounts:

@@ -332,6 +332,14 @@ database:
   # db bootstrap 不是 Helm hook：CNPG 的 Cluster 与 bootstrap Job 在同一次安装中创建，pre-install 钩子会在 PG 存在之前运行；
   # 外部 PG 没有 adminSecret 时由管理员手动 bootstrap，这期间 Pod 停在 Init 状态
   waitForSchema: true
+  # chart 自带的一次性容器（initContainer wait-for-schema 与 db-bootstrap Job，都是 Node 进程）的资源；
+  # 默认内存 request 等于 limit，满足要求两者相等的准入规则
+  waitForSchemaResources:
+    requests: {cpu: 10m, memory: 128Mi}
+    limits: {cpu: 200m, memory: 128Mi}
+  bootstrapResources:
+    requests: {cpu: 10m, memory: 256Mi}
+    limits: {cpu: 500m, memory: 256Mi}
   # 每个角色一个库角色，server 与 worker 各自拥有一个 schema（DESIGN §2.1）；mcp 不连接数据库
   roles:
     server: {username: srenautix_server}
@@ -410,6 +418,10 @@ audit:
     resources:
       requests: {cpu: 50m, memory: 256Mi}
       limits: {cpu: 500m, memory: 512Mi}
+    # 建桶、对象锁与写入账号的一次性 Job（mc）；默认内存 request 等于 limit
+    setupResources:
+      requests: {cpu: 10m, memory: 128Mi}
+      limits: {cpu: 200m, memory: 128Mi}
     nodeSelector: {}
     tolerations: []
 

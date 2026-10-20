@@ -78,8 +78,7 @@ spec:
           env:
             {{- include "srenautix.pgEnv" (dict "ctx" $ "role" $role) | nindent 12 }}
           resources:
-            requests: {cpu: 10m, memory: 64Mi}
-            limits: {cpu: 200m, memory: 128Mi}
+            {{- toYaml $.Values.database.waitForSchemaResources | nindent 12 }}
           securityContext:
             {{- include "srenautix.containerSecurityContext" $ | nindent 12 }}
           volumeMounts:
