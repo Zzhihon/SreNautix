@@ -20,6 +20,8 @@ export function sendUuid(dedupKey: string): string {
 
 export class FeishuAdapter implements ChannelAdapter {
   readonly channel = 'feishu' as const;
+  /** 飞书的卡片回调经 server 的回调路由接收（配置飞书时必须给出 verification token） */
+  readonly receivesCallbacks = true;
 
   constructor(
     readonly client: FeishuClient,

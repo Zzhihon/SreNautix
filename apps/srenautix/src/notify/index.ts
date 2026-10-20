@@ -121,6 +121,7 @@ export class NotifyService {
           editGapMs: parseDuration('notify.telegram.edit_gap', tg.edit_gap),
         },
         deps.config.prefix,
+        tg.updates !== 'none',
       );
       adapters.push(tgAdapter);
     }

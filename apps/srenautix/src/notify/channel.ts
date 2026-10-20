@@ -70,6 +70,11 @@ export interface RenderOptions {
 /** 渠道适配器：渲染、发送、编辑与错误分类。回调由各渠道自己的路由处理。 */
 export interface ChannelAdapter {
   readonly channel: ChannelId;
+  /**
+   * 渠道是否接收按钮回调。只发送的渠道（例如 Telegram 的 updates: none，bot 与其他服务共用）不渲染回调按钮，
+   * 只保留 URL 按钮（打开控制台），否则用户点了按钮没有任何反应。
+   */
+  readonly receivesCallbacks: boolean;
   readonly chats: readonly ChatTarget[];
   readonly limits: ChannelLimits;
   renderIncident(

@@ -422,4 +422,42 @@ describe('投递引擎（Telegram，录制夹具）', () => {
     );
     expect(withButtons.length).toBeGreaterThanOrEqual(1);
   });
+
+  it('只发送的渠道（Telegram updates: none）不渲染回调按钮，只保留打开控制台的链接，也不登记按钮', async () => {
+    const sendOnly = new TelegramAdapter(
+      new TelegramClient(fs.url, TOKEN),
+      [{ channel: 'telegram', chat: CHAT, language: 'zh' }],
+      { perChatPerMinute: 20, perAppPerMinute: null, perAppPerSecond: null, editGapMs: 3_000 },
+      '[影子]',
+      false,
+    );
+    const metrics = new ServerMetrics('server', false);
+    const e = new NotifyEngine(
+      store,
+      [sendOnly],
+      source,
+      new Interactions(store, new NoActions(), metrics, () => undefined),
+      metrics,
+      {
+        prefix: '[影子]',
+        consoleUrl: 'https://console.example.com/',
+        digestRetentionMs: 6 * 3_600_000,
+        now: () => now,
+      },
+    );
+    const d = incident();
+    d.message.buttons.push({
+      kind: 'open_console',
+      label: '在控制台打开',
+      callback: null,
+      url: 'https://console.example.com/incidents/x',
+    });
+    source.items = [d];
+    await e.syncOnce();
+    await e.deliverOnce();
+    const kb = (sent()[sent().length - 1]!.reply_markup as TelegramPayload['reply_markup']).inline_keyboard.flat();
+    expect(kb).toEqual([{ text: '在控制台打开', url: 'https://console.example.com/incidents/x' }]);
+    const buttons = await db.admin.query<{ n: number }>('SELECT count(*)::int AS n FROM server.notify_buttons');
+    expect(buttons.rows[0]?.n).toBe(0);
+  });
 });

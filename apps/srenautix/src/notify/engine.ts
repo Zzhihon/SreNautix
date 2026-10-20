@@ -147,7 +147,7 @@ export class NotifyEngine {
       const ex = byIncident.get(d.incidentId);
       const results = await this.store.results(a.channel, chat.chat, d.incidentId, RESULTS_SHOWN);
       const storm = stormOf.get(d.incidentId) ?? null;
-      const r = a.renderIncident(chat, d, results, storm, { callbacks: true });
+      const r = a.renderIncident(chat, d, results, storm, { callbacks: a.receivesCallbacks });
       await this.store.registerButtons(a.channel, chat.chat, r.buttons, now);
       rows.push({
         channel: a.channel,

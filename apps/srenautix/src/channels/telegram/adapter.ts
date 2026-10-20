@@ -20,6 +20,8 @@ export class TelegramAdapter implements ChannelAdapter {
     readonly chats: readonly ChatTarget[],
     readonly limits: ChannelLimits,
     private readonly prefix: string,
+    /** updates 为 webhook 或 polling 时为 true；none 时只发送，不渲染回调按钮 */
+    readonly receivesCallbacks = true,
   ) {}
 
   renderIncident(
