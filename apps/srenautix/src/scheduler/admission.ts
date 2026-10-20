@@ -31,7 +31,24 @@ export interface SchedulerSettings {
   maxRecoveries: number;
 }
 
-export type AdmissionOutcome = 'queued' | 'coalesced' | 'capped' | 'storm' | 'budget' | 'duplicate' | 'not_researched';
+export type AdmissionOutcome =
+  'queued' | 'coalesced' | 'capped' | 'storm' | 'budget' | 'no_model_route' | 'duplicate' | 'not_researched';
+
+/** worker 上报的模型路由可用情况（POST /v1/research/routes 的请求体） */
+export interface RouteReport {
+  worker_id: string;
+  routes: Array<{ id: string; enabled: boolean; reason: string | null; message: string | null }>;
+}
+
+/** 一个 worker 上报的模型路由可用情况 */
+export interface WorkerRoutes {
+  workerId: string;
+  at: number;
+  routes: Array<{ id: string; enabled: boolean; reason: string | null; message: string | null }>;
+}
+
+/** 路由上报的有效期：worker 每分钟上报一次，超过这个时间没有上报的 worker 不再计入 */
+const ROUTE_REPORT_TTL_MS = 5 * 60_000;
 
 const SEV: Record<string, number> = { critical: 3, warning: 2, info: 1 };
 
@@ -41,12 +58,14 @@ const SEV: Record<string, number> = { critical: 3, warning: 2, info: 1 };
  * - 绝对上限：每个事件 6 小时内最多 3 次模型研判，在入队时执行。
  * - 风暴模式：活动告警超过 200 条，或 5 分钟内出现超过 20 个新事件；只有排名前 3 的根因进入阶段 B。
  * - 预算：当日用量 ≥80% 时 warning 只出阶段 A；≥100% 时只有 critical 进入阶段 B。
+ * - 模型路由：在有效期内上报过的 worker 全部没有可用路由（出站策略禁用）时，阶段 B 不入队，只出阶段 A（ADR 0093）。
  * - 槽位：默认 4 个，其中 1 个保留给 critical；优先级为严重度 → 吸收的症状数 → 新事件优先于重研 → 等待时长。
  */
 export class Scheduler {
   /** worker 上报的当日预算用量比例。 */
   budgetRatio = 0;
   private storm = false;
+  private routeReports = new Map<string, WorkerRoutes>();
 
   constructor(
     private readonly pool: pg.Pool,
@@ -56,6 +75,31 @@ export class Scheduler {
 
   get stormMode(): boolean {
     return this.storm;
+  }
+
+  /** 记录 worker 上报的路由可用情况 */
+  reportRoutes(r: WorkerRoutes): void {
+    this.routeReports.set(r.workerId, r);
+  }
+
+  /** 有效期内的上报：被禁用的路由（按 id 去重）与是否有 worker 持有可用路由；没有上报时 usable 为 null（未知） */
+  modelRoutes(now = Date.now()): {
+    usable: boolean | null;
+    disabled: Array<{ id: string; reason: string; message: string }>;
+  } {
+    const fresh = [...this.routeReports.values()].filter((r) => now - r.at <= ROUTE_REPORT_TTL_MS);
+    if (!fresh.length) {
+      return { usable: null, disabled: [] };
+    }
+    const disabled = new Map<string, { id: string; reason: string; message: string }>();
+    for (const w of fresh) {
+      for (const r of w.routes) {
+        if (!r.enabled && !disabled.has(r.id)) {
+          disabled.set(r.id, { id: r.id, reason: r.reason ?? 'disabled', message: r.message ?? '' });
+        }
+      }
+    }
+    return { usable: fresh.some((w) => w.routes.some((r) => r.enabled)), disabled: [...disabled.values()] };
   }
 
   /** 风暴判定（中心恢复后补推的积压不计入：只数 created_at 在窗口内、首次触发也在窗口内的事件）。 */
@@ -102,6 +146,10 @@ export class Scheduler {
       );
       return { outcome: why, runId: null };
     };
+    // 没有可用的模型路由时，手动触发同样无法研判
+    if (this.modelRoutes().usable === false) {
+      return skip('no_model_route');
+    }
     if (reason !== 'manual') {
       if (this.budgetRatio >= 1 && inc.severity !== 'critical') {
         return skip('budget');

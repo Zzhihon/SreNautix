@@ -87,6 +87,7 @@ mcp:                                 # 只读 MCP 服务器与工具白名单（
 | `srenautix_llm_estimate_calibration{route}` | token 估算校准系数 |
 | `srenautix_llm_budget_used_ratio{scope="daily"}`、`srenautix_llm_budget_stops_total{reason}` | 预算 |
 | `srenautix_egress_bytes_total`、`srenautix_egress_redaction_hits_total{kind}`、`srenautix_egress_halted` | 出站 |
+| `srenautix_llm_route_disabled{route,reason}`、`srenautix_llm_routes_available` | 启动时被出站策略禁用的路由与可用路由数 |
 | `srenautix_llm_provider_fingerprint_changes_total` | 服务方指纹变化 |
 | `srenautix_research_runs_total{outcome,stop}`、`srenautix_research_duration_seconds` | 研判 |
 | `srenautix_research_conclusions_total{level,untested_competitor,zero_checks}` | 结论 |
@@ -96,6 +97,7 @@ mcp:                                 # 只读 MCP 服务器与工具白名单（
 ## 运维
 
 - **蜜标命中**：`srenautix_egress_halted` 为 1，worker 不再出站，事件只出阶段 A。查看日志中命中的路由与研判，确认泄漏途径并修正出境控制后重启 worker。
+- **路由被出站策略禁用**：国内配置（`allow_cross_border: false`）下 `in_domain: false` 的路由在启动时禁用（ADR 0093）：error 日志、`srenautix_llm_route_disabled{route,reason}` 为 1、控制台状态条显示 `ModelRouteBreakerOpen`（原因 `EgressPolicy`）。禁用的路由不会被探测或调用，worker 照常就绪，其余路由照常研判。一条可用路由都没有时（原因 `EgressPolicyNoRoute`），阶段 B 不入队（队列原因 `no_model_route`），事件只出阶段 A，通知横幅写明原因。确认路由确实在境内后改 `in_domain`，或按合规要求打开 `allow_cross_border`，然后重启 worker。
 - **服务方指纹变化**：该路由的评测成绩作废，用 `srenautix eval` 重新评测（见 [docs/eval](../eval/README.md)）。
 - **全部路由都在被管拓扑内**：启动日志告警，状态条件 `all_routes_in_topology` 为 1；模型服务本身出事时阶段 B 全部跳过。建议保留一条拓扑之外的路由，例如本地 vLLM。
 - **录制模型夹具**：`pnpm --filter @srenautix/app test:live`，需要 `SRENAUTIX_LIVE_LLM_BASE_URL` 指向本地自己启动的模型服务（例如 llama.cpp 的 `llama-server --jinja`）；`scripts/record-llm-fixtures.ts` 录制单个协议的原始响应。不要对持有生产数据的服务运行。

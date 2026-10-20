@@ -72,6 +72,12 @@ const T = {
       stageAOnly: '只出确定性报告：',
       blind: '观测失明：至少一半的证据卡没有数据',
     },
+    skipReason: {
+      budget: '当日模型预算已用到上限',
+      storm: '告警风暴中，只研判排名靠前的根因',
+      capped: '该事件 6 小时内已研判 3 次',
+      no_model_route: '没有可用的模型路由（全部被出站策略禁用）',
+    } as Record<string, string>,
     title: (root: string | null, alerts: number) => `${root ?? '未定位根因'} · ${alerts} 条告警`,
     disp: (d: string, r: string) => `处置判断：${d}（${r}）`,
     members: (n: number, c: number) => `${n} 条告警，涉及 ${c} 个组件`,
@@ -143,6 +149,12 @@ const T = {
       stageAOnly: 'Deterministic report only: ',
       blind: 'Observability blind: at least half of the cards have no data',
     },
+    skipReason: {
+      budget: 'daily model budget reached',
+      storm: 'alert storm, only the top-ranked roots are researched',
+      capped: 'researched 3 times in the last 6 hours',
+      no_model_route: 'no usable model route (all disabled by the egress policy)',
+    } as Record<string, string>,
     title: (root: string | null, alerts: number) => `${root ?? 'root not located'} · ${alerts} alerts`,
     disp: (d: string, r: string) => `Disposition: ${d} (${r})`,
     members: (n: number, c: number) => `${n} alerts across ${c} components`,
@@ -237,8 +249,10 @@ export function composeMessage(i: ComposeInput): { message: NotifyMessage; targe
     banner = t.banner.pending;
   } else if (i.research?.state === 'failed') {
     banner = i.research.error?.kind === 'invalid_output' ? t.banner.invalid : t.banner.failed;
+  } else if (i.research?.state === 'stage_a_only') {
+    banner = `${t.banner.stageAOnly}${i.research.error?.message ?? ''}`;
   } else if (i.stageAOnlyReason) {
-    banner = `${t.banner.stageAOnly}${i.stageAOnlyReason}`;
+    banner = `${t.banner.stageAOnly}${t.skipReason[i.stageAOnlyReason] ?? i.stageAOnlyReason}`;
   } else if (i.stageA.observability_blind) {
     banner = t.banner.blind;
   }

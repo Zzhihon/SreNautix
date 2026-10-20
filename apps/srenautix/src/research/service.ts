@@ -150,8 +150,12 @@ export function proposalKey(incidentId: string, runId: string, action: string, p
     .digest('hex');
 }
 
+/** 模型路由可用情况的上报间隔：server 重启后最迟这么久恢复状态条件与准入判断 */
+const ROUTE_REPORT_INTERVAL_MS = 60_000;
+
 export class WorkerService {
   private stopped = false;
+  private routesReportedAt = 0;
 
   constructor(private readonly d: WorkerDeps) {}
 
@@ -162,6 +166,7 @@ export class WorkerService {
   /** 认领循环，直到 stop()；每次只处理一个任务（多副本横向扩展） */
   async run(signal: AbortSignal): Promise<void> {
     while (!this.stopped && !signal.aborted) {
+      await this.reportRoutes();
       let task: ClaimedTask | null;
       try {
         task = await this.d.hub.claim(this.d.workerId, this.d.claimWaitS, signal);
@@ -176,6 +181,26 @@ export class WorkerService {
       if (task) {
         await this.handle(task, signal);
       }
+    }
+  }
+
+  /** 定期向 server 上报路由可用情况（失败时下一轮重试） */
+  async reportRoutes(now = Date.now()): Promise<void> {
+    if (now - this.routesReportedAt < ROUTE_REPORT_INTERVAL_MS) {
+      return;
+    }
+    const layer = this.d.layer;
+    try {
+      await this.d.hub.reportRoutes({
+        worker_id: this.d.workerId,
+        routes: [
+          ...layer.routes.map((r) => ({ id: r.route.id, enabled: true, reason: null, message: null })),
+          ...layer.disabled.map((r) => ({ id: r.id, enabled: false, reason: r.reason, message: r.message })),
+        ],
+      });
+      this.routesReportedAt = now;
+    } catch (e) {
+      logger.warn('上报模型路由可用情况失败，下一轮重试', { error: e });
     }
   }
 
@@ -216,6 +241,13 @@ export class WorkerService {
       evidenceFingerprint: ctx.stage_a.evidence_fingerprint,
     });
     const base = { incident_id: inc.incident_id, incident_version: inc.incident_version, run_id: task.run_id };
+    // 所有路由都被出站策略禁用：server 收到上报后不再派发阶段 B，这里兜住上报之前已入队的任务
+    const unavailable = d.layer.unavailableReason();
+    if (unavailable) {
+      d.metrics.researchRuns.inc({ outcome: 'stage_a_only', stop: 'model_unavailable' });
+      await this.finishFailed(task, ctx, 'stage_a_only', 'breaker_open', unavailable, null);
+      return 'stage_a_only';
+    }
     const used = await d.store.dailyTokens();
     d.metrics.budgetUsedRatio.set({ scope: 'daily' }, used / d.budget.dailyTokens);
     const gate = dailyGate(d.budget, used, inc.severity as Severity);

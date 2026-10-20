@@ -249,3 +249,22 @@ export function serverConditions(o: ServerObservations): Observed[] {
   }
   return out;
 }
+
+/**
+ * worker 上报的模型路由可用情况转成的条件（由 server 代为发布，role 为 worker）：
+ * 被出站策略禁用的路由记为 ModelRouteBreakerOpen（原因 EgressPolicy，相当于一直打开的熔断器）；
+ * 一条可用路由都没有时，消息中说明阶段 B 不运行、只出阶段 A。
+ */
+export function workerRouteConditions(r: {
+  usable: boolean | null;
+  disabled: Array<{ id: string; reason: string; message: string }>;
+}): Observed[] {
+  const tail = r.usable === false ? '。没有可用的模型路由，阶段 B 不运行，只出阶段 A' : '';
+  return r.disabled.map((d) => ({
+    type: 'ModelRouteBreakerOpen',
+    subject: d.id,
+    active: true,
+    reason: r.usable === false ? 'EgressPolicyNoRoute' : 'EgressPolicy',
+    message: `${d.message || `路由 ${d.id} 被出站策略禁用（${d.reason}）`}，该路由不会被调用${tail}`,
+  }));
+}

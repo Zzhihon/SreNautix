@@ -121,7 +121,7 @@ export class ServerMetrics extends BaseMetrics {
 
   readonly researchAdmissions = new Counter({
     name: 'srenautix_research_admissions_total',
-    help: '阶段 B 入队判定，按结果（queued、coalesced、capped、storm、budget、duplicate）',
+    help: '阶段 B 入队判定，按结果（queued、coalesced、capped、storm、budget、no_model_route、duplicate）',
     labelNames: ['outcome'] as const,
     registers: [this.registry],
   });

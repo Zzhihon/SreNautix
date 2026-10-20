@@ -95,6 +95,19 @@ export class WorkerMetrics extends BaseMetrics {
     registers: [this.registry],
   });
 
+  readonly routeDisabled = new Gauge({
+    name: 'srenautix_llm_route_disabled',
+    help: '启动时被出站策略禁用的模型路由（1 禁用），按原因（cross_border 等）；禁用的路由不会被调用',
+    labelNames: ['route', 'reason'] as const,
+    registers: [this.registry],
+  });
+
+  readonly routesAvailable = new Gauge({
+    name: 'srenautix_llm_routes_available',
+    help: '可用的模型路由数；为 0 时阶段 B 不运行，只出阶段 A',
+    registers: [this.registry],
+  });
+
   readonly egressHalted = new Gauge({
     name: 'srenautix_egress_halted',
     help: '出站是否因命中蜜标而停止（1 停止）；需要人工处理后重启 worker',

@@ -12,7 +12,7 @@ import { configureLog, logger } from '../log.js';
 import { Egress } from '../llm/egress.js';
 import { declaredProfile } from '../llm/dialect.js';
 import { applyProbe, probeRoute } from '../llm/probe.js';
-import { buildRuntimes } from '../llm/routes.js';
+import { partitionRoutes } from '../llm/routes.js';
 import { ModelLayer } from '../llm/session.js';
 import { LlmError } from '../llm/types.js';
 import type { RoleArgs } from '../main.js';
@@ -84,7 +84,9 @@ export async function buildWorker(o: BuildWorkerOptions): Promise<WorkerHandle> 
     },
   );
   const states = await store.routeStates();
-  const runtimes = buildRuntimes(
+  // 出站策略不允许的路由（例如国内配置下的境外路由）在启动时禁用，worker 照常就绪；
+  // 一条可用路由都没有时阶段 B 不运行，只出阶段 A（ADR 0093）
+  const { runtimes, disabled } = partitionRoutes(
     c.routes.map((r) => ({
       route: r.route,
       apiKey: r.apiKey,
@@ -93,6 +95,16 @@ export async function buildWorker(o: BuildWorkerOptions): Promise<WorkerHandle> 
     egress,
     c.callTimeoutMs,
   );
+  for (const d of disabled) {
+    metrics.routeDisabled.set({ route: d.id, reason: d.reason }, 1);
+    logger.error('模型路由被出站策略禁用，不会被调用', { route: d.id, reason: d.reason, message: d.message });
+  }
+  metrics.routesAvailable.set(runtimes.length);
+  metrics.condition.set({ role: 'worker', type: 'model_route_disabled' }, disabled.length ? 1 : 0);
+  metrics.condition.set({ role: 'worker', type: 'no_model_route' }, runtimes.length ? 0 : 1);
+  if (!runtimes.length) {
+    logger.error('没有可用的模型路由，阶段 B 不运行，只出阶段 A', { disabled: disabled.map((d) => d.id) });
+  }
   if (c.raw.llm.probe_on_start) {
     for (const rt of runtimes) {
       try {
@@ -117,6 +129,7 @@ export async function buildWorker(o: BuildWorkerOptions): Promise<WorkerHandle> 
   }
   const layer = new ModelLayer({
     routes: runtimes,
+    disabled,
     egress,
     budget: c.budget,
     metrics,
@@ -215,7 +228,11 @@ export async function buildWorker(o: BuildWorkerOptions): Promise<WorkerHandle> 
   }
   const loopCtrl = new AbortController();
   const loop = o.noLoop ? Promise.resolve() : service.run(loopCtrl.signal);
-  logger.info('worker 已启动', { api: apiUrl, routes: runtimes.map((r) => r.route.id) });
+  logger.info('worker 已启动', {
+    api: apiUrl,
+    routes: runtimes.map((r) => r.route.id),
+    disabled: disabled.map((d) => d.id),
+  });
   return {
     app,
     pool,

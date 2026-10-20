@@ -10,6 +10,7 @@ import type {
   TopologyNode,
 } from '@srenautix/contract';
 import type { CatalogAction } from '../proposals/catalog.js';
+import type { RouteReport } from '../scheduler/admission.js';
 import type { CheckTemplate, KnowledgeItem, ReferenceCase } from './types.js';
 
 // worker 调用中心 server 的内部接口（worker 的服务 token；server 代为执行队列的 SKIP LOCKED，worker 没有 server schema 的权限）。
@@ -139,6 +140,11 @@ export class HubClient {
 
   async reportBudget(usedRatio: number): Promise<void> {
     await this.call('POST', '/v1/research/budget', { used_ratio: usedRatio });
+  }
+
+  /** 上报本 worker 的模型路由可用情况：server 据此发布状态条件，没有可用路由时阶段 B 直接跳过 */
+  async reportRoutes(report: RouteReport): Promise<void> {
+    await this.call('POST', '/v1/research/routes', report);
   }
 
   /** 提议中转（POST /v1/proposals，带幂等键）；绑定与事件当前状态不一致时返回 null 与原因 */

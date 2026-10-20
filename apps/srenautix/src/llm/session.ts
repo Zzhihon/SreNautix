@@ -19,6 +19,7 @@ import { touchesFailureDomain, type RouteBreaker } from './breaker.js';
 import { EgressBlocked, type Egress } from './egress.js';
 import { turnFingerprint, type Drift, type FingerprintTracker } from './fingerprint.js';
 import { countHits, type RedactionHits } from './redact.js';
+import type { DisabledRoute } from './routes.js';
 import { reaskText, repairLocally, type RepairStep } from './repair.js';
 import {
   LlmError,
@@ -94,7 +95,10 @@ export interface EgressEntry {
 }
 
 export interface ModelLayerOptions {
+  /** 可用的路由；可以为空（全部被出站策略禁用），这时阶段 B 不运行，只出阶段 A */
   routes: RouteRuntime[];
+  /** 启动时被出站策略禁用的路由：不在 routes 中，任何情况下都不会被调用 */
+  disabled?: readonly DisabledRoute[];
   egress: Egress;
   budget: BudgetConfig;
   metrics: WorkerMetrics;
@@ -175,14 +179,24 @@ export class ModelLayer {
   readonly callTimeoutMs: number;
 
   constructor(readonly opts: ModelLayerOptions) {
-    if (!opts.routes.length) {
-      throw new Error('至少需要一条模型路由');
-    }
     this.callTimeoutMs = opts.callTimeoutMs ?? CALL_TIMEOUT_MS;
   }
 
   get routes(): readonly RouteRuntime[] {
     return this.opts.routes;
+  }
+
+  get disabled(): readonly DisabledRoute[] {
+    return this.opts.disabled ?? [];
+  }
+
+  /** 没有可用路由时的降级原因（阶段 B 不运行，只出阶段 A）；有可用路由时为 null */
+  unavailableReason(): string | null {
+    if (this.opts.routes.length) {
+      return null;
+    }
+    const why = this.disabled.map((d) => d.message).join('；');
+    return `没有可用的模型路由${why ? `：${why}` : ''}。阶段 B 不运行，只出阶段 A`;
   }
 
   route(id: string): RouteRuntime {
@@ -195,7 +209,7 @@ export class ModelLayer {
 
   /** 所有路由都声明了被管拓扑内的故障域时返回 true（配置校验告警、控制台横幅） */
   allRoutesInTopology(): boolean {
-    return this.opts.routes.every((r) => r.route.failure_domain.length > 0);
+    return this.opts.routes.length > 0 && this.opts.routes.every((r) => r.route.failure_domain.length > 0);
   }
 
   /** 候选路由：先本档位，再另一档位；同档位按配置顺序 */
@@ -251,6 +265,11 @@ export class ModelSession {
     base: Omit<LlmRequest, 'output'>,
     output: OutputFormat & { full: Record<string, unknown> },
   ): Promise<StructuredResult<T>> {
+    const unavailable = this.layer.unavailableReason();
+    if (unavailable) {
+      // 所有路由都被出站策略禁用：不发出任何请求
+      return { ok: false, reason: 'egress_blocked', detail: unavailable, attempts: [unavailable] };
+    }
     const attempts: string[] = [];
     const preOpened = new Map(this.preOpened().map((p) => [p.routeId, p.component]));
     const { metrics } = this.layer.opts;

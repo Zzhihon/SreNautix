@@ -226,6 +226,8 @@ topology:
 
 ## 阶段 B 的输入与查询模板
 
+worker 每分钟上报模型路由的可用情况：`POST /v1/research/routes`，请求体 `{worker_id, routes: [{id, enabled, reason, message}]}`。server 据此以 role `worker` 发布状态条件 `ModelRouteBreakerOpen`（被出站策略禁用的路由，原因 `EgressPolicy`；一条可用路由都没有时为 `EgressPolicyNoRoute`）。5 分钟内上报过的 worker 全部没有可用路由时，新的研判触发不入队，队列记为 `skipped`、原因 `no_model_route`，事件只出阶段 A（ADR 0093）。
+
 worker 认领任务后读取 `GET /v1/research/tasks/{run_id}/context`（worker 的服务 token），字段与 `contract/schemas/eval-snapshot.schema.json` 的 `Context` 对应：
 
 | 字段 | 内容 |

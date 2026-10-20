@@ -10,7 +10,7 @@ import { incidentVersion, latestStageA, resolveIncidentRef } from '../incident/r
 import { alertsById } from '../ingest/store.js';
 import type { Catalog } from '../proposals/catalog.js';
 import type { FeedbackService } from '../proposals/feedback.js';
-import { LeaseLost, type Scheduler } from '../scheduler/admission.js';
+import { LeaseLost, type RouteReport, type Scheduler } from '../scheduler/admission.js';
 import type { PackEvidence } from '../stage-a/pack-evidence.js';
 import type { CompiledTemplate, PackRuntime } from '../stage-a/packs.js';
 import { appendAudit } from '../store/audit.js';
@@ -124,6 +124,37 @@ export function registerResearchRoutes(app: FastifyInstance, d: ResearchRouteDep
       throw badRequest('used_ratio 必须是非负数（当日 token 用量 / 当日上限）');
     }
     d.scheduler.budgetRatio = body.used_ratio;
+    return reply.code(204).send();
+  });
+
+  app.post('/v1/research/routes', async (req, reply) => {
+    await worker(req);
+    const body = (req.body ?? {}) as Partial<RouteReport>;
+    const ok =
+      typeof body.worker_id === 'string' &&
+      body.worker_id.length > 0 &&
+      Array.isArray(body.routes) &&
+      body.routes.every(
+        (r) =>
+          typeof r?.id === 'string' &&
+          typeof r.enabled === 'boolean' &&
+          (r.reason === null || typeof r.reason === 'string') &&
+          (r.message === null || typeof r.message === 'string'),
+      );
+    if (!ok) {
+      throw badRequest('需要 worker_id 与 routes[]（id、enabled、reason、message）');
+    }
+    const r = body as RouteReport;
+    d.scheduler.reportRoutes({
+      workerId: r.worker_id,
+      at: Date.now(),
+      routes: r.routes.map((x) => ({
+        id: x.id,
+        enabled: x.enabled,
+        reason: x.reason?.slice(0, 64) ?? null,
+        message: x.message?.slice(0, 500) ?? null,
+      })),
+    });
     return reply.code(204).send();
   });
 

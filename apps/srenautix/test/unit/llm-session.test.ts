@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DEFAULT_BUDGET, ResearchLedger, type BudgetConfig } from '../../src/llm/budget.js';
 import { declaredProfile } from '../../src/llm/dialect.js';
 import { Egress, EgressBlocked } from '../../src/llm/egress.js';
-import { buildRuntimes } from '../../src/llm/routes.js';
+import { buildRuntimes, partitionRoutes } from '../../src/llm/routes.js';
 import { ModelLayer, type LlmCallRecord } from '../../src/llm/session.js';
 import type { LlmRequest } from '../../src/llm/types.js';
 import { WorkerMetrics } from '../../src/research/metrics.js';
@@ -240,6 +240,79 @@ describe('出站控制', () => {
   it('国内配置禁止境外路由', () => {
     expect(() => layer([route('a', a.baseUrl, { in_domain: false })])).toThrow(EgressBlocked);
     expect(() => layer([route('a', a.baseUrl, { in_domain: false })], { allowCrossBorder: true })).not.toThrow();
+  });
+
+  const strict = () => new Egress({ allowCrossBorder: false, honeytokens: [HONEYTOKEN] }, (r) => halted.push(r));
+  const inputs = (routes: ModelRoute[]) =>
+    routes.map((r) => ({ route: r, apiKey: 'local', state: { profile: null, calibration: null, fingerprint: null } }));
+  const partitioned = (routes: ModelRoute[]) => {
+    const egress = strict();
+    const { runtimes, disabled } = partitionRoutes(inputs(routes), egress, 90_000);
+    const l = new ModelLayer({
+      routes: runtimes,
+      disabled,
+      egress,
+      budget: DEFAULT_BUDGET,
+      metrics: new WorkerMetrics('worker', false),
+      language: 'en',
+      onCalibration: async () => undefined,
+      onDrift: async () => undefined,
+    });
+    return { l, disabled };
+  };
+
+  it('启动时禁用境外路由：不进入模型层，研判只走可用路由，境外路由收不到任何请求', async () => {
+    const { l, disabled } = partitioned([route('a', a.baseUrl, { in_domain: false }), route('b', b.baseUrl)]);
+    expect(disabled).toEqual([{ id: 'a', reason: 'cross_border', message: expect.stringMatching(/路由 a 在境外/) }]);
+    expect(l.routes.map((r) => r.route.id)).toEqual(['b']);
+    expect(l.ordered('conclude').map((r) => r.route.id)).toEqual(['b']);
+    expect(() => l.route('a')).toThrow(/没有路由 a/);
+    expect(l.unavailableReason()).toBeNull();
+    // a 在配置中排在前面，并且也备好了录制的响应：如果 a 被尝试，它会先收到请求
+    a.enqueue(fixture(P, 'chat-json-schema'));
+    b.enqueue(fixture(P, 'chat-json-schema'));
+    const r = await session(l).structured('conclude', base('card:1 says api errors'), OUTPUT);
+    expect(r).toMatchObject({ ok: true, routeId: 'b' });
+    expect(a.received).toHaveLength(0);
+    expect(records.map((x) => x.routeId)).toEqual(['b']);
+  });
+
+  it('全部路由被禁用：模型层照常构造并给出降级原因，调用不发出任何请求', async () => {
+    const { l } = partitioned([route('a', a.baseUrl, { in_domain: false })]);
+    expect(l.routes).toHaveLength(0);
+    expect(l.allRoutesInTopology()).toBe(false);
+    expect(l.unavailableReason()).toMatch(/没有可用的模型路由：路由 a 在境外.*阶段 B 不运行，只出阶段 A/);
+    a.enqueue(fixture(P, 'chat-json-schema'));
+    const r = await session(l).structured('conclude', base('x'), OUTPUT);
+    expect(r).toMatchObject({
+      ok: false,
+      reason: 'egress_blocked',
+      detail: expect.stringMatching(/没有可用的模型路由/),
+    });
+    expect(a.received).toHaveLength(0);
+    expect(records).toHaveLength(0);
+  });
+
+  it('出站检查本身不放宽：被禁用的路由构造不出客户端，严格构造仍然拒绝，每次请求都重新检查', async () => {
+    const egress = strict();
+    const overseas = route('a', a.baseUrl, { in_domain: false });
+    expect(() => egress.client(overseas, 'local', 90_000)).toThrow(EgressBlocked);
+    expect(() => buildRuntimes(inputs([overseas, route('b', b.baseUrl)]), egress, 90_000)).toThrow(EgressBlocked);
+    // 构造后路由变为境外（例如配置对象被改动）：请求在出站模块里被拦下，不到达服务端
+    const changed = route('c', a.baseUrl);
+    const client = egress.client(changed, 'local', 90_000);
+    changed.in_domain = false;
+    a.enqueue(fixture(P, 'chat-json-schema'));
+    const err = await client.chat.completions
+      .create({ model: 'qwen3-1.7b', messages: [{ role: 'user', content: 'x' }] })
+      .then(
+        () => null,
+        (e: unknown) => e,
+      );
+    const blocked = err instanceof EgressBlocked ? err : (err as { cause?: unknown } | null)?.cause;
+    expect(blocked).toBeInstanceOf(EgressBlocked);
+    expect((blocked as EgressBlocked).reason).toBe('cross_border');
+    expect(a.received).toHaveLength(0);
   });
 });
 

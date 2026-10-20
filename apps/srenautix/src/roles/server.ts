@@ -10,7 +10,7 @@ import { pgConfigFromEnv } from '../config/database.js';
 import { parseDuration, parseListen, readSecretFile } from '../config/files.js';
 import { loadServerConfig, type ServerConfig } from '../config/server.js';
 import { changesInWindow, ChangesService } from '../changes/service.js';
-import { ConditionPublisher, serverConditions } from '../console-bff/conditions.js';
+import { ConditionPublisher, serverConditions, workerRouteConditions } from '../console-bff/conditions.js';
 import { IntegrationRegistry } from '../console-bff/integrations.js';
 import { registerIncidentRoutes } from '../console-bff/routes-incidents.js';
 import { apiTokenCaller, registerSystemRoutes } from '../console-bff/routes-system.js';
@@ -672,6 +672,7 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
   }
 
   const conditions = new ConditionPublisher(pool, 'server', c.cluster_id, metrics);
+  const workerConditions = new ConditionPublisher(pool, 'worker', c.cluster_id, metrics);
   every(
     15_000,
     async () => {
@@ -715,6 +716,7 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
           now: new Date(),
         }),
       );
+      await workerConditions.publish(workerRouteConditions(scheduler.modelRoutes()));
     },
     '状态条件',
   );
