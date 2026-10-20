@@ -13,7 +13,7 @@ import styles from './IncidentRow.module.css';
 export function IncidentRow({ s, now }: { s: IncidentSummary; now: number }) {
   const { t, fmt } = useI18n();
   const { links } = useUiEnv();
-  const root = s.root_component ? componentLabel(s.root_component) : null;
+  const root = s.root_component ? componentLabel(s.root_component, s.component_names) : null;
   const fb = feedbackState(s.feedback, s.disposition !== null);
   const title = root ? root.name : s.label;
   return (

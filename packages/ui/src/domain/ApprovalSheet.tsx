@@ -15,6 +15,7 @@ import { TextAreaField, TextField } from '../primitives/form';
 import { Status, StatusPill } from '../primitives/Status';
 import { componentLabel } from './model';
 import styles from './ApprovalSheet.module.css';
+import { useComponentNames } from './names';
 
 export interface ReauthHook {
   /** H 档且距上次认证超过 5 分钟。 */
@@ -63,6 +64,7 @@ export function ApprovalSheet({
   now: number;
 }) {
   const { t, fmt } = useI18n();
+  const names = useComponentNames();
   const { caps, port, links } = useUiEnv();
   const qc = useQueryClient();
   const p = detail.proposal;
@@ -106,7 +108,7 @@ export function ApprovalSheet({
   });
 
   const ttlLeft = p.ttl_expires_at ? Date.parse(p.ttl_expires_at) - now : null;
-  const root = p.binding.root_component ? componentLabel(p.binding.root_component).name : t('common.none');
+  const root = p.binding.root_component ? componentLabel(p.binding.root_component, names).name : t('common.none');
   const awaiting = p.state === 'awaiting_approval';
   const typedOk = p.tier !== 'H' || typed === p.target.display;
   const reauthBlocked = p.tier === 'H' && reauth.needed;

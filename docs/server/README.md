@@ -186,6 +186,10 @@ packs:
 
 排除规则（`chains.yaml` 的 `excludes`）只在本次执行过的证据链上求值，上下文与规则提议相同；按声明顺序第一条命中时 disposition 为 `ignore`，报告中记录规则引用 `<pack>/<chain id>#excludes[<序号>]`。求值出错的规则不命中，计入 `srenautix_stage_a_rule_errors_total`。
 
+## 组件的可读名称
+
+领域包的组件类型可以声明 `display_name` 来源（告警注解、告警标签或本包的 metrics 信号的标签）。阶段 A 在事件锚点求出名称写入 `server.component_names`，事件详情、收件箱、通知标题与正文、GitHub issue 优先显示名称（正文写"名称（组件键）"），没有名称时显示组件键；组件键本身不变（ADR 0101）。
+
 ## 变更源
 
 事件引擎把首次触发前 30 分钟内、触及事件组件的变更放进事件（`incident.changes`），并作为根因排序的一项（DESIGN §5）。变更来自配置的变更源。hub 镜像不带 git，变更源只支持托管在 GitHub 上的仓库（`integrations/github`，ADR 0096），经 `github_app` 的安装令牌用 REST API 读取：

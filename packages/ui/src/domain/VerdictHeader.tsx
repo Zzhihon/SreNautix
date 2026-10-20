@@ -10,6 +10,7 @@ import { Status, StatusPill } from '../primitives/Status';
 import { activeConditions } from './ConditionStrip';
 import { componentLabel, countEvidence, degradedSources, incidentDuration } from './model';
 import styles from './VerdictHeader.module.css';
+import { useComponentNames } from './names';
 
 const RUNNING: ReadonlySet<ResearchRunSummary['state']> = new Set([
   'queued',
@@ -46,7 +47,8 @@ export function VerdictHeader({
   const disposition = concluded?.disposition ?? stageA?.disposition ?? null;
   const level = concluded?.conclusion_level ?? null;
   const root = concluded?.root_component ?? incident.root.component;
-  const rootL = root ? componentLabel(root) : null;
+  const names = useComponentNames();
+  const rootL = root ? componentLabel(root, names) : null;
   const counts = countEvidence(evidence);
   const degraded = degradedSources(evidence);
   const affecting = affectingConditions(conditions, incident.cluster_id);

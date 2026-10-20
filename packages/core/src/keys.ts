@@ -241,6 +241,16 @@ export function displayKey(key: string): string {
   }
 }
 
+/**
+ * 给人看的组件名（ADR 0101）：有领域包求出的可读名称时为"名称（组件键）"，例如"智元 API（provider:01a1…）"，
+ * 否则为解码后的组件键。组件键本身不变，仍用于引用与回复解析。
+ */
+export function displayComponentName(key: string, names?: Readonly<Record<string, string | undefined>> | null): string {
+  const shown = displayKey(key);
+  const name = names?.[key];
+  return name ? `${name}（${shown}）` : shown;
+}
+
 /** 命名空间伪组件：映射不到实体、只有 namespace 标签的告警归入这里（DESIGN §5） */
 export function namespacePseudoKey(namespace: string): ComponentKey {
   return nodeKey(NAMESPACE_KIND, null, namespace);

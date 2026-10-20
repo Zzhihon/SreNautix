@@ -32,6 +32,7 @@ import { EmptyState } from '../primitives/EmptyState';
 import { Tabs } from '../primitives/overlays';
 import { Status, StatusPill } from '../primitives/Status';
 import styles from './views.module.css';
+import { ComponentNamesProvider, useComponentNames } from '../domain/names';
 
 function PendingApprovals({ list, now }: { list: readonly Proposal[]; now: number }) {
   const { t, fmt } = useI18n();
@@ -100,6 +101,7 @@ function Recommendations({ recs }: { recs: readonly Recommendation[] }) {
 /** 运行标签页：各次研判，以及与上一次相比变化的字段。 */
 function RunsTab({ runs }: { runs: readonly ResearchRunSummary[] }) {
   const { t, fmt } = useI18n();
+  const names = useComponentNames();
   const { links } = useUiEnv();
   if (!runs.length) {
     return <EmptyState kind="none" title={t('detail.no_runs_title')} because={t('detail.no_runs_because')} />;
@@ -138,7 +140,7 @@ function RunsTab({ runs }: { runs: readonly ResearchRunSummary[] }) {
                 {r.conclusion_level ? t(`status.conclusion.${r.conclusion_level}`) : '-'}
               </td>
               <td className={diff('root_component') ? styles.changed : undefined}>
-                {r.root_component ? componentLabel(r.root_component).name : '-'}
+                {r.root_component ? componentLabel(r.root_component, names).name : '-'}
               </td>
             </tr>
           );
@@ -193,94 +195,96 @@ export function IncidentView({
   const start = Date.parse(i.first_firing_at) - 30 * 60_000;
 
   return (
-    <div className={styles.page}>
-      <div className={styles.detail}>
-        <div className={styles.detailMain}>
-          <Panel>
-            <VerdictHeader
-              incident={i}
-              stageA={stageA.data ?? null}
-              latestRun={latest}
-              evidence={evidence.data ?? []}
-              conditions={conditions.data ?? []}
-              now={now}
-            />
-          </Panel>
-          {firstErr !== undefined && <ErrorBox title={t('detail.partial_failed')} error={firstErr} />}
-          <PendingApprovals list={proposals.data ?? []} now={now} />
-          <Panel
-            title={t('detail.subgraph')}
-            meta={subgraph.data ? t('detail.topology_v', { v: subgraph.data.topology_version }) : undefined}
-          >
-            {subgraph.error ? (
-              <ErrorBox title={t('detail.subgraph_failed')} error={subgraph.error} />
-            ) : subgraph.data ? (
-              <Subgraph graph={subgraph.data} />
-            ) : (
-              <Loading />
-            )}
-          </Panel>
-          <Tabs
-            label={t('detail.tabs')}
-            value={tab}
-            onChange={(v) => onTab(v as IncidentTab)}
-            tabs={[
-              {
-                id: 'evidence',
-                label: t('detail.tab.evidence'),
-                badge: evidence.data?.length,
-                content: evidence.data ? (
-                  <EvidenceList incidentRef={incidentRef} runId={concludedId} results={evidence.data} />
-                ) : (
-                  <Loading />
-                ),
-              },
-              {
-                id: 'hypotheses',
-                label: t('detail.tab.hypotheses'),
-                badge: run.data?.output?.hypotheses.length,
-                content:
-                  concludedId === null ? (
-                    <HypothesisList output={null} />
-                  ) : run.data ? (
-                    <HypothesisList output={run.data.output} />
-                  ) : run.error ? (
-                    <ErrorBox title={t('detail.run_failed')} error={run.error} />
+    <ComponentNamesProvider names={i.component_names}>
+      <div className={styles.page}>
+        <div className={styles.detail}>
+          <div className={styles.detailMain}>
+            <Panel>
+              <VerdictHeader
+                incident={i}
+                stageA={stageA.data ?? null}
+                latestRun={latest}
+                evidence={evidence.data ?? []}
+                conditions={conditions.data ?? []}
+                now={now}
+              />
+            </Panel>
+            {firstErr !== undefined && <ErrorBox title={t('detail.partial_failed')} error={firstErr} />}
+            <PendingApprovals list={proposals.data ?? []} now={now} />
+            <Panel
+              title={t('detail.subgraph')}
+              meta={subgraph.data ? t('detail.topology_v', { v: subgraph.data.topology_version }) : undefined}
+            >
+              {subgraph.error ? (
+                <ErrorBox title={t('detail.subgraph_failed')} error={subgraph.error} />
+              ) : subgraph.data ? (
+                <Subgraph graph={subgraph.data} />
+              ) : (
+                <Loading />
+              )}
+            </Panel>
+            <Tabs
+              label={t('detail.tabs')}
+              value={tab}
+              onChange={(v) => onTab(v as IncidentTab)}
+              tabs={[
+                {
+                  id: 'evidence',
+                  label: t('detail.tab.evidence'),
+                  badge: evidence.data?.length,
+                  content: evidence.data ? (
+                    <EvidenceList incidentRef={incidentRef} runId={concludedId} results={evidence.data} />
                   ) : (
                     <Loading />
                   ),
-              },
-              {
-                id: 'timeline',
-                label: t('detail.tab.timeline'),
-                badge: timeline.data?.length,
-                content: timeline.data ? <TimelineLane items={timeline.data} from={start} to={end} /> : <Loading />,
-              },
-              {
-                id: 'runs',
-                label: t('detail.tab.runs'),
-                badge: runs.data?.length,
-                content: runs.data ? <RunsTab runs={runs.data} /> : <Loading />,
-              },
-            ]}
-          />
-        </div>
-        <aside className={styles.detailSide} aria-label={t('detail.side')}>
-          <Panel title={t('feedback.title')}>
-            <FeedbackControl
-              incidentRef={incidentRef}
-              runId={concludedId}
-              disposition={disposition}
-              rootComponent={root}
-              components={components}
-              latest={latestFb}
-              state={feedbackState(latestFb, disposition !== null)}
-              firing={i.state === 'firing'}
+                },
+                {
+                  id: 'hypotheses',
+                  label: t('detail.tab.hypotheses'),
+                  badge: run.data?.output?.hypotheses.length,
+                  content:
+                    concludedId === null ? (
+                      <HypothesisList output={null} />
+                    ) : run.data ? (
+                      <HypothesisList output={run.data.output} />
+                    ) : run.error ? (
+                      <ErrorBox title={t('detail.run_failed')} error={run.error} />
+                    ) : (
+                      <Loading />
+                    ),
+                },
+                {
+                  id: 'timeline',
+                  label: t('detail.tab.timeline'),
+                  badge: timeline.data?.length,
+                  content: timeline.data ? <TimelineLane items={timeline.data} from={start} to={end} /> : <Loading />,
+                },
+                {
+                  id: 'runs',
+                  label: t('detail.tab.runs'),
+                  badge: runs.data?.length,
+                  content: runs.data ? <RunsTab runs={runs.data} /> : <Loading />,
+                },
+              ]}
             />
-          </Panel>
-          {run.data?.output && <Recommendations recs={run.data.output.recommendations} />}
-        </aside>
+          </div>
+          <aside className={styles.detailSide} aria-label={t('detail.side')}>
+            <Panel title={t('feedback.title')}>
+              <FeedbackControl
+                incidentRef={incidentRef}
+                runId={concludedId}
+                disposition={disposition}
+                rootComponent={root}
+                components={components}
+                latest={latestFb}
+                state={feedbackState(latestFb, disposition !== null)}
+                firing={i.state === 'firing'}
+              />
+            </Panel>
+            {run.data?.output && <Recommendations recs={run.data.output.recommendations} />}
+          </aside>
+        </div>
       </div>
-    </div>
+    </ComponentNamesProvider>
   );
 }

@@ -88,7 +88,11 @@
       "description": "本版本使用的拓扑事件 seq"
     },
     "created_at": { "$ref": "common.schema.json#/$defs/Timestamp" },
-    "updated_at": { "$ref": "common.schema.json#/$defs/Timestamp" }
+    "updated_at": { "$ref": "common.schema.json#/$defs/Timestamp" },
+    "component_names": {
+      "$ref": "common.schema.json#/$defs/ComponentNames",
+      "description": "根因、候选与成员组件的可读名称；读取时由中心附上，事件流与旧版本的事件没有这个字段"
+    }
   },
   "$defs": {
     "IncidentLabel": {

@@ -50,6 +50,12 @@
       "pattern": "^[A-Za-z][A-Za-z0-9.-]*:([a-z0-9]([-a-z0-9]*[a-z0-9])?/)?([A-Za-z0-9._-]|%[0-9A-F]{2})+$",
       "maxLength": 400
     },
+    "ComponentNames": {
+      "type": "object",
+      "description": "组件键 → 可读名称（领域包 ComponentType.display_name 求出，ADR 0101）。只用于显示；没有名称的组件不在其中，显示组件键",
+      "propertyNames": { "$ref": "#/$defs/ComponentKey" },
+      "additionalProperties": { "type": "string", "minLength": 1, "maxLength": 200 }
+    },
     "EntityRef": {
       "title": "EntityRef",
       "description": "一个 Kubernetes 对象或领域包组件实例。uid 在实体解析成功时填写",

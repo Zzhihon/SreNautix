@@ -1,5 +1,5 @@
 // 本文件由 packages/contract/scripts/gen.ts 从 contract/ 生成，不要手工修改。
-export const CONTRACT_VERSION = '2.10.0';
+export const CONTRACT_VERSION = '2.11.0';
 
 export const SCHEMAS: Record<string, Record<string, unknown>> = {
   'https://srenautix.io/contract/gateway/v1/action-catalog.schema.json': {
@@ -1789,6 +1789,13 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
         pattern: '^[A-Za-z][A-Za-z0-9.-]*:([a-z0-9]([-a-z0-9]*[a-z0-9])?/)?([A-Za-z0-9._-]|%[0-9A-F]{2})+$',
         maxLength: 400,
       },
+      ComponentNames: {
+        type: 'object',
+        description:
+          '组件键 → 可读名称（领域包 ComponentType.display_name 求出，ADR 0101）。只用于显示；没有名称的组件不在其中，显示组件键',
+        propertyNames: { $ref: '#/$defs/ComponentKey' },
+        additionalProperties: { type: 'string', minLength: 1, maxLength: 200 },
+      },
       EntityRef: {
         title: 'EntityRef',
         description: '一个 Kubernetes 对象或领域包组件实例。uid 在实体解析成功时填写',
@@ -3318,6 +3325,10 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
       topology_version: { type: 'integer', minimum: 0, description: '本版本使用的拓扑事件 seq' },
       created_at: { $ref: 'common.schema.json#/$defs/Timestamp' },
       updated_at: { $ref: 'common.schema.json#/$defs/Timestamp' },
+      component_names: {
+        $ref: 'common.schema.json#/$defs/ComponentNames',
+        description: '根因、候选与成员组件的可读名称；读取时由中心附上，事件流与旧版本的事件没有这个字段',
+      },
     },
     $defs: {
       IncidentLabel: {

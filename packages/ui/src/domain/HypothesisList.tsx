@@ -10,6 +10,7 @@ import { Status, StatusPill } from '../primitives/Status';
 import { evidenceAnchor } from './EvidenceCard';
 import { componentLabel } from './model';
 import styles from './HypothesisList.module.css';
+import { useComponentNames } from './names';
 
 function RefChips({ refs, label }: { refs: readonly string[]; label: string }) {
   if (!refs.length) {
@@ -58,7 +59,8 @@ function Node({
   leader: string | null;
 }) {
   const { t } = useI18n();
-  const root = componentLabel(h.root_component);
+  const names = useComponentNames();
+  const root = componentLabel(h.root_component, names);
   const own = checks(h.id);
   const kids = byParent(h.id);
   return (
@@ -107,6 +109,7 @@ const CONSISTENCY_KEYS = [
 
 export function HypothesisList({ output }: { output: ResearchOutput | null }) {
   const { t } = useI18n();
+  const names = useComponentNames();
   if (!output) {
     return (
       <EmptyState kind="not_applicable" title={t('hypothesis.empty_title')} because={t('hypothesis.empty_because')} />
@@ -121,7 +124,7 @@ export function HypothesisList({ output }: { output: ResearchOutput | null }) {
         <div className={styles.conclusionHead}>
           <Status domain="conclusion" value={output.conclusion.level} />
           {output.conclusion.root_component && (
-            <span>{t('hypothesis.root', { root: componentLabel(output.conclusion.root_component).name })}</span>
+            <span>{t('hypothesis.root', { root: componentLabel(output.conclusion.root_component, names).name })}</span>
           )}
         </div>
         <ul className={styles.consistency}>

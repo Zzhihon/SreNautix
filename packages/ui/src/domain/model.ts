@@ -66,10 +66,18 @@ export function displayComponent(key: string): string {
   }
 }
 
-/** 列表里的短名："worker（StatefulSet · prod-app）"由调用方拼接，这里给出 name 与副标题。 */
-export function componentLabel(key: string): { name: string; sub: string } {
+/**
+ * 列表里的短名："worker（StatefulSet · prod-app）"由调用方拼接，这里给出 name 与副标题。
+ * 有领域包求出的可读名称时（ADR 0101）name 为名称，副标题带上对象名，例如"智元 API"与"provider · 01a1…"。
+ */
+export function componentLabel(
+  key: string,
+  names?: Readonly<Record<string, string | undefined>> | null,
+): { name: string; sub: string } {
   const p = parseComponent(key);
-  return { name: p.name, sub: p.namespace ? `${p.kind} · ${p.namespace}` : p.kind };
+  const sub = p.namespace ? `${p.kind} · ${p.namespace}` : p.kind;
+  const named = names?.[key];
+  return named ? { name: named, sub: `${sub} · ${p.name}` } : { name: p.name, sub };
 }
 
 export type DisplayState = EvidenceResult['display_state'];

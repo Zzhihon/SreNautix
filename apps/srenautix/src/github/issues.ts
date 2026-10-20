@@ -1,6 +1,7 @@
 import type { EvidenceResult, Incident, StageAReport } from '@srenautix/contract';
 import type pg from 'pg';
-import { displayKey } from '@srenautix/core';
+import { displayComponentName, displayKey } from '@srenautix/core';
+import { componentNames } from '../incident/names.js';
 import { logger } from '../log.js';
 import type { ServerMetrics } from '../metrics.js';
 import { appendAudit } from '../store/audit.js';
@@ -39,6 +40,11 @@ export interface IssueRef {
 
 export const MAX_ATTEMPTS = 8;
 const backoffMs = (attempts: number) => Math.min(30_000 * 2 ** Math.max(0, attempts - 1), 30 * 60_000);
+/** 事件标签以根因组件键开头时，把键换成可读名称（标签本身不变，只用于显示） */
+export function labelWithName(label: string, key: string, name: string): string {
+  return label.startsWith(`${key}:`) ? `${name}${label.slice(key.length)}` : label;
+}
+
 const incidentMarker = (id: string) => `<!-- srenautix:incident=${id} -->`;
 const commentMarker = (key: string) => `<!-- srenautix:comment=${key} -->`;
 
@@ -349,9 +355,14 @@ export class IssueService {
       [incidentId],
     );
     const research = run.rows[0] ?? null;
-    const root = incident.root.component ? displayKey(incident.root.component) : null;
+    // 组件的可读名称（ADR 0101）：标题用名称，正文写"名称（组件键）"
+    const rootKey = incident.root.component;
+    const names = await componentNames(c, incident.cluster_id, [rootKey]);
+    const rootName = rootKey ? (names[rootKey] ?? null) : null;
+    const root = rootKey ? displayComponentName(rootKey, names) : null;
+    const label = rootKey && rootName ? labelWithName(incident.label, rootKey, rootName) : incident.label;
     const prefix = this.s.titlePrefix ? `${this.s.titlePrefix} ` : '';
-    const title = `${prefix}${t.title(incident.label, root)}`.slice(0, 250);
+    const title = `${prefix}${t.title(label, rootKey ? (rootName ?? displayKey(rootKey)) : null)}`.slice(0, 250);
     const link = `${this.s.consoleUrl.replace(/\/+$/, '')}/incidents/${incident.incident_id}`;
     const lines: string[] = [
       incidentMarker(incidentId),

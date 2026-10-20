@@ -5,6 +5,7 @@ import type { FeedbackService } from '../proposals/feedback.js';
 import type { ProposalService } from '../proposals/service.js';
 import { composeMessage, laneOf, type ResearchMirror } from './compose.js';
 import type { DesiredIncidentMessage, MessageSource } from './ports.js';
+import { withComponentNames } from '../incident/names.js';
 
 export interface SourceSettings {
   prefix: string;
@@ -63,7 +64,9 @@ export class PgMessageSource implements MessageSource {
     const runMap = new Map(runs.rows.map((x) => [x.incident_id, x]));
     const queueMap = new Map(queue.rows.map((x) => [x.incident_id, x]));
     const out: DesiredIncidentMessage[] = [];
-    for (const { body: inc, report } of r.rows) {
+    for (const { body: raw, report } of r.rows) {
+      // 组件的可读名称（ADR 0101）：标题与正文优先显示名称
+      const inc = await withComponentNames(this.pool, raw);
       const ps = (propMap.get(inc.incident_id) ?? []).map((x) => x.body);
       const q = queueMap.get(inc.incident_id);
       const run = runMap.get(inc.incident_id) ?? null;

@@ -10,6 +10,7 @@ import { SelectField, TextField } from '../primitives/form';
 import { Status } from '../primitives/Status';
 import { componentLabel, type FeedbackState } from './model';
 import styles from './FeedbackControl.module.css';
+import { useComponentNames } from './names';
 
 type Axis = 'unset' | 'confirmed' | 'rejected';
 
@@ -80,6 +81,7 @@ export function FeedbackControl({
   firing: boolean;
 }) {
   const { t } = useI18n();
+  const names = useComponentNames();
   const { caps } = useUiEnv();
   const create = useCreateFeedback(incidentRef);
   const [editing, setEditing] = useState(false);
@@ -163,7 +165,7 @@ export function FeedbackControl({
       )}
       <AxisRow
         label={t('feedback.axis_root')}
-        shown={rootComponent ? componentLabel(rootComponent).name : t('feedback.no_root')}
+        shown={rootComponent ? componentLabel(rootComponent, names).name : t('feedback.no_root')}
         value={root}
         onChange={setRoot}
         disabled={create.isPending}
@@ -181,7 +183,7 @@ export function FeedbackControl({
           options={[
             ...components
               .filter((c) => c !== rootComponent)
-              .map((c) => ({ value: c, label: `${componentLabel(c).name}（${componentLabel(c).sub}）` })),
+              .map((c) => ({ value: c, label: `${componentLabel(c, names).name}（${componentLabel(c, names).sub}）` })),
             { value: UNKNOWN, label: t('feedback.unknown_root') },
           ]}
           required

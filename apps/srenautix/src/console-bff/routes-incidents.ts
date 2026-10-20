@@ -6,6 +6,7 @@ import type pg from 'pg';
 import { badRequest, notFound } from '../api/errors.js';
 import type { Auth } from '../identity/auth.js';
 import { scopeMatches, type RoleBinding, type Target } from '../identity/bindings.js';
+import { withComponentNames } from '../incident/names.js';
 import { incidentVersion, latestStageA, resolveIncidentRef, type IncidentRow } from '../incident/read.js';
 import { alertsById } from '../ingest/store.js';
 import type { FeedbackService } from '../proposals/feedback.js';
@@ -89,6 +90,12 @@ async function summaries(pool: pg.Pool, feedback: FeedbackService, rows: Inciden
     [ids],
   );
   const fbs = await feedback.latest(pool, ids);
+  const names = await pool.query<{ cluster_id: string; component: string; display_name: string }>(
+    `SELECT n.cluster_id, n.component, n.display_name FROM server.component_names n
+      JOIN unnest($1::text[], $2::text[]) AS w(cluster_id, component) USING (cluster_id, component)`,
+    [rows.map((r) => r.cluster_id), rows.map((r) => r.root_component ?? '')],
+  );
+  const nm = new Map(names.rows.map((x) => [`${x.cluster_id}\0${x.component}`, x.display_name]));
   const st = new Map(stage.rows.map((x) => [x.incident_id, x]));
   const rr = new Map(runs.rows.map((x) => [x.incident_id, x]));
   const pc = new Map(pending.rows.map((x) => [x.incident_id, x.n]));
@@ -121,6 +128,9 @@ async function summaries(pool: pg.Pool, feedback: FeedbackService, rows: Inciden
       suppressed: r.suppressed,
       observability_blind: r.observability_blind,
       updated_at: r.updated_at.toISOString(),
+      component_names: ((name) => (name && r.root_component ? { [r.root_component]: name } : {}))(
+        nm.get(`${r.cluster_id}\0${r.root_component ?? ''}`),
+      ),
     };
   });
 }
@@ -245,9 +255,9 @@ export function registerIncidentRoutes(app: FastifyInstance, d: IncidentRouteDep
       if (!body) {
         throw notFound(`事件没有版本 ${v}`);
       }
-      return body;
+      return withComponentNames(d.pool, body);
     }
-    return row.body;
+    return withComponentNames(d.pool, row.body);
   });
 
   app.get('/v1/incidents/:ref/stage-a', async (req) => {

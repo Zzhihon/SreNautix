@@ -1671,6 +1671,10 @@ export type components = {
      * @description 拓扑节点的键：命名空间内的对象为 <kind>:<namespace>/<名称段>，集群级对象为 <kind>:<名称段>。kind 是 Kubernetes 的 Kind（如 Pod、Node，其他 API 组写作 Kind.group）或领域包声明的组件类型（如 postgres.cluster）；namespace 是 DNS 标签。名称段由对象名编码得到（ADR 0034）：名称的 UTF-8 字节中 A–Z a–z 0–9 '-' '.' '_' 原样保留，其余每个字节写成 '%' 加两位大写十六进制，例如 RBAC 对象 system:node 写作 ClusterRole:system%3Anode；DNS 名称编码后不变。解析时只接受这种规范编码。命名空间伪组件写作 Namespace:<namespace>。黄金向量见 contract/testvectors/component-keys.json
      */
     ComponentKey: string;
+    /** @description 组件键 → 可读名称（领域包 ComponentType.display_name 求出，ADR 0101）。只用于显示；没有名称的组件不在其中，显示组件键 */
+    ComponentNames: {
+      [key: string]: string;
+    };
     /** ResearchConclusion */
     Conclusion: {
       consistency: components['schemas']['ConsistencyChecks'];
@@ -2432,6 +2436,8 @@ export type components = {
       /** @description 首次触发前 30 分钟到结束之间、触及事件组件的变更 */
       changes: components['schemas']['ChangeEvent'][];
       cluster_id: components['schemas']['ClusterId'];
+      /** @description 根因、候选与成员组件的可读名称；读取时由中心附上，事件流与旧版本的事件没有这个字段 */
+      component_names?: components['schemas']['ComponentNames'];
       /** @description 成员告警涉及的组件，根因在前 */
       components: components['schemas']['ComponentKey'][];
       created_at: components['schemas']['Timestamp'];
@@ -2552,6 +2558,8 @@ export type components = {
     IncidentSummary: {
       ambiguous: boolean;
       cluster_id: components['schemas']['ClusterId'];
+      /** @description 根因组件的可读名称（ADR 0101）；没有名称时为空对象 */
+      component_names: components['schemas']['ComponentNames'];
       conclusion_level: null | components['schemas']['ConclusionLevel'];
       /** @description 最近一次研判的处置判断；只有阶段 A 时取阶段 A 的 */
       disposition: null | components['schemas']['Disposition'];

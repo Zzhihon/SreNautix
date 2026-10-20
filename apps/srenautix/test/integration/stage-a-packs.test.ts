@@ -72,6 +72,16 @@ function fixtures(): FixtureMetricSeries[] {
     oom('api-7d9c8b6f5-x2x7k'),
     // 抓取间隔 30 秒
     { labels: { __name__: 'up', job: 'kubelet', instance: 'worker-1' }, points: range(from, T, MIN / 2, () => 1) },
+    // _example 的 example.web 从 Deployment 的 app.kubernetes.io/display-name 标签取可读名称（ADR 0101）
+    {
+      labels: {
+        __name__: 'kube_deployment_labels',
+        namespace: 'shop',
+        deployment: 'api',
+        label_app_kubernetes_io_display_name: '商城 API',
+      },
+      points: range(from, T, MIN, () => 1),
+    },
   ];
 }
 
@@ -217,6 +227,8 @@ describe('阶段 A 的领域包证据链', () => {
     expect(run.chains).toEqual(['_example/pod-memory']);
     expect(run.runbooks).toEqual(['_example/container-memory.md']);
     expect(run.rootComponentType).toBeNull();
+    // Pod 没有声明 display_name 的组件类型：不求名称
+    expect(run.names).toEqual({});
     expect(rules.excluded(inc, alerts, run)).toBeNull();
 
     const hits = rules.evaluate(inc, alerts, run);
@@ -236,6 +248,8 @@ describe('阶段 A 的领域包证据链', () => {
     const inc = incident({ kind: 'Deployment', namespace: 'shop', name: 'api' });
     const run = await evidence.run(inc, [], AbortSignal.timeout(30_000));
     expect(run.rootComponentType).toBe('example.web');
+    // 可读名称：没有告警注解时取 Deployment 标签上的名称；组件键不变
+    expect(run.names).toEqual({ 'Deployment:shop/api': '商城 API' });
     // oom-logs 只适用于 Pod
     expect(run.cards.map((c) => [c.card_id, c.verdict, c.reason.kind])).toEqual([
       ['_example/pod-memory/limit-ratio', 'normal', 'all_clear'],

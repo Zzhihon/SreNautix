@@ -10,6 +10,11 @@ export interface EvidenceRun {
   runbooks: string[];
   /** 根因组件匹配到的组件类型（components.yaml）；没有根因或没有匹配时为 null。 */
   rootComponentType: string | null;
+  /**
+   * 组件的可读名称（契约 2.10.0 的 ComponentType.display_name，ADR 0101）：组件键 → 名称。只用于显示，
+   * 求不出名称的组件不在其中；求值失败不影响证据卡。
+   */
+  names?: Record<string, string>;
 }
 
 /**

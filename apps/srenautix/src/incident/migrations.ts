@@ -148,5 +148,20 @@ CREATE TABLE server.suppressions (
 ALTER TABLE server.incidents ADD COLUMN fingerprint_state jsonb;
 `,
     },
+    {
+      version: 3,
+      name: 'component display names',
+      phase: 'expand',
+      sql: `
+-- 组件的可读名称（ADR 0101）：阶段 A 按领域包的 display_name 来源求出，只用于显示，组件键不变
+CREATE TABLE server.component_names (
+  cluster_id text NOT NULL,
+  component text NOT NULL,
+  display_name text NOT NULL,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (cluster_id, component)
+);
+`,
+    },
   ],
 };

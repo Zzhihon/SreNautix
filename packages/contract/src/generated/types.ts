@@ -373,6 +373,7 @@ export interface SrenautixContractIndex {
   Severity?: Severity;
   AlertRole?: AlertRole;
   ComponentKey?: ComponentKey;
+  CommonComponentNames?: CommonComponentNames;
   EntityRef?: EntityRef;
   TimeWindow?: TimeWindow;
   Disposition?: Disposition;
@@ -1648,6 +1649,12 @@ export interface EntityRef {
   name: string;
   uid: string | null;
 }
+/**
+ * 组件键 → 可读名称（领域包 ComponentType.display_name 求出，ADR 0101）。只用于显示；没有名称的组件不在其中，显示组件键
+ */
+export interface CommonComponentNames {
+  [k: string]: string | undefined;
+}
 export interface Error {
   /**
    * 机器可读的错误码
@@ -2150,6 +2157,7 @@ export interface Incident {
   topology_version: number;
   created_at: Timestamp;
   updated_at: Timestamp;
+  component_names?: CommonComponentNames1;
 }
 export interface IncidentRoot {
   /**
@@ -2217,6 +2225,12 @@ export interface IncidentAlias {
   from_label: IncidentLabel;
   at_version: number;
   merged_at: Timestamp;
+}
+/**
+ * 组件键 → 可读名称（领域包 ComponentType.display_name 求出，ADR 0101）。只用于显示；没有名称的组件不在其中，显示组件键
+ */
+export interface CommonComponentNames1 {
+  [k: string]: string | undefined;
 }
 /**
  * 阶段 A 的确定性报告（DESIGN §7.1）：不调用模型，不经过 worker。事件创建或版本变化后立即生成

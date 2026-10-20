@@ -21,7 +21,8 @@ import { ConditionStrip } from './ConditionStrip';
 import { EvidenceCard } from './EvidenceCard';
 import { FeedbackControl } from './FeedbackControl';
 import { HypothesisList } from './HypothesisList';
-import { sortEvidence } from './model';
+import { componentLabel, sortEvidence } from './model';
+import { ComponentNamesProvider } from './names';
 import { RunTrace, waterfall } from './RunTrace';
 import { TimelineLane } from './TimelineLane';
 import { VerdictHeader } from './VerdictHeader';
@@ -351,6 +352,25 @@ describe('结论头', () => {
     expect(screen.getByText('模型研判中：提出假设')).toBeTruthy();
     expect(screen.getByText('合并自 1')).toBeTruthy();
     expect(screen.getByRole('list', { name: '影响这个判定的条件' }).textContent).toContain('Loki 超时');
+  });
+});
+
+describe('组件的可读名称', () => {
+  it('有名称时显示名称，副标题带对象名；组件键不变；没有名称时显示对象名', () => {
+    expect(componentLabel('postgres.cluster:db/pg-main', { 'postgres.cluster:db/pg-main': '订单主库' })).toEqual({
+      name: '订单主库',
+      sub: 'postgres.cluster · db · pg-main',
+    });
+    expect(componentLabel('postgres.cluster:db/pg-main', {})).toEqual({
+      name: 'pg-main',
+      sub: 'postgres.cluster · db',
+    });
+    renderUi(
+      <ComponentNamesProvider names={{ 'postgres.cluster:db/pg-main': '订单主库' }}>
+        <HypothesisList output={researchOutput()} />
+      </ComponentNamesProvider>,
+    );
+    expect(screen.getAllByText(/订单主库/).length).toBeGreaterThan(0);
   });
 });
 

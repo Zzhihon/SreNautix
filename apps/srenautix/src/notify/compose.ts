@@ -12,7 +12,7 @@ import type {
   StageAReport,
 } from '@srenautix/contract';
 import type { ButtonTarget, DesiredIncidentMessage } from './ports.js';
-import { displayKey } from '@srenautix/core';
+import { displayComponentName, displayKey } from '@srenautix/core';
 
 type Lang = 'zh' | 'en';
 
@@ -239,6 +239,8 @@ function undoable(p: Proposal): boolean {
 export function composeMessage(i: ComposeInput): { message: NotifyMessage; targets: ButtonTarget[] } {
   const t = T[i.language];
   const inc = i.incident;
+  // 组件的可读名称（ADR 0101）："名称（组件键）"；没有名称时为组件键
+  const named = (k: string) => displayComponentName(k, inc.component_names);
   const out = i.research?.state === 'completed' ? i.research.output : null;
   const members = inc.members.filter((m) => m.left_version === null);
   const alertsById = new Map(i.alerts.map((a) => [a.alert_id, a]));
@@ -288,18 +290,18 @@ export function composeMessage(i: ComposeInput): { message: NotifyMessage; targe
 
   const root: NotifyBlock[] = [];
   if (inc.root.component) {
-    root.push(text(t.root(displayKey(inc.root.component), inc.root.ambiguous, inc.root.margin)));
+    root.push(text(t.root(named(inc.root.component), inc.root.ambiguous, inc.root.margin)));
   }
   if (inc.root.silent_root) {
     root.push(text(t.silent));
   }
-  inc.candidates.slice(0, 3).forEach((c, k) => root.push(item(t.candidate(k + 1, displayKey(c.component), c.score))));
+  inc.candidates.slice(0, 3).forEach((c, k) => root.push(item(t.candidate(k + 1, named(c.component), c.score))));
   if (out) {
     root.push(
       text(
         t.conclusion(
           t.level[out.conclusion.level] ?? out.conclusion.level,
-          out.conclusion.root_component ? displayKey(out.conclusion.root_component) : null,
+          out.conclusion.root_component ? named(out.conclusion.root_component) : null,
         ),
       ),
     );
@@ -427,7 +429,7 @@ export function composeMessage(i: ComposeInput): { message: NotifyMessage; targe
       prefix: i.prefix,
       severity: inc.severity,
       title:
-        `${t.title(inc.root.component ? displayKey(inc.root.component) : null, members.length)} · ${t.state[inc.state] ?? inc.state}`.slice(
+        `${t.title(inc.root.component ? (inc.component_names?.[inc.root.component] ?? displayKey(inc.root.component)) : null, members.length)} · ${t.state[inc.state] ?? inc.state}`.slice(
           0,
           200,
         ),

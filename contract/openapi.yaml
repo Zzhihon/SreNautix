@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: SreNautix hub API
-  version: 2.10.0
+  version: 2.11.0
   license:
     name: Apache-2.0
     identifier: Apache-2.0
@@ -2049,6 +2049,7 @@ components:
         - suppressed
         - observability_blind
         - updated_at
+        - component_names
       properties:
         incident_id: { $ref: './schemas/common.schema.json#/$defs/Uuid' }
         cluster_id: { $ref: './schemas/common.schema.json#/$defs/ClusterId' }
@@ -2080,6 +2081,9 @@ components:
         suppressed: { type: boolean }
         observability_blind: { type: boolean }
         updated_at: { $ref: './schemas/common.schema.json#/$defs/Timestamp' }
+        component_names:
+          description: 根因组件的可读名称（ADR 0101）；没有名称时为空对象
+          $ref: './schemas/common.schema.json#/$defs/ComponentNames'
     ResearchState:
       type: string
       description: |

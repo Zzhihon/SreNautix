@@ -11,6 +11,7 @@ import { EmptyState } from '../primitives/EmptyState';
 import { Loading } from '../primitives/basic';
 import { componentLabel, displayComponent } from './model';
 import styles from './Subgraph.module.css';
+import { useComponentNames } from './names';
 
 type SubNode = IncidentSubgraph['nodes'][number];
 type SubData = { n: SubNode; roleText: string; alertsText: string };
@@ -26,7 +27,8 @@ function loadElk(): Promise<ElkApi> {
 }
 
 function ComponentNode({ data }: NodeProps<Node<SubData>>) {
-  const l = componentLabel(data.n.component);
+  const names = useComponentNames();
+  const l = componentLabel(data.n.component, names);
   return (
     <div className={styles.node} data-role={data.n.role}>
       <Handle type="target" position={Position.Left} className={styles.handle} />

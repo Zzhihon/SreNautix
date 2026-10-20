@@ -9,6 +9,7 @@ import {
   DEFAULT_WINDOW,
   type EvidenceDataSource,
   type Locale,
+  resolveDisplayName,
   type RuleContext,
   type SignalResolution,
 } from '@srenautix/packs-sdk';
@@ -44,6 +45,10 @@ const LOOKBACK_MS = 24 * 3600_000;
 
 function entityKey(e: EntityRef): string {
   return `${e.cluster_id}|${e.kind}|${e.namespace ?? ''}|${e.name}`;
+}
+
+function strings(l: Labels | undefined): Record<string, string> {
+  return Object.fromEntries(Object.entries(l ?? {}).filter((e): e is [string, string] => typeof e[1] === 'string'));
 }
 
 function entityOf(clusterId: string, key: string): EntityRef {
@@ -121,6 +126,17 @@ export class PackEvidence implements EvidenceRunner {
       matchTypeByName(e.kind, e.namespace, e.name, types)?.id ??
       null;
 
+    // 要求可读名称的组件：键 → 组件类型、实体与它所在告警的标签、注解（第一个出现的告警）
+    const named = new Map<string, { type: string; entity: EntityRef; alert: Alert | null }>();
+    const wantName = (key: string, type: string | null, entity: EntityRef, alert: Alert | null) => {
+      if (type && this.hasDisplayName(type)) {
+        const cur = named.get(key);
+        if (!cur || (!cur.alert && alert)) {
+          named.set(key, { type, entity, alert });
+        }
+      }
+    };
+
     let rootComponentType: string | null = null;
     const roots = [inc.root.component, ...(inc.root.ambiguous ? [inc.candidates[1]?.component ?? null] : [])];
     for (const [i, key] of roots.entries()) {
@@ -132,6 +148,7 @@ export class PackEvidence implements EvidenceRunner {
       if (i === 0) {
         rootComponentType = t;
       }
+      wantName(key, t, entity, null);
       if (t) {
         add(this.rt.typeChains(t), entity);
       }
@@ -145,9 +162,13 @@ export class PackEvidence implements EvidenceRunner {
       if (t) {
         add(this.rt.typeChains(t), a.entity);
       }
+      if (own) {
+        wantName(own, t, a.entity, a);
+      }
       if (a.component && a.component !== own) {
         const ce = entityOf(inc.cluster_id, a.component);
         const ct = await typeOf(a.component, ce);
+        wantName(a.component, ct, ce, a);
         if (ct) {
           add(this.rt.typeChains(ct), a.entity);
           add(this.rt.typeChains(ct), ce);
@@ -159,12 +180,67 @@ export class PackEvidence implements EvidenceRunner {
     }
 
     const cards = await this.execute(plan, Date.parse(inc.first_firing_at), now, signal);
+    const names = await this.names(named, Math.min(Date.parse(inc.first_firing_at), now), signal);
     return {
       cards: cards.map((c, i) => ({ ...c, ref: `card:${i + 1}` })),
       chains: chainsRun,
       runbooks: this.runbooks(chainsRun),
       rootComponentType,
+      names,
     };
+  }
+
+  private hasDisplayName(type: string): boolean {
+    return this.rt.componentTypes().some((t) => t.id === type && (t.display_name?.length ?? 0) > 0);
+  }
+
+  /**
+   * 组件的可读名称（ADR 0101）：在事件锚点按组件类型声明的来源求值（packs-sdk 的 resolveDisplayName）。
+   * 名称只用于显示：数据源错误由运行时吞掉，其他异常记日志后跳过这个组件，不影响证据卡与阶段 A。
+   */
+  private async names(
+    named: Map<string, { type: string; entity: EntityRef; alert: Alert | null }>,
+    at: number,
+    signal: AbortSignal,
+  ): Promise<Record<string, string>> {
+    const out: Record<string, string> = {};
+    if (!named.size || signal.aborted) {
+      return out;
+    }
+    let ds: EvidenceDataSource;
+    try {
+      ds = await this.source.dataSource(at);
+    } catch (e) {
+      logger.warn('组件名称：数据源不可用，跳过', { error: e });
+      return out;
+    }
+    await pool([...named.entries()], this.o.concurrency, signal, async ([key, n]) => {
+      try {
+        const v = await resolveDisplayName(
+          this.rt.set,
+          n.type,
+          {
+            entity: {
+              cluster_id: n.entity.cluster_id,
+              kind: n.entity.kind,
+              namespace: n.entity.namespace,
+              name: n.entity.name,
+              node: n.entity.kind === 'Node' ? n.entity.name : null,
+            },
+            labels: strings(n.alert?.labels),
+            annotations: strings(n.alert?.annotations),
+          },
+          ds,
+          at,
+        );
+        if (v) {
+          out[key] = v.slice(0, 200);
+        }
+      } catch (e) {
+        logger.warn('组件名称求值失败，显示组件键', { component: key, type: n.type, error: e });
+      }
+    });
+    return out;
   }
 
   async rerun(inc: Incident, cards: EvidenceResult[], windowTo: Date, signal: AbortSignal): Promise<EvidenceResult[]> {

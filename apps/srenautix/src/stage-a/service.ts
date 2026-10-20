@@ -88,6 +88,14 @@ export class StageAService {
           report.rendered_at,
         ],
       );
+      // 组件的可读名称（ADR 0101）：只更新求出了名称的组件，求不出时保留上一次的名称
+      for (const [component, name] of Object.entries(run.names ?? {})) {
+        await c.query(
+          `INSERT INTO server.component_names (cluster_id, component, display_name, updated_at) VALUES ($1, $2, $3, now())
+           ON CONFLICT (cluster_id, component) DO UPDATE SET display_name = excluded.display_name, updated_at = now()`,
+          [inc.cluster_id, component, name],
+        );
+      }
     });
     // 规则提议绑定到刚写入的报告（事件版本、根因、证据指纹）
     const ids: string[] = [];
