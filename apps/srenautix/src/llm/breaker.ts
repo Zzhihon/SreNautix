@@ -1,13 +1,15 @@
-// 模型路由的两种熔断器（DESIGN §8.1），所有研判共用：
-// - 失败型：60 秒内失败 5 次打开；打开后每 30 秒放行一次探测，探测成功关闭，失败继续打开；
-// - 延迟型：最近的调用延迟 p50 超过单次超时的一半时打开，同样每 30 秒放行一次探测。
+// 模型路由的两种熔断器（DESIGN §8.1、ADR 0098），所有研判共用：
+// - 失败型：60 秒内失败 5 次打开（网络、首 token 或空闲超时、408/429/5xx）；打开后每 30 秒放行一次探测，
+//   探测成功关闭，失败继续打开；
+// - 延迟型：只看成功调用的首 token 延迟，最近样本的 p50 超过路由首 token 超时的一半时打开，同样每 30 秒探测一次。
+//   总耗时随输出长度增长，输出多但一直在流的调用是"慢但成功"，不进入延迟样本；失败只计入失败型。
 
 export interface BreakerOptions {
   failureWindowMs: number;
   failureThreshold: number;
   probeIntervalMs: number;
-  /** 单次调用超时；延迟型熔断的阈值是它的一半 */
-  callTimeoutMs: number;
+  /** 延迟型熔断的阈值：成功调用的首 token 延迟 p50 超过它时打开（路由首 token 超时的一半） */
+  latencyThresholdMs: number;
   /** 计算 p50 的样本数与有效期 */
   latencySamples: number;
   latencyMaxAgeMs: number;
@@ -19,7 +21,7 @@ export const DEFAULT_BREAKER: BreakerOptions = {
   failureWindowMs: 60_000,
   failureThreshold: 5,
   probeIntervalMs: 30_000,
-  callTimeoutMs: 90_000,
+  latencyThresholdMs: 60_000,
   latencySamples: 20,
   latencyMaxAgeMs: 10 * 60_000,
   latencyMinSamples: 5,
@@ -71,12 +73,15 @@ export class RouteBreaker {
     return { allowed: false, probe: false, reason: this.openedBy === 'failure' ? 'failure_open' : 'latency_open' };
   }
 
-  /** 调用成功（拿到了服务方响应）；latencyMs 进入延迟样本 */
-  success(now: number, latencyMs: number, probe: boolean): void {
-    this.pushLatency(now, latencyMs);
+  /** 调用成功（拿到了完整响应）；firstTokenMs 进入延迟样本，没有输出增量时为 null */
+  success(now: number, firstTokenMs: number | null, probe: boolean): void {
+    if (firstTokenMs !== null) {
+      this.pushLatency(now, firstTokenMs);
+    }
     if (probe) {
       this.probeInFlight = false;
-      if (this.openedBy === 'failure' || (this.openedBy === 'latency' && latencyMs <= this.opts.callTimeoutMs / 2)) {
+      const fast = firstTokenMs === null || firstTokenMs <= this.opts.latencyThresholdMs;
+      if (this.openedBy === 'failure' || (this.openedBy === 'latency' && fast)) {
         this.close();
         return;
       }
@@ -84,9 +89,8 @@ export class RouteBreaker {
     this.evaluateLatency(now);
   }
 
-  /** 计入失败型熔断的失败（网络、超时、408/429/5xx） */
-  failure(now: number, latencyMs: number, probe: boolean): void {
-    this.pushLatency(now, latencyMs);
+  /** 计入失败型熔断的失败（网络、首 token 或空闲超时、408/429/5xx）；不进入延迟样本 */
+  failure(now: number, probe: boolean): void {
     if (probe) {
       this.probeInFlight = false;
       this.openedBy ??= 'failure';
@@ -96,9 +100,7 @@ export class RouteBreaker {
     this.failures.push(now);
     if (this.failures.length >= this.opts.failureThreshold) {
       this.open('failure', now);
-      return;
     }
-    this.evaluateLatency(now);
   }
 
   /** 与熔断无关的结束（例如请求本身被服务方拒绝、调用方中止）：释放探测名额 */
@@ -108,7 +110,7 @@ export class RouteBreaker {
     }
   }
 
-  /** 当前样本的 p50（毫秒）；样本不足时为 null */
+  /** 成功调用首 token 延迟的 p50（毫秒）；样本不足时为 null */
   p50(now: number): number | null {
     const recent = this.latencies.filter((l) => now - l.at <= this.opts.latencyMaxAgeMs).map((l) => l.ms);
     if (recent.length < this.opts.latencyMinSamples) {
@@ -128,7 +130,7 @@ export class RouteBreaker {
 
   private evaluateLatency(now: number): void {
     const p = this.p50(now);
-    if (p !== null && p > this.opts.callTimeoutMs / 2 && !this.openedBy) {
+    if (p !== null && p > this.opts.latencyThresholdMs && !this.openedBy) {
       this.open('latency', now);
     }
   }

@@ -14,6 +14,7 @@ import { declaredProfile } from '../llm/dialect.js';
 import { applyProbe, probeRoute } from '../llm/probe.js';
 import { partitionRoutes } from '../llm/routes.js';
 import { ModelLayer } from '../llm/session.js';
+import { shortCallTimeoutMs } from '../llm/timeouts.js';
 import { LlmError } from '../llm/types.js';
 import type { RoleArgs } from '../main.js';
 import { startMetricsServer } from '../metrics.js';
@@ -91,9 +92,9 @@ export async function buildWorker(o: BuildWorkerOptions): Promise<WorkerHandle> 
       route: r.route,
       apiKey: r.apiKey,
       state: states.get(r.route.id) ?? { profile: null, calibration: null, fingerprint: null },
+      timeouts: r.timeouts,
     })),
     egress,
-    c.callTimeoutMs,
   );
   for (const d of disabled) {
     metrics.routeDisabled.set({ route: d.id, reason: d.reason }, 1);
@@ -112,8 +113,8 @@ export async function buildWorker(o: BuildWorkerOptions): Promise<WorkerHandle> 
           rt.route,
           declaredProfile(rt.route.dialect_profile),
           rt.client,
-          c.callTimeoutMs,
-          AbortSignal.timeout(5 * c.callTimeoutMs),
+          shortCallTimeoutMs(rt.timeouts),
+          AbortSignal.timeout(5 * shortCallTimeoutMs(rt.timeouts)),
         );
         rt.profile = applyProbe(declaredProfile(rt.route.dialect_profile), report);
         await store.saveProbe(rt.route.id, rt.profile, report);
@@ -134,7 +135,6 @@ export async function buildWorker(o: BuildWorkerOptions): Promise<WorkerHandle> 
     budget: c.budget,
     metrics,
     language: c.raw.language,
-    callTimeoutMs: c.callTimeoutMs,
     onCalibration: (cal) => store.saveCalibration(cal),
     onDrift: (d) => store.saveFingerprint(d.routeId, d.to),
   });

@@ -11,6 +11,16 @@ export interface Segment {
   text: string;
   categories: readonly EgressCategory[];
   egress: 'allow' | 'redact';
+  /** 超出路由窗口或预算时如何裁剪这一段（ADR 0099）；没有时不裁剪 */
+  trim?: SegmentTrim;
+}
+
+/** 片段的裁剪方式：按 rank 从小到大逐步裁剪，每一步换成 next() 给出的更短片段，null 表示整段去掉 */
+export interface SegmentTrim {
+  rank: number;
+  /** 写进运行详情的说明，例如"参考案例 3 条" */
+  label: string;
+  next(): Segment | null;
 }
 
 export type Item =

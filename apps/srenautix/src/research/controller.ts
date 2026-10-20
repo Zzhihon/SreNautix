@@ -219,6 +219,8 @@ export async function runStageB(input: ResearchRunInput, env: ResearchEnv, sink:
     );
   };
   let hyp = await hypothesize();
+  // 第一轮 hypothesize 实际用掉的输入，作为再提一轮与结论各需多少输入的估计（ADR 0099）
+  const roundInput = budgetLedger.input;
   if (!hyp.ok) {
     const f = failure(hyp);
     return finish({
@@ -333,6 +335,14 @@ export async function runStageB(input: ResearchRunInput, env: ResearchEnv, sink:
     }
     if (env.now() > deadline - env.limits.concludeReserveMs) {
       stopReason = 'deadline';
+      break;
+    }
+    // 研判剩余预算不够再提一轮假设并留出结论所需时直接结论，不让结论因超限失败
+    if (budgetLedger.remaining() < 2 * roundInput) {
+      notes.push(
+        `研判剩余输入预算 ${budgetLedger.remaining()} token，不够再提出一轮假设（约 ${roundInput} token）并留出结论所需，直接结论`,
+      );
+      stopReason = 'budget';
       break;
     }
     // 下一轮：带着账本重新提出假设与检查

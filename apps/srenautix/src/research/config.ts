@@ -5,6 +5,7 @@ import { z } from 'zod';
 import type { ModelRoute } from '@srenautix/contract';
 import { readSecretFile } from '../config/files.js';
 import { DEFAULT_BUDGET, type BudgetConfig } from '../llm/budget.js';
+import { resolveTimeouts, type ModelClass, type RouteTimeouts } from '../llm/timeouts.js';
 import type { McpServerConfig } from '../tools/mcp.js';
 import { DEFAULT_LIMITS, type ResearchLimits } from './controller.js';
 
@@ -22,8 +23,7 @@ import { DEFAULT_LIMITS, type ResearchLimits } from './controller.js';
 //     allow_cross_border: false
 //     honeytokens_file: /etc/srenautix/secrets/honeytokens
 //     probe_on_start: true
-//     call_timeout: 90s
-//     routes: [ … 与 eval 配置相同 … ]
+//     routes: [ … 与 eval 配置相同 … ]      # 每条路由可选 model_class 与 timeouts: { first_token, idle, total }（ADR 0098）
 //   budget: { daily_tokens: 15000000, daily_warn_ratio: 0.8, on_exhausted: critical_only, per_research_input_tokens: 150000 }
 //   research: { deadline: 8m, max_steps: 3, checks_per_step: 3, tool_calls: 12 }
 //   mcp: [ … 只读 MCP 服务器与工具白名单 … ]
@@ -55,6 +55,11 @@ const route = z
     tier: z.enum(['small', 'large']),
     retention_terms: z.string(),
     api_key_file: z.string(),
+    model_class: z.enum(['hosted_large', 'hosted_small', 'local']).optional(),
+    timeouts: z
+      .object({ first_token: duration.optional(), idle: duration.optional(), total: duration.optional() })
+      .strict()
+      .optional(),
   })
   .strict();
 
@@ -105,7 +110,8 @@ export const workerConfigSchema = z
         allow_cross_border: z.boolean().default(false),
         honeytokens_file: z.string().optional(),
         probe_on_start: z.boolean().default(true),
-        call_timeout: duration.default('90s'),
+        // 旧配置：只作为没有声明 timeouts.total 的路由的总时长上限；首 token 与空闲超时按模型类别（ADR 0098）
+        call_timeout: duration.optional(),
         routes: z.array(route).min(1),
       })
       .strict(),
@@ -152,23 +158,34 @@ export type WorkerConfigRaw = z.infer<typeof workerConfigSchema>;
 
 export interface WorkerConfig {
   raw: WorkerConfigRaw;
-  routes: Array<{ route: ModelRoute; apiKey: string }>;
+  routes: Array<{ route: ModelRoute; apiKey: string; timeouts: { modelClass: ModelClass; timeouts: RouteTimeouts } }>;
   hubToken: string;
   inboundTokenSha256: string[];
   honeytokens: string[];
   mcp: McpServerConfig[];
   budget: BudgetConfig;
   limits: ResearchLimits;
-  callTimeoutMs: number;
   claimWaitS: number;
 }
 
 export function resolveWorkerConfig(raw: WorkerConfigRaw): WorkerConfig {
   return {
     raw,
-    routes: raw.llm.routes.map(({ api_key_file, ...r }) => ({
+    routes: raw.llm.routes.map(({ api_key_file, model_class, timeouts, ...r }) => ({
       route: r,
       apiKey: readSecretFile(`路由 ${r.id} 的 api_key_file`, api_key_file),
+      timeouts: resolveTimeouts(
+        r,
+        {
+          model_class,
+          timeouts: {
+            first_token: timeouts?.first_token === undefined ? undefined : ms(timeouts.first_token),
+            idle: timeouts?.idle === undefined ? undefined : ms(timeouts.idle),
+            total: timeouts?.total === undefined ? undefined : ms(timeouts.total),
+          },
+        },
+        raw.llm.call_timeout === undefined ? null : ms(raw.llm.call_timeout),
+      ),
     })),
     hubToken: readSecretFile('hub.token_file', raw.hub.token_file),
     inboundTokenSha256: readSecretFile('inbound.token_sha256_file', raw.inbound.token_sha256_file)
@@ -207,7 +224,6 @@ export function resolveWorkerConfig(raw: WorkerConfigRaw): WorkerConfig {
       checksPerStep: raw.research.checks_per_step,
       toolCalls: raw.research.tool_calls,
     },
-    callTimeoutMs: ms(raw.llm.call_timeout),
     claimWaitS: Math.round(ms(raw.research.claim_wait) / 1000),
   };
 }

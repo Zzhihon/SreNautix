@@ -36,17 +36,17 @@ describe('失败型熔断', () => {
     const b = new RouteBreaker('r', DEFAULT_BREAKER);
     let t = 1_000_000;
     for (let i = 0; i < 4; i++) {
-      b.failure((t += 1000), 100, false);
+      b.failure((t += 1000), false);
     }
     expect(b.state(t)).toBe('closed');
-    b.failure((t += 1000), 100, false);
+    b.failure((t += 1000), false);
     expect(b.admit(t).allowed).toBe(false);
     expect(b.consumeOpened()).toBe(true);
     expect(b.admit(t + 29_000).allowed).toBe(false);
     const probe = b.admit(t + 30_000);
     expect(probe).toMatchObject({ allowed: true, probe: true });
     expect(b.admit(t + 30_001).allowed).toBe(false);
-    b.failure(t + 31_000, 100, true);
+    b.failure(t + 31_000, true);
     expect(b.admit(t + 40_000).allowed).toBe(false);
     const p2 = b.admit(t + 61_000);
     expect(p2.probe).toBe(true);
@@ -57,24 +57,48 @@ describe('失败型熔断', () => {
   it('窗口外的失败不累计', () => {
     const b = new RouteBreaker('r', DEFAULT_BREAKER);
     for (let i = 0; i < 10; i++) {
-      b.failure(i * 20_000, 100, false);
+      b.failure(i * 20_000, false);
     }
     expect(b.state(200_000)).toBe('closed');
   });
 });
 
 describe('延迟型熔断', () => {
-  it('p50 超过单次超时的一半时打开', () => {
-    const b = new RouteBreaker('r', { ...DEFAULT_BREAKER, callTimeoutMs: 90_000 });
+  it('成功调用的首 token 延迟 p50 超过阈值时打开；探测的首 token 回到阈值以内时关闭', () => {
+    const b = new RouteBreaker('r', { ...DEFAULT_BREAKER, latencyThresholdMs: 60_000 });
     for (let i = 0; i < 4; i++) {
-      b.success(i, 50_000, false);
+      b.success(i, 70_000, false);
     }
     expect(b.state(10)).toBe('closed');
-    b.success(5, 50_000, false);
+    b.success(5, 70_000, false);
     expect(b.openReason).toBe('latency');
     const p = b.admit(30_005);
     b.success(30_006, 10_000, p.probe);
     expect(b.state(30_007)).toBe('closed');
+  });
+
+  it('慢但成功（首 token 快、输出长、总耗时 100 秒）不打开延迟型熔断', () => {
+    const b = new RouteBreaker('r', { ...DEFAULT_BREAKER, latencyThresholdMs: 60_000 });
+    // 首 token 6 秒，总耗时 100 秒：只有首 token 进入延迟样本
+    for (let i = 0; i < 20; i++) {
+      b.success(i * 1000, 6_000, false);
+    }
+    expect(b.state(30_000)).toBe('closed');
+    expect(b.p50(30_000)).toBe(6_000);
+  });
+
+  it('失败（超时）只计入失败型，不进入延迟样本', () => {
+    const b = new RouteBreaker('r', { ...DEFAULT_BREAKER, latencyThresholdMs: 60_000 });
+    for (let i = 0; i < 5; i++) {
+      b.success(i, 5_000, false);
+    }
+    for (let i = 0; i < 4; i++) {
+      b.failure(100 + i, false);
+    }
+    expect(b.openReason).toBeNull();
+    expect(b.p50(200)).toBe(5_000);
+    b.failure(200, false);
+    expect(b.openReason).toBe('failure');
   });
 });
 

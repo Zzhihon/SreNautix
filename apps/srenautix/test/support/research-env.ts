@@ -3,6 +3,7 @@ import { DEFAULT_BUDGET } from '../../src/llm/budget.js';
 import { Egress } from '../../src/llm/egress.js';
 import { buildRuntimes } from '../../src/llm/routes.js';
 import { ModelLayer, type LlmCallRecord } from '../../src/llm/session.js';
+import { resolveTimeouts, type RouteTimeouts } from '../../src/llm/timeouts.js';
 import { DEFAULT_LIMITS, type ResearchEnv, type ResearchState, type RunSink } from '../../src/research/controller.js';
 import { WorkerMetrics } from '../../src/research/metrics.js';
 import type { ToolCallRecord, Tool } from '../../src/tools/box.js';
@@ -26,12 +27,19 @@ export function testRoute(baseUrl: string, over: Partial<ModelRoute> = {}): Mode
   };
 }
 
-export function testLayer(routes: ModelRoute[], callTimeoutMs = 90_000): ModelLayer {
+export function testLayer(routes: ModelRoute[], timeouts?: Partial<RouteTimeouts>): ModelLayer {
   const egress = new Egress({ allowCrossBorder: false, honeytokens: ['srx-honey-7f3a9c1e5b2d4f60'] }, () => undefined);
   const runtimes = buildRuntimes(
-    routes.map((r) => ({ route: r, apiKey: 'local', state: { profile: null, calibration: null, fingerprint: null } })),
+    routes.map((r) => {
+      const t = resolveTimeouts(r, {});
+      return {
+        route: r,
+        apiKey: 'local',
+        state: { profile: null, calibration: null, fingerprint: null },
+        timeouts: { ...t, timeouts: { ...t.timeouts, ...timeouts } },
+      };
+    }),
     egress,
-    callTimeoutMs,
   );
   // 本地小模型的上下文为 16k：评测用的路由按服务端实际配置设置
   for (const rt of runtimes) {
@@ -51,7 +59,6 @@ export function testLayer(routes: ModelRoute[], callTimeoutMs = 90_000): ModelLa
     },
     metrics: new WorkerMetrics('worker', false),
     language: 'zh',
-    callTimeoutMs,
     onCalibration: async () => undefined,
     onDrift: async () => undefined,
   });

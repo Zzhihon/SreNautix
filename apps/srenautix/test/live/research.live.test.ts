@@ -45,7 +45,7 @@ describe('真实模型上的阶段 B', () => {
         previous: null,
         signal: new AbortController().signal,
       },
-      testEnv(testLayer([testRoute(proxy.baseUrl)], 300_000), tools.tools, false),
+      testEnv(testLayer([testRoute(proxy.baseUrl)], { firstTokenMs: 300_000, idleMs: 120_000 }), tools.tools, false),
       sink,
     );
     await tools.close();

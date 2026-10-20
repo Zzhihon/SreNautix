@@ -158,6 +158,24 @@ export class ResearchLedger {
     return null;
   }
 
+  /** 一次调用可用的输入：阶段单次上限与研判剩余预算中的较小者（裁剪的目标，ADR 0099） */
+  allowance(phase: LlmPhase): number {
+    return Math.min(this.cfg.stages[phase].inputTokens, this.remaining());
+  }
+
+  /** 研判剩余的输入预算 */
+  remaining(): number {
+    return Math.max(0, this.cfg.perResearchInputTokens - this.input);
+  }
+
+  /** 只检查研判合计上限；裁剪到底仍超过阶段单次上限的请求按研判剩余预算放行（ADR 0099） */
+  checkResearch(estimatedInput: number): string | null {
+    if (this.input + estimatedInput > this.cfg.perResearchInputTokens) {
+      return `本次研判已用输入 ${this.input} token，再发送约 ${estimatedInput} token 会超过上限 ${this.cfg.perResearchInputTokens}`;
+    }
+    return null;
+  }
+
   record(u: TurnUsage, cost: number): void {
     this.input += u.input;
     this.output += u.output;

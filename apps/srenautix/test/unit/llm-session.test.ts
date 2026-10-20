@@ -5,7 +5,8 @@ import { declaredProfile } from '../../src/llm/dialect.js';
 import { Egress, EgressBlocked } from '../../src/llm/egress.js';
 import { buildRuntimes, partitionRoutes } from '../../src/llm/routes.js';
 import { ModelLayer, type LlmCallRecord } from '../../src/llm/session.js';
-import type { LlmRequest } from '../../src/llm/types.js';
+import { resolveTimeouts, type RouteTimeouts } from '../../src/llm/timeouts.js';
+import type { LlmRequest, Segment } from '../../src/llm/types.js';
 import { WorkerMetrics } from '../../src/research/metrics.js';
 import { fixture, ReplayServer } from '../support/llm-fixtures.js';
 
@@ -68,16 +69,22 @@ afterEach(async () => {
 
 function layer(
   routes: ModelRoute[],
-  opts: { budget?: BudgetConfig; callTimeoutMs?: number; allowCrossBorder?: boolean } = {},
+  opts: { budget?: BudgetConfig; timeouts?: Partial<RouteTimeouts>; allowCrossBorder?: boolean } = {},
 ) {
   const egress = new Egress({ allowCrossBorder: opts.allowCrossBorder ?? false, honeytokens: [HONEYTOKEN] }, (r) =>
     halted.push(r),
   );
-  const timeout = opts.callTimeoutMs ?? 90_000;
   const runtimes = buildRuntimes(
-    routes.map((r) => ({ route: r, apiKey: 'local', state: { profile: null, calibration: null, fingerprint: null } })),
+    routes.map((r) => {
+      const t = resolveTimeouts(r, {});
+      return {
+        route: r,
+        apiKey: 'local',
+        state: { profile: null, calibration: null, fingerprint: null },
+        timeouts: { ...t, timeouts: { ...t.timeouts, ...opts.timeouts } },
+      };
+    }),
     egress,
-    timeout,
   );
   return new ModelLayer({
     routes: runtimes,
@@ -85,7 +92,6 @@ function layer(
     budget: opts.budget ?? DEFAULT_BUDGET,
     metrics: new WorkerMetrics('worker', false),
     language: 'en',
-    callTimeoutMs: timeout,
     onCalibration: async () => undefined,
     onDrift: async () => undefined,
   });
@@ -155,12 +161,62 @@ describe('结构化调用', () => {
     expect(records.map((x) => x.outcome)).toEqual(['retried', 'failed']);
   });
 
-  it('单次调用超时计入失败型熔断', async () => {
+  it('首 token 超时计入失败型熔断', async () => {
     a.enqueue('hang');
-    const l = layer([route('a', a.baseUrl)], { callTimeoutMs: 300 });
+    const l = layer([route('a', a.baseUrl)], { timeouts: { firstTokenMs: 300 } });
     const r = await session(l).structured('conclude', base('x'), OUTPUT);
     expect(r).toMatchObject({ ok: false, reason: 'model_unavailable' });
     expect(records[0]).toMatchObject({ errorKind: 'llm_timeout', outcome: 'failed' });
+    expect(records[0]?.note).toMatch(/首 token超过/);
+  });
+
+  it('流开始后停住：空闲超时，记为超时失败', async () => {
+    a.enqueue({ fixture: fixture(P, 'chat-json-schema'), stallAfter: 3 });
+    const l = layer([route('a', a.baseUrl)], { timeouts: { firstTokenMs: 5_000, idleMs: 300 } });
+    const r = await session(l).structured('conclude', base('x'), OUTPUT);
+    expect(r).toMatchObject({ ok: false, reason: 'model_unavailable' });
+    expect(records[0]).toMatchObject({ errorKind: 'llm_timeout', outcome: 'failed' });
+    expect(records[0]?.note).toMatch(/流空闲超过/);
+  });
+
+  it('慢但一直在输出的调用不受总时长限制：总耗时超过首 token 与空闲超时之和照样成功，也不打开延迟型熔断', async () => {
+    // 每个流事件间隔 20 毫秒，事件数上百，总耗时远超 300 + 200 毫秒
+    a.enqueue({ fixture: fixture(P, 'chat-json-schema'), paceMs: 20 });
+    const l = layer([route('a', a.baseUrl)], { timeouts: { firstTokenMs: 300, idleMs: 200 } });
+    const started = Date.now();
+    const r = await session(l).structured('conclude', base('x'), OUTPUT);
+    expect(r).toMatchObject({ ok: true, step: 'validate' });
+    expect(Date.now() - started).toBeGreaterThan(500);
+    expect(records[0]).toMatchObject({ outcome: 'succeeded', usage: { input_tokens: 62, output_tokens: 1249 } });
+    const rt = l.route('a');
+    expect(rt.breaker.openReason).toBeNull();
+    expect(rt.breaker.p50(Date.now())).toBeNull();
+  });
+
+  it('路由声明的总时长仍然生效', async () => {
+    a.enqueue({ fixture: fixture(P, 'chat-json-schema'), paceMs: 20 });
+    const l = layer([route('a', a.baseUrl)], { timeouts: { firstTokenMs: 300, idleMs: 200, totalMs: 400 } });
+    const r = await session(l).structured('conclude', base('x'), OUTPUT);
+    expect(r).toMatchObject({ ok: false, reason: 'model_unavailable' });
+    expect(records[0]?.note).toMatch(/总时长超过/);
+  });
+
+  it('请求以流式发出：Responses 与 Chat 都带 stream，Chat 要求 usage', async () => {
+    a.enqueue(fixture(P, 'chat-json-schema'));
+    await session(layer([route('a', a.baseUrl)])).structured('conclude', base('x'), OUTPUT);
+    expect(JSON.parse(a.received[0]?.body as string)).toMatchObject({
+      stream: true,
+      stream_options: { include_usage: true },
+    });
+    b.enqueue(fixture(P, 'responses-json-schema'));
+    await session(layer([route('b', b.baseUrl, { api: 'responses' })])).structured('conclude', base('x'), OUTPUT);
+    const sent = JSON.parse(b.received[0]?.body as string) as Record<string, unknown>;
+    expect(sent.stream).toBe(true);
+    expect(sent.stream_options).toBeUndefined();
+    // 录制的 llama.cpp 输出本身不符合 schema（rootCause）：流被完整拼回，进入修复阶梯而不是超时或网络错误
+    expect(records[1]).toMatchObject({ outcome: 'retried', errorKind: 'llm_output_invalid' });
+    expect(records[1]?.response).toContain('rootCause');
+    expect(records[1]?.usage.output_tokens).toBeGreaterThan(0);
   });
 
   it('连接被拒绝 5 次后熔断，之后的调用不再发出', async () => {
@@ -247,7 +303,7 @@ describe('出站控制', () => {
     routes.map((r) => ({ route: r, apiKey: 'local', state: { profile: null, calibration: null, fingerprint: null } }));
   const partitioned = (routes: ModelRoute[]) => {
     const egress = strict();
-    const { runtimes, disabled } = partitionRoutes(inputs(routes), egress, 90_000);
+    const { runtimes, disabled } = partitionRoutes(inputs(routes), egress);
     const l = new ModelLayer({
       routes: runtimes,
       disabled,
@@ -297,7 +353,7 @@ describe('出站控制', () => {
     const egress = strict();
     const overseas = route('a', a.baseUrl, { in_domain: false });
     expect(() => egress.client(overseas, 'local', 90_000)).toThrow(EgressBlocked);
-    expect(() => buildRuntimes(inputs([overseas, route('b', b.baseUrl)]), egress, 90_000)).toThrow(EgressBlocked);
+    expect(() => buildRuntimes(inputs([overseas, route('b', b.baseUrl)]), egress)).toThrow(EgressBlocked);
     // 构造后路由变为境外（例如配置对象被改动）：请求在出站模块里被拦下，不到达服务端
     const changed = route('c', a.baseUrl);
     const client = egress.client(changed, 'local', 90_000);
@@ -317,14 +373,64 @@ describe('出站控制', () => {
 });
 
 describe('预算与期限', () => {
-  it('阶段单次上限截停，不发出请求', async () => {
-    const tiny: BudgetConfig = {
-      ...DEFAULT_BUDGET,
-      stages: { ...DEFAULT_BUDGET.stages, conclude: { inputTokens: 10, outputTokens: 100 } },
-    };
+  it('研判合计上限截停，不发出请求', async () => {
+    const tiny: BudgetConfig = { ...DEFAULT_BUDGET, perResearchInputTokens: 10 };
     const r = await session(layer([route('a', a.baseUrl)], { budget: tiny })).structured('conclude', base('x'), OUTPUT);
     expect(r).toMatchObject({ ok: false, reason: 'budget' });
     expect(a.received).toHaveLength(0);
+  });
+
+  it('阶段单次上限是裁剪目标：没有可裁剪的内容时按研判剩余预算照常发送', async () => {
+    a.enqueue(fixture(P, 'chat-json-schema'));
+    const tiny: BudgetConfig = {
+      ...DEFAULT_BUDGET,
+      stages: { ...DEFAULT_BUDGET.stages, conclude: { inputTokens: 10, outputTokens: 4096 } },
+    };
+    const r = await session(layer([route('a', a.baseUrl)], { budget: tiny })).structured('conclude', base('x'), OUTPUT);
+    expect(r).toMatchObject({ ok: true });
+    expect(a.received).toHaveLength(1);
+  });
+
+  it('超出窗口与预算时按裁剪顺序裁掉低优先级片段，写进调用记录与说明', async () => {
+    a.enqueue(fixture(P, 'chat-json-schema'));
+    const big = 'x'.repeat(40_000);
+    const seg = (text: string, rank: number, label: string): Segment => ({
+      text,
+      categories: ['knowledge'],
+      egress: 'allow',
+      trim: { rank, label, next: () => null },
+    });
+    // 参考案例先裁，其次知识；证据卡保留
+    const req: Omit<LlmRequest, 'output'> = {
+      items: [
+        { type: 'system', segments: [{ text: 'You are an SRE assistant.', categories: [], egress: 'allow' }] },
+        {
+          type: 'user',
+          segments: [
+            { text: 'CARDS card:1 api errors', categories: ['metrics'], egress: 'allow' },
+            seg(`KNOWLEDGE ${big}`, 2, '知识条目 1 条'),
+            seg(`CASES ${big}`, 1, '参考案例 1 条'),
+          ],
+        },
+      ],
+      maxOutputTokens: 4096,
+    };
+    const budget: BudgetConfig = {
+      ...DEFAULT_BUDGET,
+      stages: { ...DEFAULT_BUDGET.stages, conclude: { inputTokens: 25_000, outputTokens: 4096 } },
+    };
+    const r = await session(layer([route('a', a.baseUrl, { dialect_profile: 'deepseek' })], { budget })).structured(
+      'conclude',
+      req,
+      OUTPUT,
+    );
+    expect(r).toMatchObject({ ok: true });
+    const sent = a.received[0]?.body as string;
+    expect(sent).toContain('CARDS card:1');
+    expect(sent).toContain('KNOWLEDGE');
+    expect(sent).not.toContain('CASES');
+    expect(records[0]?.note).toMatch(/裁掉了：参考案例 1 条/);
+    expect(r.ok && r.notes[0]).toMatch(/参考案例 1 条/);
   });
 
   it('剩余时间不足时不再调用', async () => {

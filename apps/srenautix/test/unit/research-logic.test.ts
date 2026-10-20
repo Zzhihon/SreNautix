@@ -328,7 +328,6 @@ describe('指纹门控', () => {
           },
         ],
         egress,
-        1000,
       ),
       egress,
       budget: DEFAULT_BUDGET,

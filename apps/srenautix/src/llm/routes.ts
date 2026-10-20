@@ -5,6 +5,7 @@ import { declaredProfile } from './dialect.js';
 import { EgressBlocked, type Egress } from './egress.js';
 import { FingerprintTracker } from './fingerprint.js';
 import type { RouteRuntime } from './session.js';
+import { resolveTimeouts, type ModelClass, type RouteTimeouts } from './timeouts.js';
 
 /** 持久化的路由状态：探测得到的方言档案、估算校准、已知的服务方指纹 */
 export interface RouteState {
@@ -17,6 +18,8 @@ export interface RouteInput {
   route: ModelRoute;
   apiKey: string;
   state: RouteState;
+  /** 生效的超时与模型类别（配置解析时得出）；省略时按模型类别默认值（ADR 0098） */
+  timeouts?: { modelClass: ModelClass; timeouts: RouteTimeouts };
 }
 
 /** 校验路由组合：id 唯一；至少有一条路由属于大模型档 */
@@ -47,15 +50,16 @@ export interface DisabledRoute {
 export function partitionRoutes(
   inputs: readonly RouteInput[],
   egress: Egress,
-  callTimeoutMs: number,
 ): { runtimes: RouteRuntime[]; disabled: DisabledRoute[] } {
   checkRoutes(inputs.map((i) => i.route));
   const runtimes: RouteRuntime[] = [];
   const disabled: DisabledRoute[] = [];
   for (const i of inputs) {
+    const t = i.timeouts ?? resolveTimeouts(i.route, {});
     let client: RouteRuntime['client'];
     try {
-      client = egress.client(i.route, i.apiKey, callTimeoutMs);
+      // SDK 的 timeout 只覆盖到收到响应头为止；流式调用的首 token 与空闲超时由 stream.ts 计时
+      client = egress.client(i.route, i.apiKey, t.timeouts.firstTokenMs);
     } catch (e) {
       if (e instanceof EgressBlocked) {
         disabled.push({ id: i.route.id, reason: e.reason, message: e.message });
@@ -67,7 +71,9 @@ export function partitionRoutes(
       route: i.route,
       profile: i.state.profile ?? declaredProfile(i.route.dialect_profile),
       client,
-      breaker: new RouteBreaker(i.route.id, { ...DEFAULT_BREAKER, callTimeoutMs }),
+      timeouts: t.timeouts,
+      modelClass: t.modelClass,
+      breaker: new RouteBreaker(i.route.id, { ...DEFAULT_BREAKER, latencyThresholdMs: t.timeouts.firstTokenMs / 2 }),
       calibration: i.state.calibration ?? newCalibration(i.route.id),
       fingerprint: new FingerprintTracker(i.route.id, i.state.fingerprint),
     });
@@ -76,8 +82,8 @@ export function partitionRoutes(
 }
 
 /** 全部路由都必须可用（评测与测试）：有路由被出站策略禁用时抛出 */
-export function buildRuntimes(inputs: readonly RouteInput[], egress: Egress, callTimeoutMs: number): RouteRuntime[] {
-  const { runtimes, disabled } = partitionRoutes(inputs, egress, callTimeoutMs);
+export function buildRuntimes(inputs: readonly RouteInput[], egress: Egress): RouteRuntime[] {
+  const { runtimes, disabled } = partitionRoutes(inputs, egress);
   const first = disabled[0];
   if (first) {
     throw new EgressBlocked(first.reason, first.message);

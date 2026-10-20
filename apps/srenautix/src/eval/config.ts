@@ -4,6 +4,7 @@ import { z } from 'zod';
 import type { ModelRoute } from '@srenautix/contract';
 import { readSecretFile } from '../config/files.js';
 import { DEFAULT_BUDGET, type BudgetConfig } from '../llm/budget.js';
+import { resolveTimeouts, type ModelClass, type RouteTimeouts } from '../llm/timeouts.js';
 import type { McpServerConfig } from '../tools/mcp.js';
 
 // 评测配置（srenautix eval 的 --config / --compare 参数）：模型路由、出站策略与 reconstructed 模式的只读 MCP 服务器。
@@ -23,6 +24,8 @@ import type { McpServerConfig } from '../tools/mcp.js';
 //       tier: large
 //       retention_terms: "…"
 //       api_key_file: /etc/srenautix/secrets/llm/key     # 或 api_key_env: LLM_API_KEY
+//       model_class: hosted_large                        # 可省略：按 tier 与方言档案推断（ADR 0098）
+//       timeouts: { first_token_seconds: 120, idle_seconds: 30 }   # 可省略：按模型类别的默认值
 //   mcp: []
 
 const route = z
@@ -47,6 +50,15 @@ const route = z
     api_key_env: z.string().optional(),
     api_key_file: z.string().optional(),
     context_tokens: z.number().int().min(1024).optional(),
+    model_class: z.enum(['hosted_large', 'hosted_small', 'local']).optional(),
+    timeouts: z
+      .object({
+        first_token_seconds: z.number().int().min(1).max(1800).optional(),
+        idle_seconds: z.number().int().min(1).max(600).optional(),
+        total_seconds: z.number().int().min(5).max(3600).optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict()
   .refine(
@@ -93,6 +105,7 @@ const schema = z
     budget: z
       .object({
         per_research_input_tokens: z.number().int().min(1000).optional(),
+        // 旧配置：只作为没有声明 timeouts.total_seconds 的路由的总时长上限（ADR 0098）
         call_timeout_seconds: z.number().int().min(5).max(600).optional(),
       })
       .strict()
@@ -104,6 +117,7 @@ export interface EvalRouteConfig {
   route: ModelRoute;
   apiKey: string;
   contextTokens: number | null;
+  timeouts: { modelClass: ModelClass; timeouts: RouteTimeouts };
 }
 
 export interface EvalConfig {
@@ -113,13 +127,12 @@ export interface EvalConfig {
   routes: EvalRouteConfig[];
   mcp: McpServerConfig[];
   budget: BudgetConfig;
-  callTimeoutMs: number;
 }
 
 export function loadEvalConfig(path: string, env: Record<string, string | undefined> = process.env): EvalConfig {
   const raw = schema.parse(parse(readFileSync(path, 'utf8')));
   const routes = raw.routes.map((r): EvalRouteConfig => {
-    const { api_key_env, api_key_file, context_tokens, ...rest } = r;
+    const { api_key_env, api_key_file, context_tokens, model_class, timeouts, ...rest } = r;
     let apiKey: string;
     if (api_key_env !== undefined) {
       const v = env[api_key_env];
@@ -130,7 +143,24 @@ export function loadEvalConfig(path: string, env: Record<string, string | undefi
     } else {
       apiKey = readSecretFile(`路由 ${r.id} 的 api_key_file`, api_key_file as string);
     }
-    return { route: rest, apiKey, contextTokens: context_tokens ?? null };
+    const sec = (v: number | undefined) => (v === undefined ? undefined : v * 1000);
+    return {
+      route: rest,
+      apiKey,
+      contextTokens: context_tokens ?? null,
+      timeouts: resolveTimeouts(
+        rest,
+        {
+          model_class,
+          timeouts: {
+            first_token: sec(timeouts?.first_token_seconds),
+            idle: sec(timeouts?.idle_seconds),
+            total: sec(timeouts?.total_seconds),
+          },
+        },
+        raw.budget.call_timeout_seconds === undefined ? null : raw.budget.call_timeout_seconds * 1000,
+      ),
+    };
   });
   return {
     language: raw.language,
@@ -152,6 +182,5 @@ export function loadEvalConfig(path: string, env: Record<string, string | undefi
       ...DEFAULT_BUDGET,
       perResearchInputTokens: raw.budget.per_research_input_tokens ?? DEFAULT_BUDGET.perResearchInputTokens,
     },
-    callTimeoutMs: (raw.budget.call_timeout_seconds ?? 90) * 1000,
   };
 }

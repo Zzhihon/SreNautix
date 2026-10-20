@@ -14,7 +14,22 @@ export class WorkerMetrics extends BaseMetrics {
     name: 'srenautix_llm_call_duration_seconds',
     help: '模型调用耗时',
     labelNames: ['phase', 'route'] as const,
-    buckets: [0.5, 1, 2, 5, 10, 20, 30, 45, 60, 90],
+    buckets: [0.5, 1, 2, 5, 10, 20, 30, 45, 60, 90, 120, 180, 300],
+    registers: [this.registry],
+  });
+
+  readonly llmFirstToken = new Histogram({
+    name: 'srenautix_llm_first_token_seconds',
+    help: '成功的模型调用从发出请求到第一个输出增量的时间；延迟型熔断看它的 p50',
+    labelNames: ['phase', 'route'] as const,
+    buckets: [0.5, 1, 2, 5, 10, 20, 30, 60, 90, 120, 180, 300],
+    registers: [this.registry],
+  });
+
+  readonly promptTrims = new Counter({
+    name: 'srenautix_llm_prompt_trims_total',
+    help: '为放进路由窗口与输入预算而裁剪提示词的步数，按阶段与路由',
+    labelNames: ['phase', 'route'] as const,
     registers: [this.registry],
   });
 

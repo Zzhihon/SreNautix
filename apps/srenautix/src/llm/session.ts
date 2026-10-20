@@ -1,8 +1,6 @@
 import { createHash } from 'node:crypto';
 import { APIConnectionError, APIConnectionTimeoutError, APIError, APIUserAbortError } from 'openai';
 import type OpenAI from 'openai';
-import type { ChatCompletionCreateParamsNonStreaming } from 'openai/resources/chat/completions/completions';
-import type { ResponseCreateParamsNonStreaming } from 'openai/resources/responses/responses';
 import type { DialectProfile, ModelRoute } from '@srenautix/contract';
 import { logger } from '../log.js';
 import type { WorkerMetrics } from '../research/metrics.js';
@@ -21,6 +19,8 @@ import { turnFingerprint, type Drift, type FingerprintTracker } from './fingerpr
 import { countHits, type RedactionHits } from './redact.js';
 import type { DisabledRoute } from './routes.js';
 import { reaskText, repairLocally, type RepairStep } from './repair.js';
+import { StreamTimeout, streamingParams, streamTurn } from './stream.js';
+import type { ModelClass, RouteTimeouts } from './timeouts.js';
 import {
   LlmError,
   type EgressCategory,
@@ -28,14 +28,13 @@ import {
   type LlmRequest,
   type LlmTurn,
   type OutputFormat,
+  type Segment,
 } from './types.js';
-import { fromChatCompletion, fromResponse, requestCategories, toChatParams, toResponsesParams } from './wire.js';
+import { requestCategories, toChatParams, toResponsesParams } from './wire.js';
 
 // 一次研判的模型会话（DESIGN §7.2、§8）：按阶段选模型档位、按路由优先级与熔断状态选路由、
 // 驱动修复阶梯、按 usage 记账，并产出每次调用的记录、研判清单中的路由使用与出境清单。
 
-/** 单次调用超时（DESIGN §7.2 默认 90 秒） */
-export const CALL_TIMEOUT_MS = 90_000;
 /** 剩余时间少于这个值时不再发起模型调用 */
 export const MIN_CALL_WINDOW_MS = 5_000;
 
@@ -43,6 +42,9 @@ export interface RouteRuntime {
   route: ModelRoute;
   profile: DialectProfile;
   client: OpenAI;
+  /** 流式调用的首 token、空闲与总时长超时（ADR 0098） */
+  timeouts: RouteTimeouts;
+  modelClass: ModelClass;
   breaker: RouteBreaker;
   calibration: Calibration;
   fingerprint: FingerprintTracker;
@@ -103,7 +105,6 @@ export interface ModelLayerOptions {
   budget: BudgetConfig;
   metrics: WorkerMetrics;
   language: 'zh' | 'en';
-  callTimeoutMs?: number;
   /** 路由校准系数变化后持久化 */
   onCalibration(c: Calibration): Promise<void>;
   /** 服务方指纹确认变化 */
@@ -146,6 +147,9 @@ export function classifyError(e: unknown, routeId: string, signal: AbortSignal):
   if (e instanceof LlmError || e instanceof EgressBlocked) {
     return e;
   }
+  if (e instanceof StreamTimeout) {
+    return new LlmError('llm_timeout', null, `模型调用超时：${e.message}`, routeId);
+  }
   if (e instanceof APIUserAbortError) {
     return signal.aborted ? signal.reason : e;
   }
@@ -176,11 +180,7 @@ export function classifyError(e: unknown, routeId: string, signal: AbortSignal):
 }
 
 export class ModelLayer {
-  readonly callTimeoutMs: number;
-
-  constructor(readonly opts: ModelLayerOptions) {
-    this.callTimeoutMs = opts.callTimeoutMs ?? CALL_TIMEOUT_MS;
-  }
+  constructor(readonly opts: ModelLayerOptions) {}
 
   get routes(): readonly RouteRuntime[] {
     return this.opts.routes;
@@ -231,6 +231,43 @@ type Draft = Omit<LlmCallRecord, 'outcome' | 'repairStep'>;
 interface SentCall {
   turn: LlmTurn;
   draft: Draft;
+  /** 为放进路由窗口与预算而裁掉的内容（ADR 0099），写进调用记录与研判的校验说明 */
+  trimmed: string[];
+}
+
+/** 找到 rank 最小的可裁剪片段，换成更短的片段或去掉；没有可裁剪的片段时返回 null */
+export function trimOnce(req: LlmRequest): { request: LlmRequest; label: string } | null {
+  let best: { item: number; seg: number; rank: number } | null = null;
+  req.items.forEach((it, ii) => {
+    if (it.type !== 'system' && it.type !== 'user') {
+      return;
+    }
+    it.segments.forEach((sg, si) => {
+      if (sg.trim && (best === null || sg.trim.rank < best.rank)) {
+        best = { item: ii, seg: si, rank: sg.trim.rank };
+      }
+    });
+  });
+  if (best === null) {
+    return null;
+  }
+  const { item, seg } = best as { item: number; seg: number };
+  const target = req.items[item] as Extract<LlmRequest['items'][number], { segments: Segment[] }>;
+  const old = target.segments[seg] as Segment;
+  const next = (old.trim as NonNullable<Segment['trim']>).next();
+  const segments = [...target.segments];
+  if (next) {
+    segments[seg] = next;
+  } else {
+    segments.splice(seg, 1);
+  }
+  const items = [...req.items];
+  items[item] = { ...target, segments };
+  return { request: { ...req, items }, label: (old.trim as NonNullable<Segment['trim']>).label };
+}
+
+export function trimNote(routeId: string, trimmed: readonly string[]): string {
+  return `为放进路由 ${routeId} 的上下文窗口与输入预算，提示词裁掉了：${trimmed.join('；')}`;
 }
 
 export class ModelSession {
@@ -324,13 +361,14 @@ export class ModelSession {
         if (local.ok) {
           const step: RepairStep = reasked ? 'reask' : local.step;
           metrics.repair.inc({ phase, route: id, level: step, outcome: 'ok' });
+          const notes = [...(sent.trimmed.length ? [trimNote(id, sent.trimmed)] : []), ...local.notes];
           await this.ctx.record({
             ...sent.draft,
             outcome: 'succeeded',
             repairStep: step,
-            note: local.notes.join('；') || null,
+            note: notes.join('；') || null,
           });
-          return { ok: true, value: local.value as T, routeId: id, step, notes: local.notes };
+          return { ok: true, value: local.value as T, routeId: id, step, notes };
         }
         sawInvalid = true;
         const willReask = !reasked && !local.refusal;
@@ -340,7 +378,7 @@ export class ModelSession {
           outcome: willReask ? 'retried' : last ? 'failed' : 'switched',
           repairStep: reasked ? 'reask' : local.step,
           errorKind: 'llm_output_invalid',
-          note: local.error,
+          note: [sent.draft.note, local.error].filter(Boolean).join('；'),
         });
         attempts.push(`${id}${reasked ? '（重新请求后）' : ''}：${local.error}`);
         if (!willReask) {
@@ -378,7 +416,10 @@ export class ModelSession {
     };
   }
 
-  /** 在一条路由上发一次调用；期限、上下文长度、预算、熔断在发送前检查 */
+  /**
+   * 在一条路由上发一次流式调用；期限、上下文长度、预算、熔断在发送前检查。
+   * 估算超过路由窗口或本次可用预算时，按片段的裁剪顺序逐步裁剪，直到放得下或无可再裁（ADR 0099）。
+   */
   private async send(rt: RouteRuntime, phase: LlmPhase, req: LlmRequest): Promise<SentCall> {
     const { egress, budget, metrics, language } = this.layer.opts;
     const route = rt.route;
@@ -387,17 +428,40 @@ export class ModelSession {
     if (remaining < MIN_CALL_WINDOW_MS) {
       throw new DeadlineStop(`阶段 B 剩余 ${Math.max(0, Math.round(remaining / 1000))} 秒，不再调用模型`);
     }
-    const prepared = egress.prepare(req);
     const stage = budget.stages[phase];
-    const sized: LlmRequest = {
-      ...prepared.request,
-      maxOutputTokens: Math.min(prepared.request.maxOutputTokens, stage.outputTokens),
-    };
     const wire = { model: route.model, profile: rt.profile, language };
-    const params = route.api === 'responses' ? toResponsesParams(sized, wire) : toChatParams(sized, wire);
-    const body = JSON.stringify(params);
-    const raw = rawEstimate(body, rt.profile.tokenizer);
-    const estimated = estimateTokens(rt.calibration, raw);
+    const build = (r: LlmRequest) => {
+      const prepared = egress.prepare(r);
+      const sized: LlmRequest = {
+        ...prepared.request,
+        maxOutputTokens: Math.min(prepared.request.maxOutputTokens, stage.outputTokens),
+      };
+      const params = streamingParams(
+        route.api,
+        route.api === 'responses' ? toResponsesParams(sized, wire) : toChatParams(sized, wire),
+      );
+      const body = JSON.stringify(params);
+      const raw = rawEstimate(body, rt.profile.tokenizer);
+      return { prepared, sized, params, body, raw, estimated: estimateTokens(rt.calibration, raw) };
+    };
+    let built = build(req);
+    const window = rt.profile.context_tokens - built.sized.maxOutputTokens;
+    const target = Math.min(window, this.ctx.ledger.allowance(phase));
+    const trimmed: string[] = [];
+    let current = req;
+    while (built.estimated > target) {
+      const t = trimOnce(current);
+      if (!t) {
+        break;
+      }
+      current = t.request;
+      trimmed.push(t.label);
+      built = build(current);
+    }
+    if (trimmed.length) {
+      metrics.promptTrims.inc({ phase, route: route.id }, trimmed.length);
+    }
+    const { prepared, sized, params, body, raw, estimated } = built;
     const draft: Draft = {
       runId: this.ctx.runId,
       seq: ++this.seq,
@@ -419,23 +483,24 @@ export class ModelSession {
       fingerprint: null,
       request: body,
       response: null,
-      note: null,
+      note: trimmed.length ? trimNote(route.id, trimmed) : null,
       at: new Date(started).toISOString(),
     };
-    if (estimated + sized.maxOutputTokens > rt.profile.context_tokens) {
+    if (estimated > window) {
       throw new CallFailed(
         { ...draft, errorKind: 'context' },
         new LlmError(
           'llm_budget',
           null,
-          `输入估算 ${estimated} token 加输出上限 ${sized.maxOutputTokens} 超过路由 ${route.id} 的上下文 ${rt.profile.context_tokens}`,
+          `裁剪后输入估算 ${estimated} token 加输出上限 ${sized.maxOutputTokens} 仍超过路由 ${route.id} 的上下文 ${rt.profile.context_tokens}`,
           route.id,
         ),
       );
     }
-    const over = this.ctx.ledger.check(phase, estimated);
+    // 裁剪到底仍超过阶段单次上限时，只要研判剩余预算够就照常发送，不让整次研判因超限失败
+    const over = this.ctx.ledger.checkResearch(estimated);
     if (over) {
-      metrics.budgetStops.inc({ reason: over.includes('单次上限') ? 'stage' : 'research' });
+      metrics.budgetStops.inc({ reason: 'research' });
       throw new BudgetStop(over);
     }
     const admission = rt.breaker.admit(started);
@@ -445,25 +510,20 @@ export class ModelSession {
         new LlmError('llm_breaker_open', null, `路由 ${route.id} 熔断中（${admission.reason}）`, route.id),
       );
     }
-    const timeout = Math.min(this.layer.callTimeoutMs, remaining);
+    const cap = Math.min(rt.timeouts.totalMs ?? Number.POSITIVE_INFINITY, remaining);
     let turn: LlmTurn;
+    let firstTokenMs: number | null;
     const meter = { bytes: 0 };
     try {
-      turn = await egress.track(meter, async () => {
-        const opts = { signal: this.ctx.signal, timeout };
-        return route.api === 'responses'
-          ? fromResponse(await rt.client.responses.create(params as ResponseCreateParamsNonStreaming, opts), rt.profile)
-          : fromChatCompletion(
-              await rt.client.chat.completions.create(params as ChatCompletionCreateParamsNonStreaming, opts),
-              rt.profile,
-            );
-      });
+      ({ turn, firstTokenMs } = await egress.track(meter, () =>
+        streamTurn(rt.client, route.api, params, rt.profile, rt.timeouts, cap, this.ctx.signal, route.id),
+      ));
     } catch (rawErr) {
       const e = classifyError(rawErr, route.id, this.ctx.signal);
       const ms = Date.now() - started;
       if (e instanceof LlmError) {
         if (e.countsAsFailure) {
-          rt.breaker.failure(Date.now(), ms, admission.probe);
+          rt.breaker.failure(Date.now(), admission.probe);
         } else {
           rt.breaker.neutral(admission.probe);
         }
@@ -486,7 +546,7 @@ export class ModelSession {
             httpStatus: e.httpStatus,
             durationMs: ms,
             bytes: meter.bytes,
-            note: e.message,
+            note: [draft.note, e.message].filter(Boolean).join('；'),
           },
           e,
         );
@@ -499,15 +559,19 @@ export class ModelSession {
     }
     const bytes = meter.bytes;
     const ms = Date.now() - started;
-    rt.breaker.success(Date.now(), ms, admission.probe);
+    rt.breaker.success(Date.now(), firstTokenMs, admission.probe);
     this.syncBreaker(rt);
     const cost = callCost(route.price, turn.usage);
-    this.ctx.ledger.record(turn.usage, cost);
+    // 服务方没有在流里给出 usage 时按估算记账，研判预算照样生效
+    this.ctx.ledger.record(turn.usage.input > 0 ? turn.usage : { ...turn.usage, input: estimated }, cost);
     rt.calibration = calibrate(rt.calibration, raw, turn.usage.input);
     metrics.estimateRatio.set({ route: route.id }, rt.calibration.factor);
     await this.layer.opts.onCalibration(rt.calibration);
     metrics.llmCalls.inc({ phase, route: route.id, outcome: 'succeeded', error_kind: '' });
     metrics.llmLatency.observe({ phase, route: route.id }, ms / 1000);
+    if (firstTokenMs !== null) {
+      metrics.llmFirstToken.observe({ phase, route: route.id }, firstTokenMs / 1000);
+    }
     metrics.llmTokens.inc({ route: route.id, direction: 'input' }, turn.usage.input);
     metrics.llmTokens.inc({ route: route.id, direction: 'cached_input' }, turn.usage.cachedInput);
     metrics.llmTokens.inc({ route: route.id, direction: 'output' }, turn.usage.output);
@@ -545,6 +609,7 @@ export class ModelSession {
     });
     return {
       turn,
+      trimmed,
       draft: {
         ...draft,
         durationMs: ms,

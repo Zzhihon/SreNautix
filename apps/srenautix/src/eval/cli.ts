@@ -43,9 +43,15 @@ function layers(cfg: EvalConfig, metrics: WorkerMetrics) {
   });
   return cfg.routes.map((r) => {
     const runtimes = buildRuntimes(
-      [{ route: r.route, apiKey: r.apiKey, state: { profile: null, calibration: null, fingerprint: null } }],
+      [
+        {
+          route: r.route,
+          apiKey: r.apiKey,
+          state: { profile: null, calibration: null, fingerprint: null },
+          timeouts: r.timeouts,
+        },
+      ],
       egress,
-      cfg.callTimeoutMs,
     );
     if (r.contextTokens !== null) {
       for (const rt of runtimes) {
@@ -58,7 +64,6 @@ function layers(cfg: EvalConfig, metrics: WorkerMetrics) {
       budget: cfg.budget,
       metrics,
       language: cfg.language,
-      callTimeoutMs: cfg.callTimeoutMs,
       onCalibration: async () => undefined,
       onDrift: async () => undefined,
     });

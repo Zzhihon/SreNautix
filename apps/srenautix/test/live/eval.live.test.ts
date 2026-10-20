@@ -39,7 +39,9 @@ describe('真实模型上的评测', () => {
     const out = await runEval({
       mode: 'snapshot',
       cases,
-      layers: [{ routeId: 'local', layer: testLayer([testRoute(proxy.baseUrl)], 300_000) }],
+      layers: [
+        { routeId: 'local', layer: testLayer([testRoute(proxy.baseUrl)], { firstTokenMs: 300_000, idleMs: 120_000 }) },
+      ],
       runs: 3,
       language: 'zh',
       metrics: new WorkerMetrics('worker', false),

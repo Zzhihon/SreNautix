@@ -29,7 +29,7 @@ llm:
   allow_cross_border: false          # 国内配置默认禁止 in_domain: false 的路由
   honeytokens_file: /etc/srenautix/secrets/honeytokens   # 每行一个蜜标，至少 16 个字符
   probe_on_start: true               # 启动时逐条路由探测能力
-  call_timeout: 90s
+  # call_timeout: 90s                # 旧配置，可省略：只作为没有声明 timeouts.total 的路由的总上限
   routes:
     - id: primary
       base_url: https://llm.example.com/v1
@@ -42,6 +42,8 @@ llm:
       tier: large                    # large：hypothesize、conclude；small：工具结果判定
       retention_terms: "服务方的数据保留条款"
       api_key_file: /etc/srenautix/secrets/llm/primary
+      model_class: hosted_large      # 可省略：本地方言档案（qwen-vllm、llamacpp）为 local，否则按 tier
+      timeouts: { first_token: 120s, idle: 30s }   # 可省略：按模型类别的默认值；total 默认不设（ADR 0098）
 budget:
   daily_tokens: 5000000              # 必填，没有默认值
   daily_warn_ratio: 0.8
@@ -62,6 +64,20 @@ mcp:                                 # 只读 MCP 服务器与工具白名单（
       - { name: query, instant: { at: time, format: unix }, live: false, result: prometheus }
 ```
 
+### 模型调用的超时与提示词裁剪
+
+模型调用一律流式（ADR 0098）。每条路由三项超时：`first_token`（发出请求到第一个输出增量）、`idle`（之后相邻两个流事件的最长间隔）、`total`（可选的总上限，默认不设，只受阶段 B 期限约束）。默认值按模型类别：
+
+| model_class | first_token | idle |
+|---|---|---|
+| hosted_large | 120s | 30s |
+| hosted_small | 60s | 30s |
+| local | 300s | 60s |
+
+延迟型熔断只看成功调用的首 token 延迟（p50 超过 `first_token` 的一半时打开），输出长但一直在流的调用不会让路由熔断；超时与网络错误只计入失败型熔断。
+
+提示词估算超过路由上下文或本次可用的输入预算时按顺序裁剪（ADR 0099）：无关证据卡改为只列判定、参考案例、知识、其余卡的判定列表、旧的变更、拓扑子图、卡片表格、最后才裁结论相关的证据卡；裁掉的内容写进调用记录与研判的校验说明。研判剩余预算不够再提一轮假设时直接结论，不因超限整次失败。
+
 白名单中每个工具声明时间参数的位置与结果形状。没有时间参数、只能读取当前状态的工具写 `live: true`，回放时不可用。任何参数取值为 Secret 或 ConfigMap 的调用都被拒绝；Kubernetes 对象的环境变量字面值在进入提示词前剔除。
 
 ## 接口
@@ -80,6 +96,8 @@ mcp:                                 # 只读 MCP 服务器与工具白名单（
 | 指标 | 含义 |
 |---|---|
 | `srenautix_llm_calls_total{phase,route,outcome,error_kind}`、`srenautix_llm_call_duration_seconds` | 模型调用 |
+| `srenautix_llm_first_token_seconds{phase,route}` | 成功调用的首 token 延迟（延迟型熔断看它的 p50） |
+| `srenautix_llm_prompt_trims_total{phase,route}` | 为放进窗口与预算而裁剪提示词的步数 |
 | `srenautix_llm_tokens_total{route,direction}`、`srenautix_llm_cost_total` | 按 usage 计量 |
 | `srenautix_llm_repair_total{phase,route,level,outcome}` | 修复阶梯每一级的结果 |
 | `srenautix_llm_breaker_open{route}`、`srenautix_llm_breaker_opened_total{route,reason}` | 熔断 |
