@@ -376,11 +376,11 @@ jobs:
             echo "上面的 action 没有按 40 位提交 SHA 固定" >&2
             exit 1
           fi
-      - name: 两个镜像的 Go 版本与 go.mod 的 toolchain 一致
+      - name: 镜像的 Go 版本与 go.mod 的 toolchain 一致
         if: hashFiles('go.mod') != ''
         run: |
           want=$(awk '$1 == "toolchain" {sub(/^go/, "", $2); print $2}' go.mod)
-          for f in deploy/docker/srenautix-spoke.Dockerfile deploy/docker/srenautix.Dockerfile; do
+          for f in deploy/docker/srenautix-spoke.Dockerfile deploy/docker/srenautix.Dockerfile deploy/docker/gitlocal.Dockerfile; do
             got=$(grep -oE 'golang:[0-9]+\.[0-9]+\.[0-9]+' "$f" | head -1 | cut -d: -f2)
             if [[ -z "$want" || "$want" != "$got" ]]; then
               echo "go.mod 的 toolchain（${want:-缺失}）与 $f 的 golang 镜像（${got}）不一致" >&2
@@ -403,6 +403,10 @@ jobs:
             present: hub
           - name: srenautix-spoke
             dockerfile: deploy/docker/srenautix-spoke.Dockerfile
+            present: spoke
+          # Kind 端到端的本地 Git 服务（只用于测试，不发布）
+          - name: gitlocal
+            dockerfile: deploy/docker/gitlocal.Dockerfile
             present: spoke
     runs-on: ubuntu-24.04
     timeout-minutes: 40
