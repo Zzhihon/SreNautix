@@ -25,6 +25,8 @@ export interface EvalPlan {
   /** reconstructed 模式的只读工具（只读当前状态的工具会被过滤） */
   liveTools?: Tool[];
   query: QueryRunner | null;
+  /** 按用例给出查询模板的执行方（重建模式每个用例的事件与时刻不同）；没有时用 query */
+  queryFor?: (caseId: string) => QueryRunner | null;
   /** 本次评测的 token 上限（输入 + 输出）；达到后不再开始新的运行 */
   maxTokens: number;
   signal: AbortSignal;
@@ -69,7 +71,7 @@ export async function runEval(p: EvalPlan): Promise<EvalOutcome> {
             language: p.language,
             limits: p.limits ?? DEFAULT_LIMITS,
             tools,
-            query: p.query,
+            query: p.queryFor ? p.queryFor(c.case_id) : p.query,
             replay: true,
             now: () => Date.now(),
           },
@@ -99,6 +101,7 @@ export async function runEval(p: EvalPlan): Promise<EvalOutcome> {
           ],
           durationMs: Date.now() - started,
           error: res.error ? `${res.error.kind}: ${res.error.message}` : null,
+          proposals: (out?.proposals ?? []).map((x) => ({ action_id: x.action_id, params: x.params })),
         });
         logger.info('评测运行完成', {
           case_id: c.case_id,

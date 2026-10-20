@@ -54,6 +54,7 @@ function run(caseId: string, i: number, hit: boolean, over: Partial<RunRecord> =
     fingerprints: [],
     durationMs: 1,
     error: null,
+    proposals: [],
     ...over,
   };
 }

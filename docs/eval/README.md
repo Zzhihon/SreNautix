@@ -28,6 +28,11 @@ srenautix eval --cases <目录> --config <配置> [--suite <名>] [--runs 3] [--
                [--abstain] [--max-tokens 2000000] [--out eval/reports] [--name <报告名>]
 srenautix eval --compare <当前配置> <候选配置> --cases <目录> [同上] [--waive <case_id>]...
 srenautix eval import-seed --dir <种子目录> --cases <目录> --suite <名> --cluster-id <id>
+srenautix eval label --labels <标注> --cases <目录>
+srenautix eval export --labels <标注> --cases <目录> --config <配置> [--state <状态库连接文件>] [--only <标注 id>]...
+srenautix eval reconstruct --labels <标注> --cases <目录> --config <配置> [--runs 3] [--max-tokens N]
+                           [--repo <GitOps 仓库的本地克隆>] [--discovery-only] [--only <标注 id>]... [--out] [--name]
+srenautix eval live --state <状态库连接文件> --config <配置> --since <时刻> [--until <时刻>] [--out] [--name]
 ```
 
 评测配置：
@@ -76,6 +81,44 @@ budget: { call_timeout_seconds: 90 }
 | 可靠性表 | 每个结论档位中正确的比例；`evidence_consistent` 的下界低于 85% 时标记降级 |
 
 置信区间：聚类自助法，用例为聚类，2000 次，固定种子。门禁：配对比较，基线 pass^k 通过、候选不通过的用例必须为零或逐条豁免；按用例正确率差的单侧 90% 下界不低于 −10 个百分点（n < 100）或 −5 个百分点（n ≥ 100）。
+
+## 重建评测与三个环节的度量
+
+取舍见 ADR 0110。
+
+标注文件（YAML，格式见 `apps/srenautix/src/eval/labels.ts` 文件头）每条是一次故障：故障窗口与分析时刻、属于这次故障的告警、可接受的根因组件键、处置判断、发现环节要求的成员与变更时刻、标准修复与依据。标注、重建包与成绩单含部署方集群的事实，只保存在部署方本地。
+
+评测配置增加 `reconstruct` 部分：
+
+```yaml
+reconstruct:
+  cluster_id: prod
+  metrics: { url: http://127.0.0.1:8428, dialect: metricsql }   # 只读；证据卡与查询模板也读这里
+  packs: { dirs: [/app/packs, /etc/srenautix/packs/user] }      # 与 server 加载的领域包相同
+  revision_labels: [example.io/release-id]                      # 与 server 的 changes.kubernetes 相同
+  group_within_seconds: 120
+  step_seconds: 30
+```
+
+状态库连接文件（JSON）：`{"host": …, "port": 5432, "database": …, "user": …, "password_file": …, "ssl_mode": "require"}`。会话设为只读，连接后核对。
+
+| 命令 | 输出 |
+|---|---|
+| `eval export` | `<用例目录>/bundles/<标注 id>.json.zst`：告警实例、拓扑（kube-state-metrics 历史与状态库）、变更 |
+| `eval reconstruct --discovery-only` | 发现重放的成绩单：每次故障的事件数、主事件根因与是否命中、缺少的成员、变更、检测延迟、窗口内的 unlabelled |
+| `eval reconstruct` | 另加重建的阶段 A 与研判（每条路由 k 次，成绩单与 ADR 0084 相同）、证据卡覆盖、证据卡与告警结论一致率、自愈 PR 的触发率、补丁可应用率与正确率；`<名>.phase2.json` 为这几项的原始数据 |
+| `eval live` | 影子环境一段时间内的新建事件、unlabelled 占比、检测延迟 p50/p95、有证据卡的比例、一致率、`gitops_pr` 提议、关联的 PR 与 issue |
+
+| 指标 | 定义 |
+|---|---|
+| 每次故障的事件数 | 曾经包含故障告警的事件数；一次发布事故的验收为不超过 2 个 |
+| 根因命中率 | 主事件（包含故障告警最多）在窗口结束时的根因落在标注的根因集合内的故障比例 |
+| unlabelled 占比 | 窗口内新建的事件中没有根因的比例 |
+| 检测延迟 | 首个故障告警的 pending 开始到第一个包含故障告警的事件出现；重放的精度是一步（30 秒） |
+| 证据卡覆盖 | 主事件的阶段 A 报告中卡、得出结论的卡、异常卡与根因上的异常卡的数量 |
+| 证据卡与告警结论一致率 | 触发中的成员告警，主卡（目录条目的 `primary_card`）或条目证据链在告警实体上的卡判为异常的比例；正常、无法判定、没有卡分别列出 |
+| PR 触发率 | 标注有仓库修复、结论为 likely 或 evidence_consistent 的运行中提议了 `gitops_pr` 的比例；没有仓库修复却提议的为误触发 |
+| 补丁可应用率 / 正确率 | `gitops_pr` 补丁在分析时刻 base 分支的提交上 `git apply --check` 通过的比例 / 应用后标准修复的期望全部成立的比例 |
 
 ## 防泄漏
 

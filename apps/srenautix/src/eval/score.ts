@@ -29,6 +29,8 @@ export interface RunRecord {
   fingerprints: string[];
   durationMs: number;
   error: string | null;
+  /** 研判输出的提议草稿（动作与参数），自愈 PR 的度量用 */
+  proposals: Array<{ action_id: string; params: Record<string, unknown> }>;
 }
 
 export interface Scored {
