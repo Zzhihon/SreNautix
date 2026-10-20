@@ -605,6 +605,14 @@ describe('server 端到端', () => {
       headers: { 'x-srenautix-cluster': 'c2' },
     });
     expect(wrong.status).toBe(403);
+    // 冻结期间 gateway 只拉 gitops_pr（冻结只约束集群写入，ADR 0025）：集群写入的工单留在队列中
+    const frozen = await api('GET', '/v1/spoke/tickets?wait=0&actions=gitops_pr', {
+      token: TOKENS.gateway,
+      headers: H,
+    });
+    expect((frozen.body as unknown as { tickets: unknown[] }).tickets).toEqual([]);
+    const bad = await api('GET', '/v1/spoke/tickets?wait=0&actions=Gitops-PR', { token: TOKENS.gateway, headers: H });
+    expect(bad.status).toBe(400);
     const t = await api('GET', '/v1/spoke/tickets?wait=0', { token: TOKENS.gateway, headers: H });
     const tickets = (t.body as unknown as { tickets: Array<NonNullable<typeof ticket>> }).tickets;
     expect(tickets).toHaveLength(1);

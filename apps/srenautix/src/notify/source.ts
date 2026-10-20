@@ -3,6 +3,7 @@ import type pg from 'pg';
 import { alertsById } from '../ingest/store.js';
 import type { FeedbackService } from '../proposals/feedback.js';
 import type { ProposalService } from '../proposals/service.js';
+import { pullsOf } from '../remediation/pulls.js';
 import { composeMessage, laneOf, type ResearchMirror } from './compose.js';
 import type { DesiredIncidentMessage, MessageSource } from './ports.js';
 import { withComponentNames } from '../incident/names.js';
@@ -53,6 +54,7 @@ export class PgMessageSource implements MessageSource {
       [ids],
     );
     const fbs: Map<string, Feedback> = await this.feedback.latest(this.pool, ids);
+    const pulls = await pullsOf(this.pool, ids);
     const byInc = <T extends { incident_id: string }>(rows: T[]) => {
       const m = new Map<string, T[]>();
       for (const x of rows) {
@@ -82,6 +84,7 @@ export class PgMessageSource implements MessageSource {
         researchPending: q?.state === 'queued' || q?.state === 'leased',
         stageAOnlyReason: q?.state === 'skipped' ? q.skip_reason : null,
         proposals: ps,
+        pulls,
         feedback: fbs.get(inc.incident_id) ?? null,
         prefix: this.s.prefix,
         consoleUrl: this.s.consoleUrl,

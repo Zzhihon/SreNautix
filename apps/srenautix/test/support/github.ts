@@ -11,7 +11,8 @@ import { jwtVerify } from 'jose';
  *   POST /repos/{repo}/git/refs（分支已存在时 422）、POST /repos/{repo}/pulls、GET/PATCH /repos/{repo}/pulls/{n}；
  * - issue：POST/GET /repos/{repo}/issues（列表按 labels、创建时间倒序，PR 也出现在列表中并带 pull_request）、
  *   POST/GET /repos/{repo}/issues/{n}/comments；
- * - 提交：GET /repos/{repo}/commits（sha、since、until、per_page、page）与 GET /repos/{repo}/commits/{sha}（带 files）。
+ * - 提交：GET /repos/{repo}/commits（sha 为分支或提交、path、since、until、per_page、page）与 GET /repos/{repo}/commits/{sha}（带 files）；
+ * - contents 的 ref 可以是分支或 write() 产生的提交，路径是目录时返回目录列表；GET /repos/{repo}/pulls?head=owner:branch。
  * fault() 注入失败：返回给定状态，或处理请求之后断开连接（客户端收不到响应）。
  */
 export class FakeGitHub {
@@ -29,6 +30,8 @@ export class FakeGitHub {
     string,
     Array<{ sha: string; message: string; author: string; date: string; files: string[]; parents: number }>
   >();
+  /** 提交 SHA → 该提交时的文件（write() 写入） */
+  readonly snapshots = new Map<string, Map<string, string>>();
   readonly requests: Array<{ method: string; path: string }> = [];
   private readonly faults: Array<{ method: string; path: RegExp; status: number | 'drop_after'; times: number }> = [];
   private seq = 0;
@@ -143,14 +146,29 @@ export class FakeGitHub {
       this.heads.set(ref, String(body.sha));
       return send(res, 201, { ref: `refs/heads/${ref}`, object: { sha: body.sha } });
     }
+    if (method === 'GET' && (rest === 'contents' || rest === 'contents/')) {
+      const files = this.filesAt(u.searchParams.get('ref') ?? 'main');
+      return files ? send(res, 200, dirEntries(files, '')) : send(res, 404, { message: 'No commit found for the ref' });
+    }
     if ((m = /^contents\/(.+)$/.exec(rest))) {
       const file = m[1] as string;
       if (method === 'GET') {
-        const files = this.branches.get(u.searchParams.get('ref') ?? 'main');
-        const content = files?.get(file);
-        return content === undefined
-          ? send(res, 404, { message: 'Not Found' })
-          : send(res, 200, { content: Buffer.from(content).toString('base64'), sha: sha(content), encoding: 'base64' });
+        const files = this.filesAt(u.searchParams.get('ref') ?? 'main');
+        if (!files) {
+          return send(res, 404, { message: 'No commit found for the ref' });
+        }
+        const content = files.get(file);
+        if (content !== undefined) {
+          return send(res, 200, {
+            type: 'file',
+            path: file,
+            content: Buffer.from(content).toString('base64'),
+            sha: sha(content),
+            encoding: 'base64',
+          });
+        }
+        const entries = dirEntries(files, file);
+        return entries.length ? send(res, 200, entries) : send(res, 404, { message: 'Not Found' });
       }
       if (method === 'PUT') {
         const files = this.branches.get(String(body.branch));
@@ -243,15 +261,18 @@ export class FakeGitHub {
       });
     }
     if (method === 'GET' && rest === 'commits') {
-      const all = this.commits.get(u.searchParams.get('sha') ?? 'main');
+      const all = this.commitsFrom(u.searchParams.get('sha') ?? 'main');
       if (!all) {
         return send(res, 404, { message: 'No commit found for SHA' });
       }
+      const onPath = u.searchParams.get('path');
       const since = u.searchParams.get('since');
       const until = u.searchParams.get('until');
       const inWindow = all.filter(
         (c) =>
-          (!since || Date.parse(c.date) >= Date.parse(since)) && (!until || Date.parse(c.date) <= Date.parse(until)),
+          (!since || Date.parse(c.date) >= Date.parse(since)) &&
+          (!until || Date.parse(c.date) <= Date.parse(until)) &&
+          (!onPath || c.files.includes(onPath)),
       );
       const per = Number(u.searchParams.get('per_page') ?? 30);
       const page = Number(u.searchParams.get('page') ?? 1);
@@ -287,6 +308,22 @@ export class FakeGitHub {
         parents: Array.from({ length: c.parents }, (_, i) => ({ sha: `p${i}` })),
         files: c.files.map((f) => ({ filename: f, status: 'modified', patch: `@@ -1 +1 @@\n-old\n+new` })),
       });
+    }
+    if (method === 'GET' && rest === 'pulls') {
+      const head = u.searchParams.get('head');
+      const branch = head?.includes(':') ? head.slice(head.indexOf(':') + 1) : head;
+      return send(
+        res,
+        200,
+        this.pulls
+          .filter((p) => !branch || p.head === branch)
+          .map((p) => ({
+            number: p.number,
+            state: 'open',
+            head: { ref: p.head },
+            html_url: `https://github.example.test/${this.repo}/pull/${p.number}`,
+          })),
+      );
     }
     if (method === 'POST' && rest === 'pulls') {
       if (!this.branches.has(String(body.head)) || !this.branches.has(String(body.base))) {
@@ -324,6 +361,65 @@ export class FakeGitHub {
     return s;
   }
 
+  /** 分支名或提交 SHA 处的文件 */
+  private filesAt(ref: string): Map<string, string> | undefined {
+    return this.branches.get(ref) ?? this.snapshots.get(ref);
+  }
+
+  /** 从分支头或某个提交开始的提交列表（新的在前） */
+  private commitsFrom(
+    ref: string,
+  ):
+    | Array<{ sha: string; message: string; author: string; date: string; files: string[]; parents: number }>
+    | undefined {
+    const byBranch = this.commits.get(ref);
+    if (byBranch) {
+      return byBranch;
+    }
+    for (const list of this.commits.values()) {
+      const i = list.findIndex((c) => c.sha === ref);
+      if (i >= 0) {
+        return list.slice(i);
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * 在分支上提交文件改动（null 表示删除）：分支内容与提交时的快照都更新，contents?ref=<提交>、commits?path= 都能读到。
+   * 返回提交 SHA。
+   */
+  write(
+    branch: string,
+    files: Record<string, string | null>,
+    c: { message: string; author?: string; date?: Date } = { message: 'update' },
+  ): string {
+    const cur = new Map(this.branches.get(branch) ?? []);
+    for (const [path, content] of Object.entries(files)) {
+      if (content === null) {
+        cur.delete(path);
+      } else {
+        cur.set(path, content);
+      }
+    }
+    this.branches.set(branch, cur);
+    const list = this.commits.get(branch) ?? [];
+    this.commits.set(branch, list);
+    const date = c.date ?? new Date(Date.parse('2026-10-01T00:00:00Z') + list.length * 60_000);
+    const s = sha(`${branch}\0${c.message}\0${date.toISOString()}\0${list.length}\0${JSON.stringify(files)}`);
+    list.unshift({
+      sha: s,
+      message: c.message,
+      author: c.author ?? 'dev',
+      date: date.toISOString().replace(/\.\d{3}Z$/, 'Z'),
+      files: Object.keys(files),
+      parents: 1,
+    });
+    this.snapshots.set(s, new Map(cur));
+    this.heads.set(branch, s);
+    return s;
+  }
+
   /** 把分支合并到 main（测试中模拟审阅者合并 PR） */
   merge(branch: string): void {
     this.branches.set('main', new Map(this.branches.get(branch)));
@@ -333,6 +429,24 @@ export class FakeGitHub {
 
 function sha(s: string): string {
   return createHash('sha1').update(s).digest('hex');
+}
+
+/** contents 的目录列表：dir 下一层的文件与子目录 */
+function dirEntries(
+  files: Map<string, string>,
+  dir: string,
+): Array<{ type: 'file' | 'dir'; name: string; path: string }> {
+  const prefix = dir ? `${dir.replace(/\/+$/, '')}/` : '';
+  const seen = new Map<string, 'file' | 'dir'>();
+  for (const f of files.keys()) {
+    if (!f.startsWith(prefix)) {
+      continue;
+    }
+    const rest = f.slice(prefix.length);
+    const i = rest.indexOf('/');
+    seen.set(i < 0 ? rest : rest.slice(0, i), i < 0 ? 'file' : 'dir');
+  }
+  return [...seen].sort().map(([name, type]) => ({ type, name, path: `${prefix}${name}` }));
 }
 
 function send(res: ServerResponse, status: number, body: unknown): void {

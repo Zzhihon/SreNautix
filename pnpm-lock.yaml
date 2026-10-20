@@ -74,6 +74,9 @@ importers:
       canonicalize:
         specifier: 5.1.0
         version: 5.1.0
+      diff:
+        specifier: 9.0.0
+        version: 9.0.0
       fastify:
         specifier: 5.12.7
         version: 5.12.7

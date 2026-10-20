@@ -239,24 +239,33 @@ kube_reads:
   max_bytes: 16384
 ```
 
-## 自愈 PR 的配置
+## 自愈 PR
 
 ```yaml
 remediation:
   enabled: false
   repositories:                 # 补丁模板里的仓库角色 → 仓库与文件布局（RepositoryLayout）
     gitops:
-      repo: CCH-HQ/cchp-k8s-ops
+      repo: acme/gitops
       base_branch: main
       files:
-        release_input: {path: apps/cchp/prod/release.json, format: json, fields: {image: data.image, release_id: data.release_id}}
-        alert_rules: {path: "platform/observability/metrics/*.yaml", format: yaml}
+        release_input: {path: apps/shop/prod/release.json, format: json, fields: {image: data.image, release_id: data.release_id}}
+        alert_rules: {path: "platform/observability/rules/*.yaml", format: yaml}
+        pack_alerts: {path: srenautix/packs/shop/alerts.yaml, format: yaml}
   categories: [release_rollback, config_resource, alert_rule, topology_coverage]
   conclusions: [likely, evidence_consistent]
   title_prefix: null            # 默认取 notify.prefix
 ```
 
-PR 经 gateway 的 gitops_pr 推送；分支前缀、每小时上限、reviewers 与 main 的守护在 gateway 策略里，不在 server 配置中。
+需要 `github_app`（读仓库）与 gateway 策略中启用的 `gitops_pr`（ADR 0108）。主实例每 30 秒取最近结束、结论等级在 `conclusions` 中的研判：
+
+1. 求适用的修复模板（领域包 `remediations.yaml`），按布局经 GitHub REST 只读地读取仓库，生成补丁；
+2. 在内存中校验：路径在布局里、修改前内容与基准提交一致、补丁应用后与计划一致、修改后的 JSON/YAML 能解析、不超过 65536 字符；
+3. 提交 `gitops_pr` 提议（来源 rule，规则 `srenautix/remediation-pr`；策略为 gitops_pr 列出自动执行规则 `remediation-pr` 时自动签发），分支 `srenautix/<事件前 8 位>-<类别>-<补丁摘要>`，标题带 `[影子]` 等前缀；
+4. PR 描述分 结论、证据、改了什么、验证计划、回滚、研判运行 六段（`<!-- srenautix:pr=<段> -->` 标记），末尾 `Refs #<事件 issue>`；
+5. gateway 开出 PR 后（执行事件里的 `PR <url> #<n>`，或按分支查询），事件 issue 里回链，通知消息的修复段落显示 PR 链接。
+
+每次研判每个模板只处理一次，结果记在 `server.remediation_attempts`（proposed、skipped、rejected、failed 与原因码）与治理审计 `remediation.attempt`；指标 `srenautix_remediations_total{category,outcome}`、`srenautix_gitops_pulls_total{via}`。分支前缀、每小时上限、reviewers 与 main 的守护在 gateway 策略里，不在 server 配置中；server 从不写 Git。
 
 ## 变更源
 

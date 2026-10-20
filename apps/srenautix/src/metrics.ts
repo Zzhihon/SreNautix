@@ -105,6 +105,20 @@ export class ServerMetrics extends BaseMetrics {
     registers: [this.registry],
   });
 
+  readonly remediations = new Counter({
+    name: 'srenautix_remediations_total',
+    help: '自愈 PR 的处理结果（ADR 0108），按类别与结果（proposed：已提交 gitops_pr 提议；skipped：模板跳过或不适用；rejected：提议未通过策略；failed：计划或校验失败）',
+    labelNames: ['category', 'outcome'] as const,
+    registers: [this.registry],
+  });
+
+  readonly gitopsPulls = new Counter({
+    name: 'srenautix_gitops_pulls_total',
+    help: 'gitops_pr 开出并被 server 关联到事件的 PR 数，按来源（event：执行事件；lookup：按分支查询 GitHub）',
+    labelNames: ['via'] as const,
+    registers: [this.registry],
+  });
+
   readonly detectorLastScan = new Gauge({
     name: 'srenautix_detector_last_scan_timestamp_seconds',
     help: '集群状态检测器最近一次收到完整对象状态上报的时间',

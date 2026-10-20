@@ -19,11 +19,11 @@ describe('remediation 配置', () => {
       enabled: true,
       repositories: {
         gitops: {
-          repo: 'CCH-HQ/cchp-k8s-ops',
+          repo: 'acme/gitops',
           base_branch: 'main',
           files: {
             release_input: {
-              path: 'apps/cchp/prod/release.json',
+              path: 'apps/shop/prod/release.json',
               format: 'json',
               fields: { image: 'data.image', release_id: 'data.release_id' },
             },

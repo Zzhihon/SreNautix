@@ -37,6 +37,8 @@ export interface ComposeInput {
   /** 阶段 B 被跳过的原因（风暴、预算、上限）。 */
   stageAOnlyReason: string | null;
   proposals: Proposal[];
+  /** gitops_pr 提议 → 已开出的 PR 地址（ADR 0108）；没有时省略 */
+  pulls?: ReadonlyMap<string, string>;
   feedback: Feedback | null;
   prefix: string;
   consoleUrl: string;
@@ -101,6 +103,7 @@ const T = {
       duplicate: '重复',
     } as Record<string, string>,
     execution: (phase: string) => `执行进度：${phase}`,
+    pull: (url: string) => `PR：${url}`,
     hTier: 'H 档提议只能在控制台审批',
     runbook: (r: string) => `runbook：${r}`,
     noRemedy: '没有提议或建议',
@@ -178,6 +181,7 @@ const T = {
       duplicate: 'duplicate',
     } as Record<string, string>,
     execution: (phase: string) => `Execution: ${phase}`,
+    pull: (url: string) => `PR: ${url}`,
     hTier: 'Tier H proposals can only be approved in the console',
     runbook: (r: string) => `Runbook: ${r}`,
     noRemedy: 'No proposals or recommendations',
@@ -320,6 +324,10 @@ export function composeMessage(i: ComposeInput): { message: NotifyMessage; targe
     if (p.execution) {
       remedy.push(text(t.execution(p.execution.phase)));
     }
+    const pr = i.pulls?.get(p.proposal_id);
+    if (pr) {
+      remedy.push(text(t.pull(pr)));
+    }
     if (p.state === 'awaiting_approval' && p.tier === 'H') {
       remedy.push(text(t.hTier));
     }
@@ -389,7 +397,7 @@ export function composeMessage(i: ComposeInput): { message: NotifyMessage; targe
           kind: 'open_console',
           label: t.approveInConsole(n),
           callback: null,
-          url: consoleLink(`/proposals/${p.proposal_id}`),
+          url: consoleLink(`/actions/${p.proposal_id}`),
         });
       }
       add('reject', t.reject(n), `reject:${p.proposal_id}`, { proposalId: p.proposal_id, tier: p.tier });

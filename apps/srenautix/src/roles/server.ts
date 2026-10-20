@@ -72,6 +72,9 @@ import { IssueService } from '../github/issues.js';
 import { TopologyOverrides } from '../topology/overrides.js';
 import { TopologyStore } from '../topology/store.js';
 import { TopologyTargets } from '../topology/targets.js';
+import { GitOpsPulls } from '../remediation/pulls.js';
+import { RemediationService } from '../remediation/service.js';
+import { GitRepositoryTargets } from '../remediation/targets.js';
 import { serverTracks } from './server-schema.js';
 
 export interface ServerHandle {
@@ -198,7 +201,6 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
   const catalog = Catalog.load();
   let policies = Policies.load(c.policies_dir);
   const topology = new TopologyStore(pool);
-  const targets = new TopologyTargets(pool);
   // 拓扑覆盖：Git 挂载的目录，与角色绑定、策略一起定期重新加载
   const loadOverrides = () =>
     c.topology.overrides_dir ? TopologyOverrides.load(c.topology.overrides_dir) : TopologyOverrides.empty();
@@ -213,6 +215,8 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
         privateKey: readSecretFile('github_app.private_key_file', gh.private_key_file),
       })
     : null;
+  // 提议目标的机器推导：集群对象查拓扑；gitops_pr 的 GitRepository 取 base 分支当前的提交（ADR 0108）
+  const targets = new GitRepositoryTargets(new TopologyTargets(pool), () => github);
   const issues =
     github && c.issues?.enabled
       ? new IssueService(
@@ -684,6 +688,47 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
     signal,
   );
   every(30_000, () => proposals.expire(), '提议过期检查');
+  // 自愈 PR（ADR 0108）：研判结论 → 领域包的修复模板 → 校验 → gitops_pr 提议；gateway 开出的 PR 关联到事件 issue 与通知
+  if (github) {
+    const pulls = new GitOpsPulls(pool, github, issues, metrics);
+    every(30_000, () => pulls.runOnce(), 'gitops_pr 的 PR 关联');
+  }
+  const rm = c.remediation;
+  if (rm.enabled) {
+    if (!github) {
+      logger.warn('remediation.enabled 需要 github_app 读取仓库，自愈 PR 不会生成');
+    } else {
+      const remediation = new RemediationService(
+        pool,
+        {
+          repositories: rm.repositories,
+          categories: rm.categories,
+          conclusions: rm.conclusions,
+          titlePrefix: (rm.title_prefix ?? c.notify.prefix).trim(),
+          language: c.stage_a.language,
+          consoleUrl: c.public_url,
+          maxPerRun: 2,
+          lookbackMs: 6 * 3600_000,
+        },
+        {
+          packs: () => packs.set,
+          componentTypes: () => packs.componentTypes(),
+          componentType: (clusterId, key) => topology.componentType(clusterId, key),
+          dataSource: (at) => evidenceSource.dataSource(at),
+          github,
+          proposals,
+          issueRef: issues
+            ? async (incidentId, fromRepo) => {
+                const i = await issues.ensure(incidentId, 'repo_change');
+                return i ? GitHubApp.ref(fromRepo, i.repo, i.number) : null;
+              }
+            : null,
+          metrics,
+        },
+      );
+      every(30_000, () => remediation.runOnce(), '自愈 PR');
+    }
+  }
   // 领域包变化后重算仍在触发的事件的阶段 A（ADR 0107）：限速，只算阶段 A，不触发模型
   if (c.stage_a.recompute_per_minute > 0) {
     every(
@@ -713,7 +758,7 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
       linked: (p, refsInBody) =>
         issues.link(p.incident_id, {
           kind: 'proposal',
-          url: `${c.public_url.replace(/\/+$/, '')}/proposals/${p.proposal_id}`,
+          url: `${c.public_url.replace(/\/+$/, '')}/actions/${p.proposal_id}`,
           title: `${p.action}: ${String((p.params as { title?: unknown }).title ?? p.target.display)}`,
           repo: null,
           number: null,

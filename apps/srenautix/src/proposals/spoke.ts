@@ -69,9 +69,14 @@ export class SpokeRelay {
   }
 
   /** 本集群已签发、尚未被确认拉取、审批未过期、提议仍有效的工单。软暂停时扣住不下发。 */
+  /**
+   * actions：只下发这些动作的工单（gateway 冻结期间以 actions=gitops_pr 拉取，冻结只约束集群写入，ADR 0025）；
+   * null 表示全部动作。其余工单留在队列中等待之后的拉取。
+   */
   async tickets(
     clusterId: string,
     max: number,
+    actions: readonly string[] | null = null,
   ): Promise<{ server_time: string; restored_at: string | null; tickets: unknown[] }> {
     return tx(this.pool, async (c) => {
       const clock = await this.clock(c);
@@ -88,8 +93,9 @@ export class SpokeRelay {
         `SELECT a.assertion_id, a.envelope, p.body, p.ttl_expires_at, p.created_at FROM server.approval_assertions a
            JOIN server.proposals p ON p.proposal_id = a.proposal_id
           WHERE a.cluster_id = $1 AND a.pulled_at IS NULL AND a.expires_at > now() AND p.state = 'approved'
+            AND ($3::text[] IS NULL OR p.action = ANY($3::text[]))
           ORDER BY a.issued_at LIMIT $2 FOR UPDATE OF a SKIP LOCKED`,
-        [clusterId, max],
+        [clusterId, max, actions],
       );
       const tickets = [];
       for (const row of r.rows) {
@@ -292,14 +298,18 @@ export class SpokeRelay {
     };
     app.get('/v1/spoke/tickets', async (req) => {
       const clusterId = await cluster(req);
-      const q = req.query as { wait?: string; max?: string };
+      const q = req.query as { wait?: string; max?: string; actions?: string };
       const wait = Math.min(60, Math.max(0, Number(q.wait ?? 30)));
       const max = Math.min(100, Math.max(1, Number(q.max ?? 20)));
+      if (q.actions !== undefined && !/^[a-z][a-z0-9_]*(,[a-z][a-z0-9_]*)*$/.test(q.actions)) {
+        throw new HttpError(400, 'bad_request', 'actions 必须是逗号分隔的动作 ID');
+      }
+      const actions = q.actions === undefined ? null : q.actions.split(',');
       const deadline = Date.now() + wait * 1000;
       const abort = new AbortController();
       req.raw.on('close', () => abort.abort());
       for (;;) {
-        const r = await this.tickets(clusterId, max);
+        const r = await this.tickets(clusterId, max, actions);
         if (r.tickets.length || Date.now() >= deadline || abort.signal.aborted) {
           return r;
         }

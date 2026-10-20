@@ -10,6 +10,7 @@ import type { Track } from '../store/migrate.js';
 import { storeTrack } from '../store/migrations.js';
 import { topologyTrack } from '../topology/migrations.js';
 import { detectorTrack } from '../detectors/migrations.js';
+import { remediationTrack } from '../remediation/migrations.js';
 
 /** server schema 的全部迁移轨道，按依赖顺序排列。 */
 export const serverTracks: readonly Track[] = [
@@ -24,4 +25,5 @@ export const serverTracks: readonly Track[] = [
   changesTrack,
   githubTrack,
   detectorTrack,
+  remediationTrack,
 ];

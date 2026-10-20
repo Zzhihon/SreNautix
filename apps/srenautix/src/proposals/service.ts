@@ -119,7 +119,14 @@ export interface TargetInfo {
 
 /** 目标的机器推导（DESIGN §16.1 不变量 9：模型给出的目标必须等于机器推导的目标）。 */
 export interface TargetResolver {
-  resolve(clusterId: string, kind: string, namespace: string | null, name: string): Promise<TargetInfo>;
+  /** params：提议参数（GitRepository 的 UID 是参数 base 分支当前的提交，见 remediation/targets.ts） */
+  resolve(
+    clusterId: string,
+    kind: string,
+    namespace: string | null,
+    name: string,
+    params?: Record<string, unknown>,
+  ): Promise<TargetInfo>;
 }
 
 const NAME_KEYS = ['name', 'pod', 'node', 'instance', 'application', 'workflow', 'template', 'cluster', 'repository'];
@@ -252,7 +259,13 @@ export class ProposalService {
       let autoRule: string | null = null;
       if (a && paramErr === null) {
         const t = this.targetOf(a, params as Record<string, unknown>, binding.clusterId);
-        const info = await this.targets.resolve(binding.clusterId, t.kind, t.namespace, t.name);
+        const info = await this.targets.resolve(
+          binding.clusterId,
+          t.kind,
+          t.namespace,
+          t.name,
+          params as Record<string, unknown>,
+        );
         target = {
           cluster_id: t.cluster_id,
           kind: t.kind,
@@ -390,7 +403,13 @@ export class ProposalService {
     out.push({ name: 'params_schema', passed: paramErr === null, detail: paramErr ?? '参数符合目录 schema' });
     const pol = this.policies().check(p.cluster_id, p.action, p.target.namespace);
     out.push({ name: 'gateway_policy', passed: pol === null, detail: pol ?? '动作与命名空间在 gateway 策略中启用' });
-    const info = await this.targets.resolve(p.cluster_id, p.target.kind, p.target.namespace, p.target.name);
+    const info = await this.targets.resolve(
+      p.cluster_id,
+      p.target.kind,
+      p.target.namespace,
+      p.target.name,
+      p.params as Record<string, unknown>,
+    );
     const sameUid = info.uid !== null && info.uid === p.target.uid;
     out.push({
       name: 'target_uid',

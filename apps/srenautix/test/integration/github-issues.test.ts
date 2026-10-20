@@ -415,7 +415,7 @@ describe('事件 issue', () => {
     const n = gh.issues[0]!.number;
     expect((p.body.params as { body: string }).body).toBe(`把 api 的内存 limit 提到 1Gi\n\nRefs ${REPO}#${n}`);
     await run();
-    expect(gh.comments.get(n)!.at(-1)!.body).toContain(`${PUBLIC}/proposals/${String(p.body.proposal_id)}`);
+    expect(gh.comments.get(n)!.at(-1)!.body).toContain(`${PUBLIC}/actions/${String(p.body.proposal_id)}`);
   });
 
   it('限速：每小时开满之后的事件只记录为 skipped，不开 issue', async () => {
