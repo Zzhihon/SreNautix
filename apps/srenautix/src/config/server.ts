@@ -213,6 +213,27 @@ export const serverConfigSchema = z
       .object({
         source: z.enum(['informer', 'reader', 'off']).default('informer'),
         kubeconfig: path.optional(),
+        // 拓扑覆盖文件所在的 Git 挂载目录（每 60 秒重新加载）；不填时没有覆盖规则
+        overrides_dir: path.optional(),
+        // 控制台为未映射告警开覆盖规则 PR 用的 GitHub App；不填时该接口返回 503 并说明原因
+        override_pr: z
+          .object({
+            github: z
+              .object({
+                api_base: url.default('https://api.github.com'),
+                app_id: z.string().regex(/^\d+$/),
+                installation_id: z.string().regex(/^\d+$/),
+                private_key_file: path,
+                // owner/name
+                repo: z.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/),
+                base_branch: z.string().min(1).default('main'),
+                // 仓库中覆盖文件的目录（与 overrides_dir 挂载的是同一个目录）
+                dir: z.string().min(1).default('srenautix/topology-overrides'),
+              })
+              .strict(),
+          })
+          .strict()
+          .optional(),
       })
       .strict()
       .default({ source: 'informer' }),

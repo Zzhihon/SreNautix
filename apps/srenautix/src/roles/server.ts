@@ -56,6 +56,8 @@ import { migrateExpand, migrationsReady } from '../store/migrate.js';
 import type { OutboxEvent } from '../store/outbox.js';
 import { createPool, type PgConfig } from '../store/pool.js';
 import { startInformerTopology } from '../topology/informer.js';
+import { GitHubApp } from '../topology/override-pr.js';
+import { TopologyOverrides } from '../topology/overrides.js';
 import { TopologyStore } from '../topology/store.js';
 import { TopologyTargets } from '../topology/targets.js';
 import { serverTracks } from './server-schema.js';
@@ -178,6 +180,22 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
   let policies = Policies.load(c.policies_dir);
   const topology = new TopologyStore(pool);
   const targets = new TopologyTargets(pool);
+  // 拓扑覆盖：Git 挂载的目录，与角色绑定、策略一起定期重新加载
+  const loadOverrides = () =>
+    c.topology.overrides_dir ? TopologyOverrides.load(c.topology.overrides_dir) : TopologyOverrides.empty();
+  let overrides = loadOverrides();
+  const gh = c.topology.override_pr?.github;
+  const github = gh
+    ? new GitHubApp({
+        apiBase: gh.api_base,
+        appId: gh.app_id,
+        installationId: gh.installation_id,
+        privateKey: readSecretFile('topology.override_pr.github.private_key_file', gh.private_key_file),
+        repo: gh.repo,
+        baseBranch: gh.base_branch,
+        dir: gh.dir,
+      })
+    : null;
   const prom = c.datasources.prometheus;
   const packs = await PackRuntime.load({
     dirs: c.packs.dirs,
@@ -320,7 +338,14 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
     pool,
     c.ingest.sources,
     { clusterId: c.cluster_id, selfLabel: c.ingest.self_label, watchdogAlertname: c.ingest.watchdog_alertname },
-    { catalog: alertCatalog, nodes: topology, ksm: null, ruleExpr: () => undefined, chronic: () => false },
+    {
+      catalog: alertCatalog,
+      nodes: topology,
+      ksm: null,
+      ruleExpr: () => undefined,
+      chronic: () => false,
+      override: (clusterId, labels) => overrides.match(clusterId, labels),
+    },
     metrics,
     (_clusterId, raws) => {
       degradedLane.ingest(raws, new Date());
@@ -469,6 +494,7 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
     exporter,
     worker,
     packs,
+    github,
     integrations: IntegrationRegistry.fromConfig({
       pool,
       config: c,
@@ -591,6 +617,7 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
       bindings = Bindings.load(c.identity.bindings_dir);
       auth.setBindings(bindings);
       policies = Policies.load(c.policies_dir);
+      overrides = loadOverrides();
     },
     '重新加载角色绑定与策略',
   );

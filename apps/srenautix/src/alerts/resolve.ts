@@ -34,6 +34,11 @@ export interface ResolveDeps {
   ruleExpr(alertname: string): string | undefined;
   /** 长期告警：告警名 × 实体在 7 天内的触发比例超过阈值。 */
   chronic(alertname: string, entityKey: string | null): boolean;
+  /** 拓扑覆盖（Git 中的覆盖文件）：命中时给出组件与角色，优先于领域包的映射。 */
+  override?(
+    clusterId: string,
+    labels: Record<string, string>,
+  ): { component: string; role: AlertClassification['role']; ref: string } | null;
 }
 
 const NODE_INSTANCE_PORT = /:\d+$/;
@@ -115,9 +120,29 @@ export async function resolveAlert(clusterId: string, a: RawAlert, deps: Resolve
   if (a.labels.component && /^[A-Za-z][A-Za-z0-9.-]*:/.test(a.labels.component)) {
     component = a.labels.component;
   }
+  // 拓扑覆盖由人工在 Git 中给出，优先于领域包与标签的映射；告警自带的 role 标签仍然优先于覆盖的角色
+  const ov = deps.override?.(clusterId, a.labels) ?? null;
+  if (ov) {
+    component = ov.component;
+  }
   if (!component && a.labels.namespace) {
     // 未映射的告警归入命名空间伪组件，不丢弃（DESIGN §5）
     component = `Namespace:${a.labels.namespace}`;
+  }
+  if (ov && a.labels.role === undefined) {
+    return {
+      classification: {
+        role: ov.role,
+        source: 'catalog',
+        confidence: 1,
+        catalog_entry: `topology-overrides/${ov.ref}`,
+        chronic: deps.chronic(a.alertname, component),
+      },
+      entity,
+      entityResolution: resolution,
+      component,
+      chains: hit?.entry.chains ?? [],
+    };
   }
   const classification = classifyAlert(
     { labels: a.labels, ruleExpr: deps.ruleExpr(a.alertname), chronic: deps.chronic(a.alertname, component) },

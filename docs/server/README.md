@@ -173,6 +173,42 @@ changes:
 - 同步只在主实例上进行；有新变更时立即重算事件。某个变更源同步失败时发布 `DatasourceUnavailable` 条件（subject `changes:<id>`），其他变更源不受影响。
 - 镜像中需要 `git`（ssh 克隆还需要 `ssh`）。
 
+## 拓扑覆盖
+
+领域包没有映射到组件的告警，可以在 Git 中用覆盖文件指定组件与角色。`topology.overrides_dir` 指向挂载的目录（与角色绑定、策略一样每 60 秒重新加载），目录下每个 `*.yaml`：
+
+```yaml
+api_version: srenautix.io/topology-overrides/v1
+alerts:
+  - cluster_id: prod
+    alertname: KafkaConsumerLag
+    match_labels: { topic: orders }        # 可省略；全部相等才命中，更具体的规则优先
+    component: Deployment:shop/orders-consumer
+    role: cause                            # cause | change | symptom | forecast | meta
+```
+
+命中的告警归属覆盖的组件，角色取覆盖的角色（告警自带 `role` 标签时仍以标签为准），分类依据记为 `topology-overrides/<文件>#<序号>`。文件不合法时 server 启动或重新加载失败，并指出文件与字段。
+
+控制台拓扑页的"未映射告警"可以直接发起覆盖规则的 PR（`POST /v1/topology/overrides/pr`，admin）。server 以 GitHub App 身份在 `srenautix/*` 分支上修改 `<dir>/<cluster_id>.yaml` 并开 PR，从不合并：
+
+```yaml
+topology:
+  overrides_dir: /etc/srenautix/topology-overrides     # 挂载仓库中的 <dir>
+  override_pr:
+    github:
+      app_id: "123456"
+      installation_id: "7890"
+      private_key_file: /etc/srenautix/secrets/github-app/private-key.pem
+      repo: acme/gitops
+      base_branch: main
+      dir: srenautix/topology-overrides
+```
+
+- App 只需要该仓库的 Contents 与 Pull requests 读写权限。安装令牌由 App 私钥签的 JWT 换取，1 小时有效，到期前刷新。
+- 没有配置 `override_pr.github` 时接口返回 503，说明需要在 Git 中直接修改覆盖文件；App 身份无效、没有安装到仓库、没有仓库权限或 GitHub 不可达时同样返回 503 并说明是哪一种。
+- 基础分支上已有同一集群、同一告警名的规则，或这条规则的 PR 已经开过（分支已存在）时返回 409。
+- 每次发起写入治理审计（`topology.override_pr`）。
+
 ## 集成页
 
 `GET /v1/integrations` 按 server 配置列出已启用的集成实例，每个实例对应 `integrations/` 中的一个清单（`integrations.dir`，不填时为与代码同一发布物中的 `integrations/`，镜像中 `/app/integrations`）：

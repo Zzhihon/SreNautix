@@ -336,6 +336,23 @@ describe('server 端到端', () => {
     expect(text).toContain('api 重启');
   });
 
+  it('没有配置 GitHub App 时，覆盖规则的 PR 接口返回 503 并说明原因；请求体不合法时 400', async () => {
+    const body = {
+      cluster_id: 'c1',
+      alertname: 'DemoPodCrashLooping',
+      component: 'Deployment:shop/api',
+      role: 'cause',
+    };
+    const r = await api('POST', '/v1/topology/overrides/pr', { session: true, body });
+    expect(r.status).toBe(503);
+    expect(r.body).toMatchObject({
+      error: 'unavailable',
+      message: expect.stringContaining('topology.override_pr.github'),
+    });
+    const bad = await api('POST', '/v1/topology/overrides/pr', { session: true, body: { ...body, role: 'boss' } });
+    expect(bad.status).toBe(400);
+  });
+
   it('集成页列出配置中启用的集成实例；连接测试逐项检查声明的能力，结果进入列表与治理审计', async () => {
     const list = await api('GET', '/v1/integrations', { session: true });
     expect(list.status).toBe(200);

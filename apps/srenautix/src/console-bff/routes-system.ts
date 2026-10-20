@@ -13,6 +13,8 @@ import type { Catalog } from '../proposals/catalog.js';
 import type { Policies } from '../proposals/policy.js';
 import type { ProposalService, TargetResolver } from '../proposals/service.js';
 import type { PackRuntime } from '../stage-a/packs.js';
+import { createOverridePr, type GitHubApp } from '../topology/override-pr.js';
+import { overrideSchema } from '../topology/overrides.js';
 import type { IntegrationRegistry } from './integrations.js';
 import { appendAudit, readAudit, verifyRecords, GENESIS_HASH } from '../store/audit.js';
 import type { AuditExporter } from '../store/audit-export.js';
@@ -33,7 +35,12 @@ export interface SystemRouteDeps {
   worker: { url: string; token: string } | null;
   packs: PackRuntime;
   integrations: IntegrationRegistry;
+  /** 开覆盖规则 PR 的 GitHub App；没有配置时为 null */
+  github: GitHubApp | null;
 }
+
+/** contract/openapi.yaml 的 createTopologyOverridePr 请求体 */
+const overridePrBody = overrideSchema.omit({ match_labels: true }).strict();
 
 const fmt = (d: Date | null | undefined) => (d ? d.toISOString() : null);
 
@@ -475,13 +482,24 @@ export function registerSystemRoutes(app: FastifyInstance, d: SystemRouteDeps): 
     };
   });
 
-  app.post('/v1/topology/overrides/pr', async (req) => {
-    await d.auth.user(req, 'settings.write');
-    throw new HttpError(
-      503,
-      'unavailable',
-      '没有配置 Git 仓库凭证，不能发起覆盖规则的 PR；在 Git 中直接修改拓扑覆盖文件',
-    );
+  app.post('/v1/topology/overrides/pr', async (req, reply) => {
+    const c = await d.auth.user(req, 'settings.write');
+    const parsed = overridePrBody.safeParse(req.body);
+    if (!parsed.success) {
+      throw badRequest(parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('；'));
+    }
+    if (!d.github) {
+      throw new HttpError(
+        503,
+        'unavailable',
+        '没有配置 GitHub App（topology.override_pr.github），不能发起覆盖规则的 PR；在 Git 中直接修改拓扑覆盖文件' +
+          (d.config.topology.overrides_dir ? `（server 从 ${d.config.topology.overrides_dir} 加载）` : ''),
+      );
+    }
+    const o = { ...parsed.data };
+    const r = await createOverridePr(d.github, o, c.subject.id);
+    await tx(d.pool, (cl) => appendAudit(cl, 'topology.override_pr', c.subject.id, { ...o, ...r }));
+    return reply.code(201).send(r);
   });
 
   app.get('/v1/audit/chains', async (req) => {
