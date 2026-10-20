@@ -201,6 +201,32 @@ k -n "$ns" exec deploy/srenautix-worker -c worker -- /nodejs/bin/node -e \
      .catch((e) => { console.error(e.message); process.exit(1); });" ||
   { log "经 server 读取运行明细失败"; exit 1; }
 
+log "本地管理员登录控制台（口令 + TOTP），读取事件与条件列表（chart 默认的 local-admin 绑定）"
+# 口令与 TOTP 密钥经标准输入传入，TOTP 按 RFC 6238（SHA1、6 位、30 秒）在 server 容器中计算
+printf '{"password":"%s","totp_secret":"%s"}' "$admin_password" "$totp" |
+  k -n "$ns" exec -i deploy/srenautix-server -c server -- /nodejs/bin/node -e \
+    "const c = require('node:crypto'), { password, totp_secret } = JSON.parse(require('node:fs').readFileSync(0, 'utf8'));
+     const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'; let bits = '';
+     for (const ch of totp_secret.replace(/=+\$/, '')) bits += alphabet.indexOf(ch).toString(2).padStart(5, '0');
+     const key = Buffer.from(bits.match(/.{8}/g).map((b) => parseInt(b, 2)));
+     const counter = Buffer.alloc(8); counter.writeBigUInt64BE(BigInt(Math.floor(Date.now() / 30000)));
+     const h = c.createHmac('sha1', key).update(counter).digest(), o = h[h.length - 1] & 15;
+     const code = String((h.readUInt32BE(o) & 0x7fffffff) % 1000000).padStart(6, '0');
+     const base = 'http://127.0.0.1:8080';
+     (async () => {
+       const login = await fetch(base + '/v1/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' },
+         body: JSON.stringify({ username: 'admin', password, totp: code }) });
+       if (login.status !== 200) throw new Error('login HTTP ' + login.status + ' ' + (await login.text()));
+       const cookie = login.headers.get('set-cookie').split(';')[0];
+       for (const path of ['/v1/incidents', '/v1/conditions']) {
+         const r = await fetch(base + path, { headers: { cookie, accept: 'application/json' } });
+         const text = await r.text();
+         if (r.status !== 200) throw new Error(path + ' HTTP ' + r.status + ' ' + text.slice(0, 300));
+         console.error(path + '：200');
+       }
+     })().catch((e) => { console.error(e.message); process.exit(1); });" ||
+  { log "本地管理员登录后读取事件或条件列表失败"; exit 1; }
+
 failures=$(k -n "$ns" logs deploy/srenautix-server -c server --since-time="$ready_at" | grep -c '读取 worker 事件流失败' || true)
 [[ "$failures" == 0 ]] || { log "全部 Pod 就绪之后 server 有 ${failures} 条读取 worker 事件流失败的日志"; exit 1; }
 log "server 与 worker 双向连通，研判经事件流回到 server"

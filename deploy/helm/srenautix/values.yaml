@@ -262,6 +262,10 @@ identity:
   localAdmin:
     username: admin
     existingSecret: ""
+    # 启用本地管理员时，chart 在角色绑定中加一个 local-admin.yaml：组 srenautix:local-admin → admin
+    # （合规配置三权分立时为 sys-admin），作用域为全部集群与命名空间。identity.bindings 中已有 local-admin.yaml 时以它为准；
+    # 使用 bindingsConfigMap 时 chart 不生成绑定，需要在那个 ConfigMap 中自行加入。接入 OIDC 后建议设为 false 或收窄作用域
+    bindAdmin: true
   oidc:
     enabled: false
     issuer: ""

@@ -70,6 +70,14 @@ chart 为五个角色生成配置文件（地址、端口、挂载路径、集�
 
 境外模型路由（`in_domain=false`）没有打开 `roles.worker.config.llm.allow_cross_border` 时，安装照常完成，worker 启动时禁用这些路由；安装结束时的说明会列出被禁用的路由（ADR 0062）。
 
+## 登录与角色绑定
+
+控制台的权限来自角色绑定（`identity.bindings`，DESIGN §13），登录只确定身份。没有任何绑定的用户登录后，所有读取接口都返回 403。
+
+- **本地管理员是破窗账号**：用于首次安装后的引导和身份提供方不可用时的紧急入口，口令加 TOTP 登录（Secret 的键 `password_hash` 由 `srenautix admin hash-password` 生成，`totp_secret` 是 base32 密钥）。启用 `identity.localAdmin.existingSecret` 时，chart 在绑定中加一个 `local-admin.yaml`：组 `srenautix:local-admin` → `admin`，合规配置三权分立时为 `sys-admin`，作用域为全部集群与命名空间。
+- **接入 OIDC 之后收窄本地管理员**：为日常用户按组写绑定，然后设置 `identity.localAdmin.bindAdmin: false`（本地管理员仍能登录，但没有权限，需要时再打开），或在 `identity.bindings` 中写一个同名的 `local-admin.yaml` 缩小角色与作用域（chart 以用户写的为准）。本地管理员的每次登录都写入治理审计，建议对它设置告警。
+- 绑定由 GitOps 同步时（`identity.bindingsConfigMap`），chart 不生成 `local-admin.yaml`，需要在那个 ConfigMap 中自行加入。
+
 ## 领域包
 
 内置领域包在中心镜像的 `/app/packs`；用户层的包以 ConfigMap 挂载（`packs.userConfigMaps`）。OCI 仓库中经 cosign 签名的包写在 `packs.oci.sources`（每项含 `repository`、固定的 `digest`，以及 `key_file` 或 `certificate_identity` + `certificate_oidc_issuer`）。中心镜像带有 cosign 与 oras，chart 为 server 挂载可写的拉取目录 `/var/cache/srenautix/packs`（emptyDir，容量 `packs.oci.cacheSize`）。公钥放在 `packs.oci.keySecret` 指定的 Secret 中，`key_file` 写 `/etc/srenautix/secrets/pack-keys/<键>`。私有仓库的凭证放在 `packs.oci.dockerConfigSecret`（类型 `kubernetes.io/dockerconfigjson`），以 `DOCKER_CONFIG` 提供给 oras 与 cosign。仓库与 Rekor 的出站地址可以用 `networkPolicy.packRegistriesEgressTo` 限定。
