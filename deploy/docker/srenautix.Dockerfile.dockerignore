@@ -10,6 +10,7 @@
 .github
 bin
 deploy
+!deploy/docker/fetch-oci-tools.ts
 docs
 eval/reports
 cmd

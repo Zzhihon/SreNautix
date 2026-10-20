@@ -10,6 +10,16 @@ ARG GO_TOOLCHAIN=docker.io/library/golang:1.27.2-trixie@sha256:47667934874913a44
 
 FROM ${GO_TOOLCHAIN} AS go
 
+# server 拉取 OCI 领域包用的 cosign 与 oras（目标架构的静态二进制），版本与 sha256 取自测试共用的 backends.json；
+# 拉取目录 /var/cache/srenautix/packs 预先建好，属主为运行用户
+FROM ${NODE_BUILDER} AS oci-tools
+ARG TARGETARCH
+ARG SOURCE_DATE_EPOCH
+COPY packages/integration-sdk/backends.json deploy/docker/fetch-oci-tools.ts /tools/
+RUN node /tools/fetch-oci-tools.ts /tools/backends.json "${TARGETARCH}" /out/usr/local/bin \
+    && mkdir -p /out/var/cache/srenautix/packs \
+    && find /out -exec touch -h -d "@${SOURCE_DATE_EPOCH:-0}" {} +
+
 FROM ${NODE_BUILDER} AS build
 ARG SOURCE_DATE_EPOCH
 COPY --from=go /usr/local/go /usr/local/go
@@ -38,13 +48,14 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     pnpm --filter "{./apps/srenautix}..." --filter "{./web/console}..." run --if-present build
 # 镜像内的目录与仓库一致：/app/apps/srenautix（只含运行时依赖）、/app/contract（动作目录等契约文件）、
-# /app/packs（内置领域包）、/app/web/console/dist（控制台静态文件）。
+# /app/packs（内置领域包）、/app/integrations（各集成的 integration.yaml，不含测试夹具）、/app/web/console/dist（控制台静态文件）。
 # pnpm 9 的 deploy 需要读取包的元数据，不能离线执行；安装的每个第三方包的版本仍取自 pnpm-lock.yaml，
 # 内容按锁文件中的 integrity 校验。
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
     pnpm --filter ./apps/srenautix deploy --prod /out/app/apps/srenautix \
     && cp -R contract /out/app/contract \
     && cp -R packs /out/app/packs \
+    && find integrations -name integration.yaml -exec cp --parents {} /out/app/ \; \
     && mkdir -p /out/app/web/console \
     && cp -R web/console/dist /out/app/web/console/dist
 # 统一文件时间戳，保证同一提交的构建结果逐字节一致
@@ -64,10 +75,13 @@ ENV NODE_ENV=production \
     SRENAUTIX_CONSOLE_DIR=/app/web/console/dist
 WORKDIR /app
 COPY --from=build --chown=65532:65532 /out/app /app
+COPY --from=oci-tools /out/usr/local/bin/ /usr/local/bin/
+COPY --from=oci-tools --chown=65532:65532 /out/var/cache/srenautix /var/cache/srenautix
 USER 65532:65532
 # 冒烟检查：在运行镜像中加载三个角色的全部模块与运维子命令，缺少任何依赖（例如工作区包没有构建产物）都让构建失败；
 # 再用不存在的配置启动 server，要求进程走到读取配置这一步并报配置错误；
-# 按 chart 的 db bootstrap Job 的参数运行一次，要求参数被接受、进程走到读取 libpq 环境变量这一步
-RUN ["/nodejs/bin/node", "--input-type=module", "-e", "for (const m of ['roles/server.js', 'roles/worker.js', 'roles/mcp.js', 'commands.js']) { await import('/app/apps/srenautix/dist/' + m); } const { existsSync } = await import('node:fs'); for (const p of ['/app/contract/gateway/v1/action-catalog.yaml', '/app/packs', '/app/web/console/dist/index.html']) { if (!existsSync(p)) { throw new Error('missing ' + p); } } const { spawnSync } = await import('node:child_process'); const run = (args, env) => { const r = spawnSync('/nodejs/bin/node', ['/app/apps/srenautix/dist/main.js', ...args], { encoding: 'utf8', env }); return { status: r.status, out: r.stdout + r.stderr }; }; const s = run(['--role=server', '--config=/nonexistent/config.yaml'], {}); if (s.status === 0 || !s.out.includes('ConfigError')) { throw new Error('server did not reach config loading: ' + s.out); } const b = run(['db', 'bootstrap', '--admin-password-file=/nonexistent/password'], { PGSSLMODE: 'verify-full' }); if (b.status === 0 || !b.out.includes('PGSSLROOTCERT')) { throw new Error('db bootstrap did not reach the libpq environment: ' + b.out); } console.log('smoke ok');"]
+# 按 chart 的 db bootstrap Job 的参数运行一次，要求参数被接受、进程走到读取 libpq 环境变量这一步；
+# cosign 与 oras 能在运行镜像中执行，拉取目录可写
+RUN ["/nodejs/bin/node", "--input-type=module", "-e", "for (const m of ['roles/server.js', 'roles/worker.js', 'roles/mcp.js', 'commands.js']) { await import('/app/apps/srenautix/dist/' + m); } const { existsSync, accessSync, constants } = await import('node:fs'); for (const p of ['/app/contract/gateway/v1/action-catalog.yaml', '/app/packs', '/app/integrations/alertmanager/integration.yaml', '/app/web/console/dist/index.html']) { if (!existsSync(p)) { throw new Error('missing ' + p); } } accessSync('/var/cache/srenautix/packs', constants.W_OK); const { spawnSync } = await import('node:child_process'); for (const [bin, arg] of [['/usr/local/bin/cosign', 'version'], ['/usr/local/bin/oras', 'version']]) { const t = spawnSync(bin, [arg], { encoding: 'utf8' }); if (t.status !== 0) { throw new Error(bin + ' ' + arg + ' failed: ' + t.stdout + t.stderr + (t.error ?? '')); } } const run = (args, env) => { const r = spawnSync('/nodejs/bin/node', ['/app/apps/srenautix/dist/main.js', ...args], { encoding: 'utf8', env }); return { status: r.status, out: r.stdout + r.stderr }; }; const s = run(['--role=server', '--config=/nonexistent/config.yaml'], {}); if (s.status === 0 || !s.out.includes('ConfigError')) { throw new Error('server did not reach config loading: ' + s.out); } const b = run(['db', 'bootstrap', '--admin-password-file=/nonexistent/password'], { PGSSLMODE: 'verify-full' }); if (b.status === 0 || !b.out.includes('PGSSLROOTCERT')) { throw new Error('db bootstrap did not reach the libpq environment: ' + b.out); } console.log('smoke ok');"]
 EXPOSE 8080 8081 9090
 ENTRYPOINT ["/nodejs/bin/node", "/app/apps/srenautix/dist/main.js"]
