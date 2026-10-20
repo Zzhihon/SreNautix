@@ -124,6 +124,8 @@ ConfigMap 的值只在进程内用于匹配 Service DNS 名，不进入任何输
 | `QueryManifest` | 查询模板清单已挂载并通过校验 |
 | `AlertReconcile` | 最近一次对账的各部分都读取成功 |
 
+中心把这些条件以 role `reader` 写入状态条件（契约 2.9.0 起属于 `Condition.type` 的取值），控制台状态条显示条件不为 True 的项。没有挂载查询模板清单（chart 的 `roles.reader.queryManifestConfigMap` 为空）时 `QueryManifest` 为 False（`NotMounted`），状态条一直显示"查询模板清单未加载"：reader 拒绝声明的证据查询，中心的证据卡改由 server 直接查询数据源。
+
 ## 指标
 
 | 指标 | 说明 |

@@ -1656,6 +1656,9 @@ export interface Error {
  * 带类型的状态条件（DESIGN §12.4），驱动每个页面顶部的状态条。每个判定都附带影响它的条件
  */
 export interface Condition {
+  /**
+   * server、worker 等角色的条件；InformersFresh、TunnelConnected、QueryManifest、Datasource、AlertReconcile 由分支 reader 的心跳转来（role 为 reader，见 gateway/v1/reader.openapi.yaml 的 ReaderCondition），ClockSkew 两边都有。控制台必须容忍以后新增的类型
+   */
   type:
     | 'IngestSilent'
     | 'WatchdogMissing'
@@ -1670,7 +1673,12 @@ export interface Condition {
     | 'StateStoreDegraded'
     | 'Restored'
     | 'Frozen'
-    | 'StormMode';
+    | 'StormMode'
+    | 'InformersFresh'
+    | 'TunnelConnected'
+    | 'QueryManifest'
+    | 'Datasource'
+    | 'AlertReconcile';
   /**
    * true 表示该问题正在发生
    */

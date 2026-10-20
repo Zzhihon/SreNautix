@@ -1,0 +1,16 @@
+.fallback {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 4px 12px;
+  font-size: 12px;
+  color: var(--sn-dim);
+  border-bottom: 1px dashed var(--sn-line);
+}
+
+.detail {
+  opacity: 0.7;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

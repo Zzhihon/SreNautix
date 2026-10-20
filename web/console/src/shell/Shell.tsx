@@ -3,7 +3,7 @@
 
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, Outlet, useNavigate, useRouterState, useSearch } from '@tanstack/react-router';
-import { ConditionStrip, StatusPill, STATUS, useConditions, useI18n, type Cluster } from '@srenautix/ui';
+import { ConditionStrip, ErrorBoundary, StatusPill, STATUS, useConditions, useI18n, type Cluster } from '@srenautix/ui';
 import { LogOut, Menu, Search, ShieldAlert } from 'lucide-react';
 import { useState, type FormEvent } from 'react';
 import { hub, ok } from '../api';
@@ -139,92 +139,103 @@ export function Shell() {
 
   return (
     <div className={styles.app}>
-      <header className={styles.header}>
-        <button
-          type="button"
-          className={styles.menuBtn}
-          aria-label={t('header.menu')}
-          aria-expanded={menu}
-          onClick={() => setMenu(!menu)}
-        >
-          <Menu aria-hidden="true" />
-        </button>
-        <Link to="/incidents" search={{ cluster: search.cluster }} className={styles.brand}>
-          SreNautix
-        </Link>
-        <label className={styles.cluster}>
-          <span className={styles.srOnly}>{t('header.cluster')}</span>
-          <select
-            aria-label={t('header.cluster')}
-            value={search.cluster ?? ''}
-            onChange={(e) =>
-              void navigate({
-                to: pathname,
-                search: (prev: Record<string, unknown>) => ({ ...prev, cluster: e.currentTarget.value || undefined }),
-              })
-            }
+      {/* 全局组件各自一层错误边界：任何一个渲染出错只影响它自己（例如状态条遇到不认识的数据） */}
+      <ErrorBoundary area="Header">
+        <header className={styles.header}>
+          <button
+            type="button"
+            className={styles.menuBtn}
+            aria-label={t('header.menu')}
+            aria-expanded={menu}
+            onClick={() => setMenu(!menu)}
           >
-            <option value="">{t('header.all_clusters')}</option>
-            {(clusters.data ?? []).map((c) => (
-              <option key={c.cluster_id} value={c.cluster_id}>
-                {c.display_name}
-              </option>
-            ))}
+            <Menu aria-hidden="true" />
+          </button>
+          <Link to="/incidents" search={{ cluster: search.cluster }} className={styles.brand}>
+            SreNautix
+          </Link>
+          <label className={styles.cluster}>
+            <span className={styles.srOnly}>{t('header.cluster')}</span>
+            <select
+              aria-label={t('header.cluster')}
+              value={search.cluster ?? ''}
+              onChange={(e) =>
+                void navigate({
+                  to: pathname,
+                  search: (prev: Record<string, unknown>) => ({ ...prev, cluster: e.currentTarget.value || undefined }),
+                })
+              }
+            >
+              <option value="">{t('header.all_clusters')}</option>
+              {(clusters.data ?? []).map((c) => (
+                <option key={c.cluster_id} value={c.cluster_id}>
+                  {c.display_name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <SearchBox />
+          <span className={styles.spacer} />
+          <select
+            aria-label={t('header.locale')}
+            value={prefs.locale}
+            onChange={(e) => setPrefs({ locale: e.currentTarget.value as 'zh-CN' | 'en' })}
+          >
+            <option value="zh-CN">中文</option>
+            <option value="en">English</option>
           </select>
-        </label>
-        <SearchBox />
-        <span className={styles.spacer} />
-        <select
-          aria-label={t('header.locale')}
-          value={prefs.locale}
-          onChange={(e) => setPrefs({ locale: e.currentTarget.value as 'zh-CN' | 'en' })}
-        >
-          <option value="zh-CN">中文</option>
-          <option value="en">English</option>
-        </select>
-        <select
-          aria-label={t('header.theme')}
-          value={prefs.theme}
-          onChange={(e) => setPrefs({ theme: e.currentTarget.value as ThemePref })}
-        >
-          <option value="system">{t('header.theme_system')}</option>
-          <option value="light">{t('header.theme_light')}</option>
-          <option value="dark">{t('header.theme_dark')}</option>
-        </select>
-        <span className={styles.user} title={session.roles.map((r) => r.role).join(', ')}>
-          {session.principal.display_name || session.principal.id}
-        </span>
-        <button type="button" className={styles.logout} onClick={() => void logout()} aria-label={t('header.logout')}>
-          <LogOut aria-hidden="true" />
-        </button>
-      </header>
-      <ConditionStrip
-        conditions={conditions.data}
-        checkedAt={conditions.dataUpdatedAt || null}
-        now={now}
-        error={conditions.error ?? undefined}
-      />
-      {proposalOnly.length > 0 && (
-        <div className={styles.proposalOnly} role="alert">
-          {proposalOnly.map((c) => (
-            <StatusPill key={c.cluster_id} tone="bad" icon={STATUS.condition.frozen.icon} strong>
-              {t('header.proposal_only', { cluster: c.display_name })}
-            </StatusPill>
-          ))}
-        </div>
-      )}
-      {session.break_glass && (
-        <div className={styles.breakGlass} role="alert">
-          <ShieldAlert aria-hidden="true" />
-          {t('header.break_glass')}
-        </div>
-      )}
+          <select
+            aria-label={t('header.theme')}
+            value={prefs.theme}
+            onChange={(e) => setPrefs({ theme: e.currentTarget.value as ThemePref })}
+          >
+            <option value="system">{t('header.theme_system')}</option>
+            <option value="light">{t('header.theme_light')}</option>
+            <option value="dark">{t('header.theme_dark')}</option>
+          </select>
+          <span className={styles.user} title={session.roles.map((r) => r.role).join(', ')}>
+            {session.principal.display_name || session.principal.id}
+          </span>
+          <button type="button" className={styles.logout} onClick={() => void logout()} aria-label={t('header.logout')}>
+            <LogOut aria-hidden="true" />
+          </button>
+        </header>
+      </ErrorBoundary>
+      <ErrorBoundary area="ConditionStrip" resetKeys={[conditions.dataUpdatedAt]}>
+        <ConditionStrip
+          conditions={conditions.data}
+          checkedAt={conditions.dataUpdatedAt || null}
+          now={now}
+          error={conditions.error ?? undefined}
+        />
+      </ErrorBoundary>
+      <ErrorBoundary area="Banners" resetKeys={[clusters.dataUpdatedAt]}>
+        {proposalOnly.length > 0 && (
+          <div className={styles.proposalOnly} role="alert">
+            {proposalOnly.map((c) => (
+              <StatusPill key={c.cluster_id} tone="bad" icon={STATUS.condition.frozen.icon} strong>
+                {t('header.proposal_only', { cluster: c.display_name })}
+              </StatusPill>
+            ))}
+          </div>
+        )}
+        {session.break_glass && (
+          <div className={styles.breakGlass} role="alert">
+            <ShieldAlert aria-hidden="true" />
+            {t('header.break_glass')}
+          </div>
+        )}
+      </ErrorBoundary>
       <div className={styles.body}>
         <div className={styles.navWrap} data-open={menu ? '' : undefined}>
-          <Nav onNavigate={() => setMenu(false)} />
+          <ErrorBoundary area="Nav">
+            <Nav onNavigate={() => setMenu(false)} />
+          </ErrorBoundary>
         </div>
         <main className={styles.main} id="main">
-          <Outlet />
+          <ErrorBoundary area="Page" resetKeys={[pathname]}>
+            <Outlet />
+          </ErrorBoundary>
         </main>
       </div>
     </div>

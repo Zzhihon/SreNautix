@@ -1,6 +1,7 @@
 import { createTheme } from '@grafana/data';
 import { fireEvent, screen, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
+import { ErrorBoundary, setRenderErrorReporter, type RenderError } from '../primitives/ErrorBoundary';
 import { STATUS, Status } from '../primitives/Status';
 import {
   condition,
@@ -216,6 +217,63 @@ describe('状态条', () => {
     expect(strip.textContent).toContain('准入自检失败');
     expect(strip.textContent).toContain('模型路由熔断');
     expect(strip.textContent).not.toContain('时钟偏差');
+  });
+
+  it('reader 的条件与控制台不认识的类型：照常显示，不认识的类型按 warning 并显示类型名', () => {
+    renderUi(
+      <ConditionStrip
+        conditions={[
+          condition({
+            type: 'QueryManifest',
+            role: 'reader',
+            status: 'true',
+            message: 'declared evidence queries are rejected',
+          }),
+          // 契约之外的类型（较新的 server），绕过夹具的契约校验
+          {
+            ...condition({ type: 'ClockSkew', status: 'true', message: '较新的 server 上报的类型' }),
+            type: 'SomethingNew' as 'ClockSkew',
+          },
+        ]}
+        checkedAt={NOW}
+        now={NOW}
+      />,
+    );
+    const strip = screen.getByRole('alert');
+    expect(strip.getAttribute('data-level')).toBe('warning');
+    expect(strip.textContent).toContain('查询模板清单未加载');
+    expect(strip.textContent).toContain('SomethingNew');
+    expect(strip.textContent).toContain('较新的 server 上报的类型');
+  });
+});
+
+describe('错误边界', () => {
+  function Boom(): never {
+    throw new Error('坏数据');
+  }
+
+  it('子组件渲染出错只影响自己：显示一行说明并上报，兄弟组件照常渲染', () => {
+    const reported: RenderError[] = [];
+    setRenderErrorReporter((e) => reported.push(e));
+    const error = console.error;
+    console.error = () => undefined;
+    try {
+      renderUi(
+        <div>
+          <ErrorBoundary area="ConditionStrip">
+            <Boom />
+          </ErrorBoundary>
+          <p>页面其余部分</p>
+        </div>,
+      );
+    } finally {
+      console.error = error;
+      setRenderErrorReporter(() => undefined);
+    }
+    expect(screen.getByText('页面其余部分')).toBeTruthy();
+    expect(screen.getByRole('alert').textContent).toContain('ConditionStrip 显示出错，页面其他部分不受影响');
+    expect(screen.getByRole('alert').textContent).toContain('坏数据');
+    expect(reported.map((r) => r.area)).toEqual(['ConditionStrip']);
   });
 });
 

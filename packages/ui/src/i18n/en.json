@@ -103,6 +103,11 @@
   "condition.Restored": "Restoring from backup",
   "condition.Frozen": "Kill switch engaged",
   "condition.StormMode": "Alert storm mode",
+  "condition.InformersFresh": "Informers not synced",
+  "condition.TunnelConnected": "Reader not connected to the hub",
+  "condition.QueryManifest": "Query manifest not loaded",
+  "condition.Datasource": "Reader data source unavailable",
+  "condition.AlertReconcile": "Alert reconcile failed",
   "conditions.label": "System status",
   "conditions.loading": "Reading system status",
   "conditions.unreadable": "System status unreadable",
@@ -134,6 +139,7 @@
   "evidence.reason.observability_gap": "Observability gap",
   "evidence.reason.evaluation_error": "Evaluation error",
   "evidence.reason.all_clear": "No rule matched",
+  "evidence.reason.model_judged": "Judged by model",
   "evidence.chart_label": "Time series {ref}, {n} points",
   "evidence.table_source": "Raw data below, source: {source}",
   "evidence.window": "Window {from}–{to}",
@@ -491,5 +497,7 @@
   "detail.col.state": "State",
   "detail.col.disposition": "Disposition",
   "detail.col.level": "Conclusion",
-  "detail.col.root": "Root"
+  "detail.col.root": "Root",
+
+  "error_boundary.failed": "{area} failed to render; the rest of the page is unaffected"
 }

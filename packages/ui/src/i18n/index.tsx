@@ -1,6 +1,7 @@
 // 文案与格式化。文案使用 ICU MessageFormat，zh-CN 为默认语言，en 为第二语言；同一份 JSON
 // 由控制台、Grafana 插件和服务端的消息渲染共用（包导出 @srenautix/ui/messages/<语言>.json）。
-// 缺少的文案键直接抛出错误，测试保证两种语言的键集合一致。
+// 缺少的文案键：开发与测试环境直接抛出错误（测试保证两种语言的键集合一致，并覆盖契约里的全部枚举值）；
+// 生产环境不抛错，回退到英文文案或键本身，打一条 console.warn 并经上报函数报告一次，一个漏掉的键不能拖垮页面。
 
 import { IntlMessageFormat, type PrimitiveType } from 'intl-messageformat';
 import { createContext, useContext, useMemo, type ReactNode } from 'react';
@@ -129,18 +130,67 @@ function makeFormatters(locale: Locale, timeZone: string, t: I18n['t']): Formatt
   };
 }
 
+/** 缺少文案时的报告（每个 语言:键 只报告一次） */
+export interface MissingMessage {
+  locale: Locale;
+  id: string;
+  /** 实际显示的内容：英文文案或键本身 */
+  shown: string;
+}
+
+let missingReporter: (m: MissingMessage) => void = () => undefined;
+const reportedMissing = new Set<string>();
+
+/** 宿主登记缺少文案时的上报函数（例如发往前端错误收集）；默认只打 console.warn。 */
+export function setMissingMessageReporter(fn: (m: MissingMessage) => void): void {
+  missingReporter = fn;
+}
+
+/** 开发与测试环境缺少文案时抛错；生产构建（以及没有 Vite 环境变量的宿主）回退并报告 */
+function defaultStrict(): boolean {
+  const env = (import.meta as { env?: { DEV?: boolean; MODE?: string } }).env;
+  return env?.DEV === true || env?.MODE === 'test';
+}
+
 /** 不依赖 React 的 I18n，供服务端渲染、测试和非组件代码使用。 */
-export function createI18n(locale: Locale, timeZone: string, extra: Partial<Record<Locale, Messages>> = {}): I18n {
+export function createI18n(
+  locale: Locale,
+  timeZone: string,
+  extra: Partial<Record<Locale, Messages>> = {},
+  opts: { strict?: boolean } = {},
+): I18n {
+  const strict = opts.strict ?? defaultStrict();
   const catalog: Messages = { ...UI_MESSAGES[locale], ...(extra[locale] ?? {}) };
+  const fallback: Messages = { ...UI_MESSAGES.en, ...(extra.en ?? {}) };
   const cache = new Map<string, IntlMessageFormat>();
   const t = (id: string, values?: MessageValues): string => {
     let f = cache.get(id);
     if (!f) {
-      const src = catalog[id];
+      let src = catalog[id];
       if (src === undefined) {
-        throw new Error(`缺少文案 ${locale}:${id}`);
+        if (strict) {
+          throw new Error(`缺少文案 ${locale}:${id}`);
+        }
+        src = fallback[id] ?? id;
+        const k = `${locale}:${id}`;
+        if (!reportedMissing.has(k)) {
+          reportedMissing.add(k);
+          console.warn(`缺少文案 ${k}，显示为 ${JSON.stringify(src)}`);
+          try {
+            missingReporter({ locale, id, shown: src });
+          } catch {
+            // 上报失败不影响渲染
+          }
+        }
       }
-      f = new IntlMessageFormat(src, locale);
+      try {
+        f = new IntlMessageFormat(src, locale);
+      } catch (e) {
+        if (strict) {
+          throw e;
+        }
+        f = new IntlMessageFormat(id.replace(/[{}']/g, ''), locale);
+      }
       cache.set(id, f);
     }
     const out = f.format(values);
@@ -164,15 +214,21 @@ export function I18nProvider({
   locale,
   timeZone,
   extra,
+  strict,
   children,
 }: {
   locale: Locale;
   timeZone: string;
   /** 宿主自己的文案，与组件库的文案合并；同名键以宿主为准。 */
   extra?: Partial<Record<Locale, Messages>>;
+  /** 缺少文案时是否抛错；不填时开发与测试环境抛错、生产环境回退 */
+  strict?: boolean;
   children: ReactNode;
 }) {
-  const value = useMemo(() => createI18n(locale, timeZone, extra), [locale, timeZone, extra]);
+  const value = useMemo(
+    () => createI18n(locale, timeZone, extra, strict === undefined ? {} : { strict }),
+    [locale, timeZone, extra, strict],
+  );
   return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>;
 }
 

@@ -1,5 +1,5 @@
 // 本文件由 packages/contract/scripts/gen.ts 从 contract/ 生成，不要手工修改。
-export const CONTRACT_VERSION = '2.8.0';
+export const CONTRACT_VERSION = '2.9.0';
 
 export const SCHEMAS: Record<string, Record<string, unknown>> = {
   'https://srenautix.io/contract/gateway/v1/action-catalog.schema.json': {
@@ -1895,7 +1895,14 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
           'Restored',
           'Frozen',
           'StormMode',
+          'InformersFresh',
+          'TunnelConnected',
+          'QueryManifest',
+          'Datasource',
+          'AlertReconcile',
         ],
+        description:
+          'server、worker 等角色的条件；InformersFresh、TunnelConnected、QueryManifest、Datasource、AlertReconcile 由分支 reader 的心跳转来（role 为 reader，见 gateway/v1/reader.openapi.yaml 的 ReaderCondition），ClockSkew 两边都有。控制台必须容忍以后新增的类型',
       },
       status: { type: 'string', description: 'true 表示该问题正在发生', enum: ['true', 'false'] },
       role: { type: 'string', enum: ['server', 'worker', 'mcp', 'reader', 'gateway'] },

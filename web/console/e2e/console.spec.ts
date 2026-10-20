@@ -29,6 +29,53 @@ test('外壳：状态条不可关闭、导航分组、集群切换与搜索', as
   await expect(page.getByRole('heading', { name: '搜索：shop' })).toBeVisible();
 });
 
+test('状态条：server 上报控制台不认识的条件类型或坏数据时，页面照常渲染', async ({ page }) => {
+  const pageErrors: string[] = [];
+  page.on('pageerror', (e) => pageErrors.push(e.message));
+  const since = new Date(Date.now() - 600_000).toISOString().replace(/\.\d+Z$/, 'Z');
+  const cond = (type: string, extra: Record<string, unknown> = {}) => ({
+    type,
+    status: 'true',
+    role: 'reader',
+    cluster_id: 'e2e',
+    subject: null,
+    reason: 'NotMounted',
+    message: 'declared evidence queries are rejected',
+    since,
+    ...extra,
+  });
+  // reader 的 QueryManifest（CCHP 上曾因缺文案让整个控制台崩溃）与一个控制台不认识的类型
+  await page.route('**/v1/conditions**', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([cond('QueryManifest'), cond('SomethingNewFromAFutureServer', { role: 'server' })]),
+    }),
+  );
+  await go(page, '/incidents');
+  const strip = page.locator('[aria-label="系统状态"]');
+  await expect(strip).toContainText('查询模板清单未加载');
+  await expect(strip).toContainText('SomethingNewFromAFutureServer');
+  await expect(page.getByRole('navigation', { name: '主导航' })).toBeVisible();
+  await expect(page.getByRole('list', { name: '事件列表' }).getByRole('link').first()).toBeVisible();
+
+  // 条件的数据坏到状态条自身渲染出错：只有状态条降级，导航与页面照常
+  await page.unroute('**/v1/conditions**');
+  await page.route('**/v1/conditions**', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([cond('QueryManifest', { since: 'not-a-time' })]),
+    }),
+  );
+  await go(page, '/incidents');
+  await expect(page.locator('[data-error-boundary="ConditionStrip"]')).toBeVisible();
+  await expect(page.getByRole('navigation', { name: '主导航' })).toBeVisible();
+  await expect(page.getByRole('list', { name: '事件列表' }).getByRole('link').first()).toBeVisible();
+  await page.unroute('**/v1/conditions**');
+  expect(pageErrors).toEqual([]);
+});
+
 test('收件箱：事件行带处置判断、严重度、持续时长与待审批数，过滤条件写进 URL', async ({ page }) => {
   await go(page, '/incidents');
   const list = page.getByRole('list', { name: '事件列表' });

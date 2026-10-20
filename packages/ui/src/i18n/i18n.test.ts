@@ -2,7 +2,7 @@ import { IntlMessageFormat } from 'intl-messageformat';
 import { describe, expect, it } from 'vitest';
 import { CONDITION_SEVERITY } from '../domain/ConditionStrip';
 import { STATUS } from '../primitives/Status';
-import { createI18n, UI_MESSAGES } from './index';
+import { createI18n, setMissingMessageReporter, UI_MESSAGES, type MissingMessage } from './index';
 
 // 按枚举值拼接的文案键：每个取值在两种语言里都必须存在
 const ENUMS: Record<string, readonly string[]> = {
@@ -23,6 +23,7 @@ const ENUMS: Record<string, readonly string[]> = {
     'observability_gap',
     'evaluation_error',
     'all_clear',
+    'model_judged',
   ],
   'hypothesis.consistency': ['entity_in_scope', 'onset_precedes_symptom', 'no_contrary_normal', 'competitor_tested'],
   'inbox.blind': ['ingest_silent', 'observability_blind', 'state_store_degraded'],
@@ -109,8 +110,31 @@ describe('文案', () => {
     }
   });
 
-  it('缺少的键直接报错', () => {
+  it('开发与测试环境缺少的键直接报错', () => {
     expect(() => createI18n('zh-CN', 'UTC').t('no.such.key')).toThrow('缺少文案 zh-CN:no.such.key');
+  });
+
+  it('生产环境缺少的键不报错：回退到英文文案或键本身，警告并上报一次', () => {
+    const reported: MissingMessage[] = [];
+    setMissingMessageReporter((m) => reported.push(m));
+    const warn = console.warn;
+    const warned: unknown[] = [];
+    console.warn = (...a: unknown[]) => warned.push(a);
+    try {
+      const zh = createI18n('zh-CN', 'UTC', { en: { 'only.en': 'Only in English' } }, { strict: false });
+      expect(zh.t('no.such.key.prod')).toBe('no.such.key.prod');
+      expect(zh.t('no.such.key.prod')).toBe('no.such.key.prod');
+      expect(zh.t('only.en')).toBe('Only in English');
+      expect(zh.t('condition.QueryManifest')).toBe('查询模板清单未加载');
+    } finally {
+      console.warn = warn;
+      setMissingMessageReporter(() => undefined);
+    }
+    expect(reported).toEqual([
+      { locale: 'zh-CN', id: 'no.such.key.prod', shown: 'no.such.key.prod' },
+      { locale: 'zh-CN', id: 'only.en', shown: 'Only in English' },
+    ]);
+    expect(warned).toHaveLength(2);
   });
 
   it('时长与时刻按语言和时区格式化', () => {

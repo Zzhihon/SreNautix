@@ -2,8 +2,8 @@ export { DEFAULT_TOKENS, TOKEN_NAMES, cssVariables, tokenVar } from './theme/tok
 export type { ColorScheme, DesignTokens, Token } from './theme/tokens';
 export { ThemeRoot, usePortalContainer } from './theme/ThemeRoot';
 
-export { I18nProvider, LOCALES, UI_MESSAGES, createI18n, useI18n } from './i18n';
-export type { Formatters, I18n, Locale, MessageValues, Messages } from './i18n';
+export { I18nProvider, LOCALES, UI_MESSAGES, createI18n, setMissingMessageReporter, useI18n } from './i18n';
+export type { Formatters, I18n, Locale, MessageValues, Messages, MissingMessage } from './i18n';
 
 export { ApiError } from './port';
 export { createHubClientFor, createHubPort } from './hubPort';
@@ -44,6 +44,8 @@ export { Collapsible, Sheet, Tabs, Tip, Truncate } from './primitives/overlays';
 export type { TabDef } from './primitives/overlays';
 export { Segmented, SelectField, TextAreaField, TextField } from './primitives/form';
 export { DataTable } from './primitives/DataTable';
+export { ErrorBoundary, setRenderErrorReporter } from './primitives/ErrorBoundary';
+export type { RenderError } from './primitives/ErrorBoundary';
 export type { ColumnDef } from './primitives/DataTable';
 export { Chart, gaps } from './primitives/Chart';
 export type { Series } from './primitives/Chart';

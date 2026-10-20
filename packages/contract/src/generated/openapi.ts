@@ -1703,7 +1703,10 @@ export type components = {
       status: 'true' | 'false';
       /** @description 条件涉及的对象，例如集成实例 id、路由 id、领域包名 */
       subject: string | null;
-      /** @enum {string} */
+      /**
+       * @description server、worker 等角色的条件；InformersFresh、TunnelConnected、QueryManifest、Datasource、AlertReconcile 由分支 reader 的心跳转来（role 为 reader，见 gateway/v1/reader.openapi.yaml 的 ReaderCondition），ClockSkew 两边都有。控制台必须容忍以后新增的类型
+       * @enum {string}
+       */
       type:
         | 'IngestSilent'
         | 'WatchdogMissing'
@@ -1718,7 +1721,12 @@ export type components = {
         | 'StateStoreDegraded'
         | 'Restored'
         | 'Frozen'
-        | 'StormMode';
+        | 'StormMode'
+        | 'InformersFresh'
+        | 'TunnelConnected'
+        | 'QueryManifest'
+        | 'Datasource'
+        | 'AlertReconcile';
     };
     /** ConditionChangedEvent */
     ConditionChanged: {

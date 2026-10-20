@@ -103,6 +103,11 @@
   "condition.Restored": "从备份恢复中",
   "condition.Frozen": "熔断开关已打开",
   "condition.StormMode": "告警风暴模式",
+  "condition.InformersFresh": "informer 未就绪",
+  "condition.TunnelConnected": "reader 未连接中心",
+  "condition.QueryManifest": "查询模板清单未加载",
+  "condition.Datasource": "reader 数据源不可用",
+  "condition.AlertReconcile": "告警对账失败",
   "conditions.label": "系统状态",
   "conditions.loading": "正在读取系统状态",
   "conditions.unreadable": "读不到系统状态",
@@ -134,6 +139,7 @@
   "evidence.reason.observability_gap": "观测缺口",
   "evidence.reason.evaluation_error": "判定出错",
   "evidence.reason.all_clear": "未命中任何规则",
+  "evidence.reason.model_judged": "模型判定",
   "evidence.chart_label": "{ref} 的时间序列，{n} 个点",
   "evidence.table_source": "以下为数据原文，来源：{source}",
   "evidence.window": "窗口 {from}–{to}",
@@ -491,5 +497,7 @@
   "detail.col.state": "状态",
   "detail.col.disposition": "处置判断",
   "detail.col.level": "结论阶梯",
-  "detail.col.root": "根因"
+  "detail.col.root": "根因",
+
+  "error_boundary.failed": "{area} 显示出错，页面其他部分不受影响"
 }
