@@ -131,6 +131,90 @@ func quietLog() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, n
 // 回归：Argo CD Application 的 status.resources 里有名称带冒号的 RBAC 对象（cert-manager 的 ClusterRole）时，
 // reader 曾在 informer 回调中 panic 退出。现在冒号按 ADR 0034 编码进入拓扑；仍然无法生成键的条目（命名空间不是 DNS 标签、
 // kind 含空格）只跳过它自己并计数，Application 的其余受管资源与集群中其他对象的拓扑完整。
+// 回归：静态 Pod 的 controller owner 是 Node。顶层 owner 的键曾带上 Pod 的命名空间，拓扑里出现虚构的
+// Node:kube-system/<节点>。owner 边、配置引用边、NetworkPolicy 出站边与墓碑的 root_owner 都必须指向集群级的 Node:<节点>。
+func TestWatcherStaticPodOwnedByNode(t *testing.T) {
+	cfg, _ := testenv.StartKube(t, false)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cs := kubernetes.NewForConfigOrDie(cfg)
+	c := context.Background()
+
+	// kube-system 由 apiserver 自己创建
+	node := must(cs.CoreV1().Nodes().Create(c, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "control-plane-01"}}, metav1.CreateOptions{}))
+	must(cs.CoreV1().Services("kube-system").Create(c, svc("kube-system", "metrics"), metav1.CreateOptions{}))
+	must(cs.CoreV1().Pods("kube-system").Create(c, &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "kube-system", Name: "etcd-control-plane-01", Labels: map[string]string{"component": "etcd"},
+			OwnerReferences: []metav1.OwnerReference{ctrlRef("v1", "Node", "control-plane-01", node.UID)}},
+		Spec: corev1.PodSpec{NodeName: "control-plane-01", Containers: []corev1.Container{{Name: "etcd", Image: "etcd",
+			Env: []corev1.EnvVar{{Name: "METRICS", Value: "metrics.kube-system.svc:2381"}}}}},
+	}, metav1.CreateOptions{}))
+	must(cs.NetworkingV1().NetworkPolicies("kube-system").Create(c, &networkingv1.NetworkPolicy{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "kube-system", Name: "etcd-egress"},
+		Spec: networkingv1.NetworkPolicySpec{PodSelector: metav1.LabelSelector{MatchLabels: map[string]string{"component": "etcd"}},
+			PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeEgress},
+			Egress: []networkingv1.NetworkPolicyEgressRule{{To: []networkingv1.NetworkPolicyPeer{
+				{PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"component": "apiserver"}}}}}}},
+	}, metav1.CreateOptions{}))
+	must(cs.CoreV1().Pods("kube-system").Create(c, &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "kube-system", Name: "kube-apiserver-control-plane-01", Labels: map[string]string{"component": "apiserver"},
+			OwnerReferences: []metav1.OwnerReference{ctrlRef("v1", "Node", "control-plane-01", node.UID)}},
+		Spec: corev1.PodSpec{NodeName: "control-plane-01", Containers: []corev1.Container{{Name: "apiserver", Image: "apiserver"}}},
+	}, metav1.CreateOptions{}))
+
+	httpc, err := rest.HTTPClientFor(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := prometheus.NewRegistry()
+	rep := newReplica(t)
+	w := New(cs, nil, topology.NewStore("c1"), clock.New(httpc, cfg.Host, reg), rep.sink, reg, topology.NewReporter(reg, quietLog()))
+	if err := w.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"Pod:kube-system/etcd-control-plane-01|owned_by|Node:control-plane-01",
+		"Pod:kube-system/etcd-control-plane-01|runs_on|Node:control-plane-01",
+		"Node:control-plane-01|references|Service:kube-system/metrics",
+	}
+	testenv.Eventually(t, 10*time.Second, func() error {
+		for _, id := range want {
+			if !rep.hasEdge(id) {
+				return fmt.Errorf("missing edge %s; have %v", id, rep.edgeIDs())
+			}
+		}
+		return nil
+	})
+	// 两个静态 Pod 的顶层 owner 是同一个 Node：出站边的两端相同，不产生边
+	for _, id := range rep.edgeIDs() {
+		if strings.Contains(id, "Node:kube-system/") || strings.Contains(id, "egress_to") {
+			t.Fatalf("edge with a namespaced Node or a self egress edge: %s", id)
+		}
+	}
+	rep.mu.Lock()
+	for k := range rep.nodes {
+		if strings.HasPrefix(k, "Node:") && strings.Contains(k, "/") {
+			rep.mu.Unlock()
+			t.Fatalf("fictitious namespaced node %s", k)
+		}
+	}
+	rep.mu.Unlock()
+
+	if err := cs.CoreV1().Pods("kube-system").Delete(c, "etcd-control-plane-01", metav1.DeleteOptions{GracePeriodSeconds: ptr.To[int64](0)}); err != nil {
+		t.Fatal(err)
+	}
+	testenv.Eventually(t, 10*time.Second, func() error {
+		ts, ok := w.Tombstones().ByKey("Pod:kube-system/etcd-control-plane-01", time.Time{})
+		if !ok {
+			return fmt.Errorf("no tombstone yet")
+		}
+		if ts.RootOwner != "Node:control-plane-01" {
+			return fmt.Errorf("tombstone root owner %q", ts.RootOwner)
+		}
+		return nil
+	})
+}
+
 func TestWatcherSurvivesArgoResourcesWithColonNames(t *testing.T) {
 	cfg, _ := testenv.StartKube(t, true)
 	ctx, cancel := context.WithCancel(context.Background())

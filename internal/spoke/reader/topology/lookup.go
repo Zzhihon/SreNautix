@@ -32,16 +32,16 @@ type Lookup interface {
 	Pods(namespace string, selector labels.Selector) []*corev1.Pod
 }
 
-// RootOwner 沿 controller owner 链向上，返回最顶层的 owner 键（例如 Pod → ReplicaSet → Deployment）。
-// 没有 controller 的对象返回它自己的键；顶层 owner 无法生成合法的键时返回错误（*KeyError）。
+// RootOwner 沿 controller owner 链向上，返回最顶层的 owner 键（例如 Pod → ReplicaSet → Deployment，静态 Pod → Node）。
+// 链上出现集群级 kind 后命名空间为空。没有 controller 的对象返回它自己的键；顶层 owner 无法生成合法的键时返回错误（*KeyError）。
 func RootOwner(lk Lookup, kind, namespace, name string) (string, error) {
-	k, n := kind, name
+	k, ns, n := kind, OwnerNamespace(kind, namespace), name
 	for range 6 {
-		ref, ok := lk.ControllerOf(k, namespace, n)
+		ref, ok := lk.ControllerOf(k, ns, n)
 		if !ok {
 			break
 		}
-		k, n = ref.Kind, ref.Name
+		k, ns, n = ref.Kind, OwnerNamespace(ref.Kind, ns), ref.Name
 	}
-	return Key(k, namespace, n)
+	return Key(k, ns, n)
 }

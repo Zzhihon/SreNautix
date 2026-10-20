@@ -28,6 +28,32 @@ func KindName(group, kind string) string {
 	return kind + "." + group
 }
 
+// clusterScoped 是集群级的内置 kind（KindName 的形式）。命名空间内的对象可以把它们作为 owner（静态 Pod 的 owner 是 Node），
+// 这时 owner 的键不带命名空间。集群级的自定义资源无法从 ownerReference 判断作用域，按命名空间内对象处理。
+var clusterScoped = map[string]bool{
+	"Node": true, "Namespace": true, "PersistentVolume": true, "StorageClass": true, "CSIDriver": true, "CSINode": true,
+	"VolumeAttachment": true, "ClusterRole": true, "ClusterRoleBinding": true, "IngressClass": true,
+	"PriorityClass.scheduling.k8s.io": true, "RuntimeClass.node.k8s.io": true,
+	"CustomResourceDefinition.apiextensions.k8s.io":                 true,
+	"APIService.apiregistration.k8s.io":                             true,
+	"CertificateSigningRequest.certificates.k8s.io":                 true,
+	"MutatingWebhookConfiguration.admissionregistration.k8s.io":     true,
+	"ValidatingWebhookConfiguration.admissionregistration.k8s.io":   true,
+	"ValidatingAdmissionPolicy.admissionregistration.k8s.io":        true,
+	"ValidatingAdmissionPolicyBinding.admissionregistration.k8s.io": true,
+}
+
+// ClusterScoped 判断 kind（KindName 的形式）是否为集群级的内置资源。
+func ClusterScoped(kind string) bool { return clusterScoped[kind] }
+
+// OwnerNamespace 返回 owner 键使用的命名空间：owner 是集群级 kind 时为空，否则与依赖对象相同。
+func OwnerNamespace(ownerKind, dependentNamespace string) string {
+	if ClusterScoped(ownerKind) {
+		return ""
+	}
+	return dependentNamespace
+}
+
 // MaxKeyLength 是 ComponentKey 的最大长度（contract/schemas/common.schema.json）。
 const MaxKeyLength = 400
 

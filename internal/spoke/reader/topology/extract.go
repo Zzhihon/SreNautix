@@ -74,11 +74,7 @@ func generic(kind string, obj metav1.Object) (Contribution, string) {
 		}
 		ok := KindName(gv.Group, ref.Kind)
 		// 集群级 owner（例如静态 Pod 的 Node）没有命名空间
-		ns := obj.GetNamespace()
-		if ok == "Node" {
-			ns = ""
-		}
-		owner := c.ref(ok, ns, ref.Name, string(ref.UID), false)
+		owner := c.ref(ok, OwnerNamespace(ok, obj.GetNamespace()), ref.Name, string(ref.UID), false)
 		ev := "ownerReference"
 		if ref.Controller != nil && *ref.Controller {
 			ev = "ownerReference (controller)"

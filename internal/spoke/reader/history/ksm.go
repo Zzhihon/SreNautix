@@ -152,11 +152,7 @@ var rules = []rule{
 		if ns == "" || pod == "" || !ownerKinds[kind] || name == "" || name == "<none>" {
 			return
 		}
-		ons := ns
-		if kind == "Node" {
-			ons = ""
-		}
-		owner := b.node(kind, ons, name, "", false)
+		owner := b.node(kind, topology.OwnerNamespace(kind, ns), name, "", false)
 		b.edge(b.key("Pod", ns, pod), owner, topology.RelOwnedBy, topology.ScopeService, "kube_pod_owner")
 	}},
 	{metric: "kube_replicaset_owner", derive: func(l map[string]string, b *builder) {
@@ -165,7 +161,7 @@ var rules = []rule{
 			return
 		}
 		self := b.node("ReplicaSet", ns, rs, "", false)
-		b.edge(self, b.node(kind, ns, name, "", false), topology.RelOwnedBy, topology.ScopeService, "kube_replicaset_owner")
+		b.edge(self, b.node(kind, topology.OwnerNamespace(kind, ns), name, "", false), topology.RelOwnedBy, topology.ScopeService, "kube_replicaset_owner")
 	}},
 	{metric: "kube_job_owner", derive: func(l map[string]string, b *builder) {
 		ns, job, kind, name := l["namespace"], l["job_name"], l["owner_kind"], l["owner_name"]
@@ -173,7 +169,7 @@ var rules = []rule{
 			return
 		}
 		self := b.node("Job", ns, job, "", false)
-		b.edge(self, b.node(kind, ns, name, "", false), topology.RelOwnedBy, topology.ScopeService, "kube_job_owner")
+		b.edge(self, b.node(kind, topology.OwnerNamespace(kind, ns), name, "", false), topology.RelOwnedBy, topology.ScopeService, "kube_job_owner")
 	}},
 	{metric: "kube_pod_spec_volumes_persistentvolumeclaims_info", derive: func(l map[string]string, b *builder) {
 		ns, pod, claim := l["namespace"], l["pod"], l["persistentvolumeclaim"]

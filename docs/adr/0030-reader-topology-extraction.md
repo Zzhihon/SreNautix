@@ -32,7 +32,7 @@ DESIGN §4.1–§4.2 要求拓扑以事件形式保存（`valid_from` / `valid_t
    | `references` | Pod 的环境变量与 ConfigMap 值中的 Service DNS 名、ConfigMap 名、`secretKeyRef`/`envFrom`/卷中的 Secret 名 | config_ref 0.7 | service |
    | `egress_to` | NetworkPolicy 出站规则允许的对端 Pod | network_policy 0.6 | service |
 
-4. **配置引用与 NetworkPolicy 边的端点**：起点和终点都取 Pod 的顶层 controller owner（例如 Pod → ReplicaSet → Deployment），每个工作负载只有一条边，Pod 滚动更新不会改变它。
+4. **配置引用与 NetworkPolicy 边的端点**：起点和终点都取 Pod 的顶层 controller owner（例如 Pod → ReplicaSet → Deployment；静态 Pod 的顶层 owner 是 Node，集群级 kind 的键不带命名空间，写作 `Node:<节点>`），每个工作负载只有一条边，Pod 滚动更新不会改变它。
 5. **只读名称**：环境变量字面值与 ConfigMap 的值只在 reader 进程内用于匹配 Service DNS 名，不进入任何输出；证据字段只写"env DB_HOST"、"ConfigMap app-config key upstream"。Secret 从不读取，名称只从 Pod spec 的引用中得到。整个值就是 `<svc>` 或 `<svc>:<port>` 时才识别同命名空间的短名，`info`、`true` 之类的普通取值即使与某个 Service 同名也不产生边。
 6. **派生贡献的重算**：配置引用、CSI node plugin、NetworkPolicy 边依赖其他对象（ConfigMap、Service、PV、命名空间标签、ReplicaSet）。这些对象变化时，把受影响的派生贡献标为待重算，每 2 秒批量重算一次，避免一个 ConfigMap 变化触发上千次即时重算。
 7. **自定义资源**：识别器（`topology.Recognizer`）声明要监听的资源。reader 每分钟做一次资源发现，只为 apiserver 实际提供的资源启动 informer；资源消失时停止 informer 并撤回它的全部贡献。领域包声明的 Operator 约定通过同一接口接入。

@@ -34,6 +34,8 @@ var ksmFixture = []series{
 	{`kube_pod_info{namespace="app",pod="api-1",uid="u1",node="n1",pod_ip="10.0.0.7",host_network="false"}`, 0, time.Hour},
 	{`kube_pod_info{namespace="app",pod="api-1",uid="u2",node="n2",pod_ip="10.0.0.9",host_network="false"}`, 70 * time.Minute, 2 * time.Hour},
 	{`kube_pod_info{namespace="kube-system",pod="proxy-n1",uid="p1",node="n1",pod_ip="10.0.0.7",host_network="true"}`, 0, 2 * time.Hour},
+	// 静态 Pod 的 owner 是 Node：owner 节点是集群级的 Node:n1，不带 Pod 的命名空间
+	{`kube_pod_owner{namespace="kube-system",pod="proxy-n1",uid="p1",owner_kind="Node",owner_name="n1",owner_is_controller="true"}`, 0, 2 * time.Hour},
 	{`kube_pod_owner{namespace="app",pod="api-1",uid="u1",owner_kind="ReplicaSet",owner_name="api-rs",owner_is_controller="true"}`, 0, time.Hour},
 	{`kube_pod_owner{namespace="app",pod="api-1",uid="u2",owner_kind="ReplicaSet",owner_name="api-rs",owner_is_controller="true"}`, 70 * time.Minute, 2 * time.Hour},
 	{`kube_replicaset_owner{namespace="app",replicaset="api-rs",owner_kind="Deployment",owner_name="api",owner_is_controller="true"}`, 0, 2 * time.Hour},
@@ -184,6 +186,7 @@ func TestRebuildFromKubeStateMetricsOnPrometheusAndVictoriaMetrics(t *testing.T)
 		}
 		for _, id := range []string{
 			"ReplicaSet:app/api-rs|owned_by|Deployment:app/api",
+			"Pod:kube-system/proxy-n1|owned_by|Node:n1",
 			"PersistentVolumeClaim:app/api-data|bound_to|PersistentVolume:pv-1",
 			"PersistentVolume:pv-1|provisioned_by|CSIDriver:driver.example.io",
 		} {
