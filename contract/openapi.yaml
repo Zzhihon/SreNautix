@@ -304,6 +304,23 @@ paths:
           description: 阶段 A 报告
           content: { application/json: { schema: { $ref: './schemas/stage-a-report.schema.json' } } }
         '404': { $ref: '#/components/responses/Error' }
+  /v1/incidents/{incident_ref}/stage-a/recompute:
+    parameters: [{ $ref: '#/components/parameters/IncidentRef' }]
+    post:
+      tags: [incidents]
+      operationId: recomputeStageA
+      description: |
+        按当前加载的领域包与当前拓扑重新计算事件当前版本的阶段 A（证据卡、规则提议与处置判断），替换该版本的报告并发布 stage_a.reported。
+        只算阶段 A，不触发模型研判。写入治理审计。领域包变化（pack.lock 变化）后，仍在触发的事件由中心按限速自动重算（ADR 0107）
+      x-srenautix-roles: [responder, approver, admin]
+      x-srenautix-external: false
+      parameters: [{ $ref: '#/components/parameters/Csrf' }]
+      responses:
+        '200':
+          description: 新的阶段 A 报告
+          content: { application/json: { schema: { $ref: './schemas/stage-a-report.schema.json' } } }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
   /v1/incidents/{incident_ref}/evidence:
     parameters: [{ $ref: '#/components/parameters/IncidentRef' }]
     get:

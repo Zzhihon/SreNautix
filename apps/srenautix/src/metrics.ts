@@ -98,6 +98,13 @@ export class ServerMetrics extends BaseMetrics {
     registers: [this.registry],
   });
 
+  readonly stageARecomputes = new Counter({
+    name: 'srenautix_stage_a_recomputes_total',
+    help: '阶段 A 重算次数，按原因（manual：人工；pack_change：领域包变化后自动；before_research：研判前报告过期）',
+    labelNames: ['reason'] as const,
+    registers: [this.registry],
+  });
+
   readonly detectorLastScan = new Gauge({
     name: 'srenautix_detector_last_scan_timestamp_seconds',
     help: '集群状态检测器最近一次收到完整对象状态上报的时间',

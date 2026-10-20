@@ -34,7 +34,16 @@ export class EvidenceBook {
     }
     c.incident.members.filter((m) => m.left_version === null).forEach((m, i) => this.alerts.set(`alert:${i + 1}`, m));
     c.incident.changes.forEach((ch, i) => this.changes.set(`change:${i + 1}`, ch));
+    // 相关变更接在事件的变更后面编号；related 标出它们不在事件里
+    const n = c.incident.changes.length;
+    (c.relatedChanges ?? []).forEach((ch, i) => {
+      this.changes.set(`change:${n + i + 1}`, ch);
+      this.related.add(`change:${n + i + 1}`);
+    });
   }
+
+  /** 不在事件里的相关变更的引用 */
+  readonly related = new Set<string>();
 
   private addCard(
     result: EvidenceResult,

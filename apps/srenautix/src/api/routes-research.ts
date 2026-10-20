@@ -1,4 +1,4 @@
-import type { Alert, EvidenceResult, Feedback, Incident } from '@srenautix/contract';
+import type { Alert, ChangeEvent, EvidenceResult, Feedback, Incident } from '@srenautix/contract';
 import { Ajv2020, type ValidateFunction } from 'ajv/dist/2020.js';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type pg from 'pg';
@@ -15,7 +15,9 @@ import type { CompiledTemplate, PackRuntime } from '../stage-a/packs.js';
 import { appendAudit } from '../store/audit.js';
 import { tx } from '../store/pool.js';
 import type { TopologyStore } from '../topology/store.js';
-import { badRequest, forbidden, HttpError, notFound } from './errors.js';
+import { badRequest, conflict, forbidden, HttpError, notFound } from './errors.js';
+import { KubeToolError, type KubeTools } from '../research/kube-tools.js';
+import type { StageAService } from '../stage-a/service.js';
 import { referenceCases } from './research-materials.js';
 import { parseStoredKey } from '../topology/keys.js';
 
@@ -35,9 +37,46 @@ export interface ResearchRouteDeps {
   templates: Pick<PackEvidence, 'runTemplate'>;
   /** 知识条目的语言。 */
   locale: 'zh-CN' | 'en';
+  /** 本 server 所在的集群；Kubernetes 只读检查只对这个集群的事件提供 */
+  clusterId: string;
+  /** 阶段 B 的 Kubernetes 只读检查（ADR 0106）；没有配置集群只读权限时为 null */
+  kube?: KubeTools | null;
+  /** 研判输入里的相关变更：事件窗口内触及子图或同一命名空间的变更（变更源与从拓扑推导的发布） */
+  changes?: (clusterId: string, from: Date, to: Date) => Promise<ChangeEvent[]>;
+  /** 阶段 A 的重算（ADR 0107）：人工入口与研判前刷新 */
+  stageA?: Pick<StageAService, 'recompute' | 'current'>;
 }
 
 const ajv = new Ajv2020({ allErrors: true, strict: false });
+const toolValidators = new Map<string, ValidateFunction>();
+
+/** 事件涉及的命名空间：组件、候选根因、成员告警的实体、事件的变更目标与子图里的对象 */
+function namespacesOf(incident: Incident, nodes: readonly { namespace: string | null }[]): Set<string> {
+  const out = new Set<string>();
+  const add = (key: string | null) => {
+    if (!key) {
+      return;
+    }
+    try {
+      const k = parseStoredKey(key);
+      const ns = k.kind === 'Namespace' ? k.name : k.namespace;
+      if (ns) {
+        out.add(ns);
+      }
+    } catch {
+      // 不是组件键（逻辑组件等）
+    }
+  };
+  incident.components.forEach(add);
+  incident.candidates.forEach((c) => add(c.component));
+  incident.changes.forEach((c) => c.targets.forEach(add));
+  for (const n of nodes) {
+    if (n.namespace) {
+      out.add(n.namespace);
+    }
+  }
+  return out;
+}
 const validators = new WeakMap<CompiledTemplate, ValidateFunction>();
 
 /** 模板参数的校验器（按模板缓存）。 */
@@ -182,6 +221,10 @@ export function registerResearchRoutes(app: FastifyInstance, d: ResearchRouteDep
     await worker(req);
     const runId = (req.params as { run_id: string }).run_id;
     const { task: t, incident, topo } = await taskInput(runId);
+    // 研判用的报告是用旧的领域包算出来的（领域包增加、减少或升级之后）：先按当前领域包重算（ADR 0107）
+    if (d.stageA && !(await d.stageA.current(incident.incident_id, incident.incident_version))) {
+      await d.stageA.recompute(incident.incident_id, 'before_research', incident);
+    }
     const alerts: Alert[] = await alertsById(
       d.pool,
       incident.members.filter((m) => m.left_version === null).map((m) => m.alert_id),
@@ -209,7 +252,76 @@ export function registerResearchRoutes(app: FastifyInstance, d: ResearchRouteDep
       cases,
       templates: d.packs.templates.map((x) => ({ id: x.id, description: x.description, args: x.args })),
       pack_lock: d.packs.set.lockDigest,
+      hub_tools: d.kube && incident.cluster_id === d.clusterId ? d.kube.specs() : [],
+      related_changes: await relatedChanges(incident, topo.nodes),
     };
+  });
+
+  /** 事件窗口（首次触发前 2 小时到现在）内触及子图对象、或落在事件命名空间里的变更，不含已经在事件里的 */
+  const relatedChanges = async (incident: Incident, nodes: readonly { key: string; namespace: string | null }[]) => {
+    if (!d.changes) {
+      return [];
+    }
+    const from = new Date(Date.parse(incident.first_firing_at) - 2 * 3600_000);
+    const all = await d.changes(incident.cluster_id, from, new Date());
+    const own = new Set(incident.changes.map((c) => c.change_id));
+    const keys = new Set(nodes.map((n) => n.key));
+    const namespaces = namespacesOf(incident, nodes);
+    return all
+      .filter((c) => !own.has(c.change_id))
+      .filter((c) =>
+        c.targets.some((t) => {
+          if (keys.has(t)) {
+            return true;
+          }
+          try {
+            const ns = parseStoredKey(t).namespace;
+            return ns !== null && namespaces.has(ns);
+          } catch {
+            return false;
+          }
+        }),
+      )
+      .slice(-20);
+  };
+
+  /**
+   * 阶段 B 的 Kubernetes 只读检查（ADR 0106）：worker 以区分性检查调用，server 用自己的只读凭证读取当前状态。
+   * 只对本集群的事件、只在事件涉及的命名空间里；参数按工具的 schema 校验。
+   */
+  app.post('/v1/research/tasks/:run_id/tool', async (req) => {
+    await worker(req);
+    const body = (req.body ?? {}) as { name?: unknown; args?: unknown };
+    if (typeof body.name !== 'string' || !body.args || typeof body.args !== 'object' || Array.isArray(body.args)) {
+      throw badRequest('需要 name 与 args（JSON 对象）');
+    }
+    const { incident, topo } = await taskInput((req.params as { run_id: string }).run_id);
+    if (!d.kube || incident.cluster_id !== d.clusterId) {
+      throw conflict(
+        'kube_unavailable',
+        '本 server 不能读取这个集群的 Kubernetes 状态（只读检查只对 server 所在的集群提供）',
+      );
+    }
+    const spec = d.kube.specs().find((t) => t.name === body.name);
+    if (!spec) {
+      throw notFound(`没有工具 ${body.name}`);
+    }
+    let valid = toolValidators.get(spec.name);
+    if (!valid) {
+      valid = ajv.compile(spec.parameters);
+      toolValidators.set(spec.name, valid);
+    }
+    if (!valid(body.args)) {
+      throw badRequest(`参数不符合工具 ${spec.name} 的 schema：${ajv.errorsText(valid.errors)}`);
+    }
+    try {
+      return await d.kube.run(spec.name, body.args as Record<string, unknown>, namespacesOf(incident, topo.nodes));
+    } catch (e) {
+      if (e instanceof KubeToolError) {
+        throw new HttpError(422, 'tool_rejected', e.message);
+      }
+      throw e;
+    }
   });
 
   /**
@@ -319,6 +431,29 @@ export function registerResearchRoutes(app: FastifyInstance, d: ResearchRouteDep
         finished_at: x.finished_at?.toISOString() ?? null,
       })),
     ];
+  });
+
+  /** 按当前领域包与拓扑重算阶段 A（ADR 0107）：只算阶段 A，不触发模型；写入治理审计 */
+  app.post('/v1/incidents/:ref/stage-a/recompute', async (req) => {
+    const caller = await d.auth.user(req, 'research.request');
+    if (!d.stageA) {
+      throw conflict('unavailable', '阶段 A 不可用');
+    }
+    const inc = await resolveIncidentRef(d.pool, (req.params as { ref: string }).ref);
+    if (!inc) {
+      throw notFound('没有这个事件');
+    }
+    const out = await d.stageA.recompute(inc.incident_id, 'manual');
+    await tx(d.pool, (c) =>
+      appendAudit(c, 'stage_a.recompute', principalOf(caller), {
+        incident_id: inc.incident_id,
+        incident_version: out.report.incident_version,
+        report_id: out.report.report_id,
+        cards: out.report.cards.length,
+        disposition: out.report.disposition,
+      }),
+    );
+    return out.report;
   });
 
   app.post('/v1/incidents/:ref/research', async (req, reply) => {

@@ -1,4 +1,5 @@
 import type {
+  ChangeEvent,
   Alert,
   EvidenceResult,
   Feedback,
@@ -43,6 +44,10 @@ export interface TaskContext {
   templates: CheckTemplate[];
   /** 加载的领域包的 pack.lock 摘要，写入研判清单 */
   pack_lock: string;
+  /** server 提供的只读工具（Kubernetes 只读检查，ADR 0106）；旧版 server 没有这个字段 */
+  hub_tools?: Array<{ name: string; description: string; parameters: Record<string, unknown> }>;
+  /** 事件窗口内触及子图或事件命名空间、但不在事件里的变更 */
+  related_changes?: ChangeEvent[];
 }
 
 export class HubError extends Error {
@@ -136,6 +141,22 @@ export class HubClient {
       { timeoutMs: 45_000, signal },
     );
     return r.body as EvidenceResult;
+  }
+
+  /** server 提供的只读工具（POST /v1/research/tasks/{run_id}/tool） */
+  async runTool(
+    runId: string,
+    name: string,
+    args: Record<string, unknown>,
+    signal: AbortSignal,
+  ): Promise<{ text: string; truncated: boolean; bytes: number }> {
+    const r = await this.call<{ text: string; truncated: boolean; bytes: number }>(
+      'POST',
+      `/v1/research/tasks/${runId}/tool`,
+      { name, args },
+      { timeoutMs: 30_000, signal },
+    );
+    return r.body as { text: string; truncated: boolean; bytes: number };
   }
 
   async reportBudget(usedRatio: number): Promise<void> {

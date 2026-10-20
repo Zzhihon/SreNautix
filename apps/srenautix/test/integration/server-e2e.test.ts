@@ -28,6 +28,8 @@ import { FakeGitHub } from '../support/github.js';
 import { exampleWithTemplate } from '../support/packs.js';
 import { fixture, FixtureServer } from '../support/fixture-server.js';
 import { until } from '../support/monitoring.js';
+import { hubTools } from '../../src/tools/hub.js';
+import { ToolArgError } from '../../src/tools/limits.js';
 
 /**
  * server 角色端到端：真实 PostgreSQL、真实 HTTP。告警 webhook → 事件与阶段 A → 消息发出 → worker 认领与提议 →
@@ -486,6 +488,39 @@ describe('server 端到端', () => {
     expect(refused).toMatchObject({ verdict: 'undeterminable', reason: { kind: 'evaluation_error' } });
     expect(refused.reason.text).toContain('参数不符合模板');
     expect(validatorFor('schemas/evidence-result.schema.json')(refused)).toBe(true);
+    // 研判前报告用的是旧的 pack.lock（领域包变化）：先按当前领域包重算阶段 A（ADR 0107）
+    const lockOf = async () =>
+      (
+        await db.server.query<{ pack_lock: string | null }>(
+          'SELECT pack_lock FROM server.stage_a_reports WHERE incident_id = $1 AND incident_version = $2',
+          [incidentId, c.incident.incident_version],
+        )
+      ).rows[0]?.pack_lock;
+    expect(await lockOf()).toBe((c as unknown as { pack_lock: string }).pack_lock);
+    await db.server.query(
+      'UPDATE server.stage_a_reports SET pack_lock = $3 WHERE incident_id = $1 AND incident_version = $2',
+      [incidentId, c.incident.incident_version, 'sha256:old'],
+    );
+    expect((await api('GET', `/v1/research/tasks/${task.run_id}/context`, { token: TOKENS.worker })).status).toBe(200);
+    expect(await lockOf()).toBe((c as unknown as { pack_lock: string }).pack_lock);
+    // Kubernetes 只读检查（ADR 0106）：kube_reads 关闭时不提供工具，调用返回 409；worker 侧按参数错误记录
+    expect((c as unknown as { hub_tools: unknown[] }).hub_tools).toEqual([]);
+    expect((c as unknown as { related_changes: unknown[] }).related_changes).toEqual([]);
+    const tool = await api('POST', `/v1/research/tasks/${task.run_id}/tool`, {
+      token: TOKENS.worker,
+      body: { name: 'kube_pod_status', args: { namespace: 'shop', pod: 'x' } },
+    });
+    expect(tool.status).toBe(409);
+    expect(tool.body).toMatchObject({ error: 'kube_unavailable' });
+    const [ht] = hubTools(new HubClient(srv.apiUrl, TOKENS.worker), task.run_id, [
+      { name: 'kube_pod_status', description: 'x', parameters: {} },
+    ]);
+    await expect(
+      ht!.run(
+        { namespace: 'shop', pod: 'x' },
+        { bounds: { from: 0, to: Date.now() }, signal: AbortSignal.timeout(10_000) },
+      ),
+    ).rejects.toBeInstanceOf(ToolArgError);
     // 研判队列接口只对 worker 开放
     expect((await api('POST', `/v1/research/tasks/${task.run_id}/query`, { session: true, body: {} })).status).toBe(
       403,

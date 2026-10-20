@@ -1,4 +1,5 @@
 import type {
+  ChangeEvent,
   ActionCatalogAction,
   EvidenceResult,
   Feedback,
@@ -59,6 +60,8 @@ export interface ResearchCase {
   runbooks: string[];
   knowledge: KnowledgeItem[];
   cases: ReferenceCase[];
+  /** 事件窗口内触及子图或事件命名空间、但不在事件里的变更（ADR 0106）；旧快照没有时为空 */
+  relatedChanges?: ChangeEvent[];
   templates: CheckTemplate[];
   tools: CheckTool[];
   /** 研判时刻；回放时为快照的 as-of 时间 */

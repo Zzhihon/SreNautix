@@ -33,7 +33,66 @@ export class StageAService {
     private readonly rules: RuleProposer,
     private readonly proposals: ProposalService,
     private readonly metrics: ServerMetrics,
+    /** 当前加载的领域包的 pack.lock 摘要，写入报告（ADR 0107） */
+    private readonly packLock: () => string | null = () => null,
   ) {}
+
+  /**
+   * 仍在触发、报告是用别的 pack.lock 算出来的事件（领域包增加、减少或升级之后），最早触发的在前；
+   * 没有报告的事件不在其中（等事件引擎出报告）。
+   */
+  async stale(clusterId: string, limit: number): Promise<string[]> {
+    const lock = this.packLock();
+    if (lock === null) {
+      return [];
+    }
+    const r = await this.pool.query<{ incident_id: string }>(
+      `SELECT i.incident_id FROM server.incidents i
+         JOIN server.stage_a_reports s ON s.incident_id = i.incident_id AND s.incident_version = i.version
+        WHERE i.cluster_id = $1 AND i.state = 'firing' AND s.pack_lock IS DISTINCT FROM $2
+        ORDER BY i.first_firing_at LIMIT $3`,
+      [clusterId, lock, limit],
+    );
+    return r.rows.map((x) => x.incident_id);
+  }
+
+  /** 该事件版本的报告是否用当前的 pack.lock 算出；没有报告时为 false */
+  async current(incidentId: string, version: number): Promise<boolean> {
+    const lock = this.packLock();
+    const r = await this.pool.query<{ pack_lock: string | null }>(
+      'SELECT pack_lock FROM server.stage_a_reports WHERE incident_id = $1 AND incident_version = $2',
+      [incidentId, version],
+    );
+    const row = r.rows[0];
+    return row !== undefined && (lock === null || row.pack_lock === lock);
+  }
+
+  /**
+   * 按当前领域包与拓扑重算阶段 A；只算阶段 A，不触发研判。默认重算事件的当前版本，给出 version 的事件时重算那个版本
+   * （研判前刷新研判所用的版本）。
+   */
+  async recompute(
+    incidentId: string,
+    reason: 'manual' | 'pack_change' | 'before_research',
+    version?: Incident,
+  ): Promise<StageAOutcome> {
+    const r = version
+      ? { rows: [{ body: version }] }
+      : await this.pool.query<{ body: Incident }>('SELECT body FROM server.incidents WHERE incident_id = $1', [
+          incidentId,
+        ]);
+    const inc = r.rows[0]?.body;
+    if (!inc) {
+      throw new HttpError(404, 'not_found', '没有这个事件');
+    }
+    if (inc.state === 'merged') {
+      throw new HttpError(409, 'merged', '事件已合并到其他事件，重算吸收它的事件');
+    }
+    const out = await this.run(inc);
+    this.metrics.stageARecomputes.inc({ reason });
+    logger.info('阶段 A 已重算', { incident_id: incidentId, version: inc.incident_version, reason });
+    return out;
+  }
 
   async run(inc: Incident): Promise<StageAOutcome> {
     const memberIds = inc.members.filter((m) => m.left_version === null).map((m) => m.alert_id);
@@ -72,10 +131,11 @@ export class StageAService {
         JSON.stringify(fp.state),
       ]);
       await c.query(
-        `INSERT INTO server.stage_a_reports (report_id, incident_id, incident_version, disposition, evidence_fingerprint, degraded, body, first_firing_at, rendered_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        `INSERT INTO server.stage_a_reports (report_id, incident_id, incident_version, disposition, evidence_fingerprint, degraded, body, first_firing_at, rendered_at, pack_lock)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
          ON CONFLICT (incident_id, incident_version) DO UPDATE SET report_id = excluded.report_id, disposition = excluded.disposition,
-           evidence_fingerprint = excluded.evidence_fingerprint, degraded = excluded.degraded, body = excluded.body, rendered_at = excluded.rendered_at`,
+           evidence_fingerprint = excluded.evidence_fingerprint, degraded = excluded.degraded, body = excluded.body, rendered_at = excluded.rendered_at,
+           pack_lock = excluded.pack_lock`,
         [
           report.report_id,
           inc.incident_id,
@@ -86,6 +146,7 @@ export class StageAService {
           JSON.stringify(report),
           inc.first_firing_at,
           report.rendered_at,
+          this.packLock(),
         ],
       );
       // 组件的可读名称（ADR 0101）：只更新求出了名称的组件，求不出时保留上一次的名称

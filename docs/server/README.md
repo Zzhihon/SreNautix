@@ -224,6 +224,21 @@ detectors:
 
 指标：`srenautix_detector_last_scan_timestamp_seconds{cluster_id}`、`srenautix_detector_findings{cluster_id,kind}`、`srenautix_detector_alerts_total{cluster_id,kind}`、`srenautix_detector_scan_errors_total{cluster_id}`；首个症状到事件创建的时长 `srenautix_incident_detection_seconds{source}`。
 
+## 阶段 A 重算
+
+阶段 A 报告记录计算时的 pack.lock。领域包变化后，主实例每分钟为最多 `stage_a.recompute_per_minute`（默认 10）个仍在触发的事件重算阶段 A；研判开始前报告过期时先重算；人工入口 `POST /v1/incidents/{ref}/stage-a/recompute`（`research.request`，写治理审计）。只算阶段 A，不触发模型（ADR 0107）。
+
+## 阶段 B 的 Kubernetes 只读检查
+
+`kube_reads.enabled` 打开后（需要 `roles.server.clusterRead`），区分性检查可以用 `kube_pod_status`、`kube_workload_pods`、`kube_events`、`kube_logs` 读取 server 所在集群的当前状态，只限事件涉及的命名空间，结果脱敏并截断（ADR 0106）。
+
+```yaml
+kube_reads:
+  enabled: true
+  tail_lines: 100
+  max_bytes: 16384
+```
+
 ## 变更源
 
 事件引擎把首次触发前 30 分钟内、触及事件组件的变更放进事件（`incident.changes`），并作为根因排序的一项（DESIGN §5）。变更来自配置的变更源。hub 镜像不带 git，变更源只支持托管在 GitHub 上的仓库（`integrations/github`，ADR 0096），经 `github_app` 的安装令牌用 REST API 读取：

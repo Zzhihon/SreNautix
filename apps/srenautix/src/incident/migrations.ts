@@ -163,5 +163,14 @@ CREATE TABLE server.component_names (
 );
 `,
     },
+    {
+      version: 4,
+      name: 'pack lock of each stage A report',
+      phase: 'expand',
+      sql: `
+-- 阶段 A 报告计算时加载的领域包（pack.lock 摘要）：领域包变化后据此找出需要重算的事件（ADR 0107）
+ALTER TABLE server.stage_a_reports ADD COLUMN pack_lock text;
+`,
+    },
   ],
 };

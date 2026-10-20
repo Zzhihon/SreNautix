@@ -339,6 +339,18 @@ export const serverConfigSchema = z
         interval: '30s',
         equivalent_alerts: {},
       }),
+    // 阶段 B 的 Kubernetes 只读检查（ADR 0106）：Pod 状态、事件、Pod 列表与容器日志尾部，只对本集群的事件提供。
+    // 需要 server 的集群只读权限（chart 的 roles.server.clusterRead，含 pods/log）；默认关闭
+    kube_reads: z
+      .object({
+        enabled: z.boolean().default(false),
+        // 不填时用集群内的 ServiceAccount
+        kubeconfig: path.optional(),
+        tail_lines: z.number().int().min(10).max(500).default(100),
+        max_bytes: z.number().int().min(1024).max(65536).default(16384),
+      })
+      .strict()
+      .default({ enabled: false, tail_lines: 100, max_bytes: 16384 }),
     github_app: githubApp.optional(),
     // 需要人跟进的事件在 GitHub 开 issue（ADR 0095）；默认关闭
     issues: z
@@ -358,9 +370,14 @@ export const serverConfigSchema = z
       .strict()
       .optional(),
     stage_a: z
-      .object({ language: z.enum(['zh', 'en']).default('zh'), top_k: z.number().int().min(1).max(10).default(3) })
+      .object({
+        language: z.enum(['zh', 'en']).default('zh'),
+        top_k: z.number().int().min(1).max(10).default(3),
+        // 领域包变化（pack.lock 变化）后，每分钟最多为这么多个仍在触发的事件重算阶段 A（ADR 0107）；0 关闭
+        recompute_per_minute: z.number().int().min(0).max(100).default(10),
+      })
       .strict()
-      .default({ language: 'zh', top_k: 3 }),
+      .default({ language: 'zh', top_k: 3, recompute_per_minute: 10 }),
     scheduler: z
       .object({
         slots: z.number().int().min(1).max(64).default(4),

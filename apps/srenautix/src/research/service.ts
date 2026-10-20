@@ -21,6 +21,7 @@ import type { Language } from '../prompts/index.js';
 import type { WorkerStore } from './store.js';
 import type { ResearchCase, Subgraph } from './types.js';
 import { parseStoredKey } from '../topology/keys.js';
+import { hubTools } from '../tools/hub.js';
 
 // worker 的阶段 B 循环：认领 → 读取输入 → 预算门控 → 研判（续租）→ 提议中转 → 写结果与事件 → 释放任务。
 // 一次研判的任何错误只影响这一个任务：记为 failed 并发布 research.failed，阶段 A 的消息依然有效。
@@ -136,6 +137,7 @@ export function toResearchCase(ctx: TaskContext, tools: Tool[], now: number): Re
     knowledge: ctx.knowledge,
     // 只用研判开始之前已解决的案例（与回放的防泄漏规则相同）
     cases: ctx.cases.filter((c) => Date.parse(c.resolved_at) < now),
+    relatedChanges: ctx.related_changes ?? [],
     templates: ctx.templates,
     tools: tools.map((t) => ({ name: t.name, description: t.description, parameters: t.parameters })),
     asOf: new Date(now).toISOString(),
@@ -260,7 +262,9 @@ export class WorkerService {
       return 'stage_a_only';
     }
     const previous = await d.store.previous(inc.incident_id);
-    const toolSet = await d.tools();
+    const mcpTools = await d.tools();
+    // MCP 的只读工具加上 server 提供的 Kubernetes 只读检查（ADR 0106）
+    const toolSet = { ...mcpTools, tools: [...mcpTools.tools, ...hubTools(d.hub, task.run_id, ctx.hub_tools ?? [])] };
     let res: ResearchRunResult;
     const steps: Array<{ state: string; started_at: string; finished_at: string | null }> = [];
     const rc = toResearchCase(ctx, toolSet.tools, Date.now());

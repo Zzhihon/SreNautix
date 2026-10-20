@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
+import type { ChangeEvent } from '@srenautix/contract';
 import type { ResolvedRcaParams } from '@srenautix/core';
 import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
@@ -63,6 +64,7 @@ import { migrateWhenReady } from '../store/migrate-when-ready.js';
 import type { OutboxEvent } from '../store/outbox.js';
 import { createPool, type PgConfig } from '../store/pool.js';
 import { startInformerTopology } from '../topology/informer.js';
+import { KubeTools } from '../research/kube-tools.js';
 import { FirstSeen, objectHealth, type K8sObject } from '../detectors/health.js';
 import { DetectorService, detectorSettings } from '../detectors/service.js';
 import { GitHubApp } from '../github/app.js';
@@ -414,32 +416,33 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
   );
 
   // 事件引擎与阶段 A
+  // 变更源的变更加上从拓扑事件推导的 Kubernetes 发布（ADR 0104）
+  const engineChanges = async (clusterId: string, from: Date, to: Date): Promise<ChangeEvent[]> => {
+    const stored = await changesInWindow(pool, clusterId, from, to);
+    const k = c.changes.kubernetes;
+    if (!k.enabled) {
+      return stored;
+    }
+    const derived = await kubernetesRollouts(pool, from, to, {
+      clusterId,
+      revisionLabels: k.revision_labels,
+      groupWithinMs: parseDuration('changes.kubernetes.group_within', k.group_within),
+    });
+    return [...stored, ...derived].sort(
+      (a, b) => a.time.localeCompare(b.time) || a.change_id.localeCompare(b.change_id),
+    );
+  };
   const engine = new IncidentEngine({
     pool,
     topology,
     params,
-    // 变更源的变更加上从拓扑事件推导的 Kubernetes 发布（ADR 0104）
-    changes: async (clusterId, from, to) => {
-      const stored = await changesInWindow(pool, clusterId, from, to);
-      const k = c.changes.kubernetes;
-      if (!k.enabled) {
-        return stored;
-      }
-      const derived = await kubernetesRollouts(pool, from, to, {
-        clusterId,
-        revisionLabels: k.revision_labels,
-        groupWithinMs: parseDuration('changes.kubernetes.group_within', k.group_within),
-      });
-      return [...stored, ...derived].sort(
-        (a, b) => a.time.localeCompare(b.time) || a.change_id.localeCompare(b.change_id),
-      );
-    },
+    changes: engineChanges,
     probes: async () => [],
     stale: proposals,
     metrics,
     suppressedAlertIds: (cl, clusterId, ids) => suppressedAlertIds(cl as pg.PoolClient, clusterId, ids),
   });
-  const stageA = new StageAService(pool, evidence, rules, proposals, metrics);
+  const stageA = new StageAService(pool, evidence, rules, proposals, metrics, () => packs.set.lockDigest);
   let degraded = false;
   const pipeline = new IncidentPipeline(c.cluster_id, engine, stageA, scheduler, pool, metrics, {
     changed: () => notify.syncNow(),
@@ -556,6 +559,15 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
     packs,
     templates: evidence,
     locale: evidenceOptions.locale,
+    clusterId: c.cluster_id,
+    kube: c.kube_reads.enabled
+      ? new KubeTools(c.kube_reads.kubeconfig ?? c.topology.kubeconfig, {
+          tailLines: c.kube_reads.tail_lines,
+          maxBytes: c.kube_reads.max_bytes,
+        })
+      : null,
+    changes: engineChanges,
+    stageA,
   });
   registerIncidentRoutes(app, { pool, auth, feedback, topology, evidence, worker });
   registerSystemRoutes(app, {
@@ -672,6 +684,18 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
     signal,
   );
   every(30_000, () => proposals.expire(), '提议过期检查');
+  // 领域包变化后重算仍在触发的事件的阶段 A（ADR 0107）：限速，只算阶段 A，不触发模型
+  if (c.stage_a.recompute_per_minute > 0) {
+    every(
+      60_000,
+      async () => {
+        for (const id of await stageA.stale(c.cluster_id, c.stage_a.recompute_per_minute)) {
+          await stageA.recompute(id, 'pack_change');
+        }
+      },
+      '领域包变化后的阶段 A 重算',
+    );
+  }
   if (changes.configured) {
     every(parseDuration('changes.interval', c.changes.interval), () => changes.syncOnce(), '变更源同步');
     void leader
