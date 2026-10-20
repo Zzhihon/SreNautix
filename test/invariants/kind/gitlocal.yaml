@@ -1,0 +1,50 @@
+# 不变量 12 在 Kind 中使用的本地 Git 服务（deploy/kind/gitlocal，镜像 deploy/docker/gitlocal.Dockerfile）：真实的 bare 仓库，
+# 开启 /_test 控制接口，不校验 App JWT 的签名（测试每次生成自己的密钥），slug 与安装 ID 与测试中的 App 相同。
+# 不变量集群删除了 kube-scheduler 与 kube-controller-manager，因此是直接指定节点的裸 Pod。run.sh 用 envsubst 填入 NODE_NAME。
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: gitlocal
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: gitlocal-invariants
+  namespace: gitlocal
+  labels: {app: gitlocal-invariants}
+spec:
+  nodeName: ${NODE_NAME}
+  tolerations:
+    - {operator: Exists}
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 65532
+    fsGroup: 65532
+    seccompProfile: {type: RuntimeDefault}
+  containers:
+    - name: gitlocal
+      image: srenautix.local/gitlocal:invariants
+      imagePullPolicy: Never
+      args:
+        - -listen=:3000
+        - -data=/var/lib/gitlocal
+        - -public-url=http://gitlocal-invariants.gitlocal.svc:3000
+        - -app-slug=srenautix-test
+        - -installation-id=2
+        - -test-api
+      env:
+        - {name: HOME, value: /var/lib/gitlocal}
+      ports:
+        - {name: http, containerPort: 3000}
+      readinessProbe:
+        httpGet: {path: /healthz, port: http}
+        periodSeconds: 2
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities: {drop: [ALL]}
+      volumeMounts:
+        - {name: data, mountPath: /var/lib/gitlocal}
+        - {name: tmp, mountPath: /tmp}
+  volumes:
+    - {name: data, emptyDir: {}}
+    - {name: tmp, emptyDir: {}}

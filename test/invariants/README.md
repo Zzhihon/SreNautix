@@ -47,3 +47,4 @@ make go-test
 | 8 | DESIGN §16.1 要求随机 1000 次 `kill -9`；envtest 上只做每个故障点 1 轮 |
 | 2、3、4、10、11 | 在发行版的 kube-apiserver（kubeadm 配置、审计后端）上复核准入、RBAC 与审计日志的行为 |
 | 3（中心一侧） | 只提议时中心对执行请求返回 409，由 TS 的不变量测试在 Kind 上与 gateway 一起验证 |
+| 12 | 补偿控制在真实的 bare 仓库上验证：集群中运行本地 Git 服务 gitlocal（`test/invariants/kind/gitlocal.yaml`），经 port-forward 访问；进程内的 Git 服务与 gitlocal 实现同一套 REST 子集与 `/_test` 控制接口，测试代码相同 |
