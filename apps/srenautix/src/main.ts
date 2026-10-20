@@ -24,6 +24,8 @@ export interface RoleArgs {
   serve: 'all' | 'api' | 'console';
 }
 
+const DEFAULT_CONFIG = '/etc/srenautix/config.yaml';
+
 const ROLES = ['server', 'worker', 'mcp'] as const;
 type Role = (typeof ROLES)[number];
 
@@ -40,20 +42,20 @@ async function main(): Promise<void> {
     const { runPackCli } = await import('@srenautix/packs-sdk');
     process.exit(await runPackCli(process.argv.slice(3)));
   }
-  const { values, positionals } = parseArgs({
-    allowPositionals: true,
+  // 运维子命令各有自己的选项（db bootstrap --admin-password-file、audit verify --source），由 commands.ts 按子命令严格解析
+  if (process.argv[2] !== undefined && !process.argv[2].startsWith('-')) {
+    const { runCommand } = await import('./commands.js');
+    await runCommand(process.argv.slice(2));
+    return;
+  }
+  const { values } = parseArgs({
     options: {
       role: { type: 'string' },
-      config: { type: 'string', default: '/etc/srenautix/config.yaml' },
+      config: { type: 'string', default: DEFAULT_CONFIG },
       serve: { type: 'string', default: 'all' },
     },
   });
   const configPath = values.config as string;
-  if (positionals.length) {
-    const { runCommand } = await import('./commands.js');
-    await runCommand(positionals, configPath);
-    return;
-  }
   const role = values.role as Role | undefined;
   if (!role || !(ROLES as readonly string[]).includes(role)) {
     throw new Error(`--role 必须是 ${ROLES.join(' | ')}`);
