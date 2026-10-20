@@ -26,7 +26,8 @@ const USAGE = `用法：srenautix pack <命令> [选项]
 命令：
   lint     加载并编译领域包（schema、交叉引用、CEL、PromQL 严格解析、动作目录），输出 pack.lock 摘要
   lock     计算 pack.lock；--write 写入文件，--check 与已有文件比对
-  test     在 Prometheus 与 VictoriaMetrics 上执行夹具与自动测试；--replay 改为在 tests/replay/*.json 快照上执行
+  test     在 Prometheus 与 VictoriaMetrics 上执行夹具与自动测试；--replay 改为在 tests/replay/*.json 快照上执行；
+           --test <包名> 只执行这些包的测试（其余包仍然加载，供跨包引用的证据链编译），可重复
   record   在真实数据源上执行卡片并录制查询邻域快照
   doctor   覆盖情况：已解析的信号、14 天内未映射的告警名、没有证据链的组件
 
@@ -114,6 +115,7 @@ export async function runPackCli(
       packs: { type: 'string' },
       pack: { type: 'string', multiple: true },
       only: { type: 'string', multiple: true },
+      test: { type: 'string', multiple: true },
       layer: { type: 'string', multiple: true },
       catalog: { type: 'string' },
       lock: { type: 'string' },
@@ -168,10 +170,16 @@ export async function runPackCli(
     }
     case 'test': {
       const set = await loadSet(v);
+      const tested = v.test as string[] | undefined;
+      for (const n of tested ?? []) {
+        if (!set.packs.some((p) => p.name === n)) {
+          throw new Error(`--test 指定的包 ${n} 没有加载`);
+        }
+      }
       if (v.replay) {
         let failed = 0;
         let files = 0;
-        for (const p of set.packs) {
+        for (const p of set.packs.filter((x) => !tested || tested.includes(x.name))) {
           const dir = join(p.dir, 'tests', 'replay');
           if (!existsSync(dir)) {
             continue;
@@ -196,7 +204,7 @@ export async function runPackCli(
         }
         return failed ? 1 : 0;
       }
-      const report = await runPackTests({ set });
+      const report = await runPackTests({ set, ...(tested ? { packs: tested } : {}) });
       if (v.json) {
         io.out(JSON.stringify(report, null, 2) + '\n');
       } else {

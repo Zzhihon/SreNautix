@@ -1,0 +1,6 @@
+# 按 kind 兜底的组件类型：只有 kind 约束，具体度最低，不会抢走其他包中更具体的类型匹配的对象。
+# 告警实体是节点、又没有更具体的类型时，执行这里的证据链。
+component_types:
+  - id: kubernetes.node
+    match: { kind: Node }
+    chains: [node-health, node-filesystem, node-network, node-time]

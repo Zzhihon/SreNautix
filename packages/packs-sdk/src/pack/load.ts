@@ -74,13 +74,27 @@ const SUBDIRS: Record<string, RegExp> = {
   tests: /^[a-z0-9][a-z0-9_-]*\.yaml$/,
 };
 
+// 以 ConfigMap 挂载的包：键不能含 '/'，子目录中的文件写成 <子目录>__<文件名>（tests/replay 下的写成 tests__replay__<文件名>），
+// 加载时还原为子目录路径；挂载点里 kubelet 生成的 ..data、..<时间戳> 不属于包内容
+const FLAT_KEY = /^(runbooks|knowledge|prompts|chaos|tests)__(?:(replay)__)?([^/]+)$/;
+
 function walk(dir: string): string[] {
   return readdirSync(dir)
+    .filter((n) => !n.startsWith('..'))
     .sort()
     .flatMap((n) => {
       const p = join(dir, n);
       return statSync(p).isDirectory() ? walk(p) : [p];
     });
+}
+
+/** 包内相对路径；ConfigMap 键形式的子目录文件还原为子目录路径 */
+function packPath(rel: string): string {
+  const m = FLAT_KEY.exec(rel);
+  if (!m) {
+    return rel;
+  }
+  return m[2] ? `${m[1]}/${m[2]}/${m[3]}` : `${m[1]}/${m[3]}`;
 }
 
 function readYaml<T>(file: string, schemaRef: string): T {
@@ -96,8 +110,13 @@ export function loadPackDir(dir: string, source: string): LoadedPack {
   if (!existsSync(join(dir, 'pack.yaml'))) {
     throw new PackLintError(dir, '目录中没有 pack.yaml');
   }
+  const seen = new Set<string>();
   const files = walk(dir).map((abs) => {
-    const rel = relative(dir, abs).split(sep).join('/');
+    const rel = packPath(relative(dir, abs).split(sep).join('/'));
+    if (seen.has(rel)) {
+      throw new PackLintError(join(dir, rel), '同一文件同时以子目录与 ConfigMap 键两种形式出现');
+    }
+    seen.add(rel);
     const parts = rel.split('/');
     const ok =
       (parts.length === 1 && TOP_FILES.has(rel)) ||

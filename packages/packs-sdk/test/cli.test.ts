@@ -164,6 +164,19 @@ describe('srenautix pack', () => {
     expect(out.join('')).toMatch(/快照未命中率 0\.0%/);
   });
 
+  it('test --test 只执行指定包的测试，其余包照常加载', async () => {
+    out.length = 0;
+    expect(
+      await runPackCli(['test', ...common, '--only', '_example', '--only', 'node', '--test', '_example'], io),
+    ).toBe(0);
+    const text = out.join('');
+    expect(text).toMatch(/通过 {2}_example/);
+    expect(text).not.toMatch(/通过 {2}node/);
+    await expect(runPackCli(['test', ...common, '--only', 'node', '--test', 'missing'], io)).rejects.toThrow(
+      /--test 指定的包 missing 没有加载/,
+    );
+  });
+
   it('doctor 报告信号、未映射告警与没有证据链的组件', async () => {
     out.length = 0;
     const at = new Date(T0 + 60 * MIN).toISOString();

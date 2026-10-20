@@ -1,0 +1,8 @@
+# 按 kind 兜底的组件类型：只有 kind 约束，具体度最低，不会抢走其他包中更具体的类型匹配的对象。
+component_types:
+  - id: kubernetes.pvc
+    match: { kind: PersistentVolumeClaim }
+    chains: [pvc-capacity]
+  - id: kubernetes.pv
+    match: { kind: PersistentVolume }
+    chains: [pvc-capacity]

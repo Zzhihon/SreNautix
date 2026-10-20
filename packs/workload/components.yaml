@@ -1,0 +1,21 @@
+# 按 kind 兜底的组件类型：只有 kind 约束，具体度最低，不会抢走其他包中更具体的类型匹配的对象。
+# 告警实体是工作负载、又没有更具体的类型时，执行这里的证据链。
+component_types:
+  - id: kubernetes.pod
+    match: { kind: Pod }
+    chains: [pod-restarts, pod-pending]
+  - id: kubernetes.deployment
+    match: { kind: Deployment }
+    chains: [rollout, pod-restarts, pod-pending]
+  - id: kubernetes.statefulset
+    match: { kind: StatefulSet }
+    chains: [rollout, pod-restarts, pod-pending]
+  - id: kubernetes.daemonset
+    match: { kind: DaemonSet }
+    chains: [rollout, pod-restarts, pod-pending]
+  - id: kubernetes.job
+    match: { kind: Job }
+    chains: [job]
+  - id: kubernetes.hpa
+    match: { kind: HorizontalPodAutoscaler }
+    chains: [capacity]
