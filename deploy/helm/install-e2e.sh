@@ -106,6 +106,8 @@ for role in server worker reader gateway; do
   [[ "${ready:-0}" -ge 1 ]] || { log "srenautix-$role 没有就绪的副本"; exit 1; }
   log "srenautix-${role}：${ready} 个副本就绪"
 done
+# 之后 server 不应再有读取 worker 事件流失败的日志（启动时 worker 尚未就绪的重试不计入）
+ready_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
 log "检查 gateway 的准入自检与熔断开关（从 monitoring 命名空间读取指标）"
 deadline=$((SECONDS + 180))
@@ -146,5 +148,61 @@ k -n "$ns" get configmap srenautix-server-config -o jsonpath='{.data.config\.yam
   grep -q 'private_key_file: /etc/srenautix/secrets/github-app/private-key.pem' ||
   { log "server 配置中没有 GitHub App 私钥路径"; exit 1; }
 log "server 的 GitHub App 凭证已挂载，配置指向挂载路径"
+
+# server 与 worker 双向连通（chart 的 NetworkPolicy 打开）：worker 主动访问 server 认领任务、上报路由；
+# server 主动拉取 worker 的 /v1/events（研判事件）与 /v1/runs/*（运行明细）。docs/install 中有完整的连通矩阵
+log "检查 NetworkPolicy 生效：monitoring 命名空间的 Pod 连不上 worker 的 API"
+probe=$(k -n monitoring run "np-probe-$RANDOM" --image="$busybox" --restart=Never --rm -i --quiet -- \
+  wget -q -T 5 -O /dev/null "http://srenautix-worker.$ns.svc:8080/v1/events" 2>&1 || true)
+[[ "$probe" == *"timed out"* ]] || { log "monitoring 中的 Pod 能连上 worker 的 API（NetworkPolicy 没有生效）：$probe"; exit 1; }
+
+log "检查 server 能读取 worker 的事件流（server 主动发起，worker:8080）"
+k -n "$ns" exec deploy/srenautix-server -c server -- /nodejs/bin/node -e \
+  "const t = require('node:fs').readFileSync('/etc/srenautix/secrets/worker-client/token', 'utf8').trim();
+   fetch('http://srenautix-worker.$ns.svc:8080/v1/events?after=worker:0&limit=1', { headers: { authorization: 'Bearer ' + t } })
+     .then(async (r) => { if (r.status !== 200) { console.error('HTTP ' + r.status + ' ' + (await r.text())); process.exit(1); } })
+     .catch((e) => { console.error(e.cause?.code ?? e.message); process.exit(1); });" ||
+  { log "server 读取 worker 的 /v1/events 失败"; exit 1; }
+
+log "注入一条告警，等待阶段 B 的研判经 worker 事件流回到 server"
+# 模型端点在测试环境中不可达（ci/base/required.yaml 的示例路由），worker 的模型调用失败后研判以 stage_a_only 或 failed 结束；
+# 这里检查的是 server→worker 的认领、worker→server 的事件回传与 server 读取运行明细这条链路，不检查模型的结论
+jq '.alerts[0].startsAt = (now - 30 | floor | todate)' \
+  "$repo_root/apps/srenautix/test/fixtures/alertmanager/webhook-v4-alertmanager-0.34.1.json" |
+  k -n "$ns" exec -i deploy/srenautix-server -c server -- /nodejs/bin/node -e \
+    "const fs = require('node:fs'), body = fs.readFileSync(0, 'utf8');
+     const t = fs.readFileSync('/etc/srenautix/secrets/ingest/alertmanager', 'utf8').trim();
+     fetch('http://127.0.0.1:8080/v1/ingest/alertmanager', { method: 'POST', body,
+       headers: { authorization: 'Bearer ' + t, 'content-type': 'application/json' } })
+       .then(async (r) => { if (r.status !== 200) { console.error('HTTP ' + r.status + ' ' + (await r.text())); process.exit(1); } })
+       .catch((e) => { console.error(e.message); process.exit(1); });" ||
+  { log "告警接入失败"; exit 1; }
+deadline=$((SECONDS + 300))
+until run=$(k -n "$ns" exec srenautix-pg-1 -c postgres -- psql -U postgres -d srenautix -tAc \
+  "SELECT run_id || ' ' || state FROM server.research_runs WHERE state IN ('completed', 'failed', 'stage_a_only') LIMIT 1" 2>/dev/null) &&
+  [[ -n "$run" ]]; do
+  ((SECONDS < deadline)) || { log "5 分钟内 server 没有收到 worker 的研判结果"; exit 1; }
+  sleep 5
+done
+run_id=${run%% *}
+log "研判 ${run_id} 已回到 server：${run#* }"
+
+log "经 server 读取运行明细（server 向 worker 取 /v1/runs/${run_id}）"
+k -n "$ns" exec deploy/srenautix-worker -c worker -- /nodejs/bin/node -e \
+  "const t = require('node:fs').readFileSync('/etc/srenautix/secrets/service-token/token', 'utf8').trim();
+   fetch('http://srenautix-server.$ns.svc:8080/v1/runs/$run_id', { headers: { authorization: 'Bearer ' + t } })
+     .then(async (r) => {
+       const text = await r.text();
+       if (r.status !== 200) { console.error('HTTP ' + r.status + ' ' + text); process.exit(1); }
+       const d = JSON.parse(text);
+       if (!Array.isArray(d.steps) || !Array.isArray(d.evidence) || !Array.isArray(d.llm_calls)) { console.error(text.slice(0, 500)); process.exit(1); }
+       console.error('steps=' + d.steps.length + ' evidence=' + d.evidence.length + ' llm_calls=' + d.llm_calls.length);
+     })
+     .catch((e) => { console.error(e.message); process.exit(1); });" ||
+  { log "经 server 读取运行明细失败"; exit 1; }
+
+failures=$(k -n "$ns" logs deploy/srenautix-server -c server --since-time="$ready_at" | grep -c '读取 worker 事件流失败' || true)
+[[ "$failures" == 0 ]] || { log "全部 Pod 就绪之后 server 有 ${failures} 条读取 worker 事件流失败的日志"; exit 1; }
+log "server 与 worker 双向连通，研判经事件流回到 server"
 
 log "安装测试通过"

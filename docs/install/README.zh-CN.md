@@ -76,6 +76,33 @@ chart 为五个角色生成配置文件（地址、端口、挂载路径、集�
 
 worker 写进研判清单的 `code_sha` 取发布时写入 chart 的注解 `srenautix.io/code-sha`；使用仓库中的 chart 时设置 `codeSha`。CI 的 `role-configs` 任务用各角色自己的解析代码检查生成的配置，`install-e2e` 任务在 Kind 上实际安装 standard 配置并要求全部 Pod Ready。
 
+## 组件之间的连通
+
+chart 自带的 NetworkPolicy（`networkPolicy.enabled`，默认打开）按下表放行，其余入站与出站都拒绝。自己维护网络策略（例如关闭 chart 的 NetworkPolicy，改用 Cilium 或平台统一的策略）时，下表每一行都要同时放行发起方的出站与接收方的入站。server 与 worker 之间是双向的：两个方向的连接都由各自主动发起，只放行其中一个方向，阶段 B 的研判结果就回不到 server。
+
+| 发起方 | 接收方 | 端口 | 用途 | 收紧出站的 values |
+|---|---|---|---|---|
+| worker、reader、gateway、mcp | server | 8080 | 认领研判任务、上报模型路由与心跳（worker）；分支隧道与心跳（reader、gateway）；提议与查询（mcp） | |
+| server | worker | 8080 | 拉取研判事件流 `/v1/events` 与运行明细 `/v1/runs/*`（worker 只接受 server） | |
+| server、worker | PostgreSQL | 5432（外部 PG 为 `database.external.port`） | 各自的 schema；`db-bootstrap` Job 同样连接 | |
+| server、worker、reader | 数据源（Prometheus、Alertmanager、Loki、Tempo） | 数据源的服务端口 | 证据查询、ALERTS 与 Alertmanager 对账 | `networkPolicy.datasourcesEgressTo` |
+| gateway | Prometheus | 服务端口 | 执行后校验（`gateway.metrics_url`） | `networkPolicy.gatewayMetricsEgressTo` |
+| server、gateway | 审计对象存储 | 9000（自带 MinIO）或外部 S3 的端口 | 治理审计链（server）与执行审计链（gateway） | `networkPolicy.auditEgressTo`（外部 S3） |
+| worker | 模型端点 | 443 | 阶段 B 的模型调用 | `networkPolicy.modelsEgressTo`，或 Cilium 的 `networkPolicy.cilium.modelFQDNs` |
+| server | 聊天渠道、OIDC 提供方 | 443 | 通知、审批回调、登录 | `networkPolicy.channelsEgressTo` |
+| server、gateway | GitHub API | 443 | server：覆盖规则 PR、事件 issue、变更源；gateway：`gitops_pr`（设置了各自的 `githubApp` 时） | `networkPolicy.githubEgressTo` |
+| server | OCI 仓库与 Rekor | 443 | 签名领域包（设置了 `packs.oci.sources` 时） | `networkPolicy.packRegistriesEgressTo` |
+| server（`clusterRead`）、worker、reader、gateway、mcp | kube-apiserver | `networkPolicy.apiServerPorts`（443、6443） | 只读拓扑与查询；gateway 执行动作 | `networkPolicy.apiServerCIDRs` |
+| 所有角色 | 集群 DNS | 53（UDP、TCP） | 解析 | `networkPolicy.dns` |
+| Alertmanager、Grafana 等告警源，浏览器，聊天渠道的回调 | server | 8080 | 告警接入 `/v1/ingest/<id>`、控制台、webhook | `networkPolicy.serverIngressFrom`（入站来源） |
+| 外部 MCP 调用方 | mcp | 8080 | MCP 协议 | |
+| Prometheus 等采集方 | server、worker、gateway、mcp；reader | 9090；reader 为 8080 | `/metrics` | `networkPolicy.metricsIngressFrom`（入站来源） |
+| kubelet | server、worker、gateway；mcp、reader | 8081；mcp、reader 为 8080 | 存活与就绪探针 | |
+| CNPG operator | PostgreSQL 实例 | 8000、5432 | 实例管理（自带 PG） | `database.cnpg.operatorNamespace` |
+| MinIO 初始化 Job | MinIO | 9000 | 建桶、对象锁与写入账号（自带 MinIO） | |
+
+CI 的 `install-e2e` 在打开 NetworkPolicy 的 Kind 集群上检查：其他命名空间的 Pod 连不上 worker 的 API；server 能读取 worker 的事件流；注入一条告警后研判经 worker 的事件流回到 server，经 server 能读到运行明细；全部 Pod 就绪之后 server 没有"读取 worker 事件流失败"的日志。
+
 ## 告警接入
 
 每个接入源的地址是 `http://<release>-server.<命名空间>.svc:8080/v1/ingest/<id>`，请求带 `Authorization: Bearer <token>`，token 在 `<release>-ingest-tokens` 的同名键中。Alertmanager 的接收方建议 `group_wait` ≤30 秒。使用 prometheus-operator 时可以打开 `alertmanagerConfig.enabled`，由 chart 生成 AlertmanagerConfig；SreNautix 自身的告警（标签 `srenautix_self="true"`）会先路由到 `selfMonitoring.receiver` 指定的其他接收方。
