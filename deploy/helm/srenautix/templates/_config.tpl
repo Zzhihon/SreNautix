@@ -48,6 +48,47 @@
 {{- end -}}
 {{- define "srenautix.policyFile" -}}{{ .Values.clusterId }}.yaml{{- end -}}
 
+{{/* Go 风格时长（例如 30s、5m、1h30m）换算成秒 */}}
+{{- define "srenautix.durationSeconds" -}}
+{{- $total := 0 -}}
+{{- range $part := regexFindAll "[0-9]+[smh]" (toString .) -1 -}}
+{{- $n := regexFind "[0-9]+" $part | int -}}
+{{- $unit := regexFind "[smh]$" $part -}}
+{{- $total = add $total (mul $n (get (dict "s" 1 "m" 60 "h" 3600) $unit)) -}}
+{{- end -}}
+{{- if not (regexMatch "^([0-9]+[smh])+$" (toString .)) -}}
+{{- fail (printf "%q 不是时长（例如 30s、5m、1h30m）" (toString .)) -}}
+{{- end -}}
+{{- $total -}}
+{{- end -}}
+
+{{/* gateway 策略的最终内容（roles.gateway.policy.content）：启用自愈 PR 且策略中没有 gitops 一节时，
+     按 remediation 的值补上 gitops 一节，并在 actions 中加入 gitops_pr（自动批准规则 remediation-pr）。 */}}
+{{- define "srenautix.gatewayPolicyContent" -}}
+{{- $content := .Values.roles.gateway.policy.content -}}
+{{- $r := .Values.remediation -}}
+{{- $policy := $content | fromYaml -}}
+{{- if and $r.enabled (not (hasKey $policy "gitops")) (not (hasKey $policy "Error")) -}}
+{{- $repo := dict "repository" $r.repository "base" $r.baseBranch "paths" $r.paths -}}
+{{- with $r.reviewers }}{{- $_ := set $repo "reviewers" . }}{{- end -}}
+{{- with $r.compensatingControls }}
+{{- $_ := set $repo "compensating_controls" (dict "approved_by" .approvedBy "approved_at" (toString .approvedAt) "reference" .reference) }}
+{{- end -}}
+{{- $wd := $r.mainWatchdog -}}
+{{- $_ := set $policy "gitops" (dict "max_prs_per_hour" (int $r.maxPerHour) "main_watchdog" (dict "interval" $wd.interval "lookback" $wd.lookback "allowed_bots" $wd.allowedBots) "repositories" (list $repo)) -}}
+{{- $actions := $policy.actions | default list -}}
+{{- $has := false -}}
+{{- range $a := $actions }}{{- if eq $a.id "gitops_pr" }}{{- $has = true }}{{- end }}{{- end -}}
+{{- if not $has -}}
+{{- $actions = append $actions (dict "id" "gitops_pr" "auto_execution" (dict "rules" (list "remediation-pr"))) -}}
+{{- end -}}
+{{- $_ := set $policy "actions" $actions -}}
+{{- toYaml $policy -}}
+{{- else -}}
+{{- $content -}}
+{{- end -}}
+{{- end -}}
+
 {{/* worker 会在启动时禁用的模型路由：境外路由（in_domain=false）且没有 llm.allow_cross_border（ADR 0062） */}}
 {{- define "srenautix.blockedRoutes" -}}
 {{- $llm := (.Values.roles.worker.config | default dict).llm | default dict -}}
@@ -283,10 +324,49 @@ github_app:
 issues:
   {{- toYaml $v.issues | nindent 2 }}
 {{- end }}
-{{- with $v.changes.sources }}
 changes:
+  {{- with $v.changes.sources }}
   sources:
     {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with $v.changes.kubernetes }}
+  kubernetes:
+    enabled: {{ .enabled }}
+    revision_labels: {{ toJson .revisionLabels }}
+    group_within: {{ .groupWithin }}
+  {{- end }}
+{{- with $v.detectors }}
+{{- if .enabled }}
+detectors:
+  enabled: true
+  namespaces: {{ toJson .namespaces }}
+  exclude_namespaces: {{ toJson .excludeNamespaces }}
+  pod_init_after: {{ .podInitAfter }}
+  pod_pending_after: {{ .podPendingAfter }}
+  rollout_stalled_after: {{ .rolloutStalledAfter }}
+  crash_loop_after: {{ .crashLoopAfter }}
+  pdb_blocked_after: {{ .pdbBlockedAfter }}
+  job_failed: {{ .jobFailed }}
+  severity: {{ .severity }}
+  interval: {{ .interval }}
+  equivalent_alerts: {{ toJson .equivalentAlerts }}
+{{- end }}
+{{- end }}
+{{- with $v.remediation }}
+{{- if .enabled }}
+remediation:
+  enabled: true
+  repositories:
+    gitops:
+      repo: {{ .repository }}
+      base_branch: {{ .baseBranch }}
+      files: {{ toJson .files }}
+  categories: {{ toJson .categories }}
+  conclusions: {{ toJson .conclusions }}
+  {{- if not (kindIs "invalid" .titlePrefix) }}
+  title_prefix: {{ .titlePrefix | quote }}
+  {{- end }}
+{{- end }}
 {{- end }}
 {{- with $v.secrets.serviceSigningKey.existingSecret }}
 approvals:

@@ -1,0 +1,218 @@
+suite: 第二阶段：检测器与自愈 PR
+templates:
+  - templates/role-resources.yaml
+  - templates/secrets.yaml
+  - templates/self-monitoring.yaml
+  - templates/validate.yaml
+values:
+  - ../ci/base/required.yaml
+release:
+  name: t
+  namespace: srenautix
+capabilities:
+  majorVersion: "1"
+  minorVersion: "34"
+tests:
+  - it: 默认不生成 detectors 与 remediation
+    set:
+      profile: standard
+    template: templates/role-resources.yaml
+    documentSelector: {path: metadata.name, value: t-srenautix-server-config}
+    asserts:
+      - notMatchRegex: {path: 'data["config.yaml"]', pattern: '(?m)^(detectors|remediation):'}
+
+  - it: 检测器的阈值写入 server 配置（snake_case）
+    values:
+      - ../ci/phase2-values.yaml
+    template: templates/role-resources.yaml
+    documentSelector: {path: metadata.name, value: t-srenautix-server-config}
+    asserts:
+      - matchRegex: {path: 'data["config.yaml"]', pattern: '(?m)^  pod_init_after: 3m$'}
+      - matchRegex: {path: 'data["config.yaml"]', pattern: '(?m)^  exclude_namespaces:\n  - kube-system$'}
+      - matchRegex: {path: 'data["config.yaml"]', pattern: '(?m)^  interval: 30s$'}
+
+  - it: 自愈 PR 的仓库与文件布局写入 server 配置
+    values:
+      - ../ci/phase2-values.yaml
+    template: templates/role-resources.yaml
+    documentSelector: {path: metadata.name, value: t-srenautix-server-config}
+    asserts:
+      - matchRegex:
+          path: 'data["config.yaml"]'
+          pattern: '(?m)^  repositories:\n    gitops:\n      base_branch: main\n      files:'
+      - matchRegex: {path: 'data["config.yaml"]', pattern: 'path: apps/shop/release\.json'}
+      # 限速、审阅人与分支前缀属于 gateway 策略，不写入 server 配置
+      - notMatchRegex: {path: 'data["config.yaml"]', pattern: '(branch_prefix|reviewers):'}
+
+  - it: gateway 策略补上 gitops 一节与 gitops_pr 动作
+    values:
+      - ../ci/phase2-values.yaml
+    template: templates/secrets.yaml
+    documentSelector: {path: metadata.name, value: t-srenautix-gateway-policy}
+    asserts:
+      - matchRegex: {path: 'data["default.yaml"]', pattern: '(?m)^  max_prs_per_hour: 5$'}
+      - matchRegex: {path: 'data["default.yaml"]', pattern: '(?m)^    rules:\n    - remediation-pr\n  id: gitops_pr$'}
+      - matchRegex: {path: 'data["default.yaml"]', pattern: 'approved_by: platform-lead'}
+      - matchRegex: {path: 'data["default.yaml"]', pattern: '(?m)^    reviewers:\n    - platform-lead$'}
+
+  - it: 策略中已有 gitops 一节时原样保留
+    values:
+      - ../ci/phase2-values.yaml
+    set:
+      roles.gateway.policy.content: |
+        version: 1
+        cluster: default
+        actions:
+          - {id: gitops_pr}
+        gitops:
+          repositories:
+            - {repository: example/gitops, base: main, paths: [apps/]}
+    template: templates/secrets.yaml
+    documentSelector: {path: metadata.name, value: t-srenautix-gateway-policy}
+    asserts:
+      - equal:
+          path: 'data["default.yaml"]'
+          value: |
+            version: 1
+            cluster: default
+            actions:
+              - {id: gitops_pr}
+            gitops:
+              repositories:
+                - {repository: example/gitops, base: main, paths: [apps/]}
+
+  - it: 检测器与补偿控制的自身告警只在打开时生成
+    values:
+      - ../ci/phase2-values.yaml
+    template: templates/self-monitoring.yaml
+    documentSelector: {path: kind, value: PrometheusRule}
+    asserts:
+      - equal:
+          path: "spec.groups[0].rules[?(@.alert == 'SreNautixDetectorStale')].expr"
+          value: time() - max by (namespace, cluster_id) (srenautix_detector_last_scan_timestamp_seconds{namespace="srenautix"}) > 300
+      - equal:
+          path: "spec.groups[0].rules[?(@.alert == 'SreNautixGitMainWatchdogStale')].expr"
+          value: time() - max by (namespace, repo) (srenautix_git_main_watchdog_last_check_timestamp_seconds{namespace="srenautix"}) > 900
+      - equal:
+          path: "spec.groups[0].rules[?(@.alert == 'SreNautixGitMainUnexpectedCommits')].labels.severity"
+          value: critical
+
+  - it: 关闭时没有检测器与补偿控制的告警
+    set:
+      profile: standard
+      selfMonitoring.prometheusRule.enabled: true
+      selfMonitoring.receiver: platform-oncall
+      selfMonitoring.routeLabels: {team: platform}
+    template: templates/self-monitoring.yaml
+    documentSelector: {path: kind, value: PrometheusRule}
+    asserts:
+      - notMatchRegex: {path: 'spec.groups[0].rules[*].alert', pattern: '^SreNautix(Detector|Git)'}
+
+  - it: 自愈 PR 需要 gateway 的 gitops_pr
+    values:
+      - ../ci/phase2-values.yaml
+    set:
+      roles.gateway.actions: [node_cordon, node_uncordon, workload_scale, pod_restart]
+    template: templates/validate.yaml
+    asserts:
+      - failedTemplate: {errorPattern: roles.gateway.actions 必须包含 gitops_pr}
+
+  - it: 自愈 PR 需要合法的目标仓库
+    values:
+      - ../ci/phase2-values.yaml
+    set:
+      remediation.repository: gitops
+    template: templates/validate.yaml
+    asserts:
+      - failedTemplate: {errorPattern: remediation.repository 必须是 owner/name}
+
+  - it: 自愈 PR 需要路径白名单
+    values:
+      - ../ci/phase2-values.yaml
+    set:
+      remediation.paths: []
+    template: templates/validate.yaml
+    asserts:
+      - failedTemplate: {errorPattern: remediation.paths 不能为空}
+
+  - it: 补偿控制需要批准人、日期与依据
+    values:
+      - ../ci/phase2-values.yaml
+    set:
+      remediation.compensatingControls.approvedAt: ""
+      remediation.compensatingControls.reference: ""
+    template: templates/validate.yaml
+    asserts:
+      - failedTemplate: {errorPattern: 需要 approvedBy、approvedAt 与 reference}
+
+  - it: 修复类别必须在允许的四类之内
+    values:
+      - ../ci/phase2-values.yaml
+    set:
+      remediation.categories: [release_rollback, delete_namespace]
+    template: templates/validate.yaml
+    asserts:
+      - failedTemplate: {errorPattern: delete_namespace 不是}
+
+  - it: observe 配置不能打开自愈 PR
+    set:
+      profile: observe
+      remediation: {enabled: true, repository: example/gitops, paths: [apps/]}
+    template: templates/validate.yaml
+    asserts:
+      - failedTemplate: {errorPattern: 需要启用 gateway}
+
+  - it: 时长写错时渲染失败
+    values:
+      - ../ci/phase2-values.yaml
+    set:
+      detectors.interval: 30 seconds
+    template: templates/self-monitoring.yaml
+    asserts:
+      - failedTemplate: {errorPattern: 不是时长}
+
+  - it: 发布变更推导默认开启，写入默认的版本标签
+    set:
+      profile: standard
+    template: templates/role-resources.yaml
+    documentSelector: {path: metadata.name, value: t-srenautix-server-config}
+    asserts:
+      - matchRegex:
+          path: 'data["config.yaml"]'
+          pattern: '(?m)^changes:\n  kubernetes:\n    enabled: true\n    group_within: 2m\n    revision_labels:\n    - app.kubernetes.io/version\n    - helm.sh/chart$'
+
+  - it: 发布标签可以追加，也可以关闭推导
+    set:
+      profile: standard
+      changes.kubernetes: {enabled: false, revisionLabels: [app.kubernetes.io/version, example.com/release-id], groupWithin: 5m}
+    template: templates/role-resources.yaml
+    documentSelector: {path: metadata.name, value: t-srenautix-server-config}
+    asserts:
+      - matchRegex: {path: 'data["config.yaml"]', pattern: '(?m)^    enabled: false\n    group_within: 5m\n    revision_labels:\n    - app.kubernetes.io/version\n    - example.com/release-id$'}
+
+  - it: 每小时 PR 上限与 gateway 策略的范围一致（1–20）
+    values:
+      - ../ci/phase2-values.yaml
+    set:
+      remediation.maxPerHour: 30
+    template: templates/validate.yaml
+    asserts:
+      - failedTemplate: {errorPattern: remediation.maxPerHour=30 超出 1–20}
+
+  - it: main watchdog 的回看窗口至少 1 小时
+    values:
+      - ../ci/phase2-values.yaml
+    set:
+      remediation.mainWatchdog.lookback: 30m
+    template: templates/validate.yaml
+    asserts:
+      - failedTemplate: {errorPattern: lookback 必须在 1h–168h 之间}
+
+  - it: 允许的机器人必须是 GitHub 登录名
+    values:
+      - ../ci/phase2-values.yaml
+    set:
+      remediation.mainWatchdog.allowedBots: ["renovate[bot]", "not a login"]
+    template: templates/validate.yaml
+    asserts:
+      - failedTemplate: {errorPattern: '"not a login" 不是 GitHub 登录名'}

@@ -135,6 +135,57 @@ spec:
             {{- toYaml $labels | nindent 12 }}
           annotations:
             summary: 结论中仍有未检验竞争假设的比例超过 10%
+        {{- if .Values.detectors.enabled }}
+        # 集群状态检测器自身：扫描停止或持续出错时，没有告警规则的故障将无人发现
+        - alert: SreNautixDetectorStale
+          expr: time() - max by (namespace, cluster_id) (srenautix_detector_last_scan_timestamp_seconds{ {{- $sel -}} }) > {{ mul 10 (include "srenautix.durationSeconds" .Values.detectors.interval | int) }}
+          for: 5m
+          labels:
+            severity: critical
+            {{- toYaml $labels | nindent 12 }}
+          annotations:
+            summary: "集群 {{ "{{" }} $labels.cluster_id {{ "}}" }} 的状态检测器超过 10 个扫描周期没有完成扫描"
+        - alert: SreNautixDetectorScanErrors
+          expr: sum by (namespace, cluster_id) (increase(srenautix_detector_scan_errors_total{ {{- $sel -}} }[15m])) > 0
+          for: 15m
+          labels:
+            severity: warning
+            {{- toYaml $labels | nindent 12 }}
+          annotations:
+            summary: "集群 {{ "{{" }} $labels.cluster_id {{ "}}" }} 的状态检测器持续出错"
+        {{- end }}
+        {{- if .Values.remediation.enabled }}
+        # 自愈 PR 的补偿控制（gateway 的 gitops_pr）：main 上出现非人工提交、watchdog 停止、推送期间 base 前进、请求被白名单拦下
+        - alert: SreNautixGitMainUnexpectedCommits
+          expr: max by (namespace, repo) (srenautix_git_main_unexpected_commits{ {{- $sel -}} }) > 0
+          labels:
+            severity: critical
+            {{- toYaml $labels | nindent 12 }}
+          annotations:
+            summary: "{{ "{{" }} $labels.repo {{ "}}" }} 的 base 分支上有非人工提交，gitops_pr 已停止推送"
+        - alert: SreNautixGitMainWatchdogStale
+          expr: time() - max by (namespace, repo) (srenautix_git_main_watchdog_last_check_timestamp_seconds{ {{- $sel -}} }) > {{ mul 3 (include "srenautix.durationSeconds" .Values.remediation.mainWatchdog.interval | int) }}
+          for: 5m
+          labels:
+            severity: warning
+            {{- toYaml $labels | nindent 12 }}
+          annotations:
+            summary: "{{ "{{" }} $labels.repo {{ "}}" }} 的 main watchdog 超过 3 个周期没有完成检查"
+        - alert: SreNautixGitopsBaseMoved
+          expr: sum by (namespace, repo) (increase(srenautix_gitops_pushes_total{result="base_moved", {{ $sel }}}[1h])) > 0
+          labels:
+            severity: warning
+            {{- toYaml $labels | nindent 12 }}
+          annotations:
+            summary: "{{ "{{" }} $labels.repo {{ "}}" }} 推送期间 base 分支前进，修复 PR 没有开出"
+        - alert: SreNautixGitopsRequestDenied
+          expr: sum by (namespace, reason) (increase(srenautix_gitops_denied_requests_total{ {{- $sel -}} }[1h])) > 0
+          labels:
+            severity: critical
+            {{- toYaml $labels | nindent 12 }}
+          annotations:
+            summary: "gateway 发往 GitHub 的请求被白名单拦下（{{ "{{" }} $labels.reason {{ "}}" }}），请查看执行审计"
+        {{- end }}
 {{- end }}
 
 {{- if $sm.dashboard.enabled }}

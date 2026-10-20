@@ -218,11 +218,14 @@ tests:
     documentSelector: {path: metadata.name, value: t-srenautix-server-config}
     asserts:
       - matchRegex: {path: 'data["config.yaml"]', pattern: '(?m)^issues:\n  enabled: true\n  labels:\n  - srenautix\n  max_per_hour: 3\n  repo: example/infra$'}
-      - matchRegex: {path: 'data["config.yaml"]', pattern: '(?m)^changes:\n  sources:\n  - id: infra$'}
+      - matchRegex: {path: 'data["config.yaml"]', pattern: '(?m)^  sources:\n  - id: infra$'}
 
-  - it: 默认不生成 github_app、issues、changes
+  - it: 默认不生成 github_app、issues 与变更源
     set:
       profile: standard
     documentSelector: {path: metadata.name, value: t-srenautix-server-config}
     asserts:
-      - notMatchRegex: {path: 'data["config.yaml"]', pattern: '(?m)^(github_app|issues|changes):'}
+      - notMatchRegex: {path: 'data["config.yaml"]', pattern: '(?m)^(github_app|issues):'}
+      # changes 一节只有 kubernetes，紧接着就是下一个顶层键
+      - matchRegex: {path: 'data["config.yaml"]', pattern: '(?m)^changes:\n  kubernetes:\n(    .*\n)+[a-z_]+:'}
+      - notMatchRegex: {path: 'data["config.yaml"]', pattern: '(?m)^changes:\n  kubernetes:\n(    .*\n)+  sources:'}

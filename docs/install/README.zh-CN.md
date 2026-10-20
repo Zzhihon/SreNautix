@@ -111,6 +111,30 @@ chart 自带的 NetworkPolicy（`networkPolicy.enabled`，默认打开）按下�
 
 CI 的 `install-e2e` 在打开 NetworkPolicy 的 Kind 集群上检查：其他命名空间的 Pod 连不上 worker 的 API；server 能读取 worker 的事件流；注入一条告警后研判经 worker 的事件流回到 server，经 server 能读到运行明细；全部 Pod 就绪之后 server 没有"读取 worker 事件流失败"的日志。
 
+## 发现：检测器与发布变更
+
+- **集群状态检测器**（`detectors.*`，默认关闭）：没有告警规则时也发现 Pod 停在 Init 或 Pending、rollout 停滞、CrashLoop、PDB 阻塞驱逐与 Job 失败，按 `podInitAfter`、`podPendingAfter`、`rolloutStalledAfter`、`crashLoopAfter`、`pdbBlockedAfter` 判定，`namespaces`、`excludeNamespaces` 限定范围，`equivalentAlerts` 列出与发现等价的告警名（同一对象上已有这些告警时不再合成）。单集群安装读 server 自己的 informer，需要 `roles.server.clusterRead`；多集群由 reader 上报对象状态。打开后自身告警增加 SreNautixDetectorStale（10 个扫描周期没有完成扫描）与 SreNautixDetectorScanErrors。
+- **发布变更**（`changes.kubernetes.*`，默认开启）：Pod 模板上 `revisionLabels` 中任一标签变化即一次发布，`groupWithin` 内同一版本或同一个管理应用的变化合成一次；发布作为根因候选，同一次发布引起的告警收敛到一个事件。GitOps 仓库若在 Pod 模板上写发布 ID 标签，把它追加到 `revisionLabels`。
+- **变更源**（`changes.sources`）：GitHub 上的 GitOps 仓库的提交，按路径前缀映射到组件，需要 `roles.server.githubApp`。
+
+## 自愈 PR 与事件 issue
+
+两部分分别由 server 与 gateway 负责，配置也分开写：
+
+| 配置 | 写在哪里 | 管什么 |
+|---|---|---|
+| 事件 issue 的仓库、标签、标题前缀、每小时上限、回看窗口 | `issues.*`（server 配置的 `issues`） | 需要人跟进的事件开一个 issue，进展追加评论，与 PR 互相关联；每个事件只开一个，超过上限只记录 |
+| 自愈 PR 的类别、结论门槛、目标仓库与文件布局 | `remediation.repository`、`baseBranch`、`files`、`categories`、`conclusions`、`titlePrefix`（server 配置的 `remediation`） | server 判断哪些结论可以生成修复，按领域包的补丁模板生成改动，提交 `gitops_pr` 提议 |
+| PR 的审阅人、每小时上限、允许改动的路径、补偿控制、main watchdog | `remediation.reviewers`、`maxPerHour`、`paths`、`compensatingControls`、`mainWatchdog`（chart 写入 gateway 策略的 `gitops` 一节） | gateway 推送 `srenautix/*` 分支、开 PR 并请求审阅，推送前后核对 base，按小时限速，main 出现非人工提交时告警并停止推送 |
+
+issue 没有审阅人；需要的审阅人写在 PR 一侧（`remediation.reviewers`）。gateway 策略来自 `roles.gateway.policy.existingConfigMap` 时，chart 不改写策略，`gitops` 一节由策略自己写，键名见 `docs/gateway/README.md`。启用自愈 PR 需要 `roles.gateway.actions` 含 `gitops_pr`、`roles.gateway.githubApp` 与 `roles.server.githubApp`；base 分支没有分支保护时必须填写 `compensatingControls`。打开后自身告警增加 SreNautixGitMainUnexpectedCommits、SreNautixGitMainWatchdogStale、SreNautixGitopsBaseMoved 与 SreNautixGitopsRequestDenied。
+
+## 评测
+
+评测（`srenautix eval`，见 `docs/eval/README.md`）不随 chart 部署，也不在集群或 CI 中运行：在运维人员的机器上用本仓库的构建执行，读取本地的用例与快照，需要访问集群中的指标或 PostgreSQL 时临时 `kubectl port-forward`，并且只读。模型路由与研判使用的路由相同，密钥从本地文件读取。
+
+评测的 token 不计入 worker 的研判预算（`roles.worker.config.budget.daily_tokens`）。`--max-tokens` 限制单次评测：输入与输出的 token 累计达到上限后不再开始新的运行，成绩单记录跳过的运行与本次用量。按天的评测预算由执行评测的人维护：每次运行前用当天剩余的额度作为 `--max-tokens`，用量以成绩单中记录的为准。
+
 ## 告警接入
 
 每个接入源的地址是 `http://<release>-server.<命名空间>.svc:8080/v1/ingest/<id>`，请求带 `Authorization: Bearer <token>`，token 在 `<release>-ingest-tokens` 的同名键中。Alertmanager 的接收方建议 `group_wait` ≤30 秒。使用 prometheus-operator 时可以打开 `alertmanagerConfig.enabled`，由 chart 生成 AlertmanagerConfig；SreNautix 自身的告警（标签 `srenautix_self="true"`）会先路由到 `selfMonitoring.receiver` 指定的其他接收方。

@@ -235,10 +235,65 @@ issues:
   repo: ""
   labels: [srenautix]
 
-# 变更源（DESIGN §5 的"30 分钟内的变更"）：托管在 GitHub 上的仓库，经 roles.server.githubApp 用 REST API 读取。
-# sources 的每一项原样写入 server 配置：{id, kind: github, repo, branch, paths: [{prefix, targets, kind}]}
+# 变更（DESIGN §5 的"30 分钟内的变更"）。
 changes:
+  # 托管在 GitHub 上的仓库，经 roles.server.githubApp 用 REST API 读取；
+  # 每一项原样写入 server 配置：{id, kind: github, repo, branch, paths: [{prefix, targets, kind}]}
   sources: []
+  # 从拓扑推导发布变更：Pod 模板上表示版本的标签变化即一次发布，groupWithin 内同一版本或同一个管理应用的变化合成一次
+  kubernetes:
+    enabled: true
+    # 可追加自己的发布标签，例如 GitOps 仓库写入 Pod 模板的发布 ID 标签
+    revisionLabels: [app.kubernetes.io/version, helm.sh/chart]
+    groupWithin: 2m
+
+# 集群状态检测器（server 配置的 detectors）：没有告警规则时也能发现 Pod 卡在 Init 或 Pending、rollout 停滞、CrashLoop、
+# PDB 阻塞驱逐与 Job 失败。只读，复用拓扑的 informer（单集群）或 reader 的上报（多集群），发现结果与告警一样进入事件。
+# 关闭时 server 配置中不写这一节
+detectors:
+  enabled: false
+  namespaces: ["*"]
+  excludeNamespaces: []
+  podInitAfter: 10m
+  podPendingAfter: 10m
+  rolloutStalledAfter: 15m
+  crashLoopAfter: 5m
+  pdbBlockedAfter: 10m
+  jobFailed: true
+  severity: warning
+  interval: 30s
+  # 告警名 → 检测器发现类型：同一对象上同类的告警规则与检测器发现去重
+  equivalentAlerts: {}
+
+# 自愈 PR：结论属于允许的类别且达到允许的结论等级时，向 GitOps 仓库开 PR 并关联事件 issue，由人审阅合并，SreNautix 从不合并。
+# PR 只经 gateway 的 gitops_pr 推送（只改 Git、不写集群，冻结时也执行），需要 roles.gateway.actions 含 gitops_pr、
+# roles.gateway.githubApp 与 roles.server.githubApp。分支前缀固定为 srenautix/，推送前后核对 refs。
+# chart 生成 server 配置的 remediation；roles.gateway.policy.content 中没有 gitops 一节时，chart 按下面的值补上 gitops 一节
+# 与 gitops_pr 动作（自动批准规则 remediation-pr）。gateway 策略来自 existingConfigMap 时由策略自己写这些。
+remediation:
+  enabled: false
+  # 目标仓库 owner/name 与目标分支
+  repository: ""
+  baseBranch: main
+  # 补丁模板的文件角色 → {path, format, fields}（领域包 gitops 的模板引用文件角色，不写路径）
+  files: {}
+  categories: [release_rollback, config_resource, alert_rule, topology_coverage]
+  conclusions: [likely, evidence_consistent]
+  # PR 标题前缀；为 null 时取通知前缀（notify.prefix）
+  titlePrefix: null
+  # 以下写入 gateway 策略的 gitops 一节
+  # 允许修改的路径前缀（以 / 结尾表示目录）或完整路径
+  paths: []
+  reviewers: []
+  # 每个仓库每小时开 PR 的上限，超出的工单拒绝
+  maxPerHour: 2
+  # base 分支没有分支保护时必填：{approvedBy, approvedAt, reference}，记录批准补偿控制的人、日期与依据
+  compensatingControls: {}
+  # main 出现非人工提交（App 直接推送、App 自己合并的 PR、未列出的机器人）时告警，并停止 gitops_pr
+  mainWatchdog:
+    interval: 5m
+    lookback: 24h
+    allowedBots: []
 
 # 领域包：内置包在镜像的 /app/packs；用户的包以 ConfigMap 挂载
 packs:
@@ -485,8 +540,10 @@ networkPolicy:
   # gateway 执行后校验使用的本地指标端点
   gatewayMetricsEgressTo: []
   # GitHub API：gateway（gitops_pr，roles.gateway.githubApp）与 server（issue、PR，roles.server.githubApp）可以访问；
-  # 为空时放行到任意地址的 443
+  # 为空时放行到任意地址的 githubEgressPorts
   githubEgressTo: []
+  # GitHub API 的端口；GitHub Enterprise 或测试用的本地 Git 服务不在 443 时修改
+  githubEgressPorts: [443]
   # OCI 领域包的仓库与 Rekor（packs.oci），只有 server 可以访问；为空时放行到任意地址的 443
   packRegistriesEgressTo: []
   # 外部 S3 审计汇（audit.sink=s3）

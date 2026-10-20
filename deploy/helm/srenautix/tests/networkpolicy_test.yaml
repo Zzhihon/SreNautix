@@ -147,3 +147,21 @@ tests:
               - ipBlock: {cidr: 140.82.112.0/20}
             ports:
               - {protocol: TCP, port: 443}
+
+  - it: GitHub 出站的端口可以修改（GitHub Enterprise、本地 Git 服务）
+    set:
+      profile: standard
+      roles.gateway.actions: [node_cordon, node_uncordon, workload_scale, pod_restart, gitops_pr]
+      roles.gateway.githubApp.existingSecret: gh-app
+      networkPolicy.githubEgressPorts: [3000]
+      networkPolicy.githubEgressTo:
+        - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: gitlocal}}
+    documentSelector: {path: metadata.name, value: t-srenautix-gateway}
+    asserts:
+      - contains:
+          path: spec.egress
+          content:
+            to:
+              - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: gitlocal}}
+            ports:
+              - {protocol: TCP, port: 3000}

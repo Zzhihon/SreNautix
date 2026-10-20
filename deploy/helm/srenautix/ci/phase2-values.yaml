@@ -1,0 +1,48 @@
+# 第二阶段的三个环节全部打开的 standard 安装：集群状态检测器、事件 issue、GitHub 变更源、自愈 PR（gateway 的 gitops_pr）。
+# 检查 server 配置、gateway 策略的 gitops 一节、自身告警规则与 values 校验
+profile: standard
+roles:
+  server:
+    githubApp:
+      existingSecret: srenautix-github-app
+      appId: "123456"
+      installationId: "7890123"
+  gateway:
+    actions: [node_cordon, node_uncordon, workload_scale, pod_restart, gitops_pr]
+    githubApp:
+      existingSecret: srenautix-github-app
+      slug: srenautix-bot
+detectors:
+  enabled: true
+  excludeNamespaces: [kube-system]
+  podInitAfter: 3m
+issues:
+  enabled: true
+  repo: example/gitops
+  labels: [srenautix]
+  max_per_hour: 3
+changes:
+  sources:
+    - id: gitops
+      kind: github
+      repo: example/gitops
+      branch: main
+      paths:
+        - {prefix: apps/shop/, targets: [Deployment:shop/api], kind: rollout}
+remediation:
+  enabled: true
+  repository: example/gitops
+  files:
+    release_input: {path: apps/shop/release.json, format: json, fields: {image: data.image, release_id: data.release_id}}
+    workloads: {path: apps/shop/workloads.yaml, format: yaml}
+  paths: [apps/shop/, platform/observability/rules/, srenautix/]
+  reviewers: [platform-lead]
+  maxPerHour: 5
+  compensatingControls:
+    approvedBy: platform-lead
+    approvedAt: "2026-10-20"
+    reference: example/gitops#1
+selfMonitoring:
+  prometheusRule: {enabled: true}
+  receiver: platform-oncall
+  routeLabels: {team: platform}

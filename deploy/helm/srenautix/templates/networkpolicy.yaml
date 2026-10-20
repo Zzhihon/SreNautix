@@ -19,6 +19,8 @@
 {{- $_ := set $api "to" $to }}
 {{- end }}
 {{- $https := list (dict "protocol" "TCP" "port" 443) }}
+{{- $githubPorts := list }}
+{{- range $p := $np.githubEgressPorts }}{{- $githubPorts = append $githubPorts (dict "protocol" "TCP" "port" (int $p)) }}{{- end }}
 {{- $datasources := dict "to" (list (dict "namespaceSelector" dict)) }}
 {{- with $np.datasourcesEgressTo }}{{- $datasources = dict "to" . }}{{- end }}
 {{- $sink := include "srenautix.auditSink" . }}
@@ -55,7 +57,7 @@
 {{- with $np.channelsEgressTo }}{{- $_ := set $channels "to" . }}{{- end }}
 {{- $serverEgress = append $serverEgress $channels }}
 {{- if .Values.roles.server.githubApp.existingSecret }}
-{{- $github := dict "ports" $https }}
+{{- $github := dict "ports" $githubPorts }}
 {{- with $np.githubEgressTo }}{{- $_ := set $github "to" . }}{{- end }}
 {{- $serverEgress = append $serverEgress $github }}
 {{- end }}
@@ -88,7 +90,7 @@
 {{- $gatewayEgress = append $gatewayEgress $datasources }}
 {{- end }}
 {{- if .Values.roles.gateway.githubApp.existingSecret }}
-{{- $github := dict "ports" $https }}
+{{- $github := dict "ports" $githubPorts }}
 {{- with $np.githubEgressTo }}{{- $_ := set $github "to" . }}{{- end }}
 {{- $gatewayEgress = append $gatewayEgress $github }}
 {{- end }}

@@ -12,7 +12,7 @@ out_root="$repo_root/.scratch/role-configs"
 cd "$repo_root"
 
 # 每份 values 都打开 mcp 与 reader，使五个角色的配置都被渲染
-for f in values-standard.yaml values-compliance.yaml ci/external-values.yaml ci/standard-full-values.yaml ci/oci-packs-values.yaml; do
+for f in values-standard.yaml values-compliance.yaml ci/external-values.yaml ci/standard-full-values.yaml ci/oci-packs-values.yaml ci/phase2-values.yaml; do
   name=$(basename "$f" .yaml)
   dir="$out_root/$name"
   rm -rf "$dir"
@@ -20,13 +20,19 @@ for f in values-standard.yaml values-compliance.yaml ci/external-values.yaml ci/
   echo "==> $f"
   helm template ci "$chart_dir" --namespace srenautix \
     -f "$chart_dir/ci/base/required.yaml" -f "$chart_dir/$f" -f "$chart_dir/ci/fixtures/mcp-values.yaml" \
-    --show-only templates/role-resources.yaml >"$dir/rendered.yaml"
+    --show-only templates/role-resources.yaml --show-only templates/secrets.yaml >"$dir/rendered.yaml"
   for role in server worker mcp reader gateway; do
     yq "select(.kind == \"ConfigMap\" and .metadata.name == \"ci-srenautix-$role-config\") | .data[\"config.yaml\"]" \
       "$dir/rendered.yaml" >"$dir/$role.yaml"
     [[ -s "$dir/$role.yaml" ]] || { echo "没有渲染出 $role 的配置" >&2; exit 1; }
     yq -o=json "$dir/$role.yaml" >"$dir/$role.json"
   done
+  # chart 生成的 gateway 策略（policy.content 时才有），按契约校验
+  yq 'select(.kind == "ConfigMap" and .metadata.name == "ci-srenautix-gateway-policy") | .data | to_entries | .[0].value // ""' \
+    "$dir/rendered.yaml" >"$dir/gateway-policy.yaml"
+  if [[ -s "$dir/gateway-policy.yaml" ]]; then
+    yq -o=json "$dir/gateway-policy.yaml" >"$dir/gateway-policy.json"
+  fi
   node --conditions=@srenautix/source --import tsx deploy/helm/configcheck/check.ts "$dir"
   go run ./deploy/helm/configcheck "$dir"
 done

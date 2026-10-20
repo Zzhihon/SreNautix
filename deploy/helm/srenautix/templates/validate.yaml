@@ -162,8 +162,57 @@
 {{- if ne (len (compact (list $gw.approverKeys.content $gw.approverKeys.existingConfigMap $gw.approverKeys.existingSecret))) 1 }}
 {{- fail "启用 gateway 时 roles.gateway.approverKeys 的 content、existingConfigMap、existingSecret 必须恰好设置一个（gateway 信任的签名公钥）" }}
 {{- end }}
+{{- /* 自愈 PR：经 gateway 的 gitops_pr 推送，server 用自己的 GitHub App 开 issue 与关联 PR（先于策略的通用检查，报出具体原因） */}}
+{{- $r := $v.remediation }}
+{{- if $r.enabled }}
+{{- if not (regexMatch "^[A-Za-z0-9-]{1,39}/[A-Za-z0-9._-]{1,100}$" $r.repository) }}
+{{- fail "remediation.enabled=true 时 remediation.repository 必须是 owner/name" }}
+{{- end }}
+{{- if not (has "gitops_pr" $gw.actions) }}
+{{- fail "remediation.enabled=true 时 roles.gateway.actions 必须包含 gitops_pr（PR 只经 gateway 推送）" }}
+{{- end }}
+{{- if not $v.roles.server.githubApp.existingSecret }}
+{{- fail "remediation.enabled=true 时需要 roles.server.githubApp（server 开 issue 并关联 PR）" }}
+{{- end }}
+{{- if and $gw.policy.content (not $r.paths) (not (hasKey (fromYaml $gw.policy.content) "gitops")) }}
+{{- fail "remediation.enabled=true 时 remediation.paths 不能为空（gateway 只允许改动这些路径）" }}
+{{- end }}
+{{- range $c := $r.categories }}
+{{- if not (has $c (list "release_rollback" "config_resource" "alert_rule" "topology_coverage")) }}
+{{- fail (printf "remediation.categories 中的 %s 不是 release_rollback、config_resource、alert_rule、topology_coverage 之一" $c) }}
+{{- end }}
+{{- end }}
+{{- with $r.compensatingControls }}
+{{- if not (and .approvedBy .approvedAt .reference) }}
+{{- fail "remediation.compensatingControls 需要 approvedBy、approvedAt 与 reference" }}
+{{- end }}
+{{- if not (regexMatch "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" (toString .approvedAt)) }}
+{{- fail "remediation.compensatingControls.approvedAt 必须是日期（YYYY-MM-DD）" }}
+{{- end }}
+{{- end }}
+{{- /* 以下与 contract/gateway/v1/gateway-policy.schema.json 的 gitops 一节一致；超出范围时 gateway 加载策略失败、整体转为只提议 */}}
+{{- if or (lt (int $r.maxPerHour) 1) (gt (int $r.maxPerHour) 20) }}
+{{- fail (printf "remediation.maxPerHour=%v 超出 1–20" $r.maxPerHour) }}
+{{- end }}
+{{- if gt (len $r.reviewers) 10 }}
+{{- fail "remediation.reviewers 最多 10 个" }}
+{{- end }}
+{{- range $b := $r.mainWatchdog.allowedBots }}
+{{- if not (regexMatch "^[A-Za-z0-9-]{1,39}(\\[bot\\])?$" $b) }}
+{{- fail (printf "remediation.mainWatchdog.allowedBots 中的 %q 不是 GitHub 登录名" $b) }}
+{{- end }}
+{{- end }}
+{{- $wdInterval := include "srenautix.durationSeconds" $r.mainWatchdog.interval | int }}
+{{- if or (lt $wdInterval 1) (gt $wdInterval 3600) }}
+{{- fail "remediation.mainWatchdog.interval 必须在 1s–1h 之间" }}
+{{- end }}
+{{- $wdLookback := include "srenautix.durationSeconds" $r.mainWatchdog.lookback | int }}
+{{- if or (lt $wdLookback 3600) (gt $wdLookback 604800) }}
+{{- fail "remediation.mainWatchdog.lookback 必须在 1h–168h 之间" }}
+{{- end }}
+{{- end }}
 {{- if $gw.policy.content }}
-{{- $policy := $gw.policy.content | fromYaml }}
+{{- $policy := include "srenautix.gatewayPolicyContent" . | fromYaml }}
 {{- if hasKey $policy "Error" }}
 {{- fail (printf "roles.gateway.policy.content 不是合法的 YAML：%s" $policy.Error) }}
 {{- end }}
@@ -185,6 +234,10 @@
 {{- if not (has $v.roles.gateway.pgAntiAffinity (list "preferred" "required" "none")) }}
 {{- fail "roles.gateway.pgAntiAffinity 必须是 preferred、required、none 之一" }}
 {{- end }}
+{{- end }}
+
+{{- if and $v.remediation.enabled (not $on.gateway) }}
+{{- fail "remediation.enabled=true 需要启用 gateway（PR 只经 gateway 的 gitops_pr 推送）" }}
 {{- end }}
 
 {{- /* 合规配置：设计 §1.3、§16.3、§16.5 的强度要求 */}}
