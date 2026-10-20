@@ -687,6 +687,29 @@ export type paths = {
     patch?: never;
     trace?: never;
   };
+  '/v1/incidents/{incident_ref}/stage-a/recompute': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description incident_id、稳定标签或别名；标签放进路径时按 RFC 3986 编码 */
+        incident_ref: components['parameters']['IncidentRef'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * @description 按当前加载的领域包与当前拓扑重新计算事件当前版本的阶段 A（证据卡、规则提议与处置判断），替换该版本的报告并发布 stage_a.reported。
+     *     只算阶段 A，不触发模型研判。写入治理审计。领域包变化（pack.lock 变化）后，仍在触发的事件由中心按限速自动重算（ADR 0107）
+     */
+    post: operations['recomputeStageA'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/v1/incidents/{incident_ref}/subgraph': {
     parameters: {
       query?: never;
@@ -5039,6 +5062,33 @@ export interface operations {
         };
       };
       404: components['responses']['Error'];
+    };
+  };
+  recomputeStageA: {
+    parameters: {
+      query?: never;
+      header: {
+        'X-CSRF-Token': components['parameters']['Csrf'];
+      };
+      path: {
+        /** @description incident_id、稳定标签或别名；标签放进路径时按 RFC 3986 编码 */
+        incident_ref: components['parameters']['IncidentRef'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 新的阶段 A 报告 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['stage-a-report.schema'];
+        };
+      };
+      404: components['responses']['Error'];
+      409: components['responses']['Error'];
     };
   };
   getIncidentSubgraph: {

@@ -239,6 +239,25 @@ kube_reads:
   max_bytes: 16384
 ```
 
+## 自愈 PR 的配置
+
+```yaml
+remediation:
+  enabled: false
+  repositories:                 # 补丁模板里的仓库角色 → 仓库与文件布局（RepositoryLayout）
+    gitops:
+      repo: CCH-HQ/cchp-k8s-ops
+      base_branch: main
+      files:
+        release_input: {path: apps/cchp/prod/release.json, format: json, fields: {image: data.image, release_id: data.release_id}}
+        alert_rules: {path: "platform/observability/metrics/*.yaml", format: yaml}
+  categories: [release_rollback, config_resource, alert_rule, topology_coverage]
+  conclusions: [likely, evidence_consistent]
+  title_prefix: null            # 默认取 notify.prefix
+```
+
+PR 经 gateway 的 gitops_pr 推送；分支前缀、每小时上限、reviewers 与 main 的守护在 gateway 策略里，不在 server 配置中。
+
 ## 变更源
 
 事件引擎把首次触发前 30 分钟内、触及事件组件的变更放进事件（`incident.changes`），并作为根因排序的一项（DESIGN §5）。变更来自配置的变更源。hub 镜像不带 git，变更源只支持托管在 GitHub 上的仓库（`integrations/github`，ADR 0096），经 `github_app` 的安装令牌用 REST API 读取：

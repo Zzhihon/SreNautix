@@ -351,6 +351,51 @@ export const serverConfigSchema = z
       })
       .strict()
       .default({ enabled: false, tail_lines: 100, max_bytes: 16384 }),
+    // 自愈 PR：结论可以落到仓库改动时，按领域包的补丁模板生成补丁，经 gateway 的 gitops_pr 开 PR；默认关闭。
+    // 分支前缀、每小时上限、reviewers 与 main 的守护在 gateway 策略里
+    remediation: z
+      .object({
+        enabled: z.boolean().default(false),
+        // 补丁模板里的仓库角色 → 仓库、base 分支与文件布局（契约 pack.schema.json 的 RepositoryLayout）
+        repositories: z
+          .record(
+            z.string().regex(/^[a-z0-9][a-z0-9_-]*$/),
+            z
+              .object({
+                repo: repoName,
+                base_branch: z.string().min(1).default('main'),
+                files: z
+                  .record(
+                    z.string().regex(/^[a-z0-9][a-z0-9_-]*$/),
+                    z
+                      .object({
+                        path: z.string().min(1),
+                        format: z.enum(['json', 'yaml']),
+                        fields: z.record(z.string(), z.string().min(1)).optional(),
+                      })
+                      .strict(),
+                  )
+                  .default({}),
+              })
+              .strict(),
+          )
+          .default({}),
+        categories: z
+          .array(z.enum(['release_rollback', 'config_resource', 'alert_rule', 'topology_coverage']))
+          .default(['release_rollback', 'config_resource', 'alert_rule', 'topology_coverage']),
+        conclusions: z
+          .array(z.enum(['likely', 'evidence_consistent', 'inconclusive']))
+          .default(['likely', 'evidence_consistent']),
+        // 标题前缀；不填时取 notify.prefix（影子期间为 "[影子]"）
+        title_prefix: z.string().optional(),
+      })
+      .strict()
+      .default({
+        enabled: false,
+        repositories: {},
+        categories: ['release_rollback', 'config_resource', 'alert_rule', 'topology_coverage'],
+        conclusions: ['likely', 'evidence_consistent'],
+      }),
     github_app: githubApp.optional(),
     // 需要人跟进的事件在 GitHub 开 issue（ADR 0095）；默认关闭
     issues: z
