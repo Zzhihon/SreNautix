@@ -458,6 +458,10 @@ export interface SrenautixContractIndex {
   ChecksFile?: ChecksFile;
   RulesFile?: RulesFile;
   PackRule?: PackRule;
+  RemediationsFile?: RemediationsFile;
+  Remediation?: Remediation;
+  RemediationEdit?: RemediationEdit;
+  RepositoryLayout?: RepositoryLayout;
   RcaParams?: RcaParams;
   KnowledgeFile?: KnowledgeFile;
   ActionRequestsFile?: ActionRequestsFile;
@@ -2990,7 +2994,7 @@ export interface IntegrationManifest {
   deployment_reports?: string[];
 }
 /**
- * 领域包的 pack.yaml（DESIGN §6.3）。领域包只包含数据，不包含可执行代码；其余文件的结构见本文件的 $defs：signals.yaml → SignalsFile，components.yaml → ComponentsFile，alerts.yaml → AlertsFile，chains.yaml → ChainsFile，checks.yaml → ChecksFile，rules.yaml → RulesFile，rca-params.yaml → RcaParams，knowledge/*.yaml → KnowledgeFile，action-requests.yaml → ActionRequestsFile，chaos/*.yaml → ChaosFile，tests/*.yaml → PackTestFile，用户层文件 → UserLayer，pack.lock → PackLock
+ * 领域包的 pack.yaml（DESIGN §6.3）。领域包只包含数据，不包含可执行代码；其余文件的结构见本文件的 $defs：signals.yaml → SignalsFile，components.yaml → ComponentsFile，alerts.yaml → AlertsFile，chains.yaml → ChainsFile，checks.yaml → ChecksFile，rules.yaml → RulesFile，remediations.yaml → RemediationsFile，rca-params.yaml → RcaParams，knowledge/*.yaml → KnowledgeFile，action-requests.yaml → ActionRequestsFile，chaos/*.yaml → ChaosFile，tests/*.yaml → PackTestFile，用户层文件 → UserLayer，pack.lock → PackLock
  */
 export interface PackManifest {
   api_version: 'srenautix.io/pack/v1';
@@ -3219,6 +3223,156 @@ export interface PackRule {
     [k: string]: string | undefined;
   };
   expected_effect?: LocalizedText1;
+}
+/**
+ * remediations.yaml：修复补丁模板（ADR 0103）。模板生成 Git 补丁，由 server 经 gitops_pr 开 PR，从不合并
+ */
+export interface RemediationsFile {
+  remediations: Remediation[];
+}
+/**
+ * 一个修复补丁模板。模板只引用仓库角色与文件角色，真实路径由 server 配置的仓库布局（RepositoryLayout）给出，同一模板可用于不同仓库
+ */
+export interface Remediation {
+  id: string;
+  title: LocalizedText1;
+  /**
+   * release_rollback 发布回退；config_resource 副本数、HPA 上限、request/limit、超时与限流参数；alert_rule 告警阈值、持续时间、严重度；topology_coverage 拓扑与领域包覆盖
+   */
+  category: 'release_rollback' | 'config_resource' | 'alert_rule' | 'topology_coverage';
+  /**
+   * 仓库角色，例如 gitops；server 配置把它映射到仓库与布局
+   */
+  repository: string;
+  /**
+   * CEL 适用条件。变量：incident、root、cards（卡片全局 id → 结论）、alerts（成员告警：alertname、labels、annotations、entity，以及 AlertClassification 的 role、source、catalog_entry、chronic）、params
+   */
+  when: string;
+  /**
+   * 参数默认值，可由用户层覆盖
+   */
+  params?: {
+    [k: string]: number | string | boolean | undefined;
+  };
+  /**
+   * 计划时在事件锚点对本包的 metrics 信号做 instant 查询；结果（序列列表）以 name 作为 CEL 变量
+   */
+  inputs?: {
+    name: string;
+    signal: string;
+    /**
+     * CEL，求出查询的实体 {kind, namespace, name}，变量与 when 相同；默认为根因。为 null 时模板跳过。例如根因是管理工作负载的 Argo 应用时，用 component_ref 从 incident.components 取工作负载
+     */
+    entity?: string;
+  }[];
+  /**
+   * 读取一个文件角色的 Git 历史：变量 history 为最近 depth 个修改过它的提交（从新到旧，含当前版本），每项 {commit, author, time, message, doc}
+   */
+  history?: {
+    file: string;
+    depth: number;
+  };
+  /**
+   * 按顺序求值的 CEL 绑定，后面的绑定、skip_if、edits、change 可以引用。另有变量 files（文件角色 → 文档列表：glob 匹配的全部文件与多文档 YAML 的全部文档按路径顺序展开，单个 JSON 文件为一个元素）与 fields（文件角色 → 逻辑字段 → 点路径）
+   */
+  let?: {
+    name: string;
+    cel: string;
+  }[];
+  /**
+   * 任一 CEL 为 true 时不生成补丁，say 写明原因
+   */
+  skip_if?: {
+    cel: string;
+    say: LocalizedText1;
+  }[];
+  /**
+   * @minItems 1
+   */
+  edits: [RemediationEdit, ...RemediationEdit[]];
+  change: LocalizedText4;
+  verify: {
+    say: LocalizedText1;
+    /**
+     * 合并并同步后应判为正常的卡片全局 id
+     */
+    cards?: string[];
+    within?: string;
+  };
+  /**
+   * 回滚方法：revert 这个 PR 的提交；say 写补充说明
+   */
+  rollback: {
+    say: LocalizedText1;
+  };
+}
+/**
+ * 对一个文件角色的修改。path 用点路径：段为键名、name[key=value]（数组中 key 等于 value 的元素）、name[*]（任一元素，只用于定位）或 name[N]；{变量} 由 let 与 params 的值替换。文件角色是 glob 或多文档 YAML 时，按 document 与 locate 找到唯一的文档，找不到或不唯一时模板跳过
+ */
+export interface RemediationEdit {
+  /**
+   * 文件角色
+   */
+  file: string;
+  /**
+   * 多文档 YAML 中按 kind 与 metadata.name 选文档；两者都可以含 {变量}
+   */
+  document?: {
+    kind?: string;
+    name?: string;
+  };
+  /**
+   * 定位文档的点路径，默认取第一个 set 的路径去掉最后一段
+   */
+  locate?: string;
+  set?: {
+    path?: string;
+    /**
+     * 布局 fields 中的逻辑字段名，与 path 二选一
+     */
+    field?: string;
+    /**
+     * CEL；另有变量 current（修改前的值，不存在时为 null）
+     */
+    value: string;
+  }[];
+  append?: {
+    /**
+     * 数组的点路径
+     */
+    path: string;
+    /**
+     * CEL，追加的元素
+     */
+    value: string;
+  }[];
+}
+/**
+ * 改了什么、为什么（ICU MessageFormat，变量取自 let 与 params），写入 PR 描述
+ */
+export interface LocalizedText4 {
+  'zh-CN'?: string;
+  en?: string;
+}
+/**
+ * 仓库布局（server 配置 remediation.repositories.<角色>.files）：文件角色 → 路径、格式与逻辑字段
+ */
+export interface RepositoryLayout {
+  [k: string]:
+    | {
+        /**
+         * 仓库内路径，可以是 glob（* 与 **）
+         */
+        path: string;
+        format: 'json' | 'yaml';
+        /**
+         * 逻辑字段 → 点路径
+         */
+        fields?: {
+          [k: string]: string | undefined;
+        };
+      }
+    | undefined;
 }
 /**
  * 根因排序参数（DESIGN §5）。修改需要通过回放门禁

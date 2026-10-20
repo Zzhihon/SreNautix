@@ -14,6 +14,7 @@ import { renderMetrics } from '../signals/render.js';
 import type { ActionCatalog } from './catalog.js';
 import { applyLayers, type LoadedLayer } from './layers.js';
 import type { LoadedPack } from './load.js';
+import { compileRemediations, type CompiledRemediation } from '../remediation/compile.js';
 import { computeLock, lockDigest, verifyLock } from './lock.js';
 import type { PackLock } from '@srenautix/contract';
 
@@ -48,6 +49,8 @@ export interface PackSet {
     when: (ctx: Record<string, unknown>) => unknown;
     params: Record<string, (ctx: Record<string, unknown>) => unknown>;
   }>;
+  /** 修复补丁模板（remediations.yaml，ADR 0103） */
+  remediations: CompiledRemediation[];
   lock: PackLock;
   lockDigest: string;
 }
@@ -364,5 +367,17 @@ export async function compilePackSet(loaded: LoadedPack[], opts: CompileOptions)
     }
   }
 
-  return { packs: active, disabled, signals, cards, chains, rules, excludes, lock, lockDigest: lockDigest(lock) };
+  const remediations = compileRemediations(base, active, signals, new Set(cards.keys()));
+  return {
+    packs: active,
+    disabled,
+    signals,
+    cards,
+    chains,
+    rules,
+    excludes,
+    remediations,
+    lock,
+    lockDigest: lockDigest(lock),
+  };
 }

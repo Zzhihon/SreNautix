@@ -15,6 +15,7 @@ SDK 在 `packages/packs-sdk`（Apache-2.0），命令行入口是 `srenautix pac
 | `chains.yaml` | `ChainsFile` | 证据链：证据卡、排除规则、处置手册 |
 | `checks.yaml` | `ChecksFile` | 与告警无关、按实体种类运行的检查项 |
 | `rules.yaml` | `RulesFile` | 规则提议：条件满足时提议动作目录中的动作 |
+| `remediations.yaml` | `RemediationsFile` | 修复补丁模板：条件满足时生成 GitOps 仓库的补丁，经 `gitops_pr` 开 PR |
 | `rca-params.yaml` | `RcaParams` | 根因排序参数；修改需要通过回放门禁 |
 | `action-requests.yaml` | `ActionRequestsFile` | 动作启用申请，经 Git PR 合入策略后生效 |
 | `knowledge/*.yaml` | `KnowledgeFile` | 知识条目，`learned_from` 写来源链接 |
@@ -144,6 +145,7 @@ flowchart TD
 | 函数 | 含义 |
 |---|---|
 | `max(x)`、`min(x)` | 列表：全部点的最大、最小值；单条序列：该序列的最大、最小值 |
+| `max_in(list, from, to)` | 时间在 `[from, to)`（unix 秒）内的点的最大值，没有这样的点时不可求值；`max_in(x, window.from, window.anchor)` 与 `max_in(x, window.anchor, window.to + 1.0)` 对比事件开始前后 |
 | `last(x)` | 列表：各序列最后一个点中的最大值；单条序列：最后一个点 |
 | `sum(x)` | 列表：各序列最后一个点之和；单条序列：全部点之和 |
 | `count(list)` | 有样本的序列数或日志行数 |
@@ -197,6 +199,50 @@ component_types:
 **排除规则**：证据链的 `excludes` 是 CEL 列表，命中任意一条时阶段 A 的处置判断为 `ignore`，`say` 写明原因。可用变量 `root`（根因实体）与 `incident`。
 
 **规则提议**：`rules.yaml` 的每条规则只能引用动作目录（`contract/gateway/v1/action-catalog.yaml`）中已有的动作，参数名与类型按目录检查。`when` 与参数值都是 CEL，可用 `incident`、`root`、`cards`（键为 `<包>/<链>/<卡>`，值含 `verdict`）。`packs/workload/rules.yaml` 的 `stuck-init-recreate-pod` 是一个完整示例：Pod 卡在初始化容器、对应证据卡判定异常时提议 `pod_restart`。
+
+## 修复补丁模板
+
+`remediations.yaml` 的模板生成 GitOps 仓库的补丁（git diff 格式，每个文件带 `diff --git` 头），server 把它作为 `gitops_pr` 的 `params.patch` 开 PR，从不合并（ADR 0103）。模板只写仓库角色与文件角色，不写路径；同一套模板用于不同的仓库，差别全部在 server 配置的仓库布局里：
+
+```yaml
+remediation:
+  repositories:
+    gitops:                                   # 仓库角色，模板的 repository
+      repo: example-org/shop-gitops
+      base_branch: main
+      files:                                  # 文件角色 → 路径、格式与逻辑字段
+        release_input: { path: apps/shop/release.json, format: json, fields: { image: data.image, release_id: data.release_id } }
+        autoscaling: { path: apps/shop/autoscaling.yaml, format: yaml }
+        workloads: { path: apps/shop/workloads.yaml, format: yaml }
+        alert_rules: { path: 'platform/observability/rules/*.yaml', format: yaml }
+        pack_alerts: { path: srenautix/packs/shop/alerts.yaml, format: yaml }
+```
+
+一个模板由下面几部分组成：
+
+| 字段 | 内容 |
+|---|---|
+| `category` | `release_rollback`、`config_resource`、`alert_rule`、`topology_coverage` |
+| `when` | 适用条件（CEL）：`incident`、`root`、`cards`（`<包>/<链>/<卡>` → 结论）、`alerts`（成员告警，含 `role`、`source`、`catalog_entry`、`chronic`）、`params` |
+| `inputs` | 计划时在事件锚点对本包 metrics 信号的 instant 查询；`entity` 是求实体的 CEL，默认根因 |
+| `history` | 读取一个文件角色的 Git 历史，变量 `history` 为最近 `depth` 个修改过它的提交 `{commit, author, time, message, doc}` |
+| `let`、`skip_if` | 按顺序求值的绑定；`skip_if` 任一为 true 时不生成补丁，`say` 写明原因 |
+| `edits` | 对文件角色的修改：`document`（kind 与 metadata.name）与 `locate` 选定唯一的文档，`set` 按点路径或布局的逻辑字段设值（CEL，`current` 为原值），`append` 向数组追加元素 |
+| `change`、`verify`、`rollback` | 写进 PR 描述的改动说明、验证计划（合并同步后应判为正常的卡片与时限）与回滚方法（revert 这个 PR 的提交） |
+
+变量 `files` 是文件角色 → 文档列表（glob 匹配的全部文件与多文档 YAML 的全部文档展开），`fields` 是布局中的逻辑字段。点路径的段为键名、`name[key=value]`、`name[*]` 或 `name[N]`，可以含 `{变量}`。修改保留文件的注释、缩进与其他文档，只替换目标值。目标不存在、不唯一或已经是目标值时模板跳过，并给出原因。模板专用函数：`digest`、`field`、`mem_bytes`、`cpu_cores`、`mebibytes`、`millicores`、`seconds`、`kebab`、`component_ref`。
+
+内置的 `gitops` 包有五个模板：
+
+| 模板 | 类别 | 适用 | 修改 |
+|---|---|---|---|
+| `release-to-serving-version` | release_rollback | `params.stuck_cards` 中任一卡片异常（默认 `workload/release/init-waiting`、`replicasets`） | 发布输入改回历史中最近一次指向就绪 Pod 镜像 digest 的版本；仓库已经指向它时跳过 |
+| `hpa-max-replicas-raise` | config_resource | 根因是 HPA，`workload/capacity/hpa` 异常 | `spec.maxReplicas` 加 `params.step`，不超过 `params.ceiling` |
+| `memory-limit-raise` | config_resource | 根因是工作负载，`workload/pod-restarts/memory` 异常 | OOMKilled 容器的内存 limit 乘 `params.factor`，不超过 `params.ceiling` |
+| `chronic-alert-relax` | alert_rule | 长期告警以 critical 触发，事件中没有症状告警 | 严重度改为 `params.to_severity`，`for` 至少 `params.min_for` |
+| `alert-catalog-entry` | topology_coverage | 成员告警没有命中告警目录 | 按 deployment、statefulset、daemonset、pod 或 component 标签给告警目录加一条条目 |
+
+模板的测试在 `packages/packs-sdk/test/remediation.test.ts`：同一套模板在两种布局的 Git 仓库上生成补丁，补丁必须能 `git apply --check` 到基准提交。
 
 ## 用户层
 
@@ -302,7 +348,8 @@ tests:
 | `alerts-kps` | kube-prometheus-stack 全部告警的目录条目与证据链映射 |
 | `kubernetes-core` | apiserver、etcd 与其他控制面组件 |
 | `node` | 节点健康、文件系统、网络、时钟；混沌实验 node-memory-pressure |
-| `workload` | 重启与 CrashLoop、Pending、发布、Job、容量；规则提议重建卡在初始化的 Pod；混沌实验 crashloop-bad-config |
+| `workload` | 重启与 CrashLoop、Pending、发布进度、发布（等待迁移的 init 容器、新旧 ReplicaSet、正在服务的版本、迁移 Job、开始前后的 5xx 与延迟）、Job、容量；规则提议重建卡在初始化的 Pod；混沌实验 crashloop-bad-config |
+| `gitops` | 修复补丁模板：发布输入回到正在服务的版本、HPA 上限、OOMKilled 容器的内存 limit、长期告警的严重度与持续时间、告警目录条目 |
 | `pvc` | 卷容量；混沌实验 fill-volume |
 | `observability-self` | 抓取、Prometheus TSDB、规则评估、告警投递 |
 | `cert-manager` | 证书到期与签发失败 |

@@ -1,0 +1,312 @@
+# 修复补丁模板（ADR 0103）。模板只引用仓库角色 gitops 与文件角色，真实路径由 server 配置的仓库布局给出：
+#   release_input  发布输入（一个文档；逻辑字段 image 与 release_id），例如 kustomize replacements 引用的 ConfigMap
+#   autoscaling    HorizontalPodAutoscaler 所在的文件
+#   workloads      Deployment、StatefulSet、DaemonSet 所在的文件
+#   alert_rules    PrometheusRule 或 VMRule（spec.groups[].rules[]）所在的文件，可以是 glob
+#   pack_alerts    领域包的告警目录 alerts.yaml
+# 布局缺少模板用到的文件角色时模板跳过。补丁由 server 经 gitops_pr 开 PR，从不合并。
+remediations:
+  # ---------- 发布回退 ----------
+  # 新版本的 Pod 卡住（例如等待与当前数据库不兼容的迁移）时，把发布输入改回就绪 Pod 正在运行的版本。
+  # 正在服务的版本取自集群（就绪 Pod 的镜像 digest），目标内容取自发布输入的 Git 历史中最近一次指向这个 digest 的提交，
+  # 所以回退与前滚是同一个动作：仓库被改回了一个旧版本、而集群仍在运行新版本时，补丁把仓库前滚回新版本。
+  - id: release-to-serving-version
+    title: { zh-CN: 发布输入回到正在服务的版本, en: Point the release input back at the version being served }
+    category: release_rollback
+    repository: gitops
+    when: params.stuck_cards.split(",").exists(k, k in cards && cards[k].verdict == "abnormal")
+    params:
+      # 判定新版本卡住的卡片，任一为 abnormal 即适用；用户层可以加入自己包里的卡片
+      stuck_cards: workload/release/init-waiting,workload/release/replicasets
+      depth: 20
+    inputs:
+      # 根因是工作负载时查它的命名空间；根因是管理工作负载的 Argo 或 Flux 应用时，取事件组件中的第一个工作负载
+      - name: serving
+        signal: ready_pod_images
+        entity: >-
+          root != null && root.kind in ["Deployment", "StatefulSet", "DaemonSet"] ? dyn(root)
+          : has(incident.components) && incident.components.exists(c, c.matches("^(Deployment|StatefulSet|DaemonSet):"))
+          ? dyn(component_ref(incident.components.filter(c, c.matches("^(Deployment|StatefulSet|DaemonSet):"))[0]))
+          : dyn(null)
+    history: { file: release_input, depth: 20 }
+    let:
+      - { name: image_path, cel: fields.release_input.image }
+      - { name: release_path, cel: fields.release_input.release_id }
+      - { name: current_image, cel: 'string(field(files.release_input[0], image_path))' }
+      - { name: current_release, cel: 'string(field(files.release_input[0], release_path))' }
+      - { name: image_repo, cel: 'current_image.split("@")[0]' }
+      # 只看与发布输入同一镜像仓库的就绪容器，命名空间里其他组件的镜像不参与
+      - { name: candidates, cel: 'serving.filter(s, label(s, "image_id").contains(image_repo + "@sha256:"))' }
+      - {
+          name: serving_digest,
+          cel: 'size(candidates) > 0 ? digest(label(candidates.filter(s, candidates.all(o, last(o) <= last(s)))[0], "image_id")) : ""',
+        }
+      - {
+          name: matches,
+          cel: 'history.filter(h, h.doc != null && field(h.doc, image_path) != null && digest(string(field(h.doc, image_path))) == serving_digest)',
+        }
+      - { name: target_image, cel: 'size(matches) > 0 ? string(field(matches[0].doc, image_path)) : ""' }
+      - { name: target_release, cel: 'size(matches) > 0 ? string(field(matches[0].doc, release_path)) : ""' }
+      - { name: target_commit, cel: 'size(matches) > 0 ? matches[0].commit.substring(0, 12) : ""' }
+    skip_if:
+      - cel: size(candidates) == 0
+        say:
+          {
+            zh-CN: '没有就绪 Pod 运行 {image_repo} 的镜像，无法确定正在服务的版本',
+            en: 'No ready pod runs an image from {image_repo}, so the serving version is unknown',
+          }
+      - cel: digest(current_image) == serving_digest
+        say:
+          {
+            zh-CN: '发布输入已经指向正在服务的版本 {current_release}',
+            en: 'The release input already points at the serving version {current_release}',
+          }
+      - cel: size(matches) == 0
+        say:
+          {
+            zh-CN: '发布输入最近 {depth} 次修改中没有正在服务的版本 {serving_digest}',
+            en: 'None of the last {depth} changes to the release input points at the serving version {serving_digest}',
+          }
+    edits:
+      - file: release_input
+        set:
+          - { field: image, value: target_image }
+          - { field: release_id, value: target_release }
+    change:
+      zh-CN: '发布输入改回提交 {target_commit} 中的版本 {target_release}：就绪 Pod 正在运行这个版本（{serving_digest}），仓库当前指向的 {current_release} 的新 Pod 没有就绪。'
+      en: 'Point the release input back at {target_release} from commit {target_commit}: ready pods run this version ({serving_digest}), while new pods for {current_release}, which the repository points at now, are not ready.'
+    verify:
+      say:
+        zh-CN: 同步后新 Pod 不再卡在 init 容器，各 ReplicaSet 达到期望的就绪副本数，就绪 Pod 只运行一个版本
+        en: After the sync no pod is stuck in an init container, every ReplicaSet reaches its ready replicas and ready pods run a single version
+      cards: [workload/release/init-waiting, workload/release/replicasets, workload/release/serving-versions]
+      within: 30m
+    rollback:
+      say:
+        zh-CN: 'revert 这个 PR 的提交，发布输入回到 {current_release}；只有确认 {current_release} 与数据库结构兼容之后才这样做'
+        en: 'Revert the commit of this PR to point the release input at {current_release} again, only after confirming {current_release} is compatible with the database schema'
+
+  # ---------- 配置与资源 ----------
+  - id: hpa-max-replicas-raise
+    title: { zh-CN: 提高 HPA 的副本数上限, en: Raise the HPA replica ceiling }
+    category: config_resource
+    repository: gitops
+    when: >-
+      root != null && root.kind == "HorizontalPodAutoscaler"
+      && "workload/capacity/hpa" in cards && cards["workload/capacity/hpa"].verdict == "abnormal"
+    params: { step: 2, ceiling: 20 }
+    let:
+      - { name: hpa, cel: root.name }
+      - {
+          name: hpas,
+          cel: 'files.autoscaling.filter(d, d != null && has(d.kind) && d.kind == "HorizontalPodAutoscaler" && d.metadata.name == hpa)',
+        }
+      - { name: current_max, cel: 'size(hpas) == 1 ? double(hpas[0].spec.maxReplicas) : 0.0' }
+      - {
+          name: new_max,
+          cel: 'current_max + double(params.step) > double(params.ceiling) ? double(params.ceiling) : current_max + double(params.step)',
+        }
+    skip_if:
+      - cel: size(hpas) != 1
+        say: { zh-CN: '仓库中没有唯一的 HPA {hpa}', en: 'The repository has no unique HPA {hpa}' }
+      - cel: current_max >= double(params.ceiling)
+        say:
+          {
+            zh-CN: 'HPA {hpa} 的 maxReplicas 已经达到模板上限 {ceiling}',
+            en: 'HPA {hpa} already has maxReplicas at the template ceiling {ceiling}',
+          }
+    edits:
+      - file: autoscaling
+        document: { kind: HorizontalPodAutoscaler, name: '{hpa}' }
+        set:
+          - { path: spec.maxReplicas, value: new_max }
+    change:
+      zh-CN: 'HPA {hpa} 的 maxReplicas 由 {current_max} 调到 {new_max}：事件期间副本数一直顶在上限。'
+      en: 'Raise maxReplicas of HPA {hpa} from {current_max} to {new_max}: the replica count stayed at the ceiling during the incident.'
+    verify:
+      say:
+        zh-CN: 同步后 HPA 有扩容余量，副本数不再顶在上限
+        en: After the sync the HPA has room to scale and no longer sits at its ceiling
+      cards: [workload/capacity/hpa]
+      within: 1h
+    rollback:
+      say:
+        zh-CN: 'revert 这个 PR 的提交，maxReplicas 回到 {current_max}；节点资源容纳不下 {new_max} 个副本时这样做'
+        en: 'Revert the commit of this PR to bring maxReplicas back to {current_max} when the nodes cannot hold {new_max} replicas'
+
+  - id: memory-limit-raise
+    title: { zh-CN: 提高 OOMKilled 容器的内存 limit, en: Raise the memory limit of an OOMKilled container }
+    category: config_resource
+    repository: gitops
+    when: >-
+      root != null && root.kind in ["Deployment", "StatefulSet", "DaemonSet"]
+      && "workload/pod-restarts/memory" in cards && cards["workload/pod-restarts/memory"].verdict == "abnormal"
+    params: { factor: 1.5, ceiling: 16Gi }
+    inputs:
+      - { name: oom, signal: oom_killed_containers }
+    let:
+      - { name: workload_kind, cel: root.kind }
+      - { name: workload_name, cel: root.name }
+      - { name: container, cel: 'size(oom) > 0 ? label(oom[0], "container") : ""' }
+      - {
+          name: workloads,
+          cel: 'files.workloads.filter(d, d != null && has(d.kind) && d.kind == workload_kind && d.metadata.name == workload_name)',
+        }
+      - { name: limit_path, cel: '"spec.template.spec.containers[name=" + container + "].resources.limits.memory"' }
+      - {
+          name: current_limit,
+          cel: 'size(workloads) == 1 && container != "" && field(workloads[0], limit_path) != null ? string(field(workloads[0], limit_path)) : ""',
+        }
+      - { name: new_limit, cel: 'current_limit != "" ? mebibytes(mem_bytes(current_limit) * params.factor) : ""' }
+    skip_if:
+      - cel: container == ""
+        say: { zh-CN: '窗口内没有 OOMKilled 的容器', en: 'No container was OOMKilled in the window' }
+      - cel: current_limit == ""
+        say:
+          {
+            zh-CN: '仓库中 {workload_kind} {workload_name} 的容器 {container} 没有内存 limit',
+            en: 'Container {container} of {workload_kind} {workload_name} has no memory limit in the repository',
+          }
+      - cel: mem_bytes(new_limit) > mem_bytes(params.ceiling)
+        say:
+          {
+            zh-CN: '新的 limit {new_limit} 超过模板上限 {ceiling}',
+            en: 'The new limit {new_limit} exceeds the template ceiling {ceiling}',
+          }
+    edits:
+      - file: workloads
+        document: { kind: '{workload_kind}', name: '{workload_name}' }
+        set:
+          - { path: 'spec.template.spec.containers[name={container}].resources.limits.memory', value: new_limit }
+    change:
+      zh-CN: '{workload_kind} {workload_name} 的容器 {container} 的内存 limit 由 {current_limit} 调到 {new_limit}：事件期间容器因 OOMKilled 终止。'
+      en: 'Raise the memory limit of container {container} in {workload_kind} {workload_name} from {current_limit} to {new_limit}: the container was OOMKilled during the incident.'
+    verify:
+      say:
+        zh-CN: 同步后容器不再 OOMKilled，重启次数不再增长
+        en: After the sync the container is no longer OOMKilled and restarts stop growing
+      cards: [workload/pod-restarts/memory, workload/pod-restarts/restarts]
+      within: 1h
+    rollback:
+      say:
+        zh-CN: 'revert 这个 PR 的提交，limit 回到 {current_limit}；节点内存容纳不下新的 limit 时这样做'
+        en: 'Revert the commit of this PR to bring the limit back to {current_limit} when node memory cannot hold the new limit'
+
+  # ---------- 告警规则 ----------
+  # 长期告警（7 天内反复触发）以 critical 触发、而事件中没有任何症状告警时，降低严重度并延长持续时间。
+  - id: chronic-alert-relax
+    title: { zh-CN: 降低长期告警的严重度, en: Relax a chronic alert }
+    category: alert_rule
+    repository: gitops
+    when: >-
+      alerts.exists(a, a.chronic && "severity" in a.labels && a.labels.severity == params.from_severity)
+      && !alerts.exists(a, a.role == "symptom")
+    params: { from_severity: critical, to_severity: warning, min_for: 1h }
+    let:
+      - {
+          name: alertname,
+          cel: 'alerts.filter(a, a.chronic && "severity" in a.labels && a.labels.severity == params.from_severity)[0].alertname',
+        }
+      - {
+          name: docs,
+          cel: 'files.alert_rules.filter(d, d != null && has(d.spec) && has(d.spec.groups) && d.spec.groups.exists(g, has(g.rules) && g.rules.exists(r, has(r.alert) && r.alert == alertname)))',
+        }
+      - {
+          name: unique,
+          cel: 'size(docs) == 1 && docs[0].spec.groups.exists_one(g, has(g.rules) && g.rules.exists(r, has(r.alert) && r.alert == alertname)) && docs[0].spec.groups.all(g, !has(g.rules) || size(g.rules.filter(r, has(r.alert) && r.alert == alertname)) <= 1)',
+        }
+      - { name: rule_path, cel: '"spec.groups[*].rules[alert=" + alertname + "]"' }
+      - {
+          name: current_severity,
+          cel: 'unique && field(docs[0], rule_path + ".labels.severity") != null ? string(field(docs[0], rule_path + ".labels.severity")) : ""',
+        }
+      - {
+          name: current_for,
+          cel: 'unique && field(docs[0], rule_path + ".for") != null ? string(field(docs[0], rule_path + ".for")) : "0s"',
+        }
+      - { name: new_for, cel: 'seconds(current_for) < seconds(params.min_for) ? params.min_for : current_for' }
+    skip_if:
+      - cel: '!unique'
+        say:
+          {
+            zh-CN: '告警 {alertname} 在规则文件中不是唯一的一条规则',
+            en: 'Alert {alertname} is not a single rule in the rule files',
+          }
+      - cel: current_severity != params.from_severity
+        say:
+          {
+            zh-CN: '告警规则 {alertname} 的严重度是 {current_severity}，不是 {from_severity}',
+            en: 'Rule {alertname} has severity {current_severity}, not {from_severity}',
+          }
+    edits:
+      - file: alert_rules
+        locate: 'spec.groups[*].rules[alert={alertname}]'
+        set:
+          - { path: 'spec.groups[*].rules[alert={alertname}].labels.severity', value: params.to_severity }
+          - { path: 'spec.groups[*].rules[alert={alertname}].for', value: new_for }
+    change:
+      zh-CN: '告警 {alertname} 的严重度由 {current_severity} 改为 {to_severity}，持续时间由 {current_for} 改为 {new_for}：它在 7 天内反复触发，本次事件中没有任何症状告警。'
+      en: 'Change alert {alertname} from {current_severity} to {to_severity} and its duration from {current_for} to {new_for}: it fired repeatedly over 7 days and no symptom alert fired in this incident.'
+    verify:
+      say:
+        zh-CN: '同步后 {alertname} 以 {to_severity} 触发，不再进入 {current_severity} 通知'
+        en: 'After the sync {alertname} fires as {to_severity} and no longer reaches {current_severity} notifications'
+      within: 24h
+    rollback:
+      say:
+        zh-CN: 'revert 这个 PR 的提交，告警回到 {current_severity} 与 {current_for}'
+        en: 'Revert the commit of this PR to restore {current_severity} and {current_for}'
+
+  # ---------- 拓扑与领域包覆盖 ----------
+  # 成员告警没有命中任何告警目录条目时，按告警自带的工作负载标签给领域包加一条目录条目。
+  - id: alert-catalog-entry
+    title: { zh-CN: 为未覆盖的告警加告警目录条目, en: Add a catalog entry for an uncovered alert }
+    category: topology_coverage
+    repository: gitops
+    when: alerts.exists(a, a.catalog_entry == null)
+    let:
+      - { name: alert, cel: 'alerts.filter(a, a.catalog_entry == null)[0]' }
+      - { name: alertname, cel: alert.alertname }
+      - { name: entry_id, cel: kebab(alertname) }
+      - { name: role, cel: alert.role }
+      # 工作负载标签优先于逻辑组件标签
+      - {
+          name: name_label,
+          cel: '"deployment" in alert.labels ? "deployment" : "statefulset" in alert.labels ? "statefulset" : "daemonset" in alert.labels ? "daemonset" : "pod" in alert.labels ? "pod" : "component" in alert.labels ? "component" : ""',
+        }
+      - {
+          name: entity_kind,
+          cel: 'name_label == "deployment" ? "Deployment" : name_label == "statefulset" ? "StatefulSet" : name_label == "daemonset" ? "DaemonSet" : name_label == "pod" ? "Pod" : "component"',
+        }
+      - { name: catalogs, cel: 'files.pack_alerts.filter(d, d != null && has(d.entries))' }
+    skip_if:
+      - cel: name_label == ""
+        say:
+          {
+            zh-CN: '告警 {alertname} 没有可以作为实体名的标签（deployment、statefulset、daemonset、pod、component）',
+            en: 'Alert {alertname} has no label usable as the entity name (deployment, statefulset, daemonset, pod, component)',
+          }
+      - cel: size(catalogs) != 1
+        say: { zh-CN: '仓库布局的告警目录不是唯一的一个文件', en: 'The layout does not name a single alert catalog' }
+      - cel: catalogs[0].entries.exists(e, e.alertname == alertname || e.id == entry_id)
+        say:
+          {
+            zh-CN: '告警目录中已经有 {alertname} 或 {entry_id} 的条目',
+            en: 'The catalog already has an entry for {alertname} or {entry_id}',
+          }
+    edits:
+      - file: pack_alerts
+        append:
+          - path: entries
+            value: '{"id": entry_id, "alertname": alertname, "role": role, "entity": {"kind": entity_kind, "name_labels": [name_label]}}'
+    change:
+      zh-CN: '告警目录新增 {alertname} 的条目 {entry_id}：角色 {role}，实体为 {entity_kind}，名字取标签 {name_label}。本次事件中这条告警没有命中任何目录条目。'
+      en: 'Add catalog entry {entry_id} for {alertname}: role {role}, entity {entity_kind} named by label {name_label}. The alert matched no catalog entry in this incident.'
+    verify:
+      say:
+        zh-CN: '加载新包后 {alertname} 命中条目 {entry_id}，实体解析为 {entity_kind}'
+        en: 'After the pack reloads {alertname} matches entry {entry_id} and resolves to a {entity_kind} entity'
+    rollback:
+      say:
+        zh-CN: revert 这个 PR 的提交，告警回到按标签与表达式分类
+        en: Revert the commit of this PR to classify the alert by its labels and expression again

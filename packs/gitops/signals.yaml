@@ -1,0 +1,21 @@
+# 修复模板计划时的输入（remediations.yaml 的 inputs），实体为事件的根因，在事件锚点做 instant 查询。
+signals:
+  # 命名空间内就绪 Pod 运行的镜像 digest（image_id）与各自的容器数
+  - id: ready_pod_images
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: >-
+          count by (image_id) (
+            max by (namespace, pod, image_id) (kube_pod_container_info{namespace="$namespace", image_id=~".*sha256:.*"})
+            * on (namespace, pod) group_left ()
+            (max by (namespace, pod) (kube_pod_status_ready{namespace="$namespace", condition="true"}) == 1)
+          )
+  # 窗口内因 OOMKilled 终止过的容器
+  - id: oom_killed_containers
+    kind: metrics
+    alternatives:
+      - expr: >-
+          max by (container) (
+            max_over_time(kube_pod_container_status_last_terminated_reason{$selector, reason="OOMKilled"}[$window])
+          ) > 0

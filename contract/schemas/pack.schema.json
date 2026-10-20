@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://srenautix.io/contract/schemas/pack.schema.json",
   "title": "PackManifest",
-  "description": "领域包的 pack.yaml（DESIGN §6.3）。领域包只包含数据，不包含可执行代码；其余文件的结构见本文件的 $defs：signals.yaml → SignalsFile，components.yaml → ComponentsFile，alerts.yaml → AlertsFile，chains.yaml → ChainsFile，checks.yaml → ChecksFile，rules.yaml → RulesFile，rca-params.yaml → RcaParams，knowledge/*.yaml → KnowledgeFile，action-requests.yaml → ActionRequestsFile，chaos/*.yaml → ChaosFile，tests/*.yaml → PackTestFile，用户层文件 → UserLayer，pack.lock → PackLock",
+  "description": "领域包的 pack.yaml（DESIGN §6.3）。领域包只包含数据，不包含可执行代码；其余文件的结构见本文件的 $defs：signals.yaml → SignalsFile，components.yaml → ComponentsFile，alerts.yaml → AlertsFile，chains.yaml → ChainsFile，checks.yaml → ChecksFile，rules.yaml → RulesFile，remediations.yaml → RemediationsFile，rca-params.yaml → RcaParams，knowledge/*.yaml → KnowledgeFile，action-requests.yaml → ActionRequestsFile，chaos/*.yaml → ChaosFile，tests/*.yaml → PackTestFile，用户层文件 → UserLayer，pack.lock → PackLock",
   "type": "object",
   "additionalProperties": false,
   "required": ["api_version", "name", "version", "maturity", "requires"],
@@ -281,6 +281,186 @@
           "description": "参数值为 CEL 表达式文本"
         },
         "expected_effect": { "$ref": "evidence-card.schema.json#/$defs/LocalizedText" }
+      }
+    },
+    "RemediationsFile": {
+      "title": "RemediationsFile",
+      "description": "remediations.yaml：修复补丁模板（ADR 0103）。模板生成 Git 补丁，由 server 经 gitops_pr 开 PR，从不合并",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["remediations"],
+      "properties": {
+        "remediations": { "type": "array", "items": { "$ref": "#/$defs/Remediation" } }
+      }
+    },
+    "Remediation": {
+      "title": "Remediation",
+      "description": "一个修复补丁模板。模板只引用仓库角色与文件角色，真实路径由 server 配置的仓库布局（RepositoryLayout）给出，同一模板可用于不同仓库",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "category", "repository", "when", "edits", "change", "verify", "rollback"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$" },
+        "title": { "$ref": "evidence-card.schema.json#/$defs/LocalizedText" },
+        "category": {
+          "type": "string",
+          "description": "release_rollback 发布回退；config_resource 副本数、HPA 上限、request/limit、超时与限流参数；alert_rule 告警阈值、持续时间、严重度；topology_coverage 拓扑与领域包覆盖",
+          "enum": ["release_rollback", "config_resource", "alert_rule", "topology_coverage"]
+        },
+        "repository": { "type": "string", "description": "仓库角色，例如 gitops；server 配置把它映射到仓库与布局" },
+        "when": {
+          "type": "string",
+          "description": "CEL 适用条件。变量：incident、root、cards（卡片全局 id → 结论）、alerts（成员告警：alertname、labels、annotations、entity，以及 AlertClassification 的 role、source、catalog_entry、chronic）、params"
+        },
+        "params": {
+          "type": "object",
+          "description": "参数默认值，可由用户层覆盖",
+          "additionalProperties": { "type": ["number", "string", "boolean"] }
+        },
+        "inputs": {
+          "type": "array",
+          "description": "计划时在事件锚点对本包的 metrics 信号做 instant 查询；结果（序列列表）以 name 作为 CEL 变量",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "signal"],
+            "properties": {
+              "name": { "type": "string", "pattern": "^[a-z_][a-z0-9_]*$" },
+              "signal": { "type": "string" },
+              "entity": {
+                "type": "string",
+                "description": "CEL，求出查询的实体 {kind, namespace, name}，变量与 when 相同；默认为根因。为 null 时模板跳过。例如根因是管理工作负载的 Argo 应用时，用 component_ref 从 incident.components 取工作负载"
+              }
+            }
+          }
+        },
+        "history": {
+          "type": "object",
+          "description": "读取一个文件角色的 Git 历史：变量 history 为最近 depth 个修改过它的提交（从新到旧，含当前版本），每项 {commit, author, time, message, doc}",
+          "additionalProperties": false,
+          "required": ["file", "depth"],
+          "properties": {
+            "file": { "type": "string" },
+            "depth": { "type": "integer", "minimum": 1, "maximum": 50 }
+          }
+        },
+        "let": {
+          "type": "array",
+          "description": "按顺序求值的 CEL 绑定，后面的绑定、skip_if、edits、change 可以引用。另有变量 files（文件角色 → 文档列表：glob 匹配的全部文件与多文档 YAML 的全部文档按路径顺序展开，单个 JSON 文件为一个元素）与 fields（文件角色 → 逻辑字段 → 点路径）",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "cel"],
+            "properties": {
+              "name": { "type": "string", "pattern": "^[a-z_][a-z0-9_]*$" },
+              "cel": { "type": "string" }
+            }
+          }
+        },
+        "skip_if": {
+          "type": "array",
+          "description": "任一 CEL 为 true 时不生成补丁，say 写明原因",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["cel", "say"],
+            "properties": {
+              "cel": { "type": "string" },
+              "say": { "$ref": "evidence-card.schema.json#/$defs/LocalizedText" }
+            }
+          }
+        },
+        "edits": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/RemediationEdit" }
+        },
+        "change": {
+          "$ref": "evidence-card.schema.json#/$defs/LocalizedText",
+          "description": "改了什么、为什么（ICU MessageFormat，变量取自 let 与 params），写入 PR 描述"
+        },
+        "verify": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["say"],
+          "properties": {
+            "say": { "$ref": "evidence-card.schema.json#/$defs/LocalizedText" },
+            "cards": {
+              "type": "array",
+              "description": "合并并同步后应判为正常的卡片全局 id",
+              "items": { "type": "string" }
+            },
+            "within": { "type": "string", "pattern": "^[0-9]+(s|m|h)$" }
+          }
+        },
+        "rollback": {
+          "type": "object",
+          "description": "回滚方法：revert 这个 PR 的提交；say 写补充说明",
+          "additionalProperties": false,
+          "required": ["say"],
+          "properties": { "say": { "$ref": "evidence-card.schema.json#/$defs/LocalizedText" } }
+        }
+      }
+    },
+    "RemediationEdit": {
+      "title": "RemediationEdit",
+      "description": "对一个文件角色的修改。path 用点路径：段为键名、name[key=value]（数组中 key 等于 value 的元素）、name[*]（任一元素，只用于定位）或 name[N]；{变量} 由 let 与 params 的值替换。文件角色是 glob 或多文档 YAML 时，按 document 与 locate 找到唯一的文档，找不到或不唯一时模板跳过",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["file"],
+      "properties": {
+        "file": { "type": "string", "description": "文件角色" },
+        "document": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "多文档 YAML 中按 kind 与 metadata.name 选文档；两者都可以含 {变量}",
+          "properties": { "kind": { "type": "string" }, "name": { "type": "string" } }
+        },
+        "locate": { "type": "string", "description": "定位文档的点路径，默认取第一个 set 的路径去掉最后一段" },
+        "set": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["value"],
+            "properties": {
+              "path": { "type": "string" },
+              "field": { "type": "string", "description": "布局 fields 中的逻辑字段名，与 path 二选一" },
+              "value": { "type": "string", "description": "CEL；另有变量 current（修改前的值，不存在时为 null）" }
+            }
+          }
+        },
+        "append": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "value"],
+            "properties": {
+              "path": { "type": "string", "description": "数组的点路径" },
+              "value": { "type": "string", "description": "CEL，追加的元素" }
+            }
+          }
+        }
+      }
+    },
+    "RepositoryLayout": {
+      "title": "RepositoryLayout",
+      "description": "仓库布局（server 配置 remediation.repositories.<角色>.files）：文件角色 → 路径、格式与逻辑字段",
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "format"],
+        "properties": {
+          "path": { "type": "string", "description": "仓库内路径，可以是 glob（* 与 **）" },
+          "format": { "type": "string", "enum": ["json", "yaml"] },
+          "fields": {
+            "type": "object",
+            "description": "逻辑字段 → 点路径",
+            "additionalProperties": { "type": "string" }
+          }
+        }
       }
     },
     "RcaParams": {

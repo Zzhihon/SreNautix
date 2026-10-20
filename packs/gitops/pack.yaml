@@ -1,0 +1,10 @@
+api_version: srenautix.io/pack/v1
+name: gitops
+version: 1.0.0
+description: GitOps 仓库的修复补丁模板：发布回到正在服务的版本、HPA 上限与内存 limit、长期告警的严重度与持续时间、告警目录条目；文件路径由 server 配置的仓库布局给出
+maturity: stable
+min_srenautix_version: 0.1.0
+depends_on:
+  - workload
+requires:
+  - metrics.query

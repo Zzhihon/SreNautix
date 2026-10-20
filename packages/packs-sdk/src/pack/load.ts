@@ -16,6 +16,7 @@ import {
   type PackManifest,
   type PackTestFile,
   type RcaParams,
+  type RemediationsFile,
   type RulesFile,
   type SignalsFile,
 } from '@srenautix/contract';
@@ -32,6 +33,7 @@ export interface PackContent {
   chains: ChainsFile;
   checks: ChecksFile;
   rules: RulesFile;
+  remediations: RemediationsFile;
   rca_params: RcaParams | null;
   /** 文件名 → 知识条目 */
   knowledge: Record<string, KnowledgeFile>;
@@ -62,6 +64,7 @@ const TOP_FILES = new Set([
   'chains.yaml',
   'checks.yaml',
   'rules.yaml',
+  'remediations.yaml',
   'rca-params.yaml',
   'action-requests.yaml',
   'README.md',
@@ -152,6 +155,9 @@ export function loadPackDir(dir: string, source: string): LoadedPack {
     chains: opt<ChainsFile>('chains.yaml', `${PACK_SCHEMA}#/$defs/ChainsFile`, { chains: [] }),
     checks: opt<ChecksFile>('checks.yaml', `${PACK_SCHEMA}#/$defs/ChecksFile`, { checks: [] }),
     rules: opt<RulesFile>('rules.yaml', `${PACK_SCHEMA}#/$defs/RulesFile`, { rules: [] }),
+    remediations: opt<RemediationsFile>('remediations.yaml', `${PACK_SCHEMA}#/$defs/RemediationsFile`, {
+      remediations: [],
+    }),
     rca_params: opt<RcaParams | null>('rca-params.yaml', `${PACK_SCHEMA}#/$defs/RcaParams`, null),
     knowledge: sub('knowledge', (p) => readYaml<KnowledgeFile>(p, `${PACK_SCHEMA}#/$defs/KnowledgeFile`)),
     runbooks: sub('runbooks', (p) => readFileSync(p, 'utf8')),

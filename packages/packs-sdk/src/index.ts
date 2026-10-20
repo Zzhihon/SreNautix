@@ -84,5 +84,16 @@ export {
   type UpstreamRule,
 } from './testing/upstream-rules.js';
 export { resolveDisplayName, type DisplayNameInput } from './runtime/display-name.js';
+export {
+  applicableRemediations,
+  planRemediation,
+  type RemediationContext,
+  type RemediationTarget,
+  type RemediationPlan,
+  type RemediationSkip,
+  type SkipCode,
+} from './remediation/plan.js';
+export { GitRepoReader, globToRegExp, type RepoReader, type RepoCommit } from './remediation/repo.js';
+export type { CompiledRemediation } from './remediation/compile.js';
 export { runDoctor, type DoctorReport } from './doctor.js';
 export { runPackCli } from './cli.js';
