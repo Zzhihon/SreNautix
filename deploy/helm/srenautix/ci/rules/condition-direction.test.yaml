@@ -1,4 +1,4 @@
-# promtool test rules：SreNautixConditionActive 按 files/conditions.yaml 的方向告警（deploy/helm/check.sh 用 standard 配置渲染的规则运行）
+# promtool test rules：SreNautixConditionActive 按 files/conditions.json（契约 contract/conditions.json 的副本） 的方向告警（deploy/helm/check.sh 用 standard 配置渲染的规则运行）
 rule_files:
   - self-rules-standard.yaml
 evaluation_interval: 1m
@@ -17,6 +17,9 @@ tests:
         values: 1x20
       # gateway：1 表示正常
       - series: 'srenautix_condition{namespace="srenautix", role="gateway", type="AdmissionSelfCheck"}'
+        values: 1x20
+      # ClockSkew=True（within_limit）表示时钟正常，不告警
+      - series: 'srenautix_condition{namespace="srenautix", role="gateway", type="ClockSkew"}'
         values: 1x20
       - series: 'srenautix_condition{namespace="srenautix", role="gateway", type="AuditSink"}'
         values: 0x20

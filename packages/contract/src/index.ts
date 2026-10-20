@@ -5,5 +5,6 @@ export type {
   operations as HubOperations,
 } from './generated/openapi.js';
 export { CONTRACT_VERSION, SCHEMAS } from './generated/schemas.js';
+export { CONDITION_DIRECTIONS } from './generated/conditions.js';
 export { SCHEMA_BASE, contractAjv, validatorFor, assertValid, ContractViolation } from './validate.js';
 export { createHubClient } from './client.js';

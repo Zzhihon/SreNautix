@@ -2,6 +2,7 @@ import type { Proposal } from '@srenautix/contract';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type pg from 'pg';
 import { forbidden, HttpError, notFound } from '../api/errors.js';
+import { replaceSpokeConditions } from '../console-bff/spoke-conditions.js';
 import { checkBody, openapiValidator } from '../api/openapi-schemas.js';
 import type { Auth } from '../identity/auth.js';
 import type { OutboxListener } from '../events/listener.js';
@@ -270,22 +271,8 @@ export class SpokeRelay {
           JSON.stringify(hb.clock_skew_seconds),
         ],
       );
-      for (const cond of hb.conditions) {
-        const type = GATEWAY_CONDITIONS[cond.type];
-        if (!type) {
-          continue;
-        }
-        // gateway 的条件 True 表示功能正常；状态条的条件 true 表示问题正在发生
-        const bad = type.badWhen === cond.status;
-        await c.query(
-          `INSERT INTO server.conditions (role, cluster_id, type, subject, status, reason, message, since, updated_at)
-           VALUES ('gateway', $1, $2, $3, $4, $5, $6, $7, now())
-           ON CONFLICT (role, cluster_id, type, subject) DO UPDATE SET status = excluded.status, reason = excluded.reason,
-             message = excluded.message, since = CASE WHEN server.conditions.status = excluded.status THEN server.conditions.since ELSE excluded.since END,
-             updated_at = now()`,
-          [clusterId, type.type, hb.gateway_id, bad ? 'true' : 'false', cond.reason, cond.message ?? '', cond.since],
-        );
-      }
+      // 方向与状态条类型由契约的方向表给出（contract/conditions.json）；只保留当前上报实例（Lease 持有者）的条件
+      await replaceSpokeConditions(c, 'gateway', clusterId, hb.gateway_id, hb.conditions);
       return { ...(await this.clock(c)), soft_paused: await this.softPaused(c) };
     });
   }
@@ -340,14 +327,6 @@ export class SpokeRelay {
     });
   }
 }
-
-/** gateway 心跳条件到状态条条件的映射。 */
-const GATEWAY_CONDITIONS: Record<string, { type: string; badWhen: string }> = {
-  AdmissionSelfCheck: { type: 'AdmissionSelfTestFailed', badWhen: 'False' },
-  Freeze: { type: 'Frozen', badWhen: 'True' },
-  AuditSink: { type: 'AuditExportLagging', badWhen: 'False' },
-  ClockSkew: { type: 'ClockSkew', badWhen: 'True' },
-};
 
 /** 目标的 group/version 取自动作目录（同一动作允许多种 kind 时按目标 kind 选）。 */
 function targetRef(catalog: Catalog, p: Proposal): { group: string; version: string } {

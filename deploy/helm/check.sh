@@ -38,6 +38,9 @@ for f in "${values_files[@]}"; do
     -schema-location default -schema-location "$crd_catalog" "$out_dir/$name.yaml"
 done
 
+echo "==> 状态条件方向表与契约一致"
+cmp "$repo_root/contract/conditions.json" "$chart_dir/files/conditions.json"
+
 echo "==> promtool check rules（自身告警规则）"
 helm template ci "$chart_dir" --namespace srenautix --kube-version "$kube_version" \
   -f "$chart_dir/ci/base/required.yaml" -f "$chart_dir/values-observe.yaml" \
@@ -46,7 +49,7 @@ helm template ci "$chart_dir" --namespace srenautix --kube-version "$kube_versio
   yq 'select(.kind == "PrometheusRule") | .spec' >"$out_dir/self-rules.yaml"
 promtool check rules "$out_dir/self-rules.yaml"
 if $with_gateway; then
-  # standard 配置有 server、worker、reader、gateway；状态条件告警按各角色的方向（files/conditions.yaml）
+  # standard 配置有 server、worker、reader、gateway；状态条件告警按各角色的方向（files/conditions.json（契约 contract/conditions.json 的副本））
   helm template ci "$chart_dir" --namespace srenautix --kube-version "$kube_version" \
     -f "$chart_dir/ci/base/required.yaml" -f "$chart_dir/values-standard.yaml" \
     --set selfMonitoring.prometheusRule.enabled=true --set selfMonitoring.receiver=oncall \

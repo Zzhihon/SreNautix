@@ -33,12 +33,8 @@ import { IncidentEngine } from '../incident/engine.js';
 import { IncidentPipeline, listenIngest } from '../incident/pipeline.js';
 import { reconcileFromReader, reconcileOnce, startReconcileLoop } from '../ingest/reconcile.js';
 import { ReaderProtocol } from '../topology/protocol.js';
-import {
-  ReaderClock,
-  ReaderRequestQueue,
-  registerReaderRoutes,
-  expireReaderConditions,
-} from '../topology/reader-routes.js';
+import { ReaderClock, ReaderRequestQueue, registerReaderRoutes } from '../topology/reader-routes.js';
+import { expireSpokeConditions } from '../console-bff/spoke-conditions.js';
 import { IngestService } from '../ingest/service.js';
 import { configureLog, logger } from '../log.js';
 import type { RoleArgs } from '../main.js';
@@ -805,7 +801,7 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
         }),
       );
       await workerConditions.publish(workerRouteConditions(scheduler.modelRoutes()));
-      await expireReaderConditions(
+      await expireSpokeConditions(
         pool,
         parseDuration('topology.reader_offline_after', c.topology.reader_offline_after),
         { clusterId: c.cluster_id, usesReader: c.topology.source === 'reader' },

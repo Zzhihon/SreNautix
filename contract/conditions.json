@@ -1,0 +1,34 @@
+{
+  "$schema": "./schemas/condition-directions.schema.json",
+  "roles": {
+    "server": { "source": "condition", "healthy": "false", "types": { "Frozen": { "alert": false } } },
+    "worker": { "source": "condition", "healthy": "false", "types": {} },
+    "mcp": { "source": "condition", "healthy": "false", "types": {} },
+    "gateway": {
+      "source": "gateway_heartbeat",
+      "healthy": "True",
+      "types": {
+        "AdmissionSelfCheck": { "strip_type": "AdmissionSelfTestFailed" },
+        "Freeze": { "healthy": "False", "alert": false, "strip_type": "Frozen" },
+        "AuditSink": { "strip_type": "AuditExportLagging" },
+        "ClockSkew": { "strip_type": "ClockSkew" },
+        "Leader": { "strip_type": null },
+        "ApiserverThrottled": { "healthy": "False", "strip_type": null },
+        "GitHubBranchProtection": { "strip_type": null },
+        "PolicyLoaded": { "strip_type": null }
+      }
+    },
+    "reader": {
+      "source": "reader_heartbeat",
+      "healthy": "True",
+      "types": {
+        "InformersFresh": {},
+        "TunnelConnected": {},
+        "ClockSkew": {},
+        "QueryManifest": {},
+        "Datasource": {},
+        "AlertReconcile": {}
+      }
+    }
+  }
+}

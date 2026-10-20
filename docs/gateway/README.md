@@ -81,6 +81,8 @@ keys:
 
 已开始的执行不受影响：校验、撤销与审计照常完成，审计记录留在本地暂存，审计汇恢复后补写。
 
+心跳里的条件 `True` 表示该项正常（`Freeze`、`ApiserverThrottled` 的 `True` 表示处于冻结、正在被限流），例如 `ClockSkew=True, reason=within_limit` 是时钟正常。每个类型的方向与它在控制台状态条上的类型由契约的方向表 `contract/conditions.json` 定义（ADR 0100）；中心只保留当前上报实例（Lease 持有者）的条件，心跳超过 `topology.reader_offline_after`（默认 60 秒）没有到达时清除。
+
 ## 熔断开关
 
 硬停止只能修改 `srenautix-freeze`（kubectl 或 GitOps），它不依赖 gateway 进程：

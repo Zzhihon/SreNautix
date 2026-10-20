@@ -384,6 +384,9 @@ export interface SrenautixContractIndex {
   Sha256?: Sha256;
   EvidenceRef?: EvidenceRef;
   Error?: Error;
+  ConditionDirections?: ConditionDirections;
+  ConditionDirectionsRole?: ConditionDirectionsRole;
+  ConditionDirectionsType?: ConditionDirectionsType;
   Condition?: Condition;
   EvalCase?: EvalCase;
   EvalGranularity?: EvalGranularity;
@@ -1651,6 +1654,42 @@ export interface Error {
    */
   error: string;
   message: string;
+}
+/**
+ * 各角色上报的状态条件里哪个取值表示正常（数据在 contract/conditions.json）。server 把分支心跳的条件换算成状态条的 Condition（status true 表示问题正在发生），chart 的自身告警与看板按同一张表判断异常；新增的条件类型按所在角色的 healthy 处理
+ */
+export interface ConditionDirections {
+  $schema?: string;
+  roles: {
+    [k: string]: ConditionDirectionsRole | undefined;
+  };
+}
+export interface ConditionDirectionsRole {
+  /**
+   * condition：角色自己写 Condition（status 为 true/false，true 表示问题）；gateway_heartbeat、reader_heartbeat：分支心跳的条件（status 为 True/False/Unknown，见 gateway/v1 的 Condition 与 ReaderCondition）。指标 srenautix_condition 与 srenautix_reader_condition 的取值为 1 当且仅当 status 为 true 或 True
+   */
+  source: 'condition' | 'gateway_heartbeat' | 'reader_heartbeat';
+  /**
+   * 该角色的条件正常时的取值；取值不同（包括 Unknown）即为异常
+   */
+  healthy: 'true' | 'false' | 'True' | 'False';
+  types: {
+    [k: string]: ConditionDirectionsType | undefined;
+  };
+}
+export interface ConditionDirectionsType {
+  /**
+   * 与角色默认方向不同的类型
+   */
+  healthy?: 'true' | 'false' | 'True' | 'False';
+  /**
+   * false：异常取值是预期的运行模式（例如冻结），状态条照常显示，自身告警不告警
+   */
+  alert?: boolean;
+  /**
+   * gateway 心跳条件在状态条上的类型（Condition.type）；null 表示不转发到状态条。reader 的条件以原类型转发
+   */
+  strip_type?: string | null;
 }
 /**
  * 带类型的状态条件（DESIGN §12.4），驱动每个页面顶部的状态条。每个判定都附带影响它的条件
@@ -3075,6 +3114,37 @@ export interface ComponentType {
     namespaces?: string[];
   };
   chains?: string[];
+  /**
+   * 组件的可读名称来源（只影响显示，组件键不变）：按顺序尝试，取第一个非空且不等于实体名的值；都没有时显示组件键。alert_annotation、alert_label 取实体所在告警的注解或标签；signal 在事件锚点对本包的 metrics 信号做 instant 查询，取第一条序列的 label 标签
+   *
+   * @minItems 1
+   */
+  display_name?: [
+    (
+      | {
+          alert_annotation: string;
+        }
+      | {
+          alert_label: string;
+        }
+      | {
+          signal: string;
+          label: string;
+        }
+    ),
+    ...(
+      | {
+          alert_annotation: string;
+        }
+      | {
+          alert_label: string;
+        }
+      | {
+          signal: string;
+          label: string;
+        }
+    )[],
+  ];
 }
 export interface OperatorConvention {
   id: string;

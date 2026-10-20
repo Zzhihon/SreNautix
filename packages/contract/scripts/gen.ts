@@ -134,6 +134,17 @@ function genSchemas(files: SchemaFile[]): string {
   );
 }
 
+// contract/conditions.json：各角色状态条件的方向表（schema 见 schemas/condition-directions.schema.json）
+function genConditions(): string {
+  const data = JSON.parse(readFileSync(join(contractDir, 'conditions.json'), 'utf8')) as Record<string, unknown>;
+  delete data.$schema;
+  return (
+    BANNER +
+    "import type { ConditionDirections } from './types.js';\n\n" +
+    `export const CONDITION_DIRECTIONS: ConditionDirections = ${JSON.stringify(data)};\n`
+  );
+}
+
 async function pretty(source: string): Promise<string> {
   return format(source, { parser: 'typescript', printWidth: 120, singleQuote: true, trailingComma: 'all' });
 }
@@ -144,6 +155,7 @@ async function main(): Promise<void> {
     'types.ts': await pretty(await genTypes(files)),
     'openapi.ts': await pretty(await genOpenapi()),
     'schemas.ts': await pretty(genSchemas(files)),
+    'conditions.ts': await pretty(genConditions()),
   };
   if (check) {
     const stale = Object.entries(outputs)

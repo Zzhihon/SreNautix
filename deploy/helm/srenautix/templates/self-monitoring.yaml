@@ -72,7 +72,7 @@ spec:
             {{- toYaml $labels | nindent 12 }}
           annotations:
             summary: 阶段 A 报告 p95 超过 60 秒
-        # 各角色状态条件的方向不同（files/conditions.yaml）：server、worker 为 1 表示问题，gateway、reader 为 0 表示问题
+        # 各角色状态条件的方向不同（files/conditions.json（契约 contract/conditions.json 的副本））：server、worker 为 1 表示问题，gateway、reader 为 0 表示问题
         - alert: SreNautixConditionActive
           expr: >-
             {{ include "srenautix.unhealthyConditions" (dict "ctx" $ "selector" $sel "by" "namespace, role, type") }}

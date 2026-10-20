@@ -4,6 +4,7 @@ import type { TopologyEdge, TopologyEvent, TopologyNode } from '@srenautix/contr
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type pg from 'pg';
 import { HttpError } from '../api/errors.js';
+import { replaceSpokeConditions } from '../console-bff/spoke-conditions.js';
 import type { Auth } from '../identity/auth.js';
 import { logger } from '../log.js';
 import { tx, type Queryable } from '../store/pool.js';
@@ -275,69 +276,6 @@ async function lockCursor(c: Queryable, clusterId: string): Promise<Cursor> {
     [clusterId],
   );
   return r.rows[0] as Cursor;
-}
-
-/**
- * reader 离线后的条件（状态条件循环每 15 秒调用一次）：心跳超过 offlineMs 没有到达的集群，清除 reader 之前上报的条件
- * （不再保留旧状态），只留一条 TunnelConnected（原因 ReaderOffline）说明 reader 离线；reader 恢复心跳时由心跳覆盖。
- * 本集群的拓扑不经 reader（topology.source 不是 reader，例如 reader 已关闭）时，reader 的条件全部清除，不显示离线。
- */
-export async function expireReaderConditions(
-  c: Queryable,
-  offlineMs: number,
-  local: { clusterId: string; usesReader: boolean },
-): Promise<number> {
-  const secs = offlineMs / 1000;
-  const stale = await c.query<{ cluster_id: string; received_at: Date }>(
-    `SELECT cluster_id, received_at FROM server.reader_status WHERE received_at < now() - make_interval(secs => $1)`,
-    [secs],
-  );
-  let changed = 0;
-  for (const r of stale.rows) {
-    const unused = r.cluster_id === local.clusterId && !local.usesReader;
-    const del = await c.query(
-      `DELETE FROM server.conditions WHERE role = 'reader' AND cluster_id = $1 AND ($2 OR NOT (type = 'TunnelConnected' AND reason = 'ReaderOffline'))`,
-      [r.cluster_id, unused],
-    );
-    changed += del.rowCount ?? 0;
-    if (unused) {
-      continue;
-    }
-    const up = await c.query(
-      `INSERT INTO server.conditions (role, cluster_id, type, subject, status, reason, message, since, updated_at)
-       VALUES ('reader', $1, 'TunnelConnected', '', 'true', 'ReaderOffline', $2, $3, now())
-       ON CONFLICT (role, cluster_id, type, subject) DO NOTHING`,
-      [
-        r.cluster_id,
-        `reader 已离线：自 ${r.received_at.toISOString()} 起没有心跳（超过 ${secs} 秒），它之前上报的条件已清除`,
-        r.received_at,
-      ],
-    );
-    changed += up.rowCount ?? 0;
-  }
-  // 没有任何心跳记录、却还有 reader 条件的集群（例如状态表被清理过）：同样清除
-  const orphan = await c.query(
-    `DELETE FROM server.conditions c WHERE c.role = 'reader'
-       AND NOT EXISTS (SELECT 1 FROM server.reader_status r WHERE r.cluster_id = c.cluster_id)`,
-  );
-  return changed + (orphan.rowCount ?? 0);
-}
-
-/** reader 的状态条件（InformersFresh 等）写入 server.conditions：条件不为 True 时问题正在发生（status=true）。 */
-async function upsertConditions(
-  c: Queryable,
-  clusterId: string,
-  conditions: Array<{ type: string; status: string; reason: string; message?: string; since: string }>,
-): Promise<void> {
-  for (const x of conditions) {
-    await c.query(
-      `INSERT INTO server.conditions (role, cluster_id, type, subject, status, reason, message, since, updated_at)
-       VALUES ('reader', $1, $2, '', $3, $4, $5, $6, now())
-       ON CONFLICT (role, cluster_id, type, subject) DO UPDATE SET status = excluded.status, reason = excluded.reason,
-         message = excluded.message, since = excluded.since, updated_at = now()`,
-      [clusterId, x.type, x.status === 'True' ? 'false' : 'true', x.reason, x.message ?? '', x.since],
-    );
-  }
 }
 
 /**
@@ -644,7 +582,8 @@ export function registerReaderRoutes(app: FastifyInstance, deps: ReaderRouteDeps
             b.query_manifest === undefined ? null : JSON.stringify(b.query_manifest),
           ],
         );
-        await upsertConditions(c, clusterId, b.conditions);
+        // 方向由契约的方向表给出；每次心跳替换该集群 reader 的全部条件，换 Pod 后不留旧行
+        await replaceSpokeConditions(c, 'reader', clusterId, '', b.conditions);
         return clockOnly(await hubClock(c));
       });
     }),

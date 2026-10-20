@@ -8,18 +8,19 @@ import { Bindings } from '../../src/identity/bindings.js';
 import { CallerRegistry, tokenDigest } from '../../src/identity/callers.js';
 import { identityTrack } from '../../src/identity/migrations.js';
 import { Sessions } from '../../src/identity/sessions.js';
+import { proposalsTrack } from '../../src/proposals/migrations.js';
 import { migrateExpand } from '../../src/store/migrate.js';
 import { storeTrack } from '../../src/store/migrations.js';
 import { topologyTrack } from '../../src/topology/migrations.js';
 import { ReaderProtocol } from '../../src/topology/protocol.js';
 import {
-  expireReaderConditions,
   ReaderClock,
   ReaderRequestQueue,
   ReaderRequestTimeout,
   registerReaderRoutes,
   type AlertReconcileSnapshot,
 } from '../../src/topology/reader-routes.js';
+import { expireSpokeConditions } from '../../src/console-bff/spoke-conditions.js';
 import { TopologyStore } from '../../src/topology/store.js';
 import { newTestDb, type TestDb } from '../support/db.js';
 
@@ -63,7 +64,7 @@ const event = (seq: number, op: TopologyEvent['op'], n: TopologyNode, at: string
 
 beforeAll(async () => {
   db = await newTestDb();
-  await migrateExpand(db.server, 'server', [storeTrack, identityTrack, topologyTrack]);
+  await migrateExpand(db.server, 'server', [storeTrack, identityTrack, topologyTrack, proposalsTrack]);
   store = new TopologyStore(db.server);
   const protocol = new ReaderProtocol();
   queue = new ReaderRequestQueue(db.server, protocol);
@@ -458,13 +459,13 @@ describe('reader 离线时的状态条件', () => {
 
   it('心跳超时：清除 reader 之前上报的条件，只留"reader 离线"；心跳恢复后被新的条件覆盖', async () => {
     await seed('east', 10);
-    expect(await expireReaderConditions(db.server, 60_000, { clusterId: 'hub', usesReader: false })).toBe(0);
+    expect(await expireSpokeConditions(db.server, 60_000, { clusterId: 'hub', usesReader: false })).toBe(0);
     expect(await readerRows('east')).toHaveLength(3);
     await seed('east', 300);
-    await expireReaderConditions(db.server, 60_000, { clusterId: 'hub', usesReader: false });
+    await expireSpokeConditions(db.server, 60_000, { clusterId: 'hub', usesReader: false });
     expect(await readerRows('east')).toEqual([['TunnelConnected', 'true', 'ReaderOffline']]);
     // 再跑一轮不重复、不改动
-    expect(await expireReaderConditions(db.server, 60_000, { clusterId: 'hub', usesReader: false })).toBe(0);
+    expect(await expireSpokeConditions(db.server, 60_000, { clusterId: 'hub', usesReader: false })).toBe(0);
     const msg = await db.admin.query<{ message: string }>(
       "SELECT message FROM server.conditions WHERE role = 'reader' AND cluster_id = 'east'",
     );
@@ -480,11 +481,11 @@ describe('reader 离线时的状态条件', () => {
 
   it('本集群的拓扑不经 reader（reader 已关闭）：reader 的条件全部清除，不显示离线', async () => {
     await seed('hub', 300);
-    await expireReaderConditions(db.server, 60_000, { clusterId: 'hub', usesReader: false });
+    await expireSpokeConditions(db.server, 60_000, { clusterId: 'hub', usesReader: false });
     expect(await readerRows('hub')).toEqual([]);
     // 本集群使用 reader 时显示离线
     await seed('hub', 300);
-    await expireReaderConditions(db.server, 60_000, { clusterId: 'hub', usesReader: true });
+    await expireSpokeConditions(db.server, 60_000, { clusterId: 'hub', usesReader: true });
     expect(await readerRows('hub')).toEqual([['TunnelConnected', 'true', 'ReaderOffline']]);
   });
 });

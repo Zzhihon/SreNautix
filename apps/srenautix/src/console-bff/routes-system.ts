@@ -24,6 +24,7 @@ import type { AuditExporter } from '../store/audit-export.js';
 import { tx } from '../store/pool.js';
 import type { TopologyStore } from '../topology/store.js';
 import { subgraphOf } from './routes-incidents.js';
+import { isHealthy } from './spoke-conditions.js';
 
 export interface SystemRouteDeps {
   pool: pg.Pool;
@@ -140,7 +141,12 @@ export function registerSystemRoutes(app: FastifyInstance, d: SystemRouteDeps): 
     const g = gw.rows[0];
     const r = rd.rows[0];
     const selfCheck = g?.conditions.find((c) => c.type === 'AdmissionSelfCheck');
-    const frozen = g?.conditions.find((c) => c.type === 'Freeze')?.status === 'True';
+    // 方向按契约的方向表（contract/conditions.json）
+    const gwHealthy = (type: string) => {
+      const x = g?.conditions.find((c) => c.type === type);
+      return x ? isHealthy('gateway', type, x.status) : null;
+    };
+    const frozen = gwHealthy('Freeze') === false;
     const singleCluster = id === d.config.cluster_id && d.config.topology.source === 'informer';
     return {
       cluster_id: id,
@@ -158,23 +164,22 @@ export function registerSystemRoutes(app: FastifyInstance, d: SystemRouteDeps): 
             connected: !g.stale,
             version: g.version,
             last_seen_at: g.received_at.toISOString(),
-            admission_selfcheck: selfCheck
-              ? selfCheck.status === 'True'
-                ? 'passed'
-                : selfCheck.status === 'False'
-                  ? 'failed'
-                  : 'unknown'
-              : 'unknown',
+            admission_selfcheck:
+              !selfCheck || selfCheck.status === 'Unknown'
+                ? 'unknown'
+                : isHealthy('gateway', 'AdmissionSelfCheck', selfCheck.status)
+                  ? 'passed'
+                  : 'failed',
           }
         : null,
       freeze: { frozen, observed_at: (g?.received_at ?? new Date()).toISOString() },
       // 多集群：reader 心跳报告 informer 新鲜（InformersFresh=True）时以心跳时间为准
       informer_synced_at: singleCluster
         ? fmt(topo.rows[0]?.last)
-        : r?.conditions.some((c) => c.type === 'InformersFresh' && c.status === 'True')
+        : r?.conditions.some((c) => c.type === 'InformersFresh' && isHealthy('reader', c.type, c.status))
           ? fmt(r.received_at)
           : null,
-      proposal_only: !g || g.propose_only || g.stale || frozen || selfCheck?.status !== 'True',
+      proposal_only: !g || g.propose_only || g.stale || frozen || gwHealthy('AdmissionSelfCheck') !== true,
       conditions: conds.rows.map((c) => ({
         type: c.type,
         status: c.status,
@@ -315,7 +320,10 @@ export function registerSystemRoutes(app: FastifyInstance, d: SystemRouteDeps): 
     const row = g.rows[0];
     return {
       cluster_id: id,
-      frozen: row?.conditions.find((c) => c.type === 'Freeze')?.status === 'True',
+      frozen: (() => {
+        const f = row?.conditions.find((c) => c.type === 'Freeze');
+        return f ? !isHealthy('gateway', 'Freeze', f.status) : false;
+      })(),
       configmap: 'srenautix-freeze',
       observed_at: (row?.received_at ?? new Date()).toISOString(),
       instructions: {

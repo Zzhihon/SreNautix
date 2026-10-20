@@ -1,5 +1,5 @@
 // 本文件由 packages/contract/scripts/gen.ts 从 contract/ 生成，不要手工修改。
-export const CONTRACT_VERSION = '2.9.0';
+export const CONTRACT_VERSION = '2.10.0';
 
 export const SCHEMAS: Record<string, Record<string, unknown>> = {
   'https://srenautix.io/contract/gateway/v1/action-catalog.schema.json': {
@@ -1869,6 +1869,60 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
       },
     },
   },
+  'https://srenautix.io/contract/schemas/condition-directions.schema.json': {
+    $schema: 'https://json-schema.org/draft/2020-12/schema',
+    $id: 'https://srenautix.io/contract/schemas/condition-directions.schema.json',
+    title: 'ConditionDirections',
+    description:
+      '各角色上报的状态条件里哪个取值表示正常（数据在 contract/conditions.json）。server 把分支心跳的条件换算成状态条的 Condition（status true 表示问题正在发生），chart 的自身告警与看板按同一张表判断异常；新增的条件类型按所在角色的 healthy 处理',
+    type: 'object',
+    additionalProperties: false,
+    required: ['roles'],
+    properties: {
+      $schema: { type: 'string' },
+      roles: {
+        type: 'object',
+        propertyNames: { enum: ['server', 'worker', 'mcp', 'gateway', 'reader'] },
+        additionalProperties: { $ref: '#/$defs/Role' },
+      },
+    },
+    $defs: {
+      Role: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['source', 'healthy', 'types'],
+        properties: {
+          source: {
+            enum: ['condition', 'gateway_heartbeat', 'reader_heartbeat'],
+            description:
+              'condition：角色自己写 Condition（status 为 true/false，true 表示问题）；gateway_heartbeat、reader_heartbeat：分支心跳的条件（status 为 True/False/Unknown，见 gateway/v1 的 Condition 与 ReaderCondition）。指标 srenautix_condition 与 srenautix_reader_condition 的取值为 1 当且仅当 status 为 true 或 True',
+          },
+          healthy: {
+            enum: ['true', 'false', 'True', 'False'],
+            description: '该角色的条件正常时的取值；取值不同（包括 Unknown）即为异常',
+          },
+          types: { type: 'object', additionalProperties: { $ref: '#/$defs/Type' } },
+        },
+      },
+      Type: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          healthy: { enum: ['true', 'false', 'True', 'False'], description: '与角色默认方向不同的类型' },
+          alert: {
+            type: 'boolean',
+            default: true,
+            description: 'false：异常取值是预期的运行模式（例如冻结），状态条照常显示，自身告警不告警',
+          },
+          strip_type: {
+            type: ['string', 'null'],
+            description:
+              'gateway 心跳条件在状态条上的类型（Condition.type）；null 表示不转发到状态条。reader 的条件以原类型转发',
+          },
+        },
+      },
+    },
+  },
   'https://srenautix.io/contract/schemas/condition.schema.json': {
     $schema: 'https://json-schema.org/draft/2020-12/schema',
     $id: 'https://srenautix.io/contract/schemas/condition.schema.json',
@@ -3597,6 +3651,34 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
             },
           },
           chains: { type: 'array', items: { type: 'string' } },
+          display_name: {
+            type: 'array',
+            minItems: 1,
+            description:
+              '组件的可读名称来源（只影响显示，组件键不变）：按顺序尝试，取第一个非空且不等于实体名的值；都没有时显示组件键。alert_annotation、alert_label 取实体所在告警的注解或标签；signal 在事件锚点对本包的 metrics 信号做 instant 查询，取第一条序列的 label 标签',
+            items: {
+              oneOf: [
+                {
+                  type: 'object',
+                  additionalProperties: false,
+                  required: ['alert_annotation'],
+                  properties: { alert_annotation: { type: 'string', minLength: 1 } },
+                },
+                {
+                  type: 'object',
+                  additionalProperties: false,
+                  required: ['alert_label'],
+                  properties: { alert_label: { type: 'string', minLength: 1 } },
+                },
+                {
+                  type: 'object',
+                  additionalProperties: false,
+                  required: ['signal', 'label'],
+                  properties: { signal: { type: 'string', minLength: 1 }, label: { type: 'string', minLength: 1 } },
+                },
+              ],
+            },
+          },
         },
       },
       OperatorConvention: {

@@ -149,7 +149,37 @@
             "namespaces": { "type": "array", "items": { "type": "string" } }
           }
         },
-        "chains": { "type": "array", "items": { "type": "string" } }
+        "chains": { "type": "array", "items": { "type": "string" } },
+        "display_name": {
+          "type": "array",
+          "minItems": 1,
+          "description": "组件的可读名称来源（只影响显示，组件键不变）：按顺序尝试，取第一个非空且不等于实体名的值；都没有时显示组件键。alert_annotation、alert_label 取实体所在告警的注解或标签；signal 在事件锚点对本包的 metrics 信号做 instant 查询，取第一条序列的 label 标签",
+          "items": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["alert_annotation"],
+                "properties": { "alert_annotation": { "type": "string", "minLength": 1 } }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["alert_label"],
+                "properties": { "alert_label": { "type": "string", "minLength": 1 } }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["signal", "label"],
+                "properties": {
+                  "signal": { "type": "string", "minLength": 1 },
+                  "label": { "type": "string", "minLength": 1 }
+                }
+              }
+            ]
+          }
+        }
       }
     },
     "OperatorConvention": {
