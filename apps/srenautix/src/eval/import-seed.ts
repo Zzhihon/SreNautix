@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto';
-import { createReadStream, existsSync, readFileSync } from 'node:fs';
+import { appendFileSync, createReadStream, existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { createInterface } from 'node:readline';
-import { createZstdDecompress } from 'node:zlib';
+import { StringDecoder } from 'node:string_decoder';
+import { createZstdDecompress, zstdCompressSync, zstdDecompressSync } from 'node:zlib';
 import type {
   ChangeEvent,
   EvalCase,
@@ -123,12 +123,30 @@ export interface ImportSummary {
   entries: number;
 }
 
+/**
+ * zstd 文件逐行流式解压：按需从解压流读取（处理慢时不会预读积压），跨块的多字节字符由 StringDecoder 拼接。
+ * 内存只与最长的一行有关。
+ */
+export async function* zstdLines(file: string): AsyncGenerator<string> {
+  const decoder = new StringDecoder('utf8');
+  let carry = '';
+  for await (const chunk of createReadStream(file).pipe(createZstdDecompress())) {
+    const parts = (carry + decoder.write(chunk as Buffer)).split('\n');
+    carry = parts.pop() as string;
+    for (const line of parts) {
+      yield line.endsWith('\r') ? line.slice(0, -1) : line;
+    }
+  }
+  const rest = carry + decoder.end();
+  if (rest) {
+    yield rest;
+  }
+}
+
 /** 逐行读取一个 zstd JSON Lines 文件；第一行必须是本格式的文件头 */
 export async function* readJsonl(file: string): AsyncGenerator<Rec> {
-  const input = createReadStream(file).pipe(createZstdDecompress());
-  const lines = createInterface({ input, crlfDelay: Infinity });
   let first = true;
-  for await (const line of lines) {
+  for await (const line of zstdLines(file)) {
     if (!line) {
       continue;
     }
@@ -164,6 +182,23 @@ function slug(s: string): string {
     .replace(/[^a-z0-9_.-]+/g, '-')
     .replace(/^[^a-z0-9]+/, '');
   return v || 'x';
+}
+
+/** eval-case.schema.json 的 case_id 模式 */
+const CASE_ID = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,199}$/;
+
+/**
+ * 单元 → case_id：legacy:<unit>。旧版 Ops-Agent 的事件键是 <根组件>:<首次触发时间取整到 10 分钟>，同一根组件、
+ * 同一个 10 分钟内的多个不同事件按首次触发顺序加 ~<序号>（N ≥ 2）后缀，例如 node:2026-10-16T23:20:00Z~2。
+ * 契约的 case_id 不允许 ~，按固定规则改为 .（node:2026-10-16T23:20:00Z.2）；导入时检查映射后的冲突。
+ * 原始的事件键保留在用例的 label、leakage.learned_from_keys 与快照的 source.ref 中。映射后仍不合法时报错，不做其他改写。
+ */
+export function caseIdOf(unit: string): string {
+  const id = `legacy:${unit.replace(/~/g, '.')}`;
+  if (!CASE_ID.test(id)) {
+    throw new Error(`单元 ${JSON.stringify(unit)} 无法映射为合法的 case_id（得到 ${JSON.stringify(id)}）`);
+  }
+  return id;
 }
 
 export function componentKey(id: string): string {
@@ -424,17 +459,133 @@ export function callEntry(c: Call): Entry | null {
   }
 }
 
+/**
+ * 一个单元一个日志组窗口内日志行的时间戳：第一遍只记录最新的 limit 个时间戳（最小堆），得到截断线。
+ * 第二遍按截断线保留行：时间晚于截断线的全部保留，等于截断线的按出现顺序保留 keepAtCutoff 行。
+ * 这与"读完全部行、按时间倒序稳定排序、取前 limit 行"的结果相同，而内存只与 limit 有关。
+ */
+export class NewestTimes {
+  private heap: number[] = [];
+  /** 窗口内的总行数 */
+  total = 0;
+
+  constructor(private readonly limit = MAX_LOG_LINES_PER_GROUP) {}
+
+  offer(t: number): void {
+    this.total++;
+    const h = this.heap;
+    if (h.length < this.limit) {
+      h.push(t);
+      let i = h.length - 1;
+      while (i > 0) {
+        const p = (i - 1) >> 1;
+        if ((h[p] as number) <= t) {
+          break;
+        }
+        h[i] = h[p] as number;
+        i = p;
+      }
+      h[i] = t;
+    } else if (t > (h[0] as number)) {
+      // 替换堆顶后下沉
+      let i = 0;
+      for (;;) {
+        const l = 2 * i + 1;
+        const r = l + 1;
+        let m = i;
+        let mv = t;
+        if (l < h.length && (h[l] as number) < mv) {
+          m = l;
+          mv = h[l] as number;
+        }
+        if (r < h.length && (h[r] as number) < mv) {
+          m = r;
+        }
+        if (m === i) {
+          break;
+        }
+        h[i] = h[m] as number;
+        i = m;
+      }
+      h[i] = t;
+    }
+  }
+
+  /** 截断线：未满 limit 时为 -Infinity（全部保留）；以及等于截断线的行应保留几行 */
+  cutoff(): { at: number; keepAtCutoff: number } {
+    if (this.heap.length < this.limit) {
+      return { at: -Infinity, keepAtCutoff: Infinity };
+    }
+    const at = this.heap[0] as number;
+    const above = this.heap.filter((x) => x > at).length;
+    return { at, keepAtCutoff: this.limit - above };
+  }
+}
+
+/** 每个单元的中间结果先写入临时文件（每批一个带帧长前缀的 zstd 帧），写出用例时再逐帧读回，不在内存中累积。 */
+class UnitSpool {
+  private buf: string[] = [];
+  private size = 0;
+
+  constructor(readonly file: string) {}
+
+  add(rec: unknown): void {
+    const s = JSON.stringify(rec);
+    this.buf.push(s);
+    this.size += s.length;
+    if (this.size >= SPOOL_FLUSH_BYTES) {
+      this.flush();
+    }
+  }
+
+  flush(): void {
+    if (this.buf.length) {
+      const frame = zstdCompressSync(Buffer.from(this.buf.join('\n')));
+      const len = Buffer.alloc(4);
+      len.writeUInt32BE(frame.length);
+      appendFileSync(this.file, Buffer.concat([len, frame]));
+      this.buf = [];
+      this.size = 0;
+    }
+  }
+
+  /** 逐帧解压读回（每帧前 4 字节为帧长；Node 的流式 zstd 解压不接受多帧拼接） */
+  *read(): Generator<SpoolRec> {
+    this.flush();
+    if (!existsSync(this.file)) {
+      return;
+    }
+    const data = readFileSync(this.file);
+    for (let off = 0; off < data.length;) {
+      const len = data.readUInt32BE(off);
+      const text = zstdDecompressSync(data.subarray(off + 4, off + 4 + len)).toString('utf8');
+      off += 4 + len;
+      for (const line of text.split('\n')) {
+        yield JSON.parse(line) as SpoolRec;
+      }
+    }
+  }
+}
+
+/** 缓冲达到这个大小（字符数）时写入一帧 */
+const SPOOL_FLUSH_BYTES = 256 * 1024;
+
+type SpoolRec =
+  | { k: 'call'; e: Entry }
+  | { k: 'group'; g: string; q: string }
+  | { k: 'line'; g: string; t: number; s: Record<string, string>; l: string }
+  /** 单元用到的一个原始序列选择器（第一次出现时写入，决定条目的顺序；窗口内没有点时条目的结果为空） */
+  | { k: 'rawsel'; id: string; q: string }
+  /** 一个原始序列块中一条序列落在窗口 W 内的点 */
+  | { k: 'raw'; id: string; labels: Record<string, string>; t: number[]; v: Array<number | null> };
+
 interface Pending {
   u: Unit;
-  calls: Entry[];
-  logs: Map<string, { query: string; lines: Array<{ time: string; labels: Record<string, string>; line: string }> }>;
-  raw: Map<
-    string,
-    {
-      selector: string;
-      series: Map<string, { labels: Record<string, string>; times: number[]; values: Array<number | null> }>;
-    }
-  >;
+  spool: UnitSpool;
+  /** 日志组 → 窗口内的总行数（第一遍得出，决定 truncated） */
+  totals: Map<string, number>;
+  /** 已写入 rawsel 的选择器 */
+  rawSelectors: Set<string>;
 }
 
 export async function importSeed(o: ImportOptions): Promise<ImportSummary> {
@@ -500,63 +651,169 @@ export async function importSeed(o: ImportOptions): Promise<ImportSummary> {
   }));
 
   const pending = new Map<string, Pending>();
+  // case_id 映射的冲突检查：同一次导入的两个单元、或用例目录中已有的其他单元的用例，映射到同一个 case_id 时报错，
+  // 不覆盖。同一单元重复导入时 case_id 与 snapshot_id 都相同，按新内容覆盖。
+  const existing = new Map(o.store.cases().map((c) => [c.case_id, c.snapshot_id]));
+  const unitByCase = new Map<string, string>();
   for (const u of units.values()) {
     if (!u.incident.root) {
       summary.skipped.push({ unit: u.unit, reason: '事件没有根组件（以知识条目时间窗为单元，没有告警）' });
       continue;
     }
-    pending.set(u.unit, { u, calls: [], logs: new Map(), raw: new Map() });
+    const caseId = caseIdOf(u.unit);
+    const other = unitByCase.get(caseId);
+    if (other !== undefined) {
+      throw new Error(`单元 ${JSON.stringify(other)} 与 ${JSON.stringify(u.unit)} 映射到同一个 case_id ${caseId}`);
+    }
+    const snap = existing.get(caseId);
+    if (snap !== undefined && snap !== stableUuid('snapshot', u.unit)) {
+      throw new Error(
+        `用例目录中已有 case_id ${caseId}，来自另一个单元（快照 ${snap}）；单元 ${JSON.stringify(u.unit)} 不覆盖它`,
+      );
+    }
+    unitByCase.set(caseId, u.unit);
   }
+  // 中间结果的临时目录在用例目录内，导入结束（含失败）时删除
+  const spoolDir = join(o.store.dir, `.import-${process.pid}-${Date.now()}`);
+  mkdirSync(spoolDir, { recursive: true });
+  try {
+    let n = 0;
+    for (const u of units.values()) {
+      if (u.incident.root) {
+        pending.set(u.unit, {
+          u,
+          spool: new UnitSpool(join(spoolDir, `${n++}.jsonl.zst`)),
+          totals: new Map(),
+          rawSelectors: new Set(),
+        });
+      }
+    }
+    await spoolSources(o.dir, pending);
+    logger.info('种子导入：调用、日志与原始序列已按单元写入临时文件', { heap_mb: heapMb() });
+    await writeUnits(o, pending, { now, topo, knowledge, references, caseByUnit, truthBySnapshot, summary });
+  } finally {
+    rmSync(spoolDir, { recursive: true, force: true });
+  }
+  logger.info('种子导入完成', { ...summary, skipped: summary.skipped.length });
+  return summary;
+}
 
-  // 第二遍：单元的数据源调用
-  for await (const r of readJsonl(join(o.dir, 'calls.jsonl.zst'))) {
+/** 日志块中一条成功的日志调用，按它所属的日志组交给 visit；log_chunk 记录给出随后调用所属的组与查询 */
+async function forEachLogCall(
+  dir: string,
+  visit: (
+    chunk: { group: string; query: string },
+    res: { streams: Array<Record<string, string>>; lines: Array<[number, number, string]> },
+  ) => void,
+): Promise<void> {
+  const chunkByUnit = new Map<string, { group: string; query: string }>();
+  for await (const r of readJsonl(join(dir, 'logs.jsonl.zst'))) {
+    if (r.type === 'log_chunk') {
+      chunkByUnit.set(r.unit as string, { group: r.group as string, query: r.query as string });
+      continue;
+    }
+    if (r.type !== 'call' || r.status !== 'ok') {
+      continue;
+    }
+    const chunk = chunkByUnit.get(r.unit as string);
+    if (!chunk) {
+      throw new Error(`日志调用 ${String(r.id)} 之前没有它所属的 log_chunk`);
+    }
+    visit(chunk, r.result as { streams: Array<Record<string, string>>; lines: Array<[number, number, string]> });
+  }
+}
+
+/**
+ * 逐行读取调用、日志块与原始序列（全部流式），把每个单元用到的部分写入它的临时文件：
+ * - 调用：转换为查询快照条目；
+ * - 日志：第一遍记录每个单元每个日志组窗口内最新的 MAX_LOG_LINES_PER_GROUP 个时间戳，第二遍只写入保留的行；
+ * - 原始序列：数据量小（5 分钟 rollup），在内存中按窗口 W 合并。
+ */
+const heapMb = () => Math.round(process.memoryUsage().heapUsed / 1048576);
+
+async function spoolSources(dir: string, pending: Map<string, Pending>): Promise<void> {
+  for await (const r of readJsonl(join(dir, 'calls.jsonl.zst'))) {
     if (r.type !== 'call') {
       continue;
     }
     const p = pending.get(r.unit as string);
     const e = p ? callEntry(r as unknown as Call) : null;
     if (p && e) {
-      p.calls.push(e);
+      p.spool.add({ k: 'call', e });
     }
   }
+  logger.info('种子导入：调用已读完', { heap_mb: heapMb() });
 
-  // 日志块：每个单元按日志组合并窗口内的行
-  if (existsSync(join(o.dir, 'logs.jsonl.zst'))) {
-    const chunkByUnit = new Map<string, { group: string; query: string }>();
-    for await (const r of readJsonl(join(o.dir, 'logs.jsonl.zst'))) {
-      if (r.type === 'log_chunk') {
-        chunkByUnit.set(r.unit as string, { group: r.group as string, query: r.query as string });
-        continue;
-      }
-      if (r.type !== 'call' || r.status !== 'ok') {
-        continue;
-      }
-      const chunk = chunkByUnit.get(r.unit as string);
-      if (!chunk) {
-        throw new Error(`日志调用 ${String(r.id)} 之前没有它所属的 log_chunk`);
-      }
-      const res = r.result as { streams: Array<Record<string, string>>; lines: Array<[number, number, string]> };
-      for (const p of pending.values()) {
-        if (!p.u.log_groups.includes(chunk.group)) {
-          continue;
-        }
-        const from = Date.parse(p.u.log_window.from);
-        const to = Date.parse(p.u.log_window.to);
-        const acc = p.logs.get(chunk.group) ?? { query: chunk.query, lines: [] };
-        for (const [s, t, line] of res.lines) {
-          if (t >= from && t <= to) {
-            acc.lines.push({ time: iso(t), labels: res.streams[s] ?? {}, line });
-          }
-        }
-        p.logs.set(chunk.group, acc);
+  if (existsSync(join(dir, 'logs.jsonl.zst'))) {
+    const byGroup = new Map<string, Array<{ p: Pending; from: number; to: number }>>();
+    for (const p of pending.values()) {
+      for (const g of p.u.log_groups) {
+        const list = byGroup.get(g) ?? [];
+        list.push({ p, from: Date.parse(p.u.log_window.from), to: Date.parse(p.u.log_window.to) });
+        byGroup.set(g, list);
       }
     }
+    const key = (p: Pending, g: string) => `${p.u.unit}\0${g}`;
+    const times = new Map<string, NewestTimes>();
+    await forEachLogCall(dir, (chunk, res) => {
+      for (const { p, from, to } of byGroup.get(chunk.group) ?? []) {
+        const k = key(p, chunk.group);
+        let acc = times.get(k);
+        if (!acc) {
+          acc = new NewestTimes();
+          times.set(k, acc);
+        }
+        for (const [, t] of res.lines) {
+          if (t >= from && t <= to) {
+            acc.offer(t);
+          }
+        }
+      }
+    });
+    for (const { p } of [...byGroup.values()].flat()) {
+      for (const g of p.u.log_groups) {
+        const t = times.get(key(p, g));
+        if (t) {
+          p.totals.set(g, t.total);
+        }
+      }
+    }
+    const cut = new Map([...times].map(([k, v]) => [k, { ...v.cutoff(), keptAtCutoff: 0, seen: false }]));
+    times.clear();
+    logger.info('种子导入：日志第一遍（每个单元每个日志组的截断时间）完成', { heap_mb: heapMb() });
+    await forEachLogCall(dir, (chunk, res) => {
+      for (const { p, from, to } of byGroup.get(chunk.group) ?? []) {
+        const c = cut.get(key(p, chunk.group)) as {
+          at: number;
+          keepAtCutoff: number;
+          keptAtCutoff: number;
+          seen: boolean;
+        };
+        if (!c.seen) {
+          // 组在单元中的顺序与查询取自该组第一条成功的日志调用（即使窗口内没有行）
+          c.seen = true;
+          p.spool.add({ k: 'group', g: chunk.group, q: chunk.query });
+        }
+        for (const [s, t, line] of res.lines) {
+          if (t < from || t > to || t < c.at) {
+            continue;
+          }
+          if (t === c.at) {
+            if (c.keptAtCutoff >= c.keepAtCutoff) {
+              continue;
+            }
+            c.keptAtCutoff++;
+          }
+          p.spool.add({ k: 'line', g: chunk.group, t, s: res.streams[s] ?? {}, l: line });
+        }
+      }
+    });
   }
 
   // 原始序列：单元用到的选择器的 5 分钟 rollup，按窗口 W 合并
-  if (existsSync(join(o.dir, 'raw.jsonl.zst'))) {
+  if (existsSync(join(dir, 'raw.jsonl.zst'))) {
     const selectors = new Map<string, { selector: string; units: string[] }>();
-    for await (const r of readJsonl(join(o.dir, 'raw.jsonl.zst'))) {
+    for await (const r of readJsonl(join(dir, 'raw.jsonl.zst'))) {
       if (r.type === 'raw_selector' && r.status === 'exported') {
         selectors.set(r.id as string, { selector: r.selector as string, units: r.units as string[] });
         continue;
@@ -578,33 +835,83 @@ export async function importSeed(o: ImportOptions): Promise<ImportSummary> {
         }
         const from = Date.parse(w.from);
         const to = Date.parse(w.to);
-        const acc = p.raw.get(r.selector_id as string) ?? { selector: sel.selector, series: new Map() };
+        const id = r.selector_id as string;
+        if (!p.rawSelectors.has(id)) {
+          p.rawSelectors.add(id);
+          p.spool.add({ k: 'rawsel', id, q: sel.selector });
+        }
         for (const s of r.series as Array<{ labels: Record<string, string>; avg: Array<number | null> }>) {
-          const k = JSON.stringify(Object.entries(s.labels).sort());
-          const cur = acc.series.get(k) ?? { labels: s.labels, times: [], values: [] };
-          s.avg.forEach((v, i) => {
-            const t = (start + i * step) * 1000;
-            if (t >= from && t <= to) {
-              cur.times.push(t);
-              cur.values.push(v);
+          const t: number[] = [];
+          const v: Array<number | null> = [];
+          s.avg.forEach((x, i) => {
+            const at = (start + i * step) * 1000;
+            if (at >= from && at <= to) {
+              t.push(at);
+              v.push(x);
             }
           });
-          acc.series.set(k, cur);
+          p.spool.add({ k: 'raw', id, labels: s.labels, t, v });
         }
-        p.raw.set(r.selector_id as string, acc);
       }
     }
   }
+}
 
-  // 写出用例与快照
+interface WriteContext {
+  now: string;
+  topo: { edges: Array<{ caller: string; callee: string }> };
+  knowledge: EvalSnapshot['context']['knowledge'];
+  references: EvalSnapshot['context']['cases'];
+  caseByUnit: Map<string, Rec[]>;
+  truthBySnapshot: Map<string, string>;
+  summary: ImportSummary;
+}
+
+/** 逐个单元读回临时文件，组装查询快照条目，写出用例与快照；每个单元写完即释放。 */
+async function writeUnits(o: ImportOptions, pending: Map<string, Pending>, x: WriteContext): Promise<void> {
+  const { now, topo, knowledge, references, caseByUnit, truthBySnapshot, summary } = x;
   for (const p of pending.values()) {
     const u = p.u;
     const inc = convertIncident(u, o.clusterId, now);
     const cards = convertCards(u, o.clusterId);
     const w = u.windows.W ?? { from: u.first_firing_at, to: u.end_at };
-    const entries: Entry[] = [...p.calls];
-    for (const [, l] of p.logs) {
-      const lines = l.lines.sort((a, b) => b.time.localeCompare(a.time)).slice(0, MAX_LOG_LINES_PER_GROUP);
+    const entries: Entry[] = [];
+    const logs = new Map<
+      string,
+      { query: string; lines: Array<{ t: number; s: Record<string, string>; l: string }> }
+    >();
+    const raw = new Map<
+      string,
+      {
+        selector: string;
+        series: Map<string, { labels: Record<string, string>; times: number[]; values: Array<number | null> }>;
+      }
+    >();
+    for (const r of p.spool.read()) {
+      if (r.k === 'call') {
+        entries.push(r.e);
+      } else if (r.k === 'group') {
+        logs.set(r.g, { query: r.q, lines: [] });
+      } else if (r.k === 'line') {
+        (logs.get(r.g) as { lines: Array<{ t: number; s: Record<string, string>; l: string }> }).lines.push(r);
+      } else if (r.k === 'rawsel') {
+        raw.set(r.id, { selector: r.q, series: new Map() });
+      } else {
+        // 同一条序列（按标签）跨多个块的点合并
+        const acc = raw.get(r.id) as {
+          series: Map<string, { labels: Record<string, string>; times: number[]; values: Array<number | null> }>;
+        };
+        const k = JSON.stringify(Object.entries(r.labels).sort());
+        const cur = acc.series.get(k) ?? { labels: r.labels, times: [], values: [] };
+        cur.times.push(...r.t);
+        cur.values.push(...r.v);
+        acc.series.set(k, cur);
+      }
+    }
+    for (const [g, l] of logs) {
+      // 窗口内的总行数由第一遍得出；这里保留的就是最新的 MAX_LOG_LINES_PER_GROUP 行
+      const total = p.totals.get(g) ?? l.lines.length;
+      const lines = l.lines.sort((a, b) => b.t - a.t).map((y) => ({ time: iso(y.t), labels: y.s, line: y.l }));
       entries.push({
         op: 'logs_query',
         request: {
@@ -613,10 +920,10 @@ export async function importSeed(o: ImportOptions): Promise<ImportSummary> {
           window: { from: u.log_window.from, to: u.log_window.to },
           limit: MAX_LOG_LINES_PER_GROUP,
         },
-        result: { lines, truncated: l.lines.length > lines.length },
+        result: { lines, truncated: total > lines.length },
       });
     }
-    for (const [, r] of p.raw) {
+    for (const [, r] of raw) {
       const series = [...r.series.values()].map((s) => {
         const order = s.times.map((t, i) => [t, s.values[i] ?? null] as const).sort((a, b) => a[0] - b[0]);
         return { labels: s.labels, times: order.map((x) => x[0]), values: order.map((x) => x[1]) };
@@ -634,7 +941,7 @@ export async function importSeed(o: ImportOptions): Promise<ImportSummary> {
       .find((x): x is string => typeof x === 'string');
     const snapRoot = u.snapshot_ids.map((id) => truthBySnapshot.get(id)).find((x): x is string => x !== undefined);
     const truthRoot = knowledgeRoot ?? snapRoot ?? null;
-    const caseId = `legacy:${u.unit}`;
+    const caseId = caseIdOf(u.unit);
     const snapshotId = stableUuid('snapshot', u.unit);
     const own = new Set([...u.case_ids, u.incident_key]);
     const usable = knowledge.filter((k) => !k.learned_from.some((x) => own.has(x)));
@@ -650,7 +957,8 @@ export async function importSeed(o: ImportOptions): Promise<ImportSummary> {
       type: 'incident',
       cluster_id: o.clusterId,
       incident_id: inc.incident_id,
-      label: inc.label,
+      // 原始的事件键（case_id 中的 ~ 已改写）
+      label: u.incident_key,
       started_at: u.first_firing_at,
       as_of: u.end_at,
       truth: {
@@ -717,6 +1025,4 @@ export async function importSeed(o: ImportOptions): Promise<ImportSummary> {
       summary.unlabeled++;
     }
   }
-  logger.info('种子导入完成', { ...summary, skipped: summary.skipped.length });
-  return summary;
 }

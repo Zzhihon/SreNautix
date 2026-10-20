@@ -84,3 +84,6 @@ budget: { call_timeout_seconds: 90 }
 ## 旧版种子
 
 `import-seed` 读取旧版 Ops-Agent 导出的 `cchp-srenautix-seed` v1 目录（`units`、`calls`、`logs`、`raw`、`snapshots` 五类 zstd JSON Lines 与 `catalog.json`）。旧版组件映射为 `legacy.component:<id>`；有复盘根因的单元进入 `<suite>`，没有标准答案的进入 `<suite>-unlabeled`（稍后标注）。种子含部署方集群的事实，只保存在部署方本地。
+
+- 用例 id 为 `legacy:<事件键>`，事件键中的 `~<序号>`（同一根组件、同一个 10 分钟内的不同事件）改为 `.<序号>`；用例的 `label` 是原始事件键。映射后冲突时导入报错，不覆盖已有用例。
+- 导入逐行流式处理，在默认的 Node 堆上即可运行（中间结果写在用例目录下的临时目录中，结束时删除；临时文件的大小约为用例目录的数倍）。
