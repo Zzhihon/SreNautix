@@ -92,3 +92,24 @@ export async function createDatabase(port: number, password: string, name: strin
   await bootstrap(pool, name, DEFAULT_DB_ROLES);
   await pool.end();
 }
+
+/** 以超级用户在测试库上执行一条查询并返回行（e2e 的后端准备用来等待后台写入完成） */
+export async function queryCluster<T extends Record<string, unknown>>(
+  c: TestCluster,
+  sql: string,
+  params: unknown[] = [],
+): Promise<T[]> {
+  const client = new pg.Client({
+    host: '127.0.0.1',
+    port: c.port,
+    user: c.superuser,
+    password: c.password,
+    database: c.database,
+  });
+  await client.connect();
+  try {
+    return (await client.query<T>(sql, params)).rows;
+  } finally {
+    await client.end();
+  }
+}
