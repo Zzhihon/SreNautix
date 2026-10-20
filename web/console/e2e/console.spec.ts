@@ -209,12 +209,16 @@ test('集群：gateway 心跳正常时已连接、准入自检通过、未冻结
   await expect(page.getByText('仅提议', { exact: true })).toHaveCount(0);
 });
 
-test('拓扑：没有领域包时覆盖表写明原因，未映射的告警给出推断，邻域图显示 informer 写入的对象', async ({ page }) => {
+test('拓扑：没有领域包时覆盖表列出告警映射到的组件且写明没有证据链，未映射的告警给出推断，邻域图显示 informer 写入的对象', async ({
+  page,
+}) => {
   await go(page, '/topology?cluster=e2e');
-  await expect(page.getByText('还没有组件')).toBeVisible();
-  await expect(page.getByText(/拓扑 v\d+ 中有 Kubernetes 对象，但没有对象匹配领域包的组件类型/)).toBeVisible();
+  // KubePodCrashLooping 按 namespace、pod 标签解析到 informer 写入的 Pod（ADR 0097）：组件没有类型，也没有证据链
+  const coverage = page.getByRole('table', { name: '覆盖表' });
+  await expect(coverage.getByRole('row', { name: /api-7d9f8-x2k4p/ })).toContainText('没有证据链');
   const unmapped = page.getByRole('table', { name: '14 天内未映射的告警' });
-  await expect(unmapped).toContainText('KubePodCrashLooping');
+  await expect(unmapped).toContainText('ExternalProbeFailed');
+  await expect(unmapped).not.toContainText('KubePodCrashLooping');
   await expect(unmapped).toContainText('症状（置信度');
   // 生成覆盖 PR 需要填写组件
   await expect(unmapped.getByRole('button', { name: '生成 PR' })).toBeDisabled();

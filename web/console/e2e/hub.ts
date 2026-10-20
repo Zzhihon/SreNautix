@@ -506,6 +506,26 @@ export async function startHub(opts: HubOptions = {}): Promise<Running> {
       204,
     );
 
+    // 映射不到组件的告警（没有命名空间与对象标签）：拓扑页的"未映射的告警"。在研判任务认领之后写入，
+    // 首次触发早于上面的告警，不影响收件箱第一行与研判任务
+    const unmapped = {
+      ...webhook,
+      alerts: [
+        {
+          status: 'firing',
+          labels: { alertname: 'ExternalProbeFailed', target: 'https://shop.example.com/health', severity: 'warning' },
+          annotations: { summary: '外部探测失败' },
+          startsAt: new Date(now.getTime() - 2 * 3600_000).toISOString(),
+          endsAt: '0001-01-01T00:00:00Z',
+          generatorURL: 'http://prometheus.example:9090/graph',
+          fingerprint: '7d2e1b3c4d5e6f70',
+        },
+      ],
+      groupLabels: { alertname: 'ExternalProbeFailed' },
+      groupKey: '{}:{alertname="ExternalProbeFailed"}',
+    };
+    expectStatus('写入未映射的告警', await api('POST', '/v1/ingest/am', { token: TOKENS.ingest, body: unmapped }), 200);
+
     const state: HubState = {
       consoleUrl,
       apiUrl,
