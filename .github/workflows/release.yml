@@ -1,5 +1,6 @@
 # 发布：构建并推送两个多架构镜像与 Helm chart（OCI），全部 cosign 签名。
 # 触发：v* tag；每 30 分钟发布一次 main 的最新提交（该提交的 chart 已发布、或 ci 未成功完成时跳过）；手动 workflow_dispatch。
+# 任何触发方式都要求同一提交的 ci 已经成功完成，手动触发可以用 force 输入越过（见 detect 的门禁步骤）。
 # main 的推送频率高于一次发布的耗时，按推送触发会让排队中的运行不断被替换，所以不按推送触发。
 # 标签：镜像 sha-<短 SHA>，tag 上另加 <版本> 与 <主>.<次>；
 # chart 在 main 上为 <Chart.version>-main.<提交时间 UTC，年月日时分秒>.g<短 SHA>（同一提交的版本号固定），tag 上为 <版本>。
@@ -11,6 +12,11 @@ on:
   schedule:
     - cron: "*/30 * * * *"
   workflow_dispatch:
+    inputs:
+      force:
+        description: 同一提交的 ci 没有成功完成时仍然发布（只用于紧急修复）
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -57,27 +63,44 @@ jobs:
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
           version: v4.3.1
-      # 定时运行时，main 的最新提交已经发布过（chart 已存在），或者该提交的 ci 没有成功完成（失败、取消或仍在运行），
-      # 就不构建；ci 仍在运行的提交由下一次定时运行发布。tag 与手动触发不做这两项检查
+      # 发布门禁：同一提交的 ci（push 触发的那一轮）必须已经成功完成。
+      #   定时运行：ci 失败、取消或仍在运行时跳过（仍在运行的由下一次定时运行接着检查）；chart 已发布时同样跳过。
+      #   手动触发与 tag：ci 没有成功完成时运行失败；手动触发设置 force=true 时跳过这项检查并留下警告。
+      # 跳过时整次运行仍显示成功（只有 detect 运行），原因写在运行摘要与注解中。
       - name: 检查本提交是否已发布、ci 是否通过
         id: published
         env:
           CHART_VERSION: ${{ steps.version.outputs.chart }}
+          FORCE: ${{ github.event_name == 'workflow_dispatch' && inputs.force }}
           GH_ACTOR: ${{ github.actor }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           skip=false
-          if [[ "$GITHUB_EVENT_NAME" == schedule ]]; then
-            echo "$GH_TOKEN" | helm registry login ghcr.io -u "$GH_ACTOR" --password-stdin >/dev/null
-            ci=$(gh run list -R "$GITHUB_REPOSITORY" --workflow ci --commit "$GITHUB_SHA" --event push \
-              --json status,conclusion --jq '.[0] | "\(.status) \(.conclusion)"')
-            if helm show chart oci://ghcr.io/zzhihon/charts/srenautix --version "$CHART_VERSION" >/dev/null 2>&1; then
-              echo "chart ${CHART_VERSION} 已发布，跳过"
+          short=${GITHUB_SHA::7}
+          ci=$(gh run list -R "$GITHUB_REPOSITORY" --workflow ci --commit "$GITHUB_SHA" --event push \
+            --json databaseId,status,conclusion --jq '.[0] | "\(.status) \(.conclusion) \(.databaseId)"')
+          ci_state=$(cut -d' ' -f1,2 <<<"$ci")
+          ci_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/$(cut -d' ' -f3 <<<"$ci")"
+          echo "$GH_TOKEN" | helm registry login ghcr.io -u "$GH_ACTOR" --password-stdin >/dev/null
+          if [[ "$GITHUB_EVENT_NAME" == schedule ]] &&
+            helm show chart oci://ghcr.io/zzhihon/charts/srenautix --version "$CHART_VERSION" >/dev/null 2>&1; then
+            reason="chart ${CHART_VERSION} 已发布"
+            skip=true
+          elif [[ "$ci_state" != "completed success" ]]; then
+            reason="${short} 的 ci 为 ${ci_state:-无运行}（${ci_url}）"
+            if [[ "$FORCE" == true ]]; then
+              echo "::warning title=force::${reason}，force=true，照常发布"
+            elif [[ "$GITHUB_EVENT_NAME" == schedule ]]; then
               skip=true
-            elif [[ "$ci" != "completed success" ]]; then
-              echo "${GITHUB_SHA::7} 的 ci 为 ${ci:-无运行}，跳过"
-              skip=true
+            else
+              echo "::error title=ci 未通过::${reason}，不发布；确需发布时手动触发并设置 force=true"
+              echo "### 未发布：${reason}" >>"$GITHUB_STEP_SUMMARY"
+              exit 1
             fi
+          fi
+          if [[ "$skip" == true ]]; then
+            echo "::notice title=未发布::${reason}，跳过"
+            echo "### 未发布：${reason}，跳过" >>"$GITHUB_STEP_SUMMARY"
           fi
           echo "published=$skip" >>"$GITHUB_OUTPUT"
 
