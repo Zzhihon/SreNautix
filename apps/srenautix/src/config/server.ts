@@ -337,6 +337,9 @@ export const serverConfigSchema = z
         proposal_ttl: duration.default('2h'),
         proposal_ttl_cap: duration.default('24h'),
         h_reauth_max_age: duration.default('5m'),
+        // 审批人公钥文件（contract/gateway/v1/approver-keys.schema.json，与 gateway 挂载的是同一份）：
+        // 合规配置 H 档的通行密钥凭据与 WebAuthn 依赖方设置，每 60 秒重新加载
+        approver_keys_file: path.optional(),
       })
       .strict()
       .optional(),

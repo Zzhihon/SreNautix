@@ -177,9 +177,27 @@ export function registerProposalRoutes(app: FastifyInstance, d: ProposalRouteDep
 
   app.post('/v1/proposals/:id/approve', async (req) => {
     const who = await consoleApprover(d.auth, req);
-    const body = (req.body ?? {}) as { confirm_target?: string | null };
-    const r = await d.proposals.approve(who, (req.params as { id: string }).id, body.confirm_target ?? null);
+    const body = (req.body ?? {}) as { confirm_target?: string | null; webauthn?: unknown };
+    const r = await d.proposals.approve(
+      who,
+      (req.params as { id: string }).id,
+      body.confirm_target ?? null,
+      body.webauthn ?? null,
+    );
     return { proposal: r.proposal, envelope: r.envelope };
+  });
+
+  // 合规配置 H 档的通行密钥挑战（PublicKeyCredentialRequestOptionsJSON）
+  app.post('/v1/auth/webauthn/assertion-options', async (req) => {
+    const who = await consoleApprover(d.auth, req);
+    const body = (req.body ?? {}) as { proposal_id?: unknown };
+    if (
+      typeof body.proposal_id !== 'string' ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(body.proposal_id)
+    ) {
+      throw badRequest('需要 proposal_id（UUID）');
+    }
+    return d.proposals.webauthnOptions(who, body.proposal_id);
   });
 
   app.post('/v1/proposals/:id/reject', async (req) => {

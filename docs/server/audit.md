@@ -26,7 +26,7 @@ server 维护治理审计链（DESIGN §16.3），记录登录与失败、角色
 |---|---|
 | `auth.login`、`auth.login_failed`、`auth.reauth`、`auth.logout` | 登录、失败、重新认证与登出 |
 | `chat.link_code`、`chat.unlink` | 聊天账号绑定 |
-| `approval.issued`、`approval.rejected` | 审批断言的签发与拒绝 |
+| `approval.issued`、`approval.rejected` | 审批断言的签发与拒绝；通行密钥签名的断言带 `proof: webauthn_ed25519` 与 `credential_id` |
 | `api_token.create`、`api_token.revoke` | 控制台 API token |
 | `settings.update`、`pause.set` | 设置与软暂停 |
 | `prompt.raw.read` | 读取原始提示词（`data.run_id`） |

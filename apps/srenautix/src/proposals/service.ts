@@ -9,16 +9,21 @@ import { appendAudit } from '../store/audit.js';
 import { appendEvents, type NewEvent } from '../store/outbox.js';
 import { tx, type Queryable } from '../store/pool.js';
 import {
+  AssertionError,
   assertionHash,
   canonical,
   CANON_VERSION,
+  checkBinding,
   executionId,
   formatTs,
   paramsHash,
   signService,
+  verifyEnvelope,
   type ApprovalAssertion,
   type ApprovalEnvelope,
+  type Keyring,
   type Reauth,
+  type WebAuthnProof,
 } from './assertion.js';
 import type { Catalog, CatalogAction } from './catalog.js';
 import type { Policies } from './policy.js';
@@ -51,6 +56,59 @@ export interface ProposalSettings {
   proposalTtlMs: number;
   proposalTtlCapMs: number;
   hReauthMaxAgeMs: number;
+  /** 审批人公钥（approver-keys v1，与 gateway 同一份）：合规配置 H 档的通行密钥凭据；未配置时为 null。 */
+  approverKeys?: () => Keyring | null;
+}
+
+/** 通行密钥挑战的有效期：浏览器提示超时 2 分钟，留出提交的时间。 */
+export const WEBAUTHN_CHALLENGE_TTL_MS = 5 * 60_000;
+const WEBAUTHN_TIMEOUT_MS = 120_000;
+
+/** navigator.credentials.get 的 PublicKeyCredential JSON（WebAuthn L3 toJSON，二进制字段为 base64url）。 */
+interface AssertionCredentialJson {
+  id: string;
+  type: 'public-key';
+  response: { clientDataJSON: string; authenticatorData: string; signature: string };
+}
+
+const B64U = /^[A-Za-z0-9_-]+$/;
+
+function parseCredential(v: unknown): AssertionCredentialJson {
+  const c = v as Partial<AssertionCredentialJson> | null;
+  const r = c?.response as Partial<AssertionCredentialJson['response']> | undefined;
+  const ok =
+    c !== null &&
+    typeof c === 'object' &&
+    typeof c.id === 'string' &&
+    B64U.test(c.id) &&
+    c.type === 'public-key' &&
+    r !== undefined &&
+    [r.clientDataJSON, r.authenticatorData, r.signature].every((x) => typeof x === 'string' && B64U.test(x));
+  if (!ok) {
+    throw new HttpError(
+      400,
+      'bad_request',
+      'webauthn 必须是 PublicKeyCredential 的 JSON：id、type=public-key、response 的 clientDataJSON、authenticatorData、signature（base64url）',
+    );
+  }
+  return c as AssertionCredentialJson;
+}
+
+/** clientDataJSON 中的 challenge；不是 JSON 时 403。 */
+function clientChallenge(clientDataJson: string): string {
+  try {
+    const cd = JSON.parse(Buffer.from(clientDataJson, 'base64url').toString('utf8')) as { challenge?: unknown };
+    return typeof cd.challenge === 'string' ? cd.challenge : '';
+  } catch {
+    throw new HttpError(403, 'webauthn_bad_client_data', 'clientDataJSON 不是 JSON');
+  }
+}
+
+/** 断言校验的原因码 → HTTP：时效与绑定为 409，其余（签名、凭据、来源）为 403。 */
+function assertionHttpError(e: AssertionError): HttpError {
+  const conflict =
+    e.code.startsWith('binding_') || ['expired', 'proposal_expired', 'expires_before_issue'].includes(e.code);
+  return new HttpError(conflict ? 409 : 403, e.code, e.message);
 }
 
 export interface TargetInfo {
@@ -383,6 +441,7 @@ export class ProposalService {
     who: Approver,
     id: string,
     confirmTarget: string | null,
+    webauthn: unknown = null,
   ): Promise<{ proposal: Proposal; envelope: ApprovalEnvelope }> {
     if (!this.s.signingKey) {
       throw new HttpError(409, 'approvals_disabled', '观察模式没有审批能力');
@@ -401,8 +460,16 @@ export class ProposalService {
       if (p.tier === 'H' && who.channel !== 'console') {
         throw new HttpError(403, 'tier_requires_console', 'H 档提议只能在控制台审批');
       }
-      if (p.tier === 'H' && this.s.profile === 'compliance') {
-        throw new HttpError(403, 'webauthn_required', '合规配置下 H 档必须用通行密钥签名');
+      const passkey = p.tier === 'H' && this.s.profile === 'compliance';
+      if (passkey && webauthn === null) {
+        throw new HttpError(
+          403,
+          'webauthn_required',
+          '合规配置下 H 档必须用通行密钥签名：先请求 POST /v1/auth/webauthn/assertion-options，再带上 webauthn 审批',
+        );
+      }
+      if (!passkey && webauthn !== null) {
+        throw new HttpError(422, 'webauthn_unexpected', '只有合规配置的 H 档审批使用通行密钥，webauthn 应为 null');
       }
       const target = { cluster: p.cluster_id, namespace: p.target.namespace, labels: {} };
       if (!this.bindings().allowed(who.subject, 'approve', target, p.tier)) {
@@ -430,6 +497,23 @@ export class ProposalService {
           session_hash: `sha256:${createHash('sha256').update(who.reauth.sessionId).digest('hex')}`,
         };
       }
+      if (passkey) {
+        const r = await this.recordIssued(c, p, await this.passkeyEnvelope(c, p, who, parseCredential(webauthn), now));
+        const proof = r.envelope.proof as WebAuthnProof;
+        await appendAudit(c, 'approval.issued', who.principalId, {
+          proposal_id: p.proposal_id,
+          assertion_id: r.assertionId,
+          assertion_hash: r.aHash,
+          tier: r.tier,
+          channel: who.channel,
+          proof: 'webauthn_ed25519',
+          credential_id: proof.credential_id,
+          self_approved: false,
+        });
+        await this.implicitFeedback(c, p, who, 'approved');
+        this.metrics.approvals.inc({ tier: r.tier, channel: who.channel });
+        return { proposal: p, envelope: r.envelope };
+      }
       const { envelope, assertionId, aHash, tier } = await this.issue(
         c,
         p,
@@ -454,6 +538,148 @@ export class ProposalService {
     });
   }
 
+  /** 合规配置的 H 档：审批人公钥文件中的 WebAuthn 设置与该主体登记的凭据。 */
+  private passkeys(principal: string): { keys: Keyring; credentials: string[] } {
+    const keys = this.s.approverKeys?.() ?? null;
+    if (!keys?.rpId) {
+      throw new HttpError(
+        409,
+        'webauthn_not_configured',
+        '合规配置的 H 档审批需要通行密钥：approvals.approver_keys_file 没有配置，或其中没有 webauthn 设置',
+      );
+    }
+    const credentials = [...keys.webauthn.entries()].filter(([, v]) => v.principal === principal).map(([id]) => id);
+    if (!credentials.length) {
+      throw new HttpError(
+        409,
+        'webauthn_no_credential',
+        `${principal} 没有登记通行密钥（approver_keys_file 的 webauthn 条目）`,
+      );
+    }
+    return { keys, credentials };
+  }
+
+  /**
+   * 合规配置 H 档的通行密钥挑战（POST /v1/auth/webauthn/assertion-options）：按提议当前的绑定构造待签名的断言，
+   * 挑战是 sha256(JCS(断言)) 的 base64url（ADR 0020 第 4 条），只能用一次，5 分钟内有效；同一审批人对同一提议的旧挑战作废。
+   */
+  async webauthnOptions(who: Approver, id: string): Promise<Record<string, unknown>> {
+    if (!this.s.signingKey) {
+      throw new HttpError(409, 'approvals_disabled', '观察模式没有审批能力');
+    }
+    return tx(this.pool, async (c) => {
+      const row = await this.lock(c, id);
+      const why = await this.decidable(c, row);
+      if (why) {
+        throw new HttpError(409, why, `提议不能审批：${why}`);
+      }
+      const p = row.body;
+      if (p.tier !== 'H' || this.s.profile !== 'compliance') {
+        throw new HttpError(409, 'webauthn_not_required', '只有合规配置的 H 档审批使用通行密钥');
+      }
+      const target = { cluster: p.cluster_id, namespace: p.target.namespace, labels: {} };
+      if (!this.bindings().allowed(who.subject, 'approve', target, p.tier)) {
+        throw new HttpError(403, 'forbidden', `没有审批 ${p.target.display} 的权限或风险上限不足`);
+      }
+      if (p.caller_id === who.principalId) {
+        throw new HttpError(403, 'forbidden', '合规配置下提议人不能审批自己的提议');
+      }
+      const { keys, credentials } = this.passkeys(who.principalId);
+      const now = await dbNow(c);
+      const assertion = await this.assertionFor(c, p, row.ttl_expires_at, now, who.principalId, who.channel);
+      const challenge = createHash('sha256').update(canonical(assertion)).digest('base64url');
+      await c.query(
+        'DELETE FROM server.webauthn_challenges WHERE proposal_id = $1 AND principal_id = $2 AND used_at IS NULL',
+        [p.proposal_id, who.principalId],
+      );
+      await c.query(
+        `INSERT INTO server.webauthn_challenges (challenge, proposal_id, principal_id, assertion, created_at, expires_at)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [
+          challenge,
+          p.proposal_id,
+          who.principalId,
+          JSON.stringify(assertion),
+          now,
+          new Date(now.getTime() + WEBAUTHN_CHALLENGE_TTL_MS),
+        ],
+      );
+      return {
+        challenge,
+        rpId: keys.rpId,
+        timeout: WEBAUTHN_TIMEOUT_MS,
+        userVerification: 'required',
+        allowCredentials: credentials.map((cid) => ({ type: 'public-key', id: cid })),
+      };
+    });
+  }
+
+  /**
+   * 用通行密钥断言组成信封：挑战必须是该审批人对该提议签发过、未用过、未过期的；断言与提议的绑定仍然一致；
+   * 按 gateway 的同一套规则校验签名（rpIdHash、UP 与 UV、来源白名单、凭据属于审批人）。成功后挑战作废。
+   */
+  private async passkeyEnvelope(
+    c: Queryable,
+    p: Proposal,
+    who: Approver,
+    cred: AssertionCredentialJson,
+    now: Date,
+  ): Promise<ApprovalEnvelope> {
+    const { keys } = this.passkeys(who.principalId);
+    const challenge = clientChallenge(cred.response.clientDataJSON);
+    const r = await c.query<{ assertion: ApprovalAssertion; expires_at: Date; used_at: Date | null }>(
+      `SELECT assertion, expires_at, used_at FROM server.webauthn_challenges
+        WHERE challenge = $1 AND proposal_id = $2 AND principal_id = $3 FOR UPDATE`,
+      [challenge, p.proposal_id, who.principalId],
+    );
+    const ch = r.rows[0];
+    if (!ch) {
+      throw new HttpError(403, 'webauthn_challenge_unknown', '挑战不是为该审批人与提议签发的，或已被更新的挑战取代');
+    }
+    if (ch.used_at) {
+      throw new HttpError(403, 'webauthn_challenge_used', '挑战已经用过');
+    }
+    if (now >= ch.expires_at) {
+      throw new HttpError(403, 'webauthn_challenge_expired', '挑战已过期，重新请求 assertion-options');
+    }
+    const envelope: ApprovalEnvelope = {
+      assertion: ch.assertion,
+      proof: {
+        type: 'webauthn_ed25519',
+        credential_id: cred.id,
+        authenticator_data: cred.response.authenticatorData,
+        client_data_json: cred.response.clientDataJSON,
+        signature: cred.response.signature,
+      },
+    };
+    try {
+      verifyEnvelope(envelope, keys, { requireWebAuthnForH: true });
+      checkBinding(
+        ch.assertion,
+        {
+          proposal_id: p.proposal_id,
+          action: p.action,
+          params: p.params,
+          target_uid: p.target.uid ?? '',
+          cluster: p.cluster_id,
+          incident_version: p.binding.incident_version,
+          root_component: p.binding.root_component,
+          evidence_fingerprint: p.binding.evidence_fingerprint,
+          proposal_expires_at: null,
+        },
+        now,
+        null,
+      );
+    } catch (e) {
+      if (e instanceof AssertionError) {
+        throw assertionHttpError(e);
+      }
+      throw e;
+    }
+    await c.query('UPDATE server.webauthn_challenges SET used_at = $2 WHERE challenge = $1', [challenge, now]);
+    return envelope;
+  }
+
   /**
    * 签发服务签名断言并把提议改为 approved。断言的 expires_at 取断言 TTL 与提议剩余 TTL 中较早的一个；
    * 目标 UID 未知、根因超过断言长度上限、集群 gateway 处于仅提议状态时不签发。
@@ -468,6 +694,19 @@ export class ProposalService {
     channel: ApprovalRecord['channel'],
     reauth: Reauth | undefined,
   ): Promise<{ envelope: ApprovalEnvelope; assertionId: string; aHash: string; tier: 'L' | 'H' }> {
+    const assertion = await this.assertionFor(c, p, ttlExpiresAt, now, principal, channel);
+    return this.recordIssued(c, p, signService(assertion, key, this.s.keyId, reauth));
+  }
+
+  /** 待签名的断言；目标 UID 未知、根因过长、gateway 仅提议时不签发。 */
+  private async assertionFor(
+    c: Queryable,
+    p: Proposal,
+    ttlExpiresAt: Date | null,
+    now: Date,
+    principal: string,
+    channel: ApprovalRecord['channel'],
+  ): Promise<ApprovalAssertion> {
     if (!p.target.uid) {
       throw new HttpError(409, 'target_unresolved', '目标对象的 UID 未知，不能签发断言');
     }
@@ -486,7 +725,7 @@ export class ProposalService {
     const expires = new Date(
       Math.min(issued.getTime() + this.s.assertionTtlMs, Math.max(ttlEnd.getTime(), issued.getTime() + 1000)),
     );
-    const assertion: ApprovalAssertion = {
+    return {
       proposal_id: p.proposal_id,
       action: p.action,
       level: p.level,
@@ -503,7 +742,19 @@ export class ProposalService {
       issued_at: formatTs(issued),
       expires_at: formatTs(expires),
     };
-    const envelope = signService(assertion, key, this.s.keyId, reauth);
+  }
+
+  /** 记录已签名的断言（工单队列）并把提议改为 approved。 */
+  private async recordIssued(
+    c: Queryable,
+    p: Proposal,
+    envelope: ApprovalEnvelope,
+  ): Promise<{ envelope: ApprovalEnvelope; assertionId: string; aHash: string; tier: 'L' | 'H' }> {
+    const assertion = envelope.assertion;
+    const channel = assertion.channel as ApprovalRecord['channel'];
+    const principal = assertion.approver_principal;
+    const issued = new Date(assertion.issued_at);
+    const expires = new Date(assertion.expires_at);
     const aHash = assertionHash(assertion);
     const assertionId = randomUUID();
     await c.query(

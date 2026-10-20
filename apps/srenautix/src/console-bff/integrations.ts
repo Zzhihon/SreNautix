@@ -10,6 +10,7 @@ import type { ServerConfig } from '../config/server.js';
 import type { FeishuClient } from '../channels/feishu/client.js';
 import type { TelegramClient } from '../channels/telegram/client.js';
 import type { Oidc } from '../identity/oidc.js';
+import type { Keyring } from '../proposals/assertion.js';
 import type { Catalog } from '../proposals/catalog.js';
 import type { EvidenceSource, PackRuntime } from '../stage-a/packs.js';
 
@@ -43,6 +44,8 @@ export interface IntegrationDeps {
   telegram: TelegramClient | null;
   feishu: FeishuClient | null;
   oidc: Oidc | null;
+  /** 审批人公钥（合规配置 H 档的通行密钥）；未配置或不能加载时为 null。 */
+  approverKeys?: () => Keyring | null;
 }
 
 /** 与代码同一发布物中的 integrations/：仓库根目录（src 或 dist 的上三级）；镜像中为 /app/integrations。 */
@@ -54,6 +57,23 @@ const INGEST_MANIFEST: Record<string, string> = {
   nightingale: 'nightingale',
   generic: 'generic-webhook',
 };
+
+/** 合规配置 H 档：签名密钥、WebAuthn 依赖方设置与至少一个登记的通行密钥。 */
+function passkeyProbe(signing: ProbeOutcome, keys: Keyring | null): ProbeOutcome {
+  if (!signing.ok) {
+    return signing;
+  }
+  if (!keys?.rpId) {
+    return { ok: false, detail: '没有可用的审批人公钥文件（approvals.approver_keys_file）或其中没有 webauthn 设置' };
+  }
+  if (!keys.webauthn.size) {
+    return { ok: false, detail: '审批人公钥文件中没有登记通行密钥' };
+  }
+  return {
+    ok: true,
+    detail: `通行密钥（WebAuthn，rp_id ${keys.rpId}）签名，登记 ${keys.webauthn.size} 个凭据；另需 5 分钟内重新认证`,
+  };
+}
 
 const fail = (e: unknown): ProbeOutcome => ({ ok: false, detail: e instanceof Error ? e.message : String(e) });
 
@@ -241,7 +261,7 @@ export class IntegrationRegistry {
           'approve.l_tier': signing,
           'approve.h_tier':
             c.profile === 'compliance'
-              ? { ok: false, detail: '合规配置的 H 档审批要求 WebAuthn，尚未实现' }
+              ? passkeyProbe(signing, d.approverKeys?.() ?? null)
               : signing.ok
                 ? { ok: true, detail: '口令加 TOTP 重新认证（5 分钟内）' }
                 : signing,

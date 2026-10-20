@@ -1,7 +1,9 @@
+import { readFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import type { ResolvedRcaParams } from '@srenautix/core';
 import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
+import { parse as parseYaml } from 'yaml';
 import { createApp } from '../api/http.js';
 import { leaseLeader, neverLeader, singleLeader, type Leader } from '../api/leader.js';
 import { registerProposalRoutes } from '../api/routes-proposals.js';
@@ -50,6 +52,7 @@ import { PackEvidence, PackRules } from '../stage-a/pack-evidence.js';
 import { EvidenceSource, PackRuntime } from '../stage-a/packs.js';
 import { StageAService } from '../stage-a/service.js';
 import { loadEd25519Private } from '../store/audit.js';
+import { keyringFrom, type Keyring } from '../proposals/assertion.js';
 import { AuditExporter, s3Client } from '../store/audit-export.js';
 import { purgeIdempotencyKeys } from '../store/idempotency.js';
 import { migrateExpand, migrationsReady } from '../store/migrate.js';
@@ -244,6 +247,25 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
 
   // 提议与审批
   const ap = c.approvals;
+  // 审批人公钥文件（合规配置 H 档的通行密钥）：读取或校验失败时 H 档审批返回 409 并说明原因，server 照常启动
+  const loadApproverKeys = (): Keyring | null => {
+    if (!ap?.approver_keys_file) {
+      return null;
+    }
+    try {
+      return keyringFrom(parseYaml(readFileSync(ap.approver_keys_file, 'utf8')) as Parameters<typeof keyringFrom>[0]);
+    } catch (e) {
+      logger.error('审批人公钥文件不能加载，合规配置的 H 档审批不可用', {
+        file: ap.approver_keys_file,
+        error: e instanceof Error ? e.message : String(e),
+      });
+      return null;
+    }
+  };
+  let approverKeys = loadApproverKeys();
+  if (c.profile === 'compliance' && !approverKeys?.rpId) {
+    logger.warn('合规配置没有可用的审批人通行密钥（approvals.approver_keys_file 的 webauthn 设置），H 档审批不可用');
+  }
   const proposals = new ProposalService(
     pool,
     catalog,
@@ -255,6 +277,7 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
       proposalTtlMs: ap ? parseDuration('approvals.proposal_ttl', ap.proposal_ttl) : 2 * 3600_000,
       proposalTtlCapMs: ap ? parseDuration('approvals.proposal_ttl_cap', ap.proposal_ttl_cap) : 24 * 3600_000,
       hReauthMaxAgeMs: ap ? parseDuration('approvals.h_reauth_max_age', ap.h_reauth_max_age) : 5 * 60_000,
+      approverKeys: () => approverKeys,
     },
     () => bindings,
     targets,
@@ -513,6 +536,7 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
       telegram: notify.telegram?.adapter.client ?? null,
       feishu: notify.feishu?.client ?? null,
       oidc,
+      approverKeys: () => approverKeys,
     }),
   });
   new SpokeRelay(pool, listener, catalog).registerRoutes(app, auth);
@@ -626,6 +650,7 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
       auth.setBindings(bindings);
       policies = Policies.load(c.policies_dir);
       overrides = loadOverrides();
+      approverKeys = loadApproverKeys();
     },
     '重新加载角色绑定与策略',
   );

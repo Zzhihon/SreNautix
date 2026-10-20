@@ -78,6 +78,7 @@ audit:
 - `callers.tokens_file` 列出服务调用方（worker、各分支的 reader 与 gateway、外部提议方、Grafana 插件），只保存 token 的 sha256，格式见 `apps/srenautix/src/identity/callers.ts`。
 - 本地管理员的口令哈希：`printf '%s' '<口令>' | node apps/srenautix/dist/main.js admin hash-password`；TOTP 密钥是 20 个随机字节的 base32 编码（例如 `python3 -c 'import base64,os;print(base64.b32encode(os.urandom(20)).decode())'`），在验证器应用中按 SHA1、6 位、30 秒添加。
 - 签名密钥：`openssl genpkey -algorithm ed25519 -out ed25519.pem`；审批签名的公钥写入各 gateway 的 approver-keys（ADR 0020）。
+- 合规配置的 H 档审批用通行密钥签名（ADR 0094）：`approvals.approver_keys_file` 指向与 gateway 相同的审批人公钥文件（`contract/gateway/v1/approver-keys.schema.json`，来自 Git，每 60 秒重新加载），其中的 `webauthn.rp_id` 与 `origins` 对应控制台的外部地址，每个审批人的凭据写成 `{use: webauthn, credential_id, principal, public_key}`（Ed25519 公钥 32 字节的 base64url，COSE -8）。控制台先请求 `POST /v1/auth/webauthn/assertion-options`（挑战是待签名断言的哈希，5 分钟内有效，只能用一次），再把 `navigator.credentials.get` 的结果作为 `webauthn` 提交审批。文件缺失或没有 `webauthn` 设置时 server 照常启动，H 档审批返回 409 `webauthn_not_configured`。
 
 ## 端口
 
@@ -245,7 +246,7 @@ topology:
 | `datasource:prometheus` | prometheus-api | integration-sdk 的 verifyMetrics，逐项探测 |
 | `changes:<id>` | git | fetch 后列出最近 1 小时的变更 |
 | `notify:telegram`、`notify:feishu` | telegram、feishu | Bot API `getMe`、飞书 tenant_access_token；回调校验与 `/link` 按配置判断 |
-| `approve:console` | console | 审批签名密钥；H 档在 standard 配置为口令加 TOTP 重新认证，compliance 配置要求 WebAuthn |
+| `approve:console` | console | 审批签名密钥；H 档在 standard 配置为口令加 TOTP 重新认证，compliance 配置检查审批人公钥文件的 WebAuthn 设置与登记的凭据 |
 | `identity:local-admin`、`identity:oidc` | local-admin、oidc | OIDC 重新执行发现 |
 
 清单中声明、但没有服务端探测的能力在结果中写明"这项能力没有服务端探测"。每次测试的结果保存在内存中，列表据此给出 `verified`；测试写入治理审计（`integration.test`）。`secret_refs` 只列出挂载文件的路径，不读出内容。

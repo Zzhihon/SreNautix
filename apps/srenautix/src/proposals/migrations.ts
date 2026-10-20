@@ -103,5 +103,23 @@ CREATE TABLE server.feedback (
 CREATE INDEX feedback_incident_idx ON server.feedback (incident_id, created_at DESC);
 `,
     },
+    {
+      version: 2,
+      name: 'webauthn challenges for compliance H-tier approvals',
+      phase: 'expand',
+      sql: `
+-- 合规配置 H 档的通行密钥挑战（ADR 0020 第 4 条）：挑战 = sha256(JCS(待签名的断言))，只能用一次
+CREATE TABLE server.webauthn_challenges (
+  challenge text PRIMARY KEY,
+  proposal_id uuid NOT NULL,
+  principal_id text NOT NULL,
+  assertion jsonb NOT NULL,
+  created_at timestamptz NOT NULL,
+  expires_at timestamptz NOT NULL,
+  used_at timestamptz
+);
+CREATE INDEX webauthn_challenges_proposal_idx ON server.webauthn_challenges (proposal_id, principal_id);
+`,
+    },
   ],
 };
