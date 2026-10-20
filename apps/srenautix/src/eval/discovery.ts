@@ -11,7 +11,7 @@ import { faultAlertIds, mainIncident, type Replay } from './reconstruct.js';
 // - 根因命中：主事件（包含故障告警最多）在故障窗口结束时的根因落在标注的根因集合内；
 // - 成员覆盖：主事件覆盖标注要求的组件（每项给出同义键，任一命中即可），并在某个版本引用过标注时刻前后 2 分钟内的变更；
 // - unlabelled 占比：窗口内创建的事件中没有根因的比例；
-// - 检测延迟：首个故障告警的 pending 开始时刻（首个症状）到第一个包含故障告警的事件创建。
+// - 检测延迟：首个故障告警的 pending 开始时刻（首个症状）到故障告警第一次成为事件成员；重放开始前就在触发的告警不计。
 // 影子环境（只读状态库）：一段时间内新建的事件数、unlabelled 占比、检测延迟（first_firing_at 到 created_at）的分位数、
 // 阶段 A 报告有证据卡的比例。
 
@@ -59,11 +59,15 @@ export function discoveryCase(r: Replay, l: Label): DiscoveryCase {
     l.type === 'benign'
       ? null
       : !!main && main.incident.root.component !== null && roots.has(main.incident.root.component);
-  const symptom = [...r.alerts.values()]
-    .filter((x) => fault.has(x.alert.alert_id))
-    .map((x) => Date.parse(x.instance.active_at))
+  // 只看重放开始之后才触发的故障告警：之前就在触发的告警，接入时刻是重放的起点，不代表检测
+  const started = [...r.alerts.values()].filter(
+    (x) => fault.has(x.alert.alert_id) && Date.parse(x.instance.firing_from) > r.start,
+  );
+  const symptom = started.map((x) => Date.parse(x.instance.active_at)).sort((a, b) => a - b)[0];
+  const detected = started
+    .map((x) => r.memberSince.get(x.alert.alert_id))
+    .filter((t): t is number => t !== undefined)
     .sort((a, b) => a - b)[0];
-  const detected = touching.map((x) => x.createdMs).sort((a, b) => a - b)[0];
   const inWindow = [...r.incidents.values()].filter(
     (x) => x.incident.state !== 'merged' && x.createdMs >= from && x.createdMs <= to,
   );

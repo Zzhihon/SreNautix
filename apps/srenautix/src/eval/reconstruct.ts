@@ -26,7 +26,7 @@ import { stableUuid } from './import-seed.js';
 
 // 重建（DESIGN §14.2 reconstructed，ADR 0110）：用重建包按 server 的同一套代码重放一段时间。
 // - 拓扑：时刻 t 的节点与边取 valid_from ≤ t < valid_to 的行（与状态库的 at 查询相同），同一个键状态库的行优先于
-//   kube-state-metrics 历史；
+//   kube-state-metrics 历史；状态库在 t 时知道的节点，它的出边只取状态库的；
 // - 告警：实例在第一次观察到 firing 时接入（resolveAlert 在那一刻查拓扑），firing_to 之后为 resolved；
 // - 事件：每个步长按 IncidentEngine.recompute 的方式重算——取触发中与相邻时间内结束的告警、窗口内的变更
 //   （变更源的变更加上从拓扑事件推导的发布），computeIncidents 后与上一步的事件 reconcileIncidents；
@@ -124,17 +124,22 @@ export class BundleTopology implements NodeLookup {
       return this.cache;
     }
     const nodes: TopologyNode[] = [];
+    // 状态库在 t 时知道的节点：它的出边也以状态库为准（kube-state-metrics 不带 API 组，属主可能换一个键重复出现）
+    const fromState = new Set<string>();
     for (const list of this.nodes.values()) {
       const iv = this.pick(list, t);
       if (iv) {
         nodes.push(iv.body);
+        if (!iv.ksm) {
+          fromState.add(iv.body.key);
+        }
       }
     }
     const keys = new Set(nodes.map((n) => n.key));
     const edges: TopologyEdge[] = [];
     for (const list of this.edges.values()) {
       const iv = this.pick(list, t);
-      if (iv && keys.has(iv.body.from) && keys.has(iv.body.to)) {
+      if (iv && keys.has(iv.body.from) && keys.has(iv.body.to) && !(iv.ksm && fromState.has(iv.body.from))) {
         edges.push(iv.body);
       }
     }
@@ -306,11 +311,14 @@ export interface Replay {
   /** 实例 → 接入后的告警（结束信息按 firing_to 补齐） */
   alerts: Map<string, { instance: AlertInstance; alert: Alert }>;
   incidents: Map<string, ReplayedIncident>;
+  /** 每条告警第一次成为某个事件成员的时刻（检测延迟用） */
+  memberSince: Map<string, number>;
   /** captureAt 之前（含）最后一步的事件状态（分析时刻 as_of 的事件）；没有给出 captureAt 时为 null */
   captured: Map<string, ReplayedIncident> | null;
   /** 最后一步的变更（变更源的变更与推导出的发布） */
   changes: ChangeEvent[];
   steps: number;
+  start: number;
   end: number;
 }
 
@@ -372,6 +380,7 @@ export async function replay(
   const alerts = new Map<string, { instance: AlertInstance; alert: Alert }>();
   const incidents = new Map<string, ReplayedIncident>();
   let captured: Map<string, ReplayedIncident> | null = null;
+  const memberSince = new Map<string, number>();
   const snapshot = () =>
     new Map(
       [...incidents].map(([k, v]) => [
@@ -438,6 +447,9 @@ export async function replay(
       const members = cur?.everMembers ?? new Set<string>();
       for (const m of inc.members) {
         members.add(m.alert_id);
+        if (m.left_version === null && !memberSince.has(m.alert_id)) {
+          memberSince.set(m.alert_id, t);
+        }
       }
       const seen = cur?.everChanges ?? new Map<string, ChangeEvent>();
       for (const c of inc.changes) {
@@ -454,7 +466,18 @@ export async function replay(
       captured = snapshot();
     }
   }
-  return { clusterId: b.cluster_id, topology: topo, alerts, incidents, captured, changes, steps, end };
+  return {
+    clusterId: b.cluster_id,
+    topology: topo,
+    alerts,
+    incidents,
+    memberSince,
+    captured,
+    changes,
+    steps,
+    start,
+    end,
+  };
 }
 
 /** 事件中属于这次故障的告警 id（曾经出现过的成员） */
