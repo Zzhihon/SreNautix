@@ -17,7 +17,8 @@
 3. **导出器的抓取标签不当成对象**：`job` 与 `container` 都是导出器名、`pod` 以它开头时，按标签推断与告警目录的 `name_labels` 都跳过 `pod`、`container`，改用 `deployment`、`poddisruptionbudget` 等描述对象的标签。新增 `poddisruptionbudget` 的推断。
 4. **CRD kind 不带组也能找到拓扑节点**：查找拓扑节点时，没有点的 kind 也匹配 `<kind>.<组>`，实体的 kind 取拓扑里的写法。
 5. **没有锚点的告警归到变更**：拓扑中没有对象锚点、或只落在命名空间伪组件上的告警，在一次变更之后、变更窗口加时间相邻的范围内（默认 60 分钟）触发，且满足下面任一条时归到告警之前最近的那次变更：角色是 change（发布流水线、部署后检查之类）；告警的命名空间就是变更目标所在的命名空间；与已经归到这次变更的告警逻辑归属相同（同一个组件键，或同一个 `component` 标签）。归到不同变更的同名告警不再因同名而合并，两次发布各自的部署后检查分属两次发布。
-6. **变更类候选的先验**：变更目标作为根因候选时使用 rca-params 的 `role_priors.change`（默认 1）与 `weights.recent_change`（默认 0.15），可在领域包或用户层覆盖；能解释全部症状的候选仍然排在前面。
+6. **没有对象的告警归入逻辑组件**：解析不出对象、也没有命名空间、但带 `component` 标签的告警（发布流水线、业务主题之类）归入同名的逻辑组件 `component:<值>`（与领域包告警目录的 `kind: component` 相同），不再成为 `unlabelled` 事件。影子环境 48 小时内组件为空的 21 条告警全部属于这一类（`entity_kind: none`，component 为 provider、release、gateway），12 个 unlabelled 事件（占 56 个事件的 21%）都由它们产生。
+7. **变更类候选的先验**：变更目标作为根因候选时使用 rca-params 的 `role_priors.change`（默认 1）与 `weights.recent_change`（默认 0.15），可在领域包或用户层覆盖；能解释全部症状的候选仍然排在前面。
 
 ## 回放
 

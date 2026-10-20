@@ -9,6 +9,9 @@ import {
 } from '@srenautix/core';
 import type { RawAlert } from '../ingest/normalize.js';
 
+/** 逻辑组件的 kind：不对应 Kubernetes 对象，与领域包告警目录里的 `kind: component` 相同 */
+export const LOGICAL_KIND = 'component';
+
 /** 拓扑节点查找（由 topology/store 提供）：按 kind/namespace/name 取当前节点或 24 小时内的墓碑。 */
 export interface NodeLookup {
   find(
@@ -121,6 +124,11 @@ export async function resolveAlert(clusterId: string, a: RawAlert, deps: Resolve
   if (!component && a.labels.namespace) {
     // 未映射的告警归入命名空间伪组件，不丢弃（DESIGN §5）
     component = tryNodeKey(NAMESPACE_KIND, null, a.labels.namespace);
+  }
+  if (!component && a.labels.component) {
+    // 没有对象也没有命名空间、但声明了 component 标签的告警（发布流水线、业务主题之类）归入同名的逻辑组件，
+    // 不再成为 unlabelled 事件（ADR 0104）
+    component = tryNodeKey(LOGICAL_KIND, null, a.labels.component);
   }
   if (ov && a.labels.role === undefined) {
     return {

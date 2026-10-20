@@ -224,6 +224,14 @@ describe('16:24 的发布事故收敛到发布这一个根因', () => {
     console.log(JSON.stringify(summarize(), null, 1));
   });
 
+  it('没有 unlabelled 事件：没有对象的告警按 component 标签归入逻辑组件', () => {
+    expect(
+      incidents.filter((i) => i.ranking.root.component === null).map((i) => of(i).map((a) => a.alertname)),
+    ).toEqual([]);
+    const theme = of(containing('AlertThemeEscalated')[0]!).find((a) => a.alertname === 'AlertThemeEscalated');
+    expect(theme?.component).toBe('component:provider');
+  });
+
   it('Pod 级告警归到它的工作负载：没有以 Pod 为根因或组件的事件', () => {
     for (const inc of incidents) {
       expect(inc.ranking.root.component ?? '').not.toMatch(/^Pod:/);
