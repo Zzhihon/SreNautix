@@ -43,8 +43,12 @@ export interface ServiceProof {
   reauth?: Reauth;
 }
 
+/**
+ * 通行密钥证明（ADR 0020 第 4 条）。type 为 webauthn 时算法只取自登记的凭据（EdDSA 或 ES256）；
+ * webauthn_ed25519 是旧的写法，只能用于 EdDSA 凭据。
+ */
 export interface WebAuthnProof {
-  type: 'webauthn_ed25519';
+  type: 'webauthn' | 'webauthn_ed25519';
   credential_id: string;
   authenticator_data: string;
   client_data_json: string;
@@ -131,7 +135,78 @@ export function ed25519FromSeed(seedHex: string): KeyObject {
 }
 
 export function ed25519Public(raw32B64u: string): KeyObject {
+  if (Buffer.from(raw32B64u, 'base64url').length !== 32) {
+    throw new Error('Ed25519 公钥必须是 32 字节');
+  }
   return createPublicKey({ key: { kty: 'OKP', crv: 'Ed25519', x: raw32B64u }, format: 'jwk' });
+}
+
+/** P-256 未压缩点（0x04‖X‖Y，65 字节）的 base64url；压缩点、长度不对或不在曲线上时抛出 */
+export function p256Public(b64u: string): KeyObject {
+  const raw = Buffer.from(b64u, 'base64url');
+  if (raw.length !== 65 || raw[0] !== 0x04) {
+    throw new Error('P-256 公钥必须是 65 字节的未压缩点（0x04‖X‖Y）');
+  }
+  return createPublicKey({
+    key: {
+      kty: 'EC',
+      crv: 'P-256',
+      x: raw.subarray(1, 33).toString('base64url'),
+      y: raw.subarray(33).toString('base64url'),
+    },
+    format: 'jwk',
+  });
+}
+
+/** ES256：严格 DER 编码的签名，对 SHA-256(msg) 校验；格式不对时为 false */
+function es256Verifies(key: KeyObject, msg: Buffer, sig: Buffer): boolean {
+  try {
+    return strictDerEcdsa(sig) && verify('sha256', msg, { key, dsaEncoding: 'der' }, sig);
+  } catch {
+    return false;
+  }
+}
+
+/** 严格的 DER ECDSA-Sig-Value：SEQUENCE { INTEGER r, INTEGER s }，长度用最短形式，没有尾随字节 */
+function strictDerEcdsa(sig: Buffer): boolean {
+  const readLen = (i: number): [number, number] | null => {
+    const b = sig[i];
+    if (b === undefined) {
+      return null;
+    }
+    if (b < 0x80) {
+      return [b, i + 1];
+    }
+    if (b === 0x81 && (sig[i + 1] ?? 0) >= 0x80) {
+      return [sig[i + 1] as number, i + 2];
+    }
+    return null;
+  };
+  if (sig[0] !== 0x30) {
+    return false;
+  }
+  const seq = readLen(1);
+  if (!seq || seq[1] + seq[0] !== sig.length) {
+    return false;
+  }
+  let i = seq[1];
+  for (let n = 0; n < 2; n++) {
+    if (sig[i] !== 0x02) {
+      return false;
+    }
+    const len = readLen(i + 1);
+    if (!len || len[0] < 1 || len[0] > 33) {
+      return false;
+    }
+    const start = len[1];
+    const first = sig[start] as number;
+    // 正整数、最短编码：首字节的最高位不能是 1；以 0x00 开头时下一字节的最高位必须是 1
+    if (first & 0x80 || (first === 0 && len[0] > 1 && !((sig[start + 1] as number) & 0x80))) {
+      return false;
+    }
+    i = start + len[0];
+  }
+  return i === sig.length;
 }
 
 export function publicKeyB64u(k: KeyObject): string {
@@ -152,9 +227,12 @@ export function signService(a: ApprovalAssertion, key: KeyObject, keyId: string,
   return { assertion: a, proof };
 }
 
+/** 通行密钥的签名算法（approver-keys 中的 alg，默认 EdDSA） */
+export type PasskeyAlg = 'EdDSA' | 'ES256';
+
 export interface Keyring {
   service: Map<string, { key: KeyObject; notAfter: Date | null }>;
-  webauthn: Map<string, { key: KeyObject; principal: string }>;
+  webauthn: Map<string, { key: KeyObject; principal: string; alg: PasskeyAlg }>;
   rpId: string | null;
   origins: Set<string>;
 }
@@ -164,7 +242,7 @@ interface ApproverKeysFile {
   webauthn?: { rp_id: string; origins: string[] };
   keys: Array<
     | { use: 'service'; key_id: string; public_key: string; not_after?: string }
-    | { use: 'webauthn'; credential_id: string; principal: string; public_key: string }
+    | { use: 'webauthn'; credential_id: string; principal: string; public_key: string; alg?: string }
   >;
 }
 
@@ -186,7 +264,23 @@ export function keyringFrom(file: ApproverKeysFile): Keyring {
         notAfter: e.not_after ? new Date(e.not_after) : null,
       });
     } else {
-      k.webauthn.set(e.credential_id, { key: ed25519Public(e.public_key), principal: e.principal });
+      if (k.webauthn.has(e.credential_id)) {
+        throw new Error(`审批人公钥文件不合法：凭据 ${e.credential_id} 重复`);
+      }
+      const alg = e.alg ?? 'EdDSA';
+      let key: KeyObject;
+      try {
+        if (alg === 'EdDSA') {
+          key = ed25519Public(e.public_key);
+        } else if (alg === 'ES256') {
+          key = p256Public(e.public_key);
+        } else {
+          throw new Error(`不支持的算法 ${alg}`);
+        }
+      } catch (err) {
+        throw new Error(`审批人公钥文件不合法：凭据 ${e.credential_id}：${(err as Error).message}`, { cause: err });
+      }
+      k.webauthn.set(e.credential_id, { key, principal: e.principal, alg });
     }
   }
   return k;
@@ -250,11 +344,15 @@ export function verifyEnvelope(
   if (!cred) {
     throw fail('webauthn_unknown_credential', `通行密钥 ${p.credential_id} 未登记`);
   }
+  // 算法只取自登记的凭据，信封的 type 不参与选择；webauthn_ed25519 只能用于 EdDSA 凭据
+  if (p.type === 'webauthn_ed25519' && cred.alg !== 'EdDSA') {
+    throw fail('webauthn_alg_mismatch', `证明类型 ${p.type} 不能用于 ${cred.alg} 凭据`);
+  }
   if (cred.principal !== a.approver_principal) {
     throw fail('webauthn_principal_mismatch', `凭据属于 ${cred.principal}，断言写的是 ${a.approver_principal}`);
   }
   const cdj = Buffer.from(p.client_data_json, 'base64url');
-  let cd: { type?: unknown; challenge?: unknown; origin?: unknown };
+  let cd: { type?: unknown; challenge?: unknown; origin?: unknown; crossOrigin?: unknown; topOrigin?: unknown };
   try {
     cd = JSON.parse(cdj.toString('utf8')) as typeof cd;
   } catch {
@@ -270,6 +368,10 @@ export function verifyEnvelope(
   if (typeof cd.origin !== 'string' || !keys.origins.has(cd.origin)) {
     throw fail('webauthn_origin', `origin ${String(cd.origin)} 不在白名单中`);
   }
+  // 控制台不在跨源 iframe 中发起审批
+  if (cd.crossOrigin === true || cd.topOrigin !== undefined) {
+    throw fail('webauthn_cross_origin', '断言是在跨源上下文中做出的');
+  }
   const ad = Buffer.from(p.authenticator_data, 'base64url');
   if (ad.length < 37) {
     throw fail('webauthn_bad_client_data', 'authenticator_data 短于 37 字节');
@@ -283,8 +385,15 @@ export function verifyEnvelope(
   }
   const sig = Buffer.from(p.signature, 'base64url');
   const msg = Buffer.concat([ad, createHash('sha256').update(cdj).digest()]);
-  if (sig.length !== 64 || !verify(null, msg, cred.key, sig)) {
-    throw fail('webauthn_bad_signature', '通行密钥签名校验失败');
+  if (cred.alg === 'EdDSA') {
+    if (sig.length !== 64 || !verify(null, msg, cred.key, sig)) {
+      throw fail('webauthn_bad_signature', 'EdDSA 通行密钥签名校验失败');
+    }
+  } else {
+    // DER 编码的 ECDSA-Sig-Value；拒绝原始 r‖s 与尾随字节。高 S 与低 S 都接受：执行 ID 由断言哈希派生，签名的可塑性不产生第二次执行
+    if (!es256Verifies(cred.key, msg, sig)) {
+      throw fail('webauthn_bad_signature', 'ES256 通行密钥签名校验失败');
+    }
   }
   return { hash, envelope: env };
 }

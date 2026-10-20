@@ -1,3 +1,4 @@
+import { createECDH } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -115,3 +116,64 @@ describe('信封', () => {
     }
   });
 });
+
+/** contract/gateway/v1/testvectors/approval-vectors-es256.json：ES256 通行密钥与算法混淆，Go 与 TS 给出相同的原因码。 */
+const E = JSON.parse(
+  readFileSync(
+    resolve(import.meta.dirname, '../../../../contract/gateway/v1/testvectors/approval-vectors-es256.json'),
+    'utf8',
+  ),
+) as {
+  keys: Record<string, { alg: 'EdDSA' | 'ES256'; public_key: string; seed_hex: string }>;
+  approver_keys: Parameters<typeof keyringFrom>[0];
+  approver_keys_errors: Array<{ name: string; approver_keys: Parameters<typeof keyringFrom>[0] }>;
+  envelopes: Array<(typeof V.envelopes)[number]>;
+};
+
+describe('ES256 通行密钥', () => {
+  const es = keyringFrom(E.approver_keys);
+
+  it('种子派生出的公钥与向量一致（ES256 的种子是 P-256 标量）', () => {
+    for (const k of Object.values(E.keys)) {
+      if (k.alg === 'EdDSA') {
+        expect(publicKeyB64u(ed25519FromSeed(k.seed_hex))).toBe(k.public_key);
+      } else {
+        expect(p256PublicB64u(k.seed_hex)).toBe(k.public_key);
+      }
+    }
+  });
+
+  it.each(E.envelopes.map((c) => [c.name, c] as const))('%s', (_n, c) => {
+    let code = '';
+    try {
+      const { hash } = verifyEnvelope(c.envelope, es, { requireWebAuthnForH: c.require_webauthn_for_h });
+      expect(hash).toBe(c.assertion_hash);
+      checkBinding(
+        c.envelope.assertion,
+        {
+          ...c.binding,
+          proposal_expires_at: c.binding.proposal_expires_at ? new Date(c.binding.proposal_expires_at) : null,
+        },
+        new Date(c.now),
+        c.restored_at ? new Date(c.restored_at) : null,
+      );
+    } catch (e) {
+      if (!(e instanceof AssertionError)) {
+        throw e;
+      }
+      code = e.code;
+    }
+    expect(code).toBe(c.expect_error);
+  });
+
+  it.each(E.approver_keys_errors.map((c) => [c.name, c] as const))('公钥文件 %s 不能加载', (_n, c) => {
+    expect(() => keyringFrom(c.approver_keys)).toThrow();
+  });
+});
+
+/** P-256 标量 → 未压缩公钥点的 base64url */
+function p256PublicB64u(seedHex: string): string {
+  const ecdh = createECDH('prime256v1');
+  ecdh.setPrivateKey(Buffer.from(seedHex, 'hex'));
+  return ecdh.getPublicKey().toString('base64url');
+}

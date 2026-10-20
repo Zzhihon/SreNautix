@@ -78,7 +78,7 @@ audit:
 - `callers.tokens_file` 列出服务调用方（worker、各分支的 reader 与 gateway、外部提议方、Grafana 插件），只保存 token 的 sha256，格式见 `apps/srenautix/src/identity/callers.ts`。
 - 本地管理员的口令哈希：`printf '%s' '<口令>' | node apps/srenautix/dist/main.js admin hash-password`；TOTP 密钥是 20 个随机字节的 base32 编码（例如 `python3 -c 'import base64,os;print(base64.b32encode(os.urandom(20)).decode())'`），在验证器应用中按 SHA1、6 位、30 秒添加。
 - 签名密钥：`openssl genpkey -algorithm ed25519 -out ed25519.pem`；审批签名的公钥写入各 gateway 的 approver-keys（ADR 0020）。
-- 合规配置的 H 档审批用通行密钥签名（ADR 0094）：`approvals.approver_keys_file` 指向与 gateway 相同的审批人公钥文件（`contract/gateway/v1/approver-keys.schema.json`，来自 Git，每 60 秒重新加载），其中的 `webauthn.rp_id` 与 `origins` 对应控制台的外部地址，每个审批人的凭据写成 `{use: webauthn, credential_id, principal, public_key}`（Ed25519 公钥 32 字节的 base64url，COSE -8）。控制台先请求 `POST /v1/auth/webauthn/assertion-options`（挑战是待签名断言的哈希，5 分钟内有效，只能用一次），再把 `navigator.credentials.get` 的结果作为 `webauthn` 提交审批。文件缺失或没有 `webauthn` 设置时 server 照常启动，H 档审批返回 409 `webauthn_not_configured`。
+- 合规配置的 H 档审批用通行密钥签名（ADR 0094）：`approvals.approver_keys_file` 指向与 gateway 相同的审批人公钥文件（`contract/gateway/v1/approver-keys.schema.json`，来自 Git，每 60 秒重新加载），其中的 `webauthn.rp_id` 与 `origins` 对应控制台的外部地址，每个审批人的凭据写成 `{use: webauthn, credential_id, principal, alg, public_key}`：`alg` 为 `ES256`（P-256 未压缩点 65 字节的 base64url，常见的平台通行密钥）或 `EdDSA`（默认，Ed25519 公钥 32 字节的 base64url）；签名算法只取自这里登记的 `alg`，server 签出的证明类型为 `webauthn`。控制台先请求 `POST /v1/auth/webauthn/assertion-options`（挑战是待签名断言的哈希，5 分钟内有效，只能用一次），再把 `navigator.credentials.get` 的结果作为 `webauthn` 提交审批。文件缺失或没有 `webauthn` 设置时 server 照常启动，H 档审批返回 409 `webauthn_not_configured`。
 
 ## 端口
 

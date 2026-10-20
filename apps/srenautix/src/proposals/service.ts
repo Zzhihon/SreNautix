@@ -551,7 +551,7 @@ export class ProposalService {
           assertion_hash: r.aHash,
           tier: r.tier,
           channel: who.channel,
-          proof: 'webauthn_ed25519',
+          proof: proof.type,
           credential_id: proof.credential_id,
           self_approved: false,
         });
@@ -690,7 +690,7 @@ export class ProposalService {
     const envelope: ApprovalEnvelope = {
       assertion: ch.assertion,
       proof: {
-        type: 'webauthn_ed25519',
+        type: 'webauthn',
         credential_id: cred.id,
         authenticator_data: cred.response.authenticatorData,
         client_data_json: cred.response.clientDataJSON,
