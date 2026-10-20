@@ -341,8 +341,11 @@ async function coveredByRules(
       (a) =>
         eq.has(a.alertname) &&
         (a.entity_key === h.key ||
-          a.component === h.key ||
-          (h.owner !== null && h.state !== 'crash_loop' && (a.component === h.owner || a.entity_key === h.owner))),
+          (a.component === h.key && a.entity_key === null) ||
+          // 告警的组件是属主（ADR 0104）：落在属主工作负载上的规则才算，同一工作负载其他 Pod 上的规则不算
+          (h.owner !== null &&
+            h.state !== 'crash_loop' &&
+            (a.entity_key === h.owner || (a.component === h.owner && !(a.entity_key ?? '').startsWith('Pod:'))))),
     );
   };
 }

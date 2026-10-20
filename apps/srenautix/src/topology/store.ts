@@ -192,7 +192,7 @@ export class TopologyStore implements NodeLookup {
     namespace: string | null,
     name: string,
     at: Date,
-  ): Promise<{ key: string; uid: string | null; tombstone: boolean } | null> {
+  ): Promise<{ key: string; uid: string | null; tombstone: boolean; owner: string | null } | null> {
     const r = await this.pool.query<{ key: string; uid: string | null; valid_to: Date | null }>(
       // 告警标签里的 CRD kind 不带 API 组（application），拓扑键带组（Application.argoproj.io）：没有点的 kind 也匹配 <kind>.<组>
       `SELECT key, uid, valid_to FROM server.topology_events
@@ -209,7 +209,32 @@ export class TopologyStore implements NodeLookup {
       return null;
     }
     const tombstone = row.valid_to !== null && row.valid_to.getTime() <= at.getTime();
-    return { key: row.key, uid: row.uid, tombstone };
+    return { key: row.key, uid: row.uid, tombstone, owner: await this.ownerOf(clusterId, row.key, at) };
+  }
+
+  /**
+   * 对象沿 owned_by 取到的顶层属主（与 TopologyGraph.componentOf 相同，Pod → ReplicaSet → Deployment）；
+   * 边按与 find 相同的时间范围取（含 24 小时内删除的），没有属主时为 null。
+   */
+  async ownerOf(clusterId: string, key: string, at: Date): Promise<string | null> {
+    const r = await this.pool.query<{ k: string; depth: number }>(
+      `WITH RECURSIVE up(k, depth) AS (
+         SELECT $2::text, 0
+         UNION ALL
+         SELECT nx.t, up.depth + 1 FROM up CROSS JOIN LATERAL (
+           SELECT body->>'to' AS t FROM server.topology_events
+            WHERE cluster_id = $1 AND item = 'edge' AND body->>'from' = up.k AND op = 'edge_upsert'
+              AND body->>'relation' = 'owned_by'
+              AND valid_from <= greatest($3::timestamptz, now())
+              AND (valid_to IS NULL OR valid_to > least($3::timestamptz, now()) - make_interval(secs => $4))
+            ORDER BY (valid_to IS NULL) DESC, valid_from DESC LIMIT 1) nx
+         WHERE up.depth < 8 AND nx.t <> $2::text
+       )
+       SELECT k, depth FROM up ORDER BY depth DESC LIMIT 1`,
+      [clusterId, key, at, TOMBSTONE_MS / 1000],
+    );
+    const top = r.rows[0];
+    return top && top.depth > 0 ? top.k : null;
   }
 
   /** 当前打开的全部节点 key（informer 全量对账时用来找出已删除的对象）。 */

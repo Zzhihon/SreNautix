@@ -20,7 +20,7 @@ export interface NodeLookup {
     namespace: string | null,
     name: string,
     at: Date,
-  ): Promise<{ key: string; uid: string | null; tombstone: boolean } | null>;
+  ): Promise<{ key: string; uid: string | null; tombstone: boolean; owner?: string | null } | null>;
 }
 
 /** kube-state-metrics 历史（DESIGN §3.3 第三层）：Pod IP 或名称 → Pod 与节点。 */
@@ -93,7 +93,9 @@ export async function resolveAlert(clusterId: string, a: RawAlert, deps: Resolve
       const kind = node.key.slice(0, node.key.indexOf(':'));
       entity = { cluster_id: clusterId, ...mapped, kind: kind || mapped.kind, uid: node.uid };
       resolution = source === 'labels' ? 'labels' : node.tombstone ? 'tombstone' : 'informer';
-      component = node.key;
+      // 告警归属的组件是对象沿 owned_by 的顶层属主（Pod 归到它的 Deployment）：对象删除之后（新版本替换了 Pod），
+      // 仍在回看窗口内的告警凭它留在原来的事件里，而不是因为拓扑里找不到 Pod 被拆成新的事件（ADR 0104）
+      component = node.owner ?? node.key;
     } else if (deps.ksm && mapped.kind === 'Pod' && mapped.namespace) {
       const p = await deps.ksm.podByName(clusterId, mapped.namespace, mapped.name, a.startsAt);
       if (p) {

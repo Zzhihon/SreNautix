@@ -7,7 +7,13 @@ import type {
   TopologyEdge,
   TopologyNode,
 } from '@srenautix/contract';
-import { computeIncidents, reconcileIncidents, TopologyGraph, type ResolvedRcaParams } from '@srenautix/core';
+import {
+  changeInputFrom,
+  computeIncidents,
+  reconcileIncidents,
+  TopologyGraph,
+  type ResolvedRcaParams,
+} from '@srenautix/core';
 import { resolveAlert, type NodeLookup } from '../alerts/resolve.js';
 import { deriveRollouts, WORKLOAD_KINDS, type WorkloadEvent } from '../changes/kubernetes.js';
 import { alertId } from '../ingest/normalize.js';
@@ -52,6 +58,8 @@ const live = (iv: { from: number; to: number | null }, t: number) => iv.from <= 
 export class BundleTopology implements NodeLookup {
   private readonly nodes = new Map<string, Array<Interval<TopologyNode>>>();
   private readonly edges = new Map<string, Array<Interval<TopologyEdge>>>();
+  /** owned_by 边按起点（属主查找用） */
+  private readonly ownedBy = new Map<string, Array<Interval<TopologyEdge>>>();
   private readonly boundaries: number[];
   private readonly stateNodes: TopologyRow[];
   private readonly stateEdges: TopologyRow[];
@@ -79,8 +87,14 @@ export class BundleTopology implements NodeLookup {
         this.nodes.set(r.key, list);
       } else {
         const list = this.edges.get(r.key) ?? [];
-        list.push({ seq: r.seq, from, to, ksm, body: r.body as TopologyEdge, kind: null, namespace: null, name: null });
+        const iv = { seq: r.seq, from, to, ksm, body: r.body as TopologyEdge, kind: null, namespace: null, name: null };
+        list.push(iv);
         this.edges.set(r.key, list);
+        if (iv.body.relation === 'owned_by') {
+          const o = this.ownedBy.get(iv.body.from) ?? [];
+          o.push(iv);
+          this.ownedBy.set(iv.body.from, o);
+        }
       }
     }
     this.boundaries = bounds.sort((a, b) => a - b);
@@ -178,7 +192,7 @@ export class BundleTopology implements NodeLookup {
     namespace: string | null,
     name: string,
     at: Date,
-  ): Promise<{ key: string; uid: string | null; tombstone: boolean } | null> {
+  ): Promise<{ key: string; uid: string | null; tombstone: boolean; owner: string | null } | null> {
     const a = at.getTime();
     const upper = Math.max(a, this.now);
     const lower = Math.min(a, this.now) - TOMBSTONE_MS;
@@ -209,7 +223,41 @@ export class BundleTopology implements NodeLookup {
         y.iv.from - x.iv.from,
     );
     const best = hits[0] as { key: string; iv: Interval<TopologyNode> };
-    return { key: best.key, uid: best.iv.body.uid ?? null, tombstone: best.iv.to !== null && best.iv.to <= a };
+    return {
+      key: best.key,
+      uid: best.iv.body.uid ?? null,
+      tombstone: best.iv.to !== null && best.iv.to <= a,
+      owner: this.ownerOf(best.key, upper, lower),
+    };
+  }
+
+  /**
+   * 顶层属主，与状态库的 ownerOf 相同（topology/store.ts）：沿 owned_by 边向上，边在 [lower, upper] 内有效，
+   * 优先未结束的、状态库的、较新的
+   */
+  private ownerOf(key: string, upper: number, lower: number): string | null {
+    let cur = key;
+    const seen = new Set([key]);
+    for (let depth = 0; depth < 8; depth++) {
+      let best: Interval<TopologyEdge> | null = null;
+      for (const iv of this.ownedBy.get(cur) ?? []) {
+        if (iv.from > upper || (iv.to !== null && iv.to <= lower)) {
+          continue;
+        }
+        const rank = (x: Interval<TopologyEdge>) => [Number(x.to === null), Number(!x.ksm), x.from] as const;
+        const [a1, b1, c1] = rank(iv);
+        const [a2, b2, c2] = best ? rank(best) : ([-1, -1, -1] as const);
+        if (a1 > a2 || (a1 === a2 && (b1 > b2 || (b1 === b2 && c1 > c2)))) {
+          best = iv;
+        }
+      }
+      if (!best || seen.has(best.body.to)) {
+        break;
+      }
+      seen.add(best.body.to);
+      cur = best.body.to;
+    }
+    return cur === key ? null : cur;
   }
 
   componentType(key: string, t: number): string | null {
@@ -419,7 +467,8 @@ export async function replay(
     }
     visible.sort((x, y) => x.starts_at.localeCompare(y.starts_at) || x.alert_id.localeCompare(y.alert_id));
     const { graph } = topo.at(t);
-    const from = t - o.params.changeWindowMs - lookback;
+    // 与 server 的引擎相同（incident/engine.ts）：变更输入从最早的可见告警往前算
+    const from = changeInputFrom(visible, t, o.params);
     changes = [
       ...b.changes.filter((c) => ms(c.time) >= from && ms(c.time) <= t),
       ...deriveRollouts(topo.workloadEvents(from, t), {

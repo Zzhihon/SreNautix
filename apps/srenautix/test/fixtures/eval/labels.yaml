@@ -1,0 +1,66 @@
+# 重建回归用例的标注（由 CCHP 的真实标注脱敏：cchp → acme，见 bundles/）
+version: 1
+cluster_id: acme
+labels:
+- id: release-rollback-acme
+  title: 发布迁移后同步超时，回退到迁移前镜像失败，worker 约 2 小时没有可用副本（脱敏）
+  type: incident
+  window:
+    from: '2026-10-20T15:57:00Z'
+    to: '2026-10-20T18:50:00Z'
+  as_of: '2026-10-20T17:05:00Z'
+  fault_alerts:
+  - alertname: ACMEReleaseGateSkipped
+  - alertname: KubeWarningEventBurst
+    labels:
+      namespace: acme-prod
+  - alertname: ACMEMetricsTargetDown
+    labels:
+      namespace: acme-prod
+  - alertname: KubeStatefulSetReplicasNotReady
+    labels:
+      statefulset: gateway
+  - alertname: KubeStatefulSetRolloutStuck
+    labels:
+      namespace: acme-prod
+  - alertname: ACMEPostDeployAnomaly
+  - alertname: ACMEWorkerNoAvailableReplicas
+  - alertname: KubePdbBlockingEviction
+    labels:
+      namespace: acme-prod
+  - alertname: ACMEMigrationWaitStuck
+  - alertname: KubePodInitializingTooLong
+    labels:
+      namespace: acme-prod
+  - alertname: KubeDeploymentReplicasUnavailable
+    labels:
+      namespace: acme-prod
+  - alertname: KubeDeploymentRolloutStuck
+    labels:
+      namespace: acme-prod
+  - alertname: ArgoCDAppDegraded
+    labels:
+      name: acme-prod
+  - alertname: ArgoWorkflowsReleaseFailed
+  - alertname: ACMEReleaseFailed
+  - alertname: ACMEReleaseRollbackFailed
+  roots:
+  - Application.argoproj.io:argocd/acme-prod
+  - application:argocd/acme-prod
+  - Deployment:acme-prod/control
+  - Deployment:acme-prod/worker
+  - StatefulSet:acme-prod/gateway
+  - component:release
+  granularity: component
+  mechanism: 迁移在旧版本仍在服务时执行，回退出的 control、worker Pod 卡在等待迁移的 init 容器，worker 约 2 小时没有可用副本
+  disposition: act
+  required_members:
+  - - Deployment:acme-prod/control
+  - - Deployment:acme-prod/worker
+  - - Application.argoproj.io:argocd/acme-prod
+    - application:argocd/acme-prod
+  required_change_near: '2026-10-20T16:24:25Z'
+  evidence:
+  - kind: workflow
+    ref: acme-cd/acme-release
+    note: argocd-sync 超时，回退失败（脱敏）

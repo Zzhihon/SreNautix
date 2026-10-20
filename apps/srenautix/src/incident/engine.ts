@@ -1,5 +1,6 @@
 import type { Alert, ChangeEvent, Incident, TopologyEdge, TopologyNode } from '@srenautix/contract';
 import {
+  changeInputFrom,
   computeIncidents,
   reconcileIncidents,
   TopologyGraph,
@@ -67,7 +68,8 @@ export class IncidentEngine {
       const alerts = await activeAlerts(this.d.pool, clusterId, lookback);
       const topo = await this.d.topology.at(clusterId, now);
       const graph = new TopologyGraph(topo.nodes, topo.edges, topo.version);
-      const changes = await this.d.changes(clusterId, new Date(now.getTime() - params.changeWindowMs - lookback), now);
+      // 仍在触发或回看窗口内的告警可以关联到它开始之前一个窗口内的变更：输入从最早的告警往前算（ADR 0104）
+      const changes = await this.d.changes(clusterId, new Date(changeInputFrom(alerts, now.getTime(), params)), now);
       const computed = computeIncidents({
         alerts,
         changes,

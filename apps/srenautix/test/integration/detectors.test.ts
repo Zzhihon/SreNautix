@@ -71,6 +71,7 @@ beforeAll(async () => {
     { op: 'node_upsert', at: T(-60), source: 'informer', node: node('Deployment', 'api') },
     { op: 'node_upsert', at: T(-60), source: 'informer', node: node('ReplicaSet', 'api-1') },
     { op: 'node_upsert', at: T(-60), source: 'informer', node: node('Pod', 'api-1-x') },
+    { op: 'node_upsert', at: T(-60), source: 'informer', node: node('Pod', 'api-1-y') },
     { op: 'node_upsert', at: T(-60), source: 'informer', node: node('Deployment', 'web') },
     {
       op: 'edge_upsert',
@@ -79,6 +80,20 @@ beforeAll(async () => {
       edge: {
         from: 'ReplicaSet:shop/api-1',
         to: 'Deployment:shop/api',
+        relation: 'owned_by',
+        confidence: 1,
+        provenance: 'structural',
+        scope: 'instance',
+        evidence: 'ownerReferences',
+      },
+    },
+    {
+      op: 'edge_upsert',
+      at: T(-60),
+      source: 'informer',
+      edge: {
+        from: 'Pod:shop/api-1-y',
+        to: 'ReplicaSet:shop/api-1',
         relation: 'owned_by',
         confidence: 1,
         provenance: 'structural',
@@ -138,7 +153,8 @@ describe('集群状态检测器', () => {
     );
     const r = await detectors.scan(NOW);
     expect(r[C]?.firing.map((a) => a.alertname)).toEqual(['SreNautixPodInitStuck']);
-    expect(await firing()).toEqual([['SreNautixPodInitStuck', 'Pod:shop/api-1-x', 'firing']]);
+    // 告警的组件是 Pod 沿 owned_by 的顶层属主（ADR 0104）
+    expect(await firing()).toEqual([['SreNautixPodInitStuck', 'Deployment:shop/api', 'firing']]);
     // 再扫一次不重复写入
     expect((await detectors.scan(NOW))[C]).toEqual({ firing: [], resolved: [] });
     // 收敛：检测器告警成为事件，组件归到 Deployment
@@ -157,6 +173,23 @@ describe('集群状态检测器', () => {
   });
 
   it('同一对象上同类告警规则在触发时去重：已合成的告警恢复，新的不合成', async () => {
+    // 同一工作负载另一个 Pod 上的同类规则不算同一对象（两者的组件都是 Deployment:shop/api）
+    const rule = (pod: string, fp: string) => ({
+      source: 'alertmanager' as const,
+      labels: { alertname: 'KubePodInitializingTooLong', namespace: 'shop', pod, severity: 'warning' },
+      annotations: {},
+      severity: 'warning' as const,
+      status: 'firing' as const,
+      suppressed: 'none' as const,
+      startsAt: T(-1),
+      endsAt: null,
+      generatorUrl: null,
+      fingerprint: fp,
+      alertname: 'KubePodInitializingTooLong',
+    });
+    await ingest.write(C, 'am', 'alertmanager', [rule('api-1-y', 'bbbbbbbbbbbbbbbb')], {});
+    expect((await detectors.scan(NOW + 30_000))[C]).toEqual({ firing: [], resolved: [] });
+    expect(await firing()).toEqual([['SreNautixPodInitStuck', 'Deployment:shop/api', 'firing']]);
     await ingest.write(
       C,
       'am',
@@ -180,7 +213,7 @@ describe('集群状态检测器', () => {
     );
     const r = await detectors.scan(NOW + 60_000);
     expect(r[C]?.resolved.map((a) => a.alertname)).toEqual(['SreNautixPodInitStuck']);
-    expect(await firing()).toEqual([['SreNautixPodInitStuck', 'Pod:shop/api-1-x', 'resolved']]);
+    expect(await firing()).toEqual([['SreNautixPodInitStuck', 'Deployment:shop/api', 'resolved']]);
   });
 
   it('完整上报里没有了：恢复；不完整的上报不据此恢复', async () => {

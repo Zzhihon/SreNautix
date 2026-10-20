@@ -321,8 +321,13 @@ describe('内置 informer 拓扑', () => {
     expect(then.nodes.some((n) => n.key === 'Pod:shop/api-7d9f8-b')).toBe(true);
     expect(hasEdge(then.edges, 'Service:shop/api', 'selects', 'Pod:shop/api-7d9f8-b')).toBeTruthy();
     const found = await store.find('c1', 'Pod', 'shop', 'api-7d9f8-b', new Date());
-    expect(found).toMatchObject({ key: 'Pod:shop/api-7d9f8-b', tombstone: true });
-    expect(await store.find('c1', 'Pod', 'shop', 'api-7d9f8-a', new Date())).toMatchObject({ tombstone: false });
+    // 删除的 Pod 仍能沿已关闭的 owned_by 边找到顶层属主：告警留在工作负载的事件里（ADR 0104）
+    expect(found).toMatchObject({ key: 'Pod:shop/api-7d9f8-b', tombstone: true, owner: 'Deployment:shop/api' });
+    expect(await store.find('c1', 'Pod', 'shop', 'api-7d9f8-a', new Date())).toMatchObject({
+      tombstone: false,
+      owner: 'Deployment:shop/api',
+    });
+    expect(await store.find('c1', 'Deployment', 'shop', 'api', new Date())).toMatchObject({ owner: null });
   });
 
   it('集群状态检测器的对象：envtest 没有调度器，Pod 停在 Pending；PDB 不进入拓扑，只用于检测（ADR 0105）', async () => {

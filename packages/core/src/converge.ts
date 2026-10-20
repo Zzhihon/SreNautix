@@ -93,6 +93,31 @@ export function changeComponents(c: ChangeEvent, graph: TopologyGraph): Set<Comp
   return new Set(c.targets.map((t) => (graph.has(t) ? graph.componentOf(t) : t)));
 }
 
+/** 变更输入最多回看这么久（长期触发的告警不会让引擎读取无限久远的变更） */
+export const MAX_CHANGE_LOOKBACK_MS = 24 * 3600_000;
+
+/**
+ * 计算事件时需要的变更从什么时候开始（ADR 0104）。变更与告警的关联按告警的开始时间计算
+ * （告警在变更之后的变更窗口加时间相邻范围内触发），所以只要告警仍在触发或仍在回看窗口内，它之前这段范围内的变更都要在输入里；
+ * 只取"现在之前一个窗口"会让发布在一小时后离开输入，已经归到这次发布的无对象告警被拆成新的事件。
+ * 结果不早于 now − MAX_CHANGE_LOOKBACK_MS。
+ */
+export function changeInputFrom(
+  alerts: ReadonlyArray<Pick<Alert, 'starts_at'>>,
+  now: number,
+  params: Pick<ResolvedRcaParams, 'changeWindowMs' | 'adjacencyMs'>,
+): number {
+  const reach = params.changeWindowMs + params.adjacencyMs;
+  let earliest = now;
+  for (const a of alerts) {
+    const t = parseTime(a.starts_at);
+    if (Number.isFinite(t) && t < earliest) {
+      earliest = t;
+    }
+  }
+  return Math.max(Math.min(now, earliest) - reach, now - MAX_CHANGE_LOOKBACK_MS);
+}
+
 /** 告警 x 与变更 c 的关联置信度：x 在变更后的窗口内触发，且 x 的组件就是或依赖变更目标 */
 export function changeExplains(
   c: ChangeEvent,
