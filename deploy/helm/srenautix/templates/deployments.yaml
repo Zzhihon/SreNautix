@@ -192,7 +192,11 @@ spec:
             sizeLimit: 256Mi
         {{- range $s := $secrets }}
         - name: secret-{{ $s.key | lower }}
-          {{- if $s.configMap }}
+          {{- if $s.projected }}
+          projected:
+            sources:
+              {{- toYaml $s.projected | nindent 14 }}
+          {{- else if $s.configMap }}
           configMap:
             name: {{ $s.configMap }}
           {{- else }}

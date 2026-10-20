@@ -42,12 +42,12 @@
     {
       "id": 2,
       "type": "table",
-      "title": "当前成立的状态条件",
-      "description": "设计 §12.4 的显性失败条件；控制台顶部状态条使用同一组条件。",
+      "title": "当前异常的状态条件",
+      "description": "设计 §12.4 的显性失败条件；控制台顶部状态条使用同一组条件。各角色条件的方向见 chart 的 files/conditions.yaml。",
       "gridPos": {"x": 12, "y": 0, "w": 12, "h": 6},
       "datasource": {"type": "prometheus", "uid": "${datasource}"},
       "targets": [
-        {"refId": "A", "expr": "max by (role, type) (srenautix_condition{namespace=\"$namespace\"}) == 1", "instant": true, "format": "table"}
+        {"refId": "A", "expr": "__UNHEALTHY_CONDITIONS__", "instant": true, "format": "table"}
       ]
     },
     {

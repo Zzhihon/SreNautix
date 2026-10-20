@@ -45,6 +45,17 @@ helm template ci "$chart_dir" --namespace srenautix --kube-version "$kube_versio
   --set selfMonitoring.routeLabels.team=platform --show-only templates/self-monitoring.yaml |
   yq 'select(.kind == "PrometheusRule") | .spec' >"$out_dir/self-rules.yaml"
 promtool check rules "$out_dir/self-rules.yaml"
+if $with_gateway; then
+  # standard 配置有 server、worker、reader、gateway；状态条件告警按各角色的方向（files/conditions.yaml）
+  helm template ci "$chart_dir" --namespace srenautix --kube-version "$kube_version" \
+    -f "$chart_dir/ci/base/required.yaml" -f "$chart_dir/values-standard.yaml" \
+    --set selfMonitoring.prometheusRule.enabled=true --set selfMonitoring.receiver=oncall \
+    --set selfMonitoring.routeLabels.team=platform --show-only templates/self-monitoring.yaml |
+    yq 'select(.kind == "PrometheusRule") | .spec' >"$out_dir/self-rules-standard.yaml"
+  promtool check rules "$out_dir/self-rules-standard.yaml"
+  cp "$chart_dir/ci/rules/condition-direction.test.yaml" "$out_dir/"
+  promtool test rules "$out_dir/condition-direction.test.yaml"
+fi
 
 echo "==> helm unittest, gateway=${with_gateway}"
 helm unittest --strict "${test_globs[@]}" "$chart_dir"

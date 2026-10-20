@@ -62,7 +62,7 @@ roles:
       # - host: srenautix.example.com
       tls: []
     # server 的 GitHub App（安装令牌）：拓扑覆盖规则 PR、事件 issue（issues）与 GitHub 变更源（changes.sources）共用。
-    # Secret 的键与 gateway 相同（app-id、installation-id、slug、private-key.pem），挂载在 /etc/srenautix/secrets/github-app；
+    # server 只读取 Secret 的 private-key.pem（挂载在 /etc/srenautix/secrets/github-app，可以与 gateway 共用同一个 Secret）；
     # chart 生成 server 配置的 github_app（private_key_file、apiUrl 非空时的 api_base，以及 appId、installationId）。
     # App 权限：issues、pull_requests 写，contents 读
     githubApp:
@@ -167,10 +167,12 @@ roles:
     # 启用 workflow_submit 时必填：`srenautix-spoke admission workflow-allowlist --policy=<Git 中的 gateway 策略>`
     # 输出的 ValidatingAdmissionPolicy 原文（模板白名单与参数约束），chart 按动作目录中的策略同样渲染并绑定
     workflowAllowlistPolicy: ""
-    # 启用 gitops_pr 时必填：GitHub App 凭证的 Secret（键 app-id、installation-id、slug、private-key.pem），
-    # 挂载为 gateway.github_app_dir；GitHub Enterprise 时设置 apiUrl
+    # 启用 gitops_pr 时必填：GitHub App 凭证的 Secret（键 app-id、installation-id、private-key.pem），挂载为 gateway.github_app_dir。
+    # slug 是 App 的 URL 名称（不是敏感信息），gateway 首次取令牌前用 GET /app 核对，不一致时拒绝使用：
+    # 写在 slug 中（chart 生成 ConfigMap，与 Secret 投射到同一目录），为空时取 Secret 的 slug 键。GitHub Enterprise 时设置 apiUrl
     githubApp:
       existingSecret: ""
+      slug: ""
       apiUrl: ""
     # 收到 SIGTERM 后不再认领工单，等进行中的执行、校验与撤销完成；至少覆盖动作目录中最长的校验时间窗（1800 秒）
     terminationGracePeriodSeconds: 1860

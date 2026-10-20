@@ -268,11 +268,11 @@ tests:
               items: [{key: approver-keys.yaml, path: approver-keys.yaml}]
         documentSelector: {path: metadata.name, value: t-srenautix-gateway}
 
-  - it: server 挂载 GitHub App 凭证，挂载方式与 gateway 相同
+  - it: server 与 gateway 共用 GitHub App 的 Secret；server 只挂载私钥，gateway 的 slug 来自 values 投射的 ConfigMap
     set:
       profile: standard
       roles.server.githubApp: {existingSecret: gh-app, appId: "1", installationId: "2"}
-      roles.gateway.githubApp.existingSecret: gh-app
+      roles.gateway.githubApp: {existingSecret: gh-app, slug: srenautix-bot}
     asserts:
       - contains:
           path: spec.template.spec.volumes
@@ -282,9 +282,6 @@ tests:
               secretName: gh-app
               defaultMode: 288
               items:
-                - {key: app-id, path: app-id}
-                - {key: installation-id, path: installation-id}
-                - {key: slug, path: slug}
                 - {key: private-key.pem, path: private-key.pem}
         documentSelector: {path: metadata.name, value: t-srenautix-server}
       - contains:
@@ -295,12 +292,17 @@ tests:
           path: spec.template.spec.volumes
           content:
             name: secret-github-app
-            secret:
-              secretName: gh-app
+            projected:
               defaultMode: 288
-              items:
-                - {key: app-id, path: app-id}
-                - {key: installation-id, path: installation-id}
-                - {key: slug, path: slug}
-                - {key: private-key.pem, path: private-key.pem}
+              sources:
+                - secret:
+                    name: gh-app
+                    items:
+                      - {key: app-id, path: app-id}
+                      - {key: installation-id, path: installation-id}
+                      - {key: private-key.pem, path: private-key.pem}
+                - configMap:
+                    name: t-srenautix-gateway-github-app
+                    items:
+                      - {key: slug, path: slug}
         documentSelector: {path: metadata.name, value: t-srenautix-gateway}

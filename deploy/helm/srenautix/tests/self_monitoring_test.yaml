@@ -67,3 +67,46 @@ tests:
       - equal:
           path: 'spec.receivers[0].webhookConfigs[0].url'
           value: http://t-srenautix-server.srenautix.svc:8080/v1/ingest/alertmanager
+
+  - it: 状态条件告警按方向表区分：server、worker 为 1 异常，gateway 为 0 异常（限流为 1 异常、冻结不告警），reader 用自己的指标
+    set:
+      profile: standard
+    documentSelector: {path: kind, value: PrometheusRule}
+    asserts:
+      - equal:
+          path: "spec.groups[0].rules[?(@.alert == 'SreNautixConditionActive')].expr"
+          value: >-
+            max by (namespace, role, type) (srenautix_condition{namespace="srenautix", role="gateway", type!~"ApiserverThrottled|Freeze"} != 1)
+            or max by (namespace, role, type) (srenautix_condition{namespace="srenautix", role="gateway", type="ApiserverThrottled"} != 0)
+            or max by (namespace, role, type) (srenautix_condition{namespace="srenautix", role="server", type!~"Frozen"} != 0)
+            or max by (namespace, role, type) (srenautix_condition{namespace="srenautix", role="worker"} != 0)
+            or max by (namespace, role, type) (label_replace(srenautix_reader_condition{namespace="srenautix", type!~"QueryManifest"}, "role", "reader", "", "") != 1)
+
+  - it: 挂载了证据查询清单时 reader 的 QueryManifest 也告警
+    set:
+      profile: standard
+      roles.reader.queryManifestConfigMap: reader-queries
+    documentSelector: {path: kind, value: PrometheusRule}
+    asserts:
+      - matchRegex:
+          path: "spec.groups[0].rules[?(@.alert == 'SreNautixConditionActive')].expr"
+          pattern: 'label_replace\(srenautix_reader_condition\{namespace="srenautix"\}, "role", "reader", "", ""\) != 1'
+
+  - it: observe 配置只有 server 与 worker 的条件
+    documentSelector: {path: kind, value: PrometheusRule}
+    asserts:
+      - equal:
+          path: "spec.groups[0].rules[?(@.alert == 'SreNautixConditionActive')].expr"
+          value: >-
+            max by (namespace, role, type) (srenautix_condition{namespace="srenautix", role="server", type!~"Frozen"} != 0)
+            or max by (namespace, role, type) (srenautix_condition{namespace="srenautix", role="worker"} != 0)
+
+  - it: 看板的状态条件面板使用同一张方向表
+    set:
+      profile: standard
+    documentSelector: {path: kind, value: ConfigMap}
+    asserts:
+      - matchRegex:
+          path: 'data["srenautix-self.json"]'
+          pattern: 'label_replace\(srenautix_reader_condition\{namespace=\\"\$namespace\\", type!~\\"QueryManifest\\"\}'
+      - notMatchRegex: {path: 'data["srenautix-self.json"]', pattern: __UNHEALTHY_CONDITIONS__}

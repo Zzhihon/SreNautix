@@ -122,6 +122,8 @@ selfMonitoring:
 
 每条自身告警都带 `srenautix_self="true"` 与 `routeLabels`。chart 校验 `receiver` 不能是 SreNautix 自己的接收方，`alertmanagerConfig.selfReceiverSpec` 的 webhook 也不能指向 SreNautix server。看板 `SreNautix / 自身健康` 通过 Grafana sidecar 加载。
 
+状态条件的指标方向因角色而异：server、worker 的 `srenautix_condition` 为 1 表示问题正在发生；gateway 的 `srenautix_condition` 为 1 表示该项正常（`ApiserverThrottled` 除外）；reader 导出的是 `srenautix_reader_condition`，1 表示正常。告警 `SreNautixConditionActive` 与看板的"当前异常的状态条件"按 chart 中 `files/conditions.yaml` 的方向表生成：gateway 处于冻结（standard 的默认状态）不告警，reader 没有挂载证据查询清单时 `QueryManifest` 不告警。自己编写规则（例如 VictoriaMetrics 的 VMRule）时按同一张表区分方向。
+
 ## 资源与调度
 
 | 选项 | 说明 |

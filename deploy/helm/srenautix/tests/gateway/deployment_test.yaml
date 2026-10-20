@@ -55,7 +55,7 @@ tests:
             name: NODE_NAME
             valueFrom: {fieldRef: {fieldPath: spec.nodeName}}
 
-  - it: githubApp.existingSecret 挂载 GitHub App 凭证
+  - it: 没有设置 slug 时 gateway 从 Secret 的 slug 键读取
     set:
       profile: standard
       roles.gateway.githubApp.existingSecret: gh-app
@@ -71,8 +71,8 @@ tests:
               items:
                 - {key: app-id, path: app-id}
                 - {key: installation-id, path: installation-id}
-                - {key: slug, path: slug}
                 - {key: private-key.pem, path: private-key.pem}
+                - {key: slug, path: slug}
           any: true
       - equal:
           path: spec.template.spec.containers[0].resources

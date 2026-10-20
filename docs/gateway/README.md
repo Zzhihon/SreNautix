@@ -121,7 +121,7 @@ kubectl -n srenautix get ae <执行 ID> -o yaml
 | 指标 | 说明 |
 |---|---|
 | `srenautix_build_info{role="gateway",version}` | 版本 |
-| `srenautix_condition{role="gateway",type}` | 状态条件，1 表示成立 |
+| `srenautix_condition{role="gateway",type}` | 状态条件，1 表示该项正常；`ApiserverThrottled`、`Freeze` 为 1 表示正在限流、处于冻结。chart 的自身告警按 `deploy/helm/srenautix/files/conditions.yaml` 的方向判断 |
 | `srenautix_admission_selfcheck_ok` | 全部探针被拒绝时为 1。探针在 `apiserver_request_total` 中带 `dry_run="All"`，准入拒绝类告警用 `dry_run=""` 排除它们 |
 | `srenautix_gateway_frozen` | 处于冻结时为 1 |
 | `srenautix_gateway_propose_only` | 只提议时为 1 |

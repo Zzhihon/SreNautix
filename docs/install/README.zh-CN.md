@@ -64,9 +64,9 @@ chart 为五个角色生成配置文件（地址、端口、挂载路径、集�
 |---|---|---|
 | worker | `llm.routes`（模型路由，`api_key_file` 指向 `/etc/srenautix/secrets/llm/<键>`）、`budget.daily_tokens` | `apps/srenautix/src/research/config.ts` |
 | mcp | `public_url`、`authorization_server`、`clients`（外部调用方 token 放在 `roles.mcp.clientTokensSecret`） | `apps/srenautix/src/roles/mcp.ts` |
-| gateway | `roles.gateway.policy`（本集群的 gateway 策略）、`roles.gateway.approverKeys`；启用 `gitops_pr` 时加 `roles.gateway.githubApp.existingSecret`（键 `app-id`、`installation-id`、`slug`、`private-key.pem`） | `internal/spoke/gateway/run.go`、`docs/gateway/README.md` |
+| gateway | `roles.gateway.policy`（本集群的 gateway 策略）、`roles.gateway.approverKeys`；启用 `gitops_pr` 时加 `roles.gateway.githubApp.existingSecret`（键 `app-id`、`installation-id`、`private-key.pem`）与 `roles.gateway.githubApp.slug`（App 的 URL 名称，不是敏感信息，gateway 首次取令牌前用 `GET /app` 核对；不写时从 Secret 的 `slug` 键读取） | `internal/spoke/gateway/run.go`、`docs/gateway/README.md` |
 | reader | 无；声明的证据查询清单放在 `roles.reader.queryManifestConfigMap` | `internal/spoke/reader/config.go` |
-| server | 无；通知渠道等写在 `roles.server.config`。GitHub App（拓扑覆盖 PR、事件 issue、GitHub 变更源共用）：`roles.server.githubApp.{existingSecret, appId, installationId, apiUrl}`，Secret 的键与 gateway 相同，chart 生成 `github_app`；覆盖 PR 的仓库写在 `roles.server.config.topology.override_pr.repo`，事件 issue 用 `issues`，变更源用 `changes.sources`（`kind: github`）；出站 443 由 `networkPolicy.githubEgressTo` 限定。App 权限：issues、pull_requests 写，contents 读 | `apps/srenautix/src/config/server.ts` |
+| server | 无；通知渠道等写在 `roles.server.config`。GitHub App（拓扑覆盖 PR、事件 issue、GitHub 变更源共用）：`roles.server.githubApp.{existingSecret, appId, installationId, apiUrl}`，server 只挂载 Secret 的 `private-key.pem`（可以与 gateway 共用同一个 Secret），chart 生成 `github_app`；覆盖 PR 的仓库写在 `roles.server.config.topology.override_pr.repo`，事件 issue 用 `issues`，变更源用 `changes.sources`（`kind: github`）；出站 443 由 `networkPolicy.githubEgressTo` 限定。App 权限：issues、pull_requests 写，contents 读 | `apps/srenautix/src/config/server.ts` |
 
 境外模型路由（`in_domain=false`）没有打开 `roles.worker.config.llm.allow_cross_border` 时，安装照常完成，worker 启动时禁用这些路由；安装结束时的说明会列出被禁用的路由（ADR 0062）。
 

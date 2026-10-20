@@ -67,14 +67,27 @@
 {{- if and $g.requirePasskey (or $keys.content $keys.existingConfigMap $keys.existingSecret) -}}true{{- end -}}
 {{- end -}}
 
-{{/* GitHub App 凭证的卷（server 与 gateway 相同）；参数为 Secret 名称 */}}
+{{/* GitHub App 凭证的卷，挂载在 <secretsDir>/github-app。调用方式：include "srenautix.githubAppEntry" (dict "ctx" $ "role" "gateway")
+     server 只读私钥（App id 写在配置的 github_app 中）。gateway 读目录中的 app-id、installation-id、slug、private-key.pem：
+     roles.gateway.githubApp.slug 非空时 slug 来自 chart 生成的 ConfigMap（与 Secret 投射到同一目录），否则来自 Secret 的 slug 键 */}}
 {{- define "srenautix.githubAppEntry" -}}
+{{- $app := index .ctx.Values.roles .role "githubApp" -}}
+{{- $keys := list "private-key.pem" -}}
+{{- if eq .role "gateway" -}}
+{{- $keys = list "app-id" "installation-id" "private-key.pem" -}}
+{{- if not $app.slug -}}{{- $keys = append $keys "slug" -}}{{- end -}}
+{{- end -}}
 {{- $items := list -}}
-{{- range $k := list "app-id" "installation-id" "slug" "private-key.pem" -}}
-{{- $items = append $items (dict "key" $k "path" $k) -}}
+{{- range $k := $keys -}}{{- $items = append $items (dict "key" $k "path" $k) -}}{{- end -}}
+{{- if and (eq .role "gateway") $app.slug -}}
+{{- $slugItems := list (dict "key" "slug" "path" "slug") -}}
+{{- $sources := list (dict "secret" (dict "name" $app.existingSecret "items" $items)) (dict "configMap" (dict "name" (include "srenautix.gatewayGithubAppConfigMap" .ctx) "items" $slugItems)) -}}
+{{- toYaml (dict "key" "github-app" "projected" $sources) -}}
+{{- else -}}
+{{- toYaml (dict "key" "github-app" "secretName" $app.existingSecret "items" $items) -}}
 {{- end -}}
-{{- toYaml (dict "key" "github-app" "secretName" . "items" $items) -}}
 {{- end -}}
+{{- define "srenautix.gatewayGithubAppConfigMap" -}}{{ include "srenautix.fullname" . }}-gateway-github-app{{- end -}}
 
 {{/* 审批人公钥的卷（gateway 与 server 挂载同一份，键 approver-keys.yaml） */}}
 {{- define "srenautix.approverKeysEntry" -}}
@@ -137,8 +150,8 @@
 {{- if include "srenautix.serverApproverKeys" .ctx -}}
 {{- $out = append $out (include "srenautix.approverKeysEntry" .ctx | fromYaml) -}}
 {{- end -}}
-{{- with $v.roles.server.githubApp.existingSecret -}}
-{{- $out = append $out (include "srenautix.githubAppEntry" . | fromYaml) -}}
+{{- if $v.roles.server.githubApp.existingSecret -}}
+{{- $out = append $out (include "srenautix.githubAppEntry" (dict "ctx" .ctx "role" "server") | fromYaml) -}}
 {{- end -}}
 {{- with $v.packs.oci.keySecret -}}
 {{- $out = append $out (dict "key" "pack-keys" "secretName" .) -}}
@@ -156,8 +169,8 @@
 {{- $out = append $out (dict "key" "audit-key" "secretName" (include "srenautix.gatewayAuditKeySecret" .ctx) "items" (list (dict "key" "private.pem" "path" "private.pem"))) -}}
 {{- $out = append $out (include "srenautix.approverKeysEntry" .ctx | fromYaml) -}}
 {{- $out = append $out (dict "key" "policy" "configMap" (include "srenautix.policyConfigMap" .ctx) "items" (list (dict "key" (include "srenautix.policyFile" .ctx) "path" (include "srenautix.policyFile" .ctx)))) -}}
-{{- with $v.roles.gateway.githubApp.existingSecret -}}
-{{- $out = append $out (include "srenautix.githubAppEntry" . | fromYaml) -}}
+{{- if $v.roles.gateway.githubApp.existingSecret -}}
+{{- $out = append $out (include "srenautix.githubAppEntry" (dict "ctx" .ctx "role" "gateway") | fromYaml) -}}
 {{- end -}}
 {{- end -}}
 {{- if has $role (list "server" "worker" "reader") -}}

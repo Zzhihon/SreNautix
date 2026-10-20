@@ -1,0 +1,47 @@
+# promtool test rules：SreNautixConditionActive 按 files/conditions.yaml 的方向告警（deploy/helm/check.sh 用 standard 配置渲染的规则运行）
+rule_files:
+  - self-rules-standard.yaml
+evaluation_interval: 1m
+tests:
+  - interval: 1m
+    input_series:
+      # server、worker：1 表示问题正在发生
+      - series: 'srenautix_condition{namespace="srenautix", role="server", type="IngestSilent"}'
+        values: 1x20
+      - series: 'srenautix_condition{namespace="srenautix", role="server", type="StormMode"}'
+        values: 0x20
+      # gateway 处于冻结是默认状态，不告警
+      - series: 'srenautix_condition{namespace="srenautix", role="server", type="Frozen"}'
+        values: 1x20
+      - series: 'srenautix_condition{namespace="srenautix", role="worker", type="no_model_route"}'
+        values: 1x20
+      # gateway：1 表示正常
+      - series: 'srenautix_condition{namespace="srenautix", role="gateway", type="AdmissionSelfCheck"}'
+        values: 1x20
+      - series: 'srenautix_condition{namespace="srenautix", role="gateway", type="AuditSink"}'
+        values: 0x20
+      - series: 'srenautix_condition{namespace="srenautix", role="gateway", type="Freeze"}'
+        values: 1x20
+      - series: 'srenautix_condition{namespace="srenautix", role="gateway", type="ApiserverThrottled"}'
+        values: 1x20
+      # reader：自己的指标，1 表示正常；没有挂载查询清单时 QueryManifest 为 0，不告警
+      - series: 'srenautix_reader_condition{namespace="srenautix", type="TunnelConnected"}'
+        values: 0x20
+      - series: 'srenautix_reader_condition{namespace="srenautix", type="InformersFresh"}'
+        values: 1x20
+      - series: 'srenautix_reader_condition{namespace="srenautix", type="QueryManifest"}'
+        values: 0x20
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: SreNautixConditionActive
+        exp_alerts:
+          - exp_labels: {severity: warning, srenautix_self: "true", team: platform, namespace: srenautix, role: gateway, type: ApiserverThrottled}
+            exp_annotations: {summary: "SreNautix gateway 的状态条件 ApiserverThrottled 持续异常"}
+          - exp_labels: {severity: warning, srenautix_self: "true", team: platform, namespace: srenautix, role: gateway, type: AuditSink}
+            exp_annotations: {summary: "SreNautix gateway 的状态条件 AuditSink 持续异常"}
+          - exp_labels: {severity: warning, srenautix_self: "true", team: platform, namespace: srenautix, role: reader, type: TunnelConnected}
+            exp_annotations: {summary: "SreNautix reader 的状态条件 TunnelConnected 持续异常"}
+          - exp_labels: {severity: warning, srenautix_self: "true", team: platform, namespace: srenautix, role: server, type: IngestSilent}
+            exp_annotations: {summary: "SreNautix server 的状态条件 IngestSilent 持续异常"}
+          - exp_labels: {severity: warning, srenautix_self: "true", team: platform, namespace: srenautix, role: worker, type: no_model_route}
+            exp_annotations: {summary: "SreNautix worker 的状态条件 no_model_route 持续异常"}

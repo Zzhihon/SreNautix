@@ -71,14 +71,16 @@ spec:
             {{- toYaml $labels | nindent 12 }}
           annotations:
             summary: 阶段 A 报告 p95 超过 60 秒
+        # 各角色状态条件的方向不同（files/conditions.yaml）：server、worker 为 1 表示问题，gateway、reader 为 0 表示问题
         - alert: SreNautixConditionActive
-          expr: max by (namespace, role, type) (srenautix_condition{ {{- $sel -}} }) == 1
+          expr: >-
+            {{ include "srenautix.unhealthyConditions" (dict "ctx" $ "selector" $sel "by" "namespace, role, type") }}
           for: 10m
           labels:
             severity: warning
             {{- toYaml $labels | nindent 12 }}
           annotations:
-            summary: "SreNautix {{ "{{" }} $labels.role {{ "}}" }} 的状态条件 {{ "{{" }} $labels.type {{ "}}" }} 持续成立"
+            summary: "SreNautix {{ "{{" }} $labels.role {{ "}}" }} 的状态条件 {{ "{{" }} $labels.type {{ "}}" }} 持续异常"
         - alert: SreNautixAdmissionSelfCheckFailed
           expr: max by (namespace) (srenautix_admission_selfcheck_ok{ {{- $sel -}} }) == 0
           for: 2m
@@ -147,8 +149,9 @@ metadata:
     {{- toYaml . | nindent 4 }}
     {{- end }}
 data:
+  {{- $conditions := include "srenautix.unhealthyConditions" (dict "ctx" $ "selector" "namespace=\"$namespace\"" "by" "role, type") }}
   srenautix-self.json: |-
-    {{- .Files.Get "files/dashboards/srenautix-self.json" | nindent 4 }}
+    {{- .Files.Get "files/dashboards/srenautix-self.json" | replace "\"__UNHEALTHY_CONDITIONS__\"" (toJson $conditions) | nindent 4 }}
 {{- end }}
 
 {{- $am := .Values.alertmanagerConfig }}
