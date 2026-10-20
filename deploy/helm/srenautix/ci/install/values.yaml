@@ -28,16 +28,16 @@ roles:
   server:
     resources:
       requests: {cpu: 100m, memory: 256Mi}
-    # install-e2e.sh 创建的假 GitHub App（随机生成的 RSA 私钥）：server 启动时读取私钥，验证挂载与配置；不访问 GitHub
+    # install-e2e.sh 创建的假 GitHub App（随机生成的 RSA 私钥）：server 启动时读取私钥，验证挂载与配置；
+    # issue 与变更源保持关闭，不访问 GitHub
     githubApp:
       existingSecret: srenautix-github-app
+      appId: "1"
+      installationId: "1"
     config:
       topology:
         override_pr:
-          github:
-            app_id: "1"
-            installation_id: "1"
-            repo: example/install-e2e
+          repo: example/install-e2e
   worker:
     resources:
       requests: {cpu: 100m, memory: 256Mi}

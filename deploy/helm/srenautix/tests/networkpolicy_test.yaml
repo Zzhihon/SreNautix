@@ -120,7 +120,7 @@ tests:
   - it: server 配置了 GitHub App 时可以访问 githubEgressTo 的 443
     set:
       profile: standard
-      roles.server.githubApp.existingSecret: gh-app
+      roles.server.githubApp: {existingSecret: gh-app, appId: "1", installationId: "2"}
       networkPolicy.githubEgressTo:
         - ipBlock: {cidr: 140.82.112.0/20}
     documentSelector: {path: metadata.name, value: t-srenautix-server}

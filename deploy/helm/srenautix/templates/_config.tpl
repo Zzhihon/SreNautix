@@ -255,15 +255,26 @@ datasources:
     dialect: {{ $v.datasources.prometheus.dialect }}
 topology:
   source: {{ if $readerOn }}reader{{ else if $v.roles.server.clusterRead }}informer{{ else }}off{{ end }}
-  {{- $userTopology := (($v.roles.server.config | default dict).topology | default dict) }}
-  {{- if and $v.roles.server.githubApp.existingSecret (($userTopology.override_pr | default dict).github) }}
-  override_pr:
-    github:
-      private_key_file: {{ $dir }}/github-app/private-key.pem
-      {{- with $v.roles.server.githubApp.apiUrl }}
-      api_base: {{ . }}
-      {{- end }}
+{{- with $v.roles.server.githubApp }}
+{{- if .existingSecret }}
+github_app:
+  app_id: {{ .appId | quote }}
+  installation_id: {{ .installationId | quote }}
+  private_key_file: {{ $dir }}/github-app/private-key.pem
+  {{- with .apiUrl }}
+  api_base: {{ . }}
   {{- end }}
+{{- end }}
+{{- end }}
+{{- if $v.issues.enabled }}
+issues:
+  {{- toYaml $v.issues | nindent 2 }}
+{{- end }}
+{{- with $v.changes.sources }}
+changes:
+  sources:
+    {{- toYaml . | nindent 4 }}
+{{- end }}
 {{- with $v.secrets.serviceSigningKey.existingSecret }}
 approvals:
   signing_key_file: {{ $dir }}/service-signing/private.pem

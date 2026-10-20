@@ -171,27 +171,46 @@ tests:
       - matchRegex: {path: 'data["config.yaml"]', pattern: 'repository: registry\.example\.com/packs/k8s'}
       - matchRegex: {path: 'data["config.yaml"]', pattern: 'cache_dir: /var/cache/srenautix/packs'}
 
-  - it: override_pr.github 由 chart 补上 GitHub App 私钥路径与 API 地址
+  - it: githubApp 生成顶层 github_app（私钥路径、API 地址、App id），override_pr 只有仓库
     set:
       profile: standard
       roles.server.githubApp.existingSecret: gh-app
+      roles.server.githubApp.appId: "123"
+      roles.server.githubApp.installationId: "456"
       roles.server.githubApp.apiUrl: https://ghe.example.com/api/v3
-      roles.server.config.topology.override_pr.github:
-        app_id: "123"
-        installation_id: "456"
-        repo: example/infra
+      roles.server.config.topology.override_pr.repo: example/infra
     documentSelector: {path: metadata.name, value: t-srenautix-server-config}
     asserts:
       - matchRegex:
           path: 'data["config.yaml"]'
-          pattern: 'private_key_file: /etc/srenautix/secrets/github-app/private-key\.pem'
-      - matchRegex: {path: 'data["config.yaml"]', pattern: 'api_base: https://ghe\.example\.com/api/v3'}
-      - matchRegex: {path: 'data["config.yaml"]', pattern: 'repo: example/infra'}
+          pattern: '(?m)^github_app:\n  api_base: https://ghe\.example\.com/api/v3\n  app_id: "123"\n  installation_id: "456"\n  private_key_file: /etc/srenautix/secrets/github-app/private-key\.pem$'
+      - matchRegex: {path: 'data["config.yaml"]', pattern: '(?m)^  override_pr:\n    repo: example/infra$'}
 
-  - it: 只挂载 GitHub App 时不生成 override_pr
+  - it: App id 也可以写在 roles.server.config.github_app 中
     set:
       profile: standard
       roles.server.githubApp.existingSecret: gh-app
+      roles.server.config.github_app: {app_id: "7", installation_id: "8"}
     documentSelector: {path: metadata.name, value: t-srenautix-server-config}
     asserts:
-      - notMatchRegex: {path: 'data["config.yaml"]', pattern: override_pr}
+      - matchRegex: {path: 'data["config.yaml"]', pattern: 'app_id: "7"'}
+      - matchRegex: {path: 'data["config.yaml"]', pattern: 'installation_id: "8"'}
+
+  - it: issues 与 changes.sources 写入 server 配置，默认不生成
+    set:
+      profile: standard
+      roles.server.githubApp: {existingSecret: gh-app, appId: "1", installationId: "2"}
+      issues: {enabled: true, repo: example/infra, labels: [srenautix], max_per_hour: 3}
+      changes.sources:
+        - {id: infra, kind: github, repo: example/infra, paths: [{prefix: apps/, targets: [shop/api], kind: rollout}]}
+    documentSelector: {path: metadata.name, value: t-srenautix-server-config}
+    asserts:
+      - matchRegex: {path: 'data["config.yaml"]', pattern: '(?m)^issues:\n  enabled: true\n  labels:\n  - srenautix\n  max_per_hour: 3\n  repo: example/infra$'}
+      - matchRegex: {path: 'data["config.yaml"]', pattern: '(?m)^changes:\n  sources:\n  - id: infra$'}
+
+  - it: 默认不生成 github_app、issues、changes
+    set:
+      profile: standard
+    documentSelector: {path: metadata.name, value: t-srenautix-server-config}
+    asserts:
+      - notMatchRegex: {path: 'data["config.yaml"]', pattern: '(?m)^(github_app|issues|changes):'}

@@ -64,10 +64,26 @@
 {{- fail "ingest.sources 的 id 不能重复" }}
 {{- end }}
 
-{{- /* server 开 PR 用的 GitHub App：配置了 override_pr.github 却没有私钥时 server 启动失败 */}}
-{{- $sgh := ((((($v.roles.server.config | default dict).topology | default dict).override_pr | default dict).github) | default dict) }}
-{{- if and $sgh (not $v.roles.server.githubApp.existingSecret) (not $sgh.private_key_file) }}
-{{- fail "roles.server.config.topology.override_pr.github 需要 GitHub App 私钥：设置 roles.server.githubApp.existingSecret（键 app-id、installation-id、slug、private-key.pem）" }}
+{{- /* server 的 GitHub App（github_app）：缺少它或 App id 时，用到它的功能让 server 启动失败 */}}
+{{- $scfg := $v.roles.server.config | default dict }}
+{{- $sgh := $v.roles.server.githubApp }}
+{{- $userApp := $scfg.github_app | default dict }}
+{{- $hasApp := or $sgh.existingSecret $userApp.private_key_file }}
+{{- if (((($scfg.topology | default dict).override_pr) | default dict).github) }}
+{{- fail "roles.server.config.topology.override_pr.github 已改为两部分：App 身份用 roles.server.githubApp（existingSecret、appId、installationId、apiUrl），override_pr 只写 repo、base_branch、dir" }}
+{{- end }}
+{{- if $sgh.existingSecret }}
+{{- range $k := list "appId" "installationId" }}
+{{- if not (regexMatch "^[0-9]+$" (toString (default (index $sgh $k) (index $userApp (ternary "app_id" "installation_id" (eq $k "appId")))))) }}
+{{- fail (printf "设置 roles.server.githubApp.existingSecret 时 roles.server.githubApp.%s 必须是 GitHub App 的数字 id" $k) }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- if and (not $hasApp) (or (($scfg.topology | default dict).override_pr) $v.issues.enabled $v.changes.sources) }}
+{{- fail "拓扑覆盖 PR（topology.override_pr）、事件 issue（issues.enabled）与 GitHub 变更源（changes.sources）需要 roles.server.githubApp.existingSecret" }}
+{{- end }}
+{{- if and $v.issues.enabled (not $v.issues.repo) }}
+{{- fail "issues.enabled=true 时必须设置 issues.repo（owner/name）" }}
 {{- end }}
 
 {{- /* 数据库 */}}

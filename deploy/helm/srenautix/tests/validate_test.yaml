@@ -258,12 +258,31 @@ tests:
     asserts:
       - failedTemplate: {errorPattern: 必须列出 networkPolicy.cilium.modelFQDNs}
 
-  - it: override_pr.github 没有 GitHub App 私钥时报错
+  - it: 旧写法 override_pr.github 给出迁移说明
     set:
       profile: standard
-      roles.server.config.topology.override_pr.github:
-        app_id: "123"
-        installation_id: "456"
-        repo: example/infra
+      roles.server.config.topology.override_pr.github: {app_id: "1", installation_id: "2", repo: example/infra}
     asserts:
-      - failedTemplate: {errorPattern: 设置 roles.server.githubApp.existingSecret}
+      - failedTemplate: {errorPattern: override_pr 只写 repo、base_branch、dir}
+
+  - it: 覆盖 PR、事件 issue、变更源都需要 GitHub App
+    set:
+      profile: standard
+      issues: {enabled: true, repo: example/infra}
+    asserts:
+      - failedTemplate: {errorPattern: 需要 roles.server.githubApp.existingSecret}
+
+  - it: GitHub App 需要数字 App id
+    set:
+      profile: standard
+      roles.server.githubApp: {existingSecret: gh-app, installationId: "2"}
+    asserts:
+      - failedTemplate: {errorPattern: roles.server.githubApp.appId 必须是 GitHub App 的数字 id}
+
+  - it: 开启事件 issue 时必须给出仓库
+    set:
+      profile: standard
+      roles.server.githubApp: {existingSecret: gh-app, appId: "1", installationId: "2"}
+      issues.enabled: true
+    asserts:
+      - failedTemplate: {errorPattern: 必须设置 issues.repo}

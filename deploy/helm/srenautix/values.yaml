@@ -61,12 +61,14 @@ roles:
       hosts: []
       # - host: srenautix.example.com
       tls: []
-    # server 开 issue 与 PR（例如未映射告警的拓扑覆盖规则 PR）用的 GitHub App：Secret 的键与 gateway 相同
-    # （app-id、installation-id、slug、private-key.pem），挂载在 /etc/srenautix/secrets/github-app。
-    # roles.server.config 中出现 topology.override_pr.github 时，chart 补上 private_key_file 与 api_base（apiUrl 非空时）；
-    # app_id、installation_id、repo 写在 roles.server.config 中
+    # server 的 GitHub App（安装令牌）：拓扑覆盖规则 PR、事件 issue（issues）与 GitHub 变更源（changes.sources）共用。
+    # Secret 的键与 gateway 相同（app-id、installation-id、slug、private-key.pem），挂载在 /etc/srenautix/secrets/github-app；
+    # chart 生成 server 配置的 github_app（private_key_file、apiUrl 非空时的 api_base，以及 appId、installationId）。
+    # App 权限：issues、pull_requests 写，contents 读
     githubApp:
       existingSecret: ""
+      appId: ""
+      installationId: ""
       apiUrl: ""
     # 与 chart 生成的 server 配置深度合并（键见 apps/srenautix/src/config/server.ts），
     # 用于 notify（Telegram、飞书）、stage_a、scheduler 等业务设置；同名键以这里为准
@@ -222,6 +224,19 @@ ingest:
     - {id: alertmanager, kind: alertmanager}
   # 已存在的 Secret，键为接入源 id；为空时由 chart 生成并在升级时保留
   existingSecret: ""
+
+# 需要人跟进的事件在 GitHub 开 issue，并关联修复 PR（需要 roles.server.githubApp）。enabled 以外的键原样写入 server 配置的
+# issues（labels、title_prefix、max_per_hour、lookback、interval，见 apps/srenautix/src/config/server.ts）
+issues:
+  enabled: false
+  # owner/name
+  repo: ""
+  labels: [srenautix]
+
+# 变更源（DESIGN §5 的"30 分钟内的变更"）：托管在 GitHub 上的仓库，经 roles.server.githubApp 用 REST API 读取。
+# sources 的每一项原样写入 server 配置：{id, kind: github, repo, branch, paths: [{prefix, targets, kind}]}
+changes:
+  sources: []
 
 # 领域包：内置包在镜像的 /app/packs；用户层的包以 ConfigMap 挂载，按列出的顺序合并（组织在前、集群在后）
 packs:

@@ -14,13 +14,12 @@ roles:
           secretName: srenautix-tls
     githubApp:
       existingSecret: srenautix-github-app
+      appId: "123456"
+      installationId: "7890123"
     config:
       topology:
         override_pr:
-          github:
-            app_id: "123456"
-            installation_id: "7890123"
-            repo: example/infra
+          repo: example/infra
   worker:
     replicas: 2
   mcp:
@@ -41,6 +40,21 @@ roles:
       - rollout_resume
       - pod_restart
       - cnpg_switchover
+
+issues:
+  enabled: true
+  repo: example/infra
+  labels: [srenautix, incident]
+  max_per_hour: 3
+
+changes:
+  sources:
+    - id: infra
+      kind: github
+      repo: example/infra
+      branch: main
+      paths:
+        - {prefix: apps/shop/, targets: [shop/checkout], kind: rollout}
 
 secrets:
   llm: {existingSecret: srenautix-llm}

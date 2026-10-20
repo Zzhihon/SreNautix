@@ -253,7 +253,7 @@ tests:
   - it: server 挂载 GitHub App 凭证，挂载方式与 gateway 相同
     set:
       profile: standard
-      roles.server.githubApp.existingSecret: gh-app
+      roles.server.githubApp: {existingSecret: gh-app, appId: "1", installationId: "2"}
       roles.gateway.githubApp.existingSecret: gh-app
     asserts:
       - contains:
