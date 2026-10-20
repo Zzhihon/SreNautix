@@ -1553,6 +1553,10 @@ export interface AlertCatalogEntry {
    */
   chains?: string[];
   /**
+   * 与告警条件对应的主卡：<chain id>/<card id>（本包）或 <pack>/<chain id>/<card id>。告警触发时主卡应当判为异常；评测按它统计证据卡与告警结论的一致率
+   */
+  primary_card?: string;
+  /**
    * 来源 mixin，用于覆盖率统计
    */
   mixin?: 'kubernetes' | 'node' | 'etcd' | 'prometheus' | 'alertmanager' | 'kube-state-metrics' | 'other';
@@ -2038,9 +2042,9 @@ export interface EvalSnapshot {
   created_at: Timestamp;
   source: {
     /**
-     * promoted：控制台或 API 提升用例时固化；imported：从外部种子导入；scenario：场景运行后固化
+     * promoted：控制台或 API 提升用例时固化；imported：从外部种子导入；scenario：场景运行后固化；reconstructed：评测时从保留期内的数据重建（阶段 A 与研判输入按当前代码重新生成）
      */
-    kind: 'promoted' | 'imported' | 'scenario';
+    kind: 'promoted' | 'imported' | 'scenario' | 'reconstructed';
     /**
      * 导入来源（格式名、版本、文件与记录）
      */

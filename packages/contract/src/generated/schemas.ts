@@ -1,5 +1,5 @@
 // 本文件由 packages/contract/scripts/gen.ts 从 contract/ 生成，不要手工修改。
-export const CONTRACT_VERSION = '2.14.0';
+export const CONTRACT_VERSION = '2.15.0';
 
 export const SCHEMAS: Record<string, Record<string, unknown>> = {
   'https://srenautix.io/contract/gateway/v1/action-catalog.schema.json': {
@@ -1627,6 +1627,12 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
         default: 'instance',
       },
       chains: { type: 'array', description: '该告警触发的证据链 <pack>/<chain id>', items: { type: 'string' } },
+      primary_card: {
+        type: 'string',
+        description:
+          '与告警条件对应的主卡：<chain id>/<card id>（本包）或 <pack>/<chain id>/<card id>。告警触发时主卡应当判为异常；评测按它统计证据卡与告警结论的一致率',
+        pattern: '^([a-z0-9][a-z0-9_.-]*/)?[a-z0-9][a-z0-9_.-]*/[a-z0-9][a-z0-9_.-]*$',
+      },
       mixin: {
         type: 'string',
         description: '来源 mixin，用于覆盖率统计',
@@ -2323,8 +2329,9 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
         properties: {
           kind: {
             type: 'string',
-            description: 'promoted：控制台或 API 提升用例时固化；imported：从外部种子导入；scenario：场景运行后固化',
-            enum: ['promoted', 'imported', 'scenario'],
+            description:
+              'promoted：控制台或 API 提升用例时固化；imported：从外部种子导入；scenario：场景运行后固化；reconstructed：评测时从保留期内的数据重建（阶段 A 与研判输入按当前代码重新生成）',
+            enum: ['promoted', 'imported', 'scenario', 'reconstructed'],
           },
           ref: { type: ['string', 'null'], description: '导入来源（格式名、版本、文件与记录）' },
           code_sha: { type: ['string', 'null'] },

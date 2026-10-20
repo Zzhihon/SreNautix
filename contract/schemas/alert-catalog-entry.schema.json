@@ -44,6 +44,11 @@
       "description": "该告警触发的证据链 <pack>/<chain id>",
       "items": { "type": "string" }
     },
+    "primary_card": {
+      "type": "string",
+      "description": "与告警条件对应的主卡：<chain id>/<card id>（本包）或 <pack>/<chain id>/<card id>。告警触发时主卡应当判为异常；评测按它统计证据卡与告警结论的一致率",
+      "pattern": "^([a-z0-9][a-z0-9_.-]*/)?[a-z0-9][a-z0-9_.-]*/[a-z0-9][a-z0-9_.-]*$"
+    },
     "mixin": {
       "type": "string",
       "description": "来源 mixin，用于覆盖率统计",

@@ -38,8 +38,8 @@
       "properties": {
         "kind": {
           "type": "string",
-          "description": "promoted：控制台或 API 提升用例时固化；imported：从外部种子导入；scenario：场景运行后固化",
-          "enum": ["promoted", "imported", "scenario"]
+          "description": "promoted：控制台或 API 提升用例时固化；imported：从外部种子导入；scenario：场景运行后固化；reconstructed：评测时从保留期内的数据重建（阶段 A 与研判输入按当前代码重新生成）",
+          "enum": ["promoted", "imported", "scenario", "reconstructed"]
         },
         "ref": { "type": ["string", "null"], "description": "导入来源（格式名、版本、文件与记录）" },
         "code_sha": { "type": ["string", "null"] },
