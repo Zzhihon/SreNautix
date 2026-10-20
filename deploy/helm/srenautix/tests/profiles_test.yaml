@@ -227,6 +227,24 @@ tests:
           path: spec.template.spec.containers[0].env
           content: {name: DOCKER_CONFIG, value: /etc/srenautix/secrets/pack-registry}
 
+  - it: 用户的包以 ConfigMap 挂载为 /etc/srenautix/packs/<configMap>/<包名>，字符串项的包名等于 ConfigMap 名
+    set:
+      profile: standard
+      packs.userConfigMaps:
+        - team-pack
+        - {configMap: srenautix-pack-shop, pack: shop}
+    documentSelector: {path: metadata.name, value: t-srenautix-server}
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content: {name: pack-team-pack, mountPath: /etc/srenautix/packs/team-pack/team-pack, readOnly: true}
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content: {name: pack-srenautix-pack-shop, mountPath: /etc/srenautix/packs/srenautix-pack-shop/shop, readOnly: true}
+      - contains:
+          path: spec.template.spec.volumes
+          content: {name: pack-srenautix-pack-shop, configMap: {name: srenautix-pack-shop}}
+
   - it: 合规配置下 server 与 gateway 挂载同一份审批人公钥
     values:
       - ../values-compliance.yaml

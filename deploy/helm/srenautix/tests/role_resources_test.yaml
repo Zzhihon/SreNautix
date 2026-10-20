@@ -159,6 +159,18 @@ tests:
     asserts:
       - notMatchRegex: {path: 'data["config.yaml"]', pattern: approver_keys_file}
 
+  - it: 用户的包所在的 ConfigMap 挂载根目录加入 packs.dirs
+    set:
+      profile: standard
+      packs.userConfigMaps:
+        - team-pack
+        - {configMap: srenautix-pack-shop, pack: shop}
+    documentSelector: {path: metadata.name, value: t-srenautix-server-config}
+    asserts:
+      - matchRegex:
+          path: 'data["config.yaml"]'
+          pattern: '(?m)^  - /app/packs\n  - /etc/srenautix/packs/team-pack\n  - /etc/srenautix/packs/srenautix-pack-shop$'
+
   - it: packs.oci.sources 原样写入 server 配置，拉取目录固定
     set:
       profile: standard

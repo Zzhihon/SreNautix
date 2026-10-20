@@ -167,9 +167,10 @@ spec:
             - name: bindings
               mountPath: /etc/srenautix/bindings
               readOnly: true
-            {{- range $cm := $.Values.packs.userConfigMaps }}
-            - name: pack-{{ $cm }}
-              mountPath: /etc/srenautix/packs/{{ $cm }}
+            {{- range $p := $.Values.packs.userConfigMaps }}
+            {{- $u := include "srenautix.userPack" $p | fromYaml }}
+            - name: pack-{{ $u.configMap }}
+              mountPath: /etc/srenautix/packs/{{ $u.configMap }}/{{ $u.pack }}
               readOnly: true
             {{- end }}
             {{- if $.Values.packs.lockConfigMap }}
@@ -226,10 +227,11 @@ spec:
         - name: bindings
           configMap:
             name: {{ include "srenautix.bindingsConfigMap" $ }}
-        {{- range $cm := $.Values.packs.userConfigMaps }}
-        - name: pack-{{ $cm }}
+        {{- range $p := $.Values.packs.userConfigMaps }}
+        {{- $u := include "srenautix.userPack" $p | fromYaml }}
+        - name: pack-{{ $u.configMap }}
           configMap:
-            name: {{ $cm }}
+            name: {{ $u.configMap }}
         {{- end }}
         {{- if $.Values.packs.lockConfigMap }}
         - name: pack-lock

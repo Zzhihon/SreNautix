@@ -80,7 +80,7 @@ chart 为五个角色生成配置文件（地址、端口、挂载路径、集�
 
 ## 领域包
 
-内置领域包在中心镜像的 `/app/packs`；用户层的包以 ConfigMap 挂载（`packs.userConfigMaps`）。OCI 仓库中经 cosign 签名的包写在 `packs.oci.sources`（每项含 `repository`、固定的 `digest`，以及 `key_file` 或 `certificate_identity` + `certificate_oidc_issuer`）。中心镜像带有 cosign 与 oras，chart 为 server 挂载可写的拉取目录 `/var/cache/srenautix/packs`（emptyDir，容量 `packs.oci.cacheSize`）。公钥放在 `packs.oci.keySecret` 指定的 Secret 中，`key_file` 写 `/etc/srenautix/secrets/pack-keys/<键>`。私有仓库的凭证放在 `packs.oci.dockerConfigSecret`（类型 `kubernetes.io/dockerconfigjson`），以 `DOCKER_CONFIG` 提供给 oras 与 cosign。仓库与 Rekor 的出站地址可以用 `networkPolicy.packRegistriesEgressTo` 限定。
+内置领域包在中心镜像的 `/app/packs`；用户的包以 ConfigMap 挂载（`packs.userConfigMaps`，每项是 ConfigMap 名或 `{configMap, pack}`，一个 ConfigMap 放一个包，子目录中的文件以 `<子目录>__<文件名>` 为键，见 `docs/packs/README.zh-CN.md`）。OCI 仓库中经 cosign 签名的包写在 `packs.oci.sources`（每项含 `repository`、固定的 `digest`，以及 `key_file` 或 `certificate_identity` + `certificate_oidc_issuer`）。中心镜像带有 cosign 与 oras，chart 为 server 挂载可写的拉取目录 `/var/cache/srenautix/packs`（emptyDir，容量 `packs.oci.cacheSize`）。公钥放在 `packs.oci.keySecret` 指定的 Secret 中，`key_file` 写 `/etc/srenautix/secrets/pack-keys/<键>`。私有仓库的凭证放在 `packs.oci.dockerConfigSecret`（类型 `kubernetes.io/dockerconfigjson`），以 `DOCKER_CONFIG` 提供给 oras 与 cosign。仓库与 Rekor 的出站地址可以用 `networkPolicy.packRegistriesEgressTo` 限定。
 
 worker 写进研判清单的 `code_sha` 取发布时写入 chart 的注解 `srenautix.io/code-sha`；使用仓库中的 chart 时设置 `codeSha`。CI 的 `role-configs` 任务用各角色自己的解析代码检查生成的配置，`install-e2e` 任务在 Kind 上实际安装 standard 配置并要求全部 Pod Ready。
 

@@ -237,8 +237,8 @@ ingest:
 packs:
   dirs:
     - /app/packs
-    {{- range $cm := $v.packs.userConfigMaps }}
-    - /etc/srenautix/packs/{{ $cm }}
+    {{- range $p := $v.packs.userConfigMaps }}
+    - /etc/srenautix/packs/{{ (include "srenautix.userPack" $p | fromYaml).configMap }}
     {{- end }}
   {{- if $v.packs.lockConfigMap }}
   lock_file: /etc/srenautix/pack-lock/pack.lock

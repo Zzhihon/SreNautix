@@ -237,6 +237,23 @@ priorityClassName: {{ . }}
 {{- end -}}
 {{- end -}}
 
+{{/*
+packs.userConfigMaps 的一项：字符串（ConfigMap 名，包名与它相同），或 {configMap, pack}。
+ConfigMap 挂载为 /etc/srenautix/packs/<configMap>/<pack>，即包目录；子目录中的文件以 <子目录>__<文件名> 为键
+*/}}
+{{- define "srenautix.userPack" -}}
+{{- if kindIs "string" . -}}
+configMap: {{ . }}
+pack: {{ . }}
+{{- else -}}
+{{- if not (and .configMap .pack) -}}
+{{- fail "packs.userConfigMaps 的对象形式需要 configMap 与 pack" -}}
+{{- end -}}
+configMap: {{ .configMap }}
+pack: {{ .pack }}
+{{- end -}}
+{{- end -}}
+
 {{/* 已存在的 Secret 中的 Ed25519 私钥（键 private.pem），不存在时生成 */}}
 {{- define "srenautix.persistentKey" -}}
 {{- $existing := lookup "v1" "Secret" .ctx.Release.Namespace .name -}}

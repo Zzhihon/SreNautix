@@ -238,8 +238,10 @@ issues:
 changes:
   sources: []
 
-# 领域包：内置包在镜像的 /app/packs；用户层的包以 ConfigMap 挂载，按列出的顺序合并（组织在前、集群在后）
+# 领域包：内置包在镜像的 /app/packs；用户的包以 ConfigMap 挂载
 packs:
+  # 每项是 ConfigMap 名（包名与它相同），或 {configMap: <名>, pack: <包名>}。一个 ConfigMap 放一个包：
+  # 顶层文件以文件名为键，子目录中的文件以 <子目录>__<文件名> 为键（例如 runbooks__provider.md、tests__replay__x.json）
   userConfigMaps: []
   # 含 pack.lock 的 ConfigMap（键 pack.lock）；为空时由 server 在启动时计算
   lockConfigMap: ""
