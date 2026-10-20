@@ -11,6 +11,7 @@ import type { FeishuClient } from '../channels/feishu/client.js';
 import type { TelegramClient } from '../channels/telegram/client.js';
 import type { Oidc } from '../identity/oidc.js';
 import type { Keyring } from '../proposals/assertion.js';
+import { logger } from '../log.js';
 import type { Catalog } from '../proposals/catalog.js';
 import type { EvidenceSource, PackRuntime } from '../stage-a/packs.js';
 
@@ -95,19 +96,31 @@ export class IntegrationRegistry {
   private readonly manifests = new Map<string, { manifest: IntegrationManifest; sha: string }>();
   private readonly verified = new Map<string, Map<string, { ok: boolean; at: Date; error: string | null }>>();
 
+  /** 清单不能加载的集成：集成页只是展示，不因此让 server 启动失败；这些实例不列出，原因写进日志 */
+  readonly manifestErrors = new Map<string, string>();
+  private readonly specs: InstanceSpec[];
+
   private constructor(
     private readonly dir: string,
-    private readonly specs: InstanceSpec[],
+    specs: InstanceSpec[],
   ) {
     for (const s of specs) {
-      if (!this.manifests.has(s.manifestId)) {
+      if (this.manifests.has(s.manifestId) || this.manifestErrors.has(s.manifestId)) {
+        continue;
+      }
+      try {
         const m = loadIntegrationManifest(join(dir, s.manifestId));
         const sha = createHash('sha256')
           .update(readFileSync(join(dir, s.manifestId, 'integration.yaml')))
           .digest('hex');
         this.manifests.set(s.manifestId, { manifest: m.manifest, sha: `sha256:${sha}` });
+      } catch (e) {
+        const error = e instanceof Error ? e.message : String(e);
+        this.manifestErrors.set(s.manifestId, error);
+        logger.error('集成清单不能加载，集成页不列出使用它的实例', { manifest: s.manifestId, dir, error });
       }
     }
+    this.specs = specs.filter((s) => this.manifests.has(s.manifestId));
   }
 
   static fromConfig(d: IntegrationDeps): IntegrationRegistry {

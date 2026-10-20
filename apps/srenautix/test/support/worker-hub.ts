@@ -98,6 +98,8 @@ export async function startHubForWorker(
         reconcile: { enabled: false },
       },
       packs: { dirs: [resolve(file('packs/.keep', ''), '..')] },
+      // 空的集成清单目录：清单缺失时集成页不列出这些实例，server 照常启动（镜像缺少 integrations/ 时同样如此）
+      integrations: { dir: resolve(file('integrations/.keep', ''), '..') },
       datasources: { prometheus: { url: 'http://127.0.0.1:9' } },
       topology: { source: 'off' },
       approvals: {
