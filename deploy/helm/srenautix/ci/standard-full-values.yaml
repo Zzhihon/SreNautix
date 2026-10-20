@@ -12,6 +12,15 @@ roles:
       tls:
         - hosts: [srenautix.example.com]
           secretName: srenautix-tls
+    githubApp:
+      existingSecret: srenautix-github-app
+    config:
+      topology:
+        override_pr:
+          github:
+            app_id: "123456"
+            installation_id: "7890123"
+            repo: example/infra
   worker:
     replicas: 2
   mcp:

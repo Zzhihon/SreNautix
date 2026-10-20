@@ -66,7 +66,7 @@ chart 为五个角色生成配置文件（地址、端口、挂载路径、集�
 | mcp | `public_url`、`authorization_server`、`clients`（外部调用方 token 放在 `roles.mcp.clientTokensSecret`） | `apps/srenautix/src/roles/mcp.ts` |
 | gateway | `roles.gateway.policy`（本集群的 gateway 策略）、`roles.gateway.approverKeys`；启用 `gitops_pr` 时加 `roles.gateway.githubApp.existingSecret`（键 `app-id`、`installation-id`、`slug`、`private-key.pem`） | `internal/spoke/gateway/run.go`、`docs/gateway/README.md` |
 | reader | 无；声明的证据查询清单放在 `roles.reader.queryManifestConfigMap` | `internal/spoke/reader/config.go` |
-| server | 无；通知渠道等写在 `roles.server.config` | `apps/srenautix/src/config/server.ts` |
+| server | 无；通知渠道等写在 `roles.server.config`。开 issue 与 PR 时设置 `roles.server.githubApp.existingSecret`（键与 gateway 相同，挂载在 `/etc/srenautix/secrets/github-app`），`app_id`、`installation_id`、`repo` 写在 `roles.server.config.topology.override_pr.github`，chart 补上私钥路径与 `apiUrl`；出站 443 由 `networkPolicy.githubEgressTo` 限定 | `apps/srenautix/src/config/server.ts` |
 
 境外模型路由（`in_domain=false`）没有打开 `roles.worker.config.llm.allow_cross_border` 时，安装照常完成，worker 启动时禁用这些路由；安装结束时的说明会列出被禁用的路由（ADR 0062）。
 

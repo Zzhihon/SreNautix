@@ -67,6 +67,15 @@
 {{- if and $g.requirePasskey (or $keys.content $keys.existingConfigMap $keys.existingSecret) -}}true{{- end -}}
 {{- end -}}
 
+{{/* GitHub App 凭证的卷（server 与 gateway 相同）；参数为 Secret 名称 */}}
+{{- define "srenautix.githubAppEntry" -}}
+{{- $items := list -}}
+{{- range $k := list "app-id" "installation-id" "slug" "private-key.pem" -}}
+{{- $items = append $items (dict "key" $k "path" $k) -}}
+{{- end -}}
+{{- toYaml (dict "key" "github-app" "secretName" . "items" $items) -}}
+{{- end -}}
+
 {{/* 审批人公钥的卷（gateway 与 server 挂载同一份，键 approver-keys.yaml） */}}
 {{- define "srenautix.approverKeysEntry" -}}
 {{- $keys := .Values.roles.gateway.approverKeys -}}
@@ -128,6 +137,9 @@
 {{- if include "srenautix.serverApproverKeys" .ctx -}}
 {{- $out = append $out (include "srenautix.approverKeysEntry" .ctx | fromYaml) -}}
 {{- end -}}
+{{- with $v.roles.server.githubApp.existingSecret -}}
+{{- $out = append $out (include "srenautix.githubAppEntry" . | fromYaml) -}}
+{{- end -}}
 {{- with $v.packs.oci.keySecret -}}
 {{- $out = append $out (dict "key" "pack-keys" "secretName" .) -}}
 {{- end -}}
@@ -145,7 +157,7 @@
 {{- $out = append $out (include "srenautix.approverKeysEntry" .ctx | fromYaml) -}}
 {{- $out = append $out (dict "key" "policy" "configMap" (include "srenautix.policyConfigMap" .ctx) "items" (list (dict "key" (include "srenautix.policyFile" .ctx) "path" (include "srenautix.policyFile" .ctx)))) -}}
 {{- with $v.roles.gateway.githubApp.existingSecret -}}
-{{- $out = append $out (dict "key" "github-app" "secretName" . "items" (list (dict "key" "app-id" "path" "app-id") (dict "key" "installation-id" "path" "installation-id") (dict "key" "slug" "path" "slug") (dict "key" "private-key.pem" "path" "private-key.pem"))) -}}
+{{- $out = append $out (include "srenautix.githubAppEntry" . | fromYaml) -}}
 {{- end -}}
 {{- end -}}
 {{- if has $role (list "server" "worker" "reader") -}}
@@ -243,6 +255,15 @@ datasources:
     dialect: {{ $v.datasources.prometheus.dialect }}
 topology:
   source: {{ if $readerOn }}reader{{ else if $v.roles.server.clusterRead }}informer{{ else }}off{{ end }}
+  {{- $userTopology := (($v.roles.server.config | default dict).topology | default dict) }}
+  {{- if and $v.roles.server.githubApp.existingSecret (($userTopology.override_pr | default dict).github) }}
+  override_pr:
+    github:
+      private_key_file: {{ $dir }}/github-app/private-key.pem
+      {{- with $v.roles.server.githubApp.apiUrl }}
+      api_base: {{ . }}
+      {{- end }}
+  {{- end }}
 {{- with $v.secrets.serviceSigningKey.existingSecret }}
 approvals:
   signing_key_file: {{ $dir }}/service-signing/private.pem

@@ -249,3 +249,40 @@ tests:
               defaultMode: 288
               items: [{key: approver-keys.yaml, path: approver-keys.yaml}]
         documentSelector: {path: metadata.name, value: t-srenautix-gateway}
+
+  - it: server 挂载 GitHub App 凭证，挂载方式与 gateway 相同
+    set:
+      profile: standard
+      roles.server.githubApp.existingSecret: gh-app
+      roles.gateway.githubApp.existingSecret: gh-app
+    asserts:
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: secret-github-app
+            secret:
+              secretName: gh-app
+              defaultMode: 288
+              items:
+                - {key: app-id, path: app-id}
+                - {key: installation-id, path: installation-id}
+                - {key: slug, path: slug}
+                - {key: private-key.pem, path: private-key.pem}
+        documentSelector: {path: metadata.name, value: t-srenautix-server}
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content: {name: secret-github-app, mountPath: /etc/srenautix/secrets/github-app, readOnly: true}
+        documentSelector: {path: metadata.name, value: t-srenautix-server}
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: secret-github-app
+            secret:
+              secretName: gh-app
+              defaultMode: 288
+              items:
+                - {key: app-id, path: app-id}
+                - {key: installation-id, path: installation-id}
+                - {key: slug, path: slug}
+                - {key: private-key.pem, path: private-key.pem}
+        documentSelector: {path: metadata.name, value: t-srenautix-gateway}

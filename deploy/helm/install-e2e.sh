@@ -84,6 +84,12 @@ admin_password=$(openssl rand -hex 16)
 hash=$(printf '%s' "$admin_password" | docker run --rm -i "$hub_image" admin hash-password)
 totp=$(openssl rand 20 | base32 | tr -d '=\n')
 k -n "$ns" create secret generic srenautix-local-admin --from-literal=password_hash="$hash" --from-literal=totp_secret="$totp"
+# server 的 GitHub App（假凭证，私钥随机生成）：只验证挂载路径与 server 读取私钥
+openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out "$work/github-app.pem" 2>/dev/null
+k -n "$ns" create secret generic srenautix-github-app --from-literal=app-id=1 --from-literal=installation-id=1 \
+  --from-literal=slug=srenautix-install-e2e --from-file=private-key.pem="$work/github-app.pem"
+github_key_sha=$(sha256sum "$work/github-app.pem" | cut -d' ' -f1)
+rm -f "$work/github-app.pem"
 
 log "安装 SreNautix（values-standard.yaml）"
 helm --kube-context "$ctx" install srenautix "$chart_dir" --namespace "$ns" \
@@ -129,5 +135,16 @@ until [[ "$(k -n "$ns" get lease srenautix-gateway -o jsonpath='{.spec.holderIde
   sleep 5
 done
 log "gateway ${gateway_pod} 持有 Lease srenautix-gateway"
+
+log "检查 server 挂载的 GitHub App 凭证"
+mounted=$(k -n "$ns" exec deploy/srenautix-server -c server -- /nodejs/bin/node -e \
+  "const fs = require('node:fs'), c = require('node:crypto'), d = '/etc/srenautix/secrets/github-app/';
+   for (const f of ['app-id', 'installation-id', 'slug']) fs.accessSync(d + f, fs.constants.R_OK);
+   process.stdout.write(c.createHash('sha256').update(fs.readFileSync(d + 'private-key.pem')).digest('hex'));")
+[[ "$mounted" == "$github_key_sha" ]] || { log "server 挂载的 GitHub App 私钥与 Secret 不一致：${mounted:-读取失败}"; exit 1; }
+k -n "$ns" get configmap srenautix-server-config -o jsonpath='{.data.config\.yaml}' |
+  grep -q 'private_key_file: /etc/srenautix/secrets/github-app/private-key.pem' ||
+  { log "server 配置中没有 GitHub App 私钥路径"; exit 1; }
+log "server 的 GitHub App 凭证已挂载，配置指向挂载路径"
 
 log "安装测试通过"

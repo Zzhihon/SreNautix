@@ -54,6 +54,11 @@
 {{- $channels := dict "ports" $https }}
 {{- with $np.channelsEgressTo }}{{- $_ := set $channels "to" . }}{{- end }}
 {{- $serverEgress = append $serverEgress $channels }}
+{{- if .Values.roles.server.githubApp.existingSecret }}
+{{- $github := dict "ports" $https }}
+{{- with $np.githubEgressTo }}{{- $_ := set $github "to" . }}{{- end }}
+{{- $serverEgress = append $serverEgress $github }}
+{{- end }}
 {{- if .Values.packs.oci.sources }}
 {{- $registries := dict "ports" $https }}
 {{- with $np.packRegistriesEgressTo }}{{- $_ := set $registries "to" . }}{{- end }}

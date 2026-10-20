@@ -257,3 +257,13 @@ tests:
       networkPolicy.cilium.enabled: true
     asserts:
       - failedTemplate: {errorPattern: 必须列出 networkPolicy.cilium.modelFQDNs}
+
+  - it: override_pr.github 没有 GitHub App 私钥时报错
+    set:
+      profile: standard
+      roles.server.config.topology.override_pr.github:
+        app_id: "123"
+        installation_id: "456"
+        repo: example/infra
+    asserts:
+      - failedTemplate: {errorPattern: 设置 roles.server.githubApp.existingSecret}

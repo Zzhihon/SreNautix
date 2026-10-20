@@ -61,6 +61,13 @@ roles:
       hosts: []
       # - host: srenautix.example.com
       tls: []
+    # server 开 issue 与 PR（例如未映射告警的拓扑覆盖规则 PR）用的 GitHub App：Secret 的键与 gateway 相同
+    # （app-id、installation-id、slug、private-key.pem），挂载在 /etc/srenautix/secrets/github-app。
+    # roles.server.config 中出现 topology.override_pr.github 时，chart 补上 private_key_file 与 api_base（apiUrl 非空时）；
+    # app_id、installation_id、repo 写在 roles.server.config 中
+    githubApp:
+      existingSecret: ""
+      apiUrl: ""
     # 与 chart 生成的 server 配置深度合并（键见 apps/srenautix/src/config/server.ts），
     # 用于 notify（Telegram、飞书）、stage_a、scheduler 等业务设置；同名键以这里为准
     config: {}
@@ -438,7 +445,8 @@ networkPolicy:
   channelsEgressTo: []
   # gateway 执行后校验使用的本地指标端点
   gatewayMetricsEgressTo: []
-  # GitHub API（gitops_pr），只有 gateway 可以访问；为空时放行到任意地址的 443
+  # GitHub API：gateway（gitops_pr，roles.gateway.githubApp）与 server（issue、PR，roles.server.githubApp）可以访问；
+  # 为空时放行到任意地址的 443
   githubEgressTo: []
   # OCI 领域包的仓库与 Rekor（packs.oci），只有 server 可以访问；为空时放行到任意地址的 443
   packRegistriesEgressTo: []

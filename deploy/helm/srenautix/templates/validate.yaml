@@ -64,6 +64,12 @@
 {{- fail "ingest.sources 的 id 不能重复" }}
 {{- end }}
 
+{{- /* server 开 PR 用的 GitHub App：配置了 override_pr.github 却没有私钥时 server 启动失败 */}}
+{{- $sgh := ((((($v.roles.server.config | default dict).topology | default dict).override_pr | default dict).github) | default dict) }}
+{{- if and $sgh (not $v.roles.server.githubApp.existingSecret) (not $sgh.private_key_file) }}
+{{- fail "roles.server.config.topology.override_pr.github 需要 GitHub App 私钥：设置 roles.server.githubApp.existingSecret（键 app-id、installation-id、slug、private-key.pem）" }}
+{{- end }}
+
 {{- /* 数据库 */}}
 {{- if not (has $v.database.mode (list "cnpg" "external")) }}
 {{- fail (printf "database.mode 必须是 cnpg 或 external，当前为 %q" $v.database.mode) }}

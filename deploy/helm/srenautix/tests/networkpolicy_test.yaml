@@ -116,3 +116,34 @@ tests:
       networkPolicy.enabled: false
     asserts:
       - hasDocuments: {count: 0}
+
+  - it: server 配置了 GitHub App 时可以访问 githubEgressTo 的 443
+    set:
+      profile: standard
+      roles.server.githubApp.existingSecret: gh-app
+      networkPolicy.githubEgressTo:
+        - ipBlock: {cidr: 140.82.112.0/20}
+    documentSelector: {path: metadata.name, value: t-srenautix-server}
+    asserts:
+      - contains:
+          path: spec.egress
+          content:
+            to:
+              - ipBlock: {cidr: 140.82.112.0/20}
+            ports:
+              - {protocol: TCP, port: 443}
+
+  - it: server 没有 GitHub App 时不开放 githubEgressTo
+    set:
+      profile: standard
+      networkPolicy.githubEgressTo:
+        - ipBlock: {cidr: 140.82.112.0/20}
+    documentSelector: {path: metadata.name, value: t-srenautix-server}
+    asserts:
+      - notContains:
+          path: spec.egress
+          content:
+            to:
+              - ipBlock: {cidr: 140.82.112.0/20}
+            ports:
+              - {protocol: TCP, port: 443}
