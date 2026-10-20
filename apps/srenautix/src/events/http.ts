@@ -2,7 +2,15 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type pg from 'pg';
 import { badRequest } from '../api/errors.js';
 import { logger } from '../log.js';
-import { CursorError, formatCursor, parseCursor, readEvents, type OutboxEvent, type Owner } from '../store/outbox.js';
+import {
+  CursorError,
+  formatCursor,
+  lastSeq,
+  parseCursor,
+  readEvents,
+  type OutboxEvent,
+  type Owner,
+} from '../store/outbox.js';
 import type { OutboxListener } from './listener.js';
 
 export interface EventsDeps {
@@ -19,7 +27,14 @@ const MAX_LIMIT = 500;
 const MAX_WAIT_S = 30;
 const HEARTBEAT_MS = 15_000;
 
-function cursorOf(deps: EventsDeps, raw: string | undefined): number {
+/**
+ * 起始游标。不带游标时从 outbox 当前末尾开始（契约：不填时从当前位置开始），只推送之后的新事件；
+ * 历史事件由页面自己的查询取得。从头回放整个 outbox 会让控制台为每条历史事件各失效一次查询（请求风暴）。
+ */
+async function cursorOf(deps: EventsDeps, raw: string | undefined): Promise<number> {
+  if (raw === undefined || raw === '') {
+    return Number(await lastSeq(deps.pool, deps.schema));
+  }
   try {
     return parseCursor(raw, deps.owner);
   } catch (e) {
@@ -60,10 +75,10 @@ export function registerEvents(app: FastifyInstance, deps: EventsDeps): void {
     }
     if ((req.headers.accept ?? '').includes('text/event-stream')) {
       const lastId = req.headers['last-event-id'];
-      const after = cursorOf(deps, typeof lastId === 'string' && lastId ? lastId : q.after);
+      const after = await cursorOf(deps, typeof lastId === 'string' && lastId ? lastId : q.after);
       return sse(deps, req, reply, after, types, filter);
     }
-    let after = cursorOf(deps, q.after);
+    let after = await cursorOf(deps, q.after);
     const wait = q.wait === undefined ? 0 : Number(q.wait);
     if (!Number.isFinite(wait) || wait < 0 || wait > MAX_WAIT_S) {
       throw badRequest(`wait 必须是 0–${MAX_WAIT_S} 秒`);

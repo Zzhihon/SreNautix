@@ -8,6 +8,7 @@ export type { Formatters, I18n, Locale, MessageValues, Messages, MissingMessage 
 export { ApiError } from './port';
 export { createHubClientFor, createHubPort } from './hubPort';
 export type { HubPortOptions } from './hubPort';
+export { DEFAULT_REQUEST_GUARD, RequestGuard, type RequestGuardOptions } from './requestGuard';
 export type { ActionPort, DataPort, IncidentQuery, ProposalQuery, WebAuthnAssertion } from './port';
 export * from './contract';
 export {
@@ -20,6 +21,9 @@ export {
   useFeedback,
   useIncident,
   useIncidents,
+  createInvalidator,
+  retryDelay,
+  shouldRetry,
   useManifest,
   useProposal,
   useProposals,

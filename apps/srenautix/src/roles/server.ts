@@ -4,6 +4,7 @@ import type { ResolvedRcaParams } from '@srenautix/core';
 import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
 import { parse as parseYaml } from 'yaml';
+import { registerReadLimit } from '../api/read-limit.js';
 import { createApp } from '../api/http.js';
 import { leaseLeader, neverLeader, singleLeader, type Leader } from '../api/leader.js';
 import { registerProposalRoutes } from '../api/routes-proposals.js';
@@ -483,6 +484,7 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
   const app = await createApp({ bodyLimit: 8 << 20, trustProxy: true });
   // 在注册路由之前加上，覆盖全部接口
   registerMcpAudit(app, pool, () => callers);
+  registerReadLimit(app, metrics.apiRateLimited);
   app.get('/healthz', async () => ({ status: 'ok' }));
   app.get('/readyz', async (_req, reply) => {
     const ok = await migrationsReady(pool, 'server', serverTracks);

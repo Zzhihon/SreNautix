@@ -6,6 +6,7 @@ import type { HubPaths } from '@srenautix/contract';
 import createClient, { type Client, type Middleware } from 'openapi-fetch';
 import type { Proposal } from './contract';
 import { ApiError, type ActionPort, type DataPort } from './port';
+import { RequestGuard, type RequestGuardOptions } from './requestGuard';
 
 // 只引用契约的类型：@srenautix/contract 的运行时入口带着全部 JSON Schema 与 Ajv，浏览器端不需要
 type HubClient = Client<HubPaths>;
@@ -45,10 +46,14 @@ export interface HubPortOptions {
   /** 是否提供写操作（审批、拒绝、撤销、重新研判、实时重跑）。Grafana 插件为 false。 */
   actions: boolean;
   fetch?: typeof globalThis.fetch;
+  /** 读请求的兜底防护（同一 URL 串行、时间窗内限次）；默认 DEFAULT_REQUEST_GUARD。 */
+  guard?: RequestGuardOptions;
 }
 
-export function createHubClientFor(o: Pick<HubPortOptions, 'baseUrl' | 'csrf' | 'fetch'>): HubClient {
-  const client = createClient<HubPaths>({ baseUrl: o.baseUrl, fetch: o.fetch, credentials: 'same-origin' });
+export function createHubClientFor(o: Pick<HubPortOptions, 'baseUrl' | 'csrf' | 'fetch' | 'guard'>): HubClient {
+  const guard = new RequestGuard(o.guard);
+  const base = o.fetch ?? ((input: RequestInfo | URL, init?: RequestInit) => globalThis.fetch(input, init));
+  const client = createClient<HubPaths>({ baseUrl: o.baseUrl, fetch: guard.wrap(base), credentials: 'same-origin' });
   const csrf: Middleware = {
     onRequest({ request }) {
       const token = o.csrf();

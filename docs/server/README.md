@@ -104,6 +104,12 @@ audit:
 
 `console.dir` 中没有 `index.html` 时，`all` 与 `console` 启动失败。
 
+### 事件流与请求风暴防护
+
+- `GET /v1/events` 不带游标（`after` 或 SSE 的 `Last-Event-ID`）时从 outbox 当前末尾开始，只推送之后的新事件（契约：不填时从当前位置开始）。之前不带游标会从头回放整个 outbox，控制台对每条历史事件各失效一次查询；CCHP 上收件箱因此不停地请求 `/v1/incidents`，浏览器连接耗尽（`net::ERR_INSUFFICIENT_RESOURCES`），server 与 PG 的 CPU 被拉高。
+- 控制台把事件要失效的查询键按批合并后统一失效，两次失效至少间隔 2 秒，在途的重取不被取消重发；首次连接不做全量对账，断线重连后对账一次。读请求经过防护：同一个 URL 同一时刻只有一个在途，10 秒内最多 6 次。失败按指数退避重试（1、2、4、8 秒，带抖动，上限 30 秒）：网络错误与 429 最多 4 次，5xx 最多 2 次，其他 4xx 不重试。
+- server 对控制台会话（会话 cookie）的 GET 读接口限流：同一个会话对同一个接口（路由模板，不含查询参数）每秒补充 5 次、突发 20 次，超过时返回 429 `rate_limited` 与 `Retry-After`，计入 `srenautix_api_rate_limited_total{route}`。服务令牌的调用方（worker、gateway、reader、Grafana 插件）与事件流不受限。
+
 ## 单活工作
 
 事件引擎、准入、通知的同步与投递、Telegram 长轮询、告警对账、提议过期与状态条件只在主实例上运行（`leader.mode=lease` 时用 Kubernetes Lease 选主，持有者为 Pod 名）。接口、webhook 与渠道回调在每个副本上都可以处理。

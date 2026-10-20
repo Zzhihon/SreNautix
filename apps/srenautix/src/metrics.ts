@@ -42,6 +42,13 @@ export class BaseMetrics {
 
 /** server 角色的指标。 */
 export class ServerMetrics extends BaseMetrics {
+  readonly apiRateLimited = new Counter({
+    name: 'srenautix_api_rate_limited_total',
+    help: '控制台会话的读接口请求因过于频繁返回 429 的次数，按路由模板',
+    labelNames: ['route'] as const,
+    registers: [this.registry],
+  });
+
   readonly githubIssues = new Counter({
     name: 'srenautix_github_issues_total',
     help: '事件 issue 的处理结果（opened、skipped_rate_limit、retry、failed）',

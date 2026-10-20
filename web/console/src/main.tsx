@@ -3,8 +3,10 @@ import { RouterProvider } from '@tanstack/react-router';
 import {
   DEFAULT_TOKENS,
   I18nProvider,
+  retryDelay,
   setMissingMessageReporter,
   setRenderErrorReporter,
+  shouldRetry,
   ThemeRoot,
 } from '@srenautix/ui';
 import { StrictMode, useEffect } from 'react';
@@ -20,9 +22,12 @@ import './global.css';
 setMissingMessageReporter((m) => console.warn('srenautix.console.missing_message', m));
 setRenderErrorReporter((e) => console.warn('srenautix.console.render_error', e.area));
 
-// 服务端对每个事件推送失效；另外每 60 秒全量对账一次（DESIGN §2.3）
+// 服务端对每个事件推送失效（合并、节流，见 events.ts）；另外每 60 秒全量对账一次（DESIGN §2.3）。
+// 失败按指数退避重试（网络错误、429、5xx），其他 4xx 不重试
 const queryClient = new QueryClient({
-  defaultOptions: { queries: { staleTime: 10_000, refetchInterval: 60_000, retry: 1 } },
+  defaultOptions: {
+    queries: { staleTime: 10_000, refetchInterval: 60_000, retry: shouldRetry, retryDelay: (n) => retryDelay(n) },
+  },
 });
 const router = makeRouter({ queryClient, session: fetchSession });
 

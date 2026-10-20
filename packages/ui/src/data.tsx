@@ -119,6 +119,103 @@ export function invalidationKeys(e: OutboxEvent): QueryKey[] {
   }
 }
 
+export interface InvalidatorOptions {
+  /** 收到第一条事件后等多久再统一失效（合并同一批事件） */
+  delayMs: number;
+  /** 两次失效之间的最短间隔（节流） */
+  minGapMs: number;
+  now?: () => number;
+}
+
+export const DEFAULT_INVALIDATOR: InvalidatorOptions = { delayMs: 300, minGapMs: 2_000 };
+
+/** 失效的执行者：只需要 QueryClient 的 invalidateQueries */
+interface Invalidates {
+  invalidateQueries(filters?: { queryKey?: QueryKey }, options?: { cancelRefetch?: boolean }): Promise<void>;
+}
+
+/**
+ * 事件驱动的失效：合并与节流。一批事件里的键按前缀去重后统一失效一次，两次失效之间至少隔 minGapMs；
+ * 已经在途的重取不被取消重发（cancelRefetch: false），所以事件再多，每个查询同一时刻最多一个请求。
+ * all() 让全部查询失效（事件流重连后的全量对账），同样经过合并与节流。
+ */
+export function createInvalidator(qc: Invalidates, o: InvalidatorOptions = DEFAULT_INVALIDATOR) {
+  const now = o.now ?? Date.now;
+  const pending = new Map<string, QueryKey>();
+  let everything = false;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let last = Number.NEGATIVE_INFINITY;
+  let flushes = 0;
+  const flush = () => {
+    timer = null;
+    last = now();
+    flushes++;
+    const keys = everything ? [] : [...pending.values()];
+    const all = everything;
+    pending.clear();
+    everything = false;
+    if (all) {
+      void qc.invalidateQueries(undefined, { cancelRefetch: false });
+      return;
+    }
+    // 去掉被更短前缀覆盖的键
+    const hashes = keys.map((k) => JSON.stringify(k));
+    keys.forEach((k, i) => {
+      const h = hashes[i] as string;
+      const covered = hashes.some(
+        (p, j) => j !== i && p.length < h.length && h.startsWith(p.slice(0, -1)) && h[p.length - 1] === ',',
+      );
+      if (!covered) {
+        void qc.invalidateQueries({ queryKey: k }, { cancelRefetch: false });
+      }
+    });
+  };
+  const schedule = () => {
+    if (timer !== null) {
+      return;
+    }
+    timer = setTimeout(flush, Math.max(o.delayMs, last + o.minGapMs - now()));
+  };
+  return {
+    keys(keys: readonly QueryKey[]): void {
+      for (const k of keys) {
+        pending.set(JSON.stringify(k), k);
+      }
+      schedule();
+    },
+    all(): void {
+      everything = true;
+      schedule();
+    },
+    get flushes(): number {
+      return flushes;
+    },
+    dispose(): void {
+      if (timer !== null) {
+        clearTimeout(timer);
+        timer = null;
+      }
+    },
+  };
+}
+
+/**
+ * 读查询的重试：网络错误、408 与 429 最多重试 4 次（连接耗尽、限流都会很快恢复）；5xx 最多 2 次
+ * （例如没有配置 worker 的 503 是持续状态，不让页面等太久才显示原因）；其他 4xx 不重试。
+ */
+export function shouldRetry(failureCount: number, error: unknown): boolean {
+  const status = (error as { status?: unknown } | null)?.status;
+  if (typeof status !== 'number' || status === 408 || status === 429) {
+    return failureCount < 4;
+  }
+  return status >= 500 && failureCount < 2;
+}
+
+/** 指数退避加抖动：1、2、4、8 秒……上限 30 秒，每次乘以 0.5–1 的随机系数 */
+export function retryDelay(attempt: number, random: () => number = Math.random): number {
+  return Math.min(30_000, 1000 * 2 ** attempt) * (0.5 + random() / 2);
+}
+
 export function useConditions(cluster?: string) {
   const { port } = useUiEnv();
   return useQuery({

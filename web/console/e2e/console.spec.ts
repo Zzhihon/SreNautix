@@ -287,3 +287,112 @@ test('语言与主题：切到英文与深色后文案与令牌随之变化', as
   await page.getByRole('combobox', { name: 'Language' }).selectOption('zh-CN');
   await page.getByRole('combobox', { name: '主题' }).selectOption('system');
 });
+
+/** 记录页面里 EventSource 收到的事件数（window.__sseEvents）与连接成功的次数（window.__sseOpens） */
+async function countSse(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const w = window as unknown as { __sseEvents: number; __sseOpens: number; __sseIds: string[] };
+    w.__sseEvents = 0;
+    w.__sseOpens = 0;
+    w.__sseIds = [];
+    // 包装原型上的 addEventListener：每个事件类型的回调先计数再执行；open 单独计连接次数
+    type Add = (this: EventTarget, type: string, fn: (e: Event) => void, o?: unknown) => void;
+    const proto = EventSource.prototype as unknown as { addEventListener: Add };
+    const add = proto.addEventListener;
+    proto.addEventListener = function (type, fn, o) {
+      if (type === 'open') {
+        add.call(
+          this,
+          type,
+          (e: Event) => {
+            w.__sseOpens++;
+            fn.call(this, e);
+          },
+          o,
+        );
+        return;
+      }
+      if (type === 'error' || typeof fn !== 'function') {
+        add.call(this, type, fn, o);
+        return;
+      }
+      add.call(
+        this,
+        type,
+        (e: Event) => {
+          w.__sseEvents++;
+          w.__sseIds.push((e as MessageEvent).lastEventId);
+          fn.call(this, e);
+        },
+        o,
+      );
+    };
+    // 控制台用 onopen 而不是 addEventListener('open')：用一个空的 open 监听计数
+    const Orig = window.EventSource;
+    window.EventSource = function (url: string | URL, init?: EventSourceInit) {
+      const es = new Orig(url, init);
+      es.addEventListener('open', () => undefined);
+      return es;
+    } as unknown as typeof EventSource;
+  });
+}
+
+const sseStats = (page: Page) =>
+  page.evaluate(() => {
+    const w = window as unknown as { __sseEvents: number; __sseOpens: number; __sseIds: string[] };
+    return { events: w.__sseEvents, opens: w.__sseOpens, ids: w.__sseIds };
+  });
+
+function countIncidentLists(page: Page): () => number {
+  let n = 0;
+  page.on('request', (r) => {
+    if (new URL(r.url()).pathname === '/v1/incidents') {
+      n++;
+    }
+  });
+  return () => n;
+}
+
+test('收件箱打开 60 秒：/v1/incidents 的请求次数有上限，不回放历史事件，不产生请求风暴', async ({ page }) => {
+  test.setTimeout(120_000);
+  await countSse(page);
+  const lists = countIncidentLists(page);
+  const failed: string[] = [];
+  page.on('requestfailed', (r) => failed.push(`${r.url()} ${r.failure()?.errorText ?? ''}`));
+  // 打开页面之前 outbox 的末尾（不带游标的长轮询返回当前位置）：种子数据已经写了事件
+  const tail = Number(
+    ((await (await page.request.get(`${s.consoleUrl}/v1/events`)).json()) as { next: string }).next.split(':')[1],
+  );
+  expect(tail).toBeGreaterThan(0);
+  await go(page, '/incidents');
+  await expect(page.getByRole('list', { name: '事件列表' }).getByRole('link').first()).toBeVisible();
+  await page.waitForTimeout(60_000);
+  const sse = await sseStats(page);
+  // 首次连接不带游标，服务端不回放历史：收到的只有打开页面之后的新事件
+  expect(sse.ids.filter((id) => Number(id.split(':')[1]) <= tail)).toEqual([]);
+  // 首屏 1 次、60 秒的全量对账 1 次，余量 3 次；每条新事件最多再触发一次
+  expect(lists()).toBeLessThanOrEqual(5 + sse.events);
+  expect(failed.filter((f) => f.includes('/v1/incidents'))).toEqual([]);
+});
+
+test('事件流每次连接都涌来上千条事件时，收件箱的重取被合并与节流', async ({ page }) => {
+  test.setTimeout(60_000);
+  const burst = Array.from({ length: 2000 }, (_, i) => {
+    const type = i % 2 ? 'incident.updated' : 'condition.changed';
+    return `id: server:${i + 1}\nevent: ${type}\ndata: ${JSON.stringify({ type, payload: {} })}\n\n`;
+  }).join('');
+  // 模拟旧服务端：每次连接都从头回放，随后断开，浏览器 1 秒后重连
+  await page.route('**/v1/events', (route) =>
+    route.fulfill({ status: 200, contentType: 'text/event-stream', body: `retry: 1000\n\n${burst}` }),
+  );
+  await countSse(page);
+  const lists = countIncidentLists(page);
+  await go(page, '/incidents');
+  await expect(page.getByRole('heading', { name: '事件收件箱' })).toBeVisible();
+  await page.waitForTimeout(20_000);
+  const sse = await sseStats(page);
+  expect(sse.events).toBeGreaterThan(4000);
+  // 每次连接（一批 2000 条事件加一次重连对账）最多一次重取，再加首屏
+  expect(lists()).toBeLessThanOrEqual(2 + sse.opens);
+  await page.unroute('**/v1/events');
+});
