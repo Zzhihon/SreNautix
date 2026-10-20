@@ -78,6 +78,10 @@ type FileConfig struct {
 		GitHubAppDir          string `json:"github_app_dir"`
 		GitHubAPI             string `json:"github_api"`
 		MaxConcurrent         int    `json:"max_concurrent"`
+		// AdmissionSelfCheckInterval 是周期性准入自检的间隔（Go duration，1s 到 1h，默认 1m，ADR 0024）
+		AdmissionSelfCheckInterval string `json:"admission_self_check_interval"`
+		// SelfCheckEvery 是解析后的 AdmissionSelfCheckInterval
+		SelfCheckEvery time.Duration `json:"-"`
 	} `json:"gateway"`
 }
 
@@ -121,6 +125,15 @@ func LoadConfig(path string) (*FileConfig, error) {
 	if m := fc.Audit.ObjectLock.Mode; fc.Audit.ObjectLock.Enabled && m != "GOVERNANCE" && m != "COMPLIANCE" {
 		return nil, fmt.Errorf("%s: audit.object_lock.mode must be GOVERNANCE or COMPLIANCE, got %q", path, m)
 	}
+	every := fc.Gateway.AdmissionSelfCheckInterval
+	if every == "" {
+		every = "1m"
+	}
+	d, err := time.ParseDuration(every)
+	if err != nil || d < time.Second || d > time.Hour {
+		return nil, fmt.Errorf("%s: gateway.admission_self_check_interval must be a duration between 1s and 1h, got %q", path, every)
+	}
+	fc.Gateway.SelfCheckEvery = d
 	return &fc, nil
 }
 
@@ -240,7 +253,7 @@ func Run(ctx context.Context, version string, args []string) error {
 		Cluster: fc.ClusterID, Namespace: fc.Namespace, Identity: podName, NodeName: nodeName, LeaseName: g.LeaseName, Version: version,
 		PolicyFile: g.PolicyFile, KeysFile: g.ApproverKeysFile, AdmissionPolicyPrefix: g.AdmissionPolicyPrefix,
 		RequireWebAuthnForH: fc.Profile == "compliance", MaxConcurrent: g.MaxConcurrent,
-		SafetyInterval: 15 * time.Second, PullWait: 30 * time.Second, PushInterval: 2 * time.Second, FlushInterval: 5 * time.Second,
+		SafetyInterval: 15 * time.Second, SelfCheckInterval: g.SelfCheckEvery, PullWait: 30 * time.Second, PushInterval: 2 * time.Second, FlushInterval: 5 * time.Second,
 		MaxClockSkew: 5 * time.Second, ThrottleHold: time.Minute,
 		LeaseDuration: 15 * time.Second, RenewDeadline: 10 * time.Second, RetryPeriod: 2 * time.Second,
 	}, engine.Deps{Kube: kc, Hub: hub, Catalog: cat, Executors: execs, Audit: chain, Verify: vc, Metrics: m, Clock: clock.RealClock{}, GitHub: app})

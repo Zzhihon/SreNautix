@@ -11,7 +11,7 @@
 | 不变量 | 测试 | 内容 |
 |---|---|---|
 | 2 写操作只能是类型化动作 | `TestInvariant02TypedWritesOnly` | 执行器注册表等于目录；gateway 代码不导入 `os/exec`；以 gateway 身份修改镜像、创建 ConfigMap 与 Secret、删除 Pod 与 Deployment 都返回 403 |
-| 3 没有经过自检的准入策略就只提议 | `TestInvariant03NoSelfCheckNoExecution` | 删除一个 Binding、或把它改成 Warn，60 秒内转为只提议：不再拉取工单，心跳上报 `propose_only`；恢复后被扣住的工单得到执行 |
+| 3 没有经过自检的准入策略就只提议 | `TestInvariant03NoSelfCheckNoExecution`、`TestInvariant03SelfCheckCadence` | 删除一个 Binding、或把它改成 Warn，60 秒内转为只提议：不再拉取工单，心跳上报 `propose_only`；恢复后被扣住的工单得到执行。周期自检间隔为 1 小时时，周期之间不发探针，执行前的自检拒绝策略失效后的工单，恢复后立即继续，停用动作时立即重新探测（ADR 0024） |
 | 4 gateway 的 SA 没有特权 | `TestInvariant04NoPrivilegedPermissions` | 启用全部动作后，对 Secret、准入配置、RBAC、token、证书、模拟身份与 `srenautix-freeze` 的写入逐项 SelfSubjectAccessReview，全部不允许；生成的规则不含这些资源与通配符 |
 | 5 审批签名并绑定 | `TestInvariant05SignedAndBound` | 签名后逐个篡改断言字段、签名有效但绑定不一致、伪造签名、早于恢复标记的审批，都被拒绝且目标不变 |
 | 7 可补偿与不可逆动作一律人工审批 | `TestInvariant07HumanApprovalForIrreversible` | 对不可撤销动作配置自动执行，策略加载失败；对裸 Pod、单副本、PDB 无余量的 Pod 自动重启，转为人工审批；满足条件时自动执行 |

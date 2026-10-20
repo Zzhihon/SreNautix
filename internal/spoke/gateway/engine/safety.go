@@ -35,13 +35,45 @@ func (e *Engine) probeShorts() ([]string, error) {
 	return shorts, nil
 }
 
-// SelfCheck 为每个启用的准入策略提交一次带探针标签的 dryRun 创建，要求被该策略拒绝（DESIGN §9.4、不变量 3）。
-// 任何一个被放行或被其他原因拒绝，返回错误。
+// selfCheckResult 是最近一次准入自检：时间（本机单调时钟）、探测的策略短名集合与结果。
+type selfCheckResult struct {
+	at     time.Time
+	shorts string
+	err    error
+}
+
+// SelfCheck 立即为每个启用的准入策略提交一次带探针标签的 dryRun 创建，要求被该策略拒绝（DESIGN §9.4、不变量 3），并记下结果。
+// 任何一个被放行或被其他原因拒绝，返回错误。每次执行之前都调用它。
 func (e *Engine) SelfCheck(ctx context.Context) error {
 	shorts, err := e.probeShorts()
 	if err != nil {
 		return err
 	}
+	err = e.probe(ctx, shorts)
+	e.mu.Lock()
+	e.selfCheck = selfCheckResult{at: time.Now(), shorts: strings.Join(shorts, ","), err: err}
+	e.mu.Unlock()
+	return err
+}
+
+// periodicSelfCheck 是安全检查中的自检（ADR 0024）：上一次自检通过、启用的策略集合没有变化、距上一次不到 SelfCheckInterval 时
+// 沿用上一次的结果，不发请求；首次运行、集合变化、上一次失败或间隔已到时立即探测。
+func (e *Engine) periodicSelfCheck(ctx context.Context) error {
+	shorts, err := e.probeShorts()
+	if err != nil {
+		return err
+	}
+	e.mu.Lock()
+	last := e.selfCheck
+	e.mu.Unlock()
+	if !last.at.IsZero() && last.err == nil && last.shorts == strings.Join(shorts, ",") && time.Since(last.at) < e.cfg.SelfCheckInterval {
+		return nil
+	}
+	return e.SelfCheck(ctx)
+}
+
+// probe 提交探针。探针是 dryRun=All 的 ActionExecution 创建，名称固定为 32 个 0，带 srenautix.io/admission-probe=<短名> 标签。
+func (e *Engine) probe(ctx context.Context, shorts []string) error {
 	var failed []string
 	for _, s := range shorts {
 		name := e.cfg.AdmissionPolicyPrefix + "-gateway-" + s
@@ -77,7 +109,7 @@ func (e *Engine) gate(ctx context.Context) (bool, []string) {
 	if err := e.reloadConfig(); err != nil {
 		reasons = append(reasons, "policy: "+err.Error())
 	}
-	if err := e.SelfCheck(ctx); err != nil {
+	if err := e.periodicSelfCheck(ctx); err != nil {
 		e.setCondition(metrics.ConditionAdmissionSelfCheck, false, "probe_allowed", err.Error())
 		e.d.Metrics.SelfCheckOK.Set(0)
 		reasons = append(reasons, err.Error())

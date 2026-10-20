@@ -51,6 +51,7 @@ gateway:
   metrics_url: http://prometheus-operated.monitoring.svc:9090
   github_app_dir: ""              # gitops_pr 使用的 GitHub App：app-id、installation-id、slug、private-key.pem
   max_concurrent: 4
+  admission_self_check_interval: 1m  # 周期性准入自检的间隔，1s 到 1h（ADR 0024）
 ```
 
 策略文件（`contract/gateway/v1/gateway-policy.schema.json`）与审批人公钥（`approver-keys.schema.json`）来自 Git，经 ConfigMap 挂载，每 15 秒重新读取；加载失败时保留上一次的内容，条件 `PolicyLoaded` 为 False。审批人的通行密钥只经 Git 登记在公钥文件中，每个凭据声明 `alg`：`EdDSA`（Ed25519 公钥 32 字节）或 `ES256`（P-256 未压缩点 65 字节，用于 iCloud 钥匙串、Windows Hello 等平台通行密钥）；签名算法只取自这里，见 ADR 0020。
@@ -71,7 +72,7 @@ keys:
 
 | 条件 | 判定 |
 |---|---|
-| `AdmissionSelfCheck` | 每 15 秒与每次执行前，为每个启用的准入策略提交一次带 `srenautix.io/admission-probe=<短名>` 的 `dryRun=All` ActionExecution，必须被该策略拒绝 |
+| `AdmissionSelfCheck` | 为每个启用的准入策略提交一次带 `srenautix.io/admission-probe=<短名>` 的 `dryRun=All` ActionExecution，必须被该策略拒绝。每次执行前、启动时、启用的策略集合变化时立即探测；其余时间每 `admission_self_check_interval`（默认 1 分钟）一次，上一次失败后每 15 秒一次（ADR 0024） |
 | `Freeze` | `srenautix-freeze` 缺失，或 `data.frozen` 不是 `"false"` |
 | `AuditSink` | 最近一次写入或探测审计汇失败 |
 | `ClockSkew` | 与 apiserver 的偏差超过 5 秒 |
@@ -121,7 +122,7 @@ kubectl -n srenautix get ae <执行 ID> -o yaml
 |---|---|
 | `srenautix_build_info{role="gateway",version}` | 版本 |
 | `srenautix_condition{role="gateway",type}` | 状态条件，1 表示成立 |
-| `srenautix_admission_selfcheck_ok` | 全部探针被拒绝时为 1 |
+| `srenautix_admission_selfcheck_ok` | 全部探针被拒绝时为 1。探针在 `apiserver_request_total` 中带 `dry_run="All"`，准入拒绝类告警用 `dry_run=""` 排除它们 |
 | `srenautix_gateway_frozen` | 处于冻结时为 1 |
 | `srenautix_gateway_propose_only` | 只提议时为 1 |
 | `srenautix_gateway_executions_total{action,phase}` | 进入各阶段的次数 |

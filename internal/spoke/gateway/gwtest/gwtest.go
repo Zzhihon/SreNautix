@@ -209,6 +209,8 @@ type Options struct {
 	// StagingDir 是审计暂存目录，默认在 Dir 下。
 	StagingDir string
 	Fault      func(point, executionID string)
+	// SelfCheckInterval 是周期性准入自检的间隔，默认 1 秒（与安全检查周期相同）。
+	SelfCheckInterval time.Duration
 }
 
 // Gateway 是一个运行中的引擎。
@@ -226,7 +228,7 @@ func (e *Env) Config(o Options) Config {
 	return Config{HubURL: e.Hub.Server.URL, TokenFile: e.TokenFile, MinIOEndpoint: e.MinIO.Endpoint(),
 		MinIOAccess: e.MinIO.AccessKey, MinIOSecret: e.MinIO.SecretKey, PrometheusURL: e.Prometheus.URL, PolicyFile: e.PolicyFile,
 		KeysFile: e.KeysFile, StagingDir: firstNonEmpty(o.StagingDir, filepath.Join(e.Dir, "staging")), SigningKey: e.SigningKey,
-		Identity: firstNonEmpty(o.Identity, "gateway-0")}
+		Identity: firstNonEmpty(o.Identity, "gateway-0"), SelfCheckInterval: o.SelfCheckInterval}
 }
 
 // Build 用环境中的依赖构造引擎（不启动）。
@@ -262,6 +264,8 @@ type Config struct {
 	SigningKey    []byte `json:"signingKey"`
 	Identity      string `json:"identity"`
 	Kubeconfig    string `json:"kubeconfig"`
+	// SelfCheckInterval 为零时取 1 秒
+	SelfCheckInterval time.Duration `json:"selfCheckInterval"`
 }
 
 // Build 构造引擎及其依赖。
@@ -295,6 +299,10 @@ func Build(t testing.TB, rc *rest.Config, c Config, clk clock.Clock, fault func(
 		t.Fatal(err)
 	}
 	m := metrics.New("test")
+	selfCheck := c.SelfCheckInterval
+	if selfCheck == 0 {
+		selfCheck = time.Second
+	}
 	var eng *engine.Engine
 	execs, err := executor.Registry(&executor.Deps{Kube: kc, Catalog: cat, Policy: func() *policy.Policy { return eng.Policy() },
 		GitHub: app, Now: func() time.Time { return clk.Now().UTC() }, Poll: 100 * time.Millisecond})
@@ -304,7 +312,7 @@ func Build(t testing.TB, rc *rest.Config, c Config, clk clock.Clock, fault func(
 	eng, err = engine.New(engine.Config{
 		Cluster: Cluster, Namespace: testenv.Namespace, Identity: c.Identity, NodeName: "gateway-node", LeaseName: LeaseName, Version: "test",
 		PolicyFile: c.PolicyFile, KeysFile: c.KeysFile, AdmissionPolicyPrefix: Prefix, MaxConcurrent: 4,
-		SafetyInterval: time.Second, PullWait: time.Second, PushInterval: 300 * time.Millisecond, FlushInterval: 500 * time.Millisecond,
+		SafetyInterval: time.Second, SelfCheckInterval: selfCheck, PullWait: time.Second, PushInterval: 300 * time.Millisecond, FlushInterval: 500 * time.Millisecond,
 		MaxClockSkew: 5 * time.Second, ThrottleHold: time.Minute,
 		LeaseDuration: 4 * time.Second, RenewDeadline: 3 * time.Second, RetryPeriod: 500 * time.Millisecond, Fault: fault,
 	}, engine.Deps{Kube: kc, Hub: hub, Catalog: cat, Executors: execs, Audit: chain, Verify: vc, Metrics: m, Clock: clk, GitHub: app})

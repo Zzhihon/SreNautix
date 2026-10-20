@@ -31,7 +31,7 @@ gateway 是被管集群中唯一的写身份。RBAC 只能按"资源 × 动词"�
 
    所有修改都只允许新增或改变 `srenautix.io/execution-id` 注解（32 位小写十六进制），标签、属主、finalizer 与其他注解不变。"其余字段不变"按资源逐个列出字段比较；`fields_test.go` 用 `test/crds/` 中固定版本的 CRD 与 k8s.io/api 的类型核对列表覆盖了全部字段。
 5. **工作流模板白名单**：模板名称与参数约束来自 Git 中的 gateway 策略（`workflow_templates`），不在动作目录中。`srenautix-spoke admission workflow-allowlist --policy=<策略文件>` 生成 `workflow-allowlist` 策略：模板必须在白名单中，参数恰好是白名单中的名称，取值满足 `enum`、`pattern`、`max_length`。模板内容的 sha256 与 ServiceAccount 由 gateway 在执行前核对。
-6. **自检**：gateway 在启动时、每 15 秒、每次执行前，为启用动作用到的每个策略提交一次带探针标签的 `dryRun=All` ActionExecution 创建请求，并要求被该策略拒绝。任何一个被放行（策略或 Binding 被删除、Binding 改成 Warn 或 Audit），gateway 转为只提议。
+6. **自检**：gateway 在启动时、按 ADR 0024 的周期、每次执行前，为启用动作用到的每个策略提交一次带探针标签的 `dryRun=All` ActionExecution 创建请求，并要求被该策略拒绝。任何一个被放行（策略或 Binding 被删除、Binding 改成 Warn 或 Audit），gateway 转为只提议。
 7. **测试**：`internal/spoke/gateway/admission` 在 envtest 的 kube-apiserver 1.37 上安装生成结果（具体用户名与前缀），以 gateway 身份逐项验证允许与拒绝的写入、冻结与 ConfigMap 缺失时的拒绝、探针在冻结时仍被拒绝而普通 ActionExecution 放行。
 
 ## 结果

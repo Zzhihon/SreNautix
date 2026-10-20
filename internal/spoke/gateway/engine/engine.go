@@ -47,11 +47,14 @@ type Config struct {
 	// RequireWebAuthnForH 对应合规配置。
 	RequireWebAuthnForH bool
 	MaxConcurrent       int
-	// SafetyInterval 是自检、熔断开关、时钟偏差与心跳的周期；PullWait 是长轮询的等待时长。
+	// SafetyInterval 是熔断开关、时钟偏差、策略重新加载与心跳的周期；PullWait 是长轮询的等待时长。
 	SafetyInterval time.Duration
-	PullWait       time.Duration
-	PushInterval   time.Duration
-	FlushInterval  time.Duration
+	// SelfCheckInterval 是周期性准入自检的间隔（ADR 0024）。启动时、启用的准入策略集合变化时、上一次自检失败之后的每个安全检查周期，
+	// 以及每次执行之前，自检都会立即进行，不受这个间隔限制。
+	SelfCheckInterval time.Duration
+	PullWait          time.Duration
+	PushInterval      time.Duration
+	FlushInterval     time.Duration
 	// MaxClockSkew 超过时只提议（DESIGN §9.4：5 秒）。
 	MaxClockSkew time.Duration
 	// ThrottleHold 是收到 429 之后保持只提议的时长。
@@ -94,6 +97,7 @@ type Engine struct {
 	softPaused  bool
 	leader      bool
 	lastSkew    time.Duration
+	selfCheck   selfCheckResult
 
 	q        *queue
 	running  sync.WaitGroup
@@ -107,7 +111,7 @@ func New(cfg Config, d Deps) (*Engine, error) {
 	if cfg.Cluster == "" || cfg.Namespace == "" || cfg.Identity == "" || cfg.LeaseName == "" || cfg.AdmissionPolicyPrefix == "" {
 		return nil, errors.New("engine: cluster, namespace, identity, lease name and admission policy prefix are required")
 	}
-	if cfg.MaxConcurrent <= 0 || cfg.SafetyInterval <= 0 || cfg.PullWait < 0 || cfg.PushInterval <= 0 || cfg.FlushInterval <= 0 ||
+	if cfg.MaxConcurrent <= 0 || cfg.SafetyInterval <= 0 || cfg.SelfCheckInterval <= 0 || cfg.PullWait < 0 || cfg.PushInterval <= 0 || cfg.FlushInterval <= 0 ||
 		cfg.MaxClockSkew <= 0 || cfg.LeaseDuration <= 0 || cfg.RenewDeadline <= 0 || cfg.RetryPeriod <= 0 {
 		return nil, errors.New("engine: intervals and limits must be positive")
 	}
