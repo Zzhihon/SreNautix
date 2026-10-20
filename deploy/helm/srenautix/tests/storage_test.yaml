@@ -35,19 +35,19 @@ tests:
           value: srenautix_server
       - equal:
           path: spec.managed.roles[0].passwordSecret.name
-          value: t-srenautix-pg-server
+          value: t-srenautix-pg-role-server
       - equal:
           path: spec.managed.roles[1].name
           value: srenautix_worker
       - equal:
           path: spec.managed.roles[1].passwordSecret.name
-          value: t-srenautix-pg-worker
+          value: t-srenautix-pg-role-worker
 
   - it: 生成的密码 Secret 在卸载时保留
     template: templates/database.yaml
     set:
       profile: observe
-    documentSelector: {path: metadata.name, value: t-srenautix-pg-server}
+    documentSelector: {path: metadata.name, value: t-srenautix-pg-role-server}
     asserts:
       - isKind: {of: Secret}
       - equal: {path: type, value: kubernetes.io/basic-auth}

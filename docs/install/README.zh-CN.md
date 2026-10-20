@@ -36,7 +36,7 @@ SreNautix 以一个 Helm chart 发布：`oci://ghcr.io/zzhihon/charts/srenautix`
 | `<release>-ingest-tokens` | 每个告警接入源一个 bearer token（`ingest.sources[].id` 为键） | server | `ingest.existingSecret` |
 | `<release>-audit-key` | 治理审计链检查点签名密钥（键 `private.pem`，Ed25519） | server | `secrets.auditSigningKey.existingSecret` |
 | `<release>-gateway-audit-key` | 执行审计链检查点签名密钥（键 `private.pem`，Ed25519） | gateway | `secrets.gatewayAuditSigningKey.existingSecret` |
-| `<release>-pg-<角色>` | CNPG 模式下 server、worker 库角色的口令 | 对应角色 | `database.cnpg.passwordSecrets.<角色>` |
+| `<release>-pg-role-<角色>` | CNPG 模式下 server、worker 库角色的口令（自定义名称不能与 CNPG 占用的 `<cluster>-server`、`-ca`、`-replication`、`-app`、`-superuser` 重名） | 对应角色 | `database.cnpg.passwordSecrets.<角色>` |
 | `<release>-minio-root`、`<release>-minio-audit-<角色>` | 审计用 MinIO 的管理员与 server、gateway 的写入账号 | MinIO、server、gateway | 改用外部 S3（`audit.sink=s3`） |
 
 **GitOps 部署**：Argo CD 等工具渲染 Helm 时 `lookup` 返回空，chart 每次渲染都会生成新的随机值，每次同步都会轮换 token 与签名密钥。这类部署必须为上表的前五项提供已存在的 Secret（例如 SealedSecret）。`serviceTokens.existingSecret` 与 `callers.existingSecret` 必须同时提供，`callers.yaml` 中的 sha256 与 token 对应，格式见 `apps/srenautix/src/identity/callers.ts`：

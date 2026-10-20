@@ -67,10 +67,10 @@ database:
     host: pg.example.internal
     sslmode: verify-full
     caSecret: srenautix-pg-ca            # 键 ca.crt
+    # 数据库由 CNPG 管理时，不要用 <cluster>-server、<cluster>-app 等 CNPG 自己占用的名称
     passwordSecrets:
-      server: srenautix-pg-server        # 键 password
-      worker: srenautix-pg-worker
-      mcp: srenautix-pg-mcp
+      server: srenautix-db-server        # 键 password
+      worker: srenautix-db-worker
     adminSecret: srenautix-pg-admin      # 键 username、password；chart 用它运行 db bootstrap Job
 ```
 

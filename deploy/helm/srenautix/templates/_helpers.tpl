@@ -148,11 +148,13 @@ priorityClassName: {{ . }}
 {{- end -}}
 {{- end -}}
 
-{{/* 某个库角色的密码 Secret 名称；调用方式：include "srenautix.pg.passwordSecret" (dict "ctx" $ "role" "server") */}}
+{{/* 某个库角色的密码 Secret 名称；调用方式：include "srenautix.pg.passwordSecret" (dict "ctx" $ "role" "server")
+     CNPG 自己占用 <cluster>-server（服务端 TLS 证书）、<cluster>-ca、<cluster>-replication、<cluster>-app、<cluster>-superuser，
+     角色密码用 <cluster>-role-<角色>，不与之重名 */}}
 {{- define "srenautix.pg.passwordSecret" -}}
 {{- $db := .ctx.Values.database -}}
 {{- if eq $db.mode "cnpg" -}}
-{{- default (printf "%s-%s" (include "srenautix.pg.clusterName" .ctx) .role) (index $db.cnpg.passwordSecrets .role) -}}
+{{- default (printf "%s-role-%s" (include "srenautix.pg.clusterName" .ctx) .role) (index $db.cnpg.passwordSecrets .role) -}}
 {{- else -}}
 {{- index $db.external.passwordSecrets .role -}}
 {{- end -}}

@@ -90,6 +90,13 @@ tests:
     asserts:
       - failedTemplate: {errorPattern: 必须设置 database.external.host}
 
+  - it: CNPG 角色密码 Secret 不能与 CNPG 自己的 Secret 重名
+    set:
+      profile: observe
+      database.cnpg.passwordSecrets.server: t-srenautix-pg-server
+    asserts:
+      - failedTemplate: {errorPattern: 与 CNPG 自己管理的 Secret 重名}
+
   - it: 外部 PostgreSQL 使用 verify-full 时必须给出 CA
     set:
       profile: observe

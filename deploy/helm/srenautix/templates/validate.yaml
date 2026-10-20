@@ -72,6 +72,16 @@
 {{- if and (lt (int $v.database.cnpg.instances) 2) (not $v.database.cnpg.allowSingleInstance) }}
 {{- fail "database.cnpg.instances 至少为 2（设计 §15.2）；单实例需要显式设置 database.cnpg.allowSingleInstance=true" }}
 {{- end }}
+{{- $cluster := include "srenautix.pg.clusterName" . }}
+{{- $reserved := list }}
+{{- range $suffix := list "ca" "server" "replication" "app" "superuser" }}
+{{- $reserved = append $reserved (printf "%s-%s" $cluster $suffix) }}
+{{- end }}
+{{- range $role, $name := $v.database.cnpg.passwordSecrets }}
+{{- if has $name $reserved }}
+{{- fail (printf "database.cnpg.passwordSecrets.%s=%s 与 CNPG 自己管理的 Secret 重名（%s），换一个名称" $role $name (join "、" $reserved)) }}
+{{- end }}
+{{- end }}
 {{- else }}
 {{- if not $v.database.external.host }}
 {{- fail "database.mode=external 时必须设置 database.external.host" }}

@@ -28,18 +28,19 @@ spec:
   matchConditions:
     - name: gateway-only
       expression: request.userInfo.username == {{ $username | quote }}
+  # request 中为空的 subResource、name、namespace 不出现在 CEL 对象里，直接访问会求值失败并拒绝请求，统一用 ?. 读取
   variables:
     - name: target
       expression: >-
         request.resource.group + '/' + request.resource.resource +
-        (request.subResource != '' ? '/' + request.subResource : '')
+        (request.?subResource.orValue('') != '' ? '/' + request.subResource : '')
     - name: ownRecord
       expression: >-
         variables.target in ['srenautix.io/actionexecutions', 'srenautix.io/actionexecutions/status',
         'coordination.k8s.io/leases']
     - name: bookkeeping
       expression: >-
-        (variables.ownRecord && request.namespace == {{ .Release.Namespace | quote }}) ||
+        (variables.ownRecord && request.?namespace.orValue('') == {{ .Release.Namespace | quote }}) ||
         variables.target in ['/events', 'events.k8s.io/events',
         'authorization.k8s.io/selfsubjectaccessreviews', 'authorization.k8s.io/selfsubjectrulesreviews']
   validations:
@@ -49,9 +50,9 @@ spec:
         !(variables.target in ['/secrets', '/serviceaccounts', '/serviceaccounts/token'])
       message: gateway may never write admission configuration, RBAC, Secrets or ServiceAccount tokens
     - expression: >-
-        !(variables.target == '/configmaps' && request.name == 'srenautix-freeze')
+        !(variables.target == '/configmaps' && request.?name.orValue('') == 'srenautix-freeze')
       message: gateway may never modify the srenautix-freeze ConfigMap
-    - expression: "!variables.ownRecord || request.namespace == '{{ .Release.Namespace }}'"
+    - expression: "!variables.ownRecord || request.?namespace.orValue('') == '{{ .Release.Namespace }}'"
       message: gateway may only write ActionExecutions and Leases in its own namespace
     - expression: variables.target in {{ $writable }}
       messageExpression: "'gateway may only write resources in the action catalog, got ' + variables.target"
