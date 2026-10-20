@@ -500,6 +500,12 @@ chains:
             columns:
               - { header: { zh-CN: Job, en: Job }, cel: 'label(row, "job_name")' }
         egress: allow
+  # 发布前后的流量指标：按 Prometheus 客户端库惯例的 http_requests_total 与 http_request_duration_seconds；
+  # 与 release 分开，没有这两个指标的应用只挂 release，在自己的包里写对应的对比卡
+  - id: release-traffic
+    title: { zh-CN: 发布前后的流量, en: Traffic before and after a release }
+    runbook: workload.md
+    cards:
       # 开始之前与之后各自取峰值对比；任何一侧没有点时不可求值
       - id: errors-before-after
         title: { zh-CN: 开始前后的 5xx 比例, en: 5xx ratio before and after the start }

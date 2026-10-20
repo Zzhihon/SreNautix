@@ -173,28 +173,28 @@ tests:
   - {
       name: api 开始之后 5xx 上升,
       eval_time: 30m,
-      card: release/errors-before-after,
+      card: release-traffic/errors-before-after,
       entity: { kind: Deployment, namespace: rel, name: api },
       expect: { verdict: abnormal },
     }
   - {
       name: web 的 5xx 没有变化,
       eval_time: 30m,
-      card: release/errors-before-after,
+      card: release-traffic/errors-before-after,
       entity: { kind: Deployment, namespace: calm, name: web },
       expect: { verdict: normal },
     }
   - {
       name: api 开始之后延迟上升,
       eval_time: 30m,
-      card: release/latency-before-after,
+      card: release-traffic/latency-before-after,
       entity: { kind: Deployment, namespace: rel, name: api },
       expect: { verdict: abnormal },
     }
   - {
       name: web 的延迟没有变化,
       eval_time: 30m,
-      card: release/latency-before-after,
+      card: release-traffic/latency-before-after,
       entity: { kind: Deployment, namespace: calm, name: web },
       expect: { verdict: normal },
     }

@@ -6,13 +6,13 @@ component_types:
     chains: [pod-restarts, pod-pending]
   - id: kubernetes.deployment
     match: { kind: Deployment }
-    chains: [rollout, release, pod-restarts, pod-pending]
+    chains: [rollout, release, release-traffic, pod-restarts, pod-pending]
   - id: kubernetes.statefulset
     match: { kind: StatefulSet }
-    chains: [rollout, release, pod-restarts, pod-pending]
+    chains: [rollout, release, release-traffic, pod-restarts, pod-pending]
   - id: kubernetes.daemonset
     match: { kind: DaemonSet }
-    chains: [rollout, release, pod-restarts, pod-pending]
+    chains: [rollout, release, release-traffic, pod-restarts, pod-pending]
   - id: kubernetes.job
     match: { kind: Job }
     chains: [job]
