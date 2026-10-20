@@ -62,7 +62,7 @@ export function parseTime(raw: string | undefined | null): Date | null {
 
 /** 接入层的一个告警实例（尚未分类与解析实体）。 */
 export interface RawAlert {
-  source: 'alertmanager' | 'grafana' | 'nightingale' | 'generic' | 'reconcile';
+  source: 'alertmanager' | 'grafana' | 'nightingale' | 'generic' | 'reconcile' | 'detector';
   labels: Record<string, string>;
   annotations: Record<string, string>;
   severity: Severity;

@@ -10,6 +10,7 @@ import type { TopologyEdge } from '@srenautix/contract';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { migrateExpand } from '../../src/store/migrate.js';
 import { storeTrack } from '../../src/store/migrations.js';
+import { FirstSeen, objectHealth, type K8sObject } from '../../src/detectors/health.js';
 import { startInformerTopology, type InformerTopology } from '../../src/topology/informer.js';
 import { topologyTrack } from '../../src/topology/migrations.js';
 import { TopologyStore } from '../../src/topology/store.js';
@@ -52,6 +53,7 @@ const READ_RULES = [
   { apiGroups: ['batch'], resources: ['jobs', 'cronjobs'], verbs: ['get', 'list', 'watch'] },
   { apiGroups: ['networking.k8s.io'], resources: ['ingresses', 'networkpolicies'], verbs: ['get', 'list', 'watch'] },
   { apiGroups: ['autoscaling'], resources: ['horizontalpodautoscalers'], verbs: ['get', 'list', 'watch'] },
+  { apiGroups: ['policy'], resources: ['poddisruptionbudgets'], verbs: ['get', 'list', 'watch'] },
 ];
 
 const container = (name: string, extra: Record<string, unknown> = {}) => ({
@@ -321,6 +323,17 @@ describe('内置 informer 拓扑', () => {
     const found = await store.find('c1', 'Pod', 'shop', 'api-7d9f8-b', new Date());
     expect(found).toMatchObject({ key: 'Pod:shop/api-7d9f8-b', tombstone: true });
     expect(await store.find('c1', 'Pod', 'shop', 'api-7d9f8-a', new Date())).toMatchObject({ tombstone: false });
+  });
+
+  it('集群状态检测器的对象：envtest 没有调度器，Pod 停在 Pending；PDB 不进入拓扑，只用于检测（ADR 0105）', async () => {
+    await new Promise((r) => setTimeout(r, 500));
+    const objs = topo.healthObjects();
+    expect(objs).not.toBeNull();
+    const hs = objectHealth(objs as unknown as K8sObject[], new FirstSeen(), Date.now());
+    const pending = hs.filter((h) => h.state === 'pod_pending').map((h) => [h.key, h.owner]);
+    expect(pending).toContainEqual(['Pod:shop/api-7d9f8-a', 'Deployment:shop/api']);
+    const now = await store.at('c1', new Date());
+    expect(now.nodes.some((n) => n.kind === 'PodDisruptionBudget')).toBe(false);
   });
 
   it('两跳邻域从根因出发包含依赖它的工作负载', async () => {

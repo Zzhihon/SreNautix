@@ -1687,8 +1687,9 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
       cluster_id: { $ref: 'common.schema.json#/$defs/ClusterId' },
       source: {
         type: 'string',
-        description: '接入来源。reconcile 表示由 60 秒对账从 Alertmanager API 或 ALERTS 重建',
-        enum: ['alertmanager', 'grafana', 'nightingale', 'generic', 'reconcile'],
+        description:
+          '接入来源。reconcile 表示由 60 秒对账从 Alertmanager API 或 ALERTS 重建；detector 表示集群状态检测器在没有告警规则时合成的告警（ADR 0105）',
+        enum: ['alertmanager', 'grafana', 'nightingale', 'generic', 'reconcile', 'detector'],
       },
       fingerprint: {
         type: 'string',

@@ -92,6 +92,7 @@ export class IncidentEngine {
           now: now.getTime(),
         });
         const before = new Map(previous.map((p) => [p.incident_id, p]));
+        const sources = new Map(alerts.map((a) => [a.alert_id, a.source]));
         const toReport: Incident[] = [];
         for (const inc of result.incidents) {
           const suppressed = await this.d.suppressedAlertIds(
@@ -105,6 +106,17 @@ export class IncidentEngine {
           }
           const prev = before.get(inc.incident_id);
           await this.persist(c, inc, prev);
+          if (!prev && inc.state === 'firing') {
+            // 检测延迟：首个症状到事件创建（验收 p95 ≤ 2 分钟）；最早的成员是检测器发现时记为 detector
+            const first = [...inc.members].sort((a, b) => a.starts_at.localeCompare(b.starts_at))[0];
+            if (first) {
+              const source = sources.get(first.alert_id) === 'detector' ? 'detector' : 'alert';
+              this.d.metrics.incidentDetection.observe(
+                { source },
+                Math.max(0, (now.getTime() - Date.parse(first.starts_at)) / 1000),
+              );
+            }
+          }
           if (inc.state !== 'merged' && (!prev || prev.incident_version !== inc.incident_version)) {
             toReport.push(inc);
             const b = await currentBinding(c, inc.incident_id);

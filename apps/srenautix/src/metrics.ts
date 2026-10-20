@@ -98,6 +98,42 @@ export class ServerMetrics extends BaseMetrics {
     registers: [this.registry],
   });
 
+  readonly detectorLastScan = new Gauge({
+    name: 'srenautix_detector_last_scan_timestamp_seconds',
+    help: '集群状态检测器最近一次收到完整对象状态上报的时间',
+    labelNames: ['cluster_id'] as const,
+    registers: [this.registry],
+  });
+
+  readonly detectorFindings = new Gauge({
+    name: 'srenautix_detector_findings',
+    help: '当前不健康的对象数（未按阈值过滤），按状态',
+    labelNames: ['cluster_id', 'kind'] as const,
+    registers: [this.registry],
+  });
+
+  readonly detectorAlerts = new Counter({
+    name: 'srenautix_detector_alerts_total',
+    help: '检测器合成的告警数，按状态',
+    labelNames: ['cluster_id', 'kind'] as const,
+    registers: [this.registry],
+  });
+
+  readonly detectorScanErrors = new Counter({
+    name: 'srenautix_detector_scan_errors_total',
+    help: '检测器一轮检测失败的次数',
+    labelNames: ['cluster_id'] as const,
+    registers: [this.registry],
+  });
+
+  readonly incidentDetection = new Histogram({
+    name: 'srenautix_incident_detection_seconds',
+    help: '首个症状（最早的成员告警开始时间）到事件创建的时长，按来源（alert：告警规则；detector：集群状态检测器）',
+    labelNames: ['source'] as const,
+    buckets: [10, 30, 60, 90, 120, 180, 300, 600, 1200, 3600],
+    registers: [this.registry],
+  });
+
   readonly incidentRecomputeDuration = new Histogram({
     name: 'srenautix_incident_recompute_duration_seconds',
     help: '一次事件重算与对账的耗时',

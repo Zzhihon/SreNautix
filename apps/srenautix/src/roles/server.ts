@@ -63,6 +63,8 @@ import { migrateWhenReady } from '../store/migrate-when-ready.js';
 import type { OutboxEvent } from '../store/outbox.js';
 import { createPool, type PgConfig } from '../store/pool.js';
 import { startInformerTopology } from '../topology/informer.js';
+import { FirstSeen, objectHealth, type K8sObject } from '../detectors/health.js';
+import { DetectorService, detectorSettings } from '../detectors/service.js';
 import { GitHubApp } from '../github/app.js';
 import { IssueService } from '../github/issues.js';
 import { TopologyOverrides } from '../topology/overrides.js';
@@ -81,6 +83,8 @@ export interface ServerHandle {
   proposals: ProposalService;
   /** 事件 issue（issues.enabled）；关闭时为 null */
   issues: IssueService | null;
+  /** 集群状态检测器（detectors.enabled）；关闭时为 null */
+  detectors: DetectorService | null;
   leader: Leader;
   /** API 实际监听的地址（端口为 0 时由系统分配）。 */
   apiUrl: string;
@@ -768,6 +772,38 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
     });
   }
 
+  // 集群状态检测器（ADR 0105）：单集群时由本进程的 informer 计算对象状态，多集群时由各 reader 上报
+  const detectors = c.detectors.enabled
+    ? new DetectorService(
+        pool,
+        detectorSettings(c.detectors),
+        async (clusterId, alerts) => {
+          await ingest.write(clusterId, 'detector', 'detector', alerts, { detector: alerts.length });
+        },
+        metrics,
+      )
+    : null;
+  if (detectors) {
+    const firstSeen = new FirstSeen();
+    every(
+      parseDuration('detectors.interval', c.detectors.interval),
+      async () => {
+        const objects = informer?.healthObjects() ?? null;
+        if (objects) {
+          const now = Date.now();
+          await detectors.report(
+            c.cluster_id,
+            objectHealth(objects as unknown as K8sObject[], firstSeen, now),
+            true,
+            new Date(now),
+          );
+        }
+        await detectors.scan();
+      },
+      '集群状态检测',
+    );
+  }
+
   const conditions = new ConditionPublisher(pool, 'server', c.cluster_id, metrics);
   const workerConditions = new ConditionPublisher(pool, 'worker', c.cluster_id, metrics);
   every(
@@ -846,6 +882,7 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
     ingest,
     proposals,
     issues,
+    detectors,
     leader,
     apiUrl,
     async stop() {

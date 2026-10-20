@@ -202,6 +202,28 @@ changes:
 
 收敛时 Pod 级告警归到它的工作负载；没有对象的告警（发布流水线、部署后检查）与只落在命名空间上的告警归到它之前最近的一次发布。
 
+## 集群状态检测器
+
+`detectors.enabled` 打开后，server 按阈值把不健康的对象合成为 `source: detector` 的告警（ADR 0105），和告警规则一样收敛与研判；同一对象上同类的告警规则在触发时不合成。对象状态单集群由 server 的 informer 计算，多集群由 reader 上报。
+
+```yaml
+detectors:
+  enabled: true
+  namespaces: ["*"]
+  exclude_namespaces: []
+  pod_init_after: 10m
+  pod_pending_after: 10m
+  rollout_stalled_after: 15m
+  crash_loop_after: 5m
+  pdb_blocked_after: 10m
+  job_failed: true
+  severity: warning
+  interval: 30s
+  equivalent_alerts: {}          # 按状态追加视为同一问题的告警规则名
+```
+
+指标：`srenautix_detector_last_scan_timestamp_seconds{cluster_id}`、`srenautix_detector_findings{cluster_id,kind}`、`srenautix_detector_alerts_total{cluster_id,kind}`、`srenautix_detector_scan_errors_total{cluster_id}`；首个症状到事件创建的时长 `srenautix_incident_detection_seconds{source}`。
+
 ## 变更源
 
 事件引擎把首次触发前 30 分钟内、触及事件组件的变更放进事件（`incident.changes`），并作为根因排序的一项（DESIGN §5）。变更来自配置的变更源。hub 镜像不带 git，变更源只支持托管在 GitHub 上的仓库（`integrations/github`，ADR 0096），经 `github_app` 的安装令牌用 REST API 读取：

@@ -1583,9 +1583,9 @@ export interface Alert {
   alert_id: string;
   cluster_id: ClusterId;
   /**
-   * 接入来源。reconcile 表示由 60 秒对账从 Alertmanager API 或 ALERTS 重建
+   * 接入来源。reconcile 表示由 60 秒对账从 Alertmanager API 或 ALERTS 重建；detector 表示集群状态检测器在没有告警规则时合成的告警（ADR 0105）
    */
-  source: 'alertmanager' | 'grafana' | 'nightingale' | 'generic' | 'reconcile';
+  source: 'alertmanager' | 'grafana' | 'nightingale' | 'generic' | 'reconcile' | 'detector';
   /**
    * 去掉 alertstate、alertgroup、__name__ 之后按键排序，依次写入 key、0xff、value、0xff 的 UTF-8 字节，取 FNV-1a 64 位哈希，16 位小写十六进制；空标签集为 cbf29ce484222325
    */

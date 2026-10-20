@@ -6,6 +6,7 @@ import {
   KubeConfig,
   makeInformer,
   NetworkingV1Api,
+  PolicyV1Api,
   type Informer,
   type KubernetesListObject,
   type KubernetesObject,
@@ -22,6 +23,8 @@ interface Resource {
   kind: string;
   path: string;
   list: () => Promise<KubernetesListObject<KubernetesObject>>;
+  /** 只用于集群状态检测器（ADR 0105），不进入拓扑 */
+  healthOnly?: boolean;
 }
 
 /**
@@ -34,6 +37,7 @@ function resources(kc: KubeConfig): Resource[] {
   const batch = kc.makeApiClient(BatchV1Api);
   const net = kc.makeApiClient(NetworkingV1Api);
   const hpa = kc.makeApiClient(AutoscalingV2Api);
+  const policy = kc.makeApiClient(PolicyV1Api);
   const r = (apiVersion: string, kind: string, path: string, list: () => Promise<unknown>): Resource => ({
     apiVersion,
     kind,
@@ -66,6 +70,12 @@ function resources(kc: KubeConfig): Resource[] {
     r('autoscaling/v2', 'HorizontalPodAutoscaler', '/apis/autoscaling/v2/horizontalpodautoscalers', () =>
       hpa.listHorizontalPodAutoscalerForAllNamespaces(),
     ),
+    {
+      ...r('policy/v1', 'PodDisruptionBudget', '/apis/policy/v1/poddisruptionbudgets', () =>
+        policy.listPodDisruptionBudgetForAllNamespaces(),
+      ),
+      healthOnly: true,
+    },
   ];
 }
 
@@ -122,6 +132,8 @@ export interface InformerTopology {
   ready: Promise<void>;
   /** 最近一次成功写入拓扑的时间（informer 新鲜度，控制台集群页显示）。 */
   lastFlushAt(): Date | null;
+  /** 集群状态检测器用的对象（完整对象，带 status）；首次 list 完成之前为 null */
+  healthObjects(): KubernetesObject[] | null;
   stop(): Promise<void>;
 }
 
@@ -171,6 +183,9 @@ export function startInformerTopology(o: InformerTopologyOptions): InformerTopol
   const collect = (): KubeObject[] => {
     const out: KubeObject[] = [];
     for (const { res, inf } of informers) {
+      if (res.healthOnly) {
+        continue;
+      }
       for (const obj of inf.list()) {
         out.push({ ...(obj as unknown as KubeObject), apiVersion: res.apiVersion, kind: res.kind });
       }
@@ -225,5 +240,29 @@ export function startInformerTopology(o: InformerTopologyOptions): InformerTopol
   };
   o.signal.addEventListener('abort', () => void stop(), { once: true });
 
-  return { ready, lastFlushAt: () => last, stop };
+  const HEALTH_KINDS = new Set([
+    'Pod',
+    'ReplicaSet',
+    'Deployment',
+    'StatefulSet',
+    'DaemonSet',
+    'Job',
+    'PodDisruptionBudget',
+  ]);
+  const healthObjects = (): KubernetesObject[] | null => {
+    if (last === null) {
+      return null;
+    }
+    const out: KubernetesObject[] = [];
+    for (const { res, inf } of informers) {
+      if (HEALTH_KINDS.has(res.kind)) {
+        for (const obj of inf.list()) {
+          out.push({ ...obj, kind: res.kind, apiVersion: res.apiVersion });
+        }
+      }
+    }
+    return out;
+  };
+
+  return { ready, lastFlushAt: () => last, healthObjects, stop };
 }
