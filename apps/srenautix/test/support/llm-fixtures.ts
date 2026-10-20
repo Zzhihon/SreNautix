@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { createServer, type Server, type ServerResponse } from 'node:http';
 import { join, resolve } from 'node:path';
+import { toStreamEvents } from '../../src/llm/replay.js';
 
 // 模型层测试的夹具：test/fixtures/llm/<provider>/<name>.json，内容是服务方实际返回（或官方文档给出）的响应，
 // 由 scripts/record-llm-fixtures.ts 与 scripts/extract-openai-doc-fixtures.ts 生成。
@@ -36,109 +37,8 @@ export interface ReceivedRequest {
  */
 export type ReplayItem = LlmFixture | 'hang' | { fixture: LlmFixture; paceMs?: number; stallAfter?: number };
 
-const PIECE = 24;
-
-function pieces(text: string): string[] {
-  const out: string[] = [];
-  for (let i = 0; i < text.length; i += PIECE) {
-    out.push(text.slice(i, i + PIECE));
-  }
-  return out;
-}
-
-/* eslint-disable @typescript-eslint/no-explicit-any -- 夹具是服务方的原始 JSON */
-/**
- * 把非流式夹具的响应体转成服务方会发出的流式事件（SSE 的 data 部分，按顺序）：
- * Responses 为 response.created、各输出增量、response.completed（或 incomplete）；
- * Chat 为逐块的 delta、带 finish_reason 的块、只有 usage 的块与 [DONE]。
- */
-export function toStreamEvents(path: string, body: any): string[] {
-  const out: unknown[] = [];
-  if (path.endsWith('/responses')) {
-    let seq = 0;
-    out.push({
-      type: 'response.created',
-      sequence_number: seq++,
-      response: { ...body, status: 'in_progress', output: [] },
-    });
-    (body.output ?? []).forEach((item: any, oi: number) => {
-      if (item.type === 'message') {
-        (item.content ?? []).forEach((c: any, ci: number) => {
-          const text = c.type === 'output_text' ? c.text : c.type === 'refusal' ? c.refusal : '';
-          const type = c.type === 'refusal' ? 'response.refusal.delta' : 'response.output_text.delta';
-          for (const d of pieces(text ?? '')) {
-            out.push({ type, item_id: item.id, output_index: oi, content_index: ci, delta: d, sequence_number: seq++ });
-          }
-        });
-      } else if (item.type === 'function_call') {
-        for (const d of pieces(item.arguments ?? '')) {
-          out.push({
-            type: 'response.function_call_arguments.delta',
-            item_id: item.id,
-            output_index: oi,
-            delta: d,
-            sequence_number: seq++,
-          });
-        }
-      } else if (item.type === 'reasoning') {
-        for (const s of item.summary ?? []) {
-          for (const d of pieces(s.text ?? '')) {
-            out.push({
-              type: 'response.reasoning_summary_text.delta',
-              item_id: item.id,
-              output_index: oi,
-              summary_index: 0,
-              delta: d,
-              sequence_number: seq++,
-            });
-          }
-        }
-      }
-    });
-    out.push({
-      type: body.status === 'incomplete' ? 'response.incomplete' : 'response.completed',
-      sequence_number: seq++,
-      response: body,
-    });
-    return out.map((x) => JSON.stringify(x));
-  }
-  const head = {
-    id: body.id,
-    object: 'chat.completion.chunk',
-    created: body.created,
-    model: body.model,
-    system_fingerprint: body.system_fingerprint ?? null,
-  };
-  const choice = body.choices?.[0] ?? {};
-  const msg = choice.message ?? {};
-  const chunk = (delta: unknown, finish: string | null = null) => ({
-    ...head,
-    choices: [{ index: 0, delta, finish_reason: finish, logprobs: null }],
-  });
-  out.push(chunk({ role: 'assistant', content: '' }));
-  for (const d of pieces(msg.reasoning_content ?? '')) {
-    out.push(chunk({ reasoning_content: d }));
-  }
-  for (const d of pieces(msg.content ?? '')) {
-    out.push(chunk({ content: d }));
-  }
-  (msg.tool_calls ?? []).forEach((t: any, i: number) => {
-    out.push(
-      chunk({
-        tool_calls: [{ index: i, id: t.id, type: 'function', function: { name: t.function.name, arguments: '' } }],
-      }),
-    );
-    for (const d of pieces(t.function.arguments ?? '')) {
-      out.push(chunk({ tool_calls: [{ index: i, function: { arguments: d } }] }));
-    }
-  });
-  out.push(chunk({}, choice.finish_reason ?? 'stop'));
-  if (body.usage) {
-    out.push({ ...head, choices: [], usage: body.usage });
-  }
-  return [...out.map((x) => JSON.stringify(x)), '[DONE]'];
-}
-/* eslint-enable @typescript-eslint/no-explicit-any */
+// 流式事件的转换与 llm-replay 子命令共用（src/llm/replay.ts）
+export { toStreamEvents } from '../../src/llm/replay.js';
 
 function isStream(body: string): boolean {
   try {

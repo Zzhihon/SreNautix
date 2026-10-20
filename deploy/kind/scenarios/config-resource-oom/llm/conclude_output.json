@@ -1,0 +1,58 @@
+{
+  "provenance": {
+    "mode": "hand-written",
+    "scenario": "config-resource-oom",
+    "note": "占位符按请求解析，见 apps/srenautix/src/llm/replay.ts"
+  },
+  "output": {
+    "disposition": "act",
+    "hypothesis_id": "h1",
+    "undetermined_reason": null,
+    "situation": "checkout 的新 Pod 内存超限被 OOMKilled，发布卡住",
+    "summary": "根因是 checkout 的配置变更：缓存超过内存上限；提高 checkout 的内存 limit 或调回 CACHE_MB",
+    "recommendations": [
+      {
+        "id": "r1",
+        "kind": "mitigation",
+        "title": "提高 checkout 的内存 limit",
+        "rationale": "内存缓存需要的内存超过当前上限",
+        "steps": [
+          "合并 SreNautix 生成的内存 limit PR",
+          "确认 checkout 不再 OOMKilled"
+        ],
+        "owner": "app",
+        "risk": "low",
+        "risk_note": null,
+        "runbook_ref": null,
+        "action_id": null,
+        "hypothesis_id": "h1",
+        "evidence_refs": [
+          "{{ref:workload/pod-restarts/memory}}",
+          "{{ref:workload/pod-restarts/restarts}}",
+          "{{ref:workload/release/replicasets}}"
+        ]
+      },
+      {
+        "id": "r2",
+        "kind": "root_fix",
+        "title": "按内存上限设置缓存大小",
+        "rationale": "CACHE_MB 应与容器的内存上限一起调整",
+        "steps": [
+          "把 CACHE_MB 与内存 limit 放在同一次变更中评审"
+        ],
+        "owner": "app",
+        "risk": "low",
+        "risk_note": null,
+        "runbook_ref": null,
+        "action_id": null,
+        "hypothesis_id": "h1",
+        "evidence_refs": [
+          "{{ref:workload/pod-restarts/memory}}",
+          "{{ref:workload/pod-restarts/restarts}}",
+          "{{ref:workload/release/replicasets}}"
+        ]
+      }
+    ],
+    "proposals": []
+  }
+}

@@ -406,6 +406,16 @@ worker 认领任务后读取 `GET /v1/research/tasks/{run_id}/context`（worker 
 
 研判运行明细（`GET /v1/runs/{run_id}`）由 worker 持有，server 按研判所属事件的读取作用域转发，并在 `evidence` 前面合并该事件版本的阶段 A 卡（阶段 A 卡保留报告中的编号，worker 的检查卡编号在其后）。
 
+## 录制回放的模型服务
+
+`srenautix llm-replay --dir <录制目录> [--listen :8080]` 是同一镜像中的 OpenAI 兼容服务（`POST /v1/responses`、`/v1/chat/completions`，支持流式），kind-e2e 用它代替真实模型（`deploy/kind/scenarios/<场景>/llm/`）。
+
+- 按结构化输出的名称与第几次出现取录制：`<名称>-<n>.json`，没有时取 `<名称>.json`。名称是 `hypothesize_output`、`check_judgement`、`conclude_output` 等。都没有时返回 503，worker 视为模型不可用。
+- 录制可以是录下的 `{status, body}`，也可以是手写的 `{output: {...}}`。
+- 结构化输出里整串为占位符的字符串按本次请求解析：`{{ref:<卡片 id>[@<实体>]}}` 解析为提示中这张卡的 `card:N`，`{{component:<正则>}}` 解析为第一个匹配的组件键，`{{enum:<值>}}` 只在该值出现在 schema 枚举里时保留。解析不出时删除所在的数组元素。
+- `--record --upstream <base_url> [--api-key-file <文件>]` 以非流式转发到上游，并把响应写成 `<名称>-<n>.json`。
+- `GET /healthz` 返回录制数、已回放与缺失的键。
+
 ## 本地运行与控制台 e2e
 
 控制台的 Playwright e2e 可以这样启动一个真实的 server：

@@ -1,0 +1,11 @@
+{
+  "provenance": {
+    "mode": "hand-written",
+    "scenario": "release-stuck-init",
+    "note": "占位符按请求解析，见 apps/srenautix/src/llm/replay.ts"
+  },
+  "output": {
+    "outcome": "supports",
+    "summary": "新 ReplicaSet 的 Pod 停在 wait-for-migrations init 容器，旧 ReplicaSet 的 Pod 就绪并继续服务"
+  }
+}

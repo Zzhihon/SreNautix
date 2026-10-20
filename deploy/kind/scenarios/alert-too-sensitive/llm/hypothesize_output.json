@@ -1,0 +1,31 @@
+{
+  "provenance": {
+    "mode": "hand-written",
+    "scenario": "alert-too-sensitive",
+    "note": "占位符按请求解析，见 apps/srenautix/src/llm/replay.ts"
+  },
+  "output": {
+    "hypotheses": [
+      {
+        "id": "h1",
+        "parent_id": null,
+        "root_component": "{{component:^(Deployment:shop/api|Pod:shop/api-.+)$}}",
+        "mechanism": "api 的 db-check 边车容器正常退出一次并由 kubelet 重启，业务容器不受影响；告警规则对任何一次重启立即以 critical 触发，过于敏感",
+        "supporting": [
+          "{{ref:workload/pod-restarts/restarts}}"
+        ],
+        "refuting": []
+      }
+    ],
+    "next_checks": [
+      {
+        "hypothesis_id": "h1",
+        "type": "tool",
+        "template": "{{enum:kube_workload_pods}}",
+        "args_json": "{\"namespace\": \"shop\", \"kind\": \"Deployment\", \"name\": \"api\"}",
+        "refutes_if": "api 的 Pod 不就绪或业务容器在重启",
+        "purpose": "确认重启只发生在 db-check 容器，Pod 仍然就绪"
+      }
+    ]
+  }
+}

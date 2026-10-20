@@ -1,0 +1,11 @@
+{
+  "provenance": {
+    "mode": "hand-written",
+    "scenario": "release-bad-image",
+    "note": "占位符按请求解析，见 apps/srenautix/src/llm/replay.ts"
+  },
+  "output": {
+    "outcome": "supports",
+    "summary": "新 ReplicaSet 的 api 容器 CrashLoopBackOff，重启次数持续增加，旧版本 Pod 就绪"
+  }
+}

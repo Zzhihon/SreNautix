@@ -1,0 +1,35 @@
+{
+  "provenance": {
+    "mode": "hand-written",
+    "scenario": "alert-too-sensitive",
+    "note": "占位符按请求解析，见 apps/srenautix/src/llm/replay.ts"
+  },
+  "output": {
+    "disposition": "ignore",
+    "hypothesis_id": "h1",
+    "undetermined_reason": null,
+    "situation": "api 的 db-check 容器重启过一次，业务不受影响",
+    "summary": "不需要处理业务：一次正常的边车重启触发了过于敏感的 critical 告警；建议调整 ShopPodRestarted 的持续时间与严重度",
+    "recommendations": [
+      {
+        "id": "r1",
+        "kind": "prevention",
+        "title": "调整 ShopPodRestarted 的阈值、持续时间与严重度",
+        "rationale": "单次重启不应以 critical 立即告警",
+        "steps": [
+          "为规则加 for 并降为 warning，或改为重启次数超过阈值时告警"
+        ],
+        "owner": "platform",
+        "risk": "low",
+        "risk_note": null,
+        "runbook_ref": null,
+        "action_id": null,
+        "hypothesis_id": "h1",
+        "evidence_refs": [
+          "{{ref:workload/pod-restarts/restarts}}"
+        ]
+      }
+    ],
+    "proposals": []
+  }
+}

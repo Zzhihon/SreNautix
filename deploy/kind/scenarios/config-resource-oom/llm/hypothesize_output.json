@@ -1,0 +1,33 @@
+{
+  "provenance": {
+    "mode": "hand-written",
+    "scenario": "config-resource-oom",
+    "note": "占位符按请求解析，见 apps/srenautix/src/llm/replay.ts"
+  },
+  "output": {
+    "hypotheses": [
+      {
+        "id": "h1",
+        "parent_id": null,
+        "root_component": "{{component:^Deployment:shop/checkout$}}",
+        "mechanism": "checkout 的 CACHE_MB 调大后内存缓存超过容器的内存上限，新 Pod 启动时被 OOMKilled 并反复重启",
+        "supporting": [
+          "{{ref:workload/pod-restarts/memory}}",
+          "{{ref:workload/pod-restarts/restarts}}",
+          "{{ref:workload/release/replicasets}}"
+        ],
+        "refuting": []
+      }
+    ],
+    "next_checks": [
+      {
+        "hypothesis_id": "h1",
+        "type": "tool",
+        "template": "{{enum:kube_workload_pods}}",
+        "args_json": "{\"namespace\": \"shop\", \"kind\": \"Deployment\", \"name\": \"checkout\"}",
+        "refutes_if": "checkout 的 Pod 没有因 OOMKilled 重启",
+        "purpose": "确认新 Pod 是否因 OOMKilled 重启"
+      }
+    ]
+  }
+}

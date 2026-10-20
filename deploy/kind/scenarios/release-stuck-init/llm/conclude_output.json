@@ -1,0 +1,59 @@
+{
+  "provenance": {
+    "mode": "hand-written",
+    "scenario": "release-stuck-init",
+    "note": "占位符按请求解析，见 apps/srenautix/src/llm/replay.ts"
+  },
+  "output": {
+    "disposition": "act",
+    "hypothesis_id": "h1",
+    "undetermined_reason": null,
+    "situation": "发布 r2 卡住：新 Pod 等待失败的迁移，旧版本仍在服务",
+    "summary": "根因是发布 r2：迁移 Job 失败，新 Pod 停在等待迁移的 init 容器，发布无法完成；把发布输入退回正在服务的版本 r1",
+    "recommendations": [
+      {
+        "id": "r1",
+        "kind": "mitigation",
+        "title": "把发布输入退回正在服务的版本",
+        "rationale": "旧版本 Pod 就绪且与当前数据库兼容，退回后发布可以完成",
+        "steps": [
+          "合并 SreNautix 生成的回退 PR，等待 Argo CD 同步",
+          "确认新 Pod 不再停在 init 容器"
+        ],
+        "owner": "app",
+        "risk": "low",
+        "risk_note": null,
+        "runbook_ref": null,
+        "action_id": null,
+        "hypothesis_id": "h1",
+        "evidence_refs": [
+          "{{ref:workload/release/init-waiting}}",
+          "{{ref:workload/release/migration-jobs}}",
+          "{{ref:workload/release/replicasets}}"
+        ]
+      },
+      {
+        "id": "r2",
+        "kind": "root_fix",
+        "title": "修复迁移脚本后重新发布",
+        "rationale": "r2 的迁移引用了不存在的表",
+        "steps": [
+          "修正迁移脚本并在预发环境验证",
+          "重新提交发布"
+        ],
+        "owner": "app",
+        "risk": "medium",
+        "risk_note": null,
+        "runbook_ref": null,
+        "action_id": null,
+        "hypothesis_id": "h1",
+        "evidence_refs": [
+          "{{ref:workload/release/init-waiting}}",
+          "{{ref:workload/release/migration-jobs}}",
+          "{{ref:workload/release/replicasets}}"
+        ]
+      }
+    ],
+    "proposals": []
+  }
+}

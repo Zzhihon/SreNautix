@@ -1,0 +1,38 @@
+{
+  "provenance": {
+    "mode": "hand-written",
+    "scenario": "release-bad-image",
+    "note": "占位符按请求解析，见 apps/srenautix/src/llm/replay.ts"
+  },
+  "output": {
+    "disposition": "act",
+    "hypothesis_id": "h1",
+    "undetermined_reason": null,
+    "situation": "发布 r3 的 api 新 Pod 反复崩溃，发布卡住，旧版本仍在服务",
+    "summary": "根因是发布 r3 的镜像：新 Pod 启动后立即退出；把发布输入退回正在服务的镜像",
+    "recommendations": [
+      {
+        "id": "r1",
+        "kind": "mitigation",
+        "title": "把发布输入退回正在服务的镜像",
+        "rationale": "旧版本镜像的 Pod 正常服务",
+        "steps": [
+          "合并 SreNautix 生成的回退 PR，等待 Argo CD 同步",
+          "确认 api 的 Pod 只运行一个版本且全部就绪"
+        ],
+        "owner": "app",
+        "risk": "low",
+        "risk_note": null,
+        "runbook_ref": null,
+        "action_id": null,
+        "hypothesis_id": "h1",
+        "evidence_refs": [
+          "{{ref:workload/pod-restarts/restarts}}",
+          "{{ref:workload/release/replicasets}}",
+          "{{ref:workload/rollout/deployment}}"
+        ]
+      }
+    ],
+    "proposals": []
+  }
+}

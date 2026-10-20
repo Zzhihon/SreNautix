@@ -1,0 +1,11 @@
+{
+  "provenance": {
+    "mode": "hand-written",
+    "scenario": "config-resource-oom",
+    "note": "占位符按请求解析，见 apps/srenautix/src/llm/replay.ts"
+  },
+  "output": {
+    "outcome": "supports",
+    "summary": "checkout 新 Pod 的上一次退出原因是 OOMKilled，重启次数持续增加"
+  }
+}

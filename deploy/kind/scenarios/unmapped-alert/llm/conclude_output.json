@@ -1,0 +1,36 @@
+{
+  "provenance": {
+    "mode": "hand-written",
+    "scenario": "unmapped-alert",
+    "note": "占位符按请求解析，见 apps/srenautix/src/llm/replay.ts"
+  },
+  "output": {
+    "disposition": "act",
+    "hypothesis_id": "h1",
+    "undetermined_reason": null,
+    "situation": "ShopCatalogStale 没有映射到组件，商品目录由 api 提供",
+    "summary": "告警没有映射到拓扑：商品目录由 api 提供；为 ShopCatalogStale 增加拓扑覆盖或告警目录条目",
+    "recommendations": [
+      {
+        "id": "r1",
+        "kind": "prevention",
+        "title": "为 ShopCatalogStale 增加拓扑映射",
+        "rationale": "告警只带 service 标签，领域包与拓扑覆盖都没有它",
+        "steps": [
+          "合并 SreNautix 生成的告警目录或拓扑覆盖 PR"
+        ],
+        "owner": "platform",
+        "risk": "low",
+        "risk_note": null,
+        "runbook_ref": null,
+        "action_id": null,
+        "hypothesis_id": "h1",
+        "evidence_refs": [
+          "{{ref:workload/pod-restarts/restarts}}",
+          "{{ref:workload/rollout/deployment}}"
+        ]
+      }
+    ],
+    "proposals": []
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "provenance": {
+    "mode": "hand-written",
+    "scenario": "alert-too-sensitive",
+    "note": "占位符按请求解析，见 apps/srenautix/src/llm/replay.ts"
+  },
+  "output": {
+    "outcome": "supports",
+    "summary": "api 的 Pod 全部就绪，只有 db-check 容器重启过一次，业务容器没有重启"
+  }
+}

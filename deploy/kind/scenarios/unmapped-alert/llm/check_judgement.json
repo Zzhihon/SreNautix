@@ -1,0 +1,11 @@
+{
+  "provenance": {
+    "mode": "hand-written",
+    "scenario": "unmapped-alert",
+    "note": "占位符按请求解析，见 apps/srenautix/src/llm/replay.ts"
+  },
+  "output": {
+    "outcome": "supports",
+    "summary": "api 的 Pod 正在运行，商品目录由 api 提供"
+  }
+}

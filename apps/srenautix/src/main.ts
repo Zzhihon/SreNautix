@@ -12,6 +12,7 @@ import { logger } from './log.js';
  *   main.js audit verify --config=…
  *   main.js eval [import-seed] …（参数见 eval/cli.ts 与 docs/eval/）
  *   main.js pack lint|lock|test|record|doctor …（packages/packs-sdk 的 runPackCli，见 docs/packs/）
+ *   main.js llm-replay --dir <录制目录> [--listen :8080] [--record --upstream <base_url>]（llm/replay.ts）
  *
  * 每个角色的实现是 roles/<role>.js 的 run(argv)；worker 与 mcp 由 hub-worker 维护。
  */
@@ -41,6 +42,12 @@ async function main(): Promise<void> {
   if (process.argv[2] === 'pack') {
     const { runPackCli } = await import('@srenautix/packs-sdk');
     process.exit(await runPackCli(process.argv.slice(3)));
+  }
+  // 录制回放的模型服务（kind-e2e 与离线演示，llm/replay.ts）
+  if (process.argv[2] === 'llm-replay') {
+    const { runLlmReplay } = await import('./llm/replay.js');
+    await runLlmReplay(process.argv.slice(3));
+    process.exit(0);
   }
   // 运维子命令各有自己的选项（db bootstrap --admin-password-file、audit verify --source），由 commands.ts 按子命令严格解析
   if (process.argv[2] !== undefined && !process.argv[2].startsWith('-')) {

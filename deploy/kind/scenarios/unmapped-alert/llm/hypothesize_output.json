@@ -1,0 +1,32 @@
+{
+  "provenance": {
+    "mode": "hand-written",
+    "scenario": "unmapped-alert",
+    "note": "占位符按请求解析，见 apps/srenautix/src/llm/replay.ts"
+  },
+  "output": {
+    "hypotheses": [
+      {
+        "id": "h1",
+        "parent_id": null,
+        "root_component": "{{component:^(Deployment:shop/api|Service:shop/api)$}}",
+        "mechanism": "ShopCatalogStale 只带 service=catalog 标签，没有映射到拓扑；商品目录由 api 提供，目录过期指向 api",
+        "supporting": [
+          "{{ref:workload/pod-restarts/restarts}}",
+          "{{ref:workload/rollout/deployment}}"
+        ],
+        "refuting": []
+      }
+    ],
+    "next_checks": [
+      {
+        "hypothesis_id": "h1",
+        "type": "tool",
+        "template": "{{enum:kube_workload_pods}}",
+        "args_json": "{\"namespace\": \"shop\", \"kind\": \"Deployment\", \"name\": \"api\"}",
+        "refutes_if": "api 不存在或不提供商品目录",
+        "purpose": "确认提供商品目录的 api 工作负载"
+      }
+    ]
+  }
+}
