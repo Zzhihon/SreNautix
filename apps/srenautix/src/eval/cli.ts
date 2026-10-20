@@ -53,7 +53,9 @@ function layers(cfg: EvalConfig, metrics: WorkerMetrics) {
     const runtimes = buildRuntimes(
       [
         {
-          route: r.route,
+          // 故障域描述研判时刻路由对事件所在组件的依赖（事件涉及故障域时提前熔断）；回放的是历史事件，
+          // 路由此刻的健康与它无关，评测不按故障域熔断（ADR 0110）
+          route: { ...r.route, failure_domain: [] },
           apiKey: r.apiKey,
           state: { profile: null, calibration: null, fingerprint: null },
           timeouts: r.timeouts,

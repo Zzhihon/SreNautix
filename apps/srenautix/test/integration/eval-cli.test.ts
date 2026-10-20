@@ -31,7 +31,7 @@ afterAll(async () => {
   rmSync(ROOT, { recursive: true, force: true });
 });
 
-function config(name: string, baseUrl: string): string {
+function config(name: string, baseUrl: string, failureDomain: string[] = []): string {
   const path = join(ROOT, `${name}.yaml`);
   writeFileSync(
     path,
@@ -44,6 +44,7 @@ function config(name: string, baseUrl: string): string {
       '    model: qwen3-1.7b',
       '    dialect_profile: llamacpp',
       '    price: { currency: CNY, input_per_mtok: 0, output_per_mtok: 0, cached_input_per_mtok: null }',
+      `    failure_domain: ${JSON.stringify(failureDomain)}`,
       '    in_domain: true',
       '    tier: large',
       '    retention_terms: local',
@@ -96,6 +97,31 @@ describe('srenautix eval', () => {
       .trim()
       .split('\n');
     expect(runs).toHaveLength(3);
+  });
+
+  it('路由的故障域不参与评测：事件在故障域内时照常研判，不只出阶段 A', async () => {
+    process.env.SRENAUTIX_TEST_LLM_KEY = 'local';
+    const server = new ReplayServer();
+    await server.start();
+    server.enqueue(...recorded.responses);
+    await runEvalCli([
+      '--cases',
+      join(ROOT, 'cases'),
+      '--config',
+      config('domain', server.baseUrl, ['Namespace:shop']),
+      '--runs',
+      '3',
+      '--out',
+      join(ROOT, 'reports'),
+      '--name',
+      'domain',
+    ]);
+    await server.stop();
+    const runs = readFileSync(join(ROOT, 'reports', 'domain.runs.jsonl'), 'utf8')
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l) as { state: string });
+    expect(runs.map((r) => r.state)).toEqual(['completed', 'completed', 'completed']);
   });
 
   it('--compare：两份配置各评测一次，输出门禁', async () => {
