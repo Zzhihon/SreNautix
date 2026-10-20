@@ -139,6 +139,11 @@ func (e *Env) write(name string, b []byte) string {
 	return p
 }
 
+// WriteKeys 替换审批人公钥文件，登记给定的通行密钥（gateway 每轮重新读取）。
+func (e *Env) WriteKeys(passkeys ...*testenv.Passkey) {
+	e.write("approver-keys.json", e.Approver.KeysFile(passkeys...))
+}
+
 // WritePolicy 替换策略文件（gateway 每轮重新读取）。
 func (e *Env) WritePolicy(doc string) { e.write("policy.yaml", []byte(doc)) }
 

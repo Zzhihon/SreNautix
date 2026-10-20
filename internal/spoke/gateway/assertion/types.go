@@ -21,7 +21,9 @@ const (
 // 证明类型。
 const (
 	ProofService  = "service_ed25519"
-	ProofWebAuthn = "webauthn_ed25519"
+	ProofWebAuthn = "webauthn"
+	// ProofWebAuthnEd25519 只能用于 alg 为 EdDSA 的凭据。
+	ProofWebAuthnEd25519 = "webauthn_ed25519"
 )
 
 // ChannelAuto 是策略自动批准的渠道；审批人为 "auto:<规则名>"。

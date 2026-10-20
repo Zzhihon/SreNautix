@@ -2,6 +2,7 @@ package assertion
 
 import (
 	"bytes"
+	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/base64"
@@ -32,6 +33,8 @@ const (
 	ErrWebAuthnRPID         = "webauthn_rp_id"
 	ErrWebAuthnFlags        = "webauthn_flags"
 	ErrWebAuthnBadSignature = "webauthn_bad_signature"
+	ErrWebAuthnAlgMismatch  = "webauthn_alg_mismatch"
+	ErrWebAuthnCrossOrigin  = "webauthn_cross_origin"
 )
 
 // VerifyOptions 是签名校验的配置；RequireWebAuthnForH 对应合规配置。
@@ -39,13 +42,14 @@ type VerifyOptions struct {
 	RequireWebAuthnForH bool
 }
 
-// Verified 是签名校验通过的断言。
+// Verified 是签名校验通过的断言。Alg 是实际使用的签名算法（服务签名为 EdDSA，通行密钥取自登记的凭据）。
 type Verified struct {
 	Assertion     Assertion
 	AssertionRaw  json.RawMessage
 	AssertionHash string
 	ProofType     string
 	KeyID         string
+	Alg           string
 	Reauth        *Reauth
 }
 
@@ -110,7 +114,8 @@ func (k *Keyring) Verify(envelope []byte, opts VerifyOptions) (*Verified, error)
 		if err := k.verifyService(v, env.Proof, issued); err != nil {
 			return nil, err
 		}
-	case ProofWebAuthn:
+		v.Alg = AlgEdDSA
+	case ProofWebAuthn, ProofWebAuthnEd25519:
 		if err := k.verifyWebAuthn(v, env.Proof); err != nil {
 			return nil, err
 		}
@@ -163,10 +168,13 @@ func (k *Keyring) verifyService(v *Verified, p Proof, issued time.Time) error {
 	return nil
 }
 
+// clientData 是 CollectedClientData（WebAuthn Level 3 §5.8.1）中校验用到的字段。
 type clientData struct {
-	Type      string `json:"type"`
-	Challenge string `json:"challenge"`
-	Origin    string `json:"origin"`
+	Type        string  `json:"type"`
+	Challenge   string  `json:"challenge"`
+	Origin      string  `json:"origin"`
+	CrossOrigin *bool   `json:"crossOrigin"`
+	TopOrigin   *string `json:"topOrigin"`
 }
 
 // authenticatorData 的标志位（WebAuthn §6.1）。
@@ -182,6 +190,10 @@ func (k *Keyring) verifyWebAuthn(v *Verified, p Proof) error {
 	cred, ok := k.WebAuthn[p.CredentialID]
 	if !ok {
 		return fail(ErrWebAuthnCredential, "credential %q is not registered", p.CredentialID)
+	}
+	// 算法只取自登记的凭据；信封的 type 不参与选择。webauthn_ed25519 只能用于 EdDSA 凭据（ADR 0020）
+	if p.Type == ProofWebAuthnEd25519 && cred.Alg != AlgEdDSA {
+		return fail(ErrWebAuthnAlgMismatch, "proof type %s cannot be used with a %s credential", p.Type, cred.Alg)
 	}
 	if cred.Principal != v.Assertion.ApproverPrincipal {
 		return fail(ErrWebAuthnPrincipal, "credential belongs to %q, assertion names %q", cred.Principal, v.Assertion.ApproverPrincipal)
@@ -207,6 +219,10 @@ func (k *Keyring) verifyWebAuthn(v *Verified, p Proof) error {
 	if !k.Origins[cd.Origin] {
 		return fail(ErrWebAuthnOrigin, "origin %q is not allowed", cd.Origin)
 	}
+	// 控制台不在跨源 iframe 中发起审批
+	if (cd.CrossOrigin != nil && *cd.CrossOrigin) || cd.TopOrigin != nil {
+		return fail(ErrWebAuthnCrossOrigin, "the assertion was made in a cross-origin context")
+	}
 	ad, err := base64.RawURLEncoding.DecodeString(p.AuthenticatorData)
 	if err != nil || len(ad) < 37 {
 		return fail(ErrWebAuthnClientData, "authenticator_data is shorter than 37 bytes")
@@ -219,14 +235,26 @@ func (k *Keyring) verifyWebAuthn(v *Verified, p Proof) error {
 		return fail(ErrWebAuthnFlags, "authenticator flags 0x%02x lack UP or UV", ad[32])
 	}
 	sig, err := base64.RawURLEncoding.DecodeString(p.Signature)
-	if err != nil || len(sig) != ed25519.SignatureSize {
-		return fail(ErrWebAuthnBadSignature, "signature is not a base64url Ed25519 signature")
+	if err != nil {
+		return fail(ErrWebAuthnBadSignature, "signature is not base64url")
 	}
 	cdHash := sha256.Sum256(cdj)
 	msg := append(append([]byte{}, ad...), cdHash[:]...)
-	if !ed25519.Verify(cred.Public, msg, sig) {
-		return fail(ErrWebAuthnBadSignature, "webauthn signature does not verify")
+	switch cred.Alg {
+	case AlgEdDSA:
+		if len(sig) != ed25519.SignatureSize || !ed25519.Verify(cred.Ed25519, msg, sig) {
+			return fail(ErrWebAuthnBadSignature, "EdDSA webauthn signature does not verify")
+		}
+	case AlgES256:
+		// DER 编码的 ECDSA-Sig-Value；VerifyASN1 拒绝非 DER 编码与尾随字节。高 S 与低 S 两种形式都接受：
+		// 平台认证器不做规范化，而执行 ID 由断言哈希派生，签名的可塑性不会产生第二次执行
+		digest := sha256.Sum256(msg)
+		if !ecdsa.VerifyASN1(cred.P256, digest[:], sig) {
+			return fail(ErrWebAuthnBadSignature, "ES256 webauthn signature does not verify")
+		}
+	default:
+		return fail(ErrWebAuthnBadSignature, "credential alg %q is not supported", cred.Alg)
 	}
-	v.KeyID = p.CredentialID
+	v.KeyID, v.Alg = p.CredentialID, cred.Alg
 	return nil
 }

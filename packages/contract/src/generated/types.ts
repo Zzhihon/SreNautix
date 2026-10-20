@@ -640,7 +640,7 @@ export interface ApprovalAssertion {
   expires_at: ApprovalAssertionTimestamp1;
 }
 /**
- * 审批断言及其签名证明。服务签名（service_ed25519）由 server 的服务签名密钥签发；通行密钥签名（webauthn_ed25519）由审批人的 WebAuthn 凭据签发。签名输入与校验步骤见 docs/adr/0020-approval-assertion-format.md。
+ * 审批断言及其签名证明。服务签名（service_ed25519）由 server 的服务签名密钥签发；通行密钥签名（webauthn）由审批人的 WebAuthn 凭据签发，算法（EdDSA 或 ES256）取自登记的凭据。签名输入与校验步骤见 docs/adr/0020-approval-assertion-format.md。
  */
 export interface ApprovalEnvelope {
   assertion: ApprovalAssertion;
@@ -673,17 +673,20 @@ export interface ApprovalEnvelopeReauth {
   session_hash: string;
 }
 /**
- * 通行密钥签名（COSE alg -8，EdDSA/Ed25519）。clientDataJSON 的 challenge 为 sha256(JCS(assertion)) 原始 32 字节的 base64url；签名覆盖 authenticatorData 与 sha256(clientDataJSON) 的拼接。
+ * 通行密钥签名（WebAuthn Level 3 断言）。clientDataJSON 的 type 为 webauthn.get，challenge 为 sha256(JCS(assertion)) 原始 32 字节的 base64url；签名覆盖 authenticatorData 与 sha256(clientDataJSON) 的拼接。签名算法由 approver-keys 中该凭据的 alg 决定：EdDSA 为 64 字节 Ed25519 签名，ES256 为 DER 编码的 ECDSA 签名。type 取 webauthn；webauthn_ed25519 只能用于 alg 为 EdDSA 的凭据，用于其他凭据时拒绝（webauthn_alg_mismatch）。
  */
 export interface ApprovalEnvelopeWebauthnProof {
-  type: 'webauthn_ed25519';
+  type: 'webauthn' | 'webauthn_ed25519';
   credential_id: ApprovalEnvelopeBase64Url;
   authenticator_data: ApprovalEnvelopeBase64Url;
   client_data_json: ApprovalEnvelopeBase64Url;
+  /**
+   * EdDSA：64 字节（86 个字符）；ES256：DER 编码的 ECDSA-Sig-Value，至多 72 字节（96 个字符）。
+   */
   signature: ApprovalEnvelopeBase64Url;
 }
 /**
- * gateway 信任的签名公钥，来自 Git，经 ConfigMap 挂载。service 条目是 server 的服务签名公钥；webauthn 条目是审批人通行密钥的公钥（合规配置）。
+ * gateway 信任的签名公钥，来自 Git，经 ConfigMap 挂载。service 条目是 server 的服务签名公钥（Ed25519）；webauthn 条目是审批人通行密钥的公钥（合规配置），算法为 EdDSA 或 ES256。通行密钥只能经 Git 登记。
  */
 export interface ApproverKeys {
   version: 1;
@@ -718,6 +721,13 @@ export interface ApproverKeys {
           use: 'webauthn';
           credential_id: string;
           principal: string;
+          /**
+           * 凭据的签名算法，对应 COSE alg：EdDSA 为 -8（Ed25519），ES256 为 -7（P-256 上的 ECDSA，SHA-256）。省略时为 EdDSA。
+           */
+          alg?: 'EdDSA' | 'ES256';
+          /**
+           * EdDSA：Ed25519 公钥 32 字节的 base64url（43 个字符）；ES256：P-256 未压缩点 0x04‖X‖Y 共 65 字节的 base64url（87 个字符），必须在曲线上。
+           */
           public_key: string;
         }
     ),
@@ -738,6 +748,13 @@ export interface ApproverKeys {
           use: 'webauthn';
           credential_id: string;
           principal: string;
+          /**
+           * 凭据的签名算法，对应 COSE alg：EdDSA 为 -8（Ed25519），ES256 为 -7（P-256 上的 ECDSA，SHA-256）。省略时为 EdDSA。
+           */
+          alg?: 'EdDSA' | 'ES256';
+          /**
+           * EdDSA：Ed25519 公钥 32 字节的 base64url（43 个字符）；ES256：P-256 未压缩点 0x04‖X‖Y 共 65 字节的 base64url（87 个字符），必须在曲线上。
+           */
           public_key: string;
         }
     )[],

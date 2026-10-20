@@ -53,7 +53,17 @@ gateway:
   max_concurrent: 4
 ```
 
-策略文件（`contract/gateway/v1/gateway-policy.schema.json`）与审批人公钥（`approver-keys.schema.json`）来自 Git，经 ConfigMap 挂载，每 15 秒重新读取；加载失败时保留上一次的内容，条件 `PolicyLoaded` 为 False。
+策略文件（`contract/gateway/v1/gateway-policy.schema.json`）与审批人公钥（`approver-keys.schema.json`）来自 Git，经 ConfigMap 挂载，每 15 秒重新读取；加载失败时保留上一次的内容，条件 `PolicyLoaded` 为 False。审批人的通行密钥只经 Git 登记在公钥文件中，每个凭据声明 `alg`：`EdDSA`（Ed25519 公钥 32 字节）或 `ES256`（P-256 未压缩点 65 字节，用于 iCloud 钥匙串、Windows Hello 等平台通行密钥）；签名算法只取自这里，见 ADR 0020。
+
+```yaml
+version: 1
+webauthn:
+  rp_id: console.srenautix.example
+  origins: ["https://console.srenautix.example"]
+keys:
+  - {use: service, key_id: service-2026-10, public_key: <Ed25519 公钥 base64url>}
+  - {use: webauthn, credential_id: <凭据 ID base64url>, principal: "oidc:alice@example.org", alg: ES256, public_key: <0x04‖X‖Y 的 base64url>}
+```
 
 ## 只提议
 

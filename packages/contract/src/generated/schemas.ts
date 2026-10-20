@@ -1,5 +1,5 @@
 // 本文件由 packages/contract/scripts/gen.ts 从 contract/ 生成，不要手工修改。
-export const CONTRACT_VERSION = '2.5.1';
+export const CONTRACT_VERSION = '2.6.0';
 
 export const SCHEMAS: Record<string, Record<string, unknown>> = {
   'https://srenautix.io/contract/gateway/v1/action-catalog.schema.json': {
@@ -277,7 +277,7 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
     $id: 'https://srenautix.io/contract/gateway/v1/approval-envelope.schema.json',
     title: 'ApprovalEnvelope',
     description:
-      '审批断言及其签名证明。服务签名（service_ed25519）由 server 的服务签名密钥签发；通行密钥签名（webauthn_ed25519）由审批人的 WebAuthn 凭据签发。签名输入与校验步骤见 docs/adr/0020-approval-assertion-format.md。',
+      '审批断言及其签名证明。服务签名（service_ed25519）由 server 的服务签名密钥签发；通行密钥签名（webauthn）由审批人的 WebAuthn 凭据签发，算法（EdDSA 或 ES256）取自登记的凭据。签名输入与校验步骤见 docs/adr/0020-approval-assertion-format.md。',
     type: 'object',
     additionalProperties: false,
     required: ['assertion', 'proof'],
@@ -330,16 +330,21 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
       },
       webauthnProof: {
         description:
-          '通行密钥签名（COSE alg -8，EdDSA/Ed25519）。clientDataJSON 的 challenge 为 sha256(JCS(assertion)) 原始 32 字节的 base64url；签名覆盖 authenticatorData 与 sha256(clientDataJSON) 的拼接。',
+          '通行密钥签名（WebAuthn Level 3 断言）。clientDataJSON 的 type 为 webauthn.get，challenge 为 sha256(JCS(assertion)) 原始 32 字节的 base64url；签名覆盖 authenticatorData 与 sha256(clientDataJSON) 的拼接。签名算法由 approver-keys 中该凭据的 alg 决定：EdDSA 为 64 字节 Ed25519 签名，ES256 为 DER 编码的 ECDSA 签名。type 取 webauthn；webauthn_ed25519 只能用于 alg 为 EdDSA 的凭据，用于其他凭据时拒绝（webauthn_alg_mismatch）。',
         type: 'object',
         additionalProperties: false,
         required: ['type', 'credential_id', 'authenticator_data', 'client_data_json', 'signature'],
         properties: {
-          type: { const: 'webauthn_ed25519' },
+          type: { type: 'string', enum: ['webauthn', 'webauthn_ed25519'] },
           credential_id: { allOf: [{ $ref: '#/$defs/base64url' }], minLength: 1, maxLength: 1366 },
           authenticator_data: { allOf: [{ $ref: '#/$defs/base64url' }], minLength: 50 },
           client_data_json: { allOf: [{ $ref: '#/$defs/base64url' }], minLength: 1 },
-          signature: { allOf: [{ $ref: '#/$defs/base64url' }], minLength: 86, maxLength: 86 },
+          signature: {
+            description: 'EdDSA：64 字节（86 个字符）；ES256：DER 编码的 ECDSA-Sig-Value，至多 72 字节（96 个字符）。',
+            allOf: [{ $ref: '#/$defs/base64url' }],
+            minLength: 11,
+            maxLength: 96,
+          },
         },
       },
     },
@@ -349,7 +354,7 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
     $id: 'https://srenautix.io/contract/gateway/v1/approver-keys.schema.json',
     title: 'ApproverKeys',
     description:
-      'gateway 信任的签名公钥，来自 Git，经 ConfigMap 挂载。service 条目是 server 的服务签名公钥；webauthn 条目是审批人通行密钥的公钥（合规配置）。',
+      'gateway 信任的签名公钥，来自 Git，经 ConfigMap 挂载。service 条目是 server 的服务签名公钥（Ed25519）；webauthn 条目是审批人通行密钥的公钥（合规配置），算法为 EdDSA 或 ES256。通行密钥只能经 Git 登记。',
     type: 'object',
     additionalProperties: false,
     required: ['version', 'keys'],
@@ -390,6 +395,7 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
               },
             },
             {
+              description: '审批人的通行密钥。签名算法只取自这里的 alg，校验时不采用信封中的任何算法信息（ADR 0020）。',
               type: 'object',
               additionalProperties: false,
               required: ['use', 'credential_id', 'principal', 'public_key'],
@@ -397,8 +403,23 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
                 use: { const: 'webauthn' },
                 credential_id: { type: 'string', pattern: '^[A-Za-z0-9_-]+$', minLength: 1, maxLength: 1366 },
                 principal: { type: 'string', minLength: 1, maxLength: 512 },
-                public_key: { type: 'string', pattern: '^[A-Za-z0-9_-]{43}$' },
+                alg: {
+                  description:
+                    '凭据的签名算法，对应 COSE alg：EdDSA 为 -8（Ed25519），ES256 为 -7（P-256 上的 ECDSA，SHA-256）。省略时为 EdDSA。',
+                  type: 'string',
+                  enum: ['EdDSA', 'ES256'],
+                  default: 'EdDSA',
+                },
+                public_key: {
+                  description:
+                    'EdDSA：Ed25519 公钥 32 字节的 base64url（43 个字符）；ES256：P-256 未压缩点 0x04‖X‖Y 共 65 字节的 base64url（87 个字符），必须在曲线上。',
+                  type: 'string',
+                  pattern: '^([A-Za-z0-9_-]{43}|[A-Za-z0-9_-]{87})$',
+                },
               },
+              if: { required: ['alg'], properties: { alg: { const: 'ES256' } } },
+              then: { properties: { public_key: { pattern: '^[A-Za-z0-9_-]{87}$' } } },
+              else: { properties: { public_key: { pattern: '^[A-Za-z0-9_-]{43}$' } } },
             },
           ],
         },

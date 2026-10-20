@@ -9,6 +9,7 @@ import (
 	"github.com/Zzhihon/SreNautix/internal/spoke/gateway/execution"
 	"github.com/Zzhihon/SreNautix/internal/spoke/gateway/gwtest"
 	"github.com/Zzhihon/SreNautix/internal/spoke/testenv"
+	"github.com/Zzhihon/SreNautix/internal/spoke/tunnel"
 )
 
 // 不变量 5：审批签名并绑定。
@@ -18,6 +19,7 @@ func TestInvariant05SignedAndBound(t *testing.T) {
 	e := gwtest.New(t, gwtest.DefaultActions)
 	e.F.Node("worker-1", false, true)
 	e.F.Node("worker-2", false, true)
+	e.F.Node("worker-3", false, true)
 	e.Start(gwtest.Options{})
 	forger := testenv.NewApprover("service-test")
 	forger.Key = testenv.NewApprover("attacker").Key
@@ -77,6 +79,37 @@ func TestInvariant05SignedAndBound(t *testing.T) {
 			}
 		})
 	}
+
+	// ES256 平台通行密钥：H 档审批由审批人的 P-256 凭据签名，算法只取自登记的公钥
+	t.Run("ES256 passkey approval", func(t *testing.T) {
+		e.T, e.F.T = t, t
+		passkey := testenv.NewPasskey(gwtest.Approver)
+		e.WriteKeys(passkey)
+		// 每次安全检查（伴随一次心跳）都重新读取公钥文件；等两轮
+		n := e.Hub.HeartbeatCount()
+		testenv.Eventually(t, 15*time.Second, "keys reloaded", func() (bool, string) { return e.Hub.HeartbeatCount() >= n+2, "" })
+		h := func(proofType string) tunnel.Ticket {
+			r := e.Request("node_cordon", map[string]any{"node": "worker-2"}, nodeRef(t, e, "worker-2"), assertion.LevelReversible, assertion.TierH)
+			r.Passkey, r.ProofType = passkey, proofType
+			return e.Ticket(r)
+		}
+		// 信封自称 webauthn_ed25519，凭据登记为 ES256：拒绝，不按信封的说法换算法
+		confused := h(assertion.ProofWebAuthnEd25519)
+		e.Offer(confused)
+		phase, reason, _ := waitFinal(t, e, confused.Proposal.ProposalID, 30*time.Second, execution.PhaseRejected, execution.PhaseVerifying)
+		if phase != execution.PhaseRejected || reason != assertion.ErrWebAuthnAlgMismatch {
+			t.Fatalf("got %s/%s: %s", phase, reason, e.Hub.Describe(confused.Proposal.ProposalID))
+		}
+		if unschedulable(t, e, "worker-2") {
+			t.Fatal("node was cordoned by an algorithm-confused approval")
+		}
+		tk := h(assertion.ProofWebAuthn)
+		e.Offer(tk)
+		e.WaitPhase(tk.Proposal.ProposalID, execution.PhaseVerifying, 30*time.Second)
+		if !unschedulable(t, e, "worker-2") {
+			t.Fatal("ES256 passkey approval was not executed")
+		}
+	})
 
 	t.Run("approval issued before the restore marker", func(t *testing.T) {
 		e.T, e.F.T = t, t

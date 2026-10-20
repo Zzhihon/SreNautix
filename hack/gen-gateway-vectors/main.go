@@ -140,7 +140,7 @@ func signWebAuthn(k key, credID string, a map[string]any, o webauthnOpts) map[st
 	cdHash := sha256.Sum256(cd)
 	sig := ed25519.Sign(k.priv, append(append([]byte{}, ad...), cdHash[:]...))
 	return map[string]any{"assertion": a, "proof": map[string]any{
-		"type": assertion.ProofWebAuthn, "credential_id": credID, "authenticator_data": b64(ad),
+		"type": assertion.ProofWebAuthnEd25519, "credential_id": credID, "authenticator_data": b64(ad),
 		"client_data_json": b64(cd), "signature": b64(sig),
 	}}
 }
@@ -396,6 +396,14 @@ func main() {
 		"params_hash":             paramsHashCases(),
 		"envelopes":               cases,
 	}
+	writeJSON("approval-vectors.json", doc)
+	fmt.Println("wrote approval-vectors.json:", len(cases), "envelope cases")
+	es := es256Document()
+	writeJSON("approval-vectors-es256.json", es)
+	fmt.Println("wrote approval-vectors-es256.json:", len(es["envelopes"].([]envelopeCase)), "envelope cases")
+}
+
+func writeJSON(name string, doc any) {
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
 	enc.SetEscapeHTML(false)
@@ -404,12 +412,11 @@ func main() {
 		panic(err)
 	}
 	_, file, _, _ := runtime.Caller(0)
-	out := filepath.Join(filepath.Dir(file), "..", "..", "contract", "gateway", "v1", "testvectors", "approval-vectors.json")
+	out := filepath.Join(filepath.Dir(file), "..", "..", "contract", "gateway", "v1", "testvectors", name)
 	if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
 		panic(err)
 	}
 	if err := os.WriteFile(out, buf.Bytes(), 0o644); err != nil {
 		panic(err)
 	}
-	fmt.Println("wrote", out, len(cases), "envelope cases")
 }

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://srenautix.io/contract/gateway/v1/approver-keys.schema.json",
   "title": "ApproverKeys",
-  "description": "gateway 信任的签名公钥，来自 Git，经 ConfigMap 挂载。service 条目是 server 的服务签名公钥；webauthn 条目是审批人通行密钥的公钥（合规配置）。",
+  "description": "gateway 信任的签名公钥，来自 Git，经 ConfigMap 挂载。service 条目是 server 的服务签名公钥（Ed25519）；webauthn 条目是审批人通行密钥的公钥（合规配置），算法为 EdDSA 或 ES256。通行密钥只能经 Git 登记。",
   "type": "object",
   "additionalProperties": false,
   "required": ["version", "keys"],
@@ -47,6 +47,7 @@
             }
           },
           {
+            "description": "审批人的通行密钥。签名算法只取自这里的 alg，校验时不采用信封中的任何算法信息（ADR 0020）。",
             "type": "object",
             "additionalProperties": false,
             "required": ["use", "credential_id", "principal", "public_key"],
@@ -54,8 +55,21 @@
               "use": {"const": "webauthn"},
               "credential_id": {"type": "string", "pattern": "^[A-Za-z0-9_-]+$", "minLength": 1, "maxLength": 1366},
               "principal": {"type": "string", "minLength": 1, "maxLength": 512},
-              "public_key": {"type": "string", "pattern": "^[A-Za-z0-9_-]{43}$"}
-            }
+              "alg": {
+                "description": "凭据的签名算法，对应 COSE alg：EdDSA 为 -8（Ed25519），ES256 为 -7（P-256 上的 ECDSA，SHA-256）。省略时为 EdDSA。",
+                "type": "string",
+                "enum": ["EdDSA", "ES256"],
+                "default": "EdDSA"
+              },
+              "public_key": {
+                "description": "EdDSA：Ed25519 公钥 32 字节的 base64url（43 个字符）；ES256：P-256 未压缩点 0x04‖X‖Y 共 65 字节的 base64url（87 个字符），必须在曲线上。",
+                "type": "string",
+                "pattern": "^([A-Za-z0-9_-]{43}|[A-Za-z0-9_-]{87})$"
+              }
+            },
+            "if": {"required": ["alg"], "properties": {"alg": {"const": "ES256"}}},
+            "then": {"properties": {"public_key": {"pattern": "^[A-Za-z0-9_-]{87}$"}}},
+            "else": {"properties": {"public_key": {"pattern": "^[A-Za-z0-9_-]{43}$"}}}
           }
         ]
       }

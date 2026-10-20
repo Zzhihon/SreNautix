@@ -1513,7 +1513,7 @@ export type components = {
     };
     /**
      * ApprovalEnvelope
-     * @description 审批断言及其签名证明。服务签名（service_ed25519）由 server 的服务签名密钥签发；通行密钥签名（webauthn_ed25519）由审批人的 WebAuthn 凭据签发。签名输入与校验步骤见 docs/adr/0020-approval-assertion-format.md。
+     * @description 审批断言及其签名证明。服务签名（service_ed25519）由 server 的服务签名密钥签发；通行密钥签名（webauthn）由审批人的 WebAuthn 凭据签发，算法（EdDSA 或 ES256）取自登记的凭据。签名输入与校验步骤见 docs/adr/0020-approval-assertion-format.md。
      */
     'approval-envelope.schema': {
       assertion: components['schemas']['approval-assertion.schema'];
@@ -1539,14 +1539,15 @@ export type components = {
           /** @description "sha256:" 加服务端会话 ID 的 SHA-256，用于在治理审计链中关联会话。 */
           session_hash: string;
         };
-        /** @description 通行密钥签名（COSE alg -8，EdDSA/Ed25519）。clientDataJSON 的 challenge 为 sha256(JCS(assertion)) 原始 32 字节的 base64url；签名覆盖 authenticatorData 与 sha256(clientDataJSON) 的拼接。 */
+        /** @description 通行密钥签名（WebAuthn Level 3 断言）。clientDataJSON 的 type 为 webauthn.get，challenge 为 sha256(JCS(assertion)) 原始 32 字节的 base64url；签名覆盖 authenticatorData 与 sha256(clientDataJSON) 的拼接。签名算法由 approver-keys 中该凭据的 alg 决定：EdDSA 为 64 字节 Ed25519 签名，ES256 为 DER 编码的 ECDSA 签名。type 取 webauthn；webauthn_ed25519 只能用于 alg 为 EdDSA 的凭据，用于其他凭据时拒绝（webauthn_alg_mismatch）。 */
         webauthnProof: {
           authenticator_data: components['schemas']['base64url'];
           client_data_json: components['schemas']['base64url'];
           credential_id: components['schemas']['base64url'];
+          /** @description EdDSA：64 字节（86 个字符）；ES256：DER 编码的 ECDSA-Sig-Value，至多 72 字节（96 个字符）。 */
           signature: components['schemas']['base64url'];
-          /** @constant */
-          type: 'webauthn_ed25519';
+          /** @enum {string} */
+          type: 'webauthn' | 'webauthn_ed25519';
         };
       };
     };
@@ -3824,14 +3825,15 @@ export type components = {
      * @enum {string}
      */
     Verdict: 'normal' | 'abnormal' | 'undeterminable';
-    /** @description 通行密钥签名（COSE alg -8，EdDSA/Ed25519）。clientDataJSON 的 challenge 为 sha256(JCS(assertion)) 原始 32 字节的 base64url；签名覆盖 authenticatorData 与 sha256(clientDataJSON) 的拼接。 */
+    /** @description 通行密钥签名（WebAuthn Level 3 断言）。clientDataJSON 的 type 为 webauthn.get，challenge 为 sha256(JCS(assertion)) 原始 32 字节的 base64url；签名覆盖 authenticatorData 与 sha256(clientDataJSON) 的拼接。签名算法由 approver-keys 中该凭据的 alg 决定：EdDSA 为 64 字节 Ed25519 签名，ES256 为 DER 编码的 ECDSA 签名。type 取 webauthn；webauthn_ed25519 只能用于 alg 为 EdDSA 的凭据，用于其他凭据时拒绝（webauthn_alg_mismatch）。 */
     webauthnProof: {
       authenticator_data: components['schemas']['base64url'];
       client_data_json: components['schemas']['base64url'];
       credential_id: components['schemas']['base64url'];
+      /** @description EdDSA：64 字节（86 个字符）；ES256：DER 编码的 ECDSA-Sig-Value，至多 72 字节（96 个字符）。 */
       signature: components['schemas']['base64url'];
-      /** @constant */
-      type: 'webauthn_ed25519';
+      /** @enum {string} */
+      type: 'webauthn' | 'webauthn_ed25519';
     };
   };
   responses: {
