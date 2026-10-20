@@ -26,3 +26,8 @@ signals:
     alternatives:
       - expr: (?i)(out of memory|oomkilled|cannot allocate memory)
         dialect: logs_match
+  # 组件的可读名称来源（components.yaml 的 display_name），不被证据卡引用
+  - id: deployment_display_name
+    kind: metrics
+    alternatives:
+      - expr: max by (deployment, label_app_kubernetes_io_display_name) (kube_deployment_labels{namespace="$namespace", deployment="$name"})

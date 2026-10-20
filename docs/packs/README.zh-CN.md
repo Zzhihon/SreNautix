@@ -168,6 +168,30 @@ flowchart TD
 - `links` 中的 `explore` 由运行时生成指标查询链接，`runbook` 指向本包的处置手册。
 - `egress: deny` 的卡片内容不进入模型上下文。
 
+## 组件的可读名称
+
+组件键以对象名或 id 为名，例如上游服务的 UUID。组件类型可以声明 `display_name`，事件标题、通知、控制台与 issue 优先显示它；组件键本身不变：
+
+```yaml
+component_types:
+  - id: example.web
+    match: { kind: Deployment, labels: { app.kubernetes.io/part-of: example-shop } }
+    display_name:
+      - alert_annotation: display_name
+      - signal: deployment_display_name
+        label: label_app_kubernetes_io_display_name
+```
+
+来源按顺序尝试，取第一个非空且不等于实体名的值：
+
+| 来源 | 取值 |
+|---|---|
+| `alert_annotation` | 实体所在告警的注解 |
+| `alert_label` | 实体所在告警的标签 |
+| `signal` + `label` | 在事件锚点对本包的 metrics 信号做 instant 查询，备选按顺序尝试，取第一条序列的 `label` 标签 |
+
+`lint` 检查 signal 来源是本包的 metrics 信号，并按组件类型的 kind 渲染、严格解析每个备选。server 用 packs-sdk 的 `resolveDisplayName(set, 组件类型, {entity, labels, annotations}, 数据源, 时刻)` 求值；数据源报错只让这个来源落空，名称只用于显示，不影响研判。
+
 ## 排除规则与规则提议
 
 **排除规则**：证据链的 `excludes` 是 CEL 列表，命中任意一条时阶段 A 的处置判断为 `ignore`，`say` 写明原因。可用变量 `root`（根因实体）与 `incident`。

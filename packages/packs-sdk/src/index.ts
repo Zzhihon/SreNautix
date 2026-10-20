@@ -83,5 +83,6 @@ export {
   type CoverageReport,
   type UpstreamRule,
 } from './testing/upstream-rules.js';
+export { resolveDisplayName, type DisplayNameInput } from './runtime/display-name.js';
 export { runDoctor, type DoctorReport } from './doctor.js';
 export { runPackCli } from './cli.js';

@@ -258,7 +258,44 @@ export async function compilePackSet(loaded: LoadedPack[], opts: CompileOptions)
       }
     }
     for (const ct of p.content.components.component_types) {
-      (ct.chains ?? []).forEach((c) => chainRef(p.name, c, `${p.dir}/components.yaml：${ct.id}`));
+      const where = `${p.dir}/components.yaml：${ct.id}`;
+      (ct.chains ?? []).forEach((c) => chainRef(p.name, c, where));
+      // 可读名称的 signal 来源：本包的 metrics 信号，每个备选按组件类型的 kind 渲染并严格解析
+      for (const src of ct.display_name ?? []) {
+        if (!('signal' in src)) {
+          continue;
+        }
+        const sk = `${p.name}/${src.signal}`;
+        const sig = signals.get(sk)?.signal;
+        if (!sig) {
+          throw new PackLintError(where, `display_name 引用的信号 ${src.signal} 不在本包中`);
+        }
+        if (sig.kind !== 'metrics') {
+          throw new PackLintError(
+            where,
+            `display_name 引用的信号 ${src.signal} 必须是 metrics 信号，实际为 ${sig.kind}`,
+          );
+        }
+        for (const [i, alt] of sig.alternatives.entries()) {
+          try {
+            const text = renderMetrics(engine, alt, {
+              entity: { cluster_id: 'lint', kind: ct.match.kind, namespace: 'lint', name: 'lint', node: 'lint' },
+              params: {},
+              windowSeconds: 1800,
+              profile: LINT_PROFILE,
+            });
+            const a = engine.analyze(text, alt.dialect === 'metricsql' ? 'metricsql' : 'promql');
+            if (a.has_at) {
+              throw new Error('不允许使用 @ 修饰符');
+            }
+          } catch (err) {
+            throw new PackLintError(
+              where,
+              `display_name 的信号 ${sk} 的备选 ${i}：${err instanceof Error ? err.message : String(err)}`,
+            );
+          }
+        }
+      }
     }
     for (const k of Object.values(p.content.knowledge)) {
       for (const e of k.entries) {

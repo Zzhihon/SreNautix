@@ -6,3 +6,9 @@ component_types:
         app.kubernetes.io/part-of: example-shop
     chains:
       - pod-memory
+    # 可读名称：先取告警的 display_name 注解，再取 Deployment 上的 app.kubernetes.io/display-name 标签（kube-state-metrics 的
+    # kube_deployment_labels 需要放行这个标签）；都没有时显示组件键
+    display_name:
+      - alert_annotation: display_name
+      - signal: deployment_display_name
+        label: label_app_kubernetes_io_display_name
