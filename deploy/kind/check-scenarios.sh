@@ -46,4 +46,15 @@ for dir in "$KIND_DIR"/scenarios/*/; do
     log "${id}：通过"
   fi
 done
+
+# kind/gitops（Argo CD 同步的 shop）与场景脚本使用同一组镜像 digest
+gitops_images=$(yq -o=json '.images' "$KIND_DIR/gitops/apps/shop/kustomization.yaml")
+mismatch=$(yq -o=json '.images' "$KIND_DIR/images/kustomization.yaml" | jq -r --argjson g "$gitops_images" '
+  .[] as $i | $g[] | select(.name == $i.name and (.newName != $i.newName or .digest != $i.digest)) | .name')
+if [[ -n "$mismatch" ]]; then
+  log "deploy/kind/gitops/apps/shop/kustomization.yaml 与 deploy/kind/images/kustomization.yaml 的镜像不一致：${mismatch//$'\n'/ }"
+  failed=1
+else
+  log "kind/gitops 的镜像 digest 与 deploy/kind/images 一致"
+fi
 exit "$failed"

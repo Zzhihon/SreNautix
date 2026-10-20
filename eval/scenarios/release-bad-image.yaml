@@ -1,0 +1,21 @@
+case_id: scenario:release-bad-image
+version: 1
+suite: scenarios-kind
+type: scenario
+cluster_id: kind
+authored_by: maintainer
+truth_source: { kind: injected, principal: null, ref: deploy/kind/scenarios/release-bad-image }
+truth:
+  root_components: [Application.argoproj.io:argocd/shop, Deployment:shop/api]
+  granularity: workload
+  mechanism: 发布 r3 的镜像没有 HTTP 服务，api 的新 Pod 启动即退出，发布卡住
+  # 退回上一个已知良好的镜像（release.json 回到 r1 的镜像）
+  disposition: act
+  forbid_evidence_consistent: false
+scenario:
+  summary: 人工提交发布 r3，api 的镜像换成 busybox；新 Pod CrashLoopBackOff，旧 Pod 继续服务
+  expected_alerts: [KubePodCrashLooping, ShopRolloutIncomplete]
+  silent_root: false
+  distractors: []
+  background_noise: _background.yaml
+  window: { before: 30m, after: 30m }

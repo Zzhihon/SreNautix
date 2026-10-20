@@ -1,0 +1,21 @@
+case_id: scenario:unmapped-alert
+version: 1
+suite: scenarios-kind
+type: scenario
+cluster_id: kind
+authored_by: maintainer
+truth_source: { kind: injected, principal: null, ref: deploy/kind/scenarios/unmapped-alert }
+truth:
+  root_components: [Deployment:shop/api, Service:shop/api]
+  granularity: workload
+  mechanism: 新告警 ShopCatalogStale 只带 service 标签，拓扑与领域包都映射不到组件
+  # 补上拓扑覆盖或领域包的告警目录条目
+  disposition: act
+  forbid_evidence_consistent: false
+scenario:
+  summary: 人工新增告警规则 ShopCatalogStale（只有 service="catalog" 标签）；告警触发后映射不到组件，商品目录由 api 提供
+  expected_alerts: [ShopCatalogStale]
+  silent_root: false
+  distractors: []
+  background_noise: _background.yaml
+  window: { before: 30m, after: 30m }

@@ -1,5 +1,7 @@
-# 在 Kind 上拉起完整环境（kube-prometheus-stack、Loki、Tempo、演示业务与背景噪声、SreNautix），
-# 逐个注入级联故障场景，确认每个场景的预期告警出现，再恢复。
+# 在 Kind 上拉起完整环境（kube-prometheus-stack、Loki、Tempo、本地 Git 服务 gitlocal 与 Argo CD、演示业务与背景噪声、
+# 本次提交在本地构建的 SreNautix），逐个注入级联故障场景：确认预期告警出现；声明了 SRENAUTIX_ROOT 的场景再检查
+# 事件收敛与根因、证据卡与阶段 B 结论（模型响应来自 llm-replay 的录制）、gitlocal 上的 srenautix/* 修复 PR 与 issue 关联、
+# main 没有被机器人改动；最后恢复。发布门禁不包含这个工作流。
 name: kind-e2e
 
 on:
@@ -54,32 +56,67 @@ jobs:
           echo "${YQ_SHA256}  $HOME/.local/bin/yq" | sha256sum --check
           chmod +x "$HOME/.local/bin/kind" "$HOME/.local/bin/yq"
           echo "$HOME/.local/bin" >>"$GITHUB_PATH"
-      - name: 确认本次提交的两个镜像已经发布
-        id: images
-        run: |
-          tag="sha-${GITHUB_SHA::7}"
-          ok=true
-          for image in srenautix srenautix-spoke; do
-            if ! docker manifest inspect "ghcr.io/zzhihon/${image}:${tag}" >/dev/null 2>&1; then
-              echo "::notice::ghcr.io/zzhihon/${image}:${tag} 不存在，本次只验证环境与故障场景"
-              ok=false
-            fi
-          done
-          echo "srenautix=$ok" >>"$GITHUB_OUTPUT"
-          echo "tag=$tag" >>"$GITHUB_OUTPUT"
+      # 本次提交的两个镜像在本地构建，不依赖是否已经发布；llm-replay 用同一个 hub 镜像
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: 构建中心镜像
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: deploy/docker/srenautix.Dockerfile
+          platforms: linux/amd64
+          tags: srenautix.local/srenautix:e2e
+          load: true
+          cache-from: type=gha,scope=srenautix
+      - name: 构建分支镜像
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: deploy/docker/srenautix-spoke.Dockerfile
+          platforms: linux/amd64
+          tags: srenautix.local/srenautix-spoke:e2e
+          load: true
+          cache-from: type=gha,scope=srenautix-spoke
+      - name: 构建本地 Git 服务镜像
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: deploy/docker/gitlocal.Dockerfile
+          platforms: linux/amd64
+          tags: srenautix.local/gitlocal:e2e
+          load: true
+          cache-from: type=gha,scope=gitlocal
       - name: 拉起 Kind 环境
         env:
-          SRENAUTIX_VERSION: ${{ steps.images.outputs.tag }}
+          SKIP_BUILD: "1"
+          SRENAUTIX_LOCAL_IMAGES: e2e
+          SRENAUTIX_LLM_REPLAY: "1"
         run: |
-          if [[ "${{ steps.images.outputs.srenautix }}" == true ]]; then
-            deploy/kind/up.sh
-          else
-            deploy/kind/up.sh --no-srenautix
-          fi
-      - name: 运行级联故障场景
+          kind create cluster --name srenautix --image "$(. deploy/kind/versions.env; echo "$KIND_NODE_IMAGE")" \
+            --config deploy/kind/kind-config.yaml --wait 180s
+          kind load docker-image --name srenautix srenautix.local/srenautix:e2e srenautix.local/srenautix-spoke:e2e
+          deploy/kind/up.sh
+      # 不变量 12（自愈 PR 的补偿控制）对 Kind 中真实 bare 仓库的 gitlocal-invariants 运行；集群一侧用 envtest
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      # gateway 测试环境另需对象锁定的 MinIO（审计汇）与 Prometheus（执行后校验）；通过 GITHUB_ENV 导出 SRENAUTIX_TEST_BIN、SRENAUTIX_MINIO_BIN
+      - name: 安装测试用的 Prometheus、MinIO 等
+        run: .github/scripts/install-test-binaries.sh "$RUNNER_TEMP/testbin"
+      - name: 不变量 12：gitops_pr 只推 srenautix/*、核对 refs、从不合并、限速、main watchdog（本地 Git 服务）
+        run: |
+          # make envtest-assets 的最后一行输出是 envtest 二进制所在目录
+          assets=$(make -s envtest-assets | tail -1)
+          kubectl --context kind-srenautix -n gitlocal port-forward svc/gitlocal-invariants 13000:3000 >"$RUNNER_TEMP/pf.log" 2>&1 &
+          pf=$!
+          trap 'kill $pf' EXIT
+          for _ in $(seq 30); do curl -fsS http://127.0.0.1:13000/healthz >/dev/null 2>&1 && break; sleep 1; done
+          KUBEBUILDER_ASSETS="$assets" SRENAUTIX_TEST_GITHUB_API=http://127.0.0.1:13000 \
+            go test -count=1 -timeout 20m -run TestInvariant12 ./test/invariants/
+      - name: 运行级联故障场景（含 SreNautix 的发现、分析与自愈 PR）
         env:
           SCENARIOS: ${{ github.event.inputs.scenarios }}
           SCENARIO_STATE_DIR: ${{ runner.temp }}/scenarios
+          SRENAUTIX_CHECKS: "1"
           HOLD: "120"
         run: |
           list=${SCENARIOS:-$(deploy/kind/scenario.sh list | tr '\n' ' ')}
@@ -95,6 +132,10 @@ jobs:
           kubectl --context kind-srenautix get nodes,pods -A -o wide >"$RUNNER_TEMP/diag/pods.txt" 2>&1 || true
           kubectl --context kind-srenautix get events -A --sort-by=.lastTimestamp >"$RUNNER_TEMP/diag/events.txt" 2>&1 || true
           kubectl --context kind-srenautix -n srenautix logs -l app.kubernetes.io/part-of=srenautix --all-containers --tail=500 >"$RUNNER_TEMP/diag/srenautix.log" 2>&1 || true
+          kubectl --context kind-srenautix -n srenautix logs deploy/llm-replay --tail=500 >"$RUNNER_TEMP/diag/llm-replay.log" 2>&1 || true
+          kubectl --context kind-srenautix -n gitlocal logs deploy/gitlocal --tail=500 >"$RUNNER_TEMP/diag/gitlocal.log" 2>&1 || true
+          kubectl --context kind-srenautix get --raw /api/v1/namespaces/gitlocal/services/gitlocal:3000/proxy/_test/state >"$RUNNER_TEMP/diag/gitlocal-state.json" 2>&1 || true
+          kubectl --context kind-srenautix -n argocd get applications -o yaml >"$RUNNER_TEMP/diag/argocd-applications.yaml" 2>&1 || true
           cp -R "$RUNNER_TEMP/scenarios" "$RUNNER_TEMP/diag/" 2>/dev/null || true
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()

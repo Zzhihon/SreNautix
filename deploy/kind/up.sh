@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # 一条命令拉起 Kind 体验环境：Kind 集群（Kubernetes 1.35，1 控制面 + 3 工作节点）、kube-prometheus-stack、
-# Loki、Tempo、Alloy、metrics-server、CNPG operator、演示业务 shop 与背景噪声，以及 SreNautix（standard 配置，gateway 冻结）。
+# Loki、Tempo、Alloy、metrics-server、CNPG operator、本地 Git 服务 gitlocal 与 Argo CD（从 gitlocal 的 kind/gitops 同步演示业务 shop
+# 与 shop 的告警规则）、背景噪声，以及 SreNautix（standard 配置，gateway 冻结）。
 #
 # 用法：deploy/kind/up.sh [--no-srenautix]
 # 环境变量：
@@ -48,7 +49,18 @@ log "安装 CNPG operator（cloudnative-pg ${CNPG_CHART_VERSION}）"
 helm --kube-context "$KUBE_CONTEXT" upgrade --install cnpg cnpg/cloudnative-pg --version "$CNPG_CHART_VERSION" \
   --namespace cnpg-system --create-namespace -f "$KIND_DIR/values/cloudnative-pg.yaml" --wait --timeout 10m
 
-log "部署演示业务 shop 与背景噪声"
+log "部署本地 Git 服务 gitlocal（kind/gitops 仓库，deploy/kind/gitops）"
+"$KIND_DIR/gitlocal/install.sh"
+
+log "安装 Argo CD（argo-cd ${ARGOCD_CHART_VERSION}），从 gitlocal 同步 shop 与 shop 的告警规则"
+helm repo add argo https://argoproj.github.io/argo-helm --force-update >/dev/null
+helm --kube-context "$KUBE_CONTEXT" upgrade --install argocd argo/argo-cd --version "$ARGOCD_CHART_VERSION" \
+  --namespace argocd --create-namespace -f "$KIND_DIR/values/argo-cd.yaml" --wait --timeout 15m
+k apply -f "$KIND_DIR/gitops/argocd/applications/shop.yaml"
+wait_argo_synced shop 900
+wait_argo_synced platform-rules 300
+
+log "部署背景噪声与自身告警接收方"
 k apply -k "$KIND_DIR/workloads"
 wait_namespace_ready shop 900
 wait_namespace_ready traffic 300

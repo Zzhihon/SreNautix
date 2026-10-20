@@ -1,0 +1,24 @@
+# kind-e2e 叠加在 srenautix.yaml 之上：worker 的模型路由指向集群内的录制回放服务 llm-replay（deploy/kind/llm-replay.yaml），
+# 每个场景的录制在 deploy/kind/scenarios/<场景>/llm/，场景注入前由 scenario.sh 切换。CI 中没有真实的模型服务。
+roles:
+  worker:
+    config:
+      llm:
+        probe_on_start: false
+        allow_cross_border: false
+        routes:
+          - id: primary
+            base_url: http://llm-replay.srenautix.svc:8080/v1
+            api: responses
+            model: gpt-5
+            dialect_profile: openai-responses
+            price: {currency: USD, input_per_mtok: 0, output_per_mtok: 0, cached_input_per_mtok: null}
+            in_domain: true
+            tier: large
+            retention_terms: recorded responses
+            api_key_file: /etc/srenautix/secrets/llm/api_key
+
+networkPolicy:
+  modelsEgressTo:
+    - podSelector:
+        matchLabels: {app: llm-replay}

@@ -6,13 +6,16 @@
 #   deploy/kind/scenario.sh inject  <场景>     注入故障，记录注入时间
 #   deploy/kind/scenario.sh verify  <场景>     等待场景的预期告警出现（pending 或 firing）
 #   deploy/kind/scenario.sh recover <场景>     撤除故障并等待业务恢复
-#   deploy/kind/scenario.sh run     <场景>     inject → verify → 保持 HOLD 秒 → recover
+#   deploy/kind/scenario.sh run     <场景>     inject → verify →（SRENAUTIX_CHECKS=1 时）SreNautix 三个环节 → 保持 HOLD 秒 → recover
 #
 # 每个场景是 scenarios/<场景>/scenario.sh，定义 EXPECTED_ALERTS、VERIFY_TIMEOUT 与 inject、recover 两个函数；
 # 标准答案在 eval/scenarios/<场景>.yaml。注入时间写入 $SCENARIO_STATE_DIR/<场景>.json，评测按它截取时间窗。
+# 声明了 SRENAUTIX_ROOT 的场景在 SRENAUTIX_CHECKS=1 时另外检查发现、分析与自愈 PR（srenautix-checks.sh）。
 set -euo pipefail
 # shellcheck source=deploy/kind/lib.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+# shellcheck source=deploy/kind/srenautix-checks.sh
+source "$(dirname "${BASH_SOURCE[0]}")/srenautix-checks.sh"
 
 SCENARIO_STATE_DIR=${SCENARIO_STATE_DIR:-"$REPO_ROOT/.scratch/kind-scenarios"}
 HOLD=${HOLD:-0}
@@ -62,11 +65,19 @@ case "$cmd" in
         record "$name" recovered_at
         ;;
       run)
+        checks=false
+        [[ "${SRENAUTIX_CHECKS:-}" == 1 && -n "${SRENAUTIX_ROOT:-}" ]] && checks=true
+        $checks && use_llm_recording "$name"
+        since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
         log "注入 $name"
         record "$name" injected_at
         inject
         wait_alerts "$VERIFY_TIMEOUT" "${EXPECTED_ALERTS[@]}"
         record "$name" verified_at
+        if $checks; then
+          check_srenautix "$since"
+          record "$name" srenautix_checked_at
+        fi
         if ((HOLD > 0)); then
           log "保持故障 ${HOLD}s"
           sleep "$HOLD"

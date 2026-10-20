@@ -1,0 +1,31 @@
+# Kind 上的 Argo CD：从本地 Git 服务（gitlocal）同步 shop 应用与 shop 的告警规则（deploy/kind/gitops）。
+# 与监控一起固定在 zone a；轮询间隔缩短为 30 秒，发布提交后很快同步。
+fullnameOverride: argocd
+global:
+  nodeSelector: {srenautix.io/zone: a}
+configs:
+  cm:
+    timeout.reconciliation: 30s
+  params:
+    server.insecure: true
+dex:
+  enabled: false
+# chart 默认从 ecr-public.aws.com 拉取 Redis，GitHub Actions 上拉取失败；改用 Docker Hub 的同一版本，按 digest 固定
+redis:
+  image:
+    repository: docker.io/library/redis
+    tag: 8.6.4-alpine@sha256:2cc044fc5a07c9b701f8f1255a309ae9ad7856e694ac03513bf3648c01e40763
+notifications:
+  enabled: false
+controller:
+  metrics:
+    enabled: true
+    serviceMonitor: {enabled: true}
+repoServer:
+  metrics:
+    enabled: true
+    serviceMonitor: {enabled: true}
+server:
+  metrics:
+    enabled: true
+    serviceMonitor: {enabled: true}

@@ -1,0 +1,38 @@
+# shop 应用与 shop 的告警规则，由 Argo CD 从本地 Git 服务（gitlocal）的 kind/gitops 仓库同步。
+# 自动同步：Git 有新提交时同步并清理（prune）；不开 selfHeal，故障场景直接修改集群对象时不被立即改回。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: shop
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: http://gitlocal.gitlocal.svc:3000/kind/gitops.git
+    targetRevision: main
+    path: apps/shop
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: shop
+  syncPolicy:
+    automated: {prune: true, selfHeal: false}
+    retry:
+      limit: 3
+      backoff: {duration: 10s, factor: 2, maxDuration: 1m}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: platform-rules
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: http://gitlocal.gitlocal.svc:3000/kind/gitops.git
+    targetRevision: main
+    path: platform/observability/rules
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}

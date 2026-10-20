@@ -1,0 +1,60 @@
+# 录制回放的模型服务（`srenautix llm-replay`，hub 镜像中的子命令，OpenAI 兼容）。
+# 按"结构化输出的名称 + 第几次出现"取录制，提示中的易变内容不参与匹配；没有可用的录制时返回 503，worker 视为模型不可用。
+# 录制目录是 ConfigMap llm-replay（每个文件一个响应，<输出名>-<n>.json），scenario.sh 在每个场景注入前替换并重启。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: llm-replay
+  namespace: srenautix
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llm-replay
+  namespace: srenautix
+  labels: {app: llm-replay}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: llm-replay}
+  template:
+    metadata:
+      labels: {app: llm-replay}
+    spec:
+      nodeSelector: {srenautix.io/zone: a}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: llm-replay
+          image: HUB_IMAGE
+          imagePullPolicy: IfNotPresent
+          args: [llm-replay, --dir, /recordings, --listen, ":8080"]
+          ports:
+            - {name: http, containerPort: 8080}
+          readinessProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 5
+          resources:
+            requests: {cpu: 10m, memory: 128Mi}
+            limits: {cpu: 500m, memory: 128Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: recordings, mountPath: /recordings, readOnly: true}
+      volumes:
+        - {name: recordings, configMap: {name: llm-replay}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: llm-replay
+  namespace: srenautix
+  labels: {app: llm-replay}
+spec:
+  selector: {app: llm-replay}
+  ports:
+    - {name: http, port: 8080, targetPort: http}

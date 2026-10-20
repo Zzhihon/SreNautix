@@ -60,14 +60,81 @@ wait_namespace_ready() {
   done
 }
 
-# 监控、CNPG 与 SreNautix 的 Pod（DaemonSet 除外）必须都在 zone a；节点 NotReady 场景停止 zone b 的节点
+# 等待 Argo CD 应用同步完成且健康；参数：应用名 超时秒数
+wait_argo_synced() {
+  local app=$1 timeout=${2:-600} deadline=$((SECONDS + ${2:-600})) state
+  until state=$(k -n argocd get application "$app" -o jsonpath='{.status.sync.status}/{.status.health.status}' 2>/dev/null) &&
+    [[ "$state" == Synced/Healthy ]]; do
+    ((SECONDS < deadline)) || die "Argo CD 应用 $app 在 ${timeout}s 内没有同步完成（${state:-无状态}）"
+    sleep 5
+  done
+  log "Argo CD 应用 ${app}：${state}"
+}
+
+# 以人工身份（gitlocal 的管理员令牌）向 kind/gitops 的 main 提交文件，输出新提交；参数：提交说明 路径=本地文件...
+# 场景中的发布、回退与人工修改都走这里，SreNautix 只能向 srenautix/* 分支推送
+gitops_commit() {
+  local message=$1
+  shift
+  local files='{}' spec path src
+  for spec in "$@"; do
+    path=${spec%%=*}
+    src=${spec#*=}
+    files=$(jq --arg p "$path" --rawfile c "$src" '.[$p] = $c' <<<"$files")
+  done
+  jq -n --arg m "$message" --argjson f "$files" '{branch: "main", files: $f, message: $m}' |
+    gitlocal_api POST /_test/repos/kind/gitops/push | jq -r .sha
+}
+
+# 以人工身份修改 kind/gitops 的 main 上的一个 YAML 文件（yq 表达式作用于文件中的每个文档），等 Argo CD 同步完成；
+# 参数：提交说明 路径 yq表达式 Argo应用名。shop 由 Argo CD 管理：直接 kubectl patch 会在下一次同步时被 Git 中的内容覆盖
+gitops_edit() {
+  local message=$1 path=$2 expr=$3 app=$4 tmp
+  tmp=$(mktemp "${SCENARIO_STATE_DIR:-${TMPDIR:-/tmp}}/gitops-edit.XXXXXX")
+  gitops_file main "$path" | yq "$expr" >"$tmp"
+  gitops_commit "$message" "$path=$tmp" >/dev/null
+  rm -f "$tmp"
+  k -n argocd annotate application "$app" argocd.argoproj.io/refresh=normal --overwrite >/dev/null
+  wait_argo_synced_to_main "$app" 300
+}
+
+# 等待 Argo CD 应用同步到 kind/gitops 的 main 的最新提交；参数：应用名 超时秒数
+wait_argo_synced_to_main() {
+  local app=$1 timeout=${2:-300} deadline=$((SECONDS + ${2:-300})) head synced
+  head=$(gitlocal_api GET /_test/repos/kind/gitops/refs | jq -r .main)
+  until synced=$(k -n argocd get application "$app" -o jsonpath='{.status.sync.revision}' 2>/dev/null) && [[ "$synced" == "$head" ]]; do
+    ((SECONDS < deadline)) || die "Argo CD 应用 $app 在 ${timeout}s 内没有同步到 ${head}（当前 ${synced:-无}）"
+    sleep 5
+  done
+  log "Argo CD 应用 $app 已同步到 ${head:0:7}"
+}
+
+# 调用 gitlocal 的接口（经 apiserver 的 Service 代理，不依赖集群 DNS）；参数：方法 路径，请求体从标准输入读取
+gitlocal_api() {
+  local method=$1 path=$2
+  if [[ "$method" == GET ]]; then
+    k get --raw "/api/v1/namespaces/gitlocal/services/gitlocal:3000/proxy${path}"
+  else
+    k create --raw "/api/v1/namespaces/gitlocal/services/gitlocal:3000/proxy${path}" -f - 2>/dev/null ||
+      die "gitlocal ${method} ${path} 失败"
+  fi
+}
+
+# 读取 kind/gitops 某个提交上的文件；参数：提交或分支 路径
+gitops_file() {
+  local ref=$1 path=$2 sha
+  sha=$(gitlocal_api GET /_test/repos/kind/gitops/refs | jq -r --arg r "$ref" '.[$r] // $r')
+  gitlocal_api GET "/_test/repos/kind/gitops/file?sha=${sha}&path=$(jq -rn --arg p "$path" '$p|@uri')"
+}
+
+# 监控、CNPG、Argo CD、gitlocal 与 SreNautix 的 Pod（DaemonSet 除外）必须都在 zone a；节点 NotReady 场景停止 zone b 的节点
 check_platform_zone() {
   local zone_a stray
   zone_a=$(k get nodes -l srenautix.io/zone=a -o jsonpath='{.items[*].metadata.name}')
   [[ -n "$zone_a" ]] || die "没有 srenautix.io/zone=a 的节点"
   stray=$(k get pods -A -o json | jq -r --arg zone_a "$zone_a" '
     ($zone_a | split(" ")) as $a | .items[] |
-    select(.metadata.namespace | IN("monitoring", "srenautix", "cnpg-system")) |
+    select(.metadata.namespace | IN("monitoring", "srenautix", "cnpg-system", "argocd", "gitlocal")) |
     select((.metadata.ownerReferences[0].kind // "") != "DaemonSet") |
     select(.spec.nodeName != null and (.spec.nodeName | IN($a[]) | not)) |
     "\(.metadata.namespace)/\(.metadata.name)@\(.spec.nodeName)"')

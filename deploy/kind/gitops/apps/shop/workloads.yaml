@@ -1,5 +1,7 @@
-# 演示业务 shop：web → api → postgres，另有独立的 checkout。
+# 演示业务 shop：web → api → postgres，另有 checkout。由 Argo CD 从本地 Git 服务同步（argocd/applications/shop.yaml）。
 # 依赖关系对 SreNautix 可见的方式：web 的 nginx 配置引用 api 的 Service 名，api 与 checkout 的环境变量引用 postgres。
+# 发布：api 的 http 容器镜像与发布 ID 来自 release.json（kustomization.yaml 的 replacements）；
+# api、checkout 的 initContainer wait-for-migrations 等到本次发布的迁移 Job（shop-migrate-<发布 ID>）写入 schema_migrations 后才启动。
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -75,6 +77,48 @@ spec:
           requests:
             storage: 1Gi
 ---
+# 每次发布一个迁移 Job：名称中的 RELEASE 与环境变量 RELEASE_ID 由 replacements 换成 release.json 的 data.release_id。
+# 先建 schema_migrations，再在一个事务里执行 migrations/<发布 ID>.sql，成功后登记本次发布
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: shop-migrate-RELEASE
+  namespace: shop
+  labels: {app: shop-migrate}
+spec:
+  backoffLimit: 1
+  template:
+    metadata:
+      labels: {app: shop-migrate}
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: postgres
+          command:
+            - sh
+            - -ec
+            - |
+              psql -v ON_ERROR_STOP=1 -c 'CREATE TABLE IF NOT EXISTS schema_migrations (release_id text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())'
+              psql -v ON_ERROR_STOP=1 --single-transaction -f "/migrations/${RELEASE_ID}.sql"
+              psql -v ON_ERROR_STOP=1 -c "INSERT INTO schema_migrations (release_id) VALUES ('${RELEASE_ID}') ON CONFLICT DO NOTHING"
+              echo "migrations of release ${RELEASE_ID} applied"
+          env:
+            - {name: RELEASE_ID, value: RELEASE}
+            - {name: PGHOST, value: postgres.shop.svc}
+            - {name: PGUSER, value: postgres}
+            - {name: PGDATABASE, value: shop}
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef: {name: postgres-auth, key: password}
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}
+            limits: {cpu: 200m, memory: 64Mi}
+          volumeMounts:
+            - {name: migrations, mountPath: /migrations}
+      volumes:
+        - {name: migrations, configMap: {name: shop-migrations}}
+---
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -112,8 +156,12 @@ kind: Deployment
 metadata:
   name: api
   namespace: shop
-  labels: {app: api}
+  labels: {app: api, shop.example/migrations: wait}
 spec:
+  # 发布卡住时旧 Pod 保留，新 Pod 停在 Init（maxUnavailable 0）
+  strategy:
+    rollingUpdate: {maxUnavailable: 0, maxSurge: 1}
+  progressDeadlineSeconds: 300
   selector:
     matchLabels: {app: api}
   template:
@@ -127,6 +175,28 @@ spec:
           labelSelector:
             matchLabels: {app: api}
       initContainers:
+        - name: wait-for-migrations
+          image: postgres
+          command:
+            - sh
+            - -c
+            - |
+              until psql -tAc "SELECT 1 FROM schema_migrations WHERE release_id = '${RELEASE_ID}'" 2>/dev/null | grep -q 1; do
+                echo "waiting for the migrations of release ${RELEASE_ID}"
+                sleep 5
+              done
+          env:
+            - {name: RELEASE_ID, value: RELEASE}
+            - {name: PGHOST, value: postgres.shop.svc}
+            - {name: PGUSER, value: postgres}
+            - {name: PGDATABASE, value: shop}
+            - {name: PGCONNECT_TIMEOUT, value: "3"}
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef: {name: postgres-auth, key: password}
+          resources:
+            requests: {cpu: 5m, memory: 16Mi}
+            limits: {cpu: 100m, memory: 32Mi}
         - name: catalog
           image: busybox
           command: [sh, -c, "seq 1 300000 | sed 's/$/ catalog item/' > /data/catalog.txt"]
@@ -134,7 +204,7 @@ spec:
             - {name: data, mountPath: /data}
       containers:
         - name: http
-          image: nginx
+          image: RELEASE_IMAGE
           ports:
             - {name: http, containerPort: 8080}
           readinessProbe:
@@ -171,21 +241,6 @@ spec:
       volumes:
         - {name: data, emptyDir: {}}
         - {name: nginx, configMap: {name: api-nginx}}
----
-apiVersion: autoscaling/v2
-kind: HorizontalPodAutoscaler
-metadata:
-  name: api
-  namespace: shop
-spec:
-  scaleTargetRef: {apiVersion: apps/v1, kind: Deployment, name: api}
-  minReplicas: 2
-  maxReplicas: 4
-  metrics:
-    - type: Resource
-      resource:
-        name: cpu
-        target: {type: Utilization, averageUtilization: 60}
 ---
 apiVersion: policy/v1
 kind: PodDisruptionBudget
@@ -273,7 +328,7 @@ kind: Deployment
 metadata:
   name: checkout
   namespace: shop
-  labels: {app: checkout}
+  labels: {app: checkout, shop.example/migrations: wait}
 spec:
   replicas: 2
   # 发布卡住的判定时间较短，错误配置发布场景中 Deployment 很快进入 ProgressDeadlineExceeded
@@ -286,6 +341,29 @@ spec:
     metadata:
       labels: {app: checkout}
     spec:
+      initContainers:
+        - name: wait-for-migrations
+          image: postgres
+          command:
+            - sh
+            - -c
+            - |
+              until psql -tAc "SELECT 1 FROM schema_migrations WHERE release_id = '${RELEASE_ID}'" 2>/dev/null | grep -q 1; do
+                echo "waiting for the migrations of release ${RELEASE_ID}"
+                sleep 5
+              done
+          env:
+            - {name: RELEASE_ID, value: RELEASE}
+            - {name: PGHOST, value: postgres.shop.svc}
+            - {name: PGUSER, value: postgres}
+            - {name: PGDATABASE, value: shop}
+            - {name: PGCONNECT_TIMEOUT, value: "3"}
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef: {name: postgres-auth, key: password}
+          resources:
+            requests: {cpu: 5m, memory: 16Mi}
+            limits: {cpu: 100m, memory: 32Mi}
       containers:
         - name: checkout
           image: busybox
@@ -298,16 +376,22 @@ spec:
                 echo "checkout: invalid mode '$mode' in /config/mode" >&2
                 exit 1
               fi
-              echo "checkout: started with mode=$mode, database $DB_HOST"
+              # 启动时按 CACHE_MB 预热内存缓存（内存卷计入容器内存；配置与资源场景把它调大，超过内存上限）
+              echo "checkout: started with mode=$mode, cache ${CACHE_MB}MiB, database $DB_HOST"
+              dd if=/dev/zero of=/cache/warm bs=1048576 count="$CACHE_MB" 2>/dev/null
               trap 'exit 0' TERM
               while true; do sleep 3600 & wait; done
           env:
             - name: DB_HOST
               value: postgres.shop.svc
+            - name: CACHE_MB
+              value: "4"
           resources:
-            requests: {cpu: 10m, memory: 8Mi}
+            requests: {cpu: 10m, memory: 32Mi}
             limits: {cpu: 50m, memory: 32Mi}
           volumeMounts:
             - {name: config, mountPath: /config}
+            - {name: cache, mountPath: /cache}
       volumes:
         - {name: config, configMap: {name: checkout-config}}
+        - {name: cache, emptyDir: {medium: Memory, sizeLimit: 256Mi}}

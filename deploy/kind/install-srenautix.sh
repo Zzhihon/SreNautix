@@ -34,8 +34,35 @@ elif ! k -n "$ns" get secret srenautix-llm >/dev/null 2>&1; then
 fi
 
 args=(-f "$KIND_DIR/values/srenautix.yaml" --set-file "roles.gateway.approverKeys.content=$work/approver-keys.yaml")
-if [[ -n "${SRENAUTIX_VERSION:-}" ]]; then
+hub_image=""
+if [[ -n "${SRENAUTIX_LOCAL_IMAGES:-}" ]]; then
+  # 本地构建并 kind load 的镜像（kind-e2e）：srenautix.local/srenautix:<标签>、srenautix.local/srenautix-spoke:<标签>
+  args+=(--set "image.hub.repository=srenautix.local/srenautix" --set "image.hub.tag=$SRENAUTIX_LOCAL_IMAGES"
+    --set "image.hub.pullPolicy=Never" --set "image.spoke.repository=srenautix.local/srenautix-spoke"
+    --set "image.spoke.tag=$SRENAUTIX_LOCAL_IMAGES" --set "image.spoke.pullPolicy=Never")
+  hub_image="srenautix.local/srenautix:$SRENAUTIX_LOCAL_IMAGES"
+elif [[ -n "${SRENAUTIX_VERSION:-}" ]]; then
   args+=(--set "image.hub.tag=$SRENAUTIX_VERSION" --set "image.spoke.tag=$SRENAUTIX_VERSION")
+fi
+
+# Kind 的用户领域包 kind-shop（deploy/kind/gitops/srenautix/packs/kind-shop）：子目录中的文件以 <子目录>__<文件名> 为键
+pack_dir="$KIND_DIR/gitops/srenautix/packs/kind-shop"
+if [[ -f "$pack_dir/pack.yaml" ]]; then
+  pack_args=()
+  while IFS= read -r f; do
+    rel=${f#"$pack_dir"/}
+    pack_args+=("--from-file=${rel//\//__}=$f")
+  done < <(find "$pack_dir" -type f ! -name README.md | sort)
+  k -n "$ns" create configmap kind-shop "${pack_args[@]}" --dry-run=client -o yaml | k apply -f - >/dev/null
+  args+=(--set-json 'packs.userConfigMaps=[{"configMap":"kind-shop","pack":"kind-shop"}]')
+fi
+
+# 录制回放的模型服务（SRENAUTIX_LLM_REPLAY=1，kind-e2e）：worker 的路由指向它，镜像与 hub 相同
+if [[ "${SRENAUTIX_LLM_REPLAY:-}" == 1 ]]; then
+  [[ -n "$hub_image" ]] || die "SRENAUTIX_LLM_REPLAY=1 需要 SRENAUTIX_LOCAL_IMAGES（llm-replay 使用同一个 hub 镜像）"
+  args+=(-f "$KIND_DIR/values/srenautix-replay.yaml")
+  sed "s|HUB_IMAGE|$hub_image|" "$KIND_DIR/llm-replay.yaml" | k apply -f - >/dev/null
+  k -n "$ns" rollout status deployment/llm-replay --timeout=300s
 fi
 if [[ "$chart" == oci://* ]]; then
   # 发布的 chart 在注解中带有镜像的构建提交

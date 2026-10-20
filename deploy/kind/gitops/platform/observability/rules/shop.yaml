@@ -1,0 +1,47 @@
+# shop 的业务告警规则（Argo CD 应用 platform-rules 同步到 monitoring 命名空间，kube-prometheus-stack 的 Prometheus 加载）。
+# 告警规则调优类修复按 alert 名定位规则，改 expr 的阈值、for 与 labels.severity。
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: shop
+  namespace: monitoring
+spec:
+  groups:
+    - name: shop
+      rules:
+        - alert: ShopApiReplicasBelowMinimum
+          expr: kube_deployment_status_replicas_available{namespace="shop", deployment="api"} < 2
+          for: 2m
+          labels:
+            severity: warning
+          annotations:
+            summary: shop 的 api 可用副本少于 2
+        - alert: ShopCheckoutUnavailable
+          expr: kube_deployment_status_replicas_available{namespace="shop", deployment="checkout"} < 1
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: shop 的 checkout 没有可用副本
+        - alert: ShopMigrationFailed
+          expr: kube_job_status_failed{namespace="shop", job_name=~"shop-migrate-.+"} > 0
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: "shop 的迁移 Job {{ $labels.job_name }} 失败"
+        - alert: ShopRolloutIncomplete
+          expr: kube_deployment_status_replicas_updated{namespace="shop"} < kube_deployment_spec_replicas{namespace="shop"}
+          for: 3m
+          labels:
+            severity: warning
+          annotations:
+            summary: "shop 的 {{ $labels.deployment }} 发布没有完成"
+        # 过于敏感：任何一次重启都立即以 critical 告警（告警规则调优场景的对象）
+        - alert: ShopPodRestarted
+          expr: increase(kube_pod_container_status_restarts_total{namespace="shop"}[5m]) > 0
+          for: 0m
+          labels:
+            severity: critical
+          annotations:
+            summary: "shop 的 {{ $labels.pod }} 在 5 分钟内重启过"

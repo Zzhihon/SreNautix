@@ -1,0 +1,21 @@
+case_id: scenario:alert-too-sensitive
+version: 1
+suite: scenarios-kind
+type: scenario
+cluster_id: kind
+authored_by: maintainer
+truth_source: { kind: injected, principal: null, ref: deploy/kind/scenarios/alert-too-sensitive }
+truth:
+  root_components: [Deployment:shop/api]
+  granularity: workload
+  mechanism: 一次正常的容器重启触发了 for 0m、critical 的 ShopPodRestarted，告警规则过于敏感
+  # 业务本身不需要处理；修复的是告警规则
+  disposition: ignore
+  forbid_evidence_consistent: false
+scenario:
+  summary: api 的 db-check 容器退出一次并由 kubelet 重启，业务不受影响；ShopPodRestarted 立即以 critical 触发
+  expected_alerts: [ShopPodRestarted]
+  silent_root: false
+  distractors: []
+  background_noise: _background.yaml
+  window: { before: 30m, after: 30m }

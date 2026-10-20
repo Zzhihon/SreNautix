@@ -24,6 +24,18 @@ roles:
     resources:
       requests: {cpu: 100m, memory: 256Mi}
       limits: {cpu: "1", memory: 1Gi}
+    # GitHub App 指向本地 Git 服务 gitlocal（deploy/kind/gitlocal/install.sh 生成 Secret srenautix-github-app）
+    githubApp:
+      existingSecret: srenautix-github-app
+      appId: "1"
+      installationId: "1"
+      apiUrl: http://gitlocal.gitlocal.svc:3000
+    config:
+      topology:
+        override_pr: {repo: kind/gitops, base_branch: main, dir: srenautix/topology-overrides}
+      # 阶段 B 读取 Pod 事件与 initContainer 日志（server 的集群只读权限含 pods/log）
+      kube_reads:
+        enabled: true
   worker:
     resources:
       requests: {cpu: 100m, memory: 256Mi}
@@ -48,6 +60,11 @@ roles:
       budget:
         daily_tokens: 2000000
   gateway:
+    # 冻结时集群动作只提议；gitops_pr 只改 Git，冻结时也执行（自愈 PR）
+    actions: [node_cordon, node_uncordon, workload_scale, rollout_pause, rollout_resume, pod_restart, gitops_pr]
+    githubApp:
+      existingSecret: srenautix-github-app
+      apiUrl: http://gitlocal.gitlocal.svc:3000
     # 与 deploy/kind 场景中的 shop 业务对应；Kind 中 gateway 冻结，只提议
     policy:
       content: |
@@ -64,6 +81,62 @@ roles:
           - {id: pod_restart, namespaces: [shop]}
         self_dependencies:
           namespaces: [srenautix, monitoring]
+
+# 第二阶段的三个环节：检测器（阈值按 Kind 场景的时长缩短）、事件 issue、GitHub 变更源、自愈 PR，都指向 gitlocal 的 kind/gitops
+detectors:
+  enabled: true
+  namespaces: [shop, traffic, batch]
+  podInitAfter: 2m
+  podPendingAfter: 3m
+  rolloutStalledAfter: 4m
+  crashLoopAfter: 2m
+  pdbBlockedAfter: 5m
+  interval: 15s
+
+issues:
+  enabled: true
+  repo: kind/gitops
+  labels: [srenautix]
+  max_per_hour: 30
+
+changes:
+  # 从 Pod 模板的发布标签推导发布变更（deploy/kind/gitops 的 shop.example/release）
+  kubernetes:
+    revisionLabels: [shop.example/release, app.kubernetes.io/version]
+  sources:
+    - id: gitops
+      kind: github
+      repo: kind/gitops
+      branch: main
+      paths:
+        - {prefix: apps/shop/release.json, targets: [Deployment:shop/api, Deployment:shop/checkout], kind: rollout}
+        - {prefix: apps/shop/workloads.yaml, targets: [Deployment:shop/api, Deployment:shop/checkout, Deployment:shop/web], kind: config}
+        - {prefix: apps/shop/autoscaling.yaml, targets: [HorizontalPodAutoscaler:shop/api], kind: config}
+        - {prefix: apps/shop/migrations.yaml, targets: [Job:shop/shop-migrate-r1], kind: config}
+        - {prefix: platform/observability/rules/, targets: [Namespace:monitoring], kind: config}
+
+remediation:
+  enabled: true
+  repository: kind/gitops
+  baseBranch: main
+  files:
+    release_input: {path: apps/shop/release.json, format: json, fields: {image: data.image, release_id: data.release_id}}
+    workloads: {path: apps/shop/workloads.yaml, format: yaml}
+    autoscaling: {path: apps/shop/autoscaling.yaml, format: yaml}
+    alert_rules: {path: "platform/observability/rules/*.yaml", format: yaml}
+    pack_alerts: {path: srenautix/packs/kind-shop/alerts.yaml, format: yaml}
+  paths: [apps/shop/, platform/observability/rules/, srenautix/]
+  reviewers: [kind-operator]
+  # 一次 kind-e2e 依次运行全部场景，上限放宽到策略允许的最大值
+  maxPerHour: 20
+  compensatingControls:
+    approvedBy: kind-operator
+    approvedAt: "2026-10-21"
+    reference: deploy/kind/gitlocal（测试集群，没有分支保护）
+  mainWatchdog:
+    interval: 1m
+    lookback: 2h
+    allowedBots: []
 
 database:
   cnpg:
@@ -99,3 +172,8 @@ networkPolicy:
     - namespaceSelector:
         matchLabels:
           kubernetes.io/metadata.name: monitoring
+  githubEgressTo:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: gitlocal
+  githubEgressPorts: [3000]

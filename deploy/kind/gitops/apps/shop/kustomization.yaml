@@ -1,0 +1,43 @@
+# shop 应用（Argo CD 应用 shop 的路径）。
+# 一次发布只改 release.json 的 data.image 与 data.release_id，并且单独一次提交；replacements 把它们同步到：
+#   - api 的 http 容器镜像；
+#   - api、checkout 的 wait-for-migrations 与迁移 Job 的 RELEASE_ID，Pod 模板的标签 shop.example/release；
+#   - 迁移 Job 的名称 shop-migrate-<发布 ID>。
+# 其余镜像按 digest 固定（与 deploy/kind/images 相同，deploy/kind/check-scenarios.sh 检查两处一致）。
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - release.json
+  - migrations.yaml
+  - workloads.yaml
+  - autoscaling.yaml
+images:
+  - name: postgres
+    newName: docker.io/library/postgres
+    digest: sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
+  - name: busybox
+    newName: docker.io/library/busybox
+    digest: sha256:bdf57e528e45e4433820e045b29b4597825a1c9e38353532d90a01445013f82e
+  - name: nginx
+    newName: docker.io/library/nginx
+    digest: sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de
+replacements:
+  - source: {kind: ConfigMap, name: shop-release, fieldPath: data.image}
+    targets:
+      - select: {kind: Deployment, name: api}
+        fieldPaths:
+          - spec.template.spec.containers.[name=http].image
+  - source: {kind: ConfigMap, name: shop-release, fieldPath: data.release_id}
+    targets:
+      - select: {kind: Deployment, labelSelector: shop.example/migrations=wait}
+        fieldPaths:
+          - spec.template.spec.initContainers.[name=wait-for-migrations].env.[name=RELEASE_ID].value
+          - spec.template.metadata.labels.[shop.example/release]
+        options: {create: true}
+      - select: {kind: Job, name: shop-migrate-RELEASE}
+        fieldPaths:
+          - spec.template.spec.containers.[name=migrate].env.[name=RELEASE_ID].value
+      - select: {kind: Job, name: shop-migrate-RELEASE}
+        fieldPaths:
+          - metadata.name
+        options: {delimiter: "-", index: 2}
