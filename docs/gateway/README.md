@@ -81,6 +81,8 @@ keys:
 
 已开始的执行不受影响：校验、撤销与审计照常完成，审计记录留在本地暂存，审计汇恢复后补写。
 
+冻结只约束集群写入（ADR 0025）：`Freeze` 是唯一成立的条件时，心跳另带 `accepts_actions: ["gitops_pr"]`，gateway 只拉取并执行 `gitops_pr`（只写 Git），其余工单留在中心的队列中，解冻后照常处理。
+
 心跳里的条件 `True` 表示该项正常（`Freeze`、`ApiserverThrottled` 的 `True` 表示处于冻结、正在被限流），例如 `ClockSkew=True, reason=within_limit` 是时钟正常。每个类型的方向与它在控制台状态条上的类型由契约的方向表 `contract/conditions.json` 定义（ADR 0100）；中心只保留当前上报实例（Lease 持有者）的条件，心跳超过 `topology.reader_offline_after`（默认 60 秒）没有到达时清除。
 
 ## 熔断开关
@@ -125,6 +127,12 @@ kubectl -n srenautix get ae <执行 ID> -o yaml
 | `srenautix_build_info{role="gateway",version}` | 版本 |
 | `srenautix_condition{role="gateway",type}` | 状态条件，1 表示该项正常；`ApiserverThrottled`、`Freeze` 为 1 表示正在限流、处于冻结。chart 的自身告警按 `deploy/helm/srenautix/files/conditions.yaml` 的方向判断 |
 | `srenautix_admission_selfcheck_ok` | 全部探针被拒绝时为 1。探针在 `apiserver_request_total` 中带 `dry_run="All"`，准入拒绝类告警用 `dry_run=""` 排除它们 |
+| `srenautix_gitops_pushes_total{repo,result}` | `srenautix/` 分支的推送：`ok`、`base_moved`（推送期间 base 前进，没有开 PR）、`error` |
+| `srenautix_gitops_pull_requests_total{repo,result}` | 开出的 PR |
+| `srenautix_gitops_rate_limited_total{repo}` | 按小时限速拒绝的执行 |
+| `srenautix_gitops_denied_requests_total{reason}` | 被请求白名单拦下、没有发出的 GitHub 请求：`ref_outside_prefix`、`merge`、`other` |
+| `srenautix_git_main_unexpected_commits_total{repo,actor}`、`srenautix_git_main_unexpected_commits{repo}` | main watchdog 发现的非人工提交（`actor` 为 `srenautix` 或 `other_bot`）；gauge 是回看窗口内仍成立的条数 |
+| `srenautix_git_main_watchdog_last_check_timestamp_seconds{repo}`、`srenautix_git_main_watchdog_errors_total{repo}` | 最近一次成功检查的时间、失败次数 |
 | `srenautix_gateway_frozen` | 处于冻结时为 1 |
 | `srenautix_gateway_propose_only` | 只提议时为 1 |
 | `srenautix_gateway_executions_total{action,phase}` | 进入各阶段的次数 |
@@ -145,9 +153,30 @@ srenautix-spoke admission workflow-allowlist --policy=policy.yaml > workflow-all
 
 ## gitops_pr
 
+SreNautix 对 Git 的全部写入都经 `gitops_pr`：server 的自愈 PR 与拓扑覆盖 PR 都是 `gitops_pr` 提议（ADR 0025）。
+
 - 只在启用了 GitHub App（`gateway.github_app_dir`）且策略列出仓库与路径白名单时可用；首次使用前核对 App 的 slug。
-- 每 15 秒探测白名单中每个仓库 base 分支的分支保护，条件 `GitHubBranchProtection`；没有分支保护时预检 `branch_protection` 拒绝执行。
-- 只推送 `srenautix/<执行 ID>` 分支并开 PR，从不合并；断言的 `target_uid` 是被批准时 base 分支的提交 SHA。
+- 断言的 `target_uid` 是被批准时 base 分支的提交 SHA。只新建 `srenautix/` 分支（默认 `srenautix/<执行 ID>`，提议可以给出 `branch`），推送前后各读一次 base，base 在推送期间前进时不开 PR（`failed/base_moved`）。开 PR 后请求策略中的 `reviewers`。从不合并。
+- 每 15 秒探测每个仓库的 base 分支，条件 `GitBaseGuarded`：有分支保护，或策略登记了 `compensating_controls`（不变量 12）；两者都没有时预检 `base_guarded` 拒绝执行。
+- main watchdog 每 `gitops.main_watchdog.interval` 检查 base 分支在 `lookback` 内的提交，机器人直接写入或由机器人合并的提交使条件 `GitMainWatchdog` 为 False，预检 `main_watchdog` 拒绝执行。
+- 每个仓库每小时最多开 `gitops.max_prs_per_hour` 个 PR，超出的工单以 `gitops_rate_limited` 拒绝。
+- 推送、核对、开 PR、请求审阅、关闭 PR 与被请求白名单拦下的请求都写入执行审计链（`write` 记录，`target.group=github`）。
+- 撤销是关闭本次开出的 PR；PR 已被人合并时转为 `needs_human`，revert 需要新的提议。
+
+```yaml
+actions:
+  - id: gitops_pr
+    auto_execution: {rules: [remediation-pr]}
+gitops:
+  max_prs_per_hour: 2
+  main_watchdog: {interval: 5m, lookback: 24h, allowed_bots: []}
+  repositories:
+    - repository: acme/infra
+      base: main
+      paths: [apps/, monitoring/]
+      reviewers: [alice]
+      compensating_controls: {approved_by: alice, approved_at: "2026-10-20", reference: "https://github.com/acme/infra/issues/12"}
+```
 
 ## 测试
 

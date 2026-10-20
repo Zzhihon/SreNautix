@@ -18,6 +18,7 @@ import (
 	"github.com/Zzhihon/SreNautix/internal/spoke/gateway/catalog"
 	"github.com/Zzhihon/SreNautix/internal/spoke/gateway/execution"
 	"github.com/Zzhihon/SreNautix/internal/spoke/gateway/executor"
+	"github.com/Zzhihon/SreNautix/internal/spoke/gateway/github"
 	"github.com/Zzhihon/SreNautix/internal/spoke/gateway/kube"
 	"github.com/Zzhihon/SreNautix/internal/spoke/tunnel"
 )
@@ -111,16 +112,17 @@ func (e *Engine) precheckAndExecute(ctx context.Context, x *execution.ActionExec
 	if !now.Before(x.Spec.ApprovalExpiresAt.Time) || !now.Before(x.Spec.ProposalExpiresAt.Time) {
 		return fail(&verdict{phase: execution.PhaseExpired, reason: "expired", message: "approval or proposal expired while queued"})
 	}
-	if e.ProposeOnly() {
+	if !e.Accepts(x.Spec.Action) {
 		return fail(reject("propose_only", "", "gateway is proposal-only"))
 	}
 	if err := e.SelfCheck(ctx); err != nil {
 		e.mu.Lock()
-		e.proposeOnly = true
+		e.proposeOnly, e.accepts = true, nil
 		e.mu.Unlock()
 		return fail(reject("propose_only", "", "%v", err))
 	}
-	if frozen, detail, err := e.Frozen(ctx); err != nil || frozen {
+	// 冻结只约束集群写入：gitops_pr 只写 Git，冻结时照常执行；其余动作一律拒绝（ADR 0025）
+	if frozen, detail, err := e.Frozen(ctx); x.Spec.Action != GitOnlyAction && (err != nil || frozen) {
 		return fail(reject("frozen", "", "srenautix-freeze %s %v", detail, err))
 	}
 	b, err := e.d.Hub.GetBinding(ctx, x.Spec.ProposalID)
@@ -162,6 +164,11 @@ func (e *Engine) precheckAndExecute(ctx context.Context, x *execution.ActionExec
 	}
 	if !res.Passed() {
 		return fail(reject("precheck_failed", "", "%s", res.Failed()))
+	}
+	if x.Spec.Action == GitOnlyAction {
+		if v := e.gitopsRateLimit(ctx, x.Spec.Params.Raw); v != nil {
+			return fail(v)
+		}
 	}
 	snap := res.Snapshot
 	if snap == nil {
@@ -236,6 +243,11 @@ func (e *Engine) executeFailed(ctx context.Context, x *execution.ActionExecution
 	}
 	if errors.Is(execErr, kube.ErrEvictionBlocked) {
 		_, err := e.transition(ctx, id, tr{phase: execution.PhaseFailed, reason: "pdb_blocked", message: execErr.Error()})
+		return err
+	}
+	if errors.Is(execErr, github.ErrBaseMoved) {
+		// base 在推送期间前进：没有开 PR；已推送的 srenautix/ 分支留在仓库中（gateway 不能删除分支），审计链中有记录
+		_, err := e.transition(ctx, id, tr{phase: execution.PhaseFailed, reason: "base_moved", message: execErr.Error()})
 		return err
 	}
 	obs, detail, oerr := e.d.Executors[x.Spec.Action].Observe(ctx, e.execContext(x, snap))
@@ -322,18 +334,21 @@ func (e *Engine) verifyPhase(ctx context.Context, x *execution.ActionExecution) 
 		checks = append(checks, execution.CheckResult{ID: c.ID, Kind: "promql", Passed: r.Passed, Detail: r.Detail})
 	}
 	passed := true
-	var failed []string
+	var failed, all []string
 	for _, c := range checks {
 		res := "pass"
 		if !c.Passed {
 			passed, res = false, "fail"
 			failed = append(failed, c.ID+": "+c.Detail)
 		}
+		all = append(all, c.ID+": "+c.Detail)
 		e.d.Metrics.VerifyConditions.WithLabelValues(x.Spec.Action, c.Kind, res).Inc()
 	}
 	ver := &execution.Verification{Passed: passed, Checks: checks}
 	if passed {
-		_, err := e.transition(ctx, x.Name, tr{phase: execution.PhaseVerified, reason: "checks_passed", mutate: func(s *execution.Status) { s.Verification = ver }})
+		// 通过的检查的细节写进 verified 事件（gitops_pr 的 pr_open 带 PR 地址与编号，中心据此关联 issue）
+		_, err := e.transition(ctx, x.Name, tr{phase: execution.PhaseVerified, reason: "checks_passed", message: truncate(strings.Join(all, "; "), 1000),
+			mutate: func(s *execution.Status) { s.Verification = ver }})
 		return err
 	}
 	x, err = e.transition(ctx, x.Name, tr{phase: execution.PhaseVerifyFailed, reason: "checks_failed", message: strings.Join(failed, "; "),

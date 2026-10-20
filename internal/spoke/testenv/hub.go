@@ -30,6 +30,15 @@ type Hub struct {
 	softPaused bool
 	down       bool
 	duplicates int
+	// ignoreActions 为 true 时不理会拉取请求中的 actions（模拟不按 accepts_actions 下发的中心）
+	ignoreActions bool
+}
+
+// IgnoreActionFilter 让中心下发全部工单，不理会 gateway 拉取时给出的 actions。
+func (h *Hub) IgnoreActionFilter(on bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.ignoreActions = on
 }
 
 // StartHub 启动中心；token 写入 TokenFile 供客户端读取。
@@ -84,11 +93,18 @@ func (h *Hub) write(w http.ResponseWriter, v any) {
 
 func (h *Hub) tickets(w http.ResponseWriter, r *http.Request) {
 	deadline := time.Now().Add(2 * time.Second)
+	// actions 给出时只下发这些动作的工单（冻结的 gateway 只拉取 gitops_pr）
+	only := map[string]bool{}
+	if a := r.URL.Query().Get("actions"); a != "" {
+		for _, s := range strings.Split(a, ",") {
+			only[s] = true
+		}
+	}
 	for {
 		h.mu.Lock()
 		var out []tunnel.Ticket
 		for _, t := range h.pending {
-			if !h.delivered[t.TicketID] && !h.softPaused {
+			if !h.delivered[t.TicketID] && !h.softPaused && (len(only) == 0 || h.ignoreActions || only[t.Proposal.Action]) {
 				out = append(out, t)
 			}
 		}

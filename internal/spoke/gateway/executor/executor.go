@@ -19,6 +19,7 @@ import (
 	"github.com/Zzhihon/SreNautix/internal/spoke/gateway/execution"
 	"github.com/Zzhihon/SreNautix/internal/spoke/gateway/github"
 	"github.com/Zzhihon/SreNautix/internal/spoke/gateway/kube"
+	"github.com/Zzhihon/SreNautix/internal/spoke/gateway/metrics"
 	"github.com/Zzhihon/SreNautix/internal/spoke/gateway/policy"
 )
 
@@ -29,7 +30,11 @@ type Deps struct {
 	Policy  func() *policy.Policy
 	// GitHub 为 nil 时 gitops_pr 的预检失败。
 	GitHub *github.App
-	Now    func() time.Time
+	// MainWatchdog 返回仓库 base 分支的 watchdog 状态（ok 为 false 时 gitops_pr 预检 main_watchdog 失败）；nil 时视为失败。
+	MainWatchdog func(repository string) (ok bool, detail string)
+	// Metrics 为 nil 时不记指标（单元测试）。
+	Metrics *metrics.Metrics
+	Now     func() time.Time
 	// Poll 是分步动作等待目标恢复时的轮询间隔。
 	Poll time.Duration
 }

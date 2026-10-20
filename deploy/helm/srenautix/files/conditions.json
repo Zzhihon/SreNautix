@@ -14,7 +14,8 @@
         "ClockSkew": { "strip_type": "ClockSkew" },
         "Leader": { "strip_type": null },
         "ApiserverThrottled": { "healthy": "False", "strip_type": null },
-        "GitHubBranchProtection": { "strip_type": null },
+        "GitBaseGuarded": { "strip_type": null },
+        "GitMainWatchdog": { "strip_type": null },
         "PolicyLoaded": { "strip_type": null }
       }
     },

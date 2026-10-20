@@ -31,6 +31,9 @@ func TestInvariant07HumanApprovalForIrreversible(t *testing.T) {
 				ns, autoNS = "", ""
 			}
 			doc := fmt.Sprintf("version: 1\ncluster: c\napprovers: []\nactions:\n  - id: %s\n%s    auto_execution: {rules: [r]%s}\n", a.ID, ns, autoNS)
+			if a.ID == "gitops_pr" {
+				doc += "gitops:\n  repositories:\n    - {repository: acme/infra, base: main, paths: [deploy/]}\n"
+			}
 			_, err := policy.Parse([]byte(doc), cat)
 			reversible := a.Level == assertion.LevelReversible || a.Level == assertion.LevelReversibleRecreatable
 			if !reversible && (err == nil || !strings.Contains(err.Error(), "cannot be executed automatically")) {

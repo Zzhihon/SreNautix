@@ -633,10 +633,10 @@ actions:
 
   # ---------- GitOps ----------
   - id: gitops_pr
-    title: 以 GitHub App 在 srenautix/ 分支上提交补丁并开 PR（从不合并）
-    level: compensable
-    min_tier: H
-    auto_execution: forbidden
+    title: 以 GitHub App 在 srenautix/ 分支上提交补丁并开 PR（从不合并，改动只在人合并后生效）
+    level: reversible
+    min_tier: L
+    auto_execution: allowed
     target: {group: srenautix.io, version: v1, kind: GitRepository, resource: gitrepositories, namespaced: false}
     params:
       type: object
@@ -648,16 +648,25 @@ actions:
         title: {type: string, minLength: 1, maxLength: 120}
         body: {type: string, maxLength: 8192}
         patch: {type: string, minLength: 1, maxLength: 65536, description: git diff 格式的补丁（每个文件带 diff --git 头）；只允许修改策略中该仓库的路径白名单}
+        branch: {type: string, pattern: "^srenautix/[a-z0-9][a-z0-9._/-]{0,120}$", description: 推送的分支；省略时为 srenautix/<执行 ID>}
+        reviewers:
+          type: array
+          maxItems: 10
+          items: {type: string, pattern: "^[A-Za-z0-9-]{1,39}$"}
+          description: 请求审阅的 GitHub 账号，必须是策略中该仓库 reviewers 的子集；省略时为策略中的全部 reviewers
     conflict_domain: gitops
     prechecks:
       - {id: base_head, kind: git, description: base 分支当前的提交 SHA 等于断言的 target_uid（绑定 head SHA）}
-      - {id: branch_protection, kind: git, description: 启动时探测到 base 分支有分支保护，否则 gitops_pr 停用}
+      - {id: base_guarded, kind: git, description: base 分支有分支保护，或策略中该仓库登记了经批准的补偿控制（不变量 12）}
+      - {id: main_watchdog, kind: git, description: 回看窗口内 base 分支上没有非人工的提交}
+      - {id: branch_free, kind: git, description: 要推送的 srenautix/ 分支尚不存在}
+      - {id: reviewers_allowed, kind: git, description: 请求审阅的账号都在策略中该仓库的 reviewers 中}
       - {id: patch_paths, kind: git, description: 补丁只触及策略中的路径白名单，没有二进制改动与可执行文件模式}
       - {id: patch_applies, kind: git, description: 补丁能干净地应用到 base}
     verify:
       window_seconds: 0
       checks:
         - {id: pr_open, kind: git, description: srenautix/ 分支上的 PR 已创建，head 为本次提交}
-    undo: {kind: compensate, description: 关闭 PR 或提交 revert PR，需要再次审批, compensation_action: gitops_pr}
-    blast_radius: {unit: repositories, method: 单个仓库的一个 PR, l_tier_max: 0}
+    undo: {kind: restore, description: 关闭本次开出的 PR（未合并时）；已经由人合并的改动需要新的 revert 提议}
+    blast_radius: {unit: repositories, method: 单个仓库的一个 PR, l_tier_max: 1}
     writes: []

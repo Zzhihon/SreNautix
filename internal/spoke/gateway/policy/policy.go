@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path"
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/Zzhihon/SreNautix/internal/spoke/gateway/assertion"
 	"github.com/Zzhihon/SreNautix/internal/spoke/gateway/catalog"
@@ -58,6 +60,71 @@ type Repository struct {
 	Repository string   `json:"repository"`
 	Base       string   `json:"base"`
 	Paths      []string `json:"paths"`
+	Reviewers  []string `json:"reviewers"`
+	// CompensatingControls 不为 nil 表示 base 没有分支保护时以补偿控制代替（不变量 12，ADR 0025）
+	CompensatingControls *CompensatingControls `json:"compensating_controls"`
+}
+
+// CompensatingControls 记录补偿控制的批准人与依据。
+type CompensatingControls struct {
+	ApprovedBy string `json:"approved_by"`
+	ApprovedAt string `json:"approved_at"`
+	Reference  string `json:"reference"`
+}
+
+// GitOps 是 gitops_pr 的仓库与补偿控制设置。
+type GitOps struct {
+	MaxPRsPerHour *int `json:"max_prs_per_hour"`
+	MainWatchdog  struct {
+		Interval    string   `json:"interval"`
+		Lookback    string   `json:"lookback"`
+		AllowedBots []string `json:"allowed_bots"`
+	} `json:"main_watchdog"`
+	Repositories []Repository `json:"repositories"`
+
+	interval, lookback time.Duration
+}
+
+// PRsPerHour 返回每个仓库每小时开 PR 的上限（默认 2）。
+func (g *GitOps) PRsPerHour() int {
+	if g.MaxPRsPerHour == nil {
+		return 2
+	}
+	return *g.MaxPRsPerHour
+}
+
+// WatchdogInterval 返回 main watchdog 的检查间隔（默认 5 分钟）。
+func (g *GitOps) WatchdogInterval() time.Duration { return g.interval }
+
+// WatchdogLookback 返回 main watchdog 的回看窗口（默认 24 小时）。
+func (g *GitOps) WatchdogLookback() time.Duration { return g.lookback }
+
+func (g *GitOps) parse() error {
+	dur := func(s, def string, min, max time.Duration, field string) (time.Duration, error) {
+		if s == "" {
+			s = def
+		}
+		d, err := time.ParseDuration(s)
+		if err != nil || d < min || d > max {
+			return 0, fmt.Errorf("policy: gitops.main_watchdog.%s must be a duration between %s and %s, got %q", field, min, max, s)
+		}
+		return d, nil
+	}
+	var err error
+	if g.interval, err = dur(g.MainWatchdog.Interval, "5m", time.Second, time.Hour, "interval"); err != nil {
+		return err
+	}
+	if g.lookback, err = dur(g.MainWatchdog.Lookback, "24h", time.Hour, 168*time.Hour, "lookback"); err != nil {
+		return err
+	}
+	seen := map[string]bool{}
+	for _, r := range g.Repositories {
+		if seen[r.Repository] {
+			return fmt.Errorf("policy: gitops repository %s is listed twice", r.Repository)
+		}
+		seen[r.Repository] = true
+	}
+	return nil
 }
 
 // SelfDependencies 是 SreNautix 自身的依赖集合。
@@ -79,9 +146,7 @@ type Policy struct {
 	Self                     SelfDependencies   `json:"self_dependencies"`
 	Approvers                []Approver         `json:"approvers"`
 	WorkflowTemplates        []WorkflowTemplate `json:"workflow_templates"`
-	GitOps                   *struct {
-		Repositories []Repository `json:"repositories"`
-	} `json:"gitops"`
+	GitOps                   *GitOps            `json:"gitops"`
 
 	byID map[string]*ActionPolicy
 }
@@ -174,6 +239,11 @@ func Parse(doc []byte, cat *catalog.Catalog) (*Policy, error) {
 	}
 	if _, ok := p.byID["gitops_pr"]; ok && (p.GitOps == nil || len(p.GitOps.Repositories) == 0) {
 		return nil, fmt.Errorf("policy: gitops_pr is enabled without gitops.repositories")
+	}
+	if p.GitOps != nil {
+		if err := p.GitOps.parse(); err != nil {
+			return nil, err
+		}
 	}
 	for _, ap := range p.Approvers {
 		if strings.HasPrefix(ap.Principal, "auto:") {
@@ -309,14 +379,29 @@ func (p *Policy) Repo(repository string) (*Repository, bool) {
 	return nil, false
 }
 
-// PathAllowed 表示补丁可以修改该路径：等于白名单中的完整路径，或在以 / 结尾的目录前缀之下。
-func (r *Repository) PathAllowed(path string) bool {
-	for _, p := range r.Paths {
-		if strings.HasSuffix(p, "/") && strings.HasPrefix(path, p) {
-			return true
+// ReviewersAllowed 表示 reviewers 都在该仓库的 reviewers 中。
+func (r *Repository) ReviewersAllowed(reviewers []string) bool {
+	for _, v := range reviewers {
+		if !contains(r.Reviewers, v) {
+			return false
 		}
-		if path == p {
+	}
+	return true
+}
+
+// PathAllowed 表示补丁可以修改该路径：等于白名单中的完整路径，在以 / 结尾的目录前缀之下，
+// 或匹配含 * ? [ 的模式（path.Match 语义，* 不跨越 /）。
+func (r *Repository) PathAllowed(p string) bool {
+	for _, allowed := range r.Paths {
+		switch {
+		case strings.HasSuffix(allowed, "/") && strings.HasPrefix(p, allowed):
 			return true
+		case p == allowed:
+			return true
+		case strings.ContainsAny(allowed, "*?["):
+			if ok, err := path.Match(allowed, p); err == nil && ok {
+				return true
+			}
 		}
 	}
 	return false

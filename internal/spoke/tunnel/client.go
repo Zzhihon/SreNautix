@@ -143,9 +143,12 @@ func (c *Client) Do(ctx context.Context, method, path string, query url.Values, 
 	return nil
 }
 
-// PullTickets 长轮询拉取工单；wait 为中心没有工单时的最长等待。
-func (c *Client) PullTickets(ctx context.Context, wait time.Duration, max int) (*TicketBatch, error) {
+// PullTickets 长轮询拉取工单；wait 为中心没有工单时的最长等待。actions 不为空时只拉取这些动作的工单。
+func (c *Client) PullTickets(ctx context.Context, wait time.Duration, max int, actions ...string) (*TicketBatch, error) {
 	q := url.Values{"wait": {strconv.Itoa(int(wait / time.Second))}, "max": {strconv.Itoa(max)}}
+	if len(actions) > 0 {
+		q.Set("actions", strings.Join(actions, ","))
+	}
 	var out TicketBatch
 	if err := c.Do(ctx, http.MethodGet, "/v1/spoke/tickets", q, nil, &out, wait+c.cfg.Timeout); err != nil {
 		return nil, err

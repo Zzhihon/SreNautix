@@ -1,5 +1,5 @@
 // 本文件由 packages/contract/scripts/gen.ts 从 contract/ 生成，不要手工修改。
-export const CONTRACT_VERSION = '2.15.0';
+export const CONTRACT_VERSION = '2.16.0';
 
 export const SCHEMAS: Record<string, Record<string, unknown>> = {
   'https://srenautix.io/contract/gateway/v1/action-catalog.schema.json': {
@@ -611,11 +611,33 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
         },
       },
       gitops: {
-        description: 'gitops_pr 的仓库与路径白名单。',
+        description: 'gitops_pr 的仓库、路径白名单与补偿控制（ADR 0025）。',
         type: 'object',
         additionalProperties: false,
         required: ['repositories'],
         properties: {
+          max_prs_per_hour: {
+            description:
+              '每个仓库每小时最多开出的 PR 数（按进入 executing 的时间计），超出的工单以 gitops_rate_limited 拒绝。默认 2。',
+            type: 'integer',
+            minimum: 1,
+            maximum: 20,
+          },
+          main_watchdog: {
+            description:
+              '定期检查 base 分支上的提交：由机器人身份直接写入、或由机器人合并的提交为非人工提交，回看窗口内存在时条件 GitMainWatchdog 为 False，gitops_pr 停止推送。',
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              interval: { description: '检查间隔，Go duration，1s 到 1h，默认 5m。', type: 'string' },
+              lookback: { description: '回看窗口，Go duration，1h 到 168h，默认 24h。', type: 'string' },
+              allowed_bots: {
+                description: '允许直接写入 base 的机器人账号（例如 renovate[bot]）；gateway 自己的 App 不能列在这里。',
+                type: 'array',
+                items: { type: 'string', pattern: '^[A-Za-z0-9-]{1,39}(\\[bot\\])?$' },
+              },
+            },
+          },
           repositories: {
             type: 'array',
             items: {
@@ -624,12 +646,31 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
               required: ['repository', 'base', 'paths'],
               properties: {
                 repository: { type: 'string', pattern: '^[A-Za-z0-9-]{1,39}/[A-Za-z0-9._-]{1,100}$' },
-                base: { type: 'string' },
+                base: { type: 'string', minLength: 1 },
                 paths: {
-                  description: '允许修改的路径前缀（以 / 结尾表示目录）或完整路径。',
+                  description:
+                    '允许修改的路径：以 / 结尾的目录前缀、完整路径，或含 * ? [ 的模式（path.Match 语义，* 不跨越 /）。',
                   type: 'array',
                   minItems: 1,
                   items: { type: 'string' },
+                },
+                reviewers: {
+                  description: '开出 PR 后请求审阅的 GitHub 账号；工单参数中的 reviewers 必须是它的子集。',
+                  type: 'array',
+                  maxItems: 10,
+                  items: { type: 'string', pattern: '^[A-Za-z0-9-]{1,39}$' },
+                },
+                compensating_controls: {
+                  description:
+                    'base 分支没有分支保护时，经批准以补偿控制代替（不变量 12，ADR 0025）：只推送 srenautix/ 分支并在推送前后核对 base、从不合并、每次推送与开 PR 写入审计链、按小时限速、main watchdog。这一项记录批准人与依据，没有它时 base 必须有分支保护。',
+                  type: 'object',
+                  additionalProperties: false,
+                  required: ['approved_by', 'approved_at', 'reference'],
+                  properties: {
+                    approved_by: { type: 'string', minLength: 1 },
+                    approved_at: { type: 'string', format: 'date' },
+                    reference: { description: '批准的出处（issue、章程、ADR 链接）。', type: 'string', minLength: 1 },
+                  },
                 },
               },
             },

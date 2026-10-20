@@ -153,13 +153,15 @@ type ClockSkew struct {
 
 // Heartbeat 是 gateway 上报的状态。
 type Heartbeat struct {
-	GatewayID   string        `json:"gateway_id"`
-	Version     string        `json:"version"`
-	Leader      bool          `json:"leader"`
-	ProposeOnly bool          `json:"propose_only"`
-	Conditions  []Condition   `json:"conditions"`
-	Queue       []QueueDomain `json:"queue"`
-	ClockSkew   ClockSkew     `json:"clock_skew_seconds"`
+	GatewayID   string `json:"gateway_id"`
+	Version     string `json:"version"`
+	Leader      bool   `json:"leader"`
+	ProposeOnly bool   `json:"propose_only"`
+	// AcceptsActions 是只提议时仍然执行的动作（冻结时为 [gitops_pr]），中心只下发这些动作的工单
+	AcceptsActions []string      `json:"accepts_actions,omitempty"`
+	Conditions     []Condition   `json:"conditions"`
+	Queue          []QueueDomain `json:"queue"`
+	ClockSkew      ClockSkew     `json:"clock_skew_seconds"`
 }
 
 // HubStatus 是心跳的响应。

@@ -104,8 +104,8 @@ func (e *Engine) Frozen(ctx context.Context) (bool, string, error) {
 }
 
 // gate 计算是否只提议：自检、熔断开关、审计汇、时钟偏差、apiserver 限流、策略加载。
-func (e *Engine) gate(ctx context.Context) (bool, []string) {
-	var reasons []string
+// frozenOnly 表示冻结是唯一的原因：冻结只约束集群写入，此时 gitops_pr 仍然执行（ADR 0025）。
+func (e *Engine) gate(ctx context.Context) (po bool, reasons []string, frozenOnly bool) {
 	if err := e.reloadConfig(); err != nil {
 		reasons = append(reasons, "policy: "+err.Error())
 	}
@@ -124,9 +124,6 @@ func (e *Engine) gate(ctx context.Context) (bool, []string) {
 	// Freeze 条件为 True 表示处于冻结
 	e.setCondition(metrics.ConditionFreeze, frozen, map[bool]string{true: "frozen", false: "active"}[frozen], detail)
 	e.d.Metrics.Frozen.Set(map[bool]float64{true: 1, false: 0}[frozen])
-	if frozen {
-		reasons = append(reasons, "srenautix-freeze: "+detail)
-	}
 	if ok, aerr := e.d.Audit.Healthy(); !ok {
 		e.setCondition(metrics.ConditionAuditSink, false, "sink_unavailable", fmt.Sprint(aerr))
 		reasons = append(reasons, fmt.Sprintf("audit sink: %v", aerr))
@@ -155,42 +152,13 @@ func (e *Engine) gate(ctx context.Context) (bool, []string) {
 	} else {
 		e.setCondition(metrics.ConditionApiserverThrottled, false, "none", "")
 	}
-	e.probeBranchProtection(ctx)
-	return len(reasons) > 0, reasons
-}
-
-// probeBranchProtection 在启用 gitops_pr 时探测白名单中每个仓库 base 分支的分支保护（不变量 12）。
-// 没有分支保护时条件为 False，gitops_pr 的预检 branch_protection 拒绝执行；不影响其他动作。
-func (e *Engine) probeBranchProtection(ctx context.Context) {
-	pol := e.currentPolicy()
-	if _, ok := pol.Action("gitops_pr"); !ok {
-		return
+	e.probeGitBase(ctx)
+	e.watchMain(ctx)
+	frozenOnly = frozen && len(reasons) == 0
+	if frozen {
+		reasons = append(reasons, "srenautix-freeze: "+detail)
 	}
-	if e.d.GitHub == nil {
-		e.setCondition(metrics.ConditionGitHubBranchProtection, false, "not_configured", "gitops_pr is enabled without a GitHub App")
-		return
-	}
-	var unprotected []string
-	for _, r := range pol.GitOps.Repositories {
-		repo, err := e.d.GitHub.Repo(r.Repository)
-		if err != nil {
-			e.setCondition(metrics.ConditionGitHubBranchProtection, false, "probe_failed", err.Error())
-			return
-		}
-		ok, err := repo.Protected(ctx, r.Base)
-		if err != nil {
-			e.setCondition(metrics.ConditionGitHubBranchProtection, false, "probe_failed", err.Error())
-			return
-		}
-		if !ok {
-			unprotected = append(unprotected, r.Repository+"@"+r.Base)
-		}
-	}
-	if len(unprotected) > 0 {
-		e.setCondition(metrics.ConditionGitHubBranchProtection, false, "unprotected", strings.Join(unprotected, ", "))
-		return
-	}
-	e.setCondition(metrics.ConditionGitHubBranchProtection, true, "protected", "")
+	return len(reasons) > 0, reasons, frozenOnly
 }
 
 // safetyCheck 更新只提议状态并发送心跳。
@@ -198,19 +166,24 @@ func (e *Engine) safetyCheck(ctx context.Context) {
 	if ctx.Err() != nil {
 		return
 	}
-	po, reasons := e.gate(ctx)
+	po, reasons, frozenOnly := e.gate(ctx)
+	var accepts []string
+	if _, ok := e.currentPolicy().Action(GitOnlyAction); ok && po && frozenOnly {
+		accepts = []string{GitOnlyAction}
+	}
 	e.mu.Lock()
 	e.proposeOnly = po
+	e.accepts = accepts
 	softPaused := e.softPaused
 	e.mu.Unlock()
 	e.d.Metrics.ProposeOnly.Set(map[bool]float64{true: 1, false: 0}[po])
 	if po {
-		slog.Warn("gateway is proposal-only", "reasons", reasons)
+		slog.Warn("gateway is proposal-only", "reasons", reasons, "still_executing", accepts)
 	}
 	e.mu.Lock()
 	skew := e.lastSkew
 	e.mu.Unlock()
-	hb := tunnel.Heartbeat{GatewayID: e.cfg.Identity, Version: e.cfg.Version, Leader: true, ProposeOnly: po,
+	hb := tunnel.Heartbeat{GatewayID: e.cfg.Identity, Version: e.cfg.Version, Leader: true, ProposeOnly: po, AcceptsActions: accepts,
 		Conditions: e.Conditions(), Queue: e.q.snapshot(), ClockSkew: tunnel.ClockSkew{Apiserver: skew.Seconds()}}
 	st, err := e.d.Hub.SendHeartbeat(ctx, hb)
 	if err != nil {

@@ -36,6 +36,13 @@ paths:
           in: query
           required: false
           schema: {type: integer, minimum: 1, maximum: 100, default: 20}
+        - name: actions
+          in: query
+          description: |
+            逗号分隔的动作 ID。给出时只下发这些动作的工单，其余工单留在队列中等待之后的拉取。
+            gateway 在冻结期间只执行不写集群的 gitops_pr，此时以 actions=gitops_pr 拉取（ADR 0025）。
+          required: false
+          schema: {type: string, pattern: '^[a-z][a-z0-9_]*(,[a-z][a-z0-9_]*)*$'}
       responses:
         '200':
           description: 工单列表（可以为空）
@@ -313,7 +320,7 @@ components:
       properties:
         type:
           type: string
-          enum: [AdmissionSelfCheck, Freeze, AuditSink, ClockSkew, Leader, ApiserverThrottled, GitHubBranchProtection, PolicyLoaded]
+          enum: [AdmissionSelfCheck, Freeze, AuditSink, ClockSkew, Leader, ApiserverThrottled, GitBaseGuarded, GitMainWatchdog, PolicyLoaded]
         status: {type: string, enum: ['True', 'False', 'Unknown']}
         reason: {type: string}
         message: {type: string, maxLength: 4096}
@@ -329,8 +336,14 @@ components:
         version: {type: string}
         leader: {type: boolean}
         propose_only:
-          description: 为 true 时 gateway 不认领新工单；中心在所有页面上把该集群显示为"仅提议"。
+          description: 为 true 时 gateway 不认领新工单（accepts_actions 中的动作除外）；中心在所有页面上把该集群显示为"仅提议"。
           type: boolean
+        accepts_actions:
+          description: |
+            propose_only 为 true 时仍会执行的动作。冻结只约束集群写入，冻结期间 gitops_pr（只写 Git）照常执行，此时为 ["gitops_pr"]（ADR 0025）。
+            中心只向 gateway 下发这些动作的工单，其余工单留在队列中。propose_only 为 false 时省略。
+          type: array
+          items: {type: string, pattern: '^[a-z][a-z0-9_]*$'}
         conditions:
           type: array
           items: {$ref: '#/components/schemas/Condition'}

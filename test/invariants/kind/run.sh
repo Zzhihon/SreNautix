@@ -7,6 +7,8 @@
 #   4. 删除集群。
 # 不变量 8 默认运行 1000 轮（SRENAUTIX_INVARIANT8_ROUNDS）。
 # 需要：docker、go、envsubst；SRENAUTIX_TEST_BIN（含 prometheus）与 SRENAUTIX_MINIO_BIN（.github/scripts/install-test-binaries.sh）。
+# 不变量 12 设置 SRENAUTIX_TEST_GITHUB_API 时使用该地址的 Git 服务（Kind 中的本地 Git 服务，实现 /_test 控制接口，
+# 不校验 App JWT 的签名），否则使用进程内的同一实现。
 # 用法：test/invariants/kind/run.sh [不变量编号 ...]，例如 run.sh 08 10；不带参数时运行全部。
 set -euo pipefail
 

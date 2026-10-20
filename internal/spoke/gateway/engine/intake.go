@@ -19,7 +19,8 @@ import (
 	"github.com/Zzhihon/SreNautix/internal/spoke/tunnel"
 )
 
-// pullLoop 长轮询拉取工单；只提议、停机或失去主实例身份时不认领新工单。
+// pullLoop 长轮询拉取工单；只提议、停机或失去主实例身份时不认领新工单。只提议的唯一原因是冻结时，
+// 只拉取不写集群的 gitops_pr（ADR 0025），其余工单留在中心的队列中。
 func (e *Engine) pullLoop(ctx context.Context) {
 	for {
 		select {
@@ -27,11 +28,14 @@ func (e *Engine) pullLoop(ctx context.Context) {
 			return
 		default:
 		}
+		var only []string
 		if e.ProposeOnly() {
-			e.sleep(ctx, time.Second)
-			continue
+			if only = e.acceptedActions(); len(only) == 0 {
+				e.sleep(ctx, time.Second)
+				continue
+			}
 		}
-		batch, err := e.d.Hub.PullTickets(ctx, e.cfg.PullWait, 20)
+		batch, err := e.d.Hub.PullTickets(ctx, e.cfg.PullWait, 20, only...)
 		if err != nil {
 			if ctx.Err() == nil {
 				slog.Error("pull tickets", "err", err)
@@ -40,14 +44,22 @@ func (e *Engine) pullLoop(ctx context.Context) {
 			continue
 		}
 		e.observeHub(batch.HubClock)
+		skipped := false
 		for _, t := range batch.Tickets {
-			if ctx.Err() != nil || e.ProposeOnly() {
-				// 未处理的工单没有 pulled 事件，中心会再次下发
+			if ctx.Err() != nil {
 				break
+			}
+			if !e.Accepts(t.Proposal.Action) {
+				// 未处理的工单没有 pulled 事件，中心会再次下发
+				skipped = true
+				continue
 			}
 			if err := e.intake(ctx, t); err != nil {
 				slog.Error("intake ticket", "ticket", t.TicketID, "proposal", t.Proposal.ProposalID, "err", err)
 			}
+		}
+		if skipped {
+			e.sleep(ctx, time.Second)
 		}
 		e.Wake()
 	}

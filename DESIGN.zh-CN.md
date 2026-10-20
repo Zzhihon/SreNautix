@@ -572,13 +572,13 @@ pulled → prechecked → executing → verifying → verified
 | 动作 | 约束 |
 |---|---|
 | `argocd_app_sync` | 固定到指定 revision |
-| `gitops_pr` | 绑定 head SHA；只推送到 `srenautix/*` 分支；从不合并；启动时探测目标仓库的分支保护 |
+| `gitops_pr` | 绑定 head SHA；只新建 `srenautix/*` 分支，推送前后核对 base 没有变化；从不合并；base 有分支保护或经批准的补偿控制；每个仓库每小时开 PR 的数量有上限；main watchdog 发现机器人写入或合并 base 时停止推送（ADR 0025）。改动只在人合并 PR 后生效，因此是可撤销动作（关闭 PR），可以自动执行 |
 | `workflow_submit` | 只接受 Git 白名单中的模板，按名称、内容 sha256、ServiceAccount 匹配；参数必须符合 schema |
 
 **准入策略**
 
 - Helm 根据启用的动作生成准入策略，只约束 gateway 自己的 ServiceAccount，并显式包含 `pods/eviction`。
-- `srenautix-freeze` 作为 `paramRef` 引用，配置 `paramNotFoundAction: Deny`：ConfigMap 缺失时，所有写入都被拒绝。
+- `srenautix-freeze` 作为 `paramRef` 引用，配置 `paramNotFoundAction: Deny`：ConfigMap 缺失时，所有写入都被拒绝。冻结只约束集群写入：冻结期间 gateway 仍然执行只写 Git 的 `gitops_pr`，其余动作一律不执行（ADR 0025）。
 - 自检：启动时和每次执行前，各提交一次违规的 `dryRun=All` 写入，必须被拒绝；被放行就转为只提议。
 
 **升级与停机**：收到 SIGTERM 后不再认领新工单，等进行中的动作完成。正在执行或校验时不升级。
@@ -1100,7 +1100,7 @@ server、worker、reader、gateway 都会发布带类型的状态条件，例如
 | 9 | 不可信文本不会变成控件，也不会改变动作 | 渲染时转义；目标由机器推导；聊天中引用原文时注明来源 | 注入语料（Markdown、卡片 JSON、HTML、`{{ }}`、零宽字符、RTL 字符），用 Playwright 和渠道快照验证；模型给出的目标必须等于机器推导的目标 |
 | 10 | 每次写入都可追溯，审计导出到 PG 之外 | 执行链由 gateway 直接写入审计汇，本地有暂存 | apiserver 审计日志里每一条写入都能关联到审批人，并且出现在审计汇中；审计汇不可用时不接受新的执行 |
 | 11 | 熔断开关不依赖 gateway | `paramRef` 引用 `srenautix-freeze`，`paramNotFoundAction: Deny` | 用 SIGSTOP 冻结 gateway 后切换开关，下一次写入被拒；删除该 ConfigMap，写入同样被拒 |
-| 12 | `gitops_pr` 从不合并 | 静态禁止调用合并接口；只推送到 `srenautix/*` | 用模拟 Git 服务器断言推送的 ref；启动时探测分支保护 |
+| 12 | `gitops_pr` 从不合并；base 分支有分支保护，或经批准的补偿控制 | 请求白名单与客户端都没有合并接口；只新建 `srenautix/*` 分支，推送前后核对 base；每次推送与开 PR 写入审计链；按小时限速；main watchdog | 在模拟 Git 服务器与 Kind 中的本地 Git 服务上：推送到 main 被拒、推送期间 base 前进时不开 PR、限速、机器人写入或合并 main 时告警并停止推送、冻结期间只执行 `gitops_pr` |
 
 ### 16.2 凭证
 

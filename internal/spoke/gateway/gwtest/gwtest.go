@@ -305,7 +305,8 @@ func Build(t testing.TB, rc *rest.Config, c Config, clk clock.Clock, fault func(
 	}
 	var eng *engine.Engine
 	execs, err := executor.Registry(&executor.Deps{Kube: kc, Catalog: cat, Policy: func() *policy.Policy { return eng.Policy() },
-		GitHub: app, Now: func() time.Time { return clk.Now().UTC() }, Poll: 100 * time.Millisecond})
+		GitHub: app, MainWatchdog: func(r string) (bool, string) { return eng.MainWatchdog(r) }, Metrics: m,
+		Now: func() time.Time { return clk.Now().UTC() }, Poll: 100 * time.Millisecond})
 	if err != nil {
 		t.Fatal(err)
 	}

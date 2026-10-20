@@ -18,7 +18,7 @@
 | 8 最多执行一次 | `TestInvariant08AtMostOnce` | 子进程 gateway 在 `executing` 写入后、副作用之后、`verifying` 写入后被 `kill -9`；接管的 gateway 只观察不重跑；以 apiserver 审计日志为准，写入次数为 0 或 1 且与结局一致 |
 | 10 每次写入都可追溯 | `TestInvariant10TraceableWrites` | apiserver 审计日志中 gateway 的每次写入，在审计汇中都有对应的写入记录与审批人，哈希链与检查点签名校验通过；审计汇停止后不认领新执行，恢复后继续 |
 | 11 熔断开关不依赖 gateway | `TestInvariant11FreezeWithoutGateway` | gateway 子进程被 `SIGSTOP` 后切换 `srenautix-freeze`：写入被拒；删除该 ConfigMap，写入同样被拒 |
-| 12 `gitops_pr` 从不合并 | `TestInvariant12GitOpsNeverMerges` | 请求白名单拒绝合并、删除与改写分支；base 分支没有分支保护时启动探测为 False、预检拒绝；有保护时只推送 `srenautix/<执行 ID>` 分支并开 PR，main 不变，没有任何合并请求 |
+| 12 `gitops_pr` 从不合并；base 有分支保护或经批准的补偿控制 | `TestInvariant12GitOpsNeverMerges` | 请求白名单与客户端都没有合并，推送到 main、移动或删除引用都被拒绝；base 既没有分支保护也没有补偿控制时预检拒绝；有补偿控制时只新建 `srenautix/` 分支并开 PR、请求审阅，main 不变，推送、核对与开 PR 写入审计链，人工 squash 合并不告警；推送期间 base 前进时不开 PR（`failed/base_moved`）；冻结时只执行 `gitops_pr`，集群动作不认领；超过每小时上限时拒绝；App 合并 PR、App 或其他机器人直接推送 main 时 watchdog 告警并停止推送（ADR 0025） |
 
 不变量 1、6、9 由 TypeScript 部分负责（`test/invariants` 中的 TS 测试）。
 

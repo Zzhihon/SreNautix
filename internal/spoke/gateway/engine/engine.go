@@ -98,6 +98,9 @@ type Engine struct {
 	leader      bool
 	lastSkew    time.Duration
 	selfCheck   selfCheckResult
+	// accepts 是只提议时仍然执行的动作（只有冻结、且启用了 gitops_pr 时为 [gitops_pr]）
+	accepts []string
+	watch   map[string]*watchState
 
 	q        *queue
 	running  sync.WaitGroup
@@ -116,7 +119,10 @@ func New(cfg Config, d Deps) (*Engine, error) {
 		return nil, errors.New("engine: intervals and limits must be positive")
 	}
 	e := &Engine{cfg: cfg, d: d, store: execution.NewStore(d.Kube.Dyn, cfg.Namespace), conditions: map[string]tunnel.Condition{},
-		proposeOnly: true, q: newQueue(), wake: make(chan struct{}, 1), stopping: make(chan struct{})}
+		proposeOnly: true, q: newQueue(), wake: make(chan struct{}, 1), stopping: make(chan struct{}), watch: map[string]*watchState{}}
+	if d.GitHub != nil {
+		d.GitHub.OnDenied = func(de *github.DeniedError) { d.Metrics.GitOpsDenied.WithLabelValues(de.Reason).Inc() }
+	}
 	if err := e.reloadConfig(); err != nil {
 		return nil, err
 	}
@@ -198,7 +204,7 @@ func (e *Engine) Conditions() []tunnel.Condition {
 	var out []tunnel.Condition
 	for _, t := range []string{metrics.ConditionAdmissionSelfCheck, metrics.ConditionFreeze, metrics.ConditionAuditSink,
 		metrics.ConditionClockSkew, metrics.ConditionLeader, metrics.ConditionApiserverThrottled, metrics.ConditionPolicyLoaded,
-		metrics.ConditionGitHubBranchProtection} {
+		metrics.ConditionGitBaseGuarded, metrics.ConditionGitMainWatchdog} {
 		if c, ok := e.conditions[t]; ok {
 			out = append(out, c)
 		}
