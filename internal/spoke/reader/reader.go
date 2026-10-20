@@ -126,10 +126,14 @@ func New(cfg *Config, rc *rest.Config, version, readerID string, log *slog.Logge
 	if err != nil {
 		return nil, err
 	}
+	rep := topology.NewReporter(reg, log)
 	if cfg.History != nil {
 		h := cfg.History
-		rd.ksm = history.New(history.Config{Datasource: h.Datasource, Matchers: h.Matchers, Step: time.Duration(h.Step), Chunk: time.Duration(h.Chunk),
-			MaxSeries: h.MaxSeries, MaxBytes: h.MaxBytes, MaxWindow: time.Duration(h.MaxWindow)}, cfg.ClusterID, rd.exec)
+		rd.ksm, err = history.New(history.Config{Datasource: h.Datasource, Matchers: h.Matchers, Step: time.Duration(h.Step), Chunk: time.Duration(h.Chunk),
+			MaxSeries: h.MaxSeries, MaxBytes: h.MaxBytes, MaxWindow: time.Duration(h.MaxWindow)}, cfg.ClusterID, rd.exec, rep)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if cfg.Alerts != nil {
 		ac := cfg.Alerts.Config
@@ -175,7 +179,7 @@ func New(cfg *Config, rc *rest.Config, version, readerID string, log *slog.Logge
 		return nil, err
 	}
 	rd.watcher = kube.New(cs, &kube.CRDSource{Discovery: disc, Dynamic: dyn, Recognizers: topology.BuiltinRecognizers(), Every: orDefault(cfg.CRDRediscover, time.Minute)},
-		rd.store, rd.clock, rd.syncer.Enqueue, reg)
+		rd.store, rd.clock, rd.syncer.Enqueue, reg, rep)
 	rd.resolver = &Resolver{w: rd.watcher, ksm: rd.ksm}
 
 	rd.setCondition(hub.CondTunnelConnected, false, "NotConnected", "")

@@ -46,57 +46,63 @@ func isHub(namespace string, lbl map[string]string) bool {
 	return hubWorkloads[lbl["k8s-app"]] || hubWorkloads[lbl["app.kubernetes.io/name"]]
 }
 
-// ObjectNode 构造对象自己的节点。
-func ObjectNode(kind string, obj metav1.Object) Node {
-	n := NewNode(kind, obj.GetNamespace(), obj.GetName(), string(obj.GetUID()), obj.GetLabels())
-	n.Hub = isHub(obj.GetNamespace(), obj.GetLabels())
-	return n
-}
-
-// ownerKind 把 ownerReference 的 apiVersion + kind 转成 ComponentKey 的 kind 名称。
-func ownerKind(ref metav1.OwnerReference) string {
-	gv, err := schema.ParseGroupVersion(ref.APIVersion)
+// ObjectNode 构造对象自己的节点。对象无法生成合法的键时返回 *KeyError。
+func ObjectNode(kind string, obj metav1.Object) (Node, error) {
+	n, err := NewNode(kind, obj.GetNamespace(), obj.GetName(), string(obj.GetUID()), obj.GetLabels())
 	if err != nil {
-		panic(fmt.Sprintf("topology: ownerReference with invalid apiVersion %q: %v", ref.APIVersion, err))
+		return Node{}, err
 	}
-	return KindName(gv.Group, ref.Kind)
+	n.Hub = isHub(obj.GetNamespace(), obj.GetLabels())
+	return n, nil
 }
 
-// Owners 返回对象的 ownerReferences 产生的节点（占位）和 owned_by 边。
-func Owners(kind string, obj metav1.Object, c *Contribution) {
-	self := Key(kind, obj.GetNamespace(), obj.GetName())
+// generic 贡献对象自己的节点与 ownerReferences 产生的占位节点和 owned_by 边，并返回对象自己的键。
+// 对象自己无法生成合法的键时只返回问题，键为空串。
+func generic(kind string, obj metav1.Object) (Contribution, string) {
+	var c Contribution
+	self, err := ObjectNode(kind, obj)
+	if err != nil {
+		c.Problems = append(c.Problems, KeyProblem(err))
+		return c, ""
+	}
+	c.Nodes = append(c.Nodes, NodeContribution{Node: self, Own: true})
 	for _, ref := range obj.GetOwnerReferences() {
-		ok := ownerKind(ref)
+		gv, err := schema.ParseGroupVersion(ref.APIVersion)
+		if err != nil {
+			c.fail(kind, obj.GetNamespace(), obj.GetName(), fmt.Sprintf("ownerReference %q has invalid apiVersion %q", ref.Name, ref.APIVersion))
+			continue
+		}
+		ok := KindName(gv.Group, ref.Kind)
 		// 集群级 owner（例如静态 Pod 的 Node）没有命名空间
 		ns := obj.GetNamespace()
 		if ok == "Node" {
 			ns = ""
 		}
-		owner := NewNode(ok, ns, ref.Name, string(ref.UID), nil)
-		c.Nodes = append(c.Nodes, NodeContribution{Node: owner})
+		owner := c.ref(ok, ns, ref.Name, string(ref.UID), false)
 		ev := "ownerReference"
 		if ref.Controller != nil && *ref.Controller {
 			ev = "ownerReference (controller)"
 		}
-		c.Edges = append(c.Edges, Structural(self, owner.Key, RelOwnedBy, ScopeService, ev))
+		c.edge(Structural(self.Key, owner, RelOwnedBy, ScopeService, ev))
 	}
+	return c, self.Key
 }
 
 // Generic 是只贡献自身节点和 owner 边的对象（Node、ReplicaSet、Deployment、StatefulSet、DaemonSet、Job、CronJob、Service 等）。
 func Generic(kind string, obj metav1.Object) Contribution {
-	c := Contribution{Nodes: []NodeContribution{{Node: ObjectNode(kind, obj), Own: true}}}
-	Owners(kind, obj, &c)
+	c, _ := generic(kind, obj)
 	return c
 }
 
 // Pod 贡献 Pod 节点、owner 边、Pod→Node、Pod→PVC、PV→CSI node plugin，以及配置引用边。
 func Pod(lk Lookup, pod *corev1.Pod) Contribution {
-	c := Generic("Pod", pod)
-	self := Key("Pod", pod.Namespace, pod.Name)
+	c, self := generic("Pod", pod)
+	if self == "" {
+		return c
+	}
 	if pod.Spec.NodeName != "" {
-		node := NewNode("Node", "", pod.Spec.NodeName, "", nil)
-		c.Nodes = append(c.Nodes, NodeContribution{Node: node})
-		c.Edges = append(c.Edges, Structural(self, node.Key, RelRunsOn, ScopeInstance, "spec.nodeName"))
+		node := c.ref("Node", "", pod.Spec.NodeName, "", false)
+		c.edge(Structural(self, node, RelRunsOn, ScopeInstance, "spec.nodeName"))
 	}
 	for _, v := range pod.Spec.Volumes {
 		var claim string
@@ -108,9 +114,8 @@ func Pod(lk Lookup, pod *corev1.Pod) Contribution {
 		default:
 			continue
 		}
-		pvc := NewNode("PersistentVolumeClaim", pod.Namespace, claim, "", nil)
-		c.Nodes = append(c.Nodes, NodeContribution{Node: pvc})
-		c.Edges = append(c.Edges, Structural(self, pvc.Key, RelMounts, ScopeInstance, "volume "+v.Name))
+		pvc := c.ref("PersistentVolumeClaim", pod.Namespace, claim, "", false)
+		c.edge(Structural(self, pvc, RelMounts, ScopeInstance, "volume "+v.Name))
 		csiPluginEdge(lk, pod, claim, &c)
 	}
 	configRefs(lk, pod, &c)
@@ -134,19 +139,25 @@ func csiPluginEdge(lk Lookup, pod *corev1.Pod, claim string, c *Contribution) {
 	if !ok {
 		return
 	}
-	pn := NewNode("Pod", plugin.Namespace, plugin.Name, string(plugin.UID), nil)
-	c.Nodes = append(c.Nodes, NodeContribution{Node: pn})
-	c.Edges = append(c.Edges, Structural(Key("PersistentVolume", "", pv.Name), pn.Key, RelCSINodePlugin, ScopeInstance,
+	pn := c.ref("Pod", plugin.Namespace, plugin.Name, string(plugin.UID), false)
+	c.edge(Structural(c.key("PersistentVolume", "", pv.Name), pn, RelCSINodePlugin, ScopeInstance,
 		"driver "+pv.Spec.CSI.Driver+" on node "+pod.Spec.NodeName))
 }
 
 // configRefs 贡献配置引用边（DESIGN §4.2，置信度 0.7），起点是 Pod 的顶层 owner（通常是 Deployment 或 StatefulSet）。
 // 只输出名称：Service DNS 名、ConfigMap 名、Secret 名；环境变量和 ConfigMap 的取值不进入输出。Secret 从不读取。
 func configRefs(lk Lookup, pod *corev1.Pod, c *Contribution) {
-	from := RootOwner(lk, "Pod", pod.Namespace, pod.Name)
+	from, err := RootOwner(lk, "Pod", pod.Namespace, pod.Name)
+	if err != nil {
+		c.Problems = append(c.Problems, KeyProblem(err))
+		return
+	}
 	ns := pod.Namespace
 	edges := map[string]Edge{}
 	add := func(to, evidence string) {
+		if to == "" {
+			return
+		}
 		e := Edge{From: from, To: to, Relation: RelReferences, Provenance: ProvConfigRef, Confidence: ConfConfigRef, Scope: ScopeService, Evidence: clip(evidence)}
 		if _, ok := edges[e.ID()]; !ok {
 			edges[e.ID()] = e
@@ -154,11 +165,11 @@ func configRefs(lk Lookup, pod *corev1.Pod, c *Contribution) {
 	}
 	svc := func(value, evidence string) {
 		for _, r := range FindServiceRefs(lk, ns, value) {
-			add(Key("Service", r.Namespace, r.Name), evidence)
+			add(c.key("Service", r.Namespace, r.Name), evidence)
 		}
 	}
 	cmAll := func(name, evidence string) {
-		add(Key("ConfigMap", ns, name), evidence)
+		add(c.key("ConfigMap", ns, name), evidence)
 		cm, ok := lk.ConfigMap(ns, name)
 		if !ok {
 			return
@@ -180,12 +191,12 @@ func configRefs(lk Lookup, pod *corev1.Pod, c *Contribution) {
 				svc(env.Value, "env "+env.Name)
 			case env.ValueFrom.ConfigMapKeyRef != nil:
 				ref := env.ValueFrom.ConfigMapKeyRef
-				add(Key("ConfigMap", ns, ref.Name), "env "+env.Name)
+				add(c.key("ConfigMap", ns, ref.Name), "env "+env.Name)
 				if cm, ok := lk.ConfigMap(ns, ref.Name); ok {
 					svc(cm.Data[ref.Key], "env "+env.Name+" from ConfigMap "+ref.Name+" key "+ref.Key)
 				}
 			case env.ValueFrom.SecretKeyRef != nil:
-				add(Key("Secret", ns, env.ValueFrom.SecretKeyRef.Name), "env "+env.Name+" secretKeyRef")
+				add(c.key("Secret", ns, env.ValueFrom.SecretKeyRef.Name), "env "+env.Name+" secretKeyRef")
 			}
 		}
 		for _, ef := range ct.EnvFrom {
@@ -193,7 +204,7 @@ func configRefs(lk Lookup, pod *corev1.Pod, c *Contribution) {
 				cmAll(ef.ConfigMapRef.Name, "envFrom ConfigMap "+ef.ConfigMapRef.Name)
 			}
 			if ef.SecretRef != nil {
-				add(Key("Secret", ns, ef.SecretRef.Name), "envFrom Secret")
+				add(c.key("Secret", ns, ef.SecretRef.Name), "envFrom Secret")
 			}
 		}
 	}
@@ -202,14 +213,14 @@ func configRefs(lk Lookup, pod *corev1.Pod, c *Contribution) {
 		case v.ConfigMap != nil:
 			cmAll(v.ConfigMap.Name, "volume "+v.Name)
 		case v.Secret != nil:
-			add(Key("Secret", ns, v.Secret.SecretName), "volume "+v.Name)
+			add(c.key("Secret", ns, v.Secret.SecretName), "volume "+v.Name)
 		case v.Projected != nil:
 			for _, src := range v.Projected.Sources {
 				if src.ConfigMap != nil {
 					cmAll(src.ConfigMap.Name, "projected volume "+v.Name)
 				}
 				if src.Secret != nil {
-					add(Key("Secret", ns, src.Secret.Name), "projected volume "+v.Name)
+					add(c.key("Secret", ns, src.Secret.Name), "projected volume "+v.Name)
 				}
 			}
 		}
@@ -226,23 +237,20 @@ func configRefs(lk Lookup, pod *corev1.Pod, c *Contribution) {
 
 // PVC 贡献 PVC → PV。
 func PVC(pvc *corev1.PersistentVolumeClaim) Contribution {
-	c := Generic("PersistentVolumeClaim", pvc)
-	if pvc.Spec.VolumeName != "" {
-		pv := NewNode("PersistentVolume", "", pvc.Spec.VolumeName, "", nil)
-		c.Nodes = append(c.Nodes, NodeContribution{Node: pv})
-		c.Edges = append(c.Edges, Structural(Key("PersistentVolumeClaim", pvc.Namespace, pvc.Name), pv.Key, RelBoundTo, ScopeInstance, "spec.volumeName"))
+	c, self := generic("PersistentVolumeClaim", pvc)
+	if self != "" && pvc.Spec.VolumeName != "" {
+		pv := c.ref("PersistentVolume", "", pvc.Spec.VolumeName, "", false)
+		c.edge(Structural(self, pv, RelBoundTo, ScopeInstance, "spec.volumeName"))
 	}
 	return c
 }
 
 // PV 贡献 PV → CSIDriver。CSIDriver 是存储枢纽。
 func PV(pv *corev1.PersistentVolume) Contribution {
-	c := Generic("PersistentVolume", pv)
-	if pv.Spec.CSI != nil {
-		d := NewNode(KindCSIDriver, "", pv.Spec.CSI.Driver, "", nil)
-		d.Hub = true
-		c.Nodes = append(c.Nodes, NodeContribution{Node: d})
-		c.Edges = append(c.Edges, Structural(Key("PersistentVolume", "", pv.Name), d.Key, RelProvisionedBy, ScopeInstance, "spec.csi.driver"))
+	c, self := generic("PersistentVolume", pv)
+	if self != "" && pv.Spec.CSI != nil {
+		d := c.ref(KindCSIDriver, "", pv.Spec.CSI.Driver, "", true)
+		c.edge(Structural(self, d, RelProvisionedBy, ScopeInstance, "spec.csi.driver"))
 	}
 	return c
 }
@@ -254,8 +262,10 @@ func EndpointSlice(es *discoveryv1.EndpointSlice) Contribution {
 	if svcName == "" {
 		return c
 	}
-	svc := NewNode("Service", es.Namespace, svcName, "", nil)
-	c.Nodes = append(c.Nodes, NodeContribution{Node: svc})
+	svc := c.ref("Service", es.Namespace, svcName, "", false)
+	if svc == "" {
+		return c
+	}
 	for _, ep := range es.Endpoints {
 		if ep.TargetRef == nil || ep.TargetRef.Kind != "Pod" {
 			continue
@@ -264,24 +274,24 @@ func EndpointSlice(es *discoveryv1.EndpointSlice) Contribution {
 		if ns == "" {
 			ns = es.Namespace
 		}
-		p := NewNode("Pod", ns, ep.TargetRef.Name, string(ep.TargetRef.UID), nil)
-		c.Nodes = append(c.Nodes, NodeContribution{Node: p})
-		c.Edges = append(c.Edges, Structural(svc.Key, p.Key, RelSelects, ScopeService, "EndpointSlice "+es.Name))
+		p := c.ref("Pod", ns, ep.TargetRef.Name, string(ep.TargetRef.UID), false)
+		c.edge(Structural(svc, p, RelSelects, ScopeService, "EndpointSlice "+es.Name))
 	}
 	return c
 }
 
 // Ingress 贡献 Ingress → Service（routes_to）。
 func Ingress(ing *networkingv1.Ingress) Contribution {
-	c := Generic("Ingress", ing)
-	self := Key("Ingress", ing.Namespace, ing.Name)
+	c, self := generic("Ingress", ing)
+	if self == "" {
+		return c
+	}
 	add := func(b *networkingv1.IngressBackend, ev string) {
 		if b == nil || b.Service == nil {
 			return
 		}
-		s := NewNode("Service", ing.Namespace, b.Service.Name, "", nil)
-		c.Nodes = append(c.Nodes, NodeContribution{Node: s})
-		c.Edges = append(c.Edges, Structural(self, s.Key, RelRoutesTo, ScopeService, ev))
+		s := c.ref("Service", ing.Namespace, b.Service.Name, "", false)
+		c.edge(Structural(self, s, RelRoutesTo, ScopeService, ev))
 	}
 	add(ing.Spec.DefaultBackend, "defaultBackend")
 	for _, r := range ing.Spec.Rules {
@@ -302,13 +312,25 @@ func NetworkPolicyEgress(lk Lookup, np *networkingv1.NetworkPolicy) Contribution
 	if !hasEgress(np) {
 		return c
 	}
+	fail := func(field string, err error) Contribution {
+		c.fail("NetworkPolicy", np.Namespace, np.Name, field+": "+err.Error())
+		return c
+	}
+	root := func(p *corev1.Pod, into map[string]bool) {
+		k, err := RootOwner(lk, "Pod", p.Namespace, p.Name)
+		if err != nil {
+			c.Problems = append(c.Problems, KeyProblem(err))
+			return
+		}
+		into[k] = true
+	}
 	srcSel, err := metav1.LabelSelectorAsSelector(&np.Spec.PodSelector)
 	if err != nil {
-		panic(fmt.Sprintf("topology: NetworkPolicy %s/%s podSelector: %v", np.Namespace, np.Name, err))
+		return fail("podSelector", err)
 	}
 	sources := map[string]bool{}
 	for _, p := range lk.Pods(np.Namespace, srcSel) {
-		sources[RootOwner(lk, "Pod", p.Namespace, p.Name)] = true
+		root(p, sources)
 	}
 	if len(sources) == 0 {
 		return c
@@ -323,7 +345,7 @@ func NetworkPolicyEgress(lk Lookup, np *networkingv1.NetworkPolicy) Contribution
 			if peer.NamespaceSelector != nil {
 				nsSel, err := metav1.LabelSelectorAsSelector(peer.NamespaceSelector)
 				if err != nil {
-					panic(fmt.Sprintf("topology: NetworkPolicy %s/%s namespaceSelector: %v", np.Namespace, np.Name, err))
+					return fail("egress namespaceSelector", err)
 				}
 				namespaces = lk.Namespaces(nsSel)
 			}
@@ -331,12 +353,12 @@ func NetworkPolicyEgress(lk Lookup, np *networkingv1.NetworkPolicy) Contribution
 			if peer.PodSelector != nil {
 				podSel, err = metav1.LabelSelectorAsSelector(peer.PodSelector)
 				if err != nil {
-					panic(fmt.Sprintf("topology: NetworkPolicy %s/%s peer podSelector: %v", np.Namespace, np.Name, err))
+					return fail("egress podSelector", err)
 				}
 			}
 			for _, ns := range namespaces {
 				for _, p := range lk.Pods(ns, podSel) {
-					dests[RootOwner(lk, "Pod", p.Namespace, p.Name)] = true
+					root(p, dests)
 				}
 			}
 		}

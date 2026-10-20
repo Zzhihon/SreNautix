@@ -2,7 +2,6 @@ package reader
 
 import (
 	"context"
-	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -54,16 +53,17 @@ func (r *Resolver) Resolve(ctx context.Context, req hub.ResolveRequest) *hub.Res
 		}
 		return &hub.ResolveResult{Status: "ok", Layer: "ksm_history", Node: &n, NodeName: strp(nodeName)}
 	case req.Component != "" && req.PodIP == "":
-		kind, ns, name, ok := splitKey(req.Component)
-		if !ok {
-			return &hub.ResolveResult{Status: "error", Error: &query.Error{Code: query.CodeBadParams, Message: "component is not a component key"}, Layer: "unresolved"}
+		kind, ns, name, err := topology.ParseKey(req.Component)
+		if err != nil {
+			return &hub.ResolveResult{Status: "error", Error: &query.Error{Code: query.CodeBadParams, Message: err.Error()}, Layer: "unresolved"}
 		}
 		if obj, ok := r.w.Object(kind, ns, name); ok && !at.Before(obj.GetCreationTimestamp().Time) {
 			if p, isPod := obj.(*corev1.Pod); isPod {
 				return r.fromPod(p)
 			}
-			n := topology.ObjectNode(kind, obj)
-			return &hub.ResolveResult{Status: "ok", Layer: "informer", Node: &n}
+			if n, err := topology.ObjectNode(kind, obj); err == nil {
+				return &hub.ResolveResult{Status: "ok", Layer: "informer", Node: &n}
+			}
 		}
 		if n, ok := r.w.Store().Node(req.Component); ok && n.UID == nil {
 			// 只有占位节点（对象本身不在监听范围内，例如自定义资源的子对象）：按拓扑中的节点返回
@@ -80,21 +80,13 @@ func (r *Resolver) Resolve(ctx context.Context, req hub.ResolveRequest) *hub.Res
 }
 
 func (r *Resolver) fromPod(p *corev1.Pod) *hub.ResolveResult {
-	n := topology.ObjectNode("Pod", p)
-	root := topology.RootOwner(r.w, "Pod", p.Namespace, p.Name)
+	n, err := topology.ObjectNode("Pod", p)
+	if err != nil {
+		return unresolved()
+	}
+	// 顶层 owner 无法生成合法的键时不填 root_owner
+	root, _ := topology.RootOwner(r.w, "Pod", p.Namespace, p.Name)
 	return &hub.ResolveResult{Status: "ok", Layer: "informer", Node: &n, NodeName: strp(p.Spec.NodeName), RootOwner: strp(root)}
-}
-
-// splitKey 拆分组件键 <kind>:<namespace>/<name> 或 <kind>:<name>。
-func splitKey(key string) (kind, ns, name string, ok bool) {
-	kind, rest, found := strings.Cut(key, ":")
-	if !found || kind == "" || rest == "" {
-		return "", "", "", false
-	}
-	if a, b, has := strings.Cut(rest, "/"); has {
-		return kind, a, b, a != "" && b != ""
-	}
-	return kind, "", rest, true
 }
 
 func asQueryError(err error) *query.Error {

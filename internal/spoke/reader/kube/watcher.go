@@ -5,6 +5,7 @@ package kube
 import (
 	"context"
 	"fmt"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -48,6 +49,7 @@ type Watcher struct {
 	sink  Sink
 	tomb  *Tombstones
 	m     *metrics
+	rep   *topology.Reporter
 
 	// applyMu 保证 store.Apply 与 sink 的调用顺序一致，事件序号因此按投递顺序单调递增
 	applyMu sync.Mutex
@@ -73,9 +75,9 @@ type Watcher struct {
 	synced   bool
 }
 
-// New 创建 Watcher。
-func New(cs kubernetes.Interface, crds *CRDSource, store *topology.Store, clock Clock, sink Sink, reg prometheus.Registerer) *Watcher {
-	w := &Watcher{cs: cs, store: store, clock: clock, sink: sink, tomb: NewTombstones(), m: newMetrics(reg)}
+// New 创建 Watcher。rep 记录提取时跳过的对象。
+func New(cs kubernetes.Interface, crds *CRDSource, store *topology.Store, clock Clock, sink Sink, reg prometheus.Registerer, rep *topology.Reporter) *Watcher {
+	w := &Watcher{cs: cs, store: store, clock: clock, sink: sink, tomb: NewTombstones(), m: newMetrics(reg), rep: rep}
 	w.fresh = newFreshness(w.m)
 	w.factory = informers.NewSharedInformerFactory(cs, 0)
 	if crds != nil {
@@ -94,7 +96,8 @@ type typed struct {
 	name     string
 	kind     string
 	informer cache.SharedIndexInformer
-	extract  func(obj any) (topology.Contribution, bool)
+	// extract 为 nil 的对象不贡献拓扑，只用作派生贡献的查询来源
+	extract func(obj any) topology.Contribution
 	// affects 列出这种对象变化后需要重算的派生贡献
 	affectsPods, affectsNP bool
 }
@@ -120,25 +123,20 @@ func (w *Watcher) Start(ctx context.Context) error {
 	w.jobs = f.Batch().V1().Jobs().Lister()
 	w.nps = npInf.GetIndexer()
 
-	generic := func(kind string) func(any) (topology.Contribution, bool) {
-		return func(obj any) (topology.Contribution, bool) {
-			return topology.Generic(kind, obj.(metav1.Object)), true
-		}
+	generic := func(kind string) func(any) topology.Contribution {
+		return func(obj any) topology.Contribution { return topology.Generic(kind, obj.(metav1.Object)) }
 	}
-	none := func(any) (topology.Contribution, bool) { return topology.Contribution{}, false }
 	list := []typed{
 		{name: "pods", kind: "Pod", informer: podInf, affectsPods: true, affectsNP: true,
-			extract: func(o any) (topology.Contribution, bool) { return topology.Pod(w, o.(*corev1.Pod)), true }},
+			extract: func(o any) topology.Contribution { return topology.Pod(w, o.(*corev1.Pod)) }},
 		{name: "nodes", kind: "Node", informer: f.Core().V1().Nodes().Informer(), extract: generic("Node")},
-		{name: "namespaces", kind: "Namespace", informer: f.Core().V1().Namespaces().Informer(), extract: none, affectsNP: true},
+		{name: "namespaces", kind: "Namespace", informer: f.Core().V1().Namespaces().Informer(), affectsNP: true},
 		{name: "services", kind: "Service", informer: f.Core().V1().Services().Informer(), extract: generic("Service"), affectsPods: true},
-		{name: "configmaps", kind: "ConfigMap", informer: f.Core().V1().ConfigMaps().Informer(), extract: none, affectsPods: true},
+		{name: "configmaps", kind: "ConfigMap", informer: f.Core().V1().ConfigMaps().Informer(), affectsPods: true},
 		{name: "persistentvolumeclaims", kind: "PersistentVolumeClaim", informer: f.Core().V1().PersistentVolumeClaims().Informer(), affectsPods: true,
-			extract: func(o any) (topology.Contribution, bool) {
-				return topology.PVC(o.(*corev1.PersistentVolumeClaim)), true
-			}},
+			extract: func(o any) topology.Contribution { return topology.PVC(o.(*corev1.PersistentVolumeClaim)) }},
 		{name: "persistentvolumes", kind: "PersistentVolume", informer: f.Core().V1().PersistentVolumes().Informer(), affectsPods: true,
-			extract: func(o any) (topology.Contribution, bool) { return topology.PV(o.(*corev1.PersistentVolume)), true }},
+			extract: func(o any) topology.Contribution { return topology.PV(o.(*corev1.PersistentVolume)) }},
 		{name: "replicasets", kind: "ReplicaSet", informer: f.Apps().V1().ReplicaSets().Informer(), extract: generic("ReplicaSet"), affectsPods: true, affectsNP: true},
 		{name: "deployments", kind: "Deployment", informer: f.Apps().V1().Deployments().Informer(), extract: generic("Deployment")},
 		{name: "statefulsets", kind: "StatefulSet", informer: f.Apps().V1().StatefulSets().Informer(), extract: generic("StatefulSet")},
@@ -146,14 +144,12 @@ func (w *Watcher) Start(ctx context.Context) error {
 		{name: "jobs", kind: "Job", informer: f.Batch().V1().Jobs().Informer(), extract: generic("Job"), affectsPods: true, affectsNP: true},
 		{name: "cronjobs", kind: "CronJob", informer: f.Batch().V1().CronJobs().Informer(), extract: generic("CronJob")},
 		{name: "endpointslices", kind: "EndpointSlice", informer: f.Discovery().V1().EndpointSlices().Informer(),
-			extract: func(o any) (topology.Contribution, bool) {
-				return topology.EndpointSlice(o.(*discoveryv1.EndpointSlice)), true
-			}},
+			extract: func(o any) topology.Contribution { return topology.EndpointSlice(o.(*discoveryv1.EndpointSlice)) }},
 		{name: "ingresses", kind: "Ingress", informer: f.Networking().V1().Ingresses().Informer(),
-			extract: func(o any) (topology.Contribution, bool) { return topology.Ingress(o.(*networkingv1.Ingress)), true }},
+			extract: func(o any) topology.Contribution { return topology.Ingress(o.(*networkingv1.Ingress)) }},
 		{name: "networkpolicies", kind: "NetworkPolicy", informer: npInf,
-			extract: func(o any) (topology.Contribution, bool) {
-				return topology.NetworkPolicyEgress(w, o.(*networkingv1.NetworkPolicy)), true
+			extract: func(o any) topology.Contribution {
+				return topology.NetworkPolicyEgress(w, o.(*networkingv1.NetworkPolicy))
 			}},
 	}
 	for _, t := range list {
@@ -214,16 +210,45 @@ func stripManagedFields(obj any) (any, error) {
 	return obj, nil
 }
 
-func contributorID(kind string, obj metav1.Object) string {
+func contributorID(kind string, obj metav1.Object) (string, error) {
 	return topology.Key(kind, obj.GetNamespace(), obj.GetName())
 }
 
 func (w *Watcher) upsert(t typed, obj any, at time.Time) {
 	w.fresh.event(t.name)
-	if c, ok := t.extract(obj); ok {
-		w.apply(contributorID(t.kind, obj.(metav1.Object)), c, at)
+	if t.extract != nil {
+		w.contribute(t.name, t.kind, obj.(metav1.Object), func() topology.Contribution { return t.extract(obj) }, at)
 	}
 	w.markDirty(t.affectsPods, t.affectsNP)
+}
+
+// contribute 提取一个对象的贡献并写入存储。对象自己的键无法生成时整个对象跳过；贡献中的问题（某个引用的键无法生成、
+// 某个字段无法解析）只跳过对应的节点和边。两者都交给 Reporter 计数并限速记录警告，单个对象的问题不会让 reader 退出。
+func (w *Watcher) contribute(source, kind string, obj metav1.Object, extract func() topology.Contribution, at time.Time) {
+	id, err := contributorID(kind, obj)
+	if err != nil {
+		w.rep.Report(source, []topology.Problem{topology.KeyProblem(err)})
+		return
+	}
+	c, ok := w.extract(source, kind, obj, extract)
+	if !ok {
+		return
+	}
+	w.rep.Report(source, c.Problems)
+	w.apply(id, c, at)
+}
+
+// extract 调用提取函数。提取函数是只读的纯函数；它因为某个对象的异常内容出错（panic）时，这个对象保留上一次的贡献，
+// 错误连同调用栈交给 Reporter，其余对象照常处理。
+func (w *Watcher) extract(source, kind string, obj metav1.Object, extract func() topology.Contribution) (c topology.Contribution, ok bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			w.rep.Report(source, []topology.Problem{{Kind: kind, Namespace: obj.GetNamespace(), Name: obj.GetName(),
+				Reason: fmt.Sprintf("extractor panic: %v\n%s", r, debug.Stack())}})
+			c, ok = topology.Contribution{}, false
+		}
+	}()
+	return extract(), true
 }
 
 func (w *Watcher) remove(t typed, obj any) {
@@ -233,19 +258,25 @@ func (w *Watcher) remove(t typed, obj any) {
 	}
 	mo := obj.(metav1.Object)
 	now := w.clock.Now()
-	if _, ok := t.extract(obj); ok {
-		w.applyMu.Lock()
-		evs := w.store.Remove(contributorID(t.kind, mo), now)
-		w.emit(evs)
-		w.applyMu.Unlock()
+	// 键无法生成的对象从未进入存储，也不留墓碑
+	if id, err := contributorID(t.kind, mo); err == nil {
+		if t.extract != nil {
+			w.applyMu.Lock()
+			w.emit(w.store.Remove(id, now))
+			w.applyMu.Unlock()
+		}
+		w.addTombstone(t.kind, obj, now)
 	}
-	w.addTombstone(t.kind, obj, now)
 	w.markDirty(t.affectsPods, t.affectsNP)
 }
 
 func (w *Watcher) addTombstone(kind string, obj any, now time.Time) {
 	mo := obj.(metav1.Object)
-	ts := Tombstone{Node: topology.ObjectNode(kind, mo), CreatedAt: mo.GetCreationTimestamp().UTC(), DeletedAt: now}
+	n, err := topology.ObjectNode(kind, mo)
+	if err != nil {
+		return
+	}
+	ts := Tombstone{Node: n, CreatedAt: mo.GetCreationTimestamp().UTC(), DeletedAt: now}
 	if p, ok := obj.(*corev1.Pod); ok {
 		ts.PodIP = p.Status.PodIP
 		ts.NodeName = p.Spec.NodeName
@@ -254,15 +285,20 @@ func (w *Watcher) addTombstone(kind string, obj any, now time.Time) {
 	w.tomb.Add(ts)
 }
 
-// rootOwnerOf 从 Pod 自己的 ownerReferences 出发求顶层 owner；Pod 已从缓存删除时仍然可用。
+// rootOwnerOf 从 Pod 自己的 ownerReferences 出发求顶层 owner；Pod 已从缓存删除时仍然可用。顶层 owner 无法生成合法的键时返回空串。
 func (w *Watcher) rootOwnerOf(p *corev1.Pod) string {
+	kind, name := "Pod", p.Name
 	for _, ref := range p.OwnerReferences {
 		if ref.Controller != nil && *ref.Controller {
-			kind := topology.KindName(groupOf(ref.APIVersion), ref.Kind)
-			return topology.RootOwner(w, kind, p.Namespace, ref.Name)
+			kind, name = topology.KindName(groupOf(ref.APIVersion), ref.Kind), ref.Name
+			break
 		}
 	}
-	return topology.Key("Pod", p.Namespace, p.Name)
+	k, err := topology.RootOwner(w, kind, p.Namespace, name)
+	if err != nil {
+		return ""
+	}
+	return k
 }
 
 func (w *Watcher) apply(contributor string, c topology.Contribution, at time.Time) {
@@ -303,7 +339,7 @@ func (w *Watcher) recompute(pods, nps, initial bool) {
 			if initial {
 				at = p.CreationTimestamp.UTC()
 			}
-			w.apply(topology.Key("Pod", p.Namespace, p.Name), topology.Pod(w, p), at)
+			w.contribute("pods", "Pod", p, func() topology.Contribution { return topology.Pod(w, p) }, at)
 		}
 	}
 	if nps {
@@ -313,7 +349,7 @@ func (w *Watcher) recompute(pods, nps, initial bool) {
 			if initial {
 				at = np.CreationTimestamp.UTC()
 			}
-			w.apply(topology.Key("NetworkPolicy", np.Namespace, np.Name), topology.NetworkPolicyEgress(w, np), at)
+			w.contribute("networkpolicies", "NetworkPolicy", np, func() topology.Contribution { return topology.NetworkPolicyEgress(w, np) }, at)
 		}
 	}
 }

@@ -1,0 +1,269 @@
+{
+  "description": "ComponentKey 编码（ADR 0034）。keys：对象（kind、namespace、object_name）编码后必须恰好等于 key，key 解析后必须还原出同样的三元组。rejected_objects：编码必须报错。rejected_keys：解析必须报错。名称段：object_name 的 UTF-8 字节中 A–Z a–z 0–9 '-' '.' '_' 原样保留，其余每个字节写成 '%' 加两位大写十六进制；解析只接受这种规范编码。键的长度上限 400 按编码后的字节计算。",
+  "keys": [
+    {
+      "name": "dns_name_unchanged",
+      "kind": "Deployment",
+      "namespace": "app",
+      "object_name": "api",
+      "key": "Deployment:app/api"
+    },
+    {
+      "name": "cluster_scoped",
+      "kind": "Node",
+      "namespace": null,
+      "object_name": "n1",
+      "key": "Node:n1"
+    },
+    {
+      "name": "crd_kind_with_group",
+      "kind": "Application.argoproj.io",
+      "namespace": "argocd",
+      "object_name": "app",
+      "key": "Application.argoproj.io:argocd/app"
+    },
+    {
+      "name": "namespace_pseudo_component",
+      "kind": "Namespace",
+      "namespace": null,
+      "object_name": "app",
+      "key": "Namespace:app"
+    },
+    {
+      "name": "domain_pack_kind_upper_and_underscore",
+      "kind": "postgres.cluster",
+      "namespace": "db",
+      "object_name": "Main_DB.v2",
+      "key": "postgres.cluster:db/Main_DB.v2"
+    },
+    {
+      "name": "rbac_colon",
+      "kind": "ClusterRole",
+      "namespace": null,
+      "object_name": "cert-manager-controller-approve:cert-manager-io",
+      "key": "ClusterRole:cert-manager-controller-approve%3Acert-manager-io"
+    },
+    {
+      "name": "rbac_system_prefix",
+      "kind": "ClusterRoleBinding",
+      "namespace": null,
+      "object_name": "system:kube-controller-manager",
+      "key": "ClusterRoleBinding:system%3Akube-controller-manager"
+    },
+    {
+      "name": "namespaced_rbac_double_colon",
+      "kind": "RoleBinding",
+      "namespace": "kube-system",
+      "object_name": "system::leader-locking-kube-controller-manager",
+      "key": "RoleBinding:kube-system/system%3A%3Aleader-locking-kube-controller-manager"
+    },
+    {
+      "name": "percent_is_escaped",
+      "kind": "Role",
+      "namespace": "app",
+      "object_name": "50%-quota",
+      "key": "Role:app/50%25-quota"
+    },
+    {
+      "name": "already_escaped_looking_name",
+      "kind": "Role",
+      "namespace": "app",
+      "object_name": "a%3Ab",
+      "key": "Role:app/a%253Ab"
+    },
+    {
+      "name": "slash_cannot_fake_namespace",
+      "kind": "ClusterRole",
+      "namespace": null,
+      "object_name": "app/api",
+      "key": "ClusterRole:app%2Fapi"
+    },
+    {
+      "name": "space_at_plus",
+      "kind": "ClusterRole",
+      "namespace": null,
+      "object_name": "edit view@team+ops",
+      "key": "ClusterRole:edit%20view%40team%2Bops"
+    },
+    {
+      "name": "tilde_is_escaped",
+      "kind": "ClusterRole",
+      "namespace": null,
+      "object_name": "~admin",
+      "key": "ClusterRole:%7Eadmin"
+    },
+    {
+      "name": "leading_and_trailing_punctuation",
+      "kind": "ClusterRole",
+      "namespace": null,
+      "object_name": "-x.",
+      "key": "ClusterRole:-x."
+    },
+    {
+      "name": "non_ascii_two_byte",
+      "kind": "ClusterRole",
+      "namespace": null,
+      "object_name": "café",
+      "key": "ClusterRole:caf%C3%A9"
+    },
+    {
+      "name": "non_ascii_cjk",
+      "kind": "Role",
+      "namespace": "ops",
+      "object_name": "运维",
+      "key": "Role:ops/%E8%BF%90%E7%BB%B4"
+    },
+    {
+      "name": "non_ascii_four_byte",
+      "kind": "ClusterRole",
+      "namespace": null,
+      "object_name": "on-call-📟",
+      "key": "ClusterRole:on-call-%F0%9F%93%9F"
+    },
+    {
+      "name": "length_exactly_400",
+      "kind": "ClusterRole",
+      "namespace": null,
+      "object_name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "key": "ClusterRole:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  ],
+  "max_length": 400,
+  "rejected_keys": [
+    {
+      "name": "raw_colon_in_name",
+      "key": "ClusterRole:a:b",
+      "reason": "':' must be escaped"
+    },
+    {
+      "name": "raw_space_in_name",
+      "key": "ClusterRole:a b",
+      "reason": "' ' must be escaped"
+    },
+    {
+      "name": "lower_case_hex",
+      "key": "ClusterRole:a%3ab",
+      "reason": "escapes use upper-case hex"
+    },
+    {
+      "name": "escaped_unreserved",
+      "key": "ClusterRole:%41dmin",
+      "reason": "'A' must appear literally"
+    },
+    {
+      "name": "truncated_escape",
+      "key": "ClusterRole:a%3",
+      "reason": "escape needs two hex digits"
+    },
+    {
+      "name": "bare_percent",
+      "key": "ClusterRole:100%",
+      "reason": "escape needs two hex digits"
+    },
+    {
+      "name": "invalid_utf8",
+      "key": "ClusterRole:caf%C3",
+      "reason": "decoded name is not valid UTF-8"
+    },
+    {
+      "name": "overlong_utf8",
+      "key": "ClusterRole:%C0%AF",
+      "reason": "decoded name is not valid UTF-8"
+    },
+    {
+      "name": "empty_name",
+      "key": "Pod:app/",
+      "reason": "name segment is empty"
+    },
+    {
+      "name": "empty_kind",
+      "key": ":app/x",
+      "reason": "kind is empty"
+    },
+    {
+      "name": "no_separator",
+      "key": "Pod",
+      "reason": "missing ':'"
+    },
+    {
+      "name": "bad_namespace",
+      "key": "Pod:App/x",
+      "reason": "namespace must be a DNS label"
+    },
+    {
+      "name": "two_slashes",
+      "key": "Pod:a/b/c",
+      "reason": "'/' in the name must be escaped"
+    },
+    {
+      "name": "too_long",
+      "key": "ClusterRole:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "reason": "longer than 400"
+    }
+  ],
+  "rejected_objects": [
+    {
+      "name": "empty_name",
+      "kind": "Pod",
+      "namespace": "app",
+      "object_name": "",
+      "reason": "name is empty"
+    },
+    {
+      "name": "kind_with_space",
+      "kind": "Bad Kind",
+      "namespace": null,
+      "object_name": "x",
+      "reason": "kind must start with a letter and contain only letters, digits, '.' and '-'"
+    },
+    {
+      "name": "kind_starts_with_digit",
+      "kind": "1Pod",
+      "namespace": "app",
+      "object_name": "x",
+      "reason": "kind must start with a letter"
+    },
+    {
+      "name": "kind_with_colon",
+      "kind": "Cluster:Role",
+      "namespace": null,
+      "object_name": "x",
+      "reason": "kind must not contain ':'"
+    },
+    {
+      "name": "namespace_upper_case",
+      "kind": "Pod",
+      "namespace": "App",
+      "object_name": "x",
+      "reason": "namespace must be a DNS label"
+    },
+    {
+      "name": "namespace_with_underscore",
+      "kind": "Pod",
+      "namespace": "not_a_label",
+      "object_name": "x",
+      "reason": "namespace must be a DNS label"
+    },
+    {
+      "name": "namespace_with_slash",
+      "kind": "Pod",
+      "namespace": "a/b",
+      "object_name": "x",
+      "reason": "namespace must be a DNS label"
+    },
+    {
+      "name": "length_401",
+      "kind": "ClusterRole",
+      "namespace": null,
+      "object_name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "reason": "key longer than 400"
+    },
+    {
+      "name": "escaping_overflows_length",
+      "kind": "ClusterRole",
+      "namespace": null,
+      "object_name": "::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::",
+      "reason": "escaped key is 402 bytes"
+    }
+  ]
+}

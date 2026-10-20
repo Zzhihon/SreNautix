@@ -3,6 +3,8 @@ package kube
 import (
 	"context"
 	"fmt"
+	"io"
+	"log/slog"
 	"sort"
 	"strings"
 	"sync"
@@ -10,10 +12,12 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -121,6 +125,127 @@ func ctrlRef(apiVersion, kind, name string, uid types.UID) metav1.OwnerReference
 }
 
 func mustQty(s string) resource.Quantity { return resource.MustParse(s) }
+
+func quietLog() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
+
+// 回归：Argo CD Application 的 status.resources 里有名称带冒号的 RBAC 对象（cert-manager 的 ClusterRole）时，
+// reader 曾在 informer 回调中 panic 退出。现在冒号按 ADR 0034 编码进入拓扑；仍然无法生成键的条目（命名空间不是 DNS 标签、
+// kind 含空格）只跳过它自己并计数，Application 的其余受管资源与集群中其他对象的拓扑完整。
+func TestWatcherSurvivesArgoResourcesWithColonNames(t *testing.T) {
+	cfg, _ := testenv.StartKube(t, true)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cs := kubernetes.NewForConfigOrDie(cfg)
+	dyn := dynamic.NewForConfigOrDie(cfg)
+	disc := discovery.NewDiscoveryClientForConfigOrDie(cfg)
+	c := context.Background()
+
+	for _, n := range []string{"argocd", "cert-manager"} {
+		must(cs.CoreV1().Namespaces().Create(c, ns(n, nil), metav1.CreateOptions{}))
+	}
+	const roleName = "cert-manager-controller-approve:cert-manager-io"
+	must(cs.RbacV1().ClusterRoles().Create(c, &rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: roleName}}, metav1.CreateOptions{}))
+	must(cs.CoreV1().Services("cert-manager").Create(c, svc("cert-manager", "cert-manager"), metav1.CreateOptions{}))
+	dep := must(cs.AppsV1().Deployments("cert-manager").Create(c, &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "cert-manager", Name: "cert-manager"},
+		Spec: appsv1.DeploymentSpec{Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "cm"}},
+			Template: corev1.PodTemplateSpec{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "cm"}},
+				Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: "x"}}}}},
+	}, metav1.CreateOptions{}))
+	must(cs.CoreV1().Pods("cert-manager").Create(c, &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "cert-manager", Name: "cert-manager-0",
+			OwnerReferences: []metav1.OwnerReference{ctrlRef("apps/v1", "Deployment", "cert-manager", dep.UID)}},
+		Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: "x"}}},
+	}, metav1.CreateOptions{}))
+
+	appGVR := schema.GroupVersionResource{Group: "argoproj.io", Version: "v1alpha1", Resource: "applications"}
+	app := must(dyn.Resource(appGVR).Namespace("argocd").Create(c, &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "argoproj.io/v1alpha1", "kind": "Application",
+		"metadata": map[string]any{"namespace": "argocd", "name": "cert-manager"},
+		"spec": map[string]any{
+			"project":     "default",
+			"source":      map[string]any{"repoURL": "https://charts.example.test", "chart": "cert-manager", "targetRevision": "1.0.0"},
+			"destination": map[string]any{"server": "https://kubernetes.default.svc", "namespace": "cert-manager"},
+		},
+	}}, metav1.CreateOptions{}))
+	if err := unstructured.SetNestedSlice(app.Object, []any{
+		map[string]any{"group": "rbac.authorization.k8s.io", "version": "v1", "kind": "ClusterRole", "name": roleName},
+		map[string]any{"group": "apps", "version": "v1", "kind": "Deployment", "namespace": "cert-manager", "name": "cert-manager"},
+		map[string]any{"version": "v1", "kind": "Service", "namespace": "cert-manager", "name": "cert-manager"},
+		map[string]any{"version": "v1", "kind": "ConfigMap", "namespace": "Not_A_Label", "name": "x"},
+		map[string]any{"version": "v1", "kind": "Bad Kind", "name": "y"},
+	}, "status", "resources"); err != nil {
+		t.Fatal(err)
+	}
+	// Argo CD 的 Application CRD 没有 status 子资源，status 随对象一起更新
+	must(dyn.Resource(appGVR).Namespace("argocd").Update(c, app, metav1.UpdateOptions{}))
+
+	httpc, err := rest.HTTPClientFor(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := prometheus.NewRegistry()
+	rp := topology.NewReporter(reg, quietLog())
+	rep := newReplica(t)
+	store := topology.NewStore("c1")
+	w := New(cs, &CRDSource{Discovery: disc, Dynamic: dyn, Recognizers: topology.BuiltinRecognizers(), Every: time.Second}, store,
+		clock.New(httpc, cfg.Host, reg), rep.sink, reg, rp)
+	if err := w.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	const appKey = "Application.argoproj.io:argocd/cert-manager"
+	roleKey := "ClusterRole:cert-manager-controller-approve%3Acert-manager-io"
+	want := []string{
+		roleKey + "|managed_by|" + appKey,
+		"Deployment:cert-manager/cert-manager|managed_by|" + appKey,
+		"Service:cert-manager/cert-manager|managed_by|" + appKey,
+		"Pod:cert-manager/cert-manager-0|owned_by|Deployment:cert-manager/cert-manager",
+	}
+	testenv.Eventually(t, 20*time.Second, func() error {
+		for _, id := range want {
+			if !rep.hasEdge(id) {
+				return fmt.Errorf("missing edge %s; have %v", id, rep.edgeIDs())
+			}
+		}
+		if testutil.ToFloat64(rp.InvalidKeys().WithLabelValues("applications.argoproj.io", "ConfigMap")) == 0 ||
+			testutil.ToFloat64(rp.InvalidKeys().WithLabelValues("applications.argoproj.io", "invalid")) == 0 {
+			return fmt.Errorf("skipped entries not counted")
+		}
+		// 跳过的条目不影响新鲜度：全部 informer（含自定义资源）同步且没有 watch 错误
+		if ok, msg := w.Fresh(); !ok {
+			return fmt.Errorf("informers not fresh: %s", msg)
+		}
+		return nil
+	})
+	if n, ok := rep.node(roleKey); !ok || n.Name != roleName {
+		t.Fatalf("ClusterRole node keeps its original name: %+v %v", n, ok)
+	}
+	for _, id := range rep.edgeIDs() {
+		if strings.Contains(id, "Not_A_Label") || strings.Contains(id, "Bad Kind") {
+			t.Fatalf("edge from a skipped entry: %s", id)
+		}
+	}
+
+	// 之后的变化照常处理：Application 不再管理 Service，受管边被撤回
+	app = must(dyn.Resource(appGVR).Namespace("argocd").Get(c, "cert-manager", metav1.GetOptions{}))
+	if err := unstructured.SetNestedSlice(app.Object, []any{
+		map[string]any{"group": "rbac.authorization.k8s.io", "version": "v1", "kind": "ClusterRole", "name": roleName},
+		map[string]any{"group": "apps", "version": "v1", "kind": "Deployment", "namespace": "cert-manager", "name": "cert-manager"},
+	}, "status", "resources"); err != nil {
+		t.Fatal(err)
+	}
+	must(dyn.Resource(appGVR).Namespace("argocd").Update(c, app, metav1.UpdateOptions{}))
+	testenv.Eventually(t, 10*time.Second, func() error {
+		if rep.hasEdge("Service:cert-manager/cert-manager|managed_by|" + appKey) {
+			return fmt.Errorf("managed_by edge to the Service still present")
+		}
+		if !rep.hasEdge(roleKey + "|managed_by|" + appKey) {
+			return fmt.Errorf("ClusterRole edge lost")
+		}
+		return nil
+	})
+}
 
 func installCRDs(t *testing.T, cfg *rest.Config) {
 	t.Helper()
@@ -235,7 +360,8 @@ func TestWatcherBuildsTopologyFromLiveCluster(t *testing.T) {
 
 	rep := newReplica(t)
 	store := topology.NewStore("c1")
-	w := New(cs, &CRDSource{Discovery: disc, Dynamic: dyn, Recognizers: topology.BuiltinRecognizers(), Every: time.Second}, store, clk, rep.sink, reg)
+	w := New(cs, &CRDSource{Discovery: disc, Dynamic: dyn, Recognizers: topology.BuiltinRecognizers(), Every: time.Second}, store, clk, rep.sink, reg,
+		topology.NewReporter(reg, quietLog()))
 	if err := w.Start(ctx); err != nil {
 		t.Fatal(err)
 	}

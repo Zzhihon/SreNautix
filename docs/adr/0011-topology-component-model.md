@@ -6,7 +6,7 @@ DESIGN §4 要求拓扑以事件形式保存、可以按任意时刻查询，边
 
 ## 决定
 
-1. **对象图**：节点是 Kubernetes 对象或领域包声明的组件实例，键为 `<kind>:<namespace>/<name>`（集群级对象省略命名空间）。边的方向是"from 依赖 to"，to 的故障沿边反向传播到 from。
+1. **对象图**：节点是 Kubernetes 对象或领域包声明的组件实例，键为 `<kind>:<namespace>/<name>`（集群级对象省略命名空间），名称段按 ADR 0034 转义。边的方向是"from 依赖 to"，to 的故障沿边反向传播到 from。
 2. **组件**：`owned_by` 是成员关系，只为 ownerReference 中的控制者生成。沿 `owned_by` 向上的顶层对象就是组件：Pod → ReplicaSet → Deployment，CNPG 的 Pod、PVC、Service → Cluster。其余的边都是依赖边。
 3. **边的来源与默认置信度**：结构性 1.0（ownerReference、Pod→节点、Pod→PVC→PV→CSI 驱动、Service 选择器或 Endpoints、Ingress→Service、领域包的 Operator 约定、同节点的枢纽 DaemonSet Pod），运行时观测 0.9，配置引用 0.7（环境变量与被引用 ConfigMap 中的 Service DNS 名、secretKeyRef 的名称），NetworkPolicy 出站规则 0.6，命名推断 0.3。Secret 的内容永远不读；ConfigMap 的值只用于匹配 Service 名，边的依据只写键名。
 4. **作用范围**：在对象级可达性中自然体现。从告警实体及其全部成员出发沿依赖边走，`instance` 边只连到具体实例，`service` 边沿服务依赖传播。路径置信度取各边之积的最大值。

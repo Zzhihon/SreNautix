@@ -9,7 +9,7 @@ GO_TMPDIR           := $(CURDIR)/.scratch/tmp
 VERSION             ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 
 # 生成结果所在的路径；gateway-generate-check 要求重新生成后这些路径没有差异
-GATEWAY_GENERATED := contract/gateway/v1/crd contract/gateway/v1/testvectors deploy/helm/srenautix/crds deploy/helm/srenautix/files/admission
+GATEWAY_GENERATED := contract/gateway/v1/crd contract/gateway/v1/testvectors contract/testvectors deploy/helm/srenautix/crds deploy/helm/srenautix/files/admission
 
 .PHONY: go-build go-vet go-test gateway-generate gateway-generate-check envtest-assets invariants-kind
 
@@ -34,6 +34,7 @@ gateway-generate: $(CONTROLLER_GEN)
 	$(CONTROLLER_GEN) crd paths=./internal/spoke/gateway/execution/... output:crd:dir=deploy/helm/srenautix/crds
 	$(GO) run ./hack/gen-gateway-admission
 	$(GO) run ./hack/gen-gateway-vectors
+	$(GO) run ./hack/gen-component-key-vectors
 
 gateway-generate-check: gateway-generate
 	git diff --exit-code -- $(GATEWAY_GENERATED)

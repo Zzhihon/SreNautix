@@ -4,7 +4,7 @@ reader 是分支镜像 `srenautix-spoke` 的只读角色（`--role=reader`），
 
 | 功能 | 说明 | 设计依据 |
 |---|---|---|
-| 拓扑 | 只读 informer 把集群对象转换成带 `valid_from` / `valid_to` 的拓扑事件，推送给中心 | [ADR 0030](../adr/0030-reader-topology-extraction.md)、[ADR 0031](../adr/0031-reader-hub-protocol.md) |
+| 拓扑 | 只读 informer 把集群对象转换成带 `valid_from` / `valid_to` 的拓扑事件，推送给中心；对象名按规范编码进入组件键，无法生成键的对象只跳过它自己 | [ADR 0030](../adr/0030-reader-topology-extraction.md)、[ADR 0031](../adr/0031-reader-hub-protocol.md)、[ADR 0034](../adr/0034-component-key-name-escaping.md) |
 | 告警对账 | 每 60 秒读取本集群 Alertmanager 与 `ALERTS` / `ALERTS_FOR_STATE`，转发给中心 | ADR 0031 |
 | 声明式证据查询 | 只执行查询模板清单中声明过的模板，带范围、步长、序列数、字节、超时、并发与熔断限制 | [ADR 0032](../adr/0032-declared-evidence-queries.md) |
 | 历史重建与实体解析 | 用 kube-state-metrics 历史重建过去的拓扑；按 informer 缓存 → 24 小时墓碑 → kube-state-metrics 历史解析 Pod IP 与组件 | [ADR 0033](../adr/0033-ksm-history-topology.md) |
@@ -134,6 +134,8 @@ ConfigMap 的值只在进程内用于匹配 Service DNS 名，不进入任何输
 | `srenautix_reader_informer_last_resource_version_change_timestamp_seconds{resource}` | resourceVersion 最近一次前进的时间 |
 | `srenautix_reader_informer_watch_errors_total{resource}` | list/watch 错误次数 |
 | `srenautix_reader_topology_events_total{op}` | 产生的拓扑事件数 |
+| `srenautix_topology_invalid_keys_total{source,kind}` | 无法生成合法组件键而跳过的对象次数；`source` 是 informer 资源名或 kube-state-metrics 指标名，非法的 kind 记为 `invalid`（ADR 0034） |
+| `srenautix_topology_extract_errors_total{source}` | 字段无法解析或提取出错而跳过的对象次数 |
 | `srenautix_reader_topology_nodes`、`srenautix_reader_topology_edges` | 当前节点数与边数 |
 | `srenautix_reader_tombstones` | 保留中的墓碑数 |
 | `srenautix_reader_topology_pushed_seq` | 中心已确认的拓扑序号 |

@@ -101,11 +101,13 @@ func (c *crdWatcher) start(ctx context.Context, r topology.Recognizer, name stri
 	gvr := r.Resource()
 	kind := topology.KindName(gvr.Group, r.Kind())
 	inf := dynamicinformer.NewFilteredDynamicInformer(c.src.Dynamic, gvr, metav1.NamespaceAll, 0, cache.Indexers{}, nil).Informer()
-	t := typed{name: name, kind: kind, informer: inf, extract: func(o any) (topology.Contribution, bool) {
-		return r.Extract(o.(*unstructured.Unstructured)), true
+	t := typed{name: name, kind: kind, informer: inf, extract: func(o any) topology.Contribution {
+		return r.Extract(o.(*unstructured.Unstructured))
 	}}
 	if err := c.w.register(t); err != nil {
-		panic(err)
+		// 新建的 informer 尚未运行，注册只会因处理函数设置失败而出错：记为该资源的 watch 错误，下一次资源发现重试
+		c.w.fresh.watchError(name, err)
+		return
 	}
 	cctx, cancel := context.WithCancel(ctx)
 	c.mu.Lock()
@@ -123,9 +125,13 @@ func (c *crdWatcher) stop(gvr schema.GroupVersionResource, name string, cur *crd
 	cur.cancel()
 	now := c.w.clock.Now()
 	for _, o := range cur.informer.GetStore().List() {
-		u := o.(*unstructured.Unstructured)
+		id, err := contributorID(cur.kind, o.(*unstructured.Unstructured))
+		if err != nil {
+			// 键无法生成的对象从未进入存储
+			continue
+		}
 		c.w.applyMu.Lock()
-		c.w.emit(c.w.store.Remove(contributorID(cur.kind, u), now))
+		c.w.emit(c.w.store.Remove(id, now))
 		c.w.applyMu.Unlock()
 	}
 	c.w.fresh.untrack(name)

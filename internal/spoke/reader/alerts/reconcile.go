@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"sort"
@@ -206,9 +207,13 @@ func (r *Reconciler) rules(ctx context.Context) Part[RuleAlert] {
 				l[k] = v
 			}
 		}
+		// 取值无法解析的序列只是缺少 active_at，告警本身仍然上报
+		if len(s.Samples) == 0 {
+			continue
+		}
 		f, err := strconv.ParseFloat(s.Samples[len(s.Samples)-1].V, 64)
-		if err != nil {
-			panic(fmt.Sprintf("alerts: ALERTS_FOR_STATE value %q: %v", s.Samples[len(s.Samples)-1].V, err))
+		if err != nil || math.IsNaN(f) || math.IsInf(f, 0) {
+			continue
 		}
 		active[ruleKey(l)] = time.UnixMilli(int64(f * 1000)).UTC()
 	}

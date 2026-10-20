@@ -33,8 +33,8 @@ type Lookup interface {
 }
 
 // RootOwner 沿 controller owner 链向上，返回最顶层的 owner 键（例如 Pod → ReplicaSet → Deployment）。
-// 没有 controller 的对象返回它自己的键。
-func RootOwner(lk Lookup, kind, namespace, name string) string {
+// 没有 controller 的对象返回它自己的键；顶层 owner 无法生成合法的键时返回错误（*KeyError）。
+func RootOwner(lk Lookup, kind, namespace, name string) (string, error) {
 	k, n := kind, name
 	for range 6 {
 		ref, ok := lk.ControllerOf(k, namespace, n)

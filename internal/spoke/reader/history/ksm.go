@@ -40,10 +40,11 @@ type Rebuilder struct {
 	cfg     Config
 	cluster string
 	exec    *query.Executor
+	rep     *topology.Reporter
 }
 
-// New 创建 Rebuilder，未填写的配置项取默认值。
-func New(cfg Config, clusterID string, exec *query.Executor) *Rebuilder {
+// New 创建 Rebuilder，未填写的配置项取默认值；chunk 不是 step 的整数倍时返回错误。rep 记录标签值无法生成合法键而跳过的序列。
+func New(cfg Config, clusterID string, exec *query.Executor, rep *topology.Reporter) (*Rebuilder, error) {
 	if cfg.Step == 0 {
 		cfg.Step = 5 * time.Minute
 	}
@@ -60,9 +61,9 @@ func New(cfg Config, clusterID string, exec *query.Executor) *Rebuilder {
 		cfg.MaxWindow = 15 * 24 * time.Hour
 	}
 	if cfg.Chunk%cfg.Step != 0 {
-		panic(fmt.Sprintf("history: chunk %s must be a multiple of step %s", cfg.Chunk, cfg.Step))
+		return nil, fmt.Errorf("history: chunk %s must be a multiple of step %s", cfg.Chunk, cfg.Step)
 	}
-	return &Rebuilder{cfg: cfg, cluster: clusterID, exec: exec}
+	return &Rebuilder{cfg: cfg, cluster: clusterID, exec: exec, rep: rep}, nil
 }
 
 // item 是从一条序列推出的节点或边。
@@ -86,17 +87,44 @@ func (it item) id() string {
 // rule 把一个 kube-state-metrics 指标的标签集转换成节点和边。
 type rule struct {
 	metric string
-	derive func(l map[string]string) []item
+	derive func(l map[string]string, b *builder)
 }
 
-func structural(from, to, rel string, scope topology.Scope, ev string) item {
+// builder 收集一条序列推出的节点和边。标签值无法生成合法的键时记录问题，跳过这个节点和以它为端点的边。
+type builder struct {
+	items    []item
+	problems []topology.Problem
+}
+
+// node 追加一个节点并返回它的键；无法生成时返回空串。
+func (b *builder) node(kind, ns, name, uid string, hub bool) string {
+	n, err := topology.NewNode(kind, ns, name, uid, nil)
+	if err != nil {
+		b.problems = append(b.problems, topology.KeyProblem(err))
+		return ""
+	}
+	n.Hub = hub
+	b.items = append(b.items, item{node: &n})
+	return n.Key
+}
+
+// key 返回不在本条序列中产生节点的端点的键；无法生成时返回空串。
+func (b *builder) key(kind, ns, name string) string {
+	k, err := topology.Key(kind, ns, name)
+	if err != nil {
+		b.problems = append(b.problems, topology.KeyProblem(err))
+		return ""
+	}
+	return k
+}
+
+// edge 追加一条结构性边；任一端点为空串时跳过。
+func (b *builder) edge(from, to, rel string, scope topology.Scope, ev string) {
+	if from == "" || to == "" {
+		return
+	}
 	e := topology.Structural(from, to, rel, scope, ev)
-	return item{edge: &e}
-}
-
-func node(kind, ns, name, uid string) item {
-	n := topology.NewNode(kind, ns, name, uid, nil)
-	return item{node: &n}
+	b.items = append(b.items, item{edge: &e})
 }
 
 // ownerKindFromKSM 把 kube-state-metrics 的 owner_kind 转换成 ComponentKey 的 kind。kube-state-metrics 不输出 owner 的 API 组，
@@ -104,91 +132,81 @@ func node(kind, ns, name, uid string) item {
 var ownerKinds = map[string]bool{"ReplicaSet": true, "Deployment": true, "StatefulSet": true, "DaemonSet": true, "Job": true, "CronJob": true, "Node": true}
 
 var rules = []rule{
-	{metric: "kube_node_info", derive: func(l map[string]string) []item {
-		if l["node"] == "" {
-			return nil
+	{metric: "kube_node_info", derive: func(l map[string]string, b *builder) {
+		if l["node"] != "" {
+			b.node("Node", "", l["node"], "", false)
 		}
-		return []item{node("Node", "", l["node"], "")}
 	}},
-	{metric: "kube_pod_info", derive: func(l map[string]string) []item {
+	{metric: "kube_pod_info", derive: func(l map[string]string, b *builder) {
 		ns, pod := l["namespace"], l["pod"]
 		if ns == "" || pod == "" {
-			return nil
+			return
 		}
-		out := []item{node("Pod", ns, pod, l["uid"])}
+		p := b.node("Pod", ns, pod, l["uid"], false)
 		if n := l["node"]; n != "" {
-			out = append(out, node("Node", "", n, ""),
-				structural(topology.Key("Pod", ns, pod), topology.Key("Node", "", n), topology.RelRunsOn, topology.ScopeInstance, "kube_pod_info node"))
+			b.edge(p, b.node("Node", "", n, "", false), topology.RelRunsOn, topology.ScopeInstance, "kube_pod_info node")
 		}
-		return out
 	}},
-	{metric: "kube_pod_owner", derive: func(l map[string]string) []item {
+	{metric: "kube_pod_owner", derive: func(l map[string]string, b *builder) {
 		ns, pod, kind, name := l["namespace"], l["pod"], l["owner_kind"], l["owner_name"]
 		if ns == "" || pod == "" || !ownerKinds[kind] || name == "" || name == "<none>" {
-			return nil
+			return
 		}
 		ons := ns
 		if kind == "Node" {
 			ons = ""
 		}
-		return []item{node(kind, ons, name, ""),
-			structural(topology.Key("Pod", ns, pod), topology.Key(kind, ons, name), topology.RelOwnedBy, topology.ScopeService, "kube_pod_owner")}
+		owner := b.node(kind, ons, name, "", false)
+		b.edge(b.key("Pod", ns, pod), owner, topology.RelOwnedBy, topology.ScopeService, "kube_pod_owner")
 	}},
-	{metric: "kube_replicaset_owner", derive: func(l map[string]string) []item {
+	{metric: "kube_replicaset_owner", derive: func(l map[string]string, b *builder) {
 		ns, rs, kind, name := l["namespace"], l["replicaset"], l["owner_kind"], l["owner_name"]
 		if ns == "" || rs == "" || !ownerKinds[kind] || name == "" || name == "<none>" {
-			return nil
+			return
 		}
-		return []item{node("ReplicaSet", ns, rs, ""), node(kind, ns, name, ""),
-			structural(topology.Key("ReplicaSet", ns, rs), topology.Key(kind, ns, name), topology.RelOwnedBy, topology.ScopeService, "kube_replicaset_owner")}
+		self := b.node("ReplicaSet", ns, rs, "", false)
+		b.edge(self, b.node(kind, ns, name, "", false), topology.RelOwnedBy, topology.ScopeService, "kube_replicaset_owner")
 	}},
-	{metric: "kube_job_owner", derive: func(l map[string]string) []item {
+	{metric: "kube_job_owner", derive: func(l map[string]string, b *builder) {
 		ns, job, kind, name := l["namespace"], l["job_name"], l["owner_kind"], l["owner_name"]
 		if ns == "" || job == "" || !ownerKinds[kind] || name == "" || name == "<none>" {
-			return nil
+			return
 		}
-		return []item{node("Job", ns, job, ""), node(kind, ns, name, ""),
-			structural(topology.Key("Job", ns, job), topology.Key(kind, ns, name), topology.RelOwnedBy, topology.ScopeService, "kube_job_owner")}
+		self := b.node("Job", ns, job, "", false)
+		b.edge(self, b.node(kind, ns, name, "", false), topology.RelOwnedBy, topology.ScopeService, "kube_job_owner")
 	}},
-	{metric: "kube_pod_spec_volumes_persistentvolumeclaims_info", derive: func(l map[string]string) []item {
+	{metric: "kube_pod_spec_volumes_persistentvolumeclaims_info", derive: func(l map[string]string, b *builder) {
 		ns, pod, claim := l["namespace"], l["pod"], l["persistentvolumeclaim"]
 		if ns == "" || pod == "" || claim == "" {
-			return nil
+			return
 		}
-		return []item{node("PersistentVolumeClaim", ns, claim, ""),
-			structural(topology.Key("Pod", ns, pod), topology.Key("PersistentVolumeClaim", ns, claim), topology.RelMounts, topology.ScopeInstance, "volume "+l["volume"])}
+		pvc := b.node("PersistentVolumeClaim", ns, claim, "", false)
+		b.edge(b.key("Pod", ns, pod), pvc, topology.RelMounts, topology.ScopeInstance, "volume "+l["volume"])
 	}},
-	{metric: "kube_persistentvolumeclaim_info", derive: func(l map[string]string) []item {
+	{metric: "kube_persistentvolumeclaim_info", derive: func(l map[string]string, b *builder) {
 		ns, claim, pv := l["namespace"], l["persistentvolumeclaim"], l["volumename"]
 		if ns == "" || claim == "" {
-			return nil
+			return
 		}
-		out := []item{node("PersistentVolumeClaim", ns, claim, "")}
+		self := b.node("PersistentVolumeClaim", ns, claim, "", false)
 		if pv != "" {
-			out = append(out, node("PersistentVolume", "", pv, ""),
-				structural(topology.Key("PersistentVolumeClaim", ns, claim), topology.Key("PersistentVolume", "", pv), topology.RelBoundTo, topology.ScopeInstance, "kube_persistentvolumeclaim_info volumename"))
+			b.edge(self, b.node("PersistentVolume", "", pv, "", false), topology.RelBoundTo, topology.ScopeInstance, "kube_persistentvolumeclaim_info volumename")
 		}
-		return out
 	}},
-	{metric: "kube_persistentvolume_info", derive: func(l map[string]string) []item {
+	{metric: "kube_persistentvolume_info", derive: func(l map[string]string, b *builder) {
 		pv, driver := l["persistentvolume"], l["csi_driver"]
 		if pv == "" {
-			return nil
+			return
 		}
-		out := []item{node("PersistentVolume", "", pv, "")}
+		self := b.node("PersistentVolume", "", pv, "", false)
 		if driver != "" {
-			d := topology.NewNode(topology.KindCSIDriver, "", driver, "", nil)
-			d.Hub = true
-			out = append(out, item{node: &d},
-				structural(topology.Key("PersistentVolume", "", pv), d.Key, topology.RelProvisionedBy, topology.ScopeInstance, "kube_persistentvolume_info csi_driver"))
+			b.edge(self, b.node(topology.KindCSIDriver, "", driver, "", true), topology.RelProvisionedBy, topology.ScopeInstance, "kube_persistentvolume_info csi_driver")
 		}
-		return out
 	}},
-	{metric: "kube_service_info", derive: func(l map[string]string) []item {
-		if l["namespace"] == "" || l["service"] == "" {
-			return nil
+	{metric: "kube_service_info", derive: func(l map[string]string, b *builder) {
+		if l["namespace"] != "" && l["service"] != "" {
+			b.node("Service", l["namespace"], l["service"], l["uid"], false)
 		}
-		return []item{node("Service", l["namespace"], l["service"], l["uid"])}
 	}},
 }
 
@@ -272,8 +290,10 @@ func (r *Rebuilder) Rebuild(ctx context.Context, req Request) Result {
 			res.Truncated = res.Truncated || out.Truncated
 			for _, series := range out.Series {
 				seen = true
-				items := ru.derive(series.Labels)
-				for _, it := range items {
+				var b builder
+				ru.derive(series.Labels, &b)
+				r.rep.Report(ru.metric, b.problems)
+				for _, it := range b.items {
 					p, ok := acc[it.id()]
 					if !ok {
 						p = &presence{it: it}
@@ -400,7 +420,12 @@ func (r *Rebuilder) PodAt(ctx context.Context, ip string, at time.Time) (topolog
 		if l["namespace"] == "" || l["pod"] == "" || l["host_network"] == "true" {
 			continue
 		}
-		return topology.NewNode("Pod", l["namespace"], l["pod"], l["uid"], nil), l["node"], true, nil
+		n, err := topology.NewNode("Pod", l["namespace"], l["pod"], l["uid"], nil)
+		if err != nil {
+			r.rep.Report("kube_pod_info", []topology.Problem{topology.KeyProblem(err)})
+			continue
+		}
+		return n, l["node"], true, nil
 	}
 	return topology.Node{}, "", false, nil
 }

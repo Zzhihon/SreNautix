@@ -2,6 +2,7 @@ package topology
 
 import (
 	"fmt"
+	"strings"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -28,21 +29,27 @@ func BuiltinRecognizers() []Recognizer {
 
 func crdKind(r Recognizer) string { return KindName(r.Resource().Group, r.Kind()) }
 
-func nestedSlice(obj *unstructured.Unstructured, fields ...string) []any {
-	v, found, err := unstructured.NestedSlice(obj.Object, fields...)
+// fields 读取自定义资源的字段。字段类型与预期不符时记录一个问题，按字段缺失处理。
+type fields struct {
+	c    *Contribution
+	kind string
+	obj  *unstructured.Unstructured
+}
+
+func (f fields) slice(path ...string) []any {
+	v, _, err := unstructured.NestedSlice(f.obj.Object, path...)
 	if err != nil {
-		panic(fmt.Sprintf("topology: %s %s/%s field %v: %v", obj.GetKind(), obj.GetNamespace(), obj.GetName(), fields, err))
-	}
-	if !found {
+		f.c.fail(f.kind, f.obj.GetNamespace(), f.obj.GetName(), fmt.Sprintf("field %s: %v", strings.Join(path, "."), err))
 		return nil
 	}
 	return v
 }
 
-func nestedString(m map[string]any, fields ...string) string {
-	v, _, err := unstructured.NestedString(m, fields...)
+func (f fields) str(m map[string]any, path ...string) string {
+	v, _, err := unstructured.NestedString(m, path...)
 	if err != nil {
-		panic(fmt.Sprintf("topology: field %v: %v", fields, err))
+		f.c.fail(f.kind, f.obj.GetNamespace(), f.obj.GetName(), fmt.Sprintf("field %s: %v", strings.Join(path, "."), err))
+		return ""
 	}
 	return v
 }
@@ -58,27 +65,30 @@ func (argoApplication) Kind() string { return "Application" }
 
 // Extract：status.resources 中的每个受管资源 → Application（managed_by）。Application 的同步会改变它管理的资源。
 // 目标是其他集群的 Application 不产生受管资源边，那些资源由目标集群的 reader 负责。
+// 单个受管资源的键无法生成（例如名称超长）时只跳过这一项，Application 与其余受管资源照常进入拓扑。
 func (r argoApplication) Extract(obj *unstructured.Unstructured) Contribution {
 	kind := crdKind(r)
-	c := Generic(kind, obj)
-	app := Key(kind, obj.GetNamespace(), obj.GetName())
-	server := nestedString(obj.Object, "spec", "destination", "server")
-	dest := nestedString(obj.Object, "spec", "destination", "name")
+	c, app := generic(kind, obj)
+	if app == "" {
+		return c
+	}
+	f := fields{c: &c, kind: kind, obj: obj}
+	server := f.str(obj.Object, "spec", "destination", "server")
+	dest := f.str(obj.Object, "spec", "destination", "name")
 	if !(server == "https://kubernetes.default.svc" || (server == "" && dest == "in-cluster")) {
 		return c
 	}
-	for _, item := range nestedSlice(obj, "status", "resources") {
+	for _, item := range f.slice("status", "resources") {
 		m, ok := item.(map[string]any)
 		if !ok {
 			continue
 		}
-		rk, name := nestedString(m, "kind"), nestedString(m, "name")
+		rk, name := f.str(m, "kind"), f.str(m, "name")
 		if rk == "" || name == "" {
 			continue
 		}
-		res := NewNode(KindName(nestedString(m, "group"), rk), nestedString(m, "namespace"), name, "", nil)
-		c.Nodes = append(c.Nodes, NodeContribution{Node: res})
-		c.Edges = append(c.Edges, Structural(res.Key, app, RelManagedBy, ScopeService, "Argo CD status.resources"))
+		res := c.ref(KindName(f.str(m, "group"), rk), f.str(m, "namespace"), name, "", false)
+		c.edge(Structural(res, app, RelManagedBy, ScopeService, "Argo CD status.resources"))
 	}
 	return c
 }
@@ -95,20 +105,23 @@ func (fluxKustomization) Kind() string { return "Kustomization" }
 // Extract：status.inventory.entries 中的每个资源 → Kustomization（managed_by）。条目 ID 用 cli-utils 的 ObjMetadata 格式解析。
 func (r fluxKustomization) Extract(obj *unstructured.Unstructured) Contribution {
 	kind := crdKind(r)
-	c := Generic(kind, obj)
-	ks := Key(kind, obj.GetNamespace(), obj.GetName())
-	for _, item := range nestedSlice(obj, "status", "inventory", "entries") {
+	c, ks := generic(kind, obj)
+	if ks == "" {
+		return c
+	}
+	f := fields{c: &c, kind: kind, obj: obj}
+	for _, item := range f.slice("status", "inventory", "entries") {
 		m, ok := item.(map[string]any)
 		if !ok {
 			continue
 		}
-		meta, err := object.ParseObjMetadata(nestedString(m, "id"))
+		meta, err := object.ParseObjMetadata(f.str(m, "id"))
 		if err != nil {
-			panic(fmt.Sprintf("topology: Kustomization %s/%s inventory entry: %v", obj.GetNamespace(), obj.GetName(), err))
+			c.fail(kind, obj.GetNamespace(), obj.GetName(), "status.inventory entry: "+err.Error())
+			continue
 		}
-		res := NewNode(KindName(meta.GroupKind.Group, meta.GroupKind.Kind), meta.Namespace, meta.Name, "", nil)
-		c.Nodes = append(c.Nodes, NodeContribution{Node: res})
-		c.Edges = append(c.Edges, Structural(res.Key, ks, RelManagedBy, ScopeService, "Flux status.inventory"))
+		res := c.ref(KindName(meta.GroupKind.Group, meta.GroupKind.Kind), meta.Namespace, meta.Name, "", false)
+		c.edge(Structural(res, ks, RelManagedBy, ScopeService, "Flux status.inventory"))
 	}
 	return c
 }
@@ -124,13 +137,16 @@ func (httpRoute) Kind() string { return "HTTPRoute" }
 
 // Extract：HTTPRoute → backendRefs 指向的 Service（routes_to）；HTTPRoute → parentRefs 指向的 Gateway（attached_to）。
 func (r httpRoute) Extract(obj *unstructured.Unstructured) Contribution {
+	kind := crdKind(r)
+	c, self := generic(kind, obj)
+	if self == "" {
+		return c
+	}
 	var route gatewayv1.HTTPRoute
 	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(obj.Object, &route); err != nil {
-		panic(fmt.Sprintf("topology: HTTPRoute %s/%s: %v", obj.GetNamespace(), obj.GetName(), err))
+		c.fail(kind, obj.GetNamespace(), obj.GetName(), "spec: "+err.Error())
+		return c
 	}
-	kind := crdKind(r)
-	c := Generic(kind, obj)
-	self := Key(kind, route.Namespace, route.Name)
 	for _, p := range route.Spec.ParentRefs {
 		group, pk := gatewayv1.GroupName, "Gateway"
 		if p.Group != nil {
@@ -143,9 +159,8 @@ func (r httpRoute) Extract(obj *unstructured.Unstructured) Contribution {
 		if p.Namespace != nil {
 			ns = string(*p.Namespace)
 		}
-		parent := NewNode(KindName(group, pk), ns, string(p.Name), "", nil)
-		c.Nodes = append(c.Nodes, NodeContribution{Node: parent})
-		c.Edges = append(c.Edges, Structural(self, parent.Key, RelAttachedTo, ScopeService, "parentRefs"))
+		parent := c.ref(KindName(group, pk), ns, string(p.Name), "", false)
+		c.edge(Structural(self, parent, RelAttachedTo, ScopeService, "parentRefs"))
 	}
 	for _, rule := range route.Spec.Rules {
 		for _, b := range rule.BackendRefs {
@@ -160,9 +175,8 @@ func (r httpRoute) Extract(obj *unstructured.Unstructured) Contribution {
 			if b.Namespace != nil {
 				ns = string(*b.Namespace)
 			}
-			be := NewNode(KindName(group, bk), ns, string(b.Name), "", nil)
-			c.Nodes = append(c.Nodes, NodeContribution{Node: be})
-			c.Edges = append(c.Edges, Structural(self, be.Key, RelRoutesTo, ScopeService, "backendRefs"))
+			be := c.ref(KindName(group, bk), ns, string(b.Name), "", false)
+			c.edge(Structural(self, be, RelRoutesTo, ScopeService, "backendRefs"))
 		}
 	}
 	return c
@@ -181,28 +195,28 @@ func (cnpgCluster) Kind() string { return "Cluster" }
 // Cluster 依赖 status.currentPrimary（primary）和其余 status.instanceNames（replica）。
 func (r cnpgCluster) Extract(obj *unstructured.Unstructured) Contribution {
 	kind := crdKind(r)
-	c := Generic(kind, obj)
+	c, self := generic(kind, obj)
+	if self == "" {
+		return c
+	}
 	ns, name := obj.GetNamespace(), obj.GetName()
-	self := Key(kind, ns, name)
+	f := fields{c: &c, kind: kind, obj: obj}
 	for _, suffix := range []string{"-rw", "-ro", "-r"} {
-		svc := NewNode("Service", ns, name+suffix, "", nil)
-		c.Nodes = append(c.Nodes, NodeContribution{Node: svc})
-		c.Edges = append(c.Edges, Structural(svc.Key, self, RelOperatorConv, ScopeService, "CNPG service "+name+suffix))
+		svc := c.ref("Service", ns, name+suffix, "", false)
+		c.edge(Structural(svc, self, RelOperatorConv, ScopeService, "CNPG service "+name+suffix))
 	}
-	primary := nestedString(obj.Object, "status", "currentPrimary")
+	primary := f.str(obj.Object, "status", "currentPrimary")
 	if primary != "" {
-		p := NewNode("Pod", ns, primary, "", nil)
-		c.Nodes = append(c.Nodes, NodeContribution{Node: p})
-		c.Edges = append(c.Edges, Structural(self, p.Key, RelPrimary, ScopeService, "status.currentPrimary"))
+		p := c.ref("Pod", ns, primary, "", false)
+		c.edge(Structural(self, p, RelPrimary, ScopeService, "status.currentPrimary"))
 	}
-	for _, item := range nestedSlice(obj, "status", "instanceNames") {
+	for _, item := range f.slice("status", "instanceNames") {
 		inst, ok := item.(string)
 		if !ok || inst == primary || inst == "" {
 			continue
 		}
-		p := NewNode("Pod", ns, inst, "", nil)
-		c.Nodes = append(c.Nodes, NodeContribution{Node: p})
-		c.Edges = append(c.Edges, Structural(self, p.Key, RelReplica, ScopeService, "status.instanceNames"))
+		p := c.ref("Pod", ns, inst, "", false)
+		c.edge(Structural(self, p, RelReplica, ScopeService, "status.instanceNames"))
 	}
 	return c
 }

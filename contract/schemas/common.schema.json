@@ -45,9 +45,9 @@
     },
     "ComponentKey": {
       "title": "ComponentKey",
-      "description": "拓扑节点的键：命名空间内的对象为 <kind>:<namespace>/<name>，集群级对象为 <kind>:<name>。kind 是 Kubernetes 的 Kind（如 Pod、Node）或领域包声明的组件类型（如 postgres.cluster）。命名空间伪组件写作 Namespace:<namespace>",
+      "description": "拓扑节点的键：命名空间内的对象为 <kind>:<namespace>/<名称段>，集群级对象为 <kind>:<名称段>。kind 是 Kubernetes 的 Kind（如 Pod、Node，其他 API 组写作 Kind.group）或领域包声明的组件类型（如 postgres.cluster）；namespace 是 DNS 标签。名称段由对象名编码得到（ADR 0034）：名称的 UTF-8 字节中 A–Z a–z 0–9 '-' '.' '_' 原样保留，其余每个字节写成 '%' 加两位大写十六进制，例如 RBAC 对象 system:node 写作 ClusterRole:system%3Anode；DNS 名称编码后不变。解析时只接受这种规范编码。命名空间伪组件写作 Namespace:<namespace>。黄金向量见 contract/testvectors/component-keys.json",
       "type": "string",
-      "pattern": "^[A-Za-z][A-Za-z0-9.-]*:([a-z0-9]([-a-z0-9]*[a-z0-9])?/)?[A-Za-z0-9]([-A-Za-z0-9_.]*[A-Za-z0-9])?$",
+      "pattern": "^[A-Za-z][A-Za-z0-9.-]*:([a-z0-9]([-a-z0-9]*[a-z0-9])?/)?([A-Za-z0-9._-]|%[0-9A-F]{2})+$",
       "maxLength": 400
     },
     "EntityRef": {

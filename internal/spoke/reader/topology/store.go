@@ -16,10 +16,11 @@ type NodeContribution struct {
 	Own  bool
 }
 
-// Contribution 是一个来源对象当前贡献的全部节点和边。
+// Contribution 是一个来源对象当前贡献的全部节点和边。Problems 是提取时跳过的项，不进入存储，由调用方交给 Reporter。
 type Contribution struct {
-	Nodes []NodeContribution
-	Edges []Edge
+	Nodes    []NodeContribution
+	Edges    []Edge
+	Problems []Problem
 }
 
 type nodeSlot struct {

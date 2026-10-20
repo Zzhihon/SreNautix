@@ -5,6 +5,23 @@ import (
 	"time"
 )
 
+// mustKey 与 mustNode 用于测试中已知合法的键；出错时就地 panic，测试随之失败。
+func mustKey(kind, namespace, name string) string {
+	k, err := Key(kind, namespace, name)
+	if err != nil {
+		panic(err)
+	}
+	return k
+}
+
+func mustNode(kind, namespace, name, uid string, labels map[string]string) Node {
+	n, err := NewNode(kind, namespace, name, uid, labels)
+	if err != nil {
+		panic(err)
+	}
+	return n
+}
+
 func ops(evs []Event) []string {
 	out := make([]string, 0, len(evs))
 	for _, e := range evs {
@@ -34,22 +51,22 @@ func equal(t *testing.T, got, want []string) {
 func TestStoreRefcountsSharedEdges(t *testing.T) {
 	s := NewStore("c1")
 	t0 := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
-	dep := Key("Deployment", "app", "api")
-	svc := Key("Service", "db", "pg-rw")
+	dep := mustKey("Deployment", "app", "api")
+	svc := mustKey("Service", "db", "pg-rw")
 	ref := Edge{From: dep, To: svc, Relation: RelReferences, Provenance: ProvConfigRef, Confidence: ConfConfigRef, Scope: ScopeService, Evidence: "env DB_HOST"}
 	pod := func(name string) Contribution {
-		return Contribution{Nodes: []NodeContribution{{Node: NewNode("Pod", "app", name, "uid-"+name, nil), Own: true}}, Edges: []Edge{ref}}
+		return Contribution{Nodes: []NodeContribution{{Node: mustNode("Pod", "app", name, "uid-"+name, nil), Own: true}}, Edges: []Edge{ref}}
 	}
-	evs := s.Apply(Key("Pod", "app", "api-1"), pod("api-1"), t0)
+	evs := s.Apply(mustKey("Pod", "app", "api-1"), pod("api-1"), t0)
 	equal(t, ops(evs), []string{"node_upsert Pod:app/api-1", "edge_upsert " + ref.ID()})
 	if evs[0].Seq != 1 || evs[1].Seq != 2 {
 		t.Fatalf("seq: %d %d", evs[0].Seq, evs[1].Seq)
 	}
-	equal(t, ops(s.Apply(Key("Pod", "app", "api-2"), pod("api-2"), t0.Add(time.Minute))), []string{"node_upsert Pod:app/api-2"})
+	equal(t, ops(s.Apply(mustKey("Pod", "app", "api-2"), pod("api-2"), t0.Add(time.Minute))), []string{"node_upsert Pod:app/api-2"})
 	// 重复应用同样的贡献不产生事件
-	equal(t, ops(s.Apply(Key("Pod", "app", "api-2"), pod("api-2"), t0.Add(2*time.Minute))), nil)
-	equal(t, ops(s.Remove(Key("Pod", "app", "api-1"), t0.Add(3*time.Minute))), []string{"node_delete Pod:app/api-1"})
-	evs = s.Remove(Key("Pod", "app", "api-2"), t0.Add(4*time.Minute))
+	equal(t, ops(s.Apply(mustKey("Pod", "app", "api-2"), pod("api-2"), t0.Add(2*time.Minute))), nil)
+	equal(t, ops(s.Remove(mustKey("Pod", "app", "api-1"), t0.Add(3*time.Minute))), []string{"node_delete Pod:app/api-1"})
+	evs = s.Remove(mustKey("Pod", "app", "api-2"), t0.Add(4*time.Minute))
 	equal(t, ops(evs), []string{"edge_delete " + ref.ID(), "node_delete Pod:app/api-2"})
 	if evs[1].Seq != 6 || s.Seq() != 6 {
 		t.Fatalf("seq after removals: last event %d, store %d", evs[1].Seq, s.Seq())
@@ -62,11 +79,11 @@ func TestStoreRefcountsSharedEdges(t *testing.T) {
 func TestStoreOwnNodeWinsOverPlaceholder(t *testing.T) {
 	s := NewStore("c1")
 	t0 := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
-	stub := NewNode("Node", "", "n1", "", nil)
-	own := NewNode("Node", "", "n1", "uid-n1", map[string]string{"zone": "a"})
+	stub := mustNode("Node", "", "n1", "", nil)
+	own := mustNode("Node", "", "n1", "uid-n1", map[string]string{"zone": "a"})
 	pod := Contribution{
-		Nodes: []NodeContribution{{Node: NewNode("Pod", "x", "p", "", nil), Own: true}, {Node: stub}},
-		Edges: []Edge{Structural(Key("Pod", "x", "p"), stub.Key, RelRunsOn, ScopeInstance, "spec.nodeName")},
+		Nodes: []NodeContribution{{Node: mustNode("Pod", "x", "p", "", nil), Own: true}, {Node: stub}},
+		Edges: []Edge{Structural(mustKey("Pod", "x", "p"), stub.Key, RelRunsOn, ScopeInstance, "spec.nodeName")},
 	}
 	evs := s.Apply("Pod:x/p", pod, t0.Add(time.Hour))
 	equal(t, ops(evs), []string{"node_upsert Node:n1", "node_upsert Pod:x/p", "edge_upsert Pod:x/p|runs_on|Node:n1"})
@@ -91,7 +108,7 @@ func TestStoreRaiseSeqAndSnapshot(t *testing.T) {
 	s := NewStore("c1")
 	s.RaiseSeq(41)
 	t0 := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
-	evs := s.Apply("Service:a/s", Contribution{Nodes: []NodeContribution{{Node: NewNode("Service", "a", "s", "u", nil), Own: true}}}, t0)
+	evs := s.Apply("Service:a/s", Contribution{Nodes: []NodeContribution{{Node: mustNode("Service", "a", "s", "u", nil), Own: true}}}, t0)
 	if evs[0].Seq != 42 {
 		t.Fatalf("seq after raise: %d", evs[0].Seq)
 	}

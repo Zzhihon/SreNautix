@@ -4,11 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 
 	"github.com/Zzhihon/SreNautix/internal/spoke/reader/history"
 	"github.com/Zzhihon/SreNautix/internal/spoke/reader/query"
@@ -39,6 +42,8 @@ var ksmFixture = []series{
 	{`kube_persistentvolumeclaim_info{namespace="app",persistentvolumeclaim="api-data",volumename="pv-1",storageclassname="csi"}`, 0, 2 * time.Hour},
 	{`kube_persistentvolume_info{persistentvolume="pv-1",csi_driver="driver.example.io",storageclass="csi"}`, 0, 2 * time.Hour},
 	{`kube_service_info{namespace="app",service="api",uid="s1",cluster_ip="10.96.0.10"}`, 0, 2 * time.Hour},
+	// 标签值无法生成合法的组件键（命名空间不是 DNS 标签）：跳过并计数，其余序列照常重建
+	{`kube_service_info{namespace="Not_A_Label",service="web",uid="s2",cluster_ip="10.96.0.11"}`, 0, 2 * time.Hour},
 }
 
 func render() (om, prom string) {
@@ -131,14 +136,30 @@ func TestRebuildFromKubeStateMetricsOnPrometheusAndVictoriaMetrics(t *testing.T)
 	ctx := context.Background()
 	results := map[string]history.Result{}
 	for _, ds := range []string{"prom", "vm"} {
+		reg := prometheus.NewRegistry()
+		rep := topology.NewReporter(reg, slog.New(slog.NewTextHandler(io.Discard, nil)))
 		// 1 小时的分段：窗口跨两个分段，分段边界上的点只计一次
-		rb := history.New(history.Config{Datasource: ds, Step: 5 * time.Minute, Chunk: time.Hour}, "c1", exec)
+		rb, err := history.New(history.Config{Datasource: ds, Step: 5 * time.Minute, Chunk: time.Hour}, "c1", exec, rep)
+		if err != nil {
+			t.Fatal(err)
+		}
 		res := rb.Rebuild(ctx, history.Request{RequestID: "h", From: base.Add(2 * time.Minute), To: base.Add(2 * time.Hour)})
 		if res.Status != "ok" {
 			t.Fatalf("%s: %+v", ds, res.Error)
 		}
 		results[ds] = res
 		vs := summarize(res.Events)
+		if n := testutil.ToFloat64(rep.InvalidKeys().WithLabelValues("kube_service_info", "Service")); n == 0 {
+			t.Fatalf("%s: the series with an invalid namespace was not counted", ds)
+		}
+		for _, v := range vs {
+			if strings.Contains(v.Subject, "Not_A_Label") || v.UID == "s2" {
+				t.Fatalf("%s: a node was rebuilt from an invalid key: %+v", ds, v)
+			}
+		}
+		if svc := find(vs, "Service:app/api"); len(svc) != 1 {
+			t.Fatalf("%s: valid service next to the invalid one: %+v", ds, svc)
+		}
 
 		if !res.From.Equal(base) {
 			t.Fatalf("%s: window start not aligned to step: %s", ds, res.From)
@@ -197,7 +218,14 @@ func TestRebuildFromKubeStateMetricsOnPrometheusAndVictoriaMetrics(t *testing.T)
 		t.Fatalf("Prometheus and VictoriaMetrics rebuilt different topology:\nprom=%v\nvm=%v", summarize(results["prom"].Events), summarize(results["vm"].Events))
 	}
 
-	rb := history.New(history.Config{Datasource: "prom", Step: 5 * time.Minute, MaxWindow: time.Hour}, "c1", exec)
+	rep := topology.NewReporter(prometheus.NewRegistry(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if _, err := history.New(history.Config{Datasource: "prom", Step: 7 * time.Minute, Chunk: time.Hour}, "c1", exec, rep); err == nil {
+		t.Fatal("chunk that is not a multiple of step was accepted")
+	}
+	rb, err := history.New(history.Config{Datasource: "prom", Step: 5 * time.Minute, MaxWindow: time.Hour}, "c1", exec, rep)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if res := rb.Rebuild(ctx, history.Request{From: base, To: base.Add(2 * time.Hour)}); res.Status != "error" || res.Error.Code != query.CodeBadRange {
 		t.Fatalf("window over max: %+v", res)
 	}
