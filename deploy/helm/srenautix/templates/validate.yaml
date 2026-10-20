@@ -33,6 +33,11 @@
 {{- if not (and $wc.llm $wc.llm.routes) }}
 {{- fail "worker 需要 roles.worker.config.llm.routes（至少一条模型路由，api_key_file 指向 /etc/srenautix/secrets/llm/<键>）" }}
 {{- end }}
+{{- range $r := $wc.llm.routes }}
+{{- if and (not $r.in_domain) (not $wc.llm.allow_cross_border) }}
+{{- fail (printf "模型路由 %s 是境外路由（in_domain=false），worker 默认禁止出境：确认后设置 roles.worker.config.llm.allow_cross_border=true，或改用境内路由" $r.id) }}
+{{- end }}
+{{- end }}
 {{- if not (and $wc.budget $wc.budget.daily_tokens) }}
 {{- fail "worker 需要 roles.worker.config.budget.daily_tokens（每日 token 上限）" }}
 {{- end }}

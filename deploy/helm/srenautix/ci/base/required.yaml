@@ -15,6 +15,7 @@ roles:
   worker:
     config:
       llm:
+        allow_cross_border: true
         routes:
           - id: primary
             base_url: https://llm.example.com/v1

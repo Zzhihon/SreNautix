@@ -32,6 +32,8 @@ roles:
     config:
       llm:
         probe_on_start: false
+        # 示例路由在境外（in_domain=false），worker 默认禁止出境
+        allow_cross_border: true
         routes:
           - id: primary
             base_url: https://api.openai.com/v1

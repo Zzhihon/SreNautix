@@ -51,6 +51,8 @@ roles:
   worker:
     config:
       llm:
+        # worker 默认禁止境外路由（in_domain=false）；只用境内路由时去掉这一行
+        allow_cross_border: true
         routes:
           - id: primary
             base_url: https://llm.example.com/v1
