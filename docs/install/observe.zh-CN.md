@@ -74,12 +74,16 @@ database:
     adminSecret: srenautix-pg-admin      # 键 username、password；chart 用它运行 db bootstrap Job
 ```
 
-不提供 `adminSecret` 时，由数据库管理员手动执行一次初始化（可重复执行），之后 chart 只用三个库角色连接：
+不提供 `adminSecret` 时，由数据库管理员手动执行一次初始化（可重复执行），之后 chart 只用 server、worker 两个库角色连接：
 
 ```bash
 PGHOST=… PGDATABASE=srenautix PGUSER=postgres \
   node /app/apps/srenautix/dist/main.js db bootstrap --admin-password-file=<文件>
 ```
+
+也可以由数据库自己建好：库角色 `srenautix_server`、`srenautix_worker`，schema `server`、`worker` 分别属于这两个库角色（例如 CNPG 的 `postInitApplicationSQL`）。
+
+**启动顺序**：server、worker 的 initContainer `wait-for-schema`（`db wait`）以各自的库角色等到自己的 schema 存在且属于自己，再启动主进程。chart 自带 PG 时由 `db-bootstrap` Job 建 schema；外部 PG 在初始化完成之前，这两个 Pod 停在 `Init` 状态，日志每 30 秒说明原因。`db-bootstrap` 是普通的 Job（名称带 Helm 修订号），不是 Helm hook：CNPG 的 Cluster 与它在同一次安装中创建，pre-install 钩子会在 PG 存在之前运行；Argo CD 等 GitOps 工具也就把它当作普通资源同步，没有 hook 语义上的差异。不提供 `adminSecret` 时不生成这个 Job。
 
 ## 观察模式的审计
 

@@ -108,6 +108,15 @@ for role in server worker reader gateway; do
   log "srenautix-${role}：${ready} 个副本就绪"
 done
 
+log "检查启动顺序：server、worker 的 initContainer 等到 schema 就绪，主容器没有因为 schema 不存在而重启"
+for role in server worker; do
+  pod=$(k -n "$ns" get pod -l "app.kubernetes.io/component=$role" -o jsonpath='{.items[0].metadata.name}')
+  restarts=$(k -n "$ns" get pod "$pod" -o jsonpath='{.status.containerStatuses[0].restartCount}')
+  [[ "$restarts" == 0 ]] || { log "srenautix-$role 的主容器重启了 ${restarts} 次"; exit 1; }
+  k -n "$ns" logs "$pod" -c wait-for-schema | grep -q 'schema 已就绪' ||
+    { log "srenautix-$role 的 wait-for-schema 没有记录 schema 已就绪"; exit 1; }
+done
+
 log "检查 gateway 的准入自检与熔断开关（从 monitoring 命名空间读取指标）"
 deadline=$((SECONDS + 180))
 while true; do

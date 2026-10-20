@@ -67,6 +67,30 @@ spec:
       affinity:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- if and $.Values.database.waitForSchema (has $role (splitList " " (include "srenautix.dbRoles" $))) }}
+      # 以角色自己的库角色等到它的 schema 存在且属于自己（db bootstrap Job 建好之后）再启动主进程；
+      # 外部 PG 预先建好 schema 时立即通过
+      initContainers:
+        - name: wait-for-schema
+          image: {{ include "srenautix.image" (dict "ctx" $ "image" $.Values.image.hub) }}
+          imagePullPolicy: {{ $.Values.image.hub.pullPolicy }}
+          args: [db, wait, --schema={{ $role }}, --password-file={{ include "srenautix.secretsDir" $ }}/db/password]
+          env:
+            {{- include "srenautix.pgEnv" (dict "ctx" $ "role" $role) | nindent 12 }}
+          resources:
+            requests: {cpu: 10m, memory: 64Mi}
+            limits: {cpu: 200m, memory: 128Mi}
+          securityContext:
+            {{- include "srenautix.containerSecurityContext" $ | nindent 12 }}
+          volumeMounts:
+            {{- range $s := $secrets }}
+            {{- if has $s.key (list "db" "db-ca") }}
+            - name: secret-{{ $s.key }}
+              mountPath: {{ include "srenautix.secretsDir" $ }}/{{ $s.key }}
+              readOnly: true
+            {{- end }}
+            {{- end }}
+      {{- end }}
       containers:
         - name: {{ $role }}
           image: {{ include "srenautix.image" (dict "ctx" $ "image" $image) }}

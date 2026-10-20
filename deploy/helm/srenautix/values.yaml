@@ -328,6 +328,10 @@ database:
   # cnpg：在本命名空间创建 CNPG Cluster（需要已安装 CNPG operator）；external：使用外部 PostgreSQL 16+
   mode: cnpg
   name: srenautix
+  # server、worker 的 initContainer（`db wait`）等到自己的 schema 存在且属于自己的库角色后再启动主进程。
+  # db bootstrap 不是 Helm hook：CNPG 的 Cluster 与 bootstrap Job 在同一次安装中创建，pre-install 钩子会在 PG 存在之前运行；
+  # 外部 PG 没有 adminSecret 时由管理员手动 bootstrap，这期间 Pod 停在 Init 状态
+  waitForSchema: true
   # 每个角色一个库角色，server 与 worker 各自拥有一个 schema（DESIGN §2.1）；mcp 不连接数据库
   roles:
     server: {username: srenautix_server}

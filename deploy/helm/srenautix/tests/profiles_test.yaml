@@ -306,3 +306,40 @@ tests:
                     items:
                       - {key: slug, path: slug}
         documentSelector: {path: metadata.name, value: t-srenautix-gateway}
+
+  - it: server 与 worker 先由 initContainer 等待各自的 schema 就绪
+    set:
+      profile: standard
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[0].args
+          value: [db, wait, --schema=server, --password-file=/etc/srenautix/secrets/db/password]
+        documentSelector: {path: metadata.name, value: t-srenautix-server}
+      - equal:
+          path: spec.template.spec.initContainers[0].args
+          value: [db, wait, --schema=worker, --password-file=/etc/srenautix/secrets/db/password]
+        documentSelector: {path: metadata.name, value: t-srenautix-worker}
+      - contains:
+          path: spec.template.spec.initContainers[0].env
+          content: {name: PGUSER, value: srenautix_worker}
+        documentSelector: {path: metadata.name, value: t-srenautix-worker}
+      - contains:
+          path: spec.template.spec.initContainers[0].volumeMounts
+          content: {name: secret-db, mountPath: /etc/srenautix/secrets/db, readOnly: true}
+        documentSelector: {path: metadata.name, value: t-srenautix-worker}
+      - contains:
+          path: spec.template.spec.initContainers[0].volumeMounts
+          content: {name: secret-db-ca, mountPath: /etc/srenautix/secrets/db-ca, readOnly: true}
+        documentSelector: {path: metadata.name, value: t-srenautix-server}
+      - notExists: {path: spec.template.spec.initContainers}
+        documentSelector: {path: metadata.name, value: t-srenautix-reader}
+      - notExists: {path: spec.template.spec.initContainers}
+        documentSelector: {path: metadata.name, value: t-srenautix-gateway}
+
+  - it: database.waitForSchema=false 时没有 initContainer
+    set:
+      profile: standard
+      database.waitForSchema: false
+    documentSelector: {path: metadata.name, value: t-srenautix-server}
+    asserts:
+      - notExists: {path: spec.template.spec.initContainers}

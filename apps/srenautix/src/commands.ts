@@ -1,19 +1,22 @@
 import { readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
-import { pgConfigFromEnv } from './config/database.js';
+import { DEFAULT_DB_PASSWORD_FILE, pgConfigFromEnv } from './config/database.js';
 import { loadServerConfig } from './config/server.js';
 import { hashPassword } from './identity/password.js';
 import { logger } from './log.js';
 import { serverTracks } from './roles/server-schema.js';
-import { bootstrap, DEFAULT_DB_ROLES } from './store/bootstrap.js';
+import { bootstrap, DEFAULT_DB_ROLES, SCHEMAS } from './store/bootstrap.js';
 import { migrateContract, migrateExpand } from './store/migrate.js';
 import { createPool } from './store/pool.js';
+import { waitForSchema } from './store/wait-schema.js';
 
 const DEFAULT_CONFIG = '/etc/srenautix/config.yaml';
 
 /**
  * 运维子命令（每个子命令都接受 --config，默认 /etc/srenautix/config.yaml；未知选项报错）：
  *   db bootstrap --admin-password-file=<文件>   以 PGUSER（数据库管理员）建角色与 schema
+ *   db wait --schema=<server|worker> [--password-file=<文件>]
+ *                                               以 PGUSER（角色自己的库角色）等到 schema 存在且属于自己（chart 的 initContainer）
  *   db migrate                                  以 server 库角色执行扩展迁移（Helm pre-upgrade 钩子）
  *   db contract                                 以 server 库角色执行收缩迁移（全部副本升级之后）
  *   admin hash-password                         从标准输入读口令，输出本地管理员口令哈希
@@ -35,6 +38,23 @@ export async function runCommand(args: string[]): Promise<void> {
       await bootstrap(pool, cfg.database, DEFAULT_DB_ROLES);
       await pool.end();
       logger.info('数据库角色与 schema 已就绪', { database: cfg.database });
+      return;
+    }
+    case 'db wait': {
+      const { values } = parseArgs({
+        args: rest,
+        options: {
+          config,
+          schema: { type: 'string' },
+          'password-file': { type: 'string', default: DEFAULT_DB_PASSWORD_FILE },
+        },
+      });
+      const schema = values.schema;
+      if (!schema || !(Object.values(SCHEMAS) as string[]).includes(schema)) {
+        throw new Error(`db wait 需要 --schema=${Object.values(SCHEMAS).join('|')}`);
+      }
+      const cfg = pgConfigFromEnv(process.env, values['password-file']);
+      await waitForSchema(cfg, schema, { intervalMs: 3_000, logEveryMs: 30_000 });
       return;
     }
     case 'db migrate':
