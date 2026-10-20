@@ -58,6 +58,7 @@ import { keyringFrom, type Keyring } from '../proposals/assertion.js';
 import { AuditExporter, s3Client } from '../store/audit-export.js';
 import { purgeIdempotencyKeys } from '../store/idempotency.js';
 import { migrateExpand, migrationsReady } from '../store/migrate.js';
+import { migrateWhenReady } from '../store/migrate-when-ready.js';
 import type { OutboxEvent } from '../store/outbox.js';
 import { createPool, type PgConfig } from '../store/pool.js';
 import { startInformerTopology } from '../topology/informer.js';
@@ -125,7 +126,10 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
   configureLog(c.log_level, { role: 'server', cluster_id: c.cluster_id, serve });
   const metrics = new ServerMetrics('server', !o.noAuxListeners);
   const pool = createPool(o.pg, 'srenautix-server', c.database.pool_size);
-  const applied = await migrateExpand(pool, 'server', serverTracks);
+  // db bootstrap 还没完成时重试并保持 not ready，而不是退出（ADR 0102）
+  const applied = await migrateWhenReady('server', () => migrateExpand(pool, 'server', serverTracks), {
+    probes: o.noAuxListeners ? null : parseListen('listen.probes', c.listen.probes),
+  });
   if (applied.length) {
     logger.info('扩展迁移完成', { applied });
   }

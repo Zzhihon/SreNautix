@@ -25,6 +25,7 @@ import { workerTracks } from '../research/migrations.js';
 import { WorkerService } from '../research/service.js';
 import { WorkerStore } from '../research/store.js';
 import { migrateExpand, migrationsReady } from '../store/migrate.js';
+import { migrateWhenReady } from '../store/migrate-when-ready.js';
 import { createPool, type PgConfig } from '../store/pool.js';
 import type { Tool } from '../tools/box.js';
 import { openMcp } from '../tools/mcp.js';
@@ -72,7 +73,10 @@ export async function buildWorker(o: BuildWorkerOptions): Promise<WorkerHandle> 
   const c = o.config;
   configureLog(c.raw.log_level, { role: 'worker', cluster_id: c.raw.cluster_id, worker_id: c.raw.worker_id });
   const pool = createPool(o.pg, 'srenautix-worker', c.raw.database.pool_size);
-  await migrateExpand(pool, 'worker', workerTracks);
+  // db bootstrap 还没完成时重试并保持 not ready，而不是退出（ADR 0102）
+  await migrateWhenReady('worker', () => migrateExpand(pool, 'worker', workerTracks), {
+    probes: o.noAuxListeners ? null : parseListen('listen.probes', c.raw.listen.probes),
+  });
   const store = new WorkerStore(pool);
   const metrics = new WorkerMetrics('worker', !o.noAuxListeners);
 
