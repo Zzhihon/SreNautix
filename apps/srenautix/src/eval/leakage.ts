@@ -1,4 +1,5 @@
 import type { EvalCase, EvalSnapshot } from '@srenautix/contract';
+import { tryNodeKey } from '@srenautix/core';
 import type { ResearchCase } from '../research/types.js';
 
 // 防泄漏（DESIGN §14.3）：从快照构造回放的研判输入时，排除可能包含答案的材料。
@@ -84,7 +85,7 @@ export function deriveAbstain(
 ): { c: EvalCase; s: EvalSnapshot } | null {
   const roots = new Set(c.truth.root_components);
   const entityKey = (e: { kind: string; namespace: string | null; name: string } | null) =>
-    e ? (e.namespace ? `${e.kind}:${e.namespace}/${e.name}` : `${e.kind}:${e.name}`) : null;
+    e ? tryNodeKey(e.kind, e.namespace, e.name) : null;
   const removed = s.context.stage_a.cards.filter(
     (x) => x.verdict === 'abnormal' && roots.has(entityKey(x.entity) ?? ''),
   );

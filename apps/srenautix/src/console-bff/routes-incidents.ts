@@ -1,6 +1,6 @@
 import type { EvidenceResult, Feedback, FeedbackCreate, Incident, Proposal, StageAReport } from '@srenautix/contract';
 import { validatorFor } from '@srenautix/contract';
-import { NAMESPACE_KIND, parseKey } from '@srenautix/core';
+import { NAMESPACE_KIND } from '@srenautix/core';
 import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
 import { badRequest, notFound } from '../api/errors.js';
@@ -11,6 +11,7 @@ import { alertsById } from '../ingest/store.js';
 import type { FeedbackService } from '../proposals/feedback.js';
 import type { EvidenceRunner } from '../stage-a/ports.js';
 import type { TopologyStore } from '../topology/store.js';
+import { parseStoredKey } from '../topology/keys.js';
 
 /** 事件的授权对象：根因组件（没有时取第一个组件）所在的命名空间。 */
 export function incidentTarget(inc: Pick<Incident, 'cluster_id' | 'root' | 'components'>): Target {
@@ -18,7 +19,7 @@ export function incidentTarget(inc: Pick<Incident, 'cluster_id' | 'root' | 'comp
   if (!key) {
     return { cluster: inc.cluster_id, namespace: null, labels: {} };
   }
-  const k = parseKey(key);
+  const k = parseStoredKey(key);
   return { cluster: inc.cluster_id, namespace: k.kind === NAMESPACE_KIND ? k.name : k.namespace, labels: {} };
 }
 
@@ -530,7 +531,7 @@ export async function subgraphOf(topology: TopologyStore, inc: Incident, hops: n
   const candidates = new Set(inc.candidates.map((c) => c.component));
   const nodes = [...dist.entries()].map(([key, h]) => {
     const n = all.nodes.find((x) => x.key === key);
-    const k = parseKey(key);
+    const k = parseStoredKey(key);
     return {
       component: key,
       kind: n?.kind ?? k.kind,

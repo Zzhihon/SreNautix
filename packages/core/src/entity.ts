@@ -1,6 +1,6 @@
 // 实体解析（DESIGN §3.3）：告警标签 → 实体候选 → 按顺序查找 informer 缓存、24 小时墓碑、kube-state-metrics 历史。
 import type { AlertCatalogEntry, ClusterId, ComponentKey, EntityRef, Labels, MetricSeries } from '@srenautix/contract';
-import { entityKey, namespacePseudoKey, nodeKey } from './keys.js';
+import { NAMESPACE_KIND, tryNodeKey } from './keys.js';
 import type { TopologyStore } from './topology/store.js';
 
 /** 告警自带的 entity_kind 标签值 → Kubernetes Kind */
@@ -158,12 +158,13 @@ export class EntityResolver {
   constructor(private readonly opts: EntityResolverOptions) {}
 
   async resolve(candidate: EntityCandidate, at: number, now: number): Promise<Resolution> {
-    const pseudo = candidate.namespace ? namespacePseudoKey(candidate.namespace) : null;
+    // 标签里的命名空间或对象名不能构成合法的键（ADR 0034）时，按解析不到处理
+    const pseudo = candidate.namespace ? tryNodeKey(NAMESPACE_KIND, null, candidate.namespace) : null;
     const e = candidate.entity;
-    if (e === null) {
+    const key = e ? tryNodeKey(e.kind, e.namespace, e.name) : null;
+    if (e === null || key === null) {
       return { entity: null, layer: 'unresolved', component: pseudo };
     }
-    const key = entityKey(e);
     // informer 缓存：告警时刻的拓扑
     const graph = this.opts.store.asOf(at);
     const live = graph.node(key);
@@ -187,7 +188,7 @@ export class EntityResolver {
         return {
           entity: { ...e, uid: facts.uid },
           layer: 'ksm_history',
-          component: top ? nodeKey(top.kind, e.namespace, top.name) : key,
+          component: (top ? tryNodeKey(top.kind, e.namespace, top.name) : null) ?? key,
         };
       }
     }

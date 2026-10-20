@@ -1,5 +1,4 @@
 import type { Alert, EntityRef, EvidenceResult, Incident, Labels } from '@srenautix/contract';
-import { parseKey } from '@srenautix/core';
 import { toIso } from '@srenautix/integration-sdk';
 import {
   durationSeconds,
@@ -16,6 +15,7 @@ import { logger } from '../log.js';
 import type { ServerMetrics } from '../metrics.js';
 import type { EvidenceSource, PackRuntime } from './packs.js';
 import type { EvidenceRun, EvidenceRunner, RuleHit, RuleProposer } from './ports.js';
+import { parseStoredKey } from '../topology/keys.js';
 
 /**
  * 组件 key → 组件类型（拓扑节点上由 components.yaml 匹配出的值）。正常通道查状态库，
@@ -46,7 +46,7 @@ function entityKey(e: EntityRef): string {
 }
 
 function entityOf(clusterId: string, key: string): EntityRef {
-  const k = parseKey(key);
+  const k = parseStoredKey(key);
   return { cluster_id: clusterId, kind: k.kind, namespace: k.namespace, name: k.name, uid: null };
 }
 

@@ -1,4 +1,5 @@
 import type pg from 'pg';
+import { parseStoredKey } from '../topology/keys.js';
 
 /** 阶段 B 输入中的参考案例（与 contract/schemas/eval-snapshot.schema.json 的 ReferenceCase 同形）。 */
 export interface ReferenceCase {
@@ -52,9 +53,8 @@ export async function referenceCases(
     [o.clusterId, o.incidentId, o.before],
   );
   const namespaceOf = (key: string) => {
-    const rest = key.slice(key.indexOf(':') + 1);
-    const slash = rest.indexOf('/');
-    return slash < 0 ? (key.startsWith('Namespace:') ? rest : null) : rest.slice(0, slash);
+    const p = parseStoredKey(key);
+    return p.namespace ?? (p.kind === 'Namespace' ? p.name : null);
   };
   return r.rows
     .filter((x) => {

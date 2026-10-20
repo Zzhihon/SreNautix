@@ -11,6 +11,7 @@ import { t } from '../../notify/text.js';
 import { ALLOWED_UPDATES, TelegramApiError, TelegramTransportError, type TelegramClient } from './client.js';
 import { CALLBACK_PREFIX } from './render.js';
 import type { SendMessageParams, TgCallbackQuery, TgEntity, TgMessage, TgUpdate, TgUser } from './types.js';
+import { displayKey } from '@srenautix/core';
 
 export const WEBHOOK_PATH = '/v1/channels/telegram/webhook';
 const SECRET_HEADER = 'x-telegram-bot-api-secret-token';
@@ -141,7 +142,7 @@ export class TelegramUpdates {
       const text =
         res.purpose === 'reject_reason'
           ? `${m.text}，请回复本消息填写拒绝原因（${until} 前有效，不回复则不提交）。`
-          : `${m.text}，请回复本消息填写真实根因组件，可选：${res.button.target.choices.join('、') || '（无）'}；不知道时回复 -（${until} 前有效）。`;
+          : `${m.text}，请回复本消息填写真实根因组件，可选：${res.button.target.choices.map(displayKey).join('、') || '（无）'}；不知道时回复 -（${until} 前有效）。`;
       const msg = await this.sendInteractive({
         chat_id: Number(chat),
         text,

@@ -2,7 +2,7 @@
 // 只读取对象的名称与结构；Secret 的内容永远不读，只记录 secretKeyRef 引用的名称。
 // ConfigMap 的值只用于找出 Service DNS 名，边的依据只写键名，不写值。
 import type { ComponentType, Labels, OperatorConvention, TopologyEdge, TopologyNode } from '@srenautix/contract';
-import { nodeKey, parseKey } from '../keys.js';
+import { nodeKey, parseKey, tryNodeKey } from '../keys.js';
 import { OWNED_BY } from './graph.js';
 import type { TopologySnapshot } from './store.js';
 
@@ -127,23 +127,29 @@ function keyOf(o: KubeObject): string {
   return nodeKey(o.kind, o.metadata.namespace, o.metadata.name);
 }
 
+/** 引用的对象（属主、节点、PVC、Service 等）不能构成合法的键时为 null，相应的边不建 */
+const refKey = tryNodeKey;
+
 function escapeRe(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-export function buildKubeTopology(objects: readonly KubeObject[], opts: BuildOptions = {}): TopologySnapshot {
+export function buildKubeTopology(all: readonly KubeObject[], opts: BuildOptions = {}): TopologySnapshot {
+  // 不能构成合法键的对象（kind 或 namespace 不合法、名称编码后超长）不进入拓扑，与 reader 相同（ADR 0034）
+  const objects = all.filter((o) => tryNodeKey(o.kind, o.metadata.namespace, o.metadata.name) !== null);
   const types = opts.componentTypes ?? [];
   const nodes = new Map<string, TopologyNode>();
   const edges = new Map<string, TopologyEdge>();
   const addEdge = (
-    from: string,
-    to: string,
+    from: string | null,
+    to: string | null,
     relation: string,
     provenance: TopologyEdge['provenance'],
     scope: TopologyEdge['scope'],
     evidence: string,
   ) => {
-    if (from === to) {
+    // 端点不能构成合法的键（ADR 0034）时不建这条边
+    if (from === null || to === null || from === to) {
       return;
     }
     const k = `${from}|${relation}|${to}`;
@@ -152,8 +158,8 @@ export function buildKubeTopology(objects: readonly KubeObject[], opts: BuildOpt
     }
   };
   const addVirtual = (kind: string, namespace: string | null, name: string, hub: boolean) => {
-    const key = nodeKey(kind, namespace, name);
-    if (!nodes.has(key)) {
+    const key = refKey(kind, namespace, name);
+    if (key !== null && !nodes.has(key)) {
       nodes.set(key, { key, kind, namespace, name, uid: null, labels: {}, component_type: null, hub });
     }
     return key;
@@ -191,8 +197,8 @@ export function buildKubeTopology(objects: readonly KubeObject[], opts: BuildOpt
     const refs = o.metadata.ownerReferences ?? [];
     const ctl = refs.find((r) => r.controller) ?? refs[0];
     if (ctl) {
-      const ownerKey = nodeKey(ctl.kind, o.metadata.namespace, ctl.name);
-      if (!nodes.has(ownerKey)) {
+      const ownerKey = refKey(ctl.kind, o.metadata.namespace, ctl.name);
+      if (ownerKey !== null && !nodes.has(ownerKey)) {
         addVirtual(ctl.kind, o.metadata.namespace ?? null, ctl.name, false);
       }
       addEdge(keyOf(o), ownerKey, OWNED_BY, 'structural', 'service', `ownerReference ${ctl.kind}/${ctl.name}`);
@@ -205,10 +211,8 @@ export function buildKubeTopology(objects: readonly KubeObject[], opts: BuildOpt
     const spec = obj(p.spec);
     const nodeName = str(spec.nodeName);
     if (nodeName) {
-      if (!nodes.has(nodeKey('Node', null, nodeName))) {
-        addVirtual('Node', null, nodeName, false);
-      }
-      addEdge(pk, nodeKey('Node', null, nodeName), 'runs_on', 'structural', 'instance', `spec.nodeName ${nodeName}`);
+      const nk = addVirtual('Node', null, nodeName, false);
+      addEdge(pk, nk, 'runs_on', 'structural', 'instance', `spec.nodeName ${nodeName}`);
     }
     const referencedConfigMaps = new Set<string>();
     for (const v of arr(spec.volumes)) {
@@ -216,7 +220,7 @@ export function buildKubeTopology(objects: readonly KubeObject[], opts: BuildOpt
       if (claim) {
         addEdge(
           pk,
-          nodeKey('PersistentVolumeClaim', ns, claim),
+          refKey('PersistentVolumeClaim', ns, claim),
           'mounts',
           'structural',
           'instance',
@@ -310,7 +314,7 @@ export function buildKubeTopology(objects: readonly KubeObject[], opts: BuildOpt
           if (ref.kind === 'Pod' && str(ref.name)) {
             addEdge(
               keyOf(s),
-              nodeKey('Pod', ns, String(ref.name)),
+              refKey('Pod', ns, String(ref.name)),
               'selects',
               'structural',
               'service',
@@ -335,7 +339,7 @@ export function buildKubeTopology(objects: readonly KubeObject[], opts: BuildOpt
     for (const b of backends) {
       const svc = str(obj(b.service).name);
       if (svc) {
-        addEdge(keyOf(ing), nodeKey('Service', ns, svc), 'routes_to', 'structural', 'service', 'ingress backend');
+        addEdge(keyOf(ing), refKey('Service', ns, svc), 'routes_to', 'structural', 'service', 'ingress backend');
       }
     }
   }
@@ -346,7 +350,7 @@ export function buildKubeTopology(objects: readonly KubeObject[], opts: BuildOpt
     if (vol) {
       addEdge(
         keyOf(pvc),
-        nodeKey('PersistentVolume', null, vol),
+        refKey('PersistentVolume', null, vol),
         'bound_to',
         'structural',
         'instance',

@@ -2,6 +2,7 @@
 import type { Alert, AlertmanagerAlert, AlertmanagerWebhook, ClusterId, Labels, Severity } from '@srenautix/contract';
 import { type AlertCatalog, classifyAlert } from './classify.js';
 import { alertEntityCandidate, type EntityResolver } from './entity.js';
+import { tryNodeKey } from './keys.js';
 import { formatTime, isZeroTime, parseTime } from './time.js';
 
 const IGNORED_LABELS = new Set(['__name__', 'alertstate', 'alertgroup']);
@@ -73,7 +74,7 @@ export async function normalizeAlert(raw: AlertmanagerAlert, ctx: NormalizeConte
   const candidate = alertEntityCandidate(labels, hit?.entry, ctx.clusterId);
   const resolution = await ctx.resolver.resolve(candidate, startsAt, ctx.now);
   const entityRef = resolution.entity;
-  const ek = entityRef ? `${entityRef.kind}:${entityRef.namespace ?? ''}/${entityRef.name}` : null;
+  const ek = entityRef ? tryNodeKey(entityRef.kind, entityRef.namespace, entityRef.name) : null;
   const classification = classifyAlert(
     { labels, ruleExpr: ctx.ruleExprs?.get(labels.alertname!), chronic: ctx.chronic?.(labels.alertname!, ek) ?? false },
     ctx.catalog,

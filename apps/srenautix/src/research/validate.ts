@@ -5,6 +5,7 @@ import type {
   ProposalDraft,
   ResearchOutput,
 } from '@srenautix/contract';
+import { displayKey, tryNodeKey } from '@srenautix/core';
 import { validatorOf, formatErrors } from '../llm/schema.js';
 import type { EvidenceBook } from './evidence.js';
 import type { Ledger, LedgerEntry } from './ledger.js';
@@ -37,12 +38,9 @@ export function proposalTargets(action: ActionCatalogAction, params: Record<stri
   if (!name) {
     return out;
   }
-  if (s('node')) {
-    out.push(`Node:${name}`);
-  } else if (ns) {
-    out.push(`${kind}:${ns}/${name}`);
-  } else {
-    out.push(`${kind}:${name}`);
+  const key = s('node') ? tryNodeKey('Node', null, name) : tryNodeKey(kind, ns, name);
+  if (key) {
+    out.push(key);
   }
   return out;
 }
@@ -125,7 +123,7 @@ export function validateConclusion(
       !targets.some((t) => topology.has(t) || topologyNames.has(nsName(t)))
     ) {
       notes.push(
-        `提议 ${p.action_id}：目标 ${targets.join('、') || '（无）'} 不在本次研判的拓扑中，与机器推导的目标不一致，已删除`,
+        `提议 ${p.action_id}：目标 ${targets.map(displayKey).join('、') || '（无）'} 不在本次研判的拓扑中，与机器推导的目标不一致，已删除`,
       );
       continue;
     }

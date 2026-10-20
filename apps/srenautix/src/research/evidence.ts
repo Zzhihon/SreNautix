@@ -1,4 +1,5 @@
 import type { ChangeEvent, EntityRef, EvidenceResult, IncidentMember } from '@srenautix/contract';
+import { tryNodeKey } from '@srenautix/core';
 import type { ResearchCase } from './types.js';
 
 // 一次研判运行内的证据编号（契约 EvidenceRef）：card:<n> 指证据卡结果（阶段 A 的卡在前，区分性检查产生的卡在后），
@@ -8,7 +9,7 @@ export function entityKey(e: EntityRef | null): string | null {
   if (!e) {
     return null;
   }
-  return e.namespace ? `${e.kind}:${e.namespace}/${e.name}` : `${e.kind}:${e.name}`;
+  return tryNodeKey(e.kind, e.namespace, e.name);
 }
 
 export interface CardEntry {

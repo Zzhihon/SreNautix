@@ -1,7 +1,7 @@
 // 从 kube-state-metrics 历史重建拓扑（DESIGN §4.1、§14.5）：用于回放与观察模式的首次成绩单。
 // 每条序列有样本的时段就是对应节点或边的有效区间；相邻样本间隔超过 gapMs 时拆成两段。
 import type { MetricSeries, TopologyEdge, TopologyNode } from '@srenautix/contract';
-import { nodeKey } from '../keys.js';
+import { ComponentKeyError, nodeKey } from '../keys.js';
 import { OWNED_BY } from './graph.js';
 import { PROVENANCE_CONFIDENCE } from './kube.js';
 import type { TopologyStore } from './store.js';
@@ -72,30 +72,46 @@ function edge(
 
 export function ksmTopologyIntervals(results: KsmTopologyResults, stepMs: number, gapMs = 5 * 60_000): KsmInterval[] {
   const out: KsmInterval[] = [];
-  const push = (item: KsmInterval['item'], s: MetricSeries) => {
-    for (const [from, to] of spans(s, stepMs, gapMs)) {
-      out.push({ item, from, to });
+  /**
+   * 一条序列产生的节点与边；标签里的对象不能构成合法的键时（ADR 0034）整条序列跳过，与 reader 相同
+   */
+  const series = (s: MetricSeries, build: (add: (item: KsmInterval['item']) => void) => void) => {
+    const items: Array<KsmInterval['item']> = [];
+    try {
+      build((item) => items.push(item));
+    } catch (e) {
+      if (e instanceof ComponentKeyError) {
+        return;
+      }
+      throw e;
+    }
+    for (const item of items) {
+      for (const [from, to] of spans(s, stepMs, gapMs)) {
+        out.push({ item, from, to });
+      }
     }
   };
   for (const s of results.nodeInfo) {
-    push({ node: node('Node', null, s.labels.node!) }, s);
+    series(s, (add) => add({ node: node('Node', null, s.labels.node!) }));
   }
   for (const s of results.podInfo) {
-    const { namespace, pod, node: nodeName, uid } = s.labels;
-    const p = node('Pod', namespace!, pod!, uid ?? null);
-    push({ node: p }, s);
-    if (nodeName) {
-      push({ edge: edge(p.key, nodeKey('Node', null, nodeName), 'runs_on', 'instance', 'kube_pod_info') }, s);
-    }
+    series(s, (add) => {
+      const { namespace, pod, node: nodeName, uid } = s.labels;
+      const p = node('Pod', namespace!, pod!, uid ?? null);
+      add({ node: p });
+      if (nodeName) {
+        add({ edge: edge(p.key, nodeKey('Node', null, nodeName), 'runs_on', 'instance', 'kube_pod_info') });
+      }
+    });
   }
   for (const s of results.podOwner) {
-    const { namespace, pod, owner_kind, owner_name } = s.labels;
-    if (!owner_kind || owner_kind === '<none>') {
-      continue;
-    }
-    push({ node: node(owner_kind, namespace!, owner_name!) }, s);
-    push(
-      {
+    series(s, (add) => {
+      const { namespace, pod, owner_kind, owner_name } = s.labels;
+      if (!owner_kind || owner_kind === '<none>') {
+        return;
+      }
+      add({ node: node(owner_kind, namespace!, owner_name!) });
+      add({
         edge: edge(
           nodeKey('Pod', namespace, pod!),
           nodeKey(owner_kind, namespace, owner_name!),
@@ -103,19 +119,18 @@ export function ksmTopologyIntervals(results: KsmTopologyResults, stepMs: number
           'service',
           'kube_pod_owner',
         ),
-      },
-      s,
-    );
+      });
+    });
   }
   for (const s of results.replicasetOwner) {
-    const { namespace, replicaset, owner_kind, owner_name } = s.labels;
-    push({ node: node('ReplicaSet', namespace!, replicaset!) }, s);
-    if (!owner_kind || owner_kind === '<none>') {
-      continue;
-    }
-    push({ node: node(owner_kind, namespace!, owner_name!) }, s);
-    push(
-      {
+    series(s, (add) => {
+      const { namespace, replicaset, owner_kind, owner_name } = s.labels;
+      add({ node: node('ReplicaSet', namespace!, replicaset!) });
+      if (!owner_kind || owner_kind === '<none>') {
+        return;
+      }
+      add({ node: node(owner_kind, namespace!, owner_name!) });
+      add({
         edge: edge(
           nodeKey('ReplicaSet', namespace, replicaset!),
           nodeKey(owner_kind, namespace, owner_name!),
@@ -123,15 +138,14 @@ export function ksmTopologyIntervals(results: KsmTopologyResults, stepMs: number
           'service',
           'kube_replicaset_owner',
         ),
-      },
-      s,
-    );
+      });
+    });
   }
   for (const s of results.podPvc) {
-    const { namespace, pod, persistentvolumeclaim } = s.labels;
-    push({ node: node('PersistentVolumeClaim', namespace!, persistentvolumeclaim!) }, s);
-    push(
-      {
+    series(s, (add) => {
+      const { namespace, pod, persistentvolumeclaim } = s.labels;
+      add({ node: node('PersistentVolumeClaim', namespace!, persistentvolumeclaim!) });
+      add({
         edge: edge(
           nodeKey('Pod', namespace, pod!),
           nodeKey('PersistentVolumeClaim', namespace, persistentvolumeclaim!),
@@ -139,9 +153,8 @@ export function ksmTopologyIntervals(results: KsmTopologyResults, stepMs: number
           'instance',
           'kube_pod_spec_volumes_persistentvolumeclaims_info',
         ),
-      },
-      s,
-    );
+      });
+    });
   }
   return out;
 }

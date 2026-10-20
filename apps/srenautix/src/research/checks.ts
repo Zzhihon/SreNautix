@@ -9,6 +9,7 @@ import type { CardEntry, EvidenceBook } from './evidence.js';
 import type { Ledger } from './ledger.js';
 import { judgeItems, JUDGE_SCHEMA } from './prompt.js';
 import type { CheckTemplate, ResearchCase } from './types.js';
+import { parseStoredKey } from '../topology/keys.js';
 
 // 区分性检查（DESIGN §7.2 discriminate）：由控制器执行模型给出的 next_checks，把结果判定成新的证据卡。
 // - type=query：领域包的查询模板，按模板附带的卡定义用 CEL 判定（判定方式 rule）；
@@ -102,13 +103,9 @@ function verdictOf(outcome: 'supports' | 'refutes' | 'inconclusive'): EvidenceRe
 
 /** 组件键 → EntityRef */
 export function entityOf(clusterId: string, component: string): EvidenceResult['entity'] {
-  const i = component.indexOf(':');
-  const kind = component.slice(0, i);
-  const rest = component.slice(i + 1);
-  const slash = rest.indexOf('/');
-  return slash < 0
-    ? { cluster_id: clusterId, kind, namespace: null, name: rest, uid: null }
-    : { cluster_id: clusterId, kind, namespace: rest.slice(0, slash), name: rest.slice(slash + 1), uid: null };
+  // 名称段解码为原始对象名（ADR 0034），数据源查询用原始名称
+  const p = parseStoredKey(component);
+  return { cluster_id: clusterId, kind: p.kind, namespace: p.namespace, name: p.name, uid: null };
 }
 
 export interface CheckEnv {

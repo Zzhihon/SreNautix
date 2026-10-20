@@ -20,6 +20,7 @@ import type { WorkerMetrics } from './metrics.js';
 import type { Language } from '../prompts/index.js';
 import type { WorkerStore } from './store.js';
 import type { ResearchCase, Subgraph } from './types.js';
+import { parseStoredKey } from '../topology/keys.js';
 
 // worker 的阶段 B 循环：认领 → 读取输入 → 预算门控 → 研判（续租）→ 提议中转 → 写结果与事件 → 释放任务。
 // 一次研判的任何错误只影响这一个任务：记为 failed 并发布 research.failed，阶段 A 的消息依然有效。
@@ -91,14 +92,12 @@ export function toSubgraph(ctx: TaskContext): Subgraph {
   const known = new Set(nodes.map((n) => n.component));
   for (const k of new Set([...inc.components, ...candidates, ...(root ? [root] : [])])) {
     if (!known.has(k)) {
-      const i = k.indexOf(':');
-      const rest = k.slice(i + 1);
-      const slash = rest.indexOf('/');
+      const p = parseStoredKey(k);
       nodes.push({
         component: k,
-        kind: k.slice(0, i),
-        namespace: slash < 0 ? null : rest.slice(0, slash),
-        name: slash < 0 ? rest : rest.slice(slash + 1),
+        kind: p.kind,
+        namespace: p.namespace,
+        name: p.name,
         role: k === root ? 'root' : candidates.has(k) ? 'candidate' : 'member',
         alerts: alertsByComponent.get(k) ?? [],
         hops: hops.get(k) ?? 0,

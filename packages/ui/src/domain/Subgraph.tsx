@@ -9,7 +9,7 @@ import type { IncidentSubgraph } from '../contract';
 import { useI18n } from '../i18n';
 import { EmptyState } from '../primitives/EmptyState';
 import { Loading } from '../primitives/basic';
-import { componentLabel } from './model';
+import { componentLabel, displayComponent } from './model';
 import styles from './Subgraph.module.css';
 
 type SubNode = IncidentSubgraph['nodes'][number];
@@ -30,7 +30,7 @@ function ComponentNode({ data }: NodeProps<Node<SubData>>) {
   return (
     <div className={styles.node} data-role={data.n.role}>
       <Handle type="target" position={Position.Left} className={styles.handle} />
-      <div className={styles.name} title={data.n.component}>
+      <div className={styles.name} title={displayComponent(data.n.component)}>
         {l.name}
       </div>
       <div className={styles.sub}>

@@ -3,6 +3,7 @@ import { logger } from '../log.js';
 import type { ServerMetrics } from '../metrics.js';
 import type { ActionOutcome, ChannelActor, NotifyActions } from './ports.js';
 import type { ButtonRow, NotifyStore, PendingReply } from './store.js';
+import { displayKey } from '@srenautix/core';
 
 /** 回复式交互的有效期（拒绝原因、真实根因）。 */
 export const REPLY_WINDOW_MS = 5 * 60_000;
@@ -359,7 +360,7 @@ export class Interactions {
     }
     const parsed = parseRootReply(text, btn.target.choices);
     if (parsed.kind === 'unknown') {
-      return `无法识别组件“${parsed.word}”，可选：${btn.target.choices.join('、')}；不知道真实根因时回复 -`;
+      return `无法识别组件“${parsed.word}”，可选：${btn.target.choices.map(displayKey).join('、')}；不知道真实根因时回复 -`;
     }
     if (parsed.kind === 'too_long') {
       return `原因最长 ${MAX_REASON_CHARS} 字，本次未提交，请重新回复`;
@@ -467,24 +468,21 @@ export function parseRootReply(text: string, choices: readonly string[]): RootRe
     return { kind: 'ok', component: null, reason };
   }
   const lower = word.toLowerCase();
-  const exact = choices.find((c) => c.toLowerCase() === lower);
+  // 组件键的名称段是编码形式（ADR 0034）；回复可以写编码形式，也可以写展示的原始名称
+  const forms = (c: string) => [...new Set([c.toLowerCase(), displayKey(c).toLowerCase()])];
+  const exact = choices.find((c) => forms(c).includes(lower));
   if (exact) {
     return { kind: 'ok', component: exact, reason };
   }
   // 组件键形如 Kind:ns/name：也接受只写 name 或 ns/name
-  const byName = choices.filter((c) => {
-    const lc = c.toLowerCase();
-    return lc.endsWith(`/${lower}`) || lc.endsWith(`:${lower}`);
-  });
+  const byName = choices.filter((c) => forms(c).some((lc) => lc.endsWith(`/${lower}`) || lc.endsWith(`:${lower}`)));
   if (byName.length === 1) {
     return { kind: 'ok', component: byName[0] as string, reason };
   }
   if (lower.length >= 3) {
-    const pre = choices.filter((c) => {
-      const lc = c.toLowerCase();
-      const tail = lc.slice(lc.lastIndexOf('/') + 1);
-      return lc.startsWith(lower) || tail.startsWith(lower);
-    });
+    const pre = choices.filter((c) =>
+      forms(c).some((lc) => lc.startsWith(lower) || lc.slice(lc.lastIndexOf('/') + 1).startsWith(lower)),
+    );
     if (pre.length === 1) {
       return { kind: 'ok', component: pre[0] as string, reason };
     }

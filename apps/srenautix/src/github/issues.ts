@@ -1,5 +1,6 @@
 import type { EvidenceResult, Incident, StageAReport } from '@srenautix/contract';
 import type pg from 'pg';
+import { displayKey } from '@srenautix/core';
 import { logger } from '../log.js';
 import type { ServerMetrics } from '../metrics.js';
 import { appendAudit } from '../store/audit.js';
@@ -348,7 +349,7 @@ export class IssueService {
       [incidentId],
     );
     const research = run.rows[0] ?? null;
-    const root = incident.root.component;
+    const root = incident.root.component ? displayKey(incident.root.component) : null;
     const prefix = this.s.titlePrefix ? `${this.s.titlePrefix} ` : '';
     const title = `${prefix}${t.title(incident.label, root)}`.slice(0, 250);
     const link = `${this.s.consoleUrl.replace(/\/+$/, '')}/incidents/${incident.incident_id}`;

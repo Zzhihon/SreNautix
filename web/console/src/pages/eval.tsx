@@ -7,6 +7,7 @@ import type { HubComponents, HubOperations } from '@srenautix/contract';
 import { useState } from 'react';
 import {
   Button,
+  displayComponent,
   EmptyState,
   ErrorBox,
   KeyValue,
@@ -214,7 +215,7 @@ function CaseBrowser({ suite, mode }: { suite: string; mode: EvalMode }) {
                     </div>
                   </th>
                   <td>
-                    {c.truth.root_components.join(', ') || '-'}
+                    {c.truth.root_components.map(displayComponent).join(', ') || '-'}
                     <div className={styles.dim}>
                       {c.truth.granularity ? t(`eval.granularity.${c.truth.granularity}`) : '-'} ·{' '}
                       {c.truth.disposition ? t(`status.disposition.${c.truth.disposition}`) : '-'}

@@ -12,6 +12,7 @@ import type { ButtonTarget, DesiredIncidentMessage } from '../../notify/ports.js
 import { shortId } from '../../notify/shortid.js';
 import { clip, hm, oneLine, publicHttpsUrl, t, ymdhm } from '../../notify/text.js';
 import { payloadHash, MAX_RESULTS_SHOWN } from '../telegram/render.js';
+import { displayKey } from '@srenautix/core';
 
 /** 卡片 JSON 的上限是 30 KB；留出余量，超过时按优先级省略段落。 */
 export const MAX_CARD_BYTES = 28 * 1024;
@@ -263,7 +264,7 @@ function rootSelect(l: Language, target: ButtonTarget): El {
     required: true,
     placeholder: { tag: 'plain_text', content: l === 'zh' ? '真实根因组件' : 'Actual root component' },
     options: [
-      ...target.choices.map((c) => ({ text: { tag: 'plain_text', content: clip(c, 60) }, value: c })),
+      ...target.choices.map((c) => ({ text: { tag: 'plain_text', content: clip(displayKey(c), 60) }, value: c })),
       { text: { tag: 'plain_text', content: l === 'zh' ? '不知道真实根因' : 'Unknown' }, value: '-' },
     ],
   };

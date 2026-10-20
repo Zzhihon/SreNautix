@@ -1,5 +1,4 @@
 import type { Alert, EvidenceResult, Feedback, Incident } from '@srenautix/contract';
-import { parseKey } from '@srenautix/core';
 import { Ajv2020, type ValidateFunction } from 'ajv/dist/2020.js';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type pg from 'pg';
@@ -18,6 +17,7 @@ import { tx } from '../store/pool.js';
 import type { TopologyStore } from '../topology/store.js';
 import { badRequest, forbidden, HttpError, notFound } from './errors.js';
 import { referenceCases } from './research-materials.js';
+import { parseStoredKey } from '../topology/keys.js';
 
 export interface ResearchRouteDeps {
   pool: pg.Pool;
@@ -250,7 +250,7 @@ export function registerResearchRoutes(app: FastifyInstance, d: ResearchRouteDep
     if (!node && !own) {
       throw badRequest(`组件 ${component} 不在本次研判的子图中`);
     }
-    const k = parseKey(component);
+    const k = parseStoredKey(component);
     const entity = node
       ? { cluster_id: incident.cluster_id, kind: node.kind, namespace: node.namespace, name: node.name, uid: node.uid }
       : { cluster_id: incident.cluster_id, kind: k.kind, namespace: k.namespace, name: k.name, uid: null };

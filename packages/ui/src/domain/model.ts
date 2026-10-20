@@ -8,7 +8,41 @@ export interface ComponentParts {
   name: string;
 }
 
-/** `<kind>:<namespace>/<name>` 或 `<kind>:<name>`。 */
+const UNRESERVED = /^[A-Za-z0-9._-]$/;
+const utf8 = new TextDecoder('utf-8', { fatal: true });
+
+/**
+ * 名称段解码（ADR 0034）：A–Z a–z 0–9 '-' '.' '_' 以外的字节写成 %XX。只用于展示；
+ * 不是规范编码（例如契约 2.8.0 之前写入的旧键）时原样返回。
+ */
+export function decodeComponentName(segment: string): string {
+  if (!segment.includes('%')) {
+    return segment;
+  }
+  const bytes: number[] = [];
+  for (let i = 0; i < segment.length; i++) {
+    const c = segment[i] as string;
+    if (c === '%') {
+      const hex = segment.slice(i + 1, i + 3);
+      if (!/^[0-9A-F]{2}$/.test(hex)) {
+        return segment;
+      }
+      bytes.push(parseInt(hex, 16));
+      i += 2;
+    } else if (UNRESERVED.test(c)) {
+      bytes.push(c.charCodeAt(0));
+    } else {
+      return segment;
+    }
+  }
+  try {
+    return utf8.decode(Uint8Array.from(bytes));
+  } catch {
+    return segment;
+  }
+}
+
+/** `<kind>:<namespace>/<名称段>` 或 `<kind>:<名称段>`；name 是解码后的原始对象名（给人看），键本身保持编码形式。 */
 export function parseComponent(key: string): ComponentParts {
   const i = key.indexOf(':');
   if (i <= 0) {
@@ -17,7 +51,19 @@ export function parseComponent(key: string): ComponentParts {
   const kind = key.slice(0, i);
   const rest = key.slice(i + 1);
   const j = rest.indexOf('/');
-  return j < 0 ? { kind, namespace: null, name: rest } : { kind, namespace: rest.slice(0, j), name: rest.slice(j + 1) };
+  return j < 0
+    ? { kind, namespace: null, name: decodeComponentName(rest) }
+    : { kind, namespace: rest.slice(0, j), name: decodeComponentName(rest.slice(j + 1)) };
+}
+
+/** 给人看的完整组件名：ClusterRole:a%3Ab → ClusterRole:a:b */
+export function displayComponent(key: string): string {
+  try {
+    const p = parseComponent(key);
+    return p.namespace ? `${p.kind}:${p.namespace}/${p.name}` : `${p.kind}:${p.name}`;
+  } catch {
+    return key;
+  }
 }
 
 /** 列表里的短名："worker（StatefulSet · prod-app）"由调用方拼接，这里给出 name 与副标题。 */

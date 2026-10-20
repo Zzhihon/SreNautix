@@ -12,6 +12,7 @@ import type {
   StageAReport,
 } from '@srenautix/contract';
 import type { ButtonTarget, DesiredIncidentMessage } from './ports.js';
+import { displayKey } from '@srenautix/core';
 
 type Lang = 'zh' | 'en';
 
@@ -287,14 +288,21 @@ export function composeMessage(i: ComposeInput): { message: NotifyMessage; targe
 
   const root: NotifyBlock[] = [];
   if (inc.root.component) {
-    root.push(text(t.root(inc.root.component, inc.root.ambiguous, inc.root.margin)));
+    root.push(text(t.root(displayKey(inc.root.component), inc.root.ambiguous, inc.root.margin)));
   }
   if (inc.root.silent_root) {
     root.push(text(t.silent));
   }
-  inc.candidates.slice(0, 3).forEach((c, k) => root.push(item(t.candidate(k + 1, c.component, c.score))));
+  inc.candidates.slice(0, 3).forEach((c, k) => root.push(item(t.candidate(k + 1, displayKey(c.component), c.score))));
   if (out) {
-    root.push(text(t.conclusion(t.level[out.conclusion.level] ?? out.conclusion.level, out.conclusion.root_component)));
+    root.push(
+      text(
+        t.conclusion(
+          t.level[out.conclusion.level] ?? out.conclusion.level,
+          out.conclusion.root_component ? displayKey(out.conclusion.root_component) : null,
+        ),
+      ),
+    );
     const h = out.hypotheses.find((x) => x.id === out.conclusion.hypothesis_id);
     if (h) {
       root.push(text(h.mechanism, true));
@@ -418,7 +426,11 @@ export function composeMessage(i: ComposeInput): { message: NotifyMessage; targe
       incident_version: inc.incident_version,
       prefix: i.prefix,
       severity: inc.severity,
-      title: `${t.title(inc.root.component, members.length)} · ${t.state[inc.state] ?? inc.state}`.slice(0, 200),
+      title:
+        `${t.title(inc.root.component ? displayKey(inc.root.component) : null, members.length)} · ${t.state[inc.state] ?? inc.state}`.slice(
+          0,
+          200,
+        ),
       sections,
       buttons,
       banner,

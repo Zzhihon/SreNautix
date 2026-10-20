@@ -3,6 +3,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { AlertRole } from '@srenautix/contract';
 import { parse as parseYaml, stringify } from 'yaml';
+import { isComponentKey } from '@srenautix/core';
 import { z } from 'zod';
 import { ConfigError } from '../config/files.js';
 
@@ -21,14 +22,17 @@ import { ConfigError } from '../config/files.js';
  */
 export const OVERRIDES_API_VERSION = 'srenautix.io/topology-overrides/v1';
 
-const COMPONENT_KEY = /^[A-Za-z][A-Za-z0-9.-]*:[^\s]+$/;
-
 export const overrideSchema = z
   .object({
     cluster_id: z.string().min(1),
     alertname: z.string().min(1),
     match_labels: z.record(z.string(), z.string()).optional(),
-    component: z.string().regex(COMPONENT_KEY, '组件键形如 <kind>:<namespace>/<name> 或 <kind>:<name>'),
+    component: z
+      .string()
+      .refine(
+        isComponentKey,
+        '组件键形如 <kind>:<namespace>/<名称段> 或 <kind>:<名称段>，名称段按 ADR 0034 编码（例如 ClusterRole:system%3Aauth）',
+      ),
     role: z.enum(['cause', 'change', 'symptom', 'forecast', 'meta']),
   })
   .strict();

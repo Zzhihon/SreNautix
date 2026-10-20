@@ -1,5 +1,5 @@
 import type { AlertCatalogEntry, AlertClassification, EntityRef } from '@srenautix/contract';
-import { classifyAlert, type AlertCatalog } from '@srenautix/core';
+import { classifyAlert, isComponentKey, NAMESPACE_KIND, tryNodeKey, type AlertCatalog } from '@srenautix/core';
 import type { RawAlert } from '../ingest/normalize.js';
 
 /** 拓扑节点查找（由 topology/store 提供）：按 kind/namespace/name 取当前节点或 24 小时内的墓碑。 */
@@ -79,8 +79,9 @@ function entityFromContractLabels(
   return { kind: labels.entity_kind, namespace: labels.namespace ?? null, name: labels.entity };
 }
 
-export function componentKeyOf(kind: string, namespace: string | null, name: string): string {
-  return namespace ? `${kind}:${namespace}/${name}` : `${kind}:${name}`;
+/** 组件键（ADR 0034：名称段编码）；标签里的对象不能构成合法的键时为 null */
+export function componentKeyOf(kind: string, namespace: string | null, name: string): string | null {
+  return tryNodeKey(kind, namespace, name);
 }
 
 /** 分类（DESIGN §3.2）与实体解析（§3.3）：标签契约 → informer 缓存 → 24 小时墓碑 → kube-state-metrics 历史。 */
@@ -117,7 +118,7 @@ export async function resolveAlert(clusterId: string, a: RawAlert, deps: Resolve
       component = componentKeyOf(mapped.kind, mapped.namespace, mapped.name);
     }
   }
-  if (a.labels.component && /^[A-Za-z][A-Za-z0-9.-]*:/.test(a.labels.component)) {
+  if (a.labels.component && isComponentKey(a.labels.component)) {
     component = a.labels.component;
   }
   // 拓扑覆盖由人工在 Git 中给出，优先于领域包与标签的映射；告警自带的 role 标签仍然优先于覆盖的角色
@@ -127,7 +128,7 @@ export async function resolveAlert(clusterId: string, a: RawAlert, deps: Resolve
   }
   if (!component && a.labels.namespace) {
     // 未映射的告警归入命名空间伪组件，不丢弃（DESIGN §5）
-    component = `Namespace:${a.labels.namespace}`;
+    component = tryNodeKey(NAMESPACE_KIND, null, a.labels.namespace);
   }
   if (ov && a.labels.role === undefined) {
     return {
