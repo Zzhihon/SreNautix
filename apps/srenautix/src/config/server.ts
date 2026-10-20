@@ -86,6 +86,32 @@ const changesSource = z
     message: 'deploy_key_file 需要同时给出 known_hosts_file',
   });
 
+// OCI 来源的领域包：固定到 digest，先用 cosign 校验签名（公钥，或 keyless 的证书身份与签发方）再用 oras 拉取
+const ociPackSource = z
+  .object({
+    repository: z.string().min(1),
+    digest: z.string().regex(/^sha256:[0-9a-f]{64}$/, 'OCI 来源必须固定到 sha256 digest'),
+    key_file: path.optional(),
+    certificate_identity: z.string().min(1).optional(),
+    certificate_oidc_issuer: z.string().min(1).optional(),
+    // 跳过透明日志校验；只用于无法访问 Rekor 的离线环境，且必须配合 key_file
+    ignore_tlog: z.boolean().default(false),
+    // 仓库只提供 HTTP（仅限本机或隔离网络中的仓库）
+    plain_http: z.boolean().default(false),
+  })
+  .strict()
+  .refine((s) => Boolean(s.key_file) !== Boolean(s.certificate_identity || s.certificate_oidc_issuer), {
+    message: '需要且只能给出 key_file 或 certificate_identity + certificate_oidc_issuer 之一',
+  })
+  .refine(
+    (s) =>
+      !(s.certificate_identity || s.certificate_oidc_issuer) || (s.certificate_identity && s.certificate_oidc_issuer),
+    {
+      message: 'keyless 校验需要同时给出 certificate_identity 与 certificate_oidc_issuer',
+    },
+  )
+  .refine((s) => !s.ignore_tlog || s.key_file, { message: 'ignore_tlog 只能与 key_file 一起使用' });
+
 const telegram = z
   .object({
     enabled: z.boolean().default(false),
@@ -192,10 +218,25 @@ export const serverConfigSchema = z
         watchdog_alertname: 'Watchdog',
         reconcile: { enabled: true, interval: '60s' },
       }),
-    // dirs 下的每个子目录是一个领域包；only 不填时加载除 `_` 开头（示例包）以外的全部包
+    // dirs 下的每个子目录是一个领域包；only 不填时加载除 `_` 开头（示例包）以外的全部包；oci 中的包总是加载
     packs: z
-      .object({ dirs: z.array(path).min(1), only: z.array(z.string().min(1)).optional(), lock_file: path.optional() })
-      .strict(),
+      .object({
+        dirs: z.array(path).default([]),
+        only: z.array(z.string().min(1)).optional(),
+        lock_file: path.optional(),
+        oci: z
+          .object({
+            sources: z.array(ociPackSource).min(1),
+            cosign: path.default('cosign'),
+            oras: path.default('oras'),
+            // 拉取目录（可写的临时卷）；每个来源一个子目录，启动时清空后重新拉取
+            cache_dir: path.default('/var/cache/srenautix/packs'),
+          })
+          .strict()
+          .optional(),
+      })
+      .strict()
+      .refine((p) => p.dirs.length > 0 || p.oci, { message: '至少需要 packs.dirs 或 packs.oci 之一' }),
     datasources: z
       .object({
         prometheus: z

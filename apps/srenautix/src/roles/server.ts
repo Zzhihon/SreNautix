@@ -203,6 +203,14 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
     lockFile: c.packs.lock_file ?? null,
     catalogPath: DEFAULT_CATALOG_PATH,
     capabilities: new Set(['metrics.query', 'metrics.query_range', 'metrics.series']),
+    oci: c.packs.oci
+      ? {
+          sources: c.packs.oci.sources,
+          cosign: c.packs.oci.cosign,
+          oras: c.packs.oci.oras,
+          cacheDir: c.packs.oci.cache_dir,
+        }
+      : null,
   });
   logger.info('领域包已加载', {
     packs: packs.set.packs.map((p) => p.name),

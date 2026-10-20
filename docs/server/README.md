@@ -127,6 +127,31 @@ server 启动时用 packages/packs-sdk 加载 `packs.dirs` 下的领域包（每
 | `chains.yaml`、`signals.yaml` | 阶段 A 执行的证据卡 |
 | `rules.yaml` | 规则提议 |
 
+### OCI 来源的包
+
+`packs.oci` 中的包在目录中的包之后加载，总是加载（不受 `packs.only` 限制）。每个来源固定到 digest，启动时先用 cosign 校验签名，再检查制品类型与单层结构，最后用 oras 拉取（ADR 0091）；来源记为 `oci://<仓库>@<digest>`，计入 pack.lock。
+
+```yaml
+packs:
+  dirs: [/app/packs]
+  oci:
+    cosign: cosign                         # 可执行文件
+    oras: oras
+    cache_dir: /var/cache/srenautix/packs  # 可写的临时卷，每个来源一个子目录，启动时清空后重新拉取
+    sources:
+      - repository: registry.example.org/packs/redis
+        digest: sha256:<64 位十六进制>
+        key_file: /etc/srenautix/packs/cosign.pub          # 密钥对签名
+      - repository: ghcr.io/example/packs/kafka
+        digest: sha256:<64 位十六进制>
+        certificate_identity: https://github.com/example/packs/.github/workflows/release.yaml@refs/heads/main
+        certificate_oidc_issuer: https://token.actions.githubusercontent.com   # keyless 签名
+```
+
+`key_file` 与 `certificate_identity` + `certificate_oidc_issuer` 二选一。`ignore_tlog: true` 跳过透明日志校验，只用于无法访问 Rekor 的离线环境，并且只能与 `key_file` 一起用。`plain_http: true` 用于只提供 HTTP 的仓库（仅限本机或隔离网络）。仓库凭证按 Docker 配置（`DOCKER_CONFIG`）读取。
+
+签名校验、制品检查或拉取失败时只禁用这个来源，在"领域包"页列出原因；没有拉取到内容时摘要为制品的 digest。镜像中需要 `cosign` 与 `oras`。
+
 阶段 A 执行哪些卡：
 
 1. 根因（有歧义时前两个候选）的组件类型声明的证据链，实体为根因组件。
@@ -141,6 +166,7 @@ server 启动时用 packages/packs-sdk 加载 `packs.dirs` 下的领域包（每
 
 - 单个包校验不通过（例如规则引用了动作目录中没有的动作）：只禁用这个包，其余包照常加载。
 - `requires` 中的能力缺失，或者依赖的包被禁用：整个包禁用；`optional` 中的能力缺失时相应的卡显示"能力缺失"。
+- OCI 来源的签名校验、制品检查或拉取失败：只禁用这个来源。
 - 配置了 `packs.lock_file` 而加载的内容与之不一致：不加载任何包。
 
 以上情况都发布 `PackLoadFailed` 条件（subject 为包名），控制台"领域包"页（`GET /v1/packs`）列出原因。证据数据源的标签档案探测失败时发布 `DatasourceUnavailable`（subject `evidence-metrics`），查询按规范标签名照常发出。

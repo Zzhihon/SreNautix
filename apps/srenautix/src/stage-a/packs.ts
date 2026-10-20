@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import type {
   AlertCatalogEntry,
@@ -25,9 +25,11 @@ import {
 import {
   compileCard,
   compilePackSet,
+  CosignVerifier,
   createBaseEnvironment,
   LiveDataSource,
   loadActionCatalog,
+  loadOciPack,
   loadPackDir,
   packDigest,
   PackLintError,
@@ -55,6 +57,68 @@ export interface PackRuntimeOptions {
   catalogPath: string;
   /** 数据源具备的能力；requires 中的能力缺失时整个包禁用。 */
   capabilities: ReadonlySet<Capability>;
+  /** OCI 来源的包：签名校验或拉取失败时只禁用这个来源。 */
+  oci?: OciPackSources | null;
+}
+
+export interface OciPackSource {
+  repository: string;
+  digest: string;
+  key_file?: string | undefined;
+  certificate_identity?: string | undefined;
+  certificate_oidc_issuer?: string | undefined;
+  ignore_tlog: boolean;
+  plain_http: boolean;
+}
+
+export interface OciPackSources {
+  sources: OciPackSource[];
+  cosign: string;
+  oras: string;
+  cacheDir: string;
+}
+
+/** 校验并拉取 OCI 来源的包；失败（签名、制品类型、拉取、校验）时记为失败的包，不影响其他包。 */
+async function loadOciSources(o: OciPackSources): Promise<{ loaded: LoadedPack[]; failures: PackFailure[] }> {
+  const loaded: LoadedPack[] = [];
+  const failures: PackFailure[] = [];
+  for (const src of o.sources) {
+    const ref = `oci://${src.repository}@${src.digest}`;
+    const dir = join(o.cacheDir, src.digest.replace(':', '-'));
+    // 上次拉取的内容不复用：签名校验不通过时目录保持为空
+    rmSync(dir, { recursive: true, force: true });
+    try {
+      const r = await loadOciPack({
+        repository: src.repository,
+        digest: src.digest,
+        verifier: new CosignVerifier({
+          cosign: o.cosign,
+          ...(src.key_file ? { key: src.key_file } : {}),
+          ...(src.certificate_identity ? { certificate_identity: src.certificate_identity } : {}),
+          ...(src.certificate_oidc_issuer ? { certificate_oidc_issuer: src.certificate_oidc_issuer } : {}),
+          allow_http_registry: src.plain_http,
+          ignore_tlog: src.ignore_tlog,
+        }),
+        oras: o.oras,
+        dir,
+        plain_http: src.plain_http,
+      });
+      logger.info('OCI 领域包签名校验通过并已拉取', { pack: r.pack.name, source: ref, signer: r.signer });
+      loaded.push(r.pack);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      logger.error('OCI 领域包没有加载', { source: ref, error: msg });
+      // 拉取并解开之后才校验失败时按目录内容列出；没有拉取到内容时摘要取制品的 digest
+      const pulled = existsSync(dir) ? readdirSync(dir).filter((n) => existsSync(join(dir, n, 'pack.yaml'))) : [];
+      const name = pulled[0] ?? src.repository.split('/').at(-1) ?? src.repository;
+      failures.push(
+        pulled[0]
+          ? failureOf(join(dir, pulled[0]), name, ref, msg)
+          : { name, source: ref, version: null, maturity: null, digest: src.digest, error: msg },
+      );
+    }
+  }
+  return { loaded, failures };
 }
 
 export type PackStatus = HubComponents['schemas']['PackStatus'];
@@ -215,6 +279,11 @@ export class PackRuntime {
         throw new Error(`packs.only 中的包 ${n} 不在 packs.dirs 中`);
       }
     }
+    if (o.oci) {
+      const r = await loadOciSources(o.oci);
+      active.push(...r.loaded);
+      failures.push(...r.failures);
+    }
     const expectedLock =
       o.lockFile && existsSync(o.lockFile)
         ? assertValid<PackLock>('schemas/pack.schema.json#/$defs/PackLock', parseYaml(readFileSync(o.lockFile, 'utf8')))
@@ -325,7 +394,7 @@ export class PackRuntime {
       s.startsWith('git+') ? 'git' : s.startsWith('oci://') ? 'oci' : 'builtin';
     const disabled = new Map(this.set.disabled.map((d) => [d.name, d.reason]));
     const loaded = this.set.lock.packs
-      .filter((l) => !this.failures.some((f) => f.name === l.name))
+      .filter((l) => !this.failures.some((f) => f.name === l.name && f.source === l.source))
       .map((l): PackStatus => {
         const m = this.inputs.find((x) => x.name === l.name)!.content.manifest;
         const reason = disabled.get(l.name) ?? null;
