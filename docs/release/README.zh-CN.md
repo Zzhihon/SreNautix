@@ -4,10 +4,10 @@
 
 | 触发 | 中心镜像与分支镜像 | chart |
 |---|---|---|
-| 每 30 分钟，main 的最新提交（该提交的 chart 已发布时跳过）；手动 `gh workflow run release.yml --ref main` | `sha-<7 位提交>` | `<Chart.version>-main.<提交时间 UTC，年月日时分秒>.g<7 位提交>` |
+| 每 30 分钟，main 的最新提交（该提交的 chart 已发布、或该提交的 ci 未成功完成时跳过）；手动 `gh workflow run release.yml --ref main` | `sha-<7 位提交>` | `<Chart.version>-main.<提交时间 UTC，年月日时分秒>.g<7 位提交>` |
 | tag `vX.Y.Z` | `sha-<7 位提交>`、`X.Y.Z`、`X.Y` | `X.Y.Z`，并附带离线包 |
 
-main 不按推送触发发布：推送频率高于一次发布的耗时，同一并发组只保留一个排队中的运行，排队的运行会不断被更新的推送替换。定时发布取运行时 main 的最新提交，同一提交的 chart 版本号固定，已发布的提交不会重复构建。需要立即发布时手动触发。
+main 不按推送触发发布：推送频率高于一次发布的耗时，同一并发组只保留一个排队中的运行，排队的运行会不断被更新的推送替换。定时发布取运行时 main 的最新提交，同一提交的 chart 版本号固定，已发布的提交不会重复构建；ci 失败、被取消或仍在运行的提交不发布，仍在运行的由下一次定时运行接着检查。需要立即发布时手动触发，手动触发与 tag 不检查 ci，发布前先确认 ci 与 kind-e2e 已通过。
 
 - 镜像：`ghcr.io/zzhihon/srenautix`、`ghcr.io/zzhihon/srenautix-spoke`，linux/amd64 与 linux/arm64。
 - chart：`oci://ghcr.io/zzhihon/charts/srenautix`；打包时 `appVersion` 写成本次镜像的标签，chart 默认就拉取同一次构建的镜像。

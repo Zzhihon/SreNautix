@@ -1,5 +1,5 @@
 # 发布：构建并推送两个多架构镜像与 Helm chart（OCI），全部 cosign 签名。
-# 触发：v* tag；每 30 分钟发布一次 main 的最新提交（该提交的 chart 已发布时跳过）；手动 workflow_dispatch。
+# 触发：v* tag；每 30 分钟发布一次 main 的最新提交（该提交的 chart 已发布、或 ci 未成功完成时跳过）；手动 workflow_dispatch。
 # main 的推送频率高于一次发布的耗时，按推送触发会让排队中的运行不断被替换，所以不按推送触发。
 # 标签：镜像 sha-<短 SHA>，tag 上另加 <版本> 与 <主>.<次>；
 # chart 在 main 上为 <Chart.version>-main.<提交时间 UTC，年月日时分秒>.g<短 SHA>（同一提交的版本号固定），tag 上为 <版本>。
@@ -23,6 +23,7 @@ jobs:
   detect:
     runs-on: ubuntu-24.04
     permissions:
+      actions: read
       contents: read
       packages: read
     outputs:
@@ -56,22 +57,29 @@ jobs:
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
           version: v4.3.1
-      # 定时运行时，main 的最新提交已经发布过（chart 已存在）就不再重复构建
-      - name: 检查本提交是否已发布
+      # 定时运行时，main 的最新提交已经发布过（chart 已存在），或者该提交的 ci 没有成功完成（失败、取消或仍在运行），
+      # 就不构建；ci 仍在运行的提交由下一次定时运行发布。tag 与手动触发不做这两项检查
+      - name: 检查本提交是否已发布、ci 是否通过
         id: published
         env:
           CHART_VERSION: ${{ steps.version.outputs.chart }}
           GH_ACTOR: ${{ github.actor }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "$GH_TOKEN" | helm registry login ghcr.io -u "$GH_ACTOR" --password-stdin >/dev/null
-          if [[ "$GITHUB_EVENT_NAME" == schedule ]] &&
-            helm show chart oci://ghcr.io/zzhihon/charts/srenautix --version "$CHART_VERSION" >/dev/null 2>&1; then
-            echo "chart ${CHART_VERSION} 已发布，跳过"
-            echo "published=true" >>"$GITHUB_OUTPUT"
-          else
-            echo "published=false" >>"$GITHUB_OUTPUT"
+          skip=false
+          if [[ "$GITHUB_EVENT_NAME" == schedule ]]; then
+            echo "$GH_TOKEN" | helm registry login ghcr.io -u "$GH_ACTOR" --password-stdin >/dev/null
+            ci=$(gh run list -R "$GITHUB_REPOSITORY" --workflow ci --commit "$GITHUB_SHA" --event push \
+              --json status,conclusion --jq '.[0] | "\(.status) \(.conclusion)"')
+            if helm show chart oci://ghcr.io/zzhihon/charts/srenautix --version "$CHART_VERSION" >/dev/null 2>&1; then
+              echo "chart ${CHART_VERSION} 已发布，跳过"
+              skip=true
+            elif [[ "$ci" != "completed success" ]]; then
+              echo "${GITHUB_SHA::7} 的 ci 为 ${ci:-无运行}，跳过"
+              skip=true
+            fi
           fi
+          echo "published=$skip" >>"$GITHUB_OUTPUT"
 
   hub:
     needs: detect
