@@ -59,3 +59,17 @@ wait_namespace_ready() {
     k -n "$ns" rollout status "$obj" --timeout="${timeout}s"
   done
 }
+
+# 监控、CNPG 与 SreNautix 的 Pod（DaemonSet 除外）必须都在 zone a；节点 NotReady 场景停止 zone b 的节点
+check_platform_zone() {
+  local zone_a stray
+  zone_a=$(k get nodes -l srenautix.io/zone=a -o jsonpath='{.items[*].metadata.name}')
+  [[ -n "$zone_a" ]] || die "没有 srenautix.io/zone=a 的节点"
+  stray=$(k get pods -A -o json | jq -r --arg zone_a "$zone_a" '
+    ($zone_a | split(" ")) as $a | .items[] |
+    select(.metadata.namespace | IN("monitoring", "srenautix", "cnpg-system")) |
+    select((.metadata.ownerReferences[0].kind // "") != "DaemonSet") |
+    select(.spec.nodeName != null and (.spec.nodeName | IN($a[]) | not)) |
+    "\(.metadata.namespace)/\(.metadata.name)@\(.spec.nodeName)"')
+  [[ -z "$stray" ]] || die "以下监控或 SreNautix 的 Pod 不在 zone a，节点故障场景会让监控失明：$(echo "$stray" | paste -sd ' ' -)"
+}

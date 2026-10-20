@@ -56,6 +56,7 @@ wait_namespace_ready traffic 300
 if $with_srenautix; then
   "$KIND_DIR/install-srenautix.sh"
 fi
+check_platform_zone
 
 log "完成。Grafana：kubectl --context $KUBE_CONTEXT -n monitoring port-forward svc/kps-grafana 3000:80（admin / srenautix-kind）"
 log "故障场景：deploy/kind/scenario.sh list；deploy/kind/scenario.sh run <场景>"

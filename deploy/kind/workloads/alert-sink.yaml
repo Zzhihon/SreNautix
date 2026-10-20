@@ -25,6 +25,8 @@ spec:
     metadata:
       labels: {app: alert-sink}
     spec:
+      # 与监控一起固定在 zone a；节点 NotReady 场景停止 zone b 的节点时，自身告警仍能送达
+      nodeSelector: {srenautix.io/zone: a}
       containers:
         - name: httpd
           image: busybox

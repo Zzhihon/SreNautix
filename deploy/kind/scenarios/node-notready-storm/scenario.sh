@@ -8,13 +8,10 @@ EXPECTED_ALERTS=(KubeNodeNotReady KubeNodeUnreachable)
 VERIFY_TIMEOUT=600
 
 inject() {
-  local zone platform shop
+  local zone shop
   zone=$(k get node "$NODE" -o jsonpath='{.metadata.labels.srenautix\.io/zone}')
   [[ "$zone" == b ]] || die "$NODE 的 srenautix.io/zone 应为 b，实际为 ${zone:-空}"
-  platform=$(k get pods -A --field-selector "spec.nodeName=$NODE" -o json |
-    jq '[.items[] | select(.metadata.namespace | IN("monitoring", "srenautix", "cnpg-system")) |
-      select(.metadata.ownerReferences[0].kind != "DaemonSet")] | length')
-  ((platform == 0)) || die "$NODE 上有 ${platform} 个监控或 SreNautix 的 Pod，停止它会让监控失明"
+  check_platform_zone
   shop=$(k -n shop get pods --field-selector "spec.nodeName=$NODE" -o name | wc -l)
   ((shop > 0)) || die "$NODE 上没有 shop 的 Pod，场景不会产生 Pod 风暴"
   docker exec "$NODE" systemctl stop kubelet
