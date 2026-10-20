@@ -97,6 +97,11 @@ spec:
             {{- if has $role (splitList " " (include "srenautix.dbRoles" $)) }}
             {{- include "srenautix.pgEnv" (dict "ctx" $ "role" $role) | nindent 12 }}
             {{- end }}
+            {{- if and (eq $role "server") $.Values.packs.oci.dockerConfigSecret }}
+            # oras 与 cosign 按 DOCKER_CONFIG 读取私有仓库的凭证
+            - name: DOCKER_CONFIG
+              value: {{ include "srenautix.secretsDir" $ }}/pack-registry
+            {{- end }}
             {{- with $r.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -172,6 +177,10 @@ spec:
               mountPath: /etc/srenautix/pack-lock
               readOnly: true
             {{- end }}
+            {{- if $.Values.packs.oci.sources }}
+            - name: pack-cache
+              mountPath: /var/cache/srenautix/packs
+            {{- end }}
             {{- end }}
       volumes:
         - name: config
@@ -228,6 +237,12 @@ spec:
             name: {{ $.Values.packs.lockConfigMap }}
             items:
               - {key: pack.lock, path: pack.lock}
+        {{- end }}
+        {{- if $.Values.packs.oci.sources }}
+        # OCI 领域包的拉取目录：server 启动时清空后按 digest 重新拉取
+        - name: pack-cache
+          emptyDir:
+            sizeLimit: {{ $.Values.packs.oci.cacheSize }}
         {{- end }}
         {{- end }}
 {{- end }}

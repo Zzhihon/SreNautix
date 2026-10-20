@@ -43,7 +43,11 @@ ClusterImagePolicy 要求两个 SreNautix 镜像带有发布工作流的无密�
 
 COMPLIANCE 模式的对象锁在保留期内任何账号都无法删除或覆盖对象，包括 MinIO 管理员。server 与 gateway 的写入账号只有写入与读取权限。`srenautix audit verify` 校验两条链，见 `docs/server/audit.md`。
 
+## H 档的通行密钥审批
+
+合规配置下 server 与 gateway 挂载同一份审批人公钥（`roles.gateway.approverKeys`，格式见 `contract/gateway/v1/approver-keys.schema.json`），server 配置写入 `approvals.approver_keys_file`。文件中的 `webauthn.rp_id` 与 `origins` 要与控制台地址一致，`origins` 填 `publicUrl`。每位审批人的通行密钥凭据限于 Ed25519（COSE 算法 -8）：审批人在控制台登记通行密钥后，把凭据 ID 与公钥写入 Git 中的这份文件，经 ConfigMap（或 Secret）同步。server 每 60 秒重新读取；没有这份文件时，H 档审批返回 409 `webauthn_not_configured`。
+
 ## 国内环境
 
-- 模型路由默认禁用出境路由（DESIGN §8.1），worker 的路由配置写明 `in_domain`。
+- 模型路由默认禁用出境路由（DESIGN §8.1），worker 的路由配置写明 `in_domain`。没有打开 `allow_cross_border` 的境外路由在 worker 启动时被禁用，没有可用路由时只出阶段 A（ADR 0062）。
 - 麒麟（Kylin）基础镜像与 SM2/SM3 检查点签名属于合规配置的扩展项，按 DESIGN 附录 B 第 9 步提供。

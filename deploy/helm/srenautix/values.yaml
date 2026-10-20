@@ -221,6 +221,16 @@ packs:
   userConfigMaps: []
   # 含 pack.lock 的 ConfigMap（键 pack.lock）；为空时由 server 在启动时计算
   lockConfigMap: ""
+  # OCI 仓库中经 cosign 签名的领域包（镜像内带 cosign 与 oras）。sources 的每一项原样写入 server 配置的 packs.oci.sources：
+  # repository、digest（sha256 固定）、key_file 或 certificate_identity + certificate_oidc_issuer（见 apps/srenautix/src/config/server.ts）。
+  # key_file 写 /etc/srenautix/secrets/pack-keys/<键>，公钥放在 keySecret 指定的 Secret 中
+  oci:
+    sources: []
+    keySecret: ""
+    # 私有仓库凭证（类型 kubernetes.io/dockerconfigjson），以 DOCKER_CONFIG 提供给 oras 与 cosign
+    dockerConfigSecret: ""
+    # 拉取目录（emptyDir）的容量上限
+    cacheSize: 512Mi
 
 identity:
   # 本地管理员（只用于首次引导与紧急入口）。Secret 的两个键：
@@ -430,6 +440,8 @@ networkPolicy:
   gatewayMetricsEgressTo: []
   # GitHub API（gitops_pr），只有 gateway 可以访问；为空时放行到任意地址的 443
   githubEgressTo: []
+  # OCI 领域包的仓库与 Rekor（packs.oci），只有 server 可以访问；为空时放行到任意地址的 443
+  packRegistriesEgressTo: []
   # 外部 S3 审计汇（audit.sink=s3）
   auditEgressTo: []
   # Cilium 环境下为 worker 生成按 FQDN 限制的出站策略

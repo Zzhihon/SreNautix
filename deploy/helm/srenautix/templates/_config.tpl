@@ -48,6 +48,36 @@
 {{- end -}}
 {{- define "srenautix.policyFile" -}}{{ .Values.clusterId }}.yaml{{- end -}}
 
+{{/* worker 会在启动时禁用的模型路由：境外路由（in_domain=false）且没有 llm.allow_cross_border（ADR 0062） */}}
+{{- define "srenautix.blockedRoutes" -}}
+{{- $llm := (.Values.roles.worker.config | default dict).llm | default dict -}}
+{{- $ids := list -}}
+{{- range $r := $llm.routes | default list -}}
+{{- if and (not $r.in_domain) (not $llm.allow_cross_border) -}}
+{{- $ids = append $ids $r.id -}}
+{{- end -}}
+{{- end -}}
+{{- join "、" $ids -}}
+{{- end -}}
+
+{{/* server 是否挂载审批人公钥（合规配置 H 档的通行密钥审批）：requirePasskey 为真且给出了 roles.gateway.approverKeys */}}
+{{- define "srenautix.serverApproverKeys" -}}
+{{- $keys := .Values.roles.gateway.approverKeys -}}
+{{- $g := include "srenautix.governance" . | fromYaml -}}
+{{- if and $g.requirePasskey (or $keys.content $keys.existingConfigMap $keys.existingSecret) -}}true{{- end -}}
+{{- end -}}
+
+{{/* 审批人公钥的卷（gateway 与 server 挂载同一份，键 approver-keys.yaml） */}}
+{{- define "srenautix.approverKeysEntry" -}}
+{{- $keys := .Values.roles.gateway.approverKeys -}}
+{{- $items := list (dict "key" "approver-keys.yaml" "path" "approver-keys.yaml") -}}
+{{- if $keys.existingSecret -}}
+{{- toYaml (dict "key" "approver-keys" "secretName" $keys.existingSecret "items" $items) -}}
+{{- else -}}
+{{- toYaml (dict "key" "approver-keys" "configMap" (default (printf "%s-approver-keys" (include "srenautix.fullname" .)) $keys.existingConfigMap) "items" $items) -}}
+{{- end -}}
+{{- end -}}
+
 {{/* 使用数据库的角色 */}}
 {{- define "srenautix.dbRoles" -}}server worker{{- end -}}
 
@@ -95,6 +125,15 @@
 {{- with $v.secrets.serviceSigningKey.existingSecret -}}
 {{- $out = append $out (dict "key" "service-signing" "secretName" . "items" (list (dict "key" "private.pem" "path" "private.pem"))) -}}
 {{- end -}}
+{{- if include "srenautix.serverApproverKeys" .ctx -}}
+{{- $out = append $out (include "srenautix.approverKeysEntry" .ctx | fromYaml) -}}
+{{- end -}}
+{{- with $v.packs.oci.keySecret -}}
+{{- $out = append $out (dict "key" "pack-keys" "secretName" .) -}}
+{{- end -}}
+{{- with $v.packs.oci.dockerConfigSecret -}}
+{{- $out = append $out (dict "key" "pack-registry" "secretName" . "items" (list (dict "key" ".dockerconfigjson" "path" "config.json"))) -}}
+{{- end -}}
 {{- end -}}
 {{- if eq $role "mcp" -}}
 {{- with $v.roles.mcp.clientTokensSecret -}}
@@ -103,12 +142,7 @@
 {{- end -}}
 {{- if eq $role "gateway" -}}
 {{- $out = append $out (dict "key" "audit-key" "secretName" (include "srenautix.gatewayAuditKeySecret" .ctx) "items" (list (dict "key" "private.pem" "path" "private.pem"))) -}}
-{{- $keys := $v.roles.gateway.approverKeys -}}
-{{- if $keys.existingSecret -}}
-{{- $out = append $out (dict "key" "approver-keys" "secretName" $keys.existingSecret "items" (list (dict "key" "approver-keys.yaml" "path" "approver-keys.yaml"))) -}}
-{{- else -}}
-{{- $out = append $out (dict "key" "approver-keys" "configMap" (default (printf "%s-approver-keys" (include "srenautix.fullname" .ctx)) $keys.existingConfigMap) "items" (list (dict "key" "approver-keys.yaml" "path" "approver-keys.yaml"))) -}}
-{{- end -}}
+{{- $out = append $out (include "srenautix.approverKeysEntry" .ctx | fromYaml) -}}
 {{- $out = append $out (dict "key" "policy" "configMap" (include "srenautix.policyConfigMap" .ctx) "items" (list (dict "key" (include "srenautix.policyFile" .ctx) "path" (include "srenautix.policyFile" .ctx)))) -}}
 {{- with $v.roles.gateway.githubApp.existingSecret -}}
 {{- $out = append $out (dict "key" "github-app" "secretName" . "items" (list (dict "key" "app-id" "path" "app-id") (dict "key" "installation-id" "path" "installation-id") (dict "key" "slug" "path" "slug") (dict "key" "private-key.pem" "path" "private-key.pem"))) -}}
@@ -172,10 +206,14 @@ worker:
 policies_dir: /etc/srenautix/policies
 {{- end }}
 ingest:
+  {{- if $v.ingest.sources }}
   sources:
     {{- range $s := $v.ingest.sources }}
     - {{- toYaml (merge (dict "token_file" (printf "%s/ingest/%s" $dir $s.id)) (omit $s "token_file")) | nindent 6 }}
     {{- end }}
+  {{- else }}
+  sources: []
+  {{- end }}
   self_label: srenautix_self
   reconcile:
     enabled: true
@@ -193,6 +231,12 @@ packs:
   {{- if $v.packs.lockConfigMap }}
   lock_file: /etc/srenautix/pack-lock/pack.lock
   {{- end }}
+  {{- with $v.packs.oci.sources }}
+  oci:
+    sources:
+      {{- toYaml . | nindent 6 }}
+    cache_dir: /var/cache/srenautix/packs
+  {{- end }}
 datasources:
   prometheus:
     url: {{ $v.datasources.prometheus.url }}
@@ -204,6 +248,10 @@ approvals:
   signing_key_file: {{ $dir }}/service-signing/private.pem
   key_id: {{ $v.approvals.keyId }}
   h_reauth_max_age: {{ printf "%ds" (int $v.governance.highTierReauthMaxAgeSeconds) }}
+  {{- if include "srenautix.serverApproverKeys" $ }}
+  # 合规配置 H 档的通行密钥审批：与 gateway 相同的审批人公钥文件（webauthn.origins 应为 publicUrl）
+  approver_keys_file: {{ $dir }}/approver-keys/approver-keys.yaml
+  {{- end }}
 {{- end }}
 callers:
   tokens_file: {{ $dir }}/callers/callers.yaml

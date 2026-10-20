@@ -16,6 +16,18 @@ gateway 只提议、不执行。解除冻结只能用 kubectl 或 GitOps：
 {{- end }}
 {{- end }}
 
+{{- if include "srenautix.roleEnabled" (dict "ctx" $ "role" "worker") }}
+{{- with include "srenautix.blockedRoutes" . }}
+
+警告：模型路由 {{ . }} 是境外路由（in_domain=false），roles.worker.config.llm.allow_cross_border 没有打开，
+worker 启动时禁用这些路由（指标 srenautix_llm_route_disabled{reason="cross_border"}）。
+{{- if eq (len (splitList "、" .)) (len $.Values.roles.worker.config.llm.routes) }}
+没有可用的模型路由：事件只出阶段 A 的结论，不运行阶段 B 的研判。
+{{- end }}
+确认可以出境后设置 allow_cross_border=true，或改用境内路由。
+{{- end }}
+{{- end }}
+
 {{- if eq (include "srenautix.auditSink" .) "pg" }}
 
 注意：审计写入 PG 的独立表，没有对象锁保护。控制台会持续提示这一风险。

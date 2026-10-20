@@ -1,0 +1,13 @@
+# 没有告警接入源（ingest.sources 为空列表）、从 OCI 仓库加载签名领域包的 standard 安装：
+# 检查空列表照常渲染为 []，以及 packs.oci 的配置、拉取目录、公钥与仓库凭证挂载
+profile: standard
+ingest:
+  sources: []
+packs:
+  oci:
+    sources:
+      - repository: registry.example.com/srenautix/packs/kubernetes
+        digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+        key_file: /etc/srenautix/secrets/pack-keys/cosign.pub
+    keySecret: srenautix-pack-keys
+    dockerConfigSecret: srenautix-pack-registry

@@ -198,3 +198,54 @@ tests:
             name: secret-llm
             secret: {secretName: llm, defaultMode: 288}
         documentSelector: {path: metadata.name, value: t-srenautix-server}
+
+  - it: 配置 OCI 领域包时 server 挂载可写的拉取目录、公钥与仓库凭证
+    set:
+      profile: standard
+      packs.oci.sources:
+        - repository: registry.example.com/packs/k8s
+          digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+          key_file: /etc/srenautix/secrets/pack-keys/cosign.pub
+      packs.oci.keySecret: pack-keys
+      packs.oci.dockerConfigSecret: registry-auth
+    documentSelector: {path: metadata.name, value: t-srenautix-server}
+    asserts:
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: pack-cache
+            emptyDir: {sizeLimit: 512Mi}
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content: {name: pack-cache, mountPath: /var/cache/srenautix/packs}
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: secret-pack-keys
+            secret: {secretName: pack-keys, defaultMode: 288}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: DOCKER_CONFIG, value: /etc/srenautix/secrets/pack-registry}
+
+  - it: 合规配置下 server 与 gateway 挂载同一份审批人公钥
+    values:
+      - ../values-compliance.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: secret-approver-keys
+            configMap:
+              name: t-srenautix-approver-keys
+              defaultMode: 288
+              items: [{key: approver-keys.yaml, path: approver-keys.yaml}]
+        documentSelector: {path: metadata.name, value: t-srenautix-server}
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: secret-approver-keys
+            configMap:
+              name: t-srenautix-approver-keys
+              defaultMode: 288
+              items: [{key: approver-keys.yaml, path: approver-keys.yaml}]
+        documentSelector: {path: metadata.name, value: t-srenautix-gateway}

@@ -1,0 +1,36 @@
+suite: 安装说明
+templates:
+  - templates/NOTES.txt
+values:
+  - ../ci/base/required.yaml
+release:
+  name: t
+  namespace: srenautix
+capabilities:
+  majorVersion: "1"
+  minorVersion: "34"
+tests:
+  - it: 境外路由没有允许出境时警告，全部路由被禁用时说明只出阶段 A
+    set:
+      profile: standard
+      roles.worker.config.llm.allow_cross_border: false
+    asserts:
+      - matchRegexRaw: {pattern: 警告：模型路由 primary 是境外路由}
+      - matchRegexRaw: {pattern: 没有可用的模型路由：事件只出阶段 A 的结论}
+
+  - it: 还有境内路由时只警告被禁用的路由
+    set:
+      profile: standard
+      roles.worker.config.llm.allow_cross_border: false
+      roles.worker.config.llm.routes:
+        - {id: primary, in_domain: false}
+        - {id: local, in_domain: true}
+    asserts:
+      - matchRegexRaw: {pattern: 警告：模型路由 primary 是境外路由}
+      - notMatchRegexRaw: {pattern: 没有可用的模型路由}
+
+  - it: 允许出境时不警告
+    set:
+      profile: standard
+    asserts:
+      - notMatchRegexRaw: {pattern: 境外路由}

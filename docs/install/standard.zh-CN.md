@@ -51,7 +51,8 @@ roles:
   worker:
     config:
       llm:
-        # worker 默认禁止境外路由（in_domain=false）；只用境内路由时去掉这一行
+        # worker 默认禁止境外路由（in_domain=false）：不打开时这些路由被禁用，没有可用路由时只出阶段 A（安装结束时的说明会列出，ADR 0062）
+        # 只用境内路由时去掉这一行
         allow_cross_border: true
         routes:
           - id: primary

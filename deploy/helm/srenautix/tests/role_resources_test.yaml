@@ -134,3 +134,39 @@ tests:
       - contains:
           path: spec.ports
           content: {name: metrics, port: 9090, targetPort: http, protocol: TCP}
+
+  - it: ingest.sources 为空时渲染为空列表（不是 null）
+    set:
+      profile: standard
+      ingest.sources: []
+    documentSelector: {path: metadata.name, value: t-srenautix-server-config}
+    asserts:
+      - matchRegex: {path: 'data["config.yaml"]', pattern: '(?m)^  sources: \[\]$'}
+
+  - it: 合规配置下 server 读取审批人公钥（H 档通行密钥审批）
+    values:
+      - ../values-compliance.yaml
+    documentSelector: {path: metadata.name, value: t-srenautix-server-config}
+    asserts:
+      - matchRegex:
+          path: 'data["config.yaml"]'
+          pattern: 'approver_keys_file: /etc/srenautix/secrets/approver-keys/approver-keys\.yaml'
+
+  - it: standard 配置下 server 不读取审批人公钥
+    set:
+      profile: standard
+    documentSelector: {path: metadata.name, value: t-srenautix-server-config}
+    asserts:
+      - notMatchRegex: {path: 'data["config.yaml"]', pattern: approver_keys_file}
+
+  - it: packs.oci.sources 原样写入 server 配置，拉取目录固定
+    set:
+      profile: standard
+      packs.oci.sources:
+        - repository: registry.example.com/packs/k8s
+          digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+          key_file: /etc/srenautix/secrets/pack-keys/cosign.pub
+    documentSelector: {path: metadata.name, value: t-srenautix-server-config}
+    asserts:
+      - matchRegex: {path: 'data["config.yaml"]', pattern: 'repository: registry\.example\.com/packs/k8s'}
+      - matchRegex: {path: 'data["config.yaml"]', pattern: 'cache_dir: /var/cache/srenautix/packs'}

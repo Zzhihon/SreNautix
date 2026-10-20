@@ -12,7 +12,7 @@ out_root="$repo_root/.scratch/role-configs"
 cd "$repo_root"
 
 # 每份 values 都打开 mcp 与 reader，使五个角色的配置都被渲染
-for f in values-standard.yaml values-compliance.yaml ci/external-values.yaml ci/standard-full-values.yaml; do
+for f in values-standard.yaml values-compliance.yaml ci/external-values.yaml ci/standard-full-values.yaml ci/oci-packs-values.yaml; do
   name=$(basename "$f" .yaml)
   dir="$out_root/$name"
   rm -rf "$dir"

@@ -54,6 +54,11 @@
 {{- $channels := dict "ports" $https }}
 {{- with $np.channelsEgressTo }}{{- $_ := set $channels "to" . }}{{- end }}
 {{- $serverEgress = append $serverEgress $channels }}
+{{- if .Values.packs.oci.sources }}
+{{- $registries := dict "ports" $https }}
+{{- with $np.packRegistriesEgressTo }}{{- $_ := set $registries "to" . }}{{- end }}
+{{- $serverEgress = append $serverEgress $registries }}
+{{- end }}
 {{- $serverEgress = concat $serverEgress $auditEgress }}
 {{- $_ := set $rules "server" (dict "ingress" (list $serverIn (index $metricsIn "server") (index $probesIn "server")) "egress" $serverEgress) }}
 

@@ -68,6 +68,12 @@ chart 为五个角色生成配置文件（地址、端口、挂载路径、集�
 | reader | 无；声明的证据查询清单放在 `roles.reader.queryManifestConfigMap` | `internal/spoke/reader/config.go` |
 | server | 无；通知渠道等写在 `roles.server.config` | `apps/srenautix/src/config/server.ts` |
 
+境外模型路由（`in_domain=false`）没有打开 `roles.worker.config.llm.allow_cross_border` 时，安装照常完成，worker 启动时禁用这些路由；安装结束时的说明会列出被禁用的路由（ADR 0062）。
+
+## 领域包
+
+内置领域包在中心镜像的 `/app/packs`；用户层的包以 ConfigMap 挂载（`packs.userConfigMaps`）。OCI 仓库中经 cosign 签名的包写在 `packs.oci.sources`（每项含 `repository`、固定的 `digest`，以及 `key_file` 或 `certificate_identity` + `certificate_oidc_issuer`）。中心镜像带有 cosign 与 oras，chart 为 server 挂载可写的拉取目录 `/var/cache/srenautix/packs`（emptyDir，容量 `packs.oci.cacheSize`）。公钥放在 `packs.oci.keySecret` 指定的 Secret 中，`key_file` 写 `/etc/srenautix/secrets/pack-keys/<键>`。私有仓库的凭证放在 `packs.oci.dockerConfigSecret`（类型 `kubernetes.io/dockerconfigjson`），以 `DOCKER_CONFIG` 提供给 oras 与 cosign。仓库与 Rekor 的出站地址可以用 `networkPolicy.packRegistriesEgressTo` 限定。
+
 worker 写进研判清单的 `code_sha` 取发布时写入 chart 的注解 `srenautix.io/code-sha`；使用仓库中的 chart 时设置 `codeSha`。CI 的 `role-configs` 任务用各角色自己的解析代码检查生成的配置，`install-e2e` 任务在 Kind 上实际安装 standard 配置并要求全部 Pod Ready。
 
 ## 告警接入
