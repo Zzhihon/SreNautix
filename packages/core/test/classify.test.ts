@@ -95,9 +95,20 @@ describe('告警目录与分类顺序', () => {
     expect(classifyAlert({ labels: { alertname: 'TargetDown' }, chronic: false }, catalog).role).toBe('meta');
   });
 
-  it('告警自带 role 标签时优先', () => {
+  it('告警自带 role 标签时角色以标签为准，目录条目照样记下（证据链作为补充执行）', () => {
     const c = classifyAlert({ labels: { alertname: 'TargetDown', role: 'symptom' }, chronic: true }, catalog);
-    expect(c).toEqual({ role: 'symptom', source: 'label', confidence: 1, catalog_entry: null, chronic: true });
+    expect(c).toMatchObject({ role: 'symptom', source: 'label', confidence: 1, chronic: true });
+    expect(c.catalog_entry).toBe(
+      classifyAlert({ labels: { alertname: 'TargetDown' }, chronic: false }, catalog).catalog_entry,
+    );
+    expect(c.catalog_entry).not.toBeNull();
+    expect(classifyAlert({ labels: { alertname: 'NotInCatalog', role: 'cause' }, chronic: false }, catalog)).toEqual({
+      role: 'cause',
+      source: 'label',
+      confidence: 1,
+      catalog_entry: null,
+      chronic: false,
+    });
   });
 
   it('目录外的告警按 rules API 的表达式分类，没有依据时按 symptom', () => {

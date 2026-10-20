@@ -1,4 +1,5 @@
 import type { Alert, EntityRef, EvidenceResult, Incident, Labels } from '@srenautix/contract';
+import { matchTypeByName, tryNodeKey } from '@srenautix/core';
 import { toIso } from '@srenautix/integration-sdk';
 import {
   durationSeconds,
@@ -65,9 +66,13 @@ async function pool<T, R>(items: T[], n: number, signal: AbortSignal, fn: (x: T)
 }
 
 /**
- * 领域包证据链的执行（DESIGN §6.1、§7.1）：
+ * 领域包证据链的执行（DESIGN §6.1、§7.1，ADR 0097）：
  * - 根因（有歧义时前两个候选）按组件类型声明的证据链执行，实体为根因组件；
- * - 每个成员告警按告警目录条目声明的证据链执行，实体为告警解析出的实体；
+ * - 每个能解析出实体的成员告警，不论分类来源（label、catalog、expression、default），按实体的组件类型执行证据链；
+ *   告警归属的组件（例如 Pod 的属主 StatefulSet）与实体不同时，组件类型的证据链也执行；
+ * - 告警目录条目声明的证据链作为补充；
+ * - 组件类型取拓扑节点上由领域包匹配出的类型，没有拓扑节点或没有匹配时，按 kind、命名空间与名称静态匹配
+ *   （领域包的自定义 kind 与告警里的 CRD 对象走这一条）；
  * - 只执行 applies_to.kinds 包含实体类型的卡，同一张卡对同一实体只执行一次。
  * 卡片窗口以事件首次触发时间为锚点，终点不晚于当前时间。
  */
@@ -109,22 +114,45 @@ export class PackEvidence implements EvidenceRunner {
       }
     };
 
+    const types = this.rt.componentTypes();
+    const typeOf = async (key: string, e: EntityRef): Promise<string | null> =>
+      (await this.componentType(inc.cluster_id, key)) ??
+      matchTypeByName(e.kind, e.namespace, e.name, types)?.id ??
+      null;
+
     let rootComponentType: string | null = null;
     const roots = [inc.root.component, ...(inc.root.ambiguous ? [inc.candidates[1]?.component ?? null] : [])];
     for (const [i, key] of roots.entries()) {
       if (!key) {
         continue;
       }
-      const t = await this.componentType(inc.cluster_id, key);
+      const entity = i === 0 && inc.root.entity ? inc.root.entity : entityOf(inc.cluster_id, key);
+      const t = await typeOf(key, entity);
       if (i === 0) {
         rootComponentType = t;
       }
       if (t) {
-        add(this.rt.typeChains(t), i === 0 && inc.root.entity ? inc.root.entity : entityOf(inc.cluster_id, key));
+        add(this.rt.typeChains(t), entity);
       }
     }
     for (const a of alerts) {
-      if (a.classification.catalog_entry && a.entity) {
+      if (!a.entity) {
+        continue;
+      }
+      const own = tryNodeKey(a.entity.kind, a.entity.namespace, a.entity.name);
+      const t = own ? await typeOf(own, a.entity) : null;
+      if (t) {
+        add(this.rt.typeChains(t), a.entity);
+      }
+      if (a.component && a.component !== own) {
+        const ce = entityOf(inc.cluster_id, a.component);
+        const ct = await typeOf(a.component, ce);
+        if (ct) {
+          add(this.rt.typeChains(ct), a.entity);
+          add(this.rt.typeChains(ct), ce);
+        }
+      }
+      if (a.classification.catalog_entry) {
         add(this.rt.alertChains(a.classification.catalog_entry), a.entity);
       }
     }

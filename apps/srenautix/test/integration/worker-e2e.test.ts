@@ -21,6 +21,8 @@ import { fileWriter, seedShopTopology, startHubForWorker, workerConfigFor } from
  * 设置 SRENAUTIX_LIVE_LLM_BASE_URL 时改为转发到该模型服务并重新录制（只指向本地自己启动的服务）。
  */
 const LIVE = process.env.SRENAUTIX_LIVE_LLM_BASE_URL ?? null;
+/** 重新录制时实际使用的模型（写进录制的 provenance） */
+const LIVE_MODEL = process.env.SRENAUTIX_LIVE_MODEL ?? 'qwen3-1.7b';
 const FIXTURE = resolve(import.meta.dirname, '../fixtures/llm/worker/e2e.json');
 const ROOT = resolve(import.meta.dirname, '../../../../.scratch', `worker-e2e-${process.pid}`);
 const TOKENS = {
@@ -55,7 +57,7 @@ beforeAll(async () => {
           id: 'local',
           base_url: model.baseUrl,
           api: 'chat_completions',
-          model: 'qwen3-1.7b',
+          model: LIVE_MODEL,
           dialect_profile: 'llamacpp',
           price: { currency: 'CNY', input_per_mtok: 0, output_per_mtok: 0, cached_input_per_mtok: null },
           in_domain: true,
@@ -88,7 +90,7 @@ afterAll(async () => {
     mkdirSync(resolve(FIXTURE, '..'), { recursive: true });
     writeFileSync(
       FIXTURE,
-      `${JSON.stringify({ provenance: { provider: 'llamacpp', model: 'qwen3-1.7b', recorded_at: new Date().toISOString() }, responses: model.recorded }, null, 2)}\n`,
+      `${JSON.stringify({ provenance: { provider: 'llamacpp', model: LIVE_MODEL, recorded_at: new Date().toISOString() }, responses: model.recorded }, null, 2)}\n`,
     );
   }
 });

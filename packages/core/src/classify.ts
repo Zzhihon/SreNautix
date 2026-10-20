@@ -113,10 +113,17 @@ export interface ClassifyInput {
 export function classifyAlert(input: ClassifyInput, catalog: AlertCatalog): AlertClassification {
   const { labels, ruleExpr, chronic } = input;
   const labelRole = labels.role;
-  if (labelRole !== undefined && (ALERT_ROLES as readonly string[]).includes(labelRole)) {
-    return { role: labelRole as AlertRole, source: 'label', confidence: 1, catalog_entry: null, chronic };
-  }
   const hit = catalog.lookup(labels);
+  if (labelRole !== undefined && (ALERT_ROLES as readonly string[]).includes(labelRole)) {
+    // 角色以标签为准；目录条目照样记下，它声明的证据链作为补充执行（ADR 0097）
+    return {
+      role: labelRole as AlertRole,
+      source: 'label',
+      confidence: 1,
+      catalog_entry: hit ? `${hit.pack}/${hit.entry.id}` : null,
+      chronic,
+    };
+  }
   if (hit) {
     // 实际规则的表达式优先于目录记录的上游表达式
     const expr = ruleExpr ?? hit.entry.expr;

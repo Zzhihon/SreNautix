@@ -13,6 +13,7 @@ import { storeTrack } from '../../src/store/migrations.js';
 import { topologyTrack } from '../../src/topology/migrations.js';
 import { ReaderProtocol } from '../../src/topology/protocol.js';
 import {
+  expireReaderConditions,
   ReaderClock,
   ReaderRequestQueue,
   ReaderRequestTimeout,
@@ -423,5 +424,67 @@ describe('读取请求', () => {
       "SELECT count(*)::int AS n FROM server.reader_requests WHERE cluster_id = 'dev' AND deadline > now()",
     );
     expect(r.rows[0].n).toBe(0);
+  });
+});
+
+describe('reader 离线时的状态条件', () => {
+  const readerRows = async (cluster: string) =>
+    (
+      await db.admin.query<{ type: string; status: string; reason: string }>(
+        "SELECT type, status, reason FROM server.conditions WHERE role = 'reader' AND cluster_id = $1 ORDER BY type",
+        [cluster],
+      )
+    ).rows.map((r) => [r.type, r.status, r.reason]);
+  const seed = async (cluster: string, ageS: number) => {
+    await db.admin.query(
+      `INSERT INTO server.reader_status (cluster_id, reader_id, version, boot_id, topology_seq, conditions, clock, received_at)
+       VALUES ($1, 'r1', '0.1.0', gen_random_uuid(), 1, '[]', '{}', now() - make_interval(secs => $2))
+       ON CONFLICT (cluster_id) DO UPDATE SET received_at = excluded.received_at`,
+      [cluster, ageS],
+    );
+    for (const [type, status, reason] of [
+      ['QueryManifest', 'true', 'NotMounted'],
+      ['InformersFresh', 'false', 'Synced'],
+      ['TunnelConnected', 'false', 'Connected'],
+    ]) {
+      await db.admin.query(
+        `INSERT INTO server.conditions (role, cluster_id, type, subject, status, reason, message, since, updated_at)
+         VALUES ('reader', $1, $2, '', $3, $4, '', now(), now())
+         ON CONFLICT (role, cluster_id, type, subject) DO UPDATE SET status = excluded.status, reason = excluded.reason`,
+        [cluster, type, status, reason],
+      );
+    }
+  };
+
+  it('心跳超时：清除 reader 之前上报的条件，只留"reader 离线"；心跳恢复后被新的条件覆盖', async () => {
+    await seed('east', 10);
+    expect(await expireReaderConditions(db.server, 60_000, { clusterId: 'hub', usesReader: false })).toBe(0);
+    expect(await readerRows('east')).toHaveLength(3);
+    await seed('east', 300);
+    await expireReaderConditions(db.server, 60_000, { clusterId: 'hub', usesReader: false });
+    expect(await readerRows('east')).toEqual([['TunnelConnected', 'true', 'ReaderOffline']]);
+    // 再跑一轮不重复、不改动
+    expect(await expireReaderConditions(db.server, 60_000, { clusterId: 'hub', usesReader: false })).toBe(0);
+    const msg = await db.admin.query<{ message: string }>(
+      "SELECT message FROM server.conditions WHERE role = 'reader' AND cluster_id = 'east'",
+    );
+    expect(msg.rows[0]?.message).toMatch(/reader 已离线：自 .* 起没有心跳（超过 60 秒）/);
+    // reader 恢复：心跳写入新的条件，覆盖离线
+    await seed('east', 0);
+    expect(await readerRows('east')).toEqual([
+      ['InformersFresh', 'false', 'Synced'],
+      ['QueryManifest', 'true', 'NotMounted'],
+      ['TunnelConnected', 'false', 'Connected'],
+    ]);
+  });
+
+  it('本集群的拓扑不经 reader（reader 已关闭）：reader 的条件全部清除，不显示离线', async () => {
+    await seed('hub', 300);
+    await expireReaderConditions(db.server, 60_000, { clusterId: 'hub', usesReader: false });
+    expect(await readerRows('hub')).toEqual([]);
+    // 本集群使用 reader 时显示离线
+    await seed('hub', 300);
+    await expireReaderConditions(db.server, 60_000, { clusterId: 'hub', usesReader: true });
+    expect(await readerRows('hub')).toEqual([['TunnelConnected', 'true', 'ReaderOffline']]);
   });
 });

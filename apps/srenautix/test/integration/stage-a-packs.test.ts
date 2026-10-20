@@ -256,6 +256,67 @@ describe('阶段 A 的领域包证据链', () => {
     expect(rules.excluded(loadtest, [], { ...run, chains: [] })).toBeNull();
   });
 
+  const labelled = (pod: string, component: string): Alert => ({
+    ...memoryAlert(pod),
+    alertname: 'CustomMemoryAlert',
+    labels: { alertname: 'CustomMemoryAlert', role: 'cause', entity_kind: 'pod', entity: pod, namespace: 'shop' },
+    classification: { role: 'cause', source: 'label', confidence: 1, catalog_entry: null, chronic: false },
+    entity_resolution: 'labels',
+    component,
+  });
+
+  it('按标签分类、没有目录条目的告警：按告警归属组件的组件类型执行证据链（ADR 0097）', async () => {
+    const inc = incident({ kind: 'Pod', namespace: 'shop', name: 'web-0' });
+    const run = await evidence.run(inc, [labelled('web-0', 'Deployment:shop/api')], AbortSignal.timeout(30_000));
+    expect(run.cards.map((c) => [c.card_id, c.entity?.kind, c.entity?.name])).toEqual([
+      ['_example/pod-memory/limit-ratio', 'Pod', 'web-0'],
+      ['_example/pod-memory/oom-logs', 'Pod', 'web-0'],
+      ['_example/pod-memory/limit-ratio', 'Deployment', 'api'],
+    ]);
+    expect(run.chains).toEqual(['_example/pod-memory']);
+  });
+
+  it('实体没有拓扑节点时按 kind 静态匹配组件类型；只按 kind 匹配的类型是兜底', async () => {
+    const dir = join(SCRATCH, 'kind-fallback');
+    mkdirSync(dir, { recursive: true });
+    cpSync(join(PACKS, '_example'), join(dir, '_example'), { recursive: true });
+    writeFileSync(
+      join(dir, '_example', 'components.yaml'),
+      [
+        'component_types:',
+        '  - id: example.web',
+        '    match: { kind: Deployment, labels: { app.kubernetes.io/part-of: example-shop } }',
+        '    chains: [pod-memory]',
+        '  - id: example.pod',
+        '    match: { kind: Pod }',
+        '    chains: [pod-memory]',
+        '',
+      ].join('\n'),
+    );
+    const r = await PackRuntime.load({
+      dirs: [dir],
+      only: ['_example'],
+      lockFile: null,
+      catalogPath: DEFAULT_CATALOG_PATH,
+      capabilities: CAPS,
+    });
+    const ev = new PackEvidence(
+      r,
+      source,
+      async () => null,
+      { locale: 'zh-CN', concurrency: 4, queryTimeoutMs: 10_000 },
+      metrics,
+    );
+    const inc = incident({ kind: 'Pod', namespace: 'shop', name: 'web-0' });
+    // 告警归属的组件就是实体本身，拓扑里没有它
+    const run = await ev.run(inc, [labelled('web-0', 'Pod:shop/web-0')], AbortSignal.timeout(30_000));
+    expect(run.rootComponentType).toBe('example.pod');
+    expect(run.cards.map((c) => [c.card_id, c.display_state])).toEqual([
+      ['_example/pod-memory/limit-ratio', 'abnormal'],
+      ['_example/pod-memory/oom-logs', 'capability_missing'],
+    ]);
+  });
+
   it('实时重跑只重跑已声明过的卡，编号沿用原结果', async () => {
     const inc = incident({ kind: 'Pod', namespace: 'shop', name: 'web-0' });
     const run = await evidence.run(inc, [memoryAlert('web-0')], AbortSignal.timeout(30_000));

@@ -1,5 +1,12 @@
 import type { AlertCatalogEntry, AlertClassification, EntityRef } from '@srenautix/contract';
-import { classifyAlert, isComponentKey, NAMESPACE_KIND, tryNodeKey, type AlertCatalog } from '@srenautix/core';
+import {
+  alertEntityCandidate,
+  classifyAlert,
+  isComponentKey,
+  NAMESPACE_KIND,
+  tryNodeKey,
+  type AlertCatalog,
+} from '@srenautix/core';
 import type { RawAlert } from '../ingest/normalize.js';
 
 /** 拓扑节点查找（由 topology/store 提供）：按 kind/namespace/name 取当前节点或 24 小时内的墓碑。 */
@@ -41,42 +48,27 @@ export interface ResolveDeps {
   ): { component: string; role: AlertClassification['role']; ref: string } | null;
 }
 
-const NODE_INSTANCE_PORT = /:\d+$/;
-
-/** 按目录条目的实体映射取 (kind, namespace, name)。 */
-export function entityFromMapping(
-  entry: AlertCatalogEntry,
+/**
+ * 告警标签 → 实体候选（packages/core 的 alertEntityCandidate）：标签契约（entity、entity_kind）→ 目录条目的映射 →
+ * 按标签推断（pod、deployment、node、kubernetes_node、节点级抓取任务的 instance 等）。kind 统一成规范写法（node → Node），
+ * 集群级对象忽略 namespace 标签；领域包的自定义 kind（provider、cluster 等）原样保留，并保留 namespace。
+ */
+function candidateOf(
+  clusterId: string,
   labels: Record<string, string>,
-): { kind: string; namespace: string | null; name: string } | null {
-  const m = entry.entity;
-  if (m.kind === 'cluster') {
-    return null;
+  entry: AlertCatalogEntry | undefined,
+): {
+  entity: { kind: string; namespace: string | null; name: string } | null;
+  source: 'labels' | 'catalog' | 'heuristic';
+} {
+  const c = alertEntityCandidate(labels, entry, clusterId);
+  if (!c.entity) {
+    return { entity: null, source: 'heuristic' };
   }
-  let name: string | undefined;
-  for (const l of m.name_labels) {
-    if (labels[l]) {
-      name = labels[l];
-      break;
-    }
-  }
-  if (!name) {
-    return null;
-  }
-  if (m.kind === 'Node') {
-    name = name.replace(NODE_INSTANCE_PORT, '');
-    return { kind: 'Node', namespace: null, name };
-  }
-  return { kind: m.kind, namespace: labels[m.namespace_label ?? 'namespace'] ?? null, name };
-}
-
-/** 告警自带标签契约（component、entity_kind、entity）时直接使用。 */
-function entityFromContractLabels(
-  labels: Record<string, string>,
-): { kind: string; namespace: string | null; name: string } | null {
-  if (!labels.entity || !labels.entity_kind) {
-    return null;
-  }
-  return { kind: labels.entity_kind, namespace: labels.namespace ?? null, name: labels.entity };
+  return {
+    entity: { kind: c.entity.kind, namespace: c.entity.namespace, name: c.entity.name },
+    source: c.fromLabels ? 'labels' : entry ? 'catalog' : 'heuristic',
+  };
 }
 
 /** 组件键（ADR 0034：名称段编码）；标签里的对象不能构成合法的键时为 null */
@@ -87,35 +79,33 @@ export function componentKeyOf(kind: string, namespace: string | null, name: str
 /** 分类（DESIGN §3.2）与实体解析（§3.3）：标签契约 → informer 缓存 → 24 小时墓碑 → kube-state-metrics 历史。 */
 export async function resolveAlert(clusterId: string, a: RawAlert, deps: ResolveDeps): Promise<Resolved> {
   const hit = deps.catalog.lookup(a.labels);
-  const labelEntity = entityFromContractLabels(a.labels);
-  const mapped = labelEntity ?? (hit ? entityFromMapping(hit.entry, a.labels) : null);
+  const { entity: mapped, source } = candidateOf(clusterId, a.labels, hit?.entry);
   let entity: EntityRef | null = null;
   let resolution: Resolved['entityResolution'] = 'unresolved';
   let component: string | null = null;
   if (mapped) {
     const node = await deps.nodes.find(clusterId, mapped.kind, mapped.namespace, mapped.name, a.startsAt);
     if (node) {
-      entity = {
-        cluster_id: clusterId,
-        kind: mapped.kind,
-        namespace: mapped.namespace,
-        name: mapped.name,
-        uid: node.uid,
-      };
-      resolution = labelEntity ? 'labels' : node.tombstone ? 'tombstone' : 'informer';
+      entity = { cluster_id: clusterId, ...mapped, uid: node.uid };
+      resolution = source === 'labels' ? 'labels' : node.tombstone ? 'tombstone' : 'informer';
       component = node.key;
     } else if (deps.ksm && mapped.kind === 'Pod' && mapped.namespace) {
       const p = await deps.ksm.podByName(clusterId, mapped.namespace, mapped.name, a.startsAt);
       if (p) {
-        entity = { cluster_id: clusterId, kind: 'Pod', namespace: mapped.namespace, name: mapped.name, uid: p.uid };
+        entity = { cluster_id: clusterId, ...mapped, uid: p.uid };
         resolution = 'ksm_history';
         component = componentKeyOf('Pod', mapped.namespace, mapped.name);
       }
     }
-    if (!entity && labelEntity) {
-      entity = { cluster_id: clusterId, kind: mapped.kind, namespace: mapped.namespace, name: mapped.name, uid: null };
-      resolution = 'labels';
-      component = componentKeyOf(mapped.kind, mapped.namespace, mapped.name);
+    // 标签契约与目录映射给出的实体即使拓扑里没有（领域包的自定义 kind、CRD 对象、已删除超过 24 小时的对象）也保留，
+    // 按实体的 kind 执行证据卡（ADR 0097）；只按标签推断出的实体必须在拓扑中找到
+    if (!entity && source !== 'heuristic') {
+      const key = componentKeyOf(mapped.kind, mapped.namespace, mapped.name);
+      if (key) {
+        entity = { cluster_id: clusterId, ...mapped, uid: null };
+        resolution = 'labels';
+        component = key;
+      }
     }
   }
   if (a.labels.component && isComponentKey(a.labels.component)) {

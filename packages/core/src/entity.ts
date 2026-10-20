@@ -1,22 +1,7 @@
 // 实体解析（DESIGN §3.3）：告警标签 → 实体候选 → 按顺序查找 informer 缓存、24 小时墓碑、kube-state-metrics 历史。
 import type { AlertCatalogEntry, ClusterId, ComponentKey, EntityRef, Labels, MetricSeries } from '@srenautix/contract';
-import { NAMESPACE_KIND, tryNodeKey } from './keys.js';
+import { canonicalKind, NAMESPACE_KIND, scopedNamespace, tryNodeKey } from './keys.js';
 import type { TopologyStore } from './topology/store.js';
-
-/** 告警自带的 entity_kind 标签值 → Kubernetes Kind */
-const LABEL_KIND: Record<string, string> = {
-  pod: 'Pod',
-  node: 'Node',
-  pvc: 'PersistentVolumeClaim',
-  persistentvolumeclaim: 'PersistentVolumeClaim',
-  deployment: 'Deployment',
-  statefulset: 'StatefulSet',
-  daemonset: 'DaemonSet',
-  job: 'Job',
-  cronjob: 'CronJob',
-  service: 'Service',
-  namespace: 'Namespace',
-};
 
 // 没有目录条目时按标签推断，越具体的越靠前
 const HEURISTICS: ReadonlyArray<{ label: string; kind: string; namespaced: boolean }> = [
@@ -30,6 +15,7 @@ const HEURISTICS: ReadonlyArray<{ label: string; kind: string; namespaced: boole
   { label: 'cronjob', kind: 'CronJob', namespaced: true },
   { label: 'horizontalpodautoscaler', kind: 'HorizontalPodAutoscaler', namespaced: true },
   { label: 'node', kind: 'Node', namespaced: false },
+  { label: 'kubernetes_node', kind: 'Node', namespaced: false },
   { label: 'service', kind: 'Service', namespaced: true },
 ];
 
@@ -44,6 +30,22 @@ function stripPort(v: string): string {
   return v.replace(/:[0-9]+$/, '');
 }
 
+/** entity_kind 标签表示"没有实体"的取值 */
+const NO_ENTITY = new Set(['none', '']);
+
+const IP_LITERAL = /^(\d{1,3}(\.\d{1,3}){3}|\[?[0-9a-f:]+\]?)$/i;
+/** instance 标签是节点名的抓取任务：node-exporter、kubelet、cAdvisor（instance 为 IP 时不是节点名，不取） */
+const NODE_JOBS = /(node[-_]?exporter|kubelet|cadvisor)/i;
+
+/** 节点级抓取目标的 instance：去掉端口后的节点名；不是节点级任务或是 IP 时为 null */
+export function nodeFromInstance(labels: Labels): string | null {
+  if (!labels.instance || !NODE_JOBS.test(labels.job ?? '')) {
+    return null;
+  }
+  const v = stripPort(labels.instance);
+  return v && !IP_LITERAL.test(v) ? v : null;
+}
+
 /** 从告警标签取实体候选：标签契约 → 目录条目的映射 → 按标签推断 */
 export function alertEntityCandidate(
   labels: Labels,
@@ -51,16 +53,19 @@ export function alertEntityCandidate(
   clusterId: ClusterId,
 ): EntityCandidate {
   const namespace = labels.namespace || null;
-  const make = (kind: string, ns: string | null, name: string): EntityRef => ({
-    cluster_id: clusterId,
-    kind,
-    namespace: kind === 'Node' || kind === 'PersistentVolume' ? null : ns,
-    name,
-    uid: null,
-  });
-  if (labels.entity && labels.entity_kind) {
-    const kind = LABEL_KIND[labels.entity_kind.toLowerCase()] ?? labels.entity_kind;
-    return { entity: make(kind, namespace, labels.entity), namespace, fromLabels: true };
+  // kind 统一成规范写法（node → Node）；集群级对象忽略 namespace 标签（节点告警常带着抓取目标的命名空间）
+  const make = (rawKind: string, ns: string | null, name: string): EntityRef => {
+    const kind = canonicalKind(rawKind);
+    return {
+      cluster_id: clusterId,
+      kind,
+      namespace: scopedNamespace(kind, ns),
+      name: kind === 'Node' ? stripPort(name) : name,
+      uid: null,
+    };
+  };
+  if (labels.entity && labels.entity_kind && !NO_ENTITY.has(labels.entity_kind.toLowerCase())) {
+    return { entity: make(labels.entity_kind, namespace, labels.entity), namespace, fromLabels: true };
   }
   if (entry) {
     const m = entry.entity;
@@ -71,7 +76,7 @@ export function alertEntityCandidate(
     for (const l of m.name_labels) {
       const v = labels[l];
       if (v) {
-        return { entity: make(m.kind, ns, m.kind === 'Node' ? stripPort(v) : v), namespace: ns, fromLabels: false };
+        return { entity: make(m.kind, ns, v), namespace: ns, fromLabels: false };
       }
     }
     return { entity: null, namespace: ns, fromLabels: false };
@@ -81,6 +86,10 @@ export function alertEntityCandidate(
     if (v && (!h.namespaced || namespace)) {
       return { entity: make(h.kind, namespace, v), namespace, fromLabels: false };
     }
+  }
+  const node = nodeFromInstance(labels);
+  if (node) {
+    return { entity: make('Node', null, node), namespace, fromLabels: false };
   }
   return { entity: null, namespace, fromLabels: false };
 }
@@ -188,7 +197,7 @@ export class EntityResolver {
         return {
           entity: { ...e, uid: facts.uid },
           layer: 'ksm_history',
-          component: (top ? tryNodeKey(top.kind, e.namespace, top.name) : null) ?? key,
+          component: (top ? tryNodeKey(top.kind, scopedNamespace(top.kind, e.namespace), top.name) : null) ?? key,
         };
       }
     }

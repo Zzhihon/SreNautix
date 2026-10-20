@@ -35,6 +35,8 @@ export class IngestService {
   private readonly sources = new Map<string, Source>();
   private pending: Array<{ clusterId: string; sourceId: string; alerts: RawAlert[] }> = [];
   lastWatchdogAt: Date | null = null;
+  /** 最近一次成功的告警对账（对账也是接入路径：只用对账、不接 webhook 的部署靠它判断是否在接收告警） */
+  lastReconcileAt: Date | null = null;
 
   constructor(
     private readonly pool: pg.Pool,
@@ -180,6 +182,28 @@ export class IngestService {
       }
       return changed;
     });
+  }
+
+  /**
+   * 一轮完整读取成功的对账：计入接入（接入源 reconcile 的最后到达时间与指标），对账快照里有 Watchdog 时
+   * 记为 Watchdog 到达。只用对账、不接 webhook 推送的部署（例如每 15 秒对账一次）靠它判断告警链路是否通畅。
+   */
+  async observeReconcile(alerts: number, sawWatchdog: boolean): Promise<void> {
+    const now = new Date();
+    this.lastReconcileAt = now;
+    if (sawWatchdog) {
+      this.lastWatchdogAt = now;
+      this.metrics.ingestAlerts.inc({ source: 'reconcile', outcome: 'watchdog' });
+    }
+    this.metrics.ingestLastReceived.set({ source: 'reconcile' }, now.getTime() / 1000);
+    try {
+      await touchSource(this.pool, 'reconcile', 'reconcile');
+    } catch (e) {
+      if (!isConnectionError(e)) {
+        throw e;
+      }
+    }
+    logger.debug('告警对账完成', { alerts, watchdog: sawWatchdog });
   }
 
   /** 状态库恢复后补写降级期间收下的告警。 */

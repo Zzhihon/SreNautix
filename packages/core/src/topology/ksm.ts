@@ -1,7 +1,11 @@
 // 从 kube-state-metrics 历史重建拓扑（DESIGN §4.1、§14.5）：用于回放与观察模式的首次成绩单。
 // 每条序列有样本的时段就是对应节点或边的有效区间；相邻样本间隔超过 gapMs 时拆成两段。
 import type { MetricSeries, TopologyEdge, TopologyNode } from '@srenautix/contract';
-import { ComponentKeyError, nodeKey } from '../keys.js';
+import { ComponentKeyError, nodeKey as rawKey, scopedNamespace } from '../keys.js';
+
+/** 集群级 kind（例如静态 Pod 的属主 Node）的键不带命名空间 */
+const nodeKey = (kind: string, namespace: string | null | undefined, name: string) =>
+  rawKey(kind, scopedNamespace(kind, namespace), name);
 import { OWNED_BY } from './graph.js';
 import { PROVENANCE_CONFIDENCE } from './kube.js';
 import type { TopologyStore } from './store.js';
@@ -39,7 +43,8 @@ function spans(s: MetricSeries, stepMs: number, gapMs: number): Array<[number, n
   return out;
 }
 
-function node(kind: string, namespace: string | null, name: string, uid: string | null = null): TopologyNode {
+function node(kind: string, ns: string | null, name: string, uid: string | null = null): TopologyNode {
+  const namespace = scopedNamespace(kind, ns);
   return {
     key: nodeKey(kind, namespace, name),
     kind,

@@ -1,0 +1,316 @@
+{
+  "description": "CCHP 影子环境的真实告警标签（取自 2026-10-20 的 cchp-srenautix-seed 种子），用于实体解析的回归测试；expect 为解析出的规范实体与组件键",
+  "alerts": [
+    {
+      "alertname": "NodeRootFilesystemFillForecast",
+      "labels": {
+        "job": "node-exporter",
+        "pod": "node-exporter-5q94z",
+        "node": "storage-01",
+        "role": "cause",
+        "chain": "capacity",
+        "layer": "L3",
+        "owner": "oncall",
+        "device": "/dev/sda3",
+        "entity": "storage-01",
+        "fstype": "xfs",
+        "cluster": "cchp",
+        "service": "node-exporter",
+        "endpoint": "metrics",
+        "instance": "10.77.0.4:9100",
+        "severity": "warning",
+        "alertname": "NodeRootFilesystemFillForecast",
+        "component": "node",
+        "container": "node-exporter",
+        "namespace": "observability",
+        "mountpoint": "/",
+        "prometheus": "observability/vmagent",
+        "entity_kind": "node",
+        "dashboard_uid": "cchp-volumes",
+        "dashboard_panel": "panel-22"
+      },
+      "expect": {
+        "kind": "Node",
+        "namespace": null,
+        "name": "storage-01",
+        "key": "Node:storage-01",
+        "fromLabels": true
+      }
+    },
+    {
+      "alertname": "NodeMemoryRequestsNearAllocatable",
+      "labels": {
+        "node": "storage-03",
+        "role": "cause",
+        "chain": "capacity",
+        "layer": "L3",
+        "owner": "oncall",
+        "entity": "storage-03",
+        "severity": "warning",
+        "alertname": "NodeMemoryRequestsNearAllocatable",
+        "component": "node",
+        "entity_kind": "node",
+        "dashboard_uid": "cchp-cluster",
+        "dashboard_panel": "panel-22"
+      },
+      "expect": {
+        "kind": "Node",
+        "namespace": null,
+        "name": "storage-03",
+        "key": "Node:storage-03",
+        "fromLabels": true
+      }
+    },
+    {
+      "alertname": "CCHPGatewaySingleNode",
+      "labels": {
+        "node": "appservice-03",
+        "role": "cause",
+        "chain": "capacity",
+        "layer": "L2",
+        "owner": "oncall",
+        "entity": "appservice-03",
+        "severity": "info",
+        "alertname": "CCHPGatewaySingleNode",
+        "component": "workload",
+        "entity_kind": "node",
+        "dashboard_uid": "cchp-workload",
+        "dashboard_panel": "panel-2"
+      },
+      "expect": {
+        "kind": "Node",
+        "namespace": null,
+        "name": "appservice-03",
+        "key": "Node:appservice-03",
+        "fromLabels": true
+      }
+    },
+    {
+      "alertname": "KubePodPendingTooLong",
+      "labels": {
+        "pod": "alloy-n6r72",
+        "role": "cause",
+        "chain": "capacity",
+        "layer": "L2",
+        "owner": "kubernetes",
+        "entity": "alloy-n6r72",
+        "severity": "warning",
+        "alertname": "KubePodPendingTooLong",
+        "component": "workload",
+        "namespace": "observability",
+        "entity_kind": "pod",
+        "dashboard_uid": "cchp-logs",
+        "dashboard_panel": "panel-39"
+      },
+      "expect": {
+        "kind": "Pod",
+        "namespace": "observability",
+        "name": "alloy-n6r72",
+        "key": "Pod:observability/alloy-n6r72",
+        "fromLabels": true
+      }
+    },
+    {
+      "alertname": "CCHPGatewayContainerTerminated",
+      "labels": {
+        "pod": "gateway-0",
+        "role": "change",
+        "chain": "runtime",
+        "layer": "L2",
+        "owner": "oncall",
+        "entity": "gateway-0",
+        "reason": "Error",
+        "severity": "warning",
+        "alertname": "CCHPGatewayContainerTerminated",
+        "component": "gateway",
+        "container": "gateway",
+        "namespace": "cchp-prod",
+        "entity_kind": "pod",
+        "dashboard_uid": "cchp-workload",
+        "dashboard_panel": "panel-10"
+      },
+      "expect": {
+        "kind": "Pod",
+        "namespace": "cchp-prod",
+        "name": "gateway-0",
+        "key": "Pod:cchp-prod/gateway-0",
+        "fromLabels": true
+      }
+    },
+    {
+      "alertname": "KubeContainerOOMKilled",
+      "labels": {
+        "job": "kube-state-metrics",
+        "pod": "cchp-postgres-2",
+        "uid": "2ba56fc1-97ed-416e-b284-8582de73b774",
+        "layer": "L2",
+        "owner": "kubernetes",
+        "cluster": "cchp",
+        "service": "kube-state-metrics",
+        "endpoint": "http",
+        "instance": "10.42.10.116:8080",
+        "severity": "warning",
+        "alertname": "KubeContainerOOMKilled",
+        "container": "postgres",
+        "namespace": "cchp-data",
+        "prometheus": "observability/vmagent",
+        "dashboard_uid": "cchp-events"
+      },
+      "expect": {
+        "kind": "Pod",
+        "namespace": "cchp-data",
+        "name": "cchp-postgres-2",
+        "key": "Pod:cchp-data/cchp-postgres-2",
+        "fromLabels": false
+      }
+    },
+    {
+      "alertname": "KubeHpaMaxedOut",
+      "labels": {
+        "role": "cause",
+        "chain": "capacity",
+        "layer": "L2",
+        "owner": "oncall",
+        "severity": "critical",
+        "alertname": "KubeHpaMaxedOut",
+        "component": "workload",
+        "namespace": "cchp-prod",
+        "entity_kind": "none",
+        "dashboard_uid": "cchp-deploy",
+        "dashboard_panel": "panel-27",
+        "horizontalpodautoscaler": "gateway"
+      },
+      "expect": {
+        "kind": "HorizontalPodAutoscaler",
+        "namespace": "cchp-prod",
+        "name": "gateway",
+        "key": "HorizontalPodAutoscaler:cchp-prod/gateway",
+        "fromLabels": false
+      }
+    },
+    {
+      "alertname": "KubeStatefulSetReplicasNotReady",
+      "labels": {
+        "role": "cause",
+        "chain": "runtime",
+        "layer": "L2",
+        "owner": "kubernetes",
+        "severity": "warning",
+        "alertname": "KubeStatefulSetReplicasNotReady",
+        "component": "workload",
+        "namespace": "cchp-prod",
+        "entity_kind": "none",
+        "statefulset": "gateway",
+        "dashboard_uid": "cchp-workload",
+        "dashboard_panel": "panel-9"
+      },
+      "expect": {
+        "kind": "StatefulSet",
+        "namespace": "cchp-prod",
+        "name": "gateway",
+        "key": "StatefulSet:cchp-prod/gateway",
+        "fromLabels": false
+      }
+    },
+    {
+      "alertname": "CCHPProviderErrorRatioHigh",
+      "labels": {
+        "pair": "provider-error-ratio",
+        "role": "symptom",
+        "chain": "provider",
+        "layer": "L1",
+        "owner": "cchp-routing",
+        "entity": "01a13502-db15-7da2-a26d-87d84d75b634",
+        "severity": "warning",
+        "alertname": "CCHPProviderErrorRatioHigh",
+        "component": "provider",
+        "entity_kind": "provider",
+        "provider_id": "01a13502-db15-7da2-a26d-87d84d75b634",
+        "dashboard_uid": "cchp-business",
+        "dashboard_panel": "panel-14"
+      },
+      "expect": {
+        "kind": "provider",
+        "namespace": null,
+        "name": "01a13502-db15-7da2-a26d-87d84d75b634",
+        "key": "provider:01a13502-db15-7da2-a26d-87d84d75b634",
+        "fromLabels": true
+      }
+    },
+    {
+      "alertname": "CCHPDragonflyBigKey",
+      "labels": {
+        "kind": "bytes",
+        "role": "cause",
+        "chain": "cache",
+        "layer": "L3",
+        "owner": "oncall",
+        "entity": "dragonfly",
+        "family": "replay_spool",
+        "severity": "warning",
+        "alertname": "CCHPDragonflyBigKey",
+        "component": "dragonfly",
+        "entity_kind": "cluster",
+        "dashboard_uid": "cchp-dragonfly",
+        "dashboard_panel": "panel-36"
+      },
+      "expect": {
+        "kind": "cluster",
+        "namespace": null,
+        "name": "dragonfly",
+        "key": "cluster:dragonfly",
+        "fromLabels": true
+      }
+    },
+    {
+      "alertname": "CNPGDeadlocks",
+      "labels": {
+        "role": "cause",
+        "chain": "db-saturation",
+        "layer": "L3",
+        "owner": "oncall",
+        "entity": "cchp-postgres",
+        "cchp_env": "prod",
+        "severity": "warning",
+        "alertname": "CNPGDeadlocks",
+        "component": "pg",
+        "namespace": "cchp-data",
+        "entity_kind": "cluster",
+        "cnpg_cluster": "cchp-postgres",
+        "dashboard_uid": "cchp-db",
+        "dashboard_panel": "panel-21"
+      },
+      "expect": {
+        "kind": "cluster",
+        "namespace": "cchp-data",
+        "name": "cchp-postgres",
+        "key": "cluster:cchp-data/cchp-postgres",
+        "fromLabels": true
+      }
+    },
+    {
+      "alertname": "CCHPErrorBudgetBurnFast",
+      "labels": {
+        "pair": "edge-error-budget-burn",
+        "role": "symptom",
+        "chain": "edge",
+        "layer": "L0",
+        "owner": "oncall",
+        "entity": "httproute/cchp-prod/cchp/rule/1",
+        "severity": "critical",
+        "alertname": "CCHPErrorBudgetBurnFast",
+        "component": "edge-envoy",
+        "entity_kind": "route",
+        "dashboard_uid": "cchp-edge",
+        "dashboard_panel": "panel-9"
+      },
+      "expect": {
+        "kind": "route",
+        "namespace": null,
+        "name": "httproute/cchp-prod/cchp/rule/1",
+        "key": "route:httproute%2Fcchp-prod%2Fcchp%2Frule%2F1",
+        "fromLabels": true
+      }
+    }
+  ]
+}

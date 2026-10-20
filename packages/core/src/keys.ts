@@ -7,6 +7,94 @@ import type { ComponentKey, EntityRef } from '@srenautix/contract';
 
 export const NAMESPACE_KIND = 'Namespace';
 
+/**
+ * 集群级的 Kubernetes kind：键里没有 namespace。告警标签里的 namespace（例如节点告警带着抓取目标的命名空间）
+ * 与静态 Pod 指向 Node 的 ownerReference 都不能把命名空间带进这些对象的键。
+ */
+export const CLUSTER_SCOPED_KINDS: ReadonlySet<string> = new Set([
+  'Node',
+  'Namespace',
+  'PersistentVolume',
+  'StorageClass',
+  'ClusterRole',
+  'ClusterRoleBinding',
+  'CustomResourceDefinition',
+  'PriorityClass',
+  'IngressClass',
+  'RuntimeClass',
+  'CSIDriver',
+  'CSINode',
+  'VolumeAttachment',
+  'APIService',
+  'MutatingWebhookConfiguration',
+  'ValidatingWebhookConfiguration',
+  'ValidatingAdmissionPolicy',
+  'ValidatingAdmissionPolicyBinding',
+  'ClusterIssuer',
+  'GatewayClass',
+]);
+
+/** 小写或简写的 Kubernetes kind（告警标签 entity_kind 等）→ 规范写法 */
+const KIND_ALIASES: Record<string, string> = Object.fromEntries([
+  ...[
+    'Pod',
+    'Node',
+    'Namespace',
+    'Service',
+    'Endpoints',
+    'ConfigMap',
+    'Secret',
+    'Deployment',
+    'StatefulSet',
+    'DaemonSet',
+    'ReplicaSet',
+    'Job',
+    'CronJob',
+    'Ingress',
+    'PersistentVolume',
+    'PersistentVolumeClaim',
+    'HorizontalPodAutoscaler',
+    'PodDisruptionBudget',
+    'ServiceAccount',
+    'Role',
+    'RoleBinding',
+    'StorageClass',
+    // 领域包按这些 CRD 的 kind 声明组件类型（argocd、cert-manager）
+    'Application',
+    'Certificate',
+    ...CLUSTER_SCOPED_KINDS,
+  ].map((k) => [k.toLowerCase(), k]),
+  ['pvc', 'PersistentVolumeClaim'],
+  ['pv', 'PersistentVolume'],
+  ['hpa', 'HorizontalPodAutoscaler'],
+  ['pdb', 'PodDisruptionBudget'],
+  ['ns', 'Namespace'],
+  ['svc', 'Service'],
+  ['deploy', 'Deployment'],
+  ['sts', 'StatefulSet'],
+  ['ds', 'DaemonSet'],
+  ['rs', 'ReplicaSet'],
+  ['cm', 'ConfigMap'],
+  ['sa', 'ServiceAccount'],
+]);
+
+/**
+ * kind 的规范写法：已知的 Kubernetes kind（不区分大小写，含常见简写）写成规范的大小写；
+ * 其他值（领域包的自定义 kind，例如 postgres.cluster、provider）原样返回。
+ */
+export function canonicalKind(kind: string): string {
+  return KIND_ALIASES[kind.toLowerCase()] ?? kind;
+}
+
+export function isClusterScoped(kind: string): boolean {
+  return CLUSTER_SCOPED_KINDS.has(kind);
+}
+
+/** 对象键里的 namespace：集群级 kind 忽略给出的 namespace */
+export function scopedNamespace(kind: string, namespace: string | null | undefined): string | null {
+  return isClusterScoped(kind) ? null : (namespace ?? null);
+}
+
 /** 键的最大长度（按编码后的字节计） */
 export const MAX_KEY_LENGTH = 400;
 

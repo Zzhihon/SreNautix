@@ -126,6 +126,8 @@ ConfigMap 的值只在进程内用于匹配 Service DNS 名，不进入任何输
 
 中心把这些条件以 role `reader` 写入状态条件（契约 2.9.0 起属于 `Condition.type` 的取值），控制台状态条显示条件不为 True 的项。没有挂载查询模板清单（chart 的 `roles.reader.queryManifestConfigMap` 为空）时 `QueryManifest` 为 False（`NotMounted`），状态条一直显示"查询模板清单未加载"：reader 拒绝声明的证据查询，中心的证据卡改由 server 直接查询数据源。
 
+reader 超过 `topology.reader_offline_after`（server 配置，默认 60 秒，即 4 个心跳周期）没有心跳时，server 清除它之前上报的条件，状态条只显示一条 `TunnelConnected`（原因 `ReaderOffline`，"reader 离线"）；reader 恢复心跳后由新的条件覆盖。server 自己所在的集群拓扑不经 reader（`topology.source` 不是 `reader`，例如 reader 已关闭）时，这个集群的 reader 条件全部清除，不显示离线。
+
 ## 指标
 
 | 指标 | 说明 |

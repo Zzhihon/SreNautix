@@ -2,7 +2,7 @@
 // 只读取对象的名称与结构；Secret 的内容永远不读，只记录 secretKeyRef 引用的名称。
 // ConfigMap 的值只用于找出 Service DNS 名，边的依据只写键名，不写值。
 import type { ComponentType, Labels, OperatorConvention, TopologyEdge, TopologyNode } from '@srenautix/contract';
-import { nodeKey, parseKey, tryNodeKey } from '../keys.js';
+import { nodeKey, parseKey, scopedNamespace, tryNodeKey } from '../keys.js';
 import { OWNED_BY } from './graph.js';
 import type { TopologySnapshot } from './store.js';
 
@@ -110,25 +110,78 @@ function apiGroup(apiVersion: string): string {
   return i < 0 ? '' : apiVersion.slice(0, i);
 }
 
+/**
+ * 匹配约束的个数：类型同时匹配一个对象时，约束更多（更具体）的优先；只按 kind 匹配的类型是兜底
+ * （例如通用包为 Node、Pod 声明的类型），不会抢走领域包里更具体的类型。约束个数相同时按声明顺序。
+ */
+export function typeSpecificity(t: ComponentType): number {
+  const m = t.match;
+  return (
+    Object.keys(m.labels ?? {}).length +
+    (m.name_pattern === undefined ? 0 : 1) +
+    (m.namespaces === undefined ? 0 : 1) +
+    (m.api_group === undefined ? 0 : 1)
+  );
+}
+
+/**
+ * 按 kind、命名空间与名称匹配组件类型：没有拓扑节点的实体（例如领域包的自定义 kind、告警里的 CRD 对象）用它。
+ * 带 labels 约束的类型无法核对，跳过；api_group 无法核对，视为满足（kind 已经限定），仍计入具体度。
+ */
+export function matchTypeByName(
+  kind: string,
+  namespace: string | null,
+  name: string,
+  types: readonly ComponentType[],
+): ComponentType | undefined {
+  return mostSpecific(
+    types.filter((t) => {
+      const m = t.match;
+      return (
+        m.kind === kind &&
+        Object.keys(m.labels ?? {}).length === 0 &&
+        (m.name_pattern === undefined || new RegExp(m.name_pattern).test(name)) &&
+        (m.namespaces === undefined || m.namespaces.includes(namespace ?? ''))
+      );
+    }),
+  );
+}
+
+function mostSpecific(matches: ComponentType[]): ComponentType | undefined {
+  let best: ComponentType | undefined;
+  for (const t of matches) {
+    if (!best || typeSpecificity(t) > typeSpecificity(best)) {
+      best = t;
+    }
+  }
+  return best;
+}
+
 function matchType(o: KubeObject, types: readonly ComponentType[]): ComponentType | undefined {
-  return types.find((t) => {
-    const m = t.match;
-    return (
-      m.kind === o.kind &&
-      (m.api_group === undefined || m.api_group === apiGroup(o.apiVersion)) &&
-      Object.entries(m.labels ?? {}).every(([k, v]) => o.metadata.labels?.[k] === v) &&
-      (m.name_pattern === undefined || new RegExp(m.name_pattern).test(o.metadata.name)) &&
-      (m.namespaces === undefined || m.namespaces.includes(o.metadata.namespace ?? ''))
-    );
-  });
+  return mostSpecific(
+    types.filter((t) => {
+      const m = t.match;
+      return (
+        m.kind === o.kind &&
+        (m.api_group === undefined || m.api_group === apiGroup(o.apiVersion)) &&
+        Object.entries(m.labels ?? {}).every(([k, v]) => o.metadata.labels?.[k] === v) &&
+        (m.name_pattern === undefined || new RegExp(m.name_pattern).test(o.metadata.name)) &&
+        (m.namespaces === undefined || m.namespaces.includes(o.metadata.namespace ?? ''))
+      );
+    }),
+  );
 }
 
 function keyOf(o: KubeObject): string {
   return nodeKey(o.kind, o.metadata.namespace, o.metadata.name);
 }
 
-/** 引用的对象（属主、节点、PVC、Service 等）不能构成合法的键时为 null，相应的边不建 */
-const refKey = tryNodeKey;
+/**
+ * 引用的对象（属主、节点、PVC、Service 等）的键：集群级 kind 不带命名空间（例如静态 Pod 的属主是 Node）；
+ * 不能构成合法的键时为 null，相应的边不建
+ */
+const refKey = (kind: string, namespace: string | null | undefined, name: string) =>
+  tryNodeKey(kind, scopedNamespace(kind, namespace), name);
 
 function escapeRe(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -157,7 +210,8 @@ export function buildKubeTopology(all: readonly KubeObject[], opts: BuildOptions
       edges.set(k, { from, to, relation, provenance, confidence: PROVENANCE_CONFIDENCE[provenance], scope, evidence });
     }
   };
-  const addVirtual = (kind: string, namespace: string | null, name: string, hub: boolean) => {
+  const addVirtual = (kind: string, ns: string | null, name: string, hub: boolean) => {
+    const namespace = scopedNamespace(kind, ns);
     const key = refKey(kind, namespace, name);
     if (key !== null && !nodes.has(key)) {
       nodes.set(key, { key, kind, namespace, name, uid: null, labels: {}, component_type: null, hub });

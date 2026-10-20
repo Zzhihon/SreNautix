@@ -155,6 +155,13 @@ export async function applyRemote(
       });
     }
   }
+  if (ok.length) {
+    // 完整读取成功：对账本身就是接入路径，计入接入与 Watchdog（只用对账的部署不会因此误报 IngestSilent、WatchdogMissing）
+    await ingest.observeReconcile(
+      remote.size,
+      [...remote.values()].some((a) => a.alertname === watchdog),
+    );
+  }
   metrics.reconcileRepairs.inc({ kind: 'added' }, missing.length);
   metrics.reconcileRepairs.inc({ kind: 'resolved' }, resolved);
   return { added: missing.length, resolved, sources: ok };

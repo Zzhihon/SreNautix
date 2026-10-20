@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { assertValid, type TopologyEdge } from '@srenautix/contract';
-import { buildKubeTopology, OWNED_BY, TopologyStore } from '../src/index.js';
+import { buildKubeTopology, matchTypeByName, OWNED_BY, TopologyStore } from '../src/index.js';
 import { CLUSTER, clusterObjects, clusterStore, COMPONENT_TYPES, CONVENTIONS, MIN, T0 } from './fixtures.js';
 
 const snapshot = () =>
@@ -164,5 +164,80 @@ describe('事件溯源与按时刻查询', () => {
     expect([...b.allNodes()].length).toBe([...a.allNodes()].length);
     expect(b.edges.length).toBe(a.edges.length);
     expect(b.edges.filter((e) => e.relation === OWNED_BY).length).toBeGreaterThan(10);
+  });
+});
+
+describe('集群级属主与组件类型的优先级', () => {
+  const pod = (name: string, owner: { kind: string; name: string }) => ({
+    apiVersion: 'v1',
+    kind: 'Pod',
+    metadata: {
+      name,
+      namespace: 'kube-system',
+      uid: `uid-${name}`,
+      labels: { component: 'kube-apiserver' },
+      ownerReferences: [{ apiVersion: 'v1', kind: owner.kind, name: owner.name, controller: true }],
+    },
+    spec: { nodeName: owner.name },
+  });
+
+  it('静态 Pod 的属主是 Node：属主的键不带 Pod 的命名空间，不产生虚构的 Node:kube-system/…', () => {
+    const snap = buildKubeTopology([
+      { apiVersion: 'v1', kind: 'Node', metadata: { name: 'control-plane-01', uid: 'uid-n1' } },
+      pod('kube-apiserver-control-plane-01', { kind: 'Node', name: 'control-plane-01' }),
+      pod('kube-apiserver-control-plane-02', { kind: 'Node', name: 'control-plane-02' }),
+    ]);
+    const keys = snap.nodes.map((n) => n.key);
+    expect(keys.filter((k) => k.startsWith('Node:'))).toEqual(['Node:control-plane-01', 'Node:control-plane-02']);
+    expect(snap.nodes.find((n) => n.key === 'Node:control-plane-02')).toMatchObject({ namespace: null });
+    expect(snap.edges).toContainEqual(
+      expect.objectContaining({
+        from: 'Pod:kube-system/kube-apiserver-control-plane-01',
+        to: 'Node:control-plane-01',
+        relation: OWNED_BY,
+      }),
+    );
+  });
+
+  it('只按 kind 匹配的组件类型是兜底，更具体的类型优先，与声明顺序无关', () => {
+    const snap = buildKubeTopology(
+      [
+        pod('kube-apiserver-a', { kind: 'Node', name: 'a' }),
+        { apiVersion: 'v1', kind: 'Pod', metadata: { name: 'web-1', namespace: 'app', uid: 'u2' } },
+      ],
+      {
+        componentTypes: [
+          { id: 'kubernetes.pod', match: { kind: 'Pod' }, chains: [] },
+          {
+            id: 'kubernetes.apiserver',
+            match: { kind: 'Pod', namespaces: ['kube-system'], labels: { component: 'kube-apiserver' } },
+            chains: [],
+          },
+        ],
+      },
+    );
+    expect(snap.nodes.find((n) => n.key === 'Pod:kube-system/kube-apiserver-a')?.component_type).toBe(
+      'kubernetes.apiserver',
+    );
+    expect(snap.nodes.find((n) => n.key === 'Pod:app/web-1')?.component_type).toBe('kubernetes.pod');
+  });
+
+  it('没有拓扑节点的实体按 kind、命名空间与名称静态匹配：跳过带标签约束的类型，api_group 视为满足', () => {
+    const types = [
+      { id: 'kubernetes.pod', match: { kind: 'Pod' }, chains: [] },
+      { id: 'web', match: { kind: 'Pod', name_pattern: '^x$' }, chains: [] },
+      {
+        id: 'labelled',
+        match: { kind: 'Pod', labels: { a: 'b' }, name_pattern: '^x$', namespaces: ['app'] },
+        chains: [],
+      },
+      { id: 'argocd.application', match: { kind: 'Application', api_group: 'argoproj.io' }, chains: [] },
+      { id: 'dragonfly', match: { kind: 'cluster', name_pattern: '^dragonfly$' }, chains: [] },
+    ];
+    expect(matchTypeByName('Pod', 'app', 'x', types)?.id).toBe('web');
+    expect(matchTypeByName('Pod', 'app', 'y', types)?.id).toBe('kubernetes.pod');
+    expect(matchTypeByName('Application', 'argocd', 'cchp', types)?.id).toBe('argocd.application');
+    expect(matchTypeByName('cluster', 'cchp-data', 'dragonfly', types)?.id).toBe('dragonfly');
+    expect(matchTypeByName('cluster', null, 'seaweedfs', types)).toBeUndefined();
   });
 });

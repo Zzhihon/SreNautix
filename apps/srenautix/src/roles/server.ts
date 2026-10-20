@@ -33,7 +33,12 @@ import { IncidentEngine } from '../incident/engine.js';
 import { IncidentPipeline, listenIngest } from '../incident/pipeline.js';
 import { reconcileFromReader, reconcileOnce, startReconcileLoop } from '../ingest/reconcile.js';
 import { ReaderProtocol } from '../topology/protocol.js';
-import { ReaderClock, ReaderRequestQueue, registerReaderRoutes } from '../topology/reader-routes.js';
+import {
+  ReaderClock,
+  ReaderRequestQueue,
+  registerReaderRoutes,
+  expireReaderConditions,
+} from '../topology/reader-routes.js';
 import { IngestService } from '../ingest/service.js';
 import { configureLog, logger } from '../log.js';
 import type { RoleArgs } from '../main.js';
@@ -697,6 +702,9 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
 
   let reconcileOk: boolean | null = null;
   const rc = c.ingest.reconcile;
+  // 告警对账：本集群直接读取 Alertmanager 与规则引擎，或多集群时由 reader 推送快照
+  const reconcileEnabled =
+    (rc.enabled && !!(rc.alertmanager_url || rc.prometheus_url)) || c.topology.source === 'reader';
   if (rc.enabled && (rc.alertmanager_url || rc.prometheus_url)) {
     const bearer = rc.bearer_token_file
       ? readSecretFile('ingest.reconcile.bearer_token_file', rc.bearer_token_file)
@@ -769,6 +777,10 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
           })),
           silenceThresholdMs: parseDuration('ingest.silence_threshold', c.ingest.silence_threshold),
           lastWatchdogAt: ingest.lastWatchdogAt,
+          reconcile: {
+            enabled: reconcileEnabled,
+            lastAt: srcs.rows.find((x) => x.source_id === 'reconcile')?.last_received_at ?? ingest.lastReconcileAt,
+          },
           startedAt,
           reconcileOk,
           // 标签档案按需重新探测（失败时每 60 秒、成功时每小时）
@@ -793,6 +805,11 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
         }),
       );
       await workerConditions.publish(workerRouteConditions(scheduler.modelRoutes()));
+      await expireReaderConditions(
+        pool,
+        parseDuration('topology.reader_offline_after', c.topology.reader_offline_after),
+        { clusterId: c.cluster_id, usesReader: c.topology.source === 'reader' },
+      );
     },
     '状态条件',
   );

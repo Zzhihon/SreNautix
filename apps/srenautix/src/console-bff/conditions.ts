@@ -105,6 +105,8 @@ export interface ServerObservations {
   ingestSources: Array<{ id: string; lastReceivedAt: Date | null }>;
   silenceThresholdMs: number;
   lastWatchdogAt: Date | null;
+  /** 告警对账（Alertmanager、规则引擎或 reader 的快照）：是否配置，最近一次完整读取成功的时间 */
+  reconcile?: { enabled: boolean; lastAt: Date | null };
   startedAt: Date;
   reconcileOk: boolean | null;
   /** 证据卡指标数据源最近一次标签档案探测的错误；可达时为 null。 */
@@ -128,19 +130,38 @@ export interface ServerObservations {
 /** server 角色观察到的条件。 */
 export function serverConditions(o: ServerObservations): Observed[] {
   const out: Observed[] = [];
+  const fresh = (t: Date | null | undefined) => !!t && o.now.getTime() - t.getTime() <= o.silenceThresholdMs;
+  // 对账也是接入路径：webhook 没有推送、但对账在阈值内读取成功时告警链路仍然通畅
+  const reconciling = !!o.reconcile?.enabled && fresh(o.reconcile.lastAt);
   for (const s of o.ingestSources) {
     const since = s.lastReceivedAt ?? o.startedAt;
-    const silent = o.now.getTime() - since.getTime() > o.silenceThresholdMs;
+    const webhookSilent = o.now.getTime() - since.getTime() > o.silenceThresholdMs;
+    const silent = webhookSilent && !reconciling;
     out.push({
       type: 'IngestSilent',
       subject: s.id,
       active: silent,
-      reason: silent ? 'NoPayload' : 'Receiving',
-      message: silent ? `接入源 ${s.id} 自 ${since.toISOString()} 起没有收到告警` : '',
+      reason: silent ? 'NoPayload' : webhookSilent ? 'ReconcileOnly' : 'Receiving',
+      message: silent
+        ? `接入源 ${s.id} 自 ${since.toISOString()} 起没有收到告警${o.reconcile?.enabled ? '，告警对账也没有成功' : ''}`
+        : webhookSilent
+          ? `接入源 ${s.id} 没有收到 webhook 推送，告警经对账接入（最近一次 ${o.reconcile!.lastAt!.toISOString()}）`
+          : '',
+    });
+  }
+  if (o.ingestSources.length === 0 && o.reconcile?.enabled) {
+    const since = o.reconcile.lastAt ?? o.startedAt;
+    out.push({
+      type: 'IngestSilent',
+      subject: 'reconcile',
+      active: !reconciling,
+      reason: reconciling ? 'Receiving' : 'NoPayload',
+      message: reconciling ? '' : `告警对账自 ${since.toISOString()} 起没有成功读取告警源`,
     });
   }
   const wd = o.lastWatchdogAt ?? o.startedAt;
-  const wdMissing = o.ingestSources.length > 0 && o.now.getTime() - wd.getTime() > o.silenceThresholdMs;
+  const ingestConfigured = o.ingestSources.length > 0 || !!o.reconcile?.enabled;
+  const wdMissing = ingestConfigured && o.now.getTime() - wd.getTime() > o.silenceThresholdMs;
   out.push({
     type: 'WatchdogMissing',
     subject: null,

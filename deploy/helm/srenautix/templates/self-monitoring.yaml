@@ -62,7 +62,8 @@ spec:
             severity: critical
             {{- toYaml $labels | nindent 12 }}
           annotations:
-            summary: SreNautix 超过 15 分钟没有收到任何告警（Watchdog 也没有到达）
+            # srenautix_ingest_last_received_timestamp_seconds 按接入源记录：webhook 接入源，以及每轮完整读取成功的告警对账（source=reconcile）
+            summary: SreNautix 超过 15 分钟没有收到任何告警（webhook 与告警对账都没有，Watchdog 也没有到达）
         - alert: SreNautixStageALatencyHigh
           expr: histogram_quantile(0.95, sum by (namespace, le) (rate(srenautix_stage_a_latency_seconds_bucket{ {{- $sel -}} }[30m]))) > 60
           for: 15m

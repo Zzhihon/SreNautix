@@ -1,5 +1,6 @@
 import { AlertCatalog } from '@srenautix/core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { serverConditions, type ServerObservations } from '../../src/console-bff/conditions.js';
 import { reconcileFromReader, type ReaderAlertSnapshot } from '../../src/ingest/reconcile.js';
 import { IngestService } from '../../src/ingest/service.js';
 import { activeAlerts } from '../../src/ingest/store.js';
@@ -96,5 +97,62 @@ describe('reader 告警快照对账', () => {
     const r = await run(snap([am('A')], { status: 'ok', truncated: false, items: [] }));
     expect(r.resolved).toBe(1);
     expect(await firing()).toEqual(['A']);
+  });
+
+  it('只用对账、不接 webhook 时：完整读取成功计入接入与 Watchdog，不误报 IngestSilent、WatchdogMissing', async () => {
+    const watchdogBefore = ingest.lastWatchdogAt;
+    // 读取失败的快照不算接入
+    await run(snap([am('Watchdog')], { status: 'ok', truncated: false, items: [] }, 'error'));
+    expect(ingest.lastWatchdogAt).toBe(watchdogBefore);
+    await run(snap([am('A'), am('Watchdog')], { status: 'ok', truncated: false, items: [] }));
+    expect(ingest.lastWatchdogAt).not.toBeNull();
+    const row = await db.admin.query<{ last_received_at: Date }>(
+      "SELECT last_received_at FROM server.ingest_sources WHERE source_id = 'reconcile'",
+    );
+    expect(row.rows[0]?.last_received_at).toBeInstanceOf(Date);
+    expect(
+      (await metrics.registry.getSingleMetric('srenautix_ingest_last_received_timestamp_seconds')?.get())?.values,
+    ).toContainEqual(expect.objectContaining({ labels: { source: 'reconcile' } }));
+
+    const now = new Date();
+    const base: ServerObservations = {
+      ingestSources: [{ id: 'alertmanager', lastReceivedAt: null }],
+      silenceThresholdMs: 600_000,
+      lastWatchdogAt: ingest.lastWatchdogAt,
+      reconcile: { enabled: true, lastAt: row.rows[0]!.last_received_at },
+      startedAt: new Date(now.getTime() - 3600_000),
+      reconcileOk: true,
+      evidenceDatasourceError: null,
+      changeSources: [],
+      packFailures: [],
+      packsDisabled: [],
+      degraded: false,
+      storm: false,
+      budgetRatio: 0,
+      audit: { sink: 'pg', lagSeconds: 0, thresholdSeconds: 300 },
+      channelFailures: [],
+      restoredAt: null,
+      frozenClusters: [],
+      now,
+    };
+    const pick = (o: ServerObservations) =>
+      serverConditions(o)
+        .filter((c) => c.type === 'IngestSilent' || c.type === 'WatchdogMissing')
+        .map((c) => [c.type, c.subject, c.active, c.reason]);
+    expect(pick(base)).toEqual([
+      ['IngestSilent', 'alertmanager', false, 'ReconcileOnly'],
+      ['WatchdogMissing', null, false, 'Present'],
+    ]);
+    // 对账也停了：两项都成立
+    const stale = new Date(now.getTime() - 3600_000);
+    expect(pick({ ...base, reconcile: { enabled: true, lastAt: stale }, lastWatchdogAt: stale })).toEqual([
+      ['IngestSilent', 'alertmanager', true, 'NoPayload'],
+      ['WatchdogMissing', null, true, 'NoWatchdog'],
+    ]);
+    // 没有配置 webhook 接入源、只有对账
+    expect(pick({ ...base, ingestSources: [] })).toEqual([
+      ['IngestSilent', 'reconcile', false, 'Receiving'],
+      ['WatchdogMissing', null, false, 'Present'],
+    ]);
   });
 });

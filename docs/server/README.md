@@ -117,6 +117,7 @@ audit:
 ## 一次告警的处理
 
 1. webhook 写入 `alert_state` 与接入日志，经 `NOTIFY` 唤醒主实例；60 秒对账补回遗漏并结束告警源中已经没有的告警。
+   对账也是接入路径：每轮完整读取成功的对账计入接入（接入源 `reconcile` 的最后到达时间与 `srenautix_ingest_last_received_timestamp_seconds{source="reconcile"}`），对账读到 Watchdog 时计为 Watchdog 到达。只用对账、不接 webhook 推送的部署因此不会误报 `IngestSilent` 与 `WatchdogMissing`；webhook 没有推送、但对账在静默阈值内成功时，`IngestSilent` 的原因为 `ReconcileOnly`（不成立）。
 2. 事件引擎用 packages/core 重算并对账事件，写入版本、成员、别名与 outbox。
 3. 每个新版本立即出阶段 A：证据卡、规则提议、确定性的处置判断，发布 `stage_a.reported`，消息就地更新（见下面的"阶段 A 与领域包"）。
 4. 按触发原因（新事件、根因变化、严重度升高、证据指纹变化）经准入进入阶段 B 队列，worker 认领后研判；研判事件经 server 的事件流发布，消息再次更新。
@@ -162,8 +163,12 @@ packs:
 阶段 A 执行哪些卡：
 
 1. 根因（有歧义时前两个候选）的组件类型声明的证据链，实体为根因组件。
-2. 每个成员告警的告警目录条目声明的证据链，实体为告警解析出的实体。
-3. 只执行 `applies_to.kinds` 包含实体类型的卡；同一张卡对同一实体只执行一次，根因的卡排在前面。
+2. 每个能解析出实体的成员告警，不论分类来源（label、catalog、expression、default），按实体的组件类型执行证据链；告警归属的组件与实体不同时（例如 Pod 的属主 StatefulSet），组件类型的证据链也执行（ADR 0097）。
+3. 成员告警的告警目录条目声明的证据链作为补充，实体为告警解析出的实体。
+4. 组件类型先取拓扑节点上匹配出的类型；没有拓扑节点或没有匹配时，按 kind、命名空间与名称静态匹配领域包的组件类型（跳过带 labels 约束的类型）。一个对象匹配多个类型时取约束最多的，只按 kind 匹配的类型是兜底。
+5. 只执行 `applies_to.kinds` 包含实体类型的卡；同一张卡对同一实体只执行一次，根因的卡排在前面。
+
+告警标签解析出的实体统一成规范的 kind（node → Node 等），集群级对象（Node、PersistentVolume、ClusterRole 等）忽略 namespace 标签，`kubernetes_node` 与节点级抓取任务（node-exporter、kubelet）的 `instance` 映射到 Node。
 
 卡片窗口以事件首次触发时间为锚点，终点不晚于当前时间。取数经 `datasources.prometheus`（`concurrency` 张卡同时执行，单个查询超时 `timeout`），标签档案每小时自动探测一次，信号备选的选择缓存 10 分钟。整个证据链的期限是 40 秒，超过期限时未完成的卡不进入报告。PG 不可用时降级通道照样执行证据卡，组件类型取最后一次成功对账时的拓扑。
 

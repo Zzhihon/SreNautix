@@ -260,6 +260,8 @@ export const serverConfigSchema = z
       .object({
         source: z.enum(['informer', 'reader', 'off']).default('informer'),
         kubeconfig: path.optional(),
+        // reader 超过这个时长没有心跳（默认 15 秒一次）视为离线：它上报的条件清除，状态条只显示"reader 离线"
+        reader_offline_after: duration.default('60s'),
         // 拓扑覆盖文件所在的 Git 挂载目录（每 60 秒重新加载）；不填时没有覆盖规则
         overrides_dir: path.optional(),
         // 控制台为未映射告警开覆盖规则 PR 的仓库（用 github_app 的身份）；不填时该接口返回 503 并说明原因
@@ -274,7 +276,7 @@ export const serverConfigSchema = z
           .optional(),
       })
       .strict()
-      .default({ source: 'informer' }),
+      .default({ source: 'informer', reader_offline_after: '60s' }),
     // 变更源（changes/v1，DESIGN §5 的"30 分钟内的变更"）：server 维护只读克隆，定期 fetch 后按路径映射到拓扑节点
     changes: z
       .object({
