@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { parse as parseYaml } from 'yaml';
 import { z } from 'zod';
 import { ConfigError } from './files.js';
+import { DEFAULT_REVISION_LABELS } from '../changes/kubernetes.js';
 
 const duration = z.string().regex(/^\d+(ms|s|m|h|d)$/, '时长形如 30s、5m、12h');
 const url = z.string().url();
@@ -284,9 +285,25 @@ export const serverConfigSchema = z
         interval: duration.default('60s'),
         // 首次同步与每次同步回看的时长（与上一次同步重叠，按 change_id 去重）
         lookback: duration.default('24h'),
+        // 从拓扑事件推导 Kubernetes 的发布（ADR 0104）：工作负载的版本标签变化与新的 ReplicaSet
+        kubernetes: z
+          .object({
+            enabled: z.boolean().default(true),
+            // 表示版本的标签；默认 app.kubernetes.io/version、helm.sh/chart，可追加，例如 cchp.io/release-id
+            revision_labels: z.array(z.string().min(1)).default([...DEFAULT_REVISION_LABELS]),
+            // 这段时间内同一版本或同一个管理应用的变化合成一次发布
+            group_within: duration.default('2m'),
+          })
+          .strict()
+          .default({ enabled: true, revision_labels: [...DEFAULT_REVISION_LABELS], group_within: '2m' }),
       })
       .strict()
-      .default({ sources: [], interval: '60s', lookback: '24h' }),
+      .default({
+        sources: [],
+        interval: '60s',
+        lookback: '24h',
+        kubernetes: { enabled: true, revision_labels: [...DEFAULT_REVISION_LABELS], group_within: '2m' },
+      }),
     github_app: githubApp.optional(),
     // 需要人跟进的事件在 GitHub 开 issue（ADR 0095）；默认关闭
     issues: z

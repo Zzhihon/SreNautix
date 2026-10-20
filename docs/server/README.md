@@ -190,6 +190,18 @@ packs:
 
 领域包的组件类型可以声明 `display_name` 来源（告警注解、告警标签或本包的 metrics 信号的标签）。阶段 A 在事件锚点求出名称写入 `server.component_names`，事件详情、收件箱、通知标题与正文、GitHub issue 优先显示名称（正文写"名称（组件键）"），没有名称时显示组件键；组件键本身不变（ADR 0101）。
 
+## 发布与收敛
+
+没有配置变更源时，server 从拓扑事件推导 Kubernetes 的发布（`changes.kubernetes`，默认开启，ADR 0104）：工作负载的版本标签变化（`revision_labels`，默认 `app.kubernetes.io/version`、`helm.sh/chart`）与新的 ReplicaSet，`group_within`（默认 2m）内同一版本或同一个管理应用的变化合成一次 `kind: rollout` 的变更，目标包括管理它们的 Argo/Flux 应用。
+
+```yaml
+changes:
+  kubernetes:
+    revision_labels: [app.kubernetes.io/version, helm.sh/chart, cchp.io/release-id]
+```
+
+收敛时 Pod 级告警归到它的工作负载；没有对象的告警（发布流水线、部署后检查）与只落在命名空间上的告警归到它之前最近的一次发布。
+
 ## 变更源
 
 事件引擎把首次触发前 30 分钟内、触及事件组件的变更放进事件（`incident.changes`），并作为根因排序的一项（DESIGN §5）。变更来自配置的变更源。hub 镜像不带 git，变更源只支持托管在 GitHub 上的仓库（`integrations/github`，ADR 0096），经 `github_app` 的安装令牌用 REST API 读取：

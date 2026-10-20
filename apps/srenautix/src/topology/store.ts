@@ -194,11 +194,14 @@ export class TopologyStore implements NodeLookup {
     at: Date,
   ): Promise<{ key: string; uid: string | null; tombstone: boolean } | null> {
     const r = await this.pool.query<{ key: string; uid: string | null; valid_to: Date | null }>(
+      // 告警标签里的 CRD kind 不带 API 组（application），拓扑键带组（Application.argoproj.io）：没有点的 kind 也匹配 <kind>.<组>
       `SELECT key, uid, valid_to FROM server.topology_events
-        WHERE cluster_id = $1 AND item = 'node' AND op = 'node_upsert' AND kind = $2 AND namespace IS NOT DISTINCT FROM $3 AND name = $4
+        WHERE cluster_id = $1 AND item = 'node' AND op = 'node_upsert'
+          AND (kind = $2 OR (strpos($2, '.') = 0 AND kind LIKE $2 || '.%'))
+          AND namespace IS NOT DISTINCT FROM $3 AND name = $4
           AND valid_from <= greatest($5::timestamptz, now())
           AND (valid_to IS NULL OR valid_to > least($5::timestamptz, now()) - make_interval(secs => $6))
-        ORDER BY (valid_to IS NULL) DESC, valid_from DESC LIMIT 1`,
+        ORDER BY (valid_to IS NULL) DESC, (kind = $2) DESC, valid_from DESC LIMIT 1`,
       [clusterId, kind, namespace, name, at, TOMBSTONE_MS / 1000],
     );
     const row = r.rows[0];

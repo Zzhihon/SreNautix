@@ -14,6 +14,7 @@ const HEURISTICS: ReadonlyArray<{ label: string; kind: string; namespaced: boole
   { label: 'job_name', kind: 'Job', namespaced: true },
   { label: 'cronjob', kind: 'CronJob', namespaced: true },
   { label: 'horizontalpodautoscaler', kind: 'HorizontalPodAutoscaler', namespaced: true },
+  { label: 'poddisruptionbudget', kind: 'PodDisruptionBudget', namespaced: true },
   { label: 'node', kind: 'Node', namespaced: false },
   { label: 'kubernetes_node', kind: 'Node', namespaced: false },
   { label: 'service', kind: 'Service', namespaced: true },
@@ -46,6 +47,21 @@ export function nodeFromInstance(labels: Labels): string | null {
   return v && !IP_LITERAL.test(v) ? v : null;
 }
 
+/**
+ * 描述抓取目标本身、而不是告警对象的标签：kube-state-metrics 之类的导出器被抓取时，Prometheus 给序列加上
+ * 导出器自己的 pod、container 标签（job 与 container 都是导出器名，pod 名以它开头）。这时按标签推断不取 pod 与
+ * container，改用 deployment、poddisruptionbudget 等描述对象的标签（ADR 0104）。
+ */
+export function scrapeTargetLabels(labels: Labels): Set<string> {
+  const job = labels.job;
+  const pod = labels.pod;
+  if (!job || !pod) {
+    return new Set();
+  }
+  const fromExporter = (pod === job || pod.startsWith(`${job}-`)) && (!labels.container || labels.container === job);
+  return fromExporter ? new Set(['pod', 'container']) : new Set();
+}
+
 /** 从告警标签取实体候选：标签契约 → 目录条目的映射 → 按标签推断 */
 export function alertEntityCandidate(
   labels: Labels,
@@ -73,7 +89,11 @@ export function alertEntityCandidate(
       return { entity: null, namespace, fromLabels: false };
     }
     const ns = labels[m.namespace_label ?? 'namespace'] || null;
+    const scraped = scrapeTargetLabels(labels);
     for (const l of m.name_labels) {
+      if (scraped.has(l)) {
+        continue;
+      }
       const v = labels[l];
       if (v) {
         return { entity: make(m.kind, ns, v), namespace: ns, fromLabels: false };
@@ -81,7 +101,11 @@ export function alertEntityCandidate(
     }
     return { entity: null, namespace: ns, fromLabels: false };
   }
+  const scraper = scrapeTargetLabels(labels);
   for (const h of HEURISTICS) {
+    if (scraper.has(h.label)) {
+      continue;
+    }
     const v = labels[h.label];
     if (v && (!h.namespaced || namespace)) {
       return { entity: make(h.kind, namespace, v), namespace, fromLabels: false };

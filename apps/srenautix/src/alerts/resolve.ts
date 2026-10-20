@@ -86,7 +86,9 @@ export async function resolveAlert(clusterId: string, a: RawAlert, deps: Resolve
   if (mapped) {
     const node = await deps.nodes.find(clusterId, mapped.kind, mapped.namespace, mapped.name, a.startsAt);
     if (node) {
-      entity = { cluster_id: clusterId, ...mapped, uid: node.uid };
+      // 拓扑里的 kind 可能带 API 组（告警写 application，拓扑是 Application.argoproj.io）：实体取拓扑的 kind
+      const kind = node.key.slice(0, node.key.indexOf(':'));
+      entity = { cluster_id: clusterId, ...mapped, kind: kind || mapped.kind, uid: node.uid };
       resolution = source === 'labels' ? 'labels' : node.tombstone ? 'tombstone' : 'informer';
       component = node.key;
     } else if (deps.ksm && mapped.kind === 'Pod' && mapped.namespace) {

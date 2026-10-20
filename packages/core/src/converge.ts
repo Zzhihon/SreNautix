@@ -4,8 +4,10 @@
 //   - 时间相邻（默认 30 分钟）。
 // forecast 告警最多加入一个分组，不能把两个分组连起来；变更在 30 分钟窗口内连到它触及的组件上的告警；
 // 没有告警的集群枢纽只有在至少 3 个独立依赖方同时出现告警时才吸收这些告警。
+// 告警归属的组件按拓扑的 owned_by 链取到顶层（Pod → ReplicaSet → Deployment），Pod 级告警归到它的工作负载；
+// 拓扑中没有锚点的告警（逻辑组件、命名空间伪组件、没有实体）在变更之后与该变更的分组时间相邻时归到这次变更（ADR 0104）。
 import type { Alert, ChangeEvent, ComponentKey } from '@srenautix/contract';
-import { entityKey } from './keys.js';
+import { entityKey, isNamespacePseudo, parseKey } from './keys.js';
 import type { ResolvedRcaParams } from './params.js';
 import { parseTime } from './time.js';
 import type { ReachResult, TopologyGraph } from './topology/graph.js';
@@ -49,12 +51,14 @@ export function prepareAlerts(
     const ek = a.entity ? entityKey(a.entity) : null;
     const anchor =
       ek !== null && graph.has(ek) ? ek : a.component !== null && graph.has(a.component) ? a.component : null;
+    // 告警归属的组件：拓扑中的对象沿 owned_by 取到顶层（Pod 的告警归到它的 Deployment/StatefulSet）
+    const component = anchor !== null ? graph.componentOf(anchor) : a.component;
     return {
-      alert: a,
+      alert: component === a.component ? a : { ...a, component },
       start: parseTime(a.starts_at),
       end: a.ends_at === null ? now : parseTime(a.ends_at),
       anchor,
-      component: a.component,
+      component,
       mergeReach:
         anchor === null
           ? null
@@ -112,6 +116,108 @@ export function changeExplains(
   return best;
 }
 
+/** 告警所在的命名空间：实体、命名空间伪组件或 namespace 标签 */
+function namespaceOf(x: PreparedAlert): string | null {
+  if (x.alert.entity?.namespace) {
+    return x.alert.entity.namespace;
+  }
+  if (x.component !== null && isNamespacePseudo(x.component)) {
+    return parseKey(x.component).name;
+  }
+  return x.alert.labels.namespace ?? null;
+}
+
+/** 变更目标所在的命名空间 */
+function changeNamespaces(c: ChangeEvent, graph: TopologyGraph): Set<string> {
+  const out = new Set<string>();
+  for (const t of c.targets) {
+    const n = graph.node(t);
+    let ns = n?.namespace ?? null;
+    if (!n) {
+      try {
+        ns = parseKey(t).namespace;
+      } catch {
+        ns = null;
+      }
+    }
+    if (ns) {
+      out.add(ns);
+    }
+  }
+  return out;
+}
+
+/** 告警在拓扑里没有对象锚点，或者只落在命名空间伪组件上 */
+function unanchored(x: PreparedAlert): boolean {
+  return x.anchor === null || (x.component !== null && isNamespacePseudo(x.component));
+}
+
+/** 告警的逻辑归属：组件键，没有时取 component 标签（领域包按它归类的逻辑组件，例如 release） */
+function logicalOf(x: PreparedAlert): string | null {
+  return x.component ?? (x.alert.labels.component ? `label:${x.alert.labels.component}` : null);
+}
+
+/**
+ * 没有锚点的告警该归到哪一次变更（ADR 0104），返回变更的下标，不归时为 null。条件：
+ * - 告警在变更之后、变更窗口加时间相邻的范围内触发（默认 60 分钟）；
+ * - 角色是 change（发布流水线、部署后检查之类没有对象的告警），或者告警的命名空间就是变更目标所在的命名空间；
+ *   不满足这两条的告警，与已经归到某次变更的告警逻辑归属相同时（同一个组件键或 component 标签）也归到那次变更；
+ * - 有多次变更可选时取告警之前最近的一次。
+ */
+function changeTargets(
+  xs: readonly PreparedAlert[],
+  changes: readonly ChangeEvent[],
+  graph: TopologyGraph,
+  params: ResolvedRcaParams,
+): Array<number | null> {
+  const out: Array<number | null> = xs.map(() => null);
+  if (!changes.length) {
+    return out;
+  }
+  const namespaces = changes.map((c) => changeNamespaces(c, graph));
+  const times = changes.map((c) => parseTime(c.time));
+  const reach = params.changeWindowMs + params.adjacencyMs;
+  const latestBefore = (x: PreparedAlert, ok: (k: number) => boolean): number | null => {
+    let best: number | null = null;
+    for (let k = 0; k < changes.length; k++) {
+      const t = times[k]!;
+      if (t <= x.start && x.start - t <= reach && ok(k) && (best === null || t > times[best]!)) {
+        best = k;
+      }
+    }
+    return best;
+  };
+  xs.forEach((x, i) => {
+    if (x.alert.classification.role === 'forecast' || !unanchored(x)) {
+      return;
+    }
+    const ns = namespaceOf(x);
+    out[i] = latestBefore(
+      x,
+      (k) => x.alert.classification.role === 'change' || (ns !== null && namespaces[k]!.has(ns)),
+    );
+  });
+  // 逻辑归属相同的告警跟随已经归到变更的告警
+  const byLogical = new Map<string, Set<number>>();
+  xs.forEach((x, i) => {
+    const l = logicalOf(x);
+    if (l !== null && out[i] !== null) {
+      byLogical.set(l, (byLogical.get(l) ?? new Set()).add(out[i]!));
+    }
+  });
+  xs.forEach((x, i) => {
+    const l = logicalOf(x);
+    if (out[i] !== null || l === null || x.alert.classification.role === 'forecast' || !unanchored(x)) {
+      return;
+    }
+    const ks = byLogical.get(l);
+    if (ks) {
+      out[i] = latestBefore(x, (k) => ks.has(k));
+    }
+  });
+  return out;
+}
+
 class UnionFind {
   private readonly parent: number[];
   constructor(n: number) {
@@ -145,6 +251,7 @@ export function converge(input: ConvergeInput): AlertGroup[] {
   const uf = new UnionFind(n + changes.length);
   const isForecast = (x: PreparedAlert) => x.alert.classification.role === 'forecast';
   const gap = params.adjacencyMs;
+  const targets = changeTargets(xs, changes, graph, params);
 
   for (let i = 0; i < n; i++) {
     for (let j = i + 1; j < n; j++) {
@@ -160,8 +267,13 @@ export function converge(input: ConvergeInput): AlertGroup[] {
             (x.alert.entity === null) === (y.alert.entity === null) &&
             (x.alert.entity === null || entityKey(x.alert.entity) === entityKey(y.alert.entity!))
           : y.component === null && x.alert.alertname === y.alert.alertname;
-      if (sameObject) {
+      // 归到不同变更的同名告警（例如两次发布各自的部署后检查）不因同名而合并
+      const splitByChange = targets[i] !== null && targets[j] !== null && targets[i] !== targets[j];
+      if (sameObject && !splitByChange) {
         uf.union(i, j);
+        continue;
+      }
+      if (sameObject) {
         continue;
       }
       if (isForecast(x) || isForecast(y)) {
@@ -201,6 +313,13 @@ export function converge(input: ConvergeInput): AlertGroup[] {
       if (!isForecast(xs[i]!) && changeExplains(c, xs[i]!, graph, params, 'merge') >= params.mergeThreshold) {
         uf.union(i, n + k);
       }
+    }
+  });
+
+  // 没有锚点的告警归到变更（ADR 0104）
+  targets.forEach((k, i) => {
+    if (k !== null) {
+      uf.union(i, n + k);
     }
   });
 

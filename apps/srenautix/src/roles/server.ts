@@ -12,6 +12,7 @@ import { registerResearchRoutes } from '../api/routes-research.js';
 import { pgConfigFromEnv } from '../config/database.js';
 import { parseDuration, parseListen, readSecretFile } from '../config/files.js';
 import { loadServerConfig, type ServerConfig } from '../config/server.js';
+import { kubernetesRollouts } from '../changes/kubernetes.js';
 import { changesInWindow, ChangesService } from '../changes/service.js';
 import { ConditionPublisher, serverConditions, workerRouteConditions } from '../console-bff/conditions.js';
 import { IntegrationRegistry } from '../console-bff/integrations.js';
@@ -413,7 +414,22 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
     pool,
     topology,
     params,
-    changes: (clusterId, from, to) => changesInWindow(pool, clusterId, from, to),
+    // 变更源的变更加上从拓扑事件推导的 Kubernetes 发布（ADR 0104）
+    changes: async (clusterId, from, to) => {
+      const stored = await changesInWindow(pool, clusterId, from, to);
+      const k = c.changes.kubernetes;
+      if (!k.enabled) {
+        return stored;
+      }
+      const derived = await kubernetesRollouts(pool, from, to, {
+        clusterId,
+        revisionLabels: k.revision_labels,
+        groupWithinMs: parseDuration('changes.kubernetes.group_within', k.group_within),
+      });
+      return [...stored, ...derived].sort(
+        (a, b) => a.time.localeCompare(b.time) || a.change_id.localeCompare(b.change_id),
+      );
+    },
     probes: async () => [],
     stale: proposals,
     metrics,
