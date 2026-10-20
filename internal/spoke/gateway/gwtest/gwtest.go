@@ -142,6 +142,36 @@ func (e *Env) write(name string, b []byte) string {
 // WritePolicy 替换策略文件（gateway 每轮重新读取）。
 func (e *Env) WritePolicy(doc string) { e.write("policy.yaml", []byte(doc)) }
 
+// InstallWorkflowAllowlist 按当前策略文件生成 workflow-allowlist 策略（与 srenautix-spoke admission workflow-allowlist 相同），
+// 连同 Binding 安装，并等它生效。
+func (e *Env) InstallWorkflowAllowlist() {
+	e.T.Helper()
+	pol, err := policy.Load(e.PolicyFile, e.Catalog)
+	if err != nil {
+		e.T.Fatal(err)
+	}
+	p, err := admission.WorkflowAllowlist(pol, admission.Options{Username: testenv.GatewayUser, Prefix: Prefix})
+	if err != nil {
+		e.T.Fatal(err)
+	}
+	for _, d := range []map[string]any{p.Doc, admission.Binding(p.Name(), testenv.Namespace)} {
+		b, err := yaml.Marshal(d)
+		if err != nil {
+			e.T.Fatal(err)
+		}
+		e.Kube.Apply(e.T, b)
+	}
+	gw, err := kube.New(e.Kube.Gateway(), 15*time.Second)
+	if err != nil {
+		e.T.Fatal(err)
+	}
+	store := execution.NewStore(gw.Dyn, testenv.Namespace)
+	testenv.Eventually(e.T, 30*time.Second, "workflow allowlist enforced", func() (bool, string) {
+		err := store.DryRunCreate(context.Background(), admission.ProbeObject(testenv.Namespace, p.Short))
+		return err != nil && strings.Contains(err.Error(), "ValidatingAdmissionPolicy '"+p.Name()+"'"), errString(err)
+	})
+}
+
 // WaitPoliciesLoaded 等 apiserver 加载全部准入策略与 Binding。
 func (e *Env) WaitPoliciesLoaded() {
 	gw, err := kube.New(e.Kube.Gateway(), 15*time.Second)
