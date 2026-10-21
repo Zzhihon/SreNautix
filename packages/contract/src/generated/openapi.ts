@@ -2504,6 +2504,8 @@ export type components = {
       merged_into: null | components['schemas']['Uuid'];
       /** @description 至少 50% 的证据卡没有数据（DESIGN §7.1） */
       observability_blind: boolean;
+      /** @description 最近一次完成的研判给出的根因，读取时由中心附上（ADR 0104 §14）；没有给出根因的研判、事件流与旧版本的事件没有这个字段 */
+      research_root?: components['schemas']['ResearchRoot'];
       root: components['schemas']['Root'];
       severity: components['schemas']['Severity'];
       /** @description 本事件由哪个事件拆分而来 */
@@ -2516,6 +2518,13 @@ export type components = {
       topology_version: number;
       updated_at: components['schemas']['Timestamp'];
       $defs: {
+        /** ResearchRoot */
+        ResearchRoot: {
+          component: components['schemas']['ComponentKey'];
+          /** @description 研判根因与事件根因按属主粒度比较不一致（Pod 与它所属的 Deployment 算一致）。只标记，事件不拆分，分组与根因不变 */
+          mismatch: boolean;
+          run_id: components['schemas']['Uuid'];
+        };
         /**
          * IncidentLabel
          * @description 稳定标签 <根组件>:<首次触发时间取整到 10 分钟>，同一标签冲突时追加 ~2、~3
@@ -2628,6 +2637,8 @@ export type components = {
       pending_approvals: number;
       /** @description 最近一次研判或阶段 A 报告的时间 */
       research_fresh_at: null | components['schemas']['Timestamp'];
+      /** @description 最近一次完成、给出了根因的研判的根因，及它与事件根因是否不一致（ADR 0104 §14）；没有这样的研判时为 null */
+      research_root: null | components['schemas']['ResearchRoot'];
       root_component: null | components['schemas']['ComponentKey'];
       severity: components['schemas']['Severity'];
       split_from: null | components['schemas']['Uuid'];
@@ -3471,6 +3482,13 @@ export type components = {
       | 'manual'
       | 'model_recovered'
       | 'resumed';
+    /** ResearchRoot */
+    ResearchRoot: {
+      component: components['schemas']['ComponentKey'];
+      /** @description 研判根因与事件根因按属主粒度比较不一致（Pod 与它所属的 Deployment 算一致）。只标记，事件不拆分，分组与根因不变 */
+      mismatch: boolean;
+      run_id: components['schemas']['Uuid'];
+    };
     ResearchRun: {
       budget: {
         cost: number;

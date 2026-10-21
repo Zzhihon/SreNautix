@@ -32,6 +32,8 @@ export interface ComposeInput {
   stageA: StageAReport;
   alerts: Alert[];
   research: ResearchMirror | null;
+  /** 最近一次完成的研判根因与事件根因按属主粒度不一致（ADR 0104 §14）；只提示，事件不拆分 */
+  researchRootMismatch?: boolean;
   /** 阶段 B 排队或进行中。 */
   researchPending: boolean;
   /** 阶段 B 被跳过的原因（风暴、预算、上限）。 */
@@ -89,6 +91,8 @@ const T = {
     candidate: (i: number, c: string, s: number) => `${i}. ${c}（得分 ${s.toFixed(2)}）`,
     silent: '根因由探测卡发现，没有指向它的告警',
     conclusion: (lvl: string, c: string | null) => `研判结论：${lvl}${c ? ` · ${c}` : ''}`,
+    rootMismatch: (research: string, incident: string) =>
+      `研判根因（${research}）与发现根因（${incident}）不一致，事件没有拆分`,
     proposal: (n: number, action: string, target: string, tier: string, state: string) =>
       `#${n} ${action} → ${target}（${tier} 档，${state}）`,
     proposalState: {
@@ -167,6 +171,8 @@ const T = {
     candidate: (i: number, c: string, s: number) => `${i}. ${c} (score ${s.toFixed(2)})`,
     silent: 'Found by a probe card; no alert points at it',
     conclusion: (lvl: string, c: string | null) => `Conclusion: ${lvl}${c ? ` · ${c}` : ''}`,
+    rootMismatch: (research: string, incident: string) =>
+      `Research root (${research}) differs from the discovered root (${incident}); the incident was not split`,
     proposal: (n: number, action: string, target: string, tier: string, state: string) =>
       `#${n} ${action} → ${target} (tier ${tier}, ${state})`,
     proposalState: {
@@ -309,6 +315,9 @@ export function composeMessage(i: ComposeInput): { message: NotifyMessage; targe
         ),
       ),
     );
+    if (i.researchRootMismatch && out.conclusion.root_component && inc.root.component) {
+      root.push(text(t.rootMismatch(named(out.conclusion.root_component), named(inc.root.component))));
+    }
     const h = out.hypotheses.find((x) => x.id === out.conclusion.hypothesis_id);
     if (h) {
       root.push(text(h.mechanism, true));

@@ -29,6 +29,7 @@ export function IncidentRow({ s, now }: { s: IncidentSummary; now: number }) {
         <span className={styles.title}>
           <Truncate text={root ? `${root.name}` : t('incident.no_root')} />
           {s.ambiguous && <span className={styles.flag}>{t('incident.ambiguous')}</span>}
+          {s.research_root?.mismatch && <span className={styles.flag}>{t('incident.root_mismatch')}</span>}
         </span>
         <span className={styles.sub}>
           {root && <span>{root.sub}</span>}

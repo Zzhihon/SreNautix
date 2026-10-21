@@ -88,6 +88,11 @@ export function VerdictHeader({
           </span>
         )}
         {incident.root.silent_root && <span className={styles.flag}>{t('verdict.silent_root')}</span>}
+        {incident.research_root?.mismatch && (
+          <span className={styles.flag}>
+            {t('verdict.root_mismatch', { root: componentLabel(incident.research_root.component, names).name })}
+          </span>
+        )}
       </div>
 
       <p className={styles.sentence}>

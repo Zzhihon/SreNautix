@@ -233,6 +233,7 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
             language: c.stage_a.language,
           },
           metrics,
+          (clusterId, key, at) => topology.ownerOf(clusterId, key, at),
         )
       : null;
   const prom = c.datasources.prometheus;
@@ -365,6 +366,7 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
     },
     proposals,
     feedback,
+    (clusterId, key, at) => topology.ownerOf(clusterId, key, at),
   );
   const notify = new NotifyService({
     pool,

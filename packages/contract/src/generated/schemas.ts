@@ -1,5 +1,5 @@
 // 本文件由 packages/contract/scripts/gen.ts 从 contract/ 生成，不要手工修改。
-export const CONTRACT_VERSION = '2.20.0';
+export const CONTRACT_VERSION = '2.21.0';
 
 export const SCHEMAS: Record<string, Record<string, unknown>> = {
   'https://srenautix.io/contract/gateway/v1/action-catalog.schema.json': {
@@ -3412,8 +3412,28 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
         $ref: 'common.schema.json#/$defs/ComponentNames',
         description: '根因、候选与成员组件的可读名称；读取时由中心附上，事件流与旧版本的事件没有这个字段',
       },
+      research_root: {
+        description:
+          '最近一次完成的研判给出的根因，读取时由中心附上（ADR 0104 §14）；没有给出根因的研判、事件流与旧版本的事件没有这个字段',
+        $ref: '#/$defs/ResearchRoot',
+      },
     },
     $defs: {
+      ResearchRoot: {
+        title: 'ResearchRoot',
+        type: 'object',
+        additionalProperties: false,
+        required: ['run_id', 'component', 'mismatch'],
+        properties: {
+          run_id: { $ref: 'common.schema.json#/$defs/Uuid' },
+          component: { $ref: 'common.schema.json#/$defs/ComponentKey' },
+          mismatch: {
+            type: 'boolean',
+            description:
+              '研判根因与事件根因按属主粒度比较不一致（Pod 与它所属的 Deployment 算一致）。只标记，事件不拆分，分组与根因不变',
+          },
+        },
+      },
       IncidentLabel: {
         title: 'IncidentLabel',
         description: '稳定标签 <根组件>:<首次触发时间取整到 10 分钟>，同一标签冲突时追加 ~2、~3',

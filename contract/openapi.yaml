@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: SreNautix hub API
-  version: 2.20.0
+  version: 2.21.0
   license:
     name: Apache-2.0
     identifier: Apache-2.0
@@ -2066,6 +2066,7 @@ components:
         - observability_blind
         - updated_at
         - component_names
+        - research_root
       properties:
         incident_id: { $ref: './schemas/common.schema.json#/$defs/Uuid' }
         cluster_id: { $ref: './schemas/common.schema.json#/$defs/ClusterId' }
@@ -2100,6 +2101,9 @@ components:
         component_names:
           description: 根因组件的可读名称（ADR 0101）；没有名称时为空对象
           $ref: './schemas/common.schema.json#/$defs/ComponentNames'
+        research_root:
+          description: 最近一次完成、给出了根因的研判的根因，及它与事件根因是否不一致（ADR 0104 §14）；没有这样的研判时为 null
+          oneOf: [{ type: 'null' }, { $ref: './schemas/incident.schema.json#/$defs/ResearchRoot' }]
     ResearchState:
       type: string
       description: |

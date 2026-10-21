@@ -8,6 +8,7 @@ import type { Auth } from '../identity/auth.js';
 import { scopeMatches, type RoleBinding, type Target } from '../identity/bindings.js';
 import { withComponentNames } from '../incident/names.js';
 import { incidentVersion, latestStageA, resolveIncidentRef, type IncidentRow } from '../incident/read.js';
+import { researchRoots } from '../incident/research-root.js';
 import { alertsById } from '../ingest/store.js';
 import type { FeedbackService } from '../proposals/feedback.js';
 import type { EvidenceRunner } from '../stage-a/ports.js';
@@ -60,11 +61,12 @@ function decodeCursor(raw: string): Cursor {
   return c;
 }
 
-async function summaries(pool: pg.Pool, feedback: FeedbackService, rows: IncidentRow[]) {
+async function summaries(pool: pg.Pool, feedback: FeedbackService, topology: TopologyStore, rows: IncidentRow[]) {
   const ids = rows.map((r) => r.incident_id);
   if (!ids.length) {
     return [];
   }
+  const roots = await researchRoots(pool, (c, k, at) => topology.ownerOf(c, k, at), rows);
   const stage = await pool.query<{ incident_id: string; disposition: string; rendered_at: Date }>(
     'SELECT DISTINCT ON (incident_id) incident_id, disposition, rendered_at FROM server.stage_a_reports WHERE incident_id = ANY($1::uuid[]) ORDER BY incident_id, incident_version DESC',
     [ids],
@@ -131,6 +133,7 @@ async function summaries(pool: pg.Pool, feedback: FeedbackService, rows: Inciden
       component_names: ((name) => (name && r.root_component ? { [r.root_component]: name } : {}))(
         nm.get(`${r.cluster_id}\0${r.root_component ?? ''}`),
       ),
+      research_root: roots.get(r.incident_id) ?? null,
     };
   });
 }
@@ -196,7 +199,7 @@ export function registerIncidentRoutes(app: FastifyInstance, d: IncidentRouteDep
           (x.first_firing_at.toISOString() === cursor.t && x.incident_id < cursor.id),
       );
     }
-    let items = await summaries(d.pool, d.feedback, rows);
+    let items = await summaries(d.pool, d.feedback, d.topology, rows);
     if (q.disposition) {
       items = items.filter((x) => x.disposition === q.disposition);
     }
@@ -257,7 +260,10 @@ export function registerIncidentRoutes(app: FastifyInstance, d: IncidentRouteDep
       }
       return withComponentNames(d.pool, body);
     }
-    return withComponentNames(d.pool, row.body);
+    // 最新版本附上研判根因与是否不一致（ADR 0104 §14）；历史版本不附
+    const rr = (await researchRoots(d.pool, (c, k, at) => d.topology.ownerOf(c, k, at), [row])).get(row.incident_id);
+    const named = await withComponentNames(d.pool, row.body);
+    return rr ? { ...named, research_root: rr } : named;
   });
 
   app.get('/v1/incidents/:ref/stage-a', async (req) => {

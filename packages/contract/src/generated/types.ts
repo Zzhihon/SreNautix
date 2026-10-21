@@ -435,6 +435,7 @@ export interface SrenautixContractIndex {
   Feedback?: Feedback;
   FeedbackCreate?: FeedbackCreate;
   Incident?: Incident;
+  ResearchRoot?: ResearchRoot1;
   IncidentLabel?: IncidentLabel;
   IncidentRoot?: IncidentRoot;
   RootCandidate?: RootCandidate;
@@ -2211,6 +2212,7 @@ export interface Incident {
   created_at: Timestamp;
   updated_at: Timestamp;
   component_names?: CommonComponentNames1;
+  research_root?: ResearchRoot;
 }
 export interface IncidentRoot {
   /**
@@ -2284,6 +2286,17 @@ export interface IncidentAlias {
  */
 export interface CommonComponentNames1 {
   [k: string]: string | undefined;
+}
+/**
+ * 最近一次完成的研判给出的根因，读取时由中心附上（ADR 0104 §14）；没有给出根因的研判、事件流与旧版本的事件没有这个字段
+ */
+export interface ResearchRoot {
+  run_id: Uuid;
+  component: ComponentKey;
+  /**
+   * 研判根因与事件根因按属主粒度比较不一致（Pod 与它所属的 Deployment 算一致）。只标记，事件不拆分，分组与根因不变
+   */
+  mismatch: boolean;
 }
 /**
  * 阶段 A 的确定性报告（DESIGN §7.1）：不调用模型，不经过 worker。事件创建或版本变化后立即生成
@@ -3001,6 +3014,14 @@ export interface FeedbackCreate {
   disposition: null | Disposition;
   mechanism: string | null;
   reason: string | null;
+}
+export interface ResearchRoot1 {
+  run_id: Uuid;
+  component: ComponentKey;
+  /**
+   * 研判根因与事件根因按属主粒度比较不一致（Pod 与它所属的 Deployment 算一致）。只标记，事件不拆分，分组与根因不变
+   */
+  mismatch: boolean;
 }
 /**
  * 集成清单 integration.yaml（DESIGN §10.1）。一项能力只有在清单里声明过、并且 verify() 通过，才算可用。控制台的集成页由清单生成

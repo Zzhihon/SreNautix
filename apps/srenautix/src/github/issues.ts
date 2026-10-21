@@ -2,6 +2,7 @@ import type { EvidenceResult, Incident, StageAReport } from '@srenautix/contract
 import type pg from 'pg';
 import { displayComponentName, displayKey } from '@srenautix/core';
 import { componentNames } from '../incident/names.js';
+import { researchRoots, type OwnerLookup } from '../incident/research-root.js';
 import { logger } from '../log.js';
 import type { ServerMetrics } from '../metrics.js';
 import { appendAudit } from '../store/audit.js';
@@ -82,6 +83,8 @@ const T = {
         ? `模型研判结束：${summary ?? ''}`
         : `模型研判没有给出结论（${state}）${err ? `：${err}` : ''}`,
     resolved: (at: string) => `事件已于 ${at} 恢复。`,
+    rootMismatch: (research: string, incident: string) =>
+      `研判根因（\`${research}\`）与发现根因（\`${incident}\`）不一致。事件没有拆分，请以研判结论与证据为准核对。`,
     pull: (title: string, url: string) => `关联的 PR：[${title}](${url})`,
     proposal: (title: string, url: string) => `修复提议（审批后由 gateway 在仓库中开 PR）：[${title}](${url})`,
     footer: '由 SreNautix 生成，同一事件的后续进展会追加在评论里。',
@@ -109,6 +112,8 @@ const T = {
         ? `Model research finished: ${summary ?? ''}`
         : `Model research ended without a conclusion (${state})${err ? `: ${err}` : ''}`,
     resolved: (at: string) => `The incident resolved at ${at}.`,
+    rootMismatch: (research: string, incident: string) =>
+      `The research root (\`${research}\`) differs from the discovered root (\`${incident}\`). The incident was not split; check against the research conclusion and evidence.`,
     pull: (title: string, url: string) => `Linked PR: [${title}](${url})`,
     proposal: (title: string, url: string) =>
       `Fix proposal (the gateway opens the PR after approval): [${title}](${url})`,
@@ -125,6 +130,8 @@ export class IssueService {
     private readonly gh: GitHubApp,
     private readonly s: IssueSettings,
     private readonly metrics: ServerMetrics,
+    /** 研判根因与事件根因按属主粒度比较时取顶层属主（ADR 0104 §14）；不提供时只按键比较 */
+    private readonly ownerOf: OwnerLookup = async () => null,
   ) {}
 
   get repo(): string {
@@ -418,7 +425,21 @@ export class IssueService {
       `SELECT l.incident_id, l.kind, l.url, l.title FROM server.github_issue_links l
          JOIN server.github_issues g ON g.incident_id = l.incident_id WHERE g.state = 'open'`,
     );
+    // 最近一次完成的研判根因与事件根因不一致时追加一条评论（每次研判一条），事件不拆分
+    const open = await this.pool.query<{ incident_id: string; cluster_id: string; root_component: string | null }>(
+      `SELECT i.incident_id, i.cluster_id, i.root_component FROM server.incidents i
+         JOIN server.github_issues g ON g.incident_id = i.incident_id WHERE g.state = 'open'`,
+    );
+    const roots = await researchRoots(this.pool, this.ownerOf, open.rows);
+    const incidentRoot = new Map(open.rows.map((r) => [r.incident_id, r.root_component]));
     const want: Array<[string, string, string]> = [
+      ...[...roots]
+        .filter(([, r]) => r.mismatch)
+        .map(([incidentId, r]): [string, string, string] => [
+          incidentId,
+          `root-mismatch:${r.run_id}`,
+          t.rootMismatch(r.component, incidentRoot.get(incidentId) ?? '-'),
+        ]),
       ...runs.rows.map((r): [string, string, string] => [
         r.incident_id,
         `research:${r.run_id}`,

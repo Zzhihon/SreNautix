@@ -7,6 +7,7 @@ import { pullsOf } from '../remediation/pulls.js';
 import { composeMessage, laneOf, type ResearchMirror } from './compose.js';
 import type { DesiredIncidentMessage, MessageSource } from './ports.js';
 import { withComponentNames } from '../incident/names.js';
+import { researchRoots, type OwnerLookup } from '../incident/research-root.js';
 
 export interface SourceSettings {
   prefix: string;
@@ -24,6 +25,8 @@ export class PgMessageSource implements MessageSource {
     private readonly s: SourceSettings,
     private readonly proposals: ProposalService,
     private readonly feedback: FeedbackService,
+    /** 研判根因与事件根因按属主粒度比较时取顶层属主（ADR 0104 §14）；不提供时只按键比较 */
+    private readonly ownerOf: OwnerLookup = async () => null,
   ) {}
 
   async desired(language: 'zh' | 'en'): Promise<DesiredIncidentMessage[]> {
@@ -54,6 +57,15 @@ export class PgMessageSource implements MessageSource {
       [ids],
     );
     const fbs: Map<string, Feedback> = await this.feedback.latest(this.pool, ids);
+    const roots = await researchRoots(
+      this.pool,
+      this.ownerOf,
+      r.rows.map((x) => ({
+        incident_id: x.body.incident_id,
+        cluster_id: x.body.cluster_id,
+        root_component: x.body.root.component,
+      })),
+    );
     const pulls = await pullsOf(this.pool, ids);
     const byInc = <T extends { incident_id: string }>(rows: T[]) => {
       const m = new Map<string, T[]>();
@@ -81,6 +93,7 @@ export class PgMessageSource implements MessageSource {
         stageA: report,
         alerts,
         research: run,
+        researchRootMismatch: roots.get(inc.incident_id)?.mismatch ?? false,
         researchPending: q?.state === 'queued' || q?.state === 'leased',
         stageAOnlyReason: q?.state === 'skipped' ? q.skip_reason : null,
         proposals: ps,
