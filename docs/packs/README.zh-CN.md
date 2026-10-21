@@ -80,6 +80,14 @@ signals:
 
 方言为 `promql` 的备选用 Prometheus 官方解析器检查，`metricsql` 的用 VictoriaMetrics 官方解析器检查（两者编译为 wasm，随 `integration-sdk` 发布）。`lint` 对每个备选按 `applies_to` 的每种实体渲染一次再解析，并检查：不使用 `@` 修饰符；`range` 模式的查询结果是瞬时向量。同一份包要在 Prometheus 与 VictoriaMetrics 上得出相同结论，由 `pack test` 在两种后端上执行来保证。
 
+**查询模板**
+
+阶段 B 的区分性检查默认把适用于子图组件的证据链卡当作检查执行（ADR 0116）。卡片表达不了的查询（例如按 Pod 拆分的前 k 名、与另一个工作负载对比）写成 `signals.yaml` 的 `templates`：`signal`、`description`、`args`（参数的 JSON Schema）与判定结果的 `card`。执行时模型给出的参数作为卡的 `params` 传入，附带的卡与证据卡一样编译与严格解析，键为 `<包>/templates/<模板 id>`，夹具以 `card: templates/<模板 id>` 测试。`lint` 另外要求：
+- `args` 写 `additionalProperties: false`，每个参数都是卡的 `params`，并有 `description`；
+- 字符串参数用 `enum` 或 `pattern` 限定（它们会代入 PromQL），数字参数有 `minimum` 与 `maximum`；
+- 卡的默认值满足参数的限定；
+- 分组标签（`by (...)`）不能是参数：信号探测时参数取占位值。
+
 ## 证据卡
 
 证据卡属于证据链（`chains.yaml`）或检查项（`checks.yaml`），结构见 `contract/schemas/evidence-card.schema.json`：
@@ -353,7 +361,7 @@ tests:
 | `kps-conditions` | 由 `pnpm --filter @srenautix/packs-sdk run gen:kps-conditions` 从固定版本 chart 的告警规则生成的告警条件卡（beta，ADR 0109），夹具来自 kubernetes-mixin 的 promtool 测试 |
 | `kubernetes-core` | apiserver、etcd 与其他控制面组件 |
 | `node` | 节点健康、文件系统、网络、时钟；混沌实验 node-memory-pressure |
-| `workload` | 重启与 CrashLoop、Pending、发布进度、发布（等待迁移的 init 容器、新旧 ReplicaSet、正在服务的版本、迁移 Job、开始前后的 5xx 与延迟）、Job、容量；规则提议重建卡在初始化的 Pod；混沌实验 crashloop-bad-config |
+| `workload` | 重启与 CrashLoop、Pending、发布进度、发布（等待迁移的 init 容器、新旧 ReplicaSet、正在服务的版本、迁移 Job、开始前后的 5xx 与延迟）、Job、容量（HPA 达到上限时伸缩指标相对目标值、伸缩对象的 CPU 限流与延迟对比基线，区分良性与饱和）；查询模板按 Pod 拆分 CPU、内存与重启的前 k 名，与另一个工作负载对比重启；规则提议重建卡在初始化的 Pod；混沌实验 crashloop-bad-config |
 | `gitops` | 修复补丁模板：发布输入回到正在服务的版本、HPA 上限、OOMKilled 容器的内存 limit、长期告警的严重度与持续时间、告警目录条目 |
 | `pvc` | 卷容量；混沌实验 fill-volume |
 | `observability-self` | 抓取、Prometheus TSDB、规则评估、告警投递 |

@@ -1,0 +1,141 @@
+# 查询模板：tpl 命名空间的 hot 有三个 Pod，CPU、内存与重启都集中在 hot-…-aaaaa 上；even 的三个 Pod 用量相同、没有重启。
+api_version: srenautix.io/pack-test/v1
+interval: 1m
+input_series:
+  # hot：aaaaa 每秒 0.9 核，其余每秒 0.1 核；aaaaa 900 MB，其余 100 MB；只有 aaaaa 重启
+  - {
+      series: 'container_cpu_usage_seconds_total{namespace="tpl",pod="hot-6b7c8d9e0f-aaaaa",container="app"}',
+      values: '0+54x60',
+    }
+  - {
+      series: 'container_cpu_usage_seconds_total{namespace="tpl",pod="hot-6b7c8d9e0f-bbbbb",container="app"}',
+      values: '0+6x60',
+    }
+  - {
+      series: 'container_cpu_usage_seconds_total{namespace="tpl",pod="hot-6b7c8d9e0f-ccccc",container="app"}',
+      values: '0+6x60',
+    }
+  - {
+      series: 'container_memory_working_set_bytes{namespace="tpl",pod="hot-6b7c8d9e0f-aaaaa",container="app"}',
+      values: '900000000x60',
+    }
+  - {
+      series: 'container_memory_working_set_bytes{namespace="tpl",pod="hot-6b7c8d9e0f-bbbbb",container="app"}',
+      values: '100000000x60',
+    }
+  - {
+      series: 'container_memory_working_set_bytes{namespace="tpl",pod="hot-6b7c8d9e0f-ccccc",container="app"}',
+      values: '100000000x60',
+    }
+  - {
+      series: 'kube_pod_container_status_restarts_total{namespace="tpl",pod="hot-6b7c8d9e0f-aaaaa",container="app"}',
+      values: '0+1x60',
+    }
+  - {
+      series: 'kube_pod_container_status_restarts_total{namespace="tpl",pod="hot-6b7c8d9e0f-bbbbb",container="app"}',
+      values: '0x60',
+    }
+  - {
+      series: 'kube_pod_container_status_restarts_total{namespace="tpl",pod="hot-6b7c8d9e0f-ccccc",container="app"}',
+      values: '0x60',
+    }
+  # even：三个 Pod 都是每秒 0.3 核、300 MB，没有重启
+  - {
+      series: 'container_cpu_usage_seconds_total{namespace="tpl",pod="even-5c6d7e8f9a-aaaaa",container="app"}',
+      values: '0+18x60',
+    }
+  - {
+      series: 'container_cpu_usage_seconds_total{namespace="tpl",pod="even-5c6d7e8f9a-bbbbb",container="app"}',
+      values: '0+18x60',
+    }
+  - {
+      series: 'container_cpu_usage_seconds_total{namespace="tpl",pod="even-5c6d7e8f9a-ccccc",container="app"}',
+      values: '0+18x60',
+    }
+  - {
+      series: 'container_memory_working_set_bytes{namespace="tpl",pod="even-5c6d7e8f9a-aaaaa",container="app"}',
+      values: '300000000x60',
+    }
+  - {
+      series: 'container_memory_working_set_bytes{namespace="tpl",pod="even-5c6d7e8f9a-bbbbb",container="app"}',
+      values: '300000000x60',
+    }
+  - {
+      series: 'container_memory_working_set_bytes{namespace="tpl",pod="even-5c6d7e8f9a-ccccc",container="app"}',
+      values: '300000000x60',
+    }
+  - {
+      series: 'kube_pod_container_status_restarts_total{namespace="tpl",pod="even-5c6d7e8f9a-aaaaa",container="app"}',
+      values: '0x60',
+    }
+  - {
+      series: 'kube_pod_container_status_restarts_total{namespace="tpl",pod="even-5c6d7e8f9a-bbbbb",container="app"}',
+      values: '0x60',
+    }
+tests:
+  - {
+      name: hot 的 CPU 集中在一个 Pod,
+      eval_time: 40m,
+      card: templates/cpu-by-pod,
+      entity: { kind: Deployment, namespace: tpl, name: hot },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: even 的 CPU 平均分布,
+      eval_time: 40m,
+      card: templates/cpu-by-pod,
+      entity: { kind: Deployment, namespace: tpl, name: even },
+      expect: { verdict: normal },
+    }
+  - {
+      name: hot 的内存集中在一个 Pod,
+      eval_time: 40m,
+      card: templates/memory-by-pod,
+      entity: { kind: Deployment, namespace: tpl, name: hot },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: even 的内存平均分布,
+      eval_time: 40m,
+      card: templates/memory-by-pod,
+      entity: { kind: Deployment, namespace: tpl, name: even },
+      expect: { verdict: normal },
+    }
+  - {
+      name: 占比阈值调到 0.9 时 hot 的内存不算集中,
+      eval_time: 40m,
+      card: templates/memory-by-pod,
+      entity: { kind: Deployment, namespace: tpl, name: hot },
+      params: { share: 0.9 },
+      expect: { verdict: normal },
+    }
+  - {
+      name: hot 的重启集中在一个 Pod,
+      eval_time: 40m,
+      card: templates/restarts-by-pod,
+      entity: { kind: Deployment, namespace: tpl, name: hot },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: even 没有重启,
+      eval_time: 40m,
+      card: templates/restarts-by-pod,
+      entity: { kind: Deployment, namespace: tpl, name: even },
+      expect: { verdict: normal },
+    }
+  - {
+      name: hot 的重启是自己特有的,
+      eval_time: 40m,
+      card: templates/compare-restarts,
+      entity: { kind: Deployment, namespace: tpl, name: hot },
+      params: { other: even },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: even 与 hot 对比没有更多重启,
+      eval_time: 40m,
+      card: templates/compare-restarts,
+      entity: { kind: Deployment, namespace: tpl, name: even },
+      params: { other: hot },
+      expect: { verdict: normal },
+    }

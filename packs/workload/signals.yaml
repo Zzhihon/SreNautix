@@ -148,6 +148,116 @@ signals:
             kube_horizontalpodautoscaler_status_current_replicas{namespace="$namespace", horizontalpodautoscaler="$name"}
             / kube_horizontalpodautoscaler_spec_max_replicas{namespace="$namespace", horizontalpodautoscaler="$name"}
           )
+  # ---- HPA 达到上限时是否已经饱和（capacity 链）：区分"副本数顶到上限但资源仍有余量"与"已经饱和" ----
+  # HPA 各指标当前值占目标值的比例（kube-state-metrics 2.9 起导出 spec/status_target_metric，按 metric_name 与类型配对）
+  - id: hpa_target_ratio
+    kind: metrics
+    unit: ratio
+    alternatives:
+      - expr: >-
+          max by (namespace, horizontalpodautoscaler, metric_name, metric_target_type) (
+            kube_horizontalpodautoscaler_status_target_metric{namespace="$namespace", horizontalpodautoscaler="$name"}
+          )
+          / on (namespace, horizontalpodautoscaler, metric_name, metric_target_type)
+          (max by (namespace, horizontalpodautoscaler, metric_name, metric_target_type) (
+            kube_horizontalpodautoscaler_spec_target_metric{namespace="$namespace", horizontalpodautoscaler="$name"}
+          ) > 0)
+  # HPA 伸缩对象（Deployment 或 StatefulSet）的 Pod 的 CPU 限流比例：
+  # HPA 的 scaletargetref → Deployment 的 ReplicaSet（kube_replicaset_owner）或 StatefulSet → Pod（kube_pod_owner）
+  - id: hpa_target_throttled_ratio
+    kind: metrics
+    unit: ratio
+    alternatives:
+      - expr: >-
+          max by (namespace, pod) (
+            (
+              sum by (namespace, pod) (rate(container_cpu_cfs_throttled_periods_total{namespace="$namespace", container!=""}[$rate_window]))
+              / (sum by (namespace, pod) (rate(container_cpu_cfs_periods_total{namespace="$namespace", container!=""}[$rate_window])) > 0)
+            )
+            * on (namespace, pod) group_left ()
+            (
+              max by (namespace, pod) (
+                label_replace(kube_pod_owner{namespace="$namespace", owner_kind="ReplicaSet"}, "replicaset", "$1", "owner_name", "(.+)")
+                * on (namespace, replicaset) group_left ()
+                max by (namespace, replicaset) (
+                  label_replace(kube_replicaset_owner{namespace="$namespace", owner_kind="Deployment"}, "target", "$1", "owner_name", "(.+)")
+                  * on (namespace, target) group_left ()
+                  max by (namespace, target) (
+                    label_replace(kube_horizontalpodautoscaler_info{namespace="$namespace", horizontalpodautoscaler="$name", scaletargetref_kind="Deployment"}, "target", "$1", "scaletargetref_name", "(.+)")
+                  )
+                )
+              )
+              or
+              max by (namespace, pod) (
+                label_replace(kube_pod_owner{namespace="$namespace", owner_kind="StatefulSet"}, "target", "$1", "owner_name", "(.+)")
+                * on (namespace, target) group_left ()
+                max by (namespace, target) (
+                  label_replace(kube_horizontalpodautoscaler_info{namespace="$namespace", horizontalpodautoscaler="$name", scaletargetref_kind="StatefulSet"}, "target", "$1", "scaletargetref_name", "(.+)")
+                )
+              )
+            )
+          )
+  # HPA 伸缩对象的 Pod 的 HTTP 请求 p95 延迟，与一天前同一时刻的 p95（基线）；指标名按 Prometheus 客户端库的惯例
+  - id: hpa_target_latency_p95
+    kind: metrics
+    unit: seconds
+    alternatives:
+      - expr: >-
+          histogram_quantile(0.95, sum by (le) (
+            rate(http_request_duration_seconds_bucket{namespace="$namespace"}[$rate_window])
+            * on (namespace, pod) group_left ()
+            (
+              max by (namespace, pod) (
+                label_replace(kube_pod_owner{namespace="$namespace", owner_kind="ReplicaSet"}, "replicaset", "$1", "owner_name", "(.+)")
+                * on (namespace, replicaset) group_left ()
+                max by (namespace, replicaset) (
+                  label_replace(kube_replicaset_owner{namespace="$namespace", owner_kind="Deployment"}, "target", "$1", "owner_name", "(.+)")
+                  * on (namespace, target) group_left ()
+                  max by (namespace, target) (
+                    label_replace(kube_horizontalpodautoscaler_info{namespace="$namespace", horizontalpodautoscaler="$name", scaletargetref_kind="Deployment"}, "target", "$1", "scaletargetref_name", "(.+)")
+                  )
+                )
+              )
+              or
+              max by (namespace, pod) (
+                label_replace(kube_pod_owner{namespace="$namespace", owner_kind="StatefulSet"}, "target", "$1", "owner_name", "(.+)")
+                * on (namespace, target) group_left ()
+                max by (namespace, target) (
+                  label_replace(kube_horizontalpodautoscaler_info{namespace="$namespace", horizontalpodautoscaler="$name", scaletargetref_kind="StatefulSet"}, "target", "$1", "scaletargetref_name", "(.+)")
+                )
+              )
+            )
+          ))
+  - id: hpa_target_latency_p95_baseline
+    kind: metrics
+    unit: seconds
+    alternatives:
+      - expr: >-
+          histogram_quantile(0.95, sum by (le) (
+            rate(http_request_duration_seconds_bucket{namespace="$namespace"}[$rate_window] offset 1d)
+            * on (namespace, pod) group_left ()
+            (
+              max by (namespace, pod) (
+                label_replace(kube_pod_owner{namespace="$namespace", owner_kind="ReplicaSet"} offset 1d, "replicaset", "$1", "owner_name", "(.+)")
+                * on (namespace, replicaset) group_left ()
+                max by (namespace, replicaset) (
+                  label_replace(kube_replicaset_owner{namespace="$namespace", owner_kind="Deployment"} offset 1d, "target", "$1", "owner_name", "(.+)")
+                  * on (namespace, target) group_left ()
+                  max by (namespace, target) (
+                    label_replace(kube_horizontalpodautoscaler_info{namespace="$namespace", horizontalpodautoscaler="$name", scaletargetref_kind="Deployment"}, "target", "$1", "scaletargetref_name", "(.+)")
+                  )
+                )
+              )
+              or
+              max by (namespace, pod) (
+                label_replace(kube_pod_owner{namespace="$namespace", owner_kind="StatefulSet"} offset 1d, "target", "$1", "owner_name", "(.+)")
+                * on (namespace, target) group_left ()
+                max by (namespace, target) (
+                  label_replace(kube_horizontalpodautoscaler_info{namespace="$namespace", horizontalpodautoscaler="$name", scaletargetref_kind="StatefulSet"}, "target", "$1", "scaletargetref_name", "(.+)")
+                )
+              )
+            )
+          ))
   - id: quota_usage
     kind: metrics
     unit: ratio
@@ -240,3 +350,205 @@ signals:
     unit: seconds
     alternatives:
       - expr: histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{$selector}[$rate_window])))
+
+  # ---- 查询模板（阶段 B 的区分性检查）用的信号：按 Pod 拆分的前 params.k 名 ----
+  # 分组标签不能作为参数（信号探测时参数取占位值），所以固定按 pod 拆分
+  - id: cpu_by_pod
+    kind: metrics
+    unit: ratio
+    alternatives:
+      - expr: >-
+          topk($params.k, sum by (pod) (
+            rate(container_cpu_usage_seconds_total{$selector, container!="", container!="POD"}[$rate_window])
+          ))
+  - id: memory_by_pod
+    kind: metrics
+    unit: bytes
+    alternatives:
+      - expr: >-
+          topk($params.k, sum by (pod) (
+            container_memory_working_set_bytes{$selector, container!="", container!="POD"}
+          ))
+  - id: restarts_by_pod
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: >-
+          topk($params.k, sum by (pod) (
+            increase(kube_pod_container_status_restarts_total{$selector}[$window])
+          ))
+  # 同一命名空间中另一个工作负载（Pod 名以 params.other 开头）在窗口内的重启次数
+  - id: restarts_of_other
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: >-
+          sum(increase(kube_pod_container_status_restarts_total{namespace="$namespace", pod=~"$params.other-.+"}[$window]))
+  - id: restarts_total
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: sum(increase(kube_pod_container_status_restarts_total{$selector}[$window]))
+
+# 区分性检查的查询模板：卡片表达不了的按 Pod 拆分的前 k 名与两个工作负载的对比。参数作为附带卡的 params 传入
+templates:
+  - id: cpu-by-pod
+    signal: cpu_by_pod
+    description: 工作负载的 CPU 用量按 Pod 拆分的前 k 名；判断用量是集中在一个 Pod 上（热点）还是整体上升
+    args:
+      type: object
+      additionalProperties: false
+      properties:
+        k: { type: integer, minimum: 1, maximum: 20, description: 列出前几名 }
+        share: { type: number, minimum: 0.3, maximum: 0.95, description: 第一名占比超过它时判为集中 }
+    card:
+      id: cpu-by-pod
+      title: { zh-CN: CPU 用量按 Pod 拆分, en: CPU usage split by pod }
+      note:
+        zh-CN: 窗口末尾按 Pod 拆分的 CPU 用量前 params.k 名；第一名占比超过 params.share 时判为集中在一个 Pod 上
+        en: CPU usage split by pod at the end of the window; concentrated when the first exceeds params.share of the total
+      applies_to: { kinds: [Deployment, StatefulSet, DaemonSet] }
+      params: { k: 5, share: 0.6 }
+      refs:
+        - { name: top, signal: cpu_by_pod, mode: instant }
+      judge:
+        let:
+          - { name: share, cel: 'top_share(top, 1)' }
+          # last(列表) 是各序列最后值中的最大值，等于它的序列就是第一名
+          - { name: peak, cel: last(top) }
+          - { name: leader, cel: 'label(top.filter(s, last(s) >= peak)[0], "pod")' }
+        abnormal_if:
+          - cel: count(top) > 1 && share > params.share
+            say:
+              {
+                zh-CN: '{leader} 占 CPU 用量的 {share, number, percent}',
+                en: '{leader} accounts for {share, number, percent} of the CPU usage',
+              }
+      display:
+        value: share
+        unit: percent
+        table:
+          rows_from: top
+          sort_by: last(row)
+          columns:
+            - { header: { zh-CN: Pod, en: Pod }, cel: 'label(row, "pod")' }
+            - { header: { zh-CN: CPU（核）, en: CPU (cores) }, cel: last(row) }
+      egress: allow
+  - id: memory-by-pod
+    signal: memory_by_pod
+    description: 工作负载的内存工作集按 Pod 拆分的前 k 名；判断内存是集中在一个 Pod 上（泄漏）还是整体增长
+    args:
+      type: object
+      additionalProperties: false
+      properties:
+        k: { type: integer, minimum: 1, maximum: 20, description: 列出前几名 }
+        share: { type: number, minimum: 0.3, maximum: 0.95, description: 第一名占比超过它时判为集中 }
+    card:
+      id: memory-by-pod
+      title: { zh-CN: 内存用量按 Pod 拆分, en: Memory usage split by pod }
+      note:
+        zh-CN: 窗口末尾按 Pod 拆分的内存工作集前 params.k 名；第一名占比超过 params.share 时判为集中在一个 Pod 上
+        en: Memory working set split by pod at the end of the window; concentrated when the first exceeds params.share of the total
+      applies_to: { kinds: [Deployment, StatefulSet, DaemonSet] }
+      params: { k: 5, share: 0.6 }
+      refs:
+        - { name: top, signal: memory_by_pod, mode: instant }
+      judge:
+        let:
+          - { name: share, cel: 'top_share(top, 1)' }
+          - { name: peak, cel: last(top) }
+          - { name: leader, cel: 'label(top.filter(s, last(s) >= peak)[0], "pod")' }
+        abnormal_if:
+          - cel: count(top) > 1 && share > params.share
+            say:
+              {
+                zh-CN: '{leader} 占内存工作集的 {share, number, percent}',
+                en: '{leader} accounts for {share, number, percent} of the memory working set',
+              }
+      display:
+        value: share
+        unit: percent
+        table:
+          rows_from: top
+          sort_by: last(row)
+          columns:
+            - { header: { zh-CN: Pod, en: Pod }, cel: 'label(row, "pod")' }
+            - { header: { zh-CN: 工作集, en: Working set }, cel: last(row), unit: bytes }
+      egress: allow
+  - id: restarts-by-pod
+    signal: restarts_by_pod
+    description: 工作负载窗口内的容器重启按 Pod 拆分的前 k 名；判断重启是集中在一个 Pod 上还是普遍发生
+    args:
+      type: object
+      additionalProperties: false
+      properties:
+        k: { type: integer, minimum: 1, maximum: 20, description: 列出前几名 }
+        share: { type: number, minimum: 0.3, maximum: 0.95, description: 第一名占比超过它时判为集中 }
+    card:
+      id: restarts-by-pod
+      title: { zh-CN: 重启按 Pod 拆分, en: Restarts split by pod }
+      note:
+        zh-CN: 窗口内按 Pod 拆分的重启次数前 params.k 名；有重启且第一名占比超过 params.share 时判为集中在一个 Pod 上
+        en: Restarts in the window split by pod; concentrated when there are restarts and the first exceeds params.share of them
+      applies_to: { kinds: [Deployment, StatefulSet, DaemonSet] }
+      params: { k: 5, share: 0.6 }
+      refs:
+        - { name: top, signal: restarts_by_pod, mode: instant }
+      judge:
+        let:
+          - { name: total, cel: sum(top) }
+          - { name: share, cel: 'total > 0.0 ? top_share(top, 1) : 0.0' }
+          - { name: peak, cel: last(top) }
+          - { name: leader, cel: 'label(top.filter(s, last(s) >= peak)[0], "pod")' }
+        abnormal_if:
+          - cel: total > 0.0 && count(top) > 1 && share > params.share
+            say:
+              {
+                zh-CN: '{total, number} 次重启中 {leader} 占 {share, number, percent}',
+                en: '{leader} accounts for {share, number, percent} of {total, number} restarts',
+              }
+      display:
+        value: total
+        unit: count
+        table:
+          rows_from: top
+          sort_by: last(row)
+          columns:
+            - { header: { zh-CN: Pod, en: Pod }, cel: 'label(row, "pod")' }
+            - { header: { zh-CN: 重启, en: Restarts }, cel: last(row), unit: count }
+      egress: allow
+  - id: compare-restarts
+    signal: restarts_total
+    description: 对比本工作负载与同一命名空间中另一个工作负载（名字为 other）在窗口内的重启次数；判断问题是本工作负载特有还是命名空间里普遍发生
+    args:
+      type: object
+      additionalProperties: false
+      properties:
+        other:
+          { type: string, pattern: '^[a-z0-9]([-a-z0-9]*[a-z0-9])?$', description: 对比的工作负载名（同一命名空间） }
+        factor: { type: number, minimum: 1, maximum: 100, description: 本工作负载的重启超过对方的几倍时判为特有 }
+    card:
+      id: compare-restarts
+      title: { zh-CN: 与另一个工作负载对比重启, en: Restarts compared with another workload }
+      note:
+        zh-CN: 窗口内本工作负载与 params.other 的重启次数；本工作负载有重启且超过对方的 params.factor 倍时判为本工作负载特有
+        en: Restarts of this workload and params.other in the window; specific to this workload when it restarts more than params.factor times as often
+      applies_to: { kinds: [Deployment, StatefulSet, DaemonSet] }
+      params: { other: none, factor: 3 }
+      refs:
+        - { name: mine, signal: restarts_total, mode: instant }
+        - { name: theirs, signal: restarts_of_other, mode: instant }
+      judge:
+        let:
+          - { name: a, cel: sum(mine) }
+          - { name: b, cel: sum(theirs) }
+          - { name: other, cel: params.other }
+        abnormal_if:
+          - cel: a > 0.0 && a > double(params.factor) * b
+            say:
+              {
+                zh-CN: '本工作负载重启 {a, number} 次，{other} 重启 {b, number} 次',
+                en: 'This workload restarted {a, number} times and {other} {b, number} times',
+              }
+      display: { value: a, unit: count }
+      egress: allow

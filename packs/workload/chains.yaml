@@ -323,6 +323,75 @@ chains:
               say: { zh-CN: 副本数顶到 HPA 上限, en: Replicas reached the HPA maximum }
         display: { value: peak, unit: percent }
         egress: allow
+      # 以下三张卡区分"副本数顶到上限但没有饱和"（良性，上限只是没有余量）与"已经饱和"（需要扩容或排查负载）
+      - id: hpa-utilization
+        title: { zh-CN: HPA 指标相对目标值, en: HPA metrics against their targets }
+        note:
+          zh-CN: 各伸缩指标当前值占目标值的比例；顶到上限时仍超过目标的 params.over 倍，说明需要更多副本，负载已经饱和；不超过则上限只是没有余量
+          en: Current value of each scaling metric against its target; above params.over times the target at the ceiling means the load is saturated
+        applies_to: { kinds: [HorizontalPodAutoscaler] }
+        # HPA 自己有 10% 的容差，这里同样只在超过 10% 时判为饱和
+        params: { over: 1.1 }
+        refs:
+          - { name: ratio, signal: hpa_target_ratio, mode: range }
+        judge:
+          let:
+            - { name: peak, cel: max(ratio) }
+            - { name: worst, cel: 'label(ratio.filter(s, max(s) >= peak)[0], "metric_name")' }
+          abnormal_if:
+            - cel: peak > params.over
+              say:
+                {
+                  zh-CN: '指标 {worst} 最高达到目标值的 {peak, number, percent}',
+                  en: 'Metric {worst} reached {peak, number, percent} of its target',
+                }
+        display: { value: peak, unit: percent, threshold: params.over }
+        egress: allow
+      - id: hpa-throttling
+        title: { zh-CN: 伸缩对象的 CPU 限流, en: CPU throttling of the scaled workload }
+        note:
+          zh-CN: HPA 伸缩对象（Deployment 或 StatefulSet）的 Pod 被 CFS 限流的周期占比；超过 params.ratio 说明 CPU 已经不够用
+          en: Share of throttled CFS periods in the pods of the workload the HPA scales; above params.ratio CPU is short
+        applies_to: { kinds: [HorizontalPodAutoscaler] }
+        params: { ratio: 0.25 }
+        refs:
+          - { name: thr, signal: hpa_target_throttled_ratio, mode: range }
+        judge:
+          let:
+            - { name: peak, cel: max(thr) }
+            - { name: pod, cel: 'label(thr.filter(s, max(s) >= peak)[0], "pod")' }
+          abnormal_if:
+            - cel: peak > params.ratio
+              say:
+                {
+                  zh-CN: 'Pod {pod} 的限流比例峰值 {peak, number, percent}',
+                  en: 'Pod {pod} peaked at {peak, number, percent} throttling',
+                }
+        display: { value: peak, unit: percent, threshold: params.ratio }
+        egress: allow
+      - id: hpa-latency
+        title: { zh-CN: 伸缩对象的请求延迟对比基线, en: Request latency of the scaled workload against baseline }
+        note:
+          zh-CN: HPA 伸缩对象的 Pod 的 HTTP p95 延迟与一天前同一时刻的 p95；超过基线的 params.factor 倍且超过 params.min_seconds 秒说明请求已经变慢。应用没有 http_request_duration_seconds 时无法判定
+          en: HTTP p95 latency of the scaled pods against the same time a day earlier; above params.factor times the baseline and params.min_seconds requests are slowing down
+        applies_to: { kinds: [HorizontalPodAutoscaler] }
+        params: { factor: 1.5, min_seconds: 0.1 }
+        refs:
+          - { name: p95, signal: hpa_target_latency_p95, mode: range }
+          - { name: base, signal: hpa_target_latency_p95_baseline, mode: range }
+        judge:
+          let:
+            - { name: peak, cel: max(p95) }
+            - { name: baseline, cel: max(base) }
+          abnormal_if:
+            - cel: peak > params.min_seconds && peak > params.factor * baseline
+              say:
+                {
+                  zh-CN: 'p95 延迟峰值 {peak, number} 秒，一天前同一时刻 {baseline, number} 秒',
+                  en: 'p95 latency peaked at {peak, number} s against {baseline, number} s a day earlier',
+                }
+        display: { value: peak, unit: seconds }
+        egress: allow
       - id: quota
         title: { zh-CN: 命名空间配额, en: Namespace quota }
         applies_to: { kinds: [ResourceQuota, Namespace, Pod, Deployment, StatefulSet, DaemonSet] }

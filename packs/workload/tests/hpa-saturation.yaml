@@ -1,0 +1,145 @@
+# HPA 达到上限时是否饱和：hpa 命名空间的两个 HPA 都顶到上限。hot 的 CPU 利用率是目标的 2 倍、Pod 被限流 50%、
+# p95 延迟由一天前的约 0.1 秒升到约 0.5 秒（已经饱和）；calm 的利用率低于目标、限流 5%、延迟与一天前相同（良性）。
+# 每 30 分钟一个点，覆盖 26 小时，eval_time 25h 时基线取一天前的数据。
+api_version: srenautix.io/pack-test/v1
+interval: 30m
+input_series:
+  # ---------- HPA 与伸缩对象 ----------
+  - {
+      series: 'kube_horizontalpodautoscaler_info{namespace="hpa",horizontalpodautoscaler="hot",scaletargetref_kind="Deployment",scaletargetref_name="hot"}',
+      values: '1x52',
+    }
+  - {
+      series: 'kube_horizontalpodautoscaler_info{namespace="hpa",horizontalpodautoscaler="calm",scaletargetref_kind="Deployment",scaletargetref_name="calm"}',
+      values: '1x52',
+    }
+  - {
+      series: 'kube_horizontalpodautoscaler_status_target_metric{namespace="hpa",horizontalpodautoscaler="hot",metric_name="cpu",metric_target_type="utilization"}',
+      values: '140x52',
+    }
+  - {
+      series: 'kube_horizontalpodautoscaler_spec_target_metric{namespace="hpa",horizontalpodautoscaler="hot",metric_name="cpu",metric_target_type="utilization"}',
+      values: '70x52',
+    }
+  - {
+      series: 'kube_horizontalpodautoscaler_status_target_metric{namespace="hpa",horizontalpodautoscaler="calm",metric_name="cpu",metric_target_type="utilization"}',
+      values: '55x52',
+    }
+  - {
+      series: 'kube_horizontalpodautoscaler_spec_target_metric{namespace="hpa",horizontalpodautoscaler="calm",metric_name="cpu",metric_target_type="utilization"}',
+      values: '70x52',
+    }
+  - {
+      series: 'kube_replicaset_owner{namespace="hpa",replicaset="hot-7d9f8c6b5d",owner_kind="Deployment",owner_name="hot"}',
+      values: '1x52',
+    }
+  - {
+      series: 'kube_replicaset_owner{namespace="hpa",replicaset="calm-6c8d7f9b4c",owner_kind="Deployment",owner_name="calm"}',
+      values: '1x52',
+    }
+  - {
+      series: 'kube_pod_owner{namespace="hpa",pod="hot-7d9f8c6b5d-aaaaa",owner_kind="ReplicaSet",owner_name="hot-7d9f8c6b5d"}',
+      values: '1x52',
+    }
+  - {
+      series: 'kube_pod_owner{namespace="hpa",pod="calm-6c8d7f9b4c-bbbbb",owner_kind="ReplicaSet",owner_name="calm-6c8d7f9b4c"}',
+      values: '1x52',
+    }
+  # 不属于任何 HPA 的 Pod：限流 90%，不应计入
+  - {
+      series: 'kube_pod_owner{namespace="hpa",pod="other-5f6d7c8b9a-ccccc",owner_kind="ReplicaSet",owner_name="other-5f6d7c8b9a"}',
+      values: '1x52',
+    }
+  # ---------- CPU 限流 ----------
+  - {
+      series: 'container_cpu_cfs_periods_total{namespace="hpa",pod="hot-7d9f8c6b5d-aaaaa",container="app"}',
+      values: '0+600x52',
+    }
+  - {
+      series: 'container_cpu_cfs_throttled_periods_total{namespace="hpa",pod="hot-7d9f8c6b5d-aaaaa",container="app"}',
+      values: '0+300x52',
+    }
+  - {
+      series: 'container_cpu_cfs_periods_total{namespace="hpa",pod="calm-6c8d7f9b4c-bbbbb",container="app"}',
+      values: '0+600x52',
+    }
+  - {
+      series: 'container_cpu_cfs_throttled_periods_total{namespace="hpa",pod="calm-6c8d7f9b4c-bbbbb",container="app"}',
+      values: '0+30x52',
+    }
+  - {
+      series: 'container_cpu_cfs_periods_total{namespace="hpa",pod="other-5f6d7c8b9a-ccccc",container="app"}',
+      values: '0+600x52',
+    }
+  - {
+      series: 'container_cpu_cfs_throttled_periods_total{namespace="hpa",pod="other-5f6d7c8b9a-ccccc",container="app"}',
+      values: '0+540x52',
+    }
+  # ---------- 请求延迟：hot 第一天全部 ≤ 0.1 秒，之后全部在 0.1–0.5 秒；calm 一直 ≤ 0.1 秒 ----------
+  - {
+      series: 'http_request_duration_seconds_bucket{namespace="hpa",pod="hot-7d9f8c6b5d-aaaaa",le="0.1"}',
+      values: '0+100x48 4800x4',
+    }
+  - {
+      series: 'http_request_duration_seconds_bucket{namespace="hpa",pod="hot-7d9f8c6b5d-aaaaa",le="0.5"}',
+      values: '0+100x52',
+    }
+  - {
+      series: 'http_request_duration_seconds_bucket{namespace="hpa",pod="hot-7d9f8c6b5d-aaaaa",le="+Inf"}',
+      values: '0+100x52',
+    }
+  - {
+      series: 'http_request_duration_seconds_bucket{namespace="hpa",pod="calm-6c8d7f9b4c-bbbbb",le="0.1"}',
+      values: '0+100x52',
+    }
+  - {
+      series: 'http_request_duration_seconds_bucket{namespace="hpa",pod="calm-6c8d7f9b4c-bbbbb",le="0.5"}',
+      values: '0+100x52',
+    }
+  - {
+      series: 'http_request_duration_seconds_bucket{namespace="hpa",pod="calm-6c8d7f9b4c-bbbbb",le="+Inf"}',
+      values: '0+100x52',
+    }
+tests:
+  - {
+      name: hot 的利用率是目标的 2 倍,
+      eval_time: 25h,
+      card: capacity/hpa-utilization,
+      entity: { kind: HorizontalPodAutoscaler, namespace: hpa, name: hot },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: calm 顶到上限但利用率低于目标,
+      eval_time: 25h,
+      card: capacity/hpa-utilization,
+      entity: { kind: HorizontalPodAutoscaler, namespace: hpa, name: calm },
+      expect: { verdict: normal },
+    }
+  - {
+      name: hot 的 Pod 被限流 50%,
+      eval_time: 25h,
+      card: capacity/hpa-throttling,
+      entity: { kind: HorizontalPodAutoscaler, namespace: hpa, name: hot },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: calm 的 Pod 限流 5%，不计入不属于它的 Pod,
+      eval_time: 25h,
+      card: capacity/hpa-throttling,
+      entity: { kind: HorizontalPodAutoscaler, namespace: hpa, name: calm },
+      expect: { verdict: normal },
+    }
+  - {
+      name: hot 的 p95 延迟是一天前的约 5 倍,
+      eval_time: 25h,
+      card: capacity/hpa-latency,
+      entity: { kind: HorizontalPodAutoscaler, namespace: hpa, name: hot },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: calm 的延迟与一天前相同,
+      eval_time: 25h,
+      card: capacity/hpa-latency,
+      entity: { kind: HorizontalPodAutoscaler, namespace: hpa, name: calm },
+      expect: { verdict: normal },
+    }
