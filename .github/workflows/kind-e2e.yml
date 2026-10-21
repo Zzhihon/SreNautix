@@ -142,7 +142,7 @@ jobs:
           kubectl --context kind-srenautix -n srenautix logs deploy/srenautix-server --tail=2000 >"$RUNNER_TEMP/diag/server.log" 2>&1 || true
           # 自愈 PR 的决策（跳过与失败只记在库里）、研判与事件版本：经 CNPG 实例本地的 psql 读取，只读
           kubectl --context kind-srenautix -n srenautix exec srenautix-pg-1 -c postgres -- psql -d srenautix -X -A -F $'\t' -c "
-            SELECT 'attempt', created_at, run_id, incident_id, incident_version, outcome, code, category, key, reason FROM server.remediation_attempts ORDER BY created_at;
+            SELECT 'attempt', created_at, run_id, incident_id, incident_version, outcome, code, retries, category, key, reason FROM server.remediation_attempts ORDER BY created_at;
             SELECT 'run', started_at, finished_at, run_id, incident_id, incident_version, state, conclusion_level, disposition, root_component FROM server.research_runs ORDER BY started_at;
             SELECT 'incident', updated_at, incident_id, version, state, suppressed, body->'root'->>'component' FROM server.incidents ORDER BY updated_at;" \
             >"$RUNNER_TEMP/diag/remediation.tsv" 2>&1 || true
