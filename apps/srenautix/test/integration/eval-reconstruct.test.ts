@@ -324,9 +324,11 @@ describe('重放、重建阶段 A 与研判输入', () => {
     expect(rc.snapshot.source.kind).toBe('reconstructed');
     expect(rc.cards.total).toBeGreaterThan(0);
     expect(rc.snapshot.context.subgraph.nodes.map((n) => n.component)).toContain('Deployment:shop/api');
-    // 分析时刻第一次触发仍在继续：一条告警，主卡未声明，链级有卡
+    // 分析时刻第一次触发仍在继续：一条告警，链级有卡。主卡是 kps-conditions 的告警条件卡（ADR 0109），
+    // 夹具里没有它读取的 kube_deployment_status_condition，所以无法判定
     expect(rc.agreement).toHaveLength(1);
-    expect(rc.agreement[0]!.primary).toBe('undeclared');
+    expect(rc.agreement[0]!.primary_card).toBe('kps-conditions/kube-deployment-rollout-stuck/condition');
+    expect(rc.agreement[0]!.primary).toBe('undeterminable');
     expect(rc.agreement[0]!.chain).not.toBe('uncatalogued');
 
     // 查询模板：内置包没有模板，用带模板的 _example 副本；评估时刻不晚于 as_of，实体取拓扑中的 Deployment
