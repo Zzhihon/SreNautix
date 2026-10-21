@@ -18,15 +18,34 @@ export type ReasonKind =
   | 'evaluation_error'
   | 'all_clear';
 
+export type Scalar = number | string | boolean;
+
+/** 一条求值过的判定条件 */
+export interface ConditionOutcome {
+  kind: 'undeterminable' | 'abnormal';
+  cel: string;
+  outcome: 'hit' | 'miss' | 'unavailable';
+  /** 命中时为 say；没有命中时为 normal_say（卡片提供时），否则为 null */
+  say: string | null;
+}
+
 export interface CardOutcome {
   verdict: Verdict;
   display_state: DisplayState;
   reason: { kind: ReasonKind; text: string };
   value: string | null;
   threshold: number | null;
+  /** 对比基线（display.baseline）；没有或不可用时为 null */
+  baseline: number | null;
   table: { head: string[]; rows: string[][] } | null;
   /** unix 秒；卡片用 let anomaly_started_at 给出 */
   anomaly_started_at: number | null;
+  /** let 绑定的标量取值，按定义顺序最多 16 个；不可用时为 null */
+  observations: Record<string, Scalar | null>;
+  /** 生效的 params */
+  params: Record<string, Scalar>;
+  /** 求值过的判定条件 */
+  conditions: ConditionOutcome[];
 }
 
 export interface EntityBinding {

@@ -165,6 +165,17 @@ describe('16:24 的发布事故收敛到发布这一个根因', () => {
     expect(r!.summary).toContain(RELEASE_LABEL);
   });
 
+  it('变更带上版本标签的旧取值：16:24 的变更退回到 15:59 发布之前的版本（回退）', () => {
+    const release = changes.find((c) => c.time.startsWith('2026-10-20T15:59'))!;
+    const rollback = changes.find((c) => c.time.startsWith('2026-10-20T16:24'))!;
+    expect(release.revision).toBe('rel-9a8c9cd6');
+    expect(release.previous_revision).toBe('rel-fd8097cf');
+    expect(rollback.previous_revision).toBe(release.revision);
+    expect(rollback.revision).toBe(release.previous_revision);
+    // 没有版本标签变化的发布（只有新的 ReplicaSet）不写旧版本
+    expect(changes.filter((c) => c.revision === null).every((c) => c.previous_revision === undefined)).toBe(true);
+  });
+
   it('发布相关的告警（迁移等待、Init 过久、rollout 停滞、副本不可用、Argo 应用、PDB、发布流水线）不超过 2 个事件', () => {
     const release = (a: Alert) =>
       Date.parse(a.starts_at) >= Date.parse('2026-10-20T16:30:00Z') &&

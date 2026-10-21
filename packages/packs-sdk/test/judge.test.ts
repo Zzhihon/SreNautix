@@ -110,6 +110,66 @@ describe('judgeCard', () => {
     };
     expect(judgeCard(card, { refs, entity, window }).display_state).toBe('capability_missing');
   });
+
+  it('记录观测值、生效的 params 与每条条件的结果', () => {
+    const refs: Record<string, RefData> = {
+      mem: { kind: 'metrics', truncated: false, series: [series('a', [0.5, 0.6])] },
+      oom: { kind: 'metrics', truncated: false, series: [] },
+    };
+    const out = judgeCard(card, { refs, entity, window, params: { limit_ratio: 0.8 } });
+    expect(out.verdict).toBe('normal');
+    expect(out.observations).toEqual({ peak: 0.6, ooms: 0 });
+    expect(out.params).toEqual({ limit_ratio: 0.8 });
+    expect(out.conditions).toEqual([
+      { kind: 'abnormal', cel: 'ooms > 0', outcome: 'miss', say: null },
+      { kind: 'abnormal', cel: 'peak > params.limit_ratio', outcome: 'miss', say: null },
+    ]);
+  });
+
+  it('命中的条件写 say，没有命中的条件写 normal_say，基线取 display.baseline', () => {
+    const def: CardDefinition = {
+      ...memCard,
+      judge: {
+        ...memCard.judge,
+        abnormal_if: [
+          {
+            cel: 'peak > params.limit_ratio',
+            say: { 'zh-CN': '峰值 {peak, number, percent} 超过阈值' },
+            normal_say: { 'zh-CN': '峰值 {peak, number, percent}，未超过阈值' },
+          },
+        ],
+      },
+      display: { ...memCard.display, baseline: 'params.limit_ratio / 2.0', threshold: 'params.limit_ratio' },
+    };
+    const c = compileCard(base, def, { where: 'test/memory-normal-say' });
+    const refs: Record<string, RefData> = {
+      mem: { kind: 'metrics', truncated: false, series: [series('a', [0.5, 0.6])] },
+      oom: { kind: 'metrics', truncated: false, series: [] },
+    };
+    const normal = judgeCard(c, { refs, entity, window });
+    expect(normal.conditions).toEqual([
+      { kind: 'abnormal', cel: 'peak > params.limit_ratio', outcome: 'miss', say: '峰值 60%，未超过阈值' },
+    ]);
+    expect(normal.threshold).toBe(0.9);
+    expect(normal.baseline).toBe(0.45);
+    const high = judgeCard(c, {
+      refs: { ...refs, mem: { kind: 'metrics', truncated: false, series: [series('a', [0.95])] } },
+      entity,
+      window,
+    });
+    expect(high.conditions[0]).toMatchObject({ outcome: 'hit', say: '峰值 95% 超过阈值' });
+  });
+
+  it('依赖的引用没有数据的条件记为 unavailable', () => {
+    const refs: Record<string, RefData> = {
+      mem: { kind: 'error', message: '超时' },
+      oom: { kind: 'metrics', truncated: false, series: [] },
+    };
+    const out = judgeCard(card, { refs, entity, window });
+    expect(out.verdict).toBe('undeterminable');
+    expect(out.observations).toEqual({ peak: null, ooms: 0 });
+    expect(out.conditions.map((x) => x.outcome)).toEqual(['miss', 'unavailable']);
+  });
 });
 
 describe('series library', () => {

@@ -43,8 +43,32 @@
     },
     "validation_notes": {
       "type": "array",
-      "description": "代码校验的修改记录：删除的无效证据引用、删除的目录外提议、降级的结论等",
+      "description": "代码校验的修改记录：删除的无效证据引用、删除的目录外提议、降级的结论、删除的无法核实的数值等",
       "items": { "type": "string" }
+    },
+    "stop_reason": {
+      "type": ["string", "null"],
+      "description": "检验循环的停止原因：leader_supported 第一的假设得到支持且竞争假设都已推翻或检验后无法判定；no_change 连续两步没有变化或没有可执行的检查；step_limit、deadline、budget 达到步数、期限或预算上限；model_unavailable 模型不可用；指纹不变直接沿用上一次研判时为 no_change",
+      "enum": ["leader_supported", "no_change", "step_limit", "deadline", "budget", "model_unavailable", null]
+    },
+    "check_cards": {
+      "type": "array",
+      "description": "区分性检查产生的证据卡（引用编号接在阶段 A 的卡之后），序列为空数组；完整序列在 worker 的运行明细中",
+      "maxItems": 12,
+      "items": { "$ref": "evidence-result.schema.json" }
+    },
+    "evidence_index": {
+      "type": "array",
+      "description": "研判运行内的证据引用到定义与实体的映射（同研判清单的 evidence_map）：卡为 <card_id>@<实体键>，告警为 alert_id，变更为 change_id",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["ref", "target"],
+        "properties": {
+          "ref": { "$ref": "common.schema.json#/$defs/EvidenceRef" },
+          "target": { "type": "string" }
+        }
+      }
     }
   },
   "$defs": {
@@ -60,7 +84,82 @@
           "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/ComponentKey" }]
         },
         "undetermined_reason": { "type": ["string", "null"], "maxLength": 400 },
-        "consistency": { "$ref": "#/$defs/ConsistencyChecks" }
+        "consistency": { "$ref": "#/$defs/ConsistencyChecks" },
+        "consistency_detail": { "$ref": "#/$defs/ConsistencyDetail" }
+      }
+    },
+    "ConsistencyDetail": {
+      "title": "ConsistencyDetail",
+      "description": "四个条件各自的依据，由结论阶梯的代码给出：支持卡、支持的成员告警、最早的异常起点、症状起点与容差、相反的正常卡、检验过与同样得到支持的竞争假设、结论由谁选中",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "support_refs",
+        "model_judged_refs",
+        "support_alerts",
+        "onset",
+        "symptom_onset_at",
+        "tolerance_seconds",
+        "contrary_refs",
+        "tested_competitors",
+        "supported_competitors",
+        "chosen_by"
+      ],
+      "properties": {
+        "support_refs": {
+          "type": "array",
+          "description": "由领域包规则判定、实体在假设范围内的异常卡",
+          "items": { "$ref": "common.schema.json#/$defs/EvidenceRef" }
+        },
+        "support_alerts": {
+          "type": "array",
+          "description": "计入支持的成员告警（ADR 0122）；只有它们支持时档位最高为 likely",
+          "items": { "$ref": "common.schema.json#/$defs/EvidenceRef" }
+        },
+        "supported_competitors": {
+          "type": "array",
+          "description": "同样处于支持状态的竞争假设（ADR 0124）；不为空时第 4 个条件不满足",
+          "items": { "type": "string", "pattern": "^h[1-9]$" }
+        },
+        "chosen_by": {
+          "type": "string",
+          "description": "model：模型在 conclude 中选中；ledger：模型弃权，由代码按账本选中（ADR 0120，档位最高为 likely）",
+          "enum": ["model", "ledger"]
+        },
+        "model_judged_refs": {
+          "type": "array",
+          "description": "由小模型判定的支持卡（只能支持 likely）",
+          "items": { "$ref": "common.schema.json#/$defs/EvidenceRef" }
+        },
+        "onset": {
+          "description": "支持卡中最早的异常起点；没有可确定起点的支持卡时为 null",
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["ref", "at"],
+              "properties": {
+                "ref": { "$ref": "common.schema.json#/$defs/EvidenceRef" },
+                "at": { "$ref": "common.schema.json#/$defs/Timestamp" }
+              }
+            }
+          ]
+        },
+        "symptom_onset_at": {
+          "description": "症状起点：最早触发的 symptom 角色成员告警，没有时为事件首次触发时间",
+          "$ref": "common.schema.json#/$defs/Timestamp"
+        },
+        "tolerance_seconds": { "type": "integer", "minimum": 0 },
+        "contrary_refs": {
+          "type": "array",
+          "items": { "$ref": "common.schema.json#/$defs/EvidenceRef" }
+        },
+        "tested_competitors": {
+          "type": "array",
+          "description": "执行过检查或已被推翻的竞争假设",
+          "items": { "type": "string", "pattern": "^h[1-9]$" }
+        }
       }
     },
     "ConsistencyChecks": {
@@ -100,6 +199,16 @@
           "type": "string",
           "description": "假设账本状态：pending 待检验；supported 支持；refuted 推翻；inconclusive 检验后仍无法判定",
           "enum": ["pending", "supported", "refuted", "inconclusive"]
+        },
+        "status_reasons": {
+          "type": "array",
+          "description": "账本给出状态的依据，按时间顺序，例如“支持卡：card:31、card:38”“相反的正常卡：card:25”“人工反馈确认根因”",
+          "items": { "type": "string", "maxLength": 500 }
+        },
+        "checks_run": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "针对这个假设执行完成的区分性检查数（失败的检查不计）"
         }
       }
     },
@@ -122,6 +231,10 @@
         "outcome": {
           "type": "string",
           "enum": ["not_run", "supports", "refutes", "inconclusive", "failed"]
+        },
+        "error": {
+          "type": ["string", "null"],
+          "description": "outcome 为 failed 时的原因（参数被拒绝、数据源报错、结果无法判定成卡）"
         }
       }
     },

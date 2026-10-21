@@ -1651,6 +1651,8 @@ export type components = {
        */
       kind: 'rollout' | 'config' | 'cordon' | 'scale' | 'gitops_sync' | 'ci_deploy' | 'operator' | 'other';
       link: string | null;
+      /** @description 变更之前的版本（版本标签的旧取值）；与更早一次变更的 revision 相同时，这次变更是回退。来源不知道旧版本时省略或为 null */
+      previous_revision?: string | null;
       /** @description 来源中的引用，例如 Application 名、PR 号、流水线运行 id */
       refs: string[];
       revision: string | null;
@@ -1710,6 +1712,7 @@ export type components = {
     /** ResearchConclusion */
     Conclusion: {
       consistency: components['schemas']['ConsistencyChecks'];
+      consistency_detail?: components['schemas']['ConsistencyDetail'];
       hypothesis_id: string | null;
       level: components['schemas']['ConclusionLevel'];
       root_component: null | components['schemas']['ComponentKey'];
@@ -1721,6 +1724,20 @@ export type components = {
      * @enum {string}
      */
     ConclusionLevel: 'evidence_consistent' | 'likely' | 'inconclusive' | 'undetermined';
+    /** EvidenceCondition */
+    Condition: {
+      /** @description 条件的 CEL 表达式 */
+      cel: string;
+      /** @enum {string} */
+      kind: 'undeterminable' | 'abnormal';
+      /**
+       * @description hit：命中；miss：求值为 false；unavailable：依赖的引用或绑定没有数据，没有求值
+       * @enum {string}
+       */
+      outcome: 'hit' | 'miss' | 'unavailable';
+      /** @description 命中时为条件的 say；没有命中时为条件的 normal_say（卡片提供时），否则为 null */
+      say: string | null;
+    };
     /**
      * Condition
      * @description 带类型的状态条件（DESIGN §12.4），驱动每个页面顶部的状态条。每个判定都附带影响它的条件
@@ -1779,6 +1796,36 @@ export type components = {
       entity_in_scope: boolean;
       no_contrary_normal: boolean;
       onset_precedes_symptom: boolean;
+    };
+    /**
+     * ConsistencyDetail
+     * @description 四个条件各自的依据，由结论阶梯的代码给出：支持卡、支持的成员告警、最早的异常起点、症状起点与容差、相反的正常卡、检验过与同样得到支持的竞争假设、结论由谁选中
+     */
+    ConsistencyDetail: {
+      /**
+       * @description model：模型在 conclude 中选中；ledger：模型弃权，由代码按账本选中（ADR 0120，档位最高为 likely）
+       * @enum {string}
+       */
+      chosen_by: 'model' | 'ledger';
+      contrary_refs: components['schemas']['EvidenceRef'][];
+      /** @description 由小模型判定的支持卡（只能支持 likely） */
+      model_judged_refs: components['schemas']['EvidenceRef'][];
+      /** @description 支持卡中最早的异常起点；没有可确定起点的支持卡时为 null */
+      onset: null | {
+        at: components['schemas']['Timestamp'];
+        ref: components['schemas']['EvidenceRef'];
+      };
+      /** @description 计入支持的成员告警（ADR 0122）；只有它们支持时档位最高为 likely */
+      support_alerts: components['schemas']['EvidenceRef'][];
+      /** @description 由领域包规则判定、实体在假设范围内的异常卡 */
+      support_refs: components['schemas']['EvidenceRef'][];
+      /** @description 同样处于支持状态的竞争假设（ADR 0124）；不为空时第 4 个条件不满足 */
+      supported_competitors: string[];
+      /** @description 症状起点：最早触发的 symptom 角色成员告警，没有时为事件首次触发时间 */
+      symptom_onset_at: components['schemas']['Timestamp'];
+      /** @description 执行过检查或已被推翻的竞争假设 */
+      tested_competitors: string[];
+      tolerance_seconds: number;
     };
     /**
      * Disposition
@@ -2186,8 +2233,12 @@ export type components = {
     'evidence-result.schema': {
       /** @description 异常的起始时间，用于 evidence_consistent 判定中的时间条件；无法确定时为 null */
       anomaly_started_at?: null | components['schemas']['Timestamp'];
+      /** @description 对比基线（卡片 display.baseline 的取值）；卡片没有基线或基线不可用时为 null */
+      baseline?: number | null;
       /** @description <pack>/<chain>/<card>；区分性检查产生的卡为 check/<hypothesis id>/<n> */
       card_id: string;
+      /** @description 求值过的判定条件，按求值顺序：undeterminable_if 全部条件，abnormal_if 到第一条命中为止 */
+      conditions?: components['schemas']['Condition'][];
       /**
        * @description verdict 为 undeterminable 且原因是所需能力不可用时为 capability_missing，其余与 verdict 相同
        * @enum {string}
@@ -2196,6 +2247,16 @@ export type components = {
       egress: components['schemas']['Egress'];
       entity: null | components['schemas']['EntityRef'];
       evaluated_at: components['schemas']['Timestamp'];
+      /** @description 卡片标为影响类（impact: true），异常时它的值进入通知的影响范围 */
+      impact?: boolean;
+      /** @description 判定时 let 绑定的标量取值（数值、字符串、布尔），按定义顺序最多 16 个；绑定不可用时为 null。通知与控制台用它展示正常卡的实测值 */
+      observations?: {
+        [key: string]: number | string | boolean | null;
+      };
+      /** @description 本次判定生效的 params（卡片默认值与覆盖值合并后），即判定条件里的阈值 */
+      params?: {
+        [key: string]: number | string | boolean;
+      };
       queries: components['schemas']['QueryRecord'][];
       reason: components['schemas']['Reason'];
       ref: components['schemas']['EvidenceRef'];
@@ -2214,6 +2275,11 @@ export type components = {
       threshold: number | null;
       /** @description 取自卡片定义，结果脱离定义也能展示 */
       title: components['schemas']['LocalizedText'];
+      /**
+       * @description 主值、阈值与基线的单位（卡片 display.unit）；没有时为 none
+       * @enum {string}
+       */
+      unit?: 'none' | 'percent' | 'ratio' | 'bytes' | 'seconds' | 'count' | 'per_second';
       /** @description 主值的展示文本 */
       value: string | null;
       verdict: components['schemas']['Verdict'];
@@ -2236,6 +2302,20 @@ export type components = {
             | 'all_clear'
             | 'model_judged';
           text: string;
+        };
+        /** EvidenceCondition */
+        Condition: {
+          /** @description 条件的 CEL 表达式 */
+          cel: string;
+          /** @enum {string} */
+          kind: 'undeterminable' | 'abnormal';
+          /**
+           * @description hit：命中；miss：求值为 false；unavailable：依赖的引用或绑定没有数据，没有求值
+           * @enum {string}
+           */
+          outcome: 'hit' | 'miss' | 'unavailable';
+          /** @description 命中时为条件的 say；没有命中时为条件的 normal_say（卡片提供时），否则为 null */
+          say: string | null;
         };
         /** EvidenceQueryRecord */
         QueryRecord: {
@@ -2465,6 +2545,8 @@ export type components = {
     };
     /** Hypothesis */
     Hypothesis: {
+      /** @description 针对这个假设执行完成的区分性检查数（失败的检查不计） */
+      checks_run?: number;
       id: string;
       mechanism: string;
       parent_id: string | null;
@@ -2475,6 +2557,8 @@ export type components = {
        * @enum {string}
        */
       status: 'pending' | 'supported' | 'refuted' | 'inconclusive';
+      /** @description 账本给出状态的依据，按时间顺序，例如“支持卡：card:31、card:38”“相反的正常卡：card:25”“人工反馈确认根因” */
+      status_reasons?: string[];
       supporting: components['schemas']['EvidenceRef'][];
     };
     /**
@@ -2861,6 +2945,8 @@ export type components = {
       args: {
         [key: string]: unknown;
       };
+      /** @description outcome 为 failed 时的原因（参数被拒绝、数据源报错、结果无法判定成卡） */
+      error?: string | null;
       hypothesis_id: string;
       /** @enum {string} */
       outcome: 'not_run' | 'supports' | 'refutes' | 'inconclusive' | 'failed';
@@ -3327,24 +3413,68 @@ export type components = {
      * @description 一次研判经代码校验后的输出（DESIGN §7.2、§7.3），由 worker 写入 research_runs 并随 research.concluded 发布。模型直接输出的部分见 contract/model/；本结构加入假设账本状态、区分性检查结果、代码判定的结论阶梯和校验记录
      */
     'research-output.schema': {
+      /** @description 区分性检查产生的证据卡（引用编号接在阶段 A 的卡之后），序列为空数组；完整序列在 worker 的运行明细中 */
+      check_cards?: components['schemas']['evidence-result.schema'][];
       conclusion: components['schemas']['Conclusion'];
       disposition: components['schemas']['Disposition'];
+      /** @description 研判运行内的证据引用到定义与实体的映射（同研判清单的 evidence_map）：卡为 <card_id>@<实体键>，告警为 alert_id，变更为 change_id */
+      evidence_index?: {
+        ref: components['schemas']['EvidenceRef'];
+        target: string;
+      }[];
       hypotheses: components['schemas']['Hypothesis'][];
       next_checks: components['schemas']['NextCheck'][];
       proposals: components['schemas']['ProposalDraft'][];
       recommendations: components['schemas']['Recommendation'][];
       situation: string;
+      /**
+       * @description 检验循环的停止原因：leader_supported 第一的假设得到支持且竞争假设都已推翻或检验后无法判定；no_change 连续两步没有变化或没有可执行的检查；step_limit、deadline、budget 达到步数、期限或预算上限；model_unavailable 模型不可用；指纹不变直接沿用上一次研判时为 no_change
+       * @enum {string|null}
+       */
+      stop_reason?:
+        'leader_supported' | 'no_change' | 'step_limit' | 'deadline' | 'budget' | 'model_unavailable' | null;
       summary: string;
-      /** @description 代码校验的修改记录：删除的无效证据引用、删除的目录外提议、降级的结论等 */
+      /** @description 代码校验的修改记录：删除的无效证据引用、删除的目录外提议、降级的结论、删除的无法核实的数值等 */
       validation_notes: string[];
       $defs: {
         /** ResearchConclusion */
         Conclusion: {
           consistency: components['schemas']['ConsistencyChecks'];
+          consistency_detail?: components['schemas']['ConsistencyDetail'];
           hypothesis_id: string | null;
           level: components['schemas']['ConclusionLevel'];
           root_component: null | components['schemas']['ComponentKey'];
           undetermined_reason: string | null;
+        };
+        /**
+         * ConsistencyDetail
+         * @description 四个条件各自的依据，由结论阶梯的代码给出：支持卡、支持的成员告警、最早的异常起点、症状起点与容差、相反的正常卡、检验过与同样得到支持的竞争假设、结论由谁选中
+         */
+        ConsistencyDetail: {
+          /**
+           * @description model：模型在 conclude 中选中；ledger：模型弃权，由代码按账本选中（ADR 0120，档位最高为 likely）
+           * @enum {string}
+           */
+          chosen_by: 'model' | 'ledger';
+          contrary_refs: components['schemas']['EvidenceRef'][];
+          /** @description 由小模型判定的支持卡（只能支持 likely） */
+          model_judged_refs: components['schemas']['EvidenceRef'][];
+          /** @description 支持卡中最早的异常起点；没有可确定起点的支持卡时为 null */
+          onset: null | {
+            at: components['schemas']['Timestamp'];
+            ref: components['schemas']['EvidenceRef'];
+          };
+          /** @description 计入支持的成员告警（ADR 0122）；只有它们支持时档位最高为 likely */
+          support_alerts: components['schemas']['EvidenceRef'][];
+          /** @description 由领域包规则判定、实体在假设范围内的异常卡 */
+          support_refs: components['schemas']['EvidenceRef'][];
+          /** @description 同样处于支持状态的竞争假设（ADR 0124）；不为空时第 4 个条件不满足 */
+          supported_competitors: string[];
+          /** @description 症状起点：最早触发的 symptom 角色成员告警，没有时为事件首次触发时间 */
+          symptom_onset_at: components['schemas']['Timestamp'];
+          /** @description 执行过检查或已被推翻的竞争假设 */
+          tested_competitors: string[];
+          tolerance_seconds: number;
         };
         /**
          * ConsistencyChecks
@@ -3358,6 +3488,8 @@ export type components = {
         };
         /** Hypothesis */
         Hypothesis: {
+          /** @description 针对这个假设执行完成的区分性检查数（失败的检查不计） */
+          checks_run?: number;
           id: string;
           mechanism: string;
           parent_id: string | null;
@@ -3368,6 +3500,8 @@ export type components = {
            * @enum {string}
            */
           status: 'pending' | 'supported' | 'refuted' | 'inconclusive';
+          /** @description 账本给出状态的依据，按时间顺序，例如“支持卡：card:31、card:38”“相反的正常卡：card:25”“人工反馈确认根因” */
+          status_reasons?: string[];
           supporting: components['schemas']['EvidenceRef'][];
         };
         /** NextCheck */
@@ -3375,6 +3509,8 @@ export type components = {
           args: {
             [key: string]: unknown;
           };
+          /** @description outcome 为 failed 时的原因（参数被拒绝、数据源报错、结果无法判定成卡） */
+          error?: string | null;
           hypothesis_id: string;
           /** @enum {string} */
           outcome: 'not_run' | 'supports' | 'refutes' | 'inconclusive' | 'failed';

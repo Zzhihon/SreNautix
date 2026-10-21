@@ -69,6 +69,10 @@
           "items": { "type": "string" }
         },
         "revision": { "type": ["string", "null"] },
+        "previous_revision": {
+          "type": ["string", "null"],
+          "description": "变更之前的版本（版本标签的旧取值）；与更早一次变更的 revision 相同时，这次变更是回退。来源不知道旧版本时省略或为 null"
+        },
         "actor": { "type": ["string", "null"] },
         "time": { "$ref": "../../../schemas/common.schema.json#/$defs/Timestamp" },
         "link": { "type": ["string", "null"] },

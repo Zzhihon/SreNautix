@@ -1,5 +1,5 @@
 // 本文件由 packages/contract/scripts/gen.ts 从 contract/ 生成，不要手工修改。
-export const CONTRACT_VERSION = '2.22.0';
+export const CONTRACT_VERSION = '2.23.0';
 
 export const SCHEMAS: Record<string, Record<string, unknown>> = {
   'https://srenautix.io/contract/gateway/v1/action-catalog.schema.json': {
@@ -877,6 +877,11 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
             items: { type: 'string' },
           },
           revision: { type: ['string', 'null'] },
+          previous_revision: {
+            type: ['string', 'null'],
+            description:
+              '变更之前的版本（版本标签的旧取值）；与更早一次变更的 revision 相同时，这次变更是回退。来源不知道旧版本时省略或为 null',
+          },
           actor: { type: ['string', 'null'] },
           time: { $ref: '../../../schemas/common.schema.json#/$defs/Timestamp' },
           link: { type: ['string', 'null'] },
@@ -1263,7 +1268,8 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
     $defs: {
       Message: {
         title: 'NotifyMessage',
-        description: '渠道无关的消息，渠道适配器负责转义和渲染。四段：现状与背景、问题根源、解决方案、相关证据',
+        description:
+          '渠道无关的消息，渠道适配器负责转义和渲染。五段依次为现状、关键问题、拓扑联系、解决方案、证据链；带 runs 的块是富文本，渠道按自己的格式渲染（Telegram HTML、飞书卡片 markdown、GitHub Markdown），没有 runs 时按 text 渲染',
         type: 'object',
         additionalProperties: false,
         required: ['incident_id', 'incident_version', 'prefix', 'severity', 'title', 'sections', 'buttons', 'banner'],
@@ -1273,6 +1279,11 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
           prefix: { type: 'string', description: '部署配置的消息前缀，例如影子部署的标记' },
           severity: { $ref: '../../../schemas/common.schema.json#/$defs/Severity' },
           title: { type: 'string', maxLength: 200 },
+          headline: {
+            type: 'array',
+            description: '一句话现状（严重度、根因组件、症状、状态），渠道放在最上面并加粗',
+            items: { $ref: '#/$defs/Run' },
+          },
           sections: { type: 'array', items: { $ref: '#/$defs/Section' } },
           buttons: { type: 'array', items: { $ref: '#/$defs/Button' } },
           banner: { type: ['string', 'null'], description: '降级横幅，例如状态库降级、模型研判中、模型输出无效' },
@@ -1284,22 +1295,65 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
         additionalProperties: false,
         required: ['kind', 'blocks'],
         properties: {
-          kind: { type: 'string', enum: ['situation', 'root_cause', 'remedy', 'evidence'] },
+          kind: {
+            type: 'string',
+            description:
+              'situation 现状；key_issue 关键问题（结论、结论档位的依据、假设）；topology 拓扑联系；remedy 解决方案；evidence 证据链；root_cause 是旧的四段结构中的问题根源',
+            enum: ['situation', 'key_issue', 'topology', 'remedy', 'evidence', 'root_cause'],
+          },
+          title: { type: 'string', description: '段标题；没有时渠道按 kind 取固定文案' },
+          folded: { type: 'boolean', description: '聊天渠道折叠显示（Telegram 可展开引用块、飞书折叠面板）' },
+          priority: { type: 'integer', minimum: 0, description: '超长时的省略顺序：数字越小越先省略；0 不省略' },
+          omitted: { type: 'string', description: '整段被省略时显示的一行' },
           blocks: { type: 'array', items: { $ref: '#/$defs/Block' } },
         },
       },
       Block: {
         title: 'NotifyBlock',
         description:
-          'text 是 SreNautix 渲染的模板文本；quote 是引用的不可信原文，source 注明来源；model_generated=true 的块标注模型生成',
+          'text 是 SreNautix 渲染的模板文本（runs 的纯文本形式）；quote 是引用的不可信原文，source 注明来源；model_generated=true 的块标注模型生成',
         type: 'object',
         additionalProperties: false,
         required: ['type', 'text', 'source', 'model_generated'],
         properties: {
-          type: { type: 'string', enum: ['text', 'quote', 'list_item'] },
+          type: { type: 'string', enum: ['text', 'quote', 'list_item', 'heading', 'table'] },
           text: { type: 'string' },
           source: { type: ['string', 'null'] },
           model_generated: { type: 'boolean' },
+          runs: { type: 'array', description: '富文本：按顺序拼接的文本片段', items: { $ref: '#/$defs/Run' } },
+          scope: {
+            type: 'string',
+            description: 'all：所有渠道；summary：只在聊天渠道（摘要）；full：只在完整报告（issue）',
+            enum: ['all', 'summary', 'full'],
+            default: 'all',
+          },
+          indent: { type: 'integer', minimum: 0, maximum: 3, default: 0 },
+          table: {
+            description: 'type 为 table 时的表格：表头与每行每格的富文本',
+            type: 'object',
+            additionalProperties: false,
+            required: ['head', 'rows'],
+            properties: {
+              head: { type: 'array', items: { type: 'string' } },
+              rows: {
+                type: 'array',
+                items: { type: 'array', items: { type: 'array', items: { $ref: '#/$defs/Run' } } },
+              },
+            },
+          },
+        },
+      },
+      Run: {
+        title: 'NotifyRun',
+        description:
+          '富文本片段。text 是原文，渠道负责转义；code 用于数值与对象名；italic 用于模型生成的文字；href 是链接（只允许 http 与 https）',
+        type: 'object',
+        additionalProperties: false,
+        required: ['text', 'style', 'href'],
+        properties: {
+          text: { type: 'string' },
+          style: { type: 'string', enum: ['plain', 'bold', 'code', 'italic'] },
+          href: { type: ['string', 'null'] },
         },
       },
       Button: {
@@ -1666,6 +1720,10 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
     properties: {
       id: { type: 'string', description: '包内唯一', pattern: '^[a-z0-9][a-z0-9_.-]*$' },
       alertname: { type: 'string', minLength: 1 },
+      title: {
+        description: '告警的可读标题（症状短语），例如“worker 没有可用副本”；通知的标题与问题陈述用它代替告警名',
+        $ref: 'evidence-card.schema.json#/$defs/LocalizedText',
+      },
       match_labels: { description: '变体的标签等值条件，全部满足才命中', $ref: 'common.schema.json#/$defs/Labels' },
       expr: { type: 'string', description: '上游规则的表达式，用于按表达式复核角色与 CI 覆盖检查' },
       role: { $ref: 'common.schema.json#/$defs/AlertRole' },
@@ -2938,6 +2996,11 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
         default: false,
         description: '沉默根因探测卡：症状存在但没有指向原因的告警时，对上游组件执行，结果异常的组件加入根因候选',
       },
+      impact: {
+        type: 'boolean',
+        default: false,
+        description: '影响类卡片：衡量用户可见的影响（错误率、可用性、业务量）。异常时它的标题与值写进通知的影响范围',
+      },
       requires: {
         type: 'array',
         description:
@@ -3044,6 +3107,11 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
         properties: {
           cel: { type: 'string', minLength: 1 },
           say: { description: '命中时的理由，ICU MessageFormat，可引用 CEL 变量', $ref: '#/$defs/LocalizedText' },
+          normal_say: {
+            description:
+              '求值为 false 时的说明（例如“连接池峰值 {poolPeak, number, percent}，未超过 95%”），ICU MessageFormat，可引用的参数与 say 相同',
+            $ref: '#/$defs/LocalizedText',
+          },
         },
       },
       Display: {
@@ -3054,6 +3122,10 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
           value: { type: 'string', description: '主值的 CEL 表达式' },
           unit: { type: 'string', enum: ['none', 'percent', 'ratio', 'bytes', 'seconds', 'count', 'per_second'] },
           threshold: { type: 'string', description: '图上阈值线的 CEL 表达式' },
+          baseline: {
+            type: 'string',
+            description: '对比基线的 CEL 表达式（例如前一天的中位数），结果写入 EvidenceResult.baseline',
+          },
           table: { $ref: '#/$defs/TableTemplate' },
         },
       },
@@ -3171,6 +3243,11 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
       },
       reason: { $ref: '#/$defs/Reason' },
       value: { type: ['string', 'null'], description: '主值的展示文本' },
+      unit: {
+        type: 'string',
+        description: '主值、阈值与基线的单位（卡片 display.unit）；没有时为 none',
+        enum: ['none', 'percent', 'ratio', 'bytes', 'seconds', 'count', 'per_second'],
+      },
       table: {
         oneOf: [
           { type: 'null' },
@@ -3192,6 +3269,28 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
         oneOf: [{ type: 'null' }, { $ref: 'common.schema.json#/$defs/Timestamp' }],
       },
       evaluated_at: { $ref: 'common.schema.json#/$defs/Timestamp' },
+      observations: {
+        type: 'object',
+        description:
+          '判定时 let 绑定的标量取值（数值、字符串、布尔），按定义顺序最多 16 个；绑定不可用时为 null。通知与控制台用它展示正常卡的实测值',
+        maxProperties: 16,
+        additionalProperties: { type: ['number', 'string', 'boolean', 'null'] },
+      },
+      params: {
+        type: 'object',
+        description: '本次判定生效的 params（卡片默认值与覆盖值合并后），即判定条件里的阈值',
+        additionalProperties: { type: ['number', 'string', 'boolean'] },
+      },
+      conditions: {
+        type: 'array',
+        description: '求值过的判定条件，按求值顺序：undeterminable_if 全部条件，abnormal_if 到第一条命中为止',
+        items: { $ref: '#/$defs/Condition' },
+      },
+      baseline: {
+        type: ['number', 'null'],
+        description: '对比基线（卡片 display.baseline 的取值）；卡片没有基线或基线不可用时为 null',
+      },
+      impact: { type: 'boolean', description: '卡片标为影响类（impact: true），异常时它的值进入通知的影响范围' },
     },
     $defs: {
       Reason: {
@@ -3217,6 +3316,25 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
             ],
           },
           text: { type: 'string', maxLength: 1000 },
+        },
+      },
+      Condition: {
+        title: 'EvidenceCondition',
+        type: 'object',
+        additionalProperties: false,
+        required: ['kind', 'cel', 'outcome', 'say'],
+        properties: {
+          kind: { type: 'string', enum: ['undeterminable', 'abnormal'] },
+          cel: { type: 'string', description: '条件的 CEL 表达式' },
+          outcome: {
+            type: 'string',
+            description: 'hit：命中；miss：求值为 false；unavailable：依赖的引用或绑定没有数据，没有求值',
+            enum: ['hit', 'miss', 'unavailable'],
+          },
+          say: {
+            type: ['string', 'null'],
+            description: '命中时为条件的 say；没有命中时为条件的 normal_say（卡片提供时），否则为 null',
+          },
         },
       },
       QueryRecord: {
@@ -4685,8 +4803,32 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
       proposals: { type: 'array', maxItems: 3, items: { $ref: '#/$defs/ProposalDraft' } },
       validation_notes: {
         type: 'array',
-        description: '代码校验的修改记录：删除的无效证据引用、删除的目录外提议、降级的结论等',
+        description: '代码校验的修改记录：删除的无效证据引用、删除的目录外提议、降级的结论、删除的无法核实的数值等',
         items: { type: 'string' },
+      },
+      stop_reason: {
+        type: ['string', 'null'],
+        description:
+          '检验循环的停止原因：leader_supported 第一的假设得到支持且竞争假设都已推翻或检验后无法判定；no_change 连续两步没有变化或没有可执行的检查；step_limit、deadline、budget 达到步数、期限或预算上限；model_unavailable 模型不可用；指纹不变直接沿用上一次研判时为 no_change',
+        enum: ['leader_supported', 'no_change', 'step_limit', 'deadline', 'budget', 'model_unavailable', null],
+      },
+      check_cards: {
+        type: 'array',
+        description:
+          '区分性检查产生的证据卡（引用编号接在阶段 A 的卡之后），序列为空数组；完整序列在 worker 的运行明细中',
+        maxItems: 12,
+        items: { $ref: 'evidence-result.schema.json' },
+      },
+      evidence_index: {
+        type: 'array',
+        description:
+          '研判运行内的证据引用到定义与实体的映射（同研判清单的 evidence_map）：卡为 <card_id>@<实体键>，告警为 alert_id，变更为 change_id',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['ref', 'target'],
+          properties: { ref: { $ref: 'common.schema.json#/$defs/EvidenceRef' }, target: { type: 'string' } },
+        },
       },
     },
     $defs: {
@@ -4701,6 +4843,80 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
           root_component: { oneOf: [{ type: 'null' }, { $ref: 'common.schema.json#/$defs/ComponentKey' }] },
           undetermined_reason: { type: ['string', 'null'], maxLength: 400 },
           consistency: { $ref: '#/$defs/ConsistencyChecks' },
+          consistency_detail: { $ref: '#/$defs/ConsistencyDetail' },
+        },
+      },
+      ConsistencyDetail: {
+        title: 'ConsistencyDetail',
+        description:
+          '四个条件各自的依据，由结论阶梯的代码给出：支持卡、支持的成员告警、最早的异常起点、症状起点与容差、相反的正常卡、检验过与同样得到支持的竞争假设、结论由谁选中',
+        type: 'object',
+        additionalProperties: false,
+        required: [
+          'support_refs',
+          'model_judged_refs',
+          'support_alerts',
+          'onset',
+          'symptom_onset_at',
+          'tolerance_seconds',
+          'contrary_refs',
+          'tested_competitors',
+          'supported_competitors',
+          'chosen_by',
+        ],
+        properties: {
+          support_refs: {
+            type: 'array',
+            description: '由领域包规则判定、实体在假设范围内的异常卡',
+            items: { $ref: 'common.schema.json#/$defs/EvidenceRef' },
+          },
+          support_alerts: {
+            type: 'array',
+            description: '计入支持的成员告警（ADR 0122）；只有它们支持时档位最高为 likely',
+            items: { $ref: 'common.schema.json#/$defs/EvidenceRef' },
+          },
+          supported_competitors: {
+            type: 'array',
+            description: '同样处于支持状态的竞争假设（ADR 0124）；不为空时第 4 个条件不满足',
+            items: { type: 'string', pattern: '^h[1-9]$' },
+          },
+          chosen_by: {
+            type: 'string',
+            description:
+              'model：模型在 conclude 中选中；ledger：模型弃权，由代码按账本选中（ADR 0120，档位最高为 likely）',
+            enum: ['model', 'ledger'],
+          },
+          model_judged_refs: {
+            type: 'array',
+            description: '由小模型判定的支持卡（只能支持 likely）',
+            items: { $ref: 'common.schema.json#/$defs/EvidenceRef' },
+          },
+          onset: {
+            description: '支持卡中最早的异常起点；没有可确定起点的支持卡时为 null',
+            oneOf: [
+              { type: 'null' },
+              {
+                type: 'object',
+                additionalProperties: false,
+                required: ['ref', 'at'],
+                properties: {
+                  ref: { $ref: 'common.schema.json#/$defs/EvidenceRef' },
+                  at: { $ref: 'common.schema.json#/$defs/Timestamp' },
+                },
+              },
+            ],
+          },
+          symptom_onset_at: {
+            description: '症状起点：最早触发的 symptom 角色成员告警，没有时为事件首次触发时间',
+            $ref: 'common.schema.json#/$defs/Timestamp',
+          },
+          tolerance_seconds: { type: 'integer', minimum: 0 },
+          contrary_refs: { type: 'array', items: { $ref: 'common.schema.json#/$defs/EvidenceRef' } },
+          tested_competitors: {
+            type: 'array',
+            description: '执行过检查或已被推翻的竞争假设',
+            items: { type: 'string', pattern: '^h[1-9]$' },
+          },
         },
       },
       ConsistencyChecks: {
@@ -4733,6 +4949,17 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
             description: '假设账本状态：pending 待检验；supported 支持；refuted 推翻；inconclusive 检验后仍无法判定',
             enum: ['pending', 'supported', 'refuted', 'inconclusive'],
           },
+          status_reasons: {
+            type: 'array',
+            description:
+              '账本给出状态的依据，按时间顺序，例如“支持卡：card:31、card:38”“相反的正常卡：card:25”“人工反馈确认根因”',
+            items: { type: 'string', maxLength: 500 },
+          },
+          checks_run: {
+            type: 'integer',
+            minimum: 0,
+            description: '针对这个假设执行完成的区分性检查数（失败的检查不计）',
+          },
         },
       },
       NextCheck: {
@@ -4752,6 +4979,10 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
             oneOf: [{ type: 'null' }, { $ref: 'common.schema.json#/$defs/EvidenceRef' }],
           },
           outcome: { type: 'string', enum: ['not_run', 'supports', 'refutes', 'inconclusive', 'failed'] },
+          error: {
+            type: ['string', 'null'],
+            description: 'outcome 为 failed 时的原因（参数被拒绝、数据源报错、结果无法判定成卡）',
+          },
         },
       },
       Recommendation: {

@@ -203,6 +203,10 @@ export type ResearchConcludedEvent = OutboxEventHeader & {
     output: ResearchOutput;
   };
 };
+/**
+ * RFC 3339 UTC 时间
+ */
+export type Timestamp4 = string;
 export type ResearchFailedEvent = OutboxEventHeader & {
   type: 'research.failed';
   payload: {
@@ -349,6 +353,7 @@ export interface SrenautixContractIndex {
   NotifyMessage?: NotifyMessage;
   NotifySection?: NotifySection;
   NotifyBlock?: NotifyBlock;
+  NotifyRun?: NotifyRun;
   NotifyButton?: NotifyButton;
   NotifySendResult?: NotifySendResult;
   NotifyCallback?: NotifyCallback;
@@ -420,7 +425,7 @@ export interface SrenautixContractIndex {
   FeedbackRecordedEvent?: FeedbackRecordedEvent;
   ConditionChangedEvent?: ConditionChangedEvent;
   EvidenceCardDefinition?: EvidenceCardDefinition;
-  LocalizedText?: LocalizedText1;
+  LocalizedText?: LocalizedText2;
   CardWindow?: CardWindow;
   CardSignalRef?: CardSignalRef;
   CardBinding?: CardBinding;
@@ -431,6 +436,7 @@ export interface SrenautixContractIndex {
   CardLink?: CardLink;
   EvidenceResult?: EvidenceResult;
   EvidenceReason?: EvidenceReason;
+  EvidenceCondition?: EvidenceCondition;
   EvidenceQueryRecord?: EvidenceQueryRecord;
   Feedback?: Feedback;
   FeedbackCreate?: FeedbackCreate;
@@ -482,6 +488,7 @@ export interface SrenautixContractIndex {
   EgressEntry?: EgressEntry;
   ResearchOutput?: ResearchOutput;
   ResearchConclusion?: ResearchConclusion;
+  ConsistencyDetail?: ConsistencyDetail;
   ConsistencyChecks?: ConsistencyChecks;
   Hypothesis?: Hypothesis;
   NextCheck?: NextCheck;
@@ -1083,6 +1090,10 @@ export interface ChangeEvent {
    */
   refs: string[];
   revision: string | null;
+  /**
+   * 变更之前的版本（版本标签的旧取值）；与更早一次变更的 revision 相同时，这次变更是回退。来源不知道旧版本时省略或为 null
+   */
+  previous_revision?: string | null;
   actor: string | null;
   time: Timestamp;
   link: string | null;
@@ -1315,7 +1326,7 @@ export interface ModelUsage {
   reasoning_tokens: number;
 }
 /**
- * 渠道无关的消息，渠道适配器负责转义和渲染。四段：现状与背景、问题根源、解决方案、相关证据
+ * 渠道无关的消息，渠道适配器负责转义和渲染。五段依次为现状、关键问题、拓扑联系、解决方案、证据链；带 runs 的块是富文本，渠道按自己的格式渲染（Telegram HTML、飞书卡片 markdown、GitHub Markdown），没有 runs 时按 text 渲染
  */
 export interface NotifyMessage {
   incident_id: Uuid;
@@ -1326,6 +1337,10 @@ export interface NotifyMessage {
   prefix: string;
   severity: Severity;
   title: string;
+  /**
+   * 一句话现状（严重度、根因组件、症状、状态），渠道放在最上面并加粗
+   */
+  headline?: NotifyRun[];
   sections: NotifySection[];
   buttons: NotifyButton[];
   /**
@@ -1333,18 +1348,61 @@ export interface NotifyMessage {
    */
   banner: string | null;
 }
+/**
+ * 富文本片段。text 是原文，渠道负责转义；code 用于数值与对象名；italic 用于模型生成的文字；href 是链接（只允许 http 与 https）
+ */
+export interface NotifyRun {
+  text: string;
+  style: 'plain' | 'bold' | 'code' | 'italic';
+  href: string | null;
+}
 export interface NotifySection {
-  kind: 'situation' | 'root_cause' | 'remedy' | 'evidence';
+  /**
+   * situation 现状；key_issue 关键问题（结论、结论档位的依据、假设）；topology 拓扑联系；remedy 解决方案；evidence 证据链；root_cause 是旧的四段结构中的问题根源
+   */
+  kind: 'situation' | 'key_issue' | 'topology' | 'remedy' | 'evidence' | 'root_cause';
+  /**
+   * 段标题；没有时渠道按 kind 取固定文案
+   */
+  title?: string;
+  /**
+   * 聊天渠道折叠显示（Telegram 可展开引用块、飞书折叠面板）
+   */
+  folded?: boolean;
+  /**
+   * 超长时的省略顺序：数字越小越先省略；0 不省略
+   */
+  priority?: number;
+  /**
+   * 整段被省略时显示的一行
+   */
+  omitted?: string;
   blocks: NotifyBlock[];
 }
 /**
- * text 是 SreNautix 渲染的模板文本；quote 是引用的不可信原文，source 注明来源；model_generated=true 的块标注模型生成
+ * text 是 SreNautix 渲染的模板文本（runs 的纯文本形式）；quote 是引用的不可信原文，source 注明来源；model_generated=true 的块标注模型生成
  */
 export interface NotifyBlock {
-  type: 'text' | 'quote' | 'list_item';
+  type: 'text' | 'quote' | 'list_item' | 'heading' | 'table';
   text: string;
   source: string | null;
   model_generated: boolean;
+  /**
+   * 富文本：按顺序拼接的文本片段
+   */
+  runs?: NotifyRun[];
+  /**
+   * all：所有渠道；summary：只在聊天渠道（摘要）；full：只在完整报告（issue）
+   */
+  scope?: 'all' | 'summary' | 'full';
+  indent?: number;
+  /**
+   * type 为 table 时的表格：表头与每行每格的富文本
+   */
+  table?: {
+    head: string[];
+    rows: NotifyRun[][][];
+  };
 }
 export interface NotifyButton {
   kind:
@@ -1578,6 +1636,7 @@ export interface AlertCatalogEntry {
    */
   id: string;
   alertname: string;
+  title?: LocalizedText;
   match_labels?: Labels1;
   /**
    * 上游规则的表达式，用于按表达式复核角色与 CI 覆盖检查
@@ -1606,6 +1665,13 @@ export interface AlertCatalogEntry {
    * 来源 mixin，用于覆盖率统计
    */
   mixin?: 'kubernetes' | 'node' | 'etcd' | 'prometheus' | 'alertmanager' | 'kube-state-metrics' | 'other';
+}
+/**
+ * 告警的可读标题（症状短语），例如“worker 没有可用副本”；通知的标题与问题陈述用它代替告警名
+ */
+export interface LocalizedText {
+  'zh-CN'?: string;
+  en?: string;
 }
 /**
  * 变体的标签等值条件，全部满足才命中
@@ -2351,7 +2417,7 @@ export interface EvidenceResult {
    * <pack>/<chain>/<card>；区分性检查产生的卡为 check/<hypothesis id>/<n>
    */
   card_id: string;
-  title: LocalizedText;
+  title: LocalizedText1;
   /**
    * 展示用阈值线
    */
@@ -2382,6 +2448,10 @@ export interface EvidenceResult {
    * 主值的展示文本
    */
   value: string | null;
+  /**
+   * 主值、阈值与基线的单位（卡片 display.unit）；没有时为 none
+   */
+  unit?: 'none' | 'percent' | 'ratio' | 'bytes' | 'seconds' | 'count' | 'per_second';
   table: null | {
     head: string[];
     rows: string[][];
@@ -2393,11 +2463,35 @@ export interface EvidenceResult {
    */
   anomaly_started_at?: null | Timestamp;
   evaluated_at: Timestamp;
+  /**
+   * 判定时 let 绑定的标量取值（数值、字符串、布尔），按定义顺序最多 16 个；绑定不可用时为 null。通知与控制台用它展示正常卡的实测值
+   */
+  observations?: {
+    [k: string]: number | string | boolean | null | undefined;
+  };
+  /**
+   * 本次判定生效的 params（卡片默认值与覆盖值合并后），即判定条件里的阈值
+   */
+  params?: {
+    [k: string]: number | string | boolean | undefined;
+  };
+  /**
+   * 求值过的判定条件，按求值顺序：undeterminable_if 全部条件，abnormal_if 到第一条命中为止
+   */
+  conditions?: EvidenceCondition[];
+  /**
+   * 对比基线（卡片 display.baseline 的取值）；卡片没有基线或基线不可用时为 null
+   */
+  baseline?: number | null;
+  /**
+   * 卡片标为影响类（impact: true），异常时它的值进入通知的影响范围
+   */
+  impact?: boolean;
 }
 /**
  * 取自卡片定义，结果脱离定义也能展示
  */
-export interface LocalizedText {
+export interface LocalizedText1 {
   'zh-CN'?: string;
   en?: string;
 }
@@ -2432,6 +2526,21 @@ export interface EvidenceQueryRecord {
   truncated: boolean;
   error: string | null;
   duration_ms: number;
+}
+export interface EvidenceCondition {
+  kind: 'undeterminable' | 'abnormal';
+  /**
+   * 条件的 CEL 表达式
+   */
+  cel: string;
+  /**
+   * hit：命中；miss：求值为 false；unavailable：依赖的引用或绑定没有数据，没有求值
+   */
+  outcome: 'hit' | 'miss' | 'unavailable';
+  /**
+   * 命中时为条件的 say；没有命中时为条件的 normal_say（卡片提供时），否则为 null
+   */
+  say: string | null;
 }
 export interface EvalKnowledge {
   id: string;
@@ -2577,9 +2686,26 @@ export interface ResearchOutput {
    */
   proposals: ProposalDraft[];
   /**
-   * 代码校验的修改记录：删除的无效证据引用、删除的目录外提议、降级的结论等
+   * 代码校验的修改记录：删除的无效证据引用、删除的目录外提议、降级的结论、删除的无法核实的数值等
    */
   validation_notes: string[];
+  /**
+   * 检验循环的停止原因：leader_supported 第一的假设得到支持且竞争假设都已推翻或检验后无法判定；no_change 连续两步没有变化或没有可执行的检查；step_limit、deadline、budget 达到步数、期限或预算上限；model_unavailable 模型不可用；指纹不变直接沿用上一次研判时为 no_change
+   */
+  stop_reason?: 'leader_supported' | 'no_change' | 'step_limit' | 'deadline' | 'budget' | 'model_unavailable' | null;
+  /**
+   * 区分性检查产生的证据卡（引用编号接在阶段 A 的卡之后），序列为空数组；完整序列在 worker 的运行明细中
+   *
+   * @maxItems 12
+   */
+  check_cards?: EvidenceResult[];
+  /**
+   * 研判运行内的证据引用到定义与实体的映射（同研判清单的 evidence_map）：卡为 <card_id>@<实体键>，告警为 alert_id，变更为 change_id
+   */
+  evidence_index?: {
+    ref: EvidenceRef;
+    target: string;
+  }[];
 }
 export interface ResearchConclusion {
   level: ConclusionLevel;
@@ -2587,6 +2713,7 @@ export interface ResearchConclusion {
   root_component: null | ComponentKey;
   undetermined_reason: string | null;
   consistency: ConsistencyChecks;
+  consistency_detail?: ConsistencyDetail;
 }
 /**
  * evidence_consistent 的四个条件逐项结果（DESIGN §7.3）；四项全为 true 才是 evidence_consistent
@@ -2596,6 +2723,45 @@ export interface ConsistencyChecks {
   onset_precedes_symptom: boolean;
   no_contrary_normal: boolean;
   competitor_tested: boolean;
+}
+/**
+ * 四个条件各自的依据，由结论阶梯的代码给出：支持卡、支持的成员告警、最早的异常起点、症状起点与容差、相反的正常卡、检验过与同样得到支持的竞争假设、结论由谁选中
+ */
+export interface ConsistencyDetail {
+  /**
+   * 由领域包规则判定、实体在假设范围内的异常卡
+   */
+  support_refs: EvidenceRef[];
+  /**
+   * 计入支持的成员告警（ADR 0122）；只有它们支持时档位最高为 likely
+   */
+  support_alerts: EvidenceRef[];
+  /**
+   * 同样处于支持状态的竞争假设（ADR 0124）；不为空时第 4 个条件不满足
+   */
+  supported_competitors: string[];
+  /**
+   * model：模型在 conclude 中选中；ledger：模型弃权，由代码按账本选中（ADR 0120，档位最高为 likely）
+   */
+  chosen_by: 'model' | 'ledger';
+  /**
+   * 由小模型判定的支持卡（只能支持 likely）
+   */
+  model_judged_refs: EvidenceRef[];
+  /**
+   * 支持卡中最早的异常起点；没有可确定起点的支持卡时为 null
+   */
+  onset: null | {
+    ref: EvidenceRef;
+    at: Timestamp;
+  };
+  symptom_onset_at: Timestamp4;
+  tolerance_seconds: number;
+  contrary_refs: EvidenceRef[];
+  /**
+   * 执行过检查或已被推翻的竞争假设
+   */
+  tested_competitors: string[];
 }
 export interface Hypothesis {
   id: string;
@@ -2614,6 +2780,14 @@ export interface Hypothesis {
    * 假设账本状态：pending 待检验；supported 支持；refuted 推翻；inconclusive 检验后仍无法判定
    */
   status: 'pending' | 'supported' | 'refuted' | 'inconclusive';
+  /**
+   * 账本给出状态的依据，按时间顺序，例如“支持卡：card:31、card:38”“相反的正常卡：card:25”“人工反馈确认根因”
+   */
+  status_reasons?: string[];
+  /**
+   * 针对这个假设执行完成的区分性检查数（失败的检查不计）
+   */
+  checks_run?: number;
 }
 export interface NextCheck {
   hypothesis_id: string;
@@ -2629,6 +2803,10 @@ export interface NextCheck {
    */
   result_ref: null | EvidenceRef;
   outcome: 'not_run' | 'supports' | 'refutes' | 'inconclusive' | 'failed';
+  /**
+   * outcome 为 failed 时的原因（参数被拒绝、数据源报错、结果无法判定成卡）
+   */
+  error?: string | null;
 }
 export interface Recommendation {
   id: string;
@@ -2834,8 +3012,8 @@ export interface EvidenceCardDefinition {
    * 证据链内唯一；全局 id 为 <pack>/<chain>/<id>
    */
   id: string;
-  title: LocalizedText1;
-  note?: LocalizedText2;
+  title: LocalizedText2;
+  note?: LocalizedText3;
   /**
    * 卡片对哪些实体执行；不填时对证据链所属组件执行
    */
@@ -2863,6 +3041,10 @@ export interface EvidenceCardDefinition {
    */
   probe?: boolean;
   /**
+   * 影响类卡片：衡量用户可见的影响（错误率、可用性、业务量）。异常时它的标题与值写进通知的影响范围
+   */
+  impact?: boolean;
+  /**
    * 卡片需要的集成能力，例如 metrics.query_range、logs.match。能力不可用时卡片显示 capability_missing
    */
   requires?: string[];
@@ -2870,7 +3052,7 @@ export interface EvidenceCardDefinition {
    * 作为阶段 B 区分性检查执行时的说明与可覆盖参数（ADR 0116）。没有它时卡片仍可作为检查，参数为全部 params 与 window_before、window_after，类型取默认值；有它时 params 的取值范围按 args 约束。window_before、window_after 总是由运行时提供，不在 args 中声明
    */
   check?: {
-    description?: LocalizedText4;
+    description?: LocalizedText6;
     /**
      * 可覆盖参数的 JSON Schema（type: object、additionalProperties: false）：每个属性都是卡片 params 的键，带 description；字符串用 enum 或 pattern 限定，数字有 minimum 与 maximum，卡片的默认值满足它
      */
@@ -2881,14 +3063,14 @@ export interface EvidenceCardDefinition {
     };
   };
 }
-export interface LocalizedText1 {
+export interface LocalizedText2 {
   'zh-CN'?: string;
   en?: string;
 }
 /**
  * 这张卡展示什么、怎么读
  */
-export interface LocalizedText2 {
+export interface LocalizedText3 {
   'zh-CN'?: string;
   en?: string;
 }
@@ -2941,12 +3123,20 @@ export interface CardBinding {
 }
 export interface CardRule {
   cel: string;
-  say: LocalizedText3;
+  say: LocalizedText4;
+  normal_say?: LocalizedText5;
 }
 /**
  * 命中时的理由，ICU MessageFormat，可引用 CEL 变量
  */
-export interface LocalizedText3 {
+export interface LocalizedText4 {
+  'zh-CN'?: string;
+  en?: string;
+}
+/**
+ * 求值为 false 时的说明（例如“连接池峰值 {poolPeak, number, percent}，未超过 95%”），ICU MessageFormat，可引用的参数与 say 相同
+ */
+export interface LocalizedText5 {
   'zh-CN'?: string;
   en?: string;
 }
@@ -2960,6 +3150,10 @@ export interface CardDisplay {
    * 图上阈值线的 CEL 表达式
    */
   threshold?: string;
+  /**
+   * 对比基线的 CEL 表达式（例如前一天的中位数），结果写入 EvidenceResult.baseline
+   */
+  baseline?: string;
   table?: CardTableTemplate;
 }
 export interface CardTableTemplate {
@@ -2972,12 +3166,12 @@ export interface CardTableTemplate {
    */
   columns: [
     {
-      header: LocalizedText1;
+      header: LocalizedText2;
       cel: string;
       unit?: string;
     },
     ...{
-      header: LocalizedText1;
+      header: LocalizedText2;
       cel: string;
       unit?: string;
     }[],
@@ -2990,7 +3184,7 @@ export interface CardLink {
    * explore：按卡片的查询生成数据源浏览链接；dashboard：看板；runbook：领域包内的 runbook
    */
   kind: 'explore' | 'dashboard' | 'runbook';
-  label: LocalizedText1;
+  label: LocalizedText2;
   /**
    * dashboard 的 uid 或 runbook 的 <文件>#<锚点>
    */
@@ -2999,7 +3193,7 @@ export interface CardLink {
 /**
  * 这张卡作为检查时判断什么、结果怎样区分假设
  */
-export interface LocalizedText4 {
+export interface LocalizedText6 {
   'zh-CN'?: string;
   en?: string;
 }
@@ -3169,8 +3363,8 @@ export interface EvidenceCardDefinition1 {
    * 证据链内唯一；全局 id 为 <pack>/<chain>/<id>
    */
   id: string;
-  title: LocalizedText1;
-  note?: LocalizedText2;
+  title: LocalizedText2;
+  note?: LocalizedText3;
   /**
    * 卡片对哪些实体执行；不填时对证据链所属组件执行
    */
@@ -3198,6 +3392,10 @@ export interface EvidenceCardDefinition1 {
    */
   probe?: boolean;
   /**
+   * 影响类卡片：衡量用户可见的影响（错误率、可用性、业务量）。异常时它的标题与值写进通知的影响范围
+   */
+  impact?: boolean;
+  /**
    * 卡片需要的集成能力，例如 metrics.query_range、logs.match。能力不可用时卡片显示 capability_missing
    */
   requires?: string[];
@@ -3205,7 +3403,7 @@ export interface EvidenceCardDefinition1 {
    * 作为阶段 B 区分性检查执行时的说明与可覆盖参数（ADR 0116）。没有它时卡片仍可作为检查，参数为全部 params 与 window_before、window_after，类型取默认值；有它时 params 的取值范围按 args 约束。window_before、window_after 总是由运行时提供，不在 args 中声明
    */
   check?: {
-    description?: LocalizedText4;
+    description?: LocalizedText6;
     /**
      * 可覆盖参数的 JSON Schema（type: object、additionalProperties: false）：每个属性都是卡片 params 的键，带 description；字符串用 enum 或 pattern 限定，数字有 minimum 与 maximum，卡片的默认值满足它
      */
@@ -3293,7 +3491,7 @@ export interface ChainsFile {
 }
 export interface EvidenceChain {
   id: string;
-  title: LocalizedText1;
+  title: LocalizedText2;
   runbook?: string;
   /**
    * @minItems 1
@@ -3315,7 +3513,7 @@ export interface RulesFile {
  */
 export interface PackRule {
   id: string;
-  title: LocalizedText1;
+  title: LocalizedText2;
   /**
    * CEL，可引用 incident、root、cards（卡片 id → 结论）
    */
@@ -3327,7 +3525,7 @@ export interface PackRule {
   params: {
     [k: string]: string | undefined;
   };
-  expected_effect?: LocalizedText1;
+  expected_effect?: LocalizedText2;
 }
 /**
  * remediations.yaml：修复补丁模板（ADR 0103）。模板生成 Git 补丁，由 server 经 gitops_pr 开 PR，从不合并
@@ -3340,7 +3538,7 @@ export interface RemediationsFile {
  */
 export interface Remediation {
   id: string;
-  title: LocalizedText1;
+  title: LocalizedText2;
   /**
    * release_rollback 发布回退；config_resource 副本数、HPA 上限、request/limit、超时与限流参数；alert_rule 告警阈值、持续时间、严重度；topology_coverage 拓扑与领域包覆盖
    */
@@ -3389,15 +3587,15 @@ export interface Remediation {
    */
   skip_if?: {
     cel: string;
-    say: LocalizedText1;
+    say: LocalizedText2;
   }[];
   /**
    * @minItems 1
    */
   edits: [RemediationEdit, ...RemediationEdit[]];
-  change: LocalizedText5;
+  change: LocalizedText7;
   verify: {
-    say: LocalizedText1;
+    say: LocalizedText2;
     /**
      * 合并并同步后应判为正常的卡片全局 id
      */
@@ -3408,7 +3606,7 @@ export interface Remediation {
    * 回滚方法：revert 这个 PR 的提交；say 写补充说明
    */
   rollback: {
-    say: LocalizedText1;
+    say: LocalizedText2;
   };
 }
 /**
@@ -3455,7 +3653,7 @@ export interface RemediationEdit {
 /**
  * 改了什么、为什么（ICU MessageFormat，变量取自 let 与 params），写入 PR 描述
  */
-export interface LocalizedText5 {
+export interface LocalizedText7 {
   'zh-CN'?: string;
   en?: string;
 }
@@ -3513,7 +3711,7 @@ export interface KnowledgeFile {
   entries: {
     id: string;
     components?: string[];
-    text: LocalizedText1;
+    text: LocalizedText2;
     /**
      * 来源事件 incident_id 或外部引用；回放时排除来自该用例的部分
      */
@@ -3583,7 +3781,7 @@ export interface PackUserLayer {
 export interface ChaosFile {
   api_version: 'srenautix.io/chaos/v1';
   id: string;
-  title: LocalizedText1;
+  title: LocalizedText2;
   /**
    * 实验需要的集群组件，例如 chaos-mesh
    */

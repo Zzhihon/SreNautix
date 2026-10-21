@@ -73,6 +73,8 @@ interface Atom {
   managers: string[];
   /** 版本标签的新取值（只取第一个变化的标签）；新 ReplicaSet 时为 Pod 模板的哈希 */
   revision: string | null;
+  /** 版本标签的旧取值；不是版本标签的变化时为 null */
+  previousRevision: string | null;
   fromLabel: boolean;
   /** 工作负载或新 ReplicaSet 上 preStepLabels 的取值（有值的），用于按版本标签关联前置 Job */
   stepLabels: Record<string, string>;
@@ -156,6 +158,7 @@ export function deriveRollouts(events: readonly WorkloadEvent[], o: RolloutOptio
           replicaSet: null,
           managers: e.managers,
           revision: r.to || null,
+          previousRevision: r.from || null,
           fromLabel: true,
           stepLabels: labelValues(e.body.labels, o.preStepLabels ?? []),
           describe: `${short(e.key)}：${r.label} ${r.from || '（无）'} → ${r.to || '（无）'}`,
@@ -169,6 +172,7 @@ export function deriveRollouts(events: readonly WorkloadEvent[], o: RolloutOptio
         replicaSet: e.key,
         managers: e.managers,
         revision: e.body.labels?.['pod-template-hash'] ?? null,
+        previousRevision: null,
         fromLabel: false,
         // 新 ReplicaSet 的 Pod 模板标签带着这次发布的版本标签（例如 CCHP 的 cchp.io/release-id）
         stepLabels: labelValues(e.body.labels, o.preStepLabels ?? []),
@@ -183,6 +187,7 @@ export function deriveRollouts(events: readonly WorkloadEvent[], o: RolloutOptio
         replicaSet: null,
         managers: e.managers,
         revision: e.body.name,
+        previousRevision: null,
         fromLabel: false,
         stepLabels: {},
         describe: `${short(e.owner)}：新的版本 ${e.body.name}`,
@@ -224,6 +229,15 @@ export function deriveRollouts(events: readonly WorkloadEvent[], o: RolloutOptio
       ),
     ];
     const revisions = pick(true).length ? pick(true) : pick(false);
+    // 旧版本：版本标签的旧取值，唯一时才写出（用于识别回退到更早的版本）
+    const previous = [
+      ...new Set(
+        g
+          .filter((a) => a.fromLabel)
+          .map((a) => a.previousRevision)
+          .filter((r): r is string => r !== null),
+      ),
+    ];
     const lines = [
       ...pre.map((p) => `前置 Job ${short(p.job.key)}（${BASIS_TEXT[p.basis]}）`),
       ...new Set(g.map((a) => a.describe)),
@@ -242,6 +256,9 @@ export function deriveRollouts(events: readonly WorkloadEvent[], o: RolloutOptio
       targets: [...workloads.sort(), ...pre.map((p) => p.job.key).sort(), ...managers],
       summary: lines.join('；').slice(0, 500),
     };
+    if (revisions.length === 1 && pick(true).length && previous.length === 1) {
+      change.previous_revision = previous[0]!;
+    }
     if (pre.length) {
       change.attachments = pre.map((p) => ({ target: p.job.key, basis: p.basis }));
     }

@@ -70,6 +70,11 @@
     },
     "reason": { "$ref": "#/$defs/Reason" },
     "value": { "type": ["string", "null"], "description": "主值的展示文本" },
+    "unit": {
+      "type": "string",
+      "description": "主值、阈值与基线的单位（卡片 display.unit）；没有时为 none",
+      "enum": ["none", "percent", "ratio", "bytes", "seconds", "count", "per_second"]
+    },
     "table": {
       "oneOf": [
         { "type": "null" },
@@ -93,7 +98,31 @@
       "description": "异常的起始时间，用于 evidence_consistent 判定中的时间条件；无法确定时为 null",
       "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/Timestamp" }]
     },
-    "evaluated_at": { "$ref": "common.schema.json#/$defs/Timestamp" }
+    "evaluated_at": { "$ref": "common.schema.json#/$defs/Timestamp" },
+    "observations": {
+      "type": "object",
+      "description": "判定时 let 绑定的标量取值（数值、字符串、布尔），按定义顺序最多 16 个；绑定不可用时为 null。通知与控制台用它展示正常卡的实测值",
+      "maxProperties": 16,
+      "additionalProperties": { "type": ["number", "string", "boolean", "null"] }
+    },
+    "params": {
+      "type": "object",
+      "description": "本次判定生效的 params（卡片默认值与覆盖值合并后），即判定条件里的阈值",
+      "additionalProperties": { "type": ["number", "string", "boolean"] }
+    },
+    "conditions": {
+      "type": "array",
+      "description": "求值过的判定条件，按求值顺序：undeterminable_if 全部条件，abnormal_if 到第一条命中为止",
+      "items": { "$ref": "#/$defs/Condition" }
+    },
+    "baseline": {
+      "type": ["number", "null"],
+      "description": "对比基线（卡片 display.baseline 的取值）；卡片没有基线或基线不可用时为 null"
+    },
+    "impact": {
+      "type": "boolean",
+      "description": "卡片标为影响类（impact: true），异常时它的值进入通知的影响范围"
+    }
   },
   "$defs": {
     "Reason": {
@@ -118,6 +147,25 @@
           ]
         },
         "text": { "type": "string", "maxLength": 1000 }
+      }
+    },
+    "Condition": {
+      "title": "EvidenceCondition",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "cel", "outcome", "say"],
+      "properties": {
+        "kind": { "type": "string", "enum": ["undeterminable", "abnormal"] },
+        "cel": { "type": "string", "description": "条件的 CEL 表达式" },
+        "outcome": {
+          "type": "string",
+          "description": "hit：命中；miss：求值为 false；unavailable：依赖的引用或绑定没有数据，没有求值",
+          "enum": ["hit", "miss", "unavailable"]
+        },
+        "say": {
+          "type": ["string", "null"],
+          "description": "命中时为条件的 say；没有命中时为条件的 normal_say（卡片提供时），否则为 null"
+        }
       }
     },
     "QueryRecord": {

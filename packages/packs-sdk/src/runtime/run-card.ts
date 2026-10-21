@@ -289,6 +289,12 @@ export async function runCard(input: RunCardInput): Promise<RunCardResult> {
     egress: e.def.egress,
     anomaly_started_at: outcome.anomaly_started_at === null ? null : toIso(outcome.anomaly_started_at * 1000),
     evaluated_at: new Date().toISOString(),
+    unit: e.def.display?.unit ?? 'none',
+    observations: outcome.observations,
+    params: outcome.params,
+    conditions: outcome.conditions,
+    baseline: outcome.baseline,
+    impact: e.def.impact ?? false,
     outcome,
     refs,
   };

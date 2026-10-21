@@ -6,7 +6,7 @@
   "$defs": {
     "Message": {
       "title": "NotifyMessage",
-      "description": "渠道无关的消息，渠道适配器负责转义和渲染。四段：现状与背景、问题根源、解决方案、相关证据",
+      "description": "渠道无关的消息，渠道适配器负责转义和渲染。五段依次为现状、关键问题、拓扑联系、解决方案、证据链；带 runs 的块是富文本，渠道按自己的格式渲染（Telegram HTML、飞书卡片 markdown、GitHub Markdown），没有 runs 时按 text 渲染",
       "type": "object",
       "additionalProperties": false,
       "required": ["incident_id", "incident_version", "prefix", "severity", "title", "sections", "buttons", "banner"],
@@ -16,6 +16,11 @@
         "prefix": { "type": "string", "description": "部署配置的消息前缀，例如影子部署的标记" },
         "severity": { "$ref": "../../../schemas/common.schema.json#/$defs/Severity" },
         "title": { "type": "string", "maxLength": 200 },
+        "headline": {
+          "type": "array",
+          "description": "一句话现状（严重度、根因组件、症状、状态），渠道放在最上面并加粗",
+          "items": { "$ref": "#/$defs/Run" }
+        },
         "sections": { "type": "array", "items": { "$ref": "#/$defs/Section" } },
         "buttons": { "type": "array", "items": { "$ref": "#/$defs/Button" } },
         "banner": {
@@ -30,21 +35,73 @@
       "additionalProperties": false,
       "required": ["kind", "blocks"],
       "properties": {
-        "kind": { "type": "string", "enum": ["situation", "root_cause", "remedy", "evidence"] },
+        "kind": {
+          "type": "string",
+          "description": "situation 现状；key_issue 关键问题（结论、结论档位的依据、假设）；topology 拓扑联系；remedy 解决方案；evidence 证据链；root_cause 是旧的四段结构中的问题根源",
+          "enum": ["situation", "key_issue", "topology", "remedy", "evidence", "root_cause"]
+        },
+        "title": { "type": "string", "description": "段标题；没有时渠道按 kind 取固定文案" },
+        "folded": {
+          "type": "boolean",
+          "description": "聊天渠道折叠显示（Telegram 可展开引用块、飞书折叠面板）"
+        },
+        "priority": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "超长时的省略顺序：数字越小越先省略；0 不省略"
+        },
+        "omitted": { "type": "string", "description": "整段被省略时显示的一行" },
         "blocks": { "type": "array", "items": { "$ref": "#/$defs/Block" } }
       }
     },
     "Block": {
       "title": "NotifyBlock",
-      "description": "text 是 SreNautix 渲染的模板文本；quote 是引用的不可信原文，source 注明来源；model_generated=true 的块标注模型生成",
+      "description": "text 是 SreNautix 渲染的模板文本（runs 的纯文本形式）；quote 是引用的不可信原文，source 注明来源；model_generated=true 的块标注模型生成",
       "type": "object",
       "additionalProperties": false,
       "required": ["type", "text", "source", "model_generated"],
       "properties": {
-        "type": { "type": "string", "enum": ["text", "quote", "list_item"] },
+        "type": { "type": "string", "enum": ["text", "quote", "list_item", "heading", "table"] },
         "text": { "type": "string" },
         "source": { "type": ["string", "null"] },
-        "model_generated": { "type": "boolean" }
+        "model_generated": { "type": "boolean" },
+        "runs": {
+          "type": "array",
+          "description": "富文本：按顺序拼接的文本片段",
+          "items": { "$ref": "#/$defs/Run" }
+        },
+        "scope": {
+          "type": "string",
+          "description": "all：所有渠道；summary：只在聊天渠道（摘要）；full：只在完整报告（issue）",
+          "enum": ["all", "summary", "full"],
+          "default": "all"
+        },
+        "indent": { "type": "integer", "minimum": 0, "maximum": 3, "default": 0 },
+        "table": {
+          "description": "type 为 table 时的表格：表头与每行每格的富文本",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["head", "rows"],
+          "properties": {
+            "head": { "type": "array", "items": { "type": "string" } },
+            "rows": {
+              "type": "array",
+              "items": { "type": "array", "items": { "type": "array", "items": { "$ref": "#/$defs/Run" } } }
+            }
+          }
+        }
+      }
+    },
+    "Run": {
+      "title": "NotifyRun",
+      "description": "富文本片段。text 是原文，渠道负责转义；code 用于数值与对象名；italic 用于模型生成的文字；href 是链接（只允许 http 与 https）",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["text", "style", "href"],
+      "properties": {
+        "text": { "type": "string" },
+        "style": { "type": "string", "enum": ["plain", "bold", "code", "italic"] },
+        "href": { "type": ["string", "null"] }
       }
     },
     "Button": {

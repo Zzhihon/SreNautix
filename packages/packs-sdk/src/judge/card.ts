@@ -20,10 +20,12 @@ import { isEmpty, toCelSeries, type RefData } from './data.js';
 import type {
   CardDefinition,
   CardOutcome,
+  ConditionOutcome,
   EntityBinding,
   Locale,
   LocalizedText,
   ReasonKind,
+  Scalar,
   WindowBinding,
 } from './types.js';
 
@@ -41,13 +43,24 @@ interface CompiledMessage {
   formats: Partial<Record<Locale, IntlMessageFormat>>;
 }
 
+interface CompiledRule {
+  expr: CompiledExpr;
+  say: CompiledMessage;
+  /** 求值为 false 时的说明 */
+  normalSay: CompiledMessage | null;
+}
+
+/** 观测值最多记录的 let 绑定数（与契约 EvidenceResult.observations 的 maxProperties 一致） */
+export const MAX_OBSERVATIONS = 16;
+
 export interface CompiledCard {
   def: CardDefinition;
   lets: Array<{ name: string; expr: CompiledExpr }>;
-  undeterminable: Array<{ expr: CompiledExpr; say: CompiledMessage }>;
-  abnormal: Array<{ expr: CompiledExpr; say: CompiledMessage }>;
+  undeterminable: CompiledRule[];
+  abnormal: CompiledRule[];
   value: CompiledExpr | null;
   threshold: CompiledExpr | null;
+  baseline: CompiledExpr | null;
   table: {
     rowsFrom: string;
     columns: Array<{ header: LocalizedText; expr: CompiledExpr; unit: Unit }>;
@@ -162,10 +175,11 @@ export function compileCard(base: Environment, def: CardDefinition, opts: Compil
     return { text, formats };
   };
 
-  const rules = (list: CardDefinition['judge']['undeterminable_if'], what: string) =>
+  const rules = (list: CardDefinition['judge']['undeterminable_if'], what: string): CompiledRule[] =>
     (list ?? []).map((r, i) => ({
       expr: compile(r.cel, `${what}[${i}]`),
       say: message(r.say, `${what}[${i}]`),
+      normalSay: r.normal_say ? message(r.normal_say, `${what}[${i}].normal_say`) : null,
     }));
 
   const display = def.display;
@@ -199,6 +213,7 @@ export function compileCard(base: Environment, def: CardDefinition, opts: Compil
     abnormal: rules(def.judge.abnormal_if, 'abnormal_if'),
     value: display?.value ? compile(display.value, 'display.value') : null,
     threshold: display?.threshold ? compile(display.threshold, 'display.threshold') : null,
+    baseline: display?.baseline ? compile(display.baseline, 'display.baseline') : null,
     table,
     refNames,
     maxCost,
@@ -224,6 +239,34 @@ export interface JudgeInput {
   entity: EntityBinding;
   window: WindowBinding;
   locale?: Locale;
+}
+
+/** let 绑定的标量取值：数值、字符串、布尔；不可用的绑定与非有限数值为 null，列表与映射不记录 */
+function observationsOf(
+  card: CompiledCard,
+  ctx: Record<string, unknown>,
+  avail: Map<string, Availability>,
+): Record<string, Scalar | null> {
+  const out: Record<string, Scalar | null> = {};
+  for (const l of card.lets) {
+    if (Object.keys(out).length >= MAX_OBSERVATIONS) {
+      break;
+    }
+    const a = avail.get(l.name);
+    const v = ctx[l.name];
+    if (a && !a.ok) {
+      out[l.name] = null;
+    } else if (typeof v === 'bigint') {
+      out[l.name] = Number(v);
+    } else if (typeof v === 'number') {
+      out[l.name] = Number.isFinite(v) ? v : null;
+    } else if (typeof v === 'string' || typeof v === 'boolean') {
+      out[l.name] = v;
+    } else if (v === null || v === undefined) {
+      out[l.name] = null;
+    }
+  }
+  return out;
 }
 
 type Availability = { ok: true } | { ok: false; kind: 'no_data' | 'source_error' | 'evaluation_error'; detail: string };
@@ -261,11 +304,18 @@ export function judgeCard(card: CompiledCard, input: JudgeInput): CardOutcome {
     kind,
     text: detail ? `${SYSTEM_TEXT[kind][locale]}：${detail}` : SYSTEM_TEXT[kind][locale],
   });
+  const params = Object.fromEntries(
+    Object.entries({ ...(def.params ?? {}), ...(input.params ?? {}) }).map(([k, v]) => [k, toCelScalar(k, v)]),
+  );
   const empty: Omit<CardOutcome, 'verdict' | 'display_state' | 'reason'> = {
     value: null,
     threshold: null,
+    baseline: null,
     table: null,
     anomaly_started_at: null,
+    observations: {},
+    params,
+    conditions: [],
   };
 
   for (const r of def.refs) {
@@ -299,10 +349,10 @@ export function judgeCard(card: CompiledCard, input: JudgeInput): CardOutcome {
   const required = def.refs.filter((r) => (r.empty_is ?? 'no_data') === 'no_data');
   const allRequiredMissing = required.every((r) => !avail.get(r.name)!.ok);
 
+  const conditions: ConditionOutcome[] = [];
+
   const ctx: Record<string, unknown> = {
-    params: Object.fromEntries(
-      Object.entries({ ...(def.params ?? {}), ...(input.params ?? {}) }).map(([k, v]) => [k, toCelScalar(k, v)]),
-    ),
+    params,
     entity: {
       cluster_id: input.entity.cluster_id,
       kind: input.entity.kind,
@@ -386,22 +436,52 @@ export function judgeCard(card: CompiledCard, input: JudgeInput): CardOutcome {
       }
     }
 
+    const num = (e: CompiledExpr | null): number | null => {
+      const r = e ? run(e, ctx) : null;
+      if (!r || !r.ok) {
+        return null;
+      }
+      const v = typeof r.v === 'bigint' ? Number(r.v) : r.v;
+      return typeof v === 'number' && Number.isFinite(v) ? v : null;
+    };
     const decorate = (): Omit<CardOutcome, 'verdict' | 'display_state' | 'reason'> => {
       const value = card.value ? run(card.value, ctx) : null;
-      const threshold = card.threshold ? run(card.threshold, ctx) : null;
       const anomaly = avail.get('anomaly_started_at');
       const started = ctx['anomaly_started_at'];
       return {
         value: value && value.ok ? formatValue(value.v, def.display?.unit) : null,
-        threshold: threshold && threshold.ok && typeof threshold.v === 'number' ? threshold.v : null,
+        threshold: num(card.threshold),
+        baseline: num(card.baseline),
         table: renderTable(card, ctx, avail, locale),
         anomaly_started_at: anomaly && anomaly.ok && typeof started === 'number' ? started : null,
+        observations: observationsOf(card, ctx, avail),
+        params,
+        conditions,
       };
+    };
+    // 求值一条条件并记录结果：命中时为 say，没有命中时为 normal_say
+    const evaluate = (
+      rule: CompiledRule,
+      kind: ConditionOutcome['kind'],
+    ): { ok: true; hit: boolean } | { ok: false; a: Availability } => {
+      const r = run(rule.expr, ctx);
+      if (!r.ok) {
+        conditions.push({ kind, cel: rule.expr.source, outcome: 'unavailable', say: null });
+        return r;
+      }
+      const hit = bool(rule.expr, r.v);
+      conditions.push({
+        kind,
+        cel: rule.expr.source,
+        outcome: hit ? 'hit' : 'miss',
+        say: hit ? say(rule.say) : rule.normalSay ? say(rule.normalSay) : null,
+      });
+      return { ok: true, hit };
     };
 
     for (const rule of card.undeterminable) {
-      const r = run(rule.expr, ctx);
-      if (r.ok && bool(rule.expr, r.v)) {
+      const r = evaluate(rule, 'undeterminable');
+      if (r.ok && r.hit) {
         return {
           verdict: 'undeterminable',
           display_state: 'undeterminable',
@@ -412,12 +492,12 @@ export function judgeCard(card: CompiledCard, input: JudgeInput): CardOutcome {
     }
     const skipped: Availability[] = [];
     for (const rule of card.abnormal) {
-      const r = run(rule.expr, ctx);
+      const r = evaluate(rule, 'abnormal');
       if (!r.ok) {
         skipped.push(r.a);
         continue;
       }
-      if (bool(rule.expr, r.v)) {
+      if (r.hit) {
         return {
           verdict: 'abnormal',
           display_state: 'abnormal',
@@ -452,6 +532,7 @@ export function judgeCard(card: CompiledCard, input: JudgeInput): CardOutcome {
         display_state: 'undeterminable',
         reason: sys('evaluation_error', err.detail),
         ...empty,
+        conditions,
       };
     }
     throw err;

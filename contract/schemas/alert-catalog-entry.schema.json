@@ -13,6 +13,10 @@
       "pattern": "^[a-z0-9][a-z0-9_.-]*$"
     },
     "alertname": { "type": "string", "minLength": 1 },
+    "title": {
+      "description": "告警的可读标题（症状短语），例如“worker 没有可用副本”；通知的标题与问题陈述用它代替告警名",
+      "$ref": "evidence-card.schema.json#/$defs/LocalizedText"
+    },
     "match_labels": {
       "description": "变体的标签等值条件，全部满足才命中",
       "$ref": "common.schema.json#/$defs/Labels"

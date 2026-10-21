@@ -156,6 +156,22 @@ flowchart TD
 
 没有任何样本永远不会得出正常。依赖缺数据引用的 `let` 不可用，引用了它的规则跳过并计入 `partial_data`。表达式求值出错（缺样本之外的错误）时为无法判定，原因 `evaluation_error`。
 
+**判定的明细**
+
+结果里除了结论，还记录判定所依据的数据，通知、issue 与控制台用它们展示正常卡的实测值：
+
+- `observations`：`let` 绑定的标量取值（按定义顺序最多 16 个，不可用时为 null）；
+- `params`：生效的参数（判定条件里的阈值）；
+- `conditions`：求值过的条件（`undeterminable_if` 全部，`abnormal_if` 到第一条命中为止），每条记录 `hit`、`miss` 或 `unavailable`；命中时附 `say`，没有命中时附规则的 `normal_say`（写了才有）；
+- `baseline`、`unit`、`impact`：见下文。
+
+```yaml
+abnormal_if:
+  - cel: poolPeak > params.pool
+    say: { zh-CN: '应用 PG 连接池峰值 {poolPeak, number, percent}' }
+    normal_say: { zh-CN: '应用 PG 连接池峰值 {poolPeak, number, percent}，未超过阈值' }
+```
+
 **let**
 
 `judge.let` 按顺序求值，后面的 `let` 和全部规则、`say`、`display` 都可以引用前面的名字。名为 `anomaly_started_at` 的 `let`（unix 秒）给出异常开始时间。表达式内部的局部绑定用 CEL 标准的 `cel.bind(名, 值, 表达式)`。保留名：`params`、`entity`、`window`、`row`、`cards`、`incident`、`root`。
@@ -188,7 +204,9 @@ flowchart TD
 **文字与展示**
 
 - `say`、`title`、`note`、表头都是 `zh-CN` 与 `en` 两种语言。`say` 是 ICU MessageFormat，变量取自 `let`，数字格式用 `{x, number, percent}` 等。
-- `display.value` 与 `display.threshold` 是 CEL，`unit` 取 `none`、`percent`、`ratio`、`bytes`、`seconds`、`count`、`per_second`。
+- `display.value` 与 `display.threshold` 是 CEL，`unit` 取 `none`、`percent`、`ratio`、`bytes`、`seconds`、`count`、`per_second`。`display.value` 写命中条件所比较的那个量，阈值与它同单位。
+- `display.baseline` 是对比基线的 CEL（例如前一天的中位数），结果写入 `baseline`，通知里与实测值并列。
+- `impact: true` 标出衡量用户可见影响的卡（错误率、可用性、业务量）：判为异常时，通知的问题陈述把它的标题与值写成影响范围。
 - `display.table` 是声明式表格：`rows_from` 选择一个引用，每列一个 CEL（`row` 为当前序列），`sort_by` 与 `limit` 控制排序与行数。
 - `links` 中的 `explore` 由运行时生成指标查询链接，`runbook` 指向本包的处置手册。
 - `egress: deny` 的卡片内容不进入模型上下文。
@@ -363,6 +381,7 @@ tests:
 - `stable` 的包要求每张卡都有夹具测试。
 - 告警目录条目的 `primary_card`（`<链>/<卡>` 或 `<包>/<链>/<卡>`）是与告警条件对应的卡，告警触发时它应当判为异常。`lint` 检查卡片存在、`applies_to` 包含条目的实体 kind、卡片所在的证据链在条目的 `chains` 中。`test --alert-rules <规则文件>` 读入告警规则（Prometheus 规则文件、PrometheusRule 或 VMRule，同名告警按条目的 `match_labels` 选规则），主卡的每个夹具测试在同一份夹具上再求一次告警规则：告警在卡片窗口内触发（满足 `for`）当且仅当主卡判为异常，否则测试失败。阈值因此只在告警规则里写一次，两边漂移时 CI 失败。没有现成的卡判断告警条件时，用 `generateConditionPack` 从规则生成告警条件卡（查询与规则表达式相同、判定与 `for` 相同），作为条目的主卡（ADR 0109）。
 - 测试的 `params` 字段覆盖卡片参数，用于验证阈值行为。
+- 告警目录条目可以写 `title`（`zh-CN` 与 `en`），即告警的可读症状，例如“worker 没有可用副本”。通知的标题与问题陈述用它代替告警名，没有时显示告警名。
 
 **录制与回放**：`record` 在真实数据源上执行卡片，把查询与响应写成快照（`srenautix.io/query-snapshot/v1`）。`test --replay` 用快照代替数据源重新判定，快照中没有的查询直接失败，因此修改查询的提交必须重新录制。
 

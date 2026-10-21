@@ -432,6 +432,12 @@ export class PackEvidence implements EvidenceRunner {
           egress: r.egress,
           anomaly_started_at: r.anomaly_started_at ?? null,
           evaluated_at: r.evaluated_at,
+          unit: r.unit ?? 'none',
+          observations: r.observations ?? {},
+          params: r.params ?? {},
+          conditions: r.conditions ?? [],
+          baseline: r.baseline ?? null,
+          impact: r.impact ?? false,
         };
       } catch (err) {
         // 渲染与判定的错误由运行时记在卡片里；这里只剩窗口为空等计划本身的问题

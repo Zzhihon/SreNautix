@@ -7,10 +7,12 @@ export { checkArgsSchema, applyCheckArgs, CHECK_WINDOW_KEYS } from './judge/chec
 export type {
   CardDefinition,
   CardOutcome,
+  ConditionOutcome,
   DisplayState,
   EntityBinding,
   Locale,
   ReasonKind,
+  Scalar,
   Verdict,
   WindowBinding,
 } from './judge/types.js';
