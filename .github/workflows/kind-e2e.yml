@@ -140,6 +140,12 @@ jobs:
           kubectl --context kind-srenautix get --raw /api/v1/namespaces/monitoring/services/kps-prometheus:9090/proxy/api/v1/alerts >"$RUNNER_TEMP/diag/alerts.json" 2>&1 || true
           kubectl --context kind-srenautix get --raw "/api/v1/namespaces/monitoring/services/kps-prometheus:9090/proxy/api/v1/query?query=$(jq -rn '"count by (alertname, namespace, alertstate, srenautix_self) (max_over_time(ALERTS[6h]))"|@uri')" >"$RUNNER_TEMP/diag/alerts-6h.json" 2>&1 || true
           kubectl --context kind-srenautix -n srenautix logs deploy/srenautix-server --tail=2000 >"$RUNNER_TEMP/diag/server.log" 2>&1 || true
+          # 自愈 PR 的决策（跳过与失败只记在库里）、研判与事件版本：经 CNPG 实例本地的 psql 读取，只读
+          kubectl --context kind-srenautix -n srenautix exec srenautix-pg-1 -c postgres -- psql -d srenautix -X -A -F $'\t' -c "
+            SELECT 'attempt', created_at, run_id, incident_id, incident_version, outcome, code, category, key, reason FROM server.remediation_attempts ORDER BY created_at;
+            SELECT 'run', started_at, finished_at, run_id, incident_id, incident_version, state, conclusion_level, disposition, root_component FROM server.research_runs ORDER BY started_at;
+            SELECT 'incident', updated_at, incident_id, version, state, suppressed, body->'root'->>'component' FROM server.incidents ORDER BY updated_at;" \
+            >"$RUNNER_TEMP/diag/remediation.tsv" 2>&1 || true
           cp -R "$RUNNER_TEMP/scenarios" "$RUNNER_TEMP/diag/" 2>/dev/null || true
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
