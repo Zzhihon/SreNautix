@@ -189,8 +189,16 @@ export class BundleTopology implements NodeLookup {
     const edges: TopologyEdge[] = [];
     for (const list of this.edges.values()) {
       const iv = this.pick(list, t);
-      if (iv && keys.has(iv.body.from) && keys.has(iv.body.to) && !(iv.ksm && fromState.has(iv.body.from))) {
-        edges.push(iv.body);
+      if (!iv || (iv.ksm && fromState.has(iv.body.from))) {
+        continue;
+      }
+      // kube-state-metrics 的 kind 不带 API 组（Cluster 与 Cluster.postgresql.cnpg.io）：端点改写成状态库中同一个对象的键，
+      // 否则同一个对象在图里有两个节点，收敛把它们当成两个组件
+      const e = iv.ksm
+        ? { ...iv.body, from: this.sameObjectKeyCached(iv.body.from), to: this.sameObjectKeyCached(iv.body.to) }
+        : iv.body;
+      if (keys.has(e.from) && keys.has(e.to)) {
+        edges.push(e);
       }
     }
     this.cache = { version, graph: new TopologyGraph(nodes, edges, version), nodes, edges };
@@ -339,6 +347,18 @@ export class BundleTopology implements NodeLookup {
       }
     }
     return hits.size === 1 ? [...hits][0]! : key;
+  }
+
+  /** 拓扑行在重建包内不变，sameObjectKey 的结果按键缓存 */
+  private readonly objectKeys = new Map<string, string>();
+
+  private sameObjectKeyCached(key: string): string {
+    let k = this.objectKeys.get(key);
+    if (k === undefined) {
+      k = this.sameObjectKey(key);
+      this.objectKeys.set(key, k);
+    }
+    return k;
   }
 
   componentType(key: string, t: number): string | null {

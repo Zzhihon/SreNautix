@@ -117,6 +117,21 @@ describe('kube-state-metrics 回退', () => {
     row('ksm_history', 'node', stateRs, 25, null),
   ];
 
+  it('kube-state-metrics 的边端点改写成状态库中同一个对象的键（kind 不带 API 组）', () => {
+    const cluster = node('Cluster.postgresql.cnpg.io:data/pg', 'Cluster.postgresql.cnpg.io', 'data', 'pg');
+    const ksmCluster = node('Cluster:data/pg', 'Cluster', 'data', 'pg');
+    const pod = node('Pod:data/pg-1', 'Pod', 'data', 'pg-1');
+    const topo = new BundleTopology([
+      row('informer', 'node', cluster, 0, null),
+      row('ksm_history', 'node', ksmCluster, 0, null),
+      row('ksm_history', 'node', pod, 0, null),
+      row('ksm_history', 'edge', edge(pod.key, ksmCluster.key, 'owned_by'), 0, null),
+    ]);
+    const g = topo.at(T0 + 10 * 60_000);
+    expect(g.edges.filter((e) => e.from === pod.key).map((e) => e.to)).toEqual([cluster.key]);
+    expect(g.graph.componentOf(pod.key)).toBe(cluster.key);
+  });
+
   it('状态库没有的 ReplicaSet 用 kube-state-metrics 第一次出现的时刻，属主与管理应用齐全；导出起点就存在的不算', () => {
     const topo = new BundleTopology(rows);
     const ev = topo.workloadEvents(T0, T0 + 120 * 60_000);
