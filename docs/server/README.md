@@ -199,7 +199,10 @@ changes:
   kubernetes:
     revision_labels: [app.kubernetes.io/version, helm.sh/chart, cchp.io/release-id]
     ksm_fallback: true      # informer 空窗时从 kube-state-metrics 推导拓扑里没有的发布
+    pre_step_labels: [cchp.io/release-id]  # 发布之前的 Job 按这些标签的取值关联到发布，默认不启用
 ```
+
+发布之前 30 分钟内新建的 Job（迁移、预检，CronJob 创建的除外）按四档判定是否是这次发布的第一步（ADR 0104 §13）：管理应用（managed_by 边或 Argo 的 `app.kubernetes.io/instance` 标签）、`pre_step_labels` 的取值、Pod 镜像，都没有数据时同一命名空间且窗口里只有一个候选 Job。挂上的 Job 让发布的时间提前到它新建的时刻，变更的 `attachments` 写明依据。
 
 informer 有空窗时（server 重启、与 reader 断连、刚安装），拓扑里没有这段时间新建的 ReplicaSet。`ksm_fallback`（默认开启，ADR 0104 §11）从证据数据源的 kube-state-metrics（`kube_replicaset_created`、`kube_replicaset_owner`、`kube_deployment_created`）补上：窗口内创建、属主 Deployment 早已存在、拓扑里从来没有记录过的 ReplicaSet 视为一次发布，与拓扑事件推导的发布用同样的规则合成。只对本集群；数据源不可用时跳过并记日志，结果缓存一分钟。
 

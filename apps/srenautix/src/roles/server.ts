@@ -452,6 +452,7 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
       clusterId,
       revisionLabels: k.revision_labels,
       groupWithinMs: parseDuration('changes.kubernetes.group_within', k.group_within),
+      preStepLabels: k.pre_step_labels,
     };
     const derived = await kubernetesRollouts(pool, from, to, ro);
     // informer 空窗时拓扑里没有的发布：从 kube-state-metrics 推导（ADR 0104 §11）；只对本集群，数据源不可用时跳过

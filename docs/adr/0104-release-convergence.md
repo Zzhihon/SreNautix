@@ -35,17 +35,18 @@
 
 12. **同一组件的不同对象按依赖关系合并**：两条告警落在同一组件的不同对象上（CNPG 集群的主库与备库 Pod、同一 Deployment 或 StatefulSet 的不同 Pod），开始时间相差不超过时间相邻的 4 倍时合并，与第 10 条的依赖合并相同。ADR 0012 只合并同一实体，或一方可达另一方的告警。同一组件的 Pod 之间没有依赖边，Pod 的告警归到工作负载之后（第 2、9 条），同一个根因就分成了几个事件：2026-10-15 的 CNPG 主库 OOM 故障里，cchp-postgres-2 的 OOM 与主库重启是一个事件，cchp-postgres-1 的 postmaster 重启是另一个，两个事件的根因都是 Cluster；2026-10-14 发布后的抓取失败里，gateway 的 3 个 Pod 与 control 的 2 个 Pod 各自成为事件。枢纽（每个节点上都有的 CNI 之类）与命名空间伪组件除外，它们的不同对象常常各自出故障；归到不同变更的告警也不因此合并。在 17 个标注故障的发现重放上，事件数平均从 2.35 降到 2.12，通过数从 11 增加到 12，没有变差的用例。
 
-13. **发布之前的 Job 是发布的第一步**：CCHP 的发布先由 Argo 的 PreSync 跑迁移 Job（`cchp-migrate-<sha>`），新的 ReplicaSet 要等迁移结束才出现，晚 5 到 10 分钟。故障往往在迁移期间开始，比如 2026-10-19 的死锁、旧 gateway-3 等待迁移，以及 2026-10-16 worker 的 CrashLoop。变更只解释它之后开始的告警，所以这些告警被拆成单独的事件（release-migration-deadlock 4 个事件，onboarding-rls-window 3 个）。
+13. **发布之前的 Job 是发布的第一步**：CCHP 的发布流水线（Argo Workflows 的 `scripts/workflows/release.py`）先用 `kubectl create` 跑迁移 Job（`cchp-migrate-<sha>`，之前还有只读的 `cchp-migstat-<sha>-<n>`），新的 ReplicaSet 要等迁移结束才出现，晚 5 到 10 分钟。故障往往在迁移期间开始，比如 2026-10-19 的死锁、旧 gateway-3 等待迁移，以及 2026-10-16 worker 的 CrashLoop。变更只解释它之后开始的告警，所以这些告警被拆成单独的事件（release-migration-deadlock 4 个事件，onboarding-rls-window 3 个）。
     - **候选**：发布开始之前 30 分钟内新建的 Job，CronJob 创建的除外（属主来自 kube_job_owner 或 informer 的 owned_by）。
-    - **三档判定**，按顺序：
-      1. **managed_by**：Job 有 managed_by 边时，管理它的应用必须与发布的相同，不同就不挂，也不再往下判定。
-      2. **镜像**：Job 没有 managed_by 时，比较它的 Pod 镜像与发布新 ReplicaSet 的 Pod 镜像，digest 或 tag 相同就挂，不同就不挂。镜像来自 Pod 节点的 `images`（契约 2.19.0），kube-state-metrics 历史由 `kube_pod_container_info` 填写。迁移 Job 与 control、worker 用同一个 sha 的镜像，这条信号比命名空间可靠，也能排除同一命名空间里无关的一次性 Job。
-      3. **命名空间与时间窗**：前两档都没有数据时（Job 或新 ReplicaSet 的 Pod 没有镜像），Job 与发布的工作负载在同一命名空间，并且这次发布的窗口里只有这一个候选 Job，才挂上。
-    - **挂上之后**：发布的时间提前到 Job 新建的时刻，Job 加入发布的目标；`change_id` 不变。变更带上 `attachments: [{target, basis}]`（契约 2.19.0），摘要里写明依据。每个 Job 只挂到它之后最近的那次发布。
-    - **弱推导的风险**：第 3 档是按命名空间与时间窗推断的，同一命名空间里一个与发布无关的一次性 Job 会让发布的开始时间提前，并把这个 Job 上的告警归到发布。所以只在窗口里只有一个候选 Job 时才挂，并标为 `namespace_window`，研判与控制台能看出这是弱推导。第 2 档也有一个已知的误判：所有 Pod 都带同一个边车镜像时，镜像比较会把无关的 Job 挂上。
+    - **四档判定**，按顺序，有数据的一档决定结果：
+      1. **managed_by**：管理 Job 的应用必须与发布的相同，不同就不挂。管理应用取 Job 的 managed_by 边；没有边、但 Job 带 Argo 标签跟踪的 `app.kubernetes.io/instance` 时，按名称唯一匹配拓扑里的 Application。Argo CD 的 PreSync 等 hook 不在 Application 的 `status.resources` 里，reader 不会为它们生成 managed_by 边。
+      2. **版本标签**（`revision_label`）：`changes.kubernetes.pre_step_labels` 里的标签，Job 上的取值必须等于发布的新 ReplicaSet（Pod 模板）或工作负载上的同名标签，相等就挂，不等就不挂。只有一边带这个标签时落到下一档。默认不配置，不启用。CCHP 配 `cchp.io/release-id`：迁移 Job 与 migstat Job 带这个标签（`release.py` 的 `migration_job`），control、worker、gateway 的 Pod 模板也带同一个值（`apps/cchp/prod/kustomization.yaml` 从 `release.json` 的 `release_id` 替换），所以这是 CCHP 线上实际起作用的一档。CCHP 的迁移 Job 由 Argo Workflows 创建，没有 Argo 的跟踪标记，第 1 档用不上。
+      3. **镜像**：比较 Job 的 Pod 镜像与发布新 ReplicaSet 的 Pod 镜像，digest 或 tag 相同就挂，不同就不挂。镜像来自 Pod 节点的 `images`（契约 2.19.0）：reader 上报普通容器的镜像与 imageID（不含 init 容器，避免 wait-for-db 之类的辅助镜像误配）；kube-state-metrics 历史由 `kube_pod_container_info` 填写。这条信号比命名空间可靠，也能排除同一命名空间里无关的一次性 Job。
+      4. **命名空间与时间窗**：以上都没有数据时，Job 与发布的工作负载在同一命名空间，并且这次发布的窗口里只有这一个候选 Job，才挂上。
+    - **挂上之后**：发布的时间提前到 Job 新建的时刻，Job 加入发布的目标；`change_id` 不变。变更带上 `attachments: [{target, basis}]`（契约 2.19.0；`revision_label` 是 2.20.0 加的），摘要里写明依据。每个 Job 只挂到它之后最近的那次发布。
+    - **弱推导的风险**：第 4 档是按命名空间与时间窗推断的，同一命名空间里一个与发布无关的一次性 Job 会让发布的开始时间提前，并把这个 Job 上的告警归到发布。所以只在窗口里只有一个候选 Job 时才挂，并标为 `namespace_window`，研判与控制台能看出这是弱推导。第 3 档也有一个已知的误判：所有 Pod 都带同一个边车镜像时，镜像比较会把无关的 Job 挂上。
     - **数据来源**：kube-state-metrics 历史重建增加 `kube_job_owner` 与 `kube_pod_container_info`（core `KSM_TOPOLOGY_QUERIES`），server 的状态库与 eval 的重建用同一个 `deriveRollouts`。
 
-    **在重建包上的结果**：两个包都还没有镜像数据（导出时还没有 `kube_pod_container_info`），也没有 kube_job_owner。两次发布的窗口里各有两个候选 Job（`cchp-migrate-<sha>` 与 `cchp-migstat-<sha>-<n>`），按第 3 档都不挂，17 个标注的发现结果不变。把两个 Job 的镜像设为与新 ReplicaSet 相同来模拟第 2 档：
+    **在重建包上的结果**：两个包都还没有镜像数据（导出时还没有 `kube_pod_container_info`），也没有 kube_job_owner。kube-state-metrics 历史里的 Job 也没有标签，所以第 2 档用不上。两次发布的窗口里各有两个候选 Job（`cchp-migrate-<sha>` 与 `cchp-migstat-<sha>-<n>`），按第 4 档都不挂，17 个标注的发现结果不变。把两个 Job 的镜像设为与新 ReplicaSet 相同来模拟第 3 档：
     - release-migration-deadlock：发布时间从 06:27:10 提前到 06:20，gateway 的三条故障告警归到发布，事件数从 4 个降到 3 个，根因是 Argo 应用；
     - onboarding-rls-window：发布时间从 05:45 提前到 05:40，worker 告警归到发布，根因是 Argo 应用。
     

@@ -137,6 +137,53 @@ describe('从拓扑事件推导 Kubernetes 发布', () => {
     expect(r[0]!.targets).toEqual(['Deployment:shop/api', 'Job:shop/migrate', APP]);
   });
 
+  it('没有 managed_by 边的 Job：Argo instance 标签匹配到 Application；配置的版本标签与发布的相同时挂上', async () => {
+    const K = 'east-argo';
+    const up = (min: number, n: TopologyNode) => ({
+      op: 'node_upsert' as const,
+      at: at(min),
+      source: 'informer' as const,
+      node: n,
+    });
+    const ue = (min: number, e: TopologyEdge) => ({
+      op: 'edge_upsert' as const,
+      at: at(min),
+      source: 'informer' as const,
+      edge: e,
+    });
+    const app: TopologyNode = {
+      key: APP,
+      kind: 'Application.argoproj.io',
+      namespace: 'argocd',
+      name: 'shop',
+      uid: 'uid-app',
+      labels: {},
+      component_type: null,
+      hub: false,
+    };
+    await store.apply(K, [
+      up(0, app),
+      up(0, node('Deployment', 'api', { 'release-id': 'r1' })),
+      ue(0, edge('Deployment:shop/api', APP, 'managed_by')),
+      up(10, node('Job', 'presync', { 'app.kubernetes.io/instance': 'shop' })),
+      up(12, node('Job', 'migrate-r2', { 'release-id': 'r2' })),
+      up(13, node('Job', 'migrate-r0', { 'release-id': 'r0' })),
+      up(20, node('Deployment', 'api', { 'release-id': 'r2' })),
+    ]);
+    const r = await kubernetesRollouts(db.server, at(5), at(30), {
+      clusterId: K,
+      revisionLabels: ['release-id'],
+      groupWithinMs: 2 * 60_000,
+      preStepLabels: ['release-id'],
+    });
+    expect(r).toHaveLength(1);
+    expect(r[0]!.time).toBe(at(10).toISOString());
+    expect(r[0]!.attachments).toEqual([
+      { target: 'Job:shop/presync', basis: 'managed_by' },
+      { target: 'Job:shop/migrate-r2', basis: 'revision_label' },
+    ]);
+  });
+
   it('窗口外的变化与第一次出现的工作负载不算发布', async () => {
     expect(
       await kubernetesRollouts(db.server, at(-10), at(5), {

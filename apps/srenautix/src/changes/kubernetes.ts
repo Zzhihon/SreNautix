@@ -41,10 +41,23 @@ export interface RolloutOptions {
    * 不提供时第 2 档（镜像）始终没有数据
    */
   images?: (owner: string) => readonly string[] | null;
+  /**
+   * 拓扑中的 Argo CD Application 键。Job 没有 managed_by 边、但带 Argo 的标签跟踪 `app.kubernetes.io/instance` 时，
+   * 按名称唯一匹配到 Application 作为它的管理应用（PreSync 等 hook 不在 Application 的 status.resources 里）
+   */
+  argoApplications?: readonly string[];
+  /**
+   * 前置 Job 按版本标签关联时比较的标签（changes.kubernetes.pre_step_labels，例如 CCHP 的 cchp.io/release-id），
+   * 默认不启用。Job 上的取值与发布的新 ReplicaSet（Pod 模板）或工作负载上的同名标签比较
+   */
+  preStepLabels?: readonly string[];
 }
 
 /** 前置 Job 关联到发布的依据（changes/v1 的 attachments.basis） */
-export type AttachmentBasis = 'managed_by' | 'image' | 'namespace_window';
+export type AttachmentBasis = 'managed_by' | 'revision_label' | 'image' | 'namespace_window';
+
+/** Argo CD 标签跟踪方式写入的标签，值是 Application 的名称 */
+export const ARGO_INSTANCE_LABEL = 'app.kubernetes.io/instance';
 
 export const DEFAULT_PRE_STEP_WITHIN_MS = 30 * 60_000;
 
@@ -61,6 +74,8 @@ interface Atom {
   /** 版本标签的新取值（只取第一个变化的标签）；新 ReplicaSet 时为 Pod 模板的哈希 */
   revision: string | null;
   fromLabel: boolean;
+  /** 工作负载或新 ReplicaSet 上 preStepLabels 的取值（有值的），用于按版本标签关联前置 Job */
+  stepLabels: Record<string, string>;
   describe: string;
 }
 
@@ -89,7 +104,12 @@ interface PreStep {
   key: string;
   namespace: string | null;
   managers: string[];
+  labels: Readonly<Record<string, string | undefined>>;
 }
+
+/** 对象标签中 keys 里有值的部分 */
+const labelValues = (labels: Readonly<Record<string, string | undefined>> | undefined, keys: readonly string[]) =>
+  Object.fromEntries(keys.flatMap((k) => (labels?.[k] ? [[k, labels[k]!]] : [])));
 
 const namespaceOf = (key: string): string | null => {
   const rest = key.slice(key.indexOf(':') + 1);
@@ -108,12 +128,20 @@ export function deriveRollouts(events: readonly WorkloadEvent[], o: RolloutOptio
     // 新建的 Job（CronJob 创建的除外）：可能是发布的前置步骤（迁移、预检），在下面按三档依据关联
     if (e.kind === 'Job') {
       if (e.previous === null && !(e.owner ?? '').startsWith('CronJob:') && !jobs.some((j) => j.key === e.key)) {
+        // 没有 managed_by 边时，按 Argo 的标签跟踪找管理应用：名称唯一匹配拓扑中的 Application
+        let managers = e.managers;
+        const instance = e.body.labels?.[ARGO_INSTANCE_LABEL];
+        if (!managers.length && instance && o.argoApplications) {
+          const hits = o.argoApplications.filter((k) => k.slice(k.lastIndexOf('/') + 1) === instance);
+          managers = hits.length === 1 ? hits : [];
+        }
         jobs.push({
           time,
           seq: e.seq,
           key: e.key,
           namespace: e.body.namespace ?? namespaceOf(e.key),
-          managers: e.managers,
+          managers,
+          labels: e.body.labels ?? {},
         });
       }
       continue;
@@ -129,6 +157,7 @@ export function deriveRollouts(events: readonly WorkloadEvent[], o: RolloutOptio
           managers: e.managers,
           revision: r.to || null,
           fromLabel: true,
+          stepLabels: labelValues(e.body.labels, o.preStepLabels ?? []),
           describe: `${short(e.key)}：${r.label} ${r.from || '（无）'} → ${r.to || '（无）'}`,
         });
       }
@@ -141,6 +170,8 @@ export function deriveRollouts(events: readonly WorkloadEvent[], o: RolloutOptio
         managers: e.managers,
         revision: e.body.labels?.['pod-template-hash'] ?? null,
         fromLabel: false,
+        // 新 ReplicaSet 的 Pod 模板标签带着这次发布的版本标签（例如 CCHP 的 cchp.io/release-id）
+        stepLabels: labelValues(e.body.labels, o.preStepLabels ?? []),
         describe: `${short(e.owner)}：新的 ReplicaSet ${e.body.name}`,
       });
     }
@@ -207,15 +238,18 @@ export function deriveRollouts(events: readonly WorkloadEvent[], o: RolloutOptio
 
 const BASIS_TEXT: Record<AttachmentBasis, string> = {
   managed_by: '与发布由同一个应用管理',
+  revision_label: '版本标签与发布的相同',
   image: '镜像与发布的新 ReplicaSet 相同',
   namespace_window: '只按同一命名空间与时间窗推断',
 };
 
 /**
- * 发布之前的 Job 关联到发布（ADR 0104 §13）。Job 在发布开始之前 preStepWithinMs 之内新建，依次按三档判定：
- * 1. Job 有 managed_by：管理它的应用必须与发布的一致，不一致就不挂（不再往下判定）；
- * 2. 没有 managed_by：Job 的 Pod 镜像与发布新 ReplicaSet 的 Pod 镜像有相同的（digest 或 tag）就挂，没有相同的不挂；
- * 3. 前两档都没有数据：同一命名空间，并且这次发布的窗口里只有这一个候选 Job 时才挂（弱推导，attachments 标为
+ * 发布之前的 Job 关联到发布（ADR 0104 §13）。Job 在发布开始之前 preStepWithinMs 之内新建，依次判定，有数据的一档决定结果：
+ * 1. Job 有管理应用（managed_by 边，或 Argo 的 instance 标签）：必须与发布的一致，不一致就不挂；
+ * 2. Job 带配置的版本标签（preStepLabels，例如 cchp.io/release-id），发布的工作负载或新 ReplicaSet 也带：取值相同就挂，
+ *    不同就不挂；
+ * 3. Job 的 Pod 镜像与发布新 ReplicaSet 的 Pod 镜像有相同的（digest 或 tag）就挂，没有相同的不挂；
+ * 4. 以上都没有数据：同一命名空间，并且这次发布的窗口里只有这一个候选 Job 时才挂（弱推导，attachments 标为
  *    namespace_window）。
  * 一个 Job 只挂到它之后最近的、判定通过的那次发布。
  */
@@ -239,6 +273,14 @@ function attachPreSteps(
       const all = g.flatMap((a) => (a.replicaSet ? [...(o.images!(a.replicaSet) ?? [])] : []));
       return all.length ? new Set(all) : null;
     })();
+    // 发布的版本标签取值：同一个标签在这次发布里有多个取值时不用它判定
+    const values = new Map<string, Set<string>>();
+    for (const a of g) {
+      for (const [k, v] of Object.entries(a.stepLabels)) {
+        values.set(k, (values.get(k) ?? new Set()).add(v));
+      }
+    }
+    const releaseLabels = new Map([...values].flatMap(([k, s]) => (s.size === 1 ? [[k, [...s][0]!] as const] : [])));
     const candidates = jobs.filter((j) => !used.has(j.key) && j.time <= start && start - j.time <= within);
     const strong: Array<{ job: PreStep; basis: AttachmentBasis }> = [];
     const weak: PreStep[] = [];
@@ -248,6 +290,14 @@ function attachPreSteps(
         considered++;
         if (j.managers.some((m) => managers.has(m))) {
           strong.push({ job: j, basis: 'managed_by' });
+        }
+        continue;
+      }
+      const shared = [...releaseLabels.keys()].filter((k) => j.labels[k]);
+      if (shared.length) {
+        considered++;
+        if (shared.every((k) => j.labels[k] === releaseLabels.get(k))) {
+          strong.push({ job: j, basis: 'revision_label' });
         }
         continue;
       }
@@ -343,6 +393,16 @@ export async function kubernetesRollouts(
       images.set(x.owner, s);
     }
   }
+  // Argo CD Application：没有 managed_by 边的 Job 按 instance 标签找管理应用
+  const apps = r.rows.some((x) => x.kind === 'Job' && x.body.labels?.[ARGO_INSTANCE_LABEL])
+    ? (
+        await q.query<{ key: string }>(
+          `SELECT DISTINCT key FROM server.topology_events
+            WHERE cluster_id = $1 AND item = 'node' AND op = 'node_upsert' AND key LIKE 'Application.argoproj.io:%'`,
+          [o.clusterId],
+        )
+      ).rows.map((x) => x.key)
+    : [];
   return deriveRollouts(
     r.rows.map((x) => ({
       seq: Number(x.seq),
@@ -356,6 +416,10 @@ export async function kubernetesRollouts(
       ownerSeenBefore: x.owner_seen_before ?? false,
       managers: x.managers ?? [],
     })),
-    { ...o, images: (owner) => (images.has(owner) ? [...images.get(owner)!] : null) },
+    {
+      ...o,
+      images: (owner) => (images.has(owner) ? [...images.get(owner)!] : null),
+      argoApplications: apps,
+    },
   );
 }

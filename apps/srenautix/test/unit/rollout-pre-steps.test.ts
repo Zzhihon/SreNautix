@@ -139,6 +139,76 @@ describe('发布之前的 Job', () => {
   });
 });
 
+describe('没有 managed_by 边的 Job：Argo 的 instance 标签与版本标签', () => {
+  const REL = 'cchp.io/release-id';
+  const labelled = (e: WorkloadEvent, labels: Record<string, string>): WorkloadEvent => ({
+    ...e,
+    body: { ...e.body, labels: { ...e.body.labels, ...labels } },
+  });
+  // 发布：Deployment 的版本标签从 r1 变到 r2，新 ReplicaSet 的 Pod 模板也带 r2
+  const deploy = (to: string): WorkloadEvent => ({
+    seq: ++seq,
+    op: 'node_upsert',
+    key: 'Deployment:shop/api',
+    kind: 'Deployment',
+    valid_from: at(20),
+    body: { ...body('Deployment', 'api'), labels: { [REL]: to } },
+    previous: { ...body('Deployment', 'api'), labels: { [REL]: 'r1' } },
+    owner: null,
+    managers: [APP],
+  });
+  const withRel = (images: Record<string, string[]> = {}): RolloutOptions => ({
+    ...opts(images),
+    revisionLabels: [REL],
+    preStepLabels: [REL],
+  });
+  const SAME_IMAGE = { 'Job:shop/cchp-migrate-abc': ['sha256:same'], 'ReplicaSet:shop/api-new': ['sha256:same'] };
+
+  it('instance 标签按名称唯一匹配 Application，作为管理应用：一致时挂上，指向别的应用时不挂', () => {
+    const apps = { ...withRel(), argoApplications: [APP, OTHER_APP] };
+    const same = only([labelled(job('presync', 10), { 'app.kubernetes.io/instance': 'shop' }), rs()], apps);
+    expect(same.attachments).toEqual([{ target: 'Job:shop/presync', basis: 'managed_by' }]);
+    const other = only([labelled(job('presync', 10), { 'app.kubernetes.io/instance': 'billing' }), rs()], apps);
+    expect(other.attachments).toBeUndefined();
+  });
+
+  it('版本标签：Job 的取值与发布的相同就挂上（CCHP 的迁移 Job 与 migstat Job 都挂）；不同就不挂，也不看镜像', () => {
+    const c = only(
+      [
+        labelled(job('cchp-migrate-abc', 10), { [REL]: 'r2' }),
+        labelled(job('cchp-migstat-abc-1', 11), { [REL]: 'r2' }),
+        deploy('r2'),
+        labelled(rs(), { [REL]: 'r2' }),
+      ],
+      withRel(),
+    );
+    expect(c.time).toBe(at(10));
+    expect(c.attachments).toEqual([
+      { target: 'Job:shop/cchp-migrate-abc', basis: 'revision_label' },
+      { target: 'Job:shop/cchp-migstat-abc-1', basis: 'revision_label' },
+    ]);
+    const old = only(
+      [labelled(job('cchp-migrate-abc', 10), { [REL]: 'r1' }), deploy('r2'), labelled(rs(), { [REL]: 'r2' })],
+      withRel(SAME_IMAGE),
+    );
+    expect(old.attachments).toBeUndefined();
+    expect(old.time).toBe(at(20));
+  });
+
+  it('版本标签：Job 带标签而发布的工作负载与新 ReplicaSet 都不带时，落到下一档（镜像）', () => {
+    const c = only([labelled(job('cchp-migrate-abc', 10), { [REL]: 'r2' }), rs()], withRel(SAME_IMAGE));
+    expect(c.attachments).toEqual([{ target: 'Job:shop/cchp-migrate-abc', basis: 'image' }]);
+  });
+
+  it('版本标签：没有配置 pre_step_labels 时不启用，取值不同也落到下一档', () => {
+    const c = only(
+      [labelled(job('cchp-migrate-abc', 10), { [REL]: 'r1' }), deploy('r2'), labelled(rs(), { [REL]: 'r2' })],
+      { ...withRel(SAME_IMAGE), preStepLabels: [] },
+    );
+    expect(c.attachments).toEqual([{ target: 'Job:shop/cchp-migrate-abc', basis: 'image' }]);
+  });
+});
+
 describe('重建包（kube-state-metrics 历史）中的前置 Job', () => {
   // 状态库只有 Deployment；新 ReplicaSet、迁移 Job、CronJob 的 Job 与它们的 Pod（带镜像）只在 kube-state-metrics 历史里
   const row = (s: number, min: number, b: TopologyNode | TopologyEdge, source = 'ksm_history'): TopologyRow =>

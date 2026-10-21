@@ -334,6 +334,9 @@ changes:
     enabled: {{ .enabled }}
     revision_labels: {{ toJson .revisionLabels }}
     group_within: {{ .groupWithin }}
+    {{- with .preStepLabels }}
+    pre_step_labels: {{ toJson . }}
+    {{- end }}
   {{- end }}
 {{- with $v.detectors }}
 {{- if .enabled }}

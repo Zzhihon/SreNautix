@@ -530,6 +530,14 @@ export class BundleTopology implements NodeLookup {
    * 属于 owner（Job 或 ReplicaSet，沿 owned_by，任一来源）的 Pod 的镜像（Pod 节点的 images）；没有任何 Pod 带镜像时为 null。
    * 与 changes/kubernetes.ts 的 kubernetesRollouts 相同，不按时刻过滤：Pod 的镜像在它的生命周期内不变
    */
+  /** 重建包里出现过的 Argo CD Application 键（与 kubernetesRollouts 的查询相同，不按时刻过滤） */
+  argoApplications(): string[] {
+    this.apps ??= [...this.nodes.keys()].filter((k) => k.startsWith('Application.argoproj.io:')).sort();
+    return this.apps;
+  }
+
+  private apps: string[] | null = null;
+
   podImages(owner: string): string[] | null {
     if (!this.imageIndex) {
       const pods = new Map<string, Set<string>>();
@@ -568,6 +576,8 @@ export interface ReplayOptions {
   rt: PackRuntime;
   params: ResolvedRcaParams;
   revisionLabels: readonly string[];
+  /** 与 server 的 changes.kubernetes.pre_step_labels 相同；不填时不启用 */
+  preStepLabels?: readonly string[];
   groupWithinMs: number;
   stepMs: number;
 }
@@ -706,6 +716,8 @@ export async function replay(
         revisionLabels: o.revisionLabels,
         groupWithinMs: o.groupWithinMs,
         images: (owner) => topo.podImages(owner),
+        argoApplications: topo.argoApplications(),
+        preStepLabels: o.preStepLabels ?? [],
       }),
     ].sort((x, y) => x.time.localeCompare(y.time) || x.change_id.localeCompare(y.change_id));
     const computed = computeIncidents({ alerts: visible, changes, graph, params: o.params, now: t, probes: [] });

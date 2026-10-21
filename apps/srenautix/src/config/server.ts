@@ -295,6 +295,9 @@ export const serverConfigSchema = z
             group_within: duration.default('2m'),
             // informer 空窗时（重启、断连、刚安装）从证据数据源的 kube-state-metrics 推导拓扑里没有的发布（ADR 0104 §11）
             ksm_fallback: z.boolean().default(true),
+            // 发布之前的 Job 按这些标签的取值关联到发布（ADR 0104 §13）：Job 上的取值等于发布新 ReplicaSet 或工作负载上的
+            // 同名标签时挂上。默认不启用；CCHP 配 cchp.io/release-id
+            pre_step_labels: z.array(z.string().min(1)).default([]),
           })
           .strict()
           .default({
@@ -302,6 +305,7 @@ export const serverConfigSchema = z
             revision_labels: [...DEFAULT_REVISION_LABELS],
             group_within: '2m',
             ksm_fallback: true,
+            pre_step_labels: [],
           }),
       })
       .strict()
@@ -314,6 +318,7 @@ export const serverConfigSchema = z
           revision_labels: [...DEFAULT_REVISION_LABELS],
           group_within: '2m',
           ksm_fallback: true,
+          pre_step_labels: [],
         },
       }),
     // 集群状态检测器（ADR 0105）：没有告警规则时也发现卡住的 Pod、停滞的发布、CrashLoop、阻塞驱逐的 PDB 与失败的 Job，

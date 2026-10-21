@@ -246,6 +246,9 @@ changes:
     # 可追加自己的发布标签，例如 GitOps 仓库写入 Pod 模板的发布 ID 标签
     revisionLabels: [app.kubernetes.io/version, helm.sh/chart]
     groupWithin: 2m
+    # 发布之前的 Job（迁移、预检）按这些标签的取值关联到发布：Job 上的取值等于新 ReplicaSet 或工作负载上的同名标签时，
+    # Job 算作发布的第一步（ADR 0104 §13）。默认不启用，例如 [example.com/release-id]
+    preStepLabels: []
 
 # 集群状态检测器（server 配置的 detectors）：没有告警规则时也能发现 Pod 卡在 Init 或 Pending、rollout 停滞、CrashLoop、
 # PDB 阻塞驱逐与 Job 失败。只读，复用拓扑的 informer（单集群）或 reader 的上报（多集群），发现结果与告警一样进入事件。

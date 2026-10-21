@@ -1,5 +1,5 @@
 // 本文件由 packages/contract/scripts/gen.ts 从 contract/ 生成，不要手工修改。
-export const CONTRACT_VERSION = '2.19.0';
+export const CONTRACT_VERSION = '2.20.0';
 
 export const SCHEMAS: Record<string, Record<string, unknown>> = {
   'https://srenautix.io/contract/gateway/v1/action-catalog.schema.json': {
@@ -889,14 +889,14 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
           attachments: {
             type: 'array',
             description:
-              '推导出的变更挂上的前置对象及推导依据（ADR 0104 §13），例如发布之前的迁移 Job。basis：managed_by（与发布由同一个应用管理）、image（Pod 镜像与发布新 ReplicaSet 的镜像相同）、namespace_window（只按同一命名空间与时间窗推断，是弱推导）',
+              '推导出的变更挂上的前置对象及推导依据（ADR 0104 §13），例如发布之前的迁移 Job。basis：managed_by（与发布由同一个应用管理：managed_by 边或 Argo 的 instance 标签）、revision_label（配置的版本标签取值与发布的相同，例如 cchp.io/release-id）、image（Pod 镜像与发布新 ReplicaSet 的镜像相同）、namespace_window（只按同一命名空间与时间窗推断，是弱推导）',
             items: {
               type: 'object',
               additionalProperties: false,
               required: ['target', 'basis'],
               properties: {
                 target: { $ref: '../../../schemas/common.schema.json#/$defs/ComponentKey' },
-                basis: { type: 'string', enum: ['managed_by', 'image', 'namespace_window'] },
+                basis: { type: 'string', enum: ['managed_by', 'revision_label', 'image', 'namespace_window'] },
               },
             },
           },

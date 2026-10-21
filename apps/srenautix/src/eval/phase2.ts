@@ -120,6 +120,7 @@ export async function runPhase2(o: Phase2Options): Promise<Phase2Result> {
         rt,
         params,
         revisionLabels: r.revision_labels,
+        preStepLabels: r.pre_step_labels ?? [],
         groupWithinMs: r.group_within_seconds * 1000,
         stepMs: r.step_seconds * 1000,
       },

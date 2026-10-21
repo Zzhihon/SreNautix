@@ -124,6 +124,8 @@ const schema = z
           .strict(),
         packs: z.object({ dirs: z.array(z.string().min(1)).min(1) }).strict(),
         revision_labels: z.array(z.string().min(1)).default([]),
+        // 与 server 的 changes.kubernetes.pre_step_labels 相同（ADR 0104 §13）
+        pre_step_labels: z.array(z.string().min(1)).optional(),
         group_within_seconds: z.number().int().min(10).default(120),
         step_seconds: z.number().int().min(10).max(300).default(30),
         locale: z.enum(['zh-CN', 'en']).default('zh-CN'),

@@ -190,6 +190,15 @@ tests:
     asserts:
       - matchRegex: {path: 'data["config.yaml"]', pattern: '(?m)^    enabled: false\n    group_within: 5m\n    revision_labels:\n    - app.kubernetes.io/version\n    - example.com/release-id$'}
 
+  - it: 前置 Job 的版本标签默认不写，配置后写入 pre_step_labels
+    set:
+      profile: standard
+      changes.kubernetes.preStepLabels: [example.com/release-id]
+    template: templates/role-resources.yaml
+    documentSelector: {path: metadata.name, value: t-srenautix-server-config}
+    asserts:
+      - matchRegex: {path: 'data["config.yaml"]', pattern: '(?m)^    group_within: 2m\n    pre_step_labels:\n    - example.com/release-id\n    revision_labels:$'}
+
   - it: 每小时 PR 上限与 gateway 策略的范围一致（1–20）
     values:
       - ../ci/phase2-values.yaml
