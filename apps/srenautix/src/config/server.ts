@@ -293,16 +293,28 @@ export const serverConfigSchema = z
             revision_labels: z.array(z.string().min(1)).default([...DEFAULT_REVISION_LABELS]),
             // 这段时间内同一版本或同一个管理应用的变化合成一次发布
             group_within: duration.default('2m'),
+            // informer 空窗时（重启、断连、刚安装）从证据数据源的 kube-state-metrics 推导拓扑里没有的发布（ADR 0104 §11）
+            ksm_fallback: z.boolean().default(true),
           })
           .strict()
-          .default({ enabled: true, revision_labels: [...DEFAULT_REVISION_LABELS], group_within: '2m' }),
+          .default({
+            enabled: true,
+            revision_labels: [...DEFAULT_REVISION_LABELS],
+            group_within: '2m',
+            ksm_fallback: true,
+          }),
       })
       .strict()
       .default({
         sources: [],
         interval: '60s',
         lookback: '24h',
-        kubernetes: { enabled: true, revision_labels: [...DEFAULT_REVISION_LABELS], group_within: '2m' },
+        kubernetes: {
+          enabled: true,
+          revision_labels: [...DEFAULT_REVISION_LABELS],
+          group_within: '2m',
+          ksm_fallback: true,
+        },
       }),
     // 集群状态检测器（ADR 0105）：没有告警规则时也发现卡住的 Pod、停滞的发布、CrashLoop、阻塞驱逐的 PDB 与失败的 Job，
     // 合成为 source=detector 的告警进入事件。对象状态由 reader（多集群）或 server 的 informer（单集群）上报

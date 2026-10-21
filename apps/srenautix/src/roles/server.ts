@@ -14,6 +14,7 @@ import { pgConfigFromEnv } from '../config/database.js';
 import { parseDuration, parseListen, readSecretFile } from '../config/files.js';
 import { loadServerConfig, type ServerConfig } from '../config/server.js';
 import { kubernetesRollouts } from '../changes/kubernetes.js';
+import { ksmRollouts } from '../changes/ksm-rollouts.js';
 import { changesInWindow, ChangesService } from '../changes/service.js';
 import { ConditionPublisher, serverConditions, workerRouteConditions } from '../console-bff/conditions.js';
 import { IntegrationRegistry } from '../console-bff/integrations.js';
@@ -421,18 +422,41 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
 
   // 事件引擎与阶段 A
   // 变更源的变更加上从拓扑事件推导的 Kubernetes 发布（ADR 0104）
+  // kube-state-metrics 的发布推导：事件引擎每次重算都会调用，结果按分钟缓存 60 秒，数据源报错时记日志并跳过
+  let ksmCache: { key: string; at: number; out: ChangeEvent[] } | null = null;
+  const ksmFallback = async (from: Date, to: Date, ro: Parameters<typeof ksmRollouts>[4]): Promise<ChangeEvent[]> => {
+    const minute = (d: Date) => Math.floor(d.getTime() / 60_000);
+    const key = `${minute(from)}:${minute(to)}`;
+    if (ksmCache && ksmCache.key === key && Date.now() - ksmCache.at < 60_000) {
+      return ksmCache.out;
+    }
+    try {
+      const ds = await evidenceSource.dataSource(to.getTime());
+      const out = await ksmRollouts(pool, (req) => ds.query(req), from, to, ro);
+      ksmCache = { key, at: Date.now(), out };
+      return out;
+    } catch (e) {
+      logger.warn('从 kube-state-metrics 推导发布失败，本次只用拓扑事件', {
+        error: e instanceof Error ? e.message : e,
+      });
+      return [];
+    }
+  };
   const engineChanges = async (clusterId: string, from: Date, to: Date): Promise<ChangeEvent[]> => {
     const stored = await changesInWindow(pool, clusterId, from, to);
     const k = c.changes.kubernetes;
     if (!k.enabled) {
       return stored;
     }
-    const derived = await kubernetesRollouts(pool, from, to, {
+    const ro = {
       clusterId,
       revisionLabels: k.revision_labels,
       groupWithinMs: parseDuration('changes.kubernetes.group_within', k.group_within),
-    });
-    return [...stored, ...derived].sort(
+    };
+    const derived = await kubernetesRollouts(pool, from, to, ro);
+    // informer 空窗时拓扑里没有的发布：从 kube-state-metrics 推导（ADR 0104 §11）；只对本集群，数据源不可用时跳过
+    const fromKsm = k.ksm_fallback && clusterId === c.cluster_id ? await ksmFallback(from, to, ro) : [];
+    return [...stored, ...derived, ...fromKsm].sort(
       (a, b) => a.time.localeCompare(b.time) || a.change_id.localeCompare(b.change_id),
     );
   };

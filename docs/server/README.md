@@ -198,7 +198,10 @@ packs:
 changes:
   kubernetes:
     revision_labels: [app.kubernetes.io/version, helm.sh/chart, cchp.io/release-id]
+    ksm_fallback: true      # informer 空窗时从 kube-state-metrics 推导拓扑里没有的发布
 ```
+
+informer 有空窗时（server 重启、与 reader 断连、刚安装），拓扑里没有这段时间新建的 ReplicaSet。`ksm_fallback`（默认开启，ADR 0104 §11）从证据数据源的 kube-state-metrics（`kube_replicaset_created`、`kube_replicaset_owner`、`kube_deployment_created`）补上：窗口内创建、属主 Deployment 早已存在、拓扑里从来没有记录过的 ReplicaSet 视为一次发布，与拓扑事件推导的发布用同样的规则合成。只对本集群；数据源不可用时跳过并记日志，结果缓存一分钟。
 
 收敛时 Pod 级告警归到它的工作负载；没有对象的告警（发布流水线、部署后检查）与只落在命名空间上的告警归到它之前最近的一次发布。
 
