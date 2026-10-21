@@ -18,6 +18,7 @@ import type { ServerMetrics } from '../metrics.js';
 import type { EvidenceSource, PackRuntime } from './packs.js';
 import type { EvidenceRun, EvidenceRunner, RuleHit, RuleProposer } from './ports.js';
 import { parseStoredKey } from '../topology/keys.js';
+import { cardApplies, splitCardCheckArgs } from './card-checks.js';
 
 /**
  * 组件 key → 组件类型（拓扑节点上由 components.yaml 匹配出的值）。正常通道查状态库，
@@ -38,6 +39,8 @@ interface Planned {
   entity: EntityRef;
   /** 覆盖卡片默认参数（查询模板的参数） */
   params?: Record<string, number | string | boolean>;
+  /** 覆盖卡片定义的窗口（卡片检查，ADR 0116） */
+  window?: { before: string; after: string };
 }
 
 /** 数据源的查询回看：卡片窗口之前再留 24 小时，供 rate 等函数的回看范围使用。 */
@@ -293,6 +296,39 @@ export class PackEvidence implements EvidenceRunner {
     return { ...r, ref: 'card:1' };
   }
 
+  /**
+   * 卡片检查（ADR 0116）：在 entity 上执行证据链的卡 card；args 中的 window_before/window_after 覆盖卡片的窗口，
+   * 其余覆盖卡片的默认参数。
+   * 窗口以事件首次触发时间为锚点，终点不晚于 now。卡片不存在、不适用于实体的 kind 或没有执行时抛出。
+   */
+  async runCardCheck(
+    inc: Incident,
+    card: string,
+    args: Record<string, unknown>,
+    entity: EntityRef,
+    now: number,
+    signal: AbortSignal,
+  ): Promise<EvidenceResult> {
+    const e = this.rt.set.cards.get(card);
+    if (!e || e.chain === null) {
+      throw new Error(`没有证据链的卡 ${card}`);
+    }
+    if (!cardApplies(e, entity.kind)) {
+      throw new Error(`卡 ${card} 不适用于 ${entity.kind}`);
+    }
+    const { params, window } = splitCardCheckArgs(e, args);
+    const [r] = await this.execute(
+      [{ card, entity, params, ...(window ? { window } : {}) }],
+      Date.parse(inc.first_firing_at),
+      now,
+      signal,
+    );
+    if (!r) {
+      throw new Error(`卡 ${card} 没有执行（见 server 日志）`);
+    }
+    return { ...r, ref: 'card:1' };
+  }
+
   private runbooks(chains: string[]): string[] {
     const out: string[] = [];
     for (const ck of chains) {
@@ -321,7 +357,9 @@ export class PackEvidence implements EvidenceRunner {
     // 按事件当时的数据选择备选，不按墙上时钟（否则 [当前−2h, 当前] 内没有序列，每张卡都是 source_error）
     const windowEnd = Math.max(
       ...plan.map(
-        (p) => anchor + durationSeconds((this.rt.set.cards.get(p.card)!.def.window ?? DEFAULT_WINDOW).after) * 1000,
+        (p) =>
+          anchor +
+          durationSeconds((p.window ?? this.rt.set.cards.get(p.card)!.def.window ?? DEFAULT_WINDOW).after) * 1000,
       ),
     );
     const probeAt = Math.min(now, windowEnd);
@@ -331,7 +369,7 @@ export class PackEvidence implements EvidenceRunner {
     type Done = Omit<EvidenceResult, 'ref'>;
     const results = await pool(plan, this.o.concurrency, signal, async (p): Promise<Done | null> => {
       const e = this.rt.set.cards.get(p.card)!;
-      const before = durationSeconds((e.def.window ?? DEFAULT_WINDOW).before) * 1000;
+      const before = durationSeconds((p.window ?? e.def.window ?? DEFAULT_WINDOW).before) * 1000;
       const started = performance.now();
       try {
         const r = await runCard({
@@ -353,6 +391,7 @@ export class PackEvidence implements EvidenceRunner {
           locale: this.o.locale,
           timeoutMs: this.o.queryTimeoutMs,
           ...(p.params ? { params: p.params } : {}),
+          ...(p.window ? { window: p.window } : {}),
         });
         this.metrics.evidenceCards.inc({ display_state: r.display_state });
         this.metrics.evidenceCardSeconds.observe((performance.now() - started) / 1000);

@@ -6,9 +6,9 @@ labels:
   title: 发布迁移后同步超时，回退到迁移前镜像失败，worker 约 2 小时没有可用副本（脱敏）
   type: incident
   window:
-    from: '2026-10-20T15:57:00Z'
-    to: '2026-10-20T18:50:00Z'
-  as_of: '2026-10-20T17:05:00Z'
+    from: 2026-10-20 15:57:00+00:00
+    to: 2026-10-20 18:50:00+00:00
+  as_of: 2026-10-20 17:05:00+00:00
   fault_alerts:
   - alertname: ACMEReleaseGateSkipped
   - alertname: KubeWarningEventBurst
@@ -59,8 +59,61 @@ labels:
   - - Deployment:acme-prod/worker
   - - Application.argoproj.io:argocd/acme-prod
     - application:argocd/acme-prod
-  required_change_near: '2026-10-20T16:24:25Z'
+  required_change_near: 2026-10-20 16:24:25+00:00
   evidence:
   - kind: workflow
     ref: acme-cd/acme-release
     note: argocd-sync 超时，回退失败（脱敏）
+- id: pg-sync-restart-acme
+  title: pg-sync-restart-acme（脱敏）
+  type: incident
+  window:
+    from: 2026-10-14 02:30:00+00:00
+    to: 2026-10-14 02:50:00+00:00
+  as_of: 2026-10-14 02:38:00+00:00
+  fault_alerts:
+  - alertname: CNPGNoWritablePrimary
+  - alertname: CNPGNoPrimaryReported
+  - alertname: CNPGPrimaryPostmasterRestarted
+  - alertname: CNPGWALArchiveFailures
+  - alertname: ArgoCDSyncFailed
+    labels:
+      name: acme-postgresql-prod
+  - alertname: ACMEBillingSettlementRecoveryRequired
+  roots:
+  - cluster:acme-postgres
+  - cluster:acme-data/acme-postgres
+  - Cluster.postgresql.cnpg.io:acme-data/acme-postgres
+  - component:pg
+  - Application.argoproj.io:argocd/acme-postgresql-prod
+  - application:argocd/acme-postgresql-prod
+  granularity: component
+  mechanism: 脱敏的回归用例：只保留故障涉及的命名空间
+  evidence:
+  - kind: report
+    ref: fixture/pg-sync-restart-acme
+    note: 脱敏的回归用例
+- id: metrics-scrape-blind-acme
+  title: metrics-scrape-blind-acme（脱敏）
+  type: incident
+  window:
+    from: 2026-10-14 05:05:00+00:00
+    to: 2026-10-14 06:35:00+00:00
+  as_of: 2026-10-14 05:30:00+00:00
+  fault_alerts:
+  - alertname: ACMEMetricsTargetDown
+    labels:
+      namespace: acme-prod
+  roots:
+  - Application.argoproj.io:argocd/acme-prod
+  - application:argocd/acme-prod
+  - StatefulSet:acme-prod/gateway
+  - Deployment:acme-prod/control
+  - component:release
+  granularity: component
+  mechanism: 脱敏的回归用例：只保留故障涉及的命名空间
+  disposition: act
+  evidence:
+  - kind: report
+    ref: fixture/metrics-scrape-blind-acme
+    note: 脱敏的回归用例

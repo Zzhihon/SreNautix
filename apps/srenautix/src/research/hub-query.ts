@@ -1,5 +1,6 @@
 import type { EvidenceResult } from '@srenautix/contract';
 import type { QueryRunContext, QueryRunner } from './checks.js';
+import { parseCardCheckId } from '../stage-a/card-checks.js';
 import { HubError, type HubClient } from './hub.js';
 import type { CheckTemplate } from './types.js';
 
@@ -15,18 +16,26 @@ export class HubQueryRunner implements QueryRunner {
   ) {}
 
   async run(template: CheckTemplate, args: Record<string, unknown>, ctx: QueryRunContext): Promise<EvidenceResult> {
+    // 卡片检查（ADR 0116）的 id 带着要执行的组件，按它执行；查询模板按假设的根因执行
+    const card = parseCardCheckId(template.id);
     try {
-      return await this.hub.runTemplate(this.runId, template.id, args, ctx.rootComponent, ctx.signal);
+      return await this.hub.runTemplate(
+        this.runId,
+        template.id,
+        args,
+        card?.component ?? ctx.rootComponent,
+        ctx.signal,
+      );
     } catch (e) {
       if (!(e instanceof HubError) || e.status >= 500) {
         throw e;
       }
       const now = new Date().toISOString();
-      // 模板 id 为 <pack>/<id>，卡片 id 与 server 执行时相同：<pack>/templates/<id>
+      // 卡片 id 与 server 执行时相同：卡片检查为卡片键，查询模板 <pack>/<id> 为 <pack>/templates/<id>
       const slash = template.id.indexOf('/');
       return {
         ref: 'card:1',
-        card_id: `${template.id.slice(0, slash)}/templates/${template.id.slice(slash + 1)}`,
+        card_id: card ? card.card : `${template.id.slice(0, slash)}/templates/${template.id.slice(slash + 1)}`,
         title: { 'zh-CN': template.description, en: template.description },
         threshold: null,
         series: [],

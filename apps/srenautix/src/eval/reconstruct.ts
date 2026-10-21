@@ -30,6 +30,7 @@ import { buildReport, verdictFingerprint } from '../stage-a/report.js';
 import { agreeAlerts, type AlertAgreement } from './agreement.js';
 import type { AlertInstance, Bundle, TopologyRow } from './bundle.js';
 import { matchesFault, type Label } from './labels.js';
+import { cardChecks, parseCardCheckId } from '../stage-a/card-checks.js';
 import { stableUuid } from './import-seed.js';
 
 // 重建（DESIGN §14.2 reconstructed，ADR 0110）：用重建包按 server 的同一套代码重放一段时间。
@@ -766,7 +767,11 @@ export async function reconstructCase(
       runbooks: report.runbooks,
       knowledge: a.rt.knowledge(types, a.locale) as unknown as EvalSnapshot['context']['knowledge'],
       cases: [],
-      templates: a.rt.templates.map((x) => ({ id: x.id, description: x.description, args: x.args })),
+      // 领域包的查询模板，加上子图组件 × 适用的证据链卡（卡片即检查，ADR 0116），与 server 的研判输入相同
+      templates: [
+        ...a.rt.templates.map((x) => ({ id: x.id, description: x.description, args: x.args })),
+        ...cardChecks(a.rt, inc, topo.nodes, report.cards, a.locale, topo.edges),
+      ],
     },
     queries: {
       api_version: 'srenautix.io/query-snapshot/v1',
@@ -830,11 +835,17 @@ export class ReconstructedQueryRunner implements QueryRunner {
         params[k] = v;
       }
     }
-    const node = this.topology.at(this.asOf).nodes.find((n) => n.key === ctx.rootComponent);
-    const k = parseStoredKey(ctx.rootComponent);
+    // 卡片检查（ADR 0116）按 id 里的组件执行；查询模板按假设的根因执行（与 server 的 /query 相同）
+    const card = parseCardCheckId(template.id);
+    const component = card?.component ?? ctx.rootComponent;
+    const node = this.topology.at(this.asOf).nodes.find((n) => n.key === component);
+    const k = parseStoredKey(component);
     const entity = node
       ? { cluster_id: this.inc.cluster_id, kind: node.kind, namespace: node.namespace, name: node.name, uid: node.uid }
       : { cluster_id: this.inc.cluster_id, kind: k.kind, namespace: k.namespace, name: k.name, uid: null };
+    if (card) {
+      return this.evidence.runCardCheck(this.inc, card.card, args, entity, this.asOf, ctx.signal);
+    }
     return this.evidence.runTemplate(this.inc, template.id, params, entity, this.asOf, ctx.signal);
   }
 }

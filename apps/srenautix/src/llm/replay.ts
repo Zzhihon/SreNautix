@@ -13,6 +13,7 @@ import { logger } from '../log.js';
  *   回放时包成对应协议的响应。
  * - 结构化输出中的占位符按本次请求解析（只对整串是占位符的字符串）：
  *   `{{ref:<卡片 id>}}`、`{{ref:<卡片 id>@<实体>}}` 为提示中这张卡的引用（card:N）；
+ *   `{{match:<正则>}}` 为 schema 枚举中第一个匹配的值（例如运行时才确定的卡片检查 `cardcheck:…@<组件>`）；
  *   `{{component:<正则>}}` 为 schema 组件枚举（没有 schema 时为提示）中第一个匹配的组件键，没有匹配时退回事件的根因（在枚举里时）；`{{enum:<值>}}` 为该值本身，只在它出现在 schema 的某个枚举里时。
  *   解析不出的占位符删除它所在的数组元素（数组外为 null），录制因此不依赖某张卡或某个工具一定存在。
  * - 请求为流式时按服务方的事件格式发出。
@@ -186,7 +187,7 @@ function schemaEnums(req: any): Set<string> {
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
 const DROP = Symbol('drop');
-const PLACEHOLDER = /^\{\{(ref|component|enum):(.+)\}\}$/;
+const PLACEHOLDER = /^\{\{(ref|component|enum|match):(.+)\}\}$/;
 const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 /** 按请求解析结构化输出中的占位符；解析不出的删除所在的数组元素（数组外为 null） */
@@ -214,6 +215,10 @@ export function resolvePlaceholders(output: unknown, req: unknown): unknown {
     if (kind === 'component') {
       const re = new RegExp(arg);
       return components.find((c) => re.test(c)) ?? (rootOk ? incidentRoot : DROP);
+    }
+    if (kind === 'match') {
+      const re = new RegExp(arg);
+      return [...enums].find((e) => re.test(e)) ?? DROP;
     }
     return enums.has(arg) ? arg : DROP;
   };

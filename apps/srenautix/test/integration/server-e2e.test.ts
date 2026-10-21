@@ -452,9 +452,13 @@ describe('server 端到端', () => {
       topology: { nodes: Array<{ key: string }> };
     };
     // 领域包材料：查询模板（由 server 执行）、pack.lock 摘要；子图中没有 example.web 组件，知识条目为空；没有参考案例
-    expect(c.templates).toEqual([
+    // 领域包的查询模板在前，其后是子图组件 × 适用的证据链卡（卡片即检查，ADR 0116）
+    expect(c.templates[0]).toEqual(
       expect.objectContaining({ id: '_example/memory-ratio', args: expect.objectContaining({ type: 'object' }) }),
-    ]);
+    );
+    const cardChecks = c.templates.filter((x) => x.id.startsWith('cardcheck:'));
+    expect(cardChecks.length).toBeGreaterThan(0);
+    expect(c.templates.length).toBe(1 + cardChecks.length);
     expect(c.pack_lock).toMatch(/^sha256:[0-9a-f]{64}$/);
     expect(c.knowledge).toEqual([]);
     expect(c.cases).toEqual([]);
@@ -488,6 +492,21 @@ describe('server 端到端', () => {
     expect(refused).toMatchObject({ verdict: 'undeterminable', reason: { kind: 'evaluation_error' } });
     expect(refused.reason.text).toContain('参数不符合模板');
     expect(validatorFor('schemas/evidence-result.schema.json')(refused)).toBe(true);
+    // 卡片检查：按 id 里的组件执行（不按请求体的 component），参数全部可选，未知参数与不适用的组件被拒绝
+    const cc = cardChecks[0]!;
+    const [cardKey, ccComponent] = cc.id.slice('cardcheck:'.length).split('@') as [string, string];
+    const checked = await query({ template: cc.id, args: { window_before: '1h' }, component: 'Node:elsewhere' });
+    expect(checked.status).toBe(200);
+    expect(checked.body).toMatchObject({ card_id: cardKey });
+    expect(validatorFor('schemas/evidence-result.schema.json')(checked.body)).toBe(true);
+    expect((await query({ template: cc.id, args: { nope: 1 }, component })).status).toBe(400);
+    expect((await query({ template: 'cardcheck:_example/nope/x@' + ccComponent, args: {}, component })).status).toBe(
+      404,
+    );
+    expect((await query({ template: `cardcheck:${cardKey}@Node:elsewhere`, args: {}, component })).status).toBe(400);
+    const viaRunner = await runner.run(cc, {}, { ...rctx, rootComponent: 'Node:elsewhere' });
+    expect(viaRunner).toMatchObject({ card_id: cardKey });
+    expect(viaRunner.reason.kind).not.toBe('evaluation_error');
     // 研判前报告用的是旧的 pack.lock（领域包变化）：先按当前领域包重算阶段 A（ADR 0107）
     const lockOf = async () =>
       (

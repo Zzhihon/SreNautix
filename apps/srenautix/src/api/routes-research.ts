@@ -8,6 +8,7 @@ import { principalOf, type Auth } from '../identity/auth.js';
 import { incidentVersion, latestStageA, resolveIncidentRef } from '../incident/read.js';
 import { alertsById } from '../ingest/store.js';
 import type { Catalog } from '../proposals/catalog.js';
+import { cardApplies, cardCheckArgs, cardChecks, parseCardCheckId } from '../stage-a/card-checks.js';
 import type { FeedbackService } from '../proposals/feedback.js';
 import { LeaseLost, type RouteReport, type Scheduler } from '../scheduler/admission.js';
 import type { PackEvidence } from '../stage-a/pack-evidence.js';
@@ -34,7 +35,7 @@ export interface ResearchRouteDeps {
   /** 领域包：知识条目、查询模板与 pack.lock。 */
   packs: PackRuntime;
   /** 查询模板的执行（阶段 A 的证据卡运行时）。 */
-  templates: Pick<PackEvidence, 'runTemplate'>;
+  templates: Pick<PackEvidence, 'runTemplate' | 'runCardCheck'>;
   /** 知识条目的语言。 */
   locale: 'zh-CN' | 'en';
   /** 本 server 所在的集群；Kubernetes 只读检查只对这个集群的事件提供 */
@@ -250,7 +251,11 @@ export function registerResearchRoutes(app: FastifyInstance, d: ResearchRouteDep
       catalog: d.catalog.raw,
       knowledge: d.packs.knowledge(types, d.locale),
       cases,
-      templates: d.packs.templates.map((x) => ({ id: x.id, description: x.description, args: x.args })),
+      // 领域包的查询模板，加上子图组件 × 适用的证据链卡（卡片即检查，ADR 0116）
+      templates: [
+        ...d.packs.templates.map((x) => ({ id: x.id, description: x.description, args: x.args })),
+        ...cardChecks(d.packs, incident, topo.nodes, stageA?.cards ?? [], d.locale, topo.edges),
+      ],
       pack_lock: d.packs.set.lockDigest,
       hub_tools: d.kube && incident.cluster_id === d.clusterId ? d.kube.specs() : [],
       related_changes: await relatedChanges(incident, topo.nodes),
@@ -340,6 +345,30 @@ export function registerResearchRoutes(app: FastifyInstance, d: ResearchRouteDep
       throw badRequest('args 必须是 JSON 对象');
     }
     const { incident, topo } = await taskInput((req.params as { run_id: string }).run_id);
+    // 卡片检查（ADR 0116）：按 id 里的组件执行，不按请求体的 component（假设的根因）
+    const cardCheck = parseCardCheckId(body.template);
+    if (cardCheck) {
+      const e = d.packs.set.cards.get(cardCheck.card);
+      if (!e || e.chain === null) {
+        throw notFound(`没有证据链的卡 ${cardCheck.card}`);
+      }
+      const valid = ajv.compile(cardCheckArgs(e));
+      if (!valid(args)) {
+        throw badRequest(`参数不符合卡片检查 ${body.template} 的 schema：${ajv.errorsText(valid.errors)}`);
+      }
+      const entity = entityIn(incident, topo, cardCheck.component);
+      if (!cardApplies(e, entity.kind)) {
+        throw badRequest(`卡 ${cardCheck.card} 不适用于 ${entity.kind}`);
+      }
+      return d.templates.runCardCheck(
+        incident,
+        e.key,
+        args as Record<string, unknown>,
+        entity,
+        Date.now(),
+        AbortSignal.timeout(30_000),
+      );
+    }
     const template = d.packs.templates.find((t) => t.id === body.template);
     if (!template) {
       throw notFound(`没有查询模板 ${body.template}`);
@@ -355,19 +384,28 @@ export function registerResearchRoutes(app: FastifyInstance, d: ResearchRouteDep
       }
       params[k] = v;
     }
-    // 子图节点，或事件的组件与候选根因（命名空间伪组件 Namespace:<ns> 不是拓扑节点）
-    const component = body.component;
+    const entity = entityIn(incident, topo, body.component);
+    return d.templates.runTemplate(incident, template.id, params, entity, Date.now(), AbortSignal.timeout(30_000));
+  });
+
+  /** 子图节点，或事件的组件与候选根因（命名空间伪组件 Namespace:<ns> 不是拓扑节点）→ 实体；不在其中时 400 */
+  const entityIn = (
+    incident: Incident,
+    topo: {
+      nodes: ReadonlyArray<{ key: string; kind: string; namespace: string | null; name: string; uid: string | null }>;
+    },
+    component: string,
+  ) => {
     const node = topo.nodes.find((n) => n.key === component);
     const own = incident.components.includes(component) || incident.candidates.some((c) => c.component === component);
     if (!node && !own) {
       throw badRequest(`组件 ${component} 不在本次研判的子图中`);
     }
     const k = parseStoredKey(component);
-    const entity = node
+    return node
       ? { cluster_id: incident.cluster_id, kind: node.kind, namespace: node.namespace, name: node.name, uid: node.uid }
       : { cluster_id: incident.cluster_id, kind: k.kind, namespace: k.namespace, name: k.name, uid: null };
-    return d.templates.runTemplate(incident, template.id, params, entity, Date.now(), AbortSignal.timeout(30_000));
-  });
+  };
 
   app.get('/v1/incidents/:ref/research', async (req) => {
     await d.auth.reader(req);

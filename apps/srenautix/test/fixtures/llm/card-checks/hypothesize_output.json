@@ -1,0 +1,25 @@
+{
+  "provenance": { "mode": "hand-written", "note": "卡片检查的回归（ADR 0116）：假设落在事件根因上，检查取模板列表里第一个卡片检查" },
+  "output": {
+    "hypotheses": [
+      {
+        "id": "h1",
+        "parent_id": null,
+        "root_component": "{{component:^$}}",
+        "mechanism": "根因组件自身的故障",
+        "supporting": [],
+        "refuting": []
+      }
+    ],
+    "next_checks": [
+      {
+        "hypothesis_id": "h1",
+        "type": "query",
+        "template": "{{match:^cardcheck:}}",
+        "args_json": "{\"window_before\": \"1h\"}",
+        "refutes_if": "卡片判定为正常",
+        "purpose": "在根因组件上用领域包的证据卡检验假设"
+      }
+    ]
+  }
+}

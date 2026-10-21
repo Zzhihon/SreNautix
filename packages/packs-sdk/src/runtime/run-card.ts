@@ -44,6 +44,8 @@ export interface RunCardInput {
   /** 回放时钟窗口；实时研判为 [anchor - 回看, now] */
   clock: TimeWindow;
   params?: Record<string, number | string | boolean>;
+  /** 覆盖卡片定义的窗口（阶段 B 把卡片当作区分性检查时，模型可以指定锚点前后的范围） */
+  window?: { before: string; after: string };
   locale?: Locale;
   timeoutMs?: number;
 }
@@ -56,8 +58,13 @@ export interface RunCardResult extends Omit<EvidenceResult, 'ref'> {
   judgeInput: JudgeInput;
 }
 
-function cardWindow(e: CardEntry, anchor: number, now: number): { from: number; to: number } {
-  const w = e.def.window ?? DEFAULT_WINDOW;
+function cardWindow(
+  e: CardEntry,
+  anchor: number,
+  now: number,
+  override?: { before: string; after: string },
+): { from: number; to: number } {
+  const w = override ?? e.def.window ?? DEFAULT_WINDOW;
   const from = anchor - durationSeconds(w.before) * 1000;
   const to = Math.min(anchor + durationSeconds(w.after) * 1000, now);
   if (to <= from) {
@@ -76,7 +83,7 @@ export async function runCard(input: RunCardInput): Promise<RunCardResult> {
   if (!e) {
     throw new Error(`没有卡片 ${input.card}`);
   }
-  const w = cardWindow(e, input.anchor, input.now);
+  const w = cardWindow(e, input.anchor, input.now, input.window);
   const window = { from: toIso(w.from), to: toIso(w.to) };
   const timeout = input.timeoutMs ?? 10_000;
   const refs: Record<string, RefData> = {};
