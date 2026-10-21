@@ -21,6 +21,11 @@ export const KSM_TOPOLOGY_QUERIES = {
   jobOwner: 'max by (namespace, job_name, owner_kind, owner_name) (kube_job_owner{owner_is_controller="true"})',
   /** Pod 容器的镜像：发布之前的 Job 按镜像关联到发布（ADR 0104 §13） */
   podImages: 'max by (namespace, pod, image, image_id) (kube_pod_container_info)',
+  /**
+   * StatefulSet 的当前版本（ControllerRevision 名称）。StatefulSet 没有 ReplicaSet，模板变化时换一个 update revision：
+   * 回放时状态库没有记录的变化由它推导出发布（ADR 0104 §11）
+   */
+  statefulsetRevision: 'max by (namespace, statefulset, revision) (kube_statefulset_status_update_revision)',
 } as const;
 
 /**
@@ -57,7 +62,7 @@ export function ksmTopologyQueries(preStepLabels: readonly string[] = []): Recor
 }
 
 /** 没有给出的查询按没有数据处理（早于这些查询导出的重建包，或没有配置 pre_step_labels） */
-type OptionalKsmQuery = 'jobOwner' | 'podImages';
+type OptionalKsmQuery = 'jobOwner' | 'podImages' | 'statefulsetRevision';
 export type KsmTopologyResults = {
   [K in Exclude<keyof typeof KSM_TOPOLOGY_QUERIES, OptionalKsmQuery>]: MetricSeries[];
 } & { [K in OptionalKsmQuery | LabelQuery]?: MetricSeries[] };
@@ -273,6 +278,26 @@ export function ksmTopologyIntervals(
           OWNED_BY,
           'service',
           'kube_job_owner',
+        ),
+      });
+    });
+  }
+  // StatefulSet 的每个 update revision 是一个 ControllerRevision 节点，属于这个 StatefulSet（与 ReplicaSet 属于 Deployment 相同）
+  for (const s of results.statefulsetRevision ?? []) {
+    series(s, (add) => {
+      const { namespace, statefulset, revision } = s.labels;
+      if (!revision) {
+        return;
+      }
+      add({ node: node('StatefulSet', namespace!, statefulset!) });
+      add({ node: node('ControllerRevision', namespace!, revision) });
+      add({
+        edge: edge(
+          nodeKey('ControllerRevision', namespace, revision),
+          nodeKey('StatefulSet', namespace, statefulset!),
+          OWNED_BY,
+          'service',
+          'kube_statefulset_status_update_revision',
         ),
       });
     });

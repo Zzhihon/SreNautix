@@ -19,6 +19,7 @@ import {
 } from '@srenautix/core';
 import { resolveAlert, type NodeLookup } from '../alerts/resolve.js';
 import { deriveRollouts, WORKLOAD_KINDS, type WorkloadEvent } from '../changes/kubernetes.js';
+import { STATEFULSET_REVISION_DEDUPE_MS } from '../changes/ksm-rollouts.js';
 import { alertId } from '../ingest/normalize.js';
 import type { Catalog } from '../proposals/catalog.js';
 import type { QueryRunner } from '../research/checks.js';
@@ -127,6 +128,17 @@ export class BundleTopology implements NodeLookup {
           !stateKeys.has(r.key),
       )
       .sort((a, b) => ms(a.valid_from) - ms(b.valid_from) || a.seq - b.seq);
+    // StatefulSet 的 update revision（kube_statefulset_status_update_revision，ADR 0104 §11）：状态库从不记录 ControllerRevision
+    this.ksmRevisions = rows
+      .filter(
+        (r) =>
+          r.item === 'node' &&
+          r.source === 'ksm_history' &&
+          r.op === 'node_upsert' &&
+          (r.body as TopologyNode).kind === 'ControllerRevision' &&
+          !stateKeys.has(r.key),
+      )
+      .sort((a, b) => ms(a.valid_from) - ms(b.valid_from) || a.seq - b.seq);
     this.ksmOwnedBy = rows.filter(
       (r) => r.item === 'edge' && r.source === 'ksm_history' && (r.body as TopologyEdge).relation === 'owned_by',
     );
@@ -144,6 +156,7 @@ export class BundleTopology implements NodeLookup {
 
   private readonly ksmReplicaSets: TopologyRow[];
   private readonly ksmJobs: TopologyRow[];
+  private readonly ksmRevisions: TopologyRow[];
   private readonly ksmOwnedBy: TopologyRow[];
   /** 每个节点键在任一来源中第一次出现的时刻 */
   private readonly firstSeen: Map<string, number>;
@@ -531,13 +544,59 @@ export class BundleTopology implements NodeLookup {
         ],
       });
     }
+    // kube-state-metrics 历史中 StatefulSet 的新 update revision（与 ReplicaSet 相同的规则，ADR 0104 §11）：
+    // - 重建包起点就存在的 revision 不算变化；
+    // - 状态库在这个时间窗里记录过这个 StatefulSet 的变化（版本标签变化）时，由状态库推导，不再用 kube-state-metrics
+    const seenRev = new Set<string>();
+    for (const r of this.ksmRevisions) {
+      if (seenRev.has(r.key)) {
+        continue;
+      }
+      seenRev.add(r.key);
+      const t = ms(r.valid_from);
+      if (t <= this.rangeFrom) {
+        continue;
+      }
+      const ownerEdge = this.ksmOwnedBy.find((x) => (x.body as TopologyEdge).from === r.key);
+      const owner = ownerEdge ? (ownerEdge.body as TopologyEdge).to : null;
+      if (owner === null) {
+        continue;
+      }
+      const recorded = out.some(
+        (e) =>
+          e.key === owner && e.previous !== null && Math.abs(ms(e.valid_from) - t) <= STATEFULSET_REVISION_DEDUPE_MS,
+      );
+      if (recorded) {
+        continue;
+      }
+      const ownerFirst = this.firstSeen.get(owner);
+      out.push({
+        seq: r.seq,
+        op: 'node_upsert',
+        key: r.key,
+        kind: 'ControllerRevision',
+        valid_from: r.valid_from,
+        body: r.body as TopologyNode,
+        previous: null,
+        owner,
+        ownerSeenBefore: ownerFirst !== undefined && ownerFirst < t - 60_000,
+        managers: [
+          ...new Set(
+            (edgesFrom.get(owner) ?? [])
+              .filter(
+                (x) =>
+                  (x.body as TopologyEdge).relation === 'managed_by' &&
+                  ms(x.valid_from) <= t + 60_000 &&
+                  (x.valid_to === null || ms(x.valid_to) > t),
+              )
+              .map((x) => (x.body as TopologyEdge).to),
+          ),
+        ],
+      });
+    }
     return out.sort((a, b) => ms(a.valid_from) - ms(b.valid_from) || a.seq - b.seq);
   }
 
-  /**
-   * 属于 owner（Job 或 ReplicaSet，沿 owned_by，任一来源）的 Pod 的镜像（Pod 节点的 images）；没有任何 Pod 带镜像时为 null。
-   * 与 changes/kubernetes.ts 的 kubernetesRollouts 相同，不按时刻过滤：Pod 的镜像在它的生命周期内不变
-   */
   /** 重建包里出现过的 Argo CD Application 键（与 kubernetesRollouts 的查询相同，不按时刻过滤） */
   argoApplications(): string[] {
     this.apps ??= [...this.nodes.keys()].filter((k) => k.startsWith('Application.argoproj.io:')).sort();
@@ -546,6 +605,10 @@ export class BundleTopology implements NodeLookup {
 
   private apps: string[] | null = null;
 
+  /**
+   * 属于 owner（Job 或 ReplicaSet，沿 owned_by，任一来源）的 Pod 的镜像（Pod 节点的 images）；没有任何 Pod 带镜像时为 null。
+   * 与 changes/kubernetes.ts 的 kubernetesRollouts 相同，不按时刻过滤：Pod 的镜像在它的生命周期内不变
+   */
   podImages(owner: string): string[] | null {
     if (!this.imageIndex) {
       const pods = new Map<string, Set<string>>();

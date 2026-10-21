@@ -174,6 +174,19 @@ export function deriveRollouts(events: readonly WorkloadEvent[], o: RolloutOptio
         stepLabels: labelValues(e.body.labels, o.preStepLabels ?? []),
         describe: `${short(e.owner)}：新的 ReplicaSet ${e.body.name}`,
       });
+    } else if (e.kind === 'ControllerRevision' && e.previous === null && e.owner && e.ownerSeenBefore !== false) {
+      // StatefulSet 的新 update revision（只来自 kube-state-metrics 回退，ADR 0104 §11）：与新 ReplicaSet 相同，是一次模板变化
+      atoms.push({
+        time,
+        seq: e.seq,
+        target: e.owner,
+        replicaSet: null,
+        managers: e.managers,
+        revision: e.body.name,
+        fromLabel: false,
+        stepLabels: {},
+        describe: `${short(e.owner)}：新的版本 ${e.body.name}`,
+      });
     }
   }
   atoms.sort((a, b) => a.time - b.time || a.seq - b.seq);

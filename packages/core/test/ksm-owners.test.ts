@@ -80,6 +80,46 @@ describe('kube-state-metrics 历史的对象标签', () => {
   });
 });
 
+describe('kube-state-metrics 历史的 StatefulSet update revision（ADR 0104 §11）', () => {
+  it('每个 revision 是一个属于 StatefulSet 的 ControllerRevision 节点，区间是它的样本区间', () => {
+    const MIN = 60_000;
+    const results = {
+      nodeInfo: [],
+      podInfo: [],
+      podOwner: [],
+      replicasetOwner: [],
+      podPvc: [],
+      statefulsetRevision: [
+        {
+          labels: { namespace: 'data', statefulset: 'gateway', revision: 'gateway-r1' },
+          times: [0, MIN],
+          values: [1, 1],
+        },
+        {
+          labels: { namespace: 'data', statefulset: 'gateway', revision: 'gateway-r2' },
+          times: [10 * MIN, 11 * MIN],
+          values: [1, 1],
+        },
+      ],
+    } as unknown as KsmTopologyResults;
+    const ivs = ksmTopologyIntervals(results, 30_000, MIN);
+    const crs = ivs.flatMap((x) =>
+      'node' in x.item && x.item.node.kind === 'ControllerRevision' ? [[x.item.node.key, x.from]] : [],
+    );
+    expect(crs).toEqual([
+      ['ControllerRevision:data/gateway-r1', 0],
+      ['ControllerRevision:data/gateway-r2', 10 * MIN],
+    ]);
+    const edges = ivs.flatMap((x) =>
+      'edge' in x.item ? [`${x.item.edge.from}|${x.item.edge.relation}|${x.item.edge.to}`] : [],
+    );
+    expect(edges).toContain('ControllerRevision:data/gateway-r2|owned_by|StatefulSet:data/gateway');
+    expect(KSM_TOPOLOGY_QUERIES.statefulsetRevision).toBe(
+      'max by (namespace, statefulset, revision) (kube_statefulset_status_update_revision)',
+    );
+  });
+});
+
 /** kube-state-metrics 历史：Job 的 Pod、Job 的 CronJob 属主与 Pod 的镜像（ADR 0104 §13） */
 describe('kube-state-metrics 历史的 Job 与镜像', () => {
   const one = (labels: Record<string, string>) => ({ labels, times: [0], values: [1] });

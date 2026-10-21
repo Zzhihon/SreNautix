@@ -2,6 +2,7 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { TopologyEdge, TopologyNode } from '@srenautix/contract';
 import { afterAll, describe, expect, it } from 'vitest';
+import { deriveRollouts } from '../../src/changes/kubernetes.js';
 import { type TopologyRow } from '../../src/eval/bundle.js';
 import { discoveryRoots, loadLabels, type Label } from '../../src/eval/labels.js';
 import { compareRoots } from '../../src/eval/phase2.js';
@@ -221,5 +222,48 @@ describe('kube-state-metrics 回退', () => {
     });
     // 状态库的记录照常推导（没有属主边时 owner 为 null）
     expect(ev.filter((e) => e.key === stateRs.key).map((e) => e.seq > 0)).toEqual([true]);
+  });
+
+  it('StatefulSet 的 update revision（ADR 0104 §11）：状态库没有记录的变化用 kube-state-metrics 推导；起点就在的与状态库已记录的不算', () => {
+    const gw = node('StatefulSet:prod/gateway', 'StatefulSet', 'prod', 'gateway');
+    const cache = node('StatefulSet:prod/cache', 'StatefulSet', 'prod', 'cache');
+    const cr = (name: string) => node(`ControllerRevision:prod/${name}`, 'ControllerRevision', 'prod', name);
+    const labelled = (n: TopologyNode, v: string): TopologyNode => ({ ...n, labels: { release: v } });
+    const stsRows: TopologyRow[] = [
+      row('informer', 'node', app, 0, null),
+      row('informer', 'node', labelled(gw, 'r1'), 0, null),
+      row('informer', 'edge', edge(gw.key, app.key, 'managed_by'), 0, null),
+      // cache：状态库在 90 分钟时记录了版本标签变化
+      row('informer', 'node', labelled(cache, 'r1'), 0, 90),
+      row('informer', 'node', labelled(cache, 'r2'), 90, null),
+      // kube-state-metrics：gateway-r1 起点就在；gateway-r2 在 60 分钟时出现；cache-r2 在 92 分钟时出现
+      row('ksm_history', 'node', gw, 0, null),
+      row('ksm_history', 'node', cr('gateway-r1'), 0, 60),
+      row('ksm_history', 'edge', edge(`ControllerRevision:prod/gateway-r1`, gw.key, 'owned_by'), 0, 60),
+      row('ksm_history', 'node', cr('gateway-r2'), 60, null),
+      row('ksm_history', 'edge', edge(`ControllerRevision:prod/gateway-r2`, gw.key, 'owned_by'), 60, null),
+      row('ksm_history', 'node', cache, 0, null),
+      row('ksm_history', 'node', cr('cache-r1'), 0, 92),
+      row('ksm_history', 'edge', edge(`ControllerRevision:prod/cache-r1`, cache.key, 'owned_by'), 0, 92),
+      row('ksm_history', 'node', cr('cache-r2'), 92, null),
+      row('ksm_history', 'edge', edge(`ControllerRevision:prod/cache-r2`, cache.key, 'owned_by'), 92, null),
+    ];
+    const ev = new BundleTopology(stsRows).workloadEvents(T0, T0 + 120 * 60_000);
+    const revs = ev.filter((e) => e.kind === 'ControllerRevision');
+    expect(revs).toHaveLength(1);
+    expect(revs[0]).toMatchObject({
+      key: 'ControllerRevision:prod/gateway-r2',
+      owner: gw.key,
+      ownerSeenBefore: true,
+      managers: [app.key],
+      valid_from: iso(60),
+    });
+    // 推导出的发布目标是 StatefulSet 与它的管理应用
+    const r = deriveRollouts(ev, { clusterId: 'prod', revisionLabels: ['release'], groupWithinMs: 120_000 });
+    expect(r.find((c) => c.targets.includes(gw.key))).toMatchObject({
+      time: iso(60),
+      targets: [gw.key, app.key],
+      revision: 'gateway-r2',
+    });
   });
 });

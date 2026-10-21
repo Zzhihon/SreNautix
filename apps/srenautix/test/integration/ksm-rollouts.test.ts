@@ -152,4 +152,106 @@ describe('从 kube-state-metrics 推导发布', () => {
     });
     expect(out).toEqual([]);
   });
+
+  it('时钟窗口的起点不是整秒时也能查询（回看不早于窗口起点）', async () => {
+    const from = new Date(NOW - 45 * MIN + 123);
+    const out = await ksmRollouts(db.server, (req) => adapter.query(req), from, new Date(NOW + 456), {
+      clusterId: C,
+      revisionLabels: [],
+      groupWithinMs: 120_000,
+    });
+    expect(out.map((c) => c.targets)).toEqual([['Deployment:shop/api', APP]]);
+  });
+});
+
+describe('从 kube-state-metrics 推导 StatefulSet 的发布（update revision，ADR 0104 §11）', () => {
+  let p: TsdbInstance;
+  let a: PrometheusApiAdapter;
+  /** 只在 [from, to] 内有样本的序列 */
+  const during = (labels: Record<string, string>, from: number, to: number): FixtureMetricSeries => ({
+    labels,
+    points: Array.from({ length: 61 }, (_, i) => T0 + i * MIN)
+      .filter((t) => t >= from && t <= to)
+      .map((t) => ({ t, v: 1 })),
+  });
+  const rev = (sts: string, revision: string, from: number, to: number) =>
+    during(
+      { __name__: 'kube_statefulset_status_update_revision', namespace: 'data', statefulset: sts, revision },
+      from,
+      to,
+    );
+  const created = (sts: string, at: number) =>
+    constant({ __name__: 'kube_statefulset_created', namespace: 'data', statefulset: sts }, s(at));
+
+  beforeAll(async () => {
+    p = await startPrometheus([
+      // gateway：25 分钟前换了 revision（informer 没有记录）
+      created('gateway', NOW - 24 * 3600_000),
+      rev('gateway', 'gateway-r1', T0, NOW - 26 * MIN),
+      rev('gateway', 'gateway-r2', NOW - 25 * MIN, NOW),
+      // cache：15 分钟前换了 revision，拓扑在同一时间记录了 StatefulSet 的变化（版本标签变化），不重复
+      created('cache', NOW - 24 * 3600_000),
+      rev('cache', 'cache-r1', T0, NOW - 16 * MIN),
+      rev('cache', 'cache-r2', NOW - 15 * MIN, NOW),
+      // db：整个窗口都是同一个 revision，没有变化
+      created('db', NOW - 24 * 3600_000),
+      rev('db', 'db-r1', T0, NOW),
+      // queue：新建的 StatefulSet 的第一个 revision 不是发布
+      created('queue', NOW - 20 * MIN),
+      rev('queue', 'queue-r1', NOW - 20 * MIN, NOW),
+    ]);
+    a = new PrometheusApiAdapter({ id: 'prometheus', url: p.url, dialects: ['promql'] });
+    const sts = (name: string, release: string): TopologyNode => ({
+      key: `StatefulSet:data/${name}`,
+      kind: 'StatefulSet',
+      namespace: 'data',
+      name,
+      uid: null,
+      labels: { release },
+      component_type: null,
+      hub: false,
+    });
+    const store = new TopologyStore(db.server);
+    await store.apply(C, [
+      { op: 'node_upsert', at: new Date(NOW - 26 * 3600_000), source: 'informer', node: sts('gateway', 'r1') },
+      { op: 'node_upsert', at: new Date(NOW - 26 * 3600_000), source: 'informer', node: sts('cache', 'r1') },
+      {
+        op: 'edge_upsert',
+        at: new Date(NOW - 26 * 3600_000),
+        source: 'informer',
+        edge: {
+          from: 'StatefulSet:data/gateway',
+          to: APP,
+          relation: 'managed_by',
+          confidence: 1,
+          provenance: 'structural',
+        } as TopologyEdge,
+      },
+    ]);
+    await store.apply(C, [
+      { op: 'node_upsert', at: new Date(NOW - 15 * MIN + 20_000), source: 'informer', node: sts('cache', 'r2') },
+    ]);
+  }, 180_000);
+
+  afterAll(async () => {
+    await p?.stop();
+  });
+
+  it('窗口内第一次出现的 revision 是一次发布；起点就在的、拓扑已记录的、新建 StatefulSet 的都不算', async () => {
+    const out = await ksmRollouts(db.server, (req) => a.query(req), new Date(NOW - 45 * MIN), new Date(NOW), {
+      clusterId: C,
+      revisionLabels: ['release'],
+      groupWithinMs: 120_000,
+    });
+    expect(out).toEqual([
+      expect.objectContaining({
+        kind: 'rollout',
+        targets: ['StatefulSet:data/gateway', APP],
+        revision: 'gateway-r2',
+        change_id: expect.stringMatching(/^kubernetes:east:ksm-\d+$/),
+      }),
+    ]);
+    // revision 第一次出现的时刻精确到子查询的步长
+    expect(Math.abs(Date.parse(out[0]!.time) - (NOW - 25 * MIN))).toBeLessThanOrEqual(30_000);
+  });
 });

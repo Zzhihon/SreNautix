@@ -30,6 +30,13 @@
     - 拓扑里记录过的 ReplicaSet 仍只由拓扑事件推导，两个来源不重复。
     - 只对本集群；数据源不可用时跳过，结果缓存一分钟。
     - eval 的重建用同样的规则（ADR 0110）。
+    - **StatefulSet**：StatefulSet 没有 ReplicaSet。2026-10-19 的发布里 gateway StatefulSet 换了版本，但 informer 正好在空窗期，状态库没有记录这次变化，gateway 的告警因此不在发布事件里（release-migration-deadlock 是 4 个事件）。模板变化时 `kube_statefulset_status_update_revision` 换一个 revision（ControllerRevision 名称），与新 ReplicaSet 等价，不需要标签放行：
+      - 窗口内第一次出现的 revision 是一次变化。窗口开始时就在的 revision 不算；线上的子查询要扣掉 Prometheus 的默认回看量，窗口最前 5 分钟里出现的也当作开始时就在，这么早的变化解释不了任何告警。
+      - StatefulSet 自己要早于它一分钟以上存在，新建的 StatefulSet 的第一个 revision 不算。
+      - 拓扑在这个时间窗（前后 10 分钟）里记录过这个 StatefulSet 的变化（版本标签变化），或者记录过这个 ControllerRevision 时，不再生成，两个来源不重复。
+      - 生成的是 ControllerRevision 事件，属主为 StatefulSet，经同一个 `deriveRollouts` 合成发布，目标是 StatefulSet 与管理它的应用。
+      - 重建：core `KSM_TOPOLOGY_QUERIES` 增加这条查询，导出为属于 StatefulSet 的 ControllerRevision 节点，`BundleTopology` 按同样的规则推导。
+    - 顺带修复：查询的区间按秒向上取整，回看会比时钟窗口起点早不到一秒，回放时钟检查拒绝整个查询。Kind 的诊断日志里"从 kube-state-metrics 推导发布失败，本次只用拓扑事件"就是这个原因，回退从未生效。改为向下取整。
 
 10. **依赖合并要求开始时间相近**：不同对象上的两条告警只因依赖关系合并时，开始时间相差不能超过时间相邻的 4 倍（默认 2 小时）。已经持续触发数小时的告警（资源请求接近上限、全天的扩容顶格）不是之后才开始的新故障的起因；没有这条时，正确解析到 CNPG Cluster 的 WAL 归档失败经 Pod 运行在的节点被前一晚开始的节点容量事件吸收，全天的 HPA 顶格事件也吸收过发布事故。
 
