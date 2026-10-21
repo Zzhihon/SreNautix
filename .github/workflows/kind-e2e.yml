@@ -1,7 +1,11 @@
 # 在 Kind 上拉起完整环境（kube-prometheus-stack、Loki、Tempo、本地 Git 服务 gitlocal 与 Argo CD、演示业务与背景噪声、
-# 本次提交在本地构建的 SreNautix），逐个注入级联故障场景：确认预期告警出现；声明了 SRENAUTIX_ROOT 的场景再检查
-# 事件收敛与根因、证据卡与阶段 B 结论（模型响应来自 llm-replay 的录制）、gitlocal 上的 srenautix/* 修复 PR 与 issue 关联、
-# main 没有被机器人改动；最后恢复。发布门禁不包含这个工作流。
+# 本次提交在本地构建的 SreNautix，见 .github/actions/kind-env），注入级联故障场景：确认预期告警出现；声明了 SRENAUTIX_ROOT
+# 的场景再检查事件收敛与根因、证据卡与阶段 B 结论（模型响应来自 llm-replay 的录制）、gitlocal 上的 srenautix/* 修复 PR 与
+# issue 关联、main 没有被机器人改动；最后恢复。发布门禁不包含这个工作流。
+#
+# 每个场景在自己的 Kind 集群中运行（矩阵）。SreNautix 把 30 分钟内（时间相邻与变更窗口，core 的 rca-params 默认值）沿拓扑
+# 或同一次变更相连的告警归为一个事件；同一集群中相隔几分钟的场景会被归进上一个场景的事件，只有独立的集群能隔离场景。
+# 只需运行一次的检查（环境拉起、不变量 12）在单独的 job 中。
 name: kind-e2e
 
 on:
@@ -19,6 +23,7 @@ on:
       - deploy/kind/**
       - deploy/helm/**
       - eval/scenarios/**
+      - .github/actions/kind-env/**
       - .github/workflows/kind-e2e.yml
 
 permissions:
@@ -29,73 +34,39 @@ concurrency:
   group: kind-e2e-${{ github.ref }}
   cancel-in-progress: false
 
-env:
-  # kind 的版本在 deploy/kind/versions.env；这里是对应的 linux-amd64 二进制的 sha256
-  KIND_SHA256: aee6151561422756b764a4ae28e7f44cda5af5a9eead3cc9985112b1de8d8e0d
-  YQ_VERSION: v4.54.1
-  YQ_SHA256: 8e34fc298390875de416e6a4afcb8cabeceb25d9aa8506c1a2f9353cf702ea5f
-
 jobs:
-  e2e:
+  plan:
     runs-on: ubuntu-24.04
-    timeout-minutes: 150
+    timeout-minutes: 5
+    outputs:
+      scenarios: ${{ steps.list.outputs.scenarios }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
-        with:
-          version: v4.3.1
-      - name: 安装 kind 与 yq（校验 sha256）
-        run: |
-          source deploy/kind/versions.env
-          mkdir -p "$HOME/.local/bin"
-          curl -fsSLo "$HOME/.local/bin/kind" "https://github.com/kubernetes-sigs/kind/releases/download/${KIND_VERSION}/kind-linux-amd64"
-          echo "${KIND_SHA256}  $HOME/.local/bin/kind" | sha256sum --check
-          curl -fsSLo "$HOME/.local/bin/yq" "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_amd64"
-          echo "${YQ_SHA256}  $HOME/.local/bin/yq" | sha256sum --check
-          chmod +x "$HOME/.local/bin/kind" "$HOME/.local/bin/yq"
-          echo "$HOME/.local/bin" >>"$GITHUB_PATH"
-      # 本次提交的两个镜像在本地构建，不依赖是否已经发布；llm-replay 用同一个 hub 镜像
-      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-      - name: 构建中心镜像
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-        with:
-          context: .
-          file: deploy/docker/srenautix.Dockerfile
-          platforms: linux/amd64
-          tags: srenautix.local/srenautix:e2e
-          load: true
-          cache-from: type=gha,scope=srenautix
-      - name: 构建分支镜像
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-        with:
-          context: .
-          file: deploy/docker/srenautix-spoke.Dockerfile
-          platforms: linux/amd64
-          tags: srenautix.local/srenautix-spoke:e2e
-          load: true
-          cache-from: type=gha,scope=srenautix-spoke
-      - name: 构建本地 Git 服务镜像
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-        with:
-          context: .
-          file: deploy/docker/gitlocal.Dockerfile
-          platforms: linux/amd64
-          tags: srenautix.local/gitlocal:e2e
-          load: true
-          cache-from: type=gha,scope=gitlocal
-      - name: 拉起 Kind 环境
+      - id: list
+        name: 场景清单
         env:
-          SKIP_BUILD: "1"
-          SRENAUTIX_LOCAL_IMAGES: e2e
-          SRENAUTIX_LLM_REPLAY: "1"
+          SCENARIOS: ${{ github.event.inputs.scenarios }}
         run: |
-          kind create cluster --name srenautix --image "$(. deploy/kind/versions.env; echo "$KIND_NODE_IMAGE")" \
-            --config deploy/kind/kind-config.yaml --wait 180s
-          kind load docker-image --name srenautix srenautix.local/srenautix:e2e srenautix.local/srenautix-spoke:e2e
-          deploy/kind/up.sh
-      # 不变量 12（自愈 PR 的补偿控制）对 Kind 中真实 bare 仓库的 gitlocal-invariants 运行；集群一侧用 envtest
+          all=$(deploy/kind/scenario.sh list)
+          read -ra names <<<"${SCENARIOS:-$(tr '\n' ' ' <<<"$all")}"
+          ((${#names[@]} > 0)) || { echo "::error::场景清单为空"; exit 1; }
+          for s in "${names[@]}"; do
+            grep -qxF "$s" <<<"$all" || { echo "::error::没有场景 $s（可选：$(tr '\n' ' ' <<<"$all")）"; exit 1; }
+          done
+          echo "scenarios=$(printf '%s\n' "${names[@]}" | jq -R . | jq -sc .)" >>"$GITHUB_OUTPUT"
+
+  # 环境拉起本身（kind-env 中 up.sh 的各项就绪检查）与不变量 12（自愈 PR 的补偿控制）；
+  # 不变量 12 对 Kind 中真实 bare 仓库的 gitlocal-invariants 运行，集群一侧用 envtest
+  invariants:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/kind-env
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
@@ -112,19 +83,30 @@ jobs:
           for _ in $(seq 30); do curl -fsS http://127.0.0.1:13000/healthz >/dev/null 2>&1 && break; sleep 1; done
           KUBEBUILDER_ASSETS="$assets" SRENAUTIX_TEST_GITHUB_API=http://127.0.0.1:13000 \
             go test -count=1 -timeout 20m -run TestInvariant12 ./test/invariants/
-      - name: 运行级联故障场景（含 SreNautix 的发现、分析与自愈 PR）
+
+  scenario:
+    name: scenario (${{ matrix.scenario }})
+    needs: plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      # 单个场景约 25–35 分钟（环境拉起约 10 分钟）；11 个场景分两批，整轮约 70 分钟，同时占用的 runner 不超过 7 个（含 invariants）
+      max-parallel: 6
+      matrix:
+        scenario: ${{ fromJSON(needs.plan.outputs.scenarios) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/kind-env
+      - name: 运行场景（含 SreNautix 的发现、分析与自愈 PR）
         env:
-          SCENARIOS: ${{ github.event.inputs.scenarios }}
+          SCENARIO: ${{ matrix.scenario }}
           SCENARIO_STATE_DIR: ${{ runner.temp }}/scenarios
           SRENAUTIX_CHECKS: "1"
           HOLD: "120"
-        run: |
-          list=${SCENARIOS:-$(deploy/kind/scenario.sh list | tr '\n' ' ')}
-          for s in $list; do
-            echo "::group::$s"
-            deploy/kind/scenario.sh run "$s"
-            echo "::endgroup::"
-          done
+        run: deploy/kind/scenario.sh run "$SCENARIO"
       - name: 收集诊断信息
         if: always()
         run: |
@@ -160,6 +142,6 @@ jobs:
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
-          name: kind-e2e-diagnostics
+          name: kind-e2e-diagnostics-${{ matrix.scenario }}
           path: ${{ runner.temp }}/diag
           if-no-files-found: ignore

@@ -25,7 +25,7 @@
 
 ## 资源
 
-Docker 至少 4 CPU、10 GiB 内存、25 GiB 磁盘。磁盘有限的机器上建议直接使用 GitHub Actions 的 `kind-e2e` 工作流（手动触发，可指定场景）。
+Docker 至少 4 CPU、10 GiB 内存、25 GiB 磁盘。磁盘有限的机器上建议直接使用 GitHub Actions 的 `kind-e2e` 工作流（手动触发，可指定场景）。工作流中每个场景在自己的 Kind 集群里运行（矩阵，最多 6 个并行）；环境拉起与不变量 12 在单独的 `invariants` job 中运行一次。每个场景的诊断 artifact 是 `kind-e2e-diagnostics-<场景>`。
 
 ## 使用
 
@@ -73,6 +73,6 @@ Grafana：`kubectl --context kind-srenautix -n monitoring port-forward svc/kps-g
 3. **自愈 PR**：`kind/gitops` 上出现该事件的 `srenautix/*` 分支 PR，描述含结论、证据、改动、验证计划、回滚五节与 `Refs #<issue>`，issue 带 `srenautix` 标签并有回链 PR 的评论，改动的文件匹配 `SRENAUTIX_PR_FILES`；
 4. **补偿控制**：注入之后 App 机器人只改动过 `srenautix/*` 分支，main 只有人工提交，没有经 REST 的合并请求。
 
-场景恢复由人工身份提交回退（例如把 `release.json` 改回 r1），SreNautix 的 PR 保持未合并。`SRENAUTIX_CHECKS=1` 时每个场景注入之前等告警投递链路正常（Alertmanager 5 分钟内没有通知失败，没有 `Alertmanager*FailedToSendAlerts`）；每个场景恢复之后等它注入的故障告警（`EXPECTED_ALERTS`）在 Prometheus 中消失、在 SreNautix 中 resolved，再开始下一个场景，避免上一个场景仍在 firing 的事件吸收下一个场景的告警；持续的背景告警不阻塞。没有故障时 shop 不应产生告警（例如 CPU limit 不低于单个请求的单线程消耗，避免 CPUThrottlingHigh）。
+场景恢复由人工身份提交回退（例如把 `release.json` 改回 r1），SreNautix 的 PR 保持未合并。`SRENAUTIX_CHECKS=1` 时每个场景注入之前等告警投递链路正常（Alertmanager 5 分钟内没有通知失败，没有 `Alertmanager*FailedToSendAlerts`）；每个场景恢复之后等它注入的故障告警（`EXPECTED_ALERTS`）在 Prometheus 中消失、在 SreNautix 中 resolved，再开始下一个场景；持续的背景告警不阻塞。这两项等待不能让同一集群中相继运行的场景互不影响：SreNautix 把 30 分钟内（`rca-params` 的 `adjacency` 与 `change_window` 默认值）沿拓扑或同一次变更（例如环境拉起时 Argo CD 的首次同步同时触及 api、checkout、web）相连的告警归为一个事件，上一个场景的事件即使已经结束，也会吸收几分钟后下一个场景的告警，下一个场景就不会出现自己的根因事件。本地在同一集群中连续运行场景时，场景之间至少间隔 30 分钟，或者每个场景重建集群（`kind-e2e` 采用后者）。没有故障时 shop 不应产生告警（例如 CPU limit 不低于单个请求的单线程消耗，避免 CPUThrottlingHigh）。
 
 完整的标准答案（根因集合、粒度、机制、处置判断、干扰项）在 `eval/scenarios/<场景>.yaml`，格式见 `eval/scenarios/README.zh-CN.md`。新增场景时在 `deploy/kind/scenarios/<场景>/scenario.sh` 中定义 `EXPECTED_ALERTS`、`VERIFY_TIMEOUT` 与 `inject`、`recover` 两个函数（需要检查 SreNautix 时另外声明 `SRENAUTIX_*`），并添加对应的标准答案文件。

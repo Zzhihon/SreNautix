@@ -1,0 +1,67 @@
+# kind-e2e 的每个 job 共用：安装 helm、kind、yq（校验 sha256），在本地构建本次提交的中心镜像、分支镜像与 gitlocal 镜像，
+# 创建 Kind 集群并执行 deploy/kind/up.sh（SreNautix 使用本地镜像，worker 的模型路由指向 llm-replay）。
+name: kind-env
+description: 构建本次提交的镜像并在 Kind 上拉起完整环境
+
+runs:
+  using: composite
+  steps:
+    - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+      with:
+        version: v4.3.1
+    - name: 安装 kind 与 yq（校验 sha256）
+      shell: bash
+      env:
+        # kind 的版本在 deploy/kind/versions.env；这里是对应的 linux-amd64 二进制的 sha256
+        KIND_SHA256: aee6151561422756b764a4ae28e7f44cda5af5a9eead3cc9985112b1de8d8e0d
+        YQ_VERSION: v4.54.1
+        YQ_SHA256: 8e34fc298390875de416e6a4afcb8cabeceb25d9aa8506c1a2f9353cf702ea5f
+      run: |
+        source deploy/kind/versions.env
+        mkdir -p "$HOME/.local/bin"
+        curl -fsSLo "$HOME/.local/bin/kind" "https://github.com/kubernetes-sigs/kind/releases/download/${KIND_VERSION}/kind-linux-amd64"
+        echo "${KIND_SHA256}  $HOME/.local/bin/kind" | sha256sum --check
+        curl -fsSLo "$HOME/.local/bin/yq" "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_amd64"
+        echo "${YQ_SHA256}  $HOME/.local/bin/yq" | sha256sum --check
+        chmod +x "$HOME/.local/bin/kind" "$HOME/.local/bin/yq"
+        echo "$HOME/.local/bin" >>"$GITHUB_PATH"
+    # 本次提交的镜像在本地构建，不依赖是否已经发布；llm-replay 用同一个 hub 镜像
+    - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+    - name: 构建中心镜像
+      uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+      with:
+        context: .
+        file: deploy/docker/srenautix.Dockerfile
+        platforms: linux/amd64
+        tags: srenautix.local/srenautix:e2e
+        load: true
+        cache-from: type=gha,scope=srenautix
+    - name: 构建分支镜像
+      uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+      with:
+        context: .
+        file: deploy/docker/srenautix-spoke.Dockerfile
+        platforms: linux/amd64
+        tags: srenautix.local/srenautix-spoke:e2e
+        load: true
+        cache-from: type=gha,scope=srenautix-spoke
+    - name: 构建本地 Git 服务镜像
+      uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+      with:
+        context: .
+        file: deploy/docker/gitlocal.Dockerfile
+        platforms: linux/amd64
+        tags: srenautix.local/gitlocal:e2e
+        load: true
+        cache-from: type=gha,scope=gitlocal
+    - name: 拉起 Kind 环境
+      shell: bash
+      env:
+        SKIP_BUILD: "1"
+        SRENAUTIX_LOCAL_IMAGES: e2e
+        SRENAUTIX_LLM_REPLAY: "1"
+      run: |
+        kind create cluster --name srenautix --image "$(. deploy/kind/versions.env; echo "$KIND_NODE_IMAGE")" \
+          --config deploy/kind/kind-config.yaml --wait 180s
+        kind load docker-image --name srenautix srenautix.local/srenautix:e2e srenautix.local/srenautix-spoke:e2e
+        deploy/kind/up.sh

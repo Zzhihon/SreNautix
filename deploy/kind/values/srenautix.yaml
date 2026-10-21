@@ -127,7 +127,7 @@ remediation:
     pack_alerts: {path: srenautix/packs/kind-shop/alerts.yaml, format: yaml}
   paths: [apps/shop/, platform/observability/rules/, srenautix/]
   reviewers: [kind-operator]
-  # 一次 kind-e2e 依次运行全部场景，上限放宽到策略允许的最大值
+  # 本地可以在同一集群中依次运行全部场景，上限放宽到策略允许的最大值
   maxPerHour: 20
   compensatingControls:
     approvedBy: kind-operator

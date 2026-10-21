@@ -24,7 +24,7 @@ main 不按推送触发发布：推送频率高于一次发布的耗时，同一
 | `image.yml` | 被 `release.yml` 调用 | 多架构构建与推送、cosign 无密钥签名、syft 生成 SPDX 与 CycloneDX SBOM 并以 cosign 证明附加、GitHub 构建溯源证明 |
 
 签名与两种 SBOM 证明由 `.github/scripts/cosign-sign-attest.sh` 完成：签名与每种证明分别检查，已经存在的跳过（构建可复现，同一提交得到同一个 digest，Rekor 拒绝重复记录）；获取 GitHub Actions OIDC token 偶尔返回错误页，每次 cosign 调用最多重试 4 次。
-| `kind-e2e.yml` | 手动、每晚、`deploy/kind` 变更 | 在 Kind 上安装完整环境，逐个注入级联故障场景并检查预期告警 |
+| `kind-e2e.yml` | 手动、每晚、`deploy/kind` 变更 | 每个级联故障场景在自己的 Kind 集群中安装完整环境、注入故障并检查预期告警与 SreNautix 的三个环节；环境拉起与不变量 12 单独运行一次 |
 
 ## 依赖固定
 
