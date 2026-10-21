@@ -9,10 +9,6 @@ SRENAUTIX_ROOT='^(Application\.argoproj\.io:argocd/shop|Deployment:shop/api)$'
 SRENAUTIX_MAX_INCIDENTS=2
 SRENAUTIX_REMEDIATION=release_rollback
 SRENAUTIX_PR_FILES='^apps/shop/release\.json$'
-# 已知缺口（产品缺陷，断言不变）：gitops 包的 release-to-serving-version 只在与当前（出错的）发布输入同一镜像仓库的就绪容器中
-# 找正在服务的版本；r3 把镜像仓库从 nginx 换成 busybox，仍在服务的 r1 Pod 不在候选中，模板以 skip_if 跳过，没有自愈 PR
-# （kind-e2e 39620204509 的 remediation.tsv）。
-KNOWN_GAP='Zzhihon/SreNautix#5 (1)：release-to-serving-version 按出错发布的镜像仓库找正在服务的版本，换了仓库的发布没有回退 PR'
 
 inject() {
   jq --arg image "$(image_ref busybox)" '.data.image = $image | .data.release_id = "r3"' \
