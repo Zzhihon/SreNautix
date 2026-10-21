@@ -92,6 +92,14 @@ spec:
       labels: {app: shop-migrate}
     spec:
       restartPolicy: Never
+      # 首次部署时 postgres 与迁移 Job 同时创建：先等数据库可连接，迁移本身的失败才计入 backoffLimit
+      initContainers:
+        - name: wait-for-postgres
+          image: postgres
+          command: [sh, -c, "until pg_isready -h postgres.shop.svc -p 5432 -t 2; do sleep 2; done"]
+          resources:
+            requests: {cpu: 5m, memory: 16Mi}
+            limits: {cpu: 100m, memory: 32Mi}
       containers:
         - name: migrate
           image: postgres
