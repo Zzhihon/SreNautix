@@ -7,7 +7,7 @@ import { ModelLayer } from '../../src/llm/session.js';
 import { DEFAULT_LIMITS, runStageB } from '../../src/research/controller.js';
 import { EvidenceBook } from '../../src/research/evidence.js';
 import { judgeLadder } from '../../src/research/ladder.js';
-import { Ledger, scopeOf } from '../../src/research/ledger.js';
+import { Ledger, ownerOf, scopeOf } from '../../src/research/ledger.js';
 import { WorkerMetrics } from '../../src/research/metrics.js';
 import { validateConclusion } from '../../src/research/validate.js';
 import { MemorySink, testRoute } from '../support/research-env.js';
@@ -380,6 +380,88 @@ describe('模型弃权时按账本选中（ADR 0120）', () => {
     const v = validateConclusion(conclude({ hypothesis_id: 'h1', disposition: 'escalate' }), rc, book, ledger);
     expect(v.chosenBy).toBe('model');
     expect(judgeLadder(ledger, v.chosen, rc.incident, true, v.chosenBy).level).toBe('evidence_consistent');
+  });
+});
+
+describe('组件粒度（ADR 0121）', () => {
+  const DEP = 'Deployment:shop/worker';
+  const RS = 'ReplicaSet:shop/worker-6d8';
+  const POD = 'Pod:shop/worker-6d8-x1';
+  const edge = (from: string, to: string, relation: string) => ({
+    from,
+    to,
+    relation,
+    provenance: 'structural' as const,
+    confidence: 1,
+    scope: 'instance' as const,
+  });
+  function owned() {
+    const base = subgraph();
+    const node = (component: string, kind: string, name: string) => ({
+      component,
+      kind,
+      namespace: 'shop',
+      name,
+      role: 'member' as const,
+      alerts: [],
+      hops: 1,
+    });
+    const g = {
+      ...base,
+      nodes: [
+        ...base.nodes,
+        node(DEP, 'Deployment', 'worker'),
+        node(RS, 'ReplicaSet', 'worker-6d8'),
+        node(POD, 'Pod', 'worker-6d8-x1'),
+      ],
+      edges: [
+        ...base.edges,
+        edge(RS, DEP, 'owned_by'),
+        edge(POD, RS, 'owned_by'),
+        edge(POD, 'Node:node-a', 'scheduled_on'),
+      ],
+    };
+    const card = { ...checkCard(POD, 'abnormal', -5), ref: 'card:1', card_id: 'pod/restarts' };
+    const rc = researchCase({ subgraph: g, stageA: stageA([card]) });
+    const book = new EvidenceBook(rc);
+    return { rc, book, ledger: new Ledger(book, rc.subgraph), g };
+  }
+
+  it('属主取到顶层；范围沿 owned_by 向下包含全部成员，不含成员依赖的节点', () => {
+    const { g } = owned();
+    expect(ownerOf(POD, g)).toBe(DEP);
+    expect(ownerOf(RS, g)).toBe(DEP);
+    expect(ownerOf(PG, g)).toBe(PG);
+    expect([...scopeOf(DEP, g)].sort()).toEqual([DEP, POD, RS].sort());
+  });
+
+  it('Pod 上的假设改为属主；落在同一组件上的假设合并，检查与结论按合并后的 id 引用', () => {
+    const { rc, book, ledger } = owned();
+    const notes: string[] = [];
+    ledger.merge([hyp('h1', POD, ['card:1']), hyp('h2', DEP, ['alert:1']), hyp('h3', PG, [])], notes);
+    ledger.evaluate();
+    expect(ledger.entries.get('h1')).toMatchObject({ rootComponent: DEP, status: 'supported' });
+    expect(ledger.entries.get('h1')?.supporting).toEqual(['card:1', 'alert:1']);
+    expect(ledger.entries.has('h2')).toBe(false);
+    expect(ledger.resolve('h2')).toBe('h1');
+    expect(notes).toEqual([
+      `假设 h1 的根因 ${POD} 由 ${DEP} 拥有，按组件粒度改为 ${DEP}`,
+      `假设 h2 与 h1 的根因都是 ${DEP}，已并入 h1`,
+    ]);
+    const v = validateConclusion(conclude({ hypothesis_id: 'h2', disposition: 'escalate' }), rc, book, ledger);
+    expect(v.chosen?.id).toBe('h1');
+    expect(v.chosen?.rootComponent).toBe(DEP);
+    // 下一轮模型改用 h2 指向别的组件时，别名解除
+    ledger.merge([hyp('h1', DEP, ['card:1']), hyp('h2', API, [])], []);
+    expect(ledger.resolve('h2')).toBe('h2');
+    expect(ledger.entries.get('h2')?.rootComponent).toBe(API);
+  });
+
+  it('反馈中的 Pod 根因按属主比对', () => {
+    const { ledger } = owned();
+    ledger.merge([hyp('h1', DEP, [])], []);
+    ledger.applyFeedback([feedback({ verdict: 'rejected', root_component: PG })], POD, []);
+    expect(ledger.entries.get('h1')).toMatchObject({ status: 'refuted', pinned: 'human_rejected' });
   });
 });
 

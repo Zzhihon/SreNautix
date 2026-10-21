@@ -265,7 +265,8 @@ export async function runStageB(input: ResearchRunInput, env: ResearchEnv, sink:
     );
     const planned: Array<{ check: NextCheck; args: Record<string, unknown> }> = [];
     const seen = new Set<string>();
-    for (const c of hyp.value.next_checks) {
+    // 检查针对的假设按组件粒度合并后的 id（ADR 0121）
+    for (const c of hyp.value.next_checks.map((x) => ({ ...x, hypothesis_id: ledger.resolve(x.hypothesis_id) }))) {
       if (!open.has(c.hypothesis_id) || seen.has(c.hypothesis_id) || done.has(checkKey(c))) {
         continue;
       }

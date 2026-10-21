@@ -42,7 +42,7 @@ Output exactly one object conforming to the given JSON schema and nothing else. 
 
 Propose 1–6 competing root-cause hypotheses (ids h1…h6; use parent_id for refinements):
 
-- root_component must be a component key from the topology in the context;
+- root_component must be a component key from the topology in the context, at component granularity: for an object owned by a controller (Pod, ReplicaSet and so on) use its top-level owner; the code rewrites such keys to the owner and merges hypotheses that end up on the same component;
 - mechanism states the causal chain from the root cause to the observed symptoms;
 - supporting / refuting reference the evidence for or against it;
 - do not repeat a hypothesis that the previous ledger refuted unless there is new evidence; statuses pinned by human feedback do not change.

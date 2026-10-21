@@ -40,20 +40,47 @@ export interface ModelHypothesis {
 }
 
 /**
+ * 组件粒度（ADR 0121）：沿子图的 owned_by 向上取顶层属主，与阶段 A 的 componentOf 相同；
+ * 例如 Pod → ReplicaSet → Deployment 取 Deployment，CNPG 实例 Pod 取 Cluster。子图中没有属主时就是它自己。
+ */
+export function ownerOf(key: string, subgraph: Subgraph): string {
+  const parent = new Map<string, string>();
+  for (const e of subgraph.edges) {
+    if (e.relation === 'owned_by') {
+      parent.set(e.from, e.to);
+    }
+  }
+  let cur = key;
+  const seen = new Set([cur]);
+  for (let next = parent.get(cur); next !== undefined; next = parent.get(cur)) {
+    if (seen.has(next)) {
+      throw new Error(`owned_by 成环：${[...seen].join(' → ')} → ${next}`);
+    }
+    seen.add(next);
+    cur = next;
+  }
+  return cur;
+}
+
+/**
  * 假设的范围：根因组件本身，它直接依赖的对象（边 from=根因，置信度不低于 τ，例如挂载的 PVC、所在节点），
- * 以及它拥有的对象（owned_by 指向根因，例如 Deployment 的 Pod）。调用根因的上游（边 to=根因 的其他关系）
- * 只会表现出症状，它们的异常卡不能证明根因。
+ * 以及沿 owned_by 向下它拥有的全部对象（例如 Deployment 的 ReplicaSet 与 Pod）。调用根因的上游
+ * （边 to=根因 的其他关系）只会表现出症状，它们的异常卡不能证明根因。
  */
 export function scopeOf(root: string, subgraph: Subgraph): Set<string> {
   const out = new Set([root]);
-  for (const e of subgraph.edges) {
-    if (e.confidence < SCOPE_TAU) {
-      continue;
+  const members = [root];
+  for (let i = 0; i < members.length; i++) {
+    for (const e of subgraph.edges) {
+      if (e.relation === 'owned_by' && e.to === members[i] && e.confidence >= SCOPE_TAU && !out.has(e.from)) {
+        out.add(e.from);
+        members.push(e.from);
+      }
     }
-    if (e.from === root) {
+  }
+  for (const e of subgraph.edges) {
+    if (e.confidence >= SCOPE_TAU && e.from === root) {
       out.add(e.to);
-    } else if (e.to === root && e.relation === 'owned_by') {
-      out.add(e.from);
     }
   }
   return out;
@@ -65,6 +92,8 @@ function hasData(c: CardEntry): boolean {
 
 export class Ledger {
   readonly entries = new Map<string, LedgerEntry>();
+  /** 按组件粒度合并掉的假设 id → 保留的假设 id；检查、结论与提议引用被合并的 id 时按它改写 */
+  private readonly aliases = new Map<string, string>();
   private changes = 0;
 
   constructor(
@@ -78,6 +107,17 @@ export class Ledger {
 
   list(): LedgerEntry[] {
     return [...this.entries.values()];
+  }
+
+  /** 假设 id 按组件粒度合并后的 id；没有合并时是它自己 */
+  resolve<T extends string>(id: T): T {
+    // 别名的值同样取自模型给出的假设 id（h1…h6）
+    return (this.aliases.get(id) as T | undefined) ?? id;
+  }
+
+  /** 组件粒度的根因（ADR 0121） */
+  componentOf(key: string): string {
+    return ownerOf(key, this.subgraph);
   }
 
   /** 状态签名：用于判断"连续两步判定都没有变化" */
@@ -102,7 +142,7 @@ export class Ledger {
       this.entries.set(h.id, {
         id: h.id,
         parentId: h.parent_id,
-        rootComponent: h.root_component,
+        rootComponent: this.componentOf(h.root_component),
         mechanism: h.mechanism,
         supporting: [],
         refuting: [],
@@ -129,26 +169,51 @@ export class Ledger {
         }
         return [...new Set(ok)];
       };
+      // 组件粒度：由控制器拥有的对象改为顶层属主
+      const root = this.componentOf(h.root_component);
+      if (root !== h.root_component) {
+        notes.push(`假设 ${h.id} 的根因 ${h.root_component} 由 ${root} 拥有，按组件粒度改为 ${root}`);
+      }
+      // 与另一个假设落在同一个组件上时并入那个假设，引用合并
+      const same = [...this.entries.values()].find((e) => e.id !== h.id && e.rootComponent === root);
+      if (same) {
+        same.supporting = [...new Set([...same.supporting, ...keep(h.supporting, '支持')])];
+        same.refuting = [...new Set([...same.refuting, ...keep(h.refuting, '反驳')])];
+        if (this.entries.delete(h.id)) {
+          notes.push(`假设 ${h.id} 原有的根因被替换，旧的账本记录已删除`);
+        }
+        this.aliases.set(h.id, same.id);
+        notes.push(`假设 ${h.id} 与 ${same.id} 的根因都是 ${root}，已并入 ${same.id}`);
+        return;
+      }
+      this.aliases.delete(h.id);
       const prev = this.entries.get(h.id);
-      if (prev && prev.rootComponent !== h.root_component) {
-        notes.push(`假设 ${h.id} 的根因组件由 ${prev.rootComponent} 改为 ${h.root_component}，按新假设重新检验`);
+      const kept = prev !== undefined && prev.rootComponent === root ? prev : null;
+      if (prev && !kept) {
+        notes.push(`假设 ${h.id} 的根因组件由 ${prev.rootComponent} 改为 ${root}，按新假设重新检验`);
       }
       const entry: LedgerEntry = {
         id: h.id,
         parentId: h.parent_id && h.parent_id !== h.id ? h.parent_id : null,
-        rootComponent: h.root_component,
+        rootComponent: root,
         mechanism: h.mechanism,
         supporting: keep(h.supporting, '支持'),
         refuting: keep(h.refuting, '反驳'),
-        status: prev && prev.rootComponent === h.root_component ? prev.status : 'pending',
-        pinned: prev && prev.rootComponent === h.root_component ? prev.pinned : null,
-        checksRun: prev && prev.rootComponent === h.root_component ? prev.checksRun : 0,
-        reasons: prev && prev.rootComponent === h.root_component ? prev.reasons : [],
+        status: kept ? kept.status : 'pending',
+        pinned: kept ? kept.pinned : null,
+        checksRun: kept ? kept.checksRun : 0,
+        reasons: kept ? kept.reasons : [],
         order: i,
       };
       this.entries.set(h.id, entry);
     });
     for (const e of this.entries.values()) {
+      if (e.parentId) {
+        e.parentId = this.resolve(e.parentId);
+      }
+      if (e.parentId === e.id) {
+        e.parentId = null;
+      }
       if (e.parentId && !this.entries.has(e.parentId)) {
         notes.push(`假设 ${e.id} 的父假设 ${e.parentId} 不存在，已置空`);
         e.parentId = null;
@@ -174,13 +239,14 @@ export class Ledger {
    * 反馈作为输入（DESIGN §7.4）：确认的根因固定为支持，否定的结论固定为推翻。
    * 只采用已绑定账号的反馈，同一事件以最新的一条为准。
    */
-  applyFeedback(feedback: readonly Feedback[], previousRoot: string | null, notes: string[]): void {
+  applyFeedback(feedback: readonly Feedback[], previousConclusion: string | null, notes: string[]): void {
     const latest = [...feedback]
       .filter((f) => f.linked && f.verdict !== null)
       .sort((a, b) => b.created_at.localeCompare(a.created_at))[0];
     if (!latest) {
       return;
     }
+    const previousRoot = previousConclusion === null ? null : this.componentOf(previousConclusion);
     // previousRoot：反馈所针对的那次研判给出的根因组件
     if (latest.verdict === 'rejected' && previousRoot) {
       for (const e of this.entries.values()) {
@@ -192,7 +258,12 @@ export class Ledger {
         }
       }
     }
-    const confirmedRoot = latest.verdict === 'confirmed' ? previousRoot : latest.root_component;
+    const confirmedRoot =
+      latest.verdict === 'confirmed'
+        ? previousRoot
+        : latest.root_component === null
+          ? null
+          : this.componentOf(latest.root_component);
     if (!confirmedRoot) {
       return;
     }

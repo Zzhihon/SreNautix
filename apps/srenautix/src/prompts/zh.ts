@@ -42,7 +42,7 @@ export const zh: PromptSet = {
 
 提出 1–6 个相互竞争的根因假设（id 为 h1…h6，可以用 parent_id 表示细化关系）：
 
-- root_component 必须是上下文拓扑中的组件键；
+- root_component 必须是上下文拓扑中的组件键，按组件粒度填写：由控制器拥有的对象（Pod、ReplicaSet 等）写它的顶层属主；代码会把这类键改写为属主，并合并落在同一组件上的假设；
 - mechanism 写清从根因到观察到的症状的因果链；
 - supporting / refuting 引用支持或反驳它的证据编号；
 - 上一次研判的账本中已经推翻的假设不要原样重复，除非有新的证据；人工反馈固定的状态不会改变。

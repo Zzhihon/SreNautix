@@ -84,7 +84,7 @@ export function validateConclusion(
   let chosen: LedgerEntry | null = null;
   let undeterminedReason = raw.undetermined_reason;
   if (raw.hypothesis_id !== null) {
-    const e = ledger.entries.get(raw.hypothesis_id) ?? null;
+    const e = ledger.entries.get(ledger.resolve(raw.hypothesis_id)) ?? null;
     if (!e) {
       notes.push(`结论引用的假设 ${raw.hypothesis_id} 不在账本中，改为无法判定`);
       undeterminedReason = `结论引用的假设 ${raw.hypothesis_id} 不存在`;
@@ -129,7 +129,7 @@ export function validateConclusion(
       notes.push(`提议 ${p.action_id}：不在本集群可用的动作目录中，已删除`);
       continue;
     }
-    const h = ledger.entries.get(p.hypothesis_id);
+    const h = ledger.entries.get(ledger.resolve(p.hypothesis_id));
     if (!h || h.status === 'refuted') {
       notes.push(`提议 ${p.action_id}：依据的假设 ${p.hypothesis_id} ${h ? '已被推翻' : '不存在'}，已删除`);
       continue;
@@ -172,7 +172,7 @@ export function validateConclusion(
     (a, b) => RECOMMENDATION_ORDER.indexOf(a.kind) - RECOMMENDATION_ORDER.indexOf(b.kind),
   );
   for (const r of ordered) {
-    const h = ledger.entries.get(r.hypothesis_id);
+    const h = ledger.entries.get(ledger.resolve(r.hypothesis_id));
     if (!h || h.status === 'refuted') {
       notes.push(`修复建议 ${r.id}：依据的假设 ${r.hypothesis_id} ${h ? '已被推翻' : '不存在'}，已删除`);
       continue;
@@ -195,6 +195,7 @@ export function validateConclusion(
     }
     recommendations.push({
       ...r,
+      hypothesis_id: h.id,
       runbook_ref: runbook,
       action_id: actionId,
       evidence_refs: keepRefs(r.evidence_refs, `修复建议 ${r.id} 的引用`),
