@@ -60,9 +60,10 @@ check_discovery() {
   printf '%s' "$id"
 }
 
-# 分析：阶段 A 有证据卡，阶段 B 研判完成且结论在允许范围内；参数：事件 id
+# 分析：阶段 A 有证据卡，注入之后开始的阶段 B 研判完成且结论在允许范围内（事件在注入之前已经存在时，
+# 之前的研判用的是上一个场景的录制，不计入）；参数：事件 id、注入时间
 check_analysis() {
-  local id=$1 timeout=${SRENAUTIX_TIMEOUT:-600} deadline cards runs run
+  local id=$1 since=$2 timeout=${SRENAUTIX_TIMEOUT:-600} deadline cards runs run
   local allowed=${SRENAUTIX_CONCLUSIONS:-likely evidence_consistent}
   deadline=$((SECONDS + timeout))
   until cards=$(srenautix_api "/v1/incidents/$id/evidence" | jq 'length') && ((cards > 0)); do
@@ -70,8 +71,10 @@ check_analysis() {
     sleep 15
   done
   until runs=$(srenautix_api "/v1/incidents/$id/research") &&
-    run=$(jq -c '[.[] | select(.state == "completed")][0] // empty' <<<"$runs") && [[ -n "$run" ]]; do
-    ((SECONDS < deadline)) || die "分析：事件 $id 在 ${timeout}s 内没有完成的阶段 B 研判：$(jq -c '[.[] | {state, conclusion_level}]' <<<"${runs:-[]}")"
+    run=$(jq -c --arg since "$since" '[.[] | select(.started_at >= $since and .state == "completed")][0] // empty' <<<"$runs") &&
+    [[ -n "$run" ]]; do
+    ((SECONDS < deadline)) ||
+      die "分析：事件 $id 在 ${timeout}s 内没有注入之后完成的阶段 B 研判：$(jq -c '[.[] | {started_at, state, conclusion_level}]' <<<"${runs:-[]}")"
     sleep 15
   done
   local level
@@ -139,6 +142,9 @@ use_llm_recording() {
   k -n "$SRENAUTIX_NS" create configmap llm-replay "${args[@]}" --dry-run=client -o yaml | k apply -f - >/dev/null
   k -n "$SRENAUTIX_NS" rollout restart deployment/llm-replay >/dev/null
   k -n "$SRENAUTIX_NS" rollout status deployment/llm-replay --timeout=180s >/dev/null
+  # 新 Pod 就绪（readinessProbe 是 /healthz）且旧 Pod 已退出之后才注入，避免注入后的研判打到正在重启的服务
+  k -n "$SRENAUTIX_NS" wait pod -l app=llm-replay --for=condition=Ready --timeout=120s >/dev/null
+  until [[ "$(k -n "$SRENAUTIX_NS" get pod -l app=llm-replay -o name | wc -l | tr -d ' ')" == 1 ]]; do sleep 2; done
   log "llm-replay 使用 ${name} 的录制（$(find "$dir" -name '*.json' 2>/dev/null | wc -l | tr -d ' ') 个响应）"
 }
 
@@ -146,7 +152,7 @@ use_llm_recording() {
 check_srenautix() {
   local since=$1 id
   id=$(check_discovery "$since")
-  check_analysis "$id"
+  check_analysis "$id" "$since"
   if [[ -n "${SRENAUTIX_REMEDIATION:-}" ]]; then
     check_remediation "$id" "$since"
   else
