@@ -564,3 +564,82 @@ describe('依赖合并要求开始时间相近（ADR 0104）', () => {
     expect(near).toHaveLength(1);
   });
 });
+
+describe('同一组件的不同对象（ADR 0104 §12）', () => {
+  const node = (key: string, hub = false): TopologyNode => {
+    const [kind, rest] = key.split(':') as [string, string];
+    const [ns, name] = rest.includes('/') ? (rest.split('/') as [string, string]) : [null, rest];
+    return { key, kind, namespace: ns, name, uid: null, labels: {}, component_type: null, hub };
+  };
+  const owned = (from: string, to: string): TopologyEdge => ({
+    from,
+    to,
+    relation: 'owned_by',
+    provenance: 'structural',
+    confidence: 1,
+    scope: 'instance',
+    evidence: 't',
+  });
+  // CNPG 集群的主库与备库 Pod 之间没有依赖边；cilium 是每个节点上都有的枢纽
+  const CLUSTER_KEY = 'Cluster.postgresql.cnpg.io:data/pg';
+  const PG1 = 'Pod:data/pg-1';
+  const PG2 = 'Pod:data/pg-2';
+  const CILIUM = 'DaemonSet:kube-system/cilium';
+  const CILIUM_A = 'Pod:kube-system/cilium-a';
+  const CILIUM_B = 'Pod:kube-system/cilium-b';
+  const graph = new TopologyGraph(
+    [node(CLUSTER_KEY), node(PG1), node(PG2), node(CILIUM, true), node(CILIUM_A), node(CILIUM_B)],
+    [owned(PG1, CLUSTER_KEY), owned(PG2, CLUSTER_KEY), owned(CILIUM_A, CILIUM), owned(CILIUM_B, CILIUM)],
+    1,
+  );
+  const alert = (n: number, alertname: string, pod: string, at: number): Alert => {
+    const [ns, name] = pod.split(':')[1]!.split('/') as [string, string];
+    return {
+      alert_id: `${n.toString(16).padStart(16, '0')}@${at / 1000}`,
+      cluster_id: CLUSTER,
+      source: 'alertmanager',
+      fingerprint: n.toString(16).padStart(16, '0'),
+      alertname,
+      labels: { alertname, namespace: ns, pod: name },
+      annotations: {},
+      severity: 'critical',
+      status: 'firing',
+      suppressed: 'none',
+      starts_at: new Date(at).toISOString(),
+      ends_at: null,
+      generator_url: null,
+      classification: { role: 'cause', source: 'catalog', confidence: 1, catalog_entry: null, chronic: false },
+      entity: { cluster_id: CLUSTER, kind: 'Pod', namespace: ns, name, uid: null },
+      entity_resolution: 'informer',
+      component: pod,
+      received_at: new Date(at).toISOString(),
+    };
+  };
+  const now = T0 + 10 * 60 * MIN;
+  const run = (alerts: Alert[]) => computeIncidents({ alerts, changes: [], graph, params: DEFAULT_RCA_PARAMS, now });
+
+  it('主库 Pod 的 OOM 与另一个实例的 postmaster 重启在同一个事件，根因是集群', () => {
+    const incs = run([
+      alert(1, 'KubeContainerOOMKilled', PG2, T0),
+      alert(2, 'CNPGPrimaryRestarted', PG2, T0 + MIN),
+      alert(3, 'CNPGPrimaryPostmasterRestarted', PG1, T0 + 2 * MIN),
+    ]);
+    expect(incs).toHaveLength(1);
+    expect(incs[0]!.ranking.root?.component).toBe(CLUSTER_KEY);
+  });
+
+  it('开始时间相差超过时间相邻的 4 倍时不合并', () => {
+    expect(
+      run([
+        alert(1, 'KubeContainerOOMKilled', PG2, T0),
+        alert(2, 'CNPGPrimaryPostmasterRestarted', PG1, T0 + 8 * 60 * MIN),
+      ]),
+    ).toHaveLength(2);
+  });
+
+  it('枢纽的不同 Pod 各自出错时不合并', () => {
+    expect(
+      run([alert(1, 'KubePodCrashLooping', CILIUM_A, T0), alert(2, 'KubePodCrashLooping', CILIUM_B, T0 + MIN)]),
+    ).toHaveLength(2);
+  });
+});

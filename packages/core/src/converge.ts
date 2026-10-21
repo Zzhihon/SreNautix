@@ -318,10 +318,18 @@ export function converge(input: ConvergeInput): AlertGroup[] {
       }
       // 依赖关系只在两条告警开始时间相近时合并（ADR 0104）：已经持续触发数小时的告警（资源请求接近上限、全天的扩容
       // 顶格）不是几小时后才开始的新故障的起因，不吸收它
-      if (
-        Math.abs(x.start - y.start) <= DEPENDENCY_ONSET_FACTOR * gap &&
-        (dependsOn(x, y, graph, 'merge') > 0 || dependsOn(y, x, graph, 'merge') > 0)
-      ) {
+      if (Math.abs(x.start - y.start) > DEPENDENCY_ONSET_FACTOR * gap) {
+        continue;
+      }
+      // 同一组件的不同对象（CNPG 集群的主库与备库 Pod、同一 Deployment 的两个 Pod）与依赖关系同样处理（ADR 0104 §12）；
+      // 枢纽（每个节点上都有的 CNI 之类）与命名空间伪组件除外，它们的不同对象常常各自独立出故障
+      const sameComponent =
+        x.component !== null &&
+        x.component === y.component &&
+        !splitByChange &&
+        !isNamespacePseudo(x.component) &&
+        !graph.isHub(x.component);
+      if (sameComponent || dependsOn(x, y, graph, 'merge') > 0 || dependsOn(y, x, graph, 'merge') > 0) {
         uf.union(i, j);
       }
     }
