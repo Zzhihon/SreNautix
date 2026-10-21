@@ -356,6 +356,8 @@ export class WorkerService {
       stop: res.stopReason,
       conclusion_level: output?.conclusion.level ?? null,
       tokens: res.ledger.input + res.ledger.output,
+      // 失败的原因（模型输出无效时含每次尝试的校验错误），不必再查运行明细
+      ...(res.error ? { error_kind: res.error.kind, error: res.error.message.slice(0, 1000) } : {}),
     });
     return res.state;
   }

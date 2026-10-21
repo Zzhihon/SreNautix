@@ -13,7 +13,7 @@ import { logger } from '../log.js';
  *   回放时包成对应协议的响应。
  * - 结构化输出中的占位符按本次请求解析（只对整串是占位符的字符串）：
  *   `{{ref:<卡片 id>}}`、`{{ref:<卡片 id>@<实体>}}` 为提示中这张卡的引用（card:N）；
- *   `{{component:<正则>}}` 为 schema 枚举或提示中第一个匹配的组件键；`{{enum:<值>}}` 为该值本身，只在它出现在 schema 的某个枚举里时。
+ *   `{{component:<正则>}}` 为 schema 组件枚举（没有 schema 时为提示）中第一个匹配的组件键，没有匹配时退回事件的根因（在枚举里时）；`{{enum:<值>}}` 为该值本身，只在它出现在 schema 的某个枚举里时。
  *   解析不出的占位符删除它所在的数组元素（数组外为 null），录制因此不依赖某张卡或某个工具一定存在。
  * - 请求为流式时按服务方的事件格式发出。
  * - 录制模式（--record --upstream <base_url>）：以非流式转发到上游，响应写入目录（`<名称>-<n>.json`）后按请求方式返回。
@@ -193,10 +193,13 @@ const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 export function resolvePlaceholders(output: unknown, req: unknown): unknown {
   const text = requestText(req);
   const enums = schemaEnums(req);
-  const components = [
-    ...enums,
-    ...[...text.matchAll(/"(?:entity|component|root_component)":"([^"]+)"/g)].map((m) => m[1] as string),
-  ];
+  // schema 带有组件枚举时只从枚举里取（取枚举之外的值会让输出不合 schema）；没有 schema 时取提示中出现的组件
+  const components = enums.size
+    ? [...enums]
+    : [...text.matchAll(/"(?:entity|component|root_component)":"([^"]+)"/g)].map((m) => m[1] as string);
+  // 事件的根因（提示中事件段的 root.component）：组件占位符没有匹配时的退路，录制因此不依赖场景里事件的根因恰好是哪个组件
+  const incidentRoot = /"root":\{"component":"([^"]+)"/.exec(text)?.[1] ?? null;
+  const rootOk = incidentRoot !== null && (enums.size === 0 || enums.has(incidentRoot));
   const one = (s: string): unknown => {
     const m = PLACEHOLDER.exec(s);
     if (!m) {
@@ -210,7 +213,7 @@ export function resolvePlaceholders(output: unknown, req: unknown): unknown {
     }
     if (kind === 'component') {
       const re = new RegExp(arg);
-      return components.find((c) => re.test(c)) ?? DROP;
+      return components.find((c) => re.test(c)) ?? (rootOk ? incidentRoot : DROP);
     }
     return enums.has(arg) ? arg : DROP;
   };
