@@ -205,6 +205,78 @@ export async function runStageB(input: ResearchRunInput, env: ResearchEnv, sink:
     ledger.seed(previous.output.hypotheses);
   }
 
+  const candidateScore = (c: string) => rc.incident.candidates.find((x) => x.component === c)?.score ?? 0;
+
+  // conclude
+  const conclude = async (stopReason: StopReason): Promise<ResearchRunResult> => {
+    await move('conclude');
+    hash('conclude', 'conclude');
+    const concluded = await session.structured<ConcludeOutput>(
+      'conclude',
+      { items: concludeItems(env.language, parts, ledger, book), maxOutputTokens: 8000, temperature: 0 },
+      output('conclude'),
+    );
+    if (!concluded.ok) {
+      const f = failure(concluded);
+      return finish({
+        state: f.stageAOnly ? 'stage_a_only' : 'failed',
+        stopReason: f.stop,
+        output: null,
+        error: { kind: f.kind, message: f.message },
+        stillConsistent: false,
+      });
+    }
+    notes.push(...concluded.notes);
+    const v = validateConclusion(concluded.value, rc, book, ledger);
+    notes.push(...v.notes);
+    const ladder = judgeLadder(ledger, v.chosen, rc.incident, ledger.list().length > 0, v.chosenBy);
+    notes.push(...ladder.notes);
+    const leader = ledger.ranked(candidateScore)[0];
+    const untested = v.chosen ? !ledger.competitorTested(v.chosen) : false;
+    env.metrics.conclusions.inc({
+      level: ladder.level,
+      untested_competitor: String(untested && ledger.list().length > 1),
+      zero_checks: String(checks.length === 0),
+    });
+    if (leader && v.chosen && leader.id !== v.chosen.id) {
+      notes.push(`结论选中 ${v.chosen.id}，账本排名第一的是 ${leader.id}`);
+    }
+    const result: ResearchOutput = {
+      disposition: v.disposition,
+      conclusion: {
+        level: ladder.level,
+        hypothesis_id: v.chosen?.id ?? null,
+        root_component: v.chosen?.rootComponent ?? null,
+        undetermined_reason: v.undeterminedReason,
+        consistency: ladder.consistency,
+      },
+      hypotheses: ledger.toContract(),
+      next_checks: checks.map((x) => ({
+        hypothesis_id: x.check.hypothesis_id,
+        type: x.check.type,
+        template: x.check.template,
+        args: x.args,
+        refutes_if: x.check.refutes_if,
+        purpose: x.check.purpose,
+        result_ref: x.card?.ref ?? null,
+        outcome: x.outcome,
+      })),
+      situation: v.situation,
+      summary: v.summary,
+      recommendations: v.recommendations,
+      proposals: v.proposals.map((p) => ({ ...p, proposal_id: null })),
+      validation_notes: notes,
+    };
+    return finish({ state: 'completed', stopReason, output: result, error: null, stillConsistent: false });
+  };
+
+  // 研判子图没有任何组件（事件没有根因，例如 unlabelled）：没有可以作为根因的组件，hypothesize 的输出必然不合 schema。
+  // 不提出假设，直接结论，档位为 undetermined
+  if (rc.subgraph.nodes.length === 0) {
+    notes.push('研判子图没有组件（事件没有根因），不提出假设，直接结论');
+    return conclude('no_change');
+  }
+
   // hypothesize
   const hypothesize = async (): Promise<StructuredResult<HypothesizeOutput>> => {
     hash('hypothesize', 'hypothesize');
@@ -241,7 +313,6 @@ export async function runStageB(input: ResearchRunInput, env: ResearchEnv, sink:
   let stopReason: StopReason;
   let unchanged = 0;
   let lastSignature = ledger.signature();
-  const candidateScore = (c: string) => rc.incident.candidates.find((x) => x.component === c)?.score ?? 0;
   for (let step = 1; ; step++) {
     const leader = ledger.ranked(candidateScore)[0];
     if (leader && leader.status === 'supported' && ledger.competitorsResolved(leader)) {
@@ -362,64 +433,5 @@ export async function runStageB(input: ResearchRunInput, env: ResearchEnv, sink:
     ledger.evaluate();
   }
 
-  // conclude
-  await move('conclude');
-  hash('conclude', 'conclude');
-  const concluded = await session.structured<ConcludeOutput>(
-    'conclude',
-    { items: concludeItems(env.language, parts, ledger, book), maxOutputTokens: 8000, temperature: 0 },
-    output('conclude'),
-  );
-  if (!concluded.ok) {
-    const f = failure(concluded);
-    return finish({
-      state: f.stageAOnly ? 'stage_a_only' : 'failed',
-      stopReason: f.stop,
-      output: null,
-      error: { kind: f.kind, message: f.message },
-      stillConsistent: false,
-    });
-  }
-  notes.push(...concluded.notes);
-  const v = validateConclusion(concluded.value, rc, book, ledger);
-  notes.push(...v.notes);
-  const ladder = judgeLadder(ledger, v.chosen, rc.incident, ledger.list().length > 0, v.chosenBy);
-  notes.push(...ladder.notes);
-  const leader = ledger.ranked(candidateScore)[0];
-  const untested = v.chosen ? !ledger.competitorTested(v.chosen) : false;
-  env.metrics.conclusions.inc({
-    level: ladder.level,
-    untested_competitor: String(untested && ledger.list().length > 1),
-    zero_checks: String(checks.length === 0),
-  });
-  if (leader && v.chosen && leader.id !== v.chosen.id) {
-    notes.push(`结论选中 ${v.chosen.id}，账本排名第一的是 ${leader.id}`);
-  }
-  const result: ResearchOutput = {
-    disposition: v.disposition,
-    conclusion: {
-      level: ladder.level,
-      hypothesis_id: v.chosen?.id ?? null,
-      root_component: v.chosen?.rootComponent ?? null,
-      undetermined_reason: v.undeterminedReason,
-      consistency: ladder.consistency,
-    },
-    hypotheses: ledger.toContract(),
-    next_checks: checks.map((x) => ({
-      hypothesis_id: x.check.hypothesis_id,
-      type: x.check.type,
-      template: x.check.template,
-      args: x.args,
-      refutes_if: x.check.refutes_if,
-      purpose: x.check.purpose,
-      result_ref: x.card?.ref ?? null,
-      outcome: x.outcome,
-    })),
-    situation: v.situation,
-    summary: v.summary,
-    recommendations: v.recommendations,
-    proposals: v.proposals.map((p) => ({ ...p, proposal_id: null })),
-    validation_notes: notes,
-  };
-  return finish({ state: 'completed', stopReason, output: result, error: null, stillConsistent: false });
+  return conclude(stopReason);
 }

@@ -124,4 +124,30 @@ describe('录制的研判回放', () => {
     expect(res.session.egress.every((e) => e.in_domain)).toBe(true);
     expect(res.ledger.input).toBe(sink.llm.reduce((a, c) => a + c.usage.input_tokens, 0));
   });
+
+  it('研判子图没有组件：不提出假设，直接结论为 undetermined', async () => {
+    const server = new ReplayServer();
+    await server.start();
+    // 只排队一次 conclude 的响应（录制中的最后一条，选了 h1）；hypothesize 不应被调用
+    server.enqueue(recorded.responses[3] as LlmFixture);
+    const base = researchCase();
+    const rc = {
+      ...base,
+      incident: { ...base.incident, root: { ...base.incident.root, component: null, entity: null }, candidates: [] },
+      subgraph: { ...base.subgraph, root: null, nodes: [], edges: [] },
+    } as typeof base;
+    const sink = new MemorySink();
+    const res = await runStageB(
+      { runId: '7a1b2c3d-0000-4000-8000-0000000000b2', rc, previous: null, signal: new AbortController().signal },
+      testEnv(testLayer([testRoute(server.baseUrl)]), [], false),
+      sink,
+    );
+    await server.stop();
+    expect(server.pending).toBe(0);
+    expect(res.state).toBe('completed');
+    expect(res.output?.conclusion).toMatchObject({ level: 'undetermined', hypothesis_id: null, root_component: null });
+    expect(res.output?.validation_notes[0]).toBe('研判子图没有组件（事件没有根因），不提出假设，直接结论');
+    expect(sink.llm.map((c) => c.phase)).toEqual(['conclude']);
+    expect(sink.steps.map((s) => s.state)).toEqual(['hypothesize', 'conclude']);
+  });
 });
