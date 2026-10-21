@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto';
 import { HttpError } from '../api/errors.js';
 import { GitHubError, type GitHubApp } from '../github/app.js';
+import { GitHubRepoReader } from '../remediation/github-repo.js';
+import { filePatch } from '../remediation/patch.js';
 import { addOverride, type TopologyOverride } from './overrides.js';
 
 /** 覆盖规则 PR 的仓库：每个集群一个文件 <dir>/<cluster_id>.yaml */
@@ -11,11 +13,15 @@ export interface OverrideRepo {
   dir: string;
 }
 
-export interface OverridePrResult {
-  pr_url: string;
-  pr_number: number;
+/** gitops_pr 提议的参数与基准提交（ADR 0025、0108：server 只读仓库，PR 由 gateway 的 gitops_pr 开出） */
+export interface OverridePlan {
+  path: string;
   branch: string;
-  head_sha: string;
+  title: string;
+  body: string;
+  patch: string;
+  /** 补丁基于的 base 分支提交 */
+  base: string;
 }
 
 function slug(s: string): string {
@@ -29,94 +35,45 @@ function slug(s: string): string {
 }
 
 /**
- * 为未映射的告警开覆盖规则的 PR（DESIGN §12）：在 srenautix/* 分支上修改 <dir>/<cluster_id>.yaml，开 PR，从不合并。
+ * 为未映射的告警计划覆盖规则的 PR（DESIGN §12）：只读地取 base 分支上的 <dir>/<cluster_id>.yaml，追加规则，生成补丁。
  * - 基础分支上已有同一集群、同一告警名的规则：409；
- * - 同一内容的分支已经存在（PR 已开过）：409；
  * - GitHub 拒绝 App 身份（未安装、私钥或 App id 不对）或不可达：503，带原因。
+ * 分支名由集群、告警名与规则内容决定：同一条规则的提议幂等（ProposalService 的幂等键）。
  */
-export async function createOverridePr(
+export async function planOverridePr(
   gh: GitHubApp,
   s: OverrideRepo,
   o: TopologyOverride,
   requestedBy: string,
-  /** 关联的事件 issue（例如 #12 或 owner/name#12）；PR 描述里写 Refs，GitHub 在 issue 上显示关联 */
-  refs: string | null = null,
-): Promise<OverridePrResult> {
+): Promise<OverridePlan> {
   const path = `${s.dir.replace(/\/+$/, '')}/${o.cluster_id}.yaml`;
   const digest = createHash('sha256').update(JSON.stringify(o)).digest('hex').slice(0, 8);
   const branch = `srenautix/topology-override-${slug(o.cluster_id)}-${slug(o.alertname)}-${digest}`;
+  const reader = new GitHubRepoReader(gh, s.repo, s.baseBranch);
   try {
-    const base = await gh.api<{ object: { sha: string } }>(
-      'GET',
-      `/repos/${s.repo}/git/ref/heads/${encodeURIComponent(s.baseBranch)}`,
-      undefined,
-      'get_base_ref',
-    );
-    let existing: { content: string; sha: string } | null = null;
-    try {
-      const f = await gh.api<{ content: string; sha: string; encoding: string }>(
-        'GET',
-        `/repos/${s.repo}/contents/${path}?ref=${encodeURIComponent(s.baseBranch)}`,
-        undefined,
-        'get_file',
-      );
-      existing = { content: Buffer.from(f.content, 'base64').toString('utf8'), sha: f.sha };
-    } catch (e) {
-      if (!(e instanceof GitHubError && e.status === 404)) {
-        throw e;
-      }
-    }
-    const next = addOverride(existing?.content ?? null, path, o);
+    const base = await reader.head();
+    const existing = await reader.read(path);
+    const next = addOverride(existing, path, o);
     if (next === null) {
       throw new HttpError(409, 'conflict', `${path} 中已有集群 ${o.cluster_id} 告警 ${o.alertname} 的覆盖规则`);
     }
-    try {
-      await gh.api(
-        'POST',
-        `/repos/${s.repo}/git/refs`,
-        { ref: `refs/heads/${branch}`, sha: base.object.sha },
-        'create_branch',
-      );
-    } catch (e) {
-      if (e instanceof GitHubError && e.status === 422) {
-        throw new HttpError(409, 'conflict', `分支 ${branch} 已存在：这条覆盖规则的 PR 已经开过`);
-      }
-      throw e;
-    }
-    const put = await gh.api<{ commit: { sha: string } }>(
-      'PUT',
-      `/repos/${s.repo}/contents/${path}`,
-      {
-        message: `topology: map ${o.alertname} in ${o.cluster_id} to ${o.component} as ${o.role}`,
-        content: Buffer.from(next).toString('base64'),
-        branch,
-        ...(existing ? { sha: existing.sha } : {}),
-      },
-      'put_file',
-    );
-    const pr = await gh.api<{ html_url: string; number: number }>(
-      'POST',
-      `/repos/${s.repo}/pulls`,
-      {
-        title: `topology: map ${o.alertname} (${o.cluster_id}) to ${o.component}`,
-        head: branch,
-        base: s.baseBranch,
-        body: [
-          `由 SreNautix 控制台为未映射的告警生成，发起人 ${requestedBy}。`,
-          '',
-          `- 集群：${o.cluster_id}`,
-          `- 告警：${o.alertname}`,
-          `- 组件：${o.component}`,
-          `- 角色：${o.role}`,
-          '',
-          '合并后 server 在下一次重新加载拓扑覆盖目录时生效。',
-          ...(refs ? ['', `Refs ${refs}`] : []),
-        ].join('\n'),
-        maintainer_can_modify: true,
-      },
-      'create_pull',
-    );
-    return { pr_url: pr.html_url, pr_number: pr.number, branch, head_sha: put.commit.sha };
+    return {
+      path,
+      branch,
+      base,
+      title: `topology: map ${o.alertname} (${o.cluster_id}) to ${o.component}`,
+      body: [
+        `由 SreNautix 控制台为未映射的告警生成，发起人 ${requestedBy}。`,
+        '',
+        `- 集群：${o.cluster_id}`,
+        `- 告警：${o.alertname}`,
+        `- 组件：${o.component}`,
+        `- 角色：${o.role}`,
+        '',
+        '合并后 server 在下一次重新加载拓扑覆盖目录时生效。',
+      ].join('\n'),
+      patch: filePatch(path, existing, next),
+    };
   } catch (e) {
     if (e instanceof GitHubError) {
       const why =

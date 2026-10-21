@@ -14,9 +14,11 @@ import type { Catalog } from '../proposals/catalog.js';
 import type { Policies } from '../proposals/policy.js';
 import type { ProposalService, TargetResolver } from '../proposals/service.js';
 import type { PackRuntime } from '../stage-a/packs.js';
-import { GitHubApp } from '../github/app.js';
+import type { GitHubApp } from '../github/app.js';
 import type { IssueService } from '../github/issues.js';
-import { createOverridePr } from '../topology/override-pr.js';
+import { approverFromSession } from '../api/routes-proposals.js';
+import { currentBinding } from '../incident/read.js';
+import { planOverridePr } from '../topology/override-pr.js';
 import { overrideSchema } from '../topology/overrides.js';
 import type { IntegrationRegistry } from './integrations.js';
 import { appendAudit, readAudit, verifyRecords, GENESIS_HASH } from '../store/audit.js';
@@ -513,38 +515,93 @@ export function registerSystemRoutes(app: FastifyInstance, d: SystemRouteDeps): 
           (d.config.topology.overrides_dir ? `（server 从 ${d.config.topology.overrides_dir} 加载）` : ''),
       );
     }
-    const { incident_id: incidentId, ...o } = parsed.data;
+    const { incident_id: given, ...o } = parsed.data;
+    // gitops_pr 提议绑定事件（ADR 0025、0108）：给出 incident_id 时用它，否则取这条告警所在的最近一个事件
+    let incidentId = given ?? null;
     if (incidentId) {
       const inc = await d.pool.query('SELECT 1 FROM server.incidents WHERE incident_id = $1', [incidentId]);
       if (!inc.rowCount) {
         throw notFound(`没有事件 ${incidentId}`);
       }
+    } else {
+      const r = await d.pool.query<{ incident_id: string }>(
+        `SELECT incident_id FROM server.incidents
+          WHERE cluster_id = $1 AND state <> 'merged' AND root_component IS NOT NULL
+            AND EXISTS (SELECT 1 FROM jsonb_array_elements(body->'members') m WHERE m->>'alertname' = $2)
+          ORDER BY first_firing_at DESC LIMIT 1`,
+        [o.cluster_id, o.alertname],
+      );
+      incidentId = r.rows[0]?.incident_id ?? null;
     }
-    // 需要改仓库的修复提议：先确保事件有 issue，PR 描述写 Refs（ADR 0095）
-    const issue = incidentId && d.issues ? await d.issues.ensure(incidentId, 'repo_change') : null;
-    const refs = issue ? GitHubApp.ref(target.repo, issue.repo, issue.number) : null;
-    const pr = await createOverridePr(
+    if (!incidentId) {
+      throw new HttpError(
+        409,
+        'no_incident',
+        `覆盖规则的 PR 经 gitops_pr 提议开出，提议需要绑定事件；集群 ${o.cluster_id} 没有包含告警 ${o.alertname} 的事件，给出 incident_id 或在 Git 中直接修改覆盖文件`,
+      );
+    }
+    const b = await currentBinding(d.pool, incidentId);
+    const fingerprint = b ? [...b.fingerprints][0] : undefined;
+    if (!b || b.state === 'merged' || !b.rootComponent || !fingerprint) {
+      throw new HttpError(
+        409,
+        'binding_unavailable',
+        `事件 ${incidentId} 没有根因组件或当前版本的阶段 A 报告，提议无法绑定`,
+      );
+    }
+    const plan = await planOverridePr(
       d.github,
       { repo: target.repo, baseBranch: target.base_branch, dir: target.dir },
       o,
       c.subject.id,
-      refs,
     );
-    if (incidentId && d.issues) {
-      await d.issues.link(incidentId, {
-        kind: 'pull',
-        url: pr.pr_url,
-        title: `topology: map ${o.alertname} (${o.cluster_id}) to ${o.component}`,
-        repo: target.repo,
-        number: pr.pr_number,
-        refsInBody: refs !== null,
-      });
+    // 提议的来源是控制台的发起人；需要改仓库的提议由 ProposalService 确保事件 issue 并在描述里写 Refs（ADR 0095）
+    const created = await d.proposals.create(
+      { source: 'human', callerId: c.subject.id, subject: c.subject },
+      {
+        incident_id: incidentId,
+        binding: { incident_version: b.version, root_component: b.rootComponent, evidence_fingerprint: fingerprint },
+        action: 'gitops_pr',
+        params: {
+          repository: target.repo,
+          base: target.base_branch,
+          title: plan.title,
+          body: plan.body,
+          patch: plan.patch,
+          branch: plan.branch,
+        },
+        research_run_id: null,
+        rule_id: null,
+        hypothesis_id: null,
+        evidence_refs: [],
+        expected_effect: `告警 ${o.alertname} 归属 ${o.component}（${o.role}）`.slice(0, 300),
+      },
+    );
+    let p = created.proposal;
+    // 发起人能审批时直接批准（控制台会话；L 档）；不能审批时（权限、合规配置下不能批自己的提议、观察模式）留待审批
+    if (p.state === 'awaiting_approval' && c.kind === 'user') {
+      try {
+        p = (await d.proposals.approve(approverFromSession(c), p.proposal_id, null)).proposal;
+      } catch (e) {
+        if (!(e instanceof HttpError)) {
+          throw e;
+        }
+      }
     }
-    const r = { pr_url: pr.pr_url, branch: pr.branch, head_sha: pr.head_sha, issue_url: issue?.url ?? null };
-    await tx(d.pool, (cl) =>
-      appendAudit(cl, 'topology.override_pr', c.subject.id, { ...o, incident_id: incidentId ?? null, ...r }),
-    );
-    return reply.code(201).send(r);
+    const issue = d.issues ? await d.issues.issueOf(incidentId) : null;
+    const r = {
+      proposal_id: p.proposal_id,
+      state: p.state,
+      branch: plan.branch,
+      base_sha: plan.base,
+      incident_id: incidentId,
+      approval_url: `${d.config.public_url.replace(/\/+$/, '')}/actions/${p.proposal_id}`,
+      issue_url: issue?.url ?? null,
+    };
+    if (created.status === 201) {
+      await tx(d.pool, (cl) => appendAudit(cl, 'topology.override_pr', c.subject.id, { ...o, ...r }));
+    }
+    return reply.code(created.status).send(r);
   });
 
   app.get('/v1/audit/chains', async (req) => {

@@ -1207,8 +1207,11 @@ export type paths = {
     get?: never;
     put?: never;
     /**
-     * @description 为未映射的告警生成拓扑覆盖规则的 PR；只推送到 srenautix/* 分支，从不合并。
-     *     给出 incident_id 且开启了事件 issue 时，先确保该事件有 issue，PR 描述写 `Refs #<issue>`，issue 里回链 PR
+     * @description 为未映射的告警计划拓扑覆盖规则的 PR，提交为 gitops_pr 提议（ADR 0025、0108）：server 只读地取 base 分支上的覆盖文件、
+     *     生成补丁；PR 由 gateway 在提议批准后经 gitops_pr 开出（只推送到 srenautix/* 分支，从不合并）。
+     *     提议绑定事件：给出 incident_id 时用它，否则取包含这条告警的最近一个事件，没有时 409（error no_incident）。
+     *     发起人能审批时（控制台会话、L 档、不是合规配置下的自批）直接批准，否则留待审批。
+     *     同一条规则重复发起时返回已有的提议（200）。开启了事件 issue 时 PR 描述写 `Refs #<issue>`，PR 开出后 issue 里回链
      */
     post: operations['createTopologyOverridePr'];
     delete?: never;
@@ -3867,6 +3870,19 @@ export type components = {
         suggested_role: components['schemas']['AlertRole'];
       }[];
     };
+    /** @description 拓扑覆盖规则的 gitops_pr 提议（PR 在提议批准后由 gateway 开出，地址见提议的执行与事件 issue） */
+    TopologyOverrideProposal: {
+      /** @description 控制台的审批页 */
+      approval_url: string;
+      /** @description 补丁基于的 base 分支提交（gateway 的 base_head 预检核对它） */
+      base_sha: string;
+      branch: string;
+      incident_id: components['schemas']['Uuid'];
+      /** @description 关联的事件 issue；没有开启事件 issue，或 issue 暂时没能开出时为 null */
+      issue_url: string | null;
+      proposal_id: components['schemas']['Uuid'];
+      state: components['schemas']['State'];
+    };
     /**
      * ModelUsage
      * @description 计量依据服务方返回的 usage
@@ -6019,30 +6035,34 @@ export interface operations {
           alertname: string;
           cluster_id: components['schemas']['ClusterId'];
           component: components['schemas']['ComponentKey'];
-          /** @description 引出这条规则的事件；PR 与该事件的 issue 互相关联 */
+          /** @description 提议绑定的事件；省略时取包含这条告警的最近一个事件 */
           incident_id?: components['schemas']['Uuid'];
           role: components['schemas']['AlertRole'];
         };
       };
     };
     responses: {
-      /** @description 已开 PR */
+      /** @description 同一条规则的提议已经存在 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['TopologyOverrideProposal'];
+        };
+      };
+      /** @description 已提交 gitops_pr 提议 */
       201: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          'application/json': {
-            branch: string;
-            head_sha: string;
-            /** @description 关联的事件 issue；没有给出 incident_id、没有开启事件 issue，或 issue 暂时没能开出时为 null */
-            issue_url: string | null;
-            pr_url: string;
-          };
+          'application/json': components['schemas']['TopologyOverrideProposal'];
         };
       };
       404: components['responses']['Error'];
       409: components['responses']['Error'];
+      503: components['responses']['Error'];
     };
   };
   listUsers: {

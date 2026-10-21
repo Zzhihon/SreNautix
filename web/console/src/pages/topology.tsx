@@ -1,5 +1,5 @@
-// 拓扑（DESIGN §4.4、§12.2）：默认视图是覆盖表；未映射的告警可以直接生成覆盖规则的 PR（只推送到
-// srenautix/* 分支，从不合并）；邻域图每条边标注来源；版本差异。
+// 拓扑（DESIGN §4.4、§12.2）：默认视图是覆盖表；未映射的告警可以直接生成覆盖规则的 gitops_pr 提议（批准后由 gateway
+// 只推送到 srenautix/* 分支并开 PR，从不合并）；邻域图每条边标注来源；版本差异。
 
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
@@ -49,12 +49,11 @@ function OverridePr({ cluster, a }: { cluster: string; a: Unmapped }) {
       ),
   });
   if (pr.data) {
+    // PR 由 gateway 在提议批准后经 gitops_pr 开出（ADR 0108）：这里给出提议与它的状态
     return (
       <span role="status">
-        {t('topology.pr_opened')}{' '}
-        <a href={pr.data.pr_url} target="_blank" rel="noopener noreferrer">
-          {pr.data.branch}
-        </a>
+        {t(pr.data.state === 'approved' ? 'topology.pr_approved' : 'topology.pr_proposed')}{' '}
+        <a href={`/actions/${pr.data.proposal_id}`}>{pr.data.branch}</a>
       </span>
     );
   }

@@ -6,7 +6,10 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { stringify } from 'yaml';
 import { parseServerConfig } from '../../src/config/server.js';
 import { hashPassword } from '../../src/identity/password.js';
+import { GitHubApp } from '../../src/github/app.js';
+import { ServerMetrics } from '../../src/metrics.js';
 import { withRefs } from '../../src/proposals/service.js';
+import { GitOpsPulls } from '../../src/remediation/pulls.js';
 import { buildServer, type ServerHandle } from '../../src/roles/server.js';
 import { responseErrors } from '../support/contract.js';
 import { newTestDb, type TestDb } from '../support/db.js';
@@ -319,7 +322,7 @@ describe('事件 issue', () => {
     expect(audit.rows[0]?.data).toMatchObject({ recovered: true });
   });
 
-  it('拓扑覆盖 PR：事件已有 issue 时 PR 描述写 Refs，issue 回链 PR', async () => {
+  it('拓扑覆盖 PR：提交 gitops_pr 提议，事件已有 issue 时描述写 Refs，issue 回链提议；gateway 开出 PR 后回链 PR', async () => {
     const r = await api('POST', '/v1/topology/overrides/pr', {
       cluster_id: 'c1',
       alertname: 'ApiMemoryHigh',
@@ -331,12 +334,42 @@ describe('事件 issue', () => {
     expect(responseErrors('/v1/topology/overrides/pr', 'post', 201, r.body)).toBeNull();
     const n = gh.issues[0]!.number;
     expect(r.body.issue_url).toBe(`https://github.example.test/${REPO}/issues/${n}`);
-    const pr = gh.pulls.at(-1)!;
-    expect(pr.body).toContain(`Refs #${n}`);
+    const proposalId = String(r.body.proposal_id);
+    const params = (
+      await db.admin.query<{ params: { body: string; branch: string } }>(
+        'SELECT params FROM server.proposals WHERE proposal_id = $1',
+        [proposalId],
+      )
+    ).rows[0]!.params;
+    expect(params.body).toContain(`Refs #${n}`);
+    // server 不开 PR
+    expect(gh.pulls.some((p) => p.head === params.branch)).toBe(false);
     await run();
-    expect(gh.comments.get(n)!.at(-1)!.body).toContain(
-      `关联的 PR：[topology: map ApiMemoryHigh (c1) to Deployment:shop/api](${String(r.body.pr_url)})`,
+    expect(gh.comments.get(n)!.at(-1)!.body).toContain(`${PUBLIC}/actions/${proposalId}`);
+    // gateway 执行批准后的提议、开出 PR（执行事件里写 PR 地址）：关联到事件 issue
+    gh.pulls.push({ number: 501, head: params.branch, base: 'main', title: 't', body: params.body });
+    await db.admin.query(
+      `INSERT INTO server.execution_events (event_id, cluster_id, execution_id, ticket_id, proposal_id, seq, phase, at, reason, body)
+       VALUES ($1, 'c1', $2, gen_random_uuid(), $3, 1, 'verified', now(), 'checks_passed', $4)`,
+      [
+        'd'.repeat(32),
+        'e'.repeat(32),
+        proposalId,
+        JSON.stringify({ message: `pr_open: PR https://github.example.test/${REPO}/pull/501 #501 state=open` }),
+      ],
     );
+    await db.admin.query("UPDATE server.proposals SET state = 'dispatched' WHERE proposal_id = $1", [proposalId]);
+    const appClient = new GitHubApp({
+      apiBase: gh.url,
+      appId: '424242',
+      installationId: '99',
+      privateKey: app.privateKey.export({ format: 'pem', type: 'pkcs8' }) as string,
+    });
+    const pulls = new GitOpsPulls(db.server, appClient, srv.issues, new ServerMetrics('server', false));
+    expect(await pulls.runOnce()).toBe(1);
+    await run();
+    expect(gh.comments.get(n)!.at(-1)!.body).toContain(`关联的 PR：`);
+    expect(gh.comments.get(n)!.at(-1)!.body).toContain(`https://github.example.test/${REPO}/pull/501`);
     const missing = await api('POST', '/v1/topology/overrides/pr', {
       cluster_id: 'c1',
       alertname: 'Other',
@@ -347,7 +380,7 @@ describe('事件 issue', () => {
     expect(missing.status).toBe(404);
   });
 
-  it('PR 先于 issue：issue 暂时开不出时 PR 照常开出，issue 开出后补 Refs 并回链', async () => {
+  it('提议先于 issue：issue 暂时开不出时提议照常提交，issue 开出后回链提议；之后开出的 PR 补 Refs', async () => {
     const c = await cloneEscalated('c2-pr-first');
     gh.fault('POST', new RegExp(`^/repos/${REPO}/issues$`), 502);
     const r = await api('POST', '/v1/topology/overrides/pr', {
@@ -359,15 +392,33 @@ describe('事件 issue', () => {
     });
     expect(r.status, JSON.stringify(r.body)).toBe(201);
     expect(r.body.issue_url).toBeNull();
-    const pr = gh.pulls.at(-1)!;
-    expect(pr.body).not.toContain('Refs');
+    const params = (
+      await db.admin.query<{ params: { body: string; branch: string } }>(
+        'SELECT params FROM server.proposals WHERE proposal_id = $1',
+        [r.body.proposal_id],
+      )
+    ).rows[0]!.params;
+    expect(params.body).not.toContain('Refs');
     await fastForward();
     await run();
     const row = await issueRow(c);
     expect(row).toMatchObject({ state: 'open' });
-    expect(pr.body).toContain(`Refs #${row!.number!}`);
     await run();
-    expect(gh.comments.get(row!.number!)!.map((x) => x.body)).toEqual([expect.stringContaining('关联的 PR')]);
+    expect(gh.comments.get(row!.number!)!.map((x) => x.body)).toEqual([
+      expect.stringContaining(`${PUBLIC}/actions/${String(r.body.proposal_id)}`),
+    ]);
+    // gateway 按提议开出的 PR 描述里没有 Refs：关联后补上
+    gh.pulls.push({ number: 502, head: params.branch, base: 'main', title: 't', body: params.body });
+    await srv.issues!.link(c, {
+      kind: 'pull',
+      url: `https://github.example.test/${REPO}/pull/502`,
+      title: 't',
+      repo: REPO,
+      number: 502,
+      refsInBody: false,
+    });
+    await run();
+    expect(gh.pulls.find((p) => p.number === 502)!.body).toContain(`Refs #${row!.number!}`);
     const refsAudit = await db.admin.query<{ n: number }>(
       "SELECT count(*)::int AS n FROM server.governance_audit WHERE kind = 'github.pr_refs'",
     );

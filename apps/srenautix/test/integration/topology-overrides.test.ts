@@ -12,8 +12,10 @@ import { activeAlerts } from '../../src/ingest/store.js';
 import { ServerMetrics } from '../../src/metrics.js';
 import { serverTracks } from '../../src/roles/server-schema.js';
 import { migrateExpand } from '../../src/store/migrate.js';
+import { applyPatch } from 'diff';
+import type { Incident } from '@srenautix/contract';
 import { GitHubApp } from '../../src/github/app.js';
-import { createOverridePr, type OverrideRepo } from '../../src/topology/override-pr.js';
+import { planOverridePr, type OverrideRepo } from '../../src/topology/override-pr.js';
 import { parseOverridesFile, TopologyOverrides } from '../../src/topology/overrides.js';
 import { TopologyStore } from '../../src/topology/store.js';
 import { parseServerConfig } from '../../src/config/server.js';
@@ -22,6 +24,7 @@ import { buildServer } from '../../src/roles/server.js';
 import { responseErrors } from '../support/contract.js';
 import { newTestDb, type TestDb } from '../support/db.js';
 import { FakeGitHub } from '../support/github.js';
+import { incident, stageA } from '../support/scenario.js';
 
 /**
  * 拓扑覆盖：为未映射的告警开 PR（GitHub App 身份，内存中的 GitHub REST API），合并后 server 加载覆盖目录，
@@ -71,42 +74,94 @@ afterAll(async () => {
   rmSync(ROOT, { recursive: true, force: true });
 });
 
-describe('拓扑覆盖的 PR', () => {
-  let branch = '';
+const INCIDENT_ID = '7a1b2c3d-0000-4000-8000-0000000000e1';
 
-  it('新文件：在 srenautix/* 分支上写入覆盖文件并开 PR，从不改动基础分支', async () => {
-    const r = await createOverridePr(client(), target(), override, 'oidc:alice');
-    expect(r.branch).toMatch(/^srenautix\/topology-override-prod-kafkaconsumerlag-[0-9a-f]{8}$/);
-    expect(r.pr_url).toBe(`https://github.example.test/${REPO}/pull/1`);
-    expect(r.head_sha).toBe(gh.heads.get(r.branch));
-    branch = r.branch;
-    const file = gh.branches.get(r.branch)!.get(`${DIR}/prod.yaml`)!;
+/** 一个包含告警 alertname 的事件与它当前版本的阶段 A 报告 */
+async function seedIncident(t: TestDb, alertname: string): Promise<void> {
+  const base = incident();
+  const inc: Incident = {
+    ...base,
+    incident_id: INCIDENT_ID,
+    cluster_id: 'prod',
+    label: `Deployment:edge/nginx:${base.first_firing_at}`,
+    root: { ...base.root, component: 'Deployment:edge/nginx', entity: null },
+    members: base.members.map((m) => ({ ...m, alertname })),
+  };
+  await t.admin.query(
+    `INSERT INTO server.incidents (incident_id, cluster_id, label, version, state, severity, first_firing_at, root_component, body)
+     VALUES ($1, $2, $3, $4, 'firing', $5, $6, $7, $8)`,
+    [
+      inc.incident_id,
+      inc.cluster_id,
+      inc.label,
+      inc.incident_version,
+      inc.severity,
+      inc.first_firing_at,
+      inc.root.component,
+      JSON.stringify(inc),
+    ],
+  );
+  const report = { ...stageA(), incident_id: inc.incident_id, incident_version: inc.incident_version };
+  await t.admin.query(
+    `INSERT INTO server.stage_a_reports (report_id, incident_id, incident_version, disposition, evidence_fingerprint, degraded, body, first_firing_at, rendered_at)
+     VALUES (gen_random_uuid(), $1, $2, $3, $4, false, $5, $6, now())`,
+    [
+      inc.incident_id,
+      inc.incident_version,
+      report.disposition,
+      report.evidence_fingerprint,
+      JSON.stringify(report),
+      inc.first_firing_at,
+    ],
+  );
+}
+
+/** 不是取令牌的请求里有没有写请求（server 对 Git 只读，ADR 0025、0108） */
+const writes = (from = 0) => gh.requests.slice(from).filter((r) => r.method !== 'GET' && !r.path.startsWith('/app/'));
+
+/** 把补丁应用到 main（模拟 gateway 开出 PR、审阅者合并） */
+function merge(patch: string, path: string): void {
+  const before = gh.branches.get('main')!.get(path) ?? '';
+  const after = applyPatch(before, patch);
+  expect(after).not.toBe(false);
+  gh.write('main', { [path]: after as string }, { message: 'merge override PR' });
+}
+
+describe('拓扑覆盖 PR 的计划', () => {
+  const PATH = `${DIR}/prod.yaml`;
+
+  it('新文件：只读地生成新建文件的补丁与 srenautix/* 分支名，补丁应用后是合法的覆盖文件；不写 Git', async () => {
+    const before = gh.requests.length;
+    const plan = await planOverridePr(client(), target(), override, 'oidc:alice');
+    expect(plan.branch).toMatch(/^srenautix\/topology-override-prod-kafkaconsumerlag-[0-9a-f]{8}$/);
+    expect(plan.base).toBe(gh.heads.get('main'));
+    expect(plan.patch).toContain('new file mode 100644\n--- /dev/null\n');
+    expect(plan.body).toContain('oidc:alice');
+    const file = applyPatch('', plan.patch) as string;
     expect(parseOverridesFile('prod.yaml', file)).toEqual({
       api_version: 'srenautix.io/topology-overrides/v1',
       alerts: [override],
     });
-    expect(gh.branches.get('main')!.has(`${DIR}/prod.yaml`)).toBe(false);
-    expect(gh.pulls[0]).toMatchObject({ head: r.branch, base: 'main' });
-    expect(gh.pulls[0]!.body).toContain('oidc:alice');
+    expect(writes(before)).toEqual([]);
+    expect(gh.branches.get('main')!.has(PATH)).toBe(false);
+    merge(plan.patch, PATH);
   });
 
-  it('同一条规则的 PR 已开过：409；合并后基础分支已有这条规则：409', async () => {
-    const again = createOverridePr(client(), target(), override, 'oidc:alice');
-    await expect(again).rejects.toMatchObject({ status: 409, message: expect.stringContaining('已经开过') });
-    gh.merge(branch);
-    const merged = createOverridePr(client(), target(), override, 'oidc:alice');
-    await expect(merged).rejects.toMatchObject({ status: 409, message: expect.stringContaining('已有集群 prod') });
-  });
-
-  it('已有文件：追加规则，更新时带上文件的当前版本', async () => {
+  it('基础分支已有这条规则：409；已有文件：追加规则，补丁基于当前内容', async () => {
+    await expect(planOverridePr(client(), target(), override, 'oidc:alice')).rejects.toMatchObject({
+      status: 409,
+      message: expect.stringContaining('已有集群 prod'),
+    });
     const second = {
       ...override,
       alertname: 'RedisEvictions',
       component: 'StatefulSet:cache/redis',
       role: 'symptom' as const,
     };
-    const r = await createOverridePr(client(), target(), second, 'oidc:bob');
-    const file = parseOverridesFile('prod.yaml', gh.branches.get(r.branch)!.get(`${DIR}/prod.yaml`)!);
+    const plan = await planOverridePr(client(), target(), second, 'oidc:bob');
+    expect(plan.patch).not.toContain('new file mode');
+    merge(plan.patch, PATH);
+    const file = parseOverridesFile('prod.yaml', gh.branches.get('main')!.get(PATH)!);
     expect(file.alerts.map((a) => a.alertname)).toEqual(['KafkaConsumerLag', 'RedisEvictions']);
   });
 
@@ -124,7 +179,7 @@ describe('拓扑覆盖的 PR', () => {
       [{ apiBase: 'http://127.0.0.1:9' }, {}, /GitHub 不可达/],
     ];
     for (const [over, repoOver, why] of cases) {
-      const p = createOverridePr(client(over), target(repoOver), third, 'oidc:alice');
+      const p = planOverridePr(client(over), target(repoOver), third, 'oidc:alice');
       await expect(p).rejects.toBeInstanceOf(HttpError);
       await expect(p).rejects.toMatchObject({ status: 503, message: expect.stringMatching(why) });
     }
@@ -132,7 +187,7 @@ describe('拓扑覆盖的 PR', () => {
 });
 
 describe('控制台接口 POST /v1/topology/overrides/pr', () => {
-  it('配置了 GitHub App：admin 发起 PR 返回 201 与分支，写入治理审计；非 admin 403；重复 409', async () => {
+  it('admin 发起：生成 gitops_pr 提议并由发起人批准，server 不写 Git；重复发起返回同一个提议；没有事件 409；未登录 401', async () => {
     const PUBLIC = 'https://srenautix.example.test';
     const file = (name: string, content: string) => {
       const p = join(ROOT, 'srv', name);
@@ -149,7 +204,10 @@ describe('控制台接口 POST /v1/topology/overrides/pr', () => {
       log_level: 'warn',
       public_url: PUBLIC,
       policies_dir: resolve(
-        file('policies/prod.yaml', stringify({ version: 1, cluster: 'prod', actions: [], approvers: [] })),
+        file(
+          'policies/prod.yaml',
+          stringify({ version: 1, cluster: 'prod', actions: [{ id: 'gitops_pr' }], approvers: [] }),
+        ),
         '..',
       ),
       packs: { dirs: [resolve(file('packs/.keep', ''), '..')] },
@@ -220,18 +278,45 @@ describe('控制台接口 POST /v1/topology/overrides/pr', () => {
           },
           body: JSON.stringify(body),
         });
+      // 告警 NginxHighLatency 所在的事件（提议绑定它的版本、根因与阶段 A 的证据指纹）
+      await seedIncident(srvDb, 'NginxHighLatency');
       const body = {
         cluster_id: 'prod',
         alertname: 'NginxHighLatency',
         component: 'Deployment:edge/nginx',
         role: 'symptom',
       };
+      const before = gh.requests.length;
       const r = await post(body);
       const created = (await r.json()) as Record<string, unknown>;
       expect(r.status, JSON.stringify(created)).toBe(201);
       expect(responseErrors('/v1/topology/overrides/pr', 'post', 201, created)).toBeNull();
+      expect(created).toMatchObject({
+        state: 'approved',
+        incident_id: INCIDENT_ID,
+        approval_url: `${PUBLIC}/actions/${String(created.proposal_id)}`,
+      });
       expect(created.branch).toMatch(/^srenautix\/topology-override-prod-nginxhighlatency-/);
-      expect((await post(body)).status).toBe(409);
+      const p = await srvDb.admin.query<{ action: string; params: Record<string, string>; target: unknown }>(
+        "SELECT action, params, body->'target' AS target FROM server.proposals WHERE proposal_id = $1",
+        [created.proposal_id],
+      );
+      expect(p.rows[0]).toMatchObject({
+        action: 'gitops_pr',
+        params: { repository: REPO, base: 'main', branch: created.branch },
+        target: { kind: 'GitRepository', name: REPO, uid: gh.heads.get('main') },
+      });
+      expect(applyPatch(gh.branches.get('main')!.get(`${DIR}/prod.yaml`) ?? '', p.rows[0]!.params.patch!)).toContain(
+        'NginxHighLatency',
+      );
+      // server 不写 Git：PR 由 gateway 执行批准后的 gitops_pr 开出
+      expect(writes(before)).toEqual([]);
+      const again = await post(body);
+      expect(again.status).toBe(200);
+      expect(((await again.json()) as { proposal_id: string }).proposal_id).toBe(created.proposal_id);
+      const orphan = await post({ ...body, alertname: 'NeverFired' });
+      expect(orphan.status).toBe(409);
+      expect(((await orphan.json()) as { error: string }).error).toBe('no_incident');
       expect((await post(body, false)).status).toBe(401);
       const audit = await srvDb.admin.query<{ actor: string; data: { branch: string } }>(
         "SELECT actor, data FROM server.governance_audit WHERE kind = 'topology.override_pr'",
@@ -263,7 +348,8 @@ describe('拓扑覆盖的加载与告警归属', () => {
       ].join('\n'),
     );
     const overrides = TopologyOverrides.load(dir);
-    expect(overrides.size).toBe(2);
+    // prod.yaml 里合并了两条规则（KafkaConsumerLag、RedisEvictions），prod-topics.yaml 一条
+    expect(overrides.size).toBe(3);
     const tokenFile = join(ROOT, 'ingest-token');
     writeFileSync(tokenFile, 'ingest-token-overrides-0123456789');
     const ingest = new IngestService(

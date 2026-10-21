@@ -310,7 +310,7 @@ alerts:
 
 命中的告警归属覆盖的组件，角色取覆盖的角色（告警自带 `role` 标签时仍以标签为准），分类依据记为 `topology-overrides/<文件>#<序号>`。文件不合法时 server 启动或重新加载失败，并指出文件与字段。
 
-控制台拓扑页的"未映射告警"可以直接发起覆盖规则的 PR（`POST /v1/topology/overrides/pr`，admin）。server 以 GitHub App 身份在 `srenautix/*` 分支上修改 `<dir>/<cluster_id>.yaml` 并开 PR，从不合并：
+控制台拓扑页的"未映射告警"可以直接发起覆盖规则的 PR（`POST /v1/topology/overrides/pr`，admin）。server 只读地取 base 分支上的 `<dir>/<cluster_id>.yaml`，追加规则生成补丁，提交为 `gitops_pr` 提议；提议批准后由 gateway 在 `srenautix/*` 分支上提交并开 PR，从不合并（ADR 0025、0108）。server 不写 Git：
 
 ```yaml
 github_app:                                            # 见下面的"GitHub App"
@@ -326,8 +326,10 @@ topology:
 ```
 
 - 没有配置 `github_app` 与 `topology.override_pr` 时接口返回 503，说明需要在 Git 中直接修改覆盖文件；App 身份无效、没有安装到仓库、没有仓库权限或 GitHub 不可达时同样返回 503 并说明是哪一种。
-- 基础分支上已有同一集群、同一告警名的规则，或这条规则的 PR 已经开过（分支已存在）时返回 409。
-- 请求带 `incident_id` 并开启了事件 issue 时，先确保该事件有 issue，PR 描述写 `Refs #<issue>`，issue 里回链 PR；响应的 `issue_url` 为该 issue（暂时没能开出时为 null，issue 开出后补上 Refs）。见下面的"事件 issue"。
+- 提议绑定事件：请求带 `incident_id` 时用它，否则取包含这条告警的最近一个事件；没有这样的事件时返回 409（`no_incident`），事件没有根因或当前版本的阶段 A 报告时同样 409。gateway 策略中要启用 `gitops_pr`，否则提议记为未通过策略。
+- 发起人能审批时（控制台会话、L 档、不是合规配置下的自批）直接批准，否则留待审批；响应带提议的状态与审批页地址（`approval_url`）。
+- 基础分支上已有同一集群、同一告警名的规则时返回 409；同一条规则重复发起时返回已有的提议（200）。
+- 开启了事件 issue 时，提议描述写 `Refs #<issue>`，issue 里回链提议；gateway 开出 PR 后（执行事件里的 PR 地址，或按分支查询）issue 里回链 PR，PR 描述还没有 Refs 时补上。见下面的"事件 issue"。
 - 每次发起写入治理审计（`topology.override_pr`）。
 - 2.5 版的写法 `topology.override_pr.github`（App 身份与仓库写在一起）仍然接受，解析时迁移到 `github_app` 与 `topology.override_pr`。
 
@@ -343,7 +345,13 @@ github_app:
   private_key_file: /etc/srenautix/secrets/github-app/private-key.pem
 ```
 
-App 需要的仓库权限：拓扑覆盖 PR 要 Contents 与 Pull requests 读写；事件 issue 要 Issues 读写，以及 Pull requests 读写（给 PR 补 Refs）；GitHub 变更源要 Contents 只读。
+server 对 Git 只读，写入都经 gateway 的 `gitops_pr`（ADR 0025、0108）。server 的请求白名单（`github/app.ts` 的 `deniedRequest`，不在其中的请求不发出，以 `GitHubDenied` 报错）：
+
+- issue：列出、读取、新建；评论：列出、新建；
+- PR：列出、读取，`PATCH` 只允许改描述（补 `Refs`）；
+- 只读访问仓库：分支引用（`git/ref/heads`）、文件与目录（`contents`）、提交列表与单个提交（修复补丁与拓扑覆盖的计划、变更源）。
+
+建分支、写文件、提交、开 PR、请求审阅、合并都不在其中。server 用到的 App 仓库权限：Issues 读写、Pull requests 读写（只改描述）、Contents 只读；gateway 的 App 另需 Contents 与 Pull requests 写。
 
 ## 事件 issue
 

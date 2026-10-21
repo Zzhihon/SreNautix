@@ -56,6 +56,18 @@
    - 指标为 `srenautix_remediations_total{category,outcome}` 与 `srenautix_gitops_pulls_total{via}`；
    - 每一行同时写进 info 日志（`自愈 PR 处理结果`，带原因码与原因），Kind 与影子环境的诊断日志里能看到自愈 PR 为什么没有出现。
 10. **研判之后事件有了新版本**：新版本只加入了成员，根因、严重度与证据指纹都没变时不会重新研判（DESIGN §2.4 的触发原因），这次研判的结论仍然适用。之前一律记为 incident_changed，这样的事件就再也不会有自愈 PR。Kind 的 alert-too-sensitive 场景（kind-e2e 39542017862）与这条路径相符：研判 04:16:24 结束，04:16:44 对账补进一条告警，之后 10 分钟没有 PR，gitlocal 也没有收到任何写入。现在只有 `research_queue` 里有更高版本的研判触发（含被准入跳过的，例如超过次数上限）时才跳过；否则绑定事件的当前版本，指纹取当前版本阶段 A 报告的指纹，报告还没生成时推迟到下一轮。
+11. **拓扑覆盖 PR 也走 gitops_pr**：控制台的 `POST /v1/topology/overrides/pr` 不再由 server 推送分支、开 PR。
+    - server 只读地取 base 分支上的覆盖文件，生成补丁（新文件是 `new file mode` 与 `--- /dev/null`），提交为 gitops_pr 提议，来源是控制台的发起人。
+    - 提议绑定 `incident_id`；没有给出时，取包含这条告警的最近一个事件。没有事件时返回 409，因为提议必须绑定事件版本、根因与证据指纹。
+    - 发起人能审批时直接批准，否则留待审批。
+    - 响应改为提议（契约 `TopologyOverrideProposal`）；同一条规则重复发起时返回已有的提议。
+    - PR 地址经执行事件回到事件 issue 与通知，与自愈 PR 相同。
+12. **server 的 GitHub 请求白名单**：`GitHubApp.api` 只发白名单内的请求（`deniedRequest`）：
+    - issue 与评论的读写；
+    - PR 的读取，以及只改描述的 `PATCH`；
+    - 分支引用、文件与目录、提交的读取。
+
+    建分支、写文件、提交、开 PR、请求审阅、合并与路径穿越都在发出之前以 `GitHubDenied` 拒绝。白名单保证 server 没有绕过 gateway 写 Git 的路径（ADR 0025 的唯一写入路径）。
 
 ## 结果
 

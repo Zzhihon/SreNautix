@@ -1,6 +1,6 @@
 {
   "name": "@srenautix/contract",
-  "version": "2.17.0",
+  "version": "2.18.0",
   "description": "SreNautix 契约的 TypeScript 类型与 JSON Schema 校验器，由 contract/ 生成",
   "license": "Apache-2.0",
   "type": "module",

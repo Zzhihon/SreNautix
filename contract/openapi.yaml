@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: SreNautix hub API
-  version: 2.17.0
+  version: 2.18.0
   license:
     name: Apache-2.0
     identifier: Apache-2.0
@@ -1335,8 +1335,11 @@ paths:
       tags: [topology]
       operationId: createTopologyOverridePr
       description: |
-        为未映射的告警生成拓扑覆盖规则的 PR；只推送到 srenautix/* 分支，从不合并。
-        给出 incident_id 且开启了事件 issue 时，先确保该事件有 issue，PR 描述写 `Refs #<issue>`，issue 里回链 PR
+        为未映射的告警计划拓扑覆盖规则的 PR，提交为 gitops_pr 提议（ADR 0025、0108）：server 只读地取 base 分支上的覆盖文件、
+        生成补丁；PR 由 gateway 在提议批准后经 gitops_pr 开出（只推送到 srenautix/* 分支，从不合并）。
+        提议绑定事件：给出 incident_id 时用它，否则取包含这条告警的最近一个事件，没有时 409（error no_incident）。
+        发起人能审批时（控制台会话、L 档、不是合规配置下的自批）直接批准，否则留待审批。
+        同一条规则重复发起时返回已有的提议（200）。开启了事件 issue 时 PR 描述写 `Refs #<issue>`，PR 开出后 issue 里回链
       x-srenautix-roles: [admin]
       x-srenautix-external: false
       parameters: [{ $ref: '#/components/parameters/Csrf' }]
@@ -1355,25 +1358,21 @@ paths:
                 role: { $ref: './schemas/common.schema.json#/$defs/AlertRole' }
                 incident_id:
                   $ref: './schemas/common.schema.json#/$defs/Uuid'
-                  description: 引出这条规则的事件；PR 与该事件的 issue 互相关联
+                  description: 提议绑定的事件；省略时取包含这条告警的最近一个事件
       responses:
         '201':
-          description: 已开 PR
+          description: 已提交 gitops_pr 提议
           content:
             application/json:
-              schema:
-                type: object
-                additionalProperties: false
-                required: [pr_url, branch, head_sha, issue_url]
-                properties:
-                  pr_url: { type: string }
-                  branch: { type: string, pattern: '^srenautix/' }
-                  head_sha: { type: string }
-                  issue_url:
-                    type: [string, 'null']
-                    description: 关联的事件 issue；没有给出 incident_id、没有开启事件 issue，或 issue 暂时没能开出时为 null
+              schema: { $ref: '#/components/schemas/TopologyOverrideProposal' }
+        '200':
+          description: 同一条规则的提议已经存在
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TopologyOverrideProposal' }
         '404': { $ref: '#/components/responses/Error' }
         '409': { $ref: '#/components/responses/Error' }
+        '503': { $ref: '#/components/responses/Error' }
   /v1/topology/neighborhood:
     get:
       tags: [topology]
@@ -2420,6 +2419,21 @@ components:
             rerun_p95: { type: [number, 'null'] }
             budget_cutoff_ratio: { type: [number, 'null'] }
             fallback_ratio: { type: [number, 'null'] }
+    TopologyOverrideProposal:
+      description: 拓扑覆盖规则的 gitops_pr 提议（PR 在提议批准后由 gateway 开出，地址见提议的执行与事件 issue）
+      type: object
+      additionalProperties: false
+      required: [proposal_id, state, branch, base_sha, incident_id, approval_url, issue_url]
+      properties:
+        proposal_id: { $ref: './schemas/common.schema.json#/$defs/Uuid' }
+        state: { $ref: './schemas/proposal.schema.json#/$defs/State' }
+        branch: { type: string, pattern: '^srenautix/' }
+        base_sha: { type: string, description: 补丁基于的 base 分支提交（gateway 的 base_head 预检核对它） }
+        incident_id: { $ref: './schemas/common.schema.json#/$defs/Uuid' }
+        approval_url: { type: string, description: 控制台的审批页 }
+        issue_url:
+          type: [string, 'null']
+          description: 关联的事件 issue；没有开启事件 issue，或 issue 暂时没能开出时为 null
     TopologyCoverage:
       type: object
       additionalProperties: false

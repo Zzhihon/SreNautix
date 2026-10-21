@@ -21,10 +21,57 @@ export class GitHubError extends Error {
   }
 }
 
+/** 请求不在 server 的 GitHub 请求白名单内，没有发出 */
+export class GitHubDenied extends GitHubError {
+  constructor(op: string, detail: string) {
+    super(403, op, `请求不在 server 的 GitHub 白名单内（${detail}）`);
+    this.name = 'GitHubDenied';
+  }
+}
+
+const REPO = '/repos/[A-Za-z0-9-]{1,39}/[A-Za-z0-9._-]{1,100}';
+/** 允许的请求（路径不含查询串）：issue 与评论、读 PR、读引用、读文件与目录、读提交 */
+const ALLOWED: Array<[method: string, path: RegExp]> = [
+  ['GET', new RegExp(`^${REPO}/issues$`)],
+  ['GET', new RegExp(`^${REPO}/issues/\\d+$`)],
+  ['GET', new RegExp(`^${REPO}/issues/\\d+/comments$`)],
+  ['POST', new RegExp(`^${REPO}/issues$`)],
+  ['POST', new RegExp(`^${REPO}/issues/\\d+/comments$`)],
+  ['GET', new RegExp(`^${REPO}/pulls$`)],
+  ['GET', new RegExp(`^${REPO}/pulls/\\d+$`)],
+  ['PATCH', new RegExp(`^${REPO}/pulls/\\d+$`)],
+  ['GET', new RegExp(`^${REPO}/git/ref/heads/.+$`)],
+  ['GET', new RegExp(`^${REPO}/contents(/.*)?$`)],
+  ['GET', new RegExp(`^${REPO}/commits$`)],
+  ['GET', new RegExp(`^${REPO}/commits/[0-9a-f]{7,40}$`)],
+];
+
+/**
+ * server 的 GitHub 请求白名单（ADR 0025、0108）：server 只开 issue、写评论、读 PR、给 PR 描述补 Refs，以及只读地访问仓库
+ * （修复补丁的计划、变更源、拓扑覆盖的计划）。建分支、提交、写文件、开 PR、请求审阅、合并都不在其中——Git 写入只经
+ * gateway 的 gitops_pr。PATCH PR 只允许改描述。返回拒绝原因，允许时为 null。
+ */
+export function deniedRequest(method: string, path: string, body: unknown): string | null {
+  const p = path.split('?')[0] ?? path;
+  if (/(^|\/)\.\.(\/|$)/.test(p)) {
+    return '路径含 ..';
+  }
+  if (!ALLOWED.some(([m, re]) => m === method && re.test(p))) {
+    return 'server 不写 Git，不开 PR，不合并';
+  }
+  if (method === 'PATCH') {
+    const keys = body && typeof body === 'object' ? Object.keys(body) : [];
+    if (keys.length !== 1 || keys[0] !== 'body') {
+      return '只允许修改 PR 的描述';
+    }
+  }
+  return null;
+}
+
 /**
  * 以 GitHub App 身份访问仓库：用 App 私钥签 JWT（RS256，有效 9 分钟）换取安装令牌（1 小时，提前 5 分钟刷新）。
- * 各功能需要的权限：覆盖 PR 要 contents 与 pull_requests 写；事件 issue 要 issues 写与 pull_requests 写（回链 PR）；
- * 变更源要 contents 读。
+ * server 只发白名单内的请求（deniedRequest）：事件 issue 要 issues 写与 pull_requests 写（只改描述、回链 PR）；
+ * 变更源、修复补丁与拓扑覆盖的计划要 contents 读。Git 写入都经 gateway 的 gitops_pr，server 不需要 contents 写。
  */
 export class GitHubApp {
   private readonly key: KeyObject;
@@ -94,6 +141,11 @@ export class GitHubApp {
   }
 
   async api<T>(method: string, path: string, body: unknown, op: string): Promise<T> {
+    const denied = deniedRequest(method, path, body);
+    if (denied) {
+      // 不发出请求：server 对 Git 只读，写入都经 gateway 的 gitops_pr（ADR 0025、0108）
+      throw new GitHubDenied(op, `${method} ${path.split('?')[0]}：${denied}`);
+    }
     return this.call<T>(method, path, body, `token ${await this.installationToken()}`, op);
   }
 
