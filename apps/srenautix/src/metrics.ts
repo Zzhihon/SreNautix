@@ -105,6 +105,12 @@ export class ServerMetrics extends BaseMetrics {
     registers: [this.registry],
   });
 
+  readonly alertsReresolved = new Counter({
+    name: 'srenautix_alerts_reresolved_total',
+    help: '重算阶段 A 之前按当前解析规则重新解析并回写的告警数（升级前接入的告警，ADR 0107）',
+    registers: [this.registry],
+  });
+
   readonly remediations = new Counter({
     name: 'srenautix_remediations_total',
     help: '自愈 PR 的处理结果（ADR 0108），按类别与结果（proposed：已提交 gitops_pr 提议；skipped：模板跳过或不适用；rejected：提议未通过策略；failed：计划或校验失败）',

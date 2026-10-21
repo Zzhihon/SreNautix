@@ -10,6 +10,8 @@ import type {
 import {
   changeInputFrom,
   computeIncidents,
+  parseKey,
+  sameKind,
   reconcileIncidents,
   TopologyGraph,
   type ResolvedRcaParams,
@@ -232,10 +234,12 @@ export class BundleTopology implements NodeLookup {
     const hits: Array<{ key: string; iv: Interval<TopologyNode> }> = [];
     for (const [key, list] of this.nodes) {
       for (const iv of list) {
-        const kindOk = iv.kind === kind || (!kind.includes('.') && (iv.kind ?? '').startsWith(`${kind}.`));
+        // 与状态库的 find 相同：kind 不区分大小写，没有点的 kind 也匹配 <kind>.<组>；告警没有命名空间时也接受命名空间级对象
+        const ik = (iv.kind ?? '').toLowerCase();
+        const kindOk = ik === kind.toLowerCase() || (!kind.includes('.') && ik.startsWith(`${kind.toLowerCase()}.`));
         if (
           kindOk &&
-          (iv.namespace ?? null) === namespace &&
+          ((iv.namespace ?? null) === namespace || namespace === null) &&
           iv.name === name &&
           iv.from <= upper &&
           (iv.to === null || iv.to > lower)
@@ -247,9 +251,16 @@ export class BundleTopology implements NodeLookup {
     if (!hits.length) {
       return null;
     }
+    if (namespace === null && !hits.some((h) => (h.iv.namespace ?? null) === null)) {
+      // 只按名称找到的命名空间级对象：不同命名空间里有同名对象时无法确定
+      if (new Set(hits.map((h) => h.key)).size !== 1) {
+        return null;
+      }
+    }
     const open = (iv: Interval<TopologyNode>) => iv.to === null || iv.to > this.now;
     hits.sort(
       (x, y) =>
+        Number((y.iv.namespace ?? null) === namespace) - Number((x.iv.namespace ?? null) === namespace) ||
         Number(open(y.iv)) - Number(open(x.iv)) ||
         Number(y.iv.kind === kind) - Number(x.iv.kind === kind) ||
         Number(!y.iv.ksm) - Number(!x.iv.ksm) ||
@@ -284,13 +295,49 @@ export class BundleTopology implements NodeLookup {
           best = iv;
         }
       }
-      if (!best || seen.has(best.body.to)) {
+      if (!best) {
         break;
       }
-      seen.add(best.body.to);
-      cur = best.body.to;
+      // kube-state-metrics 的属主 kind 不带 API 组（Cluster），拓扑里的对象带组（Cluster.postgresql.cnpg.io）：
+      // 换成同一个对象在拓扑里的键
+      const to = this.sameObjectKey(best.body.to);
+      if (seen.has(to)) {
+        break;
+      }
+      seen.add(to);
+      cur = to;
     }
     return cur === key ? null : cur;
+  }
+
+  /**
+   * 键对应的拓扑节点键：状态库知道这个键时原样返回；否则（只有 kube-state-metrics 历史，或没有这个键）找状态库里
+   * kind（sameKind）、命名空间与名称相同、唯一的节点
+   */
+  private sameObjectKey(key: string): string {
+    if ((this.nodes.get(key) ?? []).some((iv) => !iv.ksm)) {
+      return key;
+    }
+    let p: { kind: string; namespace: string | null; name: string };
+    try {
+      p = parseKey(key);
+    } catch {
+      return key;
+    }
+    const hits = new Set<string>();
+    for (const [k, list] of this.nodes) {
+      const n = list.find((iv) => !iv.ksm);
+      if (
+        k !== key &&
+        n &&
+        sameKind(n.kind ?? '', p.kind) &&
+        (n.namespace ?? null) === p.namespace &&
+        n.name === p.name
+      ) {
+        hits.add(k);
+      }
+    }
+    return hits.size === 1 ? [...hits][0]! : key;
   }
 
   componentType(key: string, t: number): string | null {

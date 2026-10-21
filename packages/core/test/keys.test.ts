@@ -54,3 +54,19 @@ describe('ComponentKey 编码', () => {
     expect(displayKey('ClusterRole:a:b')).toBe('ClusterRole:a:b');
   });
 });
+
+describe('sameKind：不区分大小写、忽略 API 组', () => {
+  it('application、Application 与 Application.argoproj.io 是同一种对象；不同 kind 不同', async () => {
+    const { sameKind, matchTypeByName } = await import('../src/index.js');
+    expect(sameKind('application', 'Application.argoproj.io')).toBe(true);
+    expect(sameKind('cluster', 'Cluster.postgresql.cnpg.io')).toBe(true);
+    expect(sameKind('Node', 'node')).toBe(true);
+    expect(sameKind('Pod', 'PodDisruptionBudget')).toBe(false);
+    // 组件类型按不带组的 kind 声明，实体带组时也匹配；声明了 api_group 时组必须一致
+    const types = [
+      { id: 'argocd.application', match: { kind: 'Application', api_group: 'argoproj.io' } },
+      { id: 'other.application', match: { kind: 'Application', api_group: 'example.io' } },
+    ] as unknown as Parameters<typeof matchTypeByName>[3];
+    expect(matchTypeByName('Application.argoproj.io', 'argocd', 'shop', types)?.id).toBe('argocd.application');
+  });
+});

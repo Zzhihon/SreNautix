@@ -115,7 +115,7 @@ export async function touchSource(c: Queryable, sourceId: string, kind: string):
   );
 }
 
-interface AlertRow {
+export interface AlertRow {
   alert_id: string;
   cluster_id: string;
   fingerprint: string;

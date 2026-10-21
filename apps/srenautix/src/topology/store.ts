@@ -193,18 +193,31 @@ export class TopologyStore implements NodeLookup {
     name: string,
     at: Date,
   ): Promise<{ key: string; uid: string | null; tombstone: boolean; owner: string | null } | null> {
-    const r = await this.pool.query<{ key: string; uid: string | null; valid_to: Date | null }>(
-      // 告警标签里的 CRD kind 不带 API 组（application），拓扑键带组（Application.argoproj.io）：没有点的 kind 也匹配 <kind>.<组>
-      `SELECT key, uid, valid_to FROM server.topology_events
-        WHERE cluster_id = $1 AND item = 'node' AND op = 'node_upsert'
-          AND (kind = $2 OR (strpos($2, '.') = 0 AND kind LIKE $2 || '.%'))
-          AND namespace IS NOT DISTINCT FROM $3 AND name = $4
+    const r = await this.pool.query<{
+      key: string;
+      uid: string | null;
+      valid_to: Date | null;
+      namespace: string | null;
+    }>(
+      // 告警标签里的 CRD kind 不带 API 组、大小写也不一定（application、cluster），拓扑键带组（Application.argoproj.io、
+      // Cluster.postgresql.cnpg.io）：不区分大小写，没有点的 kind 也匹配 <kind>.<组>。
+      // 告警没有命名空间时（聚合掉了 namespace 的规则）也接受按名称唯一的命名空间级对象
+      `SELECT key, uid, valid_to, namespace FROM server.topology_events
+        WHERE cluster_id = $1 AND item = 'node' AND op = 'node_upsert' AND name = $4
+          AND (lower(kind) = lower($2) OR (strpos($2, '.') = 0 AND lower(kind) LIKE lower($2) || '.%'))
+          AND (namespace IS NOT DISTINCT FROM $3 OR $3::text IS NULL)
           AND valid_from <= greatest($5::timestamptz, now())
           AND (valid_to IS NULL OR valid_to > least($5::timestamptz, now()) - make_interval(secs => $6))
-        ORDER BY (valid_to IS NULL) DESC, (kind = $2) DESC, valid_from DESC LIMIT 1`,
+        ORDER BY (namespace IS NOT DISTINCT FROM $3) DESC, (valid_to IS NULL) DESC, (kind = $2) DESC, valid_from DESC
+        LIMIT 20`,
       [clusterId, kind, namespace, name, at, TOMBSTONE_MS / 1000],
     );
-    const row = r.rows[0];
+    let row = r.rows[0];
+    if (row && namespace === null && row.namespace !== null) {
+      // 只按名称找到的命名空间级对象：不同命名空间里有同名对象时无法确定，不解析
+      const keys = new Set(r.rows.filter((x) => x.namespace !== null).map((x) => x.key));
+      row = keys.size === 1 ? row : undefined;
+    }
     if (!row) {
       return null;
     }

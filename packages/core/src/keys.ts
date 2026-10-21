@@ -86,6 +86,15 @@ export function canonicalKind(kind: string): string {
   return KIND_ALIASES[kind.toLowerCase()] ?? kind;
 }
 
+/**
+ * 两个 kind 是否是同一种对象：不区分大小写，忽略 API 组（application、Application 与 Application.argoproj.io 相同）。
+ * 领域包按不带组的 kind 声明（组件类型、卡片的 applies_to），拓扑与解析后的实体带组。
+ */
+export function sameKind(a: string, b: string): boolean {
+  const k = (x: string) => x.split('.')[0]!.toLowerCase();
+  return k(a) === k(b);
+}
+
 export function isClusterScoped(kind: string): boolean {
   return CLUSTER_SCOPED_KINDS.has(kind);
 }

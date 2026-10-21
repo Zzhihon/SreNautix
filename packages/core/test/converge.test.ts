@@ -484,3 +484,83 @@ describe('没有对象的发布告警归到哪一次变更（ADR 0104）', () =>
     expect(g.group.changes.map((c) => c.change_id)).not.toContain('grafana');
   });
 });
+
+describe('依赖合并要求开始时间相近（ADR 0104）', () => {
+  const node = (key: string): TopologyNode => {
+    const [kind, rest] = key.split(':') as [string, string];
+    const [ns, name] = rest.includes('/') ? (rest.split('/') as [string, string]) : [null, rest];
+    return { key, kind, namespace: ns, name, uid: null, labels: {}, component_type: null, hub: false };
+  };
+  const NODE = 'Node:storage-03';
+  const DB = 'StatefulSet:data/pg';
+  const POD = 'Pod:data/pg-0';
+  const graph = new TopologyGraph(
+    [node(NODE), node(DB), node(POD)],
+    [
+      {
+        from: POD,
+        to: DB,
+        relation: 'owned_by',
+        provenance: 'structural',
+        confidence: 1,
+        scope: 'instance',
+        evidence: 't',
+      },
+      {
+        from: POD,
+        to: NODE,
+        relation: 'runs_on',
+        provenance: 'structural',
+        confidence: 1,
+        scope: 'instance',
+        evidence: 't',
+      },
+    ],
+    1,
+  );
+  const alert = (n: number, alertname: string, comp: string, at: number): Alert => {
+    const [kind, rest] = comp.split(':') as [string, string];
+    const [ns, name] = rest.includes('/') ? (rest.split('/') as [string, string]) : [null, rest];
+    return {
+      alert_id: `${n.toString(16).padStart(16, '0')}@${at / 1000}`,
+      cluster_id: CLUSTER,
+      source: 'alertmanager',
+      fingerprint: n.toString(16).padStart(16, '0'),
+      alertname,
+      labels: { alertname },
+      annotations: {},
+      severity: 'warning',
+      status: 'firing',
+      suppressed: 'none',
+      starts_at: new Date(at).toISOString(),
+      ends_at: null,
+      generator_url: null,
+      classification: { role: 'cause', source: 'catalog', confidence: 1, catalog_entry: null, chronic: false },
+      entity: { cluster_id: CLUSTER, kind, namespace: ns, name, uid: null },
+      entity_resolution: 'informer',
+      component: comp,
+      received_at: new Date(at).toISOString(),
+    };
+  };
+  const now = T0 + 10 * 60 * MIN;
+
+  it('持续 8 小时的节点告警不吸收之后才开始的数据库告警；开始时间相近时照常合并', () => {
+    const nodeAlert = alert(1, 'NodeMemoryRequestsNearAllocatable', NODE, T0);
+    const late = computeIncidents({
+      alerts: [nodeAlert, alert(2, 'WALArchiveFailures', POD, T0 + 8 * 60 * MIN)],
+      changes: [],
+      graph,
+      params: DEFAULT_RCA_PARAMS,
+      now,
+    });
+    expect(late).toHaveLength(2);
+    const near = computeIncidents({
+      alerts: [nodeAlert, alert(3, 'WALArchiveFailures', POD, T0 + 20 * MIN)],
+      changes: [],
+      graph,
+      params: DEFAULT_RCA_PARAMS,
+      now,
+    });
+    expect(near).toHaveLength(1);
+  });
+});

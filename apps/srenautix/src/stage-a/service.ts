@@ -35,6 +35,8 @@ export class StageAService {
     private readonly metrics: ServerMetrics,
     /** 当前加载的领域包的 pack.lock 摘要，写入报告（ADR 0107） */
     private readonly packLock: () => string | null = () => null,
+    /** 重算前按当前解析规则重新解析成员告警并回写（IngestService.reresolve）；没有时不重新解析 */
+    private readonly reresolve: ((clusterId: string, alertIds: readonly string[]) => Promise<string[]>) | null = null,
   ) {}
 
   /**
@@ -88,8 +90,19 @@ export class StageAService {
     if (inc.state === 'merged') {
       throw new HttpError(409, 'merged', '事件已合并到其他事件，重算吸收它的事件');
     }
+    // 升级前接入的告警（kind 没有归一、没有告警目录条目、组件是旧格式）先按当前的解析规则重新解析，
+    // 阶段 A 读回写之后的告警；组件变化由事件流水线重算事件（ADR 0107）
+    const reresolved = this.reresolve
+      ? await this.reresolve(
+          inc.cluster_id,
+          inc.members.filter((m) => m.left_version === null).map((m) => m.alert_id),
+        )
+      : [];
     const out = await this.run(inc);
     this.metrics.stageARecomputes.inc({ reason });
+    if (reresolved.length) {
+      logger.info('重算前重新解析了成员告警', { incident_id: incidentId, alerts: reresolved.length });
+    }
     logger.info('阶段 A 已重算', { incident_id: incidentId, version: inc.incident_version, reason });
     return out;
   }

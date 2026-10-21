@@ -93,6 +93,9 @@ export function changeComponents(c: ChangeEvent, graph: TopologyGraph): Set<Comp
   return new Set(c.targets.map((t) => (graph.has(t) ? graph.componentOf(t) : t)));
 }
 
+/** 依赖合并要求两条告警的开始时间相差不超过时间相邻的这么多倍（默认 4 × 30 分钟） */
+export const DEPENDENCY_ONSET_FACTOR = 4;
+
 /** 变更输入最多回看这么久（长期触发的告警不会让引擎读取无限久远的变更） */
 export const MAX_CHANGE_LOOKBACK_MS = 24 * 3600_000;
 
@@ -313,7 +316,12 @@ export function converge(input: ConvergeInput): AlertGroup[] {
       if (isForecast(x) || isForecast(y)) {
         continue;
       }
-      if (dependsOn(x, y, graph, 'merge') > 0 || dependsOn(y, x, graph, 'merge') > 0) {
+      // 依赖关系只在两条告警开始时间相近时合并（ADR 0104）：已经持续触发数小时的告警（资源请求接近上限、全天的扩容
+      // 顶格）不是几小时后才开始的新故障的起因，不吸收它
+      if (
+        Math.abs(x.start - y.start) <= DEPENDENCY_ONSET_FACTOR * gap &&
+        (dependsOn(x, y, graph, 'merge') > 0 || dependsOn(y, x, graph, 'merge') > 0)
+      ) {
         uf.union(i, j);
       }
     }

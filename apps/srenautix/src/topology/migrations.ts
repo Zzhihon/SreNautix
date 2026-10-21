@@ -91,5 +91,14 @@ CREATE TABLE server.reader_requests (
 CREATE INDEX reader_requests_pending_idx ON server.reader_requests (cluster_id, created_at) WHERE completed_at IS NULL;
 `,
     },
+    {
+      version: 3,
+      name: 'node lookup by name',
+      phase: 'expand',
+      sql: `
+-- 告警解析按名称查找节点（kind 不区分大小写、不带 API 组，命名空间可以缺省）
+CREATE INDEX IF NOT EXISTS topology_node_name_idx ON server.topology_events (cluster_id, name, valid_from DESC) WHERE item = 'node';
+`,
+    },
   ],
 };

@@ -7,10 +7,11 @@ import { readSecretFile } from '../config/files.js';
 import { logger } from '../log.js';
 import type { ServerMetrics } from '../metrics.js';
 import { isConnectionError } from '../store/health.js';
+import { canonical } from '../proposals/assertion.js';
 import { tx } from '../store/pool.js';
 import { resolveAlert, type ResolveDeps, type Resolved } from '../alerts/resolve.js';
 import { parseAlertmanagerWebhook, parseGeneric, parseNightingale, PayloadError, type RawAlert } from './normalize.js';
-import { INGEST_CHANNEL, logIngest, touchSource, upsertAlert } from './store.js';
+import { INGEST_CHANNEL, logIngest, touchSource, upsertAlert, type AlertRow } from './store.js';
 
 export interface IngestOptions {
   clusterId: string;
@@ -145,6 +146,72 @@ export class IngestService {
     }
     this.metrics.ingestAlerts.inc({ source: sourceId, outcome: 'accepted' }, kept.length);
     return { accepted: kept.length, dropped, degraded: false };
+  }
+
+  /**
+   * 按当前的解析器重新解析已存储的告警（实体、kind 归一、告警目录条目、属主折叠、拓扑覆盖），有变化的行回写
+   * alert_state 的分类、实体与组件，不改状态与时间（ADR 0107）。升级前接入的告警在重算阶段 A 之前用它对齐当前的
+   * 解析规则；组件有变化时通知事件流水线重算事件。返回回写的 alert_id。
+   */
+  async reresolve(clusterId: string, alertIds: readonly string[]): Promise<string[]> {
+    if (!alertIds.length) {
+      return [];
+    }
+    const rows = await this.pool.query<AlertRow>(
+      'SELECT * FROM server.alert_state WHERE cluster_id = $1 AND alert_id = ANY($2::text[])',
+      [clusterId, alertIds],
+    );
+    const updates: Array<{ id: string; r: Resolved; componentChanged: boolean }> = [];
+    for (const row of rows.rows) {
+      const raw: RawAlert = {
+        source: row.source as RawAlert['source'],
+        labels: row.labels,
+        annotations: row.annotations,
+        severity: row.severity,
+        status: row.status,
+        suppressed: row.suppressed,
+        startsAt: row.starts_at,
+        endsAt: row.ends_at,
+        generatorUrl: row.generator_url,
+        fingerprint: row.fingerprint,
+        alertname: row.alertname,
+      };
+      const r = await resolveAlert(clusterId, raw, this.resolve);
+      // jsonb 不保留键的顺序：按规范化的 JSON 比较
+      const same =
+        canonical(r.classification) === canonical(row.classification) &&
+        canonical(r.entity ?? null) === canonical(row.entity ?? null) &&
+        r.entityResolution === row.entity_resolution &&
+        r.component === row.component;
+      if (!same) {
+        updates.push({ id: row.alert_id, r, componentChanged: r.component !== row.component });
+      }
+    }
+    if (!updates.length) {
+      return [];
+    }
+    await tx(this.pool, async (c) => {
+      for (const u of updates) {
+        await c.query(
+          `UPDATE server.alert_state SET classification = $2, entity = $3, entity_resolution = $4, component = $5,
+             updated_at = CASE WHEN component IS DISTINCT FROM $5 THEN now() ELSE updated_at END
+           WHERE alert_id = $1`,
+          [
+            u.id,
+            JSON.stringify(u.r.classification),
+            u.r.entity ? JSON.stringify(u.r.entity) : null,
+            u.r.entityResolution,
+            u.r.component,
+          ],
+        );
+      }
+      if (updates.some((u) => u.componentChanged)) {
+        await c.query('SELECT pg_notify($1, $2)', [INGEST_CHANNEL, clusterId]);
+      }
+    });
+    this.metrics.alertsReresolved.inc(updates.length);
+    logger.info('已按当前的解析规则重新解析告警', { cluster_id: clusterId, alerts: updates.length });
+    return updates.map((u) => u.id);
   }
 
   /** 写入一批告警（webhook 或对账），返回状态有变化的 alert_id。 */

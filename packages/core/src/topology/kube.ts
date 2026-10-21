@@ -2,7 +2,7 @@
 // 只读取对象的名称与结构；Secret 的内容永远不读，只记录 secretKeyRef 引用的名称。
 // ConfigMap 的值只用于找出 Service DNS 名，边的依据只写键名，不写值。
 import type { ComponentType, Labels, OperatorConvention, TopologyEdge, TopologyNode } from '@srenautix/contract';
-import { nodeKey, parseKey, scopedNamespace, tryNodeKey } from '../keys.js';
+import { nodeKey, parseKey, sameKind, scopedNamespace, tryNodeKey } from '../keys.js';
 import { OWNED_BY } from './graph.js';
 import type { TopologySnapshot } from './store.js';
 
@@ -138,7 +138,9 @@ export function matchTypeByName(
     types.filter((t) => {
       const m = t.match;
       return (
-        m.kind === kind &&
+        // 实体的 kind 可能带 API 组（Application.argoproj.io），类型按不带组的 kind 声明
+        sameKind(m.kind, kind) &&
+        (m.api_group === undefined || !kind.includes('.') || kind.slice(kind.indexOf('.') + 1) === m.api_group) &&
         Object.keys(m.labels ?? {}).length === 0 &&
         (m.name_pattern === undefined || new RegExp(m.name_pattern).test(name)) &&
         (m.namespaces === undefined || m.namespaces.includes(namespace ?? ''))

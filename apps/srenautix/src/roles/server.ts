@@ -446,7 +446,15 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
     metrics,
     suppressedAlertIds: (cl, clusterId, ids) => suppressedAlertIds(cl as pg.PoolClient, clusterId, ids),
   });
-  const stageA = new StageAService(pool, evidence, rules, proposals, metrics, () => packs.set.lockDigest);
+  const stageA = new StageAService(
+    pool,
+    evidence,
+    rules,
+    proposals,
+    metrics,
+    () => packs.set.lockDigest,
+    (cl, ids) => ingest.reresolve(cl, ids),
+  );
   let degraded = false;
   const pipeline = new IncidentPipeline(c.cluster_id, engine, stageA, scheduler, pool, metrics, {
     changed: () => notify.syncNow(),

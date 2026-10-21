@@ -1,5 +1,5 @@
 import type { Alert, EntityRef, EvidenceResult, Incident, Labels } from '@srenautix/contract';
-import { matchTypeByName, tryNodeKey } from '@srenautix/core';
+import { matchTypeByName, sameKind, tryNodeKey } from '@srenautix/core';
 import { toIso } from '@srenautix/integration-sdk';
 import {
   durationSeconds,
@@ -104,7 +104,8 @@ export class PackEvidence implements EvidenceRunner {
         let any = false;
         for (const c of chain.chain.cards) {
           const card = `${ck}/${c.id}`;
-          if (!(c.applies_to?.kinds ?? ['Pod']).includes(entity.kind)) {
+          // 卡片按不带 API 组的 kind 声明，实体的 kind 取拓扑的写法（Application.argoproj.io）：按 sameKind 比较
+          if (!(c.applies_to?.kinds ?? ['Pod']).some((k) => sameKind(k, entity.kind))) {
             continue;
           }
           any = true;
