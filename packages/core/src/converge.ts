@@ -147,7 +147,35 @@ export function changeExplains(
     }
     best = Math.max(best, reach?.components.get(comp) ?? 0);
   }
+  // 发布的前置 Job（迁移）作用在它写入的组件上：落在这些组件上的告警也由这次发布解释（ADR 0104 §13）
+  if (x.component !== null) {
+    best = Math.max(best, preStepTargets(c, graph).get(x.component) ?? 0);
+  }
   return best;
+}
+
+/** 按强依据（managed_by、版本标签、镜像）挂上的前置 Job 才算发布的一部分；namespace_window 是弱推导，不扩展作用对象 */
+const STRONG_ATTACHMENTS: ReadonlySet<string> = new Set(['managed_by', 'revision_label', 'image']);
+
+/**
+ * 变更挂上的前置 Job 经 egress_to 访问的组件（迁移 Job 访问的数据库）→ 边的置信度。只看 egress_to：Job 依赖它们，
+ * 迁移改的正是它们，所以它们上的告警可以由这次发布解释；Job 的其他依赖（DNS、存储）不算
+ */
+function preStepTargets(c: ChangeEvent, graph: TopologyGraph): Map<ComponentKey, number> {
+  const out = new Map<ComponentKey, number>();
+  for (const a of c.attachments ?? []) {
+    if (!STRONG_ATTACHMENTS.has(a.basis) || !graph.has(a.target)) {
+      continue;
+    }
+    for (const e of graph.dependencies(a.target)) {
+      if (e.relation !== 'egress_to' || e.provenance === 'naming') {
+        continue;
+      }
+      const comp = graph.componentOf(e.to);
+      out.set(comp, Math.max(out.get(comp) ?? 0, e.confidence));
+    }
+  }
+  return out;
 }
 
 /**
