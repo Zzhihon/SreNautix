@@ -30,12 +30,13 @@ srenautix_api() {
       .catch((e) => { console.error(e.message); process.exit(1); });" "$path"
 }
 
-# 注入之后创建、与场景相关的事件（不含背景噪声命名空间），输出 JSON 数组；参数：注入时间（RFC 3339）
+# 注入之后有变化的事件（新建，或已有事件吸收了新的告警），不含根因在背景噪声命名空间中的事件；
+# 没有根因或根因是集群级对象的事件也计入。输出 JSON 数组；参数：注入时间（RFC 3339）
 scenario_incidents() {
   local since=$1
   srenautix_api '/v1/incidents?state=all&limit=500' | jq --arg since "$since" --arg bg "$SRENAUTIX_BACKGROUND_NS" '
-    [.items[] | select(.first_firing_at >= $since)
-     | select((.root_component // "") | capture("^[^:]+:(?<ns>[a-z0-9-]+)/") | .ns | test($bg) | not)]'
+    [.items[] | select(.updated_at >= $since)
+     | select(((.root_component // "") | capture("^[^:]+:(?<ns>[a-z0-9-]+)/")? // {ns: ""} | .ns) | test($bg) | not)]'
 }
 
 # 发现：事件收敛到不超过上限，其中有一个事件的根因匹配 SRENAUTIX_ROOT；输出该事件的 id
