@@ -57,6 +57,11 @@ export async function startTempo(spans: FixtureSpan[]): Promise<RunningProcess> 
       url: `http://127.0.0.1:${http}`,
       readyPath: '/ready',
       timeoutMs: 120_000,
+      // 端口上应答的 Tempo 是本进程：/status/config 中的存储路径在本实例的目录下
+      owns: async (url) => {
+        const res = await fetch(`${url}/status/config`, { signal: AbortSignal.timeout(5000) });
+        return res.ok && (await res.text()).includes(dir);
+      },
     });
   }
   if (spans.length) {

@@ -68,6 +68,11 @@ export async function startLoki(streams: FixtureLogStream[]): Promise<RunningPro
       url: `http://127.0.0.1:${http}`,
       readyPath: '/ready',
       timeoutMs: 120_000,
+      // 端口上应答的 Loki 是本进程：/config 中的 path_prefix 是本实例的目录
+      owns: async (url) => {
+        const res = await fetch(`${url}/config`, { signal: AbortSignal.timeout(5000) });
+        return res.ok && (await res.text()).includes(dir);
+      },
     });
   }
   if (streams.length) {

@@ -79,6 +79,28 @@ export interface TsdbInstance extends RunningProcess {
   readonly kind: 'prometheus' | 'victoria-metrics';
 }
 
+/** 端口上应答的 Prometheus 是否使用这个数据目录（/api/v1/status/flags 的 storage.tsdb.path） */
+export function prometheusOwns(data: string): (url: string) => Promise<boolean> {
+  return async (url) => {
+    const res = await fetch(`${url}/api/v1/status/flags`, { signal: AbortSignal.timeout(5000) });
+    if (!res.ok) {
+      return false;
+    }
+    const body = (await res.json()) as { data?: Record<string, string> };
+    return body.data?.['storage.tsdb.path'] === data;
+  };
+}
+
+/** 端口上应答的 VictoriaMetrics 是否使用这个数据目录（/flags 中的 -storageDataPath） */
+export function victoriaMetricsOwns(data: string): (url: string) => Promise<boolean> {
+  return async (url) => {
+    const res = await fetch(`${url}/flags`, { signal: AbortSignal.timeout(5000) });
+    return (
+      res.ok && (await res.text()).split('\n').some((l) => l.trim() === `-storageDataPath=${JSON.stringify(data)}`)
+    );
+  };
+}
+
 export async function startPrometheus(series: FixtureMetricSeries[]): Promise<TsdbInstance> {
   const bins = await ensureBackend('prometheus');
   const dir = workDir('prometheus');
@@ -103,6 +125,7 @@ export async function startPrometheus(series: FixtureMetricSeries[]): Promise<Ts
       ],
       url: `http://127.0.0.1:${port}`,
       readyPath: '/-/ready',
+      owns: prometheusOwns(data),
     }),
   );
   return {
@@ -118,12 +141,14 @@ export async function startPrometheus(series: FixtureMetricSeries[]): Promise<Ts
 export async function startVictoriaMetrics(series: FixtureMetricSeries[]): Promise<TsdbInstance> {
   const bins = await ensureBackend('victoria-metrics');
   const dir = workDir('victoria-metrics');
+  const data = join(dir, 'data');
   const proc = await withFreePorts(1, ([port]) =>
     startProcess({
       name: 'victoria-metrics',
       bin: bins['victoria-metrics']!,
+      owns: victoriaMetricsOwns(data),
       args: [
-        `-storageDataPath=${join(dir, 'data')}`,
+        `-storageDataPath=${data}`,
         `-httpListenAddr=127.0.0.1:${port}`,
         '-retentionPeriod=100y',
         '-search.disableCache',

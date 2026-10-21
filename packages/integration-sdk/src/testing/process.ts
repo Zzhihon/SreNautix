@@ -76,6 +76,11 @@ export async function startProcess(opts: {
   readyPath: string;
   cwd?: string;
   timeoutMs?: number;
+  /**
+   * 就绪的端口确实由这个进程监听：端口被并发的测试抢走时，就绪探测会被另一个已经就绪的后端应答，
+   * 而本进程随后才因绑定失败退出。给出时，就绪之后核对身份（例如数据目录），不是本进程就按 PortTaken 处理。
+   */
+  owns?: (url: string) => Promise<boolean>;
 }): Promise<RunningProcess> {
   const child = spawn(opts.bin, opts.args, { cwd: opts.cwd, stdio: ['ignore', 'pipe', 'pipe'] });
   live.add(child);
@@ -111,6 +116,10 @@ export async function startProcess(opts: {
       throw new Error(`${opts.name} 在期限内没有就绪：\n${output}`);
     }
     await new Promise((r) => setTimeout(r, 200));
+  }
+  if (opts.owns && !(await opts.owns(opts.url))) {
+    child.kill('SIGKILL');
+    throw new PortTaken(`${opts.name}：${opts.url} 上应答的是另一个进程（端口被并发的测试占用）：\n${output}`);
   }
 
   return {

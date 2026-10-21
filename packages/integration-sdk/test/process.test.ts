@@ -1,13 +1,18 @@
 // 测试后端的端口竞争：freePort 释放端口到后端绑定之间，并发的测试文件可能先占用它（CI 上 Prometheus 因此
 // "bind: address already in use" 退出）。startProcess 把这种退出报告为 PortTaken，withFreePorts 换端口重试。
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:net';
+import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
+import { backendsDir, ensureBackend } from '../src/testing/backends.js';
 import { PortTaken, startProcess, withFreePorts } from '../src/testing/process.js';
-import { startPrometheus } from '../src/testing/tsdb.js';
+import { prometheusOwns, startPrometheus } from '../src/testing/tsdb.js';
 
 const held: Server[] = [];
+const scratch: string[] = [];
 afterAll(() => {
   held.forEach((s) => s.close());
+  scratch.forEach((d) => rmSync(d, { recursive: true, force: true }));
 });
 
 describe('测试后端的端口', () => {
@@ -77,6 +82,41 @@ describe('测试后端的端口', () => {
       }),
     ).rejects.toThrow('配置错误');
     expect(calls).toBe(1);
+  });
+
+  it('端口被另一个已就绪的后端占用时，就绪探测会被它应答；按数据目录核对身份后报告 PortTaken', async () => {
+    // 根因复现：B 绑定失败之前，B 的就绪探测打到占着端口的 A 上，A 已经就绪
+    const a = await startPrometheus([]);
+    const { prometheus: bin } = await ensureBackend('prometheus');
+    const port = new URL(a.url).port;
+    const dir = mkdtempSync(join(backendsDir(), 'runs', 'prometheus-b-'));
+    scratch.push(dir);
+    writeFileSync(join(dir, 'prometheus.yml'), 'global:\n  evaluation_interval: 1m\n');
+    const opts = {
+      name: 'prometheus',
+      bin: bin!,
+      args: [
+        `--config.file=${join(dir, 'prometheus.yml')}`,
+        `--storage.tsdb.path=${join(dir, 'data')}`,
+        `--web.listen-address=127.0.0.1:${port}`,
+      ],
+      url: a.url,
+      readyPath: '/-/ready',
+      timeoutMs: 20_000,
+    };
+    try {
+      // 不核对身份时 B 被当作已就绪，URL 指向 A 的数据
+      const fooled = await startProcess(opts);
+      expect(fooled.url).toBe(a.url);
+      await fooled.stop();
+      // 核对数据目录后识别出端口被占用
+      await expect(startProcess({ ...opts, owns: prometheusOwns(join(dir, 'data')) })).rejects.toBeInstanceOf(
+        PortTaken,
+      );
+      expect(await prometheusOwns(join(dir, 'data'))(a.url)).toBe(false);
+    } finally {
+      await a.stop();
+    }
   });
 
   it('并发启动多个 Prometheus 都能就绪', async () => {
