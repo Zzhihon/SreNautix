@@ -75,6 +75,19 @@ describe('CCHP 真实告警标签的解析', () => {
     }
   });
 
+  it('没有对象也没有命名空间：component 标签与 service 标签归入逻辑组件；有命名空间时仍归命名空间伪组件', async () => {
+    const only = async (labels: Record<string, string>) =>
+      (await resolveAlert('cchp', raw({ alertname: 'X', severity: 'warning', ...labels }), deps)).component;
+    expect(await only({ component: 'release' })).toBe('component:release');
+    // Kind 的 unmapped-alert：ShopCatalogStale 只带 service="catalog"
+    expect(await only({ service: 'catalog' })).toBe('component:catalog');
+    // component 标签优先于 service
+    expect(await only({ component: 'release', service: 'catalog' })).toBe('component:release');
+    // 带命名空间的服务级告警仍归命名空间伪组件（抓取目标的 service 标签不当作逻辑组件）
+    expect(await only({ service: 'kube-state-metrics', namespace: 'monitoring' })).toBe('Namespace:monitoring');
+    expect(await only({})).toBeNull();
+  });
+
   it('节点告警带着抓取目标的命名空间：实体是 Node:storage-01，在拓扑中找到', async () => {
     const node = F.alerts.find((a) => a.alertname === 'NodeRootFilesystemFillForecast')!;
     expect(node.labels.namespace).toBe('observability');

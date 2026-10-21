@@ -132,6 +132,11 @@ export async function resolveAlert(clusterId: string, a: RawAlert, deps: Resolve
     // 不再成为 unlabelled 事件（ADR 0104）
     component = tryNodeKey(LOGICAL_KIND, null, a.labels.component);
   }
+  if (!component && a.labels.service) {
+    // 只带 service 标签的告警（业务主题的规则、聚合掉了命名空间的服务级规则）同样归入逻辑组件 component:<service>，
+    // 与领域包告警目录按 service 标签建条目（name_labels [service]）一致（ADR 0104 §6）
+    component = tryNodeKey(LOGICAL_KIND, null, a.labels.service);
+  }
   if (ov && a.labels.role === undefined) {
     return {
       classification: {
