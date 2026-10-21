@@ -47,11 +47,34 @@ export function newCalibration(routeId: string): Calibration {
   return { routeId, factor: 1, recentMax: 1, samples: 0 };
 }
 
+/**
+ * 可信的校准比例范围（ADR 0129）。分词器估算与服务方计数的差别在这之内：字节估算对中文与英文约为 0.4–0.7，
+ * 有分词器时接近 1。之外的样本是服务方的计数异常（CCHP 的一次 2.9k token 请求报了 24,993 输入 token），
+ * 计入后估算会长期偏大数倍，路由因"超过上下文"被跳过、研判因"超过预算"停止。
+ */
+export const CALIBRATION_RATIO_RANGE = { min: 0.2, max: 3 } as const;
+
+export function plausibleRatio(ratio: number): boolean {
+  return ratio >= CALIBRATION_RATIO_RANGE.min && ratio <= CALIBRATION_RATIO_RANGE.max;
+}
+
+/** 状态库里读回的校准：系数在可信范围之外（之前计入过异常样本）时从头校准 */
+export function restoredCalibration(routeId: string, c: Calibration | null): Calibration {
+  if (!c || !plausibleRatio(c.factor) || !plausibleRatio(c.recentMax)) {
+    return newCalibration(routeId);
+  }
+  return c;
+}
+
+/** 按一次调用的实际输入更新校准；比例在可信范围之外的样本不计入（ADR 0129） */
 export function calibrate(c: Calibration, raw: number, actualInput: number): Calibration {
   if (raw <= 0 || actualInput <= 0) {
     return c;
   }
   const ratio = actualInput / raw;
+  if (!plausibleRatio(ratio)) {
+    return c;
+  }
   const factor = c.samples === 0 ? ratio : c.factor * (1 - EWMA_ALPHA) + ratio * EWMA_ALPHA;
   // 最近最大值缓慢回落，避免一次异常值长期抬高估算
   const recentMax = Math.max(ratio, c.recentMax * 0.98);

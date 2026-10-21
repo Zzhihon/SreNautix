@@ -8,6 +8,7 @@ import {
   callCost,
   calibrate,
   estimateTokens,
+  plausibleRatio,
   rawEstimate,
   type BudgetConfig,
   type Calibration,
@@ -612,6 +613,15 @@ export class ModelSession {
     const cost = callCost(route.price, turn.usage);
     // 服务方没有在流里给出 usage 时按估算记账，研判预算照样生效
     this.ctx.ledger.record(turn.usage.input > 0 ? turn.usage : { ...turn.usage, input: estimated }, cost);
+    if (raw > 0 && turn.usage.input > 0 && !plausibleRatio(turn.usage.input / raw)) {
+      metrics.calibrationRejected.inc({ route: route.id });
+      logger.warn('服务方报告的输入 token 与估算相差过大，不计入校准', {
+        route: route.id,
+        phase,
+        raw_estimate: raw,
+        usage_input: turn.usage.input,
+      });
+    }
     rt.calibration = calibrate(rt.calibration, raw, turn.usage.input);
     metrics.estimateRatio.set({ route: route.id }, rt.calibration.factor);
     await this.layer.opts.onCalibration(rt.calibration);

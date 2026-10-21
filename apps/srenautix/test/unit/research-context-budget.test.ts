@@ -17,6 +17,7 @@ import {
   MAX_FULL_CARDS,
   promptParts,
   selectCards,
+  topologyView,
 } from '../../src/research/prompt.js';
 import type { Subgraph } from '../../src/research/types.js';
 import { researchCase, stageA, stageACards, subgraph } from '../support/scenario.js';
@@ -151,6 +152,47 @@ describe('卡多的事件', () => {
     const t = text(concludeItems('zh', parts, ledger, book));
     expect(t).toContain('## 假设相关的证据卡（阶段 A，上文未完整列出');
     expect(t).toContain('第 99 张卡的判定说明');
+  });
+});
+
+describe('提示词里的拓扑（ADR 0129）', () => {
+  it('与事件无关的 Pod、ReplicaSet 按 kind 计入属主的 owns，它们的边改记在属主上；有关的 Pod 照常列出', () => {
+    const g = podSubgraph();
+    const withNode = {
+      ...g,
+      nodes: [...g.nodes, { ...g.nodes[4]!, component: 'Node:node-b', name: 'node-b' }],
+      edges: [
+        ...g.edges,
+        ...['Pod:shop/api-0', 'Pod:shop/api-1'].map((from) => ({
+          from,
+          to: 'Node:node-b',
+          relation: 'scheduled_on',
+          provenance: 'structural' as const,
+          confidence: 1,
+          scope: 'instance' as const,
+        })),
+      ],
+    };
+    const rc = researchCase({ subgraph: withNode });
+    const v = topologyView(rc, withNode.nodes, withNode.edges, new Set(['Pod:shop/api-7']));
+    const keys = v.nodes.map((n) => n.component);
+    expect(keys).toContain('Pod:shop/api-7');
+    expect(keys.filter((k) => String(k).startsWith('Pod:'))).toEqual(['Pod:shop/api-7']);
+    expect(keys).not.toContain('ReplicaSet:shop/api-1');
+    expect(v.nodes.find((n) => n.component === 'Deployment:shop/api')).toMatchObject({
+      owns: { ReplicaSet: 1, Pod: 19 },
+    });
+    // 两个 Pod 所在的节点：改记为属主一条边
+    expect(v.edges.filter((e) => e.to === 'Node:node-b')).toEqual([
+      { from: 'Deployment:shop/api', to: 'Node:node-b', relation: 'scheduled_on', confidence: 1 },
+    ]);
+    // 有关的 Pod 保留它到 ReplicaSet 的边，ReplicaSet 已并入属主
+    expect(v.edges).toContainEqual({
+      from: 'Pod:shop/api-7',
+      to: 'Deployment:shop/api',
+      relation: 'owned_by',
+      confidence: 1,
+    });
   });
 });
 

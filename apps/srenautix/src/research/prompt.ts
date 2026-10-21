@@ -1,8 +1,8 @@
 import { PROMPTS, type Language } from '../prompts/index.js';
 import type { Item, Segment, SegmentTrim } from '../llm/types.js';
 import type { CardEntry, EvidenceBook } from './evidence.js';
-import { scopeOf, type Ledger } from './ledger.js';
-import type { PreviousRun, ResearchCase } from './types.js';
+import { ownerOf, scopeOf, type Ledger } from './ledger.js';
+import type { PreviousRun, ResearchCase, Subgraph } from './types.js';
 
 // 提示词按稳定前缀排列（DESIGN §8.3），便于服务方命中前缀缓存：
 // 1. 固定指令（system）；
@@ -353,8 +353,72 @@ export function catalogSegment(c: ResearchCase): Segment {
   );
 }
 
+/**
+ * 拓扑子图在提示词里的写法（ADR 0129）：由控制器拥有、自身与事件无关的对象（不是根因、候选或事件组件，没有告警，
+ * 也不是证据卡的实体）不逐个列出，按 kind 计数记在顶层属主的 owns 上；它们的其他边改记在属主上（去重，置信度取最高）。
+ * 几百个 Pod 的子图里，逐个列出的 Pod 与边曾占提示词的大半。
+ */
+export function topologyView(
+  c: ResearchCase,
+  nodes: Subgraph['nodes'],
+  edges: Subgraph['edges'],
+  related: ReadonlySet<string>,
+): { nodes: Array<Record<string, unknown>>; edges: Array<Record<string, unknown>> } {
+  const present = new Set(nodes.map((n) => n.component));
+  const owned = new Set(edges.filter((e) => e.relation === 'owned_by').map((e) => e.from));
+  const into = new Map<string, string>();
+  for (const n of nodes) {
+    if (
+      !owned.has(n.component) ||
+      related.has(n.component) ||
+      n.alerts.length ||
+      n.role === 'root' ||
+      n.role === 'candidate'
+    ) {
+      continue;
+    }
+    const top = ownerOf(n.component, c.subgraph);
+    if (top !== n.component && present.has(top) && !into.has(top)) {
+      into.set(n.component, top);
+    }
+  }
+  const owns = new Map<string, Record<string, number>>();
+  for (const n of nodes) {
+    const top = into.get(n.component);
+    if (top) {
+      const o = owns.get(top) ?? {};
+      o[n.kind] = (o[n.kind] ?? 0) + 1;
+      owns.set(top, o);
+    }
+  }
+  const out = new Map<string, { from: string; to: string; relation: string; confidence: number }>();
+  for (const e of edges) {
+    const from = into.get(e.from) ?? e.from;
+    const to = into.get(e.to) ?? e.to;
+    if (from === to) {
+      continue;
+    }
+    const k = `${from}|${e.relation}|${to}`;
+    const cur = out.get(k);
+    if (!cur || cur.confidence < e.confidence) {
+      out.set(k, { from, to, relation: e.relation, confidence: e.confidence });
+    }
+  }
+  return {
+    nodes: nodes
+      .filter((n) => !into.has(n.component))
+      .map((n) => ({
+        component: n.component,
+        role: n.role,
+        hops: n.hops,
+        ...(owns.has(n.component) ? { owns: owns.get(n.component) } : {}),
+      })),
+    edges: [...out.values()],
+  };
+}
+
 /** 拓扑子图片段：先裁到根因与候选的一跳之内，再整段去掉 */
-function topologySegment(c: ResearchCase, categories: Segment['categories']): Segment {
+function topologySegment(c: ResearchCase, categories: Segment['categories'], related: ReadonlySet<string>): Segment {
   const view = (maxHops: number) => {
     const nodes = c.subgraph.nodes.filter((n) => n.hops <= maxHops);
     const keep = new Set(nodes.map((n) => n.component));
@@ -362,10 +426,7 @@ function topologySegment(c: ResearchCase, categories: Segment['categories']): Se
     return {
       nodes,
       edges,
-      text: fenced('拓扑（根因两跳内）', {
-        nodes: nodes.map((n) => ({ component: n.component, role: n.role, hops: n.hops })),
-        edges: edges.map((e) => ({ from: e.from, to: e.to, relation: e.relation, confidence: e.confidence })),
-      }),
+      text: fenced('拓扑（根因两跳内）', topologyView(c, nodes, edges, related)),
     };
   };
   const full = view(Number.POSITIVE_INFINITY);
@@ -464,7 +525,15 @@ export function incidentSegments(
       'allow',
     ),
   );
-  out.push(topologySegment(c, facts));
+  // 与事件有关的组件：根因、候选、事件组件、成员告警的组件与证据卡的实体，拓扑里逐个列出
+  const related = new Set<string>([
+    ...(i.root.component ? [i.root.component] : []),
+    ...i.candidates.map((x) => x.component),
+    ...i.components,
+    ...book.alertEntries.flatMap(([, m]) => (m.component ? [m.component] : [])),
+    ...book.promptCards().flatMap((x) => (x.component ? [x.component] : [])),
+  ]);
+  out.push(topologySegment(c, facts, related));
   out.push(
     seg(
       fenced(

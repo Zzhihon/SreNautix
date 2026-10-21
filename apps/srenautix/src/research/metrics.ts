@@ -82,6 +82,13 @@ export class WorkerMetrics extends BaseMetrics {
     registers: [this.registry],
   });
 
+  readonly calibrationRejected = new Counter({
+    name: 'srenautix_llm_calibration_rejected_total',
+    help: '实际 usage 与原始估算之比在可信范围之外、没有计入校准的调用数（ADR 0129）',
+    labelNames: ['route'] as const,
+    registers: [this.registry],
+  });
+
   readonly budgetUsedRatio = new Gauge({
     name: 'srenautix_llm_budget_used_ratio',
     help: '已用 token 占上限的比例，scope=daily 为当天（UTC）',

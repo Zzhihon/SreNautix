@@ -7,7 +7,9 @@ import {
   DEFAULT_BUDGET,
   estimateTokens,
   newCalibration,
+  plausibleRatio,
   rawEstimate,
+  restoredCalibration,
   ResearchLedger,
 } from '../../src/llm/budget.js';
 import { RouteBreaker, touchesFailureDomain, DEFAULT_BREAKER } from '../../src/llm/breaker.js';
@@ -120,6 +122,23 @@ describe('预算与估算校准', () => {
     expect(estimateTokens(c, raw)).toBe(Math.ceil(2000 * 0.5 * 1.1));
     c = calibrate(c, raw, 3000);
     expect(estimateTokens(c, raw)).toBeGreaterThanOrEqual(Math.ceil(2000 * 1.5 * 1.1) - 1);
+  });
+
+  it('服务方计数异常的样本不计入校准；状态库里系数异常的校准从头开始（ADR 0129）', () => {
+    let c = newCalibration('primary');
+    // CCHP 的 primary：2.9k token 的请求报了 24,993 输入 token，之后的估算长期偏大数倍
+    c = calibrate(c, 2877, 2877);
+    const after = calibrate(c, 2877, 24_993);
+    expect(after).toEqual(c);
+    expect(estimateTokens(after, 20_000)).toBe(Math.ceil(20_000 * 1.1));
+    expect(calibrate(c, 2877, 100)).toEqual(c);
+    expect(plausibleRatio(0.45)).toBe(true);
+    expect(plausibleRatio(8.7)).toBe(false);
+    const polluted = { routeId: 'primary', factor: 1.3, recentMax: 8.7, samples: 40 };
+    expect(restoredCalibration('primary', polluted)).toEqual(newCalibration('primary'));
+    const healthy = { routeId: 'primary', factor: 0.98, recentMax: 1.1, samples: 40 };
+    expect(restoredCalibration('primary', healthy)).toBe(healthy);
+    expect(restoredCalibration('primary', null)).toEqual(newCalibration('primary'));
   });
 
   it('tiktoken 分词', () => {

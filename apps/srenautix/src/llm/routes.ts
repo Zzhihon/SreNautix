@@ -1,6 +1,6 @@
 import type { DialectProfile, ModelRoute } from '@srenautix/contract';
 import { DEFAULT_BREAKER, RouteBreaker } from './breaker.js';
-import { newCalibration, type Calibration } from './budget.js';
+import { restoredCalibration, type Calibration } from './budget.js';
 import { declaredProfile } from './dialect.js';
 import { EgressBlocked, type Egress } from './egress.js';
 import { FingerprintTracker } from './fingerprint.js';
@@ -74,7 +74,8 @@ export function partitionRoutes(
       timeouts: t.timeouts,
       modelClass: t.modelClass,
       breaker: new RouteBreaker(i.route.id, { ...DEFAULT_BREAKER, latencyThresholdMs: t.timeouts.firstTokenMs / 2 }),
-      calibration: i.state.calibration ?? newCalibration(i.route.id),
+      // 系数在可信范围之外的已保存校准从头开始（ADR 0129）
+      calibration: restoredCalibration(i.route.id, i.state.calibration),
       fingerprint: new FingerprintTracker(i.route.id, i.state.fingerprint),
     });
   }
