@@ -185,7 +185,9 @@ function logicalOf(x: PreparedAlert): string | null {
 /**
  * 没有锚点的告警该归到哪一次变更（ADR 0104），返回变更的下标，不归时为 null。条件：
  * - 告警在变更之后、变更窗口加时间相邻的范围内触发（默认 60 分钟）；
- * - 角色是 change（发布流水线、部署后检查之类没有对象的告警），或者告警的命名空间就是变更目标所在的命名空间；
+ * - 告警的命名空间就是变更目标所在的命名空间；或者角色是 change（发布流水线、部署后检查之类没有对象的告警）
+ *   并且这次变更有影响：输入中至少一条有锚点的告警由它解释（触发在变更窗口内、组件就是或依赖变更目标）。
+ *   没有影响的变更（例如另一个命名空间里同时发生、没有任何告警的发布）不吸收没有对象的发布告警；
  *   不满足这两条的告警，与已经归到某次变更的告警逻辑归属相同时（同一个组件键或 component 标签）也归到那次变更；
  * - 有多次变更可选时取告警之前最近的一次。
  */
@@ -201,6 +203,13 @@ function changeTargets(
   }
   const namespaces = changes.map((c) => changeNamespaces(c, graph));
   const times = changes.map((c) => parseTime(c.time));
+  // 有影响的变更：至少解释一条有锚点的告警
+  const impact = changes.map((c) =>
+    xs.some(
+      (x) =>
+        !unanchored(x) && x.alert.classification.role !== 'forecast' && changeExplains(c, x, graph, params, 'rank') > 0,
+    ),
+  );
   const reach = params.changeWindowMs + params.adjacencyMs;
   const latestBefore = (x: PreparedAlert, ok: (k: number) => boolean): number | null => {
     let best: number | null = null;
@@ -219,7 +228,7 @@ function changeTargets(
     const ns = namespaceOf(x);
     out[i] = latestBefore(
       x,
-      (k) => x.alert.classification.role === 'change' || (ns !== null && namespaces[k]!.has(ns)),
+      (k) => (ns !== null && namespaces[k]!.has(ns)) || (x.alert.classification.role === 'change' && impact[k]!),
     );
   });
   // 逻辑归属相同的告警跟随已经归到变更的告警

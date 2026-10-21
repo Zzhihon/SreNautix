@@ -398,3 +398,89 @@ describe('集群枢纽', () => {
     expect(incidents).toHaveLength(2);
   });
 });
+
+describe('没有对象的发布告警归到哪一次变更（ADR 0104）', () => {
+  const node = (key: string): TopologyNode => {
+    const [kind, rest] = key.split(':') as [string, string];
+    const [ns, name] = rest.includes('/') ? (rest.split('/') as [string, string]) : [null, rest];
+    return { key, kind, namespace: ns, name, uid: null, labels: {}, component_type: null, hub: false };
+  };
+  const API = 'Deployment:shop/api';
+  const GRAFANA = 'Deployment:observability/grafana';
+  const graph = new TopologyGraph([node(API), node(GRAFANA)], [], 1);
+  const rollout = (id: string, target: string, at: number): ChangeEvent => ({
+    change_id: id,
+    source: 'kubernetes',
+    kind: 'rollout',
+    refs: [],
+    revision: null,
+    actor: null,
+    time: new Date(at).toISOString(),
+    link: null,
+    targets: [target],
+    summary: `rollout ${target}`,
+  });
+  const alert = (
+    n: number,
+    alertname: string,
+    at: number,
+    over: Partial<Pick<Alert, 'component' | 'entity' | 'labels'>> & { role: Alert['classification']['role'] },
+  ): Alert => ({
+    alert_id: `${n.toString(16).padStart(16, '0')}@${at / 1000}`,
+    cluster_id: CLUSTER,
+    source: 'alertmanager',
+    fingerprint: n.toString(16).padStart(16, '0'),
+    alertname,
+    labels: { alertname, ...over.labels },
+    annotations: {},
+    severity: 'warning',
+    status: 'firing',
+    suppressed: 'none',
+    starts_at: new Date(at).toISOString(),
+    ends_at: null,
+    generator_url: null,
+    classification: { role: over.role, source: 'catalog', confidence: 1, catalog_entry: null, chronic: false },
+    entity: over.entity ?? null,
+    entity_resolution: over.entity ? 'informer' : 'unresolved',
+    component: over.component ?? null,
+    received_at: new Date(at).toISOString(),
+  });
+  const release = alert(1, 'ReleaseFailed', T0 + 10 * MIN, {
+    role: 'change',
+    component: 'component:release',
+    labels: { component: 'release' },
+  });
+  const apiDown = alert(2, 'ApiReplicasUnavailable', T0 + 5 * MIN, {
+    role: 'cause',
+    component: API,
+    entity: { cluster_id: CLUSTER, kind: 'Deployment', namespace: 'shop', name: 'api', uid: null },
+  });
+  const now = T0 + 20 * MIN;
+  const groupOf = (incs: ComputedIncident[], name: string) =>
+    incs.find((i) => i.group.alerts.some((a) => a.alert.alertname === name));
+
+  it('另一个命名空间里没有任何告警的发布不吸收发布告警', () => {
+    const incs = computeIncidents({
+      alerts: [release],
+      changes: [rollout('grafana', GRAFANA, T0)],
+      graph,
+      params: DEFAULT_RCA_PARAMS,
+      now,
+    });
+    expect(groupOf(incs, 'ReleaseFailed')?.group.changes.map((c) => c.change_id)).toEqual([]);
+  });
+
+  it('有更近但没有影响的发布时，发布告警归到解释了工作负载告警的那次发布，与工作负载告警在同一个事件', () => {
+    const incs = computeIncidents({
+      alerts: [apiDown, release],
+      changes: [rollout('shop', API, T0), rollout('grafana', GRAFANA, T0 + 8 * MIN)],
+      graph,
+      params: DEFAULT_RCA_PARAMS,
+      now,
+    });
+    const g = groupOf(incs, 'ReleaseFailed')!;
+    expect(g.group.alerts.map((a) => a.alert.alertname).sort()).toEqual(['ApiReplicasUnavailable', 'ReleaseFailed']);
+    expect(g.group.changes.map((c) => c.change_id)).toContain('shop');
+    expect(g.group.changes.map((c) => c.change_id)).not.toContain('grafana');
+  });
+});
