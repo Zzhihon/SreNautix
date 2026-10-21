@@ -54,10 +54,13 @@ async function api(method: string, path: string, body?: unknown, bearer?: string
 const run = () => srv.issues!.runOnce();
 const issueRow = async (id: string) =>
   (
-    await db.admin.query<{ state: string; number: number | null; attempts: number; last_error: string | null }>(
-      'SELECT state, number, attempts, last_error FROM server.github_issues WHERE incident_id = $1',
-      [id],
-    )
+    await db.admin.query<{
+      state: string;
+      number: number | null;
+      attempts: number;
+      last_error: string | null;
+      body_hash: string | null;
+    }>('SELECT state, number, attempts, last_error, body_hash FROM server.github_issues WHERE incident_id = $1', [id])
   ).rows[0];
 /** 跳过退避，让到期的重试立即执行 */
 const fastForward = () =>
@@ -241,8 +244,15 @@ describe('事件 issue', () => {
     expect(issue.body).toContain(`<!-- srenautix:incident=${incidentA} -->`);
     expect(issue.body).toContain(`${PUBLIC}/incidents/${incidentA}`);
     expect(issue.body).toContain('处置判断为升级');
-    expect(issue.body).toContain('| 证据卡 | 判定 | 值 | 说明 |');
-    expect(issue.body).toContain('| working set 占 limit | abnormal | 96% | 超过阈值 0.9 |');
+    // 与通知同一份报告的全文：五段，阶段 A 的异常卡带实测值、阈值与控制台卡片详情的链接
+    for (const h of ['## 现状', '## 关键问题', '## 拓扑联系', '## 解决方案', '## 证据链']) {
+      expect(issue.body).toContain(h);
+    }
+    expect(issue.body).toMatch(
+      /\*\*working set 占 limit\*\* · `Pod:shop\/api-7d9f8-x2k4p`：超过阈值 0\.9，值 `96%`，阈值 `0\.9`/,
+    );
+    expect(issue.body).toContain(`[控制台](${PUBLIC}/incidents/${incidentA}?tab=evidence#card-`);
+    expect(await issueRow(incidentA)).toMatchObject({ body_hash: expect.stringMatching(/^[0-9a-f]{64}$/) });
     expect(await issueRow(incidentA)).toMatchObject({ state: 'open', number: issue.number });
     const audit = await db.admin.query<{ data: Record<string, unknown> }>(
       "SELECT data FROM server.governance_audit WHERE kind = 'github.issue_opened'",
@@ -256,19 +266,46 @@ describe('事件 issue', () => {
     const n = gh.issues[0]!.number;
     const research = async (summary: string) => {
       const runId = randomUUID();
+      const output = {
+        disposition: 'escalate',
+        conclusion: {
+          level: 'likely',
+          hypothesis_id: null,
+          root_component: null,
+          undetermined_reason: null,
+          consistency: {
+            entity_in_scope: false,
+            onset_precedes_symptom: false,
+            no_contrary_normal: false,
+            competitor_tested: false,
+          },
+        },
+        hypotheses: [],
+        next_checks: [],
+        situation: '',
+        summary,
+        recommendations: [],
+        proposals: [],
+        validation_notes: [],
+      };
       await db.admin.query(
-        `INSERT INTO server.research_runs (run_id, incident_id, incident_version, reason, state, disposition, summary, started_at, finished_at)
-         VALUES ($1, $2, 1, 'new_incident', 'completed', 'escalate', $3, now(), now() + interval '1 second')`,
-        [runId, incidentA, summary],
+        `INSERT INTO server.research_runs (run_id, incident_id, incident_version, reason, state, disposition, conclusion_level, summary,
+           output, started_at, finished_at)
+         VALUES ($1, $2, 1, 'new_incident', 'completed', 'escalate', 'likely', $3, $4, now(), now() + interval '1 second')`,
+        [runId, incidentA, summary, JSON.stringify(output)],
       );
       return runId;
     };
+    const before = gh.issues[0]!.body;
     await research('api 的 Pod 内存接近 limit，建议扩容并排查泄漏');
     await run();
     await run();
-    expect(gh.comments.get(n)?.map((c) => c.body)).toEqual([
-      expect.stringContaining('模型研判结束：api 的 Pod 内存接近 limit'),
-    ]);
+    expect(gh.comments.get(n)?.map((c) => c.body)).toEqual([expect.stringContaining('研判结束：结论 `likely`')]);
+    // 正文就地更新为新的结论（PATCH 只改 body）
+    expect(gh.issues[0]!.body).not.toBe(before);
+    expect(gh.issues[0]!.body).toContain('结论：可能（likely）');
+    const patches = gh.requests.filter((r) => r.method === 'PATCH' && r.path === `/repos/${REPO}/issues/${n}`);
+    expect(patches.length).toBe(1);
 
     // 5xx：记一次失败，退避后重试成功
     gh.fault('POST', /\/issues\/\d+\/comments$/, 503);

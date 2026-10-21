@@ -350,7 +350,7 @@ github_app:
 
 server 对 Git 只读，写入都经 gateway 的 `gitops_pr`（ADR 0025、0108）。server 的请求白名单（`github/app.ts` 的 `deniedRequest`，不在其中的请求不发出，以 `GitHubDenied` 报错）：
 
-- issue：列出、读取、新建；评论：列出、新建；
+- issue：列出、读取、新建，`PATCH` 只允许改正文（就地更新报告，ADR 0125）；评论：列出、新建；
 - PR：列出、读取，`PATCH` 只允许改描述（补 `Refs`）；
 - 只读访问仓库：分支引用（`git/ref/heads`）、文件与目录（`contents`）、提交列表与单个提交（修复补丁与拓扑覆盖的计划、变更源）。
 
@@ -372,14 +372,15 @@ issues:
 ```
 
 - **什么时候开**：阶段 A 或已完成的研判的处置判断为 `escalate`；或者有需要改仓库的修复提议（带 `incident_id` 的拓扑覆盖 PR、`gitops_pr` 提议）。被抑制、已合并的事件不开。
-- **内容**：事件（标签、严重度、集群、状态）、开 issue 的原因、处置判断、根因候选、结论（研判的摘要与结论档位，没有研判时说明是阶段 A 的确定性报告）、关键证据卡（异常的在前，最多 6 张：判定、值、说明）、控制台链接。正文第一行是事件标记 `<!-- srenautix:incident=<id> -->`。
+- **内容**：与通知同一份报告（ADR 0125，`docs/server/notify.md`）的全文：现状与时间线、关键问题（结论档位与四个条件的依据）、拓扑联系、解决方案与验证方法、证据链（每个假设的全部支持卡与相反卡、已执行的检查、排除的信号、无法判定的卡、成员告警与变更，带控制台与来源链接）。正文第一行是事件标记 `<!-- srenautix:incident=<id> -->`，随后是开 issue 的原因。标题是一句话现状（根因组件与症状），带标题前缀。
+- **正文更新**：研判结束、事件恢复或证据变化后，后台循环重新生成正文，与上次写入的不同（`server.github_issues.body_hash`）时就地更新（PATCH 只改 body，`srenautix_github_issues_total{outcome="body_updated"}`）；只处理 `lookback` 内更新过的事件。
 - **去重**：每个事件最多一个 issue（`server.github_issues` 以 incident_id 为主键）。开 issue 的请求超时或连接断开时，重试先按事件标记在仓库中找回已开的 issue，不重复开。
-- **后续进展**：issue 开出之后结束的研判、事件恢复、关联的 PR 与 gitops_pr 提议各追加一条评论，按 (事件, 键) 去重；评论同样带标记，重试时找回已写入的评论。
+- **后续进展**：issue 开出之后结束的研判（新的结论档位与根因）、事件恢复、关联的 PR 与 gitops_pr 提议各追加一条评论，按 (事件, 键) 去重；评论同样带标记，重试时找回已写入的评论。
 - **关联**：server 发起的拓扑覆盖 PR 与 gitops_pr 提议的参数描述里写 `Refs #<issue>`（跨仓库时 `owner/name#<issue>`），GitHub 在 issue 上显示关联；PR 先于 issue 开出时，issue 开出后给 PR 描述补上 Refs（`github.pr_refs`）。gitops_pr 的 Refs 在创建提议时写入参数，随参数一起被审批；幂等键按调用方给出的参数计算。
 - **限速**：最近 1 小时已开满 `max_per_hour` 个 issue 时，新的事件记为 `skipped`，只记录（`github.issue_skipped`、`srenautix_github_issues_total{outcome="skipped_rate_limit"}`、日志），之后不再为它开 issue。评论不受限速。
 - **失败与重试**：GitHub 返回错误或不可达时按退避重试（30 秒起，每次翻倍，最长 30 分钟），最多 8 次，用尽后记为 `failed`（`github.issue_failed`）。最近 1 小时内重试 3 次以上或放弃的 issue 与评论使状态条显示 `ChannelDeliveryFailed`（channel `github-issues`）。
 - 主实例运行后台循环；控制台发起拓扑覆盖 PR、提交 gitops_pr 提议时在当前副本上立即尝试开一次。每次开出、跳过、放弃、评论与补 Refs 写入治理审计。
-- 指标：`srenautix_github_issues_total{repo,outcome}`（opened、skipped_rate_limit、retry、failed）、`srenautix_github_issue_comments_total{repo,outcome}`（posted、retry、failed）。
+- 指标：`srenautix_github_issues_total{repo,outcome}`（opened、skipped_rate_limit、retry、failed、body_updated）、`srenautix_github_issue_comments_total{repo,outcome}`（posted、retry、failed）。
 
 ## 集成页
 

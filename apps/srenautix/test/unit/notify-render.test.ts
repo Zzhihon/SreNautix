@@ -1,8 +1,9 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import type { NotifyRun } from '@srenautix/contract';
 import { ButtonSigner, MAX_CARD_BYTES, renderCard, renderDigestCard } from '../../src/channels/feishu/render.js';
-import { Doc, MAX_TEXT_UNITS } from '../../src/channels/telegram/doc.js';
+import { buildHtml, MAX_ENTITIES, MAX_TEXT_UNITS, type Part } from '../../src/channels/telegram/html.js';
 import {
   CALLBACK_PREFIX,
   renderDigest,
@@ -10,8 +11,12 @@ import {
   type TelegramPayload,
 } from '../../src/channels/telegram/render.js';
 import type { ActionResultView, ChatTarget, DigestInput, Rendered } from '../../src/notify/channel.js';
+import { composeMessage, type ComposeInput } from '../../src/notify/compose.js';
 import { feishuButtonKey } from '../../src/notify/index.js';
+import { issueMarkdown } from '../../src/notify/markdown.js';
 import type { DesiredIncidentMessage } from '../../src/notify/ports.js';
+import { releaseRolloutInput } from '../support/report-fixture.js';
+import { parseTelegramHtml } from '../support/telegram-html.js';
 
 /** test/fixtures/render 下的渲染黄金用例，格式见该目录的 README.md。 */
 interface RenderCase {
@@ -134,26 +139,34 @@ function checkText(text: string, e: RenderCase['expect']): void {
   }
 }
 
+/** HTML 消息按 Bot API 的规则解析（不合法时抛出，对应 400 can't parse entities），并检查长度与实体数 */
+function parsed(p: TelegramPayload): ReturnType<typeof parseTelegramHtml> {
+  expect(p.parse_mode).toBe('HTML');
+  const r = parseTelegramHtml(p.text);
+  expect(r.text.length).toBeGreaterThan(0);
+  expect(r.text.length).toBeLessThanOrEqual(MAX_TEXT_UNITS);
+  expect(r.entities.length).toBeLessThanOrEqual(MAX_ENTITIES);
+  expect(hasLoneSurrogate(r.text), '截断切开了代理对').toBe(false);
+  return r;
+}
+
 describe('Telegram 渲染黄金用例', () => {
   for (const c of cases.filter((x) => x.channels.includes('telegram'))) {
     it(`${c.file}：${c.name}`, () => {
       const r = telegram(c);
       const p = r.payload as TelegramPayload;
-      checkText(p.text, c.expect);
-      expect(p.text.length).toBeGreaterThan(0);
-      expect(p.text.length).toBeLessThanOrEqual(c.expect.max_units ?? MAX_TEXT_UNITS);
-      expect(hasLoneSurrogate(p.text), '截断切开了代理对').toBe(false);
-      for (const ent of p.entities) {
-        expect(ent.offset).toBeGreaterThanOrEqual(0);
-        expect(ent.length).toBeGreaterThan(0);
-        expect(ent.offset + ent.length).toBeLessThanOrEqual(p.text.length);
+      const { text, entities } = parsed(p);
+      checkText(text, c.expect);
+      expect(text.length).toBeLessThanOrEqual(c.expect.max_units ?? MAX_TEXT_UNITS);
+      for (const ent of entities) {
+        expect(ent.offset + ent.length).toBeLessThanOrEqual(text.length);
         if (c.expect.only_entity_types) {
           expect(c.expect.only_entity_types).toContain(ent.type);
         }
       }
       for (const want of c.expect.entities ?? []) {
-        const found = p.entities.some(
-          (x) => x.type === want.type && p.text.slice(x.offset, x.offset + x.length) === want.text,
+        const found = entities.some(
+          (x) => x.type === want.type && text.slice(x.offset, x.offset + x.length) === want.text,
         );
         expect(found, `缺少实体 ${want.type}：${want.text}`).toBe(true);
       }
@@ -211,31 +224,222 @@ describe('Telegram 渲染黄金用例', () => {
   });
 });
 
-describe('Telegram 文本组装', () => {
-  it('硬截断保持实体有效、不切开代理对，并追加说明', () => {
-    const d = new Doc();
-    const s = d.section(0, '');
-    for (let i = 0; i < 600; i++) {
-      s.bold('告警🔥').plain(` 第 ${i} 行 😀`).nl();
-    }
-    const note = '\n…（内容过长已截断）';
-    const r = d.build(MAX_TEXT_UNITS, note);
-    expect(r.text.length).toBeLessThanOrEqual(MAX_TEXT_UNITS);
-    expect(r.text.endsWith(note)).toBe(true);
-    expect(hasLoneSurrogate(r.text)).toBe(false);
-    for (const e of r.entities) {
-      expect(e.offset + e.length).toBeLessThanOrEqual(r.text.length - note.length);
+const run = (text: string, style: NotifyRun['style'] = 'plain', href: string | null = null): NotifyRun => ({
+  text,
+  style,
+  href,
+});
+const part = (o: Partial<Part> & { lines: Part['lines'] }): Part => ({
+  priority: 1,
+  omitted: '段已省略',
+  more: '…其余见控制台',
+  title: null,
+  folded: false,
+  ...o,
+});
+
+describe('Telegram HTML 组装', () => {
+  it('转义 &、<、> 与链接中的引号；只用 Bot API 支持的标签；非 http(s) 链接按纯文字输出', () => {
+    const r = buildHtml([
+      part({
+        priority: 0,
+        lines: [
+          {
+            runs: [
+              run('<b>click</b> & "x" &amp; ', 'plain'),
+              run('a<b', 'code'),
+              run(' 链接', 'italic', 'https://example.test/q?a=1&b="2"'),
+              run(' 坏链接', 'bold', 'javascript:alert(1)'),
+            ],
+          },
+          { runs: [run('引用 <i>不是格式</i>')], quote: true },
+        ],
+      }),
+    ]);
+    const p = parseTelegramHtml(r.html);
+    expect(p.text).toBe('<b>click</b> & "x" &amp; a<b 链接 坏链接\n引用 <i>不是格式</i>');
+    expect(p.entities.map((e) => e.type)).toEqual(['code', 'italic', 'text_link', 'bold', 'blockquote']);
+    expect(p.entities.find((e) => e.type === 'text_link')?.url).toBe('https://example.test/q?a=1&b=%222%22');
+    expect(r.units).toBe(p.text.length);
+  });
+
+  it('超长时从优先级最低的段的末尾逐块删减，标签闭合，折叠段整段在可展开引用块中', () => {
+    const lines = (n: number, w: string) =>
+      Array.from({ length: n }, (_, i) => ({
+        runs: [run(`${w}${i} `, 'bold'), run('😀'.repeat(40)), run(' x', 'code')],
+      }));
+    const r = buildHtml([
+      part({ priority: 0, title: '头部', lines: lines(3, '头') }),
+      part({ priority: 3, title: '建议', omitted: '建议已省略', lines: lines(60, '建') }),
+      part({ priority: 2, title: '证据', folded: true, omitted: '证据已省略', lines: lines(60, '证') }),
+    ]);
+    const p = parseTelegramHtml(r.html);
+    expect(p.text.length).toBeLessThanOrEqual(MAX_TEXT_UNITS);
+    expect(r.units).toBe(p.text.length);
+    expect(hasLoneSurrogate(p.text)).toBe(false);
+    // 证据段（优先级低）先删减到只剩省略说明，建议段保留一部分块并以“其余见控制台”结尾
+    expect(p.text).toContain('证据已省略');
+    expect(p.text).not.toContain('证0 ');
+    expect(p.text).toContain('建0 ');
+    expect(p.text).toMatch(/建\d+ [😀]+ x\n…其余见控制台/u);
+    expect(p.entities.length).toBeLessThanOrEqual(MAX_ENTITIES);
+  });
+
+  it('折叠段放在 blockquote expandable 中；实体超过 100 个时依次放弃等宽、强调与链接的格式', () => {
+    const many = Array.from({ length: 80 }, (_, i) => ({
+      runs: [run(`r${i}`, 'code'), run(' ', 'plain'), run('t', 'bold'), run(' l', 'plain', `https://e.test/${i}`)],
+    }));
+    const r = buildHtml([part({ priority: 0, title: '证据', folded: true, lines: many })]);
+    const p = parseTelegramHtml(r.html);
+    expect(r.html.startsWith('<b>证据</b>\n<blockquote expandable>')).toBe(true);
+    expect(p.entities).toHaveLength(MAX_ENTITIES);
+    const count = (t: string) => p.entities.filter((e) => e.type === t).length;
+    // 段标题与引用块 2 个，链接 80 个，加粗 18 个，等宽 0 个
+    expect([count('bold') - 1, count('expandable_blockquote'), count('text_link'), count('code')]).toEqual([
+      18, 1, 80, 0,
+    ]);
+  });
+
+  it('单块超过上限时截短并以“…”结尾，不切开代理对', () => {
+    const r = buildHtml([part({ priority: 0, lines: [{ runs: [run('😀'.repeat(3000), 'bold')] }] })]);
+    const p = parseTelegramHtml(r.html);
+    expect(p.text.length).toBeLessThanOrEqual(MAX_TEXT_UNITS);
+    expect(p.text.endsWith('…')).toBe(true);
+    expect(hasLoneSurrogate(p.text)).toBe(false);
+  });
+});
+
+describe('事件报告：2026-10-20 发布事故（黄金用例）', () => {
+  const telegramOf = (input: ComposeInput) => {
+    const { message, targets } = composeMessage(input);
+    const inc = input.incident;
+    const d: DesiredIncidentMessage = {
+      incidentId: inc.incident_id,
+      clusterId: inc.cluster_id,
+      label: inc.label,
+      severity: inc.severity,
+      state: inc.state,
+      firstFiringAt: new Date(inc.first_firing_at),
+      endedAt: inc.ended_at ? new Date(inc.ended_at) : null,
+      lane: 'urgent',
+      message,
+      targets,
+      language: 'zh',
+    };
+    return {
+      message,
+      payload: renderIncident({ channel: 'telegram', chat: '-1001234567890', language: 'zh' }, d, [], null, {
+        callbacks: true,
+      }).payload as TelegramPayload,
+    };
+  };
+
+  it('Telegram HTML 与黄金文件一致，并能按 Bot API 的规则解析', async () => {
+    const { payload } = telegramOf(releaseRolloutInput());
+    const { text, entities } = parsed(payload);
+    await expect(payload.text).toMatchFileSnapshot('../fixtures/report/release-rollout-2026-10-20.telegram.html');
+    // 主线顺序：现状 → 关键问题 → 拓扑联系 → 解决方案 → 证据链
+    checkText(text, {
+      starts_with: '[影子] [严重] StatefulSet:acme-prod/gateway：worker 没有可用副本',
+      order: ['现状', '时间线（UTC，10-20）', '关键问题', '拓扑联系', '解决方案', '证据链'],
+      contains: [
+        '发布 rel-9a8c9cd6（15:59:52）与回退到 rel-fd8097cf（16:24:25）期间',
+        '结论：可能（likely）',
+        '不满足：同一信号上有 5 张相反的正常卡',
+        '【模型】机制：',
+        '—managed_by→ Application.argoproj.io:argocd/acme-prod —manages→ Deployment:acme-prod/control',
+        '已执行的检查',
+      ],
+    });
+    // 证据链在可展开的引用块里；每张卡带控制台卡片详情与数据源查询的链接
+    expect(entities.some((e) => e.type === 'expandable_blockquote')).toBe(true);
+    const urls = entities.filter((e) => e.type === 'text_link').map((e) => e.url!);
+    expect(urls).toContain(
+      'https://srenautix.example.test/incidents/e88a2a7c-0000-4000-8000-e88a2a7ca284?tab=evidence#card-38',
+    );
+    expect(urls.some((u) => u.startsWith('https://vm.example.test/vmui/#/?g0.expr='))).toBe(true);
+    expect(urls.some((u) => u.startsWith('https://argocd.example.test/applications/argocd/acme-prod'))).toBe(true);
+    // 模型写的文字都是斜体并带【模型】
+    for (const e of entities.filter((x) => x.type === 'italic')) {
+      expect(text.slice(e.offset, e.offset + e.length).startsWith('【模型】')).toBe(true);
     }
   });
 
-  it('先省略优先级小的段', () => {
-    const d = new Doc();
-    d.section(0, '').plain('头部');
-    d.section(2, '建议已省略').plain('建'.repeat(3000));
-    d.section(1, '操作已省略').plain('操'.repeat(3000));
-    const r = d.build(MAX_TEXT_UNITS, '');
-    expect(r.text).toContain('操作已省略');
-    expect(r.text).not.toContain('建议已省略');
+  it("证据与告警里的 HTML、实体与 Markdown 原样作为文字出现，Bot API 能解析（#169 的 400 can't parse entities）", () => {
+    const input = releaseRolloutInput();
+    const evil = '<b>x</b> & &amp; <a href="javascript:1">y</a> </blockquote> **z** `w`';
+    const c38 = input.researchStageA!.cards.find((c) => c.ref === 'card:38')!;
+    c38.reason = { kind: 'rule', text: evil };
+    c38.conditions = (c38.conditions ?? []).map((c) => (c.outcome === 'hit' ? { ...c, say: evil } : c));
+    input.alerts = input.alerts.map((a) => ({ ...a, alertname: `${a.alertname}<&>` }));
+    const { payload } = telegramOf(input);
+    const { text } = parsed(payload);
+    expect(text).toContain(evil);
+    expect(text).toContain('KubePdbBlockingEviction<&>');
+    expect(payload.text).not.toMatch(/<a href="javascript/);
+  });
+
+  it('飞书卡片：同样的五段，证据链在折叠面板中，markdown 文字已转义，大小不超过上限', () => {
+    const { message, targets } = composeMessage(releaseRolloutInput());
+    const inc = releaseRolloutInput().incident;
+    const r = renderCard(
+      { channel: 'feishu', chat: 'oc_x', language: 'zh' },
+      {
+        incidentId: inc.incident_id,
+        clusterId: inc.cluster_id,
+        label: inc.label,
+        severity: inc.severity,
+        state: inc.state,
+        firstFiringAt: new Date(inc.first_firing_at),
+        endedAt: null,
+        lane: 'urgent',
+        message,
+        targets,
+        language: 'zh',
+      },
+      [],
+      null,
+      { callbacks: true },
+      signer,
+    );
+    const json = JSON.stringify(r.payload);
+    expect(Buffer.byteLength(json)).toBeLessThanOrEqual(MAX_CARD_BYTES);
+    expect(json).toContain('"tag":"collapsible_panel"');
+    const { text, markdown } = cardText(r.payload);
+    checkText(text, { order: ['现状', '关键问题', '拓扑联系', '解决方案'] });
+    // 链接以 markdown 写出，文字中的特殊字符已转义
+    expect(markdown.some((m) => m.includes('[控制台](https://srenautix.example.test/incidents/'))).toBe(true);
+    expect(markdown.join('\n')).not.toMatch(/<(?!br)/);
+  });
+
+  it('恢复后：问题陈述写恢复时间与持续时长，时间线以事件恢复结束', () => {
+    const { payload } = telegramOf(releaseRolloutInput('end'));
+    const { text } = parsed(payload);
+    expect(text).toContain('18:49 恢复，持续 2 小时 59 分');
+    expect(text).toContain('已恢复 · 事件');
+  });
+
+  it('issue 正文是全文：每个假设的全部证据、成员告警与变更带来源链接，Markdown 特殊字符已转义', () => {
+    const { message } = telegramOf(releaseRolloutInput());
+    const { title, body } = issueMarkdown(message, '<!-- srenautix:incident=x -->', '由 SreNautix 生成');
+    expect(title).toBe('[影子] StatefulSet:acme-prod/gateway：worker 没有可用副本');
+    for (const s of [
+      '## 现状',
+      '## 关键问题',
+      '## 拓扑联系',
+      '## 解决方案',
+      '## 证据链',
+      '#### 成员告警',
+      '#### 变更',
+    ]) {
+      expect(body).toContain(s);
+    }
+    // 摘要中省略的支持卡在全文中都有
+    expect(body).toContain('`card:76`');
+    expect(body).not.toContain('其余 27 张见控制台');
+    expect(body).toContain('[控制台](https://srenautix.example.test/incidents/');
+    expect(body).toContain('_【模型】机制：');
+    expect(body).toMatch(/\[发布 rel-9a8c9cd6\]\(https:\/\/argocd\.example\.test\/applications\/argocd\/acme-prod\)/);
   });
 });
 

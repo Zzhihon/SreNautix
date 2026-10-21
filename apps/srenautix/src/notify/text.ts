@@ -77,6 +77,7 @@ const MISC: Record<Language, Dict> = {
     digest_none: '无待审批提议',
     console: '控制台：',
     truncated: '\n…（内容过长已截断，完整内容见控制台）',
+    more: '…其余内容见控制台',
     open_console: '在控制台打开',
   },
   en: {
@@ -92,6 +93,7 @@ const MISC: Record<Language, Dict> = {
     digest_none: 'no pending approvals',
     console: 'Console: ',
     truncated: '\n… (truncated, see the console for the full report)',
+    more: '… the rest is in the console',
     open_console: 'Open in console',
   },
 };

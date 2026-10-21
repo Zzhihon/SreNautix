@@ -92,6 +92,11 @@ describe('证据卡', () => {
     expect(screen.getByRole('status').textContent).toBe('研判时为「异常」，现在为「正常」');
   });
 
+  it('卡片的页内锚点是 card-<n>，与通知、issue 里卡片详情链接的 #card-<n> 相同', () => {
+    const { container } = renderUi(<EvidenceCard r={evidence({ ref: 'card:38', display_state: 'abnormal' })} />);
+    expect(container.querySelector('#card-38')).not.toBeNull();
+  });
+
   it('表格里的原文只作为文本显示（不变量 9）', () => {
     const payload = '<img src=x onerror="window.__pwned=1">{{ .Values }}‮';
     const r = evidence({ ref: 'card:1', display_state: 'abnormal', table: { head: ['message'], rows: [[payload]] } });

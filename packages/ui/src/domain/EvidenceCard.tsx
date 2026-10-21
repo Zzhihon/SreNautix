@@ -2,7 +2,7 @@
 // "非模型所见"。卡片里的日志、标签值等原文一律作为文本显示，放在注明来源的引用块里（不变量 9）。
 
 import { Eye, EyeOff, RefreshCw } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { EvidenceRef, EvidenceResult } from '../contract';
 import { useRerunEvidence, useUiEnv } from '../data';
 import { useI18n } from '../i18n';
@@ -14,9 +14,12 @@ import { Status, StatusPill } from '../primitives/Status';
 import { countEvidence, sortEvidence } from './model';
 import styles from './EvidenceCard.module.css';
 
-/** 页内锚点：card:3 → ev-card-3，假设与提议里的引用据此跳转。 */
+/**
+ * 页内锚点：card:3 → card-3。假设与提议里的引用据此跳转；通知与 issue 中证据卡的链接是
+ * /incidents/<id>?tab=evidence#card-<n>（ADR 0125）。
+ */
 export function evidenceAnchor(ref: string): string {
-  return `ev-${ref.replace(':', '-')}`;
+  return ref.replace(':', '-');
 }
 
 export function evidenceTitle(r: EvidenceResult, locale: string): string {
@@ -175,6 +178,13 @@ export function EvidenceList({
   const [live, setLive] = useState<Map<string, EvidenceResult> | null>(null);
   const sorted = useMemo(() => sortEvidence(results), [results]);
   const c = countEvidence(results);
+  // 从通知或 issue 打开带 #card-<n> 的链接时，卡片在数据加载之后才出现：加载后滚动到这张卡
+  useEffect(() => {
+    const id = window.location.hash.slice(1);
+    if (id) {
+      document.getElementById(id)?.scrollIntoView({ block: 'start' });
+    }
+  }, [sorted]);
   if (!results.length) {
     return <EmptyState kind="none" title={t('evidence.empty_title')} because={t('evidence.empty_because')} />;
   }

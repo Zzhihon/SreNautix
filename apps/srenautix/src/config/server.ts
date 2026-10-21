@@ -159,6 +159,17 @@ export const serverConfigSchema = z
     profile: z.enum(['observe', 'standard', 'compliance']).default('standard'),
     log_level: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
     public_url: url,
+    // 通知与 issue 中证据的链接（ADR 0125）：模板占位符 {query}、{query_json}、{from}、{to}、{from_ms}、{to_ms}、{range}、{revision}
+    links: z
+      .object({
+        metrics_explore_url: url.optional(),
+        logs_explore_url: url.optional(),
+        alertmanager_url: url.optional(),
+        argocd_url: url.optional(),
+        git_commit_url: url.optional(),
+      })
+      .strict()
+      .default({}),
     listen: z
       .object({
         api: z.string().default(':8080'),

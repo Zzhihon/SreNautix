@@ -30,10 +30,11 @@ export class GitHubDenied extends GitHubError {
 }
 
 const REPO = '/repos/[A-Za-z0-9-]{1,39}/[A-Za-z0-9._-]{1,100}';
-/** 允许的请求（路径不含查询串）：issue 与评论、读 PR、读引用、读文件与目录、读提交 */
+/** 允许的请求（路径不含查询串）：issue（含更新正文）与评论、读 PR、读引用、读文件与目录、读提交 */
 const ALLOWED: Array<[method: string, path: RegExp]> = [
   ['GET', new RegExp(`^${REPO}/issues$`)],
   ['GET', new RegExp(`^${REPO}/issues/\\d+$`)],
+  ['PATCH', new RegExp(`^${REPO}/issues/\\d+$`)],
   ['GET', new RegExp(`^${REPO}/issues/\\d+/comments$`)],
   ['POST', new RegExp(`^${REPO}/issues$`)],
   ['POST', new RegExp(`^${REPO}/issues/\\d+/comments$`)],
@@ -47,9 +48,9 @@ const ALLOWED: Array<[method: string, path: RegExp]> = [
 ];
 
 /**
- * server 的 GitHub 请求白名单（ADR 0025、0108）：server 只开 issue、写评论、读 PR、给 PR 描述补 Refs，以及只读地访问仓库
- * （修复补丁的计划、变更源、拓扑覆盖的计划）。建分支、提交、写文件、开 PR、请求审阅、合并都不在其中——Git 写入只经
- * gateway 的 gitops_pr。PATCH PR 只允许改描述。返回拒绝原因，允许时为 null。
+ * server 的 GitHub 请求白名单（ADR 0025、0108、0125）：server 只开 issue、更新 issue 正文、写评论、读 PR、给 PR 描述补 Refs，
+ * 以及只读地访问仓库（修复补丁的计划、变更源、拓扑覆盖的计划）。建分支、提交、写文件、开 PR、请求审阅、合并都不在其中——
+ * Git 写入只经 gateway 的 gitops_pr。PATCH issue 与 PR 只允许改正文（关闭、改标题、改标签都不允许）。返回拒绝原因，允许时为 null。
  */
 export function deniedRequest(method: string, path: string, body: unknown): string | null {
   const p = path.split('?')[0] ?? path;
@@ -62,7 +63,7 @@ export function deniedRequest(method: string, path: string, body: unknown): stri
   if (method === 'PATCH') {
     const keys = body && typeof body === 'object' ? Object.keys(body) : [];
     if (keys.length !== 1 || keys[0] !== 'body') {
-      return '只允许修改 PR 的描述';
+      return '只允许修改 issue 或 PR 的正文';
     }
   }
   return null;

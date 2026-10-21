@@ -18,6 +18,10 @@ import { migrateExpand } from '../../src/store/migrate.js';
 import { storeTrack } from '../../src/store/migrations.js';
 import { newTestDb, type TestDb } from '../support/db.js';
 import { fixture, FixtureServer } from '../support/fixture-server.js';
+import { parseTelegramHtml } from '../support/telegram-html.js';
+
+/** 发给 Bot API 的 HTML 解析后的文字（不合法的 HTML 在这里就失败） */
+const visible = (html: unknown) => parseTelegramHtml(String(html)).text;
 
 const TOKEN = 'test-token';
 const CHAT = '-1001234567890';
@@ -211,7 +215,8 @@ describe('投递引擎（Telegram，录制夹具）', () => {
     expect(sent()).toHaveLength(1);
     const body = sent()[0]!;
     expect(body.chat_id).toBe(Number(CHAT));
-    expect(String(body.text).startsWith('[影子] [严重] 事件')).toBe(true);
+    expect(body.parse_mode).toBe('HTML');
+    expect(visible(body.text).startsWith('[影子] [严重] 事件')).toBe(true);
     expect(body.disable_notification).toBeUndefined();
     expect((body.reply_markup as TelegramPayload['reply_markup']).inline_keyboard[0]![0]!.text).toBe('批准 #1');
     expect(source.delivered_).toEqual([{ incidentId: d.incidentId, proposalIds: [d.targets[0]!.proposalId] }]);
@@ -228,7 +233,7 @@ describe('投递引擎（Telegram，录制夹具）', () => {
     expect(await engine.deliverOnce()).toBe(1);
     expect(edited()).toHaveLength(1);
     expect(edited()[0]!.message_id).toBe(101);
-    expect(String(edited()[0]!.text)).toContain('第二次变化');
+    expect(visible(edited()[0]!.text)).toContain('第二次变化');
     // 编辑成功同样回写：之后加入已有消息的提议由此开始计算 TTL（提议中转只记录第一次送达）
     expect(source.delivered_).toEqual([
       { incidentId: d.incidentId, proposalIds: [d.targets[0]!.proposalId] },
@@ -263,7 +268,7 @@ describe('投递引擎（Telegram，录制夹具）', () => {
     expect(sent()).toHaveLength(1);
     expect(await engine.deliverOnce()).toBe(1);
     expect(sent()).toHaveLength(2);
-    expect(String(sent()[1]!.text)).toContain('变化二');
+    expect(visible(sent()[1]!.text)).toContain('变化二');
     const row = (await store.messages('telegram', CHAT, 'incident'))[0]!;
     expect(row.externalId).toBe('101');
     expect(row.deliveredHash).toBe(row.desiredHash);
@@ -303,11 +308,11 @@ describe('投递引擎（Telegram，录制夹具）', () => {
     expect(bodies[1]!.disable_notification).toBe(true);
     expect(bodies[2]!.disable_notification).toBe(true);
     const digest = bodies[3]!;
-    expect(String(digest.text)).toContain('[影子] 事件风暴：自 00:01 UTC 起 3 个事件');
+    expect(visible(digest.text)).toContain('[影子] 事件风暴：自 00:01 UTC 起 3 个事件');
     for (const d of [first, a, b]) {
-      expect(String(digest.text)).toContain(d.label);
+      expect(visible(digest.text)).toContain(d.label);
     }
-    expect(edited().some((e) => String(e.text).includes('属于 00:01 UTC 开始的事件风暴'))).toBe(true);
+    expect(edited().some((e) => visible(e.text).includes('属于 00:01 UTC 开始的事件风暴'))).toBe(true);
 
     now += 60_000;
     const c = incident();
@@ -316,7 +321,7 @@ describe('投递引擎（Telegram，录制夹具）', () => {
     await engine.deliverOnce();
     const last = sent()[sent().length - 1]!;
     expect(last.disable_notification).toBe(true);
-    expect(edited().some((e) => String(e.text).includes('起 4 个事件'))).toBe(true);
+    expect(edited().some((e) => visible(e.text).includes('起 4 个事件'))).toBe(true);
   });
 
   it('令牌桶：每个群每分钟 20 次，超出的推迟到令牌补充；审批与新事件先于汇总', async () => {
@@ -325,13 +330,13 @@ describe('投递引擎（Telegram，录制夹具）', () => {
     expect(await engine.deliverOnce()).toBe(20);
     expect(sent()).toHaveLength(20);
     // 20 条新事件消息（urgent）都先于汇总（digest）
-    expect(sent().every((b) => !String(b.text).includes('事件风暴：自'))).toBe(true);
+    expect(sent().every((b) => !visible(b.text).includes('事件风暴：自'))).toBe(true);
     expect(sent().every((b) => b.disable_notification === true)).toBe(true);
     now += 3_000;
     expect(await engine.deliverOnce()).toBe(1);
     now += 6_000;
     expect(await engine.deliverOnce()).toBe(2);
-    expect(String(sent()[sent().length - 1]!.text)).toContain('事件风暴：自 00:00 UTC 起 22 个事件');
+    expect(visible(sent()[sent().length - 1]!.text)).toContain('事件风暴：自 00:00 UTC 起 22 个事件');
   });
 
   it('Bot API 拒绝消息（其他 4xx）时记录错误并 5 分钟后重试；token 无效时抛出配置错误', async () => {

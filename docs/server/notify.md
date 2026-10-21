@@ -5,13 +5,16 @@ server 角色把每个事件的阶段 A 报告与阶段 B 研判推送到聊天�
 ## 消息模型
 
 - 一个事件在每个群里只有一条消息，内容变化时就地编辑。
-- 消息由 server 生成渠道无关的 `NotifyMessage`（`contract/integrations/notify/v1/notify.schema.json`），渠道适配器负责渲染：
-  1. 头部：配置的前缀（`notify.prefix`，例如影子部署写 `[影子]`）、严重度、根因组件、事件状态、稳定标签、首次触发时间；
+- 消息由 server 生成渠道无关的 `NotifyMessage`（`contract/integrations/notify/v1/notify.schema.json`，`notify/compose.ts`），渠道适配器负责渲染（ADR 0125）：
+  1. 头部：配置的前缀（`notify.prefix`，例如影子部署写 `[影子]`）、严重度与加粗的一句话现状（根因组件与症状）、事件状态、稳定标签、首次触发时间；
   2. 横幅一行：例如"模型研判中""状态库降级""模型输出无效"；
-  3. 四段，依次为现状与背景、问题根源、解决方案、相关证据（英文为 Situation、Root cause、Remedy、Evidence）。
-- 告警、日志、变更里的原文是不可信文本：放在引用块中，前一行写"来源：<来源>"。Telegram 只用 `entities` 标注格式，不使用 `parse_mode`；飞书卡片里的原文先转义再放入 markdown 元素。原文不会变成按钮、链接或格式。
-- 模型生成的段落标注"模型生成"。
-- Telegram 的文本上限按 4096 个 UTF-16 code unit 计算。超限时按优先级先省略最近操作、相关证据、修复建议，各留一行提示；仍然超限时在行边界截断，不切开代理对。处置提议与头部不省略。
+  3. 五段，依次为现状（问题陈述与时间线）、关键问题（结论档位与四个条件的依据、处置判断）、拓扑联系（从根因到每个受影响组件的路径与边的类型）、解决方案（提议、建议与验证方法）、证据链（按假设分组的证据卡、已执行的检查、排除的信号、无法判定的卡）。
+- 数值与时刻只取自确定性数据：事件、阶段 A 报告、研判输出（账本、检查、结论阶梯）、变更与动作目录。模型写的文字只有假设机制、结论摘要、修复建议、无法判定的原因，以斜体显示并标注【模型】，worker 已经删除其中无法核实的数值。
+- 块带 `scope`：`summary` 只在聊天里，`full` 只在事件 issue 里。聊天消息是摘要，issue 正文是全文，控制台有全部卡片与序列。
+- 每张证据卡带控制台卡片详情的链接（`/incidents/<id>?tab=evidence#card-<n>`）与数据源查询的链接（`links.metrics_explore_url`、`links.logs_explore_url` 模板，带查询与时间窗）；告警带 generatorURL 或 Alertmanager 链接（`links.alertmanager_url`）；变更带变更来源、Argo CD 应用（`links.argocd_url`）或 Git 提交（`links.git_commit_url`）的链接。没有配置时只有控制台链接。模板占位符为 `{query}`、`{query_json}`、`{from}`、`{to}`、`{from_ms}`、`{to_ms}`、`{range}`、`{revision}`。
+- 告警、日志、变更里的原文是不可信文本：只作为文字出现，Telegram 中按 HTML 转义，飞书与 issue 中按各自的 Markdown 规则转义；原文不会变成按钮、链接或格式。告警注解原文只在 issue 里，放在注明来源的引用块中。
+- Telegram 用 `parse_mode=HTML`：只使用 `b`、`i`、`code`、`a`、`blockquote`（证据链为可展开的引用块）。文本上限按解析后的 4096 个 UTF-16 code unit 计算，超限时从优先级最低的段（最近操作、证据链、拓扑联系、时间线）的末尾逐块删减，段末写"其余内容见控制台"，整段删完时只留一行省略说明；头部与现状不删减。实体数超过 100 时依次放弃等宽、强调与链接的格式。
+- 飞书卡片用 markdown 元素写富文本，证据链放在折叠面板里；超过卡片大小上限时按优先级省略整段。
 
 ## 发送队列与限流
 
@@ -88,4 +91,5 @@ server 角色把每个事件的阶段 A 报告与阶段 B 研判推送到聊天�
 - Bot API 与飞书开放平台的交互用录制夹具（`apps/srenautix/test/fixtures/{telegram,feishu}/`，按官方文档的请求与响应整理）和真实的本地 HTTP 回放服务测试，不访问外网。
 - 飞书签名与加密用官方文档的解密向量，以及用 `openssl enc`、`shasum -a 256`、`openssl dgst -hmac` 独立生成的向量（`signature-vectors.json`）。
 - 渲染规则来自原 Go 实现的黄金用例，改写成语言无关的 JSON 夹具（`apps/srenautix/test/fixtures/render/`）。
+- 报告的黄金用例是一次真实发布事故（发布后回退失败）在本机重建的事件、阶段 A 报告与研判账本，已脱敏（`apps/srenautix/test/fixtures/report/`）；Telegram HTML 与黄金文件逐字比较。每条 Telegram 消息都按 Bot API 的 HTML 规则解析（标签、属性、嵌套、转义），不合法的 HTML 让测试失败，对应 Bot API 的 400 "can't parse entities"。
 - 投递引擎与回调流程在真实 PostgreSQL 上测试：风暴、令牌桶、编辑合并、429 暂停、消息被删除后重发、回调去重与按钮独占、拒绝理由窗口、`/link`、未绑定账号与 H 档提议的拒绝。

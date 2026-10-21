@@ -55,5 +55,14 @@ CREATE TABLE server.github_issue_links (
 );
 `,
     },
+    {
+      version: 2,
+      name: 'hash of the issue body last written, so the body is updated in place when the report changes',
+      phase: 'expand',
+      sql: `
+-- 上次写入的 issue 正文的 sha256（ADR 0125）：报告变化时就地更新正文；按标记找回的 issue 为 null，下一轮更新
+ALTER TABLE server.github_issues ADD COLUMN body_hash text;
+`,
+    },
   ],
 };

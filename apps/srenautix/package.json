@@ -49,6 +49,7 @@
     "@types/node": "22.20.5",
     "@types/oidc-provider": "9.12.1",
     "@types/pg": "8.23.1",
+    "htmlparser2": "12.0.0",
     "oidc-provider": "9.12.2",
     "tough-cookie": "6.0.2",
     "tsx": "4.23.15",

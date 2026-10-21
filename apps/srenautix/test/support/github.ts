@@ -10,7 +10,7 @@ import { jwtVerify } from 'jose';
  * - GET /repos/{repo}/git/ref/heads/{branch}、GET/PUT /repos/{repo}/contents/{path}（PUT 更新已有文件时必须带当前 sha）、
  *   POST /repos/{repo}/git/refs（分支已存在时 422）、POST /repos/{repo}/pulls、GET/PATCH /repos/{repo}/pulls/{n}；
  * - issue：POST/GET /repos/{repo}/issues（列表按 labels、创建时间倒序，PR 也出现在列表中并带 pull_request）、
- *   POST/GET /repos/{repo}/issues/{n}/comments；
+ *   GET/PATCH /repos/{repo}/issues/{n}（PATCH 改正文）、POST/GET /repos/{repo}/issues/{n}/comments；
  * - 提交：GET /repos/{repo}/commits（sha 为分支或提交、path、since、until、per_page、page）与 GET /repos/{repo}/commits/{sha}（带 files）；
  * - contents 的 ref 可以是分支或 write() 产生的提交，路径是目录时返回目录列表；GET /repos/{repo}/pulls?head=owner:branch。
  * fault() 注入失败：返回给定状态，或处理请求之后断开连接（客户端收不到响应）。
@@ -220,6 +220,21 @@ export class FakeGitHub {
         })),
       ].sort((a, b) => b.created - a.created);
       return send(res, 200, items.slice(0, Number(u.searchParams.get('per_page') ?? 30)));
+    }
+    if ((m = /^issues\/(\d+)$/.exec(rest))) {
+      const issue = this.issues.find((i) => i.number === Number(m![1]));
+      if (!issue) {
+        return send(res, 404, { message: 'Not Found' });
+      }
+      if (method === 'PATCH' && typeof body.body === 'string') {
+        issue.body = body.body;
+      }
+      return send(res, 200, {
+        number: issue.number,
+        title: issue.title,
+        body: issue.body,
+        html_url: `https://github.example.test/${this.repo}/issues/${issue.number}`,
+      });
     }
     if ((m = /^issues\/(\d+)\/comments$/.exec(rest))) {
       const n = Number(m[1]);

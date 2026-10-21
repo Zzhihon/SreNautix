@@ -151,16 +151,27 @@ export function cardMaterial(r: EvidenceResult): { texts: string[]; numbers: num
   return { texts, numbers, times };
 }
 
-/** 分句的边界：中英文逗号、分号、句号、问号、叹号与换行 */
-const CLAUSE = /([，,；;。！？!?\n])/;
+/** 分句的边界：中英文逗号、分号、句号、问号、叹号、因果箭头与换行 */
+const CLAUSE = /([，,；;。！？!?\n]|\s*→\s*)/;
+/** 括号内的补充说明（不嵌套） */
+const PAREN = /（[^（）]*）|\([^()]*\)/g;
 
 /**
- * 删除含无法核实数值的分句。返回删除后的文字与被删除的断言；全部分句都被删除时文字为空字符串。
+ * 删除含无法核实数值的文字：数值在括号内的补充说明里时只删除这段括号，否则删除所在分句。
+ * 返回删除后的文字与被删除的断言；全部分句都被删除时文字为空字符串。
  */
 export function auditText(text: string, corpus: NumberCorpus): { text: string; removed: string[] } {
-  const parts = text.split(CLAUSE);
-  const kept: string[] = [];
   const removed: string[] = [];
+  const unbracketed = text.replace(PAREN, (p) => {
+    const bad = unsupportedClaims(p, corpus);
+    if (bad.length) {
+      removed.push(...bad);
+      return '';
+    }
+    return p;
+  });
+  const parts = unbracketed.split(CLAUSE);
+  const kept: string[] = [];
   for (let i = 0; i < parts.length; i += 2) {
     const clause = parts[i]!;
     const sep = parts[i + 1] ?? '';
@@ -176,8 +187,8 @@ export function auditText(text: string, corpus: NumberCorpus): { text: string; r
   }
   const joined = kept
     .join('')
-    .replace(/^[，,；;。\s]+/, '')
-    .replace(/[，,；;\s]+$/, '')
+    .replace(/^[，,；;。→\s]+/, '')
+    .replace(/[，,；;→\s]+$/, '')
     .trim();
   return { text: joined, removed };
 }

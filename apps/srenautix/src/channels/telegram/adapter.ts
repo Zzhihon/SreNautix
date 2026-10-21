@@ -43,7 +43,7 @@ export class TelegramAdapter implements ChannelAdapter {
     const m = await this.client.sendMessage({
       chat_id: Number(chat.chat),
       text: p.text,
-      entities: p.entities,
+      parse_mode: p.parse_mode,
       link_preview_options: { is_disabled: true },
       ...(silent ? { disable_notification: true } : {}),
       ...(p.reply_markup.inline_keyboard.length ? { reply_markup: p.reply_markup } : {}),
@@ -58,7 +58,7 @@ export class TelegramAdapter implements ChannelAdapter {
       chat_id: Number(chat.chat),
       message_id: Number(externalId),
       text: p.text,
-      entities: p.entities,
+      parse_mode: p.parse_mode,
       link_preview_options: { is_disabled: true },
       reply_markup: p.reply_markup,
     });

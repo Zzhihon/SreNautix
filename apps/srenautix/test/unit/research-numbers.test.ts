@@ -35,6 +35,13 @@ describe('数值审计', () => {
     const r = auditText('canary 调低了内存 limit，内存峰值 37–57% 是旧版本的读数，Pod 被 OOMKilled。', corpus);
     expect(r.text).toBe('canary 调低了内存 limit，Pod 被 OOMKilled。');
     expect(r.removed).toEqual(['57%']);
+    // 因果链中的一环与括号内的补充说明分别删除，其余环节保留
+    const chain = auditText(
+      '新版本常驻内存上升（内存峰值 37–57% 是旧 limit 下的读数）→ Pod 被 OOMKilled → 同步 9 分钟后超时 → PDB 阻塞驱逐',
+      corpus,
+    );
+    expect(chain.text).toBe('新版本常驻内存上升→ Pod 被 OOMKilled → PDB 阻塞驱逐');
+    expect(chain.removed).toEqual(['57%', '9 分钟']);
     const kept = auditText('gateway-4 未就绪，峰值 96.5%。', corpus);
     expect(kept).toEqual({ text: 'gateway-4 未就绪，峰值 96.5%。', removed: [] });
   });

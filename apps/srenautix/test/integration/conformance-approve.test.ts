@@ -497,7 +497,7 @@ describe('approve/v1 一致性', () => {
         };
         const payload: TelegramPayload = {
           text: sent.text,
-          entities: sent.entities,
+          parse_mode: sent.parse_mode,
           reply_markup: sent.reply_markup ?? { inline_keyboard: [] },
         };
         const id = await adapter.send(chat, payload, true);

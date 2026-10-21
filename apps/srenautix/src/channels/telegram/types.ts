@@ -66,6 +66,8 @@ export interface TgForceReply {
 export interface SendMessageParams {
   chat_id: number;
   text: string;
+  /** 与 entities 二选一 */
+  parse_mode?: 'HTML';
   entities?: TgEntity[];
   link_preview_options?: { is_disabled: boolean };
   disable_notification?: boolean;
@@ -77,6 +79,7 @@ export interface EditMessageTextParams {
   chat_id: number;
   message_id: number;
   text: string;
+  parse_mode?: 'HTML';
   entities?: TgEntity[];
   link_preview_options?: { is_disabled: boolean };
   reply_markup?: TgInlineKeyboard;

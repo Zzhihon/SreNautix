@@ -1,6 +1,5 @@
 import { displayComponentName } from '@srenautix/core';
 import { describe, expect, it } from 'vitest';
-import { labelWithName } from '../../src/github/issues.js';
 import { composeMessage } from '../../src/notify/compose.js';
 import { incident, stageA } from '../support/scenario.js';
 
@@ -15,13 +14,6 @@ describe('组件的可读名称', () => {
     );
     expect(displayComponentName('ClusterRole:a%3Ab', {})).toBe('ClusterRole:a:b');
     expect(displayComponentName(PG, undefined)).toBe(PG);
-  });
-
-  it('事件标签以根因组件键开头时换成名称', () => {
-    expect(labelWithName('provider:01a1:2026-10-20T08:00:00Z', 'provider:01a1', '智元 API')).toBe(
-      '智元 API:2026-10-20T08:00:00Z',
-    );
-    expect(labelWithName('other:x:t', 'provider:01a1', '智元 API')).toBe('other:x:t');
   });
 
   it('通知：标题用名称，根因与候选写"名称（组件键）"；没有名称时与原来相同', () => {

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import type { NotifyBlock, NotifyRun } from '@srenautix/contract';
 import type {
   ActionResultView,
   ChatTarget,
@@ -11,30 +12,42 @@ import type {
 import type { ButtonTarget, DesiredIncidentMessage } from '../../notify/ports.js';
 import { shortId } from '../../notify/shortid.js';
 import { clip, hm, oneLine, publicHttpsUrl, t, ymdhm } from '../../notify/text.js';
-import { Doc, MAX_TEXT_UNITS, type Section } from './doc.js';
-import type { TgButton, TgEntity, TgInlineKeyboard } from './types.js';
+import { buildHtml, MAX_TEXT_UNITS, type Line, type Part } from './html.js';
+import type { TgButton, TgInlineKeyboard } from './types.js';
 
 /** callback_data 是前缀加 16 个字符的 short id（18 字节，Bot API 上限 64 字节）。 */
 export const CALLBACK_PREFIX = 'b:';
 
-/** 存进 notify_messages.desired_payload 的 Telegram 消息内容。 */
+/** 存进 notify_messages.desired_payload 的 Telegram 消息内容：HTML 文本（parse_mode=HTML）与键盘。 */
 export interface TelegramPayload {
   text: string;
-  entities: TgEntity[];
+  parse_mode: 'HTML';
   reply_markup: TgInlineKeyboard;
 }
 
-/** 各段的省略优先级：数字越小越先省略。 */
-const SECTION_PRIORITY: Record<string, number> = { situation: 5, root_cause: 4, remedy: 3, evidence: 2 };
+/** 旧的四段结构（没有段级优先级时）的省略顺序：数字越小越先省略。 */
+const SECTION_PRIORITY: Record<string, number> = {
+  situation: 5,
+  root_cause: 4,
+  key_issue: 6,
+  topology: 3,
+  remedy: 3,
+  evidence: 2,
+};
 
 /** 最近操作最多列出的条数。 */
 export const MAX_RESULTS_SHOWN = 5;
 
 const QUOTE_MAX = 600;
+const LINE_MAX = 800;
 
 export function payloadHash(p: unknown): string {
   return createHash('sha256').update(JSON.stringify(p)).digest('hex');
 }
+
+const plain = (text: string): NotifyRun => ({ text, style: 'plain', href: null });
+const bold = (text: string): NotifyRun => ({ text, style: 'bold', href: null });
+const code = (text: string): NotifyRun => ({ text, style: 'code', href: null });
 
 /** 按钮分行：同一提议的按钮一行，两个反馈维度各一行，其余各占一行。 */
 function rowKey(b: { kind: string; target: ButtonTarget | null }, i: number): string {
@@ -50,17 +63,56 @@ function rowKey(b: { kind: string; target: ButtonTarget | null }, i: number): st
   return `#${i}`;
 }
 
-function writeResults(s: Section, l: Language, results: readonly ActionResultView[]): void {
-  if (!results.length) {
-    return;
+/** 消息块 → 一行。不可信原文只出现在纯文本片段或引用块中；模型文字由组装方以斜体片段给出 */
+export function blockLines(b: NotifyBlock, l: Language): Line[] {
+  const indent = '  '.repeat(b.indent ?? 0);
+  if (b.type === 'quote') {
+    return [
+      { runs: [plain(`${indent}${t.misc(l, 'source')}${clip(oneLine(b.source ?? '-'), 120)}`)] },
+      { runs: [plain(clip(b.text, QUOTE_MAX))], quote: true },
+    ];
   }
-  s.bold(t.misc(l, 'results'));
-  for (const r of results.slice(0, MAX_RESULTS_SHOWN)) {
-    s.nl().plain(`${hm(r.at)} ${clip(r.actor, 40)} ${t.action(l, r.action)}：${clip(oneLine(r.message), 160)}`);
+  const runs: NotifyRun[] = b.runs?.length
+    ? clipLine(b.runs)
+    : [plain(`${b.model_generated ? t.misc(l, 'model') : ''}${clip(b.text, LINE_MAX)}`)];
+  if (b.type === 'list_item') {
+    return [{ runs: [plain(`${indent}- `), ...runs] }];
   }
+  return [{ runs: indent ? [plain(indent), ...runs] : runs }];
 }
 
-/** 一条事件消息。不可信文本只出现在 plain 或 blockquote 实体中，不使用 parse_mode。 */
+/** 单行超过上限时截短最后的片段 */
+function clipLine(runs: NotifyRun[]): NotifyRun[] {
+  let n = 0;
+  const out: NotifyRun[] = [];
+  for (const r of runs) {
+    if (n + r.text.length > LINE_MAX) {
+      out.push({ ...r, text: clip(r.text, Math.max(1, LINE_MAX - n)) });
+      break;
+    }
+    out.push(r);
+    n += r.text.length;
+  }
+  return out;
+}
+
+function resultsPart(l: Language, results: readonly ActionResultView[]): Part | null {
+  if (!results.length) {
+    return null;
+  }
+  return {
+    priority: 1,
+    omitted: t.omitted(l, 'results'),
+    more: t.misc(l, 'more'),
+    title: t.misc(l, 'results'),
+    folded: false,
+    lines: results.slice(0, MAX_RESULTS_SHOWN).map((r) => ({
+      runs: [plain(`${hm(r.at)} ${clip(r.actor, 40)} ${t.action(l, r.action)}：${clip(oneLine(r.message), 160)}`)],
+    })),
+  };
+}
+
+/** 一条事件消息（parse_mode=HTML）。只在聊天里出现的块（scope 为 all 或 summary）进入消息。 */
 export function renderIncident(
   chat: ChatTarget,
   d: DesiredIncidentMessage,
@@ -70,42 +122,41 @@ export function renderIncident(
 ): Rendered {
   const l = chat.language;
   const m = d.message;
-  const doc = new Doc();
-  const head = doc.section(0, '');
-  if (m.prefix) {
-    head.plain(`${m.prefix} `);
-  }
-  head.bold(`[${t.severity(l, m.severity)}] ${clip(oneLine(m.title), 160)}`);
-  head
-    .nl()
-    .plain(`${t.state(l, d.state)} · ${t.misc(l, 'incident')} `)
-    .code(clip(d.label, 120));
-  head.nl().plain(`${t.misc(l, 'first_firing')} ${ymdhm(d.firstFiringAt)}`);
+  const head: Line[] = [];
+  const headline = m.headline?.length ? m.headline.map((r) => r.text).join('') : m.title;
+  head.push({
+    runs: [
+      ...(m.prefix ? [plain(`${m.prefix} `)] : []),
+      bold(`[${t.severity(l, m.severity)}] ${clip(oneLine(headline), 200)}`),
+    ],
+  });
+  head.push({ runs: [plain(`${t.state(l, d.state)} · ${t.misc(l, 'incident')} `), code(clip(d.label, 120))] });
+  head.push({ runs: [plain(`${t.misc(l, 'first_firing')} ${ymdhm(d.firstFiringAt)}`)] });
   if (storm) {
-    head.nl().plain(t.misc(l, 'storm', { at: hm(storm.startedAt) }));
+    head.push({ runs: [plain(t.misc(l, 'storm', { at: hm(storm.startedAt) }))] });
   }
   if (m.banner) {
-    head.nl().bold(clip(oneLine(m.banner), 200));
+    head.push({ runs: [bold(clip(oneLine(m.banner), 200))] });
   }
+  const parts: Part[] = [{ priority: 0, omitted: '', more: '', title: null, folded: false, lines: head }];
   for (const sec of m.sections) {
-    if (!sec.blocks.length) {
+    const blocks = sec.blocks.filter((b) => (b.scope ?? 'all') !== 'full');
+    if (!blocks.length) {
       continue;
     }
-    const s = doc.section(SECTION_PRIORITY[sec.kind] ?? 1, t.omitted(l, sec.kind));
-    s.bold(t.section(l, sec.kind));
-    for (const b of sec.blocks) {
-      const model = b.model_generated ? t.misc(l, 'model') : '';
-      if (b.type === 'quote') {
-        s.nl().plain(`${t.misc(l, 'source')}${clip(oneLine(b.source ?? '-'), 120)}`);
-        s.nl().quote(clip(b.text, QUOTE_MAX));
-      } else if (b.type === 'list_item') {
-        s.nl().plain(`- ${model}${clip(b.text, 600)}`);
-      } else {
-        s.nl().plain(`${model}${clip(b.text, 800)}`);
-      }
-    }
+    parts.push({
+      priority: sec.priority ?? SECTION_PRIORITY[sec.kind] ?? 1,
+      omitted: sec.omitted ?? t.omitted(l, sec.kind),
+      more: t.misc(l, 'more'),
+      title: sec.title ?? t.section(l, sec.kind),
+      folded: sec.folded ?? false,
+      lines: blocks.flatMap((b) => blockLines(b, l)),
+    });
   }
-  writeResults(doc.section(1, t.omitted(l, 'results')), l, results);
+  const res = resultsPart(l, results);
+  if (res) {
+    parts.push(res);
+  }
 
   const rows = new Map<string, TgButton[]>();
   const registered: RegisteredButton[] = [];
@@ -132,49 +183,78 @@ export function renderIncident(
     rows.set(key, [...(rows.get(key) ?? []), { text: b.label, callback_data: CALLBACK_PREFIX + sid }]);
   });
   if (textLinks.length) {
-    const s = doc.section(0, '');
-    textLinks.forEach((u, i) => {
-      if (i) {
-        s.nl();
-      }
-      s.plain(t.misc(l, 'console')).code(u);
+    parts.push({
+      priority: 0,
+      omitted: '',
+      more: '',
+      title: null,
+      folded: false,
+      lines: textLinks.map((u) => ({ runs: [plain(t.misc(l, 'console')), code(u)] })),
     });
   }
-  const { text, entities } = doc.build(MAX_TEXT_UNITS, t.misc(l, 'truncated'));
-  const payload: TelegramPayload = { text, entities, reply_markup: { inline_keyboard: [...rows.values()] } };
+  const { html } = buildHtml(parts, MAX_TEXT_UNITS);
+  const payload: TelegramPayload = {
+    text: html,
+    parse_mode: 'HTML',
+    reply_markup: { inline_keyboard: [...rows.values()] },
+  };
   return { payload, hash: payloadHash(payload), buttons: registered };
 }
 
 /** 风暴汇总消息：逐行列出事件与待审批数。 */
 export function renderDigest(chat: ChatTarget, d: DigestInput, prefix: string): Rendered {
   const l = chat.language;
-  const doc = new Doc();
-  const head = doc.section(0, '');
-  if (prefix) {
-    head.plain(`${prefix} `);
-  }
-  head.bold(t.misc(l, 'digest_title', { at: hm(d.startedAt), n: d.members.length }));
-  head.nl().plain(t.misc(l, 'digest_note'));
-  const list = doc.section(0, '');
-  d.members.forEach((x, i) => {
-    if (i) {
-      list.nl();
-    }
-    list.plain(`${i + 1}. `).bold(`[${t.severity(l, x.severity)}] ${clip(oneLine(x.title), 80)}`);
-    list.plain(` · ${t.state(l, x.state)} · `).code(clip(x.label, 80));
-    list
-      .nl()
-      .plain(
-        `   ${x.pendingApprovals ? t.misc(l, 'digest_pending', { n: x.pendingApprovals }) : t.misc(l, 'digest_none')}`,
-      );
-  });
+  const head: Line[] = [
+    {
+      runs: [
+        ...(prefix ? [plain(`${prefix} `)] : []),
+        bold(t.misc(l, 'digest_title', { at: hm(d.startedAt), n: d.members.length })),
+      ],
+    },
+    { runs: [plain(t.misc(l, 'digest_note'))] },
+  ];
+  const list: Line[] = d.members.flatMap((x, i) => [
+    {
+      runs: [
+        plain(`${i + 1}. `),
+        bold(`[${t.severity(l, x.severity)}] ${clip(oneLine(x.title), 80)}`),
+        plain(` · ${t.state(l, x.state)} · `),
+        code(clip(x.label, 80)),
+      ],
+    },
+    {
+      runs: [
+        plain(
+          `   ${x.pendingApprovals ? t.misc(l, 'digest_pending', { n: x.pendingApprovals }) : t.misc(l, 'digest_none')}`,
+        ),
+      ],
+    },
+  ]);
+  const parts: Part[] = [
+    { priority: 0, omitted: '', more: '', title: null, folded: false, lines: head },
+    {
+      priority: 1,
+      omitted: t.misc(l, 'truncated').trim(),
+      more: t.misc(l, 'truncated').trim(),
+      title: null,
+      folded: false,
+      lines: list,
+    },
+  ];
   const keyboard: TgButton[][] = [];
   if (d.consoleUrl && publicHttpsUrl(d.consoleUrl)) {
     keyboard.push([{ text: t.misc(l, 'open_console'), url: d.consoleUrl }]);
   } else if (d.consoleUrl) {
-    doc.section(0, '').plain(t.misc(l, 'console')).code(d.consoleUrl);
+    parts.push({
+      priority: 0,
+      omitted: '',
+      more: '',
+      title: null,
+      folded: false,
+      lines: [{ runs: [plain(t.misc(l, 'console')), code(d.consoleUrl)] }],
+    });
   }
-  const { text, entities } = doc.build(MAX_TEXT_UNITS, t.misc(l, 'truncated'));
-  const payload: TelegramPayload = { text, entities, reply_markup: { inline_keyboard: keyboard } };
+  const { html } = buildHtml(parts, MAX_TEXT_UNITS);
+  const payload: TelegramPayload = { text: html, parse_mode: 'HTML', reply_markup: { inline_keyboard: keyboard } };
   return { payload, hash: payloadHash(payload), buttons: [] };
 }

@@ -44,7 +44,7 @@ import type { RoleArgs } from '../main.js';
 import { ServerMetrics, startMetricsServer } from '../metrics.js';
 import { ServerNotifyActions } from '../notify/actions.js';
 import { NotifyService } from '../notify/index.js';
-import { PgMessageSource } from '../notify/source.js';
+import { PgMessageSource, ReportSource } from '../notify/source.js';
 import { Catalog, DEFAULT_CATALOG_PATH } from '../proposals/catalog.js';
 import { FeedbackService } from '../proposals/feedback.js';
 import { Policies } from '../proposals/policy.js';
@@ -69,7 +69,7 @@ import { KubeTools } from '../research/kube-tools.js';
 import { FirstSeen, objectHealth, type K8sObject } from '../detectors/health.js';
 import { DetectorService, detectorSettings } from '../detectors/service.js';
 import { GitHubApp } from '../github/app.js';
-import { IssueService } from '../github/issues.js';
+import { IssueService, type IssueReport } from '../github/issues.js';
 import { TopologyOverrides } from '../topology/overrides.js';
 import { TopologyStore } from '../topology/store.js';
 import { TopologyTargets } from '../topology/targets.js';
@@ -233,6 +233,14 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
     : null;
   // 提议目标的机器推导：集群对象查拓扑；gitops_pr 的 GitRepository 取 base 分支当前的提交（ADR 0108）
   const targets = new GitRepositoryTargets(new TopologyTargets(pool), () => github);
+  // 事件报告（通知与 issue 共用，ADR 0125）：需要领域包的告警目录，在领域包加载之后创建；issue 只在后台循环中使用它
+  let reports: ReportSource | null = null;
+  const issueReport: IssueReport = (incidentId, language) => {
+    if (!reports) {
+      throw new Error('事件报告还没有初始化');
+    }
+    return reports.message(incidentId, language);
+  };
   const issues =
     github && c.issues?.enabled
       ? new IssueService(
@@ -248,6 +256,7 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
             language: c.stage_a.language,
           },
           metrics,
+          issueReport,
           (clusterId, key, at) => topology.ownerOf(clusterId, key, at),
         )
       : null;
@@ -370,7 +379,33 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
           })
         : singleLeader();
 
-  // 通知
+  // 通知与 issue 的事件报告（ADR 0125）
+  reports = new ReportSource(
+    pool,
+    feedback,
+    topology,
+    {
+      alertTitle: (a, language) => {
+        const title = alertCatalog.lookup(a.labels)?.entry.title;
+        return title
+          ? ((language === 'zh' ? (title['zh-CN'] ?? title.en) : (title.en ?? title['zh-CN'])) ?? null)
+          : null;
+      },
+      actionVerify: (actionId) => {
+        const v = catalog.get(actionId)?.verify;
+        return v ? { windowSeconds: v.window_seconds, checks: v.checks.map((x) => x.description) } : null;
+      },
+      links: {
+        metricsExploreUrl: c.links.metrics_explore_url ?? null,
+        logsExploreUrl: c.links.logs_explore_url ?? null,
+        alertmanagerUrl: c.links.alertmanager_url ?? null,
+        argocdUrl: c.links.argocd_url ?? null,
+        gitCommitUrl: c.links.git_commit_url ?? null,
+      },
+    },
+    { prefix: c.notify.prefix, consoleUrl: c.public_url },
+    (clusterId, key, at) => topology.ownerOf(clusterId, key, at),
+  );
   const source = new PgMessageSource(
     pool,
     {
@@ -380,8 +415,7 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
       resolvedRetentionMs: parseDuration('notify.resolved_retention', c.notify.resolved_retention),
     },
     proposals,
-    feedback,
-    (clusterId, key, at) => topology.ownerOf(clusterId, key, at),
+    reports,
   );
   const notify = new NotifyService({
     pool,

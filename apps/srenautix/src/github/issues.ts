@@ -1,8 +1,8 @@
-import type { EvidenceResult, Incident, StageAReport } from '@srenautix/contract';
+import { createHash } from 'node:crypto';
+import type { NotifyMessage } from '@srenautix/contract';
 import type pg from 'pg';
-import { displayComponentName, displayKey } from '@srenautix/core';
-import { componentNames } from '../incident/names.js';
 import { researchRoots, type OwnerLookup } from '../incident/research-root.js';
+import { issueMarkdown } from '../notify/markdown.js';
 import { logger } from '../log.js';
 import type { ServerMetrics } from '../metrics.js';
 import { appendAudit } from '../store/audit.js';
@@ -41,10 +41,9 @@ export interface IssueRef {
 
 export const MAX_ATTEMPTS = 8;
 const backoffMs = (attempts: number) => Math.min(30_000 * 2 ** Math.max(0, attempts - 1), 30 * 60_000);
-/** 事件标签以根因组件键开头时，把键换成可读名称（标签本身不变，只用于显示） */
-export function labelWithName(label: string, key: string, name: string): string {
-  return label.startsWith(`${key}:`) ? `${name}${label.slice(key.length)}` : label;
-}
+
+/** 事件报告：由 notify/source.ts 的 ReportSource.message 提供；事件或阶段 A 报告不存在时为 null */
+export type IssueReport = (incidentId: string, language: 'zh' | 'en') => Promise<NotifyMessage | null>;
 
 const incidentMarker = (id: string) => `<!-- srenautix:incident=${id} -->`;
 const commentMarker = (key: string) => `<!-- srenautix:comment=${key} -->`;
@@ -61,27 +60,15 @@ interface IssueRow {
 
 const T = {
   zh: {
-    title: (label: string, root: string | null) => `${label}：${root ?? '未定位根因'} 需要人工跟进`,
     reason: { escalate: '处置判断为升级（需要人工跟进）', repo_change: '有需要修改仓库的修复提议' } as Record<
       IssueReason,
       string
     >,
-    incident: '事件',
     why: '开 issue 的原因',
-    disposition: '处置判断',
-    conclusion: '结论',
-    root: '根因候选',
-    cards: '关键证据卡',
-    card: '证据卡',
-    verdict: '判定',
-    value: '值',
-    note: '说明',
-    console: '控制台',
-    noResearch: '模型研判尚未给出结论，以下为确定性报告（阶段 A）',
-    research: (state: string, summary: string | null, err: string | null) =>
+    research: (state: string, level: string | null, root: string | null, err: string | null) =>
       state === 'completed'
-        ? `模型研判结束：${summary ?? ''}`
-        : `模型研判没有给出结论（${state}）${err ? `：${err}` : ''}`,
+        ? `研判结束：结论 \`${level ?? '-'}\`${root ? `，根因 \`${root}\`` : ''}。正文已按新结论更新。`
+        : `模型研判没有给出结论（${state}）${err ? `：${err}` : ''}，正文为确定性报告。`,
     resolved: (at: string) => `事件已于 ${at} 恢复。`,
     rootMismatch: (research: string, incident: string) =>
       `研判根因（\`${research}\`）与发现根因（\`${incident}\`）不一致。事件没有拆分，请以研判结论与证据为准核对。`,
@@ -90,27 +77,15 @@ const T = {
     footer: '由 SreNautix 生成，同一事件的后续进展会追加在评论里。',
   },
   en: {
-    title: (label: string, root: string | null) => `${label}: ${root ?? 'root not located'} needs follow-up`,
     reason: {
       escalate: 'Disposition is escalate (needs a human)',
       repo_change: 'A fix needs a repository change',
     } as Record<IssueReason, string>,
-    incident: 'Incident',
     why: 'Why this issue',
-    disposition: 'Disposition',
-    conclusion: 'Conclusion',
-    root: 'Root candidate',
-    cards: 'Key evidence cards',
-    card: 'Card',
-    verdict: 'Verdict',
-    value: 'Value',
-    note: 'Note',
-    console: 'Console',
-    noResearch: 'No model conclusion yet; deterministic report (stage A) below',
-    research: (state: string, summary: string | null, err: string | null) =>
+    research: (state: string, level: string | null, root: string | null, err: string | null) =>
       state === 'completed'
-        ? `Model research finished: ${summary ?? ''}`
-        : `Model research ended without a conclusion (${state})${err ? `: ${err}` : ''}`,
+        ? `Research finished: conclusion \`${level ?? '-'}\`${root ? `, root \`${root}\`` : ''}. The body now shows the new conclusion.`
+        : `Model research ended without a conclusion (${state})${err ? `: ${err}` : ''}; the body is the deterministic report.`,
     resolved: (at: string) => `The incident resolved at ${at}.`,
     rootMismatch: (research: string, incident: string) =>
       `The research root (\`${research}\`) differs from the discovered root (\`${incident}\`). The incident was not split; check against the research conclusion and evidence.`,
@@ -121,15 +96,14 @@ const T = {
   },
 };
 
-/** Markdown 表格单元格：去掉换行与竖线 */
-const cell = (s: string) => s.replace(/\r?\n/g, ' ').replace(/\|/g, '\\|').slice(0, 200);
-
 export class IssueService {
   constructor(
     private readonly pool: pg.Pool,
     private readonly gh: GitHubApp,
     private readonly s: IssueSettings,
     private readonly metrics: ServerMetrics,
+    /** 事件的报告（与通知相同，notify/source.ts 的 ReportSource.message） */
+    private readonly report: IssueReport,
     /** 研判根因与事件根因按属主粒度比较时取顶层属主（ADR 0104 §14）；不提供时只按键比较 */
     private readonly ownerOf: OwnerLookup = async () => null,
   ) {}
@@ -199,6 +173,7 @@ export class IssueService {
   async runOnce(): Promise<void> {
     await this.scan();
     await this.openDue(null);
+    await this.refreshBodies();
     await this.syncComments();
     await this.postDueComments();
     await this.patchPullRefs();
@@ -267,11 +242,11 @@ export class IssueService {
       try {
         // 上一次可能已经开出但没有收到响应：先按事件标记找回
         const found = row.attempts > 0 ? await this.findByMarker(row.repo, incidentMarker(incidentId)) : null;
-        const issue = found ?? (await this.create(c, row));
+        const issue = found ? { ...found, bodyHash: null } : await this.create(row);
         await c.query(
           `UPDATE server.github_issues SET state = 'open', number = $2, url = $3, opened_at = now(), attempts = attempts + 1,
-             last_error = NULL, updated_at = now() WHERE incident_id = $1`,
-          [incidentId, issue.number, issue.url],
+             last_error = NULL, body_hash = $4, updated_at = now() WHERE incident_id = $1`,
+          [incidentId, issue.number, issue.url, issue.bodyHash],
         );
         await appendAudit(c, 'github.issue_opened', 'server', {
           incident_id: incidentId,
@@ -326,81 +301,76 @@ export class IssueService {
     return hit ? { number: hit.number, url: hit.html_url, repo } : null;
   }
 
-  private async create(c: Queryable, row: IssueRow): Promise<IssueRef> {
-    const content = await this.render(c, row.incident_id, row.reason);
+  private async create(row: IssueRow): Promise<IssueRef & { bodyHash: string }> {
+    const content = await this.render(row.incident_id, row.reason);
     const r = await this.gh.api<{ number: number; html_url: string }>(
       'POST',
       `/repos/${row.repo}/issues`,
       { title: content.title, body: content.body, labels: this.s.labels },
       'create_issue',
     );
-    return { number: r.number, url: r.html_url, repo: row.repo };
+    return {
+      number: r.number,
+      url: r.html_url,
+      repo: row.repo,
+      bodyHash: createHash('sha256').update(content.body).digest('hex'),
+    };
   }
 
-  /** issue 的标题与正文：结论、关键证据卡摘要、控制台链接 */
-  private async render(
-    c: Queryable,
-    incidentId: string,
-    reason: IssueReason,
-  ): Promise<{ title: string; body: string }> {
+  /**
+   * issue 的标题与正文（ADR 0125）：与通知同一份报告（现状、关键问题、拓扑联系、解决方案、证据链）的全文，
+   * 开头是事件标记与开 issue 的原因
+   */
+  private async render(incidentId: string, reason: IssueReason): Promise<{ title: string; body: string }> {
     const t = T[this.s.language];
-    const inc = await c.query<{ body: Incident }>('SELECT body FROM server.incidents WHERE incident_id = $1', [
-      incidentId,
-    ]);
-    const incident = inc.rows[0]?.body;
-    if (!incident) {
-      throw new Error(`没有事件 ${incidentId}`);
+    const m = await this.report(incidentId, this.s.language);
+    if (!m) {
+      throw new Error(`没有事件 ${incidentId} 或它的阶段 A 报告`);
     }
-    const sa = await c.query<{ body: StageAReport }>(
-      'SELECT body FROM server.stage_a_reports WHERE incident_id = $1 ORDER BY incident_version DESC LIMIT 1',
-      [incidentId],
+    const lead = `${incidentMarker(incidentId)}\n**${t.why}**：${t.reason[reason]}\n`;
+    const r = issueMarkdown({ ...m, prefix: this.s.titlePrefix }, lead, t.footer);
+    return { title: r.title, body: r.body };
+  }
+
+  /**
+   * 正文与事件同步：研判结束、事件恢复、证据变化后重新生成，与上次写入的不同时就地更新正文（PATCH 只改 body）。
+   * 只处理最近更新过的事件
+   */
+  private async refreshBodies(): Promise<void> {
+    const open = await this.pool.query<{
+      incident_id: string;
+      repo: string;
+      number: number;
+      reason: IssueReason;
+      body_hash: string | null;
+    }>(
+      `SELECT g.incident_id, g.repo, g.number, g.reason, g.body_hash FROM server.github_issues g
+         JOIN server.incidents i ON i.incident_id = g.incident_id
+        WHERE g.state = 'open' AND i.updated_at > now() - make_interval(secs => $1)
+        ORDER BY g.opened_at LIMIT 50`,
+      [this.s.lookbackMs / 1000],
     );
-    const report = sa.rows[0]?.body ?? null;
-    const run = await c.query<{ summary: string | null; disposition: string | null; conclusion_level: string | null }>(
-      `SELECT summary, disposition, conclusion_level FROM server.research_runs
-        WHERE incident_id = $1 AND state = 'completed' ORDER BY finished_at DESC NULLS LAST LIMIT 1`,
-      [incidentId],
-    );
-    const research = run.rows[0] ?? null;
-    // 组件的可读名称（ADR 0101）：标题用名称，正文写"名称（组件键）"
-    const rootKey = incident.root.component;
-    const names = await componentNames(c, incident.cluster_id, [rootKey]);
-    const rootName = rootKey ? (names[rootKey] ?? null) : null;
-    const root = rootKey ? displayComponentName(rootKey, names) : null;
-    const label = rootKey && rootName ? labelWithName(incident.label, rootKey, rootName) : incident.label;
-    const prefix = this.s.titlePrefix ? `${this.s.titlePrefix} ` : '';
-    const title = `${prefix}${t.title(label, rootKey ? (rootName ?? displayKey(rootKey)) : null)}`.slice(0, 250);
-    const link = `${this.s.consoleUrl.replace(/\/+$/, '')}/incidents/${incident.incident_id}`;
-    const lines: string[] = [
-      incidentMarker(incidentId),
-      `**${t.incident}**：${incident.label}（${incident.severity}，${incident.cluster_id}，${incident.state}）`,
-      `**${t.why}**：${t.reason[reason]}`,
-      `**${t.disposition}**：${research?.disposition ?? report?.disposition ?? '-'}`,
-      `**${t.root}**：${root ?? '-'}`,
-      '',
-      `**${t.conclusion}**：${research ? `${research.summary ?? ''}（${research.conclusion_level ?? '-'}）` : t.noResearch}`,
-    ];
-    const cards = keyCards(report?.cards ?? []);
-    if (cards.length) {
-      lines.push(
-        '',
-        `**${t.cards}**`,
-        '',
-        `| ${t.card} | ${t.verdict} | ${t.value} | ${t.note} |`,
-        '|---|---|---|---|',
-      );
-      const lang = this.s.language === 'zh' ? 'zh-CN' : 'en';
-      for (const card of cards) {
-        const ti = card.title as Record<string, string | undefined>;
-        const title = ti[lang] ?? ti['zh-CN'] ?? ti.en ?? card.card_id;
-        const value = card.value === null || card.value === undefined ? '-' : String(card.value);
-        lines.push(
-          `| ${cell(title)} | ${cell(card.display_state ?? card.verdict)} | ${cell(value)} | ${cell(card.reason?.text ?? '')} |`,
-        );
+    for (const row of open.rows) {
+      const content = await this.render(row.incident_id, row.reason);
+      const hash = createHash('sha256').update(content.body).digest('hex');
+      if (hash === row.body_hash) {
+        continue;
       }
+      try {
+        await this.gh.api('PATCH', `/repos/${row.repo}/issues/${row.number}`, { body: content.body }, 'update_issue');
+      } catch (e) {
+        if (!(e instanceof GitHubError)) {
+          throw e;
+        }
+        logger.warn('事件 issue 正文更新失败，下一轮重试', { incident_id: row.incident_id, error: e.message });
+        continue;
+      }
+      await this.pool.query(
+        'UPDATE server.github_issues SET body_hash = $2, updated_at = now() WHERE incident_id = $1',
+        [row.incident_id, hash],
+      );
+      this.metrics.githubIssues.inc({ repo: row.repo, outcome: 'body_updated' });
     }
-    lines.push('', `**${t.console}**：${link}`, '', `_${t.footer}_`);
-    return { title, body: lines.join('\n') };
   }
 
   /** 进展评论：issue 开出之后结束的研判、事件恢复、关联的 PR 与提议 */
@@ -410,10 +380,11 @@ export class IssueService {
       incident_id: string;
       run_id: string;
       state: string;
-      summary: string | null;
+      conclusion_level: string | null;
+      root_component: string | null;
       error: { message?: string } | null;
     }>(
-      `SELECT r.incident_id, r.run_id, r.state, r.summary, r.error FROM server.research_runs r
+      `SELECT r.incident_id, r.run_id, r.state, r.conclusion_level, r.root_component, r.error FROM server.research_runs r
          JOIN server.github_issues g ON g.incident_id = r.incident_id
         WHERE g.state = 'open' AND r.finished_at > g.opened_at AND r.state IN ('completed', 'failed', 'stage_a_only')`,
     );
@@ -443,7 +414,7 @@ export class IssueService {
       ...runs.rows.map((r): [string, string, string] => [
         r.incident_id,
         `research:${r.run_id}`,
-        t.research(r.state, r.summary, r.error?.message?.slice(0, 300) ?? null),
+        t.research(r.state, r.conclusion_level, r.root_component, r.error?.message?.slice(0, 300) ?? null),
       ]),
       ...resolved.rows.map((r): [string, string, string] => [
         r.incident_id,
@@ -578,10 +549,4 @@ export class IssueService {
       }
     }
   }
-}
-
-/** 关键证据卡：异常的在前，其次无法判定的，最多 6 张 */
-function keyCards(cards: EvidenceResult[]): EvidenceResult[] {
-  const rank = (c: EvidenceResult) => (c.verdict === 'abnormal' ? 0 : c.verdict === 'normal' ? 2 : 1);
-  return [...cards].sort((a, b) => rank(a) - rank(b)).slice(0, 6);
 }

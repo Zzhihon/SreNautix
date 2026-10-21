@@ -2,7 +2,9 @@ import { randomUUID } from 'node:crypto';
 import { readFileSync, rmSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { PgMessageSource } from '../../src/notify/source.js';
+import { NO_LINKS } from '../../src/notify/links.js';
+import { PgMessageSource, ReportSource } from '../../src/notify/source.js';
+import { TopologyStore } from '../../src/topology/store.js';
 import type { FeedbackService } from '../../src/proposals/feedback.js';
 import type { ProposalService } from '../../src/proposals/service.js';
 import type { ServerHandle } from '../../src/roles/server.js';
@@ -92,7 +94,13 @@ const banner = async (incidentId: string): Promise<string | null> => {
       resolvedRetentionMs: 86_400_000,
     },
     {} as ProposalService,
-    { latest: async () => new Map() } as unknown as FeedbackService,
+    new ReportSource(
+      db.admin,
+      { latest: async () => new Map() } as unknown as FeedbackService,
+      new TopologyStore(db.admin),
+      { alertTitle: () => null, actionVerify: () => null, links: NO_LINKS },
+      { prefix: '', consoleUrl: 'https://srenautix.example.test' },
+    ),
   );
   const m = (await source.desired('zh')).find((x) => x.incidentId === incidentId);
   return m?.message.banner ?? null;

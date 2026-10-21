@@ -8,7 +8,10 @@ import { IssueService } from '../../src/github/issues.js';
 import type { Bindings } from '../../src/identity/bindings.js';
 import { upsertAlert } from '../../src/ingest/store.js';
 import { ServerMetrics } from '../../src/metrics.js';
+import { NO_LINKS } from '../../src/notify/links.js';
+import { ReportSource } from '../../src/notify/source.js';
 import { Catalog, DEFAULT_CATALOG_PATH } from '../../src/proposals/catalog.js';
+import { FeedbackService } from '../../src/proposals/feedback.js';
 import { Policies, type GatewayPolicy } from '../../src/proposals/policy.js';
 import { ProposalService } from '../../src/proposals/service.js';
 import { GitOpsPulls } from '../../src/remediation/pulls.js';
@@ -18,6 +21,7 @@ import { serverTracks } from '../../src/roles/server-schema.js';
 import { PackRuntime } from '../../src/stage-a/packs.js';
 import { migrateExpand } from '../../src/store/migrate.js';
 import { tx } from '../../src/store/pool.js';
+import { TopologyStore } from '../../src/topology/store.js';
 import { TopologyTargets } from '../../src/topology/targets.js';
 import { newTestDb, type TestDb } from '../support/db.js';
 import { FakeGitHub } from '../support/github.js';
@@ -270,6 +274,14 @@ function build(
       language: 'zh',
     },
     metrics,
+    (incidentId, language) =>
+      new ReportSource(
+        db.server,
+        new FeedbackService(db.server, metrics),
+        new TopologyStore(db.server),
+        { alertTitle: () => null, actionVerify: () => null, links: NO_LINKS },
+        { prefix: '[影子]', consoleUrl: 'https://srenautix.example.test' },
+      ).message(incidentId, language),
   );
   const service = new RemediationService(
     db.server,

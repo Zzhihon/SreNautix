@@ -17,7 +17,7 @@
    - Telegram 用 `parse_mode=HTML`：数字与对象名为 `<code>`，模型文字为 `<i>` 并带【模型】，证据链放进 `<blockquote expandable>`。所有文本按 Bot API 的规则转义（`&`、`<`、`>`、`"`）。超长时从优先级最低的段的末尾逐块删减，最后加一行"其余见控制台"；删减以块为单位，标签总是闭合。实体数不超过 100，超出的样式按纯文本输出。
    - 飞书卡片用 markdown 元素（按飞书的转义表转义），证据链放进折叠面板。
    - issue 用 GitHub Markdown，渲染 `scope` 为 all 与 full 的块，内容是全文；正文在研判结束与事件恢复时就地更新（server 的 GitHub 白名单允许只改 issue 的 body）。
-3. **数值只来自确定性数据**：Incident、StageAReport（证据卡结果与时间线）、ResearchOutput 的账本与检查、changes 与动作目录。模型文字只出现在四处：假设机制、结论摘要、建议的标题与步骤、无法判定的原因，都标【模型】。worker 在研判结束时审计这些文字（`research/numbers.ts`）：时刻、百分比、带单位的数与小数必须能在本次证据里找到，找不到的连同所在分句删掉，并写入 `validation_notes`。`ResearchOutput.situation` 不再出现在消息里，问题陈述由模板生成。
+3. **数值只来自确定性数据**：Incident、StageAReport（证据卡结果与时间线）、ResearchOutput 的账本与检查、changes 与动作目录。模型文字只出现在四处：假设机制、结论摘要、建议的标题与步骤、无法判定的原因，都标【模型】。worker 在研判结束时审计这些文字（`research/numbers.ts`）：时刻、百分比、带单位的数与小数必须能在本次证据里找到；找不到的数值在括号内的补充说明里时删掉这段括号，否则连同所在分句（以逗号、句号与因果箭头分隔）删掉，并写入 `validation_notes`。`ResearchOutput.situation` 不再出现在消息里，问题陈述由模板生成。
 4. **契约 2.23.0**（全部为可选字段或新增枚举值）：
    - `EvidenceResult`：`observations`（let 绑定的标量取值）、`params`、`conditions`（每条判定条件的求值结果与说明）、`baseline`、`unit`、`impact`。
    - 卡片定义：`display.baseline`、`impact`、规则的 `normal_say`。
@@ -25,7 +25,7 @@
    - `ChangeEvent.previous_revision`：版本标签的旧取值，用来识别回退。
    - 告警目录条目的 `title`：告警的可读症状。
    - notify：`Message.headline`、`Section.title/folded/priority/omitted`、`Block.runs/scope/indent/table` 与类型 heading、table，段类型增加 `key_issue`、`topology`。
-5. **链接配置**：server 配置的 `links`：`metrics_explore_url`、`logs_explore_url` 是模板，占位符为 `{query}`（URL 编码的查询）、`{query_json}`（URL 编码的 JSON 字符串内容）、`{from}`、`{to}`（RFC3339）、`{from_ms}`、`{to_ms}`、`{range}`（窗口长度，例如 `40m`）；`alertmanager_url`、`argocd_url` 是根地址；`git_commit_url` 是模板，占位符 `{revision}`。没有配置时证据只带控制台链接。
+5. **链接配置**：server 配置的 `links`：`metrics_explore_url`、`logs_explore_url` 是模板，占位符为 `{query}`（URL 编码的查询）、`{query_json}`（查询写成带引号的 JSON 字符串后再 URL 编码，用于 Grafana Explore 的 JSON 参数）、`{from}`、`{to}`（RFC3339）、`{from_ms}`、`{to_ms}`、`{range}`（窗口长度，例如 `40m`）；`alertmanager_url`、`argocd_url` 是根地址；`git_commit_url` 是模板，占位符 `{revision}`。没有配置时证据只带控制台链接。
 
 ## 结果
 

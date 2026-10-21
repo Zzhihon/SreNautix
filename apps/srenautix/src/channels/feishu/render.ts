@@ -1,4 +1,5 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
+import type { NotifyRun } from '@srenautix/contract';
 import type {
   ActionResultView,
   ChatTarget,
@@ -9,6 +10,7 @@ import type {
   RenderOptions,
 } from '../../notify/channel.js';
 import type { ButtonTarget, DesiredIncidentMessage } from '../../notify/ports.js';
+import { linkTarget } from '../../notify/markdown.js';
 import { shortId } from '../../notify/shortid.js';
 import { clip, hm, oneLine, publicHttpsUrl, t, ymdhm } from '../../notify/text.js';
 import { payloadHash, MAX_RESULTS_SHOWN } from '../telegram/render.js';
@@ -17,14 +19,50 @@ import { displayKey } from '@srenautix/core';
 /** 卡片 JSON 的上限是 30 KB；留出余量，超过时按优先级省略段落。 */
 export const MAX_CARD_BYTES = 28 * 1024;
 
-const SECTION_PRIORITY: Record<string, number> = { situation: 5, root_cause: 4, remedy: 3, evidence: 2 };
+const SECTION_PRIORITY: Record<string, number> = {
+  situation: 5,
+  root_cause: 4,
+  key_issue: 6,
+  topology: 3,
+  remedy: 3,
+  evidence: 2,
+};
 
 const TEMPLATE: Record<string, string> = { critical: 'red', warning: 'orange', info: 'blue' };
 
 type El = Record<string, unknown>;
 
 const plain = (content: string, extra: El = {}): El => ({ tag: 'div', text: { tag: 'plain_text', content, ...extra } });
-const heading = (content: string): El => ({ tag: 'markdown', content: `**${content}**` });
+const heading = (content: string): El => ({ tag: 'markdown', content: `**${escapeFeishu(content)}**` });
+
+/** 飞书 markdown 的转义（卡片 JSON 2.0 富文本组件的特殊字符表），& 一并转义，避免拼出 HTML 实体 */
+export function escapeFeishu(s: string): string {
+  return s.replace(/[&*~<>[\]\-_#`]/g, (c) => {
+    switch (c) {
+      case '~':
+        return '&sim;';
+      case '`':
+        return '&#96;';
+      default:
+        return `&#${c.charCodeAt(0)};`;
+    }
+  });
+}
+
+/** 富文本片段 → 飞书 markdown：加粗、斜体、行内代码、链接（只允许 http 与 https） */
+export function feishuMarkdown(runs: readonly NotifyRun[]): string {
+  return runs
+    .map((r) => {
+      if (!r.text) {
+        return '';
+      }
+      const body = r.style === 'code' ? `\`${r.text.replace(/`/g, "'")}\`` : escapeFeishu(r.text);
+      const styled = r.style === 'bold' ? `**${body}**` : r.style === 'italic' ? `*${body}*` : body;
+      const href = r.href && /^https?:\/\//.test(r.href) ? r.href : null;
+      return href ? `[${styled}](${linkTarget(href)})` : styled;
+    })
+    .join('');
+}
 const hr = (): El => ({ tag: 'hr' });
 
 /**
@@ -132,7 +170,8 @@ export function renderCard(
 ): Rendered {
   const l = chat.language;
   const m = d.message;
-  const title = `${m.prefix ? `${m.prefix} ` : ''}[${t.severity(l, m.severity)}] ${clip(oneLine(m.title), 160)}`;
+  const headline = m.headline?.length ? m.headline.map((r) => r.text).join('') : m.title;
+  const title = `${m.prefix ? `${m.prefix} ` : ''}[${t.severity(l, m.severity)}] ${clip(oneLine(headline), 160)}`;
   const header: El = {
     title: { tag: 'plain_text', content: title },
     subtitle: {
@@ -151,12 +190,28 @@ export function renderCard(
   }
   parts.push({ priority: 0, omitted: '', elements: head });
   for (const sec of m.sections) {
-    if (!sec.blocks.length) {
+    const blocks = sec.blocks.filter((b) => (b.scope ?? 'all') !== 'full');
+    if (!blocks.length) {
       continue;
     }
-    const els: El[] = [heading(t.section(l, sec.kind))];
-    for (const b of sec.blocks) {
+    const title = sec.title ?? t.section(l, sec.kind);
+    const els: El[] = [];
+    // 带富文本片段的连续块合成一个 markdown 元素（文字已按飞书的规则转义）；不可信原文与旧结构的块用 plain_text
+    let md: string[] = [];
+    const flush = () => {
+      if (md.length) {
+        els.push({ tag: 'markdown', content: md.join('\n') });
+        md = [];
+      }
+    };
+    for (const b of blocks) {
       const model = b.model_generated ? t.misc(l, 'model') : '';
+      const indent = '　'.repeat(b.indent ?? 0);
+      if (b.runs?.length) {
+        md.push(`${indent}${b.type === 'list_item' ? '- ' : ''}${feishuMarkdown(b.runs)}`);
+        continue;
+      }
+      flush();
       if (b.type === 'quote') {
         els.push(
           plain(`${t.misc(l, 'source')}${clip(oneLine(b.source ?? '-'), 120)}`, {
@@ -171,7 +226,22 @@ export function renderCard(
         els.push(plain(`${model}${clip(b.text, 800)}`));
       }
     }
-    parts.push({ priority: SECTION_PRIORITY[sec.kind] ?? 1, omitted: t.omitted(l, sec.kind), elements: els });
+    flush();
+    const elements = sec.folded
+      ? [
+          {
+            tag: 'collapsible_panel',
+            expanded: false,
+            header: { title: { tag: 'plain_text', content: title } },
+            elements: els,
+          },
+        ]
+      : [heading(title), ...els];
+    parts.push({
+      priority: sec.priority ?? SECTION_PRIORITY[sec.kind] ?? 1,
+      omitted: sec.omitted ?? t.omitted(l, sec.kind),
+      elements,
+    });
   }
   parts.push({ priority: 1, omitted: t.omitted(l, 'results'), elements: writeResults(l, results) });
 
