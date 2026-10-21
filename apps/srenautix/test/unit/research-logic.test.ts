@@ -531,6 +531,28 @@ describe('组件粒度（ADR 0121）', () => {
     expect(ledger.entries.get('h2')?.status).toBe('refuted');
   });
 
+  it('属主拥有的某个成员上的检查卡正常时，有支持证据的属主假设不被推翻；没有支持证据时推翻', () => {
+    const { book, ledger } = owned();
+    ledger.merge([hyp('h1', DEP, [])], []);
+    book.addCheckCard(checkCard(RS, 'normal', null), 'h1', 'rule');
+    ledger.noteCheckRun('h1');
+    ledger.evaluate();
+    expect(ledger.entries.get('h1')?.status).toBe('supported');
+    expect(ledger.contraryCards(ledger.entries.get('h1') as never).map((c) => c.ref)).toEqual(['card:2']);
+    // 根因本身上的检查卡正常：直接推翻
+    book.addCheckCard(checkCard(DEP, 'normal', null), 'h1', 'rule');
+    ledger.evaluate();
+    expect(ledger.entries.get('h1')?.status).toBe('refuted');
+    // 没有支持证据的属主：成员上的正常检查卡推翻它
+    const o = owned();
+    o.ledger.merge([hyp('h1', DEP, [])], []);
+    o.book.addCheckCard({ ...checkCard(RS, 'normal', null), card_id: 'x/y' }, 'h1', 'rule');
+    const pod = o.book.card('card:1');
+    (pod as { result: { verdict: string } }).result.verdict = 'normal';
+    o.ledger.evaluate();
+    expect(o.ledger.entries.get('h1')?.status).toBe('refuted');
+  });
+
   it('反馈中的 Pod 根因按属主比对', () => {
     const { ledger } = owned();
     ledger.merge([hyp('h1', DEP, [])], []);

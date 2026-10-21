@@ -375,10 +375,16 @@ export class Ledger {
       if (e.pinned) {
         continue;
       }
-      // 检查卡判定为正常时，只有卡的实体在假设范围内才推翻它（ADR 0121）；实体未知的卡（工具结果）照旧按检查针对的假设判定
+      // 检查卡判定为正常时直接推翻假设的，只有实体是根因本身或它直接依赖的对象的卡，以及实体未知的卡（工具结果）；
+      // 实体是根因拥有的某个成员（例如多副本中的一个 Pod）的正常卡只作为相反的正常卡，在没有支持证据时才推翻（ADR 0121）
       const scope = scopeOf(e.rootComponent, this.subgraph);
+      const members = membersOf(e.rootComponent, this.subgraph);
       const checks = this.book.allCards.filter(
-        (c) => c.hypothesisId === e.id && (c.component === null || scope.has(c.component)),
+        (c) =>
+          c.hypothesisId === e.id &&
+          (c.component === null ||
+            c.component === e.rootComponent ||
+            (scope.has(c.component) && !members.has(c.component))),
       );
       const checkRefuted = checks.some((c) => c.result.verdict === 'normal');
       const support = [...this.supportCards(e).map((c) => c.ref), ...this.supportAlerts(e)];
