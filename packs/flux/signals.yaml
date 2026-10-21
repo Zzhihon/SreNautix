@@ -16,3 +16,13 @@ signals:
           histogram_quantile(0.99, sum by (le, kind, name) (
             rate(gotk_reconcile_duration_seconds_bucket{exported_namespace="$namespace"}[$rate_window])
           ))
+  # 超过最高有限桶的观测占比：大于 1 - 0.99 时 p99 落在 +Inf 桶，histogram_quantile 只返回最高有限桶的上界（饱和）
+  - id: reconcile_duration_p99_overflow
+    kind: metrics
+    unit: ratio
+    alternatives:
+      - expr: >-
+          1 - max by (kind, name) (sum by (le, kind, name) (
+            rate(gotk_reconcile_duration_seconds_bucket{exported_namespace="$namespace", le!="+Inf"}[$rate_window])
+          ))
+          / (sum by (kind, name) (rate(gotk_reconcile_duration_seconds_bucket{exported_namespace="$namespace", le="+Inf"}[$rate_window])) > 0)

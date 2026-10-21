@@ -17,7 +17,7 @@ chains:
         judge:
           let:
             - name: mine
-              cel: 'entity.kind == "HTTPRoute" ? ratio.filter(s, label(s, "envoy_cluster_name").contains("/" + entity.namespace + "/" + entity.name + "/rule/")) : ratio'
+              cel: 'kind_is(entity.kind, "HTTPRoute.gateway.networking.k8s.io") ? ratio.filter(s, label(s, "envoy_cluster_name").contains("/" + entity.namespace + "/" + entity.name + "/rule/")) : ratio'
             - { name: peak, cel: max(mine) }
             - { name: anomaly_started_at, cel: 'first_above(mine, params.ratio)' }
           abnormal_if:
@@ -46,7 +46,7 @@ chains:
         judge:
           let:
             - name: mine
-              cel: 'entity.kind == "HTTPRoute" ? healthy.filter(s, label(s, "envoy_cluster_name").contains("/" + entity.namespace + "/" + entity.name + "/rule/")) : healthy'
+              cel: 'kind_is(entity.kind, "HTTPRoute.gateway.networking.k8s.io") ? healthy.filter(s, label(s, "envoy_cluster_name").contains("/" + entity.namespace + "/" + entity.name + "/rule/")) : healthy'
             - { name: empty, cel: 'size(mine.filter(s, min(s) < 1.0))' }
           abnormal_if:
             - cel: empty > 0

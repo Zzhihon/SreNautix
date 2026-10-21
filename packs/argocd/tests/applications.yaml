@@ -42,6 +42,27 @@ tests:
       expect: { verdict: normal },
     }
   - {
+      name: 拓扑实体带 API 组时只看 calm 自己，shop 未同步不算,
+      eval_time: 40m,
+      card: application/status,
+      entity: { kind: Application.argoproj.io, namespace: argocd, name: calm },
+      expect: { verdict: normal },
+    }
+  - {
+      name: 拓扑实体带 API 组时 shop 不健康且未同步,
+      eval_time: 40m,
+      card: application/status,
+      entity: { kind: Application.argoproj.io, namespace: argocd, name: shop },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: 拓扑实体带 API 组时 calm 的同步失败与条件只看自己,
+      eval_time: 40m,
+      card: application/sync-failures,
+      entity: { kind: Application.argoproj.io, namespace: argocd, name: calm },
+      expect: { verdict: normal },
+    }
+  - {
       name: 没有这个应用,
       eval_time: 40m,
       card: application/status,

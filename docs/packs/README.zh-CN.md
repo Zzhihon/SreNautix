@@ -180,6 +180,7 @@ flowchart TD
 | `join(a, b, op)` | 按共同标签配对，两边最后值做 `op`（`+`、`-`、`*`、`/`，除数为 0 的配对丢弃），结果序列带两边的标签 |
 | `first_above(list, 阈值)`、`first_below(list, 阈值)` | 第一个越过阈值的点的时间（unix 秒） |
 | `label(序列或日志行, 名)` | 标签值，不存在时为空字符串 |
+| `kind_is(entity.kind, "Application.argoproj.io")` | 实体是否是这个 kind：kind 不区分大小写；两边都带 API 组时组必须相同，任一边不带组时只比较 kind。拓扑中的实体带组（`Application.argoproj.io`），告警标签契约给出的不带组（`application`），按 kind 区分实体的 CEL 都用它，不要写 `entity.kind == "..."` |
 | `abs`、`fmt_pct`、`fmt_bytes`、`fmt_secs`、`fmt_num` | 数值与格式化 |
 
 输入有硬上限：每个引用最多 200 条序列，每条序列最多 1500 个点，日志最多 200 行，超出部分在进入 CEL 前截断。加载时按 AST 计算每个表达式最坏情况下的求值步数，超过 2000 万步的表达式拒绝加载。
@@ -261,7 +262,7 @@ remediation:
 
 | 模板 | 类别 | 适用 | 修改 |
 |---|---|---|---|
-| `release-to-serving-version` | release_rollback | `params.stuck_cards` 中任一卡片异常（默认 `workload/release/init-waiting`、`replicasets`） | 发布输入改回历史中最近一次指向就绪 Pod 镜像 digest 的版本；仓库已经指向它时跳过 |
+| `release-to-serving-version` | release_rollback | `params.stuck_cards` 中任一卡片异常（默认 `workload/release/init-waiting`、`replicasets`） | 发布输入改回历史中最近一次指向就绪 Pod 镜像 digest 的版本。就绪 Pod 取运行发布输入当前或历史中出现过的镜像仓库的容器，坏版本换了仓库（镜像写错）时仍能找到旧版本；仓库已经指向它时跳过 |
 | `hpa-max-replicas-raise` | config_resource | 根因是 HPA，`workload/capacity/hpa` 异常 | `spec.maxReplicas` 加 `params.step`，不超过 `params.ceiling` |
 | `memory-limit-raise` | config_resource | 根因是工作负载，`workload/pod-restarts/memory` 异常 | OOMKilled 容器的内存 limit 乘 `params.factor`，不超过 `params.ceiling` |
 | `noisy-alert-relax` | alert_rule | 研判结论为不需要处理（`research.disposition == "ignore"`）且有 critical 告警，或长期告警以 critical 触发、事件中没有症状告警 | 严重度改为 `params.to_severity`，`for` 至少 `params.min_for` |

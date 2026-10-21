@@ -434,10 +434,20 @@ chains:
         refs:
           - { name: p95, signal: hpa_target_latency_p95, mode: range }
           - { name: base, signal: hpa_target_latency_p95_baseline, mode: range }
+          - { name: over, signal: hpa_target_latency_p95_overflow, mode: range, empty_is: normal }
         judge:
           let:
             - { name: peak, cel: max(p95) }
             - { name: baseline, cel: max(base) }
+            - { name: overflowPeak, cel: 'count(over) > 0 ? max(over) : 0.0' }
+          # p95 落在 +Inf 桶时 histogram_quantile 只给出最高有限桶的上界，是下限：下限已满足异常条件仍判异常，否则无法判定
+          undeterminable_if:
+            - cel: overflowPeak > 0.05 && !(peak > params.min_seconds && peak > params.factor * baseline)
+              say:
+                {
+                  zh-CN: '直方图饱和：最多 {overflowPeak, number, percent} 的请求超过最高的有限桶，p95 只能确定不低于 {peak, number} 秒',
+                  en: 'Histogram saturated: up to {overflowPeak, number, percent} of requests exceeded the highest finite bucket, p95 is at least {peak, number} s',
+                }
           abnormal_if:
             - cel: peak > params.min_seconds && peak > params.factor * baseline
               say:
@@ -693,10 +703,23 @@ chains:
         params: { factor: 2.0 }
         refs:
           - { name: latency, signal: http_latency_p95, mode: range }
+          - { name: over, signal: http_latency_p95_overflow, mode: range, empty_is: normal }
         judge:
           let:
             - { name: l0, cel: 'max_in(latency, window.from, window.anchor)' }
             - { name: l1, cel: 'max_in(latency, window.anchor, window.to + 1.0)' }
+            # 开始之后 p95 落在 +Inf 桶时只知道下限；开始之前饱和时之后不可能"升到"更高，不影响判定
+            - {
+                name: overflowAfter,
+                cel: 'any_point(over, p, p.t >= window.anchor) ? max_in(over, window.anchor, window.to + 1.0) : 0.0',
+              }
+          undeterminable_if:
+            - cel: overflowAfter > 0.05 && !(l1 > params.factor * l0)
+              say:
+                {
+                  zh-CN: '直方图饱和：开始之后最多 {overflowAfter, number, percent} 的请求超过最高的有限桶，p95 只能确定不低于 {l1, number} 秒',
+                  en: 'Histogram saturated: after the start up to {overflowAfter, number, percent} of requests exceeded the highest finite bucket, p95 is at least {l1, number} s',
+                }
           abnormal_if:
             - cel: l1 > params.factor * l0
               say:

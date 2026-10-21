@@ -117,6 +117,10 @@ export function compileCard(base: Environment, def: CardDefinition, opts: Compil
     if (!checked.valid) {
       fail(`${what} 的 CEL 不合法：${checked.error?.message ?? ''}：${source}`);
     }
+    // 拓扑中的实体 kind 带 API 组（Application.argoproj.io），按字符串比较会把目标实体当成别的 kind
+    if (/\bentity\.kind\s*(==|!=)|(==|!=)\s*entity\.kind\b|\bentity\.kind\s+in\b/.test(source)) {
+      fail(`${what} 按字符串比较 entity.kind，改用 kind_is(entity.kind, "<Kind[.组]>")：${source}`);
+    }
     const parsed = e.parse(source);
     const ids = identifiers(parsed.ast as never);
     if (visibleLets) {

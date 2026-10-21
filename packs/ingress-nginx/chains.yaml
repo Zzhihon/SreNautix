@@ -18,7 +18,7 @@ chains:
           let:
             - {
                 name: mine,
-                cel: 'entity.kind == "Ingress" ? ratio.filter(s, label(s, "ingress") == entity.name) : ratio',
+                cel: 'kind_is(entity.kind, "Ingress.networking.k8s.io") ? ratio.filter(s, label(s, "ingress") == entity.name) : ratio',
               }
             - { name: peak, cel: max(mine) }
             - { name: anomaly_started_at, cel: 'first_above(mine, params.ratio)' }
@@ -42,10 +42,27 @@ chains:
         params: { seconds: 2 }
         refs:
           - { name: p99, signal: ingress_latency_p99, mode: range }
+          - { name: over, signal: ingress_latency_p99_overflow, mode: range, empty_is: normal }
         judge:
           let:
-            - { name: mine, cel: 'entity.kind == "Ingress" ? p99.filter(s, label(s, "ingress") == entity.name) : p99' }
+            - {
+                name: mine,
+                cel: 'kind_is(entity.kind, "Ingress.networking.k8s.io") ? p99.filter(s, label(s, "ingress") == entity.name) : p99',
+              }
             - { name: peak, cel: max(mine) }
+            - {
+                name: myOver,
+                cel: 'kind_is(entity.kind, "Ingress.networking.k8s.io") ? over.filter(s, label(s, "ingress") == entity.name) : over',
+              }
+            - { name: overflowPeak, cel: 'count(myOver) > 0 ? max(myOver) : 0.0' }
+          # p99 落在 +Inf 桶时 histogram_quantile 只给出最高有限桶的上界，是下限：下限已超过阈值仍判异常，否则无法判定
+          undeterminable_if:
+            - cel: overflowPeak > 0.01 && !(peak > double(params.seconds))
+              say:
+                {
+                  zh-CN: '直方图饱和：最多 {overflowPeak, number, percent} 的请求超过最高的有限桶，p99 只能确定不低于 {peak, number} 秒',
+                  en: 'Histogram saturated: up to {overflowPeak, number, percent} of requests exceeded the highest finite bucket, p99 is at least {peak, number} s',
+                }
           abnormal_if:
             - cel: peak > double(params.seconds)
               say: { zh-CN: 'p99 延迟峰值 {peak, number} 秒', en: 'Peak p99 latency {peak, number} s' }

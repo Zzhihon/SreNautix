@@ -18,13 +18,13 @@ chains:
           let:
             - {
                 name: mine,
-                cel: 'entity.kind == "Certificate" ? expiry.filter(s, label(s, "name") == entity.name) : expiry',
+                cel: 'kind_is(entity.kind, "Certificate.cert-manager.io") ? expiry.filter(s, label(s, "name") == entity.name) : expiry',
               }
             - { name: soonest, cel: 'min(mine) / 86400.0' }
             - name: notReadyCount
-              cel: 'size(notReady.filter(s, entity.kind != "Certificate" || label(s, "name") == entity.name))'
+              cel: 'size(notReady.filter(s, !kind_is(entity.kind, "Certificate.cert-manager.io") || label(s, "name") == entity.name))'
             - name: overdueCount
-              cel: 'size(overdue.filter(s, entity.kind != "Certificate" || label(s, "name") == entity.name))'
+              cel: 'size(overdue.filter(s, !kind_is(entity.kind, "Certificate.cert-manager.io") || label(s, "name") == entity.name))'
           abnormal_if:
             - cel: soonest < double(params.days)
               say:

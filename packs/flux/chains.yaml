@@ -17,7 +17,7 @@ chains:
           let:
             - {
                 name: mine,
-                cel: 'entity.kind == "Namespace" ? info : info.filter(s, label(s, "name") == entity.name && label(s, "customresource_kind") == entity.kind)',
+                cel: 'kind_is(entity.kind, "Namespace") ? info : info.filter(s, label(s, "name") == entity.name && kind_is(entity.kind, label(s, "customresource_kind")))',
               }
             - { name: notReady, cel: 'size(mine.filter(s, label(s, "ready") != "True" && last(s) > 0.0))' }
             - { name: suspended, cel: 'size(mine.filter(s, label(s, "suspended") == "true" && last(s) > 0.0))' }
@@ -45,9 +45,19 @@ chains:
         params: { seconds: 60 }
         refs:
           - { name: p99, signal: reconcile_duration_p99, mode: range }
+          - { name: over, signal: reconcile_duration_p99_overflow, mode: range, empty_is: normal }
         judge:
           let:
             - { name: peak, cel: max(p99) }
+            - { name: overflowPeak, cel: 'count(over) > 0 ? max(over) : 0.0' }
+          # p99 落在 +Inf 桶时 histogram_quantile 只给出最高有限桶的上界，是下限：下限已超过阈值仍判异常，否则无法判定
+          undeterminable_if:
+            - cel: overflowPeak > 0.01 && !(peak > double(params.seconds))
+              say:
+                {
+                  zh-CN: '直方图饱和：最多 {overflowPeak, number, percent} 的调和超过最高的有限桶，p99 只能确定不低于 {peak, number} 秒',
+                  en: 'Histogram saturated: up to {overflowPeak, number, percent} of reconciles exceeded the highest finite bucket, p99 is at least {peak, number} s',
+                }
           abnormal_if:
             - cel: peak > double(params.seconds)
               say: { zh-CN: '调和 p99 耗时峰值 {peak, number} 秒', en: 'Peak reconcile p99 {peak, number} s' }

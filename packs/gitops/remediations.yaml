@@ -35,8 +35,13 @@ remediations:
       - { name: current_image, cel: 'string(field(files.release_input[0], image_path))' }
       - { name: current_release, cel: 'string(field(files.release_input[0], release_path))' }
       - { name: image_repo, cel: 'current_image.split("@")[0]' }
-      # 只看与发布输入同一镜像仓库的就绪容器，命名空间里其他组件的镜像不参与
-      - { name: candidates, cel: 'serving.filter(s, label(s, "image_id").contains(image_repo + "@sha256:"))' }
+      # 发布输入当前与历史中出现过的全部镜像仓库：坏版本换了仓库（例如 nginx 换成 busybox）时，正在服务的旧版本仍在历史的仓库里
+      - {
+          name: repos,
+          cel: '[image_repo] + history.filter(h, h.doc != null && field(h.doc, image_path) != null).map(h, string(field(h.doc, image_path)).split("@")[0])',
+        }
+      # 只看运行这些仓库镜像的就绪容器，命名空间里其他组件的镜像不参与
+      - { name: candidates, cel: 'serving.filter(s, repos.exists(r, label(s, "image_id").contains(r + "@sha256:")))' }
       - {
           name: serving_digest,
           cel: 'size(candidates) > 0 ? digest(label(candidates.filter(s, candidates.all(o, last(o) <= last(s)))[0], "image_id")) : ""',
@@ -52,8 +57,8 @@ remediations:
       - cel: size(candidates) == 0
         say:
           {
-            zh-CN: '没有就绪 Pod 运行 {image_repo} 的镜像，无法确定正在服务的版本',
-            en: 'No ready pod runs an image from {image_repo}, so the serving version is unknown',
+            zh-CN: '没有就绪 Pod 运行发布输入出现过的镜像仓库（当前 {image_repo}），无法确定正在服务的版本',
+            en: 'No ready pod runs an image from a repository the release input has used (now {image_repo}), so the serving version is unknown',
           }
       - cel: digest(current_image) == serving_digest
         say:

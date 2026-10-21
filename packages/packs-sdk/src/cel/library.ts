@@ -55,6 +55,19 @@ function seriesValues(s: unknown, fn: string): number[] {
 
 const sumOf = (v: number[]) => v.reduce((a, b) => a + b, 0);
 
+/** kind_is 的比较：kind 部分不区分大小写；两边都带 API 组时组必须相同（组不区分大小写） */
+export function kindIs(actual: string, want: string): boolean {
+  const split = (k: string) => {
+    const i = k.indexOf('.');
+    return i < 0
+      ? { kind: k.toLowerCase(), group: null }
+      : { kind: k.slice(0, i).toLowerCase(), group: k.slice(i + 1).toLowerCase() };
+  };
+  const a = split(actual);
+  const w = split(want);
+  return a.kind === w.kind && (a.group === null || w.group === null || a.group === w.group);
+}
+
 /** 两个序列按共同标签匹配时使用的键：只取双方都有的标签 */
 function joinKey(labels: Record<string, string>, names: string[]): string {
   return JSON.stringify(names.map((n) => labels[n] ?? ''));
@@ -261,6 +274,9 @@ export function createBaseEnvironment(): Environment {
       }
       return labels[name] ?? '';
     })
+    // 实体 kind 是否是给定的 kind（kind 不区分大小写；给定带 API 组时，实体带组则组必须相同，不带组也算）：
+    // 拓扑中的实体带组（Application.argoproj.io），告警标签契约给出的不带组（application）
+    .registerFunction('kind_is(string, string): bool', (actual: string, want: string) => kindIs(actual, want))
     .registerFunction('abs(double): double', (x: number) => Math.abs(x))
     .registerFunction('fmt_pct(double): string', (x: number) => fmtPct(x))
     .registerFunction('fmt_bytes(double): string', (x: number) => fmtBytes(x))

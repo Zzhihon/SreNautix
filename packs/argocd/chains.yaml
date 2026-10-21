@@ -17,7 +17,7 @@ chains:
           let:
             - {
                 name: mine,
-                cel: 'entity.kind == "Application" ? info.filter(s, label(s, "name") == entity.name) : info',
+                cel: 'kind_is(entity.kind, "Application.argoproj.io") ? info.filter(s, label(s, "name") == entity.name) : info',
               }
             - {
                 name: degraded,
@@ -52,11 +52,11 @@ chains:
           let:
             - {
                 name: failures,
-                cel: 'size(failed.filter(s, entity.kind != "Application" || label(s, "name") == entity.name))',
+                cel: 'size(failed.filter(s, !kind_is(entity.kind, "Application.argoproj.io") || label(s, "name") == entity.name))',
               }
             - {
                 name: errors,
-                cel: 'size(conditions.filter(s, entity.kind != "Application" || label(s, "name") == entity.name))',
+                cel: 'size(conditions.filter(s, !kind_is(entity.kind, "Application.argoproj.io") || label(s, "name") == entity.name))',
               }
           abnormal_if:
             - cel: failures > 0

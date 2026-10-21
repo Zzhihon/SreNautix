@@ -228,6 +228,62 @@ signals:
               )
             )
           ))
+  # 同一组 Pod 超过最高有限桶的观测占比：大于 1 - 0.95 时 p95 饱和在最高有限桶的上界
+  - id: hpa_target_latency_p95_overflow
+    kind: metrics
+    unit: ratio
+    alternatives:
+      - expr: >-
+          1 - max(sum by (le) (
+            rate(http_request_duration_seconds_bucket{namespace="$namespace", le!="+Inf"}[$rate_window])
+            * on (namespace, pod) group_left ()
+            (
+              max by (namespace, pod) (
+                label_replace(kube_pod_owner{namespace="$namespace", owner_kind="ReplicaSet"}, "replicaset", "$1", "owner_name", "(.+)")
+                * on (namespace, replicaset) group_left ()
+                max by (namespace, replicaset) (
+                  label_replace(kube_replicaset_owner{namespace="$namespace", owner_kind="Deployment"}, "target", "$1", "owner_name", "(.+)")
+                  * on (namespace, target) group_left ()
+                  max by (namespace, target) (
+                    label_replace(kube_horizontalpodautoscaler_info{namespace="$namespace", horizontalpodautoscaler="$name", scaletargetref_kind="Deployment"}, "target", "$1", "scaletargetref_name", "(.+)")
+                  )
+                )
+              )
+              or
+              max by (namespace, pod) (
+                label_replace(kube_pod_owner{namespace="$namespace", owner_kind="StatefulSet"}, "target", "$1", "owner_name", "(.+)")
+                * on (namespace, target) group_left ()
+                max by (namespace, target) (
+                  label_replace(kube_horizontalpodautoscaler_info{namespace="$namespace", horizontalpodautoscaler="$name", scaletargetref_kind="StatefulSet"}, "target", "$1", "scaletargetref_name", "(.+)")
+                )
+              )
+            )
+          ))
+          / (sum(
+            rate(http_request_duration_seconds_bucket{namespace="$namespace", le="+Inf"}[$rate_window])
+            * on (namespace, pod) group_left ()
+            (
+              max by (namespace, pod) (
+                label_replace(kube_pod_owner{namespace="$namespace", owner_kind="ReplicaSet"}, "replicaset", "$1", "owner_name", "(.+)")
+                * on (namespace, replicaset) group_left ()
+                max by (namespace, replicaset) (
+                  label_replace(kube_replicaset_owner{namespace="$namespace", owner_kind="Deployment"}, "target", "$1", "owner_name", "(.+)")
+                  * on (namespace, target) group_left ()
+                  max by (namespace, target) (
+                    label_replace(kube_horizontalpodautoscaler_info{namespace="$namespace", horizontalpodautoscaler="$name", scaletargetref_kind="Deployment"}, "target", "$1", "scaletargetref_name", "(.+)")
+                  )
+                )
+              )
+              or
+              max by (namespace, pod) (
+                label_replace(kube_pod_owner{namespace="$namespace", owner_kind="StatefulSet"}, "target", "$1", "owner_name", "(.+)")
+                * on (namespace, target) group_left ()
+                max by (namespace, target) (
+                  label_replace(kube_horizontalpodautoscaler_info{namespace="$namespace", horizontalpodautoscaler="$name", scaletargetref_kind="StatefulSet"}, "target", "$1", "scaletargetref_name", "(.+)")
+                )
+              )
+            )
+          ) > 0)
   - id: hpa_target_latency_p95_baseline
     kind: metrics
     unit: seconds
@@ -350,6 +406,14 @@ signals:
     unit: seconds
     alternatives:
       - expr: histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{$selector}[$rate_window])))
+  # 超过最高有限桶的观测占比：大于 1 - 0.95 时 p95 饱和在最高有限桶的上界
+  - id: http_latency_p95_overflow
+    kind: metrics
+    unit: ratio
+    alternatives:
+      - expr: >-
+          1 - max(sum by (le) (rate(http_request_duration_seconds_bucket{$selector, le!="+Inf"}[$rate_window])))
+          / (sum(rate(http_request_duration_seconds_bucket{$selector, le="+Inf"}[$rate_window])) > 0)
 
   # ---- 查询模板（阶段 B 的区分性检查）用的信号：按 Pod 拆分的前 params.k 名 ----
   # 分组标签不能作为参数（信号探测时参数取占位值），所以固定按 pod 拆分

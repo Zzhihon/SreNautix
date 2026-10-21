@@ -21,6 +21,18 @@ signals:
           histogram_quantile(0.99, sum by (le, exported_namespace, ingress) (
             rate(nginx_ingress_controller_request_duration_seconds_bucket{exported_namespace="$namespace"}[$rate_window])
           ))
+  # 超过最高有限桶的观测占比：大于 1 - 0.99 时 p99 饱和在最高有限桶的上界
+  - id: ingress_latency_p99_overflow
+    kind: metrics
+    unit: ratio
+    alternatives:
+      - expr: >-
+          1 - max by (exported_namespace, ingress) (sum by (le, exported_namespace, ingress) (
+            rate(nginx_ingress_controller_request_duration_seconds_bucket{exported_namespace="$namespace", le!="+Inf"}[$rate_window])
+          ))
+          / (sum by (exported_namespace, ingress) (
+            rate(nginx_ingress_controller_request_duration_seconds_bucket{exported_namespace="$namespace", le="+Inf"}[$rate_window])
+          ) > 0)
   - id: config_reload_ok
     kind: metrics
     alternatives:

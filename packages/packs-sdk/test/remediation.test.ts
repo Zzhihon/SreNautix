@@ -33,6 +33,8 @@ const AT = T0 + 50 * MIN;
 const OLD = 'registry.example/shop@sha256:' + 'a'.repeat(64);
 const NEW = 'registry.example/shop@sha256:' + 'b'.repeat(64);
 const SIDECAR = 'registry.example/otel@sha256:' + 'd'.repeat(64);
+// 写错镜像的坏版本：换成了另一个仓库，新 Pod 拉不起来，就绪 Pod 里没有这个仓库的镜像
+const OTHER_REPO = 'registry.example/busybox@sha256:' + 'e'.repeat(64);
 
 const flat = (v: number) => Array.from({ length: 61 }, (_, i) => ({ t: T0 + i * MIN, v }));
 const series = (labels: Record<string, string>, v = 1): FixtureMetricSeries => ({ labels, points: flat(v) });
@@ -305,6 +307,28 @@ describe.each(SHAPES)('$name', (shape) => {
     expect(plan.change['zh-CN']).toContain('r1');
     applyCheck(dir, plan.patch);
     // 应用后与 r1 的提交内容逐字节相同
+    expect(readFileSync(join(dir, shape.layout.release_input!.path), 'utf8')).toBe(release(OLD, 'r1'));
+  });
+
+  it('坏版本换了镜像仓库：从发布输入历史中的仓库找到正在服务的 r1 并回退（Zzhihon/SreNautix#5）', async () => {
+    const dir = makeRepo(shape, [
+      [OLD, 'r1'],
+      [OTHER_REPO, 'r2'],
+    ]);
+    const plan = await planRemediation(
+      set,
+      'gitops/release-to-serving-version',
+      stuck,
+      { repo: new GitRepoReader(dir), layout: shape.layout },
+      ds,
+      AT,
+    );
+    expect(plan.kind).toBe('plan');
+    if (plan.kind !== 'plan') {
+      return;
+    }
+    expect(plan.change['zh-CN']).toContain('r1');
+    applyCheck(dir, plan.patch);
     expect(readFileSync(join(dir, shape.layout.release_input!.path), 'utf8')).toBe(release(OLD, 'r1'));
   });
 

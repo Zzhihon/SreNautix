@@ -17,7 +17,7 @@ chains:
           let:
             - {
                 name: mine,
-                cel: 'entity.kind == "PersistentVolumeClaim" ? rob.filter(s, label(s, "pvc") == entity.name) : rob',
+                cel: 'kind_is(entity.kind, "PersistentVolumeClaim") ? rob.filter(s, label(s, "pvc") == entity.name) : rob',
               }
             - { name: faulted, cel: 'size(mine.filter(s, label(s, "state") == "faulted"))' }
             - { name: degraded, cel: 'size(mine.filter(s, label(s, "state") == "degraded"))' }
@@ -47,7 +47,7 @@ chains:
           let:
             - {
                 name: mine,
-                cel: 'entity.kind == "PersistentVolumeClaim" ? used.filter(s, label(s, "pvc") == entity.name) : used',
+                cel: 'kind_is(entity.kind, "PersistentVolumeClaim") ? used.filter(s, label(s, "pvc") == entity.name) : used',
               }
             - { name: peak, cel: max(mine) }
           abnormal_if:
@@ -66,11 +66,11 @@ chains:
           let:
             - {
                 name: full,
-                cel: 'size(storage.filter(s, (entity.kind != "Node" || label(s, "node") == entity.name) && last(s) > params.ratio))',
+                cel: 'size(storage.filter(s, (!kind_is(entity.kind, "Node") || label(s, "node") == entity.name) && last(s) > params.ratio))',
               }
             - {
                 name: bad,
-                cel: 'size(cond.filter(s, (entity.kind != "Node" || label(s, "node") == entity.name) && min(s) < 1.0))',
+                cel: 'size(cond.filter(s, (!kind_is(entity.kind, "Node") || label(s, "node") == entity.name) && min(s) < 1.0))',
               }
           abnormal_if:
             - cel: bad > 0

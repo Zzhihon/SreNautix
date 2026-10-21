@@ -43,9 +43,19 @@ chains:
               p99_seconds: { type: number, minimum: 0.1, maximum: 60, description: p99 延迟超过这么多秒时判为异常 }
         refs:
           - { name: p99, signal: apiserver_latency_p99, mode: range }
+          - { name: over, signal: apiserver_latency_p99_overflow, mode: range, empty_is: normal }
         judge:
           let:
             - { name: peak, cel: max(p99) }
+            - { name: overflowPeak, cel: 'count(over) > 0 ? max(over) : 0.0' }
+          # p99 落在 +Inf 桶时 histogram_quantile 只给出最高有限桶的上界，是下限：下限已超过阈值仍判异常，否则无法判定
+          undeterminable_if:
+            - cel: overflowPeak > 0.01 && !(peak > double(params.p99_seconds))
+              say:
+                {
+                  zh-CN: '直方图饱和：最多 {overflowPeak, number, percent} 的请求超过最高的有限桶，p99 只能确定不低于 {peak, number} 秒',
+                  en: 'Histogram saturated: up to {overflowPeak, number, percent} of requests exceeded the highest finite bucket, p99 is at least {peak, number} s',
+                }
           abnormal_if:
             - cel: peak > double(params.p99_seconds)
               say: { zh-CN: 'p99 延迟峰值 {peak, number} 秒', en: 'Peak p99 latency {peak, number} s' }
@@ -110,10 +120,20 @@ chains:
               fsync_seconds: { type: number, minimum: 0.01, maximum: 10, description: fsync p99 超过这么多秒时判为异常 }
         refs:
           - { name: fsync, signal: etcd_wal_fsync_p99, mode: range }
+          - { name: over, signal: etcd_wal_fsync_p99_overflow, mode: range, empty_is: normal }
         judge:
           let:
             - { name: peak, cel: max(fsync) }
             - { name: anomaly_started_at, cel: 'first_above(fsync, params.fsync_seconds)' }
+            - { name: overflowPeak, cel: 'count(over) > 0 ? max(over) : 0.0' }
+          # p99 落在 +Inf 桶时 histogram_quantile 只给出最高有限桶的上界，是下限：下限已超过阈值仍判异常，否则无法判定
+          undeterminable_if:
+            - cel: overflowPeak > 0.01 && !(peak > params.fsync_seconds)
+              say:
+                {
+                  zh-CN: '直方图饱和：最多 {overflowPeak, number, percent} 的 fsync 超过最高的有限桶，p99 只能确定不低于 {peak, number} 秒',
+                  en: 'Histogram saturated: up to {overflowPeak, number, percent} of fsyncs exceeded the highest finite bucket, p99 is at least {peak, number} s',
+                }
           abnormal_if:
             - cel: peak > params.fsync_seconds
               say: { zh-CN: 'fsync p99 峰值 {peak, number} 秒', en: 'Peak fsync p99 {peak, number} s' }

@@ -1,0 +1,23 @@
+api_version: srenautix.io/pack-test/v1
+interval: 1m
+input_series:
+  # 最高的有限桶是 0.5 秒，全部请求都超过它：p99 落在 +Inf 桶，histogram_quantile 只返回 0.5（下限）
+  - { series: 'apiserver_request_duration_seconds_bucket{verb="GET",le="0.1"}', values: '0x60' }
+  - { series: 'apiserver_request_duration_seconds_bucket{verb="GET",le="0.5"}', values: '0x60' }
+  - { series: 'apiserver_request_duration_seconds_bucket{verb="GET",le="+Inf"}', values: '0+100x60' }
+tests:
+  - {
+      name: 饱和的下限 0.5 秒没有超过阈值 1 秒，无法判定,
+      eval_time: 40m,
+      card: apiserver/latency,
+      entity: { kind: cluster, name: c1 },
+      expect: { verdict: undeterminable, reason_kind: rule },
+    }
+  - {
+      name: 饱和的下限 0.5 秒已经超过阈值 0.2 秒，判为异常,
+      eval_time: 40m,
+      card: apiserver/latency,
+      entity: { kind: cluster, name: c1 },
+      params: { p99_seconds: 0.2 },
+      expect: { verdict: abnormal, reason_kind: rule },
+    }
