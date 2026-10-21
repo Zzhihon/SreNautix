@@ -136,6 +136,10 @@ jobs:
           kubectl --context kind-srenautix -n gitlocal logs deploy/gitlocal --tail=500 >"$RUNNER_TEMP/diag/gitlocal.log" 2>&1 || true
           kubectl --context kind-srenautix get --raw /api/v1/namespaces/gitlocal/services/gitlocal:3000/proxy/_test/state >"$RUNNER_TEMP/diag/gitlocal-state.json" 2>&1 || true
           kubectl --context kind-srenautix -n argocd get applications -o yaml >"$RUNNER_TEMP/diag/argocd-applications.yaml" 2>&1 || true
+          # 收集时刻 Prometheus 的全部告警（带完整标签，包括 srenautix_self）与最近 6 小时出现过的告警名、命名空间
+          kubectl --context kind-srenautix get --raw /api/v1/namespaces/monitoring/services/kps-prometheus:9090/proxy/api/v1/alerts >"$RUNNER_TEMP/diag/alerts.json" 2>&1 || true
+          kubectl --context kind-srenautix get --raw "/api/v1/namespaces/monitoring/services/kps-prometheus:9090/proxy/api/v1/query?query=$(jq -rn '"count by (alertname, namespace, alertstate, srenautix_self) (max_over_time(ALERTS[6h]))"|@uri')" >"$RUNNER_TEMP/diag/alerts-6h.json" 2>&1 || true
+          kubectl --context kind-srenautix -n srenautix logs deploy/srenautix-server --tail=2000 >"$RUNNER_TEMP/diag/server.log" 2>&1 || true
           cp -R "$RUNNER_TEMP/scenarios" "$RUNNER_TEMP/diag/" 2>/dev/null || true
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()

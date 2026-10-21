@@ -39,6 +39,15 @@ scenario_incidents() {
      | select(((.root_component // "") | capture("^[^:]+:(?<ns>[a-z0-9-]+)/")? // {ns: ""} | .ns) | test($bg) | not)]'
 }
 
+# 失败信息用：每个事件的根因、标签与成员告警（告警名、组件、状态、开始时间）；参数：scenario_incidents 的输出
+describe_incidents() {
+  local id
+  for id in $(jq -r '.[].incident_id' <<<"$1"); do
+    srenautix_api "/v1/incidents/$id" | jq -c '{root: .root, label, members: [.members[]
+      | {alertname, component, status, starts_at}]}' || printf '{"incident_id":"%s","error":"读取失败"}' "$id"
+  done | jq -sc .
+}
+
 # 发现：事件收敛到不超过上限，其中有一个事件的根因匹配 SRENAUTIX_ROOT；输出该事件的 id
 check_discovery() {
   local since=$1 max=${SRENAUTIX_MAX_INCIDENTS:-2} timeout=${SRENAUTIX_TIMEOUT:-600} deadline incidents id
@@ -55,7 +64,7 @@ check_discovery() {
   incidents=$(scenario_incidents "$since")
   local n
   n=$(jq 'length' <<<"$incidents")
-  ((n <= max)) || die "发现：注入之后有 ${n} 个事件，超过 ${max}：$(jq -c '[.[] | {root_component, label}]' <<<"$incidents")"
+  ((n <= max)) || die "发现：注入之后有 ${n} 个事件，超过 ${max}：$(describe_incidents "$incidents")"
   log "发现：${n} 个事件（上限 ${max}），根因事件 ${id}（$(jq -r --arg id "$id" '.[] | select(.incident_id == $id) | .root_component' <<<"$incidents")）"
   printf '%s' "$id"
 }
