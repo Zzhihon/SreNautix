@@ -434,18 +434,22 @@ export async function startHub(opts: HubOptions = {}): Promise<Running> {
       groupKey: '{}:{alertname="KubePodCrashLooping"}',
       truncatedAlerts: 0,
     };
-    // 告警在接入时按标签解析实体：等 informer 把 Pod 写进拓扑再写入告警，否则告警是否映射到 Pod 取决于
-    // informer 与接入谁先完成（CI 上 informer 较慢时 KubePodCrashLooping 落到"未映射"，拓扑页的用例失败）
+    // 告警在接入时按标签解析实体，组件取 Pod 沿 owned_by 的顶层属主（ADR 0104）：等 informer 把 Pod 与
+    // Pod → ReplicaSet → Deployment 的属主边写进拓扑再写入告警，否则告警的组件取决于 informer 与接入谁先完成
+    // （CI 上 informer 较慢时 KubePodCrashLooping 落到"未映射"或停在 Pod 上，拓扑页的用例失败）
     await until(
-      'informer 把 Pod 写进拓扑',
+      'informer 把 Pod 与它的属主链写进拓扑',
       async () =>
         (
           await queryCluster(
             pg as TestCluster,
-            "SELECT 1 FROM server.topology_events WHERE cluster_id = $1 AND item = 'node' AND key = $2 AND valid_to IS NULL",
-            [CLUSTER, 'Pod:shop/api-7d9f8-x2k4p'],
+            `SELECT count(*)::int AS n FROM server.topology_events WHERE cluster_id = $1 AND valid_to IS NULL AND (
+               (item = 'node' AND key = $2) OR
+               (item = 'edge' AND body->>'relation' = 'owned_by' AND (
+                 (body->>'from' = $2 AND body->>'to' = $3) OR (body->>'from' = $3 AND body->>'to' = $4))))`,
+            [CLUSTER, 'Pod:shop/api-7d9f8-x2k4p', 'ReplicaSet:shop/api-7d9f8', 'Deployment:shop/api'],
           )
-        ).length > 0,
+        )[0]?.n === 3,
     );
     expectStatus('写入告警', await api('POST', '/v1/ingest/am', { token: TOKENS.ingest, body: webhook }), 200);
 

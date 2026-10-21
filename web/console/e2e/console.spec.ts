@@ -213,9 +213,13 @@ test('拓扑：没有领域包时覆盖表列出告警映射到的组件且写�
   page,
 }) => {
   await go(page, '/topology?cluster=e2e');
-  // KubePodCrashLooping 按 namespace、pod 标签解析到 informer 写入的 Pod（ADR 0097）：组件没有类型，也没有证据链
+  // KubePodCrashLooping 按 namespace、pod 标签解析到 informer 写入的 Pod（ADR 0097），告警的组件是 Pod 沿 owned_by 的
+  // 顶层属主 Deployment:shop/api（ADR 0104）：覆盖表里它是 api 这一行（没有类型、没有证据链、映射 1 条告警），没有 Pod 行
   const coverage = page.getByRole('table', { name: '覆盖表' });
-  await expect(coverage.getByRole('row', { name: /api-7d9f8-x2k4p/ })).toContainText('没有证据链');
+  const api = coverage.getByRole('row', { name: /^api Deployment · shop/ });
+  await expect(api).toContainText('没有证据链');
+  await expect(api.getByRole('cell').last()).toHaveText('1');
+  await expect(coverage.getByRole('row', { name: /api-7d9f8-x2k4p/ })).toHaveCount(0);
   const unmapped = page.getByRole('table', { name: '14 天内未映射的告警' });
   await expect(unmapped).toContainText('ExternalProbeFailed');
   await expect(unmapped).not.toContainText('KubePodCrashLooping');
