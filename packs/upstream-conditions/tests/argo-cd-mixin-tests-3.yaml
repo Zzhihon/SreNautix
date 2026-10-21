@@ -1,0 +1,17 @@
+# 由 packages/packs-sdk/scripts/upstream-conditions.ts 从上游的 promtool 测试（来源与提交见 upstream/community-rules.json）转换，不要手工修改。
+api_version: srenautix.io/pack-test/v1
+interval: 5m
+input_series:
+  - series: argocd_app_info{autosync_enabled="false", dest_server="https://kubernetes.default.svc", health_status="Healthy", job="argo-cd-argocd-application-controller-metrics", name="ci-cd", namespace="ci-cd", project="ops", sync_status="Synced"}
+    values: 1+0x40
+  - series: argocd_app_info{autosync_enabled="true", dest_server="https://kubernetes.default.svc", health_status="Healthy", job="argo-cd-argocd-application-controller-metrics", name="ci-cd-sync-enabled", namespace="ci-cd", project="ops", sync_status="Synced"}
+    values: 1+0x40
+tests:
+  - name: ArgoCdAppAutoSyncDisabled 在 3h 触发（argo-cd-mixin-tests.yaml#3）
+    eval_time: 3h
+    card: argocd-app-autosync-disabled/condition
+    entity:
+      kind: Application
+      name: ci-cd
+    expect:
+      verdict: abnormal

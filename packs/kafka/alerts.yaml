@@ -20,20 +20,22 @@ entries:
     }
   - {
       id: kafka-under-replicated-partitions,
+      primary_card: upstream-conditions/kafka-under-replicated-partitions/condition,
       alertname: UnderReplicatedPartitions,
       role: cause,
       entity: { kind: Pod, name_labels: [pod] },
       component_type: kafka.broker,
-      chains: [kafka],
+      chains: [kafka, upstream-conditions/kafka-under-replicated-partitions],
       mixin: other,
     }
   - {
       id: kafka-offline-partitions,
+      primary_card: upstream-conditions/kafka-offline-partitions/condition,
       alertname: OfflinePartitions,
       role: cause,
       entity: { kind: Pod, name_labels: [pod] },
       component_type: kafka.broker,
-      chains: [kafka],
+      chains: [kafka, upstream-conditions/kafka-offline-partitions],
       mixin: other,
     }
   - {

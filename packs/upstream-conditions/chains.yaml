@@ -1,0 +1,1530 @@
+# 由 packages/packs-sdk/scripts/upstream-conditions.ts 生成，不要手工修改。
+chains:
+  - id: argocd-app-autosync-disabled
+    title:
+      zh-CN: 告警条件：ArgoCdAppAutoSyncDisabled
+      en: 'Alert condition: ArgoCdAppAutoSyncDisabled'
+    cards:
+      - id: condition
+        title:
+          zh-CN: 告警 ArgoCdAppAutoSyncDisabled 的条件
+          en: Condition of alert ArgoCdAppAutoSyncDisabled
+        note:
+          zh-CN: '与 adinhodovic/argo-cd-mixin@15d57c9 (argo-cd) 中 ArgoCdAppAutoSyncDisabled 的表达式相同；条件持续 for: 2h 时判异常'
+          en: Same expression as ArgoCdAppAutoSyncDisabled in adinhodovic/argo-cd-mixin@15d57c9 (argo-cd); abnormal when it holds for 2h
+        applies_to:
+          kinds:
+            - Application
+        window:
+          before: 30m
+          after: 10m
+        refs:
+          - name: inputs
+            signal: argo_cd_app_auto_sync_disabled.inputs
+            mode: range
+          - name: value_0
+            signal: argo_cd_app_auto_sync_disabled.value
+            mode: range
+            empty_is: normal
+          - name: held_0
+            signal: argo_cd_app_auto_sync_disabled.held
+            mode: range
+            empty_is: normal
+        judge:
+          let:
+            - name: shown_0
+              cel: 'value_0.filter(s, ("name" in s.labels ? s.labels["name"] == entity.name : true))'
+            - name: peak_0
+              cel: 'count(shown_0) > 0 ? max(shown_0) : 0.0'
+            - name: mine_0
+              cel: 'held_0.filter(s, ("name" in s.labels ? s.labels["name"] == entity.name : true))'
+            - name: longest_0
+              cel: 'count(mine_0) > 0 ? max(mine_0) : 0.0'
+          abnormal_if:
+            - cel: count(inputs) > 0 && longest_0 >= 120.0
+              say:
+                zh-CN: 告警 ArgoCdAppAutoSyncDisabled 的条件持续了 2h，表达式的值最高 {peak_0, number}
+                en: The condition of ArgoCdAppAutoSyncDisabled held for 2h, with the expression peaking at {peak_0, number}
+        display:
+          value: peak_0
+        egress: allow
+  - id: cert-manager-absent
+    title:
+      zh-CN: 告警条件：CertManagerAbsent
+      en: 'Alert condition: CertManagerAbsent'
+    cards:
+      - id: condition
+        title:
+          zh-CN: 告警 CertManagerAbsent 的条件
+          en: Condition of alert CertManagerAbsent
+        note:
+          zh-CN: '与 monitoring-mixins/website@a3204ec (cert-manager-mixin) (cert-manager) 中 CertManagerAbsent 的表达式相同；条件持续 for: 10m 时判异常'
+          en: Same expression as CertManagerAbsent in monitoring-mixins/website@a3204ec (cert-manager-mixin) (cert-manager); abnormal when it holds for 10m
+        applies_to:
+          kinds:
+            - cluster
+        window:
+          before: 30m
+          after: 10m
+        refs:
+          - name: inputs
+            signal: cert_manager_absent.inputs
+            mode: range
+          - name: value_0
+            signal: cert_manager_absent.value
+            mode: range
+            empty_is: normal
+          - name: held_0
+            signal: cert_manager_absent.held
+            mode: range
+            empty_is: normal
+        judge:
+          let:
+            - name: shown_0
+              cel: 'value_0.filter(s, ("alertname" in s.labels ? s.labels["alertname"] == entity.name : true))'
+            - name: peak_0
+              cel: 'count(shown_0) > 0 ? max(shown_0) : 0.0'
+            - name: mine_0
+              cel: 'held_0.filter(s, ("alertname" in s.labels ? s.labels["alertname"] == entity.name : true))'
+            - name: longest_0
+              cel: 'count(mine_0) > 0 ? max(mine_0) : 0.0'
+          abnormal_if:
+            - cel: count(inputs) > 0 && longest_0 >= 10.0
+              say:
+                zh-CN: 告警 CertManagerAbsent 的条件持续了 10m，表达式的值最高 {peak_0, number}
+                en: The condition of CertManagerAbsent held for 10m, with the expression peaking at {peak_0, number}
+        display:
+          value: peak_0
+        egress: allow
+  - id: cert-manager-hitting-rate-limits
+    title:
+      zh-CN: 告警条件：CertManagerHittingRateLimits
+      en: 'Alert condition: CertManagerHittingRateLimits'
+    cards:
+      - id: condition
+        title:
+          zh-CN: 告警 CertManagerHittingRateLimits 的条件
+          en: Condition of alert CertManagerHittingRateLimits
+        note:
+          zh-CN: '与 monitoring-mixins/website@a3204ec (cert-manager-mixin) (certificates) 中 CertManagerHittingRateLimits 的表达式相同；条件持续 for: 5m 时判异常'
+          en: Same expression as CertManagerHittingRateLimits in monitoring-mixins/website@a3204ec (cert-manager-mixin) (certificates); abnormal when it holds for 5m
+        applies_to:
+          kinds:
+            - cluster
+        window:
+          before: 30m
+          after: 10m
+        refs:
+          - name: inputs
+            signal: cert_manager_hitting_rate_limits.inputs
+            mode: range
+          - name: value_0
+            signal: cert_manager_hitting_rate_limits.value
+            mode: range
+            empty_is: normal
+          - name: held_0
+            signal: cert_manager_hitting_rate_limits.held
+            mode: range
+            empty_is: normal
+        judge:
+          let:
+            - name: shown_0
+              cel: 'value_0.filter(s, ("host" in s.labels ? s.labels["host"] == entity.name : true))'
+            - name: peak_0
+              cel: 'count(shown_0) > 0 ? max(shown_0) : 0.0'
+            - name: mine_0
+              cel: 'held_0.filter(s, ("host" in s.labels ? s.labels["host"] == entity.name : true))'
+            - name: longest_0
+              cel: 'count(mine_0) > 0 ? max(mine_0) : 0.0'
+          abnormal_if:
+            - cel: count(inputs) > 0 && longest_0 >= 5.0
+              say:
+                zh-CN: 告警 CertManagerHittingRateLimits 的条件持续了 5m，表达式的值最高 {peak_0, number}
+                en: The condition of CertManagerHittingRateLimits held for 5m, with the expression peaking at {peak_0, number}
+        display:
+          value: peak_0
+        egress: allow
+  - id: cnpg-cluster-instances-on-same-node
+    title:
+      zh-CN: 告警条件：CNPGClusterInstancesOnSameNode
+      en: 'Alert condition: CNPGClusterInstancesOnSameNode'
+    cards:
+      - id: condition
+        title:
+          zh-CN: 告警 CNPGClusterInstancesOnSameNode 的条件
+          en: Condition of alert CNPGClusterInstancesOnSameNode
+        note:
+          zh-CN: '与 cloudnative-pg/charts cluster-v0.9.0 (cloudnative-pg/*, names replaced by entity variables) 中 CNPGClusterInstancesOnSameNode 的表达式相同；条件持续 for: 5m 时判异常'
+          en: Same expression as CNPGClusterInstancesOnSameNode in cloudnative-pg/charts cluster-v0.9.0 (cloudnative-pg/*, names replaced by entity variables); abnormal when it holds for 5m
+        applies_to:
+          kinds:
+            - Cluster
+        window:
+          before: 30m
+          after: 10m
+        refs:
+          - name: inputs
+            signal: cnpg_cluster_instances_on_same_node.inputs
+            mode: range
+          - name: value_0
+            signal: cnpg_cluster_instances_on_same_node.value
+            mode: range
+            empty_is: normal
+          - name: held_0
+            signal: cnpg_cluster_instances_on_same_node.held
+            mode: range
+            empty_is: normal
+        judge:
+          let:
+            - name: shown_0
+              cel: 'value_0.filter(s, ("cnpg_cluster" in s.labels ? s.labels["cnpg_cluster"] == entity.name : true))'
+            - name: peak_0
+              cel: 'count(shown_0) > 0 ? max(shown_0) : 0.0'
+            - name: mine_0
+              cel: 'held_0.filter(s, ("cnpg_cluster" in s.labels ? s.labels["cnpg_cluster"] == entity.name : true))'
+            - name: longest_0
+              cel: 'count(mine_0) > 0 ? max(mine_0) : 0.0'
+          abnormal_if:
+            - cel: count(inputs) > 0 && longest_0 >= 5.0
+              say:
+                zh-CN: 告警 CNPGClusterInstancesOnSameNode 的条件持续了 5m，表达式的值最高 {peak_0, number}
+                en: The condition of CNPGClusterInstancesOnSameNode held for 5m, with the expression peaking at {peak_0, number}
+        display:
+          value: peak_0
+        egress: allow
+  - id: cnpg-cluster-low-disk-space-critical
+    title:
+      zh-CN: 告警条件：CNPGClusterLowDiskSpaceCritical
+      en: 'Alert condition: CNPGClusterLowDiskSpaceCritical'
+    cards:
+      - id: condition
+        title:
+          zh-CN: 告警 CNPGClusterLowDiskSpaceCritical 的条件
+          en: Condition of alert CNPGClusterLowDiskSpaceCritical
+        note:
+          zh-CN: '与 cloudnative-pg/charts cluster-v0.9.0 (cloudnative-pg/*, names replaced by entity variables) 中 CNPGClusterLowDiskSpaceCritical 的表达式相同；条件持续 for: 5m 时判异常'
+          en: Same expression as CNPGClusterLowDiskSpaceCritical in cloudnative-pg/charts cluster-v0.9.0 (cloudnative-pg/*, names replaced by entity variables); abnormal when it holds for 5m
+        applies_to:
+          kinds:
+            - Cluster
+        window:
+          before: 30m
+          after: 10m
+        refs:
+          - name: inputs
+            signal: cnpg_cluster_low_disk_space_critical.inputs
+            mode: range
+          - name: value_0
+            signal: cnpg_cluster_low_disk_space_critical.value
+            mode: range
+            empty_is: normal
+          - name: held_0
+            signal: cnpg_cluster_low_disk_space_critical.held
+            mode: range
+            empty_is: normal
+        judge:
+          let:
+            - name: shown_0
+              cel: 'value_0.filter(s, ("cnpg_cluster" in s.labels ? s.labels["cnpg_cluster"] == entity.name : true))'
+            - name: peak_0
+              cel: 'count(shown_0) > 0 ? max(shown_0) : 0.0'
+            - name: mine_0
+              cel: 'held_0.filter(s, ("cnpg_cluster" in s.labels ? s.labels["cnpg_cluster"] == entity.name : true))'
+            - name: longest_0
+              cel: 'count(mine_0) > 0 ? max(mine_0) : 0.0'
+          abnormal_if:
+            - cel: count(inputs) > 0 && longest_0 >= 5.0
+              say:
+                zh-CN: 告警 CNPGClusterLowDiskSpaceCritical 的条件持续了 5m，表达式的值最高 {peak_0, number}
+                en: The condition of CNPGClusterLowDiskSpaceCritical held for 5m, with the expression peaking at {peak_0, number}
+        display:
+          value: peak_0
+        egress: allow
+  - id: cnpg-cluster-low-disk-space-warning
+    title:
+      zh-CN: 告警条件：CNPGClusterLowDiskSpaceWarning
+      en: 'Alert condition: CNPGClusterLowDiskSpaceWarning'
+    cards:
+      - id: condition
+        title:
+          zh-CN: 告警 CNPGClusterLowDiskSpaceWarning 的条件
+          en: Condition of alert CNPGClusterLowDiskSpaceWarning
+        note:
+          zh-CN: '与 cloudnative-pg/charts cluster-v0.9.0 (cloudnative-pg/*, names replaced by entity variables) 中 CNPGClusterLowDiskSpaceWarning 的表达式相同；条件持续 for: 5m 时判异常'
+          en: Same expression as CNPGClusterLowDiskSpaceWarning in cloudnative-pg/charts cluster-v0.9.0 (cloudnative-pg/*, names replaced by entity variables); abnormal when it holds for 5m
+        applies_to:
+          kinds:
+            - Cluster
+        window:
+          before: 30m
+          after: 10m
+        refs:
+          - name: inputs
+            signal: cnpg_cluster_low_disk_space_warning.inputs
+            mode: range
+          - name: value_0
+            signal: cnpg_cluster_low_disk_space_warning.value
+            mode: range
+            empty_is: normal
+          - name: held_0
+            signal: cnpg_cluster_low_disk_space_warning.held
+            mode: range
+            empty_is: normal
+        judge:
+          let:
+            - name: shown_0
+              cel: 'value_0.filter(s, ("cnpg_cluster" in s.labels ? s.labels["cnpg_cluster"] == entity.name : true))'
+            - name: peak_0
+              cel: 'count(shown_0) > 0 ? max(shown_0) : 0.0'
+            - name: mine_0
+              cel: 'held_0.filter(s, ("cnpg_cluster" in s.labels ? s.labels["cnpg_cluster"] == entity.name : true))'
+            - name: longest_0
+              cel: 'count(mine_0) > 0 ? max(mine_0) : 0.0'
+          abnormal_if:
+            - cel: count(inputs) > 0 && longest_0 >= 5.0
+              say:
+                zh-CN: 告警 CNPGClusterLowDiskSpaceWarning 的条件持续了 5m，表达式的值最高 {peak_0, number}
+                en: The condition of CNPGClusterLowDiskSpaceWarning held for 5m, with the expression peaking at {peak_0, number}
+        display:
+          value: peak_0
+        egress: allow
+  - id: cnpg-cluster-zone-spread-warning
+    title:
+      zh-CN: 告警条件：CNPGClusterZoneSpreadWarning
+      en: 'Alert condition: CNPGClusterZoneSpreadWarning'
+    cards:
+      - id: condition
+        title:
+          zh-CN: 告警 CNPGClusterZoneSpreadWarning 的条件
+          en: Condition of alert CNPGClusterZoneSpreadWarning
+        note:
+          zh-CN: '与 cloudnative-pg/charts cluster-v0.9.0 (cloudnative-pg/*, names replaced by entity variables) 中 CNPGClusterZoneSpreadWarning 的表达式相同；条件持续 for: 5m 时判异常'
+          en: Same expression as CNPGClusterZoneSpreadWarning in cloudnative-pg/charts cluster-v0.9.0 (cloudnative-pg/*, names replaced by entity variables); abnormal when it holds for 5m
+        applies_to:
+          kinds:
+            - Cluster
+        window:
+          before: 30m
+          after: 10m
+        refs:
+          - name: inputs
+            signal: cnpg_cluster_zone_spread_warning.inputs
+            mode: range
+          - name: value_0
+            signal: cnpg_cluster_zone_spread_warning.value
+            mode: range
+            empty_is: normal
+          - name: held_0
+            signal: cnpg_cluster_zone_spread_warning.held
+            mode: range
+            empty_is: normal
+        judge:
+          let:
+            - name: shown_0
+              cel: 'value_0.filter(s, ("cnpg_cluster" in s.labels ? s.labels["cnpg_cluster"] == entity.name : true))'
+            - name: peak_0
+              cel: 'count(shown_0) > 0 ? max(shown_0) : 0.0'
+            - name: mine_0
+              cel: 'held_0.filter(s, ("cnpg_cluster" in s.labels ? s.labels["cnpg_cluster"] == entity.name : true))'
+            - name: longest_0
+              cel: 'count(mine_0) > 0 ? max(mine_0) : 0.0'
+          abnormal_if:
+            - cel: count(inputs) > 0 && longest_0 >= 5.0
+              say:
+                zh-CN: 告警 CNPGClusterZoneSpreadWarning 的条件持续了 5m，表达式的值最高 {peak_0, number}
+                en: The condition of CNPGClusterZoneSpreadWarning held for 5m, with the expression peaking at {peak_0, number}
+        display:
+          value: peak_0
+        egress: allow
+  - id: cnpg-instance-metrics-absent
+    title:
+      zh-CN: 告警条件：CNPGInstanceMetricsAbsent
+      en: 'Alert condition: CNPGInstanceMetricsAbsent'
+    cards:
+      - id: condition
+        title:
+          zh-CN: 告警 CNPGInstanceMetricsAbsent 的条件
+          en: Condition of alert CNPGInstanceMetricsAbsent
+        note:
+          zh-CN: '与 cloudnative-pg/charts cluster-v0.9.0 (cloudnative-pg/*, names replaced by entity variables) 中 CNPGInstanceMetricsAbsent 的表达式相同；条件持续 for: 10m 时判异常'
+          en: Same expression as CNPGInstanceMetricsAbsent in cloudnative-pg/charts cluster-v0.9.0 (cloudnative-pg/*, names replaced by entity variables); abnormal when it holds for 10m
+        applies_to:
+          kinds:
+            - Pod
+        window:
+          before: 30m
+          after: 10m
+        refs:
+          - name: inputs
+            signal: cnpg_instance_metrics_absent.inputs
+            mode: range
+          - name: value_0
+            signal: cnpg_instance_metrics_absent.value
+            mode: range
+            empty_is: normal
+          - name: held_0
+            signal: cnpg_instance_metrics_absent.held
+            mode: range
+            empty_is: normal
+        judge:
+          let:
+            - name: shown_0
+              cel: 'value_0.filter(s, ("pod" in s.labels ? s.labels["pod"] == entity.name : true))'
+            - name: peak_0
+              cel: 'count(shown_0) > 0 ? max(shown_0) : 0.0'
+            - name: mine_0
+              cel: 'held_0.filter(s, ("pod" in s.labels ? s.labels["pod"] == entity.name : true))'
+            - name: longest_0
+              cel: 'count(mine_0) > 0 ? max(mine_0) : 0.0'
+          abnormal_if:
+            - cel: count(inputs) > 0 && longest_0 >= 10.0
+              say:
+                zh-CN: 告警 CNPGInstanceMetricsAbsent 的条件持续了 10m，表达式的值最高 {peak_0, number}
+                en: The condition of CNPGInstanceMetricsAbsent held for 10m, with the expression peaking at {peak_0, number}
+        display:
+          value: peak_0
+        egress: allow
+  - id: cnpg-logical-replication-errors
+    title:
+      zh-CN: 告警条件：CNPGClusterLogicalReplicationErrors
+      en: 'Alert condition: CNPGClusterLogicalReplicationErrors'
+    cards:
+      - id: condition
+        title:
+          zh-CN: 告警 CNPGClusterLogicalReplicationErrors 的条件
+          en: Condition of alert CNPGClusterLogicalReplicationErrors
+        note:
+          zh-CN: '与 cloudnative-pg/charts cluster-v0.9.0 (cloudnative-pg/*, names replaced by entity variables) 中 CNPGClusterLogicalReplicationErrors 的表达式相同；条件持续 for: 1m 时判异常'
+          en: Same expression as CNPGClusterLogicalReplicationErrors in cloudnative-pg/charts cluster-v0.9.0 (cloudnative-pg/*, names replaced by entity variables); abnormal when it holds for 1m
+        applies_to:
+          kinds:
+            - Cluster
+        window:
+          before: 30m
+          after: 10m
+        refs:
+          - name: inputs
+            signal: cnpg_cluster_logical_replication_errors.inputs
+            mode: range
+          - name: value_0
+            signal: cnpg_cluster_logical_replication_errors.value
+            mode: range
+            empty_is: normal
+          - name: held_0
+            signal: cnpg_cluster_logical_replication_errors.held
+            mode: range
+            empty_is: normal
+        judge:
+          let:
+            - name: shown_0
+              cel: 'value_0.filter(s, ("cnpg_cluster" in s.labels ? s.labels["cnpg_cluster"] == entity.name : ("cluster" in s.labels ? s.labels["cluster"] == entity.name : true)))'
+            - name: peak_0
+              cel: 'count(shown_0) > 0 ? max(shown_0) : 0.0'
+            - name: mine_0
+              cel: 'held_0.filter(s, ("cnpg_cluster" in s.labels ? s.labels["cnpg_cluster"] == entity.name : ("cluster" in s.labels ? s.labels["cluster"] == entity.name : true)))'
+            - name: longest_0
+              cel: 'count(mine_0) > 0 ? max(mine_0) : 0.0'
+          abnormal_if:
+            - cel: count(inputs) > 0 && longest_0 >= 1.0
+              say:
+                zh-CN: 告警 CNPGClusterLogicalReplicationErrors 的条件持续了 1m，表达式的值最高 {peak_0, number}
+                en: The condition of CNPGClusterLogicalReplicationErrors held for 1m, with the expression peaking at {peak_0, number}
+        display:
+          value: peak_0
+        egress: allow
+  - id: cnpg-logical-replication-errors-critical
+    title:
+      zh-CN: 告警条件：CNPGClusterLogicalReplicationErrorsCritical
+      en: 'Alert condition: CNPGClusterLogicalReplicationErrorsCritical'
+    cards:
+      - id: condition
+        title:
+          zh-CN: 告警 CNPGClusterLogicalReplicationErrorsCritical 的条件
+          en: Condition of alert CNPGClusterLogicalReplicationErrorsCritical
+        note:
+          zh-CN: '与 cloudnative-pg/charts cluster-v0.9.0 (cloudnative-pg/*, names replaced by entity variables) 中 CNPGClusterLogicalReplicationErrorsCritical 的表达式相同；条件持续 for: 0m 时判异常'
+          en: Same expression as CNPGClusterLogicalReplicationErrorsCritical in cloudnative-pg/charts cluster-v0.9.0 (cloudnative-pg/*, names replaced by entity variables); abnormal when it holds for 0m
+        applies_to:
+          kinds:
+            - Cluster
+        window:
+          before: 30m
+          after: 10m
+        refs:
+          - name: inputs
+            signal: cnpg_cluster_logical_replication_errors_critical.inputs
+            mode: range
+          - name: value_0
+            signal: cnpg_cluster_logical_replication_errors_critical.value
+            mode: range
+            empty_is: normal
+        judge:
+          let:
+            - name: shown_0
+              cel: 'value_0.filter(s, ("cnpg_cluster" in s.labels ? s.labels["cnpg_cluster"] == entity.name : ("cluster" in s.labels ? s.labels["cluster"] == entity.name : true)))'
+            - name: peak_0
+              cel: 'count(shown_0) > 0 ? max(shown_0) : 0.0'
+          abnormal_if:
+            - cel: count(inputs) > 0 && count(shown_0) > 0
+              say:
+                zh-CN: 告警 CNPGClusterLogicalReplicationErrorsCritical 的条件成立，表达式的值最高 {peak_0, number}
+                en: The condition of CNPGClusterLogicalReplicationErrorsCritical held, with the expression peaking at {peak_0, number}
+        display:
+          value: peak_0
+        egress: allow
+  - id: cnpg-logical-replication-lagging
+    title:
+      zh-CN: 告警条件：CNPGClusterLogicalReplicationLagging
+      en: 'Alert condition: CNPGClusterLogicalReplicationLagging'
+    cards:
+      - id: condition
+        title:
+          zh-CN: 告警 CNPGClusterLogicalReplicationLagging 的条件
+          en: Condition of alert CNPGClusterLogicalReplicationLagging
+        note:
+          zh-CN: '与 cloudnative-pg/charts cluster-v0.9.0 (cloudnative-pg/*, names replaced by entity variables) 中 CNPGClusterLogicalReplicationLagging 的表达式相同；条件持续 for: 5m 时判异常'
+          en: Same expression as CNPGClusterLogicalReplicationLagging in cloudnative-pg/charts cluster-v0.9.0 (cloudnative-pg/*, names replaced by entity variables); abnormal when it holds for 5m
+        applies_to:
+          kinds:
+            - Cluster
+        window:
+          before: 30m
+          after: 10m
+        refs:
+          - name: inputs
+            signal: cnpg_cluster_logical_replication_lagging.inputs
+            mode: range
+          - name: value_0
+            signal: cnpg_cluster_logical_replication_lagging.value
+            mode: range
+            empty_is: normal
+          - name: held_0
+            signal: cnpg_cluster_logical_replication_lagging.held
+            mode: range
+            empty_is: normal
+        judge:
+          let:
+            - name: shown_0
+              cel: 'value_0.filter(s, ("cnpg_cluster" in s.labels ? s.labels["cnpg_cluster"] == entity.name : ("cluster" in s.labels ? s.labels["cluster"] == entity.name : true)))'
+            - name: peak_0
+              cel: 'count(shown_0) > 0 ? max(shown_0) : 0.0'
+            - name: mine_0
+              cel: 'held_0.filter(s, ("cnpg_cluster" in s.labels ? s.labels["cnpg_cluster"] == entity.name : ("cluster" in s.labels ? s.labels["cluster"] == entity.name : true)))'
+            - name: longest_0
+              cel: 'count(mine_0) > 0 ? max(mine_0) : 0.0'
+          abnormal_if:
+            - cel: count(inputs) > 0 && longest_0 >= 5.0
+              say:
+                zh-CN: 告警 CNPGClusterLogicalReplicationLagging 的条件持续了 5m，表达式的值最高 {peak_0, number}
+                en: The condition of CNPGClusterLogicalReplicationLagging held for 5m, with the expression peaking at {peak_0, number}
+        display:
+          value: peak_0
+        egress: allow
+  - id: cnpg-logical-replication-lagging-critical
+    title:
+      zh-CN: 告警条件：CNPGClusterLogicalReplicationLaggingCritical
+      en: 'Alert condition: CNPGClusterLogicalReplicationLaggingCritical'
+    cards:
+      - id: condition
+        title:
+          zh-CN: 告警 CNPGClusterLogicalReplicationLaggingCritical 的条件
+          en: Condition of alert CNPGClusterLogicalReplicationLaggingCritical
+        note:
+          zh-CN: '与 cloudnative-pg/charts cluster-v0.9.0 (cloudnative-pg/*, names replaced by entity variables) 中 CNPGClusterLogicalReplicationLaggingCritical 的表达式相同；条件持续 for: 2m 时判异常'
+          en: Same expression as CNPGClusterLogicalReplicationLaggingCritical in cloudnative-pg/charts cluster-v0.9.0 (cloudnative-pg/*, names replaced by entity variables); abnormal when it holds for 2m
+        applies_to:
+          kinds:
+            - Cluster
+        window:
+          before: 30m
+          after: 10m
+        refs:
+          - name: inputs
+            signal: cnpg_cluster_logical_replication_lagging_critical.inputs
+            mode: range
+          - name: value_0
+            signal: cnpg_cluster_logical_replication_lagging_critical.value
+            mode: range
+            empty_is: normal
+          - name: held_0
+            signal: cnpg_cluster_logical_replication_lagging_critical.held
+            mode: range
+            empty_is: normal
+        judge:
+          let:
+            - name: shown_0
+              cel: 'value_0.filter(s, ("cnpg_cluster" in s.labels ? s.labels["cnpg_cluster"] == entity.name : ("cluster" in s.labels ? s.labels["cluster"] == entity.name : true)))'
+            - name: peak_0
+              cel: 'count(shown_0) > 0 ? max(shown_0) : 0.0'
+            - name: mine_0
+              cel: 'held_0.filter(s, ("cnpg_cluster" in s.labels ? s.labels["cnpg_cluster"] == entity.name : ("cluster" in s.labels ? s.labels["cluster"] == entity.name : true)))'
+            - name: longest_0
+              cel: 'count(mine_0) > 0 ? max(mine_0) : 0.0'
+          abnormal_if:
+            - cel: count(inputs) > 0 && longest_0 >= 2.0
+              say:
+                zh-CN: 告警 CNPGClusterLogicalReplicationLaggingCritical 的条件持续了 2m，表达式的值最高 {peak_0, number}
+                en: The condition of CNPGClusterLogicalReplicationLaggingCritical held for 2m, with the expression peaking at {peak_0, number}
+        display:
+          value: peak_0
+        egress: allow
+  - id: cnpg-logical-replication-stopped
+    title:
+      zh-CN: 告警条件：CNPGClusterLogicalReplicationStopped
+      en: 'Alert condition: CNPGClusterLogicalReplicationStopped'
+    cards:
+      - id: condition
+        title:
+          zh-CN: 告警 CNPGClusterLogicalReplicationStopped 的条件
+          en: Condition of alert CNPGClusterLogicalReplicationStopped
+        note:
+          zh-CN: '与 cloudnative-pg/charts cluster-v0.9.0 (cloudnative-pg/*, names replaced by entity variables) 中 CNPGClusterLogicalReplicationStopped 的表达式相同；条件持续 for: 5m 时判异常'
+          en: Same expression as CNPGClusterLogicalReplicationStopped in cloudnative-pg/charts cluster-v0.9.0 (cloudnative-pg/*, names replaced by entity variables); abnormal when it holds for 5m
+        applies_to:
+          kinds:
+            - Cluster
+        window:
+          before: 30m
+          after: 10m
+        refs:
+          - name: inputs
+            signal: cnpg_cluster_logical_replication_stopped.inputs
+            mode: range
+          - name: value_0
+            signal: cnpg_cluster_logical_replication_stopped.value
+            mode: range
+            empty_is: normal
+          - name: held_0
+            signal: cnpg_cluster_logical_replication_stopped.held
+            mode: range
+            empty_is: normal
+        judge:
+          let:
+            - name: shown_0
+              cel: 'value_0.filter(s, ("cnpg_cluster" in s.labels ? s.labels["cnpg_cluster"] == entity.name : ("cluster" in s.labels ? s.labels["cluster"] == entity.name : true)))'
+            - name: peak_0
+              cel: 'count(shown_0) > 0 ? max(shown_0) : 0.0'
+            - name: mine_0
+              cel: 'held_0.filter(s, ("cnpg_cluster" in s.labels ? s.labels["cnpg_cluster"] == entity.name : ("cluster" in s.labels ? s.labels["cluster"] == entity.name : true)))'
+            - name: longest_0
+              cel: 'count(mine_0) > 0 ? max(mine_0) : 0.0'
+          abnormal_if:
+            - cel: count(inputs) > 0 && longest_0 >= 5.0
+              say:
+                zh-CN: 告警 CNPGClusterLogicalReplicationStopped 的条件持续了 5m，表达式的值最高 {peak_0, number}
+                en: The condition of CNPGClusterLogicalReplicationStopped held for 5m, with the expression peaking at {peak_0, number}
+        display:
+          value: peak_0
+        egress: allow
+  - id: cnpg-logical-replication-stopped-critical
+    title:
+      zh-CN: 告警条件：CNPGClusterLogicalReplicationStoppedCritical
+      en: 'Alert condition: CNPGClusterLogicalReplicationStoppedCritical'
+    cards:
+      - id: condition
+        title:
+          zh-CN: 告警 CNPGClusterLogicalReplicationStoppedCritical 的条件
+          en: Condition of alert CNPGClusterLogicalReplicationStoppedCritical
+        note:
+          zh-CN: '与 cloudnative-pg/charts cluster-v0.9.0 (cloudnative-pg/*, names replaced by entity variables) 中 CNPGClusterLogicalReplicationStoppedCritical 的表达式相同；条件持续 for: 15m 时判异常'
+          en: Same expression as CNPGClusterLogicalReplicationStoppedCritical in cloudnative-pg/charts cluster-v0.9.0 (cloudnative-pg/*, names replaced by entity variables); abnormal when it holds for 15m
+        applies_to:
+          kinds:
+            - Cluster
+        window:
+          before: 30m
+          after: 10m
+        refs:
+          - name: inputs
+            signal: cnpg_cluster_logical_replication_stopped_critical.inputs
+            mode: range
+          - name: value_0
+            signal: cnpg_cluster_logical_replication_stopped_critical.value
+            mode: range
+            empty_is: normal
+          - name: held_0
+            signal: cnpg_cluster_logical_replication_stopped_critical.held
+            mode: range
+            empty_is: normal
+        judge:
+          let:
+            - name: shown_0
+              cel: 'value_0.filter(s, ("cnpg_cluster" in s.labels ? s.labels["cnpg_cluster"] == entity.name : ("cluster" in s.labels ? s.labels["cluster"] == entity.name : true)))'
+            - name: peak_0
+              cel: 'count(shown_0) > 0 ? max(shown_0) : 0.0'
+            - name: mine_0
+              cel: 'held_0.filter(s, ("cnpg_cluster" in s.labels ? s.labels["cnpg_cluster"] == entity.name : ("cluster" in s.labels ? s.labels["cluster"] == entity.name : true)))'
+            - name: longest_0
+              cel: 'count(mine_0) > 0 ? max(mine_0) : 0.0'
+          abnormal_if:
+            - cel: count(inputs) > 0 && longest_0 >= 15.0
+              say:
+                zh-CN: 告警 CNPGClusterLogicalReplicationStoppedCritical 的条件持续了 15m，表达式的值最高 {peak_0, number}
+                en: The condition of CNPGClusterLogicalReplicationStoppedCritical held for 15m, with the expression peaking at {peak_0, number}
+        display:
+          value: peak_0
+        egress: allow
+  - id: kafka-offline-partitions
+    title:
+      zh-CN: 告警条件：OfflinePartitions
+      en: 'Alert condition: OfflinePartitions'
+    cards:
+      - id: condition
+        title:
+          zh-CN: 告警 OfflinePartitions 的条件
+          en: Condition of alert OfflinePartitions
+        note:
+          zh-CN: '与 strimzi-kafka-operator 1.3.0 prometheus-kafka-rules.yaml (kafka) 中 OfflinePartitions 的表达式相同；条件持续 for: 10s 时判异常'
+          en: Same expression as OfflinePartitions in strimzi-kafka-operator 1.3.0 prometheus-kafka-rules.yaml (kafka); abnormal when it holds for 10s
+        applies_to:
+          kinds:
+            - Pod
+        window:
+          before: 30m
+          after: 10m
+        refs:
+          - name: inputs
+            signal: offline_partitions.inputs
+            mode: range
+          - name: value_0
+            signal: offline_partitions.value
+            mode: range
+            empty_is: normal
+        judge:
+          let:
+            - name: shown_0
+              cel: 'value_0.filter(s, ("pod" in s.labels ? s.labels["pod"] == entity.name : true))'
+            - name: peak_0
+              cel: 'count(shown_0) > 0 ? max(shown_0) : 0.0'
+          abnormal_if:
+            - cel: count(inputs) > 0 && count(shown_0) > 0
+              say:
+                zh-CN: 告警 OfflinePartitions 的条件成立，表达式的值最高 {peak_0, number}
+                en: The condition of OfflinePartitions held, with the expression peaking at {peak_0, number}
+        display:
+          value: peak_0
+        egress: allow
+  - id: kafka-under-replicated-partitions
+    title:
+      zh-CN: 告警条件：UnderReplicatedPartitions
+      en: 'Alert condition: UnderReplicatedPartitions'
+    cards:
+      - id: condition
+        title:
+          zh-CN: 告警 UnderReplicatedPartitions 的条件
+          en: Condition of alert UnderReplicatedPartitions
+        note:
+          zh-CN: '与 strimzi-kafka-operator 1.3.0 prometheus-kafka-rules.yaml (kafka) 中 UnderReplicatedPartitions 的表达式相同；条件持续 for: 10s 时判异常'
+          en: Same expression as UnderReplicatedPartitions in strimzi-kafka-operator 1.3.0 prometheus-kafka-rules.yaml (kafka); abnormal when it holds for 10s
+        applies_to:
+          kinds:
+            - Pod
+        window:
+          before: 30m
+          after: 10m
+        refs:
+          - name: inputs
+            signal: under_replicated_partitions.inputs
+            mode: range
+          - name: value_0
+            signal: under_replicated_partitions.value
+            mode: range
+            empty_is: normal
+        judge:
+          let:
+            - name: shown_0
+              cel: 'value_0.filter(s, ("pod" in s.labels ? s.labels["pod"] == entity.name : true))'
+            - name: peak_0
+              cel: 'count(shown_0) > 0 ? max(shown_0) : 0.0'
+          abnormal_if:
+            - cel: count(inputs) > 0 && count(shown_0) > 0
+              say:
+                zh-CN: 告警 UnderReplicatedPartitions 的条件成立，表达式的值最高 {peak_0, number}
+                en: The condition of UnderReplicatedPartitions held, with the expression peaking at {peak_0, number}
+        display:
+          value: peak_0
+        egress: allow
+  - id: longhorn-instance-manager-cpu-usage-warning
+    title:
+      zh-CN: 告警条件：LonghornInstanceManagerCPUUsageWarning
+      en: 'Alert condition: LonghornInstanceManagerCPUUsageWarning'
+    cards:
+      - id: condition
+        title:
+          zh-CN: 告警 LonghornInstanceManagerCPUUsageWarning 的条件
+          en: Condition of alert LonghornInstanceManagerCPUUsageWarning
+        note:
+          zh-CN: '与 Longhorn 1.13.1 docs alert-rules-example (longhorn.rules) 中 LonghornInstanceManagerCPUUsageWarning 的表达式相同；条件持续 for: 5m 时判异常'
+          en: Same expression as LonghornInstanceManagerCPUUsageWarning in Longhorn 1.13.1 docs alert-rules-example (longhorn.rules); abnormal when it holds for 5m
+        applies_to:
+          kinds:
+            - Node
+        window:
+          before: 30m
+          after: 10m
+        refs:
+          - name: inputs
+            signal: longhorn_instance_manager_cpu_usage_warning.inputs
+            mode: range
+          - name: value_0
+            signal: longhorn_instance_manager_cpu_usage_warning.value
+            mode: range
+            empty_is: normal
+          - name: held_0
+            signal: longhorn_instance_manager_cpu_usage_warning.held
+            mode: range
+            empty_is: normal
+        judge:
+          let:
+            - name: shown_0
+              cel: 'value_0.filter(s, ("node" in s.labels ? s.labels["node"] == entity.name : true))'
+            - name: peak_0
+              cel: 'count(shown_0) > 0 ? max(shown_0) : 0.0'
+            - name: mine_0
+              cel: 'held_0.filter(s, ("node" in s.labels ? s.labels["node"] == entity.name : true))'
+            - name: longest_0
+              cel: 'count(mine_0) > 0 ? max(mine_0) : 0.0'
+          abnormal_if:
+            - cel: count(inputs) > 0 && longest_0 >= 5.0
+              say:
+                zh-CN: 告警 LonghornInstanceManagerCPUUsageWarning 的条件持续了 5m，表达式的值最高 {peak_0, number}
+                en: The condition of LonghornInstanceManagerCPUUsageWarning held for 5m, with the expression peaking at {peak_0, number}
+        display:
+          value: peak_0
+        egress: allow
+  - id: mysql-galera-donor-falling-behind
+    title:
+      zh-CN: 告警条件：MySQLGaleraDonorFallingBehind
+      en: 'Alert condition: MySQLGaleraDonorFallingBehind'
+    cards:
+      - id: condition
+        title:
+          zh-CN: 告警 MySQLGaleraDonorFallingBehind 的条件
+          en: Condition of alert MySQLGaleraDonorFallingBehind
+        note:
+          zh-CN: '与 mysqld_exporter v0.20.0 mysqld-mixin galera.yaml (GaleraAlerts) 中 MySQLGaleraDonorFallingBehind 的表达式相同；条件持续 for: 5m 时判异常'
+          en: Same expression as MySQLGaleraDonorFallingBehind in mysqld_exporter v0.20.0 mysqld-mixin galera.yaml (GaleraAlerts); abnormal when it holds for 5m
+        applies_to:
+          kinds:
+            - Pod
+        window:
+          before: 30m
+          after: 10m
+        refs:
+          - name: inputs
+            signal: my_sql_galera_donor_falling_behind.inputs
+            mode: range
+          - name: value_0
+            signal: my_sql_galera_donor_falling_behind.value
+            mode: range
+            empty_is: normal
+          - name: held_0
+            signal: my_sql_galera_donor_falling_behind.held
+            mode: range
+            empty_is: normal
+        judge:
+          let:
+            - name: shown_0
+              cel: 'value_0.filter(s, ("pod" in s.labels ? s.labels["pod"] == entity.name : ("instance" in s.labels ? s.labels["instance"] == entity.name : true)))'
+            - name: peak_0
+              cel: 'count(shown_0) > 0 ? max(shown_0) : 0.0'
+            - name: mine_0
+              cel: 'held_0.filter(s, ("pod" in s.labels ? s.labels["pod"] == entity.name : ("instance" in s.labels ? s.labels["instance"] == entity.name : true)))'
+            - name: longest_0
+              cel: 'count(mine_0) > 0 ? max(mine_0) : 0.0'
+          abnormal_if:
+            - cel: count(inputs) > 0 && longest_0 >= 5.0
+              say:
+                zh-CN: 告警 MySQLGaleraDonorFallingBehind 的条件持续了 5m，表达式的值最高 {peak_0, number}
+                en: The condition of MySQLGaleraDonorFallingBehind held for 5m, with the expression peaking at {peak_0, number}
+        display:
+          value: peak_0
+        egress: allow
+  - id: mysql-innodb-log-waits
+    title:
+      zh-CN: 告警条件：MySQLInnoDBLogWaits
+      en: 'Alert condition: MySQLInnoDBLogWaits'
+    cards:
+      - id: condition
+        title:
+          zh-CN: 告警 MySQLInnoDBLogWaits 的条件
+          en: Condition of alert MySQLInnoDBLogWaits
+        note:
+          zh-CN: '与 mysqld_exporter v0.20.0 mysqld-mixin galera.yaml (GaleraAlerts) 中 MySQLInnoDBLogWaits 的表达式相同；条件持续 for: 0m 时判异常'
+          en: Same expression as MySQLInnoDBLogWaits in mysqld_exporter v0.20.0 mysqld-mixin galera.yaml (GaleraAlerts); abnormal when it holds for 0m
+        applies_to:
+          kinds:
+            - Pod
+        window:
+          before: 30m
+          after: 10m
+        refs:
+          - name: inputs
+            signal: my_sql_inno_db_log_waits.inputs
+            mode: range
+          - name: value_0
+            signal: my_sql_inno_db_log_waits.value
+            mode: range
+            empty_is: normal
+        judge:
+          let:
+            - name: shown_0
+              cel: 'value_0.filter(s, ("pod" in s.labels ? s.labels["pod"] == entity.name : ("instance" in s.labels ? s.labels["instance"] == entity.name : true)))'
+            - name: peak_0
+              cel: 'count(shown_0) > 0 ? max(shown_0) : 0.0'
+          abnormal_if:
+            - cel: count(inputs) > 0 && count(shown_0) > 0
+              say:
+                zh-CN: 告警 MySQLInnoDBLogWaits 的条件成立，表达式的值最高 {peak_0, number}
+                en: The condition of MySQLInnoDBLogWaits held, with the expression peaking at {peak_0, number}
+        display:
+          value: peak_0
+        egress: allow
+  - id: nacos-down
+    title:
+      zh-CN: 告警条件：NacosDown
+      en: 'Alert condition: NacosDown'
+    cards:
+      - id: condition
+        title:
+          zh-CN: 告警 NacosDown 的条件
+          en: Condition of alert NacosDown
+        note:
+          zh-CN: '与 nacos-group/nacos-k8s@bf2857d operator chart alert.yaml (nacos-alert, names replaced by entity variables) 中 NacosDown 的表达式相同；条件持续 for: 1m 时判异常'
+          en: Same expression as NacosDown in nacos-group/nacos-k8s@bf2857d operator chart alert.yaml (nacos-alert, names replaced by entity variables); abnormal when it holds for 1m
+        applies_to:
+          kinds:
+            - Pod
+        window:
+          before: 30m
+          after: 10m
+        refs:
+          - name: inputs
+            signal: nacos_down.inputs
+            mode: range
+          - name: value_0
+            signal: nacos_down.value
+            mode: range
+            empty_is: normal
+          - name: held_0
+            signal: nacos_down.held
+            mode: range
+            empty_is: normal
+        judge:
+          let:
+            - name: shown_0
+              cel: 'value_0.filter(s, ("pod" in s.labels ? s.labels["pod"] == entity.name : ("instance" in s.labels ? s.labels["instance"] == entity.name : true)))'
+            - name: peak_0
+              cel: 'count(shown_0) > 0 ? max(shown_0) : 0.0'
+            - name: mine_0
+              cel: 'held_0.filter(s, ("pod" in s.labels ? s.labels["pod"] == entity.name : ("instance" in s.labels ? s.labels["instance"] == entity.name : true)))'
+            - name: longest_0
+              cel: 'count(mine_0) > 0 ? max(mine_0) : 0.0'
+          abnormal_if:
+            - cel: count(inputs) > 0 && longest_0 >= 1.0
+              say:
+                zh-CN: 告警 NacosDown 的条件持续了 1m，表达式的值最高 {peak_0, number}
+                en: The condition of NacosDown held for 1m, with the expression peaking at {peak_0, number}
+        display:
+          value: peak_0
+        egress: allow
+  - id: nginx-certificate-expiry
+    title:
+      zh-CN: 告警条件：NGINXCertificateExpiry
+      en: 'Alert condition: NGINXCertificateExpiry'
+    cards:
+      - id: condition
+        title:
+          zh-CN: 告警 NGINXCertificateExpiry 的条件
+          en: Condition of alert NGINXCertificateExpiry
+        note:
+          zh-CN: '与 ingress-nginx helm-chart-4.15.1 values.yaml (commented) 中 NGINXCertificateExpiry 的表达式相同；条件持续 for: 1s 时判异常'
+          en: Same expression as NGINXCertificateExpiry in ingress-nginx helm-chart-4.15.1 values.yaml (commented); abnormal when it holds for 1s
+        applies_to:
+          kinds:
+            - Ingress
+        window:
+          before: 30m
+          after: 10m
+        refs:
+          - name: inputs
+            signal: nginx_certificate_expiry.inputs
+            mode: range
+          - name: value_0
+            signal: nginx_certificate_expiry.value
+            mode: range
+            empty_is: normal
+        judge:
+          let:
+            - name: shown_0
+              cel: 'value_0.filter(s, ("ingress" in s.labels ? s.labels["ingress"] == entity.name : true))'
+            - name: peak_0
+              cel: 'count(shown_0) > 0 ? max(shown_0) : 0.0'
+          abnormal_if:
+            - cel: count(inputs) > 0 && count(shown_0) > 0
+              say:
+                zh-CN: 告警 NGINXCertificateExpiry 的条件成立，表达式的值最高 {peak_0, number}
+                en: The condition of NGINXCertificateExpiry held, with the expression peaking at {peak_0, number}
+        display:
+          value: peak_0
+        egress: allow
+  - id: nginx-config-failed
+    title:
+      zh-CN: 告警条件：NGINXConfigFailed
+      en: 'Alert condition: NGINXConfigFailed'
+    cards:
+      - id: condition
+        title:
+          zh-CN: 告警 NGINXConfigFailed 的条件
+          en: Condition of alert NGINXConfigFailed
+        note:
+          zh-CN: '与 ingress-nginx helm-chart-4.15.1 values.yaml (commented) 中 NGINXConfigFailed 的表达式相同；条件持续 for: 1s 时判异常'
+          en: Same expression as NGINXConfigFailed in ingress-nginx helm-chart-4.15.1 values.yaml (commented); abnormal when it holds for 1s
+        applies_to:
+          kinds:
+            - Pod
+        window:
+          before: 30m
+          after: 10m
+        refs:
+          - name: inputs
+            signal: nginx_config_failed.inputs
+            mode: range
+          - name: value_0
+            signal: nginx_config_failed.value
+            mode: range
+            empty_is: normal
+        judge:
+          let:
+            - name: shown_0
+              cel: 'value_0.filter(s, ("pod" in s.labels ? s.labels["pod"] == entity.name : true))'
+            - name: peak_0
+              cel: 'count(shown_0) > 0 ? max(shown_0) : 0.0'
+          abnormal_if:
+            - cel: count(inputs) > 0 && count(shown_0) > 0
+              say:
+                zh-CN: 告警 NGINXConfigFailed 的条件成立，表达式的值最高 {peak_0, number}
+                en: The condition of NGINXConfigFailed held, with the expression peaking at {peak_0, number}
+        display:
+          value: peak_0
+        egress: allow
+  - id: nginx-too-many-400s
+    title:
+      zh-CN: 告警条件：NGINXTooMany400s
+      en: 'Alert condition: NGINXTooMany400s'
+    cards:
+      - id: condition
+        title:
+          zh-CN: 告警 NGINXTooMany400s 的条件
+          en: Condition of alert NGINXTooMany400s
+        note:
+          zh-CN: '与 ingress-nginx helm-chart-4.15.1 values.yaml (commented) 中 NGINXTooMany400s 的表达式相同；条件持续 for: 1m 时判异常'
+          en: Same expression as NGINXTooMany400s in ingress-nginx helm-chart-4.15.1 values.yaml (commented); abnormal when it holds for 1m
+        applies_to:
+          kinds:
+            - Ingress
+        window:
+          before: 30m
+          after: 10m
+        refs:
+          - name: inputs
+            signal: nginx_too_many400s.inputs
+            mode: range
+          - name: value_0
+            signal: nginx_too_many400s.value
+            mode: range
+            empty_is: normal
+          - name: held_0
+            signal: nginx_too_many400s.held
+            mode: range
+            empty_is: normal
+        judge:
+          let:
+            - name: shown_0
+              cel: 'value_0.filter(s, ("ingress" in s.labels ? s.labels["ingress"] == entity.name : true))'
+            - name: peak_0
+              cel: 'count(shown_0) > 0 ? max(shown_0) : 0.0'
+            - name: mine_0
+              cel: 'held_0.filter(s, ("ingress" in s.labels ? s.labels["ingress"] == entity.name : true))'
+            - name: longest_0
+              cel: 'count(mine_0) > 0 ? max(mine_0) : 0.0'
+          abnormal_if:
+            - cel: count(inputs) > 0 && longest_0 >= 1.0
+              say:
+                zh-CN: 告警 NGINXTooMany400s 的条件持续了 1m，表达式的值最高 {peak_0, number}
+                en: The condition of NGINXTooMany400s held for 1m, with the expression peaking at {peak_0, number}
+        display:
+          value: peak_0
+        egress: allow
+  - id: postgres-exporter-errors
+    title:
+      zh-CN: 告警条件：PostgresHasExporterErrors
+      en: 'Alert condition: PostgresHasExporterErrors'
+    cards:
+      - id: condition
+        title:
+          zh-CN: 告警 PostgresHasExporterErrors 的条件
+          en: Condition of alert PostgresHasExporterErrors
+        note:
+          zh-CN: '与 monitoring-mixins/website@a3204ec (postgres-exporter mixin) (PostgreSQL) 中 PostgresHasExporterErrors 的表达式相同；条件持续 for: 30m 时判异常'
+          en: Same expression as PostgresHasExporterErrors in monitoring-mixins/website@a3204ec (postgres-exporter mixin) (PostgreSQL); abnormal when it holds for 30m
+        applies_to:
+          kinds:
+            - Pod
+        window:
+          before: 30m
+          after: 10m
+        refs:
+          - name: inputs
+            signal: postgres_has_exporter_errors.inputs
+            mode: range
+          - name: value_0
+            signal: postgres_has_exporter_errors.value
+            mode: range
+            empty_is: normal
+          - name: held_0
+            signal: postgres_has_exporter_errors.held
+            mode: range
+            empty_is: normal
+        judge:
+          let:
+            - name: shown_0
+              cel: 'value_0.filter(s, ("pod" in s.labels ? s.labels["pod"] == entity.name : true))'
+            - name: peak_0
+              cel: 'count(shown_0) > 0 ? max(shown_0) : 0.0'
+            - name: mine_0
+              cel: 'held_0.filter(s, ("pod" in s.labels ? s.labels["pod"] == entity.name : true))'
+            - name: longest_0
+              cel: 'count(mine_0) > 0 ? max(mine_0) : 0.0'
+          abnormal_if:
+            - cel: count(inputs) > 0 && longest_0 >= 30.0
+              say:
+                zh-CN: 告警 PostgresHasExporterErrors 的条件持续了 30m，表达式的值最高 {peak_0, number}
+                en: The condition of PostgresHasExporterErrors held for 30m, with the expression peaking at {peak_0, number}
+        display:
+          value: peak_0
+        egress: allow
+  - id: postgres-replication-slot-unused
+    title:
+      zh-CN: 告警条件：PostgresHasReplicationSlotUsed
+      en: 'Alert condition: PostgresHasReplicationSlotUsed'
+    cards:
+      - id: condition
+        title:
+          zh-CN: 告警 PostgresHasReplicationSlotUsed 的条件
+          en: Condition of alert PostgresHasReplicationSlotUsed
+        note:
+          zh-CN: '与 monitoring-mixins/website@a3204ec (postgres-exporter mixin) (PostgreSQL) 中 PostgresHasReplicationSlotUsed 的表达式相同；条件持续 for: 30m 时判异常'
+          en: Same expression as PostgresHasReplicationSlotUsed in monitoring-mixins/website@a3204ec (postgres-exporter mixin) (PostgreSQL); abnormal when it holds for 30m
+        applies_to:
+          kinds:
+            - Pod
+        window:
+          before: 30m
+          after: 10m
+        refs:
+          - name: inputs
+            signal: postgres_has_replication_slot_used.inputs
+            mode: range
+          - name: value_0
+            signal: postgres_has_replication_slot_used.value
+            mode: range
+            empty_is: normal
+          - name: held_0
+            signal: postgres_has_replication_slot_used.held
+            mode: range
+            empty_is: normal
+        judge:
+          let:
+            - name: shown_0
+              cel: 'value_0.filter(s, ("pod" in s.labels ? s.labels["pod"] == entity.name : true))'
+            - name: peak_0
+              cel: 'count(shown_0) > 0 ? max(shown_0) : 0.0'
+            - name: mine_0
+              cel: 'held_0.filter(s, ("pod" in s.labels ? s.labels["pod"] == entity.name : true))'
+            - name: longest_0
+              cel: 'count(mine_0) > 0 ? max(mine_0) : 0.0'
+          abnormal_if:
+            - cel: count(inputs) > 0 && longest_0 >= 30.0
+              say:
+                zh-CN: 告警 PostgresHasReplicationSlotUsed 的条件持续了 30m，表达式的值最高 {peak_0, number}
+                en: The condition of PostgresHasReplicationSlotUsed held for 30m, with the expression peaking at {peak_0, number}
+        display:
+          value: peak_0
+        egress: allow
+  - id: postgres-tables-not-vacuumed
+    title:
+      zh-CN: 告警条件：PostgresTablesNotVaccumed
+      en: 'Alert condition: PostgresTablesNotVaccumed'
+    cards:
+      - id: condition
+        title:
+          zh-CN: 告警 PostgresTablesNotVaccumed 的条件
+          en: Condition of alert PostgresTablesNotVaccumed
+        note:
+          zh-CN: '与 monitoring-mixins/website@a3204ec (postgres-exporter mixin) (PostgreSQL) 中 PostgresTablesNotVaccumed 的表达式相同；条件持续 for: 30m 时判异常'
+          en: Same expression as PostgresTablesNotVaccumed in monitoring-mixins/website@a3204ec (postgres-exporter mixin) (PostgreSQL); abnormal when it holds for 30m
+        applies_to:
+          kinds:
+            - Pod
+        window:
+          before: 30m
+          after: 10m
+        refs:
+          - name: inputs
+            signal: postgres_tables_not_vaccumed.inputs
+            mode: range
+          - name: value_0
+            signal: postgres_tables_not_vaccumed.value
+            mode: range
+            empty_is: normal
+          - name: held_0
+            signal: postgres_tables_not_vaccumed.held
+            mode: range
+            empty_is: normal
+        judge:
+          let:
+            - name: shown_0
+              cel: 'value_0.filter(s, ("pod" in s.labels ? s.labels["pod"] == entity.name : true))'
+            - name: peak_0
+              cel: 'count(shown_0) > 0 ? max(shown_0) : 0.0'
+            - name: mine_0
+              cel: 'held_0.filter(s, ("pod" in s.labels ? s.labels["pod"] == entity.name : true))'
+            - name: longest_0
+              cel: 'count(mine_0) > 0 ? max(mine_0) : 0.0'
+          abnormal_if:
+            - cel: count(inputs) > 0 && longest_0 >= 30.0
+              say:
+                zh-CN: 告警 PostgresTablesNotVaccumed 的条件持续了 30m，表达式的值最高 {peak_0, number}
+                en: The condition of PostgresTablesNotVaccumed held for 30m, with the expression peaking at {peak_0, number}
+        display:
+          value: peak_0
+        egress: allow
+  - id: postgres-too-many-checkpoints-requested
+    title:
+      zh-CN: 告警条件：PostgresTooManyCheckpointsRequested
+      en: 'Alert condition: PostgresTooManyCheckpointsRequested'
+    cards:
+      - id: condition
+        title:
+          zh-CN: 告警 PostgresTooManyCheckpointsRequested 的条件
+          en: Condition of alert PostgresTooManyCheckpointsRequested
+        note:
+          zh-CN: '与 monitoring-mixins/website@a3204ec (postgres-exporter mixin) (PostgreSQL) 中 PostgresTooManyCheckpointsRequested 的表达式相同；条件持续 for: 5m 时判异常'
+          en: Same expression as PostgresTooManyCheckpointsRequested in monitoring-mixins/website@a3204ec (postgres-exporter mixin) (PostgreSQL); abnormal when it holds for 5m
+        applies_to:
+          kinds:
+            - Pod
+        window:
+          before: 30m
+          after: 10m
+        refs:
+          - name: inputs
+            signal: postgres_too_many_checkpoints_requested.inputs
+            mode: range
+          - name: value_0
+            signal: postgres_too_many_checkpoints_requested.value
+            mode: range
+            empty_is: normal
+          - name: held_0
+            signal: postgres_too_many_checkpoints_requested.held
+            mode: range
+            empty_is: normal
+        judge:
+          let:
+            - name: shown_0
+              cel: 'value_0.filter(s, ("pod" in s.labels ? s.labels["pod"] == entity.name : true))'
+            - name: peak_0
+              cel: 'count(shown_0) > 0 ? max(shown_0) : 0.0'
+            - name: mine_0
+              cel: 'held_0.filter(s, ("pod" in s.labels ? s.labels["pod"] == entity.name : true))'
+            - name: longest_0
+              cel: 'count(mine_0) > 0 ? max(mine_0) : 0.0'
+          abnormal_if:
+            - cel: count(inputs) > 0 && longest_0 >= 5.0
+              say:
+                zh-CN: 告警 PostgresTooManyCheckpointsRequested 的条件持续了 5m，表达式的值最高 {peak_0, number}
+                en: The condition of PostgresTooManyCheckpointsRequested held for 5m, with the expression peaking at {peak_0, number}
+        display:
+          value: peak_0
+        egress: allow
+  - id: postgres-too-many-locks
+    title:
+      zh-CN: 告警条件：PostgresAcquiredTooManyLocks
+      en: 'Alert condition: PostgresAcquiredTooManyLocks'
+    cards:
+      - id: condition
+        title:
+          zh-CN: 告警 PostgresAcquiredTooManyLocks 的条件
+          en: Condition of alert PostgresAcquiredTooManyLocks
+        note:
+          zh-CN: '与 monitoring-mixins/website@a3204ec (postgres-exporter mixin) (PostgreSQL) 中 PostgresAcquiredTooManyLocks 的表达式相同；条件持续 for: 5m 时判异常'
+          en: Same expression as PostgresAcquiredTooManyLocks in monitoring-mixins/website@a3204ec (postgres-exporter mixin) (PostgreSQL); abnormal when it holds for 5m
+        applies_to:
+          kinds:
+            - Pod
+        window:
+          before: 30m
+          after: 10m
+        refs:
+          - name: inputs
+            signal: postgres_acquired_too_many_locks.inputs
+            mode: range
+          - name: value_0
+            signal: postgres_acquired_too_many_locks.value
+            mode: range
+            empty_is: normal
+          - name: held_0
+            signal: postgres_acquired_too_many_locks.held
+            mode: range
+            empty_is: normal
+        judge:
+          let:
+            - name: shown_0
+              cel: 'value_0.filter(s, ("pod" in s.labels ? s.labels["pod"] == entity.name : true))'
+            - name: peak_0
+              cel: 'count(shown_0) > 0 ? max(shown_0) : 0.0'
+            - name: mine_0
+              cel: 'held_0.filter(s, ("pod" in s.labels ? s.labels["pod"] == entity.name : true))'
+            - name: longest_0
+              cel: 'count(mine_0) > 0 ? max(mine_0) : 0.0'
+          abnormal_if:
+            - cel: count(inputs) > 0 && longest_0 >= 5.0
+              say:
+                zh-CN: 告警 PostgresAcquiredTooManyLocks 的条件持续了 5m，表达式的值最高 {peak_0, number}
+                en: The condition of PostgresAcquiredTooManyLocks held for 5m, with the expression peaking at {peak_0, number}
+        display:
+          value: peak_0
+        egress: allow
+  - id: postgresql-cache-hit-ratio
+    title:
+      zh-CN: 告警条件：PostgreSQLCacheHitRatio
+      en: 'Alert condition: PostgreSQLCacheHitRatio'
+    cards:
+      - id: condition
+        title:
+          zh-CN: 告警 PostgreSQLCacheHitRatio 的条件
+          en: Condition of alert PostgreSQLCacheHitRatio
+        note:
+          zh-CN: '与 monitoring-mixins/website@a3204ec (postgres-exporter mixin) (PostgreSQL) 中 PostgreSQLCacheHitRatio 的表达式相同；条件持续 for: 5m 时判异常'
+          en: Same expression as PostgreSQLCacheHitRatio in monitoring-mixins/website@a3204ec (postgres-exporter mixin) (PostgreSQL); abnormal when it holds for 5m
+        applies_to:
+          kinds:
+            - Pod
+        window:
+          before: 30m
+          after: 10m
+        refs:
+          - name: inputs
+            signal: postgre_sql_cache_hit_ratio.inputs
+            mode: range
+          - name: value_0
+            signal: postgre_sql_cache_hit_ratio.value
+            mode: range
+            empty_is: normal
+          - name: held_0
+            signal: postgre_sql_cache_hit_ratio.held
+            mode: range
+            empty_is: normal
+        judge:
+          let:
+            - name: shown_0
+              cel: 'value_0.filter(s, ("pod" in s.labels ? s.labels["pod"] == entity.name : true))'
+            - name: peak_0
+              cel: 'count(shown_0) > 0 ? max(shown_0) : 0.0'
+            - name: mine_0
+              cel: 'held_0.filter(s, ("pod" in s.labels ? s.labels["pod"] == entity.name : true))'
+            - name: longest_0
+              cel: 'count(mine_0) > 0 ? max(mine_0) : 0.0'
+          abnormal_if:
+            - cel: count(inputs) > 0 && longest_0 >= 5.0
+              say:
+                zh-CN: 告警 PostgreSQLCacheHitRatio 的条件持续了 5m，表达式的值最高 {peak_0, number}
+                en: The condition of PostgreSQLCacheHitRatio held for 5m, with the expression peaking at {peak_0, number}
+        display:
+          value: peak_0
+        egress: allow
+  - id: postgresql-qps
+    title:
+      zh-CN: 告警条件：PostgreSQLQPS
+      en: 'Alert condition: PostgreSQLQPS'
+    cards:
+      - id: condition
+        title:
+          zh-CN: 告警 PostgreSQLQPS 的条件
+          en: Condition of alert PostgreSQLQPS
+        note:
+          zh-CN: '与 monitoring-mixins/website@a3204ec (postgres-exporter mixin) (PostgreSQL) 中 PostgreSQLQPS 的表达式相同；条件持续 for: 5m 时判异常'
+          en: Same expression as PostgreSQLQPS in monitoring-mixins/website@a3204ec (postgres-exporter mixin) (PostgreSQL); abnormal when it holds for 5m
+        applies_to:
+          kinds:
+            - Pod
+        window:
+          before: 30m
+          after: 10m
+        refs:
+          - name: inputs
+            signal: postgre_sqlqps.inputs
+            mode: range
+          - name: value_0
+            signal: postgre_sqlqps.value
+            mode: range
+            empty_is: normal
+          - name: held_0
+            signal: postgre_sqlqps.held
+            mode: range
+            empty_is: normal
+        judge:
+          let:
+            - name: shown_0
+              cel: 'value_0.filter(s, ("pod" in s.labels ? s.labels["pod"] == entity.name : true))'
+            - name: peak_0
+              cel: 'count(shown_0) > 0 ? max(shown_0) : 0.0'
+            - name: mine_0
+              cel: 'held_0.filter(s, ("pod" in s.labels ? s.labels["pod"] == entity.name : true))'
+            - name: longest_0
+              cel: 'count(mine_0) > 0 ? max(mine_0) : 0.0'
+          abnormal_if:
+            - cel: count(inputs) > 0 && longest_0 >= 5.0
+              say:
+                zh-CN: 告警 PostgreSQLQPS 的条件持续了 5m，表达式的值最高 {peak_0, number}
+                en: The condition of PostgreSQLQPS held for 5m, with the expression peaking at {peak_0, number}
+        display:
+          value: peak_0
+        egress: allow
+  - id: postgresql-slow-queries
+    title:
+      zh-CN: 告警条件：PostgreSQLSlowQueries
+      en: 'Alert condition: PostgreSQLSlowQueries'
+    cards:
+      - id: condition
+        title:
+          zh-CN: 告警 PostgreSQLSlowQueries 的条件
+          en: Condition of alert PostgreSQLSlowQueries
+        note:
+          zh-CN: '与 monitoring-mixins/website@a3204ec (postgres-exporter mixin) (PostgreSQL) 中 PostgreSQLSlowQueries 的表达式相同；条件持续 for: 2m 时判异常'
+          en: Same expression as PostgreSQLSlowQueries in monitoring-mixins/website@a3204ec (postgres-exporter mixin) (PostgreSQL); abnormal when it holds for 2m
+        applies_to:
+          kinds:
+            - Pod
+        window:
+          before: 30m
+          after: 10m
+        refs:
+          - name: inputs
+            signal: postgre_sql_slow_queries.inputs
+            mode: range
+          - name: value_0
+            signal: postgre_sql_slow_queries.value
+            mode: range
+            empty_is: normal
+          - name: held_0
+            signal: postgre_sql_slow_queries.held
+            mode: range
+            empty_is: normal
+        judge:
+          let:
+            - name: shown_0
+              cel: 'value_0.filter(s, ("pod" in s.labels ? s.labels["pod"] == entity.name : true))'
+            - name: peak_0
+              cel: 'count(shown_0) > 0 ? max(shown_0) : 0.0'
+            - name: mine_0
+              cel: 'held_0.filter(s, ("pod" in s.labels ? s.labels["pod"] == entity.name : true))'
+            - name: longest_0
+              cel: 'count(mine_0) > 0 ? max(mine_0) : 0.0'
+          abnormal_if:
+            - cel: count(inputs) > 0 && longest_0 >= 2.0
+              say:
+                zh-CN: 告警 PostgreSQLSlowQueries 的条件持续了 2m，表达式的值最高 {peak_0, number}
+                en: The condition of PostgreSQLSlowQueries held for 2m, with the expression peaking at {peak_0, number}
+        display:
+          value: peak_0
+        egress: allow
+  - id: redis-missing-master
+    title:
+      zh-CN: 告警条件：RedisMissingMaster
+      en: 'Alert condition: RedisMissingMaster'
+    cards:
+      - id: condition
+        title:
+          zh-CN: 告警 RedisMissingMaster 的条件
+          en: Condition of alert RedisMissingMaster
+        note:
+          zh-CN: '与 samber/awesome-prometheus-alerts@822af1e (oliver006-redis-exporter) (Oliver006RedisExporter) 中 RedisMissingMaster 的表达式相同；条件持续 for: 0m 时判异常'
+          en: Same expression as RedisMissingMaster in samber/awesome-prometheus-alerts@822af1e (oliver006-redis-exporter) (Oliver006RedisExporter); abnormal when it holds for 0m
+        applies_to:
+          kinds:
+            - Namespace
+        window:
+          before: 30m
+          after: 10m
+        refs:
+          - name: inputs
+            signal: redis_missing_master.inputs
+            mode: range
+          - name: value_0
+            signal: redis_missing_master.value
+            mode: range
+            empty_is: normal
+        judge:
+          let:
+            - name: shown_0
+              cel: 'value_0.filter(s, ("namespace" in s.labels ? s.labels["namespace"] == entity.name : true))'
+            - name: peak_0
+              cel: 'count(shown_0) > 0 ? max(shown_0) : 0.0'
+          abnormal_if:
+            - cel: count(inputs) > 0 && count(shown_0) > 0
+              say:
+                zh-CN: 告警 RedisMissingMaster 的条件成立，表达式的值最高 {peak_0, number}
+                en: The condition of RedisMissingMaster held, with the expression peaking at {peak_0, number}
+        display:
+          value: peak_0
+        egress: allow
+  - id: rocketmq-group-get-latency
+    title:
+      zh-CN: 告警条件：GroupGetLatencyByStoretime
+      en: 'Alert condition: GroupGetLatencyByStoretime'
+    cards:
+      - id: condition
+        title:
+          zh-CN: 告警 GroupGetLatencyByStoretime 的条件
+          en: Condition of alert GroupGetLatencyByStoretime
+        note:
+          zh-CN: '与 apache/rocketmq-exporter@e1ab2dd example.rules (GaleraAlerts) 中 GroupGetLatencyByStoretime 的表达式相同；条件持续 for: 3m 时判异常'
+          en: Same expression as GroupGetLatencyByStoretime in apache/rocketmq-exporter@e1ab2dd example.rules (GaleraAlerts); abnormal when it holds for 3m
+        applies_to:
+          kinds:
+            - Namespace
+        window:
+          before: 30m
+          after: 10m
+        refs:
+          - name: inputs
+            signal: group_get_latency_by_storetime.inputs
+            mode: range
+          - name: value_0
+            signal: group_get_latency_by_storetime.value
+            mode: range
+            empty_is: normal
+          - name: held_0
+            signal: group_get_latency_by_storetime.held
+            mode: range
+            empty_is: normal
+        judge:
+          let:
+            - name: shown_0
+              cel: 'value_0.filter(s, ("namespace" in s.labels ? s.labels["namespace"] == entity.name : true))'
+            - name: peak_0
+              cel: 'count(shown_0) > 0 ? max(shown_0) : 0.0'
+            - name: mine_0
+              cel: 'held_0.filter(s, ("namespace" in s.labels ? s.labels["namespace"] == entity.name : true))'
+            - name: longest_0
+              cel: 'count(mine_0) > 0 ? max(mine_0) : 0.0'
+          abnormal_if:
+            - cel: count(inputs) > 0 && longest_0 >= 3.0
+              say:
+                zh-CN: 告警 GroupGetLatencyByStoretime 的条件持续了 3m，表达式的值最高 {peak_0, number}
+                en: The condition of GroupGetLatencyByStoretime held for 3m, with the expression peaking at {peak_0, number}
+        display:
+          value: peak_0
+        egress: allow

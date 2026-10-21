@@ -7,6 +7,7 @@ import { parse } from 'yaml';
 import { compilePackSet } from '../src/pack/compile.js';
 import { generateKpsConditions } from '../src/pack/kps-conditions.js';
 import { loadBuiltinPacks } from '../src/pack/sources.js';
+import { generateUpstreamConditions } from '../src/pack/upstream-conditions.js';
 import { alertRulesFrom } from '../src/testing/alert-consistency.js';
 import { runPackTests } from '../src/testing/pack-test.js';
 import { checkCoverage, loadChartPin, renderUpstreamRules } from '../src/testing/upstream-rules.js';
@@ -46,6 +47,46 @@ describe('内置领域包', () => {
     expect(report.cases.filter((c) => !c.passed)).toEqual([]);
     // 每个夹具测试在两个后端上各核对一次
     expect(report.alert_checks).toBe(2 * report.cases.filter((c) => c.kind === 'fixture').length);
+  });
+
+  it('upstream-conditions 与生成器一致，社区包的条目都有主卡，夹具上主卡与上游规则结论一致', async () => {
+    const g = await generateUpstreamConditions(REPO);
+    const read = (p: string) => parse(readFileSync(join(PACKS, p), 'utf8')) as unknown;
+    // 仓库内容与生成结果一致（不比较格式；更新执行 pnpm --filter @srenautix/packs-sdk run gen:upstream-conditions）
+    expect(read('upstream-conditions/pack.yaml')).toEqual(g.manifest);
+    expect(read('upstream-conditions/signals.yaml')).toEqual({ signals: g.pack.signals });
+    expect(read('upstream-conditions/chains.yaml')).toEqual({ chains: g.pack.chains });
+    expect(readdirSync(join(PACKS, 'upstream-conditions/tests')).sort()).toEqual([...g.tests.keys()].sort());
+    for (const [name, t] of g.tests) {
+      expect(read(`upstream-conditions/tests/${name}`)).toEqual(t);
+    }
+    for (const [pack, ids] of g.targets) {
+      const entries = (read(`${pack}/alerts.yaml`) as { entries: AlertCatalogEntry[] }).entries;
+      for (const e of entries.filter((x) => ids.includes(x.id))) {
+        expect(e.primary_card).toBe(`upstream-conditions/${e.id}/condition`);
+        expect(e.chains).toContain(`upstream-conditions/${e.id}`);
+      }
+    }
+    // 目录里 SendTPSTooHigh 这个名字在 rocketmq-exporter 的示例规则与文档中都不存在，没有可生成的条件
+    expect(g.missing).toEqual(['rocketmq/rocketmq-send-tps-too-high']);
+    expect(g.firing).toBeGreaterThan(0);
+
+    const set = await shared;
+    const report = await runPackTests({
+      set,
+      packs: ['upstream-conditions'],
+      alertRules: alertRulesFrom(g.rules, 'community-rules', await loadPromqlEngine()),
+    });
+    expect(report.cases.filter((c) => !c.passed)).toEqual([]);
+    expect(report.alert_checks).toBe(2 * report.cases.filter((c) => c.kind === 'fixture').length);
+  });
+
+  it('内置包中除上游没有规则的条目外，有证据链的条目都声明了主卡', async () => {
+    const set = await shared;
+    const without = set.packs.flatMap((p) =>
+      p.content.alerts.entries.filter((e) => e.chains?.length && !e.primary_card).map((e) => e.id),
+    );
+    expect(without).toEqual(['rocketmq-send-tps-too-high']);
   });
 
   it('alerts-kps 覆盖固定版本 kube-prometheus-stack 的全部告警名，forecast 与 predict_linear 一致', async () => {

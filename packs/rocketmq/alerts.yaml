@@ -19,10 +19,11 @@ entries:
     }
   - {
       id: rocketmq-group-get-latency,
+      primary_card: upstream-conditions/rocketmq-group-get-latency/condition,
       alertname: GroupGetLatencyByStoretime,
       role: symptom,
       entity: { kind: Namespace, name_labels: [namespace] },
-      chains: [rocketmq],
+      chains: [rocketmq, upstream-conditions/rocketmq-group-get-latency],
       mixin: other,
     }
   - {

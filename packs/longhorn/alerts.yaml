@@ -58,10 +58,11 @@ entries:
     }
   - {
       id: longhorn-instance-manager-cpu-usage-warning,
+      primary_card: upstream-conditions/longhorn-instance-manager-cpu-usage-warning/condition,
       alertname: LonghornInstanceManagerCPUUsageWarning,
       role: symptom,
       entity: { kind: Node, name_labels: [node] },
-      chains: [volumes],
+      chains: [volumes, upstream-conditions/longhorn-instance-manager-cpu-usage-warning],
       mixin: other,
     }
   - {

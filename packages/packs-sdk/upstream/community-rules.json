@@ -1,0 +1,128 @@
+{
+  "comment": "社区包告警目录中没有手写主卡的条目所对应的上游告警规则（ADR 0109）。每个文件固定提交与 sha256；scripts/upstream-conditions.ts 下载、提取规则并生成 packs/upstream-conditions。format：rules 为规则文件或 PrometheusRule；commented 为注释掉的规则示例（after 之后同一列的连续注释行）；markdown 为文档中的 yaml 代码块；helm 为按 values 渲染的 chart。replace 把渲染或模板留下的具体名字换成实体变量，by_kind 按条目的实体类型取值。",
+  "sources": [
+    {
+      "id": "argo-cd-mixin",
+      "pack": "argocd",
+      "title": "adinhodovic/argo-cd-mixin@15d57c9",
+      "license": "Apache-2.0",
+      "format": "rules",
+      "url": "https://raw.githubusercontent.com/adinhodovic/argo-cd-mixin/15d57c98aec72b82a2e3726b00f00eb240c3902f/prometheus_alerts.yaml",
+      "sha256": "ea2dfe05b2042af1c7c1db0efc940e5eacbe5f3354b89b93cc94f8b1901cbc04",
+      "tests": [
+        {
+          "url": "https://raw.githubusercontent.com/adinhodovic/argo-cd-mixin/15d57c98aec72b82a2e3726b00f00eb240c3902f/tests/tests.yaml",
+          "sha256": "db408de029066e8493344f288bb1cdab8355d4e7ce03ce8f153f10dea5c95d33"
+        }
+      ]
+    },
+    {
+      "id": "cert-manager-mixin",
+      "pack": "cert-manager",
+      "title": "monitoring-mixins/website@a3204ec (cert-manager-mixin)",
+      "license": "Apache-2.0",
+      "format": "rules",
+      "url": "https://raw.githubusercontent.com/monitoring-mixins/website/a3204ec27972d979a64793b3ace42e0dbcf83e92/assets/cert-manager/alerts.yaml",
+      "sha256": "daa3cddcc02d65a144ddec946f93d6034fee08a2870bd1a5749ff34ef200e255"
+    },
+    {
+      "id": "ingress-nginx-chart",
+      "pack": "ingress-nginx",
+      "title": "ingress-nginx helm-chart-4.15.1 values.yaml",
+      "license": "Apache-2.0",
+      "format": "commented",
+      "after": "rules: []",
+      "url": "https://raw.githubusercontent.com/kubernetes/ingress-nginx/0a5901f3c64f11e92e487799b8da3f00cca37515/charts/ingress-nginx/values.yaml",
+      "sha256": "0d8eac2d4e5cc2ffa225debea7b1feb1fb372520c5b046e21f6177919d54e622"
+    },
+    {
+      "id": "strimzi-kafka-rules",
+      "pack": "kafka",
+      "title": "strimzi-kafka-operator 1.3.0 prometheus-kafka-rules.yaml",
+      "license": "Apache-2.0",
+      "format": "rules",
+      "url": "https://raw.githubusercontent.com/strimzi/strimzi-kafka-operator/0d138c48b936d07cfb4715a27fda2948cdee0fe5/packaging/examples/metrics/prometheus-install/prometheus-rules/prometheus-kafka-rules.yaml",
+      "sha256": "e7120e9b8163475e2147bd9092c0355258c9e9c0e43289dcaece9445e918085e"
+    },
+    {
+      "id": "longhorn-docs",
+      "pack": "longhorn",
+      "title": "Longhorn 1.13.1 docs alert-rules-example",
+      "license": "CC-BY-4.0",
+      "format": "markdown",
+      "url": "https://raw.githubusercontent.com/longhorn/website/cbed06a4a2e1808deb04ecd0368be6f26d00b940/content/docs/1.13.1/monitoring/alert-rules-example.md",
+      "sha256": "e0db5eaaf5d3b3f3cf70db5ce55c9e08b45d4371f6e622ca142bc4809d890852"
+    },
+    {
+      "id": "mysqld-mixin-general",
+      "pack": "mysql",
+      "title": "mysqld_exporter v0.20.0 mysqld-mixin general.yaml",
+      "license": "Apache-2.0",
+      "format": "rules",
+      "url": "https://raw.githubusercontent.com/prometheus/mysqld_exporter/11da31c961d37eab296c48ab50c38c3bdff8e2e3/mysqld-mixin/alerts/general.yaml",
+      "sha256": "8489a91dbcef55f019f93dc8d91b176476bbe1251b9b153d1fa05e8d07a8ed6a"
+    },
+    {
+      "id": "mysqld-mixin-galera",
+      "pack": "mysql",
+      "title": "mysqld_exporter v0.20.0 mysqld-mixin galera.yaml",
+      "license": "Apache-2.0",
+      "format": "rules",
+      "url": "https://raw.githubusercontent.com/prometheus/mysqld_exporter/11da31c961d37eab296c48ab50c38c3bdff8e2e3/mysqld-mixin/alerts/galera.yaml",
+      "sha256": "d5b50ca273b5c324504ff89b4925f42956d67acf00526eef074b04b0eead49e4"
+    },
+    {
+      "id": "nacos-k8s-chart",
+      "pack": "nacos",
+      "title": "nacos-group/nacos-k8s@bf2857d operator chart alert.yaml",
+      "license": "Apache-2.0",
+      "format": "commented",
+      "url": "https://raw.githubusercontent.com/nacos-group/nacos-k8s/bf2857def24e3518cc0f5242f5089eddaf04c3a1/operator/chart/nacos/templates/alert.yaml",
+      "sha256": "d18471dabae06733faef239caf5656d863f27a68f358a0809912acd1df5bd781",
+      "replace": [{ "from": "service='{{ include \"nacos.fullname\" . }}-headless'", "to": "service=~'.+-headless'" }]
+    },
+    {
+      "id": "cnpg-cluster-chart",
+      "pack": "postgres",
+      "title": "cloudnative-pg/charts cluster-v0.9.0",
+      "license": "Apache-2.0",
+      "format": "helm",
+      "release": "srnxrelease",
+      "namespace": "srnxnamespace",
+      "set": { "cluster.monitoring.enabled": "true" },
+      "url": "https://github.com/cloudnative-pg/charts/releases/download/cluster-v0.9.0/cluster-0.9.0.tgz",
+      "sha256": "95b23ee4b7e2b24d7aec03a9b6a7b751ce42c7447f1299a34460764a43a8f030",
+      "replace": [
+        { "from": "srnxrelease-cluster", "to": "[a-z0-9]([-a-z0-9]*[a-z0-9])?", "by_kind": { "Cluster": "$name" } },
+        { "from": "srnxnamespace", "to": "$namespace" }
+      ]
+    },
+    {
+      "id": "postgres-exporter-mixin",
+      "pack": "postgres",
+      "title": "monitoring-mixins/website@a3204ec (postgres-exporter mixin)",
+      "license": "Apache-2.0",
+      "format": "rules",
+      "url": "https://raw.githubusercontent.com/monitoring-mixins/website/a3204ec27972d979a64793b3ace42e0dbcf83e92/assets/postgres-exporter/alerts.yaml",
+      "sha256": "220d759b641d766baa5854ce21ce635ad404e77de043086f8710071934198792"
+    },
+    {
+      "id": "awesome-prometheus-alerts-redis",
+      "pack": "redis",
+      "title": "samber/awesome-prometheus-alerts@822af1e (oliver006-redis-exporter)",
+      "license": "CC-BY-4.0",
+      "format": "rules",
+      "url": "https://raw.githubusercontent.com/samber/awesome-prometheus-alerts/822af1e59938844e9f32c9c2ff7cbe63e8438655/dist/rules/redis/oliver006-redis-exporter.yml",
+      "sha256": "707da73e5f8f0b9b5efa4b791668ffb587611593b5656b7b4d741f6a51e8f7f6"
+    },
+    {
+      "id": "rocketmq-exporter",
+      "pack": "rocketmq",
+      "title": "apache/rocketmq-exporter@e1ab2dd example.rules",
+      "license": "Apache-2.0",
+      "format": "rules",
+      "url": "https://raw.githubusercontent.com/apache/rocketmq-exporter/e1ab2dd569d431c88c9eb599a9284aedc7abeb7c/example.rules",
+      "sha256": "dfb97cb79d3e26d931b4872a300cdcb89d1f40e8f408a14f15cdf0562eeb59c5"
+    }
+  ]
+}

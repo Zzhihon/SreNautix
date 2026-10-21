@@ -14,10 +14,11 @@ entries:
     }
   - {
       id: cnpg-instance-metrics-absent,
+      primary_card: upstream-conditions/cnpg-instance-metrics-absent/condition,
       alertname: CNPGInstanceMetricsAbsent,
       role: meta,
       entity: { kind: Pod, name_labels: [pod] },
-      chains: [availability],
+      chains: [availability, upstream-conditions/cnpg-instance-metrics-absent],
       mixin: other,
     }
   - {
@@ -92,94 +93,104 @@ entries:
     }
   - {
       id: cnpg-cluster-low-disk-space-critical,
+      primary_card: upstream-conditions/cnpg-cluster-low-disk-space-critical/condition,
       alertname: CNPGClusterLowDiskSpaceCritical,
       role: cause,
       entity: { kind: Cluster, name_labels: [cnpg_cluster] },
       component_type: postgres.cnpg-cluster,
-      chains: [pvc/pvc-capacity, wal],
+      chains: [pvc/pvc-capacity, wal, upstream-conditions/cnpg-cluster-low-disk-space-critical],
       mixin: other,
     }
   - {
       id: cnpg-cluster-low-disk-space-warning,
+      primary_card: upstream-conditions/cnpg-cluster-low-disk-space-warning/condition,
       alertname: CNPGClusterLowDiskSpaceWarning,
       role: cause,
       entity: { kind: Cluster, name_labels: [cnpg_cluster] },
       component_type: postgres.cnpg-cluster,
-      chains: [pvc/pvc-capacity, wal],
+      chains: [pvc/pvc-capacity, wal, upstream-conditions/cnpg-cluster-low-disk-space-warning],
       mixin: other,
     }
   - {
       id: cnpg-cluster-instances-on-same-node,
+      primary_card: upstream-conditions/cnpg-cluster-instances-on-same-node/condition,
       alertname: CNPGClusterInstancesOnSameNode,
       role: symptom,
       role_confidence: 0.6,
       entity: { kind: Cluster, name_labels: [cnpg_cluster] },
       component_type: postgres.cnpg-cluster,
-      chains: [availability],
+      chains: [availability, upstream-conditions/cnpg-cluster-instances-on-same-node],
       mixin: other,
     }
   - {
       id: cnpg-cluster-zone-spread-warning,
+      primary_card: upstream-conditions/cnpg-cluster-zone-spread-warning/condition,
       alertname: CNPGClusterZoneSpreadWarning,
       role: symptom,
       role_confidence: 0.6,
       entity: { kind: Cluster, name_labels: [cnpg_cluster] },
       component_type: postgres.cnpg-cluster,
-      chains: [availability],
+      chains: [availability, upstream-conditions/cnpg-cluster-zone-spread-warning],
       mixin: other,
     }
   - {
       id: cnpg-logical-replication-errors,
+      primary_card: upstream-conditions/cnpg-logical-replication-errors/condition,
       alertname: CNPGClusterLogicalReplicationErrors,
       role: symptom,
       entity: { kind: Cluster, name_labels: [cnpg_cluster, cluster] },
       component_type: postgres.cnpg-cluster,
-      chains: [availability],
+      chains: [availability, upstream-conditions/cnpg-logical-replication-errors],
       mixin: other,
     }
   - {
       id: cnpg-logical-replication-errors-critical,
+      primary_card: upstream-conditions/cnpg-logical-replication-errors-critical/condition,
       alertname: CNPGClusterLogicalReplicationErrorsCritical,
       role: symptom,
       entity: { kind: Cluster, name_labels: [cnpg_cluster, cluster] },
       component_type: postgres.cnpg-cluster,
-      chains: [availability],
+      chains: [availability, upstream-conditions/cnpg-logical-replication-errors-critical],
       mixin: other,
     }
   - {
       id: cnpg-logical-replication-lagging,
+      primary_card: upstream-conditions/cnpg-logical-replication-lagging/condition,
       alertname: CNPGClusterLogicalReplicationLagging,
       role: symptom,
       entity: { kind: Cluster, name_labels: [cnpg_cluster, cluster] },
       component_type: postgres.cnpg-cluster,
-      chains: [availability],
+      chains: [availability, upstream-conditions/cnpg-logical-replication-lagging],
       mixin: other,
     }
   - {
       id: cnpg-logical-replication-lagging-critical,
+      primary_card: upstream-conditions/cnpg-logical-replication-lagging-critical/condition,
       alertname: CNPGClusterLogicalReplicationLaggingCritical,
       role: symptom,
       entity: { kind: Cluster, name_labels: [cnpg_cluster, cluster] },
       component_type: postgres.cnpg-cluster,
-      chains: [availability],
+      chains: [availability, upstream-conditions/cnpg-logical-replication-lagging-critical],
       mixin: other,
     }
   - {
       id: cnpg-logical-replication-stopped,
+      primary_card: upstream-conditions/cnpg-logical-replication-stopped/condition,
       alertname: CNPGClusterLogicalReplicationStopped,
       role: cause,
       entity: { kind: Cluster, name_labels: [cnpg_cluster, cluster] },
       component_type: postgres.cnpg-cluster,
-      chains: [availability],
+      chains: [availability, upstream-conditions/cnpg-logical-replication-stopped],
       mixin: other,
     }
   - {
       id: cnpg-logical-replication-stopped-critical,
+      primary_card: upstream-conditions/cnpg-logical-replication-stopped-critical/condition,
       alertname: CNPGClusterLogicalReplicationStoppedCritical,
       role: cause,
       entity: { kind: Cluster, name_labels: [cnpg_cluster, cluster] },
       component_type: postgres.cnpg-cluster,
-      chains: [availability],
+      chains: [availability, upstream-conditions/cnpg-logical-replication-stopped-critical],
       mixin: other,
     }
 
@@ -216,29 +227,32 @@ entries:
     }
   - {
       id: postgresql-slow-queries,
+      primary_card: upstream-conditions/postgresql-slow-queries/condition,
       alertname: PostgreSQLSlowQueries,
       role: symptom,
       entity: { kind: Pod, name_labels: [pod] },
       component_type: postgres.instance,
-      chains: [saturation],
+      chains: [saturation, upstream-conditions/postgresql-slow-queries],
       mixin: other,
     }
   - {
       id: postgresql-qps,
+      primary_card: upstream-conditions/postgresql-qps/condition,
       alertname: PostgreSQLQPS,
       role: symptom,
       entity: { kind: Pod, name_labels: [pod] },
       component_type: postgres.instance,
-      chains: [saturation],
+      chains: [saturation, upstream-conditions/postgresql-qps],
       mixin: other,
     }
   - {
       id: postgresql-cache-hit-ratio,
+      primary_card: upstream-conditions/postgresql-cache-hit-ratio/condition,
       alertname: PostgreSQLCacheHitRatio,
       role: symptom,
       entity: { kind: Pod, name_labels: [pod] },
       component_type: postgres.instance,
-      chains: [saturation],
+      chains: [saturation, upstream-conditions/postgresql-cache-hit-ratio],
       mixin: other,
     }
   - {
@@ -263,20 +277,22 @@ entries:
     }
   - {
       id: postgres-too-many-locks,
+      primary_card: upstream-conditions/postgres-too-many-locks/condition,
       alertname: PostgresAcquiredTooManyLocks,
       role: cause,
       entity: { kind: Pod, name_labels: [pod] },
       component_type: postgres.instance,
-      chains: [saturation],
+      chains: [saturation, upstream-conditions/postgres-too-many-locks],
       mixin: other,
     }
   - {
       id: postgres-replication-slot-unused,
+      primary_card: upstream-conditions/postgres-replication-slot-unused/condition,
       alertname: PostgresHasReplicationSlotUsed,
       role: cause,
       entity: { kind: Pod, name_labels: [pod] },
       component_type: postgres.instance,
-      chains: [wal],
+      chains: [wal, upstream-conditions/postgres-replication-slot-unused],
       mixin: other,
     }
   - {
@@ -291,28 +307,31 @@ entries:
     }
   - {
       id: postgres-exporter-errors,
+      primary_card: upstream-conditions/postgres-exporter-errors/condition,
       alertname: PostgresHasExporterErrors,
       role: meta,
       entity: { kind: Pod, name_labels: [pod] },
       component_type: postgres.instance,
-      chains: [observability-self/scrape],
+      chains: [observability-self/scrape, upstream-conditions/postgres-exporter-errors],
       mixin: other,
     }
   - {
       id: postgres-tables-not-vacuumed,
+      primary_card: upstream-conditions/postgres-tables-not-vacuumed/condition,
       alertname: PostgresTablesNotVaccumed,
       role: symptom,
       entity: { kind: Pod, name_labels: [pod] },
       component_type: postgres.instance,
-      chains: [saturation],
+      chains: [saturation, upstream-conditions/postgres-tables-not-vacuumed],
       mixin: other,
     }
   - {
       id: postgres-too-many-checkpoints-requested,
+      primary_card: upstream-conditions/postgres-too-many-checkpoints-requested/condition,
       alertname: PostgresTooManyCheckpointsRequested,
       role: symptom,
       entity: { kind: Pod, name_labels: [pod] },
       component_type: postgres.instance,
-      chains: [wal],
+      chains: [wal, upstream-conditions/postgres-too-many-checkpoints-requested],
       mixin: other,
     }

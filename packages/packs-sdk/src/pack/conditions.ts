@@ -32,13 +32,19 @@ export interface ConditionPack {
 
 const SECONDS: Record<string, number> = { s: 1, m: 60, h: 3600, d: 86400, w: 604800 };
 
-/** for 的分钟数；不是整分钟时报错（卡片以 1 分钟为步长求值） */
+/**
+ * for 的分钟数（卡片以 1 分钟为步长求值）。不足一分钟的 for（例如 ingress-nginx 示例的 1s、Strimzi 的 10s）
+ * 在这个步长下与 0 相同，按"条件成立"判定；一分钟以上不是整分钟时报错
+ */
 export function forMinutes(d: string): number {
   const parts = [...d.matchAll(/([0-9]+)(s|m|h|d|w)/g)];
   if (parts.map((p) => p[0]).join('') !== d) {
     throw new Error(`for 不是 Prometheus 时长：${d}`);
   }
   const s = parts.reduce((a, p) => a + Number(p[1]) * SECONDS[p[2]!]!, 0);
+  if (s < 60) {
+    return 0;
+  }
   if (s % 60 !== 0) {
     throw new Error(`for ${d} 不是整分钟`);
   }

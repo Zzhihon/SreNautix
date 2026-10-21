@@ -373,6 +373,7 @@ tests:
 |---|---|
 | `alerts-kps` | kube-prometheus-stack 全部告警的目录条目与证据链映射，每个条目的主卡在 kps-conditions |
 | `kps-conditions` | 由 `pnpm --filter @srenautix/packs-sdk run gen:kps-conditions` 从固定版本 chart 的告警规则生成的告警条件卡（beta，ADR 0109），夹具来自 kubernetes-mixin 的 promtool 测试 |
+| `upstream-conditions` | 由 `pnpm --filter @srenautix/packs-sdk run gen:upstream-conditions` 从社区包的上游告警规则生成告警条件卡（beta，ADR 0109），作为没有手写主卡的目录条目的主卡。上游规则的来源、提交与 sha256 固定在 `upstream/community-rules.json`，夹具来自 argo-cd-mixin 的 promtool 测试 |
 | `kubernetes-core` | apiserver、etcd 与其他控制面组件 |
 | `node` | 节点健康、文件系统、网络、时钟；混沌实验 node-memory-pressure |
 | `workload` | 重启与 CrashLoop、Pending、发布进度、发布（等待迁移的 init 容器、新旧 ReplicaSet、正在服务的版本、迁移 Job、开始前后的 5xx 与延迟）、Job、容量（HPA 达到上限时伸缩指标相对目标值、伸缩对象的 CPU 限流与延迟对比基线，区分良性与饱和）；查询模板按 Pod 拆分 CPU、内存与重启的前 k 名，与另一个工作负载对比重启；规则提议重建卡在初始化的 Pod；混沌实验 crashloop-bad-config |
@@ -387,4 +388,4 @@ tests:
 | `longhorn` | 卷健康、副本与节点存储 |
 | `_example` | 演示全部文件的示例包，默认不加载 |
 
-除 `kps-conditions`（beta：卡由规则生成，夹具只覆盖能在后端复现上游测试的告警）外，内置包都是 `stable`。
+除 `kps-conditions` 与 `upstream-conditions`（beta：卡由规则生成，夹具只覆盖能在后端复现上游测试的告警）外，内置包都是 `stable`。

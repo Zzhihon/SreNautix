@@ -12,10 +12,11 @@ entries:
     }
   - {
       id: redis-missing-master,
+      primary_card: upstream-conditions/redis-missing-master/condition,
       alertname: RedisMissingMaster,
       role: cause,
       entity: { kind: Namespace, name_labels: [namespace] },
-      chains: [redis],
+      chains: [redis, upstream-conditions/redis-missing-master],
       mixin: other,
     }
   - {

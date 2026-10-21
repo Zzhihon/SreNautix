@@ -2,19 +2,21 @@
 entries:
   - {
       id: nginx-config-failed,
+      primary_card: upstream-conditions/nginx-config-failed/condition,
       alertname: NGINXConfigFailed,
       role: change,
       entity: { kind: Pod, name_labels: [pod] },
       component_type: ingress-nginx.controller,
-      chains: [ingress],
+      chains: [ingress, upstream-conditions/nginx-config-failed],
       mixin: other,
     }
   - {
       id: nginx-certificate-expiry,
+      primary_card: upstream-conditions/nginx-certificate-expiry/condition,
       alertname: NGINXCertificateExpiry,
       role: cause,
       entity: { kind: Ingress, name_labels: [ingress], namespace_label: exported_namespace },
-      chains: [ingress, cert-manager/certificate],
+      chains: [ingress, cert-manager/certificate, upstream-conditions/nginx-certificate-expiry],
       mixin: other,
     }
   - {
@@ -28,9 +30,10 @@ entries:
     }
   - {
       id: nginx-too-many-400s,
+      primary_card: upstream-conditions/nginx-too-many-400s/condition,
       alertname: NGINXTooMany400s,
       role: symptom,
       entity: { kind: Ingress, name_labels: [ingress], namespace_label: exported_namespace },
-      chains: [ingress],
+      chains: [ingress, upstream-conditions/nginx-too-many-400s],
       mixin: other,
     }

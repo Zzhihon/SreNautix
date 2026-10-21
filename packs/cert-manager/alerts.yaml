@@ -2,11 +2,12 @@
 entries:
   - {
       id: cert-manager-absent,
+      primary_card: upstream-conditions/cert-manager-absent/condition,
       alertname: CertManagerAbsent,
       role: meta,
       entity: { kind: cluster, name_labels: [alertname] },
       component_type: cert-manager.controller,
-      chains: [certificate],
+      chains: [certificate, upstream-conditions/cert-manager-absent],
       mixin: other,
     }
   - {
@@ -31,10 +32,11 @@ entries:
     }
   - {
       id: cert-manager-hitting-rate-limits,
+      primary_card: upstream-conditions/cert-manager-hitting-rate-limits/condition,
       alertname: CertManagerHittingRateLimits,
       role: cause,
       entity: { kind: cluster, name_labels: [host] },
       component_type: cert-manager.controller,
-      chains: [certificate],
+      chains: [certificate, upstream-conditions/cert-manager-hitting-rate-limits],
       mixin: other,
     }

@@ -1,0 +1,686 @@
+# 由 packages/packs-sdk/scripts/upstream-conditions.ts 生成，不要手工修改。
+signals:
+  - id: argo_cd_app_auto_sync_disabled.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(argocd_app_info{job=~"(argocd|argo-cd).*", autosync_enabled!="true", name!~""})
+  - id: argo_cd_app_auto_sync_disabled.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          sum(
+            argocd_app_info{
+              job=~"(argocd|argo-cd).*",
+              autosync_enabled!="true",
+              name!~""
+            }
+          ) by (cluster, job, dest_server, project, name, autosync_enabled)
+          > 0
+  - id: argo_cd_app_auto_sync_disabled.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          sum(
+            argocd_app_info{
+              job=~"(argocd|argo-cd).*",
+              autosync_enabled!="true",
+              name!~""
+            }
+          ) by (cluster, job, dest_server, project, name, autosync_enabled)
+          > 0
+          )[120m:1m])
+  - id: cert_manager_absent.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(up)
+  - id: cert_manager_absent.value
+    kind: metrics
+    alternatives:
+      - expr: absent(up{job="cert-manager"})
+  - id: cert_manager_absent.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          absent(up{job="cert-manager"})
+          )[10m:1m])
+  - id: cert_manager_hitting_rate_limits.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(certmanager_http_acme_client_request_count{status="429"})
+  - id: cert_manager_hitting_rate_limits.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          sum by (host) (
+            rate(certmanager_http_acme_client_request_count{status="429"}[5m])
+          ) > 0
+  - id: cert_manager_hitting_rate_limits.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          sum by (host) (
+            rate(certmanager_http_acme_client_request_count{status="429"}[5m])
+          ) > 0
+          )[5m:1m])
+  - id: cnpg_cluster_instances_on_same_node.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(kube_pod_info{namespace="$namespace", pod=~"$name-([1-9][0-9]*)$"})
+  - id: cnpg_cluster_instances_on_same_node.value
+    kind: metrics
+    alternatives:
+      - expr: count by (node) (kube_pod_info{namespace="$namespace", pod=~"$name-([1-9][0-9]*)$"}) > 1
+  - id: cnpg_cluster_instances_on_same_node.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          count by (node) (kube_pod_info{namespace="$namespace", pod=~"$name-([1-9][0-9]*)$"}) > 1
+          )[5m:1m])
+  - id: cnpg_cluster_logical_replication_errors.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(cnpg_pg_stat_subscription_apply_error_count{}) or count(cnpg_pg_stat_subscription_sync_error_count{})
+  - id: cnpg_cluster_logical_replication_errors.value
+    kind: metrics
+    alternatives:
+      - expr: label_replace(max by (namespace, job, subname) (increase(cnpg_pg_stat_subscription_apply_error_count[5m]) + increase(cnpg_pg_stat_subscription_sync_error_count[5m])), "cluster", "$1", "job", ".+/(.+)") > 0
+  - id: cnpg_cluster_logical_replication_errors.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          label_replace(max by (namespace, job, subname) (increase(cnpg_pg_stat_subscription_apply_error_count[5m]) + increase(cnpg_pg_stat_subscription_sync_error_count[5m])), "cluster", "$1", "job", ".+/(.+)") > 0
+          )[1m:1m])
+  - id: cnpg_cluster_logical_replication_errors_critical.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(cnpg_pg_stat_subscription_apply_error_count{}) or count(cnpg_pg_stat_subscription_sync_error_count{})
+  - id: cnpg_cluster_logical_replication_errors_critical.value
+    kind: metrics
+    alternatives:
+      - expr: label_replace(max by (namespace, job, subname) (increase(cnpg_pg_stat_subscription_apply_error_count[5m]) + increase(cnpg_pg_stat_subscription_sync_error_count[5m])), "cluster", "$1", "job", ".+/(.+)") >= 5
+  - id: cnpg_cluster_logical_replication_lagging.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(cnpg_pg_stat_subscription_apply_lag_seconds{}) or count(cnpg_pg_stat_subscription_buffered_lag_bytes{}) or count(cnpg_pg_stat_subscription_receipt_lag_seconds{})
+  - id: cnpg_cluster_logical_replication_lagging.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          (
+            # Receipt lag - time since last message received
+            label_replace(max by (namespace, job, subname) (cnpg_pg_stat_subscription_receipt_lag_seconds), "cluster", "$1", "job", ".+/(.+)") > 60
+          ) or (
+            # Apply lag - time delay in applying changes
+            label_replace(max by (namespace, job, subname) (cnpg_pg_stat_subscription_apply_lag_seconds), "cluster", "$1", "job", ".+/(.+)") > 60
+          ) or (
+            # LSN distance - bytes pending to be applied
+            label_replace(max by (namespace, job, subname) (cnpg_pg_stat_subscription_buffered_lag_bytes), "cluster", "$1", "job", ".+/(.+)") / 1024^3 > 1
+          )
+  - id: cnpg_cluster_logical_replication_lagging.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          (
+            # Receipt lag - time since last message received
+            label_replace(max by (namespace, job, subname) (cnpg_pg_stat_subscription_receipt_lag_seconds), "cluster", "$1", "job", ".+/(.+)") > 60
+          ) or (
+            # Apply lag - time delay in applying changes
+            label_replace(max by (namespace, job, subname) (cnpg_pg_stat_subscription_apply_lag_seconds), "cluster", "$1", "job", ".+/(.+)") > 60
+          ) or (
+            # LSN distance - bytes pending to be applied
+            label_replace(max by (namespace, job, subname) (cnpg_pg_stat_subscription_buffered_lag_bytes), "cluster", "$1", "job", ".+/(.+)") / 1024^3 > 1
+          )
+          )[5m:1m])
+  - id: cnpg_cluster_logical_replication_lagging_critical.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(cnpg_pg_stat_subscription_apply_lag_seconds{}) or count(cnpg_pg_stat_subscription_buffered_lag_bytes{}) or count(cnpg_pg_stat_subscription_receipt_lag_seconds{})
+  - id: cnpg_cluster_logical_replication_lagging_critical.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          (
+            # Receipt lag - not receiving WAL data
+            label_replace(max by (namespace, job, subname) (cnpg_pg_stat_subscription_receipt_lag_seconds), "cluster", "$1", "job", ".+/(.+)") > 300
+          ) or (
+            # Apply lag - not applying received data
+            label_replace(max by (namespace, job, subname) (cnpg_pg_stat_subscription_apply_lag_seconds), "cluster", "$1", "job", ".+/(.+)") > 300
+          ) or (
+            # LSN distance - large amount of pending data
+            label_replace(max by (namespace, job, subname) (cnpg_pg_stat_subscription_buffered_lag_bytes), "cluster", "$1", "job", ".+/(.+)") / 1024^3 > 4
+          )
+  - id: cnpg_cluster_logical_replication_lagging_critical.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          (
+            # Receipt lag - not receiving WAL data
+            label_replace(max by (namespace, job, subname) (cnpg_pg_stat_subscription_receipt_lag_seconds), "cluster", "$1", "job", ".+/(.+)") > 300
+          ) or (
+            # Apply lag - not applying received data
+            label_replace(max by (namespace, job, subname) (cnpg_pg_stat_subscription_apply_lag_seconds), "cluster", "$1", "job", ".+/(.+)") > 300
+          ) or (
+            # LSN distance - large amount of pending data
+            label_replace(max by (namespace, job, subname) (cnpg_pg_stat_subscription_buffered_lag_bytes), "cluster", "$1", "job", ".+/(.+)") / 1024^3 > 4
+          )
+          )[2m:1m])
+  - id: cnpg_cluster_logical_replication_stopped.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(cnpg_pg_stat_subscription_buffered_lag_bytes{}) or count(cnpg_pg_stat_subscription_enabled{}) or count(cnpg_pg_stat_subscription_pid{})
+  - id: cnpg_cluster_logical_replication_stopped.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          (
+            # Subscription is explicitly disabled
+            label_replace(max by (namespace, job, subname) (cnpg_pg_stat_subscription_enabled), "cluster", "$1", "job", ".+/(.+)") == 0
+          ) or (
+            # Subscription is enabled but stuck (no worker process with significant lag)
+            label_replace(max by (namespace, job, subname) (cnpg_pg_stat_subscription_enabled), "cluster", "$1", "job", ".+/(.+)") == 1
+            and label_replace(max by (namespace, job, subname) (cnpg_pg_stat_subscription_pid), "cluster", "$1", "job", ".+/(.+)") == 0
+            and label_replace(max by (namespace, job, subname) (cnpg_pg_stat_subscription_buffered_lag_bytes), "cluster", "$1", "job", ".+/(.+)") / 1024^3 > 0.1
+          )
+  - id: cnpg_cluster_logical_replication_stopped.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          (
+            # Subscription is explicitly disabled
+            label_replace(max by (namespace, job, subname) (cnpg_pg_stat_subscription_enabled), "cluster", "$1", "job", ".+/(.+)") == 0
+          ) or (
+            # Subscription is enabled but stuck (no worker process with significant lag)
+            label_replace(max by (namespace, job, subname) (cnpg_pg_stat_subscription_enabled), "cluster", "$1", "job", ".+/(.+)") == 1
+            and label_replace(max by (namespace, job, subname) (cnpg_pg_stat_subscription_pid), "cluster", "$1", "job", ".+/(.+)") == 0
+            and label_replace(max by (namespace, job, subname) (cnpg_pg_stat_subscription_buffered_lag_bytes), "cluster", "$1", "job", ".+/(.+)") / 1024^3 > 0.1
+          )
+          )[5m:1m])
+  - id: cnpg_cluster_logical_replication_stopped_critical.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(cnpg_pg_stat_subscription_buffered_lag_bytes{}) or count(cnpg_pg_stat_subscription_enabled{}) or count(cnpg_pg_stat_subscription_pid{})
+  - id: cnpg_cluster_logical_replication_stopped_critical.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          (
+            # Subscription is explicitly disabled
+            label_replace(max by (namespace, job, subname) (cnpg_pg_stat_subscription_enabled), "cluster", "$1", "job", ".+/(.+)") == 0
+          ) or (
+            # Subscription is enabled but stuck (no worker process with significant lag)
+            label_replace(max by (namespace, job, subname) (cnpg_pg_stat_subscription_enabled), "cluster", "$1", "job", ".+/(.+)") == 1
+            and label_replace(max by (namespace, job, subname) (cnpg_pg_stat_subscription_pid), "cluster", "$1", "job", ".+/(.+)") == 0
+            and label_replace(max by (namespace, job, subname) (cnpg_pg_stat_subscription_buffered_lag_bytes), "cluster", "$1", "job", ".+/(.+)") / 1024^3 > 0.1
+          )
+  - id: cnpg_cluster_logical_replication_stopped_critical.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          (
+            # Subscription is explicitly disabled
+            label_replace(max by (namespace, job, subname) (cnpg_pg_stat_subscription_enabled), "cluster", "$1", "job", ".+/(.+)") == 0
+          ) or (
+            # Subscription is enabled but stuck (no worker process with significant lag)
+            label_replace(max by (namespace, job, subname) (cnpg_pg_stat_subscription_enabled), "cluster", "$1", "job", ".+/(.+)") == 1
+            and label_replace(max by (namespace, job, subname) (cnpg_pg_stat_subscription_pid), "cluster", "$1", "job", ".+/(.+)") == 0
+            and label_replace(max by (namespace, job, subname) (cnpg_pg_stat_subscription_buffered_lag_bytes), "cluster", "$1", "job", ".+/(.+)") / 1024^3 > 0.1
+          )
+          )[15m:1m])
+  - id: cnpg_cluster_low_disk_space_critical.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(kube_pod_spec_volumes_persistentvolumeclaims_info{pod=~"$name-([1-9][0-9]*)$"}) or count(kubelet_volume_stats_available_bytes{namespace="$namespace", persistentvolumeclaim=~"$name-([1-9][0-9]*)$"}) or count(kubelet_volume_stats_available_bytes{namespace="$namespace", persistentvolumeclaim=~"$name-([1-9][0-9]*)$-wal"}) or count(kubelet_volume_stats_capacity_bytes{namespace="$namespace", persistentvolumeclaim=~"$name-([1-9][0-9]*)$"}) or count(kubelet_volume_stats_capacity_bytes{namespace="$namespace", persistentvolumeclaim=~"$name-([1-9][0-9]*)$-tbs.*"}) or count(kubelet_volume_stats_capacity_bytes{namespace="$namespace", persistentvolumeclaim=~"$name-([1-9][0-9]*)$-wal"}) or count(kubelet_volume_stats_used_bytes{namespace="$namespace", persistentvolumeclaim=~"$name-([1-9][0-9]*)$-tbs.*"})
+  - id: cnpg_cluster_low_disk_space_critical.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          max(max by(persistentvolumeclaim) (1 - kubelet_volume_stats_available_bytes{namespace="$namespace", persistentvolumeclaim=~"$name-([1-9][0-9]*)$"} / kubelet_volume_stats_capacity_bytes{namespace="$namespace", persistentvolumeclaim=~"$name-([1-9][0-9]*)$"})) * 100 > 90 OR
+          max(max by(persistentvolumeclaim) (1 - kubelet_volume_stats_available_bytes{namespace="$namespace", persistentvolumeclaim=~"$name-([1-9][0-9]*)$-wal"} / kubelet_volume_stats_capacity_bytes{namespace="$namespace", persistentvolumeclaim=~"$name-([1-9][0-9]*)$-wal"})) * 100 > 90 OR
+          max(sum by (namespace,persistentvolumeclaim) (kubelet_volume_stats_used_bytes{namespace="$namespace", persistentvolumeclaim=~"$name-([1-9][0-9]*)$-tbs.*"})
+              /
+              sum by (namespace,persistentvolumeclaim) (kubelet_volume_stats_capacity_bytes{namespace="$namespace", persistentvolumeclaim=~"$name-([1-9][0-9]*)$-tbs.*"})
+              *
+              on(namespace, persistentvolumeclaim) group_left(volume)
+              kube_pod_spec_volumes_persistentvolumeclaims_info{pod=~"$name-([1-9][0-9]*)$"}
+          ) * 100 > 90
+  - id: cnpg_cluster_low_disk_space_critical.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          max(max by(persistentvolumeclaim) (1 - kubelet_volume_stats_available_bytes{namespace="$namespace", persistentvolumeclaim=~"$name-([1-9][0-9]*)$"} / kubelet_volume_stats_capacity_bytes{namespace="$namespace", persistentvolumeclaim=~"$name-([1-9][0-9]*)$"})) * 100 > 90 OR
+          max(max by(persistentvolumeclaim) (1 - kubelet_volume_stats_available_bytes{namespace="$namespace", persistentvolumeclaim=~"$name-([1-9][0-9]*)$-wal"} / kubelet_volume_stats_capacity_bytes{namespace="$namespace", persistentvolumeclaim=~"$name-([1-9][0-9]*)$-wal"})) * 100 > 90 OR
+          max(sum by (namespace,persistentvolumeclaim) (kubelet_volume_stats_used_bytes{namespace="$namespace", persistentvolumeclaim=~"$name-([1-9][0-9]*)$-tbs.*"})
+              /
+              sum by (namespace,persistentvolumeclaim) (kubelet_volume_stats_capacity_bytes{namespace="$namespace", persistentvolumeclaim=~"$name-([1-9][0-9]*)$-tbs.*"})
+              *
+              on(namespace, persistentvolumeclaim) group_left(volume)
+              kube_pod_spec_volumes_persistentvolumeclaims_info{pod=~"$name-([1-9][0-9]*)$"}
+          ) * 100 > 90
+          )[5m:1m])
+  - id: cnpg_cluster_low_disk_space_warning.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(kube_pod_spec_volumes_persistentvolumeclaims_info{pod=~"$name-([1-9][0-9]*)$"}) or count(kubelet_volume_stats_available_bytes{namespace="$namespace", persistentvolumeclaim=~"$name-([1-9][0-9]*)$"}) or count(kubelet_volume_stats_available_bytes{namespace="$namespace", persistentvolumeclaim=~"$name-([1-9][0-9]*)$-wal"}) or count(kubelet_volume_stats_capacity_bytes{namespace="$namespace", persistentvolumeclaim=~"$name-([1-9][0-9]*)$"}) or count(kubelet_volume_stats_capacity_bytes{namespace="$namespace", persistentvolumeclaim=~"$name-([1-9][0-9]*)$-tbs.*"}) or count(kubelet_volume_stats_capacity_bytes{namespace="$namespace", persistentvolumeclaim=~"$name-([1-9][0-9]*)$-wal"}) or count(kubelet_volume_stats_used_bytes{namespace="$namespace", persistentvolumeclaim=~"$name-([1-9][0-9]*)$-tbs.*"})
+  - id: cnpg_cluster_low_disk_space_warning.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          max(max by(persistentvolumeclaim) (1 - kubelet_volume_stats_available_bytes{namespace="$namespace", persistentvolumeclaim=~"$name-([1-9][0-9]*)$"} / kubelet_volume_stats_capacity_bytes{namespace="$namespace", persistentvolumeclaim=~"$name-([1-9][0-9]*)$"})) * 100 > 70 OR
+          max(max by(persistentvolumeclaim) (1 - kubelet_volume_stats_available_bytes{namespace="$namespace", persistentvolumeclaim=~"$name-([1-9][0-9]*)$-wal"} / kubelet_volume_stats_capacity_bytes{namespace="$namespace", persistentvolumeclaim=~"$name-([1-9][0-9]*)$-wal"})) * 100 > 70 OR
+          max(sum by (namespace,persistentvolumeclaim) (kubelet_volume_stats_used_bytes{namespace="$namespace", persistentvolumeclaim=~"$name-([1-9][0-9]*)$-tbs.*"})
+              /
+              sum by (namespace,persistentvolumeclaim) (kubelet_volume_stats_capacity_bytes{namespace="$namespace", persistentvolumeclaim=~"$name-([1-9][0-9]*)$-tbs.*"})
+              *
+              on(namespace, persistentvolumeclaim) group_left(volume)
+              kube_pod_spec_volumes_persistentvolumeclaims_info{pod=~"$name-([1-9][0-9]*)$"}
+          ) * 100 > 70
+  - id: cnpg_cluster_low_disk_space_warning.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          max(max by(persistentvolumeclaim) (1 - kubelet_volume_stats_available_bytes{namespace="$namespace", persistentvolumeclaim=~"$name-([1-9][0-9]*)$"} / kubelet_volume_stats_capacity_bytes{namespace="$namespace", persistentvolumeclaim=~"$name-([1-9][0-9]*)$"})) * 100 > 70 OR
+          max(max by(persistentvolumeclaim) (1 - kubelet_volume_stats_available_bytes{namespace="$namespace", persistentvolumeclaim=~"$name-([1-9][0-9]*)$-wal"} / kubelet_volume_stats_capacity_bytes{namespace="$namespace", persistentvolumeclaim=~"$name-([1-9][0-9]*)$-wal"})) * 100 > 70 OR
+          max(sum by (namespace,persistentvolumeclaim) (kubelet_volume_stats_used_bytes{namespace="$namespace", persistentvolumeclaim=~"$name-([1-9][0-9]*)$-tbs.*"})
+              /
+              sum by (namespace,persistentvolumeclaim) (kubelet_volume_stats_capacity_bytes{namespace="$namespace", persistentvolumeclaim=~"$name-([1-9][0-9]*)$-tbs.*"})
+              *
+              on(namespace, persistentvolumeclaim) group_left(volume)
+              kube_pod_spec_volumes_persistentvolumeclaims_info{pod=~"$name-([1-9][0-9]*)$"}
+          ) * 100 > 70
+          )[5m:1m])
+  - id: cnpg_cluster_zone_spread_warning.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(kube_node_labels{}) or count(kube_pod_info{namespace="$namespace", pod=~"$name-([1-9][0-9]*)$"})
+  - id: cnpg_cluster_zone_spread_warning.value
+    kind: metrics
+    alternatives:
+      - expr: 3 > count(count by (label_topology_kubernetes_io_zone) (kube_pod_info{namespace="$namespace", pod=~"$name-([1-9][0-9]*)$"} * on(node,instance) group_left(label_topology_kubernetes_io_zone) kube_node_labels)) < 3
+  - id: cnpg_cluster_zone_spread_warning.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          3 > count(count by (label_topology_kubernetes_io_zone) (kube_pod_info{namespace="$namespace", pod=~"$name-([1-9][0-9]*)$"} * on(node,instance) group_left(label_topology_kubernetes_io_zone) kube_node_labels)) < 3
+          )[5m:1m])
+  - id: cnpg_instance_metrics_absent.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(up{namespace="$namespace", pod=~"[a-z0-9]([-a-z0-9]*[a-z0-9])?-([1-9][0-9]*)$"})
+  - id: cnpg_instance_metrics_absent.value
+    kind: metrics
+    alternatives:
+      - expr: up{namespace="$namespace",pod=~"[a-z0-9]([-a-z0-9]*[a-z0-9])?-([1-9][0-9]*)$"} == 0
+  - id: cnpg_instance_metrics_absent.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          up{namespace="$namespace",pod=~"[a-z0-9]([-a-z0-9]*[a-z0-9])?-([1-9][0-9]*)$"} == 0
+          )[10m:1m])
+  - id: group_get_latency_by_storetime.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(rocketmq_group_get_latency_by_storetime{})
+  - id: group_get_latency_by_storetime.value
+    kind: metrics
+    alternatives:
+      - expr: rocketmq_group_get_latency_by_storetime > 1000
+  - id: group_get_latency_by_storetime.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          rocketmq_group_get_latency_by_storetime > 1000
+          )[3m:1m])
+  - id: longhorn_instance_manager_cpu_usage_warning.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(longhorn_instance_manager_cpu_requests_millicpu{}) or count(longhorn_instance_manager_cpu_usage_millicpu{})
+  - id: longhorn_instance_manager_cpu_usage_warning.value
+    kind: metrics
+    alternatives:
+      - expr: (longhorn_instance_manager_cpu_usage_millicpu/longhorn_instance_manager_cpu_requests_millicpu) * 100 > 300
+  - id: longhorn_instance_manager_cpu_usage_warning.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          (longhorn_instance_manager_cpu_usage_millicpu/longhorn_instance_manager_cpu_requests_millicpu) * 100 > 300
+          )[5m:1m])
+  - id: my_sql_galera_donor_falling_behind.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(mysql_global_status_wsrep_local_recv_queue{}) or count(mysql_global_status_wsrep_local_state{})
+  - id: my_sql_galera_donor_falling_behind.value
+    kind: metrics
+    alternatives:
+      - expr: (mysql_global_status_wsrep_local_state == 2 and mysql_global_status_wsrep_local_recv_queue > 100)
+  - id: my_sql_galera_donor_falling_behind.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          (mysql_global_status_wsrep_local_state == 2 and mysql_global_status_wsrep_local_recv_queue > 100)
+          )[5m:1m])
+  - id: my_sql_inno_db_log_waits.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(mysql_global_status_innodb_log_waits{})
+  - id: my_sql_inno_db_log_waits.value
+    kind: metrics
+    alternatives:
+      - expr: rate(mysql_global_status_innodb_log_waits[15m]) > 10
+  - id: nacos_down.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(up{service=~".+-headless"})
+  - id: nacos_down.value
+    kind: metrics
+    alternatives:
+      - expr: up{service=~'.+-headless'} == 0
+  - id: nacos_down.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          up{service=~'.+-headless'} == 0
+          )[1m:1m])
+  - id: nginx_certificate_expiry.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(nginx_ingress_controller_ssl_expire_time_seconds{host!="_"})
+  - id: nginx_certificate_expiry.value
+    kind: metrics
+    alternatives:
+      - expr: (avg(nginx_ingress_controller_ssl_expire_time_seconds{host!="_"}) by (host) - time()) < 604800
+  - id: nginx_config_failed.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(nginx_ingress_controller_config_last_reload_successful{})
+  - id: nginx_config_failed.value
+    kind: metrics
+    alternatives:
+      - expr: count(nginx_ingress_controller_config_last_reload_successful == 0) > 0
+  - id: nginx_too_many400s.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(nginx_ingress_controller_requests{status=~"4.+"}) or count(nginx_ingress_controller_requests{})
+  - id: nginx_too_many400s.value
+    kind: metrics
+    alternatives:
+      - expr: 100 * ( sum( nginx_ingress_controller_requests{status=~"4.+"} ) / sum(nginx_ingress_controller_requests) ) > 5
+  - id: nginx_too_many400s.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          100 * ( sum( nginx_ingress_controller_requests{status=~"4.+"} ) / sum(nginx_ingress_controller_requests) ) > 5
+          )[1m:1m])
+  - id: offline_partitions.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(kafka_controller_kafkacontroller_offlinepartitionscount{})
+  - id: offline_partitions.value
+    kind: metrics
+    alternatives:
+      - expr: sum(kafka_controller_kafkacontroller_offlinepartitionscount) by (namespace, pod) > 0
+  - id: postgre_sql_cache_hit_ratio.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(pg_stat_database_blks_hit{datname!~"template.*"}) or count(pg_stat_database_blks_read{datname!~"template.*"})
+  - id: postgre_sql_cache_hit_ratio.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          avg by (datname, job, instance, server) (
+            rate(pg_stat_database_blks_hit{datname!~"template.*", }[5m])
+            /
+            (
+              rate(
+                pg_stat_database_blks_hit{datname!~"template.*", }[5m]
+              )
+              +
+              rate(
+                pg_stat_database_blks_read{datname!~"template.*", }[5m]
+              )
+            )
+          ) < 0.98
+  - id: postgre_sql_cache_hit_ratio.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          avg by (datname, job, instance, server) (
+            rate(pg_stat_database_blks_hit{datname!~"template.*", }[5m])
+            /
+            (
+              rate(
+                pg_stat_database_blks_hit{datname!~"template.*", }[5m]
+              )
+              +
+              rate(
+                pg_stat_database_blks_read{datname!~"template.*", }[5m]
+              )
+            )
+          ) < 0.98
+          )[5m:1m])
+  - id: postgre_sql_slow_queries.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(pg_stat_activity_max_tx_duration{datname!~"template.*"})
+  - id: postgre_sql_slow_queries.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          avg by (datname, job, instance, server) (
+            rate (
+              pg_stat_activity_max_tx_duration{datname!~"template.*", }[2m]
+            )
+          ) > 2 * 60
+  - id: postgre_sql_slow_queries.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          avg by (datname, job, instance, server) (
+            rate (
+              pg_stat_activity_max_tx_duration{datname!~"template.*", }[2m]
+            )
+          ) > 2 * 60
+          )[2m:1m])
+  - id: postgre_sqlqps.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(pg_stat_database_xact_commit{datname!~"template.*"}) or count(pg_stat_database_xact_rollback{datname!~"template.*"})
+  - id: postgre_sqlqps.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          avg by (datname, job, instance, server) (
+            irate(
+              pg_stat_database_xact_commit{datname!~"template.*", }[5m]
+            )
+            +
+            irate(
+              pg_stat_database_xact_rollback{datname!~"template.*", }[5m]
+            )
+          ) > 10000
+  - id: postgre_sqlqps.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          avg by (datname, job, instance, server) (
+            irate(
+              pg_stat_database_xact_commit{datname!~"template.*", }[5m]
+            )
+            +
+            irate(
+              pg_stat_database_xact_rollback{datname!~"template.*", }[5m]
+            )
+          ) > 10000
+          )[5m:1m])
+  - id: postgres_acquired_too_many_locks.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(pg_locks_count{datname!~"template.*"}) or count(pg_settings_max_connections{}) or count(pg_settings_max_locks_per_transaction{})
+  - id: postgres_acquired_too_many_locks.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          max by(datname, job,instance,server) (
+            (pg_locks_count{datname!~"template.*"}) 
+            /
+            on(job,instance) group_left(server) (
+              pg_settings_max_locks_per_transaction{} * pg_settings_max_connections{}
+            )
+          ) > 0.20
+  - id: postgres_acquired_too_many_locks.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          max by(datname, job,instance,server) (
+            (pg_locks_count{datname!~"template.*"}) 
+            /
+            on(job,instance) group_left(server) (
+              pg_settings_max_locks_per_transaction{} * pg_settings_max_connections{}
+            )
+          ) > 0.20
+          )[5m:1m])
+  - id: postgres_has_exporter_errors.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(pg_exporter_last_scrape_error{})
+  - id: postgres_has_exporter_errors.value
+    kind: metrics
+    alternatives:
+      - expr: pg_exporter_last_scrape_error{} > 0
+  - id: postgres_has_exporter_errors.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          pg_exporter_last_scrape_error{} > 0
+          )[30m:1m])
+  - id: postgres_has_replication_slot_used.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(pg_replication_slots_active{})
+  - id: postgres_has_replication_slot_used.value
+    kind: metrics
+    alternatives:
+      - expr: pg_replication_slots_active{} == 0
+  - id: postgres_has_replication_slot_used.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          pg_replication_slots_active{} == 0
+          )[30m:1m])
+  - id: postgres_tables_not_vaccumed.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(pg_settings_autovacuum_vacuum_scale_factor{}) or count(pg_settings_autovacuum_vacuum_threshold{}) or count(pg_stat_user_tables_n_dead_tup{}) or count(pg_stat_user_tables_n_live_tup{})
+  - id: postgres_tables_not_vaccumed.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          group without(pod, instance)(
+            timestamp(
+              pg_stat_user_tables_n_dead_tup{} >
+                pg_stat_user_tables_n_live_tup{}
+                  * on(job, instance, server) group_left pg_settings_autovacuum_vacuum_scale_factor{}
+                  + on(job, instance, server) group_left pg_settings_autovacuum_vacuum_threshold{}
+            )
+            < time() - 36000
+          )
+  - id: postgres_tables_not_vaccumed.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          group without(pod, instance)(
+            timestamp(
+              pg_stat_user_tables_n_dead_tup{} >
+                pg_stat_user_tables_n_live_tup{}
+                  * on(job, instance, server) group_left pg_settings_autovacuum_vacuum_scale_factor{}
+                  + on(job, instance, server) group_left pg_settings_autovacuum_vacuum_threshold{}
+            )
+            < time() - 36000
+          )
+          )[30m:1m])
+  - id: postgres_too_many_checkpoints_requested.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(pg_stat_bgwriter_checkpoints_req_total{}) or count(pg_stat_bgwriter_checkpoints_timed_total{})
+  - id: postgres_too_many_checkpoints_requested.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          rate(pg_stat_bgwriter_checkpoints_timed_total{}[5m]) /
+          (rate(pg_stat_bgwriter_checkpoints_timed_total{}[5m]) + rate(pg_stat_bgwriter_checkpoints_req_total{}[5m]))
+          < 0.5
+  - id: postgres_too_many_checkpoints_requested.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          rate(pg_stat_bgwriter_checkpoints_timed_total{}[5m]) /
+          (rate(pg_stat_bgwriter_checkpoints_timed_total{}[5m]) + rate(pg_stat_bgwriter_checkpoints_req_total{}[5m]))
+          < 0.5
+          )[5m:1m])
+  - id: redis_missing_master.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(redis_instance_info{role="master"})
+  - id: redis_missing_master.value
+    kind: metrics
+    alternatives:
+      - expr: (count(redis_instance_info{role="master"}) or vector(0)) < 1
+  - id: under_replicated_partitions.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(kafka_server_replicamanager_underreplicatedpartitions{})
+  - id: under_replicated_partitions.value
+    kind: metrics
+    alternatives:
+      - expr: kafka_server_replicamanager_underreplicatedpartitions > 0

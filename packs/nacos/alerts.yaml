@@ -2,11 +2,12 @@
 entries:
   - {
       id: nacos-down,
+      primary_card: upstream-conditions/nacos-down/condition,
       alertname: NacosDown,
       role: cause,
       entity: { kind: Pod, name_labels: [pod, instance] },
       component_type: nacos.server,
-      chains: [nacos],
+      chains: [nacos, upstream-conditions/nacos-down],
       mixin: other,
     }
   - {

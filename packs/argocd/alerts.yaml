@@ -32,11 +32,12 @@ entries:
     }
   - {
       id: argocd-app-autosync-disabled,
+      primary_card: upstream-conditions/argocd-app-autosync-disabled/condition,
       alertname: ArgoCdAppAutoSyncDisabled,
       role: change,
       role_confidence: 0.6,
       entity: { kind: Application, name_labels: [name] },
       component_type: argocd.application,
-      chains: [application],
+      chains: [application, upstream-conditions/argocd-app-autosync-disabled],
       mixin: other,
     }

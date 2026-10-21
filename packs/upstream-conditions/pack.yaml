@@ -1,0 +1,10 @@
+# 由 packages/packs-sdk/scripts/upstream-conditions.ts 生成，不要手工修改。
+api_version: srenautix.io/pack/v1
+name: upstream-conditions
+version: 1.0.0
+description: 社区包告警目录中没有手写主卡的条目的条件卡：查询与上游告警规则（argocd、cert-manager、ingress-nginx、kafka、longhorn、mysql、nacos、postgres、redis、rocketmq 共 12 个来源，固定提交与 sha256）相同，判定与规则的 for 相同，作为条目的主卡
+maturity: beta
+min_srenautix_version: 0.1.0
+requires:
+  - metrics.query
+  - metrics.query_range

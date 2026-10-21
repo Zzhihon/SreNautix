@@ -32,11 +32,12 @@ entries:
     }
   - {
       id: mysql-galera-donor-falling-behind,
+      primary_card: upstream-conditions/mysql-galera-donor-falling-behind/condition,
       alertname: MySQLGaleraDonorFallingBehind,
       role: symptom,
       entity: { kind: Pod, name_labels: [pod, instance] },
       component_type: mysql.instance,
-      chains: [mysql],
+      chains: [mysql, upstream-conditions/mysql-galera-donor-falling-behind],
       mixin: other,
     }
   - {
@@ -71,10 +72,11 @@ entries:
     }
   - {
       id: mysql-innodb-log-waits,
+      primary_card: upstream-conditions/mysql-innodb-log-waits/condition,
       alertname: MySQLInnoDBLogWaits,
       role: symptom,
       entity: { kind: Pod, name_labels: [pod, instance] },
       component_type: mysql.instance,
-      chains: [mysql],
+      chains: [mysql, upstream-conditions/mysql-innodb-log-waits],
       mixin: other,
     }

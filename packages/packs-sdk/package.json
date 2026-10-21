@@ -21,7 +21,8 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "gen:kps-conditions": "tsx scripts/kps-conditions.ts"
+    "gen:kps-conditions": "tsx scripts/kps-conditions.ts",
+    "gen:upstream-conditions": "tsx scripts/upstream-conditions.ts"
   },
   "dependencies": {
     "@formatjs/icu-messageformat-parser": "3.5.21",
