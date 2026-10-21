@@ -3,6 +3,7 @@
 #
 # 用法：
 #   deploy/kind/scenario.sh list
+#   deploy/kind/scenario.sh known-gaps         输出声明了 KNOWN_GAP 的场景（每行"场景<TAB>说明"）
 #   deploy/kind/scenario.sh inject  <场景>     注入故障，记录注入时间
 #   deploy/kind/scenario.sh verify  <场景>     等待场景的预期告警出现（pending 或 firing）
 #   deploy/kind/scenario.sh recover <场景>     撤除故障并等待业务恢复
@@ -11,6 +12,7 @@
 # 每个场景是 scenarios/<场景>/scenario.sh，定义 EXPECTED_ALERTS、VERIFY_TIMEOUT 与 inject、recover 两个函数；
 # 标准答案在 eval/scenarios/<场景>.yaml。注入时间写入 $SCENARIO_STATE_DIR/<场景>.json，评测按它截取时间窗。
 # 声明了 SRENAUTIX_ROOT 的场景在 SRENAUTIX_CHECKS=1 时另外检查发现、分析与自愈 PR（srenautix-checks.sh）。
+# KNOWN_GAP（引用跟踪 issue 与产品缺陷）标记已知缺口：场景照常运行、断言不变，kind-e2e 中它失败时只留下警告。
 set -euo pipefail
 # shellcheck source=deploy/kind/lib.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
@@ -20,7 +22,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/srenautix-checks.sh"
 SCENARIO_STATE_DIR=${SCENARIO_STATE_DIR:-"$REPO_ROOT/.scratch/kind-scenarios"}
 HOLD=${HOLD:-0}
 
-usage() { sed -n '2,12p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+usage() { sed -n '2,15p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 
 load() {
   local name=$1 file="$KIND_DIR/scenarios/$1/scenario.sh"
@@ -44,6 +46,14 @@ cmd=${1:-}
 case "$cmd" in
   list)
     for d in "$KIND_DIR"/scenarios/*/; do basename "$d"; done
+    ;;
+  known-gaps)
+    for d in "$KIND_DIR"/scenarios/*/; do
+      # 在子 shell 中读取，场景之间的变量互不影响
+      # shellcheck source=/dev/null
+      gap=$(KNOWN_GAP='' && source "$d/scenario.sh" && printf '%s' "$KNOWN_GAP")
+      [[ -z "$gap" ]] || printf '%s\t%s\n' "$(basename "$d")" "$gap"
+    done
     ;;
   inject | verify | recover | run)
     name=${2:-}

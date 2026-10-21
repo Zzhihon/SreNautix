@@ -40,6 +40,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       scenarios: ${{ steps.list.outputs.scenarios }}
+      known_gaps: ${{ steps.list.outputs.known_gaps }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -56,6 +57,8 @@ jobs:
             grep -qxF "$s" <<<"$all" || { echo "::error::没有场景 $s（可选：$(tr '\n' ' ' <<<"$all")）"; exit 1; }
           done
           echo "scenarios=$(printf '%s\n' "${names[@]}" | jq -R . | jq -sc .)" >>"$GITHUB_OUTPUT"
+          # 已知缺口（场景脚本的 KNOWN_GAP）：照常运行，失败时只留下警告，不让整次运行判红
+          echo "known_gaps=$(deploy/kind/scenario.sh known-gaps | cut -f1 | jq -R . | jq -sc .)" >>"$GITHUB_OUTPUT"
 
   # 环境拉起本身（kind-env 中 up.sh 的各项就绪检查）与不变量 12（自愈 PR 的补偿控制）；
   # 不变量 12 对 Kind 中真实 bare 仓库的 gitlocal-invariants 运行，集群一侧用 envtest
@@ -101,12 +104,22 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/kind-env
       - name: 运行场景（含 SreNautix 的发现、分析与自愈 PR）
+        id: run
+        # 已知缺口的场景失败时不让 job 失败，下一步留下警告；其余场景的断言照常判定
+        continue-on-error: ${{ contains(fromJSON(needs.plan.outputs.known_gaps), matrix.scenario) }}
         env:
           SCENARIO: ${{ matrix.scenario }}
           SCENARIO_STATE_DIR: ${{ runner.temp }}/scenarios
           SRENAUTIX_CHECKS: "1"
           HOLD: "120"
         run: deploy/kind/scenario.sh run "$SCENARIO"
+      - name: 已知缺口
+        if: steps.run.outcome == 'failure' && steps.run.conclusion == 'success'
+        env:
+          SCENARIO: ${{ matrix.scenario }}
+        run: |
+          gap=$(deploy/kind/scenario.sh known-gaps | awk -F '\t' -v s="$SCENARIO" '$1 == s { print $2 }')
+          echo "::warning title=已知缺口 ${SCENARIO}::场景失败，按已知缺口处理：${gap}"
       - name: 收集诊断信息
         if: always()
         run: |

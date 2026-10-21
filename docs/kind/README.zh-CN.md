@@ -25,7 +25,7 @@
 
 ## 资源
 
-Docker 至少 4 CPU、10 GiB 内存、25 GiB 磁盘。磁盘有限的机器上建议直接使用 GitHub Actions 的 `kind-e2e` 工作流（手动触发，可指定场景）。工作流中每个场景在自己的 Kind 集群里运行（矩阵，最多 6 个并行）；环境拉起与不变量 12 在单独的 `invariants` job 中运行一次。每个场景的诊断 artifact 是 `kind-e2e-diagnostics-<场景>`。
+Docker 至少 4 CPU、10 GiB 内存、25 GiB 磁盘。磁盘有限的机器上建议直接使用 GitHub Actions 的 `kind-e2e` 工作流（手动触发，可指定场景）。工作流中每个场景在自己的 Kind 集群里运行（矩阵，最多 6 个并行）；环境拉起与不变量 12 在单独的 `invariants` job 中运行一次。每个场景的诊断 artifact 是 `kind-e2e-diagnostics-<场景>`。场景脚本声明 `KNOWN_GAP`（引用跟踪 issue 与产品缺陷）时为已知缺口：照常运行、断言不变、收集诊断，失败时只留下警告，不让整次运行判红；`deploy/kind/scenario.sh known-gaps` 列出这些场景（目前 release-bad-image、unmapped-alert，见 #5），缺陷修复后删除声明。
 
 ## 使用
 

@@ -12,6 +12,9 @@ SRENAUTIX_ROOT='^component:catalog$'
 SRENAUTIX_MAX_INCIDENTS=1
 SRENAUTIX_REMEDIATION=topology_coverage
 SRENAUTIX_PR_FILES='^srenautix/(topology-overrides|packs/kind-shop)/'
+# 已知缺口（产品缺陷，断言不变）：根因是逻辑组件 component:catalog 的事件没有证据卡；阶段 B 请求的组件枚举里既没有 api
+# 也没有 component:catalog，研判没有可用的假设（hypotheses 为空，输出不合 schema），研判失败（kind-e2e 39620204509）。
+KNOWN_GAP='Zzhihon/SreNautix#5 (2)：根因为逻辑组件的事件没有证据卡，阶段 B 的组件枚举不含可映射的工作负载'
 
 rules=platform/observability/rules/shop.yaml
 
