@@ -1,0 +1,136 @@
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import type { TopologyEdge, TopologyNode } from '@srenautix/contract';
+import { afterAll, describe, expect, it } from 'vitest';
+import { type TopologyRow } from '../../src/eval/bundle.js';
+import { discoveryRoots, loadLabels } from '../../src/eval/labels.js';
+import { BundleTopology } from '../../src/eval/reconstruct.js';
+
+// 标注的发现根因与修订记录；重建包拓扑在状态库没有记录时用 kube-state-metrics 历史推导新的 ReplicaSet（ADR 0110）
+
+const DIR = resolve(import.meta.dirname, '../../../../.scratch', `eval-labels-${process.pid}`);
+
+afterAll(() => {
+  rmSync(DIR, { recursive: true, force: true });
+});
+
+describe('标注', () => {
+  it('discovery_roots 为空时与 roots 相同；修订记录随标注读入', () => {
+    mkdirSync(DIR, { recursive: true });
+    const path = join(DIR, 'labels.yaml');
+    writeFileSync(
+      path,
+      [
+        'version: 1',
+        'cluster_id: prod',
+        'labels:',
+        '  - id: a',
+        '    title: 迁移被拒绝',
+        '    type: incident',
+        '    window: { from: 2026-10-16T01:20:00Z, to: 2026-10-16T02:00:00Z }',
+        '    as_of: 2026-10-16T01:35:00Z',
+        '    fault_alerts: [{ alertname: KubeJobFailed }]',
+        '    roots: [cluster:db]',
+        '    discovery_roots: [cluster:db, Job:prod/migrate-1, component:release]',
+        '    revisions:',
+        '      - { date: 2026-10-21, change: 增加 discovery_roots, reason: 发布与迁移是变更源头 }',
+        '    evidence: [{ kind: report, ref: r.md }]',
+        '  - id: b',
+        '    title: 其他',
+        '    type: incident',
+        '    window: { from: 2026-10-16T01:20:00Z, to: 2026-10-16T02:00:00Z }',
+        '    as_of: 2026-10-16T01:35:00Z',
+        '    fault_alerts: [{ alertname: X }]',
+        '    roots: [Deployment:prod/api]',
+        '    evidence: [{ kind: report, ref: r.md }]',
+      ].join('\n'),
+    );
+    const f = loadLabels(path);
+    expect(discoveryRoots(f.labels[0]!)).toEqual(['cluster:db', 'Job:prod/migrate-1', 'component:release']);
+    expect(f.labels[0]!.roots).toEqual(['cluster:db']);
+    expect(f.labels[0]!.revisions).toHaveLength(1);
+    expect(discoveryRoots(f.labels[1]!)).toEqual(['Deployment:prod/api']);
+  });
+});
+
+const node = (key: string, kind: string, namespace: string | null, name: string): TopologyNode => ({
+  key,
+  kind,
+  namespace,
+  name,
+  uid: null,
+  labels: {},
+  component_type: null,
+  hub: false,
+});
+const edge = (from: string, to: string, relation: string): TopologyEdge => ({
+  from,
+  to,
+  relation,
+  provenance: 'structural',
+  confidence: 1,
+  scope: 'service',
+  evidence: 'test',
+});
+
+describe('kube-state-metrics 回退', () => {
+  const T0 = Date.parse('2026-10-18T00:00:00Z');
+  const iso = (m: number) => new Date(T0 + m * 60_000).toISOString();
+  let seq = 0;
+  const row = (
+    source: string,
+    item: 'node' | 'edge',
+    body: TopologyNode | TopologyEdge,
+    from: number,
+    to: number | null,
+  ): TopologyRow => ({
+    seq: source === 'ksm_history' ? -1000 + ++seq : ++seq,
+    op: item === 'node' ? 'node_upsert' : 'edge_upsert',
+    item,
+    key:
+      item === 'node'
+        ? (body as TopologyNode).key
+        : `${(body as TopologyEdge).from}|${(body as TopologyEdge).relation}|${(body as TopologyEdge).to}`,
+    valid_from: iso(from),
+    valid_to: to === null ? null : iso(to),
+    source,
+    body,
+  });
+  const dep = node('Deployment:prod/api', 'Deployment', 'prod', 'api');
+  const app = node('Application.argoproj.io:argocd/prod', 'Application.argoproj.io', 'argocd', 'prod');
+  const oldRs = node('ReplicaSet:prod/api-1', 'ReplicaSet', 'prod', 'api-1');
+  const newRs = node('ReplicaSet:prod/api-2', 'ReplicaSet', 'prod', 'api-2');
+  const stateRs = node('ReplicaSet:prod/web-2', 'ReplicaSet', 'prod', 'web-2');
+  const rows: TopologyRow[] = [
+    // 状态库只有应用与 Deployment 的管理关系，没有 api 的 ReplicaSet
+    row('informer', 'node', app, 0, null),
+    row('informer', 'node', dep, 0, null),
+    row('informer', 'edge', edge(dep.key, app.key, 'managed_by'), 0, null),
+    // kube-state-metrics：导出起点就存在的旧 ReplicaSet，与 60 分钟时出现的新 ReplicaSet
+    row('ksm_history', 'node', dep, 0, null),
+    row('ksm_history', 'node', oldRs, 0, 70),
+    row('ksm_history', 'edge', edge(oldRs.key, dep.key, 'owned_by'), 0, 70),
+    row('ksm_history', 'node', newRs, 60, null),
+    row('ksm_history', 'edge', edge(newRs.key, dep.key, 'owned_by'), 60, null),
+    // 状态库有记录的 ReplicaSet：kube-state-metrics 的同名记录不再使用
+    row('informer', 'node', stateRs, 30, null),
+    row('ksm_history', 'node', stateRs, 25, null),
+  ];
+
+  it('状态库没有的 ReplicaSet 用 kube-state-metrics 第一次出现的时刻，属主与管理应用齐全；导出起点就存在的不算', () => {
+    const topo = new BundleTopology(rows);
+    const ev = topo.workloadEvents(T0, T0 + 120 * 60_000);
+    const fromKsm = ev.filter((e) => e.seq < 0);
+    expect(fromKsm).toHaveLength(1);
+    expect(fromKsm[0]).toMatchObject({
+      key: newRs.key,
+      owner: dep.key,
+      ownerSeenBefore: true,
+      managers: [app.key],
+      previous: null,
+      valid_from: iso(60),
+    });
+    // 状态库的记录照常推导（没有属主边时 owner 为 null）
+    expect(ev.filter((e) => e.key === stateRs.key).map((e) => e.seq > 0)).toEqual([true]);
+  });
+});

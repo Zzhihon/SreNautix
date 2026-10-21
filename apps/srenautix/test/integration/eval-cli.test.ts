@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { runEvalCli } from '../../src/eval/cli.js';
@@ -122,6 +122,64 @@ describe('srenautix eval', () => {
       .split('\n')
       .map((l) => JSON.parse(l) as { state: string });
     expect(runs.map((r) => r.state)).toEqual(['completed', 'completed', 'completed']);
+  });
+
+  it('--trace 为每次运行写研判记录：标准答案、输出、模型调用的请求与响应', async () => {
+    process.env.SRENAUTIX_TEST_LLM_KEY = 'local';
+    const server = new ReplayServer();
+    await server.start();
+    server.enqueue(...recorded.responses);
+    await runEvalCli([
+      '--cases',
+      join(ROOT, 'cases'),
+      '--config',
+      config('trace', server.baseUrl),
+      '--runs',
+      '3',
+      '--out',
+      join(ROOT, 'reports'),
+      '--name',
+      'trace',
+      '--trace',
+      join(ROOT, 'trace'),
+    ]);
+    await server.stop();
+    const dir = join(ROOT, 'trace', encodeURIComponent('scenario:pvc-full'));
+    expect(readdirSync(dir).sort()).toEqual(['local-0.json', 'local-1.json', 'local-2.json']);
+    const t = JSON.parse(readFileSync(join(dir, 'local-0.json'), 'utf8')) as {
+      state: string;
+      truth: { root_components: string[] };
+      output: { conclusion: { level: string } } | null;
+      llm_calls: Array<{ request: string; response: string | null }>;
+      steps: unknown[];
+    };
+    expect(t.state).toBe('completed');
+    expect(t.truth.root_components).toContain('StatefulSet:shop/postgres');
+    expect(t.output?.conclusion.level).toBe('likely');
+    expect(t.llm_calls.length).toBeGreaterThan(0);
+    expect(t.llm_calls[0]!.request.length).toBeGreaterThan(0);
+    expect(t.llm_calls.some((c) => c.response !== null)).toBe(true);
+    expect(t.steps.length).toBeGreaterThan(0);
+  });
+
+  it('模型路由不可达时评测立即停止，不写成绩单', async () => {
+    process.env.SRENAUTIX_TEST_LLM_KEY = 'local';
+    // 没有任何服务监听的端口：连接失败
+    await expect(
+      runEvalCli([
+        '--cases',
+        join(ROOT, 'cases'),
+        '--config',
+        config('down', 'http://127.0.0.1:9/v1'),
+        '--runs',
+        '1',
+        '--out',
+        join(ROOT, 'reports'),
+        '--name',
+        'down',
+      ]),
+    ).rejects.toThrow(/model_unavailable|breaker_open/);
+    expect(existsSync(join(ROOT, 'reports', 'down.md'))).toBe(false);
   });
 
   it('--compare：两份配置各评测一次，输出门禁', async () => {

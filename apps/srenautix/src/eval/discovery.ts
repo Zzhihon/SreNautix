@@ -2,7 +2,7 @@ import type pg from 'pg';
 import type { Alert, EvidenceResult } from '@srenautix/contract';
 import type { PackRuntime } from '../stage-a/packs.js';
 import { agreeAlerts, type AlertAgreement } from './agreement.js';
-import type { Label } from './labels.js';
+import { discoveryRoots, type Label } from './labels.js';
 import { faultAlertIds, mainIncident, type Replay } from './reconstruct.js';
 
 // 发现环节的度量（章程第二阶段 §3，ADR 0110）。
@@ -54,7 +54,7 @@ export function discoveryCase(r: Replay, l: Label): DiscoveryCase {
         [...main.everChanges.values()].some(
           (c) => Math.abs(Date.parse(c.time) - Date.parse(l.required_change_near as string)) <= CHANGE_NEAR_MS,
         );
-  const roots = new Set(l.roots);
+  const roots = new Set(discoveryRoots(l));
   const rootHit =
     l.type === 'benign'
       ? null

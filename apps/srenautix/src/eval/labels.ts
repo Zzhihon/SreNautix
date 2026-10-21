@@ -17,7 +17,9 @@ import { stableUuid } from './import-seed.js';
 //       as_of: …                             # 分析时刻（阶段 B 的研判时刻）
 //       fault_alerts:                        # 属于这次故障的告警（告警名 + 标签子集）
 //         - {alertname: KubeDeploymentRolloutStuck, labels: {namespace: prod}}
-//       roots: [Deployment:prod/api]         # 可接受的根因组件键（任一命中即为命中）
+//       roots: [Deployment:prod/api]         # 可接受的根因组件键（任一命中即为命中；分析环节的标准答案）
+//       discovery_roots: []                  # 发现环节可接受的根因，为空时与 roots 相同
+//       revisions: [{date: …, change: …, reason: …}]   # 修订记录
 //       granularity: workload
 //       mechanism: …
 //       disposition: act
@@ -74,6 +76,13 @@ const label = z
     as_of: time,
     fault_alerts: z.array(matcher).min(1),
     roots: z.array(z.string().min(1)).default([]),
+    // 发现环节可接受的根因：为空时与 roots 相同。变更是源头、受影响的组件是分析环节的根因时分开写
+    // （例如迁移失败：发现环节落在发布或迁移 Job 上，分析环节必须指出数据库的托管角色）
+    discovery_roots: z.array(z.string().min(1)).default([]),
+    // 标注的修订记录：每次修改标准答案都写一条，清单中列出供抽查
+    revisions: z
+      .array(z.object({ date: z.string().min(1), change: z.string().min(1), reason: z.string().min(1) }).strict())
+      .default([]),
     granularity: z.enum(['pod', 'workload', 'component', 'node']).nullable().default(null),
     mechanism: z.string().max(600).nullable().default(null),
     disposition: z.enum(['act', 'ignore', 'escalate', 'undetermined']).nullable().default(null),
@@ -106,7 +115,7 @@ const label = z
     if (l.type === 'incident' && !l.roots.length) {
       ctx.addIssue({ code: 'custom', message: `${l.id}：incident 标注必须给出 roots` });
     }
-    if (l.type === 'benign' && (l.roots.length || l.disposition !== 'ignore')) {
+    if (l.type === 'benign' && (l.roots.length || l.discovery_roots.length || l.disposition !== 'ignore')) {
       ctx.addIssue({ code: 'custom', message: `${l.id}：benign 标注的 roots 为空、disposition 为 ignore` });
     }
   });
@@ -135,6 +144,11 @@ export type FixExpect = z.infer<typeof fixExpect>;
 
 export function loadLabels(path: string): LabelFile {
   return file.parse(parse(readFileSync(path, 'utf8')));
+}
+
+/** 发现环节可接受的根因 */
+export function discoveryRoots(l: Label): string[] {
+  return l.discovery_roots.length ? l.discovery_roots : l.roots;
 }
 
 /** 告警是否属于这次故障：告警名相同且标签子集全部相等 */

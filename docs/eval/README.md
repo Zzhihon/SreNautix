@@ -25,13 +25,14 @@
 
 ```
 srenautix eval --cases <目录> --config <配置> [--suite <名>] [--runs 3] [--mode snapshot|reconstructed]
-               [--abstain] [--max-tokens 2000000] [--out eval/reports] [--name <报告名>]
+               [--abstain] [--max-tokens 2000000] [--out eval/reports] [--name <报告名>] [--trace <目录>]
 srenautix eval --compare <当前配置> <候选配置> --cases <目录> [同上] [--waive <case_id>]...
 srenautix eval import-seed --dir <种子目录> --cases <目录> --suite <名> --cluster-id <id>
 srenautix eval label --labels <标注> --cases <目录>
 srenautix eval export --labels <标注> --cases <目录> --config <配置> [--state <状态库连接文件>] [--only <标注 id>]...
 srenautix eval reconstruct --labels <标注> --cases <目录> --config <配置> [--runs 3] [--max-tokens N]
                            [--repo <GitOps 仓库的本地克隆>] [--discovery-only] [--only <标注 id>]... [--out] [--name]
+                           [--trace <目录>]
 srenautix eval live --state <状态库连接文件> --config <配置> --since <时刻> [--until <时刻>] [--out] [--name]
 ```
 
@@ -62,7 +63,10 @@ budget: { call_timeout_seconds: 90 }
 |---|---|
 | `<名>.md` | 成绩单：每个比例的值、分子、分母与 90% 置信区间；可靠性表；按粒度的 top-1；门禁 |
 | `<名>.json` | 契约 `eval-report` |
-| `<名>.runs.jsonl` | 每次运行的记录（用例、路由、状态、档位、处置、前 3 个根因、token、成本、快照未命中率、服务方指纹） |
+| `<名>.runs.jsonl` | 每次运行的记录（用例、路由、状态、档位、处置、前 3 个根因、token、成本、快照未命中率、服务方指纹、提议） |
+| `--trace <目录>` 下的 `<case_id>/<路由>-<次序>.json` | 每次运行的研判记录：标准答案、研判输出、执行的检查与得到的卡、账本，以及各步骤、模型调用（完整的请求与响应）与工具调用；`--compare` 时两份配置分别在 `config-0/`、`config-1/` 下 |
+
+模型路由不可达（连接失败、熔断）时评测立即停止并报错，不写成绩单：这类运行量出的是评测机器到模型服务的网络，不是研判质量。网络或模型服务恢复后重跑。
 
 `--compare` 另写出 `<名>.baseline.*`（当前配置的成绩），候选成绩单带门禁；门禁不通过时命令以非零状态退出。
 

@@ -100,7 +100,40 @@ export class BundleTopology implements NodeLookup {
     this.boundaries = bounds.sort((a, b) => a - b);
     this.stateNodes = rows.filter((r) => r.item === 'node' && r.source !== 'ksm_history').sort((a, b) => a.seq - b.seq);
     this.stateEdges = rows.filter((r) => r.item === 'edge' && r.source !== 'ksm_history').sort((a, b) => a.seq - b.seq);
+    // 状态库没有记录的 ReplicaSet：用 kube-state-metrics 历史推导发布（与 reader 的 history/ksm 相同，ADR 0110）。
+    // 状态库有记录的 ReplicaSet 只用状态库，两个来源不混用
+    const stateKeys = new Set(this.stateNodes.map((r) => r.key));
+    this.ksmReplicaSets = rows
+      .filter(
+        (r) =>
+          r.item === 'node' &&
+          r.source === 'ksm_history' &&
+          r.op === 'node_upsert' &&
+          (r.body as TopologyNode).kind === 'ReplicaSet' &&
+          !stateKeys.has(r.key),
+      )
+      .sort((a, b) => ms(a.valid_from) - ms(b.valid_from) || a.seq - b.seq);
+    this.ksmOwnedBy = rows.filter(
+      (r) => r.item === 'edge' && r.source === 'ksm_history' && (r.body as TopologyEdge).relation === 'owned_by',
+    );
+    this.firstSeen = new Map();
+    for (const r of rows) {
+      if (r.item === 'node' && r.op === 'node_upsert') {
+        const t = ms(r.valid_from);
+        if (!this.firstSeen.has(r.key) || t < (this.firstSeen.get(r.key) as number)) {
+          this.firstSeen.set(r.key, t);
+        }
+      }
+    }
+    this.rangeFrom = Math.min(...[...this.firstSeen.values()]);
   }
+
+  private readonly ksmReplicaSets: TopologyRow[];
+  private readonly ksmOwnedBy: TopologyRow[];
+  /** 每个节点键在任一来源中第一次出现的时刻 */
+  private readonly firstSeen: Map<string, number>;
+  /** 重建包拓扑的起点：kube-state-metrics 区间的下限不早于它，这一刻出现的对象在导出前就已存在 */
+  private readonly rangeFrom: number;
 
   /** 拓扑版本：t 之前（含）的区间边界数，内容不变时版本不变 */
   version(t: number): number {
@@ -331,7 +364,50 @@ export class BundleTopology implements NodeLookup {
         managers,
       });
     }
-    return out;
+    // kube-state-metrics 历史中的 ReplicaSet：第一次出现（不在重建包起点）即为新的 ReplicaSet；
+    // 属主取 kube-state-metrics 的 owned_by，管理应用取状态库的 managed_by（kube-state-metrics 没有这类关系）
+    const seenRs = new Set<string>();
+    for (const r of this.ksmReplicaSets) {
+      if (seenRs.has(r.key)) {
+        continue;
+      }
+      seenRs.add(r.key);
+      const t = ms(r.valid_from);
+      if (t <= this.rangeFrom) {
+        continue;
+      }
+      const ownerEdge = this.ksmOwnedBy.find((x) => (x.body as TopologyEdge).from === r.key);
+      const owner = ownerEdge ? (ownerEdge.body as TopologyEdge).to : null;
+      if (owner === null) {
+        continue;
+      }
+      const ownerFirst = this.firstSeen.get(owner);
+      const managers = [
+        ...new Set(
+          (edgesFrom.get(owner) ?? [])
+            .filter(
+              (x) =>
+                (x.body as TopologyEdge).relation === 'managed_by' &&
+                ms(x.valid_from) <= t + 60_000 &&
+                (x.valid_to === null || ms(x.valid_to) > t),
+            )
+            .map((x) => (x.body as TopologyEdge).to),
+        ),
+      ];
+      out.push({
+        seq: r.seq,
+        op: 'node_upsert',
+        key: r.key,
+        kind: 'ReplicaSet',
+        valid_from: r.valid_from,
+        body: r.body as TopologyNode,
+        previous: null,
+        owner,
+        ownerSeenBefore: ownerFirst !== undefined && ownerFirst < t - 60_000,
+        managers,
+      });
+    }
+    return out.sort((a, b) => ms(a.valid_from) - ms(b.valid_from) || a.seq - b.seq);
   }
 }
 

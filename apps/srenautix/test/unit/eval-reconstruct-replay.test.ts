@@ -140,6 +140,8 @@ const label: Label = {
     'Deployment:acme-prod/worker',
     'StatefulSet:acme-prod/gateway',
   ],
+  discovery_roots: [],
+  revisions: [],
   granularity: 'component',
   mechanism: null,
   disposition: 'act',

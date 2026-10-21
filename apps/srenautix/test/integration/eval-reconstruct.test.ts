@@ -68,6 +68,8 @@ const label: Label = {
   as_of: iso(T0 + 30 * MIN),
   fault_alerts: [{ alertname: 'KubeDeploymentRolloutStuck', labels: { deployment: 'api' } }],
   roots: ['Deployment:shop/api', 'Application.argoproj.io:argocd/shop'],
+  discovery_roots: [],
+  revisions: [],
   granularity: 'workload',
   mechanism: null,
   disposition: 'act',

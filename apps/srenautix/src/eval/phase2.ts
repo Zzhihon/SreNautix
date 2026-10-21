@@ -79,6 +79,8 @@ export interface Phase2Options {
     maxTokens: number;
     repo: string | null;
     scratch: string;
+    /** 研判记录目录（每次运行一份，见 runner.ts） */
+    traceDir: string | null;
   } | null;
   now: string;
 }
@@ -200,6 +202,7 @@ export async function runPhase2(o: Phase2Options): Promise<Phase2Result> {
           queryFor: (id) => runners.get(id) ?? null,
           maxTokens: a.maxTokens,
           signal: new AbortController().signal,
+          traceDir: a.traceDir,
         })
       : { runs: [], excluded: new Map(), tokens: 0, skipped: 0 };
     // 重建没有得到事件的标注：每条路由每次都记为失败（未命中）
