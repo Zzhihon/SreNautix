@@ -96,6 +96,8 @@ func Pod(lk Lookup, pod *corev1.Pod) Contribution {
 	if self == "" {
 		return c
 	}
+	// 自己的节点在第一位（generic 先加入它）
+	c.Nodes[0].Node.Images = PodImages(pod)
 	if pod.Spec.NodeName != "" {
 		node := c.ref("Node", "", pod.Spec.NodeName, "", false)
 		c.edge(Structural(self, node, RelRunsOn, ScopeInstance, "spec.nodeName"))

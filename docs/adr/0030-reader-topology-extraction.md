@@ -36,7 +36,11 @@ DESIGN §4.1–§4.2 要求拓扑以事件形式保存（`valid_from` / `valid_t
 5. **只读名称**：环境变量字面值与 ConfigMap 的值只在 reader 进程内用于匹配 Service DNS 名，不进入任何输出；证据字段只写"env DB_HOST"、"ConfigMap app-config key upstream"。Secret 从不读取，名称只从 Pod spec 的引用中得到。整个值就是 `<svc>` 或 `<svc>:<port>` 时才识别同命名空间的短名，`info`、`true` 之类的普通取值即使与某个 Service 同名也不产生边。
 6. **派生贡献的重算**：配置引用、CSI node plugin、NetworkPolicy 边依赖其他对象（ConfigMap、Service、PV、命名空间标签、ReplicaSet）。这些对象变化时，把受影响的派生贡献标为待重算，每 2 秒批量重算一次，避免一个 ConfigMap 变化触发上千次即时重算。
 7. **自定义资源**：识别器（`topology.Recognizer`）声明要监听的资源。reader 每分钟做一次资源发现，只为 apiserver 实际提供的资源启动 informer；资源消失时停止 informer 并撤回它的全部贡献。领域包声明的 Operator 约定通过同一接口接入。
-8. **墓碑**：删除的对象保留 24 小时，按组件键和 Pod IP 索引，记录创建与删除时间、所在节点和顶层 owner。查询带时刻时，只返回在该时刻存活的对象；同一个键先后对应多个对象（例如 StatefulSet 的 Pod 重建）时全部保留。
+8. **Pod 的镜像**：Pod 节点带 `images`，内容是普通容器 spec 中的 `image` 与 status 中的 `imageID`（digest）。中心用它把发布之前的迁移 Job 关联到发布（ADR 0104 §13 第 2 档）。
+   - 每个引用按中心的 `normalizeImage` 规范化：去掉运行时前缀，带 digest 的只保留 `sha256:…`，其余转小写。结果去重、按字典序排列，没有镜像时省略。
+   - init 容器不计入，与 kube-state-metrics 的 `kube_pod_container_info` 一致。等待迁移的 init 容器可能与迁移 Job 用同一个镜像，计入后第 2 档会因 init 镜像误判为匹配，实时拓扑与按 kube-state-metrics 回放的结果也会不同。临时容器同样不计入。
+   - 只读镜像引用，环境变量与 Secret 都不进入节点。
+9. **墓碑**：删除的对象保留 24 小时，按组件键和 Pod IP 索引，记录创建与删除时间、所在节点和顶层 owner。查询带时刻时，只返回在该时刻存活的对象；同一个键先后对应多个对象（例如 StatefulSet 的 Pod 重建）时全部保留。
 
 ## 结果
 

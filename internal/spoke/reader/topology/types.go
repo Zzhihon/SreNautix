@@ -58,6 +58,8 @@ type Node struct {
 	Labels        map[string]string `json:"labels"`
 	ComponentType *string           `json:"component_type"`
 	Hub           bool              `json:"hub"`
+	// Images 是 Pod 容器的镜像引用（规范化、去重、排序，见 PodImages）；只有 Pod 节点填写，没有时省略
+	Images []string `json:"images,omitempty"`
 }
 
 // Edge 表示 From 依赖 To。

@@ -496,6 +496,13 @@ func TestWatcherBuildsTopologyFromLiveCluster(t *testing.T) {
 	if n, _ := rep.node("CSIDriver:driver.example.io"); !n.Hub {
 		t.Fatalf("CSI driver must be a hub: %+v", n)
 	}
+	// Pod 节点经事件流带上容器镜像（ADR 0104 §13 的第 2 档）；其他节点不带
+	if n, _ := rep.node("Pod:app/api-1"); fmt.Sprint(n.Images) != "[x]" {
+		t.Fatalf("pod images %v", n.Images)
+	}
+	if n, _ := rep.node("Node:n1"); n.Images != nil {
+		t.Fatalf("node images %v", n.Images)
+	}
 	// 首次列举的对象以创建时间为 valid_from
 	for _, ev := range rep.events {
 		if ev.Op == topology.OpNodeUpsert && ev.Node.Key == "Pod:app/api-1" {
