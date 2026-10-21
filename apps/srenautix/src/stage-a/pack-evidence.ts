@@ -41,6 +41,13 @@ interface Planned {
   params?: Record<string, number | string | boolean>;
   /** 覆盖卡片定义的窗口（卡片检查，ADR 0116） */
   window?: { before: string; after: string };
+  /** 实体上最晚开始的在场成员告警（unix 毫秒）；卡片窗口装不下它时按它重新锚定（ADR 0107 §7） */
+  latest?: number;
+}
+
+/** 卡片的锚点：事件首次触发；实体上最晚开始的成员告警落在卡片窗口之后时（之后才升级的告警）按它重新锚定 */
+function anchorOf(p: Planned, anchor: number, afterMs: number): number {
+  return p.latest !== undefined && p.latest > anchor + afterMs ? p.latest : anchor;
 }
 
 /** 数据源的查询回看：卡片窗口之前再留 24 小时，供 rate 等函数的回看范围使用。 */
@@ -96,8 +103,22 @@ export class PackEvidence implements EvidenceRunner {
   /** now：评估时刻（默认当前时间）；评测与回放传入快照的 as_of，卡片窗口与信号探测都不晚于它 */
   async run(inc: Incident, alerts: Alert[], signal: AbortSignal, now = Date.now()): Promise<EvidenceRun> {
     const plan: Planned[] = [];
-    const seen = new Set<string>();
+    const seen = new Map<string, Planned>();
     const chainsRun: string[] = [];
+    // 每个实体（与告警归属的组件）上最晚开始的在场成员告警：卡片窗口装不下它时按它重新锚定（ADR 0107 §7）
+    const latest = new Map<string, number>();
+    const note = (k: string | null, t: number) => {
+      if (k !== null && Number.isFinite(t) && t > (latest.get(k) ?? -Infinity)) {
+        latest.set(k, t);
+      }
+    };
+    for (const a of alerts) {
+      const t = Date.parse(a.starts_at);
+      note(a.entity ? entityKey(a.entity) : null, t);
+      note(a.component, t);
+    }
+    const latestOf = (entity: EntityRef) =>
+      latest.get(entityKey(entity)) ?? latest.get(tryNodeKey(entity.kind, entity.namespace, entity.name) ?? '');
     const add = (chains: string[], entity: EntityRef) => {
       for (const ck of chains) {
         const chain = this.rt.set.chains.get(ck);
@@ -114,8 +135,10 @@ export class PackEvidence implements EvidenceRunner {
           any = true;
           const k = `${card}|${entityKey(entity)}`;
           if (!seen.has(k)) {
-            seen.add(k);
-            plan.push({ card, entity });
+            const l = latestOf(entity);
+            const p: Planned = { card, entity, ...(l !== undefined ? { latest: l } : {}) };
+            seen.set(k, p);
+            plan.push(p);
           }
         }
         if (any && !chainsRun.includes(ck)) {
@@ -355,13 +378,9 @@ export class PackEvidence implements EvidenceRunner {
     }
     // 标签档案与信号备选在卡片窗口的终点探测（不晚于 now）：事件开始两小时之后重跑或回放时，
     // 按事件当时的数据选择备选，不按墙上时钟（否则 [当前−2h, 当前] 内没有序列，每张卡都是 source_error）
-    const windowEnd = Math.max(
-      ...plan.map(
-        (p) =>
-          anchor +
-          durationSeconds((p.window ?? this.rt.set.cards.get(p.card)!.def.window ?? DEFAULT_WINDOW).after) * 1000,
-      ),
-    );
+    const afterOf = (p: Planned) =>
+      durationSeconds((p.window ?? this.rt.set.cards.get(p.card)!.def.window ?? DEFAULT_WINDOW).after) * 1000;
+    const windowEnd = Math.max(...plan.map((p) => anchorOf(p, anchor, afterOf(p)) + afterOf(p)));
     const probeAt = Math.min(now, windowEnd);
     const ds: EvidenceDataSource = await this.source.dataSource(probeAt);
     const keys = new Set(plan.flatMap((p) => Object.values(this.rt.set.cards.get(p.card)!.signals)));
@@ -370,6 +389,7 @@ export class PackEvidence implements EvidenceRunner {
     const results = await pool(plan, this.o.concurrency, signal, async (p): Promise<Done | null> => {
       const e = this.rt.set.cards.get(p.card)!;
       const before = durationSeconds((p.window ?? e.def.window ?? DEFAULT_WINDOW).before) * 1000;
+      const at = anchorOf(p, anchor, afterOf(p));
       const started = performance.now();
       try {
         const r = await runCard({
@@ -382,12 +402,12 @@ export class PackEvidence implements EvidenceRunner {
             name: p.entity.name,
             node: p.entity.kind === 'Node' ? p.entity.name : null,
           },
-          anchor,
+          anchor: at,
           now,
           ds,
           engine: this.source.engine,
           resolutions,
-          clock: { from: toIso(anchor - before - LOOKBACK_MS), to: toIso(now) },
+          clock: { from: toIso(at - before - LOOKBACK_MS), to: toIso(now) },
           locale: this.o.locale,
           timeoutMs: this.o.queryTimeoutMs,
           ...(p.params ? { params: p.params } : {}),
