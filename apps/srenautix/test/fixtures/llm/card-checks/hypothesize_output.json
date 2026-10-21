@@ -1,5 +1,8 @@
 {
-  "provenance": { "mode": "hand-written", "note": "卡片检查的回归（ADR 0116）：假设落在事件根因上，检查取模板列表里第一个卡片检查" },
+  "provenance": {
+    "mode": "hand-written",
+    "note": "卡片检查的回归（ADR 0116）：h1 落在事件根因上，检查取模板列表里第一个卡片检查；h2 落在子图里另一个组件，作为待检验的竞争假设，停止条件不成立（ADR 0121、0122 下根因上的卡与告警会让 h1 一开始就是支持）"
+  },
   "output": {
     "hypotheses": [
       {
@@ -7,6 +10,14 @@
         "parent_id": null,
         "root_component": "{{component:^$}}",
         "mechanism": "根因组件自身的故障",
+        "supporting": [],
+        "refuting": []
+      },
+      {
+        "id": "h2",
+        "parent_id": null,
+        "root_component": "{{component:^(Node|Service|StatefulSet):}}",
+        "mechanism": "依赖组件的故障",
         "supporting": [],
         "refuting": []
       }

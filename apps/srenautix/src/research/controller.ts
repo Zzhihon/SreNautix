@@ -315,7 +315,7 @@ export async function runStageB(input: ResearchRunInput, env: ResearchEnv, sink:
   let lastSignature = ledger.signature();
   for (let step = 1; ; step++) {
     const leader = ledger.ranked(candidateScore)[0];
-    if (leader && leader.status === 'supported' && ledger.competitorsResolved(leader)) {
+    if (ledger.leaderSettled(leader)) {
       stopReason = 'leader_supported';
       break;
     }
@@ -397,7 +397,7 @@ export async function runStageB(input: ResearchRunInput, env: ResearchEnv, sink:
       break;
     }
     const lead = ledger.ranked(candidateScore)[0];
-    if (lead && lead.status === 'supported' && ledger.competitorsResolved(lead)) {
+    if (ledger.leaderSettled(lead)) {
       stopReason = 'leader_supported';
       break;
     }

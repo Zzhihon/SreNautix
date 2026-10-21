@@ -412,6 +412,19 @@ export class Ledger {
     );
   }
 
+  /**
+   * 停止条件（DESIGN §7.3）：排名第一的假设有支持卡（只有成员告警支持的不算，ADR 0122），
+   * 并且其余候选都已推翻或检验后仍无法判定
+   */
+  leaderSettled(leader: LedgerEntry | undefined): boolean {
+    return (
+      leader !== undefined &&
+      leader.status === 'supported' &&
+      this.supportCards(leader).length > 0 &&
+      this.competitorsResolved(leader)
+    );
+  }
+
   /** 竞争假设（除 leader 外）是否都已推翻或检验后无法判定 */
   competitorsResolved(leader: LedgerEntry): boolean {
     return this.list()

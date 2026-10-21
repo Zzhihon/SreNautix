@@ -331,6 +331,19 @@ describe('成员告警作为支持证据（ADR 0122）', () => {
     expect(ledger.toContract()[0]?.supporting).toEqual(['alert:2']);
   });
 
+  it('只有告警支持的第一名不满足停止条件，有支持卡才满足', () => {
+    const cards = stageACards().map((c) => (c.ref === 'card:1' ? { ...c, verdict: 'normal' as const } : c));
+    const { ledger } = setup(cards);
+    ledger.merge([hyp('h1', API, [])], []);
+    ledger.evaluate();
+    expect(ledger.entries.get('h1')?.status).toBe('supported');
+    expect(ledger.leaderSettled(ledger.ranked()[0])).toBe(false);
+    const s = setup();
+    s.ledger.merge([hyp('h1', API, [])], []);
+    s.ledger.evaluate();
+    expect(s.ledger.leaderSettled(s.ledger.ranked()[0])).toBe(true);
+  });
+
   it('依赖对象上的告警只在模型引用时计入；meta 与 forecast 告警不计入', () => {
     const { ledger, rc, book } = setup();
     ledger.merge([hyp('h1', PG, []), hyp('h2', WEB, ['alert:1'])], []);
