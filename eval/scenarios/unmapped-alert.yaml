@@ -15,6 +15,13 @@ truth:
 scenario:
   summary: 人工新增告警规则 ShopCatalogStale（只有 service="catalog" 标签）；告警触发后映射不到组件，商品目录由 api 提供
   expected_alerts: [ShopCatalogStale]
+  # 发现环节可接受的根因：告警只带 service 标签，server 归到逻辑组件 component:catalog（9c97653）；
+  # 分析环节必须查明商品目录由 api 提供（truth.root_components）
+  discovery_roots: ['component:catalog']
+  revisions:
+    - date: 2026-10-21
+      change: 增加 discovery_roots（component:catalog）；truth.root_components 不变
+      reason: 告警没有任何对象标签，发现环节只能落在 service 标签对应的逻辑组件上；api 与 catalog 的对应关系只能在分析环节查明
   silent_root: false
   distractors: []
   background_noise: _background.yaml

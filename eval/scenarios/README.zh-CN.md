@@ -22,6 +22,8 @@
 |---|---|
 | `summary` | 场景说明 |
 | `expected_alerts` | 注入后一定会出现的告警（`scenario.sh verify` 等待它们出现） |
+| `discovery_roots` | 发现环节可接受的根因（可选；没有时与 `truth.root_components` 相同）。变更或告警本身只能定位到上游对象、真正的根因要在分析环节查明时分开写，与评测标注的 `discovery_roots` 相同（ADR 0110） |
+| `revisions` | 标准答案的修订记录：日期、改动、理由 |
 | `silent_root` | 根因上没有任何告警，需要探测卡发现 |
 | `distractors` | 干扰项：同时发生但与故障无关的变更或异常，不能成为 top-1 |
 | `background_noise` | 所有场景期间都存在的背景噪声，见 `_background.yaml` |
