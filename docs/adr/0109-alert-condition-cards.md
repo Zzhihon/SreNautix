@@ -19,10 +19,10 @@
    - 来源固定在 `upstream/community-rules.json`，每个文件都有固定提交与 sha256，包括 argo-cd-mixin、cert-manager-mixin 与 postgres-exporter mixin 的渲染结果、ingress-nginx chart values 中的示例、Strimzi 示例规则、Longhorn 文档、mysqld-mixin、nacos-k8s 的 chart、CloudNativePG cluster chart、awesome-prometheus-alerts 的 redis_exporter 规则，以及 rocketmq-exporter 的示例规则。
    - 规则以多种形式给出：规则文件、注释掉的示例、文档中的 yaml 代码块，或按 values 渲染的 chart。
    - chart 模板或渲染留下的具体名字由 `replace` 换成实体变量。例如 CNPG 规则里的集群名，Cluster 条目换成 `$name`，Pod 条目换成任意集群名的正则；命名空间换成 `$namespace`。换过名字的来源会在卡片说明中注明。
-   - 没有手写主卡的 33 个条目都以 `upstream-conditions` 中的条件卡为主卡。
+   - 没有手写主卡的 34 个条目都以 `upstream-conditions` 中的条件卡为主卡。
    - 夹具来自 argo-cd-mixin 同一提交的 promtool 测试。
    - builtin-packs 测试做三件事：核对仓库内容与生成结果一致；核对内置包中有证据链的条目都有主卡；在夹具上用上游规则做一致性核对。
-   - rocketmq 目录的 `SendTPSTooHigh` 在 rocketmq-exporter 的示例规则与文档中都不存在，是唯一没有主卡的条目。
+   - rocketmq 目录的集群发送 TPS 过高条目使用上游的告警名 `RocketMQClusterProduceHigh`。曾登记的 `SendTPSTooHigh` 在 rocketmq-exporter 的示例规则与文档中都不存在。
    - 成熟度是 beta。
 6. **用户包**：与 CCHP 一样，用户可以用同一个函数从自己的规则生成条件卡包，并在 CI 中执行 `pack test --alert-rules`。
 

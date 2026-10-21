@@ -1,11 +1,14 @@
 # 来源：apache/rocketmq-exporter 仓库 example.rules 中的告警名。
+# 集群发送 TPS 过高的告警在上游名为 RocketMQClusterProduceHigh（example.rules 与 rocketmq_exporter_quickstart.md）；
+# 曾登记的 SendTPSTooHigh 在上游规则与文档中都不存在，已改为上游的名字。
 entries:
   - {
-      id: rocketmq-send-tps-too-high,
-      alertname: SendTPSTooHigh,
+      id: rocketmq-cluster-produce-high,
+      primary_card: upstream-conditions/rocketmq-cluster-produce-high/condition,
+      alertname: RocketMQClusterProduceHigh,
       role: symptom,
       entity: { kind: Namespace, name_labels: [namespace] },
-      chains: [rocketmq],
+      chains: [rocketmq, upstream-conditions/rocketmq-cluster-produce-high],
       mixin: other,
     }
   - {

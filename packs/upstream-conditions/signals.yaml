@@ -676,6 +676,22 @@ signals:
     kind: metrics
     alternatives:
       - expr: (count(redis_instance_info{role="master"}) or vector(0)) < 1
+  - id: rocket_mq_cluster_produce_high.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(rocketmq_producer_tps{})
+  - id: rocket_mq_cluster_produce_high.value
+    kind: metrics
+    alternatives:
+      - expr: sum(rocketmq_producer_tps) by (cluster) >= 10
+  - id: rocket_mq_cluster_produce_high.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          sum(rocketmq_producer_tps) by (cluster) >= 10
+          )[3m:1m])
   - id: under_replicated_partitions.inputs
     kind: metrics
     alternatives:

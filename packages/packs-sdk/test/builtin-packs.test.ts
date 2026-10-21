@@ -67,8 +67,8 @@ describe('内置领域包', () => {
         expect(e.chains).toContain(`upstream-conditions/${e.id}`);
       }
     }
-    // 目录里 SendTPSTooHigh 这个名字在 rocketmq-exporter 的示例规则与文档中都不存在，没有可生成的条件
-    expect(g.missing).toEqual(['rocketmq/rocketmq-send-tps-too-high']);
+    // 每个没有手写主卡的条目在上游都有同名规则
+    expect(g.missing).toEqual([]);
     expect(g.firing).toBeGreaterThan(0);
 
     const set = await shared;
@@ -81,12 +81,12 @@ describe('内置领域包', () => {
     expect(report.alert_checks).toBe(2 * report.cases.filter((c) => c.kind === 'fixture').length);
   });
 
-  it('内置包中除上游没有规则的条目外，有证据链的条目都声明了主卡', async () => {
+  it('内置包中有证据链的条目都声明了主卡', async () => {
     const set = await shared;
     const without = set.packs.flatMap((p) =>
       p.content.alerts.entries.filter((e) => e.chains?.length && !e.primary_card).map((e) => e.id),
     );
-    expect(without).toEqual(['rocketmq-send-tps-too-high']);
+    expect(without).toEqual([]);
   });
 
   it('alerts-kps 覆盖固定版本 kube-prometheus-stack 的全部告警名，forecast 与 predict_linear 一致', async () => {

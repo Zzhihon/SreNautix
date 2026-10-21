@@ -1480,6 +1480,54 @@ chains:
         display:
           value: peak_0
         egress: allow
+  - id: rocketmq-cluster-produce-high
+    title:
+      zh-CN: 告警条件：RocketMQClusterProduceHigh
+      en: 'Alert condition: RocketMQClusterProduceHigh'
+    cards:
+      - id: condition
+        title:
+          zh-CN: 告警 RocketMQClusterProduceHigh 的条件
+          en: Condition of alert RocketMQClusterProduceHigh
+        note:
+          zh-CN: '与 apache/rocketmq-exporter@e1ab2dd example.rules (GaleraAlerts) 中 RocketMQClusterProduceHigh 的表达式相同；条件持续 for: 3m 时判异常'
+          en: Same expression as RocketMQClusterProduceHigh in apache/rocketmq-exporter@e1ab2dd example.rules (GaleraAlerts); abnormal when it holds for 3m
+        applies_to:
+          kinds:
+            - Namespace
+        window:
+          before: 30m
+          after: 10m
+        refs:
+          - name: inputs
+            signal: rocket_mq_cluster_produce_high.inputs
+            mode: range
+          - name: value_0
+            signal: rocket_mq_cluster_produce_high.value
+            mode: range
+            empty_is: normal
+          - name: held_0
+            signal: rocket_mq_cluster_produce_high.held
+            mode: range
+            empty_is: normal
+        judge:
+          let:
+            - name: shown_0
+              cel: 'value_0.filter(s, ("namespace" in s.labels ? s.labels["namespace"] == entity.name : true))'
+            - name: peak_0
+              cel: 'count(shown_0) > 0 ? max(shown_0) : 0.0'
+            - name: mine_0
+              cel: 'held_0.filter(s, ("namespace" in s.labels ? s.labels["namespace"] == entity.name : true))'
+            - name: longest_0
+              cel: 'count(mine_0) > 0 ? max(mine_0) : 0.0'
+          abnormal_if:
+            - cel: count(inputs) > 0 && longest_0 >= 3.0
+              say:
+                zh-CN: 告警 RocketMQClusterProduceHigh 的条件持续了 3m，表达式的值最高 {peak_0, number}
+                en: The condition of RocketMQClusterProduceHigh held for 3m, with the expression peaking at {peak_0, number}
+        display:
+          value: peak_0
+        egress: allow
   - id: rocketmq-group-get-latency
     title:
       zh-CN: 告警条件：GroupGetLatencyByStoretime
