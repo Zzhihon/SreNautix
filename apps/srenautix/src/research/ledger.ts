@@ -62,22 +62,28 @@ export function ownerOf(key: string, subgraph: Subgraph): string {
   return cur;
 }
 
+/** 组件本身加上沿 owned_by 向下的全部成员（例如 Deployment 的 ReplicaSet 与 Pod），与阶段 A 的 membersOf 相同 */
+export function membersOf(root: string, subgraph: Subgraph): Set<string> {
+  const out = new Set([root]);
+  const queue = [root];
+  for (let i = 0; i < queue.length; i++) {
+    for (const e of subgraph.edges) {
+      if (e.relation === 'owned_by' && e.to === queue[i] && e.confidence >= SCOPE_TAU && !out.has(e.from)) {
+        out.add(e.from);
+        queue.push(e.from);
+      }
+    }
+  }
+  return out;
+}
+
 /**
  * 假设的范围：根因组件本身，它直接依赖的对象（边 from=根因，置信度不低于 τ，例如挂载的 PVC、所在节点），
  * 以及沿 owned_by 向下它拥有的全部对象（例如 Deployment 的 ReplicaSet 与 Pod）。调用根因的上游
  * （边 to=根因 的其他关系）只会表现出症状，它们的异常卡不能证明根因。
  */
 export function scopeOf(root: string, subgraph: Subgraph): Set<string> {
-  const out = new Set([root]);
-  const members = [root];
-  for (let i = 0; i < members.length; i++) {
-    for (const e of subgraph.edges) {
-      if (e.relation === 'owned_by' && e.to === members[i] && e.confidence >= SCOPE_TAU && !out.has(e.from)) {
-        out.add(e.from);
-        members.push(e.from);
-      }
-    }
-  }
+  const out = membersOf(root, subgraph);
   for (const e of subgraph.edges) {
     if (e.confidence >= SCOPE_TAU && e.from === root) {
       out.add(e.to);
@@ -297,13 +303,17 @@ export class Ledger {
 
   /**
    * 能作为支持证据的卡：异常、实体在假设范围内。来源有三个：模型引用的卡、针对这个假设的检查卡、
-   * 实体就是假设根因组件本身的阶段 A 卡（代码自动关联，模型漏引也不影响判定）。
+   * 实体是根因组件本身或它拥有的对象的阶段 A 卡（代码自动关联，模型漏引也不影响判定，ADR 0121）。
+   * 根因依赖的对象上的卡只在模型引用时计入：依赖异常同样可以说明依赖本身才是根因。
    */
   supportCards(e: LedgerEntry): CardEntry[] {
     const scope = scopeOf(e.rootComponent, this.subgraph);
+    const members = membersOf(e.rootComponent, this.subgraph);
     const fromRefs = e.supporting.map((r) => this.book.card(r)).filter((c): c is CardEntry => c !== undefined);
     const fromChecks = this.book.allCards.filter((c) => c.hypothesisId === e.id);
-    const ownCards = this.book.allCards.filter((c) => c.hypothesisId === null && c.component === e.rootComponent);
+    const ownCards = this.book.allCards.filter(
+      (c) => c.hypothesisId === null && c.component !== null && members.has(c.component),
+    );
     const all = new Map([...fromRefs, ...fromChecks, ...ownCards].map((c) => [c.ref, c]));
     return [...all.values()].filter(
       (c) => c.result.verdict === 'abnormal' && c.component !== null && scope.has(c.component),
@@ -327,7 +337,7 @@ export class Ledger {
       (c) =>
         c.result.verdict === 'normal' &&
         hasData(c) &&
-        (c.hypothesisId === e.id ||
+        ((c.hypothesisId === e.id && (c.component === null || scope.has(c.component))) ||
           (c.component !== null && scope.has(c.component) && supportDefs.has(c.result.card_id)) ||
           (e.refuting.includes(c.ref) && c.component !== null && scope.has(c.component))),
     );
@@ -339,7 +349,11 @@ export class Ledger {
       if (e.pinned) {
         continue;
       }
-      const checks = this.book.allCards.filter((c) => c.hypothesisId === e.id);
+      // 检查卡判定为正常时，只有卡的实体在假设范围内才推翻它（ADR 0121）；实体未知的卡（工具结果）照旧按检查针对的假设判定
+      const scope = scopeOf(e.rootComponent, this.subgraph);
+      const checks = this.book.allCards.filter(
+        (c) => c.hypothesisId === e.id && (c.component === null || scope.has(c.component)),
+      );
       const checkRefuted = checks.some((c) => c.result.verdict === 'normal');
       const support = this.supportCards(e);
       const contrary = [...this.contraryCards(e), ...(support.length === 0 ? this.rootAllNormal(e) : [])];

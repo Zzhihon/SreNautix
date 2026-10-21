@@ -457,6 +457,31 @@ describe('组件粒度（ADR 0121）', () => {
     expect(ledger.entries.get('h2')?.rootComponent).toBe(API);
   });
 
+  it('属主拥有的对象上的阶段 A 异常卡自动支持属主；依赖对象上的卡只在模型引用时计入', () => {
+    const { ledger } = owned();
+    ledger.merge([hyp('h1', DEP, []), hyp('h2', WEB, [])], []);
+    ledger.evaluate();
+    expect(ledger.supportCards(ledger.entries.get('h1') as never).map((c) => c.ref)).toEqual(['card:1']);
+    expect(ledger.entries.get('h1')?.status).toBe('supported');
+    // WEB 调用 API，API 上的异常卡（场景 card:1 在 API 上）没有被引用，不支持 WEB
+    const s = setup();
+    s.ledger.merge([hyp('h1', WEB, [])], []);
+    expect(s.ledger.supportCards(s.ledger.entries.get('h1') as never)).toEqual([]);
+  });
+
+  it('范围外组件上的检查卡判定为正常时不推翻假设', () => {
+    const { book, ledger } = setup();
+    ledger.merge([hyp('h1', PG, ['card:2']), hyp('h2', API, [])], []);
+    book.addCheckCard(checkCard(WEB, 'normal', null), 'h1', 'rule');
+    ledger.noteCheckRun('h1');
+    book.addCheckCard(checkCard(API, 'normal', null), 'h2', 'rule');
+    ledger.noteCheckRun('h2');
+    ledger.evaluate();
+    expect(ledger.entries.get('h1')?.status).toBe('supported');
+    expect(ledger.contraryCards(ledger.entries.get('h1') as never)).toEqual([]);
+    expect(ledger.entries.get('h2')?.status).toBe('refuted');
+  });
+
   it('反馈中的 Pod 根因按属主比对', () => {
     const { ledger } = owned();
     ledger.merge([hyp('h1', DEP, [])], []);
