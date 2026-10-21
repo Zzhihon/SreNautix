@@ -1,5 +1,7 @@
 import { createHash, generateKeyPairSync, randomUUID, type KeyObject } from 'node:crypto';
-import type { Incident, Proposal } from '@srenautix/contract';
+import type { EvidenceResult, Incident, Proposal, RepositoryLayout } from '@srenautix/contract';
+import { startPrometheus, type TsdbInstance } from '@srenautix/integration-sdk';
+import type { EvidenceDataSource } from '@srenautix/packs-sdk';
 import { applyPatch } from 'diff';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { parse } from 'yaml';
@@ -18,15 +20,16 @@ import { GitOpsPulls } from '../../src/remediation/pulls.js';
 import { BINDING_RETRY_LIMIT, REMEDIATION_RULE, RemediationService } from '../../src/remediation/service.js';
 import { GitRepositoryTargets } from '../../src/remediation/targets.js';
 import { serverTracks } from '../../src/roles/server-schema.js';
-import { PackRuntime } from '../../src/stage-a/packs.js';
+import { EvidenceSource, PackRuntime } from '../../src/stage-a/packs.js';
 import { migrateExpand } from '../../src/store/migrate.js';
 import { tx } from '../../src/store/pool.js';
+import { ComponentExpander } from '../../src/topology/expand.js';
 import { TopologyStore } from '../../src/topology/store.js';
 import { TopologyTargets } from '../../src/topology/targets.js';
 import { newTestDb, type TestDb } from '../support/db.js';
 import { FakeGitHub } from '../support/github.js';
 import { PACKS } from '../support/packs.js';
-import { incident as baseIncident, stageA } from '../support/scenario.js';
+import { incident as baseIncident, stageA, stageACards } from '../support/scenario.js';
 
 /**
  * 自愈 PR（ADR 0108），真实 PostgreSQL、内置 gitops 包与内存中的 GitHub REST API：
@@ -70,12 +73,27 @@ function incident(): Incident {
   };
 }
 
-/** 事件、成员告警（没有命中目录）、阶段 A 报告与一次结束的研判 */
+/**
+ * 事件、成员告警（没有命中目录）、阶段 A 报告与一次结束的研判。root 改写事件根因，researchRoot 是研判结论的根因
+ * （默认 Deployment:shop/api），cards 是阶段 A 的卡（默认 support/scenario 的五张）
+ */
 async function seed(
   level = 'likely',
-  o: { disposition?: string; severity?: 'warning' | 'critical' } = {},
+  o: {
+    disposition?: string;
+    severity?: 'warning' | 'critical';
+    root?: Incident['root'];
+    researchRoot?: string;
+    cards?: EvidenceResult[];
+  } = {},
 ): Promise<{ inc: Incident; runId: string }> {
   const inc = incident();
+  if (o.root) {
+    inc.root = o.root;
+    inc.label = `${o.root.component}:${inc.incident_id}`;
+    inc.components = [...new Set([o.root.component!, ...inc.components])];
+  }
+  const researchRoot = o.researchRoot ?? 'Deployment:shop/api';
   const disposition = o.disposition ?? 'act';
   const severity = o.severity ?? 'warning';
   const fp = createHash('sha256').update(inc.incident_id).digest('hex').slice(0, 16);
@@ -135,7 +153,7 @@ async function seed(
       JSON.stringify(inc),
     ],
   );
-  const report = { ...stageA(), incident_id: inc.incident_id, incident_version: inc.incident_version };
+  const report = { ...stageA(o.cards), incident_id: inc.incident_id, incident_version: inc.incident_version };
   await db.server.query(
     `INSERT INTO server.stage_a_reports (report_id, incident_id, incident_version, disposition, evidence_fingerprint, degraded, body, first_firing_at, rendered_at)
      VALUES ($1, $2, $3, $4, $5, false, $6, $7, now())`,
@@ -159,7 +177,7 @@ async function seed(
       inc.incident_id,
       inc.incident_version,
       level,
-      'Deployment:shop/api',
+      researchRoot,
       'api 的队列积压告警没有命中告警目录',
       report.evidence_fingerprint,
       JSON.stringify({
@@ -167,7 +185,7 @@ async function seed(
         conclusion: {
           level,
           hypothesis_id: 'h1',
-          root_component: 'Deployment:shop/api',
+          root_component: researchRoot,
           undetermined_reason: null,
           consistency: {},
         },
@@ -175,7 +193,7 @@ async function seed(
           {
             id: 'h1',
             parent_id: null,
-            root_component: 'Deployment:shop/api',
+            root_component: researchRoot,
             mechanism: '队列积压',
             supporting: ['card:1'],
             refuting: [],
@@ -234,9 +252,17 @@ beforeAll(async () => {
 /** 提议服务与自愈服务；signingKey 给出时自动执行规则签发断言（经过 gateway 仅提议的检查） */
 function build(
   signingKey: KeyObject | null,
-  /** 在提交提议之前执行（模拟对账在读取事件与提议之间让事件升版本） */
-  beforeCreate?: () => Promise<void>,
+  o: {
+    /** 在提交提议之前执行（模拟对账在读取事件与提议之间让事件升版本） */
+    beforeCreate?: () => Promise<void>;
+    /** 仓库布局里另加的文件角色 */
+    files?: RepositoryLayout;
+    dataSource?: () => Promise<EvidenceDataSource | null>;
+    categories?: string[];
+    conclusions?: string[];
+  } = {},
 ): { proposals: ProposalService; service: RemediationService } {
+  const beforeCreate = o.beforeCreate;
   const policy: GatewayPolicy = {
     version: 1,
     cluster: CLUSTER,
@@ -293,11 +319,12 @@ function build(
           files: {
             pack_alerts: { path: CATALOG_PATH, format: 'yaml' },
             alert_rules: { path: 'platform/rules/*.yaml', format: 'yaml' },
+            ...o.files,
           },
         },
       },
-      categories: ['release_rollback', 'config_resource', 'alert_rule', 'topology_coverage'],
-      conclusions: ['likely', 'evidence_consistent'],
+      categories: o.categories ?? ['release_rollback', 'config_resource', 'alert_rule', 'topology_coverage'],
+      conclusions: o.conclusions ?? ['likely', 'evidence_consistent'],
       titlePrefix: '[影子]',
       language: 'zh',
       consoleUrl: 'https://srenautix.example.test',
@@ -308,7 +335,9 @@ function build(
       packs: () => rt.set,
       componentTypes: () => rt.componentTypes(),
       componentType: async () => null,
-      dataSource: async () => null,
+      concrete: (clusterId, key, at) =>
+        new ComponentExpander(new TopologyStore(db.server)).concrete(clusterId, key, at),
+      dataSource: o.dataSource ?? (async () => null),
       github: app,
       proposals: beforeCreate
         ? (Object.assign(Object.create(proposals) as ProposalService, {
@@ -513,11 +542,13 @@ describe('自愈 PR', () => {
     const v1 = run.inc.incident_version;
     const v2 = v1 + 1;
     let raced = false;
-    const racing = build(null, async () => {
-      if (!raced) {
-        raced = true;
-        await bump(run.inc.incident_id);
-      }
+    const racing = build(null, {
+      beforeCreate: async () => {
+        if (!raced) {
+          raced = true;
+          await bump(run.inc.incident_id);
+        }
+      },
     }).service;
     expect(await racing.runOnce()).toBe(0);
     expect((await attempts(run.runId)).find((a) => a.key === 'gitops/noisy-alert-relax')).toMatchObject({
@@ -543,16 +574,18 @@ describe('自愈 PR', () => {
   it('绑定过时：根因变了时等新版本的研判；重试有次数上限', async () => {
     const changed = await seed('likely', { severity: 'critical', disposition: 'ignore' });
     let once = false;
-    const racing = build(null, async () => {
-      if (!once) {
-        once = true;
-        const v = await bump(changed.inc.incident_id);
-        await db.server.query(
-          `INSERT INTO server.research_queue (run_id, incident_id, incident_version, reason, severity, is_new, state)
-           VALUES ($1, $2, $3, 'root_changed', 'critical', false, 'queued')`,
-          [randomUUID(), changed.inc.incident_id, v],
-        );
-      }
+    const racing = build(null, {
+      beforeCreate: async () => {
+        if (!once) {
+          once = true;
+          const v = await bump(changed.inc.incident_id);
+          await db.server.query(
+            `INSERT INTO server.research_queue (run_id, incident_id, incident_version, reason, severity, is_new, state)
+             VALUES ($1, $2, $3, 'root_changed', 'critical', false, 'queued')`,
+            [randomUUID(), changed.inc.incident_id, v],
+          );
+        }
+      },
     }).service;
     expect(await racing.runOnce()).toBe(0);
     expect(await racing.runOnce()).toBe(0);
@@ -560,8 +593,10 @@ describe('自愈 PR', () => {
 
     const stuck = await seed('likely', { severity: 'critical', disposition: 'ignore' });
     // 每次提交前都有新版本：重试 BINDING_RETRY_LIMIT 次后停止
-    const always = build(null, async () => {
-      await bump(stuck.inc.incident_id);
+    const always = build(null, {
+      beforeCreate: async () => {
+        await bump(stuck.inc.incident_id);
+      },
     }).service;
     for (let i = 0; i < BINDING_RETRY_LIMIT + 3; i++) {
       await report(stuck.inc.incident_id, (await currentVersion(stuck.inc.incident_id)) as number).catch(
@@ -686,5 +721,186 @@ describe('自愈 PR', () => {
       code: 'gateway_propose_only',
     });
     await db.server.query('DELETE FROM server.spoke_status WHERE cluster_id = $1', [CLUSTER]);
+  });
+});
+
+/**
+ * 修复模板按研判根因匹配（ADR 0126），对应 Kind 的 config-resource-oom（kind-e2e 39628044289）：事件根因是管理 shop 的
+ * Argo Application，研判根因是 Deployment shop/checkout，checkout 的容器被 OOMKilled。指标在真实 Prometheus 里。
+ */
+describe('研判根因', () => {
+  const WORKLOADS_PATH = 'apps/shop/workloads.yaml';
+  const WORKLOADS_FILE = `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: checkout
+  namespace: shop
+spec:
+  template:
+    spec:
+      containers:
+        - name: checkout
+          image: busybox
+          resources:
+            requests: {cpu: 5m, memory: 16Mi}
+            limits: {cpu: 100m, memory: 32Mi}
+`;
+  const APP = 'Application.argoproj.io:argocd/shop';
+  const appRoot: Incident['root'] = {
+    component: APP,
+    entity: { cluster_id: CLUSTER, kind: 'Application.argoproj.io', namespace: 'argocd', name: 'shop', uid: null },
+    ambiguous: false,
+    margin: 0.4,
+    silent_root: false,
+  };
+  // 阶段 A 在 checkout 的 Pod 上执行的内存卡：OOMKilled，异常
+  const memoryCard = (): EvidenceResult => ({
+    ...stageACards()[0]!,
+    card_id: 'workload/pod-restarts/memory',
+    entity: { cluster_id: CLUSTER, kind: 'Pod', namespace: 'shop', name: 'checkout-56f4794c88-fbdsd', uid: null },
+    verdict: 'abnormal',
+    display_state: 'abnormal',
+    reason: { kind: 'rule', text: '1 个容器被 OOM 终止' },
+  });
+  let prom: TsdbInstance;
+  let oom: RemediationService;
+
+  beforeAll(async () => {
+    const points = Array.from({ length: 61 }, (_, i) => ({ t: T - (60 - i) * 60_000, v: 1 }));
+    prom = await startPrometheus([
+      {
+        labels: {
+          __name__: 'kube_pod_container_status_last_terminated_reason',
+          namespace: 'shop',
+          pod: 'checkout-56f4794c88-fbdsd',
+          container: 'checkout',
+          reason: 'OOMKilled',
+        },
+        points,
+      },
+    ]);
+    const source = await EvidenceSource.create({
+      id: 'prometheus',
+      url: prom.url,
+      dialect: 'promql',
+      bearerTokenFile: null,
+      timeoutMs: 5_000,
+    });
+    gh.write('main', { [WORKLOADS_PATH]: WORKLOADS_FILE }, { message: 'shop workloads' });
+    oom = build(null, {
+      files: { workloads: { path: WORKLOADS_PATH, format: 'yaml' } },
+      dataSource: () => source.dataSource(Date.now()),
+      categories: ['config_resource'],
+      conclusions: ['likely', 'evidence_consistent', 'inconclusive'],
+    }).service;
+  }, 120_000);
+
+  afterAll(async () => {
+    await prom?.stop();
+  });
+
+  it('事件根因是 Application、研判根因是 Deployment：memory-limit-raise 按 checkout 生成补丁，limit 乘 1.5', async () => {
+    const s = await seed('likely', { root: appRoot, researchRoot: 'Deployment:shop/checkout', cards: [memoryCard()] });
+    expect(await oom.runOnce()).toBe(1);
+    const rows = await attempts(s.runId);
+    expect(rows).toEqual([
+      {
+        key: 'gitops/memory-limit-raise',
+        outcome: 'proposed',
+        code: null,
+        proposal_id: expect.any(String),
+        branch: expect.stringMatching(new RegExp(`^srenautix/${s.inc.incident_id.slice(0, 8)}-config-resource-`)),
+      },
+    ]);
+    const p = await db.server.query<{ body: Proposal }>('SELECT body FROM server.proposals WHERE proposal_id = $1', [
+      rows[0]!.proposal_id,
+    ]);
+    const proposal = p.rows[0]!.body;
+    const params = proposal.params as { title: string; patch: string };
+    expect(params.patch).toContain(`diff --git a/${WORKLOADS_PATH} b/${WORKLOADS_PATH}`);
+    const after = applyPatch(WORKLOADS_FILE, params.patch) as string;
+    expect(after).toContain('limits: {cpu: 100m, memory: 48Mi}');
+    expect(after.replace('memory: 48Mi', 'memory: 32Mi')).toBe(WORKLOADS_FILE);
+    // 标题写研判根因；提议仍绑定事件的根因（提议服务按事件核对绑定）
+    expect(params.title).toMatch(/：Deployment:shop\/checkout$/);
+    expect(proposal.binding.root_component).toBe(APP);
+  });
+
+  it('研判结论低于 likely 时退回事件根因：Application 上没有适用的配置模板', async () => {
+    const s = await seed('inconclusive', {
+      root: appRoot,
+      researchRoot: 'Deployment:shop/checkout',
+      cards: [memoryCard()],
+    });
+    expect(await oom.runOnce()).toBe(0);
+    expect(await attempts(s.runId)).toEqual([
+      { key: '-', outcome: 'skipped', code: 'no_template', proposal_id: null, branch: null },
+    ]);
+  });
+
+  it('研判根因是 Service：展开到它选中的 Pod 所属的工作负载', async () => {
+    const topo = new TopologyStore(db.server);
+    const at = new Date(T - 3600_000);
+    const node = (kind: string, name: string) => ({
+      key: `${kind}:shop/${name}`,
+      kind,
+      namespace: 'shop',
+      name,
+      uid: `uid-${name}`,
+      labels: {},
+      component_type: null,
+      hub: false,
+    });
+    const edge = (from: string, relation: 'selects' | 'owned_by', to: string) => ({
+      from,
+      to,
+      relation,
+      provenance: 'structural' as const,
+      confidence: 1,
+      scope: 'service' as const,
+      evidence: relation === 'selects' ? 'spec.selector' : 'ownerReference',
+    });
+    await topo.apply(CLUSTER, [
+      { op: 'node_upsert', at, source: 'informer', node: node('Service', 'checkout') },
+      { op: 'node_upsert', at, source: 'informer', node: node('Deployment', 'checkout') },
+      { op: 'node_upsert', at, source: 'informer', node: node('ReplicaSet', 'checkout-56f4794c88') },
+      { op: 'node_upsert', at, source: 'informer', node: node('Pod', 'checkout-56f4794c88-fbdsd') },
+      {
+        op: 'edge_upsert',
+        at,
+        source: 'informer',
+        edge: edge('Service:shop/checkout', 'selects', 'Pod:shop/checkout-56f4794c88-fbdsd'),
+      },
+      {
+        op: 'edge_upsert',
+        at,
+        source: 'informer',
+        edge: edge('Pod:shop/checkout-56f4794c88-fbdsd', 'owned_by', 'ReplicaSet:shop/checkout-56f4794c88'),
+      },
+      {
+        op: 'edge_upsert',
+        at,
+        source: 'informer',
+        edge: edge('ReplicaSet:shop/checkout-56f4794c88', 'owned_by', 'Deployment:shop/checkout'),
+      },
+    ]);
+    const expander = new ComponentExpander(topo);
+    expect(await expander.concrete(CLUSTER, 'Service:shop/checkout', new Date())).toEqual({
+      key: 'Deployment:shop/checkout',
+      kind: 'Deployment',
+      namespace: 'shop',
+      name: 'checkout',
+      uid: 'uid-checkout',
+    });
+    expect((await expander.concrete(CLUSTER, 'Pod:shop/checkout-56f4794c88-fbdsd', new Date())).key).toBe(
+      'Deployment:shop/checkout',
+    );
+    expect((await expander.concrete(CLUSTER, APP, new Date())).key).toBe(APP);
+
+    const s = await seed('likely', { root: appRoot, researchRoot: 'Service:shop/checkout', cards: [memoryCard()] });
+    expect(await oom.runOnce()).toBe(1);
+    expect(await attempts(s.runId)).toEqual([
+      expect.objectContaining({ key: 'gitops/memory-limit-raise', outcome: 'proposed' }),
+    ]);
   });
 });

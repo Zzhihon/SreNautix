@@ -9,7 +9,7 @@
 1. **触发**：主实例每 30 秒取最近 6 小时内结束的研判，条件是 `state=completed`、结论等级在 `remediation.conclusions` 中（默认 likely、evidence_consistent）、还没有处理过。事件已合并、被抑制、版本变化后重新触发了研判（第 10 条）或没有根因时，只记录原因，不处理。
 2. **上下文**：`RemediationContext` 由以下几部分组成：
    - 事件；
-   - 根因：研判结论的根因组件，没有时取事件根因。组件类型取拓扑节点，没有时按名称匹配；
+   - 根因：研判结论达到 likely 时取研判的根因组件，否则取事件根因，再展开到拓扑里的具体对象（ADR 0126）。组件类型取拓扑节点，没有时按名称匹配；
    - 当前版本阶段 A 报告的卡片：全局 id 对应最严重的结论；
    - 成员告警的分类。
 3. **计划**：`applicableRemediations` 给出适用模板，过滤掉 `remediation.categories` 之外的类别，每次研判最多提交 2 个。`planRemediation` 通过 GitHub REST 读取仓库（`GitHubRepoReader`）：

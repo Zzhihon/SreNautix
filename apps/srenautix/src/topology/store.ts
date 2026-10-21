@@ -250,6 +250,55 @@ export class TopologyStore implements NodeLookup {
     return top && top.depth > 0 ? top.k : null;
   }
 
+  /**
+   * 按名称找节点：kind 在 kinds 中（不区分大小写），namespace 为 null 时不限命名空间；时间范围与 find 相同。
+   * 同一个键只出现一次，当前存在的在前，再按键排序。
+   */
+  async named(
+    clusterId: string,
+    kinds: readonly string[],
+    namespace: string | null,
+    name: string,
+    at: Date,
+  ): Promise<Array<{ key: string; kind: string; namespace: string | null; uid: string | null }>> {
+    const r = await this.pool.query<{ key: string; kind: string; namespace: string | null; uid: string | null }>(
+      `SELECT DISTINCT ON (key) key, kind, namespace, uid FROM server.topology_events
+        WHERE cluster_id = $1 AND item = 'node' AND op = 'node_upsert' AND name = $4
+          AND lower(kind) = ANY($2::text[]) AND ($3::text IS NULL OR namespace = $3)
+          AND valid_from <= greatest($5::timestamptz, now())
+          AND (valid_to IS NULL OR valid_to > least($5::timestamptz, now()) - make_interval(secs => $6))
+        ORDER BY key, (valid_to IS NULL) DESC, valid_from DESC`,
+      [clusterId, kinds.map((k) => k.toLowerCase()), namespace, name, at, TOMBSTONE_MS / 1000],
+    );
+    return r.rows;
+  }
+
+  /** 从 key 出发、关系为 relation 的边指向的节点键（时间范围与 find 相同），按键排序。 */
+  async targets(clusterId: string, key: string, relation: string, at: Date): Promise<string[]> {
+    const r = await this.pool.query<{ t: string }>(
+      `SELECT DISTINCT body->>'to' AS t FROM server.topology_events
+        WHERE cluster_id = $1 AND item = 'edge' AND op = 'edge_upsert' AND body->>'from' = $2 AND body->>'relation' = $3
+          AND valid_from <= greatest($4::timestamptz, now())
+          AND (valid_to IS NULL OR valid_to > least($4::timestamptz, now()) - make_interval(secs => $5))
+        ORDER BY t`,
+      [clusterId, key, relation, at, TOMBSTONE_MS / 1000],
+    );
+    return r.rows.map((x) => x.t);
+  }
+
+  /** 节点的 uid（时间范围与 find 相同）；节点不存在时为 undefined。 */
+  async uidOf(clusterId: string, key: string, at: Date): Promise<string | null | undefined> {
+    const r = await this.pool.query<{ uid: string | null }>(
+      `SELECT uid FROM server.topology_events
+        WHERE cluster_id = $1 AND item = 'node' AND op = 'node_upsert' AND key = $2
+          AND valid_from <= greatest($3::timestamptz, now())
+          AND (valid_to IS NULL OR valid_to > least($3::timestamptz, now()) - make_interval(secs => $4))
+        ORDER BY (valid_to IS NULL) DESC, valid_from DESC LIMIT 1`,
+      [clusterId, key, at, TOMBSTONE_MS / 1000],
+    );
+    return r.rows.length ? (r.rows[0]!.uid ?? null) : undefined;
+  }
+
   /** 当前打开的全部节点 key（informer 全量对账时用来找出已删除的对象）。 */
   async openKeys(
     clusterId: string,

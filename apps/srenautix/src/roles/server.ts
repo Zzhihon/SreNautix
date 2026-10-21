@@ -64,6 +64,7 @@ import { migrateExpand, migrationsReady } from '../store/migrate.js';
 import { migrateWhenReady } from '../store/migrate-when-ready.js';
 import type { OutboxEvent } from '../store/outbox.js';
 import { createPool, type PgConfig } from '../store/pool.js';
+import { ComponentExpander } from '../topology/expand.js';
 import { startInformerTopology } from '../topology/informer.js';
 import { KubeTools } from '../research/kube-tools.js';
 import { FirstSeen, objectHealth, type K8sObject } from '../detectors/health.js';
@@ -217,6 +218,7 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
   const catalog = Catalog.load();
   let policies = Policies.load(c.policies_dir);
   const topology = new TopologyStore(pool);
+  const expander = new ComponentExpander(topology);
   // 拓扑覆盖：Git 挂载的目录，与角色绑定、策略一起定期重新加载
   const loadOverrides = () =>
     c.topology.overrides_dir ? TopologyOverrides.load(c.topology.overrides_dir) : TopologyOverrides.empty();
@@ -798,6 +800,7 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
           packs: () => packs.set,
           componentTypes: () => packs.componentTypes(),
           componentType: (clusterId, key) => topology.componentType(clusterId, key),
+          concrete: (clusterId, key, at) => expander.concrete(clusterId, key, at),
           dataSource: (at) => evidenceSource.dataSource(at),
           github,
           proposals,

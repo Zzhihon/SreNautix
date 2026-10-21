@@ -19,7 +19,7 @@ import type { ServerMetrics } from '../metrics.js';
 import type { ProposalService } from '../proposals/service.js';
 import { appendAudit } from '../store/audit.js';
 import { tx } from '../store/pool.js';
-import { parseStoredKey } from '../topology/keys.js';
+import type { ConcreteObject } from '../topology/expand.js';
 import { GitHubRepoReader } from './github-repo.js';
 import { alertsOf, branchOf, cardsOf, keyCards, prBody, say, validatePlan, type Lang } from './render.js';
 
@@ -54,6 +54,8 @@ export interface RemediationDeps {
   packs: () => PackSet;
   componentTypes: () => readonly ComponentType[];
   componentType: (clusterId: string, key: string) => Promise<string | null>;
+  /** 组件键 → 拓扑里的具体对象（ComponentExpander.concrete） */
+  concrete: (clusterId: string, key: string, at: Date) => Promise<ConcreteObject>;
   dataSource: (at: number) => Promise<EvidenceDataSource | null>;
   github: GitHubApp;
   proposals: ProposalService;
@@ -63,6 +65,19 @@ export interface RemediationDeps {
 }
 
 export const REMEDIATION_RULE = 'srenautix/remediation-pr';
+
+/** 研判结论达到这些等级时，修复模板按研判的根因匹配与解析目标（ADR 0126）；其余情况用事件根因 */
+export const RESEARCH_ROOT_LEVELS: ReadonlySet<string> = new Set(['likely', 'evidence_consistent']);
+
+/** 修复模板使用的根因组件：研判结论达到 likely 时取研判的根因，否则取事件根因 */
+export function remediationRootKey(
+  run: { root_component: string | null; conclusion_level: string },
+  inc: Pick<Incident, 'root'>,
+): string | null {
+  return run.root_component !== null && RESEARCH_ROOT_LEVELS.has(run.conclusion_level)
+    ? run.root_component
+    : inc.root.component;
+}
 
 interface RunRow {
   run_id: string;
@@ -195,6 +210,16 @@ export class RemediationService {
     for (const e of errors) {
       logger.warn('修复模板的适用条件求值出错', { key: e.key, error: e.message });
     }
+    // 模板匹配用的根因与卡片写进日志：模板没有被尝试时，Kind 与影子环境的诊断能看到是根因还是卡片不满足条件
+    logger.info('自愈 PR 的模板匹配', {
+      run_id: run.run_id,
+      incident_id: run.incident_id,
+      root: ctx.root ? `${ctx.root.kind}:${ctx.root.namespace ?? ''}/${ctx.root.name}` : null,
+      abnormal_cards: Object.entries(ctx.cards)
+        .filter(([, c]) => c.verdict === 'abnormal')
+        .map(([id]) => id),
+      applicable: applicable.map((a) => a.key),
+    });
     const wanted = applicable.filter((a) => this.s.categories.includes(a.category));
     if (!wanted.length) {
       return skipAll('no_template', applicable.length ? '适用的模板不在启用的类别中' : '没有适用的修复模板');
@@ -249,16 +274,17 @@ export class RemediationService {
       this.pool,
       inc.members.filter((m) => m.left_version === null).map((m) => m.alert_id),
     );
-    const rootKey = run.root_component ?? inc.root.component;
+    const rootKey = remediationRootKey(run, inc);
     let root: RemediationContext['root'] = null;
     if (rootKey) {
-      const k = parseStoredKey(rootKey);
+      // 根因组件展开到具体对象：Pod 取属主工作负载，Service 取它选中的唯一工作负载（ADR 0126）
+      const o = await this.d.concrete(inc.cluster_id, rootKey, new Date());
       const e =
-        rootKey === inc.root.component && inc.root.entity
+        o.key === inc.root.component && inc.root.entity
           ? inc.root.entity
-          : { cluster_id: inc.cluster_id, kind: k.kind, namespace: k.namespace, name: k.name };
+          : { cluster_id: inc.cluster_id, kind: o.kind, namespace: o.namespace, name: o.name };
       const type =
-        (await this.d.componentType(inc.cluster_id, rootKey)) ??
+        (await this.d.componentType(inc.cluster_id, o.key)) ??
         matchTypeByName(e.kind, e.namespace, e.name, this.d.componentTypes())?.id ??
         null;
       root = {
@@ -342,8 +368,9 @@ export class RemediationService {
     }
     const digest = createHash('sha256').update(plan.patch).digest('hex');
     const branch = branchOf(inc.incident_id, plan.category, digest);
-    const names = await componentNames(this.pool, inc.cluster_id, [run.root_component, inc.root.component]);
-    const rootName = displayComponentName(run.root_component ?? inc.root.component!, names);
+    const shownRoot = remediationRootKey(run, inc) ?? inc.root.component!;
+    const names = await componentNames(this.pool, inc.cluster_id, [shownRoot]);
+    const rootName = displayComponentName(shownRoot, names);
     const title =
       `${this.s.titlePrefix ? `${this.s.titlePrefix} ` : ''}${say(plan.title, this.s.language)}：${rootName}`.slice(
         0,

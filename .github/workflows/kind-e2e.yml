@@ -151,6 +151,13 @@ jobs:
             SELECT 'alert', alert_id, alertname, status, starts_at, ends_at, entity_resolution, component, entity, labels
               FROM server.alert_state ORDER BY starts_at;" \
             >"$RUNNER_TEMP/diag/incident-members.tsv" 2>&1 || true
+          # 每个事件版本的阶段 A 证据卡判定：修复模板按卡片判断是否适用，没有被尝试时看这里
+          kubectl --context kind-srenautix -n srenautix exec srenautix-pg-1 -c postgres -- psql -d srenautix -X -A -F $'\t' -c "
+            SELECT 'card', s.incident_id, s.incident_version, s.rendered_at, c->>'card_id', c->'entity'->>'kind',
+                   c->'entity'->>'name', c->>'verdict', c->'reason'->>'text'
+              FROM server.stage_a_reports s, jsonb_array_elements(s.body->'cards') c
+             ORDER BY s.incident_id, s.incident_version, c->>'card_id';" \
+            >"$RUNNER_TEMP/diag/stage-a-cards.tsv" 2>&1 || true
           cp -R "$RUNNER_TEMP/scenarios" "$RUNNER_TEMP/diag/" 2>/dev/null || true
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
