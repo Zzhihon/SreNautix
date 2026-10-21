@@ -146,6 +146,16 @@ jobs:
             SELECT 'run', started_at, finished_at, run_id, incident_id, incident_version, state, conclusion_level, disposition, root_component FROM server.research_runs ORDER BY started_at;
             SELECT 'incident', updated_at, incident_id, version, state, suppressed, body->'root'->>'component' FROM server.incidents ORDER BY updated_at;" \
             >"$RUNNER_TEMP/diag/remediation.tsv" 2>&1 || true
+          # 事件的成员与关联变更、入库告警的实体解析：判断是哪条规则把告警并入事件
+          kubectl --context kind-srenautix -n srenautix exec srenautix-pg-1 -c postgres -- psql -d srenautix -X -A -F $'\t' -c "
+            SELECT 'member', i.incident_id, i.version, i.root_component, m->>'alert_id', m->>'alertname', m->>'component', m->>'role',
+                   m->>'starts_at', m->>'joined_version', m->>'left_version'
+              FROM server.incidents i, jsonb_array_elements(i.body->'members') m ORDER BY i.incident_id, (m->>'joined_version')::int;
+            SELECT 'change', incident_id, version, c->>'change_id', c->>'time', c->'targets'
+              FROM server.incidents, jsonb_array_elements(body->'changes') c;
+            SELECT 'alert', alert_id, alertname, status, starts_at, ends_at, entity_resolution, component, entity, labels
+              FROM server.alert_state ORDER BY starts_at;" \
+            >"$RUNNER_TEMP/diag/incident-members.tsv" 2>&1 || true
           cp -R "$RUNNER_TEMP/scenarios" "$RUNNER_TEMP/diag/" 2>/dev/null || true
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
