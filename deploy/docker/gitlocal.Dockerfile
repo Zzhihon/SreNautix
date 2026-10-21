@@ -3,7 +3,7 @@
 # 构建上下文是仓库根目录：docker buildx build -f deploy/docker/gitlocal.Dockerfile .
 # 运行镜像需要 git（bare 仓库的读写与 smart HTTP 都调用 git），用 Chainguard 的 git 镜像。
 
-ARG GO_BUILDER=docker.io/library/golang:1.27.2-trixie@sha256:47667934874913a449b96faa7ef4777fa285d9ec29126ee80ed61c45b7cccf0e
+ARG GO_BUILDER=docker.io/library/golang:1.27.3-trixie@sha256:1896654cfc5c2b5ad74c07f29cb36f5d2d1cbed42e3054070fbfe444e521e83c
 ARG GIT_RUNTIME=cgr.dev/chainguard/git@sha256:62087eb4f17f6d09e27f4eace690f264e091bbbf0f99c8882dc5b8eae4013bab
 
 FROM --platform=$BUILDPLATFORM ${GO_BUILDER} AS build

@@ -3,7 +3,7 @@
 # 构建上下文是仓库根目录：docker buildx build -f deploy/docker/srenautix-spoke.Dockerfile .
 # 在构建平台上交叉编译，不经过 QEMU；-trimpath、空 buildid 与 SOURCE_DATE_EPOCH 保证可复现。
 
-ARG GO_BUILDER=docker.io/library/golang:1.27.2-trixie@sha256:47667934874913a449b96faa7ef4777fa285d9ec29126ee80ed61c45b7cccf0e
+ARG GO_BUILDER=docker.io/library/golang:1.27.3-trixie@sha256:1896654cfc5c2b5ad74c07f29cb36f5d2d1cbed42e3054070fbfe444e521e83c
 ARG STATIC_RUNTIME=gcr.io/distroless/static-debian13:nonroot@sha256:e2e927ec666bae08560abb3c55d0659eceabb657f56b6782ab500a9fc7f555e3
 
 FROM --platform=$BUILDPLATFORM ${GO_BUILDER} AS build

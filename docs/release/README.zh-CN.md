@@ -29,7 +29,7 @@ main 不按推送触发发布：推送频率高于一次发布的耗时，同一
 ## 依赖固定
 
 - GitHub Actions 全部按 40 位提交 SHA 固定，`ci.yml` 检查新增的 `uses:`。
-- 基础镜像按 digest 固定：`node:24.22.0-trixie-slim`（构建）、`gcr.io/distroless/nodejs24-debian13:nonroot`（中心镜像运行）、`golang:1.27.2-trixie`（构建）、`gcr.io/distroless/static-debian13:nonroot`（分支镜像运行）。
+- 基础镜像按 digest 固定：`node:24.22.0-trixie-slim`（构建）、`gcr.io/distroless/nodejs24-debian13:nonroot`（中心镜像运行）、`golang:1.27.3-trixie`（构建）、`gcr.io/distroless/static-debian13:nonroot`（分支镜像运行）。
 - go.mod 的 `toolchain` 与分支镜像的 Go 版本相同，`ci.yml` 检查两者一致。
 - pnpm 使用冻结锁文件，依赖安装脚本只对 `pnpm-workspace.yaml` 的 `onlyBuiltDependencies` 白名单执行。
 - CI 下载的工具与测试二进制全部校验 sha256。

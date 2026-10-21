@@ -2,7 +2,7 @@ module github.com/Zzhihon/SreNautix
 
 go 1.26.0
 
-toolchain go1.27.2
+toolchain go1.27.3
 
 require (
 	github.com/VictoriaMetrics/metricsql v0.87.5
