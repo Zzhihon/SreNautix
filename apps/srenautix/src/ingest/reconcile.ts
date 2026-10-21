@@ -1,4 +1,5 @@
 import type { AlertmanagerAlert } from '@srenautix/contract';
+import { isIgnorable } from '@srenautix/core';
 import type pg from 'pg';
 import { logger } from '../log.js';
 import type { ServerMetrics } from '../metrics.js';
@@ -130,7 +131,10 @@ export async function applyRemote(
   watchdog: string,
 ): Promise<ReconcileResult> {
   const ok = complete;
-  const kept = [...remote.values()].filter((a) => a.labels[selfLabel] === undefined && a.alertname !== watchdog);
+  // 与 webhook 接入相同：自身的告警、Watchdog、InfoInhibitor 与 severity=none 不进入事件（core isIgnorable）
+  const kept = [...remote.values()].filter(
+    (a) => a.labels[selfLabel] === undefined && a.alertname !== watchdog && !isIgnorable(a.labels),
+  );
   const local = await firingAlertIds(pool, clusterId);
   const localFps = new Set([...local.values()].map((v) => v.fingerprint));
   const missing = kept.filter((a) => !localFps.has(a.fingerprint));

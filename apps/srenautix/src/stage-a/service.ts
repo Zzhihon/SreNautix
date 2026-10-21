@@ -1,5 +1,5 @@
 import type { Incident, StageAReport } from '@srenautix/contract';
-import { observeFingerprint, type FingerprintState } from '@srenautix/core';
+import { isIgnorable, observeFingerprint, type FingerprintState } from '@srenautix/core';
 import type pg from 'pg';
 import { HttpError } from '../api/errors.js';
 import { alertsById } from '../ingest/store.js';
@@ -109,7 +109,8 @@ export class StageAService {
 
   async run(inc: Incident): Promise<StageAOutcome> {
     const memberIds = inc.members.filter((m) => m.left_version === null).map((m) => m.alert_id);
-    const alerts = await alertsById(this.pool, memberIds);
+    // 修复之前入库的 Watchdog、InfoInhibitor 与 severity=none 成员不参与阶段 A（事件引擎重算后它们离开事件）
+    const alerts = (await alertsById(this.pool, memberIds)).filter((a) => !isIgnorable(a.labels));
     const ac = new AbortController();
     const timer = setTimeout(() => ac.abort(new Error('阶段 A 证据卡超过期限')), EVIDENCE_DEADLINE_MS);
     let run;

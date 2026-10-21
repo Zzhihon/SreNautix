@@ -1,4 +1,5 @@
 import type { Alert } from '@srenautix/contract';
+import { isIgnorable } from '@srenautix/core';
 import type pg from 'pg';
 import type { Resolved } from '../alerts/resolve.js';
 import type { Queryable } from '../store/pool.js';
@@ -159,7 +160,10 @@ export function rowToAlert(r: AlertRow): Alert {
   };
 }
 
-/** 事件引擎的输入：触发中的告警，以及 lookbackMs 内恢复的告警。 */
+/**
+ * 事件引擎的输入：触发中的告警，以及 lookbackMs 内恢复的告警。不进入事件的告警（core isIgnorable：Watchdog、
+ * InfoInhibitor、severity=none）不在其中——接入时已经丢弃，这里排除修复之前已经入库的，重算后它们离开所在的事件。
+ */
 export async function activeAlerts(pool: pg.Pool | Queryable, clusterId: string, lookbackMs: number): Promise<Alert[]> {
   const r = await pool.query<AlertRow>(
     `SELECT * FROM server.alert_state
@@ -167,7 +171,7 @@ export async function activeAlerts(pool: pg.Pool | Queryable, clusterId: string,
       ORDER BY starts_at, alert_id`,
     [clusterId, lookbackMs / 1000],
   );
-  return r.rows.map(rowToAlert);
+  return r.rows.filter((x) => !isIgnorable(x.labels)).map(rowToAlert);
 }
 
 export async function alertsById(pool: pg.Pool | Queryable, ids: readonly string[]): Promise<Alert[]> {

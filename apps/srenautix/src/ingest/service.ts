@@ -1,4 +1,5 @@
 import { timingSafeEqual } from 'node:crypto';
+import { isIgnorable } from '@srenautix/core';
 import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
 import { HttpError, notFound, unauthorized } from '../api/errors.js';
@@ -127,6 +128,12 @@ export class IngestService {
         this.metrics.ingestAlerts.inc({ source: sourceId, outcome: 'watchdog' });
         continue;
       }
+      // Watchdog、InfoInhibitor 与 severity=none 不进入事件（core isIgnorable，DESIGN §5）
+      if (isIgnorable(a.labels)) {
+        dropped++;
+        this.metrics.ingestAlerts.inc({ source: sourceId, outcome: 'ignored' });
+        continue;
+      }
       kept.push(a);
     }
     try {
@@ -161,8 +168,13 @@ export class IngestService {
       'SELECT * FROM server.alert_state WHERE cluster_id = $1 AND alert_id = ANY($2::text[])',
       [clusterId, alertIds],
     );
+    // 修复之前入库的不进入事件的成员（Watchdog、InfoInhibitor、severity=none）：不重新解析，通知事件流水线重算，
+    // 事件引擎的输入已经排除它们（activeAlerts），重算后它们离开所在的事件
+    if (rows.rows.some((r) => isIgnorable(r.labels))) {
+      await this.pool.query('SELECT pg_notify($1, $2)', [INGEST_CHANNEL, clusterId]);
+    }
     const updates: Array<{ id: string; r: Resolved; componentChanged: boolean }> = [];
-    for (const row of rows.rows) {
+    for (const row of rows.rows.filter((r) => !isIgnorable(r.labels))) {
       const raw: RawAlert = {
         source: row.source as RawAlert['source'],
         labels: row.labels,

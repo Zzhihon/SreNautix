@@ -10,6 +10,7 @@ import type {
 import {
   changeInputFrom,
   computeIncidents,
+  isIgnorable,
   parseKey,
   sameKind,
   reconcileIncidents,
@@ -595,7 +596,8 @@ export async function replay(
     steps++;
     for (const inst of b.alerts) {
       const k = `${inst.fingerprint}@${inst.active_at}`;
-      if (!alerts.has(k) && ms(inst.firing_from) <= t) {
+      // 与 server 的接入相同：Watchdog、InfoInhibitor 与 severity=none 不进入事件（core isIgnorable）
+      if (!alerts.has(k) && ms(inst.firing_from) <= t && !isIgnorable({ alertname: inst.alertname, ...inst.labels })) {
         alerts.set(k, { instance: inst, alert: await ingest(b.cluster_id, inst, topo, o.rt) });
       }
     }
