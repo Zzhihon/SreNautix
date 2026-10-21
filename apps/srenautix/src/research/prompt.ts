@@ -1,7 +1,7 @@
 import { PROMPTS, type Language } from '../prompts/index.js';
 import type { Item, Segment, SegmentTrim } from '../llm/types.js';
 import type { CardEntry, EvidenceBook } from './evidence.js';
-import type { Ledger } from './ledger.js';
+import { scopeOf, type Ledger } from './ledger.js';
 import type { PreviousRun, ResearchCase } from './types.js';
 
 // 提示词按稳定前缀排列（DESIGN §8.3），便于服务方命中前缀缓存：
@@ -20,6 +20,14 @@ const TEXT_CHARS = 300;
 
 /** 上下文较小的路由只放入异常卡、候选根因上的卡与检查卡（DESIGN §7.5 上下文预算） */
 export const SMALL_CONTEXT_TOKENS = 64_000;
+/** 阶段 A 的卡超过这个数时同样只完整放入结论相关的卡，其余写成摘要（ADR 0127） */
+export const MANY_CARDS = 40;
+/** 完整放入的结论相关卡最多这么多张，按相关性排序取前面的；其余的结论相关卡只列判定（ADR 0127） */
+export const MAX_FULL_CARDS = 40;
+/** 账本片段里补充的假设相关卡最多这么多张（ADR 0127） */
+export const MAX_HYPOTHESIS_CARDS = 16;
+/** 摘要里每条证据链最多列出的组件数 */
+const SUMMARY_COMPONENTS = 6;
 
 const cut = (s: string, n: number) => (s.length > n ? `${s.slice(0, n)}…` : s);
 
@@ -92,19 +100,61 @@ function relevanceRank(c: ResearchCase): (x: CardEntry) => number {
   };
 }
 
+/**
+ * 阶段 A 的卡怎样进入提示词（ADR 0127）：
+ * - 卡不多、路由上下文足够时全部完整放入（与结论无关的卡可在裁剪时改为只列判定）；
+ * - 卡超过 MANY_CARDS 或路由上下文小于 SMALL_CONTEXT_TOKENS 时，结论相关的卡按相关性取前 MAX_FULL_CARDS 张完整放入
+ *   （included），其余结论相关的卡只列判定（listed），与结论无关的卡只写摘要（summarized：按证据链与判定计数）。
+ */
 export function selectCards(
   book: EvidenceBook,
   c: ResearchCase,
   contextTokens: number,
-): { included: CardEntry[]; listed: CardEntry[] } {
+): { included: CardEntry[]; listed: CardEntry[]; summarized: CardEntry[] } {
   const cards = book.promptCards();
-  if (contextTokens >= SMALL_CONTEXT_TOKENS) {
-    return { included: cards, listed: [] };
+  const stageA = cards.filter((x) => x.hypothesisId === null);
+  if (contextTokens >= SMALL_CONTEXT_TOKENS && stageA.length <= MANY_CARDS) {
+    return { included: cards, listed: [], summarized: [] };
   }
   const isRelevant = relevant(c);
-  const included = cards.filter(isRelevant);
-  const keep = new Set(included.map((x) => x.ref));
-  return { included, listed: cards.filter((x) => !keep.has(x.ref)) };
+  const rank = relevanceRank(c);
+  const rel = cards.filter(isRelevant);
+  const full = new Set(
+    rel
+      .map((x, i) => ({ x, i }))
+      .sort((p, q) => rank(p.x) - rank(q.x) || p.i - q.i)
+      .slice(0, MAX_FULL_CARDS)
+      .map((p) => p.x.ref),
+  );
+  return {
+    included: cards.filter((x) => full.has(x.ref)),
+    listed: rel.filter((x) => !full.has(x.ref)),
+    summarized: cards.filter((x) => !isRelevant(x)),
+  };
+}
+
+/** 输出 schema 里根因组件枚举的上限（ADR 0127） */
+export const MAX_COMPONENT_CHOICES = 300;
+
+/**
+ * 输出 schema 里根因组件的可选值（动态枚举 components，ADR 0127）。假设按组件粒度提出（ADR 0121），由控制器拥有的对象
+ * （子图里有 owned_by 出边的 Pod、ReplicaSet 等）不在其中，事件根因与候选根因除外；超过上限时按角色（根因、候选、成员、
+ * 邻居）与跳数取前面的。几百个 Pod 的子图里，枚举曾是请求中最大且不可裁剪的部分。
+ */
+export function componentChoices(c: ResearchCase): string[] {
+  const owned = new Set(c.subgraph.edges.filter((e) => e.relation === 'owned_by').map((e) => e.from));
+  const nodes = c.subgraph.nodes.filter((n) => !owned.has(n.component) || n.role === 'root' || n.role === 'candidate');
+  const role = { root: 0, candidate: 1, member: 2, neighbor: 3 } as Record<string, number>;
+  const picked =
+    nodes.length <= MAX_COMPONENT_CHOICES
+      ? nodes
+      : nodes
+          .map((n, i) => ({ n, i }))
+          .sort((a, b) => (role[a.n.role] ?? 4) - (role[b.n.role] ?? 4) || a.n.hops - b.n.hops || a.i - b.i)
+          .slice(0, MAX_COMPONENT_CHOICES)
+          .sort((a, b) => a.i - b.i)
+          .map((x) => x.n);
+  return [...new Set(picked.map((n) => n.component))];
 }
 
 const listedView = (x: CardEntry) => ({
@@ -113,6 +163,34 @@ const listedView = (x: CardEntry) => ({
   entity: x.component,
   verdict: x.result.verdict,
 });
+
+/** 与结论无关的卡的摘要：按证据链统计各判定的张数，列出前几个组件 */
+export function summaryView(cards: readonly CardEntry[]): Record<string, unknown> {
+  const verdicts: Record<string, number> = {};
+  const chains = new Map<string, { counts: Record<string, number>; components: string[] }>();
+  for (const x of cards) {
+    verdicts[x.result.verdict] = (verdicts[x.result.verdict] ?? 0) + 1;
+    const chain = x.result.card_id.split('/').slice(0, 2).join('/');
+    const cur = chains.get(chain) ?? { counts: {}, components: [] };
+    cur.counts[x.result.verdict] = (cur.counts[x.result.verdict] ?? 0) + 1;
+    if (x.component !== null && !cur.components.includes(x.component)) {
+      cur.components.push(x.component);
+    }
+    chains.set(chain, cur);
+  }
+  return {
+    total: cards.length,
+    verdicts,
+    chains: [...chains.entries()].map(([chain, v]) => ({
+      chain,
+      ...v.counts,
+      components: v.components.slice(0, SUMMARY_COMPONENTS),
+      ...(v.components.length > SUMMARY_COMPONENTS
+        ? { more_components: v.components.length - SUMMARY_COMPONENTS }
+        : {}),
+    })),
+  };
+}
 
 /** 一组同出境方式的证据卡片段的状态；每一步裁剪得到下一个状态 */
 interface CardState {
@@ -192,9 +270,15 @@ function cardTrim(st: CardState): SegmentTrim | null {
 
 /**
  * 证据卡片段：每种出境方式一段。included 是放入的卡（其中与结论无关的卡可被裁成只列判定），
- * listed 是一开始就只列判定的卡（上下文较小的路由，单独一段）。
+ * listed 是一开始就只列判定的卡，summarized 是只写摘要的卡（selectCards），各自单独一段。
  */
-function cardSegments(entries: CardEntry[], listed: CardEntry[], title: string, c: ResearchCase): Segment[] {
+function cardSegments(
+  entries: CardEntry[],
+  listed: CardEntry[],
+  title: string,
+  c: ResearchCase,
+  summarized: CardEntry[] = [],
+): Segment[] {
   const out: Segment[] = [];
   const isRelevant = relevant(c);
   const rank = relevanceRank(c);
@@ -224,6 +308,16 @@ function cardSegments(entries: CardEntry[], listed: CardEntry[], title: string, 
     out.push({
       ...seg(fenced('其余证据卡（只列判定）', listed.map(listedView)), ['metrics'], 'allow'),
       trim: { rank: TRIM.irrelevantList, label: `其余证据卡的判定列表 ${listed.length} 张`, next: () => null },
+    });
+  }
+  if (summarized.length) {
+    out.push({
+      ...seg(
+        fenced('与结论无关的证据卡（摘要：判定正常或无法判定、不在候选根因上，按证据链计数）', summaryView(summarized)),
+        ['metrics'],
+        'allow',
+      ),
+      trim: { rank: TRIM.irrelevantList, label: `与结论无关的证据卡摘要 ${summarized.length} 张`, next: () => null },
     });
   }
   return out;
@@ -392,13 +486,14 @@ export function incidentSegments(
   if (book.changeEntries.length) {
     out.push(changesSegment(book.changeEntries, book.related));
   }
-  const { included, listed } = selectCards(book, c, contextTokens);
+  const { included, listed, summarized } = selectCards(book, c, contextTokens);
   out.push(
     ...cardSegments(
       included.filter((x) => x.hypothesisId === null),
       listed,
       '证据卡（阶段 A）',
       c,
+      summarized,
     ),
   );
   if (c.knowledge.length || c.cases.length) {
@@ -475,8 +570,63 @@ export function incidentSegments(
   return out;
 }
 
-function ledgerSegment(ledger: Ledger, book: EvidenceBook, c: ResearchCase): Segment[] {
+/**
+ * 假设相关、但事件数据段没有完整放入的阶段 A 卡（ADR 0127）：假设引用的卡在前，其次是假设范围（ADR 0121 scopeOf）内的
+ * 异常卡与其他卡；最多 MAX_HYPOTHESIS_CARDS 张，表格只保留前几行。
+ */
+export function hypothesisCards(
+  ledger: Ledger,
+  book: EvidenceBook,
+  c: ResearchCase,
+  shown: ReadonlySet<string>,
+): CardEntry[] {
+  const cited: CardEntry[] = [];
+  const scoped: CardEntry[] = [];
+  const seen = new Set(shown);
+  const stageA = book.promptCards().filter((x) => x.hypothesisId === null);
+  for (const e of ledger.ranked()) {
+    for (const ref of [...e.supporting, ...e.refuting]) {
+      const x = book.card(ref);
+      if (x && x.hypothesisId === null && x.result.egress !== 'never' && !seen.has(ref)) {
+        seen.add(ref);
+        cited.push(x);
+      }
+    }
+    const scope = scopeOf(e.rootComponent, c.subgraph);
+    for (const x of stageA) {
+      if (x.component !== null && scope.has(x.component) && !seen.has(x.ref)) {
+        seen.add(x.ref);
+        scoped.push(x);
+      }
+    }
+  }
+  const order = (x: CardEntry) => (x.result.verdict === 'abnormal' ? 0 : x.result.verdict === 'normal' ? 1 : 2);
+  return [...cited, ...scoped.sort((a, b) => order(a) - order(b))].slice(0, MAX_HYPOTHESIS_CARDS);
+}
+
+function ledgerSegment(ledger: Ledger, book: EvidenceBook, p: PromptParts): Segment[] {
+  const c = p.rc;
   const checks = book.allCards.filter((x) => x.hypothesisId !== null);
+  const extra = hypothesisCards(ledger, book, c, p.fullRefs);
+  const extraSegments: Segment[] = [];
+  for (const egress of ['allow', 'redact'] as const) {
+    const list = extra.filter((x) => x.result.egress === egress);
+    if (list.length) {
+      extraSegments.push({
+        ...seg(
+          fenced(
+            egress === 'redact'
+              ? '假设相关的证据卡（阶段 A，上文未完整列出；脱敏）'
+              : '假设相关的证据卡（阶段 A，上文未完整列出）',
+            list.map((x) => cardView(x, TRIMMED_TABLE_ROWS)),
+          ),
+          CARD_CATEGORIES,
+          egress,
+        ),
+        trim: { rank: TRIM.relevantCards, label: `假设相关的证据卡 ${list.length} 张`, next: () => null },
+      });
+    }
+  }
   return [
     seg(
       fenced(
@@ -493,6 +643,7 @@ function ledgerSegment(ledger: Ledger, book: EvidenceBook, c: ResearchCase): Seg
       [],
       'redact',
     ),
+    ...extraSegments,
     ...cardSegments(checks, [], '区分性检查产生的证据卡', c),
   ];
 }
@@ -502,6 +653,8 @@ export interface PromptParts {
   system: Segment;
   catalog: Segment;
   incident: Segment[];
+  /** 事件数据段完整放入的卡（selectCards 的 included） */
+  fullRefs: ReadonlySet<string>;
 }
 
 export function promptParts(
@@ -516,6 +669,7 @@ export function promptParts(
     system: seg(PROMPTS[language].system, [], 'allow'),
     catalog: catalogSegment(c),
     incident: incidentSegments(c, book, contextTokens, previous),
+    fullRefs: new Set(selectCards(book, c, contextTokens).included.map((x) => x.ref)),
   };
 }
 
@@ -531,7 +685,7 @@ export function hypothesizeItems(
     {
       type: 'user',
       segments: [
-        ...(ledger && ledger.list().length ? ledgerSegment(ledger, book, p.rc) : []),
+        ...(ledger && ledger.list().length ? ledgerSegment(ledger, book, p) : []),
         seg(PROMPTS[language].hypothesize, [], 'allow'),
       ],
     },
@@ -542,7 +696,7 @@ export function concludeItems(language: Language, p: PromptParts, ledger: Ledger
   return [
     { type: 'system', segments: [p.system] },
     { type: 'user', segments: [p.catalog, ...p.incident] },
-    { type: 'user', segments: [...ledgerSegment(ledger, book, p.rc), seg(PROMPTS[language].conclude, [], 'allow')] },
+    { type: 'user', segments: [...ledgerSegment(ledger, book, p), seg(PROMPTS[language].conclude, [], 'allow')] },
   ];
 }
 

@@ -14,7 +14,13 @@ export type LocalOutcome =
   | { ok: true; value: unknown; step: 'validate' | 'jsonrepair' | 'field_salvage'; notes: string[] }
   | { ok: false; step: 'parse' | 'jsonrepair' | 'field_salvage'; refusal: boolean; error: string };
 
-export function repairLocally(turn: LlmTurn, schema: Record<string, unknown>): LocalOutcome {
+/**
+ * 输出专用的补全（例如 next_checks 按检查 id 补 template，ADR 0127）：解析之后、校验之前执行，
+ * 修改写入 notes；有修改时这次输出的修复级别记为 field_salvage
+ */
+export type Prepare = (value: unknown, notes: string[]) => unknown;
+
+export function repairLocally(turn: LlmTurn, schema: Record<string, unknown>, prepare?: Prepare): LocalOutcome {
   if (turn.refusal) {
     return { ok: false, step: 'parse', refusal: true, error: `模型拒绝输出：${turn.refusal.slice(0, 300)}` };
   }
@@ -44,14 +50,26 @@ export function repairLocally(turn: LlmTurn, schema: Record<string, unknown>): L
     parsed = JSON.parse(fixed);
     repaired = true;
   }
+  const prepared: string[] = [];
+  if (prepare) {
+    parsed = prepare(parsed, prepared);
+  }
   const validate = validatorOf(schema);
   if (validate(parsed)) {
+    if (prepared.length) {
+      return {
+        ok: true,
+        value: parsed,
+        step: 'field_salvage',
+        notes: [...(repaired ? ['模型输出经 jsonrepair 修复后才能解析'] : []), ...prepared],
+      };
+    }
     return repaired
       ? { ok: true, value: parsed, step: 'jsonrepair', notes: ['模型输出经 jsonrepair 修复后才能解析'] }
       : { ok: true, value: parsed, step: 'validate', notes: [] };
   }
   const firstErrors = formatErrors(validate.errors);
-  const notes: string[] = [];
+  const notes: string[] = [...prepared];
   const s = salvage(schema, parsed, notes);
   if (s.ok && validate(s.value)) {
     return {

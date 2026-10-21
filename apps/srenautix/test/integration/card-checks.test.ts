@@ -36,6 +36,9 @@ let rt: PackRuntime;
 let source: EvidenceSource;
 let model: LlmReplay;
 let modelUrl: string;
+// 输出里 next_checks 缺少 template 的录制（fallback 路由的形态）
+let missing: LlmReplay;
+let missingUrl: string;
 
 beforeAll(async () => {
   prom = await startPrometheus([]);
@@ -55,10 +58,13 @@ beforeAll(async () => {
   });
   model = new LlmReplay({ dir: RECORDINGS });
   modelUrl = `http://127.0.0.1:${await model.listen('127.0.0.1', 0)}/v1`;
+  missing = new LlmReplay({ dir: `${RECORDINGS}-missing-template` });
+  missingUrl = `http://127.0.0.1:${await missing.listen('127.0.0.1', 0)}/v1`;
 }, 120_000);
 
 afterAll(async () => {
   await model?.close();
+  await missing?.close();
   await prom?.stop();
 });
 
@@ -177,5 +183,43 @@ describe.each(['pg-sync-restart-acme', 'metrics-scrape-blind-acme'])('%s', (id) 
     expect(Date.parse(card.window.from)).toBe(Date.parse(research.incident.first_firing_at) - 2 * 3600_000);
     const k = parseStoredKey(parseCardCheckId(t.id)!.component);
     expect(card.entity).toMatchObject({ kind: k.kind, namespace: k.namespace, name: k.name });
+  }, 120_000);
+
+  it('next_checks 缺少 template：按条目里的检查 id 补全并执行；没有检查 id 的条目只删除它（ADR 0127）', async () => {
+    const { research, runner } = await caseOf(id);
+    const env = {
+      ...testEnv(
+        testLayer([
+          testRoute(missingUrl, {
+            id: 'fallback',
+            api: 'responses',
+            model: 'gpt-5',
+            dialect_profile: 'openai-responses',
+          }),
+        ]),
+        [],
+        true,
+      ),
+      query: runner,
+    };
+    const res = await runStageB(
+      {
+        runId: '7a1b2c3d-0000-4000-8000-0000000000d2',
+        rc: research,
+        previous: null,
+        signal: new AbortController().signal,
+      },
+      env,
+      new MemorySink(),
+    );
+    expect(res.error, JSON.stringify(res.error)).toBeNull();
+    const checks = res.output!.next_checks;
+    expect(checks).toHaveLength(1);
+    expect(parseCardCheckId(checks[0]!.template)!.component).toBe(research.incident.root.component);
+    expect(checks[0]!.result_ref).not.toBeNull();
+    expect(checks[0]!.outcome).not.toBe('failed');
+    const notes = res.output!.validation_notes.join('\n');
+    expect(notes).toMatch(/\/next_checks\[0\]：template 缺失，按检查 id cardcheck:\S+ 补为 cardcheck:/);
+    expect(notes).toContain('/next_checks[1]：条目不合格，已删除');
   }, 120_000);
 });

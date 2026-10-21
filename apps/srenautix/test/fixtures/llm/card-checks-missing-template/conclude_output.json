@@ -1,0 +1,12 @@
+{
+  "provenance": { "mode": "hand-written" },
+  "output": {
+    "disposition": "escalate",
+    "hypothesis_id": "h1",
+    "undetermined_reason": null,
+    "situation": "回归用例",
+    "summary": "回归用例：按检查 id 补全 template 后卡片检查已执行",
+    "recommendations": [],
+    "proposals": []
+  }
+}

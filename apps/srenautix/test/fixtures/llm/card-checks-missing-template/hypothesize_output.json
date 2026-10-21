@@ -1,0 +1,43 @@
+{
+  "provenance": {
+    "mode": "hand-written",
+    "note": "next_checks 缺少 template 的回归（ADR 0127）：与 card-checks 相同的假设，检查只在多余字段 check_id 里写了卡片检查 id，没有 template 字段（CCHP 影子 fallback 路由的输出形态）"
+  },
+  "output": {
+    "hypotheses": [
+      {
+        "id": "h1",
+        "parent_id": null,
+        "root_component": "{{component:^$}}",
+        "mechanism": "根因组件自身的故障",
+        "supporting": [],
+        "refuting": []
+      },
+      {
+        "id": "h2",
+        "parent_id": null,
+        "root_component": "{{component:^(Node|Service|StatefulSet):}}",
+        "mechanism": "依赖组件的故障",
+        "supporting": [],
+        "refuting": []
+      }
+    ],
+    "next_checks": [
+      {
+        "hypothesis_id": "h1",
+        "type": "query",
+        "check_id": "{{match:^cardcheck:}}",
+        "args_json": "{\"window_before\": \"1h\"}",
+        "refutes_if": "卡片判定为正常",
+        "purpose": "在根因组件上用领域包的证据卡检验假设"
+      },
+      {
+        "hypothesis_id": "h2",
+        "type": "query",
+        "args_json": "{}",
+        "refutes_if": "依赖组件正常",
+        "purpose": "这一条没有任何检查 id，只删除它"
+      }
+    ]
+  }
+}

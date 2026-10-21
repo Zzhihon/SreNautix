@@ -18,7 +18,7 @@ import { EgressBlocked, type Egress } from './egress.js';
 import { turnFingerprint, type Drift, type FingerprintTracker } from './fingerprint.js';
 import { countHits, type RedactionHits } from './redact.js';
 import type { DisabledRoute } from './routes.js';
-import { reaskText, repairLocally, type RepairStep } from './repair.js';
+import { reaskText, repairLocally, type Prepare, type RepairStep } from './repair.js';
 import { StreamTimeout, streamingParams, streamTurn } from './stream.js';
 import type { ModelClass, RouteTimeouts } from './timeouts.js';
 import {
@@ -348,7 +348,7 @@ export class ModelSession {
   async structured<T>(
     phase: LlmPhase,
     base: Omit<LlmRequest, 'output'>,
-    output: OutputFormat & { full: Record<string, unknown> },
+    output: OutputFormat & { full: Record<string, unknown>; prepare?: Prepare },
   ): Promise<StructuredResult<T>> {
     const unavailable = this.layer.unavailableReason();
     if (unavailable) {
@@ -405,7 +405,7 @@ export class ModelSession {
           }
           throw e;
         }
-        const local = repairLocally(sent.turn, output.full);
+        const local = repairLocally(sent.turn, output.full, output.prepare);
         if (local.ok) {
           const step: RepairStep = reasked ? 'reask' : local.step;
           metrics.repair.inc({ phase, route: id, level: step, outcome: 'ok' });

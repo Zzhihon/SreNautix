@@ -6,12 +6,20 @@ import type { LlmPhase } from '../llm/types.js';
 import { promptHash, type Language } from '../prompts/index.js';
 import { ToolBox, type Tool, type ToolCallRecord } from '../tools/box.js';
 import type { Window } from '../tools/limits.js';
-import { checkKey, runCheck, vetCheck, type ExecutedCheck, type NextCheck, type QueryRunner } from './checks.js';
+import {
+  checkKey,
+  inferCheckTemplates,
+  runCheck,
+  vetCheck,
+  type ExecutedCheck,
+  type NextCheck,
+  type QueryRunner,
+} from './checks.js';
 import { EvidenceBook } from './evidence.js';
 import { judgeLadder } from './ladder.js';
 import { Ledger } from './ledger.js';
 import type { WorkerMetrics } from './metrics.js';
-import { concludeItems, hypothesizeItems, promptParts } from './prompt.js';
+import { componentChoices, concludeItems, hypothesizeItems, promptParts } from './prompt.js';
 import type { PreviousRun, ResearchCase } from './types.js';
 import { auditModelText, evidenceCorpus, validateConclusion } from './validate.js';
 
@@ -188,15 +196,24 @@ export async function runStageB(input: ResearchRunInput, env: ResearchEnv, sink:
   const tools = env.replay ? env.tools.filter((t) => !t.live) : env.tools;
   const box = new ToolBox(tools, env.metrics, env.limits.toolCalls);
   const enums = (): DynamicEnums => ({
-    components: rc.subgraph.nodes.map((n) => n.component),
+    components: componentChoices(rc),
     evidence_refs: book.refs(),
     check_templates: [...rc.templates.map((t) => t.id), ...box.tools.map((t) => t.name)],
     runbooks: rc.runbooks,
     actions: rc.actions.map((a) => a.id),
   });
   const output = (name: 'hypothesize' | 'conclude') => {
-    const b = bindSchema(modelSchema(name), enums());
-    return { name: `${name}_output`, schema: b.portable, full: b.full };
+    const e = enums();
+    const b = bindSchema(modelSchema(name), e);
+    return {
+      name: `${name}_output`,
+      schema: b.portable,
+      full: b.full,
+      // next_checks 缺少 template 时按条目里的检查 id 补全，补不出才删除这一条（ADR 0127）
+      ...(name === 'hypothesize'
+        ? { prepare: (v: unknown, n: string[]) => inferCheckTemplates(v, e.check_templates, n) }
+        : {}),
+    };
   };
   const hash = (phase: LlmPhase, step: 'hypothesize' | 'conclude') => {
     promptHashes[phase] = promptHash(env.language, step);

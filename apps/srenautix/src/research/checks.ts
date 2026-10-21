@@ -9,6 +9,7 @@ import type { CardEntry, EvidenceBook } from './evidence.js';
 import type { Ledger } from './ledger.js';
 import { judgeItems, JUDGE_SCHEMA } from './prompt.js';
 import type { CheckTemplate, ResearchCase } from './types.js';
+import { parseCardCheckId } from '../stage-a/card-checks.js';
 import { parseStoredKey } from '../topology/keys.js';
 
 // 区分性检查（DESIGN §7.2 discriminate）：由控制器执行模型给出的 next_checks，把结果判定成新的证据卡。
@@ -36,6 +37,82 @@ export interface ExecutedCheck {
   card: CardEntry | null;
   tool: ToolCallRecord | null;
   error: string | null;
+}
+
+const CARD_CHECK_ID = /cardcheck:[^\s"'`,，。;；()（）[\]{}<>]+/g;
+
+/**
+ * hypothesize 输出的 next_checks 在本地校验之前的补全（ADR 0127）：条目缺少 template、或 template 不是可用的模板与工具时，
+ * 从条目里出现的检查 id 推断。
+ * - 条目任何字段（包括多余字段，例如 id、check_id）的字符串里有可用的模板名或工具名时直接用它；
+ * - 有 `cardcheck:<包>/<链>/<卡>@<组件>` 时：完全相同的可用检查优先；组件不在列表中、或 id 没有写组件时，取同一张卡在
+ *   假设根因上的检查，再取这张卡唯一的检查；
+ * - 推断出卡片检查、或 type 缺失时 type 补为 query。
+ * 推断不出的条目保持原样，按字段挽救时只删除这一条。每处补全写入 notes。
+ */
+export function inferCheckTemplates(value: unknown, templates: readonly string[], notes: string[]): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return value;
+  }
+  const v = value as Record<string, unknown>;
+  if (!Array.isArray(v.next_checks)) {
+    return value;
+  }
+  const available = new Set(templates);
+  const hypotheses = Array.isArray(v.hypotheses) ? (v.hypotheses as Array<Record<string, unknown>>) : [];
+  const rootOf = (id: unknown) => {
+    const h = hypotheses.find((x) => x && x.id === id);
+    return typeof h?.root_component === 'string' ? h.root_component : null;
+  };
+  const strings = (x: unknown, out: string[] = []): string[] => {
+    if (typeof x === 'string') {
+      out.push(x);
+    } else if (Array.isArray(x)) {
+      x.forEach((y) => strings(y, out));
+    } else if (x && typeof x === 'object') {
+      Object.values(x).forEach((y) => strings(y, out));
+    }
+    return out;
+  };
+  const byCard = (card: string) => templates.filter((t) => parseCardCheckId(t)?.card === card);
+  const next_checks = (v.next_checks as unknown[]).map((item, i) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      return item;
+    }
+    const c = item as Record<string, unknown>;
+    if (typeof c.template === 'string' && available.has(c.template)) {
+      return item;
+    }
+    const texts = strings(c);
+    let found = texts.find((s) => available.has(s.trim()))?.trim() ?? null;
+    let from: string | null = found;
+    if (!found) {
+      for (const id of texts.flatMap((s) => [...s.matchAll(CARD_CHECK_ID)].map((m) => m[0]))) {
+        const at = id.indexOf('@');
+        const card = (at < 0 ? id : id.slice(0, at)).slice('cardcheck:'.length);
+        const same = byCard(card);
+        const root = rootOf(c.hypothesis_id);
+        found = available.has(id)
+          ? id
+          : (same.find((t) => root !== null && parseCardCheckId(t)?.component === root) ??
+            (same.length === 1 ? same[0]! : null));
+        if (found) {
+          from = id;
+          break;
+        }
+      }
+    }
+    if (!found) {
+      return item;
+    }
+    notes.push(
+      `/next_checks[${i}]：template ${typeof c.template === 'string' ? `${JSON.stringify(c.template)} 不可用` : '缺失'}，按检查 id ${from} 补为 ${found}`,
+    );
+    // type 缺失或不合法时补为 query（vetCheck 会把指向只读工具的 query 改为 tool）；卡片检查总是 query
+    const typeOk = c.type === 'query' || c.type === 'tool';
+    return { ...c, template: found, ...(!typeOk || parseCardCheckId(found) ? { type: 'query' } : {}) };
+  });
+  return { ...v, next_checks };
 }
 
 /** 检查的去重键 */
