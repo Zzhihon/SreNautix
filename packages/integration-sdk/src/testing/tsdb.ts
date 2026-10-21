@@ -6,7 +6,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { backendsDir, ensureBackend } from './backends.js';
-import { freePort, startProcess, type RunningProcess } from './process.js';
+import { startProcess, withFreePorts, type RunningProcess } from './process.js';
 
 export interface FixturePoint {
   /** unix 毫秒 */
@@ -91,19 +91,20 @@ export async function startPrometheus(series: FixtureMetricSeries[]): Promise<Ts
   }
   const cfg = join(dir, 'prometheus.yml');
   writeFileSync(cfg, 'global:\n  evaluation_interval: 1m\n');
-  const port = await freePort();
-  const proc = await startProcess({
-    name: 'prometheus',
-    bin: bins['prometheus']!,
-    args: [
-      `--config.file=${cfg}`,
-      `--storage.tsdb.path=${data}`,
-      '--storage.tsdb.retention.time=100y',
-      `--web.listen-address=127.0.0.1:${port}`,
-    ],
-    url: `http://127.0.0.1:${port}`,
-    readyPath: '/-/ready',
-  });
+  const proc = await withFreePorts(1, ([port]) =>
+    startProcess({
+      name: 'prometheus',
+      bin: bins['prometheus']!,
+      args: [
+        `--config.file=${cfg}`,
+        `--storage.tsdb.path=${data}`,
+        '--storage.tsdb.retention.time=100y',
+        `--web.listen-address=127.0.0.1:${port}`,
+      ],
+      url: `http://127.0.0.1:${port}`,
+      readyPath: '/-/ready',
+    }),
+  );
   return {
     ...proc,
     kind: 'prometheus',
@@ -117,21 +118,22 @@ export async function startPrometheus(series: FixtureMetricSeries[]): Promise<Ts
 export async function startVictoriaMetrics(series: FixtureMetricSeries[]): Promise<TsdbInstance> {
   const bins = await ensureBackend('victoria-metrics');
   const dir = workDir('victoria-metrics');
-  const port = await freePort();
-  const proc = await startProcess({
-    name: 'victoria-metrics',
-    bin: bins['victoria-metrics']!,
-    args: [
-      `-storageDataPath=${join(dir, 'data')}`,
-      `-httpListenAddr=127.0.0.1:${port}`,
-      '-retentionPeriod=100y',
-      '-search.disableCache',
-      '-search.latencyOffset=0s',
-      '-loggerLevel=ERROR',
-    ],
-    url: `http://127.0.0.1:${port}`,
-    readyPath: '/health',
-  });
+  const proc = await withFreePorts(1, ([port]) =>
+    startProcess({
+      name: 'victoria-metrics',
+      bin: bins['victoria-metrics']!,
+      args: [
+        `-storageDataPath=${join(dir, 'data')}`,
+        `-httpListenAddr=127.0.0.1:${port}`,
+        '-retentionPeriod=100y',
+        '-search.disableCache',
+        '-search.latencyOffset=0s',
+        '-loggerLevel=ERROR',
+      ],
+      url: `http://127.0.0.1:${port}`,
+      readyPath: '/health',
+    }),
+  );
   if (series.length) {
     const res = await fetch(`${proc.url}/api/v1/import/prometheus`, {
       method: 'POST',

@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { stringify } from 'yaml';
 import { backendsDir, ensureBackend } from './backends.js';
-import { freePort, startProcess, type RunningProcess } from './process.js';
+import { startProcess, withFreePorts, type RunningProcess } from './process.js';
 
 export interface FixtureSpan {
   trace_id: string;
@@ -24,36 +24,41 @@ export async function startTempo(spans: FixtureSpan[]): Promise<RunningProcess> 
   const root = join(backendsDir(), 'runs');
   mkdirSync(root, { recursive: true });
   const dir = mkdtempSync(join(root, 'tempo-'));
-  const [http, grpc, otlp] = [await freePort(), await freePort(), await freePort()];
-  const config = {
-    server: {
-      http_listen_address: '127.0.0.1',
-      http_listen_port: http,
-      grpc_listen_address: '127.0.0.1',
-      grpc_listen_port: grpc,
-      log_level: 'warn',
-    },
-    distributor: { receivers: { otlp: { protocols: { http: { endpoint: `127.0.0.1:${otlp}` } } } } },
-    storage: { trace: { backend: 'local', local: { path: join(dir, 'traces') }, wal: { path: join(dir, 'wal') } } },
-    usage_report: { reporting_enabled: false },
-  };
-  const cfgPath = join(dir, 'tempo.yaml');
-  writeFileSync(cfgPath, stringify(config));
-  const proc = await startProcess({
-    name: 'tempo',
-    bin: bins['tempo']!,
-    // 这些路径的默认值在 /var/tempo 下；backend-scheduler 的参数名在 Tempo 3.1 中带重复的前缀
-    args: [
-      `-config.file=${cfgPath}`,
-      `-backend-schedulerbackend-scheduler.local-work-path=${join(dir, 'scheduler')}`,
-      `-block-builder.wal.path=${join(dir, 'block-builder')}`,
-      `-live-store.shutdown_marker_dir=${join(dir, 'shutdown-marker')}`,
-      `-live-store.wal.path=${join(dir, 'live-store')}`,
-    ],
-    url: `http://127.0.0.1:${http}`,
-    readyPath: '/ready',
-    timeoutMs: 120_000,
-  });
+  const { proc, otlp } = await withFreePorts(3, async ([http, grpc, otlp]) => ({
+    proc: await startOn(http!, grpc!, otlp!),
+    otlp: otlp!,
+  }));
+  async function startOn(http: number, grpc: number, otlp: number): Promise<RunningProcess> {
+    const config = {
+      server: {
+        http_listen_address: '127.0.0.1',
+        http_listen_port: http,
+        grpc_listen_address: '127.0.0.1',
+        grpc_listen_port: grpc,
+        log_level: 'warn',
+      },
+      distributor: { receivers: { otlp: { protocols: { http: { endpoint: `127.0.0.1:${otlp}` } } } } },
+      storage: { trace: { backend: 'local', local: { path: join(dir, 'traces') }, wal: { path: join(dir, 'wal') } } },
+      usage_report: { reporting_enabled: false },
+    };
+    const cfgPath = join(dir, 'tempo.yaml');
+    writeFileSync(cfgPath, stringify(config));
+    return startProcess({
+      name: 'tempo',
+      bin: bins['tempo']!,
+      // 这些路径的默认值在 /var/tempo 下；backend-scheduler 的参数名在 Tempo 3.1 中带重复的前缀
+      args: [
+        `-config.file=${cfgPath}`,
+        `-backend-schedulerbackend-scheduler.local-work-path=${join(dir, 'scheduler')}`,
+        `-block-builder.wal.path=${join(dir, 'block-builder')}`,
+        `-live-store.shutdown_marker_dir=${join(dir, 'shutdown-marker')}`,
+        `-live-store.wal.path=${join(dir, 'live-store')}`,
+      ],
+      url: `http://127.0.0.1:${http}`,
+      readyPath: '/ready',
+      timeoutMs: 120_000,
+    });
+  }
   if (spans.length) {
     const byService = new Map<string, FixtureSpan[]>();
     for (const s of spans) {

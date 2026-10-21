@@ -3,7 +3,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { backendsDir, ensureBackend } from './backends.js';
-import { freePort, startProcess, type RunningProcess } from './process.js';
+import { startProcess, withFreePorts, type RunningProcess } from './process.js';
 
 export interface OciRegistry extends RunningProcess {
   /** host:port，用于镜像引用 */
@@ -15,23 +15,25 @@ export async function startOciRegistry(): Promise<OciRegistry> {
   const base = join(backendsDir(), 'runs');
   mkdirSync(base, { recursive: true });
   const dir = mkdtempSync(join(base, 'zot-'));
-  const port = await freePort();
   const config = join(dir, 'config.json');
-  writeFileSync(
-    config,
-    JSON.stringify({
-      distSpecVersion: '1.1.1',
-      storage: { rootDirectory: join(dir, 'data'), gc: false, dedupe: false },
-      http: { address: '127.0.0.1', port: String(port) },
-      log: { level: 'warn' },
-    }),
-  );
-  const proc = await startProcess({
-    name: 'zot',
-    bin: zot!,
-    args: ['serve', config],
-    url: `http://127.0.0.1:${port}`,
-    readyPath: '/v2/',
+  const { proc, port } = await withFreePorts(1, async ([port]) => {
+    writeFileSync(
+      config,
+      JSON.stringify({
+        distSpecVersion: '1.1.1',
+        storage: { rootDirectory: join(dir, 'data'), gc: false, dedupe: false },
+        http: { address: '127.0.0.1', port: String(port) },
+        log: { level: 'warn' },
+      }),
+    );
+    const proc = await startProcess({
+      name: 'zot',
+      bin: zot!,
+      args: ['serve', config],
+      url: `http://127.0.0.1:${port}`,
+      readyPath: '/v2/',
+    });
+    return { proc, port: port! };
   });
   return {
     name: proc.name,

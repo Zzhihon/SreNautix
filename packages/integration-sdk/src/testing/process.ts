@@ -19,6 +19,40 @@ export async function freePort(): Promise<number> {
   });
 }
 
+/** 进程因端口已被占用而退出（freePort 释放端口到进程绑定之间被并发的测试抢走） */
+export class PortTaken extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'PortTaken';
+  }
+}
+
+const PORT_TAKEN = /address already in use|bind: address|EADDRINUSE/i;
+
+/**
+ * 分配 count 个空闲端口并启动后端；后端因端口被抢走而退出时换一组端口重试（最多 attempts 次）。
+ * 并发的测试文件各自分配端口，释放与绑定之间的竞争只能靠重试消除。其他启动错误直接抛出。
+ */
+export async function withFreePorts<T>(
+  count: number,
+  start: (ports: number[]) => Promise<T>,
+  attempts = 5,
+): Promise<T> {
+  for (let i = 1; ; i++) {
+    const ports: number[] = [];
+    for (let j = 0; j < count; j++) {
+      ports.push(await freePort());
+    }
+    try {
+      return await start(ports);
+    } catch (err) {
+      if (!(err instanceof PortTaken) || i >= attempts) {
+        throw err;
+      }
+    }
+  }
+}
+
 export interface RunningProcess {
   readonly name: string;
   readonly url: string;
@@ -60,10 +94,12 @@ export async function startProcess(opts: {
   const deadline = Date.now() + (opts.timeoutMs ?? 60_000);
   for (;;) {
     if (exited !== undefined) {
-      throw new Error(`${opts.name} 启动后退出（code ${exited}）：\n${output}`);
+      const message = `${opts.name} 启动后退出（code ${exited}）：\n${output}`;
+      throw PORT_TAKEN.test(output) ? new PortTaken(message) : new Error(message);
     }
     try {
-      const res = await fetch(opts.url + opts.readyPath);
+      // 每次探测都有超时：端口上的进程接受连接却不回 HTTP 时，不会卡住直到整体期限之后
+      const res = await fetch(opts.url + opts.readyPath, { signal: AbortSignal.timeout(2000) });
       if (res.ok) {
         break;
       }
