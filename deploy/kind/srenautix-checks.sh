@@ -142,9 +142,14 @@ use_llm_recording() {
   k -n "$SRENAUTIX_NS" create configmap llm-replay "${args[@]}" --dry-run=client -o yaml | k apply -f - >/dev/null
   k -n "$SRENAUTIX_NS" rollout restart deployment/llm-replay >/dev/null
   k -n "$SRENAUTIX_NS" rollout status deployment/llm-replay --timeout=180s >/dev/null
-  # 新 Pod 就绪（readinessProbe 是 /healthz）且旧 Pod 已退出之后才注入，避免注入后的研判打到正在重启的服务
+  # 旧 Pod 已退出、新 Pod 就绪（readinessProbe 是 /healthz）之后才注入，避免注入后的研判打到正在重启的服务。
+  # 先等旧 Pod 消失：kubectl wait 按选择器取到的 Pod 包括正在终止的旧 Pod，它不会再变为 Ready
+  local deadline=$((SECONDS + 120))
+  until [[ "$(k -n "$SRENAUTIX_NS" get pod -l app=llm-replay -o name | wc -l | tr -d ' ')" == 1 ]]; do
+    ((SECONDS < deadline)) || die "llm-replay 的旧 Pod 120s 内没有退出：$(k -n "$SRENAUTIX_NS" get pod -l app=llm-replay -o name | tr '\n' ' ')"
+    sleep 2
+  done
   k -n "$SRENAUTIX_NS" wait pod -l app=llm-replay --for=condition=Ready --timeout=120s >/dev/null
-  until [[ "$(k -n "$SRENAUTIX_NS" get pod -l app=llm-replay -o name | wc -l | tr -d ' ')" == 1 ]]; do sleep 2; done
   log "llm-replay 使用 ${name} 的录制（$(find "$dir" -name '*.json' 2>/dev/null | wc -l | tr -d ' ') 个响应）"
 }
 
