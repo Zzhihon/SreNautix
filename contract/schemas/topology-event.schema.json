@@ -49,6 +49,11 @@
         "hub": {
           "type": "boolean",
           "description": "集群枢纽（CoreDNS、CNI、apiserver、存储）：只有在出现针对它的证据，或至少 3 个独立依赖方同时失败时才吸收症状"
+        },
+        "images": {
+          "type": "array",
+          "description": "Pod 容器的镜像（kube_pod_container_info 的 image 与 image_id），去重后按字典序；只有 Pod 节点填写，用于把发布之前的 Job 关联到发布（ADR 0104 §13）",
+          "items": { "type": "string", "minLength": 1 }
         }
       }
     },

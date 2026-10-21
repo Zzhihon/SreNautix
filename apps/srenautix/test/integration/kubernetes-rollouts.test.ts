@@ -94,6 +94,49 @@ describe('从拓扑事件推导 Kubernetes 发布', () => {
     expect(again.map((c) => c.change_id)).toEqual(r.map((c) => c.change_id));
   });
 
+  it('发布之前的 Job：Pod 镜像与新 ReplicaSet 的相同时挂上；managed_by 指向别的应用时不挂（ADR 0104 §13）', async () => {
+    const K = 'east-jobs';
+    const up = (min: number, n: TopologyNode) => ({
+      op: 'node_upsert' as const,
+      at: at(min),
+      source: 'informer' as const,
+      node: n,
+    });
+    const ue = (min: number, e: TopologyEdge) => ({
+      op: 'edge_upsert' as const,
+      at: at(min),
+      source: 'informer' as const,
+      edge: e,
+    });
+    const pod = (name: string, images: string[]): TopologyNode => ({ ...node('Pod', name), images });
+    await store.apply(K, [
+      up(0, node('Deployment', 'api')),
+      ue(0, edge('Deployment:shop/api', APP, 'managed_by')),
+      // 12 分钟：迁移 Job（没有 managed_by，镜像与新版本相同）与另一个应用管理的 Job（镜像也相同）
+      up(12, node('Job', 'migrate')),
+      up(12, pod('migrate-x1', ['ghcr.io/acme/api:sha-2', 'sha256:222'])),
+      ue(12, edge('Pod:shop/migrate-x1', 'Job:shop/migrate', 'owned_by')),
+      up(13, node('Job', 'billing-sync')),
+      ue(13, edge('Job:shop/billing-sync', 'Application.argoproj.io:argocd/billing', 'managed_by')),
+      up(13, pod('billing-sync-y1', ['sha256:222'])),
+      ue(13, edge('Pod:shop/billing-sync-y1', 'Job:shop/billing-sync', 'owned_by')),
+      // 20 分钟：api 的新 ReplicaSet
+      up(20, node('ReplicaSet', 'api-ccc', { 'pod-template-hash': 'ccc' })),
+      ue(20, edge('ReplicaSet:shop/api-ccc', 'Deployment:shop/api', 'owned_by')),
+      up(20, pod('api-ccc-z1', ['ghcr.io/acme/api:sha-2', 'sha256:222'])),
+      ue(20, edge('Pod:shop/api-ccc-z1', 'ReplicaSet:shop/api-ccc', 'owned_by')),
+    ]);
+    const r = await kubernetesRollouts(db.server, at(5), at(30), {
+      clusterId: K,
+      revisionLabels: ['release-id'],
+      groupWithinMs: 2 * 60_000,
+    });
+    expect(r).toHaveLength(1);
+    expect(r[0]!.time).toBe(at(12).toISOString());
+    expect(r[0]!.attachments).toEqual([{ target: 'Job:shop/migrate', basis: 'image' }]);
+    expect(r[0]!.targets).toEqual(['Deployment:shop/api', 'Job:shop/migrate', APP]);
+  });
+
   it('窗口外的变化与第一次出现的工作负载不算发布', async () => {
     expect(
       await kubernetesRollouts(db.server, at(-10), at(5), {

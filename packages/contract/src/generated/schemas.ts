@@ -1,5 +1,5 @@
 // 本文件由 packages/contract/scripts/gen.ts 从 contract/ 生成，不要手工修改。
-export const CONTRACT_VERSION = '2.18.0';
+export const CONTRACT_VERSION = '2.19.0';
 
 export const SCHEMAS: Record<string, Record<string, unknown>> = {
   'https://srenautix.io/contract/gateway/v1/action-catalog.schema.json': {
@@ -886,6 +886,20 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
             items: { $ref: '../../../schemas/common.schema.json#/$defs/ComponentKey' },
           },
           summary: { type: 'string', description: '不可信文本，只作为文本显示', maxLength: 500 },
+          attachments: {
+            type: 'array',
+            description:
+              '推导出的变更挂上的前置对象及推导依据（ADR 0104 §13），例如发布之前的迁移 Job。basis：managed_by（与发布由同一个应用管理）、image（Pod 镜像与发布新 ReplicaSet 的镜像相同）、namespace_window（只按同一命名空间与时间窗推断，是弱推导）',
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['target', 'basis'],
+              properties: {
+                target: { $ref: '../../../schemas/common.schema.json#/$defs/ComponentKey' },
+                basis: { type: 'string', enum: ['managed_by', 'image', 'namespace_window'] },
+              },
+            },
+          },
         },
       },
     },
@@ -4896,6 +4910,12 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
             type: 'boolean',
             description:
               '集群枢纽（CoreDNS、CNI、apiserver、存储）：只有在出现针对它的证据，或至少 3 个独立依赖方同时失败时才吸收症状',
+          },
+          images: {
+            type: 'array',
+            description:
+              'Pod 容器的镜像（kube_pod_container_info 的 image 与 image_id），去重后按字典序；只有 Pod 节点填写，用于把发布之前的 Job 关联到发布（ADR 0104 §13）',
+            items: { type: 'string', minLength: 1 },
           },
         },
       },

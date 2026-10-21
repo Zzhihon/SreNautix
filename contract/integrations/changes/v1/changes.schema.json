@@ -81,6 +81,19 @@
           "type": "string",
           "description": "不可信文本，只作为文本显示",
           "maxLength": 500
+        },
+        "attachments": {
+          "type": "array",
+          "description": "推导出的变更挂上的前置对象及推导依据（ADR 0104 §13），例如发布之前的迁移 Job。basis：managed_by（与发布由同一个应用管理）、image（Pod 镜像与发布新 ReplicaSet 的镜像相同）、namespace_window（只按同一命名空间与时间窗推断，是弱推导）",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["target", "basis"],
+            "properties": {
+              "target": { "$ref": "../../../schemas/common.schema.json#/$defs/ComponentKey" },
+              "basis": { "type": "string", "enum": ["managed_by", "image", "namespace_window"] }
+            }
+          }
         }
       }
     }

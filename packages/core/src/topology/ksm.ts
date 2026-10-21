@@ -17,9 +17,27 @@ export const KSM_TOPOLOGY_QUERIES = {
   replicasetOwner: 'max by (namespace, replicaset, owner_kind, owner_name) (kube_replicaset_owner)',
   podPvc: 'max by (namespace, pod, persistentvolumeclaim) (kube_pod_spec_volumes_persistentvolumeclaims_info)',
   nodeInfo: 'max by (node) (kube_node_info)',
+  /** Job 的属主（CronJob 创建的 Job 不当作发布的前置步骤，ADR 0104 §13） */
+  jobOwner: 'max by (namespace, job_name, owner_kind, owner_name) (kube_job_owner{owner_is_controller="true"})',
+  /** Pod 容器的镜像：发布之前的 Job 按镜像关联到发布（ADR 0104 §13） */
+  podImages: 'max by (namespace, pod, image, image_id) (kube_pod_container_info)',
 } as const;
 
-export type KsmTopologyResults = { [K in keyof typeof KSM_TOPOLOGY_QUERIES]: MetricSeries[] };
+/** 没有给出的查询按没有数据处理（早于这些查询导出的重建包） */
+type OptionalKsmQuery = 'jobOwner' | 'podImages';
+export type KsmTopologyResults = {
+  [K in Exclude<keyof typeof KSM_TOPOLOGY_QUERIES, OptionalKsmQuery>]: MetricSeries[];
+} & { [K in OptionalKsmQuery]?: MetricSeries[] };
+
+/** 镜像比较用的形式：image_id 取 digest（sha256:…），image 取去掉运行时前缀的引用 */
+export function normalizeImage(ref: string): string {
+  const s = ref.trim().replace(/^[a-z-]+:\/\//, '');
+  const at = s.indexOf('@sha256:');
+  if (at >= 0) {
+    return s.slice(at + 1);
+  }
+  return s.startsWith('sha256:') ? s : s.toLowerCase();
+}
 
 export interface KsmInterval {
   item: { node: TopologyNode } | { edge: TopologyEdge };
@@ -99,10 +117,30 @@ export function ksmTopologyIntervals(results: KsmTopologyResults, stepMs: number
   for (const s of results.nodeInfo) {
     series(s, (add) => add({ node: node('Node', null, s.labels.node!) }));
   }
+  // Pod 的镜像在它的生命周期内不变：按 (命名空间, Pod) 汇总全部容器的 image 与 image_id
+  const images = new Map<string, Set<string>>();
+  for (const s of results.podImages ?? []) {
+    const { namespace, pod, image, image_id } = s.labels;
+    if (!namespace || !pod || !s.values.some((v) => v !== null && v !== undefined)) {
+      continue;
+    }
+    const k = `${namespace}/${pod}`;
+    const set = images.get(k) ?? new Set<string>();
+    for (const ref of [image, image_id]) {
+      if (ref && ref.trim()) {
+        set.add(normalizeImage(ref));
+      }
+    }
+    images.set(k, set);
+  }
   for (const s of results.podInfo) {
     series(s, (add) => {
       const { namespace, pod, node: nodeName, uid } = s.labels;
       const p = node('Pod', namespace!, pod!, uid ?? null);
+      const imgs = images.get(`${namespace}/${pod}`);
+      if (imgs?.size) {
+        p.images = [...imgs].sort();
+      }
       add({ node: p });
       if (nodeName) {
         add({ edge: edge(p.key, nodeKey('Node', null, nodeName), 'runs_on', 'instance', 'kube_pod_info') });
@@ -142,6 +180,25 @@ export function ksmTopologyIntervals(results: KsmTopologyResults, stepMs: number
           OWNED_BY,
           'service',
           'kube_replicaset_owner',
+        ),
+      });
+    });
+  }
+  for (const s of results.jobOwner ?? []) {
+    series(s, (add) => {
+      const { namespace, job_name, owner_kind, owner_name } = s.labels;
+      add({ node: node('Job', namespace!, job_name!) });
+      if (!owner_kind || owner_kind === '<none>') {
+        return;
+      }
+      add({ node: node(owner_kind, namespace!, owner_name!) });
+      add({
+        edge: edge(
+          nodeKey('Job', namespace, job_name!),
+          nodeKey(owner_kind, namespace, owner_name!),
+          OWNED_BY,
+          'service',
+          'kube_job_owner',
         ),
       });
     });

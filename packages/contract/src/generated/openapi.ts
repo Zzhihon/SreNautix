@@ -1637,6 +1637,12 @@ export type components = {
     /** ChangeEvent */
     ChangeEvent: {
       actor: string | null;
+      /** @description 推导出的变更挂上的前置对象及推导依据（ADR 0104 §13），例如发布之前的迁移 Job。basis：managed_by（与发布由同一个应用管理）、image（Pod 镜像与发布新 ReplicaSet 的镜像相同）、namespace_window（只按同一命名空间与时间窗推断，是弱推导） */
+      attachments?: {
+        /** @enum {string} */
+        basis: 'managed_by' | 'image' | 'namespace_window';
+        target: components['schemas']['ComponentKey'];
+      }[];
       /** @description <source>:<来源内唯一标识>，用于去重 */
       change_id: string;
       /**
@@ -2861,6 +2867,8 @@ export type components = {
       component_type: string | null;
       /** @description 集群枢纽（CoreDNS、CNI、apiserver、存储）：只有在出现针对它的证据，或至少 3 个独立依赖方同时失败时才吸收症状 */
       hub: boolean;
+      /** @description Pod 容器的镜像（kube_pod_container_info 的 image 与 image_id），去重后按字典序；只有 Pod 节点填写，用于把发布之前的 Job 关联到发布（ADR 0104 §13） */
+      images?: string[];
       key: components['schemas']['ComponentKey'];
       kind: string;
       labels: components['schemas']['Labels'];

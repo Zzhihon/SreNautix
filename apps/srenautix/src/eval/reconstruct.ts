@@ -117,6 +117,16 @@ export class BundleTopology implements NodeLookup {
           !stateKeys.has(r.key),
       )
       .sort((a, b) => ms(a.valid_from) - ms(b.valid_from) || a.seq - b.seq);
+    this.ksmJobs = rows
+      .filter(
+        (r) =>
+          r.item === 'node' &&
+          r.source === 'ksm_history' &&
+          r.op === 'node_upsert' &&
+          (r.body as TopologyNode).kind === 'Job' &&
+          !stateKeys.has(r.key),
+      )
+      .sort((a, b) => ms(a.valid_from) - ms(b.valid_from) || a.seq - b.seq);
     this.ksmOwnedBy = rows.filter(
       (r) => r.item === 'edge' && r.source === 'ksm_history' && (r.body as TopologyEdge).relation === 'owned_by',
     );
@@ -133,6 +143,7 @@ export class BundleTopology implements NodeLookup {
   }
 
   private readonly ksmReplicaSets: TopologyRow[];
+  private readonly ksmJobs: TopologyRow[];
   private readonly ksmOwnedBy: TopologyRow[];
   /** 每个节点键在任一来源中第一次出现的时刻 */
   private readonly firstSeen: Map<string, number>;
@@ -383,7 +394,7 @@ export class BundleTopology implements NodeLookup {
 
   /** 每个事件的前一版本、属主与管理应用只取决于事件本身的时刻，一次算出 */
   private buildWorkloadEvents(): WorkloadEvent[] {
-    const kinds = new Set<string>([...WORKLOAD_KINDS, 'ReplicaSet']);
+    const kinds = new Set<string>([...WORKLOAD_KINDS, 'ReplicaSet', 'Job']);
     const byKey = new Map<string, TopologyRow[]>();
     for (const r of this.stateNodes) {
       byKey.set(r.key, [...(byKey.get(r.key) ?? []), r]);
@@ -404,16 +415,18 @@ export class BundleTopology implements NodeLookup {
       const t = ms(r.valid_from);
       const prev = (byKey.get(r.key) ?? []).filter((p) => p.seq < r.seq && p.op === 'node_upsert').at(-1);
       let owner: string | null = null;
-      if (n.kind === 'ReplicaSet') {
+      if (n.kind === 'ReplicaSet' || n.kind === 'Job') {
         const e = (edgesFrom.get(r.key) ?? [])
           .filter((x) => (x.body as TopologyEdge).relation === 'owned_by' && ms(x.valid_from) <= t + 60_000)
           .at(-1);
         owner = e ? (e.body as TopologyEdge).to : null;
       }
       const ownerSeenBefore = owner !== null && (byKey.get(owner) ?? []).some((s) => ms(s.valid_from) < t - 60_000);
+      // ReplicaSet 取属主（Deployment）的管理应用，其他对象取自己的
+      const managedKey = n.kind === 'ReplicaSet' ? (owner ?? r.key) : r.key;
       const managers = [
         ...new Set(
-          (edgesFrom.get(owner ?? r.key) ?? [])
+          (edgesFrom.get(managedKey) ?? [])
             .filter(
               (x) =>
                 (x.body as TopologyEdge).relation === 'managed_by' &&
@@ -479,8 +492,76 @@ export class BundleTopology implements NodeLookup {
         managers,
       });
     }
+    // kube-state-metrics 历史中的 Job（状态库没有记录的）：第一次出现（不在重建包起点）即为新建；属主取
+    // kube_job_owner 的 owned_by（CronJob 创建的 Job 不作为发布的前置步骤），管理应用取状态库的 managed_by
+    const seenJob = new Set<string>();
+    for (const r of this.ksmJobs) {
+      if (seenJob.has(r.key)) {
+        continue;
+      }
+      seenJob.add(r.key);
+      const t = ms(r.valid_from);
+      if (t <= this.rangeFrom) {
+        continue;
+      }
+      const ownerEdge = this.ksmOwnedBy.find((x) => (x.body as TopologyEdge).from === r.key);
+      out.push({
+        seq: r.seq,
+        op: 'node_upsert',
+        key: r.key,
+        kind: 'Job',
+        valid_from: r.valid_from,
+        body: r.body as TopologyNode,
+        previous: null,
+        owner: ownerEdge ? (ownerEdge.body as TopologyEdge).to : null,
+        managers: [
+          ...new Set(
+            (edgesFrom.get(r.key) ?? [])
+              .filter((x) => (x.body as TopologyEdge).relation === 'managed_by')
+              .map((x) => (x.body as TopologyEdge).to),
+          ),
+        ],
+      });
+    }
     return out.sort((a, b) => ms(a.valid_from) - ms(b.valid_from) || a.seq - b.seq);
   }
+
+  /**
+   * 属于 owner（Job 或 ReplicaSet，沿 owned_by，任一来源）的 Pod 的镜像（Pod 节点的 images）；没有任何 Pod 带镜像时为 null。
+   * 与 changes/kubernetes.ts 的 kubernetesRollouts 相同，不按时刻过滤：Pod 的镜像在它的生命周期内不变
+   */
+  podImages(owner: string): string[] | null {
+    if (!this.imageIndex) {
+      const pods = new Map<string, Set<string>>();
+      for (const list of this.edges.values()) {
+        for (const iv of list) {
+          if (iv.body.relation === 'owned_by') {
+            const s = pods.get(iv.body.to) ?? new Set<string>();
+            s.add(iv.body.from);
+            pods.set(iv.body.to, s);
+          }
+        }
+      }
+      const images = new Map<string, Set<string>>();
+      for (const [key, list] of this.nodes) {
+        for (const iv of list) {
+          for (const img of iv.body.images ?? []) {
+            const s = images.get(key) ?? new Set<string>();
+            s.add(img);
+            images.set(key, s);
+          }
+        }
+      }
+      this.imageIndex = { pods, images };
+    }
+    const out = new Set<string>();
+    for (const p of this.imageIndex.pods.get(owner) ?? []) {
+      this.imageIndex.images.get(p)?.forEach((i) => out.add(i));
+    }
+    return out.size ? [...out].sort() : null;
+  }
+
+  private imageIndex: { pods: Map<string, Set<string>>; images: Map<string, Set<string>> } | null = null;
 }
 
 export interface ReplayOptions {
@@ -624,6 +705,7 @@ export async function replay(
         clusterId: b.cluster_id,
         revisionLabels: o.revisionLabels,
         groupWithinMs: o.groupWithinMs,
+        images: (owner) => topo.podImages(owner),
       }),
     ].sort((x, y) => x.time.localeCompare(y.time) || x.change_id.localeCompare(y.change_id));
     const computed = computeIncidents({ alerts: visible, changes, graph, params: o.params, now: t, probes: [] });
