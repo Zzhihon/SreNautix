@@ -135,13 +135,36 @@ export function changeExplains(
   }
   let best = 0;
   const reach = which === 'merge' ? x.mergeReach : x.rankReach;
-  for (const comp of changeComponents(c, graph)) {
+  const comps = changeComponents(c, graph);
+  const managers = managersOfTargets(comps, graph);
+  for (const comp of comps) {
     if (x.component === comp) {
       return 1;
+    }
+    // 管理应用同时管理变更没有触及的兄弟工作负载：它作为目标时只解释落在应用本身上的告警（ADR 0104 §14）
+    if (managers.has(comp)) {
+      continue;
     }
     best = Math.max(best, reach?.components.get(comp) ?? 0);
   }
   return best;
+}
+
+/**
+ * 变更目标中作为其他目标的管理应用出现的组件（另一个目标有到它的 managed_by 边），例如发布的目标里 checkout 与管理它的
+ * Argo 应用。变更已经点名了具体的工作负载，同一应用下的其他工作负载不因为经 managed_by 可达应用而被这次变更解释。
+ * 只有应用一个目标的变更（例如 Argo 同步）不受影响：没有别的目标指向它
+ */
+function managersOfTargets(comps: ReadonlySet<ComponentKey>, graph: TopologyGraph): Set<ComponentKey> {
+  const out = new Set<ComponentKey>();
+  for (const t of comps) {
+    for (const e of graph.dependencies(t)) {
+      if (e.relation === 'managed_by' && e.to !== t && comps.has(graph.componentOf(e.to))) {
+        out.add(graph.componentOf(e.to));
+      }
+    }
+  }
+  return out;
 }
 
 /** 告警所在的命名空间：实体、命名空间伪组件或 namespace 标签 */
@@ -289,6 +312,10 @@ export function converge(input: ConvergeInput): AlertGroup[] {
   const isForecast = (x: PreparedAlert) => x.alert.classification.role === 'forecast';
   const gap = params.adjacencyMs;
   const targets = changeTargets(xs, changes, graph, params);
+  // 没有对象锚点（或只落在命名空间伪组件上）、也没有归到变更的告警：它与别的告警"同一对象"只是因为都落在同一个命名空间
+  // （或都没有组件、同名），不说明两者有关。这样的告警最多并入一个已有分组，不把两个分组连起来（ADR 0104 §14）
+  const floating = xs.map((x, i) => unanchored(x) && targets[i] === null);
+  const pending: Array<[number, number]> = [];
 
   for (let i = 0; i < n; i++) {
     for (let j = i + 1; j < n; j++) {
@@ -306,6 +333,10 @@ export function converge(input: ConvergeInput): AlertGroup[] {
           : y.component === null && x.alert.alertname === y.alert.alertname;
       // 归到不同变更的同名告警（例如两次发布各自的部署后检查）不因同名而合并
       const splitByChange = targets[i] !== null && targets[j] !== null && targets[i] !== targets[j];
+      if (sameObject && floating[i] !== floating[j]) {
+        pending.push(floating[i] ? [i, j] : [j, i]);
+        continue;
+      }
       if (sameObject && !splitByChange) {
         uf.union(i, j);
         continue;
@@ -372,6 +403,31 @@ export function converge(input: ConvergeInput): AlertGroup[] {
       uf.union(i, n + k);
     }
   });
+
+  // 不归属的告警（以及彼此同一对象的这类告警组成的小组）只并入一个分组：开始时间最接近的那条同一对象告警所在的分组
+  const floatingGroups = new Map<number, number[]>();
+  xs.forEach((_, i) => {
+    if (floating[i]) {
+      const r = uf.find(i);
+      floatingGroups.set(r, [...(floatingGroups.get(r) ?? []), i]);
+    }
+  });
+  for (const members of [...floatingGroups.values()].sort((a, b) => a[0]! - b[0]!)) {
+    const own = new Set(members);
+    let best: { j: number; dt: number } | undefined;
+    for (const [f, j] of pending) {
+      if (!own.has(f)) {
+        continue;
+      }
+      const dt = Math.abs(xs[f]!.start - xs[j]!.start);
+      if (!best || dt < best.dt || (dt === best.dt && j < best.j)) {
+        best = { j, dt };
+      }
+    }
+    if (best) {
+      uf.union(members[0]!, best.j);
+    }
+  }
 
   // 无告警的枢纽：只考虑没有原因与变更的分组里的告警（已有原因的症状不需要枢纽来解释）。
   // 时间相邻的这些告警中，至少 hubMinDependents 个相互独立（互不可达）的组件可达枢纽时，枢纽吸收它们
