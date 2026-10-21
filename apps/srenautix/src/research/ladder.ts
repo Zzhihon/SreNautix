@@ -7,7 +7,7 @@ import type { Ledger, LedgerEntry } from './ledger.js';
 // 3. 该机制所需的信号上没有相反的正常卡；
 // 4. 至少检验过一个竞争假设。
 // 只读工具结果由小模型判定的卡可以支持 likely，不能单独支撑 evidence_consistent。
-// 模型在 conclude 弃权、由代码按账本选中的假设（ADR 0120）最高为 likely。
+// 模型在 conclude 弃权、由代码按账本选中的假设（ADR 0120）最高为 likely；只有成员告警支持的假设（ADR 0122）为 likely。
 
 export const ONSET_TOLERANCE_MS = 2 * 60_000;
 
@@ -50,7 +50,16 @@ export function judgeLadder(
   const notes: string[] = [];
   const support = ledger.supportCards(chosen);
   if (support.length === 0) {
-    return { level: 'inconclusive', consistency: NONE, notes: [`假设 ${chosen.id} 没有范围内的异常卡支持`] };
+    const alerts = ledger.supportAlerts(chosen);
+    if (alerts.length > 0) {
+      // 只有成员告警支持：告警规则判定的异常可以支撑 likely，不能支撑 evidence_consistent（ADR 0122）
+      return {
+        level: 'likely',
+        consistency: { ...NONE, competitor_tested: ledger.competitorTested(chosen) },
+        notes: [`假设 ${chosen.id} 只有成员告警支持（${alerts.join('、')}），没有范围内的异常卡`],
+      };
+    }
+    return { level: 'inconclusive', consistency: NONE, notes: [`假设 ${chosen.id} 没有范围内的异常卡或成员告警支持`] };
   }
   const ruleSupport = support.filter((c) => c.judgedBy === 'rule');
   const onset = symptomOnset(incident);

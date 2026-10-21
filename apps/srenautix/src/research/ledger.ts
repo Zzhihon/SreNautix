@@ -13,6 +13,9 @@ export const HYPOTHESIS_IDS = ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'] as const;
 /** 归并阈值 τ（DESIGN §4.2）：置信度不低于它的边才把邻居算进假设的范围 */
 export const SCOPE_TAU = 0.6;
 
+/** 计入支持证据的成员告警角色（ADR 0122） */
+const SUPPORTING_ROLES: ReadonlySet<string> = new Set(['cause', 'change', 'symptom']);
+
 export interface LedgerEntry {
   id: string;
   parentId: string | null;
@@ -320,6 +323,29 @@ export class Ledger {
     );
   }
 
+  /**
+   * 能作为支持证据的成员告警（ADR 0122）：角色是 cause、change 或 symptom 的告警是告警规则判定的异常，
+   * 与异常卡同样按范围计入：实体是根因本身或它拥有的对象时自动计入，实体是根因依赖的对象时只在模型引用时计入。
+   * meta（观测缺口）与 forecast（预测）不计入。
+   */
+  supportAlerts(e: LedgerEntry): string[] {
+    const scope = scopeOf(e.rootComponent, this.subgraph);
+    const members = membersOf(e.rootComponent, this.subgraph);
+    return this.book.alertEntries
+      .filter(
+        ([ref, m]) =>
+          SUPPORTING_ROLES.has(m.role) &&
+          m.component !== null &&
+          (members.has(m.component) || (e.supporting.includes(ref) && scope.has(m.component))),
+      )
+      .map(([ref]) => ref);
+  }
+
+  /** 支持证据的数量：异常卡与成员告警 */
+  supportCount(e: LedgerEntry): number {
+    return this.supportCards(e).length + this.supportAlerts(e).length;
+  }
+
   /** 根因组件自身的阶段 A 卡都有数据且都正常（至少一张）：没有支持卡时据此推翻 */
   rootAllNormal(e: LedgerEntry): CardEntry[] {
     const own = this.book.allCards.filter((c) => c.hypothesisId === null && c.component === e.rootComponent);
@@ -355,12 +381,12 @@ export class Ledger {
         (c) => c.hypothesisId === e.id && (c.component === null || scope.has(c.component)),
       );
       const checkRefuted = checks.some((c) => c.result.verdict === 'normal');
-      const support = this.supportCards(e);
+      const support = [...this.supportCards(e).map((c) => c.ref), ...this.supportAlerts(e)];
       const contrary = [...this.contraryCards(e), ...(support.length === 0 ? this.rootAllNormal(e) : [])];
       if (checkRefuted || (contrary.length > 0 && support.length === 0)) {
         this.set(e, 'refuted', `相反的正常卡：${[...new Set(contrary.map((c) => c.ref))].join('、')}`);
       } else if (support.length > 0) {
-        this.set(e, 'supported', `支持卡：${support.map((c) => c.ref).join('、')}`);
+        this.set(e, 'supported', `支持证据：${support.join('、')}`);
       } else if (e.checksRun > 0) {
         this.set(e, 'inconclusive', '检验后仍无法判定');
       }
@@ -380,7 +406,7 @@ export class Ledger {
     return this.list().sort(
       (a, b) =>
         rank[a.status] - rank[b.status] ||
-        this.supportCards(b).length - this.supportCards(a).length ||
+        this.supportCount(b) - this.supportCount(a) ||
         candidateScore(b.rootComponent) - candidateScore(a.rootComponent) ||
         a.order - b.order,
     );
@@ -406,7 +432,9 @@ export class Ledger {
         parent_id: e.parentId,
         root_component: e.rootComponent,
         mechanism: e.mechanism,
-        supporting: [...new Set([...e.supporting, ...this.supportCards(e).map((c) => c.ref)])],
+        supporting: [
+          ...new Set([...e.supporting, ...this.supportCards(e).map((c) => c.ref), ...this.supportAlerts(e)]),
+        ],
         refuting: [...new Set([...e.refuting, ...this.contraryCards(e).map((c) => c.ref)])],
         status: e.status,
       }));

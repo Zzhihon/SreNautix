@@ -315,6 +315,42 @@ describe('代码校验', () => {
   });
 });
 
+describe('成员告警作为支持证据（ADR 0122）', () => {
+  it('根因本身上的 cause/change/symptom 告警支持它，当前状态卡全部正常也不推翻；只有告警支持时档位为 likely', () => {
+    // API 上的阶段 A 卡改为正常：只剩 alert:2（ApiHighErrorRate，symptom，在 API 上）
+    const cards = stageACards().map((c) => (c.ref === 'card:1' ? { ...c, verdict: 'normal' as const } : c));
+    const { ledger, rc } = setup(cards);
+    ledger.merge([hyp('h1', API, [])], []);
+    ledger.evaluate();
+    const h1 = ledger.entries.get('h1');
+    expect(ledger.supportAlerts(h1 as never)).toEqual(['alert:2']);
+    expect(h1?.status).toBe('supported');
+    const r = judgeLadder(ledger, h1 ?? null, rc.incident, true);
+    expect(r.level).toBe('likely');
+    expect(r.consistency.entity_in_scope).toBe(false);
+    expect(ledger.toContract()[0]?.supporting).toEqual(['alert:2']);
+  });
+
+  it('依赖对象上的告警只在模型引用时计入；meta 与 forecast 告警不计入', () => {
+    const { ledger, rc, book } = setup();
+    ledger.merge([hyp('h1', PG, []), hyp('h2', WEB, ['alert:1'])], []);
+    // PVC 是 PG 挂载的依赖：没有引用时 alert:1 不计入
+    expect(ledger.supportAlerts(ledger.entries.get('h1') as never)).toEqual([]);
+    ledger.merge([hyp('h1', PG, ['alert:1']), hyp('h2', WEB, ['alert:1'])], []);
+    expect(ledger.supportAlerts(ledger.entries.get('h1') as never)).toEqual(['alert:1']);
+    // WEB 的范围不含 PVC：引用了也不计入
+    expect(ledger.supportAlerts(ledger.entries.get('h2') as never)).toEqual([]);
+    const meta = setup();
+    (meta.rc.incident.members[1] as { role: string }).role = 'meta';
+    const book2 = new EvidenceBook(meta.rc);
+    const l2 = new Ledger(book2, meta.rc.subgraph);
+    l2.merge([hyp('h1', API, [])], []);
+    expect(l2.supportAlerts(l2.entries.get('h1') as never)).toEqual([]);
+    expect(book.alertEntries).toHaveLength(2);
+    expect(rc.incident.members).toHaveLength(2);
+  });
+});
+
 describe('模型弃权时按账本选中（ADR 0120）', () => {
   it('唯一处于支持状态且有范围内异常卡的假设由代码选中，四个条件都满足时档位也只到 likely', () => {
     const { book, ledger, rc } = setup();
