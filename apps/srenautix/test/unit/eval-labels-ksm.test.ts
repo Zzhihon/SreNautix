@@ -3,7 +3,9 @@ import { join, resolve } from 'node:path';
 import type { TopologyEdge, TopologyNode } from '@srenautix/contract';
 import { afterAll, describe, expect, it } from 'vitest';
 import { type TopologyRow } from '../../src/eval/bundle.js';
-import { discoveryRoots, loadLabels } from '../../src/eval/labels.js';
+import { discoveryRoots, loadLabels, type Label } from '../../src/eval/labels.js';
+import { compareRoots } from '../../src/eval/phase2.js';
+import type { RunRecord } from '../../src/eval/score.js';
 import { BundleTopology } from '../../src/eval/reconstruct.js';
 
 // 标注的发现根因与修订记录；重建包拓扑在状态库没有记录时用 kube-state-metrics 历史推导新的 ReplicaSet（ADR 0110）
@@ -130,6 +132,65 @@ describe('kube-state-metrics 回退', () => {
     const g = topo.at(T0 + 10 * 60_000);
     expect(g.edges.filter((e) => e.from === pod.key).map((e) => e.to)).toEqual([cluster.key]);
     expect(g.graph.componentOf(pod.key)).toBe(cluster.key);
+  });
+
+  it('研判根因与发现根因按属主粒度比较：同一工作负载的 Pod 算一致，弃权与没有根因的运行不比较', () => {
+    const pod = node('Pod:prod/api-2-x', 'Pod', 'prod', 'api-2-x');
+    const topo = new BundleTopology([
+      ...rows,
+      row('informer', 'node', pod, 0, null),
+      row('informer', 'edge', edge(pod.key, newRs.key, 'owned_by'), 0, null),
+      row('ksm_history', 'edge', edge(newRs.key, dep.key, 'owned_by'), 0, null),
+    ]);
+    const asOf = T0 + 90 * 60_000;
+    expect(topo.ownerAt(pod.key, asOf)).toBe(dep.key);
+    const run = (caseId: string, i: number, top: string[], level: RunRecord['level']): RunRecord => ({
+      caseId,
+      run: i,
+      routeId: 'r',
+      model: 'm',
+      state: 'completed',
+      structuredFailure: false,
+      level,
+      disposition: null,
+      top,
+      cost: 0,
+      currency: 'USD',
+      inputTokens: 0,
+      outputTokens: 0,
+      missRate: null,
+      fingerprints: [],
+      durationMs: 0,
+      error: null,
+      proposals: [],
+    });
+    const incidents = new Map([
+      ['label:a', { root: dep.key, ownerOf: (k: string) => topo.ownerAt(k, asOf) }],
+      ['label:b', { root: null, ownerOf: (k: string) => topo.ownerAt(k, asOf) }],
+    ]);
+    const label = { roots: [app.key] } as unknown as Label;
+    const r = compareRoots(
+      [
+        run('label:a', 0, [pod.key], 'likely'),
+        run('label:a', 1, [app.key], 'likely'),
+        run('label:a', 2, [app.key], 'inconclusive'),
+        run('label:b', 0, [app.key], 'likely'),
+      ],
+      incidents,
+      new Map([['label:a', label]]),
+    );
+    expect(r.by_route).toEqual({ r: { compared: 2, mismatched: 1 } });
+    expect(r.mismatches).toEqual([
+      {
+        case: 'label:a',
+        route: 'r',
+        run: 1,
+        incident_root: dep.key,
+        research_root: app.key,
+        research_hit: true,
+        incident_hit: false,
+      },
+    ]);
   });
 
   it('节点查找命中 kube-state-metrics 的同名对象时返回状态库中同一个对象的键', async () => {

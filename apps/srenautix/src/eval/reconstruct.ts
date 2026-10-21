@@ -300,6 +300,14 @@ export class BundleTopology implements NodeLookup {
   }
 
   /**
+   * 时刻 t 的顶层属主（研判根因与发现根因按属主粒度比较时用，incident/research-root.ts 的 rootsAgree）：
+   * 与节点查找相同，属主边在 t 之前 24 小时内有效即可；没有属主时为 null
+   */
+  ownerAt(key: string, t: number): string | null {
+    return this.ownerOf(this.sameObjectKeyCached(key), t, t - TOMBSTONE_MS);
+  }
+
+  /**
    * 顶层属主，与状态库的 ownerOf 相同（topology/store.ts）：沿 owned_by 边向上，边在 [lower, upper] 内有效，
    * 优先未结束的、状态库的、较新的
    */

@@ -428,6 +428,7 @@ async function reconstructCli(argv: string[]): Promise<CliResult> {
         coverage: result.coverage,
         agreement: result.agreement,
         remediation: result.remediation,
+        roots: result.roots,
         tokens: result.analysis?.tokens ?? 0,
       },
       null,

@@ -15,6 +15,7 @@ import {
   type AgreementSummary,
   type AlertAgreement,
 } from './agreement.js';
+import { rootsAgree } from '../incident/research-root.js';
 import { readBundle } from './bundle.js';
 import type { ReconstructConfig } from './config.js';
 import { discoveryCase, summarizeDiscovery, type DiscoveryCase, type DiscoverySummary } from './discovery.js';
@@ -52,6 +53,24 @@ export interface CardCoverage {
   root_abnormal: number;
 }
 
+/** 一次研判的根因与发现（事件）根因按属主粒度不一致（ADR 0104 §14，incident/research-root.ts） */
+export interface RootMismatch {
+  case: string;
+  route: string;
+  run: number;
+  incident_root: string;
+  research_root: string;
+  /** 研判根因是否在标注的分析根因集合内（研判纠正了发现，或偏离了正确的发现） */
+  research_hit: boolean;
+  incident_hit: boolean;
+}
+
+export interface RootComparison {
+  /** 每条路由：比较过的运行（研判完成、给出根因且不弃权、事件有根因）与其中不一致的 */
+  by_route: Record<string, { compared: number; mismatched: number }>;
+  mismatches: RootMismatch[];
+}
+
 export interface Phase2Result {
   discovery: DiscoveryCase[];
   discoverySummary: DiscoverySummary;
@@ -60,6 +79,7 @@ export interface Phase2Result {
   evalCases: EvalCase[];
   analysis: EvalOutcome | null;
   remediation: RemediationSummary | null;
+  roots: RootComparison | null;
   packLock: string;
 }
 
@@ -111,6 +131,8 @@ export async function runPhase2(o: Phase2Options): Promise<Phase2Result> {
   const cases: Array<{ c: EvalCase; s: EvalSnapshot }> = [];
   const missing: EvalCase[] = [];
   const runners = new Map<string, QueryRunner>();
+  // 每个用例：分析时刻的事件根因与属主查找（研判根因与发现根因的比较用）
+  const incidentRoots = new Map<string, { root: string | null; ownerOf: (key: string) => string | null }>();
   for (const l of labels) {
     const b = readBundle(o.casesDir, l.id);
     const rep = await replay(
@@ -175,6 +197,11 @@ export async function runPhase2(o: Phase2Options): Promise<Phase2Result> {
     cases.push({ c, s: rc.snapshot });
     agreements.push(...rc.agreement);
     runners.set(c.case_id, new ReconstructedQueryRunner(evidence, rc.incident, rep.topology, asOf));
+    const topology = rep.topology;
+    incidentRoots.set(c.case_id, {
+      root: rc.incident.root.component,
+      ownerOf: (key) => topology.ownerAt(key, asOf),
+    });
     coverage.push({
       label: l.id,
       incident: rc.incident.label,
@@ -188,6 +215,7 @@ export async function runPhase2(o: Phase2Options): Promise<Phase2Result> {
   }
   let analysis: EvalOutcome | null = null;
   let remediation: RemediationSummary | null = null;
+  let roots: RootComparison | null = null;
   if (o.analysis) {
     const a = o.analysis;
     analysis = cases.length
@@ -216,6 +244,7 @@ export async function runPhase2(o: Phase2Options): Promise<Phase2Result> {
     }
     const byCase = new Map<string, Label>(labels.map((l) => [`label:${l.id}`, l]));
     remediation = scoreRemediation(analysis.runs, (id) => byCase.get(id) ?? null, a.repo, a.scratch);
+    roots = compareRoots(analysis.runs, incidentRoots, byCase);
   }
   return {
     discovery,
@@ -225,8 +254,47 @@ export async function runPhase2(o: Phase2Options): Promise<Phase2Result> {
     evalCases: [...cases.map((x) => x.c), ...missing],
     analysis,
     remediation,
+    roots,
     packLock,
   };
+}
+
+const ABSTAIN_LEVELS = new Set(['inconclusive', 'undetermined']);
+
+/**
+ * 研判根因与发现根因（分析时刻主事件的根因）按属主粒度比较，与 server 的标记相同（incident/research-root.ts）：
+ * 只比较研判完成、给出根因且不弃权、事件有根因的运行
+ */
+export function compareRoots(
+  runs: readonly RunRecord[],
+  incidents: ReadonlyMap<string, { root: string | null; ownerOf: (key: string) => string | null }>,
+  labels: ReadonlyMap<string, Label>,
+): RootComparison {
+  const out: RootComparison = { by_route: {}, mismatches: [] };
+  for (const r of runs) {
+    const inc = incidents.get(r.caseId);
+    const research = r.top[0];
+    if (!inc?.root || !research || r.state !== 'completed' || r.level === null || ABSTAIN_LEVELS.has(r.level)) {
+      continue;
+    }
+    const slot = (out.by_route[r.routeId] ??= { compared: 0, mismatched: 0 });
+    slot.compared++;
+    if (rootsAgree(research, inc.root, inc.ownerOf)) {
+      continue;
+    }
+    slot.mismatched++;
+    const truth = new Set(labels.get(r.caseId)?.roots ?? []);
+    out.mismatches.push({
+      case: r.caseId,
+      route: r.routeId,
+      run: r.run,
+      incident_root: inc.root,
+      research_root: research,
+      research_hit: truth.has(research),
+      incident_hit: truth.has(inc.root),
+    });
+  }
+  return out;
 }
 
 function failedRun(caseId: string, routeId: string, model: string, run: number): RunRecord {
@@ -319,6 +387,25 @@ export function renderPhase2Markdown(r: Phase2Result): string {
   }
   if (r.coverage.length) {
     lines.push('', renderAgreement(r.agreement, '证据卡与告警结论一致率（as_of 时触发中的成员告警）'));
+  }
+  if (r.roots) {
+    lines.push('', '## 研判根因与发现根因（按属主粒度）', '');
+    lines.push('| 路由 | 比较的运行 | 不一致 |', '|---|---|---|');
+    for (const [route, v] of Object.entries(r.roots.by_route)) {
+      lines.push(`| ${route} | ${v.compared} | ${v.mismatched} |`);
+    }
+    if (r.roots.mismatches.length) {
+      lines.push(
+        '',
+        '| 用例 | 路由 | 次序 | 事件根因 | 研判根因 | 事件根因命中 | 研判根因命中 |',
+        '|---|---|---|---|---|---|---|',
+      );
+      for (const m of r.roots.mismatches) {
+        lines.push(
+          `| ${m.case} | ${m.route} | ${m.run} | ${m.incident_root} | ${m.research_root} | ${m.incident_hit ? '是' : '否'} | ${m.research_hit ? '是' : '否'} |`,
+        );
+      }
+    }
   }
   if (r.remediation) {
     const m = r.remediation;
