@@ -1,15 +1,18 @@
 import type { Alert, ChangeEvent, Incident, TopologyEdge, TopologyNode } from '@srenautix/contract';
 import {
   changeInputFrom,
+  computedLabel,
   computeIncidents,
   reconcileIncidents,
   TopologyGraph,
+  type ComputedIncident,
   type IncidentChange,
   type ProbeResult,
   type ResolvedRcaParams,
 } from '@srenautix/core';
 import type pg from 'pg';
 import { activeAlerts } from '../ingest/store.js';
+import { logger } from '../log.js';
 import type { ServerMetrics } from '../metrics.js';
 import { appendEvents, type NewEvent } from '../store/outbox.js';
 import { tx, type Queryable } from '../store/pool.js';
@@ -54,6 +57,8 @@ export interface RecomputeResult {
 /**
  * 事件引擎（DESIGN §2.2）：唯一写入方。每次对账按确定性规则重算（packages/core 的收敛与根因排序），
  * 再与已持久化的事件对账（合并写别名、拆分记 split_from），在一个事务里写入事件、版本、成员、别名与 outbox。
+ * 超出回看窗口、与本轮分组共享成员或标签的事件也参与对账（重开或占用标签）；每组事件在自己的保存点里写入，
+ * 一组失败不影响其余（ADR 0132）。
  */
 export class IncidentEngine {
   constructor(private readonly d: EngineDeps) {}
@@ -86,29 +91,65 @@ export class IncidentEngine {
           [clusterId, now, lookback / 1000],
         );
         const previous = prevRows.rows.map((r) => r.body);
+        const dormant = await dormantIncidents(c, clusterId, previous, computed);
         const result = reconcileIncidents({
           clusterId,
           previous,
+          dormant,
           computed,
           topologyVersion: topo.version,
           now: now.getTime(),
         });
-        const before = new Map(previous.map((p) => [p.incident_id, p]));
+        const before = new Map([...dormant, ...previous].map((p) => [p.incident_id, p]));
         const sources = new Map(alerts.map((a) => [a.alert_id, a.source]));
         const toReport: Incident[] = [];
-        for (const inc of result.incidents) {
-          const suppressed = await this.d.suppressedAlertIds(
-            c,
-            clusterId,
-            inc.members.filter((m) => m.left_version === null && m.status === 'firing').map((m) => m.alert_id),
-          );
-          const firing = inc.members.filter((m) => m.left_version === null && m.status === 'firing');
-          if (firing.length > 0 && firing.every((m) => suppressed.has(m.alert_id))) {
-            inc.suppressed = true;
+        const failed = new Set<string>();
+        // 每组（合并、拆分牵连的事件为一组）在自己的保存点里写入：一组失败只回滚这一组，其余照常写入（ADR 0132）
+        for (const unit of persistUnits(result.incidents)) {
+          const reported: Incident[] = [];
+          const detected: Incident[] = [];
+          await c.query('SAVEPOINT incident_persist');
+          try {
+            for (const inc of unit) {
+              const firing = inc.members.filter((m) => m.left_version === null && m.status === 'firing');
+              const suppressed = await this.d.suppressedAlertIds(
+                c,
+                clusterId,
+                firing.map((m) => m.alert_id),
+              );
+              if (firing.length > 0 && firing.every((m) => suppressed.has(m.alert_id))) {
+                inc.suppressed = true;
+              }
+              const prev = before.get(inc.incident_id);
+              await this.persist(c, inc, prev);
+              if (!prev && inc.state === 'firing') {
+                detected.push(inc);
+              }
+              if (inc.state !== 'merged' && (!prev || prev.incident_version !== inc.incident_version)) {
+                reported.push(inc);
+                const b = await currentBinding(c, inc.incident_id);
+                if (b) {
+                  await this.d.stale.markStale(c, b);
+                }
+              }
+            }
+            await c.query('RELEASE SAVEPOINT incident_persist');
+          } catch (e) {
+            await c.query('ROLLBACK TO SAVEPOINT incident_persist');
+            await c.query('RELEASE SAVEPOINT incident_persist');
+            for (const inc of unit) {
+              failed.add(inc.incident_id);
+            }
+            this.d.metrics.incidentPersistErrors.inc({ cluster_id: clusterId });
+            logger.error('事件写入失败，本组回滚，其余事件照常写入，下一轮重试', {
+              cluster_id: clusterId,
+              incidents: unit.map((i) => ({ incident_id: i.incident_id, label: i.label, version: i.incident_version })),
+              error: e,
+            });
+            continue;
           }
-          const prev = before.get(inc.incident_id);
-          await this.persist(c, inc, prev);
-          if (!prev && inc.state === 'firing') {
+          toReport.push(...reported);
+          for (const inc of detected) {
             // 检测延迟：首个症状到事件创建（验收 p95 ≤ 2 分钟）；最早的成员是检测器发现时记为 detector
             const first = [...inc.members].sort((a, b) => a.starts_at.localeCompare(b.starts_at))[0];
             if (first) {
@@ -119,22 +160,21 @@ export class IncidentEngine {
               );
             }
           }
-          if (inc.state !== 'merged' && (!prev || prev.incident_version !== inc.incident_version)) {
-            toReport.push(inc);
-            const b = await currentBinding(c, inc.incident_id);
-            if (b) {
-              await this.d.stale.markStale(c, b);
-            }
-          }
         }
-        const events: NewEvent[] = result.changes.map((ch) => toEvent(clusterId, ch));
+        // 没有写入的事件不发事件流，也不进本轮状态（保持写入前的样子）
+        const changes = result.changes
+          .map((ch) => writtenChange(ch, failed))
+          .filter((ch): ch is IncidentChange => ch !== null);
+        const events: NewEvent[] = changes.map((ch) => toEvent(clusterId, ch));
         await appendEvents(c, 'server', 'server', SCHEMA_VERSION, events);
         const current = new Map(previous.map((p) => [p.incident_id, p]));
         for (const inc of result.incidents) {
-          current.set(inc.incident_id, inc);
+          if (!failed.has(inc.incident_id)) {
+            current.set(inc.incident_id, inc);
+          }
         }
         return {
-          changes: result.changes,
+          changes,
           toReport,
           state: {
             alerts,
@@ -181,7 +221,12 @@ export class IncidentEngine {
     if (!prev || prev.incident_version !== inc.incident_version) {
       await c.query(
         'INSERT INTO server.incident_versions (incident_id, version, body, reason) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING',
-        [inc.incident_id, inc.incident_version, JSON.stringify(inc), prev ? 'updated' : 'created'],
+        [
+          inc.incident_id,
+          inc.incident_version,
+          JSON.stringify(inc),
+          !prev ? 'created' : prev.state === 'resolved' && inc.state === 'firing' ? 'reopened' : 'updated',
+        ],
       );
     }
     await c.query('DELETE FROM server.incident_members WHERE incident_id = $1', [inc.incident_id]);
@@ -197,6 +242,85 @@ export class IncidentEngine {
          VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (from_incident_id) DO UPDATE SET into_incident_id = excluded.into_incident_id`,
         [a.from_incident_id, a.from_label, inc.cluster_id, inc.incident_id, a.at_version, a.merged_at],
       );
+    }
+  }
+}
+
+/**
+ * 不在 previous 里、但与本轮分组相关的已持久化事件（超出回看窗口的 resolved 与 merged）：共享仍在的成员告警，
+ * 或标签是某个分组的标签（含去重后缀）。对账据此重开事件、避开已占用的标签（ADR 0132）
+ */
+async function dormantIncidents(
+  c: Queryable,
+  clusterId: string,
+  previous: readonly Incident[],
+  computed: readonly ComputedIncident[],
+): Promise<Incident[]> {
+  if (computed.length === 0) {
+    return [];
+  }
+  const labels = [...new Set(computed.map(computedLabel))];
+  const alertIds = [...new Set(computed.flatMap((x) => x.group.alerts.map((a) => a.alert.alert_id)))];
+  const r = await c.query<{ body: Incident }>(
+    `SELECT i.body FROM server.incidents i
+      WHERE i.cluster_id = $1 AND NOT (i.incident_id = ANY($2::uuid[]))
+        AND (i.label = ANY($3::text[])
+             OR EXISTS (SELECT 1 FROM unnest($3::text[]) b WHERE starts_with(i.label, b || '~'))
+             OR i.incident_id IN (SELECT m.incident_id FROM server.incident_members m
+                                   WHERE m.alert_id = ANY($4::text[]) AND m.left_version IS NULL))
+      ORDER BY i.created_at, i.incident_id`,
+    [clusterId, previous.map((p) => p.incident_id), labels, alertIds],
+  );
+  return r.rows.map((x) => x.body);
+}
+
+/** 写入的分组：合并（merged_into、别名）与拆分（split_from）牵连的事件在同一组，保持按 incident_id 的顺序 */
+export function persistUnits(incidents: readonly Incident[]): Incident[][] {
+  const parent = new Map(incidents.map((i) => [i.incident_id, i.incident_id]));
+  const find = (id: string): string => {
+    let r = id;
+    while (parent.get(r) !== r) {
+      r = parent.get(r)!;
+    }
+    parent.set(id, r);
+    return r;
+  };
+  const union = (a: string, b: string | null) => {
+    if (b !== null && parent.has(b)) {
+      const ra = find(a);
+      const rb = find(b);
+      if (ra !== rb) {
+        parent.set(rb, ra);
+      }
+    }
+  };
+  for (const i of incidents) {
+    union(i.incident_id, i.merged_into);
+    union(i.incident_id, i.split_from);
+    for (const a of i.aliases) {
+      union(i.incident_id, a.from_incident_id);
+    }
+  }
+  const units = new Map<string, Incident[]>();
+  for (const i of incidents) {
+    const root = find(i.incident_id);
+    units.set(root, [...(units.get(root) ?? []), i]);
+  }
+  return [...units.values()];
+}
+
+/** 去掉牵涉没有写入的事件的变化；拆分只去掉没有写入的新事件 */
+function writtenChange(ch: IncidentChange, failed: ReadonlySet<string>): IncidentChange | null {
+  switch (ch.type) {
+    case 'incident.created':
+    case 'incident.updated':
+    case 'incident.resolved':
+      return failed.has(ch.incident.incident_id) ? null : ch;
+    case 'incident.merged':
+      return failed.has(ch.from_incident_id) || failed.has(ch.into_incident_id) ? null : ch;
+    case 'incident.split': {
+      const ids = ch.new_incident_ids.filter((id) => !failed.has(id));
+      return failed.has(ch.from_incident_id) || ids.length === 0 ? null : { ...ch, new_incident_ids: ids };
     }
   }
 }

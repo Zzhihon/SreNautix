@@ -184,6 +184,61 @@ describe('持久化事件的对账：合并、拆分、别名', () => {
     expect(r2.incidents[0]).toMatchObject({ state: 'resolved', ended_at: '2026-10-15T10:20:00Z', incident_version: 1 });
   });
 
+  it('超出回看窗口的 resolved 事件（ADR 0132）：同一告警重新触发时重开；只有标签相同也重开；merged 的只占用标签', async () => {
+    const store = clusterStore();
+    const graph = store.asOf(T0);
+    const labels = { alertname: 'ApiErrorRatioHigh', namespace: 'shop', deployment: 'api', severity: 'critical' };
+    const api = await alert(store, labels, '2026-10-15T10:02:00Z', T0);
+    const newId = ids();
+    const step = (previous: Incident[], dormant: Incident[], alerts: Alert[], now: number) =>
+      reconcileIncidents({
+        clusterId: CLUSTER,
+        previous,
+        dormant,
+        computed: computeIncidents({ alerts, changes: [], graph, params: DEFAULT_RCA_PARAMS, now }),
+        topologyVersion: graph.version,
+        now,
+        newId,
+      });
+    const r1 = step([], [], [api], T0 + 5 * MIN);
+    const r2 = step(r1.incidents, [], [{ ...api, status: 'resolved', ends_at: '2026-10-15T10:20:00Z' }], T0 + 21 * MIN);
+    const resolved = r2.incidents[0]!;
+    expect(resolved).toMatchObject({ state: 'resolved', incident_version: 1 });
+
+    // 几小时后同一个告警（指纹与开始时间不变）重新触发：事件已不在 previous 里，只在 dormant 里
+    const r3 = step([], [resolved], [api], T0 + 600 * MIN);
+    expect(r3.changes.map((c) => c.type)).toEqual(['incident.updated']);
+    expect(r3.incidents).toHaveLength(1);
+    expect(r3.incidents[0]).toMatchObject({
+      incident_id: resolved.incident_id,
+      label: resolved.label,
+      state: 'firing',
+      ended_at: null,
+      incident_version: 2,
+    });
+    assertValid('schemas/incident.schema.json', r3.incidents[0]);
+    // 没有 dormant 时（旧行为）新建一个标签相同的事件，持久化时撞上 (cluster_id, label) 唯一约束
+    expect(step([], [], [api], T0 + 600 * MIN).incidents[0]).toMatchObject({
+      label: resolved.label,
+      incident_version: 1,
+    });
+
+    // 同一桶里另一次触发（告警 id 不同）：按标签重开同一个事件
+    const again = await alert(store, labels, '2026-10-15T10:07:00Z', T0 + 600 * MIN);
+    expect(again.alert_id).not.toBe(api.alert_id);
+    const r4 = step([], [resolved], [again], T0 + 600 * MIN);
+    expect(r4.incidents.map((i) => [i.incident_id, i.label, i.state, i.incident_version])).toEqual([
+      [resolved.incident_id, resolved.label, 'firing', 2],
+    ]);
+
+    // merged 的事件不重开，标签照样占用
+    const merged: Incident = { ...resolved, state: 'merged', merged_into: '11111111-0000-4000-8000-999999999999' };
+    const r5 = step([], [merged], [again], T0 + 600 * MIN);
+    expect(r5.changes.map((c) => c.type)).toEqual(['incident.created']);
+    expect(r5.incidents[0]).toMatchObject({ label: `${resolved.label}~2`, incident_version: 1 });
+    expect(r5.incidents[0]!.incident_id).not.toBe(resolved.incident_id);
+  });
+
   it('标签取整到 10 分钟', () => {
     expect(incidentLabel('Cluster:shop/pg', Date.parse('2026-10-15T10:29:59Z'))).toBe(
       'Cluster:shop/pg:2026-10-15T10:20:00Z',

@@ -168,6 +168,13 @@ export class ServerMetrics extends BaseMetrics {
     registers: [this.registry],
   });
 
+  readonly incidentPersistErrors = new Counter({
+    name: 'srenautix_incident_persist_errors_total',
+    help: '事件重算中写入失败、回滚到保存点的事件组数（其余事件照常写入，ADR 0132）',
+    labelNames: ['cluster_id'] as const,
+    registers: [this.registry],
+  });
+
   readonly incidentRecomputeDuration = new Histogram({
     name: 'srenautix_incident_recompute_duration_seconds',
     help: '一次事件重算与对账的耗时',

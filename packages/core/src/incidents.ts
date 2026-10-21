@@ -2,7 +2,8 @@
 // 每次对账先按收敛与根因排序重算出分组，再和已持久化的事件按共享的成员告警对账：
 //   - 一对一：沿用 incident_id，成员或根因变化时 incident_version 加一；
 //   - 多个已有事件对应一个分组（合并）：最早创建的事件保留，其余标为 merged 并写入别名（from → into）；
-//   - 一个已有事件对应多个分组（拆分）：重叠最多的分组沿用原 id，其余分组成为新事件，split_from 指向原事件。
+//   - 一个已有事件对应多个分组（拆分）：重叠最多的分组沿用原 id，其余分组成为新事件，split_from 指向原事件；
+//   - 没有对应已有事件的分组，与超出回看窗口的 resolved 事件共享成员或稳定标签：重开那个事件（ADR 0132）。
 // incident_id 是 UUID；稳定标签 <根组件>:<首次触发时间取整到 10 分钟> 在事件创建时确定，之后不再改变。
 import type {
   Alert,
@@ -55,6 +56,11 @@ export function incidentLabel(root: ComponentKey | null, firstFiringMs: number):
   return `${root ?? 'unlabelled'}:${formatTime(floorTo(firstFiringMs, LABEL_BUCKET_MS))}`;
 }
 
+/** 分组新建为事件时使用的稳定标签（去重后缀之前） */
+export function computedLabel(c: ComputedIncident): string {
+  return incidentLabel(c.ranking.root.component, Math.min(...c.group.alerts.map((x) => parseTime(x.alert.starts_at))));
+}
+
 export type IncidentChange =
   | { type: 'incident.created'; incident: Incident }
   | { type: 'incident.updated'; incident: Incident }
@@ -66,6 +72,12 @@ export interface ReconcileInput {
   clusterId: ClusterId;
   /** 已持久化、未合并的事件 */
   previous: readonly Incident[];
+  /**
+   * 已持久化、不在 previous 里的事件（超出回看窗口的 resolved 与 merged），只取与本轮分组共享成员告警或稳定标签的。
+   * 它们的标签与别名照样占用；没有分到已有事件的分组与其中一个 resolved 事件共享成员（否则标签相同）时，重开那个事件
+   * 而不是新建（ADR 0132）。merged 的事件不重开，只占用标签
+   */
+  dormant?: readonly Incident[];
   computed: readonly ComputedIncident[];
   topologyVersion: number;
   now: number;
@@ -106,7 +118,7 @@ export function reconcileIncidents(input: ReconcileInput): ReconcileResult {
   }
 
   const labels = new Set<string>();
-  for (const p of input.previous) {
+  for (const p of [...input.previous, ...(input.dormant ?? [])]) {
     labels.add(p.label);
     for (const a of p.aliases) {
       labels.add(a.from_label);
@@ -119,6 +131,25 @@ export function reconcileIncidents(input: ReconcileInput): ReconcileResult {
     }
     labels.add(label);
     return label;
+  };
+
+  const previousIds = new Set(input.previous.map((p) => p.incident_id));
+  const dormant = (input.dormant ?? [])
+    .filter((d) => d.state !== 'merged' && !previousIds.has(d.incident_id))
+    .sort((a, b) => a.created_at.localeCompare(b.created_at) || a.incident_id.localeCompare(b.incident_id));
+  const used = new Set<string>();
+  // 共享成员的优先；只按标签认领时，分组不能是从窗口内事件拆分出来的
+  const pickDormant = (gi: number, splitChild: boolean): Incident | undefined => {
+    const free = dormant.filter((d) => !used.has(d.incident_id));
+    const byMembers = free
+      .map((d) => ({ d, n: overlap(d, gi) }))
+      .filter((o) => o.n > 0)
+      .sort((a, b) => b.n - a.n)[0]?.d;
+    if (byMembers || splitChild) {
+      return byMembers;
+    }
+    const label = computedLabel(groups[gi]!.c);
+    return free.find((d) => d.label === label);
   };
 
   const out = new Map<string, Incident>();
@@ -139,11 +170,24 @@ export function reconcileIncidents(input: ReconcileInput): ReconcileResult {
       }
       return;
     }
-    // 新事件；与某个已有事件重叠时是拆分出来的
+    // 与某个已有事件重叠时是拆分出来的
     const parent = prev
       .map((q) => ({ q, n: overlap(q, gi) }))
       .filter((o) => o.n > 0)
       .sort((a, b) => b.n - a.n)[0]?.q;
+    // 超出回看窗口的 resolved 事件与分组共享成员（检测器以原来的告警重新触发），或者标签就是分组的标签：重开它，
+    // incident_id 与标签不变，版本加一（ADR 0132）
+    const reopen = pickDormant(gi, parent !== undefined);
+    if (reopen) {
+      used.add(reopen.incident_id);
+      const next = applyGroup(reopen, c, input.topologyVersion, now, true);
+      if (next !== reopen) {
+        out.set(next.incident_id, next);
+        changes.push({ type: 'incident.updated', incident: next });
+      }
+      return;
+    }
+    // 新事件
     const created = createIncident(
       input.clusterId,
       newId(),
@@ -294,7 +338,7 @@ function createIncident(
   return {
     incident_id: id,
     cluster_id: clusterId,
-    label: uniqueLabel(incidentLabel(c.ranking.root.component, g.first)),
+    label: uniqueLabel(computedLabel(c)),
     incident_version: 1,
     state: g.state,
     severity: g.severity,
@@ -316,14 +360,18 @@ function createIncident(
   };
 }
 
-/** 把重算出的分组套到已有事件上；没有任何变化时返回原对象 */
-function applyGroup(p: Incident, c: ComputedIncident, topologyVersion: number, now: string): Incident {
+/**
+ * 把重算出的分组套到已有事件上；没有任何变化时返回原对象。dormant 为 true 时 p 是超出回看窗口的事件：
+ * 它从 resolved 回到 firing（重开）时版本也加一，阶段 A 按新版本重新出报告（ADR 0132）
+ */
+function applyGroup(p: Incident, c: ComputedIncident, topologyVersion: number, now: string, dormant = false): Incident {
   const g = aggregate(c);
   const before = memberIds(p);
   const after = new Set(g.alerts.map((a) => a.alert_id));
   const membersChanged = before.size !== after.size || [...after].some((id) => !before.has(id));
   const rootChanged = p.root.component !== c.ranking.root.component;
-  const version = membersChanged || rootChanged ? p.incident_version + 1 : p.incident_version;
+  const reopened = dormant && p.state === 'resolved' && g.state === 'firing';
+  const version = membersChanged || rootChanged || reopened ? p.incident_version + 1 : p.incident_version;
   const byId = new Map(g.alerts.map((a) => [a.alert_id, a]));
   const members: IncidentMember[] = p.members.map((m) => {
     const a = byId.get(m.alert_id);
