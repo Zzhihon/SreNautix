@@ -1,21 +1,20 @@
 import type { AlertmanagerAlert, Labels, Severity } from '@srenautix/contract';
+import { isIdentityLabel } from '@srenautix/core';
 import { JSONPath } from 'jsonpath-plus';
-
-/** 不属于告警身份的标签（与 Prometheus ALERTS 序列的附加标签一致）。 */
-export const NON_IDENTITY_LABELS = new Set(['alertstate', 'alertgroup', '__name__']);
 
 const FNV_OFFSET = 0xcbf29ce484222325n;
 const FNV_PRIME = 0x100000001b3n;
 const MASK = 0xffffffffffffffffn;
 
 /**
- * 告警指纹：去掉 alertstate、alertgroup、__name__ 后，按键排序，逐个写入 key、0xff、value、0xff 的 UTF-8 字节，
+ * 告警指纹：去掉 alertstate、alertgroup、__name__ 与 Prometheus 的 external labels（ingest.external_labels，ADR 0117）后，
+ * 按键排序，逐个写入 key、0xff、value、0xff 的 UTF-8 字节，
  * 取 FNV-1a 64 位哈希的 16 位十六进制。各接入源（webhook、Alertmanager API、ALERTS 序列）对同一标签集得到同一个指纹。
  */
 export function fingerprint(labels: Labels): string {
   let h = FNV_OFFSET;
   const keys = Object.keys(labels)
-    .filter((k) => !NON_IDENTITY_LABELS.has(k) && labels[k] !== undefined)
+    .filter((k) => isIdentityLabel(k) && labels[k] !== undefined)
     .sort();
   const sep = 0xff;
   for (const k of keys) {
@@ -30,7 +29,7 @@ export function fingerprint(labels: Labels): string {
 export function identityLabels(labels: Labels): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(labels)) {
-    if (!NON_IDENTITY_LABELS.has(k) && v !== undefined) {
+    if (isIdentityLabel(k) && v !== undefined) {
       out[k] = v;
     }
   }

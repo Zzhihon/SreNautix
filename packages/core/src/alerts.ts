@@ -7,10 +7,29 @@ import { formatTime, isZeroTime, parseTime } from './time.js';
 
 const IGNORED_LABELS = new Set(['__name__', 'alertstate', 'alertgroup']);
 
+/**
+ * Prometheus 的 external labels（ADR 0117）：Prometheus 发给 Alertmanager 的告警带着它们（kube-prometheus-stack 默认加
+ * prometheus=<命名空间>/<名称>，高可用时还有 prometheus_replica），规则引擎的 ALERTS 与 /api/v1/alerts 不带。它们不属于
+ * 告警身份，否则同一条告警经 webhook 与对账会得到两个指纹。
+ */
+export const DEFAULT_EXTERNAL_LABELS = ['prometheus', 'prometheus_replica'] as const;
+
+let externalLabels: ReadonlySet<string> = new Set(DEFAULT_EXTERNAL_LABELS);
+
+/** 进程启动时按配置（ingest.external_labels）设定一次；所有接入入口与对账共用 */
+export function setExternalLabels(labels: readonly string[]): void {
+  externalLabels = new Set(labels);
+}
+
+/** 标签是否属于告警身份：不是 __name__、alertstate、alertgroup，也不是 external label */
+export function isIdentityLabel(key: string): boolean {
+  return !IGNORED_LABELS.has(key) && !externalLabels.has(key);
+}
+
 export function identityLabels(labels: Labels): Labels {
   return Object.fromEntries(
     Object.entries(labels)
-      .filter(([k]) => !IGNORED_LABELS.has(k))
+      .filter(([k]) => isIdentityLabel(k))
       .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
   );
 }

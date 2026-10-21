@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import type { ChangeEvent } from '@srenautix/contract';
-import type { ResolvedRcaParams } from '@srenautix/core';
+import { setExternalLabels, type ResolvedRcaParams } from '@srenautix/core';
 import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
 import { parse as parseYaml } from 'yaml';
@@ -135,6 +135,8 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
   const c = o.config;
   const serve = o.serve ?? 'api';
   configureLog(c.log_level, { role: 'server', cluster_id: c.cluster_id, serve });
+  // 告警身份去掉 Prometheus 的 external labels：webhook、对账与 reader 快照共用（ADR 0117）
+  setExternalLabels(c.ingest.external_labels);
   const metrics = new ServerMetrics('server', !o.noAuxListeners);
   const pool = createPool(o.pg, 'srenautix-server', c.database.pool_size);
   // db bootstrap 还没完成时重试并保持 not ready，而不是退出（ADR 0102）

@@ -281,6 +281,9 @@ ingest:
   sources: []
   {{- end }}
   self_label: srenautix_self
+  {{- with $v.ingest.externalLabels }}
+  external_labels: {{ toJson . }}
+  {{- end }}
   reconcile:
     enabled: true
     interval: 60s

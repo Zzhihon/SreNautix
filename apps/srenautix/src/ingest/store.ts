@@ -188,10 +188,17 @@ export async function alertsById(pool: pg.Pool | Queryable, ids: readonly string
 export async function firingAlertIds(
   pool: pg.Pool | Queryable,
   clusterId: string,
-): Promise<Map<string, { fingerprint: string; startsAt: Date }>> {
-  const r = await pool.query<{ alert_id: string; fingerprint: string; starts_at: Date }>(
-    "SELECT alert_id, fingerprint, starts_at FROM server.alert_state WHERE cluster_id = $1 AND status = 'firing'",
+): Promise<Map<string, { fingerprint: string; startsAt: Date; labels: Record<string, string> }>> {
+  const r = await pool.query<{
+    alert_id: string;
+    fingerprint: string;
+    starts_at: Date;
+    labels: Record<string, string>;
+  }>(
+    "SELECT alert_id, fingerprint, starts_at, labels FROM server.alert_state WHERE cluster_id = $1 AND status = 'firing'",
     [clusterId],
   );
-  return new Map(r.rows.map((x) => [x.alert_id, { fingerprint: x.fingerprint, startsAt: x.starts_at }]));
+  return new Map(
+    r.rows.map((x) => [x.alert_id, { fingerprint: x.fingerprint, startsAt: x.starts_at, labels: x.labels }]),
+  );
 }

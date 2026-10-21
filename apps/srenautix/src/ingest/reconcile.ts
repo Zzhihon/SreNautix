@@ -136,28 +136,46 @@ export async function applyRemote(
     (a) => a.labels[selfLabel] === undefined && a.alertname !== watchdog && !isIgnorable(a.labels),
   );
   const local = await firingAlertIds(pool, clusterId);
-  const localFps = new Set([...local.values()].map((v) => v.fingerprint));
+  // 本地告警按当前的身份规则重新计算指纹（ADR 0117）：之前按带 external labels 的标签存下的告警与对账得到的同一条告警
+  // 指纹相同。两条本地告警的身份相同、开始时间也相同时，后者是重复的一份，在本轮结束它（合并到较早存下的那一份）
+  const identity = new Map([...local].map(([id, v]) => [id, fingerprint(v.labels)]));
+  const byIdentity = new Map<string, string>();
+  const duplicates: string[] = [];
+  for (const [id, v] of [...local].sort(
+    ([a, x], [b, y]) =>
+      Number(x.fingerprint !== identity.get(a)) - Number(y.fingerprint !== identity.get(b)) || a.localeCompare(b),
+  )) {
+    const key = `${identity.get(id)}@${Math.floor(v.startsAt.getTime() / 1000)}`;
+    if (byIdentity.has(key)) {
+      duplicates.push(id);
+    } else {
+      byIdentity.set(key, id);
+    }
+  }
+  const localFps = new Set(identity.values());
   const missing = kept.filter((a) => !localFps.has(a.fingerprint));
   if (missing.length) {
     await ingest.write(clusterId, 'reconcile', 'reconcile', missing, { reconcile: missing.map((a) => a.labels) });
   }
   let resolved = 0;
-  if (ok.length) {
-    const remoteFps = new Set(remote.keys());
-    const gone = [...local.entries()].filter(([, v]) => !remoteFps.has(v.fingerprint));
-    if (gone.length) {
-      await tx(pool, async (c) => {
-        const t = (await c.query<{ now: Date }>('SELECT now() AS now')).rows[0] as { now: Date };
-        for (const [id] of gone) {
-          if (await resolveMissing(c, id, t.now)) {
-            resolved++;
-          }
+  const remoteFps = new Set(remote.keys());
+  const gone = ok.length ? [...local.keys()].filter((id) => !remoteFps.has(identity.get(id)!)) : [];
+  const ending = [...new Set([...duplicates, ...gone])];
+  if (ending.length) {
+    await tx(pool, async (c) => {
+      const t = (await c.query<{ now: Date }>('SELECT now() AS now')).rows[0] as { now: Date };
+      for (const id of ending) {
+        if (await resolveMissing(c, id, t.now)) {
+          resolved++;
         }
-        if (resolved) {
-          await c.query("SELECT pg_notify('srenautix_ingest', $1)", [clusterId]);
-        }
-      });
-    }
+      }
+      if (resolved) {
+        await c.query("SELECT pg_notify('srenautix_ingest', $1)", [clusterId]);
+      }
+    });
+  }
+  if (duplicates.length) {
+    logger.info('合并重复存下的告警', { cluster_id: clusterId, alert_ids: duplicates });
   }
   if (ok.length) {
     // 完整读取成功：对账本身就是接入路径，计入接入与 Watchdog（只用对账的部署不会因此误报 IngestSilent、WatchdogMissing）

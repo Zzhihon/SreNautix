@@ -3,6 +3,7 @@ import { parse as parseYaml } from 'yaml';
 import { z } from 'zod';
 import { ConfigError } from './files.js';
 import { DEFAULT_REVISION_LABELS } from '../changes/kubernetes.js';
+import { DEFAULT_EXTERNAL_LABELS } from '@srenautix/core';
 
 const duration = z.string().regex(/^\d+(ms|s|m|h|d)$/, '时长形如 30s、5m、12h');
 const url = z.string().url();
@@ -206,6 +207,9 @@ export const serverConfigSchema = z
         self_label: z.string().default('srenautix_self'),
         silence_threshold: duration.default('10m'),
         watchdog_alertname: z.string().default('Watchdog'),
+        // Prometheus 的 external labels：Alertmanager 收到的告警带着它们，规则引擎的 ALERTS 不带。计算告警身份与指纹时
+        // 去掉，webhook 与对账两条入口才能认出同一条告警（ADR 0117）
+        external_labels: z.array(z.string().min(1)).default([...DEFAULT_EXTERNAL_LABELS]),
         reconcile: z
           .object({
             enabled: z.boolean().default(true),
@@ -223,6 +227,7 @@ export const serverConfigSchema = z
         self_label: 'srenautix_self',
         silence_threshold: '10m',
         watchdog_alertname: 'Watchdog',
+        external_labels: [...DEFAULT_EXTERNAL_LABELS],
         reconcile: { enabled: true, interval: '60s' },
       }),
     // dirs 下的每个子目录是一个领域包；only 不填时加载除 `_` 开头（示例包）以外的全部包；oci 中的包总是加载

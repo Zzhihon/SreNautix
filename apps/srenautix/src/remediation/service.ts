@@ -91,6 +91,12 @@ interface Attempt {
 
 class Deferred extends Error {}
 
+/**
+ * 提议因绑定过时被拒绝（事件在读取与提议之间升了版本，例如对账补进一条告警）时最多重试的次数（ADR 0108 §13）。
+ * 每 30 秒一轮，重试时按事件的当前版本重新判断：根因变了就等新版本的研判，只加了成员就绑定当前版本
+ */
+export const BINDING_RETRY_LIMIT = 5;
+
 export class RemediationService {
   constructor(
     private readonly pool: pg.Pool,
@@ -106,9 +112,13 @@ export class RemediationService {
          FROM server.research_runs r
         WHERE r.state = 'completed' AND r.conclusion_level = ANY($1::text[])
           AND r.finished_at > now() - make_interval(secs => $2)
-          AND NOT EXISTS (SELECT 1 FROM server.remediation_attempts a WHERE a.run_id = r.run_id)
+          AND (NOT EXISTS (SELECT 1 FROM server.remediation_attempts a WHERE a.run_id = r.run_id)
+            -- 绑定过时的模板在上限内重试（ADR 0108 §13）；整次研判已判定不处理（key '-'）时不再重试
+            OR (EXISTS (SELECT 1 FROM server.remediation_attempts a WHERE a.run_id = r.run_id
+                          AND a.code = 'binding_stale' AND a.retries < $4)
+                AND NOT EXISTS (SELECT 1 FROM server.remediation_attempts a WHERE a.run_id = r.run_id AND a.key = '-')))
         ORDER BY r.finished_at LIMIT $3`,
-      [this.s.conclusions, this.s.lookbackMs / 1000, limit],
+      [this.s.conclusions, this.s.lookbackMs / 1000, limit, BINDING_RETRY_LIMIT],
     );
     let n = 0;
     for (const run of r.rows) {
@@ -189,11 +199,31 @@ export class RemediationService {
     if (!wanted.length) {
       return skipAll('no_template', applicable.length ? '适用的模板不在启用的类别中' : '没有适用的修复模板');
     }
+    // 之前处理过这次研判：只重试绑定过时、还没到上限的模板，其余已经有结果的不重复处理（ADR 0108 §13）
+    const prior = new Map(
+      (
+        await this.pool.query<{ key: string; code: string | null; retries: number }>(
+          'SELECT key, code, retries FROM server.remediation_attempts WHERE run_id = $1',
+          [run.run_id],
+        )
+      ).rows.map((x) => [x.key, x]),
+    );
     const attempts: Attempt[] = [];
     let proposed = 0;
+    // 每次研判的上限把之前已经提议的算在内
+    let counted = (
+      await this.pool.query<{ n: number }>(
+        "SELECT count(*)::int AS n FROM server.remediation_attempts WHERE run_id = $1 AND outcome = 'proposed'",
+        [run.run_id],
+      )
+    ).rows[0]!.n;
     const ds = await this.d.dataSource(Date.now()).catch(() => null);
     for (const a of wanted) {
-      if (proposed >= this.s.maxPerRun) {
+      const before = prior.get(a.key);
+      if (before && (before.code !== 'binding_stale' || before.retries >= BINDING_RETRY_LIMIT)) {
+        continue;
+      }
+      if (counted >= this.s.maxPerRun) {
         attempts.push({
           key: a.key,
           outcome: 'skipped',
@@ -207,6 +237,7 @@ export class RemediationService {
       attempts.push(at);
       if (at.outcome === 'proposed') {
         proposed++;
+        counted++;
       }
     }
     await this.record(run, attempts);
@@ -393,7 +424,13 @@ export class RemediationService {
         const ins = await c.query(
           `INSERT INTO server.remediation_attempts (run_id, key, incident_id, incident_version, outcome, code, reason, category,
              repository, branch, base, proposal_id, files)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) ON CONFLICT (run_id, key) DO NOTHING`,
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+           ON CONFLICT (run_id, key) DO UPDATE SET outcome = excluded.outcome, code = excluded.code, reason = excluded.reason,
+             category = excluded.category, repository = excluded.repository, branch = excluded.branch, base = excluded.base,
+             proposal_id = excluded.proposal_id, files = excluded.files, incident_version = excluded.incident_version,
+             retries = server.remediation_attempts.retries + 1, created_at = now()
+           -- 只有绑定过时的尝试可以被重试覆盖（ADR 0108 §13）
+           WHERE server.remediation_attempts.code = 'binding_stale'`,
           [
             run.run_id,
             a.key,

@@ -41,5 +41,14 @@ CREATE TABLE server.gitops_pulls (
 CREATE INDEX gitops_pulls_incident_idx ON server.gitops_pulls (incident_id);
 `,
     },
+    {
+      version: 2,
+      name: 'retry remediation attempts that hit a stale binding',
+      phase: 'expand',
+      sql: `
+-- 提议因绑定过时（事件在研判与提议之间升了版本）被拒绝的尝试可以重试，有次数上限（ADR 0108 §13）
+ALTER TABLE server.remediation_attempts ADD COLUMN retries integer NOT NULL DEFAULT 0;
+`,
+    },
   ],
 };

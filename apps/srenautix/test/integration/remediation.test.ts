@@ -12,7 +12,7 @@ import { Catalog, DEFAULT_CATALOG_PATH } from '../../src/proposals/catalog.js';
 import { Policies, type GatewayPolicy } from '../../src/proposals/policy.js';
 import { ProposalService } from '../../src/proposals/service.js';
 import { GitOpsPulls } from '../../src/remediation/pulls.js';
-import { REMEDIATION_RULE, RemediationService } from '../../src/remediation/service.js';
+import { BINDING_RETRY_LIMIT, REMEDIATION_RULE, RemediationService } from '../../src/remediation/service.js';
 import { GitRepositoryTargets } from '../../src/remediation/targets.js';
 import { serverTracks } from '../../src/roles/server-schema.js';
 import { PackRuntime } from '../../src/stage-a/packs.js';
@@ -228,7 +228,11 @@ beforeAll(async () => {
 }, 120_000);
 
 /** 提议服务与自愈服务；signingKey 给出时自动执行规则签发断言（经过 gateway 仅提议的检查） */
-function build(signingKey: KeyObject | null): { proposals: ProposalService; service: RemediationService } {
+function build(
+  signingKey: KeyObject | null,
+  /** 在提交提议之前执行（模拟对账在读取事件与提议之间让事件升版本） */
+  beforeCreate?: () => Promise<void>,
+): { proposals: ProposalService; service: RemediationService } {
   const policy: GatewayPolicy = {
     version: 1,
     cluster: CLUSTER,
@@ -294,7 +298,14 @@ function build(signingKey: KeyObject | null): { proposals: ProposalService; serv
       componentType: async () => null,
       dataSource: async () => null,
       github: app,
-      proposals,
+      proposals: beforeCreate
+        ? (Object.assign(Object.create(proposals) as ProposalService, {
+            create: async (...args: Parameters<ProposalService['create']>) => {
+              await beforeCreate();
+              return proposals.create(...args);
+            },
+          }) as ProposalService)
+        : proposals,
       issueRef: async (incidentId, fromRepo) => {
         const i = await issues.ensure(incidentId, 'repo_change');
         return i ? GitHubApp.ref(fromRepo, i.repo, i.number) : null;
@@ -309,6 +320,32 @@ afterAll(async () => {
   await gh?.stop();
   await db?.close();
 });
+
+/** 事件升一个版本（只加入成员，根因不变）；返回新版本 */
+const bump = async (incidentId: string) =>
+  (
+    await db.server.query<{ version: number }>(
+      `UPDATE server.incidents SET version = version + 1, body = jsonb_set(body, '{incident_version}', to_jsonb(version + 1))
+        WHERE incident_id = $1 RETURNING version`,
+      [incidentId],
+    )
+  ).rows[0]!.version;
+const currentVersion = async (incidentId: string) =>
+  (
+    await db.server.query<{ version: number }>('SELECT version FROM server.incidents WHERE incident_id = $1', [
+      incidentId,
+    ])
+  ).rows[0]?.version;
+/** 新版本的阶段 A 报告：证据指纹不变（指纹变化会触发研判）；从上一版本的报告复制 */
+const report = (incidentId: string, v: number) =>
+  db.server.query(
+    `INSERT INTO server.stage_a_reports (report_id, incident_id, incident_version, disposition, evidence_fingerprint, degraded, body,
+       first_firing_at, rendered_at)
+     SELECT $3, incident_id, $2, disposition, evidence_fingerprint, degraded, jsonb_set(body, '{incident_version}', to_jsonb($2::int)),
+            first_firing_at, now()
+       FROM server.stage_a_reports WHERE incident_id = $1 AND incident_version = $2 - 1`,
+    [incidentId, v, randomUUID()],
+  );
 
 const attempts = async (runId: string) =>
   (
@@ -434,24 +471,6 @@ describe('自愈 PR', () => {
   });
 
   it('研判之后事件只加入了成员（新版本没有触发研判）时结论仍然适用；新版本触发过研判时跳过（ADR 0108 §10）', async () => {
-    const bump = async (incidentId: string) =>
-      (
-        await db.server.query<{ version: number }>(
-          `UPDATE server.incidents SET version = version + 1, body = jsonb_set(body, '{incident_version}', to_jsonb(version + 1))
-            WHERE incident_id = $1 RETURNING version`,
-          [incidentId],
-        )
-      ).rows[0]!.version;
-    // 新版本的阶段 A 报告：证据指纹不变（指纹变化会触发研判）
-    const report = (incidentId: string, v: number) =>
-      db.server.query(
-        `INSERT INTO server.stage_a_reports (report_id, incident_id, incident_version, disposition, evidence_fingerprint, degraded, body,
-           first_firing_at, rendered_at)
-         SELECT $3, incident_id, $2, disposition, evidence_fingerprint, degraded, jsonb_set(body, '{incident_version}', to_jsonb($2::int)),
-                first_firing_at, now()
-           FROM server.stage_a_reports WHERE incident_id = $1 AND incident_version = $2 - 1`,
-        [incidentId, v, randomUUID()],
-      );
     const joined = await seed('likely', { severity: 'critical', disposition: 'ignore' });
     const jv = await bump(joined.inc.incident_id);
     // 新版本的阶段 A 报告还没有生成：推迟到下一轮，不记结果
@@ -474,6 +493,75 @@ describe('自愈 PR', () => {
     expect(await attempts(retriggered.runId)).toEqual([
       { key: '-', outcome: 'skipped', code: 'incident_changed', proposal_id: null, branch: null },
     ]);
+  });
+
+  it('Kind 12:13:57 的时序：v1 研判完成，提交提议前对账让事件升到 v2，第一次绑定过时；下一轮按 v2 重新绑定，开出 PR（ADR 0108 §13）', async () => {
+    const run = await seed('likely', { severity: 'critical', disposition: 'ignore' });
+    // 研判针对的版本（v1），对账之后是下一个版本（v2）
+    const v1 = run.inc.incident_version;
+    const v2 = v1 + 1;
+    let raced = false;
+    const racing = build(null, async () => {
+      if (!raced) {
+        raced = true;
+        await bump(run.inc.incident_id);
+      }
+    }).service;
+    expect(await racing.runOnce()).toBe(0);
+    expect((await attempts(run.runId)).find((a) => a.key === 'gitops/noisy-alert-relax')).toMatchObject({
+      outcome: 'skipped',
+      code: 'binding_stale',
+    });
+    // v2 的阶段 A 报告还没有：推迟，尝试仍是 binding_stale
+    expect(await racing.runOnce()).toBe(0);
+    await report(run.inc.incident_id, v2);
+    // 上一轮绑定过时的模板这一轮按 v2 重新处理（告警目录模板因前面的用例已经写入目录而 skip_if）
+    expect(await racing.runOnce()).toBe(1);
+    const rows = await attempts(run.runId);
+    expect(rows.find((a) => a.key === 'gitops/noisy-alert-relax')).toMatchObject({ outcome: 'proposed' });
+    const p = await db.server.query<{ v: number }>(
+      "SELECT (body->'binding'->>'incident_version')::int AS v FROM server.proposals WHERE proposal_id = $1",
+      [rows.find((a) => a.key === 'gitops/noisy-alert-relax')!.proposal_id],
+    );
+    expect(p.rows[0]!.v).toBe(v2);
+    // 已经有结果的模板不再处理
+    expect(await racing.runOnce()).toBe(0);
+  });
+
+  it('绑定过时：根因变了时等新版本的研判；重试有次数上限', async () => {
+    const changed = await seed('likely', { severity: 'critical', disposition: 'ignore' });
+    let once = false;
+    const racing = build(null, async () => {
+      if (!once) {
+        once = true;
+        const v = await bump(changed.inc.incident_id);
+        await db.server.query(
+          `INSERT INTO server.research_queue (run_id, incident_id, incident_version, reason, severity, is_new, state)
+           VALUES ($1, $2, $3, 'root_changed', 'critical', false, 'queued')`,
+          [randomUUID(), changed.inc.incident_id, v],
+        );
+      }
+    }).service;
+    expect(await racing.runOnce()).toBe(0);
+    expect(await racing.runOnce()).toBe(0);
+    expect((await attempts(changed.runId)).map((a) => [a.key, a.code])).toContainEqual(['-', 'incident_changed']);
+
+    const stuck = await seed('likely', { severity: 'critical', disposition: 'ignore' });
+    // 每次提交前都有新版本：重试 BINDING_RETRY_LIMIT 次后停止
+    const always = build(null, async () => {
+      await bump(stuck.inc.incident_id);
+    }).service;
+    for (let i = 0; i < BINDING_RETRY_LIMIT + 3; i++) {
+      await report(stuck.inc.incident_id, (await currentVersion(stuck.inc.incident_id)) as number).catch(
+        () => undefined,
+      );
+      await always.runOnce();
+    }
+    const r = await db.server.query<{ retries: number; code: string }>(
+      "SELECT retries, code FROM server.remediation_attempts WHERE run_id = $1 AND key = 'gitops/noisy-alert-relax'",
+      [stuck.runId],
+    );
+    expect(r.rows[0]).toEqual({ retries: BINDING_RETRY_LIMIT, code: 'binding_stale' });
   });
 
   it('gateway 开出 PR 后：从执行事件取得 PR，关联到事件 issue；消息里没有时按分支查 GitHub', async () => {

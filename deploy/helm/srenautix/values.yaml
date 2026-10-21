@@ -226,6 +226,9 @@ ingest:
     - {id: alertmanager, kind: alertmanager}
   # 已存在的 Secret，键为接入源 id；为空时由 chart 生成并在升级时保留
   existingSecret: ""
+  # Prometheus 的 external labels：不计入告警身份（ADR 0117）。为空时用 server 的默认值 [prometheus, prometheus_replica]；
+  # 告警源加了别的 external label（例如 vmalert 的 -external.label=cluster=x）时写在这里，要包含默认的两个
+  externalLabels: []
 
 # 需要人跟进的事件在 GitHub 开 issue，并关联修复 PR（需要 roles.server.githubApp）。enabled 以外的键原样写入 server 配置的
 # issues（labels、title_prefix、max_per_hour、lookback、interval，见 apps/srenautix/src/config/server.ts）
