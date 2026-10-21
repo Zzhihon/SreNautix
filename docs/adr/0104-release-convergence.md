@@ -45,6 +45,9 @@
     - **挂上之后**：发布的时间提前到 Job 新建的时刻，Job 加入发布的目标；`change_id` 不变。变更带上 `attachments: [{target, basis}]`（契约 2.19.0；`revision_label` 是 2.20.0 加的），摘要里写明依据。每个 Job 只挂到它之后最近的那次发布。
     - **弱推导的风险**：第 4 档是按命名空间与时间窗推断的，同一命名空间里一个与发布无关的一次性 Job 会让发布的开始时间提前，并把这个 Job 上的告警归到发布。所以只在窗口里只有一个候选 Job 时才挂，并标为 `namespace_window`，研判与控制台能看出这是弱推导。第 3 档也有一个已知的误判：所有 Pod 都带同一个边车镜像时，镜像比较会把无关的 Job 挂上。
     - **数据来源**：kube-state-metrics 历史重建增加 `kube_job_owner` 与 `kube_pod_container_info`（core `KSM_TOPOLOGY_QUERIES`），server 的状态库与 eval 的重建用同一个 `deriveRollouts`。
+      - 线上：reader（以及单集群的 informer）把对象的全部 `metadata.labels` 写进拓扑节点，第 2 档直接读 Job、新 ReplicaSet 与工作负载节点上的标签，不需要额外的数据。
+      - 重建：配置了 `pre_step_labels` 时，`ksmTopologyQueries` 增加 `kube_job_labels`、`kube_replicaset_labels`、`kube_deployment_labels`、`kube_statefulset_labels` 的查询，只按这些 key sanitize 之后的 `label_*` 分组；配置为空时不查。`ksmTopologyIntervals` 把 `label_*` 映射回原 key 写进节点标签，不在配置里的标签不进节点。取值在窗口内不变的对象（Job、ReplicaSet），属主序列产生的同一节点也带上这组标签；取值会变的对象（发布时改了标签的 Deployment），由标签序列按各自的区间产生节点。导出（`eval export`）与回放读同一份 `reconstruct.pre_step_labels`。
+      - 前提：kube-state-metrics 的 `metricLabelsAllowlist` 放行这些标签。CCHP 原来只对 pods、deployments、statefulsets 放行 `cchp.io/release-id`，而迁移 Job 的 Pod 模板不带这个标签，所以要对 jobs、replicasets 也放行（cchp-k8s-ops 的 observability PR）。放行之前导出的重建包没有这些标签。
 
     **在重建包上的结果**：两个包都还没有镜像数据（导出时还没有 `kube_pod_container_info`），也没有 kube_job_owner。kube-state-metrics 历史里的 Job 也没有标签，所以第 2 档用不上。两次发布的窗口里各有两个候选 Job（`cchp-migrate-<sha>` 与 `cchp-migstat-<sha>-<n>`），按第 4 档都不挂，17 个标注的发现结果不变。把两个 Job 的镜像设为与新 ReplicaSet 相同来模拟第 3 档：
     - release-migration-deadlock：发布时间从 06:27:10 提前到 06:20，gateway 的三条故障告警归到发布，事件数从 4 个降到 3 个，根因是 Argo 应用；

@@ -23,11 +23,44 @@ export const KSM_TOPOLOGY_QUERIES = {
   podImages: 'max by (namespace, pod, image, image_id) (kube_pod_container_info)',
 } as const;
 
-/** 没有给出的查询按没有数据处理（早于这些查询导出的重建包） */
+/**
+ * kube-state-metrics 的 `kube_<资源>_labels` 带着 metricLabelsAllowlist 放行的对象标签，键是 sanitize 之后的
+ * `label_<key>`（非字母数字下划线的字符换成 `_`）。重建只取 pre_step_labels 配置里的 key（ADR 0104 §13），
+ * 用于把发布之前的 Job 按版本标签关联到发布。
+ */
+const LABEL_METRICS = {
+  jobLabels: { metric: 'kube_job_labels', kind: 'Job', name: 'job_name' },
+  replicasetLabels: { metric: 'kube_replicaset_labels', kind: 'ReplicaSet', name: 'replicaset' },
+  deploymentLabels: { metric: 'kube_deployment_labels', kind: 'Deployment', name: 'deployment' },
+  statefulsetLabels: { metric: 'kube_statefulset_labels', kind: 'StatefulSet', name: 'statefulset' },
+} as const;
+type LabelQuery = keyof typeof LABEL_METRICS;
+
+/** kube-state-metrics 对标签键的 sanitize：前缀 label_，非 [a-zA-Z0-9_] 的字符换成 _ */
+export function ksmLabelName(key: string): string {
+  return `label_${key.replace(/[^a-zA-Z0-9_]/g, '_')}`;
+}
+
+/**
+ * 重建需要的全部查询：KSM_TOPOLOGY_QUERIES，加上配置了 pre_step_labels 时 Job、ReplicaSet、Deployment、StatefulSet 的
+ * 标签查询（只按配置的 key 分组）。配置为空时不查标签
+ */
+export function ksmTopologyQueries(preStepLabels: readonly string[] = []): Record<string, string> {
+  const out: Record<string, string> = { ...KSM_TOPOLOGY_QUERIES };
+  const keys = [...new Set(preStepLabels.map(ksmLabelName))].sort();
+  if (keys.length) {
+    for (const [q, m] of Object.entries(LABEL_METRICS)) {
+      out[q] = `max by (namespace, ${m.name}, ${keys.join(', ')}) (${m.metric})`;
+    }
+  }
+  return out;
+}
+
+/** 没有给出的查询按没有数据处理（早于这些查询导出的重建包，或没有配置 pre_step_labels） */
 type OptionalKsmQuery = 'jobOwner' | 'podImages';
 export type KsmTopologyResults = {
   [K in Exclude<keyof typeof KSM_TOPOLOGY_QUERIES, OptionalKsmQuery>]: MetricSeries[];
-} & { [K in OptionalKsmQuery]?: MetricSeries[] };
+} & { [K in OptionalKsmQuery | LabelQuery]?: MetricSeries[] };
 
 /** 镜像比较用的形式：image_id 取 digest（sha256:…），image 取去掉运行时前缀的引用 */
 export function normalizeImage(ref: string): string {
@@ -61,7 +94,7 @@ function spans(s: MetricSeries, stepMs: number, gapMs: number): Array<[number, n
   return out;
 }
 
-function node(kind: string, ns: string | null, name: string, uid: string | null = null): TopologyNode {
+function baseNode(kind: string, ns: string | null, name: string, uid: string | null = null): TopologyNode {
   const namespace = scopedNamespace(kind, ns);
   return {
     key: nodeKey(kind, namespace, name),
@@ -93,8 +126,49 @@ function edge(
   };
 }
 
-export function ksmTopologyIntervals(results: KsmTopologyResults, stepMs: number, gapMs = 5 * 60_000): KsmInterval[] {
+export function ksmTopologyIntervals(
+  results: KsmTopologyResults,
+  stepMs: number,
+  gapMs = 5 * 60_000,
+  /** 与 ksmTopologyQueries 相同的 pre_step_labels；只把这些 key 写进节点标签 */
+  preStepLabels: readonly string[] = [],
+): KsmInterval[] {
   const out: KsmInterval[] = [];
+  // sanitize 之后的标签名 → 配置里的原 key；不在配置里的 label_* 一律不进节点
+  const wanted = new Map(preStepLabels.map((k) => [ksmLabelName(k), k]));
+  const objectLabels = (s: MetricSeries): Record<string, string> => {
+    const l: Record<string, string> = {};
+    for (const [name, key] of wanted) {
+      const v = s.labels[name];
+      if (v) {
+        l[key] = v;
+      }
+    }
+    return l;
+  };
+  // 一个对象在整个窗口里只有一组取值时（Job、ReplicaSet 的标签创建后不变），其他序列产生的同一节点也带上这组标签
+  const stable = new Map<string, Record<string, string> | null>();
+  for (const [q, m] of Object.entries(LABEL_METRICS)) {
+    for (const s of results[q as LabelQuery] ?? []) {
+      const l = objectLabels(s);
+      const { namespace } = s.labels;
+      const name = s.labels[m.name];
+      if (!namespace || !name || !Object.keys(l).length || !s.values.some((v) => v !== null && v !== undefined)) {
+        continue;
+      }
+      const k = `${m.kind}\0${namespace}\0${name}`;
+      const prev = stable.get(k);
+      stable.set(k, prev === undefined || JSON.stringify(prev) === JSON.stringify(l) ? l : null);
+    }
+  }
+  const node = (kind: string, ns: string | null, name: string, uid: string | null = null): TopologyNode => {
+    const n = baseNode(kind, ns, name, uid);
+    const l = stable.get(`${kind}\0${ns}\0${name}`);
+    if (l) {
+      n.labels = { ...l };
+    }
+    return n;
+  };
   /**
    * 一条序列产生的节点与边；标签里的对象不能构成合法的键时（ADR 0034）整条序列跳过，与 reader 相同
    */
@@ -202,6 +276,20 @@ export function ksmTopologyIntervals(results: KsmTopologyResults, stepMs: number
         ),
       });
     });
+  }
+  // 标签序列本身也产生节点区间：取值随时间变化的对象（发布时改了版本标签的 Deployment）按各自的区间带不同的标签
+  for (const [q, m] of Object.entries(LABEL_METRICS)) {
+    for (const s of results[q as LabelQuery] ?? []) {
+      const l = objectLabels(s);
+      if (!Object.keys(l).length) {
+        continue;
+      }
+      series(s, (add) => {
+        const n = baseNode(m.kind, s.labels.namespace!, s.labels[m.name]!);
+        n.labels = l;
+        add({ node: n });
+      });
+    }
   }
   for (const s of results.podPvc) {
     series(s, (add) => {

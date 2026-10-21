@@ -303,6 +303,7 @@ async function exportCli(argv: string[]): Promise<CliResult> {
         metrics: { url: r.metrics.url, bearerTokenFile: r.metrics.bearer_token_file ?? null },
         state,
         stateId: state ? 'state' : null,
+        preStepLabels: r.pre_step_labels ?? [],
       });
       process.stdout.write(`${writeBundle(values.cases, b)}\n`);
     }

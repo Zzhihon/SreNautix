@@ -260,4 +260,22 @@ describe('重建包（kube-state-metrics 历史）中的前置 Job', () => {
     const r = deriveRollouts(events, { ...opts(), images: (o) => topo.podImages(o) });
     expect(r.map((c) => [c.time, c.attachments])).toEqual([[at(10), [{ target: 'Job:shop/migrate', basis: 'image' }]]]);
   });
+
+  it('kube-state-metrics 的对象标签（pre_step_labels）：Job 与新 ReplicaSet 的版本标签相同时按 revision_label 挂上', () => {
+    const REL = 'cchp.io/release-id';
+    const labelled = (n: TopologyNode, v: string): TopologyNode => ({ ...n, labels: { [REL]: v } });
+    const t = new BundleTopology([
+      row(1, 0, body('Deployment', 'api'), 'informer'),
+      row(-20, 0, body('Node', 'n1')),
+      row(-19, 10, labelled(body('Job', 'migrate-r2'), 'r2')),
+      row(-18, 12, labelled(body('Job', 'migrate-r1'), 'r1')),
+      row(-14, 20, labelled(body('ReplicaSet', 'api-new'), 'r2')),
+      row(-13, 20, owned('ReplicaSet:shop/api-new', 'Deployment:shop/api')),
+    ]);
+    const events = t.workloadEvents(T0, T0 + 30 * 60_000);
+    const r = deriveRollouts(events, { ...opts(), preStepLabels: [REL], images: (o) => t.podImages(o) });
+    expect(r.map((c) => [c.time, c.attachments])).toEqual([
+      [at(10), [{ target: 'Job:shop/migrate-r2', basis: 'revision_label' }]],
+    ]);
+  });
 });

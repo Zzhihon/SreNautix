@@ -4,7 +4,7 @@ import { zstdCompressSync, zstdDecompressSync } from 'node:zlib';
 import pg from 'pg';
 import { z } from 'zod';
 import type { ChangeEvent, MetricSeries, TopologyEdge, TopologyNode } from '@srenautix/contract';
-import { KSM_TOPOLOGY_QUERIES, ksmTopologyIntervals, type KsmTopologyResults } from '@srenautix/core';
+import { ksmTopologyIntervals, ksmTopologyQueries, type KsmTopologyResults } from '@srenautix/core';
 import { PrometheusApiAdapter } from '@srenautix/integration-sdk';
 import { readSecretFile } from '../config/files.js';
 import { fingerprint, identityLabels } from '../ingest/normalize.js';
@@ -184,14 +184,22 @@ async function range(
   return r.series;
 }
 
-/** kube-state-metrics 历史 → 拓扑行（source ksm_history，seq 为负数，排在状态库的行之前） */
-async function ksmRows(m: PrometheusApiAdapter, from: number, to: number): Promise<TopologyRow[]> {
+/**
+ * kube-state-metrics 历史 → 拓扑行（source ksm_history，seq 为负数，排在状态库的行之前）。配置了 pre_step_labels 时，
+ * 同时导出 Job、ReplicaSet、Deployment、StatefulSet 上这些 key 的标签（ADR 0104 §13），回放用同一份配置
+ */
+async function ksmRows(
+  m: PrometheusApiAdapter,
+  from: number,
+  to: number,
+  preStepLabels: readonly string[],
+): Promise<TopologyRow[]> {
   const entries: Array<[string, MetricSeries[]]> = [];
-  for (const [k, q] of Object.entries(KSM_TOPOLOGY_QUERIES)) {
+  for (const [k, q] of Object.entries(ksmTopologyQueries(preStepLabels))) {
     entries.push([k, await range(m, q, from, to, KSM_STEP_S)]);
   }
   const results = Object.fromEntries(entries) as KsmTopologyResults;
-  const intervals = ksmTopologyIntervals(results, KSM_STEP_S * 1000);
+  const intervals = ksmTopologyIntervals(results, KSM_STEP_S * 1000, undefined, preStepLabels);
   return intervals.map((iv, i): TopologyRow => {
     const node = 'node' in iv.item ? iv.item.node : null;
     const edge = 'edge' in iv.item ? iv.item.edge : null;
@@ -255,6 +263,8 @@ export interface ExportOptions {
   metrics: { url: string; bearerTokenFile: string | null };
   state: pg.Client | null;
   stateId: string | null;
+  /** 与 server 的 changes.kubernetes.pre_step_labels 相同；为空时不导出对象标签 */
+  preStepLabels?: readonly string[];
   now?: () => Date;
 }
 
@@ -273,7 +283,7 @@ export async function exportBundle(l: Label, o: ExportOptions): Promise<Bundle> 
   // 区间查询的最后一个点不晚于 to，按步长对齐
   const lastPoint = Math.max(0, ...[...forState, ...firing].flatMap((s) => s.times));
   const alerts = alertInstances(forState, firing, lastPoint);
-  const ksm = await ksmRows(m, topoFrom, to);
+  const ksm = await ksmRows(m, topoFrom, to, o.preStepLabels ?? []);
   const state = o.state ? await stateRows(o.state, o.clusterId, topoFrom, to) : { topology: [], changes: [] };
   logger.info('重建包已导出', {
     label: l.id,
