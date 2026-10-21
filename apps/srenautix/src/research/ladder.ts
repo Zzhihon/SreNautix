@@ -5,7 +5,7 @@ import type { Ledger, LedgerEntry } from './ledger.js';
 // 1. 支持卡的实体在假设的范围内；
 // 2. 支持卡异常的起始时间不晚于症状起始时间加容差；
 // 3. 该机制所需的信号上没有相反的正常卡；
-// 4. 至少检验过一个竞争假设。
+// 4. 至少检验并排除过一个竞争假设，并且没有竞争假设同样处于支持状态（ADR 0124）。
 // 只读工具结果由小模型判定的卡可以支持 likely，不能单独支撑 evidence_consistent。
 // 模型在 conclude 弃权、由代码按账本选中的假设（ADR 0120）最高为 likely；只有成员告警支持的假设（ADR 0122）为 likely。
 
@@ -90,7 +90,12 @@ export function judgeLadder(
     );
   }
   if (!consistency.competitor_tested) {
-    notes.push(`假设 ${chosen.id} 没有检验过任何竞争假设`);
+    const rivals = ledger.supportedCompetitors(chosen);
+    notes.push(
+      rivals.length
+        ? `假设 ${chosen.id} 的竞争假设 ${rivals.map((e) => e.id).join('、')} 同样处于支持状态，检查没有区分它们`
+        : `假设 ${chosen.id} 没有检验并排除任何竞争假设`,
+    );
   }
   const all = Object.values(consistency).every(Boolean);
   // 模型弃权、由代码按账本选中的结论最高为 likely（ADR 0120）

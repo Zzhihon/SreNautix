@@ -438,9 +438,21 @@ export class Ledger {
       .every((e) => e.status === 'refuted' || (e.status === 'inconclusive' && e.checksRun > 0));
   }
 
-  /** 是否至少检验过一个竞争假设（有检查执行，或状态已由证据确定） */
+  /**
+   * 是否检验过竞争假设并把它排除（ADR 0124）：至少一个竞争假设已推翻，或执行过检查后仍无法判定；
+   * 并且没有任何竞争假设同样处于支持状态（检查结果同样支持竞争假设时，检查没有区分两者）
+   */
   competitorTested(leader: LedgerEntry): boolean {
-    return this.list().some((e) => e.id !== leader.id && (e.checksRun > 0 || e.status === 'refuted'));
+    const others = this.list().filter((e) => e.id !== leader.id);
+    return (
+      others.some((e) => e.status === 'refuted' || (e.status === 'inconclusive' && e.checksRun > 0)) &&
+      !others.some((e) => e.status === 'supported')
+    );
+  }
+
+  /** 同样处于支持状态的竞争假设 */
+  supportedCompetitors(leader: LedgerEntry): LedgerEntry[] {
+    return this.list().filter((e) => e.id !== leader.id && e.status === 'supported');
   }
 
   toContract(): Hypothesis[] {

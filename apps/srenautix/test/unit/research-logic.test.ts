@@ -151,6 +151,22 @@ describe('结论阶梯', () => {
     });
   });
 
+  it('竞争假设检查后同样处于支持状态：likely（ADR 0124）', () => {
+    const { book, ledger, rc } = setup();
+    ledger.merge([hyp('h1', PG, ['card:2']), hyp('h2', API, []), hyp('h3', WEB, [])], []);
+    book.addCheckCard(checkCard(API, 'abnormal', 3), 'h2', 'rule');
+    ledger.noteCheckRun('h2');
+    book.addCheckCard(checkCard(WEB, 'normal', null), 'h3', 'rule');
+    ledger.noteCheckRun('h3');
+    ledger.evaluate();
+    expect(ledger.entries.get('h2')?.status).toBe('supported');
+    expect(ledger.entries.get('h3')?.status).toBe('refuted');
+    const r = judgeLadder(ledger, ledger.entries.get('h1') ?? null, rc.incident, true);
+    expect(r.level).toBe('likely');
+    expect(r.consistency.competitor_tested).toBe(false);
+    expect(r.notes).toContain('假设 h1 的竞争假设 h2 同样处于支持状态，检查没有区分它们');
+  });
+
   it('没有检验过竞争假设：likely', () => {
     const { ledger, rc } = setup();
     ledger.merge([hyp('h1', PG, ['card:2']), hyp('h2', API, [])], []);

@@ -63,7 +63,7 @@ describe('录制的研判回放', () => {
     const v = validatorFor('schemas/research-output.schema.json');
     expect(v(out), JSON.stringify(v.errors)).toBe(true);
 
-    // 结论：数据卷卡在范围内异常、早于症状；但全部检查都失败，没有检验过任何竞争假设，只能是 likely
+    // 结论：数据卷卡在范围内异常、早于症状；但全部检查都失败，竞争假设（postgres 与 api）同样处于支持状态，只能是 likely
     expect(out.conclusion).toMatchObject({
       level: 'likely',
       root_component: 'PersistentVolumeClaim:shop/data-postgres-0',
@@ -79,7 +79,7 @@ describe('录制的研判回放', () => {
     expect(notes).toMatch(/构成环/);
     expect(notes).toMatch(/type 写成 query，目标是只读工具，已改为 tool/);
     expect(notes).toMatch(/args_json 经 jsonrepair 修复/);
-    expect(notes).toMatch(/假设 h1 没有检验过任何竞争假设/);
+    expect(notes).toMatch(/假设 h1 的竞争假设 h2、h3 同样处于支持状态，检查没有区分它们/);
     // pod_restart 的目标是占位符 Pod:shop/<pod-name>：删除；没有有效提议时 act 改为 escalate（critical）
     expect(notes).toMatch(/提议 pod_restart：目标 Pod:shop\/<pod-name> 不在本次研判的拓扑中/);
     expect(notes).toMatch(/处置为 act 但没有有效的提议或规则提议，改为 escalate/);
