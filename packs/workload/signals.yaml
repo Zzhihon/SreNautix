@@ -204,16 +204,17 @@ signals:
             * on (namespace, replicaset) group_left ()
             max by (namespace, replicaset) (kube_replicaset_owner{namespace="$namespace", owner_kind="Deployment", owner_name="$name"})
           ) > 0
-  # 命名空间内就绪 Pod 运行的镜像 digest（image_id）与各自的 Pod 数
+  # 工作负载的就绪 Pod 中每个容器运行的镜像 digest（image_id）与就绪 Pod 数；只看这个工作负载的 Pod，
+  # 同一命名空间的其他应用与同一 Pod 的其他容器不会被当成另一个版本
   - id: ready_pod_images
     kind: metrics
     unit: count
     alternatives:
       - expr: >-
-          count by (image_id) (
-            max by (namespace, pod, image_id) (kube_pod_container_info{namespace="$namespace", image_id=~".*sha256:.*"})
+          count by (container, image_id) (
+            max by (namespace, pod, container, image_id) (kube_pod_container_info{$selector, image_id=~".*sha256:.*"})
             * on (namespace, pod) group_left ()
-            (max by (namespace, pod) (kube_pod_status_ready{namespace="$namespace", condition="true"}) == 1)
+            (max by (namespace, pod) (kube_pod_status_ready{$selector, condition="true"}) == 1)
           )
   # 命名空间内名字匹配的 Job：失败与仍在运行
   - id: job_failed_matching

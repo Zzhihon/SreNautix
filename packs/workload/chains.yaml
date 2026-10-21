@@ -451,25 +451,35 @@ chains:
       - id: serving-versions
         title: { zh-CN: 就绪 Pod 运行的版本, en: Versions run by ready pods }
         note:
-          zh-CN: 命名空间内就绪 Pod 运行的镜像 digest；超过一个说明发布或回退没有完成，数量最多的就是正在服务的版本
-          en: Image digests run by ready pods in the namespace; more than one means a release or rollback is incomplete
+          zh-CN: 工作负载的就绪 Pod 中每个容器运行的镜像 digest；同一容器在不同 Pod 中运行不同的 digest 说明发布或回退没有完成，就绪 Pod 最多的就是正在服务的版本
+          en: Image digests run by each container of the workload's ready pods; one container running different digests across pods means a release or rollback is incomplete
         applies_to: { kinds: [Pod, Deployment, StatefulSet, DaemonSet] }
         window: { before: 30m, after: 30m }
         refs:
           - { name: images, signal: ready_pod_images, mode: instant }
         judge:
           let:
-            - { name: versions, cel: count(images) }
+            # 有另一个 digest 的容器（每个这样的容器计两次以上，只用于是否混跑）
+            - {
+                name: mixed,
+                cel: 'size(images.filter(s, images.exists(o, label(o, "container") == label(s, "container") && label(o, "image_id") != label(s, "image_id"))))',
+              }
+            - { name: digests, cel: count(images) }
           abnormal_if:
-            - cel: versions > 1
-              say: { zh-CN: '就绪 Pod 同时运行 {versions} 个版本', en: 'Ready pods run {versions} different versions' }
+            - cel: mixed > 0
+              say:
+                {
+                  zh-CN: '就绪 Pod 中同一容器运行 {mixed} 个不同的镜像版本',
+                  en: 'The same container runs {mixed} different image versions across ready pods',
+                }
         display:
-          value: versions
+          value: digests
           unit: count
           table:
             rows_from: images
             sort_by: last(row)
             columns:
+              - { header: { zh-CN: 容器, en: Container }, cel: 'label(row, "container")' }
               - { header: { zh-CN: 镜像, en: Image }, cel: 'label(row, "image_id")' }
               - { header: { zh-CN: 就绪 Pod, en: Ready pods }, cel: last(row), unit: count }
         egress: allow

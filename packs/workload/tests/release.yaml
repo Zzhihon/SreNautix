@@ -1,6 +1,7 @@
-# 发布链（release）：rel 命名空间的 api 在第 30 分钟发布新版本，新 Pod 卡在等待迁移的 init 容器，迁移 Job 失败，
-# worker 已经换成新镜像、api 仍是旧镜像，开始之后 5xx 与延迟上升；calm 命名空间的 web 一切正常。
-# eval_time 30m 时窗口为 0m–60m（迁移 Job 卡片为 -30m–60m）。
+# 发布链（release）：rel 命名空间的 api 发布新版本 bbbb，新 ReplicaSet 的一个 Pod 卡在等待迁移的 init 容器、另一个已经就绪，
+# 旧 ReplicaSet 的两个 Pod 仍运行 aaaa，迁移 Job 失败，开始之后 5xx 与延迟上升；同一命名空间的 worker 运行别的版本，
+# 每个 api Pod 还带一个 proxy 边车（另一个镜像仓库），两者都不算 api 的另一个版本。
+# calm 命名空间的 web 一切正常（同样带边车）。eval_time 30m 时窗口为 0m–60m（迁移 Job 卡片为 -30m–60m）。
 api_version: srenautix.io/pack-test/v1
 interval: 1m
 input_series:
@@ -8,6 +9,7 @@ input_series:
   - { series: 'kube_pod_info{namespace="rel",pod="api-5f7b8c9d6e-k2m4n",node="n1"}', values: '1x59' }
   - { series: 'kube_pod_info{namespace="rel",pod="api-5f7b8c9d6e-p7q8r",node="n2"}', values: '1x59' }
   - { series: 'kube_pod_info{namespace="rel",pod="api-7c8d9e0f1a-x2z4w",node="n2"}', values: '1x59' }
+  - { series: 'kube_pod_info{namespace="rel",pod="api-7c8d9e0f1a-q1w2e",node="n1"}', values: '1x59' }
   - { series: 'kube_pod_info{namespace="rel",pod="worker-6d8b9c7f5a-m3n5p",node="n1"}', values: '1x59' }
   # 新 Pod 从第 10 分钟起一直在 init 容器 wait-for-migrations 中
   - {
@@ -18,7 +20,7 @@ input_series:
       series: 'kube_pod_init_container_status_running{namespace="rel",pod="api-5f7b8c9d6e-k2m4n",container="wait-for-migrations"}',
       values: '0x59',
     }
-  # 旧 ReplicaSet 2/2 就绪，新 ReplicaSet 0/1
+  # 旧 ReplicaSet 2/2 就绪，新 ReplicaSet 1/2
   - {
       series: 'kube_replicaset_owner{namespace="rel",replicaset="api-5f7b8c9d6e",owner_kind="Deployment",owner_name="api"}',
       values: '1x59',
@@ -29,9 +31,22 @@ input_series:
     }
   - { series: 'kube_replicaset_spec_replicas{namespace="rel",replicaset="api-5f7b8c9d6e"}', values: '2x59' }
   - { series: 'kube_replicaset_status_ready_replicas{namespace="rel",replicaset="api-5f7b8c9d6e"}', values: '2x59' }
-  - { series: 'kube_replicaset_spec_replicas{namespace="rel",replicaset="api-7c8d9e0f1a"}', values: '1x59' }
-  - { series: 'kube_replicaset_status_ready_replicas{namespace="rel",replicaset="api-7c8d9e0f1a"}', values: '0x59' }
-  # 就绪的 api 运行旧镜像 aaaa，就绪的 worker 运行新镜像 bbbb，卡住的新 Pod 未就绪
+  - { series: 'kube_replicaset_spec_replicas{namespace="rel",replicaset="api-7c8d9e0f1a"}', values: '2x59' }
+  - { series: 'kube_replicaset_status_ready_replicas{namespace="rel",replicaset="api-7c8d9e0f1a"}', values: '1x59' }
+  # 旧 api Pod 运行 aaaa，新 api Pod 运行 bbbb（x2z4w 卡住未就绪，q1w2e 已就绪），worker 运行 dddd
+  - {
+      series: 'kube_pod_container_info{namespace="rel",pod="api-7c8d9e0f1a-q1w2e",container="api",image_id="registry.example/shop@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}',
+      values: '1x59',
+    }
+  - { series: 'kube_pod_status_ready{namespace="rel",pod="api-7c8d9e0f1a-q1w2e",condition="true"}', values: '1x59' }
+  - {
+      series: 'kube_pod_container_info{namespace="rel",pod="api-5f7b8c9d6e-k2m4n",container="proxy",image_id="registry.example/proxy@sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"}',
+      values: '1x59',
+    }
+  - {
+      series: 'kube_pod_container_info{namespace="rel",pod="api-5f7b8c9d6e-p7q8r",container="proxy",image_id="registry.example/proxy@sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"}',
+      values: '1x59',
+    }
   - {
       series: 'kube_pod_container_info{namespace="rel",pod="api-5f7b8c9d6e-k2m4n",container="api",image_id="registry.example/shop@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}',
       values: '1x59',
@@ -45,7 +60,7 @@ input_series:
       values: '1x59',
     }
   - {
-      series: 'kube_pod_container_info{namespace="rel",pod="worker-6d8b9c7f5a-m3n5p",container="worker",image_id="registry.example/shop@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}',
+      series: 'kube_pod_container_info{namespace="rel",pod="worker-6d8b9c7f5a-m3n5p",container="worker",image_id="registry.example/shop@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"}',
       values: '1x59',
     }
   - { series: 'kube_pod_status_ready{namespace="rel",pod="api-5f7b8c9d6e-k2m4n",condition="true"}', values: '1x59' }
@@ -92,6 +107,10 @@ input_series:
     }
   - {
       series: 'kube_pod_container_info{namespace="calm",pod="web-6b7c8d9e0f-d5f7g",container="web",image_id="registry.example/web@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}',
+      values: '1x59',
+    }
+  - {
+      series: 'kube_pod_container_info{namespace="calm",pod="web-6b7c8d9e0f-d5f7g",container="proxy",image_id="registry.example/proxy@sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"}',
       values: '1x59',
     }
   - { series: 'kube_pod_status_ready{namespace="calm",pod="web-6b7c8d9e0f-a2b4c",condition="true"}', values: '1x59' }
