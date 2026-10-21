@@ -1,3 +1,4 @@
+import { APIError } from 'openai';
 import type OpenAI from 'openai';
 import type {
   ChatCompletion,
@@ -12,6 +13,7 @@ import type {
   ResponseStreamEvent,
 } from 'openai/resources/responses/responses';
 import type { DialectProfile } from './dialect.js';
+import { EgressBlocked } from './egress.js';
 import type { RouteTimeouts } from './timeouts.js';
 import { LlmError, type LlmApi, type LlmTurn } from './types.js';
 import { fromChatCompletion, fromResponse } from './wire.js';
@@ -158,7 +160,8 @@ export class ChatAccumulator {
 
 /**
  * 发出一次流式调用。首 token 计时从发出请求开始，收到第一个输出增量后改为空闲计时（任何流事件都会重置）；
- * capMs 是总时长上限（路由的 total 与阶段 B 剩余时间中的较小者）。超时以 StreamTimeout 抛出，其他错误原样抛出。
+ * capMs 是总时长上限（路由的 total 与阶段 B 剩余时间中的较小者）。超时以 StreamTimeout 抛出；流读到一半的非预期异常
+ * 以 LlmError llm_network 抛出；其他错误原样抛出。
  */
 export async function streamTurn(
   client: OpenAI,
@@ -200,26 +203,53 @@ export async function streamTurn(
       throw signal.reason;
     }
   };
+  // 流读到一半的异常统一兜底：SDK 的 SSE 与 JSON 解析错误（SyntaxError: malformed server-sent event JSON）、
+  // 连接中断（undici 的 TypeError: terminated）以及其他非预期异常都归为网络失败，照常重试或换路由，
+  // 不让它逃出研判、使整个进程退出。超时与调用方中止仍按原样返回；服务方在流里报告的错误（LlmError、SDK 的 APIError）
+  // 照原来的归类
+  const midStream = (e: unknown): unknown => {
+    if (st.fired) {
+      return st.fired;
+    }
+    if (signal.aborted) {
+      return signal.reason;
+    }
+    if (e instanceof LlmError || e instanceof APIError || e instanceof StreamTimeout || e instanceof EgressBlocked) {
+      return e;
+    }
+    const cause = (e as { cause?: unknown } | null)?.cause;
+    const what = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
+    return new LlmError(
+      'llm_network',
+      null,
+      `模型服务的流在读取中途出错：${what}${cause instanceof Error ? `（${cause.message}）` : ''}`.slice(0, 600),
+      routeId,
+    );
+  };
   try {
     let turn: LlmTurn;
     if (api === 'responses') {
       const stream = await client.responses.create(params as ResponseCreateParamsStreaming, opts);
       let final: Response | null = null;
-      for await (const ev of stream) {
-        progress(responsesToken(ev));
-        if (ev.type === 'response.completed' || ev.type === 'response.incomplete') {
-          final = ev.response;
-        } else if (ev.type === 'response.failed') {
-          const err = ev.response.error;
-          throw new LlmError(
-            'llm_http',
-            null,
-            `模型服务报告失败：${err?.code ?? ''} ${err?.message ?? ''}`.trim(),
-            routeId,
-          );
-        } else if (ev.type === 'error') {
-          throw new LlmError('llm_http', null, `模型服务在流中报错：${ev.code ?? ''} ${ev.message}`.trim(), routeId);
+      try {
+        for await (const ev of stream) {
+          progress(responsesToken(ev));
+          if (ev.type === 'response.completed' || ev.type === 'response.incomplete') {
+            final = ev.response;
+          } else if (ev.type === 'response.failed') {
+            const err = ev.response.error;
+            throw new LlmError(
+              'llm_http',
+              null,
+              `模型服务报告失败：${err?.code ?? ''} ${err?.message ?? ''}`.trim(),
+              routeId,
+            );
+          } else if (ev.type === 'error') {
+            throw new LlmError('llm_http', null, `模型服务在流中报错：${ev.code ?? ''} ${ev.message}`.trim(), routeId);
+          }
         }
+      } catch (e) {
+        throw midStream(e);
       }
       throwIfAborted();
       if (!final) {
@@ -229,9 +259,13 @@ export async function streamTurn(
     } else {
       const stream = await client.chat.completions.create(params as ChatCompletionCreateParamsStreaming, opts);
       const acc = new ChatAccumulator();
-      for await (const chunk of stream) {
-        progress(chatToken(chunk));
-        acc.push(chunk);
+      try {
+        for await (const chunk of stream) {
+          progress(chatToken(chunk));
+          acc.push(chunk);
+        }
+      } catch (e) {
+        throw midStream(e);
       }
       throwIfAborted();
       turn = fromChatCompletion(acc.result(), profile);

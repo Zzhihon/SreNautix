@@ -199,6 +199,49 @@ describe('结构化调用', () => {
     ]);
   });
 
+  it('流读到一半送来坏的 SSE 帧（SDK 的 SyntaxError）：记为网络失败，不抛出；有其他路由时换路由并成功', async () => {
+    a.enqueue({ fixture: fixture(P, 'chat-json-schema'), malformedAfter: 3 });
+    const only = await session(layer([route('a', a.baseUrl)])).structured('conclude', base('x'), OUTPUT);
+    expect(only).toMatchObject({ ok: false, reason: 'model_unavailable' });
+    expect(records[0]).toMatchObject({
+      errorKind: 'llm_network',
+      outcome: 'failed',
+      note: expect.stringContaining('malformed server-sent event JSON'),
+    });
+    a.enqueue({ fixture: fixture(P, 'chat-json-schema'), malformedAfter: 3 });
+    b.enqueue(fixture(P, 'chat-json-schema'));
+    records = [];
+    const switched = await session(layer([route('a', a.baseUrl), route('b', b.baseUrl)])).structured(
+      'conclude',
+      base('x'),
+      OUTPUT,
+    );
+    expect(switched).toMatchObject({ ok: true, routeId: 'b' });
+    expect(records.map((r) => [r.routeId, r.outcome, r.errorKind])).toEqual([
+      ['a', 'switched', 'llm_network'],
+      ['b', 'succeeded', null],
+    ]);
+  });
+
+  it('流读到一半调用方中止：仍以中止原因结束，不归为网络失败', async () => {
+    a.enqueue({ fixture: fixture(P, 'chat-json-schema'), paceMs: 20 });
+    const ac = new AbortController();
+    const s = layer([route('a', a.baseUrl)]).session({
+      runId: null,
+      incidentComponents: [],
+      deadline: Date.now() + 480_000,
+      signal: ac.signal,
+      ledger: new ResearchLedger(DEFAULT_BUDGET),
+      record: async (r) => {
+        records.push(r);
+      },
+    });
+    const reason = new Error('caller aborted');
+    setTimeout(() => ac.abort(reason), 100);
+    await expect(s.structured('conclude', base('x'), OUTPUT)).rejects.toBe(reason);
+    expect(records.some((r) => r.errorKind === 'llm_network')).toBe(false);
+  });
+
   it('慢但一直在输出的调用不受总时长限制：总耗时超过首 token 与空闲超时之和照样成功，也不打开延迟型熔断', async () => {
     // 每个流事件间隔 20 毫秒，事件数上百，总耗时远超 300 + 200 毫秒
     a.enqueue({ fixture: fixture(P, 'chat-json-schema'), paceMs: 20 });
