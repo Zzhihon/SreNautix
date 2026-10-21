@@ -41,6 +41,7 @@ export {
 export {
   compilePackSet,
   primaryCardKey,
+  checkTemplateArgs,
   kindKey,
   type PackSet,
   type CardEntry,

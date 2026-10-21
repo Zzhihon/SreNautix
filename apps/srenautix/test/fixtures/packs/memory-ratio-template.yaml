@@ -9,7 +9,7 @@ templates:
       additionalProperties: false
       required: [limit_ratio]
       properties:
-        limit_ratio: { type: number, minimum: 0, maximum: 1 }
+        limit_ratio: { type: number, minimum: 0, maximum: 1, description: working set 占 limit 的比例超过它时判为异常 }
     card:
       id: memory-ratio
       title: { zh-CN: working set 占 limit, en: Working set vs limit }

@@ -51,6 +51,8 @@ export interface PackSet {
   }>;
   /** 修复补丁模板（remediations.yaml，ADR 0103） */
   remediations: CompiledRemediation[];
+  /** 阶段 B 的查询模板：全局 id <pack>/<模板 id>，附带的卡在 cards 中的键为 <pack>/templates/<模板 id> */
+  templates: Array<{ id: string; pack: string; description: string; args: Record<string, unknown>; card: string }>;
   lock: PackLock;
   lockDigest: string;
 }
@@ -113,6 +115,57 @@ function checkPrimaryCard(
       where,
       `主卡 ${e.primary_card} 所在的证据链 ${chain} 不在条目的 chains 中，告警触发时不会执行`,
     );
+  }
+}
+
+interface ArgSchema {
+  type?: string;
+  enum?: unknown[];
+  pattern?: string;
+  minimum?: number;
+  maximum?: number;
+  description?: string;
+}
+
+/**
+ * 查询模板参数的检查：模板参数在执行时作为附带卡的 params 传入，模型给出的值按 args 校验后代入查询。
+ * - 每个参数都是卡的 params，卡的默认值满足 args（默认值就是不传参数时的行为）；
+ * - 参数有 description，模型才知道它的含义；
+ * - 字符串参数必须用 enum 或 pattern 限定（它们代入 PromQL 的标签名、正则与字符串）；数字参数必须有 minimum 与 maximum。
+ */
+export function checkTemplateArgs(args: Record<string, unknown>, params: Record<string, unknown>, where: string): void {
+  if (args.additionalProperties !== false) {
+    throw new PackLintError(where, 'args 必须写 additionalProperties: false');
+  }
+  for (const [name, raw] of Object.entries((args.properties as Record<string, ArgSchema> | undefined) ?? {})) {
+    const s = raw;
+    const fail = (detail: string): never => {
+      throw new PackLintError(where, `模板参数 ${name}：${detail}`);
+    };
+    if (!(name in params)) {
+      fail('不是附带卡的 params，执行时不会生效');
+    }
+    if (!s.description) {
+      fail('缺少 description');
+    }
+    const v = params[name];
+    if (s.type === 'string') {
+      if (!s.enum && !s.pattern) {
+        fail('字符串参数必须用 enum 或 pattern 限定');
+      }
+      if (typeof v !== 'string' || (s.enum && !s.enum.includes(v)) || (s.pattern && !new RegExp(s.pattern).test(v))) {
+        fail(`卡的默认值 ${JSON.stringify(v)} 不满足参数的限定`);
+      }
+    } else if (s.type === 'integer' || s.type === 'number') {
+      if (s.minimum === undefined || s.maximum === undefined) {
+        fail('数字参数必须有 minimum 与 maximum');
+      }
+      if (typeof v !== 'number' || v < s.minimum! || v > s.maximum! || (s.type === 'integer' && !Number.isInteger(v))) {
+        fail(`卡的默认值 ${JSON.stringify(v)} 不在 [${s.minimum}, ${s.maximum}] 内`);
+      }
+    } else {
+      fail(`只支持 string、integer、number 类型，实际为 ${String(s.type)}`);
+    }
   }
 }
 
@@ -209,8 +262,13 @@ export async function compilePackSet(loaded: LoadedPack[], opts: CompileOptions)
 
   const cards: PackSet['cards'] = new Map();
   const chains: PackSet['chains'] = new Map();
-  const addCard = (p: LoadedPack, chain: string | null, def: CardDefinition) => {
-    const key = chain ? `${p.name}/${chain}/${def.id}` : `${p.name}/checks/${def.id}`;
+  // 证据链的卡键为 <pack>/<chain>/<card>，检查项为 <pack>/checks/<id>，查询模板附带的卡为 <pack>/templates/<模板 id>
+  const addCard = (
+    p: LoadedPack,
+    chain: string | null,
+    def: CardDefinition,
+    key = chain ? `${p.name}/${chain}/${def.id}` : `${p.name}/checks/${def.id}`,
+  ) => {
     if (cards.has(key)) {
       throw new PackLintError(p.dir, `卡片 ${key} 重复`);
     }
@@ -284,6 +342,26 @@ export async function compilePackSet(loaded: LoadedPack[], opts: CompileOptions)
     }
     for (const c of p.content.checks.checks) {
       addCard(p, null, c);
+    }
+  }
+
+  // 查询模板（signals.yaml 的 templates，阶段 B 的区分性检查）：附带的卡按与证据卡相同的规则编译与严格解析，
+  // 键为 <pack>/templates/<模板 id>，pack test 的夹具以 templates/<模板 id> 引用它
+  const templates: PackSet['templates'] = [];
+  for (const p of active) {
+    for (const t of p.content.signals.templates ?? []) {
+      const where = `${p.dir}/signals.yaml：templates ${t.id}`;
+      resolveSignal(p.name, t.signal, where);
+      if (!t.card) {
+        throw new PackLintError(where, '查询模板必须附带判定结果的卡（card）');
+      }
+      if (t.args.type !== 'object') {
+        throw new PackLintError(where, '模板的 args 必须是 type: object 的 JSON Schema');
+      }
+      const key = `${p.name}/templates/${t.id}`;
+      addCard(p, null, t.card as CardDefinition, key);
+      checkTemplateArgs(t.args, (t.card as CardDefinition).params ?? {}, where);
+      templates.push({ id: `${p.name}/${t.id}`, pack: p.name, description: t.description, args: t.args, card: key });
     }
   }
 
@@ -422,6 +500,7 @@ export async function compilePackSet(loaded: LoadedPack[], opts: CompileOptions)
     rules,
     excludes,
     remediations,
+    templates,
     lock,
     lockDigest: lockDigest(lock),
   };
