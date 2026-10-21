@@ -80,9 +80,23 @@ signals:
 
 方言为 `promql` 的备选用 Prometheus 官方解析器检查，`metricsql` 的用 VictoriaMetrics 官方解析器检查（两者编译为 wasm，随 `integration-sdk` 发布）。`lint` 对每个备选按 `applies_to` 的每种实体渲染一次再解析，并检查：不使用 `@` 修饰符；`range` 模式的查询结果是瞬时向量。同一份包要在 Prometheus 与 VictoriaMetrics 上得出相同结论，由 `pack test` 在两种后端上执行来保证。
 
+**卡片作为检查**
+
+阶段 B 的区分性检查默认把适用于子图组件的证据链卡当作检查执行（ADR 0116），参数是 `window_before`、`window_after` 与卡的全部 `params`（类型取默认值）。阈值与窗口值得让模型调整的卡写 `check` 块：`description` 说明它作为检查时区分什么，`args` 用与查询模板相同的规则约束 `params` 的取值范围（不声明窗口，窗口总是由运行时提供）。packs-sdk 的 `checkArgsSchema(card)` 与 `applyCheckArgs(card, args)` 给出 schema 与合并规则，server 与评测共用。
+
+```yaml
+check:
+  description: { zh-CN: HPA 顶到上限时伸缩指标是否仍超过目标值, en: ... }
+  args:
+    type: object
+    additionalProperties: false
+    properties:
+      over: { type: number, minimum: 1, maximum: 3, description: 指标超过目标值的这个倍数时判为饱和 }
+```
+
 **查询模板**
 
-阶段 B 的区分性检查默认把适用于子图组件的证据链卡当作检查执行（ADR 0116）。卡片表达不了的查询（例如按 Pod 拆分的前 k 名、与另一个工作负载对比）写成 `signals.yaml` 的 `templates`：`signal`、`description`、`args`（参数的 JSON Schema）与判定结果的 `card`。执行时模型给出的参数作为卡的 `params` 传入，附带的卡与证据卡一样编译与严格解析，键为 `<包>/templates/<模板 id>`，夹具以 `card: templates/<模板 id>` 测试。`lint` 另外要求：
+卡片表达不了的查询（例如按 Pod 拆分的前 k 名、与另一个工作负载对比）写成 `signals.yaml` 的 `templates`：`signal`、`description`、`args`（参数的 JSON Schema）与判定结果的 `card`。执行时模型给出的参数作为卡的 `params` 传入，附带的卡与证据卡一样编译与严格解析，键为 `<包>/templates/<模板 id>`，夹具以 `card: templates/<模板 id>` 测试。`lint` 另外要求：
 - `args` 写 `additionalProperties: false`，每个参数都是卡的 `params`，并有 `description`；
 - 字符串参数用 `enum` 或 `pattern` 限定（它们会代入 PromQL），数字参数有 `minimum` 与 `maximum`；
 - 卡的默认值满足参数的限定；

@@ -8,6 +8,15 @@ chains:
         note: { zh-CN: 全部请求中 5xx 的比例峰值；超过 error_ratio 判为异常, en: Peak share of 5xx responses }
         applies_to: { kinds: [cluster] }
         params: { error_ratio: 0.05 }
+        check:
+          description:
+            zh-CN: apiserver 请求的 5xx 比例；区分"控制面出错"与工作负载自身的问题
+            en: 5xx ratio of apiserver requests
+          args:
+            type: object
+            additionalProperties: false
+            properties:
+              error_ratio: { type: number, minimum: 0.001, maximum: 0.5, description: 5xx 比例超过它时判为异常 }
         refs:
           - { name: ratio, signal: apiserver_error_ratio, mode: range }
         judge:
@@ -23,6 +32,15 @@ chains:
         title: { zh-CN: apiserver p99 延迟, en: API server p99 latency }
         applies_to: { kinds: [cluster] }
         params: { p99_seconds: 1 }
+        check:
+          description:
+            zh-CN: apiserver 请求的 p99 延迟；区分"控制面变慢"导致的调度、发布与控制器问题
+            en: p99 latency of apiserver requests
+          args:
+            type: object
+            additionalProperties: false
+            properties:
+              p99_seconds: { type: number, minimum: 0.1, maximum: 60, description: p99 延迟超过这么多秒时判为异常 }
         refs:
           - { name: p99, signal: apiserver_latency_p99, mode: range }
         judge:
@@ -81,6 +99,15 @@ chains:
           { zh-CN: etcd 写盘延迟；超过 fsync_seconds 时 leader 选举与 apiserver 写入都会变慢, en: etcd disk latency }
         applies_to: { kinds: [cluster, Pod] }
         params: { fsync_seconds: 0.5 }
+        check:
+          description:
+            zh-CN: etcd WAL fsync 的 p99；区分"etcd 磁盘慢"导致的控制面变慢
+            en: p99 of etcd WAL fsync
+          args:
+            type: object
+            additionalProperties: false
+            properties:
+              fsync_seconds: { type: number, minimum: 0.01, maximum: 10, description: fsync p99 超过这么多秒时判为异常 }
         refs:
           - { name: fsync, signal: etcd_wal_fsync_p99, mode: range }
         judge:

@@ -2846,6 +2846,20 @@ export interface EvidenceCardDefinition {
    * 卡片需要的集成能力，例如 metrics.query_range、logs.match。能力不可用时卡片显示 capability_missing
    */
   requires?: string[];
+  /**
+   * 作为阶段 B 区分性检查执行时的说明与可覆盖参数（ADR 0116）。没有它时卡片仍可作为检查，参数为全部 params 与 window_before、window_after，类型取默认值；有它时 params 的取值范围按 args 约束。window_before、window_after 总是由运行时提供，不在 args 中声明
+   */
+  check?: {
+    description?: LocalizedText4;
+    /**
+     * 可覆盖参数的 JSON Schema（type: object、additionalProperties: false）：每个属性都是卡片 params 的键，带 description；字符串用 enum 或 pattern 限定，数字有 minimum 与 maximum，卡片的默认值满足它
+     */
+    args?: {
+      type: 'object';
+      additionalProperties?: false;
+      properties: {};
+    };
+  };
 }
 export interface LocalizedText1 {
   'zh-CN'?: string;
@@ -2961,6 +2975,13 @@ export interface CardLink {
    * dashboard 的 uid 或 runbook 的 <文件>#<锚点>
    */
   target?: string;
+}
+/**
+ * 这张卡作为检查时判断什么、结果怎样区分假设
+ */
+export interface LocalizedText4 {
+  'zh-CN'?: string;
+  en?: string;
 }
 /**
  * 提交反馈的请求体。channel 与主体由认证上下文决定，请求体不含
@@ -3152,6 +3173,20 @@ export interface EvidenceCardDefinition1 {
    * 卡片需要的集成能力，例如 metrics.query_range、logs.match。能力不可用时卡片显示 capability_missing
    */
   requires?: string[];
+  /**
+   * 作为阶段 B 区分性检查执行时的说明与可覆盖参数（ADR 0116）。没有它时卡片仍可作为检查，参数为全部 params 与 window_before、window_after，类型取默认值；有它时 params 的取值范围按 args 约束。window_before、window_after 总是由运行时提供，不在 args 中声明
+   */
+  check?: {
+    description?: LocalizedText4;
+    /**
+     * 可覆盖参数的 JSON Schema（type: object、additionalProperties: false）：每个属性都是卡片 params 的键，带 description；字符串用 enum 或 pattern 限定，数字有 minimum 与 maximum，卡片的默认值满足它
+     */
+    args?: {
+      type: 'object';
+      additionalProperties?: false;
+      properties: {};
+    };
+  };
 }
 export interface ComponentsFile {
   component_types: ComponentType[];
@@ -3332,7 +3367,7 @@ export interface Remediation {
    * @minItems 1
    */
   edits: [RemediationEdit, ...RemediationEdit[]];
-  change: LocalizedText4;
+  change: LocalizedText5;
   verify: {
     say: LocalizedText1;
     /**
@@ -3392,7 +3427,7 @@ export interface RemediationEdit {
 /**
  * 改了什么、为什么（ICU MessageFormat，变量取自 let 与 params），写入 PR 描述
  */
-export interface LocalizedText4 {
+export interface LocalizedText5 {
   'zh-CN'?: string;
   en?: string;
 }

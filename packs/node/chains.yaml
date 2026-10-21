@@ -30,6 +30,16 @@ chains:
         title: { zh-CN: CPU 与内存, en: CPU and memory }
         applies_to: { kinds: [Node] }
         params: { cpu_ratio: 0.9, memory_ratio: 0.9 }
+        check:
+          description:
+            zh-CN: 节点 CPU 与内存使用率的峰值；区分"节点资源耗尽"与单个工作负载自身的问题
+            en: Peak node CPU and memory usage; node exhaustion versus a problem of one workload
+          args:
+            type: object
+            additionalProperties: false
+            properties:
+              cpu_ratio: { type: number, minimum: 0.5, maximum: 1, description: CPU 使用率超过它时判为异常 }
+              memory_ratio: { type: number, minimum: 0.5, maximum: 1, description: 内存使用率超过它时判为异常 }
         refs:
           - { name: cpu, signal: node_cpu_usage, mode: range }
           - { name: mem, signal: node_memory_usage, mode: range }
@@ -83,6 +93,15 @@ chains:
         title: { zh-CN: 文件系统余量, en: Filesystem headroom }
         applies_to: { kinds: [Node] }
         params: { avail_ratio: 0.1 }
+        check:
+          description:
+            zh-CN: 节点文件系统剩余空间；区分"磁盘写满"导致的故障
+            en: Free space on the node file systems
+          args:
+            type: object
+            additionalProperties: false
+            properties:
+              avail_ratio: { type: number, minimum: 0.01, maximum: 0.5, description: 剩余空间占比低于它时判为异常 }
         refs:
           - { name: avail, signal: node_fs_avail_ratio, mode: range }
         judge:
@@ -155,6 +174,15 @@ chains:
         title: { zh-CN: 磁盘忙比例, en: Disk busy ratio }
         applies_to: { kinds: [Node] }
         params: { busy_ratio: 0.9 }
+        check:
+          description:
+            zh-CN: 节点磁盘 IO 繁忙比例；区分"磁盘 IO 饱和"导致的变慢
+            en: Disk IO busy ratio on the node
+          args:
+            type: object
+            additionalProperties: false
+            properties:
+              busy_ratio: { type: number, minimum: 0.3, maximum: 1, description: IO 繁忙比例超过它时判为异常 }
         refs:
           - { name: busy, signal: node_disk_busy, mode: range }
         judge:
@@ -188,6 +216,15 @@ chains:
         title: { zh-CN: conntrack 占用, en: Conntrack usage }
         applies_to: { kinds: [Node] }
         params: { ratio: 0.9 }
+        check:
+          description:
+            zh-CN: 节点 conntrack 表占用；区分"连接跟踪表满"导致的丢包与连接失败
+            en: Conntrack table usage on the node
+          args:
+            type: object
+            additionalProperties: false
+            properties:
+              ratio: { type: number, minimum: 0.5, maximum: 1, description: 占用超过它时判为异常 }
         refs:
           - { name: ct, signal: node_conntrack_ratio, mode: range }
         judge:

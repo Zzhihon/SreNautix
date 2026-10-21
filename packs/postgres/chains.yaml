@@ -62,6 +62,15 @@ chains:
         title: { zh-CN: 复制延迟, en: Replication lag }
         applies_to: { kinds: [Cluster, Pod, StatefulSet] }
         params: { lag_seconds: 15 }
+        check:
+          description:
+            zh-CN: 备库复制延迟；区分"复制跟不上"与主库自身的问题
+            en: Replication lag of the standbys
+          args:
+            type: object
+            additionalProperties: false
+            properties:
+              lag_seconds: { type: number, minimum: 1, maximum: 3600, description: 复制延迟超过这么多秒时判为异常 }
         refs:
           - { name: lag, signal: replication_lag_seconds, mode: range }
         judge:
@@ -106,6 +115,15 @@ chains:
         title: { zh-CN: 连接占 max_connections, en: Connections vs max_connections }
         applies_to: { kinds: [Cluster, Pod, StatefulSet] }
         params: { ratio: 0.85 }
+        check:
+          description:
+            zh-CN: 连接数占 max_connections 的比例；区分"连接耗尽"与查询变慢
+            en: Connections against max_connections
+          args:
+            type: object
+            additionalProperties: false
+            properties:
+              ratio: { type: number, minimum: 0.3, maximum: 1, description: 连接占比超过它时判为异常 }
         refs:
           - { name: ratio, signal: connections_ratio, mode: range }
           - { name: byApp, signal: connections_by_application, mode: instant, empty_is: normal }
@@ -137,6 +155,15 @@ chains:
         note: { zh-CN: 长事务阻止 VACUUM 并长期持有锁, en: Long transactions block vacuum and hold locks }
         applies_to: { kinds: [Cluster, Pod, StatefulSet] }
         params: { seconds: 300 }
+        check:
+          description:
+            zh-CN: 最长事务的持续时间；区分"长事务持有锁或阻止清理"导致的阻塞
+            en: Duration of the longest transaction
+          args:
+            type: object
+            additionalProperties: false
+            properties:
+              seconds: { type: number, minimum: 10, maximum: 86400, description: 最长事务超过这么多秒时判为异常 }
         refs:
           - { name: tx, signal: longest_transaction_seconds, mode: range }
         judge:
@@ -168,6 +195,15 @@ chains:
         title: { zh-CN: 回滚比例, en: Rollback ratio }
         applies_to: { kinds: [Cluster, Pod, StatefulSet] }
         params: { ratio: 0.1 }
+        check:
+          description:
+            zh-CN: 回滚占事务的比例；区分"应用侧大量失败的事务"与数据库自身的问题
+            en: Rollbacks against transactions
+          args:
+            type: object
+            additionalProperties: false
+            properties:
+              ratio: { type: number, minimum: 0.01, maximum: 0.9, description: 回滚比例超过它时判为异常 }
         refs:
           - { name: ratio, signal: rollback_ratio, mode: range }
         judge:
@@ -192,6 +228,15 @@ chains:
           }
         applies_to: { kinds: [Cluster, Pod] }
         params: { ready_segments: 10 }
+        check:
+          description:
+            zh-CN: WAL 归档失败与待归档的段数；区分"归档卡住导致 pg_wal 增长"
+            en: WAL archiving failures and segments waiting to be archived
+          args:
+            type: object
+            additionalProperties: false
+            properties:
+              ready_segments: { type: integer, minimum: 1, maximum: 10000, description: 待归档段数超过它时判为异常 }
         refs:
           - { name: archived, signal: wal_archived_count, mode: instant }
           - { name: failures, signal: wal_archive_failures, mode: instant, empty_is: normal }

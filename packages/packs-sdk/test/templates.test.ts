@@ -1,6 +1,7 @@
 // 查询模板（阶段 B 的区分性检查）由 compilePackSet 编译：附带的卡与证据卡一样严格检查，模板参数的 schema 要能约束模型给出的值。
 import { describe, expect, it } from 'vitest';
 import { PackLintError } from '../src/cel/errors.js';
+import { applyCheckArgs, checkArgsSchema } from '../src/judge/check-args.js';
 import { checkTemplateArgs, compilePackSet } from '../src/pack/compile.js';
 import { loadBuiltinPacks } from '../src/pack/sources.js';
 import { CATALOG, PACKS } from './support.js';
@@ -30,6 +31,29 @@ describe('查询模板', () => {
       expect(t.card).toBe(`${t.pack}/templates/${t.id.slice(t.pack.length + 1)}`);
       expect(set.cards.get(t.card)?.chain).toBeNull();
     }
+  });
+
+  it('卡片作为检查：schema 含窗口与全部 params，check.args 约束取值；合并只覆盖给出的部分', async () => {
+    const set = await compilePackSet(loadBuiltinPacks(PACKS), { catalog: CATALOG });
+    const hpa = set.cards.get('workload/capacity/hpa-latency')!.def;
+    const schema = checkArgsSchema(hpa) as {
+      additionalProperties: boolean;
+      properties: Record<string, Record<string, unknown>>;
+    };
+    expect(schema.additionalProperties).toBe(false);
+    expect(Object.keys(schema.properties).sort()).toEqual(['factor', 'min_seconds', 'window_after', 'window_before']);
+    expect(schema.properties.factor).toMatchObject({ type: 'number', minimum: 1.1, maximum: 10 });
+    // 没有 check 块的卡：类型取默认值的类型
+    const plain = set.cards.get('workload/job/status')!.def;
+    expect((checkArgsSchema(plain) as { properties: Record<string, unknown> }).properties.max_hours).toEqual({
+      type: 'number',
+    });
+    expect(applyCheckArgs(hpa, { factor: 2, window_before: '2h' })).toEqual({
+      params: { factor: 2 },
+      // hpa-latency 没有声明窗口：没有给出的端点取默认窗口
+      window: { before: '2h', after: '10m' },
+    });
+    expect(applyCheckArgs(hpa, {})).toEqual({ params: {}, window: undefined });
   });
 
   it('模板参数必须是卡的 params、有说明与取值约束，卡的默认值满足它', () => {

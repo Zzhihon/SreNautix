@@ -323,6 +323,15 @@ export async function compilePackSet(loaded: LoadedPack[], opts: CompileOptions)
         }
       }
     }
+    // 作为阶段 B 检查时的可覆盖参数：与查询模板参数同样的约束；窗口由运行时提供，不在这里声明
+    if (def.check?.args) {
+      const props = Object.keys((def.check.args.properties as Record<string, unknown> | undefined) ?? {});
+      const windowKey = props.find((k) => k === 'window_before' || k === 'window_after');
+      if (windowKey) {
+        throw new PackLintError(where, `check.args 不能声明 ${windowKey}，窗口由运行时提供`);
+      }
+      checkTemplateArgs(def.check.args, def.params ?? {}, `${where}：check`);
+    }
     cards.set(key, { key, pack: p.name, chain, def, compiled: compileCard(base, def, { where }), signals: refSignals });
   };
 

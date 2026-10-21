@@ -12,6 +12,15 @@ chains:
           }
         applies_to: { kinds: [Pod, Deployment, StatefulSet, DaemonSet] }
         params: { restarts: 0 }
+        check:
+          description:
+            zh-CN: 工作负载或 Pod 在窗口内是否重启或处于 CrashLoopBackOff；区分"应用自身崩溃"与"其他组件导致的症状"
+            en: Whether the workload or pod restarted or is crash looping in the window
+          args:
+            type: object
+            additionalProperties: false
+            properties:
+              restarts: { type: integer, minimum: 0, maximum: 100, description: 窗口内重启次数超过它时判为异常 }
         refs:
           - { name: restarts, signal: container_restarts, mode: instant }
           - { name: crash, signal: container_crashloop, mode: instant, empty_is: normal }
@@ -40,6 +49,15 @@ chains:
         title: { zh-CN: 内存占 limit 与 OOM, en: Memory vs limit and OOM }
         applies_to: { kinds: [Pod, Deployment, StatefulSet, DaemonSet] }
         params: { limit_ratio: 0.9 }
+        check:
+          description:
+            zh-CN: 容器内存工作集占 limit 的峰值与 OOMKilled；区分"内存不够"与其他原因的重启
+            en: Peak memory working set against the limit and OOM kills
+          args:
+            type: object
+            additionalProperties: false
+            properties:
+              limit_ratio: { type: number, minimum: 0.5, maximum: 1, description: 工作集占 limit 超过它时判为异常 }
         refs:
           - { name: mem, signal: container_memory_limit_ratio, mode: range }
           - { name: oom, signal: container_oom_events, mode: instant, empty_is: normal }
@@ -71,6 +89,15 @@ chains:
         note: { zh-CN: 被 CFS 限流的周期占比；超过 25% 时延迟会明显上升, en: Share of throttled CFS periods }
         applies_to: { kinds: [Pod, Deployment, StatefulSet, DaemonSet] }
         params: { ratio: 0.25 }
+        check:
+          description:
+            zh-CN: 容器被 CFS 限流的周期占比；区分"CPU limit 不够导致变慢"与其他原因的延迟
+            en: Share of throttled CFS periods; tells CPU limits from other causes of latency
+          args:
+            type: object
+            additionalProperties: false
+            properties:
+              ratio: { type: number, minimum: 0.05, maximum: 0.9, description: 限流比例超过它时判为异常 }
         refs:
           - { name: thr, signal: container_cpu_throttled_ratio, mode: range }
         judge:
@@ -332,6 +359,15 @@ chains:
         applies_to: { kinds: [HorizontalPodAutoscaler] }
         # HPA 自己有 10% 的容差，这里同样只在超过 10% 时判为饱和
         params: { over: 1.1 }
+        check:
+          description:
+            zh-CN: HPA 顶到上限时伸缩指标是否仍超过目标值；区分"上限只是没有余量"（良性）与"负载已经饱和"
+            en: Whether the scaling metrics still exceed their targets at the ceiling; benign ceiling or saturated load
+          args:
+            type: object
+            additionalProperties: false
+            properties:
+              over: { type: number, minimum: 1, maximum: 3, description: 指标超过目标值的这个倍数时判为饱和 }
         refs:
           - { name: ratio, signal: hpa_target_ratio, mode: range }
         judge:
@@ -354,6 +390,15 @@ chains:
           en: Share of throttled CFS periods in the pods of the workload the HPA scales; above params.ratio CPU is short
         applies_to: { kinds: [HorizontalPodAutoscaler] }
         params: { ratio: 0.25 }
+        check:
+          description:
+            zh-CN: HPA 伸缩对象的 Pod 是否被 CPU 限流；区分"副本数到顶但 CPU 仍够用"与"CPU 已经不够"
+            en: Whether the pods the HPA scales are CPU throttled
+          args:
+            type: object
+            additionalProperties: false
+            properties:
+              ratio: { type: number, minimum: 0.05, maximum: 0.9, description: 限流比例超过它时判为饱和 }
         refs:
           - { name: thr, signal: hpa_target_throttled_ratio, mode: range }
         judge:
@@ -376,6 +421,16 @@ chains:
           en: HTTP p95 latency of the scaled pods against the same time a day earlier; above params.factor times the baseline and params.min_seconds requests are slowing down
         applies_to: { kinds: [HorizontalPodAutoscaler] }
         params: { factor: 1.5, min_seconds: 0.1 }
+        check:
+          description:
+            zh-CN: HPA 伸缩对象的请求 p95 延迟是否高于一天前同一时刻；区分"副本数到顶但用户无感"与"请求已经变慢"
+            en: Whether request p95 latency of the scaled pods is above the same time a day earlier
+          args:
+            type: object
+            additionalProperties: false
+            properties:
+              factor: { type: number, minimum: 1.1, maximum: 10, description: 超过基线的这个倍数时判为变慢 }
+              min_seconds: { type: number, minimum: 0, maximum: 10, description: 延迟低于它时不判为异常（秒） }
         refs:
           - { name: p95, signal: hpa_target_latency_p95, mode: range }
           - { name: base, signal: hpa_target_latency_p95_baseline, mode: range }
@@ -458,6 +513,15 @@ chains:
         applies_to: { kinds: [Pod, Deployment, StatefulSet, DaemonSet] }
         window: { before: 30m, after: 30m }
         params: { minutes: 10 }
+        check:
+          description:
+            zh-CN: Pod 是否长时间停在 init 容器（例如等待数据库迁移）；区分"发布卡在初始化"与运行期故障
+            en: Whether pods stayed in an init container for long, for example waiting for a migration
+          args:
+            type: object
+            additionalProperties: false
+            properties:
+              minutes: { type: integer, minimum: 1, maximum: 240, description: init 容器运行超过这么多分钟时判为卡住 }
         refs:
           - { name: pods, signal: pod_info, mode: instant }
           - { name: running, signal: init_running_minutes, mode: instant, empty_is: normal }
@@ -594,6 +658,16 @@ chains:
         applies_to: { kinds: [Deployment, StatefulSet, DaemonSet] }
         window: { before: 30m, after: 30m }
         params: { factor: 2.0, error_ratio: 0.01 }
+        check:
+          description:
+            zh-CN: 事件开始前后 HTTP 5xx 比例的峰值；区分"开始之后错误上升"（变更或故障引起）与长期存在的错误
+            en: Peak HTTP 5xx ratio before and after the start; a rise after the start versus long-standing errors
+          args:
+            type: object
+            additionalProperties: false
+            properties:
+              factor: { type: number, minimum: 1.1, maximum: 20, description: 之后的峰值超过之前的这个倍数时判为上升 }
+              error_ratio: { type: number, minimum: 0, maximum: 0.5, description: 之后的峰值超过它时才判为异常 }
         refs:
           - { name: errors, signal: http_error_ratio, mode: range }
         judge:

@@ -1,5 +1,5 @@
 // 本文件由 packages/contract/scripts/gen.ts 从 contract/ 生成，不要手工修改。
-export const CONTRACT_VERSION = '2.16.0';
+export const CONTRACT_VERSION = '2.17.0';
 
 export const SCHEMAS: Record<string, Record<string, unknown>> = {
   'https://srenautix.io/contract/gateway/v1/action-catalog.schema.json': {
@@ -2929,6 +2929,26 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
         description:
           '卡片需要的集成能力，例如 metrics.query_range、logs.match。能力不可用时卡片显示 capability_missing',
         items: { type: 'string', pattern: '^[a-z]+\\.[a-z_]+$' },
+      },
+      check: {
+        type: 'object',
+        additionalProperties: false,
+        description:
+          '作为阶段 B 区分性检查执行时的说明与可覆盖参数（ADR 0116）。没有它时卡片仍可作为检查，参数为全部 params 与 window_before、window_after，类型取默认值；有它时 params 的取值范围按 args 约束。window_before、window_after 总是由运行时提供，不在 args 中声明',
+        properties: {
+          description: { $ref: '#/$defs/LocalizedText', description: '这张卡作为检查时判断什么、结果怎样区分假设' },
+          args: {
+            type: 'object',
+            description:
+              '可覆盖参数的 JSON Schema（type: object、additionalProperties: false）：每个属性都是卡片 params 的键，带 description；字符串用 enum 或 pattern 限定，数字有 minimum 与 maximum，卡片的默认值满足它',
+            required: ['type', 'properties'],
+            properties: {
+              type: { const: 'object' },
+              additionalProperties: { const: false },
+              properties: { type: 'object' },
+            },
+          },
+        },
       },
     },
     $defs: {

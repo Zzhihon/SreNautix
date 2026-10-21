@@ -3,6 +3,7 @@ export { createBaseEnvironment, RESERVED_NAMES } from './cel/library.js';
 export { COST_BUDGET, MAX_SERIES, MAX_POINTS, MAX_LOG_LINES } from './cel/cost.js';
 export { formatValue, type Unit } from './cel/format.js';
 export { compileCard, judgeCard, type CompiledCard, type JudgeInput } from './judge/card.js';
+export { checkArgsSchema, applyCheckArgs, CHECK_WINDOW_KEYS } from './judge/check-args.js';
 export type {
   CardDefinition,
   CardOutcome,
