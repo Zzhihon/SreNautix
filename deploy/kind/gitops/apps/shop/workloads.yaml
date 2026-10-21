@@ -392,8 +392,14 @@ spec:
               # 启动时按 CACHE_MB 预热内存缓存（内存卷计入容器内存；配置与资源场景把它调大，超过内存上限）
               echo "checkout: started with mode=$mode, cache ${CACHE_MB}MiB, database $DB_HOST"
               dd if=/dev/zero of=/cache/warm bs=1048576 count="$CACHE_MB" 2>/dev/null
+              # 缓存预热完成之后才就绪：预热中被 OOMKilled 的新 Pod 从未就绪，发布停在第一个新 Pod，旧 Pod 继续服务
+              touch /tmp/ready
               trap 'exit 0' TERM
               while true; do sleep 3600 & wait; done
+          readinessProbe:
+            exec:
+              command: [test, -f, /tmp/ready]
+            periodSeconds: 2
           env:
             - name: DB_HOST
               value: postgres.shop.svc
