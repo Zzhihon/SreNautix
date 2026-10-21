@@ -30,5 +30,5 @@ recover() {
   checkout_config checkout-config >"$SCENARIO_STATE_DIR/workloads.yaml"
   gitops_commit "Revert checkout to the v1 configuration" "$workloads=$SCENARIO_STATE_DIR/workloads.yaml" >/dev/null
   wait_argo_synced_to_main shop 300
-  k -n shop rollout status deployment/checkout --timeout=300s
+  wait_deployment_rolled_out shop checkout 300
 }

@@ -25,5 +25,5 @@ inject() {
 recover() {
   set_cache_mb 4 "Revert the checkout cache size"
   wait_argo_synced shop 600
-  k -n shop rollout status deployment/checkout --timeout=600s
+  wait_deployment_rolled_out shop checkout 600
 }

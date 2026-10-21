@@ -21,5 +21,5 @@ recover() {
     <(gitops_file main apps/shop/release.json) >"$SCENARIO_STATE_DIR/release.json"
   gitops_commit "Revert release r3" "apps/shop/release.json=$SCENARIO_STATE_DIR/release.json" >/dev/null
   wait_argo_synced shop 600
-  k -n shop rollout status deployment/api --timeout=600s
+  wait_deployment_rolled_out shop api 600
 }

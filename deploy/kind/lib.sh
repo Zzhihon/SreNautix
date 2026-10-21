@@ -52,6 +52,23 @@ wait_alerts() {
   done
 }
 
+# 等待 Deployment 按当前 spec 完成发布：控制器已观察到最新 generation，全部副本已更新且可用，没有多余的旧副本。
+# 不用 kubectl rollout status：发布超过 progressDeadlineSeconds 之后回退到已有的 ReplicaSet 时，Progressing 条件在
+# 新的进展出现之前仍是 ProgressDeadlineExceeded，rollout status 会立即失败。参数：命名空间 名称 [超时秒数，默认 600]
+wait_deployment_rolled_out() {
+  local ns=$1 name=$2 timeout=${3:-600} deadline st
+  deadline=$((SECONDS + timeout))
+  while true; do
+    st=$(k -n "$ns" get deployment "$name" -o json | jq -c '{gen: .metadata.generation, obs: (.status.observedGeneration // 0),
+      want: (.spec.replicas // 1), replicas: (.status.replicas // 0), updated: (.status.updatedReplicas // 0),
+      available: (.status.availableReplicas // 0)}')
+    jq -e '.obs >= .gen and .updated == .want and .available == .want and .replicas == .want' <<<"$st" >/dev/null && break
+    ((SECONDS < deadline)) || die "deployment ${ns}/${name} 在 ${timeout}s 内没有完成发布：${st}"
+    sleep 5
+  done
+  log "deployment ${ns}/${name} 已完成发布"
+}
+
 # 等待命名空间内全部 Deployment 与 StatefulSet 就绪
 wait_namespace_ready() {
   local ns=$1 timeout=${2:-600} obj
