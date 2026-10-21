@@ -269,7 +269,8 @@ export async function runStageB(input: ResearchRunInput, env: ResearchEnv, sink:
         consistency: ladder.consistency,
         ...(ladder.detail ? { consistency_detail: ladder.detail } : {}),
       },
-      hypotheses: ledger.toContract(),
+      // 按排名排列的全部假设，被推翻的在最后（ADR 0133）
+      hypotheses: ledger.toContract(candidateScore),
       next_checks: checks.map((x) => ({
         hypothesis_id: x.check.hypothesis_id,
         type: x.check.type,
@@ -409,9 +410,12 @@ export async function runStageB(input: ResearchRunInput, env: ResearchEnv, sink:
         checks.length + 1,
       );
       checks.push(executed);
-      // 失败的检查（参数被拒绝、数据源报错、结果无法判定成卡）不算检验过
-      if (executed.outcome !== 'failed') {
-        ledger.noteCheckRun(p.check.hypothesis_id);
+      // 失败的检查（参数被拒绝、数据源报错、结果无法判定成卡）不算检验过；测的信号不属于假设机制的检查记为无关（ADR 0133）
+      if (executed.outcome !== 'failed' && executed.card) {
+        const unrelated = ledger.noteCheckRun(p.check.hypothesis_id, executed.card.ref);
+        if (unrelated) {
+          notes.push(unrelated);
+        }
       }
       env.metrics.checks.inc({ type: p.check.type, outcome: executed.outcome });
       if (executed.error) {

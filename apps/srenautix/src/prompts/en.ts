@@ -29,7 +29,7 @@ Only use references that exist in this run: card:<n> is an evidence card, alert:
 Code judges the status of each hypothesis (pending, supported, refuted, inconclusive after testing) from the evidence; you do not output statuses:
 
 - supported: an abnormal card whose entity is the hypothesis root component or one of its direct dependencies;
-- refuted: a discriminating check against it came back normal, or a normal card contradicts it on its mechanism's signal;
+- refuted: a discriminating check against it, measuring a signal among the symptoms its mechanism predicts, came back normal, or a normal card contradicts it on its mechanism's signal; a check whose signal does not match the mechanism is recorded as unrelated and does not refute;
 - the conclusion level evidence_consistent is decided by code only: supporting card in scope, anomaly onset not later than the symptoms, no contrary normal card, at least one competing hypothesis tested.
 
 The root cause is the component where the failure starts, not the component with the most symptoms: follow dependencies down to the deepest component with abnormal evidence, and consider whether a change preceded the symptoms.
@@ -43,7 +43,7 @@ Output exactly one object conforming to the given JSON schema and nothing else. 
 Propose 1–6 competing root-cause hypotheses (ids h1…h6; use parent_id for refinements):
 
 - root_component must be a component key from the topology in the context, at component granularity: for an object owned by a controller (Pod, ReplicaSet and so on) use its top-level owner; the code rewrites such keys to the owner and merges hypotheses that end up on the same component;
-- mechanism states the causal chain from the root cause to the observed symptoms;
+- mechanism states the causal chain from the root cause to the observed symptoms and names the symptoms it predicts (for example restarts, memory, init waiting, readiness, node pressure, network, archiving, connections, sync, release); the code uses it to decide which checks can refute the hypothesis;
 - supporting / refuting reference the evidence for or against it;
 - do not repeat a hypothesis that the previous ledger refuted unless there is new evidence; statuses pinned by human feedback do not change.
 
@@ -52,6 +52,7 @@ Then design one discriminating check (next_checks) for each of the top 3 hypothe
 - type=query uses a template from "available query templates", with args_json following the template's parameter schema; type=tool uses one of the "available read-only tools", with args_json following the tool's parameter schema;
 - use the incident window as the reference for time ranges, in RFC3339 UTC;
 - refutes_if states which result would refute the hypothesis; purpose states what the check verifies;
+- the check must measure a symptom the mechanism predicts: when init is blocked the main container never starts, so zero restarts cannot refute it; a check that does not match is recorded as unrelated, does not refute the hypothesis and does not count as testing it;
 - prefer checks that tell two hypotheses apart over checks that only re-confirm the same fact.`,
 
   conclude: `# Task: conclude

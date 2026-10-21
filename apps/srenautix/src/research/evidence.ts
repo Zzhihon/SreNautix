@@ -20,6 +20,8 @@ export interface CardEntry {
   hypothesisId: string | null;
   /** 判定方式：领域包的 CEL 判定为 rule；只读工具结果由小模型判定为 model */
   judgedBy: 'rule' | 'model';
+  /** 区分性检查产生的卡：执行的查询模板或卡片检查 id（ADR 0133 按它判断检查测的信号）；阶段 A 的卡为 null */
+  check: string | null;
 }
 
 export class EvidenceBook {
@@ -50,6 +52,7 @@ export class EvidenceBook {
     hypothesisId: string | null,
     judgedBy: 'rule' | 'model',
     ref?: string,
+    check: string | null = null,
   ): CardEntry {
     const r = ref ?? `card:${this.next}`;
     const m = /^card:(\d+)$/.exec(r);
@@ -66,14 +69,20 @@ export class EvidenceBook {
       component: entityKey(result.entity),
       hypothesisId,
       judgedBy,
+      check,
     };
     this.cards.set(r, entry);
     return entry;
   }
 
-  /** 加入一张区分性检查产生的卡，分配下一个编号 */
-  addCheckCard(result: EvidenceResult, hypothesisId: string, judgedBy: 'rule' | 'model'): CardEntry {
-    return this.addCard(result, hypothesisId, judgedBy);
+  /** 加入一张区分性检查产生的卡，分配下一个编号；check 是执行的查询模板、卡片检查或工具 */
+  addCheckCard(
+    result: EvidenceResult,
+    hypothesisId: string,
+    judgedBy: 'rule' | 'model',
+    check: string | null = null,
+  ): CardEntry {
+    return this.addCard(result, hypothesisId, judgedBy, undefined, check);
   }
 
   card(ref: string): CardEntry | undefined {

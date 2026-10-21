@@ -190,13 +190,35 @@ describe('结论阶梯', () => {
     expect(judgeLadder(ledger, ledger.entries.get('h1') ?? null, rc.incident, true).level).toBe('likely');
   });
 
-  it('支持卡的异常起始晚于症状加容差：likely', () => {
+  it('支持卡的异常起始晚于症状告警加容差：档位最高 inconclusive（ADR 0134）', () => {
     const cards = stageACards();
     (cards[1] as EvidenceResult).anomaly_started_at = new Date(T0 + 20 * 60_000).toISOString();
     const { book, ledger, rc } = setup(cards);
     ledger.merge([hyp('h1', PG, ['card:2']), hyp('h2', WEB, [])], []);
     book.addCheckCard(checkCard(WEB, 'normal', null), 'h2', 'rule');
     ledger.noteCheckRun('h2');
+    ledger.evaluate();
+    const r = judgeLadder(ledger, ledger.entries.get('h1') ?? null, rc.incident, true);
+    expect(r.level).toBe('inconclusive');
+    expect(r.consistency.onset_precedes_symptom).toBe(false);
+    expect(r.notes.at(-1)).toMatch(
+      /^模型选中的假设 h1 支持卡最早的异常起始（card:2，.*）晚于症状起始 .*档位由 likely 退回/,
+    );
+    // 事件没有症状告警时（症状起始退回事件首次触发时间）不限制
+    const noSymptom = setup(cards);
+    noSymptom.rc.incident.members = noSymptom.rc.incident.members.filter((m) => m.role !== 'symptom');
+    noSymptom.ledger.merge([hyp('h1', PG, ['card:2'])], []);
+    noSymptom.ledger.evaluate();
+    const n = judgeLadder(noSymptom.ledger, noSymptom.ledger.entries.get('h1') ?? null, noSymptom.rc.incident, true);
+    expect(n.level).toBe('likely');
+    expect(n.consistency.onset_precedes_symptom).toBe(false);
+  });
+
+  it('异常起始未知：onset_precedes_symptom 不满足，档位不受限', () => {
+    const cards = stageACards();
+    (cards[1] as EvidenceResult).anomaly_started_at = null;
+    const { ledger, rc } = setup(cards);
+    ledger.merge([hyp('h1', PG, ['card:2'])], []);
     ledger.evaluate();
     const r = judgeLadder(ledger, ledger.entries.get('h1') ?? null, rc.incident, true);
     expect(r.level).toBe('likely');

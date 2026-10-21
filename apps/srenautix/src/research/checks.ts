@@ -225,7 +225,7 @@ export async function runCheck(
       bounds: env.bounds,
       signal: env.signal,
     });
-    const card = env.book.addCheckCard({ ...result, card_id: `check/${h.id}/${seq}` }, h.id, 'rule');
+    const card = env.book.addCheckCard({ ...result, card_id: `check/${h.id}/${seq}` }, h.id, 'rule', check.template);
     const outcome =
       result.verdict === 'abnormal' ? 'supports' : result.verdict === 'normal' ? 'refutes' : 'inconclusive';
     return { check, args, outcome, card, tool: null, error: null };
@@ -299,6 +299,7 @@ export async function runCheck(
     } as EvidenceResult,
     h.id,
     'model',
+    check.template,
   );
   const record = { ...res.record, result_ref: card.ref };
   await env.onTool(record);

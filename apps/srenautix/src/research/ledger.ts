@@ -1,5 +1,6 @@
 import type { Feedback, Hypothesis } from '@srenautix/contract';
 import type { CardEntry, EvidenceBook } from './evidence.js';
+import { checkDefinition, targets, type Targeting } from './targeting.js';
 import type { Subgraph } from './types.js';
 
 // 假设账本（DESIGN §7.3）：由代码维护，模型只提出假设与检查。状态：
@@ -25,8 +26,10 @@ export interface LedgerEntry {
   refuting: string[];
   status: LedgerStatus;
   pinned: 'human_confirmed' | 'human_rejected' | null;
-  /** 针对这个假设执行过的区分性检查（含失败的） */
+  /** 针对这个假设执行过、并且检验了它的机制的区分性检查数；测的信号与机制对不上的检查不算（ADR 0133） */
   checksRun: number;
+  /** 针对这个假设执行过的检查产生的卡 */
+  checkRefs: string[];
   /** 状态的依据，写入运行明细 */
   reasons: string[];
   /** 模型给出的排序位置（越小越靠前） */
@@ -150,6 +153,7 @@ export class Ledger {
         status: h.status,
         pinned: null,
         checksRun: 0,
+        checkRefs: [],
         reasons: [`沿用上一次研判的状态 ${h.status}`],
         order: i,
       });
@@ -190,6 +194,7 @@ export class Ledger {
         status: kept ? kept.status : 'pending',
         pinned: kept ? kept.pinned : null,
         checksRun: kept ? kept.checksRun : 0,
+        checkRefs: kept ? kept.checkRefs : [],
         reasons: kept ? kept.reasons : [],
         order: i,
       };
@@ -266,6 +271,7 @@ export class Ledger {
         status: 'supported',
         pinned: 'human_confirmed',
         checksRun: 0,
+        checkRefs: [],
         reasons: [],
         order: -1,
       };
@@ -325,9 +331,46 @@ export class Ledger {
     return own.length > 0 && own.every((c) => c.result.verdict === 'normal') ? own : [];
   }
 
+  /** 支持卡测的卡片定义：阶段 A 卡取卡片定义，检查卡取检查测的定义（ADR 0133） */
+  supportDefinitions(e: LedgerEntry): Set<string> {
+    return new Set(this.supportCards(e).map((c) => (c.check !== null ? checkDefinition(c.check) : c.result.card_id)));
+  }
+
+  /**
+   * 针对假设的检查卡与假设机制是否对应（ADR 0133）：检查测的信号属于机制预示的症状，或与支持卡是同一个卡片定义。
+   * 由小模型对照 refutes_if 判定的工具结果、以及不知道执行了什么的卡视为对应
+   */
+  targeting(e: LedgerEntry, c: CardEntry): Targeting {
+    if (c.judgedBy === 'model') {
+      return { related: true, basis: '由小模型对照 refutes_if 判定' };
+    }
+    if (c.check === null) {
+      return { related: true, basis: '检查未知' };
+    }
+    return targets(c.check, e.mechanism, this.supportDefinitions(e));
+  }
+
+  /** 针对假设、并且检验了它的机制的检查卡 */
+  private relatedCheck(e: LedgerEntry, c: CardEntry): boolean {
+    return c.hypothesisId === e.id && this.targeting(e, c).related;
+  }
+
+  /**
+   * 推翻假设的检查卡（ADR 0133、0134）：针对它、判定为正常、实体在范围内（或未知）、测的信号属于它的机制。
+   * 成员上的这类卡在假设有支持证据时不改变账本状态（ADR 0121），但结论阶梯据此把档位限制在 inconclusive
+   */
+  refutingChecks(e: LedgerEntry): CardEntry[] {
+    const scope = scopeOf(e.rootComponent, this.subgraph);
+    return this.book.allCards.filter(
+      (c) =>
+        c.result.verdict === 'normal' && (c.component === null || scope.has(c.component)) && this.relatedCheck(e, c),
+    );
+  }
+
   /**
    * 与假设机制相反的正常卡（evidence_consistent 的第 3 个条件）：范围内、有数据，并且是下列之一：
-   * 与支持卡是同一个卡定义（同一信号）；针对这个假设的检查给出的正常结果；模型明确引用为反驳证据的卡。
+   * 与支持卡是同一个卡定义（同一信号）；针对这个假设、测的信号属于它的机制的检查给出的正常结果（ADR 0133）；
+   * 模型明确引用为反驳证据的卡。
    */
   contraryCards(e: LedgerEntry): CardEntry[] {
     const scope = scopeOf(e.rootComponent, this.subgraph);
@@ -336,7 +379,7 @@ export class Ledger {
       (c) =>
         c.result.verdict === 'normal' &&
         hasData(c) &&
-        ((c.hypothesisId === e.id && (c.component === null || scope.has(c.component))) ||
+        ((c.hypothesisId === e.id && (c.component === null || scope.has(c.component)) && this.relatedCheck(e, c)) ||
           (c.component !== null && scope.has(c.component) && supportDefs.has(c.result.card_id)) ||
           (e.refuting.includes(c.ref) && c.component !== null && scope.has(c.component))),
     );
@@ -345,16 +388,19 @@ export class Ledger {
   /** 按证据重新评估全部未固定的假设 */
   evaluate(): void {
     for (const e of this.entries.values()) {
+      // 机制可能在下一轮 hypothesize 中改写，检查与机制的对应关系每次重新判断
+      e.checksRun = this.countChecks(e);
       if (e.pinned) {
         continue;
       }
       // 检查卡判定为正常时直接推翻假设的，只有实体是根因本身或它直接依赖的对象的卡，以及实体未知的卡（工具结果）；
-      // 实体是根因拥有的某个成员（例如多副本中的一个 Pod）的正常卡只作为相反的正常卡，在没有支持证据时才推翻（ADR 0121）
+      // 实体是根因拥有的某个成员（例如多副本中的一个 Pod）的正常卡只作为相反的正常卡，在没有支持证据时才推翻（ADR 0121）；
+      // 测的信号不属于假设机制的检查卡记为无关，不推翻（ADR 0133）
       const scope = scopeOf(e.rootComponent, this.subgraph);
       const members = membersOf(e.rootComponent, this.subgraph);
       const checks = this.book.allCards.filter(
         (c) =>
-          c.hypothesisId === e.id &&
+          this.relatedCheck(e, c) &&
           (c.component === null ||
             c.component === e.rootComponent ||
             (scope.has(c.component) && !members.has(c.component))),
@@ -372,11 +418,39 @@ export class Ledger {
     }
   }
 
-  noteCheckRun(id: string): void {
+  /** 检验了假设机制的检查数：记录过的检查卡中与机制对应的 */
+  private countChecks(e: LedgerEntry): number {
+    return e.checkRefs.filter((ref) => {
+      const c = this.book.card(ref);
+      return c !== undefined && this.relatedCheck(e, c);
+    }).length;
+  }
+
+  /**
+   * 记录一项针对假设执行完成的检查（失败的检查不记录）。ref 是检查产生的卡；不给出时取这个假设最近一张没有记录过的检查卡。
+   * 检查测的信号不属于假设机制时记为无关，不算检验过（ADR 0133），返回写入运行明细的说明
+   */
+  noteCheckRun(id: string, ref?: string): string | null {
     const e = this.entries.get(id);
-    if (e) {
-      e.checksRun++;
+    if (!e) {
+      return null;
     }
+    const card =
+      ref !== undefined
+        ? this.book.card(ref)
+        : this.book.allCards.filter((c) => c.hypothesisId === id && !e.checkRefs.includes(c.ref)).at(-1);
+    if (!card) {
+      return null;
+    }
+    e.checkRefs.push(card.ref);
+    e.checksRun = this.countChecks(e);
+    const t = this.targeting(e, card);
+    if (t.related) {
+      return null;
+    }
+    const note = `检查 ${card.ref}（${card.check}）测的信号不属于假设 ${e.id} 的机制，记为无关，不计入推翻：${t.basis}`;
+    e.reasons.push(note);
+    return note;
   }
 
   /** 排名：支持 > 待检验 > 无法判定 > 推翻；同档按支持卡数、阶段 A 候选得分、模型给出的顺序 */
@@ -446,21 +520,20 @@ export class Ledger {
     return [...new Set(roots)];
   }
 
-  toContract(): Hypothesis[] {
-    return this.list()
-      .sort((a, b) => a.id.localeCompare(b.id))
-      .map((e) => ({
-        id: e.id,
-        parent_id: e.parentId,
-        root_component: e.rootComponent,
-        mechanism: e.mechanism,
-        supporting: [
-          ...new Set([...e.supporting, ...this.supportCards(e).map((c) => c.ref), ...this.supportAlerts(e)]),
-        ],
-        refuting: [...new Set([...e.refuting, ...this.contraryCards(e).map((c) => c.ref)])],
-        status: e.status,
-        status_reasons: e.reasons.map((r) => r.slice(0, 500)),
-        checks_run: e.checksRun,
-      }));
+  /**
+   * 契约中的账本按排名排列，包含全部假设（ADR 0133）：被推翻的排在最后，不从排序中删除；评测的召回@3 按这个顺序计算
+   */
+  toContract(candidateScore?: (component: string) => number): Hypothesis[] {
+    return this.ranked(candidateScore).map((e) => ({
+      id: e.id,
+      parent_id: e.parentId,
+      root_component: e.rootComponent,
+      mechanism: e.mechanism,
+      supporting: [...new Set([...e.supporting, ...this.supportCards(e).map((c) => c.ref), ...this.supportAlerts(e)])],
+      refuting: [...new Set([...e.refuting, ...this.contraryCards(e).map((c) => c.ref)])],
+      status: e.status,
+      status_reasons: e.reasons.map((r) => r.slice(0, 500)),
+      checks_run: e.checksRun,
+    }));
   }
 }

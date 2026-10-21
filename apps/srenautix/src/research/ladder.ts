@@ -8,6 +8,8 @@ import type { Ledger, LedgerEntry } from './ledger.js';
 // 4. 至少检验并排除过一个竞争假设，并且没有竞争假设同样处于支持状态（ADR 0124）。
 // 只读工具结果由小模型判定的卡可以支持 likely，不能单独支撑 evidence_consistent。
 // 模型在 conclude 弃权、由代码按账本选中的假设（ADR 0120）最高为 likely；只有成员告警支持的假设（ADR 0122）为 likely。
+// 选中的假设有相反证据时（自己的检查给出推翻结果，或异常出现时间晚于症状），无论由模型还是代码选中，档位最高为
+// inconclusive（ADR 0134，contraryLimits）。
 // 每个条件的依据写进 consistency_detail（ADR 0125），通知与 issue 据此逐项说明档位。
 
 export const ONSET_TOLERANCE_MS = 2 * 60_000;
@@ -91,16 +93,28 @@ export function judgeLadder(
   const detail = detailOf(ledger, chosen, incident, chosenBy);
   const notes: string[] = [];
   const support = ledger.supportCards(chosen);
+  const capped = (r: LadderResult): LadderResult => {
+    const why = contraryLimits(ledger, chosen, incident);
+    if (why.length === 0 || r.level === 'inconclusive') {
+      return r;
+    }
+    const by = chosenBy === 'ledger' ? '代码按账本选中的' : '模型选中的';
+    return {
+      ...r,
+      level: 'inconclusive',
+      notes: [...r.notes, `${by}假设 ${chosen.id} ${why.join('；')}，档位由 ${r.level} 退回 inconclusive（ADR 0134）`],
+    };
+  };
   if (support.length === 0) {
     const alerts = ledger.supportAlerts(chosen);
     if (alerts.length > 0) {
       // 只有成员告警支持：告警规则判定的异常可以支撑 likely，不能支撑 evidence_consistent（ADR 0122）
-      return {
+      return capped({
         level: 'likely',
         consistency: { ...NONE, competitor_tested: ledger.competitorTested(chosen) },
         detail,
         notes: [`假设 ${chosen.id} 只有成员告警支持（${alerts.join('、')}），没有范围内的异常卡`],
-      };
+      });
     }
     return {
       level: 'inconclusive',
@@ -144,7 +158,40 @@ export function judgeLadder(
   // 模型弃权、由代码按账本选中的结论最高为 likely（ADR 0120）
   if (all && chosenBy === 'ledger') {
     notes.push(`假设 ${chosen.id} 满足 evidence_consistent 的四个条件，但模型弃权、由代码按账本选中，档位为 likely`);
-    return { level: 'likely', consistency, detail, notes };
+    return capped({ level: 'likely', consistency, detail, notes });
   }
-  return { level: all ? 'evidence_consistent' : 'likely', consistency, detail, notes };
+  return capped({ level: all ? 'evidence_consistent' : 'likely', consistency, detail, notes });
+}
+
+/**
+ * 有相反证据时档位最高为 inconclusive（ADR 0134），满足任一项即限制，返回原因：
+ * - 选中假设自己的检查给出推翻结果：针对它、实体在范围内、测的信号属于它的机制的检查卡判定为正常（ADR 0133 的
+ *   `refutingChecks`；成员上的这类卡在有支持证据时不推翻假设，但同样限制档位）；
+ * - 异常出现时间晚于症状：事件有 symptom 角色的成员告警，规则判定的支持卡中有异常起始时间的，最早的也晚于最早的
+ *   症状告警加容差。起始时间都未知、或事件没有症状告警时不限制（由 onset_precedes_symptom 记为不满足）。
+ */
+export function contraryLimits(ledger: Ledger, chosen: LedgerEntry, incident: Incident): string[] {
+  const out: string[] = [];
+  const refuting = ledger.refutingChecks(chosen);
+  if (refuting.length) {
+    out.push(`自己的检查给出推翻结果（${refuting.map((c) => `${c.ref} ${c.check ?? c.result.card_id}`).join('、')}）`);
+  }
+  // 只和真实的症状比：事件没有 symptom 角色的成员告警时，symptomOnset 退回事件首次触发时间，那可能是更早一段的
+  // cause 或 change 告警，不能据此说异常晚于症状
+  if (!incident.members.some((m) => m.role === 'symptom')) {
+    return out;
+  }
+  const symptom = symptomOnset(incident);
+  const onsets = ledger
+    .supportCards(chosen)
+    .filter((c) => c.judgedBy === 'rule' && c.result.anomaly_started_at)
+    .map((c) => ({ ref: c.ref, at: Date.parse(c.result.anomaly_started_at as string) }))
+    .sort((a, b) => a.at - b.at);
+  const first = onsets[0];
+  if (first && first.at > symptom + ONSET_TOLERANCE_MS) {
+    out.push(
+      `支持卡最早的异常起始（${first.ref}，${new Date(first.at).toISOString()}）晚于症状起始 ${new Date(symptom).toISOString()} 加 ${ONSET_TOLERANCE_MS / 60_000} 分钟`,
+    );
+  }
+  return out;
 }

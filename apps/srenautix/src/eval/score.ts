@@ -18,7 +18,7 @@ export interface RunRecord {
   structuredFailure: boolean;
   level: ConclusionLevel | null;
   disposition: Disposition | null;
-  /** top-1 根因与排名前 3 的根因（按账本排序，不含被推翻的假设） */
+  /** top-1 根因与排名前 3 的根因（按完整的账本排序，被推翻的假设在最后） */
   top: string[];
   cost: number;
   currency: string;
@@ -49,12 +49,15 @@ export interface Scored {
 
 const ABSTAIN: ReadonlySet<ConclusionLevel> = new Set(['inconclusive', 'undetermined']);
 
-/** 从研判输出取排名前 3 的根因组件：结论选中的在前，其余按账本状态（支持、待检验、无法判定），不含推翻 */
+/**
+ * 从研判输出取排名前 3 的根因组件：结论选中的在前，其余按完整的账本排序（支持、待检验、无法判定、推翻；同档保持输出中的
+ * 账本顺序）。被推翻的假设排在最后，不从排序中删除（ADR 0133）
+ */
 export function topComponents(out: ResearchOutput): string[] {
-  const rank: Record<string, number> = { supported: 0, pending: 1, inconclusive: 2 };
+  const rank: Record<string, number> = { supported: 0, pending: 1, inconclusive: 2, refuted: 3 };
   const chosen = out.conclusion.root_component;
   const others = out.hypotheses
-    .filter((h) => h.status !== 'refuted' && h.root_component !== chosen)
+    .filter((h) => h.root_component !== chosen)
     .sort((a, b) => (rank[a.status] as number) - (rank[b.status] as number))
     .map((h) => h.root_component);
   return [...new Set([...(chosen ? [chosen] : []), ...others])].slice(0, 3);
