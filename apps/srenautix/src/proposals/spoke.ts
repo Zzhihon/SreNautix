@@ -35,6 +35,8 @@ interface Heartbeat {
   version: string;
   leader: boolean;
   propose_only: boolean;
+  /** propose_only 时仍会执行的动作（冻结期间为 gitops_pr）；propose_only 为 false 时省略 */
+  accepts_actions?: string[];
   conditions: Array<{ type: string; status: string; reason: string; message?: string; since: string }>;
   queue: unknown[];
   clock_skew_seconds: { apiserver: number; ntp?: number };
@@ -262,10 +264,12 @@ export class SpokeRelay {
   async heartbeat(clusterId: string, hb: Heartbeat) {
     return tx(this.pool, async (c) => {
       await c.query(
-        `INSERT INTO server.spoke_status (cluster_id, gateway_id, version, leader, propose_only, conditions, queue, clock_skew, received_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
+        `INSERT INTO server.spoke_status (cluster_id, gateway_id, version, leader, propose_only, conditions, queue, clock_skew,
+           accepts_actions, received_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())
          ON CONFLICT (cluster_id) DO UPDATE SET gateway_id = excluded.gateway_id, version = excluded.version, leader = excluded.leader,
-           propose_only = excluded.propose_only, conditions = excluded.conditions, queue = excluded.queue, clock_skew = excluded.clock_skew, received_at = now()`,
+           propose_only = excluded.propose_only, conditions = excluded.conditions, queue = excluded.queue, clock_skew = excluded.clock_skew,
+           accepts_actions = excluded.accepts_actions, received_at = now()`,
         [
           clusterId,
           hb.gateway_id,
@@ -275,6 +279,8 @@ export class SpokeRelay {
           JSON.stringify(hb.conditions),
           JSON.stringify(hb.queue),
           JSON.stringify(hb.clock_skew_seconds),
+          // 契约：propose_only 为 false 时省略，此时没有意义
+          hb.propose_only ? (hb.accepts_actions ?? []) : [],
         ],
       );
       // 方向与状态条类型由契约的方向表给出（contract/conditions.json）；只保留当前上报实例（Lease 持有者）的条件

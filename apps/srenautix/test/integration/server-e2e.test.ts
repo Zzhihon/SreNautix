@@ -592,6 +592,29 @@ describe('server 端到端', () => {
   });
 
   it('控制台审批签发服务签名断言，gateway 能校验签名与绑定', async () => {
+    // gateway 冻结（仅提议，只接受 gitops_pr）：集群写动作不签发
+    const heartbeat = (body: Record<string, unknown>) =>
+      api('POST', '/v1/spoke/heartbeat', {
+        token: TOKENS.gateway,
+        headers: { 'x-srenautix-cluster': 'c1' },
+        body: {
+          gateway_id: 'gw-0',
+          version: '0.1.0',
+          leader: true,
+          conditions: [],
+          queue: [],
+          clock_skew_seconds: { apiserver: 0.1 },
+          ...body,
+        },
+      });
+    expect((await heartbeat({ propose_only: true, accepts_actions: ['gitops_pr'] })).status).toBe(200);
+    const frozen = await api('POST', `/v1/proposals/${proposalId}/approve`, {
+      session: true,
+      body: { confirm_target: null },
+    });
+    expect(frozen.status).toBe(409);
+    expect(frozen.body).toMatchObject({ error: 'propose_only' });
+    expect((await heartbeat({ propose_only: false })).status).toBe(200);
     const r = await api('POST', `/v1/proposals/${proposalId}/approve`, {
       session: true,
       body: { confirm_target: null },

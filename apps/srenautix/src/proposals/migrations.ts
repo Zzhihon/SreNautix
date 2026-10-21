@@ -121,5 +121,14 @@ CREATE TABLE server.webauthn_challenges (
 CREATE INDEX webauthn_challenges_proposal_idx ON server.webauthn_challenges (proposal_id, principal_id);
 `,
     },
+    {
+      version: 3,
+      name: 'gateway heartbeat accepts_actions',
+      phase: 'expand',
+      sql: `
+-- 仅提议时 gateway 仍会执行的动作（契约 Heartbeat.accepts_actions，冻结期间为 gitops_pr）；断言只为这些动作签发
+ALTER TABLE server.spoke_status ADD COLUMN accepts_actions text[] NOT NULL DEFAULT '{}';
+`,
+    },
   ],
 };

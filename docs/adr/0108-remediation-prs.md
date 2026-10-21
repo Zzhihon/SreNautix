@@ -49,7 +49,7 @@
    - 消息里没有时，执行进入校验之后按分支查 `GET pulls?head=<owner>:<branch>`；
    - 找到后写入 `server.gitops_pulls` 与治理审计 `gitops.pr_opened`，事件 issue 里回链；
    - 通知消息的修复段落显示 `PR：<url>`，消息带 `notify.prefix`。
-8. **冻结只约束集群写入**：gateway 冻结期间以 `GET /v1/spoke/tickets?actions=gitops_pr` 拉取，server 只下发这些动作的工单，其余工单留在队列里。
+8. **冻结只约束集群写入**：gateway 冻结期间以 `GET /v1/spoke/tickets?actions=gitops_pr` 拉取，server 只下发这些动作的工单，其余工单留在队列里。签发断言时同样只对仅提议状态下仍会执行的动作放行：server 保存 gateway 心跳里的 `accepts_actions`（`server.spoke_status.accepts_actions`），`propose_only` 为 true 时，只有动作在 `accepts_actions` 里才签发（契约 Heartbeat：仅提议时 accepts_actions 中的动作除外）。之前任何动作都返回 409 propose_only，冻结期间 gitops_pr 的自动执行签不出断言，自愈 PR 被记成 binding_stale（Kind kind-e2e 39547670741）。现在 propose_only 的 409 记为 `gateway_propose_only`，目标 UID 未知记为 `target_unresolved`，其余 409 才是 `binding_stale`。控制台的"仅提议"仍按 propose_only 显示：集群写入确实只能提议。
 9. **记录**：
    - `server.remediation_attempts` 按（研判, 模板）一行，结果为 proposed、skipped、rejected 或 failed，带原因码；
    - 治理审计记 `remediation.attempt`；

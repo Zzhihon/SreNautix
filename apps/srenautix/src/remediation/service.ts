@@ -373,7 +373,14 @@ export class RemediationService {
       };
     } catch (e) {
       if (e instanceof HttpError && e.status === 409) {
-        return { ...base, repository: repo.repo, code: 'binding_stale', reason: e.message, base: plan.base, files };
+        // 原因码按提议服务的错误区分：gateway 仅提议（且不接受 gitops_pr）与绑定过时是两回事
+        const code =
+          e.code === 'propose_only'
+            ? 'gateway_propose_only'
+            : e.code === 'target_unresolved'
+              ? 'target_unresolved'
+              : 'binding_stale';
+        return { ...base, repository: repo.repo, code, reason: e.message, base: plan.base, files };
       }
       throw e;
     }

@@ -1,4 +1,4 @@
-import { createHash, generateKeyPairSync, randomUUID } from 'node:crypto';
+import { createHash, generateKeyPairSync, randomUUID, type KeyObject } from 'node:crypto';
 import type { Incident, Proposal } from '@srenautix/contract';
 import { applyPatch } from 'diff';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -44,7 +44,6 @@ const T = Date.now();
 let db: TestDb;
 let gh: FakeGitHub;
 let app: GitHubApp;
-let proposals: ProposalService;
 let service: RemediationService;
 let issues: IssueService;
 let rt: PackRuntime;
@@ -225,19 +224,24 @@ beforeAll(async () => {
     catalogPath: DEFAULT_CATALOG_PATH,
     capabilities: new Set(['metrics.query', 'metrics.query_range', 'metrics.series'] as const),
   });
+  ({ service } = build(null));
+}, 120_000);
+
+/** 提议服务与自愈服务；signingKey 给出时自动执行规则签发断言（经过 gateway 仅提议的检查） */
+function build(signingKey: KeyObject | null): { proposals: ProposalService; service: RemediationService } {
   const policy: GatewayPolicy = {
     version: 1,
     cluster: CLUSTER,
     actions: [{ id: 'gitops_pr', auto_execution: { rules: ['remediation-pr'], namespaces: [] } }],
     approvers: [],
   };
-  proposals = new ProposalService(
+  const proposals = new ProposalService(
     db.server,
     Catalog.load(),
     {
       profile: 'standard',
-      signingKey: null,
-      keyId: 'none',
+      signingKey,
+      keyId: signingKey ? 'test-service' : 'none',
       assertionTtlMs: 900_000,
       proposalTtlMs: 7_200_000,
       proposalTtlCapMs: 86_400_000,
@@ -263,7 +267,7 @@ beforeAll(async () => {
     },
     metrics,
   );
-  service = new RemediationService(
+  const service = new RemediationService(
     db.server,
     {
       repositories: {
@@ -298,7 +302,8 @@ beforeAll(async () => {
       metrics,
     },
   );
-}, 120_000);
+  return { proposals, service };
+}
 
 afterAll(async () => {
   await gh?.stop();
@@ -547,5 +552,39 @@ describe('自愈 PR', () => {
       other.proposal_id,
     ]);
     expect(second.rows).toEqual([{ url: `https://github.example.test/${REPO}/pull/77` }]);
+  });
+
+  it('gateway 仅提议（冻结）时：accepts_actions 含 gitops_pr 就照常签发；为空时不签发，原因码是 gateway_propose_only', async () => {
+    const signed = build(generateKeyPairSync('ed25519').privateKey);
+    const status = (accepts: string[]) =>
+      db.server.query(
+        `INSERT INTO server.spoke_status (cluster_id, gateway_id, version, leader, propose_only, conditions, queue, clock_skew,
+           accepts_actions)
+         VALUES ($1, 'gw-0', '0.1.0', true, true, '[]', '[]', '{"apiserver": 0}', $2)
+         ON CONFLICT (cluster_id) DO UPDATE SET propose_only = true, accepts_actions = excluded.accepts_actions`,
+        [CLUSTER, accepts],
+      );
+    const issued = (proposalId: string | null) =>
+      db.server
+        .query<{ n: number }>('SELECT count(*)::int AS n FROM server.approval_assertions WHERE proposal_id = $1', [
+          proposalId,
+        ])
+        .then((r) => r.rows[0]!.n);
+
+    await status(['gitops_pr']);
+    const allowed = await seed('likely', { severity: 'critical', disposition: 'ignore' });
+    expect(await signed.service.runOnce()).toBe(1);
+    const ok = (await attempts(allowed.runId)).find((a) => a.key === 'gitops/noisy-alert-relax')!;
+    expect(ok).toMatchObject({ outcome: 'proposed' });
+    expect(await issued(ok.proposal_id)).toBe(1);
+
+    await status([]);
+    const blocked = await seed('likely', { severity: 'critical', disposition: 'ignore' });
+    expect(await signed.service.runOnce()).toBe(0);
+    expect((await attempts(blocked.runId)).find((a) => a.key === 'gitops/noisy-alert-relax')).toMatchObject({
+      outcome: 'skipped',
+      code: 'gateway_propose_only',
+    });
+    await db.server.query('DELETE FROM server.spoke_status WHERE cluster_id = $1', [CLUSTER]);
   });
 });

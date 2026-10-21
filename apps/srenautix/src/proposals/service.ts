@@ -762,7 +762,10 @@ export class ProposalService {
     return this.recordIssued(c, p, signService(assertion, key, this.s.keyId, reauth));
   }
 
-  /** 待签名的断言；目标 UID 未知、根因过长、gateway 仅提议时不签发。 */
+  /**
+   * 待签名的断言；目标 UID 未知、根因过长、gateway 仅提议且动作不在它的 accepts_actions 里时不签发
+   * （契约 Heartbeat.accepts_actions：冻结只约束集群写入，冻结期间 gitops_pr 照常执行，ADR 0025）。
+   */
   private async assertionFor(
     c: Queryable,
     p: Proposal,
@@ -777,12 +780,19 @@ export class ProposalService {
     if (p.binding.root_component.length > 253) {
       throw new HttpError(400, 'root_component_too_long', '根因组件超过断言允许的 253 个字符');
     }
-    const spoke = await c.query<{ propose_only: boolean }>(
-      'SELECT propose_only FROM server.spoke_status WHERE cluster_id = $1',
+    const spoke = await c.query<{ propose_only: boolean; accepts_actions: string[] }>(
+      'SELECT propose_only, accepts_actions FROM server.spoke_status WHERE cluster_id = $1',
       [p.cluster_id],
     );
-    if (spoke.rows[0]?.propose_only) {
-      throw new HttpError(409, 'propose_only', '该集群的 gateway 处于仅提议状态');
+    const s = spoke.rows[0];
+    if (s?.propose_only && !s.accepts_actions.includes(p.action)) {
+      throw new HttpError(
+        409,
+        'propose_only',
+        s.accepts_actions.length
+          ? `该集群的 gateway 处于仅提议状态，只执行 ${s.accepts_actions.join('、')}`
+          : '该集群的 gateway 处于仅提议状态',
+      );
     }
     const issued = new Date(Math.floor(now.getTime() / 1000) * 1000);
     const ttlEnd = ttlExpiresAt ?? new Date(new Date(p.created_at).getTime() + this.s.proposalTtlCapMs);
