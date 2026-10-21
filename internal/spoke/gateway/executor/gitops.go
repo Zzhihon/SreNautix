@@ -87,7 +87,7 @@ func (e *gitopsPR) Resolve(ctx context.Context, params json.RawMessage) (*Resolv
 	}
 	watchOK, watchDetail := false, "main watchdog 尚未完成检查"
 	if e.d.MainWatchdog != nil {
-		watchOK, watchDetail = e.d.MainWatchdog(p.Repository)
+		watchOK, watchDetail = e.d.MainWatchdog(ctx, p.Repository)
 	}
 	// 分支名由执行 ID 决定时，预检阶段还不知道执行 ID：srenautix/<执行 ID> 由 at-most-once 保证不会重复，只检查显式给出的分支
 	branchFree, branchDetail := true, "分支 srenautix/<执行 ID>"

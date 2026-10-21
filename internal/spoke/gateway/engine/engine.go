@@ -101,6 +101,8 @@ type Engine struct {
 	// accepts 是只提议时仍然执行的动作（只有冻结、且启用了 gitops_pr 时为 [gitops_pr]）
 	accepts []string
 	watch   map[string]*watchState
+	// watchMu 让周期检查与预检中的 main watchdog 检查串行进行
+	watchMu sync.Mutex
 
 	q        *queue
 	running  sync.WaitGroup

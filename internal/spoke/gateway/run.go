@@ -244,7 +244,7 @@ func Run(ctx context.Context, version string, args []string) error {
 	}
 	var eng *engine.Engine
 	deps := &executor.Deps{Kube: kc, Catalog: cat, Policy: func() *policy.Policy { return eng.Policy() }, GitHub: app,
-		MainWatchdog: func(r string) (bool, string) { return eng.MainWatchdog(r) }, Metrics: m,
+		MainWatchdog: func(ctx context.Context, r string) (bool, string) { return eng.MainWatchdog(ctx, r) }, Metrics: m,
 		Now: func() time.Time { return time.Now().UTC() }, Poll: 5 * time.Second}
 	execs, err := executor.Registry(deps)
 	if err != nil {

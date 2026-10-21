@@ -158,7 +158,7 @@ SreNautix 对 Git 的全部写入都经 `gitops_pr`：server 的自愈 PR 与拓
 - 只在启用了 GitHub App（`gateway.github_app_dir`）且策略列出仓库与路径白名单时可用；首次使用前核对 App 的 slug。
 - 断言的 `target_uid` 是被批准时 base 分支的提交 SHA。只新建 `srenautix/` 分支（默认 `srenautix/<执行 ID>`，提议可以给出 `branch`），推送前后各读一次 base，base 在推送期间前进时不开 PR（`failed/base_moved`）。开 PR 后请求策略中的 `reviewers`。从不合并。
 - 每 15 秒探测每个仓库的 base 分支，条件 `GitBaseGuarded`：有分支保护，或策略登记了 `compensating_controls`（不变量 12）；两者都没有时预检 `base_guarded` 拒绝执行。
-- main watchdog 每 `gitops.main_watchdog.interval` 检查 base 分支在 `lookback` 内的提交，机器人直接写入或由机器人合并的提交使条件 `GitMainWatchdog` 为 False，预检 `main_watchdog` 拒绝执行。
+- main watchdog 每 `gitops.main_watchdog.interval` 检查 base 分支在 `lookback` 内的提交，机器人直接写入或由机器人合并的提交使条件 `GitMainWatchdog` 为 False，预检 `main_watchdog` 拒绝执行。预检时距上一次成功检查已满一个间隔就当场再检查一次，不依赖周期检查的时机。
 - 每个仓库每小时最多开 `gitops.max_prs_per_hour` 个 PR，超出的工单以 `gitops_rate_limited` 拒绝。
 - 推送、核对、开 PR、请求审阅、关闭 PR 与被请求白名单拦下的请求都写入执行审计链（`write` 记录，`target.group=github`）。
 - 撤销是关闭本次开出的 PR；PR 已被人合并时转为 `needs_human`，revert 需要新的提议。

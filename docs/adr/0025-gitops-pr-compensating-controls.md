@@ -54,7 +54,8 @@
        - 计入 `srenautix_git_main_unexpected_commits_total{repo,actor}` 与 gauge `srenautix_git_main_unexpected_commits{repo}`；
        - 条件 `GitMainWatchdog` 为 False，由 chart 的告警规则覆盖；
        - 回看窗口内预检 `main_watchdog` 失败，不再推送。
-     - 检查失败或超过 3 个间隔没有成功检查，同样视为未通过。
+     - 周期检查随安全检查运行。预检 `main_watchdog` 不依赖周期检查的时机：距上一次成功检查已满一个间隔（或从未检查过）时，预检先当场检查一次，判定总是基于不早于一个间隔的结果；当场检查失败同样视为未通过。周期检查与预检的检查串行进行，同一个提交只判定、计数一次。
+     - 条件 `GitMainWatchdog` 在超过 3 倍的 max(检查间隔, 安全检查周期) 没有成功检查时为 False（`check_failed`）。
    - **审阅人**：PR 只请求策略中该仓库的 `reviewers`。提议给出的 `reviewers` 必须是它的子集，否则预检 `reviewers_allowed` 失败。
 3. **等级**：`gitops_pr` 从 compensable 改为 reversible，最低档位 L，允许自动执行。
    - 理由：PR 本身不改变任何系统，改动只在人审阅并合并后生效，人工合并就是对改动内容的人工审批。撤销是关闭本次开出的 PR；PR 已被合并时撤销转为 `needs_human`，revert 需要新的提议。

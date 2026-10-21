@@ -12,6 +12,7 @@ import (
 	"github.com/Zzhihon/SreNautix/internal/spoke/gateway/executor"
 	"github.com/Zzhihon/SreNautix/internal/spoke/gateway/github"
 	"github.com/Zzhihon/SreNautix/internal/spoke/gateway/metrics"
+	"github.com/Zzhihon/SreNautix/internal/spoke/gateway/policy"
 )
 
 // GitOnlyAction 是唯一不写集群的动作。冻结只约束集群写入（ADR 0025）：冻结期间 gateway 仍然执行它，其余动作一律不执行。
@@ -46,35 +47,56 @@ func (e *Engine) watchMain(ctx context.Context) {
 		return
 	}
 	g := pol.GitOps
-	now := time.Now()
-	wd := github.Watchdog{AppBot: e.d.GitHub.BotLogin(), AllowedBots: g.MainWatchdog.AllowedBots}
 	for _, entry := range g.Repositories {
-		e.mu.Lock()
-		st, ok := e.watch[entry.Repository]
-		if !ok {
-			st = &watchState{seen: map[string]time.Time{}, unexpect: map[string]unexpectedCommit{}}
-			e.watch[entry.Repository] = st
-		}
-		due := st.checked.IsZero() || now.Sub(st.checked) >= g.WatchdogInterval()
-		e.mu.Unlock()
-		if !due {
-			continue
-		}
-		err := e.checkRepo(ctx, wd, entry.Repository, entry.Base, st, now, g.WatchdogLookback())
-		e.mu.Lock()
-		st.lastError = err
-		if err == nil {
-			st.checked = now
-		}
-		e.mu.Unlock()
-		if err != nil {
-			e.d.Metrics.MainWatchdogFailures.WithLabelValues(entry.Repository).Inc()
-			slog.Error("main watchdog", "repository", entry.Repository, "err", err)
-			continue
-		}
-		e.d.Metrics.MainWatchdogLast.WithLabelValues(entry.Repository).Set(float64(now.Unix()))
+		_, _ = e.watchRepo(ctx, pol, entry.Repository, entry.Base)
 	}
-	e.updateWatchCondition(g.WatchdogInterval())
+	e.updateWatchCondition(e.watchStaleAfter())
+}
+
+// watchRepo 在距上一次成功检查已满一个间隔（或从未检查过）时检查一次仓库，返回检查之后的状态，
+// 以及状态是否新鲜（上一次成功检查不满一个间隔，或这一次检查成功）。
+// 周期检查与 gitops_pr 的预检共用这一个入口，检查串行进行，同一个提交只判定、计数一次。
+func (e *Engine) watchRepo(ctx context.Context, pol *policy.Policy, repository, base string) (*watchState, bool) {
+	e.watchMu.Lock()
+	defer e.watchMu.Unlock()
+	g := pol.GitOps
+	now := time.Now()
+	e.mu.Lock()
+	st, ok := e.watch[repository]
+	if !ok {
+		st = &watchState{seen: map[string]time.Time{}, unexpect: map[string]unexpectedCommit{}}
+		e.watch[repository] = st
+	}
+	due := st.checked.IsZero() || now.Sub(st.checked) >= g.WatchdogInterval()
+	e.mu.Unlock()
+	if !due {
+		return st, true
+	}
+	wd := github.Watchdog{AppBot: e.d.GitHub.BotLogin(), AllowedBots: g.MainWatchdog.AllowedBots}
+	err := e.checkRepo(ctx, wd, repository, base, st, now, g.WatchdogLookback())
+	e.mu.Lock()
+	st.lastError = err
+	if err == nil {
+		st.checked = now
+	}
+	e.mu.Unlock()
+	if err != nil {
+		e.d.Metrics.MainWatchdogFailures.WithLabelValues(repository).Inc()
+		slog.Error("main watchdog", "repository", repository, "err", err)
+		return st, false
+	}
+	e.d.Metrics.MainWatchdogLast.WithLabelValues(repository).Set(float64(now.Unix()))
+	return st, true
+}
+
+// watchStaleAfter 是条件 GitMainWatchdog 判定"检查过期"的时长：周期检查随安全检查运行，
+// 实际间隔不短于安全检查的周期，因此取 3 倍的 max(watchdog 间隔, 安全检查周期)。
+func (e *Engine) watchStaleAfter() time.Duration {
+	interval := 5 * time.Minute
+	if pol := e.currentPolicy(); pol.GitOps != nil {
+		interval = pol.GitOps.WatchdogInterval()
+	}
+	return 3 * max(interval, e.cfg.SafetyInterval)
 }
 
 func (e *Engine) checkRepo(ctx context.Context, wd github.Watchdog, repository, base string, st *watchState, now time.Time, lookback time.Duration) error {
@@ -131,7 +153,7 @@ func (e *Engine) checkRepo(ctx context.Context, wd github.Watchdog, repository, 
 	return nil
 }
 
-func (e *Engine) updateWatchCondition(interval time.Duration) {
+func (e *Engine) updateWatchCondition(staleAfter time.Duration) {
 	var bad, stale []string
 	e.mu.Lock()
 	repos := make([]string, 0, len(e.watch))
@@ -144,7 +166,7 @@ func (e *Engine) updateWatchCondition(interval time.Duration) {
 		for _, u := range st.unexpect {
 			bad = append(bad, fmt.Sprintf("%s %s (%s: %s)", r, u.SHA, u.Actor, u.Why))
 		}
-		if st.checked.IsZero() || time.Since(st.checked) > 3*interval {
+		if st.checked.IsZero() || time.Since(st.checked) > staleAfter {
 			stale = append(stale, fmt.Sprintf("%s: %v", r, st.lastError))
 		}
 	}
@@ -160,22 +182,22 @@ func (e *Engine) updateWatchCondition(interval time.Duration) {
 	}
 }
 
-// MainWatchdog 返回仓库的 watchdog 状态，供 gitops_pr 的预检 main_watchdog 使用：
-// 最近一次成功检查不早于 3 个间隔，且回看窗口内没有非人工提交时 ok。
-func (e *Engine) MainWatchdog(repository string) (bool, string) {
+// MainWatchdog 是 gitops_pr 的预检 main_watchdog：距上一次成功检查已满一个间隔（或从未检查过）时先当场检查一次，
+// 判定总是基于不早于一个间隔的检查结果，不依赖周期检查的时机。当场检查失败，或回看窗口内有非人工提交时拒绝。
+func (e *Engine) MainWatchdog(ctx context.Context, repository string) (bool, string) {
 	pol := e.currentPolicy()
-	interval := 5 * time.Minute
-	if pol.GitOps != nil {
-		interval = pol.GitOps.WatchdogInterval()
+	if pol.GitOps == nil || e.d.GitHub == nil {
+		return false, "gitops_pr 没有配置 GitHub App 或 gitops 设置"
 	}
+	entry, ok := pol.Repo(repository)
+	if !ok {
+		return false, repository + " 不在 gateway 策略中"
+	}
+	st, fresh := e.watchRepo(ctx, pol, entry.Repository, entry.Base)
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	st, ok := e.watch[repository]
-	if !ok || st.checked.IsZero() {
-		return false, "main watchdog 尚未完成对 " + repository + " 的检查"
-	}
-	if time.Since(st.checked) > 3*interval {
-		return false, fmt.Sprintf("main watchdog 最近一次成功检查在 %s 之前：%v", time.Since(st.checked).Round(time.Second), st.lastError)
+	if !fresh {
+		return false, fmt.Sprintf("main watchdog 检查 %s 失败：%v", repository, st.lastError)
 	}
 	if n := len(st.unexpect); n > 0 {
 		var shas []string

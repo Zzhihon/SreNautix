@@ -30,8 +30,9 @@ type Deps struct {
 	Policy  func() *policy.Policy
 	// GitHub 为 nil 时 gitops_pr 的预检失败。
 	GitHub *github.App
-	// MainWatchdog 返回仓库 base 分支的 watchdog 状态（ok 为 false 时 gitops_pr 预检 main_watchdog 失败）；nil 时视为失败。
-	MainWatchdog func(repository string) (ok bool, detail string)
+	// MainWatchdog 返回仓库 base 分支的 watchdog 状态，结果过期时当场检查（ok 为 false 时 gitops_pr 预检 main_watchdog 失败）；
+	// nil 时视为失败。
+	MainWatchdog func(ctx context.Context, repository string) (ok bool, detail string)
 	// Metrics 为 nil 时不记指标（单元测试）。
 	Metrics *metrics.Metrics
 	Now     func() time.Time
