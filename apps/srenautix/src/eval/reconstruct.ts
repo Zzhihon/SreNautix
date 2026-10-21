@@ -277,11 +277,14 @@ export class BundleTopology implements NodeLookup {
         y.iv.from - x.iv.from,
     );
     const best = hits[0] as { key: string; iv: Interval<TopologyNode> };
+    // 命中的是 kube-state-metrics 历史的节点（kind 不带 API 组，例如 Cluster）时，改用状态库中同一个对象的键：
+    // server 的状态库里只有 informer 写入的节点（Cluster.postgresql.cnpg.io）
+    const key = best.iv.ksm ? this.sameObjectKeyCached(best.key) : best.key;
     return {
-      key: best.key,
+      key,
       uid: best.iv.body.uid ?? null,
       tombstone: best.iv.to !== null && best.iv.to <= a,
-      owner: this.ownerOf(best.key, upper, lower),
+      owner: this.ownerOf(key, upper, lower),
     };
   }
 

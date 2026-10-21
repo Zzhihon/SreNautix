@@ -132,6 +132,19 @@ describe('kube-state-metrics 回退', () => {
     expect(g.graph.componentOf(pod.key)).toBe(cluster.key);
   });
 
+  it('节点查找命中 kube-state-metrics 的同名对象时返回状态库中同一个对象的键', async () => {
+    const cluster = node('Cluster.postgresql.cnpg.io:data/pg', 'Cluster.postgresql.cnpg.io', 'data', 'pg');
+    const ksmCluster = node('Cluster:data/pg', 'Cluster', 'data', 'pg');
+    const topo = new BundleTopology([
+      row('informer', 'node', cluster, 0, null),
+      row('ksm_history', 'node', ksmCluster, 0, null),
+    ]);
+    topo.now = T0 + 10 * 60_000;
+    // 告警目录的实体 kind 写 Cluster：kind 完全相同的是 kube-state-metrics 的节点
+    const hit = await topo.find('c', 'Cluster', 'data', 'pg', new Date(T0 + 10 * 60_000));
+    expect(hit?.key).toBe(cluster.key);
+  });
+
   it('状态库没有的 ReplicaSet 用 kube-state-metrics 第一次出现的时刻，属主与管理应用齐全；导出起点就存在的不算', () => {
     const topo = new BundleTopology(rows);
     const ev = topo.workloadEvents(T0, T0 + 120 * 60_000);
