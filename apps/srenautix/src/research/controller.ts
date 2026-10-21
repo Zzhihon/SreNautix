@@ -13,7 +13,7 @@ import { Ledger } from './ledger.js';
 import type { WorkerMetrics } from './metrics.js';
 import { concludeItems, hypothesizeItems, promptParts } from './prompt.js';
 import type { PreviousRun, ResearchCase } from './types.js';
-import { validateConclusion } from './validate.js';
+import { auditModelText, evidenceCorpus, validateConclusion } from './validate.js';
 
 // 阶段 B 控制器（DESIGN §7.2–§7.4）：hypothesize → discriminate（可多轮）→ conclude。
 // 模型只提出假设、检查与结论文字；账本状态、停止规则、结论阶梯与校验都由代码决定。
@@ -175,6 +175,7 @@ export async function runStageB(input: ResearchRunInput, env: ResearchEnv, sink:
           ...previous.output.validation_notes,
           `证据指纹 ${rc.stageA.evidence_fingerprint.slice(0, 19)} 与上一次研判相同，仍然一致，没有调用模型`,
         ],
+        stop_reason: 'no_change',
       };
       state = 'completed';
       return finish({ state: 'completed', stopReason: 'no_change', output, error: null, stillConsistent: true });
@@ -241,7 +242,7 @@ export async function runStageB(input: ResearchRunInput, env: ResearchEnv, sink:
     if (leader && v.chosen && leader.id !== v.chosen.id) {
       notes.push(`结论选中 ${v.chosen.id}，账本排名第一的是 ${leader.id}`);
     }
-    const result: ResearchOutput = {
+    const draft: ResearchOutput = {
       disposition: v.disposition,
       conclusion: {
         level: ladder.level,
@@ -249,6 +250,7 @@ export async function runStageB(input: ResearchRunInput, env: ResearchEnv, sink:
         root_component: v.chosen?.rootComponent ?? null,
         undetermined_reason: v.undeterminedReason,
         consistency: ladder.consistency,
+        ...(ladder.detail ? { consistency_detail: ladder.detail } : {}),
       },
       hypotheses: ledger.toContract(),
       next_checks: checks.map((x) => ({
@@ -260,13 +262,25 @@ export async function runStageB(input: ResearchRunInput, env: ResearchEnv, sink:
         purpose: x.check.purpose,
         result_ref: x.card?.ref ?? null,
         outcome: x.outcome,
+        error: x.error,
       })),
       situation: v.situation,
       summary: v.summary,
       recommendations: v.recommendations,
       proposals: v.proposals.map((p) => ({ ...p, proposal_id: null })),
       validation_notes: notes,
+      stop_reason: stopReason,
+      // 检查产生的卡随输出发布，消息与 issue 不依赖 worker 的运行明细；序列只在运行明细中保存
+      check_cards: book.allCards
+        .filter((c) => c.hypothesisId !== null)
+        .slice(0, 12)
+        .map((c) => ({ ...c.result, series: [] })),
+      evidence_index: book.evidenceMap(),
     };
+    // 模型文字的数值审计（ADR 0125）
+    const audited = auditModelText(draft, evidenceCorpus(rc, book));
+    notes.push(...audited.notes);
+    const result: ResearchOutput = { ...audited.output, validation_notes: notes };
     return finish({ state: 'completed', stopReason, output: result, error: null, stillConsistent: false });
   };
 

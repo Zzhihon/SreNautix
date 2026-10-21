@@ -459,6 +459,8 @@ export class Ledger {
         ],
         refuting: [...new Set([...e.refuting, ...this.contraryCards(e).map((c) => c.ref)])],
         status: e.status,
+        status_reasons: e.reasons.map((r) => r.slice(0, 500)),
+        checks_run: e.checksRun,
       }));
   }
 }

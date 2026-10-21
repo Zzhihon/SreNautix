@@ -9,6 +9,7 @@ import { displayKey, tryNodeKey } from '@srenautix/core';
 import { validatorOf, formatErrors } from '../llm/schema.js';
 import type { EvidenceBook } from './evidence.js';
 import type { Ledger, LedgerEntry } from './ledger.js';
+import { auditText, buildCorpus, cardMaterial, type NumberCorpus } from './numbers.js';
 import type { ResearchCase } from './types.js';
 
 // 结论的代码校验（DESIGN §7.3）：删除无效的证据引用；删除目录以外、参数不合 schema、目标与机器推导不一致的提议；
@@ -227,6 +228,83 @@ export function validateConclusion(
     summary: raw.summary,
     recommendations,
     proposals,
+    notes,
+  };
+}
+
+/** 本次研判的证据语料：证据卡（阶段 A 与检查）、成员告警、变更、事件与候选 */
+export function evidenceCorpus(c: ResearchCase, book: EvidenceBook): NumberCorpus {
+  const texts: string[] = [];
+  const numbers: number[] = [];
+  const times: string[] = [c.incident.first_firing_at, c.incident.created_at, c.stageA.rendered_at];
+  for (const card of book.allCards) {
+    const m = cardMaterial(card.result);
+    texts.push(...m.texts);
+    numbers.push(...m.numbers);
+    times.push(...m.times);
+  }
+  for (const [, a] of book.alertEntries) {
+    times.push(a.starts_at, ...(a.ends_at ? [a.ends_at] : []));
+  }
+  for (const [, ch] of book.changeEntries) {
+    texts.push(ch.summary, ch.revision ?? '', ch.previous_revision ?? '');
+    times.push(ch.time);
+  }
+  for (const t of c.stageA.timeline) {
+    texts.push(t.text);
+    times.push(t.at);
+  }
+  numbers.push(...c.incident.candidates.map((x) => x.score));
+  if (c.incident.root.margin !== null) {
+    numbers.push(c.incident.root.margin);
+  }
+  return buildCorpus(texts, numbers, times);
+}
+
+/**
+ * 模型文字的数值审计（ADR 0125）：假设机制、结论摘要与现状、建议的标题与步骤、无法判定的原因中，
+ * 证据里找不到的数值断言连同所在分句删除；每处删除写一条 validation_notes
+ */
+export function auditModelText(out: ResearchOutput, corpus: NumberCorpus): { output: ResearchOutput; notes: string[] } {
+  const notes: string[] = [];
+  const audit = (text: string, where: string): string => {
+    const r = auditText(text, corpus);
+    if (r.removed.length) {
+      notes.push(`${where}：删除无法核实的数值 ${[...new Set(r.removed)].join('、')}`);
+    }
+    return r.text;
+  };
+  // 步骤全部被删除的建议整条删除
+  const recommendations: ResearchOutput['recommendations'] = [];
+  for (const r of out.recommendations) {
+    const steps = r.steps.map((s, i) => audit(s, `修复建议 ${r.id} 的第 ${i + 1} 步`)).filter((s) => s !== '');
+    const [first, ...rest] = steps;
+    if (first === undefined) {
+      notes.push(`修复建议 ${r.id}：步骤都含无法核实的数值，已删除`);
+      continue;
+    }
+    recommendations.push({
+      ...r,
+      title: audit(r.title, `修复建议 ${r.id} 的标题`),
+      rationale: audit(r.rationale, `修复建议 ${r.id} 的理由`),
+      steps: [first, ...rest],
+    });
+  }
+  return {
+    output: {
+      ...out,
+      hypotheses: out.hypotheses.map((h) => ({ ...h, mechanism: audit(h.mechanism, `假设 ${h.id} 的机制`) })),
+      situation: audit(out.situation, '现状'),
+      summary: audit(out.summary, '结论摘要'),
+      recommendations,
+      conclusion: {
+        ...out.conclusion,
+        undetermined_reason:
+          out.conclusion.undetermined_reason === null
+            ? null
+            : audit(out.conclusion.undetermined_reason, '无法判定的原因'),
+      },
+    },
     notes,
   };
 }

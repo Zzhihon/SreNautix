@@ -6,7 +6,7 @@ import { buildRuntimes } from '../../src/llm/routes.js';
 import { ModelLayer } from '../../src/llm/session.js';
 import { DEFAULT_LIMITS, runStageB } from '../../src/research/controller.js';
 import { EvidenceBook } from '../../src/research/evidence.js';
-import { judgeLadder } from '../../src/research/ladder.js';
+import { judgeLadder, symptomOnset } from '../../src/research/ladder.js';
 import { Ledger, ownerOf, scopeOf } from '../../src/research/ledger.js';
 import { WorkerMetrics } from '../../src/research/metrics.js';
 import { validateConclusion } from '../../src/research/validate.js';
@@ -165,6 +165,22 @@ describe('结论阶梯', () => {
     expect(r.level).toBe('likely');
     expect(r.consistency.competitor_tested).toBe(false);
     expect(r.notes).toContain('假设 h1 的竞争假设 h2 同样处于支持状态，检查没有区分它们');
+    // 四个条件的依据：支持卡、最早异常起点、症状起点与容差、检验过与同样支持的竞争假设
+    expect(r.detail).toMatchObject({
+      support_refs: ['card:2'],
+      model_judged_refs: [],
+      contrary_refs: [],
+      tested_competitors: ['h3'],
+      supported_competitors: ['h2'],
+      tolerance_seconds: 120,
+      chosen_by: 'model',
+    });
+    expect(r.detail?.onset?.ref).toBe('card:2');
+    expect(r.detail?.symptom_onset_at).toBe(new Date(symptomOnset(rc.incident)).toISOString());
+    // 账本的状态理由与检查数进入契约
+    const h2 = ledger.toContract().find((h) => h.id === 'h2');
+    expect(h2).toMatchObject({ status: 'supported', checks_run: 1 });
+    expect(h2?.status_reasons?.[0]).toMatch(/^支持证据：card:6/);
   });
 
   it('没有检验过竞争假设：likely', () => {
@@ -201,7 +217,7 @@ describe('结论阶梯', () => {
 
   it('有假设没有支持卡：inconclusive；没有假设：undetermined', () => {
     const { ledger, rc } = setup();
-    expect(judgeLadder(ledger, null, rc.incident, true).level).toBe('inconclusive');
+    expect(judgeLadder(ledger, null, rc.incident, true)).toMatchObject({ level: 'inconclusive', detail: null });
     expect(judgeLadder(ledger, null, rc.incident, false).level).toBe('undetermined');
   });
 });
