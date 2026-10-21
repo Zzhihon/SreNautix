@@ -2,6 +2,7 @@
 entries:
   - {
       id: redis-down,
+      primary_card: redis/availability,
       alertname: RedisDown,
       role: cause,
       entity: { kind: Pod, name_labels: [pod] },
@@ -19,6 +20,7 @@ entries:
     }
   - {
       id: redis-disconnected-slaves,
+      primary_card: redis/availability,
       alertname: RedisDisconnectedSlaves,
       role: symptom,
       entity: { kind: Pod, name_labels: [pod] },
@@ -28,6 +30,7 @@ entries:
     }
   - {
       id: redis-out-of-configured-maxmemory,
+      primary_card: redis/memory,
       alertname: RedisOutOfConfiguredMaxmemory,
       role: cause,
       entity: { kind: Pod, name_labels: [pod] },
@@ -37,6 +40,7 @@ entries:
     }
   - {
       id: redis-too-many-connections,
+      primary_card: redis/connections,
       alertname: RedisTooManyConnections,
       role: symptom,
       entity: { kind: Pod, name_labels: [pod] },
@@ -46,6 +50,7 @@ entries:
     }
   - {
       id: redis-rejected-connections,
+      primary_card: redis/connections,
       alertname: RedisRejectedConnections,
       role: cause,
       entity: { kind: Pod, name_labels: [pod] },

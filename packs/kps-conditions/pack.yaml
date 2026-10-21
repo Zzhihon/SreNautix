@@ -1,0 +1,10 @@
+# 由 packages/packs-sdk/scripts/kps-conditions.ts 生成，不要手工修改。
+api_version: srenautix.io/pack/v1
+name: kps-conditions
+version: 92.10.1
+description: kube-prometheus-stack 92.10.1 告警规则的条件卡：alerts-kps 每个条目一张，查询与规则表达式相同，判定与规则的 for 相同，作为条目的主卡
+maturity: beta
+min_srenautix_version: 0.1.0
+requires:
+  - metrics.query
+  - metrics.query_range

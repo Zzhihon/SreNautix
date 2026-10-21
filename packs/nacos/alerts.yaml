@@ -11,6 +11,7 @@ entries:
     }
   - {
       id: nacos-db-unhealthy,
+      primary_card: nacos/exceptions,
       alertname: NacosDatabaseUnhealthy,
       role: cause,
       entity: { kind: Pod, name_labels: [pod, instance] },
@@ -20,6 +21,7 @@ entries:
     }
   - {
       id: nacos-jvm-heap-high,
+      primary_card: nacos/connections-heap,
       alertname: NacosJvmHeapHigh,
       role: symptom,
       entity: { kind: Pod, name_labels: [pod, instance] },

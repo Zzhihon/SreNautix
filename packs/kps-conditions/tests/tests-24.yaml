@@ -1,0 +1,22 @@
+# 由 packages/packs-sdk/scripts/kps-conditions.ts 从 kubernetes-mixin 的 promtool 测试（Apache-2.0，提交见 upstream/kubernetes-mixin-tests.json）转换，不要手工修改。
+api_version: srenautix.io/pack-test/v1
+interval: 1m
+input_series:
+  - series: kube_node_status_condition{condition="Ready",endpoint="https-main",cluster="kubernetes",instance="10.0.2.15:10250",job="kube-state-metrics",namespace="monitoring",node="minikube",pod="kube-state-metrics-b894d84cc-d6htw",service="kube-state-metrics",status="true"}
+    values: 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+  - series: kube_node_spec_unschedulable{endpoint="https-main",cluster="kubernetes",instance="10.0.2.15:10250",job="kube-state-metrics",namespace="monitoring",node="minikube",pod="kube-state-metrics-b894d84cc-d6htw",service="kube-state-metrics",status="true"}
+    values: 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+  - series: kube_node_status_condition{condition="Ready",endpoint="https-main",cluster="kubernetes",instance="10.0.2.15:10250",job="kube-state-metrics",namespace="monitoring",node="minikube2",pod="kube-state-metrics-b894d84cc-f5e9f",service="kube-state-metrics"}
+    values: 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+  - series: kube_node_spec_unschedulable{endpoint="https-main",cluster="kubernetes",instance="10.0.2.15:10250",job="kube-state-metrics",namespace="monitoring",node="minikube2",pod="kube-state-metrics-b894d84cc-f5e9f",service="kube-state-metrics"}
+    values: 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1
+tests:
+  - name: KubeNodeNotReady 在 18m 触发（tests.yaml#24）
+    eval_time: 18m
+    card: kube-node-not-ready/condition
+    entity:
+      kind: Node
+      namespace: monitoring
+      name: minikube
+    expect:
+      verdict: abnormal

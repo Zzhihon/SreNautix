@@ -27,6 +27,8 @@ export interface UpstreamRule {
   group: string;
   alert: string;
   expr: string;
+  /** Prometheus 时长；规则没有写 for 时为 0m */
+  for: string;
   labels: Record<string, string>;
 }
 
@@ -68,6 +70,7 @@ export async function renderUpstreamRules(pin: ChartPin): Promise<UpstreamRule[]
           group: g.name,
           alert: r['alert'],
           expr: String(r['expr']),
+          for: typeof r['for'] === 'string' ? r['for'] : '0m',
           labels: (r['labels'] as Record<string, string> | undefined) ?? {},
         });
       }

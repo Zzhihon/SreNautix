@@ -1,0 +1,36 @@
+{
+  "name": "kubernetes-mixin",
+  "ref": "f57ebcd21d8fb67fe9708b7f6d1d30aed26b2be4",
+  "comment": "kube-prometheus-stack 92.10.1 的 hack/sync_prometheus_rules.py 固定的 kubernetes-mixin 提交；tests/ 下的 promtool 单元测试（Apache-2.0）转成 kps-conditions 的夹具",
+  "url": "https://raw.githubusercontent.com/kubernetes-monitoring/kubernetes-mixin/f57ebcd21d8fb67fe9708b7f6d1d30aed26b2be4/tests/",
+  "files": [
+    { "name": "absent_alert-test.yaml", "sha256": "27bceadd3f67481c6c458b0758d6113f1275811a0bdb38dc86a32b284997d9fd" },
+    {
+      "name": "apiserver-availability-test.yaml",
+      "sha256": "bc185b0767be7b012c5af0b66840cb468873d00b65fd3709124368d96d903ccf"
+    },
+    {
+      "name": "apiserver-burnrate-test.yaml",
+      "sha256": "6d7b3946c062c5462cbbb9cd4bc3e7a2bb816fb01cc717bb7e4e83c404049104"
+    },
+    {
+      "name": "apiserver-slos-test.yaml",
+      "sha256": "56fa9e8158d2a413c2cf4a6d93e42c4c7ff8f0136a07aa4761f216dab2e99d64"
+    },
+    { "name": "apps_alerts-test.yaml", "sha256": "5a073fcfe8e18ea47887de4c7331cedc3173475a9c7d61562adcd16265bbfd3f" },
+    {
+      "name": "kube_scheduler-test.yaml",
+      "sha256": "3931b8783700a11f0c4ea20eca24121715c22842306a9638f61ce05598ea308b"
+    },
+    { "name": "kubelet-test.yaml", "sha256": "c70b3c9902bbaf70fdcd4b324ae45d95cd762172ff5c3f46a86e60bb86faf6ad" },
+    {
+      "name": "resource_alerts-test.yaml",
+      "sha256": "f275dc6a13a2224f89511447b775aca25a92172792709148ca2dcebad7a07a2c"
+    },
+    {
+      "name": "rules-pod-owner-test.yaml",
+      "sha256": "d7a2f2df3c5ce5487452e174a5511936fd2b6bd2d4aab815756ffeda475127c9"
+    },
+    { "name": "tests.yaml", "sha256": "014c33ecf78f4127cdbc7f51deb1a088ff2910b69966ac268382a4a55b84f74d" }
+  ]
+}

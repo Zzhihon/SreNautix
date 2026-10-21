@@ -1,0 +1,16 @@
+# 由 packages/packs-sdk/scripts/kps-conditions.ts 从 kubernetes-mixin 的 promtool 测试（Apache-2.0，提交见 upstream/kubernetes-mixin-tests.json）转换，不要手工修改。
+api_version: srenautix.io/pack-test/v1
+interval: 1m
+input_series:
+  - series: kube_job_failed{instance="instance1",condition="true",job="kube-state-metrics",job_name="job-1597623120",cluster="kubernetes",namespace="ns1"}
+    values: 1+0x20
+tests:
+  - name: KubeJobFailed 在 15m 触发（tests.yaml#45）
+    eval_time: 15m
+    card: kube-job-failed/condition
+    entity:
+      kind: Job
+      namespace: ns1
+      name: job-1597623120
+    expect:
+      verdict: abnormal

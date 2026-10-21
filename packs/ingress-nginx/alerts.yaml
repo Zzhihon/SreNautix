@@ -19,6 +19,7 @@ entries:
     }
   - {
       id: nginx-too-many-500s,
+      primary_card: ingress/errors,
       alertname: NGINXTooMany500s,
       role: symptom,
       entity: { kind: Ingress, name_labels: [ingress], namespace_label: exported_namespace },

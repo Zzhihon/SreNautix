@@ -1,0 +1,34 @@
+# 由 packages/packs-sdk/scripts/kps-conditions.ts 从 kubernetes-mixin 的 promtool 测试（Apache-2.0，提交见 upstream/kubernetes-mixin-tests.json）转换，不要手工修改。
+api_version: srenautix.io/pack-test/v1
+interval: 1m
+input_series:
+  - series: kubelet_certificate_manager_server_ttl_seconds{job="kubelet",cluster="kubernetes",namespace="monitoring",node="minikube"}
+    values: 86400-60x1
+tests:
+  - name: KubeletServerCertificateExpiration 在 0m 触发（tests.yaml#42）
+    eval_time: 0m
+    card: kubelet-server-certificate-expiration/condition
+    entity:
+      kind: Node
+      namespace: monitoring
+      name: minikube
+    expect:
+      verdict: abnormal
+  - name: KubeletServerCertificateExpiration 在 1m 触发（tests.yaml#42）
+    eval_time: 1m
+    card: kubelet-server-certificate-expiration/condition
+    entity:
+      kind: Node
+      namespace: monitoring
+      name: minikube
+    expect:
+      verdict: abnormal
+  - name: KubeletServerCertificateExpiration 在 1m 触发（tests.yaml#42）
+    eval_time: 1m
+    card: kubelet-server-certificate-expiration/condition
+    entity:
+      kind: Node
+      namespace: monitoring
+      name: minikube
+    expect:
+      verdict: abnormal

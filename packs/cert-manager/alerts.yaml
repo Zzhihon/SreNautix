@@ -11,6 +11,7 @@ entries:
     }
   - {
       id: cert-manager-cert-expiry-soon,
+      primary_card: certificate/expiry,
       alertname: CertManagerCertExpirySoon,
       role: cause,
       entity: { kind: Certificate, name_labels: [name] },
@@ -20,6 +21,7 @@ entries:
     }
   - {
       id: cert-manager-cert-not-ready,
+      primary_card: certificate/expiry,
       alertname: CertManagerCertNotReady,
       role: cause,
       entity: { kind: Certificate, name_labels: [name] },

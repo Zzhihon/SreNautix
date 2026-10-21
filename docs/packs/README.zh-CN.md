@@ -338,7 +338,7 @@ tests:
 - 每个测试在两个后端上各跑一遍，结论（verdict、显示状态、原因类型）必须与期望一致，两个后端之间也必须一致。
 - 每张卡自动生成三类测试：空后端上必须是无法判定；逐个把 `no_data` 引用换成空结果或数据源错误后不能得出正常；全部 `no_data` 引用报错时不能得出正常，没有判为异常时原因必须是 `source_error`。
 - `stable` 的包要求每张卡都有夹具测试。
-- 告警目录条目的 `primary_card`（`<链>/<卡>` 或 `<包>/<链>/<卡>`）是与告警条件对应的卡，告警触发时它应当判为异常。`lint` 检查卡片存在、`applies_to` 包含条目的实体 kind、卡片所在的证据链在条目的 `chains` 中。`test --alert-rules <规则文件>` 读入告警规则（Prometheus 规则文件、PrometheusRule 或 VMRule，同名告警按条目的 `match_labels` 选规则），主卡的每个夹具测试在同一份夹具上再求一次告警规则：告警在卡片窗口内触发（满足 `for`）当且仅当主卡判为异常，否则测试失败。阈值因此只在告警规则里写一次，两边漂移时 CI 失败。
+- 告警目录条目的 `primary_card`（`<链>/<卡>` 或 `<包>/<链>/<卡>`）是与告警条件对应的卡，告警触发时它应当判为异常。`lint` 检查卡片存在、`applies_to` 包含条目的实体 kind、卡片所在的证据链在条目的 `chains` 中。`test --alert-rules <规则文件>` 读入告警规则（Prometheus 规则文件、PrometheusRule 或 VMRule，同名告警按条目的 `match_labels` 选规则），主卡的每个夹具测试在同一份夹具上再求一次告警规则：告警在卡片窗口内触发（满足 `for`）当且仅当主卡判为异常，否则测试失败。阈值因此只在告警规则里写一次，两边漂移时 CI 失败。没有现成的卡判断告警条件时，用 `generateConditionPack` 从规则生成告警条件卡（查询与规则表达式相同、判定与 `for` 相同），作为条目的主卡（ADR 0109）。
 - 测试的 `params` 字段覆盖卡片参数，用于验证阈值行为。
 
 **录制与回放**：`record` 在真实数据源上执行卡片，把查询与响应写成快照（`srenautix.io/query-snapshot/v1`）。`test --replay` 用快照代替数据源重新判定，快照中没有的查询直接失败，因此修改查询的提交必须重新录制。
@@ -349,7 +349,8 @@ tests:
 
 | 包 | 内容 |
 |---|---|
-| `alerts-kps` | kube-prometheus-stack 全部告警的目录条目与证据链映射 |
+| `alerts-kps` | kube-prometheus-stack 全部告警的目录条目与证据链映射，每个条目的主卡在 kps-conditions |
+| `kps-conditions` | 由 `pnpm --filter @srenautix/packs-sdk run gen:kps-conditions` 从固定版本 chart 的告警规则生成的告警条件卡（beta，ADR 0109），夹具来自 kubernetes-mixin 的 promtool 测试 |
 | `kubernetes-core` | apiserver、etcd 与其他控制面组件 |
 | `node` | 节点健康、文件系统、网络、时钟；混沌实验 node-memory-pressure |
 | `workload` | 重启与 CrashLoop、Pending、发布进度、发布（等待迁移的 init 容器、新旧 ReplicaSet、正在服务的版本、迁移 Job、开始前后的 5xx 与延迟）、Job、容量；规则提议重建卡在初始化的 Pod；混沌实验 crashloop-bad-config |
@@ -364,4 +365,4 @@ tests:
 | `longhorn` | 卷健康、副本与节点存储 |
 | `_example` | 演示全部文件的示例包，默认不加载 |
 
-全部内置包都是 `stable`。
+除 `kps-conditions`（beta：卡由规则生成，夹具只覆盖能在后端复现上游测试的告警）外，内置包都是 `stable`。

@@ -2,6 +2,7 @@
 entries:
   - {
       id: kafka-topics-replicas,
+      primary_card: kafka/brokers,
       alertname: KafkaTopicsReplicas,
       role: cause,
       entity: { kind: Namespace, name_labels: [namespace] },
@@ -10,6 +11,7 @@ entries:
     }
   - {
       id: kafka-consumers-group,
+      primary_card: kafka/consumer-lag,
       alertname: KafkaConsumersGroup,
       role: symptom,
       entity: { kind: Namespace, name_labels: [namespace] },
@@ -36,6 +38,7 @@ entries:
     }
   - {
       id: kafka-consumer-lag,
+      primary_card: kafka/consumer-lag,
       alertname: KafkaConsumerLag,
       role: symptom,
       entity: { kind: Namespace, name_labels: [namespace] },

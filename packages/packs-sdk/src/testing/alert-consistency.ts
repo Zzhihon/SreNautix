@@ -64,6 +64,29 @@ export function loadAlertRules(files: string[], engine: PromqlEngine): Map<strin
   return out;
 }
 
+/** 已经解析好的规则（例如渲染 chart 得到的上游规则）→ 告警名 → 规则 */
+export function alertRulesFrom(
+  rules: ReadonlyArray<{ alert: string; expr: string; for: string; labels: Record<string, string> }>,
+  file: string,
+  engine: PromqlEngine,
+): Map<string, AlertRule[]> {
+  const out = new Map<string, AlertRule[]>();
+  for (const r of rules) {
+    out.set(r.alert, [
+      ...(out.get(r.alert) ?? []),
+      {
+        alert: r.alert,
+        expr: r.expr,
+        dialect: dialectOf(engine, r.expr),
+        for_seconds: durationSeconds(r.for),
+        labels: Object.fromEntries(Object.entries(r.labels).filter(([, v]) => !v.includes('{{'))),
+        file,
+      },
+    ]);
+  }
+  return out;
+}
+
 function dialectOf(engine: PromqlEngine, expr: string): 'promql' | 'metricsql' {
   try {
     engine.analyze(expr, 'promql');
@@ -77,15 +100,14 @@ function dialectOf(engine: PromqlEngine, expr: string): 'promql' | 'metricsql' {
   }
 }
 
-/** 条目对应的规则：告警名相同、match_labels 是规则静态标签的子集；没有时为 null，多于一条时报错 */
-export function ruleForEntry(rules: Map<string, AlertRule[]>, entry: AlertCatalogEntry): AlertRule | null {
-  const hits = (rules.get(entry.alertname) ?? []).filter((r) =>
+/**
+ * 条目对应的规则：告警名相同、match_labels 是规则静态标签的子集；没有时为空。同名告警的严重度变体没有按
+ * match_labels 拆成不同条目时有多条，任何一条触发都算这个条目的告警在触发
+ */
+export function rulesForEntry(rules: Map<string, AlertRule[]>, entry: AlertCatalogEntry): AlertRule[] {
+  return (rules.get(entry.alertname) ?? []).filter((r) =>
     Object.entries(entry.match_labels ?? {}).every(([k, v]) => r.labels[k] === v),
   );
-  if (hits.length > 1) {
-    throw new Error(`告警目录条目 ${entry.id} 对应 ${hits.length} 条 ${entry.alertname} 规则，用 match_labels 区分`);
-  }
-  return hits[0] ?? null;
 }
 
 /** 主卡全局键 → 声明它的告警目录条目 */

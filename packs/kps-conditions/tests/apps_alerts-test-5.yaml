@@ -1,0 +1,20 @@
+# 由 packages/packs-sdk/scripts/kps-conditions.ts 从 kubernetes-mixin 的 promtool 测试（Apache-2.0，提交见 upstream/kubernetes-mixin-tests.json）转换，不要手工修改。
+api_version: srenautix.io/pack-test/v1
+interval: 1m
+input_series:
+  - series: kube_horizontalpodautoscaler_status_current_replicas{job="kube-state-metrics", cluster="cluster1", namespace="ns1", horizontalpodautoscaler="hpa2"}
+    values: 5x15
+  - series: kube_horizontalpodautoscaler_spec_max_replicas{job="kube-state-metrics", cluster="cluster1", namespace="ns1", horizontalpodautoscaler="hpa2"}
+    values: 5x15
+  - series: kube_horizontalpodautoscaler_spec_min_replicas{job="kube-state-metrics", cluster="cluster1", namespace="ns1", horizontalpodautoscaler="hpa2"}
+    values: 5x15
+tests:
+  - name: KubeHpaMaxedOut 在 15m 没有触发（apps_alerts-test.yaml#5）
+    eval_time: 15m
+    card: kube-hpa-maxed-out/condition
+    entity:
+      kind: HorizontalPodAutoscaler
+      namespace: ns1
+      name: hpa1
+    expect:
+      verdict: normal

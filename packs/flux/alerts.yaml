@@ -2,6 +2,7 @@
 entries:
   - {
       id: flux-reconciliation-failure,
+      primary_card: reconciliation/readiness,
       alertname: ReconciliationFailure,
       role: change,
       entity: { kind: Kustomization, name_labels: [name], namespace_label: exported_namespace },
@@ -10,6 +11,7 @@ entries:
     }
   - {
       id: flux-resource-suspended,
+      primary_card: reconciliation/readiness,
       alertname: FluxResourceSuspended,
       role: change,
       role_confidence: 0.6,

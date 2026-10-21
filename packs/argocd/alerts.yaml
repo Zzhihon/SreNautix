@@ -2,6 +2,7 @@
 entries:
   - {
       id: argocd-app-health-degraded,
+      primary_card: application/status,
       alertname: ArgoCdAppUnhealthy,
       role: symptom,
       entity: { kind: Application, name_labels: [name] },
@@ -11,6 +12,7 @@ entries:
     }
   - {
       id: argocd-app-out-of-sync,
+      primary_card: application/status,
       alertname: ArgoCdAppOutOfSync,
       role: change,
       entity: { kind: Application, name_labels: [name] },
@@ -20,6 +22,7 @@ entries:
     }
   - {
       id: argocd-app-sync-failed,
+      primary_card: application/sync-failures,
       alertname: ArgoCdAppSyncFailed,
       role: change,
       entity: { kind: Application, name_labels: [name] },

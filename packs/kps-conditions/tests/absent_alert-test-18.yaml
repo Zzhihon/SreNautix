@@ -1,0 +1,15 @@
+# 由 packages/packs-sdk/scripts/kps-conditions.ts 从 kubernetes-mixin 的 promtool 测试（Apache-2.0，提交见 upstream/kubernetes-mixin-tests.json）转换，不要手工修改。
+api_version: srenautix.io/pack-test/v1
+interval: 1m
+input_series:
+  - series: up{job="kube-controller-manager", instance="controller1"}
+    values: 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1
+tests:
+  - name: KubeControllerManagerInstanceUnreachable 在 25m 没有触发（absent_alert-test.yaml#18）
+    eval_time: 25m
+    card: kube-controller-manager-instance-unreachable/condition
+    entity:
+      kind: cluster
+      name: controller1
+    expect:
+      verdict: normal

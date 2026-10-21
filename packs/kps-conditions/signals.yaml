@@ -1,0 +1,3428 @@
+# 由 packages/packs-sdk/scripts/kps-conditions.ts 生成，不要手工修改。
+signals:
+  - id: alertmanager_cluster_crashlooping.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(process_start_time_seconds{job="kps-kube-prometheus-stack-alertmanager", container="alertmanager", namespace="monitoring"}) or count(up{job="kps-kube-prometheus-stack-alertmanager", container="alertmanager", namespace="monitoring"})
+  - id: alertmanager_cluster_crashlooping.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          (
+            count by (namespace,service,cluster) (
+              changes(process_start_time_seconds{job="kps-kube-prometheus-stack-alertmanager",container="alertmanager",namespace="monitoring"}[10m]) > 4
+            )
+          /
+            count by (namespace,service,cluster) (
+              up{job="kps-kube-prometheus-stack-alertmanager",container="alertmanager",namespace="monitoring"}
+            )
+          )
+          >= 0.5
+  - id: alertmanager_cluster_crashlooping.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          (
+            count by (namespace,service,cluster) (
+              changes(process_start_time_seconds{job="kps-kube-prometheus-stack-alertmanager",container="alertmanager",namespace="monitoring"}[10m]) > 4
+            )
+          /
+            count by (namespace,service,cluster) (
+              up{job="kps-kube-prometheus-stack-alertmanager",container="alertmanager",namespace="monitoring"}
+            )
+          )
+          >= 0.5
+          )[5m:1m])
+  - id: alertmanager_cluster_down.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(up{job="kps-kube-prometheus-stack-alertmanager", container="alertmanager", namespace="monitoring"})
+  - id: alertmanager_cluster_down.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          (
+            count by (namespace,service,cluster) (
+              avg_over_time(up{job="kps-kube-prometheus-stack-alertmanager",container="alertmanager",namespace="monitoring"}[5m]) < 0.5
+            )
+          /
+            count by (namespace,service,cluster) (
+              up{job="kps-kube-prometheus-stack-alertmanager",container="alertmanager",namespace="monitoring"}
+            )
+          )
+          >= 0.5
+  - id: alertmanager_cluster_down.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          (
+            count by (namespace,service,cluster) (
+              avg_over_time(up{job="kps-kube-prometheus-stack-alertmanager",container="alertmanager",namespace="monitoring"}[5m]) < 0.5
+            )
+          /
+            count by (namespace,service,cluster) (
+              up{job="kps-kube-prometheus-stack-alertmanager",container="alertmanager",namespace="monitoring"}
+            )
+          )
+          >= 0.5
+          )[5m:1m])
+  - id: alertmanager_cluster_failed_peers.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(alertmanager_cluster_failed_peers{job="kps-kube-prometheus-stack-alertmanager", container="alertmanager", namespace="monitoring"})
+  - id: alertmanager_cluster_failed_peers.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          # Without max_over_time, failed scrapes could create false negatives, see
+          # https://www.robustperception.io/alerting-on-gauges-in-prometheus-2-0 for details.
+          max_over_time(alertmanager_cluster_failed_peers{job="kps-kube-prometheus-stack-alertmanager",container="alertmanager",namespace="monitoring"}[5m]) > 0
+  - id: alertmanager_cluster_failed_peers.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          # Without max_over_time, failed scrapes could create false negatives, see
+          # https://www.robustperception.io/alerting-on-gauges-in-prometheus-2-0 for details.
+          max_over_time(alertmanager_cluster_failed_peers{job="kps-kube-prometheus-stack-alertmanager",container="alertmanager",namespace="monitoring"}[5m]) > 0
+          )[15m:1m])
+  - id: alertmanager_cluster_failed_to_send_alerts.1.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(alertmanager_notifications_failed_total{job="kps-kube-prometheus-stack-alertmanager", container="alertmanager", namespace="monitoring", integration=~".*"}) or count(alertmanager_notifications_total{job="kps-kube-prometheus-stack-alertmanager", container="alertmanager", namespace="monitoring", integration=~".*"})
+  - id: alertmanager_cluster_failed_to_send_alerts.1.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          min by (namespace,service, integration) (
+            rate(alertmanager_notifications_failed_total{job="kps-kube-prometheus-stack-alertmanager",container="alertmanager",namespace="monitoring", integration=~`.*`}[15m])
+          /
+            ignoring (reason) group_left rate(alertmanager_notifications_total{job="kps-kube-prometheus-stack-alertmanager",container="alertmanager",namespace="monitoring", integration=~`.*`}[15m]) > 0
+          )
+          > 0.01
+  - id: alertmanager_cluster_failed_to_send_alerts.1.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          min by (namespace,service, integration) (
+            rate(alertmanager_notifications_failed_total{job="kps-kube-prometheus-stack-alertmanager",container="alertmanager",namespace="monitoring", integration=~`.*`}[15m])
+          /
+            ignoring (reason) group_left rate(alertmanager_notifications_total{job="kps-kube-prometheus-stack-alertmanager",container="alertmanager",namespace="monitoring", integration=~`.*`}[15m]) > 0
+          )
+          > 0.01
+          )[5m:1m])
+  - id: alertmanager_cluster_failed_to_send_alerts.2.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(alertmanager_notifications_failed_total{job="kps-kube-prometheus-stack-alertmanager", container="alertmanager", namespace="monitoring", integration!~".*"}) or count(alertmanager_notifications_total{job="kps-kube-prometheus-stack-alertmanager", container="alertmanager", namespace="monitoring", integration!~".*"})
+  - id: alertmanager_cluster_failed_to_send_alerts.2.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          min by (namespace,service, integration) (
+            rate(alertmanager_notifications_failed_total{job="kps-kube-prometheus-stack-alertmanager",container="alertmanager",namespace="monitoring", integration!~`.*`}[15m])
+          /
+            ignoring (reason) group_left rate(alertmanager_notifications_total{job="kps-kube-prometheus-stack-alertmanager",container="alertmanager",namespace="monitoring", integration!~`.*`}[15m]) > 0
+          )
+          > 0.01
+  - id: alertmanager_cluster_failed_to_send_alerts.2.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          min by (namespace,service, integration) (
+            rate(alertmanager_notifications_failed_total{job="kps-kube-prometheus-stack-alertmanager",container="alertmanager",namespace="monitoring", integration!~`.*`}[15m])
+          /
+            ignoring (reason) group_left rate(alertmanager_notifications_total{job="kps-kube-prometheus-stack-alertmanager",container="alertmanager",namespace="monitoring", integration!~`.*`}[15m]) > 0
+          )
+          > 0.01
+          )[5m:1m])
+  - id: alertmanager_config_inconsistent.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(alertmanager_config_hash{job="kps-kube-prometheus-stack-alertmanager", container="alertmanager", namespace="monitoring"})
+  - id: alertmanager_config_inconsistent.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          count by (namespace,service,cluster) (
+            count_values by (namespace,service,cluster) ("config_hash", alertmanager_config_hash{job="kps-kube-prometheus-stack-alertmanager",container="alertmanager",namespace="monitoring"})
+          )
+          != 1
+  - id: alertmanager_config_inconsistent.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          count by (namespace,service,cluster) (
+            count_values by (namespace,service,cluster) ("config_hash", alertmanager_config_hash{job="kps-kube-prometheus-stack-alertmanager",container="alertmanager",namespace="monitoring"})
+          )
+          != 1
+          )[20m:1m])
+  - id: alertmanager_failed_reload.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(alertmanager_config_last_reload_successful{job="kps-kube-prometheus-stack-alertmanager", container="alertmanager", namespace="monitoring"})
+  - id: alertmanager_failed_reload.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          # Without max_over_time, failed scrapes could create false negatives, see
+          # https://www.robustperception.io/alerting-on-gauges-in-prometheus-2-0 for details.
+          max_over_time(alertmanager_config_last_reload_successful{job="kps-kube-prometheus-stack-alertmanager",container="alertmanager",namespace="monitoring"}[5m]) == 0
+  - id: alertmanager_failed_reload.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          # Without max_over_time, failed scrapes could create false negatives, see
+          # https://www.robustperception.io/alerting-on-gauges-in-prometheus-2-0 for details.
+          max_over_time(alertmanager_config_last_reload_successful{job="kps-kube-prometheus-stack-alertmanager",container="alertmanager",namespace="monitoring"}[5m]) == 0
+          )[10m:1m])
+  - id: alertmanager_failed_to_send_alerts.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(alertmanager_notifications_failed_total{job="kps-kube-prometheus-stack-alertmanager", container="alertmanager", namespace="monitoring"}) or count(alertmanager_notifications_total{job="kps-kube-prometheus-stack-alertmanager", container="alertmanager", namespace="monitoring"})
+  - id: alertmanager_failed_to_send_alerts.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          (
+            rate(alertmanager_notifications_failed_total{job="kps-kube-prometheus-stack-alertmanager",container="alertmanager",namespace="monitoring"}[15m])
+          /
+            ignoring (reason) group_left rate(alertmanager_notifications_total{job="kps-kube-prometheus-stack-alertmanager",container="alertmanager",namespace="monitoring"}[15m])
+          )
+          > 0.01
+  - id: alertmanager_failed_to_send_alerts.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          (
+            rate(alertmanager_notifications_failed_total{job="kps-kube-prometheus-stack-alertmanager",container="alertmanager",namespace="monitoring"}[15m])
+          /
+            ignoring (reason) group_left rate(alertmanager_notifications_total{job="kps-kube-prometheus-stack-alertmanager",container="alertmanager",namespace="monitoring"}[15m])
+          )
+          > 0.01
+          )[5m:1m])
+  - id: alertmanager_members_inconsistent.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(alertmanager_cluster_members{job="kps-kube-prometheus-stack-alertmanager", container="alertmanager", namespace="monitoring"})
+  - id: alertmanager_members_inconsistent.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          # Without max_over_time, failed scrapes could create false negatives, see
+          # https://www.robustperception.io/alerting-on-gauges-in-prometheus-2-0 for details.
+            max_over_time(alertmanager_cluster_members{job="kps-kube-prometheus-stack-alertmanager",container="alertmanager",namespace="monitoring"}[5m])
+          < on (namespace,service,cluster) group_left
+            count by (namespace,service,cluster) (max_over_time(alertmanager_cluster_members{job="kps-kube-prometheus-stack-alertmanager",container="alertmanager",namespace="monitoring"}[5m]))
+  - id: alertmanager_members_inconsistent.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          # Without max_over_time, failed scrapes could create false negatives, see
+          # https://www.robustperception.io/alerting-on-gauges-in-prometheus-2-0 for details.
+            max_over_time(alertmanager_cluster_members{job="kps-kube-prometheus-stack-alertmanager",container="alertmanager",namespace="monitoring"}[5m])
+          < on (namespace,service,cluster) group_left
+            count by (namespace,service,cluster) (max_over_time(alertmanager_cluster_members{job="kps-kube-prometheus-stack-alertmanager",container="alertmanager",namespace="monitoring"}[5m]))
+          )[15m:1m])
+  - id: config_reloader_sidecar_errors.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(reloader_last_reload_successful{namespace=~".+"})
+  - id: config_reloader_sidecar_errors.value
+    kind: metrics
+    alternatives:
+      - expr: max_over_time(reloader_last_reload_successful{namespace=~".+"}[5m]) == 0
+  - id: config_reloader_sidecar_errors.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          max_over_time(reloader_last_reload_successful{namespace=~".+"}[5m]) == 0
+          )[10m:1m])
+  - id: cpu_throttling_high.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(container_cpu_cfs_periods_total{job="kubelet", metrics_path="/metrics/cadvisor"}) or count(container_cpu_cfs_throttled_periods_total{container!="", job="kubelet", metrics_path="/metrics/cadvisor"})
+  - id: cpu_throttling_high.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          sum without (id, metrics_path, name, image, endpoint, job, node) (
+            topk by (cluster, namespace, pod, container, instance) (1,
+              increase(
+                container_cpu_cfs_throttled_periods_total{container!="", job="kubelet", metrics_path="/metrics/cadvisor", }
+              [5m])
+            )
+          )
+          / on (cluster, namespace, pod, container, instance) group_left
+          sum without (id, metrics_path, name, image, endpoint, job, node) (
+            topk by (cluster, namespace, pod, container, instance) (1,
+              increase(
+                container_cpu_cfs_periods_total{job="kubelet", metrics_path="/metrics/cadvisor", }
+              [5m])
+            )
+          )
+          > ( 25 / 100 )
+  - id: cpu_throttling_high.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          sum without (id, metrics_path, name, image, endpoint, job, node) (
+            topk by (cluster, namespace, pod, container, instance) (1,
+              increase(
+                container_cpu_cfs_throttled_periods_total{container!="", job="kubelet", metrics_path="/metrics/cadvisor", }
+              [5m])
+            )
+          )
+          / on (cluster, namespace, pod, container, instance) group_left
+          sum without (id, metrics_path, name, image, endpoint, job, node) (
+            topk by (cluster, namespace, pod, container, instance) (1,
+              increase(
+                container_cpu_cfs_periods_total{job="kubelet", metrics_path="/metrics/cadvisor", }
+              [5m])
+            )
+          )
+          > ( 25 / 100 )
+          )[15m:1m])
+  - id: etcd_database_high_fragmentation_ratio.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(etcd_mvcc_db_total_size_in_bytes{job=~".*etcd.*"}) or count(etcd_mvcc_db_total_size_in_use_in_bytes{job=~".*etcd.*"})
+  - id: etcd_database_high_fragmentation_ratio.value
+    kind: metrics
+    alternatives:
+      - expr: (last_over_time(etcd_mvcc_db_total_size_in_use_in_bytes{job=~".*etcd.*"}[5m]) / last_over_time(etcd_mvcc_db_total_size_in_bytes{job=~".*etcd.*"}[5m])) < 0.5 and etcd_mvcc_db_total_size_in_use_in_bytes{job=~".*etcd.*"} > 104857600
+  - id: etcd_database_high_fragmentation_ratio.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          (last_over_time(etcd_mvcc_db_total_size_in_use_in_bytes{job=~".*etcd.*"}[5m]) / last_over_time(etcd_mvcc_db_total_size_in_bytes{job=~".*etcd.*"}[5m])) < 0.5 and etcd_mvcc_db_total_size_in_use_in_bytes{job=~".*etcd.*"} > 104857600
+          )[10m:1m])
+  - id: etcd_database_quota_low_space.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(etcd_mvcc_db_total_size_in_bytes{job=~".*etcd.*"}) or count(etcd_server_quota_backend_bytes{job=~".*etcd.*"})
+  - id: etcd_database_quota_low_space.value
+    kind: metrics
+    alternatives:
+      - expr: (last_over_time(etcd_mvcc_db_total_size_in_bytes{job=~".*etcd.*"}[5m]) / last_over_time(etcd_server_quota_backend_bytes{job=~".*etcd.*"}[5m]))*100 > 95
+  - id: etcd_database_quota_low_space.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          (last_over_time(etcd_mvcc_db_total_size_in_bytes{job=~".*etcd.*"}[5m]) / last_over_time(etcd_server_quota_backend_bytes{job=~".*etcd.*"}[5m]))*100 > 95
+          )[10m:1m])
+  - id: etcd_excessive_database_growth.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(etcd_mvcc_db_total_size_in_bytes{job=~".*etcd.*"}) or count(etcd_server_quota_backend_bytes{job=~".*etcd.*"})
+  - id: etcd_excessive_database_growth.value
+    kind: metrics
+    alternatives:
+      - expr: predict_linear(etcd_mvcc_db_total_size_in_bytes{job=~".*etcd.*"}[4h], 4*60*60) > etcd_server_quota_backend_bytes{job=~".*etcd.*"}
+  - id: etcd_excessive_database_growth.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          predict_linear(etcd_mvcc_db_total_size_in_bytes{job=~".*etcd.*"}[4h], 4*60*60) > etcd_server_quota_backend_bytes{job=~".*etcd.*"}
+          )[10m:1m])
+  - id: etcd_grpc_requests_slow.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(grpc_server_handling_seconds_bucket{job=~".*etcd.*", grpc_method!="Defragment", grpc_type="unary"})
+  - id: etcd_grpc_requests_slow.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          histogram_quantile(0.99, sum(rate(grpc_server_handling_seconds_bucket{job=~".*etcd.*", grpc_method!="Defragment", grpc_type="unary"}[5m])) without(grpc_type))
+          > 0.15
+  - id: etcd_grpc_requests_slow.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          histogram_quantile(0.99, sum(rate(grpc_server_handling_seconds_bucket{job=~".*etcd.*", grpc_method!="Defragment", grpc_type="unary"}[5m])) without(grpc_type))
+          > 0.15
+          )[10m:1m])
+  - id: etcd_high_commit_durations.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(etcd_disk_backend_commit_duration_seconds_bucket{job=~".*etcd.*"})
+  - id: etcd_high_commit_durations.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          histogram_quantile(0.99, rate(etcd_disk_backend_commit_duration_seconds_bucket{job=~".*etcd.*"}[5m]))
+          > 0.25
+  - id: etcd_high_commit_durations.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          histogram_quantile(0.99, rate(etcd_disk_backend_commit_duration_seconds_bucket{job=~".*etcd.*"}[5m]))
+          > 0.25
+          )[10m:1m])
+  - id: etcd_high_fsync_durations.1.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(etcd_disk_wal_fsync_duration_seconds_bucket{job=~".*etcd.*"})
+  - id: etcd_high_fsync_durations.1.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          histogram_quantile(0.99, rate(etcd_disk_wal_fsync_duration_seconds_bucket{job=~".*etcd.*"}[5m]))
+          > 0.5
+  - id: etcd_high_fsync_durations.1.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          histogram_quantile(0.99, rate(etcd_disk_wal_fsync_duration_seconds_bucket{job=~".*etcd.*"}[5m]))
+          > 0.5
+          )[10m:1m])
+  - id: etcd_high_fsync_durations.2.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(etcd_disk_wal_fsync_duration_seconds_bucket{job=~".*etcd.*"})
+  - id: etcd_high_fsync_durations.2.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          histogram_quantile(0.99, rate(etcd_disk_wal_fsync_duration_seconds_bucket{job=~".*etcd.*"}[5m]))
+          > 1
+  - id: etcd_high_fsync_durations.2.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          histogram_quantile(0.99, rate(etcd_disk_wal_fsync_duration_seconds_bucket{job=~".*etcd.*"}[5m]))
+          > 1
+          )[10m:1m])
+  - id: etcd_high_number_of_failed_grpc_requests.1.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(grpc_server_handled_total{job=~".*etcd.*", grpc_code=~"Unknown|FailedPrecondition|ResourceExhausted|Internal|Unavailable|DataLoss|DeadlineExceeded"}) or count(grpc_server_handled_total{job=~".*etcd.*"})
+  - id: etcd_high_number_of_failed_grpc_requests.1.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          100 * sum(rate(grpc_server_handled_total{job=~".*etcd.*", grpc_code=~"Unknown|FailedPrecondition|ResourceExhausted|Internal|Unavailable|DataLoss|DeadlineExceeded"}[5m])) without (grpc_type, grpc_code)
+            /
+          sum(rate(grpc_server_handled_total{job=~".*etcd.*"}[5m])) without (grpc_type, grpc_code)
+            > 1
+  - id: etcd_high_number_of_failed_grpc_requests.1.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          100 * sum(rate(grpc_server_handled_total{job=~".*etcd.*", grpc_code=~"Unknown|FailedPrecondition|ResourceExhausted|Internal|Unavailable|DataLoss|DeadlineExceeded"}[5m])) without (grpc_type, grpc_code)
+            /
+          sum(rate(grpc_server_handled_total{job=~".*etcd.*"}[5m])) without (grpc_type, grpc_code)
+            > 1
+          )[10m:1m])
+  - id: etcd_high_number_of_failed_grpc_requests.2.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(grpc_server_handled_total{job=~".*etcd.*", grpc_code=~"Unknown|FailedPrecondition|ResourceExhausted|Internal|Unavailable|DataLoss|DeadlineExceeded"}) or count(grpc_server_handled_total{job=~".*etcd.*"})
+  - id: etcd_high_number_of_failed_grpc_requests.2.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          100 * sum(rate(grpc_server_handled_total{job=~".*etcd.*", grpc_code=~"Unknown|FailedPrecondition|ResourceExhausted|Internal|Unavailable|DataLoss|DeadlineExceeded"}[5m])) without (grpc_type, grpc_code)
+            /
+          sum(rate(grpc_server_handled_total{job=~".*etcd.*"}[5m])) without (grpc_type, grpc_code)
+            > 5
+  - id: etcd_high_number_of_failed_grpc_requests.2.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          100 * sum(rate(grpc_server_handled_total{job=~".*etcd.*", grpc_code=~"Unknown|FailedPrecondition|ResourceExhausted|Internal|Unavailable|DataLoss|DeadlineExceeded"}[5m])) without (grpc_type, grpc_code)
+            /
+          sum(rate(grpc_server_handled_total{job=~".*etcd.*"}[5m])) without (grpc_type, grpc_code)
+            > 5
+          )[5m:1m])
+  - id: etcd_high_number_of_failed_proposals.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(etcd_server_proposals_failed_total{job=~".*etcd.*"})
+  - id: etcd_high_number_of_failed_proposals.value
+    kind: metrics
+    alternatives:
+      - expr: rate(etcd_server_proposals_failed_total{job=~".*etcd.*"}[15m]) > 5
+  - id: etcd_high_number_of_failed_proposals.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          rate(etcd_server_proposals_failed_total{job=~".*etcd.*"}[15m]) > 5
+          )[15m:1m])
+  - id: etcd_high_number_of_leader_changes.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(up)
+  - id: etcd_high_number_of_leader_changes.value
+    kind: metrics
+    alternatives:
+      - expr: increase((max without (instance, pod) (etcd_server_leader_changes_seen_total{job=~".*etcd.*"}) or 0*absent(etcd_server_leader_changes_seen_total{job=~".*etcd.*"}))[15m:1m]) >= 4
+  - id: etcd_high_number_of_leader_changes.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          increase((max without (instance, pod) (etcd_server_leader_changes_seen_total{job=~".*etcd.*"}) or 0*absent(etcd_server_leader_changes_seen_total{job=~".*etcd.*"}))[15m:1m]) >= 4
+          )[5m:1m])
+  - id: etcd_insufficient_members.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(up{job=~".*etcd.*"})
+  - id: etcd_insufficient_members.value
+    kind: metrics
+    alternatives:
+      - expr: sum(up{job=~".*etcd.*"} == bool 1) without (instance, pod) < ((count(up{job=~".*etcd.*"}) without (instance, pod) + 1) / 2)
+  - id: etcd_insufficient_members.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          sum(up{job=~".*etcd.*"} == bool 1) without (instance, pod) < ((count(up{job=~".*etcd.*"}) without (instance, pod) + 1) / 2)
+          )[3m:1m])
+  - id: etcd_member_communication_slow.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(etcd_network_peer_round_trip_time_seconds_bucket{job=~".*etcd.*"})
+  - id: etcd_member_communication_slow.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          histogram_quantile(0.99, rate(etcd_network_peer_round_trip_time_seconds_bucket{job=~".*etcd.*"}[5m]))
+          > 0.15
+  - id: etcd_member_communication_slow.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          histogram_quantile(0.99, rate(etcd_network_peer_round_trip_time_seconds_bucket{job=~".*etcd.*"}[5m]))
+          > 0.15
+          )[10m:1m])
+  - id: etcd_members_down.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(etcd_network_peer_sent_failures_total{job=~".*etcd.*"}) or count(up{job=~".*etcd.*"})
+  - id: etcd_members_down.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          max without (endpoint) (
+            sum without (instance, pod) (up{job=~".*etcd.*"} == bool 0)
+          or
+            count without (To) (
+              sum without (instance, pod) (rate(etcd_network_peer_sent_failures_total{job=~".*etcd.*"}[120s])) > 0.01
+            )
+          )
+          > 0
+  - id: etcd_members_down.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          max without (endpoint) (
+            sum without (instance, pod) (up{job=~".*etcd.*"} == bool 0)
+          or
+            count without (To) (
+              sum without (instance, pod) (rate(etcd_network_peer_sent_failures_total{job=~".*etcd.*"}[120s])) > 0.01
+            )
+          )
+          > 0
+          )[20m:1m])
+  - id: etcd_no_leader.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(etcd_server_has_leader{job=~".*etcd.*"})
+  - id: etcd_no_leader.value
+    kind: metrics
+    alternatives:
+      - expr: etcd_server_has_leader{job=~".*etcd.*"} == 0
+  - id: etcd_no_leader.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          etcd_server_has_leader{job=~".*etcd.*"} == 0
+          )[1m:1m])
+  - id: kube_aggregated_api_down.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(aggregator_unavailable_apiservice{job="apiserver"})
+  - id: kube_aggregated_api_down.value
+    kind: metrics
+    alternatives:
+      - expr: (1 - max by (name, namespace, cluster)(avg_over_time(aggregator_unavailable_apiservice{job="apiserver"}[10m]))) * 100 < 85
+  - id: kube_aggregated_api_down.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          (1 - max by (name, namespace, cluster)(avg_over_time(aggregator_unavailable_apiservice{job="apiserver"}[10m]))) * 100 < 85
+          )[5m:1m])
+  - id: kube_aggregated_api_errors.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(aggregator_unavailable_apiservice_total{job="apiserver"})
+  - id: kube_aggregated_api_errors.value
+    kind: metrics
+    alternatives:
+      - expr: sum by (cluster, instance, name, reason)(increase(aggregator_unavailable_apiservice_total{job="apiserver"}[1m])) > 0
+  - id: kube_aggregated_api_errors.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          sum by (cluster, instance, name, reason)(increase(aggregator_unavailable_apiservice_total{job="apiserver"}[1m])) > 0
+          )[10m:1m])
+  - id: kube_api_down.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(up)
+  - id: kube_api_down.value
+    kind: metrics
+    alternatives:
+      - expr: absent(up{job="apiserver"})
+  - id: kube_api_down.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          absent(up{job="apiserver"})
+          )[15m:1m])
+  - id: kube_api_error_budget_burn.1.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(apiserver_request:burnrate1h{}) or count(apiserver_request:burnrate5m{})
+  - id: kube_api_error_budget_burn.1.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          sum by (cluster) (apiserver_request:burnrate1h) > (14.40 * 0.01000)
+          and on (cluster)
+          sum by (cluster) (apiserver_request:burnrate5m) > (14.40 * 0.01000)
+  - id: kube_api_error_budget_burn.1.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          sum by (cluster) (apiserver_request:burnrate1h) > (14.40 * 0.01000)
+          and on (cluster)
+          sum by (cluster) (apiserver_request:burnrate5m) > (14.40 * 0.01000)
+          )[2m:1m])
+  - id: kube_api_error_budget_burn.2.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(apiserver_request:burnrate30m{}) or count(apiserver_request:burnrate6h{})
+  - id: kube_api_error_budget_burn.2.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          sum by (cluster) (apiserver_request:burnrate6h) > (6.00 * 0.01000)
+          and on (cluster)
+          sum by (cluster) (apiserver_request:burnrate30m) > (6.00 * 0.01000)
+  - id: kube_api_error_budget_burn.2.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          sum by (cluster) (apiserver_request:burnrate6h) > (6.00 * 0.01000)
+          and on (cluster)
+          sum by (cluster) (apiserver_request:burnrate30m) > (6.00 * 0.01000)
+          )[15m:1m])
+  - id: kube_api_error_budget_burn.3.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(apiserver_request:burnrate1d{}) or count(apiserver_request:burnrate2h{})
+  - id: kube_api_error_budget_burn.3.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          sum by (cluster) (apiserver_request:burnrate1d) > (3.00 * 0.01000)
+          and on (cluster)
+          sum by (cluster) (apiserver_request:burnrate2h) > (3.00 * 0.01000)
+  - id: kube_api_error_budget_burn.3.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          sum by (cluster) (apiserver_request:burnrate1d) > (3.00 * 0.01000)
+          and on (cluster)
+          sum by (cluster) (apiserver_request:burnrate2h) > (3.00 * 0.01000)
+          )[60m:1m])
+  - id: kube_api_error_budget_burn.4.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(apiserver_request:burnrate3d{}) or count(apiserver_request:burnrate6h{})
+  - id: kube_api_error_budget_burn.4.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          sum by (cluster) (apiserver_request:burnrate3d) > (1.00 * 0.01000)
+          and on (cluster)
+          sum by (cluster) (apiserver_request:burnrate6h) > (1.00 * 0.01000)
+  - id: kube_api_error_budget_burn.4.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          sum by (cluster) (apiserver_request:burnrate3d) > (1.00 * 0.01000)
+          and on (cluster)
+          sum by (cluster) (apiserver_request:burnrate6h) > (1.00 * 0.01000)
+          )[180m:1m])
+  - id: kube_api_instance_unreachable.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(up{job="apiserver"})
+  - id: kube_api_instance_unreachable.value
+    kind: metrics
+    alternatives:
+      - expr: up{job="apiserver"} == 0
+  - id: kube_api_instance_unreachable.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          up{job="apiserver"} == 0
+          )[15m:1m])
+  - id: kube_api_terminated_requests.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(apiserver_request_terminations_total{job="apiserver"}) or count(apiserver_request_total{job="apiserver"})
+  - id: kube_api_terminated_requests.value
+    kind: metrics
+    alternatives:
+      - expr: sum by (cluster) (rate(apiserver_request_terminations_total{job="apiserver"}[10m])) / ( sum by (cluster) (rate(apiserver_request_total{job="apiserver"}[10m])) + sum by (cluster) (rate(apiserver_request_terminations_total{job="apiserver"}[10m])) ) > 0.20
+  - id: kube_api_terminated_requests.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          sum by (cluster) (rate(apiserver_request_terminations_total{job="apiserver"}[10m])) / ( sum by (cluster) (rate(apiserver_request_total{job="apiserver"}[10m])) + sum by (cluster) (rate(apiserver_request_terminations_total{job="apiserver"}[10m])) ) > 0.20
+          )[5m:1m])
+  - id: kube_client_certificate_expiration.1.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(apiserver_client_certificate_expiration_seconds_bucket{job="apiserver"}) or count(apiserver_client_certificate_expiration_seconds_count{job="apiserver"})
+  - id: kube_client_certificate_expiration.1.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          histogram_quantile(0.01, sum without (namespace, service, endpoint) (rate(apiserver_client_certificate_expiration_seconds_bucket{job="apiserver"}[5m]))) < 604800
+          and
+          on (job, cluster, instance) apiserver_client_certificate_expiration_seconds_count{job="apiserver"} > 0
+  - id: kube_client_certificate_expiration.1.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          histogram_quantile(0.01, sum without (namespace, service, endpoint) (rate(apiserver_client_certificate_expiration_seconds_bucket{job="apiserver"}[5m]))) < 604800
+          and
+          on (job, cluster, instance) apiserver_client_certificate_expiration_seconds_count{job="apiserver"} > 0
+          )[5m:1m])
+  - id: kube_client_certificate_expiration.2.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(apiserver_client_certificate_expiration_seconds_bucket{job="apiserver"}) or count(apiserver_client_certificate_expiration_seconds_count{job="apiserver"})
+  - id: kube_client_certificate_expiration.2.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          histogram_quantile(0.01, sum without (namespace, service, endpoint) (rate(apiserver_client_certificate_expiration_seconds_bucket{job="apiserver"}[5m]))) < 86400
+          and
+          on (job, cluster, instance) apiserver_client_certificate_expiration_seconds_count{job="apiserver"} > 0
+  - id: kube_client_certificate_expiration.2.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          histogram_quantile(0.01, sum without (namespace, service, endpoint) (rate(apiserver_client_certificate_expiration_seconds_bucket{job="apiserver"}[5m]))) < 86400
+          and
+          on (job, cluster, instance) apiserver_client_certificate_expiration_seconds_count{job="apiserver"} > 0
+          )[5m:1m])
+  - id: kube_client_errors.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(rest_client_requests_total{job="apiserver", code=~"5.."}) or count(rest_client_requests_total{job="apiserver"})
+  - id: kube_client_errors.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          (sum(rate(rest_client_requests_total{job="apiserver",code=~"5.."}[5m])) by (cluster, instance, job, namespace)
+            /
+          sum(rate(rest_client_requests_total{job="apiserver"}[5m])) by (cluster, instance, job, namespace))
+          > 0.01
+  - id: kube_client_errors.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          (sum(rate(rest_client_requests_total{job="apiserver",code=~"5.."}[5m])) by (cluster, instance, job, namespace)
+            /
+          sum(rate(rest_client_requests_total{job="apiserver"}[5m])) by (cluster, instance, job, namespace))
+          > 0.01
+          )[15m:1m])
+  - id: kube_container_waiting.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(kube_pod_container_status_waiting_reason{reason!="CrashLoopBackOff", job="kube-state-metrics", namespace=~".*"})
+  - id: kube_container_waiting.value
+    kind: metrics
+    alternatives:
+      - expr: kube_pod_container_status_waiting_reason{reason!="CrashLoopBackOff", job="kube-state-metrics", namespace=~".*"} > 0
+  - id: kube_container_waiting.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          kube_pod_container_status_waiting_reason{reason!="CrashLoopBackOff", job="kube-state-metrics", namespace=~".*"} > 0
+          )[60m:1m])
+  - id: kube_controller_manager_down.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(up)
+  - id: kube_controller_manager_down.value
+    kind: metrics
+    alternatives:
+      - expr: absent(up{job="kube-controller-manager"})
+  - id: kube_controller_manager_down.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          absent(up{job="kube-controller-manager"})
+          )[15m:1m])
+  - id: kube_controller_manager_instance_unreachable.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(up{job="kube-controller-manager"})
+  - id: kube_controller_manager_instance_unreachable.value
+    kind: metrics
+    alternatives:
+      - expr: up{job="kube-controller-manager"} == 0
+  - id: kube_controller_manager_instance_unreachable.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          up{job="kube-controller-manager"} == 0
+          )[15m:1m])
+  - id: kube_cpu_overcommit.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(kube_node_role{job="kube-state-metrics", role="control-plane"}) or count(kube_node_status_allocatable{job="kube-state-metrics", resource="cpu"}) or count(namespace_cpu:kube_pod_container_resource_requests:sum{})
+  - id: kube_cpu_overcommit.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          # Non-HA clusters.
+          (
+            (
+              sum by (cluster) (namespace_cpu:kube_pod_container_resource_requests:sum{})
+              -
+              sum by (cluster) (kube_node_status_allocatable{job="kube-state-metrics",resource="cpu"}) > 0
+            )
+            and
+            count by (cluster) (max by (cluster, node) (kube_node_role{job="kube-state-metrics", role="control-plane"})) < 3
+          )
+          or
+          # HA clusters.
+          (
+            sum by (cluster) (namespace_cpu:kube_pod_container_resource_requests:sum{})
+            -
+            (
+              # Skip clusters with only one allocatable node.
+              (
+                sum by (cluster) (kube_node_status_allocatable{job="kube-state-metrics",resource="cpu"})
+                -
+                max by (cluster) (kube_node_status_allocatable{job="kube-state-metrics",resource="cpu"})
+              ) > 0
+            ) > 0
+          )
+  - id: kube_cpu_overcommit.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          # Non-HA clusters.
+          (
+            (
+              sum by (cluster) (namespace_cpu:kube_pod_container_resource_requests:sum{})
+              -
+              sum by (cluster) (kube_node_status_allocatable{job="kube-state-metrics",resource="cpu"}) > 0
+            )
+            and
+            count by (cluster) (max by (cluster, node) (kube_node_role{job="kube-state-metrics", role="control-plane"})) < 3
+          )
+          or
+          # HA clusters.
+          (
+            sum by (cluster) (namespace_cpu:kube_pod_container_resource_requests:sum{})
+            -
+            (
+              # Skip clusters with only one allocatable node.
+              (
+                sum by (cluster) (kube_node_status_allocatable{job="kube-state-metrics",resource="cpu"})
+                -
+                max by (cluster) (kube_node_status_allocatable{job="kube-state-metrics",resource="cpu"})
+              ) > 0
+            ) > 0
+          )
+          )[10m:1m])
+  - id: kube_cpu_quota_overcommit.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(kube_node_status_allocatable{resource="cpu", job="kube-state-metrics"}) or count(kube_resourcequota{job="kube-state-metrics", type="hard", resource=~"(cpu|requests.cpu)"})
+  - id: kube_cpu_quota_overcommit.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          sum by (cluster) (
+            min without(resource) (kube_resourcequota{job="kube-state-metrics", type="hard", resource=~"(cpu|requests.cpu)"})
+          )
+          /
+          sum by (cluster) (
+            kube_node_status_allocatable{resource="cpu", job="kube-state-metrics"}
+          ) > 1.5
+  - id: kube_cpu_quota_overcommit.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          sum by (cluster) (
+            min without(resource) (kube_resourcequota{job="kube-state-metrics", type="hard", resource=~"(cpu|requests.cpu)"})
+          )
+          /
+          sum by (cluster) (
+            kube_node_status_allocatable{resource="cpu", job="kube-state-metrics"}
+          ) > 1.5
+          )[5m:1m])
+  - id: kube_daemon_set_mis_scheduled.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(kube_daemonset_status_number_misscheduled{job="kube-state-metrics", namespace=~".*"})
+  - id: kube_daemon_set_mis_scheduled.value
+    kind: metrics
+    alternatives:
+      - expr: kube_daemonset_status_number_misscheduled{job="kube-state-metrics", namespace=~".*"} > 0
+  - id: kube_daemon_set_mis_scheduled.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          kube_daemonset_status_number_misscheduled{job="kube-state-metrics", namespace=~".*"} > 0
+          )[15m:1m])
+  - id: kube_daemon_set_not_scheduled.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(kube_daemonset_status_current_number_scheduled{job="kube-state-metrics", namespace=~".*"}) or count(kube_daemonset_status_desired_number_scheduled{job="kube-state-metrics", namespace=~".*"})
+  - id: kube_daemon_set_not_scheduled.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          kube_daemonset_status_desired_number_scheduled{job="kube-state-metrics", namespace=~".*"}
+            -
+          kube_daemonset_status_current_number_scheduled{job="kube-state-metrics", namespace=~".*"} > 0
+  - id: kube_daemon_set_not_scheduled.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          kube_daemonset_status_desired_number_scheduled{job="kube-state-metrics", namespace=~".*"}
+            -
+          kube_daemonset_status_current_number_scheduled{job="kube-state-metrics", namespace=~".*"} > 0
+          )[10m:1m])
+  - id: kube_daemon_set_rollout_stuck.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(kube_daemonset_status_current_number_scheduled{job="kube-state-metrics", namespace=~".*"}) or count(kube_daemonset_status_desired_number_scheduled{job="kube-state-metrics", namespace=~".*"}) or count(kube_daemonset_status_number_available{job="kube-state-metrics", namespace=~".*"}) or count(kube_daemonset_status_number_misscheduled{job="kube-state-metrics", namespace=~".*"}) or count(kube_daemonset_status_updated_number_scheduled{job="kube-state-metrics", namespace=~".*"})
+  - id: kube_daemon_set_rollout_stuck.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          (
+            (
+              kube_daemonset_status_current_number_scheduled{job="kube-state-metrics", namespace=~".*"}
+                !=
+              kube_daemonset_status_desired_number_scheduled{job="kube-state-metrics", namespace=~".*"}
+            ) or (
+              kube_daemonset_status_number_misscheduled{job="kube-state-metrics", namespace=~".*"}
+                !=
+              0
+            ) or (
+              kube_daemonset_status_updated_number_scheduled{job="kube-state-metrics", namespace=~".*"}
+                !=
+              kube_daemonset_status_desired_number_scheduled{job="kube-state-metrics", namespace=~".*"}
+            ) or (
+              kube_daemonset_status_number_available{job="kube-state-metrics", namespace=~".*"}
+                !=
+              kube_daemonset_status_desired_number_scheduled{job="kube-state-metrics", namespace=~".*"}
+            )
+          ) and (
+            changes(kube_daemonset_status_updated_number_scheduled{job="kube-state-metrics", namespace=~".*"}[5m])
+              ==
+            0
+          )
+  - id: kube_daemon_set_rollout_stuck.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          (
+            (
+              kube_daemonset_status_current_number_scheduled{job="kube-state-metrics", namespace=~".*"}
+                !=
+              kube_daemonset_status_desired_number_scheduled{job="kube-state-metrics", namespace=~".*"}
+            ) or (
+              kube_daemonset_status_number_misscheduled{job="kube-state-metrics", namespace=~".*"}
+                !=
+              0
+            ) or (
+              kube_daemonset_status_updated_number_scheduled{job="kube-state-metrics", namespace=~".*"}
+                !=
+              kube_daemonset_status_desired_number_scheduled{job="kube-state-metrics", namespace=~".*"}
+            ) or (
+              kube_daemonset_status_number_available{job="kube-state-metrics", namespace=~".*"}
+                !=
+              kube_daemonset_status_desired_number_scheduled{job="kube-state-metrics", namespace=~".*"}
+            )
+          ) and (
+            changes(kube_daemonset_status_updated_number_scheduled{job="kube-state-metrics", namespace=~".*"}[5m])
+              ==
+            0
+          )
+          )[15m:1m])
+  - id: kube_deployment_generation_mismatch.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(kube_deployment_metadata_generation{job="kube-state-metrics", namespace=~".*"}) or count(kube_deployment_status_observed_generation{job="kube-state-metrics", namespace=~".*"})
+  - id: kube_deployment_generation_mismatch.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          kube_deployment_status_observed_generation{job="kube-state-metrics", namespace=~".*"}
+            !=
+          kube_deployment_metadata_generation{job="kube-state-metrics", namespace=~".*"}
+  - id: kube_deployment_generation_mismatch.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          kube_deployment_status_observed_generation{job="kube-state-metrics", namespace=~".*"}
+            !=
+          kube_deployment_metadata_generation{job="kube-state-metrics", namespace=~".*"}
+          )[15m:1m])
+  - id: kube_deployment_replicas_mismatch.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(kube_deployment_spec_replicas{job="kube-state-metrics", namespace=~".*"}) or count(kube_deployment_status_replicas_available{job="kube-state-metrics", namespace=~".*"}) or count(kube_deployment_status_replicas_updated{job="kube-state-metrics", namespace=~".*"})
+  - id: kube_deployment_replicas_mismatch.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          (
+            kube_deployment_spec_replicas{job="kube-state-metrics", namespace=~".*"}
+              >
+            kube_deployment_status_replicas_available{job="kube-state-metrics", namespace=~".*"}
+          ) and (
+            changes(kube_deployment_status_replicas_updated{job="kube-state-metrics", namespace=~".*"}[10m])
+              ==
+            0
+          )
+  - id: kube_deployment_replicas_mismatch.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          (
+            kube_deployment_spec_replicas{job="kube-state-metrics", namespace=~".*"}
+              >
+            kube_deployment_status_replicas_available{job="kube-state-metrics", namespace=~".*"}
+          ) and (
+            changes(kube_deployment_status_replicas_updated{job="kube-state-metrics", namespace=~".*"}[10m])
+              ==
+            0
+          )
+          )[15m:1m])
+  - id: kube_deployment_rollout_stuck.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(kube_deployment_status_condition{condition="Progressing", status="false", job="kube-state-metrics", namespace=~".*"})
+  - id: kube_deployment_rollout_stuck.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          kube_deployment_status_condition{condition="Progressing", status="false",job="kube-state-metrics", namespace=~".*"}
+          != 0
+  - id: kube_deployment_rollout_stuck.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          kube_deployment_status_condition{condition="Progressing", status="false",job="kube-state-metrics", namespace=~".*"}
+          != 0
+          )[15m:1m])
+  - id: kube_hpa_maxed_out.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(kube_horizontalpodautoscaler_spec_max_replicas{job="kube-state-metrics", namespace=~".*"}) or count(kube_horizontalpodautoscaler_spec_min_replicas{job="kube-state-metrics", namespace=~".*"}) or count(kube_horizontalpodautoscaler_status_current_replicas{job="kube-state-metrics", namespace=~".*"})
+  - id: kube_hpa_maxed_out.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          (
+            kube_horizontalpodautoscaler_status_current_replicas{job="kube-state-metrics", namespace=~".*"}
+              ==
+            kube_horizontalpodautoscaler_spec_max_replicas{job="kube-state-metrics", namespace=~".*"}
+          )
+          and on (namespace, horizontalpodautoscaler, cluster) (
+            kube_horizontalpodautoscaler_spec_max_replicas{job="kube-state-metrics", namespace=~".*"}
+              !=
+            kube_horizontalpodautoscaler_spec_min_replicas{job="kube-state-metrics", namespace=~".*"}
+          )
+  - id: kube_hpa_maxed_out.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          (
+            kube_horizontalpodautoscaler_status_current_replicas{job="kube-state-metrics", namespace=~".*"}
+              ==
+            kube_horizontalpodautoscaler_spec_max_replicas{job="kube-state-metrics", namespace=~".*"}
+          )
+          and on (namespace, horizontalpodautoscaler, cluster) (
+            kube_horizontalpodautoscaler_spec_max_replicas{job="kube-state-metrics", namespace=~".*"}
+              !=
+            kube_horizontalpodautoscaler_spec_min_replicas{job="kube-state-metrics", namespace=~".*"}
+          )
+          )[15m:1m])
+  - id: kube_hpa_replicas_mismatch.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(kube_horizontalpodautoscaler_spec_max_replicas{job="kube-state-metrics", namespace=~".*"}) or count(kube_horizontalpodautoscaler_spec_min_replicas{job="kube-state-metrics", namespace=~".*"}) or count(kube_horizontalpodautoscaler_status_current_replicas{job="kube-state-metrics", namespace=~".*"}) or count(kube_horizontalpodautoscaler_status_desired_replicas{job="kube-state-metrics", namespace=~".*"})
+  - id: kube_hpa_replicas_mismatch.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          (kube_horizontalpodautoscaler_status_desired_replicas{job="kube-state-metrics", namespace=~".*"}
+            !=
+          kube_horizontalpodautoscaler_status_current_replicas{job="kube-state-metrics", namespace=~".*"})
+            and
+          (kube_horizontalpodautoscaler_status_current_replicas{job="kube-state-metrics", namespace=~".*"}
+            >
+          kube_horizontalpodautoscaler_spec_min_replicas{job="kube-state-metrics", namespace=~".*"})
+            and
+          (kube_horizontalpodautoscaler_status_current_replicas{job="kube-state-metrics", namespace=~".*"}
+            <
+          kube_horizontalpodautoscaler_spec_max_replicas{job="kube-state-metrics", namespace=~".*"})
+            and
+          changes(kube_horizontalpodautoscaler_status_current_replicas{job="kube-state-metrics", namespace=~".*"}[15m]) == 0
+  - id: kube_hpa_replicas_mismatch.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          (kube_horizontalpodautoscaler_status_desired_replicas{job="kube-state-metrics", namespace=~".*"}
+            !=
+          kube_horizontalpodautoscaler_status_current_replicas{job="kube-state-metrics", namespace=~".*"})
+            and
+          (kube_horizontalpodautoscaler_status_current_replicas{job="kube-state-metrics", namespace=~".*"}
+            >
+          kube_horizontalpodautoscaler_spec_min_replicas{job="kube-state-metrics", namespace=~".*"})
+            and
+          (kube_horizontalpodautoscaler_status_current_replicas{job="kube-state-metrics", namespace=~".*"}
+            <
+          kube_horizontalpodautoscaler_spec_max_replicas{job="kube-state-metrics", namespace=~".*"})
+            and
+          changes(kube_horizontalpodautoscaler_status_current_replicas{job="kube-state-metrics", namespace=~".*"}[15m]) == 0
+          )[15m:1m])
+  - id: kube_job_failed.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(kube_job_failed{job="kube-state-metrics", namespace=~".*"})
+  - id: kube_job_failed.value
+    kind: metrics
+    alternatives:
+      - expr: kube_job_failed{job="kube-state-metrics", namespace=~".*"}  > 0
+  - id: kube_job_failed.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          kube_job_failed{job="kube-state-metrics", namespace=~".*"}  > 0
+          )[15m:1m])
+  - id: kube_job_not_completed.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(kube_job_labels{job="kube-state-metrics", namespace=~".*", label_excluded_from_alerts="true"}) or count(kube_job_status_active{job="kube-state-metrics", namespace=~".*"}) or count(kube_job_status_start_time{job="kube-state-metrics", namespace=~".*"})
+  - id: kube_job_not_completed.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          time() - max by (namespace, job_name, cluster) (kube_job_status_start_time{job="kube-state-metrics", namespace=~".*"}
+            and
+          kube_job_status_active{job="kube-state-metrics", namespace=~".*"} > 0) > 43200
+            unless on (namespace, job_name, cluster)
+          max by (namespace, job_name, cluster) (kube_job_labels{job="kube-state-metrics", namespace=~".*",label_excluded_from_alerts="true"} == 1)
+  - id: kube_memory_overcommit.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(kube_node_role{job="kube-state-metrics", role="control-plane"}) or count(kube_node_status_allocatable{job="kube-state-metrics", resource="memory"}) or count(namespace_memory:kube_pod_container_resource_requests:sum{})
+  - id: kube_memory_overcommit.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          # Non-HA clusters.
+          (
+            (
+              sum by (cluster) (namespace_memory:kube_pod_container_resource_requests:sum{})
+              -
+              sum by (cluster) (kube_node_status_allocatable{job="kube-state-metrics",resource="memory"}) > 0
+            )
+            and
+            count by (cluster) (max by (cluster, node) (kube_node_role{job="kube-state-metrics", role="control-plane"})) < 3
+          )
+          or
+          # HA clusters.
+          (
+            sum by (cluster) (namespace_memory:kube_pod_container_resource_requests:sum{})
+            -
+            (
+              # Skip clusters with only one allocatable node.
+              (
+                sum by (cluster) (kube_node_status_allocatable{job="kube-state-metrics",resource="memory"})
+                -
+                max by (cluster) (kube_node_status_allocatable{job="kube-state-metrics",resource="memory"})
+              ) > 0
+            ) > 0
+          )
+  - id: kube_memory_overcommit.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          # Non-HA clusters.
+          (
+            (
+              sum by (cluster) (namespace_memory:kube_pod_container_resource_requests:sum{})
+              -
+              sum by (cluster) (kube_node_status_allocatable{job="kube-state-metrics",resource="memory"}) > 0
+            )
+            and
+            count by (cluster) (max by (cluster, node) (kube_node_role{job="kube-state-metrics", role="control-plane"})) < 3
+          )
+          or
+          # HA clusters.
+          (
+            sum by (cluster) (namespace_memory:kube_pod_container_resource_requests:sum{})
+            -
+            (
+              # Skip clusters with only one allocatable node.
+              (
+                sum by (cluster) (kube_node_status_allocatable{job="kube-state-metrics",resource="memory"})
+                -
+                max by (cluster) (kube_node_status_allocatable{job="kube-state-metrics",resource="memory"})
+              ) > 0
+            ) > 0
+          )
+          )[10m:1m])
+  - id: kube_memory_quota_overcommit.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(kube_node_status_allocatable{resource="memory", job="kube-state-metrics"}) or count(kube_resourcequota{job="kube-state-metrics", type="hard", resource=~"(memory|requests.memory)"})
+  - id: kube_memory_quota_overcommit.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          sum by (cluster) (
+            min without(resource) (kube_resourcequota{job="kube-state-metrics", type="hard", resource=~"(memory|requests.memory)"})
+          )
+          /
+          sum by (cluster) (
+            kube_node_status_allocatable{resource="memory", job="kube-state-metrics"}
+          ) > 1.5
+  - id: kube_memory_quota_overcommit.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          sum by (cluster) (
+            min without(resource) (kube_resourcequota{job="kube-state-metrics", type="hard", resource=~"(memory|requests.memory)"})
+          )
+          /
+          sum by (cluster) (
+            kube_node_status_allocatable{resource="memory", job="kube-state-metrics"}
+          ) > 1.5
+          )[5m:1m])
+  - id: kube_node_eviction.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(kubelet_evictions{job="kubelet", metrics_path="/metrics"}) or count(kubelet_node_name{job="kubelet", metrics_path="/metrics"})
+  - id: kube_node_eviction.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          sum(rate(kubelet_evictions{job="kubelet", metrics_path="/metrics"}[15m])) by (cluster, eviction_signal, instance)
+          * on (cluster, instance) group_left(node)
+          max by (cluster, instance, node) (
+            kubelet_node_name{job="kubelet", metrics_path="/metrics"}
+          )
+          > 0
+  - id: kube_node_not_ready.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(kube_node_spec_unschedulable{job="kube-state-metrics"}) or count(kube_node_status_condition{job="kube-state-metrics", condition="Ready", status="true"})
+  - id: kube_node_not_ready.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          kube_node_status_condition{job="kube-state-metrics",condition="Ready",status="true"} == 0
+          and on (cluster, node)
+          kube_node_spec_unschedulable{job="kube-state-metrics"} == 0
+  - id: kube_node_not_ready.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          kube_node_status_condition{job="kube-state-metrics",condition="Ready",status="true"} == 0
+          and on (cluster, node)
+          kube_node_spec_unschedulable{job="kube-state-metrics"} == 0
+          )[15m:1m])
+  - id: kube_node_pressure.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(kube_node_spec_unschedulable{job="kube-state-metrics"}) or count(kube_node_status_condition{job="kube-state-metrics", condition=~"(MemoryPressure|DiskPressure|PIDPressure)", status="true"})
+  - id: kube_node_pressure.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          kube_node_status_condition{job="kube-state-metrics",condition=~"(MemoryPressure|DiskPressure|PIDPressure)",status="true"} == 1
+          and on (cluster, node)
+          kube_node_spec_unschedulable{job="kube-state-metrics"} == 0
+  - id: kube_node_pressure.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          kube_node_status_condition{job="kube-state-metrics",condition=~"(MemoryPressure|DiskPressure|PIDPressure)",status="true"} == 1
+          and on (cluster, node)
+          kube_node_spec_unschedulable{job="kube-state-metrics"} == 0
+          )[10m:1m])
+  - id: kube_node_readiness_flapping.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(kube_node_spec_unschedulable{job="kube-state-metrics"}) or count(kube_node_status_condition{job="kube-state-metrics", status="true", condition="Ready"})
+  - id: kube_node_readiness_flapping.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          sum(changes(kube_node_status_condition{job="kube-state-metrics",status="true",condition="Ready"}[15m])) by (cluster, node) > 2
+          and on (cluster, node)
+          kube_node_spec_unschedulable{job="kube-state-metrics"} == 0
+  - id: kube_node_readiness_flapping.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          sum(changes(kube_node_status_condition{job="kube-state-metrics",status="true",condition="Ready"}[15m])) by (cluster, node) > 2
+          and on (cluster, node)
+          kube_node_spec_unschedulable{job="kube-state-metrics"} == 0
+          )[15m:1m])
+  - id: kube_node_unreachable.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(kube_node_spec_taint{job="kube-state-metrics", key="node.kubernetes.io/unreachable", effect="NoSchedule"}) or count(kube_node_spec_taint{job="kube-state-metrics", key=~"ToBeDeletedByClusterAutoscaler|cloud.google.com/impending-node-termination|aws-node-termination-handler/spot-itn"})
+  - id: kube_node_unreachable.value
+    kind: metrics
+    alternatives:
+      - expr: (kube_node_spec_taint{job="kube-state-metrics",key="node.kubernetes.io/unreachable",effect="NoSchedule"} unless ignoring(key,value) kube_node_spec_taint{job="kube-state-metrics",key=~"ToBeDeletedByClusterAutoscaler|cloud.google.com/impending-node-termination|aws-node-termination-handler/spot-itn"}) == 1
+  - id: kube_node_unreachable.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          (kube_node_spec_taint{job="kube-state-metrics",key="node.kubernetes.io/unreachable",effect="NoSchedule"} unless ignoring(key,value) kube_node_spec_taint{job="kube-state-metrics",key=~"ToBeDeletedByClusterAutoscaler|cloud.google.com/impending-node-termination|aws-node-termination-handler/spot-itn"}) == 1
+          )[15m:1m])
+  - id: kube_pdb_not_enough_healthy_pods.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(kube_poddisruptionbudget_status_current_healthy{job="kube-state-metrics", namespace=~".*"}) or count(kube_poddisruptionbudget_status_desired_healthy{job="kube-state-metrics", namespace=~".*"}) or count(kube_poddisruptionbudget_status_expected_pods{job="kube-state-metrics", namespace=~".*"})
+  - id: kube_pdb_not_enough_healthy_pods.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          (
+            kube_poddisruptionbudget_status_desired_healthy{job="kube-state-metrics", namespace=~".*"}
+            -
+            kube_poddisruptionbudget_status_current_healthy{job="kube-state-metrics", namespace=~".*"}
+          )
+          > 0
+          and
+          kube_poddisruptionbudget_status_expected_pods{job="kube-state-metrics", namespace=~".*"}
+          > 0
+  - id: kube_pdb_not_enough_healthy_pods.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          (
+            kube_poddisruptionbudget_status_desired_healthy{job="kube-state-metrics", namespace=~".*"}
+            -
+            kube_poddisruptionbudget_status_current_healthy{job="kube-state-metrics", namespace=~".*"}
+          )
+          > 0
+          and
+          kube_poddisruptionbudget_status_expected_pods{job="kube-state-metrics", namespace=~".*"}
+          > 0
+          )[15m:1m])
+  - id: kube_persistent_volume_errors.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(kube_persistentvolume_status_phase{phase=~"Failed|Pending", job="kube-state-metrics"})
+  - id: kube_persistent_volume_errors.value
+    kind: metrics
+    alternatives:
+      - expr: kube_persistentvolume_status_phase{phase=~"Failed|Pending",job="kube-state-metrics"} > 0
+  - id: kube_persistent_volume_errors.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          kube_persistentvolume_status_phase{phase=~"Failed|Pending",job="kube-state-metrics"} > 0
+          )[5m:1m])
+  - id: kube_persistent_volume_filling_up.1.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(kube_persistentvolumeclaim_access_mode{access_mode="ReadOnlyMany"}) or count(kube_persistentvolumeclaim_labels{label_excluded_from_alerts="true"}) or count(kubelet_volume_stats_available_bytes{job="kubelet", namespace=~".*", metrics_path="/metrics"}) or count(kubelet_volume_stats_capacity_bytes{job="kubelet", namespace=~".*", metrics_path="/metrics"}) or count(kubelet_volume_stats_used_bytes{job="kubelet", namespace=~".*", metrics_path="/metrics"})
+  - id: kube_persistent_volume_filling_up.1.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          (
+            kubelet_volume_stats_available_bytes{job="kubelet", namespace=~".*", metrics_path="/metrics"}
+              /
+            kubelet_volume_stats_capacity_bytes{job="kubelet", namespace=~".*", metrics_path="/metrics"}
+          ) < 0.03
+          and
+          kubelet_volume_stats_used_bytes{job="kubelet", namespace=~".*", metrics_path="/metrics"} > 0
+          unless on (cluster, namespace, persistentvolumeclaim)
+          kube_persistentvolumeclaim_access_mode{ access_mode="ReadOnlyMany"} == 1
+          unless on (cluster, namespace, persistentvolumeclaim)
+          kube_persistentvolumeclaim_labels{label_excluded_from_alerts="true"} == 1
+  - id: kube_persistent_volume_filling_up.1.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          (
+            kubelet_volume_stats_available_bytes{job="kubelet", namespace=~".*", metrics_path="/metrics"}
+              /
+            kubelet_volume_stats_capacity_bytes{job="kubelet", namespace=~".*", metrics_path="/metrics"}
+          ) < 0.03
+          and
+          kubelet_volume_stats_used_bytes{job="kubelet", namespace=~".*", metrics_path="/metrics"} > 0
+          unless on (cluster, namespace, persistentvolumeclaim)
+          kube_persistentvolumeclaim_access_mode{ access_mode="ReadOnlyMany"} == 1
+          unless on (cluster, namespace, persistentvolumeclaim)
+          kube_persistentvolumeclaim_labels{label_excluded_from_alerts="true"} == 1
+          )[1m:1m])
+  - id: kube_persistent_volume_filling_up.2.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(kube_persistentvolumeclaim_access_mode{access_mode="ReadOnlyMany"}) or count(kube_persistentvolumeclaim_labels{label_excluded_from_alerts="true"}) or count(kubelet_volume_stats_available_bytes{job="kubelet", namespace=~".*", metrics_path="/metrics"}) or count(kubelet_volume_stats_capacity_bytes{job="kubelet", namespace=~".*", metrics_path="/metrics"}) or count(kubelet_volume_stats_used_bytes{job="kubelet", namespace=~".*", metrics_path="/metrics"})
+  - id: kube_persistent_volume_filling_up.2.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          (
+            kubelet_volume_stats_available_bytes{job="kubelet", namespace=~".*", metrics_path="/metrics"}
+              /
+            kubelet_volume_stats_capacity_bytes{job="kubelet", namespace=~".*", metrics_path="/metrics"}
+          ) < 0.15
+          and
+          kubelet_volume_stats_used_bytes{job="kubelet", namespace=~".*", metrics_path="/metrics"} > 0
+          and
+          predict_linear(kubelet_volume_stats_available_bytes{job="kubelet", namespace=~".*", metrics_path="/metrics"}[6h], 4 * 24 * 3600) < 0
+          unless on (cluster, namespace, persistentvolumeclaim)
+          kube_persistentvolumeclaim_access_mode{ access_mode="ReadOnlyMany"} == 1
+          unless on (cluster, namespace, persistentvolumeclaim)
+          kube_persistentvolumeclaim_labels{label_excluded_from_alerts="true"} == 1
+  - id: kube_persistent_volume_filling_up.2.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          (
+            kubelet_volume_stats_available_bytes{job="kubelet", namespace=~".*", metrics_path="/metrics"}
+              /
+            kubelet_volume_stats_capacity_bytes{job="kubelet", namespace=~".*", metrics_path="/metrics"}
+          ) < 0.15
+          and
+          kubelet_volume_stats_used_bytes{job="kubelet", namespace=~".*", metrics_path="/metrics"} > 0
+          and
+          predict_linear(kubelet_volume_stats_available_bytes{job="kubelet", namespace=~".*", metrics_path="/metrics"}[6h], 4 * 24 * 3600) < 0
+          unless on (cluster, namespace, persistentvolumeclaim)
+          kube_persistentvolumeclaim_access_mode{ access_mode="ReadOnlyMany"} == 1
+          unless on (cluster, namespace, persistentvolumeclaim)
+          kube_persistentvolumeclaim_labels{label_excluded_from_alerts="true"} == 1
+          )[60m:1m])
+  - id: kube_persistent_volume_inodes_filling_up.1.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(kube_persistentvolumeclaim_access_mode{access_mode="ReadOnlyMany"}) or count(kube_persistentvolumeclaim_labels{label_excluded_from_alerts="true"}) or count(kubelet_volume_stats_inodes_free{job="kubelet", namespace=~".*", metrics_path="/metrics"}) or count(kubelet_volume_stats_inodes_used{job="kubelet", namespace=~".*", metrics_path="/metrics"}) or count(kubelet_volume_stats_inodes{job="kubelet", namespace=~".*", metrics_path="/metrics"})
+  - id: kube_persistent_volume_inodes_filling_up.1.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          (
+            kubelet_volume_stats_inodes_free{job="kubelet", namespace=~".*", metrics_path="/metrics"}
+              /
+            kubelet_volume_stats_inodes{job="kubelet", namespace=~".*", metrics_path="/metrics"}
+          ) < 0.03
+          and
+          kubelet_volume_stats_inodes_used{job="kubelet", namespace=~".*", metrics_path="/metrics"} > 0
+          unless on (cluster, namespace, persistentvolumeclaim)
+          kube_persistentvolumeclaim_access_mode{ access_mode="ReadOnlyMany"} == 1
+          unless on (cluster, namespace, persistentvolumeclaim)
+          kube_persistentvolumeclaim_labels{label_excluded_from_alerts="true"} == 1
+  - id: kube_persistent_volume_inodes_filling_up.1.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          (
+            kubelet_volume_stats_inodes_free{job="kubelet", namespace=~".*", metrics_path="/metrics"}
+              /
+            kubelet_volume_stats_inodes{job="kubelet", namespace=~".*", metrics_path="/metrics"}
+          ) < 0.03
+          and
+          kubelet_volume_stats_inodes_used{job="kubelet", namespace=~".*", metrics_path="/metrics"} > 0
+          unless on (cluster, namespace, persistentvolumeclaim)
+          kube_persistentvolumeclaim_access_mode{ access_mode="ReadOnlyMany"} == 1
+          unless on (cluster, namespace, persistentvolumeclaim)
+          kube_persistentvolumeclaim_labels{label_excluded_from_alerts="true"} == 1
+          )[1m:1m])
+  - id: kube_persistent_volume_inodes_filling_up.2.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(kube_persistentvolumeclaim_access_mode{access_mode="ReadOnlyMany"}) or count(kube_persistentvolumeclaim_labels{label_excluded_from_alerts="true"}) or count(kubelet_volume_stats_inodes_free{job="kubelet", namespace=~".*", metrics_path="/metrics"}) or count(kubelet_volume_stats_inodes_used{job="kubelet", namespace=~".*", metrics_path="/metrics"}) or count(kubelet_volume_stats_inodes{job="kubelet", namespace=~".*", metrics_path="/metrics"})
+  - id: kube_persistent_volume_inodes_filling_up.2.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          (
+            kubelet_volume_stats_inodes_free{job="kubelet", namespace=~".*", metrics_path="/metrics"}
+              /
+            kubelet_volume_stats_inodes{job="kubelet", namespace=~".*", metrics_path="/metrics"}
+          ) < 0.15
+          and
+          kubelet_volume_stats_inodes_used{job="kubelet", namespace=~".*", metrics_path="/metrics"} > 0
+          and
+          predict_linear(kubelet_volume_stats_inodes_free{job="kubelet", namespace=~".*", metrics_path="/metrics"}[6h], 4 * 24 * 3600) < 0
+          unless on (cluster, namespace, persistentvolumeclaim)
+          kube_persistentvolumeclaim_access_mode{ access_mode="ReadOnlyMany"} == 1
+          unless on (cluster, namespace, persistentvolumeclaim)
+          kube_persistentvolumeclaim_labels{label_excluded_from_alerts="true"} == 1
+  - id: kube_persistent_volume_inodes_filling_up.2.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          (
+            kubelet_volume_stats_inodes_free{job="kubelet", namespace=~".*", metrics_path="/metrics"}
+              /
+            kubelet_volume_stats_inodes{job="kubelet", namespace=~".*", metrics_path="/metrics"}
+          ) < 0.15
+          and
+          kubelet_volume_stats_inodes_used{job="kubelet", namespace=~".*", metrics_path="/metrics"} > 0
+          and
+          predict_linear(kubelet_volume_stats_inodes_free{job="kubelet", namespace=~".*", metrics_path="/metrics"}[6h], 4 * 24 * 3600) < 0
+          unless on (cluster, namespace, persistentvolumeclaim)
+          kube_persistentvolumeclaim_access_mode{ access_mode="ReadOnlyMany"} == 1
+          unless on (cluster, namespace, persistentvolumeclaim)
+          kube_persistentvolumeclaim_labels{label_excluded_from_alerts="true"} == 1
+          )[60m:1m])
+  - id: kube_pod_crash_looping.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(kube_pod_container_status_waiting_reason{reason="CrashLoopBackOff", job="kube-state-metrics", namespace=~".*"})
+  - id: kube_pod_crash_looping.value
+    kind: metrics
+    alternatives:
+      - expr: max_over_time(kube_pod_container_status_waiting_reason{reason="CrashLoopBackOff", job="kube-state-metrics", namespace=~".*"}[5m]) >= 1
+  - id: kube_pod_crash_looping.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          max_over_time(kube_pod_container_status_waiting_reason{reason="CrashLoopBackOff", job="kube-state-metrics", namespace=~".*"}[5m]) >= 1
+          )[15m:1m])
+  - id: kube_pod_not_ready.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(kube_pod_owner{owner_kind!="Job"}) or count(kube_pod_status_phase{job="kube-state-metrics", namespace=~".*", phase="Running"}) or count(kube_pod_status_phase{job="kube-state-metrics", namespace=~".*", phase=~"Pending|Unknown"}) or count(kube_pod_status_ready{job="kube-state-metrics", namespace=~".*", condition="true"}) or count(kube_pod_status_reason{job="kube-state-metrics", namespace=~".*", reason="SchedulingGated"})
+  - id: kube_pod_not_ready.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          sum by (namespace, pod, job, cluster) (
+            max by (namespace, pod, job, cluster) (
+              kube_pod_status_phase{job="kube-state-metrics", namespace=~".*", phase=~"Pending|Unknown"}
+              or
+              (
+                kube_pod_status_phase{job="kube-state-metrics", namespace=~".*", phase="Running"} == 1
+                and on (namespace, pod, cluster)
+                kube_pod_status_ready{job="kube-state-metrics", namespace=~".*", condition="true"} == 0
+              )
+            ) * on (namespace, pod, cluster) group_left() topk by (namespace, pod, cluster) (
+              1, max by (namespace, pod, owner_kind, cluster) (kube_pod_owner{owner_kind!="Job"})
+            )
+          ) > 0
+          unless on (namespace, pod, cluster)
+          kube_pod_status_reason{job="kube-state-metrics", namespace=~".*", reason="SchedulingGated"} == 1
+  - id: kube_pod_not_ready.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          sum by (namespace, pod, job, cluster) (
+            max by (namespace, pod, job, cluster) (
+              kube_pod_status_phase{job="kube-state-metrics", namespace=~".*", phase=~"Pending|Unknown"}
+              or
+              (
+                kube_pod_status_phase{job="kube-state-metrics", namespace=~".*", phase="Running"} == 1
+                and on (namespace, pod, cluster)
+                kube_pod_status_ready{job="kube-state-metrics", namespace=~".*", condition="true"} == 0
+              )
+            ) * on (namespace, pod, cluster) group_left() topk by (namespace, pod, cluster) (
+              1, max by (namespace, pod, owner_kind, cluster) (kube_pod_owner{owner_kind!="Job"})
+            )
+          ) > 0
+          unless on (namespace, pod, cluster)
+          kube_pod_status_reason{job="kube-state-metrics", namespace=~".*", reason="SchedulingGated"} == 1
+          )[15m:1m])
+  - id: kube_proxy_down.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(up)
+  - id: kube_proxy_down.value
+    kind: metrics
+    alternatives:
+      - expr: absent(up{job="kube-proxy"})
+  - id: kube_proxy_down.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          absent(up{job="kube-proxy"})
+          )[15m:1m])
+  - id: kube_proxy_instance_unreachable.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(up{job="kube-proxy"})
+  - id: kube_proxy_instance_unreachable.value
+    kind: metrics
+    alternatives:
+      - expr: up{job="kube-proxy"} == 0
+  - id: kube_proxy_instance_unreachable.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          up{job="kube-proxy"} == 0
+          )[15m:1m])
+  - id: kube_quota_almost_full.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(kube_resourcequota{job="kube-state-metrics", type="hard"}) or count(kube_resourcequota{job="kube-state-metrics", type="used"})
+  - id: kube_quota_almost_full.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          topk by (cluster, namespace, resource, resourcequota) (1,
+            max without (instance, job, type) (
+              kube_resourcequota{job="kube-state-metrics", type="used"}
+            )
+          )
+          / on (cluster, namespace, resource, resourcequota) group_left()
+          topk by (cluster, namespace, resource, resourcequota) (1,
+            max without (instance, job, type) (
+              kube_resourcequota{job="kube-state-metrics", type="hard"}
+            ) > 0
+          )
+          > 0.9 < 1
+  - id: kube_quota_almost_full.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          topk by (cluster, namespace, resource, resourcequota) (1,
+            max without (instance, job, type) (
+              kube_resourcequota{job="kube-state-metrics", type="used"}
+            )
+          )
+          / on (cluster, namespace, resource, resourcequota) group_left()
+          topk by (cluster, namespace, resource, resourcequota) (1,
+            max without (instance, job, type) (
+              kube_resourcequota{job="kube-state-metrics", type="hard"}
+            ) > 0
+          )
+          > 0.9 < 1
+          )[15m:1m])
+  - id: kube_quota_exceeded.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(kube_resourcequota{job="kube-state-metrics", type="hard"}) or count(kube_resourcequota{job="kube-state-metrics", type="used"})
+  - id: kube_quota_exceeded.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          topk by (cluster, namespace, resource, resourcequota) (1,
+            max without (instance, job, type) (
+              kube_resourcequota{job="kube-state-metrics", type="used"}
+            )
+          )
+          / on (cluster, namespace, resource, resourcequota) group_left()
+          topk by (cluster, namespace, resource, resourcequota) (1,
+            max without (instance, job, type) (
+              kube_resourcequota{job="kube-state-metrics", type="hard"}
+            ) > 0
+          ) > 1
+  - id: kube_quota_exceeded.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          topk by (cluster, namespace, resource, resourcequota) (1,
+            max without (instance, job, type) (
+              kube_resourcequota{job="kube-state-metrics", type="used"}
+            )
+          )
+          / on (cluster, namespace, resource, resourcequota) group_left()
+          topk by (cluster, namespace, resource, resourcequota) (1,
+            max without (instance, job, type) (
+              kube_resourcequota{job="kube-state-metrics", type="hard"}
+            ) > 0
+          ) > 1
+          )[15m:1m])
+  - id: kube_quota_fully_used.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(kube_resourcequota{job="kube-state-metrics", type="hard"}) or count(kube_resourcequota{job="kube-state-metrics", type="used"})
+  - id: kube_quota_fully_used.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          topk by (cluster, namespace, resource, resourcequota) (1,
+            max without (instance, job, type) (
+              kube_resourcequota{job="kube-state-metrics", type="used"}
+            )
+          )
+          / on (cluster, namespace, resource, resourcequota) group_left()
+          topk by (cluster, namespace, resource, resourcequota) (1,
+            max without (instance, job, type) (
+              kube_resourcequota{job="kube-state-metrics", type="hard"}
+            ) > 0
+          )
+          == 1
+  - id: kube_quota_fully_used.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          topk by (cluster, namespace, resource, resourcequota) (1,
+            max without (instance, job, type) (
+              kube_resourcequota{job="kube-state-metrics", type="used"}
+            )
+          )
+          / on (cluster, namespace, resource, resourcequota) group_left()
+          topk by (cluster, namespace, resource, resourcequota) (1,
+            max without (instance, job, type) (
+              kube_resourcequota{job="kube-state-metrics", type="hard"}
+            ) > 0
+          )
+          == 1
+          )[15m:1m])
+  - id: kube_scheduler_down.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(up)
+  - id: kube_scheduler_down.value
+    kind: metrics
+    alternatives:
+      - expr: absent(up{job="kube-scheduler"})
+  - id: kube_scheduler_down.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          absent(up{job="kube-scheduler"})
+          )[15m:1m])
+  - id: kube_scheduler_instance_unreachable.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(up{job="kube-scheduler"})
+  - id: kube_scheduler_instance_unreachable.value
+    kind: metrics
+    alternatives:
+      - expr: up{job="kube-scheduler"} == 0
+  - id: kube_scheduler_instance_unreachable.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          up{job="kube-scheduler"} == 0
+          )[15m:1m])
+  - id: kube_state_metrics_list_errors.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(kube_state_metrics_list_total{job="kube-state-metrics", result="error"}) or count(kube_state_metrics_list_total{job="kube-state-metrics"})
+  - id: kube_state_metrics_list_errors.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          (sum(rate(kube_state_metrics_list_total{job="kube-state-metrics",result="error"}[5m])) by (cluster)
+            /
+          sum(rate(kube_state_metrics_list_total{job="kube-state-metrics"}[5m])) by (cluster))
+          > 0.01
+  - id: kube_state_metrics_list_errors.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          (sum(rate(kube_state_metrics_list_total{job="kube-state-metrics",result="error"}[5m])) by (cluster)
+            /
+          sum(rate(kube_state_metrics_list_total{job="kube-state-metrics"}[5m])) by (cluster))
+          > 0.01
+          )[15m:1m])
+  - id: kube_state_metrics_sharding_mismatch.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(kube_state_metrics_total_shards{job="kube-state-metrics"})
+  - id: kube_state_metrics_sharding_mismatch.value
+    kind: metrics
+    alternatives:
+      - expr: stdvar (kube_state_metrics_total_shards{job="kube-state-metrics"}) by (cluster) != 0
+  - id: kube_state_metrics_sharding_mismatch.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          stdvar (kube_state_metrics_total_shards{job="kube-state-metrics"}) by (cluster) != 0
+          )[15m:1m])
+  - id: kube_state_metrics_shards_missing.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(kube_state_metrics_shard_ordinal{job="kube-state-metrics"}) or count(kube_state_metrics_total_shards{job="kube-state-metrics"})
+  - id: kube_state_metrics_shards_missing.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          2^max(kube_state_metrics_total_shards{job="kube-state-metrics"}) by (cluster) - 1
+            -
+          sum( 2 ^ max by (cluster, shard_ordinal) (kube_state_metrics_shard_ordinal{job="kube-state-metrics"}) ) by (cluster)
+          != 0
+  - id: kube_state_metrics_shards_missing.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          2^max(kube_state_metrics_total_shards{job="kube-state-metrics"}) by (cluster) - 1
+            -
+          sum( 2 ^ max by (cluster, shard_ordinal) (kube_state_metrics_shard_ordinal{job="kube-state-metrics"}) ) by (cluster)
+          != 0
+          )[15m:1m])
+  - id: kube_state_metrics_watch_errors.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(kube_state_metrics_watch_total{job="kube-state-metrics", result="error"}) or count(kube_state_metrics_watch_total{job="kube-state-metrics"})
+  - id: kube_state_metrics_watch_errors.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          (sum(rate(kube_state_metrics_watch_total{job="kube-state-metrics",result="error"}[5m])) by (cluster)
+            /
+          sum(rate(kube_state_metrics_watch_total{job="kube-state-metrics"}[5m])) by (cluster))
+          > 0.01
+  - id: kube_state_metrics_watch_errors.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          (sum(rate(kube_state_metrics_watch_total{job="kube-state-metrics",result="error"}[5m])) by (cluster)
+            /
+          sum(rate(kube_state_metrics_watch_total{job="kube-state-metrics"}[5m])) by (cluster))
+          > 0.01
+          )[15m:1m])
+  - id: kube_stateful_set_generation_mismatch.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(kube_statefulset_metadata_generation{job="kube-state-metrics", namespace=~".*"}) or count(kube_statefulset_status_observed_generation{job="kube-state-metrics", namespace=~".*"})
+  - id: kube_stateful_set_generation_mismatch.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          kube_statefulset_status_observed_generation{job="kube-state-metrics", namespace=~".*"}
+            !=
+          kube_statefulset_metadata_generation{job="kube-state-metrics", namespace=~".*"}
+  - id: kube_stateful_set_generation_mismatch.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          kube_statefulset_status_observed_generation{job="kube-state-metrics", namespace=~".*"}
+            !=
+          kube_statefulset_metadata_generation{job="kube-state-metrics", namespace=~".*"}
+          )[15m:1m])
+  - id: kube_stateful_set_replicas_mismatch.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(kube_statefulset_replicas{job="kube-state-metrics", namespace=~".*"}) or count(kube_statefulset_status_replicas_ready{job="kube-state-metrics", namespace=~".*"}) or count(kube_statefulset_status_replicas_updated{job="kube-state-metrics", namespace=~".*"})
+  - id: kube_stateful_set_replicas_mismatch.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          (
+            kube_statefulset_status_replicas_ready{job="kube-state-metrics", namespace=~".*"}
+              !=
+            kube_statefulset_replicas{job="kube-state-metrics", namespace=~".*"}
+          ) and (
+            changes(kube_statefulset_status_replicas_updated{job="kube-state-metrics", namespace=~".*"}[10m])
+              ==
+            0
+          )
+  - id: kube_stateful_set_replicas_mismatch.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          (
+            kube_statefulset_status_replicas_ready{job="kube-state-metrics", namespace=~".*"}
+              !=
+            kube_statefulset_replicas{job="kube-state-metrics", namespace=~".*"}
+          ) and (
+            changes(kube_statefulset_status_replicas_updated{job="kube-state-metrics", namespace=~".*"}[10m])
+              ==
+            0
+          )
+          )[15m:1m])
+  - id: kube_stateful_set_update_not_rolled_out.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(kube_statefulset_replicas{job="kube-state-metrics", namespace=~".*"}) or count(kube_statefulset_status_current_revision{job="kube-state-metrics", namespace=~".*"}) or count(kube_statefulset_status_replicas_updated{job="kube-state-metrics", namespace=~".*"}) or count(kube_statefulset_status_update_revision{job="kube-state-metrics", namespace=~".*"})
+  - id: kube_stateful_set_update_not_rolled_out.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          (
+            max by (namespace, statefulset, job, cluster) (
+              kube_statefulset_status_current_revision{job="kube-state-metrics", namespace=~".*"}
+                unless
+              kube_statefulset_status_update_revision{job="kube-state-metrics", namespace=~".*"}
+            )
+              * on (namespace, statefulset, job, cluster)
+            (
+              kube_statefulset_replicas{job="kube-state-metrics", namespace=~".*"}
+                !=
+              kube_statefulset_status_replicas_updated{job="kube-state-metrics", namespace=~".*"}
+            )
+          )  and on (namespace, statefulset, job, cluster) (
+            changes(kube_statefulset_status_replicas_updated{job="kube-state-metrics", namespace=~".*"}[5m])
+              ==
+            0
+          )
+  - id: kube_stateful_set_update_not_rolled_out.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          (
+            max by (namespace, statefulset, job, cluster) (
+              kube_statefulset_status_current_revision{job="kube-state-metrics", namespace=~".*"}
+                unless
+              kube_statefulset_status_update_revision{job="kube-state-metrics", namespace=~".*"}
+            )
+              * on (namespace, statefulset, job, cluster)
+            (
+              kube_statefulset_replicas{job="kube-state-metrics", namespace=~".*"}
+                !=
+              kube_statefulset_status_replicas_updated{job="kube-state-metrics", namespace=~".*"}
+            )
+          )  and on (namespace, statefulset, job, cluster) (
+            changes(kube_statefulset_status_replicas_updated{job="kube-state-metrics", namespace=~".*"}[5m])
+              ==
+            0
+          )
+          )[15m:1m])
+  - id: kube_version_mismatch.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(kubernetes_build_info{job!~"kube-dns|coredns"})
+  - id: kube_version_mismatch.value
+    kind: metrics
+    alternatives:
+      - expr: count by (cluster) (count by (git_version, cluster) (label_replace(kubernetes_build_info{job!~"kube-dns|coredns"},"git_version","$1","git_version","(v[0-9]*.[0-9]*).*"))) > 1
+  - id: kube_version_mismatch.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          count by (cluster) (count by (git_version, cluster) (label_replace(kubernetes_build_info{job!~"kube-dns|coredns"},"git_version","$1","git_version","(v[0-9]*.[0-9]*).*"))) > 1
+          )[15m:1m])
+  - id: kubelet_client_certificate_expiration.1.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(kubelet_certificate_manager_client_ttl_seconds{})
+  - id: kubelet_client_certificate_expiration.1.value
+    kind: metrics
+    alternatives:
+      - expr: kubelet_certificate_manager_client_ttl_seconds < 604800
+  - id: kubelet_client_certificate_expiration.2.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(kubelet_certificate_manager_client_ttl_seconds{})
+  - id: kubelet_client_certificate_expiration.2.value
+    kind: metrics
+    alternatives:
+      - expr: kubelet_certificate_manager_client_ttl_seconds < 86400
+  - id: kubelet_client_certificate_renewal_errors.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(kubelet_certificate_manager_client_expiration_renew_errors{})
+  - id: kubelet_client_certificate_renewal_errors.value
+    kind: metrics
+    alternatives:
+      - expr: increase(kubelet_certificate_manager_client_expiration_renew_errors[5m]) > 0
+  - id: kubelet_client_certificate_renewal_errors.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          increase(kubelet_certificate_manager_client_expiration_renew_errors[5m]) > 0
+          )[15m:1m])
+  - id: kubelet_down.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(kube_node_info{job="kube-state-metrics"}) or count(up{job="kubelet", metrics_path="/metrics"})
+  - id: kubelet_down.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          count by (cluster) (kube_node_info{job="kube-state-metrics"})
+          unless on (cluster)
+          count by (cluster) (up{job="kubelet", metrics_path="/metrics"} == 1)
+  - id: kubelet_down.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          count by (cluster) (kube_node_info{job="kube-state-metrics"})
+          unless on (cluster)
+          count by (cluster) (up{job="kubelet", metrics_path="/metrics"} == 1)
+          )[15m:1m])
+  - id: kubelet_instance_unreachable.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(up{job="kubelet", metrics_path="/metrics"})
+  - id: kubelet_instance_unreachable.value
+    kind: metrics
+    alternatives:
+      - expr: up{job="kubelet", metrics_path="/metrics"} == 0
+  - id: kubelet_instance_unreachable.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          up{job="kubelet", metrics_path="/metrics"} == 0
+          )[15m:1m])
+  - id: kubelet_pleg_duration_high.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(node_quantile:kubelet_pleg_relist_duration_seconds:histogram_quantile{quantile="0.99"})
+  - id: kubelet_pleg_duration_high.value
+    kind: metrics
+    alternatives:
+      - expr: node_quantile:kubelet_pleg_relist_duration_seconds:histogram_quantile{quantile="0.99"} >= 10
+  - id: kubelet_pleg_duration_high.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          node_quantile:kubelet_pleg_relist_duration_seconds:histogram_quantile{quantile="0.99"} >= 10
+          )[5m:1m])
+  - id: kubelet_pod_start_up_latency_high.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(kubelet_node_name{job="kubelet", metrics_path="/metrics"}) or count(kubelet_pod_worker_duration_seconds_bucket{job="kubelet", metrics_path="/metrics"})
+  - id: kubelet_pod_start_up_latency_high.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          histogram_quantile(0.99,
+            sum by (cluster, instance, le) (
+              topk by (cluster, instance, le, operation_type) (1,
+                rate(kubelet_pod_worker_duration_seconds_bucket{job="kubelet", metrics_path="/metrics"}[5m])
+              )
+            )
+          )
+          * on (cluster, instance) group_left(node)
+          topk by (cluster, instance, node) (1,
+            kubelet_node_name{job="kubelet", metrics_path="/metrics"}
+          )
+          > 60
+  - id: kubelet_pod_start_up_latency_high.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          histogram_quantile(0.99,
+            sum by (cluster, instance, le) (
+              topk by (cluster, instance, le, operation_type) (1,
+                rate(kubelet_pod_worker_duration_seconds_bucket{job="kubelet", metrics_path="/metrics"}[5m])
+              )
+            )
+          )
+          * on (cluster, instance) group_left(node)
+          topk by (cluster, instance, node) (1,
+            kubelet_node_name{job="kubelet", metrics_path="/metrics"}
+          )
+          > 60
+          )[15m:1m])
+  - id: kubelet_server_certificate_expiration.1.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(kubelet_certificate_manager_server_ttl_seconds{})
+  - id: kubelet_server_certificate_expiration.1.value
+    kind: metrics
+    alternatives:
+      - expr: kubelet_certificate_manager_server_ttl_seconds < 604800
+  - id: kubelet_server_certificate_expiration.2.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(kubelet_certificate_manager_server_ttl_seconds{})
+  - id: kubelet_server_certificate_expiration.2.value
+    kind: metrics
+    alternatives:
+      - expr: kubelet_certificate_manager_server_ttl_seconds < 86400
+  - id: kubelet_server_certificate_renewal_errors.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(kubelet_server_expiration_renew_errors{})
+  - id: kubelet_server_certificate_renewal_errors.value
+    kind: metrics
+    alternatives:
+      - expr: increase(kubelet_server_expiration_renew_errors[5m]) > 0
+  - id: kubelet_server_certificate_renewal_errors.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          increase(kubelet_server_expiration_renew_errors[5m]) > 0
+          )[15m:1m])
+  - id: kubelet_too_many_pods.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(kube_node_status_capacity{job="kube-state-metrics", resource="pods"}) or count(kubelet_node_name{job="kubelet", metrics_path="/metrics"}) or count(kubelet_running_pods{job="kubelet", metrics_path="/metrics"})
+  - id: kubelet_too_many_pods.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          (
+            max by (cluster, instance) (
+              kubelet_running_pods{job="kubelet", metrics_path="/metrics"} > 1
+            )
+            * on (cluster, instance) group_left(node)
+            max by (cluster, instance, node) (
+              kubelet_node_name{job="kubelet", metrics_path="/metrics"}
+            )
+          )
+          / on (cluster, node) group_left()
+          max by (cluster, node) (
+            kube_node_status_capacity{job="kube-state-metrics", resource="pods"} != 1
+          ) > 0.95
+  - id: kubelet_too_many_pods.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          (
+            max by (cluster, instance) (
+              kubelet_running_pods{job="kubelet", metrics_path="/metrics"} > 1
+            )
+            * on (cluster, instance) group_left(node)
+            max by (cluster, instance, node) (
+              kubelet_node_name{job="kubelet", metrics_path="/metrics"}
+            )
+          )
+          / on (cluster, node) group_left()
+          max by (cluster, node) (
+            kube_node_status_capacity{job="kube-state-metrics", resource="pods"} != 1
+          ) > 0.95
+          )[15m:1m])
+  - id: node_bonding_degraded.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(node_bonding_active{job="node-exporter"}) or count(node_bonding_slaves{job="node-exporter"})
+  - id: node_bonding_degraded.value
+    kind: metrics
+    alternatives:
+      - expr: (node_bonding_slaves{job="node-exporter"} - node_bonding_active{job="node-exporter"}) != 0
+  - id: node_bonding_degraded.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          (node_bonding_slaves{job="node-exporter"} - node_bonding_active{job="node-exporter"}) != 0
+          )[5m:1m])
+  - id: node_clock_not_synchronising.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(node_timex_maxerror_seconds{job="node-exporter"}) or count(node_timex_sync_status{job="node-exporter"})
+  - id: node_clock_not_synchronising.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          min_over_time(node_timex_sync_status{job="node-exporter"}[5m]) == 0
+          and
+          node_timex_maxerror_seconds{job="node-exporter"} >= 16
+  - id: node_clock_not_synchronising.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          min_over_time(node_timex_sync_status{job="node-exporter"}[5m]) == 0
+          and
+          node_timex_maxerror_seconds{job="node-exporter"} >= 16
+          )[10m:1m])
+  - id: node_clock_skew_detected.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(node_timex_offset_seconds{job="node-exporter"})
+  - id: node_clock_skew_detected.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          (
+            node_timex_offset_seconds{job="node-exporter"} > 0.05
+          and
+            deriv(node_timex_offset_seconds{job="node-exporter"}[5m]) >= 0
+          )
+          or
+          (
+            node_timex_offset_seconds{job="node-exporter"} < -0.05
+          and
+            deriv(node_timex_offset_seconds{job="node-exporter"}[5m]) <= 0
+          )
+  - id: node_clock_skew_detected.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          (
+            node_timex_offset_seconds{job="node-exporter"} > 0.05
+          and
+            deriv(node_timex_offset_seconds{job="node-exporter"}[5m]) >= 0
+          )
+          or
+          (
+            node_timex_offset_seconds{job="node-exporter"} < -0.05
+          and
+            deriv(node_timex_offset_seconds{job="node-exporter"}[5m]) <= 0
+          )
+          )[10m:1m])
+  - id: node_cpu_high_usage.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(node_cpu_seconds_total{job="node-exporter", mode!~"idle|iowait"})
+  - id: node_cpu_high_usage.value
+    kind: metrics
+    alternatives:
+      - expr: sum without(mode) (avg without (cpu) (rate(node_cpu_seconds_total{job="node-exporter", mode!~"idle|iowait"}[2m]))) * 100 > 90
+  - id: node_cpu_high_usage.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          sum without(mode) (avg without (cpu) (rate(node_cpu_seconds_total{job="node-exporter", mode!~"idle|iowait"}[2m]))) * 100 > 90
+          )[15m:1m])
+  - id: node_disk_io_saturation.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(node_disk_io_time_weighted_seconds_total{job="node-exporter", device=~"(/dev/)?(mmcblk.p.+|nvme.+|rbd.+|sd.+|vd.+|xvd.+|dm-.+|md.+|dasd.+)"})
+  - id: node_disk_io_saturation.value
+    kind: metrics
+    alternatives:
+      - expr: rate(node_disk_io_time_weighted_seconds_total{job="node-exporter", device=~"(/dev/)?(mmcblk.p.+|nvme.+|rbd.+|sd.+|vd.+|xvd.+|dm-.+|md.+|dasd.+)"}[5m]) > 10
+  - id: node_disk_io_saturation.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          rate(node_disk_io_time_weighted_seconds_total{job="node-exporter", device=~"(/dev/)?(mmcblk.p.+|nvme.+|rbd.+|sd.+|vd.+|xvd.+|dm-.+|md.+|dasd.+)"}[5m]) > 10
+          )[30m:1m])
+  - id: node_file_descriptor_limit.1.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(node_filefd_allocated{job="node-exporter"}) or count(node_filefd_maximum{job="node-exporter"})
+  - id: node_file_descriptor_limit.1.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          (
+            node_filefd_allocated{job="node-exporter"} * 100 / node_filefd_maximum{job="node-exporter"} > 70
+          )
+  - id: node_file_descriptor_limit.1.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          (
+            node_filefd_allocated{job="node-exporter"} * 100 / node_filefd_maximum{job="node-exporter"} > 70
+          )
+          )[15m:1m])
+  - id: node_file_descriptor_limit.2.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(node_filefd_allocated{job="node-exporter"}) or count(node_filefd_maximum{job="node-exporter"})
+  - id: node_file_descriptor_limit.2.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          (
+            node_filefd_allocated{job="node-exporter"} * 100 / node_filefd_maximum{job="node-exporter"} > 90
+          )
+  - id: node_file_descriptor_limit.2.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          (
+            node_filefd_allocated{job="node-exporter"} * 100 / node_filefd_maximum{job="node-exporter"} > 90
+          )
+          )[15m:1m])
+  - id: node_filesystem_almost_out_of_files.1.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(node_filesystem_files_free{job="node-exporter", fstype!="", mountpoint!=""}) or count(node_filesystem_files{job="node-exporter", fstype!="", mountpoint!=""}) or count(node_filesystem_readonly{job="node-exporter", fstype!="", mountpoint!=""})
+  - id: node_filesystem_almost_out_of_files.1.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          (
+            node_filesystem_files_free{job="node-exporter",fstype!="",mountpoint!=""} / node_filesystem_files{job="node-exporter",fstype!="",mountpoint!=""} * 100 < 5
+          and
+            node_filesystem_readonly{job="node-exporter",fstype!="",mountpoint!=""} == 0
+          )
+  - id: node_filesystem_almost_out_of_files.1.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          (
+            node_filesystem_files_free{job="node-exporter",fstype!="",mountpoint!=""} / node_filesystem_files{job="node-exporter",fstype!="",mountpoint!=""} * 100 < 5
+          and
+            node_filesystem_readonly{job="node-exporter",fstype!="",mountpoint!=""} == 0
+          )
+          )[60m:1m])
+  - id: node_filesystem_almost_out_of_files.2.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(node_filesystem_files_free{job="node-exporter", fstype!="", mountpoint!=""}) or count(node_filesystem_files{job="node-exporter", fstype!="", mountpoint!=""}) or count(node_filesystem_readonly{job="node-exporter", fstype!="", mountpoint!=""})
+  - id: node_filesystem_almost_out_of_files.2.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          (
+            node_filesystem_files_free{job="node-exporter",fstype!="",mountpoint!=""} / node_filesystem_files{job="node-exporter",fstype!="",mountpoint!=""} * 100 < 3
+          and
+            node_filesystem_readonly{job="node-exporter",fstype!="",mountpoint!=""} == 0
+          )
+  - id: node_filesystem_almost_out_of_files.2.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          (
+            node_filesystem_files_free{job="node-exporter",fstype!="",mountpoint!=""} / node_filesystem_files{job="node-exporter",fstype!="",mountpoint!=""} * 100 < 3
+          and
+            node_filesystem_readonly{job="node-exporter",fstype!="",mountpoint!=""} == 0
+          )
+          )[60m:1m])
+  - id: node_filesystem_almost_out_of_space.1.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(node_filesystem_avail_bytes{job="node-exporter", fstype!="", mountpoint!=""}) or count(node_filesystem_readonly{job="node-exporter", fstype!="", mountpoint!=""}) or count(node_filesystem_size_bytes{job="node-exporter", fstype!="", mountpoint!=""})
+  - id: node_filesystem_almost_out_of_space.1.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          (
+            node_filesystem_avail_bytes{job="node-exporter",fstype!="",mountpoint!=""} / node_filesystem_size_bytes{job="node-exporter",fstype!="",mountpoint!=""} * 100 < 5
+          and
+            node_filesystem_readonly{job="node-exporter",fstype!="",mountpoint!=""} == 0
+          )
+  - id: node_filesystem_almost_out_of_space.1.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          (
+            node_filesystem_avail_bytes{job="node-exporter",fstype!="",mountpoint!=""} / node_filesystem_size_bytes{job="node-exporter",fstype!="",mountpoint!=""} * 100 < 5
+          and
+            node_filesystem_readonly{job="node-exporter",fstype!="",mountpoint!=""} == 0
+          )
+          )[30m:1m])
+  - id: node_filesystem_almost_out_of_space.2.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(node_filesystem_avail_bytes{job="node-exporter", fstype!="", mountpoint!=""}) or count(node_filesystem_readonly{job="node-exporter", fstype!="", mountpoint!=""}) or count(node_filesystem_size_bytes{job="node-exporter", fstype!="", mountpoint!=""})
+  - id: node_filesystem_almost_out_of_space.2.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          (
+            node_filesystem_avail_bytes{job="node-exporter",fstype!="",mountpoint!=""} / node_filesystem_size_bytes{job="node-exporter",fstype!="",mountpoint!=""} * 100 < 3
+          and
+            node_filesystem_readonly{job="node-exporter",fstype!="",mountpoint!=""} == 0
+          )
+  - id: node_filesystem_almost_out_of_space.2.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          (
+            node_filesystem_avail_bytes{job="node-exporter",fstype!="",mountpoint!=""} / node_filesystem_size_bytes{job="node-exporter",fstype!="",mountpoint!=""} * 100 < 3
+          and
+            node_filesystem_readonly{job="node-exporter",fstype!="",mountpoint!=""} == 0
+          )
+          )[30m:1m])
+  - id: node_filesystem_files_filling_up.1.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(node_filesystem_files_free{job="node-exporter", fstype!="", mountpoint!=""}) or count(node_filesystem_files{job="node-exporter", fstype!="", mountpoint!=""}) or count(node_filesystem_readonly{job="node-exporter", fstype!="", mountpoint!=""})
+  - id: node_filesystem_files_filling_up.1.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          (
+            node_filesystem_files_free{job="node-exporter",fstype!="",mountpoint!=""} / node_filesystem_files{job="node-exporter",fstype!="",mountpoint!=""} * 100 < 40
+          and
+            predict_linear(node_filesystem_files_free{job="node-exporter",fstype!="",mountpoint!=""}[6h], 24*60*60) < 0
+          and
+            node_filesystem_readonly{job="node-exporter",fstype!="",mountpoint!=""} == 0
+          )
+  - id: node_filesystem_files_filling_up.1.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          (
+            node_filesystem_files_free{job="node-exporter",fstype!="",mountpoint!=""} / node_filesystem_files{job="node-exporter",fstype!="",mountpoint!=""} * 100 < 40
+          and
+            predict_linear(node_filesystem_files_free{job="node-exporter",fstype!="",mountpoint!=""}[6h], 24*60*60) < 0
+          and
+            node_filesystem_readonly{job="node-exporter",fstype!="",mountpoint!=""} == 0
+          )
+          )[60m:1m])
+  - id: node_filesystem_files_filling_up.2.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(node_filesystem_files_free{job="node-exporter", fstype!="", mountpoint!=""}) or count(node_filesystem_files{job="node-exporter", fstype!="", mountpoint!=""}) or count(node_filesystem_readonly{job="node-exporter", fstype!="", mountpoint!=""})
+  - id: node_filesystem_files_filling_up.2.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          (
+            node_filesystem_files_free{job="node-exporter",fstype!="",mountpoint!=""} / node_filesystem_files{job="node-exporter",fstype!="",mountpoint!=""} * 100 < 20
+          and
+            predict_linear(node_filesystem_files_free{job="node-exporter",fstype!="",mountpoint!=""}[6h], 4*60*60) < 0
+          and
+            node_filesystem_readonly{job="node-exporter",fstype!="",mountpoint!=""} == 0
+          )
+  - id: node_filesystem_files_filling_up.2.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          (
+            node_filesystem_files_free{job="node-exporter",fstype!="",mountpoint!=""} / node_filesystem_files{job="node-exporter",fstype!="",mountpoint!=""} * 100 < 20
+          and
+            predict_linear(node_filesystem_files_free{job="node-exporter",fstype!="",mountpoint!=""}[6h], 4*60*60) < 0
+          and
+            node_filesystem_readonly{job="node-exporter",fstype!="",mountpoint!=""} == 0
+          )
+          )[60m:1m])
+  - id: node_filesystem_space_filling_up.1.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(node_filesystem_avail_bytes{job="node-exporter", fstype!="", mountpoint!=""}) or count(node_filesystem_readonly{job="node-exporter", fstype!="", mountpoint!=""}) or count(node_filesystem_size_bytes{job="node-exporter", fstype!="", mountpoint!=""})
+  - id: node_filesystem_space_filling_up.1.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          (
+            node_filesystem_avail_bytes{job="node-exporter",fstype!="",mountpoint!=""} / node_filesystem_size_bytes{job="node-exporter",fstype!="",mountpoint!=""} * 100 < 15
+          and
+            predict_linear(node_filesystem_avail_bytes{job="node-exporter",fstype!="",mountpoint!=""}[6h], 24*60*60) < 0
+          and
+            node_filesystem_readonly{job="node-exporter",fstype!="",mountpoint!=""} == 0
+          )
+  - id: node_filesystem_space_filling_up.1.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          (
+            node_filesystem_avail_bytes{job="node-exporter",fstype!="",mountpoint!=""} / node_filesystem_size_bytes{job="node-exporter",fstype!="",mountpoint!=""} * 100 < 15
+          and
+            predict_linear(node_filesystem_avail_bytes{job="node-exporter",fstype!="",mountpoint!=""}[6h], 24*60*60) < 0
+          and
+            node_filesystem_readonly{job="node-exporter",fstype!="",mountpoint!=""} == 0
+          )
+          )[60m:1m])
+  - id: node_filesystem_space_filling_up.2.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(node_filesystem_avail_bytes{job="node-exporter", fstype!="", mountpoint!=""}) or count(node_filesystem_readonly{job="node-exporter", fstype!="", mountpoint!=""}) or count(node_filesystem_size_bytes{job="node-exporter", fstype!="", mountpoint!=""})
+  - id: node_filesystem_space_filling_up.2.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          (
+            node_filesystem_avail_bytes{job="node-exporter",fstype!="",mountpoint!=""} / node_filesystem_size_bytes{job="node-exporter",fstype!="",mountpoint!=""} * 100 < 10
+          and
+            predict_linear(node_filesystem_avail_bytes{job="node-exporter",fstype!="",mountpoint!=""}[6h], 4*60*60) < 0
+          and
+            node_filesystem_readonly{job="node-exporter",fstype!="",mountpoint!=""} == 0
+          )
+  - id: node_filesystem_space_filling_up.2.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          (
+            node_filesystem_avail_bytes{job="node-exporter",fstype!="",mountpoint!=""} / node_filesystem_size_bytes{job="node-exporter",fstype!="",mountpoint!=""} * 100 < 10
+          and
+            predict_linear(node_filesystem_avail_bytes{job="node-exporter",fstype!="",mountpoint!=""}[6h], 4*60*60) < 0
+          and
+            node_filesystem_readonly{job="node-exporter",fstype!="",mountpoint!=""} == 0
+          )
+          )[60m:1m])
+  - id: node_high_number_conntrack_entries_used.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(node_nf_conntrack_entries_limit{}) or count(node_nf_conntrack_entries{job="node-exporter"})
+  - id: node_high_number_conntrack_entries_used.value
+    kind: metrics
+    alternatives:
+      - expr: (node_nf_conntrack_entries{job="node-exporter"} / node_nf_conntrack_entries_limit) > 0.75
+  - id: node_memory_high_utilization.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(node_memory_MemAvailable_bytes{job="node-exporter"}) or count(node_memory_MemTotal_bytes{job="node-exporter"})
+  - id: node_memory_high_utilization.value
+    kind: metrics
+    alternatives:
+      - expr: 100 - (node_memory_MemAvailable_bytes{job="node-exporter"} / node_memory_MemTotal_bytes{job="node-exporter"} * 100) > 90
+  - id: node_memory_high_utilization.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          100 - (node_memory_MemAvailable_bytes{job="node-exporter"} / node_memory_MemTotal_bytes{job="node-exporter"} * 100) > 90
+          )[15m:1m])
+  - id: node_memory_major_pages_faults.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(node_vmstat_pgmajfault{job="node-exporter"})
+  - id: node_memory_major_pages_faults.value
+    kind: metrics
+    alternatives:
+      - expr: rate(node_vmstat_pgmajfault{job="node-exporter"}[5m]) > 500
+  - id: node_memory_major_pages_faults.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          rate(node_vmstat_pgmajfault{job="node-exporter"}[5m]) > 500
+          )[15m:1m])
+  - id: node_network_interface_flapping.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(node_network_up{job="node-exporter", device!~"veth.+"})
+  - id: node_network_interface_flapping.value
+    kind: metrics
+    alternatives:
+      - expr: changes(node_network_up{job="node-exporter",device!~"veth.+"}[2m]) > 2
+  - id: node_network_interface_flapping.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          changes(node_network_up{job="node-exporter",device!~"veth.+"}[2m]) > 2
+          )[2m:1m])
+  - id: node_network_receive_errs.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(node_network_receive_errs_total{job="node-exporter"}) or count(node_network_receive_packets_total{job="node-exporter"})
+  - id: node_network_receive_errs.value
+    kind: metrics
+    alternatives:
+      - expr: rate(node_network_receive_errs_total{job="node-exporter"}[2m]) / rate(node_network_receive_packets_total{job="node-exporter"}[2m]) > 0.01
+  - id: node_network_receive_errs.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          rate(node_network_receive_errs_total{job="node-exporter"}[2m]) / rate(node_network_receive_packets_total{job="node-exporter"}[2m]) > 0.01
+          )[60m:1m])
+  - id: node_network_transmit_errs.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(node_network_transmit_errs_total{job="node-exporter"}) or count(node_network_transmit_packets_total{job="node-exporter"})
+  - id: node_network_transmit_errs.value
+    kind: metrics
+    alternatives:
+      - expr: rate(node_network_transmit_errs_total{job="node-exporter"}[2m]) / rate(node_network_transmit_packets_total{job="node-exporter"}[2m]) > 0.01
+  - id: node_network_transmit_errs.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          rate(node_network_transmit_errs_total{job="node-exporter"}[2m]) / rate(node_network_transmit_packets_total{job="node-exporter"}[2m]) > 0.01
+          )[60m:1m])
+  - id: node_raid_degraded.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(node_md_disks_required{job="node-exporter", device=~"(/dev/)?(mmcblk.p.+|nvme.+|rbd.+|sd.+|vd.+|xvd.+|dm-.+|md.+|dasd.+)"}) or count(node_md_disks{state="active", job="node-exporter", device=~"(/dev/)?(mmcblk.p.+|nvme.+|rbd.+|sd.+|vd.+|xvd.+|dm-.+|md.+|dasd.+)"})
+  - id: node_raid_degraded.value
+    kind: metrics
+    alternatives:
+      - expr: node_md_disks_required{job="node-exporter",device=~"(/dev/)?(mmcblk.p.+|nvme.+|rbd.+|sd.+|vd.+|xvd.+|dm-.+|md.+|dasd.+)"} - ignoring (state) (node_md_disks{state="active",job="node-exporter",device=~"(/dev/)?(mmcblk.p.+|nvme.+|rbd.+|sd.+|vd.+|xvd.+|dm-.+|md.+|dasd.+)"}) > 0
+  - id: node_raid_degraded.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          node_md_disks_required{job="node-exporter",device=~"(/dev/)?(mmcblk.p.+|nvme.+|rbd.+|sd.+|vd.+|xvd.+|dm-.+|md.+|dasd.+)"} - ignoring (state) (node_md_disks{state="active",job="node-exporter",device=~"(/dev/)?(mmcblk.p.+|nvme.+|rbd.+|sd.+|vd.+|xvd.+|dm-.+|md.+|dasd.+)"}) > 0
+          )[15m:1m])
+  - id: node_raid_disk_failure.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(node_md_disks{state="failed", job="node-exporter", device=~"(/dev/)?(mmcblk.p.+|nvme.+|rbd.+|sd.+|vd.+|xvd.+|dm-.+|md.+|dasd.+)"})
+  - id: node_raid_disk_failure.value
+    kind: metrics
+    alternatives:
+      - expr: node_md_disks{state="failed",job="node-exporter",device=~"(/dev/)?(mmcblk.p.+|nvme.+|rbd.+|sd.+|vd.+|xvd.+|dm-.+|md.+|dasd.+)"} > 0
+  - id: node_system_saturation.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(node_cpu_seconds_total{job="node-exporter", mode="idle"}) or count(node_load1{job="node-exporter"})
+  - id: node_system_saturation.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          node_load1{job="node-exporter"}
+          / count without (cpu, mode) (node_cpu_seconds_total{job="node-exporter", mode="idle"}) > 2
+  - id: node_system_saturation.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          node_load1{job="node-exporter"}
+          / count without (cpu, mode) (node_cpu_seconds_total{job="node-exporter", mode="idle"}) > 2
+          )[15m:1m])
+  - id: node_systemd_service_crashlooping.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(node_systemd_service_restart_total{job="node-exporter"})
+  - id: node_systemd_service_crashlooping.value
+    kind: metrics
+    alternatives:
+      - expr: increase(node_systemd_service_restart_total{job="node-exporter"}[5m]) > 2
+  - id: node_systemd_service_crashlooping.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          increase(node_systemd_service_restart_total{job="node-exporter"}[5m]) > 2
+          )[15m:1m])
+  - id: node_systemd_service_failed.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(node_systemd_unit_state{job="node-exporter", state="failed"})
+  - id: node_systemd_service_failed.value
+    kind: metrics
+    alternatives:
+      - expr: node_systemd_unit_state{job="node-exporter", state="failed"} == 1
+  - id: node_systemd_service_failed.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          node_systemd_unit_state{job="node-exporter", state="failed"} == 1
+          )[5m:1m])
+  - id: node_text_file_collector_scrape_error.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(node_textfile_scrape_error{job="node-exporter"})
+  - id: node_text_file_collector_scrape_error.value
+    kind: metrics
+    alternatives:
+      - expr: node_textfile_scrape_error{job="node-exporter"} == 1
+  - id: prometheus_bad_config.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(prometheus_config_last_reload_successful{job="kps-kube-prometheus-stack-prometheus", namespace="monitoring"})
+  - id: prometheus_bad_config.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          # Without max_over_time, failed scrapes could create false negatives, see
+          # https://www.robustperception.io/alerting-on-gauges-in-prometheus-2-0 for details.
+          max_over_time(prometheus_config_last_reload_successful{job="kps-kube-prometheus-stack-prometheus",namespace="monitoring"}[5m]) == 0
+  - id: prometheus_bad_config.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          # Without max_over_time, failed scrapes could create false negatives, see
+          # https://www.robustperception.io/alerting-on-gauges-in-prometheus-2-0 for details.
+          max_over_time(prometheus_config_last_reload_successful{job="kps-kube-prometheus-stack-prometheus",namespace="monitoring"}[5m]) == 0
+          )[10m:1m])
+  - id: prometheus_duplicate_timestamps.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(prometheus_target_scrapes_sample_duplicate_timestamp_total{job="kps-kube-prometheus-stack-prometheus", namespace="monitoring"})
+  - id: prometheus_duplicate_timestamps.value
+    kind: metrics
+    alternatives:
+      - expr: rate(prometheus_target_scrapes_sample_duplicate_timestamp_total{job="kps-kube-prometheus-stack-prometheus",namespace="monitoring"}[5m]) > 0
+  - id: prometheus_duplicate_timestamps.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          rate(prometheus_target_scrapes_sample_duplicate_timestamp_total{job="kps-kube-prometheus-stack-prometheus",namespace="monitoring"}[5m]) > 0
+          )[10m:1m])
+  - id: prometheus_error_sending_alerts_to_any_alertmanager.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(prometheus_notifications_errors_total{job="kps-kube-prometheus-stack-prometheus", namespace="monitoring", alertmanager!~""}) or count(prometheus_notifications_sent_total{job="kps-kube-prometheus-stack-prometheus", namespace="monitoring", alertmanager!~""})
+  - id: prometheus_error_sending_alerts_to_any_alertmanager.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          min without (alertmanager) (
+            rate(prometheus_notifications_errors_total{job="kps-kube-prometheus-stack-prometheus",namespace="monitoring",alertmanager!~``}[5m])
+          /
+            rate(prometheus_notifications_sent_total{job="kps-kube-prometheus-stack-prometheus",namespace="monitoring",alertmanager!~``}[5m])
+          )
+          * 100
+          > 3
+  - id: prometheus_error_sending_alerts_to_any_alertmanager.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          min without (alertmanager) (
+            rate(prometheus_notifications_errors_total{job="kps-kube-prometheus-stack-prometheus",namespace="monitoring",alertmanager!~``}[5m])
+          /
+            rate(prometheus_notifications_sent_total{job="kps-kube-prometheus-stack-prometheus",namespace="monitoring",alertmanager!~``}[5m])
+          )
+          * 100
+          > 3
+          )[15m:1m])
+  - id: prometheus_error_sending_alerts_to_some_alertmanagers.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(prometheus_notifications_errors_total{job="kps-kube-prometheus-stack-prometheus", namespace="monitoring"}) or count(prometheus_notifications_sent_total{job="kps-kube-prometheus-stack-prometheus", namespace="monitoring"})
+  - id: prometheus_error_sending_alerts_to_some_alertmanagers.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          (
+            rate(prometheus_notifications_errors_total{job="kps-kube-prometheus-stack-prometheus",namespace="monitoring"}[5m])
+          /
+            rate(prometheus_notifications_sent_total{job="kps-kube-prometheus-stack-prometheus",namespace="monitoring"}[5m])
+          )
+          * 100
+          > 1
+  - id: prometheus_error_sending_alerts_to_some_alertmanagers.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          (
+            rate(prometheus_notifications_errors_total{job="kps-kube-prometheus-stack-prometheus",namespace="monitoring"}[5m])
+          /
+            rate(prometheus_notifications_sent_total{job="kps-kube-prometheus-stack-prometheus",namespace="monitoring"}[5m])
+          )
+          * 100
+          > 1
+          )[15m:1m])
+  - id: prometheus_high_query_load.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(prometheus_engine_queries_concurrent_max{job="kps-kube-prometheus-stack-prometheus", namespace="monitoring"}) or count(prometheus_engine_queries{job="kps-kube-prometheus-stack-prometheus", namespace="monitoring"})
+  - id: prometheus_high_query_load.value
+    kind: metrics
+    alternatives:
+      - expr: avg_over_time(prometheus_engine_queries{job="kps-kube-prometheus-stack-prometheus",namespace="monitoring"}[5m]) / max_over_time(prometheus_engine_queries_concurrent_max{job="kps-kube-prometheus-stack-prometheus",namespace="monitoring"}[5m]) > 0.8
+  - id: prometheus_high_query_load.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          avg_over_time(prometheus_engine_queries{job="kps-kube-prometheus-stack-prometheus",namespace="monitoring"}[5m]) / max_over_time(prometheus_engine_queries_concurrent_max{job="kps-kube-prometheus-stack-prometheus",namespace="monitoring"}[5m]) > 0.8
+          )[15m:1m])
+  - id: prometheus_kubernetes_list_watch_failures.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(prometheus_sd_kubernetes_failures_total{job="kps-kube-prometheus-stack-prometheus", namespace="monitoring"})
+  - id: prometheus_kubernetes_list_watch_failures.value
+    kind: metrics
+    alternatives:
+      - expr: increase(prometheus_sd_kubernetes_failures_total{job="kps-kube-prometheus-stack-prometheus",namespace="monitoring"}[5m]) > 0
+  - id: prometheus_kubernetes_list_watch_failures.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          increase(prometheus_sd_kubernetes_failures_total{job="kps-kube-prometheus-stack-prometheus",namespace="monitoring"}[5m]) > 0
+          )[15m:1m])
+  - id: prometheus_label_limit_hit.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(prometheus_target_scrape_pool_exceeded_label_limits_total{job="kps-kube-prometheus-stack-prometheus", namespace="monitoring"})
+  - id: prometheus_label_limit_hit.value
+    kind: metrics
+    alternatives:
+      - expr: increase(prometheus_target_scrape_pool_exceeded_label_limits_total{job="kps-kube-prometheus-stack-prometheus",namespace="monitoring"}[5m]) > 0
+  - id: prometheus_label_limit_hit.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          increase(prometheus_target_scrape_pool_exceeded_label_limits_total{job="kps-kube-prometheus-stack-prometheus",namespace="monitoring"}[5m]) > 0
+          )[15m:1m])
+  - id: prometheus_missing_rule_evaluations.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(prometheus_rule_group_iterations_missed_total{job="kps-kube-prometheus-stack-prometheus", namespace="monitoring"})
+  - id: prometheus_missing_rule_evaluations.value
+    kind: metrics
+    alternatives:
+      - expr: increase(prometheus_rule_group_iterations_missed_total{job="kps-kube-prometheus-stack-prometheus",namespace="monitoring"}[5m]) > 0
+  - id: prometheus_missing_rule_evaluations.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          increase(prometheus_rule_group_iterations_missed_total{job="kps-kube-prometheus-stack-prometheus",namespace="monitoring"}[5m]) > 0
+          )[15m:1m])
+  - id: prometheus_not_connected_to_alertmanagers.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(prometheus_notifications_alertmanagers_discovered{job="kps-kube-prometheus-stack-prometheus", namespace="monitoring"})
+  - id: prometheus_not_connected_to_alertmanagers.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          # Without max_over_time, failed scrapes could create false negatives, see
+          # https://www.robustperception.io/alerting-on-gauges-in-prometheus-2-0 for details.
+          max_over_time(prometheus_notifications_alertmanagers_discovered{job="kps-kube-prometheus-stack-prometheus",namespace="monitoring"}[5m]) < 1
+  - id: prometheus_not_connected_to_alertmanagers.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          # Without max_over_time, failed scrapes could create false negatives, see
+          # https://www.robustperception.io/alerting-on-gauges-in-prometheus-2-0 for details.
+          max_over_time(prometheus_notifications_alertmanagers_discovered{job="kps-kube-prometheus-stack-prometheus",namespace="monitoring"}[5m]) < 1
+          )[10m:1m])
+  - id: prometheus_not_ingesting_samples.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(prometheus_rule_group_rules{job="kps-kube-prometheus-stack-prometheus", namespace="monitoring"}) or count(prometheus_target_metadata_cache_entries{job="kps-kube-prometheus-stack-prometheus", namespace="monitoring"}) or count(prometheus_tsdb_head_samples_appended_total{job="kps-kube-prometheus-stack-prometheus", namespace="monitoring"})
+  - id: prometheus_not_ingesting_samples.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          (
+            sum without(type) (rate(prometheus_tsdb_head_samples_appended_total{job="kps-kube-prometheus-stack-prometheus",namespace="monitoring"}[5m])) <= 0
+          and
+            (
+              sum without(scrape_job) (prometheus_target_metadata_cache_entries{job="kps-kube-prometheus-stack-prometheus",namespace="monitoring"}) > 0
+            or
+              sum without(rule_group) (prometheus_rule_group_rules{job="kps-kube-prometheus-stack-prometheus",namespace="monitoring"}) > 0
+            )
+          )
+  - id: prometheus_not_ingesting_samples.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          (
+            sum without(type) (rate(prometheus_tsdb_head_samples_appended_total{job="kps-kube-prometheus-stack-prometheus",namespace="monitoring"}[5m])) <= 0
+          and
+            (
+              sum without(scrape_job) (prometheus_target_metadata_cache_entries{job="kps-kube-prometheus-stack-prometheus",namespace="monitoring"}) > 0
+            or
+              sum without(rule_group) (prometheus_rule_group_rules{job="kps-kube-prometheus-stack-prometheus",namespace="monitoring"}) > 0
+            )
+          )
+          )[10m:1m])
+  - id: prometheus_notification_queue_running_full.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(prometheus_notifications_queue_capacity{job="kps-kube-prometheus-stack-prometheus", namespace="monitoring"}) or count(prometheus_notifications_queue_length{job="kps-kube-prometheus-stack-prometheus", namespace="monitoring"})
+  - id: prometheus_notification_queue_running_full.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          # Without min_over_time, failed scrapes could create false negatives, see
+          # https://www.robustperception.io/alerting-on-gauges-in-prometheus-2-0 for details.
+          (
+            predict_linear(prometheus_notifications_queue_length{job="kps-kube-prometheus-stack-prometheus",namespace="monitoring"}[5m], 60 * 30)
+          >
+            min_over_time(prometheus_notifications_queue_capacity{job="kps-kube-prometheus-stack-prometheus",namespace="monitoring"}[5m])
+          )
+  - id: prometheus_notification_queue_running_full.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          # Without min_over_time, failed scrapes could create false negatives, see
+          # https://www.robustperception.io/alerting-on-gauges-in-prometheus-2-0 for details.
+          (
+            predict_linear(prometheus_notifications_queue_length{job="kps-kube-prometheus-stack-prometheus",namespace="monitoring"}[5m], 60 * 30)
+          >
+            min_over_time(prometheus_notifications_queue_capacity{job="kps-kube-prometheus-stack-prometheus",namespace="monitoring"}[5m])
+          )
+          )[15m:1m])
+  - id: prometheus_operator_list_errors.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(prometheus_operator_list_operations_failed_total{job="kps-kube-prometheus-stack-operator", namespace="monitoring"}) or count(prometheus_operator_list_operations_total{job="kps-kube-prometheus-stack-operator", namespace="monitoring"})
+  - id: prometheus_operator_list_errors.value
+    kind: metrics
+    alternatives:
+      - expr: (sum by (cluster,controller,namespace) (rate(prometheus_operator_list_operations_failed_total{job="kps-kube-prometheus-stack-operator",namespace="monitoring"}[10m])) / sum by (cluster,controller,namespace) (rate(prometheus_operator_list_operations_total{job="kps-kube-prometheus-stack-operator",namespace="monitoring"}[10m]))) > 0.4
+  - id: prometheus_operator_list_errors.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          (sum by (cluster,controller,namespace) (rate(prometheus_operator_list_operations_failed_total{job="kps-kube-prometheus-stack-operator",namespace="monitoring"}[10m])) / sum by (cluster,controller,namespace) (rate(prometheus_operator_list_operations_total{job="kps-kube-prometheus-stack-operator",namespace="monitoring"}[10m]))) > 0.4
+          )[15m:1m])
+  - id: prometheus_operator_node_lookup_errors.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(prometheus_operator_node_address_lookup_errors_total{job="kps-kube-prometheus-stack-operator", namespace="monitoring"})
+  - id: prometheus_operator_node_lookup_errors.value
+    kind: metrics
+    alternatives:
+      - expr: rate(prometheus_operator_node_address_lookup_errors_total{job="kps-kube-prometheus-stack-operator",namespace="monitoring"}[5m]) > 0.1
+  - id: prometheus_operator_node_lookup_errors.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          rate(prometheus_operator_node_address_lookup_errors_total{job="kps-kube-prometheus-stack-operator",namespace="monitoring"}[5m]) > 0.1
+          )[10m:1m])
+  - id: prometheus_operator_not_ready.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(prometheus_operator_ready{job="kps-kube-prometheus-stack-operator", namespace="monitoring"})
+  - id: prometheus_operator_not_ready.value
+    kind: metrics
+    alternatives:
+      - expr: min by (cluster,controller,namespace) (max_over_time(prometheus_operator_ready{job="kps-kube-prometheus-stack-operator",namespace="monitoring"}[5m]) == 0)
+  - id: prometheus_operator_not_ready.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          min by (cluster,controller,namespace) (max_over_time(prometheus_operator_ready{job="kps-kube-prometheus-stack-operator",namespace="monitoring"}[5m]) == 0)
+          )[5m:1m])
+  - id: prometheus_operator_reconcile_errors.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(prometheus_operator_reconcile_errors_total{job="kps-kube-prometheus-stack-operator", namespace="monitoring"}) or count(prometheus_operator_reconcile_operations_total{job="kps-kube-prometheus-stack-operator", namespace="monitoring"})
+  - id: prometheus_operator_reconcile_errors.value
+    kind: metrics
+    alternatives:
+      - expr: (sum by (cluster,controller,namespace) (rate(prometheus_operator_reconcile_errors_total{job="kps-kube-prometheus-stack-operator",namespace="monitoring"}[5m]))) / (sum by (cluster,controller,namespace) (rate(prometheus_operator_reconcile_operations_total{job="kps-kube-prometheus-stack-operator",namespace="monitoring"}[5m]))) > 0.1
+  - id: prometheus_operator_reconcile_errors.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          (sum by (cluster,controller,namespace) (rate(prometheus_operator_reconcile_errors_total{job="kps-kube-prometheus-stack-operator",namespace="monitoring"}[5m]))) / (sum by (cluster,controller,namespace) (rate(prometheus_operator_reconcile_operations_total{job="kps-kube-prometheus-stack-operator",namespace="monitoring"}[5m]))) > 0.1
+          )[10m:1m])
+  - id: prometheus_operator_rejected_resources.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(prometheus_operator_managed_resources{state="rejected", job="kps-kube-prometheus-stack-operator", namespace="monitoring"})
+  - id: prometheus_operator_rejected_resources.value
+    kind: metrics
+    alternatives:
+      - expr: min_over_time(prometheus_operator_managed_resources{state="rejected",job="kps-kube-prometheus-stack-operator",namespace="monitoring"}[5m]) > 0
+  - id: prometheus_operator_rejected_resources.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          min_over_time(prometheus_operator_managed_resources{state="rejected",job="kps-kube-prometheus-stack-operator",namespace="monitoring"}[5m]) > 0
+          )[5m:1m])
+  - id: prometheus_operator_status_update_errors.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(prometheus_operator_status_update_errors_total{job="kps-kube-prometheus-stack-operator", namespace="monitoring"}) or count(prometheus_operator_status_update_operations_total{job="kps-kube-prometheus-stack-operator", namespace="monitoring"})
+  - id: prometheus_operator_status_update_errors.value
+    kind: metrics
+    alternatives:
+      - expr: (sum by (cluster,controller,namespace) (rate(prometheus_operator_status_update_errors_total{job="kps-kube-prometheus-stack-operator",namespace="monitoring"}[5m]))) / (sum by (cluster,controller,namespace) (rate(prometheus_operator_status_update_operations_total{job="kps-kube-prometheus-stack-operator",namespace="monitoring"}[5m]))) > 0.1
+  - id: prometheus_operator_status_update_errors.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          (sum by (cluster,controller,namespace) (rate(prometheus_operator_status_update_errors_total{job="kps-kube-prometheus-stack-operator",namespace="monitoring"}[5m]))) / (sum by (cluster,controller,namespace) (rate(prometheus_operator_status_update_operations_total{job="kps-kube-prometheus-stack-operator",namespace="monitoring"}[5m]))) > 0.1
+          )[10m:1m])
+  - id: prometheus_operator_sync_failed.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(prometheus_operator_syncs{status="failed", job="kps-kube-prometheus-stack-operator", namespace="monitoring"})
+  - id: prometheus_operator_sync_failed.value
+    kind: metrics
+    alternatives:
+      - expr: min_over_time(prometheus_operator_syncs{status="failed",job="kps-kube-prometheus-stack-operator",namespace="monitoring"}[5m]) > 0
+  - id: prometheus_operator_sync_failed.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          min_over_time(prometheus_operator_syncs{status="failed",job="kps-kube-prometheus-stack-operator",namespace="monitoring"}[5m]) > 0
+          )[10m:1m])
+  - id: prometheus_operator_watch_errors.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(prometheus_operator_watch_operations_failed_total{job="kps-kube-prometheus-stack-operator", namespace="monitoring"}) or count(prometheus_operator_watch_operations_total{job="kps-kube-prometheus-stack-operator", namespace="monitoring"})
+  - id: prometheus_operator_watch_errors.value
+    kind: metrics
+    alternatives:
+      - expr: (sum by (cluster,controller,namespace) (rate(prometheus_operator_watch_operations_failed_total{job="kps-kube-prometheus-stack-operator",namespace="monitoring"}[5m])) / sum by (cluster,controller,namespace) (rate(prometheus_operator_watch_operations_total{job="kps-kube-prometheus-stack-operator",namespace="monitoring"}[5m]))) > 0.4
+  - id: prometheus_operator_watch_errors.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          (sum by (cluster,controller,namespace) (rate(prometheus_operator_watch_operations_failed_total{job="kps-kube-prometheus-stack-operator",namespace="monitoring"}[5m])) / sum by (cluster,controller,namespace) (rate(prometheus_operator_watch_operations_total{job="kps-kube-prometheus-stack-operator",namespace="monitoring"}[5m]))) > 0.4
+          )[15m:1m])
+  - id: prometheus_out_of_order_timestamps.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(prometheus_target_scrapes_sample_out_of_order_total{job="kps-kube-prometheus-stack-prometheus", namespace="monitoring"})
+  - id: prometheus_out_of_order_timestamps.value
+    kind: metrics
+    alternatives:
+      - expr: rate(prometheus_target_scrapes_sample_out_of_order_total{job="kps-kube-prometheus-stack-prometheus",namespace="monitoring"}[5m]) > 0
+  - id: prometheus_out_of_order_timestamps.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          rate(prometheus_target_scrapes_sample_out_of_order_total{job="kps-kube-prometheus-stack-prometheus",namespace="monitoring"}[5m]) > 0
+          )[10m:1m])
+  - id: prometheus_remote_storage_failures.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(prometheus_remote_storage_failed_samples_total{job="kps-kube-prometheus-stack-prometheus", namespace="monitoring"}) or count(prometheus_remote_storage_samples_failed_total{job="kps-kube-prometheus-stack-prometheus", namespace="monitoring"}) or count(prometheus_remote_storage_samples_total{job="kps-kube-prometheus-stack-prometheus", namespace="monitoring"}) or count(prometheus_remote_storage_succeeded_samples_total{job="kps-kube-prometheus-stack-prometheus", namespace="monitoring"})
+  - id: prometheus_remote_storage_failures.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          (
+            (rate(prometheus_remote_storage_failed_samples_total{job="kps-kube-prometheus-stack-prometheus",namespace="monitoring"}[5m]) or rate(prometheus_remote_storage_samples_failed_total{job="kps-kube-prometheus-stack-prometheus",namespace="monitoring"}[5m]))
+          /
+            (
+              (rate(prometheus_remote_storage_failed_samples_total{job="kps-kube-prometheus-stack-prometheus",namespace="monitoring"}[5m]) or rate(prometheus_remote_storage_samples_failed_total{job="kps-kube-prometheus-stack-prometheus",namespace="monitoring"}[5m]))
+            +
+              (rate(prometheus_remote_storage_succeeded_samples_total{job="kps-kube-prometheus-stack-prometheus",namespace="monitoring"}[5m]) or rate(prometheus_remote_storage_samples_total{job="kps-kube-prometheus-stack-prometheus",namespace="monitoring"}[5m]))
+            )
+          )
+          * 100
+          > 1
+  - id: prometheus_remote_storage_failures.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          (
+            (rate(prometheus_remote_storage_failed_samples_total{job="kps-kube-prometheus-stack-prometheus",namespace="monitoring"}[5m]) or rate(prometheus_remote_storage_samples_failed_total{job="kps-kube-prometheus-stack-prometheus",namespace="monitoring"}[5m]))
+          /
+            (
+              (rate(prometheus_remote_storage_failed_samples_total{job="kps-kube-prometheus-stack-prometheus",namespace="monitoring"}[5m]) or rate(prometheus_remote_storage_samples_failed_total{job="kps-kube-prometheus-stack-prometheus",namespace="monitoring"}[5m]))
+            +
+              (rate(prometheus_remote_storage_succeeded_samples_total{job="kps-kube-prometheus-stack-prometheus",namespace="monitoring"}[5m]) or rate(prometheus_remote_storage_samples_total{job="kps-kube-prometheus-stack-prometheus",namespace="monitoring"}[5m]))
+            )
+          )
+          * 100
+          > 1
+          )[15m:1m])
+  - id: prometheus_remote_write_behind.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(prometheus_remote_storage_queue_highest_sent_timestamp_seconds{job="kps-kube-prometheus-stack-prometheus", namespace="monitoring"}) or count(prometheus_remote_storage_queue_highest_timestamp_seconds{job="kps-kube-prometheus-stack-prometheus", namespace="monitoring"})
+  - id: prometheus_remote_write_behind.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          # Without max_over_time, failed scrapes could create false negatives, see
+          # https://www.robustperception.io/alerting-on-gauges-in-prometheus-2-0 for details.
+          (
+            max_over_time(prometheus_remote_storage_queue_highest_timestamp_seconds{job="kps-kube-prometheus-stack-prometheus",namespace="monitoring"}[5m])
+          -
+            max_over_time(prometheus_remote_storage_queue_highest_sent_timestamp_seconds{job="kps-kube-prometheus-stack-prometheus",namespace="monitoring"}[5m])
+          )
+          > 120
+  - id: prometheus_remote_write_behind.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          # Without max_over_time, failed scrapes could create false negatives, see
+          # https://www.robustperception.io/alerting-on-gauges-in-prometheus-2-0 for details.
+          (
+            max_over_time(prometheus_remote_storage_queue_highest_timestamp_seconds{job="kps-kube-prometheus-stack-prometheus",namespace="monitoring"}[5m])
+          -
+            max_over_time(prometheus_remote_storage_queue_highest_sent_timestamp_seconds{job="kps-kube-prometheus-stack-prometheus",namespace="monitoring"}[5m])
+          )
+          > 120
+          )[15m:1m])
+  - id: prometheus_remote_write_desired_shards.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(prometheus_remote_storage_shards_desired{job="kps-kube-prometheus-stack-prometheus", namespace="monitoring"}) or count(prometheus_remote_storage_shards_max{job="kps-kube-prometheus-stack-prometheus", namespace="monitoring"})
+  - id: prometheus_remote_write_desired_shards.value
+    kind: metrics
+    alternatives:
+      - expr: |-
+          # Without max_over_time, failed scrapes could create false negatives, see
+          # https://www.robustperception.io/alerting-on-gauges-in-prometheus-2-0 for details.
+          (
+            max_over_time(prometheus_remote_storage_shards_desired{job="kps-kube-prometheus-stack-prometheus",namespace="monitoring"}[5m])
+          >
+            max_over_time(prometheus_remote_storage_shards_max{job="kps-kube-prometheus-stack-prometheus",namespace="monitoring"}[5m])
+          )
+  - id: prometheus_remote_write_desired_shards.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          # Without max_over_time, failed scrapes could create false negatives, see
+          # https://www.robustperception.io/alerting-on-gauges-in-prometheus-2-0 for details.
+          (
+            max_over_time(prometheus_remote_storage_shards_desired{job="kps-kube-prometheus-stack-prometheus",namespace="monitoring"}[5m])
+          >
+            max_over_time(prometheus_remote_storage_shards_max{job="kps-kube-prometheus-stack-prometheus",namespace="monitoring"}[5m])
+          )
+          )[15m:1m])
+  - id: prometheus_rule_failures.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(prometheus_rule_evaluation_failures_total{job="kps-kube-prometheus-stack-prometheus", namespace="monitoring"})
+  - id: prometheus_rule_failures.value
+    kind: metrics
+    alternatives:
+      - expr: increase(prometheus_rule_evaluation_failures_total{job="kps-kube-prometheus-stack-prometheus",namespace="monitoring"}[5m]) > 0
+  - id: prometheus_rule_failures.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          increase(prometheus_rule_evaluation_failures_total{job="kps-kube-prometheus-stack-prometheus",namespace="monitoring"}[5m]) > 0
+          )[15m:1m])
+  - id: prometheus_scrape_body_size_limit_hit.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(prometheus_target_scrapes_exceeded_body_size_limit_total{job="kps-kube-prometheus-stack-prometheus", namespace="monitoring"})
+  - id: prometheus_scrape_body_size_limit_hit.value
+    kind: metrics
+    alternatives:
+      - expr: increase(prometheus_target_scrapes_exceeded_body_size_limit_total{job="kps-kube-prometheus-stack-prometheus",namespace="monitoring"}[5m]) > 0
+  - id: prometheus_scrape_body_size_limit_hit.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          increase(prometheus_target_scrapes_exceeded_body_size_limit_total{job="kps-kube-prometheus-stack-prometheus",namespace="monitoring"}[5m]) > 0
+          )[15m:1m])
+  - id: prometheus_scrape_sample_limit_hit.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(prometheus_target_scrapes_exceeded_sample_limit_total{job="kps-kube-prometheus-stack-prometheus", namespace="monitoring"})
+  - id: prometheus_scrape_sample_limit_hit.value
+    kind: metrics
+    alternatives:
+      - expr: increase(prometheus_target_scrapes_exceeded_sample_limit_total{job="kps-kube-prometheus-stack-prometheus",namespace="monitoring"}[5m]) > 0
+  - id: prometheus_scrape_sample_limit_hit.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          increase(prometheus_target_scrapes_exceeded_sample_limit_total{job="kps-kube-prometheus-stack-prometheus",namespace="monitoring"}[5m]) > 0
+          )[15m:1m])
+  - id: prometheus_sd_refresh_failure.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(prometheus_sd_refresh_failures_total{job="kps-kube-prometheus-stack-prometheus", namespace="monitoring"})
+  - id: prometheus_sd_refresh_failure.value
+    kind: metrics
+    alternatives:
+      - expr: increase(prometheus_sd_refresh_failures_total{job="kps-kube-prometheus-stack-prometheus",namespace="monitoring"}[10m]) > 0
+  - id: prometheus_sd_refresh_failure.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          increase(prometheus_sd_refresh_failures_total{job="kps-kube-prometheus-stack-prometheus",namespace="monitoring"}[10m]) > 0
+          )[20m:1m])
+  - id: prometheus_target_limit_hit.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(prometheus_target_scrape_pool_exceeded_target_limit_total{job="kps-kube-prometheus-stack-prometheus", namespace="monitoring"})
+  - id: prometheus_target_limit_hit.value
+    kind: metrics
+    alternatives:
+      - expr: increase(prometheus_target_scrape_pool_exceeded_target_limit_total{job="kps-kube-prometheus-stack-prometheus",namespace="monitoring"}[5m]) > 0
+  - id: prometheus_target_limit_hit.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          increase(prometheus_target_scrape_pool_exceeded_target_limit_total{job="kps-kube-prometheus-stack-prometheus",namespace="monitoring"}[5m]) > 0
+          )[15m:1m])
+  - id: prometheus_target_sync_failure.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(prometheus_target_sync_failed_total{job="kps-kube-prometheus-stack-prometheus", namespace="monitoring"})
+  - id: prometheus_target_sync_failure.value
+    kind: metrics
+    alternatives:
+      - expr: increase(prometheus_target_sync_failed_total{job="kps-kube-prometheus-stack-prometheus",namespace="monitoring"}[30m]) > 0
+  - id: prometheus_target_sync_failure.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          increase(prometheus_target_sync_failed_total{job="kps-kube-prometheus-stack-prometheus",namespace="monitoring"}[30m]) > 0
+          )[5m:1m])
+  - id: prometheus_tsdb_compactions_failing.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(prometheus_tsdb_compactions_failed_total{job="kps-kube-prometheus-stack-prometheus", namespace="monitoring"})
+  - id: prometheus_tsdb_compactions_failing.value
+    kind: metrics
+    alternatives:
+      - expr: increase(prometheus_tsdb_compactions_failed_total{job="kps-kube-prometheus-stack-prometheus",namespace="monitoring"}[3h]) > 0
+  - id: prometheus_tsdb_compactions_failing.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          increase(prometheus_tsdb_compactions_failed_total{job="kps-kube-prometheus-stack-prometheus",namespace="monitoring"}[3h]) > 0
+          )[240m:1m])
+  - id: prometheus_tsdb_reloads_failing.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(prometheus_tsdb_reloads_failures_total{job="kps-kube-prometheus-stack-prometheus", namespace="monitoring"})
+  - id: prometheus_tsdb_reloads_failing.value
+    kind: metrics
+    alternatives:
+      - expr: increase(prometheus_tsdb_reloads_failures_total{job="kps-kube-prometheus-stack-prometheus",namespace="monitoring"}[3h]) > 0
+  - id: prometheus_tsdb_reloads_failing.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          increase(prometheus_tsdb_reloads_failures_total{job="kps-kube-prometheus-stack-prometheus",namespace="monitoring"}[3h]) > 0
+          )[240m:1m])
+  - id: target_down.inputs
+    kind: metrics
+    alternatives:
+      - expr: count(up{})
+  - id: target_down.value
+    kind: metrics
+    alternatives:
+      - expr: 100 * (count(up == 0) BY (cluster, job, namespace, service) / count(up) BY (cluster, job, namespace, service)) > 10
+  - id: target_down.held
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: |-
+          count_over_time((
+          100 * (count(up == 0) BY (cluster, job, namespace, service) / count(up) BY (cluster, job, namespace, service)) > 10
+          )[10m:1m])

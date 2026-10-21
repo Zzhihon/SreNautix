@@ -8,4 +8,6 @@ entries:
       name_labels: [pod]
     chains:
       - pod-memory
+    # 与告警条件对应的卡：告警触发时它应当判为异常（pack lint 检查卡存在、applies_to 包含实体 kind、证据链在 chains 中）
+    primary_card: pod-memory/limit-ratio
     mixin: other

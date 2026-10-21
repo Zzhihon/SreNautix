@@ -10,6 +10,7 @@ entries:
     }
   - {
       id: rocketmq-consumer-fallen-behind,
+      primary_card: rocketmq/consumer-lag,
       alertname: ConsumerFallingBehind,
       role: symptom,
       entity: { kind: Namespace, name_labels: [namespace] },
@@ -26,6 +27,7 @@ entries:
     }
   - {
       id: rocketmq-disk-ratio-high,
+      primary_card: rocketmq/broker,
       alertname: DiskRatioTooHigh,
       role: cause,
       entity: { kind: Namespace, name_labels: [namespace] },

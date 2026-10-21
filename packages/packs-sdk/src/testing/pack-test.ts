@@ -24,7 +24,7 @@ import { denseLabels, type RefData } from '../judge/data.js';
 import type { PackSet } from '../pack/compile.js';
 import { LiveDataSource, type EvidenceDataSource } from '../runtime/datasource.js';
 import { DEFAULT_WINDOW, durationSeconds, runCard, type RunCardResult } from '../runtime/run-card.js';
-import { alertFires, primaryCardIndex, ruleForEntry, type AlertRule } from './alert-consistency.js';
+import { alertFires, primaryCardIndex, rulesForEntry, type AlertRule } from './alert-consistency.js';
 import { resolveSignal, type SignalResolution } from '../signals/resolve.js';
 
 /** 夹具的时间零点 */
@@ -287,26 +287,35 @@ export async function runPackTests(opts: PackTestOptions): Promise<PackTestRepor
             }
             // 这张卡是某些告警的主卡：告警在卡片窗口内触发 ⇔ 主卡判为异常
             for (const { entry } of primaries.get(key) ?? []) {
-              const rule = opts.alertRules ? ruleForEntry(opts.alertRules, entry) : null;
-              if (!rule) {
+              const rules = opts.alertRules ? rulesForEntry(opts.alertRules, entry) : [];
+              if (!rules.length) {
                 continue;
               }
               const w = e.def.window ?? DEFAULT_WINDOW;
-              const fires = await alertFires(
-                env.ds[b],
-                rule,
-                entry.entity.name_labels ?? [],
-                t.entity.name,
-                { from: anchor - durationSeconds(w.before) * 1000, to: anchor + durationSeconds(w.after) * 1000 },
-                interval,
-                clock,
+              // 任何一条规则（严重度变体）触发都算条目的告警在触发；后端不支持某条规则的方言时整体不核对
+              const each = await Promise.all(
+                rules.map((rule) =>
+                  alertFires(
+                    env.ds[b],
+                    rule,
+                    entry.entity.name_labels ?? [],
+                    t.entity.name,
+                    {
+                      from: anchor - durationSeconds(w.before) * 1000,
+                      to: anchor + durationSeconds(w.after) * 1000,
+                    },
+                    interval,
+                    clock,
+                  ),
+                ),
               );
-              if (fires === null) {
+              if (each.some((x) => x === null)) {
                 continue;
               }
+              const fires = each.some((x) => x === true);
               if (fires !== (r.verdict === 'abnormal')) {
                 failures.push(
-                  `${b}：告警 ${entry.alertname}（${rule.file}）在卡片窗口内${fires ? '触发' : '没有触发'}，主卡判为 ${r.verdict}`,
+                  `${b}：告警 ${entry.alertname}（${rules[0]!.file}）在卡片窗口内${fires ? '触发' : '没有触发'}，主卡判为 ${r.verdict}`,
                 );
               }
               consistency.checked++;

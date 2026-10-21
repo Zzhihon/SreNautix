@@ -1,0 +1,63 @@
+# 由 packages/packs-sdk/scripts/kps-conditions.ts 从 kubernetes-mixin 的 promtool 测试（Apache-2.0，提交见 upstream/kubernetes-mixin-tests.json）转换，不要手工修改。
+api_version: srenautix.io/pack-test/v1
+interval: 1m
+input_series:
+  - series: kube_pod_status_phase{endpoint="https",instance="instance1",job="kube-state-metrics",cluster="kubernetes",namespace="ns1",phase="Failed",pod="failed-pods-must-be-ignored",service="ksm"}
+    values: 1+0x20
+  - series: kube_pod_owner{endpoint="https",instance="instance1",job="kube-state-metrics",cluster="kubernetes",namespace="ns1",owner_is_controller="false",owner_kind="<None>",owner_name="failed-pods-example",pod="failed-pods-must-be-ignored",service="ksm"}
+    values: 1+0x20
+  - series: kube_pod_status_phase{endpoint="https",instance="instance1",job="kube-state-metrics",cluster="kubernetes",namespace="ns1",phase="Pending",pod="pod-ds-7cc77d965f-cgsdv",service="ksm"}
+    values: 1+0x20
+  - series: kube_pod_owner{endpoint="https",instance="instance1",job="kube-state-metrics",cluster="kubernetes",namespace="ns1",owner_is_controller="false",owner_kind="<None>",owner_name="ds-7cc77d965f",pod="pod-ds-7cc77d965f-cgsdv",service="ksm"}
+    values: 1+0x20
+  - series: kube_pod_owner{endpoint="https",instance="instance1",job="kube-state-metrics",cluster="kubernetes",namespace="ns1",owner_is_controller="true",owner_kind="ReplicaSet",owner_name="ds-7cc77d965f",pod="pod-ds-7cc77d965f-cgsdv",service="ksm"}
+    values: 1+0x20
+  - series: kube_pod_status_phase{endpoint="https",instance="instance1",job="kube-state-metrics",cluster="kubernetes",namespace="ns1",phase="Running",pod="pod-running-but-not-ready",service="ksm"}
+    values: 1+0x20
+  - series: kube_pod_status_ready{endpoint="https",instance="instance1",job="kube-state-metrics",cluster="kubernetes",namespace="ns1",pod="pod-running-but-not-ready",service="ksm",condition="true"}
+    values: 0+0x20
+  - series: kube_pod_status_ready{endpoint="https",instance="instance1",job="kube-state-metrics",cluster="kubernetes",namespace="ns1",pod="pod-running-but-not-ready",service="ksm",condition="false"}
+    values: 1+0x20
+  - series: kube_pod_owner{endpoint="https",instance="instance1",job="kube-state-metrics",cluster="kubernetes",namespace="ns1",owner_is_controller="false",owner_kind="Deployment",owner_name="running-but-not-ready-example",pod="pod-running-but-not-ready",service="ksm"}
+    values: 1+0x20
+  - series: kube_pod_status_phase{endpoint="https",instance="instance1",job="kube-state-metrics",cluster="kubernetes",namespace="ns1",phase="Succeeded",pod="pod-succeeded-batch-job",service="ksm"}
+    values: 1+0x20
+  - series: kube_pod_status_ready{endpoint="https",instance="instance1",job="kube-state-metrics",cluster="kubernetes",namespace="ns1",pod="pod-succeeded-batch-job",service="ksm",condition="true"}
+    values: 0+0x20
+  - series: kube_pod_status_ready{endpoint="https",instance="instance1",job="kube-state-metrics",cluster="kubernetes",namespace="ns1",pod="pod-succeeded-batch-job",service="ksm",condition="false"}
+    values: 1+0x20
+  - series: kube_pod_owner{endpoint="https",instance="instance1",job="kube-state-metrics",cluster="kubernetes",namespace="ns1",owner_is_controller="false",owner_kind="Job",owner_name="succeeded-batch-job-example",pod="pod-succeeded-batch-job",service="ksm"}
+    values: 1+0x20
+  - series: kube_pod_status_phase{endpoint="https",instance="instance1",job="kube-state-metrics",cluster="kubernetes",namespace="ns1",phase="Running",pod="pod-running-and-ready",service="ksm"}
+    values: 1+0x20
+  - series: kube_pod_status_ready{endpoint="https",instance="instance1",job="kube-state-metrics",cluster="kubernetes",namespace="ns1",pod="pod-running-and-ready",service="ksm",condition="true"}
+    values: 1+0x20
+  - series: kube_pod_status_ready{endpoint="https",instance="instance1",job="kube-state-metrics",cluster="kubernetes",namespace="ns1",pod="pod-running-and-ready",service="ksm",condition="false"}
+    values: 0+0x20
+  - series: kube_pod_owner{endpoint="https",instance="instance1",job="kube-state-metrics",cluster="kubernetes",namespace="ns1",owner_is_controller="false",owner_kind="Deployment",owner_name="running-and-ready-example",pod="pod-running-and-ready",service="ksm"}
+    values: 1+0x20
+  - series: kube_pod_status_phase{endpoint="https",instance="instance1",job="kube-state-metrics",cluster="kubernetes",namespace="ns1",phase="Pending",pod="pod-scheduling-gated",service="ksm"}
+    values: 1+0x20
+  - series: kube_pod_status_reason{endpoint="https",instance="instance1",job="kube-state-metrics",cluster="kubernetes",namespace="ns1",reason="SchedulingGated",pod="pod-scheduling-gated",service="ksm"}
+    values: 1+0x20
+  - series: kube_pod_owner{endpoint="https",instance="instance1",job="kube-state-metrics",cluster="kubernetes",namespace="ns1",owner_is_controller="true",owner_kind="StatefulSet",owner_name="scheduling-gated-example",pod="pod-scheduling-gated",service="ksm"}
+    values: 1+0x20
+tests:
+  - name: KubePodNotReady 在 15m 触发（tests.yaml#30）
+    eval_time: 15m
+    card: kube-pod-not-ready/condition
+    entity:
+      kind: Pod
+      namespace: ns1
+      name: pod-ds-7cc77d965f-cgsdv
+    expect:
+      verdict: abnormal
+  - name: KubePodNotReady 在 15m 触发（tests.yaml#30）
+    eval_time: 15m
+    card: kube-pod-not-ready/condition
+    entity:
+      kind: Pod
+      namespace: ns1
+      name: pod-running-but-not-ready
+    expect:
+      verdict: abnormal

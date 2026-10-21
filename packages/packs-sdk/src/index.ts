@@ -20,6 +20,15 @@ export { computeLock, lockDigest, verifyLock, PackLockMismatch } from './pack/lo
 export { loadActionCatalog, type ActionCatalog, type CatalogAction } from './pack/catalog.js';
 export { loadBuiltinPacks, loadGitPack } from './pack/sources.js';
 export {
+  generateConditionPack,
+  rulesForCatalogEntry,
+  forMinutes,
+  ruleDialect,
+  type ConditionRule,
+  type ConditionPack,
+} from './pack/conditions.js';
+export { convertPromtoolTests, type ConvertedFixtures } from './pack/promtool-fixtures.js';
+export {
   loadOciPack,
   CosignVerifier,
   OciPackError,
@@ -83,7 +92,8 @@ export {
 export { runPackTests, FIXTURE_EPOCH, type PackTestReport, type CaseResult } from './testing/pack-test.js';
 export {
   loadAlertRules,
-  ruleForEntry,
+  alertRulesFrom,
+  rulesForEntry,
   primaryCardIndex,
   alertFires,
   type AlertRule,

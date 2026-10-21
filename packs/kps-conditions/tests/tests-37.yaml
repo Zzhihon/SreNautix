@@ -1,0 +1,16 @@
+# 由 packages/packs-sdk/scripts/kps-conditions.ts 从 kubernetes-mixin 的 promtool 测试（Apache-2.0，提交见 upstream/kubernetes-mixin-tests.json）转换，不要手工修改。
+api_version: srenautix.io/pack-test/v1
+interval: 1m
+input_series:
+  - series: kube_deployment_status_condition{job="kube-state-metrics",cluster="kubernetes",namespace="monitoring",deployment="stuck", condition="Progressing", status="false"}
+    values: 1+0x17 0+0x5
+tests:
+  - name: KubeDeploymentRolloutStuck 在 16m 触发（tests.yaml#37）
+    eval_time: 16m
+    card: kube-deployment-rollout-stuck/condition
+    entity:
+      kind: Deployment
+      namespace: monitoring
+      name: stuck
+    expect:
+      verdict: abnormal

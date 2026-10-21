@@ -2,6 +2,7 @@
 entries:
   - {
       id: mysql-down,
+      primary_card: mysql/availability,
       alertname: MySQLDown,
       role: cause,
       entity: { kind: Pod, name_labels: [pod, instance] },
@@ -11,6 +12,7 @@ entries:
     }
   - {
       id: mysql-galera-not-ready,
+      primary_card: mysql/replication,
       alertname: MySQLGaleraNotReady,
       role: cause,
       entity: { kind: Pod, name_labels: [pod, instance] },
@@ -20,6 +22,7 @@ entries:
     }
   - {
       id: mysql-galera-out-of-sync,
+      primary_card: mysql/replication,
       alertname: MySQLGaleraOutOfSync,
       role: cause,
       entity: { kind: Pod, name_labels: [pod, instance] },
@@ -38,6 +41,7 @@ entries:
     }
   - {
       id: mysql-replication-not-running,
+      primary_card: mysql/replication,
       alertname: MySQLReplicationNotRunning,
       role: cause,
       entity: { kind: Pod, name_labels: [pod, instance] },
@@ -47,6 +51,7 @@ entries:
     }
   - {
       id: mysql-replication-lag,
+      primary_card: mysql/replication,
       alertname: MySQLReplicationLag,
       role: forecast,
       entity: { kind: Pod, name_labels: [pod, instance] },
@@ -56,6 +61,7 @@ entries:
     }
   - {
       id: mysql-heartbeat-lag,
+      primary_card: mysql/replication,
       alertname: MySQLHeartbeatLag,
       role: forecast,
       entity: { kind: Pod, name_labels: [pod, instance] },

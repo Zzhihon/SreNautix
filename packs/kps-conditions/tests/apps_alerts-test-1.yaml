@@ -1,0 +1,20 @@
+# 由 packages/packs-sdk/scripts/kps-conditions.ts 从 kubernetes-mixin 的 promtool 测试（Apache-2.0，提交见 upstream/kubernetes-mixin-tests.json）转换，不要手工修改。
+api_version: srenautix.io/pack-test/v1
+interval: 1m
+input_series:
+  - series: kube_poddisruptionbudget_status_desired_healthy{cluster="cluster1", namespace="ns1", poddisruptionbudget="pdb1", job="kube-state-metrics"}
+    values: 4x15
+  - series: kube_poddisruptionbudget_status_current_healthy{cluster="cluster1", namespace="ns1", poddisruptionbudget="pdb1", job="kube-state-metrics"}
+    values: 3x15
+  - series: kube_poddisruptionbudget_status_expected_pods{cluster="cluster1", namespace="ns1", poddisruptionbudget="pdb1", job="kube-state-metrics"}
+    values: 4x15
+tests:
+  - name: KubePdbNotEnoughHealthyPods 在 15m 触发（apps_alerts-test.yaml#1）
+    eval_time: 15m
+    card: kube-pdb-not-enough-healthy-pods/condition
+    entity:
+      kind: PodDisruptionBudget
+      namespace: ns1
+      name: pdb1
+    expect:
+      verdict: abnormal

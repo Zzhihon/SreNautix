@@ -1,0 +1,22 @@
+# 由 packages/packs-sdk/scripts/kps-conditions.ts 从 kubernetes-mixin 的 promtool 测试（Apache-2.0，提交见 upstream/kubernetes-mixin-tests.json）转换，不要手工修改。
+api_version: srenautix.io/pack-test/v1
+interval: 1m
+input_series:
+  - series: kube_resourcequota{cluster="cluster1", namespace="test-ns", resourcequota="memory-quota", resource="requests.memory", type="used", job="kube-state-metrics", instance="ksm1"}
+    values: 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100
+  - series: kube_resourcequota{cluster="cluster1", namespace="test-ns", resourcequota="memory-quota", resource="requests.memory", type="hard", job="kube-state-metrics", instance="ksm1"}
+    values: 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100
+  - series: kube_resourcequota{cluster="cluster1", namespace="test-ns", resourcequota="memory-quota", resource="requests.memory", type="used", job="kube-state-metrics", instance="ksm2"}
+    values: 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100
+  - series: kube_resourcequota{cluster="cluster1", namespace="test-ns", resourcequota="memory-quota", resource="requests.memory", type="hard", job="kube-state-metrics", instance="ksm2"}
+    values: 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100
+tests:
+  - name: KubeQuotaFullyUsed 在 20m 触发（resource_alerts-test.yaml#3）
+    eval_time: 20m
+    card: kube-quota-fully-used/condition
+    entity:
+      kind: ResourceQuota
+      namespace: test-ns
+      name: memory-quota
+    expect:
+      verdict: abnormal
