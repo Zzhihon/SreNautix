@@ -68,8 +68,13 @@ function incident(): Incident {
 }
 
 /** 事件、成员告警（没有命中目录）、阶段 A 报告与一次结束的研判 */
-async function seed(level = 'likely'): Promise<{ inc: Incident; runId: string }> {
+async function seed(
+  level = 'likely',
+  o: { disposition?: string; severity?: 'warning' | 'critical' } = {},
+): Promise<{ inc: Incident; runId: string }> {
   const inc = incident();
+  const disposition = o.disposition ?? 'act';
+  const severity = o.severity ?? 'warning';
   const fp = createHash('sha256').update(inc.incident_id).digest('hex').slice(0, 16);
   const startsAt = new Date(T - 15 * 60_000);
   const u = await tx(db.server, (c) =>
@@ -78,9 +83,9 @@ async function seed(level = 'likely'): Promise<{ inc: Incident; runId: string }>
       CLUSTER,
       {
         source: 'alertmanager',
-        labels: { alertname: 'ShopQueueBacklog', deployment: 'api', namespace: 'shop', severity: 'warning' },
+        labels: { alertname: 'ShopQueueBacklog', deployment: 'api', namespace: 'shop', severity },
         annotations: {},
-        severity: 'warning',
+        severity,
         status: 'firing',
         suppressed: 'none',
         startsAt,
@@ -145,7 +150,7 @@ async function seed(level = 'likely'): Promise<{ inc: Incident; runId: string }>
   await db.server.query(
     `INSERT INTO server.research_runs (run_id, incident_id, incident_version, reason, state, disposition, conclusion_level, root_component,
        summary, evidence_fingerprint, output, started_at, finished_at)
-     VALUES ($1, $2, $3, 'new_incident', 'completed', 'act', $4, $5, $6, $7, $8, now() - interval '2 minutes', now())`,
+     VALUES ($1, $2, $3, 'new_incident', 'completed', $9, $4, $5, $6, $7, $8, now() - interval '2 minutes', now())`,
     [
       runId,
       inc.incident_id,
@@ -155,7 +160,7 @@ async function seed(level = 'likely'): Promise<{ inc: Incident; runId: string }>
       'api 的队列积压告警没有命中告警目录',
       report.evidence_fingerprint,
       JSON.stringify({
-        disposition: 'act',
+        disposition,
         conclusion: {
           level,
           hypothesis_id: 'h1',
@@ -181,17 +186,37 @@ async function seed(level = 'likely'): Promise<{ inc: Incident; runId: string }>
         proposals: [],
         validation_notes: [],
       }),
+      disposition,
     ],
   );
   return { inc, runId };
 }
+
+const RULES_PATH = 'platform/rules/shop.yaml';
+const RULES_FILE = `apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: shop
+spec:
+  groups:
+    - name: shop
+      rules:
+        - alert: ShopQueueBacklog
+          expr: queue_depth > 100
+          labels:
+            severity: critical
+`;
 
 beforeAll(async () => {
   db = await newTestDb();
   await migrateExpand(db.server, 'server', serverTracks);
   gh = new FakeGitHub('1', '2', key.publicKey, REPO);
   await gh.start();
-  gh.write('main', { [CATALOG_PATH]: CATALOG_FILE, 'apps/shop/release.json': '{}\n' }, { message: 'seed' });
+  gh.write(
+    'main',
+    { [CATALOG_PATH]: CATALOG_FILE, [RULES_PATH]: RULES_FILE, 'apps/shop/release.json': '{}\n' },
+    { message: 'seed' },
+  );
   app = new GitHubApp({ apiBase: gh.url, appId: '1', installationId: '2', privateKey: pem });
   rt = await PackRuntime.load({
     dirs: [PACKS],
@@ -245,7 +270,10 @@ beforeAll(async () => {
         gitops: {
           repo: REPO,
           base_branch: 'main',
-          files: { pack_alerts: { path: CATALOG_PATH, format: 'yaml' } },
+          files: {
+            pack_alerts: { path: CATALOG_PATH, format: 'yaml' },
+            alert_rules: { path: 'platform/rules/*.yaml', format: 'yaml' },
+          },
         },
       },
       categories: ['release_rollback', 'config_resource', 'alert_rule', 'topology_coverage'],
@@ -379,6 +407,25 @@ describe('自愈 PR', () => {
     expect(await attempts(again.runId)).toEqual([
       { key: 'gitops/alert-catalog-entry', outcome: 'skipped', code: 'skip_if', proposal_id: null, branch: null },
     ]);
+  });
+
+  it('模板收到研判结论：研判判为 ignore、告警是 critical 时提议把规则降为 warning；判为 act 时不提', async () => {
+    const act = await seed('likely', { severity: 'critical' });
+    expect(await service.runOnce()).toBe(0);
+    expect((await attempts(act.runId)).map((a) => a.key)).not.toContain('gitops/noisy-alert-relax');
+    const ignored = await seed('likely', { severity: 'critical', disposition: 'ignore' });
+    expect(await service.runOnce()).toBe(1);
+    const rows = await attempts(ignored.runId);
+    const noisy = rows.find((a) => a.key === 'gitops/noisy-alert-relax');
+    expect(noisy).toMatchObject({ outcome: 'proposed' });
+    const p = await db.server.query<{ params: { patch: string; title: string } }>(
+      'SELECT params FROM server.proposals WHERE proposal_id = $1',
+      [noisy!.proposal_id],
+    );
+    const after = applyPatch(RULES_FILE, p.rows[0]!.params.patch) as string;
+    expect(after).toContain('severity: warning');
+    expect(after).toContain('for: 1h');
+    expect(p.rows[0]!.params.title).toMatch(/^\[影子\] 降低误报告警的严重度/);
   });
 
   it('gateway 开出 PR 后：从执行事件取得 PR，关联到事件 issue；消息里没有时按分支查 GitHub', async () => {

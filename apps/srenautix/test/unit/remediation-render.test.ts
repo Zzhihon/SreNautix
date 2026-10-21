@@ -22,9 +22,9 @@ function patchOf(path: string, before: string, after: string): string {
 
 const plan = (over: Partial<RemediationPlan> = {}): RemediationPlan => ({
   kind: 'plan',
-  key: 'gitops/chronic-alert-relax',
+  key: 'gitops/noisy-alert-relax',
   pack: 'gitops',
-  id: 'chronic-alert-relax',
+  id: 'noisy-alert-relax',
   category: 'alert_rule',
   repository: 'gitops',
   title: { 'zh-CN': '降低长期告警的严重度', en: 'Relax a chronic alert' },

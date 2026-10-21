@@ -69,6 +69,7 @@ interface RunRow {
   incident_id: string;
   incident_version: number;
   conclusion_level: string;
+  disposition: string | null;
   root_component: string | null;
   summary: string | null;
   evidence_fingerprint: string | null;
@@ -100,7 +101,7 @@ export class RemediationService {
   /** 一轮：处理最近结束、还没有处理过的研判 */
   async runOnce(limit = 5): Promise<number> {
     const r = await this.pool.query<RunRow>(
-      `SELECT r.run_id, r.incident_id, r.incident_version, r.conclusion_level, r.root_component, r.summary,
+      `SELECT r.run_id, r.incident_id, r.incident_version, r.conclusion_level, r.disposition, r.root_component, r.summary,
               r.evidence_fingerprint, r.output
          FROM server.research_runs r
         WHERE r.state = 'completed' AND r.conclusion_level = ANY($1::text[])
@@ -226,6 +227,11 @@ export class RemediationService {
       root,
       cards: cardsOf(cards),
       alerts: alertsOf(alerts),
+      // 触发这次修复的研判结论（模板按处置判断与结论等级适用，例如研判判为 ignore 的误报告警降级）
+      research: {
+        disposition: run.disposition ?? run.output?.disposition ?? 'undetermined',
+        level: run.conclusion_level,
+      },
     };
   }
 
