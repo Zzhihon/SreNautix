@@ -37,12 +37,21 @@ export interface EvalPlan {
 }
 
 /**
- * 模型路由不可达（连接失败、熔断）时评测立即失败：这类运行量出的是评测机器到模型服务的网络，不是研判质量，
- * 记进成绩单会让整份成绩单失真（ADR 0110）。
+ * 模型路由不可达（连接失败、熔断）的运行超过本轮计划运行数的 10% 时评测中止，这一轮无效：这类运行量出的是
+ * 评测机器到模型服务的网络，不是研判质量（ADR 0110）。runs 是中止前已经完成的运行。
  */
 export class EvalInfrastructureError extends Error {
   override name = 'EvalInfrastructureError';
+  constructor(
+    message: string,
+    readonly runs: RunRecord[],
+  ) {
+    super(message);
+  }
 }
+
+/** 模型路由不可达的运行占本轮计划运行数的上限，超过即中止 */
+export const MAX_UNREACHABLE_SHARE = 0.1;
 
 const INFRASTRUCTURE: ReadonlySet<string> = new Set(['model_unavailable', 'breaker_open']);
 
@@ -79,6 +88,8 @@ export async function runEval(p: EvalPlan): Promise<EvalOutcome> {
   const excluded = new Map<string, Excluded[]>();
   let tokens = 0;
   let skipped = 0;
+  let unreachable = 0;
+  const planned = p.cases.length * p.layers.length * p.runs;
   for (const { c, s } of p.cases) {
     const { rc, excluded: ex } = replayCase(c, s);
     excluded.set(c.case_id, ex);
@@ -139,11 +150,7 @@ export async function runEval(p: EvalPlan): Promise<EvalOutcome> {
             )}\n`,
           );
         }
-        if (res.error && INFRASTRUCTURE.has(res.error.kind)) {
-          throw new EvalInfrastructureError(
-            `用例 ${c.case_id} 路由 ${routeId} 第 ${i} 次：${res.error.kind}：${res.error.message}。评测停止，网络或模型服务恢复后重跑`,
-          );
-        }
+        const infrastructure = !!res.error && INFRASTRUCTURE.has(res.error.kind);
         const route = layer.route(routeId).route;
         runs.push({
           caseId: c.case_id,
@@ -175,6 +182,14 @@ export async function runEval(p: EvalPlan): Promise<EvalOutcome> {
           conclusion_level: out?.conclusion.level ?? null,
           tokens: used,
         });
+        if (infrastructure && ++unreachable > MAX_UNREACHABLE_SHARE * planned) {
+          throw new EvalInfrastructureError(
+            `模型路由不可达的运行 ${unreachable} 次，超过本轮计划 ${planned} 次的 ${MAX_UNREACHABLE_SHARE * 100}%` +
+              `（最近一次：用例 ${c.case_id} 路由 ${routeId} 第 ${i} 次，${res.error!.kind}：${res.error!.message}）。` +
+              '评测中止，这一轮无效；网络或模型服务恢复后重跑',
+            runs,
+          );
+        }
       }
     }
   }

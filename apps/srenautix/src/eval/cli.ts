@@ -17,10 +17,11 @@ import { liveAgreement, liveStats } from './discovery.js';
 import { importSeed } from './import-seed.js';
 import { loadLabels, relabelLegacy } from './labels.js';
 import { loadRuntime, renderAgreement, renderPhase2Markdown, runPhase2 } from './phase2.js';
+import { preflightMetrics, preflightRoutes } from './preflight.js';
 import { liveRemediation } from './remediation.js';
 import { deriveAbstain } from './leakage.js';
 import { buildReport, evaluateGate, renderMarkdown } from './report.js';
-import { runEval, type EvalOutcome } from './runner.js';
+import { EvalInfrastructureError, runEval, type EvalOutcome } from './runner.js';
 import { stableUuid } from './import-seed.js';
 import { CaseStore } from './store.js';
 
@@ -44,7 +45,14 @@ function codeSha(): string {
   return execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
 }
 
-function layers(cfg: EvalConfig, metrics: WorkerMetrics) {
+/** 每条路由的模型层；开跑前先探测每条路由，任何一条不可用都不开跑 */
+async function layers(cfg: EvalConfig, metrics: WorkerMetrics) {
+  const built = buildLayers(cfg, metrics);
+  await preflightRoutes(built.flatMap((b) => b.runtimes));
+  return built.map(({ routeId, layer }) => ({ routeId, layer }));
+}
+
+function buildLayers(cfg: EvalConfig, metrics: WorkerMetrics) {
   // 命中蜜标后出站停止，之后每次研判都以 egress_blocked 结束，成绩单中表现为结构化失败之外的 stage_a_only
   const egress = new Egress({ allowCrossBorder: cfg.allowCrossBorder, honeytokens: cfg.honeytokens }, (reason) => {
     logger.error('评测出站命中蜜标，停止全部出站', { reason });
@@ -77,8 +85,21 @@ function layers(cfg: EvalConfig, metrics: WorkerMetrics) {
       onCalibration: async () => undefined,
       onDrift: async () => undefined,
     });
-    return { routeId: r.route.id, layer };
+    return { routeId: r.route.id, layer, runtimes };
   });
+}
+
+/** 中止的一轮：写出无效标记（原因与中止前完成的运行），不写成绩单 */
+function markInvalid(dir: string, name: string, e: EvalInfrastructureError): void {
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    join(dir, `${name}.invalid.md`),
+    `# 评测无效：${name}\n\n${e.message}\n\n中止前完成 ${e.runs.length} 次运行，记录在 ${name}.invalid.runs.jsonl，不计入成绩。\n`,
+  );
+  writeFileSync(
+    join(dir, `${name}.invalid.runs.jsonl`),
+    e.runs.map((r) => JSON.stringify(r)).join('\n') + (e.runs.length ? '\n' : ''),
+  );
 }
 
 export async function runEvalCli(argv: string[]): Promise<CliResult> {
@@ -188,26 +209,34 @@ export async function runEvalCli(argv: string[]): Promise<CliResult> {
         liveTools = [...liveTools, ...s.tools.filter((t) => !t.live)];
       }
     }
-    outcomes.push(
-      await runEval({
-        mode,
-        cases,
-        layers: layers(cfg, metrics),
-        runs,
-        language: cfg.language,
-        metrics,
-        liveTools,
-        query: null,
-        maxTokens: Number(values['max-tokens']),
-        signal: new AbortController().signal,
-        // 比较两份配置时研判记录分开写
-        traceDir: values.trace
-          ? values.compare
-            ? join(values.trace, `config-${outcomes.length}`)
-            : values.trace
-          : null,
-      }),
-    );
+    const name = values.name ?? (values.compare ? `compare-${now.slice(0, 10)}` : `eval-${now.slice(0, 10)}`);
+    try {
+      outcomes.push(
+        await runEval({
+          mode,
+          cases,
+          layers: await layers(cfg, metrics),
+          runs,
+          language: cfg.language,
+          metrics,
+          liveTools,
+          query: null,
+          maxTokens: Number(values['max-tokens']),
+          signal: new AbortController().signal,
+          // 比较两份配置时研判记录分开写
+          traceDir: values.trace
+            ? values.compare
+              ? join(values.trace, `config-${outcomes.length}`)
+              : values.trace
+            : null,
+        }),
+      );
+    } catch (e) {
+      if (e instanceof EvalInfrastructureError) {
+        markInvalid(values.out, name, e);
+      }
+      throw e;
+    }
     for (const s of sessions) {
       await s.close();
     }
@@ -347,28 +376,46 @@ async function reconstructCli(argv: string[]): Promise<CliResult> {
   const cfg = values['discovery-only'] ? null : loadEvalConfig(values.config);
   const r = cfg?.reconstruct ?? loadReconstructConfig(values.config);
   mkdirSync(values.out, { recursive: true });
-  const result = await runPhase2({
-    labels: f,
-    only: values.only,
-    casesDir: values.cases,
-    reconstruct: r,
-    suite: values.suite,
-    codeSha: sha,
-    analysis: cfg
-      ? {
-          layers: layers(cfg, metrics),
-          runs,
-          language: cfg.language,
-          metrics,
-          maxTokens: Number(values['max-tokens']),
-          repo: values.repo ?? null,
-          scratch: values.out,
-          traceDir: values.trace ?? null,
-        }
-      : null,
-    now,
-  });
   const name = values.name ?? `reconstruct-${now.slice(0, 10)}`;
+  let result: Awaited<ReturnType<typeof runPhase2>>;
+  try {
+    // 分析需要模型路由与指标数据源（阶段 A 的证据卡、查询模板）；发现重放只读本地的重建包
+    const analysisLayers = cfg ? await layers(cfg, metrics) : null;
+    if (cfg) {
+      await preflightMetrics({
+        url: r.metrics.url,
+        dialect: r.metrics.dialect,
+        bearerTokenFile: r.metrics.bearer_token_file ?? null,
+      });
+    }
+    result = await runPhase2({
+      labels: f,
+      only: values.only,
+      casesDir: values.cases,
+      reconstruct: r,
+      suite: values.suite,
+      codeSha: sha,
+      analysis:
+        cfg && analysisLayers
+          ? {
+              layers: analysisLayers,
+              runs,
+              language: cfg.language,
+              metrics,
+              maxTokens: Number(values['max-tokens']),
+              repo: values.repo ?? null,
+              scratch: values.out,
+              traceDir: values.trace ?? null,
+            }
+          : null,
+      now,
+    });
+  } catch (e) {
+    if (e instanceof EvalInfrastructureError) {
+      markInvalid(values.out, name, e);
+    }
+    throw e;
+  }
   const extra = renderPhase2Markdown(result);
   writeFileSync(
     join(values.out, `${name}.phase2.json`),

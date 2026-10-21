@@ -4,7 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { runEvalCli } from '../../src/eval/cli.js';
 import { CaseStore } from '../../src/eval/store.js';
 import { scenarioEvalCase, startVictoria } from '../support/eval-scenario.js';
-import { ReplayServer, type LlmFixture } from '../support/llm-fixtures.js';
+import { fixture, ReplayServer, type LlmFixture } from '../support/llm-fixtures.js';
 import { writeSeedFixture } from '../support/seed-fixture.js';
 import type { Victoria } from '../support/victoria.js';
 
@@ -14,6 +14,21 @@ const recorded = JSON.parse(
   readFileSync(resolve(import.meta.dirname, '../fixtures/llm/eval/scenario-pvc.json'), 'utf8'),
 ) as { responses: LlmFixture[] };
 const ROOT = resolve(import.meta.dirname, '../../../../.scratch', `eval-cli-${process.pid}`);
+
+// 开跑前探测（ADR 0110）对每条路由依次发出 json_schema、工具调用、推理通道、中文四次调用与 GET /models；
+// 这里用同一个本地模型的录制响应回答，排在评测本身的录制之前
+const P = 'llamacpp-qwen3-1.7b';
+const probeResponses = (): LlmFixture[] => [
+  fixture(P, 'chat-json-schema'),
+  fixture(P, 'chat-tool-call'),
+  fixture(P, 'chat-chinese'),
+  fixture(P, 'chat-chinese'),
+  { provenance: { mode: 'synthetic', path: '/models' }, status: 200, body: { object: 'list', data: [] } },
+];
+
+function serve(server: ReplayServer): void {
+  server.enqueue(...probeResponses(), ...recorded.responses);
+}
 
 let vm: Victoria;
 
@@ -76,7 +91,7 @@ describe('srenautix eval', () => {
     process.env.SRENAUTIX_TEST_LLM_KEY = 'local';
     const server = new ReplayServer();
     await server.start();
-    server.enqueue(...recorded.responses);
+    serve(server);
     const r = await runEvalCli([
       '--cases',
       join(ROOT, 'cases'),
@@ -103,7 +118,7 @@ describe('srenautix eval', () => {
     process.env.SRENAUTIX_TEST_LLM_KEY = 'local';
     const server = new ReplayServer();
     await server.start();
-    server.enqueue(...recorded.responses);
+    serve(server);
     await runEvalCli([
       '--cases',
       join(ROOT, 'cases'),
@@ -128,7 +143,7 @@ describe('srenautix eval', () => {
     process.env.SRENAUTIX_TEST_LLM_KEY = 'local';
     const server = new ReplayServer();
     await server.start();
-    server.enqueue(...recorded.responses);
+    serve(server);
     await runEvalCli([
       '--cases',
       join(ROOT, 'cases'),
@@ -162,7 +177,7 @@ describe('srenautix eval', () => {
     expect(t.steps.length).toBeGreaterThan(0);
   });
 
-  it('模型路由不可达时评测立即停止，不写成绩单', async () => {
+  it('开跑前探测不到模型路由时不开跑，写出无效标记，不写成绩单', async () => {
     process.env.SRENAUTIX_TEST_LLM_KEY = 'local';
     // 没有任何服务监听的端口：连接失败
     await expect(
@@ -178,8 +193,38 @@ describe('srenautix eval', () => {
         '--name',
         'down',
       ]),
-    ).rejects.toThrow(/model_unavailable|breaker_open/);
+    ).rejects.toThrow(/开跑前探测：模型路由 local 不可用/);
     expect(existsSync(join(ROOT, 'reports', 'down.md'))).toBe(false);
+    expect(readFileSync(join(ROOT, 'reports', 'down.invalid.md'), 'utf8')).toContain('开跑前探测');
+  });
+
+  it('运行中模型服务不可达的运行超过 10% 时中止，这一轮无效', async () => {
+    process.env.SRENAUTIX_TEST_LLM_KEY = 'local';
+    const server = new ReplayServer();
+    await server.start();
+    // 探测通过之后不再有响应：之后的每次调用都得到服务端错误
+    server.enqueue(...probeResponses());
+    await expect(
+      runEvalCli([
+        '--cases',
+        join(ROOT, 'cases'),
+        '--config',
+        config('flaky', server.baseUrl),
+        '--runs',
+        '3',
+        '--out',
+        join(ROOT, 'reports'),
+        '--name',
+        'flaky',
+      ]),
+    ).rejects.toThrow(/超过本轮计划 3 次的 10%/);
+    await server.stop();
+    expect(existsSync(join(ROOT, 'reports', 'flaky.md'))).toBe(false);
+    expect(readFileSync(join(ROOT, 'reports', 'flaky.invalid.md'), 'utf8')).toContain('这一轮无效');
+    const partial = readFileSync(join(ROOT, 'reports', 'flaky.invalid.runs.jsonl'), 'utf8')
+      .trim()
+      .split('\n');
+    expect(partial).toHaveLength(1);
   });
 
   it('--compare：两份配置各评测一次，输出门禁', async () => {
@@ -187,8 +232,8 @@ describe('srenautix eval', () => {
     const b = new ReplayServer();
     await a.start();
     await b.start();
-    a.enqueue(...recorded.responses);
-    b.enqueue(...recorded.responses);
+    serve(a);
+    serve(b);
     const r = await runEvalCli([
       '--compare',
       config('current', a.baseUrl),
