@@ -500,26 +500,32 @@ describe('组件粒度（ADR 0121）', () => {
     expect([...scopeOf(DEP, g)].sort()).toEqual([DEP, POD, RS].sort());
   });
 
-  it('Pod 上的假设改为属主；落在同一组件上的假设合并，检查与结论按合并后的 id 引用', () => {
+  it('Pod 上的假设改为属主；同一组件上的不同机制各自保留，彼此不算竞争假设', () => {
     const { rc, book, ledger } = owned();
     const notes: string[] = [];
-    ledger.merge([hyp('h1', POD, ['card:1']), hyp('h2', DEP, ['alert:1']), hyp('h3', PG, [])], notes);
+    ledger.merge([hyp('h1', POD, ['card:1']), hyp('h2', DEP, []), hyp('h3', PG, [])], notes);
     ledger.evaluate();
     expect(ledger.entries.get('h1')).toMatchObject({ rootComponent: DEP, status: 'supported' });
-    expect(ledger.entries.get('h1')?.supporting).toEqual(['card:1', 'alert:1']);
-    expect(ledger.entries.has('h2')).toBe(false);
-    expect(ledger.resolve('h2')).toBe('h1');
-    expect(notes).toEqual([
-      `假设 h1 的根因 ${POD} 由 ${DEP} 拥有，按组件粒度改为 ${DEP}`,
-      `假设 h2 与 h1 的根因都是 ${DEP}，已并入 h1`,
-    ]);
+    expect(ledger.entries.get('h2')).toMatchObject({ rootComponent: DEP, status: 'supported' });
+    expect(notes).toEqual([`假设 h1 的根因 ${POD} 由 ${DEP} 拥有，按组件粒度改为 ${DEP}`]);
+    const h1 = ledger.entries.get('h1') as never;
+    expect(ledger.competitors(h1).map((e: { id: string }) => e.id)).toEqual(['h3']);
+    // 场景里 PG 只有依赖对象 PVC 上的卡，没有引用时不计入，h3 待检验
+    expect(ledger.entries.get('h3')?.status).toBe('pending');
+    expect(ledger.supportedRoots()).toEqual([DEP]);
     const v = validateConclusion(conclude({ hypothesis_id: 'h2', disposition: 'escalate' }), rc, book, ledger);
-    expect(v.chosen?.id).toBe('h1');
     expect(v.chosen?.rootComponent).toBe(DEP);
-    // 下一轮模型改用 h2 指向别的组件时，别名解除
-    ledger.merge([hyp('h1', DEP, ['card:1']), hyp('h2', API, [])], []);
-    expect(ledger.resolve('h2')).toBe('h2');
-    expect(ledger.entries.get('h2')?.rootComponent).toBe(API);
+  });
+
+  it('支持假设都落在同一个组件上时，模型弃权仍由代码代选；同一组件上的支持假设不阻止停止条件', () => {
+    const { rc, book, ledger } = owned();
+    ledger.merge([hyp('h1', POD, []), hyp('h2', DEP, [])], []);
+    ledger.evaluate();
+    expect(ledger.supportedRoots()).toEqual([DEP]);
+    const v = validateConclusion(conclude({ hypothesis_id: null, undetermined_reason: 'x' }), rc, book, ledger);
+    expect(v.chosenBy).toBe('ledger');
+    expect(v.chosen?.rootComponent).toBe(DEP);
+    expect(ledger.leaderSettled(ledger.ranked()[0])).toBe(true);
   });
 
   it('属主拥有的对象上的阶段 A 异常卡自动支持属主；依赖对象上的卡只在模型引用时计入', () => {

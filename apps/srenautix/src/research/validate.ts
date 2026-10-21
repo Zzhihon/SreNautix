@@ -53,16 +53,17 @@ function nsName(key: string): string {
 }
 
 /**
- * 模型弃权时代码按账本选中的假设（ADR 0120）：账本中恰好一个假设处于支持状态（没有打平），
+ * 模型弃权时代码按账本选中的假设（ADR 0120）：账本中处于支持状态的假设都落在同一个根因组件上（没有打平），
  * 并且它有范围内的异常卡（人工反馈固定为支持、没有卡的假设不算）。其余情况不代选。
  */
 export function ledgerPick(ledger: Ledger): LedgerEntry | null {
-  const supported = ledger.list().filter((e) => e.status === 'supported');
-  if (supported.length !== 1) {
+  const roots = ledger.supportedRoots();
+  if (roots.length !== 1) {
     return null;
   }
-  const only = supported[0] as LedgerEntry;
-  return ledger.supportCards(only).length > 0 ? only : null;
+  // 同一组件上有多个支持假设时，取支持证据最多的一个（账本排名第一）
+  const pick = ledger.ranked().find((e) => e.status === 'supported' && e.rootComponent === roots[0]) as LedgerEntry;
+  return ledger.supportCards(pick).length > 0 ? pick : null;
 }
 
 export function validateConclusion(
@@ -84,7 +85,7 @@ export function validateConclusion(
   let chosen: LedgerEntry | null = null;
   let undeterminedReason = raw.undetermined_reason;
   if (raw.hypothesis_id !== null) {
-    const e = ledger.entries.get(ledger.resolve(raw.hypothesis_id)) ?? null;
+    const e = ledger.entries.get(raw.hypothesis_id) ?? null;
     if (!e) {
       notes.push(`结论引用的假设 ${raw.hypothesis_id} 不在账本中，改为无法判定`);
       undeterminedReason = `结论引用的假设 ${raw.hypothesis_id} 不存在`;
@@ -102,7 +103,7 @@ export function validateConclusion(
       chosen = pick;
       chosenBy = 'ledger';
       notes.push(
-        `模型弃权，代码按账本选中 ${pick.id}（${displayKey(pick.rootComponent)}）：它是账本中唯一处于支持状态的假设，支持卡 ${ledger
+        `模型弃权，代码按账本选中 ${pick.id}（${displayKey(pick.rootComponent)}）：账本中处于支持状态的假设都落在这个根因上，支持卡 ${ledger
           .supportCards(pick)
           .map((x) => x.ref)
           .join('、')}；模型给出的弃权原因：${raw.undetermined_reason ?? '没有给出'}`,
@@ -129,7 +130,7 @@ export function validateConclusion(
       notes.push(`提议 ${p.action_id}：不在本集群可用的动作目录中，已删除`);
       continue;
     }
-    const h = ledger.entries.get(ledger.resolve(p.hypothesis_id));
+    const h = ledger.entries.get(p.hypothesis_id);
     if (!h || h.status === 'refuted') {
       notes.push(`提议 ${p.action_id}：依据的假设 ${p.hypothesis_id} ${h ? '已被推翻' : '不存在'}，已删除`);
       continue;
@@ -172,7 +173,7 @@ export function validateConclusion(
     (a, b) => RECOMMENDATION_ORDER.indexOf(a.kind) - RECOMMENDATION_ORDER.indexOf(b.kind),
   );
   for (const r of ordered) {
-    const h = ledger.entries.get(ledger.resolve(r.hypothesis_id));
+    const h = ledger.entries.get(r.hypothesis_id);
     if (!h || h.status === 'refuted') {
       notes.push(`修复建议 ${r.id}：依据的假设 ${r.hypothesis_id} ${h ? '已被推翻' : '不存在'}，已删除`);
       continue;

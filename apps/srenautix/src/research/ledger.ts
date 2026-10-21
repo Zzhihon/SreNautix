@@ -101,8 +101,6 @@ function hasData(c: CardEntry): boolean {
 
 export class Ledger {
   readonly entries = new Map<string, LedgerEntry>();
-  /** 按组件粒度合并掉的假设 id → 保留的假设 id；检查、结论与提议引用被合并的 id 时按它改写 */
-  private readonly aliases = new Map<string, string>();
   private changes = 0;
 
   constructor(
@@ -116,12 +114,6 @@ export class Ledger {
 
   list(): LedgerEntry[] {
     return [...this.entries.values()];
-  }
-
-  /** 假设 id 按组件粒度合并后的 id；没有合并时是它自己 */
-  resolve<T extends string>(id: T): T {
-    // 别名的值同样取自模型给出的假设 id（h1…h6）
-    return (this.aliases.get(id) as T | undefined) ?? id;
   }
 
   /** 组件粒度的根因（ADR 0121） */
@@ -183,19 +175,6 @@ export class Ledger {
       if (root !== h.root_component) {
         notes.push(`假设 ${h.id} 的根因 ${h.root_component} 由 ${root} 拥有，按组件粒度改为 ${root}`);
       }
-      // 与另一个假设落在同一个组件上时并入那个假设，引用合并
-      const same = [...this.entries.values()].find((e) => e.id !== h.id && e.rootComponent === root);
-      if (same) {
-        same.supporting = [...new Set([...same.supporting, ...keep(h.supporting, '支持')])];
-        same.refuting = [...new Set([...same.refuting, ...keep(h.refuting, '反驳')])];
-        if (this.entries.delete(h.id)) {
-          notes.push(`假设 ${h.id} 原有的根因被替换，旧的账本记录已删除`);
-        }
-        this.aliases.set(h.id, same.id);
-        notes.push(`假设 ${h.id} 与 ${same.id} 的根因都是 ${root}，已并入 ${same.id}`);
-        return;
-      }
-      this.aliases.delete(h.id);
       const prev = this.entries.get(h.id);
       const kept = prev !== undefined && prev.rootComponent === root ? prev : null;
       if (prev && !kept) {
@@ -217,12 +196,6 @@ export class Ledger {
       this.entries.set(h.id, entry);
     });
     for (const e of this.entries.values()) {
-      if (e.parentId) {
-        e.parentId = this.resolve(e.parentId);
-      }
-      if (e.parentId === e.id) {
-        e.parentId = null;
-      }
       if (e.parentId && !this.entries.has(e.parentId)) {
         notes.push(`假设 ${e.id} 的父假设 ${e.parentId} 不存在，已置空`);
         e.parentId = null;
@@ -431,11 +404,19 @@ export class Ledger {
     );
   }
 
-  /** 竞争假设（除 leader 外）是否都已推翻或检验后无法判定 */
+  /**
+   * 竞争假设：根因组件与 leader 不同的假设。同一组件上的多个假设（不同机制）都在解释同一个根因，
+   * 它们之间不构成根因的竞争（ADR 0121）
+   */
+  competitors(leader: LedgerEntry): LedgerEntry[] {
+    return this.list().filter((e) => e.id !== leader.id && e.rootComponent !== leader.rootComponent);
+  }
+
+  /** 竞争假设是否都已推翻或检验后无法判定 */
   competitorsResolved(leader: LedgerEntry): boolean {
-    return this.list()
-      .filter((e) => e.id !== leader.id)
-      .every((e) => e.status === 'refuted' || (e.status === 'inconclusive' && e.checksRun > 0));
+    return this.competitors(leader).every(
+      (e) => e.status === 'refuted' || (e.status === 'inconclusive' && e.checksRun > 0),
+    );
   }
 
   /**
@@ -443,7 +424,7 @@ export class Ledger {
    * 并且没有任何竞争假设同样处于支持状态（检查结果同样支持竞争假设时，检查没有区分两者）
    */
   competitorTested(leader: LedgerEntry): boolean {
-    const others = this.list().filter((e) => e.id !== leader.id);
+    const others = this.competitors(leader);
     return (
       others.some((e) => e.status === 'refuted' || (e.status === 'inconclusive' && e.checksRun > 0)) &&
       !others.some((e) => e.status === 'supported')
@@ -452,7 +433,17 @@ export class Ledger {
 
   /** 同样处于支持状态的竞争假设 */
   supportedCompetitors(leader: LedgerEntry): LedgerEntry[] {
-    return this.list().filter((e) => e.id !== leader.id && e.status === 'supported');
+    return this.competitors(leader).filter((e) => e.status === 'supported');
+  }
+
+  /**
+   * 处于支持状态的根因组件（去重）。同一组件上的多个支持假设算一个，供模型弃权时的代选判断"唯一"（ADR 0120）
+   */
+  supportedRoots(): string[] {
+    const roots = this.list()
+      .filter((e) => e.status === 'supported')
+      .map((e) => e.rootComponent);
+    return [...new Set(roots)];
   }
 
   toContract(): Hypothesis[] {
