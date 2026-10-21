@@ -19,7 +19,7 @@ import type { ServerMetrics } from '../metrics.js';
 import type { ProposalService } from '../proposals/service.js';
 import { appendAudit } from '../store/audit.js';
 import { tx } from '../store/pool.js';
-import type { ConcreteObject } from '../topology/expand.js';
+import { hintOf, type ConcreteObject, type LogicalHint } from '../topology/expand.js';
 import { GitHubRepoReader } from './github-repo.js';
 import { alertsOf, branchOf, cardsOf, keyCards, prBody, say, validatePlan, type Lang } from './render.js';
 
@@ -55,7 +55,7 @@ export interface RemediationDeps {
   componentTypes: () => readonly ComponentType[];
   componentType: (clusterId: string, key: string) => Promise<string | null>;
   /** 组件键 → 拓扑里的具体对象（ComponentExpander.concrete） */
-  concrete: (clusterId: string, key: string, at: Date) => Promise<ConcreteObject>;
+  concrete: (clusterId: string, key: string, at: Date, hints: readonly LogicalHint[]) => Promise<ConcreteObject>;
   dataSource: (at: number) => Promise<EvidenceDataSource | null>;
   github: GitHubApp;
   proposals: ProposalService;
@@ -277,8 +277,10 @@ export class RemediationService {
     const rootKey = remediationRootKey(run, inc);
     let root: RemediationContext['root'] = null;
     if (rootKey) {
-      // 根因组件展开到具体对象：Pod 取属主工作负载，Service 取它选中的唯一工作负载（ADR 0126）
-      const o = await this.d.concrete(inc.cluster_id, rootKey, new Date());
+      // 根因组件展开到具体对象：Pod 取属主工作负载，Service 取它选中的唯一工作负载，逻辑组件取映射出的唯一工作负载
+      // （ADR 0126、0130）；逻辑组件的线索是落在它上面的告警的 service 与 namespace 标签
+      const hints = alerts.filter((a) => a.component === rootKey).map((a) => hintOf(a.labels));
+      const o = await this.d.concrete(inc.cluster_id, rootKey, new Date(), hints);
       const e =
         o.key === inc.root.component && inc.root.entity
           ? inc.root.entity

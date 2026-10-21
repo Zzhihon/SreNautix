@@ -64,7 +64,7 @@ import { migrateExpand, migrationsReady } from '../store/migrate.js';
 import { migrateWhenReady } from '../store/migrate-when-ready.js';
 import type { OutboxEvent } from '../store/outbox.js';
 import { createPool, type PgConfig } from '../store/pool.js';
-import { ComponentExpander } from '../topology/expand.js';
+import { ComponentExpander, hintOf } from '../topology/expand.js';
 import { startInformerTopology } from '../topology/informer.js';
 import { KubeTools } from '../research/kube-tools.js';
 import { FirstSeen, objectHealth, type K8sObject } from '../detectors/health.js';
@@ -305,6 +305,14 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
     (clusterId, key) => topology.componentType(clusterId, key),
     evidenceOptions,
     metrics,
+    // 逻辑组件映射到候选工作负载（ADR 0130）
+    (clusterId, key, alerts, at) =>
+      expander.logicalCandidates(
+        clusterId,
+        key,
+        alerts.map((a) => hintOf(a.labels)),
+        at,
+      ),
   );
   const rules = new PackRules(packs, metrics);
 
@@ -658,6 +666,7 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
       : null,
     changes: engineChanges,
     stageA,
+    expander,
   });
   registerIncidentRoutes(app, { pool, auth, feedback, topology, evidence, worker });
   registerSystemRoutes(app, {
@@ -800,7 +809,7 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
           packs: () => packs.set,
           componentTypes: () => packs.componentTypes(),
           componentType: (clusterId, key) => topology.componentType(clusterId, key),
-          concrete: (clusterId, key, at) => expander.concrete(clusterId, key, at),
+          concrete: (clusterId, key, at, hints) => expander.concrete(clusterId, key, at, hints),
           dataSource: (at) => evidenceSource.dataSource(at),
           github,
           proposals,

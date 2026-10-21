@@ -1,4 +1,4 @@
-import type { Alert, ChangeEvent, EvidenceResult, Feedback, Incident } from '@srenautix/contract';
+import type { Alert, ChangeEvent, EvidenceResult, Feedback, Incident, TopologyEdge } from '@srenautix/contract';
 import { Ajv2020, type ValidateFunction } from 'ajv/dist/2020.js';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type pg from 'pg';
@@ -15,6 +15,7 @@ import type { PackEvidence } from '../stage-a/pack-evidence.js';
 import type { CompiledTemplate, PackRuntime } from '../stage-a/packs.js';
 import { appendAudit } from '../store/audit.js';
 import { tx } from '../store/pool.js';
+import { hintOf, isLogicalComponent, type ComponentExpander } from '../topology/expand.js';
 import type { TopologyStore } from '../topology/store.js';
 import { badRequest, conflict, forbidden, HttpError, notFound } from './errors.js';
 import { KubeToolError, type KubeTools } from '../research/kube-tools.js';
@@ -46,6 +47,21 @@ export interface ResearchRouteDeps {
   changes?: (clusterId: string, from: Date, to: Date) => Promise<ChangeEvent[]>;
   /** 阶段 A 的重算（ADR 0107）：人工入口与研判前刷新 */
   stageA?: Pick<StageAService, 'recompute' | 'current'>;
+  /** 逻辑组件映射出的候选进入研判的拓扑邻域（ADR 0130）；没有时邻域只按事件的组件与候选根因取 */
+  expander?: Pick<ComponentExpander, 'logicalCandidates'>;
+}
+
+/** 逻辑组件到候选的映射边（ADR 0130）：命名来源，置信度 0.3，低于归并阈值 τ */
+export function logicalEdge(from: string, to: string): TopologyEdge {
+  return {
+    from,
+    to,
+    relation: 'maps_to',
+    provenance: 'naming',
+    confidence: 0.3,
+    scope: 'service',
+    evidence: '逻辑组件按同名对象、告警的 service 标签与 Service 选中的工作负载映射',
+  };
 }
 
 const ajv = new Ajv2020({ allErrors: true, strict: false });
@@ -213,8 +229,27 @@ export function registerResearchRoutes(app: FastifyInstance, d: ResearchRouteDep
     if (!incident) {
       throw notFound('事件版本不存在');
     }
-    const keys = [...new Set([...incident.components, ...incident.candidates.map((c) => c.component)])];
-    const topo = await d.topology.neighborhood(incident.cluster_id, keys, new Date(incident.updated_at), 2);
+    const own = [...new Set([...incident.components, ...incident.candidates.map((c) => c.component)])];
+    // 逻辑组件（例如 component:catalog）不在拓扑里：映射出的候选工作负载与 Service 作为邻域的起点（ADR 0130），
+    // 阶段 B 的子图、组件枚举与卡片检查因此包含它们
+    const mapped: TopologyEdge[] = [];
+    if (d.expander && own.some((k) => isLogicalComponent(k))) {
+      const alerts = await alertsById(
+        d.pool,
+        incident.members.filter((m) => m.left_version === null).map((m) => m.alert_id),
+      );
+      for (const k of own.filter((x) => isLogicalComponent(x))) {
+        const hints = alerts.filter((a) => a.component === k).map((a) => hintOf(a.labels));
+        const at = new Date(incident.updated_at);
+        for (const to of await d.expander.logicalCandidates(incident.cluster_id, k, hints, at)) {
+          mapped.push(logicalEdge(k, to));
+        }
+      }
+    }
+    const keys = [...new Set([...own, ...mapped.map((e) => e.to)])];
+    const near = await d.topology.neighborhood(incident.cluster_id, keys, new Date(incident.updated_at), 2);
+    // 映射本身作为邻域里的边（maps_to，置信度低于归并阈值，不进入假设的范围）
+    const topo = { ...near, edges: [...mapped, ...near.edges] };
     return { task: t, incident, topo };
   };
 

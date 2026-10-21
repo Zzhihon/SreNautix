@@ -13,7 +13,7 @@ truth:
   disposition: act
   forbid_evidence_consistent: false
 scenario:
-  summary: 人工新增告警规则 ShopCatalogStale（只有 service="catalog" 标签）；告警触发后映射不到组件，商品目录由 api 提供
+  summary: 人工新增告警规则 ShopCatalogStale（只有 service="catalog" 标签）；告警触发后映射不到对象，商品目录由 api 提供（目录入口是选中 api 的 Service catalog）
   expected_alerts: [ShopCatalogStale]
   # 发现环节可接受的根因：告警只带 service 标签，server 归到逻辑组件 component:catalog（9c97653）；
   # 分析环节必须查明商品目录由 api 提供（truth.root_components）
@@ -22,6 +22,9 @@ scenario:
     - date: 2026-10-21
       change: 增加 discovery_roots（component:catalog）；truth.root_components 不变
       reason: 告警没有任何对象标签，发现环节只能落在 service 标签对应的逻辑组件上；api 与 catalog 的对应关系只能在分析环节查明
+    - date: 2026-10-22
+      change: Kind 的 shop 增加 Service catalog（选中 api 的 Pod）；truth 不变
+      reason: 逻辑组件按同名 Service 与它选中的工作负载映射到候选（ADR 0130），阶段 A 在 api 上执行证据链，阶段 B 的组件枚举包含 api；接入与发现环节不变
   silent_root: false
   distractors: []
   background_noise: _background.yaml

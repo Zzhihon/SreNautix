@@ -159,6 +159,18 @@ spec:
   ports:
     - {name: http, port: 8080, targetPort: 8080}
 ---
+# 商品目录由 api 提供（/catalog）：目录的入口是单独的 Service，选中 api 的 Pod。只带 service="catalog" 标签的告警
+# 归入逻辑组件 component:catalog，经这个 Service 映射到 api（ADR 0130）
+apiVersion: v1
+kind: Service
+metadata:
+  name: catalog
+  namespace: shop
+spec:
+  selector: {app: api}
+  ports:
+    - {name: http, port: 8080, targetPort: 8080}
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:

@@ -7,6 +7,8 @@ EXPECTED_ALERTS=(ShopCatalogStale)
 VERIFY_TIMEOUT=600
 # 发现：只带 service 标签的告警归入逻辑组件 component:<service>（ADR 0104 §6），事件的根因是 component:catalog；
 # eval/scenarios/unmapped-alert.yaml 的 root_components（api）是研判应当指出的真实来源，不是接入时的组件。
+# 分析：component:catalog 经同名的 Service shop/catalog 与它选中的 Pod 映射到 Deployment shop/api（ADR 0130），
+# 阶段 A 在 api 上执行证据链，阶段 B 的组件枚举包含 api。
 # 自愈：gitops 包的 alert-catalog-entry 为没有命中目录条目的告警在 kind-shop 包的告警目录中按 service 标签加条目
 SRENAUTIX_ROOT='^component:catalog$'
 SRENAUTIX_MAX_INCIDENTS=1

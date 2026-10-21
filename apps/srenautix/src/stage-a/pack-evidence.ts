@@ -17,6 +17,7 @@ import { logger } from '../log.js';
 import type { ServerMetrics } from '../metrics.js';
 import type { EvidenceSource, PackRuntime } from './packs.js';
 import type { EvidenceRun, EvidenceRunner, RuleHit, RuleProposer } from './ports.js';
+import { isLogicalComponent } from '../topology/expand.js';
 import { parseStoredKey } from '../topology/keys.js';
 import { cardApplies, splitCardCheckArgs } from './card-checks.js';
 
@@ -25,6 +26,12 @@ import { cardApplies, splitCardCheckArgs } from './card-checks.js';
  * 降级通道查最后一轮成功对账时的内存拓扑。
  */
 export type ComponentTypeLookup = (clusterId: string, key: string) => Promise<string | null>;
+
+/**
+ * 逻辑组件 → 候选组件键（ComponentExpander.logicalCandidates，ADR 0130）；参数是落在这个逻辑组件上的告警。
+ * 不是逻辑组件时为空。
+ */
+export type LogicalLookup = (clusterId: string, key: string, alerts: readonly Alert[], at: Date) => Promise<string[]>;
 
 export interface PackEvidenceOptions {
   locale: Locale;
@@ -86,6 +93,7 @@ async function pool<T, R>(items: T[], n: number, signal: AbortSignal, fn: (x: T)
  * - 每个能解析出实体的成员告警，不论分类来源（label、catalog、expression、default），按实体的组件类型执行证据链；
  *   告警归属的组件（例如 Pod 的属主 StatefulSet）与实体不同时，组件类型的证据链也执行；
  * - 告警目录条目声明的证据链作为补充；
+ * - 逻辑组件（根因或告警归属的组件，例如 component:catalog）映射到候选工作负载，候选按自己的组件类型执行证据链（ADR 0130）；
  * - 组件类型取拓扑节点上由领域包匹配出的类型，没有拓扑节点或没有匹配时，按 kind、命名空间与名称静态匹配
  *   （领域包的自定义 kind 与告警里的 CRD 对象走这一条）；
  * - 只执行 applies_to.kinds 包含实体类型的卡，同一张卡对同一实体只执行一次。
@@ -98,6 +106,8 @@ export class PackEvidence implements EvidenceRunner {
     private readonly componentType: ComponentTypeLookup,
     private readonly o: PackEvidenceOptions,
     private readonly metrics: ServerMetrics,
+    /** 逻辑组件的候选；没有时逻辑组件上只执行告警目录条目声明的证据链 */
+    private readonly logical: LogicalLookup | null = null,
   ) {}
 
   /** now：评估时刻（默认当前时间）；评测与回放传入快照的 as_of，卡片窗口与信号探测都不晚于它 */
@@ -203,6 +213,25 @@ export class PackEvidence implements EvidenceRunner {
       }
       if (a.classification.catalog_entry) {
         add(this.rt.alertChains(a.classification.catalog_entry), a.entity);
+      }
+    }
+
+    // 逻辑组件（根因或告警归属的组件）映射到候选工作负载，候选按自己的组件类型执行证据链（ADR 0130）
+    if (this.logical) {
+      const logical = [
+        ...new Set(
+          [...roots, ...alerts.map((a) => a.component)].filter((k): k is string => isLogicalComponent(k ?? '')),
+        ),
+      ];
+      for (const key of logical) {
+        const on = alerts.filter((a) => a.component === key);
+        for (const cand of await this.logical(inc.cluster_id, key, on, new Date(now))) {
+          const e = entityOf(inc.cluster_id, cand);
+          const t = await typeOf(cand, e);
+          if (t) {
+            add(this.rt.typeChains(t), e);
+          }
+        }
       }
     }
 

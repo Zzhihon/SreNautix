@@ -335,8 +335,8 @@ function build(
       packs: () => rt.set,
       componentTypes: () => rt.componentTypes(),
       componentType: async () => null,
-      concrete: (clusterId, key, at) =>
-        new ComponentExpander(new TopologyStore(db.server)).concrete(clusterId, key, at),
+      concrete: (clusterId, key, at, hints) =>
+        new ComponentExpander(new TopologyStore(db.server)).concrete(clusterId, key, at, hints),
       dataSource: o.dataSource ?? (async () => null),
       github: app,
       proposals: beforeCreate
