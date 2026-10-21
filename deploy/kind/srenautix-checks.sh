@@ -115,8 +115,10 @@ check_remediation() {
   [[ -n "$issue" ]] || die "自愈 PR #${number}：描述没有 Refs #<issue>"
   jq -e --argjson n "$issue" '.repos["kind/gitops"].items[] | select(.number == $n and (.is_pr | not)) | .labels | index("srenautix")' \
     <<<"$state" >/dev/null || die "自愈 PR #${number}：Refs 的 #${issue} 不是带 srenautix 标签的 issue"
+  # 回链评论：App 机器人写的、标记为 <!-- srenautix:comment=link:<PR 地址> --> 且地址以 /pull/<编号> 结尾（apps/srenautix/src/github/issues.ts）
   until state=$(gitlocal_api GET /_test/state) &&
-    jq -e --arg n "$issue" --arg num "$number" '.repos["kind/gitops"].comments[$n] // [] | map(.body) | any(contains("srenautix:pr-link=") and contains("/pull/" + $num))' \
+    jq -e --arg n "$issue" --arg num "$number" '.repos["kind/gitops"].comments[$n] // []
+      | any((.user | endswith("[bot]")) and ([.body | capture("<!-- srenautix:comment=link:(?<url>[^ ]+) -->")? | .url] | any(endswith("/pull/" + $num))))' \
       <<<"$state" >/dev/null; do
     ((SECONDS < deadline)) || die "自愈 PR #${number}：issue #${issue} 没有回链 PR 的评论"
     sleep 10
