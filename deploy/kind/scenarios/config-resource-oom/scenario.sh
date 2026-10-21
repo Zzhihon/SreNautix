@@ -10,10 +10,9 @@ SRENAUTIX_MAX_INCIDENTS=2
 SRENAUTIX_REMEDIATION=config_resource
 SRENAUTIX_PR_FILES='^apps/shop/workloads\.yaml$'
 
-# 已知缺口（产品缺陷，断言不变）：事件根因是 Argo Application，研判根因是 Deployment shop/checkout；memory-limit-raise 的
-# when 只看事件根因的 kind（Deployment 等），从未被尝试，只评估了 release-to-serving-version 并以 skip_if 跳过，没有自愈 PR
-# （kind-e2e 39628044289）。修复模板应按研判根因匹配。
-KNOWN_GAP='Zzhihon/SreNautix#5 (3)：修复模板按事件根因而不是研判根因匹配，根因为 Application 的事件拿不到 memory-limit-raise'
+# 已知缺口（断言不变）：memory-limit-raise 要求内存卡异常，kind-e2e 39666613594 中 checkout 的内存卡没有看到 OOM
+# （cAdvisor 计数没有采到，内存卷让重启在初始化时失败）。ADR 0126 第 6、7 条之后待 kind-e2e 确认。
+KNOWN_GAP='Zzhihon/SreNautix#5 (3)：checkout 的内存卡没有看到 OOM，memory-limit-raise 不适用'
 
 set_cache_mb() {
   gitops_file main apps/shop/workloads.yaml |

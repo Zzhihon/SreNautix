@@ -87,6 +87,24 @@ input_series:
       series: 'kube_pod_init_container_status_running{namespace="shop",pod="init-5d8f7c9b6d-k2m4n",container="wait-db"}',
       values: '0x5 1x55',
     }
+  # checkout：第 22 分钟被 OOM 终止后马上被替换，cAdvisor 的计数没有采到这次增长，只有 kube-state-metrics 的最近终止原因
+  # 在 2 分钟内是 OOMKilled；工作集一直远低于 limit
+  - {
+      series: 'kube_pod_container_status_last_terminated_reason{namespace="shop",pod="checkout-56f4794c88-k67m5",container="checkout",reason="OOMKilled"}',
+      values: '_x22 1x2 _x36',
+    }
+  - {
+      series: 'container_oom_events_total{namespace="shop",pod="checkout-56f4794c88-k67m5",container="checkout"}',
+      values: '0x60',
+    }
+  - {
+      series: 'container_memory_working_set_bytes{namespace="shop",pod="checkout-56f4794c88-k67m5",container="checkout"}',
+      values: '8000000x60',
+    }
+  - {
+      series: 'kube_pod_container_resource_limits{namespace="shop",pod="checkout-56f4794c88-k67m5",container="checkout",resource="memory",unit="byte"}',
+      values: '33554432x60',
+    }
   # worker-0：一直 Pending，无法调度
   - { series: 'kube_pod_status_phase{namespace="batch",pod="worker-0",phase="Pending"}', values: '1x60' }
   - { series: 'kube_pod_status_unschedulable{namespace="batch",pod="worker-0"}', values: '1x60' }
@@ -226,6 +244,13 @@ tests:
       card: pod-restarts/memory,
       entity: { kind: Pod, namespace: shop, name: api-6c8d7f9b4c-q7w2z },
       expect: { verdict: normal },
+    }
+  - {
+      name: checkout 的 OOM 只在 kube-state-metrics 的终止原因里,
+      eval_time: 40m,
+      card: pod-restarts/memory,
+      entity: { kind: Pod, namespace: shop, name: checkout-56f4794c88-k67m5 },
+      expect: { verdict: abnormal },
     }
   - {
       name: web 被限流,

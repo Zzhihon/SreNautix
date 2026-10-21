@@ -401,9 +401,10 @@ spec:
                 echo "checkout: invalid mode '$mode' in /config/mode" >&2
                 exit 1
               fi
-              # 启动时按 CACHE_MB 预热内存缓存（内存卷计入容器内存；配置与资源场景把它调大，超过内存上限）
+              # 启动时按 CACHE_MB 预热进程内的内存缓存（常驻在 shell 变量里，计入容器内存）。配置与资源场景把它调大，
+              # 超过内存上限，每次启动都在预热中被 OOMKilled
               echo "checkout: started with mode=$mode, cache ${CACHE_MB}MiB, database $DB_HOST"
-              dd if=/dev/zero of=/cache/warm bs=1048576 count="$CACHE_MB" 2>/dev/null
+              cache=$(head -c "$((CACHE_MB * 1048576))" /dev/zero | tr '\000' x)
               # 缓存预热完成之后才就绪：预热中被 OOMKilled 的新 Pod 从未就绪，发布停在第一个新 Pod，旧 Pod 继续服务
               touch /tmp/ready
               trap 'exit 0' TERM
@@ -422,7 +423,5 @@ spec:
             limits: {cpu: 50m, memory: 32Mi}
           volumeMounts:
             - {name: config, mountPath: /config}
-            - {name: cache, mountPath: /cache}
       volumes:
         - {name: config, configMap: {name: checkout-config}}
-        - {name: cache, emptyDir: {medium: Memory, sizeLimit: 256Mi}}

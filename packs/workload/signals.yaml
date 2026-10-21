@@ -32,9 +32,14 @@ signals:
             / on (namespace, pod, container)
             kube_pod_container_resource_limits{$selector, resource="memory"}
           )
+  # cAdvisor 的计数挂在容器的 cgroup 上，被 OOM 终止后马上被替换的容器常常来不及采到这次增长；kube-state-metrics 的
+  # 最近终止原因在容器重启之后仍保留。两者都有时取并集，只有一个时用它
   - id: container_oom_events
     kind: metrics
     alternatives:
+      - expr: >-
+          (sum by (namespace, pod, container) (increase(container_oom_events_total{$selector, container!=""}[$window])) > 0)
+          or (max by (namespace, pod, container) (max_over_time(kube_pod_container_status_last_terminated_reason{$selector, reason="OOMKilled"}[$window])) > 0)
       - expr: sum by (namespace, pod, container) (increase(container_oom_events_total{$selector, container!=""}[$window])) > 0
       - expr: max by (namespace, pod, container) (max_over_time(kube_pod_container_status_last_terminated_reason{$selector, reason="OOMKilled"}[$window])) > 0
   - id: container_cpu_throttled_ratio
