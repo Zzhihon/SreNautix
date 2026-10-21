@@ -1,0 +1,36 @@
+# platform/observability/rules/shop.yaml 的告警。主卡是与告警条件对应的内置卡：告警触发时它应当判为异常。
+# 实体取 kube-state-metrics 保留的对象标签（kube-prometheus-stack 的抓取把导出器自己的 pod、container 标签改名为 exported_*，
+# 不会与对象标签混淆）。
+entries:
+  # 可用副本少于 2：spec 至少 2 时 deployment_unavailable > 0
+  - id: shop-api-replicas-below-minimum
+    alertname: ShopApiReplicasBelowMinimum
+    role: symptom
+    entity: { kind: Deployment, name_labels: [deployment] }
+    chains: [workload/rollout, workload/release]
+    primary_card: workload/rollout/deployment
+  - id: shop-checkout-unavailable
+    alertname: ShopCheckoutUnavailable
+    role: symptom
+    entity: { kind: Deployment, name_labels: [deployment] }
+    chains: [workload/rollout, workload/release]
+    primary_card: workload/rollout/deployment
+  - id: shop-migration-failed
+    alertname: ShopMigrationFailed
+    role: cause
+    entity: { kind: Job, name_labels: [job_name] }
+    chains: [workload/job, workload/release]
+    primary_card: workload/job/status
+  # 已更新的副本少于期望：新 ReplicaSet 没有达到期望的就绪副本数
+  - id: shop-rollout-incomplete
+    alertname: ShopRolloutIncomplete
+    role: change
+    entity: { kind: Deployment, name_labels: [deployment] }
+    chains: [workload/release, workload/rollout]
+    primary_card: workload/release/replicasets
+  - id: shop-pod-restarted
+    alertname: ShopPodRestarted
+    role: symptom
+    entity: { kind: Pod, name_labels: [pod] }
+    chains: [workload/pod-restarts]
+    primary_card: workload/pod-restarts/restarts

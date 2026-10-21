@@ -1,0 +1,20 @@
+# shop 命名空间的工作负载。shop 是 nginx，没有 http_requests_total 与 http_request_duration_seconds，
+# 所以不挂 workload/release-traffic；发布链 workload/release 只用 kube-state-metrics。
+# api 与 checkout 的 initContainer wait-for-migrations 等待迁移 Job shop-migrate-<发布 ID>（workload/release/migration-jobs
+# 的默认 job_pattern .*migrat.* 匹配它）。
+component_types:
+  - id: shop.app
+    match: { kind: Deployment, namespaces: [shop], name_pattern: '^(api|checkout)$' }
+    chains: [workload/release, workload/rollout, workload/pod-restarts, workload/pod-pending]
+  - id: shop.web
+    match: { kind: Deployment, namespaces: [shop], name_pattern: '^web$' }
+    chains: [workload/rollout, workload/pod-restarts, workload/pod-pending]
+  - id: shop.postgres
+    match: { kind: StatefulSet, namespaces: [shop], name_pattern: '^postgres$' }
+    chains: [workload/rollout, workload/pod-restarts, workload/pod-pending]
+  - id: shop.migration-job
+    match: { kind: Job, namespaces: [shop], name_pattern: '^shop-migrate-' }
+    chains: [workload/job, workload/release]
+  - id: shop.pod
+    match: { kind: Pod, namespaces: [shop], name_pattern: '^(api|checkout|web|postgres)-' }
+    chains: [workload/pod-restarts, workload/pod-pending]
