@@ -1332,13 +1332,27 @@ export function composeMessage(i: ComposeInput): { message: NotifyMessage; targe
   if (i.feedback && !i.feedback.stale) {
     situation.push(text([P(t.feedback(fbVerdict(i.feedback), i.feedback.principal_id))]));
   }
-  // 引用告警注解原文（不可信文本）只在全文中
-  for (const a of alerts.slice(0, 3)) {
-    const s = a.annotations.summary ?? a.annotations.description;
-    if (s) {
-      const source = `${t.alertFiring} ${a.alertname}`;
-      situation.push({ type: 'quote', text: s, source, model_generated: false, scope: 'full' });
+  // 告警注解原文（不可信文本）作为引用块：头条症状告警的第一条摘要在聊天里也出现，其余只在全文中，相同的摘要只引用一次
+  const headlineIds = new Set(pool.map((m) => m.alert_id));
+  const quoted = [...alerts].sort((a, b) => Number(headlineIds.has(b.alert_id)) - Number(headlineIds.has(a.alert_id)));
+  const seenQuotes = new Set<string>();
+  for (const a of quoted) {
+    if (seenQuotes.size >= 3) {
+      break;
     }
+    const s = a.annotations.summary ?? a.annotations.description;
+    if (!s || seenQuotes.has(s)) {
+      continue;
+    }
+    seenQuotes.add(s);
+    const source = `${t.alertFiring} ${a.alertname}`;
+    situation.push({
+      type: 'quote',
+      text: s,
+      source,
+      model_generated: false,
+      scope: seenQuotes.size === 1 ? 'all' : 'full',
+    });
   }
 
   // ---- 时间线 ----

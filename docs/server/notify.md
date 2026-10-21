@@ -12,7 +12,7 @@ server 角色把每个事件的阶段 A 报告与阶段 B 研判推送到聊天�
 - 数值与时刻只取自确定性数据：事件、阶段 A 报告、研判输出（账本、检查、结论阶梯）、变更与动作目录。模型写的文字只有假设机制、结论摘要、修复建议、无法判定的原因，以斜体显示并标注【模型】，worker 已经删除其中无法核实的数值。
 - 块带 `scope`：`summary` 只在聊天里，`full` 只在事件 issue 里。聊天消息是摘要，issue 正文是全文，控制台有全部卡片与序列。
 - 每张证据卡带控制台卡片详情的链接（`/incidents/<id>?tab=evidence#card-<n>`）与数据源查询的链接（`links.metrics_explore_url`、`links.logs_explore_url` 模板，带查询与时间窗）；告警带 generatorURL 或 Alertmanager 链接（`links.alertmanager_url`）；变更带变更来源、Argo CD 应用（`links.argocd_url`）或 Git 提交（`links.git_commit_url`）的链接。没有配置时只有控制台链接。模板占位符为 `{query}`、`{query_json}`、`{from}`、`{to}`、`{from_ms}`、`{to_ms}`、`{range}`、`{revision}`。
-- 告警、日志、变更里的原文是不可信文本：只作为文字出现，Telegram 中按 HTML 转义，飞书与 issue 中按各自的 Markdown 规则转义；原文不会变成按钮、链接或格式。告警注解原文只在 issue 里，放在注明来源的引用块中。
+- 告警、日志、变更里的原文是不可信文本：只作为文字出现，Telegram 中按 HTML 转义，飞书与 issue 中按各自的 Markdown 规则转义；原文不会变成按钮、链接或格式。告警注解原文（summary，没有时为 description）放在注明来源的引用块中：头条症状告警的第一条摘要在聊天消息的现状段里也出现，issue 引用最多 3 条不同的摘要。
 - Telegram 用 `parse_mode=HTML`：只使用 `b`、`i`、`code`、`a`、`blockquote`（证据链为可展开的引用块）。文本上限按解析后的 4096 个 UTF-16 code unit 计算，超限时从优先级最低的段（最近操作、证据链、拓扑联系、时间线）的末尾逐块删减，段末写"其余内容见控制台"，整段删完时只留一行省略说明；头部与现状不删减。实体数超过 100 时依次放弃等宽、强调与链接的格式。
 - 飞书卡片用 markdown 元素写富文本，证据链放在折叠面板里；超过卡片大小上限时按优先级省略整段。
 
