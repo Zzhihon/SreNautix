@@ -1,5 +1,5 @@
 // 登录（DESIGN §13）：OIDC 为主；本地管理员只用于首次引导，SSO 验证通过后只作为紧急入口，
-// 必须带 TOTP。失败到一定次数会锁定（423）。
+// 默认必须带 TOTP；server 关闭 TOTP 时（ADR 0118）不显示验证码输入框，显示"TOTP 已关闭"。失败到一定次数会锁定（423）。
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
@@ -20,9 +20,15 @@ export function LoginPage({ returnTo }: { returnTo?: string }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [totp, setTotp] = useState('');
+  const totpRequired = providers.data?.local_admin.totp_required ?? true;
   const login = useMutation({
     mutationFn: async () =>
-      ok<Session>('loginLocal', await hub.POST('/v1/auth/login', { body: { username, password, totp } })),
+      ok<Session>(
+        'loginLocal',
+        await hub.POST('/v1/auth/login', {
+          body: totpRequired ? { username, password, totp } : { username, password },
+        }),
+      ),
     onSuccess: async (s) => {
       setCsrf(s.csrf_token);
       qc.setQueryData(SESSION_KEY, s);
@@ -71,16 +77,22 @@ export function LoginPage({ returnTo }: { returnTo?: string }) {
                   onChange={(e) => setPassword(e.currentTarget.value)}
                   required
                 />
-                <TextField
-                  label={t('login.totp')}
-                  inputMode="numeric"
-                  autoComplete="one-time-code"
-                  pattern="[0-9]{6}"
-                  maxLength={6}
-                  value={totp}
-                  onChange={(e) => setTotp(e.currentTarget.value)}
-                  required
-                />
+                {totpRequired ? (
+                  <TextField
+                    label={t('login.totp')}
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    pattern="[0-9]{6}"
+                    maxLength={6}
+                    value={totp}
+                    onChange={(e) => setTotp(e.currentTarget.value)}
+                    required
+                  />
+                ) : (
+                  <p className={styles.warn} role="note">
+                    {t('login.totp_off')}
+                  </p>
+                )}
                 <Button type="submit" variant="primary" size="lg" busy={login.isPending}>
                   {t('login.submit')}
                 </Button>

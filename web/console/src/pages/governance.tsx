@@ -16,6 +16,7 @@ import {
   StatusPill,
   TextField,
   useI18n,
+  type AuthProviders,
   type ColumnDef,
 } from '@srenautix/ui';
 import { CheckCircle2, Clock, OctagonX, ShieldCheck } from 'lucide-react';
@@ -748,9 +749,22 @@ export function SettingsPage() {
     queryKey: ['settings'],
     queryFn: async () => ok<S['Settings']>('getSettings', await hub.GET('/v1/settings')),
   });
+  // 本地管理员的 TOTP 开关（ADR 0118）：关闭时在安全设置中显示
+  const providers = useQuery({
+    queryKey: ['auth-providers'],
+    queryFn: async () => ok<AuthProviders>('listAuthProviders', await hub.GET('/v1/auth/providers')),
+  });
+  const totpOff = providers.data?.local_admin.enabled === true && !providers.data.local_admin.totp_required;
   return (
     <div className={styles.page}>
       <PageHeader title={t('settings.title')} meta={t('settings.secret_note')} />
+      {totpOff && (
+        <Panel title={t('settings.totp_off_title')}>
+          <p className={styles.warn} role="note">
+            {t('settings.totp_off')}
+          </p>
+        </Panel>
+      )}
       <Loaded q={q} what={t('settings.failed')} roles={ROLES_ALL}>
         {(s) =>
           admin ? (

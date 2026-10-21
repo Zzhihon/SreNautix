@@ -33,5 +33,12 @@ export default defineConfig({
       testMatch: /mobile\.spec\.ts/,
       use: { ...devices['Pixel 7'], storageState: '../../.scratch/console-e2e/session.json' },
     },
+    // 最后运行：另起一个关闭 TOTP 的 server（同一个库），它启动时在审计链追加开关变化
+    {
+      name: 'totp-off',
+      dependencies: ['mobile'],
+      testMatch: /totp-off\.spec\.ts/,
+      use: { ...devices['Desktop Chrome'] },
+    },
   ],
 });

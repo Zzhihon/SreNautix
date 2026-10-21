@@ -9,7 +9,7 @@ import { Auth } from '../../src/identity/auth.js';
 import { Bindings } from '../../src/identity/bindings.js';
 import { CallerRegistry } from '../../src/identity/callers.js';
 import { ChatLinks, upsertUser } from '../../src/identity/chat-links.js';
-import { LocalAdmin } from '../../src/identity/local-admin.js';
+import { LocalAdmin, recordLocalAdminTotpSetting } from '../../src/identity/local-admin.js';
 import { identityTrack } from '../../src/identity/migrations.js';
 import { Oidc } from '../../src/identity/oidc.js';
 import { hashPassword } from '../../src/identity/password.js';
@@ -46,7 +46,7 @@ function cookieOf(res: { cookies: Array<{ name: string; value: string }> }): str
   return `${SESSION_COOKIE}=${c.value}`;
 }
 
-async function buildApp(username: string, t: TOTP, maxFailures: number): Promise<FastifyInstance> {
+async function buildApp(username: string, t: TOTP, maxFailures: number, totpRequired = true): Promise<FastifyInstance> {
   const sessions = new Sessions(db.server, { idleMs: 30 * 60_000, absoluteMs: 12 * 3_600_000 });
   const auth = new Auth(sessions, new CallerRegistry([]), Bindings.load(dir), PUBLIC);
   const a = await createApp({ bodyLimit: 1 << 20, trustProxy: false });
@@ -56,7 +56,7 @@ async function buildApp(username: string, t: TOTP, maxFailures: number): Promise
     auth,
     localAdmin: new LocalAdmin(
       db.server,
-      { username, passwordHash: await hashPassword(PASSWORD), totpSecret: t.secret.base32 },
+      { username, passwordHash: await hashPassword(PASSWORD), totpSecret: t.secret.base32, totpRequired },
       { maxFailures, windowMs: 15 * 60_000, durationMs: 15 * 60_000 },
     ),
     oidc: new Oidc(db.server, {
@@ -83,9 +83,13 @@ const apps: FastifyInstance[] = [];
  * 每个 TOTP 时间步对同一用户名只能用一次，校验窗口是前后一步，所以每个需要单独登录的场景用自己的本地管理员用户名
  * （同一个库、同一组角色绑定）。
  */
-async function localUser(username: string, maxFailures = 5): Promise<{ app: FastifyInstance; totp: TOTP }> {
+async function localUser(
+  username: string,
+  maxFailures = 5,
+  totpRequired = true,
+): Promise<{ app: FastifyInstance; totp: TOTP }> {
   const t = new TOTP({ secret: new Secret({ size: 20 }), digits: 6, period: 30, algorithm: 'SHA1' });
-  const a = await buildApp(username, t, maxFailures);
+  const a = await buildApp(username, t, maxFailures, totpRequired);
   apps.push(a);
   return { app: a, totp: t };
 }
@@ -151,7 +155,7 @@ describe('本地管理员', () => {
   it('登录方式列出本地管理员与 OIDC', async () => {
     const r = await app.inject({ method: 'GET', url: '/v1/auth/providers' });
     expect(r.json()).toEqual({
-      local_admin: { enabled: true, break_glass: false },
+      local_admin: { enabled: true, break_glass: false, totp_required: true },
       oidc: { display_name: new URL(idp.issuer).host },
       profile: 'standard',
     });
@@ -269,6 +273,125 @@ describe('本地管理员', () => {
   });
 });
 
+describe('TOTP 关闭（identity.local_admin.totp_required=false，ADR 0118）', () => {
+  it('登录方式写明 TOTP 已关闭；只凭口令登录，会话不带第二因子', async () => {
+    const u = await localUser('nototp', 5, false);
+    const p = await u.app.inject({ method: 'GET', url: '/v1/auth/providers' });
+    expect(p.json().local_admin).toEqual({ enabled: true, break_glass: false, totp_required: false });
+    const r = await u.app.inject({
+      method: 'POST',
+      url: '/v1/auth/login',
+      headers: ORIGIN,
+      payload: { username: 'nototp', password: PASSWORD },
+    });
+    expect(r.statusCode, r.body).toBe(200);
+    expect(r.json()).toMatchObject({ provider: 'local-admin', local_admin: true });
+    const s = await db.server.query<{ mfa: boolean }>(
+      "SELECT mfa FROM server.sessions WHERE principal_id = 'local:nototp' ORDER BY created_at DESC LIMIT 1",
+    );
+    expect(s.rows[0]?.mfa).toBe(false);
+    // 审计记录里写明这次登录没有第二因子
+    const recs = (await readAudit(db.server, 0, 10_000)).filter(
+      (x) => x.kind === 'auth.login' && x.actor === 'local:nototp',
+    );
+    expect(recs.at(-1)?.data).toMatchObject({ provider: 'local-admin', mfa: false });
+    // 提交了验证码也不校验
+    const withCode = await u.app.inject({
+      method: 'POST',
+      url: '/v1/auth/login',
+      headers: ORIGIN,
+      payload: { username: 'nototp', password: PASSWORD, totp: '000000' },
+    });
+    expect(withCode.statusCode).toBe(200);
+  });
+
+  it('口令错误仍然拒绝、计入失败次数并锁定', async () => {
+    const u = await localUser('nototp-lock', 2, false);
+    for (let i = 0; i < 2; i++) {
+      const r = await u.app.inject({
+        method: 'POST',
+        url: '/v1/auth/login',
+        headers: ORIGIN,
+        payload: { username: 'nototp-lock', password: 'wrong' },
+      });
+      expect(r.statusCode).toBe(i === 0 ? 401 : 423);
+    }
+    const ok = await u.app.inject({
+      method: 'POST',
+      url: '/v1/auth/login',
+      headers: ORIGIN,
+      payload: { username: 'nototp-lock', password: PASSWORD },
+    });
+    expect(ok.statusCode).toBe(423);
+  });
+
+  it('TOTP 打开时省略验证码按凭据错误处理', async () => {
+    const u = await localUser('needs-totp');
+    const r = await u.app.inject({
+      method: 'POST',
+      url: '/v1/auth/login',
+      headers: ORIGIN,
+      payload: { username: 'needs-totp', password: PASSWORD },
+    });
+    expect(r.statusCode).toBe(401);
+    expect(r.json().error).toBe('invalid_credentials');
+  });
+
+  it('重新认证（H 档审批）仍然要求 TOTP，通过后会话带第二因子', async () => {
+    const u = await localUser('nototp-reauth', 5, false);
+    const lr = await u.app.inject({
+      method: 'POST',
+      url: '/v1/auth/login',
+      headers: ORIGIN,
+      payload: { username: 'nototp-reauth', password: PASSWORD },
+    });
+    const cookie = cookieOf(lr);
+    const csrf = lr.json().csrf_token as string;
+    const headers = { cookie, ...ORIGIN, 'x-csrf-token': csrf };
+    const noCode = await u.app.inject({
+      method: 'POST',
+      url: '/v1/auth/reauth',
+      headers,
+      payload: { password: PASSWORD },
+    });
+    expect(noCode.statusCode).toBe(400);
+    const wrong = String((Number(code(u.totp)) + 1) % 1_000_000).padStart(6, '0');
+    const bad = await u.app.inject({
+      method: 'POST',
+      url: '/v1/auth/reauth',
+      headers,
+      payload: { password: PASSWORD, totp: wrong },
+    });
+    expect(bad.statusCode).toBe(401);
+    const ok = await u.app.inject({
+      method: 'POST',
+      url: '/v1/auth/reauth',
+      headers,
+      payload: { password: PASSWORD, totp: code(u.totp) },
+    });
+    expect(ok.statusCode, ok.body).toBe(200);
+    const s = await db.server.query<{ mfa: boolean }>(
+      "SELECT mfa FROM server.sessions WHERE principal_id = 'local:nototp-reauth' ORDER BY created_at DESC LIMIT 1",
+    );
+    expect(s.rows[0]?.mfa).toBe(true);
+  });
+
+  it('开关的变化写入审计链：首次关闭、重复启动不重复记录、重新打开', async () => {
+    const changes = async () =>
+      (await readAudit(db.server, 0, 10_000)).filter((x) => x.kind === 'identity.local_admin_totp').map((x) => x.data);
+    expect(await recordLocalAdminTotpSetting(db.server, true)).toBe(false);
+    expect(await changes()).toEqual([]);
+    expect(await recordLocalAdminTotpSetting(db.server, false)).toBe(true);
+    expect(await recordLocalAdminTotpSetting(db.server, false)).toBe(false);
+    expect(await recordLocalAdminTotpSetting(db.server, true)).toBe(true);
+    expect(await changes()).toEqual([
+      { setting: 'identity.local_admin.totp_required', totp_required: false, previous: true },
+      { setting: 'identity.local_admin.totp_required', totp_required: true, previous: false },
+    ]);
+    expect(verifyRecords(await readAudit(db.server, 0, 10_000), { seq: 0, hash: GENESIS_HASH })).toBeNull();
+  });
+});
+
 describe('锁定', () => {
   it('连续失败达到上限后锁定，锁定期间凭据正确也返回 423', async () => {
     for (let i = 0; i < 2; i++) {
@@ -355,7 +478,7 @@ describe('OIDC（真实的身份提供方）', () => {
 
   it('SSO 验证通过后本地管理员只作为紧急入口', async () => {
     const p = await app.inject({ method: 'GET', url: '/v1/auth/providers' });
-    expect(p.json().local_admin).toEqual({ enabled: true, break_glass: true });
+    expect(p.json().local_admin).toEqual({ enabled: true, break_glass: true, totp_required: true });
     const u = await localUser('glass');
     const s = await login(u, 'glass');
     const r = await u.app.inject({ method: 'GET', url: '/v1/auth/session', headers: { cookie: s.cookie } });

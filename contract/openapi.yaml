@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: SreNautix hub API
-  version: 2.21.0
+  version: 2.22.0
   license:
     name: Apache-2.0
     identifier: Apache-2.0
@@ -83,11 +83,14 @@ paths:
             schema:
               type: object
               additionalProperties: false
-              required: [username, password, totp]
+              required: [username, password]
               properties:
                 username: { type: string }
                 password: { type: string }
-                totp: { type: string, pattern: '^[0-9]{6}$' }
+                totp:
+                  type: string
+                  pattern: '^[0-9]{6}$'
+                  description: 本地管理员要求 TOTP 时（默认，见 listAuthProviders 的 local_admin.totp_required）必填；关闭时可以省略，提交了也不校验
       responses:
         '200':
           description: 已登录
@@ -154,10 +157,15 @@ paths:
                   local_admin:
                     type: object
                     additionalProperties: false
-                    required: [enabled, break_glass]
+                    required: [enabled, break_glass, totp_required]
                     properties:
                       enabled: { type: boolean }
                       break_glass: { type: boolean, description: SSO 已验证通过，本地管理员只作为紧急入口 }
+                      totp_required:
+                        type: boolean
+                        description: >-
+                          登录是否要求 TOTP（identity.local_admin.totp_required）。为 false 时只凭口令登录，控制台显示"TOTP 已关闭"；
+                          H 档审批的重新认证仍要求口令加 TOTP
                   oidc:
                     oneOf:
                       - { type: 'null' }

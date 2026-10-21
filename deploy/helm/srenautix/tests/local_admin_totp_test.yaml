@@ -1,0 +1,38 @@
+suite: 本地管理员的 TOTP 开关（ADR 0118）
+templates:
+  - templates/role-resources.yaml
+values:
+  - ../ci/base/required.yaml
+release:
+  name: t
+  namespace: srenautix
+capabilities:
+  majorVersion: "1"
+  minorVersion: "34"
+tests:
+  - it: 默认要求 TOTP
+    set:
+      profile: standard
+      identity.localAdmin.existingSecret: local-admin
+    documentSelector: {path: metadata.name, value: t-srenautix-server-config}
+    asserts:
+      - matchRegex: {path: 'data["config.yaml"]', pattern: '(?m)^    totp_required: true$'}
+      - matchRegex: {path: 'data["config.yaml"]', pattern: '(?m)^    totp_secret_file: \S+/local-admin/totp_secret$'}
+
+  - it: totpRequired=false 时只凭口令登录，TOTP 密钥仍然挂载
+    set:
+      profile: standard
+      identity.localAdmin.existingSecret: local-admin
+      identity.localAdmin.totpRequired: false
+    documentSelector: {path: metadata.name, value: t-srenautix-server-config}
+    asserts:
+      - matchRegex: {path: 'data["config.yaml"]', pattern: '(?m)^    totp_required: false$'}
+      - matchRegex: {path: 'data["config.yaml"]', pattern: '(?m)^    totp_secret_file: \S+/local-admin/totp_secret$'}
+
+  - it: 没有启用本地管理员时不生成 local_admin
+    set:
+      profile: standard
+      identity.localAdmin.totpRequired: false
+    documentSelector: {path: metadata.name, value: t-srenautix-server-config}
+    asserts:
+      - notMatchRegex: {path: 'data["config.yaml"]', pattern: 'totp_required'}

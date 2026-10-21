@@ -119,11 +119,12 @@ export class Sessions {
   }
 
   /** 重新认证成功：更新认证时间（H 档审批要求 5 分钟内）。 */
-  async reauthenticated(id: string, authTime: Date): Promise<void> {
-    await this.pool.query('UPDATE server.sessions SET auth_time = $2 WHERE id_hash = $1 AND revoked_at IS NULL', [
-      hashId(id),
-      authTime,
-    ]);
+  /** 重新认证：更新 auth_time；mfa 为 true 时会话从此视为带第二因子（只升不降）。 */
+  async reauthenticated(id: string, authTime: Date, mfa = false): Promise<void> {
+    await this.pool.query(
+      'UPDATE server.sessions SET auth_time = $2, mfa = mfa OR $3 WHERE id_hash = $1 AND revoked_at IS NULL',
+      [hashId(id), authTime, mfa],
+    );
   }
 
   async revoke(id: string): Promise<void> {

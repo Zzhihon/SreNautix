@@ -393,6 +393,7 @@ identity:
     username: {{ $v.identity.localAdmin.username }}
     password_hash_file: {{ $dir }}/local-admin/password_hash
     totp_secret_file: {{ $dir }}/local-admin/totp_secret
+    totp_required: {{ ne $v.identity.localAdmin.totpRequired false }}
   {{- end }}
   {{- if $v.identity.oidc.enabled }}
   oidc:

@@ -327,6 +327,10 @@ identity:
   localAdmin:
     username: admin
     existingSecret: ""
+    # 登录是否要求 TOTP（ADR 0118）。false 时本地管理员只凭口令登录（例如控制台前面已有 Cloudflare Access 之类的访问控制），
+    # Secret 中的 totp_secret 保留；server 启动时打警告，控制台显示"TOTP 已关闭"，开关的变化写入审计链。
+    # H 档审批的重新认证仍然要求口令加 TOTP
+    totpRequired: true
     # 启用本地管理员时，chart 在角色绑定中加一个 local-admin.yaml：组 srenautix:local-admin → admin
     # （合规配置三权分立时为 sys-admin），作用域为全部集群与命名空间。identity.bindings 中已有 local-admin.yaml 时以它为准；
     # 使用 bindingsConfigMap 时 chart 不生成绑定，需要在那个 ConfigMap 中自行加入。接入 OIDC 后建议设为 false 或收窄作用域

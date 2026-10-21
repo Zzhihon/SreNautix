@@ -5,11 +5,11 @@
 
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { createHash, generateKeyPairSync } from 'node:crypto';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { join, resolve } from 'node:path';
 import { Secret, TOTP } from 'otpauth';
-import { stringify } from 'yaml';
+import { parse, stringify } from 'yaml';
 import { hashPassword } from '../../../apps/srenautix/src/identity/password.ts';
 import { ADMIN_TOKEN, startEnvTest, type EnvTest } from '../../../apps/srenautix/test/support/envtest.ts';
 import { startIdp, type TestAccount, type TestIdp } from '../../../apps/srenautix/test/support/oidc.ts';
@@ -38,6 +38,9 @@ export interface HubState {
   proposals: { low: string; high: string };
   pids: number[];
   pgDir: string;
+  /** server 的配置文件与库连接，供 startServerVariant 以同一个库再启动一个 server */
+  configPath: string;
+  pg: { port: number; database: string };
 }
 
 const sha = (s: string) => createHash('sha256').update(s).digest('hex');
@@ -238,6 +241,57 @@ export function buildServerDeps(): void {
 export interface Running {
   state: HubState;
   stop(): Promise<void>;
+}
+
+/**
+ * 以同一个库、同一份种子数据再启动一个 server，配置按 mutate 修改（例如关闭本地管理员的 TOTP，ADR 0118），
+ * 监听新的端口并提供控制台页面。返回它的控制台地址与停止函数；测试结束时由调用方停止。
+ */
+export async function startServerVariant(
+  name: string,
+  mutate: (config: Record<string, unknown>) => void,
+): Promise<{ url: string; stop(): Promise<void> }> {
+  const s = JSON.parse(readFileSync(STATE_FILE, 'utf8')) as HubState;
+  const config = parse(readFileSync(s.configPath, 'utf8')) as Record<string, unknown>;
+  const port = await freePort();
+  const url = `http://localhost:${port}`;
+  config.public_url = url;
+  config.listen = {
+    api: `localhost:${port}`,
+    metrics: `127.0.0.1:${await freePort()}`,
+    probes: `127.0.0.1:${await freePort()}`,
+  };
+  mutate(config);
+  const path = file(`${name}.yaml`, stringify(config));
+  const p = spawnLogged(
+    name,
+    process.execPath,
+    ['--conditions=@srenautix/source', '--import', 'tsx', 'src/main.ts', '--role=server', `--config=${path}`],
+    {
+      PGHOST: '127.0.0.1',
+      PGPORT: String(s.pg.port),
+      PGDATABASE: s.pg.database,
+      PGUSER: 'srenautix_server',
+      PGSSLMODE: 'disable',
+    },
+    join(REPO, 'apps', 'srenautix'),
+  );
+  const stop = async () => {
+    if (p.exitCode === null) {
+      await new Promise<void>((res) => {
+        p.once('exit', () => res());
+        p.kill('SIGTERM');
+      });
+    }
+  };
+  try {
+    await waitOk(`${url}/readyz`, `${name} 就绪`);
+    await waitOk(`${url}/`, `${name} 的控制台页面`);
+  } catch (e) {
+    await stop();
+    throw e;
+  }
+  return { url, stop };
 }
 
 export interface HubOptions {
@@ -552,6 +606,8 @@ export async function startHub(opts: HubOptions = {}): Promise<Running> {
       proposals: { low, high },
       pids: procs.map((p) => p.pid ?? 0),
       pgDir: pg.dir,
+      configPath,
+      pg: { port: pg.port, database: pg.database },
     };
     writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
     return { state, stop };

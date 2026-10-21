@@ -28,7 +28,7 @@ import { Bindings, scopeMatches } from '../identity/bindings.js';
 import { CallerRegistry } from '../identity/callers.js';
 import { ChatLinks, usersByEmail } from '../identity/chat-links.js';
 import { registerMcpAudit } from '../identity/mcp-audit.js';
-import { LocalAdmin } from '../identity/local-admin.js';
+import { LocalAdmin, recordLocalAdminTotpSetting } from '../identity/local-admin.js';
 import { Oidc } from '../identity/oidc.js';
 import { registerAuthRoutes } from '../identity/routes.js';
 import { Sessions } from '../identity/sessions.js';
@@ -182,10 +182,23 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
             c.identity.local_admin.password_hash_file,
           ),
           totpSecret: readSecretFile('identity.local_admin.totp_secret_file', c.identity.local_admin.totp_secret_file),
+          totpRequired: c.identity.local_admin.totp_required,
         },
         lockout,
       )
     : null;
+  if (localAdmin) {
+    // 开关的变化写入治理审计链；关闭时每次启动都打警告（ADR 0118）
+    await recordLocalAdminTotpSetting(pool, localAdmin.totpRequired);
+    if (!localAdmin.totpRequired) {
+      logger.warn(
+        '本地管理员登录不要求 TOTP（identity.local_admin.totp_required=false），只凭口令即可登录；H 档审批的重新认证仍要求 TOTP',
+        {
+          username: localAdmin.username,
+        },
+      );
+    }
+  }
   const oidc = c.identity.oidc
     ? new Oidc(pool, {
         issuer: c.identity.oidc.issuer,

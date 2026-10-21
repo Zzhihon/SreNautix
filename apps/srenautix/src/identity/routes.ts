@@ -46,8 +46,16 @@ export interface SessionView {
   break_glass: boolean;
 }
 
+// totp 只在 identity.local_admin.totp_required 关闭时可以省略（ADR 0118）；要求 TOTP 时省略按凭据错误处理
 const loginBody = z
-  .object({ username: z.string(), password: z.string(), totp: z.string().regex(/^[0-9]{6}$/) })
+  .object({
+    username: z.string(),
+    password: z.string(),
+    totp: z
+      .string()
+      .regex(/^[0-9]{6}$/)
+      .optional(),
+  })
   .strict();
 const reauthBody = z.object({ password: z.string(), totp: z.string().regex(/^[0-9]{6}$/) }).strict();
 const explainBody = z
@@ -137,7 +145,11 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): v
   app.get('/v1/auth/providers', async () => {
     const superseded = await pool.query("SELECT 1 FROM server.system_state WHERE key = 'local_admin_superseded_at'");
     return {
-      local_admin: { enabled: deps.localAdmin !== null, break_glass: (superseded.rowCount ?? 0) > 0 },
+      local_admin: {
+        enabled: deps.localAdmin !== null,
+        break_glass: (superseded.rowCount ?? 0) > 0,
+        totp_required: deps.localAdmin?.totpRequired ?? true,
+      },
       oidc: deps.oidc ? { display_name: deps.oidc.displayName } : null,
       profile: deps.profile,
     };
@@ -162,7 +174,11 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): v
       if (r.reason === 'locked') {
         throw new HttpError(423, 'locked', `登录失败次数过多，已锁定到 ${r.lockedUntil?.toISOString() ?? '稍后'}`);
       }
-      throw new HttpError(401, 'invalid_credentials', '用户名、口令或 TOTP 不正确');
+      throw new HttpError(
+        401,
+        'invalid_credentials',
+        local.totpRequired ? '用户名、口令或 TOTP 不正确' : '用户名或口令不正确',
+      );
     }
     deps.metrics.logins.inc({ method: 'local', outcome: r.breakGlass ? 'break_glass' : 'ok' });
     const s = await startSession(reply, r.principal, r.breakGlass, 'auth.login');
@@ -236,7 +252,8 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): v
       }
       throw new HttpError(401, 'invalid_credentials', '口令或 TOTP 不正确');
     }
-    await sessions.reauthenticated(c.sessionId, r.principal.auth_time);
+    // 重新认证总是校验 TOTP：会话从此带第二因子（H 档审批的 local_totp 凭据）
+    await sessions.reauthenticated(c.sessionId, r.principal.auth_time, r.principal.mfa);
     await audit(pool, 'auth.reauth', c.session.principalId, { provider: LOCAL_PROVIDER });
     deps.metrics.logins.inc({ method: 'local_reauth', outcome: 'ok' });
     const s = await sessions.touch(c.sessionId);

@@ -4275,7 +4275,8 @@ export interface operations {
       content: {
         'application/json': {
           password: string;
-          totp: string;
+          /** @description 本地管理员要求 TOTP 时（默认，见 listAuthProviders 的 local_admin.totp_required）必填；关闭时可以省略，提交了也不校验 */
+          totp?: string;
           username: string;
         };
       };
@@ -4378,6 +4379,8 @@ export interface operations {
               /** @description SSO 已验证通过，本地管理员只作为紧急入口 */
               break_glass: boolean;
               enabled: boolean;
+              /** @description 登录是否要求 TOTP（identity.local_admin.totp_required）。为 false 时只凭口令登录，控制台显示"TOTP 已关闭"； H 档审批的重新认证仍要求口令加 TOTP */
+              totp_required: boolean;
             };
             oidc: null | {
               display_name: string;

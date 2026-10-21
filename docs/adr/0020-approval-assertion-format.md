@@ -17,6 +17,7 @@ gateway 是被管集群中唯一的写身份。它执行的每个动作都必须
 3. **服务签名**（`proof.type = service_ed25519`）：server 用服务签名密钥（Ed25519）签名。
    - 签名输入是 ASCII `srenautix-approval-v1` 加换行符，再接 `JCS(statement)`。statement 为 `{"assertion": 断言}`；H 档时为 `{"assertion": 断言, "reauth": 重新认证凭据}`。
    - 重新认证凭据含 `method`（`oidc_max_age` 或 `local_totp`）、`auth_time` 与会话 ID 的哈希。gateway 要求 `auth_time` 不晚于 `issued_at`，且两者相差不超过 300 秒。
+   - `local_totp` 只由校验过 TOTP 的本地管理员会话签发。本地管理员登录关闭 TOTP（ADR 0118）时，只凭口令登录的会话没有这项凭据，H 档审批要先用口令加 TOTP 重新认证。
    - 公钥带 `key_id`，可设 `not_after`：只接受 `issued_at` 早于它的断言，用于轮换。
 4. **通行密钥签名**（`proof.type = webauthn`，合规配置的 H 档）：审批人的 WebAuthn 凭据按 WebAuthn Level 3 的断言格式签名。
    - `clientDataJSON.challenge` 是 `sha256(JCS(断言))` 原始 32 字节的 base64url，`type` 为 `webauthn.get`，`origin` 必须在白名单中；`crossOrigin` 为 true 或带 `topOrigin` 时拒绝（控制台不在跨源 iframe 中发起审批）。

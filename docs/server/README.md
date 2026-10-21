@@ -68,7 +68,7 @@ notify:
 approvals: { signing_key_file: /etc/srenautix/secrets/approvals/ed25519.pem, key_id: prod-2026-10 }
 callers: { tokens_file: /etc/srenautix/secrets/callers/callers.yaml }
 identity:
-  local_admin: { username: admin, password_hash_file: …, totp_secret_file: … }
+  local_admin: { username: admin, password_hash_file: …, totp_secret_file: …, totp_required: true }  # false：只凭口令登录（ADR 0118）
   bindings_dir: /etc/srenautix/role-bindings
 audit:
   checkpoint_key_file: /etc/srenautix/secrets/audit/ed25519.pem

@@ -10,18 +10,22 @@ import type { Approver, ProposalCaller, ProposalService } from '../proposals/ser
 import { idempotent } from '../store/idempotency.js';
 import { badRequest, forbidden, notFound } from './errors.js';
 
-/** 控制台会话的审批人；H 档的重新认证凭据来自会话的认证时间（OIDC max_age 或本地管理员 TOTP）。 */
+/**
+ * 控制台会话的审批人；H 档的重新认证凭据来自会话的认证时间（OIDC max_age 或本地管理员 TOTP）。
+ * 本地管理员不带 TOTP 登录的会话（identity.local_admin.totp_required=false）没有 local_totp 凭据，
+ * H 档审批前必须经 POST /v1/auth/reauth 用口令加 TOTP 重新认证（ADR 0118）。
+ */
 export function approverFromSession(c: Extract<Caller, { kind: 'user' }>): Approver {
+  const oidc = c.session.provider === 'oidc';
   return {
     principalId: c.session.principalId,
     channel: 'console',
     subject: c.subject,
     linked: true,
-    reauth: {
-      authTime: c.session.authTime,
-      method: c.session.provider === 'oidc' ? 'oidc_max_age' : 'local_totp',
-      sessionId: c.sessionId,
-    },
+    reauth:
+      oidc || c.session.mfa
+        ? { authTime: c.session.authTime, method: oidc ? 'oidc_max_age' : 'local_totp', sessionId: c.sessionId }
+        : null,
   };
 }
 

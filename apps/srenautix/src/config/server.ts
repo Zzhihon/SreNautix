@@ -503,7 +503,13 @@ export const serverConfigSchema = z
     identity: z
       .object({
         local_admin: z
-          .object({ username: z.string().min(1), password_hash_file: path, totp_secret_file: path })
+          .object({
+            username: z.string().min(1),
+            password_hash_file: path,
+            totp_secret_file: path,
+            // 登录是否要求 TOTP（ADR 0118）；false 时只用口令登录，TOTP 密钥保留，H 档审批的重新认证仍要求 TOTP
+            totp_required: z.boolean().default(true),
+          })
           .strict()
           .optional(),
         oidc: z
