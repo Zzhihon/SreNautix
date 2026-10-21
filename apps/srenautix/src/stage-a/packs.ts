@@ -23,10 +23,8 @@ import {
   type VerifyResult,
 } from '@srenautix/integration-sdk';
 import {
-  compileCard,
   compilePackSet,
   CosignVerifier,
-  createBaseEnvironment,
   LiveDataSource,
   loadActionCatalog,
   loadOciPack,
@@ -36,8 +34,6 @@ import {
   PackLockMismatch,
   resolveSignal,
   type Capability,
-  type CardDefinition,
-  type CardEntry,
   type EvidenceDataSource,
   type LoadedPack,
   type PackSet,
@@ -175,67 +171,11 @@ export interface KnowledgeEntry {
   source: 'human' | 'model';
 }
 
-/** 区分性检查可用的查询模板（signals.yaml 的 templates），按模板附带的卡判定。 */
-export interface CompiledTemplate {
-  /** 全局 id <pack>/<template id> */
-  id: string;
-  pack: string;
-  description: string;
-  /** 参数的 JSON Schema（可移植子集） */
-  args: Record<string, unknown>;
-  /** set.cards 中的卡片键 <pack>/templates/<template id> */
-  card: string;
-}
-
-const REF_KIND: Record<string, string> = { range: 'metrics', instant: 'metrics', logs: 'logs', traces: 'traces' };
-
 /**
- * 编译查询模板：模板引用的信号与卡的每个引用都必须存在且类型相符，卡的 CEL 按阶段 A 的同一套环境编译。
- * 编译后的卡加入 set.cards（键 <pack>/templates/<id>），由 runCard 执行。没有附带卡的模板无法判定，不提供给阶段 B。
+ * 区分性检查可用的查询模板（signals.yaml 的 templates）。packs-sdk 的 compilePackSet 编译模板与附带的卡
+ * （卡在 set.cards 中的键为 <pack>/templates/<template id>）；没有附带卡的模板无法判定，不在列表里。
  */
-function compileTemplates(set: PackSet): CompiledTemplate[] {
-  const base = createBaseEnvironment();
-  const out: CompiledTemplate[] = [];
-  const signalKey = (pack: string, ref: string, where: string) => {
-    const key = ref.includes('/') ? ref : `${pack}/${ref}`;
-    if (!set.signals.has(key)) {
-      throw new PackLintError(where, `引用的信号 ${ref} 不存在或所在的包被禁用`);
-    }
-    return key;
-  };
-  for (const p of set.packs) {
-    for (const t of p.content.signals.templates ?? []) {
-      const where = `${p.dir}/signals.yaml：templates ${t.id}`;
-      signalKey(p.name, t.signal, where);
-      if (!t.card) {
-        logger.warn('查询模板没有附带卡，无法判定，不提供给阶段 B', { pack: p.name, template: t.id });
-        continue;
-      }
-      const def = t.card as CardDefinition;
-      const signals: Record<string, string> = {};
-      for (const r of def.refs) {
-        const key = signalKey(p.name, r.signal, where);
-        const kind = set.signals.get(key)!.signal.kind;
-        if (REF_KIND[r.mode] !== kind) {
-          throw new PackLintError(where, `引用 ${r.name} 的模式 ${r.mode} 与信号 ${key} 的类型 ${kind} 不符`);
-        }
-        signals[r.name] = key;
-      }
-      const key = `${p.name}/templates/${t.id}`;
-      const entry: CardEntry = {
-        key,
-        pack: p.name,
-        chain: null,
-        def,
-        compiled: compileCard(base, def, { where }),
-        signals,
-      };
-      set.cards.set(key, entry);
-      out.push({ id: `${p.name}/${t.id}`, pack: p.name, description: t.description, args: t.args, card: key });
-    }
-  }
-  return out;
-}
+export type CompiledTemplate = PackSet['templates'][number];
 
 /**
  * 领域包运行时（DESIGN §6.3）：加载并编译全部包，提供告警目录、组件类型、Operator 约定边、根因排序参数，
@@ -250,8 +190,12 @@ export class PackRuntime {
     private readonly inputs: LoadedPack[],
     readonly failures: PackFailure[],
     private readonly capabilities: ReadonlySet<Capability>,
-    readonly templates: CompiledTemplate[],
   ) {}
+
+  /** 阶段 B 的查询模板（packs-sdk 编译，附带的卡在 set.cards 中） */
+  get templates(): readonly CompiledTemplate[] {
+    return this.set.templates;
+  }
 
   static async load(o: PackRuntimeOptions): Promise<PackRuntime> {
     const catalog = loadActionCatalog(o.catalogPath);
@@ -295,8 +239,7 @@ export class PackRuntime {
           capabilities: o.capabilities,
           ...(expectedLock ? { expectedLock } : {}),
         });
-        const templates = compileTemplates(set);
-        return new PackRuntime(set, active, failures, o.capabilities, templates);
+        return new PackRuntime(set, active, failures, o.capabilities);
       } catch (e) {
         if (e instanceof PackLockMismatch) {
           logger.error('pack.lock 与加载的领域包不一致，不加载任何包', { error: e.message });
@@ -306,7 +249,6 @@ export class PackRuntime {
             [],
             [...failures, ...active.map((p) => failureOf(p.dir, p.name, p.source, e.message))],
             o.capabilities,
-            [],
           );
         }
         if (!(e instanceof PackLintError)) {

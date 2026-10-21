@@ -18,7 +18,8 @@
    - **id**：`cardcheck:<包>/<链>/<卡>@<组件键>`。
    - **参数全部可选**，不允许其他字段：
      - `window_before`、`window_after`：相对事件首次触发时间的时长，覆盖卡片定义的窗口；只给一端时，另一端取卡片定义；终点不晚于研判时刻。
-     - 卡片 `params` 的键：类型取默认值的类型，覆盖卡片的默认参数。
+     - 卡片 `params` 的键：覆盖卡片的默认参数。卡片有 `check.args`（契约 2.17.0）时，取值范围按它约束；没有时，类型取默认值的类型。
+     - schema 与合并规则由 packs-sdk 的 `checkArgsSchema`、`applyCheckArgs` 提供，server 与评测共用。
    - **执行方**：server 的 `POST /v1/research/tasks/{run_id}/query`（`PackEvidence.runCardCheck`）与评测的 `ReconstructedQueryRunner` 走同一个执行器。按 id 里的组件执行，不按假设的根因。结果按卡片的 CEL 判定成新的证据卡。
    - **拒绝**：未知参数、不适用的组件、不在子图中的组件，返回 400；没有这张卡返回 404。worker 把拒绝转成无法判定的卡，研判照常继续。
    - **packs-sdk**：`runCard` 增加 `window` 覆盖，这是增量改动，不影响已有调用。
@@ -31,8 +32,8 @@
      4. 其余只按 kind 适用的卡。
      阶段 A 已在这个组件上执行过的卡，排在同一档的后面。同一档内各条证据链轮流取，不让一条链占满名额。
    - **上限**：每个组件最多 4 张，合计最多 20 张，控制在提示的目录片段之内（这一段不参与裁剪）。
-   - **描述**：写成"<卡标题>，在 <组件> 上；异常表示 <卡片说明>"。
-3. 领域包的显式 `templates` 保留，用于卡片表达不了的查询。
+   - **描述**：卡片有 `check.description` 时写成"<卡标题>，在 <组件> 上：<检查说明>"；没有时写成"<卡标题>，在 <组件> 上；异常表示 <卡片说明>"。
+3. 领域包的显式 `templates` 保留，用于卡片表达不了的查询。它们由 packs-sdk 的 `compilePackSet` 编译（`PackSet.templates`，附带的卡在 `set.cards` 中，键为 `<包>/templates/<id>`），server 不再自己编译。
 4. 契约不变：研判输入的 `templates` 与评测快照的 `context.templates` 本来就是 `{id, description, args}`，id 与 args 的取值不受 schema 约束。
 5. **录制回放**：`llm-replay` 增加 `{{match:<正则>}}` 占位符，取 schema 枚举中第一个匹配的值，用于运行时才确定的检查 id。
 6. **前缀**：选 `cardcheck:` 而不是 `card:`，因为证据卡的引用是 `card:N`。两者共用前缀会让录制与模型都混淆。

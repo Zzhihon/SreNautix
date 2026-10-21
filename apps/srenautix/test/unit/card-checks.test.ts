@@ -1,10 +1,12 @@
-import type { CardEntry } from '@srenautix/packs-sdk';
+import type { Incident } from '@srenautix/contract';
+import type { CardEntry, PackSet } from '@srenautix/packs-sdk';
 import { describe, expect, it } from 'vitest';
 import { validatorOf } from '../../src/llm/schema.js';
 import {
   cardApplies,
   cardCheckArgs,
   cardCheckId,
+  cardChecks,
   parseCardCheckId,
   splitCardCheckArgs,
 } from '../../src/stage-a/card-checks.js';
@@ -49,6 +51,45 @@ describe('卡片检查', () => {
       window: { before: '2h', after: '10m' },
     });
     expect(splitCardCheckArgs(entry, {})).toEqual({ params: {}, window: undefined });
+  });
+
+  it('卡片有 check 块时参数按 check.args 约束（契约 2.17.0），窗口键仍由运行时提供', () => {
+    const bounded = {
+      ...entry,
+      def: {
+        ...entry.def,
+        check: {
+          description: { 'zh-CN': '应用降级超过阈值', en: 'Application degraded beyond the threshold' },
+          args: {
+            type: 'object',
+            additionalProperties: false,
+            properties: { degraded_minutes: { type: 'number', minimum: 1, maximum: 60, description: '降级分钟数' } },
+          },
+        },
+      },
+    } as unknown as CardEntry;
+    const v = validatorOf(cardCheckArgs(bounded));
+    expect(v({ degraded_minutes: 30, window_after: '1h' })).toBe(true);
+    expect(v({ degraded_minutes: 600 })).toBe(false);
+    // check.args 没有声明的 params 键仍按默认值的类型提供
+    expect(v({ mode: 'loose' })).toBe(true);
+
+    // 检查说明优先取 check.description，没有时用标题与卡片说明
+    const rt = {
+      set: { cards: new Map([[bounded.key, bounded]]) } as unknown as PackSet,
+      typeChains: () => [],
+      componentTypes: () => [],
+    };
+    const app = 'Application.argoproj.io:argocd/shop';
+    const incident = { root: { component: app }, candidates: [], components: [app] } as unknown as Incident;
+    const node = { key: app, kind: 'Application.argoproj.io', namespace: 'argocd', name: 'shop', component_type: null };
+    expect(cardChecks(rt, incident, [node], [], 'en')[0]!.description).toBe(
+      `Sync and health on ${app}: Application degraded beyond the threshold`,
+    );
+    rt.set.cards.set(entry.key, entry);
+    expect(cardChecks(rt, incident, [node], [], 'en')[0]!.description).toBe(
+      `Sync and health on ${app}; abnormal means the card rules judged it abnormal`,
+    );
   });
 
   it('applies_to 按 sameKind 比较：Application 的卡适用于 Application.argoproj.io', () => {

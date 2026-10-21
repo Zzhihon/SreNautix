@@ -1,6 +1,6 @@
 import type { ComponentType, EvidenceResult, Incident } from '@srenautix/contract';
 import { sameKind } from '@srenautix/core';
-import type { CardEntry, PackSet } from '@srenautix/packs-sdk';
+import { applyCheckArgs, checkArgsSchema, type CardEntry, type PackSet } from '@srenautix/packs-sdk';
 import type { CheckTemplate } from '../research/types.js';
 import { parseStoredKey } from '../topology/keys.js';
 
@@ -10,8 +10,9 @@ import { parseStoredKey } from '../topology/keys.js';
  *
  * - 检查 id：`cardcheck:<包>/<链>/<卡>@<组件键>`；执行方（server 的 /query、评测的 ReconstructedQueryRunner）按 id 里的组件
  *   执行，不按假设的根因；
- * - 参数全部可选：`window_before`、`window_after`（相对事件首次触发时间的时长，例如 2h、10m）与卡片声明的可覆盖参数
- *   （卡片 params 的键，类型取默认值的类型）；
+ * - 参数全部可选：`window_before`、`window_after`（相对事件首次触发时间的时长，例如 2h、10m）与卡片 params 的键；
+ *   卡片有 `check.args`（契约 2.17.0）时按它约束取值范围，否则类型取默认值的类型。schema 与合并规则取 packs-sdk 的
+ *   checkArgsSchema、applyCheckArgs，与评测相同；说明优先取卡片的 `check.description`；
  * - 列表按相关性截断：根因与候选根因在前（按得分），其次事件的成员组件，最后其余子图节点；每个组件最多
  *   PER_COMPONENT 张，合计最多 TOTAL 张。同一组件上依次是组件自身类型的证据链、这个 kind 的通用证据链、阶段 A 在本事件里
  *   执行过的证据链、其余只按 kind 适用的卡；阶段 A 已在该组件上执行过的卡排在同档之后。
@@ -19,8 +20,6 @@ import { parseStoredKey } from '../topology/keys.js';
 export const CARD_CHECK_PREFIX = 'cardcheck:';
 export const PER_COMPONENT = 4;
 export const TOTAL = 20;
-
-const DURATION = { type: 'string', pattern: '^([0-9]+(ms|s|m|h|d|w))+$' } as const;
 
 export interface CardCheckNode {
   key: string;
@@ -53,33 +52,17 @@ export function parseCardCheckId(id: string): { card: string; component: string 
   return { card: rest.slice(0, at), component: rest.slice(at + 1) };
 }
 
-/** 卡片检查的参数 schema：全部可选，不允许其他字段 */
+/** 卡片检查的参数 schema（packs-sdk 的 checkArgsSchema）：全部可选，不允许其他字段 */
 export function cardCheckArgs(e: CardEntry): Record<string, unknown> {
-  const properties: Record<string, unknown> = {
-    window_before: { ...DURATION, description: '窗口起点：事件首次触发之前多久（默认取卡片定义）' },
-    window_after: { ...DURATION, description: '窗口终点：事件首次触发之后多久，不晚于当前时间（默认取卡片定义）' },
-  };
-  for (const [k, v] of Object.entries(e.def.params ?? {})) {
-    properties[k] = { type: typeof v === 'number' ? 'number' : typeof v === 'boolean' ? 'boolean' : 'string' };
-  }
-  return { type: 'object', additionalProperties: false, properties };
+  return checkArgsSchema(e.def);
 }
 
-/** 检查参数 → 卡片参数与窗口覆盖（没有给出的窗口端点取卡片定义） */
+/** 检查参数 → 卡片参数与窗口覆盖（packs-sdk 的 applyCheckArgs；没有给出的窗口端点取卡片定义） */
 export function splitCardCheckArgs(
   e: CardEntry,
   args: Record<string, unknown>,
 ): { params: Record<string, number | string | boolean>; window: { before: string; after: string } | undefined } {
-  const params: Record<string, number | string | boolean> = {};
-  for (const [k, v] of Object.entries(args)) {
-    if (k !== 'window_before' && k !== 'window_after' && ['number', 'string', 'boolean'].includes(typeof v)) {
-      params[k] = v as number | string | boolean;
-    }
-  }
-  const before = typeof args.window_before === 'string' ? args.window_before : undefined;
-  const after = typeof args.window_after === 'string' ? args.window_after : undefined;
-  const def = e.def.window ?? { before: '30m', after: '10m' };
-  return { params, window: before || after ? { before: before ?? def.before, after: after ?? def.after } : undefined };
+  return applyCheckArgs(e.def, args);
 }
 
 /** 卡片能否在这个 kind 的组件上执行 */
@@ -188,11 +171,16 @@ export function cardChecks(
     }
     for (const { e } of picked) {
       const title = text(e.def.title as Record<string, string>, locale) || e.key;
+      // 卡片为检查写的说明（判断什么、怎样区分假设）优先；没有时用标题与卡片说明
+      const check = text(e.def.check?.description as Record<string, string> | undefined, locale);
       const note = text(e.def.note as Record<string, string> | undefined, locale);
       out.push({
         id: cardCheckId(e.key, component),
-        description:
-          locale === 'zh-CN'
+        description: check
+          ? locale === 'zh-CN'
+            ? `${title}，在 ${component} 上：${check}`
+            : `${title} on ${component}: ${check}`
+          : locale === 'zh-CN'
             ? `${title}，在 ${component} 上；异常表示${note ? `：${note}` : '卡片按规则判定为异常'}`
             : `${title} on ${component}; abnormal means ${note || 'the card rules judged it abnormal'}`,
         args: cardCheckArgs(e),
