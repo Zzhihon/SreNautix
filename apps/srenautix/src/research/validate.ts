@@ -19,6 +19,8 @@ const MAX_PER_KIND = 3;
 
 export interface Validated {
   chosen: LedgerEntry | null;
+  /** 结论假设的来源：模型选中；模型弃权时由代码按账本选中（ADR 0120，档位最高 likely） */
+  chosenBy: 'model' | 'ledger' | null;
   disposition: Disposition;
   undeterminedReason: string | null;
   situation: string;
@@ -50,6 +52,19 @@ function nsName(key: string): string {
   return key.slice(key.indexOf(':') + 1);
 }
 
+/**
+ * 模型弃权时代码按账本选中的假设（ADR 0120）：账本中恰好一个假设处于支持状态（没有打平），
+ * 并且它有范围内的异常卡（人工反馈固定为支持、没有卡的假设不算）。其余情况不代选。
+ */
+export function ledgerPick(ledger: Ledger): LedgerEntry | null {
+  const supported = ledger.list().filter((e) => e.status === 'supported');
+  if (supported.length !== 1) {
+    return null;
+  }
+  const only = supported[0] as LedgerEntry;
+  return ledger.supportCards(only).length > 0 ? only : null;
+}
+
 export function validateConclusion(
   raw: ConcludeOutput,
   c: ResearchCase,
@@ -78,6 +93,20 @@ export function validateConclusion(
       undeterminedReason = `所选假设 ${e.id}（${e.rootComponent}）已被推翻`;
     } else {
       chosen = e;
+    }
+  }
+  let chosenBy: Validated['chosenBy'] = chosen ? 'model' : null;
+  if (raw.hypothesis_id === null) {
+    const pick = ledgerPick(ledger);
+    if (pick) {
+      chosen = pick;
+      chosenBy = 'ledger';
+      notes.push(
+        `模型弃权，代码按账本选中 ${pick.id}（${displayKey(pick.rootComponent)}）：它是账本中唯一处于支持状态的假设，支持卡 ${ledger
+          .supportCards(pick)
+          .map((x) => x.ref)
+          .join('、')}；模型给出的弃权原因：${raw.undetermined_reason ?? '没有给出'}`,
+      );
     }
   }
   if (!chosen && !undeterminedReason) {
@@ -189,6 +218,7 @@ export function validateConclusion(
 
   return {
     chosen,
+    chosenBy,
     disposition,
     undeterminedReason,
     situation: raw.situation,

@@ -382,7 +382,7 @@ export async function runStageB(input: ResearchRunInput, env: ResearchEnv, sink:
   notes.push(...concluded.notes);
   const v = validateConclusion(concluded.value, rc, book, ledger);
   notes.push(...v.notes);
-  const ladder = judgeLadder(ledger, v.chosen, rc.incident, ledger.list().length > 0);
+  const ladder = judgeLadder(ledger, v.chosen, rc.incident, ledger.list().length > 0, v.chosenBy);
   notes.push(...ladder.notes);
   const leader = ledger.ranked(candidateScore)[0];
   const untested = v.chosen ? !ledger.competitorTested(v.chosen) : false;

@@ -7,6 +7,7 @@ import type { Ledger, LedgerEntry } from './ledger.js';
 // 3. 该机制所需的信号上没有相反的正常卡；
 // 4. 至少检验过一个竞争假设。
 // 只读工具结果由小模型判定的卡可以支持 likely，不能单独支撑 evidence_consistent。
+// 模型在 conclude 弃权、由代码按账本选中的假设（ADR 0120）最高为 likely。
 
 export const ONSET_TOLERANCE_MS = 2 * 60_000;
 
@@ -41,6 +42,7 @@ export function judgeLadder(
   chosen: LedgerEntry | null,
   incident: Incident,
   hasHypotheses: boolean,
+  chosenBy: 'model' | 'ledger' | null = 'model',
 ): LadderResult {
   if (!chosen) {
     return { level: hasHypotheses ? 'inconclusive' : 'undetermined', consistency: NONE, notes: [] };
@@ -82,5 +84,10 @@ export function judgeLadder(
     notes.push(`假设 ${chosen.id} 没有检验过任何竞争假设`);
   }
   const all = Object.values(consistency).every(Boolean);
+  // 模型弃权、由代码按账本选中的结论最高为 likely（ADR 0120）
+  if (all && chosenBy === 'ledger') {
+    notes.push(`假设 ${chosen.id} 满足 evidence_consistent 的四个条件，但模型弃权、由代码按账本选中，档位为 likely`);
+    return { level: 'likely', consistency, notes };
+  }
   return { level: all ? 'evidence_consistent' : 'likely', consistency, notes };
 }

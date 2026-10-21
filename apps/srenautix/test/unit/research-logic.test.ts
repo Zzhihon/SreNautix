@@ -315,6 +315,74 @@ describe('代码校验', () => {
   });
 });
 
+describe('模型弃权时按账本选中（ADR 0120）', () => {
+  it('唯一处于支持状态且有范围内异常卡的假设由代码选中，四个条件都满足时档位也只到 likely', () => {
+    const { book, ledger, rc } = setup();
+    ledger.merge([hyp('h1', PG, ['card:2']), hyp('h2', WEB, [])], []);
+    book.addCheckCard(checkCard(WEB, 'normal', null), 'h2', 'rule');
+    ledger.noteCheckRun('h2');
+    ledger.evaluate();
+    const v = validateConclusion(
+      conclude({ hypothesis_id: null, undetermined_reason: '竞争假设没有检验', disposition: 'escalate' }),
+      rc,
+      book,
+      ledger,
+    );
+    expect(v.chosen?.id).toBe('h1');
+    expect(v.chosenBy).toBe('ledger');
+    expect(v.undeterminedReason).toBeNull();
+    const note = v.notes.find((n) => n.startsWith('模型弃权，代码按账本选中 h1'));
+    expect(note).toContain('竞争假设没有检验');
+    const byModel = judgeLadder(ledger, v.chosen, rc.incident, true, 'model');
+    expect(byModel.level).toBe('evidence_consistent');
+    const r = judgeLadder(ledger, v.chosen, rc.incident, true, v.chosenBy);
+    expect(r.level).toBe('likely');
+    expect(r.consistency).toEqual(byModel.consistency);
+    expect(r.notes.at(-1)).toMatch(/模型弃权、由代码按账本选中/);
+  });
+
+  it('两个假设同时处于支持状态时不代选', () => {
+    const { book, ledger, rc } = setup();
+    ledger.merge([hyp('h1', PG, ['card:2']), hyp('h2', API, [])], []);
+    ledger.evaluate();
+    expect(ledger.list().filter((e) => e.status === 'supported')).toHaveLength(2);
+    const v = validateConclusion(conclude({ hypothesis_id: null, undetermined_reason: 'x' }), rc, book, ledger);
+    expect(v.chosen).toBeNull();
+    expect(v.chosenBy).toBeNull();
+    expect(v.undeterminedReason).toBe('x');
+    expect(judgeLadder(ledger, v.chosen, rc.incident, true, v.chosenBy).level).toBe('inconclusive');
+  });
+
+  it('只由人工反馈固定为支持、没有异常卡的假设不代选；模型选了被推翻的假设时也不代选', () => {
+    const { book, ledger, rc } = setup();
+    ledger.merge([hyp('h1', WEB, [])], []);
+    ledger.applyFeedback([feedback({ verdict: 'rejected', root_component: 'Node:node-a' })], WEB, []);
+    ledger.evaluate();
+    const pinned = ledger.list().find((e) => e.pinned === 'human_confirmed');
+    expect(pinned?.status).toBe('supported');
+    expect(ledger.supportCards(pinned as never)).toHaveLength(0);
+    const abstained = validateConclusion(conclude({ hypothesis_id: null, undetermined_reason: 'x' }), rc, book, ledger);
+    expect(abstained.chosen).toBeNull();
+    const s = setup();
+    s.ledger.merge([hyp('h1', PG, ['card:2']), hyp('h2', WEB, [])], []);
+    s.ledger.evaluate();
+    const r = validateConclusion(conclude({ hypothesis_id: 'h2', disposition: 'escalate' }), s.rc, s.book, s.ledger);
+    expect(r.chosen).toBeNull();
+    expect(r.chosenBy).toBeNull();
+  });
+
+  it('模型自己选中的假设照常按四个条件判定', () => {
+    const { book, ledger, rc } = setup();
+    ledger.merge([hyp('h1', PG, ['card:2']), hyp('h2', WEB, [])], []);
+    book.addCheckCard(checkCard(WEB, 'normal', null), 'h2', 'rule');
+    ledger.noteCheckRun('h2');
+    ledger.evaluate();
+    const v = validateConclusion(conclude({ hypothesis_id: 'h1', disposition: 'escalate' }), rc, book, ledger);
+    expect(v.chosenBy).toBe('model');
+    expect(judgeLadder(ledger, v.chosen, rc.incident, true, v.chosenBy).level).toBe('evidence_consistent');
+  });
+});
+
 describe('指纹门控', () => {
   it('证据指纹不变且没有新的反馈：不调用模型，追加"仍然一致"', async () => {
     const egress = new Egress({ allowCrossBorder: false, honeytokens: [] }, () => undefined);
