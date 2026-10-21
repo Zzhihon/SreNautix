@@ -9,9 +9,10 @@ VERIFY_TIMEOUT=600
 SRENAUTIX_ROOT='^(Pod:shop/api-.+|Deployment:shop/api)$'
 SRENAUTIX_MAX_INCIDENTS=1
 SRENAUTIX_CONCLUSIONS='likely evidence_consistent'
-# 告警规则调优的补丁模板（gitops 包的 chronic-alert-relax）要求 7 天的长期告警历史，Kind 中没有；
-# 模板支持一次性的过敏告警之后在这里检查 PR：SRENAUTIX_REMEDIATION=alert_rule，改动 platform/observability/rules/shop.yaml
-SRENAUTIX_REMEDIATION=
+# gitops 包的 noisy-alert-relax：研判结论为不需要处理（录制的 disposition ignore）且告警为 critical 时，
+# 把这条规则改为 warning、持续时间至少 1h（不需要 7 天的长期告警历史）
+SRENAUTIX_REMEDIATION=alert_rule
+SRENAUTIX_PR_FILES='^platform/observability/rules/shop\.yaml$'
 
 inject() {
   local pod

@@ -63,10 +63,10 @@ Grafana：`kubectl --context kind-srenautix -n monitoring port-forward svc/kps-g
 | `release-stuck-init` | 人工提交发布 r2，迁移失败，新 Pod 停在 `wait-for-migrations` | ShopMigrationFailed、ShopRolloutIncomplete | 发布 r2（Argo 应用 shop、迁移 Job、api、checkout） | 发布回退：`apps/shop/release.json` |
 | `release-bad-image` | 人工提交发布 r3，镜像没有 HTTP 服务 | KubePodCrashLooping、ShopRolloutIncomplete | 发布 r3（Argo 应用 shop、api） | 发布回退：`apps/shop/release.json` |
 | `config-resource-oom` | 人工提交把 checkout 的内存缓存调到超过内存上限 | KubePodCrashLooping、ShopRolloutIncomplete | `Deployment:shop/checkout` | 配置与资源：`apps/shop/workloads.yaml` |
-| `alert-too-sensitive` | api 的一个容器正常退出一次 | ShopPodRestarted（for 0m、critical） | `Deployment:shop/api`，处置为忽略 | 告警规则调优：`platform/observability/rules/shop.yaml`（尚不检查，见下） |
-| `unmapped-alert` | 人工新增只带 `service` 标签的告警 ShopCatalogStale | ShopCatalogStale | `Deployment:shop/api` | 拓扑与领域包覆盖：`srenautix/`（尚不检查，见下） |
+| `alert-too-sensitive` | api 的一个容器正常退出一次 | ShopPodRestarted（for 0m、critical） | `Deployment:shop/api`，处置为忽略 | 告警规则调优（`noisy-alert-relax`）：`platform/observability/rules/shop.yaml` |
+| `unmapped-alert` | 人工新增只带 `service` 标签的告警 ShopCatalogStale | ShopCatalogStale | 接入时为逻辑组件 `component:catalog`；研判指向 `Deployment:shop/api` | 拓扑与领域包覆盖（`alert-catalog-entry`）：`srenautix/packs/kind-shop/` |
 
-后五个场景在 `SRENAUTIX_CHECKS=1` 时依次检查（`deploy/kind/srenautix-checks.sh`）。`alert-too-sensitive` 只检查发现与分析：告警规则调优的补丁模板要求 7 天的长期告警历史，Kind 中没有。`unmapped-alert` 只检查告警：只带 `service` 标签的告警目前没有根因，也没有模型录制。两者的期望值写在各自 `scenario.sh` 的注释中，相应的能力落地后打开：
+后五个场景在 `SRENAUTIX_CHECKS=1` 时依次检查（`deploy/kind/srenautix-checks.sh`）：
 
 1. **发现**：注入之后与场景相关的事件不超过 `SRENAUTIX_MAX_INCIDENTS`（背景噪声的命名空间不计），其中有一个事件的根因匹配 `SRENAUTIX_ROOT`；
 2. **分析**：该事件有证据卡，阶段 B 研判完成且结论为 `likely` 或 `evidence_consistent`（模型响应来自 `deploy/kind/scenarios/<场景>/llm/` 的录制）；

@@ -5,11 +5,13 @@
 # shellcheck disable=SC2034
 EXPECTED_ALERTS=(ShopCatalogStale)
 VERIFY_TIMEOUT=600
-# 只带 service 标签的告警目前没有根因（事件记录 no_root），也没有模型录制；SreNautix 能从 service 标签推断组件、
-# 领域包的 alert-catalog-entry 模板识别 service 标签之后，在这里检查三个环节：
-#   SRENAUTIX_ROOT='^(Deployment:shop/api|Service:shop/api)$' SRENAUTIX_MAX_INCIDENTS=1
-#   SRENAUTIX_REMEDIATION=topology_coverage SRENAUTIX_PR_FILES='^srenautix/(topology-overrides|packs/kind-shop)/'
-SRENAUTIX_ROOT=
+# 发现：只带 service 标签的告警归入逻辑组件 component:<service>（ADR 0104 §6），事件的根因是 component:catalog；
+# eval/scenarios/unmapped-alert.yaml 的 root_components（api）是研判应当指出的真实来源，不是接入时的组件。
+# 自愈：gitops 包的 alert-catalog-entry 为没有命中目录条目的告警在 kind-shop 包的告警目录中按 service 标签加条目
+SRENAUTIX_ROOT='^component:catalog$'
+SRENAUTIX_MAX_INCIDENTS=1
+SRENAUTIX_REMEDIATION=topology_coverage
+SRENAUTIX_PR_FILES='^srenautix/(topology-overrides|packs/kind-shop)/'
 
 rules=platform/observability/rules/shop.yaml
 
