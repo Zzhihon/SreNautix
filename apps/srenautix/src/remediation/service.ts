@@ -139,21 +139,38 @@ export class RemediationService {
     if (!row || row.state === 'merged' || row.suppressed) {
       return skipAll('incident_closed', '事件已合并、被抑制或不存在');
     }
+    // 事件在研判之后有了新版本：只有新版本触发了研判（根因、严重度或证据指纹变化，含被准入跳过的触发）时，这次研判的结论
+    // 才算过时；只是加入了成员、其余不变的新版本不会再研判，结论仍然适用（ADR 0108 §10）
     if (row.version !== run.incident_version) {
-      return skipAll('incident_changed', `事件已更新到版本 ${row.version}，研判针对版本 ${run.incident_version}`);
+      const newer = await this.pool.query<{ v: number }>(
+        `SELECT max(incident_version)::int AS v FROM server.research_queue WHERE incident_id = $1 AND incident_version > $2`,
+        [run.incident_id, run.incident_version],
+      );
+      const v = newer.rows[0]?.v;
+      if (v !== null && v !== undefined) {
+        return skipAll(
+          'incident_changed',
+          `事件已更新到版本 ${row.version}，版本 ${v} 重新触发了研判；这次研判针对版本 ${run.incident_version}`,
+        );
+      }
     }
     const inc = row.body;
     if (!inc.root.component) {
       return skipAll('no_root', '事件没有根因组件，提议无法绑定');
     }
-    const fp =
-      run.evidence_fingerprint ??
+    // 提议绑定事件的当前版本：版本没变时用研判自己的指纹；版本变了（指纹没有触发研判）时用当前版本阶段 A 的指纹
+    const moved = row.version !== run.incident_version;
+    const currentFp = async () =>
       (
         await this.pool.query<{ fp: string }>(
           'SELECT evidence_fingerprint AS fp FROM server.stage_a_reports WHERE incident_id = $1 AND incident_version = $2',
           [inc.incident_id, inc.incident_version],
         )
       ).rows[0]?.fp;
+    const fp = moved ? await currentFp() : (run.evidence_fingerprint ?? (await currentFp()));
+    if (!fp && moved) {
+      throw new Deferred(`事件版本 ${row.version} 的阶段 A 报告还没有生成`);
+    }
     if (!fp) {
       return skipAll('no_fingerprint', '没有当前版本的证据指纹');
     }
@@ -363,6 +380,7 @@ export class RemediationService {
   }
 
   private async record(run: RunRow, attempts: Attempt[]): Promise<void> {
+    const recorded: Attempt[] = [];
     await tx(this.pool, async (c) => {
       for (const a of attempts) {
         const ins = await c.query(
@@ -388,6 +406,7 @@ export class RemediationService {
         if (!ins.rowCount) {
           continue;
         }
+        recorded.push(a);
         this.d.metrics.remediations.inc({ category: a.category ?? 'none', outcome: a.outcome });
         await appendAudit(c, 'remediation.attempt', 'server', {
           run_id: run.run_id,
@@ -401,5 +420,19 @@ export class RemediationService {
         });
       }
     });
+    // 每次研判的处理结果写进日志：跳过与失败的原因只在状态库里时，Kind 与影子环境的诊断看不到自愈 PR 为什么没有出现
+    for (const a of recorded) {
+      logger.info('自愈 PR 处理结果', {
+        run_id: run.run_id,
+        incident_id: run.incident_id,
+        incident_version: run.incident_version,
+        key: a.key,
+        outcome: a.outcome,
+        code: a.code,
+        reason: a.reason,
+        proposal_id: a.proposalId ?? null,
+        branch: a.branch ?? null,
+      });
+    }
   }
 }

@@ -6,7 +6,7 @@
 
 ## 决定
 
-1. **触发**：主实例每 30 秒取最近 6 小时内结束的研判，条件是 `state=completed`、结论等级在 `remediation.conclusions` 中（默认 likely、evidence_consistent）、还没有处理过。事件已合并、被抑制、版本已经变化或没有根因时，只记录原因，不处理。
+1. **触发**：主实例每 30 秒取最近 6 小时内结束的研判，条件是 `state=completed`、结论等级在 `remediation.conclusions` 中（默认 likely、evidence_consistent）、还没有处理过。事件已合并、被抑制、版本变化后重新触发了研判（第 10 条）或没有根因时，只记录原因，不处理。
 2. **上下文**：`RemediationContext` 由以下几部分组成：
    - 事件；
    - 根因：研判结论的根因组件，没有时取事件根因。组件类型取拓扑节点，没有时按名称匹配；
@@ -53,7 +53,9 @@
 9. **记录**：
    - `server.remediation_attempts` 按（研判, 模板）一行，结果为 proposed、skipped、rejected 或 failed，带原因码；
    - 治理审计记 `remediation.attempt`；
-   - 指标为 `srenautix_remediations_total{category,outcome}` 与 `srenautix_gitops_pulls_total{via}`。
+   - 指标为 `srenautix_remediations_total{category,outcome}` 与 `srenautix_gitops_pulls_total{via}`；
+   - 每一行同时写进 info 日志（`自愈 PR 处理结果`，带原因码与原因），Kind 与影子环境的诊断日志里能看到自愈 PR 为什么没有出现。
+10. **研判之后事件有了新版本**：新版本只加入了成员，根因、严重度与证据指纹都没变时不会重新研判（DESIGN §2.4 的触发原因），这次研判的结论仍然适用。之前一律记为 incident_changed，这样的事件就再也不会有自愈 PR。Kind 的 alert-too-sensitive 场景（kind-e2e 39542017862）与这条路径相符：研判 04:16:24 结束，04:16:44 对账补进一条告警，之后 10 分钟没有 PR，gitlocal 也没有收到任何写入。现在只有 `research_queue` 里有更高版本的研判触发（含被准入跳过的，例如超过次数上限）时才跳过；否则绑定事件的当前版本，指纹取当前版本阶段 A 报告的指纹，报告还没生成时推迟到下一轮。
 
 ## 结果
 

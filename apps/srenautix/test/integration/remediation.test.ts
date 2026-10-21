@@ -428,6 +428,49 @@ describe('自愈 PR', () => {
     expect(p.rows[0]!.params.title).toMatch(/^\[影子\] 降低误报告警的严重度/);
   });
 
+  it('研判之后事件只加入了成员（新版本没有触发研判）时结论仍然适用；新版本触发过研判时跳过（ADR 0108 §10）', async () => {
+    const bump = async (incidentId: string) =>
+      (
+        await db.server.query<{ version: number }>(
+          `UPDATE server.incidents SET version = version + 1, body = jsonb_set(body, '{incident_version}', to_jsonb(version + 1))
+            WHERE incident_id = $1 RETURNING version`,
+          [incidentId],
+        )
+      ).rows[0]!.version;
+    // 新版本的阶段 A 报告：证据指纹不变（指纹变化会触发研判）
+    const report = (incidentId: string, v: number) =>
+      db.server.query(
+        `INSERT INTO server.stage_a_reports (report_id, incident_id, incident_version, disposition, evidence_fingerprint, degraded, body,
+           first_firing_at, rendered_at)
+         SELECT $3, incident_id, $2, disposition, evidence_fingerprint, degraded, jsonb_set(body, '{incident_version}', to_jsonb($2::int)),
+                first_firing_at, now()
+           FROM server.stage_a_reports WHERE incident_id = $1 AND incident_version = $2 - 1`,
+        [incidentId, v, randomUUID()],
+      );
+    const joined = await seed('likely', { severity: 'critical', disposition: 'ignore' });
+    const jv = await bump(joined.inc.incident_id);
+    // 新版本的阶段 A 报告还没有生成：推迟到下一轮，不记结果
+    expect(await service.runOnce()).toBe(0);
+    expect(await attempts(joined.runId)).toEqual([]);
+    await report(joined.inc.incident_id, jv);
+    expect(await service.runOnce()).toBe(1);
+    expect((await attempts(joined.runId)).find((a) => a.key === 'gitops/noisy-alert-relax')).toMatchObject({
+      outcome: 'proposed',
+    });
+
+    const retriggered = await seed('likely', { severity: 'critical', disposition: 'ignore' });
+    const v = await bump(retriggered.inc.incident_id);
+    await db.server.query(
+      `INSERT INTO server.research_queue (run_id, incident_id, incident_version, reason, severity, is_new, state, skip_reason, finished_at)
+       VALUES ($1, $2, $3, 'fingerprint_changed', 'critical', false, 'skipped', 'capped', now())`,
+      [randomUUID(), retriggered.inc.incident_id, v],
+    );
+    expect(await service.runOnce()).toBe(0);
+    expect(await attempts(retriggered.runId)).toEqual([
+      { key: '-', outcome: 'skipped', code: 'incident_changed', proposal_id: null, branch: null },
+    ]);
+  });
+
   it('gateway 开出 PR 后：从执行事件取得 PR，关联到事件 issue；消息里没有时按分支查 GitHub', async () => {
     const execId = 'a'.repeat(32);
     await db.server.query("UPDATE server.proposals SET state = 'dispatched' WHERE proposal_id = $1", [
