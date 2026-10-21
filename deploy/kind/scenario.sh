@@ -67,6 +67,9 @@ case "$cmd" in
       run)
         checks=false
         [[ "${SRENAUTIX_CHECKS:-}" == 1 && -n "${SRENAUTIX_ROOT:-}" ]] && checks=true
+        if [[ "${SRENAUTIX_CHECKS:-}" == 1 ]]; then
+          wait_alert_delivery_healthy
+        fi
         $checks && use_llm_recording "$name"
         since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
         log "注入 $name"

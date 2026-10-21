@@ -73,6 +73,6 @@ Grafana：`kubectl --context kind-srenautix -n monitoring port-forward svc/kps-g
 3. **自愈 PR**：`kind/gitops` 上出现该事件的 `srenautix/*` 分支 PR，描述含结论、证据、改动、验证计划、回滚五节与 `Refs #<issue>`，issue 带 `srenautix` 标签并有回链 PR 的评论，改动的文件匹配 `SRENAUTIX_PR_FILES`；
 4. **补偿控制**：注入之后 App 机器人只改动过 `srenautix/*` 分支，main 只有人工提交，没有经 REST 的合并请求。
 
-场景恢复由人工身份提交回退（例如把 `release.json` 改回 r1），SreNautix 的 PR 保持未合并。`SRENAUTIX_CHECKS=1` 时每个场景恢复之后等它注入的故障告警（`EXPECTED_ALERTS`）在 Prometheus 中消失、在 SreNautix 中 resolved，再开始下一个场景，避免上一个场景仍在 firing 的事件吸收下一个场景的告警；持续的背景告警不阻塞。没有故障时 shop 不应产生告警（例如 CPU limit 不低于单个请求的单线程消耗，避免 CPUThrottlingHigh）。
+场景恢复由人工身份提交回退（例如把 `release.json` 改回 r1），SreNautix 的 PR 保持未合并。`SRENAUTIX_CHECKS=1` 时每个场景注入之前等告警投递链路正常（Alertmanager 5 分钟内没有通知失败，没有 `Alertmanager*FailedToSendAlerts`）；每个场景恢复之后等它注入的故障告警（`EXPECTED_ALERTS`）在 Prometheus 中消失、在 SreNautix 中 resolved，再开始下一个场景，避免上一个场景仍在 firing 的事件吸收下一个场景的告警；持续的背景告警不阻塞。没有故障时 shop 不应产生告警（例如 CPU limit 不低于单个请求的单线程消耗，避免 CPUThrottlingHigh）。
 
 完整的标准答案（根因集合、粒度、机制、处置判断、干扰项）在 `eval/scenarios/<场景>.yaml`，格式见 `eval/scenarios/README.zh-CN.md`。新增场景时在 `deploy/kind/scenarios/<场景>/scenario.sh` 中定义 `EXPECTED_ALERTS`、`VERIFY_TIMEOUT` 与 `inject`、`recover` 两个函数（需要检查 SreNautix 时另外声明 `SRENAUTIX_*`），并添加对应的标准答案文件。

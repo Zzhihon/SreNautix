@@ -48,6 +48,21 @@ describe_incidents() {
   done | jq -sc .
 }
 
+# 注入前提：告警投递链路正常。Alertmanager 5 分钟内没有通知失败，也没有 Alertmanager*FailedToSendAlerts 告警
+# （安装期间 SreNautix server 就绪之前的 webhook 失败会让这两条告警在随后约 5 分钟内触发，并成为第一个场景之外的事件）。
+# SRENAUTIX_QUIET_TIMEOUT 秒（默认 900）
+wait_alert_delivery_healthy() {
+  local timeout=${SRENAUTIX_QUIET_TIMEOUT:-900} deadline failed alerts
+  deadline=$((SECONDS + timeout))
+  while true; do
+    failed=$(prom_query 'sum(increase(alertmanager_notifications_failed_total[5m]))' | jq -r '.data.result[0].value[1] // "0"')
+    alerts=$(prom_query 'ALERTS{alertname=~"Alertmanager(Cluster)?FailedToSendAlerts"}' | jq -c '[.data.result[].metric | {alertname, alertstate, integration}] | unique')
+    [[ "$alerts" == "[]" ]] && awk -v f="$failed" 'BEGIN { exit !(f + 0 == 0) }' && break
+    ((SECONDS < deadline)) || die "告警投递：${timeout}s 内 Alertmanager 仍有通知失败（5 分钟内 ${failed} 次）或告警 ${alerts}"
+    sleep 15
+  done
+}
+
 # 场景隔离：恢复之后等到场景注入的故障告警（EXPECTED_ALERTS）都已结束，下一个场景才注入：Prometheus 中不再有
 # pending 或 firing，SreNautix 中注入之后开始的同名成员告警都已 resolved。只看注入的故障告警，持续的背景告警不阻塞。
 # 参数：注入时间、告警名...；SRENAUTIX_QUIET_TIMEOUT 秒（默认 900）
