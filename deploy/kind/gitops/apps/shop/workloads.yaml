@@ -218,9 +218,12 @@ spec:
           readinessProbe:
             httpGet: {path: /healthz, port: http}
             periodSeconds: 5
+          # 每个 /catalog 请求在一个 nginx worker 中单线程压缩约 5 MB：limit 不低于一个核，单个请求不会被 CFS 节流
+          # （500m 时稳态 1 次/秒的背景流量就让约 30% 的周期被节流，CPUThrottlingHigh 持续触发）。
+          # HPA 按 request 计算利用率，limit 不影响 hpa-at-max 场景
           resources:
             requests: {cpu: 100m, memory: 32Mi}
-            limits: {cpu: 500m, memory: 128Mi}
+            limits: {cpu: 1000m, memory: 128Mi}
           volumeMounts:
             - {name: data, mountPath: /data}
             - {name: nginx, mountPath: /etc/nginx/conf.d}
@@ -243,9 +246,11 @@ spec:
               command: [sh, -c, 'pg_isready -h "$DB_HOST" -p 5432 -t 2']
             periodSeconds: 5
             timeoutSeconds: 4
+          # 存活与就绪探针每 5 秒各在容器内启动一次 sh 与 pg_isready，启动开销超过 100m 的单周期配额，
+          # 空闲容器的大部分周期都被节流；500m 容得下两次探针的启动
           resources:
             requests: {cpu: 10m, memory: 16Mi}
-            limits: {cpu: 100m, memory: 64Mi}
+            limits: {cpu: 500m, memory: 64Mi}
       volumes:
         - {name: data, emptyDir: {}}
         - {name: nginx, configMap: {name: api-nginx}}

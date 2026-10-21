@@ -85,10 +85,10 @@ case "$cmd" in
         log "恢复 $name"
         recover
         record "$name" recovered_at
-        # 检查 SreNautix 时每个场景都等自己的事件结束（不论是否声明了 SRENAUTIX_ROOT），下一个场景从没有 firing 事件的状态开始
+        # 检查 SreNautix 时每个场景都等自己注入的故障告警结束（不论是否声明了 SRENAUTIX_ROOT），再开始下一个场景
         if [[ "${SRENAUTIX_CHECKS:-}" == 1 ]]; then
-          wait_incidents_quiet "$since"
-          record "$name" incidents_quiet_at
+          wait_fault_alerts_resolved "$since" "${EXPECTED_ALERTS[@]}"
+          record "$name" fault_alerts_resolved_at
         fi
         ;;
     esac

@@ -48,18 +48,26 @@ describe_incidents() {
   done | jq -sc .
 }
 
-# 场景隔离：恢复之后等到注入以来有变化的事件都不再是 firing，下一个场景才注入。否则上一个场景仍在 firing 的事件
-# 会按时间与拓扑吸收下一个场景的告警，下一个场景就不会出现自己的根因事件。参数：注入时间；SRENAUTIX_QUIET_TIMEOUT 秒（默认 900）
-wait_incidents_quiet() {
-  local since=$1 timeout=${SRENAUTIX_QUIET_TIMEOUT:-900} deadline firing
+# 场景隔离：恢复之后等到场景注入的故障告警（EXPECTED_ALERTS）都已结束，下一个场景才注入：Prometheus 中不再有
+# pending 或 firing，SreNautix 中注入之后开始的同名成员告警都已 resolved。只看注入的故障告警，持续的背景告警不阻塞。
+# 参数：注入时间、告警名...；SRENAUTIX_QUIET_TIMEOUT 秒（默认 900）
+wait_fault_alerts_resolved() {
+  local since=$1 timeout=${SRENAUTIX_QUIET_TIMEOUT:-900} deadline names prom open id
+  shift
+  names=$(printf '%s\n' "$@" | jq -R . | jq -sc .)
   deadline=$((SECONDS + timeout))
   while true; do
-    firing=$(scenario_incidents "$since" | jq -c '[.[] | select(.state == "firing")]')
-    [[ "$firing" == "[]" ]] && break
-    ((SECONDS < deadline)) || die "隔离：恢复之后 ${timeout}s 内仍有 firing 的事件：$(describe_incidents "$firing")"
+    prom=$(prom_query "ALERTS{alertname=~\"$(IFS='|'; echo "$*")\"}" | jq -c '[.data.result[].metric | {alertname, alertstate}] | unique')
+    open=$(for id in $(scenario_incidents "$since" | jq -r '.[].incident_id'); do
+      srenautix_api "/v1/incidents/$id" | jq -c --argjson names "$names" --arg since "$since" '.members[]
+        | select((.alertname | IN($names[])) and .status == "firing" and .starts_at >= $since)
+        | {alert_id, alertname, component, starts_at}'
+    done | jq -sc .)
+    [[ "$prom" == "[]" && "$open" == "[]" ]] && break
+    ((SECONDS < deadline)) || die "隔离：恢复之后 ${timeout}s 内注入的故障告警仍未结束：Prometheus ${prom}；SreNautix ${open}"
     sleep 15
   done
-  log "隔离：注入以来的事件都已结束"
+  log "隔离：注入的故障告警（$*）都已结束"
 }
 
 # 发现：事件收敛到不超过上限，其中有一个事件的根因匹配 SRENAUTIX_ROOT；输出该事件的 id
