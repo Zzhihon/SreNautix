@@ -10,7 +10,8 @@ import { parseStoredKey } from '../topology/keys.js';
  *
  * - 检查 id：`cardcheck:<包>/<链>/<卡>@<组件键>`；执行方（server 的 /query、评测的 ReconstructedQueryRunner）按 id 里的组件
  *   执行，不按假设的根因；
- * - 参数全部可选：`window_before`、`window_after`（相对事件首次触发时间的时长，例如 2h、10m）与卡片 params 的键；
+ * - 参数全部可选：`window_before`、`window_after`（相对检查锚点的时长，例如 2h、10m；锚点与阶段 A 相同，ADR 0131）与卡片
+ *   params 的键；
  *   卡片有 `check.args`（契约 2.17.0）时按它约束取值范围，否则类型取默认值的类型。schema 与合并规则取 packs-sdk 的
  *   checkArgsSchema、applyCheckArgs，与评测相同；说明优先取卡片的 `check.description`；
  * - 列表按相关性截断：根因与候选根因在前（按得分），其次事件的成员组件，最后其余子图节点；每个组件最多

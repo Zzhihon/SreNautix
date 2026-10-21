@@ -1,5 +1,6 @@
 import { resolve } from 'node:path';
 import { startPrometheus, type TsdbInstance } from '@srenautix/integration-sdk';
+import { DEFAULT_WINDOW, durationSeconds } from '@srenautix/packs-sdk';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { readBundle } from '../../src/eval/bundle.js';
 import { loadLabels } from '../../src/eval/labels.js';
@@ -15,8 +16,8 @@ import { ServerMetrics } from '../../src/metrics.js';
 import { Catalog, DEFAULT_CATALOG_PATH } from '../../src/proposals/catalog.js';
 import { runStageB } from '../../src/research/controller.js';
 import type { ResearchCase } from '../../src/research/types.js';
-import { parseCardCheckId, PER_COMPONENT, TOTAL } from '../../src/stage-a/card-checks.js';
-import { PackEvidence, PackRules } from '../../src/stage-a/pack-evidence.js';
+import { cardCheckId, parseCardCheckId, PER_COMPONENT, TOTAL } from '../../src/stage-a/card-checks.js';
+import { memberLatest, PackEvidence, PackRules } from '../../src/stage-a/pack-evidence.js';
 import { EvidenceSource, PackRuntime } from '../../src/stage-a/packs.js';
 import { parseStoredKey } from '../../src/topology/keys.js';
 import { MemorySink, testEnv, testLayer, testRoute } from '../support/research-env.js';
@@ -113,8 +114,47 @@ async function caseOf(id: string) {
     tools: [],
     asOf: s.as_of,
   };
-  return { research, runner: new ReconstructedQueryRunner(evidence, rc.incident, rep.topology, asOf) };
+  return {
+    research,
+    alerts: s.context.alerts,
+    runner: new ReconstructedQueryRunner(evidence, rc.incident, rep.topology, asOf, s.context.alerts),
+  };
 }
+
+describe('release-rollback-acme：发布之后又回退', () => {
+  it('检查的锚点与阶段 A 相同：回退阶段才升级的成员告警重新锚定，检查窗口与阶段 A 的卡相同，覆盖回退之后的症状（ADR 0131）', async () => {
+    const { research, runner } = await caseOf('release-rollback-acme');
+    const worker = 'Deployment:acme-prod/worker';
+    const first = Date.parse(research.incident.first_firing_at);
+    // worker 上最晚开始的在场成员告警：回退（16:24:25）之后才出现
+    const onWorker = research.incident.members.filter((m) => m.left_version === null && m.component === worker);
+    const latest = Math.max(...onWorker.map((m) => Date.parse(m.starts_at)));
+    expect(latest).toBeGreaterThan(Date.parse('2026-10-20T16:24:25Z'));
+    // 阶段 A 在 worker 上重新锚定过的卡：窗口终点在首次触发的窗口之后
+    const stage = research.stageA.cards.filter(
+      (c) =>
+        c.entity?.kind === 'Deployment' &&
+        c.entity.name === 'worker' &&
+        c.card_id.split('/').length === 3 &&
+        Date.parse(c.window.from) > first,
+    );
+    expect(stage.length).toBeGreaterThan(0);
+    for (const c of stage.slice(0, 3)) {
+      const card = await runner.run(
+        { id: cardCheckId(c.card_id, worker), description: '', args: {} },
+        {},
+        {
+          hypothesisId: 'h1',
+          rootComponent: worker,
+          bounds: { from: 0, to: Date.parse(research.asOf) },
+          signal: AbortSignal.timeout(30_000),
+        },
+      );
+      expect(card.window, c.card_id).toEqual(c.window);
+      expect(Date.parse(card.window.to)).toBeGreaterThanOrEqual(Math.min(latest, Date.parse(research.asOf)));
+    }
+  }, 120_000);
+});
 
 describe.each(['pg-sync-restart-acme', 'metrics-scrape-blind-acme'])('%s', (id) => {
   it('研判输入有卡片检查：根因组件在前，按组件与总数截断，参数全部可选', async () => {
@@ -137,7 +177,7 @@ describe.each(['pg-sync-restart-acme', 'metrics-scrape-blind-acme'])('%s', (id) 
   }, 120_000);
 
   it('阶段 B 执行卡片检查：在 id 里的组件上执行，结果成为新的证据卡，记入假设的检查', async () => {
-    const { research, runner } = await caseOf(id);
+    const { research, runner, alerts } = await caseOf(id);
     const env = {
       ...testEnv(
         testLayer([
@@ -168,8 +208,15 @@ describe.each(['pg-sync-restart-acme', 'metrics-scrape-blind-acme'])('%s', (id) 
     expect(c.result_ref).not.toBeNull();
     expect(research.stageA.cards.map((x) => x.ref)).not.toContain(c.result_ref);
     expect(c.outcome).not.toBe('failed');
-    // 窗口覆盖：起点是事件首次触发之前 2 小时，终点取卡片定义（不晚于研判时刻）
+    // 窗口覆盖：起点是锚点之前 2 小时，终点取卡片定义（不晚于研判时刻）。锚点与阶段 A 相同（ADR 0131）：事件首次触发，
+    // 实体上最晚开始的成员告警落在卡片窗口之后时按它重新锚定
     const t = research.templates.find((x) => x.id === c.template)!;
+    const k = parseStoredKey(parseCardCheckId(t.id)!.component);
+    const def = rt.set.cards.get(parseCardCheckId(t.id)!.card)!.def;
+    const afterMs = durationSeconds((def.window ?? DEFAULT_WINDOW).after) * 1000;
+    const first = Date.parse(research.incident.first_firing_at);
+    const latest = memberLatest(alerts)({ cluster_id: research.incident.cluster_id, ...k, uid: null });
+    const anchor = latest !== undefined && latest > first + afterMs ? latest : first;
     const card = await runner.run(
       t,
       { window_before: '2h' },
@@ -180,8 +227,7 @@ describe.each(['pg-sync-restart-acme', 'metrics-scrape-blind-acme'])('%s', (id) 
         signal: AbortSignal.timeout(30_000),
       },
     );
-    expect(Date.parse(card.window.from)).toBe(Date.parse(research.incident.first_firing_at) - 2 * 3600_000);
-    const k = parseStoredKey(parseCardCheckId(t.id)!.component);
+    expect(Date.parse(card.window.from)).toBe(anchor - 2 * 3600_000);
     expect(card.entity).toMatchObject({ kind: k.kind, namespace: k.namespace, name: k.name });
   }, 120_000);
 

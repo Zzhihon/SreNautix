@@ -17,7 +17,7 @@
 1. **卡片即检查**：已加载领域包中证据链的卡，只要 `applies_to.kinds` 与研判子图中某个组件的 kind 相同（`sameKind`：不区分大小写、忽略 API 组），就可以作为区分性检查，在那个组件上执行。
    - **id**：`cardcheck:<包>/<链>/<卡>@<组件键>`。
    - **参数全部可选**，不允许其他字段：
-     - `window_before`、`window_after`：相对事件首次触发时间的时长，覆盖卡片定义的窗口；只给一端时，另一端取卡片定义；终点不晚于研判时刻。
+     - `window_before`、`window_after`：相对检查锚点的时长，覆盖卡片定义的窗口；只给一端时，另一端取卡片定义；终点不晚于研判时刻。锚点与阶段 A 相同（ADR 0131）。
      - 卡片 `params` 的键：覆盖卡片的默认参数。卡片有 `check.args`（契约 2.17.0）时，取值范围按它约束；没有时，类型取默认值的类型。
      - schema 与合并规则由 packs-sdk 的 `checkArgsSchema`、`applyCheckArgs` 提供，server 与评测共用。
    - **执行方**：server 的 `POST /v1/research/tasks/{run_id}/query`（`PackEvidence.runCardCheck`）与评测的 `ReconstructedQueryRunner` 走同一个执行器。按 id 里的组件执行，不按假设的根因。结果按卡片的 CEL 判定成新的证据卡。

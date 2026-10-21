@@ -1,4 +1,4 @@
-import type { Incident } from '@srenautix/contract';
+import type { Alert, Incident } from '@srenautix/contract';
 import type { CardEntry, PackSet } from '@srenautix/packs-sdk';
 import { describe, expect, it } from 'vitest';
 import { validatorOf } from '../../src/llm/schema.js';
@@ -10,6 +10,7 @@ import {
   parseCardCheckId,
   splitCardCheckArgs,
 } from '../../src/stage-a/card-checks.js';
+import { memberLatest } from '../../src/stage-a/pack-evidence.js';
 
 // 卡片即检查的 id、参数 schema 与窗口覆盖（ADR 0116）
 
@@ -96,5 +97,26 @@ describe('卡片检查', () => {
     expect(cardApplies(entry, 'Application.argoproj.io')).toBe(true);
     expect(cardApplies(entry, 'namespace')).toBe(true);
     expect(cardApplies(entry, 'Deployment')).toBe(false);
+  });
+});
+
+describe('检查的锚点（ADR 0131）', () => {
+  it('实体上最晚开始的成员告警：按告警的实体，或按告警归属的组件（Pod 上的告警归到 Deployment）', () => {
+    const alert = (startsAt: string, entity: { kind: string; name: string } | null, component: string | null) =>
+      ({
+        starts_at: startsAt,
+        entity: entity ? { cluster_id: 'c', namespace: 'shop', uid: null, ...entity } : null,
+        component,
+      }) as unknown as Alert;
+    const latestOf = memberLatest([
+      alert('2026-10-20T16:00:00Z', { kind: 'Deployment', name: 'worker' }, 'Deployment:shop/worker'),
+      alert('2026-10-20T16:40:00Z', { kind: 'Pod', name: 'worker-1' }, 'Deployment:shop/worker'),
+      alert('2026-10-20T17:00:00Z', { kind: 'Deployment', name: 'control' }, 'Deployment:shop/control'),
+    ]);
+    const e = (kind: string, name: string) => ({ cluster_id: 'c', kind, namespace: 'shop', name, uid: null });
+    expect(latestOf(e('Deployment', 'worker'))).toBe(Date.parse('2026-10-20T16:00:00Z'));
+    expect(latestOf(e('Pod', 'worker-1'))).toBe(Date.parse('2026-10-20T16:40:00Z'));
+    expect(latestOf(e('Deployment', 'control'))).toBe(Date.parse('2026-10-20T17:00:00Z'));
+    expect(latestOf(e('Deployment', 'web'))).toBeUndefined();
   });
 });

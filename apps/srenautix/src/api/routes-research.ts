@@ -380,6 +380,11 @@ export function registerResearchRoutes(app: FastifyInstance, d: ResearchRouteDep
       throw badRequest('args 必须是 JSON 对象');
     }
     const { incident, topo } = await taskInput((req.params as { run_id: string }).run_id);
+    // 研判所用事件版本的在场成员告警：检查的锚点与阶段 A 相同（ADR 0131）
+    const members = await alertsById(
+      d.pool,
+      incident.members.filter((m) => m.left_version === null).map((m) => m.alert_id),
+    );
     // 卡片检查（ADR 0116）：按 id 里的组件执行，不按请求体的 component（假设的根因）
     const cardCheck = parseCardCheckId(body.template);
     if (cardCheck) {
@@ -400,6 +405,7 @@ export function registerResearchRoutes(app: FastifyInstance, d: ResearchRouteDep
         e.key,
         args as Record<string, unknown>,
         entity,
+        members,
         Date.now(),
         AbortSignal.timeout(30_000),
       );
@@ -420,7 +426,15 @@ export function registerResearchRoutes(app: FastifyInstance, d: ResearchRouteDep
       params[k] = v;
     }
     const entity = entityIn(incident, topo, body.component);
-    return d.templates.runTemplate(incident, template.id, params, entity, Date.now(), AbortSignal.timeout(30_000));
+    return d.templates.runTemplate(
+      incident,
+      template.id,
+      params,
+      entity,
+      members,
+      Date.now(),
+      AbortSignal.timeout(30_000),
+    );
   });
 
   /** 子图节点，或事件的组件与候选根因（命名空间伪组件 Namespace:<ns> 不是拓扑节点）→ 实体；不在其中时 400 */

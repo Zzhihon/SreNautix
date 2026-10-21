@@ -347,7 +347,13 @@ describe('重放、重建阶段 A 与研判输入', () => {
       metrics,
     );
     const tpl = tplRt.templates.find((t) => t.id === '_example/memory-ratio')!;
-    const card = await new ReconstructedQueryRunner(tplEvidence, rc.incident, r.topology, asOf).run(
+    const card = await new ReconstructedQueryRunner(
+      tplEvidence,
+      rc.incident,
+      r.topology,
+      asOf,
+      rc.snapshot.context.alerts,
+    ).run(
       { id: tpl.id, description: tpl.description, args: tpl.args },
       { limit_ratio: 0.9 },
       {

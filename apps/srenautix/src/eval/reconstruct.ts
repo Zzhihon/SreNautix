@@ -1012,6 +1012,8 @@ export class ReconstructedQueryRunner implements QueryRunner {
     private readonly inc: Incident,
     private readonly topology: BundleTopology,
     private readonly asOf: number,
+    /** 研判所用事件版本的在场成员告警（快照 context.alerts）：检查的锚点与阶段 A 相同（ADR 0131） */
+    private readonly alerts: readonly Alert[],
   ) {}
 
   async run(
@@ -1034,8 +1036,8 @@ export class ReconstructedQueryRunner implements QueryRunner {
       ? { cluster_id: this.inc.cluster_id, kind: node.kind, namespace: node.namespace, name: node.name, uid: node.uid }
       : { cluster_id: this.inc.cluster_id, kind: k.kind, namespace: k.namespace, name: k.name, uid: null };
     if (card) {
-      return this.evidence.runCardCheck(this.inc, card.card, args, entity, this.asOf, ctx.signal);
+      return this.evidence.runCardCheck(this.inc, card.card, args, entity, this.alerts, this.asOf, ctx.signal);
     }
-    return this.evidence.runTemplate(this.inc, template.id, params, entity, this.asOf, ctx.signal);
+    return this.evidence.runTemplate(this.inc, template.id, params, entity, this.alerts, this.asOf, ctx.signal);
   }
 }

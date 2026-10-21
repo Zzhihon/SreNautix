@@ -493,6 +493,7 @@ describe('阶段 B 的领域包材料', () => {
       '_example/memory-ratio',
       { limit_ratio: 0.9 },
       entity,
+      [],
       Date.now(),
       AbortSignal.timeout(30_000),
     );
@@ -507,12 +508,13 @@ describe('阶段 B 的领域包材料', () => {
       '_example/memory-ratio',
       { limit_ratio: 0.97 },
       entity,
+      [],
       Date.now(),
       AbortSignal.timeout(30_000),
     );
     expect(cool.verdict).toBe('normal');
     await expect(
-      tplEvidence.runTemplate(inc, '_example/nope', {}, entity, Date.now(), AbortSignal.timeout(30_000)),
+      tplEvidence.runTemplate(inc, '_example/nope', {}, entity, [], Date.now(), AbortSignal.timeout(30_000)),
     ).rejects.toThrow(/没有查询模板/);
   });
 

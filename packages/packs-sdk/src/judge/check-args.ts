@@ -1,5 +1,6 @@
 // 卡片作为阶段 B 区分性检查时的参数（ADR 0116，契约 2.17.0 的卡片 check 块）。server 与评测共用这里的 schema 与合并规则：
-// - 参数全部可选：window_before、window_after（相对事件首次触发时间的时长）与卡片 params 的键；
+// - 参数全部可选：window_before、window_after（相对检查锚点的时长；锚点与阶段 A 相同，是事件首次触发，或这个组件上之后才
+//   升级的成员告警的开始时间，ADR 0131）与卡片 params 的键；
 // - 卡片声明了 check.args 时 params 的取值范围按它约束，否则类型取默认值的类型；
 // - 合并：给出的 params 覆盖卡片默认值；只给出一个窗口端点时另一个取卡片定义。
 
@@ -14,8 +15,12 @@ const DEFAULT_WINDOW = { before: '30m', after: '10m' };
 export function checkArgsSchema(card: CardDefinition): Record<string, unknown> {
   const declared = (card.check?.args?.properties as Record<string, unknown> | undefined) ?? {};
   const properties: Record<string, unknown> = {
-    window_before: { ...DURATION, description: '窗口起点：事件首次触发之前多久（默认取卡片定义）' },
-    window_after: { ...DURATION, description: '窗口终点：事件首次触发之后多久，不晚于当前时间（默认取卡片定义）' },
+    window_before: {
+      ...DURATION,
+      description:
+        '窗口起点：锚点之前多久（锚点是事件首次触发，或这个组件上之后才升级的告警的开始时间；默认取卡片定义）',
+    },
+    window_after: { ...DURATION, description: '窗口终点：锚点之后多久，不晚于当前时间（默认取卡片定义）' },
   };
   for (const [k, v] of Object.entries(card.params ?? {})) {
     properties[k] = declared[k] ?? {

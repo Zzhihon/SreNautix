@@ -196,7 +196,10 @@ export async function runPhase2(o: Phase2Options): Promise<Phase2Result> {
     const c = labelCase(o.labels, l, o.suite, sid, o.now);
     cases.push({ c, s: rc.snapshot });
     agreements.push(...rc.agreement);
-    runners.set(c.case_id, new ReconstructedQueryRunner(evidence, rc.incident, rep.topology, asOf));
+    runners.set(
+      c.case_id,
+      new ReconstructedQueryRunner(evidence, rc.incident, rep.topology, asOf, rc.snapshot.context.alerts),
+    );
     const topology = rep.topology;
     incidentRoots.set(c.case_id, {
       root: rc.incident.root.component,

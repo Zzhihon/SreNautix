@@ -57,6 +57,26 @@ function anchorOf(p: Planned, anchor: number, afterMs: number): number {
   return p.latest !== undefined && p.latest > anchor + afterMs ? p.latest : anchor;
 }
 
+/**
+ * 每个实体（与告警归属的组件）上最晚开始的在场成员告警（unix 毫秒）：卡片窗口装不下它时按它重新锚定（ADR 0107 §7）。
+ * 阶段 A 的证据卡与阶段 B 的检查（卡片检查与查询模板）用同一个函数，同一实体上两者看到的时间段相同（ADR 0131）。
+ */
+export function memberLatest(alerts: readonly Alert[]): (entity: EntityRef) => number | undefined {
+  const latest = new Map<string, number>();
+  const note = (k: string | null, t: number) => {
+    if (k !== null && Number.isFinite(t) && t > (latest.get(k) ?? -Infinity)) {
+      latest.set(k, t);
+    }
+  };
+  for (const a of alerts) {
+    const t = Date.parse(a.starts_at);
+    note(a.entity ? entityKey(a.entity) : null, t);
+    note(a.component, t);
+  }
+  return (entity) =>
+    latest.get(entityKey(entity)) ?? latest.get(tryNodeKey(entity.kind, entity.namespace, entity.name) ?? '');
+}
+
 /** 数据源的查询回看：卡片窗口之前再留 24 小时，供 rate 等函数的回看范围使用。 */
 const LOOKBACK_MS = 24 * 3600_000;
 
@@ -115,20 +135,7 @@ export class PackEvidence implements EvidenceRunner {
     const plan: Planned[] = [];
     const seen = new Map<string, Planned>();
     const chainsRun: string[] = [];
-    // 每个实体（与告警归属的组件）上最晚开始的在场成员告警：卡片窗口装不下它时按它重新锚定（ADR 0107 §7）
-    const latest = new Map<string, number>();
-    const note = (k: string | null, t: number) => {
-      if (k !== null && Number.isFinite(t) && t > (latest.get(k) ?? -Infinity)) {
-        latest.set(k, t);
-      }
-    };
-    for (const a of alerts) {
-      const t = Date.parse(a.starts_at);
-      note(a.entity ? entityKey(a.entity) : null, t);
-      note(a.component, t);
-    }
-    const latestOf = (entity: EntityRef) =>
-      latest.get(entityKey(entity)) ?? latest.get(tryNodeKey(entity.kind, entity.namespace, entity.name) ?? '');
+    const latestOf = memberLatest(alerts);
     const add = (chains: string[], entity: EntityRef) => {
       for (const ck of chains) {
         const chain = this.rt.set.chains.get(ck);
@@ -322,13 +329,14 @@ export class PackEvidence implements EvidenceRunner {
 
   /**
    * 阶段 B 区分性检查的查询模板：在 entity 上执行模板附带的卡，参数覆盖卡片默认参数。
-   * 窗口以事件首次触发时间为锚点，终点不晚于 now。模板不存在或卡没有执行（例如窗口为空）时抛出。
+   * 锚点与卡片检查相同（runCardCheck，ADR 0131），终点不晚于 now。模板不存在或卡没有执行（例如窗口为空）时抛出。
    */
   async runTemplate(
     inc: Incident,
     templateId: string,
     args: Record<string, number | string | boolean>,
     entity: EntityRef,
+    alerts: readonly Alert[],
     now: number,
     signal: AbortSignal,
   ): Promise<EvidenceResult> {
@@ -336,8 +344,9 @@ export class PackEvidence implements EvidenceRunner {
     if (!t) {
       throw new Error(`没有查询模板 ${templateId}`);
     }
+    const latest = memberLatest(alerts)(entity);
     const [r] = await this.execute(
-      [{ card: t.card, entity, params: args }],
+      [{ card: t.card, entity, params: args, ...(latest !== undefined ? { latest } : {}) }],
       Date.parse(inc.first_firing_at),
       now,
       signal,
@@ -351,13 +360,15 @@ export class PackEvidence implements EvidenceRunner {
   /**
    * 卡片检查（ADR 0116）：在 entity 上执行证据链的卡 card；args 中的 window_before/window_after 覆盖卡片的窗口，
    * 其余覆盖卡片的默认参数。
-   * 窗口以事件首次触发时间为锚点，终点不晚于 now。卡片不存在、不适用于实体的 kind 或没有执行时抛出。
+   * 锚点与阶段 A 相同（ADR 0131）：事件首次触发；alerts（研判所用事件版本的在场成员告警）里 entity 上最晚开始的告警
+   * 落在窗口之后时按它重新锚定。终点不晚于 now（研判时刻）。卡片不存在、不适用于实体的 kind 或没有执行时抛出。
    */
   async runCardCheck(
     inc: Incident,
     card: string,
     args: Record<string, unknown>,
     entity: EntityRef,
+    alerts: readonly Alert[],
     now: number,
     signal: AbortSignal,
   ): Promise<EvidenceResult> {
@@ -369,8 +380,9 @@ export class PackEvidence implements EvidenceRunner {
       throw new Error(`卡 ${card} 不适用于 ${entity.kind}`);
     }
     const { params, window } = splitCardCheckArgs(e, args);
+    const latest = memberLatest(alerts)(entity);
     const [r] = await this.execute(
-      [{ card, entity, params, ...(window ? { window } : {}) }],
+      [{ card, entity, params, ...(window ? { window } : {}), ...(latest !== undefined ? { latest } : {}) }],
       Date.parse(inc.first_firing_at),
       now,
       signal,
