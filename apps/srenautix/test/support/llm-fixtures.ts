@@ -32,10 +32,11 @@ export interface ReceivedRequest {
 }
 
 /**
- * 回放队列项：夹具，或带节奏的夹具（流式请求时每个事件之间等 paceMs；stallAfter 个事件之后不再发送，用于验证空闲超时），
- * 或 'hang'（不响应，用于验证首 token 超时）。
+ * 回放队列项：夹具，或带节奏的夹具（流式请求时每个事件之间等 paceMs；stallAfter 个事件之后不再发送，用于验证空闲超时；
+ * cutAfter 个事件之后断开连接，用于验证流读到一半时连接中断），或 'hang'（不响应，用于验证首 token 超时）。
  */
-export type ReplayItem = LlmFixture | 'hang' | { fixture: LlmFixture; paceMs?: number; stallAfter?: number };
+export type ReplayItem =
+  LlmFixture | 'hang' | { fixture: LlmFixture; paceMs?: number; stallAfter?: number; cutAfter?: number };
 
 // 流式事件的转换与 llm-replay 子命令共用（src/llm/replay.ts）
 export { toStreamEvents } from '../../src/llm/replay.js';
@@ -78,7 +79,7 @@ export class ReplayServer {
   }
 
   private send(res: ServerResponse, path: string, body: string, item: Exclude<ReplayItem, 'hang'>): void {
-    const { fixture: f, paceMs = 0, stallAfter } = 'fixture' in item ? item : { fixture: item };
+    const { fixture: f, paceMs = 0, stallAfter, cutAfter } = 'fixture' in item ? item : { fixture: item };
     if (!isStream(body) || f.status !== 200) {
       res.writeHead(f.status, { 'content-type': 'application/json' });
       res.end(JSON.stringify(f.body));
@@ -90,6 +91,11 @@ export class ReplayServer {
     let i = 0;
     const next = () => {
       if (res.destroyed) {
+        return;
+      }
+      if (cutAfter !== undefined && i >= cutAfter) {
+        // 连接在流中途断开（客户端读响应体时收到 undici 的 TypeError: terminated）
+        res.socket?.destroy();
         return;
       }
       if (i >= limit) {

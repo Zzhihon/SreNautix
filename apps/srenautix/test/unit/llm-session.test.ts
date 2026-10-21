@@ -4,7 +4,7 @@ import { DEFAULT_BUDGET, ResearchLedger, type BudgetConfig } from '../../src/llm
 import { declaredProfile } from '../../src/llm/dialect.js';
 import { Egress, EgressBlocked } from '../../src/llm/egress.js';
 import { buildRuntimes, partitionRoutes } from '../../src/llm/routes.js';
-import { ModelLayer, type LlmCallRecord } from '../../src/llm/session.js';
+import { classifyError, ModelLayer, type LlmCallRecord } from '../../src/llm/session.js';
 import { resolveTimeouts, type RouteTimeouts } from '../../src/llm/timeouts.js';
 import type { LlmRequest, Segment } from '../../src/llm/types.js';
 import { WorkerMetrics } from '../../src/research/metrics.js';
@@ -179,6 +179,26 @@ describe('结构化调用', () => {
     expect(records[0]?.note).toMatch(/流空闲超过/);
   });
 
+  it('流读到一半连接中断：记为网络失败，不抛出；有其他路由时换路由并成功', async () => {
+    a.enqueue({ fixture: fixture(P, 'chat-json-schema'), cutAfter: 3 });
+    const only = await session(layer([route('a', a.baseUrl)])).structured('conclude', base('x'), OUTPUT);
+    expect(only).toMatchObject({ ok: false, reason: 'model_unavailable' });
+    expect(records[0]).toMatchObject({ errorKind: 'llm_network', outcome: 'failed' });
+    a.enqueue({ fixture: fixture(P, 'chat-json-schema'), cutAfter: 3 });
+    b.enqueue(fixture(P, 'chat-json-schema'));
+    records = [];
+    const switched = await session(layer([route('a', a.baseUrl), route('b', b.baseUrl)])).structured(
+      'conclude',
+      base('x'),
+      OUTPUT,
+    );
+    expect(switched).toMatchObject({ ok: true, routeId: 'b' });
+    expect(records.map((r) => [r.routeId, r.outcome, r.errorKind])).toEqual([
+      ['a', 'switched', 'llm_network'],
+      ['b', 'succeeded', null],
+    ]);
+  });
+
   it('慢但一直在输出的调用不受总时长限制：总耗时超过首 token 与空闲超时之和照样成功，也不打开延迟型熔断', async () => {
     // 每个流事件间隔 20 毫秒，事件数上百，总耗时远超 300 + 200 毫秒
     a.enqueue({ fixture: fixture(P, 'chat-json-schema'), paceMs: 20 });
@@ -252,6 +272,28 @@ describe('结构化调用', () => {
     const l = layer([route('large', a.baseUrl), route('small', b.baseUrl, { tier: 'small' })]);
     const r = await session(l).structured('still_consistent', base('x'), OUTPUT);
     expect(r).toMatchObject({ ok: true, routeId: 'small' });
+  });
+});
+
+describe('错误归类', () => {
+  it('undici 读响应体时的 TypeError: terminated、fetch failed 与带套接字错误码的错误归为网络失败；其他错误原样返回', () => {
+    const live = new AbortController().signal;
+    const socket = Object.assign(new Error('other side closed'), { code: 'UND_ERR_SOCKET' });
+    const terminated = new TypeError('terminated', { cause: socket });
+    expect(classifyError(terminated, 'r', live)).toMatchObject({
+      kind: 'llm_network',
+      message: expect.stringContaining('other side closed'),
+    });
+    expect(classifyError(new TypeError('fetch failed'), 'r', live)).toMatchObject({ kind: 'llm_network' });
+    expect(
+      classifyError(new Error('wrapped', { cause: Object.assign(new Error('x'), { code: 'ECONNRESET' }) }), 'r', live),
+    ).toMatchObject({ kind: 'llm_network' });
+    const bug = new TypeError('cannot read properties of undefined');
+    expect(classifyError(bug, 'r', live)).toBe(bug);
+    // 调用方中止时返回中止原因，不归为网络失败
+    const ac = new AbortController();
+    ac.abort(new Error('deadline'));
+    expect(classifyError(terminated, 'r', ac.signal)).toBe(ac.signal.reason);
   });
 });
 

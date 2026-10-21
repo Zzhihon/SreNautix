@@ -176,7 +176,55 @@ export function classifyError(e: unknown, routeId: string, signal: AbortSignal):
       routeId,
     );
   }
+  if (signal.aborted) {
+    return signal.reason;
+  }
+  // 流读到一半连接断开：undici 在读响应体时抛 TypeError('terminated')（或 'fetch failed'、带套接字错误码的错误），
+  // 不经过 SDK 的错误类型。按网络失败处理（可重试、可换路由），而不是让它逃出研判、使整个进程退出
+  if (isNetworkError(e)) {
+    const cause = (e as { cause?: unknown }).cause;
+    return new LlmError(
+      'llm_network',
+      null,
+      `模型服务的连接中断：${(e as Error).message}${cause instanceof Error ? `（${cause.message}）` : ''}`.slice(
+        0,
+        600,
+      ),
+      routeId,
+    );
+  }
   return e;
+}
+
+const NETWORK_CODES = new Set([
+  'ECONNRESET',
+  'ECONNREFUSED',
+  'EPIPE',
+  'ETIMEDOUT',
+  'ENOTFOUND',
+  'EAI_AGAIN',
+  'ENETUNREACH',
+  'EHOSTUNREACH',
+  'UND_ERR_SOCKET',
+  'UND_ERR_CLOSED',
+  'UND_ERR_ABORTED',
+  'UND_ERR_CONNECT_TIMEOUT',
+  'UND_ERR_HEADERS_TIMEOUT',
+  'UND_ERR_BODY_TIMEOUT',
+]);
+
+/** fetch 与套接字层的网络错误（本身或 cause 链上带网络错误码，或 undici 的 terminated / fetch failed） */
+export function isNetworkError(e: unknown): boolean {
+  for (let x: unknown = e, i = 0; x instanceof Error && i < 5; x = (x as { cause?: unknown }).cause, i++) {
+    const code = (x as { code?: unknown }).code;
+    if (typeof code === 'string' && NETWORK_CODES.has(code)) {
+      return true;
+    }
+    if (x instanceof TypeError && (x.message === 'terminated' || x.message === 'fetch failed')) {
+      return true;
+    }
+  }
+  return false;
 }
 
 export class ModelLayer {
