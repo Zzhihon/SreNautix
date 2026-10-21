@@ -48,6 +48,20 @@ describe_incidents() {
   done | jq -sc .
 }
 
+# 场景隔离：恢复之后等到注入以来有变化的事件都不再是 firing，下一个场景才注入。否则上一个场景仍在 firing 的事件
+# 会按时间与拓扑吸收下一个场景的告警，下一个场景就不会出现自己的根因事件。参数：注入时间；SRENAUTIX_QUIET_TIMEOUT 秒（默认 900）
+wait_incidents_quiet() {
+  local since=$1 timeout=${SRENAUTIX_QUIET_TIMEOUT:-900} deadline firing
+  deadline=$((SECONDS + timeout))
+  while true; do
+    firing=$(scenario_incidents "$since" | jq -c '[.[] | select(.state == "firing")]')
+    [[ "$firing" == "[]" ]] && break
+    ((SECONDS < deadline)) || die "隔离：恢复之后 ${timeout}s 内仍有 firing 的事件：$(describe_incidents "$firing")"
+    sleep 15
+  done
+  log "隔离：注入以来的事件都已结束"
+}
+
 # 发现：事件收敛到不超过上限，其中有一个事件的根因匹配 SRENAUTIX_ROOT；输出该事件的 id
 check_discovery() {
   local since=$1 max=${SRENAUTIX_MAX_INCIDENTS:-2} timeout=${SRENAUTIX_TIMEOUT:-600} deadline incidents id
