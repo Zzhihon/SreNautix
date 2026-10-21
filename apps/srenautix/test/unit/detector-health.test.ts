@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { FirstSeen, objectHealth, type K8sObject } from '../../src/detectors/health.js';
-import { DEFAULT_EQUIVALENTS, findingAlert, type DetectorSettings } from '../../src/detectors/service.js';
+import {
+  belowThreshold,
+  DEFAULT_EQUIVALENTS,
+  findingAlert,
+  type DetectorSettings,
+} from '../../src/detectors/service.js';
 
 // 集群状态检测器的对象健康判定（ADR 0105）
 
@@ -194,5 +199,12 @@ describe('阈值与合成告警', () => {
     expect(findingAlert('east', { ...init, since: T(-5) }, settings, NOW)).toBeNull();
     expect(findingAlert('east', { ...init, namespace: 'kube-system' }, settings, NOW)).toBeNull();
     expect(findingAlert('east', { ...init, state: 'rollout_stalled' }, settings, NOW)).toBeNull();
+  });
+
+  it('只是还没到阈值（重启后进入时间从头算起）：已触发的发现据此保持，命名空间被排除或状态关闭时不算（ADR 0128）', () => {
+    expect(belowThreshold({ ...init, since: T(-5) }, settings, NOW)).toBe(true);
+    expect(belowThreshold(init, settings, NOW)).toBe(false);
+    expect(belowThreshold({ ...init, since: T(-5), namespace: 'kube-system' }, settings, NOW)).toBe(false);
+    expect(belowThreshold({ ...init, since: T(-5), state: 'rollout_stalled' }, settings, NOW)).toBe(false);
   });
 });

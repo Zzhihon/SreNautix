@@ -146,6 +146,13 @@ export class ServerMetrics extends BaseMetrics {
     registers: [this.registry],
   });
 
+  readonly detectorRefired = new Counter({
+    name: 'srenautix_detector_refired_total',
+    help: '检测器的发现仍然成立、告警却已不在触发而重新触发的告警数（ADR 0128）',
+    labelNames: ['cluster_id'] as const,
+    registers: [this.registry],
+  });
+
   readonly detectorScanErrors = new Counter({
     name: 'srenautix_detector_scan_errors_total',
     help: '检测器一轮检测失败的次数',

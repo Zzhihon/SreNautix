@@ -347,4 +347,11 @@ describe('内置 informer 拓扑', () => {
       expect.arrayContaining(['Pod:shop/db-0', 'Pod:shop/api-7d9f8-a', 'ReplicaSet:shop/api-7d9f8']),
     );
   });
+
+  // 放在最后：会停止 informer
+  it('停止之后检测器拿不到对象（null），退出中的进程不会据此上报一份空列表（ADR 0128）', async () => {
+    expect(topo.healthObjects()).not.toBeNull();
+    await topo.stop();
+    expect(topo.healthObjects()).toBeNull();
+  });
 });

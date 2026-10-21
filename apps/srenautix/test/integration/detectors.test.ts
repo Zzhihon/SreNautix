@@ -2,6 +2,7 @@ import { AlertCatalog, computeIncidents, DEFAULT_RCA_PARAMS, TopologyGraph } fro
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { ObjectHealth } from '../../src/detectors/health.js';
 import { DEFAULT_EQUIVALENTS, DetectorService, type DetectorSettings } from '../../src/detectors/service.js';
+import { applyRemote } from '../../src/ingest/reconcile.js';
 import { activeAlerts } from '../../src/ingest/store.js';
 import { IngestService } from '../../src/ingest/service.js';
 import { ServerMetrics } from '../../src/metrics.js';
@@ -156,7 +157,7 @@ describe('集群状态检测器', () => {
     // 告警的组件是 Pod 沿 owned_by 的顶层属主（ADR 0104）
     expect(await firing()).toEqual([['SreNautixPodInitStuck', 'Deployment:shop/api', 'firing']]);
     // 再扫一次不重复写入
-    expect((await detectors.scan(NOW))[C]).toEqual({ firing: [], resolved: [] });
+    expect((await detectors.scan(NOW))[C]).toEqual({ firing: [], resolved: [], refired: [] });
     // 收敛：检测器告警成为事件，组件归到 Deployment
     const topo = await new TopologyStore(db.server).at(C, T(0));
     const alerts = await activeAlerts(db.server, C, 30 * 60_000);
@@ -188,7 +189,7 @@ describe('集群状态检测器', () => {
       alertname: 'KubePodInitializingTooLong',
     });
     await ingest.write(C, 'am', 'alertmanager', [rule('api-1-y', 'bbbbbbbbbbbbbbbb')], {});
-    expect((await detectors.scan(NOW + 30_000))[C]).toEqual({ firing: [], resolved: [] });
+    expect((await detectors.scan(NOW + 30_000))[C]).toEqual({ firing: [], resolved: [], refired: [] });
     expect(await firing()).toEqual([['SreNautixPodInitStuck', 'Deployment:shop/api', 'firing']]);
     await ingest.write(
       C,
@@ -222,11 +223,70 @@ describe('集群状态检测器', () => {
       'SreNautixRolloutStalled',
     ]);
     await detectors.report(C, [], false, T(3));
-    expect((await detectors.scan(NOW + 3 * 60_000))[C]).toEqual({ firing: [], resolved: [] });
+    expect((await detectors.scan(NOW + 3 * 60_000))[C]).toEqual({ firing: [], resolved: [], refired: [] });
     await detectors.report(C, [], true, T(4));
     expect((await detectors.scan(NOW + 4 * 60_000))[C]?.resolved.map((a) => a.alertname)).toEqual([
       'SreNautixRolloutStalled',
     ]);
     expect((await firing()).find((x) => x[0] === 'SreNautixRolloutStalled')?.[2]).toBe('resolved');
+  });
+
+  it('主实例切换（ADR 0128）：对账不结束检测器告警；不是主实例时不写入；新主实例重新触发仍然成立的发现，阈值从重启时间算起时也不恢复', async () => {
+    const t0 = NOW + 10 * 60_000;
+    const crash = (since: number) =>
+      health({
+        key: 'Pod:shop/api-1-y',
+        state: 'crash_loop',
+        since: new Date(since).toISOString(),
+        owner: 'Deployment:shop/api',
+      });
+    await detectors.report(C, [crash(t0 - 8 * 60_000)], true, new Date(t0));
+    expect((await detectors.scan(t0))[C]?.firing.map((a) => a.alertname)).toEqual(['SreNautixCrashLoop']);
+    const state = async () =>
+      (
+        await db.server.query<{ alert_id: string; status: string }>(
+          "SELECT alert_id, status FROM server.alert_state WHERE cluster_id = $1 AND alertname = 'SreNautixCrashLoop'",
+          [C],
+        )
+      ).rows;
+    const [before] = await state();
+    expect(before?.status).toBe('firing');
+
+    // 对账读到的告警源里没有检测器告警：不据此结束它
+    await applyRemote(db.server, C, new Map(), ['alertmanager'], ingest, metrics, 'srenautix_self', 'Watchdog');
+    expect(await state()).toEqual([{ alert_id: before!.alert_id, status: 'firing' }]);
+
+    // 正在退出（或已失去主实例身份）的实例：即使上报里没有了也不写入
+    const exiting = new DetectorService(
+      db.server,
+      settings,
+      async () => {
+        throw new Error('不是主实例时不应写入');
+      },
+      metrics,
+      () => false,
+    );
+    await detectors.report(C, [], true, new Date(t0 + 60_000));
+    expect(await exiting.scan(t0 + 60_000)).toEqual({});
+    expect(await state()).toEqual([{ alert_id: before!.alert_id, status: 'firing' }]);
+
+    // 旧实例退出时告警被标成恢复，发现表里它仍是活跃的；新主实例的上报从重启时间算起（还没到 5 分钟的阈值）
+    await db.server.query("UPDATE server.alert_state SET status = 'resolved', ends_at = $2 WHERE alert_id = $1", [
+      before!.alert_id,
+      new Date(t0 + 90_000),
+    ]);
+    await detectors.report(C, [crash(t0 + 2 * 60_000)], true, new Date(t0 + 2 * 60_000));
+    const r = await detectors.scan(t0 + 2 * 60_000);
+    expect(r[C]).toMatchObject({ firing: [], resolved: [] });
+    expect(r[C]?.refired.map((a) => a.alertname)).toEqual(['SreNautixCrashLoop']);
+    // 同一个告警重新触发（指纹与开始时间不变）
+    expect(await state()).toEqual([{ alert_id: before!.alert_id, status: 'firing' }]);
+    // 告警在触发时不重复写入；对象恢复后照常恢复
+    expect((await detectors.scan(t0 + 3 * 60_000))[C]).toEqual({ firing: [], resolved: [], refired: [] });
+    await detectors.report(C, [], true, new Date(t0 + 4 * 60_000));
+    expect((await detectors.scan(t0 + 4 * 60_000))[C]?.resolved.map((a) => a.alertname)).toEqual([
+      'SreNautixCrashLoop',
+    ]);
+    expect(await state()).toEqual([{ alert_id: before!.alert_id, status: 'resolved' }]);
   });
 });

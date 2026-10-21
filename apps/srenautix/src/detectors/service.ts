@@ -108,6 +108,12 @@ function namespaceAllowed(ns: string | null, s: DetectorSettings): boolean {
   return s.namespaces.includes('*') || (ns !== null && s.namespaces.includes(ns));
 }
 
+/** 对象的状态有阈值、命名空间允许，只是还没持续到阈值 */
+export function belowThreshold(h: ObjectHealth, s: DetectorSettings, now: number): boolean {
+  const threshold = s.thresholdsMs[h.state];
+  return threshold !== undefined && namespaceAllowed(h.namespace, s) && Date.parse(h.since) + threshold > now;
+}
+
 /** 不健康对象 → 合成告警（只包含超过阈值、命名空间允许的对象） */
 export function findingAlert(clusterId: string, h: ObjectHealth, s: DetectorSettings, now: number): RawAlert | null {
   const threshold = s.thresholdsMs[h.state];
@@ -166,6 +172,8 @@ export function findingAlert(clusterId: string, h: ObjectHealth, s: DetectorSett
 export interface ScanResult {
   firing: RawAlert[];
   resolved: RawAlert[];
+  /** 发现仍然成立、告警却已不在触发，按原来的告警重新触发的 */
+  refired: RawAlert[];
 }
 
 /** 写入合成告警（IngestService.write）：同一接入路径，解析实体、写 alert_state 并唤醒事件引擎 */
@@ -177,6 +185,11 @@ export class DetectorService {
     private readonly settings: DetectorSettings,
     private readonly write: AlertWriter,
     private readonly metrics: ServerMetrics,
+    /**
+     * 本进程是否还在以主实例身份检测（是主实例、没有在退出）。不是时 scan 不写入任何告警：退出与失去主实例身份时
+     * 不恢复检测器告警，交给接手的主实例重新确认（ADR 0128）
+     */
+    private readonly active: () => boolean = () => true,
   ) {}
 
   /**
@@ -218,9 +231,15 @@ export class DetectorService {
     }
   }
 
-  /** 一轮检测：每个有上报的集群，按阈值合成告警、恢复不再成立或改由告警规则覆盖的告警 */
+  /**
+   * 一轮检测：每个有上报的集群，按阈值合成告警、恢复不再成立或改由告警规则覆盖的告警；仍然成立、但告警已经不在触发的
+   * 发现（上一个主实例退出时恢复了它，或写入告警之后来不及更新发现表）重新触发（ADR 0128）
+   */
   async scan(now = Date.now()): Promise<Record<string, ScanResult>> {
     const out: Record<string, ScanResult> = {};
+    if (!this.active()) {
+      return out;
+    }
     const clusters = await this.pool.query<{ cluster_id: string; complete: boolean }>(
       'SELECT cluster_id, complete FROM server.object_health_reports',
     );
@@ -241,38 +260,69 @@ export class DetectorService {
       [clusterId],
     );
     const covered = await coveredByRules(this.pool, clusterId, this.settings);
+    const current = await this.pool.query<{
+      key: string;
+      state: string;
+      alert: RawAlert & { startsAt: string };
+      firing: boolean;
+    }>(
+      // firing：发现对应的告警（同一指纹与开始时间）在 alert_state 里仍在触发
+      `SELECT f.key, f.state, f.alert, EXISTS (
+         SELECT 1 FROM server.alert_state a
+          WHERE a.cluster_id = f.cluster_id AND a.fingerprint = f.fingerprint AND a.starts_at = f.starts_at
+            AND a.status = 'firing') AS firing
+         FROM server.detector_findings f WHERE f.cluster_id = $1`,
+      [clusterId],
+    );
+    const known = new Set(current.rows.map((r) => `${r.key}|${r.state}`));
     const desired = new Map<string, { h: ObjectHealth; alert: RawAlert }>();
+    // 已经触发过的发现，对象仍在上报里、只是按新的进入时间还没到阈值：不恢复。CrashLoopBackOff 与发布停滞的进入时间
+    // 由上报方在内存里记录，新的主实例（或 reader）重启后从重启时间算起（ADR 0128）
+    const held = new Set<string>();
     for (const { body: h } of rows.rows) {
-      const alert = findingAlert(clusterId, h, this.settings, now);
-      if (!alert) {
-        continue;
-      }
+      const id = `${h.key}|${h.state}`;
       if (covered(h)) {
         continue;
       }
-      desired.set(`${h.key}|${h.state}`, { h, alert });
+      const alert = findingAlert(clusterId, h, this.settings, now);
+      if (alert) {
+        desired.set(id, { h, alert });
+      } else if (known.has(id) && belowThreshold(h, this.settings, now)) {
+        held.add(id);
+      }
     }
-    const current = await this.pool.query<{ key: string; state: string; alert: RawAlert & { startsAt: string } }>(
-      'SELECT key, state, alert FROM server.detector_findings WHERE cluster_id = $1',
-      [clusterId],
-    );
     const firing: RawAlert[] = [];
+    const refired: RawAlert[] = [];
     const resolved: RawAlert[] = [];
-    const known = new Set<string>();
     for (const r of current.rows) {
       const id = `${r.key}|${r.state}`;
-      known.add(id);
+      const a = r.alert;
       const stillThere = rows.rows.some((x) => x.body.key === r.key && x.body.state === r.state);
+      const active = desired.has(id) || held.has(id);
       // 不完整的上报里没有它，不算恢复；完整上报里没有，或者改由告警规则覆盖、命名空间不再允许，才恢复
-      if (!desired.has(id) && (complete || stillThere)) {
-        const a = r.alert;
+      if (!active && (complete || stillThere)) {
         resolved.push({ ...a, startsAt: new Date(a.startsAt), status: 'resolved', endsAt: new Date(now) });
+      } else if (active && !r.firing) {
+        // 发现仍然成立，告警却已不在触发：以同一个告警（指纹与开始时间不变）重新触发
+        refired.push({ ...a, startsAt: new Date(a.startsAt), status: 'firing', endsAt: null });
       }
     }
     for (const [id, d] of desired) {
       if (!known.has(id)) {
         firing.push(d.alert);
       }
+    }
+    // 写入之前再确认一次：扫描期间失去主实例身份或开始退出时不写（ADR 0128）
+    if (!this.active()) {
+      return { firing: [], resolved: [], refired: [] };
+    }
+    if (refired.length) {
+      await this.write(clusterId, refired);
+      this.metrics.detectorRefired.inc({ cluster_id: clusterId }, refired.length);
+      logger.info('检测器的发现仍然成立，重新触发告警', {
+        cluster_id: clusterId,
+        alerts: refired.map((x) => `${x.alertname} ${x.labels.namespace ?? ''}/${x.labels.entity ?? ''}`),
+      });
     }
     if (firing.length || resolved.length) {
       await this.write(clusterId, [...firing, ...resolved]);
@@ -306,7 +356,7 @@ export class DetectorService {
         this.metrics.detectorAlerts.inc({ cluster_id: clusterId, kind: a.labels.srenautix_detector ?? '' });
       }
     }
-    return { firing, resolved };
+    return { firing, resolved, refired };
   }
 }
 

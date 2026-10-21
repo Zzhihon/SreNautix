@@ -132,7 +132,7 @@ export interface InformerTopology {
   ready: Promise<void>;
   /** 最近一次成功写入拓扑的时间（informer 新鲜度，控制台集群页显示）。 */
   lastFlushAt(): Date | null;
-  /** 集群状态检测器用的对象（完整对象，带 status）；首次 list 完成之前为 null */
+  /** 集群状态检测器用的对象（完整对象，带 status）；首次 list 完成之前与停止之后为 null */
   healthObjects(): KubernetesObject[] | null;
   stop(): Promise<void>;
 }
@@ -250,7 +250,8 @@ export function startInformerTopology(o: InformerTopologyOptions): InformerTopol
     'PodDisruptionBudget',
   ]);
   const healthObjects = (): KubernetesObject[] | null => {
-    if (last === null) {
+    // 首次 list 完成之前与停止之后都没有完整的视图：返回 null，检测器不据此上报（停止中的缓存可能已经清空，ADR 0128）
+    if (last === null || stopped) {
       return null;
     }
     const out: KubernetesObject[] = [];

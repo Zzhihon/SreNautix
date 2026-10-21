@@ -17,7 +17,7 @@
    "第一次看到"只在内存里记录，进程重启后从重启时间算起，偏向晚报而不是误报。
 3. **阈值与合成告警**（server 配置 `detectors`，默认关闭）：状态持续超过阈值（`pod_init_after`、`pod_pending_after` 默认 10m，`rollout_stalled_after` 15m，`crash_loop_after` 5m，`pdb_blocked_after` 10m，`job_failed` 立即）时，合成一条 `source: detector` 的告警：告警名 `SreNautixPodPending`、`SreNautixPodInitStuck`、`SreNautixCrashLoop`、`SreNautixRolloutStalled`、`SreNautixPdbBlockingEviction`、`SreNautixJobFailed`；开始时间是"进入状态 + 阈值"，与告警规则的 `for` 相同；标签带标签契约的 `entity`、`entity_kind` 与对象标签，`role: cause`；摘要与说明写明原因、停住的容器、副本数等。合成告警走与告警规则相同的接入路径（实体解析、alert_state、唤醒事件引擎）。
 4. **去重**：同一对象上，同类的告警规则（默认表按状态列出 kube-prometheus 与 CCHP 的常见告警名，`equivalent_alerts` 可追加）正在触发时不合成；已经合成的随之恢复。"同一对象"指告警的实体或组件就是这个对象；Pod 的状态（CrashLoop 除外）也接受落在它属主工作负载上的同类规则。
-5. **恢复**：完整的上报（`complete: true`）里没有这个状态时，合成告警恢复；不完整的上报（reader 的列表超过上限、informer 尚未同步）不据此恢复。
+5. **恢复**：完整的上报（`complete: true`）里没有这个状态时，合成告警恢复；不完整的上报（reader 的列表超过上限、informer 尚未同步）不据此恢复。合成告警只由检测器恢复，主实例切换时的处理见 ADR 0128。
 6. **指标**：`srenautix_detector_last_scan_timestamp_seconds{cluster_id}`、`srenautix_detector_findings{cluster_id,kind}`、`srenautix_detector_alerts_total{cluster_id,kind}`、`srenautix_detector_scan_errors_total{cluster_id}`；检测延迟 `srenautix_incident_detection_seconds{source}`（首个症状到事件创建，source 为 alert 或 detector）。
 
 ## 结果

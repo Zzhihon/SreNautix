@@ -185,6 +185,10 @@ export async function alertsById(pool: pg.Pool | Queryable, ids: readonly string
   return r.rows.map(rowToAlert);
 }
 
+/**
+ * 对账比较用的本地触发中告警。检测器合成的告警不在任何告警源里，对账不能以"告警源中没有"结束它们，
+ * 它们只由检测器恢复（ADR 0128），所以不在其中
+ */
 export async function firingAlertIds(
   pool: pg.Pool | Queryable,
   clusterId: string,
@@ -195,7 +199,7 @@ export async function firingAlertIds(
     starts_at: Date;
     labels: Record<string, string>;
   }>(
-    "SELECT alert_id, fingerprint, starts_at, labels FROM server.alert_state WHERE cluster_id = $1 AND status = 'firing'",
+    "SELECT alert_id, fingerprint, starts_at, labels FROM server.alert_state WHERE cluster_id = $1 AND status = 'firing' AND source <> 'detector'",
     [clusterId],
   );
   return new Map(

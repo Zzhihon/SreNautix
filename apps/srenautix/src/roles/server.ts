@@ -940,6 +940,8 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
           await ingest.write(clusterId, 'detector', 'detector', alerts, { detector: alerts.length });
         },
         metrics,
+        // 退出或失去主实例身份时不写入检测器告警（ADR 0128）
+        () => leader.isLeader() && !signal.aborted,
       )
     : null;
   if (detectors) {
