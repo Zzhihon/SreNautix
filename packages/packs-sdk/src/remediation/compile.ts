@@ -42,6 +42,7 @@ export interface CompiledRemediation {
 export const REMEDIATION_VARIABLES = [
   'incident',
   'root',
+  'research',
   'cards',
   'alerts',
   'params',
@@ -110,7 +111,10 @@ export function compileRemediations(
 
       const env = registerRemediationFunctions(base.clone());
       for (const v of REMEDIATION_VARIABLES) {
-        env.registerVariable(v, v === 'alerts' || v === 'history' ? 'list' : v === 'root' ? 'dyn' : 'map');
+        env.registerVariable(
+          v,
+          v === 'alerts' || v === 'history' ? 'list' : v === 'root' || v === 'research' ? 'dyn' : 'map',
+        );
       }
       for (const n of inputNames) {
         env.registerVariable(n, 'list');

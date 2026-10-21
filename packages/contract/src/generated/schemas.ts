@@ -3856,7 +3856,7 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
           when: {
             type: 'string',
             description:
-              'CEL 适用条件。变量：incident、root、cards（卡片全局 id → 结论）、alerts（成员告警：alertname、labels、annotations、entity，以及 AlertClassification 的 role、source、catalog_entry、chronic）、params',
+              'CEL 适用条件。变量：incident、root、research（触发计划的研判结论 {disposition, level}，取值见 Disposition 与 ConclusionLevel；没有研判时为 null）、cards（卡片全局 id → 结论）、alerts（成员告警：alertname、labels、annotations、entity，以及 AlertClassification 的 role、source、catalog_entry、chronic）、params',
           },
           params: {
             type: 'object',

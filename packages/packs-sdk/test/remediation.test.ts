@@ -388,10 +388,10 @@ describe.each(SHAPES)('$name', (shape) => {
         },
       ],
     });
-    expect(applicableRemediations(set, c).applicable.map((a) => a.key)).toEqual(['gitops/chronic-alert-relax']);
+    expect(applicableRemediations(set, c).applicable.map((a) => a.key)).toEqual(['gitops/noisy-alert-relax']);
     const plan = await planRemediation(
       set,
-      'gitops/chronic-alert-relax',
+      'gitops/noisy-alert-relax',
       c,
       { repo: new GitRepoReader(dir), layout: shape.layout },
       ds,
@@ -406,41 +406,80 @@ describe.each(SHAPES)('$name', (shape) => {
     applyCheck(dir, plan.patch);
   });
 
-  it('没有 for 的长期告警补上 for；同名有两条规则时跳过', async () => {
+  it('研判结论为不需要处理：不是长期告警的症状告警也降级并补上 for；同名有两条规则时跳过', async () => {
     const dir = makeRepo(shape, [[OLD, 'r1']]);
     const alert = (alertname: string) => ({
       alertname,
-      labels: { severity: 'critical' },
+      labels: { severity: 'critical', namespace: 'shop' },
       annotations: {},
-      role: 'cause',
+      role: 'symptom',
       source: 'label',
       catalog_entry: null,
-      chronic: true,
+      chronic: false,
       entity: null,
     });
+    const ignore = { disposition: 'ignore', level: 'likely' };
     const repo = new GitRepoReader(dir);
-    const plan = await planRemediation(
-      set,
-      'gitops/chronic-alert-relax',
-      ctx({ alerts: [alert('ShopPodRestarted')] }),
-      { repo, layout: shape.layout },
-      ds,
-      AT,
-    );
+    // 没有研判结论时，非长期告警不适用
+    expect(
+      applicableRemediations(set, ctx({ alerts: [alert('ShopPodRestarted')] })).applicable.map((a) => a.key),
+    ).not.toContain('gitops/noisy-alert-relax');
+    const c = ctx({ alerts: [alert('ShopPodRestarted')], research: ignore });
+    expect(applicableRemediations(set, c).applicable.map((a) => a.key)).toContain('gitops/noisy-alert-relax');
+    const plan = await planRemediation(set, 'gitops/noisy-alert-relax', c, { repo, layout: shape.layout }, ds, AT);
     expect(plan.kind).toBe('plan');
     if (plan.kind === 'plan') {
       expect(plan.patch).toContain('+      for: 1h\n');
+      expect(plan.change['zh-CN']).toContain('研判结论为不需要处理');
       applyCheck(dir, plan.patch);
     }
     const paired = await planRemediation(
       set,
-      'gitops/chronic-alert-relax',
-      ctx({ alerts: [alert('ShopLatencyHigh')] }),
+      'gitops/noisy-alert-relax',
+      ctx({ alerts: [alert('ShopLatencyHigh')], research: ignore }),
       { repo, layout: shape.layout },
       ds,
       AT,
     );
     expect(paired).toMatchObject({ kind: 'skipped', code: 'skip_if' });
+  });
+
+  it('未覆盖的告警只带 service 标签：实体为逻辑组件', async () => {
+    const dir = makeRepo(shape, [[OLD, 'r1']]);
+    const c = ctx({
+      alerts: [
+        {
+          alertname: 'ShopCatalogStale',
+          labels: { severity: 'warning', service: 'catalog' },
+          annotations: {},
+          role: 'symptom',
+          source: 'default',
+          catalog_entry: null,
+          chronic: false,
+          entity: null,
+        },
+      ],
+    });
+    const plan = await planRemediation(
+      set,
+      'gitops/alert-catalog-entry',
+      c,
+      { repo: new GitRepoReader(dir), layout: shape.layout },
+      ds,
+      AT,
+    );
+    expect(plan.kind).toBe('plan');
+    if (plan.kind !== 'plan') {
+      return;
+    }
+    applyCheck(dir, plan.patch);
+    const doc = parse(readFileSync(join(dir, shape.layout.pack_alerts!.path), 'utf8')) as { entries: unknown[] };
+    expect(doc.entries[1]).toEqual({
+      id: 'shop-catalog-stale',
+      alertname: 'ShopCatalogStale',
+      role: 'symptom',
+      entity: { kind: 'component', name_labels: ['service'] },
+    });
   });
 
   it('未覆盖的告警：按 deployment 标签加目录条目；已有条目时跳过', async () => {

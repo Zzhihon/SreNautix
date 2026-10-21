@@ -194,18 +194,22 @@ remediations:
 
   # ---------- 告警规则 ----------
   # 长期告警（7 天内反复触发）以 critical 触发、而事件中没有任何症状告警时，降低严重度并延长持续时间。
-  - id: chronic-alert-relax
-    title: { zh-CN: 降低长期告警的严重度, en: Relax a chronic alert }
+  # 两种依据：研判结论为不需要处理（ignore），或告警在 7 天内反复触发、本次事件中没有症状告警。
+  - id: noisy-alert-relax
+    title: { zh-CN: 降低误报告警的严重度, en: Relax a noisy alert }
     category: alert_rule
     repository: gitops
     when: >-
-      alerts.exists(a, a.chronic && "severity" in a.labels && a.labels.severity == params.from_severity)
-      && !alerts.exists(a, a.role == "symptom")
+      (research != null && research.disposition == "ignore"
+        && alerts.exists(a, a.role != "meta" && "severity" in a.labels && a.labels.severity == params.from_severity))
+      || (alerts.exists(a, a.chronic && "severity" in a.labels && a.labels.severity == params.from_severity)
+        && !alerts.exists(a, a.role == "symptom"))
     params: { from_severity: critical, to_severity: warning, min_for: 1h }
     let:
+      - { name: why, cel: 'research != null && research.disposition == "ignore" ? "research" : "chronic"' }
       - {
           name: alertname,
-          cel: 'alerts.filter(a, a.chronic && "severity" in a.labels && a.labels.severity == params.from_severity)[0].alertname',
+          cel: 'why == "research" ? alerts.filter(a, a.role != "meta" && "severity" in a.labels && a.labels.severity == params.from_severity)[0].alertname : alerts.filter(a, a.chronic && "severity" in a.labels && a.labels.severity == params.from_severity)[0].alertname',
         }
       - {
           name: docs,
@@ -245,8 +249,8 @@ remediations:
           - { path: 'spec.groups[*].rules[alert={alertname}].labels.severity', value: params.to_severity }
           - { path: 'spec.groups[*].rules[alert={alertname}].for', value: new_for }
     change:
-      zh-CN: '告警 {alertname} 的严重度由 {current_severity} 改为 {to_severity}，持续时间由 {current_for} 改为 {new_for}：它在 7 天内反复触发，本次事件中没有任何症状告警。'
-      en: 'Change alert {alertname} from {current_severity} to {to_severity} and its duration from {current_for} to {new_for}: it fired repeatedly over 7 days and no symptom alert fired in this incident.'
+      zh-CN: '告警 {alertname} 的严重度由 {current_severity} 改为 {to_severity}，持续时间由 {current_for} 改为 {new_for}：{why, select, research {研判结论为不需要处理} other {它在 7 天内反复触发，本次事件中没有任何症状告警}}。'
+      en: 'Change alert {alertname} from {current_severity} to {to_severity} and its duration from {current_for} to {new_for}: {why, select, research {the research concluded that it needs no action} other {it fired repeatedly over 7 days and no symptom alert fired in this incident}}.'
     verify:
       say:
         zh-CN: '同步后 {alertname} 以 {to_severity} 触发，不再进入 {current_severity} 通知'
@@ -269,10 +273,10 @@ remediations:
       - { name: alertname, cel: alert.alertname }
       - { name: entry_id, cel: kebab(alertname) }
       - { name: role, cel: alert.role }
-      # 工作负载标签优先于逻辑组件标签
+      # 工作负载标签优先于逻辑组件标签（component、service），后两者的实体为逻辑组件
       - {
           name: name_label,
-          cel: '"deployment" in alert.labels ? "deployment" : "statefulset" in alert.labels ? "statefulset" : "daemonset" in alert.labels ? "daemonset" : "pod" in alert.labels ? "pod" : "component" in alert.labels ? "component" : ""',
+          cel: '"deployment" in alert.labels ? "deployment" : "statefulset" in alert.labels ? "statefulset" : "daemonset" in alert.labels ? "daemonset" : "pod" in alert.labels ? "pod" : "component" in alert.labels ? "component" : "service" in alert.labels ? "service" : ""',
         }
       - {
           name: entity_kind,
@@ -283,8 +287,8 @@ remediations:
       - cel: name_label == ""
         say:
           {
-            zh-CN: '告警 {alertname} 没有可以作为实体名的标签（deployment、statefulset、daemonset、pod、component）',
-            en: 'Alert {alertname} has no label usable as the entity name (deployment, statefulset, daemonset, pod, component)',
+            zh-CN: '告警 {alertname} 没有可以作为实体名的标签（deployment、statefulset、daemonset、pod、component、service）',
+            en: 'Alert {alertname} has no label usable as the entity name (deployment, statefulset, daemonset, pod, component, service)',
           }
       - cel: size(catalogs) != 1
         say: { zh-CN: '仓库布局的告警目录不是唯一的一个文件', en: 'The layout does not name a single alert catalog' }

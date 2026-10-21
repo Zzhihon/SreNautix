@@ -19,6 +19,8 @@ export interface RemediationContext {
   incident: Record<string, unknown>;
   /** 根因实体与组件类型；没有根因时为 null */
   root: (RenderEntity & { component_type?: string | null }) | null;
+  /** 触发计划的研判结论：处置（契约 Disposition）与结论等级（契约 ConclusionLevel）；没有研判时为 null */
+  research?: { disposition: string; level: string } | null;
   /** 卡片全局 id → 结论 */
   cards: Record<string, { verdict: string; display_state?: string; value?: string | null; reason_kind?: string }>;
   /** 成员告警；role、source、catalog_entry、chronic 取自契约 AlertClassification */
@@ -81,7 +83,14 @@ function skip(key: string, code: SkipCode, reason: LocalizedText): RemediationSk
 }
 
 function ctxOf(ctx: RemediationContext, params: Record<string, unknown>): Record<string, unknown> {
-  return { incident: ctx.incident, root: ctx.root, cards: ctx.cards, alerts: ctx.alerts, params };
+  return {
+    incident: ctx.incident,
+    root: ctx.root,
+    research: ctx.research ?? null,
+    cards: ctx.cards,
+    alerts: ctx.alerts,
+    params,
+  };
 }
 
 /** 适用条件为 true 的模板；条件求值出错的模板不适用，错误写入 errors */
