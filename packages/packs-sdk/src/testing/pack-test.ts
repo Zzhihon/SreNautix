@@ -23,7 +23,8 @@ import { judgeCard } from '../judge/card.js';
 import { denseLabels, type RefData } from '../judge/data.js';
 import type { PackSet } from '../pack/compile.js';
 import { LiveDataSource, type EvidenceDataSource } from '../runtime/datasource.js';
-import { durationSeconds, runCard, type RunCardResult } from '../runtime/run-card.js';
+import { DEFAULT_WINDOW, durationSeconds, runCard, type RunCardResult } from '../runtime/run-card.js';
+import { alertFires, primaryCardIndex, ruleForEntry, type AlertRule } from './alert-consistency.js';
 import { resolveSignal, type SignalResolution } from '../signals/resolve.js';
 
 /** 夹具的时间零点 */
@@ -54,6 +55,8 @@ export interface PackTestReport {
     passed: boolean;
   }>;
   cases: CaseResult[];
+  /** 主卡与告警规则的一致性核对次数（夹具测试 × 后端 × 告警） */
+  alert_checks: number;
   passed: boolean;
 }
 
@@ -204,6 +207,8 @@ export interface PackTestOptions {
   set: PackSet;
   /** 只测这些包；不填时测全部启用的包 */
   packs?: string[];
+  /** 告警规则（loadAlertRules）：主卡的夹具测试同时核对告警规则在同一份夹具上是否触发 */
+  alertRules?: Map<string, AlertRule[]>;
 }
 
 export async function runPackTests(opts: PackTestOptions): Promise<PackTestReport> {
@@ -212,6 +217,8 @@ export async function runPackTests(opts: PackTestOptions): Promise<PackTestRepor
   const cases: CaseResult[] = [];
   const packsOut: PackTestReport['packs'] = [];
   const selected = set.packs.filter((p) => !opts.packs || opts.packs.includes(p.name));
+  const primaries = primaryCardIndex(set);
+  const consistency = { checked: 0 };
 
   for (const pack of selected) {
     const cardKeys = [...set.cards.values()].filter((c) => c.pack === pack.name).map((c) => c.key);
@@ -242,6 +249,7 @@ export async function runPackTests(opts: PackTestOptions): Promise<PackTestRepor
         for (const t of tf.tests) {
           const key = cardKeyFor(pack.name, t.card);
           covered.add(key);
+          const e = set.cards.get(key)!;
           const entity = {
             cluster_id: 'pack-test',
             kind: t.entity.kind,
@@ -276,6 +284,32 @@ export async function runPackTests(opts: PackTestOptions): Promise<PackTestRepor
             }
             if (b === 'prometheus' && r.verdict !== 'undeterminable') {
               captured.set(`${key}\u0000${t.name}`, r);
+            }
+            // 这张卡是某些告警的主卡：告警在卡片窗口内触发 ⇔ 主卡判为异常
+            for (const { entry } of primaries.get(key) ?? []) {
+              const rule = opts.alertRules ? ruleForEntry(opts.alertRules, entry) : null;
+              if (!rule) {
+                continue;
+              }
+              const w = e.def.window ?? DEFAULT_WINDOW;
+              const fires = await alertFires(
+                env.ds[b],
+                rule,
+                entry.entity.name_labels ?? [],
+                t.entity.name,
+                { from: anchor - durationSeconds(w.before) * 1000, to: anchor + durationSeconds(w.after) * 1000 },
+                interval,
+                clock,
+              );
+              if (fires === null) {
+                continue;
+              }
+              if (fires !== (r.verdict === 'abnormal')) {
+                failures.push(
+                  `${b}：告警 ${entry.alertname}（${rule.file}）在卡片窗口内${fires ? '触发' : '没有触发'}，主卡判为 ${r.verdict}`,
+                );
+              }
+              consistency.checked++;
             }
           }
           const p = results.prometheus!;
@@ -435,5 +469,5 @@ export async function runPackTests(opts: PackTestOptions): Promise<PackTestRepor
       passed: !uncovered.length && packCases.every((c) => c.passed),
     });
   }
-  return { packs: packsOut, cases, passed: packsOut.every((p) => p.passed) };
+  return { packs: packsOut, cases, alert_checks: consistency.checked, passed: packsOut.every((p) => p.passed) };
 }

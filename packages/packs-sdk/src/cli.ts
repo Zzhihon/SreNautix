@@ -6,7 +6,13 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import { assertValid, type PackLock } from '@srenautix/contract';
-import { detectLabelProfile, LokiAdapter, PrometheusApiAdapter, type Dialect } from '@srenautix/integration-sdk';
+import {
+  detectLabelProfile,
+  loadPromqlEngine,
+  LokiAdapter,
+  PrometheusApiAdapter,
+  type Dialect,
+} from '@srenautix/integration-sdk';
 import { parse } from 'yaml';
 import { runDoctor } from './doctor.js';
 import { loadActionCatalog } from './pack/catalog.js';
@@ -17,6 +23,7 @@ import { loadPackDir } from './pack/load.js';
 import { loadBuiltinPacks } from './pack/sources.js';
 import { LiveDataSource } from './runtime/datasource.js';
 import { ReplayDataSource, writeSnapshot } from './runtime/snapshot.js';
+import { loadAlertRules } from './testing/alert-consistency.js';
 import { runPackTests } from './testing/pack-test.js';
 import { recordSnapshot } from './testing/record.js';
 import { replaySnapshot } from './testing/replay.js';
@@ -27,7 +34,9 @@ const USAGE = `用法：srenautix pack <命令> [选项]
   lint     加载并编译领域包（schema、交叉引用、CEL、PromQL 严格解析、动作目录），输出 pack.lock 摘要
   lock     计算 pack.lock；--write 写入文件，--check 与已有文件比对
   test     在 Prometheus 与 VictoriaMetrics 上执行夹具与自动测试；--replay 改为在 tests/replay/*.json 快照上执行；
-           --test <包名> 只执行这些包的测试（其余包仍然加载，供跨包引用的证据链编译），可重复
+           --test <包名> 只执行这些包的测试（其余包仍然加载，供跨包引用的证据链编译），可重复；
+           --alert-rules <文件> 告警规则文件（Prometheus 规则、PrometheusRule 或 VMRule），可重复：
+           告警目录条目的主卡的夹具测试同时求告警规则，告警在卡片窗口内触发与主卡判为异常必须一致
   record   在真实数据源上执行卡片并录制查询邻域快照
   doctor   覆盖情况：已解析的信号、14 天内未映射的告警名、没有证据链的组件
 
@@ -132,6 +141,7 @@ export async function runPackCli(
       anchor: { type: 'string' },
       out: { type: 'string' },
       json: { type: 'boolean' },
+      'alert-rules': { type: 'string', multiple: true },
     },
     strict: true,
   });
@@ -204,7 +214,12 @@ export async function runPackCli(
         }
         return failed ? 1 : 0;
       }
-      const report = await runPackTests({ set, ...(tested ? { packs: tested } : {}) });
+      const rules = v['alert-rules'] as string[] | undefined;
+      const report = await runPackTests({
+        set,
+        ...(tested ? { packs: tested } : {}),
+        ...(rules ? { alertRules: loadAlertRules(rules, await loadPromqlEngine()) } : {}),
+      });
       if (v.json) {
         io.out(JSON.stringify(report, null, 2) + '\n');
       } else {
@@ -217,6 +232,9 @@ export async function runPackCli(
           );
         }
         io.out(`${report.cases.filter((c) => c.passed).length}/${report.cases.length} 个用例通过\n`);
+        if (rules) {
+          io.out(`主卡与告警规则的一致性核对 ${report.alert_checks} 次\n`);
+        }
       }
       return report.passed ? 0 : 1;
     }

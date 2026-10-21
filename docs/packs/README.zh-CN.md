@@ -206,6 +206,9 @@ component_types:
 
 ```yaml
 remediation:
+  enabled: true
+  categories: [release_rollback, config_resource, alert_rule, topology_coverage]
+  conclusions: [likely, evidence_consistent]  # 研判结论达到这些等级时计划（ADR 0108）
   repositories:
     gitops:                                   # 仓库角色，模板的 repository
       repo: example-org/shop-gitops
@@ -223,7 +226,7 @@ remediation:
 | 字段 | 内容 |
 |---|---|
 | `category` | `release_rollback`、`config_resource`、`alert_rule`、`topology_coverage` |
-| `when` | 适用条件（CEL）：`incident`、`root`、`cards`（`<包>/<链>/<卡>` → 结论）、`alerts`（成员告警，含 `role`、`source`、`catalog_entry`、`chronic`）、`params` |
+| `when` | 适用条件（CEL）：`incident`、`root`、`research`（研判结论 `{disposition, level}`，没有时为 null）、`cards`（`<包>/<链>/<卡>` → 结论）、`alerts`（成员告警，含 `role`、`source`、`catalog_entry`、`chronic`）、`params` |
 | `inputs` | 计划时在事件锚点对本包 metrics 信号的 instant 查询；`entity` 是求实体的 CEL，默认根因 |
 | `history` | 读取一个文件角色的 Git 历史，变量 `history` 为最近 `depth` 个修改过它的提交 `{commit, author, time, message, doc}` |
 | `let`、`skip_if` | 按顺序求值的绑定；`skip_if` 任一为 true 时不生成补丁，`say` 写明原因 |
@@ -239,8 +242,8 @@ remediation:
 | `release-to-serving-version` | release_rollback | `params.stuck_cards` 中任一卡片异常（默认 `workload/release/init-waiting`、`replicasets`） | 发布输入改回历史中最近一次指向就绪 Pod 镜像 digest 的版本；仓库已经指向它时跳过 |
 | `hpa-max-replicas-raise` | config_resource | 根因是 HPA，`workload/capacity/hpa` 异常 | `spec.maxReplicas` 加 `params.step`，不超过 `params.ceiling` |
 | `memory-limit-raise` | config_resource | 根因是工作负载，`workload/pod-restarts/memory` 异常 | OOMKilled 容器的内存 limit 乘 `params.factor`，不超过 `params.ceiling` |
-| `chronic-alert-relax` | alert_rule | 长期告警以 critical 触发，事件中没有症状告警 | 严重度改为 `params.to_severity`，`for` 至少 `params.min_for` |
-| `alert-catalog-entry` | topology_coverage | 成员告警没有命中告警目录 | 按 deployment、statefulset、daemonset、pod 或 component 标签给告警目录加一条条目 |
+| `noisy-alert-relax` | alert_rule | 研判结论为不需要处理（`research.disposition == "ignore"`）且有 critical 告警，或长期告警以 critical 触发、事件中没有症状告警 | 严重度改为 `params.to_severity`，`for` 至少 `params.min_for` |
+| `alert-catalog-entry` | topology_coverage | 成员告警没有命中告警目录 | 按 deployment、statefulset、daemonset、pod、component 或 service 标签给告警目录加一条条目 |
 
 模板的测试在 `packages/packs-sdk/test/remediation.test.ts`：同一套模板在两种布局的 Git 仓库上生成补丁，补丁必须能 `git apply --check` 到基准提交。
 
@@ -335,6 +338,7 @@ tests:
 - 每个测试在两个后端上各跑一遍，结论（verdict、显示状态、原因类型）必须与期望一致，两个后端之间也必须一致。
 - 每张卡自动生成三类测试：空后端上必须是无法判定；逐个把 `no_data` 引用换成空结果或数据源错误后不能得出正常；全部 `no_data` 引用报错时不能得出正常，没有判为异常时原因必须是 `source_error`。
 - `stable` 的包要求每张卡都有夹具测试。
+- 告警目录条目的 `primary_card`（`<链>/<卡>` 或 `<包>/<链>/<卡>`）是与告警条件对应的卡，告警触发时它应当判为异常。`lint` 检查卡片存在、`applies_to` 包含条目的实体 kind、卡片所在的证据链在条目的 `chains` 中。`test --alert-rules <规则文件>` 读入告警规则（Prometheus 规则文件、PrometheusRule 或 VMRule，同名告警按条目的 `match_labels` 选规则），主卡的每个夹具测试在同一份夹具上再求一次告警规则：告警在卡片窗口内触发（满足 `for`）当且仅当主卡判为异常，否则测试失败。阈值因此只在告警规则里写一次，两边漂移时 CI 失败。
 - 测试的 `params` 字段覆盖卡片参数，用于验证阈值行为。
 
 **录制与回放**：`record` 在真实数据源上执行卡片，把查询与响应写成快照（`srenautix.io/query-snapshot/v1`）。`test --replay` 用快照代替数据源重新判定，快照中没有的查询直接失败，因此修改查询的提交必须重新录制。

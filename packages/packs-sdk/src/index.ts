@@ -29,7 +29,14 @@ export {
   type OciPullOptions,
   type LoadedOciPack,
 } from './pack/oci.js';
-export { compilePackSet, type PackSet, type CardEntry, type CompileOptions } from './pack/compile.js';
+export {
+  compilePackSet,
+  primaryCardKey,
+  kindKey,
+  type PackSet,
+  type CardEntry,
+  type CompileOptions,
+} from './pack/compile.js';
 export {
   selectorFor,
   podPattern,
@@ -74,6 +81,13 @@ export {
   type ExcludeEvaluation,
 } from './runtime/rules.js';
 export { runPackTests, FIXTURE_EPOCH, type PackTestReport, type CaseResult } from './testing/pack-test.js';
+export {
+  loadAlertRules,
+  ruleForEntry,
+  primaryCardIndex,
+  alertFires,
+  type AlertRule,
+} from './testing/alert-consistency.js';
 export { replaySnapshot, type ReplayReport, type ReplayCaseResult } from './testing/replay.js';
 export { recordSnapshot } from './testing/record.js';
 export {

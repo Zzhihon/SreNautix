@@ -75,6 +75,47 @@ const LINT_PROFILE: LabelProfile = {
   tenant: null,
 };
 
+/** 主卡的全局键：<chain>/<card> 在条目所在的包内解析，三段为 <pack>/<chain>/<card> */
+export function primaryCardKey(pack: string, ref: string): string {
+  return ref.split('/').length === 2 ? `${pack}/${ref}` : ref;
+}
+
+/** 实体 kind 的比较形式：忽略大小写与 API 组（application 与 Application.argoproj.io 相同），与评测的实体匹配一致 */
+export function kindKey(kind: string): string {
+  return kind.split('.')[0]!.toLowerCase();
+}
+
+/**
+ * 主卡的检查：卡片存在；卡片的 applies_to 包含条目的实体 kind；卡片所在的证据链在条目的 chains 中，
+ * 告警触发时阶段 A 才会在告警实体上执行它（评测按这次执行的结论统计一致率）。
+ */
+function checkPrimaryCard(
+  pack: string,
+  e: { primary_card?: string; chains?: string[]; entity: { kind: string } },
+  cards: PackSet['cards'],
+  where: string,
+): void {
+  const key = primaryCardKey(pack, e.primary_card!);
+  const card = cards.get(key);
+  if (!card || card.chain === null) {
+    throw new PackLintError(where, `主卡 ${e.primary_card} 不存在或所在的包被禁用`);
+  }
+  const kinds = card.def.applies_to?.kinds;
+  if (kinds && !kinds.some((k) => kindKey(k) === kindKey(e.entity.kind))) {
+    throw new PackLintError(
+      where,
+      `主卡 ${e.primary_card} 的 applies_to（${kinds.join('、')}）不包含实体 kind ${e.entity.kind}`,
+    );
+  }
+  const chain = `${card.pack}/${card.chain}`;
+  if (!(e.chains ?? []).some((c) => (c.includes('/') ? c : `${pack}/${c}`) === chain)) {
+    throw new PackLintError(
+      where,
+      `主卡 ${e.primary_card} 所在的证据链 ${chain} 不在条目的 chains 中，告警触发时不会执行`,
+    );
+  }
+}
+
 function cardKind(mode: string): Signal['kind'] {
   return mode === 'logs' ? 'logs' : mode === 'traces' ? 'traces' : 'metrics';
 }
@@ -255,9 +296,13 @@ export async function compilePackSet(loaded: LoadedPack[], opts: CompileOptions)
   const componentTypes = new Set(active.flatMap((p) => p.content.components.component_types.map((c) => c.id)));
   for (const p of active) {
     for (const e of p.content.alerts.entries) {
-      (e.chains ?? []).forEach((c) => chainRef(p.name, c, `${p.dir}/alerts.yaml：${e.id}`));
+      const where = `${p.dir}/alerts.yaml：${e.id}`;
+      (e.chains ?? []).forEach((c) => chainRef(p.name, c, where));
       if (e.component_type && !componentTypes.has(e.component_type)) {
-        throw new PackLintError(`${p.dir}/alerts.yaml：${e.id}`, `组件类型 ${e.component_type} 不存在`);
+        throw new PackLintError(where, `组件类型 ${e.component_type} 不存在`);
+      }
+      if (e.primary_card) {
+        checkPrimaryCard(p.name, e, cards, where);
       }
     }
     for (const ct of p.content.components.component_types) {
