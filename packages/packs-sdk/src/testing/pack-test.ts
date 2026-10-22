@@ -199,8 +199,13 @@ const summary = (r: RunCardResult) => ({
   reason: r.reason.text,
 });
 
-function cardKeyFor(pack: string, ref: string): string {
-  return `${pack}/${ref}`;
+/**
+ * 测试引用的卡：本包的 <链>/<卡>（或 checks/<id>、templates/<id>）；本包没有、而 ref 本身是另一个包的卡键
+ * <包>/<链>/<卡> 时取那张卡，例如本包用 extends 补充了它读取的信号（ADR 0139）
+ */
+function cardKeyFor(set: PackSet, pack: string, ref: string): string {
+  const own = `${pack}/${ref}`;
+  return set.cards.has(own) || !set.cards.has(ref) ? own : ref;
 }
 
 export interface PackTestOptions {
@@ -236,7 +241,7 @@ export async function runPackTests(opts: PackTestOptions): Promise<PackTestRepor
         const clock = { from: toIso(FIXTURE_EPOCH - 30 * DAY), to: toIso(end + 30 * DAY) };
         const used = new Set<string>();
         for (const t of tf.tests) {
-          const e = set.cards.get(cardKeyFor(pack.name, t.card));
+          const e = set.cards.get(cardKeyFor(set, pack.name, t.card));
           if (!e) {
             throw new Error(`${where}：测试 ${t.name} 引用的卡片 ${t.card} 不存在`);
           }
@@ -247,7 +252,7 @@ export async function runPackTests(opts: PackTestOptions): Promise<PackTestRepor
           'victoria-metrics': await resolveAll(set, used, env.ds['victoria-metrics'], engine, end, clock),
         };
         for (const t of tf.tests) {
-          const key = cardKeyFor(pack.name, t.card);
+          const key = cardKeyFor(set, pack.name, t.card);
           covered.add(key);
           const e = set.cards.get(key)!;
           const entity = {

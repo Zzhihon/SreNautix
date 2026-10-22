@@ -29,6 +29,7 @@ ADR 0138 让代码推导处置，适用的修复模板可以支撑 act，重建�
 
    上下文的卡带上卡片定义的 `impact` 标记。
 6. **HPA 饱和要求限流或变慢**：`workload/capacity/hpa-utilization` 改为判断负载是否饱和：伸缩指标超过目标的 `params.over` 倍，并且伸缩对象的 CPU 限流超过 `params.ratio`、或 p95 延迟超过一天前的 `params.factor` 倍（与 `hpa-throttling`、`hpa-latency` 的阈值相同）。限流与延迟没有数据时按"没有证据"处理，只用另一项判断；超过目标、没有限流、延迟直方图饱和时无法判定。`hpa-throttling` 与 `hpa-latency` 标为影响卡。`hpa-max-replicas-raise` 要求根因 HPA 自己的 `hpa` 与 `hpa-utilization` 都异常：副本数顶到上限、负载没有饱和时上限只是没有余量，不提高上限，影响卡全部正常时处置推导可以按 ADR 0138 的影响卡依据给出 ignore。
+7. **用户包补充内置包的信号**（契约 2.26.0）：领域包的信号增加 `extends: <包>/<信号 id>`，补充的备选排在被补充信号原有的备选之前，引用它的卡按合并后的备选探测与查询。只能补充别的包里、本身不是补充的信号，类型必须相同。包的测试可以用完整的卡键测试别的包的卡。CCHP 的 gateway 没有 `http_request_duration_seconds`，cchp 包用它为 `workload/hpa_target_latency_p95` 与 `_baseline` 补充 gateway 自身的阶段耗时（`cchp_gateway_stage_duration_seconds`，auth、parse、plan），`hpa-latency` 与 `hpa-utilization` 不必复制到 cchp 包。没有采用"组件类型替换信号"这类按实体选择备选的做法：备选的探测按数据源进行，按实体选择要改运行时，补充的表达式用 `and on ()` 限定实体就够了。
 
 ## 结果
 

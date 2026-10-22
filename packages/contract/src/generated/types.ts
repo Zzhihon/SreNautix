@@ -3341,6 +3341,10 @@ export interface Signal {
   kind: 'metrics' | 'logs' | 'traces';
   unit?: string;
   /**
+   * 补充另一个包的信号 <包>/<信号 id>（契约 2.26.0，ADR 0139）：本信号的备选排在那个信号原有的备选之前，引用那个信号的卡都按合并后的备选探测与查询。只能补充别的包里没有 extends 的信号，类型必须相同。备选按数据源选中一个，被选中后用于这个信号的全部实体，只覆盖部分实体的备选要让其余实体查不到数据
+   */
+  extends?: string;
+  /**
    * 按优先级排列
    *
    * @minItems 1
@@ -3873,7 +3877,7 @@ export interface PackTestFile {
       name: string;
       eval_time: Duration;
       /**
-       * <chain>/<card> 或 checks/<id>
+       * <chain>/<card> 或 checks/<id>；写成 <包>/<链>/<卡> 时测试别的包的卡，例如本包用 extends 补充了它读取的信号（契约 2.26.0）
        */
       card: string;
       entity: {
@@ -3894,7 +3898,7 @@ export interface PackTestFile {
       name: string;
       eval_time: Duration;
       /**
-       * <chain>/<card> 或 checks/<id>
+       * <chain>/<card> 或 checks/<id>；写成 <包>/<链>/<卡> 时测试别的包的卡，例如本包用 extends 补充了它读取的信号（契约 2.26.0）
        */
       card: string;
       entity: {

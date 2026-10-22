@@ -62,6 +62,27 @@ signals:
 - 没有备选可用时，`srenautix pack doctor` 列出每个备选被拒绝的原因（`capability`、`dialect`、`missing_metric`、`probe`、`error`）。
 - `recording_rule: true` 的备选不能是最后一个：录制规则是可选的加速，必须有原始表达式兜底。
 
+**补充别的包的信号**
+
+应用没有内置包假定的指标时（例如没有 `http_request_duration_seconds`，`workload` 包的 HPA 延迟卡因此无法判定），用户包可以给那个信号补充备选，而不必复制证据卡（契约 2.26.0，ADR 0139）：
+
+```yaml
+signals:
+  - id: gateway_latency_p95
+    kind: metrics
+    unit: seconds
+    extends: workload/hpa_target_latency_p95
+    alternatives:
+      - expr: >-
+          histogram_quantile(0.95, sum by (le) (rate(app_stage_duration_seconds_bucket{job="gateway"}[$rate_window])))
+          and on () max(kube_horizontalpodautoscaler_info{namespace="$namespace", horizontalpodautoscaler="$name", scaletargetref_name="gateway"})
+```
+
+- 补充的备选排在被补充信号原有的备选之前（多个包补充同一个信号时按包的加载顺序），引用那个信号的卡都按合并后的备选探测与查询；补充信号本身仍是本包的信号。
+- 只能补充别的包里、本身不是补充的信号，类型必须相同。
+- 备选按数据源选中一个，被选中后用于这个信号的全部实体。只适用于部分实体的备选要用 `and on () ...` 之类的条件让其余实体查不到数据（无法判定），否则会把一个实体的数据当成所有实体的。
+- 本包的测试可以用完整的卡键 `<包>/<链>/<卡>` 测试被补充的内置卡，例如 `card: workload/capacity/hpa-latency`。
+
 **模板变量**
 
 | 变量 | 含义 |

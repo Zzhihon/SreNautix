@@ -251,6 +251,43 @@ export async function compilePackSet(loaded: LoadedPack[], opts: CompileOptions)
       signals.set(key, { pack: p.name, signal: s });
     }
   }
+  // 补充别的包的信号（Signal.extends，ADR 0139）：补充的备选按包的加载顺序排在被补充信号原有的备选之前。
+  // 卡片编译、探测与查询都读 signals 里合并后的信号
+  const prepended = new Map<string, number>();
+  for (const p of active) {
+    for (const s of p.content.signals.signals) {
+      if (!s.extends) {
+        continue;
+      }
+      const where = `${p.dir}/signals.yaml`;
+      const target = signals.get(s.extends);
+      if (!target) {
+        throw new PackLintError(where, `信号 ${s.id} 补充的信号 ${s.extends} 不存在或所在的包被禁用`);
+      }
+      if (target.pack === p.name) {
+        throw new PackLintError(where, `信号 ${s.id} 只能补充别的包的信号，${s.extends} 在本包中`);
+      }
+      if (target.signal.extends) {
+        throw new PackLintError(where, `信号 ${s.id} 补充的 ${s.extends} 本身也是补充，不能逐级补充`);
+      }
+      if (target.signal.kind !== s.kind) {
+        throw new PackLintError(
+          where,
+          `信号 ${s.id}（${s.kind}）与补充的信号 ${s.extends}（${target.signal.kind}）类型不同`,
+        );
+      }
+      const n = prepended.get(s.extends) ?? 0;
+      const alts = target.signal.alternatives;
+      signals.set(s.extends, {
+        pack: target.pack,
+        signal: {
+          ...target.signal,
+          alternatives: [...alts.slice(0, n), ...s.alternatives, ...alts.slice(n)] as typeof alts,
+        },
+      });
+      prepended.set(s.extends, n + s.alternatives.length);
+    }
+  }
 
   const resolveSignal = (pack: string, ref: string, where: string): string => {
     const key = ref.includes('/') ? ref : `${pack}/${ref}`;
