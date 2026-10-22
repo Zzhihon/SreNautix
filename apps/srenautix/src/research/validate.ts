@@ -18,6 +18,43 @@ import type { ResearchCase } from './types.js';
 export const RECOMMENDATION_ORDER = ['mitigation', 'root_fix', 'prevention', 'investigation'] as const;
 const MAX_PER_KIND = 3;
 
+const RECOMMENDATION_ID = /^r[0-9]{1,2}$/;
+
+/**
+ * conclude 输出的补全（解析之后、校验之前，见 repairLocally 的 prepare）：recommendations 里有 id 不合规
+ * （不符合 ^r[0-9]{1,2}$、缺失或重复）的条目时，全部条目按数组顺序重新编号为 r1、r2……，不因 id 删除整条建议。
+ * id 只在建议之间区分条目，输出里没有别处引用它，重新编号不改变含义。每处改动写入 notes。
+ */
+export function renumberRecommendations(value: unknown, notes: string[]): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return value;
+  }
+  const v = value as Record<string, unknown>;
+  if (!Array.isArray(v.recommendations)) {
+    return value;
+  }
+  const items = v.recommendations as unknown[];
+  const ids = items.map((r) => (r && typeof r === 'object' && !Array.isArray(r) ? (r as { id?: unknown }).id : null));
+  const valid = ids.every((id, i) => typeof id === 'string' && RECOMMENDATION_ID.test(id) && ids.indexOf(id) === i);
+  if (valid) {
+    return value;
+  }
+  let n = 0;
+  const recommendations = items.map((r, i) => {
+    if (!r || typeof r !== 'object' || Array.isArray(r)) {
+      return r;
+    }
+    const id = `r${++n}`;
+    if (ids[i] !== id) {
+      notes.push(
+        `/recommendations[${i}]：id ${ids[i] === undefined ? '缺失' : JSON.stringify(ids[i]).slice(0, 40)}，按顺序重新编号为 ${id}`,
+      );
+    }
+    return { ...r, id };
+  });
+  return { ...v, recommendations };
+}
+
 export interface Validated {
   chosen: LedgerEntry | null;
   /** 结论假设的来源：模型选中；模型弃权时由代码按账本选中（ADR 0120，档位最高 likely） */

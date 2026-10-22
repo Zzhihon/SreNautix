@@ -8,6 +8,7 @@ import { segmentsText } from '../../src/llm/wire.js';
 import { inferCheckTemplates } from '../../src/research/checks.js';
 import { EvidenceBook } from '../../src/research/evidence.js';
 import { Ledger } from '../../src/research/ledger.js';
+import { renumberRecommendations } from '../../src/research/validate.js';
 import {
   componentChoices,
   concludeItems,
@@ -324,5 +325,90 @@ describe('next_checks 缺少 template', () => {
     expect(value.next_checks.map((c) => c.template)).toEqual([templates[0]]);
     expect(r.notes.join('\n')).toContain('/next_checks[1]：条目不合格，已删除');
     expect(r.notes.join('\n')).toContain('/next_checks[0]：template 缺失');
+  });
+});
+
+describe('conclude 的 recommendations id 不合规（Zzhihon/SreNautix#9）', () => {
+  const rec = (id: unknown, kind = 'mitigation') => ({
+    ...(id === undefined ? {} : { id }),
+    kind,
+    title: 't',
+    rationale: 'r',
+    steps: ['kubectl get pdb -n data'],
+    owner: 'platform',
+    risk: 'low',
+    risk_note: null,
+    runbook_ref: null,
+    action_id: null,
+    hypothesis_id: 'h1',
+    evidence_refs: [],
+  });
+  const concludeOut = (recommendations: unknown[]) => ({
+    disposition: 'escalate',
+    hypothesis_id: 'h1',
+    undetermined_reason: null,
+    situation: 's',
+    summary: 'm',
+    recommendations,
+    proposals: [],
+  });
+  const turnOf = (value: unknown): LlmTurn => ({
+    text: JSON.stringify(value),
+    reasoningChars: 0,
+    refusal: null,
+    toolCalls: [],
+    incomplete: null,
+    usage: { input: 1, cachedInput: 0, output: 1, reasoning: 0 },
+    responseModel: null,
+    systemFingerprint: null,
+  });
+  const schema = bindSchema(modelSchema('conclude'), {
+    components: [],
+    evidence_refs: [],
+    check_templates: [],
+    runbooks: [],
+    actions: [],
+  }).full;
+
+  it('修复阶梯：不合规的 id 按顺序重新编号为 r1、r2……，建议一条都不删', () => {
+    const value = concludeOut([rec('rec-1'), rec('r2', 'root_fix'), rec(undefined, 'investigation')]);
+    // 修复前：按字段挽救把 id 不合规的两条整条删掉
+    const before = repairLocally(turnOf(value), schema);
+    expect(before.ok && (before.value as { recommendations: unknown[] }).recommendations).toHaveLength(1);
+
+    const r = repairLocally(turnOf(value), schema, renumberRecommendations);
+    expect(r.ok).toBe(true);
+    if (!r.ok) {
+      return;
+    }
+    expect(r.step).toBe('field_salvage');
+    const out = r.value as { recommendations: Array<{ id: string; kind: string }> };
+    expect(out.recommendations.map((x) => [x.id, x.kind])).toEqual([
+      ['r1', 'mitigation'],
+      ['r2', 'root_fix'],
+      ['r3', 'investigation'],
+    ]);
+    expect(r.notes).toEqual([
+      '/recommendations[0]：id "rec-1"，按顺序重新编号为 r1',
+      '/recommendations[2]：id 缺失，按顺序重新编号为 r3',
+    ]);
+  });
+
+  it('id 重复也重新编号；id 都合规且不重复时原样保留', () => {
+    const notes: string[] = [];
+    const dup = renumberRecommendations(concludeOut([rec('r1'), rec('r1'), rec('r7')]), notes) as {
+      recommendations: Array<{ id: string }>;
+    };
+    expect(dup.recommendations.map((x) => x.id)).toEqual(['r1', 'r2', 'r3']);
+    expect(notes).toEqual([
+      '/recommendations[1]：id "r1"，按顺序重新编号为 r2',
+      '/recommendations[2]：id "r7"，按顺序重新编号为 r3',
+    ]);
+
+    const ok = concludeOut([rec('r3'), rec('r1')]);
+    const kept: string[] = [];
+    expect(renumberRecommendations(ok, kept)).toBe(ok);
+    expect(kept).toEqual([]);
+    expect(repairLocally(turnOf(ok), schema, renumberRecommendations)).toMatchObject({ ok: true, step: 'validate' });
   });
 });

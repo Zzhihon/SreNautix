@@ -21,7 +21,7 @@ import { Ledger } from './ledger.js';
 import type { WorkerMetrics } from './metrics.js';
 import { componentChoices, concludeItems, hypothesizeItems, promptParts } from './prompt.js';
 import type { PreviousRun, ResearchCase } from './types.js';
-import { auditModelText, evidenceCorpus, validateConclusion } from './validate.js';
+import { auditModelText, evidenceCorpus, renumberRecommendations, validateConclusion } from './validate.js';
 
 // 阶段 B 控制器（DESIGN §7.2–§7.4）：hypothesize → discriminate（可多轮）→ conclude。
 // 模型只提出假设、检查与结论文字；账本状态、停止规则、结论阶梯与校验都由代码决定。
@@ -210,9 +210,11 @@ export async function runStageB(input: ResearchRunInput, env: ResearchEnv, sink:
       schema: b.portable,
       full: b.full,
       // next_checks 缺少 template 时按条目里的检查 id 补全，补不出才删除这一条（ADR 0127）
-      ...(name === 'hypothesize'
-        ? { prepare: (v: unknown, n: string[]) => inferCheckTemplates(v, e.check_templates, n) }
-        : {}),
+      // conclude 的 recommendations id 不合规时按顺序重新编号，不删除建议
+      prepare:
+        name === 'hypothesize'
+          ? (v: unknown, n: string[]) => inferCheckTemplates(v, e.check_templates, n)
+          : (v: unknown, n: string[]) => renumberRecommendations(v, n),
     };
   };
   const hash = (phase: LlmPhase, step: 'hypothesize' | 'conclude') => {
