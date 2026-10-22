@@ -1,7 +1,7 @@
 api_version: srenautix.io/pack/v1
 name: workload
-version: 1.1.0
-description: 工作负载：重启与终止原因、内存与 CPU 限流、调度与等待、卡住的 init 容器、发布进度、发布（等待迁移的 init 容器、新旧 ReplicaSet、正在服务的版本、迁移 Job、开始前后的错误率与延迟）、Job、HPA、配额与节点 requests
+version: 1.2.0
+description: 工作负载：重启与终止原因、内存与 CPU 限流、调度与等待、卡住的 init 容器、PodDisruptionBudget（允许的驱逐数、健康副本）、发布进度、发布（等待迁移的 init 容器、新旧 ReplicaSet、正在服务的版本、迁移 Job、开始前后的错误率与延迟）、Job、HPA、配额与节点 requests
 maturity: stable
 min_srenautix_version: 0.1.0
 requires:

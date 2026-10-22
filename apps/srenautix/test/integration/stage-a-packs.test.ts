@@ -82,6 +82,17 @@ function fixtures(): FixtureMetricSeries[] {
       },
       points: range(from, T, MIN, () => 1),
     },
+    // data/pg 的 PDB：单副本、minAvailable 1，健康副本够数，一直不允许驱逐（CCHP daeb169 上阻塞驱逐的 PDB）
+    ...(
+      [
+        ['kube_poddisruptionbudget_status_desired_healthy', 1],
+        ['kube_poddisruptionbudget_status_current_healthy', 1],
+        ['kube_poddisruptionbudget_status_pod_disruptions_allowed', 0],
+      ] as const
+    ).map(([name, v]) => ({
+      labels: { __name__: name, namespace: 'data', poddisruptionbudget: 'pg' },
+      points: range(from, T, MIN, () => v),
+    })),
   ];
 }
 
@@ -352,6 +363,35 @@ describe('阶段 A 的领域包证据链', () => {
     expect(run.cards.map((c) => [c.card_id, c.verdict, c.reason.kind])).toEqual([
       ['_example/pod-memory/limit-ratio', 'abnormal', 'rule'],
       ['_example/pod-memory/oom-logs', 'undeterminable', 'capability_missing'],
+    ]);
+  });
+
+  it('PodDisruptionBudget 根因：按 kind 匹配 workload 包的 kubernetes.pdb，执行允许的驱逐数与健康副本卡', async () => {
+    // CCHP daeb169 上 7 个 PDB 根因的事件阶段 A 一张卡都没有：没有任何组件类型匹配 PodDisruptionBudget
+    const r = await PackRuntime.load({
+      dirs: [PACKS],
+      only: ['workload'],
+      lockFile: null,
+      catalogPath: DEFAULT_CATALOG_PATH,
+      capabilities: CAPS,
+    });
+    const ev = new PackEvidence(
+      r,
+      source,
+      async () => null,
+      { locale: 'zh-CN', concurrency: 4, queryTimeoutMs: 10_000 },
+      metrics,
+    );
+    const run = await ev.run(
+      incident({ kind: 'PodDisruptionBudget', namespace: 'data', name: 'pg' }),
+      [],
+      AbortSignal.timeout(30_000),
+    );
+    expect(run.rootComponentType).toBe('kubernetes.pdb');
+    expect(run.chains).toEqual(['workload/pdb', 'workload/pod-pending']);
+    expect(run.cards.map((c) => [c.card_id, c.entity?.name, c.verdict])).toEqual([
+      ['workload/pdb/disruptions', 'pg', 'abnormal'],
+      ['workload/pod-pending/pdb', 'pg', 'normal'],
     ]);
   });
 

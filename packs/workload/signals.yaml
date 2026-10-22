@@ -78,6 +78,14 @@ signals:
             kube_poddisruptionbudget_status_desired_healthy{namespace="$namespace", poddisruptionbudget="$name"}
             - kube_poddisruptionbudget_status_current_healthy{namespace="$namespace", poddisruptionbudget="$name"}
           )
+  - id: pdb_disruptions_allowed
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: >-
+          max by (namespace, poddisruptionbudget) (
+            kube_poddisruptionbudget_status_pod_disruptions_allowed{namespace="$namespace", poddisruptionbudget="$name"}
+          )
   - id: deployment_unavailable
     kind: metrics
     unit: count

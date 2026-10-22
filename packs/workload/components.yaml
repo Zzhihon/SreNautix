@@ -19,3 +19,7 @@ component_types:
   - id: kubernetes.hpa
     match: { kind: HorizontalPodAutoscaler }
     chains: [capacity]
+  # PDB 根因的事件（检测器的 SreNautixPdbBlockingEviction）：允许的驱逐数与健康副本（pod-pending 里只有 pdb 卡适用于 PDB）
+  - id: kubernetes.pdb
+    match: { kind: PodDisruptionBudget }
+    chains: [pdb, pod-pending]

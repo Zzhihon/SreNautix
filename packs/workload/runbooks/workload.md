@@ -12,6 +12,11 @@
 - CreateContainerConfigError：引用的 ConfigMap 或 Secret 不存在。
 - init 容器卡住：确认它等待的依赖已经恢复后，批准 `pod_restart` 提议重建 Pod。
 
+## PodDisruptionBudget
+
+- `允许的驱逐数` 为 0：节点排空、Eviction API 与 `pod_restart` 提议都会被这个 PDB 阻塞。`PDB 健康副本` 卡正常而允许的驱逐数仍为 0，说明 `minAvailable` 等于（或 `maxUnavailable` 为 0 时就是）期望的 Pod 数，常见于单副本的数据库主实例；需要先扩副本或调整 PDB，再排空节点。
+- 健康副本比要求少：先按 `调度与启动`、`重启与 OOM` 找出副本不健康的原因，PDB 本身没有问题。
+
 ## 发布
 
 - Deployment 有副本长期不可用：新版本的就绪探针失败或资源不足；必要时回滚。

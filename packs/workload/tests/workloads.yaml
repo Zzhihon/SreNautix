@@ -126,6 +126,28 @@ input_series:
       series: 'kube_poddisruptionbudget_status_current_healthy{namespace="shop",poddisruptionbudget="api"}',
       values: '2x60',
     }
+  # web 第 20 分钟后少一个健康副本，不再允许驱逐；api 一直允许驱逐 1 个
+  - {
+      series: 'kube_poddisruptionbudget_status_pod_disruptions_allowed{namespace="shop",poddisruptionbudget="web"}',
+      values: '1x20 0x40',
+    }
+  - {
+      series: 'kube_poddisruptionbudget_status_pod_disruptions_allowed{namespace="shop",poddisruptionbudget="api"}',
+      values: '1x60',
+    }
+  # pg：单副本、minAvailable 1，健康副本够数，但一直不允许驱逐（CCHP 上阻塞驱逐的 PDB）
+  - {
+      series: 'kube_poddisruptionbudget_status_desired_healthy{namespace="data",poddisruptionbudget="pg"}',
+      values: '1x60',
+    }
+  - {
+      series: 'kube_poddisruptionbudget_status_current_healthy{namespace="data",poddisruptionbudget="pg"}',
+      values: '1x60',
+    }
+  - {
+      series: 'kube_poddisruptionbudget_status_pod_disruptions_allowed{namespace="data",poddisruptionbudget="pg"}',
+      values: '0x60',
+    }
 
   # ---------- 发布 ----------
   - { series: 'kube_deployment_spec_replicas{namespace="shop",deployment="web"}', values: '3x60' }
@@ -333,6 +355,34 @@ tests:
       name: PDB 有余量,
       eval_time: 40m,
       card: pod-pending/pdb,
+      entity: { kind: PodDisruptionBudget, namespace: shop, name: api },
+      expect: { verdict: normal },
+    }
+  - {
+      name: PDB 健康副本够数但一直不允许驱逐,
+      eval_time: 40m,
+      card: pdb/disruptions,
+      entity: { kind: PodDisruptionBudget, namespace: data, name: pg },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: 不允许驱逐的 PDB 健康副本卡仍为正常,
+      eval_time: 40m,
+      card: pod-pending/pdb,
+      entity: { kind: PodDisruptionBudget, namespace: data, name: pg },
+      expect: { verdict: normal },
+    }
+  - {
+      name: PDB 窗口中途起不再允许驱逐,
+      eval_time: 40m,
+      card: pdb/disruptions,
+      entity: { kind: PodDisruptionBudget, namespace: shop, name: web },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: PDB 一直允许驱逐,
+      eval_time: 40m,
+      card: pdb/disruptions,
       entity: { kind: PodDisruptionBudget, namespace: shop, name: api },
       expect: { verdict: normal },
     }

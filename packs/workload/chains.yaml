@@ -225,6 +225,42 @@ chains:
         display: { value: lack, unit: count }
         egress: allow
 
+  - id: pdb
+    title: { zh-CN: PodDisruptionBudget, en: PodDisruptionBudget }
+    runbook: workload.md
+    cards:
+      - id: disruptions
+        title: { zh-CN: 允许的驱逐数, en: Allowed disruptions }
+        note:
+          {
+            zh-CN: 允许的自愿驱逐为 0 时，节点排空、Eviction API 与 pod_restart 都会被这个 PDB 阻塞；健康副本够数时也可能为 0（minAvailable 等于 Pod 数）,
+            en: 'With zero allowed disruptions, node drains, evictions and pod_restart are blocked; this can happen with enough healthy pods when minAvailable equals the pod count',
+          }
+        applies_to: { kinds: [PodDisruptionBudget] }
+        refs:
+          - { name: allowed, signal: pdb_disruptions_allowed, mode: range }
+        judge:
+          let:
+            - { name: most, cel: max(allowed) }
+            - { name: current, cel: last(allowed) }
+            - { name: anomaly_started_at, cel: 'first_below(allowed, 1.0)' }
+          abnormal_if:
+            - cel: most < 1.0
+              say:
+                {
+                  zh-CN: 整个窗口内允许的驱逐数都是 0，节点排空与驱逐会被阻塞,
+                  en: No disruption was allowed for the whole window; drains and evictions are blocked,
+                }
+            - cel: current < 1.0
+              say: { zh-CN: 窗口结束时允许的驱逐数为 0, en: No disruption is allowed at the end of the window }
+              normal_say:
+                {
+                  zh-CN: '窗口结束时允许驱逐 {current, number} 个 Pod',
+                  en: '{current, number} disruptions are allowed at the end of the window',
+                }
+        display: { value: current, unit: count }
+        egress: allow
+
   - id: rollout
     title: { zh-CN: 发布进度, en: Rollout progress }
     runbook: workload.md
