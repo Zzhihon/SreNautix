@@ -85,8 +85,12 @@ describe('录制的研判回放', () => {
     expect(notes).toMatch(/处置为 act 但没有有效的提议或规则提议，改为 escalate/);
     expect(out.proposals).toEqual([]);
     expect(out.disposition).toBe('escalate');
-    // 修复建议的 id 不合格式，按字段挽救时整条删除
-    expect(out.recommendations).toEqual([]);
+    // 修复建议的 id 不合格式：按顺序重新编号为 r1、r2，不删除建议（ADR 0136）
+    expect(out.recommendations.map((r) => [r.id, r.kind, r.action_id])).toEqual([
+      ['r1', 'mitigation', 'pod_restart'],
+      ['r2', 'prevention', 'workload_scale'],
+    ]);
+    expect(notes).toMatch(/\/recommendations\[0\]：id "[^"]+"，按顺序重新编号为 r1/);
 
     // 检查：参数缺字段的 pod_get 被 MCP 服务器按输入 schema 拒绝；编造的查询语法被 VictoriaMetrics 拒绝；
     // 失败的检查不产生卡，也不算检验过
