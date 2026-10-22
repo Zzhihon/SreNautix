@@ -138,6 +138,8 @@ export async function remediationRoot(
     name: e.name,
     node: e.kind === 'Node' ? e.name : null,
     component_type: type,
+    // 组件类型声明在集群之外（ADR 0138）：告警调优模板不对外部上游的告警降级（ADR 0139）
+    external: type !== null && d.componentTypes().some((t) => t.id === type && t.external === true),
   };
 }
 

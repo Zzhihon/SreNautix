@@ -445,7 +445,7 @@ describe.each(SHAPES)('$name', (shape) => {
     applyCheck(dir, plan.patch);
   });
 
-  it('长期 critical 告警没有症状：降为 warning，for 至少 1h', async () => {
+  it('长期 critical 告警、影响卡全部正常：降为 warning，for 至少 1h', async () => {
     const dir = makeRepo(shape, [[OLD, 'r1']]);
     const c = ctx({
       alerts: [
@@ -460,8 +460,25 @@ describe.each(SHAPES)('$name', (shape) => {
           entity: null,
         },
       ],
+      cards: {
+        'workload/capacity/hpa': { verdict: 'abnormal' },
+        'workload/capacity/hpa-throttling': { verdict: 'normal', impact: true },
+        'workload/capacity/hpa-latency': { verdict: 'normal', impact: true },
+      },
     });
     expect(applicableRemediations(set, c).applicable.map((a) => a.key)).toEqual(['gitops/noisy-alert-relax']);
+    // 影响卡有一张异常或无法判定、或者事件没有影响卡时不适用（ADR 0139）
+    const keys = (over: Partial<RemediationContext>) =>
+      applicableRemediations(set, { ...c, ...over }).applicable.map((a) => a.key);
+    expect(
+      keys({ cards: { ...c.cards, 'workload/capacity/hpa-latency': { verdict: 'undeterminable', impact: true } } }),
+    ).not.toContain('gitops/noisy-alert-relax');
+    expect(
+      keys({ cards: { ...c.cards, 'workload/capacity/hpa-throttling': { verdict: 'abnormal', impact: true } } }),
+    ).not.toContain('gitops/noisy-alert-relax');
+    expect(keys({ cards: { 'workload/capacity/hpa': { verdict: 'abnormal' } } })).not.toContain(
+      'gitops/noisy-alert-relax',
+    );
     const plan = await planRemediation(
       set,
       'gitops/noisy-alert-relax',
@@ -499,6 +516,20 @@ describe.each(SHAPES)('$name', (shape) => {
     ).not.toContain('gitops/noisy-alert-relax');
     const c = ctx({ alerts: [alert('ShopPodRestarted')], research: ignore });
     expect(applicableRemediations(set, c).applicable.map((a) => a.key)).toContain('gitops/noisy-alert-relax');
+    // 根因是集群外部组件（外部上游服务方）时，研判判为 ignore 也不降级：外部上游出故障时告警本身是对的（ADR 0139）
+    const upstream = ctx({
+      alerts: [alert('ShopProviderErrorsCritical')],
+      research: ignore,
+      root: { cluster_id: 'c1', kind: 'provider', namespace: null, name: 'openai', external: true },
+    });
+    expect(applicableRemediations(set, upstream).applicable.map((a) => a.key)).not.toContain(
+      'gitops/noisy-alert-relax',
+    );
+    expect(
+      applicableRemediations(set, { ...upstream, root: { ...upstream.root!, external: false } }).applicable.map(
+        (a) => a.key,
+      ),
+    ).toContain('gitops/noisy-alert-relax');
     const plan = await planRemediation(set, 'gitops/noisy-alert-relax', c, { repo, layout: shape.layout }, ds, AT);
     expect(plan.kind).toBe('plan');
     if (plan.kind === 'plan') {

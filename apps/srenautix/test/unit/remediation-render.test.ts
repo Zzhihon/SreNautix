@@ -133,6 +133,18 @@ describe('上下文与辅助', () => {
       observations: { missing: 2 },
     });
     expect(cardsOf(cs)['node/disk/pressure']).not.toHaveProperty('observations');
+    // 影响卡标记取自卡片定义：任何一份结果带 impact 即为影响卡（ADR 0139 的告警调优模板按它判断）
+    const impact = (verdict: EvidenceResult['verdict'], flag: boolean): EvidenceResult => ({
+      ...cs[0]!,
+      card_id: 'cchp/edge/error-ratio',
+      verdict,
+      ...(flag ? { impact: true } : {}),
+    });
+    expect(cardsOf([impact('normal', true), impact('abnormal', false)])['cchp/edge/error-ratio']).toMatchObject({
+      verdict: 'abnormal',
+      impact: true,
+    });
+    expect(cardsOf(cs)['workload/http/error_ratio']).not.toHaveProperty('impact');
   });
 
   it('分支名与执行事件中的 PR', () => {

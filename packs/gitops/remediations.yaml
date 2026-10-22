@@ -209,17 +209,22 @@ remediations:
         en: 'Revert the commit of this PR to bring the limit back to {current_limit} when node memory cannot hold the new limit'
 
   # ---------- 告警规则 ----------
-  # 长期告警（7 天内反复触发）以 critical 触发、而事件中没有任何症状告警时，降低严重度并延长持续时间。
-  # 两种依据：研判结论为不需要处理（ignore），或告警在 7 天内反复触发、本次事件中没有症状告警。
+  # critical 告警触发、而事件不需要处理时，降低严重度并延长持续时间（ADR 0139）。根因是领域包声明在集群之外的组件
+  # （external，例如外部 API 服务方）时不适用：外部上游真的出故障时告警本身是对的，研判因"集群内没有可处置的对象"判为
+  # ignore 也不说明告警误报。根因不是外部组件时有两种依据：
+  # - 研判结论为不需要处理（ignore；ADR 0138 起只按确定性依据给出）；
+  # - 告警在 7 天内反复触发，并且事件的影响卡（impact: true）全部正常：有影响卡、没有一张异常或无法判定。
   - id: noisy-alert-relax
     title: { zh-CN: 降低误报告警的严重度, en: Relax a noisy alert }
     category: alert_rule
     repository: gitops
     when: >-
-      (research != null && research.disposition == "ignore"
-        && alerts.exists(a, a.role != "meta" && "severity" in a.labels && a.labels.severity == params.from_severity))
-      || (alerts.exists(a, a.chronic && "severity" in a.labels && a.labels.severity == params.from_severity)
-        && !alerts.exists(a, a.role == "symptom"))
+      !(root != null && "external" in root && root.external == true)
+      && ((research != null && research.disposition == "ignore"
+          && alerts.exists(a, a.role != "meta" && "severity" in a.labels && a.labels.severity == params.from_severity))
+        || (alerts.exists(a, a.chronic && "severity" in a.labels && a.labels.severity == params.from_severity)
+          && cards.exists(k, "impact" in cards[k] && cards[k].impact == true)
+          && cards.all(k, !("impact" in cards[k]) || cards[k].impact != true || cards[k].verdict == "normal")))
     params: { from_severity: critical, to_severity: warning, min_for: 1h }
     let:
       - { name: why, cel: 'research != null && research.disposition == "ignore" ? "research" : "chronic"' }
@@ -265,8 +270,8 @@ remediations:
           - { path: 'spec.groups[*].rules[alert={alertname}].labels.severity', value: params.to_severity }
           - { path: 'spec.groups[*].rules[alert={alertname}].for', value: new_for }
     change:
-      zh-CN: '告警 {alertname} 的严重度由 {current_severity} 改为 {to_severity}，持续时间由 {current_for} 改为 {new_for}：{why, select, research {研判结论为不需要处理} other {它在 7 天内反复触发，本次事件中没有任何症状告警}}。'
-      en: 'Change alert {alertname} from {current_severity} to {to_severity} and its duration from {current_for} to {new_for}: {why, select, research {the research concluded that it needs no action} other {it fired repeatedly over 7 days and no symptom alert fired in this incident}}.'
+      zh-CN: '告警 {alertname} 的严重度由 {current_severity} 改为 {to_severity}，持续时间由 {current_for} 改为 {new_for}：{why, select, research {研判结论为不需要处理} other {它在 7 天内反复触发，本次事件的影响卡全部正常}}。'
+      en: 'Change alert {alertname} from {current_severity} to {to_severity} and its duration from {current_for} to {new_for}: {why, select, research {the research concluded that it needs no action} other {it fired repeatedly over 7 days and every impact card of this incident is normal}}.'
     verify:
       say:
         zh-CN: '同步后 {alertname} 以 {to_severity} 触发，不再进入 {current_severity} 通知'

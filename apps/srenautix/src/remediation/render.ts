@@ -20,7 +20,7 @@ const SEVERITY: Record<string, number> = { abnormal: 0, undeterminable: 1, norma
 
 /**
  * 同一张卡在多个实体上执行时取最严重的结论（abnormal > undeterminable > normal）；observations 是这一份结果的
- * let 绑定取值（判定的明细，例如发布卡的 missing），没有时不出现
+ * let 绑定取值（判定的明细，例如发布卡的 missing），没有时不出现；impact 是卡片定义的影响卡标记
  */
 export function cardsOf(cards: EvidenceResult[]): RemediationContext['cards'] {
   const out: RemediationContext['cards'] = {};
@@ -32,8 +32,11 @@ export function cardsOf(cards: EvidenceResult[]): RemediationContext['cards'] {
         display_state: c.display_state,
         value: c.value === null || c.value === undefined ? null : String(c.value),
         ...(c.reason?.kind ? { reason_kind: c.reason.kind } : {}),
+        ...(c.impact === true || cur?.impact === true ? { impact: true } : {}),
         ...(c.observations ? { observations: { ...c.observations } } : {}),
       };
+    } else if (c.impact === true) {
+      cur.impact = true;
     }
   }
   return out;

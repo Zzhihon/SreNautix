@@ -17,8 +17,11 @@ import type { RepoReader } from './repo.js';
 export interface RemediationContext {
   /** 事件（契约 Incident 或其中的字段） */
   incident: Record<string, unknown>;
-  /** 根因实体与组件类型；没有根因时为 null */
-  root: (RenderEntity & { component_type?: string | null }) | null;
+  /**
+   * 根因实体与组件类型；external 为组件类型声明在集群之外（契约 ComponentType.external，ADR 0138、0139）。
+   * 没有根因时为 null
+   */
+  root: (RenderEntity & { component_type?: string | null; external?: boolean }) | null;
   /** 触发计划的研判结论：处置（契约 Disposition）与结论等级（契约 ConclusionLevel）；没有研判时为 null */
   research?: { disposition: string; level: string } | null;
   /** 卡片全局 id → 结论（同一张卡在多个实体上时取最严重的） */
@@ -46,6 +49,8 @@ export interface RemediationCard {
   display_state?: string;
   value?: string | null;
   reason_kind?: string;
+  /** 卡片定义为影响卡（impact: true，衡量用户可见的影响） */
+  impact?: boolean;
   /** 判定时 let 绑定的标量取值（契约 EvidenceResult.observations） */
   observations?: Record<string, number | string | boolean | null | undefined>;
 }

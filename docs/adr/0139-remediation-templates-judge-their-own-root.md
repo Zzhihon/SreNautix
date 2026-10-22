@@ -6,6 +6,7 @@ ADR 0138 让代码推导处置，适用的修复模板可以支撑 act，重建�
 
 - **`release-to-serving-version` 只看全局的卡**：上下文的 `cards` 是阶段 A 全部卡按卡片 id 取最严重的结论（ADR 0126 §3），模板的 `when` 只问"有没有任何一张 init 或 ReplicaSet 卡异常"。事件里只要有一个工作负载卡住，任何根因都适用：onboarding 的处置依据里，Node、PVC、HPA、PodDisruptionBudget、Service、Workflow 与几十个 Argo 应用都列着这个模板。
 - **init 卡把正常启动算成"反复失败"**：`workload/release/init-waiting` 的第二条规则数 `kube_pod_init_container_status_waiting_reason` 在窗口内出现过的 init 容器，没有区分原因。新 Pod 的 init 容器在创建之后、开始运行之前处于 `PodInitializing`（或 `ContainerCreating`），滚动发布时 kube-state-metrics 常常正好采到这一刻，窗口内的最大值就把正常启动判成"1 个 init 容器在反复失败"。10-14 metrics-scrape 的 gateway 就是这样：Kubernetes 事件里 gateway-1、gateway-0 的 init 容器 05:09:44、05:10:29 启动，4 到 5 秒后主容器启动，整个窗口没有 BackOff 或 Failed 事件，卡片却判为异常。onboarding 的 worker 上这张卡也是同样的"反复失败"、运行时长 0，研判根因是 worker 时发布回退模板因此适用，处置从 escalate（正确）变成 act。
+- **外部上游被判为 ignore 时 `noisy-alert-relax` 也适用**：它对"研判为 ignore、有 critical 告警"的事件提议把告警降为 warning。ADR 0138 之后 provider 用例的 ignore 依据是"根因是集群外部组件"，于是 CCHPProvider* 的 critical 告警被提议降级，离线重算里 alert_rule 误触发 primary 10、fallback 11 次。外部上游真的出故障时告警本身是对的，"集群内没有可处置的对象"不说明告警误报。
 - **`memory-limit-raise` 读的也是全局的卡**：根因是工作负载、全局的内存卡异常就适用，被 OOMKilled 的可以是事件里任何一个 Pod。
 - **StatefulSet 没有"滚动停在半路"的卡**：`replicasets` 卡只适用于 Deployment，gateway（StatefulSet）的发布卡住只能靠 init 卡判断。只看根因自己的卡之后，release-rollback-failed 中 gateway 为根因的运行会失去这个模板，而那次事故的标注修复正是发布回退。
 
@@ -21,6 +22,11 @@ ADR 0138 让代码推导处置，适用的修复模板可以支撑 act，重建�
 2. **`release-to-serving-version` 只看 `root_cards`**：`params.stuck_cards`（init 与 ReplicaSet 卡）在根因上有一张异常，或者 `params.rollout_cards`（Deployment、StatefulSet、DaemonSet 的发布进度卡）在根因上异常、并且判定明细 `missing`（窗口结束时未就绪或不可用的副本数）大于 0。只因 spec 变更判为异常的发布进度卡不算。为此上下文的卡带上判定明细 `observations`（契约 EvidenceResult.observations，同一张卡取最严重的那一份结果的明细）。
 3. **init 卡只数失败**：`workload` 包的 `init_container_waiting` 排除等待原因 `PodInitializing` 与 `ContainerCreating`，只数 CrashLoopBackOff、拉取镜像失败、配置错误等失败原因。
 4. **`memory-limit-raise` 只看根因工作负载的内存卡**：`root_cards` 中的 `workload/pod-restarts/memory` 异常才适用。别的工作负载（例如 pg-lock 中被 OOMKilled 的 postgres Pod）的内存卡异常时，不提高研判根因（seaweedfs-master）的 limit。
+5. **`noisy-alert-relax` 不对外部上游降级**：模板根因的组件类型声明为 `external`（上下文的 `root.external`）时不适用。研判以外部组件为根因判为 ignore（ADR 0138 的 external 依据）时，模板根因就是这个外部组件，所以"处置依据是外部上游"也被这一条挡住。根因不是外部组件时有两种依据：
+   - 研判结论为 ignore（ADR 0138 起只按确定性依据给出：阶段 A 的 ignore、没有异常卡、影响卡全部正常），并且有 critical 告警。Kind 的 alert-too-sensitive（一次正常的容器重启触发 critical 告警）走这一条；
+   - 告警在 7 天内反复触发（chronic）、以 critical 触发，并且事件的影响卡全部正常：至少有一张影响卡，没有一张异常或无法判定。原来的"事件中没有症状告警"由影响卡取代：症状告警说明有告警在响，影响卡说明用户是否真的受影响。没有任何影响卡的事件不适用。
+
+   上下文的卡带上卡片定义的 `impact` 标记。
 
 ## 结果
 

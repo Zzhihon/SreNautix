@@ -1,6 +1,6 @@
 import type { EvidenceResult } from '@srenautix/contract';
 import { describe, expect, it } from 'vitest';
-import { remediationContext, RootCardScope, type RootLookup } from '../../src/remediation/facts.js';
+import { remediationContext, remediationRoot, RootCardScope, type RootLookup } from '../../src/remediation/facts.js';
 import { incident, stageACards } from '../support/scenario.js';
 
 // 修复模板的 root_cards（ADR 0139）：根因自己的卡
@@ -55,6 +55,33 @@ const CARDS = [
   on('node/disk/pressure', 'Node:node-a', 'abnormal'),
   { ...stageACards()[0]!, card_id: 'cchp/release/versions', entity: null },
 ];
+
+describe('模板的根因', () => {
+  it('组件类型声明在集群之外时 root.external 为 true（ADR 0139：告警调优模板不对外部上游降级）', async () => {
+    const d: RootLookup = {
+      ...lookup(),
+      concrete: async (_c, key) => {
+        const [kind, name] = key.split(':') as [string, string];
+        return { key, kind, namespace: null, name, uid: null };
+      },
+      componentType: async (_c, key) => (key.startsWith('provider:') ? 'demo.provider' : null),
+      componentTypes: () => [
+        { id: 'demo.provider', external: true, match: { kind: 'provider' } },
+        { id: 'demo.node', match: { kind: 'Node' } },
+      ],
+    };
+    const inc = incident();
+    expect(await remediationRoot(d, inc, [], 'provider:openai', new Date())).toMatchObject({
+      kind: 'provider',
+      component_type: 'demo.provider',
+      external: true,
+    });
+    expect(await remediationRoot(d, inc, [], 'Node:node-a', new Date())).toMatchObject({
+      component_type: 'demo.node',
+      external: false,
+    });
+  });
+});
 
 describe('根因自己的卡', () => {
   it('工作负载根因：它拥有的 Pod 与它自己，加上管理它的应用本身的卡；同一应用管理的其他工作负载不算', async () => {
