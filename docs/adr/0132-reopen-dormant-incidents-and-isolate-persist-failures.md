@@ -41,3 +41,4 @@ merged 的事件不重开（合并过的事件不复活），它们的标签照�
 - 集成测试（真实 PostgreSQL，`test/integration/incident-engine.test.ts`）：按 CCHP 的时序，检测器事件 resolved → 超出回看窗口 → 检测器以原来的开始时间重新触发 → 重算成功，原事件重开（id 与标签不变、版本 2、原因 reopened），没有唯一约束错误；一组事件写入失败（触发器注入）时这一组回滚、指标加一、outbox 只有其余组的变化，其余事件照常更新，故障消失后下一轮补上。两个测试在修复前的代码上都失败（前者是 `incidents_cluster_id_label_key` 唯一约束错误，后者整轮回滚）。
 - 单元测试覆盖按成员重开、只按标签重开与 merged 事件只占用标签。
 - 重开的版本以研判原因 `reopened` 申请阶段 B，见 ADR 0135。
+- `srenautix_incident_persist_errors_total{cluster_id}` 在事件流水线启动时按配置的 cluster_id 初始化为 0，告警能区分"0"与"缺失"（Zzhihon/SreNautix#8）。

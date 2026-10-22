@@ -245,6 +245,52 @@ describe('事件引擎', () => {
     expect(await persistErrors(WEST)).toBe(1);
   });
 
+  it('事件没有变化时重算不发 incident.updated：outbox 不写，updated_at 不变（jsonb 读回的键顺序不同，Zzhihon/SreNautix#8）', async () => {
+    const NORTH = 'north';
+    await topology.apply(NORTH, [pdbNode('ops', 'etcd'), pdbNode('ops', 'vault')] as Parameters<
+      TopologyStore['apply']
+    >[1]);
+    const since = Date.now() - 3600_000;
+    await detectors.report(NORTH, [pdb('ops', 'etcd', since), pdb('ops', 'vault', since)], true, new Date());
+    expect((await detectors.scan(Date.now()))[NORTH]?.firing).toHaveLength(2);
+    expect((await engine.recompute(NORTH)).changes.map((c) => c.type)).toEqual([
+      'incident.created',
+      'incident.created',
+    ]);
+    const snapshot = async () => ({
+      outbox: (
+        await db.server.query<{ n: number }>('SELECT count(*)::int AS n FROM server.outbox WHERE cluster_id = $1', [
+          NORTH,
+        ])
+      ).rows[0]!.n,
+      incidents: (
+        await db.server.query<{ incident_id: string; version: number; updated_at: Date }>(
+          'SELECT incident_id, version, updated_at FROM server.incidents WHERE cluster_id = $1 ORDER BY incident_id',
+          [NORTH],
+        )
+      ).rows,
+    });
+    const before = await snapshot();
+    for (let i = 0; i < 3; i++) {
+      const r = await engine.recompute(NORTH);
+      expect(r.changes).toEqual([]);
+      expect(r.toReport).toEqual([]);
+    }
+    expect(await snapshot()).toEqual(before);
+  });
+
+  it('srenautix_incident_persist_errors_total 在流水线启动时按集群初始化为 0（Zzhihon/SreNautix#8）', async () => {
+    const fresh = new ServerMetrics('server', false);
+    const exported = async () => (await fresh.registry.metrics()).split('\n');
+    expect((await exported()).filter((l) => l.startsWith('srenautix_incident_persist_errors_total{'))).toEqual([]);
+    new IncidentPipeline('south', engine, {} as StageAService, {} as Scheduler, db.server, fresh, {
+      changed: () => undefined,
+      degraded: () => undefined,
+      recovered: () => undefined,
+    });
+    expect(await exported()).toContain('srenautix_incident_persist_errors_total{cluster_id="south"} 0');
+  });
+
   it('重开的事件与新事件一样进入阶段 B 队列（reason reopened），每事件上限照常生效', async () => {
     const EAST = 'east';
     const names = ['pg-primary', 'pg-replica', 'dragonfly'];

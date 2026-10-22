@@ -65,7 +65,10 @@ export class IncidentPipeline {
     private readonly pool: pg.Pool,
     private readonly metrics: ServerMetrics,
     private readonly hooks: PipelineHooks,
-  ) {}
+  ) {
+    // 带标签的 Counter 在第一次失败之前不导出：启动时按集群初始化为 0，告警能区分"0"与"缺失"（Zzhihon/SreNautix#8）
+    metrics.incidentPersistErrors.inc({ cluster_id: clusterId }, 0);
+  }
 
   /** 跑一轮；已有一轮在跑时合并为它结束后的一次。 */
   async kick(): Promise<void> {

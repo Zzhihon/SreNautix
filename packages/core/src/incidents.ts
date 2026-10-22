@@ -403,7 +403,34 @@ function applyGroup(p: Incident, c: ComputedIncident, topologyVersion: number, n
     suppressed: g.suppressed,
     topology_version: version !== p.incident_version ? topologyVersion : p.topology_version,
   };
-  return JSON.stringify(next) === JSON.stringify(p) ? p : { ...next, updated_at: now };
+  // 已持久化的事件从 jsonb 读回，对象键的顺序与新算出的不同：按值比较，不按序列化文本（Zzhihon/SreNautix#8）
+  return sameJson(next, p) ? p : { ...next, updated_at: now };
+}
+
+/**
+ * 与对象键顺序无关的 JSON 值比较。PostgreSQL 的 jsonb 按自己的规则重排对象的键，读回的事件与新算出的事件内容相同时
+ * 序列化文本也可能不同。值为 undefined 的键与没有这个键相同（与 JSON 序列化一致）。
+ */
+export function sameJson(a: unknown, b: unknown): boolean {
+  if (a === b) {
+    return true;
+  }
+  if (a === null || b === null || typeof a !== 'object' || typeof b !== 'object') {
+    return false;
+  }
+  if (Array.isArray(a) || Array.isArray(b)) {
+    return (
+      Array.isArray(a) &&
+      Array.isArray(b) &&
+      a.length === b.length &&
+      a.every((x, i) => sameJson(x, (b as unknown[])[i]))
+    );
+  }
+  const ra = a as Record<string, unknown>;
+  const rb = b as Record<string, unknown>;
+  const ka = Object.keys(ra).filter((k) => ra[k] !== undefined);
+  const kb = Object.keys(rb).filter((k) => rb[k] !== undefined);
+  return ka.length === kb.length && ka.every((k) => rb[k] !== undefined && sameJson(ra[k], rb[k]));
 }
 
 /**

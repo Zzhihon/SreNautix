@@ -8,6 +8,7 @@ import {
   normalizeAlert,
   reconcileIncidents,
   resolveIncidentRef,
+  sameJson,
   type ReconcileResult,
   type TopologyStore,
 } from '../src/index.js';
@@ -237,6 +238,64 @@ describe('持久化事件的对账：合并、拆分、别名', () => {
     expect(r5.changes.map((c) => c.type)).toEqual(['incident.created']);
     expect(r5.incidents[0]).toMatchObject({ label: `${resolved.label}~2`, incident_version: 1 });
     expect(r5.incidents[0]!.incident_id).not.toBe(resolved.incident_id);
+  });
+
+  it('事件没有变化时不产生变化：已持久化的事件对象键顺序不同（jsonb 读回）也一样（Zzhihon/SreNautix#8）', async () => {
+    const store = clusterStore();
+    const graph = store.asOf(T0);
+    const api = await alert(
+      store,
+      { alertname: 'ApiErrorRatioHigh', namespace: 'shop', deployment: 'api', severity: 'critical' },
+      '2026-10-15T10:02:00Z',
+      T0,
+    );
+    const computed = computeIncidents({
+      alerts: [api],
+      changes: [],
+      graph,
+      params: DEFAULT_RCA_PARAMS,
+      now: T0 + 5 * MIN,
+    });
+    const r1 = reconcileIncidents({
+      clusterId: CLUSTER,
+      previous: [],
+      computed,
+      topologyVersion: graph.version,
+      now: T0 + 5 * MIN,
+      newId: ids(),
+    });
+    // jsonb 的键按长度、再按字节排序：读回的对象各层键顺序与写入时不同
+    const reorder = (v: unknown): unknown =>
+      Array.isArray(v)
+        ? v.map(reorder)
+        : v !== null && typeof v === 'object'
+          ? Object.fromEntries(
+              Object.entries(v)
+                .sort(([a], [b]) => a.length - b.length || (a < b ? -1 : a > b ? 1 : 0))
+                .map(([k, x]) => [k, reorder(x)]),
+            )
+          : v;
+    const stored = r1.incidents.map((i) => reorder(i) as Incident);
+    expect(JSON.stringify(stored[0])).not.toBe(JSON.stringify(r1.incidents[0]));
+    const r2 = reconcileIncidents({
+      clusterId: CLUSTER,
+      previous: stored,
+      computed,
+      topologyVersion: graph.version,
+      now: T0 + 6 * MIN,
+      newId: ids(),
+    });
+    expect(r2.changes).toEqual([]);
+    expect(r2.incidents).toEqual([]);
+  });
+
+  it('sameJson：不看对象键的顺序，undefined 的键等于没有这个键，数组按顺序比较', () => {
+    expect(sameJson({ a: 1, b: { c: [1, { d: 2, e: null }] } }, { b: { c: [1, { e: null, d: 2 }] }, a: 1 })).toBe(true);
+    expect(sameJson({ a: 1, x: undefined }, { a: 1 })).toBe(true);
+    expect(sameJson({ a: 1 }, { a: 1, b: null })).toBe(false);
+    expect(sameJson([1, 2], [2, 1])).toBe(false);
+    expect(sameJson({ a: [1] }, { a: { 0: 1 } })).toBe(false);
+    expect(sameJson({ a: '1' }, { a: 1 })).toBe(false);
   });
 
   it('标签取整到 10 分钟', () => {
