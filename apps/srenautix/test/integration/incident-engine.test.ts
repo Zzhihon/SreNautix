@@ -4,9 +4,12 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { ObjectHealth } from '../../src/detectors/health.js';
 import { DEFAULT_EQUIVALENTS, DetectorService, type DetectorSettings } from '../../src/detectors/service.js';
 import { IncidentEngine } from '../../src/incident/engine.js';
+import { IncidentPipeline } from '../../src/incident/pipeline.js';
 import { IngestService } from '../../src/ingest/service.js';
 import { ServerMetrics } from '../../src/metrics.js';
 import { serverTracks } from '../../src/roles/server-schema.js';
+import { Scheduler } from '../../src/scheduler/admission.js';
+import type { StageAService } from '../../src/stage-a/service.js';
 import { migrateExpand } from '../../src/store/migrate.js';
 import { TopologyStore } from '../../src/topology/store.js';
 import { newTestDb, type TestDb } from '../support/db.js';
@@ -14,7 +17,8 @@ import { newTestDb, type TestDb } from '../support/db.js';
 // 事件引擎经真实 PG（ADR 0132）：
 // - CCHP 7c23d70 的时序：检测器事件 resolved → 超出回看窗口 → 检测器以原来的开始时间重新触发 → 重算重开原事件，
 //   不撞 (cluster_id, label) 唯一约束；
-// - 一组事件写入失败只回滚这一组，其余照常写入。
+// - 一组事件写入失败只回滚这一组，其余照常写入；
+// - 重开的事件与新事件一样进入阶段 B 队列，受每事件上限约束（ADR 0135）。
 
 let db: TestDb;
 let topology: TopologyStore;
@@ -157,6 +161,7 @@ describe('事件引擎', () => {
     const after = await rows(CCHP);
     expect(after).toEqual(before.map((r) => ({ ...r, state: 'firing', version: 2 })));
     expect(reopened.toReport.map((i) => i.incident_id).sort()).toEqual(before.map((r) => r.incident_id).sort());
+    expect([...reopened.reopened].sort()).toEqual(before.map((r) => r.incident_id).sort());
     const versions = await db.server.query<{ version: number; reason: string }>(
       'SELECT version, reason FROM server.incident_versions WHERE incident_id = ANY($1::uuid[]) ORDER BY incident_id, version',
       [before.map((r) => r.incident_id)],
@@ -238,5 +243,134 @@ describe('事件引擎', () => {
     ).toEqual([a.incident_id]);
     expect((await rows(WEST)).map((x) => x.state)).toEqual(['resolved', 'resolved']);
     expect(await persistErrors(WEST)).toBe(1);
+  });
+
+  it('重开的事件与新事件一样进入阶段 B 队列（reason reopened），每事件上限照常生效', async () => {
+    const EAST = 'east';
+    const names = ['pg-primary', 'pg-replica', 'dragonfly'];
+    await topology.apply(EAST, names.map((n) => pdbNode('data', n)) as Parameters<TopologyStore['apply']>[1]);
+    const scheduler = new Scheduler(
+      db.server,
+      {
+        slots: 4,
+        criticalReserved: 1,
+        maxRunsPerIncident: 3,
+        runWindowMs: 6 * 3600_000,
+        stageTimeoutMs: 120_000,
+        stormActiveAlerts: 200,
+        stormNewIncidents: 20,
+        stormWindowMs: 5 * 60_000,
+        stormTopRoots: 3,
+        maxRecoveries: 2,
+      },
+      metrics,
+    );
+    // 阶段 A 不是这里要测的：证据指纹不变
+    const stageA = { run: async () => ({ fingerprintChanged: false }) } as unknown as StageAService;
+    const pipeline = new IncidentPipeline(EAST, engine, stageA, scheduler, db.server, metrics, {
+      changed: () => undefined,
+      degraded: () => undefined,
+      recovered: () => undefined,
+    });
+    const queue = async () =>
+      (
+        await db.server.query<{
+          label: string;
+          version: number;
+          reason: string;
+          state: string;
+          is_new: boolean;
+          skip_reason: string | null;
+        }>(
+          `SELECT i.label, q.incident_version AS version, q.reason, q.state, q.is_new, q.skip_reason
+             FROM server.research_queue q JOIN server.incidents i USING (incident_id)
+            WHERE i.cluster_id = $1 ORDER BY i.label, q.enqueued_at, q.reason`,
+          [EAST],
+        )
+      ).rows.map((r) => ({ ...r, label: r.label.split(':').slice(0, 2).join(':') }));
+
+    await detectors.report(
+      EAST,
+      names.map((n) => pdb('data', n, Date.now() - 2 * DAY)),
+      true,
+      new Date(),
+    );
+    expect((await detectors.scan(Date.now()))[EAST]?.firing).toHaveLength(names.length);
+    await pipeline.kick();
+    const sorted = [...names].sort();
+    expect(await queue()).toEqual(
+      sorted.map((n) => ({
+        label: `PodDisruptionBudget:data/${n}`,
+        version: 1,
+        reason: 'new_incident',
+        state: 'queued',
+        is_new: true,
+        skip_reason: null,
+      })),
+    );
+    const ids = await rows(EAST);
+
+    // dragonfly 的事件在 6 小时内已经研判过 3 次（含刚才这次）：重开时到达每事件上限
+    const capped = ids.find((r) => r.label.startsWith('PodDisruptionBudget:data/dragonfly:'))!;
+    await db.server.query(
+      "UPDATE server.research_queue SET state = 'done', finished_at = now() WHERE incident_id = $1",
+      [capped.incident_id],
+    );
+    for (const reason of ['manual', 'feedback']) {
+      await db.server.query(
+        `INSERT INTO server.research_queue (run_id, incident_id, incident_version, reason, severity, is_new, state, finished_at)
+         VALUES (gen_random_uuid(), $1, 1, $2, 'warning', false, 'done', now())`,
+        [capped.incident_id, reason],
+      );
+    }
+
+    // 告警 resolved，事件随之 resolved；超出回看窗口后检测器以原来的告警重新触发，事件重开（ADR 0132）
+    await db.server.query(
+      "UPDATE server.alert_state SET status = 'resolved', ends_at = now() WHERE cluster_id = $1 AND source = 'detector'",
+      [EAST],
+    );
+    await pipeline.kick();
+    expect((await rows(EAST)).map((r) => r.state)).toEqual(names.map(() => 'resolved'));
+    await db.server.query(
+      "UPDATE server.alert_state SET ends_at = ends_at - interval '7 hours' WHERE cluster_id = $1",
+      [EAST],
+    );
+    await db.server.query(
+      `UPDATE server.incidents SET ended_at = ended_at - interval '7 hours',
+         body = jsonb_set(body, '{ended_at}', to_jsonb(to_char((ended_at - interval '7 hours') AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')))
+       WHERE cluster_id = $1`,
+      [EAST],
+    );
+    expect((await detectors.scan(Date.now()))[EAST]?.refired).toHaveLength(names.length);
+    await pipeline.kick();
+    expect((await rows(EAST)).map((r) => [r.state, r.version])).toEqual(names.map(() => ['firing', 2]));
+
+    const q = await queue();
+    // 重开的版本以 reopened 入队，排队中的旧触发被取代，优先级与新事件相同（is_new）
+    const row = (label: string, version: number, reason: string, state: string, skip: string | null = null) => ({
+      label,
+      version,
+      reason,
+      state,
+      is_new: true,
+      skip_reason: skip,
+    });
+    for (const n of ['pg-primary', 'pg-replica']) {
+      const label = `PodDisruptionBudget:data/${n}`;
+      expect(q.filter((r) => r.label === label)).toEqual([
+        row(label, 1, 'new_incident', 'superseded'),
+        row(label, 2, 'reopened', 'queued'),
+      ]);
+    }
+    // 到达上限的事件只出阶段 A：记为 skipped（capped），不入队
+    const dragonfly = 'PodDisruptionBudget:data/dragonfly';
+    expect(q.filter((r) => r.label === dragonfly && r.version === 2)).toEqual([
+      row(dragonfly, 2, 'reopened', 'skipped', 'capped'),
+    ]);
+    const queued = await db.server.query<{ n: number }>(
+      "SELECT count(*)::int AS n FROM server.outbox WHERE cluster_id = $1 AND type = 'research.queued' AND payload->>'reason' = 'reopened'",
+      [EAST],
+    );
+    expect(queued.rows[0]!.n).toBe(2);
   });
 });

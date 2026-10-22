@@ -262,6 +262,7 @@
   "research.reason.manual": "Manual request",
   "research.reason.model_recovered": "Model recovered",
   "research.reason.resumed": "Resumed after restart",
+  "research.reason.reopened": "Incident reopened",
 
   "approval.title": "Approve: {action} · {target}",
   "approval.load_failed": "Failed to read the proposal",

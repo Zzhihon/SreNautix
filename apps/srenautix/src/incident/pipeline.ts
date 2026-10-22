@@ -19,10 +19,21 @@ export interface PipelineHooks {
   recovered(clusterId: string): void;
 }
 
-/** 新版本相对上一版本的研判触发原因（DESIGN §2.4：唯一键 (incident_id, incident_version, reason)）。 */
-export function reasonFor(prev: Incident | null, next: Incident, fingerprintChanged: boolean): ResearchReason | null {
+/**
+ * 新版本相对上一版本的研判触发原因（DESIGN §2.4：唯一键 (incident_id, incident_version, reason)）。
+ * reopened 是这个版本的版本原因为 reopened（从 resolved 回到 firing，ADR 0132）：与新事件一样触发研判（ADR 0135）。
+ */
+export function reasonFor(
+  prev: Incident | null,
+  next: Incident,
+  fingerprintChanged: boolean,
+  reopened = false,
+): ResearchReason | null {
   if (!prev) {
     return 'new_incident';
+  }
+  if (reopened) {
+    return 'reopened';
   }
   if (prev.root.component !== next.root.component) {
     return 'root_changed';
@@ -100,7 +111,7 @@ export class IncidentPipeline {
       if (inc.incident_version === 1) {
         this.metrics.stageALatency.observe((Date.now() - firstMs) / 1000);
       }
-      const reason = reasonFor(prev, inc, out.fingerprintChanged);
+      const reason = reasonFor(prev, inc, out.fingerprintChanged, r.reopened.has(inc.incident_id));
       if (reason) {
         const a = await this.scheduler.admit(inc, reason);
         logger.info('阶段 B 准入', {

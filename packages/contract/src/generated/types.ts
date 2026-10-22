@@ -192,7 +192,8 @@ export type ResearchReason =
   | 'feedback'
   | 'manual'
   | 'model_recovered'
-  | 'resumed';
+  | 'resumed'
+  | 'reopened';
 export type ResearchConcludedEvent = OutboxEventHeader & {
   type: 'research.concluded';
   payload: {

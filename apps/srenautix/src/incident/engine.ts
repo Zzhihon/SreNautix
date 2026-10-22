@@ -44,6 +44,8 @@ export interface RecomputeResult {
   changes: IncidentChange[];
   /** 新建或版本变化、需要重新出阶段 A 的事件。 */
   toReport: Incident[];
+  /** toReport 里新版本原因为 reopened（从 resolved 回到 firing）的事件 id：与新事件一样进入阶段 B（ADR 0135） */
+  reopened: Set<string>;
   /** 本轮的输入与对账后的全部未合并事件，降级通道在状态库不可用时以它为起点。 */
   state: {
     alerts: Alert[];
@@ -103,11 +105,13 @@ export class IncidentEngine {
         const before = new Map([...dormant, ...previous].map((p) => [p.incident_id, p]));
         const sources = new Map(alerts.map((a) => [a.alert_id, a.source]));
         const toReport: Incident[] = [];
+        const reopenedIds = new Set<string>();
         const failed = new Set<string>();
         // 每组（合并、拆分牵连的事件为一组）在自己的保存点里写入：一组失败只回滚这一组，其余照常写入（ADR 0132）
         for (const unit of persistUnits(result.incidents)) {
           const reported: Incident[] = [];
           const detected: Incident[] = [];
+          const reopened: string[] = [];
           await c.query('SAVEPOINT incident_persist');
           try {
             for (const inc of unit) {
@@ -121,12 +125,15 @@ export class IncidentEngine {
                 inc.suppressed = true;
               }
               const prev = before.get(inc.incident_id);
-              await this.persist(c, inc, prev);
+              const reason = await this.persist(c, inc, prev);
               if (!prev && inc.state === 'firing') {
                 detected.push(inc);
               }
               if (inc.state !== 'merged' && (!prev || prev.incident_version !== inc.incident_version)) {
                 reported.push(inc);
+                if (reason === 'reopened') {
+                  reopened.push(inc.incident_id);
+                }
                 const b = await currentBinding(c, inc.incident_id);
                 if (b) {
                   await this.d.stale.markStale(c, b);
@@ -149,6 +156,9 @@ export class IncidentEngine {
             continue;
           }
           toReport.push(...reported);
+          for (const id of reopened) {
+            reopenedIds.add(id);
+          }
           for (const inc of detected) {
             // 检测延迟：首个症状到事件创建（验收 p95 ≤ 2 分钟）；最早的成员是检测器发现时记为 detector
             const first = [...inc.members].sort((a, b) => a.starts_at.localeCompare(b.starts_at))[0];
@@ -176,6 +186,7 @@ export class IncidentEngine {
         return {
           changes,
           toReport,
+          reopened: reopenedIds,
           state: {
             alerts,
             nodes: topo.nodes,
@@ -190,7 +201,8 @@ export class IncidentEngine {
     }
   }
 
-  private async persist(c: Queryable, inc: Incident, prev: Incident | undefined): Promise<void> {
+  /** 写入事件；版本变化时返回写入 incident_versions 的版本原因，否则返回 null */
+  private async persist(c: Queryable, inc: Incident, prev: Incident | undefined): Promise<VersionReason | null> {
     await c.query(
       `INSERT INTO server.incidents (incident_id, cluster_id, label, version, state, severity, first_firing_at, ended_at, root_component,
          suppressed, observability_blind, split_from, merged_into, body, created_at, updated_at)
@@ -218,15 +230,12 @@ export class IncidentEngine {
         inc.updated_at,
       ],
     );
+    let reason: VersionReason | null = null;
     if (!prev || prev.incident_version !== inc.incident_version) {
+      reason = !prev ? 'created' : prev.state === 'resolved' && inc.state === 'firing' ? 'reopened' : 'updated';
       await c.query(
         'INSERT INTO server.incident_versions (incident_id, version, body, reason) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING',
-        [
-          inc.incident_id,
-          inc.incident_version,
-          JSON.stringify(inc),
-          !prev ? 'created' : prev.state === 'resolved' && inc.state === 'firing' ? 'reopened' : 'updated',
-        ],
+        [inc.incident_id, inc.incident_version, JSON.stringify(inc), reason],
       );
     }
     await c.query('DELETE FROM server.incident_members WHERE incident_id = $1', [inc.incident_id]);
@@ -243,8 +252,12 @@ export class IncidentEngine {
         [a.from_incident_id, a.from_label, inc.cluster_id, inc.incident_id, a.at_version, a.merged_at],
       );
     }
+    return reason;
   }
 }
+
+/** incident_versions.reason：新建、更新，或从 resolved 回到 firing（重开，ADR 0132） */
+type VersionReason = 'created' | 'updated' | 'reopened';
 
 /**
  * 不在 previous 里、但与本轮分组相关的已持久化事件（超出回看窗口的 resolved 与 merged）：共享仍在的成员告警，

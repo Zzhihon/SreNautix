@@ -37,6 +37,7 @@ const ENUMS: Record<string, readonly string[]> = {
     'manual',
     'model_recovered',
     'resumed',
+    'reopened',
   ],
   'research.state': [
     'queued',

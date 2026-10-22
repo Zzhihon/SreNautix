@@ -173,7 +173,8 @@
         "feedback",
         "manual",
         "model_recovered",
-        "resumed"
+        "resumed",
+        "reopened"
       ]
     },
     "ResearchConcluded": {

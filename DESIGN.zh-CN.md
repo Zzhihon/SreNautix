@@ -118,7 +118,7 @@
 
 **研判**
 
-- 触发的唯一键是 `(incident_id, incident_version, reason)`。
+- 触发的唯一键是 `(incident_id, incident_version, reason)`。新事件与重开的事件（版本原因 reopened，ADR 0135）都触发研判。
 - 绝对上限：每个事件每 6 小时最多 3 次模型研判，在入队时执行。
 - 指纹带迟滞：判定向量连续两次对账都一致，才视为发生了变化。
 

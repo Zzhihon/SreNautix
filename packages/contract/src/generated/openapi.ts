@@ -2119,7 +2119,8 @@ export type components = {
           | 'feedback'
           | 'manual'
           | 'model_recovered'
-          | 'resumed';
+          | 'resumed'
+          | 'reopened';
         /** ResearchConcludedEvent */
         ResearchConcluded: {
           payload: {
@@ -3617,7 +3618,8 @@ export type components = {
       | 'feedback'
       | 'manual'
       | 'model_recovered'
-      | 'resumed';
+      | 'resumed'
+      | 'reopened';
     /** ResearchRoot */
     ResearchRoot: {
       component: components['schemas']['ComponentKey'];

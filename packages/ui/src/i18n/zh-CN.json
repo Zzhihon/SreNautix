@@ -262,6 +262,7 @@
   "research.reason.manual": "人工请求",
   "research.reason.model_recovered": "模型恢复",
   "research.reason.resumed": "重启后续跑",
+  "research.reason.reopened": "事件重开",
 
   "approval.title": "审批：{action} · {target}",
   "approval.load_failed": "读取提议失败",

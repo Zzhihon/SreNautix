@@ -15,7 +15,11 @@ export type ResearchReason =
   | 'feedback'
   | 'manual'
   | 'model_recovered'
-  | 'resumed';
+  | 'resumed'
+  | 'reopened';
+
+/** 按新事件排队的触发原因：重开的事件（ADR 0132）与新事件同等优先，准入规则（预算、风暴、每事件上限）相同（ADR 0135） */
+const NEW_INCIDENT_REASONS: ReadonlySet<ResearchReason> = new Set(['new_incident', 'reopened']);
 
 export interface SchedulerSettings {
   slots: number;
@@ -138,11 +142,12 @@ export class Scheduler {
     if (dup.rows[0]) {
       return { outcome: 'duplicate', runId: dup.rows[0].run_id };
     }
+    const isNew = NEW_INCIDENT_REASONS.has(reason);
     const skip = async (why: AdmissionOutcome) => {
       await c.query(
         `INSERT INTO server.research_queue (run_id, incident_id, incident_version, reason, severity, is_new, state, skip_reason, finished_at)
          VALUES ($1, $2, $3, $4, $5, $6, 'skipped', $7, now())`,
-        [randomUUID(), inc.incident_id, inc.incident_version, reason, inc.severity, reason === 'new_incident', why],
+        [randomUUID(), inc.incident_id, inc.incident_version, reason, inc.severity, isNew, why],
       );
       return { outcome: why, runId: null };
     };
@@ -178,7 +183,7 @@ export class Scheduler {
     await c.query(
       `INSERT INTO server.research_queue (run_id, incident_id, incident_version, reason, severity, absorbed, is_new, state)
        VALUES ($1, $2, $3, $4, $5, $6, $7, 'queued')`,
-      [runId, inc.incident_id, inc.incident_version, reason, inc.severity, absorbed, reason === 'new_incident'],
+      [runId, inc.incident_id, inc.incident_version, reason, inc.severity, absorbed, isNew],
     );
     await appendEvents(c, 'server', 'server', SCHEMA_VERSION, [
       {
