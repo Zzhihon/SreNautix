@@ -2,8 +2,17 @@
 //   + 0.15×30 分钟内的变更 − 0.10×长期告警惩罚；深度只用于平分。
 // 覆盖率规则：能解释全部症状的候选排在没有解释全部症状的候选之前，不受其余各项影响。
 // 第一与第二候选同层且分差小于 δ 时根因有歧义，两者的证据链都执行。
+// 变更的作用对象（变更目标中的 Job 经 egress_to 访问的组件，ADR 0140）也是候选，来源记为 change，角色先验与近期变更两项
+// 按访问边的置信度打折，排在变更本身之后。
 import type { AlertRole, ChangeEvent, ComponentKey, EntityRef, IncidentRoot, RootCandidate } from '@srenautix/contract';
-import { changeComponents, changeExplains, dependsOn, type AlertGroup, type PreparedAlert } from './converge.js';
+import {
+  actsOn,
+  changeComponents,
+  changeExplains,
+  dependsOn,
+  type AlertGroup,
+  type PreparedAlert,
+} from './converge.js';
 import { isNamespacePseudo } from './keys.js';
 import type { ResolvedRcaParams } from './params.js';
 import { parseTime } from './time.js';
@@ -42,6 +51,8 @@ interface Draft {
   roles: Set<AlertRole>;
   own: PreparedAlert[];
   changes: ChangeEvent[];
+  /** 以它为作用对象的变更与访问边的置信度（ADR 0140）；变更直接触及的组件不在这里 */
+  actedOnBy: Array<{ change: ChangeEvent; confidence: number }>;
   probe: ProbeResult | undefined;
 }
 
@@ -53,7 +64,7 @@ export function rankRoot(input: RankInput): Ranking {
   const draft = (component: ComponentKey, source: RootCandidate['source']): Draft => {
     let d = drafts.get(component);
     if (!d) {
-      d = { component, source, roles: new Set(), own: [], changes: [], probe: undefined };
+      d = { component, source, roles: new Set(), own: [], changes: [], actedOnBy: [], probe: undefined };
       drafts.set(component, d);
     } else if (SOURCE_RANK[source] < SOURCE_RANK[d.source]) {
       d.source = source;
@@ -70,6 +81,12 @@ export function rankRoot(input: RankInput): Ranking {
   for (const c of group.changes) {
     for (const comp of changeComponents(c, graph)) {
       draft(comp, 'change').changes.push(c);
+    }
+  }
+  // 变更的作用对象：迁移 Job 失败时，原因可能在迁移本身，也可能在它写入的数据库（权限、锁、容量）
+  for (const c of group.changes) {
+    for (const [comp, confidence] of actsOn(c, graph)) {
+      draft(comp, 'change').actedOnBy.push({ change: c, confidence });
     }
   }
   for (const h of group.hubs) {
@@ -105,7 +122,14 @@ export function rankRoot(input: RankInput): Ranking {
     // forecast 与 meta 不能成为活动事件的根因：只有这两种自有告警、也没有变更与探测支持的组件不参与排序，
     // 整个分组只有这些告警时除外
     const onlyWeak = d.own.length > 0 && d.own.every((x) => role(x) === 'forecast' || role(x) === 'meta');
-    if (onlyWeak && d.changes.length === 0 && !d.probe && d.source !== 'symptom' && d.source !== 'hub') {
+    if (
+      onlyWeak &&
+      d.changes.length === 0 &&
+      d.actedOnBy.length === 0 &&
+      !d.probe &&
+      d.source !== 'symptom' &&
+      d.source !== 'hub'
+    ) {
       continue;
     }
     const explained: Array<{ id: string; conf: number; start: number }> = [];
@@ -113,6 +137,9 @@ export function rankRoot(input: RankInput): Ranking {
       let conf = s.component === d.component ? 1 : (s.rankReach?.components.get(d.component) ?? 0);
       for (const c of d.changes) {
         conf = Math.max(conf, changeExplains(c, s, graph, params, 'rank'));
+      }
+      for (const a of d.actedOnBy) {
+        conf = Math.max(conf, changeExplains(a.change, s, graph, params, 'rank'));
       }
       for (const o of d.own) {
         conf = Math.max(conf, dependsOn(s, o, graph, 'rank'));
@@ -125,6 +152,7 @@ export function rankRoot(input: RankInput): Ranking {
     const onsets = [
       ...causeOnsets,
       ...d.changes.map((c) => parseTime(c.time)),
+      ...d.actedOnBy.map((a) => parseTime(a.change.time)),
       ...(d.probe?.anomaly_started_at != null ? [d.probe.anomaly_started_at] : []),
     ];
     const onset =
@@ -136,16 +164,18 @@ export function rankRoot(input: RankInput): Ranking {
         : explained.filter((e) => e.start >= onset).length / explained.length;
     const priors = [...d.roles].map((r) => params.rolePriors[r]);
     if (d.changes.length > 0) priors.push(params.rolePriors.change);
+    // 作用对象：变更的先验按访问边的置信度打折
+    const actedOn = d.actedOnBy.length > 0 ? Math.max(...d.actedOnBy.map((a) => a.confidence)) : 0;
+    if (actedOn > 0) priors.push(params.rolePriors.change * actedOn);
     if (d.probe || d.source === 'hub') priors.push(params.rolePriors.cause);
     const rolePrior = priors.length > 0 ? Math.max(...priors) : 0;
+    const recent = (c: ChangeEvent) => parseTime(c.time) >= groupStart - params.changeWindowMs;
     const recentChange =
-      d.roles.has('change') ||
-      d.changes.some((c) => {
-        const t = parseTime(c.time);
-        return t >= groupStart - params.changeWindowMs;
-      })
+      d.roles.has('change') || d.changes.some(recent)
         ? 1
-        : 0;
+        : d.actedOnBy.some((a) => recent(a.change))
+          ? round(Math.max(...d.actedOnBy.filter((a) => recent(a.change)).map((a) => a.confidence)))
+          : 0;
     const chronic = d.own.length === 0 ? 0 : d.own.filter((x) => x.alert.classification.chronic).length / d.own.length;
     const w = params.weights;
     const score =
@@ -215,7 +245,14 @@ function candidateEntity(d: Draft, graph: TopologyGraph, clusterId: string): Ent
     const n = graph.node(target)!;
     return { cluster_id: clusterId, kind: n.kind, namespace: n.namespace, name: n.name, uid: n.uid };
   }
-  return byStart[0]?.alert.entity ?? null;
+  if (byStart[0]) {
+    return byStart[0].alert.entity;
+  }
+  // 作用对象（ADR 0140）：组件本身就是拓扑中的对象（CNPG Cluster 之类）
+  const self = d.actedOnBy.length > 0 ? graph.node(d.component) : undefined;
+  return self
+    ? { cluster_id: clusterId, kind: self.kind, namespace: self.namespace, name: self.name, uid: self.uid }
+    : null;
 }
 
 export interface ProbeRequest {

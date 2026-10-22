@@ -57,8 +57,9 @@ const opts = (images: Record<string, string[]> = {}): RolloutOptions => ({
   groupWithinMs: 2 * 60_000,
   images: (owner) => images[owner] ?? null,
 });
+/** 唯一的一次发布（一次性 Job 自成的变更另外检查，ADR 0140） */
 const only = (events: WorkloadEvent[], o = opts()) => {
-  const r = deriveRollouts(events, o);
+  const r = deriveRollouts(events, o).filter((c) => c.kind === 'rollout');
   expect(r).toHaveLength(1);
   return r[0]!;
 };
@@ -128,6 +129,46 @@ describe('发布之前的 Job', () => {
       expect(c.attachments, j.key).toBeUndefined();
       expect(c.time).toBe(at(20));
     }
+  });
+
+  it('没有挂上、也没有属主的 Job：之后 30 分钟内同一命名空间没有发布时自成一次变更（ADR 0140）', () => {
+    const standalone = (events: WorkloadEvent[]) =>
+      deriveRollouts(events, opts())
+        .filter((c) => c.kind === 'other')
+        .map((c) => c.targets);
+    // 其他命名空间、早于窗口、发布之后：都没有后续发布
+    expect(standalone([job('migrate', 10, { ns: 'billing' }), rs()])).toEqual([['Job:billing/migrate']]);
+    expect(standalone([job('migrate', -15), rs()])).toEqual([['Job:shop/migrate']]);
+    expect(standalone([job('migrate', 25), rs()])).toEqual([['Job:shop/migrate']]);
+    // 发布之前、窗口内：属于这次发布（挂上，或候选不唯一时不挂），不另成变更
+    expect(standalone([job('migrate', 10), rs()])).toEqual([]);
+    expect(standalone([job('migrate', 10), job('migstat', 10), rs()])).toEqual([]);
+    // CronJob、Operator、Helm 创建的 Job（有属主）不算
+    for (const owner of [
+      'CronJob:shop/nightly',
+      'Cluster.postgresql.cnpg.io:shop/pg',
+      'HelmChart.helm.cattle.io:kube-system/x',
+    ]) {
+      expect(standalone([job('step', 10, { owner, ns: 'billing' })]), owner).toEqual([]);
+    }
+  });
+
+  it('停在迁移这一步的发布：只有迁移 Job、没有新的 ReplicaSet，迁移 Job 自成一次变更，管理应用一并作为目标', () => {
+    const r = deriveRollouts([job('cchp-migrate-abc', 10, { managers: [APP] })], opts());
+    expect(r).toEqual([
+      {
+        change_id: `kubernetes:east:${seq}`,
+        source: 'kubernetes',
+        kind: 'other',
+        refs: [APP],
+        revision: null,
+        actor: null,
+        time: at(10),
+        link: null,
+        targets: ['Job:shop/cchp-migrate-abc', APP],
+        summary: '一次性 Job cchp-migrate-abc（没有属主，之后 30 分钟内同一命名空间没有发布）',
+      },
+    ]);
   });
 
   it('同一个 Job 只挂到它之后最近的那次发布', () => {

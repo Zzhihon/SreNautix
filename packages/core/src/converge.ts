@@ -147,9 +147,10 @@ export function changeExplains(
     }
     best = Math.max(best, reach?.components.get(comp) ?? 0);
   }
-  // 发布的前置 Job（迁移）作用在它写入的组件上：落在这些组件上的告警也由这次发布解释（ADR 0104 §13）
+  // 发布的前置 Job（迁移）与一次性 Job 的变更作用在它写入的组件上：落在这些组件上的告警也由这次变更解释
+  // （ADR 0104 §13、ADR 0140）
   if (x.component !== null) {
-    best = Math.max(best, preStepTargets(c, graph).get(x.component) ?? 0);
+    best = Math.max(best, actsOn(c, graph).get(x.component) ?? 0);
   }
   return best;
 }
@@ -158,21 +159,29 @@ export function changeExplains(
 const STRONG_ATTACHMENTS: ReadonlySet<string> = new Set(['managed_by', 'revision_label', 'image']);
 
 /**
- * 变更挂上的前置 Job 经 egress_to 访问的组件（迁移 Job 访问的数据库）→ 边的置信度。只看 egress_to：Job 依赖它们，
- * 迁移改的正是它们，所以它们上的告警可以由这次发布解释；Job 的其他依赖（DNS、存储）不算
+ * 变更的作用对象：变更目标中的 Job（挂上的前置 Job、一次性 Job 自成的变更）经 egress_to 访问的组件（迁移 Job 访问的数据库）
+ * → 边的置信度。只看 egress_to：Job 依赖它们，迁移改的正是它们，所以它们上的告警可以由这次变更解释，它们也是变更失败时的
+ * 根因候选（ADR 0140）；Job 的其他依赖（存储）与枢纽（DNS）不算。按第 4 档（namespace_window）弱推导挂上的 Job 不算（ADR 0104 §13）。
+ * 变更自己的目标所属的组件不在结果里
  */
-function preStepTargets(c: ChangeEvent, graph: TopologyGraph): Map<ComponentKey, number> {
+export function actsOn(c: ChangeEvent, graph: TopologyGraph): Map<ComponentKey, number> {
   const out = new Map<ComponentKey, number>();
-  for (const a of c.attachments ?? []) {
-    if (!STRONG_ATTACHMENTS.has(a.basis) || !graph.has(a.target)) {
+  const own = changeComponents(c, graph);
+  const basis = new Map((c.attachments ?? []).map((a) => [a.target, a.basis]));
+  for (const t of c.targets) {
+    const b = basis.get(t);
+    if (graph.node(t)?.kind !== 'Job' || (b !== undefined && !STRONG_ATTACHMENTS.has(b))) {
       continue;
     }
-    for (const e of graph.dependencies(a.target)) {
+    for (const e of graph.dependencies(t)) {
       if (e.relation !== 'egress_to' || e.provenance === 'naming') {
         continue;
       }
       const comp = graph.componentOf(e.to);
-      out.set(comp, Math.max(out.get(comp) ?? 0, e.confidence));
+      // 枢纽（CoreDNS 之类，网络策略总会放行 DNS）是所有工作负载共用的基础设施，不是 Job 写入的对象
+      if (!own.has(comp) && !graph.isHub(comp)) {
+        out.set(comp, Math.max(out.get(comp) ?? 0, e.confidence));
+      }
     }
   }
   return out;
@@ -257,11 +266,18 @@ function changeTargets(
   }
   const namespaces = changes.map((c) => changeNamespaces(c, graph));
   const times = changes.map((c) => parseTime(c.time));
-  // 有影响的变更：至少解释一条有锚点的告警
-  const impact = changes.map((c) =>
+  const own = changes.map((c) => changeComponents(c, graph));
+  // 告警的组件就是变更自己的目标（不是命名空间伪组件）：对象已经删除（失败的迁移 Job 被流水线删掉）、告警因此没有锚点时，
+  // 它仍然只属于这次变更（ADR 0140）
+  const onTarget = (x: PreparedAlert, k: number) =>
+    x.component !== null && !isNamespacePseudo(x.component) && own[k]!.has(x.component);
+  // 有影响的变更：至少解释一条有锚点的告警，或落在它自己目标上的告警
+  const impact = changes.map((c, k) =>
     xs.some(
       (x) =>
-        !unanchored(x) && x.alert.classification.role !== 'forecast' && changeExplains(c, x, graph, params, 'rank') > 0,
+        (!unanchored(x) || onTarget(x, k)) &&
+        x.alert.classification.role !== 'forecast' &&
+        changeExplains(c, x, graph, params, 'rank') > 0,
     ),
   );
   const reach = params.changeWindowMs + params.adjacencyMs;
@@ -280,10 +296,12 @@ function changeTargets(
       return;
     }
     const ns = namespaceOf(x);
-    out[i] = latestBefore(
-      x,
-      (k) => (ns !== null && namespaces[k]!.has(ns)) || (x.alert.classification.role === 'change' && impact[k]!),
-    );
+    out[i] =
+      latestBefore(x, (k) => onTarget(x, k)) ??
+      latestBefore(
+        x,
+        (k) => (ns !== null && namespaces[k]!.has(ns)) || (x.alert.classification.role === 'change' && impact[k]!),
+      );
   });
   // 逻辑归属相同的告警跟随已经归到变更的告警
   const byLogical = new Map<string, Set<number>>();

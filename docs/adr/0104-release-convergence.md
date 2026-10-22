@@ -57,6 +57,7 @@
       - 只看 `egress_to`，Job 的其他依赖（DNS、存储）不算；告警早于变更时间（发布开始之前已经在触发）的不解释。
       - 数据：线上 reader 按网络策略给 Job 生成 `egress_to` 边。重建包里只有 kube-state-metrics 历史的 Job 没有这类边（NetworkPolicy 不在 kube-state-metrics 里），所以 release-migration-deadlock 的回放不受影响，数据库告警仍单独成为事件；线上 informer 记录了 Job 时才生效。
       - 测试：`packages/core/test/pre-step-acts-on.test.ts`。覆盖四种情况：按镜像挂上的迁移 Job 解释数据库告警；第 4 档的备份类 Job 不解释；Job 没有 `egress_to` 边时不解释；数据库告警早于 Job 时不解释。
+      - ADR 0140 扩展这一条：没有挂上发布的一次性 Job 自成变更；作用对象排除枢纽（DNS），并且作为根因候选。
     - **数据来源**：kube-state-metrics 历史重建增加 `kube_job_owner` 与 `kube_pod_container_info`（core `KSM_TOPOLOGY_QUERIES`），server 的状态库与 eval 的重建用同一个 `deriveRollouts`。
       - 线上：reader（以及单集群的 informer）把对象的全部 `metadata.labels` 写进拓扑节点，第 2 档直接读 Job、新 ReplicaSet 与工作负载节点上的标签，不需要额外的数据。
       - 重建：配置了 `pre_step_labels` 时，`ksmTopologyQueries` 增加 `kube_job_labels`、`kube_replicaset_labels`、`kube_deployment_labels`、`kube_statefulset_labels` 的查询，只按这些 key sanitize 之后的 `label_*` 分组；配置为空时不查。`ksmTopologyIntervals` 把 `label_*` 映射回原 key 写进节点标签，不在配置里的标签不进节点。取值在窗口内不变的对象（Job、ReplicaSet），属主序列产生的同一节点也带上这组标签；取值会变的对象（发布时改了标签的 Deployment），由标签序列按各自的区间产生节点。导出（`eval export`）与回放读同一份 `reconstruct.pre_step_labels`。

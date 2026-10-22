@@ -8,6 +8,7 @@ import type { Queryable } from '../store/pool.js';
 // - 新出现的 ReplicaSet（Pod 模板变化），归到它的 Deployment。
 // 同一时间段（默认 2 分钟内）、同一版本取值或同一个管理它们的 Argo/Flux 应用的变化合成一次发布，目标是这些工作负载
 // 与管理它们的应用。结果是 changes/v1 的 ChangeEvent（source kubernetes、kind rollout），和变更源的变更一起参与收敛。
+// 没有属主、也没有后续发布的一次性 Job（停在迁移这一步的发布）自成一次变更（kind other，ADR 0140）。
 
 export interface WorkloadEvent {
   seq: number;
@@ -107,6 +108,8 @@ interface PreStep {
   namespace: string | null;
   managers: string[];
   labels: Readonly<Record<string, string | undefined>>;
+  /** 属主（owned_by）；CronJob 创建的 Job 不在这里 */
+  owner: string | null;
 }
 
 /** 对象标签中 keys 里有值的部分 */
@@ -144,6 +147,7 @@ export function deriveRollouts(events: readonly WorkloadEvent[], o: RolloutOptio
           namespace: e.body.namespace ?? namespaceOf(e.key),
           managers,
           labels: e.body.labels ?? {},
+          owner: e.owner,
         });
       }
       continue;
@@ -214,7 +218,7 @@ export function deriveRollouts(events: readonly WorkloadEvent[], o: RolloutOptio
     }
   }
   const attached = attachPreSteps(groups, jobs, o);
-  return groups.map((g, gi) => {
+  const rollouts = groups.map((g, gi) => {
     const first = g[0]!;
     const workloads = [...new Set(g.map((a) => a.target))];
     const managers = [...new Set(g.flatMap((a) => a.managers))].sort();
@@ -264,6 +268,51 @@ export function deriveRollouts(events: readonly WorkloadEvent[], o: RolloutOptio
     }
     return change;
   });
+  return [...rollouts, ...standaloneJobs(groups, jobs, attached, o)].sort(
+    (a, b) => a.time.localeCompare(b.time) || a.change_id.localeCompare(b.change_id),
+  );
+}
+
+/**
+ * 停在前置步骤的发布（ADR 0140）：没有属主的一次性 Job（kubectl create、发布流水线直接创建的迁移与预检）没有挂到任何发布，
+ * 并且之后 preStepWithinMs 之内同一命名空间没有发布时，自成一次变更。迁移失败时发布到不了工作负载，推导不出发布，
+ * 发布流水线的告警（没有对象）与 Job 的失败告警就没有变更可归，Job 访问的数据库也进不了候选。
+ * Operator 与 Helm 创建的 Job（有属主）是它们的内部步骤，CronJob 的 Job 是例行任务，都不算。
+ * change_id 取 Job 的序号，与发布的（第一个工作负载变化的序号）不冲突；之后出现发布并挂上这个 Job 时，它成为发布的一部分，
+ * 这次变更不再生成
+ */
+function standaloneJobs(
+  groups: readonly Atom[][],
+  jobs: readonly PreStep[],
+  attached: ReadonlyMap<number, ReadonlyArray<{ job: PreStep }>>,
+  o: RolloutOptions,
+): ChangeEvent[] {
+  const within = o.preStepWithinMs ?? DEFAULT_PRE_STEP_WITHIN_MS;
+  const used = new Set([...attached.values()].flatMap((xs) => xs.map((x) => x.job.key)));
+  const followed = (j: PreStep) =>
+    groups.some((g) => {
+      const start = g[0]!.time;
+      return (
+        start >= j.time &&
+        start - j.time <= within &&
+        j.namespace !== null &&
+        g.some((a) => namespaceOf(a.target) === j.namespace)
+      );
+    });
+  return jobs
+    .filter((j) => j.owner === null && !used.has(j.key) && !followed(j))
+    .map((j) => ({
+      change_id: `kubernetes:${o.clusterId}:${j.seq}`,
+      source: 'kubernetes',
+      kind: 'other',
+      refs: [...j.managers].sort(),
+      revision: null,
+      actor: null,
+      time: new Date(j.time).toISOString(),
+      link: null,
+      targets: [j.key, ...[...j.managers].sort()],
+      summary: `一次性 Job ${short(j.key)}（没有属主，之后 ${Math.round(within / 60_000)} 分钟内同一命名空间没有发布）`,
+    }));
 }
 
 const BASIS_TEXT: Record<AttachmentBasis, string> = {
