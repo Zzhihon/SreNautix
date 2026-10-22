@@ -90,10 +90,21 @@ input_series:
   # ---------- calm：web ----------
   - { series: 'kube_pod_info{namespace="calm",pod="web-6b7c8d9e0f-a2b4c",node="n1"}', values: '1x59' }
   - { series: 'kube_pod_info{namespace="calm",pod="web-6b7c8d9e0f-d5f7g",node="n2"}', values: '1x59' }
-  # init 容器只在开头运行了几分钟
+  # init 容器只在开头运行了几分钟；创建之后第一次采样时还在 PodInitializing（正常启动，不是失败）
   - {
       series: 'kube_pod_init_container_status_running{namespace="calm",pod="web-6b7c8d9e0f-a2b4c",container="wait-db"}',
       values: '1x2 0x56',
+    }
+  - {
+      series: 'kube_pod_init_container_status_waiting_reason{namespace="calm",pod="web-6b7c8d9e0f-a2b4c",container="wait-db",reason="PodInitializing"}',
+      values: '1 0x58',
+    }
+
+  # ---------- loop：cron 的 init 容器反复失败 ----------
+  - { series: 'kube_pod_info{namespace="loop",pod="cron-5d6e7f8a9b-z9y8x",node="n1"}', values: '1x59' }
+  - {
+      series: 'kube_pod_init_container_status_waiting_reason{namespace="loop",pod="cron-5d6e7f8a9b-z9y8x",container="wait-db",reason="CrashLoopBackOff"}',
+      values: '0x9 1x49',
     }
   - {
       series: 'kube_replicaset_owner{namespace="calm",replicaset="web-6b7c8d9e0f",owner_kind="Deployment",owner_name="web"}',
@@ -141,11 +152,18 @@ tests:
       expect: { verdict: abnormal },
     }
   - {
-      name: web 的 init 容器正常结束,
+      name: web 的 init 容器正常结束（启动时的 PodInitializing 不算失败）,
       eval_time: 30m,
       card: release/init-waiting,
       entity: { kind: Deployment, namespace: calm, name: web },
       expect: { verdict: normal },
+    }
+  - {
+      name: cron 的 init 容器处于 CrashLoopBackOff,
+      eval_time: 30m,
+      card: release/init-waiting,
+      entity: { kind: Deployment, namespace: loop, name: cron },
+      expect: { verdict: abnormal },
     }
   - {
       name: api 的新 ReplicaSet 没有就绪,

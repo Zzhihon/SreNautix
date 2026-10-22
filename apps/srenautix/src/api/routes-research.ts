@@ -22,7 +22,7 @@ import { KubeToolError, type KubeTools } from '../research/kube-tools.js';
 import type { StageAService } from '../stage-a/service.js';
 import { referenceCases } from './research-materials.js';
 import { parseStoredKey } from '../topology/keys.js';
-import { dispositionFacts, factRoots, remediationRoot, type RootLookup } from '../remediation/facts.js';
+import { dispositionFacts, factRoots, remediationRoot, RootCardScope, type RootLookup } from '../remediation/facts.js';
 
 export interface ResearchRouteDeps {
   pool: pg.Pool;
@@ -281,6 +281,7 @@ export function registerResearchRoutes(app: FastifyInstance, d: ResearchRouteDep
       namespaces: new Set(topo.nodes.map((n) => n.namespace).filter((x): x is string => x !== null)),
       before: new Date(),
     });
+    const now = new Date();
     return {
       run_id: runId,
       reason: t.reason,
@@ -310,7 +311,8 @@ export function registerResearchRoutes(app: FastifyInstance, d: ResearchRouteDep
               alerts,
               cards: stageA?.cards ?? [],
               roots: factRoots(incident, topo),
-              resolve: (key) => remediationRoot(d.dispositionFacts!.lookup, incident, alerts, key, new Date()),
+              resolve: (key) => remediationRoot(d.dispositionFacts!.lookup, incident, alerts, key, now),
+              scope: new RootCardScope(d.dispositionFacts.lookup, incident, now),
             }),
           }
         : {}),

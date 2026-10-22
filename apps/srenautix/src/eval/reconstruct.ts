@@ -34,7 +34,7 @@ import type { AlertInstance, Bundle, TopologyRow } from './bundle.js';
 import { matchesFault, type Label } from './labels.js';
 import { cardChecks, parseCardCheckId } from '../stage-a/card-checks.js';
 import { stableUuid } from './import-seed.js';
-import { dispositionFacts, factRoots, remediationRoot, type RootLookup } from '../remediation/facts.js';
+import { dispositionFacts, factRoots, remediationRoot, RootCardScope, type RootLookup } from '../remediation/facts.js';
 
 // 重建（DESIGN §14.2 reconstructed，ADR 0110）：用重建包按 server 的同一套代码重放一段时间。
 // - 拓扑：时刻 t 的节点与边取 valid_from ≤ t < valid_to 的行（与状态库的 at 查询相同），同一个键状态库的行优先于
@@ -408,6 +408,18 @@ export class BundleTopology implements NodeLookup {
     return this.at(t)
       .edges.filter((e) => e.relation === 'selects' && e.from === serviceKey)
       .map((e) => e.to);
+  }
+
+  /** 时刻 t 管理这个对象的 GitOps 应用（managed_by 边的另一端，按键排序） */
+  managersAt(key: string, t: number): string[] {
+    const k = this.sameObjectKeyCached(key);
+    return [
+      ...new Set(
+        this.at(t)
+          .edges.filter((e) => e.relation === 'managed_by' && e.from === k)
+          .map((e) => e.to),
+      ),
+    ].sort();
   }
 
   /** [from, to] 内工作负载与 ReplicaSet 的拓扑事件（与 changes/kubernetes.ts 的 kubernetesRollouts 查询相同） */
@@ -927,6 +939,8 @@ export function bundleRootLookup(t: BundleTopology, at: number, rt: Pick<PackRun
     },
     componentType: async (_clusterId, key) => t.componentType(key, at),
     componentTypes: () => rt.componentTypes(),
+    owner: async (_clusterId, key) => t.ownerAt(key, at),
+    managers: async (_clusterId, key) => t.managersAt(key, at),
   };
 }
 
@@ -977,6 +991,7 @@ export async function reconstructCase(
     return c.entity.kind === k.kind && c.entity.namespace === k.namespace && c.entity.name === k.name ? root : null;
   };
   // 处置推导的依据（ADR 0138），与 server 的研判输入相同；修复类别取全部（部署方启用了自愈 PR 时的情形）
+  const lookup = bundleRootLookup(r.topology, asOf, a.rt);
   const facts = await dispositionFacts({
     set: a.rt.set,
     componentTypes: a.rt.componentTypes(),
@@ -985,7 +1000,8 @@ export async function reconstructCase(
     alerts,
     cards: report.cards,
     roots: factRoots(inc, topo),
-    resolve: (key) => remediationRoot(bundleRootLookup(r.topology, asOf, a.rt), inc, alerts, key, new Date(asOf)),
+    resolve: (key) => remediationRoot(lookup, inc, alerts, key, new Date(asOf)),
+    scope: new RootCardScope(lookup, inc, new Date(asOf)),
   });
   const snapshot: EvalSnapshot = {
     snapshot_id: snapshotId,

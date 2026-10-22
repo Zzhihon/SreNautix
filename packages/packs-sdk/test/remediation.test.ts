@@ -276,6 +276,47 @@ afterAll(async () => {
 const stuck = ctx({
   root: { cluster_id: 'c1', kind: 'Deployment', namespace: 'shop', name: 'api' },
   cards: { 'workload/release/init-waiting': { verdict: 'abnormal' } },
+  root_cards: { 'workload/release/init-waiting': { verdict: 'abnormal' } },
+});
+
+it('发布回退只看根因自己的卡：别处的 init 卡异常、根因上正常或没有执行时不适用（ADR 0139）', () => {
+  const keys = (c: RemediationContext) => applicableRemediations(set, c).applicable.map((a) => a.key);
+  // 根因是节点：事件里另一个工作负载的 init 卡异常
+  expect(
+    keys(
+      ctx({
+        root: { cluster_id: 'c1', kind: 'Node', namespace: null, name: 'worker-1' },
+        cards: { 'workload/release/init-waiting': { verdict: 'abnormal' } },
+      }),
+    ),
+  ).not.toContain('gitops/release-to-serving-version');
+  // 根因上的两张卡都正常
+  expect(
+    keys(
+      ctx({
+        ...stuck,
+        root_cards: {
+          'workload/release/init-waiting': { verdict: 'normal' },
+          'workload/release/replicasets': { verdict: 'normal' },
+        },
+      }),
+    ),
+  ).not.toContain('gitops/release-to-serving-version');
+  // 根因上 ReplicaSet 没有就绪也适用
+  expect(keys(ctx({ ...stuck, root_cards: { 'workload/release/replicasets': { verdict: 'abnormal' } } }))).toContain(
+    'gitops/release-to-serving-version',
+  );
+  // StatefulSet 的发布进度卡：窗口结束时仍有副本未就绪才适用，只有 spec 变更的异常不算
+  const sts = (missing: number) =>
+    ctx({
+      root: { cluster_id: 'c1', kind: 'StatefulSet', namespace: 'shop', name: 'gateway' },
+      root_cards: {
+        'workload/release/init-waiting': { verdict: 'normal' },
+        'workload/rollout/statefulset': { verdict: 'abnormal', observations: { missing, stale: 0, specChanges: 1 } },
+      },
+    });
+  expect(keys(sts(2))).toContain('gitops/release-to-serving-version');
+  expect(keys(sts(0))).not.toContain('gitops/release-to-serving-version');
 });
 
 describe.each(SHAPES)('$name', (shape) => {
@@ -583,6 +624,8 @@ it('根因是管理工作负载的 Argo 应用：从事件组件取工作负载�
     },
     root: { cluster_id: 'c1', kind: 'Application.argoproj.io', namespace: 'argocd', name: 'shop' },
     cards: { 'workload/release/replicasets': { verdict: 'abnormal' } },
+    // 应用管理的 Deployment shop/api 上的卡属于这个根因（ADR 0139）
+    root_cards: { 'workload/release/replicasets': { verdict: 'abnormal' } },
   });
   const plan = await planRemediation(
     set,

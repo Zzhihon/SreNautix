@@ -65,10 +65,16 @@ signals:
     kind: metrics
     alternatives:
       - expr: max by (namespace, pod, container) (kube_pod_init_container_status_running{$selector})
+  # 在等待中、并且等待原因是失败（CrashLoopBackOff、拉取镜像失败、配置错误等）的 init 容器。PodInitializing 与
+  # ContainerCreating 是每个新 Pod 启动时都会经过的状态（init 容器还没创建或前一个 init 容器还在运行），不是失败：
+  # 滚动发布时 kube-state-metrics 常常采到新 Pod 的这一刻，窗口内的最大值会把正常启动算成"反复失败"（ADR 0139）
   - id: init_container_waiting
     kind: metrics
     alternatives:
-      - expr: max by (namespace, pod, container, reason) (max_over_time(kube_pod_init_container_status_waiting_reason{$selector}[$window])) == 1
+      - expr: >-
+          max by (namespace, pod, container, reason) (max_over_time(
+            kube_pod_init_container_status_waiting_reason{$selector, reason!~"PodInitializing|ContainerCreating"}[$window]
+          )) == 1
   - id: pdb_missing_healthy
     kind: metrics
     unit: count

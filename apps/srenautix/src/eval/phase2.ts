@@ -29,7 +29,13 @@ import {
   ReconstructedQueryRunner,
   replay,
 } from './reconstruct.js';
-import { matchTemplates, remediationContext, remediationRoot, type RootLookup } from '../remediation/facts.js';
+import {
+  matchTemplates,
+  remediationContext,
+  remediationRoot,
+  RootCardScope,
+  type RootLookup,
+} from '../remediation/facts.js';
 import { templateRoot } from '../research/disposition.js';
 import { scoreRemediation, type RemediationSummary } from './remediation.js';
 import { runEval, type EvalOutcome } from './runner.js';
@@ -313,10 +319,14 @@ async function runTemplates(
     }
     const key = templateRoot(r.level, r.root ?? null, m.incident.root.component);
     const root = key ? await remediationRoot(m.lookup, m.incident, m.alerts, key, new Date(m.at)) : null;
-    const ctx = remediationContext(m.incident, m.alerts, m.cards, root, {
-      disposition: r.disposition ?? 'undetermined',
-      level: r.level,
-    });
+    const ctx = remediationContext(
+      m.incident,
+      m.alerts,
+      m.cards,
+      root,
+      { disposition: r.disposition ?? 'undetermined', level: r.level },
+      await new RootCardScope(m.lookup, m.incident, new Date(m.at)).cards(root, m.cards),
+    );
     out.set(
       r,
       matchTemplates(rt.set, ctx).filter((t) => EVAL_REMEDIATION_CATEGORIES.includes(t.category)),

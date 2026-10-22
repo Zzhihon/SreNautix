@@ -269,12 +269,14 @@ remediation:
 | 字段 | 内容 |
 |---|---|
 | `category` | `release_rollback`、`config_resource`、`alert_rule`、`topology_coverage` |
-| `when` | 适用条件（CEL）：`incident`、`root`、`research`（研判结论 `{disposition, level}`，没有时为 null）、`cards`（`<包>/<链>/<卡>` → 结论）、`alerts`（成员告警，含 `role`、`source`、`catalog_entry`、`chronic`）、`params` |
+| `when` | 适用条件（CEL）：`incident`、`root`、`research`（研判结论 `{disposition, level}`，没有时为 null）、`cards`（`<包>/<链>/<卡>` → 结论，含判定明细 `observations`）、`root_cards`（同形，只含根因自己的卡，见下文）、`alerts`（成员告警，含 `role`、`source`、`catalog_entry`、`chronic`）、`params` |
 | `inputs` | 计划时在事件锚点对本包 metrics 信号的 instant 查询；`entity` 是求实体的 CEL，默认根因 |
 | `history` | 读取一个文件角色的 Git 历史，变量 `history` 为最近 `depth` 个修改过它的提交 `{commit, author, time, message, doc}` |
 | `let`、`skip_if` | 按顺序求值的绑定；`skip_if` 任一为 true 时不生成补丁，`say` 写明原因 |
 | `edits` | 对文件角色的修改：`document`（kind 与 metadata.name）与 `locate` 选定唯一的文档，`set` 按点路径或布局的逻辑字段设值（CEL，`current` 为原值），`append` 向数组追加元素 |
 | `change`、`verify`、`rollback` | 写进 PR 描述的改动说明、验证计划（合并同步后应判为正常的卡片与时限）与回滚方法（revert 这个 PR 的提交） |
+
+`root_cards` 是模板根因自己的卡（ADR 0139）：实体沿 owned_by 的顶层属主就是根因（根因本身、它拥有的 ReplicaSet 与 Pod），根因是 Argo 或 Flux 应用时还有它管理的工作负载，再加上管理根因的应用本身的卡；根因是逻辑组件时为事件组件中的工作负载。按根因判断的模板（发布卡住、OOM）读 `root_cards`，只有事件整体的条件读 `cards`。
 
 变量 `files` 是文件角色 → 文档列表（glob 匹配的全部文件与多文档 YAML 的全部文档展开），`fields` 是布局中的逻辑字段。点路径的段为键名、`name[key=value]`、`name[*]` 或 `name[N]`，可以含 `{变量}`。修改保留文件的注释、缩进与其他文档，只替换目标值。目标不存在、不唯一或已经是目标值时模板跳过，并给出原因。模板专用函数：`digest`、`field`、`mem_bytes`、`cpu_cores`、`mebibytes`、`millicores`、`seconds`、`kebab`、`component_ref`。
 
@@ -282,7 +284,7 @@ remediation:
 
 | 模板 | 类别 | 适用 | 修改 |
 |---|---|---|---|
-| `release-to-serving-version` | release_rollback | `params.stuck_cards` 中任一卡片异常（默认 `workload/release/init-waiting`、`replicasets`） | 发布输入改回历史中最近一次指向就绪 Pod 镜像 digest 的版本。就绪 Pod 取运行发布输入当前或历史中出现过的镜像仓库的容器，坏版本换了仓库（镜像写错）时仍能找到旧版本；仓库已经指向它时跳过 |
+| `release-to-serving-version` | release_rollback | 根因自己的卡中，`params.stuck_cards` 任一异常（默认 `workload/release/init-waiting`、`replicasets`），或 `params.rollout_cards` 任一异常且判定明细 `missing` 大于 0（窗口结束时仍有副本未就绪，只有 spec 变更不算） | 发布输入改回历史中最近一次指向就绪 Pod 镜像 digest 的版本。就绪 Pod 取运行发布输入当前或历史中出现过的镜像仓库的容器，坏版本换了仓库（镜像写错）时仍能找到旧版本；仓库已经指向它时跳过 |
 | `hpa-max-replicas-raise` | config_resource | 根因是 HPA，`workload/capacity/hpa` 异常 | `spec.maxReplicas` 加 `params.step`，不超过 `params.ceiling` |
 | `memory-limit-raise` | config_resource | 根因是工作负载，`workload/pod-restarts/memory` 异常 | OOMKilled 容器的内存 limit 乘 `params.factor`，不超过 `params.ceiling` |
 | `noisy-alert-relax` | alert_rule | 研判结论为不需要处理（`research.disposition == "ignore"`）且有 critical 告警，或长期告警以 critical 触发、事件中没有症状告警 | 严重度改为 `params.to_severity`，`for` 至少 `params.min_for` |

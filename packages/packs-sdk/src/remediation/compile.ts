@@ -44,6 +44,7 @@ export const REMEDIATION_VARIABLES = [
   'root',
   'research',
   'cards',
+  'root_cards',
   'alerts',
   'params',
   'files',

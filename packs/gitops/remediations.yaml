@@ -14,10 +14,20 @@ remediations:
     title: { zh-CN: 发布输入回到正在服务的版本, en: Point the release input back at the version being served }
     category: release_rollback
     repository: gitops
-    when: params.stuck_cards.split(",").exists(k, k in cards && cards[k].verdict == "abnormal")
+    # 只看根因自己的卡（root_cards，ADR 0139）：根因本身与它拥有的 Pod、ReplicaSet，根因是 Argo 或 Flux 应用时还有它管理的
+    # 工作负载，根因是逻辑组件时为事件里的工作负载。别处的卡异常不说明这个根因的发布卡住：节点、PVC 或另一个工作负载为根因时
+    # 不适用
+    when: >-
+      params.stuck_cards.split(",").exists(k, k in root_cards && root_cards[k].verdict == "abnormal")
+      || params.rollout_cards.split(",").exists(k, k in root_cards && root_cards[k].verdict == "abnormal"
+        && "observations" in root_cards[k] && "missing" in root_cards[k].observations
+        && root_cards[k].observations.missing != null && double(root_cards[k].observations.missing) > 0.0)
     params:
-      # 判定新版本卡住的卡片，任一为 abnormal 即适用；用户层可以加入自己包里的卡片
+      # 判定新版本卡住的卡片，根因上任一为 abnormal 即适用；用户层可以加入自己包里的卡片
       stuck_cards: workload/release/init-waiting,workload/release/replicasets
+      # 发布进度卡：异常并且窗口结束时仍有副本未就绪或不可用（判定明细 missing 大于 0）时适用；只有 spec 变更的异常不算。
+      # StatefulSet 与 DaemonSet 没有 ReplicaSet 卡，靠它们判断滚动停在半路
+      rollout_cards: workload/rollout/deployment,workload/rollout/statefulset,workload/rollout/daemonset
       depth: 20
     inputs:
       # 根因是工作负载时查它的命名空间；根因是管理工作负载的 Argo 或 Flux 应用时，取事件组件中的第一个工作负载

@@ -121,6 +121,18 @@ describe('上下文与辅助', () => {
     const cs: EvidenceResult[] = stageACards();
     expect(cardsOf(cs)['workload/http/error_ratio']).toMatchObject({ verdict: 'abnormal', value: '31%' });
     expect(cardsOf(cs)['node/disk/pressure']).toMatchObject({ verdict: 'undeterminable', value: null });
+    // 判定明细跟着选中的那一份结果（ADR 0139：发布进度卡按 missing 判断滚动是否停在半路）
+    const rollout = (verdict: EvidenceResult['verdict'], missing: number): EvidenceResult => ({
+      ...cs[0]!,
+      card_id: 'workload/rollout/statefulset',
+      verdict,
+      observations: { missing, stale: 0, specChanges: 1 },
+    });
+    expect(cardsOf([rollout('normal', 0), rollout('abnormal', 2)])['workload/rollout/statefulset']).toMatchObject({
+      verdict: 'abnormal',
+      observations: { missing: 2 },
+    });
+    expect(cardsOf(cs)['node/disk/pressure']).not.toHaveProperty('observations');
   });
 
   it('分支名与执行事件中的 PR', () => {

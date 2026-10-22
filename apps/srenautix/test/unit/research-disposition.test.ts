@@ -152,9 +152,10 @@ describe('处置依据的计算', () => {
         key: 'demo/db-fix',
         pack: 'demo',
         def: { id: 'db-fix', category: 'config_resource', repository: 'gitops', params: {} },
+        // 按根因自己的卡判断（ADR 0139）
         when: (c: Record<string, unknown>) => {
           const root = c.root as { kind: string } | null;
-          const cards = c.cards as Record<string, { verdict: string }>;
+          const cards = c.root_cards as Record<string, { verdict: string }>;
           return root?.kind === 'StatefulSet' && cards['pvc/capacity/used_ratio']?.verdict === 'abnormal';
         },
       },
@@ -177,6 +178,11 @@ describe('处置依据的计算', () => {
     };
     const roots = factRoots(inc, { nodes: [], edges: [] });
     expect(roots).toEqual([PG, 'Deployment:shop/web', PROVIDER]);
+    // 每个根因自己的卡：名字落在根因名里的实体（postgres 的数据卷属于 postgres）
+    const scope = {
+      cards: async (r: { name: string } | null, cards: readonly EvidenceResult[]) =>
+        cards.filter((c) => r !== null && c.entity !== null && c.entity.name.includes(r.name)),
+    };
     const f = await dispositionFacts({
       set,
       componentTypes: types,
@@ -186,6 +192,7 @@ describe('处置依据的计算', () => {
       cards: stageACards(),
       roots,
       resolve,
+      scope,
     });
     expect(f).toEqual({
       external: [PROVIDER],
@@ -200,6 +207,7 @@ describe('处置依据的计算', () => {
       cards: stageACards(),
       roots,
       resolve,
+      scope,
     });
     expect(off.remediations).toEqual([]);
   });

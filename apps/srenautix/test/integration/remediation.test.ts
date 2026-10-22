@@ -337,6 +337,8 @@ function build(
       componentType: async () => null,
       concrete: (clusterId, key, at, hints) =>
         new ComponentExpander(new TopologyStore(db.server)).concrete(clusterId, key, at, hints),
+      owner: (clusterId, key, at) => new TopologyStore(db.server).ownerOf(clusterId, key, at),
+      managers: (clusterId, key, at) => new TopologyStore(db.server).targets(clusterId, key, 'managed_by', at),
       dataSource: o.dataSource ?? (async () => null),
       github: app,
       proposals: beforeCreate

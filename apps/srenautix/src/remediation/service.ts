@@ -20,7 +20,7 @@ import type { ProposalService } from '../proposals/service.js';
 import { appendAudit } from '../store/audit.js';
 import { tx } from '../store/pool.js';
 import type { ConcreteObject, LogicalHint } from '../topology/expand.js';
-import { remediationRoot } from './facts.js';
+import { remediationRoot, RootCardScope } from './facts.js';
 import { GitHubRepoReader } from './github-repo.js';
 import { alertsOf, branchOf, cardsOf, keyCards, prBody, say, validatePlan, type Lang } from './render.js';
 
@@ -57,6 +57,9 @@ export interface RemediationDeps {
   componentType: (clusterId: string, key: string) => Promise<string | null>;
   /** 组件键 → 拓扑里的具体对象（ComponentExpander.concrete） */
   concrete: (clusterId: string, key: string, at: Date, hints: readonly LogicalHint[]) => Promise<ConcreteObject>;
+  /** 沿 owned_by 的顶层属主与管理对象的 GitOps 应用：选出根因自己的卡（ADR 0139） */
+  owner: (clusterId: string, key: string, at: Date) => Promise<string | null>;
+  managers: (clusterId: string, key: string, at: Date) => Promise<string[]>;
   dataSource: (at: number) => Promise<EvidenceDataSource | null>;
   github: GitHubApp;
   proposals: ProposalService;
@@ -219,6 +222,9 @@ export class RemediationService {
       abnormal_cards: Object.entries(ctx.cards)
         .filter(([, c]) => c.verdict === 'abnormal')
         .map(([id]) => id),
+      root_abnormal_cards: Object.entries(ctx.root_cards ?? {})
+        .filter(([, c]) => c.verdict === 'abnormal')
+        .map(([id]) => id),
       applicable: applicable.map((a) => a.key),
     });
     const wanted = applicable.filter((a) => this.s.categories.includes(a.category));
@@ -276,11 +282,14 @@ export class RemediationService {
       inc.members.filter((m) => m.left_version === null).map((m) => m.alert_id),
     );
     const rootKey = remediationRootKey(run, inc);
-    const root = rootKey ? await remediationRoot(this.d, inc, alerts, rootKey, new Date()) : null;
+    const at = new Date();
+    const root = rootKey ? await remediationRoot(this.d, inc, alerts, rootKey, at) : null;
     return {
       incident: inc as unknown as Record<string, unknown>,
       root,
       cards: cardsOf(cards),
+      // 根因自己的卡（ADR 0139）：发布回退与内存模板只按根因上的结论适用
+      root_cards: cardsOf(await new RootCardScope(this.d, inc, at).cards(root, cards)),
       alerts: alertsOf(alerts),
       // 触发这次修复的研判结论（模板按处置判断与结论等级适用，例如研判判为 ignore 的误报告警降级）
       research: {

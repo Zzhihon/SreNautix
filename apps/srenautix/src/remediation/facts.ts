@@ -1,7 +1,14 @@
 import type { Alert, ComponentType, EvidenceResult, Incident, TopologyEdge } from '@srenautix/contract';
-import { matchTypeByName } from '@srenautix/core';
+import { matchTypeByName, tryNodeKey } from '@srenautix/core';
 import { applicableRemediations, type PackSet, type RemediationContext } from '@srenautix/packs-sdk';
-import { hintOf, type ConcreteObject, type LogicalHint } from '../topology/expand.js';
+import {
+  hintOf,
+  isLogicalComponent,
+  WORKLOAD_KINDS,
+  type ConcreteObject,
+  type LogicalHint,
+} from '../topology/expand.js';
+import { parseStoredKey } from '../topology/keys.js';
 import type { DispositionFacts } from '../research/types.js';
 import { FIX_CATEGORIES } from '../research/disposition.js';
 import { alertsOf, cardsOf } from './render.js';
@@ -29,6 +36,8 @@ export interface FactsInput {
   /** 候选根因，按优先顺序（超过 MAX_FACT_ROOTS 的不求值） */
   roots: readonly string[];
   resolve: RootResolver;
+  /** 每个根因自己的卡（RootCardScope） */
+  scope: Pick<RootCardScope, 'cards'>;
 }
 
 export interface RootLookup {
@@ -36,6 +45,69 @@ export interface RootLookup {
   concrete: (clusterId: string, key: string, at: Date, hints: readonly LogicalHint[]) => Promise<ConcreteObject>;
   componentType: (clusterId: string, key: string) => Promise<string | null>;
   componentTypes: () => readonly ComponentType[];
+  /** 组件键沿 owned_by 的顶层属主（TopologyStore.ownerOf）；没有属主时为 null */
+  owner: (clusterId: string, key: string, at: Date) => Promise<string | null>;
+  /** 管理这个对象的 GitOps 应用（managed_by 边的另一端） */
+  managers: (clusterId: string, key: string, at: Date) => Promise<string[]>;
+}
+
+/**
+ * 根因自己的卡（ADR 0139）：修复模板的 root_cards。一张卡属于根因，当它的实体沿 owned_by 的顶层属主
+ * - 就是根因（展开后的对象）：根因本身、它拥有的 ReplicaSet 与 Pod；
+ * - 由根因管理（managed_by 指向根因）：根因是 Argo 或 Flux 应用时，它管理的工作负载及其 Pod；
+ * - 管理根因：根因的 GitOps 应用本身的卡（不含这个应用管理的其他对象）；
+ * - 根因是逻辑组件（没有拓扑上的属主与成员，ADR 0104 §6）时，是事件组件中的工作负载：与发布回退模板取正在服务的版本
+ *   的实体相同。
+ * 实体为空或不是合法组件键的卡不属于任何根因。属主与管理应用按键缓存，一个实例只用于一个事件与时刻。
+ */
+export class RootCardScope {
+  private readonly tops = new Map<string, Promise<{ top: string; managers: string[] }>>();
+
+  constructor(
+    private readonly d: Pick<RootLookup, 'owner' | 'managers'>,
+    private readonly incident: Pick<Incident, 'cluster_id' | 'components'>,
+    private readonly at: Date,
+  ) {}
+
+  private resolve(key: string): Promise<{ top: string; managers: string[] }> {
+    let p = this.tops.get(key);
+    if (!p) {
+      p = (async () => {
+        const top = (await this.d.owner(this.incident.cluster_id, key, this.at)) ?? key;
+        return { top, managers: await this.d.managers(this.incident.cluster_id, top, this.at) };
+      })();
+      this.tops.set(key, p);
+    }
+    return p;
+  }
+
+  async cards(root: RemediationContext['root'], cards: readonly EvidenceResult[]): Promise<EvidenceResult[]> {
+    const rootKey = root ? tryNodeKey(root.kind, root.namespace, root.name) : null;
+    if (!rootKey) {
+      return [];
+    }
+    const r = await this.resolve(rootKey);
+    const members = new Set<string>();
+    if (isLogicalComponent(rootKey)) {
+      for (const k of this.incident.components) {
+        if (WORKLOAD_KINDS.includes(parseStoredKey(k).kind)) {
+          members.add((await this.resolve(k)).top);
+        }
+      }
+    }
+    const out: EvidenceResult[] = [];
+    for (const c of cards) {
+      const key = c.entity ? tryNodeKey(c.entity.kind, c.entity.namespace, c.entity.name) : null;
+      if (!key) {
+        continue;
+      }
+      const e = await this.resolve(key);
+      if (e.top === r.top || e.managers.includes(r.top) || r.managers.includes(e.top) || members.has(e.top)) {
+        out.push(c);
+      }
+    }
+    return out;
+  }
 }
 
 /**
@@ -89,18 +161,20 @@ export function factRoots(
   ];
 }
 
-/** 模板匹配的上下文（与 RemediationService.context 相同的字段） */
+/** 模板匹配的上下文（与 RemediationService.context 相同的字段）；rootCards 是 RootCardScope 选出的根因自己的卡 */
 export function remediationContext(
   incident: Incident,
   alerts: Alert[],
   cards: EvidenceResult[],
   root: RemediationContext['root'],
   research: { disposition: string; level: string } | null,
+  rootCards: readonly EvidenceResult[],
 ): RemediationContext {
   return {
     incident: incident as unknown as Record<string, unknown>,
     root,
     cards: cardsOf(cards),
+    root_cards: cardsOf([...rootCards]),
     alerts: alertsOf(alerts),
     research,
   };
@@ -126,7 +200,14 @@ export async function dispositionFacts(i: FactsInput): Promise<DispositionFacts>
     if (!enabled.size || !root) {
       continue;
     }
-    const ctx = remediationContext(i.incident, i.alerts, i.cards, root, { disposition: 'act', level: 'likely' });
+    const ctx = remediationContext(
+      i.incident,
+      i.alerts,
+      i.cards,
+      root,
+      { disposition: 'act', level: 'likely' },
+      await i.scope.cards(root, i.cards),
+    );
     const templates = matchTemplates(i.set, ctx).filter((t) => enabled.has(t.category));
     if (templates.length) {
       out.remediations.push({ root: key, templates });

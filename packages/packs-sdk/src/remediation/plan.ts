@@ -21,8 +21,13 @@ export interface RemediationContext {
   root: (RenderEntity & { component_type?: string | null }) | null;
   /** 触发计划的研判结论：处置（契约 Disposition）与结论等级（契约 ConclusionLevel）；没有研判时为 null */
   research?: { disposition: string; level: string } | null;
-  /** 卡片全局 id → 结论 */
-  cards: Record<string, { verdict: string; display_state?: string; value?: string | null; reason_kind?: string }>;
+  /** 卡片全局 id → 结论（同一张卡在多个实体上时取最严重的） */
+  cards: Record<string, RemediationCard>;
+  /**
+   * 根因自己的卡（ADR 0139）：实体沿 owned_by 的顶层属主就是根因（根因本身、它拥有的 Pod 与 ReplicaSet），根因是
+   * GitOps 应用时还有它管理的对象，再加上管理根因的应用本身的卡；形状与 cards 相同。没有给出时为空
+   */
+  root_cards?: Record<string, RemediationCard>;
   /** 成员告警；role、source、catalog_entry、chronic 取自契约 AlertClassification */
   alerts: Array<{
     alertname: string;
@@ -34,6 +39,15 @@ export interface RemediationContext {
     chronic: boolean;
     entity: Record<string, unknown> | null;
   }>;
+}
+
+export interface RemediationCard {
+  verdict: string;
+  display_state?: string;
+  value?: string | null;
+  reason_kind?: string;
+  /** 判定时 let 绑定的标量取值（契约 EvidenceResult.observations） */
+  observations?: Record<string, number | string | boolean | null | undefined>;
 }
 
 export interface RemediationTarget {
@@ -88,6 +102,7 @@ function ctxOf(ctx: RemediationContext, params: Record<string, unknown>): Record
     root: ctx.root,
     research: ctx.research ?? null,
     cards: ctx.cards,
+    root_cards: ctx.root_cards ?? {},
     alerts: ctx.alerts,
     params,
   };
