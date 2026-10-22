@@ -419,7 +419,15 @@ describe.each(SHAPES)('$name', (shape) => {
     const c = ctx({
       root: { cluster_id: 'c1', kind: 'Deployment', namespace: 'shop', name: 'web' },
       cards: { 'workload/pod-restarts/memory': { verdict: 'abnormal' } },
+      root_cards: { 'workload/pod-restarts/memory': { verdict: 'abnormal' } },
     });
+    // 只看根因自己的内存卡：别的工作负载被 OOMKilled（全局卡异常、根因上正常）时不适用（ADR 0139）
+    expect(
+      applicableRemediations(set, {
+        ...c,
+        root_cards: { 'workload/pod-restarts/memory': { verdict: 'normal' } },
+      }).applicable.map((a) => a.key),
+    ).not.toContain('gitops/memory-limit-raise');
     const plan = await planRemediation(
       set,
       'gitops/memory-limit-raise',

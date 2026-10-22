@@ -24,7 +24,7 @@ import { EvidenceSource, PackRuntime } from '../../src/stage-a/packs.js';
 import { migrateExpand } from '../../src/store/migrate.js';
 import { tx } from '../../src/store/pool.js';
 import { ComponentExpander } from '../../src/topology/expand.js';
-import { TopologyStore } from '../../src/topology/store.js';
+import { TopologyStore, type TopologyChange } from '../../src/topology/store.js';
 import { TopologyTargets } from '../../src/topology/targets.js';
 import { newTestDb, type TestDb } from '../support/db.js';
 import { FakeGitHub } from '../support/github.js';
@@ -789,6 +789,47 @@ spec:
       timeoutMs: 5_000,
     });
     gh.write('main', { [WORKLOADS_PATH]: WORKLOADS_FILE }, { message: 'shop workloads' });
+    // 内存卡所在 Pod 的属主链：Pod → ReplicaSet → Deployment checkout（根因自己的卡，ADR 0139）；
+    // web 的 Pod 属于另一个工作负载
+    const at = new Date(T - 3600_000);
+    const owned = (pod: string, rs: string, deploy: string): TopologyChange[] => [
+      ...[`Pod:shop/${pod}`, `ReplicaSet:shop/${rs}`, `Deployment:shop/${deploy}`].map((key): TopologyChange => ({
+        op: 'node_upsert',
+        at,
+        source: 'informer',
+        node: {
+          key,
+          kind: key.split(':')[0]!,
+          namespace: 'shop',
+          name: key.split('/')[1]!,
+          uid: `uid-${key.split('/')[1]!}`,
+          labels: {},
+          component_type: null,
+          hub: false,
+        },
+      })),
+      ...[
+        [`Pod:shop/${pod}`, `ReplicaSet:shop/${rs}`],
+        [`ReplicaSet:shop/${rs}`, `Deployment:shop/${deploy}`],
+      ].map(([from, to]): TopologyChange => ({
+        op: 'edge_upsert',
+        at,
+        source: 'informer',
+        edge: {
+          from: from!,
+          to: to!,
+          relation: 'owned_by',
+          provenance: 'structural',
+          confidence: 1,
+          scope: 'service',
+          evidence: 'ownerReference',
+        },
+      })),
+    ];
+    await new TopologyStore(db.server).apply(CLUSTER, [
+      ...owned('checkout-56f4794c88-fbdsd', 'checkout-56f4794c88', 'checkout'),
+      ...owned('web-7b8c9d0e1f-h3j5k', 'web-7b8c9d0e1f', 'web'),
+    ]);
     oom = build(null, {
       files: { workloads: { path: WORKLOADS_PATH, format: 'yaml' } },
       dataSource: () => source.dataSource(Date.now()),
@@ -826,6 +867,18 @@ spec:
     // 标题写研判根因；提议仍绑定事件的根因（提议服务按事件核对绑定）
     expect(params.title).toMatch(/：Deployment:shop\/checkout$/);
     expect(proposal.binding.root_component).toBe(APP);
+  });
+
+  it('OOMKilled 的是另一个工作负载的 Pod：研判根因 checkout 自己的内存卡没有异常，memory-limit-raise 不适用', async () => {
+    const other: EvidenceResult = {
+      ...memoryCard(),
+      entity: { cluster_id: CLUSTER, kind: 'Pod', namespace: 'shop', name: 'web-7b8c9d0e1f-h3j5k', uid: null },
+    };
+    const s = await seed('likely', { root: appRoot, researchRoot: 'Deployment:shop/checkout', cards: [other] });
+    expect(await oom.runOnce()).toBe(0);
+    expect(await attempts(s.runId)).toEqual([
+      { key: '-', outcome: 'skipped', code: 'no_template', proposal_id: null, branch: null },
+    ]);
   });
 
   it('研判结论低于 likely 时退回事件根因：Application 上没有适用的配置模板', async () => {

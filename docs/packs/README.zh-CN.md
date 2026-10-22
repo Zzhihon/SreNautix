@@ -286,7 +286,7 @@ remediation:
 |---|---|---|---|
 | `release-to-serving-version` | release_rollback | 根因自己的卡中，`params.stuck_cards` 任一异常（默认 `workload/release/init-waiting`、`replicasets`），或 `params.rollout_cards` 任一异常且判定明细 `missing` 大于 0（窗口结束时仍有副本未就绪，只有 spec 变更不算） | 发布输入改回历史中最近一次指向就绪 Pod 镜像 digest 的版本。就绪 Pod 取运行发布输入当前或历史中出现过的镜像仓库的容器，坏版本换了仓库（镜像写错）时仍能找到旧版本；仓库已经指向它时跳过 |
 | `hpa-max-replicas-raise` | config_resource | 根因是 HPA，`workload/capacity/hpa` 异常 | `spec.maxReplicas` 加 `params.step`，不超过 `params.ceiling` |
-| `memory-limit-raise` | config_resource | 根因是工作负载，`workload/pod-restarts/memory` 异常 | OOMKilled 容器的内存 limit 乘 `params.factor`，不超过 `params.ceiling` |
+| `memory-limit-raise` | config_resource | 根因是工作负载，根因自己的 `workload/pod-restarts/memory` 异常 | OOMKilled 容器的内存 limit 乘 `params.factor`，不超过 `params.ceiling` |
 | `noisy-alert-relax` | alert_rule | 研判结论为不需要处理（`research.disposition == "ignore"`）且有 critical 告警，或长期告警以 critical 触发、事件中没有症状告警 | 严重度改为 `params.to_severity`，`for` 至少 `params.min_for` |
 | `alert-catalog-entry` | topology_coverage | 成员告警没有命中告警目录 | 按 deployment、statefulset、daemonset、pod、component 或 service 标签给告警目录加一条条目 |
 

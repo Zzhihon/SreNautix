@@ -153,9 +153,10 @@ remediations:
     title: { zh-CN: 提高 OOMKilled 容器的内存 limit, en: Raise the memory limit of an OOMKilled container }
     category: config_resource
     repository: gitops
+    # 只看根因工作负载自己的内存卡（root_cards，ADR 0139）：别的工作负载被 OOMKilled 时不提高这个工作负载的 limit
     when: >-
       root != null && root.kind in ["Deployment", "StatefulSet", "DaemonSet"]
-      && "workload/pod-restarts/memory" in cards && cards["workload/pod-restarts/memory"].verdict == "abnormal"
+      && "workload/pod-restarts/memory" in root_cards && root_cards["workload/pod-restarts/memory"].verdict == "abnormal"
     params: { factor: 1.5, ceiling: 16Gi }
     inputs:
       - { name: oom, signal: oom_killed_containers }
