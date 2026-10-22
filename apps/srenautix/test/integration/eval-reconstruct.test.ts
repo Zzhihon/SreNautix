@@ -324,6 +324,8 @@ describe('重放、重建阶段 A 与研判输入', () => {
     expect(rc.snapshot.source.kind).toBe('reconstructed');
     expect(rc.cards.total).toBeGreaterThan(0);
     expect(rc.snapshot.context.subgraph.nodes.map((n) => n.component)).toContain('Deployment:shop/api');
+    // 处置推导的依据（ADR 0138）：内置包没有声明外部组件
+    expect(rc.snapshot.context.disposition_facts?.external).toEqual([]);
     // 分析时刻第一次触发仍在继续：一条告警，链级有卡。主卡是 kps-conditions 的告警条件卡（ADR 0109），
     // 夹具里没有它读取的 kube_deployment_status_condition，所以无法判定
     expect(rc.agreement).toHaveLength(1);
@@ -473,5 +475,36 @@ describe('自愈 PR 的补丁检查', () => {
       applicable: 2,
       correct: 1,
     });
+    // 模板匹配（ADR 0138）：标注类别的模板适用为触发；没有仓库修复的标注上适用的模板按类别记误触发；
+    // 低于 likely 的运行不计
+    const runs = [
+      run('label:shop-rollout', 0, null, 'likely'),
+      run('label:shop-rollout', 1, null, 'evidence_consistent'),
+      run('label:shop-rollout', 2, null, 'likely'),
+      run('label:shop-rollout', 3, null, 'inconclusive'),
+      run('label:no-fix', 0, null, 'likely'),
+    ];
+    const t = scoreRemediation(
+      runs,
+      (id) => labels.get(id) ?? null,
+      null,
+      dir,
+      (r) =>
+        r.caseId === 'label:no-fix'
+          ? [{ key: 'gitops/noisy-alert-relax', category: 'alert_rule' }]
+          : r.run === 0
+            ? [{ key: 'gitops/release-to-serving-version', category: 'release_rollback' }]
+            : r.run === 1
+              ? [{ key: 'gitops/memory-limit-raise', category: 'config_resource' }]
+              : [],
+    );
+    expect(t).toMatchObject({
+      eligible_runs: 3,
+      triggered_runs: 0,
+      template_triggered_runs: 1,
+      template_any_runs: 2,
+      template_false_triggers: { alert_rule: 1 },
+    });
+    expect(t.template_matches).toHaveLength(4);
   });
 });

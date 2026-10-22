@@ -12,7 +12,7 @@ import type {
 } from '@srenautix/contract';
 import type { CatalogAction } from '../proposals/catalog.js';
 import type { RouteReport } from '../scheduler/admission.js';
-import type { CheckTemplate, KnowledgeItem, ReferenceCase } from './types.js';
+import type { CheckTemplate, DispositionFacts, KnowledgeItem, ReferenceCase } from './types.js';
 
 // worker 调用中心 server 的内部接口（worker 的服务 token；server 代为执行队列的 SKIP LOCKED，worker 没有 server schema 的权限）。
 
@@ -48,6 +48,8 @@ export interface TaskContext {
   hub_tools?: Array<{ name: string; description: string; parameters: Record<string, unknown> }>;
   /** 事件窗口内触及子图或事件命名空间、但不在事件里的变更 */
   related_changes?: ChangeEvent[];
+  /** 处置推导的确定性依据（ADR 0138）；旧版 server 没有这个字段 */
+  disposition_facts?: DispositionFacts;
 }
 
 export class HubError extends Error {

@@ -233,6 +233,8 @@ component_types:
 | `alert_label` | 实体所在告警的标签 |
 | `signal` + `label` | 在事件锚点对本包的 metrics 信号做 instant 查询，备选按顺序尝试，取第一条序列的 `label` 标签 |
 
+组件在集群之外（例如外部 API 服务方）时，组件类型声明 `external: true`：研判根因落在这种组件上、结论为 likely 及以上时，集群内没有可处置的对象，处置推导以它为 ignore 的依据（ADR 0138）。
+
 `lint` 检查 signal 来源是本包的 metrics 信号，并按组件类型的 kind 渲染、严格解析每个备选。server 用 packs-sdk 的 `resolveDisplayName(set, 组件类型, {entity, labels, annotations}, 数据源, 时刻)` 求值；数据源报错只让这个来源落空，名称只用于显示，不影响研判。
 
 ## 排除规则与规则提议

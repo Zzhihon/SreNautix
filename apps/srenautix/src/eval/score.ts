@@ -31,6 +31,8 @@ export interface RunRecord {
   error: string | null;
   /** 研判输出的提议草稿（动作与参数），自愈 PR 的度量用 */
   proposals: Array<{ action_id: string; params: Record<string, unknown> }>;
+  /** 结论选中的研判根因（修复模板的匹配用，ADR 0138）；没有结论时为 null */
+  root?: string | null;
 }
 
 export interface Scored {

@@ -234,6 +234,7 @@ export async function runEval(p: EvalPlan): Promise<EvalOutcome> {
           durationMs: Date.now() - started,
           error: res.error ? `${res.error.kind}: ${res.error.message}` : null,
           proposals: (out?.proposals ?? []).map((x) => ({ action_id: x.action_id, params: x.params })),
+          root: out?.conclusion.root_component ?? null,
         });
         logger.info('评测运行完成', {
           case_id: c.case_id,

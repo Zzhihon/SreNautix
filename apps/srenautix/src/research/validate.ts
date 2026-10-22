@@ -1,10 +1,4 @@
-import type {
-  ActionCatalogAction,
-  ConcludeOutput,
-  Disposition,
-  ProposalDraft,
-  ResearchOutput,
-} from '@srenautix/contract';
+import type { ActionCatalogAction, ConcludeOutput, ProposalDraft, ResearchOutput } from '@srenautix/contract';
 import { displayKey, tryNodeKey } from '@srenautix/core';
 import { validatorOf, formatErrors } from '../llm/schema.js';
 import type { EvidenceBook } from './evidence.js';
@@ -13,7 +7,8 @@ import { auditText, buildCorpus, cardMaterial, type NumberCorpus } from './numbe
 import type { ResearchCase } from './types.js';
 
 // 结论的代码校验（DESIGN §7.3）：删除无效的证据引用；删除目录以外、参数不合 schema、目标与机器推导不一致的提议；
-// 修复建议按同样规则处理并按类别排序、每类最多 3 条；处置判断按规则约束。所有修改写入 validation_notes。
+// 修复建议按同样规则处理并按类别排序、每类最多 3 条。所有修改写入 validation_notes。处置判断在结论阶梯之后由
+// disposition.ts 推导（ADR 0138）。
 
 export const RECOMMENDATION_ORDER = ['mitigation', 'root_fix', 'prevention', 'investigation'] as const;
 const MAX_PER_KIND = 3;
@@ -59,7 +54,6 @@ export interface Validated {
   chosen: LedgerEntry | null;
   /** 结论假设的来源：模型选中；模型弃权时由代码按账本选中（ADR 0120，档位最高 likely） */
   chosenBy: 'model' | 'ledger' | null;
-  disposition: Disposition;
   undeterminedReason: string | null;
   situation: string;
   summary: string;
@@ -242,24 +236,9 @@ export function validateConclusion(
     });
   }
 
-  // 处置判断
-  let disposition = raw.disposition;
-  const fallback: Disposition = c.incident.severity === 'critical' ? 'escalate' : 'undetermined';
-  if (c.stageA.observability_blind && disposition !== 'escalate') {
-    notes.push(`观测失明时不由模型判断，处置改为 escalate（模型给出 ${disposition}）`);
-    disposition = 'escalate';
-  } else if (disposition === 'act' && proposals.length === 0 && c.stageA.rule_proposals.length === 0) {
-    notes.push(`处置为 act 但没有有效的提议或规则提议，改为 ${fallback}`);
-    disposition = fallback;
-  } else if (disposition === 'act' && !chosen) {
-    notes.push(`处置为 act 但根因无法判定，改为 ${fallback}`);
-    disposition = fallback;
-  }
-
   return {
     chosen,
     chosenBy,
-    disposition,
     undeterminedReason,
     situation: raw.situation,
     summary: raw.summary,

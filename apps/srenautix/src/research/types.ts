@@ -1,6 +1,7 @@
 import type {
   ChangeEvent,
   ActionCatalogAction,
+  EvalDispositionFacts,
   EvidenceResult,
   Feedback,
   HubComponents,
@@ -10,6 +11,13 @@ import type {
 } from '@srenautix/contract';
 
 export type Subgraph = HubComponents['schemas']['Subgraph'];
+
+/**
+ * 处置推导的确定性依据（ADR 0138），server 按领域包与阶段 A 计算：
+ * - external：子图中组件类型声明为集群外部的组件；
+ * - remediations：候选根因 → 适用的修复模板（release_rollback、config_resource 中启用的类别）。
+ */
+export type DispositionFacts = EvalDispositionFacts;
 
 /** 检索到的知识条目（领域包 knowledge/*.yaml），带来源事件，回放时按用例排除 */
 export interface KnowledgeItem {
@@ -66,6 +74,8 @@ export interface ResearchCase {
   tools: CheckTool[];
   /** 研判时刻；回放时为快照的 as-of 时间 */
   asOf: string;
+  /** 处置推导的确定性依据（ADR 0138）；旧版 server 与旧快照没有时为 null（没有外部组件，也没有适用的修复模板） */
+  dispositionFacts?: DispositionFacts | null;
 }
 
 /** 上一次研判的结果，用于指纹门控与增量研判 */

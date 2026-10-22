@@ -141,6 +141,7 @@ export function toResearchCase(ctx: TaskContext, tools: Tool[], now: number): Re
     templates: ctx.templates,
     tools: tools.map((t) => ({ name: t.name, description: t.description, parameters: t.parameters })),
     asOf: new Date(now).toISOString(),
+    dispositionFacts: ctx.disposition_facts ?? null,
   };
 }
 

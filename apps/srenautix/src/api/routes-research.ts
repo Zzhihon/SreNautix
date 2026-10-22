@@ -22,6 +22,7 @@ import { KubeToolError, type KubeTools } from '../research/kube-tools.js';
 import type { StageAService } from '../stage-a/service.js';
 import { referenceCases } from './research-materials.js';
 import { parseStoredKey } from '../topology/keys.js';
+import { dispositionFacts, factRoots, remediationRoot, type RootLookup } from '../remediation/facts.js';
 
 export interface ResearchRouteDeps {
   pool: pg.Pool;
@@ -49,6 +50,11 @@ export interface ResearchRouteDeps {
   stageA?: Pick<StageAService, 'recompute' | 'current'>;
   /** 逻辑组件映射出的候选进入研判的拓扑邻域（ADR 0130）；没有时邻域只按事件的组件与候选根因取 */
   expander?: Pick<ComponentExpander, 'logicalCandidates'>;
+  /**
+   * 处置推导的确定性依据（ADR 0138）：候选根因的具体对象与组件类型、启用的修复类别（没有启用自愈 PR 时为空）。
+   * 没有时研判输入不带 disposition_facts，处置只按提议与阶段 A 推导
+   */
+  dispositionFacts?: { lookup: RootLookup; categories: readonly string[] } | null;
 }
 
 /** 逻辑组件到候选的映射边（ADR 0130）：命名来源，置信度 0.3，低于归并阈值 τ */
@@ -294,6 +300,20 @@ export function registerResearchRoutes(app: FastifyInstance, d: ResearchRouteDep
       pack_lock: d.packs.set.lockDigest,
       hub_tools: d.kube && incident.cluster_id === d.clusterId ? d.kube.specs() : [],
       related_changes: await relatedChanges(incident, topo.nodes),
+      ...(d.dispositionFacts
+        ? {
+            disposition_facts: await dispositionFacts({
+              set: d.packs.set,
+              componentTypes: d.packs.componentTypes(),
+              categories: d.dispositionFacts.categories,
+              incident,
+              alerts,
+              cards: stageA?.cards ?? [],
+              roots: factRoots(incident, topo),
+              resolve: (key) => remediationRoot(d.dispositionFacts!.lookup, incident, alerts, key, new Date()),
+            }),
+          }
+        : {}),
     };
   });
 

@@ -137,6 +137,11 @@
       "properties": {
         "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_.-]*$" },
         "hub": { "type": "boolean", "default": false },
+        "external": {
+          "type": "boolean",
+          "default": false,
+          "description": "组件在集群之外（例如外部 API 服务方），集群内没有可处置的对象：研判根因落在这种组件上、结论为 likely 及以上时，处置推导以它为 ignore 的依据（ADR 0138）"
+        },
         "match": {
           "type": "object",
           "additionalProperties": false,

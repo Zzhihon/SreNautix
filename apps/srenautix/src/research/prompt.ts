@@ -761,11 +761,53 @@ export function hypothesizeItems(
   ];
 }
 
+/**
+ * 处置推导的确定性依据（ADR 0138）：账本中未被推翻的假设的根因里，哪些是集群外部组件、哪些有适用的修复模板。
+ * 只在 conclude 里给出；都没有（或旧版 server 没有提供依据）时不出现
+ */
+export function dispositionSegment(c: ResearchCase, ledger: Ledger): Segment[] {
+  const f = c.dispositionFacts;
+  if (!f) {
+    return [];
+  }
+  const roots = new Set(
+    ledger
+      .list()
+      .filter((e) => e.status !== 'refuted')
+      .map((e) => e.rootComponent),
+  );
+  const external = f.external.filter((k) => roots.has(k));
+  const remediations = f.remediations.filter((r) => roots.has(r.root));
+  if (!external.length && !remediations.length) {
+    return [];
+  }
+  return [
+    seg(
+      [
+        fenced('集群外部组件（领域包声明，集群内没有可处置的对象）', external),
+        fenced(
+          '修复模板（server 按研判根因生成仓库修复 PR；只列出账本中有适用模板的根因）',
+          remediations.map((r) => ({ root: r.root, templates: r.templates.map((t) => `${t.key}（${t.category}）`) })),
+        ),
+      ].join('\n\n'),
+      [],
+      'allow',
+    ),
+  ];
+}
+
 export function concludeItems(language: Language, p: PromptParts, ledger: Ledger, book: EvidenceBook): Item[] {
   return [
     { type: 'system', segments: [p.system] },
     { type: 'user', segments: [p.catalog, ...p.incident] },
-    { type: 'user', segments: [...ledgerSegment(ledger, book, p), seg(PROMPTS[language].conclude, [], 'allow')] },
+    {
+      type: 'user',
+      segments: [
+        ...ledgerSegment(ledger, book, p),
+        ...dispositionSegment(p.rc, ledger),
+        seg(PROMPTS[language].conclude, [], 'allow'),
+      ],
+    },
   ];
 }
 

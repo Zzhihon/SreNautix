@@ -69,6 +69,7 @@ export function replayCase(c: EvalCase, s: EvalSnapshot): { rc: ResearchCase; ex
     templates: s.context.templates,
     tools: [],
     asOf: s.as_of,
+    dispositionFacts: s.context.disposition_facts ?? null,
   };
   return { rc, excluded };
 }

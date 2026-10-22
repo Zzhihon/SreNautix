@@ -1,4 +1,4 @@
-import type { EvalCase, EvalSnapshot } from '@srenautix/contract';
+import type { Alert, EvalCase, EvalSnapshot, EvidenceResult, Incident } from '@srenautix/contract';
 import { logger } from '../log.js';
 import type { ModelLayer } from '../llm/session.js';
 import { ServerMetrics } from '../metrics.js';
@@ -20,7 +20,17 @@ import { readBundle } from './bundle.js';
 import type { ReconstructConfig } from './config.js';
 import { discoveryCase, summarizeDiscovery, type DiscoveryCase, type DiscoverySummary } from './discovery.js';
 import { labelCase, reconstructedSnapshotId, type Label, type LabelFile } from './labels.js';
-import { faultAlertIds, mainIncident, reconstructCase, ReconstructedQueryRunner, replay } from './reconstruct.js';
+import {
+  bundleRootLookup,
+  EVAL_REMEDIATION_CATEGORIES,
+  faultAlertIds,
+  mainIncident,
+  reconstructCase,
+  ReconstructedQueryRunner,
+  replay,
+} from './reconstruct.js';
+import { matchTemplates, remediationContext, remediationRoot, type RootLookup } from '../remediation/facts.js';
+import { templateRoot } from '../research/disposition.js';
 import { scoreRemediation, type RemediationSummary } from './remediation.js';
 import { runEval, type EvalOutcome } from './runner.js';
 import type { RunRecord } from './score.js';
@@ -133,6 +143,8 @@ export async function runPhase2(o: Phase2Options): Promise<Phase2Result> {
   const runners = new Map<string, QueryRunner>();
   // 每个用例：分析时刻的事件根因与属主查找（研判根因与发现根因的比较用）
   const incidentRoots = new Map<string, { root: string | null; ownerOf: (key: string) => string | null }>();
+  // 每个用例：修复模板匹配的输入（ADR 0138，只匹配、不推送）
+  const matchInputs = new Map<string, MatchInput>();
   for (const l of labels) {
     const b = readBundle(o.casesDir, l.id);
     const rep = await replay(
@@ -205,6 +217,13 @@ export async function runPhase2(o: Phase2Options): Promise<Phase2Result> {
       root: rc.incident.root.component,
       ownerOf: (key) => topology.ownerAt(key, asOf),
     });
+    matchInputs.set(c.case_id, {
+      incident: rc.incident,
+      alerts: rc.snapshot.context.alerts as unknown as Alert[],
+      cards: rc.snapshot.context.stage_a.cards,
+      lookup: bundleRootLookup(topology, asOf, rt),
+      at: asOf,
+    });
     coverage.push({
       label: l.id,
       incident: rc.incident.label,
@@ -246,7 +265,14 @@ export async function runPhase2(o: Phase2Options): Promise<Phase2Result> {
       }
     }
     const byCase = new Map<string, Label>(labels.map((l) => [`label:${l.id}`, l]));
-    remediation = scoreRemediation(analysis.runs, (id) => byCase.get(id) ?? null, a.repo, a.scratch);
+    const templates = await runTemplates(analysis.runs, matchInputs, rt);
+    remediation = scoreRemediation(
+      analysis.runs,
+      (id) => byCase.get(id) ?? null,
+      a.repo,
+      a.scratch,
+      (r) => templates.get(r) ?? [],
+    );
     roots = compareRoots(analysis.runs, incidentRoots, byCase);
   }
   return {
@@ -260,6 +286,43 @@ export async function runPhase2(o: Phase2Options): Promise<Phase2Result> {
     roots,
     packLock,
   };
+}
+
+interface MatchInput {
+  incident: Incident;
+  alerts: Alert[];
+  cards: EvidenceResult[];
+  lookup: RootLookup;
+  at: number;
+}
+
+/**
+ * 每次运行适用的修复模板（ADR 0138）：按运行的研判结论取模板使用的根因（likely 及以上取研判根因，否则取事件根因），
+ * 以运行的处置与档位求值，与 server 的自愈 PR 相同；只匹配，不读仓库、不计划、不推送
+ */
+async function runTemplates(
+  runs: readonly RunRecord[],
+  inputs: ReadonlyMap<string, MatchInput>,
+  rt: PackRuntime,
+): Promise<Map<RunRecord, Array<{ key: string; category: string }>>> {
+  const out = new Map<RunRecord, Array<{ key: string; category: string }>>();
+  for (const r of runs) {
+    const m = inputs.get(r.caseId);
+    if (!m || r.level === null) {
+      continue;
+    }
+    const key = templateRoot(r.level, r.root ?? null, m.incident.root.component);
+    const root = key ? await remediationRoot(m.lookup, m.incident, m.alerts, key, new Date(m.at)) : null;
+    const ctx = remediationContext(m.incident, m.alerts, m.cards, root, {
+      disposition: r.disposition ?? 'undetermined',
+      level: r.level,
+    });
+    out.set(
+      r,
+      matchTemplates(rt.set, ctx).filter((t) => EVAL_REMEDIATION_CATEGORIES.includes(t.category)),
+    );
+  }
+  return out;
 }
 
 const ABSTAIN_LEVELS = new Set(['inconclusive', 'undetermined']);
@@ -418,6 +481,24 @@ export function renderPhase2Markdown(r: Phase2Result): string {
     lines.push(`| 误触发（标注没有仓库修复却提议 gitops_pr） | ${m.false_triggers} |`);
     lines.push(`| 补丁可应用率（git apply --check） | ${pct(m.applicable, m.patches)} |`);
     lines.push(`| 补丁正确率（与标准修复的期望对比） | ${pct(m.correct, m.patches)} |`);
+    if (m.template_triggered_runs !== undefined) {
+      lines.push(
+        `| PR 触发率（模板匹配：标注类别的修复模板适用，只匹配不推送） | ${pct(m.template_triggered_runs, m.eligible_runs)} |`,
+      );
+      lines.push(`| 任一修复模板适用（同一批运行） | ${pct(m.template_any_runs ?? 0, m.eligible_runs)} |`);
+      const ft = Object.entries(m.template_false_triggers ?? {});
+      lines.push(
+        `| 误触发（模板匹配：标注没有仓库修复，按类别） | ${ft.length ? ft.map(([k, v]) => `${k} ${v}`).join('，') : '0'} |`,
+      );
+    }
+    if (m.template_matches?.length) {
+      lines.push('', '| 用例 | 路由 | 次序 | 档位 | 处置 | 适用的修复模板 |', '|---|---|---|---|---|---|');
+      for (const t of m.template_matches) {
+        lines.push(
+          `| ${t.case} | ${t.route} | ${t.run} | ${t.level ?? '—'} | ${t.disposition ?? '—'} | ${t.templates.join('、') || '—'} |`,
+        );
+      }
+    }
     if (m.checks.length) {
       lines.push('', '| 用例 | 路由 | 次序 | base | 可应用 | 正确 | 说明 |', '|---|---|---|---|---|---|---|');
       for (const c of m.checks) {

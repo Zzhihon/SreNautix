@@ -142,6 +142,42 @@
               "args": { "type": "object" }
             }
           }
+        },
+        "disposition_facts": { "$ref": "#/$defs/DispositionFacts" }
+      }
+    },
+    "DispositionFacts": {
+      "title": "EvalDispositionFacts",
+      "description": "处置推导的确定性依据（ADR 0138），与 server 写进研判输入的相同；旧快照没有这个字段",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["external", "remediations"],
+      "properties": {
+        "external": {
+          "type": "array",
+          "description": "子图中组件类型声明为集群外部（external）的组件",
+          "items": { "$ref": "common.schema.json#/$defs/ComponentKey" }
+        },
+        "remediations": {
+          "type": "array",
+          "description": "候选根因 → 适用的修复模板（release_rollback、config_resource 两类中启用的类别），按研判以它为根因、处置为 act 求值；没有适用模板的根因不列出",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["root", "templates"],
+            "properties": {
+              "root": { "$ref": "common.schema.json#/$defs/ComponentKey" },
+              "templates": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["key", "category"],
+                  "properties": { "key": { "type": "string" }, "category": { "type": "string" } }
+                }
+              }
+            }
+          }
         }
       }
     },

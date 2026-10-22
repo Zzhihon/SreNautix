@@ -405,6 +405,7 @@ export interface SrenautixContractIndex {
   EvalGate?: EvalGate;
   EvalSnapshot?: EvalSnapshot;
   EvalSnapshotContext?: EvalSnapshotContext;
+  EvalDispositionFacts?: EvalDispositionFacts;
   EvalKnowledge?: EvalKnowledge;
   EvalReferenceCase?: EvalReferenceCase;
   QuerySnapshot?: QuerySnapshot1;
@@ -2225,6 +2226,7 @@ export interface EvalSnapshotContext {
     description: string;
     args: {};
   }[];
+  disposition_facts?: EvalDispositionFacts;
 }
 /**
  * 持久化的事件（DESIGN §2.2、§5）。每次对账按确定性规则重算一次，再与已持久化的事件对账；成员或根因变化时 incident_version 加一
@@ -2558,6 +2560,25 @@ export interface EvalReferenceCase {
   mechanism: string | null;
   resolved_at: Timestamp;
   source: 'human' | 'model';
+}
+/**
+ * 处置推导的确定性依据（ADR 0138），与 server 写进研判输入的相同；旧快照没有这个字段
+ */
+export interface EvalDispositionFacts {
+  /**
+   * 子图中组件类型声明为集群外部（external）的组件
+   */
+  external: ComponentKey[];
+  /**
+   * 候选根因 → 适用的修复模板（release_rollback、config_resource 两类中启用的类别），按研判以它为根因、处置为 act 求值；没有适用模板的根因不列出
+   */
+  remediations: {
+    root: ComponentKey;
+    templates: {
+      key: string;
+      category: string;
+    }[];
+  }[];
 }
 /**
  * 数据源调用的录制结果（VCR），与领域包的 pack test --replay 使用同一种查询快照
@@ -3425,6 +3446,10 @@ export interface ComponentsFile {
 export interface ComponentType {
   id: string;
   hub?: boolean;
+  /**
+   * 组件在集群之外（例如外部 API 服务方），集群内没有可处置的对象：研判根因落在这种组件上、结论为 likely 及以上时，处置推导以它为 ignore 的依据（ADR 0138）
+   */
+  external?: boolean;
   match: {
     kind: string;
     api_group?: string;

@@ -667,6 +667,15 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
     changes: engineChanges,
     stageA,
     expander,
+    // 处置推导的依据（ADR 0138）：修复模板只在自愈 PR 能生成时（启用并配置了 github_app）算作 act 的依据
+    dispositionFacts: {
+      lookup: {
+        concrete: (clusterId, key, at, hints) => expander.concrete(clusterId, key, at, hints),
+        componentType: (clusterId, key) => topology.componentType(clusterId, key),
+        componentTypes: () => packs.componentTypes(),
+      },
+      categories: c.remediation.enabled && github ? c.remediation.categories : [],
+    },
   });
   registerIncidentRoutes(app, { pool, auth, feedback, topology, evidence, worker });
   registerSystemRoutes(app, {

@@ -1,5 +1,5 @@
 // 本文件由 packages/contract/scripts/gen.ts 从 contract/ 生成，不要手工修改。
-export const CONTRACT_VERSION = '2.24.0';
+export const CONTRACT_VERSION = '2.25.0';
 
 export const SCHEMAS: Record<string, Record<string, unknown>> = {
   'https://srenautix.io/contract/gateway/v1/action-catalog.schema.json': {
@@ -2542,6 +2542,43 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
               properties: { id: { type: 'string' }, description: { type: 'string' }, args: { type: 'object' } },
             },
           },
+          disposition_facts: { $ref: '#/$defs/DispositionFacts' },
+        },
+      },
+      DispositionFacts: {
+        title: 'EvalDispositionFacts',
+        description: '处置推导的确定性依据（ADR 0138），与 server 写进研判输入的相同；旧快照没有这个字段',
+        type: 'object',
+        additionalProperties: false,
+        required: ['external', 'remediations'],
+        properties: {
+          external: {
+            type: 'array',
+            description: '子图中组件类型声明为集群外部（external）的组件',
+            items: { $ref: 'common.schema.json#/$defs/ComponentKey' },
+          },
+          remediations: {
+            type: 'array',
+            description:
+              '候选根因 → 适用的修复模板（release_rollback、config_resource 两类中启用的类别），按研判以它为根因、处置为 act 求值；没有适用模板的根因不列出',
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['root', 'templates'],
+              properties: {
+                root: { $ref: 'common.schema.json#/$defs/ComponentKey' },
+                templates: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    additionalProperties: false,
+                    required: ['key', 'category'],
+                    properties: { key: { type: 'string' }, category: { type: 'string' } },
+                  },
+                },
+              },
+            },
+          },
         },
       },
       Knowledge: {
@@ -3871,6 +3908,12 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
         properties: {
           id: { type: 'string', pattern: '^[a-z0-9][a-z0-9_.-]*$' },
           hub: { type: 'boolean', default: false },
+          external: {
+            type: 'boolean',
+            default: false,
+            description:
+              '组件在集群之外（例如外部 API 服务方），集群内没有可处置的对象：研判根因落在这种组件上、结论为 likely 及以上时，处置推导以它为 ignore 的依据（ADR 0138）',
+          },
           match: {
             type: 'object',
             additionalProperties: false,

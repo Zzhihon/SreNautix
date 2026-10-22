@@ -306,7 +306,6 @@ describe('代码校验', () => {
       },
     ]);
     expect(v.notes).toHaveLength(4);
-    expect(v.disposition).toBe('act');
   });
 
   it('修复建议：按类别排序、每类最多 3 条、runbook 与动作不在列表中时置空、引用清理', () => {
@@ -353,17 +352,10 @@ describe('代码校验', () => {
     });
   });
 
-  it('处置判断：观测失明一律 escalate；act 没有提议时按严重度改写；推翻的假设不能选中', () => {
-    const blind = setup();
-    blind.rc.stageA.observability_blind = true;
-    blind.ledger.merge([hyp('h1', PG, ['card:2'])], []);
-    expect(
-      validateConclusion(conclude({ disposition: 'ignore' }), blind.rc, blind.book, blind.ledger).disposition,
-    ).toBe('escalate');
+  it('推翻的假设不能选中', () => {
     const s = setup();
     s.ledger.merge([hyp('h1', PG, ['card:2']), hyp('h2', WEB, [])], []);
     s.ledger.evaluate();
-    expect(validateConclusion(conclude({}), s.rc, s.book, s.ledger).disposition).toBe('escalate');
     const r = validateConclusion(conclude({ hypothesis_id: 'h2', disposition: 'escalate' }), s.rc, s.book, s.ledger);
     expect(r.chosen).toBeNull();
     expect(r.undeterminedReason).toMatch(/已被推翻/);

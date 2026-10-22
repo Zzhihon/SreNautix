@@ -34,6 +34,7 @@ import type { AlertInstance, Bundle, TopologyRow } from './bundle.js';
 import { matchesFault, type Label } from './labels.js';
 import { cardChecks, parseCardCheckId } from '../stage-a/card-checks.js';
 import { stableUuid } from './import-seed.js';
+import { dispositionFacts, factRoots, remediationRoot, type RootLookup } from '../remediation/facts.js';
 
 // 重建（DESIGN §14.2 reconstructed，ADR 0110）：用重建包按 server 的同一套代码重放一段时间。
 // - 拓扑：时刻 t 的节点与边取 valid_from ≤ t < valid_to 的行（与状态库的 at 查询相同），同一个键状态库的行优先于
@@ -400,6 +401,13 @@ export class BundleTopology implements NodeLookup {
   componentType(key: string, t: number): string | null {
     const iv = this.pick(this.nodes.get(key) ?? [], t);
     return iv?.body.component_type ?? null;
+  }
+
+  /** 时刻 t 的 Service 选中的对象（selects 边的另一端） */
+  selected(serviceKey: string, t: number): string[] {
+    return this.at(t)
+      .edges.filter((e) => e.relation === 'selects' && e.from === serviceKey)
+      .map((e) => e.to);
   }
 
   /** [from, to] 内工作负载与 ReplicaSet 的拓扑事件（与 changes/kubernetes.ts 的 kubernetesRollouts 查询相同） */
@@ -896,6 +904,32 @@ export interface ReconstructedCase {
   cards: { total: number; determinate: number; abnormal: number; rootAbnormal: number };
 }
 
+/** 重建评测按启用了全部修复类别计算修复模板（与 CCHP 的 remediation.categories 相同） */
+export const EVAL_REMEDIATION_CATEGORIES = ['release_rollback', 'config_resource', 'alert_rule', 'topology_coverage'];
+
+/**
+ * 重建拓扑上的根因展开（与 ComponentExpander.concrete 相同的规则，ADR 0126）：取时刻 at 的顶层属主；Service 只选中
+ * 一个工作负载时取它。重建拓扑没有逻辑组件的映射，逻辑组件保持原样
+ */
+export function bundleRootLookup(t: BundleTopology, at: number, rt: Pick<PackRuntime, 'componentTypes'>): RootLookup {
+  return {
+    concrete: async (_clusterId, key) => {
+      let target = t.ownerAt(key, at) ?? key;
+      let p = parseStoredKey(target);
+      if (p.kind === 'Service') {
+        const owners = new Set(t.selected(target, at).map((x) => t.ownerAt(x, at) ?? x));
+        if (owners.size === 1) {
+          target = [...owners][0]!;
+          p = parseStoredKey(target);
+        }
+      }
+      return { key: target, kind: p.kind, namespace: p.namespace, name: p.name, uid: null };
+    },
+    componentType: async (_clusterId, key) => t.componentType(key, at),
+    componentTypes: () => rt.componentTypes(),
+  };
+}
+
 /** 在 as_of 为主事件出阶段 A 报告并组装研判输入（快照 context 与 worker 读到的研判输入同形） */
 export async function reconstructCase(
   r: Replay,
@@ -942,6 +976,17 @@ export async function reconstructCase(
     const k = parseStoredKey(root ?? '');
     return c.entity.kind === k.kind && c.entity.namespace === k.namespace && c.entity.name === k.name ? root : null;
   };
+  // 处置推导的依据（ADR 0138），与 server 的研判输入相同；修复类别取全部（部署方启用了自愈 PR 时的情形）
+  const facts = await dispositionFacts({
+    set: a.rt.set,
+    componentTypes: a.rt.componentTypes(),
+    categories: EVAL_REMEDIATION_CATEGORIES,
+    incident: inc,
+    alerts,
+    cards: report.cards,
+    roots: factRoots(inc, topo),
+    resolve: (key) => remediationRoot(bundleRootLookup(r.topology, asOf, a.rt), inc, alerts, key, new Date(asOf)),
+  });
   const snapshot: EvalSnapshot = {
     snapshot_id: snapshotId,
     case_id: `label:${l.id}`,
@@ -962,6 +1007,7 @@ export async function reconstructCase(
         ...a.rt.templates.map((x) => ({ id: x.id, description: x.description, args: x.args })),
         ...cardChecks(a.rt, inc, topo.nodes, report.cards, a.locale, topo.edges),
       ],
+      disposition_facts: facts,
     },
     queries: {
       api_version: 'srenautix.io/query-snapshot/v1',

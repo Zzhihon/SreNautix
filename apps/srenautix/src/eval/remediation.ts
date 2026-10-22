@@ -13,6 +13,9 @@ import type { RunRecord } from './score.js';
 // - 补丁可应用率：gitops_pr 的补丁对 as_of 时刻 base 分支的提交 `git apply --check` 通过的比例
 //   （用临时索引文件，不检出、不改动工作区）；
 // - 补丁正确率：应用后，标注的每个期望（文件、文档选择、JSON Pointer、取值）都成立的比例。
+// - 模板匹配（ADR 0138）：自愈 PR 由 server 按修复模板生成，不是模型的提议。重建评测按每次运行的研判结论（根因、档位、
+//   处置）对快照的阶段 A 卡与成员告警求值修复模板的适用条件，只匹配、不计划、不推送：标注有仓库修复、结论 likely
+//   及以上的运行中，标注修复类别的模板适用的比例记为模板触发；标注没有仓库修复的运行中适用的模板按类别记为误触发。
 // 影子环境（只读状态库）：gitops_pr 提议与事件关联的 PR 数，与研判结论为 likely 及以上的事件数对照。
 
 export const REPAIR_LEVELS = new Set(['likely', 'evidence_consistent']);
@@ -27,6 +30,23 @@ export interface PatchCheck {
   detail: string;
 }
 
+/** 标注的修复类别 → 修复模板的类别 */
+export const FIX_CLASS_CATEGORY: Record<string, string> = {
+  release_rollback: 'release_rollback',
+  config_resource: 'config_resource',
+  alert_rule: 'alert_rule',
+  topology_pack: 'topology_coverage',
+};
+
+export interface TemplateMatch {
+  case: string;
+  route: string;
+  run: number;
+  level: string | null;
+  disposition: string | null;
+  templates: string[];
+}
+
 export interface RemediationSummary {
   eligible_runs: number;
   triggered_runs: number;
@@ -35,6 +55,13 @@ export interface RemediationSummary {
   applicable: number;
   correct: number;
   checks: PatchCheck[];
+  /** 模板匹配（只在给出 templatesOf 时计算）：标注有仓库修复、结论 likely 及以上、标注类别的模板适用的运行 */
+  template_triggered_runs?: number;
+  /** 同一批运行中有任何修复模板适用的 */
+  template_any_runs?: number;
+  /** 标注没有仓库修复、结论 likely 及以上的运行中适用的模板，按类别计数 */
+  template_false_triggers?: Record<string, number>;
+  template_matches?: TemplateMatch[];
 }
 
 function git(repo: string, args: string[], env: Record<string, string>, input?: string): string {
@@ -145,6 +172,7 @@ export function scoreRemediation(
   labelOf: (caseId: string) => Label | null,
   repo: string | null,
   scratch: string,
+  templatesOf?: (r: RunRecord) => Array<{ key: string; category: string }>,
 ): RemediationSummary {
   const out: RemediationSummary = {
     eligible_runs: 0,
@@ -170,6 +198,32 @@ export function scoreRemediation(
     }
     if (!l.fix && prs.length) {
       out.false_triggers++;
+    }
+    if (templatesOf && likely) {
+      const t = templatesOf(r);
+      out.template_triggered_runs ??= 0;
+      out.template_any_runs ??= 0;
+      out.template_false_triggers ??= {};
+      (out.template_matches ??= []).push({
+        case: r.caseId,
+        route: r.routeId,
+        run: r.run,
+        level: r.level,
+        disposition: r.disposition,
+        templates: t.map((x) => x.key),
+      });
+      if (l.fix) {
+        if (t.some((x) => x.category === FIX_CLASS_CATEGORY[l.fix!.class])) {
+          out.template_triggered_runs++;
+        }
+        if (t.length) {
+          out.template_any_runs++;
+        }
+      } else {
+        for (const x of t) {
+          out.template_false_triggers[x.category] = (out.template_false_triggers[x.category] ?? 0) + 1;
+        }
+      }
     }
     for (const p of prs) {
       out.patches++;

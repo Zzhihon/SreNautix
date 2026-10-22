@@ -17,6 +17,7 @@ import {
   type QueryRunner,
 } from './checks.js';
 import { EvidenceBook } from './evidence.js';
+import { deriveDisposition } from './disposition.js';
 import { judgeLadder } from './ladder.js';
 import { Ledger } from './ledger.js';
 import type { WorkerMetrics } from './metrics.js';
@@ -252,6 +253,18 @@ export async function runStageB(input: ResearchRunInput, env: ResearchEnv, sink:
     notes.push(...v.notes);
     const ladder = judgeLadder(ledger, v.chosen, rc.incident, ledger.list().length > 0, v.chosenBy);
     notes.push(...ladder.notes);
+    // 处置在档位确定之后由代码推导，模型的取值是输入之一（ADR 0138）
+    const disposition = deriveDisposition({
+      model: concluded.value.disposition,
+      incident: rc.incident,
+      stageA: rc.stageA,
+      level: ladder.level,
+      root: v.chosen?.rootComponent ?? null,
+      proposals: v.proposals.length,
+      cards: book.allCards,
+      facts: rc.dispositionFacts,
+    });
+    notes.push(...disposition.notes);
     const leader = ledger.ranked(candidateScore)[0];
     const untested = v.chosen ? !ledger.competitorTested(v.chosen) : false;
     env.metrics.conclusions.inc({
@@ -263,7 +276,7 @@ export async function runStageB(input: ResearchRunInput, env: ResearchEnv, sink:
       notes.push(`结论选中 ${v.chosen.id}，账本排名第一的是 ${leader.id}`);
     }
     const draft: ResearchOutput = {
-      disposition: v.disposition,
+      disposition: disposition.disposition,
       conclusion: {
         level: ladder.level,
         hypothesis_id: v.chosen?.id ?? null,
