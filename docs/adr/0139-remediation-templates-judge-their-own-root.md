@@ -33,12 +33,25 @@ ADR 0138 让代码推导处置，适用的修复模板可以支撑 act，重建�
 
 ## 结果
 
-- 实现：`packages/packs-sdk/src/remediation/{plan,compile}.ts`（`root_cards`、`RemediationCard.observations`）、`apps/srenautix/src/remediation/{facts,render,service}.ts`、`api/routes-research.ts`、`roles/server.ts`、`eval/{reconstruct,phase2}.ts`；`packs/gitops/remediations.yaml`、`packs/workload/signals.yaml`。契约不变。
-- 测试：`RootCardScope` 的四种归属与缓存（单元）、发布回退模板在节点根因与根因上正常时不适用、StatefulSet 的发布进度卡按 `missing` 适用（packs-sdk，真实 Prometheus）、init 卡在启动时的 `PodInitializing` 下正常、CrashLoopBackOff 下异常（workload 夹具）。
-- 离线重算见 Zzhihon/SreNautix#10 的关闭评论与下文"验证"。
+- 实现：`packages/packs-sdk/src/remediation/{plan,compile}.ts`（`root_cards`、`RemediationCard` 的 `observations` 与 `impact`）、`packages/packs-sdk/src/pack/compile.ts`（`extends`）、`testing/pack-test.ts`；`apps/srenautix/src/remediation/{facts,render,service}.ts`、`api/routes-research.ts`、`roles/server.ts`、`eval/{reconstruct,phase2}.ts`；`packs/gitops/remediations.yaml`、`packs/workload/{signals,chains}.yaml`。契约 2.26.0：`pack.schema.json` 的 `Signal.extends`。
+- 测试：`RootCardScope` 的归属与缓存、`root.external`、卡的 `impact` 与 `observations`（单元）；发布回退模板在节点根因与根因上正常时不适用、StatefulSet 发布进度卡按 `missing` 适用、内存模板只看根因、告警调优模板对外部根因与影响卡不正常时不适用、HPA 模板要求饱和（packs-sdk，真实 Prometheus）；另一个工作负载 OOMKilled 时内存模板不适用（集成，真实 PostgreSQL）；init 卡在 `PodInitializing` 下正常、CrashLoopBackOff 下异常，HPA 高峰没有限流与变慢时不饱和（workload 夹具）；用户包补充 HPA 延迟信号后内置的 hpa-latency 卡能判定（packs-sdk）。
+- CCHP 的 cchp 包用 `extends` 补充 gateway 的延迟信号，要在影子环境升级到契约 2.26.0 之后部署。
 
 ## 验证
 
 隧道断开期间不能重建阶段 A（证据卡要查 CCHP 的 VictoriaMetrics），离线重算改为从每个用例 trace 的第一次 hypothesize 提示词取阶段 A 的卡（完整放入与只列判定的卡的并集；只写摘要的卡都是正常或无法判定、且不在候选根因上），经伪造的证据执行器交给被测提交的 `reconstructCase`，事件、告警与拓扑仍按被测提交从重建包重放。用 dd85e76 自己跑这个方法，102 行的处置、模板匹配与处置依据与 dd85e76 用 VictoriaMetrics 重建的结果逐行相同。
 
-规则改变而没有原始序列的卡按提示词里的结论与展示值推出新结论：init 卡只因"反复失败"判为异常、运行时间不到 10 分钟的改为正常（metrics-scrape 由 10-14 的事件证实；10-16 的事件没有导出，onboarding 的 worker 按同一机制处理）；发布进度卡的 `missing` 取展示值。
+规则改变而没有原始序列的卡按提示词里的结论与展示值推出新结论：init 卡只因"反复失败"判为异常、运行时间不到 10 分钟的改为正常（metrics-scrape 由 10-14 的事件证实；10-16 的事件没有导出，onboarding 的 worker 按同一机制处理）；`hpa-utilization` 在同一 HPA 的限流与延迟卡都不异常时改为正常；发布进度卡的 `missing` 取展示值。
+
+| 路由 | top-1 | 召回@3 | 选择性准确率 | 良性误报 | pass^3 | 处置准确率 | 良性 ignore | 模板 PR 触发 | 误触发（按类别） |
+|---|---|---|---|---|---|---|---|---|---|
+| primary dd85e76 | 34/45 | 38/45 | 34/39 | 0 | 10/17 | 18/48 | 2/6 | 8/21 | alert_rule 10、release_rollback 7、config_resource 3、topology_coverage 2 |
+| primary 本 ADR | 34/45 | 38/45 | 34/39 | 0 | 10/17 | 17/48 | 2/6 | 6/21 | release_rollback 3、topology_coverage 2 |
+| fallback dd85e76 | 36/45 | 38/45 | 36/39 | 0 | 10/17 | 19/48 | 2/6 | 5/19 | alert_rule 11、release_rollback 8、config_resource 3、topology_coverage 2 |
+| fallback 本 ADR | 36/45 | 38/45 | 36/39 | 0 | 10/17 | 20/48 | 2/6 | 5/19 | release_rollback 2、topology_coverage 2 |
+
+- alert_rule 误触发归零：provider 用例的研判根因是声明为 external 的 provider。
+- onboarding fallback-1 回到 escalate：worker 自己的 init 卡不再异常，没有发布回退模板。只按有事件证据的用例改 init 卡（onboarding 的 worker 保持原结论）时它仍是 act，fallback 处置准确率 19/48。
+- primary 处置准确率 18 → 17：metrics-scrape primary-0 的模型给出 act、没有提议，dd85e76 里它的 act 只由 gateway 上误判的 init 卡带出的发布回退模板支撑（标注没有仓库修复，事故的修复是抓取配置）。init 卡改正后 act 没有依据，按严重度改为 undetermined。两条路由合计 37/96 不变。
+- primary 模板 PR 触发 8 → 6：pg-lock primary-1、primary-2 的研判根因是 seaweedfs-master，被 OOMKilled 的是 cchp-postgres-2，内存模板不再按别的工作负载的卡适用。
+- 业务高峰 HPA 仍不是 ignore：重建数据里 gateway 的延迟卡无法判定（cchp 包的 `extends` 还没有部署），影响卡不是全部正常。假设延迟卡为正常时，primary 的 3 次（没有提议）给出 ignore，良性 ignore 2/6 → 5/6；fallback 的 3 次有模型提议，仍为 act。这 3 次 ignore 会让 `noisy-alert-relax` 对 KubeHpaMaxedOut 适用（根因不是外部组件），标注把它记为误触发；是否需要对业务高峰下的 critical 告警降级留给领域包与标注决定。

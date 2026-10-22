@@ -43,6 +43,8 @@ CCHP 重建评测 aq-full3（17 个用例 × 2 条路由 × 3 次，e551886 / e0
 
 ## 遗留
 
+前三项由 ADR 0139 处理：模板按根因自己的卡适用，`noisy-alert-relax` 不对外部组件降级，HPA 饱和要求限流或变慢并把这两张卡标为影响卡，cchp 包用 `extends`（契约 2.26.0）补充 gateway 的延迟信号。
+
 - **HPA 良性用例仍不会是 ignore**：按现有卡片它就是饱和的（`hpa-utilization` 167% 异常，延迟卡无法判定），`hpa-max-replicas-raise` 也适用。要让它成为 ignore，领域包需要给出"没有到瓶颈"的确定性依据：CCHP 包为 gateway 提供请求延迟信号，`hpa-utilization` 或 `hpa-max-replicas-raise` 的饱和判定要求限流或延迟异常，并把这类卡标为影响卡。
 - **模板的适用条件对根因不敏感**：`release-to-serving-version` 的 `when` 只看卡片，任何根因（Node、PVC、Application……）上都适用；`memory-limit-raise` 读的是全局的卡片结论。"适用"因此偏宽，act 的依据与模板匹配的触发率都偏高，计划阶段的 `skip_if` 才会挡住不对应的根因。
 - **外部上游的 ignore 会让 `noisy-alert-relax` 适用**：它对 `research.disposition == "ignore"` 且有 critical 告警的事件提议把告警降为 warning。离线重算里这一类误触发 primary 10、fallback 11 次（provider 用例）。是否要按 ignore 的依据区分，由领域包决定。
