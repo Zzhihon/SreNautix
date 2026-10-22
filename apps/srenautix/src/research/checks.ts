@@ -6,7 +6,8 @@ import type { Language } from '../prompts/index.js';
 import type { ToolBox, ToolCallRecord } from '../tools/box.js';
 import type { Window } from '../tools/limits.js';
 import type { CardEntry, EvidenceBook } from './evidence.js';
-import type { Ledger } from './ledger.js';
+import type { Ledger, LedgerEntry } from './ledger.js';
+import { targets } from './targeting.js';
 import { judgeItems, JUDGE_SCHEMA } from './prompt.js';
 import type { CheckTemplate, ResearchCase } from './types.js';
 import { parseCardCheckId } from '../stage-a/card-checks.js';
@@ -116,6 +117,71 @@ export function inferCheckTemplates(value: unknown, templates: readonly string[]
 }
 
 /** 检查的去重键 */
+/** hypothesize 没有给出任何 next_checks 时，控制器补选的检查数上限（ADR 0137） */
+export const SUPPLEMENT_LIMIT = 3;
+
+/**
+ * hypothesize 的 next_checks 为空时由控制器补选检查（ADR 0137）：
+ * - 只取卡片检查（`cardcheck:`），并且检查的组件（按组件粒度）是事件的组件：根因、候选根因或成员告警的组件；
+ * - 依次为待检验的假设（open，按账本排名）各取一项：组件就是假设的根因组件、测的信号与假设机制对应（ADR 0133）、
+ *   本次运行没有执行过的检查中，按候选清单的顺序（清单已按相关性排列，ADR 0116）取第一项；
+ * - 最多 SUPPLEMENT_LIMIT 项，参数全部取卡片默认值（窗口取卡片定义）。
+ */
+export function supplementChecks(
+  rc: ResearchCase,
+  ledger: Ledger,
+  open: readonly LedgerEntry[],
+  done: ReadonlySet<string>,
+  language: Language,
+): NextCheck[] {
+  const inc = rc.incident;
+  const eventComponents = new Set(
+    [inc.root.component, ...inc.candidates.map((c) => c.component), ...inc.components]
+      .filter((k): k is string => typeof k === 'string' && k !== '')
+      .map((k) => ledger.componentOf(k)),
+  );
+  const offered = rc.templates.flatMap((t) => {
+    const p = parseCardCheckId(t.id);
+    if (!p) {
+      return [];
+    }
+    const component = ledger.componentOf(p.component);
+    return eventComponents.has(component) ? [{ id: t.id, component }] : [];
+  });
+  const out: NextCheck[] = [];
+  const used = new Set<string>();
+  for (const e of open) {
+    if (out.length >= SUPPLEMENT_LIMIT) {
+      break;
+    }
+    const defs = ledger.supportDefinitions(e);
+    const pick = offered.find(
+      (t) =>
+        t.component === e.rootComponent &&
+        !used.has(t.id) &&
+        !done.has(`${e.id}:${t.id}:{}`) &&
+        targets(t.id, e.mechanism, defs).related,
+    );
+    if (!pick) {
+      continue;
+    }
+    used.add(pick.id);
+    out.push({
+      hypothesis_id: e.id as NextCheck['hypothesis_id'],
+      type: 'query',
+      template: pick.id,
+      args_json: '{}',
+      refutes_if:
+        language === 'zh' ? `这张卡在 ${pick.component} 上判为正常` : `The card is judged normal on ${pick.component}`,
+      purpose:
+        language === 'zh'
+          ? `hypothesize 没有给出检查，控制器按相关性补选，检验假设 ${e.id} 的根因 ${pick.component}`
+          : `hypothesize gave no checks; picked by the controller by relevance to test ${e.id} on ${pick.component}`,
+    });
+  }
+  return out;
+}
+
 export function checkKey(c: NextCheck): string {
   return `${c.hypothesis_id}:${c.template}:${c.args_json.trim()}`;
 }

@@ -10,6 +10,7 @@ import {
   checkKey,
   inferCheckTemplates,
   runCheck,
+  supplementChecks,
   vetCheck,
   type ExecutedCheck,
   type NextCheck,
@@ -361,16 +362,26 @@ export async function runStageB(input: ResearchRunInput, env: ResearchEnv, sink:
       stopReason = 'deadline';
       break;
     }
-    const open = new Set(
-      ledger
-        .ranked(candidateScore)
-        .filter((e) => !e.pinned && e.status !== 'refuted' && e.checksRun === 0)
-        .slice(0, env.limits.checksPerStep)
-        .map((e) => e.id),
-    );
+    const openEntries = ledger
+      .ranked(candidateScore)
+      .filter((e) => !e.pinned && e.status !== 'refuted' && e.checksRun === 0)
+      .slice(0, env.limits.checksPerStep);
+    const open = new Set(openEntries.map((e) => e.id));
+    // 模型一项检查都没有给出：事件的组件有适用的卡片检查时，由控制器按相关性补选（ADR 0137）
+    let proposed = hyp.value.next_checks;
+    if (proposed.length === 0) {
+      proposed = supplementChecks(rc, ledger, openEntries, done, env.language);
+      if (proposed.length) {
+        notes.push(
+          `第 ${step} 轮 hypothesize 没有给出 next_checks，控制器按相关性补选 ${proposed.length} 项卡片检查：${proposed
+            .map((c) => `${c.template}（假设 ${c.hypothesis_id}）`)
+            .join('、')}`,
+        );
+      }
+    }
     const planned: Array<{ check: NextCheck; args: Record<string, unknown> }> = [];
     const seen = new Set<string>();
-    for (const c of hyp.value.next_checks) {
+    for (const c of proposed) {
       if (!open.has(c.hypothesis_id) || seen.has(c.hypothesis_id) || done.has(checkKey(c))) {
         continue;
       }

@@ -40,6 +40,9 @@ let modelUrl: string;
 // 输出里 next_checks 缺少 template 的录制（fallback 路由的形态）
 let missing: LlmReplay;
 let missingUrl: string;
+// 输出里 next_checks 为空的录制（ADR 0137）
+let empty: LlmReplay;
+let emptyUrl: string;
 
 beforeAll(async () => {
   prom = await startPrometheus([]);
@@ -61,11 +64,14 @@ beforeAll(async () => {
   modelUrl = `http://127.0.0.1:${await model.listen('127.0.0.1', 0)}/v1`;
   missing = new LlmReplay({ dir: `${RECORDINGS}-missing-template` });
   missingUrl = `http://127.0.0.1:${await missing.listen('127.0.0.1', 0)}/v1`;
+  empty = new LlmReplay({ dir: `${RECORDINGS}-empty` });
+  emptyUrl = `http://127.0.0.1:${await empty.listen('127.0.0.1', 0)}/v1`;
 }, 120_000);
 
 afterAll(async () => {
   await model?.close();
   await missing?.close();
+  await empty?.close();
   await prom?.stop();
 });
 
@@ -267,5 +273,43 @@ describe.each(['pg-sync-restart-acme', 'metrics-scrape-blind-acme'])('%s', (id) 
     const notes = res.output!.validation_notes.join('\n');
     expect(notes).toMatch(/\/next_checks\[0\]：template 缺失，按检查 id cardcheck:\S+ 补为 cardcheck:/);
     expect(notes).toContain('/next_checks[1]：条目不合格，已删除');
+  }, 120_000);
+
+  it('next_checks 为空：事件的组件有适用的卡片检查时，控制器按相关性补选并执行，最多 3 项（ADR 0137）', async () => {
+    const { research, runner } = await caseOf(id);
+    const env = {
+      ...testEnv(
+        testLayer([
+          testRoute(emptyUrl, { id: 'primary', api: 'responses', model: 'gpt-5', dialect_profile: 'openai-responses' }),
+        ]),
+        [],
+        true,
+      ),
+      query: runner,
+    };
+    const res = await runStageB(
+      {
+        runId: '7a1b2c3d-0000-4000-8000-0000000000d3',
+        rc: research,
+        previous: null,
+        signal: new AbortController().signal,
+      },
+      env,
+      new MemorySink(),
+    );
+    expect(res.error, JSON.stringify(res.error)).toBeNull();
+    const checks = res.output!.next_checks;
+    expect(checks.length).toBeGreaterThan(0);
+    expect(checks.length).toBeLessThanOrEqual(3);
+    // 第一项落在 h1 的根因（事件根因）上，取候选清单里这个组件的第一项卡片检查，参数全部取默认值
+    const first = research.templates.find(
+      (t) => parseCardCheckId(t.id)?.component === research.incident.root.component,
+    )!;
+    expect(checks[0]).toMatchObject({ hypothesis_id: 'h1', type: 'query', template: first.id, args: {} });
+    expect(checks[0]!.result_ref).not.toBeNull();
+    expect(checks[0]!.outcome).not.toBe('failed');
+    expect(res.output!.validation_notes.join('\n')).toMatch(
+      /第 1 轮 hypothesize 没有给出 next_checks，控制器按相关性补选 \d 项卡片检查：cardcheck:\S+（假设 h1）/,
+    );
   }, 120_000);
 });

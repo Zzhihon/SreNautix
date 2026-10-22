@@ -1,0 +1,12 @@
+{
+  "provenance": { "mode": "hand-written" },
+  "output": {
+    "disposition": "escalate",
+    "hypothesis_id": "h1",
+    "undetermined_reason": null,
+    "situation": "回归用例",
+    "summary": "回归用例：控制器补选的卡片检查已执行",
+    "recommendations": [],
+    "proposals": []
+  }
+}

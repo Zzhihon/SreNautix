@@ -4,6 +4,7 @@ import { DEFAULT_BUDGET } from '../../src/llm/budget.js';
 import { Egress } from '../../src/llm/egress.js';
 import { buildRuntimes } from '../../src/llm/routes.js';
 import { ModelLayer } from '../../src/llm/session.js';
+import { supplementChecks } from '../../src/research/checks.js';
 import { DEFAULT_LIMITS, runStageB } from '../../src/research/controller.js';
 import { EvidenceBook } from '../../src/research/evidence.js';
 import { judgeLadder, symptomOnset } from '../../src/research/ladder.js';
@@ -618,6 +619,65 @@ describe('组件粒度（ADR 0121）', () => {
     ledger.merge([hyp('h1', DEP, [])], []);
     ledger.applyFeedback([feedback({ verdict: 'rejected', root_component: PG })], POD, []);
     expect(ledger.entries.get('h1')).toMatchObject({ status: 'refuted', pinned: 'human_rejected' });
+  });
+});
+
+describe('next_checks 为空时控制器补选（ADR 0137）', () => {
+  const PVC = 'PersistentVolumeClaim:shop/data-postgres-0';
+  const NODE = 'Node:node-a';
+  const tpl = (id: string) => ({ id, description: id, args: { type: 'object', additionalProperties: false } });
+  const templates = [
+    tpl('kube_events'),
+    tpl(`cardcheck:workload/pod-restarts/restarts@${PG}`),
+    tpl(`cardcheck:workload/pod-restarts/memory@${PG}`),
+    tpl(`cardcheck:node/node-pressure/memory@${NODE}`),
+    tpl(`cardcheck:workload/pod-restarts/memory@${API}`),
+    tpl(`cardcheck:workload/pod-restarts/memory@${WEB}`),
+    tpl(`cardcheck:pvc/pvc-usage/fill@${PVC}`),
+  ];
+
+  function setupHyps() {
+    const rc = researchCase({ templates });
+    const book = new EvidenceBook(rc);
+    const ledger = new Ledger(book, rc.subgraph);
+    ledger.merge(
+      [
+        { ...hyp('h1', PG), mechanism: '工作集内存持续上涨，接近 limit' },
+        hyp('h2', NODE),
+        { ...hyp('h3', API), mechanism: 'api 内存泄漏后被 OOM' },
+        { ...hyp('h4', WEB), mechanism: 'web 内存泄漏后被 OOM' },
+        hyp('h5', PVC),
+      ],
+      [],
+    );
+    return { rc, ledger };
+  }
+
+  it('只取事件组件上的卡片检查，每个假设一项、测的信号与机制对应，按清单顺序取第一项，最多 3 项', () => {
+    const { rc, ledger } = setupHyps();
+    const out = supplementChecks(rc, ledger, ledger.list(), new Set(), 'zh');
+    expect(out.map((c) => [c.hypothesis_id, c.template, c.type, c.args_json])).toEqual([
+      // 重启卡测的是重启，h1 的机制是内存：跳过，取内存卡
+      ['h1', `cardcheck:workload/pod-restarts/memory@${PG}`, 'query', '{}'],
+      // h2 的根因 Node 不是事件的组件（根因、候选、成员告警的组件）：不补选
+      ['h3', `cardcheck:workload/pod-restarts/memory@${API}`, 'query', '{}'],
+      ['h4', `cardcheck:workload/pod-restarts/memory@${WEB}`, 'query', '{}'],
+    ]);
+    expect(out[0]!.purpose).toContain('控制器按相关性补选');
+  });
+
+  it('本次运行已执行过的检查不再补选；没有适用的卡片检查时不补', () => {
+    const { rc, ledger } = setupHyps();
+    const done = new Set([`h3:cardcheck:workload/pod-restarts/memory@${API}:{}`]);
+    expect(supplementChecks(rc, ledger, ledger.list(), done, 'zh').map((c) => c.hypothesis_id)).toEqual([
+      'h1',
+      'h4',
+      'h5',
+    ]);
+    const bare = researchCase({ templates: [tpl('kube_events')] });
+    const l = new Ledger(new EvidenceBook(bare), bare.subgraph);
+    l.merge([hyp('h1', PG)], []);
+    expect(supplementChecks(bare, l, l.list(), new Set(), 'zh')).toEqual([]);
   });
 });
 
