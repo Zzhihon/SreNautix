@@ -6,6 +6,12 @@ import type { ComponentKey, TopologyEdge, TopologyNode } from '@srenautix/contra
 
 export const OWNED_BY = 'owned_by';
 
+/**
+ * 访问边：调用方被允许访问被访问组件（网络策略推断的 egress_to）。可达只到被访问的组件为止（含组件内部的成员），
+ * 不再沿它的依赖（成员运行的节点、存储、管理应用）继续展开（ADR 0141）
+ */
+export const ACCESS_RELATIONS: ReadonlySet<string> = new Set(['egress_to']);
+
 export interface ReachOptions {
   /** 只沿置信度不低于它的边走：归并用 τ，候选排序用 0 */
   minConfidence: number;
@@ -107,24 +113,37 @@ export class TopologyGraph {
    * 从实体出发沿依赖边可达的对象与组件（最大路径置信度）。
    * 起点是实体及其全部成员（例如 Deployment 的全部 Pod）；作用范围由对象级的边自然体现：
    * 节点故障只连到运行在该节点上的 Pod。枢纽可以被到达，但不再向下展开（DESIGN §4.3）。
+   * 经访问边（ACCESS_RELATIONS）到达的组件只在组件内部展开：迁移 Job 经 egress_to 到达数据库，也到达数据库的 Pod，
+   * 但不经这些 Pod 到达它们运行的节点（ADR 0141）。
    */
   reach(entity: ComponentKey, opts: ReachOptions): ReachResult {
     const best = new Map<ComponentKey, number>();
-    const queue: Array<[ComponentKey, number]> = [];
+    // 展开状态：对象加上它被限制在哪个组件内（经访问边到达之后）；同一对象可以有不受限制与受限制两种状态
+    const seen = new Map<string, number>();
+    const queue: Array<[ComponentKey, number, ComponentKey | null]> = [];
+    const stateOf = (k: ComponentKey, within: ComponentKey | null) => (within === null ? k : `${k}\u0000${within}`);
+    const visit = (k: ComponentKey, c: number, within: ComponentKey | null) => {
+      // 不受限制的状态覆盖同一对象上置信度不更高的受限制状态
+      if (c <= (seen.get(stateOf(k, within)) ?? 0) || (within !== null && c <= (seen.get(k) ?? 0))) {
+        return;
+      }
+      seen.set(stateOf(k, within), c);
+      best.set(k, Math.max(best.get(k) ?? 0, c));
+      queue.push([k, c, within]);
+    };
     for (const m of this.membersOf(entity)) {
-      best.set(m, 1);
-      queue.push([m, 1]);
+      visit(m, 1, null);
     }
     const excluded = new Set(opts.excludeProvenance ?? []);
     const startComponent = this.componentOf(entity);
     // 最大乘积路径：置信度都在 (0,1]，按当前最优值从大到小展开
     while (queue.length > 0) {
       queue.sort((a, b) => b[1] - a[1]);
-      const [cur, conf] = queue.shift()!;
-      if (conf < (best.get(cur) ?? 0)) {
+      const [cur, conf, within] = queue.shift()!;
+      if (conf < (seen.get(stateOf(cur, within)) ?? 0)) {
         continue;
       }
-      const isStart = conf === 1 && this.componentOf(cur) === startComponent;
+      const isStart = within === null && conf === 1 && this.componentOf(cur) === startComponent;
       if (!isStart && this.isHub(cur)) {
         continue;
       }
@@ -132,11 +151,11 @@ export class TopologyGraph {
         if (e.confidence < opts.minConfidence || excluded.has(e.provenance)) {
           continue;
         }
-        const c = conf * e.confidence;
-        if (c > (best.get(e.to) ?? 0)) {
-          best.set(e.to, c);
-          queue.push([e.to, c]);
+        const comp = this.componentOf(e.to);
+        if (within !== null && comp !== within) {
+          continue;
         }
+        visit(e.to, conf * e.confidence, within ?? (ACCESS_RELATIONS.has(e.relation) ? comp : null));
       }
     }
     const components = new Map<ComponentKey, number>();
