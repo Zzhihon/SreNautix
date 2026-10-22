@@ -395,7 +395,19 @@ describe.each(SHAPES)('$name', (shape) => {
     const c = ctx({
       root: { cluster_id: 'c1', kind: 'HorizontalPodAutoscaler', namespace: 'shop', name: 'api' },
       cards: { 'workload/capacity/hpa': { verdict: 'abnormal' } },
+      root_cards: {
+        'workload/capacity/hpa': { verdict: 'abnormal' },
+        'workload/capacity/hpa-utilization': { verdict: 'abnormal' },
+      },
     });
+    // 顶到上限但负载没有饱和（没有限流、没有变慢，hpa-utilization 正常）时不提高上限（ADR 0139）
+    expect(
+      applicableRemediations(set, {
+        ...c,
+        root_cards: { ...c.root_cards, 'workload/capacity/hpa-utilization': { verdict: 'normal' } },
+      }).applicable.map((a) => a.key),
+    ).not.toContain('gitops/hpa-max-replicas-raise');
+    expect(applicableRemediations(set, c).applicable.map((a) => a.key)).toContain('gitops/hpa-max-replicas-raise');
     const plan = await planRemediation(
       set,
       'gitops/hpa-max-replicas-raise',

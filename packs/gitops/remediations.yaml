@@ -106,9 +106,13 @@ remediations:
     title: { zh-CN: 提高 HPA 的副本数上限, en: Raise the HPA replica ceiling }
     category: config_resource
     repository: gitops
+    # 副本数顶到上限并且负载已经饱和（hpa-utilization：超过目标并且限流或变慢，ADR 0139）才提高上限；只是顶到上限、
+    # 没有限流也没有变慢时上限只是没有余量，不需要改。只看这个 HPA 自己的卡（root_cards）
     when: >-
       root != null && root.kind == "HorizontalPodAutoscaler"
-      && "workload/capacity/hpa" in cards && cards["workload/capacity/hpa"].verdict == "abnormal"
+      && "workload/capacity/hpa" in root_cards && root_cards["workload/capacity/hpa"].verdict == "abnormal"
+      && "workload/capacity/hpa-utilization" in root_cards
+      && root_cards["workload/capacity/hpa-utilization"].verdict == "abnormal"
     params: { step: 2, ceiling: 20 }
     let:
       - { name: hpa, cel: root.name }
@@ -136,13 +140,13 @@ remediations:
         set:
           - { path: spec.maxReplicas, value: new_max }
     change:
-      zh-CN: 'HPA {hpa} 的 maxReplicas 由 {current_max} 调到 {new_max}：事件期间副本数一直顶在上限。'
-      en: 'Raise maxReplicas of HPA {hpa} from {current_max} to {new_max}: the replica count stayed at the ceiling during the incident.'
+      zh-CN: 'HPA {hpa} 的 maxReplicas 由 {current_max} 调到 {new_max}：事件期间副本数一直顶在上限，伸缩指标超过目标，伸缩对象被限流或请求变慢。'
+      en: 'Raise maxReplicas of HPA {hpa} from {current_max} to {new_max}: the replica count stayed at the ceiling with the scaling metrics above target and the pods throttled or slower.'
     verify:
       say:
-        zh-CN: 同步后 HPA 有扩容余量，副本数不再顶在上限
-        en: After the sync the HPA has room to scale and no longer sits at its ceiling
-      cards: [workload/capacity/hpa]
+        zh-CN: 同步后 HPA 有扩容余量，副本数不再顶在上限，负载不再饱和
+        en: After the sync the HPA has room to scale, no longer sits at its ceiling and the load is no longer saturated
+      cards: [workload/capacity/hpa, workload/capacity/hpa-utilization]
       within: 1h
     rollback:
       say:

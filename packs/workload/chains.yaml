@@ -386,36 +386,72 @@ chains:
               say: { zh-CN: 副本数顶到 HPA 上限, en: Replicas reached the HPA maximum }
         display: { value: peak, unit: percent }
         egress: allow
-      # 以下三张卡区分"副本数顶到上限但没有饱和"（良性，上限只是没有余量）与"已经饱和"（需要扩容或排查负载）
+      # 以下三张卡区分"副本数顶到上限但没有饱和"（良性，上限只是没有余量）与"已经饱和"（需要扩容或排查负载）。
+      # 饱和要求伸缩指标超过目标、并且伸缩对象被 CPU 限流或请求变慢（ADR 0139）：只看指标相对目标值时，业务高峰把
+      # CPU 推到目标以上、而用户无感的情形也会被判为饱和。限流与延迟两张卡是影响卡（impact）
       - id: hpa-utilization
-        title: { zh-CN: HPA 指标相对目标值, en: HPA metrics against their targets }
+        title: { zh-CN: HPA 负载是否饱和, en: Whether the HPA load is saturated }
         note:
-          zh-CN: 各伸缩指标当前值占目标值的比例；顶到上限时仍超过目标的 params.over 倍，说明需要更多副本，负载已经饱和；不超过则上限只是没有余量
-          en: Current value of each scaling metric against its target; above params.over times the target at the ceiling means the load is saturated
+          zh-CN: 各伸缩指标当前值占目标值的比例；顶到上限时仍超过目标的 params.over 倍，并且伸缩对象的 Pod 限流超过 params.ratio 或 p95 延迟超过一天前的 params.factor 倍，说明负载已经饱和；指标超过目标而没有限流、没有变慢时，上限只是没有余量。应用没有请求延迟指标时只按限流判断
+          en: Scaling metrics against their targets; above params.over times the target at the ceiling, together with CPU throttling above params.ratio or p95 latency above params.factor times a day earlier, means the load is saturated. Without throttling or slower requests the ceiling only has no headroom
         applies_to: { kinds: [HorizontalPodAutoscaler] }
-        # HPA 自己有 10% 的容差，这里同样只在超过 10% 时判为饱和
-        params: { over: 1.1 }
+        # HPA 自己有 10% 的容差，这里同样只在超过 10% 时算作超过目标；限流与延迟的阈值与 hpa-throttling、hpa-latency 相同
+        params: { over: 1.1, ratio: 0.25, factor: 1.5, min_seconds: 0.1 }
         check:
           description:
-            zh-CN: HPA 顶到上限时伸缩指标是否仍超过目标值；区分"上限只是没有余量"（良性）与"负载已经饱和"
-            en: Whether the scaling metrics still exceed their targets at the ceiling; benign ceiling or saturated load
+            zh-CN: HPA 顶到上限时负载是否饱和：伸缩指标仍超过目标值，并且伸缩对象被 CPU 限流或请求变慢；区分"上限只是没有余量"（良性）与"负载已经饱和"
+            en: Whether the load is saturated at the ceiling, scaling metrics above their targets with CPU throttling or slower requests; benign ceiling or saturated load
           args:
             type: object
             additionalProperties: false
             properties:
-              over: { type: number, minimum: 1, maximum: 3, description: 指标超过目标值的这个倍数时判为饱和 }
+              over: { type: number, minimum: 1, maximum: 3, description: 指标超过目标值的这个倍数时算作超过目标 }
+              ratio: { type: number, minimum: 0.05, maximum: 0.9, description: 限流比例超过它时算作 CPU 不够 }
+              factor: { type: number, minimum: 1.1, maximum: 10, description: p95 延迟超过一天前的这个倍数时算作变慢 }
         refs:
           - { name: ratio, signal: hpa_target_ratio, mode: range }
+          # 限流与延迟没有数据（没有 cAdvisor 或应用没有请求延迟指标）时按"没有证据"处理，只用另一项判断
+          - { name: thr, signal: hpa_target_throttled_ratio, mode: range, empty_is: normal }
+          - { name: p95, signal: hpa_target_latency_p95, mode: range, empty_is: normal }
+          - { name: base, signal: hpa_target_latency_p95_baseline, mode: range, empty_is: normal }
+          - { name: over, signal: hpa_target_latency_p95_overflow, mode: range, empty_is: normal }
         judge:
           let:
             - { name: peak, cel: max(ratio) }
             - { name: worst, cel: 'label(ratio.filter(s, max(s) >= peak)[0], "metric_name")' }
-          abnormal_if:
-            - cel: peak > params.over
+            - { name: thrPeak, cel: 'count(thr) > 0 ? max(thr) : 0.0' }
+            - { name: latPeak, cel: 'count(p95) > 0 ? max(p95) : 0.0' }
+            - { name: latBase, cel: 'count(base) > 0 ? max(base) : 0.0' }
+            - { name: overflowPeak, cel: 'count(over) > 0 ? max(over) : 0.0' }
+            - {
+                name: slow,
+                cel: 'count(p95) > 0 && count(base) > 0 && latPeak > params.min_seconds && latPeak > params.factor * latBase',
+              }
+          # p95 落在 +Inf 桶时只是下限（同 hpa-latency）：超过目标、没有限流、下限又不够判为变慢时无法判定
+          undeterminable_if:
+            - cel: peak > params.over && thrPeak <= params.ratio && overflowPeak > 0.05 && !slow
               say:
                 {
-                  zh-CN: '指标 {worst} 最高达到目标值的 {peak, number, percent}',
-                  en: 'Metric {worst} reached {peak, number, percent} of its target',
+                  zh-CN: '指标 {worst} 达到目标值的 {peak, number, percent}，没有限流；延迟直方图饱和，无法判断请求是否变慢',
+                  en: 'Metric {worst} reached {peak, number, percent} of its target without throttling; the latency histogram is saturated',
+                }
+          abnormal_if:
+            - cel: peak > params.over && thrPeak > params.ratio
+              say:
+                {
+                  zh-CN: '指标 {worst} 最高达到目标值的 {peak, number, percent}，伸缩对象的限流比例峰值 {thrPeak, number, percent}',
+                  en: 'Metric {worst} reached {peak, number, percent} of its target and throttling peaked at {thrPeak, number, percent}',
+                }
+            - cel: peak > params.over && slow
+              say:
+                {
+                  zh-CN: '指标 {worst} 最高达到目标值的 {peak, number, percent}，p95 延迟峰值 {latPeak, number} 秒，一天前 {latBase, number} 秒',
+                  en: 'Metric {worst} reached {peak, number, percent} of its target and p95 latency peaked at {latPeak, number} s against {latBase, number} s a day earlier',
+                }
+              normal_say:
+                {
+                  zh-CN: '指标 {worst} 最高达到目标值的 {peak, number, percent}，伸缩对象没有被限流、请求没有变慢',
+                  en: 'Metric {worst} reached {peak, number, percent} of its target without throttling or slower requests',
                 }
         display: { value: peak, unit: percent, threshold: params.over }
         egress: allow
@@ -449,6 +485,7 @@ chains:
                   en: 'Pod {pod} peaked at {peak, number, percent} throttling',
                 }
         display: { value: peak, unit: percent, threshold: params.ratio }
+        impact: true
         egress: allow
       - id: hpa-latency
         title: { zh-CN: 伸缩对象的请求延迟对比基线, en: Request latency of the scaled workload against baseline }
@@ -492,6 +529,7 @@ chains:
                   en: 'p95 latency peaked at {peak, number} s against {baseline, number} s a day earlier',
                 }
         display: { value: peak, unit: seconds }
+        impact: true
         egress: allow
       - id: quota
         title: { zh-CN: 命名空间配额, en: Namespace quota }

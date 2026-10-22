@@ -1,5 +1,7 @@
-# HPA 达到上限时是否饱和：hpa 命名空间的两个 HPA 都顶到上限。hot 的 CPU 利用率是目标的 2 倍、Pod 被限流 50%、
+# HPA 达到上限时是否饱和：hpa 命名空间的 HPA 都顶到上限。hot 的 CPU 利用率是目标的 2 倍、Pod 被限流 50%、
 # p95 延迟由一天前的约 0.1 秒升到约 0.5 秒（已经饱和）；calm 的利用率低于目标、限流 5%、延迟与一天前相同（良性）。
+# peak 的利用率是目标的约 1.67 倍，但限流 2%、延迟与一天前相同：业务高峰把副本数顶到上限，负载没有饱和（良性，
+# ADR 0139）；busy 的利用率是目标的 2 倍、限流 50%，应用没有请求延迟指标，靠限流判为饱和。
 # 每 30 分钟一个点，覆盖 26 小时，eval_time 25h 时基线取一天前的数据。
 api_version: srenautix.io/pack-test/v1
 interval: 30m
@@ -100,13 +102,120 @@ input_series:
       series: 'http_request_duration_seconds_bucket{namespace="hpa",pod="calm-6c8d7f9b4c-bbbbb",le="+Inf"}',
       values: '0+100x52',
     }
+
+  # ---------- peak：利用率 117/70、限流 2%、延迟与一天前相同 ----------
+  - {
+      series: 'kube_horizontalpodautoscaler_info{namespace="hpa",horizontalpodautoscaler="peak",scaletargetref_kind="Deployment",scaletargetref_name="peak"}',
+      values: '1x52',
+    }
+  - {
+      series: 'kube_horizontalpodautoscaler_status_target_metric{namespace="hpa",horizontalpodautoscaler="peak",metric_name="cpu",metric_target_type="utilization"}',
+      values: '117x52',
+    }
+  - {
+      series: 'kube_horizontalpodautoscaler_spec_target_metric{namespace="hpa",horizontalpodautoscaler="peak",metric_name="cpu",metric_target_type="utilization"}',
+      values: '70x52',
+    }
+  - {
+      series: 'kube_replicaset_owner{namespace="hpa",replicaset="peak-5b7c9d8e6f",owner_kind="Deployment",owner_name="peak"}',
+      values: '1x52',
+    }
+  - {
+      series: 'kube_pod_owner{namespace="hpa",pod="peak-5b7c9d8e6f-ddddd",owner_kind="ReplicaSet",owner_name="peak-5b7c9d8e6f"}',
+      values: '1x52',
+    }
+  - {
+      series: 'container_cpu_cfs_periods_total{namespace="hpa",pod="peak-5b7c9d8e6f-ddddd",container="app"}',
+      values: '0+600x52',
+    }
+  - {
+      series: 'container_cpu_cfs_throttled_periods_total{namespace="hpa",pod="peak-5b7c9d8e6f-ddddd",container="app"}',
+      values: '0+12x52',
+    }
+  - {
+      series: 'http_request_duration_seconds_bucket{namespace="hpa",pod="peak-5b7c9d8e6f-ddddd",le="0.1"}',
+      values: '0+100x52',
+    }
+  - {
+      series: 'http_request_duration_seconds_bucket{namespace="hpa",pod="peak-5b7c9d8e6f-ddddd",le="0.5"}',
+      values: '0+100x52',
+    }
+  - {
+      series: 'http_request_duration_seconds_bucket{namespace="hpa",pod="peak-5b7c9d8e6f-ddddd",le="+Inf"}',
+      values: '0+100x52',
+    }
+
+  # ---------- busy：利用率 140/70、限流 50%，没有请求延迟指标 ----------
+  - {
+      series: 'kube_horizontalpodautoscaler_info{namespace="hpa",horizontalpodautoscaler="busy",scaletargetref_kind="Deployment",scaletargetref_name="busy"}',
+      values: '1x52',
+    }
+  - {
+      series: 'kube_horizontalpodautoscaler_status_target_metric{namespace="hpa",horizontalpodautoscaler="busy",metric_name="cpu",metric_target_type="utilization"}',
+      values: '140x52',
+    }
+  - {
+      series: 'kube_horizontalpodautoscaler_spec_target_metric{namespace="hpa",horizontalpodautoscaler="busy",metric_name="cpu",metric_target_type="utilization"}',
+      values: '70x52',
+    }
+  - {
+      series: 'kube_replicaset_owner{namespace="hpa",replicaset="busy-4a6b8c7d5e",owner_kind="Deployment",owner_name="busy"}',
+      values: '1x52',
+    }
+  - {
+      series: 'kube_pod_owner{namespace="hpa",pod="busy-4a6b8c7d5e-eeeee",owner_kind="ReplicaSet",owner_name="busy-4a6b8c7d5e"}',
+      values: '1x52',
+    }
+  - {
+      series: 'container_cpu_cfs_periods_total{namespace="hpa",pod="busy-4a6b8c7d5e-eeeee",container="app"}',
+      values: '0+600x52',
+    }
+  - {
+      series: 'container_cpu_cfs_throttled_periods_total{namespace="hpa",pod="busy-4a6b8c7d5e-eeeee",container="app"}',
+      values: '0+300x52',
+    }
 tests:
   - {
-      name: hot 的利用率是目标的 2 倍,
+      name: hot 的利用率是目标的 2 倍，并且被限流、请求变慢,
       eval_time: 25h,
       card: capacity/hpa-utilization,
       entity: { kind: HorizontalPodAutoscaler, namespace: hpa, name: hot },
       expect: { verdict: abnormal },
+    }
+  - {
+      name: peak 的利用率超过目标，但没有被限流、请求没有变慢：没有饱和,
+      eval_time: 25h,
+      card: capacity/hpa-utilization,
+      entity: { kind: HorizontalPodAutoscaler, namespace: hpa, name: peak },
+      expect: { verdict: normal },
+    }
+  - {
+      name: peak 的限流,
+      eval_time: 25h,
+      card: capacity/hpa-throttling,
+      entity: { kind: HorizontalPodAutoscaler, namespace: hpa, name: peak },
+      expect: { verdict: normal },
+    }
+  - {
+      name: peak 的延迟与一天前相同,
+      eval_time: 25h,
+      card: capacity/hpa-latency,
+      entity: { kind: HorizontalPodAutoscaler, namespace: hpa, name: peak },
+      expect: { verdict: normal },
+    }
+  - {
+      name: busy 没有延迟指标，被限流 50%：饱和,
+      eval_time: 25h,
+      card: capacity/hpa-utilization,
+      entity: { kind: HorizontalPodAutoscaler, namespace: hpa, name: busy },
+      expect: { verdict: abnormal },
+    }
+  - {
+      name: busy 的延迟无法判定,
+      eval_time: 25h,
+      card: capacity/hpa-latency,
+      entity: { kind: HorizontalPodAutoscaler, namespace: hpa, name: busy },
+      expect: { verdict: undeterminable },
     }
   - {
       name: calm 顶到上限但利用率低于目标,
