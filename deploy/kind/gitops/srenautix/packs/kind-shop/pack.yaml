@@ -1,10 +1,11 @@
 # Kind 演示应用 shop 的用户领域包：组件类型把 shop 的工作负载接到内置 workload 包的证据链，
-# 告警目录映射 platform/observability/rules/shop.yaml 的告警。证据卡全部来自内置包，本包没有自己的卡。
+# 告警目录映射 platform/observability/rules/shop.yaml 的告警。本包只有一张自己的卡：traffic/client-errors，
+# 外部客户端经 web 访问 api 的请求失败比例，是 shop 唯一的影响卡（ADR 0139）。
 # ShopCatalogStale 故意不在目录里：未映射告警场景由 gitops 包的 alert-catalog-entry 模板补上它的条目。
 api_version: srenautix.io/pack/v1
 name: kind-shop
-version: 0.1.0
-description: Kind 演示应用 shop 的组件类型与告警目录
+version: 0.2.0
+description: Kind 演示应用 shop 的组件类型、告警目录与用户请求影响卡
 maturity: stable
 min_srenautix_version: 0.1.0
 depends_on:

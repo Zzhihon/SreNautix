@@ -1,0 +1,36 @@
+# 外部客户端经 web 访问 api：每分钟 60 次成功；第 71–80 分钟另有每分钟 30 次失败（约三分之一失败）。
+# 夹具在 Prometheus 与 VictoriaMetrics 上各跑一遍，结论必须一致；eval_time 是事件锚点，卡的窗口为锚点前 30 分钟到后 10 分钟。
+api_version: srenautix.io/pack-test/v1
+interval: 1m
+input_series:
+  - series: 'shop_client_requests_total{namespace="traffic",pod="loadgen-7c9d8f6b5-x2k4p",target="web",result="ok"}'
+    values: '0+60x101'
+  - series: 'shop_client_requests_total{namespace="traffic",pod="loadgen-7c9d8f6b5-x2k4p",target="web",result="failed"}'
+    values: '0x70 30+30x9 300x20'
+  - series: 'kube_deployment_spec_replicas{namespace="shop",deployment="web"}'
+    values: '2x101'
+  - series: 'kube_deployment_spec_replicas{namespace="shop",deployment="api"}'
+    values: '2x101'
+  - series: 'kube_deployment_spec_replicas{namespace="shop",deployment="checkout"}'
+    values: '2x101'
+tests:
+  - name: 请求全部成功：api 的一次容器重启没有影响用户
+    eval_time: 40m
+    card: traffic/client-errors
+    entity: { kind: Deployment, namespace: shop, name: api }
+    expect: { verdict: normal, reason_kind: all_clear }
+  - name: web 上同样正常
+    eval_time: 40m
+    card: traffic/client-errors
+    entity: { kind: Deployment, namespace: shop, name: web }
+    expect: { verdict: normal, reason_kind: all_clear }
+  - name: 约三分之一的请求失败
+    eval_time: 75m
+    card: traffic/client-errors
+    entity: { kind: Deployment, namespace: shop, name: api }
+    expect: { verdict: abnormal, reason_kind: rule }
+  - name: checkout 不在客户端的请求路径上，没有数据
+    eval_time: 75m
+    card: traffic/client-errors
+    entity: { kind: Deployment, namespace: shop, name: checkout }
+    expect: { verdict: undeterminable }

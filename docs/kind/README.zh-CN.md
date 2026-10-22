@@ -15,7 +15,7 @@
 | 本地 Git 服务 `gitlocal` | 后端是真实的 bare 仓库，提供 git smart HTTP 与 GitHub REST 的子集（GitHub App 的安装令牌、Git Data、PR、issue），见 `deploy/kind/gitlocal/main.go`；仓库 `kind/gitops` 的初始内容是 `deploy/kind/gitops` |
 | Argo CD | 从 `kind/gitops` 同步演示业务 `shop`（`apps/shop`）与 shop 的告警规则（`platform/observability/rules`） |
 | 演示业务 `shop` | web → api → postgres，独立的 checkout；api 有 HPA（2–4）与 PDB；api 与 checkout 的 initContainer `wait-for-migrations` 等待本次发布的迁移 Job（`shop-migrate-<发布 ID>`）；发布输入是 `apps/shop/release.json` |
-| 背景噪声 | `traffic/loadgen` 持续访问 web；`batch/nightly-export` 约三分之一失败；`batch/flaky-worker` 每 15 分钟退出一次 |
+| 背景噪声 | `traffic/loadgen` 持续访问 web，按结果计数 `shop_client_requests_total`（shop 唯一的用户侧指标，kind-shop 包的影响卡 `traffic/client-errors` 读它）；`batch/nightly-export` 约三分之一失败；`batch/flaky-worker` 每 15 分钟退出一次 |
 | `monitoring/alert-sink` | SreNautix 自身告警的接收方，收到的告警写入日志 |
 | SreNautix | standard 配置，gateway 冻结（集群动作只提议，`gitops_pr` 只改 Git）；检测器、事件 issue、GitHub 变更源与自愈 PR 指向 `kind/gitops` |
 
@@ -63,7 +63,7 @@ Grafana：`kubectl --context kind-srenautix -n monitoring port-forward svc/kps-g
 | `release-stuck-init` | 人工提交发布 r2，迁移失败，新 Pod 停在 `wait-for-migrations` | ShopMigrationFailed、ShopRolloutIncomplete | 发布 r2（Argo 应用 shop、迁移 Job、api、checkout） | 发布回退：`apps/shop/release.json` |
 | `release-bad-image` | 人工提交发布 r3，镜像没有 HTTP 服务 | KubePodCrashLooping、ShopRolloutIncomplete | 发布 r3（Argo 应用 shop、api） | 发布回退：`apps/shop/release.json` |
 | `config-resource-oom` | 人工提交把 checkout 的内存缓存调到超过内存上限 | KubePodCrashLooping、ShopRolloutIncomplete | `Deployment:shop/checkout` | 配置与资源：`apps/shop/workloads.yaml` |
-| `alert-too-sensitive` | api 的一个容器正常退出一次 | ShopPodRestarted（for 0m、critical） | `Deployment:shop/api`，处置为忽略 | 告警规则调优（`noisy-alert-relax`）：`platform/observability/rules/shop.yaml` |
+| `alert-too-sensitive` | api 的一个容器正常退出一次 | ShopPodRestarted（for 0m、critical） | `Deployment:shop/api`，处置为忽略（依据：影响卡 `traffic/client-errors` 全部正常） | 告警规则调优（`noisy-alert-relax`）：`platform/observability/rules/shop.yaml` |
 | `unmapped-alert` | 人工新增只带 `service` 标签的告警 ShopCatalogStale | ShopCatalogStale | 接入时为逻辑组件 `component:catalog`；研判指向 `Deployment:shop/api` | 拓扑与领域包覆盖（`alert-catalog-entry`）：`srenautix/packs/kind-shop/` |
 
 后五个场景在 `SRENAUTIX_CHECKS=1` 时依次检查（`deploy/kind/srenautix-checks.sh`）：

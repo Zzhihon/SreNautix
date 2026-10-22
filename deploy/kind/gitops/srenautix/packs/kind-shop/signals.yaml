@@ -1,0 +1,14 @@
+# shop 的用户侧信号。shop 是 nginx，没有 http_requests_total 与 http_request_duration_seconds；用户可见的影响取自外部客户端
+# traffic/loadgen（deploy/kind/workloads/background.yaml）：它经 web 访问 api 的 /catalog，按结果计数
+# shop_client_requests_total{target="web", result="ok|failed"}（超时 5 秒与非 2xx 都算失败），由 PodMonitor traffic/loadgen 抓取。
+signals:
+  # 外部客户端的请求失败比例。只对客户端请求路径上的工作负载（shop 的 web 与 api）有数据：
+  # and on () 限定实体，其余实体查不到数据（无法判定），不会把这条路径的结果当成别的工作负载的
+  - id: client_failure_ratio
+    kind: metrics
+    unit: ratio
+    alternatives:
+      - expr: >-
+          sum(rate(shop_client_requests_total{target="web", result="failed"}[$rate_window]))
+          / (sum(rate(shop_client_requests_total{target="web"}[$rate_window])) > 0)
+          and on () max(kube_deployment_spec_replicas{namespace="$namespace", deployment="$name", namespace="shop", deployment=~"web|api"})

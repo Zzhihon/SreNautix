@@ -1,0 +1,34 @@
+chains:
+  # shop 的用户可见影响：外部客户端经 web 访问 api 的请求是否失败。挂在客户端请求路径上的 web 与 api（components.yaml）
+  - id: traffic
+    title: { zh-CN: 用户请求, en: User requests }
+    cards:
+      # 影响卡（impact）：处置推导与 gitops 包的 noisy-alert-relax 用它判断"告警响了但用户没有受影响"（ADR 0138、0139）
+      - id: client-errors
+        title: { zh-CN: 外部客户端请求失败比例, en: Failure ratio of external client requests }
+        note:
+          zh-CN: traffic/loadgen 经 web 访问 api 的请求中失败（超时或非 2xx）的比例；峰值超过 params.ratio 说明用户受到影响
+          en: Share of failed requests (timeouts or non-2xx) that traffic/loadgen sends through web to api
+        applies_to: { kinds: [Deployment] }
+        params: { ratio: 0.05 }
+        refs:
+          - { name: failed, signal: client_failure_ratio, mode: range }
+        judge:
+          let:
+            - { name: peak, cel: max(failed) }
+            - { name: anomaly_started_at, cel: 'first_above(failed, params.ratio)' }
+          abnormal_if:
+            - cel: peak > params.ratio
+              say:
+                {
+                  zh-CN: '外部客户端请求失败比例峰值 {peak, number, percent}',
+                  en: 'External client requests peaked at {peak, number, percent} failures',
+                }
+              normal_say:
+                {
+                  zh-CN: '外部客户端请求失败比例峰值 {peak, number, percent}，未超过阈值',
+                  en: 'External client requests peaked at {peak, number, percent} failures, below the threshold',
+                }
+        display: { value: peak, unit: percent, threshold: params.ratio }
+        impact: true
+        egress: allow

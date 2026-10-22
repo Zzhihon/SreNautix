@@ -2,13 +2,18 @@
 # 所以不挂 workload/release-traffic；发布链 workload/release 只用 kube-state-metrics。
 # api 与 checkout 的 initContainer wait-for-migrations 等待迁移 Job shop-migrate-<发布 ID>（workload/release/migration-jobs
 # 的默认 job_pattern .*migrat.* 匹配它）。
+# 用户可见的影响由本包的 traffic 链给出（外部客户端经 web 访问 api 的请求失败比例），只挂在这条请求路径上的 web 与 api；
+# checkout 不在路径上，没有影响卡。
 component_types:
-  - id: shop.app
-    match: { kind: Deployment, namespaces: [shop], name_pattern: '^(api|checkout)$' }
+  - id: shop.api
+    match: { kind: Deployment, namespaces: [shop], name_pattern: '^api$' }
+    chains: [workload/release, workload/rollout, workload/pod-restarts, workload/pod-pending, traffic]
+  - id: shop.checkout
+    match: { kind: Deployment, namespaces: [shop], name_pattern: '^checkout$' }
     chains: [workload/release, workload/rollout, workload/pod-restarts, workload/pod-pending]
   - id: shop.web
     match: { kind: Deployment, namespaces: [shop], name_pattern: '^web$' }
-    chains: [workload/rollout, workload/pod-restarts, workload/pod-pending]
+    chains: [workload/rollout, workload/pod-restarts, workload/pod-pending, traffic]
   - id: shop.postgres
     match: { kind: StatefulSet, namespaces: [shop], name_pattern: '^postgres$' }
     chains: [workload/rollout, workload/pod-restarts, workload/pod-pending]

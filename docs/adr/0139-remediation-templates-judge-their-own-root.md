@@ -37,6 +37,22 @@ ADR 0138 让代码推导处置，适用的修复模板可以支撑 act，重建�
 - 测试：`RootCardScope` 的归属与缓存、`root.external`、卡的 `impact` 与 `observations`（单元）；发布回退模板在节点根因与根因上正常时不适用、StatefulSet 发布进度卡按 `missing` 适用、内存模板只看根因、告警调优模板对外部根因与影响卡不正常时不适用、HPA 模板要求饱和（packs-sdk，真实 Prometheus）；另一个工作负载 OOMKilled 时内存模板不适用（集成，真实 PostgreSQL）；init 卡在 `PodInitializing` 下正常、CrashLoopBackOff 下异常，HPA 高峰没有限流与变慢时不饱和（workload 夹具）；用户包补充 HPA 延迟信号后内置的 hpa-latency 卡能判定（packs-sdk）。
 - CCHP 的 cchp 包用 `extends` 补充 gateway 的延迟信号，要在影子环境升级到契约 2.26.0 之后部署。
 
+### Kind 的 shop 补上影响卡
+
+kind-e2e 39719813915（48747db）的 alert-too-sensitive 发现与分析通过（1 个事件，根因 `Deployment:shop/api`，30 张卡，likely），600 秒内没有开出 PR，自愈记录为 `no_template`。服务端日志的模板匹配：根因上异常的卡是 spec 变更、重启、未就绪与容器等待，适用模板为空。原因不在模板：
+
+- 录制的研判给出 ignore，处置推导（ADR 0138）把它改成了 escalate。阶段 A 没有判为 ignore，根因不是外部组件，有异常卡（一次重启本来就会让重启、未就绪卡异常），而 shop 没有任何影响卡：shop 是 nginx，没有 `http_requests_total` 与 `http_request_duration_seconds`，`workload/release-traffic` 没有挂上，内置包里的影响卡只有 HPA 的两张。四种依据都不成立。
+- `noisy-alert-relax` 的研判一支要求 `research.disposition == "ignore"`，模板拿到的是推导后的 escalate，所以不适用。dd85e76 之前处置直接取模型的 ignore，场景因此是绿的。
+
+修法是让 Kind 的 shop 给出影响卡，模板与处置推导不变：
+
+- **不放宽模板或推导**。"告警太敏感"的含义是告警响了而用户没有受影响；没有影响卡时，"一次重启"与"用户正在受影响而集群里看不出来"无法区分。如果把"没有影响卡"当成没有影响（例如对非外部根因放开研判一支，或者在没有影响卡时取模型的 ignore），ignore 就重新依赖模型的判断，第 5 条与 ADR 0138 收紧的正是这一点：provider 用例的 critical 告警在集群内同样没有影响卡，模型给出 ignore 时会再次被降级。生产领域包要让这个模板适用，也必须先给出用户侧的影响卡，Kind 应当演示这条要求，而不是绕开它。
+- **影响取自外部客户端**。`traffic/loadgen` 原来就持续经 web 访问 api 的 `/catalog`；它改为按结果计数 `shop_client_requests_total{target="web", result="ok|failed"}`（超时 5 秒与非 2xx 都算失败），由同一 Pod 中的 busybox httpd 以 CGI 输出、PodMonitor 抓取。给 nginx 加导出器只能看到 nginx 自己的状态码，看不到客户端超时，也会改动 shop 的镜像与资源，影响 HPA 与发布场景。
+- **kind-shop 包的影响卡**：信号 `client_failure_ratio`（失败请求的比例，用 `and on ()` 限定在 shop 的 web 与 api 上，其余实体没有数据）、证据链 `traffic` 与卡 `client-errors`（`impact: true`，峰值超过 5% 为异常），挂在客户端请求路径上的 web 与 api；组件类型 `shop.app` 拆成 `shop.api` 与 `shop.checkout`，checkout 不在路径上，没有影响卡。包从 0.1.0 升到 0.2.0，卡有夹具（`tests/client-errors.yaml`），`packages/packs-sdk/test/kind-shop-pack.test.ts` 把它与内置包一起编译，在 Prometheus 与 VictoriaMetrics 上执行。
+- 其余场景：api 或 web 不可用时（CrashLoopBackOff、NetworkPolicy、CoreDNS、数据库 OOM）客户端请求失败，影响卡异常，不会得出 ignore；发布与配置场景有适用的修复模板，ignore 不带修复，处置不受影响卡影响。
+
+`apps/srenautix/test/unit/alert-too-sensitive.test.ts` 用 39719813915 的 30 张卡复现：没有影响卡时处置为 escalate、模板不适用；加上 api 与 web 上正常的 `kind-shop/traffic/client-errors` 之后处置为 ignore（依据 `impact_normal`），只有 `noisy-alert-relax` 适用；影响卡异常或根因是外部组件时不适用。
+
 ## 验证
 
 隧道断开期间不能重建阶段 A（证据卡要查 CCHP 的 VictoriaMetrics），离线重算改为从每个用例 trace 的第一次 hypothesize 提示词取阶段 A 的卡（完整放入与只列判定的卡的并集；只写摘要的卡都是正常或无法判定、且不在候选根因上），经伪造的证据执行器交给被测提交的 `reconstructCase`，事件、告警与拓扑仍按被测提交从重建包重放。用 dd85e76 自己跑这个方法，102 行的处置、模板匹配与处置依据与 dd85e76 用 VictoriaMetrics 重建的结果逐行相同。

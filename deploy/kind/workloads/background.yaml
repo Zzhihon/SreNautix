@@ -1,11 +1,29 @@
 # 背景流量与背景噪声，所有场景期间持续存在：
-# - traffic/loadgen：外部客户端，持续以低速率访问 web（HPA 场景把它调到高速率）；
+# - traffic/loadgen：外部客户端，持续以低速率访问 web（HPA 场景把它调到高速率）；按结果计数
+#   shop_client_requests_total{target="web", result="ok|failed"}，是 shop 唯一的用户侧指标（kind-shop 包的影响卡
+#   traffic/client-errors 读它，ADR 0139）；
 # - batch/nightly-export：每 5 分钟一次，约三分之一失败（KubeJobFailed 的长期告警）；
 # - batch/flaky-worker：每 15 分钟退出一次（零散的重启）。
 apiVersion: v1
 kind: Namespace
 metadata:
   name: traffic
+---
+# loadgen 的指标：busybox httpd 的 CGI 把计数文件输出为 Prometheus 文本格式
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: loadgen-metrics
+  namespace: traffic
+data:
+  metrics: |
+    #!/bin/sh
+    n() { cat "/run/loadgen/$1" 2>/dev/null || echo 0; }
+    printf 'Status: 200 OK\r\nContent-Type: text/plain; version=0.0.4\r\n\r\n'
+    echo '# HELP shop_client_requests_total Requests the external client sent to shop web, by result.'
+    echo '# TYPE shop_client_requests_total counter'
+    echo "shop_client_requests_total{target=\"web\",result=\"ok\"} $(n ok)"
+    echo "shop_client_requests_total{target=\"web\",result=\"failed\"} $(n failed)"
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -24,13 +42,23 @@ spec:
       containers:
         - name: loadgen
           image: busybox
+          # 超时（5 秒）与非 2xx 都算失败；计数写到共享目录，先写临时文件再改名，CGI 不会读到半个文件
           command:
             - sh
             - -c
             - |
               trap 'exit 0' TERM
+              ok=0
+              failed=0
               while true; do
-                wget -q -T 5 -O /dev/null http://web.shop.svc:8080/ || echo "loadgen: request failed"
+                if wget -q -T 5 -O /dev/null http://web.shop.svc:8080/; then
+                  ok=$((ok + 1))
+                  echo "$ok" >/run/loadgen/ok.tmp && mv /run/loadgen/ok.tmp /run/loadgen/ok
+                else
+                  failed=$((failed + 1))
+                  echo "$failed" >/run/loadgen/failed.tmp && mv /run/loadgen/failed.tmp /run/loadgen/failed
+                  echo "loadgen: request failed"
+                fi
                 sleep "$INTERVAL"
               done
           env:
@@ -39,6 +67,38 @@ spec:
           resources:
             requests: {cpu: 10m, memory: 8Mi}
             limits: {cpu: 200m, memory: 32Mi}
+          volumeMounts:
+            - {name: counts, mountPath: /run/loadgen}
+        - name: metrics
+          image: busybox
+          command: [httpd, -f, -p, "9100", -h, /www]
+          ports:
+            - {name: metrics, containerPort: 9100}
+          resources:
+            requests: {cpu: 5m, memory: 8Mi}
+            limits: {cpu: 50m, memory: 16Mi}
+          volumeMounts:
+            - {name: counts, mountPath: /run/loadgen, readOnly: true}
+            - {name: cgi, mountPath: /www/cgi-bin}
+      volumes:
+        - name: counts
+          emptyDir: {}
+        - name: cgi
+          configMap:
+            name: loadgen-metrics
+            defaultMode: 0755
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: loadgen
+  namespace: traffic
+spec:
+  selector:
+    matchLabels: {app: loadgen}
+  podMetricsEndpoints:
+    - port: metrics
+      path: /cgi-bin/metrics
 ---
 apiVersion: v1
 kind: Namespace
