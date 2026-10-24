@@ -26,8 +26,10 @@ import { DEFAULT_LIMITS, type ResearchLimits } from './controller.js';
 //     egress: { categories: [metrics, logs, traces, events, topology, changes, alerts, knowledge, sql, code] }
 //     probe_on_start: true
 //     routes: [ … 与 eval 配置相同 … ]      # 每条路由可选 model_class 与 timeouts: { first_token, idle, total }（ADR 0098）
+//                                          # 以及 role: regular | last_resort（兜底路由，ADR 0152）
 //   budget: { daily_tokens: 15000000, daily_warn_ratio: 0.8, on_exhausted: critical_only, per_research_input_tokens: 150000,
-//             purposes: { optimization: { daily_tokens: 3000000 } } }   # 主动优化的每日用量上限（ADR 0146 §5.3）
+//             purposes: { optimization: { daily_tokens: 3000000 } },   # 主动优化的每日用量上限（ADR 0146 §5.3）
+//             last_resort: { daily_tokens: 2000000 } }                 # 兜底路由合计的每日上限，配置了兜底路由时必填（ADR 0152）
 //   research: { deadline: 8m, max_steps: 3, checks_per_step: 3, tool_calls: 12 }
 //   mcp: [ … 只读 MCP 服务器与工具白名单 … ]
 
@@ -56,6 +58,7 @@ const route = z
     failure_domain: z.array(z.string()).default([]),
     in_domain: z.boolean(),
     tier: z.enum(['small', 'large']),
+    role: z.enum(['regular', 'last_resort']).optional(),
     retention_terms: z.string(),
     api_key_file: z.string(),
     model_class: z.enum(['hosted_large', 'hosted_small', 'local']).optional(),
@@ -138,6 +141,11 @@ export const workerConfigSchema = z
           })
           .strict()
           .default({}),
+        // 兜底路由合计的每日上限（ADR 0152）；用量同时计入 daily_tokens
+        last_resort: z
+          .object({ daily_tokens: z.number().int().min(1000) })
+          .strict()
+          .optional(),
       })
       .strict(),
     research: z
@@ -169,7 +177,17 @@ export const workerConfigSchema = z
       )
       .default([]),
   })
-  .strict();
+  .strict()
+  .superRefine((c, ctx) => {
+    const spare = c.llm.routes.filter((r) => r.role === 'last_resort').map((r) => r.id);
+    if (spare.length && !c.budget.last_resort) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['budget', 'last_resort'],
+        message: `配置了兜底路由 ${spare.join('、')}，必须给出 budget.last_resort.daily_tokens（ADR 0152）`,
+      });
+    }
+  });
 
 export type WorkerConfigRaw = z.infer<typeof workerConfigSchema>;
 
@@ -235,6 +253,7 @@ export function resolveWorkerConfig(raw: WorkerConfigRaw): WorkerConfig {
       perResearchInputTokens: raw.budget.per_research_input_tokens,
       // 没有配置时主动优化的每日用量为 0：worker 不运行目标任务
       optimizationDailyTokens: raw.budget.purposes.optimization?.daily_tokens ?? 0,
+      ...(raw.budget.last_resort ? { lastResortDailyTokens: raw.budget.last_resort.daily_tokens } : {}),
     },
     limits: {
       ...DEFAULT_LIMITS,

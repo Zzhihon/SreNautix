@@ -10,7 +10,7 @@ import type {
   ResponseCreateParamsNonStreaming,
   ResponseInputItem,
 } from 'openai/resources/responses/responses';
-import type { DialectProfile } from './dialect.js';
+import { chatMaxTokensField, type DialectProfile } from './dialect.js';
 import type { Item, LlmRequest, LlmTurn, Segment } from './types.js';
 
 // 内部消息与两种 OpenAI 协议之间的映射。方言档案决定结构化输出的方式：
@@ -148,7 +148,9 @@ export function toChatParams(req: LlmRequest, opts: WireOptions): ChatCompletion
     model: opts.model,
     messages,
     stream: false,
-    max_completion_tokens: req.maxOutputTokens,
+    ...(chatMaxTokensField(opts.profile.id) === 'max_tokens'
+      ? { max_tokens: req.maxOutputTokens }
+      : { max_completion_tokens: req.maxOutputTokens }),
   };
   if (req.temperature !== undefined) {
     params.temperature = req.temperature;

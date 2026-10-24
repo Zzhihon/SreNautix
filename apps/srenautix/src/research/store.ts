@@ -8,7 +8,7 @@ import type {
 } from '@srenautix/contract';
 import { CONTRACT_VERSION } from '@srenautix/contract';
 import type { Calibration } from '../llm/budget.js';
-import type { LlmCallRecord } from '../llm/session.js';
+import type { LlmCallRecord, RouteUsage } from '../llm/session.js';
 import { appendEvents, type NewEvent } from '../store/outbox.js';
 import { tx } from '../store/pool.js';
 import type { ToolCallRecord } from '../tools/box.js';
@@ -56,6 +56,11 @@ const PURPOSE_USAGE_SQL = `INSERT INTO worker.daily_usage_purpose (day, purpose,
          ON CONFLICT (day, purpose) DO UPDATE SET tokens = worker.daily_usage_purpose.tokens + excluded.tokens,
            cost = worker.daily_usage_purpose.cost + excluded.cost, updated_at = now()`;
 
+const LAST_RESORT_USAGE_SQL = `INSERT INTO worker.daily_usage_last_resort (day, route_id, tokens, cost)
+         VALUES ((now() AT TIME ZONE 'UTC')::date, $1, $2, $3)
+         ON CONFLICT (day, route_id) DO UPDATE SET tokens = worker.daily_usage_last_resort.tokens + excluded.tokens,
+           cost = worker.daily_usage_last_resort.cost + excluded.cost, updated_at = now()`;
+
 export interface RunFinish {
   runId: string;
   clusterId: string;
@@ -73,6 +78,8 @@ export interface RunFinish {
   manifest: ResearchManifest | null;
   checkCards: Array<{ ref: string; hypothesisId: string; judgedBy: 'rule' | 'model'; result: EvidenceResult }>;
   events: NewEvent[];
+  /** 兜底路由的用量（已含在 input 与 output_tokens 中），按路由单独记账（ADR 0152）；没有使用兜底路由时为空 */
+  lastResortUsage?: RouteUsage[];
 }
 
 export interface RouteStateRow {
@@ -195,6 +202,9 @@ export class WorkerStore {
       }
       await c.query(USAGE_SQL, [f.input + f.output_tokens, f.cost]);
       await c.query(PURPOSE_USAGE_SQL, ['research', f.input + f.output_tokens, f.cost]);
+      for (const u of f.lastResortUsage ?? []) {
+        await c.query(LAST_RESORT_USAGE_SQL, [u.routeId, u.tokens, u.cost]);
+      }
       await appendEvents(c, 'worker', 'worker', CONTRACT_VERSION, f.events);
     });
   }
@@ -241,6 +251,14 @@ export class WorkerStore {
       : await this.pool.query<{ tokens: number }>(
           "SELECT tokens FROM worker.daily_usage WHERE day = (now() AT TIME ZONE 'UTC')::date",
         );
+    return Number(r.rows[0]?.tokens ?? 0);
+  }
+
+  /** 当日（UTC）全部兜底路由合计的 token 用量（ADR 0152） */
+  async lastResortTokens(): Promise<number> {
+    const r = await this.pool.query<{ tokens: string | null }>(
+      "SELECT sum(tokens) AS tokens FROM worker.daily_usage_last_resort WHERE day = (now() AT TIME ZONE 'UTC')::date",
+    );
     return Number(r.rows[0]?.tokens ?? 0);
   }
 

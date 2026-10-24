@@ -57,7 +57,30 @@ export const DECLARED_PROFILES: Readonly<Record<string, Omit<DialectProfile, 'me
       chinese: 'adequate',
       tokenizer: 'byte_estimate',
     },
+    // 只提供 OpenAI 兼容 /v1/chat/completions 的托管服务（国内模型服务方的兼容接口，ADR 0152）：
+    // 输出上限用 max_tokens，结构化输出声明为 json_object 加提示词中的 schema，推理内容在 reasoning_content；
+    // 严格 json_schema 与上下文长度以能力探测为准
+    'openai-compatible': {
+      id: 'openai-compatible',
+      strict_json_schema: false,
+      native_tools: true,
+      reasoning_channel: 'separate_field',
+      context_tokens: 128_000,
+      chinese: 'native',
+      tokenizer: 'byte_estimate',
+    },
   };
+
+/**
+ * 输出上限用 max_tokens 的方言档案。OpenAI 的 Chat 接口把它换成了 max_completion_tokens，
+ * 兼容接口的服务方普遍只认 max_tokens
+ */
+const MAX_TOKENS_PROFILES: ReadonlySet<string> = new Set(['openai-compatible']);
+
+/** Chat 请求体里表示输出上限的字段 */
+export function chatMaxTokensField(profileId: string): 'max_tokens' | 'max_completion_tokens' {
+  return MAX_TOKENS_PROFILES.has(profileId) ? 'max_tokens' : 'max_completion_tokens';
+}
 
 /** 取声明档案；未知的档案名直接报错 */
 export function declaredProfile(id: string): DialectProfile {

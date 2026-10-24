@@ -318,6 +318,146 @@ describe('结构化调用', () => {
   });
 });
 
+describe('兜底路由（ADR 0152）', () => {
+  // 两条常规路由都经过同一个模型网关（故障域 Namespace:llm-gateway），兜底路由直连另一个服务方
+  const GATEWAY = ['Namespace:llm-gateway'];
+  const INCIDENT = ['Deployment:llm-gateway/gateway'];
+  let c: ReplayServer;
+
+  beforeEach(async () => {
+    c = new ReplayServer();
+    await c.start();
+  });
+
+  afterEach(async () => {
+    await c.stop();
+  });
+
+  const routes = () => [
+    route('a', a.baseUrl, { failure_domain: GATEWAY }),
+    route('b', b.baseUrl, { failure_domain: GATEWAY }),
+    route('spare', c.baseUrl, { role: 'last_resort', dialect_profile: 'openai-compatible' }),
+  ];
+
+  function spareSession(
+    l: ModelLayer,
+    components: string[],
+    lastResort: { dailyTokens: number; usedToday: number } | undefined,
+  ) {
+    return l.session({
+      runId: null,
+      incidentComponents: components,
+      deadline: Date.now() + 480_000,
+      signal: new AbortController().signal,
+      ledger: new ResearchLedger(l.opts.budget),
+      record: async (r) => {
+        records.push(r);
+      },
+      ...(lastResort ? { lastResort } : {}),
+    });
+  }
+
+  it('全部常规路由因故障域提前熔断：改用兜底路由完成调用，常规路由收不到请求，用量单独记账', async () => {
+    c.enqueue(fixture(P, 'chat-json-schema'));
+    const s = spareSession(layer(routes()), INCIDENT, { dailyTokens: 100_000, usedToday: 0 });
+    expect(s.usingLastResort).toBe(true);
+    expect(s.pool.map((r) => r.route.id)).toEqual(['spare']);
+    const r = await s.structured('conclude', base('x'), OUTPUT);
+    expect(r).toMatchObject({ ok: true, routeId: 'spare' });
+    expect(a.received).toHaveLength(0);
+    expect(b.received).toHaveLength(0);
+    expect(c.received).toHaveLength(1);
+    expect(records.map((x) => [x.routeId, x.outcome])).toEqual([['spare', 'succeeded']]);
+    expect(s.lastResortUsage).toEqual([{ routeId: 'spare', tokens: 62 + 1249, cost: (62 * 1 + 1249 * 2) / 1e6 }]);
+    expect(s.routeUses.map((u) => u.route_id)).toEqual(['spare']);
+  });
+
+  it('兜底路由走 OpenAI 兼容接口：Chat 请求体用 max_tokens 表示输出上限', async () => {
+    c.enqueue(fixture(P, 'chat-json-schema'));
+    await spareSession(layer(routes()), INCIDENT, { dailyTokens: 100_000, usedToday: 0 }).structured(
+      'conclude',
+      base('x'),
+      OUTPUT,
+    );
+    const body = JSON.parse(c.received[0]?.body as string) as Record<string, unknown>;
+    expect(c.received[0]?.path).toBe('/v1/chat/completions');
+    expect(body).toMatchObject({ stream: true, stream_options: { include_usage: true }, max_tokens: 4096 });
+    expect(body).not.toHaveProperty('max_completion_tokens');
+    expect(body.response_format).toEqual({ type: 'json_object' });
+  });
+
+  it('还有一条常规路由不在故障域内：照常使用常规路由，不选兜底路由', async () => {
+    b.enqueue(fixture(P, 'chat-json-schema'));
+    const l = layer([routes()[0] as ModelRoute, route('b', b.baseUrl), routes()[2] as ModelRoute]);
+    const s = spareSession(l, INCIDENT, { dailyTokens: 100_000, usedToday: 0 });
+    expect(s.usingLastResort).toBe(false);
+    const r = await s.structured('conclude', base('x'), OUTPUT);
+    expect(r).toMatchObject({ ok: true, routeId: 'b' });
+    expect(c.received).toHaveLength(0);
+    expect(s.lastResortUsage).toEqual([]);
+  });
+
+  it('常规路由因真实调用失败不可用时不切到兜底路由', async () => {
+    await a.stop();
+    await b.stop();
+    const s = spareSession(layer(routes()), ['Deployment:shop/api'], { dailyTokens: 100_000, usedToday: 0 });
+    const r = await s.structured('conclude', base('x'), OUTPUT);
+    expect(r).toMatchObject({ ok: false, reason: 'model_unavailable' });
+    expect(records.map((x) => [x.routeId, x.errorKind])).toEqual([
+      ['a', 'llm_network'],
+      ['b', 'llm_network'],
+    ]);
+    expect(c.received).toHaveLength(0);
+    await a.start();
+    await b.start();
+  });
+
+  it('会话没有兜底额度（主动优化）：全部常规路由熔断时只出阶段 A，说明兜底路由只用于事件研判', async () => {
+    const s = spareSession(layer(routes()), INCIDENT, undefined);
+    expect(s.usingLastResort).toBe(false);
+    const r = await s.structured('conclude', base('x'), OUTPUT);
+    expect(r).toMatchObject({
+      ok: false,
+      reason: 'failure_domain',
+      detail: '所有常规路由都因事件涉及其故障域而提前熔断；兜底路由 spare 只用于事件研判',
+    });
+    expect(c.received).toHaveLength(0);
+  });
+
+  it('兜底路由当日额度不够这次调用：预算截停，不发出请求，尝试记录写明常规路由被跳过的原因', async () => {
+    const s = spareSession(layer(routes()), INCIDENT, { dailyTokens: 100_000, usedToday: 99_000 });
+    const r = await s.structured('conclude', base('x'), OUTPUT);
+    expect(r).toMatchObject({ ok: false, reason: 'budget' });
+    if (r.ok) {
+      throw new Error('unreachable');
+    }
+    expect(r.attempts.slice(0, 2)).toEqual([
+      'a：事件涉及该路由的故障域组件 Deployment:llm-gateway/gateway，提前熔断',
+      'b：事件涉及该路由的故障域组件 Deployment:llm-gateway/gateway，提前熔断',
+    ]);
+    expect(r.detail).toMatch(
+      /^兜底路由当日已用 99000 token，再发送约 \d+ token 输入（输出上限 4096）会超过每日上限 100000$/,
+    );
+    expect(c.received).toHaveLength(0);
+  });
+
+  it('同一会话里兜底路由的用量累加，下一次调用按累计用量判断上限', async () => {
+    c.enqueue(fixture(P, 'chat-json-schema'), fixture(P, 'chat-json-schema'));
+    const s = spareSession(layer(routes()), INCIDENT, { dailyTokens: 7_000, usedToday: 0 });
+    expect(await s.structured('conclude', base('x'), OUTPUT)).toMatchObject({ ok: true, routeId: 'spare' });
+    // 已用 1311，加上输入估算与 4096 的输出上限超过 7000
+    const second = await s.structured('conclude', base('x'.repeat(4000)), OUTPUT);
+    expect(second).toMatchObject({ ok: false, reason: 'budget' });
+    expect(c.received).toHaveLength(1);
+  });
+
+  it('兜底路由不能单独配置', () => {
+    expect(() => layer([route('spare', c.baseUrl, { role: 'last_resort' })])).toThrow(
+      /至少需要一条常规路由（role 为 regular 或不填），兜底路由 spare 不能单独使用/,
+    );
+  });
+});
+
 describe('错误归类', () => {
   it('undici 读响应体时的 TypeError: terminated、fetch failed 与带套接字错误码的错误归为网络失败；其他错误原样返回', () => {
     const live = new AbortController().signal;
@@ -432,6 +572,18 @@ describe('出站控制', () => {
     });
     expect(a.received).toHaveLength(0);
     expect(records).toHaveLength(0);
+  });
+
+  it('全部常规路由被禁用时只出阶段 A：兜底路由只在常规路由因故障域提前熔断时使用（ADR 0152）', () => {
+    const { l } = partitioned([
+      route('overseas', a.baseUrl, { in_domain: false }),
+      route('spare', b.baseUrl, { role: 'last_resort' }),
+    ]);
+    expect(l.regular).toHaveLength(0);
+    expect(l.lastResort.map((r) => r.route.id)).toEqual(['spare']);
+    expect(l.unavailableReason()).toMatch(
+      /^没有可用的常规模型路由：路由 overseas 在境外.*；兜底路由 spare 只在常规路由因故障域提前熔断时使用。阶段 B 不运行，只出阶段 A$/,
+    );
   });
 
   it('出站检查本身不放宽：被禁用的路由构造不出客户端，严格构造仍然拒绝，每次请求都重新检查', async () => {

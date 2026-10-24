@@ -18,7 +18,7 @@ import { touchesFailureDomain, type RouteBreaker } from './breaker.js';
 import { EgressBlocked, type Egress } from './egress.js';
 import { turnFingerprint, type Drift, type FingerprintTracker } from './fingerprint.js';
 import { countHits, type RedactionHits } from './redact.js';
-import type { DisabledRoute } from './routes.js';
+import { isLastResort, type DisabledRoute } from './routes.js';
 import { reaskText, repairLocally, type Prepare, type RepairStep } from './repair.js';
 import { StreamTimeout, streamingParams, streamTurn } from './stream.js';
 import type { ModelClass, RouteTimeouts } from './timeouts.js';
@@ -35,6 +35,7 @@ import { requestCategories, toChatParams, toResponsesParams } from './wire.js';
 
 // 一次研判的模型会话（DESIGN §7.2、§8）：按阶段选模型档位、按路由优先级与熔断状态选路由、
 // 驱动修复阶梯、按 usage 记账，并产出每次调用的记录、研判清单中的路由使用与出境清单。
+// 兜底路由（role: last_resort，ADR 0152）只在全部常规路由都因事件涉及其故障域而提前熔断时成为本次会话的路由组。
 
 /** 剩余时间少于这个值时不再发起模型调用 */
 export const MIN_CALL_WINDOW_MS = 5_000;
@@ -123,6 +124,25 @@ export interface SessionContext {
   signal: AbortSignal;
   ledger: ResearchLedger;
   record(r: LlmCallRecord): Promise<void>;
+  /**
+   * 兜底路由的每日额度：上限与本次会话开始时当日已用的 token。
+   * 不给出时本次会话不使用兜底路由（主动优化与评测）
+   */
+  lastResort?: { dailyTokens: number; usedToday: number };
+}
+
+/** 一条兜底路由在本次会话中的用量（单独记账，ADR 0152） */
+export interface RouteUsage {
+  routeId: string;
+  tokens: number;
+  cost: number;
+}
+
+/** 本次会话使用的路由组 */
+interface RoutePlan {
+  /** 常规路由；全部常规路由都因故障域提前熔断且本次会话有兜底额度时为兜底路由 */
+  pool: readonly RouteRuntime[];
+  lastResort: boolean;
 }
 
 export type StructuredFailure =
@@ -241,12 +261,29 @@ export class ModelLayer {
     return this.opts.disabled ?? [];
   }
 
-  /** 没有可用路由时的降级原因（阶段 B 不运行，只出阶段 A）；有可用路由时为 null */
+  /** 可用的常规路由（role 为 regular 或不填） */
+  get regular(): readonly RouteRuntime[] {
+    return this.opts.routes.filter((r) => !isLastResort(r.route));
+  }
+
+  /** 可用的兜底路由（role: last_resort） */
+  get lastResort(): readonly RouteRuntime[] {
+    return this.opts.routes.filter((r) => isLastResort(r.route));
+  }
+
+  /**
+   * 没有可用的常规路由时的降级原因（阶段 B 不运行，只出阶段 A）；有可用的常规路由时为 null。
+   * 兜底路由不改变这个判断：它只在常规路由因故障域提前熔断时使用
+   */
   unavailableReason(): string | null {
-    if (this.opts.routes.length) {
+    if (this.regular.length) {
       return null;
     }
     const why = this.disabled.map((d) => d.message).join('；');
+    const spare = this.lastResort.map((r) => r.route.id);
+    if (spare.length) {
+      return `没有可用的常规模型路由${why ? `：${why}` : ''}；兜底路由 ${spare.join('、')} 只在常规路由因故障域提前熔断时使用。阶段 B 不运行，只出阶段 A`;
+    }
     return `没有可用的模型路由${why ? `：${why}` : ''}。阶段 B 不运行，只出阶段 A`;
   }
 
@@ -263,13 +300,10 @@ export class ModelLayer {
     return this.opts.routes.length > 0 && this.opts.routes.every((r) => r.route.failure_domain.length > 0);
   }
 
-  /** 候选路由：先本档位，再另一档位；同档位按配置顺序 */
-  ordered(phase: LlmPhase): RouteRuntime[] {
+  /** 路由组中的候选路由（默认为常规路由）：先本档位，再另一档位；同档位按配置顺序 */
+  ordered(phase: LlmPhase, pool: readonly RouteRuntime[] = this.regular): RouteRuntime[] {
     const tier = tierFor(phase);
-    return [
-      ...this.opts.routes.filter((r) => r.route.tier === tier),
-      ...this.opts.routes.filter((r) => r.route.tier !== tier),
-    ];
+    return [...pool.filter((r) => r.route.tier === tier), ...pool.filter((r) => r.route.tier !== tier)];
   }
 
   session(ctx: SessionContext): ModelSession {
@@ -325,11 +359,46 @@ export class ModelSession {
   readonly routeUses: RouteUse[] = [];
   readonly egress: EgressEntry[] = [];
   private seq = 0;
+  private readonly plan: RoutePlan;
+  private readonly spareUsage = new Map<string, RouteUsage>();
 
   constructor(
     private readonly layer: ModelLayer,
     private readonly ctx: SessionContext,
-  ) {}
+  ) {
+    this.plan = this.planRoutes();
+  }
+
+  /**
+   * 本次会话的路由组（ADR 0152）：全部常规路由都因事件涉及其故障域而提前熔断、本次会话有兜底额度、配置了兜底路由时
+   * 为兜底路由，否则为常规路由。常规路由因真实调用失败而熔断不会让兜底路由进入路由组。
+   */
+  private planRoutes(): RoutePlan {
+    const regular = this.layer.regular;
+    const spare = this.layer.lastResort;
+    const allOpened =
+      regular.length > 0 &&
+      regular.every((r) => touchesFailureDomain(this.ctx.incidentComponents, r.route.failure_domain) !== null);
+    if (spare.length && this.ctx.lastResort && allOpened) {
+      return { pool: spare, lastResort: true };
+    }
+    return { pool: regular, lastResort: false };
+  }
+
+  /** 本次会话使用兜底路由 */
+  get usingLastResort(): boolean {
+    return this.plan.lastResort;
+  }
+
+  /** 本次会话可能使用的路由（提示词按其中最小的上下文组装） */
+  get pool(): readonly RouteRuntime[] {
+    return this.plan.pool;
+  }
+
+  /** 兜底路由在本次会话中的用量，按路由；没有使用兜底路由时为空 */
+  get lastResortUsage(): RouteUsage[] {
+    return [...this.spareUsage.values()];
+  }
 
   /** 因事件涉及其故障域而对本次研判提前熔断的路由 */
   preOpened(): Array<{ routeId: string; component: string }> {
@@ -361,7 +430,15 @@ export class ModelSession {
     const attempts: string[] = [];
     const preOpened = new Map(this.preOpened().map((p) => [p.routeId, p.component]));
     const { metrics } = this.layer.opts;
-    const order = this.layer.ordered(phase);
+    if (this.plan.lastResort) {
+      // 常规路由全部因故障域提前熔断，本次会话改用兜底路由；尝试记录照样写明每条常规路由被跳过的原因
+      for (const rt of this.layer.ordered(phase)) {
+        const id = rt.route.id;
+        metrics.failureDomainSkips.inc({ route: id });
+        attempts.push(`${id}：事件涉及该路由的故障域组件 ${preOpened.get(id) as string}，提前熔断`);
+      }
+    }
+    const order = this.layer.ordered(phase, this.plan.pool);
     let sawInvalid = false;
     let sawEgress = false;
     let candidates = 0;
@@ -454,7 +531,15 @@ export class ModelSession {
     }
     metrics.repair.inc({ phase, route: '', level: 'deterministic_only', outcome: 'failed' });
     if (candidates === 0) {
-      return { ok: false, reason: 'failure_domain', detail: '所有路由都因事件涉及其故障域而提前熔断', attempts };
+      const spare = this.plan.lastResort ? [] : this.layer.lastResort.map((r) => r.route.id);
+      return {
+        ok: false,
+        reason: 'failure_domain',
+        detail: spare.length
+          ? `所有常规路由都因事件涉及其故障域而提前熔断；兜底路由 ${spare.join('、')} 只用于事件研判`
+          : '所有路由都因事件涉及其故障域而提前熔断',
+        attempts,
+      };
     }
     if (sawInvalid) {
       return { ok: false, reason: 'model_output_invalid', detail: '模型输出无效', attempts };
@@ -566,6 +651,11 @@ export class ModelSession {
       metrics.budgetStops.inc({ reason: 'research' });
       throw new BudgetStop(over);
     }
+    const spareOver = this.checkLastResort(route, estimated, sized.maxOutputTokens);
+    if (spareOver) {
+      metrics.budgetStops.inc({ reason: 'last_resort' });
+      throw new BudgetStop(spareOver);
+    }
     const admission = rt.breaker.admit(started);
     if (!admission.allowed) {
       throw new CallFailed(
@@ -628,6 +718,11 @@ export class ModelSession {
     const cost = callCost(route.price, turn.usage);
     // 服务方没有在流里给出 usage 时按估算记账，研判预算照样生效
     this.ctx.ledger.record(turn.usage.input > 0 ? turn.usage : { ...turn.usage, input: estimated }, cost);
+    if (isLastResort(route)) {
+      const u = this.spareUsage.get(route.id) ?? { routeId: route.id, tokens: 0, cost: 0 };
+      const tokens = (turn.usage.input > 0 ? turn.usage.input : estimated) + turn.usage.output;
+      this.spareUsage.set(route.id, { routeId: route.id, tokens: u.tokens + tokens, cost: u.cost + cost });
+    }
     if (raw > 0 && turn.usage.input > 0 && !plausibleRatio(turn.usage.input / raw)) {
       metrics.calibrationRejected.inc({ route: route.id });
       logger.warn('服务方报告的输入 token 与估算相差过大，不计入校准', {
@@ -699,6 +794,25 @@ export class ModelSession {
         },
       },
     };
+  }
+
+  /**
+   * 兜底路由的每日上限：当日已用（会话开始时读取）加本次会话已用，再加这次的输入估算与输出上限，超过上限时返回拒绝原因。
+   * 常规路由返回 null
+   */
+  private checkLastResort(route: ModelRoute, estimated: number, maxOutput: number): string | null {
+    if (!isLastResort(route)) {
+      return null;
+    }
+    const quota = this.ctx.lastResort;
+    if (!quota) {
+      throw new Error(`兜底路由 ${route.id} 只在会话给出兜底额度时进入路由组`);
+    }
+    const used = quota.usedToday + this.lastResortUsage.reduce((n, u) => n + u.tokens, 0);
+    if (used + estimated + maxOutput > quota.dailyTokens) {
+      return `兜底路由当日已用 ${used} token，再发送约 ${estimated} token 输入（输出上限 ${maxOutput}）会超过每日上限 ${quota.dailyTokens}`;
+    }
+    return null;
   }
 
   private syncBreaker(rt: RouteRuntime): void {

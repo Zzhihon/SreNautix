@@ -26,13 +26,14 @@
 ```
 srenautix eval --cases <目录> --config <配置> [--suite <名>] [--runs 3] [--mode snapshot|reconstructed]
                [--abstain] [--max-tokens 2000000] [--out eval/reports] [--name <报告名>] [--trace <目录>]
+               [--route <路由 id>]...
 srenautix eval --compare <当前配置> <候选配置> --cases <目录> [同上] [--waive <case_id>]...
 srenautix eval import-seed --dir <种子目录> --cases <目录> --suite <名> --cluster-id <id>
 srenautix eval label --labels <标注> --cases <目录>
 srenautix eval export --labels <标注> --cases <目录> --config <配置> [--state <状态库连接文件>] [--only <标注 id>]...
 srenautix eval reconstruct --labels <标注> --cases <目录> --config <配置> [--runs 3] [--max-tokens N]
                            [--repo <GitOps 仓库的本地克隆>] [--discovery-only] [--only <标注 id>]... [--out] [--name]
-                           [--trace <目录>]
+                           [--trace <目录>] [--route <路由 id>]...
 srenautix eval live --state <状态库连接文件> --config <配置> --since <时刻> [--until <时刻>] [--out] [--name]
 ```
 
@@ -57,7 +58,9 @@ mcp: []                               # reconstructed 模式的只读 MCP 服务
 budget: { call_timeout_seconds: 90 }
 ```
 
-每条路由单独评测，成绩单每条路由一行，另按"领域包早于事件 / 晚于事件"各一行。输出：
+每条路由单独评测，成绩单每条路由一行，另按"领域包早于事件 / 晚于事件"各一行。`--route <id>`（可重复）只评测列出的路由，只读取这些路由的密钥，
+其他路由可以没有密钥；配置里没有的 id 直接报错。worker 配置中的兜底路由（`role: last_resort`，ADR 0152）在评测中当作常规路由单独评测，
+例如在常规路由的同一份配置里加上兜底路由，用 `--route <兜底路由 id>` 只评测它，再与常规路由已有的成绩单比较 top-1 与处置。输出：
 
 | 文件 | 内容 |
 |---|---|

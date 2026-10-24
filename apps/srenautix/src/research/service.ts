@@ -288,10 +288,11 @@ export class WorkerService {
     let res: ResearchRunResult;
     const steps: Array<{ state: string; started_at: string; finished_at: string | null }> = [];
     const rc = toResearchCase(ctx, toolSet.tools, Date.now());
+    const lastResort = await this.lastResortQuota();
     try {
       const deadline = Math.min(d.limits.deadlineMs, Date.parse(task.deadline_at) - Date.now());
       res = await runStageB(
-        { runId: task.run_id, rc, previous, signal },
+        { runId: task.run_id, rc, previous, signal, ...(lastResort ? { lastResort } : {}) },
         {
           layer: d.layer,
           metrics: d.metrics,
@@ -352,13 +353,15 @@ export class WorkerService {
       input: res.ledger.input,
       output_tokens: res.ledger.output,
       cost: res.ledger.cost,
-      currency: d.layer.routes[0]?.route.price.currency ?? 'USD',
+      // 使用兜底路由时全部调用都在兜底路由上，成本按它的币种记
+      currency: res.session.pool[0]?.route.price.currency ?? 'USD',
       steps,
       manifest,
       checkCards: res.book.allCards
         .filter((c) => c.hypothesisId !== null)
         .map((c) => ({ ref: c.ref, hypothesisId: c.hypothesisId as string, judgedBy: c.judgedBy, result: c.result })),
       events,
+      lastResortUsage: res.session.lastResortUsage,
     });
     await d.hub.finish(task.run_id, task.worker_id, res.state);
     await this.reportBudget();
@@ -376,16 +379,34 @@ export class WorkerService {
       stop: res.stopReason,
       conclusion_level: output?.conclusion.level ?? null,
       tokens: res.ledger.input + res.ledger.output,
+      ...(res.session.usingLastResort ? { last_resort: res.session.pool.map((r) => r.route.id) } : {}),
       // 失败的原因（模型输出无效时含每次尝试的校验错误），不必再查运行明细
       ...(res.error ? { error_kind: res.error.kind, error: res.error.message.slice(0, 1000) } : {}),
     });
     return res.state;
   }
 
+  /**
+   * 兜底路由的每日额度（ADR 0152）：配置了兜底路由时为上限与当日已用，研判据此决定能否改用兜底路由；没有兜底路由时为 null
+   */
+  private async lastResortQuota(): Promise<{ dailyTokens: number; usedToday: number } | null> {
+    if (!this.d.layer.lastResort.length) {
+      return null;
+    }
+    const dailyTokens = this.d.budget.lastResortDailyTokens;
+    if (dailyTokens === undefined) {
+      throw new Error('配置了兜底路由，但没有 budget.last_resort.daily_tokens');
+    }
+    const usedToday = await this.d.store.lastResortTokens();
+    this.d.metrics.budgetUsedRatio.set({ scope: 'last_resort' }, usedToday / dailyTokens);
+    return { dailyTokens, usedToday };
+  }
+
   private async reportBudget(): Promise<void> {
     const used = await this.d.store.dailyTokens();
     const ratio = used / this.d.budget.dailyTokens;
     this.d.metrics.budgetUsedRatio.set({ scope: 'daily' }, ratio);
+    await this.lastResortQuota();
     const optimization = await optimizationRatio(this.d);
     this.d.metrics.budgetUsedRatio.set({ scope: 'optimization' }, optimization);
     await this.d.hub.reportBudget(ratio, { optimization });

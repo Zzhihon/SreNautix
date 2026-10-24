@@ -39,7 +39,7 @@ llm:
       base_url: https://llm.example.com/v1
       api: responses                 # responses | chat_completions
       model: example-large
-      dialect_profile: openai-responses   # openai-responses | openai-chat | deepseek | qwen-vllm | llamacpp
+      dialect_profile: openai-responses   # openai-responses | openai-chat | deepseek | qwen-vllm | llamacpp | openai-compatible
       price: { currency: USD, input_per_mtok: 1.25, output_per_mtok: 10, cached_input_per_mtok: 0.125 }
       failure_domain: []             # 这条路由依赖的被管组件，例如 Namespace:llm-gateway
       in_domain: true
@@ -48,6 +48,19 @@ llm:
       api_key_file: /etc/srenautix/secrets/llm/primary
       model_class: hosted_large      # 可省略：本地方言档案（qwen-vllm、llamacpp）为 local，否则按 tier
       timeouts: { first_token: 120s, idle: 30s }   # 可省略：按模型类别的默认值；total 默认不设（ADR 0098）
+    # 兜底路由（ADR 0152）：不经过常规路由的故障域，平时不选，只在全部常规路由都因事件涉及其故障域而提前熔断时使用
+    # - id: direct
+    #   base_url: https://llm-direct.example.com/v1
+    #   api: chat_completions
+    #   model: example-direct
+    #   dialect_profile: openai-compatible
+    #   price: { currency: CNY, input_per_mtok: 2, output_per_mtok: 8, cached_input_per_mtok: 0.5 }
+    #   failure_domain: []
+    #   in_domain: true
+    #   tier: large
+    #   role: last_resort            # regular（默认）| last_resort
+    #   retention_terms: "服务方的数据保留条款"
+    #   api_key_file: /etc/srenautix/secrets/llm/direct
 budget:
   daily_tokens: 5000000              # 必填，没有默认值
   daily_warn_ratio: 0.8
@@ -55,6 +68,7 @@ budget:
   per_research_input_tokens: 150000
   purposes:
     optimization: { daily_tokens: 3000000 }   # 主动优化每天的用量上限；省略或为 0 时不运行目标任务（ADR 0146 §5.3）
+  # last_resort: { daily_tokens: 2000000 }   # 兜底路由合计每天的用量上限，配置了兜底路由时必填（ADR 0152）
 research:
   deadline: 8m
   max_steps: 3
@@ -85,6 +99,19 @@ mcp:                                 # 只读 MCP 服务器与工具白名单（
 提示词估算超过路由上下文或本次可用的输入预算时按顺序裁剪（ADR 0099）：无关证据卡改为只列判定、参考案例、知识、其余卡的判定列表、旧的变更、拓扑子图、卡片表格、最后才裁结论相关的证据卡；裁掉的内容写进调用记录与研判的校验说明。研判剩余预算不够再提一轮假设时直接结论，不因超限整次失败。
 
 白名单中每个工具声明时间参数的位置与结果形状。没有时间参数、只能读取当前状态的工具写 `live: true`，回放时不可用。任何参数取值为 Secret 或 ConfigMap 的调用都被拒绝；Kubernetes 对象的环境变量字面值在进入提示词前剔除。
+
+### 兜底路由
+
+常规路由（`role` 为 `regular` 或不填）都经过同一个模型网关时，网关出事件恰好是常规路由全部因故障域提前熔断的时候，阶段 B 只能跳过。兜底路由（`role: last_resort`，ADR 0152）是一条不经过这个故障域的路由，通常直连另一家服务方的 OpenAI 兼容接口（`api: chat_completions`、`dialect_profile: openai-compatible`）：
+
+- 平时不选。每次事件研判开始时，worker 用事件涉及的组件（成员与候选根因）对照常规路由的 `failure_domain`：全部常规路由都被提前熔断时，本次研判的路由组换成兜底路由，否则只用常规路由。
+- 常规路由因真实调用失败（网络、超时、408、429、5xx）熔断或不可用时不切到兜底路由，研判按原有方式在常规路由之间切换，全部失败时只出阶段 A。
+- 用量单独记账：`worker.daily_usage_last_resort` 按天、按路由记录，同时计入 `daily_usage`。每次调用前检查当日已用加本次的输入估算与输出上限是否超过 `budget.last_resort.daily_tokens`，超过时不发出请求，研判以 `budget_exhausted` 只出阶段 A，横幅写明兜底路由的当日用量。
+- 主动优化的目标任务与评测不使用兜底路由；评测把兜底路由当作常规路由单独评测（`srenautix eval --route <id>`）。
+- 结论来自兜底路由时，研判输出带 `last_resort_route: {route_id, model}`，事件消息在结论下面一行标注“由兜底线路研判”；研判清单的 `routes` 与 `worker.llm_calls` 记录每次调用所用的路由。
+- 至少要有一条常规路由；全部常规路由都被出站策略禁用时，事件只出阶段 A，兜底路由同样不使用。
+
+`openai-compatible` 方言档案的 Chat 请求体用 `max_tokens` 表示输出上限（OpenAI 自己的 Chat 接口用 `max_completion_tokens`，兼容接口的服务方普遍只认 `max_tokens`），结构化输出声明为 `json_object` 加提示词中的 schema，推理内容读 `reasoning_content`；严格 `json_schema` 与上下文长度以启动时的能力探测为准。
 
 ## 主动优化的目标任务
 
@@ -133,7 +160,7 @@ ADR 0146 §5.3 写的是给 `daily_usage` 加 `purpose` 列，加列要改主键
 | `srenautix_llm_breaker_open{route}`、`srenautix_llm_breaker_opened_total{route,reason}` | 熔断 |
 | `srenautix_llm_failure_domain_skips_total` | 故障域提前熔断 |
 | `srenautix_llm_estimate_calibration{route}` | token 估算校准系数 |
-| `srenautix_llm_budget_used_ratio{scope="daily"}`、`srenautix_llm_budget_stops_total{reason}` | 预算；`scope="optimization"` 为主动优化用途的当日比例 |
+| `srenautix_llm_budget_used_ratio{scope="daily"}`、`srenautix_llm_budget_stops_total{reason}` | 预算；`scope="optimization"` 为主动优化用途的当日比例，`scope="last_resort"` 为兜底路由合计的当日比例；截停原因 `last_resort` 为兜底路由的每日上限 |
 | `srenautix_egress_bytes_total`、`srenautix_egress_redaction_hits_total{kind}`、`srenautix_egress_halted` | 出站 |
 | `srenautix_llm_route_disabled{route,reason}`、`srenautix_llm_routes_available` | 启动时被出站策略禁用的路由与可用路由数 |
 | `srenautix_llm_provider_fingerprint_changes_total` | 服务方指纹变化 |

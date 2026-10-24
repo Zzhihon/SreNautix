@@ -57,6 +57,16 @@
       "maxItems": 12,
       "items": { "$ref": "evidence-result.schema.json" }
     },
+    "last_resort_route": {
+      "type": "object",
+      "description": "结论由兜底路由（ModelRoute.role 为 last_resort）给出时填写：全部常规路由都因事件涉及其故障域而提前熔断（契约 2.30.0，ADR 0152）。常规路由给出结论时不填",
+      "additionalProperties": false,
+      "required": ["route_id", "model"],
+      "properties": {
+        "route_id": { "type": "string" },
+        "model": { "type": "string" }
+      }
+    },
     "evidence_index": {
       "type": "array",
       "description": "研判运行内的证据引用到定义与实体的映射（同研判清单的 evidence_map）：卡为 <card_id>@<实体键>，告警为 alert_id，变更为 change_id",

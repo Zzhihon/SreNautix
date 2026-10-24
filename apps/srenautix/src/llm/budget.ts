@@ -114,6 +114,11 @@ export interface BudgetConfig {
   onExhausted: 'critical_only' | 'stage_a_only';
   /** 主动优化用途的每日上限（budget.purposes.optimization.daily_tokens，ADR 0146 §5.3）；0 或没有时不运行目标任务 */
   optimizationDailyTokens?: number;
+  /**
+   * 兜底路由（role: last_resort）合计的每日上限（budget.last_resort.daily_tokens，ADR 0152）。兜底路由的用量同时计入
+   * dailyTokens；配置了兜底路由时必须给出
+   */
+  lastResortDailyTokens?: number;
 }
 
 export const DEFAULT_BUDGET: BudgetConfig = {

@@ -206,6 +206,8 @@ const T = {
     impact: '影响：',
     hours: (h: number, m: number) => (h ? `${h} 小时 ${m} 分` : `${m} 分钟`),
     conclusion: '结论：',
+    lastResort: '由兜底线路研判：',
+    lastResortWhy: '常规模型路由都依赖本事件涉及的组件',
     stageACandidate: '阶段 A 根因候选：',
     score: (s: number) => `得分 ${s.toFixed(2)}`,
     ambiguous: (m: number | null) => `有歧义，分差 ${m === null ? '-' : m.toFixed(2)}`,
@@ -428,6 +430,8 @@ const T = {
     impact: 'Impact: ',
     hours: (h: number, m: number) => (h ? `${h} h ${m} min` : `${m} min`),
     conclusion: 'Conclusion: ',
+    lastResort: 'Researched on the last-resort route: ',
+    lastResortWhy: 'every regular model route depends on a component of this incident',
     stageACandidate: 'Stage A root candidate: ',
     score: (s: number) => `score ${s.toFixed(2)}`,
     ambiguous: (m: number | null) => `ambiguous, margin ${m === null ? '-' : m.toFixed(2)}`,
@@ -1576,6 +1580,16 @@ export function composeMessage(i: ComposeInput): { message: NotifyMessage; targe
         ...(chosen ? [P(' · '), C(shortName(chosen.root_component, names)), P(`（${chosen.id}）`)] : []),
       ]),
     );
+    // 结论来自兜底路由（ADR 0152）：紧跟结论标明路由与模型
+    if (out.last_resort_route) {
+      keyIssue.push(
+        text([
+          B(t.lastResort),
+          C(out.last_resort_route.route_id),
+          P(`（${out.last_resort_route.model}）${t.sep}${t.lastResortWhy}`),
+        ]),
+      );
+    }
   } else {
     const top = inc.candidates[0];
     const ambiguity = inc.root.ambiguous ? `${t.sep}${t.ambiguous(inc.root.margin)}` : '';

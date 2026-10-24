@@ -1,5 +1,5 @@
 // 本文件由 packages/contract/scripts/gen.ts 从 contract/ 生成，不要手工修改。
-export const CONTRACT_VERSION = '2.29.0';
+export const CONTRACT_VERSION = '2.30.0';
 
 export const SCHEMAS: Record<string, Record<string, unknown>> = {
   'https://srenautix.io/contract/gateway/v1/action-catalog.schema.json': {
@@ -1620,6 +1620,12 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
           },
           in_domain: { type: 'boolean', description: '服务方是否在境内' },
           tier: { type: 'string', enum: ['small', 'large'] },
+          role: {
+            type: 'string',
+            description:
+              'regular：常规路由（不填时的取值）；last_resort：兜底路由，平时不选，只在全部常规路由都因事件涉及其故障域而提前熔断时使用，用量按路由单独记账并受每日上限约束（契约 2.30.0，ADR 0152）',
+            enum: ['regular', 'last_resort'],
+          },
           retention_terms: { type: 'string', description: '服务方的数据保留条款' },
         },
       },
@@ -7196,6 +7202,14 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
           '区分性检查产生的证据卡（引用编号接在阶段 A 的卡之后），序列为空数组；完整序列在 worker 的运行明细中',
         maxItems: 12,
         items: { $ref: 'evidence-result.schema.json' },
+      },
+      last_resort_route: {
+        type: 'object',
+        description:
+          '结论由兜底路由（ModelRoute.role 为 last_resort）给出时填写：全部常规路由都因事件涉及其故障域而提前熔断（契约 2.30.0，ADR 0152）。常规路由给出结论时不填',
+        additionalProperties: false,
+        required: ['route_id', 'model'],
+        properties: { route_id: { type: 'string' }, model: { type: 'string' } },
       },
       evidence_index: {
         type: 'array',

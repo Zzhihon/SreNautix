@@ -31,9 +31,18 @@ export function checkRoutes(routes: readonly ModelRoute[]): void {
   if (!routes.length) {
     throw new Error('至少需要一条模型路由');
   }
+  // 兜底路由只在全部常规路由都因故障域提前熔断时使用（ADR 0152），没有常规路由时它永远不会被选中
+  if (routes.every(isLastResort)) {
+    throw new Error(`至少需要一条常规路由（role 为 regular 或不填），兜底路由 ${ids.join('、')} 不能单独使用`);
+  }
   for (const r of routes) {
     declaredProfile(r.dialect_profile);
   }
+}
+
+/** 兜底路由（role: last_resort，ADR 0152） */
+export function isLastResort(route: Pick<ModelRoute, 'role'>): boolean {
+  return route.role === 'last_resort';
 }
 
 /** 启动时被出站策略禁用的路由：不构造客户端，任何情况下都不会被调用 */

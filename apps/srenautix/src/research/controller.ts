@@ -2,6 +2,7 @@ import type { ConcludeOutput, HypothesizeOutput, ResearchOutput } from '@srenaut
 import { bindSchema, modelSchema, type DynamicEnums } from '../llm/schema.js';
 import type { LlmCallRecord, ModelLayer, ModelSession, StructuredResult } from '../llm/session.js';
 import { ResearchLedger } from '../llm/budget.js';
+import { isLastResort } from '../llm/routes.js';
 import type { LlmPhase } from '../llm/types.js';
 import { promptHash, type Language } from '../prompts/index.js';
 import { ToolBox, type Tool, type ToolCallRecord } from '../tools/box.js';
@@ -77,6 +78,8 @@ export interface ResearchRunInput {
   rc: ResearchCase;
   previous: PreviousRun | null;
   signal: AbortSignal;
+  /** 兜底路由的每日额度（ADR 0152）；不给出时本次研判不使用兜底路由 */
+  lastResort?: { dailyTokens: number; usedToday: number };
 }
 
 export interface ResearchRunResult {
@@ -136,6 +139,15 @@ export function failure(r: Extract<StructuredResult<unknown>, { ok: false }>): {
   }
 }
 
+/** 结论所用的路由是兜底路由时，研判输出的 last_resort_route；常规路由为空对象 */
+export function lastResortRoute(
+  layer: ModelLayer,
+  routeId: string,
+): Pick<ResearchOutput, 'last_resort_route'> | Record<string, never> {
+  const r = layer.route(routeId).route;
+  return isLastResort(r) ? { last_resort_route: { route_id: r.id, model: r.model } } : {};
+}
+
 export async function runStageB(input: ResearchRunInput, env: ResearchEnv, sink: RunSink): Promise<ResearchRunResult> {
   const { rc, previous, runId } = input;
   const started = env.now();
@@ -156,6 +168,7 @@ export async function runStageB(input: ResearchRunInput, env: ResearchEnv, sink:
     signal: input.signal,
     ledger: budgetLedger,
     record: (r) => sink.llmCall(r),
+    ...(input.lastResort ? { lastResort: input.lastResort } : {}),
   });
   const base = { book, checks, session, ledger: budgetLedger, promptHashes };
   let state: ResearchState = 'hypothesize';
@@ -193,7 +206,8 @@ export async function runStageB(input: ResearchRunInput, env: ResearchEnv, sink:
     }
   }
 
-  const contextTokens = Math.min(...env.layer.routes.map((r) => r.profile.context_tokens));
+  // 本次研判可能使用的路由中最小的上下文：常规路由，或全部常规路由因故障域提前熔断时的兜底路由（ADR 0152）
+  const contextTokens = Math.min(...session.pool.map((r) => r.profile.context_tokens));
   const parts = promptParts(env.language, rc, book, contextTokens, previous);
   const bounds = toolBounds(rc, env.replay, env.now());
   const tools = env.replay ? env.tools.filter((t) => !t.live) : env.tools;
@@ -311,6 +325,8 @@ export async function runStageB(input: ResearchRunInput, env: ResearchEnv, sink:
         .slice(0, 12)
         .map((c) => ({ ...c.result, series: [] })),
       evidence_index: book.evidenceMap(),
+      // 结论来自兜底路由时写明路由与模型，消息上据此标注（ADR 0152）
+      ...lastResortRoute(env.layer, concluded.routeId),
     };
     // 模型文字的数值审计（ADR 0125）
     const audited = auditModelText(draft, incidentCorpus(rc, book));

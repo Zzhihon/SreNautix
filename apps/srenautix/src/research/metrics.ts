@@ -91,14 +91,14 @@ export class WorkerMetrics extends BaseMetrics {
 
   readonly budgetUsedRatio = new Gauge({
     name: 'srenautix_llm_budget_used_ratio',
-    help: '已用 token 占上限的比例，scope=daily 为当天（UTC），scope=optimization 为主动优化用途的当天',
+    help: '已用 token 占上限的比例，scope=daily 为当天（UTC），scope=optimization 为主动优化用途的当天，scope=last_resort 为兜底路由合计的当天',
     labelNames: ['scope'] as const,
     registers: [this.registry],
   });
 
   readonly budgetStops = new Counter({
     name: 'srenautix_llm_budget_stops_total',
-    help: '预算截停次数，按原因（stage、research、daily_warn、daily_exhausted）',
+    help: '预算截停次数，按原因（stage、research、daily_warn、daily_exhausted、last_resort）',
     labelNames: ['reason'] as const,
     registers: [this.registry],
   });

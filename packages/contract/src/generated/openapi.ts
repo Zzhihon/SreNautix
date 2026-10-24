@@ -4784,6 +4784,11 @@ export type components = {
         target: string;
       }[];
       hypotheses: components['schemas']['Hypothesis'][];
+      /** @description 结论由兜底路由（ModelRoute.role 为 last_resort）给出时填写：全部常规路由都因事件涉及其故障域而提前熔断（契约 2.30.0，ADR 0152）。常规路由给出结论时不填 */
+      last_resort_route?: {
+        model: string;
+        route_id: string;
+      };
       next_checks: components['schemas']['NextCheck'][];
       proposals: components['schemas']['ProposalDraft'][];
       recommendations: components['schemas']['Recommendation'][];

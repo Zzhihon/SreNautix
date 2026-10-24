@@ -44,6 +44,11 @@
         },
         "in_domain": { "type": "boolean", "description": "服务方是否在境内" },
         "tier": { "type": "string", "enum": ["small", "large"] },
+        "role": {
+          "type": "string",
+          "description": "regular：常规路由（不填时的取值）；last_resort：兜底路由，平时不选，只在全部常规路由都因事件涉及其故障域而提前熔断时使用，用量按路由单独记账并受每日上限约束（契约 2.30.0，ADR 0152）",
+          "enum": ["regular", "last_resort"]
+        },
         "retention_terms": { "type": "string", "description": "服务方的数据保留条款" }
       }
     },

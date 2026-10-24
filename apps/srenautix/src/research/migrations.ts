@@ -135,6 +135,23 @@ CREATE TABLE worker.daily_usage_purpose (
 );
 `,
     },
+    {
+      version: 3,
+      name: 'last resort route usage',
+      phase: 'expand',
+      // 兜底路由（ADR 0152）每天（UTC）的用量，按路由单独记账，每日上限按全部兜底路由的合计判断；
+      // 这些用量同时计入 daily_usage 与 daily_usage_purpose
+      sql: `
+CREATE TABLE worker.daily_usage_last_resort (
+  day date NOT NULL,
+  route_id text NOT NULL,
+  tokens bigint NOT NULL DEFAULT 0,
+  cost double precision NOT NULL DEFAULT 0,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (day, route_id)
+);
+`,
+    },
   ],
 };
 

@@ -1790,6 +1790,10 @@ export interface ModelRoute {
   in_domain: boolean;
   tier: 'small' | 'large';
   /**
+   * regular：常规路由（不填时的取值）；last_resort：兜底路由，平时不选，只在全部常规路由都因事件涉及其故障域而提前熔断时使用，用量按路由单独记账并受每日上限约束（契约 2.30.0，ADR 0152）
+   */
+  role?: 'regular' | 'last_resort';
+  /**
    * 服务方的数据保留条款
    */
   retention_terms: string;
@@ -3500,6 +3504,13 @@ export interface ResearchOutput {
    * @maxItems 12
    */
   check_cards?: EvidenceResult[];
+  /**
+   * 结论由兜底路由（ModelRoute.role 为 last_resort）给出时填写：全部常规路由都因事件涉及其故障域而提前熔断（契约 2.30.0，ADR 0152）。常规路由给出结论时不填
+   */
+  last_resort_route?: {
+    route_id: string;
+    model: string;
+  };
   /**
    * 研判运行内的证据引用到定义与实体的映射（同研判清单的 evidence_map）：卡为 <card_id>@<实体键>，告警为 alert_id，变更为 change_id
    */

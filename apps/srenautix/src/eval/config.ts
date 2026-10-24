@@ -26,7 +26,10 @@ import type { McpServerConfig } from '../tools/mcp.js';
 //       api_key_file: /etc/srenautix/secrets/llm/key     # 或 api_key_env: LLM_API_KEY
 //       model_class: hosted_large                        # 可省略：按 tier 与方言档案推断（ADR 0098）
 //       timeouts: { first_token_seconds: 120, idle_seconds: 30 }   # 可省略：按模型类别的默认值
+//       role: last_resort                                # 可省略；评测把每条路由当作常规路由单独评测（ADR 0152）
 //   mcp: []
+//
+// 每条路由单独评测；命令行的 --route <id> 只评测列出的路由，只读取这些路由的密钥。
 
 const route = z
   .object({
@@ -46,6 +49,7 @@ const route = z
     failure_domain: z.array(z.string()).default([]),
     in_domain: z.boolean(),
     tier: z.enum(['small', 'large']),
+    role: z.enum(['regular', 'last_resort']).optional(),
     retention_terms: z.string(),
     api_key_env: z.string().optional(),
     api_key_file: z.string().optional(),
@@ -165,9 +169,24 @@ export function loadReconstructConfig(path: string): ReconstructConfig {
   return r;
 }
 
-export function loadEvalConfig(path: string, env: Record<string, string | undefined> = process.env): EvalConfig {
+/**
+ * 读取评测配置。only 不为空时只保留其中列出的路由（命令行的 --route），其他路由的密钥不读取；
+ * 列出了配置里没有的路由时报错
+ */
+export function loadEvalConfig(
+  path: string,
+  env: Record<string, string | undefined> = process.env,
+  only: readonly string[] = [],
+): EvalConfig {
   const raw = schema.parse(parse(readFileSync(path, 'utf8')));
-  const routes = raw.routes.map((r): EvalRouteConfig => {
+  const missing = only.filter((id) => !raw.routes.some((r) => r.id === id));
+  if (missing.length) {
+    throw new Error(
+      `评测配置 ${path} 中没有路由 ${missing.join('、')}，可选：${raw.routes.map((r) => r.id).join('、')}`,
+    );
+  }
+  const selected = only.length ? raw.routes.filter((r) => only.includes(r.id)) : raw.routes;
+  const routes = selected.map((r): EvalRouteConfig => {
     const { api_key_env, api_key_file, context_tokens, model_class, timeouts, ...rest } = r;
     let apiKey: string;
     if (api_key_env !== undefined) {

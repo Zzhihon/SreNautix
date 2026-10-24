@@ -138,7 +138,7 @@ export function workerConfigFor(
   hubUrl: string,
   file: (name: string, content: string) => string,
   tokens: WorkerHubTokens,
-  over: { llm: Record<string, unknown>; listen?: Record<string, string> },
+  over: { llm: Record<string, unknown>; listen?: Record<string, string>; budget?: Record<string, unknown> },
 ): WorkerConfig {
   return resolveWorkerConfig(
     workerConfigSchema.parse({
@@ -151,7 +151,7 @@ export function workerConfigFor(
       inbound: { token_sha256_file: file('inbound-sha', `${sha256(tokens.inbound)}\n`) },
       language: 'zh',
       llm: over.llm,
-      budget: { daily_tokens: 15_000_000 },
+      budget: { daily_tokens: 15_000_000, ...over.budget },
       research: { deadline: '20m', claim_wait: '1s' },
     }),
   );

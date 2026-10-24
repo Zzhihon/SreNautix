@@ -28,7 +28,8 @@ import { CaseStore } from './store.js';
 // srenautix eval 命令：
 //   eval --cases <目录> --config <配置> [--suite <名>] [--runs 3] [--mode snapshot|reconstructed]
 //        [--abstain] [--max-tokens N] [--out eval/reports] [--name <报告名>] [--trace <研判记录目录>]
-//     每条路由单独评测，输出成绩单（Markdown 与 JSON）和每次运行的记录。
+//        [--route <路由 id>]...
+//     每条路由单独评测，输出成绩单（Markdown 与 JSON）和每次运行的记录；给出 --route 时只评测列出的路由。
 //   eval --compare <当前配置> <候选配置> --cases <目录> [同上] [--waive <case_id>]...
 //     两份配置在相同用例上各评测一次，按各自的第一条路由做配对比较，给出发布门禁结果。
 //   eval import-seed --dir <种子目录> --cases <目录> --suite <名> --cluster-id <id>
@@ -62,8 +63,8 @@ function buildLayers(cfg: EvalConfig, metrics: WorkerMetrics) {
       [
         {
           // 故障域描述研判时刻路由对事件所在组件的依赖（事件涉及故障域时提前熔断）；回放的是历史事件，
-          // 路由此刻的健康与它无关，评测不按故障域熔断（ADR 0110）
-          route: { ...r.route, failure_domain: [] },
+          // 路由此刻的健康与它无关，评测不按故障域熔断（ADR 0110）。兜底路由同样当作常规路由单独评测（ADR 0152）
+          route: { ...r.route, failure_domain: [], role: 'regular' },
           apiKey: r.apiKey,
           state: { profile: null, calibration: null, fingerprint: null },
           timeouts: r.timeouts,
@@ -153,6 +154,7 @@ export async function runEvalCli(argv: string[]): Promise<CliResult> {
       seed: { type: 'string', default: '20261020' },
       'pack-lock': { type: 'string', default: `sha256:${'0'.repeat(64)}` },
       trace: { type: 'string' },
+      route: { type: 'string', multiple: true, default: [] },
     },
   });
   const casesDir = values.cases;
@@ -199,7 +201,7 @@ export async function runEvalCli(argv: string[]): Promise<CliResult> {
   const metrics = new WorkerMetrics('worker', false);
   const outcomes: EvalOutcome[] = [];
   for (const path of configs) {
-    const cfg = loadEvalConfig(path);
+    const cfg = loadEvalConfig(path, process.env, values.route);
     const sessions: McpSession[] = [];
     let liveTools: Tool[] = [];
     if (mode === 'reconstructed') {
@@ -342,12 +344,13 @@ function labelCli(argv: string[]): CliResult {
 
 // eval reconstruct --labels <标注> --cases <用例目录> --config <配置> [--runs 3] [--max-tokens N]
 //                  [--repo <GitOps 仓库的本地克隆>] [--discovery-only] [--only <标注 id>]... [--out] [--name]
-//                  [--trace <研判记录目录>]
-//   第二阶段三个环节的重建评测：发现重放、重建阶段 A 与研判（每条路由 k 次）、自愈 PR 的补丁检查
+//                  [--trace <研判记录目录>] [--route <路由 id>]...
+//   第二阶段三个环节的重建评测：发现重放、重建阶段 A 与研判（每条路由 k 次，给出 --route 时只用列出的路由）、自愈 PR 的补丁检查
 async function reconstructCli(argv: string[]): Promise<CliResult> {
   const { values } = parseArgs({
     args: argv,
     options: {
+      route: { type: 'string', multiple: true, default: [] },
       labels: { type: 'string' },
       cases: { type: 'string' },
       config: { type: 'string' },
@@ -374,7 +377,7 @@ async function reconstructCli(argv: string[]): Promise<CliResult> {
   const now = new Date().toISOString();
   const sha = codeSha();
   const metrics = new WorkerMetrics('worker', false);
-  const cfg = values['discovery-only'] ? null : loadEvalConfig(values.config);
+  const cfg = values['discovery-only'] ? null : loadEvalConfig(values.config, process.env, values.route);
   const r = cfg?.reconstruct ?? loadReconstructConfig(values.config);
   mkdirSync(values.out, { recursive: true });
   const name = values.name ?? `reconstruct-${now.slice(0, 10)}`;
