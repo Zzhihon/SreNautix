@@ -46,6 +46,11 @@ export interface RunCardInput {
   params?: Record<string, number | string | boolean>;
   /** 覆盖卡片定义的窗口（阶段 B 把卡片当作区分性检查时，模型可以指定锚点前后的范围） */
   window?: { before: string; after: string };
+  /**
+   * 长期事件（ADR 0149）：until（评估时刻，unix 毫秒）晚于锚点加 window.after 时，窗口终点取 until，
+   * 起点取 max(锚点 − window.before, until − maxWindowMs, notBefore)。不填时窗口只按锚点取。
+   */
+  extend?: { until: number; maxWindowMs: number; notBefore?: number };
   locale?: Locale;
   timeoutMs?: number;
 }
@@ -58,15 +63,28 @@ export interface RunCardResult extends Omit<EvidenceResult, 'ref'> {
   judgeInput: JudgeInput;
 }
 
-function cardWindow(
-  e: CardEntry,
+/**
+ * 卡片的判定窗口：[锚点 − before, min(锚点 + after, now)]。
+ * 长期事件（extend.until 晚于锚点 + after，ADR 0149）：终点取评估时刻，起点不早于终点减去最大窗口，也不早于数据保留期，
+ * 锚点留在原处（卡片按 window.anchor 比较前后时，锚点可能早于窗口起点）。
+ */
+export function cardWindow(
+  e: Pick<CardEntry, 'key' | 'def'>,
   anchor: number,
   now: number,
   override?: { before: string; after: string },
+  extend?: RunCardInput['extend'],
 ): { from: number; to: number } {
   const w = override ?? e.def.window ?? DEFAULT_WINDOW;
-  const from = anchor - durationSeconds(w.before) * 1000;
-  const to = Math.min(anchor + durationSeconds(w.after) * 1000, now);
+  let from = anchor - durationSeconds(w.before) * 1000;
+  let to = Math.min(anchor + durationSeconds(w.after) * 1000, now);
+  if (extend) {
+    const until = Math.min(extend.until, now);
+    if (until > to) {
+      to = until;
+      from = Math.max(from, until - extend.maxWindowMs, extend.notBefore ?? -Infinity);
+    }
+  }
   if (to <= from) {
     throw new RangeError(`卡片 ${e.key} 的窗口为空`);
   }
@@ -83,7 +101,7 @@ export async function runCard(input: RunCardInput): Promise<RunCardResult> {
   if (!e) {
     throw new Error(`没有卡片 ${input.card}`);
   }
-  const w = cardWindow(e, input.anchor, input.now, input.window);
+  const w = cardWindow(e, input.anchor, input.now, input.window, input.extend);
   const window = { from: toIso(w.from), to: toIso(w.to) };
   const timeout = input.timeoutMs ?? 10_000;
   const refs: Record<string, RefData> = {};

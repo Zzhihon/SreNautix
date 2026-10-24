@@ -307,6 +307,11 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
     locale: c.stage_a.language === 'zh' ? ('zh-CN' as const) : ('en' as const),
     concurrency: prom.concurrency,
     queryTimeoutMs: parseDuration('datasources.prometheus.timeout', prom.timeout),
+    // 长期事件的卡片窗口（ADR 0149）
+    maxCardWindowMs: parseDuration('stage_a.card_window_max', c.stage_a.card_window_max),
+    metricsRetentionMs: c.stage_a.metrics_retention
+      ? parseDuration('stage_a.metrics_retention', c.stage_a.metrics_retention)
+      : null,
   };
   const evidence = new PackEvidence(
     packs,

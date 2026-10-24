@@ -444,21 +444,34 @@ export class EvidenceSource {
     return verifyMetrics(this.adapter, now);
   }
 
-  async dataSource(at: number, wall = Date.now()): Promise<EvidenceDataSource> {
+  /**
+   * 指标数据源与标签档案。at 时刻探测失败且给出了 fallbackAt 时（长期事件：评估时刻没有数据，ADR 0149），
+   * 再在 fallbackAt（锚定窗口的终点）探测一次。
+   */
+  async dataSource(at: number, wall = Date.now(), fallbackAt: number | null = null): Promise<EvidenceDataSource> {
     const due = this.profileError ? PROFILE_RETRY_MS : PROFILE_REFRESH_MS;
     if (this.live && wall - this.profileAt < due) {
       return this.live;
     }
     let profile = CANONICAL_PROFILE;
-    try {
-      profile = await detectLabelProfile(this.adapter, toIso(at), { from: toIso(at - 2 * 3600_000), to: toIso(at) });
-      this.profileError = null;
-    } catch (e) {
-      if (!(e instanceof DatasourceError)) {
-        throw e;
+    const times = fallbackAt !== null && fallbackAt < at ? [at, fallbackAt] : [at];
+    for (const t of times) {
+      try {
+        profile = await detectLabelProfile(this.adapter, toIso(t), { from: toIso(t - 2 * 3600_000), to: toIso(t) });
+        this.profileError = null;
+        break;
+      } catch (e) {
+        if (!(e instanceof DatasourceError)) {
+          throw e;
+        }
+        this.profileError = e.message;
       }
-      this.profileError = e.message;
-      logger.warn('证据数据源的标签档案探测失败，按规范标签名查询', { datasource: this.s.id, error: e.message });
+    }
+    if (this.profileError) {
+      logger.warn('证据数据源的标签档案探测失败，按规范标签名查询', {
+        datasource: this.s.id,
+        error: this.profileError,
+      });
     }
     this.profileAt = wall;
     this.live = new LiveDataSource({ metrics: { adapter: this.adapter, profile } });

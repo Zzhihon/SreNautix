@@ -79,6 +79,7 @@ export {
 } from './runtime/snapshot.js';
 export {
   runCard,
+  cardWindow,
   durationSeconds,
   stepSeconds,
   DEFAULT_WINDOW,

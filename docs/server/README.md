@@ -236,6 +236,8 @@ detectors:
 
 阶段 A 报告记录计算时的 pack.lock。领域包变化后，主实例每分钟为最多 `stage_a.recompute_per_minute`（默认 10）个仍在触发的事件重算阶段 A；研判开始前报告过期时先重算；人工入口 `POST /v1/incidents/{ref}/stage-a/recompute`（`research.request`，写治理审计）。只算阶段 A，不触发模型（ADR 0107）。
 
+卡片窗口以事件首次触发为锚点。长期事件（评估时刻晚于锚点加卡片的 `window.after`）的窗口终点取评估时刻（已恢复的事件取恢复时刻），起点不早于终点减去 `stage_a.card_window_max`（默认 `24h`），也不早于评估时刻减去 `stage_a.metrics_retention`（指标数据源的保留期，不填时不限）。指标只在窗口后段才有数据时，卡按这些数据判定，不算观测失明（ADR 0149）。
+
 ## 阶段 B 的 Kubernetes 只读检查
 
 `kube_reads.enabled` 打开后（需要 `roles.server.clusterRead`），区分性检查可以用 `kube_pod_status`、`kube_workload_pods`、`kube_events`、`kube_logs` 读取 server 所在集群的当前状态，只限事件涉及的命名空间，结果脱敏并截断（ADR 0106）。

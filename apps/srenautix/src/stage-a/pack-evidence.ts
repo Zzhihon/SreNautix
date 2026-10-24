@@ -11,6 +11,7 @@ import {
   type Locale,
   resolveDisplayName,
   type RuleContext,
+  type RunCardInput,
   type SignalResolution,
 } from '@srenautix/packs-sdk';
 import { logger } from '../log.js';
@@ -39,7 +40,14 @@ export interface PackEvidenceOptions {
   concurrency: number;
   /** 单个查询的超时。 */
   queryTimeoutMs: number;
+  /** 长期事件的卡片窗口最长多少（ADR 0149），默认 DEFAULT_MAX_CARD_WINDOW_MS */
+  maxCardWindowMs?: number;
+  /** 指标数据源的保留期：卡片窗口起点不早于评估时刻减去它（ADR 0149）；不填时不限 */
+  metricsRetentionMs?: number | null;
 }
+
+/** 长期事件的卡片窗口默认最长 24 小时：区间查询最多约 300 个点，步长不超过 5 分钟 */
+export const DEFAULT_MAX_CARD_WINDOW_MS = 24 * 3600_000;
 
 interface Planned {
   card: string;
@@ -117,7 +125,8 @@ async function pool<T, R>(items: T[], n: number, signal: AbortSignal, fn: (x: T)
  * - 组件类型取拓扑节点上由领域包匹配出的类型，没有拓扑节点或没有匹配时，按 kind、命名空间与名称静态匹配
  *   （领域包的自定义 kind 与告警里的 CRD 对象走这一条）；
  * - 只执行 applies_to.kinds 包含实体类型的卡，同一张卡对同一实体只执行一次。
- * 卡片窗口以事件首次触发时间为锚点，终点不晚于当前时间。
+ * 卡片窗口以事件首次触发时间为锚点，终点不晚于当前时间；评估时刻晚于锚定窗口的终点时（长期事件），终点取评估时刻，
+ * 起点不早于终点减去最大窗口（ADR 0149）。
  */
 export class PackEvidence implements EvidenceRunner {
   constructor(
@@ -242,8 +251,11 @@ export class PackEvidence implements EvidenceRunner {
       }
     }
 
-    const cards = await this.execute(plan, Date.parse(inc.first_firing_at), now, signal);
-    const names = await this.names(named, Math.min(Date.parse(inc.first_firing_at), now), signal);
+    const extend = this.extendTo(inc, now);
+    const cards = await this.execute(plan, Date.parse(inc.first_firing_at), now, signal, extend);
+    // 组件名称在首次触发时求值；长期事件不早于最近一个最大窗口的起点（与卡片窗口一致）
+    const namesAt = Math.max(Math.min(Date.parse(inc.first_firing_at), now), extend.until - extend.maxWindowMs);
+    const names = await this.names(named, Math.min(namesAt, now), signal);
     return {
       cards: cards.map((c, i) => ({ ...c, ref: `card:${i + 1}` })),
       chains: chainsRun,
@@ -350,6 +362,7 @@ export class PackEvidence implements EvidenceRunner {
       Date.parse(inc.first_firing_at),
       now,
       signal,
+      this.extendTo(inc, now),
     );
     if (!r) {
       throw new Error(`查询模板 ${templateId} 没有执行（见 server 日志）`);
@@ -386,6 +399,7 @@ export class PackEvidence implements EvidenceRunner {
       Date.parse(inc.first_firing_at),
       now,
       signal,
+      this.extendTo(inc, now),
     );
     if (!r) {
       throw new Error(`卡 ${card} 没有执行（见 server 日志）`);
@@ -407,25 +421,52 @@ export class PackEvidence implements EvidenceRunner {
     return out;
   }
 
+  /**
+   * 长期事件的窗口（ADR 0149）：评估时刻为 now，已恢复的事件为恢复时刻（不晚于 now）；它晚于锚定窗口的终点时，
+   * 卡片窗口终点取评估时刻，起点不早于终点减去最大窗口，也不早于数据保留期。
+   */
+  private extendTo(inc: Incident | null, now: number): NonNullable<RunCardInput['extend']> {
+    const ended = inc?.ended_at ? Date.parse(inc.ended_at) : NaN;
+    const retention = this.o.metricsRetentionMs ?? null;
+    return {
+      until: Number.isFinite(ended) ? Math.min(ended, now) : now,
+      maxWindowMs: this.o.maxCardWindowMs ?? DEFAULT_MAX_CARD_WINDOW_MS,
+      ...(retention !== null ? { notBefore: now - retention } : {}),
+    };
+  }
+
   /** 执行计划中的卡；结果按计划顺序，没有完成（中止或运行时错误）的卡不出现在结果中。 */
   private async execute(
     plan: Planned[],
     anchor: number,
     now: number,
     signal: AbortSignal,
+    extend: RunCardInput['extend'] = undefined,
   ): Promise<Array<Omit<EvidenceResult, 'ref'>>> {
     if (!plan.length) {
       return [];
     }
     // 标签档案与信号备选在卡片窗口的终点探测（不晚于 now）：事件开始两小时之后重跑或回放时，
-    // 按事件当时的数据选择备选，不按墙上时钟（否则 [当前−2h, 当前] 内没有序列，每张卡都是 source_error）
+    // 按事件当时的数据选择备选，不按墙上时钟（否则 [当前−2h, 当前] 内没有序列，每张卡都是 source_error）。
+    // 长期事件的窗口终点是评估时刻，在那里探测（锚点时指标可能还不存在，ADR 0149）；评估时刻没有数据的信号
+    // （数据在窗口后段之前就断了，例如回放、重启后补跑）再在锚定窗口的终点探测
     const afterOf = (p: Planned) =>
       durationSeconds((p.window ?? this.rt.set.cards.get(p.card)!.def.window ?? DEFAULT_WINDOW).after) * 1000;
-    const windowEnd = Math.max(...plan.map((p) => anchorOf(p, anchor, afterOf(p)) + afterOf(p)));
-    const probeAt = Math.min(now, windowEnd);
-    const ds: EvidenceDataSource = await this.source.dataSource(probeAt);
+    const anchoredOf = (p: Planned) => anchorOf(p, anchor, afterOf(p)) + afterOf(p);
+    const endOf = (p: Planned) => (extend && extend.until > anchoredOf(p) ? extend.until : anchoredOf(p));
+    const probeAt = Math.min(now, Math.max(...plan.map(endOf)));
+    const fallbackAt = Math.min(now, Math.max(...plan.map(anchoredOf)));
+    const ds: EvidenceDataSource = await this.source.dataSource(probeAt, Date.now(), fallbackAt);
     const keys = new Set(plan.flatMap((p) => Object.values(this.rt.set.cards.get(p.card)!.signals)));
     const resolutions: Map<string, SignalResolution> = await this.source.resolve(this.rt.set, keys, ds, probeAt);
+    const missing = [...keys].filter((k) => resolutions.get(k)?.index === null);
+    if (fallbackAt < probeAt && missing.length) {
+      for (const [k, r] of await this.source.resolve(this.rt.set, missing, ds, fallbackAt)) {
+        if (r.index !== null) {
+          resolutions.set(k, r);
+        }
+      }
+    }
     type Done = Omit<EvidenceResult, 'ref'>;
     const results = await pool(plan, this.o.concurrency, signal, async (p): Promise<Done | null> => {
       const e = this.rt.set.cards.get(p.card)!;
@@ -453,6 +494,7 @@ export class PackEvidence implements EvidenceRunner {
           timeoutMs: this.o.queryTimeoutMs,
           ...(p.params ? { params: p.params } : {}),
           ...(p.window ? { window: p.window } : {}),
+          ...(extend ? { extend } : {}),
         });
         this.metrics.evidenceCards.inc({ display_state: r.display_state });
         this.metrics.evidenceCardSeconds.observe((performance.now() - started) / 1000);

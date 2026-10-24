@@ -485,9 +485,13 @@ export const serverConfigSchema = z
         top_k: z.number().int().min(1).max(10).default(3),
         // 领域包变化（pack.lock 变化）后，每分钟最多为这么多个仍在触发的事件重算阶段 A（ADR 0107）；0 关闭
         recompute_per_minute: z.number().int().min(0).max(100).default(10),
+        // 长期事件（评估时刻晚于锚定窗口的终点）的卡片窗口终点取评估时刻，最长这么久（ADR 0149）
+        card_window_max: duration.default('24h'),
+        // 指标数据源的保留期：卡片窗口起点不早于评估时刻减去它（ADR 0149）；不填时不限
+        metrics_retention: duration.optional(),
       })
       .strict()
-      .default({ language: 'zh', top_k: 3, recompute_per_minute: 10 }),
+      .default({ language: 'zh', top_k: 3, recompute_per_minute: 10, card_window_max: '24h' }),
     scheduler: z
       .object({
         slots: z.number().int().min(1).max(64).default(4),
