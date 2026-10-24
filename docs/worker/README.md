@@ -111,6 +111,7 @@ mcp:                                 # 只读 MCP 服务器与工具白名单（
 | `srenautix_research_conclusions_total{level,untested_competitor,zero_checks}` | 结论 |
 | `srenautix_research_untested_competitor_ratio`、`srenautix_research_zero_tool_ratio` | P0 指标（最近 7 天） |
 | `srenautix_research_checks_total{type,outcome}` | 区分性检查 |
+| `srenautix_pg_statement_timeouts_total{pool="worker"}` | worker 库连接池里因语句超时被取消的语句（ADR 0144） |
 
 ## 运维
 

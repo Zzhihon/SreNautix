@@ -72,13 +72,15 @@ function inboundAuth(allowed: readonly string[]): (req: FastifyRequest) => void 
 export async function buildWorker(o: BuildWorkerOptions): Promise<WorkerHandle> {
   const c = o.config;
   configureLog(c.raw.log_level, { role: 'worker', cluster_id: c.raw.cluster_id, worker_id: c.raw.worker_id });
-  const pool = createPool(o.pg, 'srenautix-worker', c.raw.database.pool_size);
+  const metrics = new WorkerMetrics('worker', !o.noAuxListeners);
+  const pool = createPool(o.pg, 'srenautix-worker', c.raw.database.pool_size, () =>
+    metrics.pgStatementTimeouts.inc({ pool: 'worker' }),
+  );
   // db bootstrap 还没完成时重试并保持 not ready，而不是退出（ADR 0102）
   await migrateWhenReady('worker', () => migrateExpand(pool, 'worker', workerTracks), {
     probes: o.noAuxListeners ? null : parseListen('listen.probes', c.raw.listen.probes),
   });
   const store = new WorkerStore(pool);
-  const metrics = new WorkerMetrics('worker', !o.noAuxListeners);
 
   const egress = new Egress(
     { allowCrossBorder: c.raw.llm.allow_cross_border, honeytokens: c.honeytokens },

@@ -139,7 +139,9 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
   // 告警身份去掉 Prometheus 的 external labels：webhook、对账与 reader 快照共用（ADR 0117）
   setExternalLabels(c.ingest.external_labels);
   const metrics = new ServerMetrics('server', !o.noAuxListeners);
-  const pool = createPool(o.pg, 'srenautix-server', c.database.pool_size);
+  const pool = createPool(o.pg, 'srenautix-server', c.database.pool_size, () =>
+    metrics.pgStatementTimeouts.inc({ pool: 'server' }),
+  );
   // db bootstrap 还没完成时重试并保持 not ready，而不是退出（ADR 0102）
   const applied = await migrateWhenReady('server', () => migrateExpand(pool, 'server', serverTracks), {
     probes: o.noAuxListeners ? null : parseListen('listen.probes', c.listen.probes),
@@ -217,7 +219,9 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
   // 领域数据
   const catalog = Catalog.load();
   let policies = Policies.load(c.policies_dir);
-  const topology = new TopologyStore(pool);
+  const topology = new TopologyStore(pool, (query, source, seconds) =>
+    metrics.topologyQuery.observe({ query, source }, seconds),
+  );
   const expander = new ComponentExpander(topology);
   // 拓扑覆盖：Git 挂载的目录，与角色绑定、策略一起定期重新加载
   const loadOverrides = () =>
@@ -878,6 +882,19 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
   }
   every(3600_000, () => purgeIdempotencyKeys(pool), '幂等键清理');
   every(3600_000, () => sessions.purgeExpired(), '会话清理');
+  // 拓扑历史压缩（ADR 0144）：删除保留期之前已经关闭的行
+  const topologyRetentionMs = parseDuration('topology.history_retention', c.topology.history_retention);
+  every(
+    3600_000,
+    async () => {
+      const r = await topology.compact(topologyRetentionMs);
+      metrics.topologyCompacted.inc(r.deleted);
+      if (r.deleted || r.backfilled) {
+        logger.info('拓扑历史已压缩', { deleted: r.deleted, backfilled: r.backfilled });
+      }
+    },
+    '拓扑历史压缩',
+  );
   every(
     60_000,
     async () => {

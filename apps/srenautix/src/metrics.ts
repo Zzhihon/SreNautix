@@ -29,6 +29,13 @@ export class BaseMetrics {
     registers: [this.registry],
   });
 
+  readonly pgStatementTimeouts = new Counter({
+    name: 'srenautix_pg_statement_timeouts_total',
+    help: 'PostgreSQL 语句因 statement_timeout 被取消的次数，按连接池',
+    labelNames: ['pool'] as const,
+    registers: [this.registry],
+  });
+
   constructor(
     readonly role: string,
     defaults = true,
@@ -172,6 +179,20 @@ export class ServerMetrics extends BaseMetrics {
     name: 'srenautix_incident_persist_errors_total',
     help: '事件重算中写入失败、回滚到保存点的事件组数（其余事件照常写入，ADR 0132）',
     labelNames: ['cluster_id'] as const,
+    registers: [this.registry],
+  });
+
+  readonly topologyQuery = new Histogram({
+    name: 'srenautix_topology_query_seconds',
+    help: '时间点拓扑查询的耗时（ADR 0144），query 为 at、subgraph、neighborhood；source 为 db、cache（命中缓存）、shared（并入进行中的同一查询）',
+    labelNames: ['query', 'source'] as const,
+    buckets: [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30],
+    registers: [this.registry],
+  });
+
+  readonly topologyCompacted = new Counter({
+    name: 'srenautix_topology_compacted_rows_total',
+    help: '拓扑历史压缩删除的行数（ADR 0144）',
     registers: [this.registry],
   });
 

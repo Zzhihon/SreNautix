@@ -100,5 +100,27 @@ CREATE INDEX reader_requests_pending_idx ON server.reader_requests (cluster_id, 
 CREATE INDEX IF NOT EXISTS topology_node_name_idx ON server.topology_events (cluster_id, name, valid_from DESC) WHERE item = 'node';
 `,
     },
+    {
+      version: 4,
+      name: 'point-in-time topology indexes',
+      phase: 'expand',
+      sql: `
+-- 时间点拓扑查询（ADR 0144）：closed_seq 是关闭这一行的事件的 seq，"版本 v 时仍然打开"即 closed_seq > v，
+-- 不再为每一条已关闭的行查找关闭它的事件；查询按打开的、t 之后关闭的、版本 v 之后关闭的三部分分别走索引
+SET LOCAL statement_timeout = 0;
+ALTER TABLE server.topology_events ADD COLUMN IF NOT EXISTS closed_seq bigint;
+UPDATE server.topology_events t SET closed_seq = n.next
+  FROM (SELECT seq, lead(seq) OVER (PARTITION BY cluster_id, item, key ORDER BY seq) AS next FROM server.topology_events) n
+ WHERE n.seq = t.seq AND n.next IS NOT NULL AND t.valid_to IS NOT NULL AND t.op IN ('node_upsert', 'edge_upsert');
+CREATE INDEX IF NOT EXISTS topology_closed_idx ON server.topology_events (cluster_id, valid_to, valid_from) WHERE valid_to IS NOT NULL;
+CREATE INDEX IF NOT EXISTS topology_closed_seq_idx ON server.topology_events (cluster_id, closed_seq, seq) WHERE closed_seq IS NOT NULL;
+-- 子图与实体解析按键取节点的各个版本
+CREATE INDEX IF NOT EXISTS topology_key_idx ON server.topology_events (cluster_id, item, key, seq);
+-- N-1 版本的二进制关闭的行不记 closed_seq，压缩时补齐
+CREATE INDEX IF NOT EXISTS topology_unclosed_idx ON server.topology_events (seq)
+  WHERE closed_seq IS NULL AND valid_to IS NOT NULL AND op IN ('node_upsert', 'edge_upsert');
+ANALYZE server.topology_events;
+`,
+    },
   ],
 };

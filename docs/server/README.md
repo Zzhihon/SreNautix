@@ -41,6 +41,8 @@ flowchart LR
    这会建立 `srenautix_server`、`srenautix_worker`、`srenautix_mcp` 三个角色与 `server`、`worker` 两个 schema，口令另行设置。
 2. server 启动时自动执行扩展迁移；也可以在升级前单独执行 `db migrate --config=…`。全部副本升级后执行 `db contract` 完成收缩迁移（ADR 0040）。
 3. 连接参数取 libpq 的环境变量 `PGHOST`、`PGPORT`、`PGDATABASE`、`PGUSER`、`PGSSLMODE`（默认 `verify-full`，此时需要 `PGSSLROOTCERT`），口令从 `database.password_file` 读取。
+4. 语句超时 30 秒，被取消的语句计入 `srenautix_pg_statement_timeouts_total{pool}`（server 与 worker 各自的连接池）。
+5. 时间点拓扑查询（事件引擎的当前拓扑、根因子图、研判的两跳邻域）按索引分段取，同键的并发查询合并、短期缓存，每个进程同时最多 2 条在库上执行，耗时见 `srenautix_topology_query_seconds{query, source}`。拓扑历史每小时压缩一次，删除 `topology.history_retention`（默认 `14d`）之前已经关闭的行，保留期内任一时刻的拓扑不变（ADR 0144）。
 
 ## 配置
 

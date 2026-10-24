@@ -513,31 +513,24 @@ export async function timelineOf(pool: pg.Pool, row: IncidentRow) {
   return out.sort((a, b) => a.at.localeCompare(b.at));
 }
 
-/** 根因子图：根因（没有时取候选与组件）加不超过 hops 跳的邻居，取该事件版本使用的拓扑版本。 */
+/**
+ * 根因子图：根因（没有时取候选与组件）加不超过 hops 跳的邻居，取该事件版本使用的拓扑版本。
+ * 只按跳取相连的边，不取整张拓扑（通知与事件 issue 每一轮为每个事件调用一次，ADR 0144）。
+ */
 export async function subgraphOf(topology: TopologyStore, inc: Incident, hops: number) {
   const seeds = inc.root.component
     ? [inc.root.component]
     : inc.candidates.length
       ? inc.candidates.map((c) => c.component)
       : inc.components;
-  const all = await topology.at(inc.cluster_id, new Date(inc.updated_at), inc.topology_version || null);
-  const dist = new Map<string, number>(seeds.map((s) => [s, 0]));
-  let frontier = [...seeds];
-  for (let h = 1; h <= hops; h++) {
-    const next: string[] = [];
-    for (const e of all.edges) {
-      for (const [a, b] of [
-        [e.from, e.to],
-        [e.to, e.from],
-      ] as const) {
-        if (frontier.includes(a) && !dist.has(b)) {
-          dist.set(b, h);
-          next.push(b);
-        }
-      }
-    }
-    frontier = next;
-  }
+  const all = await topology.subgraph(
+    inc.cluster_id,
+    seeds,
+    new Date(inc.updated_at),
+    inc.topology_version || null,
+    hops,
+  );
+  const dist = all.hops;
   const memberComponents = new Map<string, string[]>();
   for (const m of inc.members.filter((x) => x.left_version === null)) {
     if (m.component) {
@@ -545,8 +538,14 @@ export async function subgraphOf(topology: TopologyStore, inc: Incident, hops: n
     }
   }
   const candidates = new Set(inc.candidates.map((c) => c.component));
+  const byKey = new Map<string, (typeof all.nodes)[number]>();
+  for (const n of all.nodes) {
+    if (!byKey.has(n.key)) {
+      byKey.set(n.key, n);
+    }
+  }
   const nodes = [...dist.entries()].map(([key, h]) => {
-    const n = all.nodes.find((x) => x.key === key);
+    const n = byKey.get(key);
     const k = parseStoredKey(key);
     return {
       component: key,
@@ -565,15 +564,13 @@ export async function subgraphOf(topology: TopologyStore, inc: Incident, hops: n
       hops: h,
     };
   });
-  const edges = all.edges
-    .filter((e) => dist.has(e.from) && dist.has(e.to))
-    .map((e) => ({
-      from: e.from,
-      to: e.to,
-      relation: e.relation,
-      provenance: e.provenance,
-      confidence: e.confidence,
-      scope: e.scope,
-    }));
+  const edges = all.edges.map((e) => ({
+    from: e.from,
+    to: e.to,
+    relation: e.relation,
+    provenance: e.provenance,
+    confidence: e.confidence,
+    scope: e.scope,
+  }));
   return { topology_version: all.version, root: inc.root.component, nodes, edges };
 }
