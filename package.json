@@ -30,7 +30,10 @@
   },
   "pnpm": {
     "overrides": {
-      "react-router-dom-v5-compat>react-router": "7.18.4"
+      "react-router-dom-v5-compat>react-router": "7.18.4",
+      "body-parser@^2.3.0": "2.4.0",
+      "fast-uri@^3.1.8": "3.1.9",
+      "fast-uri@^4.2.2": "4.2.3"
     }
   }
 }
