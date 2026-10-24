@@ -8,6 +8,7 @@ import jsonpointer from 'jsonpointer';
 import { parse } from 'yaml';
 import { PackLintError } from '../cel/errors.js';
 import type { LoadedPack, PackContent } from './load.js';
+import { mergeDomain } from './domains.js';
 
 const PACK_SCHEMA = 'schemas/pack.schema.json';
 
@@ -22,7 +23,7 @@ export function loadLayerFile(path: string): LoadedLayer {
   const doc = parse(raw.toString('utf8'), { uniqueKeys: true }) as unknown;
   let layer: PackUserLayer;
   try {
-    layer = assertValid<PackUserLayer>(`${PACK_SCHEMA}#/$defs/PackUserLayer`, doc);
+    layer = assertValid<PackUserLayer>(`${PACK_SCHEMA}#/$defs/UserLayer`, doc);
   } catch (err) {
     throw new PackLintError(path, err instanceof Error ? err.message : String(err));
   }
@@ -37,6 +38,8 @@ interface PatchDoc {
   chains: PackContent['chains'];
   checks: PackContent['checks'];
   rules: PackContent['rules'];
+  domains: PackContent['domains'];
+  issues: PackContent['issues'];
   rca_params: RcaParams | null;
 }
 
@@ -70,6 +73,19 @@ function applyOne(pack: LoadedPack, l: LoadedLayer): void {
   appendUnique(where, c.chains.chains, ext.chains);
   appendUnique(where, c.checks.checks, ext.checks);
   appendUnique(where, c.rules.rules, ext.rules);
+  // 指标、领域与业务 issue 模板（契约 2.28.0）：同 id 的领域按 DomainsFile 的规则合并进去，其余追加
+  c.domains.indicators = appendUnique(where, c.domains.indicators ?? [], ext.indicators);
+  const domains = c.domains.domains ?? [];
+  for (const d of ext.domains ?? []) {
+    const i = domains.findIndex((x) => x.id === d.id);
+    if (i < 0) {
+      domains.push(d);
+    } else {
+      domains[i] = mergeDomain(where, domains[i]!, d);
+    }
+  }
+  c.domains.domains = domains;
+  appendUnique(where, c.issues.issues, ext.issues);
 
   for (const [key, values] of Object.entries(l.layer.params ?? {})) {
     const [scope, id, extra] = key.split('/');
@@ -98,6 +114,8 @@ function applyOne(pack: LoadedPack, l: LoadedLayer): void {
     chains: c.chains,
     checks: c.checks,
     rules: c.rules,
+    domains: c.domains,
+    issues: c.issues,
     rca_params: c.rca_params,
   };
   for (const p of l.layer.patch ?? []) {
@@ -118,6 +136,8 @@ function applyOne(pack: LoadedPack, l: LoadedLayer): void {
   c.chains = doc.chains;
   c.checks = doc.checks;
   c.rules = doc.rules;
+  c.domains = doc.domains;
+  c.issues = doc.issues;
   c.rca_params = doc.rca_params;
 
   for (const d of l.layer.disable ?? []) {
@@ -144,6 +164,30 @@ function applyOne(pack: LoadedPack, l: LoadedLayer): void {
         break;
       case 'rules':
         c.rules.rules = drop(c.rules.rules);
+        break;
+      case 'indicators':
+        c.domains.indicators = drop(c.domains.indicators ?? []);
+        break;
+      case 'issues':
+        c.issues.issues = drop(c.issues.issues);
+        break;
+      case 'domains':
+        if (card === undefined) {
+          c.domains.domains = drop(c.domains.domains ?? []);
+        } else {
+          // 领域内的一张诊断卡或份额卡
+          const domain = (c.domains.domains ?? []).find((x) => x.id === id) ?? fail();
+          const diagnostics = (domain.diagnostics ?? []).filter((x) => x.id !== card);
+          const contribution = (domain.contribution ?? []).filter((x) => x.id !== card);
+          if (
+            diagnostics.length === (domain.diagnostics ?? []).length &&
+            contribution.length === (domain.contribution ?? []).length
+          ) {
+            fail();
+          }
+          domain.diagnostics = diagnostics;
+          domain.contribution = contribution;
+        }
         break;
       case 'chains':
         if (card === undefined) {
@@ -181,6 +225,8 @@ function applyOne(pack: LoadedPack, l: LoadedLayer): void {
   check('ChainsFile', c.chains);
   check('ChecksFile', c.checks);
   check('RulesFile', c.rules);
+  check('DomainsFile', c.domains);
+  check('IssuesFile', c.issues);
   if (c.rca_params) {
     check('RcaParams', c.rca_params);
   }

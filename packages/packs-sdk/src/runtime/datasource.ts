@@ -14,10 +14,25 @@ import type {
   TracesSearchRequest,
   TracesSearchResult,
 } from '@srenautix/contract';
+import type { DbstatsRequest } from '@srenautix/contract';
 import type { LokiAdapter, PrometheusApiAdapter, TempoAdapter } from '@srenautix/integration-sdk';
+import type { RenderEntity } from '../signals/render.js';
+import { dbstatsCapability, type DbstatsCapability, type DbstatsSampler, type DbstatsSamples } from './dbstats.js';
 
 export type Capability =
-  'metrics.query' | 'metrics.query_range' | 'metrics.series' | 'logs.match' | 'logs.query' | 'traces.search';
+  | 'metrics.query'
+  | 'metrics.query_range'
+  | 'metrics.series'
+  | 'logs.match'
+  | 'logs.query'
+  | 'traces.search'
+  | DbstatsCapability;
+
+/** dbstats 读取的选项：at 为判定窗口的结束时刻（夹具按它选择采样）；rate 为需要两次采样的速率 */
+export interface DbstatsReadOptions {
+  at: number;
+  rate: boolean;
+}
 
 export interface LogsLabelProfile {
   namespace: string;
@@ -28,7 +43,7 @@ export interface LogsLabelProfile {
 
 export interface EvidenceDataSource {
   /** 集成实例 id，写进每条查询记录 */
-  readonly ids: { metrics: string | null; logs: string | null; traces: string | null };
+  readonly ids: { metrics: string | null; logs: string | null; traces: string | null; dbstats?: string | null };
   readonly capabilities: ReadonlySet<Capability>;
   readonly metricsDialects: ReadonlySet<'promql' | 'metricsql'>;
   readonly labelProfile: LabelProfile | null;
@@ -40,6 +55,8 @@ export interface EvidenceDataSource {
   logsMatch(req: LogsMatchRequest): Promise<LogsResult>;
   logsQuery(req: LogsQueryRequest): Promise<LogsResult>;
   tracesSearch(req: TracesSearchRequest): Promise<TracesSearchResult>;
+  /** dbstats 信号（契约 2.28.0）：实体所在数据库的统计视图；没有 dbstats 集成的数据源不实现 */
+  dbstats?(entity: RenderEntity, req: DbstatsRequest, opts: DbstatsReadOptions): Promise<DbstatsSamples>;
 }
 
 export class CapabilityMissing extends Error {
@@ -53,6 +70,8 @@ export interface LiveSources {
   metrics?: { adapter: PrometheusApiAdapter; profile: LabelProfile };
   logs?: { adapter: LokiAdapter; profile: LogsLabelProfile };
   traces?: { adapter: TempoAdapter };
+  /** dbstats：一次运行一个采样器（两次采样，ADR 0146 §3.3）；能力不填时为全部 dbstats 能力 */
+  dbstats?: { sampler: DbstatsSampler; capabilities?: DbstatsCapability[] };
   /** 已通过 verify() 的能力；不填时按提供的适配器推断 */
   capabilities?: Capability[];
 }
@@ -69,11 +88,13 @@ export class LiveDataSource implements EvidenceDataSource {
       metrics: s.metrics?.adapter.config.id ?? null,
       logs: s.logs?.adapter.config.id ?? null,
       traces: s.traces?.adapter.config.id ?? null,
+      dbstats: s.dbstats?.sampler.id ?? null,
     };
     const inferred: Capability[] = [
       ...(s.metrics ? (['metrics.query', 'metrics.query_range', 'metrics.series'] as const) : []),
       ...(s.logs ? (['logs.match', 'logs.query'] as const) : []),
       ...(s.traces ? (['traces.search'] as const) : []),
+      ...(s.dbstats ? (s.dbstats.capabilities ?? ALL_DBSTATS_CAPABILITIES) : []),
     ];
     this.capabilities = new Set(s.capabilities ?? inferred);
     this.metricsDialects = new Set(s.metrics?.adapter.config.dialects ?? []);
@@ -114,5 +135,74 @@ export class LiveDataSource implements EvidenceDataSource {
   tracesSearch(req: TracesSearchRequest) {
     this.need('traces.search');
     return this.s.traces!.adapter.search(req);
+  }
+  async dbstats(entity: RenderEntity, req: DbstatsRequest, opts: DbstatsReadOptions): Promise<DbstatsSamples> {
+    this.need(dbstatsCapability(req.op));
+    return this.s.dbstats!.sampler.sample(entity, req, opts.rate);
+  }
+}
+
+export const ALL_DBSTATS_CAPABILITIES: DbstatsCapability[] = [
+  'dbstats.statements_top',
+  'dbstats.statements_text',
+  'dbstats.tables_top',
+  'dbstats.indexes_usage',
+  'dbstats.settings_get',
+  'dbstats.activity_summary',
+  'dbstats.locks_summary',
+];
+
+/**
+ * 给一个数据源加上 dbstats（包测试的夹具、PostgreSQL 上的夹具与回放）：其余读取原样转给 inner
+ */
+export class DbstatsOverlay implements EvidenceDataSource {
+  readonly ids: EvidenceDataSource['ids'];
+  readonly capabilities: ReadonlySet<Capability>;
+
+  constructor(
+    private readonly inner: EvidenceDataSource,
+    id: string,
+    private readonly provider: (
+      entity: RenderEntity,
+      req: DbstatsRequest,
+      opts: DbstatsReadOptions,
+    ) => Promise<DbstatsSamples>,
+    capabilities: readonly DbstatsCapability[] = ALL_DBSTATS_CAPABILITIES,
+  ) {
+    this.ids = { ...inner.ids, dbstats: id };
+    this.capabilities = new Set([...inner.capabilities, ...capabilities]);
+  }
+  get metricsDialects() {
+    return this.inner.metricsDialects;
+  }
+  get labelProfile() {
+    return this.inner.labelProfile;
+  }
+  get logsProfile() {
+    return this.inner.logsProfile;
+  }
+  query(req: MetricsQueryRequest) {
+    return this.inner.query(req);
+  }
+  queryRange(req: MetricsQueryRangeRequest) {
+    return this.inner.queryRange(req);
+  }
+  metricExists(name: string, window: TimeWindow, clock: TimeWindow) {
+    return this.inner.metricExists(name, window, clock);
+  }
+  logsMatch(req: LogsMatchRequest) {
+    return this.inner.logsMatch(req);
+  }
+  logsQuery(req: LogsQueryRequest) {
+    return this.inner.logsQuery(req);
+  }
+  tracesSearch(req: TracesSearchRequest) {
+    return this.inner.tracesSearch(req);
+  }
+  async dbstats(entity: RenderEntity, req: DbstatsRequest, opts: DbstatsReadOptions): Promise<DbstatsSamples> {
+    if (!this.capabilities.has(dbstatsCapability(req.op))) {
+      throw new CapabilityMissing(dbstatsCapability(req.op));
+    }
+    return this.provider(entity, req, opts);
   }
 }

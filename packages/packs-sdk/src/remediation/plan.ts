@@ -13,6 +13,7 @@ import { appendValue, parseFile, setValue, type FileFormat, type ParsedFile } fr
 import { toPlain } from './functions.js';
 import { getAt, parentPath, PathError, resolvePath, resolveSetTarget, substitutePath, type Concrete } from './path.js';
 import type { RepoReader } from './repo.js';
+import { evaluateEstimate, type EstimateResult, type GoalTemplateContext } from './issues.js';
 
 export interface RemediationContext {
   /** 事件（契约 Incident 或其中的字段） */
@@ -42,6 +43,11 @@ export interface RemediationContext {
     chronic: boolean;
     entity: Record<string, unknown> | null;
   }>;
+  /**
+   * 主动优化（契约 2.28.0）：给出时只有 applies 为 goal 的模板适用，模板的 CEL 另有 goal、finding、finding_cards 与 gates；
+   * incident 与 alerts 传空值，root 为发现挂到的组件。不给出时只有 applies 为 incident 的模板适用
+   */
+  goal?: GoalTemplateContext;
 }
 
 export interface RemediationCard {
@@ -68,13 +74,16 @@ export type SkipCode =
   | 'skip_if'
   | 'target_not_found'
   | 'ambiguous_target'
-  | 'no_change';
+  | 'no_change'
+  | 'guard';
 
 export interface RemediationSkip {
   kind: 'skipped';
   key: string;
   code: SkipCode;
   reason: LocalizedText;
+  /** code 为 guard 时不成立的安全约束 id（门槛 G3 的原因码） */
+  guard?: string;
 }
 
 export interface RemediationPlan {
@@ -91,8 +100,11 @@ export interface RemediationPlan {
   /** git diff 格式，每个文件带 diff --git 头 */
   patch: string;
   change: LocalizedText;
-  verify: { say: LocalizedText; cards: string[]; within: string | null };
+  /** guards：applies 为 goal 的模板的守护指标（事件模板为空数组） */
+  verify: { say: LocalizedText; cards: string[]; within: string | null; guards?: string[] };
   rollback: { say: LocalizedText };
+  /** applies 为 goal 的模板的预期收益；事件模板为 null */
+  estimate?: EstimateResult | null;
 }
 
 const both = (zh: string, en: string): LocalizedText => ({ 'zh-CN': zh, en });
@@ -110,7 +122,16 @@ function ctxOf(ctx: RemediationContext, params: Record<string, unknown>): Record
     root_cards: ctx.root_cards ?? {},
     alerts: ctx.alerts,
     params,
+    goal: ctx.goal?.goal ?? null,
+    finding: ctx.goal?.finding ?? null,
+    finding_cards: ctx.goal?.finding_cards ?? {},
+    gates: ctx.goal?.gates ?? {},
   };
+}
+
+/** 模板是否用于这个上下文：主动优化只用 applies 为 goal 的模板，事件只用 applies 为 incident 的模板 */
+function appliesTo(r: CompiledRemediation, ctx: RemediationContext): boolean {
+  return (r.def.applies ?? 'incident') === (ctx.goal ? 'goal' : 'incident');
 }
 
 /** 适用条件为 true 的模板；条件求值出错的模板不适用，错误写入 errors */
@@ -124,6 +145,9 @@ export function applicableRemediations(
   const applicable: Array<{ key: string; pack: string; id: string; category: string; repository: string }> = [];
   const errors: Array<{ key: string; message: string }> = [];
   for (const r of set.remediations) {
+    if (!appliesTo(r, ctx)) {
+      continue;
+    }
     try {
       if (r.when(ctxOf(ctx, r.def.params ?? {})) === true) {
         applicable.push({
@@ -206,6 +230,15 @@ export async function planRemediation(
   const def = r.def;
   const params = { ...(def.params ?? {}) };
   const base = ctxOf(ctx, params);
+  if (!appliesTo(r, ctx)) {
+    return skip(
+      key,
+      'not_applicable',
+      ctx.goal
+        ? both('模板不用于主动优化（applies 不是 goal）', 'The template is not for goal-driven optimization')
+        : both('模板只用于主动优化（applies 为 goal）', 'The template is only for goal-driven optimization'),
+    );
+  }
   try {
     if (r.when(base) !== true) {
       return skip(key, 'not_applicable', both('适用条件不成立', 'The template does not apply'));
@@ -369,6 +402,12 @@ export async function planRemediation(
         return skip(key, 'skip_if', format(s.say, { ...params, ...letValues }));
       }
     }
+    // 安全约束（门槛 G3，ADR 0146 §2.5）：任一不成立即不生成补丁
+    for (const g of r.guards) {
+      if (g.run(vars) !== true) {
+        return { ...skip(key, 'guard', format(g.say, { ...params, ...letValues })), guard: g.id };
+      }
+    }
   } catch (err) {
     return skip(key, 'evaluation_error', both(`求值出错：${String(err)}`, `Evaluation failed: ${String(err)}`));
   }
@@ -469,6 +508,18 @@ export async function planRemediation(
     return skip(key, 'no_change', both('文件已经是目标状态，没有需要修改的内容', 'The files already match the target'));
   }
   const msgVars = { ...params, ...letValues };
+  let estimate: EstimateResult | null = null;
+  if (r.estimate) {
+    try {
+      estimate = evaluateEstimate(r.estimate, vars, msgVars);
+    } catch (err) {
+      return skip(
+        key,
+        'evaluation_error',
+        both(`预期收益求值出错：${String(err)}`, `Evaluating the estimate failed: ${String(err)}`),
+      );
+    }
+  }
   return {
     kind: 'plan',
     key,
@@ -481,7 +532,13 @@ export async function planRemediation(
     files: changed,
     patch: changed.map((c) => formatPatch(c.path, c.before, c.after)).join(''),
     change: format(r.change, msgVars),
-    verify: { say: format(r.verify, msgVars), cards: def.verify.cards ?? [], within: def.verify.within ?? null },
+    verify: {
+      say: format(r.verify, msgVars),
+      cards: def.verify.cards ?? [],
+      within: def.verify.within ?? null,
+      guards: def.verify.guards ?? [],
+    },
     rollback: { say: format(r.rollback, msgVars) },
+    estimate,
   };
 }

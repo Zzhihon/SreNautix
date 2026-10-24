@@ -16,6 +16,8 @@ SDK 在 `packages/packs-sdk`（Apache-2.0），命令行入口是 `srenautix pac
 | `checks.yaml` | `ChecksFile` | 与告警无关、按实体种类运行的检查项 |
 | `rules.yaml` | `RulesFile` | 规则提议：条件满足时提议动作目录中的动作 |
 | `remediations.yaml` | `RemediationsFile` | 修复补丁模板：条件满足时生成 GitOps 仓库的补丁，经 `gitops_pr` 开 PR |
+| `domains.yaml` | `DomainsFile` | 主动优化的指标目录与领域：诊断卡、份额卡、模板、门槛、趋势、体检计划、负载保护卡 |
+| `issues.yaml` | `IssuesFile` | 主动优化的业务仓库 issue 模板：适用条件、代码定位的锚点、建议、预期收益与验证计划 |
 | `rca-params.yaml` | `RcaParams` | 根因排序参数；修改需要通过回放门禁 |
 | `action-requests.yaml` | `ActionRequestsFile` | 动作启用申请，经 Git PR 合入策略后生效 |
 | `knowledge/*.yaml` | `KnowledgeFile` | 知识条目，`learned_from` 写来源链接 |
@@ -82,6 +84,27 @@ signals:
 - 只能补充别的包里、本身不是补充的信号，类型必须相同。
 - 备选按数据源选中一个，被选中后用于这个信号的全部实体。只适用于部分实体的备选要用 `and on () ...` 之类的条件让其余实体查不到数据（无法判定），否则会把一个实体的数据当成所有实体的。
 - 本包的测试可以用完整的卡键 `<包>/<链>/<卡>` 测试被补充的内置卡，例如 `card: workload/capacity/hpa-latency`。
+
+**dbstats 信号**
+
+数据库统计视图（`pg_stat_statements`、`pg_stat_user_tables`、`pg_stat_user_indexes`、`pg_settings` 等）的读取是 `dbstats` 信号（契约 2.28.0，ADR 0146 §3.3）。SQL 写在适配器里，备选只写操作名与参数：
+
+```yaml
+signals:
+  - id: statement_exec_time_rate
+    kind: dbstats
+    unit: per_second
+    alternatives:
+      - expr: statements.top          # dbstats/v1 的操作：statements.top、tables.top、indexes.usage、settings.get、activity.summary、locks.summary
+        dialect: dbstats
+        args: { order_by: total_exec_time, limit: 20, database: $params.database }
+        column: total_exec_time_ms    # 作为序列取值的数值列
+        rate: true                    # 两次采样的差值除以间隔秒数
+```
+
+- 结果的每一行是一条序列：标签为行的字符串与布尔列（例如 `queryid`、`database`、`role`），取值为 `column` 列，点在采样时刻。证据卡的函数（`sum`、`top_share`、`join`、`label`）照常可用，引用的 `mode` 写 `dbstats`。
+- `args` 的字符串值可以整体写成 `$params.<名字>`；渲染后按操作的 schema 校验，`lint` 用卡片的默认参数检查一遍。`column` 必须是这个操作的数值列。`statements.text` 返回语句文本，只经工具读取，不能作为信号。
+- 累计计数器需要两次采样：同一次运行中第一次读取保存下来，与它相隔不少于 300 秒的读取才有速率（`rate: true`），之前的读取为缺数据，卡片无法判定。只在两次采样中都出现、计数器没有回绕的行有速率。能力为 `dbstats.<操作名中的 . 换成 _>`，例如 `dbstats.statements_top`。
 
 **模板变量**
 
@@ -314,6 +337,85 @@ remediation:
 
 模板的测试在 `packages/packs-sdk/test/remediation.test.ts`：同一套模板在两种布局的 Git 仓库上生成补丁，补丁必须能 `git apply --check` 到基准提交。
 
+**主动优化的 ops 模板**：`applies: goal` 的模板（契约 2.28.0，ADR 0146 §4.3）只用于主动优化的 ops PR，事件不会用到它；不写 `applies` 的模板只用于事件，行为不变。它们另有：
+
+| 字段 | 内容 |
+|---|---|
+| `when`、`let` 等的变量 | 另有 `goal`（GoalSpec 与 `goal_id`、`revision`）、`finding`（Finding：`kind`、`entity`、`share`、`gap` 等）、`finding_cards`（发现的支持卡、份额卡与诊断卡，形状同 `cards`）与 `gates`（领域门槛）；`root` 为发现挂到的组件，`incident` 与 `alerts` 为空 |
+| `estimate` | 必填。`{indicator, unit, lower, expected, basis}`：`lower` 与 `expected` 是 CEL，`basis` 是 ICU 文案（可引用 `lower`、`expected`）；下界只用确定的值计算 |
+| `guard` | 安全约束（门槛 G3）：`{id, cel, say}`，在 `skip_if` 之后求值，任一不为 true 时不生成补丁，跳过原因码为 `guard`，`id` 写进门槛记录 |
+| `verify.guards` | 验证时的守护指标 `<包>/<指标>` |
+| `category` | 组件参数用 `component_param` |
+
+## 领域与指标
+
+主动优化（ADR 0146）在领域包里声明它能分析什么。`domains.yaml` 有两部分：
+
+```yaml
+indicators:
+  - id: db-time                           # 全局 id postgres/db-time，目标只能引用这里的指标
+    title: { zh-CN: 数据库执行时间 }
+    signal: db_exec_time_ratio            # metrics 信号，按实体与参数渲染，多条序列时取和
+    entity: Cluster.postgresql.cnpg.io    # Kubernetes Kind，或逻辑实体 pg_statement、pg_table、pg_index、route、stage
+    params: { type: object, additionalProperties: false, properties: { database: { type: string, pattern: '^[a-z_]+$', description: 库名 } } }
+    unit: ratio
+    better: lower
+    statistic: p95
+    load_indicator: postgres/xact-rate    # 判定业务高峰的负载指标
+domains:
+  - id: database
+    applies_to: [Cluster.postgresql.cnpg.io]
+    indicators: [postgres/db-time]        # 体检时计算基线的指标
+    diagnostics:                          # 诊断卡：异常即候选发现
+      - id: statement-dominant
+        card: checks/statement-share
+        finding: pg.statement_dominant
+        indicator: postgres/db-time
+        symptoms: [seq_scan, index]
+        entities:                         # 卡片在组件上执行一次，按行得到逻辑实体
+          type: pg_statement
+          rows_from: stmt
+          key: 'label(row, "database") + "/" + label(row, "queryid")'
+          labels: { queryid: 'label(row, "queryid")' }
+          when: 'last(row) / total > params.min_share'
+    contribution:                         # 份额卡：实体占指标的比例
+      - { id: statement-share, card: checks/statement-share, indicator: postgres/db-time,
+          entities: { type: pg_statement, rows_from: stmt, key: '...', share: 'last(row) / total' } }
+    templates: [postgres/table-seq-scans] # 区分性检查可用的查询模板
+    optimizations: [postgres/pg-guc-tune] # applies: goal 的 ops 模板
+    issues: [postgres/slow-statement]     # issues.yaml 的模板
+    gates: { min_share: 0.2 }             # 门槛参数，见下表
+    trends: [{ id: db-time-drift, indicator: postgres/db-time, method: drift, ratio: 1.25, sustain: 6h }]
+    schedule: { cron: '0 20 * * 6' }
+    load_guards: [{ card: checks/primary-cpu, backends: [dbstats] }]
+```
+
+- 卡片引用写 `<链>/<卡>`、`checks/<id>` 或 `templates/<模板 id>`（本包内），三段为 `<包>/<链>/<卡>`。
+- `entities` 的 CEL 在卡片的变量上编译（卡片的引用、`let`、`params`、`entity`、`window`，另有 `row`：当前序列），与卡内表达式同样检查求值成本。诊断卡的 `entities` 必须写 `when`，份额卡的必须写 `share`（0 到 1）；没有 `entities` 的份额卡用 `share`（CEL，不写为 1）。`key` 是实体键中类型之后、组件之内的部分，server 把 `pg_statement` 的 queryid 换成语句指纹。
+- 指标的参数是可移植的 JSON Schema：每个参数有 `description`，字符串用 `enum` 或 `pattern` 限定，数字有 `minimum` 与 `maximum`；信号的每个备选按指标的实体类型渲染并严格解析。
+- 多个包可以给同一个领域补充内容：同一 id 的领域按包的加载顺序合并，列表追加，`gates` 后者覆盖前者的同名键，诊断卡、份额卡与趋势的 id 在领域内不能重复。
+
+门槛的缺省值：`violation_ratio` 0.1（违反目标的小时占比）、`min_share` 0.2、`min_gain_ratio` 0.1 与 `min_gain_gap_ratio` 0.5（预期收益下界的门槛取两者中较小者）、`cooldown` 30d；另有 `min_cpu_cores`、`min_memory_bytes`、`max_utilization_after` 与领域体检的 `thresholds`（`{indicator, comparator, value}`）。趋势的 `drift` 需要 `ratio`，`slope` 需要 `window`、`horizon` 与 `limit`，`headroom` 需要 `ratio` 与 `limit`。
+
+`issues.yaml` 是业务仓库的 issue 模板，由 server 渲染 issue 并在业务仓库创建，从不提交 PR：
+
+```yaml
+issues:
+  - id: slow-statement
+    title: { zh-CN: 慢语句 }
+    domain: database
+    when: 'finding.kind == "pg.statement_dominant"'   # 变量：goal、finding、finding_cards、gates、params
+    params: { min_reduction: 0.5 }
+    let: [{ name: share, cel: 'double(finding.share)' }]
+    locate: [{ kind: sql, from: 'finding.entity.labels.queryid' }]   # 锚点：sql、table、span_name、metric_name、route
+    suggestion: { zh-CN: '这条语句占执行时间的 {share}，为过滤列补索引或改写查询' }
+    estimate: { indicator: postgres/db-time, unit: ratio, lower: 'share * params.min_reduction', expected: 'share * 0.8', basis: { zh-CN: '份额 × 最小降幅' } }
+    verify: { say: { zh-CN: 部署后语句份额下降 }, within: 72h }
+    labels: [perf]
+```
+
+packs-sdk 的接口：`set.indicators`、`set.domains`（合并后的领域，门槛已填好缺省值）、`set.issues`；`domainRows(set, 领域, 诊断卡或份额卡, 卡键, judgeInput)` 在一次卡片执行的判定输入上得到实体；`applicableIssues` 与 `planIssue` 给出 issue 的锚点、建议、预期收益与验证计划；`planRemediation` 的上下文带 `goal` 时只用 `applies: goal` 的模板，计划里有 `estimate`。
+
 ## 用户层
 
 用户在不修改包的前提下用层文件调整，层按声明的顺序合并（组织在前、集群在后），每个层只修改一个包：
@@ -332,7 +434,7 @@ extend:
   rules: []
 ```
 
-层内的操作按 `extend → params → patch → disable` 的顺序执行，结果重新按契约校验。`disable` 接受 `alerts/<id>`、`chains/<id>`、`chains/<id>/<card>`、`checks/<id>`、`rules/<id>`。
+层内的操作按 `extend → params → patch → disable` 的顺序执行，结果重新按契约校验。`disable` 接受 `alerts/<id>`、`chains/<id>`、`chains/<id>/<card>`、`checks/<id>`、`rules/<id>`、`indicators/<id>`、`issues/<id>`、`domains/<id>` 与 `domains/<id>/<诊断卡或份额卡 id>`。`extend` 另有 `indicators`、`issues` 与 `domains`；与目标包同 id 的领域按领域的合并规则并入。
 
 ## 来源与 pack.lock
 
@@ -407,6 +509,8 @@ tests:
 - `stable` 的包要求每张卡都有夹具测试。
 - 告警目录条目的 `primary_card`（`<链>/<卡>` 或 `<包>/<链>/<卡>`）是与告警条件对应的卡，告警触发时它应当判为异常。`lint` 检查卡片存在、`applies_to` 包含条目的实体 kind、卡片所在的证据链在条目的 `chains` 中。`test --alert-rules <规则文件>` 读入告警规则（Prometheus 规则文件、PrometheusRule 或 VMRule，同名告警按条目的 `match_labels` 选规则），主卡的每个夹具测试在同一份夹具上再求一次告警规则：告警在卡片窗口内触发（满足 `for`）当且仅当主卡判为异常，否则测试失败。阈值因此只在告警规则里写一次，两边漂移时 CI 失败。没有现成的卡判断告警条件时，用 `generateConditionPack` 从规则生成告警条件卡（查询与规则表达式相同、判定与 `for` 相同），作为条目的主卡（ADR 0109）。
 - 测试的 `params` 字段覆盖卡片参数，用于验证阈值行为。
+- dbstats 夹具写在 `input_dbstats`：每个操作若干次采样 `{offset, rows}`，读取时取不晚于判定窗口结束时刻的最近一次采样与它的前一次，过滤、排序与 `limit` 按适配器的语义作用在夹具的行上。没有 dbstats 夹具的操作读取时报数据源错误，无数据测试因此覆盖 dbstats 引用。
+- 测试写 `rows: <领域>/<诊断卡或份额卡 id>` 时，同时检查它按行得到的实体：`expect.entities` 中每个 `key` 必须出现，`hit` 为诊断卡的 `when`，`share` 为份额卡的份额（相对误差 1e-3）。
 - 告警目录条目可以写 `title`（`zh-CN` 与 `en`），即告警的可读症状，例如“worker 没有可用副本”。通知的标题与问题陈述用它代替告警名，没有时显示告警名。
 
 **录制与回放**：`record` 在真实数据源上执行卡片，把查询与响应写成快照（`srenautix.io/query-snapshot/v1`）。`test --replay` 用快照代替数据源重新判定，快照中没有的查询直接失败，因此修改查询的提交必须重新录制。

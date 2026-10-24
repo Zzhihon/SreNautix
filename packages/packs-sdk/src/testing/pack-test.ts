@@ -22,7 +22,10 @@ import {
 import { judgeCard } from '../judge/card.js';
 import { denseLabels, type RefData } from '../judge/data.js';
 import type { PackSet } from '../pack/compile.js';
-import { LiveDataSource, type EvidenceDataSource } from '../runtime/datasource.js';
+import type { DbstatsSample } from '@srenautix/contract';
+import { DbstatsOverlay, LiveDataSource, type EvidenceDataSource } from '../runtime/datasource.js';
+import { FixtureDbstats, type DbstatsOperation } from '../runtime/dbstats.js';
+import { domainRows } from '../runtime/domain-rows.js';
 import { DEFAULT_WINDOW, durationSeconds, runCard, type RunCardResult } from '../runtime/run-card.js';
 import { alertFires, primaryCardIndex, rulesForEntry, type AlertRule } from './alert-consistency.js';
 import { resolveSignal, type SignalResolution } from '../signals/resolve.js';
@@ -63,6 +66,8 @@ export interface PackTestReport {
 interface Fixtures {
   metrics: FixtureMetricSeries[];
   logs: FixtureLogStream[];
+  /** dbstats 夹具（契约 2.28.0）：操作 → 采样 */
+  dbstats: Map<DbstatsOperation, Array<{ at: number; rows: DbstatsSample['rows'] }>>;
   spanMs: number;
 }
 
@@ -95,7 +100,23 @@ function expandFixtures(engine: PromqlEngine, file: PackTestFile, where: string)
       return { t, line: l.line };
     }),
   }));
-  return { metrics, logs, spanMs: Math.max(maxPoints * step, lastLog + step) };
+  const dbstats = new Map<DbstatsOperation, Array<{ at: number; rows: DbstatsSample['rows'] }>>();
+  let lastSample = 0;
+  for (const d of file.input_dbstats ?? []) {
+    const list = dbstats.get(d.op) ?? [];
+    for (const s of d.samples) {
+      const at = FIXTURE_EPOCH + durationSeconds(s.offset) * 1000;
+      lastSample = Math.max(lastSample, at - FIXTURE_EPOCH);
+      list.push({ at, rows: s.rows });
+    }
+    dbstats.set(d.op, list);
+  }
+  return { metrics, logs, dbstats, spanMs: Math.max(maxPoints * step, lastLog + step, lastSample + step) };
+}
+
+/** 给数据源加上夹具的 dbstats；夹具里没有的操作读取时报数据源错误 */
+function withDbstats(ds: EvidenceDataSource, fx: FixtureDbstats): EvidenceDataSource {
+  return new DbstatsOverlay(ds, fx.id, async (_entity, req, opts) => fx.read(req, opts.at));
 }
 
 function profileFor(intervalSeconds: number): LabelProfile {
@@ -136,25 +157,29 @@ async function startEnv(fx: Fixtures, intervalSeconds: number, withLoki: boolean
     RunningProcess | null,
   ];
   const profile = profileFor(intervalSeconds);
+  const dbstats = new FixtureDbstats('dbstats-fixture', fx.dbstats);
   const ds = (b: Backend, t: TsdbInstance) =>
-    new LiveDataSource({
-      metrics: {
-        adapter: new PrometheusApiAdapter({
-          id: b,
-          url: t.url,
-          dialects: b === 'prometheus' ? ['promql'] : ['promql', 'metricsql'],
-        }),
-        profile,
-      },
-      ...(loki
-        ? {
-            logs: {
-              adapter: new LokiAdapter({ id: 'loki', url: loki.url, labels: LOGS_PROFILE }),
-              profile: LOGS_PROFILE,
-            },
-          }
-        : {}),
-    });
+    withDbstats(
+      new LiveDataSource({
+        metrics: {
+          adapter: new PrometheusApiAdapter({
+            id: b,
+            url: t.url,
+            dialects: b === 'prometheus' ? ['promql'] : ['promql', 'metricsql'],
+          }),
+          profile,
+        },
+        ...(loki
+          ? {
+              logs: {
+                adapter: new LokiAdapter({ id: 'loki', url: loki.url, labels: LOGS_PROFILE }),
+                profile: LOGS_PROFILE,
+              },
+            }
+          : {}),
+      }),
+      dbstats,
+    );
   return {
     tsdb: { prometheus: prom, 'victoria-metrics': vm },
     loki,
@@ -206,6 +231,35 @@ const summary = (r: RunCardResult) => ({
 function cardKeyFor(set: PackSet, pack: string, ref: string): string {
   const own = `${pack}/${ref}`;
   return set.cards.has(own) || !set.cards.has(ref) ? own : ref;
+}
+
+/** 测试的 rows：领域的诊断卡或份额卡在这次判定输入上得到的实体与期望一致（契约 2.28.0） */
+function checkRows(set: PackSet, t: PackTestFile['tests'][number], key: string, r: RunCardResult): string[] {
+  const [domain, item] = t.rows!.split('/') as [string, string];
+  let rows;
+  try {
+    rows = domainRows(set, domain, item, key, r.judgeInput).rows;
+  } catch (err) {
+    return [err instanceof Error ? err.message : String(err)];
+  }
+  const out: string[] = [];
+  for (const want of t.expect.entities ?? []) {
+    const got = rows.find((x) => x.key === want.key);
+    if (!got) {
+      out.push(`${t.rows} 没有得到实体 ${want.key}（得到 ${rows.map((x) => x.key).join('、') || '无'}）`);
+      continue;
+    }
+    if (want.hit !== undefined && got.hit !== want.hit) {
+      out.push(`${t.rows} 的实体 ${want.key}：期望 when 为 ${want.hit}，实际 ${String(got.hit)}`);
+    }
+    if (
+      want.share !== undefined &&
+      (got.share === null || Math.abs(got.share - want.share) > 1e-3 * Math.max(Math.abs(want.share), 1e-3))
+    ) {
+      out.push(`${t.rows} 的实体 ${want.key}：期望份额 ${want.share}，实际 ${String(got.share)}`);
+    }
+  }
+  return out;
 }
 
 export interface PackTestOptions {
@@ -287,6 +341,9 @@ export async function runPackTests(opts: PackTestOptions): Promise<PackTestRepor
             if (t.expect.reason_kind && r.reason.kind !== t.expect.reason_kind) {
               failures.push(`${b}：期望原因 ${t.expect.reason_kind}，实际 ${r.reason.kind}（${r.reason.text}）`);
             }
+            if (t.rows) {
+              failures.push(...checkRows(set, t, key, r).map((f) => `${b}：${f}`));
+            }
             if (b === 'prometheus' && r.verdict !== 'undeterminable') {
               captured.set(`${key}\u0000${t.name}`, r);
             }
@@ -353,7 +410,7 @@ export async function runPackTests(opts: PackTestOptions): Promise<PackTestRepor
     if (cardKeys.length) {
       // 有日志卡的包同时启动空的 Loki，无数据测试才能覆盖日志引用
       const usesLogs = cardKeys.some((k) => set.cards.get(k)!.def.refs.some((r) => r.mode === 'logs'));
-      const env = await startEnv({ metrics: [], logs: [], spanMs: 3600_000 }, 60, usesLogs);
+      const env = await startEnv({ metrics: [], logs: [], dbstats: new Map(), spanMs: 3600_000 }, 60, usesLogs);
       try {
         const end = FIXTURE_EPOCH + 3600_000;
         const clock = { from: toIso(FIXTURE_EPOCH - 30 * DAY), to: toIso(end + 30 * DAY) };

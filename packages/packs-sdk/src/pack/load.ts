@@ -12,6 +12,8 @@ import {
   type ChaosFile,
   type ChecksFile,
   type ComponentsFile,
+  type DomainsFile,
+  type IssuesFile,
   type KnowledgeFile,
   type PackManifest,
   type PackTestFile,
@@ -34,6 +36,10 @@ export interface PackContent {
   checks: ChecksFile;
   rules: RulesFile;
   remediations: RemediationsFile;
+  /** domains.yaml：指标与领域（契约 2.28.0） */
+  domains: DomainsFile;
+  /** issues.yaml：业务 issue 模板（契约 2.28.0） */
+  issues: IssuesFile;
   rca_params: RcaParams | null;
   /** 文件名 → 知识条目 */
   knowledge: Record<string, KnowledgeFile>;
@@ -65,6 +71,8 @@ const TOP_FILES = new Set([
   'checks.yaml',
   'rules.yaml',
   'remediations.yaml',
+  'domains.yaml',
+  'issues.yaml',
   'rca-params.yaml',
   'action-requests.yaml',
   'README.md',
@@ -158,6 +166,8 @@ export function loadPackDir(dir: string, source: string): LoadedPack {
     remediations: opt<RemediationsFile>('remediations.yaml', `${PACK_SCHEMA}#/$defs/RemediationsFile`, {
       remediations: [],
     }),
+    domains: opt<DomainsFile>('domains.yaml', `${PACK_SCHEMA}#/$defs/DomainsFile`, {}),
+    issues: opt<IssuesFile>('issues.yaml', `${PACK_SCHEMA}#/$defs/IssuesFile`, { issues: [] }),
     rca_params: opt<RcaParams | null>('rca-params.yaml', `${PACK_SCHEMA}#/$defs/RcaParams`, null),
     knowledge: sub('knowledge', (p) => readYaml<KnowledgeFile>(p, `${PACK_SCHEMA}#/$defs/KnowledgeFile`)),
     runbooks: sub('runbooks', (p) => readFileSync(p, 'utf8')),

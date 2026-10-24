@@ -17,6 +17,14 @@ import type { LoadedPack } from './load.js';
 import { compileRemediations, type CompiledRemediation } from '../remediation/compile.js';
 import { computeLock, lockDigest, verifyLock } from './lock.js';
 import type { PackLock } from '@srenautix/contract';
+import {
+  DBSTATS_COLUMNS,
+  DBSTATS_SIGNAL_OPERATIONS,
+  renderDbstats,
+  type DbstatsOperation,
+} from '../runtime/dbstats.js';
+import { compileDomains, type CompiledDomain, type CompiledIndicator } from './domains.js';
+import { compileIssues, type CompiledIssue } from '../remediation/issues.js';
 
 export interface CardEntry {
   /** <pack>/<chain>/<card> 或 <pack>/checks/<id> */
@@ -53,6 +61,12 @@ export interface PackSet {
   remediations: CompiledRemediation[];
   /** 阶段 B 的查询模板：全局 id <pack>/<模板 id>，附带的卡在 cards 中的键为 <pack>/templates/<模板 id> */
   templates: Array<{ id: string; pack: string; description: string; args: Record<string, unknown>; card: string }>;
+  /** 指标目录（domains.yaml 的 indicators，契约 2.28.0）：全局 id <pack>/<id> */
+  indicators: Map<string, CompiledIndicator>;
+  /** 领域：同一 id 的领域按包的加载顺序合并 */
+  domains: Map<string, CompiledDomain>;
+  /** 业务 issue 模板（issues.yaml） */
+  issues: CompiledIssue[];
   lock: PackLock;
   lockDigest: string;
 }
@@ -170,7 +184,37 @@ export function checkTemplateArgs(args: Record<string, unknown>, params: Record<
 }
 
 function cardKind(mode: string): Signal['kind'] {
-  return mode === 'logs' ? 'logs' : mode === 'traces' ? 'traces' : 'metrics';
+  return mode === 'logs' ? 'logs' : mode === 'traces' ? 'traces' : mode === 'dbstats' ? 'dbstats' : 'metrics';
+}
+
+/**
+ * dbstats 备选的检查（契约 2.28.0）：expr 是信号可用的操作，column 是这个操作的数值列；args 的取值在卡片中按默认参数
+ * 渲染后按操作的 schema 校验。其余类型的备选不能写 args、column、rate
+ */
+function checkDbstatsAlternative(where: string, s: Signal, i: number): void {
+  const a = s.alternatives[i]!;
+  const fail = (detail: string): never => {
+    throw new PackLintError(where, `信号 ${s.id} 的备选 ${i}：${detail}`);
+  };
+  if (s.kind !== 'dbstats') {
+    if (a.args !== undefined || a.column !== undefined || a.rate !== undefined) {
+      fail('args、column、rate 只用于 dbstats 信号');
+    }
+    return;
+  }
+  const op = a.expr as DbstatsOperation;
+  if (!DBSTATS_SIGNAL_OPERATIONS.includes(op)) {
+    fail(`dbstats 的 expr 必须是操作名（${DBSTATS_SIGNAL_OPERATIONS.join('、')}），实际为 ${a.expr}`);
+  }
+  if (!a.column) {
+    fail('dbstats 信号必须写 column（作为序列取值的列）');
+  }
+  if (!DBSTATS_COLUMNS[op].includes(a.column!)) {
+    fail(`${op} 没有数值列 ${a.column}，可用：${DBSTATS_COLUMNS[op].join('、')}`);
+  }
+  if (a.probe !== undefined || a.recording_rule) {
+    fail('dbstats 信号不能写 probe 或 recording_rule');
+  }
 }
 
 export async function compilePackSet(loaded: LoadedPack[], opts: CompileOptions): Promise<PackSet> {
@@ -240,13 +284,16 @@ export async function compilePackSet(loaded: LoadedPack[], opts: CompileOptions)
             ? d === 'promql' || d === 'metricsql'
             : s.kind === 'logs'
               ? d === 'logql' || d === 'logs_match'
-              : d === 'traceql';
+              : s.kind === 'dbstats'
+                ? d === 'dbstats'
+                : d === 'traceql';
         if (!ok) {
           throw new PackLintError(
             `${p.dir}/signals.yaml`,
             `信号 ${s.id} 的备选 ${i} 方言 ${d} 与信号类型 ${s.kind} 不符`,
           );
         }
+        checkDbstatsAlternative(`${p.dir}/signals.yaml`, s, i);
       });
       signals.set(key, { pack: p.name, signal: s });
     }
@@ -318,6 +365,20 @@ export async function compilePackSet(loaded: LoadedPack[], opts: CompileOptions)
         throw new PackLintError(where, `引用 ${r.name} 的模式 ${r.mode} 与信号 ${sk} 的类型 ${sig.kind} 不符`);
       }
       refSignals[r.name] = sk;
+      // dbstats 备选按卡片与引用的默认参数渲染成请求并按操作的 schema 校验
+      if (sig.kind === 'dbstats') {
+        const params = { ...(def.params ?? {}), ...(r.params ?? {}) } as Record<string, number | string | boolean>;
+        for (const [i, alt] of sig.alternatives.entries()) {
+          try {
+            renderDbstats(alt, params);
+          } catch (err) {
+            throw new PackLintError(
+              where,
+              `信号 ${sk} 的备选 ${i}：${err instanceof Error ? err.message : String(err)}`,
+            );
+          }
+        }
+      }
       // 严格解析每个指标备选（用卡片与引用的默认参数渲染）
       if (sig.kind === 'metrics') {
         const params = { ...(def.params ?? {}), ...(r.params ?? {}) } as Record<string, number | string | boolean>;
@@ -537,6 +598,17 @@ export async function compilePackSet(loaded: LoadedPack[], opts: CompileOptions)
   }
 
   const remediations = compileRemediations(base, active, signals, new Set(cards.keys()));
+  const issues = compileIssues(base, active, new Set(cards.keys()));
+  const { indicators, domains } = compileDomains({
+    engine,
+    active,
+    signals,
+    cards,
+    templates: new Set(templates.map((t) => t.id)),
+    remediations,
+    issues,
+    lintProfile: LINT_PROFILE,
+  });
   return {
     packs: active,
     disabled,
@@ -547,6 +619,9 @@ export async function compilePackSet(loaded: LoadedPack[], opts: CompileOptions)
     excludes,
     remediations,
     templates,
+    indicators,
+    domains,
+    issues,
     lock,
     lockDigest: lockDigest(lock),
   };

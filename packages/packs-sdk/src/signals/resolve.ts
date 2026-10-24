@@ -5,6 +5,7 @@
 import type { Signal, SignalAlternative, TimeWindow } from '@srenautix/contract';
 import { DatasourceError, toIso, toMillis, type PromqlEngine } from '@srenautix/integration-sdk';
 import type { Capability, EvidenceDataSource } from '../runtime/datasource.js';
+import { dbstatsCapability, type DbstatsOperation } from '../runtime/dbstats.js';
 import { renderMetrics, type RenderContext } from './render.js';
 
 /**
@@ -33,6 +34,9 @@ export function alternativeCapability(kind: Signal['kind'], alt: SignalAlternati
   if (kind === 'logs') {
     return d === 'logs_match' ? 'logs.match' : 'logs.query';
   }
+  if (kind === 'dbstats') {
+    return dbstatsCapability(alt.expr as DbstatsOperation);
+  }
   return 'traces.search';
 }
 
@@ -55,7 +59,11 @@ export async function resolveSignal(
     if (signal.kind !== 'metrics') {
       const d = alt.dialect;
       const okDialect =
-        signal.kind === 'logs' ? d === 'logs_match' || (d === 'logql' && ds.ids.logs !== null) : d === 'traceql';
+        signal.kind === 'logs'
+          ? d === 'logs_match' || (d === 'logql' && ds.ids.logs !== null)
+          : signal.kind === 'dbstats'
+            ? d === 'dbstats' && ds.dbstats !== undefined
+            : d === 'traceql';
       if (!okDialect) {
         rejected.push({ index: i, cause: 'dialect', reason: `数据源不接受方言 ${d ?? '未声明'}` });
         continue;

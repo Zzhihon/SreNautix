@@ -2,7 +2,15 @@ export { NoSamplesError, PackLintError } from './cel/errors.js';
 export { createBaseEnvironment, RESERVED_NAMES } from './cel/library.js';
 export { COST_BUDGET, MAX_SERIES, MAX_POINTS, MAX_LOG_LINES } from './cel/cost.js';
 export { formatValue, type Unit } from './cel/format.js';
-export { compileCard, judgeCard, type CompiledCard, type JudgeInput } from './judge/card.js';
+export {
+  compileCard,
+  judgeCard,
+  evaluateCardRows,
+  type CompiledCard,
+  type CompiledExpr,
+  type JudgeInput,
+  type RowValues,
+} from './judge/card.js';
 export { checkArgsSchema, applyCheckArgs, CHECK_WINDOW_KEYS } from './judge/check-args.js';
 export type {
   CardDefinition,
@@ -63,11 +71,52 @@ export { resolveSignal, alternativeCapability, type SignalResolution } from './s
 export {
   LiveDataSource,
   CapabilityMissing,
+  DbstatsOverlay,
+  ALL_DBSTATS_CAPABILITIES,
   type EvidenceDataSource,
   type Capability,
+  type DbstatsReadOptions,
   type LiveSources,
   type LogsLabelProfile,
 } from './runtime/datasource.js';
+export {
+  DbstatsSampler,
+  DbstatsNotReady,
+  FixtureDbstats,
+  applyDbstatsRequest,
+  dbstatsCapability,
+  dbstatsSeries,
+  renderDbstats,
+  DBSTATS_COLUMNS,
+  DBSTATS_OPERATIONS,
+  DBSTATS_SIGNAL_OPERATIONS,
+  type DbstatsCapability,
+  type DbstatsOperation,
+  type DbstatsReader,
+  type DbstatsSamples,
+  type DbstatsSamplerOptions,
+} from './runtime/dbstats.js';
+export {
+  mergeDomain,
+  DEFAULT_GATES,
+  type CompiledContribution,
+  type CompiledDiagnostic,
+  type CompiledDomain,
+  type CompiledEntityRows,
+  type CompiledIndicator,
+  type ResolvedGates,
+} from './pack/domains.js';
+export { domainRows, domainItem, type DomainRows, type EntityRow } from './runtime/domain-rows.js';
+export {
+  applicableIssues,
+  planIssue,
+  evaluateEstimate,
+  type CompiledIssue,
+  type EstimateResult,
+  type GoalTemplateContext,
+  type IssuePlan,
+  type IssueSkip,
+} from './remediation/issues.js';
 export {
   RecordingDataSource,
   ReplayDataSource,

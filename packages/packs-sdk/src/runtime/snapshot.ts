@@ -4,6 +4,7 @@
 import { randomUUID } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import type {
+  DbstatsRequest,
   LabelProfile,
   LogsMatchRequest,
   LogsQueryRequest,
@@ -17,9 +18,26 @@ import type {
 } from '@srenautix/contract';
 import { DatasourceError } from '@srenautix/integration-sdk';
 import canonicalize from 'canonicalize';
-import { CapabilityMissing, type Capability, type EvidenceDataSource, type LogsLabelProfile } from './datasource.js';
+import type { RenderEntity } from '../signals/render.js';
+import {
+  CapabilityMissing,
+  type Capability,
+  type DbstatsReadOptions,
+  type EvidenceDataSource,
+  type LogsLabelProfile,
+} from './datasource.js';
+import { dbstatsCapability, type DbstatsSamples } from './dbstats.js';
 
-type Op = 'query' | 'query_range' | 'metric_exists' | 'logs_match' | 'logs_query' | 'traces_search';
+type Op = 'query' | 'query_range' | 'metric_exists' | 'logs_match' | 'logs_query' | 'traces_search' | 'dbstats';
+
+/** dbstats 读取在快照中的请求：实体、请求与是否需要速率；at 不参与（回放的时刻与录制不同） */
+function dbstatsRequest(entity: RenderEntity, req: DbstatsRequest, opts: DbstatsReadOptions) {
+  return {
+    entity: { cluster_id: entity.cluster_id, kind: entity.kind, namespace: entity.namespace, name: entity.name },
+    req,
+    rate: opts.rate,
+  };
+}
 
 export interface SnapshotEntry {
   op: Op;
@@ -135,6 +153,14 @@ export class RecordingDataSource implements EvidenceDataSource {
   tracesSearch(req: TracesSearchRequest) {
     return this.rec('traces_search', req, () => this.inner.tracesSearch(req));
   }
+  dbstats(entity: RenderEntity, req: DbstatsRequest, opts: DbstatsReadOptions) {
+    return this.rec('dbstats', dbstatsRequest(entity, req, opts), async () => {
+      if (!this.inner.dbstats) {
+        throw new CapabilityMissing(dbstatsCapability(req.op));
+      }
+      return this.inner.dbstats(entity, req, opts);
+    });
+  }
 
   snapshot(clock: TimeWindow, cases: SnapshotCase[]): QuerySnapshot {
     return {
@@ -224,6 +250,9 @@ export class ReplayDataSource implements EvidenceDataSource {
   }
   async tracesSearch(req: TracesSearchRequest) {
     return this.get<TracesSearchResult>('traces_search', req, 'traces.search');
+  }
+  async dbstats(entity: RenderEntity, req: DbstatsRequest, opts: DbstatsReadOptions) {
+    return this.get<DbstatsSamples>('dbstats', dbstatsRequest(entity, req, opts), dbstatsCapability(req.op));
   }
 }
 

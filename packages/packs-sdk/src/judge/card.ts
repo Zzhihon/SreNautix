@@ -31,7 +31,7 @@ import type {
 
 const UNITS = new Set(['none', 'percent', 'ratio', 'bytes', 'seconds', 'count', 'per_second']);
 
-interface CompiledExpr {
+export interface CompiledExpr {
   source: string;
   run: (ctx: Record<string, unknown>) => unknown;
   ids: Set<string>;
@@ -69,6 +69,11 @@ export interface CompiledCard {
   } | null;
   refNames: Set<string>;
   maxCost: number;
+  /**
+   * 在这张卡的变量上编译另一个 CEL（领域的诊断卡与份额卡按行求值，契约 2.28.0）：可以引用卡的引用、let、params、entity、
+   * window；row 为 true 时另有 row（当前序列）。检查与卡内表达式相同（kind 比较、求值成本）
+   */
+  compileExpr: (source: string, what: string, opts?: { row?: boolean }) => CompiledExpr;
 }
 
 function messageArgs(els: MessageFormatElement[], out: Set<string>): void {
@@ -217,6 +222,90 @@ export function compileCard(base: Environment, def: CardDefinition, opts: Compil
     table,
     refNames,
     maxCost,
+    compileExpr: (source, what, opts) => compile(source, `${what}`, opts?.row ? rowEnv : env),
+  };
+}
+
+/** 一个引用按行求值的结果：每条有点的序列一行，表达式出错或缺样本时为 null */
+export interface RowValues {
+  labels: Record<string, string>;
+  values: Record<string, unknown>;
+}
+
+/**
+ * 在判定输入上按行求值（领域的诊断卡与份额卡，契约 2.28.0）：先按与判定相同的方式求 let（不可用的 let 为 null），
+ * 再对 rowsFrom 引用中每条有点的序列求 rowExprs；scalarExprs 在 let 之后求一次。引用缺数据或报错时 rows 为空
+ */
+export function evaluateCardRows(
+  card: CompiledCard,
+  input: JudgeInput,
+  rowsFrom: string | null,
+  rowExprs: Record<string, CompiledExpr>,
+  scalarExprs: Record<string, CompiledExpr> = {},
+): { rows: RowValues[]; scalars: Record<string, unknown> } {
+  const def = card.def;
+  const params = Object.fromEntries(
+    Object.entries({ ...(def.params ?? {}), ...(input.params ?? {}) }).map(([k, v]) => [k, toCelScalar(k, v)]),
+  );
+  const ctx: Record<string, unknown> = {
+    params,
+    entity: {
+      cluster_id: input.entity.cluster_id,
+      kind: input.entity.kind,
+      namespace: input.entity.namespace ?? '',
+      name: input.entity.name,
+    },
+    window: { from: input.window.from, to: input.window.to, anchor: input.window.anchor },
+  };
+  const unavailable = new Set<string>();
+  for (const r of def.refs) {
+    const d = input.refs[r.name];
+    if (!d) {
+      throw new Error(`卡片 ${def.id} 缺少引用 ${r.name} 的数据`);
+    }
+    ctx[r.name] = truncate(d);
+    if (
+      d.kind === 'error' ||
+      d.kind === 'capability_missing' ||
+      (isEmpty(d) && (r.empty_is ?? 'no_data') === 'no_data')
+    ) {
+      unavailable.add(r.name);
+    }
+  }
+  const tryRun = (e: CompiledExpr, c: Record<string, unknown>): unknown => {
+    for (const id of e.ids) {
+      if (unavailable.has(id)) {
+        return null;
+      }
+    }
+    try {
+      const v = e.run(c);
+      return typeof v === 'bigint' ? Number(v) : v;
+    } catch {
+      // 缺样本与求值出错都按不可用处理：这一行（或这个值）不参与
+      return null;
+    }
+  };
+  for (const l of card.lets) {
+    const v = tryRun(l.expr, ctx);
+    ctx[l.name] = v;
+    if (v === null) {
+      unavailable.add(l.name);
+    }
+  }
+  const scalars = Object.fromEntries(Object.entries(scalarExprs).map(([k, e]) => [k, tryRun(e, ctx)]));
+  if (rowsFrom === null || unavailable.has(rowsFrom)) {
+    return { rows: [], scalars };
+  }
+  const rows = (ctx[rowsFrom] as unknown[]).filter(
+    (r) => !(typeof r === 'object' && r !== null && 'values' in r && (r as { values: unknown[] }).values.length === 0),
+  );
+  return {
+    rows: rows.map((row) => ({
+      labels: (row as { labels?: Record<string, string> }).labels ?? {},
+      values: Object.fromEntries(Object.entries(rowExprs).map(([k, e]) => [k, tryRun(e, { ...ctx, row })])),
+    })),
+    scalars,
   };
 }
 

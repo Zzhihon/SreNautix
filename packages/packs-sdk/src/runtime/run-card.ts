@@ -10,6 +10,7 @@ import type { CardEntry, PackSet } from '../pack/compile.js';
 import { podPattern, renderMetrics, RenderError, substitute, type RenderEntity } from '../signals/render.js';
 import type { SignalResolution } from '../signals/resolve.js';
 import { CapabilityMissing, type EvidenceDataSource } from './datasource.js';
+import { dbstatsCapability, dbstatsSeries, renderDbstats } from './dbstats.js';
 
 /** Prometheus 风格时长转秒 */
 export function durationSeconds(d: string): number {
@@ -237,6 +238,18 @@ export async function runCard(input: RunCardInput): Promise<RunCardResult> {
           };
           record('logs.query', query, out.lines.length, out.truncated, null, input.ds.ids.logs);
         }
+      } else if (res.kind === 'dbstats') {
+        // dbstats（契约 2.28.0）：每行一条序列，点在采样时刻；速率需要两次采样
+        const req = renderDbstats(alt, params);
+        const cap = dbstatsCapability(req.op);
+        if (!input.ds.dbstats) {
+          throw new CapabilityMissing(cap);
+        }
+        const rate = alt.rate ?? false;
+        const out = await input.ds.dbstats(input.entity, req, { at: w.to, rate });
+        const series = dbstatsSeries(input.ds.ids.dbstats ?? 'dbstats', out, alt.column ?? '', rate);
+        refs[r.name] = { kind: 'metrics', series, truncated: out.current.truncated };
+        record(cap, JSON.stringify(req), series.length, out.current.truncated, null, input.ds.ids.dbstats ?? null);
       } else {
         const query = substitute(alt.expr, {
           entity: input.entity,
