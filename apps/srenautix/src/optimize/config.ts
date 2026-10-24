@@ -24,7 +24,8 @@ import { validatorFor, type AnchorKind, type CodeLayout } from '@srenautix/contr
 //       database: cchp
 //       user: srenautix_stats
 //       password_file: /etc/srenautix/secrets/dbstats/password
-//     loop_interval: 60s                           # 目标运行、建议与投递、验证循环的间隔
+//     argo: { namespace: argocd }                  # 验证循环读取 Application（需要 list 权限）；不配置时合并即开始验证
+//     loop_interval: 60s                           # 目标运行、建议与投递的间隔
 //     limits: { dbstats: { concurrency: 1, per_hour: 60, statement_text_per_hour: 6 }, … }   # §6.1
 
 export type { AnchorKind };
@@ -96,7 +97,12 @@ export const optimizationConfig = z
     repositories: z.object({ business: businessRepository.optional() }).strict().default({}),
     // 没有配置时 dbstats 信号的能力缺失，相关的卡无法判定（exporter 信号照常可用）
     dbstats: dbstatsSource.optional(),
-    // 目标运行、建议与投递、验证循环的间隔
+    // 验证循环读取 Argo CD 的 Application（§2.6）：所在命名空间；没有配置时 ops PR 合并即开始验证窗口
+    argo: z
+      .object({ namespace: z.string().min(1).default('argocd') })
+      .strict()
+      .optional(),
+    // 目标运行、建议与投递的间隔（验证循环固定 10 分钟）
     loop_interval: z
       .string()
       .regex(/^\d+(s|m)$/)

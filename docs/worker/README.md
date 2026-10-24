@@ -53,6 +53,8 @@ budget:
   daily_warn_ratio: 0.8
   on_exhausted: critical_only        # critical_only | stage_a_only
   per_research_input_tokens: 150000
+  purposes:
+    optimization: { daily_tokens: 3000000 }   # 主动优化每天的用量上限；省略或为 0 时不运行目标任务（ADR 0146 §5.3）
 research:
   deadline: 8m
   max_steps: 3
@@ -84,6 +86,30 @@ mcp:                                 # 只读 MCP 服务器与工具白名单（
 
 白名单中每个工具声明时间参数的位置与结果形状。没有时间参数、只能读取当前状态的工具写 `live: true`，回放时不可用。任何参数取值为 Secret 或 ConfigMap 的调用都被拒绝；Kubernetes 对象的环境变量字面值在进入提示词前剔除。
 
+## 主动优化的目标任务
+
+server 的研判队列里也有目标运行（ADR 0146，认领结果的 `subject_type: goal`），worker 用同一套账本、区分性检查、证据簿、
+预算与出境控制分析它们（server 部分见 [docs/server/optimization.md](../server/optimization.md)）：
+
+1. 读取运行的输入（`GET /v1/research/tasks/{run_id}/goal-context`）：目标、基线与差距、进入分析的候选发现（最多 3 个）、
+   诊断卡与份额卡、领域的查询模板。
+2. 预算：全部用途的当日用量按 info 级别判断，另有主动优化自己的当日上限（`budget.purposes.optimization.daily_tokens`）；
+   每次运行的输入不超过目标的 `budget.tokens`。用尽时运行以 `budget_exhausted` 结束。
+3. hypothesize：模型为每个发现提出相互竞争的机制假设，写出机制预示的症状类型；假设的根因是发现的实体，同一发现上的假设互为
+   竞争假设。
+4. discriminate：区分性检查只能用这次运行的领域模板（没有只读工具），模型漏写的模板参数从发现实体的标签补上；server 在发现
+   挂到的组件上执行（`goal-query`）。不在模板目录里的模板、原始查询与不合模板 schema 的参数在本地被拒绝，不发出请求。
+5. conclude：每个发现一条结论，档位由代码按优化结论阶梯计算（差距成立、份额达到门槛、没有相反的正常卡、检验过竞争假设）；
+   模型弃权时按账本选中这个发现上唯一处于支持状态的假设，档位最高 `likely`。模型文字经数值审计。
+6. 交回输出（`POST .../optimization`）或报告失败（`POST .../optimization-failed`），释放任务。目标运行不发 `research.*` 事件。
+
+提示词里的规范化语句（`sql` 类别）单独成段：`llm.egress.categories` 不含 `sql` 时只删掉这一段，判定与数值照常出境。
+
+用量按用途分别记账：`worker.daily_usage` 是全部用途的合计，`worker.daily_usage_purpose` 按用途（`research`、`optimization`）。
+ADR 0146 §5.3 写的是给 `daily_usage` 加 `purpose` 列，加列要改主键（收缩迁移），所以改为只扩展的新表。worker 每次结束任务后
+向 server 上报两个比例，server 据此准入目标运行。目标运行与事件研判共用 `worker.research_runs`（`subject_type` 区分，
+`incident_id` 存目标 id）。
+
 ## 接口
 
 | 路径 | 调用方 | 内容 |
@@ -107,7 +133,7 @@ mcp:                                 # 只读 MCP 服务器与工具白名单（
 | `srenautix_llm_breaker_open{route}`、`srenautix_llm_breaker_opened_total{route,reason}` | 熔断 |
 | `srenautix_llm_failure_domain_skips_total` | 故障域提前熔断 |
 | `srenautix_llm_estimate_calibration{route}` | token 估算校准系数 |
-| `srenautix_llm_budget_used_ratio{scope="daily"}`、`srenautix_llm_budget_stops_total{reason}` | 预算 |
+| `srenautix_llm_budget_used_ratio{scope="daily"}`、`srenautix_llm_budget_stops_total{reason}` | 预算；`scope="optimization"` 为主动优化用途的当日比例 |
 | `srenautix_egress_bytes_total`、`srenautix_egress_redaction_hits_total{kind}`、`srenautix_egress_halted` | 出站 |
 | `srenautix_llm_route_disabled{route,reason}`、`srenautix_llm_routes_available` | 启动时被出站策略禁用的路由与可用路由数 |
 | `srenautix_llm_provider_fingerprint_changes_total` | 服务方指纹变化 |

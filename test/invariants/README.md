@@ -19,8 +19,9 @@
 | 10 每次写入都可追溯 | `TestInvariant10TraceableWrites` | apiserver 审计日志中 gateway 的每次写入，在审计汇中都有对应的写入记录与审批人，哈希链与检查点签名校验通过；审计汇停止后不认领新执行，恢复后继续 |
 | 11 熔断开关不依赖 gateway | `TestInvariant11FreezeWithoutGateway` | gateway 子进程被 `SIGSTOP` 后切换 `srenautix-freeze`：写入被拒；删除该 ConfigMap，写入同样被拒 |
 | 12 `gitops_pr` 从不合并；base 有分支保护或经批准的补偿控制 | `TestInvariant12GitOpsNeverMerges` | 请求白名单与客户端都没有合并，推送到 main、移动或删除引用都被拒绝；base 既没有分支保护也没有补偿控制时预检拒绝；有补偿控制时只新建 `srenautix/` 分支并开 PR、请求审阅，main 不变，推送、核对与开 PR 写入审计链，人工 squash 合并不告警；推送期间 base 前进时不开 PR（`failed/base_moved`）；冻结时只执行 `gitops_pr`，集群动作不认领；超过每小时上限时拒绝；App 合并 PR、App 或其他机器人直接推送 main 时 watchdog 告警并停止推送（ADR 0025） |
+| 15 业务仓库不经 gateway 写入（gateway 部分） | `TestInvariant12GitOpsNeverMerges` 的子测试 `invariant 15` | 指向不在 `gitops.repositories` 中的仓库（主动优化的业务仓库）的 `gitops_pr`：gateway 不读取它的 base，工单在执行前以 `stale/target_changed` 结束，没有向该仓库发出任何请求，也没有推送或开 PR（ADR 0146 §6.4） |
 
-不变量 1、6、9 由 TypeScript 部分负责（`test/invariants` 中的 TS 测试）。
+不变量 1、6、9 由 TypeScript 部分负责（`test/invariants` 中的 TS 测试）。不变量 13–16（ADR 0146）的 TypeScript 部分：13 `apps/srenautix/test/unit/optimize-controller.test.ts`；14 `packages/integration-sdk` 的 dbstats 一致性（`no-business-rows`、`over-privileged`）；15 `apps/srenautix/test/integration/optimization-issues.test.ts`；16 `apps/srenautix/test/unit/optimization-limits.test.ts` 与 `optimization-guards.test.ts`。
 
 ## 本地运行（envtest）
 

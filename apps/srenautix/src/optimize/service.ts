@@ -10,6 +10,7 @@ import type { ProposalService } from '../proposals/service.js';
 import type { EvidenceSource } from '../stage-a/packs.js';
 import type { TopologyStore } from '../topology/store.js';
 import { parseStoredKey } from '../topology/keys.js';
+import { KubeArgoReader } from './argo.js';
 import { RepoCodeCache } from './code/tree.js';
 import { GoalSources } from './datasource.js';
 import { GoalEvidence } from './evidence.js';
@@ -138,6 +139,7 @@ export async function createOptimization(d: OptimizationDeps): Promise<Optimizat
     github: d.github,
     proposals: d.proposals,
     language: c.stage_a.language,
+    argo: o.argo ? new KubeArgoReader(c.kube_reads.kubeconfig ?? c.topology.kubeconfig, o.argo.namespace) : null,
   });
   return {
     sources,

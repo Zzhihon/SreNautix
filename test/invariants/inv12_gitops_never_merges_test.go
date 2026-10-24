@@ -229,6 +229,29 @@ func TestInvariant12GitOpsNeverMerges(t *testing.T) {
 		}
 	})
 
+	// 不变量 15（ADR 0146 §6.4）：业务仓库不在 gateway 策略的 gitops.repositories 中。即使中心签发了指向它的 gitops_pr，
+	// gateway 也不读取它的 base：解析出的目标没有版本（UID 为空），与审批时的版本不一致，工单在执行前以 stale 结束，
+	// gateway 不向业务仓库发出任何请求，也不推送、不开 PR
+	t.Run("invariant 15: gitops_pr for a repository outside the policy never executes", func(t *testing.T) {
+		e.T, e.F.T = t, t
+		const business = "acme/business"
+		before := len(gh.Requests())
+		params := map[string]any{"repository": business, "base": "main", "title": "[优化] work_mem", "patch": patchReplicas(replicas, replicas+1),
+			"body": "<!-- srenautix:pr=summary -->\n## 结论\n临时文件"}
+		target := tunnel.TargetRef{Group: "srenautix.io", Version: "v1", Kind: "GitRepository", Name: business, UID: gh.Head("main")}
+		tk := e.Ticket(e.Request("gitops_pr", params, target, assertion.LevelReversible, assertion.TierL))
+		e.Offer(tk)
+		phase, reason, _ := waitFinal(t, e, tk.Proposal.ProposalID, 30*time.Second, execution.PhaseStale, execution.PhaseRejected, execution.PhaseVerified, execution.PhaseFailed)
+		if phase != execution.PhaseStale || reason != "target_changed" {
+			t.Fatalf("got %s/%s: %s", phase, reason, e.Hub.Describe(tk.Proposal.ProposalID))
+		}
+		for _, r := range gh.Requests()[before:] {
+			if strings.Contains(r.Path, "/repos/"+business) || r.Method != http.MethodGet {
+				t.Fatalf("gateway sent %s %s", r.Method, r.Path)
+			}
+		}
+	})
+
 	t.Run("base moves during the push: no pull request", func(t *testing.T) {
 		e.T, e.F.T = t, t
 		gh.Race("main")
