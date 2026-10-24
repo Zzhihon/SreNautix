@@ -366,6 +366,8 @@ worker 在没有配置 `llm.egress.categories` 时允许的是事件研判一直
 
 - 发现以指纹为唯一键（`server.optimization_findings`）。每次运行先按指纹更新已有发现（`last_seen`、差距、份额、档位），再判断是否生成建议（G4）。
 - issue 与 PR 记在 `server.github_issues` 与 `server.gitops_pulls`，键扩展为（主体类型、主体 id、仓库角色）；创建 issue 的请求结果未知时按标记 `srenautix:finding=<指纹>` 在仓库中找回（ADR 0095 第 3 条）。
+
+  实现：`server.github_issues` 以 `incident_id` 为主键，只扩展型迁移改不了主键，业务 issue 因此记在建议的投递记录（`server.optimization_recommendations` 的 `delivery`）中，由 `github/optimization-issues.ts` 投递。去重与找回与事件 issue 同一套机制（ADR 0095），键是 `recommendation_id`：正文另带 `<!-- srenautix:recommendation=<id> -->` 标记，创建结果未知（超时、连接中断、5xx）时先按这个标记在仓库中找回，找不到才退避重试，重试不会重复开 issue。`server.gitops_pulls` 不变：目标的提议在 `incident_id` 中保存目标 id（契约 Subject 的语义），按提议找到 PR 的方式与事件相同。
 - 已有 open issue 的发现，每周最多追加一条评论更新差距与份额；差距消失时追加评论说明，并把发现标为 `fixed`（待人确认关闭）。
 - issue 被以 "not planned" 关闭、PR 未合并就关闭、控制台或聊天里点了"建议无用"，发现记为 `rejected`，进入冷却期。
 
