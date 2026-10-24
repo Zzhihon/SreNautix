@@ -11,7 +11,7 @@ import { resolve } from 'node:path';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { matchTemplates, remediationContext } from '../../src/remediation/facts.js';
 import { deriveDisposition } from '../../src/research/disposition.js';
-import { EvidenceBook } from '../../src/research/evidence.js';
+import { incidentBook } from '../../src/research/incident.js';
 import { PACKS } from '../support/packs.js';
 import { incident, researchCase, stageA } from '../support/scenario.js';
 
@@ -138,7 +138,7 @@ function inc() {
 function run(set: PackSet, rows: Row[], root = ROOT_ENTITY) {
   const cards = rows.map(result);
   const s = stageA(cards);
-  const book = new EvidenceBook(researchCase({ incident: inc(), stageA: s }));
+  const book = incidentBook(researchCase({ incident: inc(), stageA: s }));
   const d = deriveDisposition({
     model: 'ignore',
     incident: inc(),

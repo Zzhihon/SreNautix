@@ -3,7 +3,7 @@ import OpenAI from 'openai';
 import type { ModelRoute } from '@srenautix/contract';
 import { logger } from '../log.js';
 import { findSecrets, mergeHits, redactText, type RedactionHits, type RedactionKind } from './redact.js';
-import type { Item, LlmRequest, Segment } from './types.js';
+import { DEFAULT_EGRESS_CATEGORIES, type EgressCategory, type Item, type LlmRequest, type Segment } from './types.js';
 
 // 唯一的出站模块（DESIGN §8.4）：worker 发往模型服务的每个请求都在这里构造客户端、脱敏、检查蜜标并计量。
 // 其他模块不得直接引用 openai 的运行时或调用 fetch 访问模型端点（test/unit/egress-lint.test.ts 检查）。
@@ -23,6 +23,11 @@ export interface EgressPolicy {
   allowCrossBorder: boolean;
   /** 运行时蜜标：任何出站请求体包含其中之一，立即停止全部出站 */
   honeytokens: readonly string[];
+  /**
+   * 允许出境的数据类别（llm.egress.categories，ADR 0146 §3.6）；携带其他类别的片段在出站前删除。
+   * 没有配置时为 DEFAULT_EGRESS_CATEGORIES（不含 sql 与 code）
+   */
+  categories?: readonly EgressCategory[];
 }
 
 export interface EgressCall {
@@ -35,6 +40,13 @@ const BODY_FORBIDDEN: ReadonlySet<RedactionKind> = new Set(['pem', 'jwt', 'cloud
 export interface PreparedRequest {
   request: LlmRequest;
   hits: RedactionHits;
+  /** 因类别不在 llm.egress.categories 中而删除的片段数，按类别（一个片段有多个不允许的类别时每个都计一次） */
+  dropped: Partial<Record<EgressCategory, number>>;
+}
+
+/** 片段中不允许出境的类别 */
+function blockedCategories(s: Segment, allowed: ReadonlySet<EgressCategory>): EgressCategory[] {
+  return s.categories.filter((c) => !allowed.has(c));
 }
 
 function redactSegment(s: Segment, hits: RedactionHits): Segment {
@@ -49,11 +61,13 @@ function redactSegment(s: Segment, hits: RedactionHits): Segment {
 export class Egress {
   private haltReason: string | null = null;
   private readonly current = new AsyncLocalStorage<EgressCall>();
+  readonly categories: ReadonlySet<EgressCategory>;
 
   constructor(
     private readonly policy: EgressPolicy,
     private readonly onHalt: (reason: string) => void,
   ) {
+    this.categories = new Set(policy.categories ?? DEFAULT_EGRESS_CATEGORIES);
     for (const t of policy.honeytokens) {
       if (t.length < 16) {
         throw new Error('蜜标长度至少 16 个字符');
@@ -68,26 +82,45 @@ export class Egress {
     return this.haltReason;
   }
 
-  /** 出站前对请求做脱敏：egress=redact 的片段与模型自己的历史输出 */
+  /**
+   * 出站前处理请求：携带不允许出境类别的片段删除（工具结果换成说明），egress=redact 的片段与模型自己的历史输出脱敏
+   */
   prepare(req: LlmRequest): PreparedRequest {
     const hits: RedactionHits = {};
+    const dropped: PreparedRequest['dropped'] = {};
+    const allowed = (s: Segment) => {
+      const blocked = blockedCategories(s, this.categories);
+      for (const c of blocked) {
+        dropped[c] = (dropped[c] ?? 0) + 1;
+      }
+      return blocked.length === 0;
+    };
     const items: Item[] = req.items.map((i): Item => {
       switch (i.type) {
         case 'system':
         case 'user':
-          return { ...i, segments: i.segments.map((s) => redactSegment(s, hits)) };
+          return { ...i, segments: i.segments.filter(allowed).map((s) => redactSegment(s, hits)) };
         case 'assistant': {
           const r = redactText(i.text);
           mergeHits(hits, r.hits);
           return { ...i, text: r.text };
         }
         case 'tool_result':
-          return { ...i, output: redactSegment(i.output, hits) };
+          return {
+            ...i,
+            output: allowed(i.output)
+              ? redactSegment(i.output, hits)
+              : {
+                  text: `工具结果含有不允许出境的数据类别（${blockedCategories(i.output, this.categories).join('、')}），内容已删除`,
+                  categories: [],
+                  egress: 'allow',
+                },
+          };
         case 'tool_call':
           return i;
       }
     });
-    return { request: { ...req, items }, hits };
+    return { request: { ...req, items }, hits, dropped };
   }
 
   /** 路由是否允许出站；不允许时抛出，路由配置校验与每次请求都调用 */

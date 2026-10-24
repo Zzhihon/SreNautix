@@ -4,11 +4,26 @@ import { validatorOf, formatErrors } from '../llm/schema.js';
 import type { EvidenceBook } from './evidence.js';
 import type { Ledger, LedgerEntry } from './ledger.js';
 import { auditText, buildCorpus, cardMaterial, type NumberCorpus } from './numbers.js';
-import type { ResearchCase } from './types.js';
 
 // 结论的代码校验（DESIGN §7.3）：删除无效的证据引用；删除目录以外、参数不合 schema、目标与机器推导不一致的提议；
 // 修复建议按同样规则处理并按类别排序、每类最多 3 条。所有修改写入 validation_notes。处置判断在结论阶梯之后由
-// disposition.ts 推导（ADR 0138）。
+// disposition.ts 推导（ADR 0138）。不依赖事件（ADR 0146 §2.7）：校验只用动作目录、runbook 与拓扑组件，
+// 数值审计的语料由调用方给出证据簿之外的材料（事件研判见 incident.ts 的 incidentCorpus）。
+
+/** 结论校验用到的目录：可用动作、runbook 与研判拓扑中的组件 */
+export interface ConclusionCatalog {
+  actions: readonly ActionCatalogAction[];
+  runbooks: readonly string[];
+  subgraph: { nodes: ReadonlyArray<{ component: string; kind: string }> };
+}
+
+/** 证据簿之外可以作为数值依据的材料（研判对象的时间、得分、时间线等） */
+export interface CorpusExtra {
+  texts: readonly string[];
+  numbers: readonly number[];
+  /** 放在证据卡的时刻之前 */
+  times: readonly string[];
+}
 
 export const RECOMMENDATION_ORDER = ['mitigation', 'root_fix', 'prevention', 'investigation'] as const;
 const MAX_PER_KIND = 3;
@@ -100,7 +115,7 @@ export function ledgerPick(ledger: Ledger): LedgerEntry | null {
 
 export function validateConclusion(
   raw: ConcludeOutput,
-  c: ResearchCase,
+  c: ConclusionCatalog,
   book: EvidenceBook,
   ledger: Ledger,
 ): Validated {
@@ -248,11 +263,14 @@ export function validateConclusion(
   };
 }
 
-/** 本次研判的证据语料：证据卡（阶段 A 与检查）、成员告警、变更、事件与候选 */
-export function evidenceCorpus(c: ResearchCase, book: EvidenceBook): NumberCorpus {
+/**
+ * 本次研判的证据语料：证据卡（运行开始时已有的与检查产生的）、告警、变更，以及调用方给出的其他材料
+ * （事件研判为事件与候选、阶段 A 的时间线）。语料是集合，材料的先后不影响审计
+ */
+export function evidenceCorpus(book: EvidenceBook, extra: CorpusExtra): NumberCorpus {
   const texts: string[] = [];
   const numbers: number[] = [];
-  const times: string[] = [c.incident.first_firing_at, c.incident.created_at, c.stageA.rendered_at];
+  const times: string[] = [...extra.times];
   for (const card of book.allCards) {
     const m = cardMaterial(card.result);
     texts.push(...m.texts);
@@ -266,14 +284,8 @@ export function evidenceCorpus(c: ResearchCase, book: EvidenceBook): NumberCorpu
     texts.push(ch.summary, ch.revision ?? '', ch.previous_revision ?? '');
     times.push(ch.time);
   }
-  for (const t of c.stageA.timeline) {
-    texts.push(t.text);
-    times.push(t.at);
-  }
-  numbers.push(...c.incident.candidates.map((x) => x.score));
-  if (c.incident.root.margin !== null) {
-    numbers.push(c.incident.root.margin);
-  }
+  texts.push(...extra.texts);
+  numbers.push(...extra.numbers);
   return buildCorpus(texts, numbers, times);
 }
 

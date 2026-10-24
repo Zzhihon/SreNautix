@@ -1,6 +1,6 @@
 import type { Feedback, Hypothesis } from '@srenautix/contract';
 import type { CardEntry, EvidenceBook } from './evidence.js';
-import { checkDefinition, targets, type Targeting } from './targeting.js';
+import { checkDefinition, INCIDENT_SYMPTOM_RULES, targets, type Targeting, type TypeRule } from './targeting.js';
 import type { Subgraph } from './types.js';
 
 // 假设账本（DESIGN §7.3）：由代码维护，模型只提出假设与检查。状态：
@@ -19,6 +19,11 @@ const SUPPORTING_ROLES: ReadonlySet<string> = new Set(['cause', 'change', 'sympt
 
 export interface LedgerEntry {
   id: string;
+  /**
+   * 假设所解释的对象（ADR 0146 §2.3）：事件研判为空串（全部假设解释同一个事件）；主动优化为发现的指纹，
+   * 不同发现上的假设互不影响
+   */
+  group: string;
   parentId: string | null;
   rootComponent: string;
   mechanism: string;
@@ -43,6 +48,8 @@ export interface ModelHypothesis {
   mechanism: string;
   supporting: string[];
   refuting: string[];
+  /** 假设所解释的对象（LedgerEntry.group）；事件研判没有 */
+  group?: string;
 }
 
 /**
@@ -98,6 +105,35 @@ export function scopeOf(root: string, subgraph: Subgraph): Set<string> {
   return out;
 }
 
+/**
+ * 账本的结构参数（ADR 0146 §2.7）：组件粒度、假设的范围、竞争关系与症状类型规则。
+ * 事件研判用 subgraphFrame（按研判子图；根因组件不同的假设互为竞争假设）；主动优化按发现分组，
+ * 同一发现上的假设互为竞争假设，范围是发现的实体与它挂到的组件（optimize/）。
+ */
+export interface LedgerFrame {
+  /** 组件粒度的根因（ADR 0121） */
+  componentOf(key: string): string;
+  /** 根因组件本身与它拥有的对象 */
+  membersOf(root: string): Set<string>;
+  /** 假设的范围：成员加上直接依赖的对象 */
+  scopeOf(root: string): Set<string>;
+  /** a 是否是 b 的竞争假设（a、b 不是同一个假设） */
+  rivals(a: LedgerEntry, b: LedgerEntry): boolean;
+  /** 检查与机制对应的症状类型规则（ADR 0133） */
+  rules: readonly TypeRule[];
+}
+
+/** 事件研判的账本结构：按研判子图，根因组件不同的假设互为竞争假设（ADR 0121） */
+export function subgraphFrame(subgraph: Subgraph): LedgerFrame {
+  return {
+    componentOf: (key) => ownerOf(key, subgraph),
+    membersOf: (root) => membersOf(root, subgraph),
+    scopeOf: (root) => scopeOf(root, subgraph),
+    rivals: (a, b) => a.rootComponent !== b.rootComponent,
+    rules: INCIDENT_SYMPTOM_RULES,
+  };
+}
+
 function hasData(c: CardEntry): boolean {
   return c.result.verdict !== 'undeterminable';
 }
@@ -105,11 +141,15 @@ function hasData(c: CardEntry): boolean {
 export class Ledger {
   readonly entries = new Map<string, LedgerEntry>();
   private changes = 0;
+  private readonly frame: LedgerFrame;
 
+  /** 第二个参数是研判子图（事件研判，等同 subgraphFrame）或账本结构 */
   constructor(
     private readonly book: EvidenceBook,
-    private readonly subgraph: Subgraph,
-  ) {}
+    structure: Subgraph | LedgerFrame,
+  ) {
+    this.frame = 'rivals' in structure ? structure : subgraphFrame(structure);
+  }
 
   get changeCount(): number {
     return this.changes;
@@ -121,7 +161,7 @@ export class Ledger {
 
   /** 组件粒度的根因（ADR 0121） */
   componentOf(key: string): string {
-    return ownerOf(key, this.subgraph);
+    return this.frame.componentOf(key);
   }
 
   /** 状态签名：用于判断"连续两步判定都没有变化" */
@@ -145,6 +185,7 @@ export class Ledger {
     previous.forEach((h, i) => {
       this.entries.set(h.id, {
         id: h.id,
+        group: '',
         parentId: h.parent_id,
         rootComponent: this.componentOf(h.root_component),
         mechanism: h.mechanism,
@@ -179,13 +220,19 @@ export class Ledger {
       if (root !== h.root_component) {
         notes.push(`假设 ${h.id} 的根因 ${h.root_component} 由 ${root} 拥有，按组件粒度改为 ${root}`);
       }
+      const group = h.group ?? '';
       const prev = this.entries.get(h.id);
-      const kept = prev !== undefined && prev.rootComponent === root ? prev : null;
+      const kept = prev !== undefined && prev.rootComponent === root && prev.group === group ? prev : null;
       if (prev && !kept) {
-        notes.push(`假设 ${h.id} 的根因组件由 ${prev.rootComponent} 改为 ${root}，按新假设重新检验`);
+        notes.push(
+          prev.group === group
+            ? `假设 ${h.id} 的根因组件由 ${prev.rootComponent} 改为 ${root}，按新假设重新检验`
+            : `假设 ${h.id} 所解释的发现由 ${prev.group} 改为 ${group}，按新假设重新检验`,
+        );
       }
       const entry: LedgerEntry = {
         id: h.id,
+        group,
         parentId: h.parent_id && h.parent_id !== h.id ? h.parent_id : null,
         rootComponent: root,
         mechanism: h.mechanism,
@@ -263,6 +310,7 @@ export class Ledger {
       }
       hit = {
         id,
+        group: '',
         parentId: null,
         rootComponent: confirmedRoot,
         mechanism: latest.mechanism ?? '',
@@ -289,8 +337,8 @@ export class Ledger {
    * 根因依赖的对象上的卡只在模型引用时计入：依赖异常同样可以说明依赖本身才是根因。
    */
   supportCards(e: LedgerEntry): CardEntry[] {
-    const scope = scopeOf(e.rootComponent, this.subgraph);
-    const members = membersOf(e.rootComponent, this.subgraph);
+    const scope = this.frame.scopeOf(e.rootComponent);
+    const members = this.frame.membersOf(e.rootComponent);
     const fromRefs = e.supporting.map((r) => this.book.card(r)).filter((c): c is CardEntry => c !== undefined);
     const fromChecks = this.book.allCards.filter((c) => c.hypothesisId === e.id);
     const ownCards = this.book.allCards.filter(
@@ -308,8 +356,8 @@ export class Ledger {
    * meta（观测缺口）与 forecast（预测）不计入。
    */
   supportAlerts(e: LedgerEntry): string[] {
-    const scope = scopeOf(e.rootComponent, this.subgraph);
-    const members = membersOf(e.rootComponent, this.subgraph);
+    const scope = this.frame.scopeOf(e.rootComponent);
+    const members = this.frame.membersOf(e.rootComponent);
     return this.book.alertEntries
       .filter(
         ([ref, m]) =>
@@ -347,7 +395,7 @@ export class Ledger {
     if (c.check === null) {
       return { related: true, basis: '检查未知' };
     }
-    return targets(c.check, e.mechanism, this.supportDefinitions(e));
+    return targets(c.check, e.mechanism, this.supportDefinitions(e), this.frame.rules);
   }
 
   /** 针对假设、并且检验了它的机制的检查卡 */
@@ -360,7 +408,7 @@ export class Ledger {
    * 成员上的这类卡在假设有支持证据时不改变账本状态（ADR 0121），但结论阶梯据此把档位限制在 inconclusive
    */
   refutingChecks(e: LedgerEntry): CardEntry[] {
-    const scope = scopeOf(e.rootComponent, this.subgraph);
+    const scope = this.frame.scopeOf(e.rootComponent);
     return this.book.allCards.filter(
       (c) =>
         c.result.verdict === 'normal' && (c.component === null || scope.has(c.component)) && this.relatedCheck(e, c),
@@ -373,7 +421,7 @@ export class Ledger {
    * 模型明确引用为反驳证据的卡。
    */
   contraryCards(e: LedgerEntry): CardEntry[] {
-    const scope = scopeOf(e.rootComponent, this.subgraph);
+    const scope = this.frame.scopeOf(e.rootComponent);
     const supportDefs = new Set(this.supportCards(e).map((c) => c.result.card_id));
     return this.book.allCards.filter(
       (c) =>
@@ -396,8 +444,8 @@ export class Ledger {
       // 检查卡判定为正常时直接推翻假设的，只有实体是根因本身或它直接依赖的对象的卡，以及实体未知的卡（工具结果）；
       // 实体是根因拥有的某个成员（例如多副本中的一个 Pod）的正常卡只作为相反的正常卡，在没有支持证据时才推翻（ADR 0121）；
       // 测的信号不属于假设机制的检查卡记为无关，不推翻（ADR 0133）
-      const scope = scopeOf(e.rootComponent, this.subgraph);
-      const members = membersOf(e.rootComponent, this.subgraph);
+      const scope = this.frame.scopeOf(e.rootComponent);
+      const members = this.frame.membersOf(e.rootComponent);
       const checks = this.book.allCards.filter(
         (c) =>
           this.relatedCheck(e, c) &&
@@ -479,11 +527,16 @@ export class Ledger {
   }
 
   /**
-   * 竞争假设：根因组件与 leader 不同的假设。同一组件上的多个假设（不同机制）都在解释同一个根因，
-   * 它们之间不构成根因的竞争（ADR 0121）
+   * 竞争假设，按账本结构的 rivals 判断。事件研判为根因组件与 leader 不同的假设：同一组件上的多个假设（不同机制）
+   * 都在解释同一个根因，它们之间不构成根因的竞争（ADR 0121）
    */
   competitors(leader: LedgerEntry): LedgerEntry[] {
-    return this.list().filter((e) => e.id !== leader.id && e.rootComponent !== leader.rootComponent);
+    return this.list().filter((e) => e.id !== leader.id && this.frame.rivals(e, leader));
+  }
+
+  /** 账本结构的症状类型规则（控制器补选检查时与账本用同一套） */
+  get rules(): readonly TypeRule[] {
+    return this.frame.rules;
   }
 
   /** 竞争假设是否都已推翻或检验后无法判定 */

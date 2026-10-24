@@ -83,7 +83,11 @@ export async function buildWorker(o: BuildWorkerOptions): Promise<WorkerHandle> 
   const store = new WorkerStore(pool);
 
   const egress = new Egress(
-    { allowCrossBorder: c.raw.llm.allow_cross_border, honeytokens: c.honeytokens },
+    {
+      allowCrossBorder: c.raw.llm.allow_cross_border,
+      honeytokens: c.honeytokens,
+      ...(c.raw.llm.egress ? { categories: c.raw.llm.egress.categories } : {}),
+    },
     (reason) => {
       metrics.egressHalted.set(1);
       metrics.condition.set({ role: 'worker', type: 'egress_halted' }, 1);

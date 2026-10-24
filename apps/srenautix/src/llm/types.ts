@@ -1,7 +1,36 @@
 // 模型层的内部类型：两种 OpenAI 协议共用的消息模型、请求与回合
 
-/** 出境数据类别（研判清单 EgressEntry.categories） */
-export type EgressCategory = 'metrics' | 'logs' | 'traces' | 'events' | 'topology' | 'changes' | 'alerts' | 'knowledge';
+/**
+ * 出境数据类别（研判清单 EgressEntry.categories）。sql（规范化语句文本）与 code（业务代码片段）只来自主动优化
+ * （ADR 0146 §3.6），只在 llm.egress.categories 列出时出境
+ */
+export type EgressCategory =
+  'metrics' | 'logs' | 'traces' | 'events' | 'topology' | 'changes' | 'alerts' | 'knowledge' | 'sql' | 'code';
+
+export const EGRESS_CATEGORIES: readonly EgressCategory[] = [
+  'metrics',
+  'logs',
+  'traces',
+  'events',
+  'topology',
+  'changes',
+  'alerts',
+  'knowledge',
+  'sql',
+  'code',
+];
+
+/** 没有配置 llm.egress.categories 时允许出境的类别：事件研判一直使用的类别，不含 sql 与 code */
+export const DEFAULT_EGRESS_CATEGORIES: readonly EgressCategory[] = [
+  'metrics',
+  'logs',
+  'traces',
+  'events',
+  'topology',
+  'changes',
+  'alerts',
+  'knowledge',
+];
 
 /**
  * 一段提示词文本及其携带的数据类别；固定指令没有类别。

@@ -1,4 +1,5 @@
 import type { ConclusionLevel, ConsistencyDetail, Incident } from '@srenautix/contract';
+import type { CardEntry } from './evidence.js';
 import type { Ledger, LedgerEntry } from './ledger.js';
 
 // 结论阶梯（DESIGN §7.3）。evidence_consistent 只能由代码判定，四个条件同时满足：
@@ -51,31 +52,75 @@ function testedCompetitors(ledger: Ledger, chosen: LedgerEntry): string[] {
     .sort();
 }
 
+/**
+ * 选中假设的证据条件（ADR 0146 §2.7 从结论阶梯中拆出，事件与主动优化的阶梯共用）：支持卡（规则判定与模型判定）、
+ * 支持的成员告警、规则判定的支持卡中最早的异常起始、相反的正常卡、竞争假设的检验情况。
+ * 事件研判在它之上判定"异常起始不晚于症状"，主动优化判定差距与份额（optimize/ladder.ts）。
+ */
+export interface EvidenceConditions {
+  support: CardEntry[];
+  ruleSupport: CardEntry[];
+  modelSupport: CardEntry[];
+  supportAlerts: string[];
+  /** 规则判定的支持卡中有异常起始时间的，按时间与编号排序 */
+  onsets: Array<{ ref: string; at: string }>;
+  contrary: CardEntry[];
+  competitorTested: boolean;
+  testedCompetitors: string[];
+  supportedCompetitors: string[];
+}
+
+export function evidenceConditions(ledger: Ledger, chosen: LedgerEntry): EvidenceConditions {
+  const support = ledger.supportCards(chosen);
+  const ruleSupport = support.filter((c) => c.judgedBy === 'rule');
+  const onsets = ruleSupport
+    .filter((c) => c.result.anomaly_started_at !== null && c.result.anomaly_started_at !== undefined)
+    .map((c) => ({ ref: c.ref, at: c.result.anomaly_started_at as string }))
+    .sort((a, b) => Date.parse(a.at) - Date.parse(b.at) || a.ref.localeCompare(b.ref, 'en', { numeric: true }));
+  return {
+    support,
+    ruleSupport,
+    modelSupport: support.filter((c) => c.judgedBy === 'model'),
+    supportAlerts: ledger.supportAlerts(chosen),
+    onsets,
+    contrary: ledger.contraryCards(chosen),
+    competitorTested: ledger.competitorTested(chosen),
+    testedCompetitors: testedCompetitors(ledger, chosen),
+    supportedCompetitors: ledger
+      .supportedCompetitors(chosen)
+      .map((e) => e.id)
+      .sort(),
+  };
+}
+
+/**
+ * 选中假设自己的检查给出推翻结果时的原因（ADR 0134 的第一项，见 contraryLimits）：针对它、实体在范围内、
+ * 测的信号属于它的机制的检查卡判定为正常。没有时为 null
+ */
+export function ownRefutation(ledger: Ledger, chosen: LedgerEntry): string | null {
+  const refuting = ledger.refutingChecks(chosen);
+  return refuting.length
+    ? `自己的检查给出推翻结果（${refuting.map((c) => `${c.ref} ${c.check ?? c.result.card_id}`).join('、')}）`
+    : null;
+}
+
 function detailOf(
   ledger: Ledger,
   chosen: LedgerEntry,
   incident: Incident,
   chosenBy: 'model' | 'ledger' | null,
 ): ConsistencyDetail {
-  const support = ledger.supportCards(chosen);
-  const rule = support.filter((c) => c.judgedBy === 'rule');
-  const onsets = rule
-    .filter((c) => c.result.anomaly_started_at !== null && c.result.anomaly_started_at !== undefined)
-    .map((c) => ({ ref: c.ref, at: c.result.anomaly_started_at as string }))
-    .sort((a, b) => Date.parse(a.at) - Date.parse(b.at) || a.ref.localeCompare(b.ref, 'en', { numeric: true }));
+  const e = evidenceConditions(ledger, chosen);
   return {
-    support_refs: rule.map((c) => c.ref),
-    model_judged_refs: support.filter((c) => c.judgedBy === 'model').map((c) => c.ref),
-    support_alerts: ledger.supportAlerts(chosen),
-    onset: onsets[0] ?? null,
+    support_refs: e.ruleSupport.map((c) => c.ref),
+    model_judged_refs: e.modelSupport.map((c) => c.ref),
+    support_alerts: e.supportAlerts,
+    onset: e.onsets[0] ?? null,
     symptom_onset_at: new Date(symptomOnset(incident)).toISOString(),
     tolerance_seconds: ONSET_TOLERANCE_MS / 1000,
-    contrary_refs: ledger.contraryCards(chosen).map((c) => c.ref),
-    tested_competitors: testedCompetitors(ledger, chosen),
-    supported_competitors: ledger
-      .supportedCompetitors(chosen)
-      .map((e) => e.id)
-      .sort(),
+    contrary_refs: e.contrary.map((c) => c.ref),
+    tested_competitors: e.testedCompetitors,
+    supported_competitors: e.supportedCompetitors,
     chosen_by: chosenBy ?? 'model',
   };
 }
@@ -172,9 +217,9 @@ export function judgeLadder(
  */
 export function contraryLimits(ledger: Ledger, chosen: LedgerEntry, incident: Incident): string[] {
   const out: string[] = [];
-  const refuting = ledger.refutingChecks(chosen);
-  if (refuting.length) {
-    out.push(`自己的检查给出推翻结果（${refuting.map((c) => `${c.ref} ${c.check ?? c.result.card_id}`).join('、')}）`);
+  const own = ownRefutation(ledger, chosen);
+  if (own) {
+    out.push(own);
   }
   // 只和真实的症状比：事件没有 symptom 角色的成员告警时，symptomOnset 退回事件首次触发时间，那可能是更早一段的
   // cause 或 change 告警，不能据此说异常晚于症状

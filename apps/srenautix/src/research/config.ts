@@ -5,6 +5,7 @@ import { z } from 'zod';
 import type { ModelRoute } from '@srenautix/contract';
 import { readSecretFile } from '../config/files.js';
 import { DEFAULT_BUDGET, type BudgetConfig } from '../llm/budget.js';
+import { EGRESS_CATEGORIES, type EgressCategory } from '../llm/types.js';
 import { resolveTimeouts, type ModelClass, type RouteTimeouts } from '../llm/timeouts.js';
 import type { McpServerConfig } from '../tools/mcp.js';
 import { DEFAULT_LIMITS, type ResearchLimits } from './controller.js';
@@ -22,6 +23,7 @@ import { DEFAULT_LIMITS, type ResearchLimits } from './controller.js';
 //   llm:
 //     allow_cross_border: false
 //     honeytokens_file: /etc/srenautix/secrets/honeytokens
+//     egress: { categories: [metrics, logs, traces, events, topology, changes, alerts, knowledge, sql, code] }
 //     probe_on_start: true
 //     routes: [ … 与 eval 配置相同 … ]      # 每条路由可选 model_class 与 timeouts: { first_token, idle, total }（ADR 0098）
 //   budget: { daily_tokens: 15000000, daily_warn_ratio: 0.8, on_exhausted: critical_only, per_research_input_tokens: 150000 }
@@ -109,6 +111,11 @@ export const workerConfigSchema = z
       .object({
         allow_cross_border: z.boolean().default(false),
         honeytokens_file: z.string().optional(),
+        // 允许出境的数据类别（ADR 0146 §3.6）；没有时为事件研判一直使用的类别，不含 sql 与 code
+        egress: z
+          .object({ categories: z.array(z.enum(EGRESS_CATEGORIES as [EgressCategory, ...EgressCategory[]])).min(1) })
+          .strict()
+          .optional(),
         probe_on_start: z.boolean().default(true),
         // 旧配置：只作为没有声明 timeouts.total 的路由的总时长上限；首 token 与空闲超时按模型类别（ADR 0098）
         call_timeout: duration.optional(),

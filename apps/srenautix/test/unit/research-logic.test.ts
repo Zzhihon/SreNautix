@@ -4,9 +4,8 @@ import { DEFAULT_BUDGET } from '../../src/llm/budget.js';
 import { Egress } from '../../src/llm/egress.js';
 import { buildRuntimes } from '../../src/llm/routes.js';
 import { ModelLayer } from '../../src/llm/session.js';
-import { supplementChecks } from '../../src/research/checks.js';
 import { DEFAULT_LIMITS, runStageB } from '../../src/research/controller.js';
-import { EvidenceBook } from '../../src/research/evidence.js';
+import { incidentBook, incidentSupplement } from '../../src/research/incident.js';
 import { judgeLadder, symptomOnset } from '../../src/research/ladder.js';
 import { Ledger, ownerOf, scopeOf } from '../../src/research/ledger.js';
 import { WorkerMetrics } from '../../src/research/metrics.js';
@@ -20,7 +19,7 @@ const API = 'Deployment:shop/api';
 
 function setup(cards: EvidenceResult[] = stageACards()) {
   const rc = researchCase({ stageA: stageA(cards) });
-  const book = new EvidenceBook(rc);
+  const book = incidentBook(rc);
   const ledger = new Ledger(book, rc.subgraph);
   return { rc, book, ledger };
 }
@@ -402,7 +401,7 @@ describe('成员告警作为支持证据（ADR 0122）', () => {
     expect(ledger.supportAlerts(ledger.entries.get('h2') as never)).toEqual([]);
     const meta = setup();
     (meta.rc.incident.members[1] as { role: string }).role = 'meta';
-    const book2 = new EvidenceBook(meta.rc);
+    const book2 = incidentBook(meta.rc);
     const l2 = new Ledger(book2, meta.rc.subgraph);
     l2.merge([hyp('h1', API, [])], []);
     expect(l2.supportAlerts(l2.entries.get('h1') as never)).toEqual([]);
@@ -519,7 +518,7 @@ describe('组件粒度（ADR 0121）', () => {
     };
     const card = { ...checkCard(POD, 'abnormal', -5), ref: 'card:1', card_id: 'pod/restarts' };
     const rc = researchCase({ subgraph: g, stageA: stageA([card]) });
-    const book = new EvidenceBook(rc);
+    const book = incidentBook(rc);
     return { rc, book, ledger: new Ledger(book, rc.subgraph), g };
   }
 
@@ -630,7 +629,7 @@ describe('next_checks 为空时控制器补选（ADR 0137）', () => {
 
   function setupHyps() {
     const rc = researchCase({ templates });
-    const book = new EvidenceBook(rc);
+    const book = incidentBook(rc);
     const ledger = new Ledger(book, rc.subgraph);
     ledger.merge(
       [
@@ -647,7 +646,7 @@ describe('next_checks 为空时控制器补选（ADR 0137）', () => {
 
   it('只取事件组件上的卡片检查，每个假设一项、测的信号与机制对应，按清单顺序取第一项，最多 3 项', () => {
     const { rc, ledger } = setupHyps();
-    const out = supplementChecks(rc, ledger, ledger.list(), new Set(), 'zh');
+    const out = incidentSupplement(rc, ledger, ledger.list(), new Set(), 'zh');
     expect(out.map((c) => [c.hypothesis_id, c.template, c.type, c.args_json])).toEqual([
       // 重启卡测的是重启，h1 的机制是内存：跳过，取内存卡
       ['h1', `cardcheck:workload/pod-restarts/memory@${PG}`, 'query', '{}'],
@@ -661,15 +660,15 @@ describe('next_checks 为空时控制器补选（ADR 0137）', () => {
   it('本次运行已执行过的检查不再补选；没有适用的卡片检查时不补', () => {
     const { rc, ledger } = setupHyps();
     const done = new Set([`h3:cardcheck:workload/pod-restarts/memory@${API}:{}`]);
-    expect(supplementChecks(rc, ledger, ledger.list(), done, 'zh').map((c) => c.hypothesis_id)).toEqual([
+    expect(incidentSupplement(rc, ledger, ledger.list(), done, 'zh').map((c) => c.hypothesis_id)).toEqual([
       'h1',
       'h4',
       'h5',
     ]);
     const bare = researchCase({ templates: [tpl('kube_events')] });
-    const l = new Ledger(new EvidenceBook(bare), bare.subgraph);
+    const l = new Ledger(incidentBook(bare), bare.subgraph);
     l.merge([hyp('h1', PG)], []);
-    expect(supplementChecks(bare, l, l.list(), new Set(), 'zh')).toEqual([]);
+    expect(incidentSupplement(bare, l, l.list(), new Set(), 'zh')).toEqual([]);
   });
 });
 

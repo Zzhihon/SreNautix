@@ -110,6 +110,13 @@ export class WorkerMetrics extends BaseMetrics {
     registers: [this.registry],
   });
 
+  readonly egressDropped = new Counter({
+    name: 'srenautix_egress_dropped_segments_total',
+    help: '出站前因数据类别不在 llm.egress.categories 中而删除的提示词片段数，按类别（ADR 0146 §3.6）',
+    labelNames: ['category'] as const,
+    registers: [this.registry],
+  });
+
   readonly redactionHits = new Counter({
     name: 'srenautix_egress_redaction_hits_total',
     help: '出站前脱敏命中次数，按类别',

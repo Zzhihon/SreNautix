@@ -1,7 +1,7 @@
 import type { ConcludeOutput, EvidenceResult, ResearchOutput } from '@srenautix/contract';
 import { describe, expect, it } from 'vitest';
 import { topComponents } from '../../src/eval/score.js';
-import { EvidenceBook } from '../../src/research/evidence.js';
+import { incidentBook } from '../../src/research/incident.js';
 import { judgeLadder } from '../../src/research/ladder.js';
 import { Ledger } from '../../src/research/ledger.js';
 import { mechanismTypes, signalTypes, targets } from '../../src/research/targeting.js';
@@ -83,7 +83,7 @@ function graph(nodes: string[], edges: Array<[string, string, string]>): Subgrap
 
 function setup(cards: EvidenceResult[], sg: Subgraph) {
   const rc = researchCase({ stageA: stageA(cards), subgraph: sg });
-  const book = new EvidenceBook(rc);
+  const book = incidentBook(rc);
   return { rc, book, ledger: new Ledger(book, rc.subgraph) };
 }
 

@@ -28,6 +28,10 @@ language: zh                         # 提示词模板与修复说明的语言�
 llm:
   allow_cross_border: false          # 国内配置默认禁止 in_domain: false 的路由
   honeytokens_file: /etc/srenautix/secrets/honeytokens   # 每行一个蜜标，至少 16 个字符
+  # 允许出境的数据类别（ADR 0146 §3.6）；不在其中的提示词片段出站前删除，计入
+  # srenautix_egress_dropped_segments_total{category} 与调用记录的说明。省略时为
+  # metrics、logs、traces、events、topology、changes、alerts、knowledge（不含主动优化的 sql 与 code）
+  # egress: { categories: [metrics, logs, traces, events, topology, changes, alerts, knowledge, sql, code] }
   probe_on_start: true               # 启动时逐条路由探测能力
   # call_timeout: 90s                # 旧配置，可省略：只作为没有声明 timeouts.total 的路由的总上限
   routes:

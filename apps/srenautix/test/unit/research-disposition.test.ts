@@ -8,7 +8,7 @@ import {
   templateRoot,
   type DispositionInput,
 } from '../../src/research/disposition.js';
-import { EvidenceBook } from '../../src/research/evidence.js';
+import { incidentBook } from '../../src/research/incident.js';
 import { Ledger } from '../../src/research/ledger.js';
 import { dispositionSegment } from '../../src/research/prompt.js';
 import type { DispositionFacts } from '../../src/research/types.js';
@@ -21,7 +21,7 @@ const PROVIDER = 'provider:openai';
 
 function cardsOf(cards: EvidenceResult[]) {
   const rc = researchCase({ stageA: stageA(cards) });
-  return new EvidenceBook(rc).allCards;
+  return incidentBook(rc).allCards;
 }
 
 function input(over: Partial<DispositionInput> = {}): DispositionInput {
@@ -85,7 +85,7 @@ describe('处置推导', () => {
       ...c,
       verdict: c.verdict === 'abnormal' ? ('normal' as const) : c.verdict,
     }));
-    const book = new EvidenceBook(researchCase({ stageA: stageA(normal) }));
+    const book = incidentBook(researchCase({ stageA: stageA(normal) }));
     expect(deriveDisposition(input({ cards: book.allCards })).basis).toBe('evidence_normal');
     book.addCheckCard({ ...normal[0]!, verdict: 'abnormal', display_state: 'abnormal' }, 'h1', 'model');
     expect(deriveDisposition(input({ cards: book.allCards })).disposition).toBe('ignore');
@@ -226,7 +226,7 @@ describe('conclude 的处置依据段', () => {
         },
       ],
     });
-    const ledger = new Ledger(new EvidenceBook(rc), rc.subgraph);
+    const ledger = new Ledger(incidentBook(rc), rc.subgraph);
     expect(dispositionSegment(rc, ledger)).toEqual([]);
     ledger.merge([{ id: 'h1', parent_id: null, root_component: PG, mechanism: 'x', supporting: [], refuting: [] }], []);
     const [segment] = dispositionSegment(rc, ledger);

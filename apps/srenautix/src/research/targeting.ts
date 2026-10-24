@@ -3,6 +3,8 @@ import { parseCardCheckId } from '../stage-a/card-checks.js';
 // 推翻要有针对性（ADR 0133）：一张检查卡只有在它测的信号属于假设机制所预测的症状时，才能推翻这个假设。
 // 信号与机制都归到同一组症状类型：检查的类型取检查 id（卡片检查 `cardcheck:<包>/<链>/<卡>@<组件>` 或查询模板
 // `<包>/<id>`）里的名字，机制的类型取假设机制文字里的关键词（中英文）。两边都归不出类型时不做判断，检查照常计入。
+// 规则集是参数（ADR 0146 §2.7）：事件研判用 INCIDENT_SYMPTOM_RULES；主动优化在它之上增加自己的症状类型
+// （optimize/symptoms.ts），事件研判的判断不受影响。
 
 export type SymptomType =
   | 'crash'
@@ -22,15 +24,16 @@ export type SymptomType =
   | 'service'
   | 'scrape';
 
-interface TypeRule {
-  type: SymptomType;
+export interface TypeRule<T extends string = string> {
+  type: T;
   /** 假设机制文字中预示这类症状的词 */
   mechanism: RegExp;
   /** 检查 id 的名字段中表示测这类信号的词 */
   signal: RegExp;
 }
 
-const RULES: readonly TypeRule[] = [
+/** 事件研判的症状类型规则（ADR 0133） */
+export const INCIDENT_SYMPTOM_RULES: readonly TypeRule<SymptomType>[] = [
   {
     type: 'crash',
     mechanism: /重启|崩溃|不稳定|异常退出|退出码|被杀|\b(?:crash|restart|oom|unstable|exit code|killed)/i,
@@ -104,13 +107,13 @@ const RULES: readonly TypeRule[] = [
 ];
 
 /** 假设机制文字预示的症状类型 */
-export function mechanismTypes(mechanism: string): Set<SymptomType> {
-  return new Set(RULES.filter((r) => r.mechanism.test(mechanism)).map((r) => r.type));
+export function mechanismTypes(mechanism: string, rules: readonly TypeRule[] = INCIDENT_SYMPTOM_RULES): Set<string> {
+  return new Set(rules.filter((r) => r.mechanism.test(mechanism)).map((r) => r.type));
 }
 
-function nameTypes(name: string): Set<SymptomType> {
+function nameTypes(name: string, rules: readonly TypeRule[]): Set<string> {
   const n = name.toLowerCase();
-  return new Set(RULES.filter((r) => r.signal.test(n)).map((r) => r.type));
+  return new Set(rules.filter((r) => r.signal.test(n)).map((r) => r.type));
 }
 
 /**
@@ -128,13 +131,13 @@ const GENERIC_NAMES: ReadonlySet<string> = new Set(['errors', 'condition', 'cond
  * 例如 `workload/pod-restarts/memory` 测内存，`node/node-network/errors` 测网络，
  * `cchp-alerts/cnpg-instance-restarted/condition` 测重启
  */
-export function signalTypes(check: string): Set<SymptomType> {
+export function signalTypes(check: string, rules: readonly TypeRule[] = INCIDENT_SYMPTOM_RULES): Set<string> {
   const parts = checkDefinition(check).split('/').reverse();
   for (const p of parts) {
     if (GENERIC_NAMES.has(p.toLowerCase())) {
       continue;
     }
-    const t = nameTypes(p);
+    const t = nameTypes(p, rules);
     if (t.size) {
       return t;
     }
@@ -152,12 +155,17 @@ export interface Targeting {
  * 检查与假设机制是否对应：检查测的信号类型与机制预示的症状类型有交集；或检查测的卡片定义与假设的某张支持卡相同
  * （机制的症状已经在这个信号上出现）。任一边归不出类型时视为对应。
  */
-export function targets(check: string, mechanism: string, supportDefinitions: ReadonlySet<string>): Targeting {
-  const signal = signalTypes(check);
+export function targets(
+  check: string,
+  mechanism: string,
+  supportDefinitions: ReadonlySet<string>,
+  rules: readonly TypeRule[] = INCIDENT_SYMPTOM_RULES,
+): Targeting {
+  const signal = signalTypes(check, rules);
   if (signal.size === 0) {
     return { related: true, basis: '检查的信号类型未知' };
   }
-  const mech = mechanismTypes(mechanism);
+  const mech = mechanismTypes(mechanism, rules);
   if (mech.size === 0) {
     return { related: true, basis: '假设机制的症状类型未知' };
   }

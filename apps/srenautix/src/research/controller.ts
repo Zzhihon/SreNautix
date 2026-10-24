@@ -10,20 +10,20 @@ import {
   checkKey,
   inferCheckTemplates,
   runCheck,
-  supplementChecks,
   vetCheck,
   type ExecutedCheck,
   type NextCheck,
   type QueryRunner,
 } from './checks.js';
-import { EvidenceBook } from './evidence.js';
+import type { EvidenceBook } from './evidence.js';
 import { deriveDisposition } from './disposition.js';
+import { incidentBook, incidentCorpus, incidentSupplement } from './incident.js';
 import { judgeLadder } from './ladder.js';
-import { Ledger } from './ledger.js';
+import { Ledger, subgraphFrame } from './ledger.js';
 import type { WorkerMetrics } from './metrics.js';
 import { componentChoices, concludeItems, hypothesizeItems, promptParts } from './prompt.js';
 import type { PreviousRun, ResearchCase } from './types.js';
-import { auditModelText, evidenceCorpus, renumberRecommendations, validateConclusion } from './validate.js';
+import { auditModelText, renumberRecommendations, validateConclusion } from './validate.js';
 
 // 阶段 B 控制器（DESIGN §7.2–§7.4）：hypothesize → discriminate（可多轮）→ conclude。
 // 模型只提出假设、检查与结论文字；账本状态、停止规则、结论阶梯与校验都由代码决定。
@@ -139,8 +139,8 @@ export async function runStageB(input: ResearchRunInput, env: ResearchEnv, sink:
   const { rc, previous, runId } = input;
   const started = env.now();
   const deadline = started + env.limits.deadlineMs;
-  const book = new EvidenceBook(rc);
-  const ledger = new Ledger(book, rc.subgraph);
+  const book = incidentBook(rc);
+  const ledger = new Ledger(book, subgraphFrame(rc.subgraph));
   const budgetLedger = new ResearchLedger(env.layer.opts.budget);
   const notes: string[] = [];
   const checks: ExecutedCheck[] = [];
@@ -312,7 +312,7 @@ export async function runStageB(input: ResearchRunInput, env: ResearchEnv, sink:
       evidence_index: book.evidenceMap(),
     };
     // 模型文字的数值审计（ADR 0125）
-    const audited = auditModelText(draft, evidenceCorpus(rc, book));
+    const audited = auditModelText(draft, incidentCorpus(rc, book));
     notes.push(...audited.notes);
     const result: ResearchOutput = { ...audited.output, validation_notes: notes };
     return finish({ state: 'completed', stopReason, output: result, error: null, stillConsistent: false });
@@ -383,7 +383,7 @@ export async function runStageB(input: ResearchRunInput, env: ResearchEnv, sink:
     // 模型一项检查都没有给出：事件的组件有适用的卡片检查时，由控制器按相关性补选（ADR 0137）
     let proposed = hyp.value.next_checks;
     if (proposed.length === 0) {
-      proposed = supplementChecks(rc, ledger, openEntries, done, env.language);
+      proposed = incidentSupplement(rc, ledger, openEntries, done, env.language);
       if (proposed.length) {
         notes.push(
           `第 ${step} 轮 hypothesize 没有给出 next_checks，控制器按相关性补选 ${proposed.length} 项卡片检查：${proposed
@@ -398,7 +398,7 @@ export async function runStageB(input: ResearchRunInput, env: ResearchEnv, sink:
       if (!open.has(c.hypothesis_id) || seen.has(c.hypothesis_id) || done.has(checkKey(c))) {
         continue;
       }
-      const vet = vetCheck(c, rc, box);
+      const vet = vetCheck(c, rc.templates, box);
       if ('error' in vet) {
         notes.push(`检查 ${c.template}（假设 ${c.hypothesis_id}）：${vet.error}，未执行`);
         checks.push({ check: c, args: {}, outcome: 'failed', card: null, tool: null, error: vet.error });
@@ -420,7 +420,8 @@ export async function runStageB(input: ResearchRunInput, env: ResearchEnv, sink:
       done.add(checkKey(p.check));
       const executed = await runCheck(
         {
-          rc,
+          templates: rc.templates,
+          clusterId: rc.incident.cluster_id,
           book,
           ledger,
           box,

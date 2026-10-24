@@ -1,9 +1,22 @@
 import type { ChangeEvent, EntityRef, EvidenceResult, IncidentMember } from '@srenautix/contract';
 import { tryNodeKey } from '@srenautix/core';
-import type { ResearchCase } from './types.js';
 
-// 一次研判运行内的证据编号（契约 EvidenceRef）：card:<n> 指证据卡结果（阶段 A 的卡在前，区分性检查产生的卡在后），
+// 一次研判运行内的证据编号（契约 EvidenceRef）：card:<n> 指证据卡结果（运行开始时已有的卡在前，区分性检查产生的卡在后），
 // alert:<n> 指成员告警，change:<n> 指关联的变更。编号到定义与实体的映射写入研判清单的 evidence_map。
+// 证据簿不依赖事件（ADR 0146 §2.7）：事件研判由 research/incident.ts 的 incidentBook 填入阶段 A 的卡、
+// 仍在事件中的成员告警与变更；主动优化填入诊断卡、份额卡与变更，没有告警。
+
+/** 证据簿开始时的内容 */
+export interface BookInput {
+  /** 已有的证据卡，按 ref 编号（card:<n>） */
+  cards: readonly EvidenceResult[];
+  /** 告警，按顺序编号为 alert:<n> */
+  alerts: readonly IncidentMember[];
+  /** 研判对象本身的变更，按顺序编号为 change:<n> */
+  changes: readonly ChangeEvent[];
+  /** 同一时段触及范围、但不属于研判对象的变更，接在 changes 后面编号，related 标出它们 */
+  relatedChanges: readonly ChangeEvent[];
+}
 
 export function entityKey(e: EntityRef | null): string | null {
   if (!e) {
@@ -30,15 +43,15 @@ export class EvidenceBook {
   private readonly changes = new Map<string, ChangeEvent>();
   private next = 1;
 
-  constructor(c: ResearchCase) {
-    for (const r of c.stageA.cards) {
+  constructor(input: BookInput) {
+    for (const r of input.cards) {
       this.addCard(r, null, 'rule', r.ref);
     }
-    c.incident.members.filter((m) => m.left_version === null).forEach((m, i) => this.alerts.set(`alert:${i + 1}`, m));
-    c.incident.changes.forEach((ch, i) => this.changes.set(`change:${i + 1}`, ch));
-    // 相关变更接在事件的变更后面编号；related 标出它们不在事件里
-    const n = c.incident.changes.length;
-    (c.relatedChanges ?? []).forEach((ch, i) => {
+    input.alerts.forEach((m, i) => this.alerts.set(`alert:${i + 1}`, m));
+    input.changes.forEach((ch, i) => this.changes.set(`change:${i + 1}`, ch));
+    // 相关变更接在研判对象的变更后面编号；related 标出它们不在研判对象里
+    const n = input.changes.length;
+    input.relatedChanges.forEach((ch, i) => {
       this.changes.set(`change:${n + i + 1}`, ch);
       this.related.add(`change:${n + i + 1}`);
     });

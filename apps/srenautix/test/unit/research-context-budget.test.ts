@@ -6,7 +6,7 @@ import { bindSchema, modelSchema } from '../../src/llm/schema.js';
 import type { LlmTurn } from '../../src/llm/types.js';
 import { segmentsText } from '../../src/llm/wire.js';
 import { inferCheckTemplates } from '../../src/research/checks.js';
-import { EvidenceBook } from '../../src/research/evidence.js';
+import { incidentBook } from '../../src/research/incident.js';
 import { Ledger } from '../../src/research/ledger.js';
 import { renumberRecommendations } from '../../src/research/validate.js';
 import {
@@ -91,7 +91,7 @@ const text = (items: ReturnType<typeof hypothesizeItems>) =>
 
 describe('卡多的事件', () => {
   const rc = researchCase({ stageA: stageA(manyCards()), subgraph: podSubgraph() });
-  const book = new EvidenceBook(rc);
+  const book = incidentBook(rc);
 
   it('只完整放入结论相关的卡（按相关性取前 40 张），其余结论相关的卡只列判定，无关的卡写成按证据链计数的摘要', () => {
     const { included, listed, summarized } = selectCards(book, rc, 400_000);
@@ -123,7 +123,7 @@ describe('卡多的事件', () => {
 
   it('卡不多时全部完整放入', () => {
     const small = researchCase();
-    const s = selectCards(new EvidenceBook(small), small, 400_000);
+    const s = selectCards(incidentBook(small), small, 400_000);
     expect(s.listed).toEqual([]);
     expect(s.summarized).toEqual([]);
     expect(s.included).toHaveLength(small.stageA.cards.length);

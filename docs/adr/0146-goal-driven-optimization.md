@@ -234,6 +234,10 @@ stateDiagram-v2
 
 采用第二种。共用模块整理是行为不变的重构：`Ledger` 的分组键参数化（默认根因组件），`judgeLadder` 拆出条件计算，`checks.ts`、`targeting.ts`、`evidence.ts`、`numbers.ts`、`validate.ts` 不依赖 `Incident` 类型。研判运行表 `worker.research_runs` 增加 `subject_type`（`incident`、`goal`）与 `goal_id`，`incident_id` 改为可空；`llm_calls`、`tool_calls`、出境清单与控制台的运行明细页沿用。
 
+账本的"分组键"实现为账本结构 `LedgerFrame`：组件粒度、假设的范围与成员、症状类型规则，以及竞争关系 `rivals(a, b)`。一个分组键表达不了两种竞争关系：事件研判中根因组件不同的假设互为竞争假设（同一组件上的不同机制不竞争，ADR 0121），优化中同一发现上的假设互为竞争假设、不同发现互不影响（§2.3）。因此账本条目带 `group`（事件为空串，优化为发现指纹），事件研判用 `subgraphFrame`（按研判子图），优化控制器提供自己的结构。症状类型规则同样是参数，优化增加的类型（§2.3）只在优化的账本中生效。
+
+共用模块整理的验证：在整理前的代码（11b3804）上以快照模式录制 20 个用例的 trace（`~/srenautix-seeds/traces/2026-10-24-refactor-baseline/`），在整理前后的代码上复用录下的模型响应离线重算，输出、检查、token 用量与调用序列逐字段一致，每次请求体的 sha256 与录制时相同。
+
 ### 3. 数据接入
 
 #### 3.1 信号与工具
@@ -300,6 +304,8 @@ stateDiagram-v2
 | 业务代码片段 | code（新增） | 用户另行批准（2026-10-24） |
 
 worker 的出境模块按 `llm.egress.categories`（新配置，chart 默认只含 #141 批准的类别，CCHP 的 values 加上 sql、traces、code）检查每个片段；不在其中的类别在进入提示词之前删除，出境清单记录删除次数。
+
+worker 在没有配置 `llm.egress.categories` 时允许的是事件研判一直使用的 8 个类别（metrics、logs、traces、events、topology、changes、alerts、knowledge），不含 sql 与 code：证据卡片段同时标有 metrics、logs、traces、events，代码里的默认值若只含 #141 的类别，事件研判的提示词就会变化。按 #141 收窄由 chart 的默认 values 完成。删除次数另外计入 `srenautix_egress_dropped_segments_total{category}` 与调用记录的说明。
 
 ### 4. 输出
 

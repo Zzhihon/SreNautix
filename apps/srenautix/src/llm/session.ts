@@ -93,6 +93,8 @@ export interface EgressEntry {
   route_id: string;
   in_domain: boolean;
   categories: EgressCategory[];
+  /** 不在 llm.egress.categories 中、出站前删除的片段数，按类别；没有删除时不填（ADR 0146 §3.6） */
+  dropped?: Partial<Record<EgressCategory, number>>;
   redaction_hits: number;
   bytes: number;
 }
@@ -511,6 +513,18 @@ export class ModelSession {
       metrics.promptTrims.inc({ phase, route: route.id }, trimmed.length);
     }
     const { prepared, sized, params, body, raw, estimated } = built;
+    const dropped = Object.entries(prepared.dropped);
+    for (const [category, n] of dropped) {
+      metrics.egressDropped.inc({ category }, n);
+    }
+    const notes = [
+      ...(trimmed.length ? [trimNote(route.id, trimmed)] : []),
+      ...(dropped.length
+        ? [
+            `出境类别不在 llm.egress.categories 中，出站前删除了片段：${dropped.map(([c, n]) => `${c} ${n} 个`).join('、')}`,
+          ]
+        : []),
+    ];
     const draft: Draft = {
       runId: this.ctx.runId,
       seq: ++this.seq,
@@ -532,7 +546,7 @@ export class ModelSession {
       fingerprint: null,
       request: body,
       response: null,
-      note: trimmed.length ? trimNote(route.id, trimmed) : null,
+      note: notes.length ? notes.join('；') : null,
       at: new Date(started).toISOString(),
     };
     if (estimated > window) {
@@ -584,6 +598,7 @@ export class ModelSession {
             route_id: route.id,
             in_domain: route.in_domain,
             categories: draft.categories,
+            ...(dropped.length ? { dropped: prepared.dropped } : {}),
             redaction_hits: countHits(prepared.hits),
             bytes: meter.bytes,
           });
@@ -662,6 +677,7 @@ export class ModelSession {
       route_id: route.id,
       in_domain: route.in_domain,
       categories: draft.categories,
+      ...(dropped.length ? { dropped: prepared.dropped } : {}),
       redaction_hits: countHits(prepared.hits),
       bytes,
     });

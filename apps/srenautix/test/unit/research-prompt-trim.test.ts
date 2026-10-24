@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { trimOnce } from '../../src/llm/session.js';
 import { segmentsText } from '../../src/llm/wire.js';
 import type { LlmRequest } from '../../src/llm/types.js';
-import { EvidenceBook } from '../../src/research/evidence.js';
+import { incidentBook } from '../../src/research/incident.js';
 import { hypothesizeItems, promptParts } from '../../src/research/prompt.js';
 import { researchCase, stageA, stageACards } from '../support/scenario.js';
 
@@ -47,7 +47,7 @@ function bigCase() {
       },
     ],
   });
-  return { rc, book: new EvidenceBook(rc) };
+  return { rc, book: incidentBook(rc) };
 }
 
 function text(req: LlmRequest): string {

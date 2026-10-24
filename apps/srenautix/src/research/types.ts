@@ -9,6 +9,9 @@ import type {
   ResearchOutput,
   StageAReport,
 } from '@srenautix/contract';
+import type { CheckTemplate, CheckTool } from './catalog.js';
+
+export type { CheckTemplate, CheckTool };
 
 export type Subgraph = HubComponents['schemas']['Subgraph'];
 
@@ -37,21 +40,6 @@ export interface ReferenceCase {
   mechanism: string | null;
   resolved_at: string;
   source: 'human' | 'model';
-}
-
-/** 区分性检查可用的查询模板（领域包 signals.yaml 的 templates） */
-export interface CheckTemplate {
-  id: string;
-  description: string;
-  /** 参数的 JSON Schema（可移植子集） */
-  args: Record<string, unknown>;
-}
-
-/** 区分性检查可用的只读工具 */
-export interface CheckTool {
-  name: string;
-  description: string;
-  parameters: Record<string, unknown>;
 }
 
 /**

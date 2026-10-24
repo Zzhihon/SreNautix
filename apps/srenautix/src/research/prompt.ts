@@ -811,38 +811,4 @@ export function concludeItems(language: Language, p: PromptParts, ledger: Ledger
   ];
 }
 
-export function judgeItems(
-  language: Language,
-  input: { hypothesis: string; purpose: string; refutesIf: string; tool: string; result: string },
-): Item[] {
-  return [
-    { type: 'system', segments: [seg(PROMPTS[language].judge, [], 'allow')] },
-    {
-      type: 'user',
-      segments: [
-        seg(
-          fenced('检查', {
-            hypothesis: input.hypothesis,
-            purpose: input.purpose,
-            refutes_if: input.refutesIf,
-            tool: input.tool,
-          }),
-          [],
-          'redact',
-        ),
-        seg(`## 工具结果\n${input.result}`, ['metrics', 'logs', 'events'], 'redact'),
-      ],
-    },
-  ];
-}
-
-/** 小模型判定只读工具结果的输出 schema（可移植子集） */
-export const JUDGE_SCHEMA = {
-  type: 'object',
-  additionalProperties: false,
-  required: ['outcome', 'summary'],
-  properties: {
-    outcome: { type: 'string', enum: ['supports', 'refutes', 'inconclusive'] },
-    summary: { type: 'string', maxLength: 400 },
-  },
-} as const;
+export { judgeItems, JUDGE_SCHEMA } from './judge.js';

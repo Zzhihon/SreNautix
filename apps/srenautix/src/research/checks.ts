@@ -5,17 +5,18 @@ import type { ModelSession } from '../llm/session.js';
 import type { Language } from '../prompts/index.js';
 import type { ToolBox, ToolCallRecord } from '../tools/box.js';
 import type { Window } from '../tools/limits.js';
+import type { CheckTemplate } from './catalog.js';
 import type { CardEntry, EvidenceBook } from './evidence.js';
+import { judgeItems, JUDGE_SCHEMA } from './judge.js';
 import type { Ledger, LedgerEntry } from './ledger.js';
 import { targets } from './targeting.js';
-import { judgeItems, JUDGE_SCHEMA } from './prompt.js';
-import type { CheckTemplate, ResearchCase } from './types.js';
 import { parseCardCheckId } from '../stage-a/card-checks.js';
 import { parseStoredKey } from '../topology/keys.js';
 
 // 区分性检查（DESIGN §7.2 discriminate）：由控制器执行模型给出的 next_checks，把结果判定成新的证据卡。
 // - type=query：领域包的查询模板，按模板附带的卡定义用 CEL 判定（判定方式 rule）；
 // - type=tool：只读工具（内置或 MCP 白名单工具），结果由小模型对照 refutes_if 判定（判定方式 model）。
+// 事件研判与主动优化共用（ADR 0146 §2.7），只依赖检查目录与账本，不依赖事件。
 
 export type NextCheck = HypothesizeOutput['next_checks'][number];
 
@@ -122,31 +123,27 @@ export const SUPPLEMENT_LIMIT = 3;
 
 /**
  * hypothesize 的 next_checks 为空时由控制器补选检查（ADR 0137）：
- * - 只取卡片检查（`cardcheck:`），并且检查的组件（按组件粒度）是事件的组件：根因、候选根因或成员告警的组件；
+ * - 只取卡片检查（`cardcheck:`），并且检查的组件（按组件粒度）属于研判对象的组件 subjectComponents
+ *   （事件研判为根因、候选根因与成员告警的组件，见 incident.ts 的 incidentSupplement）；
  * - 依次为待检验的假设（open，按账本排名）各取一项：组件就是假设的根因组件、测的信号与假设机制对应（ADR 0133）、
  *   本次运行没有执行过的检查中，按候选清单的顺序（清单已按相关性排列，ADR 0116）取第一项；
  * - 最多 SUPPLEMENT_LIMIT 项，参数全部取卡片默认值（窗口取卡片定义）。
  */
 export function supplementChecks(
-  rc: ResearchCase,
+  templates: readonly CheckTemplate[],
+  subjectComponents: ReadonlySet<string>,
   ledger: Ledger,
   open: readonly LedgerEntry[],
   done: ReadonlySet<string>,
   language: Language,
 ): NextCheck[] {
-  const inc = rc.incident;
-  const eventComponents = new Set(
-    [inc.root.component, ...inc.candidates.map((c) => c.component), ...inc.components]
-      .filter((k): k is string => typeof k === 'string' && k !== '')
-      .map((k) => ledger.componentOf(k)),
-  );
-  const offered = rc.templates.flatMap((t) => {
+  const offered = templates.flatMap((t) => {
     const p = parseCardCheckId(t.id);
     if (!p) {
       return [];
     }
     const component = ledger.componentOf(p.component);
-    return eventComponents.has(component) ? [{ id: t.id, component }] : [];
+    return subjectComponents.has(component) ? [{ id: t.id, component }] : [];
   });
   const out: NextCheck[] = [];
   const used = new Set<string>();
@@ -160,7 +157,7 @@ export function supplementChecks(
         t.component === e.rootComponent &&
         !used.has(t.id) &&
         !done.has(`${e.id}:${t.id}:{}`) &&
-        targets(t.id, e.mechanism, defs).related,
+        targets(t.id, e.mechanism, defs, ledger.rules).related,
     );
     if (!pick) {
       continue;
@@ -192,12 +189,12 @@ export function checkKey(c: NextCheck): string {
  */
 export function vetCheck(
   raw: NextCheck,
-  rc: ResearchCase,
+  templates: readonly CheckTemplate[],
   box: ToolBox,
 ): { check: NextCheck; args: Record<string, unknown>; note: string | null } | { error: string } {
   let c = raw;
   let note: string | null = null;
-  const isTemplate = rc.templates.some((x) => x.id === c.template);
+  const isTemplate = templates.some((x) => x.id === c.template);
   if (c.type === 'query' && !isTemplate && box.has(c.template)) {
     c = { ...c, type: 'tool' };
     note = `检查 ${c.template}（假设 ${c.hypothesis_id}）：type 写成 query，目标是只读工具，已改为 tool`;
@@ -224,7 +221,7 @@ export function vetCheck(
     return { error: 'args_json 必须是 JSON 对象' };
   }
   if (c.type === 'query') {
-    const t = rc.templates.find((x) => x.id === c.template);
+    const t = templates.find((x) => x.id === c.template);
     if (!t) {
       return { error: `查询模板 ${c.template} 不存在` };
     }
@@ -252,7 +249,10 @@ export function entityOf(clusterId: string, component: string): EvidenceResult['
 }
 
 export interface CheckEnv {
-  rc: ResearchCase;
+  /** 本次运行的查询模板 */
+  templates: readonly CheckTemplate[];
+  /** 工具结果卡的实体所在的集群 */
+  clusterId: string;
   book: EvidenceBook;
   ledger: Ledger;
   box: ToolBox;
@@ -284,7 +284,7 @@ export async function runCheck(
     if (!env.query) {
       return { check, args, outcome: 'failed', card: null, tool: null, error: '查询模板的运行时不可用' };
     }
-    const t = env.rc.templates.find((x) => x.id === check.template) as CheckTemplate;
+    const t = env.templates.find((x) => x.id === check.template) as CheckTemplate;
     const result = await env.query.run(t, args, {
       hypothesisId: h.id,
       rootComponent: h.rootComponent,
@@ -340,7 +340,7 @@ export async function runCheck(
       title: { 'zh-CN': `区分性检查：${check.template}`, en: `Discriminating check: ${check.template}` },
       threshold: null,
       series: [],
-      entity: entityOf(env.rc.incident.cluster_id, h.rootComponent),
+      entity: entityOf(env.clusterId, h.rootComponent),
       window,
       verdict,
       display_state: verdict,
