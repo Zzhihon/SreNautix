@@ -50,6 +50,25 @@
       "pattern": "^[A-Za-z][A-Za-z0-9.-]*:([a-z0-9]([-a-z0-9]*[a-z0-9])?/)?([A-Za-z0-9._-]|%[0-9A-F]{2})+$",
       "maxLength": 400
     },
+    "EntityKey": {
+      "title": "EntityKey",
+      "description": "主动优化的实体键（契约 2.28.0，ADR 0146 §1.1）：Kubernetes 对象或领域包组件为 ComponentKey；逻辑实体为 <类型>:<组件内的键>，例如 pg_statement:<CNPG Cluster 名>/<库>/<语句指纹>、pg_table:<Cluster 名>/<库>/<schema>.<表>、route:<服务>/<endpoint>、stage:<服务>/<阶段>。逻辑实体都挂到一个拓扑组件上",
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 400,
+      "pattern": "^[A-Za-z][A-Za-z0-9._-]*:.+$"
+    },
+    "Subject": {
+      "title": "Subject",
+      "description": "研判、提议、出境清单与消息的主体（契约 2.28.0，ADR 0146 §8）：incident 事件；goal 主动优化的目标。没有 subject 的旧数据都是事件。主体为 goal 时沿用的事件字段语义为：incident_id 取目标 id，incident_version 取目标的 revision",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "id"],
+      "properties": {
+        "type": { "type": "string", "enum": ["incident", "goal"] },
+        "id": { "$ref": "#/$defs/Uuid" }
+      }
+    },
     "ComponentNames": {
       "type": "object",
       "description": "组件键 → 可读名称（领域包 ComponentType.display_name 求出，ADR 0101）。只用于显示；没有名称的组件不在其中，显示组件键",

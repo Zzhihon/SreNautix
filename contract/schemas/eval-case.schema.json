@@ -34,8 +34,8 @@
     "suite": { "type": "string", "minLength": 1, "description": "用例集，例如 reference、scenarios-kind、benign" },
     "type": {
       "type": "string",
-      "description": "incident：真实事件；feedback：来自已绑定账号且给出根因的反馈；benign：被人工忽略或平静时段注入的告警；abstain：去掉根因异常卡后的反事实快照；scenario：Kind 上注入的级联故障",
-      "enum": ["incident", "feedback", "benign", "abstain", "scenario"]
+      "description": "incident：真实事件；feedback：来自已绑定账号且给出根因的反馈；benign：被人工忽略或平静时段注入的告警；abstain：去掉根因异常卡后的反事实快照；scenario：Kind 上注入的级联故障；optimization：主动优化的目标运行（契约 2.28.0，ADR 0146 §7），incident_id 为 null，标准答案在 truth.optimization",
+      "enum": ["incident", "feedback", "benign", "abstain", "scenario", "optimization"]
     },
     "cluster_id": { "$ref": "common.schema.json#/$defs/ClusterId" },
     "incident_id": {
@@ -122,6 +122,53 @@
         "forbid_evidence_consistent": {
           "type": "boolean",
           "description": "benign 与 abstain 用例为 true：出现 evidence_consistent 即为误报"
+        },
+        "optimization": { "$ref": "#/$defs/OptimizationTruth" }
+      }
+    },
+    "OptimizationTruth": {
+      "title": "EvalOptimizationTruth",
+      "description": "optimization 用例的标准答案（ADR 0146 §7）。root_components 为期望发现挂到的组件，disposition 为 null；良性用例 benign 为 true，findings、templates、locations 为空，任何建议都算误报",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["goal", "benign", "findings", "templates", "locations", "known_gain"],
+      "properties": {
+        "goal": { "$ref": "goal.schema.json#/$defs/GoalSpec" },
+        "benign": { "type": "boolean" },
+        "findings": {
+          "type": "array",
+          "description": "期望的发现：类型与实体键（召回@3 与精确率）",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "entity"],
+            "properties": {
+              "kind": { "type": "string" },
+              "entity": { "$ref": "common.schema.json#/$defs/EntityKey" }
+            }
+          }
+        },
+        "templates": {
+          "type": "array",
+          "description": "可接受的模板 <pack>/<id>",
+          "items": { "type": "string" }
+        },
+        "locations": {
+          "type": "array",
+          "description": "期望的代码位置（文件命中@3 与函数命中@1）",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "symbol"],
+            "properties": {
+              "path": { "type": "string" },
+              "symbol": { "type": ["string", "null"], "description": "函数或方法名（带接收者时写 Receiver.Method）" }
+            }
+          }
+        },
+        "known_gain": {
+          "type": ["number", "null"],
+          "description": "已知的实际收益（指标单位，按改善方向取正值），用于预期收益的校准"
         }
       }
     },

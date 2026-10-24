@@ -1,0 +1,115 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://srenautix.io/contract/schemas/finding.schema.json",
+  "title": "Finding",
+  "description": "一个实体上的一个问题（契约 2.28.0，ADR 0146 §1.4），跨分析运行持久保存；fingerprint 是去重的唯一键。每次运行先按指纹更新已有发现（last_seen、差距、份额、档位），再判断是否生成建议",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "fingerprint",
+    "cluster_id",
+    "domain",
+    "kind",
+    "entity",
+    "component",
+    "indicator",
+    "gap",
+    "share",
+    "level",
+    "evidence_fingerprint",
+    "status",
+    "cooldown_until",
+    "last_goal_id",
+    "last_run_id",
+    "first_seen",
+    "last_seen",
+    "updated_at"
+  ],
+  "properties": {
+    "fingerprint": {
+      "description": "sha256(JCS([cluster_id, domain, kind, entity.key]))",
+      "$ref": "common.schema.json#/$defs/Sha256"
+    },
+    "cluster_id": { "$ref": "common.schema.json#/$defs/ClusterId" },
+    "domain": { "$ref": "goal.schema.json#/$defs/DomainId" },
+    "kind": {
+      "type": "string",
+      "description": "领域声明的发现类型（DomainDiagnostic.finding），例如 pg.statement_dominant、pg.temp_spill、workload.cpu_overprovisioned",
+      "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+    },
+    "entity": { "$ref": "#/$defs/FindingEntity" },
+    "component": {
+      "description": "实体挂到的拓扑组件（逻辑实体）或实体本身（Kubernetes 对象）",
+      "$ref": "common.schema.json#/$defs/ComponentKey"
+    },
+    "indicator": {
+      "description": "发现影响的指标；诊断卡没有声明时为 null",
+      "oneOf": [{ "type": "null" }, { "$ref": "pack.schema.json#/$defs/IndicatorRef" }]
+    },
+    "gap": {
+      "type": ["number", "null"],
+      "description": "指标相对目标或门槛的差距（指标单位，按改善方向取正值）；没有可比较的目标时为 null"
+    },
+    "share": {
+      "type": ["number", "null"],
+      "minimum": 0,
+      "maximum": 1,
+      "description": "实体在指标中的份额（份额卡）；没有份额卡时为 null"
+    },
+    "level": {
+      "description": "最近一次分析的结论档位（ADR 0146 §2.4）；进入候选但未分析时为 null",
+      "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/ConclusionLevel" }]
+    },
+    "evidence_fingerprint": {
+      "description": "支持卡与份额卡的判定向量指纹；未分析时为 null",
+      "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/Sha256" }]
+    },
+    "status": { "$ref": "#/$defs/FindingStatus" },
+    "cooldown_until": {
+      "description": "被拒绝之后的冷却期限",
+      "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/Timestamp" }]
+    },
+    "last_goal_id": { "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/Uuid" }] },
+    "last_run_id": { "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/Uuid" }] },
+    "first_seen": { "$ref": "common.schema.json#/$defs/Timestamp" },
+    "last_seen": { "$ref": "common.schema.json#/$defs/Timestamp" },
+    "updated_at": { "$ref": "common.schema.json#/$defs/Timestamp" }
+  },
+  "$defs": {
+    "FindingStatus": {
+      "title": "FindingStatus",
+      "description": "open 已发现；recommended 已有建议（PR 或 issue）；accepted PR 合并或 issue 以 completed 关闭；verifying 验证中；fixed 验证改善或差距消失（待人确认关闭）；no_effect 验证没有效果；regressed 验证回退；rejected 被拒绝，进入冷却期；suppressed 人工抑制",
+      "type": "string",
+      "enum": [
+        "open",
+        "recommended",
+        "accepted",
+        "verifying",
+        "fixed",
+        "no_effect",
+        "regressed",
+        "rejected",
+        "suppressed"
+      ]
+    },
+    "FindingEntity": {
+      "title": "FindingEntity",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "key", "display", "labels"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "description": "逻辑实体类型（pg_statement、pg_table、pg_index、route、stage），或 Kubernetes 的 Kind",
+          "minLength": 1
+        },
+        "key": { "$ref": "common.schema.json#/$defs/EntityKey" },
+        "display": { "type": "string", "maxLength": 200, "description": "可读名称，只用于显示" },
+        "labels": {
+          "description": "实体的标签（EntityRows.labels），例如 pg_statement 的 database、queryid；按实体执行的卡片与模板以 $params 引用",
+          "$ref": "common.schema.json#/$defs/Labels"
+        }
+      }
+    }
+  }
+}

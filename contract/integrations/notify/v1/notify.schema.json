@@ -11,6 +11,12 @@
       "additionalProperties": false,
       "required": ["incident_id", "incident_version", "prefix", "severity", "title", "sections", "buttons", "banner"],
       "properties": {
+        "kind": {
+          "type": "string",
+          "description": "incident 事件消息；goal 主动优化的目标消息（契约 2.28.0）：incident_id 为目标 id，incident_version 为目标的 revision，五段依次为现状（目标与基线）、关键问题（发现与档位）、拓扑联系、解决方案（建议、预期收益、验证）、证据链。不填时为 incident",
+          "enum": ["incident", "goal"],
+          "default": "incident"
+        },
         "incident_id": { "$ref": "../../../schemas/common.schema.json#/$defs/Uuid" },
         "incident_version": { "type": "integer", "minimum": 1 },
         "prefix": { "type": "string", "description": "部署配置的消息前缀，例如影子部署的标记" },

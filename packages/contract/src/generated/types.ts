@@ -64,6 +64,32 @@ export type ClusterId = string;
  */
 export type ComponentKey = string;
 /**
+ * 操作名；能力名为 dbstats.<操作名中的 . 换成 _>
+ */
+export type DbstatsOperation =
+  | 'statements.top'
+  | 'statements.text'
+  | 'tables.top'
+  | 'indexes.usage'
+  | 'settings.get'
+  | 'activity.summary'
+  | 'locks.summary';
+/**
+ * 一次读取。database 为 null 时读取连接所在的库；statements.top 不按库过滤时可以读到全部库的语句
+ */
+export type DbstatsRequest =
+  | DbstatsStatementsTopRequest
+  | DbstatsStatementsTextRequest
+  | DbstatsTablesTopRequest
+  | DbstatsIndexesUsageRequest
+  | DbstatsSettingsGetRequest
+  | DbstatsActivitySummaryRequest
+  | DbstatsLocksSummaryRequest;
+/**
+ * pg_stat_statements 的 queryid（bigint）的十进制字符串
+ */
+export type DbstatsQueryId = string;
+/**
  * RFC 3339 UTC 时间
  */
 export type Timestamp1 = string;
@@ -76,6 +102,10 @@ export type AlertRole = 'cause' | 'change' | 'symptom' | 'forecast' | 'meta';
  * Prometheus 风格的时长，例如 30s、5m、2h、7d
  */
 export type Duration = string;
+/**
+ * 主动优化的实体键（契约 2.28.0，ADR 0146 §1.1）：Kubernetes 对象或领域包组件为 ComponentKey；逻辑实体为 <类型>:<组件内的键>，例如 pg_statement:<CNPG Cluster 名>/<库>/<语句指纹>、pg_table:<Cluster 名>/<库>/<schema>.<表>、route:<服务>/<endpoint>、stage:<服务>/<阶段>。逻辑实体都挂到一个拓扑组件上
+ */
+export type EntityKey = string;
 /**
  * 处置判断：act 处理；ignore 忽略；escalate 升级；undetermined 无法判定
  */
@@ -110,6 +140,33 @@ export type Timestamp3 = string;
  */
 export type EvalGranularity = 'pod' | 'workload' | 'component' | 'node';
 /**
+ * 目标的来源：manual 人工下达；checkup 领域的定期体检；trend 趋势扫描；forecast_alert 预测类告警
+ */
+export type GoalOrigin = GoalOriginManual | GoalOriginCheckup | GoalOriginTrend | GoalOriginForecastAlert;
+export type DomainId = string;
+/**
+ * 目标对象：一个指标（带参数），或一个领域的体检
+ */
+export type GoalSubject = GoalSubjectIndicator | GoalSubjectDomain;
+/**
+ * 指标的全局 id <包>/<指标 id>，例如 postgres/db-time
+ */
+export type IndicatorRef = string;
+export type Comparator = 'lt' | 'le' | 'gt' | 'ge';
+export type IndicatorUnit = 'none' | 'percent' | 'ratio' | 'bytes' | 'seconds' | 'count' | 'per_second' | 'cores';
+/**
+ * 基线窗口内按小时取值之后的统计方式
+ */
+export type IndicatorStatistic = 'p50' | 'p95' | 'max';
+/**
+ * Prometheus 风格的时长，例如 30s、5m、2h、7d
+ */
+export type Duration1 = string;
+/**
+ * ops_pr：ops 仓库的 PR（gitops_pr 提议）；business_issue：业务仓库的 issue
+ */
+export type RecommendationKind = 'ops_pr' | 'business_issue';
+/**
  * 稳定标签 <根组件>:<首次触发时间取整到 10 分钟>，同一标签冲突时追加 ~2、~3
  */
 export type IncidentLabel = string;
@@ -136,7 +193,12 @@ export type OutboxEvent =
   | ApprovalIssuedEvent
   | ExecutionUpdatedEvent
   | FeedbackRecordedEvent
-  | ConditionChangedEvent;
+  | ConditionChangedEvent
+  | GoalCreatedEvent
+  | GoalRunConcludedEvent
+  | FindingUpdatedEvent
+  | RecommendationUpdatedEvent
+  | OutcomeVerifiedEvent;
 export type IncidentUpsertedEvent = OutboxEventHeader & {
   type: 'incident.created' | 'incident.updated' | 'incident.resolved';
   payload: Incident;
@@ -270,6 +332,112 @@ export type ConditionChangedEvent = OutboxEventHeader & {
   type: 'condition.changed';
   payload: Condition;
 };
+/**
+ * 目标创建（契约 2.28.0）
+ */
+export type GoalCreatedEvent = OutboxEventHeader & {
+  type: 'goal.created';
+  payload: Goal;
+};
+/**
+ * queued 排队；analyzing 分析中；recommended 有建议已发布；verifying 验证中；achieved 达成；not_achieved 验证后未达成；no_action 没有差距或没有通过门槛的建议；cancelled 取消；expired 到期；failed 失败（state_reason 写明原因）
+ */
+export type GoalState =
+  | 'queued'
+  | 'analyzing'
+  | 'recommended'
+  | 'verifying'
+  | 'achieved'
+  | 'not_achieved'
+  | 'no_action'
+  | 'cancelled'
+  | 'expired'
+  | 'failed';
+/**
+ * RFC 3339 UTC 时间
+ */
+export type Timestamp5 = string;
+/**
+ * queued 排队；deferred 被准入推迟（defer_reason）；running 执行中；concluded 结束（result）；failed 失败；cancelled 目标取消
+ */
+export type GoalRunState = 'queued' | 'deferred' | 'running' | 'concluded' | 'failed' | 'cancelled';
+/**
+ * 目标运行结束（契约 2.28.0），含失败与没有差距
+ */
+export type GoalRunConcludedEvent = OutboxEventHeader & {
+  type: 'goal.run.concluded';
+  payload: {
+    goal_id: Uuid;
+    goal_revision: number;
+    run_id: Uuid;
+    summary: GoalRunSummary;
+    /**
+     * 运行输出；在基线之前失败时为 null
+     */
+    output: null | OptimizationOutput;
+  };
+};
+/**
+ * 发现指纹
+ */
+export type Sha2563 = string;
+/**
+ * 发现创建或更新（契约 2.28.0）
+ */
+export type FindingUpdatedEvent = OutboxEventHeader & {
+  type: 'finding.updated';
+  payload: Finding;
+};
+/**
+ * sha256(JCS([cluster_id, domain, kind, entity.key]))
+ */
+export type Sha2564 = string;
+/**
+ * 拓扑节点的键：命名空间内的对象为 <kind>:<namespace>/<名称段>，集群级对象为 <kind>:<名称段>。kind 是 Kubernetes 的 Kind（如 Pod、Node，其他 API 组写作 Kind.group）或领域包声明的组件类型（如 postgres.cluster）；namespace 是 DNS 标签。名称段由对象名编码得到（ADR 0034）：名称的 UTF-8 字节中 A–Z a–z 0–9 '-' '.' '_' 原样保留，其余每个字节写成 '%' 加两位大写十六进制，例如 RBAC 对象 system:node 写作 ClusterRole:system%3Anode；DNS 名称编码后不变。解析时只接受这种规范编码。命名空间伪组件写作 Namespace:<namespace>。黄金向量见 contract/testvectors/component-keys.json
+ */
+export type ComponentKey1 = string;
+/**
+ * open 已发现；recommended 已有建议（PR 或 issue）；accepted PR 合并或 issue 以 completed 关闭；verifying 验证中；fixed 验证改善或差距消失（待人确认关闭）；no_effect 验证没有效果；regressed 验证回退；rejected 被拒绝，进入冷却期；suppressed 人工抑制
+ */
+export type FindingStatus =
+  'open' | 'recommended' | 'accepted' | 'verifying' | 'fixed' | 'no_effect' | 'regressed' | 'rejected' | 'suppressed';
+/**
+ * 建议创建或状态变化（契约 2.28.0）
+ */
+export type RecommendationUpdatedEvent = OutboxEventHeader & {
+  type: 'recommendation.updated';
+  payload: OptimizationRecommendation;
+};
+/**
+ * 发现的指纹
+ */
+export type Sha2565 = string;
+/**
+ * blocked 门槛不通过，只记录原因；open 通过门槛，PR 或 issue 创建中；recommended PR 或 issue 已创建；verifying PR 合并并同步或修复已部署，验证窗口中；improved、no_effect、regressed 验证结果；rejected issue 以 not planned 关闭、PR 未合并即关闭，或被标为建议无用；superseded 发现有了更新的建议；failed 创建失败
+ */
+export type RecommendationState =
+  | 'blocked'
+  | 'open'
+  | 'recommended'
+  | 'verifying'
+  | 'improved'
+  | 'no_effect'
+  | 'regressed'
+  | 'rejected'
+  | 'superseded'
+  | 'failed';
+/**
+ * 建议的验证结束（契约 2.28.0）
+ */
+export type OutcomeVerifiedEvent = OutboxEventHeader & {
+  type: 'outcome.verified';
+  payload: {
+    recommendation_id: Uuid;
+    finding: Sha256;
+    goal_id: Uuid;
+    outcome: RecommendationOutcome;
+  };
+};
 export type OutboxEventType =
   | 'incident.created'
   | 'incident.updated'
@@ -285,23 +453,57 @@ export type OutboxEventType =
   | 'approval.issued'
   | 'execution.updated'
   | 'feedback.recorded'
-  | 'condition.changed';
-/**
- * <集成类别>.<能力>，例如 metrics.query_range、logs.match、traces.search、changes.list
- */
-export type PackCapability = string;
-/**
- * Prometheus 风格的时长，例如 30s、5m、2h、7d
- */
-export type Duration1 = string;
+  | 'condition.changed'
+  | 'goal.created'
+  | 'goal.run.concluded'
+  | 'finding.updated'
+  | 'recommendation.updated'
+  | 'outcome.verified';
 /**
  * Prometheus 风格的时长，例如 30s、5m、2h、7d
  */
 export type Duration2 = string;
 /**
+ * <集成类别>.<能力>，例如 metrics.query_range、logs.match、traces.search、changes.list
+ */
+export type PackCapability = string;
+/**
+ * 代码定位的锚点类型（ADR 0146 §3.5）：sql 规范化语句（按 libpg-query 指纹匹配字符串字面量与 .sql 文件）；table 表名（置信度低）；span_name、metric_name、route 字符串字面量精确匹配
+ */
+export type AnchorKind = 'sql' | 'table' | 'span_name' | 'metric_name' | 'route';
+/**
+ * 指标的全局 id <包>/<指标 id>，例如 postgres/db-time
+ */
+export type IndicatorRef1 = string;
+/**
+ * 指标的全局 id <包>/<指标 id>，例如 postgres/db-time
+ */
+export type IndicatorRef2 = string;
+/**
  * Prometheus 风格的时长，例如 30s、5m、2h、7d
  */
 export type Duration3 = string;
+/**
+ * 指标的全局 id <包>/<指标 id>，例如 postgres/db-time
+ */
+export type IndicatorRef3 = string;
+/**
+ * Prometheus 风格的时长，例如 30s、5m、2h、7d
+ */
+export type Duration4 = string;
+/**
+ * Prometheus 风格的时长，例如 30s、5m、2h、7d
+ */
+export type Duration5 = string;
+/**
+ * Prometheus 风格的时长，例如 30s、5m、2h、7d
+ */
+export type Duration6 = string;
+/**
+ * 出境数据类别。sql：规范化语句文本（常量为 $n、去掉注释）；code：业务代码片段（契约 2.28.0，ADR 0146 §3.6）
+ */
+export type EgressCategory =
+  'metrics' | 'logs' | 'traces' | 'events' | 'topology' | 'changes' | 'alerts' | 'knowledge' | 'sql' | 'code';
 
 export interface SrenautixContractIndex {
   ActionCatalog?: ActionCatalog;
@@ -333,6 +535,25 @@ export interface SrenautixContractIndex {
   ChangesScope?: ChangesScope;
   ChangesListResponse?: ChangesListResponse;
   ChangeEvent?: ChangeEvent;
+  DbstatsOperation?: DbstatsOperation;
+  DbstatsRequest?: DbstatsRequest;
+  DbstatsStatementsTopRequest?: DbstatsStatementsTopRequest;
+  DbstatsStatementsTextRequest?: DbstatsStatementsTextRequest;
+  DbstatsTablesTopRequest?: DbstatsTablesTopRequest;
+  DbstatsIndexesUsageRequest?: DbstatsIndexesUsageRequest;
+  DbstatsSettingsGetRequest?: DbstatsSettingsGetRequest;
+  DbstatsActivitySummaryRequest?: DbstatsActivitySummaryRequest;
+  DbstatsLocksSummaryRequest?: DbstatsLocksSummaryRequest;
+  DbstatsQueryId?: DbstatsQueryId;
+  DbstatsSample?: DbstatsSample;
+  DbstatsStatementRow?: DbstatsStatementRow;
+  DbstatsStatementText?: DbstatsStatementText;
+  DbstatsTableRow?: DbstatsTableRow;
+  DbstatsIndexRow?: DbstatsIndexRow;
+  DbstatsSettingRow?: DbstatsSettingRow;
+  DbstatsActivityRow?: DbstatsActivityRow;
+  DbstatsLockRow?: DbstatsLockRow;
+  DbstatsPrivilegeReport?: DbstatsPrivilegeReport;
   AuthenticatedPrincipal?: AuthenticatedPrincipal;
   RoleBinding?: RoleBinding;
   LogsMatchRequest?: LogsMatchRequest;
@@ -379,6 +600,8 @@ export interface SrenautixContractIndex {
   Severity?: Severity;
   AlertRole?: AlertRole;
   ComponentKey?: ComponentKey;
+  EntityKey?: EntityKey;
+  Subject?: Subject;
   CommonComponentNames?: CommonComponentNames;
   EntityRef?: EntityRef;
   TimeWindow?: TimeWindow;
@@ -398,6 +621,7 @@ export interface SrenautixContractIndex {
   EvalCase?: EvalCase;
   EvalGranularity?: EvalGranularity;
   EvalTruth?: EvalTruth;
+  EvalOptimizationTruth?: EvalOptimizationTruth;
   EvalLeakage?: EvalLeakage;
   EvalReport?: EvalReport;
   EvalRatio?: EvalRatio7;
@@ -426,6 +650,11 @@ export interface SrenautixContractIndex {
   ExecutionUpdatedEvent?: ExecutionUpdatedEvent;
   FeedbackRecordedEvent?: FeedbackRecordedEvent;
   ConditionChangedEvent?: ConditionChangedEvent;
+  GoalCreatedEvent?: GoalCreatedEvent;
+  GoalRunConcludedEvent?: GoalRunConcludedEvent;
+  FindingUpdatedEvent?: FindingUpdatedEvent;
+  RecommendationUpdatedEvent?: RecommendationUpdatedEvent;
+  OutcomeVerifiedEvent?: OutcomeVerifiedEvent;
   EvidenceCardDefinition?: EvidenceCardDefinition;
   LocalizedText?: LocalizedText2;
   CardWindow?: CardWindow;
@@ -442,6 +671,23 @@ export interface SrenautixContractIndex {
   EvidenceQueryRecord?: EvidenceQueryRecord;
   Feedback?: Feedback;
   FeedbackCreate?: FeedbackCreate;
+  Finding?: Finding;
+  FindingStatus?: FindingStatus;
+  FindingEntity?: FindingEntity;
+  Goal?: Goal;
+  GoalState?: GoalState;
+  GoalSpec?: GoalSpec;
+  RecommendationKind?: RecommendationKind;
+  GoalOrigin?: GoalOrigin;
+  DomainId?: DomainId;
+  GoalScope?: GoalScope;
+  GoalSubject?: GoalSubject;
+  Comparator?: Comparator;
+  GoalObjective?: GoalObjective;
+  GoalBudget?: GoalBudget;
+  GoalCreate?: GoalCreate;
+  GoalRunState?: GoalRunState;
+  GoalRunSummary?: GoalRunSummary;
   Incident?: Incident;
   ResearchRoot?: ResearchRoot1;
   IncidentLabel?: IncidentLabel;
@@ -451,6 +697,15 @@ export interface SrenautixContractIndex {
   IncidentMember?: IncidentMember;
   IncidentAlias?: IncidentAlias;
   IntegrationManifest?: IntegrationManifest;
+  OptimizationOutput?: OptimizationOutput;
+  OptimizationBaseline?: OptimizationBaseline;
+  BaselineIndicator?: BaselineIndicator;
+  OptimizationGap?: OptimizationGap;
+  OptimizationCandidate?: OptimizationCandidate;
+  FindingHypothesis?: FindingHypothesis;
+  OptimizationConsistency?: OptimizationConsistency;
+  FindingConclusion?: FindingConclusion;
+  RecommendationAttempt?: RecommendationAttempt;
   PackManifest?: PackManifest;
   PackCapability?: PackCapability;
   SignalsFile?: SignalsFile;
@@ -471,6 +726,24 @@ export interface SrenautixContractIndex {
   Remediation?: Remediation;
   RemediationEdit?: RemediationEdit;
   RepositoryLayout?: RepositoryLayout;
+  CodeLayout?: CodeLayout;
+  AnchorKind?: AnchorKind;
+  IndicatorRef?: IndicatorRef;
+  IndicatorUnit?: IndicatorUnit;
+  IndicatorStatistic?: IndicatorStatistic;
+  DomainsFile?: DomainsFile;
+  Indicator?: Indicator;
+  Domain?: Domain;
+  DomainDiagnostic?: DomainDiagnostic;
+  DomainContribution?: DomainContribution;
+  EntityRows?: EntityRows;
+  DomainGates?: DomainGates;
+  DomainTrend?: DomainTrend;
+  DomainLoadGuard?: DomainLoadGuard;
+  Estimate?: Estimate1;
+  Guard?: Guard;
+  IssuesFile?: IssuesFile;
+  IssueTemplate?: IssueTemplate;
   RcaParams?: RcaParams;
   KnowledgeFile?: KnowledgeFile;
   ActionRequestsFile?: ActionRequestsFile;
@@ -485,9 +758,17 @@ export interface SrenautixContractIndex {
   ApprovalRecord?: ApprovalRecord;
   ExecutionSummary?: ExecutionSummary;
   ProposalCreate?: ProposalCreate;
+  OptimizationRecommendation?: OptimizationRecommendation;
+  RecommendationState?: RecommendationState;
+  EstimateValue?: EstimateValue;
+  VerifyPlan?: VerifyPlan;
+  GateRecord?: GateRecord;
+  RecommendationDelivery?: RecommendationDelivery;
+  RecommendationOutcome?: RecommendationOutcome;
   ResearchManifest?: ResearchManifest;
   RouteUse?: RouteUse;
   EgressEntry?: EgressEntry;
+  EgressCategory?: EgressCategory;
   ResearchOutput?: ResearchOutput;
   ResearchConclusion?: ResearchConclusion;
   ConsistencyDetail?: ConsistencyDetail;
@@ -1115,6 +1396,218 @@ export interface ChangeEvent {
     basis: 'managed_by' | 'revision_label' | 'image' | 'namespace_window';
   }[];
 }
+export interface DbstatsStatementsTopRequest {
+  op: 'statements.top';
+  args: {
+    order_by:
+      | 'total_exec_time'
+      | 'mean_exec_time'
+      | 'calls'
+      | 'rows'
+      | 'shared_blks_read'
+      | 'temp_blks_written'
+      | 'blk_read_time'
+      | 'wal_bytes';
+    limit: number;
+    /**
+     * 按库名过滤（pg_database.datname）；null 或不填时不过滤
+     */
+    database?: string | null;
+    /**
+     * 只取这些 queryid（十进制字符串）；不填时按 order_by 取前 limit 条
+     *
+     * @maxItems 50
+     */
+    queryids?: DbstatsQueryId[];
+  };
+}
+export interface DbstatsStatementsTextRequest {
+  op: 'statements.text';
+  args: {
+    /**
+     * @minItems 1
+     * @maxItems 10
+     */
+    queryids: [DbstatsQueryId, ...DbstatsQueryId[]];
+  };
+}
+export interface DbstatsTablesTopRequest {
+  op: 'tables.top';
+  args: {
+    order_by: 'seq_scan' | 'seq_tup_read' | 'idx_scan' | 'n_dead_tup' | 'n_live_tup' | 'heap_blks_read' | 'writes';
+    limit: number;
+  };
+}
+export interface DbstatsIndexesUsageRequest {
+  op: 'indexes.usage';
+  args: {
+    /**
+     * <schema>.<表名>；Timescale hypertable 的名字包含它的全部分块；null 或不填时为全部表
+     */
+    table?: string | null;
+    limit: number;
+  };
+}
+export interface DbstatsSettingsGetRequest {
+  op: 'settings.get';
+  args: {
+    /**
+     * @minItems 1
+     * @maxItems 50
+     */
+    names: [string, ...string[]];
+  };
+}
+export interface DbstatsActivitySummaryRequest {
+  op: 'activity.summary';
+  args: {};
+}
+export interface DbstatsLocksSummaryRequest {
+  op: 'locks.summary';
+  args: {};
+}
+/**
+ * 一次读取的结果。rows 的结构由 op 决定（StatementRow、StatementText、TableRow、IndexRow、SettingRow、ActivityRow、LockRow）；累计计数器原样返回，速率由两次采样的差值计算
+ */
+export interface DbstatsSample {
+  op: DbstatsOperation;
+  sampled_at: Timestamp;
+  /**
+   * server_version_num 的取值，例如 170002
+   */
+  server_version: string;
+  /**
+   * @maxItems 50
+   */
+  rows: {
+    [k: string]: string | number | boolean | null | undefined;
+  }[];
+  /**
+   * 结果被 limit 截断
+   */
+  truncated: boolean;
+}
+/**
+ * statements.top 的一行（pg_stat_statements(showtext := false)）。时间单位为毫秒；计数器是累计值
+ */
+export interface DbstatsStatementRow {
+  queryid: DbstatsQueryId;
+  database: string;
+  role: string;
+  toplevel: boolean;
+  calls: number;
+  total_exec_time_ms: number;
+  mean_exec_time_ms: number;
+  rows: number;
+  shared_blks_hit: number;
+  shared_blks_read: number;
+  temp_blks_written: number;
+  blk_read_time_ms: number;
+  wal_bytes: number;
+}
+/**
+ * statements.text 的一行：语句经 libpg-query 重新规范化（常量换成 $n）并去掉注释，不超过 4 KiB；fingerprint 是 libpg-query 对规范化语句计算的指纹（十六进制），PG 升级后 queryid 变化时不变。无法解析的语句 text 为 null，normalize_error 写明原因
+ */
+export interface DbstatsStatementText {
+  queryid: DbstatsQueryId;
+  text: string | null;
+  fingerprint: string | null;
+  truncated: boolean;
+  normalize_error: string | null;
+}
+/**
+ * tables.top 的一行（pg_stat_user_tables 与 pg_statio_user_tables）。Timescale 分块按 hypertable 汇总，chunks 为分块数；普通表 chunks 为 0
+ */
+export interface DbstatsTableRow {
+  schema: string;
+  table: string;
+  hypertable: boolean;
+  chunks: number;
+  seq_scan: number;
+  seq_tup_read: number;
+  idx_scan: number;
+  idx_tup_fetch: number;
+  n_tup_ins: number;
+  n_tup_upd: number;
+  n_tup_del: number;
+  n_tup_hot_upd: number;
+  n_live_tup: number;
+  n_dead_tup: number;
+  heap_blks_read: number;
+  heap_blks_hit: number;
+  idx_blks_read: number;
+  idx_blks_hit: number;
+  last_autovacuum: null | Timestamp;
+  last_autoanalyze: null | Timestamp;
+}
+/**
+ * indexes.usage 的一行（pg_stat_user_indexes、pg_index 与 pg_relation_size）。Timescale 分块上的索引按 hypertable 与索引名汇总
+ */
+export interface DbstatsIndexRow {
+  schema: string;
+  table: string;
+  index: string;
+  idx_scan: number;
+  idx_tup_read: number;
+  idx_tup_fetch: number;
+  size_bytes: number;
+  unique: boolean;
+  primary: boolean;
+}
+/**
+ * settings.get 的一行（pg_settings）。不存在的参数不返回
+ */
+export interface DbstatsSettingRow {
+  name: string;
+  setting: string;
+  unit: string | null;
+  vartype: 'bool' | 'enum' | 'integer' | 'real' | 'string';
+  /**
+   * 修改需要的条件；postmaster 需要重启
+   */
+  context: 'internal' | 'postmaster' | 'sighup' | 'superuser-backend' | 'backend' | 'superuser' | 'user';
+  source: string;
+  min_val: string | null;
+  max_val: string | null;
+  pending_restart: boolean;
+}
+/**
+ * activity.summary 的一行：按状态与等待事件计数的客户端会话（pg_stat_activity，backend_type 为 client backend），不含语句文本与应用名。另有一行 state 为 max_connections，count 为参数取值
+ */
+export interface DbstatsActivityRow {
+  state: string;
+  wait_event_type: string | null;
+  wait_event: string | null;
+  count: number;
+}
+/**
+ * locks.summary 的一行：按锁类型、模式与是否授予计数（pg_locks），不含对象名与进程
+ */
+export interface DbstatsLockRow {
+  locktype: string;
+  mode: string;
+  granted: boolean;
+  count: number;
+}
+/**
+ * 权限自检（启动时与每小时一次）：角色能读取任何业务表（has_table_privilege SELECT 或 has_any_column_privilege SELECT，系统 schema 之外）时 ok 为 false，集成降级为不可用并发布状态条件 DatasourceOverPrivileged。missing 为缺少的 pg_read_all_stats、pg_read_all_settings 成员关系与 pg_stat_statements 扩展
+ */
+export interface DbstatsPrivilegeReport {
+  ok: boolean;
+  role: string;
+  /**
+   * 能读取的业务表 <schema>.<表名>，最多列出 20 个
+   *
+   * @maxItems 20
+   */
+  readable_tables: string[];
+  missing: string[];
+  /**
+   * default_transaction_read_only 为 on
+   */
+  read_only: boolean;
+  checked_at: Timestamp;
+}
 export interface AuthenticatedPrincipal {
   principal: Principal;
   /**
@@ -1331,6 +1824,10 @@ export interface ModelUsage {
  * 渠道无关的消息，渠道适配器负责转义和渲染。各段依次为现状、业务关键信号（有异常或接近阈值的信号时）、关键问题、拓扑联系、解决方案、证据链；带 runs 的块是富文本，渠道按自己的格式渲染（Telegram HTML、飞书卡片 markdown、GitHub Markdown），没有 runs 时按 text 渲染
  */
 export interface NotifyMessage {
+  /**
+   * incident 事件消息；goal 主动优化的目标消息（契约 2.28.0）：incident_id 为目标 id，incident_version 为目标的 revision，五段依次为现状（目标与基线）、关键问题（发现与档位）、拓扑联系、解决方案（建议、预期收益、验证）、证据链。不填时为 incident
+   */
+  kind?: 'incident' | 'goal';
   incident_id: Uuid;
   incident_version: number;
   /**
@@ -1772,6 +2269,13 @@ export interface EntityRef {
   uid: string | null;
 }
 /**
+ * 研判、提议、出境清单与消息的主体（契约 2.28.0，ADR 0146 §8）：incident 事件；goal 主动优化的目标。没有 subject 的旧数据都是事件。主体为 goal 时沿用的事件字段语义为：incident_id 取目标 id，incident_version 取目标的 revision
+ */
+export interface Subject {
+  type: 'incident' | 'goal';
+  id: Uuid;
+}
+/**
  * 组件键 → 可读名称（领域包 ComponentType.display_name 求出，ADR 0101）。只用于显示；没有名称的组件不在其中，显示组件键
  */
 export interface CommonComponentNames {
@@ -1878,9 +2382,9 @@ export interface EvalCase {
    */
   suite: string;
   /**
-   * incident：真实事件；feedback：来自已绑定账号且给出根因的反馈；benign：被人工忽略或平静时段注入的告警；abstain：去掉根因异常卡后的反事实快照；scenario：Kind 上注入的级联故障
+   * incident：真实事件；feedback：来自已绑定账号且给出根因的反馈；benign：被人工忽略或平静时段注入的告警；abstain：去掉根因异常卡后的反事实快照；scenario：Kind 上注入的级联故障；optimization：主动优化的目标运行（契约 2.28.0，ADR 0146 §7），incident_id 为 null，标准答案在 truth.optimization
    */
-  type: 'incident' | 'feedback' | 'benign' | 'abstain' | 'scenario';
+  type: 'incident' | 'feedback' | 'benign' | 'abstain' | 'scenario' | 'optimization';
   cluster_id: ClusterId;
   /**
    * 用例对应的事件；从外部导入、还没有事件身份时为 null
@@ -1941,6 +2445,129 @@ export interface EvalTruth {
    * benign 与 abstain 用例为 true：出现 evidence_consistent 即为误报
    */
   forbid_evidence_consistent: boolean;
+  optimization?: EvalOptimizationTruth;
+}
+/**
+ * optimization 用例的标准答案（ADR 0146 §7）。root_components 为期望发现挂到的组件，disposition 为 null；良性用例 benign 为 true，findings、templates、locations 为空，任何建议都算误报
+ */
+export interface EvalOptimizationTruth {
+  goal: GoalSpec;
+  benign: boolean;
+  /**
+   * 期望的发现：类型与实体键（召回@3 与精确率）
+   */
+  findings: {
+    kind: string;
+    entity: EntityKey;
+  }[];
+  /**
+   * 可接受的模板 <pack>/<id>
+   */
+  templates: string[];
+  /**
+   * 期望的代码位置（文件命中@3 与函数命中@1）
+   */
+  locations: {
+    path: string;
+    /**
+     * 函数或方法名（带接收者时写 Receiver.Method）
+     */
+    symbol: string | null;
+  }[];
+  /**
+   * 已知的实际收益（指标单位，按改善方向取正值），用于预期收益的校准
+   */
+  known_gain: number | null;
+}
+export interface GoalSpec {
+  origin: GoalOrigin;
+  subject: GoalSubject;
+  /**
+   * 目标值；领域体检没有目标值时为 null，差距按领域的门槛（DomainGates.thresholds）
+   */
+  objective: null | GoalObjective;
+  /**
+   * 允许的建议类别
+   *
+   * @minItems 1
+   */
+  outputs: [RecommendationKind, ...RecommendationKind[]];
+  budget: GoalBudget;
+}
+export interface GoalOriginManual {
+  kind: 'manual';
+  channel: 'console' | 'telegram' | 'api';
+  /**
+   * 下达目标的主体 id；api 为调用方 id
+   */
+  principal: string;
+}
+export interface GoalOriginCheckup {
+  kind: 'checkup';
+  domain: DomainId;
+  schedule_id: string;
+}
+export interface GoalOriginTrend {
+  kind: 'trend';
+  /**
+   * <包>/<领域>/<趋势 id>
+   */
+  trend: string;
+  entity: EntityKey;
+}
+export interface GoalOriginForecastAlert {
+  kind: 'forecast_alert';
+  alert_fingerprint: string;
+}
+export interface GoalSubjectIndicator {
+  type: 'indicator';
+  indicator: IndicatorRef;
+  /**
+   * 按指标的 params schema 校验
+   */
+  params: {
+    [k: string]: number | string | boolean | undefined;
+  };
+  scope: GoalScope;
+}
+/**
+ * 范围白名单：组件键与命名空间；两者都为空表示不限
+ */
+export interface GoalScope {
+  /**
+   * @maxItems 50
+   */
+  components: ComponentKey[];
+  /**
+   * @maxItems 50
+   */
+  namespaces: string[];
+}
+export interface GoalSubjectDomain {
+  type: 'domain';
+  domain: DomainId;
+  scope: GoalScope;
+}
+export interface GoalObjective {
+  comparator: Comparator;
+  target: number;
+  unit: IndicatorUnit;
+  statistic: IndicatorStatistic;
+  window: Duration1;
+}
+/**
+ * 一次运行的预算（ADR 0146 §1.2 的默认值）
+ */
+export interface GoalBudget {
+  tokens: number;
+  duration_seconds: number;
+  checks: number;
+  dbstats_queries: number;
+  traces_queries: number;
+  logs_queries: number;
+  code_files: number;
+  code_bytes: number;
+  github_requests: number;
 }
 /**
  * 防泄漏（DESIGN §14.3）：回放时从检索与上下文中排除的材料
@@ -2885,6 +3512,7 @@ export interface Proposal {
   proposal_id: Uuid;
   idempotency_key: Sha2562;
   cluster_id: ClusterId;
+  subject?: Subject1;
   incident_id: Uuid;
   binding: ProposalBinding;
   /**
@@ -2950,6 +3578,16 @@ export interface Proposal {
   created_at: Timestamp;
   updated_at: Timestamp;
 }
+/**
+ * 研判、提议、出境清单与消息的主体（契约 2.28.0，ADR 0146 §8）：incident 事件；goal 主动优化的目标。没有 subject 的旧数据都是事件。主体为 goal 时沿用的事件字段语义为：incident_id 取目标 id，incident_version 取目标的 revision
+ */
+export interface Subject1 {
+  type: 'incident' | 'goal';
+  id: Uuid;
+}
+/**
+ * 主体为事件时是事件版本、根因组件与阶段 A 的证据指纹；主体为目标时（契约 2.28.0）incident_version 取目标的 revision，root_component 取发现挂到的组件，evidence_fingerprint 取发现的证据指纹。审批断言 v1 与 gateway 的绑定核对不变
+ */
 export interface ProposalBinding {
   incident_version: number;
   root_component: ComponentKey;
@@ -3033,6 +3671,447 @@ export interface Feedback {
    */
   stale: boolean;
   created_at: Timestamp;
+}
+/**
+ * 主动优化的目标（契约 2.28.0，ADR 0146 §1.2）。目标只引用领域包声明的指标或领域，不含任何自由查询；规格每修改一次 revision 加一。每次分析是一次目标运行（GoalRunSummary），结果见 optimization-output.schema.json
+ */
+export interface Goal {
+  goal_id: Uuid;
+  revision: number;
+  cluster_id: ClusterId;
+  spec: GoalSpec;
+  state: GoalState;
+  /**
+   * 状态的机器可读原因，例如 failed 的 baseline_insufficient、cancelled 的 user
+   */
+  state_reason: string | null;
+  expires_at: Timestamp5;
+  /**
+   * 最近一次运行；还没有运行时为 null
+   */
+  last_run: null | GoalRunSummary;
+  created_at: Timestamp;
+  updated_at: Timestamp;
+}
+export interface GoalRunSummary {
+  run_id: Uuid;
+  goal_id: Uuid;
+  goal_revision: number;
+  state: GoalRunState;
+  /**
+   * concluded 时的结果：no_gap 没有差距（不调用模型）；recommended 有通过门槛的建议；report_only 有发现、没有建议通过门槛；其余状态为 null
+   */
+  result: null | ('no_gap' | 'recommended' | 'report_only');
+  /**
+   * deferred 的原因（budget、storm、incident、load_guard、rate_limit、schedule_window）或 failed 的原因（baseline_insufficient、model_unavailable、budget_exhausted、deadline、datasource、internal）
+   */
+  reason: string | null;
+  /**
+   * 差距是否成立；基线之前为 null
+   */
+  gap: boolean | null;
+  /**
+   * 本次运行发现或更新的发现数
+   */
+  findings: number;
+  /**
+   * 通过全部门槛的建议数
+   */
+  recommendations: number;
+  queued_at: Timestamp;
+  started_at: null | Timestamp;
+  finished_at: null | Timestamp;
+}
+/**
+ * 一次目标运行经代码校验后的输出（契约 2.28.0，ADR 0146 §2）：基线、差距、候选发现、按发现分组的账本、每个发现的结论、建议与门槛记录、validation_notes。baseline、gap、candidates 与 recommendations 的数值全部由代码从信号卡计算；模型只提出假设、选择检查并写说明。没有差距时整次运行不调用模型，ledger 与 conclusions 为空
+ */
+export interface OptimizationOutput {
+  goal_id: Uuid;
+  goal_revision: number;
+  run_id: Uuid;
+  baseline: OptimizationBaseline;
+  gap: OptimizationGap;
+  /**
+   * 候选发现，按“份额 × 差距”降序；前 3 个 selected 为 true，进入假设；其余为“未分析的候选”
+   *
+   * @maxItems 50
+   */
+  candidates: OptimizationCandidate[];
+  /**
+   * 假设账本：root_component 为发现挂到的组件，finding 给出分组键；同一发现上的假设互为竞争假设
+   *
+   * @maxItems 9
+   */
+  hypotheses: FindingHypothesis[];
+  /**
+   * @maxItems 12
+   */
+  next_checks: NextCheck[];
+  /**
+   * 每个进入假设的发现一条，档位由代码按 ADR 0146 §2.4 计算
+   *
+   * @maxItems 3
+   */
+  conclusions: FindingConclusion[];
+  /**
+   * 本次运行评估过的建议与门槛记录（每次运行最多 2 个通过全部门槛）
+   *
+   * @maxItems 12
+   */
+  recommendations: RecommendationAttempt[];
+  /**
+   * 【模型】本次分析的说明；没有调用模型时为代码生成的说明
+   */
+  summary: string;
+  /**
+   * 检验循环的停止原因（取值同 ResearchOutput.stop_reason）；没有差距时为 null
+   */
+  stop_reason: 'leader_supported' | 'no_change' | 'step_limit' | 'deadline' | 'budget' | 'model_unavailable' | null;
+  /**
+   * 诊断卡、份额卡与区分性检查产生的证据卡（编号见 evidence_index），序列为空数组
+   *
+   * @maxItems 60
+   */
+  check_cards: EvidenceResult[];
+  /**
+   * 运行内的证据引用到定义与实体的映射：card:<n> → <card_id>@<实体键>
+   */
+  evidence_index: {
+    ref: EvidenceRef;
+    target: string;
+  }[];
+  /**
+   * 代码校验的修改记录：删除的无效证据引用、拒绝的未知模板与原始查询、降级的结论、删除的无法核实的数值等
+   */
+  validation_notes: string[];
+}
+export interface OptimizationBaseline {
+  window: TimeWindow;
+  /**
+   * 覆盖率不低于 90% 且至少 3 个业务高峰；否则运行以 failed（baseline_insufficient）结束
+   */
+  sufficient: boolean;
+  /**
+   * 基线不足时缺少的数据（例如“postgres/db-time 覆盖率 72%”）
+   */
+  missing: string[];
+  indicators: BaselineIndicator[];
+}
+export interface BaselineIndicator {
+  indicator: IndicatorRef;
+  params: {
+    [k: string]: number | string | boolean | undefined;
+  };
+  entity: EntityKey;
+  unit: IndicatorUnit;
+  better: 'lower' | 'higher';
+  statistic: IndicatorStatistic;
+  /**
+   * 统计值；没有数据时为 null
+   */
+  value: number | null;
+  hours: number;
+  covered_hours: number;
+  /**
+   * 按负载指标判定的业务高峰小时数（负载前 20%）
+   */
+  peak_hours: number;
+  /**
+   * 违反目标或门槛的小时占比；没有目标与门槛时为 null
+   */
+  violation_ratio: number | null;
+  /**
+   * 按小时的取值 [unix 秒, 值或 null]，控制台画基线图
+   *
+   * @maxItems 336
+   */
+  hourly: [number, number | null][];
+}
+export interface OptimizationGap {
+  exists: boolean;
+  /**
+   * objective 按目标值；gate 按领域门槛；none 基线不足或没有可比较的目标
+   */
+  basis: 'objective' | 'gate' | 'none';
+  detail: string;
+}
+export interface OptimizationCandidate {
+  finding: Sha2563;
+  kind: string;
+  entity: FindingEntity;
+  component: ComponentKey;
+  /**
+   * <领域>/<诊断卡 id>
+   */
+  diagnostic: string;
+  card_ref: EvidenceRef;
+  share: number | null;
+  share_ref: null | EvidenceRef;
+  gap: number | null;
+  score: number;
+  selected: boolean;
+  /**
+   * 没有进入假设的原因：rank（排在前 3 之外）、verifying（已修复的发现在验证期内）、cooldown
+   */
+  skipped_reason: 'rank' | 'verifying' | 'cooldown' | null;
+}
+export interface FindingEntity {
+  /**
+   * 逻辑实体类型（pg_statement、pg_table、pg_index、route、stage），或 Kubernetes 的 Kind
+   */
+  type: string;
+  key: EntityKey;
+  /**
+   * 可读名称，只用于显示
+   */
+  display: string;
+  labels: Labels2;
+}
+/**
+ * 实体的标签（EntityRows.labels），例如 pg_statement 的 database、queryid；按实体执行的卡片与模板以 $params 引用
+ */
+export interface Labels2 {
+  [k: string]: string | undefined;
+}
+export interface FindingHypothesis {
+  finding: Sha256;
+  hypothesis: Hypothesis;
+}
+export interface FindingConclusion {
+  finding: Sha256;
+  level: ConclusionLevel;
+  hypothesis_id: string | null;
+  consistency: OptimizationConsistency;
+  support_refs: EvidenceRef[];
+  share_refs: EvidenceRef[];
+  contrary_refs: EvidenceRef[];
+  chosen_by: 'model' | 'ledger';
+  /**
+   * 【模型】选择这个假设的说明
+   */
+  note: string | null;
+  undetermined_reason: string | null;
+}
+/**
+ * 优化场景的 evidence_consistent 条件逐项结果（ADR 0146 §2.4）；trend_onset 只对趋势触发的目标求值，其余为 null
+ */
+export interface OptimizationConsistency {
+  gap_holds: boolean;
+  share_holds: boolean;
+  trend_onset: boolean | null;
+  no_contrary_normal: boolean;
+  competitor_tested: boolean;
+}
+export interface RecommendationAttempt {
+  finding: Sha256;
+  kind: RecommendationKind;
+  template: string;
+  gates: GateRecord[];
+  passed: boolean;
+  /**
+   * 保存的建议；没有保存时为 null
+   */
+  recommendation_id: null | Uuid;
+}
+export interface GateRecord {
+  /**
+   * G1 证据档位；G2 预期收益；G3 安全约束；G4 新颖性；G5 数量；G6 时机
+   */
+  gate: 'G1' | 'G2' | 'G3' | 'G4' | 'G5' | 'G6';
+  passed: boolean;
+  /**
+   * 机器可读的原因码，与 remediation_attempts 的方式相同；G3 不通过时为模板 guard 的 id
+   */
+  code: string;
+  detail: string;
+}
+/**
+ * 一个实体上的一个问题（契约 2.28.0，ADR 0146 §1.4），跨分析运行持久保存；fingerprint 是去重的唯一键。每次运行先按指纹更新已有发现（last_seen、差距、份额、档位），再判断是否生成建议
+ */
+export interface Finding {
+  fingerprint: Sha2564;
+  cluster_id: ClusterId;
+  domain: DomainId;
+  /**
+   * 领域声明的发现类型（DomainDiagnostic.finding），例如 pg.statement_dominant、pg.temp_spill、workload.cpu_overprovisioned
+   */
+  kind: string;
+  entity: FindingEntity;
+  component: ComponentKey1;
+  /**
+   * 发现影响的指标；诊断卡没有声明时为 null
+   */
+  indicator: null | IndicatorRef;
+  /**
+   * 指标相对目标或门槛的差距（指标单位，按改善方向取正值）；没有可比较的目标时为 null
+   */
+  gap: number | null;
+  /**
+   * 实体在指标中的份额（份额卡）；没有份额卡时为 null
+   */
+  share: number | null;
+  /**
+   * 最近一次分析的结论档位（ADR 0146 §2.4）；进入候选但未分析时为 null
+   */
+  level: null | ConclusionLevel;
+  /**
+   * 支持卡与份额卡的判定向量指纹；未分析时为 null
+   */
+  evidence_fingerprint: null | Sha256;
+  status: FindingStatus;
+  /**
+   * 被拒绝之后的冷却期限
+   */
+  cooldown_until: null | Timestamp;
+  last_goal_id: null | Uuid;
+  last_run_id: null | Uuid;
+  first_seen: Timestamp;
+  last_seen: Timestamp;
+  updated_at: Timestamp;
+}
+/**
+ * 主动优化的建议（契约 2.28.0，ADR 0146 §1.5、§2.5、§2.6）：ops 仓库的 PR（经 gitops_pr 提议）或业务仓库的 issue。预期收益与验证计划在创建时由代码确定；模型写的文字只在 model_note 中，消息与控制台标注【模型】
+ */
+export interface OptimizationRecommendation {
+  recommendation_id: Uuid;
+  cluster_id: ClusterId;
+  finding: Sha2565;
+  goal_id: Uuid;
+  run_id: Uuid;
+  kind: RecommendationKind;
+  /**
+   * <pack>/<模板 id>：ops_pr 为 remediations.yaml 中 applies 为 goal 的模板，business_issue 为 issues.yaml 的模板
+   */
+  template: string;
+  title: string;
+  level: ConclusionLevel;
+  state: RecommendationState;
+  estimate: EstimateValue;
+  verify: VerifyPlan;
+  /**
+   * G1–G6 的逐项结果（按顺序，遇到第一个不通过即停止）；全部通过才创建 PR 或 issue
+   */
+  gates: GateRecord[];
+  /**
+   * 创建的 PR 或 issue；门槛不通过或还没有创建时为 null
+   */
+  delivery: null | RecommendationDelivery;
+  /**
+   * 验证结果；验证结束之前为 null
+   */
+  outcome: null | RecommendationOutcome;
+  /**
+   * 模型补充的说明（经数值审计），显示时标注【模型】
+   */
+  model_note: string | null;
+  created_at: Timestamp;
+  updated_at: Timestamp;
+}
+/**
+ * 模板 estimate 的求值结果：lower 为保守下界，expected 为期望值，单位与指标相同，按改善方向取正值
+ */
+export interface EstimateValue {
+  indicator: IndicatorRef;
+  unit: IndicatorUnit;
+  lower: number;
+  expected: number | null;
+  basis: string;
+}
+/**
+ * 验证计划（ADR 0146 §2.6）：start 为 merged_synced 时等管理这个文件的 Argo 应用的同步版本包含合并提交且 Healthy（GUC 另外核对 pg_settings）；为 deployed 时等发布输入的版本对应的业务提交包含修复提交。窗口开始后与基线按“星期 × 小时”匹配的时段比较
+ */
+export interface VerifyPlan {
+  start: 'merged_synced' | 'deployed';
+  indicator: IndicatorRef;
+  params: {
+    [k: string]: number | string | boolean | undefined;
+  };
+  within: Duration;
+  /**
+   * 应转为正常的卡片全局 id
+   */
+  cards: string[];
+  guards: IndicatorRef[];
+  /**
+   * GUC：应在 pg_settings 中生效的参数 → 新值
+   */
+  settings: {
+    [k: string]: string | undefined;
+  };
+  /**
+   * 验证窗口；开始之前为 null
+   */
+  window: null | TimeWindow;
+}
+export interface RecommendationDelivery {
+  /**
+   * ops：ops 仓库（只经 gateway 的 gitops_pr）；business：业务仓库（只创建 issue 与评论）
+   */
+  repository_role: 'ops' | 'business';
+  repository: string;
+  /**
+   * ops_pr 的 gitops_pr 提议；business_issue 为 null
+   */
+  proposal_id: null | Uuid;
+  /**
+   * PR 或 issue 号；PR 还没有创建时为 null
+   */
+  number: number | null;
+  url: string | null;
+  /**
+   * ops_pr 的分支 srenautix/goal-…
+   */
+  branch: string | null;
+  merged_at: null | Timestamp;
+  merge_commit: string | null;
+  /**
+   * issue 的关闭原因或 PR 未合并就关闭（unmerged）；未关闭时为 null
+   */
+  closed_reason: null | ('completed' | 'not_planned' | 'unmerged');
+}
+/**
+ * 合并或部署之后的验证结果（ADR 0146 §2.6）：改善不低于预期下界的 50% 并超出噪声带为 improved；守护指标恶化超过 10% 为 regressed；其余为 no_effect
+ */
+export interface RecommendationOutcome {
+  result: 'improved' | 'no_effect' | 'regressed';
+  window: TimeWindow;
+  /**
+   * 匹配时段的基线统计值
+   */
+  baseline: number | null;
+  /**
+   * 验证窗口的统计值
+   */
+  observed: number | null;
+  /**
+   * 按改善方向取正值，单位与指标相同
+   */
+  improvement: number | null;
+  /**
+   * 基线窗口内同一时段的四分位距的一半
+   */
+  noise_band: number | null;
+  estimate_lower: number;
+  guards: {
+    indicator: IndicatorRef;
+    /**
+     * 恶化方向为正
+     */
+    change_ratio: number | null;
+    regressed: boolean;
+  }[];
+  /**
+   * verify.cards 在窗口结束时的结论
+   */
+  cards: {
+    card_id: string;
+    verdict: Verdict;
+  }[];
+  /**
+   * regressed 的 ops PR 由 server 提交的 revert 提议
+   */
+  revert_proposal_id: null | Uuid;
+  verified_at: Timestamp;
 }
 /**
  * 证据卡定义（DESIGN §6.1），写在领域包 chains.yaml 的证据链中。卡片只包含数据：信号引用、时间窗口、params、CEL 判定、声明式展示和链接。CEL 只在 TypeScript 运行时求值，求值成本有上限
@@ -3124,7 +4203,10 @@ export interface CardSignalRef {
    * signals.yaml 中的信号 <pack>/<signal id>；同包内可省略 <pack>/
    */
   signal: string;
-  mode: 'range' | 'instant' | 'logs' | 'traces';
+  /**
+   * dbstats 读取 dbstats 信号（契约 2.28.0）：每行一条序列，点为采样时刻
+   */
+  mode: 'range' | 'instant' | 'logs' | 'traces' | 'dbstats';
   params?: {
     [k: string]: number | string | boolean | undefined;
   };
@@ -3243,6 +4325,30 @@ export interface FeedbackCreate {
   mechanism: string | null;
   reason: string | null;
 }
+/**
+ * 下达目标的请求体（POST /v1/goals）。origin 由认证上下文决定（控制台会话为 console，API token 为 api，聊天渠道的确认卡片为 telegram）；budget 只写要改的项，其余取默认值
+ */
+export interface GoalCreate {
+  cluster_id: ClusterId;
+  subject: GoalSubject;
+  objective: null | GoalObjective;
+  /**
+   * @minItems 1
+   */
+  outputs: [RecommendationKind, ...RecommendationKind[]];
+  budget?: {
+    tokens?: number;
+    duration_seconds?: number;
+    checks?: number;
+    dbstats_queries?: number;
+    traces_queries?: number;
+    logs_queries?: number;
+    code_files?: number;
+    code_bytes?: number;
+    github_requests?: number;
+  };
+  expires_in?: Duration2;
+}
 export interface ResearchRoot1 {
   run_id: Uuid;
   component: ComponentKey;
@@ -3258,8 +4364,21 @@ export interface IntegrationManifest {
   api_version: 'srenautix.io/integration/v1';
   id: string;
   display_name?: string;
+  /**
+   * dbstats：数据库统计视图（契约 2.28.0）
+   */
   category:
-    'alerts' | 'metrics' | 'logs' | 'traces' | 'changes' | 'notify' | 'approve' | 'identity' | 'model' | 'execute';
+    | 'alerts'
+    | 'metrics'
+    | 'logs'
+    | 'traces'
+    | 'changes'
+    | 'notify'
+    | 'approve'
+    | 'identity'
+    | 'model'
+    | 'execute'
+    | 'dbstats';
   /**
    * 按方向分级（DESIGN §10.2）：approve、authenticate 只能是核心或官方；execute 只能是核心
    */
@@ -3313,7 +4432,7 @@ export interface IntegrationManifest {
   deployment_reports?: string[];
 }
 /**
- * 领域包的 pack.yaml（DESIGN §6.3）。领域包只包含数据，不包含可执行代码；其余文件的结构见本文件的 $defs：signals.yaml → SignalsFile，components.yaml → ComponentsFile，alerts.yaml → AlertsFile，chains.yaml → ChainsFile，checks.yaml → ChecksFile，rules.yaml → RulesFile，remediations.yaml → RemediationsFile，rca-params.yaml → RcaParams，knowledge/*.yaml → KnowledgeFile，action-requests.yaml → ActionRequestsFile，chaos/*.yaml → ChaosFile，tests/*.yaml → PackTestFile，用户层文件 → UserLayer，pack.lock → PackLock
+ * 领域包的 pack.yaml（DESIGN §6.3）。领域包只包含数据，不包含可执行代码；其余文件的结构见本文件的 $defs：signals.yaml → SignalsFile，components.yaml → ComponentsFile，alerts.yaml → AlertsFile，chains.yaml → ChainsFile，checks.yaml → ChecksFile，rules.yaml → RulesFile，remediations.yaml → RemediationsFile，domains.yaml → DomainsFile，issues.yaml → IssuesFile，rca-params.yaml → RcaParams，knowledge/*.yaml → KnowledgeFile，action-requests.yaml → ActionRequestsFile，chaos/*.yaml → ChaosFile，tests/*.yaml → PackTestFile，用户层文件 → UserLayer，pack.lock → PackLock
  */
 export interface PackManifest {
   api_version: 'srenautix.io/pack/v1';
@@ -3350,7 +4469,10 @@ export interface SignalsFile {
  */
 export interface Signal {
   id: string;
-  kind: 'metrics' | 'logs' | 'traces';
+  /**
+   * dbstats：数据库统计视图（契约 2.28.0，ADR 0146 §3.3），备选的方言必须是 dbstats
+   */
+  kind: 'metrics' | 'logs' | 'traces' | 'dbstats';
   unit?: string;
   /**
    * 补充另一个包的信号 <包>/<信号 id>（契约 2.26.0，ADR 0139）：本信号的备选排在那个信号原有的备选之前，引用那个信号的卡都按合并后的备选探测与查询。只能补充别的包里没有 extends 的信号，类型必须相同。备选按数据源选中一个，被选中后用于这个信号的全部实体，只覆盖部分实体的备选要让其余实体查不到数据
@@ -3365,13 +4487,27 @@ export interface Signal {
 }
 export interface SignalAlternative {
   /**
-   * 查询模板。可用变量：$selector（按标签档案展开的实体选择器）、$namespace、$name、$node、$rate_window（由抓取间隔推导）、$params.<名字>
+   * 查询模板。可用变量：$selector（按标签档案展开的实体选择器）、$namespace、$name、$node、$rate_window（由抓取间隔推导）、$params.<名字>。dbstats 方言的 expr 是 dbstats/v1 的操作名（例如 statements.top），SQL 由适配器给出
    */
   expr: string;
   /**
-   * PromQL 用严格解析器做 lint；使用 MetricsQL 必须显式声明
+   * PromQL 用严格解析器做 lint；使用 MetricsQL 必须显式声明；dbstats 只用于 dbstats 信号
    */
-  dialect?: 'promql' | 'metricsql' | 'logql' | 'logs_match' | 'traceql';
+  dialect?: 'promql' | 'metricsql' | 'logql' | 'logs_match' | 'traceql' | 'dbstats';
+  /**
+   * dbstats：操作的参数（dbstats/v1 各操作的 args）；字符串值可以整体写成 $params.<名字>，执行时换成参数值，按操作的 schema 校验
+   */
+  args?: {
+    [k: string]: number | string | boolean | null | string[] | undefined;
+  };
+  /**
+   * dbstats：作为序列取值的数值列（例如 total_exec_time_ms）。每行结果是一条序列，标签为该行的字符串与布尔列，取值为这一列
+   */
+  column?: string;
+  /**
+   * dbstats：取值为两次采样（相隔不少于 300 秒）的差值除以间隔秒数，序列只含两次都出现的行；只有一次采样时引用为缺数据
+   */
+  rate?: boolean;
   /**
    * 探测该备选是否可用的查询，返回非空即可用；不填时用 expr 本身探测
    */
@@ -3586,17 +4722,26 @@ export interface Remediation {
   id: string;
   title: LocalizedText2;
   /**
-   * release_rollback 发布回退；config_resource 副本数、HPA 上限、request/limit、超时与限流参数；alert_rule 告警阈值、持续时间、严重度；topology_coverage 拓扑与领域包覆盖
+   * release_rollback 发布回退；config_resource 副本数、HPA 上限、request/limit、超时与限流参数；alert_rule 告警阈值、持续时间、严重度；topology_coverage 拓扑与领域包覆盖；component_param 组件参数（PG 的 GUC、连接池、缓存与存储组件的配置，契约 2.28.0）
    */
-  category: 'release_rollback' | 'config_resource' | 'alert_rule' | 'topology_coverage';
+  category: 'release_rollback' | 'config_resource' | 'alert_rule' | 'topology_coverage' | 'component_param';
+  /**
+   * incident：事件的自愈 PR（ADR 0108）；goal：主动优化的 ops PR（契约 2.28.0，ADR 0146 §4.3），由领域的 optimizations 引用。现有模板不写时为 incident，行为不变
+   */
+  applies?: 'incident' | 'goal';
   /**
    * 仓库角色，例如 gitops；server 配置把它映射到仓库与布局
    */
   repository: string;
   /**
-   * CEL 适用条件。变量：incident、root、research（触发计划的研判结论 {disposition, level}，取值见 Disposition 与 ConclusionLevel；没有研判时为 null）、cards（卡片全局 id → 结论）、alerts（成员告警：alertname、labels、annotations、entity，以及 AlertClassification 的 role、source、catalog_entry、chronic）、params
+   * CEL 适用条件。变量：incident、root、research（触发计划的研判结论 {disposition, level}，取值见 Disposition 与 ConclusionLevel；没有研判时为 null）、cards（卡片全局 id → 结论）、alerts（成员告警：alertname、labels、annotations、entity，以及 AlertClassification 的 role、source、catalog_entry、chronic）、params。applies 为 goal 时另有 goal（GoalSpec 与 goal_id、revision）、finding（Finding）与 finding_cards（发现的支持卡、份额卡与诊断卡：卡片全局 id → 结论，形状与 cards 相同），incident 与 alerts 为空，root 为发现挂到的组件
    */
   when: string;
+  estimate?: Estimate;
+  /**
+   * 安全约束（ADR 0146 §2.5 的 G3）：在 let 之后求值，任一为 false 时不生成补丁，say 写明原因。变量与 skip_if 相同
+   */
+  guard?: Guard[];
   /**
    * 参数默认值，可由用户层覆盖
    */
@@ -3639,7 +4784,7 @@ export interface Remediation {
    * @minItems 1
    */
   edits: [RemediationEdit, ...RemediationEdit[]];
-  change: LocalizedText7;
+  change: LocalizedText9;
   verify: {
     say: LocalizedText2;
     /**
@@ -3647,6 +4792,10 @@ export interface Remediation {
      */
     cards?: string[];
     within?: string;
+    /**
+     * applies 为 goal：验证时的守护指标 <包>/<指标>（错误率、其他语句的执行时间、CPU 限流、OOM 等），恶化超过 10% 判为 regressed（ADR 0146 §2.6）
+     */
+    guards?: IndicatorRef[];
   };
   /**
    * 回滚方法：revert 这个 PR 的提交；say 写补充说明
@@ -3654,6 +4803,47 @@ export interface Remediation {
   rollback: {
     say: LocalizedText2;
   };
+}
+/**
+ * applies 为 goal 时必填：确定性计算的预期收益（ADR 0146 §2.5 的 G2）
+ */
+export interface Estimate {
+  indicator: IndicatorRef;
+  unit: IndicatorUnit;
+  /**
+   * CEL，下界
+   */
+  lower: string;
+  /**
+   * CEL，期望值
+   */
+  expected: string;
+  basis: LocalizedText7;
+}
+/**
+ * 计算依据与前提（ICU MessageFormat，变量为 let、params、lower、expected）
+ */
+export interface LocalizedText7 {
+  'zh-CN'?: string;
+  en?: string;
+}
+export interface Guard {
+  /**
+   * 写进门槛记录的原因码
+   */
+  id: string;
+  /**
+   * 为 true 表示约束成立
+   */
+  cel: string;
+  say: LocalizedText8;
+}
+/**
+ * 约束不成立时的原因（ICU MessageFormat，变量为 let 与 params）
+ */
+export interface LocalizedText8 {
+  'zh-CN'?: string;
+  en?: string;
 }
 /**
  * 对一个文件角色的修改。path 用点路径：段为键名、name[key=value]（数组中 key 等于 value 的元素）、name[*]（任一元素，只用于定位）或 name[N]；{变量} 由 let 与 params 的值替换。文件角色是 glob 或多文档 YAML 时，按 document 与 locate 找到唯一的文档，找不到或不唯一时模板跳过
@@ -3699,7 +4889,7 @@ export interface RemediationEdit {
 /**
  * 改了什么、为什么（ICU MessageFormat，变量取自 let 与 params），写入 PR 描述
  */
-export interface LocalizedText7 {
+export interface LocalizedText9 {
   'zh-CN'?: string;
   en?: string;
 }
@@ -3724,6 +4914,389 @@ export interface RepositoryLayout {
     | undefined;
 }
 /**
+ * 业务仓库的代码布局（server 配置 optimization.repositories.business.code，契约 2.28.0，ADR 0146 §3.5）：代码定位读取哪个提交、哪些路径，锚点类型对应的候选路径，以及路径到 issue 标签的映射
+ */
+export interface CodeLayout {
+  version: {
+    /**
+     * running：从 ops 仓库的发布输入解析出运行中的业务提交，没有时用默认分支；default_branch：总是默认分支
+     */
+    rule: 'running' | 'default_branch';
+    /**
+     * running：ops 仓库中发布输入的文件角色（RepositoryLayout 的键），其中的版本字段解析为业务提交
+     */
+    release_input?: string;
+    /**
+     * running：发布输入中版本的逻辑字段名（RepositoryLayout 的 fields）
+     */
+    field?: string;
+  };
+  /**
+   * 代码根目录，仓库根为空串
+   */
+  root: string;
+  /**
+   * glob（* 与 **）
+   *
+   * @minItems 1
+   */
+  include: [string, ...string[]];
+  /**
+   * glob；测试、生成文件中的数据、testdata、*.pem、.env*、*secret* 总是排除
+   */
+  exclude: string[];
+  /**
+   * @minItems 1
+   */
+  languages: ['go' | 'typescript', ...('go' | 'typescript')[]];
+  /**
+   * 锚点类型 → 候选路径的 glob；没有列出的锚点类型在 include 的全部路径中查找
+   */
+  anchors: {
+    kind: AnchorKind;
+    /**
+     * @minItems 1
+     */
+    paths: [string, ...string[]];
+  }[];
+  /**
+   * 路径 glob → issue 标签（例如 internal/gateway/** → area/gateway），按顺序匹配，全部命中的标签都加上
+   */
+  labels?: {
+    /**
+     * @minItems 1
+     */
+    paths: [string, ...string[]];
+    label: string;
+  }[];
+  max_files?: number;
+  max_bytes?: number;
+}
+/**
+ * domains.yaml（契约 2.28.0，ADR 0146 §1.1、§1.3）：本包声明的指标与领域。多个包可以给同一个领域补充内容：同一 id 的领域按包的加载顺序合并，列表追加，gates 后者覆盖前者的同名键
+ */
+export interface DomainsFile {
+  indicators?: Indicator[];
+  domains?: Domain[];
+}
+/**
+ * 目标可以引用的指标。按实体产生序列：基线、差距与验证在指标的信号上按小时取值；目标不提交自由查询
+ */
+export interface Indicator {
+  /**
+   * 包内唯一；全局 id 为 <包>/<id>
+   */
+  id: string;
+  title: LocalizedText2;
+  description?: LocalizedText2;
+  /**
+   * metrics 信号 <pack>/<signal id>（同包内可省略 <pack>/）；查询按实体与 params 渲染，结果是一条或多条序列，多条时取和
+   */
+  signal: string;
+  /**
+   * 实体类型：Kubernetes 的 Kind（其他 API 组写作 Kind.group），或逻辑实体 pg_statement、pg_table、pg_index、route、stage
+   */
+  entity: string;
+  /**
+   * 参数的 JSON Schema（可移植子集：type: object、additionalProperties: false，字符串用 enum 或 pattern 限定，数字有 minimum 与 maximum）。信号中写作 $params.<名字>
+   */
+  params?: {
+    type: 'object';
+    additionalProperties?: false;
+    properties: {};
+  };
+  unit: IndicatorUnit;
+  /**
+   * 改善方向
+   */
+  better: 'lower' | 'higher';
+  statistic: IndicatorStatistic;
+  load_indicator?: IndicatorRef1;
+}
+/**
+ * 一个优化领域（ADR 0146 §1.3）。卡片引用写 <chain>/<card>、checks/<id> 或 templates/<模板 id>（本包内），三段为 <pack>/<chain>/<card>
+ */
+export interface Domain {
+  /**
+   * 例如 database、compute、traffic、storage、cache
+   */
+  id: string;
+  title?: LocalizedText2;
+  /**
+   * 组件类型或 Kind（例如 Cluster.postgresql.cnpg.io）；领域体检在范围内这些组件上执行
+   */
+  applies_to?: string[];
+  /**
+   * 体检时计算基线的指标
+   */
+  indicators?: IndicatorRef[];
+  diagnostics?: DomainDiagnostic[];
+  contribution?: DomainContribution[];
+  /**
+   * 区分性检查可用的查询模板全局 id <pack>/<模板 id>（含 dbstats、traces、logs 信号的模板）
+   */
+  templates?: string[];
+  /**
+   * 适用的 ops 修复模板 <pack>/<id>（remediations.yaml 中 applies 为 goal 的模板）
+   */
+  optimizations?: string[];
+  /**
+   * 适用的业务 issue 模板 <pack>/<id>（issues.yaml）
+   */
+  issues?: string[];
+  gates?: DomainGates;
+  trends?: DomainTrend[];
+  /**
+   * 默认体检计划；时段由 server 配置 optimization.schedule.window 限定
+   */
+  schedule?: {
+    /**
+     * 五段 cron（UTC）
+     */
+    cron: string;
+  };
+  /**
+   * 负载保护卡（ADR 0146 §6.2）：每次直接查询后端之前执行（缓存 1 分钟），任何一张异常就跳过这次查询
+   */
+  load_guards?: DomainLoadGuard[];
+}
+/**
+ * 诊断卡：在范围内的实体上执行，异常即候选发现。有 entities 时卡片在组件上执行一次，按 rows_from 引用的每条序列求 entities.when，为 true 的行各是一个逻辑实体上的候选；没有 entities 时卡片的实体就是发现的实体，卡片异常即候选
+ */
+export interface DomainDiagnostic {
+  id: string;
+  card: string;
+  /**
+   * 发现类型，例如 pg.statement_dominant、pg.temp_spill、workload.cpu_overprovisioned
+   */
+  finding: string;
+  indicator?: IndicatorRef2;
+  /**
+   * 这类发现预示的症状类型（ADR 0133 的集合与 ADR 0146 §2.3 的补充），供假设与检查的对应
+   */
+  symptoms?: (
+    | 'seq_scan'
+    | 'index'
+    | 'temp_spill'
+    | 'lock_wait'
+    | 'io_read'
+    | 'connection_pool'
+    | 'cache_miss'
+    | 'polling'
+    | 'n_plus_one'
+    | 'payload_size'
+    | 'overprovision'
+    | 'saturation'
+    | 'latency'
+    | 'errors'
+  )[];
+  entities?: EntityRows;
+}
+/**
+ * 从卡片的一个引用的序列得到逻辑实体。每个 CEL 的变量为卡片的引用、let、params、entity，以及 row（当前序列 {labels, times, values}）
+ */
+export interface EntityRows {
+  /**
+   * 逻辑实体类型，例如 pg_statement、pg_table、pg_index、route、stage
+   */
+  type: string;
+  /**
+   * 卡片的引用名
+   */
+  rows_from: string;
+  /**
+   * CEL，实体键中类型之后、组件之内的部分（例如 pg_statement 为 <库>/<queryid>）。server 把 pg_statement 的 queryid 换成语句指纹，得到 pg_statement:<集群>/<库>/<指纹>
+   */
+  key: string;
+  /**
+   * CEL，实体的可读名称
+   */
+  display?: string;
+  /**
+   * 实体的标签：名字 → CEL（字符串）。按实体执行的卡片与查询模板以 $params.<名字> 引用
+   */
+  labels?: {
+    [k: string]: string | undefined;
+  };
+  /**
+   * 诊断卡：CEL，为 true 的行是候选
+   */
+  when?: string;
+  /**
+   * 份额卡：CEL，行的份额（0 到 1）
+   */
+  share?: string;
+  limit?: number;
+}
+/**
+ * 份额卡：实体占指标的比例（0 到 1），用于候选排序与结论阶梯。有 entities 时按行求 entities.share；没有时卡片的实体份额为 share 的值（CEL，变量与卡片的 let 相同），不填为 1
+ */
+export interface DomainContribution {
+  id: string;
+  card: string;
+  indicator: IndicatorRef;
+  /**
+   * 没有 entities 时实体的份额（CEL）
+   */
+  share?: string;
+  entities?: EntityRows;
+}
+/**
+ * 领域的门槛参数（ADR 0146 §2.2、§2.4、§2.5）。都有默认值；同一领域在多个包中声明时后者覆盖前者的同名键
+ */
+export interface DomainGates {
+  /**
+   * 违反目标的小时数占比不低于它时差距成立
+   */
+  violation_ratio?: number;
+  /**
+   * evidence_consistent 与业务 issue 要求的份额下限
+   */
+  min_share?: number;
+  /**
+   * G2：预期收益下界的门槛之一，指标当前值的这个比例；门槛取它与 min_gain_gap_ratio 两者中较小者
+   */
+  min_gain_ratio?: number;
+  /**
+   * G2：预期收益下界的门槛之一，差距的这个比例
+   */
+  min_gain_gap_ratio?: number;
+  /**
+   * compute：每个工作负载的最小收益（核）
+   */
+  min_cpu_cores?: number;
+  /**
+   * compute：每个工作负载的最小收益（字节）
+   */
+  min_memory_bytes?: number;
+  /**
+   * 扩缩容：变更后 p95 利用率不超过目标的这个比例
+   */
+  max_utilization_after?: number;
+  cooldown?: Duration3;
+  /**
+   * 领域体检没有目标值时的差距：任一指标的统计值违反门槛即差距成立
+   */
+  thresholds?: {
+    indicator: IndicatorRef;
+    params?: {
+      [k: string]: number | string | boolean | undefined;
+    };
+    comparator: Comparator;
+    value: number;
+    statistic?: IndicatorStatistic;
+  }[];
+}
+/**
+ * 趋势定义（ADR 0146 §5.4）。drift：相对过去 7 天同一小时的中位数，比值超过 ratio 并持续 sustain；slope：在 window 内线性外推，horizon 内到达 limit 指标；headroom：用量占 limit 指标的 p95 超过 ratio 并持续 sustain
+ */
+export interface DomainTrend {
+  id: string;
+  indicator: IndicatorRef;
+  params?: {
+    [k: string]: number | string | boolean | undefined;
+  };
+  method: 'drift' | 'slope' | 'headroom';
+  ratio?: number;
+  sustain: Duration;
+  window?: Duration;
+  horizon?: Duration;
+  limit?: IndicatorRef3;
+}
+export interface DomainLoadGuard {
+  card: string;
+  /**
+   * 这张卡保护的后端：异常时跳过对它们的直接查询；metrics 异常时整次运行推迟
+   *
+   * @minItems 1
+   */
+  backends: ['dbstats' | 'traces' | 'logs' | 'metrics', ...('dbstats' | 'traces' | 'logs' | 'metrics')[]];
+}
+/**
+ * 预期收益（ADR 0146 §2.5）。lower 只用卡片里的确定值计算（保守下界），单位与 indicator 相同、按改善方向取正值；CEL 的变量与模板的 let 相同，另有 gates（领域门槛）
+ */
+export interface Estimate1 {
+  indicator: IndicatorRef;
+  unit: IndicatorUnit;
+  /**
+   * CEL，下界
+   */
+  lower: string;
+  /**
+   * CEL，期望值
+   */
+  expected: string;
+  basis: LocalizedText7;
+}
+/**
+ * issues.yaml（契约 2.28.0，ADR 0146 §4.4）：业务仓库 issue 模板。模板只描述适用条件、锚点、建议与收益，由 server 渲染 issue 并在业务仓库创建，从不提交 PR
+ */
+export interface IssuesFile {
+  issues: IssueTemplate[];
+}
+export interface IssueTemplate {
+  id: string;
+  title: LocalizedText2;
+  domain: string;
+  /**
+   * CEL 适用条件。变量：goal（GoalSpec 与 goal_id、revision）、finding（Finding）、finding_cards（卡片全局 id → 结论：verdict、display_state、value、observations）、params
+   */
+  when: string;
+  params?: {
+    [k: string]: number | string | boolean | undefined;
+  };
+  /**
+   * 按顺序求值的 CEL 绑定，后面的绑定、locate、estimate 与文案可以引用
+   */
+  let?: {
+    name: string;
+    cel: string;
+  }[];
+  /**
+   * 代码定位的锚点，按顺序都执行，命中合并后按置信度排列
+   *
+   * @minItems 1
+   */
+  locate: [
+    {
+      kind: AnchorKind;
+      /**
+       * CEL，锚点的取值（字符串；为空串或 null 时跳过）
+       */
+      from: string;
+    },
+    ...{
+      kind: AnchorKind;
+      /**
+       * CEL，锚点的取值（字符串；为空串或 null 时跳过）
+       */
+      from: string;
+    }[],
+  ];
+  suggestion: LocalizedText10;
+  estimate: Estimate1;
+  verify: {
+    say: LocalizedText2;
+    /**
+     * 部署后应判为正常的卡片全局 id
+     */
+    cards?: string[];
+    within?: string;
+    guards?: IndicatorRef[];
+  };
+  /**
+   * 模板声明的 issue 标签（例如 perf）；srenautix、srenautix:<领域> 与路径映射的 area/* 由 server 加上
+   */
+  labels?: string[];
+}
+/**
+ * 建议文字（ICU MessageFormat，变量为 let 与 params），写进 issue 的“建议”段
+ */
+export interface LocalizedText10 {
+  'zh-CN'?: string;
+  en?: string;
+}
+/**
  * 根因排序参数（DESIGN §5）。修改需要通过回放门禁
  */
 export interface RcaParams {
@@ -3743,9 +5316,9 @@ export interface RcaParams {
   };
   merge_threshold?: number;
   ambiguity_margin?: number;
-  adjacency?: Duration1;
-  change_window?: Duration2;
-  chronic_window?: Duration3;
+  adjacency?: Duration4;
+  change_window?: Duration5;
+  chronic_window?: Duration6;
   /**
    * 7 天内处于触发状态的时间比例达到该值视为长期告警
    */
@@ -3797,7 +5370,7 @@ export interface PackUserLayer {
       | undefined;
   };
   /**
-   * 禁用的条目：alerts/<id>、chains/<id>、chains/<id>/<card>、checks/<id>、rules/<id>
+   * 禁用的条目：alerts/<id>、chains/<id>、chains/<id>/<card>、checks/<id>、rules/<id>、domains/<id>、domains/<id>/<诊断卡或份额卡 id>、indicators/<id>、issues/<id>
    */
   disable?: string[];
   patch?: {
@@ -3818,6 +5391,12 @@ export interface PackUserLayer {
     chains?: EvidenceChain[];
     checks?: EvidenceCardDefinition[];
     rules?: PackRule[];
+    indicators?: Indicator[];
+    /**
+     * 与目标包同 id 的领域按 DomainsFile 的规则合并进去，其余追加
+     */
+    domains?: Domain[];
+    issues?: IssueTemplate[];
   };
   rca_params?: RcaParams;
 }
@@ -3886,6 +5465,49 @@ export interface PackTestFile {
     }[];
   }[];
   /**
+   * dbstats 夹具（契约 2.28.0）：每个操作的采样，offset 相对测试起点。读取时取不晚于 eval_time 的最近一次采样，速率按它与前一次采样的差值计算；排序、过滤与 limit 按适配器的语义作用在夹具的行上
+   */
+  input_dbstats?: {
+    op: DbstatsOperation;
+    /**
+     * @minItems 1
+     */
+    samples: [
+      {
+        offset: Duration;
+        rows: {
+          [k: string]: string | number | boolean | null | undefined;
+        }[];
+      },
+      ...{
+        offset: Duration;
+        rows: {
+          [k: string]: string | number | boolean | null | undefined;
+        }[];
+      }[],
+    ];
+  }[];
+  /**
+   * 在真实 PostgreSQL（预加载 pg_stat_statements）上执行的 dbstats 夹具：以管理员执行 setup，重置统计并采样一次，执行 workload，再采样一次；之后每个测试的 dbstats 引用读取这个库，期望同样必须成立。只在测试运行器提供 PostgreSQL 时执行，没有时只用 input_dbstats
+   */
+  input_sql?: {
+    database?: string;
+    setup: string[];
+    /**
+     * @minItems 1
+     */
+    workload: [
+      {
+        sql: string;
+        repeat: number;
+      },
+      ...{
+        sql: string;
+        repeat: number;
+      }[],
+    ];
+  };
+  /**
    * @minItems 1
    */
   tests: [
@@ -3908,7 +5530,19 @@ export interface PackTestFile {
         verdict: Verdict;
         display_state?: 'normal' | 'abnormal' | 'undeterminable' | 'capability_missing';
         reason_kind?: string;
+        /**
+         * rows 给出时：按 EntityRows 得到的实体（契约 2.28.0）。列出的键必须出现；hit 为诊断卡的 when，share 为份额卡的份额（相对误差 1e-3）
+         */
+        entities?: {
+          key: string;
+          hit?: boolean;
+          share?: number;
+        }[];
       };
+      /**
+       * 同时检查领域的诊断卡或份额卡按行得到的实体：<领域>/<诊断卡或份额卡 id>，card 必须是它引用的卡
+       */
+      rows?: string;
     },
     ...{
       name: string;
@@ -3929,7 +5563,19 @@ export interface PackTestFile {
         verdict: Verdict;
         display_state?: 'normal' | 'abnormal' | 'undeterminable' | 'capability_missing';
         reason_kind?: string;
+        /**
+         * rows 给出时：按 EntityRows 得到的实体（契约 2.28.0）。列出的键必须出现；hit 为诊断卡的 when，share 为份额卡的份额（相对误差 1e-3）
+         */
+        entities?: {
+          key: string;
+          hit?: boolean;
+          share?: number;
+        }[];
       };
+      /**
+       * 同时检查领域的诊断卡或份额卡按行得到的实体：<领域>/<诊断卡或份额卡 id>，card 必须是它引用的卡
+       */
+      rows?: string;
     }[],
   ];
 }
@@ -3956,6 +5602,7 @@ export interface PackLock {
  * 提交提议的请求体。source、caller_id 由认证上下文决定；目标由 server 推导
  */
 export interface ProposalCreate {
+  subject?: Subject2;
   incident_id: Uuid;
   binding: ProposalBinding;
   action: string;
@@ -3969,10 +5616,18 @@ export interface ProposalCreate {
   expected_effect: string;
 }
 /**
+ * 研判、提议、出境清单与消息的主体（契约 2.28.0，ADR 0146 §8）：incident 事件；goal 主动优化的目标。没有 subject 的旧数据都是事件。主体为 goal 时沿用的事件字段语义为：incident_id 取目标 id，incident_version 取目标的 revision
+ */
+export interface Subject2 {
+  type: 'incident' | 'goal';
+  id: Uuid;
+}
+/**
  * 研判清单（DESIGN §8.5）：复现一次研判需要的全部版本信息，以及出境清单（§8.4）。后处理部分可以基于已保存的响应精确重放；重新采样模型得到的是一个分布
  */
 export interface ResearchManifest {
   run_id: Uuid;
+  subject?: Subject3;
   incident_id: Uuid;
   incident_version: number;
   code_sha: string;
@@ -4005,6 +5660,13 @@ export interface ResearchManifest {
    */
   egress: EgressEntry[];
 }
+/**
+ * 研判、提议、出境清单与消息的主体（契约 2.28.0，ADR 0146 §8）：incident 事件；goal 主动优化的目标。没有 subject 的旧数据都是事件。主体为 goal 时沿用的事件字段语义为：incident_id 取目标 id，incident_version 取目标的 revision
+ */
+export interface Subject3 {
+  type: 'incident' | 'goal';
+  id: Uuid;
+}
 export interface RouteUse {
   phase: 'hypothesize' | 'conclude' | 'compress' | 'still_consistent' | 'repair';
   route_id: string;
@@ -4019,7 +5681,13 @@ export interface RouteUse {
 export interface EgressEntry {
   route_id: string;
   in_domain: boolean;
-  categories: ('metrics' | 'logs' | 'traces' | 'events' | 'topology' | 'changes' | 'alerts' | 'knowledge')[];
+  categories: EgressCategory[];
+  /**
+   * 不在 llm.egress.categories 中、进入提示词之前删除的片段数，按类别计（契约 2.28.0，ADR 0146 §3.6）；没有删除时不填或为空对象
+   */
+  dropped?: {
+    [k: string]: number | undefined;
+  };
   redaction_hits: number;
   bytes: number;
 }

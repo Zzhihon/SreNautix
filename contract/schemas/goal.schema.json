@@ -1,0 +1,330 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://srenautix.io/contract/schemas/goal.schema.json",
+  "title": "Goal",
+  "description": "主动优化的目标（契约 2.28.0，ADR 0146 §1.2）。目标只引用领域包声明的指标或领域，不含任何自由查询；规格每修改一次 revision 加一。每次分析是一次目标运行（GoalRunSummary），结果见 optimization-output.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "goal_id",
+    "revision",
+    "cluster_id",
+    "spec",
+    "state",
+    "state_reason",
+    "expires_at",
+    "last_run",
+    "created_at",
+    "updated_at"
+  ],
+  "properties": {
+    "goal_id": { "$ref": "common.schema.json#/$defs/Uuid" },
+    "revision": { "type": "integer", "minimum": 1 },
+    "cluster_id": { "$ref": "common.schema.json#/$defs/ClusterId" },
+    "spec": { "$ref": "#/$defs/GoalSpec" },
+    "state": { "$ref": "#/$defs/GoalState" },
+    "state_reason": {
+      "type": ["string", "null"],
+      "description": "状态的机器可读原因，例如 failed 的 baseline_insufficient、cancelled 的 user",
+      "maxLength": 200
+    },
+    "expires_at": {
+      "description": "到期仍未达成时状态为 expired，附最后一次分析的报告",
+      "$ref": "common.schema.json#/$defs/Timestamp"
+    },
+    "last_run": {
+      "description": "最近一次运行；还没有运行时为 null",
+      "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/GoalRunSummary" }]
+    },
+    "created_at": { "$ref": "common.schema.json#/$defs/Timestamp" },
+    "updated_at": { "$ref": "common.schema.json#/$defs/Timestamp" }
+  },
+  "$defs": {
+    "GoalState": {
+      "title": "GoalState",
+      "description": "queued 排队；analyzing 分析中；recommended 有建议已发布；verifying 验证中；achieved 达成；not_achieved 验证后未达成；no_action 没有差距或没有通过门槛的建议；cancelled 取消；expired 到期；failed 失败（state_reason 写明原因）",
+      "type": "string",
+      "enum": [
+        "queued",
+        "analyzing",
+        "recommended",
+        "verifying",
+        "achieved",
+        "not_achieved",
+        "no_action",
+        "cancelled",
+        "expired",
+        "failed"
+      ]
+    },
+    "GoalSpec": {
+      "title": "GoalSpec",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["origin", "subject", "objective", "outputs", "budget"],
+      "properties": {
+        "origin": { "$ref": "#/$defs/GoalOrigin" },
+        "subject": { "$ref": "#/$defs/GoalSubject" },
+        "objective": {
+          "description": "目标值；领域体检没有目标值时为 null，差距按领域的门槛（DomainGates.thresholds）",
+          "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/GoalObjective" }]
+        },
+        "outputs": {
+          "type": "array",
+          "description": "允许的建议类别",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/RecommendationKind" }
+        },
+        "budget": { "$ref": "#/$defs/GoalBudget" }
+      }
+    },
+    "RecommendationKind": {
+      "title": "RecommendationKind",
+      "description": "ops_pr：ops 仓库的 PR（gitops_pr 提议）；business_issue：业务仓库的 issue",
+      "type": "string",
+      "enum": ["ops_pr", "business_issue"]
+    },
+    "GoalOrigin": {
+      "title": "GoalOrigin",
+      "description": "目标的来源：manual 人工下达；checkup 领域的定期体检；trend 趋势扫描；forecast_alert 预测类告警",
+      "oneOf": [
+        {
+          "title": "GoalOriginManual",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "channel", "principal"],
+          "properties": {
+            "kind": { "const": "manual" },
+            "channel": { "type": "string", "enum": ["console", "telegram", "api"] },
+            "principal": { "type": "string", "minLength": 1, "description": "下达目标的主体 id；api 为调用方 id" }
+          }
+        },
+        {
+          "title": "GoalOriginCheckup",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "domain", "schedule_id"],
+          "properties": {
+            "kind": { "const": "checkup" },
+            "domain": { "$ref": "#/$defs/DomainId" },
+            "schedule_id": { "type": "string", "minLength": 1 }
+          }
+        },
+        {
+          "title": "GoalOriginTrend",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "trend", "entity"],
+          "properties": {
+            "kind": { "const": "trend" },
+            "trend": { "type": "string", "description": "<包>/<领域>/<趋势 id>", "minLength": 1 },
+            "entity": { "$ref": "common.schema.json#/$defs/EntityKey" }
+          }
+        },
+        {
+          "title": "GoalOriginForecastAlert",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "alert_fingerprint"],
+          "properties": {
+            "kind": { "const": "forecast_alert" },
+            "alert_fingerprint": { "type": "string", "minLength": 1 }
+          }
+        }
+      ]
+    },
+    "DomainId": {
+      "title": "DomainId",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_-]*$"
+    },
+    "GoalScope": {
+      "title": "GoalScope",
+      "description": "范围白名单：组件键与命名空间；两者都为空表示不限",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["components", "namespaces"],
+      "properties": {
+        "components": {
+          "type": "array",
+          "maxItems": 50,
+          "items": { "$ref": "common.schema.json#/$defs/ComponentKey" }
+        },
+        "namespaces": {
+          "type": "array",
+          "maxItems": 50,
+          "items": { "type": "string", "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" }
+        }
+      }
+    },
+    "GoalSubject": {
+      "title": "GoalSubject",
+      "description": "目标对象：一个指标（带参数），或一个领域的体检",
+      "oneOf": [
+        {
+          "title": "GoalSubjectIndicator",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "indicator", "params", "scope"],
+          "properties": {
+            "type": { "const": "indicator" },
+            "indicator": { "$ref": "pack.schema.json#/$defs/IndicatorRef" },
+            "params": {
+              "type": "object",
+              "description": "按指标的 params schema 校验",
+              "additionalProperties": { "type": ["number", "string", "boolean"] }
+            },
+            "scope": { "$ref": "#/$defs/GoalScope" }
+          }
+        },
+        {
+          "title": "GoalSubjectDomain",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "domain", "scope"],
+          "properties": {
+            "type": { "const": "domain" },
+            "domain": { "$ref": "#/$defs/DomainId" },
+            "scope": { "$ref": "#/$defs/GoalScope" }
+          }
+        }
+      ]
+    },
+    "Comparator": {
+      "title": "Comparator",
+      "type": "string",
+      "enum": ["lt", "le", "gt", "ge"]
+    },
+    "GoalObjective": {
+      "title": "GoalObjective",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["comparator", "target", "unit", "statistic", "window"],
+      "properties": {
+        "comparator": { "$ref": "#/$defs/Comparator" },
+        "target": { "type": "number" },
+        "unit": { "$ref": "pack.schema.json#/$defs/IndicatorUnit" },
+        "statistic": { "$ref": "pack.schema.json#/$defs/IndicatorStatistic" },
+        "window": {
+          "description": "基线窗口，默认 7d，不超过 14d",
+          "$ref": "common.schema.json#/$defs/Duration"
+        }
+      }
+    },
+    "GoalBudget": {
+      "title": "GoalBudget",
+      "description": "一次运行的预算（ADR 0146 §1.2 的默认值）",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tokens",
+        "duration_seconds",
+        "checks",
+        "dbstats_queries",
+        "traces_queries",
+        "logs_queries",
+        "code_files",
+        "code_bytes",
+        "github_requests"
+      ],
+      "properties": {
+        "tokens": { "type": "integer", "minimum": 0, "maximum": 2000000, "default": 400000 },
+        "duration_seconds": { "type": "integer", "minimum": 60, "maximum": 7200, "default": 1200 },
+        "checks": { "type": "integer", "minimum": 0, "maximum": 50, "default": 12 },
+        "dbstats_queries": { "type": "integer", "minimum": 0, "maximum": 60, "default": 30 },
+        "traces_queries": { "type": "integer", "minimum": 0, "maximum": 30, "default": 10 },
+        "logs_queries": { "type": "integer", "minimum": 0, "maximum": 30, "default": 10 },
+        "code_files": { "type": "integer", "minimum": 0, "maximum": 200, "default": 200 },
+        "code_bytes": { "type": "integer", "minimum": 0, "maximum": 8388608, "default": 8388608 },
+        "github_requests": { "type": "integer", "minimum": 0, "maximum": 1000, "default": 300 }
+      }
+    },
+    "GoalCreate": {
+      "title": "GoalCreate",
+      "description": "下达目标的请求体（POST /v1/goals）。origin 由认证上下文决定（控制台会话为 console，API token 为 api，聊天渠道的确认卡片为 telegram）；budget 只写要改的项，其余取默认值",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cluster_id", "subject", "objective", "outputs"],
+      "properties": {
+        "cluster_id": { "$ref": "common.schema.json#/$defs/ClusterId" },
+        "subject": { "$ref": "#/$defs/GoalSubject" },
+        "objective": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/GoalObjective" }] },
+        "outputs": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/RecommendationKind" }
+        },
+        "budget": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "tokens": { "type": "integer", "minimum": 0, "maximum": 2000000 },
+            "duration_seconds": { "type": "integer", "minimum": 60, "maximum": 7200 },
+            "checks": { "type": "integer", "minimum": 0, "maximum": 50 },
+            "dbstats_queries": { "type": "integer", "minimum": 0, "maximum": 60 },
+            "traces_queries": { "type": "integer", "minimum": 0, "maximum": 30 },
+            "logs_queries": { "type": "integer", "minimum": 0, "maximum": 30 },
+            "code_files": { "type": "integer", "minimum": 0, "maximum": 200 },
+            "code_bytes": { "type": "integer", "minimum": 0, "maximum": 8388608 },
+            "github_requests": { "type": "integer", "minimum": 0, "maximum": 1000 }
+          }
+        },
+        "expires_in": {
+          "description": "有效期，默认 14d，不超过 30d",
+          "$ref": "common.schema.json#/$defs/Duration"
+        }
+      }
+    },
+    "GoalRunState": {
+      "title": "GoalRunState",
+      "description": "queued 排队；deferred 被准入推迟（defer_reason）；running 执行中；concluded 结束（result）；failed 失败；cancelled 目标取消",
+      "type": "string",
+      "enum": ["queued", "deferred", "running", "concluded", "failed", "cancelled"]
+    },
+    "GoalRunSummary": {
+      "title": "GoalRunSummary",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "run_id",
+        "goal_id",
+        "goal_revision",
+        "state",
+        "result",
+        "reason",
+        "gap",
+        "findings",
+        "recommendations",
+        "queued_at",
+        "started_at",
+        "finished_at"
+      ],
+      "properties": {
+        "run_id": { "$ref": "common.schema.json#/$defs/Uuid" },
+        "goal_id": { "$ref": "common.schema.json#/$defs/Uuid" },
+        "goal_revision": { "type": "integer", "minimum": 1 },
+        "state": { "$ref": "#/$defs/GoalRunState" },
+        "result": {
+          "description": "concluded 时的结果：no_gap 没有差距（不调用模型）；recommended 有通过门槛的建议；report_only 有发现、没有建议通过门槛；其余状态为 null",
+          "oneOf": [{ "type": "null" }, { "type": "string", "enum": ["no_gap", "recommended", "report_only"] }]
+        },
+        "reason": {
+          "type": ["string", "null"],
+          "description": "deferred 的原因（budget、storm、incident、load_guard、rate_limit、schedule_window）或 failed 的原因（baseline_insufficient、model_unavailable、budget_exhausted、deadline、datasource、internal）",
+          "maxLength": 200
+        },
+        "gap": {
+          "description": "差距是否成立；基线之前为 null",
+          "type": ["boolean", "null"]
+        },
+        "findings": { "type": "integer", "minimum": 0, "description": "本次运行发现或更新的发现数" },
+        "recommendations": { "type": "integer", "minimum": 0, "description": "通过全部门槛的建议数" },
+        "queued_at": { "$ref": "common.schema.json#/$defs/Timestamp" },
+        "started_at": { "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/Timestamp" }] },
+        "finished_at": { "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/Timestamp" }] }
+      }
+    }
+  }
+}

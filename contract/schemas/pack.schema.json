@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://srenautix.io/contract/schemas/pack.schema.json",
   "title": "PackManifest",
-  "description": "领域包的 pack.yaml（DESIGN §6.3）。领域包只包含数据，不包含可执行代码；其余文件的结构见本文件的 $defs：signals.yaml → SignalsFile，components.yaml → ComponentsFile，alerts.yaml → AlertsFile，chains.yaml → ChainsFile，checks.yaml → ChecksFile，rules.yaml → RulesFile，remediations.yaml → RemediationsFile，rca-params.yaml → RcaParams，knowledge/*.yaml → KnowledgeFile，action-requests.yaml → ActionRequestsFile，chaos/*.yaml → ChaosFile，tests/*.yaml → PackTestFile，用户层文件 → UserLayer，pack.lock → PackLock",
+  "description": "领域包的 pack.yaml（DESIGN §6.3）。领域包只包含数据，不包含可执行代码；其余文件的结构见本文件的 $defs：signals.yaml → SignalsFile，components.yaml → ComponentsFile，alerts.yaml → AlertsFile，chains.yaml → ChainsFile，checks.yaml → ChecksFile，rules.yaml → RulesFile，remediations.yaml → RemediationsFile，domains.yaml → DomainsFile，issues.yaml → IssuesFile，rca-params.yaml → RcaParams，knowledge/*.yaml → KnowledgeFile，action-requests.yaml → ActionRequestsFile，chaos/*.yaml → ChaosFile，tests/*.yaml → PackTestFile，用户层文件 → UserLayer，pack.lock → PackLock",
   "type": "object",
   "additionalProperties": false,
   "required": ["api_version", "name", "version", "maturity", "requires"],
@@ -62,7 +62,11 @@
       "required": ["id", "kind", "alternatives"],
       "properties": {
         "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_.-]*$" },
-        "kind": { "type": "string", "enum": ["metrics", "logs", "traces"] },
+        "kind": {
+          "type": "string",
+          "description": "dbstats：数据库统计视图（契约 2.28.0，ADR 0146 §3.3），备选的方言必须是 dbstats",
+          "enum": ["metrics", "logs", "traces", "dbstats"]
+        },
         "unit": { "type": "string" },
         "extends": {
           "type": "string",
@@ -85,13 +89,33 @@
       "properties": {
         "expr": {
           "type": "string",
-          "description": "查询模板。可用变量：$selector（按标签档案展开的实体选择器）、$namespace、$name、$node、$rate_window（由抓取间隔推导）、$params.<名字>"
+          "description": "查询模板。可用变量：$selector（按标签档案展开的实体选择器）、$namespace、$name、$node、$rate_window（由抓取间隔推导）、$params.<名字>。dbstats 方言的 expr 是 dbstats/v1 的操作名（例如 statements.top），SQL 由适配器给出"
         },
         "dialect": {
           "type": "string",
-          "description": "PromQL 用严格解析器做 lint；使用 MetricsQL 必须显式声明",
-          "enum": ["promql", "metricsql", "logql", "logs_match", "traceql"],
+          "description": "PromQL 用严格解析器做 lint；使用 MetricsQL 必须显式声明；dbstats 只用于 dbstats 信号",
+          "enum": ["promql", "metricsql", "logql", "logs_match", "traceql", "dbstats"],
           "default": "promql"
+        },
+        "args": {
+          "type": "object",
+          "description": "dbstats：操作的参数（dbstats/v1 各操作的 args）；字符串值可以整体写成 $params.<名字>，执行时换成参数值，按操作的 schema 校验",
+          "additionalProperties": {
+            "oneOf": [
+              { "type": ["number", "string", "boolean", "null"] },
+              { "type": "array", "items": { "type": "string" } }
+            ]
+          }
+        },
+        "column": {
+          "type": "string",
+          "description": "dbstats：作为序列取值的数值列（例如 total_exec_time_ms）。每行结果是一条序列，标签为该行的字符串与布尔列，取值为这一列",
+          "pattern": "^[a-z_][a-z0-9_]*$"
+        },
+        "rate": {
+          "type": "boolean",
+          "default": false,
+          "description": "dbstats：取值为两次采样（相隔不少于 300 秒）的差值除以间隔秒数，序列只含两次都出现的行；只有一次采样时引用为缺数据"
         },
         "probe": {
           "type": "string",
@@ -314,13 +338,28 @@
         "title": { "$ref": "evidence-card.schema.json#/$defs/LocalizedText" },
         "category": {
           "type": "string",
-          "description": "release_rollback 发布回退；config_resource 副本数、HPA 上限、request/limit、超时与限流参数；alert_rule 告警阈值、持续时间、严重度；topology_coverage 拓扑与领域包覆盖",
-          "enum": ["release_rollback", "config_resource", "alert_rule", "topology_coverage"]
+          "description": "release_rollback 发布回退；config_resource 副本数、HPA 上限、request/limit、超时与限流参数；alert_rule 告警阈值、持续时间、严重度；topology_coverage 拓扑与领域包覆盖；component_param 组件参数（PG 的 GUC、连接池、缓存与存储组件的配置，契约 2.28.0）",
+          "enum": ["release_rollback", "config_resource", "alert_rule", "topology_coverage", "component_param"]
+        },
+        "applies": {
+          "type": "string",
+          "description": "incident：事件的自愈 PR（ADR 0108）；goal：主动优化的 ops PR（契约 2.28.0，ADR 0146 §4.3），由领域的 optimizations 引用。现有模板不写时为 incident，行为不变",
+          "enum": ["incident", "goal"],
+          "default": "incident"
         },
         "repository": { "type": "string", "description": "仓库角色，例如 gitops；server 配置把它映射到仓库与布局" },
         "when": {
           "type": "string",
-          "description": "CEL 适用条件。变量：incident、root、research（触发计划的研判结论 {disposition, level}，取值见 Disposition 与 ConclusionLevel；没有研判时为 null）、cards（卡片全局 id → 结论）、alerts（成员告警：alertname、labels、annotations、entity，以及 AlertClassification 的 role、source、catalog_entry、chronic）、params"
+          "description": "CEL 适用条件。变量：incident、root、research（触发计划的研判结论 {disposition, level}，取值见 Disposition 与 ConclusionLevel；没有研判时为 null）、cards（卡片全局 id → 结论）、alerts（成员告警：alertname、labels、annotations、entity，以及 AlertClassification 的 role、source、catalog_entry、chronic）、params。applies 为 goal 时另有 goal（GoalSpec 与 goal_id、revision）、finding（Finding）与 finding_cards（发现的支持卡、份额卡与诊断卡：卡片全局 id → 结论，形状与 cards 相同），incident 与 alerts 为空，root 为发现挂到的组件"
+        },
+        "estimate": {
+          "$ref": "#/$defs/Estimate",
+          "description": "applies 为 goal 时必填：确定性计算的预期收益（ADR 0146 §2.5 的 G2）"
+        },
+        "guard": {
+          "type": "array",
+          "description": "安全约束（ADR 0146 §2.5 的 G3）：在 let 之后求值，任一为 false 时不生成补丁，say 写明原因。变量与 skip_if 相同",
+          "items": { "$ref": "#/$defs/Guard" }
         },
         "params": {
           "type": "object",
@@ -400,7 +439,12 @@
               "description": "合并并同步后应判为正常的卡片全局 id",
               "items": { "type": "string" }
             },
-            "within": { "type": "string", "pattern": "^[0-9]+(s|m|h)$" }
+            "within": { "type": "string", "pattern": "^[0-9]+(s|m|h)$" },
+            "guards": {
+              "type": "array",
+              "description": "applies 为 goal：验证时的守护指标 <包>/<指标>（错误率、其他语句的执行时间、CPU 限流、OOM 等），恶化超过 10% 判为 regressed（ADR 0146 §2.6）",
+              "items": { "$ref": "#/$defs/IndicatorRef" }
+            }
           }
         },
         "rollback": {
@@ -470,6 +514,500 @@
             "description": "逻辑字段 → 点路径",
             "additionalProperties": { "type": "string" }
           }
+        }
+      }
+    },
+    "CodeLayout": {
+      "title": "CodeLayout",
+      "description": "业务仓库的代码布局（server 配置 optimization.repositories.business.code，契约 2.28.0，ADR 0146 §3.5）：代码定位读取哪个提交、哪些路径，锚点类型对应的候选路径，以及路径到 issue 标签的映射",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "root", "include", "exclude", "languages", "anchors"],
+      "properties": {
+        "version": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["rule"],
+          "properties": {
+            "rule": {
+              "type": "string",
+              "description": "running：从 ops 仓库的发布输入解析出运行中的业务提交，没有时用默认分支；default_branch：总是默认分支",
+              "enum": ["running", "default_branch"]
+            },
+            "release_input": {
+              "type": "string",
+              "description": "running：ops 仓库中发布输入的文件角色（RepositoryLayout 的键），其中的版本字段解析为业务提交"
+            },
+            "field": {
+              "type": "string",
+              "description": "running：发布输入中版本的逻辑字段名（RepositoryLayout 的 fields）"
+            }
+          }
+        },
+        "root": { "type": "string", "description": "代码根目录，仓库根为空串" },
+        "include": { "type": "array", "minItems": 1, "items": { "type": "string" }, "description": "glob（* 与 **）" },
+        "exclude": {
+          "type": "array",
+          "description": "glob；测试、生成文件中的数据、testdata、*.pem、.env*、*secret* 总是排除",
+          "items": { "type": "string" }
+        },
+        "languages": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "enum": ["go", "typescript"] }
+        },
+        "anchors": {
+          "type": "array",
+          "description": "锚点类型 → 候选路径的 glob；没有列出的锚点类型在 include 的全部路径中查找",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "paths"],
+            "properties": {
+              "kind": { "$ref": "#/$defs/AnchorKind" },
+              "paths": { "type": "array", "minItems": 1, "items": { "type": "string" } }
+            }
+          }
+        },
+        "labels": {
+          "type": "array",
+          "description": "路径 glob → issue 标签（例如 internal/gateway/** → area/gateway），按顺序匹配，全部命中的标签都加上",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["paths", "label"],
+            "properties": {
+              "paths": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+              "label": { "type": "string", "minLength": 1, "maxLength": 50 }
+            }
+          }
+        },
+        "max_files": { "type": "integer", "minimum": 1, "maximum": 200, "default": 200 },
+        "max_bytes": { "type": "integer", "minimum": 1, "maximum": 8388608, "default": 8388608 }
+      }
+    },
+    "AnchorKind": {
+      "title": "AnchorKind",
+      "description": "代码定位的锚点类型（ADR 0146 §3.5）：sql 规范化语句（按 libpg-query 指纹匹配字符串字面量与 .sql 文件）；table 表名（置信度低）；span_name、metric_name、route 字符串字面量精确匹配",
+      "type": "string",
+      "enum": ["sql", "table", "span_name", "metric_name", "route"]
+    },
+    "IndicatorRef": {
+      "title": "IndicatorRef",
+      "description": "指标的全局 id <包>/<指标 id>，例如 postgres/db-time",
+      "type": "string",
+      "pattern": "^[a-z_][a-z0-9-]*/[a-z0-9][a-z0-9_.-]*$"
+    },
+    "IndicatorUnit": {
+      "title": "IndicatorUnit",
+      "type": "string",
+      "enum": ["none", "percent", "ratio", "bytes", "seconds", "count", "per_second", "cores"]
+    },
+    "IndicatorStatistic": {
+      "title": "IndicatorStatistic",
+      "description": "基线窗口内按小时取值之后的统计方式",
+      "type": "string",
+      "enum": ["p50", "p95", "max"]
+    },
+    "DomainsFile": {
+      "title": "DomainsFile",
+      "description": "domains.yaml（契约 2.28.0，ADR 0146 §1.1、§1.3）：本包声明的指标与领域。多个包可以给同一个领域补充内容：同一 id 的领域按包的加载顺序合并，列表追加，gates 后者覆盖前者的同名键",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "indicators": { "type": "array", "items": { "$ref": "#/$defs/Indicator" } },
+        "domains": { "type": "array", "items": { "$ref": "#/$defs/Domain" } }
+      }
+    },
+    "Indicator": {
+      "title": "Indicator",
+      "description": "目标可以引用的指标。按实体产生序列：基线、差距与验证在指标的信号上按小时取值；目标不提交自由查询",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "signal", "entity", "unit", "better", "statistic"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9_.-]*$",
+          "description": "包内唯一；全局 id 为 <包>/<id>"
+        },
+        "title": { "$ref": "evidence-card.schema.json#/$defs/LocalizedText" },
+        "description": { "$ref": "evidence-card.schema.json#/$defs/LocalizedText" },
+        "signal": {
+          "type": "string",
+          "description": "metrics 信号 <pack>/<signal id>（同包内可省略 <pack>/）；查询按实体与 params 渲染，结果是一条或多条序列，多条时取和"
+        },
+        "entity": {
+          "type": "string",
+          "description": "实体类型：Kubernetes 的 Kind（其他 API 组写作 Kind.group），或逻辑实体 pg_statement、pg_table、pg_index、route、stage"
+        },
+        "params": {
+          "type": "object",
+          "description": "参数的 JSON Schema（可移植子集：type: object、additionalProperties: false，字符串用 enum 或 pattern 限定，数字有 minimum 与 maximum）。信号中写作 $params.<名字>",
+          "required": ["type", "properties"],
+          "properties": {
+            "type": { "const": "object" },
+            "additionalProperties": { "const": false },
+            "properties": { "type": "object" }
+          }
+        },
+        "unit": { "$ref": "#/$defs/IndicatorUnit" },
+        "better": { "type": "string", "description": "改善方向", "enum": ["lower", "higher"] },
+        "statistic": { "$ref": "#/$defs/IndicatorStatistic" },
+        "load_indicator": {
+          "description": "判定业务高峰用的负载指标（例如请求速率），用于基线覆盖与验证时的时段匹配；不填时不检查高峰",
+          "$ref": "#/$defs/IndicatorRef"
+        }
+      }
+    },
+    "Domain": {
+      "title": "Domain",
+      "description": "一个优化领域（ADR 0146 §1.3）。卡片引用写 <chain>/<card>、checks/<id> 或 templates/<模板 id>（本包内），三段为 <pack>/<chain>/<card>",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "description": "例如 database、compute、traffic、storage、cache"
+        },
+        "title": { "$ref": "evidence-card.schema.json#/$defs/LocalizedText" },
+        "applies_to": {
+          "type": "array",
+          "description": "组件类型或 Kind（例如 Cluster.postgresql.cnpg.io）；领域体检在范围内这些组件上执行",
+          "items": { "type": "string" }
+        },
+        "indicators": {
+          "type": "array",
+          "description": "体检时计算基线的指标",
+          "items": { "$ref": "#/$defs/IndicatorRef" }
+        },
+        "diagnostics": { "type": "array", "items": { "$ref": "#/$defs/Diagnostic" } },
+        "contribution": { "type": "array", "items": { "$ref": "#/$defs/Contribution" } },
+        "templates": {
+          "type": "array",
+          "description": "区分性检查可用的查询模板全局 id <pack>/<模板 id>（含 dbstats、traces、logs 信号的模板）",
+          "items": { "type": "string" }
+        },
+        "optimizations": {
+          "type": "array",
+          "description": "适用的 ops 修复模板 <pack>/<id>（remediations.yaml 中 applies 为 goal 的模板）",
+          "items": { "type": "string" }
+        },
+        "issues": {
+          "type": "array",
+          "description": "适用的业务 issue 模板 <pack>/<id>（issues.yaml）",
+          "items": { "type": "string" }
+        },
+        "gates": { "$ref": "#/$defs/DomainGates" },
+        "trends": { "type": "array", "items": { "$ref": "#/$defs/Trend" } },
+        "schedule": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["cron"],
+          "description": "默认体检计划；时段由 server 配置 optimization.schedule.window 限定",
+          "properties": {
+            "cron": { "type": "string", "description": "五段 cron（UTC）", "pattern": "^\\S+( \\S+){4}$" }
+          }
+        },
+        "load_guards": {
+          "type": "array",
+          "description": "负载保护卡（ADR 0146 §6.2）：每次直接查询后端之前执行（缓存 1 分钟），任何一张异常就跳过这次查询",
+          "items": { "$ref": "#/$defs/LoadGuard" }
+        }
+      }
+    },
+    "Diagnostic": {
+      "title": "DomainDiagnostic",
+      "description": "诊断卡：在范围内的实体上执行，异常即候选发现。有 entities 时卡片在组件上执行一次，按 rows_from 引用的每条序列求 entities.when，为 true 的行各是一个逻辑实体上的候选；没有 entities 时卡片的实体就是发现的实体，卡片异常即候选",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "card", "finding"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$" },
+        "card": { "type": "string" },
+        "finding": {
+          "type": "string",
+          "description": "发现类型，例如 pg.statement_dominant、pg.temp_spill、workload.cpu_overprovisioned",
+          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+        },
+        "indicator": { "$ref": "#/$defs/IndicatorRef", "description": "这个发现影响的指标；份额按它查找份额卡" },
+        "symptoms": {
+          "type": "array",
+          "description": "这类发现预示的症状类型（ADR 0133 的集合与 ADR 0146 §2.3 的补充），供假设与检查的对应",
+          "items": {
+            "type": "string",
+            "enum": [
+              "seq_scan",
+              "index",
+              "temp_spill",
+              "lock_wait",
+              "io_read",
+              "connection_pool",
+              "cache_miss",
+              "polling",
+              "n_plus_one",
+              "payload_size",
+              "overprovision",
+              "saturation",
+              "latency",
+              "errors"
+            ]
+          }
+        },
+        "entities": { "$ref": "#/$defs/EntityRows" }
+      }
+    },
+    "Contribution": {
+      "title": "DomainContribution",
+      "description": "份额卡：实体占指标的比例（0 到 1），用于候选排序与结论阶梯。有 entities 时按行求 entities.share；没有时卡片的实体份额为 share 的值（CEL，变量与卡片的 let 相同），不填为 1",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "card", "indicator"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$" },
+        "card": { "type": "string" },
+        "indicator": { "$ref": "#/$defs/IndicatorRef" },
+        "share": { "type": "string", "description": "没有 entities 时实体的份额（CEL）" },
+        "entities": { "$ref": "#/$defs/EntityRows" }
+      }
+    },
+    "EntityRows": {
+      "title": "EntityRows",
+      "description": "从卡片的一个引用的序列得到逻辑实体。每个 CEL 的变量为卡片的引用、let、params、entity，以及 row（当前序列 {labels, times, values}）",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "rows_from", "key"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "description": "逻辑实体类型，例如 pg_statement、pg_table、pg_index、route、stage",
+          "pattern": "^[a-z][a-z0-9_]*$"
+        },
+        "rows_from": { "type": "string", "description": "卡片的引用名" },
+        "key": {
+          "type": "string",
+          "description": "CEL，实体键中类型之后、组件之内的部分（例如 pg_statement 为 <库>/<queryid>）。server 把 pg_statement 的 queryid 换成语句指纹，得到 pg_statement:<集群>/<库>/<指纹>"
+        },
+        "display": { "type": "string", "description": "CEL，实体的可读名称" },
+        "labels": {
+          "type": "object",
+          "description": "实体的标签：名字 → CEL（字符串）。按实体执行的卡片与查询模板以 $params.<名字> 引用",
+          "additionalProperties": { "type": "string" }
+        },
+        "when": { "type": "string", "description": "诊断卡：CEL，为 true 的行是候选" },
+        "share": { "type": "string", "description": "份额卡：CEL，行的份额（0 到 1）" },
+        "limit": { "type": "integer", "minimum": 1, "maximum": 50, "default": 20 }
+      }
+    },
+    "DomainGates": {
+      "title": "DomainGates",
+      "description": "领域的门槛参数（ADR 0146 §2.2、§2.4、§2.5）。都有默认值；同一领域在多个包中声明时后者覆盖前者的同名键",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "violation_ratio": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0.1,
+          "description": "违反目标的小时数占比不低于它时差距成立"
+        },
+        "min_share": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0.2,
+          "description": "evidence_consistent 与业务 issue 要求的份额下限"
+        },
+        "min_gain_ratio": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0.1,
+          "description": "G2：预期收益下界的门槛之一，指标当前值的这个比例；门槛取它与 min_gain_gap_ratio 两者中较小者"
+        },
+        "min_gain_gap_ratio": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0.5,
+          "description": "G2：预期收益下界的门槛之一，差距的这个比例"
+        },
+        "min_cpu_cores": { "type": "number", "minimum": 0, "description": "compute：每个工作负载的最小收益（核）" },
+        "min_memory_bytes": {
+          "type": "number",
+          "minimum": 0,
+          "description": "compute：每个工作负载的最小收益（字节）"
+        },
+        "max_utilization_after": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "扩缩容：变更后 p95 利用率不超过目标的这个比例"
+        },
+        "cooldown": {
+          "$ref": "common.schema.json#/$defs/Duration",
+          "default": "30d",
+          "description": "G4：被拒绝的发现的冷却期"
+        },
+        "thresholds": {
+          "type": "array",
+          "description": "领域体检没有目标值时的差距：任一指标的统计值违反门槛即差距成立",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["indicator", "comparator", "value"],
+            "properties": {
+              "indicator": { "$ref": "#/$defs/IndicatorRef" },
+              "params": { "type": "object", "additionalProperties": { "type": ["number", "string", "boolean"] } },
+              "comparator": { "$ref": "goal.schema.json#/$defs/Comparator" },
+              "value": { "type": "number" },
+              "statistic": { "$ref": "#/$defs/IndicatorStatistic" }
+            }
+          }
+        }
+      }
+    },
+    "Trend": {
+      "title": "DomainTrend",
+      "description": "趋势定义（ADR 0146 §5.4）。drift：相对过去 7 天同一小时的中位数，比值超过 ratio 并持续 sustain；slope：在 window 内线性外推，horizon 内到达 limit 指标；headroom：用量占 limit 指标的 p95 超过 ratio 并持续 sustain",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "indicator", "method", "sustain"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$" },
+        "indicator": { "$ref": "#/$defs/IndicatorRef" },
+        "params": { "type": "object", "additionalProperties": { "type": ["number", "string", "boolean"] } },
+        "method": { "type": "string", "enum": ["drift", "slope", "headroom"] },
+        "ratio": { "type": "number", "exclusiveMinimum": 0 },
+        "sustain": { "$ref": "common.schema.json#/$defs/Duration" },
+        "window": { "$ref": "common.schema.json#/$defs/Duration" },
+        "horizon": { "$ref": "common.schema.json#/$defs/Duration" },
+        "limit": { "$ref": "#/$defs/IndicatorRef", "description": "slope 与 headroom 的上限指标" }
+      }
+    },
+    "LoadGuard": {
+      "title": "DomainLoadGuard",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["card", "backends"],
+      "properties": {
+        "card": { "type": "string" },
+        "backends": {
+          "type": "array",
+          "minItems": 1,
+          "description": "这张卡保护的后端：异常时跳过对它们的直接查询；metrics 异常时整次运行推迟",
+          "items": { "type": "string", "enum": ["dbstats", "traces", "logs", "metrics"] }
+        }
+      }
+    },
+    "Estimate": {
+      "title": "Estimate",
+      "description": "预期收益（ADR 0146 §2.5）。lower 只用卡片里的确定值计算（保守下界），单位与 indicator 相同、按改善方向取正值；CEL 的变量与模板的 let 相同，另有 gates（领域门槛）",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["indicator", "unit", "lower", "expected", "basis"],
+      "properties": {
+        "indicator": { "$ref": "#/$defs/IndicatorRef" },
+        "unit": { "$ref": "#/$defs/IndicatorUnit" },
+        "lower": { "type": "string", "description": "CEL，下界" },
+        "expected": { "type": "string", "description": "CEL，期望值" },
+        "basis": {
+          "$ref": "evidence-card.schema.json#/$defs/LocalizedText",
+          "description": "计算依据与前提（ICU MessageFormat，变量为 let、params、lower、expected）"
+        }
+      }
+    },
+    "Guard": {
+      "title": "Guard",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "cel", "say"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$", "description": "写进门槛记录的原因码" },
+        "cel": { "type": "string", "description": "为 true 表示约束成立" },
+        "say": {
+          "$ref": "evidence-card.schema.json#/$defs/LocalizedText",
+          "description": "约束不成立时的原因（ICU MessageFormat，变量为 let 与 params）"
+        }
+      }
+    },
+    "IssuesFile": {
+      "title": "IssuesFile",
+      "description": "issues.yaml（契约 2.28.0，ADR 0146 §4.4）：业务仓库 issue 模板。模板只描述适用条件、锚点、建议与收益，由 server 渲染 issue 并在业务仓库创建，从不提交 PR",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["issues"],
+      "properties": {
+        "issues": { "type": "array", "items": { "$ref": "#/$defs/IssueTemplate" } }
+      }
+    },
+    "IssueTemplate": {
+      "title": "IssueTemplate",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "domain", "when", "locate", "suggestion", "estimate", "verify"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$" },
+        "title": { "$ref": "evidence-card.schema.json#/$defs/LocalizedText" },
+        "domain": { "type": "string", "pattern": "^[a-z][a-z0-9_-]*$" },
+        "when": {
+          "type": "string",
+          "description": "CEL 适用条件。变量：goal（GoalSpec 与 goal_id、revision）、finding（Finding）、finding_cards（卡片全局 id → 结论：verdict、display_state、value、observations）、params"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": { "type": ["number", "string", "boolean"] }
+        },
+        "let": {
+          "type": "array",
+          "description": "按顺序求值的 CEL 绑定，后面的绑定、locate、estimate 与文案可以引用",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "cel"],
+            "properties": {
+              "name": { "type": "string", "pattern": "^[a-z_][a-z0-9_]*$" },
+              "cel": { "type": "string" }
+            }
+          }
+        },
+        "locate": {
+          "type": "array",
+          "minItems": 1,
+          "description": "代码定位的锚点，按顺序都执行，命中合并后按置信度排列",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "from"],
+            "properties": {
+              "kind": { "$ref": "#/$defs/AnchorKind" },
+              "from": { "type": "string", "description": "CEL，锚点的取值（字符串；为空串或 null 时跳过）" }
+            }
+          }
+        },
+        "suggestion": {
+          "$ref": "evidence-card.schema.json#/$defs/LocalizedText",
+          "description": "建议文字（ICU MessageFormat，变量为 let 与 params），写进 issue 的“建议”段"
+        },
+        "estimate": { "$ref": "#/$defs/Estimate" },
+        "verify": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["say"],
+          "properties": {
+            "say": { "$ref": "evidence-card.schema.json#/$defs/LocalizedText" },
+            "cards": { "type": "array", "items": { "type": "string" }, "description": "部署后应判为正常的卡片全局 id" },
+            "within": { "type": "string", "pattern": "^[0-9]+(s|m|h)$" },
+            "guards": { "type": "array", "items": { "$ref": "#/$defs/IndicatorRef" } }
+          }
+        },
+        "labels": {
+          "type": "array",
+          "description": "模板声明的 issue 标签（例如 perf）；srenautix、srenautix:<领域> 与路径映射的 area/* 由 server 加上",
+          "items": { "type": "string", "minLength": 1, "maxLength": 50 }
         }
       }
     },
@@ -584,7 +1122,7 @@
         },
         "disable": {
           "type": "array",
-          "description": "禁用的条目：alerts/<id>、chains/<id>、chains/<id>/<card>、checks/<id>、rules/<id>",
+          "description": "禁用的条目：alerts/<id>、chains/<id>、chains/<id>/<card>、checks/<id>、rules/<id>、domains/<id>、domains/<id>/<诊断卡或份额卡 id>、indicators/<id>、issues/<id>",
           "items": { "type": "string" }
         },
         "patch": {
@@ -610,7 +1148,14 @@
             "alerts": { "type": "array", "items": { "$ref": "alert-catalog-entry.schema.json" } },
             "chains": { "type": "array", "items": { "$ref": "#/$defs/Chain" } },
             "checks": { "type": "array", "items": { "$ref": "evidence-card.schema.json" } },
-            "rules": { "type": "array", "items": { "$ref": "#/$defs/Rule" } }
+            "rules": { "type": "array", "items": { "$ref": "#/$defs/Rule" } },
+            "indicators": { "type": "array", "items": { "$ref": "#/$defs/Indicator" } },
+            "domains": {
+              "type": "array",
+              "description": "与目标包同 id 的领域按 DomainsFile 的规则合并进去，其余追加",
+              "items": { "$ref": "#/$defs/Domain" }
+            },
+            "issues": { "type": "array", "items": { "$ref": "#/$defs/IssueTemplate" } }
           }
         },
         "rca_params": { "$ref": "#/$defs/RcaParams" }
@@ -702,6 +1247,60 @@
             }
           }
         },
+        "input_dbstats": {
+          "type": "array",
+          "description": "dbstats 夹具（契约 2.28.0）：每个操作的采样，offset 相对测试起点。读取时取不晚于 eval_time 的最近一次采样，速率按它与前一次采样的差值计算；排序、过滤与 limit 按适配器的语义作用在夹具的行上",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["op", "samples"],
+            "properties": {
+              "op": { "$ref": "../integrations/dbstats/v1/dbstats.schema.json#/$defs/Operation" },
+              "samples": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["offset", "rows"],
+                  "properties": {
+                    "offset": { "$ref": "common.schema.json#/$defs/Duration" },
+                    "rows": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": { "type": ["string", "number", "boolean", "null"] }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "input_sql": {
+          "type": "object",
+          "description": "在真实 PostgreSQL（预加载 pg_stat_statements）上执行的 dbstats 夹具：以管理员执行 setup，重置统计并采样一次，执行 workload，再采样一次；之后每个测试的 dbstats 引用读取这个库，期望同样必须成立。只在测试运行器提供 PostgreSQL 时执行，没有时只用 input_dbstats",
+          "additionalProperties": false,
+          "required": ["setup", "workload"],
+          "properties": {
+            "database": { "type": "string", "pattern": "^[a-z_][a-z0-9_]{0,62}$", "default": "app" },
+            "setup": { "type": "array", "items": { "type": "string" } },
+            "workload": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["sql", "repeat"],
+                "properties": {
+                  "sql": { "type": "string" },
+                  "repeat": { "type": "integer", "minimum": 1, "maximum": 100000 }
+                }
+              }
+            }
+          }
+        },
         "tests": {
           "type": "array",
           "minItems": 1,
@@ -740,8 +1339,27 @@
                     "type": "string",
                     "enum": ["normal", "abnormal", "undeterminable", "capability_missing"]
                   },
-                  "reason_kind": { "type": "string" }
+                  "reason_kind": { "type": "string" },
+                  "entities": {
+                    "type": "array",
+                    "description": "rows 给出时：按 EntityRows 得到的实体（契约 2.28.0）。列出的键必须出现；hit 为诊断卡的 when，share 为份额卡的份额（相对误差 1e-3）",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": ["key"],
+                      "properties": {
+                        "key": { "type": "string" },
+                        "hit": { "type": "boolean" },
+                        "share": { "type": "number", "minimum": 0, "maximum": 1 }
+                      }
+                    }
+                  }
                 }
+              },
+              "rows": {
+                "type": "string",
+                "description": "同时检查领域的诊断卡或份额卡按行得到的实体：<领域>/<诊断卡或份额卡 id>，card 必须是它引用的卡",
+                "pattern": "^[a-z][a-z0-9_-]*/[a-z0-9][a-z0-9_-]*$"
               }
             }
           }

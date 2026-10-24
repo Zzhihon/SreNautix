@@ -24,7 +24,20 @@
     "display_name": { "type": "string" },
     "category": {
       "type": "string",
-      "enum": ["alerts", "metrics", "logs", "traces", "changes", "notify", "approve", "identity", "model", "execute"]
+      "description": "dbstats：数据库统计视图（契约 2.28.0）",
+      "enum": [
+        "alerts",
+        "metrics",
+        "logs",
+        "traces",
+        "changes",
+        "notify",
+        "approve",
+        "identity",
+        "model",
+        "execute",
+        "dbstats"
+      ]
     },
     "direction": {
       "type": "string",

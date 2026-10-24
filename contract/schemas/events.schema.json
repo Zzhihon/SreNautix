@@ -15,7 +15,12 @@
     { "$ref": "#/$defs/ApprovalIssued" },
     { "$ref": "#/$defs/ExecutionUpdated" },
     { "$ref": "#/$defs/FeedbackRecorded" },
-    { "$ref": "#/$defs/ConditionChanged" }
+    { "$ref": "#/$defs/ConditionChanged" },
+    { "$ref": "#/$defs/GoalCreated" },
+    { "$ref": "#/$defs/GoalRunConcluded" },
+    { "$ref": "#/$defs/FindingUpdated" },
+    { "$ref": "#/$defs/RecommendationUpdated" },
+    { "$ref": "#/$defs/OutcomeVerified" }
   ],
   "$defs": {
     "EventType": {
@@ -36,7 +41,12 @@
         "approval.issued",
         "execution.updated",
         "feedback.recorded",
-        "condition.changed"
+        "condition.changed",
+        "goal.created",
+        "goal.run.concluded",
+        "finding.updated",
+        "recommendation.updated",
+        "outcome.verified"
       ]
     },
     "Owner": {
@@ -296,6 +306,85 @@
       "properties": {
         "type": { "const": "condition.changed" },
         "payload": { "$ref": "condition.schema.json" }
+      }
+    },
+    "GoalCreated": {
+      "title": "GoalCreatedEvent",
+      "description": "目标创建（契约 2.28.0）",
+      "allOf": [{ "$ref": "#/$defs/Header" }],
+      "type": "object",
+      "required": ["type", "payload"],
+      "properties": {
+        "type": { "const": "goal.created" },
+        "payload": { "$ref": "goal.schema.json" }
+      }
+    },
+    "GoalRunConcluded": {
+      "title": "GoalRunConcludedEvent",
+      "description": "目标运行结束（契约 2.28.0），含失败与没有差距",
+      "allOf": [{ "$ref": "#/$defs/Header" }],
+      "type": "object",
+      "required": ["type", "payload"],
+      "properties": {
+        "type": { "const": "goal.run.concluded" },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["goal_id", "goal_revision", "run_id", "summary", "output"],
+          "properties": {
+            "goal_id": { "$ref": "common.schema.json#/$defs/Uuid" },
+            "goal_revision": { "type": "integer", "minimum": 1 },
+            "run_id": { "$ref": "common.schema.json#/$defs/Uuid" },
+            "summary": { "$ref": "goal.schema.json#/$defs/GoalRunSummary" },
+            "output": {
+              "description": "运行输出；在基线之前失败时为 null",
+              "oneOf": [{ "type": "null" }, { "$ref": "optimization-output.schema.json" }]
+            }
+          }
+        }
+      }
+    },
+    "FindingUpdated": {
+      "title": "FindingUpdatedEvent",
+      "description": "发现创建或更新（契约 2.28.0）",
+      "allOf": [{ "$ref": "#/$defs/Header" }],
+      "type": "object",
+      "required": ["type", "payload"],
+      "properties": {
+        "type": { "const": "finding.updated" },
+        "payload": { "$ref": "finding.schema.json" }
+      }
+    },
+    "RecommendationUpdated": {
+      "title": "RecommendationUpdatedEvent",
+      "description": "建议创建或状态变化（契约 2.28.0）",
+      "allOf": [{ "$ref": "#/$defs/Header" }],
+      "type": "object",
+      "required": ["type", "payload"],
+      "properties": {
+        "type": { "const": "recommendation.updated" },
+        "payload": { "$ref": "recommendation.schema.json" }
+      }
+    },
+    "OutcomeVerified": {
+      "title": "OutcomeVerifiedEvent",
+      "description": "建议的验证结束（契约 2.28.0）",
+      "allOf": [{ "$ref": "#/$defs/Header" }],
+      "type": "object",
+      "required": ["type", "payload"],
+      "properties": {
+        "type": { "const": "outcome.verified" },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["recommendation_id", "finding", "goal_id", "outcome"],
+          "properties": {
+            "recommendation_id": { "$ref": "common.schema.json#/$defs/Uuid" },
+            "finding": { "$ref": "common.schema.json#/$defs/Sha256" },
+            "goal_id": { "$ref": "common.schema.json#/$defs/Uuid" },
+            "outcome": { "$ref": "recommendation.schema.json#/$defs/RecommendationOutcome" }
+          }
+        }
       }
     }
   }

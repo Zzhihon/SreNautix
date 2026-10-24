@@ -1,0 +1,243 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://srenautix.io/contract/schemas/recommendation.schema.json",
+  "title": "OptimizationRecommendation",
+  "description": "主动优化的建议（契约 2.28.0，ADR 0146 §1.5、§2.5、§2.6）：ops 仓库的 PR（经 gitops_pr 提议）或业务仓库的 issue。预期收益与验证计划在创建时由代码确定；模型写的文字只在 model_note 中，消息与控制台标注【模型】",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "recommendation_id",
+    "cluster_id",
+    "finding",
+    "goal_id",
+    "run_id",
+    "kind",
+    "template",
+    "title",
+    "level",
+    "state",
+    "estimate",
+    "verify",
+    "gates",
+    "delivery",
+    "outcome",
+    "model_note",
+    "created_at",
+    "updated_at"
+  ],
+  "properties": {
+    "recommendation_id": { "$ref": "common.schema.json#/$defs/Uuid" },
+    "cluster_id": { "$ref": "common.schema.json#/$defs/ClusterId" },
+    "finding": { "description": "发现的指纹", "$ref": "common.schema.json#/$defs/Sha256" },
+    "goal_id": { "$ref": "common.schema.json#/$defs/Uuid" },
+    "run_id": { "$ref": "common.schema.json#/$defs/Uuid" },
+    "kind": { "$ref": "goal.schema.json#/$defs/RecommendationKind" },
+    "template": {
+      "type": "string",
+      "description": "<pack>/<模板 id>：ops_pr 为 remediations.yaml 中 applies 为 goal 的模板，business_issue 为 issues.yaml 的模板",
+      "pattern": "^[a-z_][a-z0-9-]*/[a-z0-9][a-z0-9_-]*$"
+    },
+    "title": { "type": "string", "maxLength": 200 },
+    "level": { "$ref": "common.schema.json#/$defs/ConclusionLevel" },
+    "state": { "$ref": "#/$defs/RecommendationState" },
+    "estimate": { "$ref": "#/$defs/EstimateValue" },
+    "verify": { "$ref": "#/$defs/VerifyPlan" },
+    "gates": {
+      "type": "array",
+      "description": "G1–G6 的逐项结果（按顺序，遇到第一个不通过即停止）；全部通过才创建 PR 或 issue",
+      "items": { "$ref": "#/$defs/GateRecord" }
+    },
+    "delivery": {
+      "description": "创建的 PR 或 issue；门槛不通过或还没有创建时为 null",
+      "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/Delivery" }]
+    },
+    "outcome": {
+      "description": "验证结果；验证结束之前为 null",
+      "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/RecommendationOutcome" }]
+    },
+    "model_note": {
+      "type": ["string", "null"],
+      "maxLength": 1200,
+      "description": "模型补充的说明（经数值审计），显示时标注【模型】"
+    },
+    "created_at": { "$ref": "common.schema.json#/$defs/Timestamp" },
+    "updated_at": { "$ref": "common.schema.json#/$defs/Timestamp" }
+  },
+  "$defs": {
+    "RecommendationState": {
+      "title": "RecommendationState",
+      "description": "blocked 门槛不通过，只记录原因；open 通过门槛，PR 或 issue 创建中；recommended PR 或 issue 已创建；verifying PR 合并并同步或修复已部署，验证窗口中；improved、no_effect、regressed 验证结果；rejected issue 以 not planned 关闭、PR 未合并即关闭，或被标为建议无用；superseded 发现有了更新的建议；failed 创建失败",
+      "type": "string",
+      "enum": [
+        "blocked",
+        "open",
+        "recommended",
+        "verifying",
+        "improved",
+        "no_effect",
+        "regressed",
+        "rejected",
+        "superseded",
+        "failed"
+      ]
+    },
+    "EstimateValue": {
+      "title": "EstimateValue",
+      "description": "模板 estimate 的求值结果：lower 为保守下界，expected 为期望值，单位与指标相同，按改善方向取正值",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["indicator", "unit", "lower", "expected", "basis"],
+      "properties": {
+        "indicator": { "$ref": "pack.schema.json#/$defs/IndicatorRef" },
+        "unit": { "$ref": "pack.schema.json#/$defs/IndicatorUnit" },
+        "lower": { "type": "number" },
+        "expected": { "type": ["number", "null"] },
+        "basis": { "type": "string", "maxLength": 600 }
+      }
+    },
+    "VerifyPlan": {
+      "title": "VerifyPlan",
+      "description": "验证计划（ADR 0146 §2.6）：start 为 merged_synced 时等管理这个文件的 Argo 应用的同步版本包含合并提交且 Healthy（GUC 另外核对 pg_settings）；为 deployed 时等发布输入的版本对应的业务提交包含修复提交。窗口开始后与基线按“星期 × 小时”匹配的时段比较",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["start", "indicator", "params", "within", "cards", "guards", "settings", "window"],
+      "properties": {
+        "start": { "type": "string", "enum": ["merged_synced", "deployed"] },
+        "indicator": { "$ref": "pack.schema.json#/$defs/IndicatorRef" },
+        "params": { "type": "object", "additionalProperties": { "type": ["number", "string", "boolean"] } },
+        "within": { "$ref": "common.schema.json#/$defs/Duration" },
+        "cards": { "type": "array", "items": { "type": "string" }, "description": "应转为正常的卡片全局 id" },
+        "guards": { "type": "array", "items": { "$ref": "pack.schema.json#/$defs/IndicatorRef" } },
+        "settings": {
+          "type": "object",
+          "description": "GUC：应在 pg_settings 中生效的参数 → 新值",
+          "additionalProperties": { "type": "string" }
+        },
+        "window": {
+          "description": "验证窗口；开始之前为 null",
+          "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/TimeWindow" }]
+        }
+      }
+    },
+    "GateRecord": {
+      "title": "GateRecord",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["gate", "passed", "code", "detail"],
+      "properties": {
+        "gate": {
+          "type": "string",
+          "description": "G1 证据档位；G2 预期收益；G3 安全约束；G4 新颖性；G5 数量；G6 时机",
+          "enum": ["G1", "G2", "G3", "G4", "G5", "G6"]
+        },
+        "passed": { "type": "boolean" },
+        "code": {
+          "type": "string",
+          "description": "机器可读的原因码，与 remediation_attempts 的方式相同；G3 不通过时为模板 guard 的 id",
+          "pattern": "^[a-z0-9][a-z0-9_-]*$"
+        },
+        "detail": { "type": "string", "maxLength": 500 }
+      }
+    },
+    "Delivery": {
+      "title": "RecommendationDelivery",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repository_role",
+        "repository",
+        "proposal_id",
+        "number",
+        "url",
+        "branch",
+        "merged_at",
+        "merge_commit",
+        "closed_reason"
+      ],
+      "properties": {
+        "repository_role": {
+          "type": "string",
+          "description": "ops：ops 仓库（只经 gateway 的 gitops_pr）；business：业务仓库（只创建 issue 与评论）",
+          "enum": ["ops", "business"]
+        },
+        "repository": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$" },
+        "proposal_id": {
+          "description": "ops_pr 的 gitops_pr 提议；business_issue 为 null",
+          "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/Uuid" }]
+        },
+        "number": {
+          "type": ["integer", "null"],
+          "minimum": 1,
+          "description": "PR 或 issue 号；PR 还没有创建时为 null"
+        },
+        "url": { "type": ["string", "null"] },
+        "branch": { "type": ["string", "null"], "description": "ops_pr 的分支 srenautix/goal-…" },
+        "merged_at": { "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/Timestamp" }] },
+        "merge_commit": { "type": ["string", "null"], "pattern": "^[0-9a-f]{40}$" },
+        "closed_reason": {
+          "description": "issue 的关闭原因或 PR 未合并就关闭（unmerged）；未关闭时为 null",
+          "oneOf": [{ "type": "null" }, { "type": "string", "enum": ["completed", "not_planned", "unmerged"] }]
+        }
+      }
+    },
+    "RecommendationOutcome": {
+      "title": "RecommendationOutcome",
+      "description": "合并或部署之后的验证结果（ADR 0146 §2.6）：改善不低于预期下界的 50% 并超出噪声带为 improved；守护指标恶化超过 10% 为 regressed；其余为 no_effect",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "result",
+        "window",
+        "baseline",
+        "observed",
+        "improvement",
+        "noise_band",
+        "estimate_lower",
+        "guards",
+        "cards",
+        "revert_proposal_id",
+        "verified_at"
+      ],
+      "properties": {
+        "result": { "type": "string", "enum": ["improved", "no_effect", "regressed"] },
+        "window": { "$ref": "common.schema.json#/$defs/TimeWindow" },
+        "baseline": { "type": ["number", "null"], "description": "匹配时段的基线统计值" },
+        "observed": { "type": ["number", "null"], "description": "验证窗口的统计值" },
+        "improvement": { "type": ["number", "null"], "description": "按改善方向取正值，单位与指标相同" },
+        "noise_band": { "type": ["number", "null"], "description": "基线窗口内同一时段的四分位距的一半" },
+        "estimate_lower": { "type": "number" },
+        "guards": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["indicator", "change_ratio", "regressed"],
+            "properties": {
+              "indicator": { "$ref": "pack.schema.json#/$defs/IndicatorRef" },
+              "change_ratio": { "type": ["number", "null"], "description": "恶化方向为正" },
+              "regressed": { "type": "boolean" }
+            }
+          }
+        },
+        "cards": {
+          "type": "array",
+          "description": "verify.cards 在窗口结束时的结论",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["card_id", "verdict"],
+            "properties": {
+              "card_id": { "type": "string" },
+              "verdict": { "$ref": "common.schema.json#/$defs/Verdict" }
+            }
+          }
+        },
+        "revert_proposal_id": {
+          "description": "regressed 的 ops PR 由 server 提交的 revert 提议",
+          "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/Uuid" }]
+        },
+        "verified_at": { "$ref": "common.schema.json#/$defs/Timestamp" }
+      }
+    }
+  }
+}

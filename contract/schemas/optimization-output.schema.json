@@ -1,0 +1,291 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://srenautix.io/contract/schemas/optimization-output.schema.json",
+  "title": "OptimizationOutput",
+  "description": "一次目标运行经代码校验后的输出（契约 2.28.0，ADR 0146 §2）：基线、差距、候选发现、按发现分组的账本、每个发现的结论、建议与门槛记录、validation_notes。baseline、gap、candidates 与 recommendations 的数值全部由代码从信号卡计算；模型只提出假设、选择检查并写说明。没有差距时整次运行不调用模型，ledger 与 conclusions 为空",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "goal_id",
+    "goal_revision",
+    "run_id",
+    "baseline",
+    "gap",
+    "candidates",
+    "hypotheses",
+    "next_checks",
+    "conclusions",
+    "recommendations",
+    "summary",
+    "stop_reason",
+    "check_cards",
+    "evidence_index",
+    "validation_notes"
+  ],
+  "properties": {
+    "goal_id": { "$ref": "common.schema.json#/$defs/Uuid" },
+    "goal_revision": { "type": "integer", "minimum": 1 },
+    "run_id": { "$ref": "common.schema.json#/$defs/Uuid" },
+    "baseline": { "$ref": "#/$defs/Baseline" },
+    "gap": { "$ref": "#/$defs/Gap" },
+    "candidates": {
+      "type": "array",
+      "description": "候选发现，按“份额 × 差距”降序；前 3 个 selected 为 true，进入假设；其余为“未分析的候选”",
+      "maxItems": 50,
+      "items": { "$ref": "#/$defs/Candidate" }
+    },
+    "hypotheses": {
+      "type": "array",
+      "description": "假设账本：root_component 为发现挂到的组件，finding 给出分组键；同一发现上的假设互为竞争假设",
+      "maxItems": 9,
+      "items": { "$ref": "#/$defs/FindingHypothesis" }
+    },
+    "next_checks": {
+      "type": "array",
+      "maxItems": 12,
+      "items": { "$ref": "research-output.schema.json#/$defs/NextCheck" }
+    },
+    "conclusions": {
+      "type": "array",
+      "description": "每个进入假设的发现一条，档位由代码按 ADR 0146 §2.4 计算",
+      "maxItems": 3,
+      "items": { "$ref": "#/$defs/FindingConclusion" }
+    },
+    "recommendations": {
+      "type": "array",
+      "description": "本次运行评估过的建议与门槛记录（每次运行最多 2 个通过全部门槛）",
+      "maxItems": 12,
+      "items": { "$ref": "#/$defs/RecommendationAttempt" }
+    },
+    "summary": {
+      "type": "string",
+      "maxLength": 600,
+      "description": "【模型】本次分析的说明；没有调用模型时为代码生成的说明"
+    },
+    "stop_reason": {
+      "description": "检验循环的停止原因（取值同 ResearchOutput.stop_reason）；没有差距时为 null",
+      "type": ["string", "null"],
+      "enum": ["leader_supported", "no_change", "step_limit", "deadline", "budget", "model_unavailable", null]
+    },
+    "check_cards": {
+      "type": "array",
+      "description": "诊断卡、份额卡与区分性检查产生的证据卡（编号见 evidence_index），序列为空数组",
+      "maxItems": 60,
+      "items": { "$ref": "evidence-result.schema.json" }
+    },
+    "evidence_index": {
+      "type": "array",
+      "description": "运行内的证据引用到定义与实体的映射：card:<n> → <card_id>@<实体键>",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["ref", "target"],
+        "properties": {
+          "ref": { "$ref": "common.schema.json#/$defs/EvidenceRef" },
+          "target": { "type": "string" }
+        }
+      }
+    },
+    "validation_notes": {
+      "type": "array",
+      "description": "代码校验的修改记录：删除的无效证据引用、拒绝的未知模板与原始查询、降级的结论、删除的无法核实的数值等",
+      "items": { "type": "string" }
+    }
+  },
+  "$defs": {
+    "Baseline": {
+      "title": "OptimizationBaseline",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["window", "sufficient", "missing", "indicators"],
+      "properties": {
+        "window": { "$ref": "common.schema.json#/$defs/TimeWindow" },
+        "sufficient": {
+          "type": "boolean",
+          "description": "覆盖率不低于 90% 且至少 3 个业务高峰；否则运行以 failed（baseline_insufficient）结束"
+        },
+        "missing": {
+          "type": "array",
+          "description": "基线不足时缺少的数据（例如“postgres/db-time 覆盖率 72%”）",
+          "items": { "type": "string", "maxLength": 300 }
+        },
+        "indicators": { "type": "array", "items": { "$ref": "#/$defs/BaselineIndicator" } }
+      }
+    },
+    "BaselineIndicator": {
+      "title": "BaselineIndicator",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "indicator",
+        "params",
+        "entity",
+        "unit",
+        "better",
+        "statistic",
+        "value",
+        "hours",
+        "covered_hours",
+        "peak_hours",
+        "violation_ratio",
+        "hourly"
+      ],
+      "properties": {
+        "indicator": { "$ref": "pack.schema.json#/$defs/IndicatorRef" },
+        "params": { "type": "object", "additionalProperties": { "type": ["number", "string", "boolean"] } },
+        "entity": { "$ref": "common.schema.json#/$defs/EntityKey" },
+        "unit": { "$ref": "pack.schema.json#/$defs/IndicatorUnit" },
+        "better": { "type": "string", "enum": ["lower", "higher"] },
+        "statistic": { "$ref": "pack.schema.json#/$defs/IndicatorStatistic" },
+        "value": { "type": ["number", "null"], "description": "统计值；没有数据时为 null" },
+        "hours": { "type": "integer", "minimum": 0 },
+        "covered_hours": { "type": "integer", "minimum": 0 },
+        "peak_hours": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "按负载指标判定的业务高峰小时数（负载前 20%）"
+        },
+        "violation_ratio": {
+          "type": ["number", "null"],
+          "minimum": 0,
+          "maximum": 1,
+          "description": "违反目标或门槛的小时占比；没有目标与门槛时为 null"
+        },
+        "hourly": {
+          "type": "array",
+          "description": "按小时的取值 [unix 秒, 值或 null]，控制台画基线图",
+          "maxItems": 336,
+          "items": {
+            "type": "array",
+            "tsType": "[number, number | null]",
+            "prefixItems": [{ "type": "number" }, { "type": ["number", "null"] }],
+            "items": false,
+            "minItems": 2
+          }
+        }
+      }
+    },
+    "Gap": {
+      "title": "OptimizationGap",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["exists", "basis", "detail"],
+      "properties": {
+        "exists": { "type": "boolean" },
+        "basis": {
+          "type": "string",
+          "description": "objective 按目标值；gate 按领域门槛；none 基线不足或没有可比较的目标",
+          "enum": ["objective", "gate", "none"]
+        },
+        "detail": { "type": "string", "maxLength": 500 }
+      }
+    },
+    "Candidate": {
+      "title": "OptimizationCandidate",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "finding",
+        "kind",
+        "entity",
+        "component",
+        "diagnostic",
+        "card_ref",
+        "share",
+        "share_ref",
+        "gap",
+        "score",
+        "selected",
+        "skipped_reason"
+      ],
+      "properties": {
+        "finding": { "description": "发现指纹", "$ref": "common.schema.json#/$defs/Sha256" },
+        "kind": { "type": "string" },
+        "entity": { "$ref": "finding.schema.json#/$defs/FindingEntity" },
+        "component": { "$ref": "common.schema.json#/$defs/ComponentKey" },
+        "diagnostic": { "type": "string", "description": "<领域>/<诊断卡 id>" },
+        "card_ref": { "$ref": "common.schema.json#/$defs/EvidenceRef" },
+        "share": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+        "share_ref": { "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/EvidenceRef" }] },
+        "gap": { "type": ["number", "null"] },
+        "score": { "type": "number", "minimum": 0 },
+        "selected": { "type": "boolean" },
+        "skipped_reason": {
+          "type": ["string", "null"],
+          "description": "没有进入假设的原因：rank（排在前 3 之外）、verifying（已修复的发现在验证期内）、cooldown",
+          "enum": ["rank", "verifying", "cooldown", null]
+        }
+      }
+    },
+    "FindingHypothesis": {
+      "title": "FindingHypothesis",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["finding", "hypothesis"],
+      "properties": {
+        "finding": { "$ref": "common.schema.json#/$defs/Sha256" },
+        "hypothesis": { "$ref": "research-output.schema.json#/$defs/Hypothesis" }
+      }
+    },
+    "OptimizationConsistency": {
+      "title": "OptimizationConsistency",
+      "description": "优化场景的 evidence_consistent 条件逐项结果（ADR 0146 §2.4）；trend_onset 只对趋势触发的目标求值，其余为 null",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["gap_holds", "share_holds", "trend_onset", "no_contrary_normal", "competitor_tested"],
+      "properties": {
+        "gap_holds": { "type": "boolean" },
+        "share_holds": { "type": "boolean" },
+        "trend_onset": { "type": ["boolean", "null"] },
+        "no_contrary_normal": { "type": "boolean" },
+        "competitor_tested": { "type": "boolean" }
+      }
+    },
+    "FindingConclusion": {
+      "title": "FindingConclusion",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "finding",
+        "level",
+        "hypothesis_id",
+        "consistency",
+        "support_refs",
+        "share_refs",
+        "contrary_refs",
+        "chosen_by",
+        "note",
+        "undetermined_reason"
+      ],
+      "properties": {
+        "finding": { "$ref": "common.schema.json#/$defs/Sha256" },
+        "level": { "$ref": "common.schema.json#/$defs/ConclusionLevel" },
+        "hypothesis_id": { "type": ["string", "null"], "pattern": "^h[1-9]$" },
+        "consistency": { "$ref": "#/$defs/OptimizationConsistency" },
+        "support_refs": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/EvidenceRef" } },
+        "share_refs": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/EvidenceRef" } },
+        "contrary_refs": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/EvidenceRef" } },
+        "chosen_by": { "type": "string", "enum": ["model", "ledger"] },
+        "note": { "type": ["string", "null"], "maxLength": 600, "description": "【模型】选择这个假设的说明" },
+        "undetermined_reason": { "type": ["string", "null"], "maxLength": 400 }
+      }
+    },
+    "RecommendationAttempt": {
+      "title": "RecommendationAttempt",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["finding", "kind", "template", "gates", "passed", "recommendation_id"],
+      "properties": {
+        "finding": { "$ref": "common.schema.json#/$defs/Sha256" },
+        "kind": { "$ref": "goal.schema.json#/$defs/RecommendationKind" },
+        "template": { "type": "string" },
+        "gates": { "type": "array", "items": { "$ref": "recommendation.schema.json#/$defs/GateRecord" } },
+        "passed": { "type": "boolean" },
+        "recommendation_id": {
+          "description": "保存的建议；没有保存时为 null",
+          "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/Uuid" }]
+        }
+      }
+    }
+  }
+}

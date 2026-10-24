@@ -1,0 +1,758 @@
+{
+  "description": "主动优化的黄金夹具（契约 2.28.0，ADR 0146 §8）。valid 中每个实例必须通过 schema 指向的定义，invalid 中每个实例必须被拒绝；Go（santhosh-tekuri/jsonschema）与 TS（ajv）对每个用例给出相同的结果。schema 写成相对 contract/ 的路径，带 #/$defs/<名字> 时指向其中的定义",
+  "valid": [
+    {
+      "name": "goal_indicator_manual",
+      "schema": "schemas/goal.schema.json",
+      "instance": {
+        "goal_id": "5b0c8f3e-2a1d-4c7e-9f10-1a2b3c4d5e6f",
+        "revision": 2,
+        "cluster_id": "cchp-prod",
+        "spec": {
+          "origin": { "kind": "manual", "channel": "console", "principal": "zzhihon" },
+          "subject": {
+            "type": "indicator",
+            "indicator": "cchp/gateway-stage-p99",
+            "params": { "endpoint": "/v1/messages", "stage": "plan" },
+            "scope": { "components": [], "namespaces": ["cchp"] }
+          },
+          "objective": { "comparator": "lt", "target": 0.05, "unit": "seconds", "statistic": "p95", "window": "7d" },
+          "outputs": ["ops_pr", "business_issue"],
+          "budget": {
+            "tokens": 400000,
+            "duration_seconds": 1200,
+            "checks": 12,
+            "dbstats_queries": 30,
+            "traces_queries": 10,
+            "logs_queries": 10,
+            "code_files": 200,
+            "code_bytes": 8388608,
+            "github_requests": 300
+          }
+        },
+        "state": "analyzing",
+        "state_reason": null,
+        "expires_at": "2026-11-07T08:00:00Z",
+        "last_run": {
+          "run_id": "8d2e4f60-1b3c-4d5e-8f70-9a0b1c2d3e4f",
+          "goal_id": "5b0c8f3e-2a1d-4c7e-9f10-1a2b3c4d5e6f",
+          "goal_revision": 2,
+          "state": "running",
+          "result": null,
+          "reason": null,
+          "gap": true,
+          "findings": 2,
+          "recommendations": 0,
+          "queued_at": "2026-10-24T08:00:00Z",
+          "started_at": "2026-10-24T08:00:05Z",
+          "finished_at": null
+        },
+        "created_at": "2026-10-24T08:00:00Z",
+        "updated_at": "2026-10-24T08:00:05Z"
+      }
+    },
+    {
+      "name": "goal_domain_checkup_without_objective",
+      "schema": "schemas/goal.schema.json#/$defs/GoalSpec",
+      "instance": {
+        "origin": { "kind": "checkup", "domain": "database", "schedule_id": "database-weekly" },
+        "subject": { "type": "domain", "domain": "database", "scope": { "components": [], "namespaces": [] } },
+        "objective": null,
+        "outputs": ["business_issue"],
+        "budget": {
+          "tokens": 250000,
+          "duration_seconds": 1200,
+          "checks": 12,
+          "dbstats_queries": 30,
+          "traces_queries": 10,
+          "logs_queries": 10,
+          "code_files": 200,
+          "code_bytes": 8388608,
+          "github_requests": 300
+        }
+      }
+    },
+    {
+      "name": "goal_create_minimal",
+      "schema": "schemas/goal.schema.json#/$defs/GoalCreate",
+      "instance": {
+        "cluster_id": "kind-demo",
+        "subject": { "type": "domain", "domain": "database", "scope": { "components": [], "namespaces": ["shop"] } },
+        "objective": null,
+        "outputs": ["ops_pr"],
+        "budget": { "dbstats_queries": 10 },
+        "expires_in": "3d"
+      }
+    },
+    {
+      "name": "finding_pg_statement",
+      "schema": "schemas/finding.schema.json",
+      "instance": {
+        "fingerprint": "sha256:3f1c0a6e8b9d4c2a7e5f1b3d9c8a7e6f5d4c3b2a1908f7e6d5c4b3a291807f6e",
+        "cluster_id": "kind-demo",
+        "domain": "database",
+        "kind": "pg.statement_dominant",
+        "entity": {
+          "type": "pg_statement",
+          "key": "pg_statement:shop-pg/app/50fde20626009aba",
+          "display": "SELECT ... FROM orders WHERE customer_id = $1",
+          "labels": { "database": "app", "queryid": "-4211290122153880423" }
+        },
+        "component": "Cluster.postgresql.cnpg.io:shop/shop-pg",
+        "indicator": "postgres/db-time",
+        "gap": 0.42,
+        "share": 0.63,
+        "level": "evidence_consistent",
+        "evidence_fingerprint": "sha256:0a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f9",
+        "status": "recommended",
+        "cooldown_until": null,
+        "last_goal_id": "5b0c8f3e-2a1d-4c7e-9f10-1a2b3c4d5e6f",
+        "last_run_id": "8d2e4f60-1b3c-4d5e-8f70-9a0b1c2d3e4f",
+        "first_seen": "2026-10-24T08:03:00Z",
+        "last_seen": "2026-10-24T08:03:00Z",
+        "updated_at": "2026-10-24T08:10:00Z"
+      }
+    },
+    {
+      "name": "recommendation_ops_pr_verified",
+      "schema": "schemas/recommendation.schema.json",
+      "instance": {
+        "recommendation_id": "c1d2e3f4-a5b6-4c7d-8e9f-0a1b2c3d4e5f",
+        "cluster_id": "kind-demo",
+        "finding": "sha256:3f1c0a6e8b9d4c2a7e5f1b3d9c8a7e6f5d4c3b2a1908f7e6d5c4b3a291807f6e",
+        "goal_id": "5b0c8f3e-2a1d-4c7e-9f10-1a2b3c4d5e6f",
+        "run_id": "8d2e4f60-1b3c-4d5e-8f70-9a0b1c2d3e4f",
+        "kind": "ops_pr",
+        "template": "postgres/pg-guc-tune",
+        "title": "[优化] 调整 PostgreSQL 参数：shop-pg",
+        "level": "evidence_consistent",
+        "state": "improved",
+        "estimate": {
+          "indicator": "postgres/temp-written",
+          "unit": "per_second",
+          "lower": 1200000,
+          "expected": 2400000,
+          "basis": "temp 写入全部来自排序溢出，work_mem 从 4MB 调到 16MB"
+        },
+        "verify": {
+          "start": "merged_synced",
+          "indicator": "postgres/temp-written",
+          "params": {},
+          "within": "24h",
+          "cards": ["postgres/database/temp-spill"],
+          "guards": ["postgres/db-time"],
+          "settings": { "work_mem": "16MB" },
+          "window": { "from": "2026-10-25T00:00:00Z", "to": "2026-10-26T00:00:00Z" }
+        },
+        "gates": [
+          { "gate": "G1", "passed": true, "code": "evidence_consistent", "detail": "档位 evidence_consistent" },
+          { "gate": "G2", "passed": true, "code": "gain_ok", "detail": "下界 1.2 MB/s，门槛 0.5 MB/s" },
+          { "gate": "G3", "passed": true, "code": "guards_ok", "detail": "work_mem 的 context 为 user" },
+          { "gate": "G4", "passed": true, "code": "novel", "detail": "没有未结束的同指纹建议" },
+          { "gate": "G5", "passed": true, "code": "within_quota", "detail": "本小时 0 个优化 PR" },
+          { "gate": "G6", "passed": true, "code": "timing_ok", "detail": "范围内没有活动事件" }
+        ],
+        "delivery": {
+          "repository_role": "ops",
+          "repository": "CCH-HQ/cchp-k8s-ops",
+          "proposal_id": "e1f2a3b4-c5d6-4e7f-8a9b-0c1d2e3f4a5b",
+          "number": 170,
+          "url": "https://github.com/CCH-HQ/cchp-k8s-ops/pull/170",
+          "branch": "srenautix/goal-5b0c8f3e-pg-guc-tune-a1b2c3",
+          "merged_at": "2026-10-24T12:00:00Z",
+          "merge_commit": "0123456789abcdef0123456789abcdef01234567",
+          "closed_reason": null
+        },
+        "outcome": {
+          "result": "improved",
+          "window": { "from": "2026-10-25T00:00:00Z", "to": "2026-10-26T00:00:00Z" },
+          "baseline": 3100000,
+          "observed": 400000,
+          "improvement": 2700000,
+          "noise_band": 150000,
+          "estimate_lower": 1200000,
+          "guards": [{ "indicator": "postgres/db-time", "change_ratio": -0.05, "regressed": false }],
+          "cards": [{ "card_id": "postgres/database/temp-spill", "verdict": "normal" }],
+          "revert_proposal_id": null,
+          "verified_at": "2026-10-26T00:05:00Z"
+        },
+        "model_note": "排序发生在 orders 的报表查询上。",
+        "created_at": "2026-10-24T08:10:00Z",
+        "updated_at": "2026-10-26T00:05:00Z"
+      }
+    },
+    {
+      "name": "recommendation_blocked_business_issue",
+      "schema": "schemas/recommendation.schema.json",
+      "instance": {
+        "recommendation_id": "d1d2e3f4-a5b6-4c7d-8e9f-0a1b2c3d4e5f",
+        "cluster_id": "cchp-prod",
+        "finding": "sha256:3f1c0a6e8b9d4c2a7e5f1b3d9c8a7e6f5d4c3b2a1908f7e6d5c4b3a291807f6e",
+        "goal_id": "5b0c8f3e-2a1d-4c7e-9f10-1a2b3c4d5e6f",
+        "run_id": "8d2e4f60-1b3c-4d5e-8f70-9a0b1c2d3e4f",
+        "kind": "business_issue",
+        "template": "postgres/slow-statement",
+        "title": "[优化] 慢语句：usage_logs 按 user_id 查询",
+        "level": "likely",
+        "state": "blocked",
+        "estimate": {
+          "indicator": "postgres/db-time",
+          "unit": "ratio",
+          "lower": 0.04,
+          "expected": 0.12,
+          "basis": "语句份额 8% × 最小降幅 0.5"
+        },
+        "verify": {
+          "start": "deployed",
+          "indicator": "postgres/db-time",
+          "params": {},
+          "within": "72h",
+          "cards": [],
+          "guards": [],
+          "settings": {},
+          "window": null
+        },
+        "gates": [{ "gate": "G1", "passed": false, "code": "share_below_min", "detail": "份额 8% 低于 20%" }],
+        "delivery": null,
+        "outcome": null,
+        "model_note": null,
+        "created_at": "2026-10-24T08:10:00Z",
+        "updated_at": "2026-10-24T08:10:00Z"
+      }
+    },
+    {
+      "name": "optimization_output_no_gap",
+      "schema": "schemas/optimization-output.schema.json",
+      "instance": {
+        "goal_id": "5b0c8f3e-2a1d-4c7e-9f10-1a2b3c4d5e6f",
+        "goal_revision": 1,
+        "run_id": "8d2e4f60-1b3c-4d5e-8f70-9a0b1c2d3e4f",
+        "baseline": {
+          "window": { "from": "2026-10-17T08:00:00Z", "to": "2026-10-24T08:00:00Z" },
+          "sufficient": true,
+          "missing": [],
+          "indicators": [
+            {
+              "indicator": "postgres/db-time",
+              "params": {},
+              "entity": "Cluster.postgresql.cnpg.io:shop/shop-pg",
+              "unit": "ratio",
+              "better": "lower",
+              "statistic": "p95",
+              "value": 0.21,
+              "hours": 168,
+              "covered_hours": 166,
+              "peak_hours": 34,
+              "violation_ratio": 0.02,
+              "hourly": [
+                [1760688000, 0.2],
+                [1760691600, null]
+              ]
+            }
+          ]
+        },
+        "gap": { "exists": false, "basis": "gate", "detail": "全部指标在领域门槛之内" },
+        "candidates": [],
+        "hypotheses": [],
+        "next_checks": [],
+        "conclusions": [],
+        "recommendations": [],
+        "summary": "没有差距，本次运行没有调用模型。",
+        "stop_reason": null,
+        "check_cards": [],
+        "evidence_index": [],
+        "validation_notes": []
+      }
+    },
+    {
+      "name": "optimization_output_concluded",
+      "schema": "schemas/optimization-output.schema.json",
+      "instance": {
+        "goal_id": "5b0c8f3e-2a1d-4c7e-9f10-1a2b3c4d5e6f",
+        "goal_revision": 1,
+        "run_id": "8d2e4f60-1b3c-4d5e-8f70-9a0b1c2d3e4f",
+        "baseline": {
+          "window": { "from": "2026-10-17T08:00:00Z", "to": "2026-10-24T08:00:00Z" },
+          "sufficient": true,
+          "missing": [],
+          "indicators": []
+        },
+        "gap": { "exists": true, "basis": "objective", "detail": "违反目标的小时占比 31%" },
+        "candidates": [
+          {
+            "finding": "sha256:3f1c0a6e8b9d4c2a7e5f1b3d9c8a7e6f5d4c3b2a1908f7e6d5c4b3a291807f6e",
+            "kind": "pg.statement_dominant",
+            "entity": {
+              "type": "pg_statement",
+              "key": "pg_statement:shop-pg/app/50fde20626009aba",
+              "display": "SELECT ... FROM orders",
+              "labels": { "database": "app", "queryid": "12" }
+            },
+            "component": "Cluster.postgresql.cnpg.io:shop/shop-pg",
+            "diagnostic": "database/statement-dominant",
+            "card_ref": "card:1",
+            "share": 0.63,
+            "share_ref": "card:2",
+            "gap": 0.42,
+            "score": 0.2646,
+            "selected": true,
+            "skipped_reason": null
+          }
+        ],
+        "hypotheses": [
+          {
+            "finding": "sha256:3f1c0a6e8b9d4c2a7e5f1b3d9c8a7e6f5d4c3b2a1908f7e6d5c4b3a291807f6e",
+            "hypothesis": {
+              "id": "h1",
+              "parent_id": null,
+              "root_component": "Cluster.postgresql.cnpg.io:shop/shop-pg",
+              "mechanism": "orders 缺少 customer_id 索引，每次调用顺序扫描",
+              "supporting": ["card:3"],
+              "refuting": [],
+              "status": "supported"
+            }
+          }
+        ],
+        "next_checks": [
+          {
+            "hypothesis_id": "h1",
+            "type": "query",
+            "template": "postgres/table-seq-scans",
+            "args": {},
+            "refutes_if": "orders 的顺序扫描读取行数接近 0",
+            "purpose": "确认顺序扫描",
+            "result_ref": "card:3",
+            "outcome": "supports",
+            "error": null
+          }
+        ],
+        "conclusions": [
+          {
+            "finding": "sha256:3f1c0a6e8b9d4c2a7e5f1b3d9c8a7e6f5d4c3b2a1908f7e6d5c4b3a291807f6e",
+            "level": "evidence_consistent",
+            "hypothesis_id": "h1",
+            "consistency": {
+              "gap_holds": true,
+              "share_holds": true,
+              "trend_onset": null,
+              "no_contrary_normal": true,
+              "competitor_tested": true
+            },
+            "support_refs": ["card:3"],
+            "share_refs": ["card:2"],
+            "contrary_refs": [],
+            "chosen_by": "model",
+            "note": "顺序扫描读取的行数是返回行数的 4000 倍。",
+            "undetermined_reason": null
+          }
+        ],
+        "recommendations": [
+          {
+            "finding": "sha256:3f1c0a6e8b9d4c2a7e5f1b3d9c8a7e6f5d4c3b2a1908f7e6d5c4b3a291807f6e",
+            "kind": "business_issue",
+            "template": "postgres/slow-statement",
+            "gates": [{ "gate": "G1", "passed": true, "code": "likely_with_share", "detail": "档位与份额满足" }],
+            "passed": true,
+            "recommendation_id": "d1d2e3f4-a5b6-4c7d-8e9f-0a1b2c3d4e5f"
+          }
+        ],
+        "summary": "一条语句占数据库执行时间的 63%。",
+        "stop_reason": "leader_supported",
+        "check_cards": [],
+        "evidence_index": [
+          { "ref": "card:1", "target": "postgres/database/statement-share@Cluster.postgresql.cnpg.io:shop/shop-pg" }
+        ],
+        "validation_notes": ["拒绝了一个未知模板 postgres/raw-sql"]
+      }
+    },
+    {
+      "name": "proposal_create_goal_subject",
+      "schema": "schemas/proposal.schema.json#/$defs/ProposalCreate",
+      "instance": {
+        "subject": { "type": "goal", "id": "5b0c8f3e-2a1d-4c7e-9f10-1a2b3c4d5e6f" },
+        "incident_id": "5b0c8f3e-2a1d-4c7e-9f10-1a2b3c4d5e6f",
+        "binding": {
+          "incident_version": 2,
+          "root_component": "Cluster.postgresql.cnpg.io:shop/shop-pg",
+          "evidence_fingerprint": "sha256:0a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f9"
+        },
+        "action": "gitops_pr",
+        "params": { "repository": "CCH-HQ/cchp-k8s-ops", "patch": "diff --git a/x b/x\n" },
+        "research_run_id": "8d2e4f60-1b3c-4d5e-8f70-9a0b1c2d3e4f",
+        "rule_id": "srenautix/optimization-pr",
+        "hypothesis_id": "h1",
+        "evidence_refs": ["card:3"],
+        "expected_effect": "temp 写入下降至少 1.2 MB/s"
+      }
+    },
+    {
+      "name": "event_goal_run_concluded",
+      "schema": "schemas/events.schema.json",
+      "instance": {
+        "seq": 41,
+        "event_id": "9e7f9a52-4f0e-4b64-9e8e-1c2d3e4f5a6b",
+        "owner": "server",
+        "schema_version": "2.28.0",
+        "cluster_id": "kind-demo",
+        "occurred_at": "2026-10-24T08:20:00Z",
+        "type": "goal.run.concluded",
+        "payload": {
+          "goal_id": "5b0c8f3e-2a1d-4c7e-9f10-1a2b3c4d5e6f",
+          "goal_revision": 1,
+          "run_id": "8d2e4f60-1b3c-4d5e-8f70-9a0b1c2d3e4f",
+          "summary": {
+            "run_id": "8d2e4f60-1b3c-4d5e-8f70-9a0b1c2d3e4f",
+            "goal_id": "5b0c8f3e-2a1d-4c7e-9f10-1a2b3c4d5e6f",
+            "goal_revision": 1,
+            "state": "failed",
+            "result": null,
+            "reason": "baseline_insufficient",
+            "gap": null,
+            "findings": 0,
+            "recommendations": 0,
+            "queued_at": "2026-10-24T08:00:00Z",
+            "started_at": "2026-10-24T08:00:05Z",
+            "finished_at": "2026-10-24T08:00:40Z"
+          },
+          "output": null
+        }
+      }
+    },
+    {
+      "name": "dbstats_statements_top_request",
+      "schema": "integrations/dbstats/v1/dbstats.schema.json#/$defs/Request",
+      "instance": {
+        "op": "statements.top",
+        "args": { "order_by": "total_exec_time", "limit": 20, "database": "app", "queryids": ["-4211290122153880423"] }
+      }
+    },
+    {
+      "name": "dbstats_activity_request",
+      "schema": "integrations/dbstats/v1/dbstats.schema.json#/$defs/Request",
+      "instance": { "op": "activity.summary", "args": {} }
+    },
+    {
+      "name": "dbstats_sample",
+      "schema": "integrations/dbstats/v1/dbstats.schema.json#/$defs/Sample",
+      "instance": {
+        "op": "statements.top",
+        "sampled_at": "2026-10-24T08:00:00Z",
+        "server_version": "170002",
+        "rows": [
+          {
+            "queryid": "12",
+            "database": "app",
+            "role": "app",
+            "toplevel": true,
+            "calls": 1500,
+            "total_exec_time_ms": 91234.5,
+            "mean_exec_time_ms": 60.8,
+            "rows": 1500,
+            "shared_blks_hit": 10,
+            "shared_blks_read": 90000,
+            "temp_blks_written": 0,
+            "blk_read_time_ms": 400.1,
+            "wal_bytes": 0
+          }
+        ],
+        "truncated": false
+      }
+    },
+    {
+      "name": "dbstats_statement_text",
+      "schema": "integrations/dbstats/v1/dbstats.schema.json#/$defs/StatementText",
+      "instance": {
+        "queryid": "12",
+        "text": "SELECT id, total FROM orders WHERE customer_id = $1",
+        "fingerprint": "50fde20626009aba",
+        "truncated": false,
+        "normalize_error": null
+      }
+    },
+    {
+      "name": "dbstats_privilege_report_over_privileged",
+      "schema": "integrations/dbstats/v1/dbstats.schema.json#/$defs/PrivilegeReport",
+      "instance": {
+        "ok": false,
+        "role": "srenautix_stats",
+        "readable_tables": ["public.orders"],
+        "missing": [],
+        "read_only": true,
+        "checked_at": "2026-10-24T08:00:00Z"
+      }
+    },
+    {
+      "name": "domains_file",
+      "schema": "schemas/pack.schema.json#/$defs/DomainsFile",
+      "instance": {
+        "indicators": [
+          {
+            "id": "db-time",
+            "title": { "zh-CN": "数据库执行时间", "en": "Database execution time" },
+            "signal": "db_exec_time_rate",
+            "entity": "Cluster.postgresql.cnpg.io",
+            "unit": "ratio",
+            "better": "lower",
+            "statistic": "p95",
+            "load_indicator": "postgres/xact-rate"
+          }
+        ],
+        "domains": [
+          {
+            "id": "database",
+            "title": { "zh-CN": "数据库性能" },
+            "applies_to": ["Cluster.postgresql.cnpg.io"],
+            "indicators": ["postgres/db-time"],
+            "diagnostics": [
+              {
+                "id": "statement-dominant",
+                "card": "checks/statement-share",
+                "finding": "pg.statement_dominant",
+                "indicator": "postgres/db-time",
+                "symptoms": ["seq_scan", "index"],
+                "entities": {
+                  "type": "pg_statement",
+                  "rows_from": "stmt_time",
+                  "key": "label(row, \"database\") + \"/\" + label(row, \"queryid\")",
+                  "labels": { "queryid": "label(row, \"queryid\")" },
+                  "when": "last(row) / total > params.min_share"
+                }
+              }
+            ],
+            "contribution": [
+              {
+                "id": "statement-share",
+                "card": "checks/statement-share",
+                "indicator": "postgres/db-time",
+                "entities": {
+                  "type": "pg_statement",
+                  "rows_from": "stmt_time",
+                  "key": "label(row, \"database\") + \"/\" + label(row, \"queryid\")",
+                  "share": "last(row) / total"
+                }
+              }
+            ],
+            "templates": ["postgres/table-seq-scans"],
+            "optimizations": ["postgres/pg-guc-tune"],
+            "issues": ["postgres/slow-statement"],
+            "gates": {
+              "min_share": 0.2,
+              "thresholds": [{ "indicator": "postgres/db-time", "comparator": "gt", "value": 0.5 }]
+            },
+            "trends": [
+              {
+                "id": "db-time-drift",
+                "indicator": "postgres/db-time",
+                "method": "drift",
+                "ratio": 1.25,
+                "sustain": "6h"
+              }
+            ],
+            "schedule": { "cron": "0 20 * * 6" },
+            "load_guards": [{ "card": "checks/primary-cpu", "backends": ["dbstats"] }]
+          }
+        ]
+      }
+    },
+    {
+      "name": "issues_file",
+      "schema": "schemas/pack.schema.json#/$defs/IssuesFile",
+      "instance": {
+        "issues": [
+          {
+            "id": "slow-statement",
+            "title": { "zh-CN": "慢语句", "en": "Slow statement" },
+            "domain": "database",
+            "when": "finding.kind == \"pg.statement_dominant\"",
+            "locate": [{ "kind": "sql", "from": "finding.entity.labels.queryid" }],
+            "suggestion": { "zh-CN": "为过滤列补索引或改写查询" },
+            "estimate": {
+              "indicator": "postgres/db-time",
+              "unit": "ratio",
+              "lower": "finding.share * params.min_reduction",
+              "expected": "finding.share * 0.8",
+              "basis": { "zh-CN": "份额 × 最小降幅" }
+            },
+            "verify": { "say": { "zh-CN": "部署后语句份额下降" }, "within": "72h" },
+            "labels": ["perf"]
+          }
+        ]
+      }
+    },
+    {
+      "name": "dbstats_signal",
+      "schema": "schemas/pack.schema.json#/$defs/Signal",
+      "instance": {
+        "id": "stmt_exec_time",
+        "kind": "dbstats",
+        "alternatives": [
+          {
+            "expr": "statements.top",
+            "dialect": "dbstats",
+            "args": { "order_by": "total_exec_time", "limit": 20, "database": "$params.database" },
+            "column": "total_exec_time_ms",
+            "rate": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "egress_entry_sql_code_dropped",
+      "schema": "schemas/research-manifest.schema.json#/$defs/EgressEntry",
+      "instance": {
+        "route_id": "overseas-a",
+        "in_domain": false,
+        "categories": ["metrics", "sql"],
+        "dropped": { "code": 3 },
+        "redaction_hits": 0,
+        "bytes": 18234
+      }
+    },
+    {
+      "name": "eval_truth_optimization",
+      "schema": "schemas/eval-case.schema.json#/$defs/OptimizationTruth",
+      "instance": {
+        "goal": {
+          "origin": { "kind": "manual", "channel": "api", "principal": "eval" },
+          "subject": { "type": "domain", "domain": "database", "scope": { "components": [], "namespaces": ["shop"] } },
+          "objective": null,
+          "outputs": ["ops_pr", "business_issue"],
+          "budget": {
+            "tokens": 400000,
+            "duration_seconds": 1200,
+            "checks": 12,
+            "dbstats_queries": 30,
+            "traces_queries": 10,
+            "logs_queries": 10,
+            "code_files": 200,
+            "code_bytes": 8388608,
+            "github_requests": 300
+          }
+        },
+        "benign": false,
+        "findings": [{ "kind": "pg.statement_dominant", "entity": "pg_statement:shop-pg/app/50fde20626009aba" }],
+        "templates": ["postgres/slow-statement"],
+        "locations": [{ "path": "internal/orders/store.go", "symbol": "Store.ListByCustomer" }],
+        "known_gain": 0.3
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "name": "goal_subject_with_raw_promql",
+      "schema": "schemas/goal.schema.json#/$defs/GoalCreate",
+      "instance": {
+        "cluster_id": "kind-demo",
+        "subject": {
+          "type": "indicator",
+          "indicator": "postgres/db-time",
+          "params": {},
+          "scope": { "components": [], "namespaces": [] },
+          "query": "sum(rate(pg_stat_statements_total[5m]))"
+        },
+        "objective": null,
+        "outputs": ["ops_pr"]
+      }
+    },
+    {
+      "name": "goal_indicator_without_pack",
+      "schema": "schemas/goal.schema.json#/$defs/GoalSubject",
+      "instance": {
+        "type": "indicator",
+        "indicator": "db-time",
+        "params": {},
+        "scope": { "components": [], "namespaces": [] }
+      }
+    },
+    {
+      "name": "goal_unknown_output",
+      "schema": "schemas/goal.schema.json#/$defs/GoalCreate",
+      "instance": {
+        "cluster_id": "kind-demo",
+        "subject": { "type": "domain", "domain": "database", "scope": { "components": [], "namespaces": [] } },
+        "objective": null,
+        "outputs": ["business_pr"]
+      }
+    },
+    {
+      "name": "goal_manual_origin_unknown_channel",
+      "schema": "schemas/goal.schema.json#/$defs/GoalOrigin",
+      "instance": { "kind": "manual", "channel": "pager", "principal": "x" }
+    },
+    {
+      "name": "finding_entity_key_without_type",
+      "schema": "schemas/finding.schema.json#/$defs/FindingEntity",
+      "instance": { "type": "pg_statement", "key": "no-colon", "display": "x", "labels": {} }
+    },
+    {
+      "name": "recommendation_gate_unknown",
+      "schema": "schemas/recommendation.schema.json#/$defs/GateRecord",
+      "instance": { "gate": "G7", "passed": true, "code": "x", "detail": "" }
+    },
+    {
+      "name": "dbstats_statements_top_limit_over_50",
+      "schema": "integrations/dbstats/v1/dbstats.schema.json#/$defs/Request",
+      "instance": { "op": "statements.top", "args": { "order_by": "total_exec_time", "limit": 51 } }
+    },
+    {
+      "name": "dbstats_raw_sql_op",
+      "schema": "integrations/dbstats/v1/dbstats.schema.json#/$defs/Request",
+      "instance": { "op": "sql", "args": { "query": "SELECT * FROM orders" } }
+    },
+    {
+      "name": "dbstats_statements_text_over_10",
+      "schema": "integrations/dbstats/v1/dbstats.schema.json#/$defs/Request",
+      "instance": {
+        "op": "statements.text",
+        "args": { "queryids": ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"] }
+      }
+    },
+    {
+      "name": "dbstats_order_by_injection",
+      "schema": "integrations/dbstats/v1/dbstats.schema.json#/$defs/Request",
+      "instance": { "op": "tables.top", "args": { "order_by": "seq_scan; DROP TABLE orders", "limit": 5 } }
+    },
+    {
+      "name": "egress_entry_dropped_unknown_category",
+      "schema": "schemas/research-manifest.schema.json#/$defs/EgressEntry",
+      "instance": {
+        "route_id": "overseas-a",
+        "in_domain": false,
+        "categories": [],
+        "dropped": { "rows": 1 },
+        "redaction_hits": 0,
+        "bytes": 0
+      }
+    },
+    {
+      "name": "remediation_applies_unknown",
+      "schema": "schemas/pack.schema.json#/$defs/Remediation",
+      "instance": {
+        "id": "x",
+        "title": { "en": "x" },
+        "category": "component_param",
+        "applies": "always",
+        "repository": "gitops",
+        "when": "true",
+        "edits": [{ "file": "f", "set": [{ "path": "a.b", "value": "1" }] }],
+        "change": { "en": "x" },
+        "verify": { "say": { "en": "x" } },
+        "rollback": { "say": { "en": "x" } }
+      }
+    },
+    {
+      "name": "event_goal_created_wrong_payload",
+      "schema": "schemas/events.schema.json",
+      "instance": {
+        "seq": 1,
+        "event_id": "9e7f9a52-4f0e-4b64-9e8e-1c2d3e4f5a6b",
+        "owner": "server",
+        "schema_version": "2.28.0",
+        "cluster_id": "kind-demo",
+        "occurred_at": "2026-10-24T08:20:00Z",
+        "type": "goal.created",
+        "payload": { "goal_id": "5b0c8f3e-2a1d-4c7e-9f10-1a2b3c4d5e6f" }
+      }
+    }
+  ]
+}

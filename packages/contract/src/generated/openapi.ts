@@ -523,6 +523,23 @@ export type paths = {
     patch?: never;
     trace?: never;
   };
+  '/v1/findings': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** @description 发现（ADR 0146 §1.4），按 last_seen 从新到旧 */
+    get: operations['listFindings'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/v1/freeze': {
     parameters: {
       query?: never;
@@ -532,6 +549,102 @@ export type paths = {
     };
     /** @description 硬停止（srenautix-freeze）的状态与操作说明；控制台只读，修改只能用 kubectl 或 GitOps */
     get: operations['getFreeze'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/goals': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** @description 主动优化的目标（ADR 0146 §5.1），按 created_at 从新到旧 */
+    get: operations['listGoals'];
+    put?: never;
+    /**
+     * @description 下达目标。指标与参数按领域包的指标目录校验，模型与调用方都不能提交自由查询；作用域按范围内组件所在的命名空间检查。
+     *     每个主体每天最多 5 个目标、每个集群同时最多 10 个未结束的目标，超过时返回 429
+     */
+    post: operations['createGoal'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/goals/{goal_id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        goal_id: components['parameters']['GoalId'];
+      };
+      cookie?: never;
+    };
+    get: operations['getGoal'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/goals/{goal_id}/cancel': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        goal_id: components['parameters']['GoalId'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** @description 取消未结束的目标；进行中的运行在下一个检查点停止，已创建的 PR 与 issue 不受影响 */
+    post: operations['cancelGoal'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/goals/{goal_id}/runs': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        goal_id: components['parameters']['GoalId'];
+      };
+      cookie?: never;
+    };
+    get: operations['listGoalRuns'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/goals/{goal_id}/runs/{run_id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        goal_id: components['parameters']['GoalId'];
+        run_id: components['parameters']['RunId'];
+      };
+      cookie?: never;
+    };
+    /** @description 运行明细：基线、候选发现、账本、结论、建议与门槛记录。模型调用与出境清单见 /v1/runs/{run_id}/manifest */
+    get: operations['getGoalRun'];
     put?: never;
     post?: never;
     delete?: never;
@@ -823,6 +936,23 @@ export type paths = {
     patch?: never;
     trace?: never;
   };
+  '/v1/optimization/catalog': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** @description 加载的领域包声明的指标与领域（新建目标时选择），以及每个指标的参数 schema 与参数取值的候选 */
+    get: operations['getOptimizationCatalog'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/v1/packs': {
     parameters: {
       query?: never;
@@ -999,6 +1129,42 @@ export type paths = {
     put?: never;
     /** @description 请求撤销已执行的 reversible 动作；由 gateway 在冲突域内串行执行 */
     post: operations['undoProposal'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/recommendations': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** @description 主动优化的建议与验证结果，按 created_at 从新到旧 */
+    get: operations['listRecommendations'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/recommendations/{recommendation_id}/reject': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        recommendation_id: components['parameters']['RecommendationId'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** @description 控制台或聊天里点了“建议无用”：发现记为 rejected 并进入冷却期（ADR 0146 §4.5）；已创建的 PR 与 issue 不受影响 */
+    post: operations['rejectRecommendation'];
     delete?: never;
     options?: never;
     head?: never;
@@ -1628,11 +1794,66 @@ export type components = {
     };
     /** @description RFC 4648 §5 base64url，不带填充。 */
     base64url: string;
-    /** ProposalBinding */
+    /** OptimizationBaseline */
+    Baseline: {
+      indicators: components['schemas']['BaselineIndicator'][];
+      /** @description 基线不足时缺少的数据（例如“postgres/db-time 覆盖率 72%”） */
+      missing: string[];
+      /** @description 覆盖率不低于 90% 且至少 3 个业务高峰；否则运行以 failed（baseline_insufficient）结束 */
+      sufficient: boolean;
+      window: components['schemas']['TimeWindow'];
+    };
+    /** BaselineIndicator */
+    BaselineIndicator: {
+      /** @enum {string} */
+      better: 'lower' | 'higher';
+      covered_hours: number;
+      entity: components['schemas']['EntityKey'];
+      /** @description 按小时的取值 [unix 秒, 值或 null]，控制台画基线图 */
+      hourly: [number, number | null][];
+      hours: number;
+      indicator: components['schemas']['IndicatorRef'];
+      params: {
+        [key: string]: number | string | boolean;
+      };
+      /** @description 按负载指标判定的业务高峰小时数（负载前 20%） */
+      peak_hours: number;
+      statistic: components['schemas']['IndicatorStatistic'];
+      unit: components['schemas']['IndicatorUnit'];
+      /** @description 统计值；没有数据时为 null */
+      value: number | null;
+      /** @description 违反目标或门槛的小时占比；没有目标与门槛时为 null */
+      violation_ratio: number | null;
+    };
+    /**
+     * ProposalBinding
+     * @description 主体为事件时是事件版本、根因组件与阶段 A 的证据指纹；主体为目标时（契约 2.28.0）incident_version 取目标的 revision，root_component 取发现挂到的组件，evidence_fingerprint 取发现的证据指纹。审批断言 v1 与 gateway 的绑定核对不变
+     */
     Binding: {
       evidence_fingerprint: components['schemas']['Sha256'];
       incident_version: number;
       root_component: components['schemas']['ComponentKey'];
+    };
+    /** OptimizationCandidate */
+    Candidate: {
+      card_ref: components['schemas']['EvidenceRef'];
+      component: components['schemas']['ComponentKey'];
+      /** @description <领域>/<诊断卡 id> */
+      diagnostic: string;
+      entity: components['schemas']['FindingEntity'];
+      /** @description 发现指纹 */
+      finding: components['schemas']['Sha256'];
+      gap: number | null;
+      kind: string;
+      score: number;
+      selected: boolean;
+      share: number | null;
+      share_ref: null | components['schemas']['EvidenceRef'];
+      /**
+       * @description 没有进入假设的原因：rank（排在前 3 之外）、verifying（已修复的发现在验证期内）、cooldown
+       * @enum {string|null}
+       */
+      skipped_reason: 'rank' | 'verifying' | 'cooldown' | null;
     };
     /** ChangeEvent */
     ChangeEvent: {
@@ -1700,6 +1921,11 @@ export type components = {
      * @description 集群标识，所有键都带它（DESIGN §2.2）
      */
     ClusterId: string;
+    /**
+     * Comparator
+     * @enum {string}
+     */
+    Comparator: 'lt' | 'le' | 'gt' | 'ge';
     /**
      * ComponentKey
      * @description 拓扑节点的键：命名空间内的对象为 <kind>:<namespace>/<名称段>，集群级对象为 <kind>:<名称段>。kind 是 Kubernetes 的 Kind（如 Pod、Node，其他 API 组写作 Kind.group）或领域包声明的组件类型（如 postgres.cluster）；namespace 是 DNS 标签。名称段由对象名编码得到（ADR 0034）：名称的 UTF-8 字节中 A–Z a–z 0–9 '-' '.' '_' 原样保留，其余每个字节写成 '%' 加两位大写十六进制，例如 RBAC 对象 system:node 写作 ClusterRole:system%3Anode；DNS 名称编码后不变。解析时只接受这种规范编码。命名空间伪组件写作 Namespace:<namespace>。黄金向量见 contract/testvectors/component-keys.json
@@ -1827,12 +2053,34 @@ export type components = {
       tested_competitors: string[];
       tolerance_seconds: number;
     };
+    /** RecommendationDelivery */
+    Delivery: {
+      /** @description ops_pr 的分支 srenautix/goal-… */
+      branch: string | null;
+      /** @description issue 的关闭原因或 PR 未合并就关闭（unmerged）；未关闭时为 null */
+      closed_reason: null | ('completed' | 'not_planned' | 'unmerged');
+      merge_commit: string | null;
+      merged_at: null | components['schemas']['Timestamp'];
+      /** @description PR 或 issue 号；PR 还没有创建时为 null */
+      number: number | null;
+      /** @description ops_pr 的 gitops_pr 提议；business_issue 为 null */
+      proposal_id: null | components['schemas']['Uuid'];
+      repository: string;
+      /**
+       * @description ops：ops 仓库（只经 gateway 的 gitops_pr）；business：业务仓库（只创建 issue 与评论）
+       * @enum {string}
+       */
+      repository_role: 'ops' | 'business';
+      url: string | null;
+    };
     /**
      * Disposition
      * @description 处置判断：act 处理；ignore 忽略；escalate 升级；undetermined 无法判定
      * @enum {string}
      */
     Disposition: 'act' | 'ignore' | 'escalate' | 'undetermined';
+    /** DomainId */
+    DomainId: string;
     Drift: {
       detail: string | null;
       in_sync: boolean;
@@ -1869,14 +2117,30 @@ export type components = {
      * @enum {string}
      */
     Egress: 'allow' | 'redact' | 'never';
+    /**
+     * EgressCategory
+     * @description 出境数据类别。sql：规范化语句文本（常量为 $n、去掉注释）；code：业务代码片段（契约 2.28.0，ADR 0146 §3.6）
+     * @enum {string}
+     */
+    EgressCategory:
+      'metrics' | 'logs' | 'traces' | 'events' | 'topology' | 'changes' | 'alerts' | 'knowledge' | 'sql' | 'code';
     /** EgressEntry */
     EgressEntry: {
       bytes: number;
-      categories: ('metrics' | 'logs' | 'traces' | 'events' | 'topology' | 'changes' | 'alerts' | 'knowledge')[];
+      categories: components['schemas']['EgressCategory'][];
+      /** @description 不在 llm.egress.categories 中、进入提示词之前删除的片段数，按类别计（契约 2.28.0，ADR 0146 §3.6）；没有删除时不填或为空对象 */
+      dropped?: {
+        [key: string]: number;
+      };
       in_domain: boolean;
       redaction_hits: number;
       route_id: string;
     };
+    /**
+     * EntityKey
+     * @description 主动优化的实体键（契约 2.28.0，ADR 0146 §1.1）：Kubernetes 对象或领域包组件为 ComponentKey；逻辑实体为 <类型>:<组件内的键>，例如 pg_statement:<CNPG Cluster 名>/<库>/<语句指纹>、pg_table:<Cluster 名>/<库>/<schema>.<表>、route:<服务>/<endpoint>、stage:<服务>/<阶段>。逻辑实体都挂到一个拓扑组件上
+     */
+    EntityKey: string;
     /**
      * EntityRef
      * @description 一个 Kubernetes 对象或领域包组件实例。uid 在实体解析成功时填写
@@ -1893,6 +2157,17 @@ export type components = {
       /** @description 机器可读的错误码 */
       error: string;
       message: string;
+    };
+    /**
+     * EstimateValue
+     * @description 模板 estimate 的求值结果：lower 为保守下界，expected 为期望值，单位与指标相同，按改善方向取正值
+     */
+    EstimateValue: {
+      basis: string;
+      expected: number | null;
+      indicator: components['schemas']['IndicatorRef'];
+      lower: number;
+      unit: components['schemas']['IndicatorUnit'];
     };
     /**
      * EvalReport
@@ -2039,7 +2314,12 @@ export type components = {
           | 'approval.issued'
           | 'execution.updated'
           | 'feedback.recorded'
-          | 'condition.changed';
+          | 'condition.changed'
+          | 'goal.created'
+          | 'goal.run.concluded'
+          | 'finding.updated'
+          | 'recommendation.updated'
+          | 'outcome.verified';
         /**
          * OutboxOwner
          * @enum {string}
@@ -2192,6 +2472,63 @@ export type components = {
           /** @constant */
           type: 'condition.changed';
         } & components['schemas']['Header'];
+        /**
+         * GoalCreatedEvent
+         * @description 目标创建（契约 2.28.0）
+         */
+        GoalCreated: {
+          payload: components['schemas']['goal.schema'];
+          /** @constant */
+          type: 'goal.created';
+        } & components['schemas']['Header'];
+        /**
+         * GoalRunConcludedEvent
+         * @description 目标运行结束（契约 2.28.0），含失败与没有差距
+         */
+        GoalRunConcluded: {
+          payload: {
+            goal_id: components['schemas']['Uuid'];
+            goal_revision: number;
+            /** @description 运行输出；在基线之前失败时为 null */
+            output: null | components['schemas']['optimization-output.schema'];
+            run_id: components['schemas']['Uuid'];
+            summary: components['schemas']['GoalRunSummary'];
+          };
+          /** @constant */
+          type: 'goal.run.concluded';
+        } & components['schemas']['Header'];
+        /**
+         * FindingUpdatedEvent
+         * @description 发现创建或更新（契约 2.28.0）
+         */
+        FindingUpdated: {
+          payload: components['schemas']['finding.schema'];
+          /** @constant */
+          type: 'finding.updated';
+        } & components['schemas']['Header'];
+        /**
+         * RecommendationUpdatedEvent
+         * @description 建议创建或状态变化（契约 2.28.0）
+         */
+        RecommendationUpdated: {
+          payload: components['schemas']['recommendation.schema'];
+          /** @constant */
+          type: 'recommendation.updated';
+        } & components['schemas']['Header'];
+        /**
+         * OutcomeVerifiedEvent
+         * @description 建议的验证结束（契约 2.28.0）
+         */
+        OutcomeVerified: {
+          payload: {
+            finding: components['schemas']['Sha256'];
+            goal_id: components['schemas']['Uuid'];
+            outcome: components['schemas']['RecommendationOutcome'];
+            recommendation_id: components['schemas']['Uuid'];
+          };
+          /** @constant */
+          type: 'outcome.verified';
+        } & components['schemas']['Header'];
       };
     } & (
       | components['schemas']['IncidentUpserted']
@@ -2206,6 +2543,11 @@ export type components = {
       | components['schemas']['ExecutionUpdated']
       | components['schemas']['FeedbackRecorded']
       | components['schemas']['ConditionChanged']
+      | components['schemas']['GoalCreated']
+      | components['schemas']['GoalRunConcluded']
+      | components['schemas']['FindingUpdated']
+      | components['schemas']['RecommendationUpdated']
+      | components['schemas']['OutcomeVerified']
     );
     /**
      * OutboxEventType
@@ -2226,7 +2568,12 @@ export type components = {
       | 'approval.issued'
       | 'execution.updated'
       | 'feedback.recorded'
-      | 'condition.changed';
+      | 'condition.changed'
+      | 'goal.created'
+      | 'goal.run.concluded'
+      | 'finding.updated'
+      | 'recommendation.updated'
+      | 'outcome.verified';
     /**
      * EvidenceResult
      * @description 一张证据卡在一次研判（或阶段 A 报告）中的结果（DESIGN §6.1）。三种结论之外另有显示状态 capability_missing：所需的数据源能力不可用，和没有数据区分开
@@ -2438,6 +2785,130 @@ export type components = {
       /** @constant */
       type: 'feedback.recorded';
     } & components['schemas']['Header'];
+    /**
+     * Finding
+     * @description 一个实体上的一个问题（契约 2.28.0，ADR 0146 §1.4），跨分析运行持久保存；fingerprint 是去重的唯一键。每次运行先按指纹更新已有发现（last_seen、差距、份额、档位），再判断是否生成建议
+     */
+    'finding.schema': {
+      cluster_id: components['schemas']['ClusterId'];
+      /** @description 实体挂到的拓扑组件（逻辑实体）或实体本身（Kubernetes 对象） */
+      component: components['schemas']['ComponentKey'];
+      /** @description 被拒绝之后的冷却期限 */
+      cooldown_until: null | components['schemas']['Timestamp'];
+      domain: components['schemas']['DomainId'];
+      entity: components['schemas']['FindingEntity'];
+      /** @description 支持卡与份额卡的判定向量指纹；未分析时为 null */
+      evidence_fingerprint: null | components['schemas']['Sha256'];
+      /** @description sha256(JCS([cluster_id, domain, kind, entity.key])) */
+      fingerprint: components['schemas']['Sha256'];
+      first_seen: components['schemas']['Timestamp'];
+      /** @description 指标相对目标或门槛的差距（指标单位，按改善方向取正值）；没有可比较的目标时为 null */
+      gap: number | null;
+      /** @description 发现影响的指标；诊断卡没有声明时为 null */
+      indicator: null | components['schemas']['IndicatorRef'];
+      /** @description 领域声明的发现类型（DomainDiagnostic.finding），例如 pg.statement_dominant、pg.temp_spill、workload.cpu_overprovisioned */
+      kind: string;
+      last_goal_id: null | components['schemas']['Uuid'];
+      last_run_id: null | components['schemas']['Uuid'];
+      last_seen: components['schemas']['Timestamp'];
+      /** @description 最近一次分析的结论档位（ADR 0146 §2.4）；进入候选但未分析时为 null */
+      level: null | components['schemas']['ConclusionLevel'];
+      /** @description 实体在指标中的份额（份额卡）；没有份额卡时为 null */
+      share: number | null;
+      status: components['schemas']['FindingStatus'];
+      updated_at: components['schemas']['Timestamp'];
+      $defs: {
+        /**
+         * FindingStatus
+         * @description open 已发现；recommended 已有建议（PR 或 issue）；accepted PR 合并或 issue 以 completed 关闭；verifying 验证中；fixed 验证改善或差距消失（待人确认关闭）；no_effect 验证没有效果；regressed 验证回退；rejected 被拒绝，进入冷却期；suppressed 人工抑制
+         * @enum {string}
+         */
+        FindingStatus:
+          | 'open'
+          | 'recommended'
+          | 'accepted'
+          | 'verifying'
+          | 'fixed'
+          | 'no_effect'
+          | 'regressed'
+          | 'rejected'
+          | 'suppressed';
+        /** FindingEntity */
+        FindingEntity: {
+          /** @description 可读名称，只用于显示 */
+          display: string;
+          key: components['schemas']['EntityKey'];
+          /** @description 实体的标签（EntityRows.labels），例如 pg_statement 的 database、queryid；按实体执行的卡片与模板以 $params 引用 */
+          labels: components['schemas']['Labels'];
+          /** @description 逻辑实体类型（pg_statement、pg_table、pg_index、route、stage），或 Kubernetes 的 Kind */
+          type: string;
+        };
+      };
+    };
+    /** FindingConclusion */
+    FindingConclusion: {
+      /** @enum {string} */
+      chosen_by: 'model' | 'ledger';
+      consistency: components['schemas']['OptimizationConsistency'];
+      contrary_refs: components['schemas']['EvidenceRef'][];
+      finding: components['schemas']['Sha256'];
+      hypothesis_id: string | null;
+      level: components['schemas']['ConclusionLevel'];
+      /** @description 【模型】选择这个假设的说明 */
+      note: string | null;
+      share_refs: components['schemas']['EvidenceRef'][];
+      support_refs: components['schemas']['EvidenceRef'][];
+      undetermined_reason: string | null;
+    };
+    /** FindingEntity */
+    FindingEntity: {
+      /** @description 可读名称，只用于显示 */
+      display: string;
+      key: components['schemas']['EntityKey'];
+      /** @description 实体的标签（EntityRows.labels），例如 pg_statement 的 database、queryid；按实体执行的卡片与模板以 $params 引用 */
+      labels: components['schemas']['Labels'];
+      /** @description 逻辑实体类型（pg_statement、pg_table、pg_index、route、stage），或 Kubernetes 的 Kind */
+      type: string;
+    };
+    /** FindingHypothesis */
+    FindingHypothesis: {
+      finding: components['schemas']['Sha256'];
+      hypothesis: components['schemas']['Hypothesis'];
+    };
+    /**
+     * FindingStatus
+     * @description open 已发现；recommended 已有建议（PR 或 issue）；accepted PR 合并或 issue 以 completed 关闭；verifying 验证中；fixed 验证改善或差距消失（待人确认关闭）；no_effect 验证没有效果；regressed 验证回退；rejected 被拒绝，进入冷却期；suppressed 人工抑制
+     * @enum {string}
+     */
+    FindingStatus:
+      | 'open'
+      | 'recommended'
+      | 'accepted'
+      | 'verifying'
+      | 'fixed'
+      | 'no_effect'
+      | 'regressed'
+      | 'rejected'
+      | 'suppressed';
+    /**
+     * FindingUpdatedEvent
+     * @description 发现创建或更新（契约 2.28.0）
+     */
+    FindingUpdated: {
+      payload: components['schemas']['finding.schema'];
+      /** @constant */
+      type: 'finding.updated';
+    } & components['schemas']['Header'];
+    /** OptimizationGap */
+    Gap: {
+      /**
+       * @description objective 按目标值；gate 按领域门槛；none 基线不足或没有可比较的目标
+       * @enum {string}
+       */
+      basis: 'objective' | 'gate' | 'none';
+      detail: string;
+      exists: boolean;
+    };
     /** EvalGate */
     Gate: {
       baseline_report_id: components['schemas']['Uuid'];
@@ -2453,6 +2924,18 @@ export type components = {
       /** @description n<100 时 -0.10，n≥100 时 -0.05 */
       threshold: number;
       waived_cases: string[];
+    };
+    /** GateRecord */
+    GateRecord: {
+      /** @description 机器可读的原因码，与 remediation_attempts 的方式相同；G3 不通过时为模板 guard 的 id */
+      code: string;
+      detail: string;
+      /**
+       * @description G1 证据档位；G2 预期收益；G3 安全约束；G4 新颖性；G5 数量；G6 时机
+       * @enum {string}
+       */
+      gate: 'G1' | 'G2' | 'G3' | 'G4' | 'G5' | 'G6';
+      passed: boolean;
     };
     /**
      * GatewayPolicy
@@ -2541,6 +3024,401 @@ export type components = {
         sha256: string;
       }[];
     };
+    /**
+     * Goal
+     * @description 主动优化的目标（契约 2.28.0，ADR 0146 §1.2）。目标只引用领域包声明的指标或领域，不含任何自由查询；规格每修改一次 revision 加一。每次分析是一次目标运行（GoalRunSummary），结果见 optimization-output.schema.json
+     */
+    'goal.schema': {
+      cluster_id: components['schemas']['ClusterId'];
+      created_at: components['schemas']['Timestamp'];
+      /** @description 到期仍未达成时状态为 expired，附最后一次分析的报告 */
+      expires_at: components['schemas']['Timestamp'];
+      goal_id: components['schemas']['Uuid'];
+      /** @description 最近一次运行；还没有运行时为 null */
+      last_run: null | components['schemas']['GoalRunSummary'];
+      revision: number;
+      spec: components['schemas']['GoalSpec'];
+      state: components['schemas']['GoalState'];
+      /** @description 状态的机器可读原因，例如 failed 的 baseline_insufficient、cancelled 的 user */
+      state_reason: string | null;
+      updated_at: components['schemas']['Timestamp'];
+      $defs: {
+        /**
+         * GoalState
+         * @description queued 排队；analyzing 分析中；recommended 有建议已发布；verifying 验证中；achieved 达成；not_achieved 验证后未达成；no_action 没有差距或没有通过门槛的建议；cancelled 取消；expired 到期；failed 失败（state_reason 写明原因）
+         * @enum {string}
+         */
+        GoalState:
+          | 'queued'
+          | 'analyzing'
+          | 'recommended'
+          | 'verifying'
+          | 'achieved'
+          | 'not_achieved'
+          | 'no_action'
+          | 'cancelled'
+          | 'expired'
+          | 'failed';
+        /** GoalSpec */
+        GoalSpec: {
+          budget: components['schemas']['GoalBudget'];
+          /** @description 目标值；领域体检没有目标值时为 null，差距按领域的门槛（DomainGates.thresholds） */
+          objective: null | components['schemas']['GoalObjective'];
+          origin: components['schemas']['GoalOrigin'];
+          /** @description 允许的建议类别 */
+          outputs: components['schemas']['RecommendationKind'][];
+          subject: components['schemas']['GoalSubject'];
+        };
+        /**
+         * RecommendationKind
+         * @description ops_pr：ops 仓库的 PR（gitops_pr 提议）；business_issue：业务仓库的 issue
+         * @enum {string}
+         */
+        RecommendationKind: 'ops_pr' | 'business_issue';
+        /**
+         * GoalOrigin
+         * @description 目标的来源：manual 人工下达；checkup 领域的定期体检；trend 趋势扫描；forecast_alert 预测类告警
+         */
+        GoalOrigin:
+          | {
+              /** @enum {string} */
+              channel: 'console' | 'telegram' | 'api';
+              /** @constant */
+              kind: 'manual';
+              /** @description 下达目标的主体 id；api 为调用方 id */
+              principal: string;
+            }
+          | {
+              domain: components['schemas']['DomainId'];
+              /** @constant */
+              kind: 'checkup';
+              schedule_id: string;
+            }
+          | {
+              entity: components['schemas']['EntityKey'];
+              /** @constant */
+              kind: 'trend';
+              /** @description <包>/<领域>/<趋势 id> */
+              trend: string;
+            }
+          | {
+              alert_fingerprint: string;
+              /** @constant */
+              kind: 'forecast_alert';
+            };
+        /** DomainId */
+        DomainId: string;
+        /**
+         * GoalScope
+         * @description 范围白名单：组件键与命名空间；两者都为空表示不限
+         */
+        GoalScope: {
+          components: components['schemas']['ComponentKey'][];
+          namespaces: string[];
+        };
+        /**
+         * GoalSubject
+         * @description 目标对象：一个指标（带参数），或一个领域的体检
+         */
+        GoalSubject:
+          | {
+              indicator: components['schemas']['IndicatorRef'];
+              /** @description 按指标的 params schema 校验 */
+              params: {
+                [key: string]: number | string | boolean;
+              };
+              scope: components['schemas']['GoalScope'];
+              /** @constant */
+              type: 'indicator';
+            }
+          | {
+              domain: components['schemas']['DomainId'];
+              scope: components['schemas']['GoalScope'];
+              /** @constant */
+              type: 'domain';
+            };
+        /**
+         * Comparator
+         * @enum {string}
+         */
+        Comparator: 'lt' | 'le' | 'gt' | 'ge';
+        /** GoalObjective */
+        GoalObjective: {
+          comparator: components['schemas']['Comparator'];
+          statistic: components['schemas']['IndicatorStatistic'];
+          target: number;
+          unit: components['schemas']['IndicatorUnit'];
+          /** @description 基线窗口，默认 7d，不超过 14d */
+          window: components['schemas']['Duration'];
+        };
+        /**
+         * GoalBudget
+         * @description 一次运行的预算（ADR 0146 §1.2 的默认值）
+         */
+        GoalBudget: {
+          /** @default 12 */
+          checks: number;
+          /** @default 8388608 */
+          code_bytes: number;
+          /** @default 200 */
+          code_files: number;
+          /** @default 30 */
+          dbstats_queries: number;
+          /** @default 1200 */
+          duration_seconds: number;
+          /** @default 300 */
+          github_requests: number;
+          /** @default 10 */
+          logs_queries: number;
+          /** @default 400000 */
+          tokens: number;
+          /** @default 10 */
+          traces_queries: number;
+        };
+        /**
+         * GoalCreate
+         * @description 下达目标的请求体（POST /v1/goals）。origin 由认证上下文决定（控制台会话为 console，API token 为 api，聊天渠道的确认卡片为 telegram）；budget 只写要改的项，其余取默认值
+         */
+        GoalCreate: {
+          budget?: {
+            checks?: number;
+            code_bytes?: number;
+            code_files?: number;
+            dbstats_queries?: number;
+            duration_seconds?: number;
+            github_requests?: number;
+            logs_queries?: number;
+            tokens?: number;
+            traces_queries?: number;
+          };
+          cluster_id: components['schemas']['ClusterId'];
+          /** @description 有效期，默认 14d，不超过 30d */
+          expires_in?: components['schemas']['Duration'];
+          objective: null | components['schemas']['GoalObjective'];
+          outputs: components['schemas']['RecommendationKind'][];
+          subject: components['schemas']['GoalSubject'];
+        };
+        /**
+         * GoalRunState
+         * @description queued 排队；deferred 被准入推迟（defer_reason）；running 执行中；concluded 结束（result）；failed 失败；cancelled 目标取消
+         * @enum {string}
+         */
+        GoalRunState: 'queued' | 'deferred' | 'running' | 'concluded' | 'failed' | 'cancelled';
+        /** GoalRunSummary */
+        GoalRunSummary: {
+          /** @description 本次运行发现或更新的发现数 */
+          findings: number;
+          finished_at: null | components['schemas']['Timestamp'];
+          /** @description 差距是否成立；基线之前为 null */
+          gap: boolean | null;
+          goal_id: components['schemas']['Uuid'];
+          goal_revision: number;
+          queued_at: components['schemas']['Timestamp'];
+          /** @description deferred 的原因（budget、storm、incident、load_guard、rate_limit、schedule_window）或 failed 的原因（baseline_insufficient、model_unavailable、budget_exhausted、deadline、datasource、internal） */
+          reason: string | null;
+          /** @description 通过全部门槛的建议数 */
+          recommendations: number;
+          /** @description concluded 时的结果：no_gap 没有差距（不调用模型）；recommended 有通过门槛的建议；report_only 有发现、没有建议通过门槛；其余状态为 null */
+          result: null | ('no_gap' | 'recommended' | 'report_only');
+          run_id: components['schemas']['Uuid'];
+          started_at: null | components['schemas']['Timestamp'];
+          state: components['schemas']['GoalRunState'];
+        };
+      };
+    };
+    /**
+     * GoalBudget
+     * @description 一次运行的预算（ADR 0146 §1.2 的默认值）
+     */
+    GoalBudget: {
+      /** @default 12 */
+      checks: number;
+      /** @default 8388608 */
+      code_bytes: number;
+      /** @default 200 */
+      code_files: number;
+      /** @default 30 */
+      dbstats_queries: number;
+      /** @default 1200 */
+      duration_seconds: number;
+      /** @default 300 */
+      github_requests: number;
+      /** @default 10 */
+      logs_queries: number;
+      /** @default 400000 */
+      tokens: number;
+      /** @default 10 */
+      traces_queries: number;
+    };
+    /**
+     * GoalCreate
+     * @description 下达目标的请求体（POST /v1/goals）。origin 由认证上下文决定（控制台会话为 console，API token 为 api，聊天渠道的确认卡片为 telegram）；budget 只写要改的项，其余取默认值
+     */
+    GoalCreate: {
+      budget?: {
+        checks?: number;
+        code_bytes?: number;
+        code_files?: number;
+        dbstats_queries?: number;
+        duration_seconds?: number;
+        github_requests?: number;
+        logs_queries?: number;
+        tokens?: number;
+        traces_queries?: number;
+      };
+      cluster_id: components['schemas']['ClusterId'];
+      /** @description 有效期，默认 14d，不超过 30d */
+      expires_in?: components['schemas']['Duration'];
+      objective: null | components['schemas']['GoalObjective'];
+      outputs: components['schemas']['RecommendationKind'][];
+      subject: components['schemas']['GoalSubject'];
+    };
+    /**
+     * GoalCreatedEvent
+     * @description 目标创建（契约 2.28.0）
+     */
+    GoalCreated: {
+      payload: components['schemas']['goal.schema'];
+      /** @constant */
+      type: 'goal.created';
+    } & components['schemas']['Header'];
+    /** GoalObjective */
+    GoalObjective: {
+      comparator: components['schemas']['Comparator'];
+      statistic: components['schemas']['IndicatorStatistic'];
+      target: number;
+      unit: components['schemas']['IndicatorUnit'];
+      /** @description 基线窗口，默认 7d，不超过 14d */
+      window: components['schemas']['Duration'];
+    };
+    /**
+     * GoalOrigin
+     * @description 目标的来源：manual 人工下达；checkup 领域的定期体检；trend 趋势扫描；forecast_alert 预测类告警
+     */
+    GoalOrigin:
+      | {
+          /** @enum {string} */
+          channel: 'console' | 'telegram' | 'api';
+          /** @constant */
+          kind: 'manual';
+          /** @description 下达目标的主体 id；api 为调用方 id */
+          principal: string;
+        }
+      | {
+          domain: components['schemas']['DomainId'];
+          /** @constant */
+          kind: 'checkup';
+          schedule_id: string;
+        }
+      | {
+          entity: components['schemas']['EntityKey'];
+          /** @constant */
+          kind: 'trend';
+          /** @description <包>/<领域>/<趋势 id> */
+          trend: string;
+        }
+      | {
+          alert_fingerprint: string;
+          /** @constant */
+          kind: 'forecast_alert';
+        };
+    /**
+     * GoalRunConcludedEvent
+     * @description 目标运行结束（契约 2.28.0），含失败与没有差距
+     */
+    GoalRunConcluded: {
+      payload: {
+        goal_id: components['schemas']['Uuid'];
+        goal_revision: number;
+        /** @description 运行输出；在基线之前失败时为 null */
+        output: null | components['schemas']['optimization-output.schema'];
+        run_id: components['schemas']['Uuid'];
+        summary: components['schemas']['GoalRunSummary'];
+      };
+      /** @constant */
+      type: 'goal.run.concluded';
+    } & components['schemas']['Header'];
+    /**
+     * GoalRunState
+     * @description queued 排队；deferred 被准入推迟（defer_reason）；running 执行中；concluded 结束（result）；failed 失败；cancelled 目标取消
+     * @enum {string}
+     */
+    GoalRunState: 'queued' | 'deferred' | 'running' | 'concluded' | 'failed' | 'cancelled';
+    /** GoalRunSummary */
+    GoalRunSummary: {
+      /** @description 本次运行发现或更新的发现数 */
+      findings: number;
+      finished_at: null | components['schemas']['Timestamp'];
+      /** @description 差距是否成立；基线之前为 null */
+      gap: boolean | null;
+      goal_id: components['schemas']['Uuid'];
+      goal_revision: number;
+      queued_at: components['schemas']['Timestamp'];
+      /** @description deferred 的原因（budget、storm、incident、load_guard、rate_limit、schedule_window）或 failed 的原因（baseline_insufficient、model_unavailable、budget_exhausted、deadline、datasource、internal） */
+      reason: string | null;
+      /** @description 通过全部门槛的建议数 */
+      recommendations: number;
+      /** @description concluded 时的结果：no_gap 没有差距（不调用模型）；recommended 有通过门槛的建议；report_only 有发现、没有建议通过门槛；其余状态为 null */
+      result: null | ('no_gap' | 'recommended' | 'report_only');
+      run_id: components['schemas']['Uuid'];
+      started_at: null | components['schemas']['Timestamp'];
+      state: components['schemas']['GoalRunState'];
+    };
+    /**
+     * GoalScope
+     * @description 范围白名单：组件键与命名空间；两者都为空表示不限
+     */
+    GoalScope: {
+      components: components['schemas']['ComponentKey'][];
+      namespaces: string[];
+    };
+    /** GoalSpec */
+    GoalSpec: {
+      budget: components['schemas']['GoalBudget'];
+      /** @description 目标值；领域体检没有目标值时为 null，差距按领域的门槛（DomainGates.thresholds） */
+      objective: null | components['schemas']['GoalObjective'];
+      origin: components['schemas']['GoalOrigin'];
+      /** @description 允许的建议类别 */
+      outputs: components['schemas']['RecommendationKind'][];
+      subject: components['schemas']['GoalSubject'];
+    };
+    /**
+     * GoalState
+     * @description queued 排队；analyzing 分析中；recommended 有建议已发布；verifying 验证中；achieved 达成；not_achieved 验证后未达成；no_action 没有差距或没有通过门槛的建议；cancelled 取消；expired 到期；failed 失败（state_reason 写明原因）
+     * @enum {string}
+     */
+    GoalState:
+      | 'queued'
+      | 'analyzing'
+      | 'recommended'
+      | 'verifying'
+      | 'achieved'
+      | 'not_achieved'
+      | 'no_action'
+      | 'cancelled'
+      | 'expired'
+      | 'failed';
+    /**
+     * GoalSubject
+     * @description 目标对象：一个指标（带参数），或一个领域的体检
+     */
+    GoalSubject:
+      | {
+          indicator: components['schemas']['IndicatorRef'];
+          /** @description 按指标的 params schema 校验 */
+          params: {
+            [key: string]: number | string | boolean;
+          };
+          scope: components['schemas']['GoalScope'];
+          /** @constant */
+          type: 'indicator';
+        }
+      | {
+          domain: components['schemas']['DomainId'];
+          scope: components['schemas']['GoalScope'];
+          /** @constant */
+          type: 'domain';
+        };
     /** OutboxEventHeader */
     Header: {
       cluster_id: components['schemas']['ClusterId'];
@@ -2745,6 +3623,53 @@ export type components = {
       /** @enum {unknown} */
       type: 'incident.created' | 'incident.updated' | 'incident.resolved';
     } & components['schemas']['Header'];
+    /**
+     * Indicator
+     * @description 目标可以引用的指标。按实体产生序列：基线、差距与验证在指标的信号上按小时取值；目标不提交自由查询
+     */
+    Indicator: {
+      /**
+       * @description 改善方向
+       * @enum {string}
+       */
+      better: 'lower' | 'higher';
+      description?: components['schemas']['LocalizedText'];
+      /** @description 实体类型：Kubernetes 的 Kind（其他 API 组写作 Kind.group），或逻辑实体 pg_statement、pg_table、pg_index、route、stage */
+      entity: string;
+      /** @description 包内唯一；全局 id 为 <包>/<id> */
+      id: string;
+      /** @description 判定业务高峰用的负载指标（例如请求速率），用于基线覆盖与验证时的时段匹配；不填时不检查高峰 */
+      load_indicator?: components['schemas']['IndicatorRef'];
+      /** @description 参数的 JSON Schema（可移植子集：type: object、additionalProperties: false，字符串用 enum 或 pattern 限定，数字有 minimum 与 maximum）。信号中写作 $params.<名字> */
+      params?: {
+        /** @constant */
+        additionalProperties?: false;
+        properties: Record<string, never>;
+        /** @constant */
+        type: 'object';
+      };
+      /** @description metrics 信号 <pack>/<signal id>（同包内可省略 <pack>/）；查询按实体与 params 渲染，结果是一条或多条序列，多条时取和 */
+      signal: string;
+      statistic: components['schemas']['IndicatorStatistic'];
+      title: components['schemas']['LocalizedText'];
+      unit: components['schemas']['IndicatorUnit'];
+    };
+    /**
+     * IndicatorRef
+     * @description 指标的全局 id <包>/<指标 id>，例如 postgres/db-time
+     */
+    IndicatorRef: string;
+    /**
+     * IndicatorStatistic
+     * @description 基线窗口内按小时取值之后的统计方式
+     * @enum {string}
+     */
+    IndicatorStatistic: 'p50' | 'p95' | 'max';
+    /**
+     * IndicatorUnit
+     * @enum {string}
+     */
+    IndicatorUnit: 'none' | 'percent' | 'ratio' | 'bytes' | 'seconds' | 'count' | 'per_second' | 'cores';
     IngestResult: {
       accepted: number;
       degraded: boolean;
@@ -2763,9 +3688,22 @@ export type components = {
         /** @enum {string} */
         stability: 'alpha' | 'beta' | 'stable';
       }[];
-      /** @enum {string} */
+      /**
+       * @description dbstats：数据库统计视图（契约 2.28.0）
+       * @enum {string}
+       */
       category:
-        'alerts' | 'metrics' | 'logs' | 'traces' | 'changes' | 'notify' | 'approve' | 'identity' | 'model' | 'execute';
+        | 'alerts'
+        | 'metrics'
+        | 'logs'
+        | 'traces'
+        | 'changes'
+        | 'notify'
+        | 'approve'
+        | 'identity'
+        | 'model'
+        | 'execute'
+        | 'dbstats';
       /** @description 实例配置的 JSON Schema。密钥字段只写挂载文件的引用，用 x-srenautix-secret-ref: true 标出 */
       config_schema: {
         [key: string]: unknown;
@@ -2982,6 +3920,172 @@ export type components = {
       uid: string | null;
     };
     /**
+     * OptimizationOutput
+     * @description 一次目标运行经代码校验后的输出（契约 2.28.0，ADR 0146 §2）：基线、差距、候选发现、按发现分组的账本、每个发现的结论、建议与门槛记录、validation_notes。baseline、gap、candidates 与 recommendations 的数值全部由代码从信号卡计算；模型只提出假设、选择检查并写说明。没有差距时整次运行不调用模型，ledger 与 conclusions 为空
+     */
+    'optimization-output.schema': {
+      baseline: components['schemas']['Baseline'];
+      /** @description 候选发现，按“份额 × 差距”降序；前 3 个 selected 为 true，进入假设；其余为“未分析的候选” */
+      candidates: components['schemas']['Candidate'][];
+      /** @description 诊断卡、份额卡与区分性检查产生的证据卡（编号见 evidence_index），序列为空数组 */
+      check_cards: components['schemas']['evidence-result.schema'][];
+      /** @description 每个进入假设的发现一条，档位由代码按 ADR 0146 §2.4 计算 */
+      conclusions: components['schemas']['FindingConclusion'][];
+      /** @description 运行内的证据引用到定义与实体的映射：card:<n> → <card_id>@<实体键> */
+      evidence_index: {
+        ref: components['schemas']['EvidenceRef'];
+        target: string;
+      }[];
+      gap: components['schemas']['Gap'];
+      goal_id: components['schemas']['Uuid'];
+      goal_revision: number;
+      /** @description 假设账本：root_component 为发现挂到的组件，finding 给出分组键；同一发现上的假设互为竞争假设 */
+      hypotheses: components['schemas']['FindingHypothesis'][];
+      next_checks: components['schemas']['NextCheck'][];
+      /** @description 本次运行评估过的建议与门槛记录（每次运行最多 2 个通过全部门槛） */
+      recommendations: components['schemas']['RecommendationAttempt'][];
+      run_id: components['schemas']['Uuid'];
+      /**
+       * @description 检验循环的停止原因（取值同 ResearchOutput.stop_reason）；没有差距时为 null
+       * @enum {string|null}
+       */
+      stop_reason: 'leader_supported' | 'no_change' | 'step_limit' | 'deadline' | 'budget' | 'model_unavailable' | null;
+      /** @description 【模型】本次分析的说明；没有调用模型时为代码生成的说明 */
+      summary: string;
+      /** @description 代码校验的修改记录：删除的无效证据引用、拒绝的未知模板与原始查询、降级的结论、删除的无法核实的数值等 */
+      validation_notes: string[];
+      $defs: {
+        /** OptimizationBaseline */
+        Baseline: {
+          indicators: components['schemas']['BaselineIndicator'][];
+          /** @description 基线不足时缺少的数据（例如“postgres/db-time 覆盖率 72%”） */
+          missing: string[];
+          /** @description 覆盖率不低于 90% 且至少 3 个业务高峰；否则运行以 failed（baseline_insufficient）结束 */
+          sufficient: boolean;
+          window: components['schemas']['TimeWindow'];
+        };
+        /** BaselineIndicator */
+        BaselineIndicator: {
+          /** @enum {string} */
+          better: 'lower' | 'higher';
+          covered_hours: number;
+          entity: components['schemas']['EntityKey'];
+          /** @description 按小时的取值 [unix 秒, 值或 null]，控制台画基线图 */
+          hourly: [number, number | null][];
+          hours: number;
+          indicator: components['schemas']['IndicatorRef'];
+          params: {
+            [key: string]: number | string | boolean;
+          };
+          /** @description 按负载指标判定的业务高峰小时数（负载前 20%） */
+          peak_hours: number;
+          statistic: components['schemas']['IndicatorStatistic'];
+          unit: components['schemas']['IndicatorUnit'];
+          /** @description 统计值；没有数据时为 null */
+          value: number | null;
+          /** @description 违反目标或门槛的小时占比；没有目标与门槛时为 null */
+          violation_ratio: number | null;
+        };
+        /** OptimizationGap */
+        Gap: {
+          /**
+           * @description objective 按目标值；gate 按领域门槛；none 基线不足或没有可比较的目标
+           * @enum {string}
+           */
+          basis: 'objective' | 'gate' | 'none';
+          detail: string;
+          exists: boolean;
+        };
+        /** OptimizationCandidate */
+        Candidate: {
+          card_ref: components['schemas']['EvidenceRef'];
+          component: components['schemas']['ComponentKey'];
+          /** @description <领域>/<诊断卡 id> */
+          diagnostic: string;
+          entity: components['schemas']['FindingEntity'];
+          /** @description 发现指纹 */
+          finding: components['schemas']['Sha256'];
+          gap: number | null;
+          kind: string;
+          score: number;
+          selected: boolean;
+          share: number | null;
+          share_ref: null | components['schemas']['EvidenceRef'];
+          /**
+           * @description 没有进入假设的原因：rank（排在前 3 之外）、verifying（已修复的发现在验证期内）、cooldown
+           * @enum {string|null}
+           */
+          skipped_reason: 'rank' | 'verifying' | 'cooldown' | null;
+        };
+        /** FindingHypothesis */
+        FindingHypothesis: {
+          finding: components['schemas']['Sha256'];
+          hypothesis: components['schemas']['Hypothesis'];
+        };
+        /**
+         * OptimizationConsistency
+         * @description 优化场景的 evidence_consistent 条件逐项结果（ADR 0146 §2.4）；trend_onset 只对趋势触发的目标求值，其余为 null
+         */
+        OptimizationConsistency: {
+          competitor_tested: boolean;
+          gap_holds: boolean;
+          no_contrary_normal: boolean;
+          share_holds: boolean;
+          trend_onset: boolean | null;
+        };
+        /** FindingConclusion */
+        FindingConclusion: {
+          /** @enum {string} */
+          chosen_by: 'model' | 'ledger';
+          consistency: components['schemas']['OptimizationConsistency'];
+          contrary_refs: components['schemas']['EvidenceRef'][];
+          finding: components['schemas']['Sha256'];
+          hypothesis_id: string | null;
+          level: components['schemas']['ConclusionLevel'];
+          /** @description 【模型】选择这个假设的说明 */
+          note: string | null;
+          share_refs: components['schemas']['EvidenceRef'][];
+          support_refs: components['schemas']['EvidenceRef'][];
+          undetermined_reason: string | null;
+        };
+        /** RecommendationAttempt */
+        RecommendationAttempt: {
+          finding: components['schemas']['Sha256'];
+          gates: components['schemas']['GateRecord'][];
+          kind: components['schemas']['RecommendationKind'];
+          passed: boolean;
+          /** @description 保存的建议；没有保存时为 null */
+          recommendation_id: null | components['schemas']['Uuid'];
+          template: string;
+        };
+      };
+    };
+    /**
+     * OptimizationConsistency
+     * @description 优化场景的 evidence_consistent 条件逐项结果（ADR 0146 §2.4）；trend_onset 只对趋势触发的目标求值，其余为 null
+     */
+    OptimizationConsistency: {
+      competitor_tested: boolean;
+      gap_holds: boolean;
+      no_contrary_normal: boolean;
+      share_holds: boolean;
+      trend_onset: boolean | null;
+    };
+    /**
+     * OutcomeVerifiedEvent
+     * @description 建议的验证结束（契约 2.28.0）
+     */
+    OutcomeVerified: {
+      payload: {
+        finding: components['schemas']['Sha256'];
+        goal_id: components['schemas']['Uuid'];
+        outcome: components['schemas']['RecommendationOutcome'];
+        recommendation_id: components['schemas']['Uuid'];
+      };
+      /** @constant */
+      type: 'outcome.verified';
+    } & components['schemas']['Header'];
+    /**
      * OutboxOwner
      * @enum {string}
      */
@@ -3127,6 +4231,8 @@ export type components = {
        */
       source: 'research' | 'rule' | 'human' | 'external';
       state: components['schemas']['State'];
+      /** @description 提议的主体（契约 2.28.0）；不填时为事件。主体为目标时 incident_id 为目标 id，绑定字段的语义见 Binding */
+      subject?: components['schemas']['Subject'];
       target: components['schemas']['Target'];
       /**
        * @description 审批档位（DESIGN §9.2），取值与审批断言的 tier 一致
@@ -3137,7 +4243,10 @@ export type components = {
       ttl_expires_at: null | components['schemas']['Timestamp'];
       updated_at: components['schemas']['Timestamp'];
       $defs: {
-        /** ProposalBinding */
+        /**
+         * ProposalBinding
+         * @description 主体为事件时是事件版本、根因组件与阶段 A 的证据指纹；主体为目标时（契约 2.28.0）incident_version 取目标的 revision，root_component 取发现挂到的组件，evidence_fingerprint 取发现的证据指纹。审批断言 v1 与 gateway 的绑定核对不变
+         */
         Binding: {
           evidence_fingerprint: components['schemas']['Sha256'];
           incident_version: number;
@@ -3210,6 +4319,8 @@ export type components = {
           };
           research_run_id: null | components['schemas']['Uuid'];
           rule_id: string | null;
+          /** @description 提议的主体（契约 2.28.0）；不填时为事件。主体为目标时 incident_id 必须等于 subject.id */
+          subject?: components['schemas']['Subject'];
         };
       };
     };
@@ -3235,6 +4346,8 @@ export type components = {
       };
       research_run_id: null | components['schemas']['Uuid'];
       rule_id: string | null;
+      /** @description 提议的主体（契约 2.28.0）；不填时为事件。主体为目标时 incident_id 必须等于 subject.id */
+      subject?: components['schemas']['Subject'];
     };
     ProposalDetail: {
       blast_radius: {
@@ -3364,6 +4477,224 @@ export type components = {
       title: string;
     };
     /**
+     * OptimizationRecommendation
+     * @description 主动优化的建议（契约 2.28.0，ADR 0146 §1.5、§2.5、§2.6）：ops 仓库的 PR（经 gitops_pr 提议）或业务仓库的 issue。预期收益与验证计划在创建时由代码确定；模型写的文字只在 model_note 中，消息与控制台标注【模型】
+     */
+    'recommendation.schema': {
+      cluster_id: components['schemas']['ClusterId'];
+      created_at: components['schemas']['Timestamp'];
+      /** @description 创建的 PR 或 issue；门槛不通过或还没有创建时为 null */
+      delivery: null | components['schemas']['Delivery'];
+      estimate: components['schemas']['EstimateValue'];
+      /** @description 发现的指纹 */
+      finding: components['schemas']['Sha256'];
+      /** @description G1–G6 的逐项结果（按顺序，遇到第一个不通过即停止）；全部通过才创建 PR 或 issue */
+      gates: components['schemas']['GateRecord'][];
+      goal_id: components['schemas']['Uuid'];
+      kind: components['schemas']['RecommendationKind'];
+      level: components['schemas']['ConclusionLevel'];
+      /** @description 模型补充的说明（经数值审计），显示时标注【模型】 */
+      model_note: string | null;
+      /** @description 验证结果；验证结束之前为 null */
+      outcome: null | components['schemas']['RecommendationOutcome'];
+      recommendation_id: components['schemas']['Uuid'];
+      run_id: components['schemas']['Uuid'];
+      state: components['schemas']['RecommendationState'];
+      /** @description <pack>/<模板 id>：ops_pr 为 remediations.yaml 中 applies 为 goal 的模板，business_issue 为 issues.yaml 的模板 */
+      template: string;
+      title: string;
+      updated_at: components['schemas']['Timestamp'];
+      verify: components['schemas']['VerifyPlan'];
+      $defs: {
+        /**
+         * RecommendationState
+         * @description blocked 门槛不通过，只记录原因；open 通过门槛，PR 或 issue 创建中；recommended PR 或 issue 已创建；verifying PR 合并并同步或修复已部署，验证窗口中；improved、no_effect、regressed 验证结果；rejected issue 以 not planned 关闭、PR 未合并即关闭，或被标为建议无用；superseded 发现有了更新的建议；failed 创建失败
+         * @enum {string}
+         */
+        RecommendationState:
+          | 'blocked'
+          | 'open'
+          | 'recommended'
+          | 'verifying'
+          | 'improved'
+          | 'no_effect'
+          | 'regressed'
+          | 'rejected'
+          | 'superseded'
+          | 'failed';
+        /**
+         * EstimateValue
+         * @description 模板 estimate 的求值结果：lower 为保守下界，expected 为期望值，单位与指标相同，按改善方向取正值
+         */
+        EstimateValue: {
+          basis: string;
+          expected: number | null;
+          indicator: components['schemas']['IndicatorRef'];
+          lower: number;
+          unit: components['schemas']['IndicatorUnit'];
+        };
+        /**
+         * VerifyPlan
+         * @description 验证计划（ADR 0146 §2.6）：start 为 merged_synced 时等管理这个文件的 Argo 应用的同步版本包含合并提交且 Healthy（GUC 另外核对 pg_settings）；为 deployed 时等发布输入的版本对应的业务提交包含修复提交。窗口开始后与基线按“星期 × 小时”匹配的时段比较
+         */
+        VerifyPlan: {
+          /** @description 应转为正常的卡片全局 id */
+          cards: string[];
+          guards: components['schemas']['IndicatorRef'][];
+          indicator: components['schemas']['IndicatorRef'];
+          params: {
+            [key: string]: number | string | boolean;
+          };
+          /** @description GUC：应在 pg_settings 中生效的参数 → 新值 */
+          settings: {
+            [key: string]: string;
+          };
+          /** @enum {string} */
+          start: 'merged_synced' | 'deployed';
+          /** @description 验证窗口；开始之前为 null */
+          window: null | components['schemas']['TimeWindow'];
+          within: components['schemas']['Duration'];
+        };
+        /** GateRecord */
+        GateRecord: {
+          /** @description 机器可读的原因码，与 remediation_attempts 的方式相同；G3 不通过时为模板 guard 的 id */
+          code: string;
+          detail: string;
+          /**
+           * @description G1 证据档位；G2 预期收益；G3 安全约束；G4 新颖性；G5 数量；G6 时机
+           * @enum {string}
+           */
+          gate: 'G1' | 'G2' | 'G3' | 'G4' | 'G5' | 'G6';
+          passed: boolean;
+        };
+        /** RecommendationDelivery */
+        Delivery: {
+          /** @description ops_pr 的分支 srenautix/goal-… */
+          branch: string | null;
+          /** @description issue 的关闭原因或 PR 未合并就关闭（unmerged）；未关闭时为 null */
+          closed_reason: null | ('completed' | 'not_planned' | 'unmerged');
+          merge_commit: string | null;
+          merged_at: null | components['schemas']['Timestamp'];
+          /** @description PR 或 issue 号；PR 还没有创建时为 null */
+          number: number | null;
+          /** @description ops_pr 的 gitops_pr 提议；business_issue 为 null */
+          proposal_id: null | components['schemas']['Uuid'];
+          repository: string;
+          /**
+           * @description ops：ops 仓库（只经 gateway 的 gitops_pr）；business：业务仓库（只创建 issue 与评论）
+           * @enum {string}
+           */
+          repository_role: 'ops' | 'business';
+          url: string | null;
+        };
+        /**
+         * RecommendationOutcome
+         * @description 合并或部署之后的验证结果（ADR 0146 §2.6）：改善不低于预期下界的 50% 并超出噪声带为 improved；守护指标恶化超过 10% 为 regressed；其余为 no_effect
+         */
+        RecommendationOutcome: {
+          /** @description 匹配时段的基线统计值 */
+          baseline: number | null;
+          /** @description verify.cards 在窗口结束时的结论 */
+          cards: {
+            card_id: string;
+            verdict: components['schemas']['Verdict'];
+          }[];
+          estimate_lower: number;
+          guards: {
+            /** @description 恶化方向为正 */
+            change_ratio: number | null;
+            indicator: components['schemas']['IndicatorRef'];
+            regressed: boolean;
+          }[];
+          /** @description 按改善方向取正值，单位与指标相同 */
+          improvement: number | null;
+          /** @description 基线窗口内同一时段的四分位距的一半 */
+          noise_band: number | null;
+          /** @description 验证窗口的统计值 */
+          observed: number | null;
+          /** @enum {string} */
+          result: 'improved' | 'no_effect' | 'regressed';
+          /** @description regressed 的 ops PR 由 server 提交的 revert 提议 */
+          revert_proposal_id: null | components['schemas']['Uuid'];
+          verified_at: components['schemas']['Timestamp'];
+          window: components['schemas']['TimeWindow'];
+        };
+      };
+    };
+    /** RecommendationAttempt */
+    RecommendationAttempt: {
+      finding: components['schemas']['Sha256'];
+      gates: components['schemas']['GateRecord'][];
+      kind: components['schemas']['RecommendationKind'];
+      passed: boolean;
+      /** @description 保存的建议；没有保存时为 null */
+      recommendation_id: null | components['schemas']['Uuid'];
+      template: string;
+    };
+    /**
+     * RecommendationKind
+     * @description ops_pr：ops 仓库的 PR（gitops_pr 提议）；business_issue：业务仓库的 issue
+     * @enum {string}
+     */
+    RecommendationKind: 'ops_pr' | 'business_issue';
+    /**
+     * RecommendationOutcome
+     * @description 合并或部署之后的验证结果（ADR 0146 §2.6）：改善不低于预期下界的 50% 并超出噪声带为 improved；守护指标恶化超过 10% 为 regressed；其余为 no_effect
+     */
+    RecommendationOutcome: {
+      /** @description 匹配时段的基线统计值 */
+      baseline: number | null;
+      /** @description verify.cards 在窗口结束时的结论 */
+      cards: {
+        card_id: string;
+        verdict: components['schemas']['Verdict'];
+      }[];
+      estimate_lower: number;
+      guards: {
+        /** @description 恶化方向为正 */
+        change_ratio: number | null;
+        indicator: components['schemas']['IndicatorRef'];
+        regressed: boolean;
+      }[];
+      /** @description 按改善方向取正值，单位与指标相同 */
+      improvement: number | null;
+      /** @description 基线窗口内同一时段的四分位距的一半 */
+      noise_band: number | null;
+      /** @description 验证窗口的统计值 */
+      observed: number | null;
+      /** @enum {string} */
+      result: 'improved' | 'no_effect' | 'regressed';
+      /** @description regressed 的 ops PR 由 server 提交的 revert 提议 */
+      revert_proposal_id: null | components['schemas']['Uuid'];
+      verified_at: components['schemas']['Timestamp'];
+      window: components['schemas']['TimeWindow'];
+    };
+    /**
+     * RecommendationState
+     * @description blocked 门槛不通过，只记录原因；open 通过门槛，PR 或 issue 创建中；recommended PR 或 issue 已创建；verifying PR 合并并同步或修复已部署，验证窗口中；improved、no_effect、regressed 验证结果；rejected issue 以 not planned 关闭、PR 未合并即关闭，或被标为建议无用；superseded 发现有了更新的建议；failed 创建失败
+     * @enum {string}
+     */
+    RecommendationState:
+      | 'blocked'
+      | 'open'
+      | 'recommended'
+      | 'verifying'
+      | 'improved'
+      | 'no_effect'
+      | 'regressed'
+      | 'rejected'
+      | 'superseded'
+      | 'failed';
+    /**
+     * RecommendationUpdatedEvent
+     * @description 建议创建或状态变化（契约 2.28.0）
+     */
+    RecommendationUpdated: {
+      payload: components['schemas']['recommendation.schema'];
+      /** @constant */
+      type: 'recommendation.updated';
+    } & components['schemas']['Header'];
+    /**
      * ResearchManifest
      * @description 研判清单（DESIGN §8.5）：复现一次研判需要的全部版本信息，以及出境清单（§8.4）。后处理部分可以基于已保存的响应精确重放；重新采样模型得到的是一个分布
      */
@@ -3391,6 +4722,8 @@ export type components = {
       routes: components['schemas']['RouteUse'][];
       run_id: components['schemas']['Uuid'];
       snapshot_id: null | components['schemas']['Uuid'];
+      /** @description 主体为目标时（契约 2.28.0）incident_id 为目标 id、incident_version 为目标的 revision；不填时为事件 */
+      subject?: components['schemas']['Subject'];
       topology_version: number;
       $defs: {
         /** RouteUse */
@@ -3409,11 +4742,22 @@ export type components = {
         /** EgressEntry */
         EgressEntry: {
           bytes: number;
-          categories: ('metrics' | 'logs' | 'traces' | 'events' | 'topology' | 'changes' | 'alerts' | 'knowledge')[];
+          categories: components['schemas']['EgressCategory'][];
+          /** @description 不在 llm.egress.categories 中、进入提示词之前删除的片段数，按类别计（契约 2.28.0，ADR 0146 §3.6）；没有删除时不填或为空对象 */
+          dropped?: {
+            [key: string]: number;
+          };
           in_domain: boolean;
           redaction_hits: number;
           route_id: string;
         };
+        /**
+         * EgressCategory
+         * @description 出境数据类别。sql：规范化语句文本（常量为 $n、去掉注释）；code：业务代码片段（契约 2.28.0，ADR 0146 §3.6）
+         * @enum {string}
+         */
+        EgressCategory:
+          'metrics' | 'logs' | 'traces' | 'events' | 'topology' | 'changes' | 'alerts' | 'knowledge' | 'sql' | 'code';
       };
     };
     /**
@@ -3940,6 +5284,15 @@ export type components = {
       kind: 'user' | 'group';
       name: string;
     };
+    /**
+     * Subject
+     * @description 研判、提议、出境清单与消息的主体（契约 2.28.0，ADR 0146 §8）：incident 事件；goal 主动优化的目标。没有 subject 的旧数据都是事件。主体为 goal 时沿用的事件字段语义为：incident_id 取目标 id，incident_version 取目标的 revision
+     */
+    Subject: {
+      id: components['schemas']['Uuid'];
+      /** @enum {string} */
+      type: 'incident' | 'goal';
+    };
     target: {
       group: string;
       kind: string;
@@ -4075,6 +5428,28 @@ export type components = {
      * @enum {string}
      */
     Verdict: 'normal' | 'abnormal' | 'undeterminable';
+    /**
+     * VerifyPlan
+     * @description 验证计划（ADR 0146 §2.6）：start 为 merged_synced 时等管理这个文件的 Argo 应用的同步版本包含合并提交且 Healthy（GUC 另外核对 pg_settings）；为 deployed 时等发布输入的版本对应的业务提交包含修复提交。窗口开始后与基线按“星期 × 小时”匹配的时段比较
+     */
+    VerifyPlan: {
+      /** @description 应转为正常的卡片全局 id */
+      cards: string[];
+      guards: components['schemas']['IndicatorRef'][];
+      indicator: components['schemas']['IndicatorRef'];
+      params: {
+        [key: string]: number | string | boolean;
+      };
+      /** @description GUC：应在 pg_settings 中生效的参数 → 新值 */
+      settings: {
+        [key: string]: string;
+      };
+      /** @enum {string} */
+      start: 'merged_synced' | 'deployed';
+      /** @description 验证窗口；开始之前为 null */
+      window: null | components['schemas']['TimeWindow'];
+      within: components['schemas']['Duration'];
+    };
     /** @description 通行密钥签名（WebAuthn Level 3 断言）。clientDataJSON 的 type 为 webauthn.get，challenge 为 sha256(JCS(assertion)) 原始 32 字节的 base64url；签名覆盖 authenticatorData 与 sha256(clientDataJSON) 的拼接。签名算法由 approver-keys 中该凭据的 alg 决定：EdDSA 为 64 字节 Ed25519 签名，ES256 为 DER 编码的 ECDSA 签名。type 取 webauthn；webauthn_ed25519 只能用于 alg 为 EdDSA 的凭据，用于其他凭据时拒绝（webauthn_alg_mismatch）。 */
     webauthnProof: {
       authenticator_data: components['schemas']['base64url'];
@@ -4101,11 +5476,13 @@ export type components = {
     Csrf: string;
     /** @description 会话认证时必填；Bearer 认证时不需要 */
     CsrfOptional: string;
+    GoalId: components['schemas']['Uuid'];
     /** @description incident_id、稳定标签或别名；标签放进路径时按 RFC 3986 编码 */
     IncidentRef: string;
     /** @description 只用于 Grafana 插件 token：Grafana 用户的邮箱 */
     OnBehalfOf: string;
     ProposalId: components['schemas']['Uuid'];
+    RecommendationId: components['schemas']['Uuid'];
     RunId: components['schemas']['Uuid'];
   };
   requestBodies: never;
@@ -4966,6 +6343,38 @@ export interface operations {
       400: components['responses']['Error'];
     };
   };
+  listFindings: {
+    parameters: {
+      query?: {
+        cluster_id?: components['schemas']['ClusterId'];
+        component?: components['schemas']['ComponentKey'];
+        cursor?: string;
+        domain?: components['schemas']['DomainId'];
+        goal_id?: components['schemas']['Uuid'];
+        limit?: number;
+        status?: components['schemas']['FindingStatus'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 发现 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            items: components['schemas']['finding.schema'][];
+            next_cursor: string | null;
+          };
+        };
+      };
+      400: components['responses']['Error'];
+    };
+  };
   getFreeze: {
     parameters: {
       query: {
@@ -4995,6 +6404,169 @@ export interface operations {
           };
         };
       };
+    };
+  };
+  listGoals: {
+    parameters: {
+      query?: {
+        cluster_id?: components['schemas']['ClusterId'];
+        cursor?: string;
+        domain?: components['schemas']['DomainId'];
+        limit?: number;
+        /** @description 只返回未结束的目标 */
+        open?: boolean;
+        state?: components['schemas']['GoalState'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 目标 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            items: components['schemas']['goal.schema'][];
+            next_cursor: string | null;
+          };
+        };
+      };
+      400: components['responses']['Error'];
+    };
+  };
+  createGoal: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description 会话认证时必填；Bearer 认证时不需要 */
+        'X-CSRF-Token'?: components['parameters']['CsrfOptional'];
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['GoalCreate'];
+      };
+    };
+    responses: {
+      /** @description 已创建并入队 */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['goal.schema'];
+        };
+      };
+      400: components['responses']['Error'];
+      403: components['responses']['Error'];
+      429: components['responses']['Error'];
+    };
+  };
+  getGoal: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        goal_id: components['parameters']['GoalId'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 目标 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['goal.schema'];
+        };
+      };
+      404: components['responses']['Error'];
+    };
+  };
+  cancelGoal: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description 会话认证时必填；Bearer 认证时不需要 */
+        'X-CSRF-Token'?: components['parameters']['CsrfOptional'];
+      };
+      path: {
+        goal_id: components['parameters']['GoalId'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 取消后的目标 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['goal.schema'];
+        };
+      };
+      404: components['responses']['Error'];
+      409: components['responses']['Error'];
+    };
+  };
+  listGoalRuns: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        goal_id: components['parameters']['GoalId'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 目标的全部运行（新的在前） */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['GoalRunSummary'][];
+        };
+      };
+      404: components['responses']['Error'];
+    };
+  };
+  getGoalRun: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        goal_id: components['parameters']['GoalId'];
+        run_id: components['parameters']['RunId'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 运行明细 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            /** @description 运行输出；未结束或在基线之前失败时为 null */
+            output: null | components['schemas']['optimization-output.schema'];
+            summary: components['schemas']['GoalRunSummary'];
+          };
+        };
+      };
+      404: components['responses']['Error'];
     };
   };
   listIncidents: {
@@ -5466,6 +7038,37 @@ export interface operations {
       };
     };
   };
+  getOptimizationCatalog: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 指标与领域目录 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            domains: {
+              id: components['schemas']['DomainId'];
+              indicators: components['schemas']['IndicatorRef'][];
+              packs: string[];
+              title: components['schemas']['LocalizedText'];
+            }[];
+            indicators: {
+              definition: components['schemas']['Indicator'];
+              id: components['schemas']['IndicatorRef'];
+            }[];
+          };
+        };
+      };
+    };
+  };
   listPacks: {
     parameters: {
       query?: never;
@@ -5856,6 +7459,69 @@ export interface operations {
         };
         content: {
           'application/json': components['schemas']['proposal.schema'];
+        };
+      };
+      404: components['responses']['Error'];
+      409: components['responses']['Error'];
+    };
+  };
+  listRecommendations: {
+    parameters: {
+      query?: {
+        cursor?: string;
+        finding?: components['schemas']['Sha256'];
+        goal_id?: components['schemas']['Uuid'];
+        kind?: components['schemas']['RecommendationKind'];
+        limit?: number;
+        state?: components['schemas']['RecommendationState'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 建议 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            items: components['schemas']['recommendation.schema'][];
+            next_cursor: string | null;
+          };
+        };
+      };
+      400: components['responses']['Error'];
+    };
+  };
+  rejectRecommendation: {
+    parameters: {
+      query?: never;
+      header: {
+        'X-CSRF-Token': components['parameters']['Csrf'];
+      };
+      path: {
+        recommendation_id: components['parameters']['RecommendationId'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          reason: string | null;
+        };
+      };
+    };
+    responses: {
+      /** @description 更新后的建议 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['recommendation.schema'];
         };
       };
       404: components['responses']['Error'];

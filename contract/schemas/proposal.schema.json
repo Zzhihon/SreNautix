@@ -42,6 +42,10 @@
       "$ref": "common.schema.json#/$defs/Sha256"
     },
     "cluster_id": { "$ref": "common.schema.json#/$defs/ClusterId" },
+    "subject": {
+      "description": "提议的主体（契约 2.28.0）；不填时为事件。主体为目标时 incident_id 为目标 id，绑定字段的语义见 Binding",
+      "$ref": "common.schema.json#/$defs/Subject"
+    },
     "incident_id": { "$ref": "common.schema.json#/$defs/Uuid" },
     "binding": { "$ref": "#/$defs/Binding" },
     "source": {
@@ -116,6 +120,7 @@
   "$defs": {
     "Binding": {
       "title": "ProposalBinding",
+      "description": "主体为事件时是事件版本、根因组件与阶段 A 的证据指纹；主体为目标时（契约 2.28.0）incident_version 取目标的 revision，root_component 取发现挂到的组件，evidence_fingerprint 取发现的证据指纹。审批断言 v1 与 gateway 的绑定核对不变",
       "type": "object",
       "additionalProperties": false,
       "required": ["incident_version", "root_component", "evidence_fingerprint"],
@@ -206,6 +211,10 @@
         "expected_effect"
       ],
       "properties": {
+        "subject": {
+          "description": "提议的主体（契约 2.28.0）；不填时为事件。主体为目标时 incident_id 必须等于 subject.id",
+          "$ref": "common.schema.json#/$defs/Subject"
+        },
         "incident_id": { "$ref": "common.schema.json#/$defs/Uuid" },
         "binding": { "$ref": "#/$defs/Binding" },
         "action": { "type": "string" },

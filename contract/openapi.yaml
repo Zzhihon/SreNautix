@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: SreNautix hub API
-  version: 2.27.0
+  version: 2.28.0
   license:
     name: Apache-2.0
     identifier: Apache-2.0
@@ -32,6 +32,7 @@ tags:
   - name: topology
   - name: system
   - name: governance
+  - name: optimization
 paths:
   /healthz:
     get:
@@ -1804,6 +1805,239 @@ paths:
       responses:
         '204': { description: 已删除 }
         '404': { $ref: '#/components/responses/Error' }
+  /v1/goals:
+    get:
+      tags: [optimization]
+      operationId: listGoals
+      description: 主动优化的目标（ADR 0146 §5.1），按 created_at 从新到旧
+      x-srenautix-roles: [viewer, responder, approver, auditor, admin]
+      x-srenautix-external: true
+      parameters:
+        - { name: cluster_id, in: query, schema: { $ref: './schemas/common.schema.json#/$defs/ClusterId' } }
+        - { name: state, in: query, schema: { $ref: './schemas/goal.schema.json#/$defs/GoalState' } }
+        - { name: open, in: query, description: 只返回未结束的目标, schema: { type: boolean, default: false } }
+        - { name: domain, in: query, schema: { $ref: './schemas/goal.schema.json#/$defs/DomainId' } }
+        - { name: cursor, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+      responses:
+        '200':
+          description: 目标
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [items, next_cursor]
+                properties:
+                  items: { type: array, items: { $ref: './schemas/goal.schema.json' } }
+                  next_cursor: { type: [string, 'null'] }
+        '400': { $ref: '#/components/responses/Error' }
+    post:
+      tags: [optimization]
+      operationId: createGoal
+      description: |
+        下达目标。指标与参数按领域包的指标目录校验，模型与调用方都不能提交自由查询；作用域按范围内组件所在的命名空间检查。
+        每个主体每天最多 5 个目标、每个集群同时最多 10 个未结束的目标，超过时返回 429
+      x-srenautix-roles: [responder, approver, admin]
+      x-srenautix-external: true
+      parameters: [{ $ref: '#/components/parameters/CsrfOptional' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: './schemas/goal.schema.json#/$defs/GoalCreate' }
+      responses:
+        '201':
+          description: 已创建并入队
+          content: { application/json: { schema: { $ref: './schemas/goal.schema.json' } } }
+        '400': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '429': { $ref: '#/components/responses/Error' }
+  /v1/goals/{goal_id}:
+    parameters: [{ $ref: '#/components/parameters/GoalId' }]
+    get:
+      tags: [optimization]
+      operationId: getGoal
+      x-srenautix-roles: [viewer, responder, approver, auditor, admin]
+      x-srenautix-external: true
+      responses:
+        '200':
+          description: 目标
+          content: { application/json: { schema: { $ref: './schemas/goal.schema.json' } } }
+        '404': { $ref: '#/components/responses/Error' }
+  /v1/goals/{goal_id}/cancel:
+    parameters: [{ $ref: '#/components/parameters/GoalId' }]
+    post:
+      tags: [optimization]
+      operationId: cancelGoal
+      description: 取消未结束的目标；进行中的运行在下一个检查点停止，已创建的 PR 与 issue 不受影响
+      x-srenautix-roles: [responder, approver, admin]
+      x-srenautix-external: true
+      parameters: [{ $ref: '#/components/parameters/CsrfOptional' }]
+      responses:
+        '200':
+          description: 取消后的目标
+          content: { application/json: { schema: { $ref: './schemas/goal.schema.json' } } }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+  /v1/goals/{goal_id}/runs:
+    parameters: [{ $ref: '#/components/parameters/GoalId' }]
+    get:
+      tags: [optimization]
+      operationId: listGoalRuns
+      x-srenautix-roles: [viewer, responder, approver, auditor, admin]
+      x-srenautix-external: true
+      responses:
+        '200':
+          description: 目标的全部运行（新的在前）
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: './schemas/goal.schema.json#/$defs/GoalRunSummary' } }
+        '404': { $ref: '#/components/responses/Error' }
+  /v1/goals/{goal_id}/runs/{run_id}:
+    parameters: [{ $ref: '#/components/parameters/GoalId' }, { $ref: '#/components/parameters/RunId' }]
+    get:
+      tags: [optimization]
+      operationId: getGoalRun
+      description: 运行明细：基线、候选发现、账本、结论、建议与门槛记录。模型调用与出境清单见 /v1/runs/{run_id}/manifest
+      x-srenautix-roles: [viewer, responder, approver, auditor, admin]
+      x-srenautix-external: true
+      responses:
+        '200':
+          description: 运行明细
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [summary, output]
+                properties:
+                  summary: { $ref: './schemas/goal.schema.json#/$defs/GoalRunSummary' }
+                  output:
+                    description: 运行输出；未结束或在基线之前失败时为 null
+                    oneOf: [{ type: 'null' }, { $ref: './schemas/optimization-output.schema.json' }]
+        '404': { $ref: '#/components/responses/Error' }
+  /v1/findings:
+    get:
+      tags: [optimization]
+      operationId: listFindings
+      description: 发现（ADR 0146 §1.4），按 last_seen 从新到旧
+      x-srenautix-roles: [viewer, responder, approver, auditor, admin]
+      x-srenautix-external: true
+      parameters:
+        - { name: cluster_id, in: query, schema: { $ref: './schemas/common.schema.json#/$defs/ClusterId' } }
+        - { name: domain, in: query, schema: { $ref: './schemas/goal.schema.json#/$defs/DomainId' } }
+        - { name: status, in: query, schema: { $ref: './schemas/finding.schema.json#/$defs/FindingStatus' } }
+        - { name: goal_id, in: query, schema: { $ref: './schemas/common.schema.json#/$defs/Uuid' } }
+        - { name: component, in: query, schema: { $ref: './schemas/common.schema.json#/$defs/ComponentKey' } }
+        - { name: cursor, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+      responses:
+        '200':
+          description: 发现
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [items, next_cursor]
+                properties:
+                  items: { type: array, items: { $ref: './schemas/finding.schema.json' } }
+                  next_cursor: { type: [string, 'null'] }
+        '400': { $ref: '#/components/responses/Error' }
+  /v1/recommendations:
+    get:
+      tags: [optimization]
+      operationId: listRecommendations
+      description: 主动优化的建议与验证结果，按 created_at 从新到旧
+      x-srenautix-roles: [viewer, responder, approver, auditor, admin]
+      x-srenautix-external: true
+      parameters:
+        - { name: goal_id, in: query, schema: { $ref: './schemas/common.schema.json#/$defs/Uuid' } }
+        - { name: finding, in: query, schema: { $ref: './schemas/common.schema.json#/$defs/Sha256' } }
+        - { name: kind, in: query, schema: { $ref: './schemas/goal.schema.json#/$defs/RecommendationKind' } }
+        - {
+            name: state,
+            in: query,
+            schema: { $ref: './schemas/recommendation.schema.json#/$defs/RecommendationState' },
+          }
+        - { name: cursor, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+      responses:
+        '200':
+          description: 建议
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [items, next_cursor]
+                properties:
+                  items: { type: array, items: { $ref: './schemas/recommendation.schema.json' } }
+                  next_cursor: { type: [string, 'null'] }
+        '400': { $ref: '#/components/responses/Error' }
+  /v1/recommendations/{recommendation_id}/reject:
+    parameters: [{ $ref: '#/components/parameters/RecommendationId' }]
+    post:
+      tags: [optimization]
+      operationId: rejectRecommendation
+      description: 控制台或聊天里点了“建议无用”：发现记为 rejected 并进入冷却期（ADR 0146 §4.5）；已创建的 PR 与 issue 不受影响
+      x-srenautix-roles: [responder, approver, admin]
+      x-srenautix-external: false
+      parameters: [{ $ref: '#/components/parameters/Csrf' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [reason]
+              properties:
+                reason: { type: [string, 'null'], maxLength: 500 }
+      responses:
+        '200':
+          description: 更新后的建议
+          content: { application/json: { schema: { $ref: './schemas/recommendation.schema.json' } } }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+  /v1/optimization/catalog:
+    get:
+      tags: [optimization]
+      operationId: getOptimizationCatalog
+      description: 加载的领域包声明的指标与领域（新建目标时选择），以及每个指标的参数 schema 与参数取值的候选
+      x-srenautix-roles: [viewer, responder, approver, auditor, admin]
+      x-srenautix-external: true
+      responses:
+        '200':
+          description: 指标与领域目录
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [indicators, domains]
+                properties:
+                  indicators:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: false
+                      required: [id, definition]
+                      properties:
+                        id: { $ref: './schemas/pack.schema.json#/$defs/IndicatorRef' }
+                        definition: { $ref: './schemas/pack.schema.json#/$defs/Indicator' }
+                  domains:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: false
+                      required: [id, title, packs, indicators]
+                      properties:
+                        id: { $ref: './schemas/goal.schema.json#/$defs/DomainId' }
+                        title: { $ref: './schemas/evidence-card.schema.json#/$defs/LocalizedText' }
+                        packs: { type: array, items: { type: string } }
+                        indicators: { type: array, items: { $ref: './schemas/pack.schema.json#/$defs/IndicatorRef' } }
 components:
   securitySchemes:
     session:
@@ -1840,6 +2074,16 @@ components:
       schema: { $ref: './schemas/common.schema.json#/$defs/Uuid' }
     ProposalId:
       name: proposal_id
+      in: path
+      required: true
+      schema: { $ref: './schemas/common.schema.json#/$defs/Uuid' }
+    GoalId:
+      name: goal_id
+      in: path
+      required: true
+      schema: { $ref: './schemas/common.schema.json#/$defs/Uuid' }
+    RecommendationId:
+      name: recommendation_id
       in: path
       required: true
       schema: { $ref: './schemas/common.schema.json#/$defs/Uuid' }

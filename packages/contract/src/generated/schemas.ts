@@ -1,5 +1,5 @@
 // 本文件由 packages/contract/scripts/gen.ts 从 contract/ 生成，不要手工修改。
-export const CONTRACT_VERSION = '2.27.0';
+export const CONTRACT_VERSION = '2.28.0';
 
 export const SCHEMAS: Record<string, Record<string, unknown>> = {
   'https://srenautix.io/contract/gateway/v1/action-catalog.schema.json': {
@@ -909,6 +909,413 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
       },
     },
   },
+  'https://srenautix.io/contract/integrations/dbstats/v1/dbstats.schema.json': {
+    $schema: 'https://json-schema.org/draft/2020-12/schema',
+    $id: 'https://srenautix.io/contract/integrations/dbstats/v1/dbstats.schema.json',
+    title: 'DbstatsContract',
+    description:
+      'dbstats 集成契约 v1（契约 2.28.0，ADR 0146 §3.3）：数据库统计视图的只读读取。操作固定，SQL 写在适配器里，请求只绑定参数；不读取任何业务表的行，也不读取语句文本文件做排序。能力：dbstats.statements_top、dbstats.statements_text、dbstats.tables_top、dbstats.indexes_usage、dbstats.settings_get、dbstats.activity_summary、dbstats.locks_summary。累计计数器的速率由调用方用相隔不少于 300 秒的两次采样的差值计算（Sample.sampled_at）',
+    $defs: {
+      Operation: {
+        title: 'DbstatsOperation',
+        type: 'string',
+        description: '操作名；能力名为 dbstats.<操作名中的 . 换成 _>',
+        enum: [
+          'statements.top',
+          'statements.text',
+          'tables.top',
+          'indexes.usage',
+          'settings.get',
+          'activity.summary',
+          'locks.summary',
+        ],
+      },
+      Request: {
+        title: 'DbstatsRequest',
+        description: '一次读取。database 为 null 时读取连接所在的库；statements.top 不按库过滤时可以读到全部库的语句',
+        oneOf: [
+          { $ref: '#/$defs/StatementsTopRequest' },
+          { $ref: '#/$defs/StatementsTextRequest' },
+          { $ref: '#/$defs/TablesTopRequest' },
+          { $ref: '#/$defs/IndexesUsageRequest' },
+          { $ref: '#/$defs/SettingsGetRequest' },
+          { $ref: '#/$defs/ActivitySummaryRequest' },
+          { $ref: '#/$defs/LocksSummaryRequest' },
+        ],
+      },
+      StatementsTopRequest: {
+        title: 'DbstatsStatementsTopRequest',
+        type: 'object',
+        additionalProperties: false,
+        required: ['op', 'args'],
+        properties: {
+          op: { const: 'statements.top' },
+          args: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['order_by', 'limit'],
+            properties: {
+              order_by: {
+                type: 'string',
+                enum: [
+                  'total_exec_time',
+                  'mean_exec_time',
+                  'calls',
+                  'rows',
+                  'shared_blks_read',
+                  'temp_blks_written',
+                  'blk_read_time',
+                  'wal_bytes',
+                ],
+              },
+              limit: { type: 'integer', minimum: 1, maximum: 50 },
+              database: {
+                type: ['string', 'null'],
+                description: '按库名过滤（pg_database.datname）；null 或不填时不过滤',
+                pattern: '^[A-Za-z_][A-Za-z0-9_$-]{0,62}$',
+              },
+              queryids: {
+                type: 'array',
+                description: '只取这些 queryid（十进制字符串）；不填时按 order_by 取前 limit 条',
+                maxItems: 50,
+                items: { $ref: '#/$defs/QueryId' },
+              },
+            },
+          },
+        },
+      },
+      StatementsTextRequest: {
+        title: 'DbstatsStatementsTextRequest',
+        type: 'object',
+        additionalProperties: false,
+        required: ['op', 'args'],
+        properties: {
+          op: { const: 'statements.text' },
+          args: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['queryids'],
+            properties: { queryids: { type: 'array', minItems: 1, maxItems: 10, items: { $ref: '#/$defs/QueryId' } } },
+          },
+        },
+      },
+      TablesTopRequest: {
+        title: 'DbstatsTablesTopRequest',
+        type: 'object',
+        additionalProperties: false,
+        required: ['op', 'args'],
+        properties: {
+          op: { const: 'tables.top' },
+          args: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['order_by', 'limit'],
+            properties: {
+              order_by: {
+                type: 'string',
+                enum: ['seq_scan', 'seq_tup_read', 'idx_scan', 'n_dead_tup', 'n_live_tup', 'heap_blks_read', 'writes'],
+              },
+              limit: { type: 'integer', minimum: 1, maximum: 50 },
+            },
+          },
+        },
+      },
+      IndexesUsageRequest: {
+        title: 'DbstatsIndexesUsageRequest',
+        type: 'object',
+        additionalProperties: false,
+        required: ['op', 'args'],
+        properties: {
+          op: { const: 'indexes.usage' },
+          args: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['limit'],
+            properties: {
+              table: {
+                type: ['string', 'null'],
+                description: '<schema>.<表名>；Timescale hypertable 的名字包含它的全部分块；null 或不填时为全部表',
+                pattern: '^[A-Za-z_][A-Za-z0-9_$]{0,62}\\.[A-Za-z_][A-Za-z0-9_$]{0,62}$',
+              },
+              limit: { type: 'integer', minimum: 1, maximum: 50 },
+            },
+          },
+        },
+      },
+      SettingsGetRequest: {
+        title: 'DbstatsSettingsGetRequest',
+        type: 'object',
+        additionalProperties: false,
+        required: ['op', 'args'],
+        properties: {
+          op: { const: 'settings.get' },
+          args: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['names'],
+            properties: {
+              names: {
+                type: 'array',
+                minItems: 1,
+                maxItems: 50,
+                items: { type: 'string', pattern: '^[a-z_][a-z0-9_.]{0,62}$' },
+              },
+            },
+          },
+        },
+      },
+      ActivitySummaryRequest: {
+        title: 'DbstatsActivitySummaryRequest',
+        type: 'object',
+        additionalProperties: false,
+        required: ['op', 'args'],
+        properties: {
+          op: { const: 'activity.summary' },
+          args: { type: 'object', additionalProperties: false, properties: {} },
+        },
+      },
+      LocksSummaryRequest: {
+        title: 'DbstatsLocksSummaryRequest',
+        type: 'object',
+        additionalProperties: false,
+        required: ['op', 'args'],
+        properties: {
+          op: { const: 'locks.summary' },
+          args: { type: 'object', additionalProperties: false, properties: {} },
+        },
+      },
+      QueryId: {
+        title: 'DbstatsQueryId',
+        description: 'pg_stat_statements 的 queryid（bigint）的十进制字符串',
+        type: 'string',
+        pattern: '^-?[0-9]{1,20}$',
+      },
+      Sample: {
+        title: 'DbstatsSample',
+        description:
+          '一次读取的结果。rows 的结构由 op 决定（StatementRow、StatementText、TableRow、IndexRow、SettingRow、ActivityRow、LockRow）；累计计数器原样返回，速率由两次采样的差值计算',
+        type: 'object',
+        additionalProperties: false,
+        required: ['op', 'sampled_at', 'server_version', 'rows', 'truncated'],
+        properties: {
+          op: { $ref: '#/$defs/Operation' },
+          sampled_at: { $ref: '../../../schemas/common.schema.json#/$defs/Timestamp' },
+          server_version: { type: 'string', description: 'server_version_num 的取值，例如 170002' },
+          rows: {
+            type: 'array',
+            maxItems: 50,
+            items: { type: 'object', additionalProperties: { type: ['string', 'number', 'boolean', 'null'] } },
+          },
+          truncated: { type: 'boolean', description: '结果被 limit 截断' },
+        },
+      },
+      StatementRow: {
+        title: 'DbstatsStatementRow',
+        description: 'statements.top 的一行（pg_stat_statements(showtext := false)）。时间单位为毫秒；计数器是累计值',
+        type: 'object',
+        additionalProperties: false,
+        required: [
+          'queryid',
+          'database',
+          'role',
+          'toplevel',
+          'calls',
+          'total_exec_time_ms',
+          'mean_exec_time_ms',
+          'rows',
+          'shared_blks_hit',
+          'shared_blks_read',
+          'temp_blks_written',
+          'blk_read_time_ms',
+          'wal_bytes',
+        ],
+        properties: {
+          queryid: { $ref: '#/$defs/QueryId' },
+          database: { type: 'string' },
+          role: { type: 'string' },
+          toplevel: { type: 'boolean' },
+          calls: { type: 'number', minimum: 0 },
+          total_exec_time_ms: { type: 'number', minimum: 0 },
+          mean_exec_time_ms: { type: 'number', minimum: 0 },
+          rows: { type: 'number', minimum: 0 },
+          shared_blks_hit: { type: 'number', minimum: 0 },
+          shared_blks_read: { type: 'number', minimum: 0 },
+          temp_blks_written: { type: 'number', minimum: 0 },
+          blk_read_time_ms: { type: 'number', minimum: 0 },
+          wal_bytes: { type: 'number', minimum: 0 },
+        },
+      },
+      StatementText: {
+        title: 'DbstatsStatementText',
+        description:
+          'statements.text 的一行：语句经 libpg-query 重新规范化（常量换成 $n）并去掉注释，不超过 4 KiB；fingerprint 是 libpg-query 对规范化语句计算的指纹（十六进制），PG 升级后 queryid 变化时不变。无法解析的语句 text 为 null，normalize_error 写明原因',
+        type: 'object',
+        additionalProperties: false,
+        required: ['queryid', 'text', 'fingerprint', 'truncated', 'normalize_error'],
+        properties: {
+          queryid: { $ref: '#/$defs/QueryId' },
+          text: { type: ['string', 'null'], maxLength: 4096 },
+          fingerprint: { type: ['string', 'null'], pattern: '^[0-9a-f]{16}$' },
+          truncated: { type: 'boolean' },
+          normalize_error: { type: ['string', 'null'], maxLength: 300 },
+        },
+      },
+      TableRow: {
+        title: 'DbstatsTableRow',
+        description:
+          'tables.top 的一行（pg_stat_user_tables 与 pg_statio_user_tables）。Timescale 分块按 hypertable 汇总，chunks 为分块数；普通表 chunks 为 0',
+        type: 'object',
+        additionalProperties: false,
+        required: [
+          'schema',
+          'table',
+          'hypertable',
+          'chunks',
+          'seq_scan',
+          'seq_tup_read',
+          'idx_scan',
+          'idx_tup_fetch',
+          'n_tup_ins',
+          'n_tup_upd',
+          'n_tup_del',
+          'n_tup_hot_upd',
+          'n_live_tup',
+          'n_dead_tup',
+          'heap_blks_read',
+          'heap_blks_hit',
+          'idx_blks_read',
+          'idx_blks_hit',
+          'last_autovacuum',
+          'last_autoanalyze',
+        ],
+        properties: {
+          schema: { type: 'string' },
+          table: { type: 'string' },
+          hypertable: { type: 'boolean' },
+          chunks: { type: 'integer', minimum: 0 },
+          seq_scan: { type: 'number', minimum: 0 },
+          seq_tup_read: { type: 'number', minimum: 0 },
+          idx_scan: { type: 'number', minimum: 0 },
+          idx_tup_fetch: { type: 'number', minimum: 0 },
+          n_tup_ins: { type: 'number', minimum: 0 },
+          n_tup_upd: { type: 'number', minimum: 0 },
+          n_tup_del: { type: 'number', minimum: 0 },
+          n_tup_hot_upd: { type: 'number', minimum: 0 },
+          n_live_tup: { type: 'number', minimum: 0 },
+          n_dead_tup: { type: 'number', minimum: 0 },
+          heap_blks_read: { type: 'number', minimum: 0 },
+          heap_blks_hit: { type: 'number', minimum: 0 },
+          idx_blks_read: { type: 'number', minimum: 0 },
+          idx_blks_hit: { type: 'number', minimum: 0 },
+          last_autovacuum: {
+            oneOf: [{ type: 'null' }, { $ref: '../../../schemas/common.schema.json#/$defs/Timestamp' }],
+          },
+          last_autoanalyze: {
+            oneOf: [{ type: 'null' }, { $ref: '../../../schemas/common.schema.json#/$defs/Timestamp' }],
+          },
+        },
+      },
+      IndexRow: {
+        title: 'DbstatsIndexRow',
+        description:
+          'indexes.usage 的一行（pg_stat_user_indexes、pg_index 与 pg_relation_size）。Timescale 分块上的索引按 hypertable 与索引名汇总',
+        type: 'object',
+        additionalProperties: false,
+        required: [
+          'schema',
+          'table',
+          'index',
+          'idx_scan',
+          'idx_tup_read',
+          'idx_tup_fetch',
+          'size_bytes',
+          'unique',
+          'primary',
+        ],
+        properties: {
+          schema: { type: 'string' },
+          table: { type: 'string' },
+          index: { type: 'string' },
+          idx_scan: { type: 'number', minimum: 0 },
+          idx_tup_read: { type: 'number', minimum: 0 },
+          idx_tup_fetch: { type: 'number', minimum: 0 },
+          size_bytes: { type: 'number', minimum: 0 },
+          unique: { type: 'boolean' },
+          primary: { type: 'boolean' },
+        },
+      },
+      SettingRow: {
+        title: 'DbstatsSettingRow',
+        description: 'settings.get 的一行（pg_settings）。不存在的参数不返回',
+        type: 'object',
+        additionalProperties: false,
+        required: ['name', 'setting', 'unit', 'vartype', 'context', 'source', 'min_val', 'max_val', 'pending_restart'],
+        properties: {
+          name: { type: 'string' },
+          setting: { type: 'string' },
+          unit: { type: ['string', 'null'] },
+          vartype: { type: 'string', enum: ['bool', 'enum', 'integer', 'real', 'string'] },
+          context: {
+            type: 'string',
+            description: '修改需要的条件；postmaster 需要重启',
+            enum: ['internal', 'postmaster', 'sighup', 'superuser-backend', 'backend', 'superuser', 'user'],
+          },
+          source: { type: 'string' },
+          min_val: { type: ['string', 'null'] },
+          max_val: { type: ['string', 'null'] },
+          pending_restart: { type: 'boolean' },
+        },
+      },
+      ActivityRow: {
+        title: 'DbstatsActivityRow',
+        description:
+          'activity.summary 的一行：按状态与等待事件计数的客户端会话（pg_stat_activity，backend_type 为 client backend），不含语句文本与应用名。另有一行 state 为 max_connections，count 为参数取值',
+        type: 'object',
+        additionalProperties: false,
+        required: ['state', 'wait_event_type', 'wait_event', 'count'],
+        properties: {
+          state: { type: 'string' },
+          wait_event_type: { type: ['string', 'null'] },
+          wait_event: { type: ['string', 'null'] },
+          count: { type: 'integer', minimum: 0 },
+        },
+      },
+      LockRow: {
+        title: 'DbstatsLockRow',
+        description: 'locks.summary 的一行：按锁类型、模式与是否授予计数（pg_locks），不含对象名与进程',
+        type: 'object',
+        additionalProperties: false,
+        required: ['locktype', 'mode', 'granted', 'count'],
+        properties: {
+          locktype: { type: 'string' },
+          mode: { type: 'string' },
+          granted: { type: 'boolean' },
+          count: { type: 'integer', minimum: 0 },
+        },
+      },
+      PrivilegeReport: {
+        title: 'DbstatsPrivilegeReport',
+        description:
+          '权限自检（启动时与每小时一次）：角色能读取任何业务表（has_table_privilege SELECT 或 has_any_column_privilege SELECT，系统 schema 之外）时 ok 为 false，集成降级为不可用并发布状态条件 DatasourceOverPrivileged。missing 为缺少的 pg_read_all_stats、pg_read_all_settings 成员关系与 pg_stat_statements 扩展',
+        type: 'object',
+        additionalProperties: false,
+        required: ['ok', 'role', 'readable_tables', 'missing', 'read_only', 'checked_at'],
+        properties: {
+          ok: { type: 'boolean' },
+          role: { type: 'string' },
+          readable_tables: {
+            type: 'array',
+            description: '能读取的业务表 <schema>.<表名>，最多列出 20 个',
+            maxItems: 20,
+            items: { type: 'string' },
+          },
+          missing: { type: 'array', items: { type: 'string' } },
+          read_only: { type: 'boolean', description: 'default_transaction_read_only 为 on' },
+          checked_at: { $ref: '../../../schemas/common.schema.json#/$defs/Timestamp' },
+        },
+      },
+    },
+  },
   'https://srenautix.io/contract/integrations/identity/v1/identity.schema.json': {
     $schema: 'https://json-schema.org/draft/2020-12/schema',
     $id: 'https://srenautix.io/contract/integrations/identity/v1/identity.schema.json',
@@ -1274,6 +1681,13 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
         additionalProperties: false,
         required: ['incident_id', 'incident_version', 'prefix', 'severity', 'title', 'sections', 'buttons', 'banner'],
         properties: {
+          kind: {
+            type: 'string',
+            description:
+              'incident 事件消息；goal 主动优化的目标消息（契约 2.28.0）：incident_id 为目标 id，incident_version 为目标的 revision，五段依次为现状（目标与基线）、关键问题（发现与档位）、拓扑联系、解决方案（建议、预期收益、验证）、证据链。不填时为 incident',
+            enum: ['incident', 'goal'],
+            default: 'incident',
+          },
           incident_id: { $ref: '../../../schemas/common.schema.json#/$defs/Uuid' },
           incident_version: { type: 'integer', minimum: 1 },
           prefix: { type: 'string', description: '部署配置的消息前缀，例如影子部署的标记' },
@@ -1909,6 +2323,24 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
         pattern: '^[A-Za-z][A-Za-z0-9.-]*:([a-z0-9]([-a-z0-9]*[a-z0-9])?/)?([A-Za-z0-9._-]|%[0-9A-F]{2})+$',
         maxLength: 400,
       },
+      EntityKey: {
+        title: 'EntityKey',
+        description:
+          '主动优化的实体键（契约 2.28.0，ADR 0146 §1.1）：Kubernetes 对象或领域包组件为 ComponentKey；逻辑实体为 <类型>:<组件内的键>，例如 pg_statement:<CNPG Cluster 名>/<库>/<语句指纹>、pg_table:<Cluster 名>/<库>/<schema>.<表>、route:<服务>/<endpoint>、stage:<服务>/<阶段>。逻辑实体都挂到一个拓扑组件上',
+        type: 'string',
+        minLength: 3,
+        maxLength: 400,
+        pattern: '^[A-Za-z][A-Za-z0-9._-]*:.+$',
+      },
+      Subject: {
+        title: 'Subject',
+        description:
+          '研判、提议、出境清单与消息的主体（契约 2.28.0，ADR 0146 §8）：incident 事件；goal 主动优化的目标。没有 subject 的旧数据都是事件。主体为 goal 时沿用的事件字段语义为：incident_id 取目标 id，incident_version 取目标的 revision',
+        type: 'object',
+        additionalProperties: false,
+        required: ['type', 'id'],
+        properties: { type: { type: 'string', enum: ['incident', 'goal'] }, id: { $ref: '#/$defs/Uuid' } },
+      },
       ComponentNames: {
         type: 'object',
         description:
@@ -2132,8 +2564,8 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
       type: {
         type: 'string',
         description:
-          'incident：真实事件；feedback：来自已绑定账号且给出根因的反馈；benign：被人工忽略或平静时段注入的告警；abstain：去掉根因异常卡后的反事实快照；scenario：Kind 上注入的级联故障',
-        enum: ['incident', 'feedback', 'benign', 'abstain', 'scenario'],
+          'incident：真实事件；feedback：来自已绑定账号且给出根因的反馈；benign：被人工忽略或平静时段注入的告警；abstain：去掉根因异常卡后的反事实快照；scenario：Kind 上注入的级联故障；optimization：主动优化的目标运行（契约 2.28.0，ADR 0146 §7），incident_id 为 null，标准答案在 truth.optimization',
+        enum: ['incident', 'feedback', 'benign', 'abstain', 'scenario', 'optimization'],
       },
       cluster_id: { $ref: 'common.schema.json#/$defs/ClusterId' },
       incident_id: {
@@ -2216,6 +2648,47 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
           forbid_evidence_consistent: {
             type: 'boolean',
             description: 'benign 与 abstain 用例为 true：出现 evidence_consistent 即为误报',
+          },
+          optimization: { $ref: '#/$defs/OptimizationTruth' },
+        },
+      },
+      OptimizationTruth: {
+        title: 'EvalOptimizationTruth',
+        description:
+          'optimization 用例的标准答案（ADR 0146 §7）。root_components 为期望发现挂到的组件，disposition 为 null；良性用例 benign 为 true，findings、templates、locations 为空，任何建议都算误报',
+        type: 'object',
+        additionalProperties: false,
+        required: ['goal', 'benign', 'findings', 'templates', 'locations', 'known_gain'],
+        properties: {
+          goal: { $ref: 'goal.schema.json#/$defs/GoalSpec' },
+          benign: { type: 'boolean' },
+          findings: {
+            type: 'array',
+            description: '期望的发现：类型与实体键（召回@3 与精确率）',
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['kind', 'entity'],
+              properties: { kind: { type: 'string' }, entity: { $ref: 'common.schema.json#/$defs/EntityKey' } },
+            },
+          },
+          templates: { type: 'array', description: '可接受的模板 <pack>/<id>', items: { type: 'string' } },
+          locations: {
+            type: 'array',
+            description: '期望的代码位置（文件命中@3 与函数命中@1）',
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['path', 'symbol'],
+              properties: {
+                path: { type: 'string' },
+                symbol: { type: ['string', 'null'], description: '函数或方法名（带接收者时写 Receiver.Method）' },
+              },
+            },
+          },
+          known_gain: {
+            type: ['number', 'null'],
+            description: '已知的实际收益（指标单位，按改善方向取正值），用于预期收益的校准',
           },
         },
       },
@@ -2725,6 +3198,11 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
       { $ref: '#/$defs/ExecutionUpdated' },
       { $ref: '#/$defs/FeedbackRecorded' },
       { $ref: '#/$defs/ConditionChanged' },
+      { $ref: '#/$defs/GoalCreated' },
+      { $ref: '#/$defs/GoalRunConcluded' },
+      { $ref: '#/$defs/FindingUpdated' },
+      { $ref: '#/$defs/RecommendationUpdated' },
+      { $ref: '#/$defs/OutcomeVerified' },
     ],
     $defs: {
       EventType: {
@@ -2746,6 +3224,11 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
           'execution.updated',
           'feedback.recorded',
           'condition.changed',
+          'goal.created',
+          'goal.run.concluded',
+          'finding.updated',
+          'recommendation.updated',
+          'outcome.verified',
         ],
       },
       Owner: { title: 'OutboxOwner', type: 'string', enum: ['server', 'worker'] },
@@ -2990,6 +3473,76 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
         required: ['type', 'payload'],
         properties: { type: { const: 'condition.changed' }, payload: { $ref: 'condition.schema.json' } },
       },
+      GoalCreated: {
+        title: 'GoalCreatedEvent',
+        description: '目标创建（契约 2.28.0）',
+        allOf: [{ $ref: '#/$defs/Header' }],
+        type: 'object',
+        required: ['type', 'payload'],
+        properties: { type: { const: 'goal.created' }, payload: { $ref: 'goal.schema.json' } },
+      },
+      GoalRunConcluded: {
+        title: 'GoalRunConcludedEvent',
+        description: '目标运行结束（契约 2.28.0），含失败与没有差距',
+        allOf: [{ $ref: '#/$defs/Header' }],
+        type: 'object',
+        required: ['type', 'payload'],
+        properties: {
+          type: { const: 'goal.run.concluded' },
+          payload: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['goal_id', 'goal_revision', 'run_id', 'summary', 'output'],
+            properties: {
+              goal_id: { $ref: 'common.schema.json#/$defs/Uuid' },
+              goal_revision: { type: 'integer', minimum: 1 },
+              run_id: { $ref: 'common.schema.json#/$defs/Uuid' },
+              summary: { $ref: 'goal.schema.json#/$defs/GoalRunSummary' },
+              output: {
+                description: '运行输出；在基线之前失败时为 null',
+                oneOf: [{ type: 'null' }, { $ref: 'optimization-output.schema.json' }],
+              },
+            },
+          },
+        },
+      },
+      FindingUpdated: {
+        title: 'FindingUpdatedEvent',
+        description: '发现创建或更新（契约 2.28.0）',
+        allOf: [{ $ref: '#/$defs/Header' }],
+        type: 'object',
+        required: ['type', 'payload'],
+        properties: { type: { const: 'finding.updated' }, payload: { $ref: 'finding.schema.json' } },
+      },
+      RecommendationUpdated: {
+        title: 'RecommendationUpdatedEvent',
+        description: '建议创建或状态变化（契约 2.28.0）',
+        allOf: [{ $ref: '#/$defs/Header' }],
+        type: 'object',
+        required: ['type', 'payload'],
+        properties: { type: { const: 'recommendation.updated' }, payload: { $ref: 'recommendation.schema.json' } },
+      },
+      OutcomeVerified: {
+        title: 'OutcomeVerifiedEvent',
+        description: '建议的验证结束（契约 2.28.0）',
+        allOf: [{ $ref: '#/$defs/Header' }],
+        type: 'object',
+        required: ['type', 'payload'],
+        properties: {
+          type: { const: 'outcome.verified' },
+          payload: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['recommendation_id', 'finding', 'goal_id', 'outcome'],
+            properties: {
+              recommendation_id: { $ref: 'common.schema.json#/$defs/Uuid' },
+              finding: { $ref: 'common.schema.json#/$defs/Sha256' },
+              goal_id: { $ref: 'common.schema.json#/$defs/Uuid' },
+              outcome: { $ref: 'recommendation.schema.json#/$defs/RecommendationOutcome' },
+            },
+          },
+        },
+      },
     },
   },
   'https://srenautix.io/contract/schemas/evidence-card.schema.json': {
@@ -3099,7 +3652,11 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
         properties: {
           name: { type: 'string', description: '在 CEL 中引用的名字', pattern: '^[a-z][a-zA-Z0-9_]*$' },
           signal: { type: 'string', description: 'signals.yaml 中的信号 <pack>/<signal id>；同包内可省略 <pack>/' },
-          mode: { type: 'string', enum: ['range', 'instant', 'logs', 'traces'] },
+          mode: {
+            type: 'string',
+            description: 'dbstats 读取 dbstats 信号（契约 2.28.0）：每行一条序列，点为采样时刻',
+            enum: ['range', 'instant', 'logs', 'traces', 'dbstats'],
+          },
           params: { type: 'object', additionalProperties: { type: ['number', 'string', 'boolean'] } },
           limit: { type: 'integer', minimum: 1, maximum: 1000 },
           empty_is: {
@@ -3503,6 +4060,432 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
       },
     },
   },
+  'https://srenautix.io/contract/schemas/finding.schema.json': {
+    $schema: 'https://json-schema.org/draft/2020-12/schema',
+    $id: 'https://srenautix.io/contract/schemas/finding.schema.json',
+    title: 'Finding',
+    description:
+      '一个实体上的一个问题（契约 2.28.0，ADR 0146 §1.4），跨分析运行持久保存；fingerprint 是去重的唯一键。每次运行先按指纹更新已有发现（last_seen、差距、份额、档位），再判断是否生成建议',
+    type: 'object',
+    additionalProperties: false,
+    required: [
+      'fingerprint',
+      'cluster_id',
+      'domain',
+      'kind',
+      'entity',
+      'component',
+      'indicator',
+      'gap',
+      'share',
+      'level',
+      'evidence_fingerprint',
+      'status',
+      'cooldown_until',
+      'last_goal_id',
+      'last_run_id',
+      'first_seen',
+      'last_seen',
+      'updated_at',
+    ],
+    properties: {
+      fingerprint: {
+        description: 'sha256(JCS([cluster_id, domain, kind, entity.key]))',
+        $ref: 'common.schema.json#/$defs/Sha256',
+      },
+      cluster_id: { $ref: 'common.schema.json#/$defs/ClusterId' },
+      domain: { $ref: 'goal.schema.json#/$defs/DomainId' },
+      kind: {
+        type: 'string',
+        description:
+          '领域声明的发现类型（DomainDiagnostic.finding），例如 pg.statement_dominant、pg.temp_spill、workload.cpu_overprovisioned',
+        pattern: '^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$',
+      },
+      entity: { $ref: '#/$defs/FindingEntity' },
+      component: {
+        description: '实体挂到的拓扑组件（逻辑实体）或实体本身（Kubernetes 对象）',
+        $ref: 'common.schema.json#/$defs/ComponentKey',
+      },
+      indicator: {
+        description: '发现影响的指标；诊断卡没有声明时为 null',
+        oneOf: [{ type: 'null' }, { $ref: 'pack.schema.json#/$defs/IndicatorRef' }],
+      },
+      gap: {
+        type: ['number', 'null'],
+        description: '指标相对目标或门槛的差距（指标单位，按改善方向取正值）；没有可比较的目标时为 null',
+      },
+      share: {
+        type: ['number', 'null'],
+        minimum: 0,
+        maximum: 1,
+        description: '实体在指标中的份额（份额卡）；没有份额卡时为 null',
+      },
+      level: {
+        description: '最近一次分析的结论档位（ADR 0146 §2.4）；进入候选但未分析时为 null',
+        oneOf: [{ type: 'null' }, { $ref: 'common.schema.json#/$defs/ConclusionLevel' }],
+      },
+      evidence_fingerprint: {
+        description: '支持卡与份额卡的判定向量指纹；未分析时为 null',
+        oneOf: [{ type: 'null' }, { $ref: 'common.schema.json#/$defs/Sha256' }],
+      },
+      status: { $ref: '#/$defs/FindingStatus' },
+      cooldown_until: {
+        description: '被拒绝之后的冷却期限',
+        oneOf: [{ type: 'null' }, { $ref: 'common.schema.json#/$defs/Timestamp' }],
+      },
+      last_goal_id: { oneOf: [{ type: 'null' }, { $ref: 'common.schema.json#/$defs/Uuid' }] },
+      last_run_id: { oneOf: [{ type: 'null' }, { $ref: 'common.schema.json#/$defs/Uuid' }] },
+      first_seen: { $ref: 'common.schema.json#/$defs/Timestamp' },
+      last_seen: { $ref: 'common.schema.json#/$defs/Timestamp' },
+      updated_at: { $ref: 'common.schema.json#/$defs/Timestamp' },
+    },
+    $defs: {
+      FindingStatus: {
+        title: 'FindingStatus',
+        description:
+          'open 已发现；recommended 已有建议（PR 或 issue）；accepted PR 合并或 issue 以 completed 关闭；verifying 验证中；fixed 验证改善或差距消失（待人确认关闭）；no_effect 验证没有效果；regressed 验证回退；rejected 被拒绝，进入冷却期；suppressed 人工抑制',
+        type: 'string',
+        enum: [
+          'open',
+          'recommended',
+          'accepted',
+          'verifying',
+          'fixed',
+          'no_effect',
+          'regressed',
+          'rejected',
+          'suppressed',
+        ],
+      },
+      FindingEntity: {
+        title: 'FindingEntity',
+        type: 'object',
+        additionalProperties: false,
+        required: ['type', 'key', 'display', 'labels'],
+        properties: {
+          type: {
+            type: 'string',
+            description: '逻辑实体类型（pg_statement、pg_table、pg_index、route、stage），或 Kubernetes 的 Kind',
+            minLength: 1,
+          },
+          key: { $ref: 'common.schema.json#/$defs/EntityKey' },
+          display: { type: 'string', maxLength: 200, description: '可读名称，只用于显示' },
+          labels: {
+            description:
+              '实体的标签（EntityRows.labels），例如 pg_statement 的 database、queryid；按实体执行的卡片与模板以 $params 引用',
+            $ref: 'common.schema.json#/$defs/Labels',
+          },
+        },
+      },
+    },
+  },
+  'https://srenautix.io/contract/schemas/goal.schema.json': {
+    $schema: 'https://json-schema.org/draft/2020-12/schema',
+    $id: 'https://srenautix.io/contract/schemas/goal.schema.json',
+    title: 'Goal',
+    description:
+      '主动优化的目标（契约 2.28.0，ADR 0146 §1.2）。目标只引用领域包声明的指标或领域，不含任何自由查询；规格每修改一次 revision 加一。每次分析是一次目标运行（GoalRunSummary），结果见 optimization-output.schema.json',
+    type: 'object',
+    additionalProperties: false,
+    required: [
+      'goal_id',
+      'revision',
+      'cluster_id',
+      'spec',
+      'state',
+      'state_reason',
+      'expires_at',
+      'last_run',
+      'created_at',
+      'updated_at',
+    ],
+    properties: {
+      goal_id: { $ref: 'common.schema.json#/$defs/Uuid' },
+      revision: { type: 'integer', minimum: 1 },
+      cluster_id: { $ref: 'common.schema.json#/$defs/ClusterId' },
+      spec: { $ref: '#/$defs/GoalSpec' },
+      state: { $ref: '#/$defs/GoalState' },
+      state_reason: {
+        type: ['string', 'null'],
+        description: '状态的机器可读原因，例如 failed 的 baseline_insufficient、cancelled 的 user',
+        maxLength: 200,
+      },
+      expires_at: {
+        description: '到期仍未达成时状态为 expired，附最后一次分析的报告',
+        $ref: 'common.schema.json#/$defs/Timestamp',
+      },
+      last_run: {
+        description: '最近一次运行；还没有运行时为 null',
+        oneOf: [{ type: 'null' }, { $ref: '#/$defs/GoalRunSummary' }],
+      },
+      created_at: { $ref: 'common.schema.json#/$defs/Timestamp' },
+      updated_at: { $ref: 'common.schema.json#/$defs/Timestamp' },
+    },
+    $defs: {
+      GoalState: {
+        title: 'GoalState',
+        description:
+          'queued 排队；analyzing 分析中；recommended 有建议已发布；verifying 验证中；achieved 达成；not_achieved 验证后未达成；no_action 没有差距或没有通过门槛的建议；cancelled 取消；expired 到期；failed 失败（state_reason 写明原因）',
+        type: 'string',
+        enum: [
+          'queued',
+          'analyzing',
+          'recommended',
+          'verifying',
+          'achieved',
+          'not_achieved',
+          'no_action',
+          'cancelled',
+          'expired',
+          'failed',
+        ],
+      },
+      GoalSpec: {
+        title: 'GoalSpec',
+        type: 'object',
+        additionalProperties: false,
+        required: ['origin', 'subject', 'objective', 'outputs', 'budget'],
+        properties: {
+          origin: { $ref: '#/$defs/GoalOrigin' },
+          subject: { $ref: '#/$defs/GoalSubject' },
+          objective: {
+            description: '目标值；领域体检没有目标值时为 null，差距按领域的门槛（DomainGates.thresholds）',
+            oneOf: [{ type: 'null' }, { $ref: '#/$defs/GoalObjective' }],
+          },
+          outputs: {
+            type: 'array',
+            description: '允许的建议类别',
+            minItems: 1,
+            uniqueItems: true,
+            items: { $ref: '#/$defs/RecommendationKind' },
+          },
+          budget: { $ref: '#/$defs/GoalBudget' },
+        },
+      },
+      RecommendationKind: {
+        title: 'RecommendationKind',
+        description: 'ops_pr：ops 仓库的 PR（gitops_pr 提议）；business_issue：业务仓库的 issue',
+        type: 'string',
+        enum: ['ops_pr', 'business_issue'],
+      },
+      GoalOrigin: {
+        title: 'GoalOrigin',
+        description: '目标的来源：manual 人工下达；checkup 领域的定期体检；trend 趋势扫描；forecast_alert 预测类告警',
+        oneOf: [
+          {
+            title: 'GoalOriginManual',
+            type: 'object',
+            additionalProperties: false,
+            required: ['kind', 'channel', 'principal'],
+            properties: {
+              kind: { const: 'manual' },
+              channel: { type: 'string', enum: ['console', 'telegram', 'api'] },
+              principal: { type: 'string', minLength: 1, description: '下达目标的主体 id；api 为调用方 id' },
+            },
+          },
+          {
+            title: 'GoalOriginCheckup',
+            type: 'object',
+            additionalProperties: false,
+            required: ['kind', 'domain', 'schedule_id'],
+            properties: {
+              kind: { const: 'checkup' },
+              domain: { $ref: '#/$defs/DomainId' },
+              schedule_id: { type: 'string', minLength: 1 },
+            },
+          },
+          {
+            title: 'GoalOriginTrend',
+            type: 'object',
+            additionalProperties: false,
+            required: ['kind', 'trend', 'entity'],
+            properties: {
+              kind: { const: 'trend' },
+              trend: { type: 'string', description: '<包>/<领域>/<趋势 id>', minLength: 1 },
+              entity: { $ref: 'common.schema.json#/$defs/EntityKey' },
+            },
+          },
+          {
+            title: 'GoalOriginForecastAlert',
+            type: 'object',
+            additionalProperties: false,
+            required: ['kind', 'alert_fingerprint'],
+            properties: { kind: { const: 'forecast_alert' }, alert_fingerprint: { type: 'string', minLength: 1 } },
+          },
+        ],
+      },
+      DomainId: { title: 'DomainId', type: 'string', pattern: '^[a-z][a-z0-9_-]*$' },
+      GoalScope: {
+        title: 'GoalScope',
+        description: '范围白名单：组件键与命名空间；两者都为空表示不限',
+        type: 'object',
+        additionalProperties: false,
+        required: ['components', 'namespaces'],
+        properties: {
+          components: { type: 'array', maxItems: 50, items: { $ref: 'common.schema.json#/$defs/ComponentKey' } },
+          namespaces: {
+            type: 'array',
+            maxItems: 50,
+            items: { type: 'string', pattern: '^[a-z0-9]([-a-z0-9]*[a-z0-9])?$' },
+          },
+        },
+      },
+      GoalSubject: {
+        title: 'GoalSubject',
+        description: '目标对象：一个指标（带参数），或一个领域的体检',
+        oneOf: [
+          {
+            title: 'GoalSubjectIndicator',
+            type: 'object',
+            additionalProperties: false,
+            required: ['type', 'indicator', 'params', 'scope'],
+            properties: {
+              type: { const: 'indicator' },
+              indicator: { $ref: 'pack.schema.json#/$defs/IndicatorRef' },
+              params: {
+                type: 'object',
+                description: '按指标的 params schema 校验',
+                additionalProperties: { type: ['number', 'string', 'boolean'] },
+              },
+              scope: { $ref: '#/$defs/GoalScope' },
+            },
+          },
+          {
+            title: 'GoalSubjectDomain',
+            type: 'object',
+            additionalProperties: false,
+            required: ['type', 'domain', 'scope'],
+            properties: {
+              type: { const: 'domain' },
+              domain: { $ref: '#/$defs/DomainId' },
+              scope: { $ref: '#/$defs/GoalScope' },
+            },
+          },
+        ],
+      },
+      Comparator: { title: 'Comparator', type: 'string', enum: ['lt', 'le', 'gt', 'ge'] },
+      GoalObjective: {
+        title: 'GoalObjective',
+        type: 'object',
+        additionalProperties: false,
+        required: ['comparator', 'target', 'unit', 'statistic', 'window'],
+        properties: {
+          comparator: { $ref: '#/$defs/Comparator' },
+          target: { type: 'number' },
+          unit: { $ref: 'pack.schema.json#/$defs/IndicatorUnit' },
+          statistic: { $ref: 'pack.schema.json#/$defs/IndicatorStatistic' },
+          window: { description: '基线窗口，默认 7d，不超过 14d', $ref: 'common.schema.json#/$defs/Duration' },
+        },
+      },
+      GoalBudget: {
+        title: 'GoalBudget',
+        description: '一次运行的预算（ADR 0146 §1.2 的默认值）',
+        type: 'object',
+        additionalProperties: false,
+        required: [
+          'tokens',
+          'duration_seconds',
+          'checks',
+          'dbstats_queries',
+          'traces_queries',
+          'logs_queries',
+          'code_files',
+          'code_bytes',
+          'github_requests',
+        ],
+        properties: {
+          tokens: { type: 'integer', minimum: 0, maximum: 2000000, default: 400000 },
+          duration_seconds: { type: 'integer', minimum: 60, maximum: 7200, default: 1200 },
+          checks: { type: 'integer', minimum: 0, maximum: 50, default: 12 },
+          dbstats_queries: { type: 'integer', minimum: 0, maximum: 60, default: 30 },
+          traces_queries: { type: 'integer', minimum: 0, maximum: 30, default: 10 },
+          logs_queries: { type: 'integer', minimum: 0, maximum: 30, default: 10 },
+          code_files: { type: 'integer', minimum: 0, maximum: 200, default: 200 },
+          code_bytes: { type: 'integer', minimum: 0, maximum: 8388608, default: 8388608 },
+          github_requests: { type: 'integer', minimum: 0, maximum: 1000, default: 300 },
+        },
+      },
+      GoalCreate: {
+        title: 'GoalCreate',
+        description:
+          '下达目标的请求体（POST /v1/goals）。origin 由认证上下文决定（控制台会话为 console，API token 为 api，聊天渠道的确认卡片为 telegram）；budget 只写要改的项，其余取默认值',
+        type: 'object',
+        additionalProperties: false,
+        required: ['cluster_id', 'subject', 'objective', 'outputs'],
+        properties: {
+          cluster_id: { $ref: 'common.schema.json#/$defs/ClusterId' },
+          subject: { $ref: '#/$defs/GoalSubject' },
+          objective: { oneOf: [{ type: 'null' }, { $ref: '#/$defs/GoalObjective' }] },
+          outputs: { type: 'array', minItems: 1, uniqueItems: true, items: { $ref: '#/$defs/RecommendationKind' } },
+          budget: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              tokens: { type: 'integer', minimum: 0, maximum: 2000000 },
+              duration_seconds: { type: 'integer', minimum: 60, maximum: 7200 },
+              checks: { type: 'integer', minimum: 0, maximum: 50 },
+              dbstats_queries: { type: 'integer', minimum: 0, maximum: 60 },
+              traces_queries: { type: 'integer', minimum: 0, maximum: 30 },
+              logs_queries: { type: 'integer', minimum: 0, maximum: 30 },
+              code_files: { type: 'integer', minimum: 0, maximum: 200 },
+              code_bytes: { type: 'integer', minimum: 0, maximum: 8388608 },
+              github_requests: { type: 'integer', minimum: 0, maximum: 1000 },
+            },
+          },
+          expires_in: { description: '有效期，默认 14d，不超过 30d', $ref: 'common.schema.json#/$defs/Duration' },
+        },
+      },
+      GoalRunState: {
+        title: 'GoalRunState',
+        description:
+          'queued 排队；deferred 被准入推迟（defer_reason）；running 执行中；concluded 结束（result）；failed 失败；cancelled 目标取消',
+        type: 'string',
+        enum: ['queued', 'deferred', 'running', 'concluded', 'failed', 'cancelled'],
+      },
+      GoalRunSummary: {
+        title: 'GoalRunSummary',
+        type: 'object',
+        additionalProperties: false,
+        required: [
+          'run_id',
+          'goal_id',
+          'goal_revision',
+          'state',
+          'result',
+          'reason',
+          'gap',
+          'findings',
+          'recommendations',
+          'queued_at',
+          'started_at',
+          'finished_at',
+        ],
+        properties: {
+          run_id: { $ref: 'common.schema.json#/$defs/Uuid' },
+          goal_id: { $ref: 'common.schema.json#/$defs/Uuid' },
+          goal_revision: { type: 'integer', minimum: 1 },
+          state: { $ref: '#/$defs/GoalRunState' },
+          result: {
+            description:
+              'concluded 时的结果：no_gap 没有差距（不调用模型）；recommended 有通过门槛的建议；report_only 有发现、没有建议通过门槛；其余状态为 null',
+            oneOf: [{ type: 'null' }, { type: 'string', enum: ['no_gap', 'recommended', 'report_only'] }],
+          },
+          reason: {
+            type: ['string', 'null'],
+            description:
+              'deferred 的原因（budget、storm、incident、load_guard、rate_limit、schedule_window）或 failed 的原因（baseline_insufficient、model_unavailable、budget_exhausted、deadline、datasource、internal）',
+            maxLength: 200,
+          },
+          gap: { description: '差距是否成立；基线之前为 null', type: ['boolean', 'null'] },
+          findings: { type: 'integer', minimum: 0, description: '本次运行发现或更新的发现数' },
+          recommendations: { type: 'integer', minimum: 0, description: '通过全部门槛的建议数' },
+          queued_at: { $ref: 'common.schema.json#/$defs/Timestamp' },
+          started_at: { oneOf: [{ type: 'null' }, { $ref: 'common.schema.json#/$defs/Timestamp' }] },
+          finished_at: { oneOf: [{ type: 'null' }, { $ref: 'common.schema.json#/$defs/Timestamp' }] },
+        },
+      },
+    },
+  },
   'https://srenautix.io/contract/schemas/incident.schema.json': {
     $schema: 'https://json-schema.org/draft/2020-12/schema',
     $id: 'https://srenautix.io/contract/schemas/incident.schema.json',
@@ -3736,7 +4719,20 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
       display_name: { type: 'string' },
       category: {
         type: 'string',
-        enum: ['alerts', 'metrics', 'logs', 'traces', 'changes', 'notify', 'approve', 'identity', 'model', 'execute'],
+        description: 'dbstats：数据库统计视图（契约 2.28.0）',
+        enum: [
+          'alerts',
+          'metrics',
+          'logs',
+          'traces',
+          'changes',
+          'notify',
+          'approve',
+          'identity',
+          'model',
+          'execute',
+          'dbstats',
+        ],
       },
       direction: {
         type: 'string',
@@ -3794,12 +4790,295 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
       deployment_reports: { type: 'array', description: '真实部署报告的链接', items: { type: 'string' } },
     },
   },
+  'https://srenautix.io/contract/schemas/optimization-output.schema.json': {
+    $schema: 'https://json-schema.org/draft/2020-12/schema',
+    $id: 'https://srenautix.io/contract/schemas/optimization-output.schema.json',
+    title: 'OptimizationOutput',
+    description:
+      '一次目标运行经代码校验后的输出（契约 2.28.0，ADR 0146 §2）：基线、差距、候选发现、按发现分组的账本、每个发现的结论、建议与门槛记录、validation_notes。baseline、gap、candidates 与 recommendations 的数值全部由代码从信号卡计算；模型只提出假设、选择检查并写说明。没有差距时整次运行不调用模型，ledger 与 conclusions 为空',
+    type: 'object',
+    additionalProperties: false,
+    required: [
+      'goal_id',
+      'goal_revision',
+      'run_id',
+      'baseline',
+      'gap',
+      'candidates',
+      'hypotheses',
+      'next_checks',
+      'conclusions',
+      'recommendations',
+      'summary',
+      'stop_reason',
+      'check_cards',
+      'evidence_index',
+      'validation_notes',
+    ],
+    properties: {
+      goal_id: { $ref: 'common.schema.json#/$defs/Uuid' },
+      goal_revision: { type: 'integer', minimum: 1 },
+      run_id: { $ref: 'common.schema.json#/$defs/Uuid' },
+      baseline: { $ref: '#/$defs/Baseline' },
+      gap: { $ref: '#/$defs/Gap' },
+      candidates: {
+        type: 'array',
+        description: '候选发现，按“份额 × 差距”降序；前 3 个 selected 为 true，进入假设；其余为“未分析的候选”',
+        maxItems: 50,
+        items: { $ref: '#/$defs/Candidate' },
+      },
+      hypotheses: {
+        type: 'array',
+        description: '假设账本：root_component 为发现挂到的组件，finding 给出分组键；同一发现上的假设互为竞争假设',
+        maxItems: 9,
+        items: { $ref: '#/$defs/FindingHypothesis' },
+      },
+      next_checks: { type: 'array', maxItems: 12, items: { $ref: 'research-output.schema.json#/$defs/NextCheck' } },
+      conclusions: {
+        type: 'array',
+        description: '每个进入假设的发现一条，档位由代码按 ADR 0146 §2.4 计算',
+        maxItems: 3,
+        items: { $ref: '#/$defs/FindingConclusion' },
+      },
+      recommendations: {
+        type: 'array',
+        description: '本次运行评估过的建议与门槛记录（每次运行最多 2 个通过全部门槛）',
+        maxItems: 12,
+        items: { $ref: '#/$defs/RecommendationAttempt' },
+      },
+      summary: {
+        type: 'string',
+        maxLength: 600,
+        description: '【模型】本次分析的说明；没有调用模型时为代码生成的说明',
+      },
+      stop_reason: {
+        description: '检验循环的停止原因（取值同 ResearchOutput.stop_reason）；没有差距时为 null',
+        type: ['string', 'null'],
+        enum: ['leader_supported', 'no_change', 'step_limit', 'deadline', 'budget', 'model_unavailable', null],
+      },
+      check_cards: {
+        type: 'array',
+        description: '诊断卡、份额卡与区分性检查产生的证据卡（编号见 evidence_index），序列为空数组',
+        maxItems: 60,
+        items: { $ref: 'evidence-result.schema.json' },
+      },
+      evidence_index: {
+        type: 'array',
+        description: '运行内的证据引用到定义与实体的映射：card:<n> → <card_id>@<实体键>',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['ref', 'target'],
+          properties: { ref: { $ref: 'common.schema.json#/$defs/EvidenceRef' }, target: { type: 'string' } },
+        },
+      },
+      validation_notes: {
+        type: 'array',
+        description:
+          '代码校验的修改记录：删除的无效证据引用、拒绝的未知模板与原始查询、降级的结论、删除的无法核实的数值等',
+        items: { type: 'string' },
+      },
+    },
+    $defs: {
+      Baseline: {
+        title: 'OptimizationBaseline',
+        type: 'object',
+        additionalProperties: false,
+        required: ['window', 'sufficient', 'missing', 'indicators'],
+        properties: {
+          window: { $ref: 'common.schema.json#/$defs/TimeWindow' },
+          sufficient: {
+            type: 'boolean',
+            description: '覆盖率不低于 90% 且至少 3 个业务高峰；否则运行以 failed（baseline_insufficient）结束',
+          },
+          missing: {
+            type: 'array',
+            description: '基线不足时缺少的数据（例如“postgres/db-time 覆盖率 72%”）',
+            items: { type: 'string', maxLength: 300 },
+          },
+          indicators: { type: 'array', items: { $ref: '#/$defs/BaselineIndicator' } },
+        },
+      },
+      BaselineIndicator: {
+        title: 'BaselineIndicator',
+        type: 'object',
+        additionalProperties: false,
+        required: [
+          'indicator',
+          'params',
+          'entity',
+          'unit',
+          'better',
+          'statistic',
+          'value',
+          'hours',
+          'covered_hours',
+          'peak_hours',
+          'violation_ratio',
+          'hourly',
+        ],
+        properties: {
+          indicator: { $ref: 'pack.schema.json#/$defs/IndicatorRef' },
+          params: { type: 'object', additionalProperties: { type: ['number', 'string', 'boolean'] } },
+          entity: { $ref: 'common.schema.json#/$defs/EntityKey' },
+          unit: { $ref: 'pack.schema.json#/$defs/IndicatorUnit' },
+          better: { type: 'string', enum: ['lower', 'higher'] },
+          statistic: { $ref: 'pack.schema.json#/$defs/IndicatorStatistic' },
+          value: { type: ['number', 'null'], description: '统计值；没有数据时为 null' },
+          hours: { type: 'integer', minimum: 0 },
+          covered_hours: { type: 'integer', minimum: 0 },
+          peak_hours: { type: 'integer', minimum: 0, description: '按负载指标判定的业务高峰小时数（负载前 20%）' },
+          violation_ratio: {
+            type: ['number', 'null'],
+            minimum: 0,
+            maximum: 1,
+            description: '违反目标或门槛的小时占比；没有目标与门槛时为 null',
+          },
+          hourly: {
+            type: 'array',
+            description: '按小时的取值 [unix 秒, 值或 null]，控制台画基线图',
+            maxItems: 336,
+            items: {
+              type: 'array',
+              tsType: '[number, number | null]',
+              prefixItems: [{ type: 'number' }, { type: ['number', 'null'] }],
+              items: false,
+              minItems: 2,
+            },
+          },
+        },
+      },
+      Gap: {
+        title: 'OptimizationGap',
+        type: 'object',
+        additionalProperties: false,
+        required: ['exists', 'basis', 'detail'],
+        properties: {
+          exists: { type: 'boolean' },
+          basis: {
+            type: 'string',
+            description: 'objective 按目标值；gate 按领域门槛；none 基线不足或没有可比较的目标',
+            enum: ['objective', 'gate', 'none'],
+          },
+          detail: { type: 'string', maxLength: 500 },
+        },
+      },
+      Candidate: {
+        title: 'OptimizationCandidate',
+        type: 'object',
+        additionalProperties: false,
+        required: [
+          'finding',
+          'kind',
+          'entity',
+          'component',
+          'diagnostic',
+          'card_ref',
+          'share',
+          'share_ref',
+          'gap',
+          'score',
+          'selected',
+          'skipped_reason',
+        ],
+        properties: {
+          finding: { description: '发现指纹', $ref: 'common.schema.json#/$defs/Sha256' },
+          kind: { type: 'string' },
+          entity: { $ref: 'finding.schema.json#/$defs/FindingEntity' },
+          component: { $ref: 'common.schema.json#/$defs/ComponentKey' },
+          diagnostic: { type: 'string', description: '<领域>/<诊断卡 id>' },
+          card_ref: { $ref: 'common.schema.json#/$defs/EvidenceRef' },
+          share: { type: ['number', 'null'], minimum: 0, maximum: 1 },
+          share_ref: { oneOf: [{ type: 'null' }, { $ref: 'common.schema.json#/$defs/EvidenceRef' }] },
+          gap: { type: ['number', 'null'] },
+          score: { type: 'number', minimum: 0 },
+          selected: { type: 'boolean' },
+          skipped_reason: {
+            type: ['string', 'null'],
+            description: '没有进入假设的原因：rank（排在前 3 之外）、verifying（已修复的发现在验证期内）、cooldown',
+            enum: ['rank', 'verifying', 'cooldown', null],
+          },
+        },
+      },
+      FindingHypothesis: {
+        title: 'FindingHypothesis',
+        type: 'object',
+        additionalProperties: false,
+        required: ['finding', 'hypothesis'],
+        properties: {
+          finding: { $ref: 'common.schema.json#/$defs/Sha256' },
+          hypothesis: { $ref: 'research-output.schema.json#/$defs/Hypothesis' },
+        },
+      },
+      OptimizationConsistency: {
+        title: 'OptimizationConsistency',
+        description:
+          '优化场景的 evidence_consistent 条件逐项结果（ADR 0146 §2.4）；trend_onset 只对趋势触发的目标求值，其余为 null',
+        type: 'object',
+        additionalProperties: false,
+        required: ['gap_holds', 'share_holds', 'trend_onset', 'no_contrary_normal', 'competitor_tested'],
+        properties: {
+          gap_holds: { type: 'boolean' },
+          share_holds: { type: 'boolean' },
+          trend_onset: { type: ['boolean', 'null'] },
+          no_contrary_normal: { type: 'boolean' },
+          competitor_tested: { type: 'boolean' },
+        },
+      },
+      FindingConclusion: {
+        title: 'FindingConclusion',
+        type: 'object',
+        additionalProperties: false,
+        required: [
+          'finding',
+          'level',
+          'hypothesis_id',
+          'consistency',
+          'support_refs',
+          'share_refs',
+          'contrary_refs',
+          'chosen_by',
+          'note',
+          'undetermined_reason',
+        ],
+        properties: {
+          finding: { $ref: 'common.schema.json#/$defs/Sha256' },
+          level: { $ref: 'common.schema.json#/$defs/ConclusionLevel' },
+          hypothesis_id: { type: ['string', 'null'], pattern: '^h[1-9]$' },
+          consistency: { $ref: '#/$defs/OptimizationConsistency' },
+          support_refs: { type: 'array', items: { $ref: 'common.schema.json#/$defs/EvidenceRef' } },
+          share_refs: { type: 'array', items: { $ref: 'common.schema.json#/$defs/EvidenceRef' } },
+          contrary_refs: { type: 'array', items: { $ref: 'common.schema.json#/$defs/EvidenceRef' } },
+          chosen_by: { type: 'string', enum: ['model', 'ledger'] },
+          note: { type: ['string', 'null'], maxLength: 600, description: '【模型】选择这个假设的说明' },
+          undetermined_reason: { type: ['string', 'null'], maxLength: 400 },
+        },
+      },
+      RecommendationAttempt: {
+        title: 'RecommendationAttempt',
+        type: 'object',
+        additionalProperties: false,
+        required: ['finding', 'kind', 'template', 'gates', 'passed', 'recommendation_id'],
+        properties: {
+          finding: { $ref: 'common.schema.json#/$defs/Sha256' },
+          kind: { $ref: 'goal.schema.json#/$defs/RecommendationKind' },
+          template: { type: 'string' },
+          gates: { type: 'array', items: { $ref: 'recommendation.schema.json#/$defs/GateRecord' } },
+          passed: { type: 'boolean' },
+          recommendation_id: {
+            description: '保存的建议；没有保存时为 null',
+            oneOf: [{ type: 'null' }, { $ref: 'common.schema.json#/$defs/Uuid' }],
+          },
+        },
+      },
+    },
+  },
   'https://srenautix.io/contract/schemas/pack.schema.json': {
     $schema: 'https://json-schema.org/draft/2020-12/schema',
     $id: 'https://srenautix.io/contract/schemas/pack.schema.json',
     title: 'PackManifest',
     description:
-      '领域包的 pack.yaml（DESIGN §6.3）。领域包只包含数据，不包含可执行代码；其余文件的结构见本文件的 $defs：signals.yaml → SignalsFile，components.yaml → ComponentsFile，alerts.yaml → AlertsFile，chains.yaml → ChainsFile，checks.yaml → ChecksFile，rules.yaml → RulesFile，remediations.yaml → RemediationsFile，rca-params.yaml → RcaParams，knowledge/*.yaml → KnowledgeFile，action-requests.yaml → ActionRequestsFile，chaos/*.yaml → ChaosFile，tests/*.yaml → PackTestFile，用户层文件 → UserLayer，pack.lock → PackLock',
+      '领域包的 pack.yaml（DESIGN §6.3）。领域包只包含数据，不包含可执行代码；其余文件的结构见本文件的 $defs：signals.yaml → SignalsFile，components.yaml → ComponentsFile，alerts.yaml → AlertsFile，chains.yaml → ChainsFile，checks.yaml → ChecksFile，rules.yaml → RulesFile，remediations.yaml → RemediationsFile，domains.yaml → DomainsFile，issues.yaml → IssuesFile，rca-params.yaml → RcaParams，knowledge/*.yaml → KnowledgeFile，action-requests.yaml → ActionRequestsFile，chaos/*.yaml → ChaosFile，tests/*.yaml → PackTestFile，用户层文件 → UserLayer，pack.lock → PackLock',
     type: 'object',
     additionalProperties: false,
     required: ['api_version', 'name', 'version', 'maturity', 'requires'],
@@ -3855,7 +5134,11 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
         required: ['id', 'kind', 'alternatives'],
         properties: {
           id: { type: 'string', pattern: '^[a-z0-9][a-z0-9_.-]*$' },
-          kind: { type: 'string', enum: ['metrics', 'logs', 'traces'] },
+          kind: {
+            type: 'string',
+            description: 'dbstats：数据库统计视图（契约 2.28.0，ADR 0146 §3.3），备选的方言必须是 dbstats',
+            enum: ['metrics', 'logs', 'traces', 'dbstats'],
+          },
           unit: { type: 'string' },
           extends: {
             type: 'string',
@@ -3880,13 +5163,33 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
           expr: {
             type: 'string',
             description:
-              '查询模板。可用变量：$selector（按标签档案展开的实体选择器）、$namespace、$name、$node、$rate_window（由抓取间隔推导）、$params.<名字>',
+              '查询模板。可用变量：$selector（按标签档案展开的实体选择器）、$namespace、$name、$node、$rate_window（由抓取间隔推导）、$params.<名字>。dbstats 方言的 expr 是 dbstats/v1 的操作名（例如 statements.top），SQL 由适配器给出',
           },
           dialect: {
             type: 'string',
-            description: 'PromQL 用严格解析器做 lint；使用 MetricsQL 必须显式声明',
-            enum: ['promql', 'metricsql', 'logql', 'logs_match', 'traceql'],
+            description: 'PromQL 用严格解析器做 lint；使用 MetricsQL 必须显式声明；dbstats 只用于 dbstats 信号',
+            enum: ['promql', 'metricsql', 'logql', 'logs_match', 'traceql', 'dbstats'],
             default: 'promql',
+          },
+          args: {
+            type: 'object',
+            description:
+              'dbstats：操作的参数（dbstats/v1 各操作的 args）；字符串值可以整体写成 $params.<名字>，执行时换成参数值，按操作的 schema 校验',
+            additionalProperties: {
+              oneOf: [{ type: ['number', 'string', 'boolean', 'null'] }, { type: 'array', items: { type: 'string' } }],
+            },
+          },
+          column: {
+            type: 'string',
+            description:
+              'dbstats：作为序列取值的数值列（例如 total_exec_time_ms）。每行结果是一条序列，标签为该行的字符串与布尔列，取值为这一列',
+            pattern: '^[a-z_][a-z0-9_]*$',
+          },
+          rate: {
+            type: 'boolean',
+            default: false,
+            description:
+              'dbstats：取值为两次采样（相隔不少于 300 秒）的差值除以间隔秒数，序列只含两次都出现的行；只有一次采样时引用为缺数据',
           },
           probe: { type: 'string', description: '探测该备选是否可用的查询，返回非空即可用；不填时用 expr 本身探测' },
           recording_rule: {
@@ -4088,14 +5391,31 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
           category: {
             type: 'string',
             description:
-              'release_rollback 发布回退；config_resource 副本数、HPA 上限、request/limit、超时与限流参数；alert_rule 告警阈值、持续时间、严重度；topology_coverage 拓扑与领域包覆盖',
-            enum: ['release_rollback', 'config_resource', 'alert_rule', 'topology_coverage'],
+              'release_rollback 发布回退；config_resource 副本数、HPA 上限、request/limit、超时与限流参数；alert_rule 告警阈值、持续时间、严重度；topology_coverage 拓扑与领域包覆盖；component_param 组件参数（PG 的 GUC、连接池、缓存与存储组件的配置，契约 2.28.0）',
+            enum: ['release_rollback', 'config_resource', 'alert_rule', 'topology_coverage', 'component_param'],
+          },
+          applies: {
+            type: 'string',
+            description:
+              'incident：事件的自愈 PR（ADR 0108）；goal：主动优化的 ops PR（契约 2.28.0，ADR 0146 §4.3），由领域的 optimizations 引用。现有模板不写时为 incident，行为不变',
+            enum: ['incident', 'goal'],
+            default: 'incident',
           },
           repository: { type: 'string', description: '仓库角色，例如 gitops；server 配置把它映射到仓库与布局' },
           when: {
             type: 'string',
             description:
-              'CEL 适用条件。变量：incident、root、research（触发计划的研判结论 {disposition, level}，取值见 Disposition 与 ConclusionLevel；没有研判时为 null）、cards（卡片全局 id → 结论）、alerts（成员告警：alertname、labels、annotations、entity，以及 AlertClassification 的 role、source、catalog_entry、chronic）、params',
+              'CEL 适用条件。变量：incident、root、research（触发计划的研判结论 {disposition, level}，取值见 Disposition 与 ConclusionLevel；没有研判时为 null）、cards（卡片全局 id → 结论）、alerts（成员告警：alertname、labels、annotations、entity，以及 AlertClassification 的 role、source、catalog_entry、chronic）、params。applies 为 goal 时另有 goal（GoalSpec 与 goal_id、revision）、finding（Finding）与 finding_cards（发现的支持卡、份额卡与诊断卡：卡片全局 id → 结论，形状与 cards 相同），incident 与 alerts 为空，root 为发现挂到的组件',
+          },
+          estimate: {
+            $ref: '#/$defs/Estimate',
+            description: 'applies 为 goal 时必填：确定性计算的预期收益（ADR 0146 §2.5 的 G2）',
+          },
+          guard: {
+            type: 'array',
+            description:
+              '安全约束（ADR 0146 §2.5 的 G3）：在 let 之后求值，任一为 false 时不生成补丁，say 写明原因。变量与 skip_if 相同',
+            items: { $ref: '#/$defs/Guard' },
           },
           params: {
             type: 'object',
@@ -4162,6 +5482,12 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
               say: { $ref: 'evidence-card.schema.json#/$defs/LocalizedText' },
               cards: { type: 'array', description: '合并并同步后应判为正常的卡片全局 id', items: { type: 'string' } },
               within: { type: 'string', pattern: '^[0-9]+(s|m|h)$' },
+              guards: {
+                type: 'array',
+                description:
+                  'applies 为 goal：验证时的守护指标 <包>/<指标>（错误率、其他语句的执行时间、CPU 限流、OOM 等），恶化超过 10% 判为 regressed（ADR 0146 §2.6）',
+                items: { $ref: '#/$defs/IndicatorRef' },
+              },
             },
           },
           rollback: {
@@ -4228,6 +5554,495 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
             path: { type: 'string', description: '仓库内路径，可以是 glob（* 与 **）' },
             format: { type: 'string', enum: ['json', 'yaml'] },
             fields: { type: 'object', description: '逻辑字段 → 点路径', additionalProperties: { type: 'string' } },
+          },
+        },
+      },
+      CodeLayout: {
+        title: 'CodeLayout',
+        description:
+          '业务仓库的代码布局（server 配置 optimization.repositories.business.code，契约 2.28.0，ADR 0146 §3.5）：代码定位读取哪个提交、哪些路径，锚点类型对应的候选路径，以及路径到 issue 标签的映射',
+        type: 'object',
+        additionalProperties: false,
+        required: ['version', 'root', 'include', 'exclude', 'languages', 'anchors'],
+        properties: {
+          version: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['rule'],
+            properties: {
+              rule: {
+                type: 'string',
+                description:
+                  'running：从 ops 仓库的发布输入解析出运行中的业务提交，没有时用默认分支；default_branch：总是默认分支',
+                enum: ['running', 'default_branch'],
+              },
+              release_input: {
+                type: 'string',
+                description:
+                  'running：ops 仓库中发布输入的文件角色（RepositoryLayout 的键），其中的版本字段解析为业务提交',
+              },
+              field: {
+                type: 'string',
+                description: 'running：发布输入中版本的逻辑字段名（RepositoryLayout 的 fields）',
+              },
+            },
+          },
+          root: { type: 'string', description: '代码根目录，仓库根为空串' },
+          include: { type: 'array', minItems: 1, items: { type: 'string' }, description: 'glob（* 与 **）' },
+          exclude: {
+            type: 'array',
+            description: 'glob；测试、生成文件中的数据、testdata、*.pem、.env*、*secret* 总是排除',
+            items: { type: 'string' },
+          },
+          languages: { type: 'array', minItems: 1, items: { type: 'string', enum: ['go', 'typescript'] } },
+          anchors: {
+            type: 'array',
+            description: '锚点类型 → 候选路径的 glob；没有列出的锚点类型在 include 的全部路径中查找',
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['kind', 'paths'],
+              properties: {
+                kind: { $ref: '#/$defs/AnchorKind' },
+                paths: { type: 'array', minItems: 1, items: { type: 'string' } },
+              },
+            },
+          },
+          labels: {
+            type: 'array',
+            description:
+              '路径 glob → issue 标签（例如 internal/gateway/** → area/gateway），按顺序匹配，全部命中的标签都加上',
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['paths', 'label'],
+              properties: {
+                paths: { type: 'array', minItems: 1, items: { type: 'string' } },
+                label: { type: 'string', minLength: 1, maxLength: 50 },
+              },
+            },
+          },
+          max_files: { type: 'integer', minimum: 1, maximum: 200, default: 200 },
+          max_bytes: { type: 'integer', minimum: 1, maximum: 8388608, default: 8388608 },
+        },
+      },
+      AnchorKind: {
+        title: 'AnchorKind',
+        description:
+          '代码定位的锚点类型（ADR 0146 §3.5）：sql 规范化语句（按 libpg-query 指纹匹配字符串字面量与 .sql 文件）；table 表名（置信度低）；span_name、metric_name、route 字符串字面量精确匹配',
+        type: 'string',
+        enum: ['sql', 'table', 'span_name', 'metric_name', 'route'],
+      },
+      IndicatorRef: {
+        title: 'IndicatorRef',
+        description: '指标的全局 id <包>/<指标 id>，例如 postgres/db-time',
+        type: 'string',
+        pattern: '^[a-z_][a-z0-9-]*/[a-z0-9][a-z0-9_.-]*$',
+      },
+      IndicatorUnit: {
+        title: 'IndicatorUnit',
+        type: 'string',
+        enum: ['none', 'percent', 'ratio', 'bytes', 'seconds', 'count', 'per_second', 'cores'],
+      },
+      IndicatorStatistic: {
+        title: 'IndicatorStatistic',
+        description: '基线窗口内按小时取值之后的统计方式',
+        type: 'string',
+        enum: ['p50', 'p95', 'max'],
+      },
+      DomainsFile: {
+        title: 'DomainsFile',
+        description:
+          'domains.yaml（契约 2.28.0，ADR 0146 §1.1、§1.3）：本包声明的指标与领域。多个包可以给同一个领域补充内容：同一 id 的领域按包的加载顺序合并，列表追加，gates 后者覆盖前者的同名键',
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          indicators: { type: 'array', items: { $ref: '#/$defs/Indicator' } },
+          domains: { type: 'array', items: { $ref: '#/$defs/Domain' } },
+        },
+      },
+      Indicator: {
+        title: 'Indicator',
+        description: '目标可以引用的指标。按实体产生序列：基线、差距与验证在指标的信号上按小时取值；目标不提交自由查询',
+        type: 'object',
+        additionalProperties: false,
+        required: ['id', 'title', 'signal', 'entity', 'unit', 'better', 'statistic'],
+        properties: {
+          id: { type: 'string', pattern: '^[a-z0-9][a-z0-9_.-]*$', description: '包内唯一；全局 id 为 <包>/<id>' },
+          title: { $ref: 'evidence-card.schema.json#/$defs/LocalizedText' },
+          description: { $ref: 'evidence-card.schema.json#/$defs/LocalizedText' },
+          signal: {
+            type: 'string',
+            description:
+              'metrics 信号 <pack>/<signal id>（同包内可省略 <pack>/）；查询按实体与 params 渲染，结果是一条或多条序列，多条时取和',
+          },
+          entity: {
+            type: 'string',
+            description:
+              '实体类型：Kubernetes 的 Kind（其他 API 组写作 Kind.group），或逻辑实体 pg_statement、pg_table、pg_index、route、stage',
+          },
+          params: {
+            type: 'object',
+            description:
+              '参数的 JSON Schema（可移植子集：type: object、additionalProperties: false，字符串用 enum 或 pattern 限定，数字有 minimum 与 maximum）。信号中写作 $params.<名字>',
+            required: ['type', 'properties'],
+            properties: {
+              type: { const: 'object' },
+              additionalProperties: { const: false },
+              properties: { type: 'object' },
+            },
+          },
+          unit: { $ref: '#/$defs/IndicatorUnit' },
+          better: { type: 'string', description: '改善方向', enum: ['lower', 'higher'] },
+          statistic: { $ref: '#/$defs/IndicatorStatistic' },
+          load_indicator: {
+            description: '判定业务高峰用的负载指标（例如请求速率），用于基线覆盖与验证时的时段匹配；不填时不检查高峰',
+            $ref: '#/$defs/IndicatorRef',
+          },
+        },
+      },
+      Domain: {
+        title: 'Domain',
+        description:
+          '一个优化领域（ADR 0146 §1.3）。卡片引用写 <chain>/<card>、checks/<id> 或 templates/<模板 id>（本包内），三段为 <pack>/<chain>/<card>',
+        type: 'object',
+        additionalProperties: false,
+        required: ['id'],
+        properties: {
+          id: {
+            type: 'string',
+            pattern: '^[a-z][a-z0-9_-]*$',
+            description: '例如 database、compute、traffic、storage、cache',
+          },
+          title: { $ref: 'evidence-card.schema.json#/$defs/LocalizedText' },
+          applies_to: {
+            type: 'array',
+            description: '组件类型或 Kind（例如 Cluster.postgresql.cnpg.io）；领域体检在范围内这些组件上执行',
+            items: { type: 'string' },
+          },
+          indicators: { type: 'array', description: '体检时计算基线的指标', items: { $ref: '#/$defs/IndicatorRef' } },
+          diagnostics: { type: 'array', items: { $ref: '#/$defs/Diagnostic' } },
+          contribution: { type: 'array', items: { $ref: '#/$defs/Contribution' } },
+          templates: {
+            type: 'array',
+            description: '区分性检查可用的查询模板全局 id <pack>/<模板 id>（含 dbstats、traces、logs 信号的模板）',
+            items: { type: 'string' },
+          },
+          optimizations: {
+            type: 'array',
+            description: '适用的 ops 修复模板 <pack>/<id>（remediations.yaml 中 applies 为 goal 的模板）',
+            items: { type: 'string' },
+          },
+          issues: {
+            type: 'array',
+            description: '适用的业务 issue 模板 <pack>/<id>（issues.yaml）',
+            items: { type: 'string' },
+          },
+          gates: { $ref: '#/$defs/DomainGates' },
+          trends: { type: 'array', items: { $ref: '#/$defs/Trend' } },
+          schedule: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['cron'],
+            description: '默认体检计划；时段由 server 配置 optimization.schedule.window 限定',
+            properties: { cron: { type: 'string', description: '五段 cron（UTC）', pattern: '^\\S+( \\S+){4}$' } },
+          },
+          load_guards: {
+            type: 'array',
+            description:
+              '负载保护卡（ADR 0146 §6.2）：每次直接查询后端之前执行（缓存 1 分钟），任何一张异常就跳过这次查询',
+            items: { $ref: '#/$defs/LoadGuard' },
+          },
+        },
+      },
+      Diagnostic: {
+        title: 'DomainDiagnostic',
+        description:
+          '诊断卡：在范围内的实体上执行，异常即候选发现。有 entities 时卡片在组件上执行一次，按 rows_from 引用的每条序列求 entities.when，为 true 的行各是一个逻辑实体上的候选；没有 entities 时卡片的实体就是发现的实体，卡片异常即候选',
+        type: 'object',
+        additionalProperties: false,
+        required: ['id', 'card', 'finding'],
+        properties: {
+          id: { type: 'string', pattern: '^[a-z0-9][a-z0-9_-]*$' },
+          card: { type: 'string' },
+          finding: {
+            type: 'string',
+            description: '发现类型，例如 pg.statement_dominant、pg.temp_spill、workload.cpu_overprovisioned',
+            pattern: '^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$',
+          },
+          indicator: { $ref: '#/$defs/IndicatorRef', description: '这个发现影响的指标；份额按它查找份额卡' },
+          symptoms: {
+            type: 'array',
+            description: '这类发现预示的症状类型（ADR 0133 的集合与 ADR 0146 §2.3 的补充），供假设与检查的对应',
+            items: {
+              type: 'string',
+              enum: [
+                'seq_scan',
+                'index',
+                'temp_spill',
+                'lock_wait',
+                'io_read',
+                'connection_pool',
+                'cache_miss',
+                'polling',
+                'n_plus_one',
+                'payload_size',
+                'overprovision',
+                'saturation',
+                'latency',
+                'errors',
+              ],
+            },
+          },
+          entities: { $ref: '#/$defs/EntityRows' },
+        },
+      },
+      Contribution: {
+        title: 'DomainContribution',
+        description:
+          '份额卡：实体占指标的比例（0 到 1），用于候选排序与结论阶梯。有 entities 时按行求 entities.share；没有时卡片的实体份额为 share 的值（CEL，变量与卡片的 let 相同），不填为 1',
+        type: 'object',
+        additionalProperties: false,
+        required: ['id', 'card', 'indicator'],
+        properties: {
+          id: { type: 'string', pattern: '^[a-z0-9][a-z0-9_-]*$' },
+          card: { type: 'string' },
+          indicator: { $ref: '#/$defs/IndicatorRef' },
+          share: { type: 'string', description: '没有 entities 时实体的份额（CEL）' },
+          entities: { $ref: '#/$defs/EntityRows' },
+        },
+      },
+      EntityRows: {
+        title: 'EntityRows',
+        description:
+          '从卡片的一个引用的序列得到逻辑实体。每个 CEL 的变量为卡片的引用、let、params、entity，以及 row（当前序列 {labels, times, values}）',
+        type: 'object',
+        additionalProperties: false,
+        required: ['type', 'rows_from', 'key'],
+        properties: {
+          type: {
+            type: 'string',
+            description: '逻辑实体类型，例如 pg_statement、pg_table、pg_index、route、stage',
+            pattern: '^[a-z][a-z0-9_]*$',
+          },
+          rows_from: { type: 'string', description: '卡片的引用名' },
+          key: {
+            type: 'string',
+            description:
+              'CEL，实体键中类型之后、组件之内的部分（例如 pg_statement 为 <库>/<queryid>）。server 把 pg_statement 的 queryid 换成语句指纹，得到 pg_statement:<集群>/<库>/<指纹>',
+          },
+          display: { type: 'string', description: 'CEL，实体的可读名称' },
+          labels: {
+            type: 'object',
+            description: '实体的标签：名字 → CEL（字符串）。按实体执行的卡片与查询模板以 $params.<名字> 引用',
+            additionalProperties: { type: 'string' },
+          },
+          when: { type: 'string', description: '诊断卡：CEL，为 true 的行是候选' },
+          share: { type: 'string', description: '份额卡：CEL，行的份额（0 到 1）' },
+          limit: { type: 'integer', minimum: 1, maximum: 50, default: 20 },
+        },
+      },
+      DomainGates: {
+        title: 'DomainGates',
+        description:
+          '领域的门槛参数（ADR 0146 §2.2、§2.4、§2.5）。都有默认值；同一领域在多个包中声明时后者覆盖前者的同名键',
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          violation_ratio: {
+            type: 'number',
+            minimum: 0,
+            maximum: 1,
+            default: 0.1,
+            description: '违反目标的小时数占比不低于它时差距成立',
+          },
+          min_share: {
+            type: 'number',
+            minimum: 0,
+            maximum: 1,
+            default: 0.2,
+            description: 'evidence_consistent 与业务 issue 要求的份额下限',
+          },
+          min_gain_ratio: {
+            type: 'number',
+            minimum: 0,
+            maximum: 1,
+            default: 0.1,
+            description: 'G2：预期收益下界的门槛之一，指标当前值的这个比例；门槛取它与 min_gain_gap_ratio 两者中较小者',
+          },
+          min_gain_gap_ratio: {
+            type: 'number',
+            minimum: 0,
+            maximum: 1,
+            default: 0.5,
+            description: 'G2：预期收益下界的门槛之一，差距的这个比例',
+          },
+          min_cpu_cores: { type: 'number', minimum: 0, description: 'compute：每个工作负载的最小收益（核）' },
+          min_memory_bytes: { type: 'number', minimum: 0, description: 'compute：每个工作负载的最小收益（字节）' },
+          max_utilization_after: {
+            type: 'number',
+            minimum: 0,
+            maximum: 1,
+            description: '扩缩容：变更后 p95 利用率不超过目标的这个比例',
+          },
+          cooldown: {
+            $ref: 'common.schema.json#/$defs/Duration',
+            default: '30d',
+            description: 'G4：被拒绝的发现的冷却期',
+          },
+          thresholds: {
+            type: 'array',
+            description: '领域体检没有目标值时的差距：任一指标的统计值违反门槛即差距成立',
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['indicator', 'comparator', 'value'],
+              properties: {
+                indicator: { $ref: '#/$defs/IndicatorRef' },
+                params: { type: 'object', additionalProperties: { type: ['number', 'string', 'boolean'] } },
+                comparator: { $ref: 'goal.schema.json#/$defs/Comparator' },
+                value: { type: 'number' },
+                statistic: { $ref: '#/$defs/IndicatorStatistic' },
+              },
+            },
+          },
+        },
+      },
+      Trend: {
+        title: 'DomainTrend',
+        description:
+          '趋势定义（ADR 0146 §5.4）。drift：相对过去 7 天同一小时的中位数，比值超过 ratio 并持续 sustain；slope：在 window 内线性外推，horizon 内到达 limit 指标；headroom：用量占 limit 指标的 p95 超过 ratio 并持续 sustain',
+        type: 'object',
+        additionalProperties: false,
+        required: ['id', 'indicator', 'method', 'sustain'],
+        properties: {
+          id: { type: 'string', pattern: '^[a-z0-9][a-z0-9_-]*$' },
+          indicator: { $ref: '#/$defs/IndicatorRef' },
+          params: { type: 'object', additionalProperties: { type: ['number', 'string', 'boolean'] } },
+          method: { type: 'string', enum: ['drift', 'slope', 'headroom'] },
+          ratio: { type: 'number', exclusiveMinimum: 0 },
+          sustain: { $ref: 'common.schema.json#/$defs/Duration' },
+          window: { $ref: 'common.schema.json#/$defs/Duration' },
+          horizon: { $ref: 'common.schema.json#/$defs/Duration' },
+          limit: { $ref: '#/$defs/IndicatorRef', description: 'slope 与 headroom 的上限指标' },
+        },
+      },
+      LoadGuard: {
+        title: 'DomainLoadGuard',
+        type: 'object',
+        additionalProperties: false,
+        required: ['card', 'backends'],
+        properties: {
+          card: { type: 'string' },
+          backends: {
+            type: 'array',
+            minItems: 1,
+            description: '这张卡保护的后端：异常时跳过对它们的直接查询；metrics 异常时整次运行推迟',
+            items: { type: 'string', enum: ['dbstats', 'traces', 'logs', 'metrics'] },
+          },
+        },
+      },
+      Estimate: {
+        title: 'Estimate',
+        description:
+          '预期收益（ADR 0146 §2.5）。lower 只用卡片里的确定值计算（保守下界），单位与 indicator 相同、按改善方向取正值；CEL 的变量与模板的 let 相同，另有 gates（领域门槛）',
+        type: 'object',
+        additionalProperties: false,
+        required: ['indicator', 'unit', 'lower', 'expected', 'basis'],
+        properties: {
+          indicator: { $ref: '#/$defs/IndicatorRef' },
+          unit: { $ref: '#/$defs/IndicatorUnit' },
+          lower: { type: 'string', description: 'CEL，下界' },
+          expected: { type: 'string', description: 'CEL，期望值' },
+          basis: {
+            $ref: 'evidence-card.schema.json#/$defs/LocalizedText',
+            description: '计算依据与前提（ICU MessageFormat，变量为 let、params、lower、expected）',
+          },
+        },
+      },
+      Guard: {
+        title: 'Guard',
+        type: 'object',
+        additionalProperties: false,
+        required: ['id', 'cel', 'say'],
+        properties: {
+          id: { type: 'string', pattern: '^[a-z0-9][a-z0-9_-]*$', description: '写进门槛记录的原因码' },
+          cel: { type: 'string', description: '为 true 表示约束成立' },
+          say: {
+            $ref: 'evidence-card.schema.json#/$defs/LocalizedText',
+            description: '约束不成立时的原因（ICU MessageFormat，变量为 let 与 params）',
+          },
+        },
+      },
+      IssuesFile: {
+        title: 'IssuesFile',
+        description:
+          'issues.yaml（契约 2.28.0，ADR 0146 §4.4）：业务仓库 issue 模板。模板只描述适用条件、锚点、建议与收益，由 server 渲染 issue 并在业务仓库创建，从不提交 PR',
+        type: 'object',
+        additionalProperties: false,
+        required: ['issues'],
+        properties: { issues: { type: 'array', items: { $ref: '#/$defs/IssueTemplate' } } },
+      },
+      IssueTemplate: {
+        title: 'IssueTemplate',
+        type: 'object',
+        additionalProperties: false,
+        required: ['id', 'title', 'domain', 'when', 'locate', 'suggestion', 'estimate', 'verify'],
+        properties: {
+          id: { type: 'string', pattern: '^[a-z0-9][a-z0-9_-]*$' },
+          title: { $ref: 'evidence-card.schema.json#/$defs/LocalizedText' },
+          domain: { type: 'string', pattern: '^[a-z][a-z0-9_-]*$' },
+          when: {
+            type: 'string',
+            description:
+              'CEL 适用条件。变量：goal（GoalSpec 与 goal_id、revision）、finding（Finding）、finding_cards（卡片全局 id → 结论：verdict、display_state、value、observations）、params',
+          },
+          params: { type: 'object', additionalProperties: { type: ['number', 'string', 'boolean'] } },
+          let: {
+            type: 'array',
+            description: '按顺序求值的 CEL 绑定，后面的绑定、locate、estimate 与文案可以引用',
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['name', 'cel'],
+              properties: { name: { type: 'string', pattern: '^[a-z_][a-z0-9_]*$' }, cel: { type: 'string' } },
+            },
+          },
+          locate: {
+            type: 'array',
+            minItems: 1,
+            description: '代码定位的锚点，按顺序都执行，命中合并后按置信度排列',
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['kind', 'from'],
+              properties: {
+                kind: { $ref: '#/$defs/AnchorKind' },
+                from: { type: 'string', description: 'CEL，锚点的取值（字符串；为空串或 null 时跳过）' },
+              },
+            },
+          },
+          suggestion: {
+            $ref: 'evidence-card.schema.json#/$defs/LocalizedText',
+            description: '建议文字（ICU MessageFormat，变量为 let 与 params），写进 issue 的“建议”段',
+          },
+          estimate: { $ref: '#/$defs/Estimate' },
+          verify: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['say'],
+            properties: {
+              say: { $ref: 'evidence-card.schema.json#/$defs/LocalizedText' },
+              cards: { type: 'array', items: { type: 'string' }, description: '部署后应判为正常的卡片全局 id' },
+              within: { type: 'string', pattern: '^[0-9]+(s|m|h)$' },
+              guards: { type: 'array', items: { $ref: '#/$defs/IndicatorRef' } },
+            },
+          },
+          labels: {
+            type: 'array',
+            description:
+              '模板声明的 issue 标签（例如 perf）；srenautix、srenautix:<领域> 与路径映射的 area/* 由 server 加上',
+            items: { type: 'string', minLength: 1, maxLength: 50 },
           },
         },
       },
@@ -4342,7 +6157,8 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
           },
           disable: {
             type: 'array',
-            description: '禁用的条目：alerts/<id>、chains/<id>、chains/<id>/<card>、checks/<id>、rules/<id>',
+            description:
+              '禁用的条目：alerts/<id>、chains/<id>、chains/<id>/<card>、checks/<id>、rules/<id>、domains/<id>、domains/<id>/<诊断卡或份额卡 id>、indicators/<id>、issues/<id>',
             items: { type: 'string' },
           },
           patch: {
@@ -4366,6 +6182,13 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
               chains: { type: 'array', items: { $ref: '#/$defs/Chain' } },
               checks: { type: 'array', items: { $ref: 'evidence-card.schema.json' } },
               rules: { type: 'array', items: { $ref: '#/$defs/Rule' } },
+              indicators: { type: 'array', items: { $ref: '#/$defs/Indicator' } },
+              domains: {
+                type: 'array',
+                description: '与目标包同 id 的领域按 DomainsFile 的规则合并进去，其余追加',
+                items: { $ref: '#/$defs/Domain' },
+              },
+              issues: { type: 'array', items: { $ref: '#/$defs/IssueTemplate' } },
             },
           },
           rca_params: { $ref: '#/$defs/RcaParams' },
@@ -4452,6 +6275,59 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
               },
             },
           },
+          input_dbstats: {
+            type: 'array',
+            description:
+              'dbstats 夹具（契约 2.28.0）：每个操作的采样，offset 相对测试起点。读取时取不晚于 eval_time 的最近一次采样，速率按它与前一次采样的差值计算；排序、过滤与 limit 按适配器的语义作用在夹具的行上',
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['op', 'samples'],
+              properties: {
+                op: { $ref: '../integrations/dbstats/v1/dbstats.schema.json#/$defs/Operation' },
+                samples: {
+                  type: 'array',
+                  minItems: 1,
+                  items: {
+                    type: 'object',
+                    additionalProperties: false,
+                    required: ['offset', 'rows'],
+                    properties: {
+                      offset: { $ref: 'common.schema.json#/$defs/Duration' },
+                      rows: {
+                        type: 'array',
+                        items: {
+                          type: 'object',
+                          additionalProperties: { type: ['string', 'number', 'boolean', 'null'] },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          input_sql: {
+            type: 'object',
+            description:
+              '在真实 PostgreSQL（预加载 pg_stat_statements）上执行的 dbstats 夹具：以管理员执行 setup，重置统计并采样一次，执行 workload，再采样一次；之后每个测试的 dbstats 引用读取这个库，期望同样必须成立。只在测试运行器提供 PostgreSQL 时执行，没有时只用 input_dbstats',
+            additionalProperties: false,
+            required: ['setup', 'workload'],
+            properties: {
+              database: { type: 'string', pattern: '^[a-z_][a-z0-9_]{0,62}$', default: 'app' },
+              setup: { type: 'array', items: { type: 'string' } },
+              workload: {
+                type: 'array',
+                minItems: 1,
+                items: {
+                  type: 'object',
+                  additionalProperties: false,
+                  required: ['sql', 'repeat'],
+                  properties: { sql: { type: 'string' }, repeat: { type: 'integer', minimum: 1, maximum: 100000 } },
+                },
+              },
+            },
+          },
           tests: {
             type: 'array',
             minItems: 1,
@@ -4489,7 +6365,28 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
                       enum: ['normal', 'abnormal', 'undeterminable', 'capability_missing'],
                     },
                     reason_kind: { type: 'string' },
+                    entities: {
+                      type: 'array',
+                      description:
+                        'rows 给出时：按 EntityRows 得到的实体（契约 2.28.0）。列出的键必须出现；hit 为诊断卡的 when，share 为份额卡的份额（相对误差 1e-3）',
+                      items: {
+                        type: 'object',
+                        additionalProperties: false,
+                        required: ['key'],
+                        properties: {
+                          key: { type: 'string' },
+                          hit: { type: 'boolean' },
+                          share: { type: 'number', minimum: 0, maximum: 1 },
+                        },
+                      },
+                    },
                   },
+                },
+                rows: {
+                  type: 'string',
+                  description:
+                    '同时检查领域的诊断卡或份额卡按行得到的实体：<领域>/<诊断卡或份额卡 id>，card 必须是它引用的卡',
+                  pattern: '^[a-z][a-z0-9_-]*/[a-z0-9][a-z0-9_-]*$',
                 },
               },
             },
@@ -4576,6 +6473,11 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
         $ref: 'common.schema.json#/$defs/Sha256',
       },
       cluster_id: { $ref: 'common.schema.json#/$defs/ClusterId' },
+      subject: {
+        description:
+          '提议的主体（契约 2.28.0）；不填时为事件。主体为目标时 incident_id 为目标 id，绑定字段的语义见 Binding',
+        $ref: 'common.schema.json#/$defs/Subject',
+      },
       incident_id: { $ref: 'common.schema.json#/$defs/Uuid' },
       binding: { $ref: '#/$defs/Binding' },
       source: {
@@ -4641,6 +6543,8 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
     $defs: {
       Binding: {
         title: 'ProposalBinding',
+        description:
+          '主体为事件时是事件版本、根因组件与阶段 A 的证据指纹；主体为目标时（契约 2.28.0）incident_version 取目标的 revision，root_component 取发现挂到的组件，evidence_fingerprint 取发现的证据指纹。审批断言 v1 与 gateway 的绑定核对不变',
         type: 'object',
         additionalProperties: false,
         required: ['incident_version', 'root_component', 'evidence_fingerprint'],
@@ -4732,6 +6636,10 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
           'expected_effect',
         ],
         properties: {
+          subject: {
+            description: '提议的主体（契约 2.28.0）；不填时为事件。主体为目标时 incident_id 必须等于 subject.id',
+            $ref: 'common.schema.json#/$defs/Subject',
+          },
           incident_id: { $ref: 'common.schema.json#/$defs/Uuid' },
           binding: { $ref: '#/$defs/Binding' },
           action: { type: 'string' },
@@ -4741,6 +6649,247 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
           hypothesis_id: { type: ['string', 'null'], pattern: '^h[1-9]$' },
           evidence_refs: { type: 'array', items: { $ref: 'common.schema.json#/$defs/EvidenceRef' } },
           expected_effect: { type: 'string', maxLength: 300 },
+        },
+      },
+    },
+  },
+  'https://srenautix.io/contract/schemas/recommendation.schema.json': {
+    $schema: 'https://json-schema.org/draft/2020-12/schema',
+    $id: 'https://srenautix.io/contract/schemas/recommendation.schema.json',
+    title: 'OptimizationRecommendation',
+    description:
+      '主动优化的建议（契约 2.28.0，ADR 0146 §1.5、§2.5、§2.6）：ops 仓库的 PR（经 gitops_pr 提议）或业务仓库的 issue。预期收益与验证计划在创建时由代码确定；模型写的文字只在 model_note 中，消息与控制台标注【模型】',
+    type: 'object',
+    additionalProperties: false,
+    required: [
+      'recommendation_id',
+      'cluster_id',
+      'finding',
+      'goal_id',
+      'run_id',
+      'kind',
+      'template',
+      'title',
+      'level',
+      'state',
+      'estimate',
+      'verify',
+      'gates',
+      'delivery',
+      'outcome',
+      'model_note',
+      'created_at',
+      'updated_at',
+    ],
+    properties: {
+      recommendation_id: { $ref: 'common.schema.json#/$defs/Uuid' },
+      cluster_id: { $ref: 'common.schema.json#/$defs/ClusterId' },
+      finding: { description: '发现的指纹', $ref: 'common.schema.json#/$defs/Sha256' },
+      goal_id: { $ref: 'common.schema.json#/$defs/Uuid' },
+      run_id: { $ref: 'common.schema.json#/$defs/Uuid' },
+      kind: { $ref: 'goal.schema.json#/$defs/RecommendationKind' },
+      template: {
+        type: 'string',
+        description:
+          '<pack>/<模板 id>：ops_pr 为 remediations.yaml 中 applies 为 goal 的模板，business_issue 为 issues.yaml 的模板',
+        pattern: '^[a-z_][a-z0-9-]*/[a-z0-9][a-z0-9_-]*$',
+      },
+      title: { type: 'string', maxLength: 200 },
+      level: { $ref: 'common.schema.json#/$defs/ConclusionLevel' },
+      state: { $ref: '#/$defs/RecommendationState' },
+      estimate: { $ref: '#/$defs/EstimateValue' },
+      verify: { $ref: '#/$defs/VerifyPlan' },
+      gates: {
+        type: 'array',
+        description: 'G1–G6 的逐项结果（按顺序，遇到第一个不通过即停止）；全部通过才创建 PR 或 issue',
+        items: { $ref: '#/$defs/GateRecord' },
+      },
+      delivery: {
+        description: '创建的 PR 或 issue；门槛不通过或还没有创建时为 null',
+        oneOf: [{ type: 'null' }, { $ref: '#/$defs/Delivery' }],
+      },
+      outcome: {
+        description: '验证结果；验证结束之前为 null',
+        oneOf: [{ type: 'null' }, { $ref: '#/$defs/RecommendationOutcome' }],
+      },
+      model_note: {
+        type: ['string', 'null'],
+        maxLength: 1200,
+        description: '模型补充的说明（经数值审计），显示时标注【模型】',
+      },
+      created_at: { $ref: 'common.schema.json#/$defs/Timestamp' },
+      updated_at: { $ref: 'common.schema.json#/$defs/Timestamp' },
+    },
+    $defs: {
+      RecommendationState: {
+        title: 'RecommendationState',
+        description:
+          'blocked 门槛不通过，只记录原因；open 通过门槛，PR 或 issue 创建中；recommended PR 或 issue 已创建；verifying PR 合并并同步或修复已部署，验证窗口中；improved、no_effect、regressed 验证结果；rejected issue 以 not planned 关闭、PR 未合并即关闭，或被标为建议无用；superseded 发现有了更新的建议；failed 创建失败',
+        type: 'string',
+        enum: [
+          'blocked',
+          'open',
+          'recommended',
+          'verifying',
+          'improved',
+          'no_effect',
+          'regressed',
+          'rejected',
+          'superseded',
+          'failed',
+        ],
+      },
+      EstimateValue: {
+        title: 'EstimateValue',
+        description: '模板 estimate 的求值结果：lower 为保守下界，expected 为期望值，单位与指标相同，按改善方向取正值',
+        type: 'object',
+        additionalProperties: false,
+        required: ['indicator', 'unit', 'lower', 'expected', 'basis'],
+        properties: {
+          indicator: { $ref: 'pack.schema.json#/$defs/IndicatorRef' },
+          unit: { $ref: 'pack.schema.json#/$defs/IndicatorUnit' },
+          lower: { type: 'number' },
+          expected: { type: ['number', 'null'] },
+          basis: { type: 'string', maxLength: 600 },
+        },
+      },
+      VerifyPlan: {
+        title: 'VerifyPlan',
+        description:
+          '验证计划（ADR 0146 §2.6）：start 为 merged_synced 时等管理这个文件的 Argo 应用的同步版本包含合并提交且 Healthy（GUC 另外核对 pg_settings）；为 deployed 时等发布输入的版本对应的业务提交包含修复提交。窗口开始后与基线按“星期 × 小时”匹配的时段比较',
+        type: 'object',
+        additionalProperties: false,
+        required: ['start', 'indicator', 'params', 'within', 'cards', 'guards', 'settings', 'window'],
+        properties: {
+          start: { type: 'string', enum: ['merged_synced', 'deployed'] },
+          indicator: { $ref: 'pack.schema.json#/$defs/IndicatorRef' },
+          params: { type: 'object', additionalProperties: { type: ['number', 'string', 'boolean'] } },
+          within: { $ref: 'common.schema.json#/$defs/Duration' },
+          cards: { type: 'array', items: { type: 'string' }, description: '应转为正常的卡片全局 id' },
+          guards: { type: 'array', items: { $ref: 'pack.schema.json#/$defs/IndicatorRef' } },
+          settings: {
+            type: 'object',
+            description: 'GUC：应在 pg_settings 中生效的参数 → 新值',
+            additionalProperties: { type: 'string' },
+          },
+          window: {
+            description: '验证窗口；开始之前为 null',
+            oneOf: [{ type: 'null' }, { $ref: 'common.schema.json#/$defs/TimeWindow' }],
+          },
+        },
+      },
+      GateRecord: {
+        title: 'GateRecord',
+        type: 'object',
+        additionalProperties: false,
+        required: ['gate', 'passed', 'code', 'detail'],
+        properties: {
+          gate: {
+            type: 'string',
+            description: 'G1 证据档位；G2 预期收益；G3 安全约束；G4 新颖性；G5 数量；G6 时机',
+            enum: ['G1', 'G2', 'G3', 'G4', 'G5', 'G6'],
+          },
+          passed: { type: 'boolean' },
+          code: {
+            type: 'string',
+            description: '机器可读的原因码，与 remediation_attempts 的方式相同；G3 不通过时为模板 guard 的 id',
+            pattern: '^[a-z0-9][a-z0-9_-]*$',
+          },
+          detail: { type: 'string', maxLength: 500 },
+        },
+      },
+      Delivery: {
+        title: 'RecommendationDelivery',
+        type: 'object',
+        additionalProperties: false,
+        required: [
+          'repository_role',
+          'repository',
+          'proposal_id',
+          'number',
+          'url',
+          'branch',
+          'merged_at',
+          'merge_commit',
+          'closed_reason',
+        ],
+        properties: {
+          repository_role: {
+            type: 'string',
+            description: 'ops：ops 仓库（只经 gateway 的 gitops_pr）；business：业务仓库（只创建 issue 与评论）',
+            enum: ['ops', 'business'],
+          },
+          repository: { type: 'string', pattern: '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$' },
+          proposal_id: {
+            description: 'ops_pr 的 gitops_pr 提议；business_issue 为 null',
+            oneOf: [{ type: 'null' }, { $ref: 'common.schema.json#/$defs/Uuid' }],
+          },
+          number: { type: ['integer', 'null'], minimum: 1, description: 'PR 或 issue 号；PR 还没有创建时为 null' },
+          url: { type: ['string', 'null'] },
+          branch: { type: ['string', 'null'], description: 'ops_pr 的分支 srenautix/goal-…' },
+          merged_at: { oneOf: [{ type: 'null' }, { $ref: 'common.schema.json#/$defs/Timestamp' }] },
+          merge_commit: { type: ['string', 'null'], pattern: '^[0-9a-f]{40}$' },
+          closed_reason: {
+            description: 'issue 的关闭原因或 PR 未合并就关闭（unmerged）；未关闭时为 null',
+            oneOf: [{ type: 'null' }, { type: 'string', enum: ['completed', 'not_planned', 'unmerged'] }],
+          },
+        },
+      },
+      RecommendationOutcome: {
+        title: 'RecommendationOutcome',
+        description:
+          '合并或部署之后的验证结果（ADR 0146 §2.6）：改善不低于预期下界的 50% 并超出噪声带为 improved；守护指标恶化超过 10% 为 regressed；其余为 no_effect',
+        type: 'object',
+        additionalProperties: false,
+        required: [
+          'result',
+          'window',
+          'baseline',
+          'observed',
+          'improvement',
+          'noise_band',
+          'estimate_lower',
+          'guards',
+          'cards',
+          'revert_proposal_id',
+          'verified_at',
+        ],
+        properties: {
+          result: { type: 'string', enum: ['improved', 'no_effect', 'regressed'] },
+          window: { $ref: 'common.schema.json#/$defs/TimeWindow' },
+          baseline: { type: ['number', 'null'], description: '匹配时段的基线统计值' },
+          observed: { type: ['number', 'null'], description: '验证窗口的统计值' },
+          improvement: { type: ['number', 'null'], description: '按改善方向取正值，单位与指标相同' },
+          noise_band: { type: ['number', 'null'], description: '基线窗口内同一时段的四分位距的一半' },
+          estimate_lower: { type: 'number' },
+          guards: {
+            type: 'array',
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['indicator', 'change_ratio', 'regressed'],
+              properties: {
+                indicator: { $ref: 'pack.schema.json#/$defs/IndicatorRef' },
+                change_ratio: { type: ['number', 'null'], description: '恶化方向为正' },
+                regressed: { type: 'boolean' },
+              },
+            },
+          },
+          cards: {
+            type: 'array',
+            description: 'verify.cards 在窗口结束时的结论',
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['card_id', 'verdict'],
+              properties: { card_id: { type: 'string' }, verdict: { $ref: 'common.schema.json#/$defs/Verdict' } },
+            },
+          },
+          revert_proposal_id: {
+            description: 'regressed 的 ops PR 由 server 提交的 revert 提议',
+            oneOf: [{ type: 'null' }, { $ref: 'common.schema.json#/$defs/Uuid' }],
+          },
+          verified_at: { $ref: 'common.schema.json#/$defs/Timestamp' },
         },
       },
     },
@@ -4772,6 +6921,11 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
     ],
     properties: {
       run_id: { $ref: 'common.schema.json#/$defs/Uuid' },
+      subject: {
+        description:
+          '主体为目标时（契约 2.28.0）incident_id 为目标 id、incident_version 为目标的 revision；不填时为事件',
+        $ref: 'common.schema.json#/$defs/Subject',
+      },
       incident_id: { $ref: 'common.schema.json#/$defs/Uuid' },
       incident_version: { type: 'integer', minimum: 1 },
       code_sha: { type: 'string', pattern: '^[0-9a-f]{40}$' },
@@ -4831,16 +6985,24 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
         properties: {
           route_id: { type: 'string' },
           in_domain: { type: 'boolean' },
-          categories: {
-            type: 'array',
-            items: {
-              type: 'string',
-              enum: ['metrics', 'logs', 'traces', 'events', 'topology', 'changes', 'alerts', 'knowledge'],
-            },
+          categories: { type: 'array', items: { $ref: '#/$defs/EgressCategory' } },
+          dropped: {
+            type: 'object',
+            description:
+              '不在 llm.egress.categories 中、进入提示词之前删除的片段数，按类别计（契约 2.28.0，ADR 0146 §3.6）；没有删除时不填或为空对象',
+            propertyNames: { $ref: '#/$defs/EgressCategory' },
+            additionalProperties: { type: 'integer', minimum: 0 },
           },
           redaction_hits: { type: 'integer', minimum: 0 },
           bytes: { type: 'integer', minimum: 0 },
         },
+      },
+      EgressCategory: {
+        title: 'EgressCategory',
+        description:
+          '出境数据类别。sql：规范化语句文本（常量为 $n、去掉注释）；code：业务代码片段（契约 2.28.0，ADR 0146 §3.6）',
+        type: 'string',
+        enum: ['metrics', 'logs', 'traces', 'events', 'topology', 'changes', 'alerts', 'knowledge', 'sql', 'code'],
       },
     },
   },

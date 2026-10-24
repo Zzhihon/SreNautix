@@ -116,6 +116,17 @@ export function invalidationKeys(e: OutboxEvent): QueryKey[] {
       return [qk.proposals(), qk.proposal(e.payload.proposal_id)];
     case 'condition.changed':
       return [['conditions'], qk.incidents(), ['clusters']];
+    // 主动优化（契约 2.28.0）：目标、发现与建议的列表和详情按前缀失效
+    case 'goal.created':
+      return [['goals'], ['goal', e.payload.goal_id]];
+    case 'goal.run.concluded':
+      return [['goals'], ['goal', e.payload.goal_id], ['findings'], ['recommendations']];
+    case 'finding.updated':
+      return [['findings']];
+    case 'recommendation.updated':
+      return [['recommendations'], ['findings'], ['goal', e.payload.goal_id]];
+    case 'outcome.verified':
+      return [['recommendations'], ['findings'], ['goals'], ['goal', e.payload.goal_id]];
   }
 }
 

@@ -123,7 +123,11 @@
           "type": "string",
           "description": "signals.yaml 中的信号 <pack>/<signal id>；同包内可省略 <pack>/"
         },
-        "mode": { "type": "string", "enum": ["range", "instant", "logs", "traces"] },
+        "mode": {
+          "type": "string",
+          "description": "dbstats 读取 dbstats 信号（契约 2.28.0）：每行一条序列，点为采样时刻",
+          "enum": ["range", "instant", "logs", "traces", "dbstats"]
+        },
         "params": {
           "type": "object",
           "additionalProperties": { "type": ["number", "string", "boolean"] }

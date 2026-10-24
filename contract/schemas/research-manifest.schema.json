@@ -24,6 +24,10 @@
   ],
   "properties": {
     "run_id": { "$ref": "common.schema.json#/$defs/Uuid" },
+    "subject": {
+      "description": "主体为目标时（契约 2.28.0）incident_id 为目标 id、incident_version 为目标的 revision；不填时为事件",
+      "$ref": "common.schema.json#/$defs/Subject"
+    },
     "incident_id": { "$ref": "common.schema.json#/$defs/Uuid" },
     "incident_version": { "type": "integer", "minimum": 1 },
     "code_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
@@ -91,14 +95,23 @@
         "in_domain": { "type": "boolean" },
         "categories": {
           "type": "array",
-          "items": {
-            "type": "string",
-            "enum": ["metrics", "logs", "traces", "events", "topology", "changes", "alerts", "knowledge"]
-          }
+          "items": { "$ref": "#/$defs/EgressCategory" }
+        },
+        "dropped": {
+          "type": "object",
+          "description": "不在 llm.egress.categories 中、进入提示词之前删除的片段数，按类别计（契约 2.28.0，ADR 0146 §3.6）；没有删除时不填或为空对象",
+          "propertyNames": { "$ref": "#/$defs/EgressCategory" },
+          "additionalProperties": { "type": "integer", "minimum": 0 }
         },
         "redaction_hits": { "type": "integer", "minimum": 0 },
         "bytes": { "type": "integer", "minimum": 0 }
       }
+    },
+    "EgressCategory": {
+      "title": "EgressCategory",
+      "description": "出境数据类别。sql：规范化语句文本（常量为 $n、去掉注释）；code：业务代码片段（契约 2.28.0，ADR 0146 §3.6）",
+      "type": "string",
+      "enum": ["metrics", "logs", "traces", "events", "topology", "changes", "alerts", "knowledge", "sql", "code"]
     }
   }
 }

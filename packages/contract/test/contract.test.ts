@@ -103,6 +103,35 @@ describe('黄金夹具', () => {
   });
 });
 
+/** contract/testvectors/optimization.json：Go 与 TS 对每个用例给出相同的结果（契约 2.28.0） */
+describe('主动优化的黄金夹具', () => {
+  const vectors = JSON.parse(readFileSync(join(contractDir, 'testvectors/optimization.json'), 'utf8')) as {
+    valid: Array<{ name: string; schema: string; instance: unknown }>;
+    invalid: Array<{ name: string; schema: string; instance: unknown }>;
+  };
+  for (const v of vectors.valid) {
+    it(`通过：${v.name}`, () => {
+      expect(() => assertValid(v.schema, v.instance)).not.toThrow();
+    });
+  }
+  for (const v of vectors.invalid) {
+    it(`拒绝：${v.name}`, () => {
+      expect(() => assertValid(v.schema, v.instance)).toThrow(ContractViolation);
+    });
+  }
+  it('dbstats 的每个操作都有请求定义，能力名由操作名得到', () => {
+    const dbstats = SCHEMAS['https://srenautix.io/contract/integrations/dbstats/v1/dbstats.schema.json'] as {
+      $defs: Record<string, { enum?: string[]; oneOf?: Array<{ $ref: string }> }>;
+    };
+    const ops = dbstats.$defs.Operation!.enum!;
+    const requests = dbstats.$defs.Request!.oneOf!.map((r) => {
+      const def = dbstats.$defs[r.$ref.split('/').pop()!] as unknown as { properties: { op: { const: string } } };
+      return def.properties.op.const;
+    });
+    expect(requests.sort()).toEqual([...ops].sort());
+  });
+});
+
 describe('与 contract/gateway 一致', () => {
   const read = (p: string) => JSON.parse(readFileSync(join(contractDir, p), 'utf8'));
   const assertion = read('gateway/v1/approval-assertion.schema.json');

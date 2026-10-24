@@ -1,0 +1,405 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://srenautix.io/contract/integrations/dbstats/v1/dbstats.schema.json",
+  "title": "DbstatsContract",
+  "description": "dbstats 集成契约 v1（契约 2.28.0，ADR 0146 §3.3）：数据库统计视图的只读读取。操作固定，SQL 写在适配器里，请求只绑定参数；不读取任何业务表的行，也不读取语句文本文件做排序。能力：dbstats.statements_top、dbstats.statements_text、dbstats.tables_top、dbstats.indexes_usage、dbstats.settings_get、dbstats.activity_summary、dbstats.locks_summary。累计计数器的速率由调用方用相隔不少于 300 秒的两次采样的差值计算（Sample.sampled_at）",
+  "$defs": {
+    "Operation": {
+      "title": "DbstatsOperation",
+      "type": "string",
+      "description": "操作名；能力名为 dbstats.<操作名中的 . 换成 _>",
+      "enum": [
+        "statements.top",
+        "statements.text",
+        "tables.top",
+        "indexes.usage",
+        "settings.get",
+        "activity.summary",
+        "locks.summary"
+      ]
+    },
+    "Request": {
+      "title": "DbstatsRequest",
+      "description": "一次读取。database 为 null 时读取连接所在的库；statements.top 不按库过滤时可以读到全部库的语句",
+      "oneOf": [
+        { "$ref": "#/$defs/StatementsTopRequest" },
+        { "$ref": "#/$defs/StatementsTextRequest" },
+        { "$ref": "#/$defs/TablesTopRequest" },
+        { "$ref": "#/$defs/IndexesUsageRequest" },
+        { "$ref": "#/$defs/SettingsGetRequest" },
+        { "$ref": "#/$defs/ActivitySummaryRequest" },
+        { "$ref": "#/$defs/LocksSummaryRequest" }
+      ]
+    },
+    "StatementsTopRequest": {
+      "title": "DbstatsStatementsTopRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["op", "args"],
+      "properties": {
+        "op": { "const": "statements.top" },
+        "args": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["order_by", "limit"],
+          "properties": {
+            "order_by": {
+              "type": "string",
+              "enum": [
+                "total_exec_time",
+                "mean_exec_time",
+                "calls",
+                "rows",
+                "shared_blks_read",
+                "temp_blks_written",
+                "blk_read_time",
+                "wal_bytes"
+              ]
+            },
+            "limit": { "type": "integer", "minimum": 1, "maximum": 50 },
+            "database": {
+              "type": ["string", "null"],
+              "description": "按库名过滤（pg_database.datname）；null 或不填时不过滤",
+              "pattern": "^[A-Za-z_][A-Za-z0-9_$-]{0,62}$"
+            },
+            "queryids": {
+              "type": "array",
+              "description": "只取这些 queryid（十进制字符串）；不填时按 order_by 取前 limit 条",
+              "maxItems": 50,
+              "items": { "$ref": "#/$defs/QueryId" }
+            }
+          }
+        }
+      }
+    },
+    "StatementsTextRequest": {
+      "title": "DbstatsStatementsTextRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["op", "args"],
+      "properties": {
+        "op": { "const": "statements.text" },
+        "args": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["queryids"],
+          "properties": {
+            "queryids": { "type": "array", "minItems": 1, "maxItems": 10, "items": { "$ref": "#/$defs/QueryId" } }
+          }
+        }
+      }
+    },
+    "TablesTopRequest": {
+      "title": "DbstatsTablesTopRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["op", "args"],
+      "properties": {
+        "op": { "const": "tables.top" },
+        "args": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["order_by", "limit"],
+          "properties": {
+            "order_by": {
+              "type": "string",
+              "enum": ["seq_scan", "seq_tup_read", "idx_scan", "n_dead_tup", "n_live_tup", "heap_blks_read", "writes"]
+            },
+            "limit": { "type": "integer", "minimum": 1, "maximum": 50 }
+          }
+        }
+      }
+    },
+    "IndexesUsageRequest": {
+      "title": "DbstatsIndexesUsageRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["op", "args"],
+      "properties": {
+        "op": { "const": "indexes.usage" },
+        "args": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["limit"],
+          "properties": {
+            "table": {
+              "type": ["string", "null"],
+              "description": "<schema>.<表名>；Timescale hypertable 的名字包含它的全部分块；null 或不填时为全部表",
+              "pattern": "^[A-Za-z_][A-Za-z0-9_$]{0,62}\\.[A-Za-z_][A-Za-z0-9_$]{0,62}$"
+            },
+            "limit": { "type": "integer", "minimum": 1, "maximum": 50 }
+          }
+        }
+      }
+    },
+    "SettingsGetRequest": {
+      "title": "DbstatsSettingsGetRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["op", "args"],
+      "properties": {
+        "op": { "const": "settings.get" },
+        "args": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["names"],
+          "properties": {
+            "names": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 50,
+              "items": { "type": "string", "pattern": "^[a-z_][a-z0-9_.]{0,62}$" }
+            }
+          }
+        }
+      }
+    },
+    "ActivitySummaryRequest": {
+      "title": "DbstatsActivitySummaryRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["op", "args"],
+      "properties": {
+        "op": { "const": "activity.summary" },
+        "args": { "type": "object", "additionalProperties": false, "properties": {} }
+      }
+    },
+    "LocksSummaryRequest": {
+      "title": "DbstatsLocksSummaryRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["op", "args"],
+      "properties": {
+        "op": { "const": "locks.summary" },
+        "args": { "type": "object", "additionalProperties": false, "properties": {} }
+      }
+    },
+    "QueryId": {
+      "title": "DbstatsQueryId",
+      "description": "pg_stat_statements 的 queryid（bigint）的十进制字符串",
+      "type": "string",
+      "pattern": "^-?[0-9]{1,20}$"
+    },
+    "Sample": {
+      "title": "DbstatsSample",
+      "description": "一次读取的结果。rows 的结构由 op 决定（StatementRow、StatementText、TableRow、IndexRow、SettingRow、ActivityRow、LockRow）；累计计数器原样返回，速率由两次采样的差值计算",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["op", "sampled_at", "server_version", "rows", "truncated"],
+      "properties": {
+        "op": { "$ref": "#/$defs/Operation" },
+        "sampled_at": { "$ref": "../../../schemas/common.schema.json#/$defs/Timestamp" },
+        "server_version": { "type": "string", "description": "server_version_num 的取值，例如 170002" },
+        "rows": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "type": "object",
+            "additionalProperties": { "type": ["string", "number", "boolean", "null"] }
+          }
+        },
+        "truncated": { "type": "boolean", "description": "结果被 limit 截断" }
+      }
+    },
+    "StatementRow": {
+      "title": "DbstatsStatementRow",
+      "description": "statements.top 的一行（pg_stat_statements(showtext := false)）。时间单位为毫秒；计数器是累计值",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "queryid",
+        "database",
+        "role",
+        "toplevel",
+        "calls",
+        "total_exec_time_ms",
+        "mean_exec_time_ms",
+        "rows",
+        "shared_blks_hit",
+        "shared_blks_read",
+        "temp_blks_written",
+        "blk_read_time_ms",
+        "wal_bytes"
+      ],
+      "properties": {
+        "queryid": { "$ref": "#/$defs/QueryId" },
+        "database": { "type": "string" },
+        "role": { "type": "string" },
+        "toplevel": { "type": "boolean" },
+        "calls": { "type": "number", "minimum": 0 },
+        "total_exec_time_ms": { "type": "number", "minimum": 0 },
+        "mean_exec_time_ms": { "type": "number", "minimum": 0 },
+        "rows": { "type": "number", "minimum": 0 },
+        "shared_blks_hit": { "type": "number", "minimum": 0 },
+        "shared_blks_read": { "type": "number", "minimum": 0 },
+        "temp_blks_written": { "type": "number", "minimum": 0 },
+        "blk_read_time_ms": { "type": "number", "minimum": 0 },
+        "wal_bytes": { "type": "number", "minimum": 0 }
+      }
+    },
+    "StatementText": {
+      "title": "DbstatsStatementText",
+      "description": "statements.text 的一行：语句经 libpg-query 重新规范化（常量换成 $n）并去掉注释，不超过 4 KiB；fingerprint 是 libpg-query 对规范化语句计算的指纹（十六进制），PG 升级后 queryid 变化时不变。无法解析的语句 text 为 null，normalize_error 写明原因",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["queryid", "text", "fingerprint", "truncated", "normalize_error"],
+      "properties": {
+        "queryid": { "$ref": "#/$defs/QueryId" },
+        "text": { "type": ["string", "null"], "maxLength": 4096 },
+        "fingerprint": { "type": ["string", "null"], "pattern": "^[0-9a-f]{16}$" },
+        "truncated": { "type": "boolean" },
+        "normalize_error": { "type": ["string", "null"], "maxLength": 300 }
+      }
+    },
+    "TableRow": {
+      "title": "DbstatsTableRow",
+      "description": "tables.top 的一行（pg_stat_user_tables 与 pg_statio_user_tables）。Timescale 分块按 hypertable 汇总，chunks 为分块数；普通表 chunks 为 0",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "table",
+        "hypertable",
+        "chunks",
+        "seq_scan",
+        "seq_tup_read",
+        "idx_scan",
+        "idx_tup_fetch",
+        "n_tup_ins",
+        "n_tup_upd",
+        "n_tup_del",
+        "n_tup_hot_upd",
+        "n_live_tup",
+        "n_dead_tup",
+        "heap_blks_read",
+        "heap_blks_hit",
+        "idx_blks_read",
+        "idx_blks_hit",
+        "last_autovacuum",
+        "last_autoanalyze"
+      ],
+      "properties": {
+        "schema": { "type": "string" },
+        "table": { "type": "string" },
+        "hypertable": { "type": "boolean" },
+        "chunks": { "type": "integer", "minimum": 0 },
+        "seq_scan": { "type": "number", "minimum": 0 },
+        "seq_tup_read": { "type": "number", "minimum": 0 },
+        "idx_scan": { "type": "number", "minimum": 0 },
+        "idx_tup_fetch": { "type": "number", "minimum": 0 },
+        "n_tup_ins": { "type": "number", "minimum": 0 },
+        "n_tup_upd": { "type": "number", "minimum": 0 },
+        "n_tup_del": { "type": "number", "minimum": 0 },
+        "n_tup_hot_upd": { "type": "number", "minimum": 0 },
+        "n_live_tup": { "type": "number", "minimum": 0 },
+        "n_dead_tup": { "type": "number", "minimum": 0 },
+        "heap_blks_read": { "type": "number", "minimum": 0 },
+        "heap_blks_hit": { "type": "number", "minimum": 0 },
+        "idx_blks_read": { "type": "number", "minimum": 0 },
+        "idx_blks_hit": { "type": "number", "minimum": 0 },
+        "last_autovacuum": {
+          "oneOf": [{ "type": "null" }, { "$ref": "../../../schemas/common.schema.json#/$defs/Timestamp" }]
+        },
+        "last_autoanalyze": {
+          "oneOf": [{ "type": "null" }, { "$ref": "../../../schemas/common.schema.json#/$defs/Timestamp" }]
+        }
+      }
+    },
+    "IndexRow": {
+      "title": "DbstatsIndexRow",
+      "description": "indexes.usage 的一行（pg_stat_user_indexes、pg_index 与 pg_relation_size）。Timescale 分块上的索引按 hypertable 与索引名汇总",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "table",
+        "index",
+        "idx_scan",
+        "idx_tup_read",
+        "idx_tup_fetch",
+        "size_bytes",
+        "unique",
+        "primary"
+      ],
+      "properties": {
+        "schema": { "type": "string" },
+        "table": { "type": "string" },
+        "index": { "type": "string" },
+        "idx_scan": { "type": "number", "minimum": 0 },
+        "idx_tup_read": { "type": "number", "minimum": 0 },
+        "idx_tup_fetch": { "type": "number", "minimum": 0 },
+        "size_bytes": { "type": "number", "minimum": 0 },
+        "unique": { "type": "boolean" },
+        "primary": { "type": "boolean" }
+      }
+    },
+    "SettingRow": {
+      "title": "DbstatsSettingRow",
+      "description": "settings.get 的一行（pg_settings）。不存在的参数不返回",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "setting", "unit", "vartype", "context", "source", "min_val", "max_val", "pending_restart"],
+      "properties": {
+        "name": { "type": "string" },
+        "setting": { "type": "string" },
+        "unit": { "type": ["string", "null"] },
+        "vartype": { "type": "string", "enum": ["bool", "enum", "integer", "real", "string"] },
+        "context": {
+          "type": "string",
+          "description": "修改需要的条件；postmaster 需要重启",
+          "enum": ["internal", "postmaster", "sighup", "superuser-backend", "backend", "superuser", "user"]
+        },
+        "source": { "type": "string" },
+        "min_val": { "type": ["string", "null"] },
+        "max_val": { "type": ["string", "null"] },
+        "pending_restart": { "type": "boolean" }
+      }
+    },
+    "ActivityRow": {
+      "title": "DbstatsActivityRow",
+      "description": "activity.summary 的一行：按状态与等待事件计数的客户端会话（pg_stat_activity，backend_type 为 client backend），不含语句文本与应用名。另有一行 state 为 max_connections，count 为参数取值",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "wait_event_type", "wait_event", "count"],
+      "properties": {
+        "state": { "type": "string" },
+        "wait_event_type": { "type": ["string", "null"] },
+        "wait_event": { "type": ["string", "null"] },
+        "count": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "LockRow": {
+      "title": "DbstatsLockRow",
+      "description": "locks.summary 的一行：按锁类型、模式与是否授予计数（pg_locks），不含对象名与进程",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["locktype", "mode", "granted", "count"],
+      "properties": {
+        "locktype": { "type": "string" },
+        "mode": { "type": "string" },
+        "granted": { "type": "boolean" },
+        "count": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "PrivilegeReport": {
+      "title": "DbstatsPrivilegeReport",
+      "description": "权限自检（启动时与每小时一次）：角色能读取任何业务表（has_table_privilege SELECT 或 has_any_column_privilege SELECT，系统 schema 之外）时 ok 为 false，集成降级为不可用并发布状态条件 DatasourceOverPrivileged。missing 为缺少的 pg_read_all_stats、pg_read_all_settings 成员关系与 pg_stat_statements 扩展",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ok", "role", "readable_tables", "missing", "read_only", "checked_at"],
+      "properties": {
+        "ok": { "type": "boolean" },
+        "role": { "type": "string" },
+        "readable_tables": {
+          "type": "array",
+          "description": "能读取的业务表 <schema>.<表名>，最多列出 20 个",
+          "maxItems": 20,
+          "items": { "type": "string" }
+        },
+        "missing": { "type": "array", "items": { "type": "string" } },
+        "read_only": { "type": "boolean", "description": "default_transaction_read_only 为 on" },
+        "checked_at": { "$ref": "../../../schemas/common.schema.json#/$defs/Timestamp" }
+      }
+    }
+  }
+}
