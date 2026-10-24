@@ -9,7 +9,7 @@ import { PACKS } from '../support/packs.js';
 
 // 下达目标（ADR 0146 §1.2、§5.1）：只能引用领域包的指标与领域，参数按指标的 schema 校验，预算与期限取默认值
 
-const OPTDB =resolve(import.meta.dirname, '../fixtures/packs/optdb');
+const OPTDB = resolve(import.meta.dirname, '../fixtures/packs/optdb');
 
 let set: PackSet;
 beforeAll(async () => {
