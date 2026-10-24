@@ -1,4 +1,5 @@
-import type { EvidenceResult } from '@srenautix/contract';
+import type { EvidenceResult, TopologyEdge, TopologyNode } from '@srenautix/contract';
+import { TopologyGraph } from '@srenautix/core';
 import { describe, expect, it } from 'vitest';
 import { renderCard, ButtonSigner, renderExternalDigestCard } from '../../src/channels/feishu/render.js';
 import { MAX_ENTITIES, MAX_TEXT_UNITS } from '../../src/channels/telegram/html.js';
@@ -6,7 +7,9 @@ import { renderExternalDigest, renderIncident, type TelegramPayload } from '../.
 import { composeMessage, type ComposeInput } from '../../src/notify/compose.js';
 import {
   composeExternalDigest,
+  dependencyPath,
   externalTypeLookup,
+  impactLine,
   lastWindow,
   matchesLabels,
   type ExternalWindowStats,
@@ -277,7 +280,7 @@ describe('外部上游的周期汇总（ADR 0147）', () => {
     const lines = text.split('\n');
     expect(lines[0]).toBe('[影子] 外部上游汇总 10:00–11:00 UTC');
     expect(text).toContain('本时段 3 个上游有问题（上一时段 2 个）：新增 2、持续 1；未恢复 2、已恢复 1。');
-    expect(text).toContain('业务影响：无（业务告警 layer=L0 0 条，影响卡无异常）');
+    expect(text).toContain('业务影响：无（与上游事件相关的业务告警 layer=L0 0 条，相关的影响卡无异常）');
     const items = lines.filter((l) => l.startsWith('- '));
     expect(items).toEqual([
       '- [严重] Kimi provider 故障率 35.2%、首字延迟 12.3 s · 触发 5 次（上一时段 3 次） · 未恢复',
@@ -294,26 +297,148 @@ describe('外部上游的周期汇总（ADR 0147）', () => {
     ]);
   });
 
-  it('有业务影响时写出触发的业务告警与异常的影响卡，并说明相关事件已即时推送', () => {
-    const view = composeExternalDigest(
-      {
-        ...cur,
-        roots: [{ ...cur.roots[0]!, immediate: true }],
-        impact: {
-          labels: { layer: ['L0'] },
-          alerts: [{ alertname: 'CCHPErrorBudgetBurnFast', starts_at: '2026-10-24T10:12:00.000Z', ends_at: null }],
-          cards: [{ title: { 'zh-CN': '5xx 来自哪一层', en: 'Which layer' }, value: '4.1%' }],
-        },
+  it('有业务影响时写出相关的业务告警与异常的影响卡及依据（ADR 0150），并说明相关事件已即时推送', () => {
+    const kimi = cur.roots[0]!.root;
+    const stats: ExternalWindowStats = {
+      ...cur,
+      roots: [{ ...cur.roots[0]!, immediate: true }],
+      impact: {
+        labels: { layer: ['L0'] },
+        alerts: [
+          {
+            alertname: 'CCHPErrorBudgetBurnFast',
+            starts_at: '2026-10-24T10:12:00.000Z',
+            ends_at: null,
+            upstream: kimi,
+            basis: {
+              kind: 'window',
+              subject: 'alert',
+              upstream_at: '2026-10-24T10:05:00.000Z',
+              starts_at: '2026-10-24T10:12:00.000Z',
+            },
+          },
+        ],
+        cards: [
+          {
+            title: { 'zh-CN': '5xx 来自哪一层', en: 'Which layer' },
+            value: '4.1%',
+            upstream: kimi,
+            basis: { kind: 'topology', path: ['StatefulSet:cchp-prod/gateway', kimi] },
+          },
+        ],
       },
-      null,
-      'zh',
-      null,
+    };
+    const zh = strict(
+      renderExternalDigest(CHAT, composeExternalDigest(stats, null, 'zh', null), '').payload as TelegramPayload,
     );
-    const { text } = strict(renderExternalDigest(CHAT, view, '').payload as TelegramPayload);
-    expect(text).toContain(
-      '业务影响：CCHPErrorBudgetBurnFast（10:12 起，未恢复）、5xx 来自哪一层 4.1%，相关事件已即时推送',
+    expect(zh.text).toContain(
+      '业务影响：CCHPErrorBudgetBurnFast（10:12 起，未恢复；在上游 Kimi 的事件开始后 7 分钟开始）、' +
+        '5xx 来自哪一层 4.1%（拓扑路径 StatefulSet:cchp-prod/gateway → Kimi），相关事件已即时推送',
     );
-    expect(text).toContain('波及业务，已即时推送');
+    expect(zh.text).toContain('波及业务，已即时推送');
+    const en = strict(
+      renderExternalDigest(CHAT, composeExternalDigest(stats, null, 'en', null), '').payload as TelegramPayload,
+    );
+    expect(en.text).toContain(
+      'Business impact: CCHPErrorBudgetBurnFast (since 10:12, firing; started 7 min after the incident of upstream Kimi), ' +
+        'Which layer 4.1% (topology path StatefulSet:cchp-prod/gateway → Kimi); the incidents were sent immediately',
+    );
+  });
+
+  it('事件横幅里每个信号带依据：本事件的影响卡、时间窗、拓扑路径与落在上游组件上', () => {
+    const names = { 'provider:k': 'Kimi' };
+    const window = {
+      kind: 'window' as const,
+      subject: 'incident' as const,
+      upstream_at: '2026-10-24T10:05:00.000Z',
+      starts_at: '2026-10-24T10:05:40.000Z',
+    };
+    expect(impactLine({ signal: 'provider 故障率 35.2%', basis: { kind: 'own_card' } }, 'zh', names)).toBe(
+      'provider 故障率 35.2%（本事件的影响卡）',
+    );
+    expect(impactLine({ signal: '边缘 5xx 4.1%', basis: window }, 'zh', names)).toBe(
+      '边缘 5xx 4.1%（所在事件在上游事件开始后 1 分钟内开始）',
+    );
+    expect(impactLine({ signal: 'Edge 5xx 4.1%', basis: window }, 'en', names)).toBe(
+      'Edge 5xx 4.1% (its incident started within 1 min after the upstream incident)',
+    );
+    expect(
+      impactLine(
+        { signal: 'L0', basis: { kind: 'topology', path: ['component:edge-envoy', 'provider:k'] } },
+        'zh',
+        names,
+      ),
+    ).toBe('L0（拓扑路径 component:edge-envoy → Kimi）');
+    expect(impactLine({ signal: 'L0', basis: { kind: 'topology', path: ['provider:k'] } }, 'en', names)).toBe(
+      'L0 (on the upstream component Kimi)',
+    );
+  });
+
+  it('依赖路径：沿依赖边（含成员）到达上游组件；枢纽不展开，访问边之后不再展开，命名推断的边不算，超过跳数不算', () => {
+    const n = (key: string, hub = false): TopologyNode => {
+      const [kind, rest] = key.split(':') as [string, string];
+      const [ns, name] = rest.includes('/') ? (rest.split('/') as [string, string]) : [null, rest];
+      return { key, kind, namespace: ns, name: name!, uid: null, labels: {}, component_type: null, hub };
+    };
+    const e = (from: string, to: string, relation: string, provenance: TopologyEdge['provenance'] = 'structural') =>
+      ({ from, to, relation, provenance, confidence: 1, scope: 'service', evidence: 't' }) as TopologyEdge;
+    const g = new TopologyGraph(
+      [
+        n('Deployment:shop/web'),
+        n('ReplicaSet:shop/web-1'),
+        n('Pod:shop/web-1-a'),
+        n('Service:shop/api'),
+        n('Deployment:shop/api'),
+        n('Pod:shop/api-1-a'),
+        n('Service:shop/payments'),
+        n('Service:kube-system/dns', true),
+        n('Service:shop/ledger'),
+        n('Job:shop/migrate'),
+        n('StatefulSet:shop/pg'),
+        n('Pod:shop/pg-0'),
+        n('Node:node-a'),
+        n('Service:shop/named'),
+      ],
+      [
+        e('ReplicaSet:shop/web-1', 'Deployment:shop/web', 'owned_by'),
+        e('Pod:shop/web-1-a', 'ReplicaSet:shop/web-1', 'owned_by'),
+        e('Pod:shop/web-1-a', 'Service:shop/api', 'calls', 'runtime'),
+        e('Service:shop/api', 'Pod:shop/api-1-a', 'selects'),
+        e('Pod:shop/api-1-a', 'Deployment:shop/api', 'owned_by'),
+        e('Pod:shop/api-1-a', 'Service:shop/payments', 'calls', 'runtime'),
+        e('Pod:shop/web-1-a', 'Service:kube-system/dns', 'calls', 'runtime'),
+        e('Service:kube-system/dns', 'Service:shop/ledger', 'routes_to'),
+        e('Job:shop/migrate', 'StatefulSet:shop/pg', 'egress_to', 'network_policy'),
+        e('Pod:shop/pg-0', 'StatefulSet:shop/pg', 'owned_by'),
+        e('Pod:shop/pg-0', 'Node:node-a', 'runs_on'),
+        e('Pod:shop/web-1-a', 'Service:shop/named', 'named_like', 'naming'),
+      ],
+      1,
+    );
+    expect(dependencyPath(g, 'Deployment:shop/web', 'Service:shop/payments', 6)).toEqual([
+      'Deployment:shop/web',
+      'Service:shop/api',
+      'Deployment:shop/api',
+      'Service:shop/payments',
+    ]);
+    expect(dependencyPath(g, 'Deployment:shop/web', 'Service:shop/payments', 2)).toBeNull();
+    expect(dependencyPath(g, 'Pod:shop/api-1-a', 'Deployment:shop/api', 6)).toEqual(['Deployment:shop/api']);
+    // 枢纽可以被到达，但不经它到达后面的组件
+    expect(dependencyPath(g, 'Deployment:shop/web', 'Service:kube-system/dns', 6)).toEqual([
+      'Deployment:shop/web',
+      'Service:kube-system/dns',
+    ]);
+    expect(dependencyPath(g, 'Deployment:shop/web', 'Service:shop/ledger', 6)).toBeNull();
+    // 访问边到达被访问的组件为止，不经它的 Pod 到达节点
+    expect(dependencyPath(g, 'Job:shop/migrate', 'StatefulSet:shop/pg', 6)).toEqual([
+      'Job:shop/migrate',
+      'StatefulSet:shop/pg',
+    ]);
+    expect(dependencyPath(g, 'Job:shop/migrate', 'Node:node-a', 6)).toBeNull();
+    expect(dependencyPath(g, 'Deployment:shop/web', 'Service:shop/named', 6)).toBeNull();
+    // 方向：上游不依赖业务组件
+    expect(dependencyPath(g, 'Service:shop/payments', 'Deployment:shop/web', 6)).toBeNull();
+    expect(dependencyPath(g, 'provider:x', 'Deployment:shop/web', 6)).toBeNull();
   });
 
   it('飞书：同样的行写成 markdown，特殊字符已转义', () => {

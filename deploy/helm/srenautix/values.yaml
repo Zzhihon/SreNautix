@@ -232,8 +232,9 @@ ingest:
 
 # 外部上游的周期汇总（server 配置 notify.digest.external_roots，docs/server/notify.md，ADR 0147）：根因是领域包声明
 # external: true 的组件类型（例如模型服务方）、components 列出的组件，或全部成员告警都满足 alertLabels 的事件，不逐条推送、
-# 不开 issue，每个周期（按 UTC 对齐，1h 即整点）每个群发一条汇总；仍在触发且有业务影响（businessImpact 的告警在触发，
-# 或 impactCards 为 true 时影响卡异常）时照常即时推送。roles.server.config.notify.digest 中同名的键优先
+# 不开 issue，每个周期（按 UTC 对齐，1h 即整点）每个群发一条汇总；仍在触发且有与这个上游事件相关的业务影响时照常即时推送
+# （ADR 0150：businessImpact 的告警、或 impactCards 为 true 时其他事件异常的影响卡，在上游事件开始后 within 之内开始，
+# 或组件沿依赖边 topologyHops 跳以内到达上游根因；本事件异常的影响卡）。roles.server.config.notify.digest 中同名的键优先
 notifyDigest:
   externalRoots:
     enabled: true
@@ -243,9 +244,13 @@ notifyDigest:
     # 标签名 → 允许的取值，例如 {theme: [provider]}
     alertLabels: {}
     businessImpact:
-      # 触发中即算业务影响的告警，例如 {layer: [L0]}
+      # 算作业务影响的告警，例如 {layer: [L0]}
       alertLabels: {}
       impactCards: true
+      # 在上游事件开始后这么久之内开始的才算相关；开始早于上游事件的长期告警不算
+      within: 30m
+      # 组件沿依赖边这么多跳以内到达上游根因时也算相关；0 时不按拓扑判定
+      topologyHops: 6
 
 # 需要人跟进的事件在 GitHub 开 issue，并关联修复 PR（需要 roles.server.githubApp）。enabled 以外的键原样写入 server 配置的
 # issues（labels、title_prefix、max_per_hour、lookback、interval，见 apps/srenautix/src/config/server.ts）

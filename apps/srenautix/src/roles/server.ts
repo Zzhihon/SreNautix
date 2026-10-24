@@ -49,7 +49,7 @@ import type { RoleArgs } from '../main.js';
 import { ServerMetrics, startMetricsServer } from '../metrics.js';
 import { ServerNotifyActions } from '../notify/actions.js';
 import { NotifyService } from '../notify/index.js';
-import { ExternalRoots, externalTypeLookup } from '../notify/external.js';
+import { ExternalRoots, externalTypeLookup, topologyPaths } from '../notify/external.js';
 import { PgMessageSource, ReportSource } from '../notify/source.js';
 import { Catalog, DEFAULT_CATALOG_PATH } from '../proposals/catalog.js';
 import { FeedbackService } from '../proposals/feedback.js';
@@ -446,8 +446,10 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
     (clusterId, key, at) => topology.ownerOf(clusterId, key, at),
   );
   // 外部上游的周期汇总（ADR 0147）：组件类型取拓扑节点上匹配出的类型，节点不在拓扑里（provider、model 这类
-  // 只来自告警的实体）时按 kind 与名字匹配领域包的组件类型
+  // 只来自告警的实体）时按 kind 与名字匹配领域包的组件类型。业务影响按与上游事件的相关性判定（ADR 0150）：
+  // 时间窗，或在上游根因 topology_hops 跳以内的子图上找依赖路径
   const xr = c.notify.digest.external_roots;
+  const bi = xr.business_impact;
   const externalRoots = xr.enabled
     ? new ExternalRoots(
         pool,
@@ -456,11 +458,21 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
           periodMs: parseDuration('notify.digest.external_roots.period', xr.period),
           components: xr.components,
           alertLabels: xr.alert_labels,
-          impact: { alertLabels: xr.business_impact.alert_labels, impactCards: xr.business_impact.impact_cards },
+          impact: {
+            alertLabels: bi.alert_labels,
+            impactCards: bi.impact_cards,
+            withinMs: parseDuration('notify.digest.external_roots.business_impact.within', bi.within),
+            topologyHops: bi.topology_hops,
+          },
         },
         externalTypeLookup(
           () => packs.componentTypes(),
           (clusterId, key) => topology.componentType(clusterId, key),
+        ),
+        topologyPaths(
+          (clusterId, seeds, t, hops) => topology.subgraph(clusterId, seeds, t, null, hops),
+          bi.topology_hops,
+          o.now ?? Date.now,
         ),
         o.now ?? Date.now,
       )

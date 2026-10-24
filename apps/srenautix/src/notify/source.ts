@@ -7,7 +7,7 @@ import type { ProposalService } from '../proposals/service.js';
 import { pullsOf } from '../remediation/pulls.js';
 import type { TopologyStore } from '../topology/store.js';
 import { composeMessage, laneOf, type ActionVerify, type ComposeInput, type ResearchMirror } from './compose.js';
-import type { Classification, ExternalRoots, ExternalWindowStats } from './external.js';
+import { impactLine, type Classification, type ExternalRoots, type ExternalWindowStats } from './external.js';
 import type { LinkSettings } from './links.js';
 import type { DesiredIncidentMessage, MessageSource } from './ports.js';
 import { withComponentNames } from '../incident/names.js';
@@ -199,9 +199,12 @@ export class PgMessageSource implements MessageSource {
     return inputs.map((input) => {
       const inc = input.incident;
       const c = cls.get(inc.incident_id);
-      // 外部上游伴随业务影响时即时推送，横幅写明“上游故障已影响业务”；没有业务影响时进入周期汇总
+      // 外部上游伴随相关的业务影响时即时推送，横幅写明“上游故障已影响业务”与每个信号的依据（ADR 0150）；
+      // 没有业务影响时进入周期汇总
       const { message, targets } = composeMessage(
-        c?.external && c.impact.length ? { ...input, upstreamImpact: c.impact } : input,
+        c?.external && c.impact.length
+          ? { ...input, upstreamImpact: c.impact.map((x) => impactLine(x, input.language, inc.component_names)) }
+          : input,
       );
       return {
         ...(c?.external && !c.impact.length ? { digest: 'external' as const } : {}),

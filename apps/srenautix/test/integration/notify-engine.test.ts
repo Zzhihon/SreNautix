@@ -182,7 +182,7 @@ describe('NotifyService', () => {
             period: '1h',
             components: [],
             alert_labels: {},
-            business_impact: { alert_labels: {}, impact_cards: true },
+            business_impact: { alert_labels: {}, impact_cards: true, within: '30m', topology_hops: 6 },
           },
         },
       },

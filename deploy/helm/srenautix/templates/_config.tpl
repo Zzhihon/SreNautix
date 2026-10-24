@@ -369,6 +369,8 @@ notify:
       business_impact:
         alert_labels: {{ toJson .businessImpact.alertLabels }}
         impact_cards: {{ .businessImpact.impactCards }}
+        within: {{ .businessImpact.within }}
+        topology_hops: {{ .businessImpact.topologyHops }}
 {{- end }}
 {{- with $v.remediation }}
 {{- if .enabled }}

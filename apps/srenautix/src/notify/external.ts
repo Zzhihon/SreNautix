@@ -1,12 +1,21 @@
-import type { ComponentType, EvidenceResult, LocalizedText, NotifyBlock, NotifyRun } from '@srenautix/contract';
-import { displayKey, matchTypeByName, tryNodeKey } from '@srenautix/core';
+import type {
+  ComponentType,
+  EvidenceResult,
+  LocalizedText,
+  NotifyBlock,
+  NotifyRun,
+  TopologyEdge,
+  TopologyNode,
+} from '@srenautix/contract';
+import { ACCESS_RELATIONS, displayKey, matchTypeByName, TopologyGraph, tryNodeKey } from '@srenautix/core';
 import type pg from 'pg';
 import { parseStoredKey } from '../topology/keys.js';
 import type { ComposeInput } from './compose.js';
 
 // 外部上游的周期汇总（ADR 0147）：根因是集群之外的上游（领域包声明 external 的组件类型，例如模型服务方 provider 与 model，
 // 或配置列出的逻辑组件）的事件不逐条即时推送、不逐条开 issue，每个周期（默认整点、1 小时）发一条汇总。
-// 例外：同时有业务影响（配置的业务告警在触发、影响卡异常）时照常即时推送，横幅写“上游故障已影响业务”。
+// 例外：同时有与这个上游事件相关的业务影响时照常即时推送，横幅写“上游故障已影响业务”与相关的依据（ADR 0150）：
+// 本事件异常的影响卡；业务告警（或其他事件的影响卡）在上游事件开始后的时间窗内开始，或它的组件经拓扑依赖到上游根因。
 
 export interface ExternalRootSettings {
   enabled: boolean;
@@ -16,10 +25,113 @@ export interface ExternalRootSettings {
   components: readonly string[];
   /** 全部成员告警都满足这些标签条件（每个键取值之一）的事件也按外部上游处理；为空时不用 */
   alertLabels: Readonly<Record<string, readonly string[]>>;
-  /** 业务影响的判定：触发中的告警满足这些标签条件、或影响卡（impact: true）异常 */
+  /** 业务影响的判定：满足这些标签条件的告警、或异常的影响卡（impact: true），并且与上游事件相关 */
   impact: {
     alertLabels: Readonly<Record<string, readonly string[]>>;
     impactCards: boolean;
+    /** 在上游事件开始后这么久之内开始的业务告警（与其他事件）算相关；开始早于上游事件的不算 */
+    withinMs: number;
+    /** 组件沿依赖边最多这么多跳到达上游根因时也算相关；0 时不看拓扑 */
+    topologyHops: number;
+  };
+}
+
+/**
+ * 业务影响信号与上游事件相关的依据（ADR 0150）：
+ * - own_card：本事件自己异常的影响卡；
+ * - window：业务告警（subject: alert）或影响卡所在的事件（subject: incident）在上游事件开始后 withinMs 之内开始；
+ * - topology：信号的组件（告警的组件，或影响卡所在事件的根因）沿依赖边到达上游根因，path 是组件级的路径，首尾是这两个组件
+ */
+export type ImpactBasis =
+  | { kind: 'own_card' }
+  | { kind: 'window'; subject: 'alert' | 'incident'; upstream_at: string; starts_at: string }
+  | { kind: 'topology'; path: string[] };
+
+export interface ImpactSignal {
+  /** 告警名，或影响卡标题与值（按事件的语言） */
+  signal: string;
+  basis: ImpactBasis;
+}
+
+/** 从 from 沿依赖边到达 to 的组件级路径；没有路径时为 null */
+export type TopologyPathLookup = (clusterId: string, from: string, to: string) => Promise<string[] | null>;
+
+/**
+ * 依赖路径（ADR 0150）：从 from 的对象及其成员出发，沿依赖边（from 依赖 to）最多 maxHops 跳，到达 to 所属组件的对象时，
+ * 返回经过的组件序列。展开规则与 TopologyGraph.reach 相同：枢纽可以被到达但不再展开，经访问边（egress_to）到达的组件不再
+ * 沿它的依赖展开，命名推断的边只用于展示，不算。两者是同一个组件时路径只有这一个组件
+ */
+export function dependencyPath(graph: TopologyGraph, from: string, to: string, maxHops: number): string[] | null {
+  const target = graph.componentOf(to);
+  const start = graph.componentOf(from);
+  if (start === target) {
+    return [target];
+  }
+  const prev = new Map<string, string | null>();
+  let frontier: string[] = [];
+  for (const m of graph.membersOf(from)) {
+    prev.set(m, null);
+    frontier.push(m);
+  }
+  const pathTo = (k: string): string[] => {
+    const chain: string[] = [];
+    for (let cur: string | null = k; cur !== null; cur = prev.get(cur) ?? null) {
+      chain.unshift(graph.componentOf(cur));
+    }
+    return chain.filter((c, i) => i === 0 || chain[i - 1] !== c);
+  };
+  for (let hop = 0; hop < maxHops && frontier.length; hop++) {
+    const next: string[] = [];
+    for (const cur of frontier) {
+      if (graph.componentOf(cur) !== start && graph.isHub(cur)) {
+        continue;
+      }
+      for (const e of graph.dependencies(cur)) {
+        if (e.provenance === 'naming' || prev.has(e.to)) {
+          continue;
+        }
+        prev.set(e.to, cur);
+        if (graph.componentOf(e.to) === target) {
+          return pathTo(e.to);
+        }
+        if (!ACCESS_RELATIONS.has(e.relation)) {
+          next.push(e.to);
+        }
+      }
+    }
+    frontier = next;
+  }
+  return null;
+}
+
+/** 拓扑子图的读取：从 seeds 出发不超过 hops 跳（边的两个方向），与 TopologyStore.subgraph 相同 */
+export type SubgraphReader = (
+  clusterId: string,
+  seeds: readonly string[],
+  t: Date,
+  hops: number,
+) => Promise<{ nodes: TopologyNode[]; edges: TopologyEdge[]; version: number }>;
+
+/** 路径查询缓存 60 秒：同步每 5 秒对全部期望消息分类一次 */
+const PATH_CACHE_MS = 60_000;
+
+/** 依赖路径的查询：读取上游根因 hops 跳以内的子图，在子图上找路径；结果缓存 60 秒 */
+export function topologyPaths(read: SubgraphReader, hops: number, now: () => number = Date.now): TopologyPathLookup {
+  const cache = new Map<string, { at: number; v: string[] | null }>();
+  return async (clusterId, from, to) => {
+    if (hops <= 0) {
+      return null;
+    }
+    const k = `${clusterId}|${from}|${to}`;
+    const t = now();
+    const hit = cache.get(k);
+    if (hit && t - hit.at < PATH_CACHE_MS) {
+      return hit.v;
+    }
+    const sub = await read(clusterId, [to], new Date(t), hops);
+    const v = dependencyPath(new TopologyGraph(sub.nodes, sub.edges, sub.version), from, to, hops);
+    cache.set(k, { at: t, v });
+    return v;
   };
 }
 
@@ -51,8 +163,8 @@ export function externalTypeLookup(
 export interface Classification {
   /** 根因是外部上游 */
   external: boolean;
-  /** 业务影响的信号（告警名、影响卡与值）；外部上游的事件有这些信号时即时推送 */
-  impact: string[];
+  /** 与这个上游事件相关的业务影响信号及依据；外部上游的事件有这些信号时即时推送 */
+  impact: ImpactSignal[];
 }
 
 /** 标签条件：每个键都有，且取值在列出的值中；条件为空时不命中 */
@@ -84,10 +196,11 @@ const impactCard = (c: EvidenceResult): boolean => c.impact === true && c.verdic
 const impactText = (c: EvidenceResult, lang: 'zh' | 'en'): string =>
   `${title(c.title, lang)}${c.value ? ` ${c.value}` : ''}`;
 
-/** 触发中的业务告警（某个集群）：告警名与开始时间 */
+/** 满足业务告警条件的一条告警（某个集群）：告警名、组件与开始、结束时间 */
 interface ImpactAlert {
   cluster_id: string;
   alertname: string;
+  component: string | null;
   starts_at: string;
   ends_at: string | null;
 }
@@ -102,8 +215,52 @@ export class ExternalRoots {
     private readonly pool: pg.Pool,
     readonly s: ExternalRootSettings,
     private readonly externalType: ExternalTypeLookup,
+    private readonly paths: TopologyPathLookup,
     private readonly now: () => number = Date.now,
   ) {}
+
+  /**
+   * 一个信号与上游事件是否相关（ADR 0150）：信号在上游事件开始后 withinMs 之内开始（开始早于上游事件的不算），
+   * 或信号的组件沿依赖边到达上游根因。都不成立时为 null
+   */
+  private async relevance(
+    upstream: ComposeInput,
+    subject: 'alert' | 'incident',
+    startsAt: string,
+    component: string | null,
+  ): Promise<ImpactBasis | null> {
+    const from = Date.parse(upstream.incident.first_firing_at);
+    const t = Date.parse(startsAt);
+    if (t >= from && t - from <= this.s.impact.withinMs) {
+      return { kind: 'window', subject, upstream_at: upstream.incident.first_firing_at, starts_at: startsAt };
+    }
+    const root = rootOf(upstream);
+    if (root && component) {
+      const path = await this.paths(upstream.incident.cluster_id, component, root);
+      if (path) {
+        return { kind: 'topology', path };
+      }
+    }
+    return null;
+  }
+
+  /** 与上游事件相关的业务告警：每个告警名一项，取最早开始的相关告警的依据 */
+  private async relevantAlerts(
+    upstream: ComposeInput,
+    alerts: readonly ImpactAlert[],
+  ): Promise<Array<{ alert: ImpactAlert; basis: ImpactBasis }>> {
+    const out = new Map<string, { alert: ImpactAlert; basis: ImpactBasis }>();
+    for (const a of alerts) {
+      if (a.cluster_id !== upstream.incident.cluster_id || out.has(a.alertname)) {
+        continue;
+      }
+      const basis = await this.relevance(upstream, 'alert', a.starts_at, a.component);
+      if (basis) {
+        out.set(a.alertname, { alert: a, basis });
+      }
+    }
+    return [...out.values()];
+  }
 
   private async typeIsExternal(clusterId: string, key: string): Promise<boolean> {
     const k = `${clusterId}|${key}`;
@@ -132,7 +289,7 @@ export class ExternalRoots {
     );
   }
 
-  /** 时间段内满足业务告警条件的告警（[from, to) 内触发过；不给时间段时为当前触发中的） */
+  /** 满足业务告警条件的告警，按开始时间排序（[from, to) 内触发过；不给时间段时为当前触发中的） */
   async impactAlerts(clusterIds: readonly string[], from?: Date, to?: Date): Promise<ImpactAlert[]> {
     const keys = Object.keys(this.s.impact.alertLabels);
     if (!keys.length || !clusterIds.length) {
@@ -142,40 +299,32 @@ export class ExternalRoots {
       cluster_id: string;
       alertname: string;
       labels: Record<string, string>;
+      component: string | null;
       starts_at: Date;
       ends_at: Date | null;
     }>(
       from && to
-        ? `SELECT cluster_id, alertname, labels, starts_at, ends_at FROM server.alert_state
+        ? `SELECT cluster_id, alertname, labels, component, starts_at, ends_at FROM server.alert_state
             WHERE cluster_id = ANY($1::text[]) AND labels ?& $2::text[] AND starts_at < $4
               AND (ends_at IS NULL OR ends_at >= $3) ORDER BY starts_at, alert_id`
-        : `SELECT cluster_id, alertname, labels, starts_at, ends_at FROM server.alert_state
+        : `SELECT cluster_id, alertname, labels, component, starts_at, ends_at FROM server.alert_state
             WHERE cluster_id = ANY($1::text[]) AND labels ?& $2::text[] AND status = 'firing' ORDER BY starts_at, alert_id`,
       from && to ? [clusterIds, keys, from, to] : [clusterIds, keys],
     );
-    // 同一集群的同名告警合成一项：最早的开始；有一次仍在触发时没有结束时间，否则取最晚的结束
-    const merged = new Map<string, ImpactAlert>();
-    for (const a of r.rows.filter((x) => matchesLabels(x.labels, this.s.impact.alertLabels))) {
-      const k = `${a.cluster_id}|${a.alertname}`;
-      const ends = a.ends_at ? a.ends_at.toISOString() : null;
-      const prev = merged.get(k);
-      if (!prev) {
-        merged.set(k, {
-          cluster_id: a.cluster_id,
-          alertname: a.alertname,
-          starts_at: a.starts_at.toISOString(),
-          ends_at: ends,
-        });
-      } else {
-        prev.ends_at = prev.ends_at === null || ends === null ? null : ends > prev.ends_at ? ends : prev.ends_at;
-      }
-    }
-    return [...merged.values()];
+    return r.rows
+      .filter((x) => matchesLabels(x.labels, this.s.impact.alertLabels))
+      .map((a) => ({
+        cluster_id: a.cluster_id,
+        alertname: a.alertname,
+        component: a.component,
+        starts_at: a.starts_at.toISOString(),
+        ends_at: a.ends_at ? a.ends_at.toISOString() : null,
+      }));
   }
 
   /**
-   * 对一组事件分类（期望消息与 issue 共用）。业务影响取：本事件异常的影响卡、同一集群触发中的业务告警、
-   * 同一集群其他触发中且根因不是外部上游的事件里异常的影响卡
+   * 对一组事件分类（期望消息与 issue 共用）。业务影响取（ADR 0150）：本事件异常的影响卡；同一集群触发中、与本事件相关的
+   * 业务告警；同一集群其他触发中、根因不是外部上游、与本事件相关的事件里异常的影响卡。相关的依据见 relevance
    */
   async classify(inputs: readonly ComposeInput[]): Promise<Map<string, Classification>> {
     const out = new Map<string, Classification>();
@@ -216,14 +365,20 @@ export class ExternalRoots {
           !external.get(o.incident.incident_id),
       );
       const text = (c: EvidenceResult) => impactText(c, i.language);
-      const impact = [
-        ...new Set([
-          ...cardsOf(i).map(text),
-          ...alerts.filter((a) => a.cluster_id === cluster).map((a) => a.alertname),
-          ...others.flatMap(cardsOf).map(text),
-        ]),
-      ];
-      out.set(id, { external: true, impact });
+      const impact: ImpactSignal[] = cardsOf(i).map((c) => ({ signal: text(c), basis: { kind: 'own_card' } }));
+      for (const { alert, basis } of await this.relevantAlerts(i, alerts)) {
+        impact.push({ signal: alert.alertname, basis });
+      }
+      for (const o of others) {
+        const cards = cardsOf(o);
+        const basis = cards.length ? await this.relevance(i, 'incident', o.incident.first_firing_at, rootOf(o)) : null;
+        if (basis) {
+          impact.push(...cards.map((c) => ({ signal: text(c), basis })));
+        }
+      }
+      // 同一信号只列一次，取先出现的依据
+      const seen = new Set<string>();
+      out.set(id, { external: true, impact: impact.filter((x) => !seen.has(x.signal) && seen.add(x.signal)) });
     }
     return out;
   }
@@ -274,14 +429,42 @@ export class ExternalRoots {
         st.ended_at = null;
       }
     }
+    // 业务影响：时间段内触发过、与其中某个外部上游事件相关的业务告警与其他事件的影响卡（ADR 0150）。
+    // 同一集群的同名告警合成一项：最早的相关开始；有一次仍在触发时没有结束时间，否则取最晚的结束
     const clusters = [...new Set(ext.map((i) => i.incident.cluster_id))];
-    const alerts = ext.length ? await this.impactAlerts(clusters, from, to) : [];
-    const cards = this.s.impact.impactCards
-      ? inputs
-          .filter((i) => !cls.get(i.incident.incident_id)?.external)
-          .flatMap((i) => i.stageA.cards.filter(impactCard))
-          .map((c) => ({ title: c.title, value: c.value }))
-      : [];
+    const rows = ext.length ? await this.impactAlerts(clusters, from, to) : [];
+    const alerts = new Map<string, ExternalWindowStats['impact']['alerts'][number]>();
+    for (const a of rows) {
+      const k = `${a.cluster_id}|${a.alertname}`;
+      const prev = alerts.get(k);
+      if (prev) {
+        prev.ends_at =
+          prev.ends_at === null || a.ends_at === null ? null : a.ends_at > prev.ends_at ? a.ends_at : prev.ends_at;
+        continue;
+      }
+      const hit = await this.firstRelevant(ext, (u) =>
+        u.incident.cluster_id === a.cluster_id ? this.relevance(u, 'alert', a.starts_at, a.component) : null,
+      );
+      if (hit) {
+        alerts.set(k, { alertname: a.alertname, starts_at: a.starts_at, ends_at: a.ends_at, ...hit });
+      }
+    }
+    const cards: ExternalWindowStats['impact']['cards'] = [];
+    if (this.s.impact.impactCards) {
+      for (const o of inputs.filter((x) => !cls.get(x.incident.incident_id)?.external)) {
+        const list = o.stageA.cards.filter(impactCard);
+        const hit = list.length
+          ? await this.firstRelevant(ext, (u) =>
+              u.incident.cluster_id === o.incident.cluster_id
+                ? this.relevance(u, 'incident', o.incident.first_firing_at, rootOf(o))
+                : null,
+            )
+          : null;
+        if (hit) {
+          cards.push(...list.map((c) => ({ title: c.title, value: c.value, ...hit })));
+        }
+      }
+    }
     return {
       from: from.toISOString(),
       to: to.toISOString(),
@@ -292,12 +475,25 @@ export class ExternalRoots {
           b.triggers - a.triggers ||
           a.root.localeCompare(b.root),
       ),
-      impact: {
-        labels: this.s.impact.alertLabels,
-        alerts: alerts.map((a) => ({ alertname: a.alertname, starts_at: a.starts_at, ends_at: a.ends_at })),
-        cards,
-      },
+      impact: { labels: this.s.impact.alertLabels, alerts: [...alerts.values()], cards },
     };
+  }
+
+  /** 按事件的先后找第一个与信号相关的外部上游事件：它的根因与依据 */
+  private async firstRelevant(
+    ext: readonly ComposeInput[],
+    judge: (u: ComposeInput) => Promise<ImpactBasis | null> | null,
+  ): Promise<{ upstream: string; basis: ImpactBasis } | null> {
+    const ordered = [...ext].sort(
+      (a, b) => Date.parse(a.incident.first_firing_at) - Date.parse(b.incident.first_firing_at),
+    );
+    for (const u of ordered) {
+      const basis = await judge(u);
+      if (basis) {
+        return { upstream: rootOf(u) ?? `incident:${u.incident.incident_id}`, basis };
+      }
+    }
+    return null;
   }
 }
 
@@ -341,9 +537,41 @@ export interface ExternalWindowStats {
   roots: ExternalRootStat[];
   impact: {
     labels: Readonly<Record<string, readonly string[]>>;
-    alerts: Array<{ alertname: string; starts_at: string; ends_at: string | null }>;
-    cards: Array<{ title: LocalizedText; value: string | null }>;
+    /** upstream 与 basis：信号相关的外部上游根因与依据（ADR 0150） */
+    alerts: Array<{
+      alertname: string;
+      starts_at: string;
+      ends_at: string | null;
+      upstream: string;
+      basis: ImpactBasis;
+    }>;
+    cards: Array<{ title: LocalizedText; value: string | null; upstream: string; basis: ImpactBasis }>;
   };
+}
+
+const minutesBetween = (from: string, to: string) => Math.floor((Date.parse(to) - Date.parse(from)) / 60_000);
+
+/** 事件横幅里一条业务影响信号：信号与括号中的依据（ADR 0150）。names 是组件的可读名称 */
+export function impactLine(
+  x: ImpactSignal,
+  lang: 'zh' | 'en',
+  names: Readonly<Record<string, string | undefined>> | null | undefined,
+): string {
+  const d = D[lang];
+  return `${x.signal}${d.paren(basisText(x.basis, lang, (k) => names?.[k] ?? displayKey(k), null))}`;
+}
+
+/** 依据的说明；upstream 是上游的显示名（汇总里写明是哪个上游，事件横幅里为 null） */
+function basisText(b: ImpactBasis, lang: 'zh' | 'en', name: (k: string) => string, upstream: string | null): string {
+  const d = D[lang];
+  switch (b.kind) {
+    case 'own_card':
+      return d.basisOwn;
+    case 'window':
+      return d.basisWindow(b.subject, minutesBetween(b.upstream_at, b.starts_at), upstream);
+    case 'topology':
+      return b.path.length === 1 ? d.basisSame(name(b.path[0]!)) : d.basisPath(b.path.map(name).join(' → '));
+  }
 }
 
 /** 渠道无关的汇总消息：标题与若干块，渠道各自渲染 */
@@ -373,8 +601,14 @@ const D = {
     summary: (n: number, prev: number, fresh: number, cont: number, firing: number, recovered: number) =>
       `本时段 ${n} 个上游有问题（上一时段 ${prev} 个）：新增 ${fresh}、持续 ${cont}；未恢复 ${firing}、已恢复 ${recovered}。`,
     impactNone: (labels: string) =>
-      `业务影响：无${labels ? `（业务告警 ${labels} 0 条，影响卡无异常）` : '（影响卡无异常）'}`,
+      `业务影响：无${labels ? `（与上游事件相关的业务告警 ${labels} 0 条，相关的影响卡无异常）` : '（相关的影响卡无异常）'}`,
     impact: '业务影响：',
+    basisOwn: '本事件的影响卡',
+    basisWindow: (subject: 'alert' | 'incident', m: number, upstream: string | null) =>
+      `${subject === 'alert' ? '' : '所在事件'}在${upstream ? `上游 ${upstream} 的事件` : '上游事件'}开始后 ${m < 1 ? '1 分钟内' : `${m} 分钟`}开始`,
+    basisSame: (name: string) => `落在上游组件 ${name} 上`,
+    basisPath: (path: string) => `拓扑路径 ${path}`,
+    semi: '；',
     impactImmediate: '，相关事件已即时推送',
     since: (at: string, ended: string | null) => (ended ? `${at}–${ended}` : `${at} 起，未恢复`),
     triggers: (n: number) => `触发 ${n} 次`,
@@ -396,8 +630,14 @@ const D = {
     summary: (n: number, prev: number, fresh: number, cont: number, firing: number, recovered: number) =>
       `${n} upstreams had problems (${prev} in the previous period): ${fresh} new, ${cont} continuing; ${firing} firing, ${recovered} recovered.`,
     impactNone: (labels: string) =>
-      `Business impact: none${labels ? ` (0 business alerts ${labels}, no abnormal impact card)` : ' (no abnormal impact card)'}`,
+      `Business impact: none${labels ? ` (0 business alerts ${labels} related to the upstream incidents, no related abnormal impact card)` : ' (no related abnormal impact card)'}`,
     impact: 'Business impact: ',
+    basisOwn: 'impact card of this incident',
+    basisWindow: (subject: 'alert' | 'incident', m: number, upstream: string | null) =>
+      `${subject === 'alert' ? 'started' : 'its incident started'} ${m < 1 ? 'within 1 min' : `${m} min`} after ${upstream ? `the incident of upstream ${upstream}` : 'the upstream incident'}`,
+    basisSame: (name: string) => `on the upstream component ${name}`,
+    basisPath: (path: string) => `topology path ${path}`,
+    semi: '; ',
     impactImmediate: '; the incidents were sent immediately',
     since: (at: string, ended: string | null) => (ended ? `${at}–${ended}` : `since ${at}, firing`),
     triggers: (n: number) => `${n} firings`,
@@ -443,12 +683,20 @@ export function composeExternalDigest(
       ),
     ]),
   ];
+  // 依据里的组件与上游用汇总中的可读名称，没有时用组件键
+  const rootNames = new Map(cur.roots.map((r) => [r.root, r.name ?? displayKey(r.root)]));
+  const name = (k: string) => rootNames.get(k) ?? displayKey(k);
+  const why = (x: { upstream: string; basis: ImpactBasis }) => basisText(x.basis, lang, name, name(x.upstream));
   const impact: NotifyRun[][] = [
     ...cur.impact.alerts.map((a) => [
       B(a.alertname),
-      P(d.paren(d.since(hhmm(a.starts_at), a.ends_at ? hhmm(a.ends_at) : null))),
+      P(d.paren(`${d.since(hhmm(a.starts_at), a.ends_at ? hhmm(a.ends_at) : null)}${d.semi}${why(a)}`)),
     ]),
-    ...cur.impact.cards.map((c) => [P(title(c.title, lang)), ...(c.value ? [P(' '), C(c.value)] : [])]),
+    ...cur.impact.cards.map((c) => [
+      P(title(c.title, lang)),
+      ...(c.value ? [P(' '), C(c.value)] : []),
+      P(d.paren(why(c))),
+    ]),
   ];
   if (impact.length) {
     const immediate = cur.roots.some((r) => r.immediate);

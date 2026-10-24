@@ -89,8 +89,8 @@ export interface ComposeInput {
   /** 数据源、告警与变更的链接模板（控制台地址取 consoleUrl） */
   links?: Omit<LinkSettings, 'consoleUrl'>;
   /**
-   * 根因是外部上游、但伴随业务影响而即时发送的事件（ADR 0147）：业务影响的信号（告警名或影响卡与值），横幅写
-   * “上游故障已影响业务”。其余事件为 null 或省略
+   * 根因是外部上游、但伴随业务影响而即时发送的事件（ADR 0147）：业务影响的信号（告警名或影响卡与值）及括号中与这个
+   * 上游事件相关的依据（ADR 0150），横幅写“上游故障已影响业务”。其余事件为 null 或省略
    */
   upstreamImpact?: string[] | null;
 }

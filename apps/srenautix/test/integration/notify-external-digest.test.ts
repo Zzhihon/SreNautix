@@ -1,11 +1,11 @@
 import { randomUUID } from 'node:crypto';
-import type { Channel, EvidenceResult, Incident } from '@srenautix/contract';
+import type { Channel, EvidenceResult, Incident, TopologyEdge, TopologyNode } from '@srenautix/contract';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { TelegramAdapter } from '../../src/channels/telegram/adapter.js';
 import { TelegramClient } from '../../src/channels/telegram/client.js';
 import { ServerMetrics } from '../../src/metrics.js';
 import { NotifyEngine } from '../../src/notify/engine.js';
-import { ExternalRoots, externalTypeLookup } from '../../src/notify/external.js';
+import { ExternalRoots, externalTypeLookup, topologyPaths } from '../../src/notify/external.js';
 import { Interactions } from '../../src/notify/interactions.js';
 import { NO_LINKS } from '../../src/notify/links.js';
 import type { ActionOutcome, NotifyActions } from '../../src/notify/ports.js';
@@ -21,8 +21,8 @@ import { fixture, FixtureServer } from '../support/fixture-server.js';
 import { incident as baseIncident, stageA } from '../support/scenario.js';
 import { parseTelegramHtml } from '../support/telegram-html.js';
 
-// 外部上游的周期汇总（ADR 0147）：真实 PostgreSQL 上的事件、阶段 A 报告与告警，经 PgMessageSource 分类，
-// 由投递引擎发到本地回放的 Bot API
+// 外部上游的周期汇总（ADR 0147）与业务影响的相关性（ADR 0150）：真实 PostgreSQL 上的事件、阶段 A 报告、告警与拓扑，
+// 经 PgMessageSource 分类，由投递引擎发到本地回放的 Bot API
 
 const TOKEN = 'test-token';
 const CHAT = '-1001234567890';
@@ -54,7 +54,47 @@ let source: PgMessageSource;
 const TYPES = [
   { id: 'cchp.provider', external: true, match: { kind: 'provider' } },
   { id: 'cchp.component-provider', match: { kind: 'component', name_pattern: '^(provider|business)$' } },
+  // 拓扑里的外部上游：集群外的支付服务经 ExternalName Service 访问
+  { id: 'shop.payments', external: true, match: { kind: 'Service', name_pattern: '^payments-api$' } },
 ];
+
+const PAYMENTS = 'Service:shop/payments-api';
+const CHECKOUT = 'Deployment:shop/checkout';
+
+const topoNode = (key: string): TopologyNode => {
+  const [kind, rest] = key.split(':') as [string, string];
+  const [ns, name] = rest.split('/') as [string, string];
+  return { key, kind, namespace: ns, name, uid: null, labels: {}, component_type: null, hub: false };
+};
+const topoEdge = (
+  from: string,
+  to: string,
+  relation: string,
+  provenance: TopologyEdge['provenance'],
+): TopologyEdge => ({
+  from,
+  to,
+  relation,
+  provenance,
+  confidence: provenance === 'runtime' ? 0.9 : 1,
+  scope: 'service',
+  evidence: 't',
+});
+
+/** checkout 的 Pod 经服务图调用外部的 payments-api：checkout → payments-api 是一条依赖路径 */
+async function seedTopology(): Promise<void> {
+  const at = new Date(H10 - 3_600_000);
+  const nodes = [CHECKOUT, 'ReplicaSet:shop/checkout-1', 'Pod:shop/checkout-1-a', PAYMENTS];
+  const edges = [
+    topoEdge('ReplicaSet:shop/checkout-1', CHECKOUT, 'owned_by', 'structural'),
+    topoEdge('Pod:shop/checkout-1-a', 'ReplicaSet:shop/checkout-1', 'owned_by', 'structural'),
+    topoEdge('Pod:shop/checkout-1-a', PAYMENTS, 'calls', 'runtime'),
+  ];
+  await new TopologyStore(db.server).apply(CLUSTER, [
+    ...nodes.map((k) => ({ op: 'node_upsert' as const, at, source: 'informer' as const, node: topoNode(k) })),
+    ...edges.map((e) => ({ op: 'edge_upsert' as const, at, source: 'informer' as const, edge: e })),
+  ]);
+}
 
 async function insertAlert(a: {
   alertname: string;
@@ -193,7 +233,8 @@ afterAll(async () => {
 beforeEach(async () => {
   await db.admin.query(
     `TRUNCATE server.notify_messages, server.notify_storm_members, server.notify_storms, server.notify_buttons,
-       server.notify_external_windows, server.incidents, server.stage_a_reports, server.alert_state, server.component_names CASCADE`,
+       server.notify_external_windows, server.incidents, server.stage_a_reports, server.alert_state, server.component_names,
+       server.topology_events CASCADE`,
   );
   fs.requests.length = 0;
   fs.reset('POST', send).reset('POST', edit);
@@ -209,6 +250,7 @@ beforeEach(async () => {
     { alertTitle: () => null, actionVerify: () => null, links: NO_LINKS },
     { prefix: '[影子]', consoleUrl: 'https://srenautix.example.test' },
   );
+  const topology = new TopologyStore(db.server);
   const external = new ExternalRoots(
     db.server,
     {
@@ -216,12 +258,18 @@ beforeEach(async () => {
       periodMs: 3_600_000,
       components: ['component:provider'],
       alertLabels: { theme: ['provider'] },
-      impact: { alertLabels: { layer: ['L0'] }, impactCards: true },
+      impact: { alertLabels: { layer: ['L0'] }, impactCards: true, withinMs: 30 * 60_000, topologyHops: 6 },
     },
     externalTypeLookup(
       () => TYPES,
       async () => null,
     ),
+    topologyPaths(
+      (clusterId, seeds, t, hops) => topology.subgraph(clusterId, seeds, t, null, hops),
+      6,
+      () => now,
+    ),
+    () => now,
   );
   source = new PgMessageSource(
     db.server,
@@ -328,7 +376,7 @@ describe('外部上游的周期汇总', () => {
     const lines = text.split('\n');
     expect(lines[0]).toBe('[影子] 外部上游汇总 10:00–11:00 UTC');
     expect(text).toContain('本时段 4 个上游有问题（上一时段 0 个）：新增 4、持续 0；未恢复 3、已恢复 1。');
-    expect(text).toContain('业务影响：无（业务告警 layer=L0 0 条，影响卡无异常）');
+    expect(text).toContain('业务影响：无（与上游事件相关的业务告警 layer=L0 0 条，相关的影响卡无异常）');
     const items = lines.filter((l) => l.startsWith('- '));
     expect(items).toHaveLength(4);
     expect(items[0]).toBe('- [严重] Kimi provider 故障率 35.2% · 触发 1 次 · 新增 · 未恢复');
@@ -346,7 +394,7 @@ describe('外部上游的周期汇总', () => {
     ]);
   });
 
-  it('伴随业务影响（L0 告警触发）时即时推送仍在触发的上游事件，并标明上游故障已影响业务；issue 照常判定', async () => {
+  it('业务告警在上游事件开始后 30 分钟内开始时即时推送这些上游事件，横幅写明依据；更早开始的上游事件不算；issue 照常判定', async () => {
     const { kimi, lcodex, theme } = await seedHour();
     await round(min(50));
     expect(sent()).toHaveLength(0);
@@ -361,21 +409,92 @@ describe('外部上游的周期汇总', () => {
       component: 'component:edge-envoy',
     });
     await round(min(53));
-    // 未恢复的三个上游事件即时推送；已经恢复的 lcodex 不推送。三条新消息开启一次风暴，另有一条风暴汇总
+    // 10:52 开始的 L0 告警在柚子（10:31）与主题升级（10:40）开始后 30 分钟内，即时推送这两个；Kimi 10:05 开始，
+    // 相隔 47 分钟，留在汇总里；已经恢复的 lcodex 不推送
     const texts = sent().map((b) => parseTelegramHtml(String(b.text)).text);
     const incidents = texts.filter((t) => t.includes('上游故障已影响业务：CCHPErrorBudgetBurnFast'));
-    expect(incidents).toHaveLength(3);
-    expect(texts.some((t) => t.includes('lcodex'))).toBe(false);
-    expect(await source.externalState(kimi)).toBeNull();
+    expect(incidents).toHaveLength(2);
+    expect(incidents.some((t) => t.includes('CCHPErrorBudgetBurnFast（在上游事件开始后 21 分钟开始）'))).toBe(true);
+    expect(incidents.some((t) => t.includes('CCHPErrorBudgetBurnFast（在上游事件开始后 12 分钟开始）'))).toBe(true);
+    expect(texts.some((t) => t.includes('Kimi') || t.includes('lcodex'))).toBe(false);
+    expect(await source.externalState(kimi)).toBe('firing');
     expect(await source.externalState(theme)).toBeNull();
-    // 整点的摘要仍然发出，写明业务影响与已即时推送
+    // 整点的摘要仍然发出，写明业务影响、相关的上游与已即时推送
     fs.requests.length = 0;
     await round(min(61.5));
     const digest = sent()
       .map((b) => parseTelegramHtml(String(b.text)).text)
       .find((t) => t.includes('外部上游汇总'));
-    expect(digest).toContain('业务影响：CCHPErrorBudgetBurnFast（10:52 起，未恢复），相关事件已即时推送');
-    expect(digest).toContain('- [严重] Kimi provider 故障率 35.2% · 触发 1 次 · 新增 · 未恢复 · 波及业务，已即时推送');
+    expect(digest).toContain(
+      '业务影响：CCHPErrorBudgetBurnFast（10:52 起，未恢复；在上游 柚子 的事件开始后 21 分钟开始），相关事件已即时推送',
+    );
+    expect(digest).toContain('- [严重] Kimi provider 故障率 35.2% · 触发 1 次 · 新增 · 未恢复');
+    expect(digest).not.toContain('Kimi provider 故障率 35.2% · 触发 1 次 · 新增 · 未恢复 · 波及业务');
+    expect(digest).toContain(
+      '- 柚子 告警 CCHPProviderErrorRatioHigh · 触发 1 次 · 新增 · 未恢复 · 波及业务，已即时推送',
+    );
+  });
+
+  it('上游事件开始之前就在触发的业务告警（长期的 L0 warning）不算业务影响：不即时推送，汇总写明没有相关的业务告警', async () => {
+    const { kimi, theme } = await seedHour();
+    await insertAlert({
+      alertname: 'CCHPErrorBudgetBurnSteady',
+      labels: { layer: 'L0', component: 'edge-envoy' },
+      severity: 'warning',
+      startsAt: new Date(H10 - 18 * 3_600_000),
+      endsAt: null,
+      component: 'component:edge-envoy',
+    });
+    await round(min(53));
+    expect(sent()).toHaveLength(0);
+    expect(await source.externalState(kimi)).toBe('firing');
+    expect(await source.externalState(theme)).toBe('firing');
+    await round(min(61.5));
+    expect(sent()).toHaveLength(1);
+    const { text } = parseTelegramHtml(String(sent()[0]!.text));
+    expect(text).toContain('业务影响：无（与上游事件相关的业务告警 layer=L0 0 条，相关的影响卡无异常）');
+    expect(text).not.toContain('波及业务');
+  });
+
+  it('业务告警的组件沿依赖边到达上游根因时，开始得再晚也算相关，横幅写明拓扑路径', async () => {
+    await seedTopology();
+    const payments = await seedIncident({
+      root: PAYMENTS,
+      name: 'payments',
+      alertname: 'PaymentsUpstreamErrors',
+      at: min(5),
+      ended: null,
+    });
+    // 同一时段另一个上游（不在拓扑里）的事件：时间窗与拓扑都不成立，留在汇总里
+    const kimi = await seedIncident({
+      root: KIMI,
+      name: 'Kimi',
+      alertname: 'CCHPProviderErrorRatioCollapse',
+      at: min(6),
+      ended: null,
+    });
+    await insertAlert({
+      alertname: 'ShopCheckoutErrorBudgetBurn',
+      labels: { layer: 'L0', component: 'checkout' },
+      severity: 'critical',
+      startsAt: min(55),
+      endsAt: null,
+      component: CHECKOUT,
+    });
+    await round(min(56));
+    const texts = sent().map((b) => parseTelegramHtml(String(b.text)).text);
+    expect(texts).toHaveLength(1);
+    expect(texts[0]).toContain(
+      '上游故障已影响业务：ShopCheckoutErrorBudgetBurn（拓扑路径 Deployment:shop/checkout → payments）',
+    );
+    expect(await source.externalState(payments)).toBeNull();
+    expect(await source.externalState(kimi)).toBe('firing');
+    fs.requests.length = 0;
+    await round(min(61.5));
+    const digest = parseTelegramHtml(String(sent()[0]!.text)).text;
+    expect(digest).toContain(
+      '业务影响：ShopCheckoutErrorBudgetBurn（10:55 起，未恢复；拓扑路径 Deployment:shop/checkout → payments），相关事件已即时推送',
+    );
   });
 
   it('关闭外部上游汇总时照常逐条推送', async () => {

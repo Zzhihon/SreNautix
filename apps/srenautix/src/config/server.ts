@@ -143,12 +143,18 @@ const EXTERNAL_ROOTS_DEFAULT = {
   period: '1h',
   components: [] as string[],
   alert_labels: {} as Record<string, string[]>,
-  business_impact: { alert_labels: {} as Record<string, string[]>, impact_cards: true },
+  business_impact: {
+    alert_labels: {} as Record<string, string[]>,
+    impact_cards: true,
+    within: '30m',
+    topology_hops: 6,
+  },
 };
 
 // 外部上游的周期汇总（ADR 0147）：根因是领域包声明 external 的组件类型（例如模型服务方）、components 列出的组件，
 // 或全部成员告警都满足 alert_labels 的事件，不逐条推送、不开 issue，每个周期（按 UTC 对齐，1h 即整点）汇总一条；
-// 同时有业务影响（business_impact 的告警在触发，或 impact_cards 为 true 时影响卡异常）时照常即时推送
+// 同时有与这个上游事件相关的业务影响（ADR 0150：business_impact 的告警或 impact_cards 为 true 时其他事件异常的影响卡，
+// 在上游事件开始后 within 之内开始，或组件沿依赖边 topology_hops 跳以内到达上游根因；本事件异常的影响卡）时照常即时推送
 const externalRoots = z
   .object({
     enabled: z.boolean().default(true),
@@ -159,9 +165,12 @@ const externalRoots = z
       .object({
         alert_labels: labelMatch.default({}),
         impact_cards: z.boolean().default(true),
+        within: duration.default('30m'),
+        // 0 时不按拓扑判定
+        topology_hops: z.number().int().min(0).max(12).default(6),
       })
       .strict()
-      .default({ alert_labels: {}, impact_cards: true }),
+      .default({ alert_labels: {}, impact_cards: true, within: '30m', topology_hops: 6 }),
   })
   .strict();
 
