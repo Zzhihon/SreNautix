@@ -84,11 +84,14 @@ export class WorkerEventMirror {
                 ? 'stage_a_only'
                 : 'failed'
               : 'queued';
+        // 研判原因取 server 队列里这次任务的入队原因（root_changed、fingerprint_changed、reopened 等）：worker 的
+        // research.concluded / research.failed 不带原因（契约里没有这个字段），以前在这里一律记成 new_incident
         await c.query(
           `INSERT INTO server.research_runs (run_id, incident_id, incident_version, reason, state, disposition, conclusion_level, root_component, summary,
              evidence_fingerprint, output, error, started_at, finished_at, updated_at)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, now())
-           ON CONFLICT (run_id) DO UPDATE SET state = excluded.state, disposition = coalesce(excluded.disposition, server.research_runs.disposition),
+           VALUES ($1, $2, $3, coalesce($4::text, (SELECT q.reason FROM server.research_queue q WHERE q.run_id = $1::uuid), 'new_incident'),
+             $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, now())
+           ON CONFLICT (run_id) DO UPDATE SET reason = excluded.reason, state = excluded.state, disposition = coalesce(excluded.disposition, server.research_runs.disposition),
              conclusion_level = coalesce(excluded.conclusion_level, server.research_runs.conclusion_level),
              root_component = coalesce(excluded.root_component, server.research_runs.root_component),
              summary = coalesce(excluded.summary, server.research_runs.summary),
@@ -99,7 +102,7 @@ export class WorkerEventMirror {
             p.run_id,
             p.incident_id,
             p.incident_version,
-            p.reason ?? 'new_incident',
+            p.reason ?? null,
             state,
             p.output?.disposition ?? null,
             p.output?.conclusion.level ?? null,

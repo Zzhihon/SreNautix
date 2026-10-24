@@ -172,5 +172,16 @@ CREATE TABLE server.component_names (
 ALTER TABLE server.stage_a_reports ADD COLUMN pack_lock text;
 `,
     },
+    {
+      version: 5,
+      name: 'research mirror reason from the queue',
+      phase: 'expand',
+      sql: `
+-- 研判镜像的原因改为取队列里的入队原因（ADR 0142）：之前 worker 的事件不带原因，镜像一律记成 new_incident。
+-- 已有的记录按队列补正（队列里没有的保持原样）
+UPDATE server.research_runs r SET reason = q.reason
+  FROM server.research_queue q WHERE q.run_id = r.run_id AND r.reason <> q.reason;
+`,
+    },
   ],
 };
