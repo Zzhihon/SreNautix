@@ -38,6 +38,10 @@ spec:
         {{- end }}
       annotations:
         checksum/config: {{ $config | sha256sum }}
+        {{- if and (has $role (list "server" "worker")) $.Values.packs.revision }}
+        # 用户包的版本（ADR 0143）：包的 ConfigMap 不由 chart 渲染，改了包由 packs.revision 触发滚动更新
+        checksum/packs: {{ $.Values.packs.revision | toString | sha256sum }}
+        {{- end }}
         {{- with (merge (deepCopy ($r.podAnnotations | default dict)) ($.Values.global.podAnnotations | default dict)) }}
         {{- toYaml . | nindent 8 }}
         {{- end }}

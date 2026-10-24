@@ -308,6 +308,10 @@ packs:
   userConfigMaps: []
   # 含 pack.lock 的 ConfigMap（键 pack.lock）；为空时由 server 在启动时计算
   lockConfigMap: ""
+  # 用户包内容的版本（ADR 0143），由提供上面这些 ConfigMap 的一方填写，建议取 `srenautix pack lint` 输出的 pack.lock 摘要。
+  # chart 不渲染用户包的 ConfigMap，算不出它们的校验和；server 只在启动时加载领域包。非空时 server 与 worker 的
+  # Pod 模板带注解 checksum/packs（取值的 sha256），包变了、这里跟着变，就滚动更新；为空时没有这个注解，改了包要手动重启
+  revision: ""
   # OCI 仓库中经 cosign 签名的领域包（镜像内带 cosign 与 oras）。sources 的每一项原样写入 server 配置的 packs.oci.sources：
   # repository、digest（sha256 固定）、key_file 或 certificate_identity + certificate_oidc_issuer（见 apps/srenautix/src/config/server.ts）。
   # key_file 写 /etc/srenautix/secrets/pack-keys/<键>，公钥放在 keySecret 指定的 Secret 中

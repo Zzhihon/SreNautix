@@ -1,0 +1,58 @@
+suite: 用户包变化时滚动更新（ADR 0143）
+templates:
+  - templates/deployments.yaml
+values:
+  - ../ci/base/required.yaml
+release:
+  name: t
+  namespace: srenautix
+capabilities:
+  majorVersion: "1"
+  minorVersion: "34"
+tests:
+  - it: 没有 packs.revision 时不带 checksum/packs（与之前渲染的结果相同）
+    set:
+      profile: standard
+      packs.userConfigMaps: [cchp]
+    asserts:
+      - notExists:
+          path: spec.template.metadata.annotations["checksum/packs"]
+      - exists:
+          path: spec.template.metadata.annotations["checksum/config"]
+
+  - it: packs.revision 的 sha256 写进 server 与 worker 的 Pod 模板注解
+    set:
+      profile: standard
+      packs.userConfigMaps: [cchp]
+      packs.revision: sha256:402ed4d6aa5b0c9f0e1d2c3b4a5968778695a4b3c2d1e0f9a8b7c6d5e4f3a2b1
+    asserts:
+      - equal:
+          path: spec.template.metadata.annotations["checksum/packs"]
+          value: 01c41b2a1c38576dbd2ca238597c9ff8d6e328ffb9dfd5fdc08f8cdc338ab347
+        documentSelector: {path: metadata.name, value: t-srenautix-server}
+      - equal:
+          path: spec.template.metadata.annotations["checksum/packs"]
+          value: 01c41b2a1c38576dbd2ca238597c9ff8d6e328ffb9dfd5fdc08f8cdc338ab347
+        documentSelector: {path: metadata.name, value: t-srenautix-worker}
+
+  - it: packs.revision 变了，注解跟着变（触发滚动更新）；数字形式的取值按字符串处理
+    set:
+      profile: observe
+      packs.revision: 2026-10-24.1
+    documentSelector: {path: metadata.name, value: t-srenautix-server}
+    asserts:
+      - equal:
+          path: spec.template.metadata.annotations["checksum/packs"]
+          value: e83e4f8242a4b197845926a1b84a9a5cda96de5747a0a708acfbb66e6a32daea
+
+  - it: 不加载领域包的角色（reader、gateway）不带 checksum/packs，改包不重启它们
+    set:
+      profile: standard
+      packs.revision: sha256:402ed4d6aa5b0c9f0e1d2c3b4a5968778695a4b3c2d1e0f9a8b7c6d5e4f3a2b1
+    asserts:
+      - notExists:
+          path: spec.template.metadata.annotations["checksum/packs"]
+        documentSelector: {path: metadata.name, value: t-srenautix-reader}
+      - notExists:
+          path: spec.template.metadata.annotations["checksum/packs"]
+        documentSelector: {path: metadata.name, value: t-srenautix-gateway}
