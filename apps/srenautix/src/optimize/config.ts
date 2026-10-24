@@ -18,6 +18,13 @@ import { validatorFor, type AnchorKind, type CodeLayout } from '@srenautix/contr
 //           languages: [go, typescript]
 //           anchors: [{ kind: sql, paths: ["internal/**", "db/**"] }]
 //           labels: [{ paths: ["internal/gateway/**"], label: area/gateway }]
+//     dbstats:                                     # §3.3：一个 CNPG Cluster 主库的只读统计连接
+//       cluster: Cluster:cchp-data/cchp-pg
+//       host: cchp-pg-rw.cchp-data.svc
+//       database: cchp
+//       user: srenautix_stats
+//       password_file: /etc/srenautix/secrets/dbstats/password
+//     loop_interval: 60s                           # 目标运行、建议与投递、验证循环的间隔
 //     limits: { dbstats: { concurrency: 1, per_hour: 60, statement_text_per_hour: 6 }, … }   # §6.1
 
 export type { AnchorKind };
@@ -55,6 +62,24 @@ const businessRepository = z
   })
   .strict();
 
+/**
+ * dbstats 的直接连接（§3.3）：一个 CNPG Cluster 的主库，专用只读角色 srenautix_stats，口令文件挂载自 Secret。
+ * cluster 是这个数据库对应的拓扑组件键（例如 Cluster:cchp-data/cchp-pg），只有这个组件上的 dbstats 信号能读取
+ */
+const dbstatsSource = z
+  .object({
+    cluster: z.string().min(1),
+    host: z.string().min(1),
+    port: z.number().int().min(1).max(65535).default(5432),
+    database: z.string().min(1),
+    user: z.string().min(1).default('srenautix_stats'),
+    password_file: z.string().min(1),
+    ssl: z
+      .union([z.boolean(), z.object({ ca_file: z.string().optional(), servername: z.string().optional() }).strict()])
+      .default(false),
+  })
+  .strict();
+
 const backendLimit = (concurrency: number, perHour: number) =>
   z
     .object({
@@ -69,6 +94,13 @@ export const optimizationConfig = z
     enabled: z.boolean().default(false),
     title_prefix: z.string().default('[优化]'),
     repositories: z.object({ business: businessRepository.optional() }).strict().default({}),
+    // 没有配置时 dbstats 信号的能力缺失，相关的卡无法判定（exporter 信号照常可用）
+    dbstats: dbstatsSource.optional(),
+    // 目标运行、建议与投递、验证循环的间隔
+    loop_interval: z
+      .string()
+      .regex(/^\d+(s|m)$/)
+      .default('60s'),
     // 后端查询的并发与每小时上限（§6.1）；事件研判与主动分析共用信号量，事件研判优先
     limits: z
       .object({

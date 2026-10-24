@@ -3,7 +3,8 @@ import type { ApprovalRecord, Channel, Proposal, ProposalCreate } from '@srenaut
 import type pg from 'pg';
 import { HttpError } from '../api/errors.js';
 import type { Bindings, Subject } from '../identity/bindings.js';
-import { currentBinding, type CurrentBinding } from '../incident/read.js';
+import type { CurrentBinding } from '../incident/read.js';
+import { subjectBinding } from '../optimize/binding.js';
 import type { ServerMetrics } from '../metrics.js';
 import { appendAudit } from '../store/audit.js';
 import { appendEvents, type NewEvent } from '../store/outbox.js';
@@ -223,12 +224,23 @@ export class ProposalService {
     params: ProposalCreate['params'],
   ): Promise<{ status: 200 | 201; proposal: Proposal }> {
     const a = this.catalog.get(body.action);
-    const binding = await currentBinding(this.pool, body.incident_id);
+    // 主体为目标时 incident_id 取目标 id（契约 Subject，ADR 0146 §8）
+    if (body.subject && body.subject.id !== body.incident_id) {
+      throw new HttpError(400, 'bad_request', 'subject.id 必须与 incident_id 相同');
+    }
+    const goal = body.subject?.type === 'goal';
+    const binding = await subjectBinding(this.pool, body);
     if (!binding) {
-      throw new HttpError(404, 'not_found', `没有事件 ${body.incident_id}`);
+      throw new HttpError(404, 'not_found', goal ? `没有目标 ${body.incident_id}` : `没有事件 ${body.incident_id}`);
     }
     if (!bindingMatches(binding, body.binding)) {
-      throw new HttpError(409, 'binding_stale', '提议绑定的事件版本、根因或证据指纹与事件当前状态不一致');
+      throw new HttpError(
+        409,
+        'binding_stale',
+        goal
+          ? '提议绑定的目标版本、发现的组件或证据指纹与当前状态不一致'
+          : '提议绑定的事件版本、根因或证据指纹与事件当前状态不一致',
+      );
     }
     const origin = body.research_run_id ?? body.rule_id ?? caller.callerId;
     const key = this.idempotencyKey(body.incident_id, origin, body.action, body.params);
@@ -329,6 +341,7 @@ export class ProposalService {
         idempotency_key: key,
         cluster_id: binding.clusterId,
         incident_id: body.incident_id,
+        ...(body.subject ? { subject: body.subject } : {}),
         binding: body.binding,
         source: caller.source,
         research_run_id: body.research_run_id,
@@ -418,12 +431,19 @@ export class ProposalService {
         ? `目标 UID 仍为 ${info.uid}`
         : `目标 UID 现为 ${info.uid ?? '未知'}，提议时为 ${p.target.uid ?? '未知'}`,
     });
-    const b = await currentBinding(this.pool, p.incident_id);
+    const b = await subjectBinding(this.pool, p);
     const bound = !!b && bindingMatches(b, p.binding);
+    const goal = p.subject?.type === 'goal';
     out.push({
       name: 'binding',
       passed: bound,
-      detail: bound ? '事件版本、根因与证据指纹仍与提议一致' : '事件已变化，提议绑定已失效',
+      detail: bound
+        ? goal
+          ? '目标版本、发现的组件与证据指纹仍与提议一致'
+          : '事件版本、根因与证据指纹仍与提议一致'
+        : goal
+          ? '目标或发现已变化，提议绑定已失效'
+          : '事件已变化，提议绑定已失效',
     });
     return out;
   }
@@ -488,7 +508,7 @@ export class ProposalService {
       await this.save(c, p);
       return 'expired';
     }
-    const b = await currentBinding(c, p.incident_id);
+    const b = await subjectBinding(c, p);
     if (!b || !bindingMatches(b, p.binding)) {
       p.state = 'stale';
       await this.save(c, p);
@@ -951,9 +971,9 @@ export class ProposalService {
       // 反向动作不带原动作的执行后校验条件
       params = Object.fromEntries(Object.entries(orig.params).filter(([k]) => k !== 'verify'));
     }
-    const b = await currentBinding(this.pool, orig.incident_id);
+    const b = await subjectBinding(this.pool, orig);
     if (!b) {
-      throw new HttpError(404, 'not_found', '事件不存在');
+      throw new HttpError(404, 'not_found', orig.subject?.type === 'goal' ? '目标不存在' : '事件不存在');
     }
     const root = b.rootComponent;
     if (root === null) {
@@ -964,6 +984,7 @@ export class ProposalService {
       { source: 'human', callerId: who.principalId, subject: who.subject },
       {
         incident_id: orig.incident_id,
+        ...(orig.subject ? { subject: orig.subject } : {}),
         binding: { incident_version: b.version, root_component: root, evidence_fingerprint: fp },
         action: undoAction,
         params,
@@ -1050,6 +1071,10 @@ export class ProposalService {
     who: Approver,
     kind: 'approved' | 'rejected' | 'undone',
   ): Promise<void> {
+    // 目标的提议没有事件，反馈只对事件研判有意义；目标的“建议无用”走 /v1/recommendations/{id}/reject
+    if (p.subject?.type === 'goal') {
+      return;
+    }
     const inc = await c.query<{ version: number }>('SELECT version FROM server.incidents WHERE incident_id = $1', [
       p.incident_id,
     ]);

@@ -86,6 +86,9 @@ describe('业务仓库角色的请求白名单', () => {
     ] as Array<[string, string, unknown]>) {
       expect(deniedRequest(m, p, b, roles), `${m} ${p}`).toBe(deniedRequest(m, p, b));
     }
+    // 验证循环比较两个提交（只读）；分支名与 tag 的比较仍然不允许
+    expect(deniedRequest('GET', `${O}/compare/${SHA}...${SHA.slice(0, 12)}`, undefined, roles)).toBeNull();
+    expect(deniedRequest('GET', `${O}/compare/main...dev`, undefined, roles)).not.toBeNull();
     expect(deniedRequest('GET', '/repos/CCH-HQ/other/issues/1', undefined, roles)).toMatch(/不在任何仓库角色中/);
     expect(deniedRequest('GET', '/user/repos', undefined, roles)).not.toBeNull();
     // 仓库名不区分大小写

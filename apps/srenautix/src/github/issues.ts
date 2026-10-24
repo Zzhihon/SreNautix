@@ -46,7 +46,7 @@ export const TITLE_MIN_INTERVAL_MS = 3600_000;
 /** 外部上游的事件未恢复时，隔这么久再检查一次是否出现了业务影响（ADR 0147） */
 export const EXTERNAL_RECHECK_MS = 10 * 60_000;
 const EXTERNAL_NOTE = '根因是外部上游且没有业务影响：进入通知的周期汇总，不开 issue（ADR 0147）';
-const backoffMs = (attempts: number) => Math.min(30_000 * 2 ** Math.max(0, attempts - 1), 30 * 60_000);
+export const backoffMs = (attempts: number) => Math.min(30_000 * 2 ** Math.max(0, attempts - 1), 30 * 60_000);
 
 /** 事件报告：由 notify/source.ts 的 ReportSource.message 提供；事件或阶段 A 报告不存在时为 null */
 export type IssueReport = (incidentId: string, language: 'zh' | 'en') => Promise<NotifyMessage | null>;

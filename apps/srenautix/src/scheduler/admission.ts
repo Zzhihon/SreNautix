@@ -68,6 +68,15 @@ const SEV: Record<string, number> = { critical: 3, warning: 2, info: 1 };
 export class Scheduler {
   /** worker 上报的当日预算用量比例。 */
   budgetRatio = 0;
+  /** worker 上报的主动优化用途的当日用量比例（ADR 0146 §5.3）；没有上报过时按用尽处理 */
+  optimizationBudgetRatio = 1;
+
+  /**
+   * 主动优化的预算准入（ADR 0146 §5.3）：优化用途用尽，或研判用量（全部用途的合计）达到当日上限的 60% 时推迟
+   */
+  optimizationBudgetExhausted(): boolean {
+    return this.optimizationBudgetRatio >= 1 || this.budgetRatio >= 0.6;
+  }
   private storm = false;
   private routeReports = new Map<string, WorkerRoutes>();
 
@@ -207,9 +216,13 @@ export class Scheduler {
     return r.rows.some((x) => x.incident_id === inc.incident_id);
   }
 
-  /** worker 认领：按优先级取一个就绪任务，critical 之外的任务不能占用保留槽位。 */
+  /**
+   * worker 认领：按优先级取一个就绪任务，critical 之外的任务不能占用保留槽位。
+   * 目标运行（subject_type=goal，ADR 0146 §5.5）排在全部事件任务之后，同时最多 1 个，并且只有空闲槽位不少于 2 个时才认领。
+   */
   async claim(workerId: string): Promise<{
     run_id: string;
+    subject_type: 'incident' | 'goal';
     incident_id: string;
     incident_version: number;
     reason: string;
@@ -220,16 +233,20 @@ export class Scheduler {
     return tx(this.pool, async (c) => {
       await c.query('SELECT pg_advisory_xact_lock(hashtext($1))', ['srenautix.research.claim']);
       await this.reclaimExpired(c);
-      const busy = await c.query<{ total: number; noncrit: number }>(
-        "SELECT count(*)::int AS total, count(*) FILTER (WHERE severity <> 'critical')::int AS noncrit FROM server.research_queue WHERE state = 'leased'",
+      const busy = await c.query<{ total: number; noncrit: number; goals: number }>(
+        `SELECT count(*)::int AS total, count(*) FILTER (WHERE severity <> 'critical')::int AS noncrit,
+                count(*) FILTER (WHERE subject_type = 'goal')::int AS goals
+           FROM server.research_queue WHERE state = 'leased'`,
       );
-      const b = busy.rows[0] as { total: number; noncrit: number };
+      const b = busy.rows[0] as { total: number; noncrit: number; goals: number };
       if (b.total >= this.s.slots) {
         return null;
       }
       const allowNonCritical = b.noncrit < this.s.slots - this.s.criticalReserved;
+      const allowGoal = allowNonCritical && b.goals === 0 && this.s.slots - b.total >= 2;
       const r = await c.query<{
         run_id: string;
+        subject_type: 'incident' | 'goal';
         incident_id: string;
         incident_version: number;
         reason: string;
@@ -237,11 +254,12 @@ export class Scheduler {
         absorbed: number;
         is_new: boolean;
       }>(
-        `SELECT run_id, incident_id, incident_version, reason, severity, absorbed, is_new FROM server.research_queue
-          WHERE state = 'queued' AND ($1 OR severity = 'critical')
-          ORDER BY CASE severity WHEN 'critical' THEN 3 WHEN 'warning' THEN 2 ELSE 1 END DESC, absorbed DESC, is_new DESC, enqueued_at
+        `SELECT run_id, subject_type, incident_id, incident_version, reason, severity, absorbed, is_new FROM server.research_queue
+          WHERE state = 'queued' AND ($1 OR severity = 'critical') AND (subject_type = 'incident' OR $2)
+          ORDER BY (subject_type = 'goal'), CASE severity WHEN 'critical' THEN 3 WHEN 'warning' THEN 2 ELSE 1 END DESC,
+            absorbed DESC, is_new DESC, enqueued_at
           LIMIT 1 FOR UPDATE SKIP LOCKED`,
-        [allowNonCritical],
+        [allowNonCritical, allowGoal],
       );
       const t = r.rows[0];
       if (!t) {
@@ -256,6 +274,7 @@ export class Scheduler {
       const lease = u.rows[0] as { lease_expires_at: Date; deadline_at: Date };
       return {
         run_id: t.run_id,
+        subject_type: t.subject_type,
         incident_id: t.incident_id,
         incident_version: t.incident_version,
         reason: t.reason,

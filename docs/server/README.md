@@ -356,7 +356,7 @@ server 对 Git 只读，写入都经 gateway 的 `gitops_pr`（ADR 0025、0108�
 
 - issue：列出、读取、新建，`PATCH` 只允许改正文（就地更新报告，ADR 0125）；评论：列出、新建；
 - PR：列出、读取，`PATCH` 只允许改描述（补 `Refs`）；
-- 只读访问仓库：分支引用（`git/ref/heads`）、文件与目录（`contents`）、提交列表与单个提交（修复补丁与拓扑覆盖的计划、变更源）。
+- 只读访问仓库：分支引用（`git/ref/heads`）、文件与目录（`contents`）、提交列表与单个提交（修复补丁与拓扑覆盖的计划、变更源），以及两个完整提交 sha 的比较（主动优化的验证循环判断 Argo 应用同步的版本是否包含合并提交，ADR 0146 §2.6）。
 
 建分支、写文件、提交、开 PR、请求审阅、合并都不在其中。server 用到的 App 仓库权限：Issues 读写、Pull requests 读写（只改描述）、Contents 只读；gateway 的 App 另需 Contents 与 Pull requests 写。
 

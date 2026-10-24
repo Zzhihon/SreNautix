@@ -181,11 +181,16 @@ export function registerResearchRoutes(app: FastifyInstance, d: ResearchRouteDep
 
   app.post('/v1/research/budget', async (req, reply) => {
     await worker(req);
-    const body = (req.body ?? {}) as { used_ratio?: number };
+    const body = (req.body ?? {}) as { used_ratio?: number; purposes?: { optimization?: unknown } };
     if (typeof body.used_ratio !== 'number' || body.used_ratio < 0) {
       throw badRequest('used_ratio 必须是非负数（当日 token 用量 / 当日上限）');
     }
     d.scheduler.budgetRatio = body.used_ratio;
+    // 按用途的比例（ADR 0146 §5.3）：旧版 worker 不上报，主动优化的准入按用尽处理
+    const opt = body.purposes?.optimization;
+    if (typeof opt === 'number' && opt >= 0) {
+      d.scheduler.optimizationBudgetRatio = opt;
+    }
     return reply.code(204).send();
   });
 

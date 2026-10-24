@@ -206,12 +206,13 @@ export class BackendLimiter {
     backend: Backend,
     purpose: QueryPurpose,
     fn: () => Promise<T>,
-    opts: { signal?: AbortSignal; quota?: QuotaKey[] } = {},
+    opts: { signal?: AbortSignal; quota?: QuotaKey[]; skipGuard?: boolean } = {},
   ): Promise<Limited<T>> {
     const signal = opts.signal ?? new AbortController().signal;
     const started = this.now();
     if (purpose === 'optimization') {
-      const tripped = await this.guardState(backend, signal);
+      // 负载保护卡自己的查询不再检查负载保护（skipGuard）
+      const tripped = opts.skipGuard ? null : await this.guardState(backend, signal);
       if (tripped) {
         this.metrics.guardTrips.inc({ guard: tripped.guard });
         this.metrics.queries.inc({ backend, outcome: 'load_guard' });

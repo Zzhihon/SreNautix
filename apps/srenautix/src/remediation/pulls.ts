@@ -108,6 +108,11 @@ export class GitOpsPulls {
       return false;
     }
     this.metrics.gitopsPulls.inc({ via });
+    // 目标的提议（ADR 0146）没有事件 issue；它的 PR 由验证循环按 gitops_pulls 跟踪
+    if (p.subject?.type === 'goal') {
+      logger.info('gitops_pr 已开出 PR', { proposal_id: p.proposal_id, url: found.url, via, goal_id: p.incident_id });
+      return true;
+    }
     await this.issues?.link(p.incident_id, {
       kind: 'pull',
       url: found.url,

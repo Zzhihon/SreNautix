@@ -230,6 +230,12 @@ stateDiagram-v2
 - **比较方式**：与基线按"星期 × 小时"匹配的时段比较，按小时取值。改善不低于 `estimate.lower` 的 50% 并且超出噪声带（基线窗口内同一时段的四分位距的一半）时判为 `improved`；守护指标（错误率、其他语句的执行时间、CPU 限流、OOM）恶化超过 10% 时判为 `regressed`；其余为 `no_effect`。
 - **回退**：`regressed` 的 ops PR 由 server 提交一个 revert 的 `gitops_pr` 提议（标题前缀 `[回退]`），按普通 PR 流程由人合并。
 
+实现说明（第一阶段，`optimize/verifier.ts`）：
+
+- ops PR 的合并提交是否被同步，读 Argo CD 的 Application（`spec.source(s)` 的 `repoURL` 与 `path` 匹配被修改的文件），用 GitHub 的 `compare/<合并提交>...<同步版本>` 判断包含关系；ops 仓库角色的白名单因此增加"两个完整 sha 的比较"（只读，§6.4）。server 需要 `applications.argoproj.io` 的 list 权限；没有管理这些文件的应用时合并即开始窗口。
+- revert 的补丁是投递时补丁的反转（`+` 与 `-` 互换），投递的补丁与文件保存在 `optimization_recommendations.plan`；base 已经变化、补丁打不上时 gateway 的执行失败，由人处理。
+- 业务 issue 以 `completed` 关闭即开始窗口：发布输入（`release_input`）的版本核对需要读取 `release_input` 的 `running` 规则（§3.5 的 `CodeLayout.version`），留到第二阶段，与业务提交的读取一起做。
+
 #### 2.7 优化控制器与阶段 B 控制器的关系
 
 | 方案 | 做法 | 结果 |
@@ -275,7 +281,7 @@ stateDiagram-v2
 | `settings.get` | `pg_settings` 中指定的参数：取值、单位、`context`、来源、`pending_restart` |
 | `activity.summary`、`locks.summary` | 按状态与等待事件计数、按锁类型计数，不含语句文本与应用名 |
 
-- **两次采样**：累计计数器需要速率。有 exporter 历史时，信号优先用 VictoriaMetrics 中的 exporter 指标（历史可回放、不增加连接）；dbstats 信号在同一次运行中相隔不少于 300 秒采样两次，按差值计算速率，只用于 exporter 没有覆盖的列与对象。
+- **两次采样**：累计计数器需要速率。有 exporter 历史时，信号优先用 VictoriaMetrics 中的 exporter 指标（历史可回放、不增加连接）；dbstats 信号在同一次运行中相隔不少于 300 秒采样两次，按差值计算速率，只用于 exporter 没有覆盖的列与对象。实现上，领域的诊断卡或份额卡读 dbstats 时，runner 先在范围内的组件上执行一遍这些卡取得第一次采样，运行推迟约 5 分钟（`deferred`，原因 `sampling`）后再算基线与候选；采样器按运行保存在 server 内存中，server 重启后重新开始。区分性检查的 dbstats 模板如果需要速率、而请求（例如带 queryid 的过滤）在这次运行里没有采样过，只有一次采样，卡无法判定。
 - **角色**：只授予 `pg_read_all_stats` 与 `pg_read_all_settings`；`CONNECTION LIMIT 2`；角色级设置 `default_transaction_read_only = on`、`statement_timeout = 3s`、`lock_timeout = 200ms`、`idle_in_transaction_session_timeout = 5s`、`work_mem = 4MB`。不授予任何表的 SELECT。
 - **权限自检**：适配器启动时与每小时检查一次 `has_table_privilege` 与 `has_any_column_privilege`，能读取任何业务表时集成降级为不可用，并发布状态条件 `DatasourceOverPrivileged`（DESIGN §10.1）。
 - **连接**：连接主库的读写入口（统计只在主库上反映业务语句），每个查询在单独的只读事务中执行，`SET LOCAL statement_timeout`。连接池最多 1 个连接，空闲 60 秒关闭。
@@ -413,7 +419,7 @@ sequenceDiagram
 
 - 每个领域一个计划（cron，默认每周一次），时段由 `optimization.schedule.window` 限定（CCHP 配置在业务高峰之外），多个领域错开，每个集群每天最多 2 次体检。
 - 体检的预算：每次 25 万 token；每天的优化用量不超过 `budget.purposes.optimization.daily_tokens`（CCHP 为每天 1500 万中的 300 万）。
-- 模型用量按用途分别记账：`worker.daily_usage` 增加 `purpose` 列（`research`、`optimization`、`eval`）。评测的每日预算（CCHP 每天 2000 万）单独计算，优化用例的回放计入评测。
+- 模型用量按用途分别记账（`research`、`optimization`、`eval`）。评测的每日预算（CCHP 每天 2000 万）单独计算，优化用例的回放计入评测。实现上按用途的用量是新表 `worker.daily_usage_purpose`（主键为日期与用途），`worker.daily_usage` 保持全部用途的合计不变：`daily_usage` 的主键是日期，加列需要改主键，属于收缩迁移；新表只扩展，升级期间旧版本照常写合计。worker 向 server 上报全部用途的比例与优化用途的比例，没有上报过优化用途时按用尽处理（不准入目标运行）。目标运行与事件研判共用 `worker.research_runs`（新列 `subject_type`，`incident_id` 存目标 id）。
 - 研判用量达到每日预算的 60%、进入风暴模式、或范围内有 critical 事件时，体检推迟到下一个时段。
 
 #### 5.4 趋势检测
@@ -487,6 +493,8 @@ server 为每个后端维护一个信号量与每小时配额，事件研判与�
   | GET | `/repos/<业务仓库>/commits/<sha>`、`/compare/<base>...<head>` | 发布版本解析为业务提交，判断修复提交是否已部署（§2.6） |
 
   其余请求在发出之前以 `GitHubDenied` 拒绝，包括创建与修改 PR、写入 contents、创建分支与引用、代码搜索、修改标签与指派、关闭 issue。
+
+  `ops` 角色的白名单增加一项只读请求：`GET /repos/<ops 仓库>/compare/<sha>...<sha>`（两边都是完整或缩写的提交 sha），验证循环用它判断 Argo 应用同步的版本是否包含 PR 的合并提交（§2.6）。
 - gateway 也挂载同一个 Secret。gateway 策略的 `gitops.repositories` 只列出 ops 仓库，`gitops_pr` 的执行器按策略核对 `repository`，业务仓库不在其中。
 
 #### 6.5 新增不变量

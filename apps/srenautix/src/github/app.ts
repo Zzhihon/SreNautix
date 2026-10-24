@@ -54,6 +54,8 @@ const ALLOWED: Array<[method: string, path: RegExp]> = [
   ['GET', new RegExp(`^${REPO}/contents(/.*)?$`)],
   ['GET', new RegExp(`^${REPO}/commits$`)],
   ['GET', new RegExp(`^${REPO}/commits/[0-9a-f]{7,40}$`)],
+  // 主动优化的验证（ADR 0146 §2.6）：Argo 应用同步的版本是否包含 PR 的合并提交
+  ['GET', new RegExp(`^${REPO}/compare/[0-9a-f]{7,40}\\.\\.\\.[0-9a-f]{7,40}$`)],
 ];
 
 /**

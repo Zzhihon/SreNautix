@@ -123,5 +123,19 @@ ALTER TABLE server.research_queue ADD COLUMN subject_type text NOT NULL DEFAULT 
   CHECK (subject_type IN ('incident', 'goal'));
 `,
     },
+    {
+      version: 2,
+      name: 'what a recommendation delivers and the issue state used for marker recovery',
+      phase: 'expand',
+      sql: `
+-- 投递所需的内容：ops_pr 为模板键、仓库角色与计划的提交（每次投递前按当前 base 重新计划）；business_issue 为
+-- 模板键、锚点、建议与标签（投递时做代码定位并渲染 issue）
+ALTER TABLE server.optimization_recommendations ADD COLUMN plan jsonb;
+-- 业务 issue 的创建状态（与事件 issue 同一套机制，ADR 0095）：创建请求的结果未知（超时、连接中断、5xx）时为 unknown，
+-- 下一轮先按标记 srenautix:recommendation=<id> 在仓库中找回
+ALTER TABLE server.optimization_recommendations ADD COLUMN issue_state text
+  CHECK (issue_state IN ('pending', 'unknown', 'open', 'closed'));
+`,
+    },
   ],
 };

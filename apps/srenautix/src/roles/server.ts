@@ -9,6 +9,8 @@ import { registerReadLimit } from '../api/read-limit.js';
 import { createApp } from '../api/http.js';
 import { leaseLeader, neverLeader, singleLeader, type Leader } from '../api/leader.js';
 import { registerGoalRoutes } from '../api/routes-goals.js';
+import { registerGoalTaskRoutes } from '../api/routes-goal-tasks.js';
+import { createOptimization } from '../optimize/service.js';
 import { registerProposalRoutes } from '../api/routes-proposals.js';
 import { optimizationCatalog } from '../optimize/catalog.js';
 import { OptimizationStore } from '../optimize/store.js';
@@ -696,13 +698,38 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
   registerProposalRoutes(app, { pool, auth, proposals, catalog, policies: () => policies });
   // 主动优化（ADR 0146）：读取接口总是可用，写接口在 optimization.enabled 关闭时返回 503
   const goalCatalog = optimizationCatalog(packs.set);
+  const goalStore = new OptimizationStore(pool);
   registerGoalRoutes(app, {
     pool,
     auth,
-    store: new OptimizationStore(pool),
+    store: goalStore,
     enabled: c.optimization.enabled,
     catalog: () => goalCatalog,
     cooldown: (domain) => packs.set.domains.get(domain)?.gates.cooldown ?? '30d',
+  });
+  // 目标运行的数据源、runner、建议与投递、验证循环：只在 optimization.enabled 时创建（关闭时不连接 dbstats、不读业务仓库）
+  const optimization = c.optimization.enabled
+    ? await createOptimization({
+        config: c,
+        pool,
+        store: goalStore,
+        set: () => packs.set,
+        evidenceSource,
+        topology,
+        github,
+        proposals,
+        registry: metrics.registry,
+        storm: () => scheduler.stormMode,
+        budgetExhausted: () => scheduler.optimizationBudgetExhausted(),
+        locale: evidenceOptions.locale,
+        queryTimeoutMs: evidenceOptions.queryTimeoutMs,
+      })
+    : null;
+  registerGoalTaskRoutes(app, {
+    pool,
+    auth,
+    evidence: optimization?.evidence ?? null,
+    publisher: optimization?.publisher ?? null,
   });
   registerResearchRoutes(app, {
     pool,
@@ -853,6 +880,41 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
     signal,
   );
   every(30_000, () => proposals.expire(), '提议过期检查');
+  // 主动优化（ADR 0146）：目标运行、建议与投递每 loop_interval 一轮，验证循环每 10 分钟一轮（§6.3）；上一轮没有结束时跳过
+  if (optimization) {
+    const single = (fn: () => Promise<unknown>) => {
+      let busy = false;
+      return async () => {
+        if (busy) {
+          return;
+        }
+        busy = true;
+        try {
+          await fn();
+        } finally {
+          busy = false;
+        }
+      };
+    };
+    every(
+      optimization.loopMs,
+      single(() => optimization.runner.runOnce(signal)),
+      '目标运行',
+    );
+    every(
+      optimization.loopMs,
+      single(async () => {
+        await optimization.publisher.recommendOnce();
+        await optimization.publisher.deliverOnce();
+      }),
+      '优化建议与投递',
+    );
+    every(
+      10 * 60_000,
+      single(() => optimization.verifier.runOnce(signal)),
+      '优化建议的验证',
+    );
+  }
   // 自愈 PR（ADR 0108）：研判结论 → 领域包的修复模板 → 校验 → gitops_pr 提议；gateway 开出的 PR 关联到事件 issue 与通知
   if (github) {
     const pulls = new GitOpsPulls(pool, github, issues, metrics);
@@ -1152,6 +1214,7 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
         s.close();
       }
       await listener.stop();
+      await optimization?.close();
       await pool.end();
     },
   };
