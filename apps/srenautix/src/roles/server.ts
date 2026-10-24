@@ -8,7 +8,10 @@ import { parse as parseYaml } from 'yaml';
 import { registerReadLimit } from '../api/read-limit.js';
 import { createApp } from '../api/http.js';
 import { leaseLeader, neverLeader, singleLeader, type Leader } from '../api/leader.js';
+import { registerGoalRoutes } from '../api/routes-goals.js';
 import { registerProposalRoutes } from '../api/routes-proposals.js';
+import { optimizationCatalog } from '../optimize/catalog.js';
+import { OptimizationStore } from '../optimize/store.js';
 import { registerResearchRoutes } from '../api/routes-research.js';
 import { pgConfigFromEnv } from '../config/database.js';
 import { parseDuration, parseListen, readSecretFile } from '../config/files.js';
@@ -691,6 +694,16 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
     },
   });
   registerProposalRoutes(app, { pool, auth, proposals, catalog, policies: () => policies });
+  // 主动优化（ADR 0146）：读取接口总是可用，写接口在 optimization.enabled 关闭时返回 503
+  const goalCatalog = optimizationCatalog(packs.set);
+  registerGoalRoutes(app, {
+    pool,
+    auth,
+    store: new OptimizationStore(pool),
+    enabled: c.optimization.enabled,
+    catalog: () => goalCatalog,
+    cooldown: (domain) => packs.set.domains.get(domain)?.gates.cooldown ?? '30d',
+  });
   registerResearchRoutes(app, {
     pool,
     auth,

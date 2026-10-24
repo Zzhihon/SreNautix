@@ -1,0 +1,51 @@
+indicators:
+  - id: db-time
+    title: { zh-CN: 数据库执行时间, en: Database execution time }
+    signal: db_time
+    entity: Cluster.postgresql.cnpg.io
+    params:
+      type: object
+      additionalProperties: false
+      properties:
+        database: { type: string, pattern: '^[a-z_]+$', description: 库名 }
+    unit: per_second
+    better: lower
+    statistic: p95
+    load_indicator: optdb/xact
+  - id: xact
+    title: { zh-CN: 事务速率, en: Transaction rate }
+    signal: xact_rate
+    entity: Cluster.postgresql.cnpg.io
+    unit: per_second
+    better: higher
+    statistic: p95
+domains:
+  - id: database
+    title: { zh-CN: 数据库性能, en: Database performance }
+    applies_to: [Cluster.postgresql.cnpg.io]
+    indicators: [optdb/db-time]
+    diagnostics:
+      - id: statement-dominant
+        card: checks/statement-share
+        finding: pg.statement_dominant
+        indicator: optdb/db-time
+        symptoms: [seq_scan, index]
+        entities:
+          type: pg_statement
+          rows_from: stmt
+          key: 'label(row, "datname") + "/" + label(row, "queryid")'
+          labels: { queryid: 'label(row, "queryid")', database: 'label(row, "datname")' }
+          when: 'last(row) / total > params.min_share'
+    contribution:
+      - id: statement-share
+        card: checks/statement-share
+        indicator: optdb/db-time
+        entities:
+          type: pg_statement
+          rows_from: stmt
+          key: 'label(row, "datname") + "/" + label(row, "queryid")'
+          share: 'last(row) / total'
+    gates:
+      min_share: 0.2
+      thresholds:
+        - { indicator: optdb/db-time, comparator: le, value: 0.5, statistic: p95 }

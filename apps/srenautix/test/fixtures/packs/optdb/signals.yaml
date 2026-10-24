@@ -1,0 +1,19 @@
+signals:
+  # 数据库的语句执行时间（秒/秒），exporter 的 pg_stat_statements 指标
+  - id: db_time
+    kind: metrics
+    unit: per_second
+    alternatives:
+      - expr: sum(rate(optdb_statement_seconds_total{$selector, datname="$params.database"}[5m]))
+  # 每条语句的执行时间（秒/秒），按 queryid
+  - id: statement_time
+    kind: metrics
+    unit: per_second
+    alternatives:
+      - expr: sum by (datname, queryid) (rate(optdb_statement_seconds_total{$selector}[5m]))
+  # 负载：事务速率
+  - id: xact_rate
+    kind: metrics
+    unit: per_second
+    alternatives:
+      - expr: sum(rate(optdb_xact_commit_total{$selector}[5m]))

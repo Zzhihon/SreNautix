@@ -1,0 +1,8 @@
+# 主动优化测试用的领域包（ADR 0146）：只用指标信号的数据库领域，供目标接口、目标运行与不变量测试使用
+api_version: srenautix.io/pack/v1
+name: optdb
+version: 0.1.0
+description: 主动优化的测试包：语句执行时间指标、按语句的诊断卡与份额卡
+maturity: beta
+min_srenautix_version: 0.1.0
+requires: [metrics.query, metrics.query_range]

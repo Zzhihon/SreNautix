@@ -1,0 +1,15 @@
+checks:
+  - id: statement-share
+    title: { zh-CN: 语句占执行时间的份额, en: Statement share of execution time }
+    applies_to: { kinds: [Cluster.postgresql.cnpg.io] }
+    window: { before: 1h, after: 0m }
+    params: { min_share: 0.2 }
+    refs:
+      - { name: stmt, signal: statement_time, mode: range }
+    judge:
+      let:
+        - { name: total, cel: 'sum(stmt)' }
+        - { name: top, cel: 'top_share(stmt, 1)' }
+      abnormal_if:
+        - { cel: 'top > params.min_share', say: { zh-CN: '最大的一条语句占 {top, number, percent}' } }
+    egress: allow
