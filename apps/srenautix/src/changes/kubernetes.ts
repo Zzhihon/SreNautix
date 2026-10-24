@@ -9,6 +9,7 @@ import type { Queryable } from '../store/pool.js';
 // 同一时间段（默认 2 分钟内）、同一版本取值或同一个管理它们的 Argo/Flux 应用的变化合成一次发布，目标是这些工作负载
 // 与管理它们的应用。结果是 changes/v1 的 ChangeEvent（source kubernetes、kind rollout），和变更源的变更一起参与收敛。
 // 没有属主、也没有后续发布的一次性 Job（停在迁移这一步的发布）自成一次变更（kind other，ADR 0140）。
+// 版本标签绕了一圈回到原值、或新旧版本相同的标签变化不是发布（ADR 0142）。
 
 export interface WorkloadEvent {
   seq: number;
@@ -77,6 +78,9 @@ interface Atom {
   /** 版本标签的旧取值；不是版本标签的变化时为 null */
   previousRevision: string | null;
   fromLabel: boolean;
+  /** 版本标签的变化：这次之前与之后全部版本标签的取值（没有的记为空串），用来识别绕了一圈回到原值的抖动；其他为 null */
+  labelsBefore: Record<string, string> | null;
+  labelsAfter: Record<string, string> | null;
   /** 工作负载或新 ReplicaSet 上 preStepLabels 的取值（有值的），用于按版本标签关联前置 Job */
   stepLabels: Record<string, string>;
   describe: string;
@@ -100,6 +104,54 @@ function revisionChange(
 }
 
 const short = (key: string) => key.slice(key.indexOf('/') + 1);
+
+/** 全部版本标签的取值，没有的记为空串 */
+const revisionValues = (
+  labels: Readonly<Record<string, string | undefined>> | undefined,
+  keys: readonly string[],
+): Record<string, string> => Object.fromEntries(keys.map((k) => [k, labels?.[k] ?? '']));
+
+const sameValues = (a: Record<string, string> | null, b: Record<string, string> | null): boolean =>
+  a !== null &&
+  b !== null &&
+  Object.keys(a).length === Object.keys(b).length &&
+  Object.keys(a).every((k) => a[k] === b[k]);
+
+/**
+ * 版本标签的抖动不是发布（ADR 0142）：同一工作负载上连续的版本标签变化，从第一次起 groupWithinMs 之内回到第一次变化之前的取值
+ * （例如 CCHP 的 cchp.io/release-id 被 Argo 同步短暂去掉又加回：canary-x → 无 → canary-x），这几次变化都去掉。
+ * 工作负载最后的版本与之前相同，没有任何东西被换掉。Pod 模板变化（新 ReplicaSet、新 ControllerRevision）不在这里，照常算发布。
+ * 输入按时间排序
+ */
+function dropLabelFlaps(atoms: readonly Atom[], withinMs: number): Atom[] {
+  const drop = new Set<Atom>();
+  const byTarget = new Map<string, Atom[]>();
+  for (const a of atoms) {
+    if (a.fromLabel) {
+      byTarget.set(a.target, [...(byTarget.get(a.target) ?? []), a]);
+    }
+  }
+  for (const xs of byTarget.values()) {
+    let i = 0;
+    while (i < xs.length) {
+      const first = xs[i]!;
+      let back = -1;
+      for (let j = i; j < xs.length && xs[j]!.time - first.time <= withinMs; j++) {
+        if (sameValues(first.labelsBefore, xs[j]!.labelsAfter)) {
+          back = j;
+          break;
+        }
+      }
+      if (back < 0) {
+        i++;
+        continue;
+      }
+      xs.slice(i, back + 1).forEach((a) => drop.add(a));
+      i = back + 1;
+    }
+  }
+  return atoms.filter((a) => !drop.has(a));
+}
 
 interface PreStep {
   time: number;
@@ -164,6 +216,8 @@ export function deriveRollouts(events: readonly WorkloadEvent[], o: RolloutOptio
           revision: r.to || null,
           previousRevision: r.from || null,
           fromLabel: true,
+          labelsBefore: revisionValues(e.previous?.labels, o.revisionLabels),
+          labelsAfter: revisionValues(e.body.labels, o.revisionLabels),
           stepLabels: labelValues(e.body.labels, o.preStepLabels ?? []),
           describe: `${short(e.key)}：${r.label} ${r.from || '（无）'} → ${r.to || '（无）'}`,
         });
@@ -178,6 +232,8 @@ export function deriveRollouts(events: readonly WorkloadEvent[], o: RolloutOptio
         revision: e.body.labels?.['pod-template-hash'] ?? null,
         previousRevision: null,
         fromLabel: false,
+        labelsBefore: null,
+        labelsAfter: null,
         // 新 ReplicaSet 的 Pod 模板标签带着这次发布的版本标签（例如 CCHP 的 cchp.io/release-id）
         stepLabels: labelValues(e.body.labels, o.preStepLabels ?? []),
         describe: `${short(e.owner)}：新的 ReplicaSet ${e.body.name}`,
@@ -193,15 +249,17 @@ export function deriveRollouts(events: readonly WorkloadEvent[], o: RolloutOptio
         revision: e.body.name,
         previousRevision: null,
         fromLabel: false,
+        labelsBefore: null,
+        labelsAfter: null,
         stepLabels: {},
         describe: `${short(e.owner)}：新的版本 ${e.body.name}`,
       });
     }
   }
   atoms.sort((a, b) => a.time - b.time || a.seq - b.seq);
-  const groups: Atom[][] = [];
-  for (const a of atoms) {
-    const g = groups.find(
+  const grouped: Atom[][] = [];
+  for (const a of dropLabelFlaps(atoms, o.groupWithinMs)) {
+    const g = grouped.find(
       (x) =>
         a.time - x[0]!.time <= o.groupWithinMs &&
         x.some(
@@ -214,9 +272,11 @@ export function deriveRollouts(events: readonly WorkloadEvent[], o: RolloutOptio
     if (g) {
       g.push(a);
     } else {
-      groups.push([a]);
+      grouped.push([a]);
     }
   }
+  // 只有版本标签变化、版本的新旧取值相同的一组也不算发布（ADR 0142）：标签在两个工作负载之间来回，或抖动跨过了上面的判定
+  const groups = grouped.filter((g) => !labelOnlyNoop(g));
   const attached = attachPreSteps(groups, jobs, o);
   const rollouts = groups.map((g, gi) => {
     const first = g[0]!;
@@ -271,6 +331,16 @@ export function deriveRollouts(events: readonly WorkloadEvent[], o: RolloutOptio
   return [...rollouts, ...standaloneJobs(groups, jobs, attached, o)].sort(
     (a, b) => a.time.localeCompare(b.time) || a.change_id.localeCompare(b.change_id),
   );
+}
+
+/** 一组变化全部来自版本标签，并且合成之后的版本与旧版本相同（都唯一且非空） */
+function labelOnlyNoop(g: readonly Atom[]): boolean {
+  if (!g.every((a) => a.fromLabel)) {
+    return false;
+  }
+  const to = new Set(g.map((a) => a.revision).filter((r): r is string => r !== null));
+  const from = new Set(g.map((a) => a.previousRevision).filter((r): r is string => r !== null));
+  return to.size === 1 && from.size === 1 && [...to][0] === [...from][0];
 }
 
 /**

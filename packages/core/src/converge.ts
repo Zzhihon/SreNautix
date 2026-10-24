@@ -24,6 +24,12 @@ export interface PreparedAlert {
   mergeReach: ReachResult | null;
   /** 沿全部非命名推断边可达（候选排序用） */
   rankReach: ReachResult | null;
+  /**
+   * 这条告警所在组件的问题从什么时候开始（unix 毫秒，ADR 0142）：同一组件上首尾相接（时间相邻）的告警中最早的开始时间，
+   * 不计 forecast、meta 与长期告警。重新触发的告警（OOM 循环里每次重启都重新触发）的开始时间晚，但问题早就开始了。
+   * 由 converge 计算；没有时按 start
+   */
+  onset?: number;
 }
 
 export interface AlertGroup {
@@ -96,6 +102,46 @@ export function changeComponents(c: ChangeEvent, graph: TopologyGraph): Set<Comp
 /** 依赖合并要求两条告警的开始时间相差不超过时间相邻的这么多倍（默认 4 × 30 分钟） */
 export const DEPENDENCY_ONSET_FACTOR = 4;
 
+/**
+ * 变更时间的容差（ADR 0142）：推导出的变更时间可能比真实时刻晚。kube-state-metrics 回退推导的发布与 Job 是 5 分钟步长，
+ * 新的版本要等下一个样本才看得到，发布流水线的前置步骤又在版本变化之前（10-19 迁移死锁：gateway 告警 06:22 开始，
+ * 修订在 06:30 的样本里出现，流水线 06:20 开始），所以取两个步长。变更晚于问题开始不超过这么久时仍按可能的原因对待
+ */
+export const CHANGE_ONSET_TOLERANCE_MS = 10 * 60_000;
+
+/** 计算问题开始时间（onset）时不计的告警：forecast 与 meta 不说明问题已经开始，长期告警是背景噪声 */
+function onsetEligible(x: PreparedAlert): boolean {
+  const c = x.alert.classification;
+  return c.role !== 'forecast' && c.role !== 'meta' && !c.chronic;
+}
+
+/**
+ * 每条告警所在组件的问题开始时间（ADR 0142）：同一组件（不是命名空间伪组件）上的告警按时间相邻首尾相接成链，链上最早的开始时间。
+ * 不计的告警（onsetEligible）与没有组件的告警只取自己的开始时间。输入按开始时间排序
+ */
+function problemOnsets(xs: readonly PreparedAlert[], gapMs: number): number[] {
+  const out = xs.map((x) => x.start);
+  const byComponent = new Map<ComponentKey, number[]>();
+  xs.forEach((x, i) => {
+    if (x.component !== null && !isNamespacePseudo(x.component) && onsetEligible(x)) {
+      byComponent.set(x.component, [...(byComponent.get(x.component) ?? []), i]);
+    }
+  });
+  for (const idx of byComponent.values()) {
+    let onset = xs[idx[0]!]!.start;
+    let end = xs[idx[0]!]!.end;
+    for (const i of idx) {
+      const x = xs[i]!;
+      if (x.start - end > gapMs) {
+        onset = x.start;
+      }
+      end = Math.max(end, x.end);
+      out[i] = onset;
+    }
+  }
+  return out;
+}
+
 /** 变更输入最多回看这么久（长期触发的告警不会让引擎读取无限久远的变更） */
 export const MAX_CHANGE_LOOKBACK_MS = 24 * 3600_000;
 
@@ -121,7 +167,11 @@ export function changeInputFrom(
   return Math.max(Math.min(now, earliest) - reach, now - MAX_CHANGE_LOOKBACK_MS);
 }
 
-/** 告警 x 与变更 c 的关联置信度：x 在变更后的窗口内触发，且 x 的组件就是或依赖变更目标 */
+/**
+ * 告警 x 与变更 c 的关联置信度：x 在变更后的窗口内触发，且 x 的组件就是或依赖变更目标。
+ * x 所在组件的问题在变更之前（超过容差）就已经开始时不关联（ADR 0142）：重新触发的告警开始时间在变更之后，
+ * 但变更不是更早开始的问题的原因
+ */
 export function changeExplains(
   c: ChangeEvent,
   x: PreparedAlert,
@@ -131,6 +181,9 @@ export function changeExplains(
 ): number {
   const t = parseTime(c.time);
   if (x.start < t || x.start - t > params.changeWindowMs) {
+    return 0;
+  }
+  if ((x.onset ?? x.start) + CHANGE_ONSET_TOLERANCE_MS < t) {
     return 0;
   }
   let best = 0;
@@ -153,6 +206,33 @@ export function changeExplains(
     best = Math.max(best, actsOn(c, graph).get(x.component) ?? 0);
   }
   return best;
+}
+
+/**
+ * 变更晚于它自己目标上的问题（ADR 0142）：变更触及的组件（不含作为其他目标管理应用的组件、命名空间伪组件）上，
+ * 有一段问题在变更之前超过容差就已经开始，并且一直持续到变更前后（链上的告警在变更时刻仍在触发，或结束不到一个时间相邻）。
+ * 这样的变更不是这段问题的原因：根因排序不给它先验与近期变更，也不以它的目标为变更候选。
+ * 只看变更自己的目标：分组里其他组件早就在触发的告警（节点上持续两天的告警）不让一次发布变成"晚到"
+ */
+export function lateChange(
+  c: ChangeEvent,
+  alerts: readonly PreparedAlert[],
+  graph: TopologyGraph,
+  params: ResolvedRcaParams,
+): boolean {
+  const t = parseTime(c.time);
+  const comps = changeComponents(c, graph);
+  const managers = managersOfTargets(comps, graph);
+  return alerts.some(
+    (x) =>
+      x.component !== null &&
+      comps.has(x.component) &&
+      !managers.has(x.component) &&
+      !isNamespacePseudo(x.component) &&
+      onsetEligible(x) &&
+      (x.onset ?? x.start) + CHANGE_ONSET_TOLERANCE_MS < t &&
+      x.end + params.adjacencyMs >= t,
+  );
 }
 
 /** 按强依据（managed_by、版本标签、镜像）挂上的前置 Job 才算发布的一部分；namespace_window 是弱推导，不扩展作用对象 */
@@ -350,6 +430,9 @@ export function converge(input: ConvergeInput): AlertGroup[] {
   const xs = prepareAlerts(input.alerts, graph, params, input.now);
   // 稳定顺序：结果不依赖告警到达的顺序
   xs.sort((a, b) => a.start - b.start || a.alert.alert_id.localeCompare(b.alert.alert_id));
+  problemOnsets(xs, params.adjacencyMs).forEach((onset, i) => {
+    xs[i]!.onset = onset;
+  });
   const changes = [...input.changes].sort(
     (a, b) => a.time.localeCompare(b.time) || a.change_id.localeCompare(b.change_id),
   );

@@ -4,12 +4,14 @@
 // 第一与第二候选同层且分差小于 δ 时根因有歧义，两者的证据链都执行。
 // 变更的作用对象（变更目标中的 Job 经 egress_to 访问的组件，ADR 0140）也是候选，来源记为 change，角色先验与近期变更两项
 // 按访问边的置信度打折，排在变更本身之后。
+// 晚于自己目标上已经开始的问题（加容差）的变更不参与排序（ADR 0142）。
 import type { AlertRole, ChangeEvent, ComponentKey, EntityRef, IncidentRoot, RootCandidate } from '@srenautix/contract';
 import {
   actsOn,
   changeComponents,
   changeExplains,
   dependsOn,
+  lateChange,
   type AlertGroup,
   type PreparedAlert,
 } from './converge.js';
@@ -72,19 +74,22 @@ export function rankRoot(input: RankInput): Ranking {
     return d;
   };
   const role = (x: PreparedAlert) => x.alert.classification.role;
+  // 晚于自己目标上的问题（超过容差）的变更不参与排序（ADR 0142）：问题开始之后才发生的变更不是它的原因，不产生候选，
+  // 也不给变更先验与近期变更。变更仍在分组里（事件的相关变更照常列出）
+  const changes = group.changes.filter((c) => !lateChange(c, group.alerts, graph, params));
 
   for (const x of group.alerts) {
     if (x.component !== null && (role(x) === 'cause' || role(x) === 'change')) {
       draft(x.component, 'alert');
     }
   }
-  for (const c of group.changes) {
+  for (const c of changes) {
     for (const comp of changeComponents(c, graph)) {
       draft(comp, 'change').changes.push(c);
     }
   }
   // 变更的作用对象：迁移 Job 失败时，原因可能在迁移本身，也可能在它写入的数据库（权限、锁、容量）
-  for (const c of group.changes) {
+  for (const c of changes) {
     for (const [comp, confidence] of actsOn(c, graph)) {
       draft(comp, 'change').actedOnBy.push({ change: c, confidence });
     }

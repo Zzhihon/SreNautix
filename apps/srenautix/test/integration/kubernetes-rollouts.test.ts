@@ -1,4 +1,5 @@
-import type { TopologyEdge, TopologyNode } from '@srenautix/contract';
+import type { Alert, ChangeEvent, TopologyEdge, TopologyNode } from '@srenautix/contract';
+import { computeIncidents, DEFAULT_RCA_PARAMS, TopologyGraph } from '@srenautix/core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { kubernetesRollouts } from '../../src/changes/kubernetes.js';
 import { migrateExpand } from '../../src/store/migrate.js';
@@ -182,6 +183,116 @@ describe('从拓扑事件推导 Kubernetes 发布', () => {
       { target: 'Job:shop/presync', basis: 'managed_by' },
       { target: 'Job:shop/migrate-r2', basis: 'revision_label' },
     ]);
+  });
+
+  it('CCHP gateway OOM 循环（ADR 0142）：17:42 的 release-id 往返不是发布；根因是 StatefulSet gateway，没有歧义', async () => {
+    const K = 'cchp-gw';
+    const ts = (hhmmss: string) => new Date(`2026-10-23T${hhmmss}Z`);
+    const R1 = 'canary-3cc28887b49f';
+    const ARGO = 'Application.argoproj.io:argocd/cchp-prod';
+    const STS = 'StatefulSet:cchp-prod/gateway';
+    const n = (kind: string, ns: string, name: string, labels: Record<string, string> = {}): TopologyNode => ({
+      key: `${kind}:${ns}/${name}`,
+      kind,
+      namespace: ns,
+      name,
+      uid: `uid-${kind}-${name}`,
+      labels,
+      component_type: null,
+      hub: false,
+    });
+    const up = (t: string, x: TopologyNode) => ({
+      op: 'node_upsert' as const,
+      at: ts(t),
+      source: 'informer' as const,
+      node: x,
+    });
+    const ue = (t: string, x: TopologyEdge) => ({
+      op: 'edge_upsert' as const,
+      at: ts(t),
+      source: 'informer' as const,
+      edge: x,
+    });
+    const gw = (labels: Record<string, string>) =>
+      n('StatefulSet', 'cchp-prod', 'gateway', { app: 'gateway', ...labels });
+    await store.apply(K, [
+      up('12:00:00', n('Application.argoproj.io', 'argocd', 'cchp-prod')),
+      up('12:00:00', gw({ 'cchp.io/release-id': R1 })),
+      ue('12:00:00', edge(STS, ARGO, 'managed_by')),
+      ...[0, 1, 2, 3].flatMap((i) => [
+        up('12:00:00', n('Pod', 'cchp-prod', `gateway-${i}`)),
+        ue('12:00:00', edge(`Pod:cchp-prod/gateway-${i}`, STS, 'owned_by')),
+      ]),
+    ]);
+    // 17:42:00 标签被去掉，17:42:07 加回原值
+    await store.apply(K, [up('17:42:00', gw({}))]);
+    await store.apply(K, [up('17:42:07', gw({ 'cchp.io/release-id': R1 }))]);
+    const opts = { clusterId: K, revisionLabels: ['cchp.io/release-id'], groupWithinMs: 2 * 60_000 };
+    const changes = await kubernetesRollouts(db.server, ts('15:00:00'), ts('18:10:00'), opts);
+    expect(changes).toEqual([]);
+
+    // 15:48:30 起 gateway-3 OOM 重启，告警一直在触发；重启中不断有新的告警触发，包括 17:42 之后的
+    let seqNo = 0;
+    const alert = (alertname: string, start: string, entity: TopologyNode, end?: string): Alert => {
+      const id = (++seqNo).toString(16).padStart(16, '0');
+      return {
+        alert_id: `${id}@${ts(start).getTime() / 1000}`,
+        cluster_id: K,
+        source: 'alertmanager',
+        fingerprint: id,
+        alertname,
+        labels: { alertname, namespace: 'cchp-prod' },
+        annotations: {},
+        severity: 'critical',
+        status: end ? 'resolved' : 'firing',
+        suppressed: 'none',
+        starts_at: ts(start).toISOString(),
+        ends_at: end ? ts(end).toISOString() : null,
+        generator_url: null,
+        classification: { role: 'cause', source: 'catalog', confidence: 1, catalog_entry: null, chronic: false },
+        entity: { cluster_id: K, kind: entity.kind, namespace: entity.namespace, name: entity.name, uid: entity.uid },
+        entity_resolution: 'informer',
+        component: null,
+        received_at: ts(start).toISOString(),
+      };
+    };
+    const pod = (i: number) => n('Pod', 'cchp-prod', `gateway-${i}`);
+    const alerts = [
+      alert('GatewayContainerOOMKilled', '15:48:30', pod(3)),
+      alert('KubePodCrashLooping', '15:58:00', pod(3)),
+      alert('GatewayContainerOOMKilled', '16:40:00', pod(1), '16:52:00'),
+      alert('GatewayContainerOOMKilled', '17:48:00', pod(1)),
+      alert('KubeStatefulSetReplicasMismatch', '17:55:00', gw({})),
+    ];
+    const topo = await store.at(K, ts('18:10:00'));
+    const graph = new TopologyGraph(topo.nodes, topo.edges, topo.version);
+    // 旧代码推导出的那次变更（revision 与 previous_revision 相同）也不能让管理应用与 gateway 打平
+    const legacy: ChangeEvent = {
+      change_id: `kubernetes:${K}:153695`,
+      source: 'kubernetes',
+      kind: 'rollout',
+      refs: [ARGO],
+      revision: R1,
+      previous_revision: R1,
+      actor: null,
+      time: '2026-10-23T17:42:07.000Z',
+      link: null,
+      targets: [STS, ARGO],
+      summary: 'gateway：cchp.io/release-id 往返',
+    };
+    for (const input of [changes, [legacy]]) {
+      const inc = computeIncidents({
+        alerts,
+        changes: input,
+        graph,
+        params: DEFAULT_RCA_PARAMS,
+        now: ts('18:10:00').getTime(),
+      });
+      expect(inc).toHaveLength(1);
+      expect(inc[0]!.ranking.root).toMatchObject({ component: STS, ambiguous: false });
+      expect(inc[0]!.ranking.candidates.map((c) => c.component)).toEqual([STS]);
+      expect(inc[0]!.ranking.candidates[0]!.terms.recent_change).toBe(0);
+    }
   });
 
   it('窗口外的变化与第一次出现的工作负载不算发布', async () => {
