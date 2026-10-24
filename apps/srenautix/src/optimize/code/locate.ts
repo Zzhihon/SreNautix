@@ -1,12 +1,14 @@
+import type { CodeLayout } from '@srenautix/contract';
 import { redactText } from '../../llm/redact.js';
-import { DEFAULT_CODE_EXCLUDE, type AnchorKind, type BusinessRepositoryConfig } from '../config.js';
+import { DEFAULT_CODE_EXCLUDE, type AnchorKind } from '../config.js';
 import { matchAny } from './glob.js';
 import { enclosingFunction, languageOf, sourceFacts, type FunctionSpan, type SourceFacts } from './syntax.js';
 import type { RepoCodeCache, TreeEntry } from './tree.js';
 
 // 代码定位（ADR 0146 §3.5）：发现给出确定性的锚点，在运行中的提交的目录树上按锚点规则筛出候选文件（不超过 200 个或
 // 8 MiB），用 tree-sitter 取出字符串字面量与函数边界后匹配：
-// - sql：字面量与 .sql 文件中的语句按规范化语句的指纹比较，相等即命中（置信度高）；只有表名命中时置信度低；
+// - sql：字面量与 .sql 文件中的语句按规范化语句的指纹比较，相等即命中（置信度高）；
+// - table：SQL 字面量中出现这个表名（置信度低）；
 // - span_name、metric_name、route：字符串字面量精确匹配（置信度中）；
 // - 命中生成代码（文件头有 "Code generated … DO NOT EDIT"，例如 sqlc 的查询）时，按生成的函数名在候选文件中
 //   再找一层调用方（置信度降一档）。
@@ -14,10 +16,14 @@ import type { RepoCodeCache, TreeEntry } from './tree.js';
 
 export interface Anchor {
   kind: AnchorKind;
-  /** sql 为规范化语句，其余为字面量 */
+  /** sql 为规范化语句；table 为表名（可带 schema）；其余为字面量 */
   value: string;
-  /** sql 锚点涉及的表；只有表名命中时置信度低 */
-  tables?: readonly string[];
+}
+
+/** 业务仓库与它的代码布局（server 配置 optimization.repositories.business） */
+export interface CodeRepository {
+  repo: string;
+  code: CodeLayout;
 }
 
 export type MatchKind = 'sql_fingerprint' | 'sql_table' | 'literal' | 'caller';
@@ -74,7 +80,7 @@ function relative(path: string, root: string): string | null {
 }
 
 /** 包含、排除与语言之后的候选文件（相对代码根目录匹配 glob） */
-export function codeFiles(entries: readonly TreeEntry[], layout: BusinessRepositoryConfig): TreeEntry[] {
+export function codeFiles(entries: readonly TreeEntry[], layout: CodeLayout): TreeEntry[] {
   const exclude = [...DEFAULT_CODE_EXCLUDE, ...layout.exclude];
   return entries.filter((e) => {
     const rel = relative(e.path, layout.root);
@@ -133,22 +139,29 @@ function functionUsing(f: FileFacts, name: string): FunctionSpan | null {
 }
 
 export async function locateCode(
-  layout: BusinessRepositoryConfig,
+  repository: CodeRepository,
   commit: string,
   anchors: readonly Anchor[],
   deps: { cache: RepoCodeCache; fingerprint: SqlFingerprint },
-  limits: LocateLimits = DEFAULT_LOCATE_LIMITS,
+  budget: Partial<LocateLimits> = {},
 ): Promise<LocateResult> {
+  const layout = repository.code;
+  // 读取上限取布局与本次预算中较小者
+  const limits: LocateLimits = {
+    maxFiles: Math.min(layout.max_files ?? DEFAULT_LOCATE_LIMITS.maxFiles, budget.maxFiles ?? Infinity),
+    maxBytes: Math.min(layout.max_bytes ?? DEFAULT_LOCATE_LIMITS.maxBytes, budget.maxBytes ?? Infinity),
+  };
   const notes: string[] = [];
-  const tree = await deps.cache.tree(layout.repo, commit);
+  const tree = await deps.cache.tree(repository.repo, commit);
   if (tree.truncated) {
-    notes.push(`${layout.repo}@${commit.slice(0, 12)} 的目录树被 GitHub 截断，只在返回的部分中定位`);
+    notes.push(`${repository.repo}@${commit.slice(0, 12)} 的目录树被 GitHub 截断，只在返回的部分中定位`);
   }
   const base = codeFiles(tree.entries, layout);
   // 按锚点规则收缩范围：没有规则的锚点类型取全部代码文件
   const wanted = new Set<string>();
   for (const a of anchors) {
-    const globs = layout.anchors[a.kind];
+    const rules = layout.anchors.filter((r) => r.kind === a.kind);
+    const globs = rules.length ? rules.flatMap((r) => r.paths) : null;
     for (const e of base) {
       const rel = relative(e.path, layout.root) as string;
       if (!globs || matchAny(rel, globs)) {
@@ -173,7 +186,7 @@ export async function locateCode(
   }
   const files: FileFacts[] = [];
   for (const entry of picked) {
-    const text = await deps.cache.content(layout.repo, commit, entry);
+    const text = await deps.cache.content(repository.repo, commit, entry);
     const lang = languageOf(entry.path);
     const facts: SourceFacts = lang
       ? await sourceFacts(lang, text)
@@ -185,7 +198,7 @@ export async function locateCode(
   const add = (f: FileFacts, a: Anchor, at: { startLine: number; endLine: number }, kind: MatchKind, c: Confidence) => {
     const fn = enclosingFunction(f.facts.functions, at.startLine);
     out.push({
-      repository: layout.repo,
+      repository: repository.repo,
       commit,
       path: f.entry.path,
       start_line: fn?.startLine ?? at.startLine,
@@ -224,7 +237,7 @@ export async function locateCode(
       for (const call of g.facts.calls.filter((x) => x.name === callee)) {
         const caller = enclosingFunction(g.facts.functions, call.line);
         out.push({
-          repository: layout.repo,
+          repository: repository.repo,
           commit,
           path: g.entry.path,
           start_line: caller?.startLine ?? call.line,
@@ -244,16 +257,20 @@ export async function locateCode(
     if (a.kind === 'sql') {
       const target = deps.fingerprint(a.value);
       if (target === null) {
-        notes.push('锚点语句无法规范化，只按表名定位');
+        notes.push('锚点语句无法规范化，没有按语句定位');
+        continue;
       }
       for (const f of files) {
         for (const s of f.facts.strings) {
-          if (!SQL_WORD.test(s.value)) {
-            continue;
-          }
-          if (target !== null && deps.fingerprint(s.value) === target) {
+          if (SQL_WORD.test(s.value) && deps.fingerprint(s.value) === target) {
             add(f, a, s, 'sql_fingerprint', 'high');
-          } else if ((a.tables ?? []).some((t) => hasTable(s.value, t))) {
+          }
+        }
+      }
+    } else if (a.kind === 'table') {
+      for (const f of files) {
+        for (const s of f.facts.strings) {
+          if (SQL_WORD.test(s.value) && hasTable(s.value, a.value)) {
             add(f, a, s, 'sql_table', 'low');
           }
         }
@@ -290,12 +307,12 @@ export async function locateCode(
 }
 
 /** 路径映射的 issue 标签（§3.5 的 labels） */
-export function pathLabels(layout: BusinessRepositoryConfig, paths: readonly string[]): string[] {
+export function pathLabels(layout: CodeLayout, paths: readonly string[]): string[] {
   const out = new Set<string>();
   for (const p of paths) {
     const rel = relative(p, layout.root) ?? p;
-    for (const l of layout.labels) {
-      if (matchAny(rel, [l.glob])) {
+    for (const l of layout.labels ?? []) {
+      if (matchAny(rel, l.paths)) {
         out.add(l.label);
       }
     }

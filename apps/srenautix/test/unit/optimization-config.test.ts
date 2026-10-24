@@ -19,6 +19,16 @@ const minimal = (extra: Record<string, unknown>) => ({
 
 const app = { app_id: '1', installation_id: '2', private_key_file: '/k.pem' };
 
+const code = {
+  version: { rule: 'running', release_input: 'release_input', field: 'business_commit' },
+  root: '',
+  include: ['**/*.go', '**/*.ts'],
+  exclude: ['**/mocks/**'],
+  languages: ['go', 'typescript'],
+  anchors: [{ kind: 'sql', paths: ['internal/**'] }],
+  labels: [{ paths: ['internal/gateway/**'], label: 'area/gateway' }],
+};
+
 describe('optimization 配置', () => {
   it('默认关闭，没有业务仓库；后端上限为 ADR 0146 §6.1 的默认值', () => {
     const o = serverConfigSchema.shape.optimization.parse(undefined);
@@ -31,33 +41,25 @@ describe('optimization 配置', () => {
     expect(o.limits.github).toEqual({ concurrency: 2, per_hour: 1000 });
   });
 
-  it('业务仓库的代码布局有默认值，未知键被拒绝', () => {
+  it('业务仓库的代码布局按契约 CodeLayout 校验，未知键被拒绝', () => {
     const o = serverConfigSchema.shape.optimization.parse({
       enabled: true,
-      repositories: {
-        business: {
-          repo: 'CCH-HQ/claude-code-hub-plus',
-          default_branch: 'dev',
-          anchors: { sql: ['internal/**'] },
-          labels: [{ glob: 'internal/gateway/**', label: 'area/gateway' }],
-        },
-      },
+      repositories: { business: { repo: 'CCH-HQ/claude-code-hub-plus', default_branch: 'dev', code } },
     });
-    expect(o.repositories.business).toMatchObject({
-      repo: 'CCH-HQ/claude-code-hub-plus',
-      default_branch: 'dev',
-      languages: ['go', 'typescript'],
-      include: ['**/*.go', '**/*.ts', '**/*.tsx', '**/*.sql'],
-      anchors: { sql: ['internal/**'] },
-    });
-    expect(() =>
-      serverConfigSchema.shape.optimization.parse({ repositories: { business: { repo: 'a/b', write: true } } }),
-    ).toThrow();
+    expect(o.repositories.business).toEqual({ repo: 'CCH-HQ/claude-code-hub-plus', default_branch: 'dev', code });
+    const parse = (business: unknown) => () =>
+      serverConfigSchema.shape.optimization.parse({ repositories: { business } });
+    expect(parse({ repo: 'a/b', code, write: true })).toThrow();
+    expect(parse({ repo: 'a/b', code: { ...code, anchors: [{ kind: 'regex', paths: ['**'] }] } })).toThrow(
+      /CodeLayout/,
+    );
+    expect(parse({ repo: 'a/b', code: { ...code, max_files: 500 } })).toThrow(/CodeLayout/);
+    expect(parse({ repo: 'a/b' })).toThrow();
     expect(() => serverConfigSchema.shape.optimization.parse({ repositories: { other: { repo: 'a/b' } } })).toThrow();
   });
 
   it('业务仓库需要 github_app，并且不能同时是 ops 仓库', () => {
-    const business = { repositories: { business: { repo: 'CCH-HQ/claude-code-hub-plus' } } };
+    const business = { repositories: { business: { repo: 'CCH-HQ/claude-code-hub-plus', code } } };
     expect(() => parseServerConfig(minimal({ optimization: business }))).toThrow(/需要 github_app/);
     const c = parseServerConfig(
       minimal({

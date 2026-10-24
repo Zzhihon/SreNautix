@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { validatorFor, type AnchorKind, type CodeLayout } from '@srenautix/contract';
 
 // server 的主动优化配置（ADR 0146）：optimization.*。默认关闭；关闭时不创建目标、不访问业务仓库、不连接 dbstats。
 //
@@ -9,18 +10,20 @@ import { z } from 'zod';
 //       business:                                  # 业务仓库（只读代码，只创建 issue 与评论，§6.4）
 //         repo: CCH-HQ/claude-code-hub-plus
 //         default_branch: dev
-//         root: ""                                 # 代码根目录（相对仓库根）
-//         include: ["**/*.go", "**/*.ts", "**/*.tsx", "**/*.sql"]
-//         exclude: [...]                           # 默认排除测试、testdata、生成的数据、密钥形状的文件
-//         languages: [go, typescript]
-//         anchors:                                 # 锚点类型 → 候选路径（§3.5 范围收缩）
-//           sql: ["internal/**", "db/**"]
-//         labels:                                  # 路径 → issue 标签
-//           - { glob: "internal/gateway/**", label: area/gateway }
+//         code:                                    # 契约 CodeLayout（pack.schema.json，§3.5）
+//           version: { rule: running, release_input: release_input, field: business_commit }
+//           root: ""
+//           include: ["**/*.go", "**/*.ts", "**/*.tsx", "**/*.sql"]
+//           exclude: []                            # 测试、testdata、生成文件中的数据、密钥形状的文件总是排除
+//           languages: [go, typescript]
+//           anchors: [{ kind: sql, paths: ["internal/**", "db/**"] }]
+//           labels: [{ paths: ["internal/gateway/**"], label: area/gateway }]
 //     limits: { dbstats: { concurrency: 1, per_hour: 60, statement_text_per_hour: 6 }, … }   # §6.1
 
+export type { AnchorKind };
+export const ANCHOR_KINDS: readonly AnchorKind[] = ['sql', 'table', 'span_name', 'metric_name', 'route'];
+
 const repoName = z.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/);
-const glob = z.string().min(1).max(300);
 
 /** 业务仓库读取时一律排除的路径（§3.5）：测试、testdata、生成的数据、密钥形状的文件 */
 export const DEFAULT_CODE_EXCLUDE = [
@@ -40,23 +43,15 @@ export const DEFAULT_CODE_EXCLUDE = [
   '**/*.min.js',
 ] as const;
 
-export const ANCHOR_KINDS = ['sql', 'span_name', 'metric_name', 'route'] as const;
-export type AnchorKind = (typeof ANCHOR_KINDS)[number];
+/** 业务仓库的代码布局按契约 CodeLayout 校验 */
+const validCodeLayout = (v: unknown) => validatorFor<CodeLayout>('schemas/pack.schema.json#/$defs/CodeLayout')(v);
+const codeLayout = z.custom<CodeLayout>(validCodeLayout, { message: '不符合契约 CodeLayout（pack.schema.json）' });
 
 const businessRepository = z
   .object({
     repo: repoName,
     default_branch: z.string().min(1).default('main'),
-    root: z.string().default(''),
-    include: z.array(glob).min(1).default(['**/*.go', '**/*.ts', '**/*.tsx', '**/*.sql']),
-    // 追加在 DEFAULT_CODE_EXCLUDE 之后
-    exclude: z.array(glob).default([]),
-    languages: z
-      .array(z.enum(['go', 'typescript']))
-      .min(1)
-      .default(['go', 'typescript']),
-    anchors: z.partialRecord(z.enum(ANCHOR_KINDS), z.array(glob).min(1)).default({}),
-    labels: z.array(z.object({ glob, label: z.string().min(1).max(50) }).strict()).default([]),
+    code: codeLayout,
   })
   .strict();
 

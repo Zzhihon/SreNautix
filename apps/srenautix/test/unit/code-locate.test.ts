@@ -114,19 +114,31 @@ const fingerprint = (sql: string) =>
     .replace(/;$/, '')
     .toLowerCase();
 
-const layout = optimizationConfig.parse({
+const repository = optimizationConfig.parse({
   repositories: {
     business: {
       repo: REPO,
       default_branch: 'dev',
-      anchors: { sql: ['internal/**', 'db/**'], span_name: ['internal/gateway/**'] },
-      labels: [
-        { glob: 'internal/usage/**', label: 'area/usage' },
-        { glob: 'internal/gateway/**', label: 'area/gateway' },
-      ],
+      code: {
+        version: { rule: 'default_branch' },
+        root: '',
+        include: ['**/*.go', '**/*.ts', '**/*.tsx', '**/*.sql'],
+        exclude: [],
+        languages: ['go', 'typescript'],
+        anchors: [
+          { kind: 'sql', paths: ['internal/**', 'db/**'] },
+          { kind: 'table', paths: ['internal/**', 'db/**'] },
+          { kind: 'span_name', paths: ['internal/gateway/**'] },
+        ],
+        labels: [
+          { paths: ['internal/usage/**'], label: 'area/usage' },
+          { paths: ['internal/gateway/**'], label: 'area/gateway' },
+        ],
+      },
     },
   },
 }).repositories.business!;
+const layout = repository.code;
 
 describe('代码定位', () => {
   it('候选文件：包含与排除规则，测试文件、文档与 .env 不读', () => {
@@ -145,14 +157,11 @@ describe('代码定位', () => {
     const { gh } = fakeGitHub();
     const cache = new RepoCodeCache(gh);
     const r = await locateCode(
-      layout,
+      repository,
       COMMIT,
       [
-        {
-          kind: 'sql',
-          value: 'SELECT id, cost FROM usage_logs WHERE org_id = $1 ORDER BY created_at DESC LIMIT $2',
-          tables: ['public.usage_logs'],
-        },
+        { kind: 'sql', value: 'SELECT id, cost FROM usage_logs WHERE org_id = $1 ORDER BY created_at DESC LIMIT $2' },
+        { kind: 'table', value: 'public.usage_logs' },
       ],
       { cache, fingerprint },
     );
@@ -171,7 +180,7 @@ describe('代码定位', () => {
   it('命中生成代码时按生成的函数名再找一层调用方，置信度降一档', async () => {
     const { gh } = fakeGitHub();
     const r = await locateCode(
-      layout,
+      repository,
       COMMIT,
       [{ kind: 'sql', value: 'SELECT id, secret_hash FROM api_keys WHERE id = $1' }],
       { cache: new RepoCodeCache(gh), fingerprint },
@@ -186,12 +195,12 @@ describe('代码定位', () => {
     const { gh, calls } = fakeGitHub();
     const cache = new RepoCodeCache(gh);
     const anchors = [{ kind: 'span_name' as const, value: 'cchp.gateway.stage.plan' }];
-    const r = await locateCode(layout, COMMIT, anchors, { cache, fingerprint });
+    const r = await locateCode(repository, COMMIT, anchors, { cache, fingerprint });
     expect(r.locations).toMatchObject([
       { path: 'internal/gateway/stage.go', symbol: 'plan', match_kind: 'literal', confidence: 'medium', line: 4 },
     ]);
     const n = calls.length;
-    await locateCode(layout, COMMIT, anchors, { cache, fingerprint });
+    await locateCode(repository, COMMIT, anchors, { cache, fingerprint });
     expect(calls.length).toBe(n);
     expect(calls.filter((c) => c.includes('/git/trees/'))).toHaveLength(1);
   });
@@ -199,11 +208,11 @@ describe('代码定位', () => {
   it('读取上限：超过文件数时只读按路径排序的前几个，并写明', async () => {
     const { gh } = fakeGitHub();
     const r = await locateCode(
-      layout,
+      repository,
       COMMIT,
       [{ kind: 'sql', value: 'SELECT 1' }],
       { cache: new RepoCodeCache(gh), fingerprint },
-      { maxFiles: 2, maxBytes: 8 * 1024 * 1024 },
+      { maxFiles: 2 },
     );
     expect(r.read.files).toBe(2);
     expect(r.notes.join('')).toMatch(/超过读取上限/);
