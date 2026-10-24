@@ -29,6 +29,9 @@
     "vitest": "5.0.5"
   },
   "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ],
     "overrides": {
       "react-router-dom-v5-compat>react-router": "7.18.4",
       "body-parser@^2.3.0": "2.4.0",

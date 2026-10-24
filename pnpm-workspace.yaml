@@ -4,6 +4,5 @@ packages:
   - web/*
   - plugins/*
 
-# 依赖安装脚本只对白名单内的包执行（DESIGN §16.5）
-onlyBuiltDependencies:
-  - esbuild
+# 依赖安装脚本的白名单（DESIGN §16.5）在根目录 package.json 的 pnpm.onlyBuiltDependencies：
+# pnpm 9 只从那里读取，写在本文件里不生效
