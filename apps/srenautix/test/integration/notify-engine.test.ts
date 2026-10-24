@@ -348,14 +348,15 @@ describe('投递引擎（Telegram，录制夹具）', () => {
     expect(visible(sent()[sent().length - 1]!.text)).toContain('事件风暴：自 00:00 UTC 起 22 个事件');
   });
 
-  it('Bot API 拒绝消息（其他 4xx）时记录错误并 5 分钟后重试；token 无效时抛出配置错误', async () => {
+  it('Bot API 拒绝消息（400 以外的 4xx）时记录错误并 5 分钟后重试；token 无效时抛出配置错误', async () => {
+    // 内容本身被拒绝的 400 是永久错误，走纯文本降级与放弃（notify-stale-desired.test.ts）
     fs.reset('POST', send).on('POST', send, [
       {
-        status: 400,
+        status: 403,
         body: {
           ok: false,
-          error_code: 400,
-          description: "Bad Request: can't parse entities: Can't find end of the entity starting at byte offset 12",
+          error_code: 403,
+          description: 'Forbidden: bot is not a member of the supergroup chat',
         },
       },
       fixture('telegram', 'unauthorized'),
@@ -368,7 +369,7 @@ describe('投递引擎（Telegram，录制夹具）', () => {
       'SELECT last_error, next_attempt_at FROM server.notify_messages WHERE id = $1',
       [row.id],
     );
-    expect(r.rows[0]!.last_error).toContain("can't parse entities");
+    expect(r.rows[0]!.last_error).toContain('bot is not a member');
     expect(r.rows[0]!.next_attempt_at.getTime()).toBe(now + 5 * 60_000);
     now += 5 * 60_000;
     await expect(engine.deliverOnce()).rejects.toThrow(NotifyFatalError);

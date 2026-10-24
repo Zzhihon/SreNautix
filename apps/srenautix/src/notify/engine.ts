@@ -1,6 +1,12 @@
 import { logger } from '../log.js';
 import type { ServerMetrics } from '../metrics.js';
-import type { ChannelAdapter, ChatTarget, DigestInput } from './channel.js';
+import {
+  RENDER_VERSION,
+  type ChannelAdapter,
+  type ChatTarget,
+  type DigestInput,
+  type PermanentReason,
+} from './channel.js';
 import { composeExternalDigest, lastWindow, type ExternalWindowStats } from './external.js';
 import type { Interactions } from './interactions.js';
 import type { DesiredIncidentMessage, MessageSource } from './ports.js';
@@ -29,6 +35,11 @@ export interface EngineOptions {
 const TRANSPORT_RETRY_MS = 15_000;
 const API_ERROR_RETRY_MS = 5 * 60_000;
 const RESULTS_SHOWN = 5;
+/**
+ * 已结束（恢复或合并）事件的消息最多再编辑这么多次（渠道作出了应答的编辑，含被拒绝的），用完后放弃之后的内容（ADR 0145）。
+ * 恢复后的编辑只是补上结果与反馈，不值得无限重试
+ */
+export const MAX_ENDED_EDITS = 5;
 /** 外部上游汇总在周期结束这么久之后才统计（ADR 0147） */
 export const EXTERNAL_DIGEST_GRACE_MS = 60_000;
 
@@ -50,6 +61,8 @@ export class NotifyEngine {
   private readonly known = new Map<string, { externalId: string; hash: string | null }>();
   /** 状态库降级期间直接发送的消息，恢复后补写。 */
   private readonly direct = new Map<string, DirectSent>();
+  /** 本进程是否已经重新渲染过旧渲染器产出的期望内容（启动后第一次同步时做一次） */
+  private staleRendered = false;
 
   constructor(
     private readonly store: NotifyStore,
@@ -75,6 +88,10 @@ export class NotifyEngine {
   async syncOnce(): Promise<void> {
     const now = new Date(this.opts.now());
     await this.interactions.expire(now);
+    if (!this.staleRendered) {
+      await this.rerenderStale(now);
+      this.staleRendered = true;
+    }
     const langs = new Set(this.adapters.flatMap((a) => a.chats.map((c) => c.language)));
     const desired = new Map<string, DesiredIncidentMessage[]>();
     for (const l of langs) {
@@ -219,6 +236,7 @@ export class NotifyEngine {
         payload: r.payload,
         hash: r.hash,
         proposalIds: proposalIds(d),
+        ended: d.state !== 'firing',
       });
     }
     await this.store.upsertDesired(rows, now);
@@ -235,22 +253,7 @@ export class NotifyEngine {
       if (!members.length) {
         continue;
       }
-      const input: DigestInput = {
-        stormId: st.id,
-        startedAt: st.startedAt,
-        members: members.map((d) => ({
-          incidentId: d.incidentId,
-          label: d.label,
-          severity: d.severity,
-          state: d.state,
-          title: d.message.title,
-          pendingApprovals: new Set(
-            d.targets.filter((x) => x.kind === 'approve' && x.proposalId).map((x) => x.proposalId),
-          ).size,
-        })),
-        consoleUrl: this.opts.consoleUrl,
-      };
-      const r = a.renderDigest(chat, input);
+      const r = a.renderDigest(chat, this.digestInput(st, members));
       digests.push({
         channel: a.channel,
         chat: chat.chat,
@@ -266,6 +269,129 @@ export class NotifyEngine {
       });
     }
     await this.store.upsertDesired(digests, now);
+  }
+
+  private digestInput(st: { id: number; startedAt: Date }, members: DesiredIncidentMessage[]): DigestInput {
+    return {
+      stormId: st.id,
+      startedAt: st.startedAt,
+      members: members.map((d) => ({
+        incidentId: d.incidentId,
+        label: d.label,
+        severity: d.severity,
+        state: d.state,
+        title: d.message.title,
+        pendingApprovals: new Set(
+          d.targets.filter((x) => x.kind === 'approve' && x.proposalId).map((x) => x.proposalId),
+        ).size,
+      })),
+      consoleUrl: this.opts.consoleUrl,
+    };
+  }
+
+  /**
+   * 启动后第一次同步之前：旧版本渲染器产出、还没有呈现、没有被放弃的期望内容按当前代码重新渲染（ADR 0145）。
+   * 同步只渲染还需要消息的事件，恢复后超过保留期的事件不会再被同步，它们的旧内容（例如超出实体预算的）只能在这里换掉。
+   * 已结束的事件照样渲染（用已结束状态的模板）；事件、风暴或时间段统计已经不存在的行保持原样。
+   */
+  private async rerenderStale(now: Date): Promise<void> {
+    const stale = await this.store.staleDesired(RENDER_VERSION);
+    if (!stale.length) {
+      return;
+    }
+    for (const a of this.adapters) {
+      for (const chat of a.chats) {
+        const rows = stale.filter((m) => m.channel === a.channel && m.chat === chat.chat);
+        if (!rows.length) {
+          continue;
+        }
+        const ids = new Set<string>();
+        for (const m of rows) {
+          if (m.kind === 'incident') {
+            ids.add(m.incidentId as string);
+          } else if (m.kind === 'digest' && m.stormId !== null) {
+            for (const id of await this.store.stormMembers(m.stormId)) {
+              ids.add(id);
+            }
+          }
+        }
+        const msgs = ids.size && this.source.byIds ? await this.source.byIds([...ids], chat.language) : [];
+        const byId = new Map(msgs.map((d) => [d.incidentId, d]));
+        const out: DesiredRow[] = [];
+        for (const m of rows) {
+          const r = await this.rerender(a, chat, m, byId, now);
+          if (r) {
+            out.push(r);
+          }
+        }
+        await this.store.upsertDesired(out, now);
+        logger.info('按当前渲染器重新渲染旧的期望内容', {
+          channel: a.channel,
+          chat: chat.chat,
+          render_version: RENDER_VERSION,
+          rerendered: out.length,
+          skipped: rows.length - out.length,
+        });
+      }
+    }
+  }
+
+  private async rerender(
+    a: ChannelAdapter,
+    chat: ChatTarget,
+    m: MessageRow,
+    byId: ReadonlyMap<string, DesiredIncidentMessage>,
+    now: Date,
+  ): Promise<DesiredRow | null> {
+    const base = {
+      channel: a.channel,
+      chat: chat.chat,
+      kind: m.kind,
+      subject: m.subject,
+      incidentId: m.incidentId,
+      stormId: m.stormId,
+      silent: m.silent,
+    };
+    if (m.kind === 'incident') {
+      const d = byId.get(m.incidentId as string);
+      if (!d) {
+        return null;
+      }
+      const results = await this.store.results(a.channel, chat.chat, d.incidentId, RESULTS_SHOWN);
+      const storm = m.stormId !== null ? await this.store.storm(m.stormId) : null;
+      const r = a.renderIncident(chat, d, results, storm, { callbacks: a.receivesCallbacks });
+      await this.store.registerButtons(a.channel, chat.chat, r.buttons, now);
+      return {
+        ...base,
+        lane: laneFor(d.lane, m),
+        payload: r.payload,
+        hash: r.hash,
+        proposalIds: proposalIds(d),
+        ended: d.state !== 'firing',
+      };
+    }
+    if (m.kind === 'digest') {
+      const st = m.stormId !== null ? await this.store.storm(m.stormId) : null;
+      if (!st) {
+        return null;
+      }
+      const members = (await this.store.stormMembers(st.id))
+        .map((id) => byId.get(id))
+        .filter((d): d is DesiredIncidentMessage => d !== undefined);
+      if (!members.length) {
+        return null;
+      }
+      const r = a.renderDigest(chat, this.digestInput(st, members));
+      return { ...base, lane: 'digest', payload: r.payload, hash: r.hash, proposalIds: [] };
+    }
+    const cur = await this.store.externalWindow(new Date(m.subject));
+    if (!cur) {
+      return null;
+    }
+    const from = Date.parse(cur.from);
+    const prev = await this.store.externalWindow(new Date(from - (Date.parse(cur.to) - from)));
+    const r = a.renderExternalDigest(chat, composeExternalDigest(cur, prev, chat.language, this.opts.consoleUrl));
+    return { ...base, lane: 'digest', payload: r.payload, hash: r.hash, proposalIds: [] };
   }
 
   /** 一轮投递；返回本轮发出或编辑的消息数。 */
@@ -301,7 +427,13 @@ export class NotifyEngine {
       await this.store.markAttempt(row.id, new Date(now), new Date(now + 24 * 3_600_000), '渠道目标不在配置中');
       return 'next';
     }
-    if (row.externalId !== null && row.deliveredAt && now < row.deliveredAt.getTime() + a.limits.editGapMs) {
+    const edit = row.externalId !== null;
+    if (edit && row.ended && row.endedEdits >= MAX_ENDED_EDITS) {
+      // 已结束事件的消息编辑次数用完：放弃这一版内容，不再请求渠道
+      await this.abandon(a, row, 'ended_edit_cap', `事件结束后已编辑 ${row.endedEdits} 次`, now);
+      return 'next';
+    }
+    if (edit && row.deliveredAt && now < row.deliveredAt.getTime() + a.limits.editGapMs) {
       // 编辑合并：间隔不足时推迟，到时发送届时的最新内容
       await this.store.defer(row.id, new Date(row.deliveredAt.getTime() + a.limits.editGapMs));
       return 'next';
@@ -311,31 +443,27 @@ export class NotifyEngine {
       await this.store.defer(row.id, new Date(slot.retryAt));
       return 'next';
     }
-    let externalId = row.externalId;
+    let externalId: string;
     try {
-      if (externalId === null) {
-        externalId = await a.send(
-          chat,
-          row.payload,
-          row.silent,
-          `${row.channel}:${row.chat}:${row.kind}:${row.subject}:${row.desiredHash}`,
-        );
-        this.metrics.notifySent.inc({ channel: a.channel, op: 'send' });
-      } else {
-        await a.edit(chat, externalId, row.payload);
-        this.metrics.notifySent.inc({ channel: a.channel, op: 'edit' });
-      }
+      externalId = await this.push(a, chat, row, row.payload, '');
     } catch (e) {
       const cls = a.classify(e);
-      if (cls.kind === 'not_modified' && externalId !== null) {
+      if (cls.kind === 'not_modified' && edit) {
         // 内容与渠道上的消息相同，视为已呈现
+        externalId = row.externalId as string;
+      } else if (cls.kind === 'permanent') {
+        const r = await this.degrade(a, limiter, chat, row, cls.reason, e);
+        if (!('id' in r)) {
+          return r.outcome;
+        }
+        externalId = r.id;
       } else {
         this.metrics.notifyFailures.inc({ channel: a.channel });
         return this.failed(a, limiter, row, cls, e, now);
       }
     }
     const at = new Date(this.opts.now());
-    await this.store.markDelivered(row.id, externalId, row.desiredHash, at);
+    await this.store.markDelivered(row.id, externalId, row.desiredHash, at, edit);
     if (row.kind === 'incident') {
       this.known.set(msgKey(a.channel, row.chat, row.incidentId as string), { externalId, hash: row.desiredHash });
       // 每次发出或编辑成功都报告消息中的提议：后来加入已有消息（编辑）的提议也要开始计算 TTL。
@@ -345,6 +473,102 @@ export class NotifyEngine {
       }
     }
     return 'sent';
+  }
+
+  /** 发出或编辑一条消息，返回渠道消息 id。variant 区分纯文本降级的发送请求（飞书按请求 uuid 去重）。 */
+  private async push(
+    a: ChannelAdapter,
+    chat: ChatTarget,
+    row: MessageRow,
+    payload: unknown,
+    variant: '' | ':plain',
+  ): Promise<string> {
+    if (row.externalId === null) {
+      const id = await a.send(
+        chat,
+        payload,
+        row.silent,
+        `${row.channel}:${row.chat}:${row.kind}:${row.subject}:${row.desiredHash}${variant}`,
+      );
+      this.metrics.notifySent.inc({ channel: a.channel, op: 'send' });
+      return id;
+    }
+    await a.edit(chat, row.externalId, payload);
+    this.metrics.notifySent.inc({ channel: a.channel, op: 'edit' });
+    return row.externalId;
+  }
+
+  /**
+   * 渠道以永久错误拒绝了内容（ADR 0145）：去掉实体，按纯文本重试一次。成功时返回渠道消息 id，这一版期望内容以纯文本呈现；
+   * 仍是永久错误或无法降级时放弃这一版内容；其他错误（不可达、限流、要编辑的消息不存在）按普通失败处理，下一轮从原内容重试。
+   * 永久错误不计入投递失败。
+   */
+  private async degrade(
+    a: ChannelAdapter,
+    limiter: ChannelLimiter,
+    chat: ChatTarget,
+    row: MessageRow,
+    reason: PermanentReason,
+    first: unknown,
+  ): Promise<{ id: string } | { outcome: 'next' | 'stop' }> {
+    const now = this.opts.now();
+    const firstMsg = (first as Error).message;
+    const plain = a.plain(row.payload);
+    if (plain === null) {
+      await this.abandon(a, row, reason, firstMsg, now);
+      return { outcome: 'next' };
+    }
+    const slot = limiter.reserve(row.chat, now);
+    if (!slot.ok) {
+      await this.store.defer(row.id, new Date(slot.retryAt));
+      return { outcome: 'next' };
+    }
+    try {
+      const id = await this.push(a, chat, row, plain, ':plain');
+      logger.warn('渠道拒绝了消息内容，已改为纯文本', {
+        channel: a.channel,
+        chat: row.chat,
+        kind: row.kind,
+        subject: row.subject,
+        reason,
+        error: firstMsg,
+      });
+      return { id };
+    } catch (e) {
+      const cls = a.classify(e);
+      if (cls.kind === 'not_modified' && row.externalId !== null) {
+        return { id: row.externalId };
+      }
+      if (cls.kind === 'permanent') {
+        await this.abandon(a, row, reason, `${firstMsg}；纯文本：${(e as Error).message}`, now);
+        return { outcome: 'next' };
+      }
+      this.metrics.notifyFailures.inc({ channel: a.channel });
+      return { outcome: await this.failed(a, limiter, row, cls, e, now) };
+    }
+  }
+
+  /** 放弃这一版期望内容：不再重试，不计入投递失败；期望内容变化后重新进入待投递。 */
+  private async abandon(
+    a: ChannelAdapter,
+    row: MessageRow,
+    reason: PermanentReason | 'ended_edit_cap',
+    error: string,
+    now: number,
+  ): Promise<void> {
+    if (!(await this.store.abandon(row.id, row.desiredHash, new Date(now), reason, error))) {
+      // 期望内容刚被同步更新：下一轮投递新内容
+      return;
+    }
+    this.metrics.notifyAbandoned.inc({ channel: a.channel, reason });
+    logger.error('放弃投递这条消息内容，不再重试', {
+      channel: a.channel,
+      chat: row.chat,
+      kind: row.kind,
+      subject: row.subject,
+      reason,
+      error,
+    });
   }
 
   private async failed(
@@ -371,8 +595,16 @@ export class NotifyEngine {
         logger.warn('要编辑的消息已不存在，改为重新发送', { channel: a.channel, chat: row.chat, subject: row.subject });
         return 'next';
       case 'not_modified':
+      case 'permanent':
       case 'api':
-        await this.store.markAttempt(row.id, new Date(now), new Date(now + API_ERROR_RETRY_MS), msg);
+        // 渠道应答了这次编辑（拒绝），已结束事件的编辑计数加一
+        await this.store.markAttempt(
+          row.id,
+          new Date(now),
+          new Date(now + API_ERROR_RETRY_MS),
+          msg,
+          row.externalId !== null,
+        );
         logger.error('渠道拒绝了消息', { channel: a.channel, chat: row.chat, subject: row.subject, error: msg });
         return 'next';
       case 'fatal':

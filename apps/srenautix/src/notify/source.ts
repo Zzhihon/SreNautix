@@ -173,7 +173,28 @@ export class PgMessageSource implements MessageSource {
         ORDER BY i.first_firing_at`,
       [this.s.severities, this.s.resolvedRetentionMs / 1000],
     );
-    const inputs = await this.reports.inputs(r.rows, language);
+    return this.compose(r.rows, language);
+  }
+
+  async byIds(incidentIds: readonly string[], language: 'zh' | 'en'): Promise<DesiredIncidentMessage[]> {
+    if (!incidentIds.length) {
+      return [];
+    }
+    const r = await this.pool.query<{ body: Incident; report: StageAReport }>(
+      `SELECT i.body, s.body AS report FROM server.incidents i
+         JOIN LATERAL (SELECT body FROM server.stage_a_reports WHERE incident_id = i.incident_id ORDER BY incident_version DESC LIMIT 1) s ON true
+        WHERE i.incident_id = ANY($1::uuid[])
+        ORDER BY i.first_firing_at`,
+      [incidentIds],
+    );
+    return this.compose(r.rows, language);
+  }
+
+  private async compose(
+    rows: Array<{ body: Incident; report: StageAReport }>,
+    language: 'zh' | 'en',
+  ): Promise<DesiredIncidentMessage[]> {
+    const inputs = await this.reports.inputs(rows, language);
     const cls = this.external ? await this.external.classify(inputs) : new Map<string, Classification>();
     return inputs.map((input) => {
       const inc = input.incident;

@@ -77,7 +77,10 @@ chart 的顶层 values `notifyDigest.externalRoots`（键名为驼峰）生成�
 
 - 优先级通道：审批与新的 critical 事件（urgent）→ 风暴摘要（digest）→ 编辑（edit）→ 恢复（recovery）。令牌不足时低优先级的消息推迟。
 - 同一条消息两次编辑之间至少间隔 `edit_gap`（Telegram 默认 3 秒，飞书默认 1 秒，飞书单条消息更新上限 5 QPS），间隔内的多次变化只发送最新内容。
-- 渠道返回 429（Telegram）或 230020（飞书）时按 `retry_after` 暂停整个渠道；渠道不可达时内容留在库中，恢复后补发；要编辑的消息已被删除（Telegram）或撤回、超过 14 天（飞书 230011、230031）时改为发送新消息；其他 4xx 记录在 `last_error`，5 分钟后重试；token 或应用凭证无效时进程退出。
+- 渠道返回 429（Telegram）或 230020（飞书）时按 `retry_after` 暂停整个渠道；渠道不可达时内容留在库中，恢复后补发；要编辑的消息已被删除（Telegram）或撤回、超过 14 天（飞书 230011、230031）时改为发送新消息；Telegram 的 message is not modified 按已呈现处理；token 或应用凭证无效时进程退出。
+- 渠道拒绝内容本身的永久错误（Telegram 的 400，上面几种与群不存在、没有发言权限除外，例如 `ENTITIES_TOO_LONG`、can't parse entities；飞书 230001、230025、230099）：去掉格式与链接，按纯文本重试一次（Telegram 保留键盘；飞书卡片只保留标题与正文文字）；仍被拒绝时放弃这一版内容（`abandoned_at`、`abandoned_reason`），不再重试，不计入投递失败与 `ChannelDeliveryFailed`，记 `srenautix_notify_abandoned_total`；期望内容变化后重新尝试。其他 4xx 记录在 `last_error`，5 分钟后重试。
+- 事件恢复或合并后，它的消息最多再编辑 5 次（渠道作出应答的编辑，含被拒绝的），之后的内容放弃（原因 `ended_edit_cap`）；事件重新触发后计数清零。
+- 每行记下产出期望内容的渲染器版本（`render_version`）。进程启动后第一次同步之前，旧版本渲染、还没有呈现、没有放弃的期望内容按当前代码重新渲染，恢复后超过保留期的事件也一样（用已结束状态的模板）——同步只渲染还需要消息的事件，不会再换掉它们的旧内容（ADR 0145）。
 - 消息第一次成功送达时，server 记下其中提议的 `first_delivered_at`，提议的 TTL 从这一刻开始计算。
 
 ## 事件风暴
@@ -131,6 +134,7 @@ chart 的顶层 values `notifyDigest.externalRoots`（键名为驼峰）生成�
 |---|---|
 | `srenautix_notify_messages_total` | `channel`、`op`（send、edit） |
 | `srenautix_notify_delivery_failures_total` | `channel` |
+| `srenautix_notify_abandoned_total` | `channel`、`reason`（entities_too_long、message_too_long、parse_error、bad_request、invalid_param、content_too_long、invalid_card、ended_edit_cap） |
 | `srenautix_notify_pending` | `channel` |
 | `srenautix_notify_callbacks_total` | `channel`、`action`、`outcome` |
 

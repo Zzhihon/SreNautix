@@ -1,3 +1,4 @@
+import type { PermanentReason } from '../../notify/channel.js';
 import type {
   AnswerCallbackQueryParams,
   EditMessageTextParams,
@@ -49,6 +50,40 @@ export class TelegramApiError extends Error {
       this.code === 400 &&
       (this.description.includes('query is too old') || this.description.includes('query ID is invalid'))
     );
+  }
+
+  /** 群不存在或机器人没有发言权限：是配置问题，不是内容问题，按普通拒绝重试并告警。 */
+  get chatProblem(): boolean {
+    const d = this.description.toLowerCase();
+    return (
+      this.migrateToChatId !== null ||
+      d.includes('chat not found') ||
+      d.includes('not enough rights') ||
+      d.includes('have no rights') ||
+      d.includes('chat_write_forbidden') ||
+      d.includes('chat_restricted')
+    );
+  }
+
+  /**
+   * Bot API 以 400 拒绝这条内容本身，原样重试永远不会成功（ADR 0145）。message is not modified、要编辑的消息不存在、
+   * 回调过期与群的问题除外。返回原因，不是永久错误时返回 null。
+   */
+  get permanentReason(): PermanentReason | null {
+    if (this.code !== 400 || this.notModified || this.editTargetGone || this.queryExpired || this.chatProblem) {
+      return null;
+    }
+    const d = this.description.toLowerCase();
+    if (d.includes('entities_too_long') || d.includes('entities too long')) {
+      return 'entities_too_long';
+    }
+    if (d.includes('message is too long') || d.includes('message_too_long')) {
+      return 'message_too_long';
+    }
+    if (d.includes("can't parse entities")) {
+      return 'parse_error';
+    }
+    return 'bad_request';
   }
 
   /** bot token 无效，或另有 webhook / getUpdates 使用者：配置错误，进程应退出。 */

@@ -266,6 +266,13 @@ export class ServerMetrics extends BaseMetrics {
     registers: [this.registry],
   });
 
+  readonly notifyAbandoned = new Counter({
+    name: 'srenautix_notify_abandoned_total',
+    help: '放弃投递的消息内容（渠道永久拒绝且纯文本降级仍失败，或已结束事件的编辑次数用完），按渠道与原因；不计入投递失败',
+    labelNames: ['channel', 'reason'] as const,
+    registers: [this.registry],
+  });
+
   readonly notifyPending = new Gauge({
     name: 'srenautix_notify_pending',
     help: '尚未呈现最新内容的消息数，按渠道',

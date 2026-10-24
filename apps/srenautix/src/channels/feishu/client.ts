@@ -1,3 +1,5 @@
+import type { PermanentReason } from '../../notify/channel.js';
+
 /** 飞书开放平台返回 code ≠ 0，或 HTTP 状态不是 2xx。 */
 export class FeishuApiError extends Error {
   constructor(
@@ -17,6 +19,23 @@ export class FeishuApiError extends Error {
   /** 230011：消息已撤回；230031：超过 14 天不能更新。改为发送新消息。 */
   get editTargetGone(): boolean {
     return this.code === 230011 || this.code === 230031;
+  }
+
+  /**
+   * 飞书拒绝这张卡片的内容本身，原样重试永远不会成功（ADR 0145）：230001 请求参数无效、230025 消息内容超长、
+   * 230099 卡片内容创建失败。返回原因，不是永久错误时返回 null。
+   */
+  get permanentReason(): PermanentReason | null {
+    switch (this.code) {
+      case 230001:
+        return 'invalid_param';
+      case 230025:
+        return 'content_too_long';
+      case 230099:
+        return 'invalid_card';
+      default:
+        return null;
+    }
   }
 
   /** 应用凭证无效（99991663 tenant_access_token 无效，10003 / 10014 app_id 或 app_secret 错误）。 */

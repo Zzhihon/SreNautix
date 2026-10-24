@@ -162,5 +162,22 @@ CREATE TABLE server.notify_external_windows (
 );
 `,
     },
+    {
+      version: 3,
+      name: 'render version, ended edits, abandoned messages',
+      phase: 'expand',
+      // ADR 0145：render_version 记录期望内容由哪一版渲染器产出（旧代码写入的行为 NULL），启动时重新渲染旧版本的待投递内容；
+      // ended 与 ended_edits 限制已结束事件的编辑次数；渠道以永久错误拒绝、纯文本降级仍然失败，或已结束事件编辑次数用完时
+      // 记 abandoned_at 与原因，这一版期望内容不再投递，期望内容变化后清除。只加列，N-1 版本照常运行
+      sql: `
+ALTER TABLE server.notify_messages
+  ADD COLUMN render_version integer,
+  ADD COLUMN ended boolean NOT NULL DEFAULT false,
+  ADD COLUMN ended_edits integer NOT NULL DEFAULT 0,
+  ADD COLUMN abandoned_at timestamptz,
+  ADD COLUMN abandoned_reason text,
+  ADD CONSTRAINT notify_messages_abandoned_check CHECK ((abandoned_at IS NULL) = (abandoned_reason IS NULL));
+`,
+    },
   ],
 };

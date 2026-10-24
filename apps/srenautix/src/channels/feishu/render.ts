@@ -146,6 +146,58 @@ function fit(header: El, parts: Part[], tail: El[]): El {
   }
 }
 
+/** 纯文本降级卡片的正文上限（字符），远低于卡片 JSON 的 30 KB */
+const PLAIN_CARD_CHARS = 6000;
+
+/** feishuMarkdown 的输出 → 纯文本：链接只留文字，去掉加粗与斜体标记，还原转义；行内代码原样保留 */
+function markdownToPlain(md: string): string {
+  return md
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .split('`')
+    .map((s, i) =>
+      i % 2
+        ? s
+        : s
+            .replace(/\*/g, '')
+            .replace(/&#(\d+);|&sim;/g, (_m, n: string | undefined) => (n ? String.fromCharCode(Number(n)) : '~')),
+    )
+    .join('');
+}
+
+function elementText(e: El): string[] {
+  switch (e.tag) {
+    case 'markdown':
+      return [markdownToPlain(String(e.content ?? ''))];
+    case 'div':
+      return [String((e.text as { content?: string } | undefined)?.content ?? '')];
+    case 'collapsible_panel': {
+      const title = (e.header as { title?: { content?: string } } | undefined)?.title?.content;
+      return [...(title ? [title] : []), ...((e.elements as El[] | undefined) ?? []).flatMap(elementText)];
+    }
+    default:
+      // 按钮、表单、分隔线等交互或装饰元素不进入纯文本
+      return [];
+  }
+}
+
+/**
+ * 去掉格式的纯文本降级卡片（ADR 0145）：标题不变，正文的文字合成一个 plain_text，去掉按钮与表单
+ * （卡片更新只能是卡片，不能换成文本消息）。
+ */
+export function plainCard(card: unknown): El {
+  const c = card as { header?: El; body?: { elements?: El[] } };
+  const text = (c.body?.elements ?? [])
+    .flatMap(elementText)
+    .filter((s) => s.trim())
+    .join('\n');
+  return {
+    schema: '2.0',
+    config: { update_multi: true },
+    ...(c.header ? { header: c.header } : {}),
+    body: { elements: [plain(clip(text, PLAIN_CARD_CHARS) || '-')] },
+  };
+}
+
 function writeResults(l: Language, results: readonly ActionResultView[]): El[] {
   if (!results.length) {
     return [];

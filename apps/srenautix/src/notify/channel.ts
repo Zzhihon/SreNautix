@@ -54,12 +54,38 @@ export interface DigestInput {
   consoleUrl: string | null;
 }
 
-/** 渠道投递错误的分类。 */
+/**
+ * 渲染器版本：notify_messages.render_version 记录期望内容由哪一版渲染器产出。渲染结果的规则变化
+ * （例如 Telegram 的实体预算，ADR 0145）时加一；进程启动时把旧版本产出、还没有呈现的期望内容按当前代码重新渲染。
+ * 旧代码写入的行没有版本（NULL），视为旧版本。
+ */
+export const RENDER_VERSION = 1;
+
+/**
+ * 永久错误的原因（srenautix_notify_abandoned_total 的 reason 标签，取值有限）：
+ * entities_too_long、message_too_long、parse_error、bad_request（Telegram 其他 400）、
+ * content_too_long、invalid_card、invalid_param（飞书），以及引擎自己判定的 ended_edit_cap。
+ */
+export type PermanentReason =
+  | 'entities_too_long'
+  | 'message_too_long'
+  | 'parse_error'
+  | 'bad_request'
+  | 'content_too_long'
+  | 'invalid_card'
+  | 'invalid_param';
+
+/**
+ * 渠道投递错误的分类。permanent：渠道拒绝这条内容本身（Telegram 的 400，除了 message is not modified 与要编辑的消息
+ * 不存在；飞书的内容错误），原样重试永远不会成功，先降级为纯文本重试一次，仍然失败就放弃（ADR 0145）。
+ * api：其他拒绝（例如 403），5 分钟后重试。
+ */
 export type DeliveryError =
   | { kind: 'rate_limited'; retryAfterMs: number }
   | { kind: 'transport' }
   | { kind: 'not_modified' }
   | { kind: 'target_gone' }
+  | { kind: 'permanent'; reason: PermanentReason }
   | { kind: 'api' }
   | { kind: 'fatal' };
 
@@ -92,4 +118,9 @@ export interface ChannelAdapter {
   send(chat: ChatTarget, payload: unknown, silent: boolean, dedupKey: string): Promise<string>;
   edit(chat: ChatTarget, externalId: string, payload: unknown): Promise<void>;
   classify(err: unknown): DeliveryError;
+  /**
+   * 去掉实体的纯文本降级：渠道以永久错误拒绝 payload 时用它重试一次。去掉格式与链接，只保留文字
+   * （Telegram 保留键盘；飞书卡片只保留标题与正文文字）；无法降级时返回 null。
+   */
+  plain(payload: unknown): unknown;
 }

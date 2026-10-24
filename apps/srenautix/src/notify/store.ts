@@ -1,6 +1,6 @@
 import type pg from 'pg';
 import { tx } from '../store/pool.js';
-import type { ActionResultView, RegisteredButton } from './channel.js';
+import { RENDER_VERSION, type ActionResultView, type RegisteredButton } from './channel.js';
 import type { ExternalWindowStats } from './external.js';
 import type { ButtonTarget } from './ports.js';
 
@@ -30,6 +30,14 @@ export interface MessageRow {
   firstDeliveredAt: Date | null;
   attempts: number;
   createdAt: Date;
+  /** 产出期望内容的渲染器版本；旧代码写入的行为 null */
+  renderVersion: number | null;
+  /** 期望内容是已结束（恢复或合并）事件的消息 */
+  ended: boolean;
+  /** 事件结束后对这条消息的编辑次数（渠道作出了应答的编辑，不含不可达与限流） */
+  endedEdits: number;
+  abandonedAt: Date | null;
+  abandonedReason: string | null;
 }
 
 interface DbMessage {
@@ -51,6 +59,11 @@ interface DbMessage {
   first_delivered_at: Date | null;
   attempts: number;
   created_at: Date;
+  render_version: number | null;
+  ended: boolean;
+  ended_edits: number;
+  abandoned_at: Date | null;
+  abandoned_reason: string | null;
 }
 
 const toMessage = (r: DbMessage): MessageRow => ({
@@ -72,6 +85,11 @@ const toMessage = (r: DbMessage): MessageRow => ({
   firstDeliveredAt: r.first_delivered_at,
   attempts: r.attempts,
   createdAt: r.created_at,
+  renderVersion: r.render_version,
+  ended: r.ended,
+  endedEdits: r.ended_edits,
+  abandonedAt: r.abandoned_at,
+  abandonedReason: r.abandoned_reason,
 });
 
 export interface DesiredRow {
@@ -86,7 +104,12 @@ export interface DesiredRow {
   payload: unknown;
   hash: string;
   proposalIds: string[];
+  /** 已结束（恢复或合并）事件的消息；省略时为 false */
+  ended?: boolean;
 }
+
+/** 待投递：期望与已呈现不同，且这一版期望内容没有被放弃 */
+const PENDING = 'delivered_hash IS DISTINCT FROM desired_hash AND abandoned_at IS NULL';
 
 export interface ButtonRow {
   shortId: string;
@@ -275,7 +298,10 @@ export class NotifyStore {
     );
   }
 
-  /** 写入期望状态。内容变化时立即进入待投递；silent 与创建时间只在第一次写入时确定。 */
+  /**
+   * 写入期望状态。内容变化时立即进入待投递，并清除对上一版内容的放弃；silent 与创建时间只在第一次写入时确定。
+   * 记录当前渲染器版本；事件重新触发（不再是已结束）时编辑计数清零。
+   */
   async upsertDesired(rows: DesiredRow[], now: Date): Promise<void> {
     if (!rows.length) {
       return;
@@ -284,16 +310,21 @@ export class NotifyStore {
       for (const d of rows) {
         await c.query(
           `INSERT INTO server.notify_messages AS m (channel, chat, kind, subject, incident_id, storm_id, lane, silent,
-             desired_payload, desired_hash, desired_at, proposal_ids, next_attempt_at, created_at)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $11, $11)
+             desired_payload, desired_hash, desired_at, proposal_ids, next_attempt_at, created_at, render_version, ended)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $11, $11, $13, $14)
            ON CONFLICT (channel, chat, kind, subject) DO UPDATE SET
              desired_payload = excluded.desired_payload,
              desired_at = CASE WHEN m.desired_hash IS DISTINCT FROM excluded.desired_hash THEN excluded.desired_at ELSE m.desired_at END,
              next_attempt_at = CASE WHEN m.desired_hash IS DISTINCT FROM excluded.desired_hash THEN excluded.next_attempt_at ELSE m.next_attempt_at END,
+             abandoned_at = CASE WHEN m.desired_hash IS DISTINCT FROM excluded.desired_hash THEN NULL ELSE m.abandoned_at END,
+             abandoned_reason = CASE WHEN m.desired_hash IS DISTINCT FROM excluded.desired_hash THEN NULL ELSE m.abandoned_reason END,
              desired_hash = excluded.desired_hash,
              lane = excluded.lane,
              proposal_ids = excluded.proposal_ids,
-             storm_id = COALESCE(m.storm_id, excluded.storm_id)`,
+             storm_id = COALESCE(m.storm_id, excluded.storm_id),
+             render_version = excluded.render_version,
+             ended = excluded.ended,
+             ended_edits = CASE WHEN excluded.ended THEN m.ended_edits ELSE 0 END`,
           [
             d.channel,
             d.chat,
@@ -307,10 +338,43 @@ export class NotifyStore {
             d.hash,
             now,
             d.proposalIds,
+            RENDER_VERSION,
+            d.ended ?? false,
           ],
         );
       }
     });
+  }
+
+  /** 旧版本渲染器产出、还没有呈现、没有被放弃的期望内容（启动时按当前代码重新渲染） */
+  async staleDesired(renderVersion: number): Promise<MessageRow[]> {
+    const r = await this.pool.query<DbMessage>(
+      `SELECT * FROM server.notify_messages
+        WHERE ${PENDING} AND (render_version IS NULL OR render_version < $1) ORDER BY id`,
+      [renderVersion],
+    );
+    return r.rows.map(toMessage);
+  }
+
+  async storm(id: number): Promise<{ id: number; startedAt: Date } | null> {
+    const r = await this.pool.query<{ id: number; started_at: Date }>(
+      'SELECT id, started_at FROM server.notify_storms WHERE id = $1',
+      [id],
+    );
+    const row = r.rows[0];
+    return row ? { id: row.id, startedAt: row.started_at } : null;
+  }
+
+  /**
+   * 放弃这一版期望内容：以后不再投递，直到期望内容变化。只在期望内容没有被并发更新时生效，返回是否生效。
+   */
+  async abandon(id: number, hash: string, now: Date, reason: string, error: string): Promise<boolean> {
+    const r = await this.pool.query(
+      `UPDATE server.notify_messages SET abandoned_at = $3, abandoned_reason = $4, last_attempt_at = $3, last_error = $5
+        WHERE id = $1 AND desired_hash = $2`,
+      [id, hash, now, reason, error],
+    );
+    return (r.rowCount ?? 0) === 1;
   }
 
   async registerButtons(channel: string, chat: string, buttons: RegisteredButton[], now: Date): Promise<void> {
@@ -326,7 +390,7 @@ export class NotifyStore {
   async pending(channel: string, now: Date, limit: number): Promise<MessageRow[]> {
     const r = await this.pool.query<DbMessage>(
       `SELECT * FROM server.notify_messages
-        WHERE channel = $1 AND delivered_hash IS DISTINCT FROM desired_hash AND next_attempt_at <= $2
+        WHERE channel = $1 AND ${PENDING} AND next_attempt_at <= $2
         ORDER BY ${LANE_ORDER}, next_attempt_at, id LIMIT $3`,
       [channel, now, limit],
     );
@@ -335,19 +399,23 @@ export class NotifyStore {
 
   async pendingCount(channel: string): Promise<number> {
     const r = await this.pool.query<{ n: number }>(
-      'SELECT count(*)::int AS n FROM server.notify_messages WHERE channel = $1 AND delivered_hash IS DISTINCT FROM desired_hash',
+      `SELECT count(*)::int AS n FROM server.notify_messages WHERE channel = $1 AND ${PENDING}`,
       [channel],
     );
     return (r.rows[0] as { n: number }).n;
   }
 
-  /** 记录送达；只在期望内容没有被并发更新时才标记为已呈现。返回是否为第一次送达。 */
-  async markDelivered(id: number, externalId: string, hash: string, now: Date): Promise<boolean> {
+  /**
+   * 记录送达；只在期望内容没有被并发更新时才标记为已呈现。edit 为 true 时这是一次编辑，已结束事件的编辑计数加一。
+   * 返回是否为第一次送达。
+   */
+  async markDelivered(id: number, externalId: string, hash: string, now: Date, edit = false): Promise<boolean> {
     const r = await this.pool.query<{ first: boolean }>(
       `UPDATE server.notify_messages SET external_id = $2, delivered_hash = $3, delivered_at = $4,
-         first_delivered_at = COALESCE(first_delivered_at, $4), last_attempt_at = $4, attempts = 0, last_error = NULL
+         first_delivered_at = COALESCE(first_delivered_at, $4), last_attempt_at = $4, attempts = 0, last_error = NULL,
+         ended_edits = ended_edits + CASE WHEN ended AND $5 THEN 1 ELSE 0 END
        WHERE id = $1 RETURNING (first_delivered_at = $4) AS first`,
-      [id, externalId, hash, now],
+      [id, externalId, hash, now, edit],
     );
     return r.rows[0]?.first ?? false;
   }
@@ -356,10 +424,13 @@ export class NotifyStore {
     await this.pool.query('UPDATE server.notify_messages SET next_attempt_at = $2 WHERE id = $1', [id, at]);
   }
 
-  async markAttempt(id: number, now: Date, next: Date, error: string): Promise<void> {
+  /** 记录一次失败的尝试。edit 为 true 时渠道拒绝了一次编辑，已结束事件的编辑计数加一。 */
+  async markAttempt(id: number, now: Date, next: Date, error: string, edit = false): Promise<void> {
     await this.pool.query(
-      'UPDATE server.notify_messages SET last_attempt_at = $2, next_attempt_at = $3, attempts = attempts + 1, last_error = $4 WHERE id = $1',
-      [id, now, next, error],
+      `UPDATE server.notify_messages SET last_attempt_at = $2, next_attempt_at = $3, attempts = attempts + 1, last_error = $4,
+         ended_edits = ended_edits + CASE WHEN ended AND $5 THEN 1 ELSE 0 END
+       WHERE id = $1`,
+      [id, now, next, error, edit],
     );
   }
 
@@ -376,8 +447,9 @@ export class NotifyStore {
   async backfillDelivered(d: DesiredRow, externalId: string, at: Date): Promise<void> {
     await this.pool.query(
       `INSERT INTO server.notify_messages AS m (channel, chat, kind, subject, incident_id, lane, silent, desired_payload, desired_hash,
-         desired_at, proposal_ids, next_attempt_at, created_at, external_id, delivered_hash, delivered_at, first_delivered_at)
-       VALUES ($1, $2, 'incident', $3, $4, $5, false, $6, $7, $8, $9, $8, $8, $10, $7, $8, $8)
+         desired_at, proposal_ids, next_attempt_at, created_at, external_id, delivered_hash, delivered_at, first_delivered_at,
+         render_version)
+       VALUES ($1, $2, 'incident', $3, $4, $5, false, $6, $7, $8, $9, $8, $8, $10, $7, $8, $8, $11)
        ON CONFLICT (channel, chat, kind, subject) DO UPDATE SET external_id = excluded.external_id,
          delivered_hash = excluded.delivered_hash, delivered_at = excluded.delivered_at,
          first_delivered_at = COALESCE(m.first_delivered_at, excluded.first_delivered_at)`,
@@ -392,6 +464,7 @@ export class NotifyStore {
         at,
         d.proposalIds,
         externalId,
+        RENDER_VERSION,
       ],
     );
   }

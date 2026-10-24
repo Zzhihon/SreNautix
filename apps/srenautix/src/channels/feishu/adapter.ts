@@ -12,7 +12,7 @@ import type { ExternalDigestView } from '../../notify/external.js';
 import type { DesiredIncidentMessage } from '../../notify/ports.js';
 import type { ChannelLimits } from '../../notify/ratelimit.js';
 import { FeishuApiError, FeishuTransportError, type FeishuClient } from './client.js';
-import { renderCard, renderDigestCard, renderExternalDigestCard, type ButtonSigner } from './render.js';
+import { plainCard, renderCard, renderDigestCard, renderExternalDigestCard, type ButtonSigner } from './render.js';
 
 /** 发送请求的 uuid（1 小时内去重）：由消息身份与内容哈希决定，重试不会重复发送，内容变化后的重新发送不被去重。 */
 export function sendUuid(dedupKey: string): string {
@@ -59,6 +59,10 @@ export class FeishuAdapter implements ChannelAdapter {
     await this.client.patchCard(externalId, payload);
   }
 
+  plain(payload: unknown): unknown {
+    return plainCard(payload);
+  }
+
   classify(err: unknown): DeliveryError {
     if (err instanceof FeishuTransportError) {
       return { kind: 'transport' };
@@ -73,7 +77,8 @@ export class FeishuAdapter implements ChannelAdapter {
       if (err.fatal) {
         return { kind: 'fatal' };
       }
-      return { kind: 'api' };
+      const reason = err.permanentReason;
+      return reason ? { kind: 'permanent', reason } : { kind: 'api' };
     }
     return { kind: 'fatal' };
   }

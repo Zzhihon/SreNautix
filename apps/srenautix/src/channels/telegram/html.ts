@@ -39,6 +39,19 @@ export function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+/**
+ * buildHtml 的输出 → 解析后的纯文本（去掉全部标签、还原转义）。文字中的 <、> 与属性中的 > 都已转义，
+ * 剩下的 < 只能是标签的开头。用于永久错误后的纯文本降级（ADR 0145），文字长度与 HTML 解析后的相同。
+ */
+export function htmlToPlain(html: string): string {
+  return html
+    .replace(/<[^>]*>/g, '')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&amp;/g, '&');
+}
+
 function escapeAttr(s: string): string {
   return escapeHtml(s).replace(/"/g, '&quot;');
 }

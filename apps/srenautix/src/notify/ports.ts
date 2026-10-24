@@ -112,6 +112,11 @@ export interface NotifyActions {
 export interface MessageSource {
   /** 需要消息的事件（推送级别、恢复后保留期内、已经有消息的）。 */
   desired(language: 'zh' | 'en'): Promise<DesiredIncidentMessage[]>;
+  /**
+   * 指定事件当前的消息，不论严重度、抑制与恢复后的保留期（已结束的事件用已结束状态的模板）；不存在的事件不返回。
+   * 启动时重新渲染旧渲染器产出的期望内容用（ADR 0145）；不实现时不重新渲染
+   */
+  byIds?(incidentIds: readonly string[], language: 'zh' | 'en'): Promise<DesiredIncidentMessage[]>;
   /** 某条消息第一次成功送达：提议的 TTL 从此开始计算。 */
   delivered(incidentId: string, proposalIds: string[], at: Date): Promise<void>;
   /** 外部上游在 [from, to) 内的汇总统计（ADR 0147）；没有启用外部上游汇总时不实现 */

@@ -13,17 +13,28 @@ import type { ExternalDigestView } from '../../notify/external.js';
 import type { ButtonTarget, DesiredIncidentMessage } from '../../notify/ports.js';
 import { shortId } from '../../notify/shortid.js';
 import { clip, hm, oneLine, publicHttpsUrl, t, ymdhm } from '../../notify/text.js';
-import { buildHtml, MAX_TEXT_UNITS, type Line, type Part } from './html.js';
+import { buildHtml, htmlToPlain, MAX_TEXT_UNITS, type Line, type Part } from './html.js';
 import type { TgButton, TgInlineKeyboard } from './types.js';
 
 /** callback_data 是前缀加 16 个字符的 short id（18 字节，Bot API 上限 64 字节）。 */
 export const CALLBACK_PREFIX = 'b:';
 
-/** 存进 notify_messages.desired_payload 的 Telegram 消息内容：HTML 文本（parse_mode=HTML）与键盘。 */
+/**
+ * 存进 notify_messages.desired_payload 的 Telegram 消息内容：HTML 文本（parse_mode=HTML）与键盘。
+ * 纯文本降级（plainPayload）没有 parse_mode，文字按原样显示。
+ */
 export interface TelegramPayload {
   text: string;
-  parse_mode: 'HTML';
+  parse_mode?: 'HTML';
   reply_markup: TgInlineKeyboard;
+}
+
+/** 去掉实体的纯文本降级（ADR 0145）：文字与键盘不变，不再有格式与链接。已经是纯文本时返回 null。 */
+export function plainPayload(p: TelegramPayload): TelegramPayload | null {
+  if (p.parse_mode !== 'HTML') {
+    return null;
+  }
+  return { text: htmlToPlain(p.text), reply_markup: p.reply_markup };
 }
 
 /** 旧的四段结构（没有段级优先级时）的省略顺序：数字越小越先省略。 */

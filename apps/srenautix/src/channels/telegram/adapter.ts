@@ -11,7 +11,7 @@ import type { ExternalDigestView } from '../../notify/external.js';
 import type { DesiredIncidentMessage } from '../../notify/ports.js';
 import type { ChannelLimits } from '../../notify/ratelimit.js';
 import { TelegramApiError, TelegramTransportError, type TelegramClient } from './client.js';
-import { renderDigest, renderExternalDigest, renderIncident, type TelegramPayload } from './render.js';
+import { plainPayload, renderDigest, renderExternalDigest, renderIncident, type TelegramPayload } from './render.js';
 
 export class TelegramAdapter implements ChannelAdapter {
   readonly channel = 'telegram' as const;
@@ -48,7 +48,7 @@ export class TelegramAdapter implements ChannelAdapter {
     const m = await this.client.sendMessage({
       chat_id: Number(chat.chat),
       text: p.text,
-      parse_mode: p.parse_mode,
+      ...(p.parse_mode ? { parse_mode: p.parse_mode } : {}),
       link_preview_options: { is_disabled: true },
       ...(silent ? { disable_notification: true } : {}),
       ...(p.reply_markup.inline_keyboard.length ? { reply_markup: p.reply_markup } : {}),
@@ -63,10 +63,14 @@ export class TelegramAdapter implements ChannelAdapter {
       chat_id: Number(chat.chat),
       message_id: Number(externalId),
       text: p.text,
-      parse_mode: p.parse_mode,
+      ...(p.parse_mode ? { parse_mode: p.parse_mode } : {}),
       link_preview_options: { is_disabled: true },
       reply_markup: p.reply_markup,
     });
+  }
+
+  plain(payload: unknown): TelegramPayload | null {
+    return plainPayload(payload as TelegramPayload);
   }
 
   classify(err: unknown): DeliveryError {
@@ -86,7 +90,8 @@ export class TelegramAdapter implements ChannelAdapter {
       if (err.fatal || err.migrateToChatId !== null) {
         return { kind: 'fatal' };
       }
-      return { kind: 'api' };
+      const reason = err.permanentReason;
+      return reason ? { kind: 'permanent', reason } : { kind: 'api' };
     }
     return { kind: 'fatal' };
   }

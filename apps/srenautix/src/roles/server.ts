@@ -1068,7 +1068,8 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
         'SELECT source_id, last_received_at FROM server.ingest_sources',
       );
       const fails = await pool.query<{ channel: string; last_error: string }>(
-        'SELECT channel, max(last_error) AS last_error FROM server.notify_messages WHERE last_error IS NOT NULL AND delivered_hash IS DISTINCT FROM desired_hash AND attempts >= 3 GROUP BY channel',
+        // 放弃的消息内容（ADR 0145）不再重试，不算投递失败
+        'SELECT channel, max(last_error) AS last_error FROM server.notify_messages WHERE last_error IS NOT NULL AND delivered_hash IS DISTINCT FROM desired_hash AND abandoned_at IS NULL AND attempts >= 3 GROUP BY channel',
       );
       const restored = await pool.query<{ v: string | null }>(
         "SELECT value #>> '{}' AS v FROM server.system_state WHERE key = 'restored_at'",
