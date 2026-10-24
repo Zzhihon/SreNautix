@@ -3,6 +3,7 @@
 #   Prometheus 与 promtool、Alertmanager、VictoriaMetrics 与 vmalert → $BIN_DIR（加入 PATH，并设为 SRENAUTIX_TEST_BIN）
 #   MinIO（取自按 digest 固定的镜像，静态链接）→ $BIN_DIR/minio（SRENAUTIX_MINIO_BIN）
 #   PostgreSQL 18（PGDG 软件源）→ /usr/lib/postgresql/18/bin（SRENAUTIX_PG_BIN）
+#   PostgreSQL 16、17、18 → SRENAUTIX_PG_BINS（dbstats 的一致性测试与包测试的 input_sql 在每个版本上执行，ADR 0146）
 # 用法：install-test-binaries.sh <BIN_DIR>
 set -euo pipefail
 
@@ -21,6 +22,8 @@ VMUTILS_SHA256=0c6b01fba8ca3149a017ad7713ae65cd2222ba6a64f1e1f8787692cbb5d953c9
 # 与 deploy/helm/srenautix/values.yaml 中 audit.minio.image 相同的镜像
 MINIO_IMAGE=cgr.dev/chainguard/minio@sha256:2915cb406f38ed6ff9634de0a3e4a9423e2dda06a6f1aca18f8c968aa37a01f6
 PG_MAJOR=18
+# dbstats 的一致性测试覆盖的 PostgreSQL 主版本（pg_stat_statements 随 postgresql-<版本> 安装）
+PG_DBSTATS_MAJORS="16 17 18"
 
 fetch() {
   local url=$1 sha=$2 out=$3
@@ -54,6 +57,11 @@ sudo apt-get update -qq
 sudo apt-get install -y -qq postgresql-common
 sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
 sudo apt-get install -y -qq "postgresql-${PG_MAJOR}"
+pg_bins=()
+for v in $PG_DBSTATS_MAJORS; do
+  sudo apt-get install -y -qq "postgresql-${v}"
+  pg_bins+=("/usr/lib/postgresql/${v}/bin")
+done
 
 "$bin_dir/prometheus" --version | head -1
 "$bin_dir/alertmanager" --version | head -1
@@ -65,6 +73,7 @@ if [[ -n "${GITHUB_ENV:-}" ]]; then
     echo "SRENAUTIX_TEST_BIN=$bin_dir"
     echo "SRENAUTIX_MINIO_BIN=$bin_dir/minio"
     echo "SRENAUTIX_PG_BIN=/usr/lib/postgresql/${PG_MAJOR}/bin"
+    echo "SRENAUTIX_PG_BINS=$(IFS=,; echo "${pg_bins[*]}")"
   } >>"$GITHUB_ENV"
   echo "$bin_dir" >>"$GITHUB_PATH"
 fi

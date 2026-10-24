@@ -19,6 +19,24 @@ export {
 } from './metrics/label-profile.js';
 export { LokiAdapter, logqlString, re2Escape, type LokiConfig } from './logs/loki.js';
 export { TempoAdapter, type TempoConfig } from './traces/tempo.js';
+export { PostgresDbstatsAdapter, DbstatsLimitExceeded, type PostgresDbstatsConfig } from './dbstats/postgres.js';
+export {
+  loadSqlParser,
+  normalizeStatement,
+  statementFingerprint,
+  statementFingerprintSync,
+  MAX_STATEMENT_BYTES,
+  type NormalizedStatement,
+} from './dbstats/normalize.js';
+export {
+  startPostgres,
+  postgresBins,
+  dbstatsRoleStatements,
+  runSqlFixture,
+  sqlFixtureKey,
+  type TestPostgres,
+  type SqlFixture,
+} from './testing/postgres.js';
 export {
   ensureBackend,
   backendVersion,

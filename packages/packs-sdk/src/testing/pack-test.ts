@@ -22,9 +22,10 @@ import {
 import { judgeCard } from '../judge/card.js';
 import { denseLabels, type RefData } from '../judge/data.js';
 import type { PackSet } from '../pack/compile.js';
-import type { DbstatsSample } from '@srenautix/contract';
+import type { DbstatsRequest, DbstatsSample } from '@srenautix/contract';
+import { DatasourceError, runSqlFixture, sqlFixtureKey, type TestPostgres } from '@srenautix/integration-sdk';
 import { DbstatsOverlay, LiveDataSource, type EvidenceDataSource } from '../runtime/datasource.js';
-import { FixtureDbstats, type DbstatsOperation } from '../runtime/dbstats.js';
+import { FixtureDbstats, renderDbstats, type DbstatsOperation } from '../runtime/dbstats.js';
 import { domainRows } from '../runtime/domain-rows.js';
 import { DEFAULT_WINDOW, durationSeconds, runCard, type RunCardResult } from '../runtime/run-card.js';
 import { alertFires, primaryCardIndex, rulesForEntry, type AlertRule } from './alert-consistency.js';
@@ -45,7 +46,10 @@ export interface CaseResult {
   kind: 'fixture' | 'nodata' | 'partial_nodata' | 'datasource_error';
   passed: boolean;
   /** 后端 → verdict / display_state / reason.kind */
-  results: Partial<Record<Backend, { verdict: string; display_state: string; reason_kind: string; reason: string }>>;
+  /** 后端 → 结论；postgres 为 input_sql 在真实 PostgreSQL 上的 dbstats（指标仍读 Prometheus） */
+  results: Partial<
+    Record<Backend | 'postgres', { verdict: string; display_state: string; reason_kind: string; reason: string }>
+  >;
   failure: string | null;
 }
 
@@ -55,6 +59,8 @@ export interface PackTestReport {
     maturity: string;
     /** stable 包缺少夹具的卡片 */
     uncovered: string[];
+    /** 只有 input_sql、因为没有 PostgreSQL 而跳过的测试文件（它们的卡不算有夹具）；没有时不出现 */
+    skipped?: string[];
     passed: boolean;
   }>;
   cases: CaseResult[];
@@ -262,7 +268,53 @@ function checkRows(set: PackSet, t: PackTestFile['tests'][number], key: string, 
   return out;
 }
 
+/**
+ * input_sql 的数据源：渲染测试用到的每个 dbstats 请求（卡片、测试与引用的参数），在真实 PostgreSQL 上按请求各采样两次
+ * （工作负载之前与之后）。返回的函数给一个数据源换上这两次采样，其余读取原样转给它
+ */
+async function sqlFixtureSource(
+  set: PackSet,
+  pack: string,
+  tf: PackTestFile,
+  postgres: TestPostgres,
+  resolutions: Map<string, SignalResolution>,
+): Promise<(base: EvidenceDataSource) => EvidenceDataSource> {
+  const requests = new Map<string, DbstatsRequest>();
+  for (const t of tf.tests) {
+    const e = set.cards.get(cardKeyFor(set, pack, t.card))!;
+    for (const r of e.def.refs) {
+      const sk = e.signals[r.name]!;
+      const sig = set.signals.get(sk)!.signal;
+      if (sig.kind !== 'dbstats') {
+        continue;
+      }
+      const alt = resolutions.get(sk)?.alternative ?? sig.alternatives[0]!;
+      const params = { ...(e.def.params ?? {}), ...(t.params ?? {}), ...(r.params ?? {}) } as Record<
+        string,
+        number | string | boolean
+      >;
+      const req = renderDbstats(alt, params);
+      requests.set(sqlFixtureKey(req), req);
+    }
+  }
+  const samples = await runSqlFixture(postgres, tf.input_sql!, [...requests.values()]);
+  const id = `postgres-${postgres.major}`;
+  return (base) =>
+    new DbstatsOverlay(base, id, async (_entity, req) => {
+      const s = samples.get(sqlFixtureKey(req));
+      if (!s) {
+        throw new DatasourceError(id, `input_sql 没有采样请求 ${JSON.stringify(req)}`);
+      }
+      return s;
+    });
+}
+
 export interface PackTestOptions {
+  /**
+   * 测试用的 PostgreSQL（startPostgres，预加载 pg_stat_statements）：给出时带 input_sql 的测试文件另在它上面执行一遍，
+   * 结论记在 results.postgres
+   */
+  postgres?: TestPostgres;
   set: PackSet;
   /** 只测这些包；不填时测全部启用的包 */
   packs?: string[];
@@ -285,8 +337,15 @@ export async function runPackTests(opts: PackTestOptions): Promise<PackTestRepor
     // 每张卡最近一次非无法判定的夹具结果，供自动测试变换
     const captured = new Map<string, RunCardResult>();
 
+    const skipped: string[] = [];
     for (const [file, tf] of Object.entries(pack.content.tests)) {
       const where = `${pack.name}/tests/${file}`;
+      // 只有 input_sql 的夹具文件需要 PostgreSQL；没有时跳过并在报告中列出
+      const sqlOnly = !!tf.input_sql && !tf.input_dbstats?.length;
+      if (sqlOnly && !opts.postgres) {
+        skipped.push(file);
+        continue;
+      }
       const fx = expandFixtures(engine, tf, where);
       const interval = durationSeconds(tf.interval);
       const env = await startEnv(fx, interval, false);
@@ -305,6 +364,14 @@ export async function runPackTests(opts: PackTestOptions): Promise<PackTestRepor
           prometheus: await resolveAll(set, used, env.ds.prometheus, engine, end, clock),
           'victoria-metrics': await resolveAll(set, used, env.ds['victoria-metrics'], engine, end, clock),
         };
+        // input_sql（契约 2.28.0）：在真实 PostgreSQL 上执行夹具，测试的 dbstats 引用改读这两次采样
+        // 只有 input_sql 时两个后端的 dbstats 都读 PostgreSQL 的采样；同时有 input_dbstats 时另在 PostgreSQL 上执行一遍
+        const pgSource =
+          tf.input_sql && opts.postgres
+            ? await sqlFixtureSource(set, pack.name, tf, opts.postgres, res.prometheus)
+            : null;
+        const dsFor = (b: Backend) => (sqlOnly && pgSource ? pgSource(env.ds[b]) : env.ds[b]);
+        const pgds = pgSource && !sqlOnly ? pgSource(env.ds.prometheus) : null;
         for (const t of tf.tests) {
           const key = cardKeyFor(set, pack.name, t.card);
           covered.add(key);
@@ -325,7 +392,7 @@ export async function runPackTests(opts: PackTestOptions): Promise<PackTestRepor
               entity,
               anchor,
               now: Number.MAX_SAFE_INTEGER,
-              ds: env.ds[b],
+              ds: dsFor(b),
               engine,
               resolutions: res[b],
               clock,
@@ -381,6 +448,30 @@ export async function runPackTests(opts: PackTestOptions): Promise<PackTestRepor
                 );
               }
               consistency.checked++;
+            }
+          }
+          if (pgds) {
+            const r = await runCard({
+              set,
+              card: key,
+              entity,
+              anchor,
+              now: Number.MAX_SAFE_INTEGER,
+              ds: pgds,
+              engine,
+              resolutions: res.prometheus,
+              clock,
+              ...(t.params ? { params: t.params as Record<string, number | string | boolean> } : {}),
+            });
+            results.postgres = summary(r);
+            if (r.verdict !== t.expect.verdict) {
+              failures.push(`postgres：期望 ${t.expect.verdict}，实际 ${r.verdict}（${r.reason.text}）`);
+            }
+            if (t.expect.display_state && r.display_state !== t.expect.display_state) {
+              failures.push(`postgres：期望显示状态 ${t.expect.display_state}，实际 ${r.display_state}`);
+            }
+            if (t.rows) {
+              failures.push(...checkRows(set, t, key, r).map((f) => `postgres：${f}`));
             }
           }
           const p = results.prometheus!;
@@ -537,6 +628,7 @@ export async function runPackTests(opts: PackTestOptions): Promise<PackTestRepor
       name: pack.name,
       maturity,
       uncovered,
+      ...(skipped.length ? { skipped } : {}),
       passed: !uncovered.length && packCases.every((c) => c.passed),
     });
   }

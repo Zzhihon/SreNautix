@@ -510,6 +510,7 @@ tests:
 - 告警目录条目的 `primary_card`（`<链>/<卡>` 或 `<包>/<链>/<卡>`）是与告警条件对应的卡，告警触发时它应当判为异常。`lint` 检查卡片存在、`applies_to` 包含条目的实体 kind、卡片所在的证据链在条目的 `chains` 中。`test --alert-rules <规则文件>` 读入告警规则（Prometheus 规则文件、PrometheusRule 或 VMRule，同名告警按条目的 `match_labels` 选规则），主卡的每个夹具测试在同一份夹具上再求一次告警规则：告警在卡片窗口内触发（满足 `for`）当且仅当主卡判为异常，否则测试失败。阈值因此只在告警规则里写一次，两边漂移时 CI 失败。没有现成的卡判断告警条件时，用 `generateConditionPack` 从规则生成告警条件卡（查询与规则表达式相同、判定与 `for` 相同），作为条目的主卡（ADR 0109）。
 - 测试的 `params` 字段覆盖卡片参数，用于验证阈值行为。
 - dbstats 夹具写在 `input_dbstats`：每个操作若干次采样 `{offset, rows}`，读取时取不晚于判定窗口结束时刻的最近一次采样与它的前一次，过滤、排序与 `limit` 按适配器的语义作用在夹具的行上。没有 dbstats 夹具的操作读取时报数据源错误，无数据测试因此覆盖 dbstats 引用。
+- `input_sql` 在真实 PostgreSQL 上执行 dbstats 夹具：重建库（默认 `app`）并执行 `setup`，重置语句统计，以只读角色按测试用到的每个 dbstats 请求采样一次，执行 `workload`，再采样一次。`srenautix pack test --postgres <二进制目录>` 启动一个预加载 `pg_stat_statements` 的实例；只有 `input_sql` 的文件两个后端的 dbstats 都读这两次采样，同时有 `input_dbstats` 时另在 PostgreSQL 上执行一遍（结论记在 `results.postgres`）。没有 `--postgres` 时只有 `input_sql` 的文件跳过，并在报告中列出。断言写份额、比例这类与执行速度无关的量。
 - 测试写 `rows: <领域>/<诊断卡或份额卡 id>` 时，同时检查它按行得到的实体：`expect.entities` 中每个 `key` 必须出现，`hit` 为诊断卡的 `when`，`share` 为份额卡的份额（相对误差 1e-3）。
 - 告警目录条目可以写 `title`（`zh-CN` 与 `en`），即告警的可读症状，例如“worker 没有可用副本”。通知的标题与问题陈述用它代替告警名，没有时显示告警名。
 

@@ -25,12 +25,15 @@
   "dependencies": {
     "@srenautix/contract": "workspace:*",
     "adm-zip": "0.6.1",
+    "libpg-query": "18.2.0",
     "openai": "7.39.0",
+    "pg": "8.23.1",
     "tar": "7.5.22",
     "undici": "8.12.3",
     "yaml": "2.9.1"
   },
   "devDependencies": {
-    "@types/adm-zip": "0.6.0"
+    "@types/adm-zip": "0.6.0",
+    "@types/pg": "8.23.1"
   }
 }

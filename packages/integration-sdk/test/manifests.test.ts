@@ -30,6 +30,7 @@ const CORE = [
   'qwen-vllm',
   'oidc',
   'local-admin',
+  'postgres-stats',
 ];
 
 const CANDIDATES = [

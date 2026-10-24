@@ -1,0 +1,47 @@
+api_version: srenautix.io/integration/v1
+id: postgres-stats
+display_name: PostgreSQL 统计视图
+category: dbstats
+direction: read
+tier: core
+contract: dbstats/v1
+capabilities:
+  - { name: dbstats.statements_top, stability: beta }
+  - { name: dbstats.statements_text, stability: beta }
+  - { name: dbstats.tables_top, stability: beta }
+  - { name: dbstats.indexes_usage, stability: beta }
+  - { name: dbstats.settings_get, stability: beta }
+  - { name: dbstats.activity_summary, stability: beta }
+  - { name: dbstats.locks_summary, stability: beta }
+# 一致性测试（packages/integration-sdk/test/conformance-dbstats.test.ts）在真实 PostgreSQL 进程上执行，版本由
+# SRENAUTIX_PG_BINS 给出；这里列出实际跑过的版本
+tested_versions:
+  - { backend: postgresql, versions: ['14.19', '18.3'], verification: testcontainers }
+config_schema:
+  type: object
+  additionalProperties: false
+  required: [host, database, user, password_file]
+  properties:
+    host: { type: string, description: 主库的读写入口（统计只在主库上反映业务语句），例如 CNPG 的 <cluster>-rw }
+    port: { type: integer, minimum: 1, maximum: 65535, default: 5432 }
+    database: { type: string, description: 连接的库；pg_stat_statements 扩展装在这个库里 }
+    user: { type: string, description: 只授予 pg_read_all_stats 与 pg_read_all_settings 的角色，例如 srenautix_stats }
+    password_file: { type: string, x-srenautix-secret-ref: true }
+    ssl:
+      oneOf:
+        - { type: boolean }
+        - type: object
+          additionalProperties: false
+          properties:
+            ca_file: { type: string }
+            servername: { type: string }
+    statement_timeout_ms: { type: integer, minimum: 100, maximum: 3000, default: 3000 }
+    hourly_limit: { type: integer, minimum: 1, maximum: 60, default: 60 }
+    text_hourly_limit: { type: integer, minimum: 0, maximum: 6, default: 6 }
+required_scopes:
+  - postgres:pg_read_all_stats
+  - postgres:pg_read_all_settings
+  - postgres:CONNECTION LIMIT 2
+  - postgres:default_transaction_read_only = on
+  - postgres:no SELECT on any business table
+owner: srenautix-maintainers

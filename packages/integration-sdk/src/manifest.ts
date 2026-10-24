@@ -32,6 +32,7 @@ const CONTRACT_PREFIX: Record<string, string[]> = {
   'identity/v1': ['identity'],
   'model/v1': ['model'],
   'gateway/v1': ['execute'],
+  'dbstats/v1': ['dbstats'],
 };
 
 const SECRET_NAME = /(token|password|secret|private_key|api_key|apikey|credential|encrypt_key)/i;

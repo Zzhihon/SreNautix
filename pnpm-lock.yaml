@@ -206,9 +206,15 @@ importers:
       adm-zip:
         specifier: 0.6.1
         version: 0.6.1
+      libpg-query:
+        specifier: 18.2.0
+        version: 18.2.0
       openai:
         specifier: 7.39.0
         version: 7.39.0(@aws-sdk/credential-provider-node@3.972.86)(@smithy/signature-v4@5.7.4)(undici@8.12.3)(ws@8.22.0)(zod@4.6.7)
+      pg:
+        specifier: 8.23.1
+        version: 8.23.1
       tar:
         specifier: 7.5.22
         version: 7.5.22
@@ -222,6 +228,9 @@ importers:
       '@types/adm-zip':
         specifier: 0.6.0
         version: 0.6.0
+      '@types/pg':
+        specifier: 8.23.1
+        version: 8.23.1
 
   packages/packs-sdk:
     dependencies:
@@ -1227,6 +1236,9 @@ packages:
 
   '@petamoriken/float16@3.9.3':
     resolution: {integrity: sha512-8awtpHXCx/bNpFt4mt2xdkgtgVvKqty8VbjHI/WWWQuEw+KLzFot3f4+LkQY9YmOtq7A5GdOnqoIC8Pdygjk2g==}
+
+  '@pgsql/types@18.0.0':
+    resolution: {integrity: sha512-jtAY4JU7jdVYZ/Vv3zlZqVP+FRWZokyCLKPPCnAApiaJAElpyyiMC3HRiquBu29kSrVs+rkqZD50SUIb/zyEGw==}
 
   '@pinojs/redact@0.4.0':
     resolution: {integrity: sha512-k2ENnmBugE/rzQfEcdWHcCY+/FM3VLzH9cYEsbdsoqrvzAKRhUZeRNhAZvB8OitQJ1TBed3yqWtdjzS6wJKBwg==}
@@ -3606,6 +3618,9 @@ packages:
   levn@0.4.1:
     resolution: {integrity: sha512-+bT2uH4E5LGE7h/n3evcS/sQlJXCpIp6ym8OWJ5eV6+67Dsql/LaaT7qJBAt2rzfoa/5QBGBhxDix1dMt2kQKQ==}
     engines: {node: '>= 0.8.0'}
+
+  libpg-query@18.2.0:
+    resolution: {integrity: sha512-xoNEjLosxCZsDIP9DXjy9/m3g3uc3trfSg2G3hm2CEzqC/DVorogLy7sKOMxPLDRffr2eibbF7klx0ySOPjB6Q==}
 
   light-my-request@6.8.0:
     resolution: {integrity: sha512-5Q8PjoSEdtGIB8fikZsTem5vgRo4F2mR6vUKTDW/H1g6MtAt8e3duQbg/QxL5yzg6BZhor2KOUm3hhWMWLTZwg==}
@@ -6253,6 +6268,8 @@ snapshots:
 
   '@petamoriken/float16@3.9.3': {}
 
+  '@pgsql/types@18.0.0': {}
+
   '@pinojs/redact@0.4.0': {}
 
   '@playwright/test@1.64.1':
@@ -8786,6 +8803,10 @@ snapshots:
     dependencies:
       prelude-ls: 1.2.1
       type-check: 0.4.0
+
+  libpg-query@18.2.0:
+    dependencies:
+      '@pgsql/types': 18.0.0
 
   light-my-request@6.8.0:
     dependencies:

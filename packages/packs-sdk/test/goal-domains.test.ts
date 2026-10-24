@@ -3,7 +3,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { DbstatsRequest, DbstatsSample, RepositoryLayout } from '@srenautix/contract';
-import { backendsDir } from '@srenautix/integration-sdk';
+import { backendsDir, postgresBins, startPostgres } from '@srenautix/integration-sdk';
 import { afterAll, describe, expect, it } from 'vitest';
 import { PackLintError } from '../src/cel/errors.js';
 import { compilePackSet } from '../src/pack/compile.js';
@@ -431,6 +431,55 @@ describe('dbstats 夹具的包测试', () => {
     const failed = report.cases.filter((c) => !c.passed);
     expect(failed.map((c) => c.name)).toEqual(['一条语句占执行时间的 91%']);
     expect(failed[0]!.failure).toMatch(/app\/2：期望 when 为 true/);
+  });
+});
+
+// 真实 PostgreSQL 上的夹具：一条重查询与一条轻查询，重查询占执行时间的绝大部分
+const SQL_TESTS = `api_version: srenautix.io/pack-test/v1
+interval: 1m
+input_sql:
+  setup:
+    - CREATE TABLE events (id bigint, v int)
+    - INSERT INTO events SELECT g, g % 7 FROM generate_series(1, 200000) g
+  workload:
+    - { sql: 'SELECT count(*) FROM events WHERE v = 3', repeat: 15 }
+    - { sql: 'SELECT 1', repeat: 15 }
+tests:
+  - name: 重查询占执行时间的绝大部分
+    eval_time: 10m
+    card: checks/statement-share
+    entity: { kind: Cluster, namespace: shop, name: shop-pg }
+    rows: database/statement-share
+    expect: { verdict: abnormal, entities: [] }
+  - name: 份额上限调到 1 之后为正常
+    eval_time: 10m
+    card: checks/statement-share
+    entity: { kind: Cluster, namespace: shop, name: shop-pg }
+    params: { min_share: 1.0 }
+    expect: { verdict: normal }
+`;
+
+describe('input_sql：夹具在真实 PostgreSQL 上执行', () => {
+  const bins = postgresBins();
+
+  it('没有 PostgreSQL 时只有 input_sql 的文件跳过并在报告中列出', async () => {
+    const set = await compile({ tests: SQL_TESTS });
+    const report = await runPackTests({ set, packs: ['dbx'] });
+    expect(report.packs[0]!.skipped).toEqual(['dbstats.yaml']);
+    expect(report.cases.filter((c) => c.kind === 'fixture')).toEqual([]);
+  });
+
+  it.each(bins)('PostgreSQL（%s）', async (bin) => {
+    const pg = await startPostgres(bin);
+    try {
+      const set = await compile({ tests: SQL_TESTS });
+      const report = await runPackTests({ set, packs: ['dbx'], postgres: pg });
+      expect(report.cases.filter((c) => !c.passed)).toEqual([]);
+      expect(report.cases.filter((c) => c.kind === 'fixture')).toHaveLength(2);
+      expect(report.packs[0]!.skipped).toBeUndefined();
+    } finally {
+      await pg.stop();
+    }
   });
 });
 

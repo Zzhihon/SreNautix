@@ -11,6 +11,7 @@ import {
   loadPromqlEngine,
   LokiAdapter,
   PrometheusApiAdapter,
+  startPostgres,
   type Dialect,
 } from '@srenautix/integration-sdk';
 import { parse } from 'yaml';
@@ -36,7 +37,8 @@ const USAGE = `用法：srenautix pack <命令> [选项]
   test     在 Prometheus 与 VictoriaMetrics 上执行夹具与自动测试；--replay 改为在 tests/replay/*.json 快照上执行；
            --test <包名> 只执行这些包的测试（其余包仍然加载，供跨包引用的证据链编译），可重复；
            --alert-rules <文件> 告警规则文件（Prometheus 规则、PrometheusRule 或 VMRule），可重复：
-           告警目录条目的主卡的夹具测试同时求告警规则，告警在卡片窗口内触发与主卡判为异常必须一致
+           告警目录条目的主卡的夹具测试同时求告警规则，告警在卡片窗口内触发与主卡判为异常必须一致；
+           --postgres <二进制目录> 启动一个预加载 pg_stat_statements 的 PostgreSQL，带 input_sql 的夹具另在它上面执行
   record   在真实数据源上执行卡片并录制查询邻域快照
   doctor   覆盖情况：已解析的信号、14 天内未映射的告警名、没有证据链的组件
 
@@ -142,6 +144,7 @@ export async function runPackCli(
       out: { type: 'string' },
       json: { type: 'boolean' },
       'alert-rules': { type: 'string', multiple: true },
+      postgres: { type: 'string' },
     },
     strict: true,
   });
@@ -215,11 +218,19 @@ export async function runPackCli(
         return failed ? 1 : 0;
       }
       const rules = v['alert-rules'] as string[] | undefined;
-      const report = await runPackTests({
-        set,
-        ...(tested ? { packs: tested } : {}),
-        ...(rules ? { alertRules: loadAlertRules(rules, await loadPromqlEngine()) } : {}),
-      });
+      const pgBin = v.postgres as string | undefined;
+      const postgres = pgBin ? await startPostgres(resolve(pgBin)) : null;
+      let report;
+      try {
+        report = await runPackTests({
+          set,
+          ...(tested ? { packs: tested } : {}),
+          ...(rules ? { alertRules: loadAlertRules(rules, await loadPromqlEngine()) } : {}),
+          ...(postgres ? { postgres } : {}),
+        });
+      } finally {
+        await postgres?.stop();
+      }
       if (v.json) {
         io.out(JSON.stringify(report, null, 2) + '\n');
       } else {
@@ -228,7 +239,7 @@ export async function runPackCli(
         }
         for (const p of report.packs) {
           io.out(
-            `${p.passed ? '通过' : '失败'}  ${p.name}（${p.maturity}）${p.uncovered.length ? `  缺少夹具：${p.uncovered.join('、')}` : ''}\n`,
+            `${p.passed ? '通过' : '失败'}  ${p.name}（${p.maturity}）${p.uncovered.length ? `  缺少夹具：${p.uncovered.join('、')}` : ''}${p.skipped?.length ? `  没有 --postgres，跳过：${p.skipped.join('、')}` : ''}\n`,
           );
         }
         io.out(`${report.cases.filter((c) => c.passed).length}/${report.cases.length} 个用例通过\n`);
