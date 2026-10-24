@@ -1,5 +1,11 @@
 import type pg from 'pg';
-import type { DialectProfile, EvidenceResult, ResearchManifest, ResearchOutput } from '@srenautix/contract';
+import type {
+  DialectProfile,
+  EvidenceResult,
+  OptimizationOutput,
+  ResearchManifest,
+  ResearchOutput,
+} from '@srenautix/contract';
 import { CONTRACT_VERSION } from '@srenautix/contract';
 import type { Calibration } from '../llm/budget.js';
 import type { LlmCallRecord } from '../llm/session.js';
@@ -13,12 +19,42 @@ import type { PreviousRun } from './types.js';
 
 export interface RunStart {
   runId: string;
+  /** 目标运行（subject_type=goal）为目标 id */
   incidentId: string;
+  /** 目标运行为目标 revision */
   incidentVersion: number;
   clusterId: string;
   reason: string;
+  /** 目标运行为空串（目标没有阶段 A 的证据指纹） */
   evidenceFingerprint: string;
+  subjectType?: 'incident' | 'goal';
 }
+
+/** 模型用量的用途（ADR 0146 §5.3）：每日用量按用途分别记账 */
+export type UsagePurpose = 'research' | 'optimization' | 'eval';
+
+/** 目标运行的结束（ADR 0146 §2.3）：输出交给 server（POST /v1/research/tasks/{run_id}/optimization），worker 不发事件 */
+export interface GoalRunFinish {
+  runId: string;
+  state: 'completed' | 'failed';
+  stopReason: string | null;
+  output: OptimizationOutput | null;
+  error: { kind: string; message: string } | null;
+  input: number;
+  output_tokens: number;
+  cost: number;
+  currency: string;
+  steps: Array<{ state: string; started_at: string; finished_at: string | null }>;
+  checkCards: Array<{ ref: string; hypothesisId: string; judgedBy: 'rule' | 'model'; result: EvidenceResult }>;
+}
+
+const USAGE_SQL = `INSERT INTO worker.daily_usage (day, tokens, cost) VALUES ((now() AT TIME ZONE 'UTC')::date, $1, $2)
+         ON CONFLICT (day) DO UPDATE SET tokens = worker.daily_usage.tokens + excluded.tokens, cost = worker.daily_usage.cost + excluded.cost, updated_at = now()`;
+
+const PURPOSE_USAGE_SQL = `INSERT INTO worker.daily_usage_purpose (day, purpose, tokens, cost)
+         VALUES ((now() AT TIME ZONE 'UTC')::date, $1, $2, $3)
+         ON CONFLICT (day, purpose) DO UPDATE SET tokens = worker.daily_usage_purpose.tokens + excluded.tokens,
+           cost = worker.daily_usage_purpose.cost + excluded.cost, updated_at = now()`;
 
 export interface RunFinish {
   runId: string;
@@ -50,10 +86,19 @@ export class WorkerStore {
 
   async startRun(s: RunStart): Promise<void> {
     await this.pool.query(
-      `INSERT INTO worker.research_runs (run_id, incident_id, incident_version, cluster_id, reason, state, evidence_fingerprint, started_at)
-       VALUES ($1, $2, $3, $4, $5, 'hypothesize', $6, now())
+      `INSERT INTO worker.research_runs (run_id, incident_id, incident_version, cluster_id, reason, state, evidence_fingerprint,
+         subject_type, started_at)
+       VALUES ($1, $2, $3, $4, $5, 'hypothesize', $6, $7, now())
        ON CONFLICT (run_id) DO UPDATE SET state = 'hypothesize', started_at = now(), finished_at = NULL, output = NULL, error = NULL`,
-      [s.runId, s.incidentId, s.incidentVersion, s.clusterId, s.reason, s.evidenceFingerprint],
+      [
+        s.runId,
+        s.incidentId,
+        s.incidentVersion,
+        s.clusterId,
+        s.reason,
+        s.evidenceFingerprint,
+        s.subjectType ?? 'incident',
+      ],
     );
     // 同一个任务的重试（租约过期后重新认领）从头开始：清掉上一次尝试的调用记录
     await this.pool.query('DELETE FROM worker.llm_calls WHERE run_id = $1', [s.runId]);
@@ -148,20 +193,55 @@ export class WorkerStore {
           JSON.stringify(f.manifest),
         ]);
       }
-      await c.query(
-        `INSERT INTO worker.daily_usage (day, tokens, cost) VALUES ((now() AT TIME ZONE 'UTC')::date, $1, $2)
-         ON CONFLICT (day) DO UPDATE SET tokens = worker.daily_usage.tokens + excluded.tokens, cost = worker.daily_usage.cost + excluded.cost, updated_at = now()`,
-        [f.input + f.output_tokens, f.cost],
-      );
+      await c.query(USAGE_SQL, [f.input + f.output_tokens, f.cost]);
+      await c.query(PURPOSE_USAGE_SQL, ['research', f.input + f.output_tokens, f.cost]);
       await appendEvents(c, 'worker', 'worker', CONTRACT_VERSION, f.events);
     });
   }
 
-  async dailyTokens(): Promise<number> {
-    const r = await this.pool.query<{ tokens: number }>(
-      "SELECT tokens FROM worker.daily_usage WHERE day = (now() AT TIME ZONE 'UTC')::date",
-    );
-    return r.rows[0]?.tokens ?? 0;
+  /** 结束一次目标运行：结果、检查卡与每日用量（合计与 optimization 用途）在同一个事务里 */
+  async finishGoalRun(f: GoalRunFinish): Promise<void> {
+    await tx(this.pool, async (c) => {
+      await c.query(
+        `UPDATE worker.research_runs SET state = $2, stop_reason = $3, output = $4, error = $5, summary = $6,
+           input_tokens = $7, output_tokens = $8, cost = $9, currency = $10, steps = $11, finished_at = now()
+         WHERE run_id = $1`,
+        [
+          f.runId,
+          f.state,
+          f.stopReason,
+          f.output ? JSON.stringify(f.output) : null,
+          f.error ? JSON.stringify(f.error) : null,
+          f.output?.summary ?? null,
+          f.input,
+          f.output_tokens,
+          f.cost,
+          f.currency,
+          JSON.stringify(f.steps),
+        ],
+      );
+      for (const k of f.checkCards) {
+        await c.query(
+          'INSERT INTO worker.evidence_snapshots (run_id, ref, hypothesis_id, judged_by, result) VALUES ($1, $2, $3, $4, $5)',
+          [f.runId, k.ref, k.hypothesisId, k.judgedBy, JSON.stringify(k.result)],
+        );
+      }
+      await c.query(USAGE_SQL, [f.input + f.output_tokens, f.cost]);
+      await c.query(PURPOSE_USAGE_SQL, ['optimization', f.input + f.output_tokens, f.cost]);
+    });
+  }
+
+  /** 当日（UTC）的 token 用量：不给出用途时为全部用途的合计 */
+  async dailyTokens(purpose?: UsagePurpose): Promise<number> {
+    const r = purpose
+      ? await this.pool.query<{ tokens: number }>(
+          "SELECT tokens FROM worker.daily_usage_purpose WHERE day = (now() AT TIME ZONE 'UTC')::date AND purpose = $1",
+          [purpose],
+        )
+      : await this.pool.query<{ tokens: number }>(
+          "SELECT tokens FROM worker.daily_usage WHERE day = (now() AT TIME ZONE 'UTC')::date",
+        );
+    return Number(r.rows[0]?.tokens ?? 0);
   }
 
   /** 同一事件最近一次完成的研判（指纹门控与增量研判） */
@@ -174,7 +254,8 @@ export class WorkerStore {
       output: ResearchOutput;
     }>(
       `SELECT run_id, evidence_fingerprint, incident_version, finished_at, output FROM worker.research_runs
-        WHERE incident_id = $1 AND state = 'completed' AND output IS NOT NULL ORDER BY finished_at DESC LIMIT 1`,
+        WHERE incident_id = $1 AND subject_type = 'incident' AND state = 'completed' AND output IS NOT NULL
+        ORDER BY finished_at DESC LIMIT 1`,
       [incidentId],
     );
     const row = r.rows[0];
@@ -347,7 +428,8 @@ export class WorkerStore {
                                  AND output->'conclusion'->>'hypothesis_id' IS NOT NULL
                                  AND jsonb_array_length(output->'hypotheses') > 1)::int AS untested,
               count(*) FILTER (WHERE jsonb_array_length(output->'next_checks') = 0)::int AS zero
-         FROM worker.research_runs WHERE state = 'completed' AND output IS NOT NULL AND NOT still_consistent
+         FROM worker.research_runs WHERE subject_type = 'incident' AND state = 'completed' AND output IS NOT NULL
+          AND NOT still_consistent
           AND finished_at > now() - interval '7 days'`,
     );
     const row = r.rows[0] as { total: number; untested: number; zero: number };

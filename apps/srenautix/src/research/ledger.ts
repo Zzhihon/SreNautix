@@ -27,6 +27,8 @@ export interface LedgerEntry {
   parentId: string | null;
   rootComponent: string;
   mechanism: string;
+  /** 假设显式给出的症状类型（主动优化，ADR 0146 §2.3）；事件研判没有，症状类型只从机制文字归出 */
+  symptoms?: readonly string[];
   supporting: string[];
   refuting: string[];
   status: LedgerStatus;
@@ -50,6 +52,8 @@ export interface ModelHypothesis {
   refuting: string[];
   /** 假设所解释的对象（LedgerEntry.group）；事件研判没有 */
   group?: string;
+  /** 机制预示的症状类型（LedgerEntry.symptoms）；事件研判没有 */
+  symptoms?: readonly string[];
 }
 
 /**
@@ -236,6 +240,7 @@ export class Ledger {
         parentId: h.parent_id && h.parent_id !== h.id ? h.parent_id : null,
         rootComponent: root,
         mechanism: h.mechanism,
+        ...(h.symptoms ? { symptoms: h.symptoms } : {}),
         supporting: keep(h.supporting, '支持'),
         refuting: keep(h.refuting, '反驳'),
         status: kept ? kept.status : 'pending',
@@ -395,7 +400,7 @@ export class Ledger {
     if (c.check === null) {
       return { related: true, basis: '检查未知' };
     }
-    return targets(c.check, e.mechanism, this.supportDefinitions(e), this.frame.rules);
+    return targets(c.check, e.mechanism, this.supportDefinitions(e), this.frame.rules, e.symptoms);
   }
 
   /** 针对假设、并且检验了它的机制的检查卡 */

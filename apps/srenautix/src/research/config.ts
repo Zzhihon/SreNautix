@@ -26,7 +26,8 @@ import { DEFAULT_LIMITS, type ResearchLimits } from './controller.js';
 //     egress: { categories: [metrics, logs, traces, events, topology, changes, alerts, knowledge, sql, code] }
 //     probe_on_start: true
 //     routes: [ … 与 eval 配置相同 … ]      # 每条路由可选 model_class 与 timeouts: { first_token, idle, total }（ADR 0098）
-//   budget: { daily_tokens: 15000000, daily_warn_ratio: 0.8, on_exhausted: critical_only, per_research_input_tokens: 150000 }
+//   budget: { daily_tokens: 15000000, daily_warn_ratio: 0.8, on_exhausted: critical_only, per_research_input_tokens: 150000,
+//             purposes: { optimization: { daily_tokens: 3000000 } } }   # 主动优化的每日用量上限（ADR 0146 §5.3）
 //   research: { deadline: 8m, max_steps: 3, checks_per_step: 3, tool_calls: 12 }
 //   mcp: [ … 只读 MCP 服务器与工具白名单 … ]
 
@@ -128,6 +129,15 @@ export const workerConfigSchema = z
         daily_warn_ratio: z.number().min(0.1).max(1).default(0.8),
         on_exhausted: z.enum(['critical_only', 'stage_a_only']).default('critical_only'),
         per_research_input_tokens: z.number().int().min(1000).default(DEFAULT_BUDGET.perResearchInputTokens),
+        purposes: z
+          .object({
+            optimization: z
+              .object({ daily_tokens: z.number().int().min(0) })
+              .strict()
+              .optional(),
+          })
+          .strict()
+          .default({}),
       })
       .strict(),
     research: z
@@ -223,6 +233,8 @@ export function resolveWorkerConfig(raw: WorkerConfigRaw): WorkerConfig {
       dailyWarnRatio: raw.budget.daily_warn_ratio,
       onExhausted: raw.budget.on_exhausted,
       perResearchInputTokens: raw.budget.per_research_input_tokens,
+      // 没有配置时主动优化的每日用量为 0：worker 不运行目标任务
+      optimizationDailyTokens: raw.budget.purposes.optimization?.daily_tokens ?? 0,
     },
     limits: {
       ...DEFAULT_LIMITS,

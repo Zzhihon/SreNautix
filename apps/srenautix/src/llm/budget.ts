@@ -112,6 +112,8 @@ export interface BudgetConfig {
   dailyWarnRatio: number;
   /** 达到上限后的行为：critical_only 只有 critical 进入阶段 B；stage_a_only 全部只出阶段 A */
   onExhausted: 'critical_only' | 'stage_a_only';
+  /** 主动优化用途的每日上限（budget.purposes.optimization.daily_tokens，ADR 0146 §5.3）；0 或没有时不运行目标任务 */
+  optimizationDailyTokens?: number;
 }
 
 export const DEFAULT_BUDGET: BudgetConfig = {

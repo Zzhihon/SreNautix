@@ -22,6 +22,7 @@ import type { WorkerStore } from './store.js';
 import type { ResearchCase, Subgraph } from './types.js';
 import { parseStoredKey } from '../topology/keys.js';
 import { hubTools } from '../tools/hub.js';
+import { optimizationRatio, runGoalTask } from '../optimize/worker.js';
 
 // worker 的阶段 B 循环：认领 → 读取输入 → 预算门控 → 研判（续租）→ 提议中转 → 写结果与事件 → 释放任务。
 // 一次研判的任何错误只影响这一个任务：记为 failed 并发布 research.failed，阶段 A 的消息依然有效。
@@ -236,6 +237,11 @@ export class WorkerService {
     }, 60_000);
     beat.unref();
     try {
+      if (task.subject_type === 'goal') {
+        const state = await runGoalTask(this.d, task, ctrl.signal);
+        await this.reportBudget();
+        return state;
+      }
       return await this.research(task, ctrl.signal);
     } finally {
       clearInterval(beat);
@@ -380,7 +386,9 @@ export class WorkerService {
     const used = await this.d.store.dailyTokens();
     const ratio = used / this.d.budget.dailyTokens;
     this.d.metrics.budgetUsedRatio.set({ scope: 'daily' }, ratio);
-    await this.d.hub.reportBudget(ratio);
+    const optimization = await optimizationRatio(this.d);
+    this.d.metrics.budgetUsedRatio.set({ scope: 'optimization' }, optimization);
+    await this.d.hub.reportBudget(ratio, { optimization });
   }
 
   private async finishFailed(

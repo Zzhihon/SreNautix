@@ -103,7 +103,8 @@ export function toolBounds(rc: ResearchCase, replay: boolean, now: number): Wind
   return { from: first - 24 * 3600_000, to: Math.min(now, end + 24 * 3600_000) };
 }
 
-function failure(r: Extract<StructuredResult<unknown>, { ok: false }>): {
+/** 结构化调用失败 → 运行的失败类型与停止原因（主动优化的控制器共用） */
+export function failure(r: Extract<StructuredResult<unknown>, { ok: false }>): {
   kind: FailureKind;
   message: string;
   stop: StopReason | null;
@@ -215,7 +216,7 @@ export async function runStageB(input: ResearchRunInput, env: ResearchEnv, sink:
       // conclude 的 recommendations id 不合规时按顺序重新编号，不删除建议
       prepare:
         name === 'hypothesize'
-          ? (v: unknown, n: string[]) => inferCheckTemplates(v, e.check_templates, n)
+          ? (v: unknown, n: string[]) => inferCheckTemplates(v, e.check_templates ?? [], n)
           : (v: unknown, n: string[]) => renumberRecommendations(v, n),
     };
   };

@@ -4,12 +4,14 @@ import type {
   EvidenceResult,
   Feedback,
   Incident,
+  OptimizationOutput,
   Proposal,
   ProposalCreate,
   StageAReport,
   TopologyEdge,
   TopologyNode,
 } from '@srenautix/contract';
+import type { GoalRunContext } from '../optimize/runner.js';
 import type { CatalogAction } from '../proposals/catalog.js';
 import type { RouteReport } from '../scheduler/admission.js';
 import type { CheckTemplate, DispositionFacts, KnowledgeItem, ReferenceCase } from './types.js';
@@ -19,6 +21,8 @@ import type { CheckTemplate, DispositionFacts, KnowledgeItem, ReferenceCase } fr
 export interface ClaimedTask {
   run_id: string;
   worker_id: string;
+  /** goal：目标运行（ADR 0146 §5.5），incident_id 为目标 id、incident_version 为 revision；旧版 server 没有这个字段 */
+  subject_type?: 'incident' | 'goal';
   incident_id: string;
   incident_version: number;
   reason: string;
@@ -164,8 +168,47 @@ export class HubClient {
     return r.body as { text: string; truncated: boolean; bytes: number };
   }
 
-  async reportBudget(usedRatio: number): Promise<void> {
-    await this.call('POST', '/v1/research/budget', { used_ratio: usedRatio });
+  /** 当日用量 / 当日上限；purposes 为按用途的比例（optimization：主动优化用途，ADR 0146 §5.3） */
+  async reportBudget(usedRatio: number, purposes?: { optimization: number }): Promise<void> {
+    await this.call('POST', '/v1/research/budget', { used_ratio: usedRatio, ...(purposes ? { purposes } : {}) });
+  }
+
+  /** 目标运行的输入（server 的 runner 准备好的基线、差距、候选、诊断卡与模板） */
+  async goalContext(runId: string): Promise<GoalRunContext> {
+    const r = await this.call<GoalRunContext>('GET', `/v1/research/tasks/${runId}/goal-context`, undefined, {
+      timeoutMs: 60_000,
+    });
+    return r.body as GoalRunContext;
+  }
+
+  /** 目标运行的区分性检查：server 在发现挂到的组件上执行领域的查询模板（经主动分析的信号量与负载保护） */
+  async goalQuery(
+    runId: string,
+    template: string,
+    args: Record<string, unknown>,
+    finding: string,
+    signal: AbortSignal,
+  ): Promise<EvidenceResult> {
+    const r = await this.call<EvidenceResult>(
+      'POST',
+      `/v1/research/tasks/${runId}/goal-query`,
+      { template, args, finding },
+      { timeoutMs: 45_000, signal },
+    );
+    return r.body as EvidenceResult;
+  }
+
+  /** 交回目标运行的输出：server 校验之后计算门槛与建议 */
+  async submitOptimization(runId: string, output: OptimizationOutput): Promise<void> {
+    await this.call('POST', `/v1/research/tasks/${runId}/optimization`, output);
+  }
+
+  /** 目标运行没有输出就结束（模型不可用、预算、期限、内部错误）：server 把运行与目标记为 failed */
+  async failOptimization(runId: string, kind: string, message: string): Promise<void> {
+    await this.call('POST', `/v1/research/tasks/${runId}/optimization-failed`, {
+      kind,
+      message: message.slice(0, 2000),
+    });
   }
 
   /** 上报本 worker 的模型路由可用情况：server 据此发布状态条件，没有可用路由时阶段 B 直接跳过 */

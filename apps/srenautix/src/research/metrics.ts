@@ -91,7 +91,7 @@ export class WorkerMetrics extends BaseMetrics {
 
   readonly budgetUsedRatio = new Gauge({
     name: 'srenautix_llm_budget_used_ratio',
-    help: '已用 token 占上限的比例，scope=daily 为当天（UTC）',
+    help: '已用 token 占上限的比例，scope=daily 为当天（UTC），scope=optimization 为主动优化用途的当天',
     labelNames: ['scope'] as const,
     registers: [this.registry],
   });

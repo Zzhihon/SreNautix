@@ -157,7 +157,7 @@ export function supplementChecks(
         t.component === e.rootComponent &&
         !used.has(t.id) &&
         !done.has(`${e.id}:${t.id}:{}`) &&
-        targets(t.id, e.mechanism, defs, ledger.rules).related,
+        targets(t.id, e.mechanism, defs, ledger.rules, e.symptoms).related,
     );
     if (!pick) {
       continue;

@@ -154,18 +154,21 @@ export interface Targeting {
 /**
  * 检查与假设机制是否对应：检查测的信号类型与机制预示的症状类型有交集；或检查测的卡片定义与假设的某张支持卡相同
  * （机制的症状已经在这个信号上出现）。任一边归不出类型时视为对应。
+ * declared 是假设显式给出的症状类型（主动优化的 hypothesize 输出 symptoms，ADR 0146 §2.3），与机制文字归出的类型合并；
+ * 事件研判没有，判断只看机制文字
  */
 export function targets(
   check: string,
   mechanism: string,
   supportDefinitions: ReadonlySet<string>,
   rules: readonly TypeRule[] = INCIDENT_SYMPTOM_RULES,
+  declared: readonly string[] = [],
 ): Targeting {
   const signal = signalTypes(check, rules);
   if (signal.size === 0) {
     return { related: true, basis: '检查的信号类型未知' };
   }
-  const mech = mechanismTypes(mechanism, rules);
+  const mech = new Set([...mechanismTypes(mechanism, rules), ...declared]);
   if (mech.size === 0) {
     return { related: true, basis: '假设机制的症状类型未知' };
   }

@@ -2122,6 +2122,141 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
       },
     },
   },
+  'https://srenautix.io/contract/model/optimize-conclude.schema.json': {
+    $schema: 'https://json-schema.org/draft/2020-12/schema',
+    $id: 'https://srenautix.io/contract/model/optimize-conclude.schema.json',
+    title: 'OptimizeConcludeOutput',
+    description:
+      '主动优化 conclude 步骤的模型输出（ADR 0146 §2.3）：为每个发现选出一个假设并写说明。档位由代码按优化结论阶梯（§2.4）计算，不由模型输出；模型弃权时按 ADR 0120 由代码代选。遵守可移植 schema 子集（DESIGN §8.2）',
+    'x-srenautix-portable': true,
+    type: 'object',
+    additionalProperties: false,
+    required: ['findings', 'summary'],
+    properties: {
+      findings: {
+        type: 'array',
+        maxItems: 3,
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['finding', 'hypothesis_id', 'note', 'undetermined_reason'],
+          properties: {
+            finding: { type: 'string', 'x-srenautix-dynamic-enum': 'findings' },
+            hypothesis_id: {
+              type: ['string', 'null'],
+              description: '选中的假设（必须是这个发现上的）；为 null 时 undetermined_reason 必须非空',
+              enum: ['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'h7', 'h8', 'h9', null],
+            },
+            note: {
+              type: ['string', 'null'],
+              description: '选择这个假设的说明与建议的补充，显示时标注【模型】',
+              maxLength: 600,
+            },
+            undetermined_reason: { type: ['string', 'null'], maxLength: 400 },
+          },
+        },
+      },
+      summary: { type: 'string', description: '一到两句：本次分析的结论与第一步该做什么', maxLength: 600 },
+    },
+  },
+  'https://srenautix.io/contract/model/optimize-hypothesize.schema.json': {
+    $schema: 'https://json-schema.org/draft/2020-12/schema',
+    $id: 'https://srenautix.io/contract/model/optimize-hypothesize.schema.json',
+    title: 'OptimizeHypothesizeOutput',
+    description:
+      '主动优化 hypothesize 步骤的模型输出（ADR 0146 §2.3）。为每个候选发现提出机制假设，机制点明预示的症状；同一发现上的假设互为竞争假设。遵守可移植 schema 子集（DESIGN §8.2）。x-srenautix-dynamic-enum 标出的字段在每次运行时由 worker 替换为本次运行中存在的取值：发现只能是进入分析的候选，检查只能是本次运行的查询模板与只读工具，模型不写任何查询语句',
+    'x-srenautix-portable': true,
+    type: 'object',
+    additionalProperties: false,
+    required: ['hypotheses', 'next_checks'],
+    properties: {
+      hypotheses: {
+        type: 'array',
+        minItems: 1,
+        maxItems: 9,
+        description: '按发现分组的假设，用 parent_id 表示同一发现上的细化',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['id', 'parent_id', 'finding', 'mechanism', 'symptoms', 'supporting', 'refuting'],
+          properties: {
+            id: { type: 'string', enum: ['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'h7', 'h8', 'h9'] },
+            parent_id: { type: ['string', 'null'], enum: ['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'h7', 'h8', 'h9', null] },
+            finding: {
+              type: 'string',
+              description: '假设解释的候选发现（发现指纹）',
+              'x-srenautix-dynamic-enum': 'findings',
+            },
+            mechanism: { type: 'string', maxLength: 600 },
+            symptoms: {
+              type: 'array',
+              maxItems: 4,
+              description: '机制预示的症状类型',
+              items: {
+                type: 'string',
+                enum: [
+                  'seq_scan',
+                  'index',
+                  'temp_spill',
+                  'lock_wait',
+                  'io_read',
+                  'connection_pool',
+                  'cache_miss',
+                  'polling',
+                  'n_plus_one',
+                  'payload_size',
+                  'overprovision',
+                  'cpu',
+                  'memory',
+                  'connections',
+                  'storage',
+                  'network',
+                  'service',
+                ],
+              },
+            },
+            supporting: {
+              type: 'array',
+              maxItems: 12,
+              items: { type: 'string', 'x-srenautix-dynamic-enum': 'evidence_refs' },
+            },
+            refuting: {
+              type: 'array',
+              maxItems: 12,
+              items: { type: 'string', 'x-srenautix-dynamic-enum': 'evidence_refs' },
+            },
+          },
+        },
+      },
+      next_checks: {
+        type: 'array',
+        maxItems: 6,
+        description:
+          '为待检验的假设各给出一项区分性检查，由控制器执行；只能选本次运行的查询模板或只读工具，参数按其 schema 校验',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['hypothesis_id', 'type', 'template', 'args_json', 'refutes_if', 'purpose'],
+          properties: {
+            hypothesis_id: { type: 'string', enum: ['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'h7', 'h8', 'h9'] },
+            type: { type: 'string', description: 'query：领域包的查询模板；tool：只读工具', enum: ['query', 'tool'] },
+            template: {
+              type: 'string',
+              description: '查询模板 <pack>/<id> 或只读工具名',
+              'x-srenautix-dynamic-enum': 'check_templates',
+            },
+            args_json: {
+              type: 'string',
+              description: '参数的 JSON 文本，按模板或工具的参数 schema 校验',
+              maxLength: 2000,
+            },
+            refutes_if: { type: 'string', maxLength: 300 },
+            purpose: { type: 'string', maxLength: 300 },
+          },
+        },
+      },
+    },
+  },
   'https://srenautix.io/contract/schemas/alert-catalog-entry.schema.json': {
     $schema: 'https://json-schema.org/draft/2020-12/schema',
     $id: 'https://srenautix.io/contract/schemas/alert-catalog-entry.schema.json',

@@ -115,6 +115,26 @@ CREATE TABLE worker.daily_usage (
 );
 `,
     },
+    {
+      version: 2,
+      name: 'goal runs and model usage by purpose',
+      phase: 'expand',
+      // 主动优化（ADR 0146 §5.3、§5.5）：目标运行与事件研判共用 research_runs，incident_id 存目标 id、incident_version 存目标
+      // revision，subject_type 区分两者；按用途的每日用量是新表，daily_usage 仍是全部用途的合计（旧版本照常写入）
+      sql: `
+ALTER TABLE worker.research_runs ADD COLUMN subject_type text NOT NULL DEFAULT 'incident'
+  CHECK (subject_type IN ('incident', 'goal'));
+
+CREATE TABLE worker.daily_usage_purpose (
+  day date NOT NULL,
+  purpose text NOT NULL CHECK (purpose IN ('research', 'optimization', 'eval')),
+  tokens bigint NOT NULL DEFAULT 0,
+  cost double precision NOT NULL DEFAULT 0,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (day, purpose)
+);
+`,
+    },
   ],
 };
 

@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://srenautix.io/contract/model/optimize-conclude.schema.json",
+  "title": "OptimizeConcludeOutput",
+  "description": "主动优化 conclude 步骤的模型输出（ADR 0146 §2.3）：为每个发现选出一个假设并写说明。档位由代码按优化结论阶梯（§2.4）计算，不由模型输出；模型弃权时按 ADR 0120 由代码代选。遵守可移植 schema 子集（DESIGN §8.2）",
+  "x-srenautix-portable": true,
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["findings", "summary"],
+  "properties": {
+    "findings": {
+      "type": "array",
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["finding", "hypothesis_id", "note", "undetermined_reason"],
+        "properties": {
+          "finding": { "type": "string", "x-srenautix-dynamic-enum": "findings" },
+          "hypothesis_id": {
+            "type": ["string", "null"],
+            "description": "选中的假设（必须是这个发现上的）；为 null 时 undetermined_reason 必须非空",
+            "enum": ["h1", "h2", "h3", "h4", "h5", "h6", "h7", "h8", "h9", null]
+          },
+          "note": {
+            "type": ["string", "null"],
+            "description": "选择这个假设的说明与建议的补充，显示时标注【模型】",
+            "maxLength": 600
+          },
+          "undetermined_reason": { "type": ["string", "null"], "maxLength": 400 }
+        }
+      }
+    },
+    "summary": {
+      "type": "string",
+      "description": "一到两句：本次分析的结论与第一步该做什么",
+      "maxLength": 600
+    }
+  }
+}
