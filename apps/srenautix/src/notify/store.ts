@@ -1,17 +1,21 @@
 import type pg from 'pg';
 import { tx } from '../store/pool.js';
 import type { ActionResultView, RegisteredButton } from './channel.js';
+import type { ExternalWindowStats } from './external.js';
 import type { ButtonTarget } from './ports.js';
 
 /** 通知层的库访问。所有时间都由调用方给出（引擎的时钟），便于测试控制时间。 */
 
 export type Lane = 'urgent' | 'digest' | 'edit' | 'recovery';
 
+/** incident：事件消息；digest：风暴汇总；external_digest：外部上游的周期汇总（ADR 0147），subject 为时间段起点 */
+export type MessageKind = 'incident' | 'digest' | 'external_digest';
+
 export interface MessageRow {
   id: number;
   channel: string;
   chat: string;
-  kind: 'incident' | 'digest';
+  kind: MessageKind;
   subject: string;
   incidentId: string | null;
   stormId: number | null;
@@ -32,7 +36,7 @@ interface DbMessage {
   id: number;
   channel: string;
   chat: string;
-  kind: 'incident' | 'digest';
+  kind: MessageKind;
   subject: string;
   incident_id: string | null;
   storm_id: number | null;
@@ -73,7 +77,7 @@ const toMessage = (r: DbMessage): MessageRow => ({
 export interface DesiredRow {
   channel: string;
   chat: string;
-  kind: 'incident' | 'digest';
+  kind: MessageKind;
   subject: string;
   incidentId: string | null;
   stormId: number | null;
@@ -142,12 +146,39 @@ const LANE_ORDER = `CASE lane WHEN 'urgent' THEN 0 WHEN 'digest' THEN 1 WHEN 'ed
 export class NotifyStore {
   constructor(readonly pool: pg.Pool) {}
 
-  async messages(channel: string, chat: string, kind: 'incident' | 'digest'): Promise<MessageRow[]> {
+  async messages(channel: string, chat: string, kind: MessageKind): Promise<MessageRow[]> {
     const r = await this.pool.query<DbMessage>(
       'SELECT * FROM server.notify_messages WHERE channel = $1 AND chat = $2 AND kind = $3 ORDER BY id',
       [channel, chat, kind],
     );
     return r.rows.map(toMessage);
+  }
+
+  async hasMessage(channel: string, chat: string, kind: MessageKind, subject: string): Promise<boolean> {
+    const r = await this.pool.query(
+      'SELECT 1 FROM server.notify_messages WHERE channel = $1 AND chat = $2 AND kind = $3 AND subject = $4',
+      [channel, chat, kind, subject],
+    );
+    return (r.rowCount ?? 0) > 0;
+  }
+
+  /** 外部上游汇总的时间段统计（ADR 0147）；没有时为 null */
+  async externalWindow(from: Date): Promise<ExternalWindowStats | null> {
+    const r = await this.pool.query<{ stats: ExternalWindowStats }>(
+      'SELECT stats FROM server.notify_external_windows WHERE window_start = $1',
+      [from],
+    );
+    return r.rows[0]?.stats ?? null;
+  }
+
+  /** 写入时间段统计；已有时不覆盖，返回库中的那一份（同一时间段只统计一次，汇总消息与下一时段的对比用同一份） */
+  async saveExternalWindow(s: ExternalWindowStats, now: Date): Promise<ExternalWindowStats> {
+    await this.pool.query(
+      `INSERT INTO server.notify_external_windows (window_start, window_end, stats, created_at) VALUES ($1, $2, $3, $4)
+       ON CONFLICT (window_start) DO NOTHING`,
+      [new Date(s.from), new Date(s.to), JSON.stringify(s), now],
+    );
+    return (await this.externalWindow(new Date(s.from))) ?? s;
   }
 
   async message(id: number): Promise<MessageRow | null> {

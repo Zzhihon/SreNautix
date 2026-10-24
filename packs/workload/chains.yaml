@@ -47,6 +47,7 @@ chains:
         egress: allow
       - id: memory
         title: { zh-CN: 内存占 limit 与 OOM, en: Memory vs limit and OOM }
+        category: memory
         applies_to: { kinds: [Pod, Deployment, StatefulSet, DaemonSet] }
         params: { limit_ratio: 0.9 }
         check:
@@ -86,6 +87,7 @@ chains:
         egress: allow
       - id: throttling
         title: { zh-CN: CPU 限流, en: CPU throttling }
+        category: cpu
         note: { zh-CN: 被 CFS 限流的周期占比；超过 25% 时延迟会明显上升, en: Share of throttled CFS periods }
         applies_to: { kinds: [Pod, Deployment, StatefulSet, DaemonSet] }
         params: { ratio: 0.25 }
@@ -136,6 +138,7 @@ chains:
     cards:
       - id: pending
         title: { zh-CN: 持续 Pending, en: Stuck pending }
+        category: blocking
         applies_to: { kinds: [Pod, Deployment, StatefulSet, DaemonSet] }
         refs:
           - { name: pending, signal: pod_pending, mode: range }
@@ -154,6 +157,7 @@ chains:
         egress: allow
       - id: waiting
         title: { zh-CN: 容器等待原因, en: Container waiting reasons }
+        category: blocking
         note:
           {
             zh-CN: 'ImagePullBackOff、CreateContainerConfigError 等（CrashLoopBackOff 在重启卡）',
@@ -179,6 +183,7 @@ chains:
         egress: allow
       - id: init-stuck
         title: { zh-CN: 卡住的 init 容器, en: Stuck init containers }
+        category: blocking
         note:
           {
             zh-CN: init 容器在整个窗口内一直运行或等待；常见于等待的依赖已经恢复、但 init 容器没有重试,
@@ -212,6 +217,7 @@ chains:
         egress: allow
       - id: pdb
         title: { zh-CN: PDB 健康副本, en: PDB healthy pods }
+        category: blocking
         applies_to: { kinds: [PodDisruptionBudget] }
         refs:
           - { name: missing, signal: pdb_missing_healthy, mode: range }
@@ -231,6 +237,7 @@ chains:
     cards:
       - id: disruptions
         title: { zh-CN: 允许的驱逐数, en: Allowed disruptions }
+        category: blocking
         note:
           {
             zh-CN: 允许的自愿驱逐为 0 时，节点排空、Eviction API 与 pod_restart 都会被这个 PDB 阻塞；健康副本够数时也可能为 0（minAvailable 等于 Pod 数）,
@@ -267,6 +274,7 @@ chains:
     cards:
       - id: deployment
         title: { zh-CN: Deployment 发布, en: Deployment rollout }
+        category: blocking
         applies_to: { kinds: [Deployment] }
         refs:
           - { name: unavailable, signal: deployment_unavailable, mode: range }
@@ -292,6 +300,7 @@ chains:
         egress: allow
       - id: statefulset
         title: { zh-CN: StatefulSet 发布, en: StatefulSet rollout }
+        category: blocking
         applies_to: { kinds: [StatefulSet] }
         refs:
           - { name: notReady, signal: statefulset_not_ready, mode: range }
@@ -322,6 +331,7 @@ chains:
         egress: allow
       - id: daemonset
         title: { zh-CN: DaemonSet 发布, en: DaemonSet rollout }
+        category: blocking
         applies_to: { kinds: [DaemonSet] }
         refs:
           - { name: unavailable, signal: daemonset_unavailable, mode: range }
@@ -375,6 +385,7 @@ chains:
     cards:
       - id: hpa
         title: { zh-CN: HPA 上限, en: HPA ceiling }
+        category: cpu
         applies_to: { kinds: [HorizontalPodAutoscaler] }
         refs:
           - { name: ratio, signal: hpa_at_max, mode: range }
@@ -391,6 +402,7 @@ chains:
       # CPU 推到目标以上、而用户无感的情形也会被判为饱和。限流与延迟两张卡是影响卡（impact）
       - id: hpa-utilization
         title: { zh-CN: HPA 负载是否饱和, en: Whether the HPA load is saturated }
+        category: cpu
         note:
           zh-CN: 各伸缩指标当前值占目标值的比例；顶到上限时仍超过目标的 params.over 倍，并且伸缩对象的 Pod 限流超过 params.ratio 或 p95 延迟超过一天前的 params.factor 倍，说明负载已经饱和；指标超过目标而没有限流、没有变慢时，上限只是没有余量。应用没有请求延迟指标时只按限流判断
           en: Scaling metrics against their targets; above params.over times the target at the ceiling, together with CPU throttling above params.ratio or p95 latency above params.factor times a day earlier, means the load is saturated. Without throttling or slower requests the ceiling only has no headroom
@@ -457,6 +469,7 @@ chains:
         egress: allow
       - id: hpa-throttling
         title: { zh-CN: 伸缩对象的 CPU 限流, en: CPU throttling of the scaled workload }
+        category: cpu
         note:
           zh-CN: HPA 伸缩对象（Deployment 或 StatefulSet）的 Pod 被 CFS 限流的周期占比；超过 params.ratio 说明 CPU 已经不够用
           en: Share of throttled CFS periods in the pods of the workload the HPA scales; above params.ratio CPU is short
@@ -489,6 +502,7 @@ chains:
         egress: allow
       - id: hpa-latency
         title: { zh-CN: 伸缩对象的请求延迟对比基线, en: Request latency of the scaled workload against baseline }
+        category: traffic
         note:
           zh-CN: HPA 伸缩对象的 Pod 的 HTTP p95 延迟与一天前同一时刻的 p95；超过基线的 params.factor 倍且超过 params.min_seconds 秒说明请求已经变慢。应用没有 http_request_duration_seconds 时无法判定
           en: HTTP p95 latency of the scaled pods against the same time a day earlier; above params.factor times the baseline and params.min_seconds requests are slowing down
@@ -591,6 +605,7 @@ chains:
     cards:
       - id: init-waiting
         title: { zh-CN: 卡在 init 容器的 Pod, en: Pods stuck in an init container }
+        category: blocking
         note:
           zh-CN: 窗口内 init 容器处于运行状态超过 params.minutes 分钟的 Pod；等待数据库迁移的 init 容器在迁移没有完成或镜像与库不兼容时会一直等待
           en: Pods whose init container ran longer than params.minutes minutes in the window, for example waiting for a database migration
@@ -637,6 +652,7 @@ chains:
         egress: allow
       - id: replicasets
         title: { zh-CN: 新旧 ReplicaSet 的就绪, en: Old and new ReplicaSets }
+        category: blocking
         note:
           zh-CN: Deployment 的各 ReplicaSet 在窗口末尾的期望与就绪副本数；有期望副本却没有全部就绪的 ReplicaSet 说明滚动停在半路
           en: Desired and ready replicas of each ReplicaSet at the end of the window; a ReplicaSet short of ready replicas means the rollout stopped midway
@@ -702,6 +718,7 @@ chains:
         egress: allow
       - id: migration-jobs
         title: { zh-CN: 迁移 Job, en: Migration jobs }
+        category: blocking
         note:
           zh-CN: 命名空间内名字匹配 params.job_pattern 的 Job 在窗口末尾是否失败或仍在运行
           en: Whether jobs matching params.job_pattern failed or are still running at the end of the window
@@ -736,6 +753,7 @@ chains:
       # 开始之前与之后各自取峰值对比；任何一侧没有点时不可求值
       - id: errors-before-after
         title: { zh-CN: 开始前后的 5xx 比例, en: 5xx ratio before and after the start }
+        category: traffic
         note:
           zh-CN: 事件开始前后 HTTP 5xx 比例的峰值；之后的峰值超过 params.error_ratio 且超过之前的 params.factor 倍时判为异常
           en: Peak HTTP 5xx ratio before and after the incident started; abnormal when the later peak exceeds params.error_ratio and params.factor times the earlier peak
@@ -769,6 +787,7 @@ chains:
         egress: allow
       - id: latency-before-after
         title: { zh-CN: 开始前后的 p95 延迟, en: p95 latency before and after the start }
+        category: traffic
         note:
           zh-CN: 事件开始前后 HTTP p95 延迟的峰值；之后的峰值超过之前的 params.factor 倍时判为异常
           en: Peak HTTP p95 latency before and after the incident started; abnormal when the later peak exceeds params.factor times the earlier peak

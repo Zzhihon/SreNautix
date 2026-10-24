@@ -7,10 +7,11 @@ import type {
   Rendered,
   RenderOptions,
 } from '../../notify/channel.js';
+import type { ExternalDigestView } from '../../notify/external.js';
 import type { DesiredIncidentMessage } from '../../notify/ports.js';
 import type { ChannelLimits } from '../../notify/ratelimit.js';
 import { TelegramApiError, TelegramTransportError, type TelegramClient } from './client.js';
-import { renderDigest, renderIncident, type TelegramPayload } from './render.js';
+import { renderDigest, renderExternalDigest, renderIncident, type TelegramPayload } from './render.js';
 
 export class TelegramAdapter implements ChannelAdapter {
   readonly channel = 'telegram' as const;
@@ -36,6 +37,10 @@ export class TelegramAdapter implements ChannelAdapter {
 
   renderDigest(chat: ChatTarget, d: DigestInput): Rendered {
     return renderDigest(chat, d, this.prefix);
+  }
+
+  renderExternalDigest(chat: ChatTarget, d: ExternalDigestView): Rendered {
+    return renderExternalDigest(chat, d, this.prefix);
   }
 
   async send(chat: ChatTarget, payload: unknown, silent: boolean): Promise<string> {

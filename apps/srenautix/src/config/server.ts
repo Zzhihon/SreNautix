@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { parse as parseYaml } from 'yaml';
 import { z } from 'zod';
-import { ConfigError } from './files.js';
+import { ConfigError, parseDuration } from './files.js';
 import { DEFAULT_REVISION_LABELS } from '../changes/kubernetes.js';
 import { DEFAULT_EXTERNAL_LABELS } from '@srenautix/core';
 
@@ -131,6 +131,36 @@ const telegram = z
     webhook_secret_file: path.optional(),
     messages_per_minute: z.number().int().min(1).max(30).default(20),
     edit_gap: duration.default('3s'),
+  })
+  .strict();
+
+// 标签条件：标签名 → 允许的取值（每个键都要满足，取值之一即可）
+const labelMatch = z.record(z.string().min(1), z.array(z.string().min(1)).min(1));
+
+const EXTERNAL_ROOTS_DEFAULT = {
+  enabled: true,
+  period: '1h',
+  components: [] as string[],
+  alert_labels: {} as Record<string, string[]>,
+  business_impact: { alert_labels: {} as Record<string, string[]>, impact_cards: true },
+};
+
+// 外部上游的周期汇总（ADR 0147）：根因是领域包声明 external 的组件类型（例如模型服务方）、components 列出的组件，
+// 或全部成员告警都满足 alert_labels 的事件，不逐条推送、不开 issue，每个周期（按 UTC 对齐，1h 即整点）汇总一条；
+// 同时有业务影响（business_impact 的告警在触发，或 impact_cards 为 true 时影响卡异常）时照常即时推送
+const externalRoots = z
+  .object({
+    enabled: z.boolean().default(true),
+    period: duration.default('1h'),
+    components: z.array(z.string().min(1)).default([]),
+    alert_labels: labelMatch.default({}),
+    business_impact: z
+      .object({
+        alert_labels: labelMatch.default({}),
+        impact_cards: z.boolean().default(true),
+      })
+      .strict()
+      .default({ alert_labels: {}, impact_cards: true }),
   })
   .strict();
 
@@ -490,9 +520,18 @@ export const serverConfigSchema = z
         resolved_retention: duration.default('6h'),
         telegram: telegram.optional(),
         feishu: feishu.optional(),
+        digest: z
+          .object({ external_roots: externalRoots.default(EXTERNAL_ROOTS_DEFAULT) })
+          .strict()
+          .default({ external_roots: EXTERNAL_ROOTS_DEFAULT }),
       })
       .strict()
-      .default({ prefix: '', severities: ['critical', 'warning'], resolved_retention: '6h' }),
+      .default({
+        prefix: '',
+        severities: ['critical', 'warning'],
+        resolved_retention: '6h',
+        digest: { external_roots: EXTERNAL_ROOTS_DEFAULT },
+      }),
     approvals: z
       .object({
         signing_key_file: path,
@@ -625,6 +664,10 @@ export function parseServerConfig(raw: unknown): ServerConfig {
   const c = r.data;
   if (c.notify.telegram?.enabled && c.notify.telegram.updates === 'webhook' && !c.notify.telegram.webhook_secret_file) {
     throw new ConfigError('notify.telegram.updates=webhook 需要 webhook_secret_file');
+  }
+  const period = parseDuration('notify.digest.external_roots.period', c.notify.digest.external_roots.period);
+  if (period < 5 * 60_000 || period > 24 * 3_600_000) {
+    throw new ConfigError('notify.digest.external_roots.period 必须在 5m 与 24h 之间');
   }
   const ids = c.ingest.sources.map((s) => s.id);
   if (new Set(ids).size !== ids.length) {

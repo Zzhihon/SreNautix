@@ -1,5 +1,5 @@
 // 本文件由 packages/contract/scripts/gen.ts 从 contract/ 生成，不要手工修改。
-export const CONTRACT_VERSION = '2.26.0';
+export const CONTRACT_VERSION = '2.27.0';
 
 export const SCHEMAS: Record<string, Record<string, unknown>> = {
   'https://srenautix.io/contract/gateway/v1/action-catalog.schema.json': {
@@ -1269,7 +1269,7 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
       Message: {
         title: 'NotifyMessage',
         description:
-          '渠道无关的消息，渠道适配器负责转义和渲染。五段依次为现状、关键问题、拓扑联系、解决方案、证据链；带 runs 的块是富文本，渠道按自己的格式渲染（Telegram HTML、飞书卡片 markdown、GitHub Markdown），没有 runs 时按 text 渲染',
+          '渠道无关的消息，渠道适配器负责转义和渲染。各段依次为现状、业务关键信号（有异常或接近阈值的信号时）、关键问题、拓扑联系、解决方案、证据链；带 runs 的块是富文本，渠道按自己的格式渲染（Telegram HTML、飞书卡片 markdown、GitHub Markdown），没有 runs 时按 text 渲染',
         type: 'object',
         additionalProperties: false,
         required: ['incident_id', 'incident_version', 'prefix', 'severity', 'title', 'sections', 'buttons', 'banner'],
@@ -1298,8 +1298,8 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
           kind: {
             type: 'string',
             description:
-              'situation 现状；key_issue 关键问题（结论、结论档位的依据、假设）；topology 拓扑联系；remedy 解决方案；evidence 证据链；root_cause 是旧的四段结构中的问题根源',
-            enum: ['situation', 'key_issue', 'topology', 'remedy', 'evidence', 'root_cause'],
+              'situation 现状；signals 业务关键信号（存储、内存、CPU、流量负载、阻塞中异常或接近阈值的卡，在现状之后、关键问题之前）；key_issue 关键问题（结论、结论档位的依据、假设）；topology 拓扑联系；remedy 解决方案；evidence 证据链；root_cause 是旧的四段结构中的问题根源',
+            enum: ['situation', 'signals', 'key_issue', 'topology', 'remedy', 'evidence', 'root_cause'],
           },
           title: { type: 'string', description: '段标题；没有时渠道按 kind 取固定文案' },
           folded: { type: 'boolean', description: '聊天渠道折叠显示（Telegram 可展开引用块、飞书折叠面板）' },
@@ -3039,6 +3039,12 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
         default: false,
         description: '影响类卡片：衡量用户可见的影响（错误率、可用性、业务量）。异常时它的标题与值写进通知的影响范围',
       },
+      category: {
+        type: 'string',
+        description:
+          '业务关键信号的类别（ADR 0148）：storage 存储（PVC 与卷容量、IO、对象存储）、memory 内存（使用占 limit、OOM）、cpu CPU（使用、节流、HPA 饱和）、traffic 流量负载（请求量、错误率、延迟）、blocking 阻塞（队列积压、锁等待、Pending 与 Init 卡住、PDB 阻塞驱逐、rollout 停滞）。异常或接近阈值时，卡片进入事件消息的“业务关键信号”段；不填时按证据链与卡片名推断',
+        enum: ['storage', 'memory', 'cpu', 'traffic', 'blocking'],
+      },
       requires: {
         type: 'array',
         description:
@@ -3329,6 +3335,17 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
         description: '对比基线（卡片 display.baseline 的取值）；卡片没有基线或基线不可用时为 null',
       },
       impact: { type: 'boolean', description: '卡片标为影响类（impact: true），异常时它的值进入通知的影响范围' },
+      category: {
+        type: ['string', 'null'],
+        description:
+          '卡片定义的业务关键信号类别（EvidenceCardDefinition.category）；没有时为 null，通知按证据链名推断（ADR 0148）',
+        enum: ['storage', 'memory', 'cpu', 'traffic', 'blocking', null],
+      },
+      value_number: {
+        type: ['number', 'null'],
+        description:
+          '主值（display.value）格式化之前的数值，与 threshold 同单位；没有主值或不是有限数时为 null。通知用它判断正常卡是否接近阈值',
+      },
     },
     $defs: {
       Reason: {

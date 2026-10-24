@@ -43,6 +43,9 @@ export interface IssueRef {
 export const MAX_ATTEMPTS = 8;
 /** 同一事件的 issue 标题两次修改之间至少间隔这么久（ADR 0142） */
 export const TITLE_MIN_INTERVAL_MS = 3600_000;
+/** 外部上游的事件未恢复时，隔这么久再检查一次是否出现了业务影响（ADR 0147） */
+export const EXTERNAL_RECHECK_MS = 10 * 60_000;
+const EXTERNAL_NOTE = '根因是外部上游且没有业务影响：进入通知的周期汇总，不开 issue（ADR 0147）';
 const backoffMs = (attempts: number) => Math.min(30_000 * 2 ** Math.max(0, attempts - 1), 30 * 60_000);
 
 /** 事件报告：由 notify/source.ts 的 ReportSource.message 提供；事件或阶段 A 报告不存在时为 null */
@@ -109,6 +112,11 @@ export class IssueService {
     private readonly report: IssueReport,
     /** 研判根因与事件根因按属主粒度比较时取顶层属主（ADR 0104 §14）；不提供时只按键比较 */
     private readonly ownerOf: OwnerLookup = async () => null,
+    /**
+     * 根因是外部上游且没有业务影响的事件（ADR 0147）返回它的状态，这类事件不开 issue：未恢复时推迟检查（之后出现业务影响
+     * 仍会开出），恢复后记为跳过。其余事件为 null
+     */
+    private readonly externalOf: (incidentId: string) => Promise<'firing' | 'ended' | null> = async () => null,
   ) {}
 
   get repo(): string {
@@ -220,6 +228,30 @@ export class IssueService {
       );
       const row = r.rows[0];
       if (!row || row.state !== 'pending') {
+        return;
+      }
+      // 外部上游的事件（ADR 0147）：进入周期汇总，不开 issue；需要改仓库的修复提议（repo_change）照常开
+      const external = row.reason === 'escalate' ? await this.externalOf(incidentId) : null;
+      if (external === 'firing') {
+        await c.query(
+          `UPDATE server.github_issues SET last_error = $2, next_attempt_at = now() + make_interval(secs => $3), updated_at = now()
+            WHERE incident_id = $1`,
+          [incidentId, EXTERNAL_NOTE, EXTERNAL_RECHECK_MS / 1000],
+        );
+        return;
+      }
+      if (external === 'ended') {
+        await c.query(
+          `UPDATE server.github_issues SET state = 'skipped', last_error = $2, updated_at = now() WHERE incident_id = $1`,
+          [incidentId, EXTERNAL_NOTE],
+        );
+        await appendAudit(c, 'github.issue_skipped', 'server', {
+          incident_id: incidentId,
+          repo: row.repo,
+          reason: 'external_root',
+        });
+        this.metrics.githubIssues.inc({ repo: row.repo, outcome: 'skipped_external' });
+        logger.info('外部上游的事件不开 issue', { incident_id: incidentId, repo: row.repo });
         return;
       }
       const opened = await c.query<{ n: number }>(

@@ -1,0 +1,49 @@
+[影子] <b>[严重] StatefulSet:cchp-prod/gateway：CCHPMetricsTargetDown、KubeStatefulSetReplicasNotReady</b>
+未恢复 · 事件 <code>StatefulSet:cchp-prod/gateway:2026-10-23T15:45:00Z</code>
+首次触发 2026-10-23 15:48 UTC
+
+<b>现状</b>
+<code>cchp/cchp-prod</code>：<b>StatefulSet:cchp-prod/gateway</b>：CCHPMetricsTargetDown、KubeStatefulSetReplicasNotReady。<code>15:48:30</code> 起首个告警，<code>16:08:30</code> 起出现症状，截至 <code>10-24 14:45:30</code> 未恢复。70 条告警（4 条触发中），1 个组件。
+来源：告警 KubePodCrashLoopingCritical
+<blockquote>生产 cchp-prod/gateway-1 容器 gateway CrashLoopBackOff</blockquote>
+
+<b>业务关键信号</b>
+- 内存：gateway 内存占 limit 与 OOM <code>94.0%</code> / 阈值 <code>90.0%</code> · 2 个容器被 OOM 终止 · 自 10-24 14:37
+- 内存：gateway-2 内存占 limit 与 OOM <code>93.1%</code> / 阈值 <code>90.0%</code> · working set 峰值 93% · 自 10-24 14:38:30
+- 流量负载：gateway 5xx 来自哪一层 <code>0.4%</code> / 阈值 <code>0.5%</code> · 接近阈值 · 10-24 14:12:30–10-24 14:45:30
+- 阻塞：gateway StatefulSet 发布 <code>1</code> · 窗口结束时仍有 1 个副本未就绪 · 10-24 14:12:30–10-24 14:45:30
+- 其余：内存 1 项，见控制台
+
+<b>时间线（UTC，10-23）</b>
+- <code>15:48:30</code> 首个告警 <a href="https://alertmanager.example.test/#/alerts?filter=%7Balertname%3D%22KubeContainerOOMKilled%22%7D">KubeContainerOOMKilled</a> · <code>StatefulSet:cchp-prod/gateway</code>
+- <code>15:49:41</code> 检测器建事件
+- <code>16:08:30</code> 症状起点 <a href="https://alertmanager.example.test/#/alerts?filter=%7Balertname%3D%22CCHPMetricsTargetDown%22%7D">CCHPMetricsTargetDown</a>
+- <code>10-24 05:08:30</code> 升为严重 <a href="https://alertmanager.example.test/#/alerts?filter=%7Balertname%3D%22KubePodCrashLoopingCritical%22%7D">KubePodCrashLoopingCritical</a>
+- <code>10-24 14:12:30</code> 首张异常卡 <code>card:8</code> <b>就绪</b>：1 个 Pod 在窗口内未就绪
+- <code>10-24 14:45:30</code> 阶段 A：53 张卡，8 异常、43 正常、2 无法判定
+
+<b>关键问题</b>
+<b>阶段 A 根因候选：</b><code>StatefulSet:cchp-prod/gateway</code>（得分 0.65）
+处置：<b>升级</b> · 阶段 A：critical 且根因有歧义
+
+<b>拓扑联系</b>
+<b>StatefulSet:cchp-prod/gateway</b> ⇒ 告警 KubeContainerOOMKilled、CCHPMetricsTargetDown、KubePodCrashLooping、CCHPGatewayContainerTerminated、KubeStatefulSetReplicasNotReady、KubePodCrashLoopingCritical
+没有研判子图，拓扑联系见控制台
+
+<b>解决方案</b>
+runbook：<code>workload/workload.md</code>
+
+<b>证据链</b>
+<blockquote expandable><b>阶段 A 的异常卡（8 张）</b>
+- + <code>card:8</code> <b>就绪</b> · <code>StatefulSet:cchp-prod/gateway</code>：1 个 Pod 在窗口内未就绪 · 自 <code>10-24 14:12:30</code> · 异常 <a href="https://srenautix.example.test/incidents/b18629a6-0000-4000-8000-b18629a6f249?tab=evidence#card-8">控制台</a>
+- + <code>card:7</code> <b>重启与终止原因</b> · <code>StatefulSet:cchp-prod/gateway</code>：1 个容器处于 CrashLoopBackOff，值 <code>6</code> · 自 <code>10-24 14:33:30</code> · 异常 <a href="https://srenautix.example.test/incidents/b18629a6-0000-4000-8000-b18629a6f249?tab=evidence#card-7">控制台</a>
+- + <code>card:1</code> <b>内存占 limit 与 OOM</b> · <code>StatefulSet:cchp-prod/gateway</code>：2 个容器被 OOM 终止，值 <code>94.0%</code>，阈值 <code>90.0%</code> · 自 <code>10-24 14:37</code> · 异常 <a href="https://srenautix.example.test/incidents/b18629a6-0000-4000-8000-b18629a6f249?tab=evidence#card-1">控制台</a>
+- + <code>card:9</code> <b>重启与最近一次终止</b> · <code>StatefulSet:cchp-prod/gateway</code>：最近一次终止原因 OOMKilled（退出码 137） · 自 <code>10-24 14:37</code> · 异常 <a href="https://srenautix.example.test/incidents/b18629a6-0000-4000-8000-b18629a6f249?tab=evidence#card-9">控制台</a>
+- + <code>card:10</code> <b>应用就绪与数据库连接池</b> · <code>StatefulSet:cchp-prod/gateway</code>：应用 PG 连接池峰值 100%，值 <code>100.0%</code>，阈值 <code>95.0%</code> · <code>10-24 14:12:30–10-24 14:45:30</code> · 异常 <a href="https://srenautix.example.test/incidents/b18629a6-0000-4000-8000-b18629a6f249?tab=evidence#card-10">控制台</a>
+- + <code>card:14</code> <b>StatefulSet 发布</b> · <code>StatefulSet:cchp-prod/gateway</code>：窗口结束时仍有 1 个副本未就绪 · <code>10-24 14:12:30–10-24 14:45:30</code> · 异常 <a href="https://srenautix.example.test/incidents/b18629a6-0000-4000-8000-b18629a6f249?tab=evidence#card-14">控制台</a>
+- 其余 2 张见控制台
+<b>排除与未定</b>
+- 排除的信号：<b>CPU 限流</b>（1 张正常：gateway）：值 <code>12.0%</code>，阈值 <code>25.0%</code>，未命中异常条件 <a href="https://srenautix.example.test/incidents/b18629a6-0000-4000-8000-b18629a6f249?tab=evidence#card-5">控制台</a>
+- 排除的信号：<b>网关自身 5xx</b>（1 张正常：gateway）：值 <code>0.2%</code>，阈值 <code>1.0%</code>，未命中异常条件 <a href="https://srenautix.example.test/incidents/b18629a6-0000-4000-8000-b18629a6f249?tab=evidence#card-11">控制台</a>
+- 排除的信号：<b>5xx 来自哪一层</b>（1 张正常：gateway）：值 <code>0.4%</code>，阈值 <code>0.5%</code>，未命中异常条件 <a href="https://srenautix.example.test/incidents/b18629a6-0000-4000-8000-b18629a6f249?tab=evidence#card-12">控制台</a>
+- 无法判定 2 张：开始前后的上游 p95 耗时、伸缩对象的请求延迟对比基线 2 张（查询没有返回数据）</blockquote>

@@ -5,6 +5,16 @@
 <b>现状</b>
 <code>prod/acme-prod</code>：发布 <code>rel-9a8c9cd6</code>（15:59:52）与回退到 <code>rel-fd8097cf</code>（16:24:25）期间，<b>StatefulSet:acme-prod/gateway</b>：worker 没有可用副本。<code>15:50:30</code> 起首个告警，<code>16:25</code> 起出现症状，截至 <code>17:07:40</code> 未恢复。影响：5xx 来自哪一层 <code>4.1%</code>（阈值 <code>0.5%</code>）。23 条告警（18 条触发中），7 个组件。
 
+<b>业务关键信号</b>
+- 内存：gateway-4 内存占 limit 与 OOM <code>97.7%</code> / 阈值 <code>90.0%</code> · working set 峰值 98% · 自 15:55
+- 内存：gateway 内存占 limit 与 OOM <code>96.5%</code> / 阈值 <code>90.0%</code> · working set 峰值 97% · 自 15:55
+- CPU：control CPU 限流 <code>79.8%</code> / 阈值 <code>25.0%</code> · 限流比例峰值 80% · 16:05–16:45
+- CPU：control-75cf7dcd98-rxw8j CPU 限流 <code>78.6%</code> / 阈值 <code>25.0%</code> · 限流比例峰值 79% · 15:55:30–16:35:30
+- 流量负载：worker 5xx 来自哪一层 <code>4.1%</code> / 阈值 <code>0.5%</code> · 边缘 5xx 峰值 4%，网关自身 5xx 未超标，重试耗尽 1% · 自 15:55
+- 阻塞：control Deployment 发布 <code>0</code> · 窗口内 spec 变更 2 次 · 16:05–16:45
+- 阻塞：control 卡在 init 容器的 Pod <code>41</code> · 1 个 Pod 的 init 容器运行超过 41 分钟 · 16:05–17:05
+- 其余：内存 3 项、CPU 2 项、阻塞 25 项，见控制台
+
 <b>时间线（UTC，10-20）</b>
 - <code>15:50:30</code> 首个告警 <b>KubeContainerOOMKilled</b> · <code>StatefulSet:acme-prod/gateway</code>，检测器建事件
 - <code>15:55</code> 首张异常卡 <code>card:38</code> <b>内存占 limit 与 OOM</b>：working set 峰值 97%，值 <code>96.5%</code>，阈值 <code>90.0%</code>
@@ -31,7 +41,7 @@
 - StatefulSet:acme-prod/gateway —managed_by→ <code>Application.argoproj.io:argocd/acme-prod</code> ⇒ 告警 ArgoCDAppDegraded
 - StatefulSet:acme-prod/gateway —managed_by→ <code>Application.argoproj.io:argocd/acme-prod</code> —manages→ <code>Deployment:acme-prod/control</code> ⇒ 告警 KubePodInitializingTooLong、KubeDeploymentReplicasUnavailable、KubeDeploymentRolloutStuck、AcmeMigrationWaitStuck、AcmeMetricsTargetDown
 - StatefulSet:acme-prod/gateway —managed_by→ <code>Application.argoproj.io:argocd/acme-prod</code> —manages→ <code>Deployment:acme-prod/worker</code> ⇒ 告警 KubePodInitializingTooLong、KubeDeploymentReplicasUnavailable、AcmeMigrationWaitStuck、AcmeMetricsTargetDown
-- StatefulSet:acme-prod/gateway —managed_by→ <code>Application.argoproj.io:argocd/acme-prod</code> —manages→ PodDisruptionBudget:acme-prod/gateway ⇒ 告警 KubePdbBlockingEviction
+- StatefulSet:acme-prod/gateway —managed_by→ <code>Application.argoproj.io:argocd/acme-prod</code> —manages→ <code>PodDisruptionBudget:acme-prod/gateway</code> ⇒ 告警 KubePdbBlockingEviction
 - component:acme-prod/worker（逻辑组件，没有拓扑边） ⇒ 告警 AcmeWorkerNoAvailableReplicas
 
 <b>解决方案</b>
@@ -55,10 +65,4 @@ runbook：argocd/argocd.md、workload/workload.md
   - 成员告警 4 条：<a href="https://alertmanager.example.test/#/alerts?filter=%7Balertname%3D%22KubeContainerOOMKilled%22%7D">KubeContainerOOMKilled</a> ×3、<a href="https://alertmanager.example.test/#/alerts?filter=%7Balertname%3D%22KubeStatefulSetReplicasNotReady%22%7D">KubeStatefulSetReplicasNotReady</a>
 <b>已执行的检查</b>
 - h1 · <b>健康与同步状态</b> @ Application.argoproj.io:argocd/acme-prod → 推翻（card:134 正常：degraded=0 outOfSync=0 seen=1，未命中异常条件） <a href="https://srenautix.example.test/incidents/e88a2a7c-0000-4000-8000-e88a2a7ca284?tab=evidence#card-134">控制台</a> <a href="https://vm.example.test/vmui/#/?g0.expr=max%20by%20(namespace%2C%20name%2C%20health_status%2C%20sync_status)%20(argocd_app_info%7Bcluster%3D~%22acme%7C%22%2Cnamespace%3D%22argocd%22%7D)&amp;g0.range_input=40m&amp;g0.end_input=2026-10-20T16%3A00%3A30.000Z">查询</a>
-- h3 · <b>重启与终止原因</b> @ StatefulSet:acme-prod/gateway → 支持（card:135 异常：窗口内重启 1 次） <a href="https://srenautix.example.test/incidents/e88a2a7c-0000-4000-8000-e88a2a7ca284?tab=evidence#card-135">控制台</a> <a href="https://vm.example.test/vmui/#/?g0.expr=sum%20by%20(namespace%2C%20pod%2C%20container)%20(increase(kube_pod_container_status_restarts_total%7Bcluster%3D~%22acme%7C%22%2Cnamespace%3D%22acme-prod%22%2Cpod%3D~%22gateway-%5B0-9%5D%2B%22%7D%5B40m%5D))&amp;g0.range_input=40m&amp;g0.end_input=2026-10-20T16%3A00%3A30.000Z">查询</a>
-- h4 · <b>PDB 健康副本</b> @ PodDisruptionBudget:acme-prod/gateway → 支持（card:136 异常：健康副本比要求少 1 个） <a href="https://srenautix.example.test/incidents/e88a2a7c-0000-4000-8000-e88a2a7ca284?tab=evidence#card-136">控制台</a> <a href="https://vm.example.test/vmui/#/?g0.expr=max%20by%20(namespace%2C%20poddisruptionbudget)%20(kube_poddisruptionbudget_status_desired_healthy%7Bcluster%3D~%22acme%7C%22%2Cnamespace%3D%22acme-prod%22%2Cpoddisruptionbudget%3D%22gateway%22%7D%20-%20kube_poddisruptionbudget_status_current_healthy%7Bcluster%3D~%22acme%7C%22%2Cnamespace%3D%22acme-prod%22%2Cpoddisruptionbudget%3D%22gateway%22%7D)&amp;g0.range_input=40m&amp;g0.end_input=2026-10-20T16%3A00%3A30.000Z">查询</a>
-<b>h4 PodDisruptionBudget:acme-prod/gateway</b> · 支持 · 支持证据 3、相反卡 0、检查 1 项
-  - + card:136 <b>PDB 健康副本</b> · PodDisruptionBudget:acme-prod/gateway：健康副本比要求少 1 个 · 15:20:30–16:00:30 · 异常 <a href="https://srenautix.example.test/incidents/e88a2a7c-0000-4000-8000-e88a2a7ca284?tab=evidence#card-136">控制台</a> <a href="https://vm.example.test/vmui/#/?g0.expr=max%20by%20(namespace%2C%20poddisruptionbudget)%20(kube_poddisruptionbudget_status_desired_healthy%7Bcluster%3D~%22acme%7C%22%2Cnamespace%3D%22acme-prod%22%2Cpoddisruptionbudget%3D%22gateway%22%7D%20-%20kube_poddisruptionbudget_status_current_healthy%7Bcluster%3D~%22acme%7C%22%2Cnamespace%3D%22acme-prod%22%2Cpoddisruptionbudget%3D%22gateway%22%7D)&amp;g0.range_input=40m&amp;g0.end_input=2026-10-20T16%3A00%3A30.000Z">查询</a>
-  - + card:88 <b>PDB 健康副本</b> · PodDisruptionBudget:acme-prod/gateway：健康副本比要求少 1 个 · 15:20:30–16:00:30 · 异常 <a href="https://srenautix.example.test/incidents/e88a2a7c-0000-4000-8000-e88a2a7ca284?tab=evidence#card-88">控制台</a> <a href="https://vm.example.test/vmui/#/?g0.expr=max%20by%20(namespace%2C%20poddisruptionbudget)%20(kube_poddisruptionbudget_status_desired_healthy%7Bcluster%3D~%22acme%7C%22%2Cnamespace%3D%22acme-prod%22%2Cpoddisruptionbudget%3D%22gateway%22%7D%20-%20kube_poddisruptionbudget_status_current_healthy%7Bcluster%3D~%22acme%7C%22%2Cnamespace%3D%22acme-prod%22%2Cpoddisruptionbudget%3D%22gateway%22%7D)&amp;g0.range_input=40m&amp;g0.end_input=2026-10-20T16%3A00%3A30.000Z">查询</a>
-  - 成员告警 1 条：<a href="https://alertmanager.example.test/#/alerts?filter=%7Balertname%3D%22KubePdbBlockingEviction%22%7D">KubePdbBlockingEviction</a>
 …其余内容见控制台</blockquote>

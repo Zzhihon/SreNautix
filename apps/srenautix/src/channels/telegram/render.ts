@@ -9,6 +9,7 @@ import type {
   Rendered,
   RenderOptions,
 } from '../../notify/channel.js';
+import type { ExternalDigestView } from '../../notify/external.js';
 import type { ButtonTarget, DesiredIncidentMessage } from '../../notify/ports.js';
 import { shortId } from '../../notify/shortid.js';
 import { clip, hm, oneLine, publicHttpsUrl, t, ymdhm } from '../../notify/text.js';
@@ -253,6 +254,36 @@ export function renderDigest(chat: ChatTarget, d: DigestInput, prefix: string): 
       folded: false,
       lines: [{ runs: [plain(t.misc(l, 'console')), code(d.consoleUrl)] }],
     });
+  }
+  const { html } = buildHtml(parts, MAX_TEXT_UNITS);
+  const payload: TelegramPayload = { text: html, parse_mode: 'HTML', reply_markup: { inline_keyboard: keyboard } };
+  return { payload, hash: payloadHash(payload), buttons: [] };
+}
+
+/** 外部上游的周期汇总（ADR 0147）：粗体标题，其后是总数、业务影响与每个上游一行。 */
+export function renderExternalDigest(chat: ChatTarget, d: ExternalDigestView, prefix: string): Rendered {
+  const l = chat.language;
+  const parts: Part[] = [
+    {
+      priority: 0,
+      omitted: '',
+      more: '',
+      title: null,
+      folded: false,
+      lines: [{ runs: [...(prefix ? [plain(`${prefix} `)] : []), bold(clip(oneLine(d.title), 200))] }],
+    },
+    {
+      priority: 1,
+      omitted: t.misc(l, 'truncated').trim(),
+      more: t.misc(l, 'more'),
+      title: null,
+      folded: false,
+      lines: d.blocks.flatMap((b) => blockLines(b, l)),
+    },
+  ];
+  const keyboard: TgButton[][] = [];
+  if (d.consoleUrl && publicHttpsUrl(d.consoleUrl)) {
+    keyboard.push([{ text: t.misc(l, 'open_console'), url: d.consoleUrl }]);
   }
   const { html } = buildHtml(parts, MAX_TEXT_UNITS);
   const payload: TelegramPayload = { text: html, parse_mode: 'HTML', reply_markup: { inline_keyboard: keyboard } };

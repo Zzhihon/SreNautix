@@ -1,0 +1,20 @@
+[
+  { "card_id": "cchp/db-saturation/usage", "title": ["锁表、连接与主库内存", "Lock table, connections and primary memory"], "kind": "cluster", "name": "cchp-postgres", "namespace": "cchp-data", "verdict": "normal", "value": "38.0%" },
+  { "card_id": "cchp/db-saturation/waits", "title": ["锁等待与长事务", "Lock waits and long transactions"], "kind": "cluster", "name": "cchp-postgres", "namespace": "cchp-data", "verdict": "normal", "value": "0" },
+  { "card_id": "cchp/db-saturation/app-pool", "title": ["应用侧连接池", "App-side connection pool"], "kind": "cluster", "name": "cchp-postgres", "namespace": "cchp-data", "verdict": "normal", "value": "52.0%" },
+  { "card_id": "cchp/db-wal/backlog", "title": ["待归档段数与 pg_wal 大小", "Ready segments and pg_wal size"], "kind": "cluster", "name": "cchp-postgres", "namespace": "cchp-data", "verdict": "normal", "value": "3" },
+  { "card_id": "cchp/db-failover/phase-and-primary", "title": ["CNPG 阶段与主库", "CNPG phase and primary"], "kind": "cluster", "name": "cchp-postgres", "namespace": "cchp-data", "verdict": "normal", "value": "1" },
+  { "card_id": "cchp/db-backup/freshness", "title": ["最近一次备份", "Latest backup"], "kind": "cluster", "name": "cchp-postgres", "namespace": "cchp-data", "verdict": "normal", "value": "5 h" },
+  { "card_id": "cchp/cache/memory", "title": ["内存与淘汰", "Memory and evictions"], "kind": "cluster", "name": "dragonfly", "namespace": "cchp-data", "verdict": "normal", "value": "47.0%" },
+  { "card_id": "cchp/cache/gateway-pool", "title": ["网关侧连接池与大键", "Gateway pool and big keys"], "kind": "cluster", "name": "dragonfly", "namespace": "cchp-data", "verdict": "normal", "value": "0" },
+  { "card_id": "cchp/release/versions", "title": ["应用版本是否一致", "Are app versions consistent"], "kind": "component", "name": "release", "namespace": null, "verdict": "normal", "value": "1" },
+  { "card_id": "cchp/release/errors-before-after", "title": ["开始前后的网关自身 5xx 比例", "Gateway own 5xx ratio before and after the start"], "kind": "component", "name": "release", "namespace": null, "verdict": "normal", "value": "0.1%" },
+  { "card_id": "cchp/release/latency-before-after", "title": ["开始前后的上游 p95 耗时", "Upstream p95 duration before and after the start"], "kind": "component", "name": "release", "namespace": null, "verdict": "undeterminable", "value": null },
+  { "card_id": "cchp/platform/apiserver", "title": ["apiserver 可用与 5xx", "apiserver availability and 5xx"], "kind": "instance", "name": "control-plane-01", "namespace": null, "verdict": "normal", "value": "0.0%" },
+  { "card_id": "workload/pod-pending/pdb", "title": ["PDB 健康副本", "PDB healthy pods"], "kind": "PodDisruptionBudget", "name": "gateway", "namespace": "cchp-prod", "verdict": "normal", "value": "0", "category": "blocking" },
+  { "card_id": "workload/capacity/hpa", "title": ["HPA 上限", "HPA ceiling"], "kind": "HorizontalPodAutoscaler", "name": "gateway", "namespace": "cchp-prod", "verdict": "normal", "value": "3", "category": "cpu" },
+  { "card_id": "workload/capacity/hpa-throttling", "title": ["伸缩对象的 CPU 限流", "CPU throttling of the scaled workload"], "kind": "HorizontalPodAutoscaler", "name": "gateway", "namespace": "cchp-prod", "verdict": "normal", "value": "8.0%", "category": "cpu" },
+  { "card_id": "workload/capacity/hpa-latency", "title": ["伸缩对象的请求延迟对比基线", "Request latency of the scaled workload against baseline"], "kind": "HorizontalPodAutoscaler", "name": "gateway", "namespace": "cchp-prod", "verdict": "undeterminable", "value": null, "category": "traffic" },
+  { "card_id": "workload/release/serving-versions", "title": ["就绪 Pod 运行的版本", "Versions run by ready pods"], "kind": "StatefulSet", "name": "gateway", "namespace": "cchp-prod", "verdict": "normal", "value": "1" },
+  { "card_id": "workload/release/replicasets", "title": ["新旧 ReplicaSet 的就绪", "Old and new ReplicaSets"], "kind": "StatefulSet", "name": "gateway", "namespace": "cchp-prod", "verdict": "normal", "value": "0", "category": "blocking" }
+]

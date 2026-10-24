@@ -34,6 +34,8 @@ export interface CardOutcome {
   display_state: DisplayState;
   reason: { kind: ReasonKind; text: string };
   value: string | null;
+  /** 主值格式化之前的数值；没有主值或不是有限数时为 null */
+  value_number: number | null;
   threshold: number | null;
   /** 对比基线（display.baseline）；没有或不可用时为 null */
   baseline: number | null;

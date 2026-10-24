@@ -1,4 +1,5 @@
 import type { Channel, Disposition, NotifyMessage, Severity } from '@srenautix/contract';
+import type { ExternalWindowStats } from './external.js';
 
 /**
  * 通知层与事件、提议、反馈之间的接口。消息内容（渠道无关的 NotifyMessage）由 notify/compose.ts 从事件状态生成；
@@ -23,6 +24,11 @@ export interface DesiredIncidentMessage {
   /** 消息中按钮作用的对象，渠道把它们登记到按钮表，回调时原样交回。 */
   targets: ButtonTarget[];
   language: 'zh' | 'en';
+  /**
+   * external：根因是外部上游且没有业务影响（ADR 0147），不单独推送，进入周期汇总；已经有消息的事件照常编辑。
+   * 省略或 null 时照常推送
+   */
+  digest?: 'external' | null;
 }
 
 /** 按钮作用的对象：kind 与 NotifyButton.kind 一致。 */
@@ -108,4 +114,6 @@ export interface MessageSource {
   desired(language: 'zh' | 'en'): Promise<DesiredIncidentMessage[]>;
   /** 某条消息第一次成功送达：提议的 TTL 从此开始计算。 */
   delivered(incidentId: string, proposalIds: string[], at: Date): Promise<void>;
+  /** 外部上游在 [from, to) 内的汇总统计（ADR 0147）；没有启用外部上游汇总时不实现 */
+  externalWindow?(from: Date, to: Date): Promise<ExternalWindowStats>;
 }

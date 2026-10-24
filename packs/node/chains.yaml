@@ -28,6 +28,7 @@ chains:
         egress: allow
       - id: cpu-memory
         title: { zh-CN: CPU 与内存, en: CPU and memory }
+        category: cpu
         applies_to: { kinds: [Node] }
         params: { cpu_ratio: 0.9, memory_ratio: 0.9 }
         check:
@@ -56,6 +57,7 @@ chains:
         egress: allow
       - id: neighbours
         title: { zh-CN: 同节点 CPU 用量最大的 Pod, en: Top CPU pods on the node }
+        category: cpu
         note:
           {
             zh-CN: 单个 Pod 的 CPU 超过 cores 核时判为吵闹邻居,
@@ -91,6 +93,7 @@ chains:
     cards:
       - id: space
         title: { zh-CN: 文件系统余量, en: Filesystem headroom }
+        category: storage
         applies_to: { kinds: [Node] }
         params: { avail_ratio: 0.1 }
         check:
@@ -124,6 +127,7 @@ chains:
         egress: allow
       - id: fill-forecast
         title: { zh-CN: 写满预测, en: Fill forecast }
+        category: storage
         note:
           {
             zh-CN: 按近 6 小时趋势，预计 hours 小时内写满判为异常,
@@ -154,6 +158,7 @@ chains:
         egress: allow
       - id: readonly
         title: { zh-CN: 只读或设备错误, en: Read-only or device errors }
+        category: storage
         applies_to: { kinds: [Node] }
         refs:
           - { name: ro, signal: node_fs_readonly, mode: range, empty_is: normal }
@@ -172,6 +177,7 @@ chains:
         egress: allow
       - id: disk-io
         title: { zh-CN: 磁盘忙比例, en: Disk busy ratio }
+        category: storage
         applies_to: { kinds: [Node] }
         params: { busy_ratio: 0.9 }
         check:

@@ -381,9 +381,10 @@ issues:
 - **后续进展**：issue 开出之后结束的研判（新的结论档位与根因）、事件恢复、关联的 PR 与 gitops_pr 提议各追加一条评论，按 (事件, 键) 去重；评论同样带标记，重试时找回已写入的评论。
 - **关联**：server 发起的拓扑覆盖 PR 与 gitops_pr 提议的参数描述里写 `Refs #<issue>`（跨仓库时 `owner/name#<issue>`），GitHub 在 issue 上显示关联；PR 先于 issue 开出时，issue 开出后给 PR 描述补上 Refs（`github.pr_refs`）。gitops_pr 的 Refs 在创建提议时写入参数，随参数一起被审批；幂等键按调用方给出的参数计算。
 - **限速**：最近 1 小时已开满 `max_per_hour` 个 issue 时，新的事件记为 `skipped`，只记录（`github.issue_skipped`、`srenautix_github_issues_total{outcome="skipped_rate_limit"}`、日志），之后不再为它开 issue。评论不受限速。
+- **外部上游**（ADR 0147）：根因是外部上游且没有业务影响的事件（判定见 `docs/server/notify.md` 的“外部上游的周期汇总”）不开 issue，进入通知的周期汇总。事件未恢复时每 10 分钟再判定一次，期间出现业务影响就照常开出；恢复后记为 `skipped`（`github.issue_skipped` 的 `reason: external_root`、`srenautix_github_issues_total{outcome="skipped_external"}`）。需要改仓库的修复提议（`repo_change`）不受影响。
 - **失败与重试**：GitHub 返回错误或不可达时按退避重试（30 秒起，每次翻倍，最长 30 分钟），最多 8 次，用尽后记为 `failed`（`github.issue_failed`）。最近 1 小时内重试 3 次以上或放弃的 issue 与评论使状态条显示 `ChannelDeliveryFailed`（channel `github-issues`）。
 - 主实例运行后台循环；控制台发起拓扑覆盖 PR、提交 gitops_pr 提议时在当前副本上立即尝试开一次。每次开出、跳过、放弃、评论与补 Refs 写入治理审计。
-- 指标：`srenautix_github_issues_total{repo,outcome}`（opened、skipped_rate_limit、retry、failed、body_updated）、`srenautix_github_issue_comments_total{repo,outcome}`（posted、retry、failed）。
+- 指标：`srenautix_github_issues_total{repo,outcome}`（opened、skipped_rate_limit、skipped_external、retry、failed、body_updated）、`srenautix_github_issue_comments_total{repo,outcome}`（posted、retry、failed）。
 
 ## 集成页
 

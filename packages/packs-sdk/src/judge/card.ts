@@ -309,6 +309,7 @@ export function judgeCard(card: CompiledCard, input: JudgeInput): CardOutcome {
   );
   const empty: Omit<CardOutcome, 'verdict' | 'display_state' | 'reason'> = {
     value: null,
+    value_number: null,
     threshold: null,
     baseline: null,
     table: null,
@@ -448,8 +449,10 @@ export function judgeCard(card: CompiledCard, input: JudgeInput): CardOutcome {
       const value = card.value ? run(card.value, ctx) : null;
       const anomaly = avail.get('anomaly_started_at');
       const started = ctx['anomaly_started_at'];
+      const raw = value && value.ok ? (typeof value.v === 'bigint' ? Number(value.v) : value.v) : null;
       return {
         value: value && value.ok ? formatValue(value.v, def.display?.unit) : null,
+        value_number: typeof raw === 'number' && Number.isFinite(raw) ? raw : null,
         threshold: num(card.threshold),
         baseline: num(card.baseline),
         table: renderTable(card, ctx, avail, locale),

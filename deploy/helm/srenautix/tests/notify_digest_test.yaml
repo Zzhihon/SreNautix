@@ -1,0 +1,54 @@
+suite: 外部上游的周期汇总（notify.digest.external_roots，ADR 0147）
+templates:
+  - templates/role-resources.yaml
+values:
+  - ../ci/base/required.yaml
+release:
+  name: t
+  namespace: srenautix
+capabilities:
+  majorVersion: "1"
+  minorVersion: "34"
+tests:
+  - it: 默认开启，周期 1 小时，没有另外的组件与告警条件
+    template: templates/role-resources.yaml
+    documentSelector: {path: metadata.name, value: t-srenautix-server-config}
+    asserts:
+      - matchRegex:
+          path: 'data["config.yaml"]'
+          pattern: '(?m)^notify:\n  digest:\n    external_roots:\n      alert_labels: \{\}\n      business_impact:\n        alert_labels: \{\}\n        impact_cards: true\n      components: \[\]\n      enabled: true\n      period: 1h$'
+
+  - it: values 的驼峰键写成 server 配置的下划线键
+    set:
+      notifyDigest:
+        externalRoots:
+          period: 30m
+          components: [component:provider]
+          alertLabels: {theme: [provider]}
+          businessImpact: {alertLabels: {layer: [L0]}, impactCards: false}
+    template: templates/role-resources.yaml
+    documentSelector: {path: metadata.name, value: t-srenautix-server-config}
+    asserts:
+      - matchRegex: {path: 'data["config.yaml"]', pattern: '(?m)^      period: 30m$'}
+      - matchRegex: {path: 'data["config.yaml"]', pattern: '(?m)^      components:\n      - component:provider$'}
+      - matchRegex: {path: 'data["config.yaml"]', pattern: '(?m)^      alert_labels:\n        theme:\n        - provider$'}
+      - matchRegex:
+          path: 'data["config.yaml"]'
+          pattern: '(?m)^      business_impact:\n        alert_labels:\n          layer:\n          - L0\n        impact_cards: false$'
+
+  - it: roles.server.config 里同名的键优先，其余的 notify 设置保留
+    set:
+      roles:
+        server:
+          config:
+            notify:
+              prefix: '[影子]'
+              digest:
+                external_roots:
+                  enabled: false
+    template: templates/role-resources.yaml
+    documentSelector: {path: metadata.name, value: t-srenautix-server-config}
+    asserts:
+      - matchRegex: {path: 'data["config.yaml"]', pattern: '(?m)^      enabled: false$'}
+      - matchRegex: {path: 'data["config.yaml"]', pattern: '(?m)^      period: 1h$'}
+      - matchRegex: {path: 'data["config.yaml"]', pattern: "(?m)^  prefix: '\\[影子\\]'$"}

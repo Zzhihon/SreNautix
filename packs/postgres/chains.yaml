@@ -113,6 +113,7 @@ chains:
     cards:
       - id: connections
         title: { zh-CN: 连接占 max_connections, en: Connections vs max_connections }
+        category: traffic
         applies_to: { kinds: [Cluster, Pod, StatefulSet] }
         params: { ratio: 0.85 }
         check:
@@ -152,6 +153,7 @@ chains:
         egress: allow
       - id: long-transactions
         title: { zh-CN: 最长事务, en: Longest transaction }
+        category: blocking
         note: { zh-CN: 长事务阻止 VACUUM 并长期持有锁, en: Long transactions block vacuum and hold locks }
         applies_to: { kinds: [Cluster, Pod, StatefulSet] }
         params: { seconds: 300 }
@@ -176,6 +178,7 @@ chains:
         egress: allow
       - id: lock-waits
         title: { zh-CN: 锁等待与死锁, en: Lock waits and deadlocks }
+        category: blocking
         applies_to: { kinds: [Cluster, Pod, StatefulSet] }
         refs:
           - { name: ratio, signal: connections_ratio, mode: instant }
@@ -193,6 +196,7 @@ chains:
         egress: allow
       - id: rollbacks
         title: { zh-CN: 回滚比例, en: Rollback ratio }
+        category: traffic
         applies_to: { kinds: [Cluster, Pod, StatefulSet] }
         params: { ratio: 0.1 }
         check:
@@ -221,6 +225,7 @@ chains:
     cards:
       - id: archiving
         title: { zh-CN: WAL 归档, en: WAL archiving }
+        category: storage
         note:
           {
             zh-CN: 归档失败或待归档段堆积时，pg_wal 会持续增长直到写满卷,
@@ -257,6 +262,7 @@ chains:
         egress: allow
       - id: wal-dir
         title: { zh-CN: pg_wal 大小, en: pg_wal size }
+        category: storage
         applies_to: { kinds: [Cluster, Pod] }
         params: { bytes: 8589934592 }
         refs:
@@ -276,6 +282,7 @@ chains:
     cards:
       - id: freshness
         title: { zh-CN: 最近备份, en: Latest backup }
+        category: storage
         applies_to: { kinds: [Cluster] }
         params: { max_hours: 36 }
         refs:

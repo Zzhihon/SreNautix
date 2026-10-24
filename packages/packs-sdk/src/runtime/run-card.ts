@@ -295,6 +295,8 @@ export async function runCard(input: RunCardInput): Promise<RunCardResult> {
     conditions: outcome.conditions,
     baseline: outcome.baseline,
     impact: e.def.impact ?? false,
+    category: e.def.category ?? null,
+    value_number: outcome.value_number,
     outcome,
     refs,
   };

@@ -133,5 +133,34 @@ CREATE TABLE server.telegram_poll_state (
 );
 `,
     },
+    {
+      version: 2,
+      name: 'external upstream digests',
+      phase: 'expand',
+      // 外部上游的周期汇总（ADR 0147）：notify_messages 增加 kind external_digest（没有风暴），
+      // 每个时间段的统计存一份，汇总消息与下一时段的对比用同一份。放宽约束，N-1 版本照常运行
+      sql: `
+DO $$
+DECLARE c record;
+BEGIN
+  FOR c IN SELECT conname FROM pg_constraint
+            WHERE conrelid = 'server.notify_messages'::regclass AND contype = 'c'
+              AND (pg_get_constraintdef(oid) LIKE '%(kind = ANY %' OR pg_get_constraintdef(oid) LIKE '%storm_id IS NOT NULL%')
+  LOOP
+    EXECUTE format('ALTER TABLE server.notify_messages DROP CONSTRAINT %I', c.conname);
+  END LOOP;
+END $$;
+ALTER TABLE server.notify_messages
+  ADD CONSTRAINT notify_messages_kind_check CHECK (kind IN ('incident', 'digest', 'external_digest')),
+  ADD CONSTRAINT notify_messages_storm_check CHECK (kind <> 'digest' OR storm_id IS NOT NULL);
+
+CREATE TABLE server.notify_external_windows (
+  window_start timestamptz PRIMARY KEY,
+  window_end timestamptz NOT NULL CHECK (window_end > window_start),
+  stats jsonb NOT NULL,
+  created_at timestamptz NOT NULL
+);
+`,
+    },
   ],
 };

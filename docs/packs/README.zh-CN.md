@@ -184,7 +184,7 @@ flowchart TD
 - `observations`：`let` 绑定的标量取值（按定义顺序最多 16 个，不可用时为 null）；
 - `params`：生效的参数（判定条件里的阈值）；
 - `conditions`：求值过的条件（`undeterminable_if` 全部，`abnormal_if` 到第一条命中为止），每条记录 `hit`、`miss` 或 `unavailable`；命中时附 `say`，没有命中时附规则的 `normal_say`（写了才有）；
-- `baseline`、`unit`、`impact`：见下文。
+- `baseline`、`unit`、`impact`、`category`、`value_number`：见下文。
 
 ```yaml
 abnormal_if:
@@ -228,6 +228,7 @@ abnormal_if:
 - `display.value` 与 `display.threshold` 是 CEL，`unit` 取 `none`、`percent`、`ratio`、`bytes`、`seconds`、`count`、`per_second`。`display.value` 写命中条件所比较的那个量，阈值与它同单位。
 - `display.baseline` 是对比基线的 CEL（例如前一天的中位数），结果写入 `baseline`，通知里与实测值并列。
 - `impact: true` 标出衡量用户可见影响的卡（错误率、可用性、业务量）：判为异常时，通知的问题陈述把它的标题与值写成影响范围。
+- `category` 是业务关键信号的类别（契约 2.27.0，ADR 0148），取 `storage`（PVC 与卷容量、IO、对象存储）、`memory`（使用占 limit、OOM）、`cpu`（使用、节流、HPA 饱和）、`traffic`（请求量、错误率、延迟）、`blocking`（队列积压、锁等待、Pending 与 Init 卡住、PDB 阻塞驱逐、rollout 停滞）之一。卡判为异常，或者正常但主值不低于阈值的 80% 时，进入事件消息的“业务关键信号”段（`docs/server/notify.md`）。不写时按卡片 id、再按证据链 id 里的词推断（例如 `memory`、`oom` 为内存，`wal`、`backup`、`disk` 为存储，`pending`、`pdb`、`rollout`、`waits` 为阻塞，`error`、`latency`、`ttft` 为流量负载）；推断不出就不进入这一段。重启、就绪这类不属于五类的卡不要写。结果里另有 `value_number`（主值格式化之前的数值），用于判断是否接近阈值。
 - `display.table` 是声明式表格：`rows_from` 选择一个引用，每列一个 CEL（`row` 为当前序列），`sort_by` 与 `limit` 控制排序与行数。
 - `links` 中的 `explore` 由运行时生成指标查询链接，`runbook` 指向本包的处置手册。
 - `egress: deny` 的卡片内容不进入模型上下文。
@@ -254,7 +255,7 @@ component_types:
 | `alert_label` | 实体所在告警的标签 |
 | `signal` + `label` | 在事件锚点对本包的 metrics 信号做 instant 查询，备选按顺序尝试，取第一条序列的 `label` 标签 |
 
-组件在集群之外（例如外部 API 服务方）时，组件类型声明 `external: true`：研判根因落在这种组件上、结论为 likely 及以上时，集群内没有可处置的对象，处置推导以它为 ignore 的依据（ADR 0138）。
+组件在集群之外（例如外部 API 服务方）时，组件类型声明 `external: true`：研判根因落在这种组件上、结论为 likely 及以上时，集群内没有可处置的对象，处置推导以它为 ignore 的依据（ADR 0138）。根因落在这种组件上的事件也不逐条推送、不开 issue，进入通知的周期汇总，伴随业务影响时照常即时推送（ADR 0147，`docs/server/notify.md`）。
 
 `lint` 检查 signal 来源是本包的 metrics 信号，并按组件类型的 kind 渲染、严格解析每个备选。server 用 packs-sdk 的 `resolveDisplayName(set, 组件类型, {entity, labels, annotations}, 数据源, 时刻)` 求值；数据源报错只让这个来源落空，名称只用于显示，不影响研判。
 

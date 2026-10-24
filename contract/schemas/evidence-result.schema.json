@@ -122,6 +122,15 @@
     "impact": {
       "type": "boolean",
       "description": "卡片标为影响类（impact: true），异常时它的值进入通知的影响范围"
+    },
+    "category": {
+      "type": ["string", "null"],
+      "description": "卡片定义的业务关键信号类别（EvidenceCardDefinition.category）；没有时为 null，通知按证据链名推断（ADR 0148）",
+      "enum": ["storage", "memory", "cpu", "traffic", "blocking", null]
+    },
+    "value_number": {
+      "type": ["number", "null"],
+      "description": "主值（display.value）格式化之前的数值，与 threshold 同单位；没有主值或不是有限数时为 null。通知用它判断正常卡是否接近阈值"
     }
   },
   "$defs": {

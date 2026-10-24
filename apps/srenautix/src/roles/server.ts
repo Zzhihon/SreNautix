@@ -44,6 +44,7 @@ import type { RoleArgs } from '../main.js';
 import { ServerMetrics, startMetricsServer } from '../metrics.js';
 import { ServerNotifyActions } from '../notify/actions.js';
 import { NotifyService } from '../notify/index.js';
+import { ExternalRoots, externalTypeLookup } from '../notify/external.js';
 import { PgMessageSource, ReportSource } from '../notify/source.js';
 import { Catalog, DEFAULT_CATALOG_PATH } from '../proposals/catalog.js';
 import { FeedbackService } from '../proposals/feedback.js';
@@ -247,6 +248,9 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
     }
     return reports.message(incidentId, language);
   };
+  // 外部上游的事件不开 issue（ADR 0147）：消息来源在领域包加载之后创建
+  let messageSource: PgMessageSource | null = null;
+  const issueExternal = (incidentId: string) => messageSource?.externalState(incidentId) ?? Promise.resolve(null);
   const issues =
     github && c.issues?.enabled
       ? new IssueService(
@@ -264,6 +268,7 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
           metrics,
           issueReport,
           (clusterId, key, at) => topology.ownerOf(clusterId, key, at),
+          issueExternal,
         )
       : null;
   const prom = c.datasources.prometheus;
@@ -420,6 +425,26 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
     { prefix: c.notify.prefix, consoleUrl: c.public_url },
     (clusterId, key, at) => topology.ownerOf(clusterId, key, at),
   );
+  // 外部上游的周期汇总（ADR 0147）：组件类型取拓扑节点上匹配出的类型，节点不在拓扑里（provider、model 这类
+  // 只来自告警的实体）时按 kind 与名字匹配领域包的组件类型
+  const xr = c.notify.digest.external_roots;
+  const externalRoots = xr.enabled
+    ? new ExternalRoots(
+        pool,
+        {
+          enabled: true,
+          periodMs: parseDuration('notify.digest.external_roots.period', xr.period),
+          components: xr.components,
+          alertLabels: xr.alert_labels,
+          impact: { alertLabels: xr.business_impact.alert_labels, impactCards: xr.business_impact.impact_cards },
+        },
+        externalTypeLookup(
+          () => packs.componentTypes(),
+          (clusterId, key) => topology.componentType(clusterId, key),
+        ),
+        o.now ?? Date.now,
+      )
+    : null;
   const source = new PgMessageSource(
     pool,
     {
@@ -430,7 +455,9 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
     },
     proposals,
     reports,
+    externalRoots,
   );
+  messageSource = source;
   const notify = new NotifyService({
     pool,
     config: c.notify,

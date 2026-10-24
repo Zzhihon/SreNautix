@@ -2238,6 +2238,11 @@ export type components = {
       baseline?: number | null;
       /** @description <pack>/<chain>/<card>；区分性检查产生的卡为 check/<hypothesis id>/<n> */
       card_id: string;
+      /**
+       * @description 卡片定义的业务关键信号类别（EvidenceCardDefinition.category）；没有时为 null，通知按证据链名推断（ADR 0148）
+       * @enum {string|null}
+       */
+      category?: 'storage' | 'memory' | 'cpu' | 'traffic' | 'blocking' | null;
       /** @description 求值过的判定条件，按求值顺序：undeterminable_if 全部条件，abnormal_if 到第一条命中为止 */
       conditions?: components['schemas']['Condition'][];
       /**
@@ -2283,6 +2288,8 @@ export type components = {
       unit?: 'none' | 'percent' | 'ratio' | 'bytes' | 'seconds' | 'count' | 'per_second';
       /** @description 主值的展示文本 */
       value: string | null;
+      /** @description 主值（display.value）格式化之前的数值，与 threshold 同单位；没有主值或不是有限数时为 null。通知用它判断正常卡是否接近阈值 */
+      value_number?: number | null;
       verdict: components['schemas']['Verdict'];
       window: components['schemas']['TimeWindow'];
       $defs: {

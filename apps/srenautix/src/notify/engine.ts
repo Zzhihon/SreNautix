@@ -1,6 +1,7 @@
 import { logger } from '../log.js';
 import type { ServerMetrics } from '../metrics.js';
 import type { ChannelAdapter, ChatTarget, DigestInput } from './channel.js';
+import { composeExternalDigest, lastWindow, type ExternalWindowStats } from './external.js';
 import type { Interactions } from './interactions.js';
 import type { DesiredIncidentMessage, MessageSource } from './ports.js';
 import { ChannelLimiter } from './ratelimit.js';
@@ -19,6 +20,8 @@ export interface EngineOptions {
   consoleUrl: string | null;
   /** 风暴结束后汇总消息继续编辑的时长。 */
   digestRetentionMs: number;
+  /** 外部上游周期汇总的周期（ADR 0147）；没有或为 null 时不汇总 */
+  externalDigestPeriodMs?: number | null;
   now: () => number;
 }
 
@@ -26,6 +29,8 @@ export interface EngineOptions {
 const TRANSPORT_RETRY_MS = 15_000;
 const API_ERROR_RETRY_MS = 5 * 60_000;
 const RESULTS_SHOWN = 5;
+/** 外部上游汇总在周期结束这么久之后才统计（ADR 0147） */
+export const EXTERNAL_DIGEST_GRACE_MS = 60_000;
 
 const msgKey = (channel: string, chat: string, incidentId: string) => `${channel}|${chat}|${incidentId}`;
 
@@ -79,18 +84,71 @@ export class NotifyEngine {
       for (const chat of a.chats) {
         await this.syncChat(a, chat, desired.get(chat.language) ?? [], now);
       }
+    }
+    await this.syncExternalDigest(now);
+    for (const a of this.adapters) {
       this.metrics.notifyPending.set({ channel: a.channel }, await this.store.pendingCount(a.channel));
     }
   }
 
-  private async syncChat(
-    a: ChannelAdapter,
-    chat: ChatTarget,
-    desired: DesiredIncidentMessage[],
-    now: Date,
-  ): Promise<void> {
+  /**
+   * 外部上游的周期汇总（ADR 0147）：上一个完整周期 [from, to) 结束后，统计一次并存库（同一周期只统计一次），
+   * 有外部上游出过问题时每个渠道目标发一条汇总消息，之后不再编辑。周期结束超过半个周期（例如进程停了）的时段不再补发
+   */
+  private async syncExternalDigest(now: Date): Promise<void> {
+    const period = this.opts.externalDigestPeriodMs;
+    if (!period || !this.source.externalWindow) {
+      return;
+    }
+    const { from, to } = lastWindow(now.getTime(), period);
+    // 周期结束后等一会儿，让周期末尾的告警与事件写进库；结束太久的时段不再补发
+    if (now.getTime() - to < EXTERNAL_DIGEST_GRACE_MS || now.getTime() - to > period / 2) {
+      return;
+    }
+    const statsOf = async (f: number, t: number): Promise<ExternalWindowStats> =>
+      (await this.store.externalWindow(new Date(f))) ??
+      (await this.store.saveExternalWindow(await this.source.externalWindow!(new Date(f), new Date(t)), now));
+    const cur = await statsOf(from, to);
+    if (!cur.roots.length) {
+      return;
+    }
+    const prev = await statsOf(from - period, from);
+    const subject = new Date(from).toISOString();
+    const rows: DesiredRow[] = [];
+    for (const a of this.adapters) {
+      for (const chat of a.chats) {
+        if (await this.store.hasMessage(a.channel, chat.chat, 'external_digest', subject)) {
+          continue;
+        }
+        const view = composeExternalDigest(cur, prev, chat.language, this.opts.consoleUrl);
+        const r = a.renderExternalDigest(chat, view);
+        rows.push({
+          channel: a.channel,
+          chat: chat.chat,
+          kind: 'external_digest',
+          subject,
+          incidentId: null,
+          stormId: null,
+          lane: 'digest',
+          // 汇总不打扰：静默发送
+          silent: true,
+          payload: r.payload,
+          hash: r.hash,
+          proposalIds: [],
+        });
+      }
+    }
+    if (rows.length) {
+      logger.info('外部上游汇总', { from: subject, roots: cur.roots.length, chats: rows.length });
+      await this.store.upsertDesired(rows, now);
+    }
+  }
+
+  private async syncChat(a: ChannelAdapter, chat: ChatTarget, all: DesiredIncidentMessage[], now: Date): Promise<void> {
     const existing = await this.store.messages(a.channel, chat.chat, 'incident');
     const byIncident = new Map(existing.map((m) => [m.incidentId as string, m]));
+    // 外部上游的事件进入周期汇总，不单独发消息；之前已经发出的消息照常编辑（ADR 0147）
+    const desired = all.filter((d) => d.digest !== 'external' || byIncident.has(d.incidentId));
     for (const m of existing) {
       if (m.externalId) {
         this.known.set(msgKey(a.channel, chat.chat, m.incidentId as string), {

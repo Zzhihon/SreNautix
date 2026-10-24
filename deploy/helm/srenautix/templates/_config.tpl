@@ -358,6 +358,18 @@ detectors:
   equivalent_alerts: {{ toJson .equivalentAlerts }}
 {{- end }}
 {{- end }}
+{{- with $v.notifyDigest.externalRoots }}
+notify:
+  digest:
+    external_roots:
+      enabled: {{ .enabled }}
+      period: {{ .period }}
+      components: {{ toJson .components }}
+      alert_labels: {{ toJson .alertLabels }}
+      business_impact:
+        alert_labels: {{ toJson .businessImpact.alertLabels }}
+        impact_cards: {{ .businessImpact.impactCards }}
+{{- end }}
 {{- with $v.remediation }}
 {{- if .enabled }}
 remediation:

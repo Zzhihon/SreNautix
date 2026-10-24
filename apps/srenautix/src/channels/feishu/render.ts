@@ -9,6 +9,7 @@ import type {
   Rendered,
   RenderOptions,
 } from '../../notify/channel.js';
+import type { ExternalDigestView } from '../../notify/external.js';
 import type { ButtonTarget, DesiredIncidentMessage } from '../../notify/ports.js';
 import { linkTarget } from '../../notify/markdown.js';
 import { shortId } from '../../notify/shortid.js';
@@ -369,6 +370,31 @@ export function renderDigestCard(chat: ChatTarget, d: DigestInput, prefix: strin
     });
   } else if (d.consoleUrl) {
     tail.push(plain(`${t.misc(l, 'console')}${d.consoleUrl}`));
+  }
+  const payload = fit(header, [{ priority: 0, omitted: '', elements: els }], tail);
+  return { payload, hash: payloadHash(payload), buttons: [] };
+}
+
+/** 外部上游的周期汇总卡片（ADR 0147）：块都是模板文字，写成 markdown，列表项一行一个上游。 */
+export function renderExternalDigestCard(chat: ChatTarget, d: ExternalDigestView, prefix: string): Rendered {
+  const l = chat.language;
+  const header: El = {
+    title: { tag: 'plain_text', content: `${prefix ? `${prefix} ` : ''}${clip(oneLine(d.title), 160)}` },
+    template: 'blue',
+  };
+  const md = d.blocks.map((b) => {
+    const body = feishuMarkdown(b.runs ?? [{ text: b.text, style: 'plain', href: null }]);
+    return b.type === 'list_item' ? `- ${body}` : body;
+  });
+  const els: El[] = [{ tag: 'markdown', content: md.join('\n') }];
+  const tail: El[] = [];
+  if (d.consoleUrl && publicHttpsUrl(d.consoleUrl)) {
+    tail.push({
+      tag: 'button',
+      type: 'default',
+      text: { tag: 'plain_text', content: t.misc(l, 'open_console') },
+      behaviors: [{ type: 'open_url', default_url: d.consoleUrl }],
+    });
   }
   const payload = fit(header, [{ priority: 0, omitted: '', elements: els }], tail);
   return { payload, hash: payloadHash(payload), buttons: [] };

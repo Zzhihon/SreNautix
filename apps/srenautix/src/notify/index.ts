@@ -155,6 +155,9 @@ export class NotifyService {
       prefix: deps.config.prefix,
       consoleUrl: deps.publicUrl,
       digestRetentionMs: parseDuration('notify.resolved_retention', deps.config.resolved_retention),
+      externalDigestPeriodMs: deps.config.digest.external_roots.enabled
+        ? parseDuration('notify.digest.external_roots.period', deps.config.digest.external_roots.period)
+        : null,
       now: this.now,
     });
     if (tg?.enabled && tgAdapter) {

@@ -1328,7 +1328,7 @@ export interface ModelUsage {
   reasoning_tokens: number;
 }
 /**
- * 渠道无关的消息，渠道适配器负责转义和渲染。五段依次为现状、关键问题、拓扑联系、解决方案、证据链；带 runs 的块是富文本，渠道按自己的格式渲染（Telegram HTML、飞书卡片 markdown、GitHub Markdown），没有 runs 时按 text 渲染
+ * 渠道无关的消息，渠道适配器负责转义和渲染。各段依次为现状、业务关键信号（有异常或接近阈值的信号时）、关键问题、拓扑联系、解决方案、证据链；带 runs 的块是富文本，渠道按自己的格式渲染（Telegram HTML、飞书卡片 markdown、GitHub Markdown），没有 runs 时按 text 渲染
  */
 export interface NotifyMessage {
   incident_id: Uuid;
@@ -1360,9 +1360,9 @@ export interface NotifyRun {
 }
 export interface NotifySection {
   /**
-   * situation 现状；key_issue 关键问题（结论、结论档位的依据、假设）；topology 拓扑联系；remedy 解决方案；evidence 证据链；root_cause 是旧的四段结构中的问题根源
+   * situation 现状；signals 业务关键信号（存储、内存、CPU、流量负载、阻塞中异常或接近阈值的卡，在现状之后、关键问题之前）；key_issue 关键问题（结论、结论档位的依据、假设）；topology 拓扑联系；remedy 解决方案；evidence 证据链；root_cause 是旧的四段结构中的问题根源
    */
-  kind: 'situation' | 'key_issue' | 'topology' | 'remedy' | 'evidence' | 'root_cause';
+  kind: 'situation' | 'signals' | 'key_issue' | 'topology' | 'remedy' | 'evidence' | 'root_cause';
   /**
    * 段标题；没有时渠道按 kind 取固定文案
    */
@@ -2490,6 +2490,14 @@ export interface EvidenceResult {
    * 卡片标为影响类（impact: true），异常时它的值进入通知的影响范围
    */
   impact?: boolean;
+  /**
+   * 卡片定义的业务关键信号类别（EvidenceCardDefinition.category）；没有时为 null，通知按证据链名推断（ADR 0148）
+   */
+  category?: 'storage' | 'memory' | 'cpu' | 'traffic' | 'blocking' | null;
+  /**
+   * 主值（display.value）格式化之前的数值，与 threshold 同单位；没有主值或不是有限数时为 null。通知用它判断正常卡是否接近阈值
+   */
+  value_number?: number | null;
 }
 /**
  * 取自卡片定义，结果脱离定义也能展示
@@ -3067,6 +3075,10 @@ export interface EvidenceCardDefinition {
    */
   impact?: boolean;
   /**
+   * 业务关键信号的类别（ADR 0148）：storage 存储（PVC 与卷容量、IO、对象存储）、memory 内存（使用占 limit、OOM）、cpu CPU（使用、节流、HPA 饱和）、traffic 流量负载（请求量、错误率、延迟）、blocking 阻塞（队列积压、锁等待、Pending 与 Init 卡住、PDB 阻塞驱逐、rollout 停滞）。异常或接近阈值时，卡片进入事件消息的“业务关键信号”段；不填时按证据链与卡片名推断
+   */
+  category?: 'storage' | 'memory' | 'cpu' | 'traffic' | 'blocking';
+  /**
    * 卡片需要的集成能力，例如 metrics.query_range、logs.match。能力不可用时卡片显示 capability_missing
    */
   requires?: string[];
@@ -3421,6 +3433,10 @@ export interface EvidenceCardDefinition1 {
    * 影响类卡片：衡量用户可见的影响（错误率、可用性、业务量）。异常时它的标题与值写进通知的影响范围
    */
   impact?: boolean;
+  /**
+   * 业务关键信号的类别（ADR 0148）：storage 存储（PVC 与卷容量、IO、对象存储）、memory 内存（使用占 limit、OOM）、cpu CPU（使用、节流、HPA 饱和）、traffic 流量负载（请求量、错误率、延迟）、blocking 阻塞（队列积压、锁等待、Pending 与 Init 卡住、PDB 阻塞驱逐、rollout 停滞）。异常或接近阈值时，卡片进入事件消息的“业务关键信号”段；不填时按证据链与卡片名推断
+   */
+  category?: 'storage' | 'memory' | 'cpu' | 'traffic' | 'blocking';
   /**
    * 卡片需要的集成能力，例如 metrics.query_range、logs.match。能力不可用时卡片显示 capability_missing
    */

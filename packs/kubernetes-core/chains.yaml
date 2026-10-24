@@ -5,6 +5,7 @@ chains:
     cards:
       - id: errors
         title: { zh-CN: apiserver 5xx 比例, en: API server 5xx ratio }
+        category: traffic
         note: { zh-CN: 全部请求中 5xx 的比例峰值；超过 error_ratio 判为异常, en: Peak share of 5xx responses }
         applies_to: { kinds: [cluster] }
         params: { error_ratio: 0.05 }
@@ -30,6 +31,7 @@ chains:
         egress: allow
       - id: latency
         title: { zh-CN: apiserver p99 延迟, en: API server p99 latency }
+        category: traffic
         applies_to: { kinds: [cluster] }
         params: { p99_seconds: 1 }
         check:
@@ -105,6 +107,7 @@ chains:
         egress: allow
       - id: disk
         title: { zh-CN: WAL fsync p99, en: WAL fsync p99 }
+        category: storage
         note:
           { zh-CN: etcd 写盘延迟；超过 fsync_seconds 时 leader 选举与 apiserver 写入都会变慢, en: etcd disk latency }
         applies_to: { kinds: [cluster, Pod] }
@@ -141,6 +144,7 @@ chains:
         egress: allow
       - id: quota
         title: { zh-CN: 数据库占配额, en: Database size vs quota }
+        category: storage
         applies_to: { kinds: [cluster, Pod] }
         params: { quota_ratio: 0.8 }
         refs:
@@ -188,6 +192,7 @@ chains:
         egress: allow
       - id: pending-pods
         title: { zh-CN: Pending 的 Pod, en: Pending pods }
+        category: blocking
         note:
           {
             zh-CN: 窗口内 Pending Pod 数的最小值超过 pending 时判为异常（持续无法调度，排除短暂的 Pending）,

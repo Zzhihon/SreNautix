@@ -479,6 +479,8 @@ export class PackEvidence implements EvidenceRunner {
           conditions: r.conditions ?? [],
           baseline: r.baseline ?? null,
           impact: r.impact ?? false,
+          category: r.category ?? null,
+          value_number: r.value_number ?? null,
         };
       } catch (err) {
         // 渲染与判定的错误由运行时记在卡片里；这里只剩窗口为空等计划本身的问题

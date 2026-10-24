@@ -176,6 +176,15 @@ describe('NotifyService', () => {
           messages_per_minute: 20,
           edit_gap: '3s',
         },
+        digest: {
+          external_roots: {
+            enabled: true,
+            period: '1h',
+            components: [],
+            alert_labels: {},
+            business_impact: { alert_labels: {}, impact_cards: true },
+          },
+        },
       },
       publicUrl: 'https://srenautix.example.com',
       source,

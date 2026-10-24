@@ -54,6 +54,11 @@
       "default": false,
       "description": "影响类卡片：衡量用户可见的影响（错误率、可用性、业务量）。异常时它的标题与值写进通知的影响范围"
     },
+    "category": {
+      "type": "string",
+      "description": "业务关键信号的类别（ADR 0148）：storage 存储（PVC 与卷容量、IO、对象存储）、memory 内存（使用占 limit、OOM）、cpu CPU（使用、节流、HPA 饱和）、traffic 流量负载（请求量、错误率、延迟）、blocking 阻塞（队列积压、锁等待、Pending 与 Init 卡住、PDB 阻塞驱逐、rollout 停滞）。异常或接近阈值时，卡片进入事件消息的“业务关键信号”段；不填时按证据链与卡片名推断",
+      "enum": ["storage", "memory", "cpu", "traffic", "blocking"]
+    },
     "requires": {
       "type": "array",
       "description": "卡片需要的集成能力，例如 metrics.query_range、logs.match。能力不可用时卡片显示 capability_missing",

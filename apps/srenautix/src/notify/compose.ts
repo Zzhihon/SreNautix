@@ -30,6 +30,7 @@ import {
   type LinkSettings,
 } from './links.js';
 import type { ButtonTarget, DesiredIncidentMessage } from './ports.js';
+import { businessSignals, SIGNAL_CATEGORIES, type SignalItem } from './signals.js';
 
 // 事件消息（ADR 0125）：现状 → 关键问题 → 拓扑联系 → 解决方案 → 证据链。全部由模板与确定性数据生成：
 // Incident、阶段 A 报告（证据卡与时间线）、研判输出（账本、检查、结论阶梯）、变更与动作目录。
@@ -87,6 +88,11 @@ export interface ComposeInput {
   actionVerify?: (actionId: string) => ActionVerify | null;
   /** 数据源、告警与变更的链接模板（控制台地址取 consoleUrl） */
   links?: Omit<LinkSettings, 'consoleUrl'>;
+  /**
+   * 根因是外部上游、但伴随业务影响而即时发送的事件（ADR 0147）：业务影响的信号（告警名或影响卡与值），横幅写
+   * “上游故障已影响业务”。其余事件为 null 或省略
+   */
+  upstreamImpact?: string[] | null;
 }
 
 const T = {
@@ -139,13 +145,23 @@ const T = {
     } as Record<string, string>,
     sec: {
       situation: '现状',
+      signals: '业务关键信号',
       timeline: '时间线',
       key_issue: '关键问题',
       topology: '拓扑联系',
       remedy: '解决方案',
       evidence: '证据链',
     },
+    signal: { storage: '存储', memory: '内存', cpu: 'CPU', traffic: '流量负载', blocking: '阻塞' } as Record<
+      string,
+      string
+    >,
+    near: '接近阈值',
+    signalCount: (cat: string, n: number) => `${cat} ${n} 项`,
+    signalsMore: (counts: string) => `其余：${counts}，见控制台`,
+    upstreamImpact: (signals: string) => `上游故障已影响业务：${signals}`,
     omitted: {
+      signals: '业务关键信号已省略，见控制台',
       timeline: '时间线已省略，见控制台',
       key_issue: '关键问题已省略，见控制台',
       topology: '拓扑联系已省略，见控制台',
@@ -349,13 +365,23 @@ const T = {
     } as Record<string, string>,
     sec: {
       situation: 'Situation',
+      signals: 'Business signals',
       timeline: 'Timeline',
       key_issue: 'Key issue',
       topology: 'Topology',
       remedy: 'Remedy',
       evidence: 'Evidence chain',
     },
+    signal: { storage: 'Storage', memory: 'Memory', cpu: 'CPU', traffic: 'Traffic', blocking: 'Blocking' } as Record<
+      string,
+      string
+    >,
+    near: 'near the threshold',
+    signalCount: (cat: string, n: number) => `${n} more ${cat.toLowerCase()}`,
+    signalsMore: (counts: string) => `${counts} in the console`,
+    upstreamImpact: (signals: string) => `Upstream failure is affecting the business: ${signals}`,
     omitted: {
+      signals: 'Business signals omitted, see the console',
       timeline: 'Timeline omitted, see the console',
       key_issue: 'Key issue omitted, see the console',
       topology: 'Topology omitted, see the console',
@@ -798,6 +824,69 @@ function topologySection(x: Ctx, sg: Subgraph | null, root: string | null, alert
     }
     out.push(item([...runs, ...tail], { scope }));
   });
+  return out;
+}
+
+// ---- 业务关键信号（ADR 0148） ----
+/**
+ * 摘要中每类最多列出的项数，其余只在全文中。每项只有类别（粗体）、数值与阈值（等宽）三个实体，
+ * 五类全满时 30 个，给消息其余部分留出 Telegram 的实体上限
+ */
+const SIGNALS_PER_CATEGORY = 2;
+
+/** 信号的对象：可读名称，没有时为实体名（不带 kind 与命名空间，消息里一行要短） */
+function signalObject(x: Ctx, r: EvidenceResult): string | null {
+  const key = entityKey(r);
+  if (!key) {
+    return null;
+  }
+  return x.names?.[key] ?? r.entity?.name ?? null;
+}
+
+/** 一行一项：类别 对象 卡片标题 数值 / 阈值 · 命中的条件 · 时间 */
+function signalLine(x: Ctx, s: SignalItem, scope: Scope): NotifyBlock {
+  const t = x.t;
+  const r = s.card;
+  const obj = signalObject(x, r);
+  const label = `${t.signal[s.category] ?? s.category}${t.colon}`;
+  const runs: NotifyRun[] = [P(obj ? `${label}${obj} ${cardTitle(r, x.lang)}` : `${label}${cardTitle(r, x.lang)}`)];
+  if (r.value) {
+    runs.push(P(' '), C(r.value));
+  }
+  if (r.threshold !== null && r.threshold !== undefined) {
+    runs.push(P(` / ${t.threshold}`), C(fmtNum(r.threshold, r.unit)));
+  }
+  if (s.near) {
+    runs.push(P(` · ${t.near}`));
+  } else {
+    // 命中条件的说明；它已经写出了主值（例如“working set 峰值 96.5%”）时不再重复。只有一两个字符的主值（计数）不算
+    const said = (r.conditions ?? []).find((c) => c.outcome === 'hit')?.say ?? r.reason.text;
+    if (said && !(r.value && r.value.length >= 3 && said.includes(r.value))) {
+      runs.push(P(` · ${said}`));
+    }
+  }
+  const at =
+    r.verdict === 'abnormal' && r.anomaly_started_at
+      ? `${t.since2}${clock(r.anomaly_started_at, x.day)}`
+      : `${clock(r.window.from, x.day)}–${clock(r.window.to, x.day)}`;
+  runs.push(P(` · ${at}`));
+  return item(runs, { scope });
+}
+
+function signalsBlocks(x: Ctx, cards: readonly EvidenceResult[]): NotifyBlock[] {
+  const items = businessSignals(cards);
+  const out: NotifyBlock[] = [];
+  const rest: string[] = [];
+  for (const cat of SIGNAL_CATEGORIES) {
+    const of = items.filter((s) => s.category === cat);
+    of.forEach((s, k) => out.push(signalLine(x, s, k < SIGNALS_PER_CATEGORY ? 'all' : 'full')));
+    if (of.length > SIGNALS_PER_CATEGORY) {
+      rest.push(x.t.signalCount(x.t.signal[cat] ?? cat, of.length - SIGNALS_PER_CATEGORY));
+    }
+  }
+  if (rest.length) {
+    out.push(item([P(x.t.signalsMore(rest.join(x.t.list)))], { scope: 'summary' }));
+  }
   return out;
 }
 
@@ -1246,6 +1335,10 @@ export function composeMessage(i: ComposeInput): { message: NotifyMessage; targe
   } else if (i.stageA.observability_blind) {
     banner = t.banner.blind;
   }
+  if (i.upstreamImpact?.length) {
+    const impact = t.upstreamImpact(i.upstreamImpact.slice(0, 3).join(t.list));
+    banner = banner ? `${impact}${i.language === 'zh' ? '；' : '; '}${banner}` : impact;
+  }
 
   // ---- 症状短语：触发中的 symptom 告警，没有时为 critical 的告警；目录标题优先 ----
   const titleOf = (a: Alert) => i.alertTitle?.(a) ?? a.alertname;
@@ -1597,8 +1690,22 @@ export function composeMessage(i: ComposeInput): { message: NotifyMessage; targe
   // ---- 证据链 ----
   const evidence = evidenceBlocks(x, out, report, i.subgraph ?? null);
 
+  // ---- 业务关键信号：现状之后、关键问题之前；没有异常或接近阈值的信号时整段不出现 ----
+  const signals = signalsBlocks(x, [...cards.values()]);
+
   const sections: NotifySection[] = [
     { kind: 'situation', title: t.sec.situation, priority: 0, blocks: situation },
+    ...(signals.length
+      ? [
+          {
+            kind: 'signals' as const,
+            title: t.sec.signals,
+            priority: 7,
+            omitted: t.omitted.signals,
+            blocks: signals,
+          },
+        ]
+      : []),
     {
       kind: 'situation',
       title: t.timelineHead(day.slice(5)),

@@ -1,3 +1,4 @@
+import type { ExternalDigestView } from './external.js';
 import type { ButtonTarget, DesiredIncidentMessage } from './ports.js';
 import type { ChannelLimits } from './ratelimit.js';
 
@@ -85,6 +86,8 @@ export interface ChannelAdapter {
     opts: RenderOptions,
   ): Rendered;
   renderDigest(chat: ChatTarget, d: DigestInput): Rendered;
+  /** 外部上游的周期汇总消息（ADR 0147）。 */
+  renderExternalDigest(chat: ChatTarget, d: ExternalDigestView): Rendered;
   /** 发送一条新消息，返回渠道的消息 id。 */
   send(chat: ChatTarget, payload: unknown, silent: boolean, dedupKey: string): Promise<string>;
   edit(chat: ChatTarget, externalId: string, payload: unknown): Promise<void>;

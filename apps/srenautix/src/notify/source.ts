@@ -7,6 +7,7 @@ import type { ProposalService } from '../proposals/service.js';
 import { pullsOf } from '../remediation/pulls.js';
 import type { TopologyStore } from '../topology/store.js';
 import { composeMessage, laneOf, type ActionVerify, type ComposeInput, type ResearchMirror } from './compose.js';
+import type { Classification, ExternalRoots, ExternalWindowStats } from './external.js';
 import type { LinkSettings } from './links.js';
 import type { DesiredIncidentMessage, MessageSource } from './ports.js';
 import { withComponentNames } from '../incident/names.js';
@@ -147,12 +148,21 @@ export class ReportSource {
  * 期望消息的来源：已有阶段 A 报告、严重度在推送范围内、没有被 SreNautix 抑制的事件；恢复或合并后在保留期内继续编辑。
  */
 export class PgMessageSource implements MessageSource {
+  /** 外部上游汇总时实现（ADR 0147） */
+  readonly externalWindow?: (from: Date, to: Date) => Promise<ExternalWindowStats>;
+
   constructor(
     private readonly pool: pg.Pool,
     private readonly s: SourceSettings,
     private readonly proposals: ProposalService,
     private readonly reports: ReportSource,
-  ) {}
+    /** 外部上游的分类（ADR 0147）；没有或没有启用时照常推送全部事件 */
+    private readonly external: ExternalRoots | null = null,
+  ) {
+    if (external?.s.enabled) {
+      this.externalWindow = (from, to) => this.window(from, to);
+    }
+  }
 
   async desired(language: 'zh' | 'en'): Promise<DesiredIncidentMessage[]> {
     const r = await this.pool.query<{ body: Incident; report: StageAReport }>(
@@ -164,10 +174,16 @@ export class PgMessageSource implements MessageSource {
       [this.s.severities, this.s.resolvedRetentionMs / 1000],
     );
     const inputs = await this.reports.inputs(r.rows, language);
+    const cls = this.external ? await this.external.classify(inputs) : new Map<string, Classification>();
     return inputs.map((input) => {
       const inc = input.incident;
-      const { message, targets } = composeMessage(input);
+      const c = cls.get(inc.incident_id);
+      // 外部上游伴随业务影响时即时推送，横幅写明“上游故障已影响业务”；没有业务影响时进入周期汇总
+      const { message, targets } = composeMessage(
+        c?.external && c.impact.length ? { ...input, upstreamImpact: c.impact } : input,
+      );
       return {
+        ...(c?.external && !c.impact.length ? { digest: 'external' as const } : {}),
         incidentId: inc.incident_id,
         clusterId: inc.cluster_id,
         label: inc.label,
@@ -185,5 +201,50 @@ export class PgMessageSource implements MessageSource {
 
   async delivered(_incidentId: string, proposalIds: string[], at: Date): Promise<void> {
     await this.proposals.delivered(proposalIds, at);
+  }
+
+  /** [from, to) 内触发过的事件（推送范围内的严重度、没有被抑制、没有合并）的外部上游统计 */
+  private async window(from: Date, to: Date): Promise<ExternalWindowStats> {
+    const r = await this.pool.query<{ body: Incident; report: StageAReport }>(
+      `SELECT i.body, s.body AS report FROM server.incidents i
+         JOIN LATERAL (SELECT body FROM server.stage_a_reports WHERE incident_id = i.incident_id ORDER BY incident_version DESC LIMIT 1) s ON true
+        WHERE i.severity = ANY($1::text[]) AND NOT i.suppressed AND i.state <> 'merged'
+          AND i.first_firing_at < $3 AND (i.ended_at IS NULL OR i.ended_at >= $2)
+        ORDER BY i.first_firing_at`,
+      [this.s.severities, from, to],
+    );
+    const inputs = await this.reports.inputs(r.rows, 'zh');
+    return (this.external as ExternalRoots).window(inputs, from, to);
+  }
+
+  /**
+   * 事件 issue 用（ADR 0147）：根因是外部上游且没有业务影响时返回事件状态（firing 或 ended），issue 不开；
+   * 其余事件、没有启用汇总时为 null，照常处理
+   */
+  async externalState(incidentId: string): Promise<'firing' | 'ended' | null> {
+    if (!this.external?.s.enabled) {
+      return null;
+    }
+    const r = await this.pool.query<{ body: Incident; report: StageAReport }>(
+      `SELECT i.body, s.body AS report FROM server.incidents i
+         JOIN LATERAL (SELECT body FROM server.stage_a_reports WHERE incident_id = i.incident_id ORDER BY incident_version DESC LIMIT 1) s ON true
+        WHERE i.incident_id = $1`,
+      [incidentId],
+    );
+    if (!r.rows.length) {
+      return null;
+    }
+    const firing = await this.pool.query<{ body: Incident; report: StageAReport }>(
+      `SELECT i.body, s.body AS report FROM server.incidents i
+         JOIN LATERAL (SELECT body FROM server.stage_a_reports WHERE incident_id = i.incident_id ORDER BY incident_version DESC LIMIT 1) s ON true
+        WHERE i.cluster_id = $1 AND i.state = 'firing' AND NOT i.suppressed AND i.incident_id <> $2`,
+      [r.rows[0]!.body.cluster_id, incidentId],
+    );
+    const inputs = await this.reports.inputs([...r.rows, ...firing.rows], 'zh');
+    const c = (await this.external.classify(inputs)).get(incidentId);
+    if (!c?.external || c.impact.length) {
+      return null;
+    }
+    return r.rows[0]!.body.state === 'firing' ? 'firing' : 'ended';
   }
 }
