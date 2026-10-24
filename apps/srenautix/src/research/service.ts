@@ -181,7 +181,20 @@ export class WorkerService {
         continue;
       }
       if (task) {
-        await this.handle(task, signal);
+        try {
+          await this.handle(task, signal);
+        } catch (e) {
+          if (signal.aborted) {
+            return;
+          }
+          // 读取研判输入（上下文）或写结果之前的错误：没有 ctx 无法走 finishFailed，这里释放租约，让 server 按退避重排
+          this.d.metrics.researchRuns.inc({ outcome: 'failed', stop: 'unhandled' });
+          logger.error('研判任务出错，已放弃这次运行', { run_id: task.run_id, error: e });
+          await this.d.hub.finish(task.run_id, task.worker_id, 'failed').catch((err: unknown) => {
+            logger.warn('释放研判任务失败，等待租约到期', { run_id: task.run_id, error: err });
+          });
+          await new Promise((r) => setTimeout(r, 5_000));
+        }
       }
     }
   }

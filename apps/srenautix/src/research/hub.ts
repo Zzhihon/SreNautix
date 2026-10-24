@@ -124,7 +124,10 @@ export class HubClient {
   }
 
   async context(runId: string): Promise<TaskContext> {
-    const r = await this.call<TaskContext>('GET', `/v1/research/tasks/${runId}/context`, undefined);
+    // 大事件的上下文要在 server 上重建子图与时间点拓扑，给足 120 秒；超时由认领循环兜住（不让进程退出）
+    const r = await this.call<TaskContext>('GET', `/v1/research/tasks/${runId}/context`, undefined, {
+      timeoutMs: 120_000,
+    });
     return r.body as TaskContext;
   }
 
