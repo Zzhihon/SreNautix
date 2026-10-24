@@ -100,6 +100,8 @@ budget: { call_timeout_seconds: 90 }
 
 标注文件（YAML，格式见 `apps/srenautix/src/eval/labels.ts` 文件头）每条是一次故障：故障窗口与分析时刻、属于这次故障的告警、可接受的根因组件键、处置判断、发现环节要求的成员与变更时刻、标准修复与依据。标注、重建包与成绩单含部署方集群的事实，只保存在部署方本地。
 
+标注的 `type` 为 `incident`、`benign` 或 `abstain`。`abstain` 用于真实原因不在可观测数据里的故障（例如运行时配置变更源还没有接入）：`roots` 为空，不写处置与修复，结论为 `inconclusive` 或 `undetermined` 才算正确，不能出现 `evidence_consistent`。`noise` 列出噪声信号（卡片全局键，ADR 0153）：重建的阶段 A 中这张卡在每个实体上都应判为常态，并且不出现在任何假设的支持证据中，成绩单的"噪声信号"一节逐条列出。
+
 评测配置增加 `reconstruct` 部分：
 
 ```yaml
@@ -110,6 +112,7 @@ reconstruct:
   revision_labels: [example.io/release-id]                      # 与 server 的 changes.kubernetes 相同
   group_within_seconds: 120
   step_seconds: 30
+  novelty: { timeout: 120s }                                    # 证据基线，键与 server 的 stage_a.novelty 相同
 ```
 
 状态库连接文件（JSON）：`{"host": …, "port": 5432, "database": …, "user": …, "password_file": …, "ssl_mode": "require"}`。会话设为只读，连接后核对。

@@ -12,7 +12,8 @@ import { stableUuid } from './import-seed.js';
 //   labels:
 //     - id: release-2026-10-20
 //       title: 发布回退失败
-//       type: incident                       # incident 或 benign
+//       type: incident                       # incident、benign 或 abstain（真实原因不在可观测的数据里，
+//                                            # 正确的结论是弃权：inconclusive 或 undetermined）
 //       window: {from: …, to: …}             # 故障窗口：重建与发现统计都在这个窗口内
 //       as_of: …                             # 分析时刻（阶段 B 的研判时刻）
 //       fault_alerts:                        # 属于这次故障的告警（告警名 + 标签子集）
@@ -33,6 +34,8 @@ import { stableUuid } from './import-seed.js';
 //         repository: org/gitops
 //         commit: abc1234
 //         expect: [{path: apps/api/release.json, select: {}, pointer: /data/image, value: "…"}]
+//       noise: [{card: app/archive/unlocated}]   # 噪声信号（ADR 0153）：重建的阶段 A 中这些卡应判为常态，
+//                                            # 并且不出现在任何假设的支持证据中
 //       evidence: [{kind: report, ref: operations/reports/….md}]
 
 const time = z.string().refine((s) => !Number.isNaN(Date.parse(s)), '不是合法的时间');
@@ -71,7 +74,7 @@ const label = z
   .object({
     id: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,150}$/),
     title: z.string().min(1),
-    type: z.enum(['incident', 'benign']),
+    type: z.enum(['incident', 'benign', 'abstain']),
     window: z.object({ from: time, to: time }).strict(),
     as_of: time,
     fault_alerts: z.array(matcher).min(1),
@@ -92,11 +95,19 @@ const label = z
     legacy_roots: z.array(z.string().min(1)).default([]),
     learned_from: z.array(z.string().min(1)).default([]),
     fix: fix.nullable().default(null),
+    // 噪声信号（ADR 0153）：卡片全局键 <pack>/<chain>/<card>
+    noise: z
+      .array(
+        z
+          .object({ card: z.string().regex(/^[a-z0-9_][a-z0-9_.-]*\/[a-z0-9][a-z0-9_.-]*\/[a-z0-9][a-z0-9_-]*$/) })
+          .strict(),
+      )
+      .default([]),
     evidence: z
       .array(
         z
           .object({
-            kind: z.enum(['report', 'commit', 'pr', 'knowledge', 'workflow', 'metrics', 'proposal', 'state']),
+            kind: z.enum(['report', 'commit', 'pr', 'issue', 'knowledge', 'workflow', 'metrics', 'proposal', 'state']),
             ref: z.string().min(1),
             note: z.string().optional(),
           })
@@ -117,6 +128,9 @@ const label = z
     }
     if (l.type === 'benign' && (l.roots.length || l.discovery_roots.length || l.disposition !== 'ignore')) {
       ctx.addIssue({ code: 'custom', message: `${l.id}：benign 标注的 roots 为空、disposition 为 ignore` });
+    }
+    if (l.type === 'abstain' && (l.roots.length || l.disposition !== null || l.fix !== null)) {
+      ctx.addIssue({ code: 'custom', message: `${l.id}：abstain 标注的 roots 为空，不写 disposition 与 fix` });
     }
   });
 
@@ -171,11 +185,11 @@ export function labelCase(f: LabelFile, l: Label, suite: string, snapshotId: str
     started_at: new Date(Date.parse(l.window.from)).toISOString(),
     as_of: new Date(Date.parse(l.as_of)).toISOString(),
     truth: {
-      root_components: l.type === 'benign' ? [] : [...l.roots, ...l.legacy_roots],
+      root_components: l.type === 'incident' ? [...l.roots, ...l.legacy_roots] : [],
       granularity: l.granularity,
       mechanism: l.mechanism,
       disposition: l.disposition,
-      forbid_evidence_consistent: l.type === 'benign',
+      forbid_evidence_consistent: l.type !== 'incident',
     },
     truth_source: { kind: 'human', principal: null, ref: `label:${l.id}` },
     leakage: {
@@ -199,11 +213,11 @@ export function relabelLegacy(c: EvalCase, l: Label, createdAt: string): EvalCas
     suite: c.suite.endsWith('-unlabeled') ? c.suite.slice(0, -'-unlabeled'.length) : c.suite,
     type: l.type,
     truth: {
-      root_components: l.type === 'benign' ? [] : [...l.legacy_roots, ...l.roots],
+      root_components: l.type === 'incident' ? [...l.legacy_roots, ...l.roots] : [],
       granularity: l.granularity,
       mechanism: l.mechanism,
       disposition: l.disposition,
-      forbid_evidence_consistent: l.type === 'benign',
+      forbid_evidence_consistent: l.type !== 'incident',
     },
     truth_source: { kind: 'human', principal: null, ref: `label:${l.id}` },
     leakage: {

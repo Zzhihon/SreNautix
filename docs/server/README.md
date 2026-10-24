@@ -176,7 +176,17 @@ packs:
 
 卡片窗口以事件首次触发时间为锚点，终点不晚于当前时间。取数经 `datasources.prometheus`（`concurrency` 张卡同时执行，单个查询超时 `timeout`），标签档案每小时自动探测一次，信号备选的选择缓存 10 分钟。整个证据链的期限是 40 秒，超过期限时未完成的卡不进入报告。PG 不可用时降级通道照样执行证据卡，组件类型取最后一次成功对账时的拓扑。
 
-规则提议的 CEL 上下文：`incident`（id、version、severity、全部成员共有的 labels、alerts）、`root`（根因实体与组件类型）、`cards`（卡片全局 id → verdict、display_state、value、reason_kind；同一张卡对多个实体执行时取根因上的结果）。
+证据基线（ADR 0153，`stage_a.novelty`）：判为异常的卡在同一实体上、按同样长度的窗口在事件之前的时段重新执行，结果写进卡的 `novelty`。时段是对照时段 `comparisons`（默认 `1h`、`24h`、`7d`，即事件前 1 小时、24 小时、7 天的同一时段）加上 `span`（默认 `7d`）内均匀分布的 `samples`（默认 28）个时段，与事件窗口重叠的不取，早于 `stage_a.metrics_retention` 的不取。得出结论的样本少于 `min_samples`（默认 8）时为 `unknown`；否则下面任一项成立即为常态（`routine`），都不成立为明显异常（`novel`）：
+
+1. 样本中判为异常的比例不低于 `abnormal_share`（默认 0.5）；
+2. 条件在样本中出现过，并且事件窗口的主值落在样本主值的 `[1 − quantile, quantile]` 分位区间内（默认 0.95）；
+3. 条件在样本中出现过，主值的单位是计数或速率，与对照时段主值的最大值相差不到 `ratio` 倍（默认 3）。
+
+取样本的期限是 `timeout`（默认 `15s`），与证据链共用 40 秒的整体期限；没有取完的样本不计入。常态的卡照常出现在报告与消息里，研判不把它作为根因或支持证据；规则提议与修复模板的上下文里它按正常给出。`enabled: false` 关闭。指标 `srenautix_stage_a_evidence_novelty_total` 按判定计数。
+
+最低取证集合（ADR 0153）：告警目录条目的 `required_cards` 列出告警触发时必须在告警实体上得出结论的卡（卡所在的证据链必须在条目的 `chains` 中）。阶段 A 报告的 `required_evidence` 记录每条这样的成员告警与没有得出结论的卡；研判之后区分性检查也没有补上时，结论档位只能是 `undetermined`，处置不能是 `act` 或 `ignore`。
+
+规则提议的 CEL 上下文：`incident`（id、version、severity、全部成员共有的 labels、alerts）、`root`（根因实体与组件类型）、`cards`（卡片全局 id → verdict、display_state、value、reason_kind；同一张卡对多个实体执行时取根因上的结果；证据基线判为常态的卡按正常给出）。
 
 加载失败的处理：
 

@@ -55,8 +55,9 @@ export function discoveryCase(r: Replay, l: Label): DiscoveryCase {
           (c) => Math.abs(Date.parse(c.time) - Date.parse(l.required_change_near as string)) <= CHANGE_NEAR_MS,
         );
   const roots = new Set(discoveryRoots(l));
+  // 良性与弃权标注没有发现环节的根因（弃权标注可以另写 discovery_roots）
   const rootHit =
-    l.type === 'benign'
+    roots.size === 0
       ? null
       : !!main && main.incident.root.component !== null && roots.has(main.incident.root.component);
   // 只看重放开始之后才触发的故障告警：之前就在触发的告警，接入时刻是重放的起点，不代表检测

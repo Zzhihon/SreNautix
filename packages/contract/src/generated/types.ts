@@ -668,6 +668,8 @@ export interface SrenautixContractIndex {
   CardTableTemplate?: CardTableTemplate;
   CardLink?: CardLink;
   EvidenceResult?: EvidenceResult;
+  EvidenceNovelty?: EvidenceNovelty;
+  EvidenceNoveltyComparison?: EvidenceNoveltyComparison;
   EvidenceReason?: EvidenceReason;
   EvidenceCondition?: EvidenceCondition;
   EvidenceQueryRecord?: EvidenceQueryRecord;
@@ -2309,6 +2311,10 @@ export interface AlertCatalogEntry {
    */
   primary_card?: string;
   /**
+   * 最低取证集合（契约 2.31.0，ADR 0153）：告警是事件成员时，阶段 A 必须在告警实体上得出结论（正常或异常）的卡，写法与 primary_card 相同，通常是告警自身的指标族与相关的配置、状态（runbook 的只读检查）。卡所在的证据链随告警执行；有一张没有得出结论时，研判的结论档位只能是 undetermined
+   */
+  required_cards?: string[];
+  /**
    * 来源 mixin，用于覆盖率统计
    */
   mixin?: 'kubernetes' | 'node' | 'etcd' | 'prometheus' | 'alertmanager' | 'kube-state-metrics' | 'other';
@@ -3185,6 +3191,26 @@ export interface StageAReport {
    */
   degraded: boolean;
   rendered_at: Timestamp;
+  /**
+   * 成员告警的最低取证集合（契约 2.31.0，ADR 0153）：目录条目声明了 required_cards、能解析出实体的在场成员告警，每条一项。旧版本的报告没有这个字段
+   */
+  required_evidence?: {
+    alert_id: string;
+    alertname: string;
+    /**
+     * <pack>/<条目 id>
+     */
+    catalog_entry: string;
+    entity: EntityRef;
+    /**
+     * 最低取证集合中的卡（<pack>/<chain>/<card>）
+     */
+    cards: string[];
+    /**
+     * 阶段 A 没有在告警实体上得出结论（没有执行，或无法判定）的卡
+     */
+    missing: string[];
+  }[];
 }
 /**
  * 一张证据卡在一次研判（或阶段 A 报告）中的结果（DESIGN §6.1）。三种结论之外另有显示状态 capability_missing：所需的数据源能力不可用，和没有数据区分开
@@ -3273,6 +3299,10 @@ export interface EvidenceResult {
    * 主值（display.value）格式化之前的数值，与 threshold 同单位；没有主值或不是有限数时为 null。通知用它判断正常卡是否接近阈值
    */
   value_number?: number | null;
+  /**
+   * 证据基线（契约 2.31.0，ADR 0153）：判为异常的卡在同一实体上、按同样长度的窗口在事件之前的时段重新判定，与事件窗口比较。常态（routine）的卡不能作为根因或支持证据。只对异常卡计算；正常与无法判定的卡、关闭了证据基线的部署为 null 或不出现
+   */
+  novelty?: null | EvidenceNovelty;
 }
 /**
  * 取自卡片定义，结果脱离定义也能展示
@@ -3327,6 +3357,56 @@ export interface EvidenceCondition {
    * 命中时为条件的 say；没有命中时为条件的 normal_say（卡片提供时），否则为 null
    */
   say: string | null;
+}
+export interface EvidenceNovelty {
+  /**
+   * novel：与基线相比明显异常；routine：常态，与基线相比没有明显升高；unknown：得出结论的基线样本不足（更早的时段没有数据、超出保留期，或在期限内没有完成）
+   */
+  status: 'novel' | 'routine' | 'unknown';
+  /**
+   * 判为常态所依据的规则：abnormal_share 基线样本中判为异常的比例不低于门槛；within_range 主值落在基线样本主值的分位区间内；below_ratio 计数或速率类主值与对照时段的最大值相差不到门槛倍数。不是常态时为 null
+   */
+  rule: null | ('abnormal_share' | 'within_range' | 'below_ratio');
+  /**
+   * 事件窗口内的主值（value_number）
+   */
+  value: number | null;
+  /**
+   * 固定的对照时段（默认事件前 1 小时、24 小时、7 天的同一时段）上的判定与主值
+   */
+  comparisons: EvidenceNoveltyComparison[];
+  /**
+   * 得出结论（正常或异常）的基线样本数，含对照时段
+   */
+  samples: number;
+  /**
+   * 得出结论的基线样本中判为异常的比例；没有样本时为 null
+   */
+  abnormal_share: number | null;
+  /**
+   * 基线样本主值的分位区间 [1 − quantile, quantile]；有主值的样本不足时为 null
+   */
+  range: null | {
+    low: number;
+    high: number;
+    quantile: number;
+  };
+  /**
+   * 判定说明
+   */
+  reason: string;
+}
+/**
+ * 一个对照时段：offset 为它相对事件窗口提前的时长
+ */
+export interface EvidenceNoveltyComparison {
+  offset: Duration;
+  window: TimeWindow;
+  verdict: Verdict;
+  /**
+   * 对照时段的主值；没有主值时为 null
+   */
+  value: number | null;
 }
 export interface EvalKnowledge {
   id: string;

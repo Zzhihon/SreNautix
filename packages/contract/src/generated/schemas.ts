@@ -1,5 +1,5 @@
 // 本文件由 packages/contract/scripts/gen.ts 从 contract/ 生成，不要手工修改。
-export const CONTRACT_VERSION = '2.30.0';
+export const CONTRACT_VERSION = '2.31.0';
 
 export const SCHEMAS: Record<string, Record<string, unknown>> = {
   'https://srenautix.io/contract/gateway/v1/action-catalog.schema.json': {
@@ -2311,6 +2311,13 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
           '与告警条件对应的主卡：<chain id>/<card id>（本包）或 <pack>/<chain id>/<card id>。告警触发时主卡应当判为异常；评测按它统计证据卡与告警结论的一致率',
         pattern: '^([a-z0-9][a-z0-9_.-]*/)?[a-z0-9][a-z0-9_.-]*/[a-z0-9][a-z0-9_.-]*$',
       },
+      required_cards: {
+        type: 'array',
+        description:
+          '最低取证集合（契约 2.31.0，ADR 0153）：告警是事件成员时，阶段 A 必须在告警实体上得出结论（正常或异常）的卡，写法与 primary_card 相同，通常是告警自身的指标族与相关的配置、状态（runbook 的只读检查）。卡所在的证据链随告警执行；有一张没有得出结论时，研判的结论档位只能是 undetermined',
+        uniqueItems: true,
+        items: { type: 'string', pattern: '^([a-z0-9][a-z0-9_.-]*/)?[a-z0-9][a-z0-9_.-]*/[a-z0-9][a-z0-9_.-]*$' },
+      },
       mixin: {
         type: 'string',
         description: '来源 mixin，用于覆盖率统计',
@@ -4054,8 +4061,73 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
         description:
           '主值（display.value）格式化之前的数值，与 threshold 同单位；没有主值或不是有限数时为 null。通知用它判断正常卡是否接近阈值',
       },
+      novelty: {
+        description:
+          '证据基线（契约 2.31.0，ADR 0153）：判为异常的卡在同一实体上、按同样长度的窗口在事件之前的时段重新判定，与事件窗口比较。常态（routine）的卡不能作为根因或支持证据。只对异常卡计算；正常与无法判定的卡、关闭了证据基线的部署为 null 或不出现',
+        oneOf: [{ type: 'null' }, { $ref: '#/$defs/Novelty' }],
+      },
     },
     $defs: {
+      Novelty: {
+        title: 'EvidenceNovelty',
+        type: 'object',
+        additionalProperties: false,
+        required: ['status', 'rule', 'value', 'comparisons', 'samples', 'abnormal_share', 'range', 'reason'],
+        properties: {
+          status: {
+            type: 'string',
+            description:
+              'novel：与基线相比明显异常；routine：常态，与基线相比没有明显升高；unknown：得出结论的基线样本不足（更早的时段没有数据、超出保留期，或在期限内没有完成）',
+            enum: ['novel', 'routine', 'unknown'],
+          },
+          rule: {
+            description:
+              '判为常态所依据的规则：abnormal_share 基线样本中判为异常的比例不低于门槛；within_range 主值落在基线样本主值的分位区间内；below_ratio 计数或速率类主值与对照时段的最大值相差不到门槛倍数。不是常态时为 null',
+            oneOf: [{ type: 'null' }, { type: 'string', enum: ['abnormal_share', 'within_range', 'below_ratio'] }],
+          },
+          value: { type: ['number', 'null'], description: '事件窗口内的主值（value_number）' },
+          comparisons: {
+            type: 'array',
+            description: '固定的对照时段（默认事件前 1 小时、24 小时、7 天的同一时段）上的判定与主值',
+            items: { $ref: '#/$defs/NoveltyComparison' },
+          },
+          samples: { type: 'integer', minimum: 0, description: '得出结论（正常或异常）的基线样本数，含对照时段' },
+          abnormal_share: {
+            type: ['number', 'null'],
+            description: '得出结论的基线样本中判为异常的比例；没有样本时为 null',
+          },
+          range: {
+            description: '基线样本主值的分位区间 [1 − quantile, quantile]；有主值的样本不足时为 null',
+            oneOf: [
+              { type: 'null' },
+              {
+                type: 'object',
+                additionalProperties: false,
+                required: ['low', 'high', 'quantile'],
+                properties: {
+                  low: { type: 'number' },
+                  high: { type: 'number' },
+                  quantile: { type: 'number', exclusiveMinimum: 0.5, maximum: 1 },
+                },
+              },
+            ],
+          },
+          reason: { type: 'string', description: '判定说明' },
+        },
+      },
+      NoveltyComparison: {
+        title: 'EvidenceNoveltyComparison',
+        description: '一个对照时段：offset 为它相对事件窗口提前的时长',
+        type: 'object',
+        additionalProperties: false,
+        required: ['offset', 'window', 'verdict', 'value'],
+        properties: {
+          offset: { $ref: 'common.schema.json#/$defs/Duration' },
+          window: { $ref: 'common.schema.json#/$defs/TimeWindow' },
+          verdict: { $ref: 'common.schema.json#/$defs/Verdict' },
+          value: { type: ['number', 'null'], description: '对照时段的主值；没有主值时为 null' },
+        },
+      },
       Reason: {
         title: 'EvidenceReason',
         type: 'object',
@@ -7508,6 +7580,32 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
       rule_proposals: { type: 'array', items: { $ref: 'common.schema.json#/$defs/Uuid' } },
       degraded: { type: 'boolean', description: '状态库降级：PG 不可用时在内存中生成，消息带降级横幅' },
       rendered_at: { $ref: 'common.schema.json#/$defs/Timestamp' },
+      required_evidence: {
+        type: 'array',
+        description:
+          '成员告警的最低取证集合（契约 2.31.0，ADR 0153）：目录条目声明了 required_cards、能解析出实体的在场成员告警，每条一项。旧版本的报告没有这个字段',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['alert_id', 'alertname', 'catalog_entry', 'entity', 'cards', 'missing'],
+          properties: {
+            alert_id: { type: 'string' },
+            alertname: { type: 'string' },
+            catalog_entry: { type: 'string', description: '<pack>/<条目 id>' },
+            entity: { $ref: 'common.schema.json#/$defs/EntityRef' },
+            cards: {
+              type: 'array',
+              description: '最低取证集合中的卡（<pack>/<chain>/<card>）',
+              items: { type: 'string' },
+            },
+            missing: {
+              type: 'array',
+              description: '阶段 A 没有在告警实体上得出结论（没有执行，或无法判定）的卡',
+              items: { type: 'string' },
+            },
+          },
+        },
+      },
     },
   },
   'https://srenautix.io/contract/schemas/topology-event.schema.json': {

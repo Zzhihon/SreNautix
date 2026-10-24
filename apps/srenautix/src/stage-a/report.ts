@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Alert, Disposition, EvidenceResult, Incident, StageAReport } from '@srenautix/contract';
 import { evidenceFingerprint } from '@srenautix/core';
+import type { RequiredEvidence } from './required.js';
 
 /** 至少这个比例的卡没有数据时判为观测失明（DESIGN §7.1）。 */
 export const BLIND_RATIO = 0.5;
@@ -97,6 +98,8 @@ export interface BuildInput extends DispositionInput {
   fingerprint: string;
   degraded: boolean;
   now: Date;
+  /** 成员告警的最低取证集合与缺口（ADR 0153）；降级通道与没有领域包时不计算 */
+  required?: RequiredEvidence[];
 }
 
 export function buildReport(b: BuildInput): StageAReport {
@@ -117,5 +120,6 @@ export function buildReport(b: BuildInput): StageAReport {
     rule_proposals: b.ruleProposalIds,
     degraded: b.degraded,
     rendered_at: b.now.toISOString(),
+    ...(b.required ? { required_evidence: b.required } : {}),
   };
 }

@@ -131,9 +131,75 @@
     "value_number": {
       "type": ["number", "null"],
       "description": "主值（display.value）格式化之前的数值，与 threshold 同单位；没有主值或不是有限数时为 null。通知用它判断正常卡是否接近阈值"
+    },
+    "novelty": {
+      "description": "证据基线（契约 2.31.0，ADR 0153）：判为异常的卡在同一实体上、按同样长度的窗口在事件之前的时段重新判定，与事件窗口比较。常态（routine）的卡不能作为根因或支持证据。只对异常卡计算；正常与无法判定的卡、关闭了证据基线的部署为 null 或不出现",
+      "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/Novelty" }]
     }
   },
   "$defs": {
+    "Novelty": {
+      "title": "EvidenceNovelty",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "rule", "value", "comparisons", "samples", "abnormal_share", "range", "reason"],
+      "properties": {
+        "status": {
+          "type": "string",
+          "description": "novel：与基线相比明显异常；routine：常态，与基线相比没有明显升高；unknown：得出结论的基线样本不足（更早的时段没有数据、超出保留期，或在期限内没有完成）",
+          "enum": ["novel", "routine", "unknown"]
+        },
+        "rule": {
+          "description": "判为常态所依据的规则：abnormal_share 基线样本中判为异常的比例不低于门槛；within_range 主值落在基线样本主值的分位区间内；below_ratio 计数或速率类主值与对照时段的最大值相差不到门槛倍数。不是常态时为 null",
+          "oneOf": [{ "type": "null" }, { "type": "string", "enum": ["abnormal_share", "within_range", "below_ratio"] }]
+        },
+        "value": { "type": ["number", "null"], "description": "事件窗口内的主值（value_number）" },
+        "comparisons": {
+          "type": "array",
+          "description": "固定的对照时段（默认事件前 1 小时、24 小时、7 天的同一时段）上的判定与主值",
+          "items": { "$ref": "#/$defs/NoveltyComparison" }
+        },
+        "samples": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "得出结论（正常或异常）的基线样本数，含对照时段"
+        },
+        "abnormal_share": {
+          "type": ["number", "null"],
+          "description": "得出结论的基线样本中判为异常的比例；没有样本时为 null"
+        },
+        "range": {
+          "description": "基线样本主值的分位区间 [1 − quantile, quantile]；有主值的样本不足时为 null",
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["low", "high", "quantile"],
+              "properties": {
+                "low": { "type": "number" },
+                "high": { "type": "number" },
+                "quantile": { "type": "number", "exclusiveMinimum": 0.5, "maximum": 1 }
+              }
+            }
+          ]
+        },
+        "reason": { "type": "string", "description": "判定说明" }
+      }
+    },
+    "NoveltyComparison": {
+      "title": "EvidenceNoveltyComparison",
+      "description": "一个对照时段：offset 为它相对事件窗口提前的时长",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["offset", "window", "verdict", "value"],
+      "properties": {
+        "offset": { "$ref": "common.schema.json#/$defs/Duration" },
+        "window": { "$ref": "common.schema.json#/$defs/TimeWindow" },
+        "verdict": { "$ref": "common.schema.json#/$defs/Verdict" },
+        "value": { "type": ["number", "null"], "description": "对照时段的主值；没有主值时为 null" }
+      }
+    },
     "Reason": {
       "title": "EvidenceReason",
       "type": "object",

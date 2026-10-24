@@ -126,6 +126,26 @@ describe('主卡', () => {
     ).rejects.toThrow(/chains/);
   });
 
+  it('lint：最低取证集合（required_cards）与主卡按同样的规则检查（ADR 0153）', async () => {
+    const compile = (extra: string) => compilePackSet([loadPackDir(pack(ENTRY(extra)), 'local')], { catalog: CATALOG });
+    const set = await compile(', required_cards: [backlog/depth, queue/backlog/depth]');
+    expect(set.packs[0]!.content.alerts.entries[0]!.required_cards).toEqual(['backlog/depth', 'queue/backlog/depth']);
+    await expect(compile(', required_cards: [backlog/missing]')).rejects.toThrow(/最低取证集合中的卡 backlog\/missing/);
+    await expect(
+      compilePackSet(
+        [
+          loadPackDir(
+            pack(
+              '{ id: queue-backlog, alertname: QueueBacklog, role: symptom, entity: { kind: queue, name_labels: [queue] }, required_cards: [backlog/depth] }',
+            ),
+            'local',
+          ),
+        ],
+        { catalog: CATALOG },
+      ),
+    ).rejects.toThrow(/不在条目的 chains 中/);
+  });
+
   it('pack test：阈值与卡片一致时通过，不一致时报出告警与主卡的分歧', async () => {
     const set = await compilePackSet([loadPackDir(pack(ENTRY(', primary_card: backlog/depth')), 'local')], {
       catalog: CATALOG,

@@ -81,6 +81,31 @@
       "type": "boolean",
       "description": "状态库降级：PG 不可用时在内存中生成，消息带降级横幅"
     },
-    "rendered_at": { "$ref": "common.schema.json#/$defs/Timestamp" }
+    "rendered_at": { "$ref": "common.schema.json#/$defs/Timestamp" },
+    "required_evidence": {
+      "type": "array",
+      "description": "成员告警的最低取证集合（契约 2.31.0，ADR 0153）：目录条目声明了 required_cards、能解析出实体的在场成员告警，每条一项。旧版本的报告没有这个字段",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["alert_id", "alertname", "catalog_entry", "entity", "cards", "missing"],
+        "properties": {
+          "alert_id": { "type": "string" },
+          "alertname": { "type": "string" },
+          "catalog_entry": { "type": "string", "description": "<pack>/<条目 id>" },
+          "entity": { "$ref": "common.schema.json#/$defs/EntityRef" },
+          "cards": {
+            "type": "array",
+            "description": "最低取证集合中的卡（<pack>/<chain>/<card>）",
+            "items": { "type": "string" }
+          },
+          "missing": {
+            "type": "array",
+            "description": "阶段 A 没有在告警实体上得出结论（没有执行，或无法判定）的卡",
+            "items": { "type": "string" }
+          }
+        }
+      }
+    }
   }
 }

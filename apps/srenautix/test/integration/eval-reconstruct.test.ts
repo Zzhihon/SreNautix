@@ -5,6 +5,7 @@ import type pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { assertValid, type EvalSnapshot, type TopologyEdge, type TopologyNode } from '@srenautix/contract';
 import { DEFAULT_REVISION_LABELS } from '../../src/changes/kubernetes.js';
+import { NOVELTY_CONFIG_DEFAULT } from '../../src/config/novelty.js';
 import { ServerMetrics } from '../../src/metrics.js';
 import { Catalog } from '../../src/proposals/catalog.js';
 import { serverTracks } from '../../src/roles/server-schema.js';
@@ -84,6 +85,7 @@ const label: Label = {
     commit: 'abcdef0',
     expect: [{ path: 'apps/shop/release.json', select: {}, pointer: '/data/image', value: 'registry/api@sha256:aaa' }],
   },
+  noise: [],
   evidence: [{ kind: 'state', ref: 'test' }],
 };
 
@@ -267,6 +269,7 @@ describe('重放、重建阶段 A 与研判输入', () => {
       locale: 'zh-CN',
       evidence_concurrency: 4,
       query_timeout_seconds: 30,
+      novelty: NOVELTY_CONFIG_DEFAULT,
     });
     const r = await replay(
       bundle,
@@ -383,6 +386,7 @@ describe('影子环境统计（只读）', () => {
       locale: 'zh-CN',
       evidence_concurrency: 4,
       query_timeout_seconds: 30,
+      novelty: NOVELTY_CONFIG_DEFAULT,
     });
     const s = await liveStats(state, CLUSTER, new Date(T0), new Date(T0 + 60 * MIN));
     expect(s.incidents).toBe(0);

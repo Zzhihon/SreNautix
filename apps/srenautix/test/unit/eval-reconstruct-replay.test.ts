@@ -155,6 +155,7 @@ const label: Label = {
   legacy_roots: [],
   learned_from: [],
   fix: null,
+  noise: [],
   evidence: [{ kind: 'state', ref: 'fixture' }],
 };
 

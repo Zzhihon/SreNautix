@@ -1,4 +1,5 @@
 import type { Alert, EvidenceResult, Incident, LocalizedText } from '@srenautix/contract';
+import type { RequiredEvidence } from './required.js';
 
 /** 一次证据链执行的结果。 */
 export interface EvidenceRun {
@@ -15,6 +16,8 @@ export interface EvidenceRun {
    * 求不出名称的组件不在其中；求值失败不影响证据卡。
    */
   names?: Record<string, string>;
+  /** 成员告警的最低取证集合与缺口（ADR 0153）；没有声明 required_cards 的告警不在其中 */
+  required?: RequiredEvidence[];
 }
 
 /**

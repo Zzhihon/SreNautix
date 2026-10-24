@@ -18,6 +18,7 @@ import { registerResearchRoutes } from '../api/routes-research.js';
 import { pgConfigFromEnv } from '../config/database.js';
 import { parseDuration, parseListen, readSecretFile } from '../config/files.js';
 import { loadServerConfig, opsRepositories, type ServerConfig } from '../config/server.js';
+import { noveltyOptions } from '../config/novelty.js';
 import { kubernetesRollouts } from '../changes/kubernetes.js';
 import { ksmRollouts } from '../changes/ksm-rollouts.js';
 import { changesInWindow, ChangesService } from '../changes/service.js';
@@ -327,6 +328,8 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
     metricsRetentionMs: c.stage_a.metrics_retention
       ? parseDuration('stage_a.metrics_retention', c.stage_a.metrics_retention)
       : null,
+    // 证据基线（ADR 0153）
+    novelty: noveltyOptions(c.stage_a.novelty),
   };
   const evidence = new PackEvidence(
     packs,

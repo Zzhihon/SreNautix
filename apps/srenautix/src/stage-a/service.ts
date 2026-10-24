@@ -134,6 +134,7 @@ export class StageAService {
       cards,
       excludedBy,
       runbooks: run.runbooks,
+      ...(run.required ? { required: run.required } : {}),
       degraded: false,
       fingerprint: fp.state.current,
       now: (now.rows[0] as { now: Date }).now,

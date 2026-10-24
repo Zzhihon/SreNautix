@@ -209,6 +209,21 @@ export function judgeLadder(
 }
 
 /**
+ * 最低取证集合（ADR 0153）：成员告警的 required_cards 有没有得出结论的卡（阶段 A 与区分性检查都没有补上）时，
+ * 研判看不到区分原因所需的证据，档位只能是 undetermined。gaps 为 missingRequired 的说明
+ */
+export function requiredCap(r: LadderResult, gaps: readonly string[]): LadderResult {
+  if (!gaps.length || r.level === 'undetermined') {
+    return r;
+  }
+  return {
+    ...r,
+    level: 'undetermined',
+    notes: [...r.notes, `最低取证集合没有覆盖（${gaps.join('；')}），档位由 ${r.level} 改为 undetermined（ADR 0153）`],
+  };
+}
+
+/**
  * 有相反证据时档位最高为 inconclusive（ADR 0134），满足任一项即限制，返回原因：
  * - 选中假设自己的检查给出推翻结果：针对它、实体在范围内、测的信号属于它的机制的检查卡判定为正常（ADR 0133 的
  *   `refutingChecks`；成员上的这类卡在有支持证据时不推翻假设，但同样限制档位）；

@@ -1,4 +1,5 @@
 import type { Feedback, Hypothesis } from '@srenautix/contract';
+import { isRoutine } from '../stage-a/novelty.js';
 import type { CardEntry, EvidenceBook } from './evidence.js';
 import { checkDefinition, INCIDENT_SYMPTOM_RULES, targets, type Targeting, type TypeRule } from './targeting.js';
 import type { Subgraph } from './types.js';
@@ -219,6 +220,17 @@ export class Ledger {
         }
         return [...new Set(ok)];
       };
+      // 常态的卡（证据基线，ADR 0153）只作背景，不作为支持证据
+      const support = (refs: string[]) => {
+        const routine = refs.filter((r) => {
+          const c = this.book.card(r);
+          return c !== undefined && isRoutine(c.result);
+        });
+        if (routine.length) {
+          notes.push(`假设 ${h.id} 引用的 ${routine.join('、')} 与基线相比属于常态（ADR 0153），不作为支持证据`);
+        }
+        return refs.filter((r) => !routine.includes(r));
+      };
       // 组件粒度：由控制器拥有的对象改为顶层属主
       const root = this.componentOf(h.root_component);
       if (root !== h.root_component) {
@@ -241,7 +253,7 @@ export class Ledger {
         rootComponent: root,
         mechanism: h.mechanism,
         ...(h.symptoms ? { symptoms: h.symptoms } : {}),
-        supporting: keep(h.supporting, '支持'),
+        supporting: support(keep(h.supporting, '支持')),
         refuting: keep(h.refuting, '反驳'),
         status: kept ? kept.status : 'pending',
         pinned: kept ? kept.pinned : null,
@@ -337,8 +349,8 @@ export class Ledger {
   }
 
   /**
-   * 能作为支持证据的卡：异常、实体在假设范围内。来源有三个：模型引用的卡、针对这个假设的检查卡、
-   * 实体是根因组件本身或它拥有的对象的阶段 A 卡（代码自动关联，模型漏引也不影响判定，ADR 0121）。
+   * 能作为支持证据的卡：异常、不是常态（证据基线，ADR 0153）、实体在假设范围内。来源有三个：模型引用的卡、
+   * 针对这个假设的检查卡、实体是根因组件本身或它拥有的对象的阶段 A 卡（代码自动关联，模型漏引也不影响判定，ADR 0121）。
    * 根因依赖的对象上的卡只在模型引用时计入：依赖异常同样可以说明依赖本身才是根因。
    */
   supportCards(e: LedgerEntry): CardEntry[] {
@@ -351,7 +363,7 @@ export class Ledger {
     );
     const all = new Map([...fromRefs, ...fromChecks, ...ownCards].map((c) => [c.ref, c]));
     return [...all.values()].filter(
-      (c) => c.result.verdict === 'abnormal' && c.component !== null && scope.has(c.component),
+      (c) => c.result.verdict === 'abnormal' && !isRoutine(c.result) && c.component !== null && scope.has(c.component),
     );
   }
 

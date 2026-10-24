@@ -1,4 +1,7 @@
+import type { EvidenceResult } from '@srenautix/contract';
 import { PROMPTS, type Language } from '../prompts/index.js';
+import { isRoutine } from '../stage-a/novelty.js';
+import { missingRequired } from '../stage-a/required.js';
 import type { Item, Segment, SegmentTrim } from '../llm/types.js';
 import type { CardEntry, EvidenceBook } from './evidence.js';
 import { ownerOf, scopeOf, type Ledger } from './ledger.js';
@@ -78,6 +81,19 @@ function cardView(c: CardEntry, tableRows = TABLE_ROWS): Record<string, unknown>
         }
       : {}),
     ...(c.hypothesisId ? { check_for: c.hypothesisId, judged_by: c.judgedBy } : {}),
+    // 无法与基线比较（unknown）的不写，提示词与没有证据基线时相同
+    ...(r.novelty && r.novelty.status !== 'unknown' ? { novelty: noveltyView(r.novelty) } : {}),
+  };
+}
+
+/** 证据基线（ADR 0153）：常态、明显异常或无法比较，判定说明与对照时段的主值 */
+function noveltyView(n: NonNullable<EvidenceResult['novelty']>): Record<string, unknown> {
+  return {
+    status: n.status,
+    reason: cut(n.reason, TEXT_CHARS),
+    comparisons: Object.fromEntries(
+      n.comparisons.map((x) => [x.offset, x.verdict === 'undeterminable' ? null : x.value]),
+    ),
   };
 }
 
@@ -272,6 +288,41 @@ function cardTrim(st: CardState): SegmentTrim | null {
  * 证据卡片段：每种出境方式一段。included 是放入的卡（其中与结论无关的卡可被裁成只列判定），
  * listed 是一开始就只列判定的卡，summarized 是只写摘要的卡（selectCards），各自单独一段。
  */
+/**
+ * 证据基线与最低取证集合（ADR 0153）：有常态的卡或最低取证集合有缺口时给出一段说明，规则由代码执行，这里让模型知道；
+ * 两者都没有时不出现（提示词与没有这两项的版本相同）
+ */
+function baselineSegment(c: ResearchCase, book: EvidenceBook): Segment | null {
+  const routine = book.promptCards().filter((x) => isRoutine(x.result));
+  const gaps = missingRequired(
+    c.stageA.required_evidence,
+    book.allCards.map((x) => x.result),
+  );
+  if (!routine.length && !gaps.length) {
+    return null;
+  }
+  return seg(
+    fenced('证据基线与最低取证集合（代码判定）', {
+      ...(routine.length
+        ? {
+            routine_cards: routine.map((x) => x.ref),
+            routine_rule:
+              '这些卡判为异常，但与事件之前同样长度的时段（novelty）相比没有明显升高，属于常态：只作背景，不作为根因或支持证据，假设引用它们作为支持时由代码删除',
+          }
+        : {}),
+      ...(gaps.length
+        ? {
+            required_missing: gaps,
+            required_rule:
+              '成员告警的最低取证集合没有覆盖：结论档位只能是 undetermined，处置不能是 act 或 ignore；缺少的取证写进 investigation 类修复建议',
+          }
+        : {}),
+    }),
+    ['metrics'],
+    'allow',
+  );
+}
+
 function cardSegments(
   entries: CardEntry[],
   listed: CardEntry[],
@@ -602,6 +653,10 @@ export function incidentSegments(
       summarized,
     ),
   );
+  const baseline = baselineSegment(c, book);
+  if (baseline) {
+    out.push(baseline);
+  }
   if (c.knowledge.length || c.cases.length) {
     out.push({
       ...seg(

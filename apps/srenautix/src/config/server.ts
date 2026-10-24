@@ -5,6 +5,7 @@ import { ConfigError, parseDuration } from './files.js';
 import { DEFAULT_REVISION_LABELS } from '../changes/kubernetes.js';
 import { DEFAULT_EXTERNAL_LABELS, isComponentKey } from '@srenautix/core';
 import { DEFAULT_OPTIMIZATION, optimizationConfig, pgReadConnection } from '../optimize/config.js';
+import { NOVELTY_CONFIG_DEFAULT, noveltyConfig } from './novelty.js';
 
 const duration = z.string().regex(/^\d+(ms|s|m|h|d)$/, '时长形如 30s、5m、12h');
 const url = z.string().url();
@@ -567,9 +568,17 @@ export const serverConfigSchema = z
         card_window_max: duration.default('24h'),
         // 指标数据源的保留期：卡片窗口起点不早于评估时刻减去它（ADR 0149）；不填时不限
         metrics_retention: duration.optional(),
+        // 证据基线（ADR 0153）：异常卡在事件之前的时段取基线样本，常态的卡不作为根因或支持证据
+        novelty: noveltyConfig.default(NOVELTY_CONFIG_DEFAULT),
       })
       .strict()
-      .default({ language: 'zh', top_k: 3, recompute_per_minute: 10, card_window_max: '24h' }),
+      .default({
+        language: 'zh',
+        top_k: 3,
+        recompute_per_minute: 10,
+        card_window_max: '24h',
+        novelty: NOVELTY_CONFIG_DEFAULT,
+      }),
     scheduler: z
       .object({
         slots: z.number().int().min(1).max(64).default(4),

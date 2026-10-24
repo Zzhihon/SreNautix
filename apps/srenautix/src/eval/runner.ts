@@ -15,7 +15,7 @@ import type { QueryRunner } from '../research/checks.js';
 import type { Language } from '../prompts/index.js';
 import type { Tool } from '../tools/box.js';
 import { replayCase, type Excluded } from './leakage.js';
-import { topComponents, type RunRecord } from './score.js';
+import { supportedCards, topComponents, type RunRecord } from './score.js';
 import { SnapshotTools } from './vcr.js';
 
 // 回放评测：每个用例 × 每条路由 × k 次运行，各自独立运行阶段 B（replay 模式，不提交提议，不写库）。
@@ -235,6 +235,7 @@ export async function runEval(p: EvalPlan): Promise<EvalOutcome> {
           error: res.error ? `${res.error.kind}: ${res.error.message}` : null,
           proposals: (out?.proposals ?? []).map((x) => ({ action_id: x.action_id, params: x.params })),
           root: out?.conclusion.root_component ?? null,
+          supportedCards: out ? supportedCards(out) : [],
         });
         logger.info('评测运行完成', {
           case_id: c.case_id,

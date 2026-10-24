@@ -53,6 +53,15 @@
       "description": "与告警条件对应的主卡：<chain id>/<card id>（本包）或 <pack>/<chain id>/<card id>。告警触发时主卡应当判为异常；评测按它统计证据卡与告警结论的一致率",
       "pattern": "^([a-z0-9][a-z0-9_.-]*/)?[a-z0-9][a-z0-9_.-]*/[a-z0-9][a-z0-9_.-]*$"
     },
+    "required_cards": {
+      "type": "array",
+      "description": "最低取证集合（契约 2.31.0，ADR 0153）：告警是事件成员时，阶段 A 必须在告警实体上得出结论（正常或异常）的卡，写法与 primary_card 相同，通常是告警自身的指标族与相关的配置、状态（runbook 的只读检查）。卡所在的证据链随告警执行；有一张没有得出结论时，研判的结论档位只能是 undetermined",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^([a-z0-9][a-z0-9_.-]*/)?[a-z0-9][a-z0-9_.-]*/[a-z0-9][a-z0-9_.-]*$"
+      }
+    },
     "mixin": {
       "type": "string",
       "description": "来源 mixin，用于覆盖率统计",

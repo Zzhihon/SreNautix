@@ -6,6 +6,8 @@ import { Catalog, DEFAULT_CATALOG_PATH } from '../proposals/catalog.js';
 import type { QueryRunner } from '../research/checks.js';
 import type { WorkerMetrics } from '../research/metrics.js';
 import type { Language } from '../prompts/index.js';
+import { noveltyOptions } from '../config/novelty.js';
+import { isRoutine } from '../stage-a/novelty.js';
 import { PackEvidence, PackRules } from '../stage-a/pack-evidence.js';
 import { EvidenceSource, PackRuntime } from '../stage-a/packs.js';
 import {
@@ -67,6 +69,22 @@ export interface CardCoverage {
   determinate: number;
   abnormal: number;
   root_abnormal: number;
+  /** 证据基线判为常态的异常卡（ADR 0153） */
+  routine: number;
+}
+
+/**
+ * 标注的噪声信号（ADR 0153）：重建的阶段 A 中这张卡在每个实体上的结果（常态、明显异常、无法比较，或判为正常、
+ * 无法判定、没有执行），以及研判运行中它出现在支持证据里的次数。验收：每个实体上都是常态，并且从不作为支持证据
+ */
+export interface NoiseCheck {
+  label: string;
+  card: string;
+  /** 每个执行了这张卡的实体："<kind>:<namespace>/<name> <结果>"；没有执行时为空 */
+  results: string[];
+  routine: boolean;
+  runs: number;
+  supported_runs: number;
 }
 
 /** 一次研判的根因与发现（事件）根因按属主粒度不一致（ADR 0104 §14，incident/research-root.ts） */
@@ -96,6 +114,7 @@ export interface Phase2Result {
   analysis: EvalOutcome | null;
   remediation: RemediationSummary | null;
   roots: RootComparison | null;
+  noise: NoiseCheck[];
   packLock: string;
 }
 
@@ -151,6 +170,8 @@ export async function runPhase2(o: Phase2Options): Promise<Phase2Result> {
   const incidentRoots = new Map<string, { root: string | null; ownerOf: (key: string) => string | null }>();
   // 每个用例：修复模板匹配的输入（ADR 0138，只匹配、不推送）
   const matchInputs = new Map<string, MatchInput>();
+  // 标注的噪声信号（ADR 0153）：用例 → 阶段 A 中的结果
+  const noise = new Map<string, NoiseCheck[]>();
   for (const l of labels) {
     const b = readBundle(o.casesDir, l.id);
     const rep = await replay(
@@ -192,7 +213,9 @@ export async function runPhase2(o: Phase2Options): Promise<Phase2Result> {
         determinate: 0,
         abnormal: 0,
         root_abnormal: 0,
+        routine: 0,
       });
+      noise.set(`label:${l.id}`, noiseChecks(l, []));
       continue;
     }
     const asOf = Date.parse(l.as_of);
@@ -200,7 +223,12 @@ export async function runPhase2(o: Phase2Options): Promise<Phase2Result> {
       rt,
       source,
       async (_c, key) => rep.topology.componentType(key, asOf),
-      { locale: r.locale, concurrency: r.evidence_concurrency, queryTimeoutMs: r.query_timeout_seconds * 1000 },
+      {
+        locale: r.locale,
+        concurrency: r.evidence_concurrency,
+        queryTimeoutMs: r.query_timeout_seconds * 1000,
+        novelty: noveltyOptions(r.novelty),
+      },
       serverMetrics,
     );
     const rc = await reconstructCase(rep, l, main.incident, sid, o.codeSha, packLock, {
@@ -239,7 +267,9 @@ export async function runPhase2(o: Phase2Options): Promise<Phase2Result> {
       determinate: rc.cards.determinate,
       abnormal: rc.cards.abnormal,
       root_abnormal: rc.cards.rootAbnormal,
+      routine: rc.snapshot.context.stage_a.cards.filter((x) => isRoutine(x)).length,
     });
+    noise.set(c.case_id, noiseChecks(l, rc.snapshot.context.stage_a.cards));
   }
   let analysis: EvalOutcome | null = null;
   let remediation: RemediationSummary | null = null;
@@ -280,6 +310,13 @@ export async function runPhase2(o: Phase2Options): Promise<Phase2Result> {
       (r) => templates.get(r) ?? [],
     );
     roots = compareRoots(analysis.runs, incidentRoots, byCase);
+    for (const [caseId, checks] of noise) {
+      const runs = analysis.runs.filter((x) => x.caseId === caseId);
+      for (const n of checks) {
+        n.runs = runs.length;
+        n.supported_runs = runs.filter((x) => (x.supportedCards ?? []).includes(n.card)).length;
+      }
+    }
   }
   return {
     discovery,
@@ -290,6 +327,7 @@ export async function runPhase2(o: Phase2Options): Promise<Phase2Result> {
     analysis,
     remediation,
     roots,
+    noise: [...noise.values()].flat(),
     packLock,
   };
 }
@@ -396,6 +434,33 @@ function failedRun(caseId: string, routeId: string, model: string, run: number):
   };
 }
 
+const NOVELTY_TEXT: Record<string, string> = { routine: '常态', novel: '明显异常', unknown: '无法与基线比较' };
+
+/** 标注的噪声信号在重建的阶段 A 中的结果（ADR 0153）；运行次数在研判之后填入 */
+export function noiseChecks(l: Label, cards: readonly EvidenceResult[]): NoiseCheck[] {
+  return l.noise.map(({ card }) => {
+    const on = cards.filter((c) => c.card_id === card);
+    const results = on.map((c) => {
+      const what =
+        c.verdict === 'abnormal'
+          ? `异常，${c.novelty ? NOVELTY_TEXT[c.novelty.status] : '没有证据基线'}`
+          : c.verdict === 'normal'
+            ? '正常'
+            : '无法判定';
+      const e = c.entity;
+      return `${e ? `${e.kind}:${e.namespace ? `${e.namespace}/` : ''}${e.name}` : '—'} ${what}`;
+    });
+    return {
+      label: l.id,
+      card,
+      results,
+      routine: on.length > 0 && on.every((c) => isRoutine(c)),
+      runs: 0,
+      supported_runs: 0,
+    };
+  });
+}
+
 const pct = (n: number, d: number) => (d ? `${((100 * n) / d).toFixed(1)}%（${n}/${d}）` : '—（0/0）');
 const num = (x: number | null, digits = 1) => (x === null ? '—' : x.toFixed(digits));
 
@@ -454,10 +519,23 @@ export function renderPhase2Markdown(r: Phase2Result): string {
     const withCards = r.coverage.filter((c) => c.cards > 0).length;
     lines.push('', '## 分析：证据卡覆盖（重建的阶段 A）', '');
     lines.push(`有证据卡的事件：${pct(withCards, r.coverage.length)}。`, '');
-    lines.push('| 标注 | 主事件 | 根因 | 卡 | 得出结论 | 异常 | 根因上的异常 |', '|---|---|---|---|---|---|---|');
+    lines.push(
+      '| 标注 | 主事件 | 根因 | 卡 | 得出结论 | 异常 | 其中常态 | 根因上的异常 |',
+      '|---|---|---|---|---|---|---|---|',
+    );
     for (const c of r.coverage) {
       lines.push(
-        `| ${c.label} | ${c.incident ?? '没有事件'} | ${c.root ?? '—'} | ${c.cards} | ${c.determinate} | ${c.abnormal} | ${c.root_abnormal} |`,
+        `| ${c.label} | ${c.incident ?? '没有事件'} | ${c.root ?? '—'} | ${c.cards} | ${c.determinate} | ${c.abnormal} | ${c.routine} | ${c.root_abnormal} |`,
+      );
+    }
+  }
+  if (r.noise.length) {
+    lines.push('', '## 噪声信号（标注，ADR 0153）', '');
+    lines.push('验收：每个实体上都判为常态，并且没有出现在任何假设的支持证据中。', '');
+    lines.push('| 标注 | 卡 | 阶段 A 的结果 | 常态 | 作为支持证据的运行 |', '|---|---|---|---|---|');
+    for (const n of r.noise) {
+      lines.push(
+        `| ${n.label} | ${n.card} | ${n.results.join('；') || '没有执行'} | ${n.routine ? '是' : '否'} | ${n.supported_runs}/${n.runs} |`,
       );
     }
   }

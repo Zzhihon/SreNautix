@@ -3,6 +3,7 @@ import { parse } from 'yaml';
 import { z } from 'zod';
 import type { ModelRoute } from '@srenautix/contract';
 import { readSecretFile } from '../config/files.js';
+import { NOVELTY_CONFIG_DEFAULT, noveltyConfig } from '../config/novelty.js';
 import { DEFAULT_BUDGET, type BudgetConfig } from '../llm/budget.js';
 import { resolveTimeouts, type ModelClass, type RouteTimeouts } from '../llm/timeouts.js';
 import type { McpServerConfig } from '../tools/mcp.js';
@@ -135,6 +136,8 @@ const schema = z
         locale: z.enum(['zh-CN', 'en']).default('zh-CN'),
         evidence_concurrency: z.number().int().min(1).max(16).default(4),
         query_timeout_seconds: z.number().int().min(5).max(120).default(30),
+        // 证据基线（ADR 0153），与 server 的 stage_a.novelty 相同
+        novelty: noveltyConfig.default(NOVELTY_CONFIG_DEFAULT),
       })
       .strict()
       .optional(),

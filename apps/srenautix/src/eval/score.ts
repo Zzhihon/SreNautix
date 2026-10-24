@@ -33,6 +33,19 @@ export interface RunRecord {
   proposals: Array<{ action_id: string; params: Record<string, unknown> }>;
   /** 结论选中的研判根因（修复模板的匹配用，ADR 0138）；没有结论时为 null */
   root?: string | null;
+  /** 输出账本中任一假设的支持证据里出现的卡片定义（标注的噪声信号按它判断，ADR 0153） */
+  supportedCards?: string[];
+}
+
+/** 研判输出中全部假设的支持证据对应的卡片定义（evidence_index 的 target 为 <卡片>@<组件>） */
+export function supportedCards(out: ResearchOutput): string[] {
+  const target = new Map((out.evidence_index ?? []).map((x) => [x.ref, x.target]));
+  const cards = out.hypotheses
+    .flatMap((h) => h.supporting)
+    .filter((r) => r.startsWith('card:'))
+    .map((r) => target.get(r)?.split('@')[0])
+    .filter((x): x is string => x !== undefined);
+  return [...new Set(cards)].sort();
 }
 
 export interface Scored {

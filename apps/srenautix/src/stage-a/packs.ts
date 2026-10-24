@@ -320,6 +320,14 @@ export class PackRuntime {
     return (entry?.chains ?? []).map((c) => (c.includes('/') ? c : `${pack!.name}/${c}`));
   }
 
+  /** 告警目录条目 `<pack>/<entry id>` 的最低取证集合（ADR 0153），卡片全局键 `<pack>/<chain>/<card>` */
+  requiredCards(catalogEntry: string): string[] {
+    const i = catalogEntry.indexOf('/');
+    const pack = this.set.packs.find((p) => p.name === catalogEntry.slice(0, i));
+    const entry = pack?.content.alerts.entries.find((e) => e.id === catalogEntry.slice(i + 1));
+    return (entry?.required_cards ?? []).map((c) => (c.split('/').length === 2 ? `${pack!.name}/${c}` : c));
+  }
+
   componentTypes(): ComponentType[] {
     return this.set.packs.flatMap((p) => p.content.components.component_types);
   }

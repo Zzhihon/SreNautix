@@ -19,7 +19,8 @@ import {
 import type { EvidenceBook } from './evidence.js';
 import { deriveDisposition } from './disposition.js';
 import { incidentBook, incidentCorpus, incidentSupplement } from './incident.js';
-import { judgeLadder } from './ladder.js';
+import { judgeLadder, requiredCap } from './ladder.js';
+import { missingRequired } from '../stage-a/required.js';
 import { Ledger, subgraphFrame } from './ledger.js';
 import type { WorkerMetrics } from './metrics.js';
 import { componentChoices, concludeItems, hypothesizeItems, promptParts } from './prompt.js';
@@ -266,8 +267,15 @@ export async function runStageB(input: ResearchRunInput, env: ResearchEnv, sink:
     notes.push(...concluded.notes);
     const v = validateConclusion(concluded.value, rc, book, ledger);
     notes.push(...v.notes);
-    const ladder = judgeLadder(ledger, v.chosen, rc.incident, ledger.list().length > 0, v.chosenBy);
+    // 最低取证集合的缺口（ADR 0153）：阶段 A 记录的缺口中，区分性检查也没有补上的
+    const gaps = missingRequired(
+      rc.stageA.required_evidence,
+      book.allCards.map((c) => c.result),
+    );
+    const ladder = requiredCap(judgeLadder(ledger, v.chosen, rc.incident, ledger.list().length > 0, v.chosenBy), gaps);
     notes.push(...ladder.notes);
+    const undeterminedReason =
+      v.undeterminedReason ?? (gaps.length ? `最低取证集合没有覆盖：${gaps.join('；')}`.slice(0, 400) : null);
     // 处置在档位确定之后由代码推导，模型的取值是输入之一（ADR 0138）
     const disposition = deriveDisposition({
       model: concluded.value.disposition,
@@ -278,6 +286,7 @@ export async function runStageB(input: ResearchRunInput, env: ResearchEnv, sink:
       proposals: v.proposals.length,
       cards: book.allCards,
       facts: rc.dispositionFacts,
+      gaps,
     });
     notes.push(...disposition.notes);
     const leader = ledger.ranked(candidateScore)[0];
@@ -296,7 +305,7 @@ export async function runStageB(input: ResearchRunInput, env: ResearchEnv, sink:
         level: ladder.level,
         hypothesis_id: v.chosen?.id ?? null,
         root_component: v.chosen?.rootComponent ?? null,
-        undetermined_reason: v.undeterminedReason,
+        undetermined_reason: undeterminedReason,
         consistency: ladder.consistency,
         ...(ladder.detail ? { consistency_detail: ladder.detail } : {}),
       },

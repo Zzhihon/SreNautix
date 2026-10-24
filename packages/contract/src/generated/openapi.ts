@@ -2611,6 +2611,8 @@ export type components = {
       evaluated_at: components['schemas']['Timestamp'];
       /** @description 卡片标为影响类（impact: true），异常时它的值进入通知的影响范围 */
       impact?: boolean;
+      /** @description 证据基线（契约 2.31.0，ADR 0153）：判为异常的卡在同一实体上、按同样长度的窗口在事件之前的时段重新判定，与事件窗口比较。常态（routine）的卡不能作为根因或支持证据。只对异常卡计算；正常与无法判定的卡、关闭了证据基线的部署为 null 或不出现 */
+      novelty?: null | components['schemas']['Novelty'];
       /** @description 判定时 let 绑定的标量取值（数值、字符串、布尔），按定义顺序最多 16 个；绑定不可用时为 null。通知与控制台用它展示正常卡的实测值 */
       observations?: {
         [key: string]: number | string | boolean | null;
@@ -2649,6 +2651,43 @@ export type components = {
       verdict: components['schemas']['Verdict'];
       window: components['schemas']['TimeWindow'];
       $defs: {
+        /** EvidenceNovelty */
+        Novelty: {
+          /** @description 得出结论的基线样本中判为异常的比例；没有样本时为 null */
+          abnormal_share: number | null;
+          /** @description 固定的对照时段（默认事件前 1 小时、24 小时、7 天的同一时段）上的判定与主值 */
+          comparisons: components['schemas']['NoveltyComparison'][];
+          /** @description 基线样本主值的分位区间 [1 − quantile, quantile]；有主值的样本不足时为 null */
+          range: null | {
+            high: number;
+            low: number;
+            quantile: number;
+          };
+          /** @description 判定说明 */
+          reason: string;
+          /** @description 判为常态所依据的规则：abnormal_share 基线样本中判为异常的比例不低于门槛；within_range 主值落在基线样本主值的分位区间内；below_ratio 计数或速率类主值与对照时段的最大值相差不到门槛倍数。不是常态时为 null */
+          rule: null | ('abnormal_share' | 'within_range' | 'below_ratio');
+          /** @description 得出结论（正常或异常）的基线样本数，含对照时段 */
+          samples: number;
+          /**
+           * @description novel：与基线相比明显异常；routine：常态，与基线相比没有明显升高；unknown：得出结论的基线样本不足（更早的时段没有数据、超出保留期，或在期限内没有完成）
+           * @enum {string}
+           */
+          status: 'novel' | 'routine' | 'unknown';
+          /** @description 事件窗口内的主值（value_number） */
+          value: number | null;
+        };
+        /**
+         * EvidenceNoveltyComparison
+         * @description 一个对照时段：offset 为它相对事件窗口提前的时长
+         */
+        NoveltyComparison: {
+          offset: components['schemas']['Duration'];
+          /** @description 对照时段的主值；没有主值时为 null */
+          value: number | null;
+          verdict: components['schemas']['Verdict'];
+          window: components['schemas']['TimeWindow'];
+        };
         /** EvidenceReason */
         Reason: {
           /**
@@ -3927,6 +3966,43 @@ export type components = {
       name: string;
       namespace: string | null;
       uid: string | null;
+    };
+    /** EvidenceNovelty */
+    Novelty: {
+      /** @description 得出结论的基线样本中判为异常的比例；没有样本时为 null */
+      abnormal_share: number | null;
+      /** @description 固定的对照时段（默认事件前 1 小时、24 小时、7 天的同一时段）上的判定与主值 */
+      comparisons: components['schemas']['NoveltyComparison'][];
+      /** @description 基线样本主值的分位区间 [1 − quantile, quantile]；有主值的样本不足时为 null */
+      range: null | {
+        high: number;
+        low: number;
+        quantile: number;
+      };
+      /** @description 判定说明 */
+      reason: string;
+      /** @description 判为常态所依据的规则：abnormal_share 基线样本中判为异常的比例不低于门槛；within_range 主值落在基线样本主值的分位区间内；below_ratio 计数或速率类主值与对照时段的最大值相差不到门槛倍数。不是常态时为 null */
+      rule: null | ('abnormal_share' | 'within_range' | 'below_ratio');
+      /** @description 得出结论（正常或异常）的基线样本数，含对照时段 */
+      samples: number;
+      /**
+       * @description novel：与基线相比明显异常；routine：常态，与基线相比没有明显升高；unknown：得出结论的基线样本不足（更早的时段没有数据、超出保留期，或在期限内没有完成）
+       * @enum {string}
+       */
+      status: 'novel' | 'routine' | 'unknown';
+      /** @description 事件窗口内的主值（value_number） */
+      value: number | null;
+    };
+    /**
+     * EvidenceNoveltyComparison
+     * @description 一个对照时段：offset 为它相对事件窗口提前的时长
+     */
+    NoveltyComparison: {
+      offset: components['schemas']['Duration'];
+      /** @description 对照时段的主值；没有主值时为 null */
+      value: number | null;
+      verdict: components['schemas']['Verdict'];
+      window: components['schemas']['TimeWindow'];
     };
     /**
      * OptimizationOutput
@@ -5230,6 +5306,18 @@ export type components = {
       observability_blind: boolean;
       rendered_at: components['schemas']['Timestamp'];
       report_id: components['schemas']['Uuid'];
+      /** @description 成员告警的最低取证集合（契约 2.31.0，ADR 0153）：目录条目声明了 required_cards、能解析出实体的在场成员告警，每条一项。旧版本的报告没有这个字段 */
+      required_evidence?: {
+        alert_id: string;
+        alertname: string;
+        /** @description 最低取证集合中的卡（<pack>/<chain>/<card>） */
+        cards: string[];
+        /** @description <pack>/<条目 id> */
+        catalog_entry: string;
+        entity: components['schemas']['EntityRef'];
+        /** @description 阶段 A 没有在告警实体上得出结论（没有执行，或无法判定）的卡 */
+        missing: string[];
+      }[];
       rule_proposals: components['schemas']['Uuid'][];
       runbooks: string[];
       timeline: {

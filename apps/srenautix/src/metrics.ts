@@ -231,6 +231,13 @@ export class ServerMetrics extends BaseMetrics {
     registers: [this.registry],
   });
 
+  readonly evidenceNovelty = new Counter({
+    name: 'srenautix_stage_a_evidence_novelty_total',
+    help: '异常卡的证据基线判定（ADR 0153）：novel 明显异常，routine 常态，unknown 基线样本不足',
+    labelNames: ['status'] as const,
+    registers: [this.registry],
+  });
+
   readonly ruleErrors = new Counter({
     name: 'srenautix_stage_a_rule_errors_total',
     help: '规则提议求值出错的次数，按规则 <pack>/<rule id>',

@@ -102,33 +102,32 @@ export function kindKey(kind: string): string {
 }
 
 /**
- * 主卡的检查：卡片存在；卡片的 applies_to 包含条目的实体 kind；卡片所在的证据链在条目的 chains 中，
- * 告警触发时阶段 A 才会在告警实体上执行它（评测按这次执行的结论统计一致率）。
+ * 主卡与最低取证集合（required_cards，ADR 0153）中的卡的检查：卡片存在；卡片的 applies_to 包含条目的实体 kind；
+ * 卡片所在的证据链在条目的 chains 中，告警触发时阶段 A 才会在告警实体上执行它（评测按这次执行的结论统计一致率，
+ * 研判按它判断最低取证集合是否覆盖）。
  */
-function checkPrimaryCard(
+function checkEntryCard(
   pack: string,
-  e: { primary_card?: string; chains?: string[]; entity: { kind: string } },
+  ref: string,
+  what: string,
+  e: { chains?: string[]; entity: { kind: string } },
   cards: PackSet['cards'],
   where: string,
 ): void {
-  const key = primaryCardKey(pack, e.primary_card!);
-  const card = cards.get(key);
+  const card = cards.get(primaryCardKey(pack, ref));
   if (!card || card.chain === null) {
-    throw new PackLintError(where, `主卡 ${e.primary_card} 不存在或所在的包被禁用`);
+    throw new PackLintError(where, `${what} ${ref} 不存在或所在的包被禁用`);
   }
   const kinds = card.def.applies_to?.kinds;
   if (kinds && !kinds.some((k) => kindKey(k) === kindKey(e.entity.kind))) {
     throw new PackLintError(
       where,
-      `主卡 ${e.primary_card} 的 applies_to（${kinds.join('、')}）不包含实体 kind ${e.entity.kind}`,
+      `${what} ${ref} 的 applies_to（${kinds.join('、')}）不包含实体 kind ${e.entity.kind}`,
     );
   }
   const chain = `${card.pack}/${card.chain}`;
   if (!(e.chains ?? []).some((c) => (c.includes('/') ? c : `${pack}/${c}`) === chain)) {
-    throw new PackLintError(
-      where,
-      `主卡 ${e.primary_card} 所在的证据链 ${chain} 不在条目的 chains 中，告警触发时不会执行`,
-    );
+    throw new PackLintError(where, `${what} ${ref} 所在的证据链 ${chain} 不在条目的 chains 中，告警触发时不会执行`);
   }
 }
 
@@ -487,7 +486,10 @@ export async function compilePackSet(loaded: LoadedPack[], opts: CompileOptions)
         throw new PackLintError(where, `组件类型 ${e.component_type} 不存在`);
       }
       if (e.primary_card) {
-        checkPrimaryCard(p.name, e, cards, where);
+        checkEntryCard(p.name, e.primary_card, '主卡', e, cards, where);
+      }
+      for (const ref of e.required_cards ?? []) {
+        checkEntryCard(p.name, ref, '最低取证集合中的卡', e, cards, where);
       }
     }
     for (const ct of p.content.components.component_types) {

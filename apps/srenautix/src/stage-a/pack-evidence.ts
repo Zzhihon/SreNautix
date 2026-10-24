@@ -21,6 +21,8 @@ import type { EvidenceRun, EvidenceRunner, RuleHit, RuleProposer } from './ports
 import { isLogicalComponent } from '../topology/expand.js';
 import { parseStoredKey } from '../topology/keys.js';
 import { cardApplies, splitCardCheckArgs } from './card-checks.js';
+import { decideNovelty, isRoutine, sampleOffsets, type NoveltyOptions, type NoveltySample } from './novelty.js';
+import { requiredEvidence } from './required.js';
 
 /**
  * 组件 key → 组件类型（拓扑节点上由 components.yaml 匹配出的值）。正常通道查状态库，
@@ -44,6 +46,8 @@ export interface PackEvidenceOptions {
   maxCardWindowMs?: number;
   /** 指标数据源的保留期：卡片窗口起点不早于评估时刻减去它（ADR 0149）；不填时不限 */
   metricsRetentionMs?: number | null;
+  /** 证据基线（ADR 0153）：异常卡在事件之前的时段取基线样本；不填时不取 */
+  novelty?: NoveltyOptions;
 }
 
 /** 长期事件的卡片窗口默认最长 24 小时：区间查询最多约 300 个点，步长不超过 5 分钟 */
@@ -262,6 +266,7 @@ export class PackEvidence implements EvidenceRunner {
       runbooks: this.runbooks(chainsRun),
       rootComponentType,
       names,
+      required: requiredEvidence((entry) => this.rt.requiredCards(entry), alerts, cards),
     };
   }
 
@@ -468,10 +473,13 @@ export class PackEvidence implements EvidenceRunner {
       }
     }
     type Done = Omit<EvidenceResult, 'ref'>;
+    // 每张卡实际使用的锚点（证据基线按它平移，ADR 0153）
+    const anchors = new Map<Planned, number>();
     const results = await pool(plan, this.o.concurrency, signal, async (p): Promise<Done | null> => {
       const e = this.rt.set.cards.get(p.card)!;
       const before = durationSeconds((p.window ?? e.def.window ?? DEFAULT_WINDOW).before) * 1000;
       const at = anchorOf(p, anchor, afterOf(p));
+      anchors.set(p, at);
       const started = performance.now();
       try {
         const r = await runCard({
@@ -537,7 +545,98 @@ export class PackEvidence implements EvidenceRunner {
         done: results.filter((r) => r).length,
       });
     }
-    return results.filter((r): r is Done => r !== null && r !== undefined);
+    const done = plan
+      .map((p, i) => ({ p, r: results[i] }))
+      .filter((x): x is { p: Planned; r: Done } => x.r !== null && x.r !== undefined);
+    const o = this.o.novelty;
+    if (o?.enabled && !signal.aborted) {
+      await this.baseline(
+        done.filter((x) => x.r.verdict === 'abnormal').map((x) => ({ ...x, at: anchors.get(x.p)! })),
+        o,
+        ds,
+        resolutions,
+        signal,
+      );
+    }
+    return done.map((x) => x.r);
+  }
+
+  /**
+   * 证据基线（ADR 0153）：每张异常卡在同一实体上、按同样长度的窗口在事件之前的各个时段重新执行，判定写入 novelty。
+   * 样本时段由 sampleOffsets 给出；窗口整体平移，锚点在窗口中的位置不变（长期事件的锚点早于窗口起点时取窗口起点）；
+   * 参数与信号备选沿用事件窗口的。超出期限没有取完的样本不计入，样本不足时为 unknown。
+   */
+  private async baseline(
+    abnormal: Array<{ p: Planned; r: Omit<EvidenceResult, 'ref'>; at: number }>,
+    o: NoveltyOptions,
+    ds: EvidenceDataSource,
+    resolutions: Map<string, SignalResolution>,
+    signal: AbortSignal,
+  ): Promise<void> {
+    if (!abnormal.length) {
+      return;
+    }
+    const limit = AbortSignal.any([signal, AbortSignal.timeout(o.timeoutMs)]);
+    const notBefore = this.o.metricsRetentionMs ? Date.now() - this.o.metricsRetentionMs : -Infinity;
+    const tasks = abnormal.flatMap((x, card) => {
+      const from = Date.parse(x.r.window.from);
+      const to = Date.parse(x.r.window.to);
+      const at = Math.min(Math.max(x.at, from), to);
+      return sampleOffsets(o, to - from)
+        .filter((offset) => from - offset.ms >= notBefore)
+        .map((offset) => ({ card, from, to, at, offset }));
+    });
+    const samples: NoveltySample[][] = abnormal.map(() => []);
+    await pool(tasks, this.o.concurrency, limit, async (t) => {
+      const x = abnormal[t.card]!;
+      const shift = t.offset.ms;
+      try {
+        const r = await runCard({
+          set: this.rt.set,
+          card: x.p.card,
+          entity: {
+            cluster_id: x.p.entity.cluster_id,
+            kind: x.p.entity.kind,
+            namespace: x.p.entity.namespace,
+            name: x.p.entity.name,
+            node: x.p.entity.kind === 'Node' ? x.p.entity.name : null,
+          },
+          anchor: t.at - shift,
+          now: t.to - shift,
+          ds,
+          engine: this.source.engine,
+          resolutions,
+          clock: { from: toIso(t.from - shift - LOOKBACK_MS), to: toIso(Date.now()) },
+          locale: this.o.locale,
+          timeoutMs: this.o.queryTimeoutMs,
+          window: { before: `${t.at - t.from}ms`, after: `${t.to - t.at}ms` },
+          ...(x.p.params ? { params: x.p.params } : {}),
+        });
+        samples[t.card]!.push({
+          offset: t.offset,
+          window: r.window,
+          verdict: r.verdict,
+          value: r.value_number ?? null,
+        });
+      } catch (err) {
+        // 渲染与判定的错误由运行时记在卡片里；这里只剩窗口为空等计划本身的问题，这个样本不计入
+        logger.warn('证据基线的样本没有执行', {
+          card: x.p.card,
+          entity: entityKey(x.p.entity),
+          offset_ms: shift,
+          error: err,
+        });
+      }
+    });
+    const incomplete = limit.aborted;
+    abnormal.forEach((x, i) => {
+      const own = samples[i]!.sort((a, b) => a.offset.ms - b.offset.ms);
+      x.r.novelty = decideNovelty(x.r, own, o, incomplete);
+      this.metrics.evidenceNovelty.inc({ status: x.r.novelty.status });
+    });
+    if (incomplete) {
+      logger.warn('证据基线在期限内没有取完', { cards: abnormal.length, samples: tasks.length });
+    }
   }
 }
 
@@ -566,11 +665,13 @@ export class PackRules implements RuleProposer {
       return null;
     }
     const cards: RuleContext['cards'] = {};
-    // 同一张卡对多个实体执行时，以根因实体上的结果为准（根因的卡排在前面）
+    // 同一张卡对多个实体执行时，以根因实体上的结果为准（根因的卡排在前面）。
+    // 证据基线判为常态的异常卡按正常给出（ADR 0153），与修复模板的上下文相同
     for (const c of run.cards) {
+      const routine = isRoutine(c);
       cards[c.card_id] ??= {
-        verdict: c.verdict,
-        display_state: c.display_state,
+        verdict: routine ? 'normal' : c.verdict,
+        display_state: routine ? 'normal' : c.display_state,
         value: c.value ?? '',
         reason_kind: c.reason.kind,
       };

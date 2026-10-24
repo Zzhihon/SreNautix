@@ -2,6 +2,7 @@ import type { Alert, EvidenceResult, LocalizedText, RepositoryLayout } from '@sr
 import { globToRegExp, type RemediationContext, type RemediationPlan } from '@srenautix/packs-sdk';
 import { applyPatch, parsePatch } from 'diff';
 import { parseAllDocuments } from 'yaml';
+import { isRoutine } from '../stage-a/novelty.js';
 
 /**
  * 自愈 PR 的上下文、校验与描述（ADR 0108），全部是纯函数：
@@ -20,16 +21,18 @@ const SEVERITY: Record<string, number> = { abnormal: 0, undeterminable: 1, norma
 
 /**
  * 同一张卡在多个实体上执行时取最严重的结论（abnormal > undeterminable > normal）；observations 是这一份结果的
- * let 绑定取值（判定的明细，例如发布卡的 missing），没有时不出现；impact 是卡片定义的影响卡标记
+ * let 绑定取值（判定的明细，例如发布卡的 missing），没有时不出现；impact 是卡片定义的影响卡标记。
+ * 证据基线判为常态的异常卡（ADR 0153）按正常给出：与事件之前的时段相同的状态不是这次事件要修复的对象
  */
 export function cardsOf(cards: EvidenceResult[]): RemediationContext['cards'] {
   const out: RemediationContext['cards'] = {};
   for (const c of cards) {
     const cur = out[c.card_id];
-    if (!cur || (SEVERITY[c.verdict] ?? 3) < (SEVERITY[cur.verdict] ?? 3)) {
+    const verdict = isRoutine(c) ? 'normal' : c.verdict;
+    if (!cur || (SEVERITY[verdict] ?? 3) < (SEVERITY[cur.verdict] ?? 3)) {
       out[c.card_id] = {
-        verdict: c.verdict,
-        display_state: c.display_state,
+        verdict,
+        display_state: isRoutine(c) ? 'normal' : c.display_state,
         value: c.value === null || c.value === undefined ? null : String(c.value),
         ...(c.reason?.kind ? { reason_kind: c.reason.kind } : {}),
         ...(c.impact === true || cur?.impact === true ? { impact: true } : {}),

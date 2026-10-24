@@ -965,6 +965,7 @@ export async function reconstructCase(
     cards: run.cards,
     excludedBy,
     runbooks: run.runbooks,
+    ...(run.required ? { required: run.required } : {}),
     degraded: false,
     fingerprint: verdictFingerprint(run.cards),
     now: new Date(asOf),

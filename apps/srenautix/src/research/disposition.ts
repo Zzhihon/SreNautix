@@ -1,5 +1,6 @@
 import type { ConclusionLevel, Disposition, Incident, StageAReport } from '@srenautix/contract';
 import { displayKey } from '@srenautix/core';
+import { isRoutine } from '../stage-a/novelty.js';
 import type { CardEntry } from './evidence.js';
 import type { DispositionFacts } from './types.js';
 
@@ -7,7 +8,8 @@ import type { DispositionFacts } from './types.js';
 // - 观测失明时一律 escalate；
 // - ignore 只在确定性依据成立时给出（不论模型给出什么）：阶段 A 已判为 ignore；研判根因（likely 及以上）是领域包声明的
 //   集群外部组件；没有任何异常卡；影响卡全部正常。四种依据都要求没有有效提议、没有规则提议、修复模板使用的根因上没有
-//   适用的修复模板（ignore 不带修复）；
+//   适用的修复模板（ignore 不带修复）。证据基线判为常态的异常卡（ADR 0153）在这里按正常计；
+// - 最低取证集合没有覆盖（ADR 0153）时，除阶段 A 已判为 ignore 之外，不给 ignore，也不给 act；
 // - 模型给出 ignore 而没有依据时按严重度改写（critical 为 escalate，其余为 undetermined）；
 // - act 需要选中的根因，以及一条有效的提议、一条规则提议或修复模板使用的根因上适用的修复模板，否则按严重度改写；
 // - escalate 与 undetermined 保持模型的取值。
@@ -37,6 +39,8 @@ export interface DispositionInput {
   /** 本次研判的全部证据卡（阶段 A 与区分性检查） */
   cards: readonly CardEntry[];
   facts: DispositionFacts | null | undefined;
+  /** 最低取证集合的缺口（ADR 0153，missingRequired 的说明）；没有时为空 */
+  gaps?: readonly string[];
 }
 
 export interface DispositionResult {
@@ -71,23 +75,34 @@ function ignoreBasis(i: DispositionInput, templates: readonly string[]): { basis
   if (i.stageA.disposition === 'ignore' && STAGE_A_IGNORE.has(i.stageA.disposition_reason)) {
     return { basis: 'stage_a', why: `阶段 A 判为 ignore（${i.stageA.disposition_reason}）` };
   }
+  if (i.gaps?.length) {
+    return null;
+  }
   if (i.root !== null && RESEARCH_ROOT_LEVELS.has(i.level) && (i.facts?.external ?? []).includes(i.root)) {
     return {
       basis: 'external',
       why: `研判根因 ${displayKey(i.root)}（${i.level}）是领域包声明的集群外部组件，集群内没有可处置的对象`,
     };
   }
-  // 只有领域包规则判定的卡算确定性证据；只读工具结果由小模型判定的卡不算
+  // 只有领域包规则判定的卡算确定性证据；只读工具结果由小模型判定的卡不算。常态的异常卡按正常计（ADR 0153）
   const rule = i.cards.filter((c) => c.judgedBy === 'rule');
+  const normal = (c: CardEntry) => c.result.verdict === 'normal' || isRoutine(c.result);
+  const routine = (list: readonly CardEntry[]) => {
+    const r = list.filter((c) => isRoutine(c.result)).map((c) => c.ref);
+    return r.length ? `（${r.join('、')} 为常态）` : '';
+  };
   const determinate = rule.filter((c) => c.result.verdict === 'abnormal' || c.result.verdict === 'normal');
-  if (determinate.length > 0 && determinate.every((c) => c.result.verdict === 'normal')) {
-    return { basis: 'evidence_normal', why: `${determinate.length} 张得出结论的卡全部正常，没有异常卡` };
+  if (determinate.length > 0 && determinate.every(normal)) {
+    return {
+      basis: 'evidence_normal',
+      why: `${determinate.length} 张得出结论的卡全部正常${routine(determinate)}，没有异常卡`,
+    };
   }
   const impact = rule.filter((c) => c.result.impact === true);
-  if (impact.length > 0 && impact.every((c) => c.result.verdict === 'normal')) {
+  if (impact.length > 0 && impact.every(normal)) {
     return {
       basis: 'impact_normal',
-      why: `影响卡 ${impact.map((c) => c.ref).join('、')} 全部正常`,
+      why: `影响卡 ${impact.map((c) => c.ref).join('、')} 全部正常${routine(impact)}`,
     };
   }
   return null;
@@ -118,13 +133,19 @@ export function deriveDisposition(i: DispositionInput): DispositionResult {
           ? `根因上有适用的修复模板 ${templates.join('、')}，ignore 不带修复`
           : i.stageA.rule_proposals.length > 0
             ? '有规则提议，ignore 不带修复'
-            : '没有确定性依据（阶段 A 没有判为 ignore，根因不是 likely 以上的集群外部组件，有异常卡，影响卡不是全部正常）';
+            : i.gaps?.length
+              ? '最低取证集合没有覆盖（ADR 0153）'
+              : '没有确定性依据（阶段 A 没有判为 ignore，根因不是 likely 以上的集群外部组件，有异常卡，影响卡不是全部正常）';
     notes.push(`模型给出 ignore，但${why}，改为 ${fallback}`);
     return { disposition: fallback, basis: null, templates, notes };
   }
   if (i.model === 'act') {
     if (i.root === null) {
       notes.push(`处置为 act 但根因无法判定，改为 ${fallback}`);
+      return { disposition: fallback, basis: null, templates, notes };
+    }
+    if (i.gaps?.length) {
+      notes.push(`处置为 act 但最低取证集合没有覆盖（ADR 0153），改为 ${fallback}`);
       return { disposition: fallback, basis: null, templates, notes };
     }
     if (i.proposals === 0 && i.stageA.rule_proposals.length === 0) {
