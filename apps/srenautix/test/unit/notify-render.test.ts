@@ -3,7 +3,13 @@ import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { NotifyRun } from '@srenautix/contract';
 import { ButtonSigner, MAX_CARD_BYTES, renderCard, renderDigestCard } from '../../src/channels/feishu/render.js';
-import { buildHtml, MAX_ENTITIES, MAX_TEXT_UNITS, type Part } from '../../src/channels/telegram/html.js';
+import {
+  buildHtml,
+  MAX_ENTITIES,
+  MAX_ENTITY_BYTES,
+  MAX_TEXT_UNITS,
+  type Part,
+} from '../../src/channels/telegram/html.js';
 import {
   CALLBACK_PREFIX,
   renderDigest,
@@ -16,7 +22,7 @@ import { feishuButtonKey } from '../../src/notify/index.js';
 import { issueMarkdown } from '../../src/notify/markdown.js';
 import type { DesiredIncidentMessage } from '../../src/notify/ports.js';
 import { releaseRolloutInput } from '../support/report-fixture.js';
-import { parseTelegramHtml } from '../support/telegram-html.js';
+import { parseTelegramHtml, serializedEntityBytes } from '../support/telegram-html.js';
 
 /** test/fixtures/render 下的渲染黄金用例，格式见该目录的 README.md。 */
 interface RenderCase {
@@ -146,6 +152,7 @@ function parsed(p: TelegramPayload): ReturnType<typeof parseTelegramHtml> {
   expect(r.text.length).toBeGreaterThan(0);
   expect(r.text.length).toBeLessThanOrEqual(MAX_TEXT_UNITS);
   expect(r.entities.length).toBeLessThanOrEqual(MAX_ENTITIES);
+  expect(serializedEntityBytes(r.entities)).toBeLessThanOrEqual(MAX_ENTITY_BYTES);
   expect(hasLoneSurrogate(r.text), '截断切开了代理对').toBe(false);
   return r;
 }

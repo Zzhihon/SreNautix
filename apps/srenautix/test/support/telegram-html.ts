@@ -49,6 +49,12 @@ export function parseTelegramHtml(html: string): { text: string; entities: Parse
         if (name === 'blockquote' && stack.some((s) => s.name === 'blockquote')) {
           error ??= 'blockquote 不能嵌套';
         }
+        if (name === 'a' && stack.some((s) => s.name === 'a')) {
+          error ??= '<a> 不能嵌套';
+        }
+        if (stack.some((s) => s.name === 'code')) {
+          error ??= `<code> 里不能有其他实体（<${name}>）`;
+        }
         stack.push({ name, start: text.length, url: attribs.href, expandable: 'expandable' in attribs });
       },
       ontext(data) {
@@ -85,3 +91,27 @@ export function parseTelegramHtml(html: string): { text: string; entities: Parse
   }
   return { text, entities: entities.sort((a, b) => a.offset - b.offset) };
 }
+
+/**
+ * 实体列表按 MTProto 的 TL 序列化后的字节数，Telegram 对它有上限（超过时 400 ENTITIES_TOO_LONG，实测约 10000 字节，
+ * tdlib/telegram-bot-api#165）：vector 头 8 字节；每个实体构造号、offset、length 各 4 字节；引用块另有 flags 4 字节；
+ * text_link 另有 URL 的 TL 字符串（长度前缀 1 或 4 字节加 UTF-8 内容，按 4 字节对齐）。与 src 的实现分开写，用来对照。
+ */
+export function serializedEntityBytes(entities: readonly ParsedEntity[]): number {
+  let n = 8;
+  for (const e of entities) {
+    n += 12;
+    if (e.type === 'blockquote' || e.type === 'expandable_blockquote') {
+      n += 4;
+    }
+    if (e.type === 'text_link') {
+      const len = new TextEncoder().encode(e.url ?? '').length;
+      const head = len >= 254 ? 4 : 1;
+      n += (head + len + 3) & ~3;
+    }
+  }
+  return n;
+}
+
+/** Telegram 服务端拒绝实体列表的大小（实测值） */
+export const TELEGRAM_ENTITY_BYTES_LIMIT = 10_000;

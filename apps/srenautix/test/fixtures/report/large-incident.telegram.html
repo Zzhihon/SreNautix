@@ -1,0 +1,65 @@
+[影子] <b>[严重] StatefulSet:acme-prod/gateway：KubeContainerOOMKilled、KubePdbBlockingEviction</b>
+未恢复 · 事件 <code>StatefulSet:acme-prod/gateway:2026-10-20T15:50:00Z</code>
+首次触发 2026-10-20 15:50 UTC
+
+<b>现状</b>
+<code>prod/acme-prod</code>：发布 <code>rel-9a8c9cd6</code>（15:59:52）与回退到 <code>rel-fd8097cf</code>（16:24:25）期间，<b>StatefulSet:acme-prod/gateway</b>：KubeContainerOOMKilled、KubePdbBlockingEviction。<code>15:50:30</code> 起首个告警，<code>16:25</code> 起出现症状，截至 <code>17:07:40</code> 未恢复。70 条告警（41 条触发中），7 个组件。
+
+<b>时间线（UTC，10-20）</b>
+- <code>15:50:30</code> 首个告警 <a href="https://grafana.example.test/explore?schemaVersion=1&amp;orgId=1&amp;panes=%7B%22a%22%3A%7B%22datasource%22%3A%22victoriametrics%22%2C%22queries%22%3A%5B%7B%22refId%22%3A%22A%22%2C%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22victoriametrics%22%7D%2C%22expr%22%3A%22sum%20by%20(namespace%2C%20pod)%20(rate(container_cpu_cfs_throttled_periods_total%7Bnamespace%3D%5C%22acme-prod%5C%22%2Cpod%3D%5C%22worker-5%5C%22%2Ccontainer!%3D%5C%22%5C%22%7D%5B5m%5D))%20%2F%20sum%20by%20(namespace%2C%20pod)%20(rate(container_cpu_cfs_periods_total%7Bnamespace%3D%5C%22acme-prod%5C%22%2Cpod%3D%5C%22worker-5%5C%22%7D%5B5m%5D))%20%3E%200.25%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22now-6h%22%2C%22to%22%3A%22now%22%7D%7D%7D">AcmeWorkerNoAvailableReplicas</a> · <code>StatefulSet:acme-prod/gateway</code>，检测器建事件
+- <code>15:55</code> 首张异常卡 <code>card:38</code> <b>内存占 limit 与 OOM</b>：working set 峰值 97%，值 <code>96.5%</code>，阈值 <code>90.0%</code>
+- <code>15:59:52</code> 变更 <a href="https://argocd.example.test/applications/argocd/acme-prod">发布 rel-9a8c9cd6</a> → control、worker、gateway
+- <code>16:00:30</code> 升为严重 <a href="https://grafana.example.test/explore?schemaVersion=1&amp;orgId=1&amp;panes=%7B%22a%22%3A%7B%22datasource%22%3A%22victoriametrics%22%2C%22queries%22%3A%5B%7B%22refId%22%3A%22A%22%2C%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22victoriametrics%22%7D%2C%22expr%22%3A%22sum%20by%20(namespace%2C%20pod)%20(rate(container_cpu_cfs_throttled_periods_total%7Bnamespace%3D%5C%22acme-prod%5C%22%2Cpod%3D%5C%22gateway-6%5C%22%2Ccontainer!%3D%5C%22%5C%22%7D%5B5m%5D))%20%2F%20sum%20by%20(namespace%2C%20pod)%20(rate(container_cpu_cfs_periods_total%7Bnamespace%3D%5C%22acme-prod%5C%22%2Cpod%3D%5C%22gateway-6%5C%22%7D%5B5m%5D))%20%3E%200.25%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22now-6h%22%2C%22to%22%3A%22now%22%7D%7D%7D">KubePdbBlockingEviction</a>
+- <code>16:24:25</code> 变更 <a href="https://argocd.example.test/applications/argocd/acme-prod">回退到 rel-fd8097cf</a> → control、worker、gateway
+- <code>16:25</code> 症状起点 <a href="https://grafana.example.test/explore?schemaVersion=1&amp;orgId=1&amp;panes=%7B%22a%22%3A%7B%22datasource%22%3A%22victoriametrics%22%2C%22queries%22%3A%5B%7B%22refId%22%3A%22A%22%2C%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22victoriametrics%22%7D%2C%22expr%22%3A%22sum%20by%20(namespace%2C%20pod)%20(rate(container_cpu_cfs_throttled_periods_total%7Bnamespace%3D%5C%22acme-prod%5C%22%2Cpod%3D%5C%22gateway-3-23%5C%22%2Ccontainer!%3D%5C%22%5C%22%7D%5B5m%5D))%20%2F%20sum%20by%20(namespace%2C%20pod)%20(rate(container_cpu_cfs_periods_total%7Bnamespace%3D%5C%22acme-prod%5C%22%2Cpod%3D%5C%22gateway-3-23%5C%22%7D%5B5m%5D))%20%3E%200.25%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22now-6h%22%2C%22to%22%3A%22now%22%7D%7D%7D">KubeContainerOOMKilled</a>、<a href="https://grafana.example.test/explore?schemaVersion=1&amp;orgId=1&amp;panes=%7B%22a%22%3A%7B%22datasource%22%3A%22victoriametrics%22%2C%22queries%22%3A%5B%7B%22refId%22%3A%22A%22%2C%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22victoriametrics%22%7D%2C%22expr%22%3A%22sum%20by%20(namespace%2C%20pod)%20(rate(container_cpu_cfs_throttled_periods_total%7Bnamespace%3D%5C%22acme-prod%5C%22%2Cpod%3D%5C%22gateway-52%5C%22%2Ccontainer!%3D%5C%22%5C%22%7D%5B5m%5D))%20%2F%20sum%20by%20(namespace%2C%20pod)%20(rate(container_cpu_cfs_periods_total%7Bnamespace%3D%5C%22acme-prod%5C%22%2Cpod%3D%5C%22gateway-52%5C%22%7D%5B5m%5D))%20%3E%200.25%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22now-6h%22%2C%22to%22%3A%22now%22%7D%7D%7D">KubePdbBlockingEviction</a>
+- <code>17:05</code> 阶段 A：53 张卡，26 异常、23 正常、4 无法判定
+- <code>17:07:40</code> 研判结束：4 个假设、3 项检查
+
+<b>关键问题</b>
+<b>结论：可能（likely）</b> · <code>StatefulSet:acme-prod/gateway</code>（h3）
+处置：<b>升级</b> · 阶段 A：critical 且根因有歧义（3 个候选，第一名得分 0.35，与第二名分差 0.00）
+为什么是“可能”（代码判定，四项条件满足 2 项）：
+- <b>满足</b>：支持卡实体在假设范围内：30 张规则判定的卡（检查卡 1 张）
+- <b>满足</b>：最早异常 <code>15:55</code>（<code>card:38</code>）不晚于症状起点 <code>16:25</code> + 2 分钟
+- <b>不满足</b>：同一信号上有 5 张相反的正常卡：<code>card:25</code>、<code>card:51</code>、<code>card:52</code>、<code>card:77</code>、<code>card:78</code>（持续 Pending：gateway-3、gateway-0；容器等待原因：gateway-0；card:77：card:77；card:78：card:78）
+- <b>不满足</b>：竞争假设 h4 同样处于支持状态，检查没有区分它们
+<i>【模型】机制：本次 canary 把 gateway 容器的内存 limit/请求调低，StatefulSet 只更新了一部分副本→ 服务容量不足使 HPA 顶格。</i>
+研判根因（StatefulSet:acme-prod/gateway）与发现根因（Application.argoproj.io:argocd/acme-prod）不一致，事件没有拆分
+
+<b>拓扑联系</b>
+变更 <code>发布 rel-9a8c9cd6</code>（15:59:52）⇒ 变更 <code>回退到 rel-fd8097cf</code>（16:24:25）⇒ <b>StatefulSet:acme-prod/gateway</b> ⇒ 告警 KubeContainerOOMKilled、AcmeMetricsTargetDown、KubeStatefulSetReplicasNotReady
+- StatefulSet:acme-prod/gateway —managed_by→ <code>Application.argoproj.io:argocd/acme-prod</code> ⇒ 告警 ArgoCDAppDegraded
+- StatefulSet:acme-prod/gateway —managed_by→ <code>Application.argoproj.io:argocd/acme-prod</code> —manages→ <code>Deployment:acme-prod/control</code> ⇒ 告警 AcmeMetricsTargetDown、AcmeMigrationWaitStuck、KubePodInitializingTooLong、KubeDeploymentReplicasUnavailable、KubeDeploymentRolloutStuck
+- StatefulSet:acme-prod/gateway —managed_by→ <code>Application.argoproj.io:argocd/acme-prod</code> —manages→ <code>Deployment:acme-prod/worker</code> ⇒ 告警 AcmeMetricsTargetDown、AcmeMigrationWaitStuck、KubePodInitializingTooLong、KubeDeploymentReplicasUnavailable
+- StatefulSet:acme-prod/gateway —managed_by→ <code>Application.argoproj.io:argocd/acme-prod</code> —manages→ <code>PodDisruptionBudget:acme-prod/gateway</code> ⇒ 告警 KubePdbBlockingEviction
+- <code>component:acme-prod/worker</code>（逻辑组件，没有拓扑边） ⇒ 告警 AcmeWorkerNoAvailableReplicas
+
+<b>解决方案</b>
+- <code>r1</code> <i>【模型】暂停 acme-prod 中 control、worker、gateway 所在 Application 的 rollout</i>
+  验证：card:31 重跑后转为正常
+- <code>r2</code> <i>【模型】重建 gateway-4 并确认就绪</i> · <code>pod_restart</code>
+  验证：执行后 300 秒内：原 Pod 已移除，控制器有新的就绪 Pod，就绪副本数回到驱逐前
+- <code>r3</code> <i>【模型】检查 gateway 内存 limit 与 canary 镜像的常驻内存</i>
+  验证：card:38 重跑后转为正常
+runbook：<code>argocd/argocd.md</code>、<code>workload/workload.md</code>
+
+<b>证据链</b>
+<blockquote expandable><b>h3 StatefulSet:acme-prod/gateway</b> · 支持 · 支持证据 22、相反卡 3、检查 1 项
+  - + <code>card:135</code> <b>重启与终止原因</b> · <code>StatefulSet:acme-prod/gateway</code>：窗口内重启 1 次 · <code>15:20:30–16:00:30</code> · 异常 <a href="https://srenautix.example.test/incidents/e88a2a7c-0000-4000-8000-e88a2a7ca284?tab=evidence#card-135">控制台</a> <a href="https://vm.example.test/vmui/#/?g0.expr=sum%20by%20(namespace%2C%20pod%2C%20container)%20(increase(kube_pod_container_status_restarts_total%7Bcluster%3D~%22acme%7C%22%2Cnamespace%3D%22acme-prod%22%2Cpod%3D~%22gateway-%5B0-9%5D%2B%22%7D%5B40m%5D))&amp;g0.range_input=40m&amp;g0.end_input=2026-10-20T16%3A00%3A30.000Z">查询</a>
+  - + card:38 <b>内存占 limit 与 OOM</b> · StatefulSet:acme-prod/gateway：working set 峰值 97%，值 96.5%，阈值 90.0% · 自 15:55 · 异常 <a href="https://srenautix.example.test/incidents/e88a2a7c-0000-4000-8000-e88a2a7ca284?tab=evidence#card-38">控制台</a> <a href="https://vm.example.test/vmui/#/?g0.expr=max%20by%20(namespace%2C%20pod%2C%20container)%20(container_memory_working_set_bytes%7Bcluster%3D~%22acme%7C%22%2Ccontainer!%3D%22%22%2Ccontainer!%3D%22POD%22%2Cnamespace%3D%22acme-prod%22%2Cpod%3D~%22gateway-%5B0-9%5D%2B%22%7D%20%2F%20on%20(namespace%2C%20pod%2C%20container)%20kube_pod_container_resource_limits%7Bcluster%3D~%22acme%7C%22%2Cnamespace%3D%22acme-prod%22%2Cpod%3D~%22gateway-%5B0-9%5D%2B%22%2Cresource%3D%22memory%22%7D)&amp;g0.range_input=40m&amp;g0.end_input=2026-10-20T16%3A12%3A30.000Z">查询</a>
+  - + card:40 <b>就绪</b> · StatefulSet:acme-prod/gateway：5 个 Pod 在窗口内未就绪 · 自 15:56:30 · 异常 <a href="https://srenautix.example.test/incidents/e88a2a7c-0000-4000-8000-e88a2a7ca284?tab=evidence#card-40">控制台</a> <a href="https://vm.example.test/vmui/#/?g0.expr=max%20by%20(namespace%2C%20pod)%20(kube_pod_status_ready%7Bcluster%3D~%22acme%7C%22%2Ccondition%3D%22true%22%2Cnamespace%3D%22acme-prod%22%2Cpod%3D~%22gateway-%5B0-9%5D%2B%22%7D)&amp;g0.range_input=40m&amp;g0.end_input=2026-10-20T16%3A12%3A30.000Z">查询</a>
+  - 其余 15 张见控制台
+  - − card:25 <b>持续 Pending</b> · Pod:acme-prod/gateway-3：值 0，未命中异常条件 · 15:36–16:16 · 正常 <a href="https://srenautix.example.test/incidents/e88a2a7c-0000-4000-8000-e88a2a7ca284?tab=evidence#card-25">控制台</a> <a href="https://vm.example.test/vmui/#/?g0.expr=max%20by%20(namespace%2C%20pod)%20(kube_pod_status_phase%7Bcluster%3D~%22acme%7C%22%2Cnamespace%3D%22acme-prod%22%2Cphase%3D%22Pending%22%2Cpod%3D%22gateway-3%22%7D)&amp;g0.range_input=40m&amp;g0.end_input=2026-10-20T16%3A16%3A00.000Z">查询</a>
+  - − card:51 <b>持续 Pending</b> · Pod:acme-prod/gateway-0：值 0，未命中异常条件 · 15:34–16:14 · 正常 <a href="https://srenautix.example.test/incidents/e88a2a7c-0000-4000-8000-e88a2a7ca284?tab=evidence#card-51">控制台</a> <a href="https://vm.example.test/vmui/#/?g0.expr=max%20by%20(namespace%2C%20pod)%20(kube_pod_status_phase%7Bcluster%3D~%22acme%7C%22%2Cnamespace%3D%22acme-prod%22%2Cphase%3D%22Pending%22%2Cpod%3D%22gateway-0%22%7D)&amp;g0.range_input=40m&amp;g0.end_input=2026-10-20T16%3A14%3A00.000Z">查询</a>
+  - 其余 1 张见控制台
+  - 成员告警 4 条：<a href="https://grafana.example.test/explore?schemaVersion=1&amp;orgId=1&amp;panes=%7B%22a%22%3A%7B%22datasource%22%3A%22victoriametrics%22%2C%22queries%22%3A%5B%7B%22refId%22%3A%22A%22%2C%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22victoriametrics%22%7D%2C%22expr%22%3A%22sum%20by%20(namespace%2C%20pod)%20(rate(container_cpu_cfs_throttled_periods_total%7Bnamespace%3D%5C%22acme-prod%5C%22%2Cpod%3D%5C%22gateway-3-0%5C%22%2Ccontainer!%3D%5C%22%5C%22%7D%5B5m%5D))%20%2F%20sum%20by%20(namespace%2C%20pod)%20(rate(container_cpu_cfs_periods_total%7Bnamespace%3D%5C%22acme-prod%5C%22%2Cpod%3D%5C%22gateway-3-0%5C%22%7D%5B5m%5D))%20%3E%200.25%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22now-6h%22%2C%22to%22%3A%22now%22%7D%7D%7D">KubeContainerOOMKilled</a>、<a href="https://grafana.example.test/explore?schemaVersion=1&amp;orgId=1&amp;panes=%7B%22a%22%3A%7B%22datasource%22%3A%22victoriametrics%22%2C%22queries%22%3A%5B%7B%22refId%22%3A%22A%22%2C%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22victoriametrics%22%7D%2C%22expr%22%3A%22sum%20by%20(namespace%2C%20pod)%20(rate(container_cpu_cfs_throttled_periods_total%7Bnamespace%3D%5C%22acme-prod%5C%22%2Cpod%3D%5C%22gateway-4%5C%22%2Ccontainer!%3D%5C%22%5C%22%7D%5B5m%5D))%20%2F%20sum%20by%20(namespace%2C%20pod)%20(rate(container_cpu_cfs_periods_total%7Bnamespace%3D%5C%22acme-prod%5C%22%2Cpod%3D%5C%22gateway-4%5C%22%7D%5B5m%5D))%20%3E%200.25%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22now-6h%22%2C%22to%22%3A%22now%22%7D%7D%7D">KubeStatefulSetReplicasNotReady</a>、<a href="https://grafana.example.test/explore?schemaVersion=1&amp;orgId=1&amp;panes=%7B%22a%22%3A%7B%22datasource%22%3A%22victoriametrics%22%2C%22queries%22%3A%5B%7B%22refId%22%3A%22A%22%2C%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22victoriametrics%22%7D%2C%22expr%22%3A%22sum%20by%20(namespace%2C%20pod)%20(rate(container_cpu_cfs_throttled_periods_total%7Bnamespace%3D%5C%22acme-prod%5C%22%2Cpod%3D%5C%22gateway-6%5C%22%2Ccontainer!%3D%5C%22%5C%22%7D%5B5m%5D))%20%2F%20sum%20by%20(namespace%2C%20pod)%20(rate(container_cpu_cfs_periods_total%7Bnamespace%3D%5C%22acme-prod%5C%22%2Cpod%3D%5C%22gateway-6%5C%22%7D%5B5m%5D))%20%3E%200.25%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22now-6h%22%2C%22to%22%3A%22now%22%7D%7D%7D">KubePdbBlockingEviction</a>、AcmePostDeployAnomaly
+<b>已执行的检查</b>
+- h1 · <b>健康与同步状态</b> @ Application.argoproj.io:argocd/acme-prod → 推翻（card:134 正常：degraded=0 outOfSync=0 seen=1，未命中异常条件） 控制台 查询
+- h3 · <b>重启与终止原因</b> @ StatefulSet:acme-prod/gateway → 支持（card:135 异常：窗口内重启 1 次） 控制台 查询
+- h4 · <b>PDB 健康副本</b> @ PodDisruptionBudget:acme-prod/gateway → 支持（card:136 异常：健康副本比要求少 1 个） 控制台 查询
+<b>h4 PodDisruptionBudget:acme-prod/gateway</b> · 支持 · 支持证据 2、相反卡 0、检查 1 项
+  - + card:136 <b>PDB 健康副本</b> · PodDisruptionBudget:acme-prod/gateway：健康副本比要求少 1 个 · 15:20:30–16:00:30 · 异常 控制台 查询
+  - 成员告警 1 条：KubeContainerOOMKilled
+<b>h2 Application.argoproj.io:argocd/acme-postgresql-prod</b> · 待检验 · 支持证据 0、相反卡 0、检查 0 项
+  - 检查列表里没有这个组件，没有执行检查
+…其余内容见控制台</blockquote>

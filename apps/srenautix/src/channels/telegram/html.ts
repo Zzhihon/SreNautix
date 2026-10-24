@@ -2,7 +2,7 @@ import type { NotifyRun } from '@srenautix/contract';
 
 // Telegram 消息的 HTML（parse_mode=HTML，ADR 0125）。只使用 Bot API 支持的标签：b、i、code、a、blockquote（可展开）；
 // 文本中的 &、<、> 与属性中的 " 一律转义。按段组装：超过长度上限时从优先级最低的段的末尾逐块删减，
-// 删减以块为单位，标签总是闭合。实体（标签）数超过上限时，其余片段按纯文本输出。
+// 删减以块为单位，标签总是闭合。实体（标签）的个数或总字节数超过上限时，其余片段按纯文本输出。
 
 /**
  * sendMessage / editMessageText 的文本上限（解析实体之后的文字）。Bot API 写作 4096 字符，这里按 UTF-16 code unit 计，
@@ -11,6 +11,29 @@ import type { NotifyRun } from '@srenautix/contract';
 export const MAX_TEXT_UNITS = 4096;
 /** 一条消息里的实体数上限，超出部分 Telegram 不再显示格式 */
 export const MAX_ENTITIES = 100;
+/**
+ * 一条消息全部实体的 TL 序列化总字节数（entityBytes 之和）的上限。超过时 Telegram 整条拒绝：400 ENTITIES_TOO_LONG
+ * （#13：70 个成员、53 张卡的事件，告警来源与数据源查询的链接很长）。服务端的上限没有写进文档，实测约 10000 字节
+ * （tdlib/telegram-bot-api#165；20 个链接、URL 共 9600 字符可以发送，9640 被拒绝，与 TL 序列化后 9928 与 10008 字节相符），
+ * 这里留 10% 余量（ADR 0145）。
+ */
+export const MAX_ENTITY_BYTES = 9000;
+
+/** TL 字符串的字节数：长度前缀（不超过 253 字节时 1 字节，否则 4 字节）加 UTF-8 内容，按 4 字节对齐 */
+function tlStringBytes(s: string): number {
+  const n = Buffer.byteLength(s, 'utf8');
+  return Math.ceil(((n <= 253 ? 1 : 4) + n) / 4) * 4;
+}
+
+/**
+ * 实体的 TL 序列化字节数：构造号、offset、length 各 4 字节；引用块另有 4 字节 flags；text_link 另有 URL 的 TL 字符串。
+ * 一条消息的实体列表另有 8 字节（vector 的构造号与长度）。
+ */
+export function entityBytes(type: 'text_link' | 'blockquote' | 'other', url = ''): number {
+  return type === 'text_link' ? 12 + tlStringBytes(url) : type === 'blockquote' ? 16 : 12;
+}
+
+const ENTITY_LIST_BYTES = 8;
 
 export function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -71,36 +94,66 @@ function partText(p: Part, kept: number, trimmed: boolean): number {
 
 type Category = 'struct' | 'link' | 'emph' | 'code';
 
+interface Demand {
+  struct: number;
+  emph: number;
+  code: number;
+  /** 链接的地址，按输出顺序 */
+  links: string[];
+}
+
 /**
  * 实体的分配：总数不超过 MAX_ENTITIES，按 段标题与引用块 → 链接 → 加粗与斜体 → 等宽 的顺序分配，
- * 某一类分不到的片段按纯文本输出
+ * 某一类分不到的片段按纯文本输出。总字节数不超过 MAX_ENTITY_BYTES：先为段标题、引用块与可能分到的强调、等宽留出字节，
+ * 链接按输出顺序逐个分配，放不下的链接（地址太长）按纯文本输出，后面较短的链接照样可以分到。
  */
 class Budget {
-  private readonly left: Record<Category, number>;
+  private readonly left: Record<Exclude<Category, 'link'>, number>;
+  /** 每个链接（按输出顺序）是否分到实体 */
+  private readonly links: boolean[];
+  private next = 0;
 
-  constructor(demand: Record<Category, number>) {
+  constructor(demand: Demand) {
     let rest = MAX_ENTITIES;
     const give = (n: number) => {
       const g = Math.min(n, rest);
       rest -= g;
       return g;
     };
-    this.left = { struct: 0, link: 0, emph: 0, code: 0 };
-    for (const c of ['struct', 'link', 'emph', 'code'] as const) {
-      this.left[c] = give(demand[c]);
-    }
+    const struct = give(demand.struct);
+    // 强调与等宽最多能分到的个数，先留出它们的字节
+    const styled = Math.min(demand.emph + demand.code, rest);
+    let bytes =
+      MAX_ENTITY_BYTES - ENTITY_LIST_BYTES - struct * entityBytes('blockquote') - styled * entityBytes('other');
+    this.links = demand.links.map((url) => {
+      const need = entityBytes('text_link', url);
+      if (rest <= 0 || need > bytes) {
+        return false;
+      }
+      rest--;
+      bytes -= need;
+      return true;
+    });
+    this.left = { struct, emph: 0, code: 0 };
+    this.left.emph = give(demand.emph);
+    this.left.code = give(demand.code);
   }
 
-  take(c: Category): boolean {
+  take(c: Exclude<Category, 'link'>): boolean {
     if (this.left[c] <= 0) {
       return false;
     }
     this.left[c]--;
     return true;
   }
+
+  /** 下一个链接是否分到实体；调用顺序与 demandOf 收集链接的顺序相同 */
+  takeLink(): boolean {
+    return this.links[this.next++] ?? false;
+  }
 }
 
-const styleCategory = (s: NotifyRun['style']): Category | null =>
+const styleCategory = (s: NotifyRun['style']): 'emph' | 'code' | null =>
   s === 'code' ? 'code' : s === 'bold' || s === 'italic' ? 'emph' : null;
 
 function runHtml(r: NotifyRun, b: Budget): string {
@@ -110,10 +163,10 @@ function runHtml(r: NotifyRun, b: Budget): string {
   const body = escapeHtml(r.text);
   const href = safeHref(r.href);
   const inner = wrap(r.style, body, b);
-  return href && b.take('link') ? `<a href="${escapeAttr(href)}">${inner}</a>` : inner;
+  return href && b.takeLink() ? `<a href="${escapeAttr(href)}">${inner}</a>` : inner;
 }
 
-function wrap(style: NotifyRun['style'], body: string, b: Budget, category?: Category): string {
+function wrap(style: NotifyRun['style'], body: string, b: Budget, category?: 'struct'): string {
   const tag = style === 'bold' ? 'b' : style === 'italic' ? 'i' : style === 'code' ? 'code' : null;
   const c = category ?? styleCategory(style);
   return tag && c && b.take(c) ? `<${tag}>${body}</${tag}>` : body;
@@ -126,8 +179,8 @@ function lineHtml(l: Line, b: Budget, inFold: boolean): string {
 }
 
 /** 保留下来的内容需要的实体数 */
-function demandOf(parts: Part[], kept: number[]): Record<Category, number> {
-  const d: Record<Category, number> = { struct: 0, link: 0, emph: 0, code: 0 };
+function demandOf(parts: Part[], kept: number[]): Demand {
+  const d: Demand = { struct: 0, emph: 0, code: 0, links: [] };
   parts.forEach((p, i) => {
     const lines = p.lines.slice(0, kept[i]);
     if (!lines.length) {
@@ -142,8 +195,9 @@ function demandOf(parts: Part[], kept: number[]): Record<Category, number> {
         if (!r.text) {
           continue;
         }
-        if (safeHref(r.href)) {
-          d.link++;
+        const href = safeHref(r.href);
+        if (href) {
+          d.links.push(href);
         }
         const c = styleCategory(r.style);
         if (c) {

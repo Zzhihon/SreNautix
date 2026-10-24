@@ -28,6 +28,54 @@ export const REPORT_LINKS = {
   gitCommitUrl: null,
 };
 
+/**
+ * 大事件（#13 的 ENTITIES_TOO_LONG）：在发布事故上扩成 70 个成员告警、53 张卡。每个成员告警的来源链接与 CCHP 的
+ * vmalert 相同，是预填了表达式的 Grafana Explore 页面（JSON 再 URL 编码，每个 700 多字符），卡片带 vmui 的查询链接；
+ * 链接的地址合计远超 Telegram 对一条消息实体总大小的上限。
+ */
+export function largeIncidentInput(): ComposeInput {
+  const input = releaseRolloutInput();
+  const stageA = { ...input.stageA!, cards: input.stageA!.cards.slice(0, 53) };
+  const base = input.alerts;
+  const alerts: Alert[] = [];
+  const members: Incident['members'] = [];
+  for (let i = 0; i < 70; i++) {
+    const a = base[i % base.length]!;
+    const pod = `${a.entity?.name ?? 'pod'}-${i}`;
+    const id = `${a.fingerprint.slice(0, 12)}${String(i).padStart(4, '0')}@1792512360`;
+    const expr =
+      `sum by (namespace, pod) (rate(container_cpu_cfs_throttled_periods_total{namespace="acme-prod",pod="${pod}",container!=""}[5m]))` +
+      ` / sum by (namespace, pod) (rate(container_cpu_cfs_periods_total{namespace="acme-prod",pod="${pod}"}[5m])) > 0.25`;
+    // 与 CCHP 的 vmalert 相同：generatorURL 是预填了规则表达式的 Grafana Explore 页面（-external.alert.source）
+    const panes = {
+      a: {
+        datasource: 'victoriametrics',
+        queries: [{ refId: 'A', datasource: { type: 'prometheus', uid: 'victoriametrics' }, expr }],
+        range: { from: 'now-6h', to: 'now' },
+      },
+    };
+    alerts.push({
+      ...a,
+      alert_id: id,
+      labels: { ...a.labels, pod },
+      generator_url: `https://grafana.example.test/explore?schemaVersion=1&orgId=1&panes=${encodeURIComponent(JSON.stringify(panes))}`,
+    });
+    members.push({
+      ...input.incident.members[i % input.incident.members.length]!,
+      alert_id: id,
+      alertname: a.alertname,
+      left_version: null,
+    });
+  }
+  return {
+    ...input,
+    stageA,
+    researchStageA: stageA,
+    alerts,
+    incident: { ...input.incident, members },
+  };
+}
+
 /** at：'as_of' 为分析时刻（17:05Z，未恢复）；'end' 为窗口末尾（事件已恢复） */
 export function releaseRolloutInput(at: 'as_of' | 'end' = 'as_of'): ComposeInput {
   const fx = JSON.parse(readFileSync(FILE, 'utf8')) as ReportFixture;
