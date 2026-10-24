@@ -130,6 +130,12 @@ export interface PackFailure {
   error: string;
 }
 
+/** 卡是否引用 dbstats 信号（直接查询 PostgreSQL 统计视图，只用于主动优化） */
+export function usesDbstats(set: PackSet, cardKey: string): boolean {
+  const e = set.cards.get(cardKey);
+  return e !== undefined && Object.values(e.signals).some((k) => set.signals.get(k)?.signal.kind === 'dbstats');
+}
+
 function walk(dir: string): string[] {
   return readdirSync(dir)
     .sort()
@@ -192,9 +198,12 @@ export class PackRuntime {
     private readonly capabilities: ReadonlySet<Capability>,
   ) {}
 
-  /** 阶段 B 的查询模板（packs-sdk 编译，附带的卡在 set.cards 中） */
+  /**
+   * 阶段 B 的查询模板（packs-sdk 编译，附带的卡在 set.cards 中）。附带的卡引用 dbstats 信号的模板只用于主动优化
+   * （ADR 0146 §3.1，目标运行按领域的 templates 从 set.templates 取），事件研判的模板列表与查询接口不包含它们
+   */
   get templates(): readonly CompiledTemplate[] {
-    return this.set.templates;
+    return this.set.templates.filter((t) => !usesDbstats(this.set, t.card));
   }
 
   static async load(o: PackRuntimeOptions): Promise<PackRuntime> {
