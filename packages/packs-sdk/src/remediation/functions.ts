@@ -66,7 +66,34 @@ export function registerRemediationFunctions(env: Environment): Environment {
     .registerFunction('millicores(double): string', (n: number) => `${Math.ceil(n * 1000)}m`)
     .registerFunction('component_ref(string): map', (k: string) => componentRef(k))
     .registerFunction('seconds(string): double', (d: string) => durationSecondsOf(d))
-    .registerFunction('kebab(string): string', (s: string) => kebabOf(s));
+    .registerFunction('kebab(string): string', (s: string) => kebabOf(s))
+    .registerFunction('pg_kb(string): double', (s: string) => pgMemoryKb(s))
+    .registerFunction('pg_mem(double): string', (kb: number) => pgMemory(kb));
+}
+
+const PG_UNIT_KB: Record<string, number> = { kB: 1, MB: 1024, GB: 1024 ** 2, TB: 1024 ** 3 };
+
+/** PostgreSQL 的内存参数（work_mem 等）换算为 kB：4MB、4096kB、1GB；没有单位时按 kB（pg_settings 的 unit 为 kB 的参数） */
+export function pgMemoryKb(s: string): number {
+  const m = /^\s*([0-9]+(?:\.[0-9]+)?)\s*(kB|MB|GB|TB)?\s*$/.exec(s);
+  if (!m) {
+    throw new TypeError(`不是 PostgreSQL 内存参数：${s}`);
+  }
+  return Number(m[1]) * PG_UNIT_KB[m[2] ?? 'kB']!;
+}
+
+/** kB 数向上取整，写成能整除的最大单位：49152 → 48MB，1048576 → 1GB，1500 → 1500kB */
+export function pgMemory(kb: number): string {
+  const n = Math.ceil(kb);
+  for (const [unit, size] of [
+    ['GB', 1024 ** 2],
+    ['MB', 1024],
+  ] as const) {
+    if (n >= size && n % size === 0) {
+      return `${n / size}${unit}`;
+    }
+  }
+  return `${n}kB`;
 }
 
 /** 组件键（契约 ComponentKey，ADR 0034）→ {kind, namespace, name}；名称段的 %XX 按 UTF-8 解码 */

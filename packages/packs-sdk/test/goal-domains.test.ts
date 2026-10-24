@@ -519,13 +519,21 @@ describe('dbstats 的两次采样与序列', () => {
     expect(s.reads).toBe(3);
   });
 
-  it('计数器回绕的行与只在一次采样中出现的行不产生速率', () => {
+  it('计数器回绕的行不产生速率；新出现的行在前一次采样没有截断时从 0 开始计', () => {
     const prev = sample(0, 5000);
     const cur = {
       ...sample(600_000, 1000),
-      rows: [...sample(600_000, 1000).rows, { ...sample(0, 1).rows[0]!, queryid: '2' }],
+      rows: [...sample(600_000, 1000).rows, { ...sample(0, 600).rows[0]!, queryid: '2' }],
     };
-    expect(dbstatsSeries('pg', { current: cur, previous: prev }, 'total_exec_time_ms', true)).toEqual([]);
+    const rates = dbstatsSeries('pg', { current: cur, previous: prev }, 'total_exec_time_ms', true);
+    expect(rates.map((s) => [s.labels.queryid, s.values[0]])).toEqual([['2', 1]]);
+    const truncated = dbstatsSeries(
+      'pg',
+      { current: cur, previous: { ...prev, truncated: true } },
+      'total_exec_time_ms',
+      true,
+    );
+    expect(truncated).toEqual([]);
   });
 
   it('夹具与录制按适配器的语义过滤、排序与截断', () => {

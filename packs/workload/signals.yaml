@@ -473,6 +473,67 @@ signals:
     alternatives:
       - expr: sum(increase(kube_pod_container_status_restarts_total{$selector}[$window]))
 
+  # ---------- 主动优化：资源调整（ADR 0146 §4.3 resource-right-size）----------
+  # 按容器名汇总（同一工作负载的 Pod 取最大值）：回看 14 天的 CPU 用量 p99 与最大工作集、当前 request，30 天内的 OOM。
+  # 14 天的子查询开销大，用户包可以用 extends 补充录制规则的备选
+  - id: container_cpu_usage_p99
+    kind: metrics
+    unit: none
+    alternatives:
+      - expr: >-
+          max by (container) (
+            quantile_over_time(0.99, sum by (namespace, pod, container) (
+              rate(container_cpu_usage_seconds_total{$selector, container!="", container!="POD"}[$rate_window])
+            )[14d:5m])
+          )
+  - id: container_cpu_requests
+    kind: metrics
+    unit: none
+    alternatives:
+      - expr: max by (container) (kube_pod_container_resource_requests{$selector, resource="cpu"})
+  - id: container_memory_max
+    kind: metrics
+    unit: bytes
+    alternatives:
+      - expr: >-
+          max by (container) (
+            max_over_time(container_memory_working_set_bytes{$selector, container!="", container!="POD"}[14d])
+          )
+  - id: container_memory_requests
+    kind: metrics
+    unit: bytes
+    alternatives:
+      - expr: max by (container) (kube_pod_container_resource_requests{$selector, resource="memory"})
+  - id: container_oom_lookback
+    kind: metrics
+    alternatives:
+      - expr: >-
+          (max by (container) (increase(container_oom_events_total{$selector, container!=""}[30d])) > 0)
+          or (max by (container) (max_over_time(kube_pod_container_status_last_terminated_reason{$selector, reason="OOMKilled"}[30d])) > 0)
+      - expr: max by (container) (increase(container_oom_events_total{$selector, container!=""}[30d])) > 0
+      - expr: max by (container) (max_over_time(kube_pod_container_status_last_terminated_reason{$selector, reason="OOMKilled"}[30d])) > 0
+  # 工作负载全部 Pod 的 request 总量（compute 领域的指标）
+  - id: workload_cpu_requests_total
+    kind: metrics
+    unit: none
+    alternatives:
+      - expr: sum(kube_pod_container_resource_requests{$selector, resource="cpu"})
+  - id: workload_memory_requests_total
+    kind: metrics
+    unit: bytes
+    alternatives:
+      - expr: sum(kube_pod_container_resource_requests{$selector, resource="memory"})
+  # 伸缩对象是这个工作负载、按 CPU 利用率伸缩的 HPA：修改 CPU request 会改变它的伸缩行为
+  - id: workload_cpu_utilization_hpa
+    kind: metrics
+    alternatives:
+      - expr: >-
+          max by (horizontalpodautoscaler) (
+            kube_horizontalpodautoscaler_info{namespace="$namespace", scaletargetref_name="$name"}
+            * on (namespace, horizontalpodautoscaler) group_left
+            max by (namespace, horizontalpodautoscaler) (kube_horizontalpodautoscaler_spec_target_metric{namespace="$namespace", metric_name="cpu", metric_target_type="utilization"})
+          )
+
 # 区分性检查的查询模板：卡片表达不了的按 Pod 拆分的前 k 名与两个工作负载的对比。参数作为附带卡的 params 传入
 templates:
   - id: cpu-by-pod

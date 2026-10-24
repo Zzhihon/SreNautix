@@ -1,0 +1,40 @@
+# 主动优化的数据库领域在真实 PostgreSQL 上（srenautix pack test --postgres <二进制目录>）：orders 没有 total 上的索引，
+# 报表查询顺序扫描；排序在 64kB 的 work_mem 下写临时文件；SELECT 1 是轻量的高频语句。断言只用份额与宽松的阈值，
+# 不依赖执行速度。
+api_version: srenautix.io/pack-test/v1
+interval: 1m
+input_sql:
+  setup:
+    - CREATE TABLE orders (id bigint PRIMARY KEY, customer_id int NOT NULL, total int NOT NULL)
+    - INSERT INTO orders SELECT g, g % 1000, (g * 7919) % 100000 FROM generate_series(1, 200000) g
+    - ANALYZE orders
+  workload:
+    - { sql: "SET work_mem = '64kB'", repeat: 1 }
+    - { sql: 'SELECT count(*) FROM orders WHERE total > 100', repeat: 20 }
+    - { sql: 'SELECT id FROM orders ORDER BY total, id OFFSET 199990', repeat: 3 }
+    - { sql: 'SELECT 1', repeat: 30 }
+tests:
+  - name: 重查询占执行时间的大部分
+    eval_time: 10m
+    card: checks/statement-share
+    entity: { kind: Cluster, namespace: shop, name: pg }
+    expect: { verdict: abnormal }
+  - name: orders 的顺序扫描
+    eval_time: 10m
+    card: checks/table-seq-scans
+    entity: { kind: Cluster, namespace: shop, name: pg }
+    params: { min_rows_per_second: 1 }
+    rows: database/seq-scan-hot-table
+    expect: { verdict: abnormal, entities: [{ key: public.orders, hit: true }] }
+  - name: 排序写临时文件
+    eval_time: 10m
+    card: checks/statement-temp
+    entity: { kind: Cluster, namespace: shop, name: pg }
+    params: { min_bytes_per_second: 1 }
+    expect: { verdict: abnormal }
+  - name: 高频语句
+    eval_time: 10m
+    card: checks/statement-polling
+    entity: { kind: Cluster, namespace: shop, name: pg }
+    params: { min_calls_per_second: 0.001 }
+    expect: { verdict: abnormal }

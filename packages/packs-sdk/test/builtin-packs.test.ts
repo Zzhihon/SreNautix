@@ -1,8 +1,8 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { AlertCatalogEntry } from '@srenautix/contract';
-import { loadPromqlEngine } from '@srenautix/integration-sdk';
-import { describe, expect, it } from 'vitest';
+import { loadPromqlEngine, postgresBins, startPostgres, type TestPostgres } from '@srenautix/integration-sdk';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { parse } from 'yaml';
 import { compilePackSet } from '../src/pack/compile.js';
 import { generateKpsConditions } from '../src/pack/kps-conditions.js';
@@ -106,15 +106,31 @@ describe('内置领域包', () => {
 const names = loadBuiltinPacks(PACKS).map((p) => p.name);
 const shared = compilePackSet(loadBuiltinPacks(PACKS), { catalog: CATALOG });
 
+// 带 input_sql 的夹具在真实 PostgreSQL 上执行（SRENAUTIX_PG_BINS 或 SRENAUTIX_PG_BIN 的第一个版本，ADR 0146）
+const pgBin = postgresBins()[0];
+let postgres: TestPostgres | undefined;
+beforeAll(async () => {
+  if (pgBin) {
+    postgres = await startPostgres(pgBin);
+  }
+});
+afterAll(async () => {
+  await postgres?.stop();
+});
+
 describe.concurrent(
   'stable 的包：每张卡都有夹具，在 Prometheus 与 VictoriaMetrics 上结论一致，自动测试全部通过',
   () => {
     it.each(names)('%s', async (name) => {
       const set = await shared;
-      const report = await runPackTests({ set, packs: [name] });
+      const report = await runPackTests({ set, packs: [name], ...(postgres ? { postgres } : {}) });
       expect(report.cases.filter((c) => !c.passed)).toEqual([]);
       expect(report.packs.filter((p) => !p.passed)).toEqual([]);
       expect(report.packs.map((p) => p.name)).toEqual([name]);
+      // 有 PostgreSQL 时 input_sql 的夹具不能被跳过
+      if (postgres) {
+        expect(report.packs[0]!.skipped).toBeUndefined();
+      }
     });
   },
 );

@@ -1,0 +1,162 @@
+# 主动优化的数据库领域（ADR 0146 §1.3、§9.2 第 6 项）：CNPG Cluster 的语句、表与参数。
+# 指标在 VictoriaMetrics 的历史上算基线与验证；诊断卡与份额卡读 dbstats（两次采样），在 Cluster 上执行一次，按行得到语句与表。
+indicators:
+  - id: db-time
+    title: { zh-CN: 语句执行时间, en: Statement execution time }
+    description:
+      {
+        zh-CN: 全部语句每秒的执行时间（秒每秒，并发时可以大于 1）；越低越好,
+        en: Seconds of statement execution per second (above 1 with concurrency),
+      }
+    signal: db_exec_seconds_rate
+    entity: Cluster
+    unit: none
+    better: lower
+    statistic: p95
+    load_indicator: postgres/xact-rate
+  - id: statement-mean-time
+    title: { zh-CN: 单条语句的平均执行时间, en: Mean execution time of a statement }
+    signal: statement_mean_seconds
+    entity: Cluster
+    params:
+      type: object
+      additionalProperties: false
+      properties:
+        queryid: { type: string, pattern: '^-?[0-9]{1,20}$', description: pg_stat_statements 的 queryid（十进制） }
+    unit: seconds
+    better: lower
+    statistic: p95
+    load_indicator: postgres/xact-rate
+  - id: xact-rate
+    title: { zh-CN: 事务速率, en: Transaction rate }
+    signal: xact_rate
+    entity: Cluster
+    unit: per_second
+    better: higher
+    statistic: p95
+  - id: temp-written
+    title: { zh-CN: 临时文件写入, en: Temporary file writes }
+    description: { zh-CN: 每秒写入临时文件的字节数, en: Bytes written to temporary files per second }
+    signal: temp_bytes_rate
+    entity: Cluster
+    unit: per_second
+    better: lower
+    statistic: p95
+    load_indicator: postgres/xact-rate
+  - id: cache-hit
+    title: { zh-CN: 缓存命中率, en: Buffer cache hit ratio }
+    signal: cache_hit_ratio
+    entity: Cluster
+    unit: ratio
+    better: higher
+    statistic: p50
+    load_indicator: postgres/xact-rate
+  - id: seq-scan-ratio
+    title: { zh-CN: 顺序扫描比例, en: Sequential scan ratio }
+    description: { zh-CN: 顺序扫描占全部表扫描的比例, en: Share of sequential scans among table scans }
+    signal: seq_scan_ratio
+    entity: Cluster
+    unit: ratio
+    better: lower
+    statistic: p95
+    load_indicator: postgres/xact-rate
+
+domains:
+  - id: database
+    title: { zh-CN: 数据库性能, en: Database performance }
+    applies_to: [Cluster]
+    indicators: [postgres/db-time, postgres/temp-written, postgres/cache-hit, postgres/seq-scan-ratio]
+    diagnostics:
+      # 一条语句占执行时间的份额高：索引或查询改写（slow-statement）
+      - id: statement-dominant
+        card: checks/statement-share
+        finding: pg.statement_dominant
+        indicator: postgres/db-time
+        symptoms: [seq_scan, index, io_read]
+        entities:
+          type: pg_statement
+          rows_from: stmt
+          key: 'label(row, "database") + "/" + label(row, "queryid")'
+          display: '"queryid " + label(row, "queryid") + "（" + label(row, "database") + "）"'
+          labels: { queryid: 'label(row, "queryid")', database: 'label(row, "database")', role: 'label(row, "role")' }
+          when: 'total > 0.0 && last(row) / total > double(params.min_share)'
+      # 排序与哈希溢出到临时文件：work_mem（pg-guc-tune）
+      - id: temp-spill
+        card: checks/statement-temp
+        finding: pg.temp_spill
+        indicator: postgres/temp-written
+        symptoms: [temp_spill]
+        entities:
+          type: pg_statement
+          rows_from: temp
+          key: 'label(row, "database") + "/" + label(row, "queryid")'
+          labels: { queryid: 'label(row, "queryid")', database: 'label(row, "database")' }
+          when: 'total_bytes > double(params.min_bytes_per_second) && last(row) * 8192.0 > double(params.min_bytes_per_second) / 4.0'
+      # 高频轮询：缓存或推送（hot-polling）
+      - id: hot-polling
+        card: checks/statement-polling
+        finding: pg.hot_polling
+        indicator: postgres/db-time
+        symptoms: [polling]
+        entities:
+          type: pg_statement
+          rows_from: calls
+          key: 'label(row, "database") + "/" + label(row, "queryid")'
+          labels: { queryid: 'label(row, "queryid")', database: 'label(row, "database")' }
+          when: >-
+            last(row) > double(params.min_calls_per_second)
+            && rows.exists(r, label(r, "queryid") == label(row, "queryid") && label(r, "role") == label(row, "role")
+              && last(r) / last(row) <= double(params.max_rows_per_call))
+      # 顺序扫描读取大量行的表
+      - id: seq-scan-hot-table
+        card: checks/table-seq-scans
+        finding: pg.seq_scan_hot_table
+        indicator: postgres/seq-scan-ratio
+        symptoms: [seq_scan, index]
+        entities:
+          type: pg_table
+          rows_from: seq
+          key: 'label(row, "schema") + "." + label(row, "table")'
+          labels: { schema: 'label(row, "schema")', table: 'label(row, "table")' }
+          when: 'last(row) > double(params.min_rows_per_second)'
+    contribution:
+      - id: statement-share
+        card: checks/statement-share
+        indicator: postgres/db-time
+        entities:
+          type: pg_statement
+          rows_from: stmt
+          key: 'label(row, "database") + "/" + label(row, "queryid")'
+          share: 'total > 0.0 ? last(row) / total : 0.0'
+      - id: temp-share
+        card: checks/statement-temp
+        indicator: postgres/temp-written
+        entities:
+          type: pg_statement
+          rows_from: temp
+          key: 'label(row, "database") + "/" + label(row, "queryid")'
+          share: 'total_bytes > 0.0 ? last(row) * 8192.0 / total_bytes : 0.0'
+      - id: table-seq-share
+        card: checks/table-seq-scans
+        indicator: postgres/seq-scan-ratio
+        entities:
+          type: pg_table
+          rows_from: seq
+          key: 'label(row, "schema") + "." + label(row, "table")'
+          share: 'total_rows > 0.0 ? last(row) / total_rows : 0.0'
+    templates: [postgres/statement-detail]
+    optimizations: [postgres/pg-guc-tune]
+    issues: [postgres/slow-statement, postgres/hot-polling]
+    gates:
+      min_share: 0.2
+      # 领域体检没有目标值时的差距
+      thresholds:
+        - { indicator: postgres/cache-hit, comparator: lt, value: 0.95 }
+        - { indicator: postgres/temp-written, comparator: gt, value: 1048576 }
+        - { indicator: postgres/seq-scan-ratio, comparator: gt, value: 0.5 }
+    trends:
+      - { id: db-time-drift, indicator: postgres/db-time, method: drift, ratio: 1.25, sustain: 6h }
+      - { id: temp-written-drift, indicator: postgres/temp-written, method: drift, ratio: 1.5, sustain: 6h }
+    schedule: { cron: '0 20 * * 6' }
+    load_guards:
+      - { card: checks/load-guard, backends: [dbstats] }

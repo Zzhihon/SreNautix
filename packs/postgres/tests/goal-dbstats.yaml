@@ -1,0 +1,296 @@
+# 主动优化的数据库领域（ADR 0146）：dbstats 的两次采样相隔 10 分钟（600 秒），负载保护卡读指标。
+# shop/pg：语句 101（报表，顺序扫描 orders）占执行时间的大部分；语句 102 写临时文件；语句 103 每秒调用 100 次、每次 1 行；
+# calm/db 的实例负载正常，shop/pg 的实例 CPU 达到 limit 的 85%。
+api_version: srenautix.io/pack-test/v1
+interval: 1m
+input_series:
+  - series: 'container_cpu_usage_seconds_total{namespace="shop",pod="pg-1",container="postgres"}'
+    values: '0+51x60'
+  - series: 'kube_pod_container_resource_limits{namespace="shop",pod="pg-1",container="postgres",resource="cpu"}'
+    values: '1x60'
+  - series: 'cnpg_backends_total{namespace="shop",pod="pg-1",datname="app",usename="app",application_name="web",state="active"}'
+    values: '20x60'
+  - series: 'cnpg_pg_settings_setting{namespace="shop",pod="pg-1",name="max_connections"}'
+    values: '100x60'
+  - series: 'container_cpu_usage_seconds_total{namespace="calm",pod="db-1",container="postgres"}'
+    values: '0+6x60'
+  - series: 'kube_pod_container_resource_limits{namespace="calm",pod="db-1",container="postgres",resource="cpu"}'
+    values: '1x60'
+  - series: 'cnpg_backends_total{namespace="calm",pod="db-1",datname="app",usename="app",application_name="api",state="active"}'
+    values: '10x60'
+  - series: 'cnpg_pg_settings_setting{namespace="calm",pod="db-1",name="max_connections"}'
+    values: '100x60'
+input_dbstats:
+  - op: statements.top
+    samples:
+      - offset: 0m
+        rows:
+          - queryid: '101'
+            database: app
+            role: app
+            toplevel: true
+            calls: 1000
+            total_exec_time_ms: 100000
+            mean_exec_time_ms: 100
+            rows: 1000
+            shared_blks_hit: 0
+            shared_blks_read: 500000
+            temp_blks_written: 0
+            blk_read_time_ms: 0
+            wal_bytes: 0
+          - queryid: '102'
+            database: app
+            role: app
+            toplevel: true
+            calls: 100
+            total_exec_time_ms: 20000
+            mean_exec_time_ms: 200
+            rows: 100
+            shared_blks_hit: 0
+            shared_blks_read: 0
+            temp_blks_written: 1000
+            blk_read_time_ms: 0
+            wal_bytes: 0
+          - queryid: '103'
+            database: app
+            role: app
+            toplevel: true
+            calls: 100000
+            total_exec_time_ms: 10000
+            mean_exec_time_ms: 0.1
+            rows: 100000
+            shared_blks_hit: 0
+            shared_blks_read: 0
+            temp_blks_written: 0
+            blk_read_time_ms: 0
+            wal_bytes: 0
+      - offset: 10m
+        rows:
+          # 101：600 秒内执行时间增加 480000 ms（800 ms/s），调用 600 次，每次读取 1000 块
+          - queryid: '101'
+            database: app
+            role: app
+            toplevel: true
+            calls: 1600
+            total_exec_time_ms: 580000
+            mean_exec_time_ms: 362
+            rows: 1600
+            shared_blks_hit: 0
+            shared_blks_read: 1100000
+            temp_blks_written: 0
+            blk_read_time_ms: 0
+            wal_bytes: 0
+          # 102：写临时文件 150000 块（每秒 250 块，约 2 MB）
+          - queryid: '102'
+            database: app
+            role: app
+            toplevel: true
+            calls: 160
+            total_exec_time_ms: 80000
+            mean_exec_time_ms: 500
+            rows: 160
+            shared_blks_hit: 0
+            shared_blks_read: 0
+            temp_blks_written: 151000
+            blk_read_time_ms: 0
+            wal_bytes: 0
+          # 103：调用 60000 次（每秒 100 次），每次 1 行
+          - queryid: '103'
+            database: app
+            role: app
+            toplevel: true
+            calls: 160000
+            total_exec_time_ms: 70000
+            mean_exec_time_ms: 0.4
+            rows: 160000
+            shared_blks_hit: 0
+            shared_blks_read: 0
+            temp_blks_written: 0
+            blk_read_time_ms: 0
+            wal_bytes: 0
+  - op: tables.top
+    samples:
+      - offset: 0m
+        rows:
+          - schema: public
+            table: orders
+            hypertable: false
+            chunks: 0
+            seq_scan: 10
+            seq_tup_read: 1000000
+            idx_scan: 5
+            idx_tup_fetch: 5
+            n_tup_ins: 0
+            n_tup_upd: 0
+            n_tup_del: 0
+            n_tup_hot_upd: 0
+            n_live_tup: 100000
+            n_dead_tup: 0
+            heap_blks_read: 0
+            heap_blks_hit: 0
+            idx_blks_read: 0
+            idx_blks_hit: 0
+            last_autovacuum: null
+            last_autoanalyze: null
+          - schema: public
+            table: users
+            hypertable: false
+            chunks: 0
+            seq_scan: 1
+            seq_tup_read: 100
+            idx_scan: 1000
+            idx_tup_fetch: 1000
+            n_tup_ins: 0
+            n_tup_upd: 0
+            n_tup_del: 0
+            n_tup_hot_upd: 0
+            n_live_tup: 100
+            n_dead_tup: 0
+            heap_blks_read: 0
+            heap_blks_hit: 0
+            idx_blks_read: 0
+            idx_blks_hit: 0
+            last_autovacuum: null
+            last_autoanalyze: null
+      - offset: 10m
+        rows:
+          # orders：600 秒内顺序扫描读取 60000000 行（每秒 100000 行）；last_autovacuum 变化不影响两次采样的配对
+          - schema: public
+            table: orders
+            hypertable: false
+            chunks: 0
+            seq_scan: 610
+            seq_tup_read: 61000000
+            idx_scan: 5
+            idx_tup_fetch: 5
+            n_tup_ins: 0
+            n_tup_upd: 0
+            n_tup_del: 0
+            n_tup_hot_upd: 0
+            n_live_tup: 100000
+            n_dead_tup: 0
+            heap_blks_read: 0
+            heap_blks_hit: 0
+            idx_blks_read: 0
+            idx_blks_hit: 0
+            last_autovacuum: '2026-01-01T00:05:00.000Z'
+            last_autoanalyze: null
+          - schema: public
+            table: users
+            hypertable: false
+            chunks: 0
+            seq_scan: 2
+            seq_tup_read: 200
+            idx_scan: 70000
+            idx_tup_fetch: 70000
+            n_tup_ins: 0
+            n_tup_upd: 0
+            n_tup_del: 0
+            n_tup_hot_upd: 0
+            n_live_tup: 100
+            n_dead_tup: 0
+            heap_blks_read: 0
+            heap_blks_hit: 0
+            idx_blks_read: 0
+            idx_blks_hit: 0
+            last_autovacuum: null
+            last_autoanalyze: null
+tests:
+  - name: 第二次采样之前速率不可用
+    eval_time: 5m
+    card: checks/statement-share
+    entity: { kind: Cluster, namespace: shop, name: pg }
+    expect: { verdict: undeterminable }
+  - name: 报表语句占执行时间的 80%
+    eval_time: 10m
+    card: checks/statement-share
+    entity: { kind: Cluster, namespace: shop, name: pg }
+    rows: database/statement-dominant
+    expect:
+      verdict: abnormal
+      entities: [{ key: app/101, hit: true }, { key: app/102, hit: false }, { key: app/103, hit: false }]
+  - name: 份额卡给出每条语句的份额
+    eval_time: 10m
+    card: checks/statement-share
+    entity: { kind: Cluster, namespace: shop, name: pg }
+    rows: database/statement-share
+    expect:
+      verdict: abnormal
+      # 800 : 100 : 100（毫秒每秒）
+      entities: [{ key: app/101, share: 0.8 }, { key: app/102, share: 0.1 }, { key: app/103, share: 0.1 }]
+  - name: 份额阈值调到 90% 时为正常
+    eval_time: 10m
+    card: checks/statement-share
+    entity: { kind: Cluster, namespace: shop, name: pg }
+    params: { min_share: 0.9 }
+    expect: { verdict: normal }
+  - name: 语句 102 每秒写临时文件约 2 MB
+    eval_time: 10m
+    card: checks/statement-temp
+    entity: { kind: Cluster, namespace: shop, name: pg }
+    rows: database/temp-spill
+    expect: { verdict: abnormal, entities: [{ key: app/102, hit: true }] }
+  - name: 临时文件写入的份额
+    eval_time: 10m
+    card: checks/statement-temp
+    entity: { kind: Cluster, namespace: shop, name: pg }
+    rows: database/temp-share
+    expect: { verdict: abnormal, entities: [{ key: app/102, share: 1 }] }
+  - name: 临时文件阈值调高之后为正常
+    eval_time: 10m
+    card: checks/statement-temp
+    entity: { kind: Cluster, namespace: shop, name: pg }
+    params: { min_bytes_per_second: 10000000 }
+    expect: { verdict: normal }
+  - name: 语句 103 每秒 100 次、每次 1 行
+    eval_time: 10m
+    card: checks/statement-polling
+    entity: { kind: Cluster, namespace: shop, name: pg }
+    rows: database/hot-polling
+    expect: { verdict: abnormal, entities: [{ key: app/103, hit: true }, { key: app/101, hit: false }] }
+  - name: 调用阈值调高之后为正常
+    eval_time: 10m
+    card: checks/statement-polling
+    entity: { kind: Cluster, namespace: shop, name: pg }
+    params: { min_calls_per_second: 1000 }
+    expect: { verdict: normal }
+  - name: orders 每秒顺序扫描读取 10 万行
+    eval_time: 10m
+    card: checks/table-seq-scans
+    entity: { kind: Cluster, namespace: shop, name: pg }
+    rows: database/seq-scan-hot-table
+    expect: { verdict: abnormal, entities: [{ key: public.orders, hit: true }, { key: public.users, hit: false }] }
+  - name: 顺序扫描的份额
+    eval_time: 10m
+    card: checks/table-seq-scans
+    entity: { kind: Cluster, namespace: shop, name: pg }
+    rows: database/table-seq-share
+    expect: { verdict: abnormal, entities: [{ key: public.orders, share: 1 }] }
+  - name: 顺序扫描阈值调高之后为正常
+    eval_time: 10m
+    card: checks/table-seq-scans
+    entity: { kind: Cluster, namespace: shop, name: pg }
+    params: { min_rows_per_second: 1000000 }
+    expect: { verdict: normal }
+  - name: 单条语句每次调用读取 1000 块
+    eval_time: 10m
+    card: templates/statement-detail
+    entity: { kind: Cluster, namespace: shop, name: pg }
+    params: { queryid: '101' }
+    expect: { verdict: abnormal }
+  - name: 语句 103 不从磁盘读取
+    eval_time: 10m
+    card: templates/statement-detail
+    entity: { kind: Cluster, namespace: shop, name: pg }
+    params: { queryid: '103' }
+    expect: { verdict: normal }
+  - name: 实例 CPU 达到 limit 的 85% 时负载保护生效
+    eval_time: 50m
+    card: checks/load-guard
+    entity: { kind: Cluster, namespace: shop, name: pg }
+    expect: { verdict: abnormal }
+  - name: 负载正常时不保护
+    eval_time: 50m
+    card: checks/load-guard
+    entity: { kind: Cluster, namespace: calm, name: db }
+    expect: { verdict: normal }

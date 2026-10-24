@@ -147,6 +147,31 @@ export function dbstatsRoleStatements(role: string, password: string): string[] 
   ];
 }
 
+/** 等表统计稳定：每 200 毫秒读一次全部表的扫描与写入计数，连续两次不变（最多 10 秒）；至少等 1 秒 */
+async function settleTableStats(pgsql: TestPostgres, database: string): Promise<void> {
+  const c = await pgsql.connect(database);
+  try {
+    let last = '';
+    let stable = 0;
+    const started = Date.now();
+    while (Date.now() - started < 10_000) {
+      await c.query('SELECT pg_stat_clear_snapshot()');
+      const r = await c.query<{ v: string | null }>(
+        'SELECT (sum(seq_scan + coalesce(idx_scan, 0) + n_tup_ins + n_tup_upd + n_tup_del))::text AS v FROM pg_stat_user_tables',
+      );
+      const v = r.rows[0]?.v ?? '';
+      stable = v === last ? stable + 1 : 0;
+      last = v;
+      if (stable >= 2 && Date.now() - started >= 1000) {
+        return;
+      }
+      await new Promise((res) => setTimeout(res, 200));
+    }
+  } finally {
+    await c.end();
+  }
+}
+
 /** runSqlFixture 结果的键：请求的 JSON，对象键按字典序排列 */
 export function sqlFixtureKey(req: DbstatsRequest): string {
   const sorted = (v: unknown): unknown =>
@@ -222,8 +247,8 @@ export async function runSqlFixture(
     } finally {
       await c.end();
     }
-    // 两次采样的时间至少相差 1 毫秒，速率的分母不为 0
-    await new Promise((r) => setTimeout(r, 5));
+    // 表统计是异步汇总的（PG 15 起断开时与每秒刷新，之前经统计收集进程）：等到计数连续两次不变
+    await settleTableStats(pgsql, database);
     const out = new Map<string, { previous: DbstatsSample; current: DbstatsSample }>();
     for (const r of requests) {
       const key = sqlFixtureKey(r);

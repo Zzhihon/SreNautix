@@ -1,0 +1,62 @@
+# 主动优化的 compute 领域（ADR 0146）：两个小时的数据，每分钟一个点；判定在 120m 做 instant 查询（14 天的回看覆盖全部数据）。
+# shop/report：CPU request 1 核、用量 0.1 核；内存 request 1 GiB、工作集 200 MiB。
+# shop/tight：CPU request 0.12 核、用量 0.1 核；内存 request 256 MiB、工作集 200 MiB。
+# shop/oomed：内存 request 1 GiB、工作集 200 MiB，但被 OOM 终止过。
+api_version: srenautix.io/pack-test/v1
+interval: 1m
+input_series:
+  - series: 'container_cpu_usage_seconds_total{namespace="shop",pod="report-5f7b8c9d6e-k2m4n",container="report"}'
+    values: '0+6x120'
+  - series: 'kube_pod_container_resource_requests{namespace="shop",pod="report-5f7b8c9d6e-k2m4n",container="report",resource="cpu",unit="core"}'
+    values: '1x120'
+  - series: 'container_memory_working_set_bytes{namespace="shop",pod="report-5f7b8c9d6e-k2m4n",container="report"}'
+    values: '209715200x120'
+  - series: 'kube_pod_container_resource_requests{namespace="shop",pod="report-5f7b8c9d6e-k2m4n",container="report",resource="memory",unit="byte"}'
+    values: '1073741824x120'
+  - series: 'container_oom_events_total{namespace="shop",pod="report-5f7b8c9d6e-k2m4n",container="report"}'
+    values: '0x120'
+  - series: 'container_cpu_usage_seconds_total{namespace="shop",pod="tight-6c8d7f9b4c-q7w2z",container="tight"}'
+    values: '0+6x120'
+  - series: 'kube_pod_container_resource_requests{namespace="shop",pod="tight-6c8d7f9b4c-q7w2z",container="tight",resource="cpu",unit="core"}'
+    values: '0.12x120'
+  - series: 'container_memory_working_set_bytes{namespace="shop",pod="tight-6c8d7f9b4c-q7w2z",container="tight"}'
+    values: '209715200x120'
+  - series: 'kube_pod_container_resource_requests{namespace="shop",pod="tight-6c8d7f9b4c-q7w2z",container="tight",resource="memory",unit="byte"}'
+    values: '268435456x120'
+  - series: 'container_memory_working_set_bytes{namespace="shop",pod="oomed-7d9f8c6b5d-x2k9p",container="oomed"}'
+    values: '209715200x120'
+  - series: 'kube_pod_container_resource_requests{namespace="shop",pod="oomed-7d9f8c6b5d-x2k9p",container="oomed",resource="memory",unit="byte"}'
+    values: '1073741824x120'
+  - series: 'kube_pod_container_status_last_terminated_reason{namespace="shop",pod="oomed-7d9f8c6b5d-x2k9p",container="oomed",reason="OOMKilled"}'
+    values: '1x120'
+tests:
+  - name: report 的 CPU 用量只占 request 的 10%
+    eval_time: 120m
+    card: checks/cpu-overprovisioned
+    entity: { kind: Deployment, namespace: shop, name: report }
+    expect: { verdict: abnormal }
+  - name: tight 的 CPU request 与用量相当
+    eval_time: 120m
+    card: checks/cpu-overprovisioned
+    entity: { kind: Deployment, namespace: shop, name: tight }
+    expect: { verdict: normal }
+  - name: oomed 没有 CPU request
+    eval_time: 120m
+    card: checks/cpu-overprovisioned
+    entity: { kind: Deployment, namespace: shop, name: oomed }
+    expect: { verdict: undeterminable }
+  - name: report 的内存 request 是工作集的 5 倍
+    eval_time: 120m
+    card: checks/memory-overprovisioned
+    entity: { kind: Deployment, namespace: shop, name: report }
+    expect: { verdict: abnormal }
+  - name: tight 的内存 request 与工作集相当
+    eval_time: 120m
+    card: checks/memory-overprovisioned
+    entity: { kind: Deployment, namespace: shop, name: tight }
+    expect: { verdict: normal }
+  - name: oomed 被 OOM 终止过，不调低内存
+    eval_time: 120m
+    card: checks/memory-overprovisioned
+    entity: { kind: Deployment, namespace: shop, name: oomed }
+    expect: { verdict: normal }

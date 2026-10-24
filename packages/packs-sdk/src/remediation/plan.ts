@@ -367,7 +367,8 @@ export async function planRemediation(
           expr,
           dialect,
           time: toIso(at),
-          clock_window: { from: toIso(at - 2 * 3600_000), to: toIso(at) },
+          // 主动优化的模板按 14 天用量与 30 天 OOM 计划，时钟窗口覆盖它们的回看
+          clock_window: { from: toIso(at - (ctx.goal ? 32 * 86_400_000 : 2 * 3600_000)), to: toIso(at) },
           timeout_ms: 10_000,
         });
         if (res.series.length) {

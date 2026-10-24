@@ -104,7 +104,7 @@ signals:
 
 - 结果的每一行是一条序列：标签为行的字符串与布尔列（例如 `queryid`、`database`、`role`），取值为 `column` 列，点在采样时刻。证据卡的函数（`sum`、`top_share`、`join`、`label`）照常可用，引用的 `mode` 写 `dbstats`。
 - `args` 的字符串值可以整体写成 `$params.<名字>`；渲染后按操作的 schema 校验，`lint` 用卡片的默认参数检查一遍。`column` 必须是这个操作的数值列。`statements.text` 返回语句文本，只经工具读取，不能作为信号。
-- 累计计数器需要两次采样：同一次运行中第一次读取保存下来，与它相隔不少于 300 秒的读取才有速率（`rate: true`），之前的读取为缺数据，卡片无法判定。只在两次采样中都出现、计数器没有回绕的行有速率。能力为 `dbstats.<操作名中的 . 换成 _>`，例如 `dbstats.statements_top`。
+- 累计计数器需要两次采样：同一次运行中第一次读取保存下来，与它相隔不少于 300 秒的读取才有速率（`rate: true`），之前的读取为缺数据，卡片无法判定。计数器回绕的行没有速率；只在第二次采样中出现的行，前一次采样没有被 `limit` 截断时按从 0 开始计（两次采样之间新出现的语句），被截断时没有速率。能力为 `dbstats.<操作名中的 . 换成 _>`，例如 `dbstats.statements_top`。
 
 **模板变量**
 
@@ -527,12 +527,12 @@ tests:
 | `upstream-conditions` | 由 `pnpm --filter @srenautix/packs-sdk run gen:upstream-conditions` 从社区包的上游告警规则生成告警条件卡（beta，ADR 0109），作为没有手写主卡的目录条目的主卡。上游规则的来源、提交与 sha256 固定在 `upstream/community-rules.json`，夹具来自 argo-cd-mixin 的 promtool 测试 |
 | `kubernetes-core` | apiserver、etcd 与其他控制面组件 |
 | `node` | 节点健康、文件系统、网络、时钟；混沌实验 node-memory-pressure |
-| `workload` | 重启与 CrashLoop、Pending、PodDisruptionBudget（允许的驱逐数、健康副本）、发布进度、发布（等待迁移的 init 容器、新旧 ReplicaSet、正在服务的版本、迁移 Job、开始前后的 5xx 与延迟）、Job、容量（HPA 达到上限时伸缩指标相对目标值、伸缩对象的 CPU 限流与延迟对比基线，区分良性与饱和）；查询模板按 Pod 拆分 CPU、内存与重启的前 k 名，与另一个工作负载对比重启；规则提议重建卡在初始化的 Pod；混沌实验 crashloop-bad-config |
+| `workload` | 重启与 CrashLoop、Pending、PodDisruptionBudget（允许的驱逐数、健康副本）、发布进度、发布（等待迁移的 init 容器、新旧 ReplicaSet、正在服务的版本、迁移 Job、开始前后的 5xx 与延迟）、Job、容量（HPA 达到上限时伸缩指标相对目标值、伸缩对象的 CPU 限流与延迟对比基线，区分良性与饱和）；查询模板按 Pod 拆分 CPU、内存与重启的前 k 名，与另一个工作负载对比重启；规则提议重建卡在初始化的 Pod；混沌实验 crashloop-bad-config。主动优化的 compute 领域：CPU 与内存 request 高于 14 天用量的检查项，`resource-right-size`（CPU，按 p99 留 1.2 倍余量；按 CPU 利用率伸缩的工作负载以 guard 跳过）与 `resource-right-size-memory`（内存，按最大工作集留 1.25 倍余量，limit 等于 request 时一起调整，30 天内有 OOM 时跳过），含 CNPG Cluster 的 `spec.resources`，单次改动不超过当前值的一半 |
 | `gitops` | 修复补丁模板：发布输入回到正在服务的版本、HPA 上限、OOMKilled 容器的内存 limit、长期告警的严重度与持续时间、告警目录条目 |
 | `pvc` | 卷容量；混沌实验 fill-volume |
 | `observability-self` | 抓取、Prometheus TSDB、规则评估、告警投递 |
 | `cert-manager` | 证书到期与签发失败 |
-| `postgres` | CloudNativePG 与 postgres_exporter：复制、连接、WAL、锁；混沌实验 primary-kill |
+| `postgres` | CloudNativePG 与 postgres_exporter：复制、连接、WAL、锁；混沌实验 primary-kill。主动优化的数据库领域：指标（语句执行时间、单条语句平均执行时间、事务速率、临时文件写入、缓存命中率、顺序扫描比例），dbstats 检查项（语句份额、临时文件、高频轮询、顺序扫描的表）与负载保护卡，查询模板 `statement-detail`，`pg-guc-tune`（临时文件写入时调大 `work_mem`，只允许不需要重启的参数与包内的范围），业务 issue 模板 `slow-statement` 与 `hot-polling`；夹具在 Prometheus、VictoriaMetrics 与 PostgreSQL 上执行 |
 | `redis`、`mysql`、`kafka`、`rocketmq`、`nacos` | 各自 exporter 的可用性、延迟、积压与资源 |
 | `ingress-nginx`、`envoy-gateway` | 入口错误率、延迟、上游健康 |
 | `argocd`、`flux` | 同步失败与健康状态 |

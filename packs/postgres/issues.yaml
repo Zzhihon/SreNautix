@@ -1,0 +1,78 @@
+# 业务仓库 issue 模板（ADR 0146 §4.4）。代码定位的 sql 锚点是规范化语句：server 用 dbstats 的 statements.text 按发现的
+# queryid 取出语句文本后写进 finding.entity.labels.statement；没有语句文本时只用表名锚点（置信度低）。
+issues:
+  - id: slow-statement
+    title: { zh-CN: 慢语句：补索引或改写查询, en: 'Slow statement: add an index or rewrite the query' }
+    domain: database
+    # 一条语句占执行时间的份额高；份额由份额卡给出（finding.share）
+    when: 'finding.kind == "pg.statement_dominant" && finding.share != null'
+    params: { min_reduction: 0.5 }
+    let:
+      - { name: share, cel: 'double(finding.share)' }
+      - { name: queryid, cel: 'finding.entity.labels.queryid' }
+      - { name: statement, cel: '"statement" in finding.entity.labels ? finding.entity.labels.statement : ""' }
+      - { name: table, cel: '"table" in finding.entity.labels ? finding.entity.labels.table : ""' }
+    locate:
+      - { kind: sql, from: statement }
+      - { kind: table, from: table }
+    suggestion:
+      zh-CN: >-
+        语句 queryid {queryid} 占数据库执行时间的 {share, number, percent}。检查它的执行计划（EXPLAIN (ANALYZE, BUFFERS)）：
+        过滤与连接列没有索引时补索引；已有索引但走不上时改写条件（避免对列做函数运算、隐式类型转换）；只取需要的列与行。
+      en: >-
+        Statement queryid {queryid} takes {share, number, percent} of database execution time. Check its plan
+        (EXPLAIN (ANALYZE, BUFFERS)): add an index on filter and join columns, rewrite conditions that cannot use the
+        existing index (functions on columns, implicit casts), and fetch only the columns and rows needed.
+    estimate:
+      indicator: postgres/db-time
+      unit: none
+      # 下界：语句的份额 × 最小降幅（默认一半）；期望：份额的 80%
+      lower: 'share * double(params.min_reduction)'
+      expected: 'share * 0.8'
+      basis:
+        zh-CN: '语句份额 {share, number, percent} × 最小降幅 {min_reduction, number, percent}：执行时间至少减少 {lower, number, percent}（按全部语句的执行时间计）'
+        en: 'Share {share, number, percent} × minimum reduction {min_reduction, number, percent}: execution time drops by at least {lower, number, percent} of the total'
+    verify:
+      say:
+        zh-CN: 修复部署之后，这条语句的份额与平均执行时间下降，数据库执行时间按同一时段比较下降
+        en: After the fix is deployed the statement's share and mean time drop and database execution time drops in matching hours
+      cards: [postgres/checks/statement-share]
+      within: 72h
+      guards: [postgres/xact-rate]
+    labels: [perf]
+
+  - id: hot-polling
+    title: { zh-CN: 高频轮询：缓存或改为推送, en: 'Hot polling: cache or push instead' }
+    domain: database
+    when: 'finding.kind == "pg.hot_polling"'
+    params: { min_reduction: 0.5 }
+    let:
+      - { name: queryid, cel: 'finding.entity.labels.queryid' }
+      - { name: share, cel: 'finding.share != null ? double(finding.share) : 0.0' }
+      - { name: statement, cel: '"statement" in finding.entity.labels ? finding.entity.labels.statement : ""' }
+    locate:
+      - { kind: sql, from: statement }
+    suggestion:
+      zh-CN: >-
+        语句 queryid {queryid} 调用频率高、每次返回的行数少，像是在轮询。结果变化不频繁时在应用里缓存（设置失效时间），
+        需要实时性时改为变更通知（LISTEN/NOTIFY 或消息队列），或合并成批量查询。
+      en: >-
+        Statement queryid {queryid} runs at a high rate and returns few rows per call, which looks like polling. Cache the
+        result in the application (with an expiry) when it changes rarely, switch to change notifications (LISTEN/NOTIFY or
+        a queue) when it must be fresh, or batch the calls.
+    estimate:
+      indicator: postgres/db-time
+      unit: none
+      lower: 'share * double(params.min_reduction)'
+      expected: 'share * 0.9'
+      basis:
+        zh-CN: '语句份额 {share, number, percent} × 最小降幅 {min_reduction, number, percent}'
+        en: 'Share {share, number, percent} × minimum reduction {min_reduction, number, percent}'
+    verify:
+      say:
+        zh-CN: 修复部署之后，这条语句的调用速率下降
+        en: After the fix is deployed the statement's call rate drops
+      cards: [postgres/checks/statement-polling]
+      within: 72h
+      guards: [postgres/xact-rate]
+    labels: [perf]

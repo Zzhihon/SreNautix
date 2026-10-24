@@ -1,0 +1,195 @@
+# 主动优化的数据库领域（ADR 0146）用到的检查项：在 CNPG Cluster 上执行一次，按行（语句、表）给出诊断卡与份额卡的实体
+# （domains.yaml）。dbstats 的速率取两次采样（相隔不少于 300 秒）的差值；判定窗口结束在锚点（after: 0m）。
+checks:
+  - id: statement-share
+    title: { zh-CN: 语句占执行时间的份额, en: Statement share of execution time }
+    note:
+      {
+        zh-CN: 两次采样之间各语句的执行时间（毫秒每秒），最大的一条占全部语句的份额超过阈值时异常,
+        en: Execution time per statement between two samples; abnormal when the largest share exceeds the threshold,
+      }
+    applies_to: { kinds: [Cluster] }
+    window: { before: 30m, after: 0m }
+    params: { database: app, min_share: 0.2 }
+    requires: [dbstats.statements_top]
+    refs:
+      - { name: stmt, signal: stmt_exec_ms_rate, mode: dbstats }
+    judge:
+      let:
+        - { name: total, cel: 'sum(stmt)' }
+        - { name: top, cel: 'total > 0.0 ? top_share(stmt, 1) : 0.0' }
+      undeterminable_if:
+        - cel: total == 0.0
+          say: { zh-CN: 两次采样之间没有语句执行, en: No statement ran between the samples }
+      abnormal_if:
+        - cel: top > double(params.min_share)
+          say:
+            {
+              zh-CN: '执行时间最多的一条语句占 {top, number, percent}',
+              en: 'The top statement takes {top, number, percent} of execution time',
+            }
+          normal_say:
+            {
+              zh-CN: '执行时间最多的一条语句占 {top, number, percent}，未超过阈值',
+              en: 'The top statement takes {top, number, percent}, within the threshold',
+            }
+    display:
+      value: top
+      unit: percent
+      threshold: double(params.min_share)
+      table:
+        rows_from: stmt
+        sort_by: last(row)
+        columns:
+          - { header: { zh-CN: queryid, en: queryid }, cel: 'label(row, "queryid")' }
+          - { header: { zh-CN: 库, en: Database }, cel: 'label(row, "database")' }
+          - { header: { zh-CN: 份额, en: Share }, cel: 'last(row) / total', unit: percent }
+    egress: allow
+
+  - id: statement-temp
+    title: { zh-CN: 语句的临时文件写入, en: Temporary file writes by statement }
+    note:
+      {
+        zh-CN: 两次采样之间各语句写临时文件的速率（8 KiB 块每秒）；排序与哈希超过 work_mem 时写临时文件,
+        en: Temporary blocks written per second by statement; sorts and hashes over work_mem spill to temporary files,
+      }
+    applies_to: { kinds: [Cluster] }
+    window: { before: 30m, after: 0m }
+    params: { database: app, min_bytes_per_second: 1048576 }
+    requires: [dbstats.statements_top]
+    refs:
+      - { name: temp, signal: stmt_temp_blks_rate, mode: dbstats }
+    judge:
+      let:
+        - { name: total_bytes, cel: 'sum(temp) * 8192.0' }
+      abnormal_if:
+        - cel: total_bytes > double(params.min_bytes_per_second)
+          say:
+            {
+              zh-CN: '语句每秒写临时文件 {total_bytes, number} 字节',
+              en: 'Statements write {total_bytes, number} bytes of temporary files per second',
+            }
+          normal_say:
+            {
+              zh-CN: '语句每秒写临时文件 {total_bytes, number} 字节，未超过阈值',
+              en: 'Statements write {total_bytes, number} bytes of temporary files per second, within the threshold',
+            }
+    display: { value: total_bytes, unit: bytes, threshold: double(params.min_bytes_per_second) }
+    egress: allow
+
+  - id: statement-polling
+    title: { zh-CN: 高频轮询的语句, en: Frequently polled statements }
+    note:
+      {
+        zh-CN: 调用速率高、每次返回的行数少的语句（缓存或改为推送）,
+        en: Statements called at a high rate that return few rows per call (cache or push instead),
+      }
+    applies_to: { kinds: [Cluster] }
+    window: { before: 30m, after: 0m }
+    params: { database: app, min_calls_per_second: 50, max_rows_per_call: 100 }
+    requires: [dbstats.statements_top]
+    refs:
+      - { name: calls, signal: stmt_calls_rate, mode: dbstats }
+      - { name: rows, signal: stmt_rows_rate, mode: dbstats, empty_is: normal }
+    judge:
+      let:
+        - { name: busiest, cel: 'max(calls)' }
+      abnormal_if:
+        - cel: busiest > double(params.min_calls_per_second)
+          say:
+            {
+              zh-CN: '调用最频繁的语句每秒 {busiest, number} 次',
+              en: 'The busiest statement runs {busiest, number} times per second',
+            }
+          normal_say:
+            {
+              zh-CN: '调用最频繁的语句每秒 {busiest, number} 次，未超过阈值',
+              en: 'The busiest statement runs {busiest, number} times per second, within the threshold',
+            }
+    display: { value: busiest, unit: per_second, threshold: double(params.min_calls_per_second) }
+    egress: allow
+
+  - id: table-seq-scans
+    title: { zh-CN: 顺序扫描读取的行, en: Rows read by sequential scans }
+    note:
+      {
+        zh-CN: 两次采样之间各表顺序扫描读取的行（每秒）与索引扫描次数；读取多、索引扫描少的表缺索引或查询走不上索引,
+        en: Rows read by sequential scans and index scans per table; many rows with few index scans suggest a missing index,
+      }
+    applies_to: { kinds: [Cluster] }
+    window: { before: 30m, after: 0m }
+    params: { min_rows_per_second: 10000 }
+    requires: [dbstats.tables_top]
+    refs:
+      - { name: seq, signal: table_seq_tup_rate, mode: dbstats }
+      - { name: idx, signal: table_idx_scan_rate, mode: dbstats, empty_is: normal }
+    judge:
+      let:
+        - { name: total_rows, cel: 'sum(seq)' }
+        - { name: hottest, cel: 'max(seq)' }
+      abnormal_if:
+        - cel: hottest > double(params.min_rows_per_second)
+          say:
+            {
+              zh-CN: '顺序扫描读取最多的表每秒读取 {hottest, number} 行',
+              en: 'The table with the most sequential reads reads {hottest, number} rows per second',
+            }
+          normal_say:
+            {
+              zh-CN: '顺序扫描读取最多的表每秒读取 {hottest, number} 行，未超过阈值',
+              en: 'The table with the most sequential reads reads {hottest, number} rows per second, within the threshold',
+            }
+    display:
+      value: hottest
+      unit: per_second
+      threshold: double(params.min_rows_per_second)
+      table:
+        rows_from: seq
+        sort_by: last(row)
+        columns:
+          - { header: { zh-CN: 表, en: Table }, cel: 'label(row, "schema") + "." + label(row, "table")' }
+          - { header: { zh-CN: 行每秒, en: Rows/s }, cel: last(row), unit: per_second }
+    egress: allow
+
+  # 负载保护卡（ADR 0146 §6.2）：任一条件成立就不直接查询数据库，查询结果记为无法判定（load_guard）
+  - id: load-guard
+    title: { zh-CN: 数据库负载保护, en: Database load guard }
+    note:
+      {
+        zh-CN: 实例 CPU、连接数、复制延迟与等待锁的会话；任一超过阈值时主动分析让出，不查询数据库,
+        en: 'Instance CPU, connections, replication lag and sessions waiting on locks; active analysis backs off when any is over its threshold',
+      }
+    applies_to: { kinds: [Cluster] }
+    window: { before: 10m, after: 0m }
+    params: { cpu_ratio: 0.7, connections_ratio: 0.7, lag_seconds: 10, waiting: 5 }
+    refs:
+      - { name: cpu, signal: instance_cpu_limit_ratio, mode: instant }
+      - { name: conns, signal: connections_ratio, mode: instant }
+      - { name: lag, signal: replication_lag_seconds, mode: instant, empty_is: normal }
+      - { name: waiting, signal: backends_waiting, mode: instant, empty_is: normal }
+    judge:
+      let:
+        - { name: cpu_now, cel: 'last(cpu)' }
+        - { name: conns_now, cel: 'last(conns)' }
+        - { name: lag_now, cel: 'size(lag) > 0 ? last(lag) : 0.0' }
+        - { name: waiting_now, cel: 'size(waiting) > 0 ? last(waiting) : 0.0' }
+      abnormal_if:
+        - cel: cpu_now > double(params.cpu_ratio)
+          say:
+            {
+              zh-CN: '实例 CPU 占 limit 的 {cpu_now, number, percent}',
+              en: 'Instance CPU at {cpu_now, number, percent} of its limit',
+            }
+        - cel: conns_now > double(params.connections_ratio)
+          say:
+            {
+              zh-CN: '连接数占 max_connections 的 {conns_now, number, percent}',
+              en: 'Connections at {conns_now, number, percent} of max_connections',
+            }
+        - cel: lag_now > double(params.lag_seconds)
+          say: { zh-CN: '复制延迟 {lag_now, number} 秒', en: 'Replication lag {lag_now, number} s' }
+        - cel: waiting_now > double(params.waiting)
+          say:
+            { zh-CN: '{waiting_now, number} 个会话在等待锁', en: '{waiting_now, number} sessions are waiting on locks' }
+    display: { value: cpu_now, unit: percent, threshold: double(params.cpu_ratio) }
+    egress: allow

@@ -1,7 +1,7 @@
 api_version: srenautix.io/pack/v1
 name: postgres
-version: 1.0.0
-description: PostgreSQL（CloudNativePG 与 postgres_exporter）：主库切换与复制、连接与长事务、锁等待与回滚、WAL 归档、备份
+version: 1.1.0
+description: PostgreSQL（CloudNativePG 与 postgres_exporter）：主库切换与复制、连接与长事务、锁等待与回滚、WAL 归档、备份；主动优化的数据库领域（语句份额、临时文件、轮询、顺序扫描、work_mem 与业务 issue 模板）
 maturity: stable
 min_srenautix_version: 0.1.0
 depends_on:
@@ -12,3 +12,6 @@ requires:
   - metrics.query_range
 optional:
   - logs.match
+  # 数据库领域的检查项读 dbstats（postgres-stats 集成）
+  - dbstats.statements_top
+  - dbstats.tables_top

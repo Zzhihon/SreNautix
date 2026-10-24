@@ -5189,7 +5189,7 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
             type: 'boolean',
             default: false,
             description:
-              'dbstats：取值为两次采样（相隔不少于 300 秒）的差值除以间隔秒数，序列只含两次都出现的行；只有一次采样时引用为缺数据',
+              'dbstats：取值为两次采样（相隔不少于 300 秒）的差值除以间隔秒数，计数器回绕的行不计；只在第二次采样中出现的行在前一次采样没有被截断时从 0 开始计，被截断时不计；只有一次采样时引用为缺数据',
           },
           probe: { type: 'string', description: '探测该备选是否可用的查询，返回非空即可用；不填时用 expr 本身探测' },
           recording_rule: {

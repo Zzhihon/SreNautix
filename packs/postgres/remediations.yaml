@@ -1,0 +1,110 @@
+# 主动优化的 ops 修复模板（ADR 0146 §4.3）。文件角色由 server 配置的仓库布局给出：
+#   postgres_clusters  CNPG Cluster 清单所在的文件（可以是 glob 或多文档 YAML）
+# 只修改 spec.postgresql.parameters 中不需要重启的参数（pg_settings 的 context 为 user、superuser 或 sighup）；
+# 需要重启的参数（shared_buffers、max_connections 等）不生成 PR，只在建议中说明。
+remediations:
+  - id: pg-guc-tune
+    title: { zh-CN: 调整 PostgreSQL 参数, en: Tune a PostgreSQL parameter }
+    category: component_param
+    applies: goal
+    repository: gitops
+    # 临时文件写入来自排序与哈希溢出：调大 work_mem。发现挂到的组件是 CNPG Cluster
+    when: 'finding.kind == "pg.temp_spill" && root != null && kind_is(root.kind, "Cluster")'
+    params:
+      parameter: work_mem
+      # 不需要重启的参数与取值范围（kB）；用户层可以按集群的内存调整
+      allowed: 'work_mem:user:1024:262144,maintenance_work_mem:user:16384:2097152'
+      default_kb: 4096
+      factor: 1.5
+      max_change_ratio: 0.5
+      min_reduction: 0.5
+    let:
+      - { name: cluster_name, cel: 'root.name' }
+      - {
+          name: docs,
+          cel: 'files.postgres_clusters.filter(d, d != null && has(d.kind) && d.kind == "Cluster" && d.metadata.name == cluster_name)',
+        }
+      - { name: rule, cel: 'params.allowed.split(",").filter(r, r.split(":")[0] == params.parameter)' }
+      - { name: min_kb, cel: 'size(rule) == 1 ? double(rule[0].split(":")[2]) : 0.0' }
+      - { name: max_kb, cel: 'size(rule) == 1 ? double(rule[0].split(":")[3]) : 0.0' }
+      - name: configured
+        cel: >-
+          size(docs) == 1 && field(docs[0], "spec.postgresql.parameters." + params.parameter) != null
+          ? string(field(docs[0], "spec.postgresql.parameters." + params.parameter)) : ""
+      - { name: current_kb, cel: 'configured != "" ? pg_kb(configured) : double(params.default_kb)' }
+      - { name: wanted_kb, cel: 'current_kb * double(params.factor)' }
+      - { name: new_kb, cel: 'wanted_kb > max_kb ? max_kb : wanted_kb' }
+      - { name: new_value, cel: 'pg_mem(new_kb)' }
+      - { name: current_text, cel: 'configured != "" ? configured : pg_mem(current_kb)' }
+      - { name: parameter, cel: params.parameter }
+      # 发现的临时文件写入（字节每秒）：诊断卡的判定明细
+      - name: temp_bytes
+        cel: >-
+          "postgres/checks/statement-temp" in finding_cards
+          && "observations" in finding_cards["postgres/checks/statement-temp"]
+          && finding_cards["postgres/checks/statement-temp"].observations.total_bytes != null
+          ? double(finding_cards["postgres/checks/statement-temp"].observations.total_bytes) : 0.0
+      - { name: share, cel: 'finding.share != null ? double(finding.share) : 1.0' }
+    skip_if:
+      - cel: size(docs) != 1
+        say:
+          {
+            zh-CN: '仓库中没有唯一的 Cluster {cluster_name}',
+            en: 'The repository has no unique Cluster {cluster_name}',
+          }
+      - cel: new_kb <= current_kb
+        say:
+          {
+            zh-CN: '{parameter} 已经是 {current_text}，达到包内允许的上限',
+            en: '{parameter} is already {current_text}, the allowed maximum',
+          }
+    guard:
+      - id: parameter-allowed
+        cel: size(rule) == 1
+        say:
+          {
+            zh-CN: '{parameter} 不在允许修改的参数中（只允许不需要重启的参数）',
+            en: '{parameter} is not an allowed parameter (only parameters that need no restart)',
+          }
+      - id: within-range
+        cel: new_kb >= min_kb && new_kb <= max_kb
+        say:
+          {
+            zh-CN: '{parameter} 的新值 {new_value} 超出允许范围',
+            en: 'The new value {new_value} of {parameter} is out of range',
+          }
+      - id: change-ratio
+        cel: new_kb <= current_kb * (1.0 + double(params.max_change_ratio))
+        say:
+          {
+            zh-CN: '{parameter} 由 {current_text} 调到 {new_value}，超过单次改动的上限',
+            en: '{parameter} from {current_text} to {new_value} exceeds the change limit of one PR',
+          }
+    edits:
+      - file: postgres_clusters
+        document: { kind: Cluster, name: '{cluster_name}' }
+        set:
+          - { path: 'spec.postgresql.parameters.{parameter}', value: new_value }
+    change:
+      zh-CN: '{parameter} 由 {current_text} 调到 {new_value}：语句写临时文件每秒 {temp_bytes, number} 字节，排序与哈希超过了 {parameter}。参数不需要重启，CNPG 重新加载配置后生效。'
+      en: 'Raise {parameter} from {current_text} to {new_value}: statements write {temp_bytes, number} bytes of temporary files per second because sorts and hashes exceed {parameter}. The parameter needs no restart; CNPG reloads it.'
+    estimate:
+      indicator: postgres/temp-written
+      unit: per_second
+      # 下界：这个发现的临时文件写入 × 份额 × 最小降幅；期望：全部消除
+      lower: 'temp_bytes * share * double(params.min_reduction)'
+      expected: 'temp_bytes * share'
+      basis:
+        zh-CN: '临时文件写入 {temp_bytes, number} 字节每秒 × 份额 {share, number, percent} × 最小降幅 {min_reduction, number, percent} = {lower, number} 字节每秒'
+        en: 'Temporary writes {temp_bytes, number} B/s × share {share, number, percent} × minimum reduction {min_reduction, number, percent} = {lower, number} B/s'
+    verify:
+      say:
+        zh-CN: 合并同步后 pg_settings 中 {parameter} 为 {new_value}，临时文件写入按同一时段比较下降
+        en: After the sync pg_settings shows {parameter} = {new_value} and temporary writes drop in matching hours
+      cards: [postgres/checks/statement-temp]
+      within: 24h
+      guards: [postgres/db-time, postgres/cache-hit]
+    rollback:
+      say:
+        zh-CN: 'revert 这个 PR 的提交，{parameter} 回到 {current_text}；实例内存紧张或出现 OOM 时这样做'
+        en: 'Revert the commit of this PR to bring {parameter} back to {current_text} when the instances run short of memory or OOM'

@@ -103,3 +103,192 @@ signals:
     alternatives:
       - expr: (FATAL|PANIC|out of shared memory|could not write|terminating connection due to administrator command)
         dialect: logs_match
+
+  # ---------- 主动优化：数据库领域（ADR 0146）----------
+  # 指标信号（基线、差距与验证读 VictoriaMetrics 的历史）。语句级统计取自 postgres_exporter 的 stat_statements 采集器；
+  # CNPG 默认的监控查询不含语句统计，用户包可以用 extends 补充自己的 exporter 指标
+  - id: db_exec_seconds_rate
+    kind: metrics
+    unit: none
+    alternatives:
+      - expr: sum(rate(pg_stat_statements_seconds_total{$selector}[$rate_window]))
+  - id: statement_mean_seconds
+    kind: metrics
+    unit: seconds
+    alternatives:
+      - expr: >-
+          sum(rate(pg_stat_statements_seconds_total{$selector, queryid="$params.queryid"}[$rate_window]))
+          / sum(rate(pg_stat_statements_calls_total{$selector, queryid="$params.queryid"}[$rate_window]))
+  - id: xact_rate
+    kind: metrics
+    unit: per_second
+    alternatives:
+      - expr: >-
+          sum(rate(cnpg_pg_stat_database_xact_commit{$selector}[$rate_window]))
+          + sum(rate(cnpg_pg_stat_database_xact_rollback{$selector}[$rate_window]))
+      - expr: >-
+          sum(rate(pg_stat_database_xact_commit{$selector}[$rate_window]))
+          + sum(rate(pg_stat_database_xact_rollback{$selector}[$rate_window]))
+  - id: temp_bytes_rate
+    kind: metrics
+    unit: per_second
+    alternatives:
+      - expr: sum(rate(cnpg_pg_stat_database_temp_bytes{$selector}[$rate_window]))
+      - expr: sum(rate(pg_stat_database_temp_bytes{$selector}[$rate_window]))
+  - id: cache_hit_ratio
+    kind: metrics
+    unit: ratio
+    alternatives:
+      - expr: >-
+          sum(rate(cnpg_pg_stat_database_blks_hit{$selector}[$rate_window]))
+          / (sum(rate(cnpg_pg_stat_database_blks_hit{$selector}[$rate_window])) + sum(rate(cnpg_pg_stat_database_blks_read{$selector}[$rate_window])))
+      - expr: >-
+          sum(rate(pg_stat_database_blks_hit{$selector}[$rate_window]))
+          / (sum(rate(pg_stat_database_blks_hit{$selector}[$rate_window])) + sum(rate(pg_stat_database_blks_read{$selector}[$rate_window])))
+  - id: seq_scan_ratio
+    kind: metrics
+    unit: ratio
+    alternatives:
+      - expr: >-
+          sum(rate(pg_stat_user_tables_seq_scan{$selector}[$rate_window]))
+          / (sum(rate(pg_stat_user_tables_seq_scan{$selector}[$rate_window])) + sum(rate(pg_stat_user_tables_idx_scan{$selector}[$rate_window])))
+  # 负载保护：实例 CPU 占 limit 的比例（取最高的实例）
+  - id: instance_cpu_limit_ratio
+    kind: metrics
+    unit: ratio
+    alternatives:
+      - expr: >-
+          max(
+            sum by (pod) (rate(container_cpu_usage_seconds_total{$selector, container="postgres"}[$rate_window]))
+            / sum by (pod) (kube_pod_container_resource_limits{$selector, container="postgres", resource="cpu"})
+          )
+
+  # dbstats 信号（ADR 0146 §3.3）：同一组参数的语句统计在一次运行里只读两次，各列共用这两次采样
+  - id: stmt_exec_ms_rate
+    kind: dbstats
+    unit: none
+    alternatives:
+      - expr: statements.top
+        dialect: dbstats
+        args: { order_by: total_exec_time, limit: 20, database: $params.database }
+        column: total_exec_time_ms
+        rate: true
+  - id: stmt_calls_rate
+    kind: dbstats
+    unit: per_second
+    alternatives:
+      - expr: statements.top
+        dialect: dbstats
+        args: { order_by: total_exec_time, limit: 20, database: $params.database }
+        column: calls
+        rate: true
+  - id: stmt_rows_rate
+    kind: dbstats
+    unit: per_second
+    alternatives:
+      - expr: statements.top
+        dialect: dbstats
+        args: { order_by: total_exec_time, limit: 20, database: $params.database }
+        column: rows
+        rate: true
+  - id: stmt_temp_blks_rate
+    kind: dbstats
+    unit: per_second
+    alternatives:
+      - expr: statements.top
+        dialect: dbstats
+        args: { order_by: temp_blks_written, limit: 20, database: $params.database }
+        column: temp_blks_written
+        rate: true
+  - id: stmt_one_exec_ms_rate
+    kind: dbstats
+    unit: none
+    alternatives:
+      - expr: statements.top
+        dialect: dbstats
+        args: { order_by: total_exec_time, limit: 5, queryids: [$params.queryid] }
+        column: total_exec_time_ms
+        rate: true
+  - id: stmt_one_calls_rate
+    kind: dbstats
+    unit: per_second
+    alternatives:
+      - expr: statements.top
+        dialect: dbstats
+        args: { order_by: total_exec_time, limit: 5, queryids: [$params.queryid] }
+        column: calls
+        rate: true
+  - id: stmt_one_blks_read_rate
+    kind: dbstats
+    unit: per_second
+    alternatives:
+      - expr: statements.top
+        dialect: dbstats
+        args: { order_by: total_exec_time, limit: 5, queryids: [$params.queryid] }
+        column: shared_blks_read
+        rate: true
+  - id: table_seq_tup_rate
+    kind: dbstats
+    unit: per_second
+    alternatives:
+      - expr: tables.top
+        dialect: dbstats
+        args: { order_by: seq_tup_read, limit: 20 }
+        column: seq_tup_read
+        rate: true
+  - id: table_idx_scan_rate
+    kind: dbstats
+    unit: per_second
+    alternatives:
+      - expr: tables.top
+        dialect: dbstats
+        args: { order_by: seq_tup_read, limit: 20 }
+        column: idx_scan
+        rate: true
+
+templates:
+  # 区分性检查：一条语句的执行时间、调用次数与每次调用读取的块（假设“缺索引、每次读取大量块”与“调用次数暴涨”的区分）
+  - id: statement-detail
+    signal: stmt_one_exec_ms_rate
+    description: 一条语句（queryid）两次采样之间的执行时间、调用速率与每次调用从磁盘读取的块数
+    args:
+      type: object
+      additionalProperties: false
+      properties:
+        queryid: { type: string, pattern: '^-?[0-9]{1,20}$', description: pg_stat_statements 的 queryid（十进制） }
+        blocks_per_call: { type: number, minimum: 1, maximum: 1000000, description: 每次调用读取的块数超过它时判为异常 }
+    card:
+      id: statement-detail
+      title: { zh-CN: 单条语句的读取量, en: Reads of one statement }
+      applies_to: { kinds: [Cluster] }
+      window: { before: 30m, after: 0m }
+      params: { queryid: '0', blocks_per_call: 100 }
+      refs:
+        - { name: time, signal: stmt_one_exec_ms_rate, mode: dbstats }
+        - { name: calls, signal: stmt_one_calls_rate, mode: dbstats }
+        - { name: reads, signal: stmt_one_blks_read_rate, mode: dbstats, empty_is: normal }
+      judge:
+        let:
+          - { name: calls_per_second, cel: 'sum(calls)' }
+          - { name: mean_ms, cel: 'calls_per_second > 0.0 ? sum(time) / calls_per_second : 0.0' }
+          - {
+              name: blocks_per_call,
+              cel: 'calls_per_second > 0.0 && size(reads) > 0 ? sum(reads) / calls_per_second : 0.0',
+            }
+        undeterminable_if:
+          - cel: calls_per_second == 0.0
+            say: { zh-CN: 两次采样之间这条语句没有被调用, en: The statement was not called between the samples }
+        abnormal_if:
+          - cel: blocks_per_call > double(params.blocks_per_call)
+            say:
+              {
+                zh-CN: '每次调用从磁盘读取 {blocks_per_call, number} 块，平均 {mean_ms, number} ms',
+                en: '{blocks_per_call, number} blocks read from disk per call, mean {mean_ms, number} ms',
+              }
+            normal_say:
+              {
+                zh-CN: '每次调用读取 {blocks_per_call, number} 块，平均 {mean_ms, number} ms',
+                en: '{blocks_per_call, number} blocks read per call, mean {mean_ms, number} ms',
+              }
+      display: { value: blocks_per_call, unit: count, threshold: double(params.blocks_per_call) }
+      egress: allow

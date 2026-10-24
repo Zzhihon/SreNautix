@@ -253,7 +253,8 @@ function identityOf(op: DbstatsOperation, row: DbstatsSample['rows'][number]): s
 }
 
 /**
- * 两次采样转成序列：每行一条，点在采样时刻。rate 为 true 时只含两次都出现、计数器没有回绕的行；
+ * 两次采样转成序列：每行一条，点在采样时刻。rate 为 true 时不含计数器回绕的行；只在第二次采样中出现的行，前一次采样
+ * 没有被截断时按从 0 开始计，被截断时不计；
  * 没有前一次采样时抛出 DbstatsNotReady
  */
 export function dbstatsSeries(
@@ -285,7 +286,8 @@ export function dbstatsSeries(
   return current.rows.flatMap((row) => {
     const p = before.get(identityOf(op, row));
     const a = numeric(row[column]);
-    const b = p ? numeric(p[column]) : null;
+    // 前一次采样没有被截断时，不在其中的行是两次采样之间新出现的（计数从 0 开始）；被截断时无法区分，不计速率
+    const b = p ? numeric(p[column]) : previous.truncated ? null : 0;
     if (a === null || b === null || a < b) {
       return [];
     }

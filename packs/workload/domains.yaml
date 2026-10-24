@@ -1,0 +1,46 @@
+# 主动优化的 compute 领域（ADR 0146 §1.3）：工作负载与 CNPG Cluster 实例的 request 长期高于实际用量。
+# compute 领域的发现以工作负载本身为实体，份额按实体自身计算（100%）。
+indicators:
+  - id: cpu-requested
+    title: { zh-CN: CPU request 总量, en: Total CPU requests }
+    description: { zh-CN: 工作负载全部 Pod 的 CPU request（核）, en: CPU requests of all pods of the workload (cores) }
+    signal: workload_cpu_requests_total
+    entity: Deployment
+    unit: cores
+    better: lower
+    statistic: max
+  - id: memory-requested
+    title: { zh-CN: 内存 request 总量, en: Total memory requests }
+    signal: workload_memory_requests_total
+    entity: Deployment
+    unit: bytes
+    better: lower
+    statistic: max
+
+domains:
+  - id: compute
+    title: { zh-CN: 计算资源, en: Compute resources }
+    applies_to: [Deployment, StatefulSet, Cluster]
+    indicators: [workload/cpu-requested, workload/memory-requested]
+    diagnostics:
+      - id: cpu-overprovisioned
+        card: checks/cpu-overprovisioned
+        finding: workload.cpu_overprovisioned
+        indicator: workload/cpu-requested
+        symptoms: [overprovision]
+      - id: memory-overprovisioned
+        card: checks/memory-overprovisioned
+        finding: workload.memory_overprovisioned
+        indicator: workload/memory-requested
+        symptoms: [overprovision]
+    contribution:
+      - { id: cpu-self, card: checks/cpu-overprovisioned, indicator: workload/cpu-requested }
+      - { id: memory-self, card: checks/memory-overprovisioned, indicator: workload/memory-requested }
+    optimizations: [workload/resource-right-size, workload/resource-right-size-memory]
+    gates:
+      min_share: 1
+      # G2：每个工作负载至少减少 0.2 核或 256 MiB，并且不少于 request 的 10%
+      min_gain_ratio: 0.1
+      min_cpu_cores: 0.2
+      min_memory_bytes: 268435456
+    schedule: { cron: '0 21 * * 6' }

@@ -1,0 +1,227 @@
+# 主动优化的 ops 修复模板（ADR 0146 §4.3）：工作负载（含 CNPG Cluster 的 spec.resources）的 request 按 14 天的用量调整。
+# 文件角色由 server 配置的仓库布局给出：
+#   workloads  Deployment、StatefulSet 与 CNPG Cluster 所在的文件（可以是 glob 或多文档 YAML）
+# CPU 与内存分成两个模板，预期收益分别按 workload/cpu-requested 与 workload/memory-requested 计算。
+remediations:
+  - id: resource-right-size
+    title: { zh-CN: 按用量调低 CPU request, en: Lower CPU requests to actual usage }
+    category: config_resource
+    applies: goal
+    repository: gitops
+    when: >-
+      finding.kind == "workload.cpu_overprovisioned" && root != null
+      && (root.kind in ["Deployment", "StatefulSet"] || kind_is(root.kind, "Cluster"))
+    params: { headroom: 1.2, min_cores: 0.05, max_change_ratio: 0.5 }
+    inputs:
+      - { name: usage, signal: container_cpu_usage_p99 }
+      - { name: hpa, signal: workload_cpu_utilization_hpa }
+    let:
+      - { name: wl_kind, cel: 'kind_is(root.kind, "Cluster") ? "Cluster" : root.kind' }
+      - { name: wl_name, cel: root.name }
+      - { name: cnpg, cel: 'wl_kind == "Cluster"' }
+      - {
+          name: docs,
+          cel: 'files.workloads.filter(d, d != null && has(d.kind) && d.kind == wl_kind && d.metadata.name == wl_name)',
+        }
+      # 用量最高的容器（CNPG 的实例容器是 postgres）
+      - { name: top, cel: 'usage.filter(s, usage.all(o, last(o) <= last(s)))' }
+      - { name: container, cel: 'cnpg ? "postgres" : (size(top) > 0 ? label(top[0], "container") : "")' }
+      - {
+          name: res_path,
+          cel: 'cnpg ? "spec.resources" : "spec.template.spec.containers[name=" + container + "].resources"',
+        }
+      - {
+          name: current_text,
+          cel: 'size(docs) == 1 && field(docs[0], res_path + ".requests.cpu") != null ? string(field(docs[0], res_path + ".requests.cpu")) : ""',
+        }
+      - { name: amount, cel: 'current_text != "" ? cpu_cores(current_text) : 0.0' }
+      - {
+          name: p99,
+          cel: 'size(usage.filter(s, label(s, "container") == container)) > 0 ? last(usage.filter(s, label(s, "container") == container)) : -1.0',
+        }
+      - {
+          name: target,
+          cel: 'p99 * double(params.headroom) > double(params.min_cores) ? p99 * double(params.headroom) : double(params.min_cores)',
+        }
+      # 单次改动不超过当前值的 max_change_ratio
+      - { name: floor, cel: 'amount * (1.0 - double(params.max_change_ratio))' }
+      - { name: new_cores, cel: 'target > floor ? target : floor' }
+      - { name: new_value, cel: 'millicores(new_cores)' }
+      - {
+          name: replicas,
+          cel: 'size(docs) == 1 && field(docs[0], cnpg ? "spec.instances" : "spec.replicas") != null ? double(field(docs[0], cnpg ? "spec.instances" : "spec.replicas")) : 1.0',
+        }
+      - { name: hpas, cel: 'size(hpa)' }
+    skip_if:
+      - cel: size(docs) != 1
+        say: { zh-CN: '仓库中没有唯一的 {wl_kind} {wl_name}', en: 'The repository has no unique {wl_kind} {wl_name}' }
+      - cel: current_text == ""
+        say:
+          {
+            zh-CN: '仓库中 {wl_kind} {wl_name} 的容器 {container} 没有 CPU request',
+            en: 'Container {container} of {wl_kind} {wl_name} has no CPU request in the repository',
+          }
+      - cel: p99 < 0.0
+        say: { zh-CN: '没有容器 {container} 的 14 天用量', en: 'No 14-day usage for container {container}' }
+      - cel: new_cores >= amount
+        say:
+          {
+            zh-CN: 'CPU request {current_text} 已经不高于用量所需的 {new_value}',
+            en: 'The CPU request {current_text} is not above the {new_value} usage needs',
+          }
+    guard:
+      - id: not-below-p99
+        cel: new_cores >= p99
+        say:
+          {
+            zh-CN: '新的 request {new_value} 低于 14 天 p99 用量',
+            en: 'The new request {new_value} is below the 14-day p99 usage',
+          }
+      - id: no-cpu-hpa
+        cel: hpas == 0
+        say:
+          {
+            zh-CN: '{wl_name} 由按 CPU 利用率伸缩的 HPA 管理，调整 request 必须同时调整 HPA 目标',
+            en: '{wl_name} is scaled by a CPU utilization HPA; changing requests needs the HPA target changed too',
+          }
+      - id: change-ratio
+        cel: new_cores >= amount * (1.0 - double(params.max_change_ratio))
+        say: { zh-CN: '改动超过当前值的上限', en: 'The change exceeds the limit of one PR' }
+    edits:
+      - file: workloads
+        document: { kind: '{wl_kind}', name: '{wl_name}' }
+        set:
+          - { path: '{res_path}.requests.cpu', value: new_value }
+    change:
+      zh-CN: '{wl_kind} {wl_name} 的容器 {container} 的 CPU request 由 {current_text} 调到 {new_value}：14 天 CPU 用量 p99 为 {p99, number} 核，留出 {headroom} 倍余量。'
+      en: 'Lower the CPU request of container {container} of {wl_kind} {wl_name} from {current_text} to {new_value}: the 14-day p99 CPU usage is {p99, number} cores, with {headroom}x headroom.'
+    estimate:
+      indicator: workload/cpu-requested
+      unit: cores
+      # 减少的 request × 副本数：确定值
+      lower: '(amount - new_cores) * replicas'
+      expected: '(amount - new_cores) * replicas'
+      basis:
+        zh-CN: '每个副本减少 {current_text} − {new_value}，共 {replicas, number} 个副本：{lower, number} 核'
+        en: '{current_text} − {new_value} per replica × {replicas, number} replicas: {lower, number} cores'
+    verify:
+      say:
+        zh-CN: 合并同步后 CPU 限流不上升、延迟与错误率不恶化，request 总量下降
+        en: After the sync CPU throttling does not rise, latency and errors do not worsen and total requests drop
+      within: 24h
+    rollback:
+      say:
+        zh-CN: 'revert 这个 PR 的提交，CPU request 回到 {current_text}；出现限流或延迟上升时这样做'
+        en: 'Revert the commit of this PR to bring the CPU request back to {current_text} on throttling or higher latency'
+
+  - id: resource-right-size-memory
+    title: { zh-CN: 按用量调低内存 request, en: Lower memory requests to actual usage }
+    category: config_resource
+    applies: goal
+    repository: gitops
+    when: >-
+      finding.kind == "workload.memory_overprovisioned" && root != null
+      && (root.kind in ["Deployment", "StatefulSet"] || kind_is(root.kind, "Cluster"))
+    # 平台约定：内存 request 等于 limit（limit_equals_request 为 true 时 limit 一起调整）
+    params: { headroom: 1.25, max_change_ratio: 0.5, limit_equals_request: true }
+    inputs:
+      - { name: peak, signal: container_memory_max }
+      - { name: oom, signal: container_oom_lookback }
+    let:
+      - { name: wl_kind, cel: 'kind_is(root.kind, "Cluster") ? "Cluster" : root.kind' }
+      - { name: wl_name, cel: root.name }
+      - { name: cnpg, cel: 'wl_kind == "Cluster"' }
+      - {
+          name: docs,
+          cel: 'files.workloads.filter(d, d != null && has(d.kind) && d.kind == wl_kind && d.metadata.name == wl_name)',
+        }
+      - { name: top, cel: 'peak.filter(s, peak.all(o, last(o) <= last(s)))' }
+      - { name: container, cel: 'cnpg ? "postgres" : (size(top) > 0 ? label(top[0], "container") : "")' }
+      - {
+          name: res_path,
+          cel: 'cnpg ? "spec.resources" : "spec.template.spec.containers[name=" + container + "].resources"',
+        }
+      - {
+          name: current_text,
+          cel: 'size(docs) == 1 && field(docs[0], res_path + ".requests.memory") != null ? string(field(docs[0], res_path + ".requests.memory")) : ""',
+        }
+      - { name: amount, cel: 'current_text != "" ? mem_bytes(current_text) : 0.0' }
+      - {
+          name: max_ws,
+          cel: 'size(peak.filter(s, label(s, "container") == container)) > 0 ? last(peak.filter(s, label(s, "container") == container)) : -1.0',
+        }
+      - { name: target, cel: 'max_ws * double(params.headroom)' }
+      - { name: floor, cel: 'amount * (1.0 - double(params.max_change_ratio))' }
+      - { name: new_bytes, cel: 'target > floor ? target : floor' }
+      - { name: new_value, cel: 'mebibytes(new_bytes)' }
+      # limit 与 request 相等时一起改；否则这一项写回 request 的路径（不产生额外改动）
+      - {
+          name: limit_path,
+          cel: 'params.limit_equals_request ? res_path + ".limits.memory" : res_path + ".requests.memory"',
+        }
+      - { name: ooms, cel: 'size(oom.filter(s, label(s, "container") == container))' }
+      - {
+          name: replicas,
+          cel: 'size(docs) == 1 && field(docs[0], cnpg ? "spec.instances" : "spec.replicas") != null ? double(field(docs[0], cnpg ? "spec.instances" : "spec.replicas")) : 1.0',
+        }
+    skip_if:
+      - cel: size(docs) != 1
+        say: { zh-CN: '仓库中没有唯一的 {wl_kind} {wl_name}', en: 'The repository has no unique {wl_kind} {wl_name}' }
+      - cel: current_text == ""
+        say:
+          {
+            zh-CN: '仓库中 {wl_kind} {wl_name} 的容器 {container} 没有内存 request',
+            en: 'Container {container} of {wl_kind} {wl_name} has no memory request in the repository',
+          }
+      - cel: max_ws < 0.0
+        say: { zh-CN: '没有容器 {container} 的 14 天工作集', en: 'No 14-day working set for container {container}' }
+      - cel: new_bytes >= amount
+        say:
+          {
+            zh-CN: '内存 request {current_text} 已经不高于用量所需的 {new_value}',
+            en: 'The memory request {current_text} is not above the {new_value} usage needs',
+          }
+    guard:
+      - id: headroom
+        cel: new_bytes >= max_ws * double(params.headroom)
+        say:
+          {
+            zh-CN: '新的 request {new_value} 低于 14 天最大工作集的 {headroom} 倍',
+            en: 'The new request {new_value} is below {headroom} times the 14-day maximum working set',
+          }
+      - id: no-recent-oom
+        cel: ooms == 0
+        say:
+          {
+            zh-CN: '容器 {container} 30 天内被 OOM 终止过',
+            en: 'Container {container} was OOM killed in the last 30 days',
+          }
+      - id: change-ratio
+        cel: new_bytes >= amount * (1.0 - double(params.max_change_ratio))
+        say: { zh-CN: '改动超过当前值的上限', en: 'The change exceeds the limit of one PR' }
+    edits:
+      - file: workloads
+        document: { kind: '{wl_kind}', name: '{wl_name}' }
+        set:
+          - { path: '{res_path}.requests.memory', value: new_value }
+          - { path: '{limit_path}', value: new_value }
+    change:
+      zh-CN: '{wl_kind} {wl_name} 的容器 {container} 的内存 request 由 {current_text} 调到 {new_value}（limit 与 request 相等时一起调整）：14 天最大工作集 {max_ws, number} 字节，留出 {headroom} 倍余量，30 天内没有 OOM。'
+      en: 'Lower the memory request of container {container} of {wl_kind} {wl_name} from {current_text} to {new_value} (and the limit when it equals the request): the 14-day maximum working set is {max_ws, number} bytes, with {headroom}x headroom and no OOM in 30 days.'
+    estimate:
+      indicator: workload/memory-requested
+      unit: bytes
+      lower: '(amount - new_bytes) * replicas'
+      expected: '(amount - new_bytes) * replicas'
+      basis:
+        zh-CN: '每个副本减少 {current_text} − {new_value}，共 {replicas, number} 个副本：{lower, number} 字节'
+        en: '{current_text} − {new_value} per replica × {replicas, number} replicas: {lower, number} bytes'
+    verify:
+      say:
+        zh-CN: 合并同步后没有 OOM、工作集不超过新的 request，request 总量下降
+        en: After the sync nothing is OOM killed, the working set stays below the new request and total requests drop
+      within: 24h
+    rollback:
+      say:
+        zh-CN: 'revert 这个 PR 的提交，内存 request 回到 {current_text}；出现 OOM 或内存压力时这样做'
+        en: 'Revert the commit of this PR to bring the memory request back to {current_text} on OOM or memory pressure'

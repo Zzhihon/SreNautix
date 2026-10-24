@@ -1,0 +1,86 @@
+# 主动优化的 compute 领域（ADR 0146）用到的检查项：工作负载（含 CNPG Cluster 的实例）的 request 长期高于实际用量。
+# 按容器名汇总：CPU 用 14 天的 p99，内存用 14 天的最大工作集；判定在锚点做 instant 查询。
+checks:
+  - id: cpu-overprovisioned
+    title: { zh-CN: CPU request 高于实际用量, en: CPU requests above actual usage }
+    note:
+      {
+        zh-CN: 各容器 CPU 用量的 14 天 p99 与 request；用量占 request 的比例低、可以减少的核数够多时异常,
+        en: 14-day p99 CPU usage against requests per container; abnormal when utilization is low and enough cores can be released,
+      }
+    applies_to: { kinds: [Deployment, StatefulSet, Cluster] }
+    window: { before: 1h, after: 0m }
+    params: { max_utilization: 0.5, min_cores: 0.2 }
+    refs:
+      - { name: usage, signal: container_cpu_usage_p99, mode: instant }
+      - { name: req, signal: container_cpu_requests, mode: instant }
+    judge:
+      let:
+        - { name: requested, cel: 'sum(req)' }
+        - { name: used, cel: 'sum(usage)' }
+        - { name: utilization, cel: 'requested > 0.0 ? used / requested : 1.0' }
+        - { name: spare, cel: 'requested - used' }
+      undeterminable_if:
+        - cel: requested == 0.0
+          say: { zh-CN: 容器没有设置 CPU request, en: The containers have no CPU requests }
+      abnormal_if:
+        - cel: utilization < double(params.max_utilization) && spare > double(params.min_cores)
+          say:
+            {
+              zh-CN: 'CPU 用量 p99 只占 request 的 {utilization, number, percent}，可以减少约 {spare, number} 核',
+              en: 'p99 CPU usage is only {utilization, number, percent} of requests; about {spare, number} cores can be released',
+            }
+          normal_say:
+            {
+              zh-CN: 'CPU 用量 p99 占 request 的 {utilization, number, percent}',
+              en: 'p99 CPU usage is {utilization, number, percent} of requests',
+            }
+    display:
+      value: utilization
+      unit: percent
+      threshold: double(params.max_utilization)
+      table:
+        rows_from: req
+        columns:
+          - { header: { zh-CN: 容器, en: Container }, cel: 'label(row, "container")' }
+          - { header: { zh-CN: request（核）, en: Requests (cores) }, cel: last(row) }
+    egress: allow
+
+  - id: memory-overprovisioned
+    title: { zh-CN: 内存 request 高于实际用量, en: Memory requests above actual usage }
+    note:
+      {
+        zh-CN: 各容器 14 天的最大工作集与 request；最大工作集的 1.25 倍仍远低于 request、30 天内没有 OOM 时异常,
+        en: 14-day maximum working set against requests per container; abnormal when 1.25 times the maximum is far below requests and nothing was OOM killed in 30 days,
+      }
+    applies_to: { kinds: [Deployment, StatefulSet, Cluster] }
+    window: { before: 1h, after: 0m }
+    params: { headroom: 1.25, max_ratio: 0.6, min_bytes: 268435456 }
+    refs:
+      - { name: ws, signal: container_memory_max, mode: instant }
+      - { name: req, signal: container_memory_requests, mode: instant }
+      - { name: oom, signal: container_oom_lookback, mode: instant, empty_is: normal }
+    judge:
+      let:
+        - { name: requested, cel: 'sum(req)' }
+        - { name: needed, cel: 'sum(ws) * double(params.headroom)' }
+        - { name: ratio, cel: 'requested > 0.0 ? needed / requested : 1.0' }
+        - { name: spare, cel: 'requested - needed' }
+        - { name: ooms, cel: 'size(oom)' }
+      undeterminable_if:
+        - cel: requested == 0.0
+          say: { zh-CN: 容器没有设置内存 request, en: The containers have no memory requests }
+      abnormal_if:
+        - cel: ooms == 0 && ratio < double(params.max_ratio) && spare > double(params.min_bytes)
+          say:
+            {
+              zh-CN: '最大工作集留出余量之后只占 request 的 {ratio, number, percent}，可以减少约 {spare, number} 字节',
+              en: 'The maximum working set with headroom is only {ratio, number, percent} of requests; about {spare, number} bytes can be released',
+            }
+          normal_say:
+            {
+              zh-CN: '最大工作集留出余量之后占 request 的 {ratio, number, percent}，或 30 天内有 OOM',
+              en: 'The maximum working set with headroom is {ratio, number, percent} of requests, or a container was OOM killed in 30 days',
+            }
+    display: { value: ratio, unit: percent, threshold: double(params.max_ratio) }
+    egress: allow
