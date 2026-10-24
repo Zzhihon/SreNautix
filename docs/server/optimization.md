@@ -97,7 +97,7 @@ optimization:
 - 每个后端一个信号量与每小时配额（`optimization.limits`），事件研判与主动分析共用信号量，事件研判优先。
 - 领域的 `load_guards` 是证据卡，声明保护的后端（例如 dbstats）。每次直接查询这个后端之前执行（结果缓存 1 分钟），
   卡异常或无法执行时查询不发出，结果为 `load_guard`。保护卡在后端对应的实体上执行：dbstats 为 `optimization.dbstats.cluster`。
-- dbstats 适配器启动时与每小时检查角色能否读取任何业务表，能读取时集成不可用（`DatasourceOverPrivileged`）。
+- dbstats 适配器启动时与每小时检查角色能否读取任何业务表，能读取时集成不可用（`DatasourceOverPrivileged`）。同一个连接（host、port、database、user 相同）上的 SQL 审计表变更源声明的关系不算（`changes.sql_audit`，ADR 0151）。
 
 | 指标 | 含义 |
 |---|---|

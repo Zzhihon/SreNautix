@@ -1867,10 +1867,19 @@ export type components = {
       /** @description <source>:<来源内唯一标识>，用于去重 */
       change_id: string;
       /**
-       * @description rollout：新 ReplicaSet/ControllerRevision；config：挂载的 ConfigMap 版本变化；cordon；scale：HPA 或手动扩缩；gitops_sync：Argo/Flux 同步；ci_deploy：CI 部署；operator：Operator 发起的切换或升级；other
+       * @description rollout：新 ReplicaSet/ControllerRevision；config：挂载的 ConfigMap 版本变化；cordon；scale：HPA 或手动扩缩；gitops_sync：Argo/Flux 同步；ci_deploy：CI 部署；operator：Operator 发起的切换或升级；runtime_config：经管理接口或数据库直接生效的运行时配置变更，不经过 Git 与发布（契约 2.29.0，SQL 审计表变更源读到的记录）；other
        * @enum {string}
        */
-      kind: 'rollout' | 'config' | 'cordon' | 'scale' | 'gitops_sync' | 'ci_deploy' | 'operator' | 'other';
+      kind:
+        | 'rollout'
+        | 'config'
+        | 'cordon'
+        | 'scale'
+        | 'gitops_sync'
+        | 'ci_deploy'
+        | 'operator'
+        | 'runtime_config'
+        | 'other';
       link: string | null;
       /** @description 变更之前的版本（版本标签的旧取值）；与更早一次变更的 revision 相同时，这次变更是回退。来源不知道旧版本时省略或为 null */
       previous_revision?: string | null;

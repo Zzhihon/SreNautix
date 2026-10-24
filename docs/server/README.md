@@ -280,7 +280,7 @@ remediation:
 
 ## 变更源
 
-事件引擎把首次触发前 30 分钟内、触及事件组件的变更放进事件（`incident.changes`），并作为根因排序的一项（DESIGN §5）。变更来自配置的变更源。hub 镜像不带 git，变更源只支持托管在 GitHub 上的仓库（`integrations/github`，ADR 0096），经 `github_app` 的安装令牌用 REST API 读取：
+事件引擎把首次触发前 30 分钟内、触及事件组件的变更放进事件（`incident.changes`），并作为根因排序的一项（DESIGN §5）。变更来自配置的变更源：GitHub 仓库与 SQL 审计表（见下一节）。hub 镜像不带 git，Git 变更源只支持托管在 GitHub 上的仓库（`integrations/github`，ADR 0096），经 `github_app` 的安装令牌用 REST API 读取：
 
 ```yaml
 github_app: { app_id: "123456", installation_id: "7890", private_key_file: /etc/srenautix/secrets/github-app/private-key.pem }
@@ -301,6 +301,67 @@ changes:
 - 多集群时用 `cluster_id` 指定变更所属的集群，不填时为 server 的 `cluster_id`。
 - 同步只在主实例上进行；有新变更时立即重算事件。某个变更源同步失败时发布 `DatasourceUnavailable` 条件（subject `changes:<id>`），其他变更源不受影响。
 - `kind: git`（通用 git 远端）不支持，配置时 server 启动失败并说明改用 `kind: github`；`changes.cache_dir` 不再使用。
+
+### SQL 审计表变更源
+
+经管理接口或直接写库生效的运行时配置改动（停用一个导出目的地、发布一份路由配置）不经过 Git 与发布，前面两类变更源看不到它们。业务库里有这类改动的审计记录时，`changes.sql_audit` 把每条记录作为一次 `kind: runtime_config` 的变更（契约 2.29.0，`integrations/sql-audit`，ADR 0151）。默认没有，不连接任何业务库。
+
+```yaml
+changes:
+  sql_audit:
+    - id: app-db                       # 变更的 source，change_id 为 <id>:<查询 id>:<键>
+      connection:                      # 与 optimization.dbstats 同样的写法
+        host: app-pg-rw.app-data.svc
+        database: app
+        user: srenautix_stats
+        password_file: /etc/srenautix/secrets/sql-audit-app-db/password
+      group_within: 2m                 # 同一对象在这段时间内改动又改回原来的取值时不算变更
+      queries:
+        - id: export-targets
+          table: srenautix_audit.export_target_changes   # <schema>.<名称>：表、视图，或返回审计记录的函数
+          function: true                       # table 是函数时以回看窗口的起止两个 timestamptz 为参数调用
+          key: id                              # 行的唯一键
+          time: occurred_at                    # timestamp 或 timestamptz
+          object: target_id                    # 被改动的对象
+          action: action
+          actor: actor_id                      # 可选
+          value: state                         # 可选：改动之后对象的取值（jsonb 时摘要只列出变化的键）
+          # previous_value: 可选，改动之前的取值所在的列；不写时取同一对象上一条记录的取值
+          details: [name]                      # 可选：另外写进摘要的列
+          components:                          # 按顺序取第一条匹配的规则；都不匹配的记录不算变更
+            - match: { action: [export_target.purge] }
+              targets: ['Deployment:app/worker']
+            - targets: ['StatefulSet:app/gateway']
+```
+
+- **查询**：只有声明的关系名、函数名与列名（小写的普通标识符，加双引号引用）进入 SQL，读取时间列落在回看窗口（`lookback`）内的行，按时间排序，每个查询最多 1000 行。每个查询在单独的只读事务中执行（`statement_timeout` 3 秒，`lock_timeout` 200 毫秒），连接池最多 1 个连接，空闲 60 秒关闭。
+- **权限**：角色能读取声明之外的任何业务关系（表、视图、物化视图、外部表）时不读取，变更源状态记下 `DatasourceOverPrivileged` 与能读取的关系，与 dbstats 的不变量 14 相同。与 `optimization.dbstats` 用同一个连接（host、port、database、user 相同）时，dbstats 的权限自检同样放行声明的表与视图。
+- **授权的做法**：给角色一个返回审计记录的函数（`function: true`）。函数的属主是超级用户、`SECURITY DEFINER`、`SET search_path = pg_catalog, pg_temp`，函数体用 `RETURN QUERY EXECUTE … USING` 按时间窗只查出需要的行与列；角色只有这个函数的 `EXECUTE` 与 schema 的 `USAGE`，读不到任何业务关系。审计表开着行级安全（包括 FORCE）也能经函数读取，时间窗在函数里就用上审计表的索引。函数体是动态查询，PostgreSQL 不登记它对表与列的依赖：业务的迁移删改这些列时不会被它阻止，之后读取失败只记在变更源状态里。视图也可以，但视图依赖它引用的列，业务的迁移删除这些列、改变列的类型或重建表时会失败。
+- **示例函数**（审计日志按 `resource_type` 区分资源，`payload` 是改动之后的资源）：
+
+  ```sql
+  CREATE SCHEMA srenautix_audit;
+  REVOKE ALL ON SCHEMA srenautix_audit FROM PUBLIC;
+  CREATE FUNCTION srenautix_audit.export_target_changes(from_at timestamptz, to_at timestamptz)
+    RETURNS TABLE (id text, occurred_at timestamptz, target_id text, action text, actor_id text, state jsonb, name text)
+    LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $fn$
+    BEGIN
+      RETURN QUERY EXECUTE
+        'SELECT id::text, occurred_at, resource_id::text, action::text, actor_id::text,
+                payload - ''version'', payload ->> ''name''
+           FROM public.admin_audit_log
+          WHERE resource_type = ''export_target'' AND occurred_at >= $1 AND occurred_at <= $2'
+        USING from_at, to_at;
+    END $fn$;
+  REVOKE ALL ON FUNCTION srenautix_audit.export_target_changes(timestamptz, timestamptz) FROM PUBLIC;
+  GRANT USAGE ON SCHEMA srenautix_audit TO srenautix_stats;
+  GRANT EXECUTE ON FUNCTION srenautix_audit.export_target_changes(timestamptz, timestamptz) TO srenautix_stats;
+  ```
+- **变更**：`source` 为变更源 id，`refs` 为 `<查询 id>/<对象>` 与动作，`revision`、`previous_revision` 为改动之后与之前的取值（超过 80 个字符时取 sha256 的前 12 位），`summary` 写动作、取值的变化与 `details`。
+- **没有变化与往返**：与发布的标签抖动相同（ADR 0142）：同一对象从一条记录起 `group_within` 之内回到这条记录之前的取值，这几条记录都不算变更，包括新旧取值相同的一条记录。之前写入的变更随后变得不成立时（往返的后半条晚一轮读到），从回看窗口内删除。
+- **排序**：与其他变更相同：在问题开始之前（或容差之内）、变更窗口内的变更解释它目标上的告警，进入事件，给目标先验与近期变更两项；晚于目标上问题开始超过容差的不参与排序（ADR 0142）。
+- **阶段 A 与研判**：变更出现在事件的时间线里（`<source> runtime_config <查询 id>/<对象> <动作>`），通知标题写 `运行时配置 <查询 id>/<对象> <动作>`。研判输入的相关变更里，运行时配置变更回看到首次触发前 24 小时并全部保留（它的影响常常滞后）；只要有这类变更，研判上下文就多出一段“运行时配置变更（首要假设）”，要求第一个假设以它们为原因提出并设计区分性检查去验证或排除。没有这类变更时提示词不变。
+- chart 的 `changes.sqlAudit` 生成这一节：每一项的 `existingSecret`（键 `passwordKey`，默认 `password`）挂载到 server 的 `/etc/srenautix/secrets/sql-audit-<id>/password`；`networkPolicy.sqlAuditEgressTo` 限定 server 到业务库的出站。
 
 ## 拓扑覆盖
 

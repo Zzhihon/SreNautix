@@ -64,12 +64,11 @@ const businessRepository = z
   .strict();
 
 /**
- * dbstats 的直接连接（§3.3）：一个 CNPG Cluster 的主库，专用只读角色 srenautix_stats，口令文件挂载自 Secret。
- * cluster 是这个数据库对应的拓扑组件键（例如 Cluster:cchp-data/cchp-pg），只有这个组件上的 dbstats 信号能读取
+ * 业务库的只读连接：专用只读角色（默认 srenautix_stats），口令文件挂载自 Secret。dbstats 与 SQL 审计表变更源
+ * （changes.sql_audit，ADR 0151）用同样的写法
  */
-const dbstatsSource = z
+export const pgReadConnection = z
   .object({
-    cluster: z.string().min(1),
     host: z.string().min(1),
     port: z.number().int().min(1).max(65535).default(5432),
     database: z.string().min(1),
@@ -80,6 +79,12 @@ const dbstatsSource = z
       .default(false),
   })
   .strict();
+
+/**
+ * dbstats 的直接连接（§3.3）：一个 CNPG Cluster 的主库。cluster 是这个数据库对应的拓扑组件键
+ * （例如 Cluster:cchp-data/cchp-pg），只有这个组件上的 dbstats 信号能读取
+ */
+const dbstatsSource = pgReadConnection.extend({ cluster: z.string().min(1) }).strict();
 
 const backendLimit = (concurrency: number, perHour: number) =>
   z

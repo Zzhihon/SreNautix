@@ -1367,9 +1367,10 @@ export interface ChangeEvent {
    */
   source: string;
   /**
-   * rollout：新 ReplicaSet/ControllerRevision；config：挂载的 ConfigMap 版本变化；cordon；scale：HPA 或手动扩缩；gitops_sync：Argo/Flux 同步；ci_deploy：CI 部署；operator：Operator 发起的切换或升级；other
+   * rollout：新 ReplicaSet/ControllerRevision；config：挂载的 ConfigMap 版本变化；cordon；scale：HPA 或手动扩缩；gitops_sync：Argo/Flux 同步；ci_deploy：CI 部署；operator：Operator 发起的切换或升级；runtime_config：经管理接口或数据库直接生效的运行时配置变更，不经过 Git 与发布（契约 2.29.0，SQL 审计表变更源读到的记录）；other
    */
-  kind: 'rollout' | 'config' | 'cordon' | 'scale' | 'gitops_sync' | 'ci_deploy' | 'operator' | 'other';
+  kind:
+    'rollout' | 'config' | 'cordon' | 'scale' | 'gitops_sync' | 'ci_deploy' | 'operator' | 'runtime_config' | 'other';
   /**
    * 来源中的引用，例如 Application 名、PR 号、流水线运行 id
    */

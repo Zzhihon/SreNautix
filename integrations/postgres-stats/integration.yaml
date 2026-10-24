@@ -43,5 +43,5 @@ required_scopes:
   - postgres:pg_read_all_settings
   - postgres:CONNECTION LIMIT 2
   - postgres:default_transaction_read_only = on
-  - postgres:no SELECT on any business table
+  - postgres:no SELECT on any business table (relations declared by a changes.sql_audit source on the same role excepted)
 owner: srenautix-maintainers

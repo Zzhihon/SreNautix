@@ -3,6 +3,7 @@
 // - 每个查询在单独的只读事务中执行，SET LOCAL statement_timeout 与 lock_timeout；连接池最多 1 个连接，空闲 60 秒关闭；
 // - 每小时的调用上限（默认 60 次，其中语句文本 6 次），超过时不发出查询；
 // - 权限自检：启动时与每小时检查一次角色能否读取任何业务表，能读取时集成不可用（DatasourceOverPrivileged）；
+//   allowed_relations 声明的关系（server 的 SQL 审计表变更源经同一个角色读取的审计表或视图，ADR 0151）不算；
 // - 不读取业务数据行；statements.top 用 pg_stat_statements(false)，不读取语句文本文件，语句文本只经 statements.text 读取。
 
 import { readFileSync } from 'node:fs';
@@ -37,6 +38,11 @@ export interface PostgresDbstatsConfig {
   idle_ms?: number;
   /** 权限自检的间隔，默认 1 小时 */
   privilege_check_ms?: number;
+  /**
+   * 权限自检不计入的关系（<schema>.<名称>）：同一个角色按声明读取的审计表或视图（ADR 0151）。只能写明确的名字，
+   * 角色能读取的其他业务表照样让集成不可用
+   */
+  allowed_relations?: readonly string[];
   /** 每次权限自检的结果（server 据此发布状态条件 DatasourceOverPrivileged） */
   onPrivilegeReport?: (r: DbstatsPrivilegeReport) => void;
   now?: () => number;
@@ -180,13 +186,18 @@ FROM pg_locks WHERE pid <> pg_backend_pid()
 GROUP BY 1, 2, 3 ORDER BY count DESC, 1, 2, 3
 LIMIT 51`;
 
-const PRIVILEGES_SQL = `
+/**
+ * 当前角色能读取的业务关系（表、视图、物化视图、外部表；系统 schema 与扩展的成员对象除外），最多 20 个。
+ * $1 是不计入的关系名（<schema>.<名称> 的文本数组）
+ */
+export const READABLE_RELATIONS_SQL = `
 SELECT n.nspname || '.' || c.relname AS name
 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
 WHERE c.relkind IN ('r', 'p', 'v', 'm', 'f')
   AND n.nspname NOT IN ('pg_catalog', 'information_schema') AND n.nspname NOT LIKE 'pg\\_toast%'
   AND ${NOT_EXTENSION_MEMBER('c.oid')}
   AND (has_table_privilege(c.oid, 'SELECT') OR has_any_column_privilege(c.oid, 'SELECT'))
+  AND NOT (n.nspname || '.' || c.relname = ANY($1::text[]))
 ORDER BY 1
 LIMIT 20`;
 
@@ -316,7 +327,9 @@ export class PostgresDbstatsAdapter {
       version: string;
       timescale: boolean;
     }>(ROLE_SQL);
-    const readable = (await this.tx<{ name: string }>(PRIVILEGES_SQL)).map((r) => r.name);
+    const readable = (
+      await this.tx<{ name: string }>(READABLE_RELATIONS_SQL, [[...(this.config.allowed_relations ?? [])]])
+    ).map((r) => r.name);
     this.server = { version: Number(role!.version), timescale: role!.timescale };
     const report: DbstatsPrivilegeReport = {
       ok: readable.length === 0,

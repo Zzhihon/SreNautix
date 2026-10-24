@@ -111,7 +111,7 @@ owner: srenautix-maintainers
 
 - 操作固定：`statements.top`（`pg_stat_statements(showtext := false)`）、`statements.text`、`tables.top`（Timescale 分块按 hypertable 汇总）、`indexes.usage`、`settings.get`、`activity.summary`、`locks.summary`。SQL 写在适配器里，请求只绑定参数，请求先按契约校验。
 - 每个查询在单独的只读事务中执行，`SET LOCAL statement_timeout` 与 `lock_timeout`；连接池最多 1 个连接，空闲 60 秒关闭；每小时最多 60 次查询，其中语句文本 6 次，超过时以 `DbstatsLimitExceeded` 拒绝，查询不发出。
-- 权限自检在第一次读取时与之后每小时执行一次：角色能读取任何业务表（扩展的成员对象与系统 schema 之外）时集成不可用（`CapabilityUnavailable`），`onPrivilegeReport` 把结果交给 server 发布 `DatasourceOverPrivileged`。
+- 权限自检在第一次读取时与之后每小时执行一次：角色能读取任何业务表（扩展的成员对象与系统 schema 之外）时集成不可用（`CapabilityUnavailable`），`onPrivilegeReport` 把结果交给 server 发布 `DatasourceOverPrivileged`。`allowed_relations` 列出的关系不算：server 把同一个角色上 SQL 审计表变更源（`integrations/sql-audit`，ADR 0151）声明读取的审计表或视图放在这里。
 - 角色（`dbstatsRoleStatements` 给出参考 SQL）：只授予 `pg_read_all_stats` 与 `pg_read_all_settings`，`CONNECTION LIMIT 2`，角色级 `default_transaction_read_only = on`、`statement_timeout = 3s`、`lock_timeout = 200ms`、`idle_in_transaction_session_timeout = 5s`、`work_mem = 4MB`，不授予任何表的 SELECT。
 - 语句文本经 libpg-query（PostgreSQL 18 的解析器，wasm）规范化：常量换成 `$n`，去掉注释，不超过 4 KiB；`normalizeStatement`、`statementFingerprint`（与 `loadSqlParser` 之后的 `statementFingerprintSync`）从 `@srenautix/integration-sdk` 导出，代码定位用同一个指纹。
 - 一致性测试 `runDbstatsConformance` 在真实 PostgreSQL 进程上执行（`startPostgres`，预加载 `pg_stat_statements`），版本由 `SRENAUTIX_PG_BINS`（逗号分隔的二进制目录）给出，默认 Homebrew 的 postgresql@16、17、18；只读角色对业务表 SELECT 必须返回权限错误，额外授予 SELECT 之后集成必须降级为不可用。

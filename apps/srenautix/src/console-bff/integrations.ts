@@ -190,6 +190,16 @@ export class IntegrationRegistry {
         probe: async () => ({ 'changes.list': await attempt(() => d.changes.verify(s.id)) }),
       });
     }
+    for (const s of c.changes.sql_audit) {
+      specs.push({
+        instanceId: `changes:${s.id}`,
+        manifestId: 'sql-audit',
+        secretRefs: [s.connection.password_file],
+        usedBy: { chains: [], actions: [] },
+        lastSuccess: async () => (await d.changes.statuses()).find((x) => x.id === s.id)?.lastSyncedAt ?? null,
+        probe: async () => ({ 'changes.list': await attempt(() => d.changes.verify(s.id)) }),
+      });
+    }
 
     const tg = c.notify.telegram;
     if (tg?.enabled && d.telegram) {

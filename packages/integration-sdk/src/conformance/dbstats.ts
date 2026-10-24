@@ -76,7 +76,9 @@ export async function runDbstatsConformance(pgsql: TestPostgres): Promise<Confor
   await waitTableStats(pgsql, 20);
 
   const reports: unknown[] = [];
-  const adapter = (opts: { hourly_limit?: number; text_hourly_limit?: number } = {}) =>
+  const adapter = (
+    opts: { hourly_limit?: number; text_hourly_limit?: number; allowed_relations?: readonly string[] } = {},
+  ) =>
     new PostgresDbstatsAdapter({
       id,
       host: pgsql.host,
@@ -86,6 +88,7 @@ export async function runDbstatsConformance(pgsql: TestPostgres): Promise<Confor
       password: pgsql.password,
       hourly_limit: opts.hourly_limit ?? 1000,
       text_hourly_limit: opts.text_hourly_limit ?? 1000,
+      ...(opts.allowed_relations ? { allowed_relations: opts.allowed_relations } : {}),
       onPrivilegeReport: (r) => reports.push(r),
     });
   const a = adapter();
@@ -318,6 +321,53 @@ export async function runDbstatsConformance(pgsql: TestPostgres): Promise<Confor
       }
       return 'DatasourceOverPrivileged';
     });
+
+    await c.run(
+      'allowed-relations',
+      '声明的审计视图不计入权限自检（ADR 0151），同时能读取的业务表仍让集成不可用',
+      async () => {
+        await pgsql.exec(CONFORMANCE_DATABASE, [
+          'CREATE SCHEMA IF NOT EXISTS audit',
+          'CREATE OR REPLACE VIEW audit.order_status_changes AS SELECT id, status FROM orders',
+          `GRANT USAGE ON SCHEMA audit TO ${CONFORMANCE_ROLE}`,
+          `GRANT SELECT ON audit.order_status_changes TO ${CONFORMANCE_ROLE}`,
+        ]);
+        try {
+          const allowed = adapter({ allowed_relations: ['audit.order_status_changes'] });
+          try {
+            const r = await allowed.checkPrivileges();
+            expectEq('ok', r.ok, true);
+            expectEq('readable_tables', r.readable_tables, []);
+            await allowed.read({ op: 'locks.summary', args: {} });
+          } finally {
+            await allowed.close();
+          }
+          const plain = adapter();
+          try {
+            const r = await plain.checkPrivileges();
+            expectEq('没有声明时 ok', r.ok, false);
+            expectEq('没有声明时 readable_tables', r.readable_tables, ['audit.order_status_changes']);
+          } finally {
+            await plain.close();
+          }
+          await pgsql.exec(CONFORMANCE_DATABASE, [`GRANT SELECT ON orders TO ${CONFORMANCE_ROLE}`]);
+          const both = adapter({ allowed_relations: ['audit.order_status_changes'] });
+          try {
+            const r = await both.checkPrivileges();
+            expectEq('另有业务表时 ok', r.ok, false);
+            expectEq('另有业务表时 readable_tables', r.readable_tables, ['public.orders']);
+          } finally {
+            await both.close();
+          }
+        } finally {
+          await pgsql.exec(CONFORMANCE_DATABASE, [
+            `REVOKE SELECT ON orders FROM ${CONFORMANCE_ROLE}`,
+            'DROP SCHEMA audit CASCADE',
+          ]);
+        }
+        return 'allowed_relations';
+      },
+    );
 
     await c.run('verify', 'verify：权限正常时每项能力可用', async () => {
       const v = await a.verify();

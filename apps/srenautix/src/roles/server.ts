@@ -625,11 +625,12 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
     return r;
   };
 
-  // 变更源：有新变更时立即重算事件（变更进入根因排序的"30 分钟内的变更"一项）
+  // 变更源：有新变更时立即重算事件（变更进入根因排序的"30 分钟内的变更"一项）。SQL 审计表变更源（ADR 0151）
+  // 只在 changes.sql_audit 有声明时连接业务库
   const changes = new ChangesService(
     pool,
     c.changes.sources,
-    { github, defaultClusterId: c.cluster_id },
+    { github, defaultClusterId: c.cluster_id, sqlAudit: c.changes.sql_audit },
     parseDuration('changes.lookback', c.changes.lookback),
     () => void pipeline.kick().catch((e: unknown) => logger.error('事件流水线失败', { error: e })),
   );
@@ -735,6 +736,7 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
         budgetExhausted: () => scheduler.optimizationBudgetExhausted(),
         locale: evidenceOptions.locale,
         queryTimeoutMs: evidenceOptions.queryTimeoutMs,
+        auditRelations: (conn) => changes.auditRelations(conn),
       })
     : null;
   registerGoalTaskRoutes(app, {
@@ -1227,6 +1229,7 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
       }
       await listener.stop();
       await optimization?.close();
+      await changes.close();
       await pool.end();
     },
   };

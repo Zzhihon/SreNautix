@@ -86,6 +86,16 @@
 {{- fail "issues.enabled=true 时必须设置 issues.repo（owner/name）" }}
 {{- end }}
 
+{{- /* SQL 审计表变更源（ADR 0151）：每一项要有 id、只读连接与口令所在的 Secret */}}
+{{- range $s := $v.changes.sqlAudit }}
+{{- if not (and $s.id $s.existingSecret $s.connection) }}
+{{- fail "changes.sqlAudit 的每一项都要有 id、existingSecret（只读角色的口令）与 connection（host、database，可选 port、user、ssl）" }}
+{{- end }}
+{{- if hasKey $s.connection "password_file" }}
+{{- fail (printf "changes.sqlAudit %s：口令由 existingSecret 挂载，connection 里不写 password_file" $s.id) }}
+{{- end }}
+{{- end }}
+
 {{- /* 数据库 */}}
 {{- if not (has $v.database.mode (list "cnpg" "external")) }}
 {{- fail (printf "database.mode 必须是 cnpg 或 external，当前为 %q" $v.database.mode) }}

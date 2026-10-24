@@ -45,6 +45,7 @@ const CANDIDATES = [
   'flux',
   'gitlab',
   'github',
+  'sql-audit',
   'jenkins',
   'dingtalk',
   'wecom',

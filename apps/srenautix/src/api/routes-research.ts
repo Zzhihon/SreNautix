@@ -22,6 +22,8 @@ import { KubeToolError, type KubeTools } from '../research/kube-tools.js';
 import type { StageAService } from '../stage-a/service.js';
 import { referenceCases } from './research-materials.js';
 import { parseStoredKey } from '../topology/keys.js';
+import { changesInWindow } from '../changes/service.js';
+import { MAX_CHANGE_LOOKBACK_MS } from '@srenautix/core';
 import { dispositionFacts, factRoots, remediationRoot, RootCardScope, type RootLookup } from '../remediation/facts.js';
 
 export interface ResearchRouteDeps {
@@ -55,6 +57,26 @@ export interface ResearchRouteDeps {
    * 没有时研判输入不带 disposition_facts，处置只按提议与阶段 A 推导
    */
   dispositionFacts?: { lookup: RootLookup; categories: readonly string[] } | null;
+}
+
+/** 研判输入里相关变更的条数上限（ADR 0106） */
+export const MAX_RELATED_CHANGES = 20;
+
+/**
+ * 相关变更的选取（ADR 0106、0151）：near 是首次触发前 2 小时到现在的相关变更，earlier 是更早的 22 小时里相关的
+ * 运行时配置变更，都按时间排序。运行时配置变更全部保留（最多 20 条，取最近的），其余变更取最近的，补足 20 条。
+ * 没有运行时配置变更时就是 near 的最近 20 条
+ */
+export function pickRelatedChanges(near: readonly ChangeEvent[], earlier: readonly ChangeEvent[]): ChangeEvent[] {
+  const runtime = [...earlier, ...near.filter((c) => c.kind === 'runtime_config')].slice(-MAX_RELATED_CHANGES);
+  if (!runtime.length) {
+    return near.slice(-MAX_RELATED_CHANGES);
+  }
+  const others = near.filter((c) => c.kind !== 'runtime_config');
+  const room = MAX_RELATED_CHANGES - runtime.length;
+  return [...runtime, ...(room > 0 ? others.slice(-room) : [])].sort(
+    (a, b) => a.time.localeCompare(b.time) || a.change_id.localeCompare(b.change_id),
+  );
 }
 
 /** 逻辑组件到候选的映射边（ADR 0130）：命名来源，置信度 0.3，低于归并阈值 τ */
@@ -324,32 +346,41 @@ export function registerResearchRoutes(app: FastifyInstance, d: ResearchRouteDep
     };
   });
 
-  /** 事件窗口（首次触发前 2 小时到现在）内触及子图对象、或落在事件命名空间里的变更，不含已经在事件里的 */
+  /**
+   * 事件窗口（首次触发前 2 小时到现在）内触及子图对象、或落在事件命名空间里的变更，不含已经在事件里的，按 pickRelatedChanges
+   * 选取。运行时配置变更（runtime_config，ADR 0151）回看到首次触发前 24 小时：它的影响常常滞后（停用导出之后，积压的记录
+   * 要等本地预算用满才被淘汰）
+   */
   const relatedChanges = async (incident: Incident, nodes: readonly { key: string; namespace: string | null }[]) => {
     if (!d.changes) {
       return [];
     }
-    const from = new Date(Date.parse(incident.first_firing_at) - 2 * 3600_000);
+    const first = Date.parse(incident.first_firing_at);
+    const from = new Date(first - 2 * 3600_000);
     const all = await d.changes(incident.cluster_id, from, new Date());
+    const earlier = (
+      await changesInWindow(d.pool, incident.cluster_id, new Date(first - MAX_CHANGE_LOOKBACK_MS), from)
+    ).filter((c) => c.kind === 'runtime_config' && Date.parse(c.time) < from.getTime());
     const own = new Set(incident.changes.map((c) => c.change_id));
     const keys = new Set(nodes.map((n) => n.key));
     const namespaces = namespacesOf(incident, nodes);
-    return all
-      .filter((c) => !own.has(c.change_id))
-      .filter((c) =>
-        c.targets.some((t) => {
-          if (keys.has(t)) {
-            return true;
-          }
-          try {
-            const ns = parseStoredKey(t).namespace;
-            return ns !== null && namespaces.has(ns);
-          } catch {
-            return false;
-          }
-        }),
-      )
-      .slice(-20);
+    const related = (list: readonly ChangeEvent[]) =>
+      list
+        .filter((c) => !own.has(c.change_id))
+        .filter((c) =>
+          c.targets.some((t) => {
+            if (keys.has(t)) {
+              return true;
+            }
+            try {
+              const ns = parseStoredKey(t).namespace;
+              return ns !== null && namespaces.has(ns);
+            } catch {
+              return false;
+            }
+          }),
+        );
+    return pickRelatedChanges(related(all), related(earlier));
   };
 
   /**

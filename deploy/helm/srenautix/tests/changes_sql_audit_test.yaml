@@ -1,0 +1,102 @@
+suite: SQL 审计表变更源（changes.sqlAudit，ADR 0151）
+templates:
+  - templates/role-resources.yaml
+  - templates/deployments.yaml
+  - templates/networkpolicy.yaml
+  - templates/validate.yaml
+values:
+  - ../ci/base/required.yaml
+release:
+  name: t
+  namespace: srenautix
+capabilities:
+  majorVersion: "1"
+  minorVersion: "34"
+tests:
+  - it: 默认没有 SQL 审计表变更源：server 配置不写 sql_audit，不挂载口令，网络策略不放行业务库
+    set:
+      profile: standard
+    asserts:
+      - notMatchRegex: {path: 'data["config.yaml"]', pattern: 'sql_audit'}
+        template: templates/role-resources.yaml
+        documentSelector: {path: metadata.name, value: t-srenautix-server-config}
+      - notExists:
+          path: spec.template.spec.volumes[?(@.name=="secret-sql-audit-app-db")]
+        template: templates/deployments.yaml
+        documentSelector: {path: metadata.name, value: t-srenautix-server}
+      - notContains:
+          path: spec.egress
+          content: {ports: [{port: 5432, protocol: TCP}]}
+        template: templates/networkpolicy.yaml
+        documentSelector: {path: metadata.name, value: t-srenautix-server}
+
+  - it: 声明写入 server 配置，口令文件指向挂载的 Secret；server 挂载口令并放行到业务库端口
+    set:
+      profile: standard
+      networkPolicy.sqlAuditEgressTo:
+        - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: app-data}}
+      changes.sqlAudit:
+        - id: app-db
+          existingSecret: app-db-audit-reader
+          passwordKey: pw
+          connection: {host: app-pg-rw.app-data.svc, database: app, user: srenautix_stats}
+          queries:
+            - id: export-targets
+              table: audit.export_target_changes
+              key: id
+              time: occurred_at
+              object: target_id
+              action: action
+              value: state
+              components: [{targets: ['StatefulSet:app/gateway']}]
+    asserts:
+      - matchRegex:
+          path: 'data["config.yaml"]'
+          pattern: '(?m)^  sql_audit:\n  - connection:\n      database: app\n      host: app-pg-rw\.app-data\.svc\n      password_file: /etc/srenautix/secrets/sql-audit-app-db/password\n      user: srenautix_stats\n    id: app-db\n    queries:\n    - action: action\n'
+        template: templates/role-resources.yaml
+        documentSelector: {path: metadata.name, value: t-srenautix-server-config}
+      - notMatchRegex: {path: 'data["config.yaml"]', pattern: '(existingSecret|passwordKey)'}
+        template: templates/role-resources.yaml
+        documentSelector: {path: metadata.name, value: t-srenautix-server-config}
+      - equal:
+          path: spec.template.spec.volumes[?(@.name=="secret-sql-audit-app-db")].secret
+          value: {secretName: app-db-audit-reader, defaultMode: 288, items: [{key: pw, path: password}]}
+        template: templates/deployments.yaml
+        documentSelector: {path: metadata.name, value: t-srenautix-server}
+      - notExists:
+          path: spec.template.spec.volumes[?(@.name=="secret-sql-audit-app-db")]
+        template: templates/deployments.yaml
+        documentSelector: {path: metadata.name, value: t-srenautix-worker}
+      - contains:
+          path: spec.egress
+          content:
+            to:
+              - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: app-data}}
+            ports: [{port: 5432, protocol: TCP}]
+        template: templates/networkpolicy.yaml
+        documentSelector: {path: metadata.name, value: t-srenautix-server}
+
+  - it: 缺少 existingSecret 或在 connection 里写口令文件时渲染失败
+    set:
+      profile: standard
+      changes.sqlAudit:
+        - id: app-db
+          connection: {host: h, database: d}
+          queries: []
+    template: templates/validate.yaml
+    asserts:
+      - failedTemplate:
+          errorPattern: changes\.sqlAudit 的每一项都要有 id、existingSecret
+
+  - it: connection 里写 password_file 时渲染失败
+    set:
+      profile: standard
+      changes.sqlAudit:
+        - id: app-db
+          existingSecret: s
+          connection: {host: h, database: d, password_file: /x}
+          queries: []
+    template: templates/validate.yaml
+    asserts:
+      - failedTemplate:
+          errorPattern: connection 里不写 password_file

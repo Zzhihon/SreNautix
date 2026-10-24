@@ -1,5 +1,5 @@
 // 本文件由 packages/contract/scripts/gen.ts 从 contract/ 生成，不要手工修改。
-export const CONTRACT_VERSION = '2.28.0';
+export const CONTRACT_VERSION = '2.29.0';
 
 export const SCHEMAS: Record<string, Record<string, unknown>> = {
   'https://srenautix.io/contract/gateway/v1/action-catalog.schema.json': {
@@ -868,8 +868,18 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
           kind: {
             type: 'string',
             description:
-              'rollout：新 ReplicaSet/ControllerRevision；config：挂载的 ConfigMap 版本变化；cordon；scale：HPA 或手动扩缩；gitops_sync：Argo/Flux 同步；ci_deploy：CI 部署；operator：Operator 发起的切换或升级；other',
-            enum: ['rollout', 'config', 'cordon', 'scale', 'gitops_sync', 'ci_deploy', 'operator', 'other'],
+              'rollout：新 ReplicaSet/ControllerRevision；config：挂载的 ConfigMap 版本变化；cordon；scale：HPA 或手动扩缩；gitops_sync：Argo/Flux 同步；ci_deploy：CI 部署；operator：Operator 发起的切换或升级；runtime_config：经管理接口或数据库直接生效的运行时配置变更，不经过 Git 与发布（契约 2.29.0，SQL 审计表变更源读到的记录）；other',
+            enum: [
+              'rollout',
+              'config',
+              'cordon',
+              'scale',
+              'gitops_sync',
+              'ci_deploy',
+              'operator',
+              'runtime_config',
+              'other',
+            ],
           },
           refs: {
             type: 'array',

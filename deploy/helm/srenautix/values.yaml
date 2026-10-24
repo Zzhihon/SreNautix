@@ -265,6 +265,28 @@ changes:
   # 托管在 GitHub 上的仓库，经 roles.server.githubApp 用 REST API 读取；
   # 每一项原样写入 server 配置：{id, kind: github, repo, branch, paths: [{prefix, targets, kind}]}
   sources: []
+  # SQL 审计表变更源（server 配置 changes.sql_audit，ADR 0151）：业务库里运行时配置的审计记录作为 runtime_config 变更，
+  # 进入事件收敛、根因排序、阶段 A 时间线，研判把它列为首要假设。默认没有，不连接任何业务库。
+  # 每一项：id、existingSecret（只读角色的口令，键 passwordKey，默认 password，挂载到 server 的
+  # /etc/srenautix/secrets/sql-audit-<id>/password）、connection（host、database，可选 port、user、ssl）、queries，
+  # 可选 cluster_id、group_within；existingSecret、passwordKey 以外的键原样写入。查询声明的写法见 docs/server/README.md
+  # 的“SQL 审计表变更源”一节
+  # - id: app-db
+  #   existingSecret: app-db-audit-reader
+  #   connection: {host: app-pg-rw.app-data.svc, database: app, user: srenautix_stats}
+  #   queries:
+  #   - id: export-targets
+  #     table: srenautix_audit.export_target_changes
+  #     function: true
+  #     key: id
+  #     time: occurred_at
+  #     object: target_id
+  #     action: action
+  #     actor: actor_id
+  #     value: state
+  #     details: [name]
+  #     components: [{targets: [StatefulSet:app/gateway]}]
+  sqlAudit: []
   # 从拓扑推导发布变更：Pod 模板上表示版本的标签变化即一次发布，groupWithin 内同一版本或同一个管理应用的变化合成一次
   kubernetes:
     enabled: true
@@ -582,6 +604,8 @@ networkPolicy:
   githubEgressPorts: [443]
   # OCI 领域包的仓库与 Rekor（packs.oci），只有 server 可以访问；为空时放行到任意地址的 443
   packRegistriesEgressTo: []
+  # SQL 审计表变更源（changes.sqlAudit）连接的业务库，只有 server 可以访问；为空时放行到任意地址的这些连接端口
+  sqlAuditEgressTo: []
   # 外部 S3 审计汇（audit.sink=s3）
   auditEgressTo: []
   # Cilium 环境下为 worker 生成按 FQDN 限制的出站策略

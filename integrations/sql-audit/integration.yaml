@@ -1,0 +1,76 @@
+# SQL 审计表作为变更源（server，ADR 0151）：业务库里运行时配置的审计记录（经管理接口或直接写库生效、不经过 Git 与发布）
+# 按声明读取，每行是一次 runtime_config 变更，按组件映射关联到拓扑节点。只读角色只能读取声明的关系或执行声明的函数。
+api_version: srenautix.io/integration/v1
+id: sql-audit
+display_name: SQL 审计表
+category: changes
+direction: read
+tier: official_candidate
+contract: changes/v1
+capabilities:
+  - { name: changes.list, stability: beta }
+# 集成测试（apps/srenautix/test/integration/sql-audit-changes.test.ts）在真实 PostgreSQL 上建审计表与只读角色
+tested_versions:
+  - { backend: postgresql, versions: ['14.19', '18.3'], verification: testcontainers }
+config_schema:
+  type: object
+  additionalProperties: false
+  required: [id, connection, queries]
+  properties:
+    id: { type: string, description: 变更的 source 与 change_id 的前缀 }
+    cluster_id: { type: string, description: 变更所属的集群；不填时为 server 的集群 }
+    group_within: { type: string, description: 同一对象在这段时间内改动又改回原来的取值时不算变更，默认 2m }
+    connection:
+      type: object
+      additionalProperties: false
+      required: [host, database, password_file]
+      properties:
+        host: { type: string }
+        port: { type: integer, minimum: 1, maximum: 65535, default: 5432 }
+        database: { type: string }
+        user: { type: string, default: srenautix_stats }
+        password_file: { type: string, x-srenautix-secret-ref: true }
+        ssl:
+          oneOf:
+            - { type: boolean }
+            - type: object
+              additionalProperties: false
+              properties:
+                ca_file: { type: string }
+                servername: { type: string }
+    queries:
+      type: array
+      items:
+        type: object
+        additionalProperties: false
+        required: [id, table, key, time, object, action, components]
+        properties:
+          id: { type: string }
+          table: { type: string, description: '<schema>.<名称>：表、视图，或返回审计记录的函数' }
+          function: { type: boolean, default: false, description: table 是函数时以回看窗口的起止为参数调用 }
+          key: { type: string, description: 行的唯一键列 }
+          time: { type: string, description: 时间列（timestamp 或 timestamptz） }
+          object: { type: string, description: 被改动对象的列 }
+          action: { type: string, description: 动作列 }
+          actor: { type: string, description: 操作者列 }
+          value: { type: string, description: 变更之后对象取值的列 }
+          previous_value: { type: string, description: 变更之前对象取值的列 }
+          details: { type: array, items: { type: string }, description: 另外写进摘要的列 }
+          components:
+            type: array
+            items:
+              type: object
+              additionalProperties: false
+              required: [targets]
+              properties:
+                match:
+                  type: object
+                  additionalProperties: false
+                  properties:
+                    action: { type: array, items: { type: string } }
+                    object: { type: array, items: { type: string } }
+                targets: { type: array, items: { type: string } }
+required_scopes:
+  - postgres:SELECT on the declared relations or EXECUTE on the declared functions only
+  - postgres:default_transaction_read_only = on
+owner: srenautix-maintainers

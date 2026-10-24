@@ -194,6 +194,9 @@
 {{- if $v.roles.server.githubApp.existingSecret -}}
 {{- $out = append $out (include "srenautix.githubAppEntry" (dict "ctx" .ctx "role" "server") | fromYaml) -}}
 {{- end -}}
+{{- range $s := $v.changes.sqlAudit -}}
+{{- $out = append $out (dict "key" (printf "sql-audit-%s" $s.id) "secretName" $s.existingSecret "items" (list (dict "key" (default "password" $s.passwordKey) "path" "password"))) -}}
+{{- end -}}
 {{- with $v.packs.oci.keySecret -}}
 {{- $out = append $out (dict "key" "pack-keys" "secretName" .) -}}
 {{- end -}}
@@ -331,6 +334,16 @@ changes:
   {{- with $v.changes.sources }}
   sources:
     {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with $v.changes.sqlAudit }}
+  {{- /* SQL 审计表变更源（ADR 0151）：口令文件指向 roleSecrets 挂载的 sql-audit-<id>/password，其余键原样写入 */}}
+  sql_audit:
+    {{- range $s := . }}
+    {{- $conn := merge (dict "password_file" (printf "%s/sql-audit-%s/password" $dir $s.id)) (deepCopy $s.connection) }}
+    {{- $entry := omit $s "existingSecret" "passwordKey" "connection" }}
+    {{- $_ := set $entry "connection" $conn }}
+    - {{- toYaml $entry | nindent 6 }}
+    {{- end }}
   {{- end }}
   {{- with $v.changes.kubernetes }}
   kubernetes:

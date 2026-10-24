@@ -184,6 +184,7 @@ const T = {
     change: '变更',
     rolloutWord: '发布',
     rollbackWord: '回退到',
+    runtimeConfigWord: '运行时配置',
     and: '与',
     duringComma: '期间，',
     stop2: '。',
@@ -404,6 +405,7 @@ const T = {
     change: 'change',
     rolloutWord: 'rollout',
     rollbackWord: 'rollback to',
+    runtimeConfigWord: 'runtime config',
     and: ' and ',
     duringComma: ', during which ',
     stop2: '. ',
@@ -768,11 +770,17 @@ function changeWord(t: Dict, c: ChangeEvent, all: readonly ChangeEvent[]): strin
   if (DEPLOY_KINDS.has(c.kind) && c.revision) {
     return isRollback(c, all) ? t.rollbackWord : t.rolloutWord;
   }
-  return c.kind;
+  return c.kind === 'runtime_config' ? t.runtimeConfigWord : c.kind;
+}
+
+/** 变更的对象：版本；运行时配置变更（ADR 0151）的版本常常是整个配置对象的摘要，写改动的对象与动作 */
+function changeSubject(c: ChangeEvent): string | null {
+  return c.kind === 'runtime_config' ? c.refs.join(' ') : c.revision;
 }
 
 function changeTitle(t: Dict, c: ChangeEvent, all: readonly ChangeEvent[]): string {
-  return `${changeWord(t, c, all)}${c.revision ? ` ${c.revision}` : ''}`;
+  const subject = changeSubject(c);
+  return `${changeWord(t, c, all)}${subject ? ` ${subject}` : ''}`;
 }
 
 function topologySection(x: Ctx, sg: Subgraph | null, root: string | null, alerts: Alert[]): NotifyBlock[] {
@@ -1386,7 +1394,7 @@ export function composeMessage(i: ComposeInput): { message: NotifyMessage; targe
       ...joinRuns(
         changes.map((c) => [
           P(`${changeWord(t, c, inc.changes)} `),
-          C(c.revision ?? c.kind),
+          C(changeSubject(c) ?? c.kind),
           P(`（${clock(c.time, day)}）`),
         ]),
         t.and,

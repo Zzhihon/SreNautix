@@ -49,6 +49,8 @@ export interface OptimizationDeps {
   budgetExhausted: () => boolean;
   locale: 'zh-CN' | 'en';
   queryTimeoutMs: number;
+  /** 与 dbstats 共用连接与角色的 SQL 审计表变更源读取的关系，dbstats 的权限自检不把它们算作越权（ADR 0151） */
+  auditRelations: (conn: { host: string; port: number; database: string; user: string }) => string[];
 }
 
 const durationMs = (d: string) => {
@@ -71,6 +73,7 @@ export async function createOptimization(d: OptimizationDeps): Promise<Optimizat
         ssl: o.dbstats.ssl,
         hourly_limit: o.limits.dbstats.per_hour,
         text_hourly_limit: o.limits.dbstats.statement_text_per_hour,
+        allowed_relations: d.auditRelations(o.dbstats),
         onPrivilegeReport: (r) => {
           if (r.readable_tables.length) {
             logger.error('dbstats 的角色能读取业务表，集成不可用（DatasourceOverPrivileged）', {

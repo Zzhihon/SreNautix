@@ -61,6 +61,14 @@
 {{- with $np.githubEgressTo }}{{- $_ := set $github "to" . }}{{- end }}
 {{- $serverEgress = append $serverEgress $github }}
 {{- end }}
+{{- with .Values.changes.sqlAudit }}
+{{- /* SQL 审计表变更源（ADR 0151）连接的业务库 */}}
+{{- $auditPorts := list }}
+{{- range $s := . }}{{- $auditPorts = append $auditPorts (dict "protocol" "TCP" "port" (int (default 5432 $s.connection.port))) }}{{- end }}
+{{- $sqlAudit := dict "ports" ($auditPorts | uniq) }}
+{{- with $np.sqlAuditEgressTo }}{{- $_ := set $sqlAudit "to" . }}{{- end }}
+{{- $serverEgress = append $serverEgress $sqlAudit }}
+{{- end }}
 {{- if .Values.packs.oci.sources }}
 {{- $registries := dict "ports" $https }}
 {{- with $np.packRegistriesEgressTo }}{{- $_ := set $registries "to" . }}{{- end }}

@@ -69,7 +69,7 @@ describe('GitHub 变更源同步', () => {
     svc = new ChangesService(
       db.server,
       [source()],
-      { github: client, defaultClusterId: 'c1' },
+      { github: client, defaultClusterId: 'c1', sqlAudit: [] },
       24 * 60 * MIN,
       () => kicks++,
     );
@@ -119,7 +119,7 @@ describe('GitHub 变更源同步', () => {
     const both = new ChangesService(
       db.server,
       [source({ id: 'broken', repo: 'acme/missing', cluster_id: 'c2' }), source()],
-      { github: client, defaultClusterId: 'c1' },
+      { github: client, defaultClusterId: 'c1', sqlAudit: [] },
       24 * 60 * MIN,
       () => kicks++,
     );

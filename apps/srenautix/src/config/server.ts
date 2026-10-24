@@ -3,8 +3,8 @@ import { parse as parseYaml } from 'yaml';
 import { z } from 'zod';
 import { ConfigError, parseDuration } from './files.js';
 import { DEFAULT_REVISION_LABELS } from '../changes/kubernetes.js';
-import { DEFAULT_EXTERNAL_LABELS } from '@srenautix/core';
-import { DEFAULT_OPTIMIZATION, optimizationConfig } from '../optimize/config.js';
+import { DEFAULT_EXTERNAL_LABELS, isComponentKey } from '@srenautix/core';
+import { DEFAULT_OPTIMIZATION, optimizationConfig, pgReadConnection } from '../optimize/config.js';
 
 const duration = z.string().regex(/^\d+(ms|s|m|h|d)$/, '时长形如 30s、5m、12h');
 const url = z.string().url();
@@ -80,6 +80,69 @@ const changesSource = z
           .strict(),
       )
       .min(1),
+  })
+  .strict();
+
+// SQL 审计表变更源（ADR 0151）的列名与关系名：只接受小写的普通标识符，SQL 里一律加双引号引用
+const sqlIdentifier = z
+  .string()
+  .regex(/^[a-z_][a-z0-9_]{0,62}$/, '列名只能是小写的普通标识符（字母、数字、下划线，不以数字开头）');
+const sqlRelation = z
+  .string()
+  .regex(/^[a-z_][a-z0-9_]{0,62}\.[a-z_][a-z0-9_]{0,62}$/, '关系写成 <schema>.<名称>，两段都是小写的普通标识符');
+
+/**
+ * 一组审计记录的声明（ADR 0151）：读取 table 中时间列落在回看窗口内的行，每行是一次运行时配置变更。
+ * function 为 true 时 table 是返回审计记录的函数，以回看窗口的起止两个 timestamptz 为参数调用。
+ * components 按顺序取第一条匹配的规则决定变更的目标，没有匹配的行不是任何组件的变更
+ */
+const sqlAuditQuery = z
+  .object({
+    id: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,62}$/),
+    table: sqlRelation,
+    function: z.boolean().default(false),
+    // 行的唯一键：change_id 为 <来源 id>:<查询 id>:<键>
+    key: sqlIdentifier,
+    time: sqlIdentifier,
+    object: sqlIdentifier,
+    action: sqlIdentifier,
+    actor: sqlIdentifier.optional(),
+    // 变更之后对象的取值与变更之前的取值：写进版本，并用于判定没有变化与短时间内的往返
+    value: sqlIdentifier.optional(),
+    previous_value: sqlIdentifier.optional(),
+    // 另外写进摘要的列（不可信文本，截断）
+    details: z.array(sqlIdentifier).max(8).default([]),
+    components: z
+      .array(
+        z
+          .object({
+            // 动作或对象取值之一；不写时匹配全部
+            match: z
+              .object({
+                action: z.array(z.string().min(1)).min(1).optional(),
+                object: z.array(z.string().min(1)).min(1).optional(),
+              })
+              .strict()
+              .default({}),
+            targets: z
+              .array(z.string().refine(isComponentKey, '组件键形如 <kind>:<namespace>/<名称> 或 <kind>:<名称>'))
+              .min(1),
+          })
+          .strict(),
+      )
+      .min(1),
+  })
+  .strict();
+
+/** 一个业务库上的 SQL 审计表变更源：只读连接（与 optimization.dbstats 同样的写法）加一组查询声明 */
+const sqlAuditSource = z
+  .object({
+    id: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,62}$/),
+    cluster_id: clusterId.optional(),
+    connection: pgReadConnection,
+    queries: z.array(sqlAuditQuery).min(1),
+    // 同一对象在这段时间内改动之后又回到原来的取值，这几次都不算变更（与发布的标签抖动相同，ADR 0142）
+    group_within: duration.default('2m'),
   })
   .strict();
 
@@ -340,6 +403,8 @@ export const serverConfigSchema = z
     changes: z
       .object({
         sources: z.array(changesSource).default([]),
+        // SQL 审计表变更源（ADR 0151）：业务库里运行时配置的审计记录作为 runtime_config 变更；默认没有，不连接任何业务库
+        sql_audit: z.array(sqlAuditSource).default([]),
         interval: duration.default('60s'),
         // 首次同步与每次同步回看的时长（与上一次同步重叠，按 change_id 去重）
         lookback: duration.default('24h'),
@@ -369,6 +434,7 @@ export const serverConfigSchema = z
       .strict()
       .default({
         sources: [],
+        sql_audit: [],
         interval: '60s',
         lookback: '24h',
         kubernetes: {
@@ -725,9 +791,16 @@ export function parseServerConfig(raw: unknown): ServerConfig {
       `optimization.repositories.business 的仓库 ${c.optimization.repositories.business?.repo} 同时是 ops 仓库（issues、remediation、changes 或 topology.override_pr）`,
     );
   }
-  const srcIds = c.changes.sources.map((x) => x.id);
+  // 变更的 source 字段取变更源的 id：GitHub 变更源与 SQL 审计表变更源共用一个命名空间
+  const srcIds = [...c.changes.sources.map((x) => x.id), ...c.changes.sql_audit.map((x) => x.id)];
   if (new Set(srcIds).size !== srcIds.length) {
-    throw new ConfigError('changes.sources 的 id 不能重复');
+    throw new ConfigError('changes.sources 与 changes.sql_audit 的 id 不能重复');
+  }
+  for (const s of c.changes.sql_audit) {
+    const ids = s.queries.map((q) => q.id);
+    if (new Set(ids).size !== ids.length) {
+      throw new ConfigError(`changes.sql_audit ${s.id}：queries 的 id 不能重复`);
+    }
   }
   return c;
 }
