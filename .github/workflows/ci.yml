@@ -84,9 +84,14 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false
+      # pnpm 9 只从根目录 package.json 读取 onlyBuiltDependencies，写在 pnpm-workspace.yaml 里不生效
       - name: 确认依赖安装脚本有白名单
         run: |
-          yq -e '.onlyBuiltDependencies | length > 0' pnpm-workspace.yaml
+          jq -e '.pnpm.onlyBuiltDependencies | length > 0' package.json
+          if grep -q '^onlyBuiltDependencies:' pnpm-workspace.yaml; then
+            echo "::error file=pnpm-workspace.yaml::onlyBuiltDependencies 写在 package.json 的 pnpm 字段里，pnpm 9 不读本文件的这一项"
+            exit 1
+          fi
       - name: 安装依赖（冻结锁文件）
         run: pnpm install --frozen-lockfile
       - name: 安装测试用的 Prometheus、Alertmanager、VictoriaMetrics、MinIO、PostgreSQL
