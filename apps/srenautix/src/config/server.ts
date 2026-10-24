@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { ConfigError, parseDuration } from './files.js';
 import { DEFAULT_REVISION_LABELS } from '../changes/kubernetes.js';
 import { DEFAULT_EXTERNAL_LABELS } from '@srenautix/core';
+import { DEFAULT_OPTIMIZATION, optimizationConfig } from '../optimize/config.js';
 
 const duration = z.string().regex(/^\d+(ms|s|m|h|d)$/, '时长形如 30s、5m、12h');
 const url = z.string().url();
@@ -462,6 +463,8 @@ export const serverConfigSchema = z
         conclusions: ['likely', 'evidence_consistent'],
       }),
     github_app: githubApp.optional(),
+    // 主动优化（ADR 0146）；默认关闭
+    optimization: optimizationConfig.default(DEFAULT_OPTIMIZATION),
     // 需要人跟进的事件在 GitHub 开 issue（ADR 0095）；默认关闭
     issues: z
       .object({
@@ -610,6 +613,19 @@ export const serverConfigSchema = z
   .strict();
 
 export type ServerConfig = z.infer<typeof serverConfigSchema>;
+
+/**
+ * server 经 GitHub App 访问的 ops 角色仓库（ADR 0146 §6.4）：事件 issue、修复补丁、变更源与拓扑覆盖 PR 的仓库。
+ * 配置了业务仓库时，请求白名单按仓库取角色，这里之外的仓库一律拒绝
+ */
+export function opsRepositories(c: ServerConfig): string[] {
+  return [
+    ...(c.issues ? [c.issues.repo] : []),
+    ...Object.values(c.remediation.repositories).map((r) => r.repo),
+    ...c.changes.sources.map((s) => s.repo),
+    ...(c.topology.override_pr ? [c.topology.override_pr.repo] : []),
+  ];
+}
 export type TelegramConfig = z.infer<typeof telegram>;
 export type FeishuConfig = z.infer<typeof feishu>;
 export type IngestSourceConfig = z.infer<typeof ingestSource>;
@@ -690,6 +706,15 @@ export function parseServerConfig(raw: unknown): ServerConfig {
     if (c.changes.sources.length) {
       throw new ConfigError('kind: github 的变更源需要 github_app');
     }
+    if (c.optimization.repositories.business) {
+      throw new ConfigError('optimization.repositories.business 需要 github_app（与 ops 仓库共用同一个安装）');
+    }
+  }
+  const business = c.optimization.repositories.business?.repo.toLowerCase();
+  if (business && opsRepositories(c).some((r) => r.toLowerCase() === business)) {
+    throw new ConfigError(
+      `optimization.repositories.business 的仓库 ${c.optimization.repositories.business?.repo} 同时是 ops 仓库（issues、remediation、changes 或 topology.override_pr）`,
+    );
   }
   const srcIds = c.changes.sources.map((x) => x.id);
   if (new Set(srcIds).size !== srcIds.length) {

@@ -12,7 +12,7 @@ import { registerProposalRoutes } from '../api/routes-proposals.js';
 import { registerResearchRoutes } from '../api/routes-research.js';
 import { pgConfigFromEnv } from '../config/database.js';
 import { parseDuration, parseListen, readSecretFile } from '../config/files.js';
-import { loadServerConfig, type ServerConfig } from '../config/server.js';
+import { loadServerConfig, opsRepositories, type ServerConfig } from '../config/server.js';
 import { kubernetesRollouts } from '../changes/kubernetes.js';
 import { ksmRollouts } from '../changes/ksm-rollouts.js';
 import { changesInWindow, ChangesService } from '../changes/service.js';
@@ -70,7 +70,7 @@ import { startInformerTopology } from '../topology/informer.js';
 import { KubeTools } from '../research/kube-tools.js';
 import { FirstSeen, objectHealth, type K8sObject } from '../detectors/health.js';
 import { DetectorService, detectorSettings } from '../detectors/service.js';
-import { GitHubApp } from '../github/app.js';
+import { GitHubApp, RepoRoles } from '../github/app.js';
 import { IssueService, type IssueReport } from '../github/issues.js';
 import { TopologyOverrides } from '../topology/overrides.js';
 import { TopologyStore } from '../topology/store.js';
@@ -230,13 +230,23 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
   let overrides = loadOverrides();
   // GitHub App（安装令牌）：拓扑覆盖 PR、事件 issue、GitHub 变更源共用
   const gh = c.github_app;
+  // 配置了业务仓库时请求白名单按仓库角色判断（ADR 0146 §6.4）：业务仓库只读代码、只创建 issue 与评论，
+  // ops 仓库照旧，其余仓库一律拒绝；没有业务仓库时与之前相同，所有仓库按 ops 角色判断
+  const businessRepo = c.optimization.repositories.business?.repo ?? null;
+  const roles = businessRepo
+    ? new RepoRoles([...opsRepositories(c).map((r) => [r, 'ops'] as const), [businessRepo, 'business'] as const])
+    : null;
   const github = gh
-    ? new GitHubApp({
-        apiBase: gh.api_base,
-        appId: gh.app_id,
-        installationId: gh.installation_id,
-        privateKey: readSecretFile('github_app.private_key_file', gh.private_key_file),
-      })
+    ? new GitHubApp(
+        {
+          apiBase: gh.api_base,
+          appId: gh.app_id,
+          installationId: gh.installation_id,
+          privateKey: readSecretFile('github_app.private_key_file', gh.private_key_file),
+        },
+        Date.now,
+        roles,
+      )
     : null;
   // 提议目标的机器推导：集群对象查拓扑；gitops_pr 的 GitRepository 取 base 分支当前的提交（ADR 0108）
   const targets = new GitRepositoryTargets(new TopologyTargets(pool), () => github);
