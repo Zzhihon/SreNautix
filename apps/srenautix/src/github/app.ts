@@ -30,7 +30,7 @@ export class GitHubDenied extends GitHubError {
 }
 
 const REPO = '/repos/[A-Za-z0-9-]{1,39}/[A-Za-z0-9._-]{1,100}';
-/** 允许的请求（路径不含查询串）：issue（含更新正文）与评论、读 PR、读引用、读文件与目录、读提交 */
+/** 允许的请求（路径不含查询串）：issue（含更新标题与正文）与评论、读 PR、读引用、读文件与目录、读提交 */
 const ALLOWED: Array<[method: string, path: RegExp]> = [
   ['GET', new RegExp(`^${REPO}/issues$`)],
   ['GET', new RegExp(`^${REPO}/issues/\\d+$`)],
@@ -47,10 +47,14 @@ const ALLOWED: Array<[method: string, path: RegExp]> = [
   ['GET', new RegExp(`^${REPO}/commits/[0-9a-f]{7,40}$`)],
 ];
 
+/** PATCH issue 时允许改的字段：标题与正文（ADR 0125、0142） */
+const ISSUE_PATCH_FIELDS: ReadonlySet<string> = new Set(['title', 'body']);
+
 /**
- * server 的 GitHub 请求白名单（ADR 0025、0108、0125）：server 只开 issue、更新 issue 正文、写评论、读 PR、给 PR 描述补 Refs，
- * 以及只读地访问仓库（修复补丁的计划、变更源、拓扑覆盖的计划）。建分支、提交、写文件、开 PR、请求审阅、合并都不在其中——
- * Git 写入只经 gateway 的 gitops_pr。PATCH issue 与 PR 只允许改正文（关闭、改标题、改标签都不允许）。返回拒绝原因，允许时为 null。
+ * server 的 GitHub 请求白名单（ADR 0025、0108、0125、0142）：server 只开 issue、更新 issue 的标题与正文、写评论、读 PR、
+ * 给 PR 描述补 Refs，以及只读地访问仓库（修复补丁的计划、变更源、拓扑覆盖的计划）。建分支、提交、写文件、开 PR、请求审阅、
+ * 合并都不在其中——Git 写入只经 gateway 的 gitops_pr。PATCH issue 只允许改标题与正文，PATCH PR 只允许改描述（关闭、改标签、
+ * 改指派、改 PR 的标题与目标分支都不允许）。返回拒绝原因，允许时为 null。
  */
 export function deniedRequest(method: string, path: string, body: unknown): string | null {
   const p = path.split('?')[0] ?? path;
@@ -62,8 +66,12 @@ export function deniedRequest(method: string, path: string, body: unknown): stri
   }
   if (method === 'PATCH') {
     const keys = body && typeof body === 'object' ? Object.keys(body) : [];
-    if (keys.length !== 1 || keys[0] !== 'body') {
-      return '只允许修改 issue 或 PR 的正文';
+    if (/\/issues\/\d+$/.test(p)) {
+      if (keys.length === 0 || !keys.every((k) => ISSUE_PATCH_FIELDS.has(k))) {
+        return '只允许修改 issue 的标题与正文';
+      }
+    } else if (keys.length !== 1 || keys[0] !== 'body') {
+      return '只允许修改 PR 的描述';
     }
   }
   return null;
@@ -71,7 +79,8 @@ export function deniedRequest(method: string, path: string, body: unknown): stri
 
 /**
  * 以 GitHub App 身份访问仓库：用 App 私钥签 JWT（RS256，有效 9 分钟）换取安装令牌（1 小时，提前 5 分钟刷新）。
- * server 只发白名单内的请求（deniedRequest）：事件 issue 要 issues 写与 pull_requests 写（只改描述、回链 PR）；
+ * server 只发白名单内的请求（deniedRequest）：事件 issue 要 issues 写（开出、改标题与正文、评论）与 pull_requests 写
+ * （只改描述、回链 PR）；
  * 变更源、修复补丁与拓扑覆盖的计划要 contents 读。Git 写入都经 gateway 的 gitops_pr，server 不需要 contents 写。
  */
 export class GitHubApp {

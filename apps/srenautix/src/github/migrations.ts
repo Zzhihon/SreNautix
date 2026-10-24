@@ -64,5 +64,16 @@ CREATE TABLE server.github_issue_links (
 ALTER TABLE server.github_issues ADD COLUMN body_hash text;
 `,
     },
+    {
+      version: 3,
+      name: 'issue title last written and when it was last changed, so the title follows the root and headline symptoms',
+      phase: 'expand',
+      sql: `
+-- issue 标题跟随事件的根因与头条症状（ADR 0142）：上次写入的标题（按标记找回、或这一版之前开出的 issue 为 null，
+-- 下一轮读回 GitHub 上的标题）与上次修改标题的时刻（同一事件每小时最多改 1 次；开出时不算修改）
+ALTER TABLE server.github_issues ADD COLUMN title text;
+ALTER TABLE server.github_issues ADD COLUMN title_updated_at timestamptz;
+`,
+    },
   ],
 };

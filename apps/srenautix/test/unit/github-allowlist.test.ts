@@ -9,11 +9,15 @@ import { filePatch } from '../../src/remediation/patch.js';
 const R = '/repos/acme/gitops';
 
 describe('GitHub 请求白名单', () => {
-  it('允许：issue 与评论、只改 issue 正文、读 PR、只改 PR 描述、读引用、读文件与目录、读提交', () => {
+  it('允许：issue 与评论、改 issue 的标题与正文、读 PR、只改 PR 描述、读引用、读文件与目录、读提交', () => {
     for (const [m, p, b] of [
       ['GET', `${R}/issues?labels=srenautix&state=all`, undefined],
+      ['GET', `${R}/issues/3`, undefined],
       ['POST', `${R}/issues`, { title: 't' }],
       ['PATCH', `${R}/issues/3`, { body: '新的报告' }],
+      // 标题跟随根因与头条症状（ADR 0142）
+      ['PATCH', `${R}/issues/3`, { title: 'StatefulSet:cchp-prod/gateway：GatewayOOM' }],
+      ['PATCH', `${R}/issues/3`, { title: 't', body: '新的报告' }],
       ['GET', `${R}/issues/3/comments?per_page=100`, undefined],
       ['POST', `${R}/issues/3/comments`, { body: 'x' }],
       ['GET', `${R}/pulls?head=acme:srenautix/x&state=all`, undefined],
@@ -29,7 +33,7 @@ describe('GitHub 请求白名单', () => {
     }
   });
 
-  it('拒绝：建分支、写文件、提交、开 PR、请求审阅、合并、改 issue 与 PR 的其他字段、删除、路径穿越', () => {
+  it('拒绝：建分支、写文件、提交、开 PR、请求审阅、合并、改 issue 的状态标签指派、改 PR 描述以外的字段、删除、路径穿越', () => {
     for (const [m, p, b] of [
       ['POST', `${R}/git/refs`, { ref: 'refs/heads/x', sha: 'a' }],
       ['PATCH', `${R}/git/refs/heads/main`, { sha: 'a' }],
@@ -43,8 +47,13 @@ describe('GitHub 请求白名单', () => {
       ['PUT', `${R}/pulls/7/merge`, {}],
       ['PATCH', `${R}/pulls/7`, { state: 'closed' }],
       ['PATCH', `${R}/issues/3`, { state: 'closed' }],
-      ['PATCH', `${R}/issues/3`, { body: 'x', title: 't' }],
+      ['PATCH', `${R}/issues/3`, { title: 't', state: 'closed' }],
+      ['PATCH', `${R}/issues/3`, { body: 'x', labels: ['a'] }],
+      ['PATCH', `${R}/issues/3`, { assignees: ['a'] }],
+      ['PATCH', `${R}/issues/3`, {}],
       ['PATCH', `${R}/pulls/7`, { body: 'x', base: 'release' }],
+      ['PATCH', `${R}/pulls/7`, { title: 't' }],
+      ['PATCH', `${R}/pulls/7`, { body: 'x', title: 't' }],
       ['GET', `${R}/contents/../../x`, undefined],
       ['GET', '/user/repos', undefined],
     ] as Array<[string, string, unknown]>) {

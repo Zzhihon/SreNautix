@@ -373,7 +373,8 @@ issues:
 
 - **什么时候开**：阶段 A 或已完成的研判的处置判断为 `escalate`；或者有需要改仓库的修复提议（带 `incident_id` 的拓扑覆盖 PR、`gitops_pr` 提议）。被抑制、已合并的事件不开。
 - **内容**：与通知同一份报告（ADR 0125，`docs/server/notify.md`）的全文：现状与时间线、关键问题（结论档位与四个条件的依据）、拓扑联系、解决方案与验证方法、证据链（每个假设的全部支持卡与相反卡、已执行的检查、排除的信号、无法判定的卡、成员告警与变更，带控制台与来源链接）。正文第一行是事件标记 `<!-- srenautix:incident=<id> -->`，随后是开 issue 的原因。标题是一句话现状（根因组件与症状），带标题前缀。
-- **正文更新**：研判结束、事件恢复或证据变化后，后台循环重新生成正文，与上次写入的不同（`server.github_issues.body_hash`）时就地更新（PATCH 只改 body，`srenautix_github_issues_total{outcome="body_updated"}`）；只处理 `lookback` 内更新过的事件。
+- **正文更新**：研判结束、事件恢复或证据变化后，后台循环重新生成正文，与上次写入的不同（`server.github_issues.body_hash`）时就地更新（`srenautix_github_issues_total{outcome="body_updated"}`）；只处理 `lookback` 内更新过的事件。
+- **标题更新**（ADR 0142）：标题是根因与头条症状，它们变了就在同一次 PATCH 里改标题（`server.github_issues.title`、`github.issue_retitled`、`srenautix_github_issues_total{outcome="title_updated"}`），否则按开出时的根因搜不到这个 issue。同一事件每小时最多改一次标题，根因或症状来回抖动时不跟着来回改，没到时间的标题留到之后的轮次。按标记找回、或这一版之前开出的 issue 先读回一次 GitHub 上的标题。PATCH issue 只允许改标题与正文。
 - **去重**：每个事件最多一个 issue（`server.github_issues` 以 incident_id 为主键）。开 issue 的请求超时或连接断开时，重试先按事件标记在仓库中找回已开的 issue，不重复开。
 - **后续进展**：issue 开出之后结束的研判（新的结论档位与根因）、事件恢复、关联的 PR 与 gitops_pr 提议各追加一条评论，按 (事件, 键) 去重；评论同样带标记，重试时找回已写入的评论。
 - **关联**：server 发起的拓扑覆盖 PR 与 gitops_pr 提议的参数描述里写 `Refs #<issue>`（跨仓库时 `owner/name#<issue>`），GitHub 在 issue 上显示关联；PR 先于 issue 开出时，issue 开出后给 PR 描述补上 Refs（`github.pr_refs`）。gitops_pr 的 Refs 在创建提议时写入参数，随参数一起被审批；幂等键按调用方给出的参数计算。

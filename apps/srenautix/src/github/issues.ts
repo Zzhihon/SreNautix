@@ -14,6 +14,7 @@ import { GitHubApp, GitHubError } from './app.js';
  * - 研判或阶段 A 的处置判断为 escalate，或者有需要改仓库的修复提议（拓扑覆盖 PR、gitops_pr 提议）；
  * - 每个事件最多一个 issue（server.github_issues 以 incident_id 为主键；issue 正文带事件标记，超时后按标记找回，不重复开）；
  * - 后续进展（研判结束、事件恢复、关联的 PR）以评论追加，按 (事件, 键) 去重，评论同样带标记；
+ * - 正文就地更新为最新的报告；标题跟随根因与头条症状，同一事件每小时最多改一次（ADR 0142）；
  * - 每个仓库每小时最多新开 max_per_hour 个，超出的事件只记录为 skipped，不开 issue；
  * - GitHub 失败时按退避重试，最多 MAX_ATTEMPTS 次；每次开出、跳过、放弃与评论写治理审计。
  * 只用 GitHub App 的安装令牌。
@@ -40,6 +41,8 @@ export interface IssueRef {
 }
 
 export const MAX_ATTEMPTS = 8;
+/** 同一事件的 issue 标题两次修改之间至少间隔这么久（ADR 0142） */
+export const TITLE_MIN_INTERVAL_MS = 3600_000;
 const backoffMs = (attempts: number) => Math.min(30_000 * 2 ** Math.max(0, attempts - 1), 30 * 60_000);
 
 /** 事件报告：由 notify/source.ts 的 ReportSource.message 提供；事件或阶段 A 报告不存在时为 null */
@@ -173,7 +176,7 @@ export class IssueService {
   async runOnce(): Promise<void> {
     await this.scan();
     await this.openDue(null);
-    await this.refreshBodies();
+    await this.refreshContent();
     await this.syncComments();
     await this.postDueComments();
     await this.patchPullRefs();
@@ -245,8 +248,8 @@ export class IssueService {
         const issue = found ? { ...found, bodyHash: null } : await this.create(row);
         await c.query(
           `UPDATE server.github_issues SET state = 'open', number = $2, url = $3, opened_at = now(), attempts = attempts + 1,
-             last_error = NULL, body_hash = $4, updated_at = now() WHERE incident_id = $1`,
-          [incidentId, issue.number, issue.url, issue.bodyHash],
+             last_error = NULL, body_hash = $4, title = $5, updated_at = now() WHERE incident_id = $1`,
+          [incidentId, issue.number, issue.url, issue.bodyHash, issue.title],
         );
         await appendAudit(c, 'github.issue_opened', 'server', {
           incident_id: incidentId,
@@ -287,10 +290,10 @@ export class IssueService {
     });
   }
 
-  private async findByMarker(repo: string, marker: string): Promise<IssueRef | null> {
+  private async findByMarker(repo: string, marker: string): Promise<(IssueRef & { title: string | null }) | null> {
     const label = encodeURIComponent(this.s.labels[0] ?? 'srenautix');
     const list = await this.gh.api<
-      Array<{ number: number; html_url: string; body: string | null; pull_request?: unknown }>
+      Array<{ number: number; html_url: string; title?: string; body: string | null; pull_request?: unknown }>
     >(
       'GET',
       `/repos/${repo}/issues?labels=${label}&state=all&sort=created&direction=desc&per_page=50`,
@@ -298,10 +301,10 @@ export class IssueService {
       'list_issues',
     );
     const hit = list.find((i) => !i.pull_request && (i.body ?? '').includes(marker));
-    return hit ? { number: hit.number, url: hit.html_url, repo } : null;
+    return hit ? { number: hit.number, url: hit.html_url, repo, title: hit.title ?? null } : null;
   }
 
-  private async create(row: IssueRow): Promise<IssueRef & { bodyHash: string }> {
+  private async create(row: IssueRow): Promise<IssueRef & { bodyHash: string; title: string }> {
     const content = await this.render(row.incident_id, row.reason);
     const r = await this.gh.api<{ number: number; html_url: string }>(
       'POST',
@@ -314,6 +317,7 @@ export class IssueService {
       url: r.html_url,
       repo: row.repo,
       bodyHash: createHash('sha256').update(content.body).digest('hex'),
+      title: content.title,
     };
   }
 
@@ -333,43 +337,92 @@ export class IssueService {
   }
 
   /**
-   * 正文与事件同步：研判结束、事件恢复、证据变化后重新生成，与上次写入的不同时就地更新正文（PATCH 只改 body）。
+   * 标题与正文跟随事件：研判结束、事件恢复、证据变化后重新生成，与上次写入的不同时就地更新（一次 PATCH，只含变化的字段）。
+   * - 正文变了就更新；
+   * - 标题是根因与头条症状（ADR 0142）。它们变了就更新标题，否则按事件开出时的标题搜不到这个 issue。同一事件每小时最多改一次标题
+   *   （TITLE_MIN_INTERVAL），根因或症状来回抖动时不跟着来回改；没到时间的标题留到之后的轮次，正文照常更新。
+   * - 不知道 GitHub 上现在的标题时（按标记找回、这一版之前开出的 issue）先读回一次。
    * 只处理最近更新过的事件
    */
-  private async refreshBodies(): Promise<void> {
+  private async refreshContent(): Promise<void> {
     const open = await this.pool.query<{
       incident_id: string;
       repo: string;
       number: number;
       reason: IssueReason;
       body_hash: string | null;
+      title: string | null;
+      title_due: boolean;
     }>(
-      `SELECT g.incident_id, g.repo, g.number, g.reason, g.body_hash FROM server.github_issues g
+      `SELECT g.incident_id, g.repo, g.number, g.reason, g.body_hash, g.title,
+              (g.title_updated_at IS NULL OR g.title_updated_at <= now() - make_interval(secs => $2)) AS title_due
+         FROM server.github_issues g
          JOIN server.incidents i ON i.incident_id = g.incident_id
         WHERE g.state = 'open' AND i.updated_at > now() - make_interval(secs => $1)
         ORDER BY g.opened_at LIMIT 50`,
-      [this.s.lookbackMs / 1000],
+      [this.s.lookbackMs / 1000, TITLE_MIN_INTERVAL_MS / 1000],
     );
     for (const row of open.rows) {
       const content = await this.render(row.incident_id, row.reason);
       const hash = createHash('sha256').update(content.body).digest('hex');
-      if (hash === row.body_hash) {
-        continue;
-      }
+      let current = row.title;
+      let retitled = false;
       try {
-        await this.gh.api('PATCH', `/repos/${row.repo}/issues/${row.number}`, { body: content.body }, 'update_issue');
+        if (current === null) {
+          const issue = await this.gh.api<{ title: string }>(
+            'GET',
+            `/repos/${row.repo}/issues/${row.number}`,
+            undefined,
+            'get_issue',
+          );
+          current = issue.title;
+          await this.pool.query('UPDATE server.github_issues SET title = $2 WHERE incident_id = $1', [
+            row.incident_id,
+            current,
+          ]);
+        }
+        retitled = content.title !== current && row.title_due;
+        if (hash === row.body_hash && !retitled) {
+          continue;
+        }
+        const patch: { title?: string; body?: string } = {};
+        if (retitled) {
+          patch.title = content.title;
+        }
+        if (hash !== row.body_hash) {
+          patch.body = content.body;
+        }
+        await this.gh.api('PATCH', `/repos/${row.repo}/issues/${row.number}`, patch, 'update_issue');
       } catch (e) {
         if (!(e instanceof GitHubError)) {
           throw e;
         }
-        logger.warn('事件 issue 正文更新失败，下一轮重试', { incident_id: row.incident_id, error: e.message });
+        logger.warn('事件 issue 更新失败，下一轮重试', { incident_id: row.incident_id, error: e.message });
         continue;
       }
-      await this.pool.query(
-        'UPDATE server.github_issues SET body_hash = $2, updated_at = now() WHERE incident_id = $1',
-        [row.incident_id, hash],
-      );
-      this.metrics.githubIssues.inc({ repo: row.repo, outcome: 'body_updated' });
+      await tx(this.pool, async (c) => {
+        await c.query(
+          `UPDATE server.github_issues SET body_hash = $2, title = $3,
+             title_updated_at = CASE WHEN $4 THEN now() ELSE title_updated_at END, updated_at = now() WHERE incident_id = $1`,
+          [row.incident_id, hash, retitled ? content.title : current, retitled],
+        );
+        if (retitled) {
+          await appendAudit(c, 'github.issue_retitled', 'server', {
+            incident_id: row.incident_id,
+            repo: row.repo,
+            number: row.number,
+            from: current,
+            to: content.title,
+          });
+        }
+      });
+      if (hash !== row.body_hash) {
+        this.metrics.githubIssues.inc({ repo: row.repo, outcome: 'body_updated' });
+      }
+      if (retitled) {
+        this.metrics.githubIssues.inc({ repo: row.repo, outcome: 'title_updated' });
+        logger.info('事件 issue 标题已随根因与头条症状更新', { incident_id: row.incident_id, title: content.title });
+      }
     }
   }
 

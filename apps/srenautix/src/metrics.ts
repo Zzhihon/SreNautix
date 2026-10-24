@@ -51,7 +51,7 @@ export class ServerMetrics extends BaseMetrics {
 
   readonly githubIssues = new Counter({
     name: 'srenautix_github_issues_total',
-    help: '事件 issue 的处理结果（opened、skipped_rate_limit、retry、failed）',
+    help: '事件 issue 的处理结果（opened、skipped_rate_limit、retry、failed、body_updated、title_updated）',
     labelNames: ['repo', 'outcome'] as const,
     registers: [this.registry],
   });

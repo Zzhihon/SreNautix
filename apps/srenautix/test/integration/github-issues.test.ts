@@ -506,6 +506,86 @@ describe('事件 issue', () => {
     expect(gh.comments.get(n)!.at(-1)!.body).toContain(`${PUBLIC}/actions/${String(p.body.proposal_id)}`);
   });
 
+  it('标题跟随根因（ADR 0142）：根因变了就改标题，同一事件每小时最多改一次；不知道现在的标题时先读回', async () => {
+    // CCHP #249：开出时根因是 Argo 应用，之后事件的根因是 gateway，标题一直停在开出时那一刻
+    const id = (
+      await db.admin.query<{ incident_id: string }>(
+        "SELECT incident_id FROM server.incidents WHERE label = 'c2-recover'",
+      )
+    ).rows[0]!.incident_id;
+    const { number } = (await issueRow(id))!;
+    const issue = () => gh.issues.find((i) => i.number === number)!;
+    const reroot = (component: string) =>
+      db.admin.query(
+        `UPDATE server.incidents SET root_component = $2, updated_at = now(),
+           body = jsonb_set(body, '{root,component}', to_jsonb($2::text)) WHERE incident_id = $1`,
+        [id, component],
+      );
+    const patchesOf = () =>
+      gh.requests.filter((r) => r.method === 'PATCH' && r.path === `/repos/${REPO}/issues/${number}`).length;
+    const titleRow = async () =>
+      (
+        await db.admin.query<{ title: string | null; title_updated_at: Date | null }>(
+          'SELECT title, title_updated_at FROM server.github_issues WHERE incident_id = $1',
+          [id],
+        )
+      ).rows[0]!;
+    const opened = issue().title;
+    expect((await titleRow()).title).toBe(opened);
+    await run();
+    const before = patchesOf();
+
+    await reroot('StatefulSet:cache/gateway');
+    await run();
+    expect(issue().title).not.toBe(opened);
+    expect(issue().title).toMatch(/^\[影子\] StatefulSet:cache\/gateway：/);
+    expect(await titleRow()).toMatchObject({ title: issue().title, title_updated_at: expect.any(Date) });
+    const audit = await db.admin.query<{ data: Record<string, unknown> }>(
+      "SELECT data FROM server.governance_audit WHERE kind = 'github.issue_retitled'",
+    );
+    expect(audit.rows.map((x) => x.data)).toEqual([
+      { incident_id: id, repo: REPO, number, from: opened, to: issue().title },
+    ]);
+    const metrics = await srv.metrics.registry.metrics();
+    expect(metrics).toContain(`srenautix_github_issues_total{repo="${REPO}",outcome="title_updated"} 1`);
+    expect(patchesOf()).toBe(before + 1);
+
+    // 一小时之内根因又变了：正文照常更新，标题不改（不跟着抖动）
+    const second = issue().title;
+    await reroot('Deployment:shop/api');
+    await run();
+    expect(issue().title).toBe(second);
+    expect(issue().body).toContain('Deployment:shop/api');
+    const last = gh.requests
+      .filter((r) => r.method === 'PATCH' && r.path === `/repos/${REPO}/issues/${number}`)
+      .at(-1)!;
+    expect(Object.keys(last.body as object)).toEqual(['body']);
+    await run();
+    expect(issue().title).toBe(second);
+
+    // 过了一小时：留下的标题补上
+    await db.admin.query(
+      "UPDATE server.github_issues SET title_updated_at = now() - interval '61 minutes' WHERE incident_id = $1",
+      [id],
+    );
+    await db.admin.query('UPDATE server.incidents SET updated_at = now() WHERE incident_id = $1', [id]);
+    await run();
+    expect(issue().title).toMatch(/^\[影子\] Deployment:shop\/api：/);
+    expect(Object.keys(gh.requests.at(-1)!.body as object)).toEqual(['title']);
+
+    // 这一版之前开出的 issue（库里没有标题）：先读回 GitHub 上的标题，相同就不改
+    await db.admin.query(
+      "UPDATE server.github_issues SET title = NULL, title_updated_at = now() - interval '2 hours' WHERE incident_id = $1",
+      [id],
+    );
+    await db.admin.query('UPDATE server.incidents SET updated_at = now() WHERE incident_id = $1', [id]);
+    const n = patchesOf();
+    await run();
+    expect(patchesOf()).toBe(n);
+    expect((await titleRow()).title).toBe(issue().title);
+    expect(gh.requests.some((r) => r.method === 'GET' && r.path === `/repos/${REPO}/issues/${number}`)).toBe(true);
+  });
+
   it('限速：每小时开满之后的事件只记录为 skipped，不开 issue', async () => {
     expect(gh.issues).toHaveLength(3);
     const d = await cloneEscalated('c2-over-limit');
