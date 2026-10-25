@@ -103,6 +103,7 @@ export async function buildWorker(o: BuildWorkerOptions): Promise<WorkerHandle> 
       apiKey: r.apiKey,
       state: states.get(r.route.id) ?? { profile: null, calibration: null, fingerprint: null },
       timeouts: r.timeouts,
+      thinking: r.thinking,
     })),
     egress,
   );
@@ -125,6 +126,7 @@ export async function buildWorker(o: BuildWorkerOptions): Promise<WorkerHandle> 
           rt.client,
           shortCallTimeoutMs(rt.timeouts),
           AbortSignal.timeout(5 * shortCallTimeoutMs(rt.timeouts)),
+          rt.thinking,
         );
         rt.profile = applyProbe(declaredProfile(rt.route.dialect_profile), report);
         await store.saveProbe(rt.route.id, rt.profile, report);

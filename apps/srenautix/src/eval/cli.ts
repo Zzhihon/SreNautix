@@ -68,6 +68,7 @@ function buildLayers(cfg: EvalConfig, metrics: WorkerMetrics) {
           apiKey: r.apiKey,
           state: { profile: null, calibration: null, fingerprint: null },
           timeouts: r.timeouts,
+          thinking: r.thinking,
         },
       ],
       egress,

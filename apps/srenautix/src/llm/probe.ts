@@ -2,7 +2,7 @@ import type OpenAI from 'openai';
 import type { DialectProfile, ModelRoute } from '@srenautix/contract';
 import { classifyError } from './session.js';
 import { LlmError, type LlmRequest, type LlmTurn } from './types.js';
-import { fromChatCompletion, fromResponse, toChatParams, toResponsesParams } from './wire.js';
+import { fromChatCompletion, fromResponse, toChatParams, toResponsesParams, type ChatThinking } from './wire.js';
 
 // 能力探测（DESIGN §8.2）：启动时和评测时逐条路由测量方言档案的各项能力。
 // 探测请求只含固定文本，不含任何事件数据。每一项给出测得的值与来源：
@@ -61,10 +61,12 @@ function sender(
   client: OpenAI,
   timeoutMs: number,
   signal: AbortSignal,
+  thinking: ChatThinking | null,
 ): Send {
   return async (req, strict) => {
     const p = { ...profile, strict_json_schema: strict };
-    const wire = { model: route.model, profile: p, language: 'en' as const };
+    // 探测请求与研判请求带同样的 thinking 设置，测到的是研判时的行为
+    const wire = { model: route.model, profile: p, language: 'en' as const, thinking };
     try {
       return route.api === 'responses'
         ? fromResponse(await client.responses.create(toResponsesParams(req, wire), { signal, timeout: timeoutMs }), p)
@@ -248,8 +250,9 @@ export async function probeRoute(
   client: OpenAI,
   timeoutMs: number,
   signal: AbortSignal,
+  thinking: ChatThinking | null,
 ): Promise<ProbeReport> {
-  const send = sender(route, declared, client, timeoutMs, signal);
+  const send = sender(route, declared, client, timeoutMs, signal, thinking);
   const strictJsonSchema = await probeStrictJsonSchema(send);
   const nativeTools = await probeNativeTools(send);
   const reasoningChannel = await probeReasoning(send);

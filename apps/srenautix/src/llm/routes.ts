@@ -6,6 +6,7 @@ import { EgressBlocked, type Egress } from './egress.js';
 import { FingerprintTracker } from './fingerprint.js';
 import type { RouteRuntime } from './session.js';
 import { resolveTimeouts, type ModelClass, type RouteTimeouts } from './timeouts.js';
+import type { ChatThinking } from './wire.js';
 
 /** 持久化的路由状态：探测得到的方言档案、估算校准、已知的服务方指纹 */
 export interface RouteState {
@@ -20,6 +21,8 @@ export interface RouteInput {
   state: RouteState;
   /** 生效的超时与模型类别（配置解析时得出）；省略时按模型类别默认值（ADR 0098） */
   timeouts?: { modelClass: ModelClass; timeouts: RouteTimeouts };
+  /** 配置的 thinking（ADR 0158），只允许 Chat 接口的路由；省略时请求体不带 thinking 字段 */
+  thinking?: ChatThinking | null;
 }
 
 /** 校验路由组合：id 唯一；至少有一条路由属于大模型档 */
@@ -64,6 +67,9 @@ export function partitionRoutes(
   const runtimes: RouteRuntime[] = [];
   const disabled: DisabledRoute[] = [];
   for (const i of inputs) {
+    if (i.thinking && i.route.api !== 'chat_completions') {
+      throw new Error(`路由 ${i.route.id} 的 thinking 只用于 api: chat_completions，当前是 ${i.route.api}`);
+    }
     const t = i.timeouts ?? resolveTimeouts(i.route, {});
     let client: RouteRuntime['client'];
     try {
@@ -82,6 +88,7 @@ export function partitionRoutes(
       client,
       timeouts: t.timeouts,
       modelClass: t.modelClass,
+      thinking: i.thinking ?? null,
       breaker: new RouteBreaker(i.route.id, { ...DEFAULT_BREAKER, latencyThresholdMs: t.timeouts.firstTokenMs / 2 }),
       // 系数在可信范围之外的已保存校准从头开始（ADR 0129）
       calibration: restoredCalibration(i.route.id, i.state.calibration),

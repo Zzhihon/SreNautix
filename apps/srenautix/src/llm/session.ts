@@ -31,7 +31,7 @@ import {
   type OutputFormat,
   type Segment,
 } from './types.js';
-import { requestCategories, toChatParams, toResponsesParams } from './wire.js';
+import { requestCategories, toChatParams, toResponsesParams, type ChatThinking } from './wire.js';
 
 // 一次研判的模型会话（DESIGN §7.2、§8）：按阶段选模型档位、按路由优先级与熔断状态选路由、
 // 驱动修复阶梯、按 usage 记账，并产出每次调用的记录、研判清单中的路由使用与出境清单。
@@ -47,6 +47,8 @@ export interface RouteRuntime {
   /** 流式调用的首 token、空闲与总时长超时（ADR 0098） */
   timeouts: RouteTimeouts;
   modelClass: ModelClass;
+  /** Chat 请求体的思考模式设置（ADR 0158）；null 时不带 thinking 字段 */
+  thinking: ChatThinking | null;
   breaker: RouteBreaker;
   calibration: Calibration;
   fingerprint: FingerprintTracker;
@@ -565,7 +567,7 @@ export class ModelSession {
       throw new DeadlineStop(`阶段 B 剩余 ${Math.max(0, Math.round(remaining / 1000))} 秒，不再调用模型`);
     }
     const stage = budget.stages[phase];
-    const wire = { model: route.model, profile: rt.profile, language };
+    const wire = { model: route.model, profile: rt.profile, language, thinking: rt.thinking };
     const build = (r: LlmRequest) => {
       const prepared = egress.prepare(r);
       const sized: LlmRequest = {
