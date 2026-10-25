@@ -296,7 +296,8 @@ function aggregate(c: ComputedIncident) {
     state: firing.length > 0 ? ('firing' as const) : ('resolved' as const),
     components,
     suppressed: firing.length > 0 && firing.every((a) => a.suppressed !== 'none'),
-    changes: [...c.group.changes].sort(
+    // 只因"已合并、尚未同步"在分组里的提交也是事件的变更（ADR 0161）
+    changes: [...c.group.changes, ...c.group.pendingChanges].sort(
       (a, b) => a.time.localeCompare(b.time) || a.change_id.localeCompare(b.change_id),
     ),
     candidates: c.ranking.candidates.map((x) => ({

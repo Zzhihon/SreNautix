@@ -385,9 +385,26 @@ export class Ledger {
       .map(([ref]) => ref);
   }
 
-  /** 支持证据的数量：异常卡与成员告警 */
+  /**
+   * 能作为支持证据的变更（ADR 0161）：事件里的退役变更，假设的根因是它的候选（管理被退役工作负载的应用，没有管理应用时是
+   * 工作负载本身）。退役由副本数与 up 序列确定地推导，与成员告警一样可以支撑 likely，不能支撑 evidence_consistent。
+   * 抓取 job 消失之类的告警落在不在拓扑里的组件上，卡的实体不在应用的范围内，没有这一条时计划内的退役得不到任何支持
+   */
+  supportChanges(e: LedgerEntry): string[] {
+    return this.book.changeEntries
+      .filter(([ref, c]) => {
+        if (c.kind !== 'retire' || this.book.related.has(ref)) {
+          return false;
+        }
+        const candidates = c.refs.length ? c.refs : c.targets;
+        return candidates.some((k) => this.frame.componentOf(k) === e.rootComponent);
+      })
+      .map(([ref]) => ref);
+  }
+
+  /** 支持证据的数量：异常卡、成员告警与退役变更 */
   supportCount(e: LedgerEntry): number {
-    return this.supportCards(e).length + this.supportAlerts(e).length;
+    return this.supportCards(e).length + this.supportAlerts(e).length + this.supportChanges(e).length;
   }
 
   /** 根因组件自身的阶段 A 卡都有数据且都正常（至少一张）：没有支持卡时据此推翻 */
@@ -471,7 +488,7 @@ export class Ledger {
             (scope.has(c.component) && !members.has(c.component))),
       );
       const checkRefuted = checks.some((c) => c.result.verdict === 'normal');
-      const support = [...this.supportCards(e).map((c) => c.ref), ...this.supportAlerts(e)];
+      const support = [...this.supportCards(e).map((c) => c.ref), ...this.supportAlerts(e), ...this.supportChanges(e)];
       const contrary = [...this.contraryCards(e), ...(support.length === 0 ? this.rootAllNormal(e) : [])];
       if (checkRefuted || (contrary.length > 0 && support.length === 0)) {
         this.set(e, 'refuted', `相反的正常卡：${[...new Set(contrary.map((c) => c.ref))].join('、')}`);
@@ -599,7 +616,14 @@ export class Ledger {
       parent_id: e.parentId,
       root_component: e.rootComponent,
       mechanism: e.mechanism,
-      supporting: [...new Set([...e.supporting, ...this.supportCards(e).map((c) => c.ref), ...this.supportAlerts(e)])],
+      supporting: [
+        ...new Set([
+          ...e.supporting,
+          ...this.supportCards(e).map((c) => c.ref),
+          ...this.supportAlerts(e),
+          ...this.supportChanges(e),
+        ]),
+      ],
       refuting: [...new Set([...e.refuting, ...this.contraryCards(e).map((c) => c.ref)])],
       status: e.status,
       status_reasons: e.reasons.map((r) => r.slice(0, 500)),

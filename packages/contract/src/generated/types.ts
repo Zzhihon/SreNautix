@@ -1369,10 +1369,19 @@ export interface ChangeEvent {
    */
   source: string;
   /**
-   * rollout：新 ReplicaSet/ControllerRevision；config：挂载的 ConfigMap 版本变化；cordon；scale：HPA 或手动扩缩；gitops_sync：Argo/Flux 同步；ci_deploy：CI 部署；operator：Operator 发起的切换或升级；runtime_config：经管理接口或数据库直接生效的运行时配置变更，不经过 Git 与发布（契约 2.29.0，SQL 审计表变更源读到的记录）；other
+   * rollout：新 ReplicaSet/ControllerRevision；config：挂载的 ConfigMap 版本变化；cordon；scale：HPA 或手动扩缩；gitops_sync：Argo/Flux 同步；ci_deploy：CI 部署；operator：Operator 发起的切换或升级；runtime_config：经管理接口或数据库直接生效的运行时配置变更，不经过 Git 与发布（契约 2.29.0，SQL 审计表变更源读到的记录）；retire：工作负载被删除或副本缩到 0 并保持，目标是这些工作负载与管理它们的 GitOps 应用（契约 2.33.0，从 kube-state-metrics 推导）；other
    */
   kind:
-    'rollout' | 'config' | 'cordon' | 'scale' | 'gitops_sync' | 'ci_deploy' | 'operator' | 'runtime_config' | 'other';
+    | 'rollout'
+    | 'config'
+    | 'cordon'
+    | 'scale'
+    | 'gitops_sync'
+    | 'ci_deploy'
+    | 'operator'
+    | 'runtime_config'
+    | 'retire'
+    | 'other';
   /**
    * 来源中的引用，例如 Application 名、PR 号、流水线运行 id
    */
@@ -1399,6 +1408,30 @@ export interface ChangeEvent {
   attachments?: {
     target: ComponentKey;
     basis: 'managed_by' | 'revision_label' | 'image' | 'namespace_window';
+  }[];
+  /**
+   * kind 为 retire 时：退役之后失去全部抓取目标的抓取 job（up 序列的 job 标签）。它们的目标在退役之前的 1 小时内都是被退役工作负载的 Pod（契约 2.33.0）
+   */
+  scrape_jobs?: string[];
+  /**
+   * kind 为 retire 时：退役之前 24 小时内最近一次触及被退役的工作负载、管理它们的 GitOps 应用或这些应用的上层应用的 Git 提交（变更源的变更）。非空表示计划内的退役：先合并 Git 提交，再经同步或按提交清理把工作负载删除或缩到 0（契约 2.33.0）
+   */
+  planned_by?: {
+    change_id: string;
+    revision: string | null;
+    time: Timestamp;
+    link: string | null;
+    /**
+     * 不可信文本，只作为文本显示
+     */
+    summary: string;
+  }[];
+  /**
+   * Git 提交触及、在提交之后一直处于 OutOfSync 的 Argo CD 应用：提交已经合并，应用还没有同步到与 Git 一致。out_of_sync_since 是应用最近一次离开 Synced 的时刻，回看范围内一直没有 Synced 时为 null。由 server 在计算事件时按 argocd_app_info 标出，不写入变更源（契约 2.33.0）
+   */
+  pending_sync?: {
+    application: ComponentKey;
+    out_of_sync_since: null | Timestamp;
   }[];
 }
 export interface DbstatsStatementsTopRequest {

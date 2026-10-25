@@ -119,7 +119,7 @@ reconstruct:
 
 | 命令 | 输出 |
 |---|---|
-| `eval export` | `<用例目录>/bundles/<标注 id>.json.zst`：告警实例、拓扑（kube-state-metrics 历史与状态库）、变更 |
+| `eval export` | `<用例目录>/bundles/<标注 id>.json.zst`：告警实例、拓扑（kube-state-metrics 历史与状态库）、变更，以及退役与 Argo CD 同步状态的序列（ADR 0161，重放时与 server 一样推导退役变更与尚未同步的提交；早于它导出的重建包没有这些序列） |
 | `eval reconstruct --discovery-only` | 发现重放的成绩单：每次故障的事件数、主事件根因与是否命中、缺少的成员、变更、检测延迟、窗口内的 unlabelled |
 | `eval reconstruct` | 另加重建的阶段 A 与研判（每条路由 k 次，成绩单与 ADR 0084 相同）、证据卡覆盖、证据卡与告警结论一致率、自愈 PR 的触发率、补丁可应用率与正确率；`<名>.phase2.json` 为这几项的原始数据 |
 | `eval live` | 影子环境一段时间内的新建事件、unlabelled 占比、检测延迟 p50/p95、有证据卡的比例、一致率、`gitops_pr` 提议、关联的 PR 与 issue |

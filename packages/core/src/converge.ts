@@ -6,6 +6,7 @@
 // 没有告警的集群枢纽只有在至少 3 个独立依赖方同时出现告警时才吸收这些告警。
 // 告警归属的组件按拓扑的 owned_by 链取到顶层（Pod → ReplicaSet → Deployment），Pod 级告警归到它的工作负载；
 // 拓扑中没有锚点的告警（逻辑组件、命名空间伪组件、没有实体）在变更之后与该变更的分组时间相邻时归到这次变更（ADR 0104）。
+// 退役变更连到报它带走的抓取 job 的告警；已合并、尚未同步的提交列进它的未同步应用上的告警所在的事件，不归并（ADR 0161）。
 import type { Alert, ChangeEvent, ComponentKey } from '@srenautix/contract';
 import { entityKey, isNamespacePseudo, parseKey } from './keys.js';
 import type { ResolvedRcaParams } from './params.js';
@@ -35,6 +36,11 @@ export interface PreparedAlert {
 export interface AlertGroup {
   alerts: PreparedAlert[];
   changes: ChangeEvent[];
+  /**
+   * 只因"已合并、尚未同步"列进分组的提交（ADR 0161）：分组里有告警落在它标出的未同步应用上，它不在 changes 里。
+   * 不参与归并；根因排序只让这些应用成为候选
+   */
+  pendingChanges: ChangeEvent[];
   /** 吸收了至少 3 个独立依赖方告警的无告警枢纽 */
   hubs: ComponentKey[];
 }
@@ -170,7 +176,7 @@ export function changeInputFrom(
 /**
  * 告警 x 与变更 c 的关联置信度：x 在变更后的窗口内触发，且 x 的组件就是或依赖变更目标。
  * x 所在组件的问题在变更之前（超过容差）就已经开始时不关联（ADR 0142）：重新触发的告警开始时间在变更之后，
- * 但变更不是更早开始的问题的原因
+ * 但变更不是更早开始的问题的原因。退役变更另外解释报它失去目标的抓取 job 的告警（ADR 0161）
  */
 export function changeExplains(
   c: ChangeEvent,
@@ -185,6 +191,9 @@ export function changeExplains(
   }
   if ((x.onset ?? x.start) + CHANGE_ONSET_TOLERANCE_MS < t) {
     return 0;
+  }
+  if (retiredScrapeJob(c, x)) {
+    return 1;
   }
   let best = 0;
   const reach = which === 'merge' ? x.mergeReach : x.rankReach;
@@ -206,6 +215,32 @@ export function changeExplains(
     best = Math.max(best, actsOn(c, graph).get(x.component) ?? 0);
   }
   return best;
+}
+
+/**
+ * 告警报的是随退役失去全部目标的抓取 job（ADR 0161）：退役变更的 scrape_jobs 含告警的 job 标签，并且告警在拓扑里没有对象锚点
+ * （抓取 job 不是 Kubernetes 对象，ObservabilityScrapeJobVanished 之类的告警落在 Job:<job> 这样不在拓扑里的键上）。
+ * 有锚点的告警（例如 kube-state-metrics 导出的工作负载告警，job 是导出器）按拓扑关系判断
+ */
+export function retiredScrapeJob(c: ChangeEvent, x: PreparedAlert): boolean {
+  const job = x.alert.labels.job;
+  return c.kind === 'retire' && job !== undefined && unanchored(x) && (c.scrape_jobs ?? []).includes(job);
+}
+
+/** 变更标出的、在它之后一直没有同步的 GitOps 应用（ADR 0161） */
+export function pendingApplications(c: ChangeEvent): Set<ComponentKey> {
+  return new Set((c.pending_sync ?? []).map((p) => p.application));
+}
+
+/**
+ * 已合并、尚未同步的提交解释它的应用上的告警（ADR 0161）：告警落在提交标出的未同步应用本身上。
+ * 不受变更窗口与告警开始时间的限制：应用漂移类告警（ArgoCDManualAppDrift 之类）要持续很久才触发，漂移的内容就是全部没有
+ * 同步的提交，告警开始之后合并的也在其中（pending_sync 只标在应用最后一次 Synced 之后合并的提交上）。
+ * 这种关系只把提交列进告警所在的事件（converge 末尾）、只让这个应用成为候选（rankRoot），不参与归并：
+ * 一个提交触及很多应用时，各个应用的漂移不因此连成一个事件
+ */
+export function pendingExplains(c: ChangeEvent, x: PreparedAlert): boolean {
+  return x.component !== null && pendingApplications(c).has(x.component);
 }
 
 /**
@@ -328,10 +363,11 @@ function logicalOf(x: PreparedAlert): string | null {
 /**
  * 没有锚点的告警该归到哪一次变更（ADR 0104），返回变更的下标，不归时为 null。条件：
  * - 告警在变更之后、变更窗口加时间相邻的范围内触发（默认 60 分钟）；
- * - 告警的命名空间就是变更目标所在的命名空间；或者角色是 change（发布流水线、部署后检查之类没有对象的告警）
+ * - 告警的组件就是变更自己的目标，或者告警报的是退役变更带走的抓取 job（ADR 0161）；
+ * - 不是退役变更时，告警的命名空间就是变更目标所在的命名空间；或者角色是 change（发布流水线、部署后检查之类没有对象的告警）
  *   并且这次变更有影响：输入中至少一条有锚点的告警由它解释（触发在变更窗口内、组件就是或依赖变更目标）。
  *   没有影响的变更（例如另一个命名空间里同时发生、没有任何告警的发布）不吸收没有对象的发布告警；
- *   不满足这两条的告警，与已经归到某次变更的告警逻辑归属相同时（同一个组件键或 component 标签）也归到那次变更；
+ *   不满足以上条件的告警，与已经归到某次变更的告警逻辑归属相同时（同一个组件键或 component 标签）也归到那次变更；
  * - 有多次变更可选时取告警之前最近的一次。
  */
 function changeTargets(
@@ -376,11 +412,14 @@ function changeTargets(
       return;
     }
     const ns = namespaceOf(x);
+    // 退役变更（ADR 0161）只收落在它目标上、或报它带走的抓取 job 的告警：同一命名空间里别的工作负载的告警与它无关
     out[i] =
-      latestBefore(x, (k) => onTarget(x, k)) ??
+      latestBefore(x, (k) => onTarget(x, k) || retiredScrapeJob(changes[k]!, x)) ??
       latestBefore(
         x,
-        (k) => (ns !== null && namespaces[k]!.has(ns)) || (x.alert.classification.role === 'change' && impact[k]!),
+        (k) =>
+          changes[k]!.kind !== 'retire' &&
+          ((ns !== null && namespaces[k]!.has(ns)) || (x.alert.classification.role === 'change' && impact[k]!)),
       );
   });
   // 逻辑归属相同的告警跟随已经归到变更的告警
@@ -433,9 +472,14 @@ export function converge(input: ConvergeInput): AlertGroup[] {
   problemOnsets(xs, params.adjacencyMs).forEach((onset, i) => {
     xs[i]!.onset = onset;
   });
-  const changes = [...input.changes].sort(
-    (a, b) => a.time.localeCompare(b.time) || a.change_id.localeCompare(b.change_id),
-  );
+  // 早于变更输入窗口（changeInputFrom）、只因"已合并、尚未同步"而在输入里的提交（ADR 0161）不按时间关联告警，
+  // 只在末尾列进它的未同步应用上的告警所在的分组：漂移告警的 pending 开始时刻可能紧挨着这个提交，按时间关联会把同一提交
+  // 触及的各个应用的漂移连成一个事件，并把提交触及的其他应用排进候选
+  const windowFrom = changeInputFrom(input.alerts, input.now, params);
+  const pendingOnly = (c: ChangeEvent) => (c.pending_sync?.length ?? 0) > 0 && parseTime(c.time) < windowFrom;
+  const changes = input.changes
+    .filter((c) => !pendingOnly(c))
+    .sort((a, b) => a.time.localeCompare(b.time) || a.change_id.localeCompare(b.change_id));
   const n = xs.length;
   const uf = new UnionFind(n + changes.length);
   const isForecast = (x: PreparedAlert) => x.alert.classification.role === 'forecast';
@@ -609,7 +653,7 @@ export function converge(input: ConvergeInput): AlertGroup[] {
   const groups = new Map<number, AlertGroup>();
   xs.forEach((x, i) => {
     const r = uf.find(i);
-    const g = groups.get(r) ?? { alerts: [], changes: [], hubs: [] };
+    const g = groups.get(r) ?? { alerts: [], changes: [], pendingChanges: [], hubs: [] };
     g.alerts.push(x);
     groups.set(r, g);
   });
@@ -619,6 +663,15 @@ export function converge(input: ConvergeInput): AlertGroup[] {
       g.changes.push(c);
     }
   });
+  // 已合并、尚未同步的提交列进它的未同步应用上的告警所在的事件，不归并（ADR 0161）
+  const sorted = [...input.changes].sort(
+    (a, b) => a.time.localeCompare(b.time) || a.change_id.localeCompare(b.change_id),
+  );
+  for (const g of groups.values()) {
+    g.pendingChanges = sorted.filter(
+      (c) => !g.changes.includes(c) && g.alerts.some((x) => !isForecast(x) && pendingExplains(c, x)),
+    );
+  }
   for (const [root, hubs] of hubsByRoot) {
     groups.get(uf.find(root))!.hubs.push(...[...hubs].sort());
   }

@@ -20,6 +20,14 @@ import {
 import { resolveAlert, type NodeLookup } from '../alerts/resolve.js';
 import { deriveRollouts, WORKLOAD_KINDS, type WorkloadEvent } from '../changes/kubernetes.js';
 import { STATEFULSET_REVISION_DEDUPE_MS } from '../changes/ksm-rollouts.js';
+import {
+  DEFAULT_PENDING_SYNC_LOOKBACK_MS,
+  mergeChanges,
+  outOfSyncApplications,
+  PENDING_SYNC_STEP_MS,
+  pendingSyncChanges,
+} from '../changes/pending-sync.js';
+import { deriveRetirements, RETIRE_STEP_MS } from '../changes/retire.js';
 import { alertId } from '../ingest/normalize.js';
 import type { Catalog } from '../proposals/catalog.js';
 import type { QueryRunner } from '../research/checks.js';
@@ -430,6 +438,30 @@ export class BundleTopology implements NodeLookup {
     ].sort();
   }
 
+  /**
+   * 这些对象在 [from, to] 内有效过的 managed_by 目标（任一来源，与 changes/ksm-rollouts.ts 的 managersOf 相同）：
+   * 退役推导找管理应用与上层应用（ADR 0161）。应用可能先于工作负载被删除，所以取区间内有效过的边
+   */
+  managersDuring(keys: readonly string[], from: number, to: number): Map<string, string[]> {
+    const want = new Set(keys);
+    const out = new Map<string, string[]>();
+    for (const list of this.edges.values()) {
+      for (const iv of list) {
+        const e = iv.body;
+        if (
+          e.relation === 'managed_by' &&
+          want.has(e.from) &&
+          iv.from <= to &&
+          (iv.to === null || iv.to > from) &&
+          !(out.get(e.from) ?? []).includes(e.to)
+        ) {
+          out.set(e.from, [...(out.get(e.from) ?? []), e.to]);
+        }
+      }
+    }
+    return out;
+  }
+
   /** [from, to] 内工作负载与 ReplicaSet 的拓扑事件（与 changes/kubernetes.ts 的 kubernetesRollouts 查询相同） */
   workloadEvents(from: number, to: number): WorkloadEvent[] {
     this.workloads ??= this.buildWorkloadEvents();
@@ -808,17 +840,47 @@ export async function replay(
     const { graph } = topo.at(t);
     // 与 server 的引擎相同（incident/engine.ts）：变更输入从最早的可见告警往前算
     const from = changeInputFrom(visible, t, o.params);
-    changes = [
-      ...b.changes.filter((c) => ms(c.time) >= from && ms(c.time) <= t),
-      ...deriveRollouts(topo.workloadEvents(from, t), {
-        clusterId: b.cluster_id,
-        revisionLabels: o.revisionLabels,
-        groupWithinMs: o.groupWithinMs,
-        images: (owner) => topo.podImages(owner),
-        argoApplications: topo.argoApplications(),
-        preStepLabels: o.preStepLabels ?? [],
-      }),
-    ].sort((x, y) => x.time.localeCompare(y.time) || x.change_id.localeCompare(y.change_id));
+    // 退役与已合并、尚未同步的提交（ADR 0161）：与 server 的 MetricsChanges 相同，序列取自重建包；
+    // 早于这两类序列导出的重建包没有它们，结果与之前相同
+    const retired = b.series?.retire
+      ? await deriveRetirements(b.series.retire, {
+          clusterId: b.cluster_id,
+          from,
+          to: t,
+          stepMs: RETIRE_STEP_MS,
+          groupWithinMs: o.groupWithinMs,
+          podOwners: async (at) => {
+            const g = topo.at(at).graph;
+            return (k) => (g.has(k) ? g.componentOf(k) : null);
+          },
+          managers: async (keys, f, to) => topo.managersDuring(keys, f, to),
+          plans: b.changes,
+        })
+      : [];
+    const pendingFrom = t - DEFAULT_PENDING_SYNC_LOOKBACK_MS;
+    const pending = b.series?.argocd_sync
+      ? pendingSyncChanges(
+          b.changes.filter((c) => ms(c.time) >= pendingFrom && ms(c.time) <= t),
+          outOfSyncApplications(b.series.argocd_sync, t, PENDING_SYNC_STEP_MS),
+          pendingFrom,
+          t,
+        )
+      : [];
+    changes = mergeChanges(
+      [
+        ...b.changes.filter((c) => ms(c.time) >= from && ms(c.time) <= t),
+        ...deriveRollouts(topo.workloadEvents(from, t), {
+          clusterId: b.cluster_id,
+          revisionLabels: o.revisionLabels,
+          groupWithinMs: o.groupWithinMs,
+          images: (owner) => topo.podImages(owner),
+          argoApplications: topo.argoApplications(),
+          preStepLabels: o.preStepLabels ?? [],
+        }),
+        ...retired,
+      ],
+      pending,
+    );
     const computed = computeIncidents({ alerts: visible, changes, graph, params: o.params, now: t, probes: [] });
     const previous = [...incidents.values()]
       .map((x) => x.incident)

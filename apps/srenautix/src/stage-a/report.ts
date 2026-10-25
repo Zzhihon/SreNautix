@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Alert, Disposition, EvidenceResult, Incident, StageAReport } from '@srenautix/contract';
 import { evidenceFingerprint } from '@srenautix/core';
+import { changeNotes } from '../changes/notes.js';
 import type { RequiredEvidence } from './required.js';
 
 /** 至少这个比例的卡没有数据时判为观测失明（DESIGN §7.1）。 */
@@ -73,10 +74,12 @@ export function timeline(incident: Incident, alerts: Alert[], cards: EvidenceRes
     }
   });
   incident.changes.forEach((c, k) => {
+    // 计划内的退役与尚未同步的提交写在后面（ADR 0161）
+    const notes = changeNotes(c).map((n) => n.text);
     out.push({
       at: c.time,
       kind: 'change',
-      text: `${c.source} ${c.kind} ${c.refs.join(' ')}`.trim(),
+      text: [`${c.source} ${c.kind} ${c.refs.join(' ')}`.trim(), ...notes].join('；'),
       ref: `change:${k + 1}`,
     });
   });

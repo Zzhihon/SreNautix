@@ -422,6 +422,9 @@ export const serverConfigSchema = z
             // 发布之前的 Job 按这些标签的取值关联到发布（ADR 0104 §13）：Job 上的取值等于发布新 ReplicaSet 或工作负载上的
             // 同名标签时挂上。默认不启用；CCHP 配 cchp.io/release-id
             pre_step_labels: z.array(z.string().min(1)).default([]),
+            // 工作负载被删除或副本缩到 0 并保持是一次退役变更（ADR 0161），从证据数据源的 kube-state-metrics 与 up 序列推导，
+            // 带上随之失去目标的抓取 job 与之前合并的 Git 提交
+            retirements: z.boolean().default(true),
           })
           .strict()
           .default({
@@ -430,7 +433,18 @@ export const serverConfigSchema = z
             group_within: '2m',
             ksm_fallback: true,
             pre_step_labels: [],
+            retirements: true,
           }),
+        // 已合并、尚未同步的提交（ADR 0161）：按证据数据源的 argocd_app_info 找出 OutOfSync 的 Argo CD 应用，
+        // 从它最后一次 Synced 起合并的、触及它的变更源提交列进应用上的告警所在的事件
+        pending_sync: z
+          .object({
+            enabled: z.boolean().default(true),
+            // 往前找最后一次 Synced 的范围；更早就一直未同步时，取这个范围内的提交
+            lookback: duration.default('72h'),
+          })
+          .strict()
+          .default({ enabled: true, lookback: '72h' }),
       })
       .strict()
       .default({
@@ -444,7 +458,9 @@ export const serverConfigSchema = z
           group_within: '2m',
           ksm_fallback: true,
           pre_step_labels: [],
+          retirements: true,
         },
+        pending_sync: { enabled: true, lookback: '72h' },
       }),
     // 集群状态检测器（ADR 0105）：没有告警规则时也发现卡住的 Pod、停滞的发布、CrashLoop、阻塞驱逐的 PDB 与失败的 Job，
     // 合成为 source=detector 的告警进入事件。对象状态由 reader（多集群）或 server 的 informer（单集群）上报

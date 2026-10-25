@@ -548,6 +548,18 @@ function changesSegment(entries: EvidenceBook['changeEntries'], related: Readonl
           targets: ch.targets,
           revision: ch.revision,
           summary: cut(ch.summary, TEXT_CHARS),
+          // 退役带走的抓取 job、计划依据的提交与尚未同步的应用（ADR 0161），只在有时出现
+          ...(ch.scrape_jobs?.length ? { scrape_jobs: ch.scrape_jobs } : {}),
+          ...(ch.planned_by?.length
+            ? {
+                planned_by: ch.planned_by.map((p) => ({
+                  revision: p.revision,
+                  time: p.time,
+                  summary: cut(p.summary, TEXT_CHARS),
+                })),
+              }
+            : {}),
+          ...(ch.pending_sync?.length ? { pending_sync: ch.pending_sync } : {}),
         })),
       ),
       ['changes'],

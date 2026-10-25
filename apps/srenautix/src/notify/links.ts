@@ -106,11 +106,22 @@ export function alertLink(s: LinkSettings, a: Pick<Alert, 'alertname' | 'generat
 
 const SHA = /^[0-9a-f]{7,40}$/;
 
-/** 变更的来源：变更自带的链接；Argo CD 应用页；Git 提交页 */
+/** 变更的来源：变更自带的链接；计划内退役的依据提交（ADR 0161）；Argo CD 应用页；Git 提交页 */
 export function changeLink(s: LinkSettings, c: ChangeEvent): string | null {
   const own = httpUrl(c.link);
   if (own) {
     return own;
+  }
+  const plan = c.planned_by?.[0];
+  if (plan) {
+    const href =
+      httpUrl(plan.link) ??
+      (s.gitCommitUrl && plan.revision && SHA.test(plan.revision)
+        ? httpUrl(fill(s.gitCommitUrl, { ...NO_VARS, revision: plan.revision }))
+        : null);
+    if (href) {
+      return href;
+    }
   }
   if (s.argocdUrl) {
     for (const ref of [...c.refs, ...c.targets]) {

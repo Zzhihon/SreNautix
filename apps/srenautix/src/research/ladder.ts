@@ -161,6 +161,16 @@ export function judgeLadder(
         notes: [`假设 ${chosen.id} 只有成员告警支持（${alerts.join('、')}），没有范围内的异常卡`],
       });
     }
+    const changes = ledger.supportChanges(chosen);
+    if (changes.length > 0) {
+      // 只有退役变更支持（ADR 0161）：与只有成员告警支持相同，可以支撑 likely，不能支撑 evidence_consistent
+      return capped({
+        level: 'likely',
+        consistency: { ...NONE, competitor_tested: ledger.competitorTested(chosen) },
+        detail,
+        notes: [`假设 ${chosen.id} 只有退役变更支持（${changes.join('、')}），没有范围内的异常卡`],
+      });
+    }
     return {
       level: 'inconclusive',
       consistency: NONE,

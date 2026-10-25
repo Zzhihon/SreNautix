@@ -185,6 +185,10 @@ const T = {
     rolloutWord: '发布',
     rollbackWord: '回退到',
     runtimeConfigWord: '运行时配置',
+    retireWord: '退役',
+    plannedRetireWord: '计划内退役',
+    pendingSyncNote: '（已合并、尚未同步）',
+    pendingSyncCommits: (n: number) => `${n} 个已合并、尚未同步的提交`,
     and: '与',
     duringComma: '期间，',
     stop2: '。',
@@ -408,6 +412,10 @@ const T = {
     rolloutWord: 'rollout',
     rollbackWord: 'rollback to',
     runtimeConfigWord: 'runtime config',
+    retireWord: 'retirement',
+    plannedRetireWord: 'planned retirement',
+    pendingSyncNote: ' (merged, not synced)',
+    pendingSyncCommits: (n: number) => `${n} merged commit${n === 1 ? '' : 's'} not synced`,
     and: ' and ',
     duringComma: ', during which ',
     stop2: '. ',
@@ -769,22 +777,56 @@ function isRollback(c: ChangeEvent, all: readonly ChangeEvent[]): boolean {
 
 const DEPLOY_KINDS: ReadonlySet<string> = new Set(['rollout', 'gitops_sync', 'ci_deploy']);
 
-/** 变更的动词：发布、回退到，其余为变更类型 */
+/** 变更的动词：发布、回退到、计划内退役与退役（ADR 0161），其余为变更类型 */
 function changeWord(t: Dict, c: ChangeEvent, all: readonly ChangeEvent[]): string {
   if (DEPLOY_KINDS.has(c.kind) && c.revision) {
     return isRollback(c, all) ? t.rollbackWord : t.rolloutWord;
   }
+  if (c.kind === 'retire') {
+    return c.planned_by?.length ? t.plannedRetireWord : t.retireWord;
+  }
   return c.kind === 'runtime_config' ? t.runtimeConfigWord : c.kind;
 }
 
-/** 变更的对象：版本；运行时配置变更（ADR 0151）的版本常常是整个配置对象的摘要，写改动的对象与动作 */
+/**
+ * 变更的对象：版本；运行时配置变更（ADR 0151）的版本常常是整个配置对象的摘要，写改动的对象与动作；
+ * 计划内的退役写计划依据的提交版本（ADR 0161）
+ */
 function changeSubject(c: ChangeEvent): string | null {
+  if (c.kind === 'retire') {
+    return c.planned_by?.[0]?.revision?.slice(0, 12) ?? null;
+  }
   return c.kind === 'runtime_config' ? c.refs.join(' ') : c.revision;
 }
 
+/** 已合并、尚未同步的提交（ADR 0161） */
+const pendingSync = (c: ChangeEvent) => (c.pending_sync?.length ?? 0) > 0;
+
 function changeTitle(t: Dict, c: ChangeEvent, all: readonly ChangeEvent[]): string {
   const subject = changeSubject(c);
-  return `${changeWord(t, c, all)}${subject ? ` ${subject}` : ''}`;
+  return `${changeWord(t, c, all)}${subject ? ` ${subject}` : ''}${pendingSync(c) ? t.pendingSyncNote : ''}`;
+}
+
+/**
+ * 事件里的变更按叙述分成两部分：其余变更逐条写；已合并、尚未同步的提交合成一句"N 个已合并、尚未同步的提交"，
+ * 时刻取最早的一个（ADR 0161）。没有时为 null
+ */
+function changeRuns(
+  t: Dict,
+  changes: readonly ChangeEvent[],
+  day: string,
+): { each: ChangeEvent[]; pending: NotifyRun[] | null } {
+  const pending = changes.filter(pendingSync);
+  return {
+    each: changes.filter((c) => !pendingSync(c)),
+    pending: pending.length
+      ? [
+          P(`${t.pendingSyncCommits(pending.length)} `),
+          C(pending.map((c) => changeSubject(c)?.slice(0, 7) ?? c.kind).join(' ')),
+          P(`（${clock(pending.reduce((a, b) => (ms(a.time) <= ms(b.time) ? a : b)).time, day)}）`),
+        ]
+      : null,
+  };
 }
 
 function topologySection(x: Ctx, sg: Subgraph | null, root: string | null, alerts: Alert[]): NotifyBlock[] {
@@ -799,14 +841,15 @@ function topologySection(x: Ctx, sg: Subgraph | null, root: string | null, alert
   const changesFor = (keys: Set<string>) => x.inc.changes.filter((c) => c.targets.some((k) => keys.has(k)));
   const out: NotifyBlock[] = [];
   const rootAlerts = alertsOf(root);
-  const rootChanges = changesFor(new Set([root]));
+  const rootChanges = changeRuns(t, changesFor(new Set([root])), x.day);
   out.push(
     text([
-      ...rootChanges.flatMap((c) => [
+      ...rootChanges.each.flatMap((c) => [
         P(`${t.change} `),
         C(changeTitle(t, c, x.inc.changes)),
         P(`（${clock(c.time, x.day)}）⇒ `),
       ]),
+      ...(rootChanges.pending ? [...rootChanges.pending, P('⇒ ')] : []),
       B(shortName(root, x.names)),
       ...(rootAlerts.length ? [P(' ⇒ '), P(t.alertsOn(rootAlerts.join(t.list)))] : []),
     ]),
@@ -1270,6 +1313,8 @@ function evidenceBlocks(
             href ? L(changeTitle(t, c, x.inc.changes), href) : B(changeTitle(t, c, x.inc.changes)),
             P(` · ${c.source} ${c.kind} · `),
             P(c.summary),
+            // 计划内退役的依据提交（ADR 0161）
+            ...(c.planned_by ?? []).map((p) => P(` · ${p.summary}`)),
           ],
           { scope: 'full' },
         ),
@@ -1394,13 +1439,17 @@ export function composeMessage(i: ComposeInput): { message: NotifyMessage; targe
     P(t.colon),
   ];
   if (changes.length) {
+    const split = changeRuns(t, changes, day);
     statement.push(
       ...joinRuns(
-        changes.map((c) => [
-          P(`${changeWord(t, c, inc.changes)} `),
-          C(changeSubject(c) ?? c.kind),
-          P(`（${clock(c.time, day)}）`),
-        ]),
+        [
+          ...split.each.map((c) => [
+            P(`${changeWord(t, c, inc.changes)} `),
+            C(changeSubject(c) ?? c.kind),
+            P(`（${clock(c.time, day)}）`),
+          ]),
+          ...(split.pending ? [split.pending] : []),
+        ],
         t.and,
       ),
       P(t.duringComma),

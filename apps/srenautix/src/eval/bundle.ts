@@ -6,6 +6,8 @@ import { z } from 'zod';
 import type { ChangeEvent, MetricSeries, TopologyEdge, TopologyNode } from '@srenautix/contract';
 import { ksmTopologyIntervals, ksmTopologyQueries, type KsmTopologyResults } from '@srenautix/core';
 import { PrometheusApiAdapter } from '@srenautix/integration-sdk';
+import { ARGOCD_SYNC_QUERY, DEFAULT_PENDING_SYNC_LOOKBACK_MS, PENDING_SYNC_STEP_MS } from '../changes/pending-sync.js';
+import { RETIRE_QUERIES, RETIRE_STEP_MS, type RetireSeries } from '../changes/retire.js';
 import { readSecretFile } from '../config/files.js';
 import { fingerprint, identityLabels } from '../ingest/normalize.js';
 import { logger } from '../log.js';
@@ -16,14 +18,17 @@ import type { Label } from './labels.js';
 //   按标签与 pending 开始时刻切成告警实例（同一组标签再次触发是新的实例），与 server 的 60 秒对账接入相同；
 // - 拓扑：kube-state-metrics 历史（ADR 0033，5 分钟步长），另可从 SreNautix 状态库只读导出 topology_events
 //   （informer 或 reader 写入的完整拓扑，含 Argo 应用、属主与管理关系、版本标签）；同一个键两者都有时以状态库为准；
-// - 变更：状态库的 change_events（变更源写入的）。发布变更由重建时从拓扑事件推导（changes/kubernetes.ts）。
-// 时间范围：告警为 [窗口起点 − 归并相邻时间, 窗口终点]；拓扑与变更再往前 24 小时（墓碑查找与版本比较需要之前的状态）。
+// - 变更：状态库的 change_events（变更源写入的）。发布变更由重建时从拓扑事件推导（changes/kubernetes.ts）；
+// - 序列：退役（副本数与 up）与 Argo CD 应用的同步状态（ADR 0161），重建时与 server 一样推导退役变更与尚未同步的提交。
+// 时间范围：告警为 [窗口起点 − 归并相邻时间, 窗口终点]；拓扑与变更再往前 24 小时（墓碑查找与版本比较需要之前的状态），
+// 变更至少覆盖尚未同步的回看范围（72 小时）；退役的序列再往前 3 小时，同步状态的序列再往前 72 小时。
 
 export const BUNDLE_FORMAT = 'srenautix-eval-bundle';
 const STEP_S = 30;
 const KSM_STEP_S = 300;
 const LOOKBACK_MS = 30 * 60_000;
 const TOPOLOGY_LOOKBACK_MS = 24 * 3600_000;
+const RETIRE_LOOKBACK_MS = 3 * 3600_000;
 
 export interface AlertInstance {
   alertname: string;
@@ -57,6 +62,11 @@ export interface Bundle {
   alerts: AlertInstance[];
   topology: TopologyRow[];
   changes: ChangeEvent[];
+  /**
+   * 退役与已合并、尚未同步的提交用到的指标序列（ADR 0161），查询与 server 相同（changes/retire.ts、changes/pending-sync.ts）；
+   * 早于它导出的重建包没有这一项
+   */
+  series?: { retire: RetireSeries; argocd_sync: MetricSeries[] };
   sources: { metrics: string; state: string | null };
   exported_at: string;
 }
@@ -222,6 +232,7 @@ async function stateRows(
   clusterId: string,
   from: number,
   to: number,
+  changesFrom: number,
 ): Promise<{ topology: TopologyRow[]; changes: ChangeEvent[] }> {
   const t = await c.query<{
     seq: string;
@@ -240,7 +251,7 @@ async function stateRows(
   );
   const ch = await c.query<{ body: ChangeEvent }>(
     'SELECT body FROM server.change_events WHERE cluster_id = $1 AND time BETWEEN $2 AND $3 ORDER BY time, change_id',
-    [clusterId, new Date(from), new Date(to)],
+    [clusterId, new Date(changesFrom), new Date(to)],
   );
   return {
     topology: t.rows.map((r) => ({
@@ -284,13 +295,32 @@ export async function exportBundle(l: Label, o: ExportOptions): Promise<Bundle> 
   const lastPoint = Math.max(0, ...[...forState, ...firing].flatMap((s) => s.times));
   const alerts = alertInstances(forState, firing, lastPoint);
   const ksm = await ksmRows(m, topoFrom, to, o.preStepLabels ?? []);
-  const state = o.state ? await stateRows(o.state, o.clusterId, topoFrom, to) : { topology: [], changes: [] };
+  const changesFrom = Math.min(topoFrom, from - DEFAULT_PENDING_SYNC_LOOKBACK_MS);
+  const state = o.state
+    ? await stateRows(o.state, o.clusterId, topoFrom, to, changesFrom)
+    : { topology: [], changes: [] };
+  const retireEntries: Array<[string, MetricSeries[]]> = [];
+  for (const [k, q] of Object.entries(RETIRE_QUERIES)) {
+    retireEntries.push([k, await range(m, q, from - RETIRE_LOOKBACK_MS, to, RETIRE_STEP_MS / 1000)]);
+  }
+  const series = {
+    retire: Object.fromEntries(retireEntries) as RetireSeries,
+    argocd_sync: await range(
+      m,
+      ARGOCD_SYNC_QUERY,
+      from - DEFAULT_PENDING_SYNC_LOOKBACK_MS,
+      to,
+      PENDING_SYNC_STEP_MS / 1000,
+    ),
+  };
   logger.info('重建包已导出', {
     label: l.id,
     alerts: alerts.length,
     ksm_rows: ksm.length,
     state_rows: state.topology.length,
     changes: state.changes.length,
+    retire_series: retireEntries.reduce((a, [, s]) => a + s.length, 0),
+    argocd_sync_series: series.argocd_sync.length,
   });
   return {
     format: BUNDLE_FORMAT,
@@ -301,6 +331,7 @@ export async function exportBundle(l: Label, o: ExportOptions): Promise<Bundle> 
     alerts,
     topology: [...ksm, ...state.topology],
     changes: state.changes,
+    series,
     sources: { metrics: 'eval-metrics', state: o.stateId },
     exported_at: (o.now ?? (() => new Date()))().toISOString(),
   };

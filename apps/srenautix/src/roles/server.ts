@@ -21,6 +21,8 @@ import { loadServerConfig, opsRepositories, type ServerConfig } from '../config/
 import { noveltyOptions } from '../config/novelty.js';
 import { kubernetesRollouts } from '../changes/kubernetes.js';
 import { ksmRollouts } from '../changes/ksm-rollouts.js';
+import { MetricsChanges } from '../changes/metrics-changes.js';
+import { mergeChanges } from '../changes/pending-sync.js';
 import { changesInWindow, ChangesService } from '../changes/service.js';
 import { ConditionPublisher, serverConditions, workerRouteConditions } from '../console-bff/conditions.js';
 import { IntegrationRegistry } from '../console-bff/integrations.js';
@@ -570,11 +572,27 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
       return [];
     }
   };
+  // 退役与已合并、尚未同步的提交（ADR 0161）：从证据数据源的指标推导，只对本集群
+  const metricsChanges = new MetricsChanges({
+    pool,
+    topology,
+    clusterId: c.cluster_id,
+    dataSource: (at) => evidenceSource.dataSource(at),
+    retirements: c.changes.kubernetes.enabled && c.changes.kubernetes.retirements,
+    pendingSync: {
+      enabled: c.changes.pending_sync.enabled,
+      lookbackMs: parseDuration('changes.pending_sync.lookback', c.changes.pending_sync.lookback),
+    },
+    groupWithinMs: parseDuration('changes.kubernetes.group_within', c.changes.kubernetes.group_within),
+  });
   const engineChanges = async (clusterId: string, from: Date, to: Date): Promise<ChangeEvent[]> => {
     const stored = await changesInWindow(pool, clusterId, from, to);
+    const own = clusterId === c.cluster_id;
+    // 未同步的提交可能早于变更窗口（漂移告警要持续很久才触发），按 change_id 并入，替换窗口内同一个提交
+    const pending = own ? await metricsChanges.pendingSync(to) : [];
     const k = c.changes.kubernetes;
     if (!k.enabled) {
-      return stored;
+      return mergeChanges(stored, pending);
     }
     const ro = {
       clusterId,
@@ -584,10 +602,9 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
     };
     const derived = await kubernetesRollouts(pool, from, to, ro);
     // informer 空窗时拓扑里没有的发布：从 kube-state-metrics 推导（ADR 0104 §11）；只对本集群，数据源不可用时跳过
-    const fromKsm = k.ksm_fallback && clusterId === c.cluster_id ? await ksmFallback(from, to, ro) : [];
-    return [...stored, ...derived, ...fromKsm].sort(
-      (a, b) => a.time.localeCompare(b.time) || a.change_id.localeCompare(b.change_id),
-    );
+    const fromKsm = k.ksm_fallback && own ? await ksmFallback(from, to, ro) : [];
+    const retired = own ? await metricsChanges.retirements(from, to) : [];
+    return mergeChanges([...stored, ...derived, ...fromKsm, ...retired], pending);
   };
   const engine = new IncidentEngine({
     pool,

@@ -221,6 +221,25 @@ informer 有空窗时（server 重启、与 reader 断连、刚安装），拓�
 
 收敛时 Pod 级告警归到它的工作负载；没有对象的告警（发布流水线、部署后检查）与只落在命名空间上的告警归到它之前最近的一次发布。
 
+### 退役与已合并、尚未同步的提交
+
+两类信息从证据数据源的指标推导（ADR 0161），只对本集群（退役按分钟对齐区间并缓存一分钟，未同步按 5 分钟对齐并缓存 5 分钟），数据源报错时跳过这一类并记日志：
+
+| 配置 | 默认 | 内容 |
+|---|---|---|
+| `changes.kubernetes.retirements` | 开启 | 工作负载被删除或副本缩到 0 并保持是一次 `kind: retire` 的变更（契约 2.33.0），数据来自 kube-state-metrics 的 `kube_deployment_spec_replicas`、`kube_statefulset_replicas`、`kube_daemonset_status_desired_number_scheduled` 与 `up` |
+| `changes.pending_sync.enabled` | 开启 | Argo CD 应用处于 OutOfSync 时，从它最后一次 Synced 起合并的、触及它的变更源提交标上 `pending_sync`，数据来自 `argocd_app_info` |
+| `changes.pending_sync.lookback` | `72h` | 往前找最后一次 Synced 的范围；更早就一直未同步时取这个范围内的提交 |
+
+退役变更：
+
+- 序列消失至少 5 分钟才算删除；kube-state-metrics 自己没有数据（全部副本数序列一起中断）时不推导。`group_within` 内同一命名空间或同一个管理应用的退役合成一次，目标是管理应用与工作负载；
+- `scrape_jobs`：退役之前一小时内的目标全部是被退役工作负载的 Pod、之后没有目标的抓取 job。报这些 job 没有目标的告警（在拓扑里没有对象锚点）由这次退役解释；
+- `planned_by`：退役之前 24 小时内最近一次触及这些工作负载、管理应用或其上层应用的变更源提交，标出计划内的退役，通知写成"计划内退役 <提交>"并链接到提交；
+- 根因候选是管理应用（没有时是工作负载），退役变更在研判中作为这个候选的支持证据，档位最高 likely。
+
+已合并、尚未同步的提交列进应用上的告警（ArgoCDManualAppDrift 之类）所在的事件，不受变更窗口限制，不把告警归并，也只让这个应用成为根因候选；通知把它们合成一句"N 个已合并、尚未同步的提交"。
+
 ## 集群状态检测器
 
 `detectors.enabled` 打开后，server 按阈值把不健康的对象合成为 `source: detector` 的告警（ADR 0105），和告警规则一样收敛与研判；同一对象上同类的告警规则在触发时不合成。对象状态单集群由 server 的 informer 计算，多集群由 reader 上报。

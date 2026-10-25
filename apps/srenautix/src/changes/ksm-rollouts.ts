@@ -156,8 +156,8 @@ export async function ksmRollouts(
   }));
 }
 
-/** 工作负载在 [from, to] 内有效的 managed_by（拓扑） */
-async function managersOf(
+/** 对象在 [from, to] 内有效的 managed_by（拓扑）；退役推导（ADR 0161）也用它找管理应用与上层应用 */
+export async function managersOf(
   db: Queryable,
   clusterId: string,
   owners: string[],

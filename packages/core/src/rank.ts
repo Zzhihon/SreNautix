@@ -5,6 +5,7 @@
 // 变更的作用对象（变更目标中的 Job 经 egress_to 访问的组件，ADR 0140）也是候选，来源记为 change，角色先验与近期变更两项
 // 按访问边的置信度打折，排在变更本身之后。
 // 晚于自己目标上已经开始的问题（加容差）的变更不参与排序（ADR 0142）。
+// 退役变更的候选是管理被退役工作负载的应用；只因"已合并、尚未同步"在分组里的提交只让未同步的应用成为候选（ADR 0161）。
 import type { AlertRole, ChangeEvent, ComponentKey, EntityRef, IncidentRoot, RootCandidate } from '@srenautix/contract';
 import {
   actsOn,
@@ -12,6 +13,7 @@ import {
   changeExplains,
   dependsOn,
   lateChange,
+  pendingExplains,
   type AlertGroup,
   type PreparedAlert,
 } from './converge.js';
@@ -84,7 +86,15 @@ export function rankRoot(input: RankInput): Ranking {
     }
   }
   for (const c of changes) {
-    for (const comp of changeComponents(c, graph)) {
+    for (const comp of changeCandidates(c, graph)) {
+      draft(comp, 'change').changes.push(c);
+    }
+  }
+  // 只因"已合并、尚未同步"在分组里的提交（ADR 0161）：只有分组里落在它的未同步应用上的告警所在的应用成为候选。
+  // 提交常常触及很多应用，其余应用与这个事件无关
+  for (const c of group.pendingChanges) {
+    const apps = new Set(group.alerts.filter((x) => pendingExplains(c, x)).map((x) => x.component!));
+    for (const comp of [...apps].sort()) {
       draft(comp, 'change').changes.push(c);
     }
   }
@@ -141,7 +151,7 @@ export function rankRoot(input: RankInput): Ranking {
     for (const s of symptoms) {
       let conf = s.component === d.component ? 1 : (s.rankReach?.components.get(d.component) ?? 0);
       for (const c of d.changes) {
-        conf = Math.max(conf, changeExplains(c, s, graph, params, 'rank'));
+        conf = Math.max(conf, changeExplains(c, s, graph, params, 'rank'), pendingExplains(c, s) ? 1 : 0);
       }
       for (const a of d.actedOnBy) {
         conf = Math.max(conf, changeExplains(a.change, s, graph, params, 'rank'));
@@ -234,6 +244,20 @@ export function rankRoot(input: RankInput): Ranking {
 
 function round(v: number): number {
   return Math.round(v * 1e6) / 1e6;
+}
+
+/**
+ * 变更在分组里产生的候选组件：变更触及的全部组件；退役变更（ADR 0161）有管理应用时只是管理应用（Git 合并与同步作用在
+ * 应用上，工作负载是它的一部分），没有时是工作负载
+ */
+function changeCandidates(c: ChangeEvent, graph: TopologyGraph): ComponentKey[] {
+  const all = [...changeComponents(c, graph)];
+  if (c.kind === 'retire') {
+    const managers = new Set(c.refs.map((r) => (graph.has(r) ? graph.componentOf(r) : r)));
+    const own = all.filter((k) => managers.has(k));
+    return own.length ? own : all;
+  }
+  return all;
 }
 
 /** 候选最具体的实体：最早的原因或变更告警的实体，其次变更目标对象，再次最早的其他告警的实体 */
