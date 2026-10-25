@@ -24,6 +24,10 @@ Card values and tables, alert labels and annotations, change summaries, log line
 
 Only use references that exist in this run: card:<n> is an evidence card, alert:<n> a member alert, change:<n> a change. A card verdict is abnormal, normal, or undeterminable (no samples or the data source failed; this is not the same as normal).
 
+# Alert roles
+
+A member alert's role comes from the alert catalog: cause reports a cause, symptom a symptom, change a change, forecast a prediction, and meta an observability gap or spare capacity (missing data, vanished scrape targets, more replicas than the load needs); a meta alert is not a fault in itself. A hypothesis mechanism must point the same way as the condition its member alerts report: when an alert reports too many replicas, low load or spare resources, mechanisms such as resource pressure, connection exhaustion or insufficient capacity contradict it and cannot explain it. A separate fault shown by other abnormal cards in the same period goes into the situation or an investigation recommendation, not into the cause of this alert.
+
 # The hypothesis ledger is kept by code
 
 Code judges the status of each hypothesis (pending, supported, refuted, inconclusive after testing) from the evidence; you do not output statuses:
@@ -45,6 +49,7 @@ Propose 1–6 competing root-cause hypotheses (ids h1…h6; use parent_id for re
 - root_component must be a component key from the topology in the context, at component granularity: for an object owned by a controller (Pod, ReplicaSet and so on) use its top-level owner; the code rewrites such keys to the owner and merges hypotheses that end up on the same component;
 - mechanism states the causal chain from the root cause to the observed symptoms and names the symptoms it predicts (for example restarts, memory, init waiting, readiness, node pressure, network, archiving, connections, sync, release); the code uses it to decide which checks can refute the hypothesis;
 - supporting / refuting reference the evidence for or against it;
+- when every member alert of the incident is meta, each hypothesis must explain the condition those alerts report (for example too many replicas: the replica floor, the metric autoscaling follows, a traffic drop), with its mechanism pointing the same way as the alerts;
 - do not repeat a hypothesis that the previous ledger refuted unless there is new evidence; statuses pinned by human feedback do not change.
 
 Then design one discriminating check (next_checks) for each of the top 3 hypotheses that are still pending:
@@ -60,7 +65,7 @@ Then design one discriminating check (next_checks) for each of the top 3 hypothe
 The end of the context holds the hypothesis ledger kept by code (status and basis of each hypothesis) and the evidence cards produced by the discriminating checks. Output:
 
 - hypothesis_id: the chosen hypothesis, which must not be refuted in the ledger. The code computes the conclusion level from the evidence; untested competitors, missing discriminating checks or missing data are reflected in that level and are not a reason to withhold the choice. When the ledger has supported hypotheses, pick the one that best explains all member alerts and evidence, and put the evidence still missing into investigation recommendations. Use null only when no hypothesis in the ledger is supported, with undetermined_reason stating what evidence is missing;
-- when choosing, prefer the component whose mechanism explains all member alerts, whose change or anomaly precedes the symptoms, and which sits deeper in the dependency chain; an alert that has been firing since long before these symptoms usually describes a background condition and does not make its component the root cause;
+- when choosing, prefer the component whose mechanism explains all member alerts, whose change or anomaly precedes the symptoms, and which sits deeper in the dependency chain; an alert that has been firing since long before these symptoms usually describes a background condition and does not make its component the root cause; do not pick a hypothesis that only explains a separate fault in the same period and cannot explain the condition the member alerts report;
 - disposition: the final disposition is derived by code from deterministic evidence; your value is one of its inputs. act: there is a valid proposal, or the chosen root is listed under "remediation templates" (the server opens a repository fix PR from the template, no proposal is needed then); with neither, code rewrites it to escalate or undetermined by severity. ignore: only takes effect on deterministic grounds and never carries proposals — stage A already judged ignore, the chosen root is one of the "components outside the cluster", no card is abnormal, or every impact card is normal; code gives ignore when these hold and rewrites your ignore when they do not. escalate: needs a human, e.g. critical with an undetermined root cause, observability blind, or a repository change is needed but no remediation template applies. undetermined: cannot be determined;
 - situation: at most three sentences on what happened, the impact and the current state, without root cause or remediation;
 - summary: one or two sentences with the root-cause conclusion (or why it cannot be determined) and the first step to take;
