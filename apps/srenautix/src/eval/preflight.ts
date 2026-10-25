@@ -20,6 +20,7 @@ export async function preflightRoutes(runtimes: readonly RouteRuntime[]): Promis
         rt.client,
         timeout,
         AbortSignal.timeout(6 * timeout),
+        rt.thinking,
       );
     } catch (e) {
       if (e instanceof LlmError) {

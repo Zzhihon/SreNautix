@@ -54,6 +54,7 @@ routes:
     retention_terms: "本地部署"
     api_key_env: LLM_API_KEY          # 或 api_key_file
     context_tokens: 32768             # 可选：覆盖方言档案的上下文长度
+    thinking: disabled                # 可选：与 worker 配置相同，只用于 chat_completions（ADR 0158）
 mcp: []                               # reconstructed 模式的只读 MCP 服务器（格式同 worker）
 budget: { call_timeout_seconds: 90 }
 ```

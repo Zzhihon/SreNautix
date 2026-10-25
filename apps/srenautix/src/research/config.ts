@@ -7,6 +7,7 @@ import { readSecretFile } from '../config/files.js';
 import { DEFAULT_BUDGET, type BudgetConfig } from '../llm/budget.js';
 import { EGRESS_CATEGORIES, type EgressCategory } from '../llm/types.js';
 import { resolveTimeouts, type ModelClass, type RouteTimeouts } from '../llm/timeouts.js';
+import type { ChatThinking } from '../llm/wire.js';
 import type { McpServerConfig } from '../tools/mcp.js';
 import { DEFAULT_LIMITS, type ResearchLimits } from './controller.js';
 
@@ -27,6 +28,7 @@ import { DEFAULT_LIMITS, type ResearchLimits } from './controller.js';
 //     probe_on_start: true
 //     routes: [ … 与 eval 配置相同 … ]      # 每条路由可选 model_class 与 timeouts: { first_token, idle, total }（ADR 0098）
 //                                          # 以及 role: regular | last_resort（兜底路由，ADR 0152）
+//                                          # 与 thinking: disabled（Chat 路由关闭服务方默认的思考模式，ADR 0158）
 //   budget: { daily_tokens: 15000000, daily_warn_ratio: 0.8, on_exhausted: critical_only, per_research_input_tokens: 150000,
 //             purposes: { optimization: { daily_tokens: 3000000 } },   # 主动优化的每日用量上限（ADR 0146 §5.3）
 //             last_resort: { daily_tokens: 2000000 } }                 # 兜底路由合计的每日上限，配置了兜底路由时必填（ADR 0152）
@@ -66,6 +68,7 @@ const route = z
       .object({ first_token: duration.optional(), idle: duration.optional(), total: duration.optional() })
       .strict()
       .optional(),
+    thinking: z.enum(['disabled']).optional(),
   })
   .strict();
 
@@ -193,7 +196,12 @@ export type WorkerConfigRaw = z.infer<typeof workerConfigSchema>;
 
 export interface WorkerConfig {
   raw: WorkerConfigRaw;
-  routes: Array<{ route: ModelRoute; apiKey: string; timeouts: { modelClass: ModelClass; timeouts: RouteTimeouts } }>;
+  routes: Array<{
+    route: ModelRoute;
+    apiKey: string;
+    timeouts: { modelClass: ModelClass; timeouts: RouteTimeouts };
+    thinking: ChatThinking | null;
+  }>;
   hubToken: string;
   inboundTokenSha256: string[];
   honeytokens: string[];
@@ -206,9 +214,10 @@ export interface WorkerConfig {
 export function resolveWorkerConfig(raw: WorkerConfigRaw): WorkerConfig {
   return {
     raw,
-    routes: raw.llm.routes.map(({ api_key_file, model_class, timeouts, ...r }) => ({
+    routes: raw.llm.routes.map(({ api_key_file, model_class, timeouts, thinking, ...r }) => ({
       route: r,
       apiKey: readSecretFile(`路由 ${r.id} 的 api_key_file`, api_key_file),
+      thinking: thinking ?? null,
       timeouts: resolveTimeouts(
         r,
         {

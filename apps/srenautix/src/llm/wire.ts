@@ -29,11 +29,22 @@ export function schemaInstruction(schema: Record<string, unknown>, language: 'zh
   return [head, '```json', JSON.stringify(schema), '```'].join('\n');
 }
 
+/**
+ * 路由的思考模式设置（ADR 0158）：`disabled` 在 Chat 请求体里加 `thinking: {type: "disabled"}`，关闭服务方默认开启的思考模式。
+ * 默认思考的服务方把推理 token 计入 max_tokens，阶段的输出上限会被推理用完，正文为空。
+ */
+export type ChatThinking = 'disabled';
+
 export interface WireOptions {
   model: string;
   profile: DialectProfile;
   language: 'zh' | 'en';
+  /** 只用于 Chat 接口；不给或为 null 时请求体不带 thinking 字段 */
+  thinking?: ChatThinking | null;
 }
+
+/** OpenAI SDK 的 Chat 请求类型没有服务方扩展的 thinking 字段 */
+export type ChatParams = ChatCompletionCreateParamsNonStreaming & { thinking?: { type: ChatThinking } };
 
 function systemText(req: LlmRequest, opts: WireOptions): string {
   const parts = req.items.filter((i) => i.type === 'system').map((i) => segmentsText(i.segments));
@@ -103,7 +114,7 @@ export function toResponsesParams(req: LlmRequest, opts: WireOptions): ResponseC
 }
 
 /** 内部消息 → `POST /v1/chat/completions` 请求体（非流式）；相邻的助手文本与函数调用合成一条 assistant 消息 */
-export function toChatParams(req: LlmRequest, opts: WireOptions): ChatCompletionCreateParamsNonStreaming {
+export function toChatParams(req: LlmRequest, opts: WireOptions): ChatParams {
   const messages: ChatCompletionMessageParam[] = [];
   const system = systemText(req, opts);
   if (system) {
@@ -144,7 +155,7 @@ export function toChatParams(req: LlmRequest, opts: WireOptions): ChatCompletion
     }
   }
   flush();
-  const params: ChatCompletionCreateParamsNonStreaming = {
+  const params: ChatParams = {
     model: opts.model,
     messages,
     stream: false,
@@ -152,6 +163,9 @@ export function toChatParams(req: LlmRequest, opts: WireOptions): ChatCompletion
       ? { max_tokens: req.maxOutputTokens }
       : { max_completion_tokens: req.maxOutputTokens }),
   };
+  if (opts.thinking) {
+    params.thinking = { type: opts.thinking };
+  }
   if (req.temperature !== undefined) {
     params.temperature = req.temperature;
   }

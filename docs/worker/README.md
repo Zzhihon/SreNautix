@@ -61,6 +61,7 @@ llm:
     #   role: last_resort            # regular（默认）| last_resort
     #   retention_terms: "服务方的数据保留条款"
     #   api_key_file: /etc/srenautix/secrets/llm/direct
+    #   thinking: disabled           # 可省略；只用于 chat_completions，关闭服务方默认开启的思考模式（ADR 0158）
 budget:
   daily_tokens: 5000000              # 必填，没有默认值
   daily_warn_ratio: 0.8
@@ -112,6 +113,8 @@ mcp:                                 # 只读 MCP 服务器与工具白名单（
 - 至少要有一条常规路由；全部常规路由都被出站策略禁用时，事件只出阶段 A，兜底路由同样不使用。
 
 `openai-compatible` 方言档案的 Chat 请求体用 `max_tokens` 表示输出上限（OpenAI 自己的 Chat 接口用 `max_completion_tokens`，兼容接口的服务方普遍只认 `max_tokens`），结构化输出声明为 `json_object` 加提示词中的 schema，推理内容读 `reasoning_content`；严格 `json_schema` 与上下文长度以启动时的能力探测为准。
+
+有的服务方默认开启思考模式，推理 token 计入 `max_tokens`，各阶段的输出上限（hypothesize 6000、conclude 8000）会被推理用完，正文为空，研判以 `invalid_output` 失败。这类服务方如果支持在 Chat 请求体里用 `thinking: {"type": "disabled"}` 关闭思考，给路由设置 `thinking: disabled`（ADR 0158）：研判调用、重新请求与能力探测的每个请求体都带这个字段；`api: responses` 的路由不能设置。
 
 ## 主动优化的目标任务
 

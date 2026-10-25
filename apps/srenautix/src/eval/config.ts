@@ -6,6 +6,7 @@ import { readSecretFile } from '../config/files.js';
 import { NOVELTY_CONFIG_DEFAULT, noveltyConfig } from '../config/novelty.js';
 import { DEFAULT_BUDGET, type BudgetConfig } from '../llm/budget.js';
 import { resolveTimeouts, type ModelClass, type RouteTimeouts } from '../llm/timeouts.js';
+import type { ChatThinking } from '../llm/wire.js';
 import type { McpServerConfig } from '../tools/mcp.js';
 
 // 评测配置（srenautix eval 的 --config / --compare 参数）：模型路由、出站策略与 reconstructed 模式的只读 MCP 服务器。
@@ -28,6 +29,7 @@ import type { McpServerConfig } from '../tools/mcp.js';
 //       model_class: hosted_large                        # 可省略：按 tier 与方言档案推断（ADR 0098）
 //       timeouts: { first_token_seconds: 120, idle_seconds: 30 }   # 可省略：按模型类别的默认值
 //       role: last_resort                                # 可省略；评测把每条路由当作常规路由单独评测（ADR 0152）
+//       thinking: disabled                               # 可省略；只用于 chat_completions，关闭服务方默认的思考模式（ADR 0158）
 //   mcp: []
 //
 // 每条路由单独评测；命令行的 --route <id> 只评测列出的路由，只读取这些路由的密钥。
@@ -64,6 +66,7 @@ const route = z
       })
       .strict()
       .optional(),
+    thinking: z.enum(['disabled']).optional(),
   })
   .strict()
   .refine(
@@ -151,6 +154,7 @@ export interface EvalRouteConfig {
   apiKey: string;
   contextTokens: number | null;
   timeouts: { modelClass: ModelClass; timeouts: RouteTimeouts };
+  thinking: ChatThinking | null;
 }
 
 export interface EvalConfig {
@@ -190,7 +194,7 @@ export function loadEvalConfig(
   }
   const selected = only.length ? raw.routes.filter((r) => only.includes(r.id)) : raw.routes;
   const routes = selected.map((r): EvalRouteConfig => {
-    const { api_key_env, api_key_file, context_tokens, model_class, timeouts, ...rest } = r;
+    const { api_key_env, api_key_file, context_tokens, model_class, timeouts, thinking, ...rest } = r;
     let apiKey: string;
     if (api_key_env !== undefined) {
       const v = env[api_key_env];
@@ -206,6 +210,7 @@ export function loadEvalConfig(
       route: rest,
       apiKey,
       contextTokens: context_tokens ?? null,
+      thinking: thinking ?? null,
       timeouts: resolveTimeouts(
         rest,
         {
