@@ -960,6 +960,11 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
           consoleUrl: c.public_url,
           maxPerRun: 2,
           lookbackMs: 6 * 3600_000,
+          // 外部上游的汇总配置（ADR 0147）同样标记告警调优模板不降级的告警（ADR 0155）
+          externalAlerts: xr.enabled
+            ? { components: xr.components, alertLabels: xr.alert_labels }
+            : { components: [], alertLabels: {} },
+          rejectedCooldownMs: parseDuration('remediation.rejected_cooldown', rm.rejected_cooldown),
         },
         {
           packs: () => packs.set,
@@ -976,6 +981,17 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
                 const i = await issues.ensure(incidentId, 'repo_change');
                 return i ? GitHubApp.ref(fromRepo, i.repo, i.number) : null;
               }
+            : null,
+          linkPull: issues
+            ? (incidentId, pull) =>
+                issues.link(incidentId, {
+                  kind: 'pull',
+                  url: pull.url,
+                  title: pull.title,
+                  repo: pull.repo,
+                  number: pull.number,
+                  refsInBody: false,
+                })
             : null,
           metrics,
         },

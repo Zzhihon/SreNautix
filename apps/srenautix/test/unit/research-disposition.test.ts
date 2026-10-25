@@ -193,6 +193,7 @@ describe('处置依据的计算', () => {
       roots,
       resolve,
       scope,
+      alertFacts: new Map(),
     });
     expect(f).toEqual({
       external: [PROVIDER],
@@ -208,6 +209,7 @@ describe('处置依据的计算', () => {
       roots,
       resolve,
       scope,
+      alertFacts: new Map(),
     });
     expect(off.remediations).toEqual([]);
   });

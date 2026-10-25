@@ -22,7 +22,17 @@ export class FakeGitHub {
   /** 分支 → 文件路径 → 内容 */
   readonly branches = new Map<string, Map<string, string>>();
   readonly heads = new Map<string, string>();
-  readonly pulls: Array<{ number: number; head: string; base: string; title: string; body: string }> = [];
+  /** PR；state 不填时为 open，close() 关闭（可选合并）并写下 closed_at 与 merged_at */
+  readonly pulls: Array<{
+    number: number;
+    head: string;
+    base: string;
+    title: string;
+    body: string;
+    state?: 'open' | 'closed';
+    closed_at?: string | null;
+    merged_at?: string | null;
+  }> = [];
   readonly issues: Array<{ number: number; title: string; body: string; labels: string[]; created: number }> = [];
   readonly comments = new Map<number, Array<{ id: number; body: string }>>();
   /** 分支 → 提交（新的在前） */
@@ -283,6 +293,10 @@ export class FakeGitHub {
       return send(res, 200, {
         number: pr.number,
         body: pr.body,
+        state: pr.state ?? 'open',
+        closed_at: pr.closed_at ?? null,
+        merged_at: pr.merged_at ?? null,
+        head: { ref: pr.head },
         html_url: `https://github.example.test/${this.repo}/pull/${pr.number}`,
       });
     }
@@ -345,7 +359,7 @@ export class FakeGitHub {
           .filter((p) => !branch || p.head === branch)
           .map((p) => ({
             number: p.number,
-            state: 'open',
+            state: p.state ?? 'open',
             head: { ref: p.head },
             html_url: `https://github.example.test/${this.repo}/pull/${p.number}`,
           })),
@@ -444,6 +458,17 @@ export class FakeGitHub {
     this.snapshots.set(s, new Map(cur));
     this.heads.set(branch, s);
     return s;
+  }
+
+  /** 审阅者关闭 PR：merged 为 true 时同时合并（不改分支内容，需要时另用 merge()） */
+  close(number: number, merged: boolean, at: Date = new Date()): void {
+    const pr = this.pulls.find((p) => p.number === number);
+    if (!pr) {
+      throw new Error(`没有 PR #${number}`);
+    }
+    pr.state = 'closed';
+    pr.closed_at = at.toISOString();
+    pr.merged_at = merged ? at.toISOString() : null;
   }
 
   /** 把分支合并到 main（测试中模拟审阅者合并 PR） */

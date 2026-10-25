@@ -133,7 +133,7 @@ describe('根因自己的卡', () => {
   it('模板上下文：root_cards 与 cards 形状相同，同一张卡取最严重的结论', async () => {
     const r = root('Deployment:shop/web');
     const own = await new RootCardScope(lookup(), INC, new Date()).cards(r, CARDS);
-    const ctx = remediationContext(incident(), [], CARDS, r, null, own);
+    const ctx = remediationContext(incident(), [], CARDS, r, null, own, new Map());
     expect(ctx.cards['workload/release/init-waiting']?.verdict).toBe('abnormal');
     expect(ctx.root_cards).toEqual({
       'workload/release/init-waiting': {

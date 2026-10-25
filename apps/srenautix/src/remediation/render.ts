@@ -45,19 +45,36 @@ export function cardsOf(cards: EvidenceResult[]): RemediationContext['cards'] {
   return out;
 }
 
-export function alertsOf(alerts: Alert[]): RemediationContext['alerts'] {
+/** 告警在拓扑里的事实（facts.ts 的 alertFacts）：归属组件对应的具体对象与是否描述外部上游（ADR 0155） */
+export interface AlertFacts {
+  component_object: string | null;
+  external: boolean;
+}
+
+/** 成员告警 → 模板上下文的告警；facts 按 alert_id 给出，缺少时抛出 */
+export function alertsOf(alerts: Alert[], facts: ReadonlyMap<string, AlertFacts>): RemediationContext['alerts'] {
   const str = (l: Record<string, unknown> | undefined) =>
     Object.fromEntries(Object.entries(l ?? {}).filter((e): e is [string, string] => typeof e[1] === 'string'));
-  return alerts.map((a) => ({
-    alertname: a.alertname,
-    labels: str(a.labels),
-    annotations: str(a.annotations),
-    role: a.classification.role,
-    source: a.classification.source,
-    catalog_entry: a.classification.catalog_entry ?? null,
-    chronic: a.classification.chronic === true,
-    entity: a.entity ? { ...a.entity } : null,
-  }));
+  return alerts.map((a) => {
+    const f = facts.get(a.alert_id);
+    if (!f) {
+      throw new Error(`告警 ${a.alert_id} 没有拓扑事实`);
+    }
+    return {
+      alertname: a.alertname,
+      labels: str(a.labels),
+      annotations: str(a.annotations),
+      role: a.classification.role,
+      source: a.classification.source,
+      confidence: a.classification.confidence,
+      catalog_entry: a.classification.catalog_entry ?? null,
+      chronic: a.classification.chronic === true,
+      entity: a.entity ? { ...a.entity } : null,
+      component: a.component ?? null,
+      component_object: f.component_object,
+      external: f.external,
+    };
+  });
 }
 
 export interface PlanProblem {

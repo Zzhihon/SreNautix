@@ -3,7 +3,7 @@ import type { EvidenceResult, Incident, Proposal, RepositoryLayout } from '@sren
 import { startPrometheus, type TsdbInstance } from '@srenautix/integration-sdk';
 import type { EvidenceDataSource } from '@srenautix/packs-sdk';
 import { applyPatch } from 'diff';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { parse } from 'yaml';
 import { GitHubApp } from '../../src/github/app.js';
 import { IssueService } from '../../src/github/issues.js';
@@ -85,8 +85,22 @@ async function seed(
     root?: Incident['root'];
     researchRoot?: string;
     cards?: EvidenceResult[];
+    /** 成员告警的告警名（默认 ShopQueueBacklog） */
+    alertname?: string;
+    /** 成员告警的标签（不含 alertname 与 severity；默认 deployment=api、namespace=shop）、归属组件与实体 */
+    alert?: {
+      labels: Record<string, string>;
+      component: string;
+      entity: { kind: string; namespace: string | null; name: string } | null;
+    };
   } = {},
 ): Promise<{ inc: Incident; runId: string }> {
+  const alertname = o.alertname ?? 'ShopQueueBacklog';
+  const member = o.alert ?? {
+    labels: { deployment: 'api', namespace: 'shop' },
+    component: 'Deployment:shop/api',
+    entity: { kind: 'Deployment', namespace: 'shop', name: 'api' },
+  };
   const inc = incident();
   if (o.root) {
     inc.root = o.root;
@@ -104,7 +118,7 @@ async function seed(
       CLUSTER,
       {
         source: 'alertmanager',
-        labels: { alertname: 'ShopQueueBacklog', deployment: 'api', namespace: 'shop', severity },
+        labels: { alertname, ...member.labels, severity },
         annotations: {},
         severity,
         status: 'firing',
@@ -113,13 +127,13 @@ async function seed(
         endsAt: null,
         generatorUrl: null,
         fingerprint: fp,
-        alertname: 'ShopQueueBacklog',
+        alertname,
       },
       {
         classification: { role: 'cause', source: 'default', confidence: 0.3, catalog_entry: null, chronic: false },
-        entity: { cluster_id: CLUSTER, kind: 'Deployment', namespace: 'shop', name: 'api', uid: null },
-        entityResolution: 'labels',
-        component: 'Deployment:shop/api',
+        entity: member.entity ? { cluster_id: CLUSTER, ...member.entity, uid: null } : null,
+        entityResolution: member.entity ? 'labels' : 'unresolved',
+        component: member.component,
         chains: [],
       },
     ),
@@ -127,9 +141,9 @@ async function seed(
   inc.members = [
     {
       alert_id: u.alertId,
-      alertname: 'ShopQueueBacklog',
+      alertname,
       role: 'cause',
-      component: 'Deployment:shop/api',
+      component: member.component,
       severity: 'warning',
       status: 'firing',
       starts_at: startsAt.toISOString(),
@@ -260,6 +274,12 @@ function build(
     dataSource?: () => Promise<EvidenceDataSource | null>;
     categories?: string[];
     conclusions?: string[];
+    /** 同一模板对同一组文件的修改被拒绝后的冷却期（默认 7 天） */
+    cooldownMs?: number;
+    /** 事件 issue 每小时上限（默认 3） */
+    issuesPerHour?: number;
+    /** 外部上游汇总配置里的组件与告警标签（默认为空） */
+    externalAlerts?: { components: string[]; alertLabels: Record<string, string[]> };
   } = {},
 ): { proposals: ProposalService; service: RemediationService } {
   const beforeCreate = o.beforeCreate;
@@ -294,7 +314,7 @@ function build(
       repo: REPO,
       labels: ['srenautix'],
       titlePrefix: '[影子]',
-      maxPerHour: 3,
+      maxPerHour: o.issuesPerHour ?? 3,
       lookbackMs: 3600_000,
       consoleUrl: 'https://srenautix.example.test',
       language: 'zh',
@@ -330,6 +350,8 @@ function build(
       consoleUrl: 'https://srenautix.example.test',
       maxPerRun: 2,
       lookbackMs: 6 * 3600_000,
+      externalAlerts: o.externalAlerts ?? { components: [], alertLabels: {} },
+      rejectedCooldownMs: o.cooldownMs ?? 7 * 86_400_000,
     },
     {
       packs: () => rt.set,
@@ -353,11 +375,29 @@ function build(
         const i = await issues.ensure(incidentId, 'repo_change');
         return i ? GitHubApp.ref(fromRepo, i.repo, i.number) : null;
       },
+      linkPull: (incidentId, pull) =>
+        issues.link(incidentId, {
+          kind: 'pull',
+          url: pull.url,
+          title: pull.title,
+          repo: pull.repo,
+          number: pull.number,
+          refsInBody: false,
+        }),
       metrics,
     },
   );
   return { proposals, service };
 }
+
+/**
+ * 之前用例的提议全部过期（没有开出 PR，修改记为 abandoned）：用例之间同一个修改不算重复。去重本身由"修改去重"一组用例覆盖
+ */
+const settle = () =>
+  db.server.query(
+    `UPDATE server.proposals SET state = 'expired', body = jsonb_set(body, '{state}', '"expired"')
+      WHERE action = 'gitops_pr' AND state <> 'expired'`,
+  );
 
 afterAll(async () => {
   await gh?.stop();
@@ -407,6 +447,7 @@ const attempts = async (runId: string) =>
 describe('自愈 PR', () => {
   let proposal: Proposal;
   let inc: Incident;
+  beforeEach(settle);
 
   it('结论适用模板时生成补丁，校验后提交 gitops_pr 提议：[影子] 标题、srenautix/ 分支、带标记的描述、目标为 base 的提交', async () => {
     const s = await seed();
@@ -634,6 +675,13 @@ describe('自愈 PR', () => {
         JSON.stringify({ message: `pr_open: PR https://github.example.test/${REPO}/pull/41 #41 state=open` }),
       ],
     );
+    gh.pulls.push({
+      number: 41,
+      head: (proposal.params as { branch: string }).branch,
+      base: 'main',
+      title: (proposal.params as { title: string }).title,
+      body: (proposal.params as { body: string }).body,
+    });
     const pulls = new GitOpsPulls(db.server, app, issues, metrics);
     expect(await pulls.runOnce()).toBe(1);
     const row = await db.server.query('SELECT url, number, branch FROM server.gitops_pulls WHERE proposal_id = $1', [
@@ -716,6 +764,7 @@ describe('自愈 PR', () => {
     expect(await issued(ok.proposal_id)).toBe(1);
 
     await status([]);
+    await settle();
     const blocked = await seed('likely', { severity: 'critical', disposition: 'ignore' });
     expect(await signed.service.runOnce()).toBe(0);
     expect((await attempts(blocked.runId)).find((a) => a.key === 'gitops/noisy-alert-relax')).toMatchObject({
@@ -766,6 +815,7 @@ spec:
   });
   let prom: TsdbInstance;
   let oom: RemediationService;
+  beforeEach(settle);
 
   beforeAll(async () => {
     const points = Array.from({ length: 61 }, (_, i) => ({ t: T - (60 - i) * 60_000, v: 1 }));
@@ -957,5 +1007,288 @@ spec:
     expect(await attempts(s.runId)).toEqual([
       expect.objectContaining({ key: 'gitops/memory-limit-raise', outcome: 'proposed' }),
     ]);
+  });
+});
+
+/**
+ * 修改去重（ADR 0155）：同一条未覆盖的告警在多个事件里反复触发，基准提交在两次触发之间前进，补丁只差上下文与行号。
+ * gateway 开出 PR 由执行事件与 FakeGitHub 里的 PR 表示（与"gateway 开出 PR 后"相同）
+ */
+describe('修改去重', () => {
+  const ALERT = 'ShopCacheEvictions';
+  const PR = 900;
+  let svc: RemediationService;
+  let firstProposal: string;
+
+  beforeAll(async () => {
+    await settle();
+    ({ service: svc } = build(null, { issuesPerHour: 100 }));
+  });
+
+  const catalogAttempt = async (runId: string) =>
+    (await attempts(runId)).find((a) => a.key === 'gitops/alert-catalog-entry');
+  const pullComments = () => gh.comments.get(PR) ?? [];
+  const catalogProposals = async (alertname: string) =>
+    (
+      await db.server.query<{ n: number }>(
+        `SELECT count(*)::int AS n FROM server.proposals WHERE action = 'gitops_pr' AND params->>'patch' LIKE $1`,
+        [`%alertname: ${alertname},%`],
+      )
+    ).rows[0]!.n;
+
+  /** gateway 开出 PR：提议进入 dispatched，执行事件带 PR 地址，FakeGitHub 里有这个 PR；GitOpsPulls 记下它 */
+  const open = async (proposalId: string, number: number) => {
+    const p = (
+      await db.server.query<{ body: Proposal }>('SELECT body FROM server.proposals WHERE proposal_id = $1', [
+        proposalId,
+      ])
+    ).rows[0]!.body;
+    const params = p.params as { branch: string; title: string; body: string };
+    await db.server.query(
+      `UPDATE server.proposals SET state = 'dispatched', body = jsonb_set(body, '{state}', '"dispatched"') WHERE proposal_id = $1`,
+      [proposalId],
+    );
+    await db.server.query(
+      `INSERT INTO server.execution_events (event_id, cluster_id, execution_id, ticket_id, proposal_id, seq, phase, at, reason, body)
+       VALUES ($1, $2, $3, $4, $5, 1, 'verified', now(), 'checks_passed', $6)`,
+      [
+        randomUUID().replace(/-/g, ''),
+        CLUSTER,
+        randomUUID().replace(/-/g, ''),
+        randomUUID(),
+        proposalId,
+        JSON.stringify({
+          message: `pr_open: PR https://github.example.test/${REPO}/pull/${number} #${number} state=open`,
+        }),
+      ],
+    );
+    gh.pulls.push({ number, head: params.branch, base: 'main', title: params.title, body: params.body });
+    await new GitOpsPulls(db.server, app, issues, metrics).runOnce();
+    const row = await db.server.query('SELECT number FROM server.gitops_pulls WHERE proposal_id = $1', [proposalId]);
+    expect(row.rows).toEqual([{ number }]);
+  };
+
+  it('同一个修改：提议还没有开出 PR、PR 打开时都不再提议；PR 开出后每次触发评论一次，新事件的 issue 关联到 PR', async () => {
+    const first = await seed('likely', { alertname: ALERT });
+    expect(await svc.runOnce()).toBe(1);
+    const a1 = await catalogAttempt(first.runId);
+    expect(a1).toMatchObject({ outcome: 'proposed' });
+    firstProposal = a1!.proposal_id!;
+
+    // 基准提交前进：目录在末尾多了一条，新补丁的上下文与行号都变了，增加的行相同（CCHP #289 与 #297 的情形）
+    const catalog = gh.branches.get('main')!.get(CATALOG_PATH)!;
+    gh.write(
+      'main',
+      {
+        [CATALOG_PATH]: `${catalog}  - { id: shop-pod-pending, alertname: ShopPodPending, role: cause, entity: { kind: Pod, name_labels: [pod] } }\n`,
+      },
+      { message: 'catalog: add ShopPodPending' },
+    );
+    const second = await seed('likely', { alertname: ALERT });
+    expect(await svc.runOnce()).toBe(0);
+    expect(await catalogAttempt(second.runId)).toMatchObject({
+      outcome: 'skipped',
+      code: 'duplicate_pending',
+      proposal_id: null,
+    });
+
+    await open(firstProposal, PR);
+    const third = await seed('likely', { alertname: ALERT });
+    expect(await svc.runOnce()).toBe(0);
+    expect(await catalogAttempt(third.runId)).toMatchObject({ outcome: 'skipped', code: 'duplicate_open' });
+
+    // 只有一个提议、一个 PR；第二、第三个事件各一条评论，带标记与新事件 issue 的 Refs
+    expect(await catalogProposals(ALERT)).toBe(1);
+    expect(gh.pulls.filter((p) => p.body.includes(ALERT))).toHaveLength(1);
+    const comments = pullComments();
+    expect(comments).toHaveLength(2);
+    for (const [i, incidentId] of [second, third].map((s) => s.inc.incident_id).entries()) {
+      const issue = await issues.issueOf(incidentId);
+      expect(issue).not.toBeNull();
+      expect(comments[i]!.body).toContain(`<!-- srenautix:trigger=${incidentId} -->`);
+      expect(comments[i]!.body).toContain(`https://srenautix.example.test/incidents/${incidentId}`);
+      expect(comments[i]!.body).toContain(`Refs #${issue!.number}`);
+    }
+    const audit = await db.server.query<{ n: number }>(
+      "SELECT count(*)::int AS n FROM server.governance_audit WHERE kind = 'remediation.trigger_comment'",
+    );
+    expect(audit.rows[0]!.n).toBe(2);
+
+    // 事件 issue 的后台循环：新事件的 issue 里回链 PR，PR 描述补上它们的 Refs
+    await issues.runOnce();
+    const pr = gh.pulls.find((p) => p.number === PR)!;
+    for (const incidentId of [second, third].map((s) => s.inc.incident_id)) {
+      const issue = (await issues.issueOf(incidentId))!;
+      expect(pr.body).toContain(`Refs #${issue.number}`);
+      expect((gh.comments.get(issue.number) ?? []).map((c) => c.body).join('\n')).toContain(
+        `https://github.example.test/${REPO}/pull/${PR}`,
+      );
+    }
+
+    // 同一事件的后续轮次不重复评论
+    expect(await svc.runOnce()).toBe(0);
+    expect(pullComments()).toHaveLength(2);
+  });
+
+  it('server 重启后照常去重：记录在 PostgreSQL；去重表建立之前的提议按尝试记录补登记', async () => {
+    // 新的服务实例，并清掉修改与触发的记录（相当于升级之前已经开出的 PR）
+    await db.server.query('DELETE FROM server.remediation_triggers');
+    await db.server.query('DELETE FROM server.remediation_changes');
+    const restarted = build(null, { issuesPerHour: 100 }).service;
+    const fourth = await seed('likely', { alertname: ALERT });
+    expect(await restarted.runOnce()).toBe(0);
+    expect(await catalogAttempt(fourth.runId)).toMatchObject({ outcome: 'skipped', code: 'duplicate_open' });
+    const row = await db.server.query<{ state: string; pr_number: number }>(
+      'SELECT state, pr_number FROM server.remediation_changes WHERE proposal_id = $1',
+      [firstProposal],
+    );
+    expect(row.rows).toEqual([{ state: 'open', pr_number: PR }]);
+    expect(await catalogProposals(ALERT)).toBe(1);
+    expect(pullComments()).toHaveLength(3);
+    expect(pullComments()[2]!.body).toContain(`<!-- srenautix:trigger=${fourth.inc.incident_id} -->`);
+  });
+
+  it('人关闭 PR 且没有合并：同一个修改不再提出；同一模板对同一文件的其他修改在冷却期内不提出', async () => {
+    gh.close(PR, false);
+    const fifth = await seed('likely', { alertname: ALERT });
+    expect(await svc.runOnce()).toBe(0);
+    expect(await catalogAttempt(fifth.runId)).toMatchObject({ outcome: 'skipped', code: 'rejected_before' });
+    const state = await db.server.query<{ state: string; closed_at: Date | null }>(
+      'SELECT state, closed_at FROM server.remediation_changes WHERE proposal_id = $1',
+      [firstProposal],
+    );
+    expect(state.rows[0]).toMatchObject({ state: 'rejected', closed_at: expect.any(Date) });
+    // 被拒绝的 PR 上不再评论
+    expect(pullComments()).toHaveLength(3);
+
+    // 另一条未覆盖的告警：同一模板、同一个目录文件，冷却期（7 天）内不提出
+    const variant = await seed('likely', { alertname: 'ShopCacheMisses' });
+    expect(await svc.runOnce()).toBe(0);
+    expect(await catalogAttempt(variant.runId)).toMatchObject({ outcome: 'skipped', code: 'rejected_cooldown' });
+    expect(await catalogProposals('ShopCacheMisses')).toBe(0);
+
+    // 冷却期为 0 时只记住被拒绝的那一个修改：其他告警的条目照常提出，被拒绝的修改仍然不提
+    const relaxed = build(null, { issuesPerHour: 100, cooldownMs: 0 }).service;
+    const other = await seed('likely', { alertname: 'ShopCacheMisses' });
+    expect(await relaxed.runOnce()).toBe(1);
+    expect(await catalogAttempt(other.runId)).toMatchObject({ outcome: 'proposed' });
+    const same = await seed('likely', { alertname: ALERT });
+    expect(await relaxed.runOnce()).toBe(0);
+    expect(await catalogAttempt(same.runId)).toMatchObject({ outcome: 'skipped', code: 'rejected_before' });
+    expect(await catalogProposals(ALERT)).toBe(1);
+  });
+});
+
+/**
+ * 模板上下文里告警的拓扑事实（ADR 0155），经真实的拓扑存储与组件展开：只带分组标签、逻辑组件在拓扑里没有对象的告警不加
+ * 目录条目；外部上游的告警不降级
+ */
+describe('告警的拓扑事实', () => {
+  beforeEach(settle);
+
+  const reason = async (runId: string, key: string) =>
+    (
+      await db.server.query<{ code: string; reason: string }>(
+        'SELECT code, reason FROM server.remediation_attempts WHERE run_id = $1 AND key = $2',
+        [runId, key],
+      )
+    ).rows[0];
+
+  it('规则声明没有实体、只带 component: workload：拓扑里没有对应的对象，目录条目模板跳过并说明要在规则上补实体', async () => {
+    const s = await seed('likely', {
+      alertname: 'ShopGatewayOverProvisioned',
+      alert: {
+        labels: { component: 'workload', role: 'cause', entity_kind: 'none', entity: '' },
+        component: 'component:workload',
+        entity: null,
+      },
+    });
+    expect(await service.runOnce()).toBe(0);
+    expect(await reason(s.runId, 'gitops/alert-catalog-entry')).toEqual({
+      code: 'skip_if',
+      reason:
+        '告警 ShopGatewayOverProvisioned 给不出实体：规则声明没有实体（entity_kind 为 none），只带分组标签 workload，' +
+        '这个逻辑组件在拓扑里没有对应的对象。目录条目不会改变它的归属，需要在告警规则上加 entity 与 entity_kind 标签',
+    });
+  });
+
+  it('只带 service 标签、同名 Service 选中一个工作负载：实体为逻辑组件，条目带 role_confidence', async () => {
+    const at = new Date(T - 3600_000);
+    const node = (kind: string, name: string) => ({
+      key: `${kind}:shop/${name}`,
+      kind,
+      namespace: 'shop',
+      name,
+      uid: `uid-${kind}-${name}`,
+      labels: {},
+      component_type: null,
+      hub: false,
+    });
+    const edge = (from: string, relation: 'selects' | 'owned_by', to: string) => ({
+      from,
+      to,
+      relation,
+      provenance: 'structural' as const,
+      confidence: 1,
+      scope: 'service' as const,
+      evidence: relation === 'selects' ? 'spec.selector' : 'ownerReference',
+    });
+    await new TopologyStore(db.server).apply(CLUSTER, [
+      { op: 'node_upsert', at, source: 'informer', node: node('Service', 'catalog') },
+      { op: 'node_upsert', at, source: 'informer', node: node('Deployment', 'catalog-api') },
+      { op: 'node_upsert', at, source: 'informer', node: node('Pod', 'catalog-api-0') },
+      {
+        op: 'edge_upsert',
+        at,
+        source: 'informer',
+        edge: edge('Service:shop/catalog', 'selects', 'Pod:shop/catalog-api-0'),
+      },
+      {
+        op: 'edge_upsert',
+        at,
+        source: 'informer',
+        edge: edge('Pod:shop/catalog-api-0', 'owned_by', 'Deployment:shop/catalog-api'),
+      },
+    ]);
+    const s = await seed('likely', {
+      alertname: 'ShopCatalogStale',
+      alert: { labels: { service: 'catalog' }, component: 'component:catalog', entity: null },
+    });
+    // 上一组用例在同一个目录文件上被拒绝过一个条目：这里不用冷却期
+    expect(await build(null, { cooldownMs: 0 }).service.runOnce()).toBe(1);
+    const a = (await attempts(s.runId)).find((x) => x.key === 'gitops/alert-catalog-entry');
+    expect(a).toMatchObject({ outcome: 'proposed' });
+    const p = await db.server.query<{ params: { patch: string; body: string } }>(
+      'SELECT params FROM server.proposals WHERE proposal_id = $1',
+      [a!.proposal_id],
+    );
+    expect(p.rows[0]!.params.patch).toContain(
+      '+  - { id: shop-catalog-stale, alertname: ShopCatalogStale, role: cause, role_confidence: 0.3, entity: { kind: component, name_labels: [ service ] } }',
+    );
+    expect(p.rows[0]!.params.body).toContain('这个逻辑组件在拓扑里对应 Deployment:shop/catalog-api');
+  });
+
+  it('外部上游汇总配置里的告警：根因不是外部组件、研判为 ignore 也不降级；配置为空时同一事件会降级', async () => {
+    const provider = {
+      labels: { component: 'provider', provider_id: 'p1' },
+      component: 'component:provider',
+      entity: null,
+    };
+    const external = build(null, { externalAlerts: { components: ['component:provider'], alertLabels: {} } }).service;
+    const s = await seed('likely', { severity: 'critical', disposition: 'ignore', alert: provider });
+    expect(await external.runOnce()).toBe(0);
+    expect((await attempts(s.runId)).map((x) => x.key)).not.toContain('gitops/noisy-alert-relax');
+
+    // 只配置告警标签条件时，满足条件的告警同样不降级
+    const byLabel = build(null, { externalAlerts: { components: [], alertLabels: { provider_id: ['p1'] } } }).service;
+    const t = await seed('likely', { severity: 'critical', disposition: 'ignore', alert: provider });
+    expect(await byLabel.runOnce()).toBe(0);
+    expect((await attempts(t.runId)).map((x) => x.key)).not.toContain('gitops/noisy-alert-relax');
+
+    const plain = await seed('likely', { severity: 'critical', disposition: 'ignore', alert: provider });
+    expect(await service.runOnce()).toBe(1);
+    expect((await attempts(plain.runId)).find((x) => x.key === 'gitops/noisy-alert-relax')).toMatchObject({
+      outcome: 'proposed',
+    });
   });
 });

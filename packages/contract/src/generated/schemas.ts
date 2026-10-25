@@ -5628,7 +5628,7 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
           when: {
             type: 'string',
             description:
-              'CEL 适用条件。变量：incident、root、research（触发计划的研判结论 {disposition, level}，取值见 Disposition 与 ConclusionLevel；没有研判时为 null）、cards（卡片全局 id → 结论）、alerts（成员告警：alertname、labels、annotations、entity，以及 AlertClassification 的 role、source、catalog_entry、chronic）、params。applies 为 goal 时另有 goal（GoalSpec 与 goal_id、revision）、finding（Finding）与 finding_cards（发现的支持卡、份额卡与诊断卡：卡片全局 id → 结论，形状与 cards 相同），incident 与 alerts 为空，root 为发现挂到的组件',
+              'CEL 适用条件。变量：incident、root、research（触发计划的研判结论 {disposition, level}，取值见 Disposition 与 ConclusionLevel；没有研判时为 null）、cards（卡片全局 id → 结论）、alerts（成员告警：alertname、labels、annotations、entity，AlertClassification 的 role、source、confidence、catalog_entry、chronic，归属组件 component，归属组件在拓扑里对应的具体对象 component_object（没有时为 null），以及是否描述集群之外的上游 external）、params。applies 为 goal 时另有 goal（GoalSpec 与 goal_id、revision）、finding（Finding）与 finding_cards（发现的支持卡、份额卡与诊断卡：卡片全局 id → 结论，形状与 cards 相同），incident 与 alerts 为空，root 为发现挂到的组件',
           },
           estimate: {
             $ref: '#/$defs/Estimate',

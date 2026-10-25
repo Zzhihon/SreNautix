@@ -215,7 +215,8 @@ remediations:
   # ---------- 告警规则 ----------
   # critical 告警触发、而事件不需要处理时，降低严重度并延长持续时间（ADR 0139）。根因是领域包声明在集群之外的组件
   # （external，例如外部 API 服务方）时不适用：外部上游真的出故障时告警本身是对的，研判因"集群内没有可处置的对象"判为
-  # ignore 也不说明告警误报。根因不是外部组件时有两种依据：
+  # ignore 也不说明告警误报。同样，描述外部上游的告警（告警的 external：归属组件或实体的组件类型声明在集群之外，或命中
+  # 外部上游汇总的配置，ADR 0147）不论事件根因是什么都不降级，它们已经改为按周期汇总（ADR 0155）。其余告警有两种依据：
   # - 研判结论为不需要处理（ignore；ADR 0138 起只按确定性依据给出）；
   # - 告警在 7 天内反复触发，并且事件的影响卡（impact: true）全部正常：有影响卡、没有一张异常或无法判定。
   - id: noisy-alert-relax
@@ -225,17 +226,23 @@ remediations:
     when: >-
       !(root != null && "external" in root && root.external == true)
       && ((research != null && research.disposition == "ignore"
-          && alerts.exists(a, a.role != "meta" && "severity" in a.labels && a.labels.severity == params.from_severity))
-        || (alerts.exists(a, a.chronic && "severity" in a.labels && a.labels.severity == params.from_severity)
+          && alerts.exists(a, a.role != "meta" && !a.external
+            && "severity" in a.labels && a.labels.severity == params.from_severity))
+        || (alerts.exists(a, a.chronic && !a.external && "severity" in a.labels && a.labels.severity == params.from_severity)
           && cards.exists(k, "impact" in cards[k] && cards[k].impact == true)
           && cards.all(k, !("impact" in cards[k]) || cards[k].impact != true || cards[k].verdict == "normal")))
     params: { from_severity: critical, to_severity: warning, min_for: 1h }
     let:
-      - { name: why, cel: 'research != null && research.disposition == "ignore" ? "research" : "chronic"' }
       - {
-          name: alertname,
-          cel: 'why == "research" ? alerts.filter(a, a.role != "meta" && "severity" in a.labels && a.labels.severity == params.from_severity)[0].alertname : alerts.filter(a, a.chronic && "severity" in a.labels && a.labels.severity == params.from_severity)[0].alertname',
+          name: research_alerts,
+          cel: 'research != null && research.disposition == "ignore" ? alerts.filter(a, a.role != "meta" && !a.external && "severity" in a.labels && a.labels.severity == params.from_severity) : []',
         }
+      - {
+          name: chronic_alerts,
+          cel: 'alerts.filter(a, a.chronic && !a.external && "severity" in a.labels && a.labels.severity == params.from_severity)',
+        }
+      - { name: why, cel: 'size(research_alerts) > 0 ? "research" : "chronic"' }
+      - { name: alertname, cel: 'why == "research" ? research_alerts[0].alertname : chronic_alerts[0].alertname' }
       - {
           name: docs,
           cel: 'files.alert_rules.filter(d, d != null && has(d.spec) && has(d.spec.groups) && d.spec.groups.exists(g, has(g.rules) && g.rules.exists(r, has(r.alert) && r.alert == alertname)))',
@@ -287,33 +294,73 @@ remediations:
         en: 'Revert the commit of this PR to restore {current_severity} and {current_for}'
 
   # ---------- 拓扑与领域包覆盖 ----------
-  # 成员告警没有命中任何告警目录条目时，按告警自带的工作负载标签给领域包加一条目录条目。
+  # 成员告警没有命中任何告警目录条目时，给领域包加一条目录条目（ADR 0155）。条目只写告警本身能确认的内容：
+  # - 实体：标签契约的 entity 与 entity_kind；没有时取对象标签（params.object_labels，按顺序取第一个）；都没有时，只有告警
+  #   归属的逻辑组件（component、service 标签）在拓扑里对应到具体对象（ADR 0130）才取逻辑组件。逻辑组件在拓扑里没有对应
+  #   的对象（例如按层次分组的 component 标签）时不加条目：这样的条目与没有条目时的归属相同，只会把覆盖缺口藏起来，
+  #   实体要在告警规则上用 entity 与 entity_kind 标签补上；
+  # - 角色：告警当前的分类；依据不是告警自带的 role 标签（置信度低于 1）时写上 role_confidence，srenautix doctor 列为待确认。
   - id: alert-catalog-entry
     title: { zh-CN: 为未覆盖的告警加告警目录条目, en: Add a catalog entry for an uncovered alert }
     category: topology_coverage
     repository: gitops
     when: alerts.exists(a, a.catalog_entry == null)
+    params:
+      # 命名对象的标签，按优先顺序；kind 见 let 中的 kinds
+      object_labels: deployment,statefulset,daemonset,pod,persistentvolumeclaim,horizontalpodautoscaler,poddisruptionbudget,job_name,cronjob,node
     let:
-      - { name: alert, cel: 'alerts.filter(a, a.catalog_entry == null)[0]' }
+      - { name: order, cel: 'params.object_labels.split(",")' }
+      - {
+          name: kinds,
+          cel: '{"deployment": "Deployment", "statefulset": "StatefulSet", "daemonset": "DaemonSet", "pod": "Pod", "persistentvolumeclaim": "PersistentVolumeClaim", "horizontalpodautoscaler": "HorizontalPodAutoscaler", "poddisruptionbudget": "PodDisruptionBudget", "job_name": "Job", "cronjob": "CronJob", "node": "Node"}',
+        }
+      - { name: uncovered, cel: 'alerts.filter(a, a.catalog_entry == null)' }
+      # 能给出实体的告警：标签契约声明了实体，或带对象标签，或归属的逻辑组件在拓扑里对应到具体对象
+      - {
+          name: eligible,
+          cel: 'uncovered.filter(a, ("entity" in a.labels && a.labels.entity != "" && "entity_kind" in a.labels && !(a.labels.entity_kind in ["", "none", "None"])) || order.exists(l, l in a.labels && a.labels[l] != "") || (("component" in a.labels || "service" in a.labels) && a.component_object != null))',
+        }
+      - { name: alert, cel: 'size(eligible) > 0 ? eligible[0] : uncovered[0]' }
       - { name: alertname, cel: alert.alertname }
       - { name: entry_id, cel: kebab(alertname) }
       - { name: role, cel: alert.role }
-      # 工作负载标签优先于逻辑组件标签（component、service），后两者的实体为逻辑组件
+      - { name: role_basis, cel: alert.source }
+      - { name: confidence, cel: 'string(double(alert.confidence))' }
+      - {
+          name: contract,
+          cel: '"entity" in alert.labels && alert.labels.entity != "" && "entity_kind" in alert.labels && !(alert.labels.entity_kind in ["", "none", "None"])',
+        }
+      - { name: present, cel: 'order.filter(l, l in alert.labels && alert.labels[l] != "")' }
       - {
           name: name_label,
-          cel: '"deployment" in alert.labels ? "deployment" : "statefulset" in alert.labels ? "statefulset" : "daemonset" in alert.labels ? "daemonset" : "pod" in alert.labels ? "pod" : "component" in alert.labels ? "component" : "service" in alert.labels ? "service" : ""',
+          cel: 'contract ? "entity" : size(present) > 0 ? present[0] : "component" in alert.labels ? "component" : "service"',
         }
       - {
           name: entity_kind,
-          cel: 'name_label == "deployment" ? "Deployment" : name_label == "statefulset" ? "StatefulSet" : name_label == "daemonset" ? "DaemonSet" : name_label == "pod" ? "Pod" : "component"',
+          cel: 'contract ? alert.labels.entity_kind : name_label in kinds ? kinds[name_label] : "component"',
+        }
+      - { name: object, cel: 'alert.component_object != null ? string(alert.component_object) : ""' }
+      - { name: logical, cel: 'entity_kind == "component" ? "yes" : "no"' }
+      # 没有可加条目的告警时，说明第一条未覆盖告警给不出实体的原因
+      - {
+          name: why,
+          cel: '"entity_kind" in alert.labels && alert.labels.entity_kind in ["", "none", "None"] && ("component" in alert.labels || "service" in alert.labels) ? "declared_none" : ("component" in alert.labels || "service" in alert.labels) ? "logical_unmapped" : "no_label"',
+        }
+      - {
+          name: group,
+          cel: '"component" in alert.labels ? alert.labels.component : "service" in alert.labels ? alert.labels.service : ""',
+        }
+      - {
+          name: entry,
+          cel: 'double(alert.confidence) < 1.0 ? {"id": entry_id, "alertname": alertname, "role": role, "role_confidence": double(alert.confidence), "entity": {"kind": entity_kind, "name_labels": [name_label]}} : {"id": entry_id, "alertname": alertname, "role": role, "entity": {"kind": entity_kind, "name_labels": [name_label]}}',
         }
       - { name: catalogs, cel: 'files.pack_alerts.filter(d, d != null && has(d.entries))' }
     skip_if:
-      - cel: name_label == ""
+      - cel: size(eligible) == 0
         say:
           {
-            zh-CN: '告警 {alertname} 没有可以作为实体名的标签（deployment、statefulset、daemonset、pod、component、service）',
-            en: 'Alert {alertname} has no label usable as the entity name (deployment, statefulset, daemonset, pod, component, service)',
+            zh-CN: '告警 {alertname} 给不出实体：{why, select, declared_none {规则声明没有实体（entity_kind 为 none），只带分组标签 {group}，这个逻辑组件在拓扑里没有对应的对象} logical_unmapped {只带分组标签 {group}，这个逻辑组件在拓扑里没有对应的对象} other {没有 entity、对象标签或 component、service 标签}}。目录条目不会改变它的归属，需要在告警规则上加 entity 与 entity_kind 标签',
+            en: 'Alert {alertname} names no entity: {why, select, declared_none {its rule declares no entity (entity_kind none) and only carries the grouping label {group}, a logical component with no object in the topology} logical_unmapped {it only carries the grouping label {group}, a logical component with no object in the topology} other {it has no entity, object, component or service label}}. A catalog entry would not change where it belongs; add entity and entity_kind labels to the alert rule',
           }
       - cel: size(catalogs) != 1
         say: { zh-CN: '仓库布局的告警目录不是唯一的一个文件', en: 'The layout does not name a single alert catalog' }
@@ -327,10 +374,10 @@ remediations:
       - file: pack_alerts
         append:
           - path: entries
-            value: '{"id": entry_id, "alertname": alertname, "role": role, "entity": {"kind": entity_kind, "name_labels": [name_label]}}'
+            value: entry
     change:
-      zh-CN: '告警目录新增 {alertname} 的条目 {entry_id}：角色 {role}，实体为 {entity_kind}，名字取标签 {name_label}。本次事件中这条告警没有命中任何目录条目。'
-      en: 'Add catalog entry {entry_id} for {alertname}: role {role}, entity {entity_kind} named by label {name_label}. The alert matched no catalog entry in this incident.'
+      zh-CN: '告警目录新增 {alertname} 的条目 {entry_id}：角色 {role}（{role_basis, select, label {取自告警自带的 role 标签} expression {按规则表达式分类，置信度 {confidence}，待人确认} other {告警没有角色依据，取默认值，置信度 {confidence}，待人确认}}），实体为 {entity_kind}，名字取标签 {name_label}{logical, select, yes {，这个逻辑组件在拓扑里对应 {object}} other {}}。本次事件中这条告警没有命中任何目录条目。'
+      en: 'Add catalog entry {entry_id} for {alertname}: role {role} ({role_basis, select, label {from the role label on the alert} expression {classified by the rule expression with confidence {confidence}, to be confirmed} other {no basis on the alert, the default with confidence {confidence}, to be confirmed}}), entity {entity_kind} named by label {name_label}{logical, select, yes {, a logical component that maps to {object} in the topology} other {}}. The alert matched no catalog entry in this incident.'
     verify:
       say:
         zh-CN: '加载新包后 {alertname} 命中条目 {entry_id}，实体解析为 {entity_kind}'

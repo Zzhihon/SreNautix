@@ -165,6 +165,7 @@ export { resolveDisplayName, type DisplayNameInput } from './runtime/display-nam
 export {
   applicableRemediations,
   planRemediation,
+  type RemediationAlert,
   type RemediationCard,
   type RemediationContext,
   type RemediationTarget,

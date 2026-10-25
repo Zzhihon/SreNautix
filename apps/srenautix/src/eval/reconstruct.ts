@@ -34,7 +34,15 @@ import type { AlertInstance, Bundle, TopologyRow } from './bundle.js';
 import { matchesFault, type Label } from './labels.js';
 import { cardChecks, parseCardCheckId } from '../stage-a/card-checks.js';
 import { stableUuid } from './import-seed.js';
-import { dispositionFacts, factRoots, remediationRoot, RootCardScope, type RootLookup } from '../remediation/facts.js';
+import {
+  alertFacts,
+  dispositionFacts,
+  factRoots,
+  NO_EXTERNAL_ALERTS,
+  remediationRoot,
+  RootCardScope,
+  type RootLookup,
+} from '../remediation/facts.js';
 
 // 重建（DESIGN §14.2 reconstructed，ADR 0110）：用重建包按 server 的同一套代码重放一段时间。
 // - 拓扑：时刻 t 的节点与边取 valid_from ≤ t < valid_to 的行（与状态库的 at 查询相同），同一个键状态库的行优先于
@@ -1003,6 +1011,7 @@ export async function reconstructCase(
     roots: factRoots(inc, topo),
     resolve: (key) => remediationRoot(lookup, inc, alerts, key, new Date(asOf)),
     scope: new RootCardScope(lookup, inc, new Date(asOf)),
+    alertFacts: await alertFacts(lookup, inc, alerts, new Date(asOf), NO_EXTERNAL_ALERTS),
   });
   const snapshot: EvalSnapshot = {
     snapshot_id: snapshotId,

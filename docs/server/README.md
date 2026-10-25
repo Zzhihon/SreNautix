@@ -276,17 +276,32 @@ remediation:
   categories: [release_rollback, config_resource, alert_rule, topology_coverage]
   conclusions: [likely, evidence_consistent]
   title_prefix: null            # 默认取 notify.prefix
+  rejected_cooldown: 7d         # 同一模板对同一组文件的修改被人拒绝后，这段时间内不再提出
 ```
 
-需要 `github_app`（读仓库）与 gateway 策略中启用的 `gitops_pr`（ADR 0108）。主实例每 30 秒取最近结束、结论等级在 `conclusions` 中的研判：
+需要 `github_app`（读仓库）与 gateway 策略中启用的 `gitops_pr`（ADR 0108）。主实例每 30 秒取最近结束、结论等级在 `conclusions` 中的研判（上一轮没有结束时跳过这一轮）：
 
 1. 求适用的修复模板（领域包 `remediations.yaml`），按布局经 GitHub REST 只读地读取仓库，生成补丁；
 2. 在内存中校验：路径在布局里、修改前内容与基准提交一致、补丁应用后与计划一致、修改后的 JSON/YAML 能解析、不超过 65536 字符；
-3. 提交 `gitops_pr` 提议（来源 rule，规则 `srenautix/remediation-pr`；策略为 gitops_pr 列出自动执行规则 `remediation-pr` 时自动签发），分支 `srenautix/<事件前 8 位>-<类别>-<补丁摘要>`，标题带 `[影子]` 等前缀；
-4. PR 描述分 结论、证据、改了什么、验证计划、回滚、研判运行 六段（`<!-- srenautix:pr=<段> -->` 标记），末尾 `Refs #<事件 issue>`；
-5. gateway 开出 PR 后（执行事件里的 `PR <url> #<n>`，或按分支查询），事件 issue 里回链，通知消息的修复段落显示 PR 链接。
+3. 按修改去重（ADR 0155，见下文）；
+4. 提交 `gitops_pr` 提议（来源 rule，规则 `srenautix/remediation-pr`；策略为 gitops_pr 列出自动执行规则 `remediation-pr` 时自动签发），分支 `srenautix/<事件前 8 位>-<类别>-<补丁摘要>`，标题带 `[影子]` 等前缀；
+5. PR 描述分 结论、证据、改了什么、验证计划、回滚、研判运行 六段（`<!-- srenautix:pr=<段> -->` 标记），末尾 `Refs #<事件 issue>`；
+6. gateway 开出 PR 后（执行事件里的 `PR <url> #<n>`，或按分支查询），事件 issue 里回链，通知消息的修复段落显示 PR 链接。
 
 每次研判每个模板只处理一次，结果记在 `server.remediation_attempts`（proposed、skipped、rejected、failed 与原因码）与治理审计 `remediation.attempt`；指标 `srenautix_remediations_total{category,outcome}`、`srenautix_gitops_pulls_total{via}`。分支前缀、每小时上限、reviewers 与 main 的守护在 gateway 策略里，不在 server 配置中；server 从不写 Git。
+
+**修改去重**（ADR 0155）：去重键是（仓库，规范化补丁的哈希），规范化补丁只含每个文件的路径与增删的行，基准提交前进、行号与上下文变化后同一个修改的哈希不变。每个提议在 `server.remediation_changes` 记一行，状态按提议、`gitops_pulls` 与 GitHub 上 PR 的当前状态（GET pulls/{n}）在判断时刷新：
+
+| 已有的同一个修改 | 原因码 | 处理 |
+|---|---|---|
+| 提议还没有开出 PR | `duplicate_pending` | 不提议；登记这次触发，PR 开出后照下一行处理 |
+| PR 打开 | `duplicate_open` | 不提议；在 PR 上评论这次触发（事件、研判运行与 `Refs` 新事件的 issue，带 `<!-- srenautix:trigger=<事件> -->` 标记，同一事件只评论一次），新事件的 issue 里回链 PR，PR 描述补上它的 Refs |
+| PR 关闭且没有合并，或提议在审批时被人拒绝 | `rejected_before` | 不再自动提出；人重新打开 PR 后按打开处理 |
+| 同一模板对同一组文件的另一个修改在 `rejected_cooldown` 内被拒绝 | `rejected_cooldown` | 冷却期内不提出 |
+
+PR 已合并、提议被策略拒绝、过期、绑定过时或执行失败（没有开出 PR）的修改不算重复。记录在 PostgreSQL 里，server 重启后照常生效；没有记录的旧提议在每轮开始时按 `remediation_attempts` 补登记。PR 评论与 issue 关联失败时退避重试，最多 8 次；写入治理审计 `remediation.trigger_comment`，状态变化写 `remediation.change_state`。
+
+**模板上下文里的告警**（ADR 0155）：每条成员告警带归属组件对应的具体对象（`component_object`）与是否描述集群之外的上游（`external`：组件类型声明了 external，或命中 `notify.digest.external_roots` 开启时的 `components`、`alert_labels`）。`alert-catalog-entry` 只为能给出实体的告警加条目，`noisy-alert-relax` 不降级外部上游的告警。
 
 ## 变更源
 

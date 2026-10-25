@@ -24,7 +24,15 @@ import { referenceCases } from './research-materials.js';
 import { parseStoredKey } from '../topology/keys.js';
 import { changesInWindow } from '../changes/service.js';
 import { MAX_CHANGE_LOOKBACK_MS } from '@srenautix/core';
-import { dispositionFacts, factRoots, remediationRoot, RootCardScope, type RootLookup } from '../remediation/facts.js';
+import {
+  alertFacts,
+  dispositionFacts,
+  factRoots,
+  NO_EXTERNAL_ALERTS,
+  remediationRoot,
+  RootCardScope,
+  type RootLookup,
+} from '../remediation/facts.js';
 
 export interface ResearchRouteDeps {
   pool: pg.Pool;
@@ -340,6 +348,8 @@ export function registerResearchRoutes(app: FastifyInstance, d: ResearchRouteDep
               roots: factRoots(incident, topo),
               resolve: (key) => remediationRoot(d.dispositionFacts!.lookup, incident, alerts, key, now),
               scope: new RootCardScope(d.dispositionFacts.lookup, incident, now),
+              // 处置依据只看能消除根因的两类模板（发布回退、配置与资源），它们不读告警的外部上游标记，不需要汇总配置
+              alertFacts: await alertFacts(d.dispositionFacts.lookup, incident, alerts, now, NO_EXTERNAL_ALERTS),
             }),
           }
         : {}),

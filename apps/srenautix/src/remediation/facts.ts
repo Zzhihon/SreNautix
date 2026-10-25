@@ -1,6 +1,7 @@
 import type { Alert, ComponentType, EvidenceResult, Incident, TopologyEdge } from '@srenautix/contract';
-import { matchTypeByName, tryNodeKey } from '@srenautix/core';
+import { matchTypeByName, NAMESPACE_KIND, tryNodeKey } from '@srenautix/core';
 import { applicableRemediations, type PackSet, type RemediationContext } from '@srenautix/packs-sdk';
+import { matchesLabels } from '../notify/external.js';
 import {
   hintOf,
   isLogicalComponent,
@@ -11,7 +12,7 @@ import {
 import { parseStoredKey } from '../topology/keys.js';
 import type { DispositionFacts } from '../research/types.js';
 import { FIX_CATEGORIES } from '../research/disposition.js';
-import { alertsOf, cardsOf } from './render.js';
+import { alertsOf, cardsOf, type AlertFacts } from './render.js';
 
 // 处置推导的确定性依据（ADR 0138），server 写进研判输入，重建评测写进快照：
 // - external：候选根因中组件类型声明为集群外部（external）的组件；
@@ -38,6 +39,8 @@ export interface FactsInput {
   resolve: RootResolver;
   /** 每个根因自己的卡（RootCardScope） */
   scope: Pick<RootCardScope, 'cards'>;
+  /** 成员告警的拓扑事实（alertFacts） */
+  alertFacts: ReadonlyMap<string, AlertFacts>;
 }
 
 export interface RootLookup {
@@ -163,6 +166,60 @@ export function factRoots(
   ];
 }
 
+/**
+ * 另外按外部上游处理的告警（ADR 0147 的 notify.digest.external_roots）：归属组件在 components 里，或标签满足
+ * alertLabels。组件类型声明为 external 的告警不需要配置
+ */
+export interface ExternalAlertSettings {
+  components: readonly string[];
+  alertLabels: Readonly<Record<string, readonly string[]>>;
+}
+
+export const NO_EXTERNAL_ALERTS: ExternalAlertSettings = { components: [], alertLabels: {} };
+
+/**
+ * 成员告警的拓扑事实（ADR 0155），按 alert_id：
+ * - component_object：归属组件对应的具体对象（ComponentExpander.concrete）。组件是对象时就是它（Pod 取顶层属主），
+ *   逻辑组件只映射出一个工作负载时是这个工作负载；逻辑组件没有映射出对象、或只归入命名空间伪组件时为 null；
+ * - external：归属组件或实体的组件类型声明在集群之外（拓扑节点上的类型，节点不在拓扑里时按 kind 与名字匹配），
+ *   或命中外部上游的配置。
+ */
+export async function alertFacts(
+  d: Pick<RootLookup, 'concrete' | 'componentType' | 'componentTypes'>,
+  inc: Pick<Incident, 'cluster_id'>,
+  alerts: readonly Alert[],
+  at: Date,
+  ext: ExternalAlertSettings,
+): Promise<Map<string, AlertFacts>> {
+  const types = d.componentTypes();
+  const externalTypes = new Set(types.filter((t) => t.external === true).map((t) => t.id));
+  const typeIsExternal = async (key: string): Promise<boolean> => {
+    if (!externalTypes.size) {
+      return false;
+    }
+    const k = parseStoredKey(key);
+    const id = (await d.componentType(inc.cluster_id, key)) ?? matchTypeByName(k.kind, k.namespace, k.name, types)?.id;
+    return id !== undefined && id !== null && externalTypes.has(id);
+  };
+  const out = new Map<string, AlertFacts>();
+  for (const a of alerts) {
+    const component = a.component ?? null;
+    let object: string | null = null;
+    if (component) {
+      const o = await d.concrete(inc.cluster_id, component, at, [hintOf(a.labels)]);
+      object = isLogicalComponent(o.key) || o.kind === NAMESPACE_KIND ? null : o.key;
+    }
+    const entityKey = a.entity ? tryNodeKey(a.entity.kind, a.entity.namespace, a.entity.name) : null;
+    const external =
+      (component !== null && ext.components.includes(component)) ||
+      matchesLabels(a.labels, ext.alertLabels) ||
+      (component !== null && (await typeIsExternal(component))) ||
+      (entityKey !== null && entityKey !== component && (await typeIsExternal(entityKey)));
+    out.set(a.alert_id, { component_object: object, external });
+  }
+  return out;
+}
+
 /** 模板匹配的上下文（与 RemediationService.context 相同的字段）；rootCards 是 RootCardScope 选出的根因自己的卡 */
 export function remediationContext(
   incident: Incident,
@@ -171,13 +228,14 @@ export function remediationContext(
   root: RemediationContext['root'],
   research: { disposition: string; level: string } | null,
   rootCards: readonly EvidenceResult[],
+  facts: ReadonlyMap<string, AlertFacts>,
 ): RemediationContext {
   return {
     incident: incident as unknown as Record<string, unknown>,
     root,
     cards: cardsOf(cards),
     root_cards: cardsOf([...rootCards]),
-    alerts: alertsOf(alerts),
+    alerts: alertsOf(alerts, facts),
     research,
   };
 }
@@ -209,6 +267,7 @@ export async function dispositionFacts(i: FactsInput): Promise<DispositionFacts>
       root,
       { disposition: 'act', level: 'likely' },
       await i.scope.cards(root, i.cards),
+      i.alertFacts,
     );
     const templates = matchTemplates(i.set, ctx).filter((t) => enabled.has(t.category));
     if (templates.length) {

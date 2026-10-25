@@ -32,22 +32,40 @@ export interface RemediationContext {
    * GitOps 应用时还有它管理的对象，再加上管理根因的应用本身的卡；形状与 cards 相同。没有给出时为空
    */
   root_cards?: Record<string, RemediationCard>;
-  /** 成员告警；role、source、catalog_entry、chronic 取自契约 AlertClassification */
-  alerts: Array<{
-    alertname: string;
-    labels: Record<string, string>;
-    annotations: Record<string, string>;
-    role: string;
-    source: string;
-    catalog_entry: string | null;
-    chronic: boolean;
-    entity: Record<string, unknown> | null;
-  }>;
+  /** 成员告警；role、source、confidence、catalog_entry、chronic 取自契约 AlertClassification */
+  alerts: RemediationAlert[];
   /**
    * 主动优化（契约 2.28.0）：给出时只有 applies 为 goal 的模板适用，模板的 CEL 另有 goal、finding、finding_cards 与 gates；
    * incident 与 alerts 传空值，root 为发现挂到的组件。不给出时只有 applies 为 incident 的模板适用
    */
   goal?: GoalTemplateContext;
+}
+
+/** 模板上下文里的一条成员告警（ADR 0155） */
+export interface RemediationAlert {
+  alertname: string;
+  labels: Record<string, string>;
+  annotations: Record<string, string>;
+  role: string;
+  /** 角色的依据：label、catalog、expression、default（契约 AlertClassification.source） */
+  source: string;
+  /** 角色的置信度（契约 AlertClassification.confidence） */
+  confidence: number;
+  catalog_entry: string | null;
+  chronic: boolean;
+  entity: Record<string, unknown> | null;
+  /** 告警归属的拓扑组件（契约 Alert.component）；没有时为 null */
+  component: string | null;
+  /**
+   * 归属组件在拓扑里对应的具体对象的组件键：组件本身是对象时就是它，逻辑组件只映射出一个工作负载（ADR 0130）时是这个
+   * 工作负载；逻辑组件在拓扑里没有对应的对象、或没有归属组件时为 null
+   */
+  component_object: string | null;
+  /**
+   * 告警描述的是集群之外的上游：归属组件或实体的组件类型声明了 external（ADR 0138），或命中外部上游汇总的配置
+   * （notify.digest.external_roots 的 components 与 alert_labels，ADR 0147）
+   */
+  external: boolean;
 }
 
 export interface RemediationCard {

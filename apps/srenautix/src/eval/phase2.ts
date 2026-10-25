@@ -32,7 +32,9 @@ import {
   replay,
 } from './reconstruct.js';
 import {
+  alertFacts,
   matchTemplates,
+  NO_EXTERNAL_ALERTS,
   remediationContext,
   remediationRoot,
   RootCardScope,
@@ -364,6 +366,8 @@ async function runTemplates(
       root,
       { disposition: r.disposition ?? 'undetermined', level: r.level },
       await new RootCardScope(m.lookup, m.incident, new Date(m.at)).cards(root, m.cards),
+      // 评测没有部署的汇总配置：外部上游只按领域包声明的组件类型判断
+      await alertFacts(m.lookup, m.incident, m.alerts, new Date(m.at), NO_EXTERNAL_ALERTS),
     );
     out.set(
       r,

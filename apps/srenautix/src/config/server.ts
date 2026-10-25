@@ -530,6 +530,9 @@ export const serverConfigSchema = z
           .default(['likely', 'evidence_consistent']),
         // 标题前缀；不填时取 notify.prefix（影子期间为 "[影子]"）
         title_prefix: z.string().optional(),
+        // 同一模板对同一组文件的修改被人关闭未合并（或提议被人拒绝）之后，这段时间内不再提出（ADR 0155）；
+        // 被拒绝的那一个修改始终不再自动提出。0s 时只记住被拒绝的修改
+        rejected_cooldown: duration.default('7d'),
       })
       .strict()
       .default({
@@ -537,6 +540,7 @@ export const serverConfigSchema = z
         repositories: {},
         categories: ['release_rollback', 'config_resource', 'alert_rule', 'topology_coverage'],
         conclusions: ['likely', 'evidence_consistent'],
+        rejected_cooldown: '7d',
       }),
     github_app: githubApp.optional(),
     // 主动优化（ADR 0146）；默认关闭

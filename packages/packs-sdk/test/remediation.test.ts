@@ -22,7 +22,12 @@ import {
   quantityBytes,
   quantityCores,
 } from '../src/remediation/functions.js';
-import { applicableRemediations, planRemediation, type RemediationContext } from '../src/remediation/plan.js';
+import {
+  applicableRemediations,
+  planRemediation,
+  type RemediationContext,
+  type RemediationSkip,
+} from '../src/remediation/plan.js';
 import { GitRepoReader } from '../src/remediation/repo.js';
 import { LiveDataSource } from '../src/runtime/datasource.js';
 import { CATALOG, PACKS } from './support.js';
@@ -467,9 +472,13 @@ describe.each(SHAPES)('$name', (shape) => {
           annotations: {},
           role: 'cause',
           source: 'catalog',
+          confidence: 1,
           catalog_entry: 'alerts-kps/kube-hpa-maxed-out',
           chronic: true,
           entity: null,
+          component: 'HorizontalPodAutoscaler:shop/api',
+          component_object: 'HorizontalPodAutoscaler:shop/api',
+          external: false,
         },
       ],
       cards: {
@@ -510,15 +519,19 @@ describe.each(SHAPES)('$name', (shape) => {
 
   it('研判结论为不需要处理：不是长期告警的症状告警也降级并补上 for；同名有两条规则时跳过', async () => {
     const dir = makeRepo(shape, [[OLD, 'r1']]);
-    const alert = (alertname: string) => ({
+    const alert = (alertname: string, external = false) => ({
       alertname,
       labels: { severity: 'critical', namespace: 'shop' },
       annotations: {},
       role: 'symptom',
       source: 'label',
+      confidence: 1,
       catalog_entry: null,
       chronic: false,
       entity: null,
+      component: 'Deployment:shop/api',
+      component_object: 'Deployment:shop/api',
+      external,
     });
     const ignore = { disposition: 'ignore', level: 'likely' };
     const repo = new GitRepoReader(dir);
@@ -542,6 +555,35 @@ describe.each(SHAPES)('$name', (shape) => {
         (a) => a.key,
       ),
     ).toContain('gitops/noisy-alert-relax');
+    // 告警本身描述外部上游（ADR 0155）：根因不是外部组件（例如按主题聚合的逻辑组件）时也不降级；同一事件里另有集群内的
+    // critical 告警时，降级的是那一条
+    const viaTheme = {
+      alerts: [alert('ShopProviderErrorsCritical', true)],
+      research: ignore,
+      root: { cluster_id: 'c1', kind: 'component', namespace: null, name: 'provider', external: false },
+    };
+    expect(applicableRemediations(set, ctx(viaTheme)).applicable.map((a) => a.key)).not.toContain(
+      'gitops/noisy-alert-relax',
+    );
+    const chronicUpstream = ctx({
+      alerts: [{ ...alert('ShopProviderErrorsCritical', true), chronic: true }],
+      cards: { 'shop/traffic/client-errors': { verdict: 'normal', impact: true } },
+    });
+    expect(applicableRemediations(set, chronicUpstream).applicable.map((a) => a.key)).not.toContain(
+      'gitops/noisy-alert-relax',
+    );
+    const mixed = await planRemediation(
+      set,
+      'gitops/noisy-alert-relax',
+      ctx({ ...viaTheme, alerts: [alert('ShopProviderErrorsCritical', true), alert('ShopPodRestarted')] }),
+      { repo, layout: shape.layout },
+      ds,
+      AT,
+    );
+    expect(mixed.kind).toBe('plan');
+    if (mixed.kind === 'plan') {
+      expect(mixed.change['zh-CN']).toContain('ShopPodRestarted');
+    }
     const plan = await planRemediation(set, 'gitops/noisy-alert-relax', c, { repo, layout: shape.layout }, ds, AT);
     expect(plan.kind).toBe('plan');
     if (plan.kind === 'plan') {
@@ -560,22 +602,25 @@ describe.each(SHAPES)('$name', (shape) => {
     expect(paired).toMatchObject({ kind: 'skipped', code: 'skip_if' });
   });
 
-  it('未覆盖的告警只带 service 标签：实体为逻辑组件', async () => {
+  /** 未覆盖、只带分组标签的告警（ADR 0155）：object 是归属的逻辑组件在拓扑里对应的对象 */
+  const grouped = (labels: Record<string, string>, object: string | null) => ({
+    alertname: 'ShopCatalogStale',
+    labels: { severity: 'warning', ...labels },
+    annotations: {},
+    role: 'symptom',
+    source: 'default',
+    confidence: 0.3,
+    catalog_entry: null,
+    chronic: false,
+    entity: null,
+    component: `component:${labels.component ?? labels.service}`,
+    component_object: object,
+    external: false,
+  });
+
+  it('未覆盖的告警只带 service 标签、逻辑组件在拓扑里对应到对象：实体为逻辑组件，角色没有依据时带 role_confidence', async () => {
     const dir = makeRepo(shape, [[OLD, 'r1']]);
-    const c = ctx({
-      alerts: [
-        {
-          alertname: 'ShopCatalogStale',
-          labels: { severity: 'warning', service: 'catalog' },
-          annotations: {},
-          role: 'symptom',
-          source: 'default',
-          catalog_entry: null,
-          chronic: false,
-          entity: null,
-        },
-      ],
-    });
+    const c = ctx({ alerts: [grouped({ service: 'catalog' }, 'Deployment:shop/api')] });
     const plan = await planRemediation(
       set,
       'gitops/alert-catalog-entry',
@@ -588,13 +633,111 @@ describe.each(SHAPES)('$name', (shape) => {
     if (plan.kind !== 'plan') {
       return;
     }
+    expect(plan.change['zh-CN']).toContain('告警没有角色依据，取默认值，置信度 0.3，待人确认');
+    expect(plan.change['zh-CN']).toContain('这个逻辑组件在拓扑里对应 Deployment:shop/api');
     applyCheck(dir, plan.patch);
     const doc = parse(readFileSync(join(dir, shape.layout.pack_alerts!.path), 'utf8')) as { entries: unknown[] };
     expect(doc.entries[1]).toEqual({
       id: 'shop-catalog-stale',
       alertname: 'ShopCatalogStale',
       role: 'symptom',
+      role_confidence: 0.3,
       entity: { kind: 'component', name_labels: ['service'] },
+    });
+  });
+
+  it('只带分组标签、逻辑组件在拓扑里没有对应对象（component: workload）时不加条目，说明要在规则上补实体', async () => {
+    const dir = makeRepo(shape, [[OLD, 'r1']]);
+    const repo = new GitRepoReader(dir);
+    const declared = await planRemediation(
+      set,
+      'gitops/alert-catalog-entry',
+      ctx({
+        alerts: [
+          {
+            ...grouped({ component: 'workload', role: 'cause', entity_kind: 'none', entity: '' }, null),
+            alertname: 'ShopGatewayOverProvisioned',
+            role: 'cause',
+            source: 'label',
+            confidence: 1,
+          },
+        ],
+      }),
+      { repo, layout: shape.layout },
+      ds,
+      AT,
+    );
+    expect(declared).toMatchObject({ kind: 'skipped', code: 'skip_if' });
+    expect((declared as RemediationSkip).reason['zh-CN']).toBe(
+      '告警 ShopGatewayOverProvisioned 给不出实体：规则声明没有实体（entity_kind 为 none），只带分组标签 workload，' +
+        '这个逻辑组件在拓扑里没有对应的对象。目录条目不会改变它的归属，需要在告警规则上加 entity 与 entity_kind 标签',
+    );
+    const unmapped = await planRemediation(
+      set,
+      'gitops/alert-catalog-entry',
+      ctx({ alerts: [grouped({ component: 'workload' }, null)] }),
+      { repo, layout: shape.layout },
+      ds,
+      AT,
+    );
+    expect((unmapped as RemediationSkip).reason['zh-CN']).toContain(
+      '只带分组标签 workload，这个逻辑组件在拓扑里没有对应的对象',
+    );
+    // 同一事件里另一条未覆盖的告警带对象标签：为它加条目
+    const other = await planRemediation(
+      set,
+      'gitops/alert-catalog-entry',
+      ctx({
+        alerts: [
+          grouped({ component: 'workload' }, null),
+          {
+            ...grouped({ statefulset: 'gateway', namespace: 'shop' }, 'StatefulSet:shop/gateway'),
+            alertname: 'ShopGatewayIdle',
+          },
+        ],
+      }),
+      { repo, layout: shape.layout },
+      ds,
+      AT,
+    );
+    expect(other.kind).toBe('plan');
+    expect(other.kind === 'plan' && other.patch).toContain(
+      '+  - { id: shop-gateway-idle, alertname: ShopGatewayIdle, role: symptom, role_confidence: 0.3, entity: { kind: StatefulSet, name_labels: [ statefulset ] } }',
+    );
+  });
+
+  it('未覆盖的告警带标签契约的 entity 与 entity_kind：实体取标签契约', async () => {
+    const dir = makeRepo(shape, [[OLD, 'r1']]);
+    const plan = await planRemediation(
+      set,
+      'gitops/alert-catalog-entry',
+      ctx({
+        alerts: [
+          {
+            ...grouped({ component: 'gateway', entity_kind: 'StatefulSet', entity: 'gateway', pod: 'gateway-0' }, null),
+            alertname: 'ShopGatewaySlowQueries',
+            role: 'cause',
+            source: 'label',
+            confidence: 1,
+          },
+        ],
+      }),
+      { repo: new GitRepoReader(dir), layout: shape.layout },
+      ds,
+      AT,
+    );
+    expect(plan.kind).toBe('plan');
+    if (plan.kind !== 'plan') {
+      return;
+    }
+    expect(plan.change['zh-CN']).toContain('角色 cause（取自告警自带的 role 标签）');
+    applyCheck(dir, plan.patch);
+    const doc = parse(readFileSync(join(dir, shape.layout.pack_alerts!.path), 'utf8')) as { entries: unknown[] };
+    expect(doc.entries[1]).toEqual({
+      id: 'shop-gateway-slow-queries',
+      alertname: 'ShopGatewaySlowQueries',
+      role: 'cause',
+      entity: { kind: 'StatefulSet', name_labels: ['entity'] },
     });
   });
 
@@ -606,9 +749,13 @@ describe.each(SHAPES)('$name', (shape) => {
       annotations: {},
       role: 'cause',
       source: 'label',
+      confidence: 1,
       catalog_entry: null,
       chronic: false,
       entity: null,
+      component: 'Deployment:shop/worker',
+      component_object: 'Deployment:shop/worker',
+      external: false,
     });
     const repo = new GitRepoReader(dir);
     const plan = await planRemediation(

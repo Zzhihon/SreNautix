@@ -106,7 +106,14 @@ const ALERT = {
   alertname: 'ShopPodRestarted',
   labels: { alertname: 'ShopPodRestarted', severity: 'critical', namespace: 'shop', pod: POD, container: 'db-check' },
   annotations: { summary: `shop 的 ${POD} 在 5 分钟内重启过` },
-  classification: { role: 'symptom', source: 'catalog', catalog_entry: 'kind-shop/shop-pod-restarted', chronic: false },
+  classification: {
+    role: 'symptom',
+    source: 'catalog',
+    confidence: 1,
+    catalog_entry: 'kind-shop/shop-pod-restarted',
+    chronic: false,
+  },
+  component: ROOT,
   entity: { cluster_id: 'kind', kind: 'Pod', namespace: 'shop', name: POD, uid: null },
 } as unknown as Alert;
 
@@ -151,7 +158,16 @@ function run(set: PackSet, rows: Row[], root = ROOT_ENTITY) {
   });
   // 根因自己的卡：api 与它的 Pod
   const own = cards.filter((c) => c.entity?.name === 'api' || c.entity?.name === POD);
-  const ctx = remediationContext(inc(), [ALERT], cards, root, { disposition: d.disposition, level: 'likely' }, own);
+  const facts = new Map([[ALERT.alert_id, { component_object: ROOT, external: false }]]);
+  const ctx = remediationContext(
+    inc(),
+    [ALERT],
+    cards,
+    root,
+    { disposition: d.disposition, level: 'likely' },
+    own,
+    facts,
+  );
   return { disposition: d, templates: matchTemplates(set, ctx).map((t) => t.key) };
 }
 

@@ -20,7 +20,8 @@ import type { ProposalService } from '../proposals/service.js';
 import { appendAudit } from '../store/audit.js';
 import { tx } from '../store/pool.js';
 import type { ConcreteObject, LogicalHint } from '../topology/expand.js';
-import { remediationRoot, RootCardScope } from './facts.js';
+import { changeHash, RemediationChanges, triggerComment, type PullLink, type Verdict } from './dedupe.js';
+import { alertFacts, remediationRoot, RootCardScope, type ExternalAlertSettings } from './facts.js';
 import { GitHubRepoReader } from './github-repo.js';
 import { alertsOf, branchOf, cardsOf, keyCards, prBody, say, validatePlan, type Lang } from './render.js';
 
@@ -30,7 +31,9 @@ import { alertsOf, branchOf, cardsOf, keyCards, prBody, say, validatePlan, type 
  * - 每次研判每个模板只处理一次（server.remediation_attempts）；没有适用模板时记一行 '-'；
  * - 提议的来源为 rule，规则名 remediation-pr：gateway 策略为 gitops_pr 列出这条自动执行规则时自动签发，否则等待人工审批；
  * - 每小时上限、分支前缀、reviewers 与 main 的守护在 gateway；冻结只约束集群写入，gitops_pr 照常；
- * - 基准分支在计划与提议之间前进时不提交，下一轮重新计划。
+ * - 基准分支在计划与提议之间前进时不提交，下一轮重新计划；
+ * - 同一仓库的同一个修改（规范化补丁的哈希）已有未结束的提议或打开的 PR 时不再提议，在 PR 上评论新的触发并关联新事件的
+ *   issue；人关闭未合并的修改不再自动提出，同一模板对同一组文件的修改有冷却期（ADR 0155，dedupe.ts）。
  */
 export interface RemediationRepository {
   repo: string;
@@ -49,6 +52,10 @@ export interface RemediationSettings {
   maxPerRun: number;
   /** 只处理这段时间内结束的研判 */
   lookbackMs: number;
+  /** 另外按外部上游处理的告警（notify.digest.external_roots 开启时的 components 与 alert_labels，ADR 0147） */
+  externalAlerts: ExternalAlertSettings;
+  /** 同一模板对同一组文件的修改被人拒绝后的冷却期（remediation.rejected_cooldown） */
+  rejectedCooldownMs: number;
 }
 
 export interface RemediationDeps {
@@ -65,6 +72,8 @@ export interface RemediationDeps {
   proposals: ProposalService;
   /** 事件 issue 的引用（开 PR 之前确保 issue 存在）；没有开启事件 issue 时为 null */
   issueRef: ((incidentId: string, fromRepo: string) => Promise<string | null>) | null;
+  /** 把事件 issue 关联到已有的 PR（IssueService.link：issue 里回链，PR 描述补 Refs）；没有开启事件 issue 时为 null */
+  linkPull: ((incidentId: string, pull: PullLink) => Promise<void>) | null;
   metrics: ServerMetrics;
 }
 
@@ -117,14 +126,37 @@ class Deferred extends Error {}
 export const BINDING_RETRY_LIMIT = 5;
 
 export class RemediationService {
+  private readonly changes: RemediationChanges;
+  private running = false;
+
   constructor(
     private readonly pool: pg.Pool,
     private readonly s: RemediationSettings,
     private readonly d: RemediationDeps,
-  ) {}
+  ) {
+    this.changes = new RemediationChanges(pool, d.github, s.rejectedCooldownMs);
+  }
 
-  /** 一轮：处理最近结束、还没有处理过的研判 */
+  /**
+   * 一轮：补登记之前的提议，发出重复触发的 PR 评论，处理最近结束、还没有处理过的研判。上一轮没有结束时跳过：
+   * 两轮同时处理同一次研判会各自提议同一个修改
+   */
   async runOnce(limit = 5): Promise<number> {
+    if (this.running) {
+      return 0;
+    }
+    this.running = true;
+    try {
+      await this.changes.backfill();
+      const n = await this.runs(limit);
+      await this.changes.postTriggers(this.d.linkPull);
+      return n;
+    } finally {
+      this.running = false;
+    }
+  }
+
+  private async runs(limit: number): Promise<number> {
     const r = await this.pool.query<RunRow>(
       `SELECT r.run_id, r.incident_id, r.incident_version, r.conclusion_level, r.disposition, r.root_component, r.summary,
               r.evidence_fingerprint, r.output
@@ -290,7 +322,8 @@ export class RemediationService {
       cards: cardsOf(cards),
       // 根因自己的卡（ADR 0139）：发布回退与内存模板只按根因上的结论适用
       root_cards: cardsOf(await new RootCardScope(this.d, inc, at).cards(root, cards)),
-      alerts: alertsOf(alerts),
+      // 告警归属组件对应的具体对象与是否描述外部上游（ADR 0155）：目录条目模板按前者取实体，告警调优模板不降级后者
+      alerts: alertsOf(alerts, await alertFacts(this.d, inc, alerts, at, this.s.externalAlerts)),
       // 触发这次修复的研判结论（模板按处置判断与结论等级适用，例如研判判为 ignore 的误报告警降级）
       research: {
         disposition: run.disposition ?? run.output?.disposition ?? 'undetermined',
@@ -356,6 +389,27 @@ export class RemediationService {
         `${repo.repo} 的 ${repo.base_branch} 已从 ${plan.base.slice(0, 12)} 前进到 ${head?.slice(0, 12)}`,
       );
     }
+    // 同一个修改已有提议或 PR、或被人拒绝过（ADR 0155）：不再提议
+    const hash = changeHash(plan.patch);
+    let verdict: Verdict | null;
+    try {
+      verdict = await this.changes.verdict(repo.repo, hash, a.key, files);
+    } catch (e) {
+      if (e instanceof GitHubError) {
+        throw new Deferred(`读取 ${repo.repo} 已有 PR 的状态失败：${e.message}`);
+      }
+      throw e;
+    }
+    if (verdict) {
+      return {
+        ...base,
+        repository: repo.repo,
+        base: plan.base,
+        files,
+        code: verdict.code,
+        reason: await this.duplicate(run, inc, repo.repo, verdict),
+      };
+    }
     const digest = createHash('sha256').update(plan.patch).digest('hex');
     const branch = branchOf(inc.incident_id, plan.category, digest);
     const shownRoot = remediationRootKey(run, inc) ?? inc.root.component!;
@@ -402,6 +456,16 @@ export class RemediationService {
       );
       const p = r.proposal;
       const rejected = p.state === 'rejected_by_policy';
+      if (!rejected) {
+        await this.changes.record({
+          proposalId: p.proposal_id,
+          repository: repo.repo,
+          hash,
+          key: a.key,
+          files,
+          incidentId: inc.incident_id,
+        });
+      }
       return {
         ...base,
         outcome: rejected ? 'rejected' : 'proposed',
@@ -432,6 +496,44 @@ export class RemediationService {
       }
       throw e;
     }
+  }
+
+  /**
+   * 去重结论的说明。同一个修改已有提议或 PR 时登记这次触发：确保新事件有 issue（受同样的限速），PR 开出后在 PR 上评论，
+   * 并把新事件的 issue 关联到 PR（postTriggers）
+   */
+  private async duplicate(run: RunRow, inc: Incident, repo: string, v: Verdict): Promise<string> {
+    const pr = v.row.pr_url ?? `提议 ${v.row.proposal_id}`;
+    if (v.code === 'rejected_before') {
+      return `同一个修改的 ${pr} 已在 ${v.row.closed_at?.toISOString()} 被关闭且没有合并，不再提出`;
+    }
+    if (v.code === 'rejected_cooldown') {
+      return `同一模板对这些文件的修改 ${pr} 已在 ${v.row.closed_at?.toISOString()} 被关闭且没有合并，冷却到 ${v.until.toISOString()}`;
+    }
+    const issueRef = this.d.issueRef ? await this.d.issueRef(inc.incident_id, repo) : null;
+    const added = await this.changes.trigger(v.row.proposal_id, {
+      incidentId: inc.incident_id,
+      runId: run.run_id,
+      body: triggerComment({
+        lang: this.s.language,
+        consoleUrl: this.s.consoleUrl,
+        incidentId: inc.incident_id,
+        incidentLabel: inc.label,
+        runId: run.run_id,
+        level: run.conclusion_level,
+        issueRef,
+      }),
+    });
+    logger.info('自愈 PR 的修改已有提议或 PR，记为重复触发', {
+      run_id: run.run_id,
+      incident_id: inc.incident_id,
+      proposal_id: v.row.proposal_id,
+      pr: v.row.pr_url,
+      new_trigger: added,
+    });
+    return v.code === 'duplicate_open'
+      ? `同一个修改的 ${pr} 仍然打开，这次触发记为它的评论`
+      : `同一个修改的 ${pr} 还没有开出 PR，这次触发在 PR 开出后记为它的评论`;
   }
 
   private async record(run: RunRow, attempts: Attempt[]): Promise<void> {
