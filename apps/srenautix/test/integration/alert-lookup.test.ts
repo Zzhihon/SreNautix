@@ -416,11 +416,12 @@ describe('查找告警所属事件的各种结果', () => {
     expect(
       await lookupAlert(db.server, ALL, q({ alertname: 'SelfAlert', srenautix_self: 'true' }), OPTS),
     ).toMatchObject({ outcome: 'self_alert' });
-    for (const labels of [
+    const dropped: Array<Record<string, string>> = [
       { alertname: 'Watchdog' },
       { alertname: 'InfoInhibitor', severity: 'none' },
       { alertname: 'Quiet', severity: 'none' },
-    ]) {
+    ];
+    for (const labels of dropped) {
       expect(await lookupAlert(db.server, ALL, q(labels), OPTS), labels.alertname).toMatchObject({
         outcome: 'ignored',
       });

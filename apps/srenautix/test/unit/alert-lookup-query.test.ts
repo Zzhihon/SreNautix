@@ -16,7 +16,9 @@ describe('告警链接的查询串', () => {
       empty: 'null',
       quoted: '"a"',
     };
-    const encoded = new URLSearchParams(Object.entries(labels).map(([k, v]) => [`l.${k}`, v])).toString();
+    const encoded = new URLSearchParams(
+      Object.entries(labels).map(([k, v]): [string, string] => [`l.${k}`, v]),
+    ).toString();
     expect(parseLookupQuery(encoded)).toEqual({ labels, clusterId: null });
     // Go 的 url.QueryEscape（模板的 urlquery）把空格写成 +，html/template 写成 %20
     expect(parseLookupQuery('l.alertname=A&l.team=%E6%94%AF%E4%BB%98+%E7%BB%84&l.note=x%20y&cluster_id=c1')).toEqual({
