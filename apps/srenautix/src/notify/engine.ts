@@ -463,7 +463,16 @@ export class NotifyEngine {
       }
     }
     const at = new Date(this.opts.now());
-    await this.store.markDelivered(row.id, externalId, row.desiredHash, at, edit);
+    const first = await this.store.markDelivered(row.id, externalId, row.desiredHash, at, edit);
+    if (row.kind === 'incident' && first && this.source.firstMessage) {
+      const f = await this.source.firstMessage(row.incidentId as string, row.id, at);
+      if (f) {
+        this.metrics.firstMessageLatency.observe(
+          { business_impact: String(f.businessImpact), origin: f.origin },
+          Math.max(0, (at.getTime() - f.onsetMs) / 1000),
+        );
+      }
+    }
     if (row.kind === 'incident') {
       this.known.set(msgKey(a.channel, row.chat, row.incidentId as string), { externalId, hash: row.desiredHash });
       // 每次发出或编辑成功都报告消息中的提议：后来加入已有消息（编辑）的提议也要开始计算 TTL。

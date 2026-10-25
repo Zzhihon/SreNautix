@@ -93,7 +93,7 @@ export class ServerMetrics extends BaseMetrics {
 
   readonly reconcileRepairs = new Counter({
     name: 'srenautix_ingest_reconcile_repairs_total',
-    help: '对账修正的告警数，按类型（added、resolved）',
+    help: '对账修正的告警数，按类型（added、resolved；added_fast 为 Alertmanager 新增告警的快速轮询补写的，ADR 0160）',
     labelNames: ['kind'] as const,
     registers: [this.registry],
   });
@@ -205,8 +205,25 @@ export class ServerMetrics extends BaseMetrics {
 
   readonly stageALatency = new Histogram({
     name: 'srenautix_stage_a_latency_seconds',
-    help: '从首次触发到阶段 A 报告发出的时长（DESIGN §7.1 SLO：p95 ≤60 秒）',
+    help: '从事件的计时起点到阶段 A 报告发出的时长（DESIGN §7.1 SLO：p95 ≤60 秒）。origin=new 从首个告警触发算，origin=split 从拆分时刻算（ADR 0159）',
+    labelNames: ['origin'] as const,
     buckets: [1, 2, 5, 10, 15, 20, 30, 45, 60, 90, 120, 300],
+    registers: [this.registry],
+  });
+
+  readonly firstMessageLatency = new Histogram({
+    name: 'srenautix_first_message_latency_seconds',
+    help: '从事件的计时起点到这个事件的第一条事件消息送达渠道的时长（ADR 0159）；business_impact 按 notify.business_impact_alerts 判定',
+    labelNames: ['business_impact', 'origin'] as const,
+    buckets: [5, 10, 15, 20, 30, 45, 60, 75, 90, 120, 180, 300, 600],
+    registers: [this.registry],
+  });
+
+  readonly ingestDelay = new Histogram({
+    name: 'srenautix_ingest_delay_seconds',
+    help: '对账新补写的触发中告警：告警源给出的开始时刻到写入的时长（ADR 0160）；path=full 为完整对账，path=fast 为 Alertmanager 新增告警的快速轮询',
+    labelNames: ['path'] as const,
+    buckets: [5, 10, 15, 20, 30, 40, 50, 60, 75, 90, 120, 300],
     registers: [this.registry],
   });
 

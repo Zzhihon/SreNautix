@@ -7,6 +7,7 @@ import type { StageAService } from '../stage-a/service.js';
 import { isConnectionError } from '../store/health.js';
 import type { PgConfig } from '../store/pool.js';
 import type { IncidentEngine } from './engine.js';
+import { incidentOnsetMs, incidentOrigin } from './onset.js';
 import { incidentVersion } from './read.js';
 import { INGEST_CHANNEL } from '../ingest/store.js';
 
@@ -110,9 +111,11 @@ export class IncidentPipeline {
       const prev =
         inc.incident_version > 1 ? await incidentVersion(this.pool, inc.incident_id, inc.incident_version - 1) : null;
       const out = await this.stageA.run(inc);
-      const firstMs = new Date(inc.first_firing_at).getTime();
       if (inc.incident_version === 1) {
-        this.metrics.stageALatency.observe((Date.now() - firstMs) / 1000);
+        this.metrics.stageALatency.observe(
+          { origin: incidentOrigin(inc) },
+          Math.max(0, (Date.now() - incidentOnsetMs(inc)) / 1000),
+        );
       }
       const reason = reasonFor(prev, inc, out.fingerprintChanged, r.reopened.has(inc.incident_id));
       if (reason) {

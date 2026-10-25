@@ -183,5 +183,24 @@ UPDATE server.research_runs r SET reason = q.reason
   FROM server.research_queue q WHERE q.run_id = r.run_id AND r.reason <> q.reason;
 `,
     },
+    {
+      version: 6,
+      name: 'first rendering time of each stage A report',
+      phase: 'expand',
+      sql: `
+-- 阶段 A 报告第一次生成的时刻（ADR 0159）：领域包变化、研判前刷新与手动重算会覆盖 rendered_at，
+-- first_rendered_at 只在报告第一次写入时设置。已有的报告按 outbox 里这个版本最早的 stage_a.reported 补上，
+-- outbox 里没有的取 rendered_at。默认值 now() 让滚动升级期间旧版本写入的报告也有值
+ALTER TABLE server.stage_a_reports ADD COLUMN first_rendered_at timestamptz;
+UPDATE server.stage_a_reports s SET first_rendered_at = o.at
+  FROM (SELECT (payload->>'incident_id')::uuid AS incident_id, (payload->>'incident_version')::int AS incident_version,
+               min(occurred_at) AS at
+          FROM server.outbox WHERE type = 'stage_a.reported' GROUP BY 1, 2) o
+ WHERE o.incident_id = s.incident_id AND o.incident_version = s.incident_version;
+UPDATE server.stage_a_reports SET first_rendered_at = rendered_at WHERE first_rendered_at IS NULL;
+ALTER TABLE server.stage_a_reports ALTER COLUMN first_rendered_at SET DEFAULT now();
+ALTER TABLE server.stage_a_reports ALTER COLUMN first_rendered_at SET NOT NULL;
+`,
+    },
   ],
 };

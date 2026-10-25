@@ -7,6 +7,7 @@ import {
   type AlertCatalog,
   type ResolvedRcaParams,
 } from '@srenautix/core';
+import { incidentOnsetMs, incidentOrigin } from '../incident/onset.js';
 import { alertId, type RawAlert } from '../ingest/normalize.js';
 import { logger } from '../log.js';
 import type { ServerMetrics } from '../metrics.js';
@@ -170,7 +171,10 @@ export class DegradedLane {
       this.sentVersions.set(inc.incident_id, inc.incident_version);
       this.metrics.stageARuns.inc({ disposition: report.disposition, degraded: 'true' });
       if (inc.incident_version === 1) {
-        this.metrics.stageALatency.observe((now.getTime() - new Date(inc.first_firing_at).getTime()) / 1000);
+        this.metrics.stageALatency.observe(
+          { origin: incidentOrigin(inc) },
+          Math.max(0, (now.getTime() - incidentOnsetMs(inc)) / 1000),
+        );
       }
       logger.warn('状态库降级：阶段 A 报告直接发送', { incident_id: inc.incident_id, label: inc.label });
     }

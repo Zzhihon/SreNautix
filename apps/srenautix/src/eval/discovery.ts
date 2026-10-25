@@ -13,7 +13,7 @@ import { faultAlertIds, mainIncident, type Replay } from './reconstruct.js';
 // - unlabelled 占比：窗口内创建的事件中没有根因的比例；
 // - 检测延迟：首个故障告警的 pending 开始时刻（首个症状）到故障告警第一次成为事件成员；重放开始前就在触发的告警不计。
 // 影子环境（只读状态库）：一段时间内新建的事件数、unlabelled 占比、检测延迟（first_firing_at 到 created_at）的分位数、
-// 阶段 A 报告有证据卡的比例。
+// 阶段 A 报告有证据卡的比例。从已有事件拆分出的事件在原事件里已经被发现，不计入检测延迟（ADR 0159）。
 
 export interface DiscoveryCase {
   label: string;
@@ -196,10 +196,11 @@ export async function liveStats(
     label: string;
     root_component: string | null;
     latency_s: number;
+    split: boolean;
     cards: number | null;
     determinate: number | null;
   }>(
-    `SELECT i.label, i.root_component,
+    `SELECT i.label, i.root_component, i.split_from IS NOT NULL AS split,
             extract(epoch FROM (i.created_at - i.first_firing_at))::float8 AS latency_s,
             (SELECT jsonb_array_length(s.body->'cards') FROM server.stage_a_reports s
               WHERE s.incident_id = i.incident_id ORDER BY s.incident_version DESC LIMIT 1) AS cards,
@@ -223,7 +224,7 @@ export async function liveStats(
       WHERE i.cluster_id = $1 AND i.created_at >= $2 AND i.created_at < $3 AND rr.state = 'completed'`,
     [clusterId, since, until],
   );
-  const lat = rows.map((x) => x.latency_s);
+  const lat = rows.filter((x) => !x.split).map((x) => x.latency_s);
   const cardCounts = withCards.map((x) => x.cards as number);
   return {
     since: since.toISOString(),

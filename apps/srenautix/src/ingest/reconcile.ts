@@ -19,6 +19,8 @@ export interface ReconcileResult {
   added: number;
   resolved: number;
   sources: string[];
+  /** 本轮之后本地触发中告警的身份指纹（快速轮询据此判断新增，ADR 0160） */
+  firing: Set<string>;
 }
 
 async function getJson(url: string, token: string | null, timeoutMs: number): Promise<unknown> {
@@ -156,10 +158,15 @@ export async function applyRemote(
   const missing = kept.filter((a) => !localFps.has(a.fingerprint));
   if (missing.length) {
     await ingest.write(clusterId, 'reconcile', 'reconcile', missing, { reconcile: missing.map((a) => a.labels) });
+    observeIngestDelay(metrics, 'full', missing);
   }
   let resolved = 0;
   const remoteFps = new Set(remote.keys());
   const gone = ok.length ? [...local.keys()].filter((id) => !remoteFps.has(identity.get(id)!)) : [];
+  const firing = new Set([...localFps, ...missing.map((a) => a.fingerprint)]);
+  for (const id of gone) {
+    firing.delete(identity.get(id)!);
+  }
   const ending = [...new Set([...duplicates, ...gone])];
   if (ending.length) {
     await tx(pool, async (c) => {
@@ -186,7 +193,84 @@ export async function applyRemote(
   }
   metrics.reconcileRepairs.inc({ kind: 'added' }, missing.length);
   metrics.reconcileRepairs.inc({ kind: 'resolved' }, resolved);
-  return { added: missing.length, resolved, sources: ok };
+  return { added: missing.length, resolved, sources: ok, firing };
+}
+
+function observeIngestDelay(metrics: ServerMetrics, path: 'full' | 'fast', alerts: readonly RawAlert[]): void {
+  const now = Date.now();
+  for (const a of alerts) {
+    metrics.ingestDelay.observe({ path }, Math.max(0, (now - a.startsAt.getTime()) / 1000));
+  }
+}
+
+/**
+ * Alertmanager 新增告警的快速轮询（ADR 0160）：两轮完整对账之间，每 additions_interval 读一次 Alertmanager v2 的活动告警，
+ * 只补写本地还没有的触发中告警，不结束任何告警，不读状态库与规则引擎。本地已有哪些告警取最近一轮完整对账的结果
+ * （加上快速轮询自己补写的）；完整对账成功之前不轮询。结束告警与 ALERTS_FOR_STATE 的补写仍由完整对账负责。
+ */
+export class AlertmanagerAdditions {
+  private known: Set<string> | null = null;
+
+  constructor(
+    private readonly clusterId: string,
+    private readonly alertmanagerUrl: string,
+    private readonly bearerToken: string | null,
+    private readonly timeoutMs: number,
+    private readonly ingest: IngestService,
+    private readonly metrics: ServerMetrics,
+    private readonly selfLabel: string,
+    private readonly watchdog: string,
+  ) {}
+
+  /** 完整对账成功后更新本地触发中告警的身份指纹 */
+  update(firing: ReadonlySet<string>): void {
+    this.known = new Set(firing);
+  }
+
+  /** 不再知道本地有哪些告警（失去主实例）：下一轮完整对账成功之前不轮询 */
+  reset(): void {
+    this.known = null;
+  }
+
+  /** 一轮快速轮询；返回补写的告警数 */
+  async pollOnce(): Promise<number> {
+    const known = this.known;
+    if (known === null) {
+      return 0;
+    }
+    const now = new Date();
+    const list = (await getJson(
+      `${this.alertmanagerUrl}/api/v2/alerts?active=true&silenced=true&inhibited=true&unprocessed=true`,
+      this.bearerToken,
+      this.timeoutMs,
+    )) as AlertmanagerAlert[];
+    const fresh = new Map<string, RawAlert>();
+    for (const a of list) {
+      const r = fromAlertmanager(a, 'reconcile', now);
+      if (
+        r.status === 'firing' &&
+        !known.has(r.fingerprint) &&
+        r.labels[this.selfLabel] === undefined &&
+        r.alertname !== this.watchdog &&
+        !isIgnorable(r.labels)
+      ) {
+        fresh.set(r.fingerprint, r);
+      }
+    }
+    if (!fresh.size) {
+      return 0;
+    }
+    const added = [...fresh.values()];
+    await this.ingest.write(this.clusterId, 'reconcile', 'reconcile', added, {
+      reconcile: added.map((a) => a.labels),
+    });
+    observeIngestDelay(this.metrics, 'fast', added);
+    for (const fp of fresh.keys()) {
+      known.add(fp);
+    }
+    this.metrics.reconcileRepairs.inc({ kind: 'added_fast' }, added.length);
+    return added.length;
+  }
 }
 
 /** reader 推送的告警对账快照（协议 AlertReconcileSnapshot）。 */

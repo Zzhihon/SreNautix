@@ -329,12 +329,15 @@ export const serverConfigSchema = z
           .object({
             enabled: z.boolean().default(true),
             interval: duration.default('60s'),
+            // 两轮完整对账之间读 Alertmanager 补写新增告警的间隔（ADR 0160）：只读 Alertmanager，不读状态库与规则引擎；
+            // 0s 关闭；需要 alertmanager_url
+            additions_interval: duration.default('5s'),
             alertmanager_url: url.optional(),
             prometheus_url: url.optional(),
             bearer_token_file: path.optional(),
           })
           .strict()
-          .default({ enabled: true, interval: '60s' }),
+          .default({ enabled: true, interval: '60s', additions_interval: '5s' }),
       })
       .strict()
       .default({
@@ -343,7 +346,7 @@ export const serverConfigSchema = z
         silence_threshold: '10m',
         watchdog_alertname: 'Watchdog',
         external_labels: [...DEFAULT_EXTERNAL_LABELS],
-        reconcile: { enabled: true, interval: '60s' },
+        reconcile: { enabled: true, interval: '60s', additions_interval: '5s' },
       }),
     // dirs 下的每个子目录是一个领域包；only 不填时加载除 `_` 开头（示例包）以外的全部包；oci 中的包总是加载
     packs: z
@@ -635,6 +638,9 @@ export const serverConfigSchema = z
           .object({ external_roots: externalRoots.default(EXTERNAL_ROOTS_DEFAULT) })
           .strict()
           .default({ external_roots: EXTERNAL_ROOTS_DEFAULT }),
+        // 业务影响类事件的判定（ADR 0159），只用于首条消息时延指标的 business_impact 标签：第一条消息送达时，
+        // 事件有一个成员告警满足其中任一项（项内每个标签都要满足，取值之一即可）即为业务影响类
+        business_impact_alerts: z.array(labelMatch).default([{ severity: ['critical'] }]),
       })
       .strict()
       .default({
@@ -642,6 +648,7 @@ export const serverConfigSchema = z
         severities: ['critical', 'warning'],
         resolved_retention: '6h',
         digest: { external_roots: EXTERNAL_ROOTS_DEFAULT },
+        business_impact_alerts: [{ severity: ['critical'] }],
       }),
     approvals: z
       .object({

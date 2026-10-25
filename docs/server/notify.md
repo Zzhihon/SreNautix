@@ -143,6 +143,9 @@ chart 的顶层 values `notifyDigest.externalRoots`（键名为驼峰）生成�
 | `srenautix_notify_abandoned_total` | `channel`、`reason`（entities_too_long、message_too_long、parse_error、bad_request、invalid_param、content_too_long、invalid_card、ended_edit_cap） |
 | `srenautix_notify_pending` | `channel` |
 | `srenautix_notify_callbacks_total` | `channel`、`action`、`outcome` |
+| `srenautix_first_message_latency_seconds` | `business_impact`（true、false）、`origin`（new、split） |
+
+首条消息时延（ADR 0159）：每个事件在所有渠道目标上的第一条事件消息送达时记一次，从事件的计时起点（新事件为首个告警触发，拆分出的事件为拆分时刻）算起。送达时事件已有的成员告警中有一条满足 `notify.business_impact_alerts` 的任一项（项内每个标签都满足、取值之一即可；默认 `[{severity: [critical]}]`）时 `business_impact="true"`。进入外部上游周期汇总的事件没有事件消息，不计入。
 
 ## 测试
 

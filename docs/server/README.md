@@ -121,9 +121,11 @@ audit:
 ## 一次告警的处理
 
 1. webhook 写入 `alert_state` 与接入日志，经 `NOTIFY` 唤醒主实例；60 秒对账补回遗漏并结束告警源中已经没有的告警。
+   配置了 `ingest.reconcile.alertmanager_url` 时，两轮完整对账之间每 `additions_interval`（默认 `5s`，`0s` 关闭）读一次 Alertmanager 的活动告警，只补写本地还没有的触发中告警（ADR 0160）。这一步不读状态库与规则引擎，不结束告警；本地有哪些告警取最近一轮完整对账的结果，完整对账成功之前、以及不是主实例时不轮询。告警源给出的开始时刻到写入的时长见 `srenautix_ingest_delay_seconds{path}`（`full` 完整对账，`fast` 快速轮询），其中包含规则引擎自身的回溯：vmalert 把开始时刻记为求值时刻减去 `-rule.evalDelay`（默认 30 秒）再按组间隔对齐，告警在 Alertmanager 中出现时已经比开始时刻晚 30 秒到一个组间隔加 30 秒。
    对账也是接入路径：每轮完整读取成功的对账计入接入（接入源 `reconcile` 的最后到达时间与 `srenautix_ingest_last_received_timestamp_seconds{source="reconcile"}`），对账读到 Watchdog 时计为 Watchdog 到达。只用对账、不接 webhook 推送的部署因此不会误报 `IngestSilent` 与 `WatchdogMissing`；webhook 没有推送、但对账在静默阈值内成功时，`IngestSilent` 的原因为 `ReconcileOnly`（不成立）。
 2. 事件引擎用 packages/core 重算并对账事件，写入版本、成员、别名与 outbox。
 3. 每个新版本立即出阶段 A：证据卡、规则提议、确定性的处置判断，发布 `stage_a.reported`，消息就地更新（见下面的"阶段 A 与领域包"）。
+   时延从事件的计时起点算（ADR 0159）：新事件为首个成员告警的触发时刻，从已有事件拆分出的事件为拆分时刻。`srenautix_stage_a_latency_seconds{origin}` 记第一个版本的阶段 A，`origin` 为 `new` 或 `split`；拆分出的事件不计入检测延迟 `srenautix_incident_detection_seconds`。`server.stage_a_reports.first_rendered_at` 是报告第一次生成的时刻，重算只更新 `rendered_at`。
 4. 按触发原因（新事件、根因变化、严重度升高、证据指纹变化）经准入进入阶段 B 队列，worker 认领后研判；研判事件经 server 的事件流发布，消息再次更新。
 5. 提议经审批签发断言，分支 gateway 长轮询取走工单并推回执行事件。
 

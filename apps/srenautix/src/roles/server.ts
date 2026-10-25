@@ -43,7 +43,7 @@ import { registerAuthRoutes } from '../identity/routes.js';
 import { Sessions } from '../identity/sessions.js';
 import { IncidentEngine } from '../incident/engine.js';
 import { IncidentPipeline, listenIngest } from '../incident/pipeline.js';
-import { reconcileFromReader, reconcileOnce, startReconcileLoop } from '../ingest/reconcile.js';
+import { AlertmanagerAdditions, reconcileFromReader, reconcileOnce, startReconcileLoop } from '../ingest/reconcile.js';
 import { ReaderProtocol } from '../topology/protocol.js';
 import { ReaderClock, ReaderRequestQueue, registerReaderRoutes } from '../topology/reader-routes.js';
 import { expireSpokeConditions } from '../console-bff/spoke-conditions.js';
@@ -490,6 +490,7 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
       consoleUrl: c.public_url,
       severities: c.notify.severities,
       resolvedRetentionMs: parseDuration('notify.resolved_retention', c.notify.resolved_retention),
+      businessImpactAlerts: c.notify.business_impact_alerts,
     },
     proposals,
     reports,
@@ -1101,14 +1102,30 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
     const bearer = rc.bearer_token_file
       ? readSecretFile('ingest.reconcile.bearer_token_file', rc.bearer_token_file)
       : null;
+    const additionsMs = parseDuration('ingest.reconcile.additions_interval', rc.additions_interval);
+    const additions =
+      rc.alertmanager_url && additionsMs > 0
+        ? new AlertmanagerAdditions(
+            c.cluster_id,
+            rc.alertmanager_url,
+            bearer,
+            Math.min(10_000, additionsMs),
+            ingest,
+            metrics,
+            c.ingest.self_label,
+            c.ingest.watchdog_alertname,
+          )
+        : null;
     startReconcileLoop(
       parseDuration('ingest.reconcile.interval', rc.interval),
       signal,
       async () => {
         if (!leader.isLeader()) {
-          return { added: 0, resolved: 0, sources: [] };
+          // 不是主实例时不知道本地有哪些告警：重新成为主实例后等一轮完整对账再快速轮询
+          additions?.reset();
+          return { added: 0, resolved: 0, sources: [], firing: new Set<string>() };
         }
-        return reconcileOnce(
+        const r = await reconcileOnce(
           pool,
           c.cluster_id,
           {
@@ -1122,10 +1139,28 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
           c.ingest.self_label,
           c.ingest.watchdog_alertname,
         );
+        additions?.update(r.firing);
+        return r;
       },
       metrics,
       (ok) => (reconcileOk = ok),
     );
+    if (additions) {
+      // 上一轮没有结束时跳过（Alertmanager 应答慢时不堆积请求）
+      let busy = false;
+      const t = setInterval(() => {
+        if (busy || !leader.isLeader()) {
+          return;
+        }
+        busy = true;
+        additions
+          .pollOnce()
+          .catch((e: unknown) => logger.warn('Alertmanager 新增告警的快速轮询失败，下一轮重试', { error: e }))
+          .finally(() => (busy = false));
+      }, additionsMs);
+      t.unref();
+      signal.addEventListener('abort', () => clearInterval(t), { once: true });
+    }
   }
 
   if (worker) {

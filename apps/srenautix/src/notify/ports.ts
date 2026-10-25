@@ -121,4 +121,16 @@ export interface MessageSource {
   delivered(incidentId: string, proposalIds: string[], at: Date): Promise<void>;
   /** 外部上游在 [from, to) 内的汇总统计（ADR 0147）；没有启用外部上游汇总时不实现 */
   externalWindow?(from: Date, to: Date): Promise<ExternalWindowStats>;
+  /**
+   * 一条事件消息（notify_messages.id 为 messageId）第一次送达后调用：它是这个事件在所有渠道目标上的第一条消息时，
+   * 返回计时起点与是否业务影响类（ADR 0159），之前已有消息送达时返回 null。不实现时不记录首条消息时延
+   */
+  firstMessage?(incidentId: string, messageId: number, at: Date): Promise<FirstMessage | null>;
+}
+
+/** 事件第一条消息的时延口径（ADR 0159） */
+export interface FirstMessage {
+  onsetMs: number;
+  origin: 'new' | 'split';
+  businessImpact: boolean;
 }

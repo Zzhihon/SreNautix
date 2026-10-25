@@ -126,7 +126,8 @@ export class IncidentEngine {
               }
               const prev = before.get(inc.incident_id);
               const reason = await this.persist(c, inc, prev);
-              if (!prev && inc.state === 'firing') {
+              // 拆分出的事件的告警已经在原事件里被发现，不计入检测延迟（ADR 0159）
+              if (!prev && inc.state === 'firing' && inc.split_from === null) {
                 detected.push(inc);
               }
               if (inc.state !== 'merged' && (!prev || prev.incident_version !== inc.incident_version)) {

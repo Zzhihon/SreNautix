@@ -185,6 +185,7 @@ describe('NotifyService', () => {
             business_impact: { alert_labels: {}, impact_cards: true, within: '30m', topology_hops: 6 },
           },
         },
+        business_impact_alerts: [{ severity: ['critical'] }],
       },
       publicUrl: 'https://srenautix.example.com',
       source,

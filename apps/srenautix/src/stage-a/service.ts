@@ -146,8 +146,9 @@ export class StageAService {
         JSON.stringify(fp.state),
       ]);
       await c.query(
-        `INSERT INTO server.stage_a_reports (report_id, incident_id, incident_version, disposition, evidence_fingerprint, degraded, body, first_firing_at, rendered_at, pack_lock)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        // first_rendered_at 只在第一次写入时设置，重算不覆盖（ADR 0159）
+        `INSERT INTO server.stage_a_reports (report_id, incident_id, incident_version, disposition, evidence_fingerprint, degraded, body, first_firing_at, rendered_at, pack_lock, first_rendered_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $9)
          ON CONFLICT (incident_id, incident_version) DO UPDATE SET report_id = excluded.report_id, disposition = excluded.disposition,
            evidence_fingerprint = excluded.evidence_fingerprint, degraded = excluded.degraded, body = excluded.body, rendered_at = excluded.rendered_at,
            pack_lock = excluded.pack_lock`,

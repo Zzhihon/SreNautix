@@ -4,7 +4,7 @@ import { AlertCatalog } from '@srenautix/core';
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from '../../src/api/http.js';
-import { reconcileOnce } from '../../src/ingest/reconcile.js';
+import { AlertmanagerAdditions, reconcileOnce } from '../../src/ingest/reconcile.js';
 import { IngestService } from '../../src/ingest/service.js';
 import { activeAlerts } from '../../src/ingest/store.js';
 import { ingestTrack } from '../../src/ingest/migrations.js';
@@ -172,6 +172,59 @@ describe('接入链路', () => {
     expect(back.find((a) => a.alertname === 'DemoErrorRatio')?.source).toBe('reconcile');
     const gone = await db.server.query("SELECT status, ends_at FROM server.alert_state WHERE alertname = 'GoneAlert'");
     expect(gone.rows[0].status).toBe('resolved');
+  });
+
+  it('Alertmanager 新增告警的快速轮询：完整对账之前不轮询；只补写本地没有的触发中告警，不结束告警（ADR 0160）', async () => {
+    const additions = new AlertmanagerAdditions(
+      'c1',
+      am.url,
+      null,
+      5000,
+      ingest,
+      metrics,
+      'srenautix_self',
+      'Watchdog',
+    );
+    const labels = { alertname: 'DemoFastAdded', severity: 'critical', namespace: 'shop' };
+    const startsAt = new Date(Math.floor(Date.now() / 1000) * 1000 - 40_000).toISOString();
+    const posted = await fetch(`${am.url}/api/v2/alerts`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify([{ labels, annotations: {}, startsAt }]),
+    });
+    expect(posted.ok).toBe(true);
+    // 还没有完整对账的结果：不知道本地有哪些告警，不轮询
+    expect(await additions.pollOnce()).toBe(0);
+    // 本地有一条告警源里已经没有的告警：快速轮询不结束它
+    await db.server.query(
+      `INSERT INTO server.alert_state (alert_id, cluster_id, fingerprint, source, alertname, labels, annotations, severity, status, suppressed,
+         starts_at, classification, entity_resolution, received_at, last_seen_at, updated_at)
+       VALUES ('00000000000000bb@1', 'c1', '00000000000000bb', 'alertmanager', 'GoneAgain', '{"alertname":"GoneAgain"}', '{}', 'warning', 'firing', 'none',
+         now() - interval '1 hour', '{"role":"symptom","source":"default","confidence":0.3,"catalog_entry":null,"chronic":false}', 'unresolved', now(), now(), now())`,
+    );
+    const firing = new Set(
+      (await activeAlerts(db.server, 'c1', 0))
+        .filter((a) => a.status === 'firing' && a.alertname !== 'DemoFastAdded')
+        .map((a) => a.fingerprint),
+    );
+    additions.update(firing);
+    const delays = async () =>
+      (await metrics.ingestDelay.get()).values.find(
+        (v) => v.metricName === 'srenautix_ingest_delay_seconds_count' && v.labels.path === 'fast',
+      )?.value ?? 0;
+    expect(await additions.pollOnce()).toBe(1);
+    expect(await delays()).toBe(1);
+    const added = (await activeAlerts(db.server, 'c1', 0)).find((a) => a.alertname === 'DemoFastAdded');
+    expect(added).toMatchObject({ status: 'firing', severity: 'critical' });
+    expect(Date.parse(added!.starts_at)).toBe(Date.parse(startsAt));
+    // 补写过的告警下一轮不再写
+    expect(await additions.pollOnce()).toBe(0);
+    const gone = await db.server.query("SELECT status FROM server.alert_state WHERE alertname = 'GoneAgain'");
+    expect(gone.rows[0].status).toBe('firing');
+    // 失去主实例后不再知道本地有哪些告警，等下一轮完整对账
+    additions.reset();
+    expect(await additions.pollOnce()).toBe(0);
+    await db.server.query("DELETE FROM server.alert_state WHERE alertname = 'GoneAgain'");
   });
 
   it('告警源推送恢复后告警结束', async () => {

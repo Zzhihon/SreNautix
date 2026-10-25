@@ -9,8 +9,9 @@ import type { TopologyStore } from '../topology/store.js';
 import { composeMessage, laneOf, type ActionVerify, type ComposeInput, type ResearchMirror } from './compose.js';
 import { impactLine, type Classification, type ExternalRoots, type ExternalWindowStats } from './external.js';
 import type { LinkSettings } from './links.js';
-import type { DesiredIncidentMessage, MessageSource } from './ports.js';
+import type { DesiredIncidentMessage, FirstMessage, MessageSource } from './ports.js';
 import { withComponentNames } from '../incident/names.js';
+import { incidentOnsetMs, incidentOrigin } from '../incident/onset.js';
 import { researchRoots, type OwnerLookup } from '../incident/research-root.js';
 
 export interface SourceSettings {
@@ -18,6 +19,16 @@ export interface SourceSettings {
   consoleUrl: string;
   severities: string[];
   resolvedRetentionMs: number;
+  /** 业务影响类事件的成员告警条件（notify.business_impact_alerts，ADR 0159）；不给出时不记录首条消息时延 */
+  businessImpactAlerts?: ReadonlyArray<Record<string, string[]>>;
+}
+
+/** 告警标签满足其中一项（项内每个标签都满足、取值之一即可） */
+export function matchesAnyLabels(
+  labels: Record<string, string>,
+  matchers: ReadonlyArray<Record<string, string[]>>,
+): boolean {
+  return matchers.some((m) => Object.entries(m).every(([k, vs]) => labels[k] !== undefined && vs.includes(labels[k])));
 }
 
 /** 报告需要的领域数据：告警目录的可读标题、动作目录的执行后校验、链接模板 */
@@ -150,6 +161,8 @@ export class ReportSource {
 export class PgMessageSource implements MessageSource {
   /** 外部上游汇总时实现（ADR 0147） */
   readonly externalWindow?: (from: Date, to: Date) => Promise<ExternalWindowStats>;
+  /** 给出业务影响类条件时实现（ADR 0159） */
+  readonly firstMessage?: (incidentId: string, messageId: number, at: Date) => Promise<FirstMessage | null>;
 
   constructor(
     private readonly pool: pg.Pool,
@@ -162,6 +175,45 @@ export class PgMessageSource implements MessageSource {
     if (external?.s.enabled) {
       this.externalWindow = (from, to) => this.window(from, to);
     }
+    const matchers = s.businessImpactAlerts;
+    if (matchers) {
+      this.firstMessage = (incidentId, messageId, at) => this.first(incidentId, messageId, at, matchers);
+    }
+  }
+
+  /**
+   * 事件第一条消息的口径（ADR 0159）：所有渠道目标上更早送达过这个事件的消息时返回 null（同一时刻送达的按消息 id 取小的）；
+   * 否则返回计时起点，以及送达时已加入事件的成员告警中是否有满足业务影响类条件的
+   */
+  private async first(
+    incidentId: string,
+    messageId: number,
+    at: Date,
+    matchers: ReadonlyArray<Record<string, string[]>>,
+  ): Promise<FirstMessage | null> {
+    const r = await this.pool.query<{
+      body: Incident;
+      earlier: boolean;
+      labels: Array<Record<string, string>>;
+    }>(
+      `SELECT i.body,
+              EXISTS (SELECT 1 FROM server.notify_messages n
+                       WHERE n.incident_id = i.incident_id AND n.kind = 'incident' AND n.id <> $2
+                         AND (n.first_delivered_at < $3 OR (n.first_delivered_at = $3 AND n.id < $2))) AS earlier,
+              (SELECT coalesce(jsonb_agg(a.labels), '[]'::jsonb) FROM server.incident_members m
+                 JOIN server.alert_state a USING (alert_id) WHERE m.incident_id = i.incident_id) AS labels
+         FROM server.incidents i WHERE i.incident_id = $1`,
+      [incidentId, messageId, at],
+    );
+    const row = r.rows[0];
+    if (!row || row.earlier) {
+      return null;
+    }
+    return {
+      onsetMs: incidentOnsetMs(row.body),
+      origin: incidentOrigin(row.body),
+      businessImpact: row.labels.some((l) => matchesAnyLabels(l, matchers)),
+    };
   }
 
   async desired(language: 'zh' | 'en'): Promise<DesiredIncidentMessage[]> {
