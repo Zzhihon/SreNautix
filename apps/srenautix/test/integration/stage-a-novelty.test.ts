@@ -1,3 +1,4 @@
+import { resolve } from 'node:path';
 import type { Alert, Incident } from '@srenautix/contract';
 import { startPrometheus, type TsdbInstance } from '@srenautix/integration-sdk';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -22,6 +23,9 @@ const T0 = NOW - 10 * MIN;
 const FROM = NOW - 8 * DAY;
 const metrics = new ServerMetrics('server', false);
 const CARD = 'workload/pod-restarts/restarts';
+// 同样读重启计数、声明 baseline: false 的卡（ADR 0164）
+const BASELINE_OFF = resolve(import.meta.dirname, '../fixtures/packs-baseline');
+const KIND_CARD = 'baseline-off/restart-kind/restarting';
 
 let tsdb: TsdbInstance;
 let rt: PackRuntime;
@@ -67,7 +71,7 @@ beforeAll(async () => {
     restarts('web-0', (t) => (t >= T0 - 10 * MIN ? 5 : 0)),
   ]);
   rt = await PackRuntime.load({
-    dirs: [PACKS],
+    dirs: [PACKS, BASELINE_OFF],
     only: null,
     lockFile: null,
     catalogPath: DEFAULT_CATALOG_PATH,
@@ -113,6 +117,17 @@ describe('证据基线', () => {
     expect(web.novelty).toMatchObject({ status: 'novel', rule: null, value: 5, abnormal_share: 0 });
     expect(web.novelty!.comparisons.every((c) => c.verdict === 'normal' && c.value === 0)).toBe(true);
   }, 180_000);
+
+  it('声明 baseline: false 的卡描述故障的类型：同样长期重启的 Pod 判为异常，不取基线样本，没有 novelty', async () => {
+    const e = evidenceWith(DEFAULT_NOVELTY);
+    const signal = AbortSignal.timeout(60_000);
+    const api = await e.runCardCheck(podIncident(), KIND_CARD, {}, pod('api-0'), alerts, NOW, signal);
+    expect(api.verdict).toBe('abnormal');
+    expect(api.novelty).toBeUndefined();
+    // 普通的卡照常取基线
+    const restarts = await e.runCardCheck(podIncident(), CARD, {}, pod('api-0'), alerts, NOW, signal);
+    expect(restarts.novelty).toMatchObject({ status: 'routine' });
+  }, 120_000);
 
   it('数据只覆盖最近 1 天时样本不足，判为 unknown；关闭证据基线时没有 novelty', async () => {
     const e = evidenceWith({ ...DEFAULT_NOVELTY, span: '1d', samples: 4, comparisons: ['1h'], minSamples: 8 });

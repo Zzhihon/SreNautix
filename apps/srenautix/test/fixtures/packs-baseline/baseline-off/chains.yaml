@@ -1,0 +1,24 @@
+chains:
+  - id: restart-kind
+    title: { zh-CN: 重启的类型, en: Kind of restarts }
+    cards:
+      - id: restarting
+        title: { zh-CN: 窗口内有重启, en: Restarts in the window }
+        note:
+          zh-CN: 描述这次故障是不是重启类的卡；结论是这次故障本身的属性，不和事件之前的时段比较
+          en: Whether this failure involves restarts; a property of this failure, not compared with earlier periods
+        applies_to: { kinds: [Pod] }
+        window: { before: 30m, after: 10m }
+        baseline: false
+        refs:
+          - { name: restarts, signal: restarts_in_window, mode: instant }
+        judge:
+          let:
+            - { name: n, cel: max(restarts) }
+          abnormal_if:
+            - cel: n > 0.0
+              say:
+                zh-CN: '窗口内重启 {n, number} 次'
+                en: '{n, number} restarts in the window'
+        display: { value: n, unit: count }
+        egress: allow

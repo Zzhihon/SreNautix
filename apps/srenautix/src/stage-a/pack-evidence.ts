@@ -550,8 +550,11 @@ export class PackEvidence implements EvidenceRunner {
       .filter((x): x is { p: Planned; r: Done } => x.r !== null && x.r !== undefined);
     const o = this.o.novelty;
     if (o?.enabled && !signal.aborted) {
+      // 声明 baseline: false 的卡描述的是这次故障的类型，不和事件之前的时段比较（ADR 0164）
       await this.baseline(
-        done.filter((x) => x.r.verdict === 'abnormal').map((x) => ({ ...x, at: anchors.get(x.p)! })),
+        done
+          .filter((x) => x.r.verdict === 'abnormal' && this.rt.set.cards.get(x.p.card)!.def.baseline !== false)
+          .map((x) => ({ ...x, at: anchors.get(x.p)! })),
         o,
         ds,
         resolutions,

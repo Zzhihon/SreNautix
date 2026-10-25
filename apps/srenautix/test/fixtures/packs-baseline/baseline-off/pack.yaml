@@ -1,0 +1,10 @@
+# 证据基线测试用的包（ADR 0164）：一张描述故障类型的卡，声明 baseline: false
+api_version: srenautix.io/pack/v1
+name: baseline-off
+version: 0.1.0
+description: 描述故障类型的卡不取证据基线
+maturity: beta
+min_srenautix_version: 0.1.0
+requires:
+  - metrics.query
+  - metrics.query_range
