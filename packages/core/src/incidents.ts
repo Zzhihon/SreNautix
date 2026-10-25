@@ -295,7 +295,8 @@ function aggregate(c: ComputedIncident) {
     severity,
     state: firing.length > 0 ? ('firing' as const) : ('resolved' as const),
     components,
-    suppressed: firing.length > 0 && firing.every((a) => a.suppressed !== 'none'),
+    // 只有告警源的静默算抑制：抑制规则（inhibited）说明另一条触发中的告警能解释它，不表示它不需要处理
+    suppressed: firing.length > 0 && firing.every((a) => a.suppressed === 'silenced'),
     // 只因"已合并、尚未同步"在分组里的提交也是事件的变更（ADR 0161）
     changes: [...c.group.changes, ...c.group.pendingChanges].sort(
       (a, b) => a.time.localeCompare(b.time) || a.change_id.localeCompare(b.change_id),

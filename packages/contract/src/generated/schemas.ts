@@ -1,5 +1,5 @@
 // 本文件由 packages/contract/scripts/gen.ts 从 contract/ 生成，不要手工修改。
-export const CONTRACT_VERSION = '2.33.0';
+export const CONTRACT_VERSION = '2.34.0';
 
 export const SCHEMAS: Record<string, Record<string, unknown>> = {
   'https://srenautix.io/contract/gateway/v1/action-catalog.schema.json': {
@@ -2435,7 +2435,8 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
       status: { type: 'string', enum: ['firing', 'resolved'] },
       suppressed: {
         type: 'string',
-        description: '告警源报告的抑制状态。只用于展示和阶段 A 的 disposition，SreNautix 从不改变告警路由',
+        description:
+          '告警源报告的抑制状态。只用于展示和事件的抑制状态（silenced 计入，inhibited 不计入，ADR 0163），SreNautix 从不改变告警路由',
         enum: ['none', 'silenced', 'inhibited'],
       },
       starts_at: { $ref: 'common.schema.json#/$defs/Timestamp' },
@@ -3227,6 +3228,18 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
             type: 'array',
             description: '子图中组件类型声明为集群外部（external）的组件',
             items: { $ref: 'common.schema.json#/$defs/ComponentKey' },
+          },
+          declared: {
+            type: 'array',
+            description:
+              '候选根因中由 GitOps 仓库声明的运行中组件（ADR 0162）：沿 owned_by 的顶层属主由 GitOps 应用管理（managed_by）；管理着候选根因的 GitOps 应用与逻辑组件不在其中。修改仓库中的声明就能处置这些组件；契约 2.34.0 之前的快照没有这个字段',
+            items: { $ref: 'common.schema.json#/$defs/ComponentKey' },
+          },
+          business_impact: {
+            type: 'array',
+            description:
+              '触发中的 critical 业务影响告警（ADR 0163）：事件成员中严重度为 critical、标签满足 server 的业务影响条件的告警 id。有这些告警并且有异常卡时处置不能是 ignore；契约 2.34.0 之前的快照没有这个字段',
+            items: { type: 'string' },
           },
           remediations: {
             type: 'array',
@@ -4821,7 +4834,8 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
       },
       suppressed: {
         type: 'boolean',
-        description: '命中 SreNautix 自己的抑制规则，或全部触发中的成员都被告警源静默。只影响 SreNautix 的消息与研判',
+        description:
+          '命中 SreNautix 自己的抑制规则，或全部触发中的成员都被告警源静默（silenced）；告警源的抑制规则（inhibited）不算（ADR 0163）。没有触发中的成员时保持最后的取值。只影响 SreNautix 的消息与研判',
       },
       observability_blind: { type: 'boolean', description: '至少 50% 的证据卡没有数据（DESIGN §7.1）' },
       topology_version: { type: 'integer', minimum: 0, description: '本版本使用的拓扑事件 seq' },

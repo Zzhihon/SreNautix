@@ -152,6 +152,7 @@ function run(set: PackSet, rows: Row[], root = ROOT_ENTITY) {
     stageA: s,
     level: 'likely',
     root: ROOT,
+    ruleSupport: 0,
     proposals: 0,
     cards: book.allCards,
     facts: { external: [], remediations: [] },

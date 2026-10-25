@@ -276,13 +276,14 @@ export async function runStageB(input: ResearchRunInput, env: ResearchEnv, sink:
     notes.push(...ladder.notes);
     const undeterminedReason =
       v.undeterminedReason ?? (gaps.length ? `最低取证集合没有覆盖：${gaps.join('；')}`.slice(0, 400) : null);
-    // 处置在档位确定之后由代码推导，模型的取值是输入之一（ADR 0138）
+    // 处置在档位确定之后由代码推导，模型的取值是输入之一（ADR 0138、0162）
     const disposition = deriveDisposition({
       model: concluded.value.disposition,
       incident: rc.incident,
       stageA: rc.stageA,
       level: ladder.level,
       root: v.chosen?.rootComponent ?? null,
+      ruleSupport: ladder.detail?.support_refs.length ?? 0,
       proposals: v.proposals.length,
       cards: book.allCards,
       facts: rc.dispositionFacts,

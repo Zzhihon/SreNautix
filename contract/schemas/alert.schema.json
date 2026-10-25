@@ -49,7 +49,7 @@
     "status": { "type": "string", "enum": ["firing", "resolved"] },
     "suppressed": {
       "type": "string",
-      "description": "告警源报告的抑制状态。只用于展示和阶段 A 的 disposition，SreNautix 从不改变告警路由",
+      "description": "告警源报告的抑制状态。只用于展示和事件的抑制状态（silenced 计入，inhibited 不计入，ADR 0163），SreNautix 从不改变告警路由",
       "enum": ["none", "silenced", "inhibited"]
     },
     "starts_at": { "$ref": "common.schema.json#/$defs/Timestamp" },

@@ -138,6 +138,8 @@ const schema = z
         query_timeout_seconds: z.number().int().min(5).max(120).default(30),
         // 证据基线（ADR 0153），与 server 的 stage_a.novelty 相同
         novelty: noveltyConfig.default(NOVELTY_CONFIG_DEFAULT),
+        // 业务影响告警的标签条件（ADR 0163），与 server 的 notify.digest.external_roots.business_impact.alert_labels 相同
+        business_impact_labels: z.record(z.string().min(1), z.array(z.string().min(1)).min(1)).default({}),
       })
       .strict()
       .optional(),

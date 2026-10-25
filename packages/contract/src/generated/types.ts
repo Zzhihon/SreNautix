@@ -2402,7 +2402,7 @@ export interface Alert {
   severity: Severity;
   status: 'firing' | 'resolved';
   /**
-   * 告警源报告的抑制状态。只用于展示和阶段 A 的 disposition，SreNautix 从不改变告警路由
+   * 告警源报告的抑制状态。只用于展示和事件的抑制状态（silenced 计入，inhibited 不计入，ADR 0163），SreNautix 从不改变告警路由
    */
   suppressed: 'none' | 'silenced' | 'inhibited';
   starts_at: Timestamp;
@@ -3081,7 +3081,7 @@ export interface Incident {
    */
   merged_into: null | Uuid;
   /**
-   * 命中 SreNautix 自己的抑制规则，或全部触发中的成员都被告警源静默。只影响 SreNautix 的消息与研判
+   * 命中 SreNautix 自己的抑制规则，或全部触发中的成员都被告警源静默（silenced）；告警源的抑制规则（inhibited）不算（ADR 0163）。没有触发中的成员时保持最后的取值。只影响 SreNautix 的消息与研判
    */
   suppressed: boolean;
   /**
@@ -3465,6 +3465,14 @@ export interface EvalDispositionFacts {
    * 子图中组件类型声明为集群外部（external）的组件
    */
   external: ComponentKey[];
+  /**
+   * 候选根因中由 GitOps 仓库声明的运行中组件（ADR 0162）：沿 owned_by 的顶层属主由 GitOps 应用管理（managed_by）；管理着候选根因的 GitOps 应用与逻辑组件不在其中。修改仓库中的声明就能处置这些组件；契约 2.34.0 之前的快照没有这个字段
+   */
+  declared?: ComponentKey[];
+  /**
+   * 触发中的 critical 业务影响告警（ADR 0163）：事件成员中严重度为 critical、标签满足 server 的业务影响条件的告警 id。有这些告警并且有异常卡时处置不能是 ignore；契约 2.34.0 之前的快照没有这个字段
+   */
+  business_impact?: string[];
   /**
    * 候选根因 → 适用的修复模板（release_rollback、config_resource 两类中启用的类别），按研判以它为根因、处置为 act 求值；没有适用模板的根因不列出
    */

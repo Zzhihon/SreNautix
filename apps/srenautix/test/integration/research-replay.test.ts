@@ -82,7 +82,7 @@ describe('录制的研判回放', () => {
     expect(notes).toMatch(/假设 h1 的竞争假设 h2、h3 同样处于支持状态，检查没有区分它们/);
     // pod_restart 的目标是占位符 Pod:shop/<pod-name>：删除；没有有效提议时 act 改为 escalate（critical）
     expect(notes).toMatch(/提议 pod_restart：目标 Pod:shop\/<pod-name> 不在本次研判的拓扑中/);
-    expect(notes).toMatch(/处置为 act 但没有有效的提议、规则提议或适用的修复模板，改为 escalate/);
+    expect(notes).toMatch(/处置为 act 但没有有效的提议、规则提议或适用的修复模板，.*改为 escalate/);
     expect(out.proposals).toEqual([]);
     expect(out.disposition).toBe('escalate');
     // 修复建议的 id 不合格式：按顺序重新编号为 r1、r2，不删除建议（ADR 0136）

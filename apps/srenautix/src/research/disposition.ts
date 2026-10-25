@@ -9,10 +9,18 @@ import type { DispositionFacts } from './types.js';
 // - ignore 只在确定性依据成立时给出（不论模型给出什么）：阶段 A 已判为 ignore；研判根因（likely 及以上）是领域包声明的
 //   集群外部组件；没有任何异常卡；影响卡全部正常。四种依据都要求没有有效提议、没有规则提议、修复模板使用的根因上没有
 //   适用的修复模板（ignore 不带修复）。证据基线判为常态的异常卡（ADR 0153）在这里按正常计；
+// - 有触发中的 critical 业务影响告警（处置依据的 business_impact），并且有规则判定的异常卡时，四种依据都不成立，
+//   模型给出的 ignore 按严重度改写（ADR 0163）；
 // - 最低取证集合没有覆盖（ADR 0153）时，除阶段 A 已判为 ignore 之外，不给 ignore，也不给 act；
 // - 模型给出 ignore 而没有依据时按严重度改写（critical 为 escalate，其余为 undetermined）；
-// - act 需要选中的根因，以及一条有效的提议、一条规则提议或修复模板使用的根因上适用的修复模板，否则按严重度改写；
-// - escalate 与 undetermined 保持模型的取值。
+// - act 表示有可以经 Git 或动作目录执行的处置（ADR 0162）。两种确定性依据不论模型给出什么都给 act：
+//   1. 研判根因（likely 及以上）上有适用的修复模板：server 会按模板开出修复 PR；
+//   2. 研判根因（likely 及以上）与发现根因都是 GitOps 仓库声明的运行中组件（declared），并且选中的假设有规则判定的支持卡：
+//      事件不是由一次变更（GitOps 应用、逻辑组件 release 等发现根因）引起，根因的状态有证据说明异常，消除根因的办法是
+//      修改仓库中这个组件的声明，改什么由修复建议写明；
+//   模型给出 act 时，一条有效提议、一条规则提议或修复模板使用的根因（档位低于 likely 时为事件根因）上适用的修复模板也是依据。
+//   模型给出 act 而依据都不成立时按严重度改写；
+// - 其余情况下 escalate（需要应用代码、外部服务方或人决定）与 undetermined 保持模型的取值。
 
 /** 修复模板中修改系统本身、能消除根因的类别；alert_rule 与 topology_coverage 是告警与领域包的维护，不算修复 */
 export const FIX_CATEGORIES: ReadonlySet<string> = new Set(['release_rollback', 'config_resource']);
@@ -34,6 +42,8 @@ export interface DispositionInput {
   level: ConclusionLevel;
   /** 选中的研判根因；没有选中假设时为 null */
   root: string | null;
+  /** 选中假设的规则判定的支持卡数（结论阶梯的 support_refs，常态的卡不算，ADR 0153） */
+  ruleSupport: number;
   /** 校验之后仍然有效的提议数 */
   proposals: number;
   /** 本次研判的全部证据卡（阶段 A 与区分性检查） */
@@ -67,9 +77,27 @@ export function fixTemplates(facts: DispositionFacts | null | undefined, root: s
     .map((t) => t.key);
 }
 
-/** ignore 的确定性依据；没有时为 null。前提：没有有效提议、规则提议与适用的修复模板 */
+/**
+ * 不能 ignore 的业务影响（ADR 0163）：有触发中的 critical 业务影响告警，并且有领域包规则判定的异常卡（证据基线判为常态的
+ * 不算）。成立时返回说明，否则为 null
+ */
+function impactHeld(i: DispositionInput): string | null {
+  const alerts = i.facts?.business_impact ?? [];
+  const abnormal = i.cards.filter(
+    (c) => c.judgedBy === 'rule' && c.result.verdict === 'abnormal' && !isRoutine(c.result),
+  );
+  if (!alerts.length || !abnormal.length) {
+    return null;
+  }
+  return `${alerts.length} 条 critical 业务影响告警在触发，${abnormal.length} 张证据卡异常（${abnormal
+    .slice(0, 3)
+    .map((c) => c.ref)
+    .join('、')}${abnormal.length > 3 ? ' 等' : ''}）`;
+}
+
+/** ignore 的确定性依据；没有时为 null。前提：没有有效提议、规则提议与适用的修复模板，也没有不能 ignore 的业务影响 */
 function ignoreBasis(i: DispositionInput, templates: readonly string[]): { basis: IgnoreBasis; why: string } | null {
-  if (i.proposals > 0 || i.stageA.rule_proposals.length > 0 || templates.length > 0) {
+  if (i.proposals > 0 || i.stageA.rule_proposals.length > 0 || templates.length > 0 || impactHeld(i)) {
     return null;
   }
   if (i.stageA.disposition === 'ignore' && STAGE_A_IGNORE.has(i.stageA.disposition_reason)) {
@@ -125,9 +153,16 @@ export function deriveDisposition(i: DispositionInput): DispositionResult {
     );
     return { disposition: 'ignore', basis: ignore.basis, templates, notes };
   }
+  const act = i.gaps?.length ? null : actBasis(i, templates);
+  if (act && i.model !== 'act') {
+    notes.push(`处置改为 act（模型给出 ${i.model}）：${act}`);
+    return { disposition: 'act', basis: null, templates, notes };
+  }
   if (i.model === 'ignore') {
-    const why =
-      i.proposals > 0
+    const held = impactHeld(i);
+    const why = held
+      ? `${held}，业务受影响时不给 ignore（ADR 0163）`
+      : i.proposals > 0
         ? `有 ${i.proposals} 条有效提议，ignore 不带修复`
         : templates.length > 0
           ? `根因上有适用的修复模板 ${templates.join('、')}，ignore 不带修复`
@@ -148,14 +183,43 @@ export function deriveDisposition(i: DispositionInput): DispositionResult {
       notes.push(`处置为 act 但最低取证集合没有覆盖（ADR 0153），改为 ${fallback}`);
       return { disposition: fallback, basis: null, templates, notes };
     }
-    if (i.proposals === 0 && i.stageA.rule_proposals.length === 0) {
-      if (templates.length === 0) {
-        notes.push(`处置为 act 但没有有效的提议、规则提议或适用的修复模板，改为 ${fallback}`);
-        return { disposition: fallback, basis: null, templates, notes };
-      }
-      notes.push(`处置为 act：没有有效提议，修复由适用的修复模板 ${templates.join('、')} 给出`);
+    if (i.proposals > 0 || i.stageA.rule_proposals.length > 0) {
+      return { disposition: 'act', basis: null, templates, notes };
     }
-    return { disposition: 'act', basis: null, templates, notes };
+    if (templates.length > 0) {
+      notes.push(`处置为 act：没有有效提议，修复由适用的修复模板 ${templates.join('、')} 给出`);
+      return { disposition: 'act', basis: null, templates, notes };
+    }
+    if (act) {
+      notes.push(`处置为 act：没有有效提议与适用的修复模板，${act}`);
+      return { disposition: 'act', basis: null, templates, notes };
+    }
+    notes.push(
+      `处置为 act 但没有有效的提议、规则提议或适用的修复模板，研判根因与发现根因也不都是结论 likely 以上、由 GitOps 仓库声明的运行中组件，改为 ${fallback}`,
+    );
+    return { disposition: fallback, basis: null, templates, notes };
   }
   return { disposition: i.model, basis: null, templates, notes };
+}
+
+/**
+ * 不论模型给出什么都给 act 的确定性依据（ADR 0162）；没有时为 null。调用方先排除最低取证集合的缺口
+ * - 研判根因 likely 及以上、上面有适用的修复模板：server 会按模板开出修复 PR（ADR 0126）；
+ * - 研判根因 likely 及以上，它与发现根因都是 GitOps 仓库声明的运行中组件，并且选中的假设有规则判定的支持卡：发现根因是
+ *   GitOps 应用或逻辑组件（例如 release）时事件由一次变更引起，回退还是向前修复要由修复模板的检查或人决定，不算依据；
+ *   只有成员告警支持（或支持卡都是常态）时没有证据说明根因的状态异常，也不算依据
+ */
+function actBasis(i: DispositionInput, templates: readonly string[]): string | null {
+  if (i.root === null || !RESEARCH_ROOT_LEVELS.has(i.level)) {
+    return null;
+  }
+  if (templates.length > 0) {
+    return `研判根因 ${displayKey(i.root)}（${i.level}）上适用修复模板 ${templates.join('、')}，server 会按模板开出修复 PR`;
+  }
+  const declared = i.facts?.declared ?? [];
+  const found = i.incident.root.component;
+  if (declared.includes(i.root) && found !== null && declared.includes(found) && i.ruleSupport > 0) {
+    return `研判根因 ${displayKey(i.root)}（${i.level}，${i.ruleSupport} 张规则判定的支持卡）与发现根因 ${displayKey(found)} 都由 GitOps 仓库声明，修复是修改仓库中的声明（见修复建议）`;
+  }
+  return null;
 }

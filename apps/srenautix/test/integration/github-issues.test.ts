@@ -586,14 +586,73 @@ describe('事件 issue', () => {
     expect(gh.requests.some((r) => r.method === 'GET' && r.path === `/repos/${REPO}/issues/${number}`)).toBe(true);
   });
 
+  it('研判处置为 act 而没有提议（修复是修改仓库中的声明，ADR 0162）：按 repo_change 开 issue；有提议时不开', async () => {
+    // 已开的 issue 移出最近 1 小时，腾出限速额度；本用例开出的 issue 结束时同样移出，不占后面用例的额度
+    await db.admin.query("UPDATE server.github_issues SET opened_at = now() - interval '2 hours' WHERE state = 'open'");
+    const opened = gh.issues.length;
+    const acted = async (label: string, proposals: unknown[]) => {
+      const id = await cloneEscalated(label);
+      await db.admin.query(
+        `UPDATE server.stage_a_reports SET disposition = 'undetermined', body = body || '{"disposition":"undetermined"}'
+          WHERE incident_id = $1`,
+        [id],
+      );
+      const output = {
+        disposition: 'act',
+        conclusion: {
+          level: 'likely',
+          hypothesis_id: 'h1',
+          root_component: 'Deployment:shop/api',
+          undetermined_reason: null,
+          consistency: {
+            entity_in_scope: true,
+            onset_precedes_symptom: true,
+            no_contrary_normal: true,
+            competitor_tested: false,
+          },
+        },
+        hypotheses: [],
+        next_checks: [],
+        situation: '',
+        summary: 'api 的内存 limit 不够，修改仓库中 api 的 resources',
+        recommendations: [],
+        proposals,
+        validation_notes: [],
+      };
+      await db.admin.query(
+        `INSERT INTO server.research_runs (run_id, incident_id, incident_version, reason, state, disposition, conclusion_level,
+           root_component, summary, output, started_at, finished_at)
+         VALUES ($1, $2, 1, 'new_incident', 'completed', 'act', 'likely', 'Deployment:shop/api', $3, $4, now(), now())`,
+        [randomUUID(), id, output.summary, JSON.stringify(output)],
+      );
+      return id;
+    };
+    const declared = await acted('c2-act-declared', []);
+    const proposed = await acted('c2-act-proposal', [{ action_id: 'pod_restart', params: {} }]);
+    await run();
+    expect(gh.issues).toHaveLength(opened + 1);
+    expect(gh.issues.at(-1)!.body).toContain(`<!-- srenautix:incident=${declared} -->`);
+    expect(gh.issues.at(-1)!.body).toContain('有需要修改仓库的修复提议');
+    expect(await issueRow(declared)).toMatchObject({ state: 'open' });
+    expect(await issueRow(proposed)).toBeUndefined();
+    await db.admin.query(
+      "UPDATE server.github_issues SET opened_at = now() - interval '2 hours' WHERE incident_id = $1",
+      [declared],
+    );
+    await db.admin.query(
+      "UPDATE server.github_issues SET opened_at = now() WHERE state = 'open' AND incident_id <> $1",
+      [declared],
+    );
+  });
+
   it('限速：每小时开满之后的事件只记录为 skipped，不开 issue', async () => {
-    expect(gh.issues).toHaveLength(3);
+    expect(gh.issues).toHaveLength(4);
     const d = await cloneEscalated('c2-over-limit');
     await run();
-    expect(gh.issues).toHaveLength(3);
+    expect(gh.issues).toHaveLength(4);
     expect(await issueRow(d)).toMatchObject({ state: 'skipped', number: null });
     await run();
-    expect(gh.issues).toHaveLength(3);
+    expect(gh.issues).toHaveLength(4);
     const audit = await db.admin.query<{ data: Record<string, unknown> }>(
       "SELECT data FROM server.governance_audit WHERE kind = 'github.issue_skipped'",
     );

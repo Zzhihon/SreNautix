@@ -64,7 +64,12 @@ export interface ResearchRouteDeps {
    * 处置推导的确定性依据（ADR 0138）：候选根因的具体对象与组件类型、启用的修复类别（没有启用自愈 PR 时为空）。
    * 没有时研判输入不带 disposition_facts，处置只按提议与阶段 A 推导
    */
-  dispositionFacts?: { lookup: RootLookup; categories: readonly string[] } | null;
+  dispositionFacts?: {
+    lookup: RootLookup;
+    categories: readonly string[];
+    /** 业务影响告警的标签条件（ADR 0163） */
+    impactLabels: Readonly<Record<string, readonly string[]>>;
+  } | null;
 }
 
 /** 研判输入里相关变更的条数上限（ADR 0106） */
@@ -350,6 +355,7 @@ export function registerResearchRoutes(app: FastifyInstance, d: ResearchRouteDep
               scope: new RootCardScope(d.dispositionFacts.lookup, incident, now),
               // 处置依据只看能消除根因的两类模板（发布回退、配置与资源），它们不读告警的外部上游标记，不需要汇总配置
               alertFacts: await alertFacts(d.dispositionFacts.lookup, incident, alerts, now, NO_EXTERNAL_ALERTS),
+              impactLabels: d.dispositionFacts.impactLabels,
             }),
           }
         : {}),

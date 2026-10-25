@@ -62,7 +62,7 @@ notify:
       components: [component:provider]   # 另外按外部上游处理的根因（例如按主题聚合的逻辑组件）
       alert_labels: { theme: [provider] } # 全部成员告警都满足时按外部上游处理
       business_impact:
-        alert_labels: { layer: [L0] }     # 算作业务影响的告警（标签名 → 取值之一）
+        alert_labels: { layer: [L0] }     # 算作业务影响的告警（标签名 → 取值之一）；其中 critical 的在触发、证据卡异常时，阶段 A 与阶段 B 都不给 ignore（ADR 0163）
         impact_cards: true                # 异常的影响卡算业务影响
         within: 30m                       # 在上游事件开始后这么久之内开始的才算相关
         topology_hops: 6                  # 组件沿依赖边这么多跳以内到达上游根因时也算相关；0 时不按拓扑判定

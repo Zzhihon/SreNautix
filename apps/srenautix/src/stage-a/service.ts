@@ -37,6 +37,8 @@ export class StageAService {
     private readonly packLock: () => string | null = () => null,
     /** 重算前按当前解析规则重新解析成员告警并回写（IngestService.reresolve）；没有时不重新解析 */
     private readonly reresolve: ((clusterId: string, alertIds: readonly string[]) => Promise<string[]>) | null = null,
+    /** 业务影响告警的标签条件（ADR 0163）：有触发中的 critical 业务影响告警并且有异常卡时，阶段 A 不给 ignore */
+    private readonly impactLabels: Readonly<Record<string, readonly string[]>> = {},
   ) {}
 
   /**
@@ -133,6 +135,7 @@ export class StageAService {
       alerts,
       cards,
       excludedBy,
+      impactLabels: this.impactLabels,
       runbooks: run.runbooks,
       ...(run.required ? { required: run.required } : {}),
       degraded: false,

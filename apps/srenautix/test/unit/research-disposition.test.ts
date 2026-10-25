@@ -14,10 +14,11 @@ import { dispositionSegment } from '../../src/research/prompt.js';
 import type { DispositionFacts } from '../../src/research/types.js';
 import { incident, researchCase, stageA, stageACards } from '../support/scenario.js';
 
-// 处置推导（ADR 0138）
+// 处置推导（ADR 0138、0162）
 
 const PG = 'StatefulSet:shop/postgres';
 const PROVIDER = 'provider:openai';
+const APP = 'Application.argoproj.io:argocd/shop';
 
 function cardsOf(cards: EvidenceResult[]) {
   const rc = researchCase({ stageA: stageA(cards) });
@@ -33,6 +34,7 @@ function input(over: Partial<DispositionInput> = {}): DispositionInput {
     stageA: s,
     level: 'likely',
     root: PG,
+    ruleSupport: 1,
     proposals: 0,
     cards: cardsOf(stageACards()),
     facts: null,
@@ -67,17 +69,16 @@ describe('处置推导', () => {
     );
     expect(withProposal.disposition).toBe('escalate');
     expect(withProposal.notes[0]).toMatch(/1 条有效提议/);
-    const withTemplate = deriveDisposition(
-      input({
-        model: 'ignore',
-        root: PROVIDER,
-        facts: facts({
-          external: [PROVIDER],
-          remediations: [{ root: PROVIDER, templates: [{ key: 'gitops/x', category: 'config_resource' }] }],
-        }),
-      }),
-    );
-    expect(withTemplate.disposition).toBe('escalate');
+    const tpl = facts({
+      external: [PROVIDER],
+      remediations: [{ root: PROVIDER, templates: [{ key: 'gitops/x', category: 'config_resource' }] }],
+    });
+    // 档位低于 likely 时模板按事件根因匹配，事件根因上没有模板：模型的 ignore 按严重度改写
+    const low = deriveDisposition(input({ model: 'ignore', root: PROVIDER, level: 'inconclusive', facts: tpl }));
+    expect(low.disposition).toBe('escalate');
+    // likely 的研判根因上有适用的修复模板：server 会开出修复 PR，处置为 act（ADR 0162）
+    const withTemplate = deriveDisposition(input({ model: 'ignore', root: PROVIDER, facts: tpl }));
+    expect(withTemplate.disposition).toBe('act');
   });
 
   it('没有任何异常卡时为 ignore；只读工具结果由模型判定的异常卡不算确定性证据', () => {
@@ -134,6 +135,66 @@ describe('处置推导', () => {
     );
   });
 
+  it('研判根因与发现根因都是仓库声明的运行中组件（likely 及以上，有规则判定的支持卡）时为 act，不论模型给出什么（ADR 0162）', () => {
+    // 场景的发现根因是 PG
+    const declared = facts({ declared: [PG] });
+    const r = deriveDisposition(input({ model: 'escalate', facts: declared }));
+    expect(r.disposition).toBe('act');
+    expect(r.notes[0]).toMatch(/模型给出 escalate.*都由 GitOps 仓库声明/);
+    expect(deriveDisposition(input({ model: 'undetermined', facts: declared })).disposition).toBe('act');
+    const own = deriveDisposition(input({ model: 'act', facts: declared }));
+    expect(own.disposition).toBe('act');
+    expect(own.notes[0]).toMatch(/没有有效提议与适用的修复模板/);
+    // 档位低于 likely、只有成员告警支持（没有规则判定的支持卡）、最低取证集合有缺口时不是依据
+    expect(deriveDisposition(input({ model: 'escalate', level: 'inconclusive', facts: declared })).disposition).toBe(
+      'escalate',
+    );
+    expect(deriveDisposition(input({ model: 'escalate', ruleSupport: 0, facts: declared })).disposition).toBe(
+      'escalate',
+    );
+    expect(deriveDisposition(input({ model: 'act', facts: declared, gaps: ['x'] })).disposition).toBe('escalate');
+    // 研判根因不由仓库声明
+    const api = 'Deployment:shop/api';
+    expect(deriveDisposition(input({ model: 'act', root: api, facts: declared })).notes[0]).toMatch(
+      /研判根因与发现根因也不都是/,
+    );
+    // 发现根因不是仓库声明的运行中组件（例如由一次发布引起、发现根因是 GitOps 应用或逻辑组件 release）：保持模型的取值
+    const release = { ...incident(), root: { ...incident().root, component: 'component:release' } };
+    const both = facts({ declared: [PG, api] });
+    expect(deriveDisposition(input({ model: 'escalate', incident: release, root: api, facts: both })).disposition).toBe(
+      'escalate',
+    );
+    expect(deriveDisposition(input({ model: 'act', incident: release, root: api, facts: both })).disposition).toBe(
+      'escalate',
+    );
+    // 观测失明与 ignore 的依据优先
+    const blind = { ...stageA(), observability_blind: true };
+    expect(deriveDisposition(input({ model: 'escalate', stageA: blind, facts: declared })).disposition).toBe(
+      'escalate',
+    );
+    const chronic = {
+      ...stageA(),
+      disposition: 'ignore' as const,
+      disposition_reason: 'forecast_or_chronic_only' as const,
+    };
+    expect(deriveDisposition(input({ stageA: chronic, facts: declared })).disposition).toBe('ignore');
+  });
+
+  it('likely 及以上的研判根因上有适用的修复模板时为 act，不论模型给出什么', () => {
+    const tpl = facts({
+      remediations: [{ root: PG, templates: [{ key: 'gitops/memory-limit-raise', category: 'config_resource' }] }],
+    });
+    const r = deriveDisposition(input({ model: 'escalate', facts: tpl }));
+    expect(r).toMatchObject({ disposition: 'act', templates: ['gitops/memory-limit-raise'] });
+    expect(r.notes[0]).toMatch(/模型给出 escalate.*server 会按模板开出修复 PR/);
+    expect(deriveDisposition(input({ model: 'undetermined', facts: tpl })).disposition).toBe('act');
+    // 档位低于 likely 或最低取证集合有缺口时保持模型的取值
+    expect(deriveDisposition(input({ model: 'escalate', level: 'inconclusive', facts: tpl })).disposition).toBe(
+      'escalate',
+    );
+    expect(deriveDisposition(input({ model: 'escalate', facts: tpl, gaps: ['x'] })).disposition).toBe('escalate');
+  });
+
   it('escalate 与 undetermined 保持模型的取值', () => {
     expect(deriveDisposition(input({ model: 'undetermined' })).disposition).toBe('undetermined');
     expect(deriveDisposition(input({ model: 'escalate' })).notes).toEqual([]);
@@ -178,10 +239,12 @@ describe('处置依据的计算', () => {
     };
     const roots = factRoots(inc, { nodes: [], edges: [] });
     expect(roots).toEqual([PG, 'Deployment:shop/web', PROVIDER]);
-    // 每个根因自己的卡：名字落在根因名里的实体（postgres 的数据卷属于 postgres）
+    // 每个根因自己的卡：名字落在根因名里的实体（postgres 的数据卷属于 postgres）。postgres 由 Argo 应用 shop 管理，
+    // web 没有管理者
     const scope = {
       cards: async (r: { name: string } | null, cards: readonly EvidenceResult[]) =>
         cards.filter((c) => r !== null && c.entity !== null && c.entity.name.includes(r.name)),
+      resolve: async (key: string) => ({ top: key, managers: key === PG ? [APP] : [] }),
     };
     const f = await dispositionFacts({
       set,
@@ -194,11 +257,37 @@ describe('处置依据的计算', () => {
       resolve,
       scope,
       alertFacts: new Map(),
+      impactLabels: { layer: ['L0'] },
     });
     expect(f).toEqual({
       external: [PROVIDER],
+      declared: [PG],
+      business_impact: [],
       remediations: [{ root: PG, templates: [{ key: 'demo/db-fix', category: 'config_resource' }] }],
     });
+    // 管理着候选根因的 GitOps 应用（即使它自己也由应用的应用管理）与逻辑组件不是运行中组件；事件根因里应用的 kind 可能
+    // 不带 API 组，按同一个对象比较
+    const appScope = {
+      ...scope,
+      resolve: async (key: string) => ({ top: key, managers: key === PG ? [APP] : key !== PG ? ['root-app'] : [] }),
+    };
+    // 事件根因是应用时展开到根因实体（一个由它管理的工作负载）：组件键本身是应用，同样排除
+    const toPg = async (key: string) =>
+      key === 'application:argocd/shop' ? { ...(await resolve(PG)), kind: 'StatefulSet' } : resolve(key);
+    const withApp = await dispositionFacts({
+      set,
+      componentTypes: types,
+      categories: [],
+      incident: inc,
+      alerts: [],
+      cards: stageACards(),
+      roots: [PG, APP, 'application:argocd/shop', 'component:release'],
+      resolve: toPg,
+      scope: appScope,
+      alertFacts: new Map(),
+      impactLabels: {},
+    });
+    expect(withApp.declared).toEqual([PG]);
     const off = await dispositionFacts({
       set,
       componentTypes: types,
@@ -210,6 +299,7 @@ describe('处置依据的计算', () => {
       resolve,
       scope,
       alertFacts: new Map(),
+      impactLabels: {},
     });
     expect(off.remediations).toEqual([]);
   });
@@ -220,6 +310,7 @@ describe('conclude 的处置依据段', () => {
     const rc = researchCase({ stageA: stageA() });
     rc.dispositionFacts = facts({
       external: [PROVIDER],
+      declared: [PG, 'Deployment:shop/web'],
       remediations: [
         { root: PG, templates: [{ key: 'gitops/memory-limit-raise', category: 'config_resource' }] },
         {
@@ -233,6 +324,10 @@ describe('conclude 的处置依据段', () => {
     ledger.merge([{ id: 'h1', parent_id: null, root_component: PG, mechanism: 'x', supporting: [], refuting: [] }], []);
     const [segment] = dispositionSegment(rc, ledger);
     expect(segment?.text).toContain('gitops/memory-limit-raise（config_resource）');
+    expect(segment?.text).toContain(
+      `仓库声明的组件（由 GitOps 应用管理，修改仓库中的声明即可处置）\n\`\`\`json\n["${PG}"]`,
+    );
+    expect(segment?.text).not.toContain('Deployment:shop/web');
     expect(segment?.text).not.toContain('release-to-serving-version');
     expect(segment?.text).not.toContain(PROVIDER);
   });

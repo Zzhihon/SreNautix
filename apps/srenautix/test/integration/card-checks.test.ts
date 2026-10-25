@@ -105,6 +105,7 @@ async function caseOf(id: string) {
     catalog: Catalog.load(),
     locale: 'zh-CN',
     signal: AbortSignal.timeout(60_000),
+    impactLabels: {},
   });
   const s = rc.snapshot;
   const research: ResearchCase = {

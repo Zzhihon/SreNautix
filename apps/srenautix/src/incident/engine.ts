@@ -121,10 +121,14 @@ export class IncidentEngine {
                 clusterId,
                 firing.map((m) => m.alert_id),
               );
+              const prev = before.get(inc.incident_id);
               if (firing.length > 0 && firing.every((m) => suppressed.has(m.alert_id))) {
                 inc.suppressed = true;
+              } else if (firing.length === 0 && prev) {
+                // 没有触发中的成员（事件恢复，或成员都已离开）时保持最后的抑制状态：被抑制期间没有发出消息的事件，
+                // 恢复时也不补发一条"已恢复"
+                inc.suppressed = prev.suppressed;
               }
-              const prev = before.get(inc.incident_id);
               const reason = await this.persist(c, inc, prev);
               // 拆分出的事件的告警已经在原事件里被发现，不计入检测延迟（ADR 0159）
               if (!prev && inc.state === 'firing' && inc.split_from === null) {

@@ -973,6 +973,8 @@ export interface AnalysisInputs {
   catalog: Catalog;
   locale: 'zh-CN' | 'en';
   signal: AbortSignal;
+  /** 业务影响告警的标签条件（评测配置的 reconstruct.business_impact_labels，ADR 0163） */
+  impactLabels: Readonly<Record<string, readonly string[]>>;
 }
 
 export interface ReconstructedCase {
@@ -1034,6 +1036,7 @@ export async function reconstructCase(
     alerts,
     cards: run.cards,
     excludedBy,
+    impactLabels: a.impactLabels,
     runbooks: run.runbooks,
     ...(run.required ? { required: run.required } : {}),
     degraded: false,
@@ -1074,6 +1077,7 @@ export async function reconstructCase(
     resolve: (key) => remediationRoot(lookup, inc, alerts, key, new Date(asOf)),
     scope: new RootCardScope(lookup, inc, new Date(asOf)),
     alertFacts: await alertFacts(lookup, inc, alerts, new Date(asOf), NO_EXTERNAL_ALERTS),
+    impactLabels: a.impactLabels,
   });
   const snapshot: EvalSnapshot = {
     snapshot_id: snapshotId,

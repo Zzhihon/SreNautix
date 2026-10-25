@@ -2,6 +2,8 @@ import { randomUUID } from 'node:crypto';
 import type { Alert, Disposition, EvidenceResult, Incident, StageAReport } from '@srenautix/contract';
 import { evidenceFingerprint } from '@srenautix/core';
 import { changeNotes } from '../changes/notes.js';
+import { matchesLabels } from '../notify/external.js';
+import { isRoutine } from './novelty.js';
 import type { RequiredEvidence } from './required.js';
 
 /** 至少这个比例的卡没有数据时判为观测失明（DESIGN §7.1）。 */
@@ -25,27 +27,63 @@ export interface DispositionInput {
   ruleActions: number;
   /** 领域包排除规则命中的规则 id。 */
   excludedBy: string | null;
+  /** 业务影响告警的标签条件（notify.digest.external_roots.business_impact.alert_labels，ADR 0163）；空时不判断 */
+  impactLabels?: Readonly<Record<string, readonly string[]>>;
+}
+
+/**
+ * 触发中的 critical 业务影响告警（ADR 0163）：事件的成员中状态为 firing、严重度为 critical、标签满足业务影响条件的告警 id。
+ * 标签条件为空时没有业务影响告警
+ */
+export function businessImpactAlerts(
+  incident: Pick<Incident, 'members'>,
+  alerts: readonly Alert[],
+  labels: Readonly<Record<string, readonly string[]>> | undefined,
+): string[] {
+  if (!labels || Object.keys(labels).length === 0) {
+    return [];
+  }
+  const members = new Set(incident.members.filter((m) => m.left_version === null).map((m) => m.alert_id));
+  return alerts
+    .filter(
+      (a) =>
+        members.has(a.alert_id) &&
+        a.status === 'firing' &&
+        a.severity === 'critical' &&
+        matchesLabels(a.labels, labels),
+    )
+    .map((a) => a.alert_id);
+}
+
+/** 显示业务受影响的证据：判为异常、并且证据基线没有判为常态的卡（ADR 0153） */
+export function impactEvidence(cards: readonly EvidenceResult[]): EvidenceResult[] {
+  return cards.filter((c) => c.verdict === 'abnormal' && !isRoutine(c));
 }
 
 /**
  * 确定性的处置判断（DESIGN §7.1）：
- * ignore：命中抑制规则、领域包的排除规则，或者只有 forecast 和长期告警；
+ * ignore：命中抑制规则、领域包的排除规则，或者只有 forecast 和长期告警；有触发中的 critical 业务影响告警、并且有异常卡
+ * 时不给 ignore（ADR 0163）；
  * act：有动作明确的规则提议；escalate：critical 且有歧义，或者观测失明；undetermined：其余情况。
  */
 export function disposition(i: DispositionInput): {
   disposition: Disposition;
   reason: StageAReport['disposition_reason'];
 } {
-  if (i.incident.suppressed) {
-    return { disposition: 'ignore', reason: 'suppressed' };
-  }
-  if (i.excludedBy) {
-    return { disposition: 'ignore', reason: 'pack_exclude' };
-  }
-  const members = new Set(i.incident.members.filter((m) => m.left_version === null).map((m) => m.alert_id));
-  const own = i.alerts.filter((a) => members.has(a.alert_id));
-  if (own.length > 0 && own.every((a) => a.classification.role === 'forecast' || a.classification.chronic)) {
-    return { disposition: 'ignore', reason: 'forecast_or_chronic_only' };
+  const held =
+    businessImpactAlerts(i.incident, i.alerts, i.impactLabels).length > 0 && impactEvidence(i.cards).length > 0;
+  if (!held) {
+    if (i.incident.suppressed) {
+      return { disposition: 'ignore', reason: 'suppressed' };
+    }
+    if (i.excludedBy) {
+      return { disposition: 'ignore', reason: 'pack_exclude' };
+    }
+    const members = new Set(i.incident.members.filter((m) => m.left_version === null).map((m) => m.alert_id));
+    const own = i.alerts.filter((a) => members.has(a.alert_id));
+    if (own.length > 0 && own.every((a) => a.classification.role === 'forecast' || a.classification.chronic)) {
+      return { disposition: 'ignore', reason: 'forecast_or_chronic_only' };
+    }
   }
   if (i.ruleActions > 0) {
     return { disposition: 'act', reason: 'rule_action' };

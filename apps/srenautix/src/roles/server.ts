@@ -127,14 +127,21 @@ export interface BuildOptions {
   serve?: 'all' | 'api' | 'console';
 }
 
-/** 状态库里的抑制规则：matchers 是标签等值条件，全部满足的告警被抑制（只影响 SreNautix 自己的消息与研判）。 */
-async function suppressedAlertIds(c: pg.PoolClient | pg.Pool, clusterId: string, ids: string[]): Promise<Set<string>> {
+/**
+ * 被抑制的告警：告警源静默的（silenced），或命中状态库里的抑制规则（matchers 是标签等值条件，全部满足的告警被抑制），
+ * 只影响 SreNautix 自己的消息与研判。告警源的抑制规则（inhibited）不算：它说明另一条触发中的告警能解释这条告警
+ */
+export async function suppressedAlertIds(
+  c: pg.PoolClient | pg.Pool,
+  clusterId: string,
+  ids: string[],
+): Promise<Set<string>> {
   if (!ids.length) {
     return new Set();
   }
   const r = await c.query<{ alert_id: string }>(
     `SELECT a.alert_id FROM server.alert_state a
-      WHERE a.alert_id = ANY($2::text[]) AND (a.suppressed <> 'none' OR EXISTS (
+      WHERE a.alert_id = ANY($2::text[]) AND (a.suppressed = 'silenced' OR EXISTS (
         SELECT 1 FROM server.suppressions s WHERE s.cluster_id = $1 AND s.expires_at > now() AND a.labels @> s.matchers))`,
     [clusterId, ids],
   );
@@ -625,6 +632,8 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
     metrics,
     () => packs.set.lockDigest,
     (cl, ids) => ingest.reresolve(cl, ids),
+    // 业务影响告警与通知的外部上游判定用同一个定义（ADR 0150、0163）
+    c.notify.digest.external_roots.business_impact.alert_labels,
   );
   let degraded = false;
   const pipeline = new IncidentPipeline(c.cluster_id, engine, stageA, scheduler, pool, metrics, {
@@ -799,6 +808,7 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
         managers: (clusterId, key, at) => topology.targets(clusterId, key, 'managed_by', at),
       },
       categories: c.remediation.enabled && github ? c.remediation.categories : [],
+      impactLabels: c.notify.digest.external_roots.business_impact.alert_labels,
     },
   });
   registerIncidentRoutes(app, { pool, auth, feedback, topology, evidence, worker });

@@ -190,8 +190,23 @@ export class IssueService {
     await this.patchPullRefs();
   }
 
-  /** 处置判断为 escalate 的事件：最新的阶段 A 报告，或已完成的研判 */
+  /**
+   * 处置判断为 escalate 的事件：最新的阶段 A 报告，或已完成的研判；
+   * 研判处置为 act 而没有提议的事件（修复是修改仓库中的声明或按修复模板开 PR，ADR 0162）：原因为 repo_change，
+   * 修复模板没有开出 PR 时也有 issue 跟进
+   */
   private async scan(): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO server.github_issues (incident_id, repo, state, reason)
+       SELECT i.incident_id, $1, 'pending', 'repo_change' FROM server.incidents i
+        WHERE NOT i.suppressed AND i.state <> 'merged' AND i.updated_at > now() - make_interval(secs => $2)
+          AND NOT EXISTS (SELECT 1 FROM server.github_issues g WHERE g.incident_id = i.incident_id)
+          AND EXISTS (SELECT 1 FROM server.research_runs r WHERE r.incident_id = i.incident_id
+                        AND r.state = 'completed' AND r.disposition = 'act'
+                        AND jsonb_array_length(coalesce(r.output->'proposals', '[]'::jsonb)) = 0)
+       ON CONFLICT (incident_id) DO NOTHING`,
+      [this.s.repo, this.s.lookbackMs / 1000],
+    );
     await this.pool.query(
       `INSERT INTO server.github_issues (incident_id, repo, state, reason)
        SELECT i.incident_id, $1, 'pending', 'escalate' FROM server.incidents i

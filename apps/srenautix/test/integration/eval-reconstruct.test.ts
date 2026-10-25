@@ -270,6 +270,7 @@ describe('重放、重建阶段 A 与研判输入', () => {
       evidence_concurrency: 4,
       query_timeout_seconds: 30,
       novelty: NOVELTY_CONFIG_DEFAULT,
+      business_impact_labels: {},
     });
     const r = await replay(
       bundle,
@@ -321,14 +322,16 @@ describe('重放、重建阶段 A 与研判输入', () => {
         catalog: Catalog.load(),
         locale: 'zh-CN',
         signal: AbortSignal.timeout(60_000),
+        impactLabels: {},
       },
     );
     assertValid<EvalSnapshot>('schemas/eval-snapshot.schema.json', rc.snapshot);
     expect(rc.snapshot.source.kind).toBe('reconstructed');
     expect(rc.cards.total).toBeGreaterThan(0);
     expect(rc.snapshot.context.subgraph.nodes.map((n) => n.component)).toContain('Deployment:shop/api');
-    // 处置推导的依据（ADR 0138）：内置包没有声明外部组件
+    // 处置推导的依据（ADR 0138）：内置包没有声明外部组件；api 由 Argo 应用 shop 管理，是仓库声明的组件（ADR 0162）
     expect(rc.snapshot.context.disposition_facts?.external).toEqual([]);
+    expect(rc.snapshot.context.disposition_facts?.declared).toContain('Deployment:shop/api');
     // 分析时刻第一次触发仍在继续：一条告警，链级有卡。主卡是 kps-conditions 的告警条件卡（ADR 0109），
     // 夹具里没有它读取的 kube_deployment_status_condition，所以无法判定
     expect(rc.agreement).toHaveLength(1);
@@ -387,6 +390,7 @@ describe('影子环境统计（只读）', () => {
       evidence_concurrency: 4,
       query_timeout_seconds: 30,
       novelty: NOVELTY_CONFIG_DEFAULT,
+      business_impact_labels: {},
     });
     const s = await liveStats(state, CLUSTER, new Date(T0), new Date(T0 + 60 * MIN));
     expect(s.incidents).toBe(0);

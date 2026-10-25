@@ -3605,7 +3605,7 @@ export type components = {
       split_from: null | components['schemas']['Uuid'];
       /** @enum {string} */
       state: 'firing' | 'resolved' | 'merged';
-      /** @description 命中 SreNautix 自己的抑制规则，或全部触发中的成员都被告警源静默。只影响 SreNautix 的消息与研判 */
+      /** @description 命中 SreNautix 自己的抑制规则，或全部触发中的成员都被告警源静默（silenced）；告警源的抑制规则（inhibited）不算（ADR 0163）。没有触发中的成员时保持最后的取值。只影响 SreNautix 的消息与研判 */
       suppressed: boolean;
       /** @description 本版本使用的拓扑事件 seq */
       topology_version: number;
