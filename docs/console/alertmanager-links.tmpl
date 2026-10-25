@@ -1,0 +1,10 @@
+{{/*
+  SreNautix 告警链接（ADR 0154）：每条告警链接到控制台的 /alerts?l.标签名=标签值&…，控制台打开这条告警所属的事件。
+  用法：把 srenautix.console_url 改成控制台的地址，把本文件加进 Alertmanager 的 templates，在通知模板里对每条告警调用
+  srenautix.alert_url，例如纯文本正文写 range .Alerts 后调用 template "srenautix.alert_url" .，
+  邮件 HTML 正文写在 a 元素的 href 里。
+  标签名与标签值都经 urlquery 转义。HTML 正文由 html/template 渲染，它认出 href 里的 urlquery，不再重复转义。
+  Alertmanager 给的是全部标签（含 alertgroup 与 external labels），中心计算身份时去掉它们，链接里保留也不影响查找。
+*/}}
+{{ define "srenautix.console_url" }}https://srenautix.example.com{{ end }}
+{{ define "srenautix.alert_url" }}{{ template "srenautix.console_url" }}/alerts?{{ range $i, $p := .Labels.SortedPairs }}{{ if $i }}&{{ end }}l.{{ urlquery $p.Name }}={{ urlquery $p.Value }}{{ end }}{{ end }}

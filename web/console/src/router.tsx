@@ -2,10 +2,18 @@
 // 刷新和分享链接后页面状态不变。未登录时跳转到登录页，并带上原地址。
 
 import type { QueryClient } from '@tanstack/react-query';
-import { createRootRouteWithContext, createRoute, createRouter, Outlet, redirect } from '@tanstack/react-router';
+import {
+  createRootRouteWithContext,
+  createRoute,
+  createRouter,
+  Outlet,
+  redirect,
+  useLocation,
+} from '@tanstack/react-router';
 import { DEFAULT_INBOX_FILTERS, type IncidentTab, type InboxFilters } from '@srenautix/ui';
 import type { Session } from './api';
 import { ActionsPage, ApprovalPage, type QueueTab } from './pages/actions';
+import { AlertLookupPage } from './pages/AlertLookupPage';
 import { ClusterPage, ClustersPage } from './pages/clusters';
 import { EvalPage, type EvalMode } from './pages/eval';
 import { LoginPage } from './pages/LoginPage';
@@ -17,6 +25,7 @@ import { SearchPage } from './pages/SearchPage';
 import { IntegrationsPage, ModelsPage, PacksPage, PoliciesPage } from './pages/system';
 import { TopologyPage, type TopologyView } from './pages/topology';
 import { AppFrame } from './frame';
+import { parseSearch, stringifySearch } from './search';
 import { SESSION_KEY } from './session';
 
 export interface RouterContext {
@@ -115,6 +124,18 @@ const incidentRoute = createRoute({
     const { ref } = incidentRoute.useParams();
     const { tab, cluster } = incidentRoute.useSearch();
     return <IncidentPage key={ref} incidentRef={ref} tab={tab ?? 'evidence'} cluster={cluster} />;
+  },
+});
+
+// 告警链接（ADR 0154）：标签参数 l.<标签名> 不经 validateSearch，页面取原始查询串
+const alertsRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: 'alerts',
+  validateSearch: (s: Record<string, unknown>): ClusterSearch => ({ cluster: str(s.cluster) }),
+  component: function Alerts() {
+    const { cluster } = alertsRoute.useSearch();
+    const searchStr = useLocation({ select: (l) => l.searchStr });
+    return <AlertLookupPage searchStr={searchStr} cluster={cluster} />;
   },
 });
 
@@ -268,6 +289,7 @@ export const routeTree = rootRoute.addChildren([
     indexRoute,
     incidentsRoute,
     incidentRoute,
+    alertsRoute,
     runRoute,
     rawPromptsRoute,
     actionsRoute,
@@ -290,7 +312,14 @@ export const routeTree = rootRoute.addChildren([
 ]);
 
 export function makeRouter(context: RouterContext) {
-  return createRouter({ routeTree, context, defaultPreload: 'intent', scrollRestoration: true });
+  return createRouter({
+    routeTree,
+    context,
+    defaultPreload: 'intent',
+    scrollRestoration: true,
+    parseSearch,
+    stringifySearch,
+  });
 }
 
 declare module '@tanstack/react-router' {

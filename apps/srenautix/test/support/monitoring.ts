@@ -97,15 +97,28 @@ function stopper(p: ChildProcess, dir: string): () => Promise<void> {
     });
 }
 
-/** Alertmanager（单实例，不组集群）：一个 webhook 接收器，group_wait 1 秒，带 bearer token。 */
-export async function startAlertmanager(webhookUrl: string, token: string): Promise<Proc> {
+/** 同一个接收器上的邮件通知：发往 smarthost（不用 TLS 与认证），正文用 templates 中的模板渲染。 */
+export interface AlertmanagerEmail {
+  smarthost: string;
+  /** 模板文件的绝对路径（Alertmanager 的 templates） */
+  templates: string[];
+  /** 纯文本与 HTML 正文（Alertmanager 模板语法） */
+  text: string;
+  html: string;
+}
+
+/** Alertmanager（单实例，不组集群）：一个 webhook 接收器，group_wait 1 秒，带 bearer token；可以同时发邮件。 */
+export async function startAlertmanager(webhookUrl: string, token: string, email?: AlertmanagerEmail): Promise<Proc> {
   const port = await freePort();
   const dir = join(ROOT, `am-${process.pid}-${port}`);
   const receiver = `srenautix-${process.pid}-${port}`;
   mkdirSync(dir, { recursive: true });
+  // JSON 字符串同时是 YAML 的双引号标量，模板里的引号与花括号不用另行转义
+  const q = (s: string) => JSON.stringify(s);
   writeFileSync(
     join(dir, 'am.yml'),
     [
+      ...(email ? [`templates: [${email.templates.map(q).join(', ')}]`] : []),
       'route:',
       `  receiver: ${receiver}`,
       '  group_by: [alertname]',
@@ -121,6 +134,17 @@ export async function startAlertmanager(webhookUrl: string, token: string): Prom
       '          authorization:',
       '            type: Bearer',
       `            credentials: ${token}`,
+      ...(email
+        ? [
+            '    email_configs:',
+            '      - to: oncall@example.test',
+            '        from: alertmanager@example.test',
+            `        smarthost: ${q(email.smarthost)}`,
+            '        require_tls: false',
+            `        text: ${q(email.text)}`,
+            `        html: ${q(email.html)}`,
+          ]
+        : []),
       '',
     ].join('\n'),
   );
@@ -150,8 +174,15 @@ export async function startAlertmanager(webhookUrl: string, token: string): Prom
   return { url, log: am.log, stop };
 }
 
-/** Prometheus：只有一组告警规则，评估间隔 1 秒，发往给定的 Alertmanager。 */
-export async function startPrometheus(rules: string, alertmanagerUrl: string): Promise<Proc> {
+/**
+ * Prometheus：只有一组告警规则，评估间隔 1 秒，发往给定的 Alertmanager。externalLabels 是 global.external_labels，
+ * 发给 Alertmanager 的告警带着它们（kube-prometheus-stack 的 prometheus=<命名空间>/<名称>）。
+ */
+export async function startPrometheus(
+  rules: string,
+  alertmanagerUrl: string,
+  externalLabels: Record<string, string> = {},
+): Promise<Proc> {
   const port = await freePort();
   const dir = join(ROOT, `prom-${process.pid}-${port}`);
   mkdirSync(dir, { recursive: true });
@@ -162,6 +193,7 @@ export async function startPrometheus(rules: string, alertmanagerUrl: string): P
       'global:',
       '  evaluation_interval: 1s',
       '  scrape_interval: 1s',
+      ...(Object.keys(externalLabels).length ? [`  external_labels: ${JSON.stringify(externalLabels)}`] : []),
       'rule_files: [rules.yml]',
       'alerting:',
       '  alertmanagers:',

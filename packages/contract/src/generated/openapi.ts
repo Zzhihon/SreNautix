@@ -65,6 +65,29 @@ export type paths = {
     patch?: never;
     trace?: never;
   };
+  '/v1/alerts/lookup': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * @description 按一条告警的完整标签集找到它所属的事件（契约 2.32.0，ADR 0154）。Alertmanager 等外部通知只知道告警的标签，
+     *     不知道事件 id，控制台的 `/alerts?l.<标签名>=<标签值>&…` 页面调用本接口后打开事件。
+     *     中心按接入时同样的规则计算身份标签（去掉 alertgroup、alertstate、__name__ 与 ingest.external_labels）和指纹，
+     *     取这个指纹开始时间最晚的一条告警，经事件成员关系与别名链找到所属事件；合并过的事件给出吸收它的事件，已恢复的事件照常给出。
+     *     找不到时 outcome 说明原因。只读
+     */
+    get: operations['lookupAlert'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/v1/api-tokens': {
     parameters: {
       query?: never;
@@ -1635,6 +1658,41 @@ export type components = {
         value: number | null;
       }[];
       since: components['schemas']['Timestamp'];
+    };
+    /** @description 按标签集查找告警所属事件的结果（契约 2.32.0，ADR 0154） */
+    AlertLookup: {
+      /** @description 这个指纹开始时间最晚的一条告警；outcome 为 incident 或 not_grouped 时有值 */
+      alert: null | {
+        alert_id: string;
+        cluster_id: components['schemas']['ClusterId'];
+        ends_at: null | components['schemas']['Timestamp'];
+        received_at: components['schemas']['Timestamp'];
+        starts_at: components['schemas']['Timestamp'];
+        /** @enum {string} */
+        status: 'firing' | 'resolved';
+      };
+      /** @description 收到的标签中不计入身份的标签名（alertgroup、alertstate、__name__ 与 external labels），按名称排序 */
+      excluded_labels: string[];
+      /** @description 按身份标签计算的告警指纹（与 alert_state.fingerprint 相同） */
+      fingerprint: string;
+      identity_labels: components['schemas']['Labels'];
+      /** @description 所属事件；合并过的事件为吸收它的事件。outcome 为 incident 时有值 */
+      incident: null | {
+        incident_id: components['schemas']['Uuid'];
+        label: string;
+        /** @enum {string} */
+        state: 'firing' | 'resolved';
+      };
+      /**
+       * @description incident：找到所属事件（incident 不为空）；
+       *     not_received：中心没有收到过这个身份标签集的告警；
+       *     not_grouped：收到了告警（alert 不为空），事件引擎还没有把它归入任何事件；
+       *     not_visible：告警或它所属的事件不在调用方的读取范围内，alert 与 incident 都为空；
+       *     self_alert：标签里有 ingest.self_label，是 SreNautix 自身的元告警，接入时丢弃；
+       *     ignored：Watchdog（ingest.watchdog_alertname）、InfoInhibitor 或 severity=none，接入时丢弃，不进入事件
+       * @enum {string}
+       */
+      outcome: 'incident' | 'not_received' | 'not_grouped' | 'not_visible' | 'self_alert' | 'ignored';
     };
     /**
      * AlertRole
@@ -5685,6 +5743,38 @@ export interface operations {
           'application/json': components['schemas']['AgentHealth'];
         };
       };
+    };
+  };
+  lookupAlert: {
+    parameters: {
+      query: {
+        /** @description 只在这个集群的告警中查找；不填时取全部集群中开始时间最晚的一条 */
+        cluster_id?: components['schemas']['ClusterId'];
+        /**
+         * @description 告警的标签，每个标签一个查询参数 `l.<标签名>=<标签值>`（例如 `l.alertname=KubePodCrashLooping&l.namespace=shop`），
+         *     必须有 `l.alertname`；同一个标签出现两次时返回 400。除 `l.` 参数与 cluster_id 以外的参数返回 400
+         */
+        labels: {
+          [key: string]: string;
+        };
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 查找结果 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AlertLookup'];
+        };
+      };
+      400: components['responses']['Error'];
+      401: components['responses']['Error'];
     };
   };
   listApiTokens: {

@@ -139,6 +139,38 @@ test('反馈：进行中的事件可以对处置判断与根因分别反馈，"�
   await expect(done).toContainText('（console）');
 });
 
+test('告警链接：按告警的全部标签打开所属事件；找不到时写明原因并给出收件箱入口', async ({ page }) => {
+  // Alertmanager 模板给出的是全部标签，含 alertgroup 与 Prometheus 的 external label（ADR 0154）
+  await go(
+    page,
+    '/alerts?l.alertname=KubePodCrashLooping&l.alertgroup=kubernetes-apps&l.namespace=shop&l.pod=api-7d9f8-x2k4p' +
+      '&l.prometheus=monitoring%2Fkps-prometheus&l.severity=critical',
+  );
+  await expect(page).toHaveURL(new RegExp(`/incidents/${s.incidentId}\\?`));
+  await expect(page.getByRole('region', { name: '结论' })).toContainText(s.label);
+  // 替换了历史记录：后退不回到告警链接
+  await page.goBack();
+  await expect(page).not.toHaveURL(/\/alerts\?/);
+
+  // 没有收到过的告警：标签值按原文显示（"1.0" 不变成 1），列出不计入身份的标签
+  await go(page, '/alerts?l.alertname=NeverSent&l.namespace=shop&l.version=1.0&l.note=a%26b%3Dc+d&l.alertgroup=g');
+  await expect(page).toHaveURL(/l\.version=1\.0/);
+  await expect(page.getByRole('heading', { name: '告警所属的事件' })).toBeVisible();
+  await expect(page.getByText('没有收到过这条告警')).toBeVisible();
+  const identity = page.getByRole('list', { name: '身份标签' });
+  await expect(identity).toContainText('version="1.0"');
+  await expect(identity).toContainText('note="a&b=c d"');
+  await expect(identity).not.toContainText('alertgroup');
+  await expect(page.getByTestId('excluded-labels')).toContainText('alertgroup');
+  await page.getByRole('link', { name: '打开事件收件箱' }).click();
+  await expect(page).toHaveURL(/\/incidents(\?|$)/);
+  await expect(page.getByRole('list', { name: '事件列表' })).toBeVisible();
+
+  // 接入时丢弃的告警
+  await go(page, '/alerts?l.alertname=Watchdog&l.severity=none');
+  await expect(page.getByText('这条告警不进入事件')).toBeVisible();
+});
+
 test('审批页（L 档）：机器推导字段在前，模型理由折叠，批准后显示回执', async ({ page }) => {
   await go(page, `/actions/${s.proposals.low}`);
   await expect(page.getByRole('heading', { name: /审批：workload_scale · shop\/api/ })).toBeVisible();

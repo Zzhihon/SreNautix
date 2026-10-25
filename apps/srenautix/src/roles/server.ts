@@ -24,6 +24,7 @@ import { ksmRollouts } from '../changes/ksm-rollouts.js';
 import { changesInWindow, ChangesService } from '../changes/service.js';
 import { ConditionPublisher, serverConditions, workerRouteConditions } from '../console-bff/conditions.js';
 import { IntegrationRegistry } from '../console-bff/integrations.js';
+import { registerAlertRoutes } from '../console-bff/routes-alerts.js';
 import { registerIncidentRoutes } from '../console-bff/routes-incidents.js';
 import { apiTokenCaller, registerSystemRoutes } from '../console-bff/routes-system.js';
 import { registerConsoleStatic } from '../console-bff/static.js';
@@ -783,6 +784,12 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
     },
   });
   registerIncidentRoutes(app, { pool, auth, feedback, topology, evidence, worker });
+  registerAlertRoutes(app, {
+    pool,
+    auth,
+    selfLabel: c.ingest.self_label,
+    watchdogAlertname: c.ingest.watchdog_alertname,
+  });
   registerSystemRoutes(app, {
     pool,
     auth,

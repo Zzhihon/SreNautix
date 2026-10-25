@@ -15,14 +15,18 @@ import type { EvidenceRunner } from '../stage-a/ports.js';
 import type { TopologyStore } from '../topology/store.js';
 import { parseStoredKey } from '../topology/keys.js';
 
-/** 事件的授权对象：根因组件（没有时取第一个组件）所在的命名空间。 */
-export function incidentTarget(inc: Pick<Incident, 'cluster_id' | 'root' | 'components'>): Target {
-  const key = inc.root.component ?? inc.components[0] ?? null;
+/** 组件的授权对象：组件所在的命名空间；没有组件时为集群级对象。 */
+export function componentTarget(clusterId: string, key: string | null): Target {
   if (!key) {
-    return { cluster: inc.cluster_id, namespace: null, labels: {} };
+    return { cluster: clusterId, namespace: null, labels: {} };
   }
   const k = parseStoredKey(key);
-  return { cluster: inc.cluster_id, namespace: k.kind === NAMESPACE_KIND ? k.name : k.namespace, labels: {} };
+  return { cluster: clusterId, namespace: k.kind === NAMESPACE_KIND ? k.name : k.namespace, labels: {} };
+}
+
+/** 事件的授权对象：根因组件（没有时取第一个组件）所在的命名空间。 */
+export function incidentTarget(inc: Pick<Incident, 'cluster_id' | 'root' | 'components'>): Target {
+  return componentTarget(inc.cluster_id, inc.root.component ?? inc.components[0] ?? null);
 }
 
 export function visible(scopes: RoleBinding[] | 'all', t: Target): boolean {

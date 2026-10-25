@@ -8,7 +8,7 @@ SreNautix 控制台是 server 角色提供的单页应用（DESIGN §1.1、§12�
 | `web/console` | 控制台本身：路由、会话、外壳与全部页面 | AGPL-3.0-or-later |
 | `plugins/grafana-app` | Grafana 应用插件：嵌入收件箱、事件详情与研判运行明细，可以反馈，审批跳转到控制台 | Apache-2.0 |
 
-设计取舍见 ADR 0070（共享组件与数据端口）、0071（路由、页面状态与实时数据）、0072（Grafana 插件的打包与后端代理）、0073（端到端测试）。
+设计取舍见 ADR 0070（共享组件与数据端口）、0071（路由、页面状态与实时数据）、0072（Grafana 插件的打包与后端代理）、0073（端到端测试）、0154（告警链接）。
 
 ## 页面
 
@@ -16,6 +16,7 @@ SreNautix 控制台是 server 角色提供的单页应用（DESIGN §1.1、§12�
 |---|---|---|---|
 | 值班 | 事件收件箱 | `/incidents?state&feedback&severity&disposition&suppressed&cluster` | `listIncidents`（含盲区时段与被抑制的计数）、`listConditions` |
 | 值班 | 事件详情 | `/incidents/<id 或标签>?tab=evidence|hypotheses|timeline|runs` | 事件、阶段 A、证据快照、时间线、根因子图、研判、反馈、提议 |
+| 值班 | 告警链接 | `/alerts?l.<标签名>=<标签值>&…&cluster` | `lookupAlert`：找到后替换为事件详情页，找不到时写明原因并给出收件箱入口（见下文"告警链接"） |
 | 值班 | 研判运行明细 | `/runs/<run_id>`；提示词 `/runs/<run_id>/prompts`、原始提示词 `/runs/<run_id>/prompts/raw`（auditor、admin） | `getResearchRun`、`getResearchManifest`、`getRedactedPrompts`、`getRawPrompts` |
 | 处置 | 动作队列 | `/actions?tab=pending|running|history` | `listProposals`、`batchApprove`（只限同类型、同集群的 L 档） |
 | 处置 | 审批页 | `/actions/<proposal_id>` | `getProposal`（ProposalDetail）、`approveProposal`、`rejectProposal`、`undoProposal`、`reauthLocal` |
@@ -27,6 +28,26 @@ SreNautix 控制台是 server 角色提供的单页应用（DESIGN §1.1、§12�
 | 治理 | 审计、用户与角色、设置 | `/audit`、`/users`、`/settings` | 两条审计链、角色绑定与权限解释、聊天账号绑定码、渠道、保留期、订阅、API token |
 
 所有页面的过滤条件、标签页与集群都写在 URL 里。头部有集群切换、搜索、语言、主题与用户；头部下方是不可关闭的状态条，集群准入自检失败、gateway 失联或熔断时显示红色的"仅提议"。
+
+## 告警链接
+
+Alertmanager 等外部通知只知道告警的标签。控制台的 `/alerts?l.<标签名>=<标签值>&…` 收到一条告警的全部标签后，由中心按接入时的规则计算身份标签与指纹（去掉 `alertgroup` 与 `ingest.external_labels`，ADR 0117），取这个指纹开始时间最晚的一条告警，经事件成员关系与别名链打开所属的事件：合并过的事件打开吸收它的事件，已恢复的事件照常打开。找不到时页面显示身份标签、指纹与原因：
+
+| 原因 | 说明 |
+|---|---|
+| 没有收到过这条告警 | 告警没有路由到接入源，或者链接里的标签与告警源发出的不一致 |
+| 还没有归入事件 | 已经收到，事件引擎还没有分组；页面每 5 秒重查，归入后自动打开事件 |
+| 不在读取范围内 | 告警或事件的命名空间不在用户的角色绑定里 |
+| 自身的元告警、不进入事件 | 带 `ingest.self_label` 的告警，以及 Watchdog、InfoInhibitor、`severity=none`，接入时丢弃 |
+
+Alertmanager 的模板见 `docs/console/alertmanager-links.tmpl`：把其中的 `srenautix.console_url` 改成控制台地址，加进 Alertmanager 的 `templates`，在通知正文里对每条告警调用 `srenautix.alert_url`：
+
+```
+{{ range .Alerts }}{{ template "srenautix.alert_url" . }}
+{{ end }}
+```
+
+邮件的 HTML 正文写成 `<a href="{{ template "srenautix.alert_url" . }}">…</a>`。标签名与标签值经 `urlquery` 转义；HTML 正文由 html/template 渲染，它认出 href 里的 `urlquery`，不重复转义。登录会话的 cookie 是 `SameSite=Strict`，从邮件点开链接时第一次导航不带 cookie，单页应用加载后同源请求会带上；没有登录时先进入登录页，登录后回到这个链接。
 
 ## 界面约定
 

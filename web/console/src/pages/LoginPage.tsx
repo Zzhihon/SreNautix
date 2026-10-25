@@ -21,6 +21,7 @@ export function LoginPage({ returnTo }: { returnTo?: string }) {
   const [password, setPassword] = useState('');
   const [totp, setTotp] = useState('');
   const totpRequired = providers.data?.local_admin.totp_required ?? true;
+  const target = returnTo && returnTo.startsWith('/') && !returnTo.startsWith('//') ? returnTo : '/incidents';
   const login = useMutation({
     mutationFn: async () =>
       ok<Session>(
@@ -32,10 +33,10 @@ export function LoginPage({ returnTo }: { returnTo?: string }) {
     onSuccess: async (s) => {
       setCsrf(s.csrf_token);
       qc.setQueryData(SESSION_KEY, s);
-      await navigate({ to: returnTo && returnTo.startsWith('/') ? returnTo : '/incidents' });
+      // 原地址可能带查询串（例如告警链接 /alerts?l.alertname=…）：按 href 解析，查询串经路由的 parseSearch
+      await navigate({ href: target });
     },
   });
-  const target = returnTo && returnTo.startsWith('/') ? returnTo : '/incidents';
 
   return (
     <div className={styles.login}>
