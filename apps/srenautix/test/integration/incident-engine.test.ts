@@ -107,7 +107,7 @@ beforeAll(async () => {
     probes: async () => [],
     stale: { markStale: async () => 0 },
     metrics,
-    suppressedAlertIds: async () => new Set<string>(),
+    suppressedAlerts: async () => new Map<string, string>(),
   });
 }, 120_000);
 

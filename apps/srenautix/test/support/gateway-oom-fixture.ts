@@ -416,6 +416,9 @@ function alertsAndMembers(): { alerts: Alert[]; members: IncidentMember[] } {
 
 /** gateway OOM 事件的报告输入：阶段 A 之后、研判之前（与 #249 一样只有确定性报告） */
 export function gatewayOomInput(base: ComposeInput): ComposeInput {
+  if (!base.stageA) {
+    throw new Error('gatewayOomInput 需要带阶段 A 报告的输入');
+  }
   const { alerts, members } = alertsAndMembers();
   const id = 'b18629a6-0000-4000-8000-b18629a6f249';
   const root = `StatefulSet:${NS}/gateway`;

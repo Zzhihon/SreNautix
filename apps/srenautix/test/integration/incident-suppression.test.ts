@@ -5,7 +5,7 @@ import { IngestService } from '../../src/ingest/service.js';
 import type { RawAlert } from '../../src/ingest/normalize.js';
 import { ServerMetrics } from '../../src/metrics.js';
 import { serverTracks } from '../../src/roles/server-schema.js';
-import { suppressedAlertIds } from '../../src/roles/server.js';
+import { suppressedAlerts } from '../../src/roles/server.js';
 import { migrateExpand } from '../../src/store/migrate.js';
 import { TopologyStore } from '../../src/topology/store.js';
 import { newTestDb, type TestDb } from '../support/db.js';
@@ -67,7 +67,7 @@ beforeAll(async () => {
   db = await newTestDb();
   await migrateExpand(db.server, 'server', serverTracks);
   const topology = new TopologyStore(db.server);
-  await topology.apply(CLUSTER, [node('gateway'), node('billing')]);
+  await topology.apply(CLUSTER, [node('gateway'), node('billing'), node('ledger')]);
   ingest = new IngestService(
     db.server,
     [],
@@ -86,7 +86,7 @@ beforeAll(async () => {
     probes: async () => [],
     stale: { markStale: async () => 0 },
     metrics,
-    suppressedAlertIds: (c, clusterId, ids) => suppressedAlertIds(c as typeof db.server, clusterId, ids),
+    suppressedAlerts: (c, clusterId, ids) => suppressedAlerts(c as typeof db.server, clusterId, ids),
   });
 }, 120_000);
 
@@ -136,5 +136,40 @@ describe('事件的抑制状态', () => {
       ['Deployment:shop/billing', 'resolved', true],
       ['Deployment:shop/gateway', 'resolved', false],
     ]);
+    // 事件状态的终态记录（ADR 0172）：被抑制带原因，恢复各记一次；重算不重复写
+    await engine.recompute(CLUSTER);
+    expect(await records()).toEqual([
+      ['Deployment:shop/billing', 'suppressed', '告警源静默'],
+      ['Deployment:shop/billing', 'resolved', null],
+      ['Deployment:shop/gateway', 'resolved', null],
+    ]);
+  });
+
+  it('命中状态库的抑制规则时，被抑制的记录写规则的原因', async () => {
+    await db.server.query(
+      `INSERT INTO server.suppressions (id, cluster_id, matchers, reason, created_by, expires_at)
+       VALUES (gen_random_uuid(), $1, $2, '账务库计划内迁移', 'local:admin', now() + interval '1 hour')`,
+      [CLUSTER, JSON.stringify({ deployment: 'ledger' })],
+    );
+    await ingest.write(
+      CLUSTER,
+      'am',
+      'reconcile',
+      [alert('LedgerLagHigh', 'ledger', 'none', new Date(Date.now() - 5 * 60_000), null)],
+      {},
+    );
+    await engine.recompute(CLUSTER);
+    expect((await records()).filter((r) => r[0] === 'Deployment:shop/ledger')).toEqual([
+      ['Deployment:shop/ledger', 'suppressed', '账务库计划内迁移'],
+    ]);
   });
 });
+
+async function records() {
+  const r = await db.server.query<{ label: string; code: string; detail: string | null }>(
+    `SELECT i.label, x.code, x.detail FROM server.incident_reasons x JOIN server.incidents i USING (incident_id)
+      WHERE i.cluster_id = $1 AND x.stage = 'incident' ORDER BY i.label, x.id`,
+    [CLUSTER],
+  );
+  return r.rows.map((x) => [x.label.split(':').slice(0, 2).join(':'), x.code, x.detail]);
+}

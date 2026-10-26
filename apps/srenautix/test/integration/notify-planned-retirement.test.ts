@@ -189,5 +189,11 @@ describe('计划内退役的事件', () => {
     const edited = texts(edit);
     expect(edited.length).toBeGreaterThan(0);
     expect(edited.at(-1)).toContain('全部告警由计划内的退役解释');
+
+    // 不推送的决定写进终态记录（ADR 0172）：只有没发过消息的退役事件，同一原因只记一次
+    const withheld = await db.server.query<{ incident_id: string; code: string }>(
+      "SELECT incident_id, code FROM server.incident_reasons WHERE stage = 'notify' AND code LIKE 'withheld_%'",
+    );
+    expect(withheld.rows).toEqual([{ incident_id: retired, code: 'withheld_planned_retirement' }]);
   });
 });

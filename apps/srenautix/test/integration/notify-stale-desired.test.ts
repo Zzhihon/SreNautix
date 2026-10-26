@@ -12,6 +12,7 @@ import { RENDER_VERSION } from '../../src/notify/channel.js';
 import { composeMessage } from '../../src/notify/compose.js';
 import { MAX_ENDED_EDITS, NotifyEngine } from '../../src/notify/engine.js';
 import { Interactions } from '../../src/notify/interactions.js';
+import { incidentTrack } from '../../src/incident/migrations.js';
 import { notifyTrack } from '../../src/notify/migrations.js';
 import type { ActionOutcome, DesiredIncidentMessage, MessageSource, NotifyActions } from '../../src/notify/ports.js';
 import { NotifyStore } from '../../src/notify/store.js';
@@ -22,7 +23,7 @@ import { newTestDb, type TestDb } from '../support/db.js';
 import { largeIncidentInput } from '../support/report-fixture.js';
 import { parseTelegramHtml, serializedEntityBytes, TELEGRAM_ENTITY_BYTES_LIMIT } from '../support/telegram-html.js';
 
-// ADR 0145：旧渲染器留下的期望内容、永久 4xx 与已结束事件的编辑上限。
+// ADR 0145：旧渲染器留下的期望内容、永久 4xx 与已结束事件的编辑上限；ADR 0173：编辑次数用完后的最后一次编辑。
 // CCHP 影子 0ead2c9：22 行旧代码渲染的期望内容（14–25 KB，事件都已恢复）的 editMessageText 每次都返回
 // 400 ENTITIES_TOO_LONG，按“其他 4xx 5 分钟后重试”无限循环，投递失败计数一直上涨
 
@@ -293,7 +294,7 @@ async function rowOf(incidentId: string) {
 
 beforeAll(async () => {
   db = await newTestDb();
-  await migrateExpand(db.server, 'server', [storeTrack, identityTrack, notifyTrack]);
+  await migrateExpand(db.server, 'server', [storeTrack, identityTrack, incidentTrack, notifyTrack]);
   bot = new StrictBotApi();
   await bot.start();
 });
@@ -505,8 +506,9 @@ describe('永久 4xx：纯文本降级与放弃（ADR 0145）', () => {
   });
 });
 
-describe('已结束事件的编辑上限（ADR 0145）', () => {
-  it(`恢复后最多再编辑 ${MAX_ENDED_EDITS} 次，之后的内容放弃且不请求 Telegram；重新触发后计数清零`, async () => {
+describe('已结束事件的编辑上限与最后一次编辑（ADR 0145、0173）', () => {
+  /** 恢复后发出第一条，再成功编辑满上限次 */
+  async function editedToCap(): Promise<DesiredIncidentMessage> {
     let d = small({ state: 'resolved', endedAt: new Date(T0), lane: 'recovery' });
     source.items = [d];
     await engine.syncOnce();
@@ -521,32 +523,103 @@ describe('已结束事件的编辑上限（ADR 0145）', () => {
       expect((await rowOf(d.incidentId)).endedEdits).toBe(i);
     }
     expect(bot.requests).toHaveLength(1 + MAX_ENDED_EDITS);
+    return d;
+  }
+
+  const records = async (incidentId: string) =>
+    (
+      await db.admin.query<{ code: string; ref: string | null }>(
+        "SELECT code, ref FROM server.incident_reasons WHERE incident_id = $1 AND stage = 'notify' ORDER BY id",
+        [incidentId],
+      )
+    ).rows.map((r) => [r.code, r.ref]);
+
+  it(`成功编辑满 ${MAX_ENDED_EDITS} 次后内容再变化：最后一次编辑为精简内容加说明行与控制台链接，之后不再编辑；重新触发后计数清零`, async () => {
+    let d = await editedToCap();
+    d = retitle(d, '再一次更新');
+    source.items = [d];
+    now += 10_000;
+    await engine.syncOnce();
+    expect(await engine.deliverOnce()).toBe(1);
+    expect(bot.requests).toHaveLength(2 + MAX_ENDED_EDITS);
+    const last = bot.requests.at(-1)!;
+    expect(last.method).toBe('editMessageText');
+    const parsed = parseTelegramHtml(String(last.body.text));
+    expect(parsed.text).toContain('再一次更新');
+    expect(parsed.text).toContain('消息停止更新（原因：编辑次数达到上限），完整内容见控制台');
+    expect(String(last.body.text)).toContain('<a href="https://srenautix.example.test/i/1">控制台</a>');
+    // 只留打开控制台的按钮
+    expect(JSON.stringify(last.body.reply_markup)).toContain('https://srenautix.example.test/i/1');
+    const row = await rowOf(d.incidentId);
+    expect(row.finalEditedAt?.getTime()).toBe(now);
+    expect(row.abandonedAt).toBeNull();
+    expect(await records(d.incidentId)).toEqual([
+      ['delivered', `telegram:${CHAT}`],
+      ['final_edit', `telegram:${CHAT}`],
+    ]);
+
+    // 之后内容再变化：不再请求 Telegram，不算放弃
+    for (let i = 0; i < 3; i++) {
+      source.items = [retitle(d, `之后第 ${i} 次更新`)];
+      now += 10_000;
+      await engine.syncOnce();
+      expect(await engine.deliverOnce()).toBe(0);
+    }
+    expect(bot.requests).toHaveLength(2 + MAX_ENDED_EDITS);
+    expect(await store.pendingCount('telegram')).toBe(0);
+    expect(await abandoned('ended_edit_cap')).toBe(0);
+
+    // 事件重新触发：不再是已结束，计数与最后一次编辑清零，照常编辑
+    source.items = [{ ...retitle(d, '重新触发'), state: 'firing', endedAt: null, lane: 'urgent' }];
+    now += 10_000;
+    await engine.syncOnce();
+    const fired = await rowOf(d.incidentId);
+    expect(fired.endedEdits).toBe(0);
+    expect(fired.finalEditedAt).toBeNull();
+    expect(await engine.deliverOnce()).toBe(1);
+    expect(bot.requests).toHaveLength(3 + MAX_ENDED_EDITS);
+  });
+
+  it('最后一次编辑也被拒绝时才放弃（ended_edit_cap），事件仍已结束时内容再变化也不重试', async () => {
+    let d = await editedToCap();
+    bot.rejectHtml = 'Bad Request: ENTITIES_TOO_LONG';
+    bot.rejectPlain = 'Bad Request: message is too long';
     d = retitle(d, '再一次更新');
     source.items = [d];
     now += 10_000;
     await engine.syncOnce();
     expect(await engine.deliverOnce()).toBe(0);
-    expect(bot.requests).toHaveLength(1 + MAX_ENDED_EDITS);
+    // 原格式与纯文本各一次
+    expect(bot.requests).toHaveLength(3 + MAX_ENDED_EDITS);
     const row = await rowOf(d.incidentId);
     expect(row.abandonedReason).toBe('ended_edit_cap');
+    expect(row.finalEditedAt).toBeNull();
     expect(await abandoned('ended_edit_cap')).toBe(1);
+    expect(await abandoned('entities_too_long')).toBe(0);
     expect(await failures()).toBe(0);
+    expect((await records(d.incidentId)).map((r) => r[0])).toEqual(['delivered', 'ended_edit_cap']);
+    const terminal = (await metrics.terminalStates.get()).values.find(
+      (v) => v.labels.stage === 'notify' && v.labels.code === 'ended_edit_cap',
+    );
+    expect(terminal?.labels.level).toBe('error');
+    expect(terminal?.value).toBe(1);
 
-    // 事件重新触发：不再是已结束，计数清零，照常编辑
-    source.items = [{ ...retitle(d, '重新触发'), state: 'firing', endedAt: null, lane: 'urgent' }];
+    bot.rejectHtml = null;
+    bot.rejectPlain = null;
+    source.items = [retitle(d, '又一次更新')];
     now += 10_000;
     await engine.syncOnce();
-    expect((await rowOf(d.incidentId)).endedEdits).toBe(0);
-    expect(await engine.deliverOnce()).toBe(1);
-    expect(bot.requests).toHaveLength(2 + MAX_ENDED_EDITS);
+    expect(await engine.deliverOnce()).toBe(0);
+    expect(bot.requests).toHaveLength(3 + MAX_ENDED_EDITS);
+    expect((await rowOf(d.incidentId)).abandonedReason).toBe('ended_edit_cap');
   });
 
-  it('被渠道拒绝的编辑也计数：恢复后的内容反复被拒绝时最多尝试上限次', async () => {
+  it('被渠道拒绝的编辑不计数：恢复后的编辑反复被拒绝时照常 5 分钟后重试，渠道恢复后编辑成功', async () => {
     let d = small({ state: 'resolved', endedAt: new Date(T0), lane: 'recovery' });
     source.items = [d];
     await engine.syncOnce();
     await engine.deliverOnce();
-    // 普通拒绝（不是永久错误）：照常 5 分钟后重试，直到编辑次数用完
+    // 普通拒绝（不是永久错误）：照常 5 分钟后重试，不消耗编辑次数
     bot.rejectHtml = 'Bad Request: chat not found';
     d = retitle(d, '恢复后的更新');
     source.items = [d];
@@ -555,9 +628,14 @@ describe('已结束事件的编辑上限（ADR 0145）', () => {
       now += 5 * 60_000;
       await engine.deliverOnce();
     }
-    // 1 次发送 + 上限次被拒绝的编辑
-    expect(bot.requests).toHaveLength(1 + MAX_ENDED_EDITS);
-    expect((await rowOf(d.incidentId)).abandonedReason).toBe('ended_edit_cap');
+    expect(bot.requests).toHaveLength(1 + MAX_ENDED_EDITS + 3);
+    const rejected = await rowOf(d.incidentId);
+    expect(rejected.endedEdits).toBe(0);
+    expect(rejected.abandonedAt).toBeNull();
+    bot.rejectHtml = null;
+    now += 5 * 60_000;
+    expect(await engine.deliverOnce()).toBe(1);
+    expect((await rowOf(d.incidentId)).endedEdits).toBe(1);
   });
 });
 
@@ -566,7 +644,7 @@ describe('迁移（ADR 0145）', () => {
     const r = await db.admin.query<{ column_name: string; is_nullable: string; column_default: string | null }>(
       `SELECT column_name, is_nullable, column_default FROM information_schema.columns
         WHERE table_schema = 'server' AND table_name = 'notify_messages'
-          AND column_name IN ('render_version', 'ended', 'ended_edits', 'abandoned_at', 'abandoned_reason')
+          AND column_name IN ('render_version', 'ended', 'ended_edits', 'abandoned_at', 'abandoned_reason', 'final_edited_at')
         ORDER BY column_name`,
     );
     expect(r.rows.map((x) => [x.column_name, x.is_nullable])).toEqual([
@@ -574,6 +652,7 @@ describe('迁移（ADR 0145）', () => {
       ['abandoned_reason', 'YES'],
       ['ended', 'NO'],
       ['ended_edits', 'NO'],
+      ['final_edited_at', 'YES'],
       ['render_version', 'YES'],
     ]);
     await expect(

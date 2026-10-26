@@ -140,6 +140,7 @@ describe('reader 告警快照对账', () => {
       budgetRatio: 0,
       audit: { sink: 'pg', lagSeconds: 0, thresholdSeconds: 300 },
       channelFailures: [],
+      notifyAbandoned: [],
       restoredAt: null,
       frozenClusters: [],
       now,

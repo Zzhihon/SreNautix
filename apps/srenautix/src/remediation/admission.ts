@@ -1,4 +1,4 @@
-import type { EvidenceResult, ResearchOutput } from '@srenautix/contract';
+import type { EvidenceResult, ReasonGroupCode, ResearchOutput } from '@srenautix/contract';
 import { displayKey, tryNodeKey } from '@srenautix/core';
 import type { RemediationPlan } from '@srenautix/packs-sdk';
 import { REPOSITORY_SCOPES } from '../research/validate.js';
@@ -12,7 +12,8 @@ import { REPOSITORY_SCOPES } from '../research/validate.js';
 // 前三项只看研判输出，在模板匹配之前按运行判断；最后一项要看补丁计划，在计划校验之后按模板判断。
 // alert_rule 类别修改的是告警本身：处置为 ignore、并且 ignore 的依据说明系统状态正常时才开 PR（not_benign）。
 
-export type AdmissionCode = 'cause_scope' | 'topology_only' | 'no_runtime_evidence' | 'no_repo_fact' | 'not_benign';
+/** 准入条件不满足的原因：原因码登记表的 remediation_admission 分组 */
+export type AdmissionCode = ReasonGroupCode<'remediation_admission'>;
 
 export interface AdmissionBlock {
   code: AdmissionCode;

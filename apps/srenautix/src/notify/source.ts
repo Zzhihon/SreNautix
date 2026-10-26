@@ -7,10 +7,17 @@ import type { FeedbackService } from '../proposals/feedback.js';
 import type { ProposalService } from '../proposals/service.js';
 import { pullsOf } from '../remediation/pulls.js';
 import type { TopologyStore } from '../topology/store.js';
-import { composeMessage, laneOf, type ActionVerify, type ComposeInput, type ResearchMirror } from './compose.js';
+import {
+  composeMessage,
+  laneOf,
+  type ActionVerify,
+  type ComposeInput,
+  type ResearchMirror,
+  type StageAMissing,
+} from './compose.js';
 import { impactLine, type Classification, type ExternalRoots, type ExternalWindowStats } from './external.js';
 import type { LinkSettings } from './links.js';
-import type { DesiredIncidentMessage, FirstMessage, MessageSource } from './ports.js';
+import type { DesiredIncidentMessage, FirstMessage, MessageSource, WithheldIncident } from './ports.js';
 import { withComponentNames } from '../incident/names.js';
 import { incidentOnsetMs, incidentOrigin } from '../incident/onset.js';
 import { researchRoots, type OwnerLookup } from '../incident/research-root.js';
@@ -23,6 +30,52 @@ export interface SourceSettings {
   /** 业务影响告警（notify.business_impact_alerts，ADR 0159、0166）；不给出时不记录首条消息时延 */
   businessImpactAlerts?: readonly AlertMatcher[];
 }
+
+/** 一个事件与它最新的阶段 A 报告；还没有报告时 report 为 null，missing 为阶段 A 没有生成的原因 */
+export interface ReportRow {
+  body: Incident;
+  report: StageAReport | null;
+  missing?: StageAMissing | null;
+}
+
+/**
+ * critical 事件的首个成员告警进入 Alertmanager（成员告警都不来自 Alertmanager 时取事件创建时刻）这么久之后仍没有阶段 A
+ * 报告时，先发出不带证据卡的消息（ADR 0173）
+ */
+export const STAGE_A_MISSING_NOTIFY_MS = 60_000;
+
+/**
+ * 期望消息的事件与报告（ADR 0173）：外连接最新的阶段 A 报告。没有报告的事件只有两种进入：critical、仍在触发、首个成员
+ * 告警进入 Alertmanager 超过 STAGE_A_MISSING_NOTIFY_MS 的；已经有消息的（继续编辑）。没有报告时带上当前版本最近一条
+ * 阶段 A 失败或缺失的记录
+ */
+const DESIRED_ROWS = `
+  SELECT i.body, s.body AS report, m.code AS missing_code, m.detail AS missing_detail
+    FROM server.incidents i
+    LEFT JOIN LATERAL (SELECT body FROM server.stage_a_reports WHERE incident_id = i.incident_id ORDER BY incident_version DESC LIMIT 1) s ON true
+    LEFT JOIN LATERAL (SELECT r.code, r.detail FROM server.incident_reasons r
+                        WHERE r.incident_id = i.incident_id AND r.incident_version = i.version AND r.stage = 'stage_a'
+                        ORDER BY r.id DESC LIMIT 1) m ON s.body IS NULL`;
+
+const DESIRED_REPORTED = `(s.body IS NOT NULL
+    OR EXISTS (SELECT 1 FROM server.notify_messages n WHERE n.kind = 'incident' AND n.incident_id = i.incident_id)
+    OR (i.severity = 'critical' AND i.state = 'firing'
+        AND coalesce((SELECT min(a.alertmanager_seen_at) FROM server.incident_members im
+                        JOIN server.alert_state a USING (alert_id) WHERE im.incident_id = i.incident_id), i.created_at)
+            <= now() - make_interval(secs => ${STAGE_A_MISSING_NOTIFY_MS / 1000})))`;
+
+interface DesiredDbRow {
+  body: Incident;
+  report: StageAReport | null;
+  missing_code: 'stage_a_failed' | 'stage_a_missing' | null;
+  missing_detail: string | null;
+}
+
+const toReportRow = (r: DesiredDbRow): ReportRow => ({
+  body: r.body,
+  report: r.report,
+  missing: r.report ? null : { code: r.missing_code, detail: r.missing_detail },
+});
 
 /** 报告需要的领域数据：告警目录的可读标题、动作目录的执行后校验、链接模板 */
 export interface ReportDomain {
@@ -46,8 +99,8 @@ export class ReportSource {
     private readonly ownerOf: OwnerLookup = async () => null,
   ) {}
 
-  /** 若干事件的报告输入，顺序与 rows 相同 */
-  async inputs(rows: Array<{ body: Incident; report: StageAReport }>, language: 'zh' | 'en'): Promise<ComposeInput[]> {
+  /** 若干事件的报告输入，顺序与 rows 相同；report 为 null 的事件还没有阶段 A 报告（ADR 0173） */
+  async inputs(rows: readonly ReportRow[], language: 'zh' | 'en'): Promise<ComposeInput[]> {
     if (!rows.length) {
       return [];
     }
@@ -94,7 +147,7 @@ export class ReportSource {
     );
     const queueMap = new Map(queue.rows.map((x) => [x.incident_id, x]));
     const out: ComposeInput[] = [];
-    for (const { body: raw, report } of rows) {
+    for (const { body: raw, report, missing } of rows) {
       const inc = await withComponentNames(this.pool, raw);
       const q = queueMap.get(inc.incident_id);
       const run = runMap.get(inc.incident_id) ?? null;
@@ -114,6 +167,7 @@ export class ReportSource {
       out.push({
         incident: inc,
         stageA: report,
+        stageAMissing: report ? null : (missing ?? null),
         researchStageA,
         alerts,
         research: run,
@@ -217,35 +271,52 @@ export class PgMessageSource implements MessageSource {
   }
 
   async desired(language: 'zh' | 'en'): Promise<DesiredIncidentMessage[]> {
-    const r = await this.pool.query<{ body: Incident; report: StageAReport }>(
-      `SELECT i.body, s.body AS report FROM server.incidents i
-         JOIN LATERAL (SELECT body FROM server.stage_a_reports WHERE incident_id = i.incident_id ORDER BY incident_version DESC LIMIT 1) s ON true
+    const r = await this.pool.query<DesiredDbRow>(
+      `${DESIRED_ROWS}
         WHERE i.severity = ANY($1::text[]) AND NOT i.suppressed
           AND (i.state = 'firing' OR i.updated_at > now() - make_interval(secs => $2))
+          AND ${DESIRED_REPORTED}
         ORDER BY i.first_firing_at`,
       [this.s.severities, this.s.resolvedRetentionMs / 1000],
     );
-    return this.compose(r.rows, language);
+    return this.compose(r.rows.map(toReportRow), language);
   }
 
   async byIds(incidentIds: readonly string[], language: 'zh' | 'en'): Promise<DesiredIncidentMessage[]> {
     if (!incidentIds.length) {
       return [];
     }
-    const r = await this.pool.query<{ body: Incident; report: StageAReport }>(
-      `SELECT i.body, s.body AS report FROM server.incidents i
-         JOIN LATERAL (SELECT body FROM server.stage_a_reports WHERE incident_id = i.incident_id ORDER BY incident_version DESC LIMIT 1) s ON true
-        WHERE i.incident_id = ANY($1::uuid[])
+    const r = await this.pool.query<DesiredDbRow>(
+      `${DESIRED_ROWS}
+        WHERE i.incident_id = ANY($1::uuid[]) AND ${DESIRED_REPORTED}
         ORDER BY i.first_firing_at`,
       [incidentIds],
     );
-    return this.compose(r.rows, language);
+    return this.compose(r.rows.map(toReportRow), language);
   }
 
-  private async compose(
-    rows: Array<{ body: Incident; report: StageAReport }>,
-    language: 'zh' | 'en',
-  ): Promise<DesiredIncidentMessage[]> {
+  /**
+   * 触发中、但严重度不在推送范围内或被抑制的事件（ADR 0172），每个事件一种原因；已经记过这种原因的不返回。
+   * 严重度不在范围内时记 withheld_severity，否则记 withheld_suppressed
+   */
+  async withheld(): Promise<WithheldIncident[]> {
+    const r = await this.pool.query<{
+      incident_id: string;
+      version: number;
+      code: 'withheld_severity' | 'withheld_suppressed';
+    }>(
+      `SELECT i.incident_id, i.version, w.code FROM server.incidents i
+         CROSS JOIN LATERAL (SELECT CASE WHEN NOT (i.severity = ANY($1::text[])) THEN 'withheld_severity'
+                                          ELSE 'withheld_suppressed' END AS code) w
+        WHERE i.state = 'firing' AND (i.suppressed OR NOT (i.severity = ANY($1::text[])))
+          AND NOT EXISTS (SELECT 1 FROM server.incident_reasons x
+                           WHERE x.incident_id = i.incident_id AND x.stage = 'notify' AND x.code = w.code)`,
+      [this.s.severities],
+    );
+    return r.rows.map((x) => ({ incidentId: x.incident_id, version: x.version, code: x.code }));
+  }
+
+  private async compose(rows: readonly ReportRow[], language: 'zh' | 'en'): Promise<DesiredIncidentMessage[]> {
     const inputs = await this.reports.inputs(rows, language);
     const cls = this.external ? await this.external.classify(inputs) : new Map<string, Classification>();
     return inputs.map((input) => {
@@ -261,7 +332,7 @@ export class PgMessageSource implements MessageSource {
       return {
         ...(c?.external && !c.impact.length ? { digest: 'external' as const } : {}),
         // 全部告警由计划内的退役解释（ADR 0167）：不推送新消息
-        ...(input.stageA.disposition_reason === 'planned_retirement'
+        ...(input.stageA?.disposition_reason === 'planned_retirement'
           ? { withheld: 'planned_retirement' as const }
           : {}),
         incidentId: inc.incident_id,

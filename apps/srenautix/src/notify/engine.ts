@@ -1,12 +1,18 @@
+import { REASON_CODES } from '@srenautix/contract';
+import { recordReason, writeReason } from '../incident/reasons.js';
 import { logger } from '../log.js';
 import type { ServerMetrics } from '../metrics.js';
 import {
   RENDER_VERSION,
+  type AbandonReason,
+  type ActionResultView,
   type ChannelAdapter,
   type ChatTarget,
   type DigestInput,
   type PermanentReason,
+  type Rendered,
 } from './channel.js';
+import { finalMessage } from './compose.js';
 import { composeExternalDigest, lastWindow, type ExternalWindowStats } from './external.js';
 import type { Interactions } from './interactions.js';
 import type { DesiredIncidentMessage, MessageSource } from './ports.js';
@@ -36,8 +42,8 @@ const TRANSPORT_RETRY_MS = 15_000;
 const API_ERROR_RETRY_MS = 5 * 60_000;
 const RESULTS_SHOWN = 5;
 /**
- * 已结束（恢复或合并）事件的消息最多再编辑这么多次（渠道作出了应答的编辑，含被拒绝的），用完后放弃之后的内容（ADR 0145）。
- * 恢复后的编辑只是补上结果与反馈，不值得无限重试
+ * 已结束（恢复或合并）事件的消息最多成功编辑这么多次（ADR 0145、0173）。用完后期望内容再变化时发出最后一次编辑：
+ * 当前内容的精简版加一行停止更新的说明与控制台链接，之后不再编辑；最后一次编辑被拒绝时放弃（ended_edit_cap）
  */
 export const MAX_ENDED_EDITS = 5;
 /** 外部上游汇总在周期结束这么久之后才统计（ADR 0147） */
@@ -74,6 +80,10 @@ export class NotifyEngine {
   ) {
     for (const a of adapters) {
       this.limiters.set(a.channel, new ChannelLimiter(a.limits, opts.now()));
+      // 放弃的计数启动时导出 0：第一次放弃也能被 increase() 看到（SreNautixNotifyAbandoned）
+      for (const e of REASON_CODES.filter((x) => x.groups.includes('notify_abandon'))) {
+        metrics.notifyAbandoned.inc({ channel: a.channel, reason: e.code }, 0);
+      }
     }
   }
 
@@ -97,6 +107,7 @@ export class NotifyEngine {
     for (const l of langs) {
       desired.set(l, await this.source.desired(l));
     }
+    await this.recordWithheld([...desired.values()].flat());
     for (const a of this.adapters) {
       for (const chat of a.chats) {
         await this.syncChat(a, chat, desired.get(chat.language) ?? [], now);
@@ -106,6 +117,63 @@ export class NotifyEngine {
     for (const a of this.adapters) {
       this.metrics.notifyPending.set({ channel: a.channel }, await this.store.pendingCount(a.channel));
     }
+  }
+
+  /**
+   * 不推送的决定（ADR 0172）：计划内退役、外部上游进入汇总，以及推送范围外与被抑制的事件，每个事件每种原因写一条记录，
+   * 进入事件时间线。已经有消息的事件照常编辑，不算不推送
+   */
+  private async recordWithheld(all: readonly DesiredIncidentMessage[]): Promise<void> {
+    const flagged = new Map<
+      string,
+      { version: number; code: 'withheld_planned_retirement' | 'withheld_external_digest' }
+    >();
+    for (const d of all) {
+      if (d.withheld === 'planned_retirement') {
+        flagged.set(d.incidentId, { version: d.message.incident_version, code: 'withheld_planned_retirement' });
+      } else if (d.digest === 'external') {
+        flagged.set(d.incidentId, { version: d.message.incident_version, code: 'withheld_external_digest' });
+      }
+    }
+    const sent = await this.store.incidentsWithMessages([...flagged.keys()]);
+    const decisions = [
+      ...[...flagged].filter(([id]) => !sent.has(id)).map(([incidentId, x]) => ({ incidentId, ...x })),
+      ...((await this.source.withheld?.()) ?? []),
+    ];
+    for (const w of decisions) {
+      if (
+        await recordReason(this.store.pool, this.metrics, {
+          incidentId: w.incidentId,
+          incidentVersion: w.version,
+          stage: 'notify',
+          code: w.code,
+          once: '-',
+        })
+      ) {
+        logger.info('事件不推送', { incident_id: w.incidentId, code: w.code });
+      }
+    }
+  }
+
+  /**
+   * 渲染一个事件的消息。已结束事件的消息成功编辑满上限后渲染最后一次编辑的内容（ADR 0173）：当前内容的精简版加一行
+   * 停止更新的说明与控制台链接
+   */
+  private renderIncident(
+    a: ChannelAdapter,
+    chat: ChatTarget,
+    d: DesiredIncidentMessage,
+    ex: MessageRow | undefined,
+    results: ActionResultView[],
+    storm: { startedAt: Date } | null,
+  ): Rendered {
+    const final =
+      ex !== undefined &&
+      ex.externalId !== null &&
+      ex.ended &&
+      d.state !== 'firing' &&
+      ex.endedEdits >= MAX_ENDED_EDITS;
+    return a.renderIncident(chat, final ? finalMessage(d) : d, results, storm, { callbacks: a.receivesCallbacks });
   }
 
   /**
@@ -222,7 +290,7 @@ export class NotifyEngine {
       const ex = byIncident.get(d.incidentId);
       const results = await this.store.results(a.channel, chat.chat, d.incidentId, RESULTS_SHOWN);
       const storm = stormOf.get(d.incidentId) ?? null;
-      const r = a.renderIncident(chat, d, results, storm, { callbacks: a.receivesCallbacks });
+      const r = this.renderIncident(a, chat, d, ex, results, storm);
       await this.store.registerButtons(a.channel, chat.chat, r.buttons, now);
       rows.push({
         channel: a.channel,
@@ -359,7 +427,7 @@ export class NotifyEngine {
       }
       const results = await this.store.results(a.channel, chat.chat, d.incidentId, RESULTS_SHOWN);
       const storm = m.stormId !== null ? await this.store.storm(m.stormId) : null;
-      const r = a.renderIncident(chat, d, results, storm, { callbacks: a.receivesCallbacks });
+      const r = this.renderIncident(a, chat, d, m, results, storm);
       await this.store.registerButtons(a.channel, chat.chat, r.buttons, now);
       return {
         ...base,
@@ -428,11 +496,8 @@ export class NotifyEngine {
       return 'next';
     }
     const edit = row.externalId !== null;
-    if (edit && row.ended && row.endedEdits >= MAX_ENDED_EDITS) {
-      // 已结束事件的消息编辑次数用完：放弃这一版内容，不再请求渠道
-      await this.abandon(a, row, 'ended_edit_cap', `事件结束后已编辑 ${row.endedEdits} 次`, now);
-      return 'next';
-    }
+    // 已结束事件的消息成功编辑满上限：这一次是最后一次编辑（期望内容已渲染为精简版加说明行），被拒绝时放弃
+    const final = edit && row.ended && row.endedEdits >= MAX_ENDED_EDITS;
     if (edit && row.deliveredAt && now < row.deliveredAt.getTime() + a.limits.editGapMs) {
       // 编辑合并：间隔不足时推迟，到时发送届时的最新内容
       await this.store.defer(row.id, new Date(row.deliveredAt.getTime() + a.limits.editGapMs));
@@ -452,18 +517,25 @@ export class NotifyEngine {
         // 内容与渠道上的消息相同，视为已呈现
         externalId = row.externalId as string;
       } else if (cls.kind === 'permanent') {
-        const r = await this.degrade(a, limiter, chat, row, cls.reason, e);
+        const r = await this.degrade(a, limiter, chat, row, cls.reason, e, final);
         if (!('id' in r)) {
           return r.outcome;
         }
         externalId = r.id;
+      } else if (cls.kind === 'api' && final) {
+        // 最后一次编辑被渠道拒绝：放弃，不再重试
+        await this.abandon(a, row, 'ended_edit_cap', (e as Error).message, now);
+        return 'next';
       } else {
         this.metrics.notifyFailures.inc({ channel: a.channel });
         return this.failed(a, limiter, row, cls, e, now);
       }
     }
     const at = new Date(this.opts.now());
-    const first = await this.store.markDelivered(row.id, externalId, row.desiredHash, at, edit);
+    const first = await this.store.markDelivered(row.id, externalId, row.desiredHash, at, edit, final);
+    if (row.kind === 'incident') {
+      await this.recordDelivery(a, row, first, final, at);
+    }
     if (row.kind === 'incident' && first && this.source.firstMessage) {
       const f = await this.source.firstMessage(row.incidentId as string, row.id, at);
       if (f) {
@@ -492,6 +564,28 @@ export class NotifyEngine {
     return 'sent';
   }
 
+  /** 事件消息的投递记录（ADR 0172）：每个渠道目标第一次送达一条，最后一次编辑一条 */
+  private async recordDelivery(a: ChannelAdapter, row: MessageRow, first: boolean, final: boolean, at: Date) {
+    const base = { incidentId: row.incidentId as string, ref: `${a.channel}:${row.chat}`, at };
+    if (first) {
+      await recordReason(this.store.pool, this.metrics, {
+        ...base,
+        stage: 'notify',
+        code: 'delivered',
+        once: `${a.channel}|${row.chat}`,
+      });
+    }
+    if (final) {
+      await recordReason(this.store.pool, this.metrics, { ...base, stage: 'notify', code: 'final_edit' });
+      logger.info('已结束事件的消息编辑次数用完，最后一次编辑已发出', {
+        channel: a.channel,
+        chat: row.chat,
+        incident_id: row.incidentId,
+        ended_edits: row.endedEdits,
+      });
+    }
+  }
+
   /** 发出或编辑一条消息，返回渠道消息 id。variant 区分纯文本降级的发送请求（飞书按请求 uuid 去重）。 */
   private async push(
     a: ChannelAdapter,
@@ -517,8 +611,8 @@ export class NotifyEngine {
 
   /**
    * 渠道以永久错误拒绝了内容（ADR 0145）：去掉实体，按纯文本重试一次。成功时返回渠道消息 id，这一版期望内容以纯文本呈现；
-   * 仍是永久错误或无法降级时放弃这一版内容；其他错误（不可达、限流、要编辑的消息不存在）按普通失败处理，下一轮从原内容重试。
-   * 永久错误不计入投递失败。
+   * 仍是永久错误或无法降级时放弃这一版内容（最后一次编辑记为 ended_edit_cap，ADR 0173）；其他错误（不可达、限流、
+   * 要编辑的消息不存在）按普通失败处理，下一轮从原内容重试。永久错误不计入投递失败。
    */
   private async degrade(
     a: ChannelAdapter,
@@ -527,12 +621,16 @@ export class NotifyEngine {
     row: MessageRow,
     reason: PermanentReason,
     first: unknown,
+    final: boolean,
   ): Promise<{ id: string } | { outcome: 'next' | 'stop' }> {
     const now = this.opts.now();
     const firstMsg = (first as Error).message;
+    // 最后一次编辑被拒绝时原因码为 ended_edit_cap，说明里带渠道的拒绝原因
+    const giveUp: AbandonReason = final ? 'ended_edit_cap' : reason;
+    const said = final ? `${reason}：${firstMsg}` : firstMsg;
     const plain = a.plain(row.payload);
     if (plain === null) {
-      await this.abandon(a, row, reason, firstMsg, now);
+      await this.abandon(a, row, giveUp, said, now);
       return { outcome: 'next' };
     }
     const slot = limiter.reserve(row.chat, now);
@@ -556,8 +654,8 @@ export class NotifyEngine {
       if (cls.kind === 'not_modified' && row.externalId !== null) {
         return { id: row.externalId };
       }
-      if (cls.kind === 'permanent') {
-        await this.abandon(a, row, reason, `${firstMsg}；纯文本：${(e as Error).message}`, now);
+      if (cls.kind === 'permanent' || (cls.kind === 'api' && final)) {
+        await this.abandon(a, row, giveUp, `${said}；纯文本：${(e as Error).message}`, now);
         return { outcome: 'next' };
       }
       this.metrics.notifyFailures.inc({ channel: a.channel });
@@ -565,19 +663,28 @@ export class NotifyEngine {
     }
   }
 
-  /** 放弃这一版期望内容：不再重试，不计入投递失败；期望内容变化后重新进入待投递。 */
-  private async abandon(
-    a: ChannelAdapter,
-    row: MessageRow,
-    reason: PermanentReason | 'ended_edit_cap',
-    error: string,
-    now: number,
-  ): Promise<void> {
+  /**
+   * 放弃这一版期望内容：不再重试，不计入投递失败；期望内容变化后重新进入待投递（ended_edit_cap 在事件仍是已结束时保留）。
+   * 计入 srenautix_notify_abandoned_total 与 NotifyAbandoned 条件；事件消息写一条 notify 记录，进入事件时间线
+   */
+  private async abandon(a: ChannelAdapter, row: MessageRow, reason: AbandonReason, error: string, now: number) {
     if (!(await this.store.abandon(row.id, row.desiredHash, new Date(now), reason, error))) {
       // 期望内容刚被同步更新：下一轮投递新内容
       return;
     }
     this.metrics.notifyAbandoned.inc({ channel: a.channel, reason });
+    this.metrics.terminal('notify', reason);
+    if (row.kind === 'incident') {
+      await writeReason(this.store.pool, {
+        incidentId: row.incidentId as string,
+        stage: 'notify',
+        code: reason,
+        detail: error,
+        ref: `${a.channel}:${row.chat}`,
+        once: `${row.id}:${row.desiredHash}`,
+        at: new Date(now),
+      });
+    }
     logger.error('放弃投递这条消息内容，不再重试', {
       channel: a.channel,
       chat: row.chat,
@@ -614,14 +721,7 @@ export class NotifyEngine {
       case 'not_modified':
       case 'permanent':
       case 'api':
-        // 渠道应答了这次编辑（拒绝），已结束事件的编辑计数加一
-        await this.store.markAttempt(
-          row.id,
-          new Date(now),
-          new Date(now + API_ERROR_RETRY_MS),
-          msg,
-          row.externalId !== null,
-        );
+        await this.store.markAttempt(row.id, new Date(now), new Date(now + API_ERROR_RETRY_MS), msg);
         logger.error('渠道拒绝了消息', { channel: a.channel, chat: row.chat, subject: row.subject, error: msg });
         return 'next';
       case 'fatal':

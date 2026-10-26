@@ -146,7 +146,7 @@ describe('事件消息的业务关键信号：gateway OOM（cchp-k8s-ops#249 那
   it('卡片组合与 #249 那次相同：70 个成员告警、53 张卡', () => {
     const i = input();
     expect(i.incident.members).toHaveLength(70);
-    expect(i.stageA.cards).toHaveLength(53);
+    expect(i.stageA!.cards).toHaveLength(53);
   });
 
   it('Telegram：业务关键信号在现状之后、关键问题之前，内存一类第一项是 gateway 94% 与 OOM', async () => {
@@ -201,7 +201,12 @@ describe('事件消息的业务关键信号：gateway OOM（cchp-k8s-ops#249 那
 
   it('没有异常或接近阈值的信号时不出现这一段', () => {
     const i = input();
-    i.stageA.cards = i.stageA.cards.map((c) => ({ ...c, verdict: 'normal', display_state: 'normal', value_number: 0 }));
+    i.stageA!.cards = i.stageA!.cards.map((c) => ({
+      ...c,
+      verdict: 'normal',
+      display_state: 'normal',
+      value_number: 0,
+    }));
     const { message } = composeMessage(i);
     expect(message.sections.some((s) => s.kind === 'signals')).toBe(false);
   });

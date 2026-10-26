@@ -399,6 +399,12 @@ describe('外部上游的周期汇总', () => {
     await round(min(65));
     await round(min(90));
     expect(sent()).toHaveLength(1);
+    // 不推送的决定（ADR 0172）：每个进入汇总的上游事件记一次
+    const withheld = await db.server.query<{ code: string; n: number }>(
+      `SELECT code, count(*)::int AS n FROM server.incident_reasons WHERE stage = 'notify' AND code LIKE 'withheld_%'
+        GROUP BY code`,
+    );
+    expect(withheld.rows).toEqual([{ code: 'withheld_external_digest', n: 4 }]);
     // 统计存了一份：下一时段与它对比
     const w = await db.server.query('SELECT window_start FROM server.notify_external_windows ORDER BY window_start');
     expect(w.rows.map((x) => (x.window_start as Date).toISOString())).toEqual([

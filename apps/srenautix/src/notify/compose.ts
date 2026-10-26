@@ -18,6 +18,7 @@ import type {
   ResearchOutput,
   StageAReport,
 } from '@srenautix/contract';
+import { reasonText, type ReasonCodeOf, type ReasonStage } from '@srenautix/contract';
 import { displayComponentName, displayKey, isRollback, tryNodeKey, type ChangeBasis } from '@srenautix/core';
 import { formatValue, type Unit } from '@srenautix/packs-sdk';
 import { parseStoredKey } from '../topology/keys.js';
@@ -62,16 +63,28 @@ export interface ActionVerify {
   checks: string[];
 }
 
+/**
+ * 当前版本还没有阶段 A 报告时（ADR 0173）的原因：最近一次阶段 A 失败或补跑用完的记录；为 null 时阶段 A 仍在执行
+ */
+export interface StageAMissing {
+  code: ReasonCodeOf<'stage_a'> | null;
+  /** 失败的错误摘要 */
+  detail: string | null;
+}
+
 export interface ComposeInput {
   incident: Incident;
-  stageA: StageAReport;
+  /** 最新的阶段 A 报告；为 null 时消息不带证据卡，带一行“阶段 A 尚未生成”的说明（ADR 0173） */
+  stageA: StageAReport | null;
+  /** stageA 为 null 时阶段 A 没有生成的原因 */
+  stageAMissing?: StageAMissing | null;
   alerts: Alert[];
   research: ResearchMirror | null;
   /** 最近一次完成的研判根因与事件根因按属主粒度不一致（ADR 0104 §14）；只提示，事件不拆分 */
   researchRootMismatch?: boolean;
   /** 阶段 B 排队或进行中。 */
   researchPending: boolean;
-  /** 阶段 B 被跳过的原因（风暴、预算、上限）。 */
+  /** 阶段 B 入队时被跳过的原因（风暴、预算、上限、没有模型路由），原因码登记表的 research_skip 分组 */
   stageAOnlyReason: string | null;
   proposals: Proposal[];
   /** gitops_pr 提议 → 已开出的 PR 地址（ADR 0108）；没有时省略 */
@@ -135,17 +148,13 @@ const T = {
     banner: {
       degraded: '状态库降级：本消息由内存中的数据生成，恢复后补写',
       pending: '模型研判中，以下为确定性报告',
-      invalid: '模型输出无效，以下为确定性报告',
-      failed: '模型研判失败，以下为确定性报告',
+      failed: (why: string) => `模型研判失败：${why}，以下为确定性报告`,
       stageAOnly: '只出确定性报告：',
       blind: '观测失明：至少一半的证据卡没有数据',
+      stageAMissing: (why: string) => `阶段 A 尚未生成：${why}`,
+      stageARunning: '阶段 A 仍在执行',
     },
-    skipReason: {
-      budget: '当日模型预算已用到上限',
-      storm: '告警风暴中，只研判排名靠前的根因',
-      capped: '该事件 6 小时内已研判 3 次',
-      no_model_route: '没有可用的模型路由（全部被出站策略禁用）',
-    } as Record<string, string>,
+    paren: (s: string) => `（${s}）`,
     sec: {
       situation: '现状',
       signals: '业务关键信号',
@@ -323,15 +332,8 @@ const T = {
     approveInConsole: (n: number) => `在控制台审批 #${n}`,
     resolved: '恢复确认',
     open: '在控制台打开',
-    stopReason: {
-      leader_supported: '第一的假设得到支持，竞争假设都已推翻或检验后无法判定',
-      no_change: '连续两步没有变化或没有可执行的检查',
-      step_limit: '达到步数上限',
-      deadline: '达到期限',
-      budget: '达到预算上限',
-      model_unavailable: '模型不可用',
-    } as Record<string, string>,
     stop: '停止原因：',
+    finalNote: '消息停止更新（原因：编辑次数达到上限），完整内容见',
   },
   en: {
     disposition: { act: 'Act', ignore: 'Ignore', escalate: 'Escalate', undetermined: 'Undetermined' } as Record<
@@ -375,17 +377,13 @@ const T = {
     banner: {
       degraded: 'State store degraded: built from in-memory data, written back on recovery',
       pending: 'Model research in progress; deterministic report below',
-      invalid: 'Model output invalid; deterministic report below',
-      failed: 'Model research failed; deterministic report below',
+      failed: (why: string) => `Model research failed: ${why}; deterministic report below`,
       stageAOnly: 'Deterministic report only: ',
       blind: 'Observability blind: at least half of the cards have no data',
+      stageAMissing: (why: string) => `Stage A not generated yet: ${why}`,
+      stageARunning: 'stage A is still running',
     },
-    skipReason: {
-      budget: 'daily model budget reached',
-      storm: 'alert storm, only the top-ranked roots are researched',
-      capped: 'researched 3 times in the last 6 hours',
-      no_model_route: 'no usable model route (all disabled by the egress policy)',
-    } as Record<string, string>,
+    paren: (s: string) => ` (${s})`,
     sec: {
       situation: 'Situation',
       signals: 'Business signals',
@@ -564,15 +562,8 @@ const T = {
     approveInConsole: (n: number) => `Approve #${n} in console`,
     resolved: 'Confirm recovery',
     open: 'Open in console',
-    stopReason: {
-      leader_supported: 'the leading hypothesis is supported and the competitors are resolved',
-      no_change: 'no change in two steps, or no runnable check',
-      step_limit: 'step limit',
-      deadline: 'deadline',
-      budget: 'budget',
-      model_unavailable: 'model unavailable',
-    } as Record<string, string>,
     stop: 'Stop reason: ',
+    finalNote: 'This message stopped updating (reason: edit limit reached); full content in the',
   },
 };
 
@@ -1121,10 +1112,11 @@ function supportOrder(cards: EvidenceResult[]): EvidenceResult[] {
   );
 }
 
+/** stageCards：阶段 A 报告的卡；还没有阶段 A 报告时为空 */
 function evidenceBlocks(
   x: Ctx,
   out: ResearchOutput | null,
-  report: StageAReport,
+  stageCards: readonly EvidenceResult[],
   subgraph: Subgraph | null,
 ): NotifyBlock[] {
   const t = x.t;
@@ -1235,7 +1227,7 @@ function evidenceBlocks(
   } else {
     // 还没有研判：阶段 A 的异常卡按根因候选排序（候选上的卡在前），其次按异常起点
     const order = new Map(x.inc.candidates.map((c, k) => [c.component, k]));
-    const abnormal = supportOrder(report.cards.filter((c) => c.verdict === 'abnormal')).sort((a, b) => {
+    const abnormal = supportOrder(stageCards.filter((c) => c.verdict === 'abnormal')).sort((a, b) => {
       const ka = entityKey(a);
       const kb = entityKey(b);
       return (ka !== null ? (order.get(ka) ?? 99) : 99) - (kb !== null ? (order.get(kb) ?? 99) : 99);
@@ -1276,7 +1268,7 @@ function evidenceBlocks(
     }
     return cur;
   };
-  const normal = report.cards.filter((c) => {
+  const normal = stageCards.filter((c) => {
     const k = entityKey(c);
     return c.verdict === 'normal' && !shown.has(c.ref) && k !== null && (focus.has(k) || focus.has(owner(k)));
   });
@@ -1305,7 +1297,7 @@ function evidenceBlocks(
     );
   });
   // 无法判定，按原因归组
-  const undet = report.cards.filter((c) => c.verdict === 'undeterminable');
+  const undet = stageCards.filter((c) => c.verdict === 'undeterminable');
   if (undet.length) {
     const byReason = new Map<string, EvidenceResult[]>();
     for (const c of undet) {
@@ -1379,6 +1371,15 @@ function evidenceBlocks(
 
 const fbVerdict = (f: Feedback) => f.verdict ?? f.disposition_verdict ?? f.implicit ?? '';
 
+/** 失败或只出阶段 A 的研判的失败类型（研判镜像的 error.kind，worker 与租约过期都会写） */
+function researchFailure(r: ResearchMirror): string {
+  const kind = r.error?.kind;
+  if (!kind) {
+    throw new Error(`研判 ${r.run_id} 的状态为 ${r.state}，镜像里没有失败类型`);
+  }
+  return kind;
+}
+
 /** 消息里的提议编号与渠道按钮共用：按创建时间排序。 */
 function numbered(ps: Proposal[]): Array<{ n: number; p: Proposal }> {
   return [...ps]
@@ -1404,12 +1405,14 @@ export function composeMessage(i: ComposeInput): { message: NotifyMessage; targe
   const names = inc.component_names;
   const links: LinkSettings = { consoleUrl: i.consoleUrl, ...(i.links ?? NO_LINKS) };
   const out = i.research?.state === 'completed' ? i.research.output : null;
+  // 当前版本还没有阶段 A 报告时为 null：消息不带证据卡（ADR 0173）
   const report = out && i.researchStageA ? i.researchStageA : i.stageA;
+  const stageCards = report?.cards ?? [];
   const members = inc.members.filter((m) => m.left_version === null);
   const alertsById = new Map(i.alerts.map((a) => [a.alert_id, a]));
   const day = new Date(inc.first_firing_at).toISOString().slice(0, 10);
   // 证据编号：阶段 A 的卡、检查卡、成员告警（按事件成员顺序）、变更
-  const cards = new Map<string, EvidenceResult>([...report.cards, ...(out?.check_cards ?? [])].map((c) => [c.ref, c]));
+  const cards = new Map<string, EvidenceResult>([...stageCards, ...(out?.check_cards ?? [])].map((c) => [c.ref, c]));
   const alertsByRef = new Map<string, Alert>();
   members.forEach((m, k) => {
     const a = alertsById.get(m.alert_id);
@@ -1425,17 +1428,26 @@ export function composeMessage(i: ComposeInput): { message: NotifyMessage; targe
   /** 标题用可读名称，没有时用组件键 */
   const rootTitle = root ? (names?.[root] ?? displayKey(root)) : null;
 
+  // 研判失败与只出阶段 A 的说明行写原因码对应的文字（ADR 0172）
+  const why = (stage: ReasonStage, code: string) => reasonText(stage, code, i.language);
   let banner: string | null = null;
-  if (i.stageA.degraded) {
+  if (!i.stageA) {
+    const m = i.stageAMissing ?? null;
+    banner = t.banner.stageAMissing(
+      m?.code
+        ? `${why('stage_a', m.code)}${m.code === 'stage_a_failed' && m.detail ? t.paren(m.detail.slice(0, 200)) : ''}`
+        : t.banner.stageARunning,
+    );
+  } else if (i.stageA.degraded) {
     banner = t.banner.degraded;
   } else if (i.researchPending) {
     banner = t.banner.pending;
   } else if (i.research?.state === 'failed') {
-    banner = i.research.error?.kind === 'invalid_output' ? t.banner.invalid : t.banner.failed;
+    banner = t.banner.failed(why('research', researchFailure(i.research)));
   } else if (i.research?.state === 'stage_a_only') {
-    banner = `${t.banner.stageAOnly}${i.research.error?.message ?? ''}`;
+    banner = `${t.banner.stageAOnly}${why('research', researchFailure(i.research))}`;
   } else if (i.stageAOnlyReason) {
-    banner = `${t.banner.stageAOnly}${t.skipReason[i.stageAOnlyReason] ?? i.stageAOnlyReason}`;
+    banner = `${t.banner.stageAOnly}${why('research', i.stageAOnlyReason)}`;
   } else if (i.stageA.observability_blind) {
     banner = t.banner.blind;
   }
@@ -1475,12 +1487,12 @@ export function composeMessage(i: ComposeInput): { message: NotifyMessage; targe
         .filter((n): n is string => !!n && !n.startsWith('argocd')),
     ),
   ].slice(0, 2);
-  const nowIso = i.research?.finished_at ?? i.stageA.rendered_at;
+  const nowIso = i.research?.finished_at ?? i.stageA?.rendered_at ?? inc.updated_at;
   const symptomMembers = members.filter((m) => m.role === 'symptom').map((m) => m.starts_at);
   const symptomAt = symptomMembers.length ? symptomMembers.reduce((a, b) => (ms(a) <= ms(b) ? a : b)) : null;
   // 首个告警：事件的首次触发（包括之后离开事件的成员）
   const firstAlert = inc.first_firing_at;
-  const impactCards = report.cards.filter((c) => c.impact && c.verdict === 'abnormal');
+  const impactCards = stageCards.filter((c) => c.impact && c.verdict === 'abnormal');
   const statement: NotifyRun[] = [
     C(`${inc.cluster_id}${namespaces.length ? `/${namespaces.join(',')}` : ''}`),
     P(t.colon),
@@ -1585,7 +1597,7 @@ export function composeMessage(i: ComposeInput): { message: NotifyMessage; targe
   if (!createdTogether) {
     entries.push({ at: inc.created_at, key: true, runs: [P(t.created)] });
   }
-  const firstCard = report.timeline.find((e) => e.kind === 'card_abnormal' && e.ref && cards.get(e.ref));
+  const firstCard = report?.timeline.find((e) => e.kind === 'card_abnormal' && e.ref && cards.get(e.ref));
   if (firstCard) {
     const c = cards.get(firstCard.ref!)!;
     entries.push({
@@ -1645,9 +1657,11 @@ export function composeMessage(i: ComposeInput): { message: NotifyMessage; targe
       entries.push({ at: m.ends_at, key: false, runs: [P(`${t.alertResolved} `), P(m.alertname)] });
     }
   }
-  const counts = (v: string) => report.cards.filter((c) => c.verdict === v).length;
-  const stageALine = t.stageA(report.cards.length, counts('abnormal'), counts('normal'), counts('undeterminable'));
-  entries.push({ at: report.rendered_at, key: true, runs: [P(stageALine)] });
+  if (report) {
+    const counts = (v: string) => report.cards.filter((c) => c.verdict === v).length;
+    const stageALine = t.stageA(report.cards.length, counts('abnormal'), counts('normal'), counts('undeterminable'));
+    entries.push({ at: report.rendered_at, key: true, runs: [P(stageALine)] });
+  }
   if (out && i.research?.finished_at) {
     const researchLine = t.research(out.hypotheses.length, out.next_checks.length);
     entries.push({ at: i.research.finished_at, key: true, runs: [P(researchLine)] });
@@ -1697,17 +1711,21 @@ export function composeMessage(i: ComposeInput): { message: NotifyMessage; targe
       keyIssue.push(item([P(`${k + 2}. `), C(shortName(c.component, names)), P(`（${t.score(c.score)}）`)]));
     });
   }
-  const disposition = out?.disposition ?? i.stageA.disposition;
-  keyIssue.push(
-    text([
-      P(t.dispositionLine),
-      B(t.disposition[disposition] ?? disposition),
-      P(` · ${t.stageAReason}${t.dispositionReason[i.stageA.disposition_reason] ?? i.stageA.disposition_reason}`),
-      ...(inc.root.ambiguous && inc.candidates[0]
-        ? [P(`（${t.candidates(inc.candidates.length, inc.candidates[0].score, inc.root.margin)}）`)]
-        : []),
-    ]),
-  );
+  // 还没有阶段 A 报告时没有处置判断，处置行与处置反馈按钮都不出现
+  const disposition = out?.disposition ?? i.stageA?.disposition ?? null;
+  const stageA = i.stageA;
+  if (disposition !== null && stageA) {
+    keyIssue.push(
+      text([
+        P(t.dispositionLine),
+        B(t.disposition[disposition] ?? disposition),
+        P(` · ${t.stageAReason}${t.dispositionReason[stageA.disposition_reason] ?? stageA.disposition_reason}`),
+        ...(inc.root.ambiguous && inc.candidates[0]
+          ? [P(`（${t.candidates(inc.candidates.length, inc.candidates[0].score, inc.root.margin)}）`)]
+          : []),
+      ]),
+    );
+  }
   if (out) {
     keyIssue.push(...ladderBlocks(x, out, chosen));
     if (chosen) {
@@ -1724,7 +1742,7 @@ export function composeMessage(i: ComposeInput): { message: NotifyMessage; targe
       keyIssue.push(text([P(mismatch)]));
     }
     if (out.stop_reason) {
-      keyIssue.push(text([P(t.stop), P(t.stopReason[out.stop_reason] ?? out.stop_reason)], { scope: 'full' }));
+      keyIssue.push(text([P(t.stop), P(why('research', out.stop_reason))], { scope: 'full' }));
     }
     keyIssue.push(text([P(t.hypotheses)], { scope: 'full' }));
     for (const h of hypothesisOrder(out)) {
@@ -1799,7 +1817,7 @@ export function composeMessage(i: ComposeInput): { message: NotifyMessage; targe
     const verifyRuns = verify.length ? joinRuns(verify, '；') : [P(t.verifyNone)];
     remedy.push(text([P(t.verify), ...verifyRuns], { scope, indent: 1 }));
   });
-  if (i.stageA.runbooks.length) {
+  if (i.stageA?.runbooks.length) {
     remedy.push(text([P(t.runbook), ...codeList(i.stageA.runbooks.slice(0, 3), t.list)]));
   }
   if (!remedy.length) {
@@ -1807,7 +1825,7 @@ export function composeMessage(i: ComposeInput): { message: NotifyMessage; targe
   }
 
   // ---- 证据链 ----
-  const evidence = evidenceBlocks(x, out, report, i.subgraph ?? null);
+  const evidence = evidenceBlocks(x, out, stageCards, i.subgraph ?? null);
 
   // ---- 业务关键信号：现状之后、关键问题之前；没有异常或接近阈值的信号时整段不出现 ----
   const signals = signalsBlocks(x, [...cards.values()]);
@@ -1890,8 +1908,10 @@ export function composeMessage(i: ComposeInput): { message: NotifyMessage; targe
     add('feedback_confirm', t.fbConfirm, `fbc:${scope}`, { rootComponent: concluded });
     add('feedback_reject', t.fbReject, `fbr:${scope}`, { choices });
   }
-  add('disposition_confirm', t.dpConfirm, `dpc:${scope}`, { disposition });
-  add('disposition_reject', t.dpReject, `dpr:${scope}`, { disposition });
+  if (disposition !== null) {
+    add('disposition_confirm', t.dpConfirm, `dpc:${scope}`, { disposition });
+    add('disposition_reject', t.dpReject, `dpr:${scope}`, { disposition });
+  }
   if (inc.state === 'resolved') {
     add('resolved_confirm', t.resolved, `rc:${inc.incident_id}`);
   }
@@ -1916,6 +1936,30 @@ export function composeMessage(i: ComposeInput): { message: NotifyMessage; targe
     },
     targets,
   };
+}
+
+/**
+ * 已结束事件的消息成功编辑满上限后的最后一次编辑（ADR 0173）：当前内容的精简版，保留标题、头条、现状与关键问题两节，
+ * 现状末尾加一行“消息停止更新（原因：编辑次数达到上限），完整内容见控制台”与控制台链接；只留打开控制台的按钮
+ * （之后的点击与进展不会再反映到这条消息里）
+ */
+export function finalMessage(d: DesiredIncidentMessage): DesiredIncidentMessage {
+  const t = T[d.language];
+  // 事件详情的按钮总是最后一个（composeMessage）
+  const open = [...d.message.buttons].reverse().find((b) => b.kind === 'open_console' && b.url !== null);
+  if (!open?.url) {
+    throw new Error(`事件 ${d.incidentId} 的消息没有打开控制台的按钮`);
+  }
+  const situation = d.message.sections.find((s) => s.kind === 'situation');
+  const keyIssue = d.message.sections.find((s) => s.kind === 'key_issue');
+  const note = text([P(t.finalNote), L(t.console, open.url)]);
+  const sections: NotifySection[] = [
+    situation
+      ? { ...situation, blocks: [...situation.blocks, note] }
+      : { kind: 'situation', title: t.sec.situation, priority: 0, blocks: [note] },
+    ...(keyIssue ? [keyIssue] : []),
+  ];
+  return { ...d, message: { ...d.message, sections, buttons: [open] }, targets: [] };
 }
 
 export function laneOf(inc: Incident, proposals: Proposal[]): DesiredIncidentMessage['lane'] {

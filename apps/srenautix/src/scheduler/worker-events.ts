@@ -1,7 +1,11 @@
+import type { ReasonGroupCode } from '@srenautix/contract';
 import type pg from 'pg';
 import { logger } from '../log.js';
+import type { ServerMetrics } from '../metrics.js';
 import { appendEvents } from '../store/outbox.js';
 import { tx } from '../store/pool.js';
+
+type FailureKind = ReasonGroupCode<'research_failure'>;
 
 interface WorkerEvent {
   seq: number;
@@ -32,6 +36,7 @@ export class WorkerEventMirror {
     private readonly workerUrl: string,
     private readonly token: string,
     private readonly onUpdate: (u: ResearchMirrorUpdate) => void,
+    private readonly metrics: Pick<ServerMetrics, 'terminal'>,
   ) {}
 
   private async cursor(): Promise<string> {
@@ -54,6 +59,8 @@ export class WorkerEventMirror {
     const body = JSON.parse(text) as { events: WorkerEvent[]; next?: string; cursor?: string };
     const next = body.next ?? body.cursor ?? after;
     const updates: ResearchMirrorUpdate[] = [];
+    // 新进入失败或只出阶段 A 的研判（原因码为失败类型），提交后计数
+    const ended: FailureKind[] = [];
     await tx(this.pool, async (c) => {
       for (const e of body.events) {
         if (!e.type.startsWith('research.')) {
@@ -73,21 +80,22 @@ export class WorkerEventMirror {
             conclusion: { level: string; root_component: string | null };
             summary: string;
           };
-          kind?: string;
+          kind?: FailureKind;
           message?: string;
+          state?: 'stage_a_only' | 'failed';
         };
+        // 研判状态取 worker 写入的 state（契约 2.39.0，ADR 0172），与 worker 一致；之前的 worker 不写，按失败类型推出
         const state =
           e.type === 'research.concluded'
             ? 'completed'
             : e.type === 'research.failed'
-              ? p.kind === 'breaker_open' || p.kind === 'budget_exhausted'
-                ? 'stage_a_only'
-                : 'failed'
+              ? (p.state ?? (p.kind === 'breaker_open' || p.kind === 'budget_exhausted' ? 'stage_a_only' : 'failed'))
               : 'queued';
         // 研判原因取 server 队列里这次任务的入队原因（root_changed、fingerprint_changed、reopened 等）：worker 的
         // research.concluded / research.failed 不带原因（契约里没有这个字段），以前在这里一律记成 new_incident
-        await c.query(
-          `INSERT INTO server.research_runs (run_id, incident_id, incident_version, reason, state, disposition, conclusion_level, root_component, summary,
+        const r = await c.query<{ prev: string | null }>(
+          `WITH prev AS (SELECT state FROM server.research_runs WHERE run_id = $1)
+           INSERT INTO server.research_runs (run_id, incident_id, incident_version, reason, state, disposition, conclusion_level, root_component, summary,
              evidence_fingerprint, output, error, started_at, finished_at, updated_at)
            VALUES ($1, $2, $3, coalesce($4::text, (SELECT q.reason FROM server.research_queue q WHERE q.run_id = $1::uuid), 'new_incident'),
              $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, now())
@@ -97,7 +105,8 @@ export class WorkerEventMirror {
              summary = coalesce(excluded.summary, server.research_runs.summary),
              evidence_fingerprint = coalesce(excluded.evidence_fingerprint, server.research_runs.evidence_fingerprint),
              output = coalesce(excluded.output, server.research_runs.output), error = coalesce(excluded.error, server.research_runs.error),
-             finished_at = coalesce(excluded.finished_at, server.research_runs.finished_at), updated_at = now()`,
+             finished_at = coalesce(excluded.finished_at, server.research_runs.finished_at), updated_at = now()
+           RETURNING (SELECT state FROM prev) AS prev`,
           [
             p.run_id,
             p.incident_id,
@@ -115,6 +124,9 @@ export class WorkerEventMirror {
             state === 'queued' ? null : e.occurred_at,
           ],
         );
+        if (e.type === 'research.failed' && p.kind && r.rows[0]?.prev !== state) {
+          ended.push(p.kind);
+        }
         updates.push({ type: e.type, incidentId: p.incident_id, incidentVersion: p.incident_version, runId: p.run_id });
       }
       await c.query(
@@ -123,6 +135,9 @@ export class WorkerEventMirror {
         [CONSUMER, next],
       );
     });
+    for (const kind of ended) {
+      this.metrics.terminal('research', kind);
+    }
     updates.forEach((u) => this.onUpdate(u));
     return updates.length;
   }

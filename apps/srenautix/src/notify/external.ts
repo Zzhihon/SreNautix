@@ -348,7 +348,8 @@ export class ExternalRoots {
     }
     const clusters = [...new Set(ext.map((i) => i.incident.cluster_id))];
     const alerts = await this.impactAlerts(clusters);
-    const cardsOf = (i: ComposeInput) => (this.s.impact.impactCards ? i.stageA.cards.filter(impactCard) : []);
+    // 还没有阶段 A 报告的事件（ADR 0173）没有影响卡
+    const cardsOf = (i: ComposeInput) => (this.s.impact.impactCards ? (i.stageA?.cards ?? []).filter(impactCard) : []);
     for (const i of inputs) {
       const id = i.incident.incident_id;
       if (!external.get(id)) {
@@ -456,7 +457,7 @@ export class ExternalRoots {
     const cards: ExternalWindowStats['impact']['cards'] = [];
     if (this.s.impact.impactCards) {
       for (const o of inputs.filter((x) => !cls.get(x.incident.incident_id)?.external)) {
-        const list = o.stageA.cards.filter(impactCard);
+        const list = (o.stageA?.cards ?? []).filter(impactCard);
         const hit = list.length
           ? await this.firstRelevant(ext, (u) =>
               u.incident.cluster_id === o.incident.cluster_id
@@ -505,7 +506,7 @@ const rank = (s: string): number => ({ critical: 3, warning: 2, info: 1 })[s] ??
 
 /** 根因上的关键数值：根因自己的卡，异常的在前，最多 2 张有主值的；根因上没有时取任意对象上异常的卡 */
 function valuesOf(i: ComposeInput, root: string): ExternalRootStat['values'] {
-  const withValue = i.stageA.cards.filter((c) => c.value !== null && c.verdict !== 'undeterminable');
+  const withValue = (i.stageA?.cards ?? []).filter((c) => c.value !== null && c.verdict !== 'undeterminable');
   const on = withValue.filter(
     (c) => (c.entity ? tryNodeKey(c.entity.kind, c.entity.namespace, c.entity.name) : null) === root,
   );

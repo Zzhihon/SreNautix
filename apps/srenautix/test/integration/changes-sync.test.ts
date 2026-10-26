@@ -144,6 +144,7 @@ describe('GitHub 变更源同步', () => {
       budgetRatio: 0,
       audit: { sink: 'pg', lagSeconds: 0, thresholdSeconds: 300 },
       channelFailures: [],
+      notifyAbandoned: [],
       restoredAt: null,
       frozenClusters: [],
       now: new Date(),

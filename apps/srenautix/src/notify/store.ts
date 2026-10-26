@@ -34,8 +34,10 @@ export interface MessageRow {
   renderVersion: number | null;
   /** 期望内容是已结束（恢复或合并）事件的消息 */
   ended: boolean;
-  /** 事件结束后对这条消息的编辑次数（渠道作出了应答的编辑，不含不可达与限流） */
+  /** 事件结束后对这条消息成功编辑的次数 */
   endedEdits: number;
+  /** 编辑次数用完后的最后一次编辑（精简内容加说明行）送达的时刻；之后不再投递，事件重新触发时清除（ADR 0173） */
+  finalEditedAt: Date | null;
   abandonedAt: Date | null;
   abandonedReason: string | null;
 }
@@ -62,6 +64,7 @@ interface DbMessage {
   render_version: number | null;
   ended: boolean;
   ended_edits: number;
+  final_edited_at: Date | null;
   abandoned_at: Date | null;
   abandoned_reason: string | null;
 }
@@ -88,6 +91,7 @@ const toMessage = (r: DbMessage): MessageRow => ({
   renderVersion: r.render_version,
   ended: r.ended,
   endedEdits: r.ended_edits,
+  finalEditedAt: r.final_edited_at,
   abandonedAt: r.abandoned_at,
   abandonedReason: r.abandoned_reason,
 });
@@ -108,8 +112,8 @@ export interface DesiredRow {
   ended?: boolean;
 }
 
-/** 待投递：期望与已呈现不同，且这一版期望内容没有被放弃 */
-const PENDING = 'delivered_hash IS DISTINCT FROM desired_hash AND abandoned_at IS NULL';
+/** 待投递：期望与已呈现不同，这一版期望内容没有被放弃，也没有发出过最后一次编辑（ADR 0173） */
+const PENDING = 'delivered_hash IS DISTINCT FROM desired_hash AND abandoned_at IS NULL AND final_edited_at IS NULL';
 
 export interface ButtonRow {
   shortId: string;
@@ -300,7 +304,8 @@ export class NotifyStore {
 
   /**
    * 写入期望状态。内容变化时立即进入待投递，并清除对上一版内容的放弃；silent 与创建时间只在第一次写入时确定。
-   * 记录当前渲染器版本；事件重新触发（不再是已结束）时编辑计数清零。
+   * 记录当前渲染器版本；事件重新触发（不再是已结束）时编辑计数与最后一次编辑清零。最后一次编辑被拒绝的放弃
+   * （ended_edit_cap）在事件仍是已结束时保留，不因内容变化重新尝试（ADR 0173）。
    */
   async upsertDesired(rows: DesiredRow[], now: Date): Promise<void> {
     if (!rows.length) {
@@ -316,15 +321,18 @@ export class NotifyStore {
              desired_payload = excluded.desired_payload,
              desired_at = CASE WHEN m.desired_hash IS DISTINCT FROM excluded.desired_hash THEN excluded.desired_at ELSE m.desired_at END,
              next_attempt_at = CASE WHEN m.desired_hash IS DISTINCT FROM excluded.desired_hash THEN excluded.next_attempt_at ELSE m.next_attempt_at END,
-             abandoned_at = CASE WHEN m.desired_hash IS DISTINCT FROM excluded.desired_hash THEN NULL ELSE m.abandoned_at END,
-             abandoned_reason = CASE WHEN m.desired_hash IS DISTINCT FROM excluded.desired_hash THEN NULL ELSE m.abandoned_reason END,
+             abandoned_at = CASE WHEN m.desired_hash IS DISTINCT FROM excluded.desired_hash
+                                  AND NOT (m.abandoned_reason = 'ended_edit_cap' AND excluded.ended) THEN NULL ELSE m.abandoned_at END,
+             abandoned_reason = CASE WHEN m.desired_hash IS DISTINCT FROM excluded.desired_hash
+                                  AND NOT (m.abandoned_reason = 'ended_edit_cap' AND excluded.ended) THEN NULL ELSE m.abandoned_reason END,
              desired_hash = excluded.desired_hash,
              lane = excluded.lane,
              proposal_ids = excluded.proposal_ids,
              storm_id = COALESCE(m.storm_id, excluded.storm_id),
              render_version = excluded.render_version,
              ended = excluded.ended,
-             ended_edits = CASE WHEN excluded.ended THEN m.ended_edits ELSE 0 END`,
+             ended_edits = CASE WHEN excluded.ended THEN m.ended_edits ELSE 0 END,
+             final_edited_at = CASE WHEN excluded.ended THEN m.final_edited_at ELSE NULL END`,
           [
             d.channel,
             d.chat,
@@ -406,16 +414,24 @@ export class NotifyStore {
   }
 
   /**
-   * 记录送达；只在期望内容没有被并发更新时才标记为已呈现。edit 为 true 时这是一次编辑，已结束事件的编辑计数加一。
-   * 返回是否为第一次送达。
+   * 记录送达。edit 为 true 时这是一次编辑，已结束事件的编辑计数加一（只计成功的编辑）；final 为 true 时这是编辑次数
+   * 用完后的最后一次编辑，记 final_edited_at（ADR 0173）。返回是否为第一次送达。
    */
-  async markDelivered(id: number, externalId: string, hash: string, now: Date, edit = false): Promise<boolean> {
+  async markDelivered(
+    id: number,
+    externalId: string,
+    hash: string,
+    now: Date,
+    edit = false,
+    final = false,
+  ): Promise<boolean> {
     const r = await this.pool.query<{ first: boolean }>(
       `UPDATE server.notify_messages SET external_id = $2, delivered_hash = $3, delivered_at = $4,
          first_delivered_at = COALESCE(first_delivered_at, $4), last_attempt_at = $4, attempts = 0, last_error = NULL,
-         ended_edits = ended_edits + CASE WHEN ended AND $5 THEN 1 ELSE 0 END
+         ended_edits = ended_edits + CASE WHEN ended AND $5 THEN 1 ELSE 0 END,
+         final_edited_at = CASE WHEN $6 THEN $4 ELSE final_edited_at END
        WHERE id = $1 RETURNING (first_delivered_at = $4) AS first`,
-      [id, externalId, hash, now, edit],
+      [id, externalId, hash, now, edit, final],
     );
     return r.rows[0]?.first ?? false;
   }
@@ -424,14 +440,25 @@ export class NotifyStore {
     await this.pool.query('UPDATE server.notify_messages SET next_attempt_at = $2 WHERE id = $1', [id, at]);
   }
 
-  /** 记录一次失败的尝试。edit 为 true 时渠道拒绝了一次编辑，已结束事件的编辑计数加一。 */
-  async markAttempt(id: number, now: Date, next: Date, error: string, edit = false): Promise<void> {
+  /** 记录一次失败的尝试（不计入已结束事件的编辑次数） */
+  async markAttempt(id: number, now: Date, next: Date, error: string): Promise<void> {
     await this.pool.query(
-      `UPDATE server.notify_messages SET last_attempt_at = $2, next_attempt_at = $3, attempts = attempts + 1, last_error = $4,
-         ended_edits = ended_edits + CASE WHEN ended AND $5 THEN 1 ELSE 0 END
+      `UPDATE server.notify_messages SET last_attempt_at = $2, next_attempt_at = $3, attempts = attempts + 1, last_error = $4
        WHERE id = $1`,
-      [id, now, next, error, edit],
+      [id, now, next, error],
     );
+  }
+
+  /** 这些事件中在任一渠道目标上已有事件消息的 */
+  async incidentsWithMessages(incidentIds: readonly string[]): Promise<Set<string>> {
+    if (!incidentIds.length) {
+      return new Set();
+    }
+    const r = await this.pool.query<{ incident_id: string }>(
+      "SELECT DISTINCT incident_id FROM server.notify_messages WHERE kind = 'incident' AND incident_id = ANY($1::uuid[])",
+      [incidentIds],
+    );
+    return new Set(r.rows.map((x) => x.incident_id));
   }
 
   /** 要编辑的消息已被删除：清掉渠道消息 id，下一轮作为新消息发送最新内容。 */

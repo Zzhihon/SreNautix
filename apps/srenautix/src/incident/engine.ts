@@ -18,6 +18,7 @@ import { appendEvents, type NewEvent } from '../store/outbox.js';
 import { tx, type Queryable } from '../store/pool.js';
 import type { TopologyStore } from '../topology/store.js';
 import { currentBinding } from './read.js';
+import { countReasons, writeReason, type ReasonRecord } from './reasons.js';
 
 export const SCHEMA_VERSION = '2.2.0';
 
@@ -36,8 +37,11 @@ export interface EngineDeps {
   probes(clusterId: string): Promise<ProbeResult[]>;
   stale: StaleMarker;
   metrics: ServerMetrics;
-  /** 抑制规则（SreNautix 自己的，DESIGN §2.1）：返回命中的成员 alert_id 集合。 */
-  suppressedAlertIds(c: Queryable, clusterId: string, alertIds: string[]): Promise<Set<string>>;
+  /**
+   * 被抑制的成员告警（SreNautix 自己的抑制规则，DESIGN §2.1；Alertmanager 的静默）：命中的 alert_id → 抑制的原因
+   * （抑制规则的 reason，或 Alertmanager 静默）。事件变为被抑制时原因写进 incident_state 记录（ADR 0172）
+   */
+  suppressedAlerts(c: Queryable, clusterId: string, alertIds: string[]): Promise<Map<string, string>>;
 }
 
 export interface RecomputeResult {
@@ -85,7 +89,9 @@ export class IncidentEngine {
         now: now.getTime(),
         probes: await this.d.probes(clusterId),
       });
-      return await tx(this.d.pool, async (c) => {
+      // 事件状态的终态记录（ADR 0172）：随事件在同一事务里写入，提交后计数
+      const written: ReasonRecord[] = [];
+      const out = await tx(this.d.pool, async (c) => {
         await c.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`srenautix.incident-engine.${clusterId}`]);
         const prevRows = await c.query<{ body: Incident }>(
           `SELECT body FROM server.incidents WHERE cluster_id = $1 AND state <> 'merged'
@@ -112,11 +118,12 @@ export class IncidentEngine {
           const reported: Incident[] = [];
           const detected: Incident[] = [];
           const reopened: string[] = [];
+          const states: ReasonRecord[] = [];
           await c.query('SAVEPOINT incident_persist');
           try {
             for (const inc of unit) {
               const firing = inc.members.filter((m) => m.left_version === null && m.status === 'firing');
-              const suppressed = await this.d.suppressedAlertIds(
+              const suppressed = await this.d.suppressedAlerts(
                 c,
                 clusterId,
                 firing.map((m) => m.alert_id),
@@ -130,6 +137,11 @@ export class IncidentEngine {
                 inc.suppressed = prev.suppressed;
               }
               const reason = await this.persist(c, inc, prev);
+              for (const s of stateChanges(inc, prev, reason, suppressed)) {
+                if (await writeReason(c, s)) {
+                  states.push(s);
+                }
+              }
               // 拆分出的事件的告警已经在原事件里被发现，不计入检测延迟（ADR 0159）
               if (!prev && inc.state === 'firing' && inc.split_from === null) {
                 detected.push(inc);
@@ -158,8 +170,24 @@ export class IncidentEngine {
               incidents: unit.map((i) => ({ incident_id: i.incident_id, label: i.label, version: i.incident_version })),
               error: e,
             });
+            // 写入失败记在组内每个事件上（同一个要写入的版本只记一次），控制台的时间线可以看到
+            const detail = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
+            for (const inc of unit) {
+              const r: ReasonRecord = {
+                incidentId: inc.incident_id,
+                incidentVersion: inc.incident_version,
+                stage: 'incident',
+                code: 'persist_failed',
+                detail,
+                once: `v${inc.incident_version}`,
+              };
+              if (await writeReason(c, r)) {
+                written.push(r);
+              }
+            }
             continue;
           }
+          written.push(...states);
           toReport.push(...reported);
           for (const id of reopened) {
             reopenedIds.add(id);
@@ -201,6 +229,8 @@ export class IncidentEngine {
           },
         };
       });
+      countReasons(this.d.metrics, written);
+      return out;
     } finally {
       end();
     }
@@ -263,6 +293,35 @@ export class IncidentEngine {
 
 /** incident_versions.reason：新建、更新，或从 resolved 回到 firing（重开，ADR 0132） */
 type VersionReason = 'created' | 'updated' | 'reopened';
+
+/**
+ * 这次写入带来的事件状态变化（ADR 0172）：重开、恢复、变为被抑制（说明写抑制的原因）。同一版本的同一种变化只记一次
+ */
+function stateChanges(
+  inc: Incident,
+  prev: Incident | undefined,
+  reason: VersionReason | null,
+  suppressed: ReadonlyMap<string, string>,
+): ReasonRecord[] {
+  const base = {
+    incidentId: inc.incident_id,
+    incidentVersion: inc.incident_version,
+    at: new Date(inc.updated_at),
+    once: `v${inc.incident_version}`,
+  };
+  const out: ReasonRecord[] = [];
+  if (reason === 'reopened') {
+    out.push({ ...base, stage: 'incident', code: 'reopened' });
+  }
+  if (inc.state === 'resolved' && prev?.state !== 'resolved') {
+    out.push({ ...base, stage: 'incident', code: 'resolved' });
+  }
+  if (inc.suppressed && !prev?.suppressed) {
+    const why = [...new Set(suppressed.values())];
+    out.push({ ...base, stage: 'incident', code: 'suppressed', detail: why.join('；') || null });
+  }
+  return out;
+}
 
 /**
  * 不在 previous 里、但与本轮分组相关的已持久化事件（超出回看窗口的 resolved 与 merged）：共享仍在的成员告警，

@@ -130,23 +130,27 @@ export interface BuildOptions {
 
 /**
  * 被抑制的告警：告警源静默的（silenced），或命中状态库里的抑制规则（matchers 是标签等值条件，全部满足的告警被抑制），
- * 只影响 SreNautix 自己的消息与研判。告警源的抑制规则（inhibited）不算：它说明另一条触发中的告警能解释这条告警
+ * 只影响 SreNautix 自己的消息与研判。告警源的抑制规则（inhibited）不算：它说明另一条触发中的告警能解释这条告警。
+ * 返回 alert_id → 抑制的原因：最早创建的命中规则的 reason，只被告警源静默时为“告警源静默”
  */
-export async function suppressedAlertIds(
+export async function suppressedAlerts(
   c: pg.PoolClient | pg.Pool,
   clusterId: string,
   ids: string[],
-): Promise<Set<string>> {
+): Promise<Map<string, string>> {
   if (!ids.length) {
-    return new Set();
+    return new Map();
   }
-  const r = await c.query<{ alert_id: string }>(
-    `SELECT a.alert_id FROM server.alert_state a
+  const r = await c.query<{ alert_id: string; rule: string | null }>(
+    `SELECT a.alert_id, (SELECT s.reason FROM server.suppressions s
+                          WHERE s.cluster_id = $1 AND s.expires_at > now() AND a.labels @> s.matchers
+                          ORDER BY s.created_at LIMIT 1) AS rule
+       FROM server.alert_state a
       WHERE a.alert_id = ANY($2::text[]) AND (a.suppressed = 'silenced' OR EXISTS (
         SELECT 1 FROM server.suppressions s WHERE s.cluster_id = $1 AND s.expires_at > now() AND a.labels @> s.matchers))`,
     [clusterId, ids],
   );
-  return new Set(r.rows.map((x) => x.alert_id));
+  return new Map(r.rows.map((x) => [x.alert_id, x.rule ?? '告警源静默']));
 }
 
 /** 组装 server 角色的全部组件并启动 HTTP 接口与后台循环。 */
@@ -515,6 +519,8 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
     isLeader: () => leader.isLeader(),
     ...(o.now ? { now: o.now } : {}),
   });
+  // server 判定研判结束（租约过期）后，群消息出现研判失败的说明
+  scheduler.onEnded = () => notify.syncNow();
 
   // 降级通道
   const degradedLane: DegradedLane = new DegradedLane(
@@ -623,7 +629,7 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
     probes: async () => [],
     stale: proposals,
     metrics,
-    suppressedAlertIds: (cl, clusterId, ids) => suppressedAlertIds(cl as pg.PoolClient, clusterId, ids),
+    suppressedAlerts: (cl, clusterId, ids) => suppressedAlerts(cl as pg.PoolClient, clusterId, ids),
   });
   const stageA = new StageAService(
     pool,
@@ -1191,7 +1197,7 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
   }
 
   if (worker) {
-    new WorkerEventMirror(pool, worker.url, worker.token, () => notify.syncNow()).run(signal);
+    new WorkerEventMirror(pool, worker.url, worker.token, () => notify.syncNow(), metrics).run(signal);
   }
 
   let informer: Awaited<ReturnType<typeof startInformerTopology>> | null = null;
@@ -1252,6 +1258,11 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
         // 放弃的消息内容（ADR 0145）不再重试，不算投递失败
         'SELECT channel, max(last_error) AS last_error FROM server.notify_messages WHERE last_error IS NOT NULL AND delivered_hash IS DISTINCT FROM desired_hash AND abandoned_at IS NULL AND attempts >= 3 GROUP BY channel',
       );
+      // 放弃投递的消息内容（ADR 0173）：最近 1 小时内放弃的，按渠道
+      const abandoned = await pool.query<{ channel: string; messages: number; reasons: string[] }>(
+        `SELECT channel, count(*)::int AS messages, array_agg(DISTINCT abandoned_reason ORDER BY abandoned_reason) AS reasons
+           FROM server.notify_messages WHERE abandoned_at > now() - interval '1 hour' GROUP BY channel`,
+      );
       const restored = await pool.query<{ v: string | null }>(
         "SELECT value #>> '{}' AS v FROM server.system_state WHERE key = 'restored_at'",
       );
@@ -1288,6 +1299,7 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
             ...fails.rows.map((f) => ({ channel: f.channel, error: f.last_error })),
             ...(issues ? await issueFailures(pool) : []),
           ],
+          notifyAbandoned: abandoned.rows,
           restoredAt: restored.rows[0]?.v ? new Date(restored.rows[0].v) : null,
           frozenClusters: frozen.rows.map((x) => x.cluster_id),
           now: new Date(),

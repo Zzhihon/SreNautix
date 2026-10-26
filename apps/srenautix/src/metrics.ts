@@ -1,4 +1,5 @@
 import { createServer, type Server } from 'node:http';
+import { REASON_CODES, reasonEntry, type ReasonCodeOf, type ReasonStage } from '@srenautix/contract';
 import { Counter, Gauge, Histogram, Registry, collectDefaultMetrics } from 'prom-client';
 import { logger } from './log.js';
 
@@ -184,7 +185,7 @@ export class ServerMetrics extends BaseMetrics {
 
   readonly incidentPersistErrors = new Counter({
     name: 'srenautix_incident_persist_errors_total',
-    help: '事件重算中写入失败、回滚到保存点的事件组数（其余事件照常写入，ADR 0132）',
+    help: '事件重算中写入失败、回滚到保存点的事件组数（其余事件照常写入，ADR 0132），由 SreNautixIncidentPersistErrors 告警',
     labelNames: ['cluster_id'] as const,
     registers: [this.registry],
   });
@@ -271,7 +272,7 @@ export class ServerMetrics extends BaseMetrics {
 
   readonly researchAdmissions = new Counter({
     name: 'srenautix_research_admissions_total',
-    help: '阶段 B 入队判定，按结果（queued、coalesced、capped、storm、budget、no_model_route、duplicate）',
+    help: '阶段 B 入队判定，按结果（queued、coalesced、capped、storm、budget、no_model_route、duplicate、not_researched）',
     labelNames: ['outcome'] as const,
     registers: [this.registry],
   });
@@ -299,7 +300,7 @@ export class ServerMetrics extends BaseMetrics {
 
   readonly notifyAbandoned = new Counter({
     name: 'srenautix_notify_abandoned_total',
-    help: '放弃投递的消息内容（渠道永久拒绝且纯文本降级仍失败，或已结束事件的编辑次数用完），按渠道与原因；不计入投递失败',
+    help: '放弃投递的消息内容（渠道永久拒绝且纯文本降级仍失败，或已结束事件的编辑次数用完后最后一次编辑被拒绝，ADR 0145、0173），按渠道与原因（原因码登记表的 notify_abandon 分组）；不计入投递失败，由 SreNautixNotifyAbandoned 告警',
     labelNames: ['channel', 'reason'] as const,
     registers: [this.registry],
   });
@@ -359,6 +360,26 @@ export class ServerMetrics extends BaseMetrics {
     labelNames: ['mode'] as const,
     registers: [this.registry],
   });
+
+  readonly terminalStates = new Counter({
+    name: 'srenautix_terminal_states_total',
+    help: '写入的终态原因码（ADR 0172）：通知、阶段 A、研判、自愈 PR、事件 issue 与事件状态，按阶段、原因码与登记表中的级别；level="error" 由 SreNautixAbnormalTerminalStates 告警',
+    labelNames: ['stage', 'code', 'level'] as const,
+    registers: [this.registry],
+  });
+
+  constructor(role: string, defaults = true) {
+    super(role, defaults);
+    // 登记表里的每个原因码启动时导出 0：第一次出现的终态也能被 increase() 看到
+    for (const e of REASON_CODES) {
+      this.terminalStates.inc({ stage: e.stage, code: e.code, level: e.level }, 0);
+    }
+  }
+
+  /** 写入一个原因码时计数，级别取登记表 */
+  terminal<S extends ReasonStage>(stage: S, code: ReasonCodeOf<S>, n = 1): void {
+    this.terminalStates.inc({ stage, code, level: reasonEntry(stage, code).level }, n);
+  }
 }
 
 export function startMetricsServer(registry: Registry, host: string | undefined, port: number): Server {

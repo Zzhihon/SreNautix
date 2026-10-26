@@ -13,7 +13,13 @@ import { REDACTION_VERSION } from '../llm/redact.js';
 import type { ModelLayer } from '../llm/session.js';
 import type { NewEvent } from '../store/outbox.js';
 import type { Tool } from '../tools/box.js';
-import { runStageB, type ResearchLimits, type ResearchRunResult, type ResearchState } from './controller.js';
+import {
+  runStageB,
+  type FailureKind,
+  type ResearchLimits,
+  type ResearchRunResult,
+  type ResearchState,
+} from './controller.js';
 import { HubError, type ClaimedTask, type HubClient, type TaskContext } from './hub.js';
 import { HubQueryRunner } from './hub-query.js';
 import type { WorkerMetrics } from './metrics.js';
@@ -338,6 +344,8 @@ export class WorkerService {
               ...base,
               kind: res.error?.kind ?? 'internal',
               message: (res.error?.message ?? '').slice(0, 2000),
+              // 只出阶段 A 与失败分开（ADR 0172）：server 的研判镜像取这个值
+              state: res.state === 'stage_a_only' ? 'stage_a_only' : 'failed',
             },
           },
         ];
@@ -416,7 +424,7 @@ export class WorkerService {
     task: ClaimedTask,
     ctx: TaskContext,
     state: 'stage_a_only' | 'failed',
-    kind: string,
+    kind: FailureKind,
     message: string,
     output: ResearchOutput | null,
   ): Promise<void> {
@@ -447,6 +455,7 @@ export class WorkerService {
             run_id: task.run_id,
             kind,
             message: message.slice(0, 2000),
+            state,
           },
         },
       ],

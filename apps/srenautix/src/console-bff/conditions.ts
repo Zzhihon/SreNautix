@@ -122,6 +122,8 @@ export interface ServerObservations {
   budgetRatio: number;
   audit: { sink: 's3' | 'pg'; lagSeconds: number; thresholdSeconds: number };
   channelFailures: Array<{ channel: string; error: string }>;
+  /** 最近 1 小时内放弃投递的消息内容，按渠道（ADR 0173） */
+  notifyAbandoned: Array<{ channel: string; messages: number; reasons: string[] }>;
   restoredAt: Date | null;
   frozenClusters: string[];
   now: Date;
@@ -249,6 +251,17 @@ export function serverConditions(o: ServerObservations): Observed[] {
       active: err !== undefined,
       reason: err ? 'DeliveryFailed' : 'Delivering',
       message: err ?? '',
+    });
+    // 放弃的内容不重试，不算投递失败，单独成立 NotifyAbandoned：群里的这些消息停在旧内容
+    const ab = o.notifyAbandoned.find((x) => x.channel === ch);
+    out.push({
+      type: 'NotifyAbandoned',
+      subject: ch,
+      active: ab !== undefined,
+      reason: ab ? 'Abandoned' : 'Delivering',
+      message: ab
+        ? `最近 1 小时 ${ch} 放弃投递了 ${ab.messages} 条消息的内容（原因：${ab.reasons.join('、')}），群里的这些消息停在旧内容`
+        : '',
     });
   }
   const restored = o.restoredAt !== null;

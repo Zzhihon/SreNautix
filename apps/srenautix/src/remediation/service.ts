@@ -1,5 +1,12 @@
 import { createHash } from 'node:crypto';
-import type { ComponentType, EvidenceResult, Incident, RepositoryLayout, ResearchOutput } from '@srenautix/contract';
+import type {
+  ComponentType,
+  EvidenceResult,
+  Incident,
+  ReasonCodeOf,
+  RepositoryLayout,
+  ResearchOutput,
+} from '@srenautix/contract';
 import { displayComponentName } from '@srenautix/core';
 import {
   applicableRemediations,
@@ -120,7 +127,8 @@ interface RunRow {
 interface Attempt {
   key: string;
   outcome: 'proposed' | 'skipped' | 'rejected' | 'failed';
-  code: string | null;
+  /** 原因码登记表 remediation 阶段的值（ADR 0172）；提出了提议时为 null */
+  code: ReasonCodeOf<'remediation'> | null;
   reason: string | null;
   category?: string | null;
   repository?: string | null;
@@ -208,7 +216,7 @@ export class RemediationService {
       [run.incident_id],
     );
     const row = ir.rows[0];
-    const skipAll = (code: string, reason: string) =>
+    const skipAll = (code: ReasonCodeOf<'remediation'>, reason: string) =>
       this.record(run, [{ key: '-', outcome: 'skipped', code, reason }]).then(() => 0);
     if (!row || row.state === 'merged' || row.suppressed) {
       return skipAll('incident_closed', '事件已合并、被抑制或不存在');
@@ -658,6 +666,12 @@ export class RemediationService {
         });
       }
     });
+    // 带原因码的处理结果计入终态（ADR 0172）
+    for (const a of recorded) {
+      if (a.code !== null) {
+        this.d.metrics.terminal('remediation', a.code);
+      }
+    }
     // 每次研判的处理结果写进日志：跳过与失败的原因只在状态库里时，Kind 与影子环境的诊断看不到自愈 PR 为什么没有出现
     for (const a of recorded) {
       logger.info('自愈 PR 处理结果', {

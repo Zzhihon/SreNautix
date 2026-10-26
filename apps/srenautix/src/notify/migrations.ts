@@ -179,5 +179,17 @@ ALTER TABLE server.notify_messages
   ADD CONSTRAINT notify_messages_abandoned_check CHECK ((abandoned_at IS NULL) = (abandoned_reason IS NULL));
 `,
     },
+    {
+      version: 4,
+      name: 'final edit of ended messages',
+      phase: 'expand',
+      // ADR 0173：已结束事件的消息成功编辑满上限后，期望内容再变化时发出最后一次编辑（精简内容加说明行与控制台链接），
+      // 成功后记 final_edited_at，之后不再投递；事件重新触发时清除。ended_edit_cap 表示最后一次编辑被拒绝：
+      // 库里已有的 ended_edit_cap 没有尝试过最后一次编辑，清除放弃，由最后一次编辑补上。只加列，N-1 版本照常运行
+      sql: `
+ALTER TABLE server.notify_messages ADD COLUMN final_edited_at timestamptz;
+UPDATE server.notify_messages SET abandoned_at = NULL, abandoned_reason = NULL WHERE abandoned_reason = 'ended_edit_cap';
+`,
+    },
   ],
 };

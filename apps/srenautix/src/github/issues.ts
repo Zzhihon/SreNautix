@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
-import type { NotifyMessage } from '@srenautix/contract';
+import type { NotifyMessage, ReasonCodeOf } from '@srenautix/contract';
 import type pg from 'pg';
+import { countReasons, writeReason, type ReasonRecord } from '../incident/reasons.js';
 import { researchRoots, type OwnerLookup } from '../incident/research-root.js';
 import { issueMarkdown } from '../notify/markdown.js';
 import { logger } from '../log.js';
@@ -249,6 +250,14 @@ export class IssueService {
   }
 
   private async openOne(incidentId: string): Promise<void> {
+    // issue 的结果写进事件的终态记录（ADR 0172），与 issue 状态在同一事务里，提交后计数
+    const written: ReasonRecord[] = [];
+    const record = async (c: Queryable, code: ReasonCodeOf<'issue'>, detail: string | null, ref: string | null) => {
+      const r: ReasonRecord = { incidentId, stage: 'issue', code, detail, ref, once: code };
+      if (await writeReason(c, r)) {
+        written.push(r);
+      }
+    };
     await tx(this.pool, async (c) => {
       const r = await c.query<IssueRow>(
         `SELECT incident_id, repo, state, reason, number, url, attempts FROM server.github_issues
@@ -280,17 +289,17 @@ export class IssueService {
           reason: 'external_root',
         });
         this.metrics.githubIssues.inc({ repo: row.repo, outcome: 'skipped_external' });
+        await record(c, 'external_root', null, row.repo);
         logger.info('外部上游的事件不开 issue', { incident_id: incidentId, repo: row.repo });
         return;
       }
       if ((await openedLastHour(c, row.repo)) >= this.s.maxPerHour) {
+        const why = `仓库 ${row.repo} 最近 1 小时已开 ${this.s.maxPerHour} 个 issue（事件 issue 与覆盖 issue 合计），达到上限`;
         await c.query(
           `UPDATE server.github_issues SET state = 'skipped', last_error = $2, updated_at = now() WHERE incident_id = $1`,
-          [
-            incidentId,
-            `仓库 ${row.repo} 最近 1 小时已开 ${this.s.maxPerHour} 个 issue（事件 issue 与覆盖 issue 合计），达到上限`,
-          ],
+          [incidentId, why],
         );
+        await record(c, 'rate_limit', why, row.repo);
         await appendAudit(c, 'github.issue_skipped', 'server', {
           incident_id: incidentId,
           repo: row.repo,
@@ -319,6 +328,7 @@ export class IssueService {
           recovered: found !== null,
         });
         this.metrics.githubIssues.inc({ repo: row.repo, outcome: 'opened' });
+        await record(c, 'opened', null, issue.url);
         logger.info('事件 issue 已开', { incident_id: incidentId, url: issue.url });
       } catch (e) {
         if (!(e instanceof GitHubError)) {
@@ -338,6 +348,7 @@ export class IssueService {
             attempts,
             error: e.message.slice(0, 500),
           });
+          await record(c, 'failed', `重试 ${attempts} 次：${e.message.slice(0, 500)}`, row.repo);
         }
         this.metrics.githubIssues.inc({ repo: row.repo, outcome: give ? 'failed' : 'retry' });
         logger.warn(give ? '事件 issue 重试用尽，放弃' : '事件 issue 开出失败，稍后重试', {
@@ -347,6 +358,7 @@ export class IssueService {
         });
       }
     });
+    countReasons(this.metrics, written);
   }
 
   private async findByMarker(repo: string, marker: string): Promise<(IssueRef & { title: string | null }) | null> {

@@ -3,6 +3,7 @@ import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { incidentTrack } from '../../src/incident/migrations.js';
+import { ServerMetrics } from '../../src/metrics.js';
 import { WorkerEventMirror } from '../../src/scheduler/worker-events.js';
 import { migrateExpand } from '../../src/store/migrate.js';
 import { storeTrack } from '../../src/store/migrations.js';
@@ -16,6 +17,7 @@ let db: TestDb;
 let worker: Server;
 let url = '';
 let events: unknown[] = [];
+const metrics = new ServerMetrics('server', false);
 
 beforeAll(async () => {
   db = await newTestDb();
@@ -93,7 +95,7 @@ describe('研判镜像的原因（ADR 0142）', () => {
       event('research.concluded', fp, 11, { evidence_fingerprint: 'a'.repeat(64), output }),
       event('research.concluded', reopened, 12, { evidence_fingerprint: 'b'.repeat(64), output }),
     ];
-    const mirror = new WorkerEventMirror(db.server, url, 'token', () => {});
+    const mirror = new WorkerEventMirror(db.server, url, 'token', () => {}, metrics);
     expect(await mirror.once(0, new AbortController().signal)).toBe(3);
     expect(await reasonOf(root)).toBe('root_changed');
     expect(await reasonOf(fp)).toBe('fingerprint_changed');
@@ -111,9 +113,44 @@ describe('研判镜像的原因（ADR 0142）', () => {
       event('research.failed', unknown, 13, { kind: 'internal', message: 'x' }),
       event('research.failed', withReason, 13, { kind: 'internal', message: 'x', reason: 'manual' }),
     ];
-    const mirror = new WorkerEventMirror(db.server, url, 'token', () => {});
+    const mirror = new WorkerEventMirror(db.server, url, 'token', () => {}, metrics);
     expect(await mirror.once(0, new AbortController().signal)).toBe(2);
     expect(await reasonOf(unknown)).toBe('new_incident');
     expect(await reasonOf(withReason)).toBe('manual');
+  });
+});
+
+describe('研判镜像的状态与 worker 一致（ADR 0172）', () => {
+  const stateOf = async (runId: string) =>
+    (await db.admin.query<{ state: string }>('SELECT state FROM server.research_runs WHERE run_id = $1', [runId]))
+      .rows[0]?.state;
+  const counted = async (code: string) =>
+    (await metrics.terminalStates.get()).values.find((v) => v.labels.stage === 'research' && v.labels.code === code)
+      ?.value ?? 0;
+
+  it('出站策略禁用全部路由（失败类型 model_unavailable）时 worker 记为只出阶段 A，镜像同样是 stage_a_only', async () => {
+    const egress = await queue('new_incident', 14);
+    const invalid = await queue('new_incident', 15);
+    const before = { model: await counted('model_unavailable'), invalid: await counted('invalid_output') };
+    events = [
+      event('research.failed', egress, 14, {
+        kind: 'model_unavailable',
+        message: '出站策略禁用了路由 primary',
+        state: 'stage_a_only',
+      }),
+      event('research.failed', invalid, 15, { kind: 'invalid_output', message: '模型输出无效', state: 'failed' }),
+    ];
+    const mirror = new WorkerEventMirror(db.server, url, 'token', () => {}, metrics);
+    expect(await mirror.once(0, new AbortController().signal)).toBe(2);
+    expect(await stateOf(egress)).toBe('stage_a_only');
+    expect(await stateOf(invalid)).toBe('failed');
+    // 每次研判的终态按失败类型计数一次；重复投递同一个结果不再计数
+    expect(await counted('model_unavailable')).toBe(before.model + 1);
+    expect(await counted('invalid_output')).toBe(before.invalid + 1);
+    events = [
+      event('research.failed', invalid, 15, { kind: 'invalid_output', message: '模型输出无效', state: 'failed' }),
+    ];
+    await mirror.once(0, new AbortController().signal);
+    expect(await counted('invalid_output')).toBe(before.invalid + 1);
   });
 });

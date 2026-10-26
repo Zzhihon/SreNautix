@@ -213,7 +213,7 @@ beforeAll(async () => {
     probes: async () => [],
     stale: { markStale: async () => 0 },
     metrics,
-    suppressedAlertIds: async () => new Set<string>(),
+    suppressedAlerts: async () => new Map<string, string>(),
   });
   // 15 分钟前 gateway 开始淘汰未导出的记录；12 分钟前 node-a 的磁盘告警（cause）开始
   await insertAlert({

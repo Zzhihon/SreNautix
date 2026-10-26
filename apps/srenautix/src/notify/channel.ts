@@ -1,3 +1,4 @@
+import type { ReasonGroupCode } from '@srenautix/contract';
 import type { ExternalDigestView } from './external.js';
 import type { ButtonTarget, DesiredIncidentMessage } from './ports.js';
 import type { ChannelLimits } from './ratelimit.js';
@@ -57,23 +58,22 @@ export interface DigestInput {
 /**
  * 渲染器版本：notify_messages.render_version 记录期望内容由哪一版渲染器产出。渲染结果的规则变化
  * （例如 Telegram 的实体预算，ADR 0145）时加一；进程启动时把旧版本产出、还没有呈现的期望内容按当前代码重新渲染。
- * 旧代码写入的行没有版本（NULL），视为旧版本。
+ * 旧代码写入的行没有版本（NULL），视为旧版本。版本 2：说明行带原因码的文字，编辑次数用完的已结束事件渲染最后一次编辑的
+ * 精简内容（ADR 0172、0173）。
  */
-export const RENDER_VERSION = 1;
+export const RENDER_VERSION = 2;
 
 /**
- * 永久错误的原因（srenautix_notify_abandoned_total 的 reason 标签，取值有限）：
- * entities_too_long、message_too_long、parse_error、bad_request（Telegram 其他 400）、
- * content_too_long、invalid_card、invalid_param（飞书），以及引擎自己判定的 ended_edit_cap。
+ * 渠道永久错误的原因（原因码登记表的 notify_permanent 分组）：entities_too_long、message_too_long、parse_error、
+ * bad_request（Telegram 其他 400）、content_too_long、invalid_card、invalid_param（飞书）。
  */
-export type PermanentReason =
-  | 'entities_too_long'
-  | 'message_too_long'
-  | 'parse_error'
-  | 'bad_request'
-  | 'content_too_long'
-  | 'invalid_card'
-  | 'invalid_param';
+export type PermanentReason = ReasonGroupCode<'notify_permanent'>;
+
+/**
+ * 放弃投递一版内容的原因（srenautix_notify_abandoned_total 的 reason 标签，登记表的 notify_abandon 分组）：
+ * 渠道永久错误，以及引擎判定的 ended_edit_cap（已结束事件的最后一次编辑也被拒绝，ADR 0173）。
+ */
+export type AbandonReason = ReasonGroupCode<'notify_abandon'>;
 
 /**
  * 渠道投递错误的分类。permanent：渠道拒绝这条内容本身（Telegram 的 400，除了 message is not modified 与要编辑的消息

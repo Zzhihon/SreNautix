@@ -1,4 +1,4 @@
-import type { ConcludeOutput, HypothesizeOutput, ResearchOutput } from '@srenautix/contract';
+import type { ConcludeOutput, HypothesizeOutput, ReasonGroupCode, ResearchOutput } from '@srenautix/contract';
 import { bindSchema, modelSchema, type DynamicEnums } from '../llm/schema.js';
 import type { LlmCallRecord, ModelLayer, ModelSession, StructuredResult } from '../llm/session.js';
 import { ResearchLedger } from '../llm/budget.js';
@@ -32,9 +32,10 @@ import { auditModelText, correctCauseScope, renumberRecommendations, validateCon
 // 模型只提出假设、检查与结论文字；账本状态、停止规则、结论阶梯与校验都由代码决定。
 
 export type ResearchState = 'hypothesize' | 'discriminate' | 'conclude' | 'completed' | 'stage_a_only' | 'failed';
-export type StopReason = 'leader_supported' | 'no_change' | 'step_limit' | 'deadline' | 'budget' | 'model_unavailable';
-export type FailureKind =
-  'model_unavailable' | 'breaker_open' | 'budget_exhausted' | 'deadline' | 'invalid_output' | 'datasource' | 'internal';
+/** 检验循环的停止原因：原因码登记表的 research_stop 分组 */
+export type StopReason = ReasonGroupCode<'research_stop'>;
+/** 研判失败类型：原因码登记表的 research_failure 分组（ResearchFailed.kind） */
+export type FailureKind = ReasonGroupCode<'research_failure'>;
 
 export interface ResearchLimits {
   /** 阶段 B 的硬期限（DESIGN §7.2 默认 8 分钟） */

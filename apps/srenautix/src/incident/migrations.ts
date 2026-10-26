@@ -202,5 +202,29 @@ ALTER TABLE server.stage_a_reports ALTER COLUMN first_rendered_at SET DEFAULT no
 ALTER TABLE server.stage_a_reports ALTER COLUMN first_rendered_at SET NOT NULL;
 `,
     },
+    {
+      version: 7,
+      name: 'terminal state records with reason codes',
+      phase: 'expand',
+      sql: `
+-- 终态记录（ADR 0172、0173）：通知的送达、最后一次编辑、放弃与不推送的决定，阶段 A 的失败与缺失，不进入阶段 B 的版本，
+-- 事件 issue 的结果，事件的恢复、重开、抑制与写入失败。原因码取 contract/reason-codes.json，级别按登记表读出，不存库。
+-- once_key 不为空时同一事件、同一阶段、同一原因码、同一 once_key 只写一次。只加表，N-1 版本照常运行
+CREATE TABLE server.incident_reasons (
+  id bigserial PRIMARY KEY,
+  incident_id uuid NOT NULL,
+  incident_version integer,
+  stage text NOT NULL,
+  code text NOT NULL,
+  detail text,
+  ref text,
+  once_key text,
+  at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX incident_reasons_incident_idx ON server.incident_reasons (incident_id, at);
+CREATE UNIQUE INDEX incident_reasons_once_idx ON server.incident_reasons (incident_id, stage, code, once_key)
+  WHERE once_key IS NOT NULL;
+`,
+    },
   ],
 };

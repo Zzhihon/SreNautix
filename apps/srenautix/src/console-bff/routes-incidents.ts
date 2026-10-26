@@ -3,11 +3,13 @@ import type {
   EvidenceResult,
   Feedback,
   FeedbackCreate,
+  HubComponents,
   Incident,
   Proposal,
+  ReasonStage,
   StageAReport,
 } from '@srenautix/contract';
-import { validatorFor } from '@srenautix/contract';
+import { reasonEntry, reasonText, validatorFor } from '@srenautix/contract';
 import { NAMESPACE_KIND } from '@srenautix/core';
 import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
@@ -16,6 +18,7 @@ import type { Auth } from '../identity/auth.js';
 import { scopeMatches, type RoleBinding, type Target } from '../identity/bindings.js';
 import { withComponentNames } from '../incident/names.js';
 import { incidentVersion, latestStageA, resolveIncidentRef, type IncidentRow } from '../incident/read.js';
+import { reasonsOf } from '../incident/reasons.js';
 import { researchRoots } from '../incident/research-root.js';
 import { alertsById } from '../ingest/store.js';
 import type { FeedbackService } from '../proposals/feedback.js';
@@ -390,105 +393,197 @@ export function registerIncidentRoutes(app: FastifyInstance, d: IncidentRouteDep
   });
 }
 
-/** 时间线（一条泳道）：告警、变更、异常卡、合并与拆分、阶段 A、研判、提议、执行、反馈。 */
-export async function timelineOf(pool: pg.Pool, row: IncidentRow) {
-  const out: Array<{
-    at: string;
-    kind: string;
-    text: string;
-    ref: string | null;
-    untrusted: boolean;
-    change_link?: ChangeLink;
-  }> = [];
+type TimelineEntry = HubComponents['schemas']['TimelineEntry'];
+type TimelineKind = TimelineEntry['kind'];
+
+/** 带原因码的条目种类 → 原因码所属的阶段（ADR 0172） */
+const KIND_STAGE: Partial<Record<TimelineKind, ReasonStage>> = {
+  stage_a_missing: 'stage_a',
+  research_concluded: 'research',
+  research_ended: 'research',
+  remediation_attempt: 'remediation',
+  notify: 'notify',
+  issue: 'issue',
+  incident_state: 'incident',
+};
+
+/** server.incident_reasons 的阶段 → 时间线条目种类 */
+const RECORD_KIND: Record<ReasonStage, TimelineKind> = {
+  notify: 'notify',
+  stage_a: 'stage_a_missing',
+  research: 'research_ended',
+  remediation: 'remediation_attempt',
+  issue: 'issue',
+  incident: 'incident_state',
+};
+
+/** 一条时间线条目；code 不为空时按条目种类的阶段在登记表中查出级别，未登记的原因码抛出 */
+function entry(
+  at: string,
+  kind: TimelineKind,
+  text: string,
+  ref: string | null,
+  untrusted: boolean,
+  code: string | null = null,
+  changeLink?: ChangeLink,
+): TimelineEntry {
+  const stage = KIND_STAGE[kind];
+  if (code !== null && stage === undefined) {
+    throw new Error(`时间线条目 ${kind} 没有原因码阶段，不能带原因码 ${code}`);
+  }
+  return {
+    at,
+    kind,
+    text,
+    ref,
+    untrusted,
+    code,
+    level: code === null ? null : reasonEntry(stage!, code).level,
+    ...(changeLink ? { change_link: changeLink } : {}),
+  };
+}
+
+const zh = (stage: ReasonStage, code: string) => reasonText(stage, code, 'zh-CN');
+
+/**
+ * 时间线（一条泳道）：告警、变更、异常卡、合并与拆分、阶段 A、研判、自愈 PR、提议、执行、反馈，以及带原因码的终态
+ * （ADR 0172）：阶段 A 失败与缺失、研判没有结论（失败、只出阶段 A、入队跳过、被取代、不进入阶段 B）、通知的送达、
+ * 最后一次编辑、放弃与不推送、事件 issue、事件的恢复、重开、抑制与写入失败。
+ */
+export async function timelineOf(pool: pg.Pool, row: IncidentRow): Promise<TimelineEntry[]> {
+  const out: TimelineEntry[] = [];
   const inc = row.body;
   const alerts = await alertsById(
     pool,
     inc.members.map((m) => m.alert_id),
   );
   for (const a of alerts) {
-    out.push({
-      at: a.starts_at,
-      kind: 'alert_firing',
-      text: `${a.alertname}${a.annotations.summary ? `：${a.annotations.summary}` : ''}`,
-      ref: a.alert_id,
-      untrusted: true,
-    });
+    out.push(
+      entry(
+        a.starts_at,
+        'alert_firing',
+        `${a.alertname}${a.annotations.summary ? `：${a.annotations.summary}` : ''}`,
+        a.alert_id,
+        true,
+      ),
+    );
     if (a.ends_at) {
-      out.push({ at: a.ends_at, kind: 'alert_resolved', text: a.alertname, ref: a.alert_id, untrusted: true });
+      out.push(entry(a.ends_at, 'alert_resolved', a.alertname, a.alert_id, true));
     }
   }
   // 变更带上与事件关联的分级与依据（ADR 0169）；契约 2.37.0 之前算出的事件没有
   const links = new Map((inc.change_links ?? []).map((l) => [l.change_id, l]));
   for (const c of inc.changes) {
-    const link = links.get(c.change_id);
-    out.push({
-      at: c.time,
-      kind: 'change',
-      text: `${c.source} ${c.kind}：${c.summary}`,
-      ref: c.change_id,
-      untrusted: true,
-      ...(link ? { change_link: link } : {}),
-    });
+    out.push(
+      entry(c.time, 'change', `${c.source} ${c.kind}：${c.summary}`, c.change_id, true, null, links.get(c.change_id)),
+    );
   }
   for (const a of inc.aliases) {
-    out.push({
-      at: a.merged_at,
-      kind: 'incident_merged',
-      text: `并入 ${a.from_label}`,
-      ref: a.from_incident_id,
-      untrusted: false,
-    });
+    out.push(entry(a.merged_at, 'incident_merged', `并入 ${a.from_label}`, a.from_incident_id, false));
   }
   if (inc.split_from) {
-    out.push({
-      at: inc.created_at,
-      kind: 'incident_split',
-      text: '由另一个事件拆分而来',
-      ref: inc.split_from,
-      untrusted: false,
-    });
+    out.push(entry(inc.created_at, 'incident_split', '由另一个事件拆分而来', inc.split_from, false));
   }
   const reports = await pool.query<{ body: StageAReport }>(
     'SELECT body FROM server.stage_a_reports WHERE incident_id = $1 ORDER BY incident_version',
     [row.incident_id],
   );
   for (const { body: r } of reports.rows) {
-    out.push({
-      at: r.rendered_at,
-      kind: 'stage_a',
-      text: `阶段 A（版本 ${r.incident_version}）：${r.disposition}`,
-      ref: r.report_id,
-      untrusted: false,
-    });
+    out.push(
+      entry(r.rendered_at, 'stage_a', `阶段 A（版本 ${r.incident_version}）：${r.disposition}`, r.report_id, false),
+    );
     for (const c of r.cards.filter((x) => x.verdict === 'abnormal')) {
-      out.push({
-        at: c.anomaly_started_at ?? c.evaluated_at,
-        kind: 'card_abnormal',
-        text: `${c.card_id}${c.value ? `：${c.value}` : ''}`,
-        ref: c.ref,
-        untrusted: false,
-      });
+      out.push(
+        entry(
+          c.anomaly_started_at ?? c.evaluated_at,
+          'card_abnormal',
+          `${c.card_id}${c.value ? `：${c.value}` : ''}`,
+          c.ref,
+          false,
+        ),
+      );
     }
   }
+  // 研判的结局：给出结论的带停止原因；失败与只出阶段 A 的带失败类型（含 server 判定的租约过期）
   const runs = await pool.query<{
     run_id: string;
+    state: 'completed' | 'failed' | 'stage_a_only';
+    started_at: Date;
     finished_at: Date | null;
     conclusion_level: string | null;
     root_component: string | null;
+    stop_reason: string | null;
+    error: { kind?: string; message?: string } | null;
   }>(
-    "SELECT run_id, finished_at, conclusion_level, root_component FROM server.research_runs WHERE incident_id = $1 AND state = 'completed'",
+    `SELECT run_id, state, started_at, finished_at, conclusion_level, root_component, output->>'stop_reason' AS stop_reason, error
+       FROM server.research_runs WHERE incident_id = $1 AND state IN ('completed', 'failed', 'stage_a_only')`,
     [row.incident_id],
   );
   for (const r of runs.rows) {
-    out.push({
-      at: (r.finished_at ?? new Date()).toISOString(),
-      kind: 'research_concluded',
-      text: `研判结论：${r.conclusion_level ?? '-'} · ${r.root_component ?? '-'}`,
-      ref: r.run_id,
-      untrusted: false,
-    });
+    const at = (r.finished_at ?? r.started_at).toISOString();
+    if (r.state === 'completed') {
+      out.push(
+        entry(
+          at,
+          'research_concluded',
+          `研判结论：${r.conclusion_level ?? '-'} · ${r.root_component ?? '-'}${r.stop_reason ? `（停止原因：${zh('research', r.stop_reason)}）` : ''}`,
+          r.run_id,
+          false,
+          r.stop_reason,
+        ),
+      );
+      continue;
+    }
+    const kind = r.error?.kind;
+    if (!kind) {
+      throw new Error(`研判 ${r.run_id} 的状态为 ${r.state}，镜像里没有失败类型`);
+    }
+    const message = r.error?.message ? r.error.message.slice(0, 300) : '';
+    out.push(
+      entry(
+        at,
+        'research_ended',
+        `${r.state === 'failed' ? '研判失败' : '只出阶段 A'}：${zh('research', kind)}${message ? `（${message}）` : ''}`,
+        r.run_id,
+        // 失败说明里可能有模型输出与数据源错误的原文
+        message !== '',
+        kind,
+      ),
+    );
   }
-  // 自愈 PR 对每次研判的处理结果（ADR 0170）：模板、结果、原因码与原因；key 为 '-' 时整次研判没有可处理的模板
+  // 入队时跳过（只出阶段 A）与被同一事件更新的触发取代
+  const queued = await pool.query<{
+    run_id: string;
+    state: 'skipped' | 'superseded';
+    skip_reason: string | null;
+    enqueued_at: Date;
+    finished_at: Date | null;
+  }>(
+    `SELECT run_id, state, skip_reason, enqueued_at, finished_at FROM server.research_queue
+      WHERE incident_id = $1 AND subject_type = 'incident' AND state IN ('skipped', 'superseded')`,
+    [row.incident_id],
+  );
+  for (const q of queued.rows) {
+    const at = (q.finished_at ?? q.enqueued_at).toISOString();
+    if (q.state === 'superseded') {
+      out.push(entry(at, 'research_ended', zh('research', 'superseded'), q.run_id, false, 'superseded'));
+      continue;
+    }
+    if (!q.skip_reason) {
+      throw new Error(`研判队列 ${q.run_id} 为 skipped，没有跳过原因`);
+    }
+    out.push(
+      entry(
+        at,
+        'research_ended',
+        `入队时跳过，只出阶段 A：${zh('research', q.skip_reason)}`,
+        q.run_id,
+        false,
+        q.skip_reason,
+      ),
+    );
+  }
+  // 自愈 PR 对每次研判的处理结果（ADR 0170）：模板、结果与原因；key 为 '-' 时整次研判没有可处理的模板
   const attempts = await pool.query<{
     run_id: string;
     key: string;
@@ -500,39 +595,45 @@ export async function timelineOf(pool: pg.Pool, row: IncidentRow) {
     row.incident_id,
   ]);
   for (const a of attempts.rows) {
-    out.push({
-      at: a.created_at.toISOString(),
-      kind: 'remediation_attempt',
-      text: `自愈 PR${a.key === '-' ? '' : ` ${a.key}`}：${a.outcome}${a.code ? `（${a.code}）` : ''}${a.reason ? `：${a.reason}` : ''}`,
-      ref: a.run_id,
-      // 原因里有告警名、标签值与仓库内容等外部来源的原文
-      untrusted: true,
-    });
+    out.push(
+      entry(
+        a.created_at.toISOString(),
+        'remediation_attempt',
+        `自愈 PR${a.key === '-' ? '' : ` ${a.key}`}：${a.outcome}${a.reason ? `：${a.reason}` : ''}`,
+        a.run_id,
+        // 原因里有告警名、标签值与仓库内容等外部来源的原文
+        true,
+        a.code,
+      ),
+    );
+  }
+  // 终态记录：阶段 A、通知、不进入阶段 B、事件 issue、事件状态（ADR 0172、0173）
+  for (const r of await reasonsOf(pool, row.incident_id)) {
+    const where = r.stage === 'notify' && r.ref ? `（${r.ref}）` : '';
+    out.push(
+      entry(
+        r.at.toISOString(),
+        RECORD_KIND[r.stage],
+        `${zh(r.stage, r.code)}${where}${r.detail ? `：${r.detail}` : ''}`,
+        r.ref,
+        // 说明里可能有错误信息与渠道应答的原文
+        r.detail !== null,
+        r.code,
+      ),
+    );
   }
   const props = await pool.query<{ body: Proposal }>('SELECT body FROM server.proposals WHERE incident_id = $1', [
     row.incident_id,
   ]);
   for (const { body: p } of props.rows) {
-    out.push({
-      at: p.created_at,
-      kind: 'proposal',
-      text: `${p.action} → ${p.target.display}（${p.state}）`,
-      ref: p.proposal_id,
-      untrusted: false,
-    });
+    out.push(entry(p.created_at, 'proposal', `${p.action} → ${p.target.display}（${p.state}）`, p.proposal_id, false));
   }
   const execs = await pool.query<{ proposal_id: string; phase: string; at: Date; reason: string }>(
     'SELECT e.proposal_id, e.phase, e.at, e.reason FROM server.execution_events e JOIN server.proposals p USING (proposal_id) WHERE p.incident_id = $1',
     [row.incident_id],
   );
   for (const e of execs.rows) {
-    out.push({
-      at: e.at.toISOString(),
-      kind: 'execution',
-      text: `${e.phase}（${e.reason}）`,
-      ref: e.proposal_id,
-      untrusted: false,
-    });
+    out.push(entry(e.at.toISOString(), 'execution', `${e.phase}（${e.reason}）`, e.proposal_id, false));
   }
   const fbs = await pool.query<{
     feedback_id: string;
@@ -546,13 +647,15 @@ export async function timelineOf(pool: pg.Pool, row: IncidentRow) {
     [row.incident_id],
   );
   for (const f of fbs.rows) {
-    out.push({
-      at: f.created_at.toISOString(),
-      kind: 'feedback',
-      text: `${f.principal_id}：${f.verdict ?? f.disposition_verdict ?? f.implicit ?? ''}`,
-      ref: f.feedback_id,
-      untrusted: false,
-    });
+    out.push(
+      entry(
+        f.created_at.toISOString(),
+        'feedback',
+        `${f.principal_id}：${f.verdict ?? f.disposition_verdict ?? f.implicit ?? ''}`,
+        f.feedback_id,
+        false,
+      ),
+    );
   }
   return out.sort((a, b) => a.at.localeCompare(b.at));
 }

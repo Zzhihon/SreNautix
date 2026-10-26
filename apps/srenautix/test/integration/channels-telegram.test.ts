@@ -11,6 +11,7 @@ import { identityTrack } from '../../src/identity/migrations.js';
 import { ServerMetrics } from '../../src/metrics.js';
 import { NotifyEngine } from '../../src/notify/engine.js';
 import { Interactions, NOT_LINKED_TEXT, REPLY_WINDOW_MS } from '../../src/notify/interactions.js';
+import { incidentTrack } from '../../src/incident/migrations.js';
 import { notifyTrack } from '../../src/notify/migrations.js';
 import type {
   ActionOutcome,
@@ -160,7 +161,7 @@ let seq = 0;
 
 beforeAll(async () => {
   db = await newTestDb();
-  await migrateExpand(db.server, 'server', [storeTrack, identityTrack, notifyTrack]);
+  await migrateExpand(db.server, 'server', [storeTrack, identityTrack, incidentTrack, notifyTrack]);
   fs = new FixtureServer();
   await fs.start();
 });

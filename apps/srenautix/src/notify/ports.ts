@@ -115,13 +115,21 @@ export interface NotifyActions {
 
 /** server 实现：当前应当呈现消息的事件（期望状态的来源），以及提议 TTL 的“首次送达”回写。 */
 export interface MessageSource {
-  /** 需要消息的事件（推送级别、恢复后保留期内、已经有消息的）。 */
+  /**
+   * 需要消息的事件（推送级别、恢复后保留期内、已经有消息的）。还没有阶段 A 报告的 critical 事件在首个告警进入
+   * Alertmanager 60 秒后也在其中，消息不带证据卡（ADR 0173）
+   */
   desired(language: 'zh' | 'en'): Promise<DesiredIncidentMessage[]>;
   /**
    * 指定事件当前的消息，不论严重度、抑制与恢复后的保留期（已结束的事件用已结束状态的模板）；不存在的事件不返回。
    * 启动时重新渲染旧渲染器产出的期望内容用（ADR 0145）；不实现时不重新渲染
    */
   byIds?(incidentIds: readonly string[], language: 'zh' | 'en'): Promise<DesiredIncidentMessage[]>;
+  /**
+   * 触发中、因严重度或抑制不推送的事件，还没有记过这个原因的（ADR 0172）；通知引擎为每个写一条不推送的决定。
+   * 不实现时不记录
+   */
+  withheld?(): Promise<WithheldIncident[]>;
   /** 某条消息第一次成功送达：提议的 TTL 从此开始计算。 */
   delivered(incidentId: string, proposalIds: string[], at: Date): Promise<void>;
   /** 外部上游在 [from, to) 内的汇总统计（ADR 0147）；没有启用外部上游汇总时不实现 */
@@ -131,6 +139,13 @@ export interface MessageSource {
    * 返回两个计时起点与是否业务影响类（ADR 0159、0165），之前已有消息送达时返回 null。不实现时不记录首条消息时延
    */
   firstMessage?(incidentId: string, messageId: number, at: Date): Promise<FirstMessage | null>;
+}
+
+/** 因严重度或抑制不推送的事件（ADR 0172） */
+export interface WithheldIncident {
+  incidentId: string;
+  version: number;
+  code: 'withheld_severity' | 'withheld_suppressed';
 }
 
 /** 事件第一条消息的时延口径（ADR 0159、0165） */
