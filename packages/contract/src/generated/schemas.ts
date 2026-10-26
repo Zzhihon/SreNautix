@@ -1,5 +1,5 @@
 // 本文件由 packages/contract/scripts/gen.ts 从 contract/ 生成，不要手工修改。
-export const CONTRACT_VERSION = '2.36.0';
+export const CONTRACT_VERSION = '2.37.0';
 
 export const SCHEMAS: Record<string, Record<string, unknown>> = {
   'https://srenautix.io/contract/gateway/v1/action-catalog.schema.json': {
@@ -902,6 +902,12 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
             items: { $ref: '../../../schemas/common.schema.json#/$defs/ComponentKey' },
           },
           summary: { type: 'string', description: '不可信文本，只作为文本显示', maxLength: 500 },
+          paths: {
+            type: 'array',
+            description:
+              '按仓库路径映射目标的变更源（GitHub）：提交改动的文件命中的路径前缀（配置的 paths[].prefix），按配置顺序。只用于展示关联依据，目标已经由这些前缀映射得出（契约 2.37.0）',
+            items: { type: 'string' },
+          },
           attachments: {
             type: 'array',
             description:
@@ -4825,6 +4831,12 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
         description: '首次触发前 30 分钟到结束之间、触及事件组件的变更',
         items: { $ref: '../integrations/changes/v1/changes.schema.json#/$defs/ChangeEvent' },
       },
+      change_links: {
+        type: 'array',
+        description:
+          'changes 中每个变更与事件的关联记录，顺序与 changes 相同：分级、依据、支撑 high 的成员告警与是否回退。由确定性代码计算（ADR 0169，契约 2.37.0）；之前版本的事件没有这个字段',
+        items: { $ref: '#/$defs/ChangeLink' },
+      },
       aliases: {
         type: 'array',
         description: '合并进本事件的旧事件（incident_aliases：from → into）。旧 URL 与旧标签经别名解析到本事件',
@@ -4858,6 +4870,48 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
       },
     },
     $defs: {
+      ChangeLink: {
+        title: 'ChangeLink',
+        description:
+          '变更与事件的关联（ADR 0169）。high：变更时刻到成员告警开始不超过变更窗口、告警所在组件的问题不早于变更 10 分钟以上，变更直接作用在这个告警的对象上（component_match、acts_on 或 retire_scrape_job），并且至少一条 symptom 或 cause 角色的成员告警落在变更的目标上、开始不早于变更；medium：满足时间条件，只经拓扑可达（置信度不低于归并阈值）关联，或直接作用但没有新信号；low：只经命名空间、逻辑归属或尚未同步关联，或变更晚于它自己目标上已经开始的问题',
+        type: 'object',
+        additionalProperties: false,
+        required: ['change_id', 'grade', 'basis', 'new_signals', 'rollback'],
+        properties: {
+          change_id: { type: 'string' },
+          grade: { $ref: '#/$defs/ChangeGrade' },
+          basis: {
+            type: 'array',
+            description:
+              '关联依据，按枚举顺序排列，不重复。component_match：成员告警的组件就是变更目标所属的组件；acts_on：成员告警落在变更中按强依据挂上的 Job 经 egress_to 访问的组件上；topology_reach：成员告警的组件沿置信度不低于归并阈值的边可达变更目标；namespace：没有对象的告警按命名空间归到变更；logical_owner：没有对象的告警按逻辑归属（同一逻辑组件，或没有对象的变更类告警）归到变更；retire_scrape_job：告警报的抓取 job 随这次退役失去全部目标；pending_sync：已合并、尚未同步的提交落在告警所在的应用上；late：变更晚于它自己目标上已经开始的问题',
+            uniqueItems: true,
+            items: {
+              type: 'string',
+              enum: [
+                'component_match',
+                'acts_on',
+                'topology_reach',
+                'namespace',
+                'logical_owner',
+                'retire_scrape_job',
+                'pending_sync',
+                'late',
+              ],
+            },
+          },
+          new_signals: {
+            type: 'array',
+            description: 'grade 为 high 时支撑它的成员告警 alert_id（排序）；其余分级为空',
+            items: { type: 'string' },
+          },
+          rollback: {
+            type: 'boolean',
+            description:
+              '变更把版本退回到更早一次变更之前的版本：revision 等于事件中更早一次变更的 previous_revision，previous_revision 等于那次变更的 revision',
+          },
+        },
+      },
+      ChangeGrade: { title: 'ChangeGrade', type: 'string', enum: ['high', 'medium', 'low'] },
       ResearchRoot: {
         title: 'ResearchRoot',
         type: 'object',

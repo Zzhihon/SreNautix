@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: SreNautix hub API
-  version: 2.36.0
+  version: 2.37.0
   license:
     name: Apache-2.0
     identifier: Apache-2.0
@@ -2190,6 +2190,9 @@ components:
         text: { type: string }
         ref: { type: [string, 'null'], description: 关联对象的 id（alert_id、change_id、run_id、proposal_id 等） }
         untrusted: { type: boolean, description: text 含告警、日志或变更来源的原文，只作为文本显示 }
+        change_link:
+          $ref: './schemas/incident.schema.json#/$defs/ChangeLink'
+          description: kind 为 change 时：这个变更与事件的关联分级与依据（ADR 0169）；事件没有 change_links 时省略
     AlertLookup:
       type: object
       additionalProperties: false

@@ -97,6 +97,11 @@
           "description": "不可信文本，只作为文本显示",
           "maxLength": 500
         },
+        "paths": {
+          "type": "array",
+          "description": "按仓库路径映射目标的变更源（GitHub）：提交改动的文件命中的路径前缀（配置的 paths[].prefix），按配置顺序。只用于展示关联依据，目标已经由这些前缀映射得出（契约 2.37.0）",
+          "items": { "type": "string" }
+        },
         "attachments": {
           "type": "array",
           "description": "推导出的变更挂上的前置对象及推导依据（ADR 0104 §13），例如发布之前的迁移 Job。basis：managed_by（与发布由同一个应用管理：managed_by 边或 Argo 的 instance 标签）、revision_label（配置的版本标签取值与发布的相同，例如 cchp.io/release-id）、image（Pod 镜像与发布新 ReplicaSet 的镜像相同）、namespace_window（只按同一命名空间与时间窗推断，是弱推导）",

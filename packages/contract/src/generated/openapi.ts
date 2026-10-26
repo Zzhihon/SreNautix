@@ -1940,6 +1940,8 @@ export type components = {
         | 'retire'
         | 'other';
       link: string | null;
+      /** @description 按仓库路径映射目标的变更源（GitHub）：提交改动的文件命中的路径前缀（配置的 paths[].prefix），按配置顺序。只用于展示关联依据，目标已经由这些前缀映射得出（契约 2.37.0） */
+      paths?: string[];
       /** @description Git 提交触及、在提交之后一直处于 OutOfSync 的 Argo CD 应用：提交已经合并，应用还没有同步到与 Git 一致。out_of_sync_since 是应用最近一次离开 Synced 的时刻，回看范围内一直没有 Synced 时为 null。由 server 在计算事件时按 argocd_app_info 标出，不写入变更源（契约 2.33.0） */
       pending_sync?: {
         application: components['schemas']['ComponentKey'];
@@ -1968,6 +1970,34 @@ export type components = {
       /** @description 变更触及的拓扑节点 */
       targets: components['schemas']['ComponentKey'][];
       time: components['schemas']['Timestamp'];
+    };
+    /**
+     * ChangeGrade
+     * @enum {string}
+     */
+    ChangeGrade: 'high' | 'medium' | 'low';
+    /**
+     * ChangeLink
+     * @description 变更与事件的关联（ADR 0169）。high：变更时刻到成员告警开始不超过变更窗口、告警所在组件的问题不早于变更 10 分钟以上，变更直接作用在这个告警的对象上（component_match、acts_on 或 retire_scrape_job），并且至少一条 symptom 或 cause 角色的成员告警落在变更的目标上、开始不早于变更；medium：满足时间条件，只经拓扑可达（置信度不低于归并阈值）关联，或直接作用但没有新信号；low：只经命名空间、逻辑归属或尚未同步关联，或变更晚于它自己目标上已经开始的问题
+     */
+    ChangeLink: {
+      /** @description 关联依据，按枚举顺序排列，不重复。component_match：成员告警的组件就是变更目标所属的组件；acts_on：成员告警落在变更中按强依据挂上的 Job 经 egress_to 访问的组件上；topology_reach：成员告警的组件沿置信度不低于归并阈值的边可达变更目标；namespace：没有对象的告警按命名空间归到变更；logical_owner：没有对象的告警按逻辑归属（同一逻辑组件，或没有对象的变更类告警）归到变更；retire_scrape_job：告警报的抓取 job 随这次退役失去全部目标；pending_sync：已合并、尚未同步的提交落在告警所在的应用上；late：变更晚于它自己目标上已经开始的问题 */
+      basis: (
+        | 'component_match'
+        | 'acts_on'
+        | 'topology_reach'
+        | 'namespace'
+        | 'logical_owner'
+        | 'retire_scrape_job'
+        | 'pending_sync'
+        | 'late'
+      )[];
+      change_id: string;
+      grade: components['schemas']['ChangeGrade'];
+      /** @description grade 为 high 时支撑它的成员告警 alert_id（排序）；其余分级为空 */
+      new_signals: string[];
+      /** @description 变更把版本退回到更早一次变更之前的版本：revision 等于事件中更早一次变更的 previous_revision，previous_revision 等于那次变更的 revision */
+      rollback: boolean;
     };
     /**
      * Channel
@@ -3579,6 +3609,8 @@ export type components = {
       aliases: components['schemas']['Alias'][];
       /** @description 前 k 个候选根因，按得分从高到低 */
       candidates: components['schemas']['RootCandidate'][];
+      /** @description changes 中每个变更与事件的关联记录，顺序与 changes 相同：分级、依据、支撑 high 的成员告警与是否回退。由确定性代码计算（ADR 0169，契约 2.37.0）；之前版本的事件没有这个字段 */
+      change_links?: components['schemas']['ChangeLink'][];
       /** @description 首次触发前 30 分钟到结束之间、触及事件组件的变更 */
       changes: components['schemas']['ChangeEvent'][];
       cluster_id: components['schemas']['ClusterId'];
@@ -3611,6 +3643,34 @@ export type components = {
       topology_version: number;
       updated_at: components['schemas']['Timestamp'];
       $defs: {
+        /**
+         * ChangeLink
+         * @description 变更与事件的关联（ADR 0169）。high：变更时刻到成员告警开始不超过变更窗口、告警所在组件的问题不早于变更 10 分钟以上，变更直接作用在这个告警的对象上（component_match、acts_on 或 retire_scrape_job），并且至少一条 symptom 或 cause 角色的成员告警落在变更的目标上、开始不早于变更；medium：满足时间条件，只经拓扑可达（置信度不低于归并阈值）关联，或直接作用但没有新信号；low：只经命名空间、逻辑归属或尚未同步关联，或变更晚于它自己目标上已经开始的问题
+         */
+        ChangeLink: {
+          /** @description 关联依据，按枚举顺序排列，不重复。component_match：成员告警的组件就是变更目标所属的组件；acts_on：成员告警落在变更中按强依据挂上的 Job 经 egress_to 访问的组件上；topology_reach：成员告警的组件沿置信度不低于归并阈值的边可达变更目标；namespace：没有对象的告警按命名空间归到变更；logical_owner：没有对象的告警按逻辑归属（同一逻辑组件，或没有对象的变更类告警）归到变更；retire_scrape_job：告警报的抓取 job 随这次退役失去全部目标；pending_sync：已合并、尚未同步的提交落在告警所在的应用上；late：变更晚于它自己目标上已经开始的问题 */
+          basis: (
+            | 'component_match'
+            | 'acts_on'
+            | 'topology_reach'
+            | 'namespace'
+            | 'logical_owner'
+            | 'retire_scrape_job'
+            | 'pending_sync'
+            | 'late'
+          )[];
+          change_id: string;
+          grade: components['schemas']['ChangeGrade'];
+          /** @description grade 为 high 时支撑它的成员告警 alert_id（排序）；其余分级为空 */
+          new_signals: string[];
+          /** @description 变更把版本退回到更早一次变更之前的版本：revision 等于事件中更早一次变更的 previous_revision，previous_revision 等于那次变更的 revision */
+          rollback: boolean;
+        };
+        /**
+         * ChangeGrade
+         * @enum {string}
+         */
+        ChangeGrade: 'high' | 'medium' | 'low';
         /** ResearchRoot */
         ResearchRoot: {
           component: components['schemas']['ComponentKey'];
@@ -5502,6 +5562,8 @@ export type components = {
     tier: 'L' | 'H';
     TimelineEntry: {
       at: components['schemas']['Timestamp'];
+      /** @description kind 为 change 时：这个变更与事件的关联分级与依据（ADR 0169）；事件没有 change_links 时省略 */
+      change_link?: components['schemas']['ChangeLink'];
       /** @enum {string} */
       kind:
         | 'alert_firing'
