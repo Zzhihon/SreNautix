@@ -394,7 +394,7 @@ export function catalogSegment(c: ResearchCase): Segment {
           title: a.title,
           level: a.level,
           target_kind: a.target.kind,
-          params: a.params,
+          params: paramsView(a.params),
           undo: a.undo.kind,
         })),
       ),
@@ -403,6 +403,32 @@ export function catalogSegment(c: ResearchCase): Segment {
     [],
     'allow',
   );
+}
+
+/**
+ * 动作参数 schema 在提示词里的写法：去掉字符串的长度上下限，其余关键字照写。参数取值是拓扑中的名字、枚举与数值，
+ * 名字的长度限制不影响模型的选择；提议仍按动作目录中完整的参数 schema 校验（validate.ts），网关执行前再校验一次
+ */
+export function paramsView(schema: unknown): unknown {
+  if (Array.isArray(schema)) {
+    return schema.map(paramsView);
+  }
+  if (schema === null || typeof schema !== 'object') {
+    return schema;
+  }
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(schema)) {
+    if (k === 'minLength' || k === 'maxLength') {
+      continue;
+    }
+    out[k] =
+      k === 'properties'
+        ? Object.fromEntries(Object.entries(v as Record<string, unknown>).map(([name, p]) => [name, paramsView(p)]))
+        : k === 'items'
+          ? paramsView(v)
+          : v;
+  }
+  return out;
 }
 
 /**

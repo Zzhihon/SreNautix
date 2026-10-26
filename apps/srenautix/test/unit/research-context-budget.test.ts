@@ -1,10 +1,13 @@
 import type { EvidenceResult } from '@srenautix/contract';
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_BUDGET, rawEstimate } from '../../src/llm/budget.js';
+import { declaredProfile } from '../../src/llm/dialect.js';
 import { repairLocally } from '../../src/llm/repair.js';
 import { bindSchema, modelSchema } from '../../src/llm/schema.js';
-import type { LlmTurn } from '../../src/llm/types.js';
-import { segmentsText } from '../../src/llm/wire.js';
+import { trimOnce } from '../../src/llm/session.js';
+import { streamingParams } from '../../src/llm/stream.js';
+import type { LlmRequest, LlmTurn } from '../../src/llm/types.js';
+import { segmentsText, toChatParams } from '../../src/llm/wire.js';
 import { inferCheckTemplates } from '../../src/research/checks.js';
 import { incidentBook } from '../../src/research/incident.js';
 import { Ledger } from '../../src/research/ledger.js';
@@ -16,6 +19,7 @@ import {
   hypothesizeItems,
   MAX_COMPONENT_CHOICES,
   MAX_FULL_CARDS,
+  paramsView,
   promptParts,
   selectCards,
   topologyView,
@@ -194,6 +198,106 @@ describe('提示词里的拓扑（ADR 0129）', () => {
       relation: 'owned_by',
       confidence: 1,
     });
+  });
+});
+
+describe('上下文 16k 的路由上的 conclude', () => {
+  // 本地部署的模型常见 16k 上下文：输入只能用上下文减去 conclude 输出上限的部分。估算的是整个请求体，固定指令、
+  // 可移植 schema、目录与账本都不裁剪；json_object 的方言把 schema 写进系统提示，是同一份提示词最大的请求形态
+  it('六个假设的账本：可裁剪的片段全部裁掉之后，按字节估算的输入放得进上下文减去输出上限的部分', () => {
+    const rc = researchCase();
+    const book = incidentBook(rc);
+    const ledger = new Ledger(book, rc.subgraph);
+    const hyp = (id: string, root: string, mechanism: string, parent: string | null = null) => ({
+      id,
+      parent_id: parent,
+      root_component: root,
+      mechanism,
+      supporting: ['card:1', 'alert:1'],
+      refuting: [],
+    });
+    ledger.merge(
+      [
+        hyp(
+          'h1',
+          PG,
+          'postgres 的数据卷写满，写入失败，api 的查询报错并返回 5xx；预示数据卷用量接近 100%、写入错误与 api 的 5xx',
+        ),
+        hyp(
+          'h2',
+          'PersistentVolumeClaim:shop/data-postgres-0',
+          '数据卷容量配置过小，WAL 增长后写满，postgres 停止接受写入',
+        ),
+        hyp('h3', 'Deployment:shop/api', 'api 的新版本查询方式改变，连接数耗尽；预示连接数升高、等待连接的请求超时'),
+        hyp('h4', 'Deployment:shop/web', 'web 的发布让请求量上升，api 与 postgres 过载；预示请求量与延迟同时升高'),
+        hyp('h5', 'Node:node-a', '节点磁盘压力导致 postgres 所在的 Pod 写入变慢；预示节点的磁盘压力条件与 IO 等待升高'),
+        hyp('h6', PG, '归档失败使 WAL 无法回收，数据卷持续增长；预示归档失败计数与 WAL 目录大小持续增长', 'h1'),
+      ],
+      [],
+    );
+    expect(ledger.list()).toHaveLength(6);
+    const context = 16_384;
+    const maxOutputTokens = DEFAULT_BUDGET.stages.conclude.outputTokens;
+    const profile = { ...declaredProfile('openai-compatible'), context_tokens: context };
+    const output = {
+      name: 'conclude',
+      schema: bindSchema(modelSchema('conclude'), {
+        components: componentChoices(rc),
+        evidence_refs: book.refs(),
+        check_templates: [],
+        runbooks: rc.runbooks,
+        actions: rc.actions.map((a) => a.id),
+      }).portable,
+    };
+    let req: LlmRequest = {
+      items: concludeItems('zh', promptParts('zh', rc, book, context, null), ledger, book),
+      output,
+      maxOutputTokens,
+      temperature: 0,
+    };
+    for (let t = trimOnce(req); t; t = trimOnce(req)) {
+      req = t.request;
+    }
+    const body = JSON.stringify(
+      streamingParams('chat_completions', toChatParams(req, { model: 'local-model', profile, language: 'zh' })),
+    );
+    expect(body).toContain('只输出一个 JSON 对象');
+    expect(rawEstimate(body, profile.tokenizer)).toBeLessThanOrEqual(context - maxOutputTokens);
+  });
+
+  it('动作目录的参数 schema 去掉字符串的长度上下限，枚举、数值范围、格式与说明照写；同名的参数不受影响', () => {
+    const params = {
+      type: 'object',
+      additionalProperties: false,
+      required: ['namespace', 'kind', 'replicas', 'maxLength'],
+      properties: {
+        namespace: { type: 'string', minLength: 1, maxLength: 63 },
+        kind: { type: 'string', enum: ['Deployment', 'StatefulSet'] },
+        replicas: { type: 'integer', minimum: 0, maximum: 1000 },
+        revision: { type: 'string', pattern: '^[0-9a-f]{40}$', description: '提交' },
+        reviewers: { type: 'array', maxItems: 10, items: { type: 'string', minLength: 1, pattern: '^[a-z]+$' } },
+        maxLength: { type: 'integer', minimum: 1 },
+      },
+    };
+    expect(paramsView(params)).toEqual({
+      type: 'object',
+      additionalProperties: false,
+      required: ['namespace', 'kind', 'replicas', 'maxLength'],
+      properties: {
+        namespace: { type: 'string' },
+        kind: { type: 'string', enum: ['Deployment', 'StatefulSet'] },
+        replicas: { type: 'integer', minimum: 0, maximum: 1000 },
+        revision: { type: 'string', pattern: '^[0-9a-f]{40}$', description: '提交' },
+        reviewers: { type: 'array', maxItems: 10, items: { type: 'string', pattern: '^[a-z]+$' } },
+        maxLength: { type: 'integer', minimum: 1 },
+      },
+    });
+    const rc = researchCase();
+    const book = incidentBook(rc);
+    const t = text(concludeItems('zh', promptParts('zh', rc, book, 16_384, null), new Ledger(book, rc.subgraph), book));
+    expect(t).toContain('"id":"workload_scale"');
+    expect(t).toContain('"replicas":{"type":"integer","minimum":0,"maximum":1000}');
+    expect(t).not.toContain('minLength');
   });
 });
 

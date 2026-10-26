@@ -20,7 +20,19 @@ conclude 的模型输出增加必填字段 `cause_scope`（契约 2.38.0，可�
 
 模型的取值不能把范围扩大到仓库负责的组件之外；校正只会把范围改为 `upstream` 或 `unknown`，不会改为 `local` 或 `configuration`。
 
-各取值的含义只写在 conclude schema 中这个字段的 `description` 里（它随可移植 schema 发给模型），提示词只写校正规则与只有 `local`、`configuration` 才开 PR 这两件事。conclude 的请求在 16k 上下文的本地路由上留给输入的只有上下文减去输出上限的部分，同一组定义在 schema 与提示词里各写一遍会让请求超出这个余量。
+#### 上下文小的路由上的 conclude 请求
+
+conclude 的请求在上下文 16k 的路由上（本地部署的模型）留给输入的只有上下文减去输出上限 8000 的部分，约 8.4k token。裁剪（ADR 0099）估算的是整个请求体：固定指令、可移植 schema（不支持严格 json_schema 的路由写在系统提示里，按 JSON 转义之后的字节计）、目录、事件概要、成员告警、账本与任务说明都计入，但只有证据卡、知识、参考案例、变更与拓扑可以裁剪。告警少、证据卡少的事件里可裁剪的内容很少，请求能否放下取决于不裁剪的部分。
+
+`cause_scope` 的字段定义在 json_object 路由上约占 330 token。conclude 的固定部分按"同一条要求只写一处"组织：
+
+- `cause_scope` 各取值的含义写在 schema 中这个字段的 `description` 里；任务说明写明代码按处置依据校正取值、只有 `local` 与 `configuration` 开 PR，校正规则只在本节第 1 条与代码里；
+- 字段的取值规则写在任务说明里：`hypothesis_id`、`situation`、`summary`、`recommendations`、`runbook_ref`、`action_id` 在 schema 里没有 `description`；`params_json` 的 `description` 只写任务说明之外的"目标由代码推导"；
+- 动作与目标的限制写在系统提示的"边界"里，任务说明的 `proposals` 条目只写 `params_json` 与 `expected_effect`；
+- 契约 schema 根上的 `description` 是写给契约读者的说明（引用 DESIGN 与 ADR 的章节），`bindSchema` 生成发给模型的可移植 schema 时去掉它，四个模型 schema 都适用；
+- 可用动作目录里的参数 schema 在提示词里去掉字符串的长度上下限（Kubernetes 名字的 1–63、1–253），枚举、数值范围、格式与说明照写；提议按动作目录中完整的参数 schema 校验（`research/validate.ts`），网关执行前再校验一次。
+
+worker 端到端的兜底路由场景（6 个可用动作、3 个假设、没有证据卡，json_object 路由）里，conclude 的估算是 7911 token，余量 473；严格 json_schema 的本地路由场景（worker-e2e）是 7631 token，余量 753。六个假设的账本在 16k 路由上裁剪之后放得下，由 `test/unit/research-context-budget.test.ts` 检查。
 
 ### 2. ignore 的依据写进研判输出
 
@@ -64,9 +76,11 @@ conclude 的模型输出增加必填字段 `cause_scope`（契约 2.38.0，可�
 ## 结果
 
 - 契约 2.38.0：`contract/model/conclude.schema.json` 的 `cause_scope`；`research-output.schema.json` 的 `Conclusion.cause_scope`、`CauseScope` 与 `ignore_basis`；`eval-snapshot.schema.json` 的 `DispositionFacts.repository_owned`；`openapi.yaml` 的 `TimelineEntry.kind` 增加 `remediation_attempt`。
-- 实现：`research/validate.ts`（`correctCauseScope`）、`research/controller.ts`（写入 `cause_scope` 与 `ignore_basis`）、提示词（`prompts/zh.ts`、`prompts/en.ts` 的 conclude）、`remediation/facts.ts`（`repositoryRoots`）、`remediation/admission.ts`、`remediation/service.ts`、`metrics.ts`、`console-bff/routes-incidents.ts`、`eval/{runner,score,remediation,phase2}.ts`、`packages/ui` 的时间线与中英文案。
+- 实现：`research/validate.ts`（`correctCauseScope`）、`research/controller.ts`（写入 `cause_scope` 与 `ignore_basis`）、提示词（`prompts/zh.ts`、`prompts/en.ts` 的 conclude）、`llm/schema.ts`（可移植 schema 不带根上的说明）、`research/prompt.ts`（`paramsView`）、`remediation/facts.ts`（`repositoryRoots`）、`remediation/admission.ts`、`remediation/service.ts`、`metrics.ts`、`console-bff/routes-incidents.ts`、`eval/{runner,score,remediation,phase2}.ts`、`packages/ui` 的时间线与中英文案。
 - 测试：
   - `test/unit/remediation-admission.test.ts`：根因范围的三条校正与不改写的情形；运行时证据的判断；按证据索引与检查卡解析引用；四项条件与告警调优的良性依据逐项；
+  - `test/unit/research-context-budget.test.ts`：六个假设的账本在上下文 16k、json_object 的路由上，可裁剪的片段全部裁掉之后，conclude 的估算不超过上下文减去输出上限；动作参数 schema 在提示词里的写法；
+  - `test/integration/worker-last-resort.test.ts`、`worker-e2e.test.ts`：上下文 16k 的路由上 conclude 完成；
   - `test/unit/research-disposition.test.ts`：`repository_owned` 包含管理着候选根因的应用（两种写法）与逻辑组件，`declared` 不变；
   - `test/integration/remediation.test.ts`（真实 PostgreSQL、Prometheus 与内存中的 GitHub）：每项条件不满足时的跳过代码、原因、审计、指标与时间线；阶段 A 重算改变编号后仍按证据索引找到支撑卡；仓库文件里声明、但没有管理它的 GitOps 应用的工作负载按 `no_repo_fact` 跳过，补丁已经计划；告警调优、去重与冷却按新的准入照常工作；
   - `test/integration/eval-reconstruct.test.ts`：被准入挡下的模板不计入模板触发，记在 `blocked` 里；

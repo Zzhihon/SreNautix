@@ -140,7 +140,10 @@ export function bindSchema(source: Json, enums: DynamicEnums): Bound {
     }
     return { full, portable };
   };
-  return walk(source, []);
+  const bound = walk(source, []);
+  // 根上的 description 是写给契约读者的说明（引用 DESIGN 与 ADR 的章节），不发给模型；字段的 description 照常发送
+  delete bound.portable.description;
+  return bound;
 }
 
 function newAjv(): Ajv2020 {

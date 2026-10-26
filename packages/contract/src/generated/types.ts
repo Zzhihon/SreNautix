@@ -2055,25 +2055,14 @@ export interface ServiceGraph {
 export interface ConcludeOutput {
   disposition: 'act' | 'ignore' | 'escalate' | 'undetermined';
   /**
-   * 选中根因所在的范围：local 仓库声明的组件自身的运行状态（进程、内存、正在服务的版本）；configuration 仓库声明的组件的配置、资源或参数，或经管理它的 GitOps 应用生效的发布与清单变更；downstream 调用方或消费方（请求量或调用方式的变化）；upstream 被依赖的服务方（集群外部的服务方、其他团队的服务）；infrastructure 节点、存储、网络等基础设施；unknown 无法判断
+   * local 仓库声明的组件自身的运行状态（进程、内存、正在服务的版本）；configuration 仓库声明的组件的配置、资源或参数，或经管理它的 GitOps 应用生效的发布与清单变更；downstream 调用方或消费方（请求量或调用方式的变化）；upstream 被依赖的服务方（集群外部或其他团队的服务）；infrastructure 节点、存储、网络等基础设施；unknown 无法判断
    */
   cause_scope: 'local' | 'configuration' | 'downstream' | 'upstream' | 'infrastructure' | 'unknown';
-  /**
-   * 选中的假设；为 null 时 undetermined_reason 必须非空
-   */
   hypothesis_id: 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6' | null;
   undetermined_reason: string | null;
-  /**
-   * 现状与背景，三句以内：发生了什么、影响范围、当前状态
-   */
   situation: string;
-  /**
-   * 一到两句：根因结论（或无法判定的原因）与第一步该做什么
-   */
   summary: string;
   /**
-   * 按 mitigation、root_fix、prevention、investigation 排列，每类最多 3 条
-   *
    * @maxItems 12
    */
   recommendations: {
@@ -2089,13 +2078,7 @@ export interface ConcludeOutput {
     owner: 'platform' | 'app' | 'vendor' | 'oncall';
     risk: 'low' | 'medium' | 'high';
     risk_note: string | null;
-    /**
-     * <pack>/<runbook 文件>#<锚点>
-     */
     runbook_ref: string | null;
-    /**
-     * 能由动作目录中的动作完成时填写
-     */
     action_id: string | null;
     hypothesis_id: 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6';
     /**
@@ -2109,7 +2092,7 @@ export interface ConcludeOutput {
   proposals: {
     action_id: string;
     /**
-     * 动作参数的 JSON 文本，按动作目录中该动作的参数 schema 校验；目标由机器推导，模型给出的目标必须等于推导结果
+     * 目标由代码推导，参数里的目标必须等于推导结果
      */
     params_json: string;
     hypothesis_id: 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6';
