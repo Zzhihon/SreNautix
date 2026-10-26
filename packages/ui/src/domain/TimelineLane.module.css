@@ -107,6 +107,13 @@
   width: 13px;
   height: 13px;
 }
+.body {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+}
 .text {
   overflow-wrap: anywhere;
 }
@@ -129,7 +136,7 @@
   .item {
     grid-template-columns: 52px minmax(0, 1fr);
   }
-  .text {
+  .body {
     grid-column: 1 / -1;
   }
 }

@@ -441,4 +441,45 @@ describe('时间线', () => {
     expect(quote.closest('blockquote')).not.toBeNull();
     expect(document.querySelector('b')).toBeNull();
   });
+
+  it('变更记录显示关联分级、依据与回退（ADR 0169）', () => {
+    renderUi(
+      <TimelineLane
+        from={NOW - 3_600_000}
+        to={NOW}
+        items={[
+          {
+            at: '2026-10-19T06:18:30Z',
+            kind: 'change',
+            text: 'argocd gitops_sync：bump image',
+            ref: 'argocd:1',
+            untrusted: true,
+            change_link: {
+              change_id: 'argocd:1',
+              grade: 'high',
+              basis: ['component_match', 'acts_on'],
+              new_signals: ['a1'],
+              rollback: true,
+            },
+          },
+          {
+            at: '2026-10-19T06:20:00Z',
+            kind: 'change',
+            text: 'github config：tune',
+            ref: 'github:2',
+            untrusted: true,
+            change_link: {
+              change_id: 'github:2',
+              grade: 'low',
+              basis: ['namespace'],
+              new_signals: [],
+              rollback: false,
+            },
+          },
+        ]}
+      />,
+    );
+    expect(screen.getByText('强关联 · 作用在告警的组件上 · 前置 Job 访问的组件 · 回退')).toBeTruthy();
+    expect(screen.getByText('弱关联 · 同一命名空间')).toBeTruthy();
+  });
 });

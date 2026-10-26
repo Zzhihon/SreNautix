@@ -55,6 +55,17 @@ const ENUMS: Record<string, readonly string[]> = {
   'run.stop_reason': ['leader_supported', 'no_change', 'step_limit', 'deadline', 'budget', 'model_unavailable'],
   'subgraph.role': ['root', 'candidate', 'member', 'neighbor'],
   'subgraph.source': ['structural', 'runtime', 'config_ref', 'network_policy', 'naming'],
+  'timeline.change_grade': ['high', 'medium', 'low'],
+  'timeline.change_basis': [
+    'component_match',
+    'acts_on',
+    'topology_reach',
+    'namespace',
+    'logical_owner',
+    'retire_scrape_job',
+    'pending_sync',
+    'late',
+  ],
   'timeline.kind': [
     'alert_firing',
     'alert_resolved',
