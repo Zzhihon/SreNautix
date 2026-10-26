@@ -15,12 +15,12 @@ SreNautix 控制台是 server 角色提供的单页应用（DESIGN §1.1、§12�
 | 分组 | 页面 | 路径 | 数据 |
 |---|---|---|---|
 | 值班 | 事件收件箱 | `/incidents?state&feedback&severity&disposition&suppressed&cluster` | `listIncidents`（含盲区时段与被抑制的计数）、`listConditions` |
-| 值班 | 事件详情 | `/incidents/<id 或标签>?tab=evidence|hypotheses|timeline|runs` | 事件、阶段 A、证据快照、时间线、根因子图、研判、反馈、提议 |
+| 值班 | 事件详情 | `/incidents/<id 或标签>?tab=evidence|hypotheses|timeline|runs` | 事件、阶段 A、证据快照、时间线、根因子图、研判、反馈（两个维度加原因码，拒绝时原因必选，ADR 0174）、提议 |
 | 值班 | 告警链接 | `/alerts?l.<标签名>=<标签值>&…&cluster` | `lookupAlert`：找到后替换为事件详情页，找不到时写明原因并给出收件箱入口（见下文"告警链接"） |
 | 值班 | 研判运行明细 | `/runs/<run_id>`；提示词 `/runs/<run_id>/prompts`、原始提示词 `/runs/<run_id>/prompts/raw`（auditor、admin） | `getResearchRun`、`getResearchManifest`、`getRedactedPrompts`、`getRawPrompts` |
 | 处置 | 动作队列 | `/actions?tab=pending|running|history` | `listProposals`、`batchApprove`（只限同类型、同集群的 L 档） |
 | 处置 | 审批页 | `/actions/<proposal_id>` | `getProposal`（ProposalDetail）、`approveProposal`、`rejectProposal`、`undoProposal`、`reauthLocal` |
-| 度量 | 回放与评测 | `/eval?mode=snapshot|reconstructed&report` | 成绩单、门禁、版本趋势、成本估算、用例浏览器 |
+| 度量 | 回放与评测 | `/eval?mode=snapshot|reconstructed&report` | 成绩单（含误推送、误开 issue、误开 PR）、门禁、版本趋势、成本估算、用例浏览器；管理员另有评测候选列表（`listEvalCandidates`、`confirmEvalCandidate`、`dropEvalCandidate`，ADR 0175） |
 | 度量 | Agent 健康与成本 | `/health?cost=day|incident|model` | P0 记分卡、运行指标、成本、出境账本 |
 | 系统 | 拓扑 | `/topology?view=coverage|neighborhood|diff` | 覆盖表、未映射告警与覆盖 PR、邻域图、版本差异 |
 | 系统 | 集群 | `/clusters`、`/clusters/<id>` | reader 与 gateway 的连接、版本、准入自检、熔断开关、informer 新鲜度、状态条件 |

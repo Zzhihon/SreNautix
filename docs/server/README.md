@@ -133,7 +133,7 @@ audit:
 
 ## 终态原因码与事件时间线
 
-每个终态都带一个原因码（ADR 0172）。取值登记在 `contract/reason-codes.json`：每个原因码有阶段（notify、stage_a、research、remediation、issue、incident）、级别（info、warning、error）与中英文说明，分组对应代码与契约中的取值集合（例如研判失败类型、通知放弃的原因）。`packages/contract` 生成按阶段与按分组的字面量类型，写原因码的代码只能用这些类型；从库里读出的原因码不在登记表中时抛出。
+每个终态都带一个原因码（ADR 0172）。取值登记在 `contract/reason-codes.json`：每个原因码有阶段（notify、stage_a、research、remediation、issue、incident，以及反馈的原因码 feedback，ADR 0174）、级别（info、warning、error）与中英文说明，分组对应代码与契约中的取值集合（例如研判失败类型、通知放弃的原因）。`packages/contract` 生成按阶段与按分组的字面量类型，写原因码的代码只能用这些类型；从库里读出的原因码不在登记表中时抛出。
 
 | 终态 | 存在哪里 | 时间线条目 |
 |---|---|---|
@@ -146,6 +146,7 @@ audit:
 | 通知的送达、最后一次编辑、放弃与不推送 | `server.incident_reasons` | `notify` |
 | 事件 issue 开出、跳过与失败（`opened`、`external_root`、`rate_limit`、`failed`） | `server.incident_reasons` | `issue` |
 | 事件恢复、重开、被抑制（说明为抑制规则的原因或告警源静默）与写入失败（`persist_failed`） | `server.incident_reasons` | `incident_state` |
+| 反馈的原因码（ADR 0174） | `server.feedback.reason_code` | `feedback` |
 
 - `server.incident_reasons`（`incident` 轨道迁移 7）：事件、事件版本、阶段、原因码、说明（错误摘要等，最多 1000 字）、关联对象、时刻；`once_key` 不为空时同一事件、同一阶段、同一原因码只写一次。级别不存库，读出时按登记表。
 - `GET /v1/incidents/{ref}/timeline` 的每条记录带 `code` 与 `level`（契约 2.39.0）；没有原因码的条目（告警、变更、卡、提议等）两者都为 null。说明里有错误信息或渠道应答原文的条目按不可信文本显示。
@@ -532,6 +533,14 @@ issues:
 - **失败与重试**：GitHub 返回错误或不可达时按退避重试（30 秒起，每次翻倍，最长 30 分钟），最多 8 次，用尽后记为 `failed`（`github.issue_failed`）。最近 1 小时内重试 3 次以上或放弃的 issue 与评论使状态条显示 `ChannelDeliveryFailed`（channel `github-issues`）。
 - 主实例运行后台循环；控制台发起拓扑覆盖 PR、提交 gitops_pr 提议时在当前副本上立即尝试开一次。每次开出、跳过、放弃、评论与补 Refs 写入治理审计；开出、跳过与重试用尽另写一条终态记录（`opened`、`external_root`、`rate_limit`、`failed`），进入事件时间线。
 - 指标：`srenautix_github_issues_total{repo,outcome}`（opened、skipped_rate_limit、skipped_external、retry、failed、body_updated）、`srenautix_github_issue_comments_total{repo,outcome}`（posted、retry、failed）。
+
+### 关闭的跟踪
+
+配置了 GitHub App 时，主实例每 10 分钟刷新打开的自愈 PR（`server.remediation_changes` 中状态为 `open` 的修改）与事件 issue（`server.github_issues` 中打开、还没有记下关闭的），每个仓库每轮各最多 30 个，最久没有检查的在前（ADR 0174）：
+
+- PR 关闭且没有合并：修改记为 `rejected`，写入隐式反馈 `pr_closed`（渠道 `github`，提交者 `github:<关闭者>`，原因是关闭之前的最后一条人工评论，关联提议所属的研判）与评测候选（ADR 0175）。去重判断时读取到的关闭同样写入。
+- issue 以 not planned 关闭：记下 `closed_at` 与 `state_reason`，写入隐式反馈 `issue_not_planned` 与评测候选；以 completed 关闭只记下关闭时刻与原因。issue 的状态不变，进展评论照常追加。每次关闭写入治理审计 `github.issue_closed`。
+- 单个 PR 或 issue 的 GitHub 请求失败只记日志，下一轮再读取。这两种隐式反馈不算已绑定账号，不进入研判提示词的人工反馈，也不算事件的最新反馈。
 
 ### 覆盖缺口 issue
 

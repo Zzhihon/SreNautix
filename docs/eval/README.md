@@ -15,7 +15,7 @@
 |---|---|
 | `incident` | 根因集合、粒度、可选的机制与处置判断 |
 | `feedback` | 已绑定账号且给出根因的最新反馈 |
-| `benign` | 处置为 `ignore`，不出现 `evidence_consistent` |
+| `benign` | 处置为 `ignore`，不出现 `evidence_consistent`；重建中没有形成事件（沉默）同样正确 |
 | `abstain` | 去掉根因组件上的异常卡后，结论应弃权（`inconclusive` 或 `undetermined`），不出现 `evidence_consistent`；处置判断不计分（`--abstain` 自动派生） |
 | `scenario` | 注入的根因；维护者编写的场景单独报告 |
 
@@ -27,9 +27,11 @@
 srenautix eval --cases <目录> --config <配置> [--suite <名>] [--runs 3] [--mode snapshot|reconstructed]
                [--abstain] [--max-tokens 2000000] [--out eval/reports] [--name <报告名>] [--trace <目录>]
                [--route <路由 id>]...
-srenautix eval --compare <当前配置> <候选配置> --cases <目录> [同上] [--waive <case_id>]...
+srenautix eval --compare <当前配置> <候选配置> --cases <目录> [同上] [--waive <case_id>]... [--max-false-push <0–1>]
 srenautix eval import-seed --dir <种子目录> --cases <目录> --suite <名> --cluster-id <id>
 srenautix eval label --labels <标注> --cases <目录>
+srenautix eval candidates export --state <状态库连接文件> --since <时刻> [--until <时刻>] --out <文件>
+srenautix eval label merge --candidates <文件> --labels <标注>
 srenautix eval export --labels <标注> --cases <目录> --config <配置> [--state <状态库连接文件>] [--only <标注 id>]...
 srenautix eval reconstruct --labels <标注> --cases <目录> --config <配置> [--runs 3] [--max-tokens N]
                            [--repo <GitOps 仓库的本地克隆>] [--discovery-only] [--only <标注 id>]... [--out] [--name]
@@ -90,10 +92,29 @@ budget: { call_timeout_seconds: 90 }
 | 覆盖率 / 选择性准确率 | 不弃权的运行比例 / 不弃权的运行中 top-1 命中的比例 |
 | 处置准确率 | 有处置标准答案的运行中处置正确的比例 |
 | 良性误报 | benign 用例中出现 `evidence_consistent` 的比例 |
+| 误推送 | benign 用例的运行中，事件按通知规则会推送新消息的比例（下文"健康场景"） |
+| 误开 issue | benign 用例的运行中，处置为 escalate，或处置为 act 而没有提议的比例 |
+| 误开 PR | benign 用例的运行中，结论 likely 及以上、经过运行级准入之后仍有修复模板适用的比例；标注的标准修复是 alert_rule 时 alert_rule 类的模板不算。只有重建评测给出 |
 | 结构化输出失败 | 修复阶梯走到"只出确定性报告"的运行比例 |
 | 可靠性表 | 每个结论档位中正确的比例；`evidence_consistent` 的下界低于 85% 时标记降级 |
 
-置信区间：聚类自助法，用例为聚类，2000 次，固定种子。门禁：配对比较，基线 pass^k 通过、候选不通过的用例必须为零或逐条豁免；按用例正确率差的单侧 90% 下界不低于 −10 个百分点（n < 100）或 −5 个百分点（n ≥ 100）。
+置信区间：聚类自助法，用例为聚类，2000 次，固定种子。门禁：配对比较，基线 pass^k 通过、候选不通过的用例必须为零或逐条豁免；按用例正确率差的单侧 90% 下界不低于 −10 个百分点（n < 100）或 −5 个百分点（n ≥ 100）；给出 `--max-false-push` 时候选在配对用例上的误推送不超过上限（默认不设；设了上限却没有带推送判定的良性运行时报错）。
+
+### 健康场景
+
+取舍见 ADR 0175。
+
+- benign 标注在重建中没有形成事件时记为沉默（运行记录的 `state` 为 `silent`）：没有研判、没有模型调用，算作正确，计入 pass@1 与 pass^k；不计处置，不计入覆盖率、无法判定、选择性准确率与结构化输出失败。
+- 误推送、误开 issue、误开 PR 只对 benign 用例计算，沉默的运行计入分母、不计入分子。
+- 推送判定与 server 的通知规则相同：严重度在推送范围内、没有被抑制、阶段 A 不是计划内退役、不是没有业务影响的外部上游（外部上游按这次运行的研判根因分类）。重建评测取重建包在分析时刻的告警、拓扑与其他事件；快照评测在评测配置有 `reconstruct` 部分时按快照判断（只有快照里的事件与成员告警），没有这一部分时不判断，这些运行不计入误推送的分母。
+- 推送规则写在评测配置的 `reconstruct.notify`，与 server 的 `notify.severities`、`notify.digest` 同一写法与默认值；业务影响告警取 `reconstruct.business_impact_alerts`。
+
+## 评测候选
+
+取舍见 ADR 0175。反馈的原因码表示事件本身不需要处理（`false_positive`、`not_actionable`、`known_issue`、`planned_change`、`transient_self_resolved`、`worse_than_baseline`，建议 benign）、`wrong_fix`、关闭且没有合并的自愈 PR、以 not planned 关闭的事件 issue 与控制台的"加入评测"在 server 上生成候选，同一事件同一来源一个。管理员在控制台评测页确认（选定类型、根因、处置）或放弃。
+
+- `eval candidates export`：以只读会话读取这段时间内生成、没有放弃的候选；确认的写成完整标注（id `candidate:<候选 id>`，窗口为首次触发之前 15 分钟到结束之后 5 分钟，分析时刻为研判开始的时刻，`fault_alerts` 为仍在事件里的成员告警的告警名与身份标签，`evidence` 写明来源），待确认的列在 `pending` 一节。每条标注带集群。
+- `eval label merge`：只合并集群与标注文件相同的标注，id 已存在的不改动；合并后按标注 schema 校验全文件，不通过时不写入；原有的注释与格式保留。标注文件仍然只由部署方本地维护。
 
 ## 重建评测与三个环节的度量
 
@@ -114,6 +135,9 @@ reconstruct:
   group_within_seconds: 120
   step_seconds: 30
   novelty: { timeout: 120s }                                    # 证据基线，键与 server 的 stage_a.novelty 相同
+  notify:                                                       # 推送规则（误推送用），与 server 的 notify 同一写法与默认值
+    severities: [critical, warning]
+    digest: { external_roots: { enabled: true, components: [] } }
 ```
 
 状态库连接文件（JSON）：`{"host": …, "port": 5432, "database": …, "user": …, "password_file": …, "ssl_mode": "require"}`。会话设为只读，连接后核对。
