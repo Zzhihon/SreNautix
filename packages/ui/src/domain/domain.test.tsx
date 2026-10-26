@@ -432,8 +432,18 @@ describe('时间线', () => {
             text: 'KubePodCrashLooping app/gateway',
             ref: null,
             untrusted: false,
+            code: null,
+            level: null,
           },
-          { at: '2026-10-19T06:18:30Z', kind: 'change', text: '<b>deploy</b> by **bot**', ref: null, untrusted: true },
+          {
+            at: '2026-10-19T06:18:30Z',
+            kind: 'change',
+            text: '<b>deploy</b> by **bot**',
+            ref: null,
+            untrusted: true,
+            code: null,
+            level: null,
+          },
         ]}
       />,
     );
@@ -454,6 +464,8 @@ describe('时间线', () => {
             text: 'argocd gitops_sync：bump image',
             ref: 'argocd:1',
             untrusted: true,
+            code: null,
+            level: null,
             change_link: {
               change_id: 'argocd:1',
               grade: 'high',
@@ -468,6 +480,8 @@ describe('时间线', () => {
             text: 'github config：tune',
             ref: 'github:2',
             untrusted: true,
+            code: null,
+            level: null,
             change_link: {
               change_id: 'github:2',
               grade: 'low',
@@ -481,5 +495,55 @@ describe('时间线', () => {
     );
     expect(screen.getByText('强关联 · 作用在告警的组件上 · 前置 Job 访问的组件 · 回退')).toBeTruthy();
     expect(screen.getByText('弱关联 · 同一命名空间')).toBeTruthy();
+  });
+
+  it('终态记录显示原因码与级别，warning 与 error 的记录按级别着色（ADR 0172）', () => {
+    renderUi(
+      <TimelineLane
+        from={NOW - 3_600_000}
+        to={NOW}
+        items={[
+          {
+            at: '2026-10-19T06:18:00Z',
+            kind: 'stage_a_missing',
+            text: '阶段 A 补跑 3 次仍然失败，当前版本没有报告',
+            ref: null,
+            untrusted: false,
+            code: 'stage_a_missing',
+            level: 'error',
+          },
+          {
+            at: '2026-10-19T06:19:00Z',
+            kind: 'notify',
+            text: '不推送：事件被抑制',
+            ref: null,
+            untrusted: false,
+            code: 'withheld_suppressed',
+            level: 'info',
+          },
+          {
+            at: '2026-10-19T06:20:00Z',
+            kind: 'research_ended',
+            text: '入队时跳过，只出阶段 A：该事件 6 小时内已研判 3 次',
+            ref: 'r1',
+            untrusted: false,
+            code: 'capped',
+            level: 'warning',
+          },
+        ]}
+      />,
+    );
+    expect(screen.getByText('stage_a_missing').closest('[data-tone]')?.getAttribute('data-tone')).toBe('bad');
+    expect(screen.getByText('withheld_suppressed').closest('[data-tone]')?.getAttribute('data-tone')).toBe('neutral');
+    const kinds = [...document.querySelectorAll('li > [data-tone]')].map((e) => [
+      e.textContent,
+      e.getAttribute('data-tone'),
+    ]);
+    expect(kinds).toEqual([
+      ['阶段 A 缺失', 'bad'],
+      ['通知', 'info'],
+      ['研判没有结论', 'warn'],
+    ]);
+    expect(screen.getByText('不推送：事件被抑制')).toBeTruthy();
   });
 });

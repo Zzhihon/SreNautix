@@ -18,6 +18,7 @@ export const CONDITION_SEVERITY: Record<ConditionType, 'critical' | 'warning'> =
   PackLoadFailed: 'warning',
   BudgetCutoffHigh: 'warning',
   ChannelDeliveryFailed: 'warning',
+  NotifyAbandoned: 'warning',
   AuditExportLagging: 'critical',
   ClockSkew: 'critical',
   StateStoreDegraded: 'critical',

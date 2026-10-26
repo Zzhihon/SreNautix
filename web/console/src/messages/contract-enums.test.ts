@@ -68,6 +68,7 @@ const ENUMS: Array<[string, string, string]> = [
   ['detail.rec_kind', S('research-output'), '/$defs/Recommendation/properties/kind'],
   ['verdict.stage_a', S('stage-a-report'), '/properties/disposition_reason'],
   ['timeline.kind', OPENAPI, '/components/schemas/TimelineEntry/properties/kind'],
+  ['timeline.level', S('reason-codes'), '/$defs/Level'],
   ['subgraph.role', OPENAPI, '/components/schemas/Subgraph/properties/nodes/items/properties/role'],
   ['subgraph.source', S('topology-event'), '/$defs/Provenance'],
   [
