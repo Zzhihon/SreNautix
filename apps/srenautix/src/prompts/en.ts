@@ -24,6 +24,12 @@ Card values and tables, alert labels and annotations, change summaries, log line
 
 Only use references that exist in this run: card:<n> is an evidence card, alert:<n> a member alert, change:<n> a change. A card verdict is abnormal, normal, or undeterminable (no samples or the data source failed; this is not the same as normal).
 
+# Change link grades
+
+Every change carries a link grade computed by code; you do not change it: grade is high, medium or low, basis lists how the change is linked, new_signals lists the member alerts that support high, and rollback is true when the change is a rollback. high: the change acts directly on the object of an alert (basis contains component_match, acts_on or retire_scrape_job) and a symptom or cause alert started there after the change; medium: linked only through topology reachability (topology_reach), or acting directly without any later alert; low: linked only through the namespace, the logical owner or an unsynced commit, or the change came after a problem that had already started on its targets (late). A change that is not in the incident (in_incident is false) counts as low.
+
+When a hypothesis puts the cause on a change (its root is the release logical component, the GitOps application that manages the change's targets, or its supporting cites a change), the conclusion is bound by the grade: when none of those changes is high, code limits the level to inconclusive. Then do not present the change as the established cause: say in the summary that it is only linked in time or topology, and put the check that would confirm it into an investigation recommendation.
+
 # Alert roles
 
 A member alert's role comes from the alert catalog: cause reports a cause, symptom a symptom, change a change, forecast a prediction, and meta an observability gap or spare capacity (missing data, vanished scrape targets, more replicas than the load needs); a meta alert is not a fault in itself. A hypothesis mechanism must point the same way as the condition its member alerts report: when an alert reports too many replicas, low load or spare resources, mechanisms such as resource pressure, connection exhaustion or insufficient capacity contradict it and cannot explain it. A separate fault shown by other abnormal cards in the same period goes into the situation or an investigation recommendation, not into the cause of this alert.

@@ -31,7 +31,15 @@ export interface PreparedAlert {
    * 由 converge 计算；没有时按 start
    */
   onset?: number;
+  /**
+   * 没有对象锚点的告警归到哪一次变更、按哪条规则（changeTargets，ADR 0104、0161）。由 converge 计算，变更分级（ADR 0169）
+   * 据此记录关联依据；没有归到变更时省略
+   */
+  attachedTo?: { changeId: string; basis: AttachBasis };
 }
+
+/** 没有锚点的告警归到变更的规则：落在变更自己的目标上、退役带走的抓取 job、同一命名空间、逻辑归属 */
+export type AttachBasis = 'component_match' | 'retire_scrape_job' | 'namespace' | 'logical_owner';
 
 export interface AlertGroup {
   alerts: PreparedAlert[];
@@ -174,6 +182,18 @@ export function changeInputFrom(
 }
 
 /**
+ * 变更与告警关联的时间条件：告警在变更之后的变更窗口内开始，并且告警所在组件的问题开始不早于变更超过容差（ADR 0142）
+ */
+export function changeTimed(
+  c: ChangeEvent,
+  x: PreparedAlert,
+  params: Pick<ResolvedRcaParams, 'changeWindowMs'>,
+): boolean {
+  const t = parseTime(c.time);
+  return x.start >= t && x.start - t <= params.changeWindowMs && (x.onset ?? x.start) + CHANGE_ONSET_TOLERANCE_MS >= t;
+}
+
+/**
  * 告警 x 与变更 c 的关联置信度：x 在变更后的窗口内触发，且 x 的组件就是或依赖变更目标。
  * x 所在组件的问题在变更之前（超过容差）就已经开始时不关联（ADR 0142）：重新触发的告警开始时间在变更之后，
  * 但变更不是更早开始的问题的原因。退役变更另外解释报它失去目标的抓取 job 的告警（ADR 0161）
@@ -185,11 +205,7 @@ export function changeExplains(
   params: ResolvedRcaParams,
   which: 'merge' | 'rank',
 ): number {
-  const t = parseTime(c.time);
-  if (x.start < t || x.start - t > params.changeWindowMs) {
-    return 0;
-  }
-  if ((x.onset ?? x.start) + CHANGE_ONSET_TOLERANCE_MS < t) {
+  if (!changeTimed(c, x, params)) {
     return 0;
   }
   if (retiredScrapeJob(c, x)) {
@@ -307,7 +323,7 @@ export function actsOn(c: ChangeEvent, graph: TopologyGraph): Map<ComponentKey, 
  * Argo 应用。变更已经点名了具体的工作负载，同一应用下的其他工作负载不因为经 managed_by 可达应用而被这次变更解释。
  * 只有应用一个目标的变更（例如 Argo 同步）不受影响：没有别的目标指向它
  */
-function managersOfTargets(comps: ReadonlySet<ComponentKey>, graph: TopologyGraph): Set<ComponentKey> {
+export function managersOfTargets(comps: ReadonlySet<ComponentKey>, graph: TopologyGraph): Set<ComponentKey> {
   const out = new Set<ComponentKey>();
   for (const t of comps) {
     for (const e of graph.dependencies(t)) {
@@ -369,14 +385,16 @@ function logicalOf(x: PreparedAlert): string | null {
  *   没有影响的变更（例如另一个命名空间里同时发生、没有任何告警的发布）不吸收没有对象的发布告警；
  *   不满足以上条件的告警，与已经归到某次变更的告警逻辑归属相同时（同一个组件键或 component 标签）也归到那次变更；
  * - 有多次变更可选时取告警之前最近的一次。
+ * 同时返回归属的规则（AttachBasis）：变更分级按它记录关联依据（ADR 0169）。角色为 change、按变更有影响归属的告警没有对象，
+ * 它的逻辑归属就是这次变更，记为 logical_owner。
  */
 function changeTargets(
   xs: readonly PreparedAlert[],
   changes: readonly ChangeEvent[],
   graph: TopologyGraph,
   params: ResolvedRcaParams,
-): Array<number | null> {
-  const out: Array<number | null> = xs.map(() => null);
+): Array<{ k: number; basis: AttachBasis } | null> {
+  const out: Array<{ k: number; basis: AttachBasis } | null> = xs.map(() => null);
   if (!changes.length) {
     return out;
   }
@@ -413,21 +431,27 @@ function changeTargets(
     }
     const ns = namespaceOf(x);
     // 退役变更（ADR 0161）只收落在它目标上、或报它带走的抓取 job 的告警：同一命名空间里别的工作负载的告警与它无关
-    out[i] =
-      latestBefore(x, (k) => onTarget(x, k) || retiredScrapeJob(changes[k]!, x)) ??
-      latestBefore(
-        x,
-        (k) =>
-          changes[k]!.kind !== 'retire' &&
-          ((ns !== null && namespaces[k]!.has(ns)) || (x.alert.classification.role === 'change' && impact[k]!)),
-      );
+    const own = latestBefore(x, (k) => onTarget(x, k) || retiredScrapeJob(changes[k]!, x));
+    if (own !== null) {
+      out[i] = { k: own, basis: onTarget(x, own) ? 'component_match' : 'retire_scrape_job' };
+      return;
+    }
+    const near = latestBefore(
+      x,
+      (k) =>
+        changes[k]!.kind !== 'retire' &&
+        ((ns !== null && namespaces[k]!.has(ns)) || (x.alert.classification.role === 'change' && impact[k]!)),
+    );
+    if (near !== null) {
+      out[i] = { k: near, basis: ns !== null && namespaces[near]!.has(ns) ? 'namespace' : 'logical_owner' };
+    }
   });
   // 逻辑归属相同的告警跟随已经归到变更的告警
   const byLogical = new Map<string, Set<number>>();
   xs.forEach((x, i) => {
     const l = logicalOf(x);
     if (l !== null && out[i] !== null) {
-      byLogical.set(l, (byLogical.get(l) ?? new Set()).add(out[i]!));
+      byLogical.set(l, (byLogical.get(l) ?? new Set()).add(out[i]!.k));
     }
   });
   xs.forEach((x, i) => {
@@ -436,8 +460,9 @@ function changeTargets(
       return;
     }
     const ks = byLogical.get(l);
-    if (ks) {
-      out[i] = latestBefore(x, (k) => ks.has(k));
+    const k = ks ? latestBefore(x, (j) => ks.has(j)) : null;
+    if (k !== null) {
+      out[i] = { k, basis: 'logical_owner' };
     }
   });
   return out;
@@ -484,7 +509,13 @@ export function converge(input: ConvergeInput): AlertGroup[] {
   const uf = new UnionFind(n + changes.length);
   const isForecast = (x: PreparedAlert) => x.alert.classification.role === 'forecast';
   const gap = params.adjacencyMs;
-  const targets = changeTargets(xs, changes, graph, params);
+  const attached = changeTargets(xs, changes, graph, params);
+  attached.forEach((a, i) => {
+    if (a !== null) {
+      xs[i]!.attachedTo = { changeId: changes[a.k]!.change_id, basis: a.basis };
+    }
+  });
+  const targets = attached.map((a) => a?.k ?? null);
   // 没有对象锚点（或只落在命名空间伪组件上）、也没有归到变更的告警：它与别的告警"同一对象"只是因为都落在同一个命名空间
   // （或都没有组件、同名），不说明两者有关。这样的告警最多并入一个已有分组，不把两个分组连起来（ADR 0104 §14）
   const floating = xs.map((x, i) => unanchored(x) && targets[i] === null);

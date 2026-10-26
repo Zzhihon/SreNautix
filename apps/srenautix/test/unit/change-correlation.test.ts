@@ -331,6 +331,50 @@ describe('阶段 A 时间线与通知（ADR 0161）', () => {
     );
   });
 
+  it('阶段 A 时间线的变更行带上关联分级、依据、回退与命中的仓库路径（ADR 0169）', () => {
+    const input = releaseRolloutInput();
+    const [up, back] = input.incident.changes;
+    const fromGit = {
+      ...commit('83e3648', '2026-10-20T15:30:00.000Z', ['Deployment:acme-prod/web']),
+      paths: ['apps/web/', 'shared/'],
+    };
+    const inc = {
+      ...input.incident,
+      changes: [up!, back!, fromGit],
+      change_links: [
+        {
+          change_id: up!.change_id,
+          grade: 'medium' as const,
+          basis: ['topology_reach' as const],
+          new_signals: [],
+          rollback: false,
+        },
+        {
+          change_id: back!.change_id,
+          grade: 'high' as const,
+          basis: ['component_match' as const, 'acts_on' as const],
+          new_signals: ['a'],
+          rollback: true,
+        },
+        {
+          change_id: fromGit.change_id,
+          grade: 'low' as const,
+          basis: ['namespace' as const],
+          new_signals: [],
+          rollback: false,
+        },
+      ],
+    };
+    const lines = timeline(inc, [], [])
+      .filter((x) => x.kind === 'change')
+      .map((x) => x.text.slice(x.text.indexOf('；') + 1));
+    expect(lines).toEqual([
+      '关联分级 low（依据：namespace）；命中路径 apps/web/、shared/',
+      '关联分级 medium（依据：topology_reach）',
+      '关联分级 high（依据：component_match、acts_on；回退）',
+    ]);
+  });
+
   it('消息：计划内退役写成"计划内退役 <提交>"并链接到提交；未同步的提交合成一句', () => {
     const input = releaseRolloutInput();
     const changes = [

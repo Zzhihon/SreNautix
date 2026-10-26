@@ -160,8 +160,15 @@ export function timeline(incident: Incident, alerts: Alert[], cards: EvidenceRes
     }
   });
   incident.changes.forEach((c, k) => {
-    // 计划内的退役与尚未同步的提交写在后面（ADR 0161）
+    // 计划内的退役与尚未同步的提交写在后面（ADR 0161）；之后是关联分级与依据、命中的仓库路径（ADR 0169）
     const notes = changeNotes(c).map((n) => n.text);
+    const link = incident.change_links?.find((l) => l.change_id === c.change_id);
+    if (link) {
+      notes.push(`关联分级 ${link.grade}（依据：${link.basis.join('、')}${link.rollback ? '；回退' : ''}）`);
+    }
+    if (c.paths?.length) {
+      notes.push(`命中路径 ${c.paths.join('、')}`);
+    }
     out.push({
       at: c.time,
       kind: 'change',

@@ -1,4 +1,12 @@
-import type { EvidenceResult, Feedback, FeedbackCreate, Incident, Proposal, StageAReport } from '@srenautix/contract';
+import type {
+  ChangeLink,
+  EvidenceResult,
+  Feedback,
+  FeedbackCreate,
+  Incident,
+  Proposal,
+  StageAReport,
+} from '@srenautix/contract';
 import { validatorFor } from '@srenautix/contract';
 import { NAMESPACE_KIND } from '@srenautix/core';
 import type { FastifyInstance } from 'fastify';
@@ -384,7 +392,14 @@ export function registerIncidentRoutes(app: FastifyInstance, d: IncidentRouteDep
 
 /** 时间线（一条泳道）：告警、变更、异常卡、合并与拆分、阶段 A、研判、提议、执行、反馈。 */
 export async function timelineOf(pool: pg.Pool, row: IncidentRow) {
-  const out: Array<{ at: string; kind: string; text: string; ref: string | null; untrusted: boolean }> = [];
+  const out: Array<{
+    at: string;
+    kind: string;
+    text: string;
+    ref: string | null;
+    untrusted: boolean;
+    change_link?: ChangeLink;
+  }> = [];
   const inc = row.body;
   const alerts = await alertsById(
     pool,
@@ -402,13 +417,17 @@ export async function timelineOf(pool: pg.Pool, row: IncidentRow) {
       out.push({ at: a.ends_at, kind: 'alert_resolved', text: a.alertname, ref: a.alert_id, untrusted: true });
     }
   }
+  // 变更带上与事件关联的分级与依据（ADR 0169）；契约 2.37.0 之前算出的事件没有
+  const links = new Map((inc.change_links ?? []).map((l) => [l.change_id, l]));
   for (const c of inc.changes) {
+    const link = links.get(c.change_id);
     out.push({
       at: c.time,
       kind: 'change',
       text: `${c.source} ${c.kind}：${c.summary}`,
       ref: c.change_id,
       untrusted: true,
+      ...(link ? { change_link: link } : {}),
     });
   }
   for (const a of inc.aliases) {

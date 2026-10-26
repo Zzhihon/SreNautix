@@ -6,7 +6,18 @@
 // 按访问边的置信度打折，排在变更本身之后。
 // 晚于自己目标上已经开始的问题（加容差）的变更不参与排序（ADR 0142）。
 // 退役变更的候选是管理被退役工作负载的应用；只因"已合并、尚未同步"在分组里的提交只让未同步的应用成为候选（ADR 0161）。
-import type { AlertRole, ChangeEvent, ComponentKey, EntityRef, IncidentRoot, RootCandidate } from '@srenautix/contract';
+// 近期变更一项按变更与事件关联的分级取值：high 1、medium 0.5、low 0.2；作用对象再乘访问边的置信度；
+// 有 change 角色告警的候选取 1（ADR 0169）。
+import type {
+  AlertRole,
+  ChangeEvent,
+  ChangeLink,
+  ComponentKey,
+  EntityRef,
+  IncidentRoot,
+  RootCandidate,
+} from '@srenautix/contract';
+import { CHANGE_GRADE_WEIGHT, changeLinks } from './change-grade.js';
 import {
   actsOn,
   changeComponents,
@@ -36,6 +47,8 @@ export interface RankInput {
   params: ResolvedRcaParams;
   /** 沉默根因探测卡的结果（见 silentRootTargets） */
   probes?: readonly ProbeResult[];
+  /** 分组变更的关联分级（changeLinks）；省略时按分组计算 */
+  links?: readonly ChangeLink[];
 }
 
 export interface RankedCandidate extends RootCandidate {
@@ -79,6 +92,8 @@ export function rankRoot(input: RankInput): Ranking {
   // 晚于自己目标上的问题（超过容差）的变更不参与排序（ADR 0142）：问题开始之后才发生的变更不是它的原因，不产生候选，
   // 也不给变更先验与近期变更。变更仍在分组里（事件的相关变更照常列出）
   const changes = group.changes.filter((c) => !lateChange(c, group.alerts, graph, params));
+  const grades = new Map((input.links ?? changeLinks(group, graph, params)).map((l) => [l.change_id, l.grade]));
+  const gradeWeight = (c: ChangeEvent) => CHANGE_GRADE_WEIGHT[grades.get(c.change_id) ?? 'low'];
 
   for (const x of group.alerts) {
     if (x.component !== null && (role(x) === 'cause' || role(x) === 'change')) {
@@ -185,12 +200,13 @@ export function rankRoot(input: RankInput): Ranking {
     if (d.probe || d.source === 'hub') priors.push(params.rolePriors.cause);
     const rolePrior = priors.length > 0 ? Math.max(...priors) : 0;
     const recent = (c: ChangeEvent) => parseTime(c.time) >= groupStart - params.changeWindowMs;
-    const recentChange =
-      d.roles.has('change') || d.changes.some(recent)
-        ? 1
-        : d.actedOnBy.some((a) => recent(a.change))
-          ? round(Math.max(...d.actedOnBy.filter((a) => recent(a.change)).map((a) => a.confidence)))
-          : 0;
+    const recentChange = round(
+      Math.max(
+        d.roles.has('change') ? 1 : 0,
+        ...d.changes.filter(recent).map(gradeWeight),
+        ...d.actedOnBy.filter((a) => recent(a.change)).map((a) => gradeWeight(a.change) * a.confidence),
+      ),
+    );
     const chronic = d.own.length === 0 ? 0 : d.own.filter((x) => x.alert.classification.chronic).length / d.own.length;
     const w = params.weights;
     const score =

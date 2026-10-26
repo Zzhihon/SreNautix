@@ -76,9 +76,9 @@ describe('GitHub 变更源同步', () => {
     expect(await svc.syncOnce(NOW)).toEqual({ gitops: 2 });
     expect(kicks).toBe(1);
     const got = await changesInWindow(db.server, 'c1', new Date(NOW - 60 * MIN), new Date(NOW));
-    expect(got.map((c) => [c.summary, c.kind, c.targets])).toEqual([
-      ['scale api to 3', 'gitops_sync', ['Deployment:shop/api']],
-      ['debug logging', 'config', ['ConfigMap:shop/api-config', 'Deployment:shop/api']],
+    expect(got.map((c) => [c.summary, c.kind, c.targets, c.paths])).toEqual([
+      ['scale api to 3', 'gitops_sync', ['Deployment:shop/api'], ['apps/shop/api/']],
+      ['debug logging', 'config', ['ConfigMap:shop/api-config', 'Deployment:shop/api'], ['apps/shop/config/']],
     ]);
     expect(got[0]).toMatchObject({
       change_id: `gitops:${rollout}`,

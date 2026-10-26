@@ -95,7 +95,9 @@ describe('停在前置步骤的发布（ADR 0140）', () => {
     const cands = inc[0]!.ranking.candidates;
     expect(cands[0]!.component).toBe(MIGRATE);
     const db = cands.find((c) => c.component === DB);
-    expect(db).toMatchObject({ source: 'change', terms: { role_prior: 0.6, recent_change: 0.6 } });
+    // Job 自成的变更只有 change 角色的告警、没有新信号，分级为 medium（ADR 0169）：作用对象的近期变更为 0.5 × 0.6
+    expect(inc[0]!.links.map((l) => l.grade)).toEqual(['medium']);
+    expect(db).toMatchObject({ source: 'change', terms: { role_prior: 0.6, recent_change: 0.3 } });
     expect(db!.score).toBeLessThan(cands[0]!.score);
     expect(cands.map((c) => c.component)).not.toContain(DNS);
     expect(inc[0]!.ranking.root.component).not.toBe(DB);

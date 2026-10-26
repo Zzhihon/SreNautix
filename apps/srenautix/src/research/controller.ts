@@ -16,6 +16,7 @@ import {
   type NextCheck,
   type QueryRunner,
 } from './checks.js';
+import { changeCap } from './change-cap.js';
 import type { EvidenceBook } from './evidence.js';
 import { deriveDisposition } from './disposition.js';
 import { incidentBook, incidentCorpus, incidentSupplement } from './incident.js';
@@ -272,7 +273,14 @@ export async function runStageB(input: ResearchRunInput, env: ResearchEnv, sink:
       rc.stageA.required_evidence,
       book.allCards.map((c) => c.result),
     );
-    const ladder = requiredCap(judgeLadder(ledger, v.chosen, rc.incident, ledger.list().length > 0, v.chosenBy), gaps);
+    // 档位的两项限制：最低取证集合（ADR 0153），以及把根因归到变更上时变更的关联分级（ADR 0169）
+    const ladder = changeCap(
+      requiredCap(judgeLadder(ledger, v.chosen, rc.incident, ledger.list().length > 0, v.chosenBy), gaps),
+      v.chosen,
+      rc.incident,
+      book,
+      rc.subgraph,
+    );
     notes.push(...ladder.notes);
     const undeterminedReason =
       v.undeterminedReason ?? (gaps.length ? `最低取证集合没有覆盖：${gaps.join('；')}`.slice(0, 400) : null);

@@ -308,7 +308,7 @@ describe('SQL 审计表变更源（ADR 0151）', () => {
     expect(line).toEqual({
       at: disable.time,
       kind: 'change',
-      text: 'app-db runtime_config export-targets/dst-a export_target.update',
+      text: 'app-db runtime_config export-targets/dst-a export_target.update；关联分级 high（依据：component_match）',
       ref: 'change:1',
     });
     // 研判上下文：这次停用作为首要假设列出

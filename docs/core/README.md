@@ -11,8 +11,9 @@ SreNautix 的确定性核心（AGPL-3.0-or-later），纯 TypeScript，不依赖
 | 实体解析 | `alertEntityCandidate`、`EntityResolver`、`ksmPodFacts` | 标签 → 实体候选；按 informer、24 小时墓碑、kube-state-metrics 历史的顺序解析出 uid 与组件 |
 | 拓扑 | `buildKubeTopology`、`TopologyStore`、`TopologyGraph`、`ksmTopologyIntervals` | 由 Kubernetes 对象构建快照；事件溯源与按时刻查询；可达、组件、深度、子图；从 kube-state-metrics 历史重建 |
 | 收敛 | `converge`、`prepareAlerts` | 告警与变更 → 分组 |
-| 根因排序 | `rankRoot`、`silentRootTargets` | 候选、得分、分层、歧义；沉默根因的探测目标 |
-| 事件 | `computeIncidents`、`reconcileIncidents`、`resolveIncidentRef`、`incidentLabel` | 确定性重算；与已持久化的事件对账（合并、拆分、别名、版本）；按 id、标签或别名解析 |
+| 变更关联分级 | `changeLinks`、`gradeChange`、`isRollback`、`CHANGE_GRADE_WEIGHT` | 分组里每个变更的分级（high、medium、low）、依据、支撑 high 的成员告警与回退（[ADR 0169](../adr/0169-change-link-grades.md)） |
+| 根因排序 | `rankRoot`、`silentRootTargets` | 候选、得分、分层、歧义；近期变更按分级取值（high 1、medium 0.5、low 0.2）；沉默根因的探测目标 |
+| 事件 | `computeIncidents`、`reconcileIncidents`、`resolveIncidentRef`、`incidentLabel` | 确定性重算（分组、分级、排序）；与已持久化的事件对账（合并、拆分、别名、版本），分级写进 `Incident.change_links`；按 id、标签或别名解析 |
 | 规范化与指纹 | `jcs`、`paramsHash`、`proposalIdempotencyKey`、`evidenceFingerprint`、`observeFingerprint` | jcs-sha256-v1（与审批断言一致）；提议幂等键；带迟滞的证据指纹 |
 | 参数 | `DEFAULT_RCA_PARAMS`、`resolveRcaParams` | `rca-params` 的默认值与按层叠加 |
 

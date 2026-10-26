@@ -111,6 +111,8 @@ export class GitHubChangesAdapter {
         link: item.html_url,
         targets: [...new Set(hits.flatMap((h) => h.targets))].sort(),
         summary: subject.slice(0, 500),
+        // 命中的路径前缀（契约 2.37.0）：展示目标从哪些路径映射而来（ADR 0169）
+        paths: [...new Set(hits.map((h) => h.prefix))],
       });
     }
     this.files = seen;

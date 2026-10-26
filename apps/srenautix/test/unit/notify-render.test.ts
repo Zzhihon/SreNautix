@@ -448,6 +448,37 @@ describe('事件报告：2026-10-20 发布事故（黄金用例）', () => {
     expect(body).toContain('_【模型】机制：');
     expect(body).toMatch(/\[发布 rel-9a8c9cd6\]\(https:\/\/argocd\.example\.test\/applications\/argocd\/acme-prod\)/);
   });
+
+  it('变更带关联分级与依据；"回退到"读 change_links 的 rollback（ADR 0169）', () => {
+    const input = releaseRolloutInput();
+    const [up, back] = input.incident.changes;
+    const graded = (rollback: boolean): ComposeInput => ({
+      ...input,
+      incident: {
+        ...input.incident,
+        change_links: [
+          { change_id: up!.change_id, grade: 'medium', basis: ['topology_reach'], new_signals: [], rollback: false },
+          {
+            change_id: back!.change_id,
+            grade: 'high',
+            basis: ['component_match'],
+            new_signals: [input.incident.members[0]!.alert_id],
+            rollback,
+          },
+        ],
+      },
+    });
+    const withRollback = telegramOf(graded(true));
+    const text = parsed(withRollback.payload).text;
+    expect(text).toContain('回退到 rel-fd8097cf（强关联：作用在告警的组件上） → control、worker、gateway');
+    expect(text).toContain('发布 rel-9a8c9cd6（中等关联：拓扑可达） → ');
+    const { body } = issueMarkdown(withRollback.message, '<!-- srenautix:incident=x -->', '由 SreNautix 生成');
+    expect(body).toContain('（中等关联：拓扑可达） · kubernetes rollout · ');
+    // 关联记录说这次变更不是回退时，按它写"发布"
+    const plain = parsed(telegramOf(graded(false)).payload).text;
+    expect(plain).toContain('发布 rel-fd8097cf（强关联：作用在告警的组件上） → control、worker、gateway');
+    expect(plain).not.toContain('回退到 rel-fd8097cf');
+  });
 });
 
 /** 飞书卡片中按元素顺序拼接的全部文字（标题、副标题、文本、按钮）。 */

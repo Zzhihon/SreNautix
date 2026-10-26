@@ -1,6 +1,8 @@
 import type {
   Alert,
   ChangeEvent,
+  ChangeGrade,
+  ChangeLink,
   ConsistencyDetail,
   Disposition,
   EvidenceResult,
@@ -16,7 +18,7 @@ import type {
   ResearchOutput,
   StageAReport,
 } from '@srenautix/contract';
-import { displayComponentName, displayKey, tryNodeKey } from '@srenautix/core';
+import { displayComponentName, displayKey, isRollback, tryNodeKey, type ChangeBasis } from '@srenautix/core';
 import { formatValue, type Unit } from '@srenautix/packs-sdk';
 import { parseStoredKey } from '../topology/keys.js';
 import type { Subgraph } from '../research/types.js';
@@ -190,6 +192,18 @@ const T = {
     plannedRetireWord: '计划内退役',
     pendingSyncNote: '（已合并、尚未同步）',
     pendingSyncCommits: (n: number) => `${n} 个已合并、尚未同步的提交`,
+    changeGrade: { high: '强关联', medium: '中等关联', low: '弱关联' } as Record<ChangeGrade, string>,
+    changeBasis: {
+      component_match: '作用在告警的组件上',
+      acts_on: '前置 Job 访问的组件',
+      topology_reach: '拓扑可达',
+      namespace: '同一命名空间',
+      logical_owner: '同一逻辑归属',
+      retire_scrape_job: '带走告警的抓取 job',
+      pending_sync: '尚未同步',
+      late: '晚于问题开始',
+    } as Record<ChangeBasis, string>,
+    gradeNote: (grade: string, basis: string[]) => `（${grade}${basis.length ? `：${basis.join('、')}` : ''}）`,
     and: '与',
     duringComma: '期间，',
     stop2: '。',
@@ -418,6 +432,18 @@ const T = {
     plannedRetireWord: 'planned retirement',
     pendingSyncNote: ' (merged, not synced)',
     pendingSyncCommits: (n: number) => `${n} merged commit${n === 1 ? '' : 's'} not synced`,
+    changeGrade: { high: 'strong link', medium: 'medium link', low: 'weak link' } as Record<ChangeGrade, string>,
+    changeBasis: {
+      component_match: 'acts on the alerting component',
+      acts_on: 'component accessed by a pre-step Job',
+      topology_reach: 'reachable in the topology',
+      namespace: 'same namespace',
+      logical_owner: 'same logical owner',
+      retire_scrape_job: 'removed the scrape job the alert reports',
+      pending_sync: 'not synced',
+      late: 'after the problem started',
+    } as Record<ChangeBasis, string>,
+    gradeNote: (grade: string, basis: string[]) => ` (${grade}${basis.length ? `: ${basis.join(', ')}` : ''})`,
     and: ' and ',
     duringComma: ', during which ',
     stop2: '. ',
@@ -768,21 +794,38 @@ function pathTo(sg: Subgraph, from: string, to: string): Array<{ from: string; t
   return out;
 }
 
-/** 回退：版本退回到更早一次变更之前的版本（更早的变更从 c.revision 改到了 c.previous_revision） */
-function isRollback(c: ChangeEvent, all: readonly ChangeEvent[]): boolean {
-  return (
-    c.revision !== null &&
-    !!c.previous_revision &&
-    all.some((o) => ms(o.time) < ms(c.time) && o.revision === c.previous_revision && o.previous_revision === c.revision)
+/** 事件对这个变更的关联记录（ADR 0169）；契约 2.37.0 之前算出的事件没有 */
+function linkOf(inc: Incident, c: ChangeEvent): ChangeLink | null {
+  return inc.change_links?.find((l) => l.change_id === c.change_id) ?? null;
+}
+
+/**
+ * 回退：读事件的关联记录（core 的 isRollback 计算）。契约 2.37.0 之前算出的事件没有关联记录，按同一个函数
+ * 对事件的变更计算
+ */
+function rollbackOf(inc: Incident, c: ChangeEvent): boolean {
+  const link = linkOf(inc, c);
+  return link ? link.rollback : isRollback(c, inc.changes);
+}
+
+/** 变更的关联分级与依据：（强关联：作用在告警的组件上、拓扑可达）；没有关联记录时为空串 */
+function gradeNote(t: Dict, inc: Incident, c: ChangeEvent): string {
+  const link = linkOf(inc, c);
+  if (!link) {
+    return '';
+  }
+  return t.gradeNote(
+    t.changeGrade[link.grade],
+    link.basis.map((b) => t.changeBasis[b]),
   );
 }
 
 const DEPLOY_KINDS: ReadonlySet<string> = new Set(['rollout', 'gitops_sync', 'ci_deploy']);
 
 /** 变更的动词：发布、回退到、计划内退役与退役（ADR 0161），其余为变更类型 */
-function changeWord(t: Dict, c: ChangeEvent, all: readonly ChangeEvent[]): string {
+function changeWord(t: Dict, c: ChangeEvent, inc: Incident): string {
   if (DEPLOY_KINDS.has(c.kind) && c.revision) {
-    return isRollback(c, all) ? t.rollbackWord : t.rolloutWord;
+    return rollbackOf(inc, c) ? t.rollbackWord : t.rolloutWord;
   }
   if (c.kind === 'retire') {
     return c.planned_by?.length ? t.plannedRetireWord : t.retireWord;
@@ -804,9 +847,9 @@ function changeSubject(c: ChangeEvent): string | null {
 /** 已合并、尚未同步的提交（ADR 0161） */
 const pendingSync = (c: ChangeEvent) => (c.pending_sync?.length ?? 0) > 0;
 
-function changeTitle(t: Dict, c: ChangeEvent, all: readonly ChangeEvent[]): string {
+function changeTitle(t: Dict, c: ChangeEvent, inc: Incident): string {
   const subject = changeSubject(c);
-  return `${changeWord(t, c, all)}${subject ? ` ${subject}` : ''}${pendingSync(c) ? t.pendingSyncNote : ''}`;
+  return `${changeWord(t, c, inc)}${subject ? ` ${subject}` : ''}${pendingSync(c) ? t.pendingSyncNote : ''}`;
 }
 
 /**
@@ -848,7 +891,7 @@ function topologySection(x: Ctx, sg: Subgraph | null, root: string | null, alert
     text([
       ...rootChanges.each.flatMap((c) => [
         P(`${t.change} `),
-        C(changeTitle(t, c, x.inc.changes)),
+        C(changeTitle(t, c, x.inc)),
         P(`（${clock(c.time, x.day)}）⇒ `),
       ]),
       ...(rootChanges.pending ? [...rootChanges.pending, P('⇒ ')] : []),
@@ -1312,7 +1355,9 @@ function evidenceBlocks(
             P(' '),
             C(clock(c.time, x.day)),
             P(' '),
-            href ? L(changeTitle(t, c, x.inc.changes), href) : B(changeTitle(t, c, x.inc.changes)),
+            href ? L(changeTitle(t, c, x.inc), href) : B(changeTitle(t, c, x.inc)),
+            // 关联分级与依据（ADR 0169）
+            P(gradeNote(t, x.inc, c)),
             P(` · ${c.source} ${c.kind} · `),
             P(c.summary),
             // 计划内退役的依据提交（ADR 0161）
@@ -1446,7 +1491,7 @@ export function composeMessage(i: ComposeInput): { message: NotifyMessage; targe
       ...joinRuns(
         [
           ...split.each.map((c) => [
-            P(`${changeWord(t, c, inc.changes)} `),
+            P(`${changeWord(t, c, inc)} `),
             C(changeSubject(c) ?? c.kind),
             P(`（${clock(c.time, day)}）`),
           ]),
@@ -1556,7 +1601,8 @@ export function composeMessage(i: ComposeInput): { message: NotifyMessage; targe
       key: true,
       runs: [
         P(`${t.change} `),
-        href ? L(changeTitle(t, c, inc.changes), href) : C(changeTitle(t, c, inc.changes)),
+        href ? L(changeTitle(t, c, inc), href) : C(changeTitle(t, c, inc)),
+        P(gradeNote(t, inc, c)),
         P(' → '),
         P(
           c.targets

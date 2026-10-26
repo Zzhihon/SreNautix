@@ -124,8 +124,8 @@ audit:
    配置了 `ingest.reconcile.alertmanager_url` 时，两轮完整对账之间每 `additions_interval`（默认 `5s`，`0s` 关闭）读一次 Alertmanager 的活动告警，只补写本地还没有的触发中告警（ADR 0160）。这一步不读状态库与规则引擎，不结束告警；本地有哪些告警取最近一轮完整对账的结果，完整对账成功之前、以及不是主实例时不轮询。告警源给出的开始时刻到写入的时长见 `srenautix_ingest_delay_seconds{path}`（`full` 完整对账，`fast` 快速轮询），其中包含规则引擎自身的回溯：vmalert 把开始时刻记为求值时刻减去 `-rule.evalDelay`（默认 30 秒）再按组间隔对齐，告警在 Alertmanager 中出现时已经比开始时刻晚 30 秒到一个组间隔加 30 秒。
    每个告警记下第一次在 Alertmanager 中被看到的时刻 `alert_state.alertmanager_seen_at`（ADR 0165）：Alertmanager 或 Grafana 的 webhook 到达、完整对账或快速轮询读到 Alertmanager 应答、reader 快照的读取时刻，取最早的一次。先由规则引擎的 `ALERTS_FOR_STATE` 补写的告警没有这个时刻，之后的完整对账或快速轮询在 Alertmanager 中读到它时补上；集群状态检测器、夜莺与通用 webhook 的告警没有这个时刻。首条消息时延 `clock="alertmanager"` 从这里算起。
    对账也是接入路径：每轮完整读取成功的对账计入接入（接入源 `reconcile` 的最后到达时间与 `srenautix_ingest_last_received_timestamp_seconds{source="reconcile"}`），对账读到 Watchdog 时计为 Watchdog 到达。只用对账、不接 webhook 推送的部署因此不会误报 `IngestSilent` 与 `WatchdogMissing`；webhook 没有推送、但对账在静默阈值内成功时，`IngestSilent` 的原因为 `ReconcileOnly`（不成立）。
-2. 事件引擎用 packages/core 重算并对账事件，写入版本、成员、别名与 outbox。
-3. 每个新版本立即出阶段 A：证据卡、规则提议、确定性的处置判断，发布 `stage_a.reported`，消息就地更新（见下面的"阶段 A 与领域包"）。
+2. 事件引擎用 packages/core 重算并对账事件，写入版本、成员、别名与 outbox。事件的每个变更带关联分级（`change_links`：high、medium、low，依据与回退，ADR 0169）。
+3. 每个新版本立即出阶段 A：证据卡、规则提议、确定性的处置判断，发布 `stage_a.reported`，消息就地更新（见下面的"阶段 A 与领域包"）。时间线的变更行写"关联分级 <grade>（依据：…）"，GitHub 变更再写命中的路径前缀。
    时延从事件的计时起点算（ADR 0159）：新事件为首个成员告警的触发时刻，从已有事件拆分出的事件为拆分时刻。`srenautix_stage_a_latency_seconds{origin}` 记第一个版本的阶段 A，`origin` 为 `new` 或 `split`；拆分出的事件不计入检测延迟 `srenautix_incident_detection_seconds`。`server.stage_a_reports.first_rendered_at` 是报告第一次生成的时刻，重算只更新 `rendered_at`。
 4. 按触发原因（新事件、根因变化、严重度升高、证据指纹变化）经准入进入阶段 B 队列，worker 认领后研判；研判事件经 server 的事件流发布，消息再次更新。
 5. 提议经审批签发断言，分支 gateway 长轮询取走工单并推回执行事件。
@@ -343,7 +343,7 @@ changes:
         - { prefix: apps/shop/api/, targets: ['Deployment:shop/api'], kind: gitops_sync }
 ```
 
-- 每次同步读取分支在回看窗口内的提交（`GET /repos/{repo}/commits`，按页读取，最多 1000 个），再读取每个提交的 diff（`GET /repos/{repo}/commits/{sha}`）中改动的文件，按路径前缀映射到拓扑节点；读过的提交不重复读取。合并提交不取（与 `git log --no-merges` 相同），时间取提交时间，链接为提交在 GitHub 上的页面。
+- 每次同步读取分支在回看窗口内的提交（`GET /repos/{repo}/commits`，按页读取，最多 1000 个），再读取每个提交的 diff（`GET /repos/{repo}/commits/{sha}`）中改动的文件，按路径前缀映射到拓扑节点；读过的提交不重复读取。合并提交不取（与 `git log --no-merges` 相同），时间取提交时间，链接为提交在 GitHub 上的页面。变更的 `paths` 记命中的路径前缀（契约 2.37.0），用于展示关联依据。
 - App 需要该仓库的 Contents 只读权限。
 - 多集群时用 `cluster_id` 指定变更所属的集群，不填时为 server 的 `cluster_id`。
 - 同步只在主实例上进行；有新变更时立即重算事件。某个变更源同步失败时发布 `DatasourceUnavailable` 条件（subject `changes:<id>`），其他变更源不受影响。

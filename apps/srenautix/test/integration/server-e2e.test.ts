@@ -320,8 +320,16 @@ describe('server 端到端', () => {
     conform('/v1/incidents/{incident_ref}', 'get', inc);
     // 变更源在启动时同步：告警前 5 分钟的发布进入事件的变更列表
     expect((inc.body as unknown as { changes: Array<{ change_id: string; summary: string }> }).changes).toEqual([
-      expect.objectContaining({ change_id: `gitops:${rolloutSha}`, summary: 'roll out api v2' }),
+      expect.objectContaining({
+        change_id: `gitops:${rolloutSha}`,
+        summary: 'roll out api v2',
+        paths: ['apps/shop/api/'],
+      }),
     ]);
+    // 变更带关联分级（ADR 0169），控制台时间线的变更记录带同一条关联记录
+    const links = (inc.body as unknown as { change_links: Array<{ change_id: string; grade: string }> }).change_links;
+    expect(links).toEqual([expect.objectContaining({ change_id: `gitops:${rolloutSha}` })]);
+    expect(['high', 'medium', 'low']).toContain(links[0]!.grade);
     const byLabel = await api(
       'GET',
       `/v1/incidents/${encodeURIComponent((inc.body as unknown as { label: string }).label)}`,
@@ -330,11 +338,12 @@ describe('server 端到端', () => {
     expect((byLabel.body as unknown as { incident_id: string }).incident_id).toBe(incidentId);
     const sa = await api('GET', `/v1/incidents/${incidentId}/stage-a`, { session: true });
     conform('/v1/incidents/{incident_ref}/stage-a', 'get', sa);
-    conform(
-      '/v1/incidents/{incident_ref}/timeline',
-      'get',
-      await api('GET', `/v1/incidents/${incidentId}/timeline`, { session: true }),
+    const tl = await api('GET', `/v1/incidents/${incidentId}/timeline`, { session: true });
+    conform('/v1/incidents/{incident_ref}/timeline', 'get', tl);
+    const changeEntries = (tl.body as unknown as Array<{ kind: string; change_link?: unknown }>).filter(
+      (e) => e.kind === 'change',
     );
+    expect(changeEntries.map((e) => e.change_link)).toEqual(links);
     conform(
       '/v1/incidents/{incident_ref}/subgraph',
       'get',

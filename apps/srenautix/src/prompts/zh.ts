@@ -24,6 +24,12 @@ export const zh: PromptSet = {
 
 引用只能使用本次运行中存在的编号：card:<n> 指证据卡，alert:<n> 指成员告警，change:<n> 指变更。证据卡的判定只有三种：abnormal（异常）、normal（正常）、undeterminable（无法判定，没有样本或数据源失败，不等于正常）。
 
+# 变更的关联分级
+
+每个变更带有代码计算的关联分级，你不改变它：grade 为 high、medium 或 low，basis 是关联依据，new_signals 是支撑 high 的成员告警，rollback 为 true 表示这次变更是回退。high：变更直接作用在告警的对象上（basis 含 component_match、acts_on 或 retire_scrape_job），并且变更之后那里开始了 symptom 或 cause 告警；medium：只经拓扑可达（topology_reach）关联，或直接作用但之后没有新的告警；low：只经命名空间、逻辑归属、尚未同步关联，或变更晚于它的目标上已经开始的问题（late）；不在事件里的变更（in_incident 为 false）按 low 对待。
+
+把根因归到变更上时——根因是发布的逻辑组件、管理变更目标的 GitOps 应用，或 supporting 引用了变更——结论受分级约束：对应的变更中没有 high 的，代码把档位限制为 inconclusive。这时不要把变更写成已经确定的原因，在 summary 中写明它只是时间或拓扑上的关联，并把确认它所需的检查写进 investigation 类的修复建议。
+
 # 告警角色
 
 成员告警的 role 来自告警目录：cause 报原因，symptom 报症状，change 报变更，forecast 报预测，meta 报观测缺口或容量冗余（数据缺失、抓取目标消失、副本多于负载需要之类），本身不是故障。假设的机制要与成员告警报告的状况方向一致：告警报的是副本偏多、负载偏低、资源富余时，资源紧张、连接耗尽、容量不足这类机制与它相反，不能作为解释它的机制。同一时段其他异常卡说明的另一个故障，写进 situation 或 investigation 类的修复建议，不当作这条告警的原因。

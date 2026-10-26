@@ -8,12 +8,14 @@
 import type {
   Alert,
   ChangeEvent,
+  ChangeLink,
   ClusterId,
   ComponentKey,
   Incident,
   IncidentMember,
   Severity,
 } from '@srenautix/contract';
+import { changeLinks, groupChanges } from './change-grade.js';
 import { converge, type ConvergeInput, type AlertGroup } from './converge.js';
 import { rankRoot, silentRootTargets, type ProbeResult, type Ranking } from './rank.js';
 import { floorTo, formatTime, parseTime } from './time.js';
@@ -23,6 +25,8 @@ export const LABEL_BUCKET_MS = 10 * 60_000;
 export interface ComputedIncident {
   group: AlertGroup;
   ranking: Ranking;
+  /** 分组变更的关联分级（ADR 0169），顺序与事件的 changes 相同 */
+  links: ChangeLink[];
 }
 
 export interface ComputeInput extends ConvergeInput {
@@ -37,7 +41,8 @@ export function computeIncidents(input: ComputeInput): ComputedIncident[] {
     .map((group) => {
       const targets = new Set(silentRootTargets(group, input.graph).map((t) => t.component));
       const probes = (input.probes ?? []).filter((p) => targets.has(p.component));
-      return { group, ranking: rankRoot({ group, graph: input.graph, params: input.params, probes }) };
+      const links = changeLinks(group, input.graph, input.params);
+      return { group, links, ranking: rankRoot({ group, graph: input.graph, params: input.params, probes, links }) };
     })
     .sort(
       (a, b) =>
@@ -298,9 +303,8 @@ function aggregate(c: ComputedIncident) {
     // 只有告警源的静默算抑制：抑制规则（inhibited）说明另一条触发中的告警能解释它，不表示它不需要处理
     suppressed: firing.length > 0 && firing.every((a) => a.suppressed === 'silenced'),
     // 只因"已合并、尚未同步"在分组里的提交也是事件的变更（ADR 0161）
-    changes: [...c.group.changes, ...c.group.pendingChanges].sort(
-      (a, b) => a.time.localeCompare(b.time) || a.change_id.localeCompare(b.change_id),
-    ),
+    changes: groupChanges(c.group),
+    change_links: c.links,
     candidates: c.ranking.candidates.map((x) => ({
       component: x.component,
       score: x.score,
@@ -351,6 +355,7 @@ function createIncident(
     members: g.alerts.map((a) => member(a, 1)).sort((a, b) => a.alert_id.localeCompare(b.alert_id)),
     components: g.components,
     changes: g.changes as ChangeEvent[],
+    change_links: g.change_links,
     aliases: [],
     split_from: splitFrom,
     merged_into: null,
@@ -402,6 +407,7 @@ function applyGroup(p: Incident, c: ComputedIncident, topologyVersion: number, n
     members,
     components: g.components,
     changes: g.changes as ChangeEvent[],
+    change_links: g.change_links,
     suppressed: g.suppressed,
     topology_version: version !== p.incident_version ? topologyVersion : p.topology_version,
   };

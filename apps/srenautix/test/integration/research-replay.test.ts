@@ -181,6 +181,55 @@ describe('录制的研判回放', () => {
     expect(out.validation_notes).toContain('不生效的提议：pod_restart（h1）');
   });
 
+  it('选中的假设引用了变更：变更不是 high 时档位限制为 inconclusive，high 时不变（ADR 0169）', async () => {
+    // 同一段录制，h1、h2 的 supporting 与修复建议的依据都加上 change:1（事件里 web 的发布）
+    const responses = recorded.responses.map(
+      (r) => JSON.parse(JSON.stringify(r).replaceAll('[\\"card:2\\"]', '[\\"card:2\\", \\"change:1\\"]')) as LlmFixture,
+    );
+    const run = async (grade: 'high' | 'medium') => {
+      const server = new ReplayServer();
+      await server.start();
+      server.enqueue(...responses);
+      const tools = await metricsTools(mcp.url);
+      const base = researchCase();
+      const changeId = base.incident.changes[0]!.change_id;
+      const rc = {
+        ...base,
+        incident: {
+          ...base.incident,
+          change_links: [
+            {
+              change_id: changeId,
+              grade,
+              basis: grade === 'high' ? ['component_match' as const] : ['topology_reach' as const],
+              new_signals: grade === 'high' ? [base.incident.members[1]!.alert_id] : [],
+              rollback: false,
+            },
+          ],
+        },
+      };
+      const res = await runStageB(
+        { runId: '7a1b2c3d-0000-4000-8000-0000000000b4', rc, previous: null, signal: new AbortController().signal },
+        testEnv(testLayer([testRoute(server.baseUrl)]), tools.tools, false),
+        new MemorySink(),
+      );
+      await tools.close();
+      await server.stop();
+      expect(server.pending).toBe(0);
+      const v = validatorFor('schemas/research-output.schema.json');
+      expect(v(res.output), JSON.stringify(v.errors)).toBe(true);
+      return { out: res.output!, changeId };
+    };
+    const capped = await run('medium');
+    expect(capped.out.conclusion).toMatchObject({ level: 'inconclusive', hypothesis_id: 'h1' });
+    expect(capped.out.validation_notes).toContain(
+      `假设 h1 的根因 PersistentVolumeClaim:shop/data-postgres-0 归到变更上，但对应的变更没有 high 分级（change:1（${capped.changeId}）分级 medium：变更没有直接作用在告警的对象上，只经拓扑可达关联），档位由 likely 改为 inconclusive（ADR 0169）`,
+    );
+    const kept = await run('high');
+    expect(kept.out.conclusion).toMatchObject({ level: 'likely', hypothesis_id: 'h1' });
+    expect(kept.out.validation_notes.join('\n')).not.toMatch(/ADR 0169/);
+  });
+
   it('研判子图没有组件：不提出假设，直接结论为 undetermined', async () => {
     const server = new ReplayServer();
     await server.start();

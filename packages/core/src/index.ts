@@ -10,6 +10,7 @@ export * from './topology/store.js';
 export * from './topology/kube.js';
 export * from './topology/ksm.js';
 export * from './converge.js';
+export * from './change-grade.js';
 export * from './rank.js';
 export * from './incidents.js';
 export * from './fingerprint.js';
