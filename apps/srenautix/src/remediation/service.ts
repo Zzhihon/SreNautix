@@ -19,6 +19,7 @@ import {
 import type pg from 'pg';
 import { HttpError } from '../api/errors.js';
 import { GitHubError, type GitHubApp } from '../github/app.js';
+import type { ClosureSink } from '../github/closures.js';
 import { componentNames } from '../incident/names.js';
 import { alertsById } from '../ingest/store.js';
 import { logger } from '../log.js';
@@ -94,6 +95,8 @@ export interface RemediationDeps {
   issueRef: ((incidentId: string, fromRepo: string) => Promise<string | null>) | null;
   /** 把事件 issue 关联到已有的 PR（IssueService.link：issue 里回链，PR 描述补 Refs）；没有开启事件 issue 时为 null */
   linkPull: ((incidentId: string, pull: PullLink) => Promise<void>) | null;
+  /** PR 关闭且没有合并时写隐式反馈 pr_closed（FeedbackService.recordClosure，ADR 0174） */
+  closures: ClosureSink;
   metrics: ServerMetrics;
 }
 
@@ -155,7 +158,7 @@ export class RemediationService {
     private readonly s: RemediationSettings,
     private readonly d: RemediationDeps,
   ) {
-    this.changes = new RemediationChanges(pool, d.github, s.rejectedCooldownMs);
+    this.changes = new RemediationChanges(pool, d.github, s.rejectedCooldownMs, d.closures);
   }
 
   /**

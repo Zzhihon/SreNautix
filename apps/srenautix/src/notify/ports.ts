@@ -1,4 +1,4 @@
-import type { Channel, Disposition, NotifyMessage, Severity } from '@srenautix/contract';
+import type { Channel, Disposition, FeedbackReasonCode, NotifyMessage, Severity } from '@srenautix/contract';
 import type { ExternalWindowStats } from './external.js';
 
 /**
@@ -53,6 +53,12 @@ export interface ButtonTarget {
   disposition: Disposition | null;
   /** feedback_reject 可选的真实根因组件（本次研判的拓扑组件）；其他按钮为空数组。 */
   choices: string[];
+  /**
+   * Telegram 回复提示上的原因按钮（feedback_reason，ADR 0174）：选中的原因码与提示所属的 feedback_reject 按钮的
+   * short id。其他按钮没有这两项
+   */
+  reasonCode?: FeedbackReasonCode;
+  promptOf?: string;
 }
 
 export type NotifyMessageButtonKind = NotifyMessage['buttons'][number]['kind'];
@@ -88,20 +94,22 @@ export interface NotifyActions {
   approve(actor: ChannelActor, proposalId: string): Promise<ActionOutcome>;
   reject(actor: ChannelActor, proposalId: string, reason: string): Promise<ActionOutcome>;
   undo(actor: ChannelActor, proposalId: string): Promise<ActionOutcome>;
-  /** 根因维度：confirmed，或 rejected 并给出真实根因（null 表示不知道）。 */
+  /** 根因维度：confirmed，或 rejected 并给出真实根因（null 表示不知道）；reasonCode 是选择的原因码（ADR 0174）。 */
   feedbackRoot(
     actor: ChannelActor,
     t: { incidentId: string; incidentVersion: number; researchRunId: string | null },
     verdict: 'confirmed' | 'rejected',
     rootComponent: string | null,
     reason: string | null,
+    reasonCode: FeedbackReasonCode | null,
   ): Promise<ActionOutcome>;
-  /** 处置维度：confirmed，或 rejected 并给出正确的处置判断。 */
+  /** 处置维度：confirmed，或 rejected 并给出正确的处置判断；reasonCode 是选择的原因码（ADR 0174）。 */
   feedbackDisposition(
     actor: ChannelActor,
     t: { incidentId: string; incidentVersion: number; researchRunId: string | null },
     verdict: 'confirmed' | 'rejected',
     disposition: Disposition | null,
+    reasonCode: FeedbackReasonCode | null,
   ): Promise<ActionOutcome>;
   /** 事件恢复时的一键确认。 */
   resolvedConfirm(actor: ChannelActor, incidentId: string, incidentVersion: number): Promise<ActionOutcome>;

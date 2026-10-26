@@ -4,6 +4,7 @@ import { unauthorized } from '../../api/errors.js';
 import { logger } from '../../log.js';
 import type { ServerMetrics } from '../../metrics.js';
 import { DISPOSITIONS, type ClickResult, type Interactions } from '../../notify/interactions.js';
+import { FEEDBACK_REASON_CODES } from '../../proposals/feedback.js';
 import type { ChannelLimiter } from '../../notify/ratelimit.js';
 import { shortId } from '../../notify/shortid.js';
 import type { NotifyStore } from '../../notify/store.js';
@@ -14,6 +15,8 @@ import type { SendMessageParams, TgCallbackQuery, TgEntity, TgMessage, TgUpdate,
 import { displayKey } from '@srenautix/core';
 
 export const WEBHOOK_PATH = '/v1/channels/telegram/webhook';
+/** 真实根因提示上的原因按钮每行的个数 */
+const REASON_BUTTONS_PER_ROW = 3;
 const SECRET_HEADER = 'x-telegram-bot-api-secret-token';
 const LINK = /^\/link(?:@\w+)?\s+(\S+)\s*$/;
 
@@ -139,18 +142,43 @@ export class TelegramUpdates {
     } else if (res.type === 'prompt') {
       const m = mention(from);
       const until = `${res.expiresAt.toISOString().slice(11, 16)} UTC`;
-      const text =
-        res.purpose === 'reject_reason'
-          ? `${m.text}，请回复本消息填写拒绝原因（${until} 前有效，不回复则不提交）。`
-          : `${m.text}，请回复本消息填写真实根因组件，可选：${res.button.target.choices.map(displayKey).join('、') || '（无）'}；不知道时回复 -（${until} 前有效）。`;
+      if (res.purpose === 'reject_reason') {
+        const msg = await this.sendInteractive({
+          chat_id: Number(chat),
+          text: `${m.text}，请回复本消息填写拒绝原因（${until} 前有效，不回复则不提交）。`,
+          entities: [m.entity],
+          reply_markup: { force_reply: true, selective: true, input_field_placeholder: '拒绝原因' },
+        });
+        await this.d.store.setPrompt(res.replyId, String(msg.message_id));
+        return;
+      }
+      // 真实根因的提示带原因按钮（ADR 0174）：先选原因，再回复本消息填写组件；只有发起反馈的成员可以选择
+      const owner = String(from.id);
+      const buttons = FEEDBACK_REASON_CODES.map((code) => {
+        const target = { ...res.button.target, key: `reason:${code}`, reasonCode: code, promptOf: res.button.shortId };
+        return {
+          shortId: shortId('telegram', chat, 'feedback_reason', target, owner),
+          kind: 'feedback_reason',
+          target,
+          owner,
+        };
+      });
+      await this.d.store.registerButtons('telegram', chat, buttons, new Date(this.d.now()));
+      const rows: (typeof buttons)[] = [];
+      for (let i = 0; i < buttons.length; i += REASON_BUTTONS_PER_ROW) {
+        rows.push(buttons.slice(i, i + REASON_BUTTONS_PER_ROW));
+      }
       const msg = await this.sendInteractive({
         chat_id: Number(chat),
-        text,
+        text: `${m.text}，请先选择原因，再回复本消息填写真实根因组件，可选：${res.button.target.choices.map(displayKey).join('、') || '（无）'}；不知道时回复 -（${until} 前有效）。`,
         entities: [m.entity],
         reply_markup: {
-          force_reply: true,
-          selective: true,
-          input_field_placeholder: res.purpose === 'reject_reason' ? '拒绝原因' : '组件 原因',
+          inline_keyboard: rows.map((row) =>
+            row.map((b) => ({
+              text: t.reason(lang, b.target.reasonCode),
+              callback_data: CALLBACK_PREFIX + b.shortId,
+            })),
+          ),
         },
       });
       await this.d.store.setPrompt(res.replyId, String(msg.message_id));

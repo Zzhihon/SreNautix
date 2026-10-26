@@ -10,8 +10,9 @@ import { jwtVerify } from 'jose';
  * - GET /repos/{repo}/git/ref/heads/{branch}、GET/PUT /repos/{repo}/contents/{path}（PUT 更新已有文件时必须带当前 sha）、
  *   POST /repos/{repo}/git/refs（分支已存在时 422）、POST /repos/{repo}/pulls、GET/PATCH /repos/{repo}/pulls/{n}；
  * - issue：POST/GET /repos/{repo}/issues（列表按 labels、创建时间倒序，PR 也出现在列表中并带 pull_request）、
- *   GET/PATCH /repos/{repo}/issues/{n}（PATCH 改标题与正文；GET 带 state，closeIssue() 关闭）、
- *   POST/GET /repos/{repo}/issues/{n}/comments；
+ *   GET/PATCH /repos/{repo}/issues/{n}（PATCH 改标题与正文；GET 带 state、state_reason、closed_at 与 closed_by，
+ *   closeIssue() 关闭；与 GitHub 相同，PR 的编号也可以按 issue 读取）、
+ *   POST/GET /repos/{repo}/issues/{n}/comments（评论带 created_at，comment() 以指定时刻追加；per_page 与 page 分页）；
  * - 提交：GET /repos/{repo}/commits（sha 为分支或提交、path、since、until、per_page、page）与 GET /repos/{repo}/commits/{sha}（带 files）；
  * - contents 的 ref 可以是分支或 write() 产生的提交，路径是目录时返回目录列表；GET /repos/{repo}/pulls?head=owner:branch。
  * fault() 注入失败：返回给定状态，或处理请求之后断开连接（客户端收不到响应）。
@@ -33,6 +34,7 @@ export class FakeGitHub {
     state?: 'open' | 'closed';
     closed_at?: string | null;
     merged_at?: string | null;
+    closed_by?: string | null;
   }> = [];
   /** issue；state 不填时为 open，closeIssue() 关闭 */
   readonly issues: Array<{
@@ -42,8 +44,11 @@ export class FakeGitHub {
     labels: string[];
     created: number;
     state?: 'open' | 'closed';
+    state_reason?: 'completed' | 'not_planned' | null;
+    closed_at?: string | null;
+    closed_by?: string | null;
   }> = [];
-  readonly comments = new Map<number, Array<{ id: number; body: string }>>();
+  readonly comments = new Map<number, Array<{ id: number; body: string; created_at: string }>>();
   /** 分支 → 提交（新的在前） */
   readonly commits = new Map<
     string,
@@ -251,7 +256,22 @@ export class FakeGitHub {
     if ((m = /^issues\/(\d+)$/.exec(rest))) {
       const issue = this.issues.find((i) => i.number === Number(m![1]));
       if (!issue) {
-        return send(res, 404, { message: 'Not Found' });
+        // PR 的编号也可以按 issue 读取（只读）
+        const pr = method === 'GET' ? this.pulls.find((p) => p.number === Number(m![1])) : undefined;
+        if (!pr) {
+          return send(res, 404, { message: 'Not Found' });
+        }
+        return send(res, 200, {
+          number: pr.number,
+          title: pr.title,
+          body: pr.body,
+          state: pr.state ?? 'open',
+          state_reason: pr.state === 'closed' ? 'completed' : null,
+          closed_at: pr.closed_at ?? null,
+          closed_by: pr.closed_by ? { login: pr.closed_by } : null,
+          pull_request: {},
+          html_url: `https://github.example.test/${this.repo}/pull/${pr.number}`,
+        });
       }
       if (method === 'PATCH' && typeof body.body === 'string') {
         issue.body = body.body;
@@ -264,7 +284,9 @@ export class FakeGitHub {
         title: issue.title,
         body: issue.body,
         state: issue.state ?? 'open',
-        state_reason: issue.state === 'closed' ? 'not_planned' : null,
+        state_reason: issue.state === 'closed' ? (issue.state_reason ?? 'not_planned') : null,
+        closed_at: issue.closed_at ?? null,
+        closed_by: issue.closed_by ? { login: issue.closed_by } : null,
         html_url: `https://github.example.test/${this.repo}/issues/${issue.number}`,
       });
     }
@@ -277,18 +299,21 @@ export class FakeGitHub {
       this.comments.set(n, list);
       if (method === 'POST') {
         const id = ++this.seq;
-        list.push({ id, body: String(body.body) });
+        list.push({ id, body: String(body.body), created_at: new Date().toISOString() });
         return send(res, 201, {
           id,
           html_url: `https://github.example.test/${this.repo}/issues/${n}#issuecomment-${id}`,
         });
       }
+      const per = Number(u.searchParams.get('per_page') ?? 30);
+      const page = Number(u.searchParams.get('page') ?? 1);
       return send(
         res,
         200,
-        list.map((c) => ({
+        list.slice((page - 1) * per, page * per).map((c) => ({
           id: c.id,
           body: c.body,
+          created_at: c.created_at,
           html_url: `https://github.example.test/${this.repo}/issues/${n}#issuecomment-${c.id}`,
         })),
       );
@@ -471,17 +496,25 @@ export class FakeGitHub {
     return s;
   }
 
-  /** 人关闭 issue（不打算处理，state_reason 为 not_planned） */
-  closeIssue(number: number): void {
+  /** 人关闭 issue：state_reason 默认 not_planned（不打算处理），completed 为已完成 */
+  closeIssue(
+    number: number,
+    reason: 'not_planned' | 'completed' = 'not_planned',
+    by = 'maintainer',
+    at: Date = new Date(),
+  ): void {
     const issue = this.issues.find((i) => i.number === number);
     if (!issue) {
       throw new Error(`没有 issue #${number}`);
     }
     issue.state = 'closed';
+    issue.state_reason = reason;
+    issue.closed_at = at.toISOString();
+    issue.closed_by = by;
   }
 
   /** 审阅者关闭 PR：merged 为 true 时同时合并（不改分支内容，需要时另用 merge()） */
-  close(number: number, merged: boolean, at: Date = new Date()): void {
+  close(number: number, merged: boolean, at: Date = new Date(), by = 'reviewer'): void {
     const pr = this.pulls.find((p) => p.number === number);
     if (!pr) {
       throw new Error(`没有 PR #${number}`);
@@ -489,6 +522,14 @@ export class FakeGitHub {
     pr.state = 'closed';
     pr.closed_at = at.toISOString();
     pr.merged_at = merged ? at.toISOString() : null;
+    pr.closed_by = by;
+  }
+
+  /** 人在 issue 或 PR 上写的一条评论，时刻为 at */
+  comment(number: number, body: string, at: Date): void {
+    const list = this.comments.get(number) ?? [];
+    this.comments.set(number, list);
+    list.push({ id: ++this.seq, body, created_at: at.toISOString() });
   }
 
   /** 把分支合并到 main（测试中模拟审阅者合并 PR） */

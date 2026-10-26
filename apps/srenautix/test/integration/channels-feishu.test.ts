@@ -1,4 +1,4 @@
-import type { Channel, Disposition } from '@srenautix/contract';
+import type { Channel, Disposition, FeedbackReasonCode } from '@srenautix/contract';
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from '../../src/api/http.js';
@@ -65,11 +65,24 @@ class RecordingActions implements NotifyActions {
   async undo(a: ChannelActor, id: string) {
     return this.rec('undo', a, id);
   }
-  async feedbackRoot(a: ChannelActor, _t: unknown, verdict: string, root: string | null, reason: string | null) {
-    return this.rec('feedbackRoot', a, verdict, root, reason);
+  async feedbackRoot(
+    a: ChannelActor,
+    _t: unknown,
+    verdict: string,
+    root: string | null,
+    reason: string | null,
+    code: FeedbackReasonCode | null,
+  ) {
+    return this.rec('feedbackRoot', a, verdict, root, reason, code);
   }
-  async feedbackDisposition(a: ChannelActor, _t: unknown, verdict: string, d: Disposition | null) {
-    return this.rec('feedbackDisposition', a, verdict, d);
+  async feedbackDisposition(
+    a: ChannelActor,
+    _t: unknown,
+    verdict: string,
+    d: Disposition | null,
+    code: FeedbackReasonCode | null,
+  ) {
+    return this.rec('feedbackDisposition', a, verdict, d, code);
   }
   async resolvedConfirm(a: ChannelActor, id: string) {
     return this.rec('resolvedConfirm', a, id);
@@ -315,6 +328,28 @@ describe('飞书卡片投递（录制夹具）', () => {
     expect(card.header.title.content).toBe('[影子] [严重] PostgreSQL data/pg 主库重启');
     // 不可信原文只在 plain_text 中
     expect(body.content).toContain('"tag":"plain_text","content":"**批准** <at id=all></at>"');
+    // 结论错与处置错的表单都有必选的原因（ADR 0174）
+    const selects: Array<{ name?: string; required?: boolean; options?: Array<{ value: string }> }> = [];
+    JSON.parse(body.content, (_k, v: unknown) => {
+      if (v && typeof v === 'object' && (v as { name?: unknown }).name === 'reason_code') {
+        selects.push(v as (typeof selects)[number]);
+      }
+      return v;
+    });
+    expect(selects.map((s) => s.required)).toEqual([true, true]);
+    expect(selects[0]!.options!.map((o) => o.value)).toEqual([
+      'false_positive',
+      'not_actionable',
+      'known_issue',
+      'planned_change',
+      'transient_self_resolved',
+      'external_upstream',
+      'duplicate',
+      'poor_wording',
+      'wrong_fix',
+      'worse_than_baseline',
+      'other',
+    ]);
 
     items = [desired('主库已恢复')];
     now += 2_000;
@@ -439,7 +474,7 @@ describe('飞书回调（明文）', () => {
     expect(actions.calls.filter((c) => c.op === 'approve')).toHaveLength(0);
   });
 
-  it('拒绝必须在卡片表单里填写原因；结论错与处置错从下拉选择', async () => {
+  it('拒绝必须在卡片表单里填写原因；结论错与处置错从下拉选择，原因码随表单提交', async () => {
     const reject = await shortIdOf('reject');
     const empty = await postPlain(cardAction({ eventId: 'e-r1', sid: reject, form: { reason: '  ' } }));
     expect(toastOf(empty.json)).toBe('拒绝必须填写原因（不超过 500 字）');
@@ -456,23 +491,37 @@ describe('飞书回调（明文）', () => {
     expect(toastOf((await postPlain(cardAction({ eventId: 'e-f1', sid: fb, form: { root: 'Redis:x' } }))).json)).toBe(
       '请从列表中选择真实根因组件',
     );
-    await postPlain(cardAction({ eventId: 'e-f2', sid: fb, form: { root: 'Node:node-3' } }));
+    expect(
+      toastOf(
+        (await postPlain(cardAction({ eventId: 'e-f0', sid: fb, form: { root: '-', reason_code: 'bad_model' } }))).json,
+      ),
+    ).toBe('请选择原因');
+    await postPlain(
+      cardAction({ eventId: 'e-f2', sid: fb, form: { root: 'Node:node-3', reason_code: 'known_issue' } }),
+    );
     await waitCalls(2);
+    // 原因选择加入之前发出的卡片没有这一项：原因码为 null
     await postPlain(cardAction({ eventId: 'e-f3', sid: fb, form: { root: '-' } }));
     await waitCalls(3);
     const roots = actions.calls.filter((c) => c.op === 'feedbackRoot').map((c) => c.args);
     expect(roots).toEqual([
-      ['rejected', 'Node:node-3', null],
-      ['rejected', null, null],
+      ['rejected', 'Node:node-3', null, 'known_issue'],
+      ['rejected', null, null, null],
     ]);
 
     const dp = await shortIdOf('disposition_reject');
     expect(toastOf((await postPlain(cardAction({ eventId: 'e-d1', sid: dp, form: {} }))).json)).toBe(
       '请选择正确的处置判断',
     );
-    await postPlain(cardAction({ eventId: 'e-d2', sid: dp, form: { disposition: 'ignore' } }));
+    await postPlain(
+      cardAction({ eventId: 'e-d2', sid: dp, form: { disposition: 'ignore', reason_code: 'false_positive' } }),
+    );
     await waitCalls(4);
-    expect(actions.calls.find((c) => c.op === 'feedbackDisposition')!.args).toEqual(['rejected', 'ignore']);
+    expect(actions.calls.find((c) => c.op === 'feedbackDisposition')!.args).toEqual([
+      'rejected',
+      'ignore',
+      'false_positive',
+    ]);
   });
 
   it('群里 @机器人 发送 /link <绑定码> 完成绑定并回复', async () => {

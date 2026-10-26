@@ -363,7 +363,7 @@ export class ServerMetrics extends BaseMetrics {
 
   readonly terminalStates = new Counter({
     name: 'srenautix_terminal_states_total',
-    help: '写入的终态原因码（ADR 0172）：通知、阶段 A、研判、自愈 PR、事件 issue 与事件状态，按阶段、原因码与登记表中的级别；level="error" 由 SreNautixAbnormalTerminalStates 告警',
+    help: '写入的终态原因码（ADR 0172）：通知、阶段 A、研判、自愈 PR、事件 issue 与事件状态，以及反馈的原因码（ADR 0174），按阶段、原因码与登记表中的级别；level="error" 由 SreNautixAbnormalTerminalStates 告警',
     labelNames: ['stage', 'code', 'level'] as const,
     registers: [this.registry],
   });

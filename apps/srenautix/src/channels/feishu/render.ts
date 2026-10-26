@@ -12,6 +12,7 @@ import type {
 import type { ExternalDigestView } from '../../notify/external.js';
 import type { ButtonTarget, DesiredIncidentMessage } from '../../notify/ports.js';
 import { linkTarget } from '../../notify/markdown.js';
+import { FEEDBACK_REASON_CODES } from '../../proposals/feedback.js';
 import { shortId } from '../../notify/shortid.js';
 import { clip, hm, oneLine, publicHttpsUrl, t, ymdhm } from '../../notify/text.js';
 import { payloadHash, MAX_RESULTS_SHOWN } from '../telegram/render.js';
@@ -341,10 +342,10 @@ export function renderCard(
       ...(submit ? { form_action_type: 'submit' } : {}),
       behaviors: [{ type: 'callback', value: signer.value(sid) }],
     });
-    const form = (field: El): El => ({
+    const form = (...fields: El[]): El => ({
       tag: 'form',
       name: `f_${sid}`,
-      elements: [field, button(b.kind === 'reject' ? 'danger' : 'default', true)],
+      elements: [...fields, button(b.kind === 'reject' ? 'danger' : 'default', true)],
     });
     if (b.kind === 'reject') {
       flushRow();
@@ -359,17 +360,20 @@ export function renderCard(
       );
     } else if (b.kind === 'feedback_reject') {
       flushRow();
-      tail.push(form(rootSelect(l, target)));
+      tail.push(form(rootSelect(l, target), reasonSelect(l)));
     } else if (b.kind === 'disposition_reject') {
       flushRow();
       tail.push(
-        form({
-          tag: 'select_static',
-          name: 'disposition',
-          required: true,
-          placeholder: { tag: 'plain_text', content: l === 'zh' ? '正确的处置判断' : 'Correct disposition' },
-          options: DISPOSITIONS.map((v) => ({ text: { tag: 'plain_text', content: t.disposition(l, v) }, value: v })),
-        }),
+        form(
+          {
+            tag: 'select_static',
+            name: 'disposition',
+            required: true,
+            placeholder: { tag: 'plain_text', content: l === 'zh' ? '正确的处置判断' : 'Correct disposition' },
+            options: DISPOSITIONS.map((v) => ({ text: { tag: 'plain_text', content: t.disposition(l, v) }, value: v })),
+          },
+          reasonSelect(l),
+        ),
       );
     } else {
       rowButtons.push(button(b.kind === 'approve' ? 'primary' : 'default', false));
@@ -378,6 +382,17 @@ export function renderCard(
   flushRow();
   const payload = fit(header, parts, tail);
   return { payload, hash: payloadHash(payload), buttons: registered };
+}
+
+/** 拒绝根因与拒绝处置的表单里的原因选择（ADR 0174），必选 */
+function reasonSelect(l: Language): El {
+  return {
+    tag: 'select_static',
+    name: 'reason_code',
+    required: true,
+    placeholder: { tag: 'plain_text', content: l === 'zh' ? '原因' : 'Reason' },
+    options: FEEDBACK_REASON_CODES.map((v) => ({ text: { tag: 'plain_text', content: t.reason(l, v) }, value: v })),
+  };
 }
 
 function rootSelect(l: Language, target: ButtonTarget): El {

@@ -130,5 +130,45 @@ CREATE INDEX webauthn_challenges_proposal_idx ON server.webauthn_challenges (pro
 ALTER TABLE server.spoke_status ADD COLUMN accepts_actions text[] NOT NULL DEFAULT '{}';
 `,
     },
+    {
+      version: 4,
+      name: 'feedback reason codes, implicit feedback from closed pull requests and issues, eval candidates',
+      phase: 'expand',
+      sql: `
+-- 反馈的原因码（ADR 0174）；隐式反馈增加关闭跟踪写入的两种（pr_closed、issue_not_planned）。只有原因码的反馈也合法
+ALTER TABLE server.feedback ADD COLUMN reason_code text CHECK (reason_code IN (
+  'false_positive', 'not_actionable', 'known_issue', 'planned_change', 'transient_self_resolved', 'external_upstream',
+  'duplicate', 'poor_wording', 'wrong_fix', 'worse_than_baseline', 'other'));
+ALTER TABLE server.feedback DROP CONSTRAINT feedback_implicit_check;
+ALTER TABLE server.feedback ADD CONSTRAINT feedback_implicit_check
+  CHECK (implicit IN ('approved', 'rejected', 'undone', 'resolved_confirm', 'pr_closed', 'issue_not_planned'));
+ALTER TABLE server.feedback DROP CONSTRAINT feedback_check;
+ALTER TABLE server.feedback ADD CONSTRAINT feedback_check
+  CHECK (verdict IS NOT NULL OR disposition_verdict IS NOT NULL OR implicit IS NOT NULL OR reason_code IS NOT NULL);
+
+-- 评测候选（ADR 0175）：同一事件同一来源只有一个；label 是确认时选定的标准答案（契约 EvalCandidateConfirm）
+CREATE TABLE server.eval_candidates (
+  candidate_id uuid PRIMARY KEY,
+  cluster_id text NOT NULL,
+  incident_id uuid NOT NULL,
+  incident_version integer NOT NULL,
+  research_run_id uuid,
+  source text NOT NULL CHECK (source IN ('feedback', 'pr_closed', 'issue_not_planned', 'console')),
+  source_ref text NOT NULL,
+  reason_code text,
+  reason text CHECK (char_length(reason) <= 500),
+  suggested_type text CHECK (suggested_type IN ('incident', 'benign', 'abstain')),
+  suite text,
+  state text NOT NULL DEFAULT 'pending' CHECK (state IN ('pending', 'confirmed', 'dropped')),
+  label jsonb,
+  decided_by text,
+  decided_at timestamptz,
+  drop_reason text CHECK (char_length(drop_reason) <= 500),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (incident_id, source)
+);
+CREATE INDEX eval_candidates_state_idx ON server.eval_candidates (state, created_at DESC);
+`,
+    },
   ],
 };

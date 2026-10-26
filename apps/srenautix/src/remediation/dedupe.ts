@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { parsePatch } from 'diff';
 import type pg from 'pg';
 import { GitHubError, type GitHubApp } from '../github/app.js';
+import { closureDetails, type ClosureSink } from '../github/closures.js';
 import { logger } from '../log.js';
 import { appendAudit } from '../store/audit.js';
 import { tx } from '../store/pool.js';
@@ -114,6 +115,8 @@ export class RemediationChanges {
     private readonly github: GitHubApp,
     /** 同一模板对同一组文件的修改被拒绝后的冷却期；0 时只记住被拒绝的那一个修改 */
     private readonly cooldownMs: number,
+    /** PR 关闭且没有合并时写隐式反馈 pr_closed 与评测候选（ADR 0174），与状态更新同一事务 */
+    private readonly closed: ClosureSink,
   ) {}
 
   /**
@@ -154,7 +157,10 @@ export class RemediationChanges {
     return r.rows.length;
   }
 
-  /** 按提议、gitops_pulls 与 GitHub 上 PR 的当前状态刷新一行；merged 与 abandoned 不再变化 */
+  /**
+   * 按提议、gitops_pulls 与 GitHub 上 PR 的当前状态刷新一行；merged 与 abandoned 不再变化。PR 从打开变为关闭且没有合并时
+   * 读取关闭者与关闭之前的最后一条评论，写隐式反馈 pr_closed（关联事件与提议所属的研判）
+   */
   async refresh(row: ChangeRow): Promise<ChangeRow> {
     if (row.state === 'merged' || row.state === 'abandoned') {
       return row;
@@ -194,6 +200,11 @@ export class RemediationChanges {
       }
       next = { ...next, state, closed_at: state === 'open' ? null : new Date(pr.closed_at!) };
     }
+    // PR 关闭且没有合并（审批时被拒绝的提议没有 PR，已经有隐式反馈 rejected）
+    const closure =
+      next.state === 'rejected' && row.state !== 'rejected' && next.pr_number !== null
+        ? await closureDetails(this.github, next.repository, next.pr_number, next.closed_at as Date, true)
+        : null;
     if (next.state !== row.state || next.pr_number !== row.pr_number) {
       await tx(this.pool, async (c) => {
         await c.query(
@@ -201,6 +212,21 @@ export class RemediationChanges {
             WHERE proposal_id = $1`,
           [next.proposal_id, next.state, next.pr_number, next.pr_url, next.closed_at],
         );
+        if (closure) {
+          const run = await c.query<{ run_id: string | null }>(
+            `SELECT coalesce((SELECT a.run_id FROM server.remediation_attempts a WHERE a.proposal_id = $1 LIMIT 1),
+                             (SELECT (p.body->>'research_run_id')::uuid FROM server.proposals p WHERE p.proposal_id = $1)) AS run_id`,
+            [next.proposal_id],
+          );
+          await this.closed(c, {
+            kind: 'pr_closed',
+            incidentId: next.incident_id,
+            researchRunId: run.rows[0]?.run_id ?? null,
+            closedBy: closure.closedBy,
+            reason: closure.comment,
+            url: next.pr_url ?? `https://github.com/${next.repository}/pull/${next.pr_number}`,
+          });
+        }
         if (next.state !== row.state) {
           await appendAudit(c, 'remediation.change_state', 'server', {
             proposal_id: next.proposal_id,
@@ -214,6 +240,38 @@ export class RemediationChanges {
       });
     }
     return next;
+  }
+
+  /**
+   * 关闭跟踪（ADR 0174）：刷新 PR 仍打开的修改，每个仓库最多 perRepo 个、最久没有检查的在前，检查过的（包括 GitHub
+   * 请求失败的）更新 checked_at，下一轮先检查其他的。单个 PR 的 GitHub 请求失败只记日志；返回状态发生变化的个数
+   */
+  async refreshOpen(perRepo: number): Promise<number> {
+    const r = await this.pool.query<ChangeRow>(
+      `SELECT proposal_id, repository, change_hash, key, files, incident_id, state, pr_number, pr_url, closed_at, created_at
+         FROM (SELECT *, row_number() OVER (PARTITION BY repository ORDER BY checked_at, proposal_id) AS n
+                 FROM server.remediation_changes WHERE state = 'open') x
+        WHERE n <= $1 ORDER BY checked_at, proposal_id`,
+      [perRepo],
+    );
+    let changed = 0;
+    for (const row of r.rows) {
+      try {
+        const next = await this.refresh(row);
+        if (next.state !== row.state) {
+          changed++;
+        }
+      } catch (e) {
+        if (!(e instanceof GitHubError)) {
+          throw e;
+        }
+        logger.warn('自愈 PR 的状态读取失败，下一轮重试', { proposal_id: row.proposal_id, error: e.message });
+      }
+      await this.pool.query('UPDATE server.remediation_changes SET checked_at = now() WHERE proposal_id = $1', [
+        row.proposal_id,
+      ]);
+    }
+    return changed;
   }
 
   /**

@@ -931,7 +931,7 @@ export class ProposalService {
         reason: reason.trim(),
         channel: who.channel,
       });
-      await this.implicitFeedback(c, p, who, 'rejected');
+      await this.implicitFeedback(c, p, who, 'rejected', reason.trim());
       return p;
     });
   }
@@ -1064,12 +1064,13 @@ export class ProposalService {
     return out;
   }
 
-  /** 隐式反馈（DESIGN §11）：批准、拒绝、撤销自动记为对应反馈。 */
+  /** 隐式反馈（DESIGN §11）：批准、拒绝、撤销自动记为对应反馈；拒绝时填写的理由写进反馈的 reason（ADR 0174）。 */
   private async implicitFeedback(
     c: Queryable,
     p: Proposal,
     who: Approver,
     kind: 'approved' | 'rejected' | 'undone',
+    reason: string | null = null,
   ): Promise<void> {
     // 目标的提议没有事件，反馈只对事件研判有意义；目标的“建议无用”走 /v1/recommendations/{id}/reject
     if (p.subject?.type === 'goal') {
@@ -1087,10 +1088,11 @@ export class ProposalService {
       channel: who.channel,
       linked: who.linked,
       implicit: kind,
+      reason,
     };
     const r = await c.query<{ created_at: Date }>(
-      `INSERT INTO server.feedback (feedback_id, incident_id, incident_version, research_run_id, principal_id, channel, linked, implicit)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING created_at`,
+      `INSERT INTO server.feedback (feedback_id, incident_id, incident_version, research_run_id, principal_id, channel, linked, implicit, reason)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING created_at`,
       [
         fb.feedback_id,
         fb.incident_id,
@@ -1100,6 +1102,7 @@ export class ProposalService {
         fb.channel,
         fb.linked,
         fb.implicit,
+        fb.reason,
       ],
     );
     const payload = {
@@ -1109,7 +1112,7 @@ export class ProposalService {
       disposition_verdict: null,
       disposition: null,
       mechanism: null,
-      reason: null,
+      reason_code: null,
       stale: false,
       created_at: (r.rows[0] as { created_at: Date }).created_at.toISOString(),
     };

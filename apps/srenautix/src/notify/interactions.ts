@@ -1,8 +1,10 @@
-import type { Channel, Disposition } from '@srenautix/contract';
+import type { Channel, Disposition, FeedbackReasonCode } from '@srenautix/contract';
 import { logger } from '../log.js';
 import type { ServerMetrics } from '../metrics.js';
+import { isReasonCode } from '../proposals/feedback.js';
 import type { ActionOutcome, ChannelActor, NotifyActions } from './ports.js';
 import type { ButtonRow, NotifyStore, PendingReply } from './store.js';
+import { t as labels } from './text.js';
 import { displayKey } from '@srenautix/core';
 
 /** 回复式交互的有效期（拒绝原因、真实根因）。 */
@@ -110,6 +112,9 @@ export class Interactions {
     if (btn.kind === 'approve' && btn.target.tier !== 'L') {
       return this.done(c, btn.kind, 'tier_requires_console', '这个提议需要在控制台审批（H 档，需要重新认证）');
     }
+    if (btn.kind === 'feedback_reason') {
+      return this.reason(c, btn);
+    }
     if (!(await this.store.claim(btn.shortId, c.callbackId, c.at))) {
       const text =
         btn.kind === 'reject' || btn.kind === 'feedback_reject' ? '其他成员正在填写，见提示消息' : '该按钮已被处理';
@@ -148,13 +153,13 @@ export class Interactions {
         return this.started(
           c,
           btn,
-          run(() => this.actions.feedbackRoot(actor, ref, 'confirmed', t.rootComponent, null)),
+          run(() => this.actions.feedbackRoot(actor, ref, 'confirmed', t.rootComponent, null, null)),
         );
       case 'disposition_confirm':
         return this.started(
           c,
           btn,
-          run(() => this.actions.feedbackDisposition(actor, ref, 'confirmed', null)),
+          run(() => this.actions.feedbackDisposition(actor, ref, 'confirmed', null, null)),
         );
       case 'resolved_confirm':
         return this.started(
@@ -166,7 +171,7 @@ export class Interactions {
         return this.started(
           c,
           btn,
-          run(() => this.actions.feedbackDisposition(actor, ref, 'rejected', t.disposition)),
+          run(() => this.actions.feedbackDisposition(actor, ref, 'rejected', t.disposition, null)),
         );
       case 'reject': {
         if (form) {
@@ -190,6 +195,11 @@ export class Interactions {
             await this.store.release(btn.shortId, c.callbackId);
             return this.done(c, btn.kind, 'unknown_component', '请从列表中选择真实根因组件');
           }
+          const code = formReason(form);
+          if (code === undefined) {
+            await this.store.release(btn.shortId, c.callbackId);
+            return this.done(c, btn.kind, 'invalid_reason_code', '请选择原因');
+          }
           const reason =
             typeof form.reason === 'string' && form.reason.trim()
               ? form.reason.trim().slice(0, MAX_REASON_CHARS)
@@ -197,7 +207,7 @@ export class Interactions {
           return this.started(
             c,
             btn,
-            run(() => this.actions.feedbackRoot(actor, ref, 'rejected', root === '-' ? null : root, reason)),
+            run(() => this.actions.feedbackRoot(actor, ref, 'rejected', root === '-' ? null : root, reason, code)),
           );
         }
         return this.prompt(c, btn, actor, 'root_component', '请在 5 分钟内回复机器人的提示消息，填写真实根因组件');
@@ -209,10 +219,15 @@ export class Interactions {
             await this.store.release(btn.shortId, c.callbackId);
             return this.done(c, btn.kind, 'invalid_disposition', '请选择正确的处置判断');
           }
+          const code = formReason(form);
+          if (code === undefined) {
+            await this.store.release(btn.shortId, c.callbackId);
+            return this.done(c, btn.kind, 'invalid_reason_code', '请选择原因');
+          }
           return this.started(
             c,
             btn,
-            run(() => this.actions.feedbackDisposition(actor, ref, 'rejected', d as Disposition)),
+            run(() => this.actions.feedbackDisposition(actor, ref, 'rejected', d as Disposition, code)),
           );
         }
         // 选择按钮发出之后释放，其他成员也可以发起自己的选择
@@ -225,6 +240,27 @@ export class Interactions {
         await this.store.release(btn.shortId, c.callbackId);
         return this.done(c, btn.kind, 'invalid_data', '按钮无效');
     }
+  }
+
+  /**
+   * 回复提示上的原因按钮（Telegram，ADR 0174）：给点击者自己仍在等待的真实根因回复记下原因码，可以重复选择、以最后一次为准；
+   * 回复提交或过期时原因码随反馈写入。按钮不独占，不写"最近操作"
+   */
+  private async reason(c: Click, btn: ButtonRow): Promise<ClickResult> {
+    const code = btn.target.reasonCode;
+    const of = btn.target.promptOf;
+    if (!isReasonCode(code) || !of) {
+      return this.done(c, btn.kind, 'invalid_data', '按钮无效');
+    }
+    if (!(await this.store.setReplyReason(of, c.channelUserId, code, c.at))) {
+      return this.done(c, btn.kind, 'reply_closed', '这次反馈已经提交或已过期');
+    }
+    return this.done(
+      c,
+      btn.kind,
+      'reason_set',
+      `已选择原因：${labels.reason('zh', code)}。请回复提示消息填写真实根因组件，不知道时回复 -`,
+    );
   }
 
   private async started(c: Click, btn: ButtonRow, r: ClickResult): Promise<ClickResult> {
@@ -365,7 +401,8 @@ export class Interactions {
     if (parsed.kind === 'too_long') {
       return `原因最长 ${MAX_REASON_CHARS} 字，本次未提交，请重新回复`;
     }
-    if (!(await this.store.submitReply(p.id, text, r.at))) {
+    const sent = await this.store.submitReply(p.id, text, r.at);
+    if (!sent) {
       return null;
     }
     await this.execute({ channel: r.channel, chat: r.chat, callbackId: claimId, at: r.at }, btn, actor, () =>
@@ -379,6 +416,7 @@ export class Interactions {
         'rejected',
         parsed.component,
         parsed.reason,
+        sent.reasonCode,
       ),
     );
     return null;
@@ -432,6 +470,7 @@ export class Interactions {
             'rejected',
             null,
             '5 分钟内未填写真实根因',
+            p.reasonCode,
           ),
         );
       } catch (e) {
@@ -450,6 +489,17 @@ export type RootReply =
   | { kind: 'ok'; component: string | null; reason: string | null }
   | { kind: 'unknown'; word: string }
   | { kind: 'too_long' };
+
+/**
+ * 飞书表单里选择的原因码（ADR 0174）：表单有原因选择时必须是登记的原因码，不合法时为 undefined；没有这一项的表单
+ * （原因选择加入之前发出的卡片）为 null
+ */
+export function formReason(form: Record<string, unknown>): FeedbackReasonCode | null | undefined {
+  if (!('reason_code' in form)) {
+    return null;
+  }
+  return isReasonCode(form.reason_code) ? form.reason_code : undefined;
+}
 
 /**
  * “组件 原因”：第一个词（以空白或常见分隔符分隔）是组件，不分大小写，也接受至少 3 个字符的唯一前缀；

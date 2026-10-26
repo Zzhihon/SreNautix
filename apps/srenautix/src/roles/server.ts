@@ -17,7 +17,7 @@ import { OptimizationStore } from '../optimize/store.js';
 import { registerResearchRoutes } from '../api/routes-research.js';
 import { pgConfigFromEnv } from '../config/database.js';
 import { parseDuration, parseListen, readSecretFile } from '../config/files.js';
-import { loadServerConfig, opsRepositories, type ServerConfig } from '../config/server.js';
+import { externalRootSettings, loadServerConfig, opsRepositories, type ServerConfig } from '../config/server.js';
 import { noveltyOptions } from '../config/novelty.js';
 import { kubernetesRollouts } from '../changes/kubernetes.js';
 import { ksmRollouts } from '../changes/ksm-rollouts.js';
@@ -27,6 +27,7 @@ import { changesInWindow, ChangesService } from '../changes/service.js';
 import { ConditionPublisher, serverConditions, workerRouteConditions } from '../console-bff/conditions.js';
 import { IntegrationRegistry } from '../console-bff/integrations.js';
 import { registerAlertRoutes } from '../console-bff/routes-alerts.js';
+import { registerEvalRoutes } from '../console-bff/routes-eval.js';
 import { registerIncidentRoutes } from '../console-bff/routes-incidents.js';
 import { apiTokenCaller, registerSystemRoutes } from '../console-bff/routes-system.js';
 import { registerConsoleStatic } from '../console-bff/static.js';
@@ -53,10 +54,11 @@ import type { RoleArgs } from '../main.js';
 import { ServerMetrics, startMetricsServer } from '../metrics.js';
 import { ServerNotifyActions } from '../notify/actions.js';
 import { NotifyService } from '../notify/index.js';
-import { ExternalRoots, externalTypeLookup, topologyPaths } from '../notify/external.js';
+import { ExternalRoots, externalTypeLookup, pgImpactAlerts, topologyPaths } from '../notify/external.js';
 import { PgMessageSource, ReportSource } from '../notify/source.js';
 import { Catalog, DEFAULT_CATALOG_PATH } from '../proposals/catalog.js';
-import { FeedbackService } from '../proposals/feedback.js';
+import { EvalCandidates } from '../proposals/candidates.js';
+import { FeedbackService, type Closure } from '../proposals/feedback.js';
 import { Policies } from '../proposals/policy.js';
 import { ProposalService } from '../proposals/service.js';
 import { SpokeRelay } from '../proposals/spoke.js';
@@ -73,18 +75,20 @@ import { purgeIdempotencyKeys } from '../store/idempotency.js';
 import { migrateExpand, migrationsReady } from '../store/migrate.js';
 import { migrateWhenReady } from '../store/migrate-when-ready.js';
 import type { OutboxEvent } from '../store/outbox.js';
-import { createPool, type PgConfig } from '../store/pool.js';
+import { createPool, type PgConfig, type Queryable } from '../store/pool.js';
 import { ComponentExpander, hintOf } from '../topology/expand.js';
 import { startInformerTopology } from '../topology/informer.js';
 import { KubeTools } from '../research/kube-tools.js';
 import { FirstSeen, objectHealth, type K8sObject } from '../detectors/health.js';
 import { DetectorService, detectorSettings } from '../detectors/service.js';
 import { GitHubApp, RepoRoles } from '../github/app.js';
+import { ClosureTracker } from '../github/closures.js';
 import { CoverageIssues } from '../github/coverage-issues.js';
 import { IssueService, type IssueReport } from '../github/issues.js';
 import { TopologyOverrides } from '../topology/overrides.js';
 import { TopologyStore } from '../topology/store.js';
 import { TopologyTargets } from '../topology/targets.js';
+import { RemediationChanges } from '../remediation/dedupe.js';
 import { GitOpsPulls } from '../remediation/pulls.js';
 import { RemediationService } from '../remediation/service.js';
 import { GitRepositoryTargets } from '../remediation/targets.js';
@@ -470,19 +474,8 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
   const bi = xr.business_impact;
   const externalRoots = xr.enabled
     ? new ExternalRoots(
-        pool,
-        {
-          enabled: true,
-          periodMs: parseDuration('notify.digest.external_roots.period', xr.period),
-          components: xr.components,
-          alertLabels: xr.alert_labels,
-          impact: {
-            alerts: c.notify.business_impact_alerts,
-            impactCards: bi.impact_cards,
-            withinMs: parseDuration('notify.digest.external_roots.business_impact.within', bi.within),
-            topologyHops: bi.topology_hops,
-          },
-        },
+        pgImpactAlerts(pool),
+        externalRootSettings(xr, c.notify.business_impact_alerts),
         externalTypeLookup(
           () => packs.componentTypes(),
           (clusterId, key) => topology.componentType(clusterId, key),
@@ -819,6 +812,7 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
     },
   });
   registerIncidentRoutes(app, { pool, auth, feedback, topology, evidence, worker });
+  registerEvalRoutes(app, { pool, auth, candidates: new EvalCandidates(pool) });
   registerAlertRoutes(app, {
     pool,
     auth,
@@ -975,9 +969,19 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
     );
   }
   // 自愈 PR（ADR 0108）：研判结论 → 领域包的修复模板 → 校验 → gitops_pr 提议；gateway 开出的 PR 关联到事件 issue 与通知
+  const closures = (cl: Queryable, x: Closure) => feedback.recordClosure(cl, x);
+  const rejectedCooldownMs = parseDuration('remediation.rejected_cooldown', c.remediation.rejected_cooldown);
   if (github) {
     const pulls = new GitOpsPulls(pool, github, issues, metrics);
     every(30_000, () => pulls.runOnce(), 'gitops_pr 的 PR 关联');
+    // 关闭的跟踪（ADR 0174）：每 10 分钟刷新打开的自愈 PR 与事件 issue，关闭且没有合并、以 not planned 关闭时写隐式反馈与评测候选
+    const tracker = new ClosureTracker(
+      pool,
+      github,
+      new RemediationChanges(pool, github, rejectedCooldownMs, closures),
+      closures,
+    );
+    every(10 * 60_000, () => tracker.runOnce(), '关闭的跟踪');
   }
   const rm = c.remediation;
   if (rm.enabled) {
@@ -999,7 +1003,7 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
           externalAlerts: xr.enabled
             ? { components: xr.components, alertLabels: xr.alert_labels }
             : { components: [], alertLabels: {} },
-          rejectedCooldownMs: parseDuration('remediation.rejected_cooldown', rm.rejected_cooldown),
+          rejectedCooldownMs,
         },
         {
           packs: () => packs.set,
@@ -1028,6 +1032,7 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
                   refsInBody: false,
                 })
             : null,
+          closures,
           metrics,
         },
       );

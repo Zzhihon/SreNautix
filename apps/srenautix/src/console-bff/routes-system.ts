@@ -830,7 +830,6 @@ export function registerSystemRoutes(app: FastifyInstance, d: SystemRouteDeps): 
       },
     });
   const read = (req: FastifyRequest) => d.auth.reader(req);
-  forward('POST', '/v1/runs/:run_id/eval-case', (req) => d.auth.user(req, 'eval.write'));
   forward('GET', '/v1/eval/reports', read);
   forward('GET', '/v1/eval/reports/:report_id', read);
   forward('GET', '/v1/eval/cases', read);

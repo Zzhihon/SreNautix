@@ -491,6 +491,7 @@ function build(
           number: pull.number,
           refsInBody: false,
         }),
+      closures: (c, x) => new FeedbackService(db.server, metrics).recordClosure(c, x),
       metrics,
     },
   );
@@ -1464,17 +1465,52 @@ describe('修改去重', () => {
   });
 
   it('人关闭 PR 且没有合并：同一个修改不再提出；同一模板对同一文件的其他修改在冷却期内不提出', async () => {
-    gh.close(PR, false);
+    // 人在关闭之前写了理由；关闭之后的评论不算
+    gh.comment(PR, '这个告警的阈值是有意设的，不要放宽', new Date(Date.now() - 60_000));
+    gh.close(PR, false, new Date(Date.now() - 30_000), 'ops-lead');
+    gh.comment(PR, '关闭之后补的一句', new Date());
     const fifth = await trigger(ALERT);
     expect(await svc.runOnce()).toBe(0);
     expect(await relaxAttempt(fifth.runId)).toMatchObject({ outcome: 'skipped', code: 'rejected_before' });
-    const state = await db.server.query<{ state: string; closed_at: Date | null }>(
-      'SELECT state, closed_at FROM server.remediation_changes WHERE proposal_id = $1',
+    const state = await db.server.query<{ state: string; closed_at: Date | null; incident_id: string }>(
+      'SELECT state, closed_at, incident_id FROM server.remediation_changes WHERE proposal_id = $1',
       [firstProposal],
     );
     expect(state.rows[0]).toMatchObject({ state: 'rejected', closed_at: expect.any(Date) });
-    // 被拒绝的 PR 上不再评论
-    expect(pullComments()).toHaveLength(3);
+    // 去重判断时读到的关闭同样写隐式反馈 pr_closed（ADR 0174）与评测候选（ADR 0175），关联提议所属的研判
+    const fb = await db.server.query(
+      `SELECT implicit, channel, principal_id, linked, reason, research_run_id FROM server.feedback
+        WHERE incident_id = $1 AND implicit = 'pr_closed'`,
+      [state.rows[0]!.incident_id],
+    );
+    const run = await db.server.query<{ run_id: string }>(
+      'SELECT run_id FROM server.remediation_attempts WHERE proposal_id = $1',
+      [firstProposal],
+    );
+    expect(fb.rows).toEqual([
+      {
+        implicit: 'pr_closed',
+        channel: 'github',
+        principal_id: 'github:ops-lead',
+        linked: false,
+        reason: '这个告警的阈值是有意设的，不要放宽',
+        research_run_id: run.rows[0]!.run_id,
+      },
+    ]);
+    const cand = await db.server.query(
+      'SELECT source, source_ref, suggested_type, state FROM server.eval_candidates WHERE incident_id = $1',
+      [state.rows[0]!.incident_id],
+    );
+    expect(cand.rows).toEqual([
+      {
+        source: 'pr_closed',
+        source_ref: `https://github.example.test/${REPO}/pull/${PR}`,
+        suggested_type: null,
+        state: 'pending',
+      },
+    ]);
+    // 被拒绝的 PR 上不再评论（人写的两条之外）
+    expect(pullComments().filter((c) => c.body.includes('<!-- srenautix:'))).toHaveLength(3);
 
     // 另一条误报告警：同一模板、同一个规则文件，冷却期（7 天）内不提出
     const variant = await trigger('ShopCacheMisses');

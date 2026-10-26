@@ -1,9 +1,12 @@
 import type {
+  Alert,
   ComponentType,
   EvidenceResult,
+  Incident,
   LocalizedText,
   NotifyBlock,
   NotifyRun,
+  StageAReport,
   TopologyEdge,
   TopologyNode,
 } from '@srenautix/contract';
@@ -183,8 +186,20 @@ export function matchesLabels(
   );
 }
 
+/**
+ * 分类用到的报告输入：ComposeInput 的子集。重建评测按每次运行的研判结论构造（ADR 0175），研判只需要状态与结论选中的根因
+ */
+export interface ClassifyInput {
+  incident: Incident;
+  alerts: Alert[];
+  /** 还没有阶段 A 报告的事件（ADR 0173）为 null */
+  stageA: Pick<StageAReport, 'cards'> | null;
+  language: 'zh' | 'en';
+  research: { state: string; output: { conclusion: { root_component: string | null } } | null } | null;
+}
+
 /** 事件的根因：完成的研判给出的根因，否则为发现根因 */
-export function rootOf(i: ComposeInput): string | null {
+export function rootOf(i: ClassifyInput): string | null {
   const out = i.research?.state === 'completed' ? i.research.output : null;
   return out?.conclusion.root_component ?? i.incident.root.component;
 }
@@ -198,12 +213,57 @@ const impactText = (c: EvidenceResult, lang: 'zh' | 'en'): string =>
   `${title(c.title, lang)}${c.value ? ` ${c.value}` : ''}`;
 
 /** 满足业务告警条件的一条告警（某个集群）：告警名、组件与开始、结束时间 */
-interface ImpactAlert {
+export interface ImpactAlert {
   cluster_id: string;
   alertname: string;
   component: string | null;
   starts_at: string;
   ends_at: string | null;
+}
+
+/**
+ * 业务影响告警（ADR 0166）的来源，按开始时间排序：给出时间段时为 [from, to) 内触发过的，否则为当前触发中的。
+ * server 读状态库（pgImpactAlerts），重建评测读重建包（ADR 0175）
+ */
+export type ImpactAlertSource = (
+  clusterIds: readonly string[],
+  matchers: readonly AlertMatcher[],
+  from?: Date,
+  to?: Date,
+) => Promise<ImpactAlert[]>;
+
+/** 状态库中的业务影响告警（server.alert_state） */
+export function pgImpactAlerts(pool: pg.Pool): ImpactAlertSource {
+  return async (clusterIds, matchers, from, to) => {
+    // 状态库先按每项 labels 的键预先筛选（满足任一项的键集合），取值与排除在这里判断
+    const keys = JSON.stringify(matcherKeys(matchers));
+    const hasKeys = `EXISTS (SELECT 1 FROM jsonb_array_elements($2::jsonb) k WHERE labels ?& ARRAY(SELECT jsonb_array_elements_text(k)))`;
+    const r = await pool.query<{
+      cluster_id: string;
+      alertname: string;
+      labels: Record<string, string>;
+      component: string | null;
+      starts_at: Date;
+      ends_at: Date | null;
+    }>(
+      from && to
+        ? `SELECT cluster_id, alertname, labels, component, starts_at, ends_at FROM server.alert_state
+            WHERE cluster_id = ANY($1::text[]) AND ${hasKeys} AND starts_at < $4
+              AND (ends_at IS NULL OR ends_at >= $3) ORDER BY starts_at, alert_id`
+        : `SELECT cluster_id, alertname, labels, component, starts_at, ends_at FROM server.alert_state
+            WHERE cluster_id = ANY($1::text[]) AND ${hasKeys} AND status = 'firing' ORDER BY starts_at, alert_id`,
+      from && to ? [clusterIds, keys, from, to] : [clusterIds, keys],
+    );
+    return r.rows
+      .filter((x) => isBusinessImpact(x.labels, matchers))
+      .map((a) => ({
+        cluster_id: a.cluster_id,
+        alertname: a.alertname,
+        component: a.component,
+        starts_at: a.starts_at.toISOString(),
+        ends_at: a.ends_at ? a.ends_at.toISOString() : null,
+      }));
+  };
 }
 
 /** 类型查询缓存 60 秒：同步每 5 秒对全部期望消息分类一次 */
@@ -213,7 +273,7 @@ export class ExternalRoots {
   private readonly cache = new Map<string, { at: number; v: boolean }>();
 
   constructor(
-    private readonly pool: pg.Pool,
+    private readonly alerts: ImpactAlertSource,
     readonly s: ExternalRootSettings,
     private readonly externalType: ExternalTypeLookup,
     private readonly paths: TopologyPathLookup,
@@ -225,7 +285,7 @@ export class ExternalRoots {
    * 或信号的组件沿依赖边到达上游根因。都不成立时为 null
    */
   private async relevance(
-    upstream: ComposeInput,
+    upstream: ClassifyInput,
     subject: 'alert' | 'incident',
     startsAt: string,
     component: string | null,
@@ -247,7 +307,7 @@ export class ExternalRoots {
 
   /** 与上游事件相关的业务告警：每个告警名一项，取最早开始的相关告警的依据 */
   private async relevantAlerts(
-    upstream: ComposeInput,
+    upstream: ClassifyInput,
     alerts: readonly ImpactAlert[],
   ): Promise<Array<{ alert: ImpactAlert; basis: ImpactBasis }>> {
     const out = new Map<string, { alert: ImpactAlert; basis: ImpactBasis }>();
@@ -276,7 +336,7 @@ export class ExternalRoots {
   }
 
   /** 根因是不是外部上游 */
-  async isExternal(i: ComposeInput): Promise<boolean> {
+  async isExternal(i: ClassifyInput): Promise<boolean> {
     const root = rootOf(i);
     if (root && (this.s.components.includes(root) || (await this.typeIsExternal(i.incident.cluster_id, root)))) {
       return true;
@@ -296,41 +356,14 @@ export class ExternalRoots {
     if (!matchers.length || !clusterIds.length) {
       return [];
     }
-    // 状态库先按每项 labels 的键预先筛选（满足任一项的键集合），取值与排除在这里判断
-    const keys = JSON.stringify(matcherKeys(matchers));
-    const hasKeys = `EXISTS (SELECT 1 FROM jsonb_array_elements($2::jsonb) k WHERE labels ?& ARRAY(SELECT jsonb_array_elements_text(k)))`;
-    const r = await this.pool.query<{
-      cluster_id: string;
-      alertname: string;
-      labels: Record<string, string>;
-      component: string | null;
-      starts_at: Date;
-      ends_at: Date | null;
-    }>(
-      from && to
-        ? `SELECT cluster_id, alertname, labels, component, starts_at, ends_at FROM server.alert_state
-            WHERE cluster_id = ANY($1::text[]) AND ${hasKeys} AND starts_at < $4
-              AND (ends_at IS NULL OR ends_at >= $3) ORDER BY starts_at, alert_id`
-        : `SELECT cluster_id, alertname, labels, component, starts_at, ends_at FROM server.alert_state
-            WHERE cluster_id = ANY($1::text[]) AND ${hasKeys} AND status = 'firing' ORDER BY starts_at, alert_id`,
-      from && to ? [clusterIds, keys, from, to] : [clusterIds, keys],
-    );
-    return r.rows
-      .filter((x) => isBusinessImpact(x.labels, matchers))
-      .map((a) => ({
-        cluster_id: a.cluster_id,
-        alertname: a.alertname,
-        component: a.component,
-        starts_at: a.starts_at.toISOString(),
-        ends_at: a.ends_at ? a.ends_at.toISOString() : null,
-      }));
+    return this.alerts(clusterIds, matchers, from, to);
   }
 
   /**
    * 对一组事件分类（期望消息与 issue 共用）。业务影响取（ADR 0150）：本事件异常的影响卡；同一集群触发中、与本事件相关的
    * 业务告警；同一集群其他触发中、根因不是外部上游、与本事件相关的事件里异常的影响卡。相关的依据见 relevance
    */
-  async classify(inputs: readonly ComposeInput[]): Promise<Map<string, Classification>> {
+  async classify(inputs: readonly ClassifyInput[]): Promise<Map<string, Classification>> {
     const out = new Map<string, Classification>();
     if (!this.s.enabled) {
       return out;
@@ -349,7 +382,7 @@ export class ExternalRoots {
     const clusters = [...new Set(ext.map((i) => i.incident.cluster_id))];
     const alerts = await this.impactAlerts(clusters);
     // 还没有阶段 A 报告的事件（ADR 0173）没有影响卡
-    const cardsOf = (i: ComposeInput) => (this.s.impact.impactCards ? (i.stageA?.cards ?? []).filter(impactCard) : []);
+    const cardsOf = (i: ClassifyInput) => (this.s.impact.impactCards ? (i.stageA?.cards ?? []).filter(impactCard) : []);
     for (const i of inputs) {
       const id = i.incident.incident_id;
       if (!external.get(id)) {

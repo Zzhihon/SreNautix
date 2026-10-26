@@ -227,6 +227,7 @@ export function feedback(over: Partial<Feedback>): Feedback {
     disposition: null,
     mechanism: null,
     reason: null,
+    reason_code: null,
     principal_id: 'alice',
     channel: 'console',
     linked: true,

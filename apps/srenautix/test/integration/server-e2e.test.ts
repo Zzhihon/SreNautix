@@ -289,6 +289,7 @@ afterAll(async () => {
 describe('server 端到端', () => {
   let incidentId = '';
   let proposalId = '';
+  let runId = '';
   let ticket: {
     ticket_id: string;
     envelope: { assertion: { proposal_id: string } };
@@ -588,6 +589,27 @@ describe('server 端到端', () => {
       body: { ...create, binding: { ...create.binding, incident_version: 99 } },
     });
     expect(stale.status).toBe(409);
+    // 另一个提议被人拒绝：拒绝时填写的理由写进隐式反馈的 reason（ADR 0174）
+    const p3 = await api('POST', '/v1/proposals', {
+      token: TOKENS.worker,
+      body: { ...create, params: { ...create.params, replicas: 4 } },
+      headers: { 'idempotency-key': 'e2e-proposal-0002' },
+    });
+    expect(p3.status).toBe(201);
+    const rejectedId = (p3.body as unknown as { proposal_id: string }).proposal_id;
+    const rej = await api('POST', `/v1/proposals/${rejectedId}/reject`, {
+      session: true,
+      body: { reason: '副本数已经够了，不需要扩容' },
+    });
+    expect(rej.status).toBe(200);
+    const implicit = await db.admin.query(
+      "SELECT reason, reason_code, research_run_id FROM server.feedback WHERE incident_id = $1 AND implicit = 'rejected'",
+      [incidentId],
+    );
+    expect(implicit.rows).toEqual([
+      { reason: '副本数已经够了，不需要扩容', reason_code: null, research_run_id: task.run_id },
+    ]);
+    runId = task.run_id;
     expect(
       (
         await api('POST', `/v1/research/tasks/${task.run_id}/finish`, {
@@ -785,6 +807,136 @@ describe('server 端到端', () => {
     conform('/v1/incidents/{incident_ref}/feedback', 'get', list);
     // 批准产生了一条隐式反馈
     expect((list.body as unknown as Array<{ implicit: string | null }>).map((x) => x.implicit)).toContain('approved');
+  });
+
+  it('反馈原因码写进反馈并生成评测候选；加入评测生成控制台来源的候选，管理员确认或放弃', async () => {
+    const fb = (body: Record<string, unknown>) =>
+      api('POST', `/v1/incidents/${incidentId}/feedback`, {
+        session: true,
+        body: {
+          research_run_id: null,
+          verdict: null,
+          root_component: null,
+          disposition_verdict: null,
+          disposition: null,
+          mechanism: null,
+          reason: null,
+          ...body,
+        },
+      });
+    // 三项都没有填时 400；只有原因码时合法（并行期的"比旧系统差"）
+    expect((await fb({})).status).toBe(400);
+    expect((await fb({ reason_code: 'bad_model' })).status).toBe(400);
+    const only = await fb({ reason_code: 'worse_than_baseline', reason: '旧系统没有推送' });
+    expect(only.status).toBe(201);
+    conform('/v1/incidents/{incident_ref}/feedback', 'post', only);
+    expect(only.body).toMatchObject({ reason_code: 'worse_than_baseline', verdict: null, disposition_verdict: null });
+    const wrong = await fb({ disposition_verdict: 'rejected', disposition: 'ignore', reason_code: 'false_positive' });
+    expect(wrong.status).toBe(201);
+    expect(wrong.body).toMatchObject({ reason_code: 'false_positive', disposition: 'ignore' });
+
+    // 同一事件、来源 feedback 的候选只有一个（取第一条：worse_than_baseline，建议 benign）
+    const list = await api('GET', '/v1/eval/candidates?state=pending', { session: true });
+    expect(list.status).toBe(200);
+    conform('/v1/eval/candidates', 'get', list);
+    const items = list.body as unknown as Array<{
+      candidate_id: string;
+      source: string;
+      source_ref: string;
+      suggested_type: string | null;
+      reason_code: string | null;
+    }>;
+    expect(items.filter((x) => x.source === 'feedback')).toEqual([
+      expect.objectContaining({
+        source_ref: (only.body as unknown as { feedback_id: string }).feedback_id,
+        suggested_type: 'benign',
+        reason_code: 'worse_than_baseline',
+      }),
+    ]);
+
+    // 加入评测：研判所属的事件生成来源 console 的候选；同一事件再加一次 409；没有的研判 404
+    const promote = await api('POST', `/v1/runs/${runId}/eval-case`, {
+      session: true,
+      body: { case_type: 'incident', suite: 'reference' },
+    });
+    expect(promote.status).toBe(201);
+    conform('/v1/runs/{run_id}/eval-case', 'post', promote);
+    expect(promote.body).toMatchObject({ snapshot_status: 'queued' });
+    const consoleId = (promote.body as unknown as { case_id: string }).case_id;
+    const again = await api('POST', `/v1/runs/${runId}/eval-case`, {
+      session: true,
+      body: { case_type: 'benign', suite: 'reference' },
+    });
+    expect(again.status).toBe(409);
+    expect(
+      (
+        await api('POST', `/v1/runs/${randomUUID()}/eval-case`, {
+          session: true,
+          body: { case_type: 'incident', suite: 's' },
+        })
+      ).status,
+    ).toBe(404);
+
+    // 确认：标准答案按标注的约束校验；只有待确认的候选可以确认或放弃
+    const feedbackCandidate = items.find((x) => x.source === 'feedback')!.candidate_id;
+    const bad = await api('POST', `/v1/eval/candidates/${feedbackCandidate}/confirm`, {
+      session: true,
+      body: { type: 'benign', roots: [], disposition: 'act', mechanism: null },
+    });
+    expect(bad.status).toBe(400);
+    const ok = await api('POST', `/v1/eval/candidates/${feedbackCandidate}/confirm`, {
+      session: true,
+      body: { type: 'benign', roots: [], disposition: 'ignore', mechanism: null },
+    });
+    expect(ok.status).toBe(200);
+    conform('/v1/eval/candidates/{candidate_id}/confirm', 'post', ok);
+    expect(ok.body).toMatchObject({ state: 'confirmed', decided_by: 'local:admin', label: { type: 'benign' } });
+    expect(
+      (await api('POST', `/v1/eval/candidates/${feedbackCandidate}/drop`, { session: true, body: { reason: null } }))
+        .status,
+    ).toBe(409);
+    const dropped = await api('POST', `/v1/eval/candidates/${consoleId}/drop`, {
+      session: true,
+      body: { reason: '重复' },
+    });
+    expect(dropped.status).toBe(200);
+    conform('/v1/eval/candidates/{candidate_id}/drop', 'post', dropped);
+    const all = await api('GET', '/v1/eval/candidates?state=all', { session: true });
+    expect(
+      (all.body as unknown as Array<{ candidate_id: string; state: string }>).map((x) => [x.candidate_id, x.state]),
+    ).toEqual(
+      expect.arrayContaining([
+        [feedbackCandidate, 'confirmed'],
+        [consoleId, 'dropped'],
+      ]),
+    );
+    const audit = await db.admin.query<{ kind: string }>(
+      "SELECT kind FROM server.governance_audit WHERE kind LIKE 'eval.candidate_%' ORDER BY seq",
+    );
+    expect(audit.rows.map((r) => r.kind)).toEqual([
+      'eval.candidate_promoted',
+      'eval.candidate_confirmed',
+      'eval.candidate_dropped',
+    ]);
+    // 时间线的反馈条目带原因码与登记表的级别，说明取登记表的文字
+    const timeline = await api('GET', `/v1/incidents/${incidentId}/timeline`, { session: true });
+    const coded = (
+      timeline.body as unknown as Array<{ kind: string; text: string; code: string | null; level: string | null }>
+    ).filter((x) => x.kind === 'feedback' && x.code !== null);
+    expect(coded).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'worse_than_baseline',
+          level: 'warning',
+          text: expect.stringMatching(/：原因：比旧系统差$/),
+        }),
+        expect.objectContaining({
+          code: 'false_positive',
+          level: 'warning',
+          text: expect.stringMatching(/：rejected，原因：真误报$/),
+        }),
+      ]),
+    );
   });
 
   it('Grafana 插件按邮箱映射到已登录的用户授权，只放行读取与 createFeedback', async () => {

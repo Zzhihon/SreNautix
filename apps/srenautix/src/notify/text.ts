@@ -40,6 +40,36 @@ const DISPOSITION: Record<Language, Dict> = {
   en: { act: 'Act', ignore: 'Ignore', escalate: 'Escalate', undetermined: 'Undetermined' },
 };
 
+/** 反馈的原因码（ADR 0174），与控制台的文案相同 */
+const REASON: Record<Language, Dict> = {
+  zh: {
+    false_positive: '真误报',
+    not_actionable: '不需要处理',
+    known_issue: '已知问题',
+    planned_change: '计划内变更',
+    transient_self_resolved: '短暂、自行恢复',
+    external_upstream: '外部上游',
+    duplicate: '重复',
+    poor_wording: '措辞不佳',
+    wrong_fix: '修复方向错误',
+    worse_than_baseline: '比旧系统差',
+    other: '其他',
+  },
+  en: {
+    false_positive: 'False positive',
+    not_actionable: 'Not actionable',
+    known_issue: 'Known issue',
+    planned_change: 'Planned change',
+    transient_self_resolved: 'Transient, self-resolved',
+    external_upstream: 'External upstream',
+    duplicate: 'Duplicate',
+    poor_wording: 'Poor wording',
+    wrong_fix: 'Wrong fix',
+    worse_than_baseline: 'Worse than the old system',
+    other: 'Other',
+  },
+};
+
 const ACTION: Record<Language, Dict> = {
   zh: {
     approve: '批准',
@@ -106,6 +136,7 @@ export const t = {
   section: (l: Language, v: string) => label(SECTION[l], v),
   omitted: (l: Language, v: string) => label(OMITTED[l], v),
   disposition: (l: Language, v: string) => label(DISPOSITION[l], v),
+  reason: (l: Language, v: string) => label(REASON[l], v),
   action: (l: Language, v: string) => label(ACTION[l], v),
   misc: (l: Language, key: keyof (typeof MISC)['zh'], vars: Record<string, string | number> = {}) =>
     (MISC[l][key] as string).replace(/\{(\w+)\}/g, (_, k: string) => String(vars[k] ?? '')),

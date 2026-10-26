@@ -5,7 +5,7 @@ import { TelegramAdapter } from '../../src/channels/telegram/adapter.js';
 import { TelegramClient } from '../../src/channels/telegram/client.js';
 import { ServerMetrics } from '../../src/metrics.js';
 import { NotifyEngine } from '../../src/notify/engine.js';
-import { ExternalRoots, externalTypeLookup, topologyPaths } from '../../src/notify/external.js';
+import { ExternalRoots, externalTypeLookup, pgImpactAlerts, topologyPaths } from '../../src/notify/external.js';
 import { Interactions } from '../../src/notify/interactions.js';
 import { NO_LINKS } from '../../src/notify/links.js';
 import type { ActionOutcome, NotifyActions } from '../../src/notify/ports.js';
@@ -252,7 +252,7 @@ beforeEach(async () => {
   );
   const topology = new TopologyStore(db.server);
   const external = new ExternalRoots(
-    db.server,
+    pgImpactAlerts(db.server),
     {
       enabled: true,
       periodMs: 3_600_000,

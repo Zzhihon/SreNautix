@@ -782,6 +782,7 @@ export function incidentSegments(
             disposition_verdict: f.disposition_verdict,
             disposition: f.disposition,
             mechanism: f.mechanism,
+            reason_code: f.reason_code,
             at: f.created_at,
           })),
         ),

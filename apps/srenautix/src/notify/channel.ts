@@ -59,9 +59,9 @@ export interface DigestInput {
  * 渲染器版本：notify_messages.render_version 记录期望内容由哪一版渲染器产出。渲染结果的规则变化
  * （例如 Telegram 的实体预算，ADR 0145）时加一；进程启动时把旧版本产出、还没有呈现的期望内容按当前代码重新渲染。
  * 旧代码写入的行没有版本（NULL），视为旧版本。版本 2：说明行带原因码的文字，编辑次数用完的已结束事件渲染最后一次编辑的
- * 精简内容（ADR 0172、0173）。
+ * 精简内容（ADR 0172、0173）。版本 3：飞书拒绝表单带原因选择（ADR 0174）。
  */
-export const RENDER_VERSION = 2;
+export const RENDER_VERSION = 3;
 
 /**
  * 渠道永久错误的原因（原因码登记表的 notify_permanent 分组）：entities_too_long、message_too_long、parse_error、

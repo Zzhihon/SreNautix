@@ -6,8 +6,9 @@ import { DEFAULT_REVISION_LABELS } from '../changes/kubernetes.js';
 import { DEFAULT_EXTERNAL_LABELS, isComponentKey } from '@srenautix/core';
 import { DEFAULT_OPTIMIZATION, optimizationConfig, pgReadConnection } from '../optimize/config.js';
 import { NOVELTY_CONFIG_DEFAULT, noveltyConfig } from './novelty.js';
-import { alertMatcher, upgradeMatchers } from '../alerts/business-impact.js';
+import { alertMatcher, upgradeMatchers, type AlertMatcher } from '../alerts/business-impact.js';
 import { logger } from '../log.js';
+import type { ExternalRootSettings } from '../notify/external.js';
 
 const duration = z.string().regex(/^\d+(ms|s|m|h|d)$/, '时长形如 30s、5m、12h');
 const url = z.string().url();
@@ -238,6 +239,46 @@ const externalRoots = z
       .default({ impact_cards: true, within: '30m', topology_hops: 6 }),
   })
   .strict();
+
+export type ExternalRootsConfig = z.infer<typeof externalRoots>;
+
+/**
+ * 推送规则中可以复用的两项：推送的严重度与外部上游的周期汇总。server 的 notify 与重建评测的 reconstruct.notify
+ * （ADR 0175）同一写法
+ */
+export const notifySeverities = z.array(z.enum(['critical', 'warning', 'info'])).default(['critical', 'warning']);
+export const notifyDigest = z
+  .object({ external_roots: externalRoots.default(EXTERNAL_ROOTS_DEFAULT) })
+  .strict()
+  .default({ external_roots: EXTERNAL_ROOTS_DEFAULT });
+
+/** 重建评测的 reconstruct.notify（ADR 0175）：推送的严重度与外部上游的周期汇总，默认值与 server 相同 */
+export const notifyRules = z.object({ severities: notifySeverities, digest: notifyDigest }).strict();
+export type NotifyRulesConfig = z.infer<typeof notifyRules>;
+export const NOTIFY_RULES_DEFAULT: NotifyRulesConfig = {
+  severities: ['critical', 'warning'],
+  digest: { external_roots: EXTERNAL_ROOTS_DEFAULT },
+};
+
+/** notify.digest.external_roots 与业务影响告警 → 外部上游的分类设置（notify/external.ts 的 ExternalRoots） */
+export function externalRootSettings(
+  xr: ExternalRootsConfig,
+  businessImpactAlerts: readonly AlertMatcher[],
+  path = 'notify.digest.external_roots',
+): ExternalRootSettings {
+  return {
+    enabled: xr.enabled,
+    periodMs: parseDuration(`${path}.period`, xr.period),
+    components: xr.components,
+    alertLabels: xr.alert_labels,
+    impact: {
+      alerts: businessImpactAlerts,
+      impactCards: xr.business_impact.impact_cards,
+      withinMs: parseDuration(`${path}.business_impact.within`, xr.business_impact.within),
+      topologyHops: xr.business_impact.topology_hops,
+    },
+  };
+}
 
 const feishu = z
   .object({
@@ -632,14 +673,11 @@ export const serverConfigSchema = z
       .object({
         // 每条消息开头的前缀，例如 "[影子]"
         prefix: z.string().default(''),
-        severities: z.array(z.enum(['critical', 'warning', 'info'])).default(['critical', 'warning']),
+        severities: notifySeverities,
         resolved_retention: duration.default('6h'),
         telegram: telegram.optional(),
         feishu: feishu.optional(),
-        digest: z
-          .object({ external_roots: externalRoots.default(EXTERNAL_ROOTS_DEFAULT) })
-          .strict()
-          .default({ external_roots: EXTERNAL_ROOTS_DEFAULT }),
+        digest: notifyDigest,
         // 业务影响告警（ADR 0166）：满足任一项的告警。首条消息时延的 business_impact 标签（ADR 0159）、外部上游汇总的
         // 业务影响（ADR 0150）、处置推导中业务受影响时不给 ignore（ADR 0163）与计划内退役判为 ignore 的前提（ADR 0167）
         // 都用它。为空时没有业务影响告警

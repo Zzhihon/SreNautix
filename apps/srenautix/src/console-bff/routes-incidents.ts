@@ -396,7 +396,7 @@ export function registerIncidentRoutes(app: FastifyInstance, d: IncidentRouteDep
 type TimelineEntry = HubComponents['schemas']['TimelineEntry'];
 type TimelineKind = TimelineEntry['kind'];
 
-/** 带原因码的条目种类 → 原因码所属的阶段（ADR 0172） */
+/** 带原因码的条目种类 → 原因码所属的阶段（ADR 0172；反馈的原因码见 ADR 0174） */
 const KIND_STAGE: Partial<Record<TimelineKind, ReasonStage>> = {
   stage_a_missing: 'stage_a',
   research_concluded: 'research',
@@ -405,9 +405,10 @@ const KIND_STAGE: Partial<Record<TimelineKind, ReasonStage>> = {
   notify: 'notify',
   issue: 'issue',
   incident_state: 'incident',
+  feedback: 'feedback',
 };
 
-/** server.incident_reasons 的阶段 → 时间线条目种类 */
+/** server.incident_reasons 的阶段 → 时间线条目种类（反馈的原因码在 server.feedback，不写入 incident_reasons） */
 const RECORD_KIND: Record<ReasonStage, TimelineKind> = {
   notify: 'notify',
   stage_a: 'stage_a_missing',
@@ -415,6 +416,7 @@ const RECORD_KIND: Record<ReasonStage, TimelineKind> = {
   remediation: 'remediation_attempt',
   issue: 'issue',
   incident: 'incident_state',
+  feedback: 'feedback',
 };
 
 /** 一条时间线条目；code 不为空时按条目种类的阶段在登记表中查出级别，未登记的原因码抛出 */
@@ -641,19 +643,23 @@ export async function timelineOf(pool: pg.Pool, row: IncidentRow): Promise<Timel
     verdict: string | null;
     disposition_verdict: string | null;
     implicit: string | null;
+    reason_code: string | null;
     principal_id: string;
   }>(
-    'SELECT feedback_id, created_at, verdict, disposition_verdict, implicit, principal_id FROM server.feedback WHERE incident_id = $1',
+    'SELECT feedback_id, created_at, verdict, disposition_verdict, implicit, reason_code, principal_id FROM server.feedback WHERE incident_id = $1',
     [row.incident_id],
   );
   for (const f of fbs.rows) {
+    // 原因码（ADR 0174）放在 code，说明跟在评价之后
+    const why = f.reason_code === null ? null : `原因：${zh('feedback', f.reason_code)}`;
     out.push(
       entry(
         f.created_at.toISOString(),
         'feedback',
-        `${f.principal_id}：${f.verdict ?? f.disposition_verdict ?? f.implicit ?? ''}`,
+        `${f.principal_id}：${[f.verdict ?? f.disposition_verdict ?? f.implicit, why].filter(Boolean).join('，')}`,
         f.feedback_id,
         false,
+        f.reason_code,
       ),
     );
   }

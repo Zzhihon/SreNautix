@@ -1,3 +1,4 @@
+import type { FeedbackReasonCode } from '@srenautix/contract';
 import type pg from 'pg';
 import { tx } from '../store/pool.js';
 import { RENDER_VERSION, type ActionResultView, type RegisteredButton } from './channel.js';
@@ -138,6 +139,8 @@ export interface PendingReply {
   promptMessageId: string | null;
   expiresAt: Date;
   state: 'waiting' | 'submitted' | 'expired';
+  /** 回复之前在提示上选择的原因码（Telegram 的原因按钮，ADR 0174）；没有选择时为 null */
+  reasonCode: FeedbackReasonCode | null;
 }
 
 interface DbPending {
@@ -152,6 +155,7 @@ interface DbPending {
   prompt_message_id: string | null;
   expires_at: Date;
   state: 'waiting' | 'submitted' | 'expired';
+  reason_code: FeedbackReasonCode | null;
 }
 
 const toPending = (r: DbPending): PendingReply => ({
@@ -166,6 +170,7 @@ const toPending = (r: DbPending): PendingReply => ({
   promptMessageId: r.prompt_message_id,
   expiresAt: r.expires_at,
   state: r.state,
+  reasonCode: r.reason_code,
 });
 
 const LANE_ORDER = `CASE lane WHEN 'urgent' THEN 0 WHEN 'digest' THEN 1 WHEN 'edit' THEN 2 ELSE 3 END`;
@@ -616,11 +621,25 @@ export class NotifyStore {
     return r.rows[0] ? toPending(r.rows[0]) : null;
   }
 
-  /** 提交与过期互斥：只有仍在等待的记录才能提交。 */
-  async submitReply(id: number, reply: string, now: Date): Promise<boolean> {
-    const r = await this.pool.query(
-      "UPDATE server.notify_pending_replies SET state = 'submitted', reply = $2, resolved_at = $3 WHERE id = $1 AND state = 'waiting'",
+  /** 提交与过期互斥：只有仍在等待的记录才能提交。返回提交后的记录（带提交时刻已选的原因码），没有提交时为 null */
+  async submitReply(id: number, reply: string, now: Date): Promise<PendingReply | null> {
+    const r = await this.pool.query<DbPending>(
+      `UPDATE server.notify_pending_replies SET state = 'submitted', reply = $2, resolved_at = $3
+        WHERE id = $1 AND state = 'waiting' RETURNING *`,
       [id, reply, now],
+    );
+    return r.rows[0] ? toPending(r.rows[0]) : null;
+  }
+
+  /**
+   * 回复提示上的原因按钮（ADR 0174）：给 short id 为 shortId 的按钮上、由 channelUserId 发起、仍在等待的回复记下原因码。
+   * 没有这样的回复时返回 false
+   */
+  async setReplyReason(shortId: string, channelUserId: string, code: FeedbackReasonCode, now: Date): Promise<boolean> {
+    const r = await this.pool.query(
+      `UPDATE server.notify_pending_replies SET reason_code = $3
+        WHERE short_id = $1 AND channel_user_id = $2 AND state = 'waiting' AND expires_at > $4`,
+      [shortId, channelUserId, code, now],
     );
     return (r.rowCount ?? 0) === 1;
   }

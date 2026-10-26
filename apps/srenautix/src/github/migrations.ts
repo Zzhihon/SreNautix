@@ -120,5 +120,17 @@ CREATE INDEX coverage_gap_incidents_unreported_idx ON server.coverage_gap_incide
   WHERE reported_at IS NULL;
 `,
     },
+    {
+      version: 5,
+      name: 'when and why people closed incident issues, read by the closure tracker',
+      phase: 'expand',
+      sql: `
+-- 关闭的跟踪（ADR 0174）：人在 GitHub 上关闭事件 issue 的时刻与原因（state_reason：completed、not_planned 等），
+-- checked_at 是上一次读取 issue 状态的时间（每轮先读最久没有读过的）。state 不变：issue 的进展评论照常追加
+ALTER TABLE server.github_issues ADD COLUMN closed_at timestamptz;
+ALTER TABLE server.github_issues ADD COLUMN state_reason text;
+ALTER TABLE server.github_issues ADD COLUMN checked_at timestamptz;
+`,
+    },
   ],
 };

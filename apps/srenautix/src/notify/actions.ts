@@ -1,4 +1,4 @@
-import type { Channel, Disposition, Incident } from '@srenautix/contract';
+import type { Channel, Disposition, FeedbackReasonCode, Incident } from '@srenautix/contract';
 import type pg from 'pg';
 import { HttpError } from '../api/errors.js';
 import type { ChatLinks } from '../identity/chat-links.js';
@@ -118,6 +118,7 @@ export class ServerNotifyActions implements NotifyActions {
     verdict: 'confirmed' | 'rejected',
     rootComponent: string | null,
     reason: string | null,
+    reasonCode: FeedbackReasonCode | null,
   ): Promise<ActionOutcome> {
     if (!actor.principalId) {
       return this.notLinked();
@@ -135,6 +136,7 @@ export class ServerNotifyActions implements NotifyActions {
         disposition: null,
         mechanism: null,
         reason,
+        reason_code: reasonCode,
       });
       return { ok: true, message: '已记录反馈' };
     } catch (e) {
@@ -147,6 +149,7 @@ export class ServerNotifyActions implements NotifyActions {
     t: { incidentId: string; incidentVersion: number; researchRunId: string | null },
     verdict: 'confirmed' | 'rejected',
     disposition: Disposition | null,
+    reasonCode: FeedbackReasonCode | null,
   ): Promise<ActionOutcome> {
     if (!actor.principalId) {
       return this.notLinked();
@@ -164,6 +167,7 @@ export class ServerNotifyActions implements NotifyActions {
         disposition: verdict === 'rejected' ? disposition : null,
         mechanism: null,
         reason: null,
+        reason_code: reasonCode,
       });
       return { ok: true, message: '已记录反馈' };
     } catch (e) {

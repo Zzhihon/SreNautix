@@ -191,5 +191,14 @@ ALTER TABLE server.notify_messages ADD COLUMN final_edited_at timestamptz;
 UPDATE server.notify_messages SET abandoned_at = NULL, abandoned_reason = NULL WHERE abandoned_reason = 'ended_edit_cap';
 `,
     },
+    {
+      version: 5,
+      name: 'reason code chosen while a root cause reply is pending',
+      phase: 'expand',
+      // ADR 0174：Telegram 的真实根因回复提示上有原因按钮，回复之前选择的原因码记在等待的回复上，提交（或过期）时写进反馈
+      sql: `
+ALTER TABLE server.notify_pending_replies ADD COLUMN reason_code text;
+`,
+    },
   ],
 };

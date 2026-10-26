@@ -1,4 +1,4 @@
-import type { Channel, Disposition } from '@srenautix/contract';
+import type { Channel, Disposition, FeedbackReasonCode } from '@srenautix/contract';
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from '../../src/api/http.js';
@@ -57,11 +57,24 @@ class RecordingActions implements NotifyActions {
   async undo(a: ChannelActor, id: string) {
     return this.rec('undo', a, id);
   }
-  async feedbackRoot(a: ChannelActor, t: unknown, v: string, root: string | null, reason: string | null) {
-    return this.rec('feedbackRoot', a, t, v, root, reason);
+  async feedbackRoot(
+    a: ChannelActor,
+    t: unknown,
+    v: string,
+    root: string | null,
+    reason: string | null,
+    code: FeedbackReasonCode | null,
+  ) {
+    return this.rec('feedbackRoot', a, t, v, root, reason, code);
   }
-  async feedbackDisposition(a: ChannelActor, t: unknown, v: string, d: Disposition | null) {
-    return this.rec('feedbackDisposition', a, t, v, d);
+  async feedbackDisposition(
+    a: ChannelActor,
+    t: unknown,
+    v: string,
+    d: Disposition | null,
+    code: FeedbackReasonCode | null,
+  ) {
+    return this.rec('feedbackDisposition', a, t, v, d, code);
   }
   async resolvedConfirm(a: ChannelActor, id: string, version: number) {
     return this.rec('resolvedConfirm', a, id, version);
@@ -391,18 +404,57 @@ describe('Telegram webhook 与按钮', () => {
   it('结论对立即提交；结论错的回复给出真实根因（无法识别时说明，"-" 表示不知道）', async () => {
     link();
     expect(await click('结论对')).toBe('已提交，结果见消息');
-    expect(actions.calls[0]!.args.slice(1)).toEqual(['confirmed', 'Deployment:shop/worker', null]);
+    expect(actions.calls[0]!.args.slice(1)).toEqual(['confirmed', 'Deployment:shop/worker', null, null]);
     // 反馈按钮提交后释放，可以再点（改判）
     expect(await click('结论错')).toBe('请在 5 分钟内回复机器人的提示消息，填写真实根因组件');
     expect(String(lastSent().text)).toContain('可选：Deployment:shop/worker、Node:node-3、postgres.cluster:data/pg');
     await reply(102, 'redis 慢');
     expect(String(lastSent().text)).toContain('无法识别组件“redis”');
     await reply(102, 'node-3 磁盘写满');
-    expect(actions.calls[1]!.args.slice(1)).toEqual(['rejected', 'Node:node-3', '磁盘写满']);
+    // 没有选择原因按钮时原因码为 null
+    expect(actions.calls[1]!.args.slice(1)).toEqual(['rejected', 'Node:node-3', '磁盘写满', null]);
     expect(await click('结论错')).toBe('请在 5 分钟内回复机器人的提示消息，填写真实根因组件');
     // 103 是对无法识别组件的说明，第二次提示是 104
     await reply(104, '-');
-    expect(actions.calls[2]!.args.slice(1)).toEqual(['rejected', null, null]);
+    expect(actions.calls[2]!.args.slice(1)).toEqual(['rejected', null, null, null]);
+  });
+
+  it('结论错的提示带一组原因按钮：只有发起者可以选，以最后一次为准，原因码随回复提交；过期提交时同样带上', async () => {
+    link();
+    actions.links.set(`telegram:${BOB.id}`, 'oidc:bob');
+    expect(await click('结论错')).toBe('请在 5 分钟内回复机器人的提示消息，填写真实根因组件');
+    const prompt = lastSent();
+    expect(String(prompt.text).startsWith('@alice_oncall，请先选择原因，再回复本消息填写真实根因组件')).toBe(true);
+    const kb = (prompt.reply_markup as { inline_keyboard: Array<Array<{ text: string; callback_data: string }>> })
+      .inline_keyboard;
+    expect(kb.map((row) => row.length)).toEqual([3, 3, 3, 2]);
+    const reason = (label: string) => kb.flat().find((b) => b.text === label)!.callback_data;
+    expect(kb.flat().map((b) => b.text)).toContain('修复方向错误');
+    expect(await click('', BOB, undefined, reason('真误报'))).toBe('只有发起这次反馈的成员可以选择');
+    expect(await click('', ALICE, undefined, reason('真误报'))).toBe(
+      '已选择原因：真误报。请回复提示消息填写真实根因组件，不知道时回复 -',
+    );
+    expect(await click('', ALICE, undefined, reason('已知问题'))).toContain('已选择原因：已知问题');
+    expect(actions.calls).toEqual([]);
+    await reply(102, 'node-3 每周备份');
+    expect(actions.calls[0]!.args.slice(1)).toEqual(['rejected', 'Node:node-3', '每周备份', 'known_issue']);
+    // 已提交后原因按钮不再生效
+    expect(await click('', ALICE, undefined, reason('其他'))).toBe('这次反馈已经提交或已过期');
+
+    // 再次反馈，只选原因不回复：过期时提交"结论错、根因未知"，带上选择的原因
+    expect(await click('结论错')).toBe('请在 5 分钟内回复机器人的提示消息，填写真实根因组件');
+    const second = (
+      lastSent().reply_markup as { inline_keyboard: Array<Array<{ text: string; callback_data: string }>> }
+    ).inline_keyboard;
+    await click('', ALICE, undefined, second.flat().find((b) => b.text === '短暂、自行恢复')!.callback_data);
+    now += REPLY_WINDOW_MS;
+    await engine.syncOnce();
+    expect(actions.calls[1]!.args.slice(1)).toEqual([
+      'rejected',
+      null,
+      '5 分钟内未填写真实根因',
+      'transient_self_resolved',
+    ]);
   });
 
   it('处置错：发出只有点击者能用的选择按钮', async () => {
@@ -418,7 +470,7 @@ describe('Telegram webhook 与按钮', () => {
     expect(await click('', ALICE, undefined, escalate)).toBe('已提交，结果见消息');
     expect(actions.calls).toHaveLength(1);
     expect(actions.calls[0]!.op).toBe('feedbackDisposition');
-    expect(actions.calls[0]!.args.slice(1)).toEqual(['rejected', 'escalate']);
+    expect(actions.calls[0]!.args.slice(1)).toEqual(['rejected', 'escalate', null]);
   });
 
   it('回调已过期时应答失败不影响操作；其他群与无效按钮不处理', async () => {
