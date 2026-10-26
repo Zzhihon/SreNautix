@@ -5,8 +5,10 @@
 #   SRENAUTIX_ROOT              根因组件键的正则（ComponentKey，与 eval/scenarios/<场景>.yaml 的 root_components 对应）
 #   SRENAUTIX_MAX_INCIDENTS     注入之后与场景相关的事件数上限（默认 2）
 #   SRENAUTIX_CONCLUSIONS       阶段 B 允许的结论（默认 "likely evidence_consistent"）
-#   SRENAUTIX_REMEDIATION       期望的修复类别（release_rollback | config_resource | alert_rule | topology_coverage）；为空时不检查 PR
+#   SRENAUTIX_REMEDIATION       期望的修复类别（release_rollback | config_resource | alert_rule）；为空时不检查 PR
 #   SRENAUTIX_PR_FILES          修复 PR 应当改动的文件（kind/gitops 中的路径，正则）
+#   SRENAUTIX_COVERAGE_ALERT    没有告警目录条目的告警名（ADR 0171）：检查 kind/gitops 上有它的覆盖缺口 issue，列出根因事件，
+#                               并且这个事件没有自愈 PR
 #   SRENAUTIX_TIMEOUT           每个环节的等待时间（秒，默认 600）
 #
 # 检查经 worker 的服务 token 调用 server 的读取接口（worker 调用方可以读取全部事件），GitHub 一侧读 gitlocal 的 /_test 接口。
@@ -169,6 +171,41 @@ check_remediation() {
   log "自愈 PR：#${number}（${head}）改动 $(jq -c . <<<"$files")，关联 issue #${issue}"
 }
 
+# 覆盖缺口（ADR 0171）：kind/gitops 上有带 srenautix 与 coverage 标签、正文标记为
+# <!-- srenautix:coverage=<集群>/<SRENAUTIX_COVERAGE_ALERT> --> 的 issue（apps/srenautix/src/github/coverage-issues.ts），
+# 正文或评论列出根因事件；这个事件没有 srenautix/* 的 PR。参数：事件 id、注入时间
+check_coverage() {
+  local id=$1 since=$2 timeout=${SRENAUTIX_TIMEOUT:-600} deadline state issue number re
+  re="<!-- srenautix:coverage=[^/ ]+/${SRENAUTIX_COVERAGE_ALERT} -->"
+  deadline=$((SECONDS + timeout))
+  until state=$(gitlocal_api GET /_test/state) &&
+    issue=$(jq -c --arg re "$re" '[.repos["kind/gitops"].items[]
+      | select((.is_pr | not) and (.body | test($re)))][0] // empty' <<<"$state") && [[ -n "$issue" ]]; do
+    ((SECONDS < deadline)) || die "覆盖缺口：${timeout}s 内 kind/gitops 上没有告警 ${SRENAUTIX_COVERAGE_ALERT} 的覆盖 issue"
+    sleep 15
+  done
+  number=$(jq -r .number <<<"$issue")
+  jq -e '(.labels | index("srenautix")) and (.labels | index("coverage"))' <<<"$issue" >/dev/null ||
+    die "覆盖缺口：issue #${number} 的标签是 $(jq -c .labels <<<"$issue")，应含 srenautix 与 coverage"
+  [[ "$(jq '[.repos["kind/gitops"].items[] | select((.is_pr | not) and (.body | test($re)))] | length' --arg re "$re" <<<"$state")" == 1 ]] ||
+    die "覆盖缺口：告警 ${SRENAUTIX_COVERAGE_ALERT} 有不止一个覆盖 issue"
+  # 事件开出时写在正文里，issue 开出之后才登记的事件写在评论里
+  until state=$(gitlocal_api GET /_test/state) &&
+    jq -e --arg n "$number" --arg id "$id" '.repos["kind/gitops"] as $r
+      | ([$r.items[] | select(.number == ($n | tonumber)) | .body] + [($r.comments[$n] // [])[] | .body])
+      | any(contains("/incidents/" + $id))' <<<"$state" >/dev/null; do
+    ((SECONDS < deadline)) || die "覆盖缺口：issue #${number} 的正文与评论没有列出事件 ${id}"
+    sleep 15
+  done
+  if jq -e --arg id "$id" --arg since "$since" '[.repos["kind/gitops"].items[]
+      | select(.is_pr and (.head | startswith("srenautix/")) and .created_at >= $since
+               and (.body | contains("<!-- srenautix:incident=" + $id + " -->")))] | length > 0' <<<"$state" >/dev/null; then
+    die "覆盖缺口：事件 ${id} 开出了自愈 PR，覆盖缺口只开 issue"
+  fi
+  check_git_controls "$since"
+  log "覆盖缺口：issue #${number}（告警 ${SRENAUTIX_COVERAGE_ALERT}）列出事件 ${id}，没有自愈 PR"
+}
+
 # 补偿控制：注入之后 App 机器人只改动过 srenautix/* 分支，main 只有人工身份的提交；没有经 REST 的合并请求
 check_git_controls() {
   local since=$1 state bad
@@ -208,6 +245,8 @@ check_srenautix() {
   check_analysis "$id" "$since"
   if [[ -n "${SRENAUTIX_REMEDIATION:-}" ]]; then
     check_remediation "$id" "$since"
+  elif [[ -n "${SRENAUTIX_COVERAGE_ALERT:-}" ]]; then
+    check_coverage "$id" "$since"
   else
     check_git_controls "$since"
   fi

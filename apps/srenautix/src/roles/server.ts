@@ -80,6 +80,7 @@ import { KubeTools } from '../research/kube-tools.js';
 import { FirstSeen, objectHealth, type K8sObject } from '../detectors/health.js';
 import { DetectorService, detectorSettings } from '../detectors/service.js';
 import { GitHubApp, RepoRoles } from '../github/app.js';
+import { CoverageIssues } from '../github/coverage-issues.js';
 import { IssueService, type IssueReport } from '../github/issues.js';
 import { TopologyOverrides } from '../topology/overrides.js';
 import { TopologyStore } from '../topology/store.js';
@@ -1064,6 +1065,22 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
         }),
     });
     every(parseDuration('issues.interval', c.issues!.interval), () => issues.runOnce(), '事件 issue');
+    // 拓扑与领域包覆盖的缺口（ADR 0171）：每个 (集群, 告警名) 一个 issue，标签另加 coverage，每小时上限与事件 issue 共用
+    const coverage = new CoverageIssues(
+      pool,
+      github!,
+      {
+        repo: c.issues!.repo,
+        labels: c.issues!.labels,
+        titlePrefix: (c.issues!.title_prefix ?? c.notify.prefix).trim(),
+        maxPerHour: c.issues!.max_per_hour,
+        lookbackMs: parseDuration('issues.lookback', c.issues!.lookback),
+        consoleUrl: c.public_url,
+        language: c.stage_a.language,
+      },
+      metrics,
+    );
+    every(parseDuration('issues.interval', c.issues!.interval), () => coverage.runOnce(), '覆盖缺口 issue');
   }
   every(3600_000, () => purgeIdempotencyKeys(pool), '幂等键清理');
   every(3600_000, () => sessions.purgeExpired(), '会话清理');

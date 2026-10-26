@@ -488,6 +488,27 @@ export async function timelineOf(pool: pg.Pool, row: IncidentRow) {
       untrusted: false,
     });
   }
+  // 自愈 PR 对每次研判的处理结果（ADR 0170）：模板、结果、原因码与原因；key 为 '-' 时整次研判没有可处理的模板
+  const attempts = await pool.query<{
+    run_id: string;
+    key: string;
+    outcome: string;
+    code: string | null;
+    reason: string | null;
+    created_at: Date;
+  }>('SELECT run_id, key, outcome, code, reason, created_at FROM server.remediation_attempts WHERE incident_id = $1', [
+    row.incident_id,
+  ]);
+  for (const a of attempts.rows) {
+    out.push({
+      at: a.created_at.toISOString(),
+      kind: 'remediation_attempt',
+      text: `自愈 PR${a.key === '-' ? '' : ` ${a.key}`}：${a.outcome}${a.code ? `（${a.code}）` : ''}${a.reason ? `：${a.reason}` : ''}`,
+      ref: a.run_id,
+      // 原因里有告警名、标签值与仓库内容等外部来源的原文
+      untrusted: true,
+    });
+  }
   const props = await pool.query<{ body: Proposal }>('SELECT body FROM server.proposals WHERE incident_id = $1', [
     row.incident_id,
   ]);

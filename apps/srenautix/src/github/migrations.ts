@@ -75,5 +75,50 @@ ALTER TABLE server.github_issues ADD COLUMN title text;
 ALTER TABLE server.github_issues ADD COLUMN title_updated_at timestamptz;
 `,
     },
+    {
+      version: 4,
+      name: 'coverage gaps, one issue per alert without a catalog entry, and the incidents it appeared in',
+      phase: 'expand',
+      sql: `
+-- 拓扑与领域包覆盖的缺口（ADR 0171）：每个 (集群, 告警名) 一行、最多一个 issue。pending 等待开出（GitHub 失败或达到
+-- 每小时上限时按 next_attempt_at 再试），unknown 上一次创建的结果未知（下一次先按标记找回），open 已开，closed 人已关闭
+-- （不再重开、不再评论），failed 重试用尽。first_seen_at 与 last_seen_at 是告警在事件里最早与最近一次开始触发的时间
+CREATE TABLE server.coverage_gaps (
+  cluster_id text NOT NULL,
+  alertname text NOT NULL,
+  repo text NOT NULL,
+  state text NOT NULL CHECK (state IN ('pending', 'unknown', 'open', 'closed', 'failed')),
+  number integer,
+  url text,
+  first_seen_at timestamptz NOT NULL,
+  last_seen_at timestamptz NOT NULL,
+  attempts integer NOT NULL DEFAULT 0,
+  next_attempt_at timestamptz NOT NULL DEFAULT now(),
+  last_error text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  opened_at timestamptz,
+  closed_at timestamptz,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (cluster_id, alertname)
+);
+CREATE INDEX coverage_gaps_due_idx ON server.coverage_gaps (next_attempt_at) WHERE state IN ('pending', 'unknown', 'open');
+CREATE INDEX coverage_gaps_opened_idx ON server.coverage_gaps (repo, opened_at) WHERE opened_at IS NOT NULL;
+
+-- 缺口出现过的事件：每个 (缺口, 事件) 一行。reported_at 是写进 issue（开出时的正文或之后的评论）的时间，为空的行
+-- 在 issue 打开时以评论追加
+CREATE TABLE server.coverage_gap_incidents (
+  cluster_id text NOT NULL,
+  alertname text NOT NULL,
+  incident_id uuid NOT NULL,
+  alert_id text NOT NULL,
+  seen_at timestamptz NOT NULL,
+  reported_at timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (cluster_id, alertname, incident_id)
+);
+CREATE INDEX coverage_gap_incidents_unreported_idx ON server.coverage_gap_incidents (cluster_id, alertname)
+  WHERE reported_at IS NULL;
+`,
+    },
   ],
 };

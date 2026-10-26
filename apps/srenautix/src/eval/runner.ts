@@ -13,6 +13,7 @@ import {
 import type { WorkerMetrics } from '../research/metrics.js';
 import type { QueryRunner } from '../research/checks.js';
 import type { Language } from '../prompts/index.js';
+import { runAdmission } from '../remediation/admission.js';
 import type { Tool } from '../tools/box.js';
 import { replayCase, type Excluded } from './leakage.js';
 import { supportedCards, topComponents, type RunRecord } from './score.js';
@@ -236,6 +237,10 @@ export async function runEval(p: EvalPlan): Promise<EvalOutcome> {
           proposals: (out?.proposals ?? []).map((x) => ({ action_id: x.action_id, params: x.params })),
           root: out?.conclusion.root_component ?? null,
           supportedCards: out ? supportedCards(out) : [],
+          // 运行级准入（ADR 0170）：卡的引用按这次运行的阶段 A 卡与检查卡解析
+          admission: out
+            ? runAdmission({ output: out, disposition: out.disposition, stageACards: s.context.stage_a.cards })
+            : null,
         });
         logger.info('评测运行完成', {
           case_id: c.case_id,

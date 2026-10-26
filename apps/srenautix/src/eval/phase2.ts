@@ -585,10 +585,14 @@ export function renderPhase2Markdown(r: Phase2Result): string {
       );
     }
     if (m.template_matches?.length) {
-      lines.push('', '| 用例 | 路由 | 次序 | 档位 | 处置 | 适用的修复模板 |', '|---|---|---|---|---|---|');
+      lines.push(
+        '',
+        '| 用例 | 路由 | 次序 | 档位 | 处置 | 适用的修复模板 | 被准入条件挡下（ADR 0170） |',
+        '|---|---|---|---|---|---|---|',
+      );
       for (const t of m.template_matches) {
         lines.push(
-          `| ${t.case} | ${t.route} | ${t.run} | ${t.level ?? '—'} | ${t.disposition ?? '—'} | ${t.templates.join('、') || '—'} |`,
+          `| ${t.case} | ${t.route} | ${t.run} | ${t.level ?? '—'} | ${t.disposition ?? '—'} | ${t.templates.join('、') || '—'} | ${t.blocked.map((b) => `${b.key}（${b.code}）`).join('、') || '—'} |`,
         );
       }
     }

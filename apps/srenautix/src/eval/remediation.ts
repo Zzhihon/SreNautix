@@ -4,7 +4,8 @@ import { join } from 'node:path';
 import canonicalize from 'canonicalize';
 import type pg from 'pg';
 import { parseAllDocuments } from 'yaml';
-import type { FixExpect, Label } from './labels.js';
+import { admissionFor } from '../remediation/admission.js';
+import type { FixClass, FixExpect, Label } from './labels.js';
 import type { RunRecord } from './score.js';
 
 // 自愈 PR 环节的度量（章程第二阶段 §3、§4 第 5 条，ADR 0110）：
@@ -16,6 +17,9 @@ import type { RunRecord } from './score.js';
 // - 模板匹配（ADR 0138）：自愈 PR 由 server 按修复模板生成，不是模型的提议。重建评测按每次运行的研判结论（根因、档位、
 //   处置）对快照的阶段 A 卡与成员告警求值修复模板的适用条件，只匹配、不计划、不推送：标注有仓库修复、结论 likely
 //   及以上的运行中，标注修复类别的模板适用的比例记为模板触发；标注没有仓库修复的运行中适用的模板按类别记为误触发。
+//   适用的模板按运行再经过 server 的运行级准入条件（ADR 0170，remediation/admission.ts）：根因范围、支撑证据的类型、
+//   告警调优的良性依据；被准入挡下的模板不计为适用，记在 template_matches 的 blocked 里。仓库事实要读仓库，这里不判断。
+// - 标注类别 topology_pack 的修复是覆盖缺口 issue（ADR 0171），不开 PR，按没有仓库修复计。
 // 影子环境（只读状态库）：gitops_pr 提议与事件关联的 PR 数，与研判结论为 likely 及以上的事件数对照。
 
 export const REPAIR_LEVELS = new Set(['likely', 'evidence_consistent']);
@@ -30,13 +34,16 @@ export interface PatchCheck {
   detail: string;
 }
 
-/** 标注的修复类别 → 修复模板的类别 */
-export const FIX_CLASS_CATEGORY: Record<string, string> = {
+/** 标注的修复类别 → 修复模板的类别；topology_pack 的修复是覆盖缺口 issue，没有对应的 PR 类别 */
+export const FIX_CLASS_CATEGORY: Record<FixClass, string | null> = {
   release_rollback: 'release_rollback',
   config_resource: 'config_resource',
   alert_rule: 'alert_rule',
-  topology_pack: 'topology_coverage',
+  topology_pack: null,
 };
+
+/** 标注里由自愈 PR 完成的修复：类别有对应的 PR 类别时为 fix，否则为 null */
+const prFixOf = (l: Label) => (l.fix && FIX_CLASS_CATEGORY[l.fix.class] !== null ? l.fix : null);
 
 export interface TemplateMatch {
   case: string;
@@ -45,6 +52,8 @@ export interface TemplateMatch {
   level: string | null;
   disposition: string | null;
   templates: string[];
+  /** 适用但被运行级准入条件挡下的模板与跳过代码 */
+  blocked: Array<{ key: string; code: string }>;
 }
 
 export interface RemediationSummary {
@@ -188,19 +197,25 @@ export function scoreRemediation(
     if (!l) {
       continue;
     }
+    const fix = prFixOf(l);
     const prs = r.proposals.filter((p) => p.action_id === 'gitops_pr');
     const likely = r.level !== null && REPAIR_LEVELS.has(r.level);
-    if (l.fix && likely) {
+    if (fix && likely) {
       out.eligible_runs++;
       if (prs.length) {
         out.triggered_runs++;
       }
     }
-    if (!l.fix && prs.length) {
+    if (!fix && prs.length) {
       out.false_triggers++;
     }
     if (templatesOf && likely) {
-      const t = templatesOf(r);
+      // 运行级准入（ADR 0170）：没有准入结果的记录（手工构造的运行）不过滤
+      const matched = templatesOf(r).map((x) => ({
+        ...x,
+        block: r.admission ? admissionFor(x.category, r.admission) : null,
+      }));
+      const t = matched.filter((x) => x.block === null);
       out.template_triggered_runs ??= 0;
       out.template_any_runs ??= 0;
       out.template_false_triggers ??= {};
@@ -211,9 +226,10 @@ export function scoreRemediation(
         level: r.level,
         disposition: r.disposition,
         templates: t.map((x) => x.key),
+        blocked: matched.flatMap((x) => (x.block ? [{ key: x.key, code: x.block.code }] : [])),
       });
-      if (l.fix) {
-        if (t.some((x) => x.category === FIX_CLASS_CATEGORY[l.fix!.class])) {
+      if (fix) {
+        if (t.some((x) => x.category === FIX_CLASS_CATEGORY[fix.class])) {
           out.template_triggered_runs++;
         }
         if (t.length) {
@@ -229,7 +245,7 @@ export function scoreRemediation(
       out.patches++;
       const params = p.params as { base?: unknown; patch?: unknown };
       const patch = typeof params.patch === 'string' ? params.patch : '';
-      if (!repo || !l.fix) {
+      if (!repo || !fix) {
         out.checks.push({
           case: r.caseId,
           route: r.routeId,
@@ -243,7 +259,7 @@ export function scoreRemediation(
       }
       const base = baseCommit(repo, typeof params.base === 'string' ? params.base : 'HEAD', l.as_of);
       const c = base
-        ? checkPatch(repo, base, patch, l.fix.expect, scratch)
+        ? checkPatch(repo, base, patch, fix.expect, scratch)
         : { applies: false, correct: false, detail: 'as_of 之前 base 分支没有提交' };
       if (c.applies) {
         out.applicable++;

@@ -63,6 +63,13 @@ export class ServerMetrics extends BaseMetrics {
     registers: [this.registry],
   });
 
+  readonly coverageIssues = new Counter({
+    name: 'srenautix_coverage_issues_total',
+    help: '覆盖缺口 issue 的处理结果（ADR 0171）：opened、recovered（按标记找回）、deferred（达到每小时上限，稍后再开）、retry、failed、commented、closed（人已关闭，不再评论）',
+    labelNames: ['repo', 'outcome'] as const,
+    registers: [this.registry],
+  });
+
   readonly githubComments = new Counter({
     name: 'srenautix_github_issue_comments_total',
     help: '事件 issue 上的进展评论与 PR 回链（posted、retry、failed）',
@@ -120,8 +127,8 @@ export class ServerMetrics extends BaseMetrics {
 
   readonly remediations = new Counter({
     name: 'srenautix_remediations_total',
-    help: '自愈 PR 的处理结果（ADR 0108），按类别与结果（proposed：已提交 gitops_pr 提议；skipped：模板跳过或不适用；rejected：提议未通过策略；failed：计划或校验失败）',
-    labelNames: ['category', 'outcome'] as const,
+    help: '自愈 PR 的处理结果（ADR 0108、0170），按类别、结果（proposed：已提交 gitops_pr 提议；skipped：模板跳过、不适用或准入条件不满足；rejected：提议未通过策略；failed：计划或校验失败）与原因码（server.remediation_attempts 的 code，没有时为 none）',
+    labelNames: ['category', 'outcome', 'code'] as const,
     registers: [this.registry],
   });
 

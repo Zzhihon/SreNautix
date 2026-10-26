@@ -295,22 +295,37 @@ remediation:
         release_input: {path: apps/shop/prod/release.json, format: json, fields: {image: data.image, release_id: data.release_id}}
         alert_rules: {path: "platform/observability/rules/*.yaml", format: yaml}
         pack_alerts: {path: srenautix/packs/shop/alerts.yaml, format: yaml}
-  categories: [release_rollback, config_resource, alert_rule, topology_coverage]
+  categories: [release_rollback, config_resource, alert_rule]
   conclusions: [likely, evidence_consistent]
   title_prefix: null            # 默认取 notify.prefix
   rejected_cooldown: 7d         # 同一模板对同一组文件的修改被人拒绝后，这段时间内不再提出
 ```
 
+`categories` 中写了 `topology_coverage` 时 server 去掉它并在日志里记录弃用警告：没有告警目录条目的告警改为覆盖缺口 issue（见"事件 issue"一节，ADR 0171）。
+
 需要 `github_app`（读仓库）与 gateway 策略中启用的 `gitops_pr`（ADR 0108）。主实例每 30 秒取最近结束、结论等级在 `conclusions` 中的研判（上一轮没有结束时跳过这一轮）：
 
-1. 求适用的修复模板（领域包 `remediations.yaml`），按布局经 GitHub REST 只读地读取仓库，生成补丁；
-2. 在内存中校验：路径在布局里、修改前内容与基准提交一致、补丁应用后与计划一致、修改后的 JSON/YAML 能解析、不超过 65536 字符；
-3. 按修改去重（ADR 0155，见下文）；
-4. 提交 `gitops_pr` 提议（来源 rule，规则 `srenautix/remediation-pr`；策略为 gitops_pr 列出自动执行规则 `remediation-pr` 时自动签发），分支 `srenautix/<事件前 8 位>-<类别>-<补丁摘要>`，标题带 `[影子]` 等前缀；
-5. PR 描述分 结论、证据、改了什么、验证计划、回滚、研判运行 六段（`<!-- srenautix:pr=<段> -->` 标记），末尾 `Refs #<事件 issue>`；
-6. gateway 开出 PR 后（执行事件里的 `PR <url> #<n>`，或按分支查询），事件 issue 里回链，通知消息的修复段落显示 PR 链接。
+1. 按研判输出判断准入条件（ADR 0170，见下文），整次研判都不满足时记一行跳过；
+2. 求适用的修复模板（领域包 `remediations.yaml`），模板的类别不满足准入条件时记为跳过；按布局经 GitHub REST 只读地读取仓库，生成补丁；
+3. 在内存中校验：路径在布局里、修改前内容与基准提交一致、补丁应用后与计划一致、修改后的 JSON/YAML 能解析、不超过 65536 字符；之后检查仓库事实；
+4. 按修改去重（ADR 0155，见下文）；
+5. 提交 `gitops_pr` 提议（来源 rule，规则 `srenautix/remediation-pr`；策略为 gitops_pr 列出自动执行规则 `remediation-pr` 时自动签发），分支 `srenautix/<事件前 8 位>-<类别>-<补丁摘要>`，标题带 `[影子]` 等前缀；
+6. PR 描述分 结论、证据、改了什么、验证计划、回滚、研判运行 六段（`<!-- srenautix:pr=<段> -->` 标记），末尾 `Refs #<事件 issue>`；
+7. gateway 开出 PR 后（执行事件里的 `PR <url> #<n>`，或按分支查询），事件 issue 里回链，通知消息的修复段落显示 PR 链接。
 
-每次研判每个模板只处理一次，结果记在 `server.remediation_attempts`（proposed、skipped、rejected、failed 与原因码）与治理审计 `remediation.attempt`；指标 `srenautix_remediations_total{category,outcome}`、`srenautix_gitops_pulls_total{via}`。分支前缀、每小时上限、reviewers 与 main 的守护在 gateway 策略里，不在 server 配置中；server 从不写 Git。
+每次研判每个模板只处理一次，结果记在 `server.remediation_attempts`（proposed、skipped、rejected、failed 与原因码、原因）与治理审计 `remediation.attempt`（带原因）；指标 `srenautix_remediations_total{category,outcome,code}`、`srenautix_gitops_pulls_total{via}`；控制台的事件时间线显示每条处理结果（`remediation_attempt`）。分支前缀、每小时上限、reviewers 与 main 的守护在 gateway 策略里，不在 server 配置中；server 从不写 Git。
+
+**准入条件**（ADR 0170）：发布回退与配置资源这两类修改系统本身，四项同时满足才开 PR；告警调优修改的是告警本身，只看良性依据。
+
+| 条件 | 判断时机 | 跳过代码 |
+|---|---|---|
+| 研判输出的根因范围 `cause_scope` 为 local 或 configuration（研判已按确定性依据校正） | 模板匹配之前，按研判 | `cause_scope` |
+| 结论有支撑卡（`consistency_detail` 的 `support_refs` 与 `model_judged_refs`），不只是成员告警与变更 | 同上 | `topology_only` |
+| 支撑卡中至少一张的查询是运行时证据：指标、日志、数据库统计，或 `kube_*` 只读检查 | 同上 | `no_runtime_evidence` |
+| 补丁修改的文件在基线上都存在，研判根因由 GitOps 仓库负责（仓库声明的组件，或管理它们的 GitOps 应用） | 计划校验之后，按模板 | `no_repo_fact` |
+| 告警调优：处置为 ignore，依据（研判输出的 `ignore_basis`）为 `stage_a`、`evidence_normal` 或 `impact_normal` | 模板匹配之前，按研判 | `not_benign` |
+
+卡的引用按研判运行时的证据解析：检查产生的卡取研判输出的 `check_cards`，阶段 A 的卡按 `evidence_index` 的 `<卡片>@<实体>` 在研判针对的事件版本的报告里找，阶段 A 重算改变编号时仍然找到同一张卡。两类都不满足时整次研判记一行（key `-`）；只有一类不满足时，这一类的模板各记一行跳过。没有开出的修复仍然在研判的修复建议与事件 issue 里。
 
 **修改去重**（ADR 0155）：去重键是（仓库，规范化补丁的哈希），规范化补丁只含每个文件的路径与增删的行，基准提交前进、行号与上下文变化后同一个修改的哈希不变。每个提议在 `server.remediation_changes` 记一行，状态按提议、`gitops_pulls` 与 GitHub 上 PR 的当前状态（GET pulls/{n}）在判断时刷新：
 
@@ -323,7 +338,7 @@ remediation:
 
 PR 已合并、提议被策略拒绝、过期、绑定过时或执行失败（没有开出 PR）的修改不算重复。记录在 PostgreSQL 里，server 重启后照常生效；没有记录的旧提议在每轮开始时按 `remediation_attempts` 补登记。PR 评论与 issue 关联失败时退避重试，最多 8 次；写入治理审计 `remediation.trigger_comment`，状态变化写 `remediation.change_state`。
 
-**模板上下文里的告警**（ADR 0155）：每条成员告警带归属组件对应的具体对象（`component_object`）与是否描述集群之外的上游（`external`：组件类型声明了 external，或命中 `notify.digest.external_roots` 开启时的 `components`、`alert_labels`）。`alert-catalog-entry` 只为能给出实体的告警加条目，`noisy-alert-relax` 不降级外部上游的告警。
+**模板上下文里的告警**（ADR 0155）：每条成员告警带归属组件对应的具体对象（`component_object`）与是否描述集群之外的上游（`external`：组件类型声明了 external，或命中 `notify.digest.external_roots` 开启时的 `components`、`alert_labels`）。`noisy-alert-relax` 不降级外部上游的告警。
 
 ## 变更源
 
@@ -491,11 +506,22 @@ issues:
 - **去重**：每个事件最多一个 issue（`server.github_issues` 以 incident_id 为主键）。开 issue 的请求超时或连接断开时，重试先按事件标记在仓库中找回已开的 issue，不重复开。
 - **后续进展**：issue 开出之后结束的研判（新的结论档位与根因）、事件恢复、关联的 PR 与 gitops_pr 提议各追加一条评论，按 (事件, 键) 去重；评论同样带标记，重试时找回已写入的评论。
 - **关联**：server 发起的拓扑覆盖 PR 与 gitops_pr 提议的参数描述里写 `Refs #<issue>`（跨仓库时 `owner/name#<issue>`），GitHub 在 issue 上显示关联；PR 先于 issue 开出时，issue 开出后给 PR 描述补上 Refs（`github.pr_refs`）。gitops_pr 的 Refs 在创建提议时写入参数，随参数一起被审批；幂等键按调用方给出的参数计算。
-- **限速**：最近 1 小时已开满 `max_per_hour` 个 issue 时，新的事件记为 `skipped`，只记录（`github.issue_skipped`、`srenautix_github_issues_total{outcome="skipped_rate_limit"}`、日志），之后不再为它开 issue。评论不受限速。
+- **限速**：最近 1 小时已开满 `max_per_hour` 个 issue（事件 issue 与覆盖缺口 issue 合计）时，新的事件记为 `skipped`，只记录（`github.issue_skipped`、`srenautix_github_issues_total{outcome="skipped_rate_limit"}`、日志），之后不再为它开 issue。评论不受限速。
 - **外部上游**（ADR 0147）：根因是外部上游且没有业务影响的事件（判定见 `docs/server/notify.md` 的“外部上游的周期汇总”）不开 issue，进入通知的周期汇总。事件未恢复时每 10 分钟再判定一次，期间出现业务影响就照常开出；恢复后记为 `skipped`（`github.issue_skipped` 的 `reason: external_root`、`srenautix_github_issues_total{outcome="skipped_external"}`）。需要改仓库的修复提议（`repo_change`）不受影响。
 - **失败与重试**：GitHub 返回错误或不可达时按退避重试（30 秒起，每次翻倍，最长 30 分钟），最多 8 次，用尽后记为 `failed`（`github.issue_failed`）。最近 1 小时内重试 3 次以上或放弃的 issue 与评论使状态条显示 `ChannelDeliveryFailed`（channel `github-issues`）。
 - 主实例运行后台循环；控制台发起拓扑覆盖 PR、提交 gitops_pr 提议时在当前副本上立即尝试开一次。每次开出、跳过、放弃、评论与补 Refs 写入治理审计。
 - 指标：`srenautix_github_issues_total{repo,outcome}`（opened、skipped_rate_limit、skipped_external、retry、failed、body_updated）、`srenautix_github_issue_comments_total{repo,outcome}`（posted、retry、failed）。
+
+### 覆盖缺口 issue
+
+开启 `issues` 时，没有命中任何告警目录条目（也没有拓扑覆盖）的成员告警是覆盖缺口（ADR 0171）。缺口不开自愈 PR，每个（集群，告警名）在同一个仓库开一个 issue，由人决定是否补齐：
+
+- **登记**：后台循环（`issues.interval`）扫描 `lookback` 内更新过、没有被抑制或合并的事件，把分类里没有目录条目、仍在事件里的成员告警记入 `server.coverage_gaps`（每个缺口一行）与 `server.coverage_gap_incidents`（缺口出现过的事件）。
+- **内容**：标题 `<前缀> 覆盖缺口：告警 <告警名> 没有告警目录条目（集群 <集群>）`；标签为 `issues.labels` 加 `coverage`；正文第一行是标记 `<!-- srenautix:coverage=<集群>/<告警名> -->`，写明出现次数（事件数）、首次与最近一次出现、最近一次触发的标签、涉及事件（最多 20 个，链接到控制台）、补齐目录条目或拓扑覆盖的步骤与控制台拓扑覆盖页的入口。
+- **再次出现**：缺口出现在新的事件里时，只在 issue 下追加一条评论（标记 `<!-- srenautix:coverage-comment=<集群>/<告警名> -->`），列出新的事件与累计数。评论之前读取 issue 的状态：人已关闭时缺口记为 `closed`，之后不再评论，也不再为这个告警开 issue，新的事件只在状态库里计数。
+- **限速**：与事件 issue 共用 `max_per_hour`（同一仓库最近 1 小时开出的两类 issue 合计）。达到上限时缺口保持 `pending`，10 分钟后再试。
+- **失败与重试**：创建请求的结果未知（超时、连接中断、5xx）时记为 `unknown`，下一次先按标记在仓库中找回，找回的 issue 把已登记的事件补一条评论；结果明确的失败按退避重试，最多 8 次，用尽后记为 `failed`。开出、找回、放弃、评论与关闭写治理审计（`github.coverage_issue_opened`、`github.coverage_issue_failed`、`github.coverage_issue_comment`、`github.coverage_issue_closed`）。
+- 指标：`srenautix_coverage_issues_total{repo,outcome}`（opened、recovered、deferred、retry、failed、commented、closed）。
 
 ## 集成页
 

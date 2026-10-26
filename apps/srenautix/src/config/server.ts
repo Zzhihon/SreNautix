@@ -542,9 +542,10 @@ export const serverConfigSchema = z
               .strict(),
           )
           .default({}),
+        // 拓扑与领域包覆盖的缺口改为 issue（ADR 0171）：topology_coverage 在解析之前去掉并记录弃用警告（upgradeRaw）
         categories: z
-          .array(z.enum(['release_rollback', 'config_resource', 'alert_rule', 'topology_coverage']))
-          .default(['release_rollback', 'config_resource', 'alert_rule', 'topology_coverage']),
+          .array(z.enum(['release_rollback', 'config_resource', 'alert_rule']))
+          .default(['release_rollback', 'config_resource', 'alert_rule']),
         conclusions: z
           .array(z.enum(['likely', 'evidence_consistent', 'inconclusive']))
           .default(['likely', 'evidence_consistent']),
@@ -558,7 +559,7 @@ export const serverConfigSchema = z
       .default({
         enabled: false,
         repositories: {},
-        categories: ['release_rollback', 'config_resource', 'alert_rule', 'topology_coverage'],
+        categories: ['release_rollback', 'config_resource', 'alert_rule'],
         conclusions: ['likely', 'evidence_consistent'],
         rejected_cooldown: '7d',
       }),
@@ -758,7 +759,8 @@ export function loadServerConfig(path: string): ServerConfig {
  * - kind: git 的变更源不支持（hub 镜像不带 git，ADR 0096），给出改用 kind: github 的说明；
  * - 2.5 版的 topology.override_pr.github（App 身份与仓库写在一起）迁移到 github_app 与 topology.override_pr；
  * - 业务影响告警（ADR 0166）：notify.digest.external_roots.business_impact.alert_labels 与 notify.business_impact_alerts
- *   中标签条件本身的项转换为匹配器，返回弃用说明。
+ *   中标签条件本身的项转换为匹配器，返回弃用说明；
+ * - remediation.categories 中的 topology_coverage（ADR 0171）去掉，返回弃用说明。
  */
 export function upgradeRaw(raw: unknown): { raw: unknown; deprecated: string[] } {
   if (!raw || typeof raw !== 'object') {
@@ -783,6 +785,13 @@ export function upgradeRaw(raw: unknown): { raw: unknown; deprecated: string[] }
       delete bi.alert_labels;
     }
     deprecated.push(...up.deprecated);
+  }
+  const remediation = r.remediation as { categories?: unknown } | undefined;
+  if (Array.isArray(remediation?.categories) && remediation.categories.includes('topology_coverage')) {
+    remediation.categories = remediation.categories.filter((x: unknown) => x !== 'topology_coverage');
+    deprecated.push(
+      'remediation.categories 中的 topology_coverage 已忽略：拓扑与领域包覆盖的缺口不再开自愈 PR，改为每个缺口一个 issue（issues 开启时，ADR 0171）',
+    );
   }
   const changes = r.changes as { sources?: Array<{ id?: unknown; kind?: unknown }> } | undefined;
   for (const src of changes?.sources ?? []) {

@@ -1,12 +1,15 @@
 import { createHash, generateKeyPairSync, randomUUID, type KeyObject } from 'node:crypto';
-import type { EvidenceResult, Incident, Proposal, RepositoryLayout } from '@srenautix/contract';
+import type { EvidenceResult, Incident, Proposal, RepositoryLayout, ResearchOutput } from '@srenautix/contract';
 import { startPrometheus, type TsdbInstance } from '@srenautix/integration-sdk';
 import type { EvidenceDataSource } from '@srenautix/packs-sdk';
 import { applyPatch } from 'diff';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { parse } from 'yaml';
+import { timelineOf } from '../../src/console-bff/routes-incidents.js';
 import { GitHubApp } from '../../src/github/app.js';
+import { COVERAGE_LABEL, CoverageIssues, coverageMarker } from '../../src/github/coverage-issues.js';
 import { IssueService } from '../../src/github/issues.js';
+import type { IncidentRow } from '../../src/incident/read.js';
 import type { Bindings } from '../../src/identity/bindings.js';
 import { upsertAlert } from '../../src/ingest/store.js';
 import { ServerMetrics } from '../../src/metrics.js';
@@ -19,6 +22,7 @@ import { ProposalService } from '../../src/proposals/service.js';
 import { GitOpsPulls } from '../../src/remediation/pulls.js';
 import { BINDING_RETRY_LIMIT, REMEDIATION_RULE, RemediationService } from '../../src/remediation/service.js';
 import { GitRepositoryTargets } from '../../src/remediation/targets.js';
+import { entityKey } from '../../src/research/evidence.js';
 import { serverTracks } from '../../src/roles/server-schema.js';
 import { EvidenceSource, PackRuntime } from '../../src/stage-a/packs.js';
 import { migrateExpand } from '../../src/store/migrate.js';
@@ -33,8 +37,9 @@ import { incident as baseIncident, stageA, stageACards } from '../support/scenar
 
 /**
  * 自愈 PR（ADR 0108），真实 PostgreSQL、内置 gitops 包与内存中的 GitHub REST API：
- * 研判结论 → 适用的修复模板 → 读仓库计划补丁 → 校验 → gitops_pr 提议（规则 remediation-pr，目标 UID 为 base 的提交）；
- * 同一次研判不重复处理；gateway 开出 PR 后关联到事件 issue。server 对仓库只发 GET。
+ * 研判结论 → 准入条件（ADR 0170）→ 适用的修复模板 → 读仓库计划补丁 → 校验 → 仓库事实 → gitops_pr 提议（规则
+ * remediation-pr，目标 UID 为 base 的提交）；同一次研判不重复处理；gateway 开出 PR 后关联到事件 issue。没有告警目录条目的
+ * 告警不开 PR，开覆盖缺口 issue（ADR 0171）。server 对仓库只发 GET。
  */
 const REPO = 'acme/gitops';
 const CLUSTER = 'test';
@@ -73,9 +78,27 @@ function incident(): Incident {
   };
 }
 
+/** 阶段 A 卡上的一条指标查询（运行时证据，ADR 0170） */
+const METRICS_QUERY: EvidenceResult['queries'][number] = {
+  name: 'value',
+  integration: 'prometheus',
+  capability: 'metrics.query_range',
+  query: 'sum(rate(http_requests_total[5m]))',
+  sample_count: 61,
+  truncated: false,
+  error: null,
+  duration_ms: 3,
+};
+
+/** support/scenario 的卡没有查询记录：默认的阶段 A 卡各带一条指标查询 */
+const runtimeCards = (cards: EvidenceResult[] = stageACards()) =>
+  cards.map((c) => (c.queries.length ? c : { ...c, queries: [METRICS_QUERY] }));
+
 /**
  * 事件、成员告警（没有命中目录）、阶段 A 报告与一次结束的研判。root 改写事件根因，researchRoot 是研判结论的根因
- * （默认 Deployment:shop/api），cards 是阶段 A 的卡（默认 support/scenario 的五张）
+ * （默认 Deployment:shop/api），cards 是阶段 A 的卡（默认 support/scenario 的五张，各带一条指标查询）。
+ * 研判输出带准入条件读取的字段（ADR 0170）：根因范围 scope（默认 local）、结论的支撑卡 support（默认 card:1）与
+ * 支撑告警、证据索引（每张阶段 A 卡的 <卡片>@<实体>）；处置为 ignore 时 ignore 的依据为 basis（默认 evidence_normal）
  */
 async function seed(
   level = 'likely',
@@ -93,6 +116,10 @@ async function seed(
       component: string;
       entity: { kind: string; namespace: string | null; name: string } | null;
     };
+    scope?: NonNullable<ResearchOutput['conclusion']['cause_scope']>;
+    support?: string[];
+    supportAlerts?: string[];
+    basis?: NonNullable<ResearchOutput['ignore_basis']>;
   } = {},
 ): Promise<{ inc: Incident; runId: string }> {
   const alertname = o.alertname ?? 'ShopQueueBacklog';
@@ -168,7 +195,8 @@ async function seed(
       JSON.stringify(inc),
     ],
   );
-  const report = { ...stageA(o.cards), incident_id: inc.incident_id, incident_version: inc.incident_version };
+  const cards = o.cards ?? runtimeCards();
+  const report = { ...stageA(cards), incident_id: inc.incident_id, incident_version: inc.incident_version };
   await db.server.query(
     `INSERT INTO server.stage_a_reports (report_id, incident_id, incident_version, disposition, evidence_fingerprint, degraded, body, first_firing_at, rendered_at)
      VALUES ($1, $2, $3, $4, $5, false, $6, $7, now())`,
@@ -197,13 +225,29 @@ async function seed(
       report.evidence_fingerprint,
       JSON.stringify({
         disposition,
+        ...(disposition === 'ignore' ? { ignore_basis: o.basis ?? 'evidence_normal' } : {}),
         conclusion: {
           level,
           hypothesis_id: 'h1',
           root_component: researchRoot,
           undetermined_reason: null,
           consistency: {},
+          consistency_detail: {
+            support_refs: o.support ?? ['card:1'],
+            model_judged_refs: [],
+            support_alerts: o.supportAlerts ?? [],
+            onset: null,
+            symptom_onset_at: startsAt.toISOString(),
+            tolerance_seconds: 120,
+            contrary_refs: [],
+            tested_competitors: [],
+            supported_competitors: [],
+            chosen_by: 'model',
+          },
+          cause_scope: o.scope ?? 'local',
         },
+        check_cards: [],
+        evidence_index: cards.map((c) => ({ ref: c.ref, target: `${c.card_id}@${entityKey(c.entity) ?? ''}` })),
         hypotheses: [
           {
             id: 'h1',
@@ -241,6 +285,61 @@ spec:
           expr: queue_depth > 100
           labels:
             severity: critical
+        - alert: ShopQueueStalled
+          expr: rate(queue_consumed_total[5m]) == 0
+          labels:
+            severity: critical
+`;
+// "修改去重"一组的告警单独放一个文件：被拒绝的修改的冷却期按 (模板, 文件) 计，不影响其他用例对 shop.yaml 的告警调优。
+// 去重键只含路径与增删的行（ADR 0155），ShopCacheMisses 带 for: 10m，它的调优补丁因此与 ShopCacheEvictions 的不同
+const CACHE_RULES_PATH = 'platform/rules/cache.yaml';
+const CACHE_RULES_FILE = `apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: cache
+spec:
+  groups:
+    - name: cache
+      rules:
+        - alert: ShopCacheEvictions
+          expr: rate(cache_evictions_total[5m]) > 10
+          labels:
+            severity: critical
+        - alert: ShopCacheMisses
+          expr: rate(cache_misses_total[5m]) > 100
+          for: 10m
+          labels:
+            severity: critical
+`;
+// 严重度已经是 warning 的规则：告警调优模板适用（告警标签为 critical），skip_if 说明规则不是 critical
+const BATCH_RULES_PATH = 'platform/rules/batch.yaml';
+const BATCH_RULES_FILE = `apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: batch
+spec:
+  groups:
+    - name: batch
+      rules:
+        - alert: ShopBatchSlow
+          expr: batch_duration_seconds > 600
+          labels:
+            severity: warning
+`;
+// 外部上游的告警单独放一个文件：它的调优补丁与"自愈 PR"一组仍然打开的 shop.yaml 调优 PR 不是同一个修改
+const PROVIDER_RULES_PATH = 'platform/rules/provider.yaml';
+const PROVIDER_RULES_FILE = `apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: provider
+spec:
+  groups:
+    - name: provider
+      rules:
+        - alert: ProviderErrors
+          expr: rate(provider_errors_total[5m]) > 1
+          labels:
+            severity: critical
 `;
 
 beforeAll(async () => {
@@ -250,7 +349,14 @@ beforeAll(async () => {
   await gh.start();
   gh.write(
     'main',
-    { [CATALOG_PATH]: CATALOG_FILE, [RULES_PATH]: RULES_FILE, 'apps/shop/release.json': '{}\n' },
+    {
+      [CATALOG_PATH]: CATALOG_FILE,
+      [RULES_PATH]: RULES_FILE,
+      [CACHE_RULES_PATH]: CACHE_RULES_FILE,
+      [BATCH_RULES_PATH]: BATCH_RULES_FILE,
+      [PROVIDER_RULES_PATH]: PROVIDER_RULES_FILE,
+      'apps/shop/release.json': '{}\n',
+    },
     { message: 'seed' },
   );
   app = new GitHubApp({ apiBase: gh.url, appId: '1', installationId: '2', privateKey: pem });
@@ -344,7 +450,7 @@ function build(
           },
         },
       },
-      categories: o.categories ?? ['release_rollback', 'config_resource', 'alert_rule', 'topology_coverage'],
+      categories: o.categories ?? ['release_rollback', 'config_resource', 'alert_rule'],
       conclusions: o.conclusions ?? ['likely', 'evidence_consistent'],
       titlePrefix: '[影子]',
       language: 'zh',
@@ -445,26 +551,49 @@ const attempts = async (runId: string) =>
     )
   ).rows;
 
+/** 覆盖缺口 issue（ADR 0171）：与事件 issue 同一个仓库、标签、标题前缀与每小时上限 */
+const coverage = (perHour = 3) =>
+  new CoverageIssues(
+    db.server,
+    app,
+    {
+      repo: REPO,
+      labels: ['srenautix'],
+      titlePrefix: '[影子]',
+      maxPerHour: perHour,
+      lookbackMs: 3600_000,
+      consoleUrl: 'https://srenautix.example.test',
+      language: 'zh',
+    },
+    metrics,
+  );
+
+/** 控制台的事件时间线里自愈 PR 的处理结果（ADR 0170） */
+const remediationTimeline = async (incidentId: string) => {
+  const row = (
+    await db.server.query<IncidentRow>('SELECT * FROM server.incidents WHERE incident_id = $1', [incidentId])
+  ).rows[0]!;
+  return (await timelineOf(db.server, row)).filter((e) => e.kind === 'remediation_attempt');
+};
+
 describe('自愈 PR', () => {
   let proposal: Proposal;
   let inc: Incident;
   beforeEach(settle);
 
   it('结论适用模板时生成补丁，校验后提交 gitops_pr 提议：[影子] 标题、srenautix/ 分支、带标记的描述、目标为 base 的提交', async () => {
-    const s = await seed();
+    const s = await seed('likely', { severity: 'critical', disposition: 'ignore' });
     inc = s.inc;
     const writesBefore = gh.requests.filter((r) => r.method !== 'GET' && !r.path.startsWith('/app/')).length;
     expect(await service.runOnce()).toBe(1);
     const rows = await attempts(s.runId);
     expect(rows).toEqual([
       {
-        key: 'gitops/alert-catalog-entry',
+        key: 'gitops/noisy-alert-relax',
         outcome: 'proposed',
         code: null,
         proposal_id: expect.any(String),
-        branch: expect.stringMatching(
-          new RegExp(`^srenautix/${inc.incident_id.slice(0, 8)}-topology-coverage-[0-9a-f]{6}$`),
-        ),
+        branch: expect.stringMatching(new RegExp(`^srenautix/${inc.incident_id.slice(0, 8)}-alert-rule-[0-9a-f]{6}$`)),
       },
     ]);
     const p = await db.server.query<{ body: Proposal }>('SELECT body FROM server.proposals WHERE proposal_id = $1', [
@@ -486,7 +615,7 @@ describe('自愈 PR', () => {
     });
     expect(proposal.state).not.toBe('rejected_by_policy');
     const params = proposal.params as { title: string; body: string; patch: string; base: string; branch: string };
-    expect(params.title).toMatch(/^\[影子\] 为未覆盖的告警加告警目录条目：/);
+    expect(params.title).toMatch(/^\[影子\] 降低误报告警的严重度：/);
     expect(params.base).toBe('main');
     expect(params.branch).toBe(rows[0]!.branch);
     for (const m of ['summary', 'evidence', 'change', 'verify', 'rollback', 'run']) {
@@ -500,13 +629,28 @@ describe('自愈 PR', () => {
     // 事件 issue 先开出，描述里 Refs 在事件标记之前
     const issue = gh.issues.at(-1)!;
     expect(params.body.indexOf(`Refs #${issue.number}`)).toBeLessThan(params.body.indexOf('srenautix:incident='));
-    // 补丁应用到 base 后：目录多了一条，注释保留
-    const after = applyPatch(CATALOG_FILE, params.patch);
+    // 补丁应用到 base 后：只有 ShopQueueBacklog 降为 warning 并加上持续时间，同一文件里的其他规则不变
+    expect(params.patch).toContain(`diff --git a/${RULES_PATH} b/${RULES_PATH}`);
+    const after = applyPatch(RULES_FILE, params.patch);
     expect(after).not.toBe(false);
-    expect((after as string).startsWith('# 告警目录\n')).toBe(true);
-    expect(
-      (parse(after as string) as { entries: Array<{ alertname: string }> }).entries.map((e) => e.alertname),
-    ).toEqual(['ShopApiDown', 'ShopQueueBacklog']);
+    const rules = (parse(after as string) as { spec: { groups: Array<{ rules: Array<Record<string, unknown>> }> } })
+      .spec.groups[0]!.rules;
+    expect(rules.map((r) => [r.alert, (r.labels as { severity: string }).severity, r.for ?? null])).toEqual([
+      ['ShopQueueBacklog', 'warning', '1h'],
+      ['ShopQueueStalled', 'critical', null],
+    ]);
+    // 审计链与控制台时间线记下处理结果
+    const audit = await db.server.query<{
+      data: { key: string; outcome: string; code: string | null; reason: unknown };
+    }>("SELECT data FROM server.governance_audit WHERE kind = 'remediation.attempt' AND data->>'run_id' = $1", [
+      s.runId,
+    ]);
+    expect(audit.rows.map((r) => r.data)).toEqual([
+      expect.objectContaining({ key: 'gitops/noisy-alert-relax', outcome: 'proposed', code: null, reason: null }),
+    ]);
+    expect(await remediationTimeline(inc.incident_id)).toEqual([
+      expect.objectContaining({ text: '自愈 PR gitops/noisy-alert-relax：proposed', ref: s.runId, untrusted: true }),
+    ]);
     // server 对 GitOps 仓库只读：除了开 issue 与评论，没有写请求
     const writes = gh.requests
       .filter((r) => r.method !== 'GET' && !r.path.startsWith('/app/'))
@@ -516,23 +660,22 @@ describe('自愈 PR', () => {
     expect(gh.heads.get('main')).toBe(proposal.target.uid);
   });
 
-  it('同一次研判不重复处理；结论等级不在配置中的研判不处理；没有适用模板时记一行', async () => {
+  it('同一次研判不重复处理；结论等级不在配置中的研判不处理；没有适用模板时记一行；模板的 skip_if 记在模板上', async () => {
     expect(await service.runOnce()).toBe(0);
     const weak = await seed('inconclusive');
     expect(await service.runOnce()).toBe(0);
     expect(await attempts(weak.runId)).toEqual([]);
-    // 目录里已经有这条告警：模板的 skip_if 生效
-    gh.write(
-      'main',
-      {
-        [CATALOG_PATH]: `${CATALOG_FILE}  - { id: shop-queue-backlog, alertname: ShopQueueBacklog, role: cause, entity: { kind: Deployment, name_labels: [deployment] } }\n`,
-      },
-      { message: 'catalog: add ShopQueueBacklog' },
-    );
-    const again = await seed();
+    // 成员告警没有目录条目，但覆盖缺口不再是自愈 PR 的类别（ADR 0171）：没有启用的模板适用
+    const none = await seed();
     expect(await service.runOnce()).toBe(0);
-    expect(await attempts(again.runId)).toEqual([
-      { key: 'gitops/alert-catalog-entry', outcome: 'skipped', code: 'skip_if', proposal_id: null, branch: null },
+    expect(await attempts(none.runId)).toEqual([
+      { key: '-', outcome: 'skipped', code: 'no_template', proposal_id: null, branch: null },
+    ]);
+    // 规则文件里的严重度已经是 warning：告警调优模板的 skip_if 生效
+    const relaxed = await seed('likely', { severity: 'critical', disposition: 'ignore', alertname: 'ShopBatchSlow' });
+    expect(await service.runOnce()).toBe(0);
+    expect(await attempts(relaxed.runId)).toEqual([
+      { key: 'gitops/noisy-alert-relax', outcome: 'skipped', code: 'skip_if', proposal_id: null, branch: null },
     ]);
   });
 
@@ -779,6 +922,8 @@ describe('自愈 PR', () => {
 /**
  * 修复模板按研判根因匹配（ADR 0126），对应 Kind 的 config-resource-oom（kind-e2e 39628044289）：事件根因是管理 shop 的
  * Argo Application，研判根因是 Deployment shop/checkout，checkout 的容器被 OOMKilled。指标在真实 Prometheus 里。
+ * checkout 由 Application shop 管理（managed_by），由仓库负责；cart 同样声明在仓库文件里，但拓扑里没有管理它的 GitOps 应用。
+ * 准入条件（ADR 0170）用同一个配置资源模板逐项检查。
  */
 describe('研判根因', () => {
   const WORKLOADS_PATH = 'apps/shop/workloads.yaml';
@@ -796,6 +941,21 @@ spec:
           resources:
             requests: {cpu: 5m, memory: 16Mi}
             limits: {cpu: 100m, memory: 32Mi}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cart
+  namespace: shop
+spec:
+  template:
+    spec:
+      containers:
+        - name: cart
+          image: busybox
+          resources:
+            requests: {cpu: 5m, memory: 16Mi}
+            limits: {cpu: 100m, memory: 64Mi}
 `;
   const APP = 'Application.argoproj.io:argocd/shop';
   const appRoot: Incident['root'] = {
@@ -805,14 +965,15 @@ spec:
     margin: 0.4,
     silent_root: false,
   };
-  // 阶段 A 在 checkout 的 Pod 上执行的内存卡：OOMKilled，异常
-  const memoryCard = (): EvidenceResult => ({
+  // 阶段 A 在 checkout 的 Pod 上执行的内存卡：OOMKilled，异常；查询是指标（运行时证据）
+  const memoryCard = (pod = 'checkout-56f4794c88-fbdsd'): EvidenceResult => ({
     ...stageACards()[0]!,
     card_id: 'workload/pod-restarts/memory',
-    entity: { cluster_id: CLUSTER, kind: 'Pod', namespace: 'shop', name: 'checkout-56f4794c88-fbdsd', uid: null },
+    entity: { cluster_id: CLUSTER, kind: 'Pod', namespace: 'shop', name: pod, uid: null },
     verdict: 'abnormal',
     display_state: 'abnormal',
     reason: { kind: 'rule', text: '1 个容器被 OOM 终止' },
+    queries: [{ ...METRICS_QUERY, query: 'kube_pod_container_status_last_terminated_reason{reason="OOMKilled"}' }],
   });
   let prom: TsdbInstance;
   let oom: RemediationService;
@@ -820,17 +981,19 @@ spec:
 
   beforeAll(async () => {
     const points = Array.from({ length: 61 }, (_, i) => ({ t: T - (60 - i) * 60_000, v: 1 }));
-    prom = await startPrometheus([
-      {
-        labels: {
-          __name__: 'kube_pod_container_status_last_terminated_reason',
-          namespace: 'shop',
-          pod: 'checkout-56f4794c88-fbdsd',
-          container: 'checkout',
-          reason: 'OOMKilled',
-        },
-        points,
+    const oomKilled = (pod: string, container: string) => ({
+      labels: {
+        __name__: 'kube_pod_container_status_last_terminated_reason',
+        namespace: 'shop',
+        pod,
+        container,
+        reason: 'OOMKilled',
       },
+      points,
+    });
+    prom = await startPrometheus([
+      oomKilled('checkout-56f4794c88-fbdsd', 'checkout'),
+      oomKilled('cart-5d6f7a8b9c-x1y2z', 'cart'),
     ]);
     const source = await EvidenceSource.create({
       id: 'prometheus',
@@ -841,7 +1004,7 @@ spec:
     });
     gh.write('main', { [WORKLOADS_PATH]: WORKLOADS_FILE }, { message: 'shop workloads' });
     // 内存卡所在 Pod 的属主链：Pod → ReplicaSet → Deployment checkout（根因自己的卡，ADR 0139）；
-    // web 的 Pod 属于另一个工作负载
+    // web 的 Pod 属于另一个工作负载。checkout 由 Argo Application shop 管理，cart 没有管理它的应用
     const at = new Date(T - 3600_000);
     const owned = (pod: string, rs: string, deploy: string): TopologyChange[] => [
       ...[`Pod:shop/${pod}`, `ReplicaSet:shop/${rs}`, `Deployment:shop/${deploy}`].map((key): TopologyChange => ({
@@ -880,6 +1043,36 @@ spec:
     await new TopologyStore(db.server).apply(CLUSTER, [
       ...owned('checkout-56f4794c88-fbdsd', 'checkout-56f4794c88', 'checkout'),
       ...owned('web-7b8c9d0e1f-h3j5k', 'web-7b8c9d0e1f', 'web'),
+      ...owned('cart-5d6f7a8b9c-x1y2z', 'cart-5d6f7a8b9c', 'cart'),
+      {
+        op: 'node_upsert',
+        at,
+        source: 'informer',
+        node: {
+          key: APP,
+          kind: 'Application.argoproj.io',
+          namespace: 'argocd',
+          name: 'shop',
+          uid: 'uid-app-shop',
+          labels: {},
+          component_type: null,
+          hub: false,
+        },
+      },
+      {
+        op: 'edge_upsert',
+        at,
+        source: 'informer',
+        edge: {
+          from: 'Deployment:shop/checkout',
+          to: APP,
+          relation: 'managed_by',
+          provenance: 'structural',
+          confidence: 1,
+          scope: 'service',
+          evidence: 'argocd.argoproj.io/instance',
+        },
+      },
     ]);
     oom = build(null, {
       files: { workloads: { path: WORKLOADS_PATH, format: 'yaml' } },
@@ -1009,11 +1202,115 @@ spec:
       expect.objectContaining({ key: 'gitops/memory-limit-raise', outcome: 'proposed' }),
     ]);
   });
+
+  /** 研判根因 checkout、内存卡异常：只有被检查的那一项准入条件不满足 */
+  const checkout = (o: Parameters<typeof seed>[1] = {}) =>
+    seed('likely', { root: appRoot, researchRoot: 'Deployment:shop/checkout', cards: [memoryCard()], ...o });
+  const skipped = async (runId: string) =>
+    (
+      await db.server.query<{ key: string; outcome: string; code: string; reason: string }>(
+        'SELECT key, outcome, code, reason FROM server.remediation_attempts WHERE run_id = $1',
+        [runId],
+      )
+    ).rows;
+
+  it('cause_scope：根因范围不是 local 或 configuration 时整次研判不开 PR；审计、指标与时间线带原因', async () => {
+    const s = await checkout({ scope: 'downstream' });
+    expect(await oom.runOnce()).toBe(0);
+    const reason =
+      '根因范围为 downstream，只有 local 与 configuration（根因由 GitOps 仓库负责）开自愈 PR；告警调优：处置为 act，告警调优只在处置为 ignore 时提出';
+    expect(await skipped(s.runId)).toEqual([{ key: '-', outcome: 'skipped', code: 'cause_scope', reason }]);
+    const audit = await db.server.query<{ data: { code: string; reason: string } }>(
+      "SELECT data FROM server.governance_audit WHERE kind = 'remediation.attempt' AND data->>'run_id' = $1",
+      [s.runId],
+    );
+    expect(audit.rows.map((r) => r.data)).toEqual([expect.objectContaining({ key: '-', code: 'cause_scope', reason })]);
+    expect(await metrics.registry.getSingleMetricAsString('srenautix_remediations_total')).toContain(
+      'srenautix_remediations_total{category="none",outcome="skipped",code="cause_scope"}',
+    );
+    expect(await remediationTimeline(s.inc.incident_id)).toEqual([
+      expect.objectContaining({ text: `自愈 PR：skipped（cause_scope）：${reason}`, ref: s.runId }),
+    ]);
+  });
+
+  it('topology_only：结论只有成员告警支撑，没有证据卡', async () => {
+    const s = await checkout({ support: [], supportAlerts: ['alert:1'] });
+    expect(await oom.runOnce()).toBe(0);
+    expect(await skipped(s.runId)).toEqual([
+      expect.objectContaining({
+        key: '-',
+        code: 'topology_only',
+        reason: expect.stringContaining('只有 1 条成员告警'),
+      }),
+    ]);
+  });
+
+  it('no_runtime_evidence：支撑卡的查询只有变更记录', async () => {
+    const changesOnly: EvidenceResult = {
+      ...memoryCard(),
+      queries: [{ ...METRICS_QUERY, capability: 'changes.list' }],
+    };
+    const s = await checkout({ cards: [changesOnly] });
+    expect(await oom.runOnce()).toBe(0);
+    expect(await skipped(s.runId)).toEqual([
+      {
+        key: '-',
+        outcome: 'skipped',
+        code: 'no_runtime_evidence',
+        reason:
+          '支撑卡 card:1（changes.list）都不是运行时证据（指标、日志、数据库统计或 Kubernetes 只读检查）；告警调优：处置为 act，告警调优只在处置为 ignore 时提出',
+      },
+    ]);
+  });
+
+  it('卡的引用按研判运行的证据索引解析：研判之后阶段 A 重算、编号改变，支撑卡仍然是同一张内存卡', async () => {
+    // 研判时内存卡是 card:1（证据索引 card:1 → workload/pod-restarts/memory@Pod:shop/checkout-…）。研判之后同一版本的
+    // 阶段 A 按新的领域包重算，内存卡前面多了一张没有查询记录的卡，内存卡变成 card:2。按编号解析时 card:1 没有运行时证据
+    const s = await checkout();
+    const renumbered = [
+      { ...stageACards()[1]!, ref: 'card:1' },
+      { ...memoryCard(), ref: 'card:2' },
+    ];
+    await db.server.query(
+      `UPDATE server.stage_a_reports SET body = jsonb_set(body, '{cards}', $2::jsonb) WHERE incident_id = $1`,
+      [s.inc.incident_id, JSON.stringify(renumbered)],
+    );
+    expect(await oom.runOnce()).toBe(1);
+    expect(await attempts(s.runId)).toEqual([
+      expect.objectContaining({ key: 'gitops/memory-limit-raise', outcome: 'proposed' }),
+    ]);
+  });
+
+  it('no_repo_fact：研判根因 cart 声明在仓库文件里，但没有管理它的 GitOps 应用；模板照常计划，提交之前跳过', async () => {
+    const s = await seed('likely', {
+      root: appRoot,
+      researchRoot: 'Deployment:shop/cart',
+      cards: [memoryCard('cart-5d6f7a8b9c-x1y2z')],
+    });
+    expect(await oom.runOnce()).toBe(0);
+    expect(await skipped(s.runId)).toEqual([
+      {
+        key: 'gitops/memory-limit-raise',
+        outcome: 'skipped',
+        code: 'no_repo_fact',
+        reason:
+          '研判根因 Deployment:shop/cart 不由 GitOps 仓库负责（不是仓库声明的组件，也不是管理它们的 GitOps 应用）',
+      },
+    ]);
+    const files = await db.server.query<{ files: string[]; base: string }>(
+      'SELECT files, base FROM server.remediation_attempts WHERE run_id = $1',
+      [s.runId],
+    );
+    expect(files.rows[0]).toEqual({ files: [WORKLOADS_PATH], base: gh.heads.get('main') });
+    expect(
+      (await db.server.query("SELECT 1 FROM server.proposals WHERE body->>'research_run_id' = $1", [s.runId])).rows,
+    ).toEqual([]);
+  });
 });
 
 /**
- * 修改去重（ADR 0155）：同一条未覆盖的告警在多个事件里反复触发，基准提交在两次触发之间前进，补丁只差上下文与行号。
- * gateway 开出 PR 由执行事件与 FakeGitHub 里的 PR 表示（与"gateway 开出 PR 后"相同）
+ * 修改去重（ADR 0155）：同一条误报的 critical 告警在多个事件里反复触发、研判都判为 ignore，基准提交在两次触发之间前进，
+ * 补丁只差上下文与行号。gateway 开出 PR 由执行事件与 FakeGitHub 里的 PR 表示（与"gateway 开出 PR 后"相同）
  */
 describe('修改去重', () => {
   const ALERT = 'ShopCacheEvictions';
@@ -1026,14 +1323,16 @@ describe('修改去重', () => {
     ({ service: svc } = build(null, { issuesPerHour: 100 }));
   });
 
-  const catalogAttempt = async (runId: string) =>
-    (await attempts(runId)).find((a) => a.key === 'gitops/alert-catalog-entry');
+  /** 一个事件：告警 alertname 以 critical 触发，研判判为 ignore（得出结论的卡全部正常） */
+  const trigger = (alertname: string) => seed('likely', { alertname, severity: 'critical', disposition: 'ignore' });
+  const relaxAttempt = async (runId: string) =>
+    (await attempts(runId)).find((a) => a.key === 'gitops/noisy-alert-relax');
   const pullComments = () => gh.comments.get(PR) ?? [];
-  const catalogProposals = async (alertname: string) =>
+  const relaxProposals = async (alertname: string) =>
     (
       await db.server.query<{ n: number }>(
-        `SELECT count(*)::int AS n FROM server.proposals WHERE action = 'gitops_pr' AND params->>'patch' LIKE $1`,
-        [`%alertname: ${alertname},%`],
+        `SELECT count(*)::int AS n FROM server.proposals WHERE action = 'gitops_pr' AND params->>'body' LIKE $1`,
+        [`%告警 ${alertname} 的严重度由%`],
       )
     ).rows[0]!.n;
 
@@ -1070,36 +1369,39 @@ describe('修改去重', () => {
   };
 
   it('同一个修改：提议还没有开出 PR、PR 打开时都不再提议；PR 开出后每次触发评论一次，新事件的 issue 关联到 PR', async () => {
-    const first = await seed('likely', { alertname: ALERT });
+    const first = await trigger(ALERT);
     expect(await svc.runOnce()).toBe(1);
-    const a1 = await catalogAttempt(first.runId);
+    const a1 = await relaxAttempt(first.runId);
     expect(a1).toMatchObject({ outcome: 'proposed' });
     firstProposal = a1!.proposal_id!;
 
-    // 基准提交前进：目录在末尾多了一条，新补丁的上下文与行号都变了，增加的行相同（CCHP #289 与 #297 的情形）
-    const catalog = gh.branches.get('main')!.get(CATALOG_PATH)!;
+    // 基准提交前进：规则文件开头多了一条规则，新补丁的上下文与行号都变了，增减的行相同
+    const rules = gh.branches.get('main')!.get(CACHE_RULES_PATH)!;
     gh.write(
       'main',
       {
-        [CATALOG_PATH]: `${catalog}  - { id: shop-pod-pending, alertname: ShopPodPending, role: cause, entity: { kind: Pod, name_labels: [pod] } }\n`,
+        [CACHE_RULES_PATH]: rules.replace(
+          '      rules:\n',
+          '      rules:\n        - alert: ShopCacheCold\n          expr: cache_hit_ratio < 0.2\n          labels:\n            severity: warning\n',
+        ),
       },
-      { message: 'catalog: add ShopPodPending' },
+      { message: 'rules: add ShopCacheCold' },
     );
-    const second = await seed('likely', { alertname: ALERT });
+    const second = await trigger(ALERT);
     expect(await svc.runOnce()).toBe(0);
-    expect(await catalogAttempt(second.runId)).toMatchObject({
+    expect(await relaxAttempt(second.runId)).toMatchObject({
       outcome: 'skipped',
       code: 'duplicate_pending',
       proposal_id: null,
     });
 
     await open(firstProposal, PR);
-    const third = await seed('likely', { alertname: ALERT });
+    const third = await trigger(ALERT);
     expect(await svc.runOnce()).toBe(0);
-    expect(await catalogAttempt(third.runId)).toMatchObject({ outcome: 'skipped', code: 'duplicate_open' });
+    expect(await relaxAttempt(third.runId)).toMatchObject({ outcome: 'skipped', code: 'duplicate_open' });
 
     // 只有一个提议、一个 PR；第二、第三个事件各一条评论，带标记与新事件 issue 的 Refs
-    expect(await catalogProposals(ALERT)).toBe(1);
+    expect(await relaxProposals(ALERT)).toBe(1);
     expect(gh.pulls.filter((p) => p.body.includes(ALERT))).toHaveLength(1);
     const comments = pullComments();
     expect(comments).toHaveLength(2);
@@ -1136,24 +1438,24 @@ describe('修改去重', () => {
     await db.server.query('DELETE FROM server.remediation_triggers');
     await db.server.query('DELETE FROM server.remediation_changes');
     const restarted = build(null, { issuesPerHour: 100 }).service;
-    const fourth = await seed('likely', { alertname: ALERT });
+    const fourth = await trigger(ALERT);
     expect(await restarted.runOnce()).toBe(0);
-    expect(await catalogAttempt(fourth.runId)).toMatchObject({ outcome: 'skipped', code: 'duplicate_open' });
+    expect(await relaxAttempt(fourth.runId)).toMatchObject({ outcome: 'skipped', code: 'duplicate_open' });
     const row = await db.server.query<{ state: string; pr_number: number }>(
       'SELECT state, pr_number FROM server.remediation_changes WHERE proposal_id = $1',
       [firstProposal],
     );
     expect(row.rows).toEqual([{ state: 'open', pr_number: PR }]);
-    expect(await catalogProposals(ALERT)).toBe(1);
+    expect(await relaxProposals(ALERT)).toBe(1);
     expect(pullComments()).toHaveLength(3);
     expect(pullComments()[2]!.body).toContain(`<!-- srenautix:trigger=${fourth.inc.incident_id} -->`);
   });
 
   it('人关闭 PR 且没有合并：同一个修改不再提出；同一模板对同一文件的其他修改在冷却期内不提出', async () => {
     gh.close(PR, false);
-    const fifth = await seed('likely', { alertname: ALERT });
+    const fifth = await trigger(ALERT);
     expect(await svc.runOnce()).toBe(0);
-    expect(await catalogAttempt(fifth.runId)).toMatchObject({ outcome: 'skipped', code: 'rejected_before' });
+    expect(await relaxAttempt(fifth.runId)).toMatchObject({ outcome: 'skipped', code: 'rejected_before' });
     const state = await db.server.query<{ state: string; closed_at: Date | null }>(
       'SELECT state, closed_at FROM server.remediation_changes WHERE proposal_id = $1',
       [firstProposal],
@@ -1162,40 +1464,44 @@ describe('修改去重', () => {
     // 被拒绝的 PR 上不再评论
     expect(pullComments()).toHaveLength(3);
 
-    // 另一条未覆盖的告警：同一模板、同一个目录文件，冷却期（7 天）内不提出
-    const variant = await seed('likely', { alertname: 'ShopCacheMisses' });
+    // 另一条误报告警：同一模板、同一个规则文件，冷却期（7 天）内不提出
+    const variant = await trigger('ShopCacheMisses');
     expect(await svc.runOnce()).toBe(0);
-    expect(await catalogAttempt(variant.runId)).toMatchObject({ outcome: 'skipped', code: 'rejected_cooldown' });
-    expect(await catalogProposals('ShopCacheMisses')).toBe(0);
+    expect(await relaxAttempt(variant.runId)).toMatchObject({ outcome: 'skipped', code: 'rejected_cooldown' });
+    expect(await relaxProposals('ShopCacheMisses')).toBe(0);
 
-    // 冷却期为 0 时只记住被拒绝的那一个修改：其他告警的条目照常提出，被拒绝的修改仍然不提
+    // 冷却期为 0 时只记住被拒绝的那一个修改：其他告警的调优照常提出，被拒绝的修改仍然不提
     const relaxed = build(null, { issuesPerHour: 100, cooldownMs: 0 }).service;
-    const other = await seed('likely', { alertname: 'ShopCacheMisses' });
+    const other = await trigger('ShopCacheMisses');
     expect(await relaxed.runOnce()).toBe(1);
-    expect(await catalogAttempt(other.runId)).toMatchObject({ outcome: 'proposed' });
-    const same = await seed('likely', { alertname: ALERT });
+    expect(await relaxAttempt(other.runId)).toMatchObject({ outcome: 'proposed' });
+    const same = await trigger(ALERT);
     expect(await relaxed.runOnce()).toBe(0);
-    expect(await catalogAttempt(same.runId)).toMatchObject({ outcome: 'skipped', code: 'rejected_before' });
-    expect(await catalogProposals(ALERT)).toBe(1);
+    expect(await relaxAttempt(same.runId)).toMatchObject({ outcome: 'skipped', code: 'rejected_before' });
+    expect(await relaxProposals(ALERT)).toBe(1);
   });
 });
 
 /**
- * 模板上下文里告警的拓扑事实（ADR 0155），经真实的拓扑存储与组件展开：只带分组标签、逻辑组件在拓扑里没有对象的告警不加
- * 目录条目；外部上游的告警不降级
+ * 模板上下文里告警的拓扑事实（ADR 0155），经真实的拓扑存储与组件展开：没有命中告警目录的告警不开自愈 PR，开覆盖缺口
+ * issue（ADR 0171）；外部上游的告警不降级
  */
 describe('告警的拓扑事实', () => {
   beforeEach(settle);
 
-  const reason = async (runId: string, key: string) =>
+  /** 告警的覆盖缺口 issue（按正文标记） */
+  const coverageIssuesOf = (alertname: string) =>
+    gh.issues.filter((i) => i.body.includes(coverageMarker(CLUSTER, alertname)));
+  /** 研判的 gitops_pr 提议数 */
+  const proposalsOf = async (runId: string) =>
     (
-      await db.server.query<{ code: string; reason: string }>(
-        'SELECT code, reason FROM server.remediation_attempts WHERE run_id = $1 AND key = $2',
-        [runId, key],
+      await db.server.query<{ n: number }>(
+        "SELECT count(*)::int AS n FROM server.proposals WHERE body->>'research_run_id' = $1 AND action = 'gitops_pr'",
+        [runId],
       )
-    ).rows[0];
+    ).rows[0]!.n;
 
-  it('规则声明没有实体、只带 component: workload：拓扑里没有对应的对象，目录条目模板跳过并说明要在规则上补实体', async () => {
+  it('规则声明没有实体、只带 component: workload：不开目录条目 PR，开出覆盖缺口 issue，正文说明要在规则上补实体', async () => {
     const s = await seed('likely', {
       alertname: 'ShopGatewayOverProvisioned',
       alert: {
@@ -1205,15 +1511,29 @@ describe('告警的拓扑事实', () => {
       },
     });
     expect(await service.runOnce()).toBe(0);
-    expect(await reason(s.runId, 'gitops/alert-catalog-entry')).toEqual({
-      code: 'skip_if',
-      reason:
-        '告警 ShopGatewayOverProvisioned 给不出实体：规则声明没有实体（entity_kind 为 none），只带分组标签 workload，' +
-        '这个逻辑组件在拓扑里没有对应的对象。目录条目不会改变它的归属，需要在告警规则上加 entity 与 entity_kind 标签',
-    });
+    // 目录条目模板适用，但它的类别不再是自愈 PR 的类别
+    expect(await attempts(s.runId)).toEqual([
+      { key: '-', outcome: 'skipped', code: 'no_template', proposal_id: null, branch: null },
+    ]);
+    expect(await proposalsOf(s.runId)).toBe(0);
+
+    await coverage(100).runOnce();
+    const found = coverageIssuesOf('ShopGatewayOverProvisioned');
+    expect(found).toHaveLength(1);
+    const issue = found[0]!;
+    expect(issue.labels).toEqual(['srenautix', COVERAGE_LABEL]);
+    expect(issue.title).toBe('[影子] 覆盖缺口：告警 ShopGatewayOverProvisioned 没有告警目录条目（集群 test）');
+    expect(issue.body).toContain('出现次数：1 个事件');
+    expect(issue.body).toContain(`(https://srenautix.example.test/incidents/${s.inc.incident_id})`);
+    expect(issue.body).toContain('`component=workload`、`entity=`、`entity_kind=none`');
+    expect(issue.body).toContain('先在规则上加 `entity` 与 `entity_kind` 标签');
+    expect(issue.body).toContain('https://srenautix.example.test/topology?view=coverage&cluster=test');
+    // 下一轮不重复开
+    await coverage(100).runOnce();
+    expect(coverageIssuesOf('ShopGatewayOverProvisioned')).toHaveLength(1);
   });
 
-  it('只带 service 标签、同名 Service 选中一个工作负载：实体为逻辑组件，条目带 role_confidence', async () => {
+  it('只带 service 标签、同名 Service 选中一个工作负载：不开 PR；再次出现在新的事件里时只在覆盖 issue 下评论', async () => {
     const at = new Date(T - 3600_000);
     const node = (kind: string, name: string) => ({
       key: `${kind}:shop/${name}`,
@@ -1251,22 +1571,29 @@ describe('告警的拓扑事实', () => {
         edge: edge('Pod:shop/catalog-api-0', 'owned_by', 'Deployment:shop/catalog-api'),
       },
     ]);
-    const s = await seed('likely', {
-      alertname: 'ShopCatalogStale',
-      alert: { labels: { service: 'catalog' }, component: 'component:catalog', entity: null },
-    });
-    // 上一组用例在同一个目录文件上被拒绝过一个条目：这里不用冷却期
-    expect(await build(null, { cooldownMs: 0 }).service.runOnce()).toBe(1);
-    const a = (await attempts(s.runId)).find((x) => x.key === 'gitops/alert-catalog-entry');
-    expect(a).toMatchObject({ outcome: 'proposed' });
-    const p = await db.server.query<{ params: { patch: string; body: string } }>(
-      'SELECT params FROM server.proposals WHERE proposal_id = $1',
-      [a!.proposal_id],
-    );
-    expect(p.rows[0]!.params.patch).toContain(
-      '+  - { id: shop-catalog-stale, alertname: ShopCatalogStale, role: cause, role_confidence: 0.3, entity: { kind: component, name_labels: [ service ] } }',
-    );
-    expect(p.rows[0]!.params.body).toContain('这个逻辑组件在拓扑里对应 Deployment:shop/catalog-api');
+    const stale = { labels: { service: 'catalog' }, component: 'component:catalog', entity: null };
+    const s = await seed('likely', { alertname: 'ShopCatalogStale', alert: stale });
+    expect(await service.runOnce()).toBe(0);
+    expect(await attempts(s.runId)).toEqual([
+      { key: '-', outcome: 'skipped', code: 'no_template', proposal_id: null, branch: null },
+    ]);
+    expect(await proposalsOf(s.runId)).toBe(0);
+    await coverage(100).runOnce();
+    expect(coverageIssuesOf('ShopCatalogStale')).toHaveLength(1);
+    const issue = coverageIssuesOf('ShopCatalogStale')[0]!;
+    expect(issue.body).toContain('`service=catalog`');
+
+    // 同一条告警出现在另一个事件里：不开第二个 issue，在原 issue 下追加一条评论
+    const again = await seed('likely', { alertname: 'ShopCatalogStale', alert: stale });
+    expect(await service.runOnce()).toBe(0);
+    await coverage(100).runOnce();
+    expect(coverageIssuesOf('ShopCatalogStale')).toHaveLength(1);
+    const comments = gh.comments.get(issue.number) ?? [];
+    expect(comments).toHaveLength(1);
+    expect(comments[0]!.body).toContain(`<!-- srenautix:coverage-comment=${CLUSTER}/ShopCatalogStale -->`);
+    expect(comments[0]!.body).toContain('告警 `ShopCatalogStale` 又出现在 1 个事件里（累计 2 个事件）');
+    expect(comments[0]!.body).toContain(`/incidents/${again.inc.incident_id}`);
+    expect(comments[0]!.body).not.toContain(`/incidents/${s.inc.incident_id}`);
   });
 
   it('外部上游汇总配置里的告警：根因不是外部组件、研判为 ignore 也不降级；配置为空时同一事件会降级', async () => {
@@ -1275,18 +1602,19 @@ describe('告警的拓扑事实', () => {
       component: 'component:provider',
       entity: null,
     };
+    const alertname = 'ProviderErrors';
     const external = build(null, { externalAlerts: { components: ['component:provider'], alertLabels: {} } }).service;
-    const s = await seed('likely', { severity: 'critical', disposition: 'ignore', alert: provider });
+    const s = await seed('likely', { severity: 'critical', disposition: 'ignore', alertname, alert: provider });
     expect(await external.runOnce()).toBe(0);
     expect((await attempts(s.runId)).map((x) => x.key)).not.toContain('gitops/noisy-alert-relax');
 
     // 只配置告警标签条件时，满足条件的告警同样不降级
     const byLabel = build(null, { externalAlerts: { components: [], alertLabels: { provider_id: ['p1'] } } }).service;
-    const t = await seed('likely', { severity: 'critical', disposition: 'ignore', alert: provider });
+    const t = await seed('likely', { severity: 'critical', disposition: 'ignore', alertname, alert: provider });
     expect(await byLabel.runOnce()).toBe(0);
     expect((await attempts(t.runId)).map((x) => x.key)).not.toContain('gitops/noisy-alert-relax');
 
-    const plain = await seed('likely', { severity: 'critical', disposition: 'ignore', alert: provider });
+    const plain = await seed('likely', { severity: 'critical', disposition: 'ignore', alertname, alert: provider });
     expect(await service.runOnce()).toBe(1);
     expect((await attempts(plain.runId)).find((x) => x.key === 'gitops/noisy-alert-relax')).toMatchObject({
       outcome: 'proposed',

@@ -1,4 +1,5 @@
 import type { ConclusionLevel, Disposition, EvalCase, ResearchOutput } from '@srenautix/contract';
+import type { RunAdmission } from '../remediation/admission.js';
 
 // 单次运行的评分（DESIGN §14.4）：
 // - 根因按集合判定：top-1 落在标准答案的根因集合内为命中；前 3 个候选覆盖集合中任一组件计入召回@3；
@@ -35,6 +36,8 @@ export interface RunRecord {
   root?: string | null;
   /** 输出账本中任一假设的支持证据里出现的卡片定义（标注的噪声信号按它判断，ADR 0153） */
   supportedCards?: string[];
+  /** 自愈 PR 的运行级准入结果（ADR 0170，与 server 相同的规则）；没有研判输出时为 null */
+  admission?: RunAdmission | null;
 }
 
 /** 研判输出中全部假设的支持证据对应的卡片定义（evidence_index 的 target 为 <卡片>@<组件>） */

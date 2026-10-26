@@ -514,5 +514,35 @@ describe('自愈 PR 的补丁检查', () => {
       template_false_triggers: { alert_rule: 1 },
     });
     expect(t.template_matches).toHaveLength(4);
+    // 运行级准入（ADR 0170，与 server 相同的规则）：被挡下的模板不计为适用，记在 blocked 里
+    const gated = scoreRemediation(
+      [
+        {
+          ...run('label:shop-rollout', 0, null, 'likely'),
+          admission: { general: { code: 'cause_scope', reason: '根因范围为 upstream' }, alertRule: null },
+        },
+        {
+          ...run('label:shop-rollout', 1, null, 'likely'),
+          admission: { general: null, alertRule: { code: 'not_benign', reason: '处置为 act' } },
+        },
+        {
+          ...run('label:no-fix', 0, null, 'likely'),
+          admission: { general: null, alertRule: { code: 'not_benign', reason: '处置为 act' } },
+        },
+      ],
+      (id) => labels.get(id) ?? null,
+      null,
+      dir,
+      (r) =>
+        r.caseId === 'label:no-fix'
+          ? [{ key: 'gitops/noisy-alert-relax', category: 'alert_rule' }]
+          : [{ key: 'gitops/release-to-serving-version', category: 'release_rollback' }],
+    );
+    expect(gated).toMatchObject({ template_triggered_runs: 1, template_any_runs: 1, template_false_triggers: {} });
+    expect(gated.template_matches?.map((m) => [m.templates, m.blocked])).toEqual([
+      [[], [{ key: 'gitops/release-to-serving-version', code: 'cause_scope' }]],
+      [['gitops/release-to-serving-version'], []],
+      [[], [{ key: 'gitops/noisy-alert-relax', code: 'not_benign' }]],
+    ]);
   });
 });

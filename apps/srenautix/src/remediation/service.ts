@@ -21,7 +21,15 @@ import { appendAudit } from '../store/audit.js';
 import { tx } from '../store/pool.js';
 import type { ConcreteObject, LogicalHint } from '../topology/expand.js';
 import { changeHash, RemediationChanges, triggerComment, type PullLink, type Verdict } from './dedupe.js';
-import { alertFacts, remediationRoot, RootCardScope, type ExternalAlertSettings } from './facts.js';
+import { admissionFor, repositoryFact, runAdmission } from './admission.js';
+import {
+  alertFacts,
+  MAX_FACT_ROOTS,
+  remediationRoot,
+  repositoryRoots,
+  RootCardScope,
+  type ExternalAlertSettings,
+} from './facts.js';
 import { GitHubRepoReader } from './github-repo.js';
 import { alertsOf, branchOf, cardsOf, keyCards, prBody, say, validatePlan, type Lang } from './render.js';
 
@@ -33,7 +41,12 @@ import { alertsOf, branchOf, cardsOf, keyCards, prBody, say, validatePlan, type 
  * - 每小时上限、分支前缀、reviewers 与 main 的守护在 gateway；冻结只约束集群写入，gitops_pr 照常；
  * - 基准分支在计划与提议之间前进时不提交，下一轮重新计划；
  * - 同一仓库的同一个修改（规范化补丁的哈希）已有未结束的提议或打开的 PR 时不再提议，在 PR 上评论新的触发并关联新事件的
- *   issue；人关闭未合并的修改不再自动提出，同一模板对同一组文件的修改有冷却期（ADR 0155，dedupe.ts）。
+ *   issue；人关闭未合并的修改不再自动提出，同一模板对同一组文件的修改有冷却期（ADR 0155，dedupe.ts）；
+ * - 准入条件（ADR 0170，admission.ts）：根因范围、支撑证据的类型在模板匹配之前按运行判断，仓库事实在计划校验之后按模板
+ *   判断；告警调优（alert_rule）只要求处置为 ignore 且依据说明系统状态正常。不满足时记跳过代码与原因，修复留在研判的
+ *   建议与事件 issue 里；
+ * - 每个结果写入 server.remediation_attempts、治理审计 remediation.attempt（含原因）与 srenautix_remediations_total
+ *   {category,outcome,code}，控制台的事件时间线显示它们。
  */
 export interface RemediationRepository {
   repo: string;
@@ -235,11 +248,23 @@ export class RemediationService {
     if (!fp) {
       return skipAll('no_fingerprint', '没有当前版本的证据指纹');
     }
-    const report = await this.pool.query<{ body: { cards: EvidenceResult[] } }>(
-      'SELECT body FROM server.stage_a_reports WHERE incident_id = $1 AND incident_version = $2',
-      [inc.incident_id, inc.incident_version],
-    );
-    const cards = report.rows[0]?.body.cards ?? [];
+    const reportCards = async (version: number) =>
+      (
+        await this.pool.query<{ body: { cards: EvidenceResult[] } }>(
+          'SELECT body FROM server.stage_a_reports WHERE incident_id = $1 AND incident_version = $2',
+          [inc.incident_id, version],
+        )
+      ).rows[0]?.body.cards ?? [];
+    const cards = await reportCards(inc.incident_version);
+    // 准入条件（ADR 0170）：根因范围与证据类型只看研判输出，卡的引用按研判针对的事件版本的阶段 A 卡解析
+    const admission = runAdmission({
+      output: run.output,
+      disposition: run.disposition,
+      stageACards: moved ? await reportCards(run.incident_version) : cards,
+    });
+    if (admission.general && admission.alertRule) {
+      return skipAll(admission.general.code, `${admission.general.reason}；告警调优：${admission.alertRule.reason}`);
+    }
     const ctx = await this.context(inc, run, cards);
     const set = this.d.packs();
     const { applicable, errors } = applicableRemediations(set, ctx);
@@ -282,9 +307,23 @@ export class RemediationService {
       )
     ).rows[0]!.n;
     const ds = await this.d.dataSource(Date.now()).catch(() => null);
+    // 研判根因是否由 GitOps 仓库负责（仓库事实，ADR 0170）：第一个需要它的模板计算一次
+    let owned: Promise<boolean> | null = null;
+    const rootOwned = () => (owned ??= this.owned(inc, run.root_component));
     for (const a of wanted) {
       const before = prior.get(a.key);
       if (before && (before.code !== 'binding_stale' || before.retries >= BINDING_RETRY_LIMIT)) {
+        continue;
+      }
+      const blocked = admissionFor(a.category, admission);
+      if (blocked) {
+        attempts.push({
+          key: a.key,
+          outcome: 'skipped',
+          code: blocked.code,
+          reason: blocked.reason,
+          category: a.category,
+        });
         continue;
       }
       if (counted >= this.s.maxPerRun) {
@@ -297,7 +336,7 @@ export class RemediationService {
         });
         continue;
       }
-      const at = await this.one(run, inc, ctx, cards, a, ds, fp);
+      const at = await this.one(run, inc, ctx, cards, a, ds, fp, rootOwned);
       attempts.push(at);
       if (at.outcome === 'proposed') {
         proposed++;
@@ -332,6 +371,35 @@ export class RemediationService {
     };
   }
 
+  /**
+   * 研判根因是否由 GitOps 仓库负责（ADR 0170，facts.ts 的 repositoryRoots）：与研判根因一起求值的是事件根因、候选根因与
+   * 事件组件，管理着它们的 GitOps 应用因此也由仓库负责
+   */
+  private async owned(inc: Incident, root: string | null): Promise<boolean> {
+    if (root === null) {
+      return false;
+    }
+    const alerts = await alertsById(
+      this.pool,
+      inc.members.filter((m) => m.left_version === null).map((m) => m.alert_id),
+    );
+    const at = new Date();
+    const keys = [
+      ...new Set([
+        root,
+        ...(inc.root.component ? [inc.root.component] : []),
+        ...inc.candidates.map((c) => c.component),
+        ...inc.components,
+      ]),
+    ].slice(0, MAX_FACT_ROOTS);
+    const r = await repositoryRoots(
+      keys,
+      (key) => remediationRoot(this.d, inc, alerts, key, at),
+      new RootCardScope(this.d, inc, at),
+    );
+    return r.owned.includes(root);
+  }
+
   private async one(
     run: RunRow,
     inc: Incident,
@@ -340,6 +408,7 @@ export class RemediationService {
     a: { key: string; category: string; repository: string },
     ds: EvidenceDataSource | null,
     fp: string,
+    rootOwned: () => Promise<boolean>,
   ): Promise<Attempt> {
     const base: Attempt = { key: a.key, outcome: 'skipped', code: null, reason: null, category: a.category };
     const repo = this.s.repositories[a.repository];
@@ -381,6 +450,11 @@ export class RemediationService {
           .join('；')
           .slice(0, 1000),
       };
+    }
+    // 仓库事实（ADR 0170）：告警调优修改的是告警规则本身，不要求根因由仓库负责
+    const fact = a.category === 'alert_rule' ? null : repositoryFact(plan, run.root_component, await rootOwned());
+    if (fact) {
+      return { ...base, repository: repo.repo, base: plan.base, files, code: fact.code, reason: fact.reason };
     }
     // 计划与提议之间 base 前进：补丁可能已经不适用，下一轮按新的 base 重新计划
     const head = await new GitHubRepoReader(this.d.github, repo.repo, repo.base_branch).head().catch(() => null);
@@ -570,13 +644,14 @@ export class RemediationService {
           continue;
         }
         recorded.push(a);
-        this.d.metrics.remediations.inc({ category: a.category ?? 'none', outcome: a.outcome });
+        this.d.metrics.remediations.inc({ category: a.category ?? 'none', outcome: a.outcome, code: a.code ?? 'none' });
         await appendAudit(c, 'remediation.attempt', 'server', {
           run_id: run.run_id,
           incident_id: run.incident_id,
           key: a.key,
           outcome: a.outcome,
           code: a.code,
+          reason: a.reason,
           proposal_id: a.proposalId ?? null,
           branch: a.branch ?? null,
           base: a.base ?? null,

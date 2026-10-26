@@ -64,13 +64,13 @@ Grafana：`kubectl --context kind-srenautix -n monitoring port-forward svc/kps-g
 | `release-bad-image` | 人工提交发布 r3，镜像没有 HTTP 服务 | KubePodCrashLooping、ShopRolloutIncomplete | 发布 r3（Argo 应用 shop、api） | 发布回退：`apps/shop/release.json` |
 | `config-resource-oom` | 人工提交把 checkout 的内存缓存调到超过内存上限 | KubePodCrashLooping、ShopRolloutIncomplete | `Deployment:shop/checkout` | 配置与资源：`apps/shop/workloads.yaml` |
 | `alert-too-sensitive` | api 的一个容器正常退出一次 | ShopPodRestarted（for 0m、critical） | `Deployment:shop/api`，处置为忽略（依据：影响卡 `traffic/client-errors` 全部正常） | 告警规则调优（`noisy-alert-relax`）：`platform/observability/rules/shop.yaml` |
-| `unmapped-alert` | 人工新增只带 `service` 标签的告警 ShopCatalogStale | ShopCatalogStale | 接入时为逻辑组件 `component:catalog`；研判指向 `Deployment:shop/api` | 拓扑与领域包覆盖（`alert-catalog-entry`）：`srenautix/packs/kind-shop/` |
+| `unmapped-alert` | 人工新增只带 `service` 标签的告警 ShopCatalogStale | ShopCatalogStale | 接入时为逻辑组件 `component:catalog`；研判指向 `Deployment:shop/api` | 不开 PR；`kind/gitops` 上开出 ShopCatalogStale 的覆盖缺口 issue（ADR 0171） |
 
 后五个场景在 `SRENAUTIX_CHECKS=1` 时依次检查（`deploy/kind/srenautix-checks.sh`）：
 
 1. **发现**：注入之后与场景相关的事件不超过 `SRENAUTIX_MAX_INCIDENTS`（背景噪声的命名空间不计），其中有一个事件的根因匹配 `SRENAUTIX_ROOT`；
 2. **分析**：该事件有证据卡，阶段 B 研判完成且结论为 `likely` 或 `evidence_consistent`（模型响应来自 `deploy/kind/scenarios/<场景>/llm/` 的录制）；
-3. **自愈 PR**：`kind/gitops` 上出现该事件的 `srenautix/*` 分支 PR，描述含结论、证据、改动、验证计划、回滚五节与 `Refs #<issue>`，issue 带 `srenautix` 标签并有回链 PR 的评论，改动的文件匹配 `SRENAUTIX_PR_FILES`；
+3. **自愈 PR**：`kind/gitops` 上出现该事件的 `srenautix/*` 分支 PR，描述含结论、证据、改动、验证计划、回滚五节与 `Refs #<issue>`，issue 带 `srenautix` 标签并有回链 PR 的评论，改动的文件匹配 `SRENAUTIX_PR_FILES`；声明 `SRENAUTIX_COVERAGE_ALERT` 的场景（`unmapped-alert`）改为检查覆盖缺口：`kind/gitops` 上有这个告警唯一的、带 `srenautix` 与 `coverage` 标签的 issue，正文或评论列出该事件，该事件没有 `srenautix/*` PR；
 4. **补偿控制**：注入之后 App 机器人只改动过 `srenautix/*` 分支，main 只有人工提交，没有经 REST 的合并请求。
 
 场景恢复由人工身份提交回退（例如把 `release.json` 改回 r1），SreNautix 的 PR 保持未合并。`SRENAUTIX_CHECKS=1` 时每个场景注入之前等告警投递链路正常（Alertmanager 5 分钟内没有通知失败，没有 `Alertmanager*FailedToSendAlerts`）；每个场景恢复之后等它注入的故障告警（`EXPECTED_ALERTS`）在 Prometheus 中消失、在 SreNautix 中 resolved，再开始下一个场景；持续的背景告警不阻塞。这两项等待不能让同一集群中相继运行的场景互不影响：SreNautix 把 30 分钟内（`rca-params` 的 `adjacency` 与 `change_window` 默认值）沿拓扑或同一次变更（例如环境拉起时 Argo CD 的首次同步同时触及 api、checkout、web）相连的告警归为一个事件，上一个场景的事件即使已经结束，也会吸收几分钟后下一个场景的告警，下一个场景就不会出现自己的根因事件。本地在同一集群中连续运行场景时，场景之间至少间隔 30 分钟，或者每个场景重建集群（`kind-e2e` 采用后者）。没有故障时 shop 不应产生告警（例如 CPU limit 不低于单个请求的单线程消耗，避免 CPUThrottlingHigh）。

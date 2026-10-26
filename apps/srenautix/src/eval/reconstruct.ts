@@ -990,8 +990,8 @@ export interface ReconstructedCase {
   cards: { total: number; determinate: number; abnormal: number; rootAbnormal: number };
 }
 
-/** 重建评测按启用了全部修复类别计算修复模板（与 CCHP 的 remediation.categories 相同） */
-export const EVAL_REMEDIATION_CATEGORIES = ['release_rollback', 'config_resource', 'alert_rule', 'topology_coverage'];
+/** 重建评测按启用了全部自愈 PR 类别计算修复模板；覆盖缺口改为 issue（ADR 0171），不在其中 */
+export const EVAL_REMEDIATION_CATEGORIES = ['release_rollback', 'config_resource', 'alert_rule'];
 
 /**
  * 重建拓扑上的根因展开（与 ComponentExpander.concrete 相同的规则，ADR 0126）：取时刻 at 的顶层属主；Service 只选中

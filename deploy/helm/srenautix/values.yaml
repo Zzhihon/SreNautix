@@ -252,7 +252,8 @@ notifyDigest:
       # 组件沿依赖边这么多跳以内到达上游根因时也算相关；0 时不按拓扑判定
       topologyHops: 6
 
-# 需要人跟进的事件在 GitHub 开 issue，并关联修复 PR（需要 roles.server.githubApp）。enabled 以外的键原样写入 server 配置的
+# 需要人跟进的事件在 GitHub 开 issue，并关联修复 PR（需要 roles.server.githubApp）；没有告警目录条目的告警每个开一个覆盖缺口
+# issue（标签另加 coverage，每小时上限与事件 issue 共用）。enabled 以外的键原样写入 server 配置的
 # issues（labels、title_prefix、max_per_hour、lookback、interval，见 apps/srenautix/src/config/server.ts）
 issues:
   enabled: false
@@ -327,7 +328,8 @@ remediation:
   baseBranch: main
   # 补丁模板的文件角色 → {path, format, fields}（领域包 gitops 的模板引用文件角色，不写路径）
   files: {}
-  categories: [release_rollback, config_resource, alert_rule, topology_coverage]
+  # 拓扑与领域包覆盖的缺口不开 PR，改为每个缺口一个 issue（issues 开启时）；写了 topology_coverage 时 server 忽略并记录警告
+  categories: [release_rollback, config_resource, alert_rule]
   conclusions: [likely, evidence_consistent]
   # PR 标题前缀；为 null 时取通知前缀（notify.prefix）
   titlePrefix: null

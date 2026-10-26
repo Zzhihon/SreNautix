@@ -296,7 +296,7 @@ component_types:
 ```yaml
 remediation:
   enabled: true
-  categories: [release_rollback, config_resource, alert_rule, topology_coverage]
+  categories: [release_rollback, config_resource, alert_rule]
   conclusions: [likely, evidence_consistent]  # 研判结论达到这些等级时计划（ADR 0108）
   repositories:
     gitops:                                   # 仓库角色，模板的 repository
@@ -314,7 +314,7 @@ remediation:
 
 | 字段 | 内容 |
 |---|---|
-| `category` | `release_rollback`、`config_resource`、`alert_rule`、`topology_coverage` |
+| `category` | `release_rollback`、`config_resource`、`alert_rule`、`topology_coverage`。server 只为前三类开自愈 PR，并且要满足准入条件（ADR 0170，见 `docs/server/README.md` 的"自愈 PR"）；`topology_coverage` 的缺口改为覆盖缺口 issue（ADR 0171），这一类模板只在领域包测试里求值 |
 | `when` | 适用条件（CEL）：`incident`、`root`（含组件类型 `component_type` 与是否在集群之外 `external`）、`research`（研判结论 `{disposition, level}`，没有时为 null）、`cards`（`<包>/<链>/<卡>` → 结论，含判定明细 `observations` 与影响卡标记 `impact`）、`root_cards`（同形，只含根因自己的卡，见下文）、`alerts`（成员告警，含分类的 `role`、`source`、`confidence`、`catalog_entry`、`chronic`，归属组件 `component`，归属组件在拓扑里对应的具体对象 `component_object`（逻辑组件没有对应对象时为 null），以及告警是否描述集群之外的上游 `external`，见 ADR 0155）、`params` |
 | `inputs` | 计划时在事件锚点对本包 metrics 信号的 instant 查询；`entity` 是求实体的 CEL，默认根因 |
 | `history` | 读取一个文件角色的 Git 历史，变量 `history` 为最近 `depth` 个修改过它的提交 `{commit, author, time, message, doc}` |
@@ -334,7 +334,7 @@ remediation:
 | `hpa-max-replicas-raise` | config_resource | 根因是 HPA，它自己的 `workload/capacity/hpa`（副本数顶到上限）与 `hpa-utilization`（负载饱和：超过目标并且被限流或请求变慢）都异常 | `spec.maxReplicas` 加 `params.step`，不超过 `params.ceiling` |
 | `memory-limit-raise` | config_resource | 根因是工作负载，根因自己的 `workload/pod-restarts/memory` 异常 | OOMKilled 容器的内存 limit 乘 `params.factor`，不超过 `params.ceiling` |
 | `noisy-alert-relax` | alert_rule | 根因不是集群外部组件（`root.external`），并且研判结论为不需要处理（`research.disposition == "ignore"`）且有不描述外部上游（`external` 为 false）的 critical 告警，或这样的告警是长期告警、事件的影响卡（`impact: true`）全部正常 | 严重度改为 `params.to_severity`，`for` 至少 `params.min_for` |
-| `alert-catalog-entry` | topology_coverage | 成员告警没有命中告警目录，并且能给出实体：标签契约的 `entity` 与 `entity_kind`，或 `params.object_labels` 中的对象标签，或归属的逻辑组件（component、service 标签）在拓扑里对应到具体对象 | 给告警目录加一条条目，实体按上面的顺序取；角色取告警当前的分类，置信度低于 1 时写上 `role_confidence`。只带分组标签、逻辑组件在拓扑里没有对象的告警跳过，原因里说明要在告警规则上补 `entity` 与 `entity_kind` |
+| `alert-catalog-entry` | topology_coverage（server 不开 PR，见上文） | 成员告警没有命中告警目录，并且能给出实体：标签契约的 `entity` 与 `entity_kind`，或 `params.object_labels` 中的对象标签，或归属的逻辑组件（component、service 标签）在拓扑里对应到具体对象 | 给告警目录加一条条目，实体按上面的顺序取；角色取告警当前的分类，置信度低于 1 时写上 `role_confidence`。只带分组标签、逻辑组件在拓扑里没有对象的告警跳过，原因里说明要在告警规则上补 `entity` 与 `entity_kind` |
 
 模板的测试在 `packages/packs-sdk/test/remediation.test.ts`：同一套模板在两种布局的 Git 仓库上生成补丁，补丁必须能 `git apply --check` 到基准提交。
 

@@ -15,7 +15,7 @@ import { GitHubApp, GitHubError } from './app.js';
  * - 每个事件最多一个 issue（server.github_issues 以 incident_id 为主键；issue 正文带事件标记，超时后按标记找回，不重复开）；
  * - 后续进展（研判结束、事件恢复、关联的 PR）以评论追加，按 (事件, 键) 去重，评论同样带标记；
  * - 正文就地更新为最新的报告；标题跟随根因与头条症状，同一事件每小时最多改一次（ADR 0142）；
- * - 每个仓库每小时最多新开 max_per_hour 个，超出的事件只记录为 skipped，不开 issue；
+ * - 每个仓库每小时最多新开 max_per_hour 个（与覆盖缺口 issue 合计，ADR 0171），超出的事件只记录为 skipped，不开 issue；
  * - GitHub 失败时按退避重试，最多 MAX_ATTEMPTS 次；每次开出、跳过、放弃与评论写治理审计。
  * 只用 GitHub App 的安装令牌。
  */
@@ -47,6 +47,20 @@ export const TITLE_MIN_INTERVAL_MS = 3600_000;
 export const EXTERNAL_RECHECK_MS = 10 * 60_000;
 const EXTERNAL_NOTE = '根因是外部上游且没有业务影响：进入通知的周期汇总，不开 issue（ADR 0147）';
 export const backoffMs = (attempts: number) => Math.min(30_000 * 2 ** Math.max(0, attempts - 1), 30 * 60_000);
+
+/**
+ * 同一仓库最近 1 小时开出的 issue：事件 issue 与覆盖缺口 issue（ADR 0171）的合计，两者共用 issues.max_per_hour
+ */
+export async function openedLastHour(c: Queryable, repo: string): Promise<number> {
+  const r = await c.query<{ n: number }>(
+    `SELECT ((SELECT count(*) FROM server.github_issues
+               WHERE repo = $1 AND state = 'open' AND opened_at > now() - interval '1 hour')
+           + (SELECT count(*) FROM server.coverage_gaps
+               WHERE repo = $1 AND opened_at > now() - interval '1 hour'))::int AS n`,
+    [repo],
+  );
+  return r.rows[0]!.n;
+}
 
 /** 事件报告：由 notify/source.ts 的 ReportSource.message 提供；事件或阶段 A 报告不存在时为 null */
 export type IssueReport = (incidentId: string, language: 'zh' | 'en') => Promise<NotifyMessage | null>;
@@ -269,15 +283,13 @@ export class IssueService {
         logger.info('外部上游的事件不开 issue', { incident_id: incidentId, repo: row.repo });
         return;
       }
-      const opened = await c.query<{ n: number }>(
-        `SELECT count(*)::int AS n FROM server.github_issues
-          WHERE repo = $1 AND state = 'open' AND opened_at > now() - interval '1 hour'`,
-        [row.repo],
-      );
-      if ((opened.rows[0]?.n ?? 0) >= this.s.maxPerHour) {
+      if ((await openedLastHour(c, row.repo)) >= this.s.maxPerHour) {
         await c.query(
           `UPDATE server.github_issues SET state = 'skipped', last_error = $2, updated_at = now() WHERE incident_id = $1`,
-          [incidentId, `仓库 ${row.repo} 最近 1 小时已开 ${this.s.maxPerHour} 个 issue，达到上限`],
+          [
+            incidentId,
+            `仓库 ${row.repo} 最近 1 小时已开 ${this.s.maxPerHour} 个 issue（事件 issue 与覆盖 issue 合计），达到上限`,
+          ],
         );
         await appendAudit(c, 'github.issue_skipped', 'server', {
           incident_id: incidentId,

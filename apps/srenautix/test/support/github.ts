@@ -10,7 +10,8 @@ import { jwtVerify } from 'jose';
  * - GET /repos/{repo}/git/ref/heads/{branch}、GET/PUT /repos/{repo}/contents/{path}（PUT 更新已有文件时必须带当前 sha）、
  *   POST /repos/{repo}/git/refs（分支已存在时 422）、POST /repos/{repo}/pulls、GET/PATCH /repos/{repo}/pulls/{n}；
  * - issue：POST/GET /repos/{repo}/issues（列表按 labels、创建时间倒序，PR 也出现在列表中并带 pull_request）、
- *   GET/PATCH /repos/{repo}/issues/{n}（PATCH 改标题与正文）、POST/GET /repos/{repo}/issues/{n}/comments；
+ *   GET/PATCH /repos/{repo}/issues/{n}（PATCH 改标题与正文；GET 带 state，closeIssue() 关闭）、
+ *   POST/GET /repos/{repo}/issues/{n}/comments；
  * - 提交：GET /repos/{repo}/commits（sha 为分支或提交、path、since、until、per_page、page）与 GET /repos/{repo}/commits/{sha}（带 files）；
  * - contents 的 ref 可以是分支或 write() 产生的提交，路径是目录时返回目录列表；GET /repos/{repo}/pulls?head=owner:branch。
  * fault() 注入失败：返回给定状态，或处理请求之后断开连接（客户端收不到响应）。
@@ -33,7 +34,15 @@ export class FakeGitHub {
     closed_at?: string | null;
     merged_at?: string | null;
   }> = [];
-  readonly issues: Array<{ number: number; title: string; body: string; labels: string[]; created: number }> = [];
+  /** issue；state 不填时为 open，closeIssue() 关闭 */
+  readonly issues: Array<{
+    number: number;
+    title: string;
+    body: string;
+    labels: string[];
+    created: number;
+    state?: 'open' | 'closed';
+  }> = [];
   readonly comments = new Map<number, Array<{ id: number; body: string }>>();
   /** 分支 → 提交（新的在前） */
   readonly commits = new Map<
@@ -254,6 +263,8 @@ export class FakeGitHub {
         number: issue.number,
         title: issue.title,
         body: issue.body,
+        state: issue.state ?? 'open',
+        state_reason: issue.state === 'closed' ? 'not_planned' : null,
         html_url: `https://github.example.test/${this.repo}/issues/${issue.number}`,
       });
     }
@@ -458,6 +469,15 @@ export class FakeGitHub {
     this.snapshots.set(s, new Map(cur));
     this.heads.set(branch, s);
     return s;
+  }
+
+  /** 人关闭 issue（不打算处理，state_reason 为 not_planned） */
+  closeIssue(number: number): void {
+    const issue = this.issues.find((i) => i.number === number);
+    if (!issue) {
+      throw new Error(`没有 issue #${number}`);
+    }
+    issue.state = 'closed';
   }
 
   /** 审阅者关闭 PR：merged 为 true 时同时合并（不改分支内容，需要时另用 merge()） */
