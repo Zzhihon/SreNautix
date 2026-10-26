@@ -1,4 +1,4 @@
-import type { Alert, EvalCase, EvalSnapshot, EvidenceResult, Incident } from '@srenautix/contract';
+import type { Alert, EvalCase, EvalSnapshot, EvidenceResult, Incident, StageAReport } from '@srenautix/contract';
 import { logger } from '../log.js';
 import type { ModelLayer } from '../llm/session.js';
 import { ServerMetrics } from '../metrics.js';
@@ -21,7 +21,8 @@ import { rootsAgree } from '../incident/research-root.js';
 import { readBundle } from './bundle.js';
 import type { ReconstructConfig } from './config.js';
 import { discoveryCase, summarizeDiscovery, type DiscoveryCase, type DiscoverySummary } from './discovery.js';
-import { labelCase, reconstructedSnapshotId, type Label, type LabelFile } from './labels.js';
+import { labelCase, reconstructedSnapshotId, type FixClass, type Label, type LabelFile } from './labels.js';
+import { pushSettings, replayPushJudge, type PushJudge } from './push.js';
 import {
   bundleRootLookup,
   EVAL_REMEDIATION_CATEGORIES,
@@ -40,13 +41,15 @@ import {
   RootCardScope,
   type RootLookup,
 } from '../remediation/facts.js';
+import { admissionFor } from '../remediation/admission.js';
 import { templateRoot } from '../research/disposition.js';
-import { scoreRemediation, type RemediationSummary } from './remediation.js';
+import { REPAIR_LEVELS, scoreRemediation, type RemediationSummary } from './remediation.js';
 import { runEval, type EvalOutcome } from './runner.js';
 import type { RunRecord } from './score.js';
 
 // 第二阶段三个环节的重建评测（ADR 0110）：每条标注读取重建包，按步长重放得到发现指标；
 // 在 as_of 为主事件重建阶段 A 与研判输入，逐条路由运行 k 次阶段 B 得到分析指标；研判输出的 gitops_pr 提议得到自愈 PR 指标。
+// 良性标注（ADR 0175）：重建没有形成事件记为沉默；形成事件时每次运行另判断会不会推送、会不会开 PR（误推送与误开 PR）。
 
 export async function loadRuntime(r: ReconstructConfig): Promise<PackRuntime> {
   const rt = await PackRuntime.load({
@@ -167,6 +170,11 @@ export async function runPhase2(o: Phase2Options): Promise<Phase2Result> {
   const agreements: AlertAgreement[] = [];
   const cases: Array<{ c: EvalCase; s: EvalSnapshot }> = [];
   const missing: EvalCase[] = [];
+  // 良性标注在重建中没有形成事件：沉默，不按失败计（ADR 0175）
+  const silent: EvalCase[] = [];
+  // 良性标注形成了事件：按通知规则判断每次运行会不会推送（ADR 0175）
+  const pushes = new Map<string, PushJudge>();
+  const settings = pushSettings(r);
   const runners = new Map<string, QueryRunner>();
   // 每个用例：分析时刻的事件根因与属主查找（研判根因与发现根因的比较用）
   const incidentRoots = new Map<string, { root: string | null; ownerOf: (key: string) => string | null }>();
@@ -205,7 +213,7 @@ export async function runPhase2(o: Phase2Options): Promise<Phase2Result> {
     const sid = reconstructedSnapshotId(l, o.codeSha);
     const main = mainIncident(rep, faultAlertIds(rep, l), 'captured');
     if (!main) {
-      missing.push(labelCase(o.labels, l, o.suite, sid, o.now));
+      (l.type === 'benign' ? silent : missing).push(labelCase(o.labels, l, o.suite, sid, o.now));
       coverage.push({
         label: l.id,
         incident: null,
@@ -245,6 +253,25 @@ export async function runPhase2(o: Phase2Options): Promise<Phase2Result> {
     const c = labelCase(o.labels, l, o.suite, sid, o.now);
     cases.push({ c, s: rc.snapshot });
     agreements.push(...rc.agreement);
+    if (l.type === 'benign') {
+      pushes.set(
+        c.case_id,
+        replayPushJudge({
+          settings,
+          replay: rep,
+          topology: rep.topology,
+          types: () => rt.componentTypes(),
+          subject: {
+            incident: rc.incident,
+            stageA: rc.snapshot.context.stage_a as unknown as StageAReport,
+            alerts: rc.snapshot.context.alerts as unknown as Alert[],
+          },
+          asOf,
+          locale: r.locale,
+          cardsOf: async (inc, alerts) => (await evidence.run(inc, alerts, AbortSignal.timeout(600_000), asOf)).cards,
+        }),
+      );
+    }
     runners.set(
       c.case_id,
       new ReconstructedQueryRunner(evidence, rc.incident, rep.topology, asOf, rc.snapshot.context.alerts),
@@ -295,7 +322,7 @@ export async function runPhase2(o: Phase2Options): Promise<Phase2Result> {
           traceDir: a.traceDir,
         })
       : { runs: [], excluded: new Map(), tokens: 0, skipped: 0 };
-    // 重建没有得到事件的标注：每条路由每次都记为失败（未命中）
+    // 重建没有得到事件的标注：每条路由每次都记为失败（未命中）；良性标注记为沉默（ADR 0175）
     for (const c of missing) {
       for (const { routeId, layer } of a.layers) {
         for (let i = 0; i < a.runs; i++) {
@@ -303,8 +330,24 @@ export async function runPhase2(o: Phase2Options): Promise<Phase2Result> {
         }
       }
     }
+    for (const c of silent) {
+      for (const { routeId, layer } of a.layers) {
+        for (let i = 0; i < a.runs; i++) {
+          analysis.runs.push(silentRun(c.case_id, routeId, layer.route(routeId).route.model, i));
+        }
+      }
+    }
     const byCase = new Map<string, Label>(labels.map((l) => [`label:${l.id}`, l]));
     const templates = await runTemplates(analysis.runs, matchInputs, rt);
+    // 良性标注的推送与开 PR 判定（ADR 0175）
+    for (const run of analysis.runs) {
+      const judge = pushes.get(run.caseId);
+      if (!judge) {
+        continue;
+      }
+      run.pushed = await judge.pushed(run);
+      run.opensPr = opensPr(run, templates.get(run) ?? [], byCase.get(run.caseId)?.fix?.class ?? null);
+    }
     remediation = scoreRemediation(
       analysis.runs,
       (id) => byCase.get(id) ?? null,
@@ -326,7 +369,7 @@ export async function runPhase2(o: Phase2Options): Promise<Phase2Result> {
     discoverySummary: summarizeDiscovery(discovery),
     coverage,
     agreement: summarizeAgreement(agreements),
-    evalCases: [...cases.map((x) => x.c), ...missing],
+    evalCases: [...cases.map((x) => x.c), ...missing, ...silent],
     analysis,
     remediation,
     roots,
@@ -414,6 +457,51 @@ export function compareRoots(
     });
   }
   return out;
+}
+
+/**
+ * 一次运行是否会开 PR（ADR 0175）：结论 likely 及以上，有适用的修复模板没有被运行级准入挡下；标注的标准修复是 alert_rule
+ * 时 alert_rule 类的模板就是正确的修复，不算
+ */
+export function opensPr(
+  r: Pick<RunRecord, 'level' | 'admission'>,
+  templates: ReadonlyArray<{ key: string; category: string }>,
+  fixClass: FixClass | null,
+): boolean {
+  if (r.level === null || !REPAIR_LEVELS.has(r.level)) {
+    return false;
+  }
+  return templates.some(
+    (t) =>
+      !(fixClass === 'alert_rule' && t.category === 'alert_rule') &&
+      (r.admission ? admissionFor(t.category, r.admission) : null) === null,
+  );
+}
+
+/** 良性标注在重建中没有形成事件：沉默，没有研判，不推送、不开 issue、不开 PR */
+function silentRun(caseId: string, routeId: string, model: string, run: number): RunRecord {
+  return {
+    caseId,
+    run,
+    routeId,
+    model,
+    state: 'silent',
+    structuredFailure: false,
+    level: null,
+    disposition: null,
+    top: [],
+    cost: 0,
+    currency: 'USD',
+    inputTokens: 0,
+    outputTokens: 0,
+    missRate: null,
+    fingerprints: [],
+    durationMs: 0,
+    error: null,
+    proposals: [],
+    pushed: false,
+    opensPr: false,
+  };
 }
 
 function failedRun(caseId: string, routeId: string, model: string, run: number): RunRecord {

@@ -70,7 +70,7 @@ const fix = z
   })
   .strict();
 
-const label = z
+export const label = z
   .object({
     id: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,150}$/),
     title: z.string().min(1),
@@ -134,7 +134,7 @@ const label = z
     }
   });
 
-const file = z
+export const labelFile = z
   .object({
     version: z.literal(1),
     cluster_id: z.string().min(1),
@@ -152,12 +152,12 @@ const file = z
   });
 
 export type Label = z.infer<typeof label>;
-export type LabelFile = z.infer<typeof file>;
+export type LabelFile = z.infer<typeof labelFile>;
 export type AlertMatcher = z.infer<typeof matcher>;
 export type FixExpect = z.infer<typeof fixExpect>;
 
 export function loadLabels(path: string): LabelFile {
-  return file.parse(parse(readFileSync(path, 'utf8')));
+  return labelFile.parse(parse(readFileSync(path, 'utf8')));
 }
 
 /** 发现环节可接受的根因 */

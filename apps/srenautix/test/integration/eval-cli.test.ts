@@ -252,13 +252,24 @@ describe('srenautix eval', () => {
     expect(r.gatePassed).toBe(true);
     const report = JSON.parse(readFileSync(join(ROOT, 'reports', 'cmp.json'), 'utf8')) as {
       gate: { paired_cases: number; threshold: number };
+      rows: Array<{ false_push: { denominator: number }; false_issue: { denominator: number } }>;
     };
-    expect(report.gate).toMatchObject({ paired_cases: 1, threshold: -0.1 });
+    // 误推送默认不设上限（ADR 0175）；用例集里没有良性用例，三个度量没有样本
+    expect(report.gate).toMatchObject({ paired_cases: 1, threshold: -0.1, false_push: null, false_push_max: null });
+    expect(report.rows[0]).toMatchObject({ false_push: { denominator: 0 }, false_issue: { denominator: 0 } });
     expect(readFileSync(join(ROOT, 'reports', 'cmp.baseline.md'), 'utf8')).toContain('评测：当前配置');
   });
 
   it('参数错误时直接报错', async () => {
     await expect(runEvalCli(['--cases', join(ROOT, 'cases')])).rejects.toThrow(/--config/);
     await expect(runEvalCli(['--compare', 'x.yaml', '--cases', join(ROOT, 'cases')])).rejects.toThrow(/--compare/);
+    await expect(
+      runEvalCli(['--cases', join(ROOT, 'cases'), '--config', 'x.yaml', '--max-false-push', '0.1']),
+    ).rejects.toThrow(/--max-false-push 只用于 --compare/);
+    await expect(
+      runEvalCli(['--compare', 'a.yaml', 'b.yaml', '--cases', join(ROOT, 'cases'), '--max-false-push', '1.5']),
+    ).rejects.toThrow(/0–1/);
+    await expect(runEvalCli(['candidates', 'list'])).rejects.toThrow(/eval candidates export/);
+    await expect(runEvalCli(['label', 'merge', '--labels', 'x.yaml'])).rejects.toThrow(/--candidates/);
   });
 });

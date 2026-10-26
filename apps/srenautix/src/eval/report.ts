@@ -49,6 +49,7 @@ export function modelRow(
   seed: number,
 ): EvalModelRow {
   const runs = items.flatMap((x) => x.runs);
+  const benign = items.filter((x) => x.c.type === 'benign');
   const rootOnly = (s: Scored) => s.rootScored;
   const costs = items.map((x) => x.runs.reduce((a, r) => a + r.cost, 0) / x.runs.length).sort((a, b) => a - b);
   const misses = runs.map((r) => r.missRate).filter((m): m is number => m !== null);
@@ -91,7 +92,16 @@ export function modelRow(
       },
       seed,
     ),
-    coverage: ratio(items, (x) => count(x.scored, (s) => !s.abstained), seed),
+    coverage: ratio(
+      items,
+      (x) =>
+        count(
+          x.scored,
+          (s) => !s.abstained,
+          (s) => !s.silent,
+        ),
+      seed,
+    ),
     selective_accuracy: ratio(
       items,
       (x) =>
@@ -114,15 +124,53 @@ export function modelRow(
     ),
     reliability,
     provider_fingerprints: [...new Set(runs.flatMap((r) => r.fingerprints))].sort(),
-    benign_false_positive: ratio(
-      items.filter((x) => x.c.type === 'benign'),
-      (x) => count(x.scored, (s) => s.falsePositive),
+    benign_false_positive: ratio(benign, (x) => count(x.scored, (s) => s.falsePositive), seed),
+    false_push: ratio(
+      benign,
+      (x) =>
+        count(
+          x.scored,
+          (s) => s.falsePush,
+          (s) => s.pushScored,
+        ),
       seed,
     ),
-    undetermined_ratio: ratio(items, (x) => count(x.scored, (s) => s.abstained), seed),
+    false_issue: ratio(
+      benign,
+      (x) =>
+        count(
+          x.scored,
+          (s) => s.falseIssue,
+          (s) => s.issueScored,
+        ),
+      seed,
+    ),
+    false_pr: ratio(
+      benign,
+      (x) =>
+        count(
+          x.scored,
+          (s) => s.falsePr,
+          (s) => s.prScored,
+        ),
+      seed,
+    ),
+    undetermined_ratio: ratio(
+      items,
+      (x) =>
+        count(
+          x.scored,
+          (s) => s.abstained,
+          (s) => !s.silent,
+        ),
+      seed,
+    ),
     structured_output_failure: ratio(
       items,
-      (x) => ({ numerator: x.runs.filter((r) => r.structuredFailure).length, denominator: x.runs.length }),
+      (x) => {
+        const ran = x.runs.filter((r) => r.state !== 'silent');
+        return { numerator: ran.filter((r) => r.structuredFailure).length, denominator: ran.length };
+      },
       seed,
     ),
     cost_per_case: {
@@ -215,7 +263,9 @@ function perCase(
 /**
  * 发布门禁（DESIGN §14.4）：在相同用例上配对比较。
  * 1. 基线 pass^k 通过、候选不通过的用例必须为零，或在 waived 中逐条豁免；
- * 2. 新减旧的单侧 90% 下界不低于阈值（n < 100 时 −10 个百分点，n ≥ 100 时 −5 个百分点）。
+ * 2. 新减旧的单侧 90% 下界不低于阈值（n < 100 时 −10 个百分点，n ≥ 100 时 −5 个百分点）；
+ * 3. 给出误推送上限（falsePushMax，ADR 0175）时，候选在配对用例上的误推送不超过它。默认不设上限（null）。设了上限却没有
+ *    任何带推送判定的良性运行时抛出：门禁没有依据。
  */
 export function evaluateGate(
   baselineReportId: string,
@@ -225,6 +275,7 @@ export function evaluateGate(
   k: number,
   waived: readonly string[],
   seed: number,
+  falsePushMax: number | null = null,
 ): EvalGate {
   const b = perCase(cases, baseline, k);
   const c = perCase(cases, candidate, k);
@@ -239,6 +290,25 @@ export function evaluateGate(
   );
   const threshold = gateThreshold(d.n);
   const unwaived = regressed.filter((id) => !waived.includes(id));
+  let falsePush: EvalRatio | null = null;
+  if (falsePushMax !== null) {
+    const pairedSet = new Set(paired);
+    falsePush = ratio(
+      group(cases, candidate).filter((x) => x.c.type === 'benign' && pairedSet.has(x.c.case_id)),
+      (x) =>
+        count(
+          x.scored,
+          (s) => s.falsePush,
+          (s) => s.pushScored,
+        ),
+      seed,
+    );
+    if (falsePush.value === null) {
+      throw new Error(
+        '门禁设了误推送上限，但候选在配对用例上没有带推送判定的良性运行（评测配置需要 reconstruct 部分）',
+      );
+    }
+  }
   return {
     baseline_report_id: baselineReportId,
     paired_cases: d.n,
@@ -247,7 +317,12 @@ export function evaluateGate(
     paired_delta: d.delta,
     paired_delta_low: d.low,
     threshold,
-    passed: unwaived.length === 0 && d.low >= threshold,
+    false_push: falsePush,
+    false_push_max: falsePushMax,
+    passed:
+      unwaived.length === 0 &&
+      d.low >= threshold &&
+      (falsePush === null || (falsePush.value as number) <= (falsePushMax as number)),
   };
 }
 
@@ -272,14 +347,18 @@ export function renderMarkdown(report: EvalReport, title: string): string {
     '',
     '## 成绩',
     '',
-    '| 路由 | 模型 | 领域包时序 | top-1 | 召回@3 | pass@1 | pass^k | 运行一致 | 覆盖率 | 选择性准确率 | 处置准确率 | 良性误报 | 无法判定 | 结构化输出失败 | 每用例成本（均值 / p90） | 快照未命中 |',
-    '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|',
+    '| 路由 | 模型 | 领域包时序 | top-1 | 召回@3 | pass@1 | pass^k | 运行一致 | 覆盖率 | 选择性准确率 | 处置准确率 | 良性误报 | 误推送 | 误开 issue | 误开 PR | 无法判定 | 结构化输出失败 | 每用例成本（均值 / p90） | 快照未命中 |',
+    '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|',
   ];
   for (const r of report.rows) {
     lines.push(
-      `| ${r.route_id} | ${r.model} | ${r.pack_timing} | ${fmtRatio(r.top1)} | ${fmtRatio(r.recall_at_3)} | ${fmtRatio(r.pass_at_1)} | ${fmtRatio(r.pass_pow_k)} | ${fmtRatio(r.run_agreement)} | ${fmtRatio(r.coverage)} | ${fmtRatio(r.selective_accuracy)} | ${fmtRatio(r.disposition_accuracy)} | ${fmtRatio(r.benign_false_positive)} | ${fmtRatio(r.undetermined_ratio)} | ${fmtRatio(r.structured_output_failure)} | ${r.cost_per_case.mean.toFixed(4)} / ${r.cost_per_case.p90.toFixed(4)} ${r.cost_per_case.currency} | ${r.snapshot_miss_rate === null ? '—' : `${(r.snapshot_miss_rate * 100).toFixed(1)}%`} |`,
+      `| ${r.route_id} | ${r.model} | ${r.pack_timing} | ${fmtRatio(r.top1)} | ${fmtRatio(r.recall_at_3)} | ${fmtRatio(r.pass_at_1)} | ${fmtRatio(r.pass_pow_k)} | ${fmtRatio(r.run_agreement)} | ${fmtRatio(r.coverage)} | ${fmtRatio(r.selective_accuracy)} | ${fmtRatio(r.disposition_accuracy)} | ${fmtRatio(r.benign_false_positive)} | ${fmtRatio(r.false_push)} | ${fmtRatio(r.false_issue)} | ${fmtRatio(r.false_pr)} | ${fmtRatio(r.undetermined_ratio)} | ${fmtRatio(r.structured_output_failure)} | ${r.cost_per_case.mean.toFixed(4)} / ${r.cost_per_case.p90.toFixed(4)} ${r.cost_per_case.currency} | ${r.snapshot_miss_rate === null ? '—' : `${(r.snapshot_miss_rate * 100).toFixed(1)}%`} |`,
     );
   }
+  lines.push(
+    '',
+    '良性用例（benign）在重建中没有形成事件时记为沉默：计入 pass@1 与 pass^k，不计处置、覆盖率与无法判定；误推送、误开 issue、误开 PR 只对良性用例计算，沉默的运行计入分母（ADR 0175）。',
+  );
   lines.push('', '## 可靠性表（结论档位的精确率）', '', '| 路由 | 档位 | 精确率 | 降级 |', '|---|---|---|---|');
   for (const r of report.rows.filter((x) => x.pack_timing === 'all')) {
     for (const x of r.reliability) {
@@ -307,6 +386,7 @@ export function renderMarkdown(report: EvalReport, title: string): string {
       `- 新减旧：${(g.paired_delta * 100).toFixed(1)} 个百分点，单侧 90% 下界 ${(g.paired_delta_low * 100).toFixed(1)} 个百分点，阈值 ${(g.threshold * 100).toFixed(0)} 个百分点`,
       `- 之前 pass^k 通过、现在失败的用例：${g.regressed_cases.length ? g.regressed_cases.map((x) => `\`${x}\``).join('、') : '无'}`,
       `- 豁免：${g.waived_cases.length ? g.waived_cases.map((x) => `\`${x}\``).join('、') : '无'}`,
+      `- 误推送：${g.false_push_max === null || g.false_push === null ? '不设上限' : `${fmtRatio(g.false_push)}，上限 ${(g.false_push_max * 100).toFixed(1)}%`}`,
       `- 结果：${g.passed ? '通过' : '不通过'}`,
     );
   }

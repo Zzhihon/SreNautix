@@ -11,17 +11,20 @@ import { WorkerMetrics } from '../research/metrics.js';
 import type { Tool } from '../tools/box.js';
 import { openMcp, type McpSession } from '../tools/mcp.js';
 import { exportBundle, loadStateDbConfig, readOnlyClient, writeBundle } from './bundle.js';
-import { loadEvalConfig, loadReconstructConfig, type EvalConfig } from './config.js';
+import { exportCandidates, mergeCandidates, writeCandidates } from './candidates.js';
+import { loadEvalConfig, loadReconstructConfig, type EvalConfig, type ReconstructConfig } from './config.js';
 import { summarizeAgreement, type AgreementSummary } from './agreement.js';
 import { liveAgreement, liveStats } from './discovery.js';
 import { importSeed } from './import-seed.js';
 import { loadLabels, relabelLegacy } from './labels.js';
 import { loadRuntime, renderAgreement, renderPhase2Markdown, runPhase2 } from './phase2.js';
 import { preflightMetrics, preflightRoutes } from './preflight.js';
+import { pushSettings, snapshotPushJudge } from './push.js';
 import { liveRemediation } from './remediation.js';
 import { deriveAbstain } from './leakage.js';
 import { buildReport, evaluateGate, renderMarkdown } from './report.js';
 import { EvalInfrastructureError, runEval, type EvalOutcome } from './runner.js';
+import type { RunRecord } from './score.js';
 import { stableUuid } from './import-seed.js';
 import { CaseStore } from './store.js';
 
@@ -30,12 +33,16 @@ import { CaseStore } from './store.js';
 //        [--abstain] [--max-tokens N] [--out eval/reports] [--name <报告名>] [--trace <研判记录目录>]
 //        [--route <路由 id>]...
 //     每条路由单独评测，输出成绩单（Markdown 与 JSON）和每次运行的记录；给出 --route 时只评测列出的路由。
-//   eval --compare <当前配置> <候选配置> --cases <目录> [同上] [--waive <case_id>]...
-//     两份配置在相同用例上各评测一次，按各自的第一条路由做配对比较，给出发布门禁结果。
+//   eval --compare <当前配置> <候选配置> --cases <目录> [同上] [--waive <case_id>]... [--max-false-push <0–1>]
+//     两份配置在相同用例上各评测一次，按各自的第一条路由做配对比较，给出发布门禁结果；--max-false-push 是候选的
+//     误推送上限（ADR 0175），默认不设。
+//   评测配置有 reconstruct 部分时，良性用例的每次运行按快照与 reconstruct.notify 判断会不会推送（误推送）。
 //   eval import-seed --dir <种子目录> --cases <目录> --suite <名> --cluster-id <id>
 //     导入旧版 Ops-Agent 回放种子。
 //   eval export | label | reconstruct | live
 //     第二阶段的标注、重建包与三个环节的度量（ADR 0110，见各函数前的说明）。
+//   eval candidates export | eval label merge
+//     评测候选导出为标注、合并进标注文件（ADR 0175，见各函数前的说明）。
 
 export interface CliResult {
   reportPath: string | null;
@@ -109,7 +116,12 @@ export async function runEvalCli(argv: string[]): Promise<CliResult> {
     case 'export':
       return exportCli(argv.slice(1));
     case 'label':
-      return labelCli(argv.slice(1));
+      return argv[1] === 'merge' ? mergeCli(argv.slice(2)) : labelCli(argv.slice(1));
+    case 'candidates':
+      if (argv[1] !== 'export') {
+        throw new Error(CANDIDATES_USAGE);
+      }
+      return candidatesCli(argv.slice(2));
     case 'reconstruct':
       return reconstructCli(argv.slice(1));
     case 'live':
@@ -156,11 +168,16 @@ export async function runEvalCli(argv: string[]): Promise<CliResult> {
       'pack-lock': { type: 'string', default: `sha256:${'0'.repeat(64)}` },
       trace: { type: 'string' },
       route: { type: 'string', multiple: true, default: [] },
+      'max-false-push': { type: 'string' },
     },
   });
   const casesDir = values.cases;
   if (!casesDir) {
     throw new Error('需要 --cases <用例目录>');
+  }
+  const maxFalsePush = values['max-false-push'] === undefined ? null : Number(values['max-false-push']);
+  if (maxFalsePush !== null && (!values.compare || !(maxFalsePush >= 0 && maxFalsePush <= 1))) {
+    throw new Error('--max-false-push 只用于 --compare，取值为 0–1 之间的比例');
   }
   const mode = values.mode;
   if (mode !== 'snapshot' && mode !== 'reconstructed') {
@@ -243,6 +260,10 @@ export async function runEvalCli(argv: string[]): Promise<CliResult> {
     for (const s of sessions) {
       await s.close();
     }
+    // 良性用例的推送判定（ADR 0175）：按快照与这份配置的 reconstruct.notify
+    if (cfg.reconstruct) {
+      await judgePushes(cfg.reconstruct, cases, (outcomes.at(-1) as EvalOutcome).runs);
+    }
   }
   const evalCases = cases.map((x) => x.c);
   const meta = {
@@ -267,6 +288,7 @@ export async function runEvalCli(argv: string[]): Promise<CliResult> {
       runs,
       values.waive,
       seed,
+      maxFalsePush,
     );
     report = { ...buildReport(meta, evalCases, candidate.runs, gate) };
     const name = values.name ?? `compare-${now.slice(0, 10)}`;
@@ -278,6 +300,81 @@ export async function runEvalCli(argv: string[]): Promise<CliResult> {
   const path = writeReport(values.out, values.name ?? `eval-${now.slice(0, 10)}`, report, current, '评测成绩单');
   logger.info('评测完成', { report: path, tokens: current.tokens, skipped: current.skipped });
   return { reportPath: path, gatePassed: null };
+}
+
+/** 快照评测的推送判定（ADR 0175）：良性用例的每次运行按快照里的事件、阶段 A 报告与成员告警判断，写进运行记录 */
+async function judgePushes(
+  rc: ReconstructConfig,
+  cases: ReadonlyArray<{ c: EvalCase; s: EvalSnapshot }>,
+  runs: RunRecord[],
+): Promise<void> {
+  const benign = cases.filter((x) => x.c.type === 'benign');
+  if (!benign.length) {
+    return;
+  }
+  const rt = await loadRuntime(rc);
+  const settings = pushSettings(rc);
+  for (const { c, s } of benign) {
+    const judge = snapshotPushJudge(settings, s, () => rt.componentTypes(), rc.locale);
+    for (const r of runs.filter((x) => x.caseId === c.case_id)) {
+      r.pushed = await judge.pushed(r);
+    }
+  }
+}
+
+const CANDIDATES_USAGE =
+  '用法：eval candidates export --state <只读库连接文件> --since <时刻> [--until <时刻>] --out <文件>';
+
+// eval candidates export --state <只读库连接文件> --since <时刻> [--until <时刻>] --out <文件>
+//   评测候选（ADR 0175）：confirmed 的按事件生成完整标注，pending 的列在另一节；放弃的不导出
+async function candidatesCli(argv: string[]): Promise<CliResult> {
+  const { values } = parseArgs({
+    args: argv,
+    options: {
+      state: { type: 'string' },
+      since: { type: 'string' },
+      until: { type: 'string' },
+      out: { type: 'string' },
+    },
+  });
+  if (!values.state || !values.since || !values.out) {
+    throw new Error(CANDIDATES_USAGE);
+  }
+  const now = new Date();
+  const since = new Date(values.since);
+  const until = values.until ? new Date(values.until) : now;
+  if (Number.isNaN(since.getTime()) || Number.isNaN(until.getTime()) || since >= until) {
+    throw new Error('--since 与 --until 必须是合法的时刻，且 since 早于 until');
+  }
+  const c = await readOnlyClient(loadStateDbConfig(values.state));
+  let f: Awaited<ReturnType<typeof exportCandidates>>;
+  try {
+    f = await exportCandidates(c, since, until, now);
+  } finally {
+    await c.end();
+  }
+  writeCandidates(values.out, f);
+  process.stdout.write(`${f.confirmed.length} 个确认的候选写成标注，${f.pending.length} 个待确认：${values.out}\n`);
+  return { reportPath: null, gatePassed: null };
+}
+
+// eval label merge --candidates <文件> --labels <文件>
+//   把候选文件中确认的标注合并进标注文件（ADR 0175）：同一集群、id 去重，按标注 schema 校验，保留原有注释
+function mergeCli(argv: string[]): CliResult {
+  const { values } = parseArgs({ args: argv, options: { candidates: { type: 'string' }, labels: { type: 'string' } } });
+  if (!values.candidates || !values.labels) {
+    throw new Error('用法：eval label merge --candidates <文件> --labels <文件>');
+  }
+  const r = mergeCandidates(values.candidates, values.labels);
+  process.stdout.write(
+    [
+      `新增 ${r.added.length} 条${r.added.length ? `：${r.added.join('、')}` : ''}`,
+      `已存在、没有改动 ${r.existing.length} 条${r.existing.length ? `：${r.existing.join('、')}` : ''}`,
+      `其他集群、没有合并 ${r.otherCluster.length} 条${r.otherCluster.length ? `：${r.otherCluster.join('、')}` : ''}`,
+      `待确认的候选 ${r.pending} 个（见候选文件的 pending）`,
+    ].join('\n') + '\n',
+  );
+  return { reportPath: null, gatePassed: null };
 }
 
 // eval export --labels <标注> --cases <用例目录> --config <配置> [--state <状态库连接文件>] [--only <标注 id>]...

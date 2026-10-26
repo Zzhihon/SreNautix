@@ -3,9 +3,17 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { assertValid, type EvalSnapshot, type TopologyEdge, type TopologyNode } from '@srenautix/contract';
+import {
+  assertValid,
+  type Alert,
+  type EvalSnapshot,
+  type StageAReport,
+  type TopologyEdge,
+  type TopologyNode,
+} from '@srenautix/contract';
 import { DEFAULT_REVISION_LABELS } from '../../src/changes/kubernetes.js';
 import { NOVELTY_CONFIG_DEFAULT } from '../../src/config/novelty.js';
+import { NOTIFY_RULES_DEFAULT } from '../../src/config/server.js';
 import { ServerMetrics } from '../../src/metrics.js';
 import { Catalog } from '../../src/proposals/catalog.js';
 import { serverTracks } from '../../src/roles/server-schema.js';
@@ -18,18 +26,24 @@ import { summarizeAgreement } from '../../src/eval/agreement.js';
 import { exportBundle, readBundle, readOnlyClient, writeBundle, type Bundle } from '../../src/eval/bundle.js';
 import { discoveryCase, liveAgreement, liveStats } from '../../src/eval/discovery.js';
 import type { Label } from '../../src/eval/labels.js';
-import { loadRuntime } from '../../src/eval/phase2.js';
+import { loadRuntime, runPhase2 } from '../../src/eval/phase2.js';
+import { pushSettings, replayPushJudge } from '../../src/eval/push.js';
 import {
   faultAlertIds,
   mainIncident,
   reconstructCase,
   ReconstructedQueryRunner,
   replay,
+  type Replay,
 } from '../../src/eval/reconstruct.js';
 import { checkPatch, scoreRemediation } from '../../src/eval/remediation.js';
+import { buildReport } from '../../src/eval/report.js';
 import type { RunRecord } from '../../src/eval/score.js';
+import type { ReconstructConfig } from '../../src/eval/config.js';
+import { WorkerMetrics } from '../../src/research/metrics.js';
 import { newTestDb, type TestDb } from '../support/db.js';
 import { exampleWithTemplate, PACKS } from '../support/packs.js';
+import { testLayer, testRoute } from '../support/research-env.js';
 import { startVictoria, type Victoria } from '../support/victoria.js';
 
 /**
@@ -271,6 +285,7 @@ describe('重放、重建阶段 A 与研判输入', () => {
       query_timeout_seconds: 30,
       novelty: NOVELTY_CONFIG_DEFAULT,
       business_impact_alerts: [],
+      notify: NOTIFY_RULES_DEFAULT,
     });
     const r = await replay(
       bundle,
@@ -377,6 +392,184 @@ describe('重放、重建阶段 A 与研判输入', () => {
   }, 180_000);
 });
 
+/** 健康场景的沉默与误推送（ADR 0175）：良性标注在重建中没有形成事件记为沉默；形成事件时按通知规则判断会不会推送 */
+describe('良性标注', () => {
+  const rcConfig = (over: Partial<ReconstructConfig> = {}): ReconstructConfig => ({
+    cluster_id: CLUSTER,
+    metrics: { url: vm.url, dialect: 'metricsql' },
+    packs: { dirs: [PACKS] },
+    revision_labels: [],
+    group_within_seconds: 120,
+    step_seconds: 30,
+    locale: 'zh-CN',
+    evidence_concurrency: 4,
+    query_timeout_seconds: 30,
+    novelty: NOVELTY_CONFIG_DEFAULT,
+    business_impact_alerts: [],
+    notify: NOTIFY_RULES_DEFAULT,
+    ...over,
+  });
+
+  it('重建没有形成事件：每次运行记为沉默，算作正确，不推送、不开 issue、不开 PR，没有调用模型', async () => {
+    // 故障告警在重建包里从没出现：重建不会形成事件
+    const quiet: Label = {
+      ...label,
+      id: 'shop-quiet',
+      type: 'benign',
+      roots: [],
+      disposition: 'ignore',
+      fix: null,
+      required_members: [],
+      required_change_near: null,
+      fault_alerts: [{ alertname: 'ShopCacheEvictions', labels: {} }],
+    };
+    writeBundle(dir, { ...bundle, label_id: quiet.id });
+    // 路由指向没有服务监听的端口：任何模型调用都会失败
+    const layer = testLayer([testRoute('http://127.0.0.1:9/v1')]);
+    const r = await runPhase2({
+      labels: { version: 1, cluster_id: CLUSTER, labels: [quiet] },
+      only: [],
+      casesDir: dir,
+      reconstruct: rcConfig(),
+      suite: 'reconstructed',
+      codeSha: 'test',
+      analysis: {
+        layers: [{ routeId: 'local', layer }],
+        runs: 3,
+        language: 'zh',
+        metrics: new WorkerMetrics('worker', false),
+        maxTokens: 1_000_000,
+        repo: null,
+        scratch: dir,
+        traceDir: null,
+      },
+      now: new Date().toISOString(),
+    });
+    expect(r.analysis!.runs.map((x) => [x.state, x.pushed, x.opensPr, x.error])).toEqual([
+      ['silent', false, false, null],
+      ['silent', false, false, null],
+      ['silent', false, false, null],
+    ]);
+    expect(r.analysis!.tokens).toBe(0);
+    const report = buildReport(
+      {
+        codeSha: 'test',
+        packLock: r.packLock,
+        mode: 'reconstructed',
+        caseSet: 'reconstructed',
+        runsPerCase: 3,
+        seed: 1,
+      },
+      r.evalCases,
+      r.analysis!.runs,
+      null,
+    );
+    expect(report.rows[0]).toMatchObject({
+      pass_pow_k: { numerator: 1, denominator: 1 },
+      false_push: { numerator: 0, denominator: 3 },
+      false_issue: { numerator: 0, denominator: 3 },
+      false_pr: { numerator: 0, denominator: 3 },
+      coverage: { denominator: 0 },
+      disposition_accuracy: { denominator: 0 },
+    });
+  }, 180_000);
+
+  it('形成了事件：按严重度、外部上游与业务影响判断每次运行会不会推送', async () => {
+    const rt = await loadRuntime(rcConfig());
+    const asOf = Date.parse(label.as_of);
+    const r: Replay = await replay(
+      bundle,
+      Date.parse(label.window.to),
+      {
+        rt,
+        params: rt.rcaParams(),
+        revisionLabels: [...DEFAULT_REVISION_LABELS],
+        groupWithinMs: 120_000,
+        stepMs: 30_000,
+      },
+      asOf,
+    );
+    const main = mainIncident(r, faultAlertIds(r, label), 'captured')!;
+    const metrics = new ServerMetrics('server', false);
+    const source = await EvidenceSource.create({
+      id: 'vm',
+      url: vm.url,
+      dialect: 'metricsql',
+      bearerTokenFile: null,
+      timeoutMs: 30_000,
+    });
+    const evidence = new PackEvidence(
+      rt,
+      source,
+      async (_c, key) => r.topology.componentType(key, asOf),
+      { locale: 'zh-CN', concurrency: 4, queryTimeoutMs: 30_000 },
+      metrics,
+    );
+    const rc = await reconstructCase(
+      r,
+      { ...label, type: 'benign', roots: [], disposition: 'ignore', fix: null },
+      main.incident,
+      '7a1b2c3d-0000-4000-8000-0000000000ab',
+      'test',
+      `sha256:${'0'.repeat(64)}`,
+      {
+        evidence,
+        rules: new PackRules(rt, metrics),
+        rt,
+        catalog: Catalog.load(),
+        locale: 'zh-CN',
+        signal: AbortSignal.timeout(60_000),
+        impactAlerts: [],
+      },
+    );
+    const judge = (c: ReconstructConfig) =>
+      replayPushJudge({
+        settings: pushSettings(c),
+        replay: r,
+        topology: r.topology,
+        types: () => rt.componentTypes(),
+        subject: {
+          incident: rc.incident,
+          stageA: rc.snapshot.context.stage_a as unknown as StageAReport,
+          alerts: rc.snapshot.context.alerts as unknown as Alert[],
+        },
+        asOf,
+        locale: 'zh-CN',
+        cardsOf: async (inc, members) => (await evidence.run(inc, members, AbortSignal.timeout(60_000), asOf)).cards,
+      });
+    const completed = (root: string | null) => ({ state: 'completed' as const, root });
+    // 默认规则：critical 在推送范围内，没有被抑制、不是外部上游
+    expect(main.incident.severity).toBe('critical');
+    expect(await judge(rcConfig()).pushed(completed('Deployment:shop/api'))).toBe(true);
+    // 推送范围不含 critical
+    const onlyWarning = rcConfig({ notify: { ...NOTIFY_RULES_DEFAULT, severities: ['warning'] } });
+    expect(await judge(onlyWarning).pushed(completed('Deployment:shop/api'))).toBe(false);
+    // 研判根因是配置列出的外部上游、没有业务影响：进入周期汇总，不推送；研判没有完成时按事件根因
+    const external = (alerts: ReconstructConfig['business_impact_alerts']) =>
+      rcConfig({
+        business_impact_alerts: alerts,
+        notify: {
+          ...NOTIFY_RULES_DEFAULT,
+          digest: {
+            external_roots: {
+              ...NOTIFY_RULES_DEFAULT.digest.external_roots,
+              components: ['component:upstream'],
+              business_impact: { impact_cards: false, within: '30m', topology_hops: 0 },
+            },
+          },
+        },
+      });
+    expect(await judge(external([])).pushed(completed('component:upstream'))).toBe(false);
+    expect(await judge(external([])).pushed({ state: 'failed', root: 'component:upstream' })).toBe(true);
+    // 分析时刻触发中的业务影响告警（重建包里的故障告警）在上游事件开始后的时间窗内开始：即时推送
+    expect(
+      await judge(external([{ labels: { severity: ['critical'] }, exclude_labels: {} }])).pushed(
+        completed('component:upstream'),
+      ),
+    ).toBe(true);
+  }, 180_000);
+});
+
 describe('影子环境统计（只读）', () => {
   it('没有事件时各项为 0，不报错', async () => {
     const rt = await loadRuntime({
@@ -391,6 +584,7 @@ describe('影子环境统计（只读）', () => {
       query_timeout_seconds: 30,
       novelty: NOVELTY_CONFIG_DEFAULT,
       business_impact_alerts: [],
+      notify: NOTIFY_RULES_DEFAULT,
     });
     const s = await liveStats(state, CLUSTER, new Date(T0), new Date(T0 + 60 * MIN));
     expect(s.incidents).toBe(0);

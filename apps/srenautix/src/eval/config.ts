@@ -4,6 +4,7 @@ import { z } from 'zod';
 import type { ModelRoute } from '@srenautix/contract';
 import { alertMatcher, upgradeMatchers } from '../alerts/business-impact.js';
 import { readSecretFile } from '../config/files.js';
+import { NOTIFY_RULES_DEFAULT, notifyRules } from '../config/server.js';
 import { logger } from '../log.js';
 import { NOVELTY_CONFIG_DEFAULT, noveltyConfig } from '../config/novelty.js';
 import { DEFAULT_BUDGET, type BudgetConfig } from '../llm/budget.js';
@@ -146,6 +147,9 @@ const schema = z
         // 业务影响告警（ADR 0163、0166），与 server 的 notify.business_impact_alerts 相同。弃用的 business_impact_labels
         // 在解析前转换为它（loadEvalConfig）
         business_impact_alerts: z.array(alertMatcher).default([]),
+        // 推送规则（ADR 0175）：误推送按它判断，与 server 的 notify.severities、notify.digest 同一写法与默认值；
+        // 业务影响告警取上面的 business_impact_alerts
+        notify: notifyRules.default(NOTIFY_RULES_DEFAULT),
       })
       .strict()
       .optional(),
