@@ -26,7 +26,7 @@ import { Ledger, subgraphFrame } from './ledger.js';
 import type { WorkerMetrics } from './metrics.js';
 import { componentChoices, concludeItems, hypothesizeItems, promptParts } from './prompt.js';
 import type { PreviousRun, ResearchCase } from './types.js';
-import { auditModelText, renumberRecommendations, validateConclusion } from './validate.js';
+import { auditModelText, correctCauseScope, renumberRecommendations, validateConclusion } from './validate.js';
 
 // 阶段 B 控制器（DESIGN §7.2–§7.4）：hypothesize → discriminate（可多轮）→ conclude。
 // 模型只提出假设、检查与结论文字；账本状态、停止规则、结论阶梯与校验都由代码决定。
@@ -313,8 +313,17 @@ export async function runStageB(input: ResearchRunInput, env: ResearchEnv, sink:
     if (leader && v.chosen && leader.id !== v.chosen.id) {
       notes.push(`结论选中 ${v.chosen.id}，账本排名第一的是 ${leader.id}`);
     }
+    // 根因范围在档位确定之后按确定性依据校正（ADR 0170），自愈 PR 的准入读它
+    const scope = correctCauseScope({
+      model: concluded.value.cause_scope,
+      level: ladder.level,
+      root: v.chosen?.rootComponent ?? null,
+      facts: rc.dispositionFacts,
+    });
+    notes.push(...scope.notes);
     const draft: ResearchOutput = {
       disposition: disposition.disposition,
+      ...(disposition.basis ? { ignore_basis: disposition.basis } : {}),
       conclusion: {
         level: ladder.level,
         hypothesis_id: v.chosen?.id ?? null,
@@ -322,6 +331,7 @@ export async function runStageB(input: ResearchRunInput, env: ResearchEnv, sink:
         undetermined_reason: undeterminedReason,
         consistency: ladder.consistency,
         ...(ladder.detail ? { consistency_detail: ladder.detail } : {}),
+        cause_scope: scope.scope,
       },
       // 按排名排列的全部假设，被推翻的在最后（ADR 0133）
       hypotheses: ledger.toContract(candidateScore),

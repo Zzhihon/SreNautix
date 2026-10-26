@@ -187,6 +187,7 @@
   "timeline.kind.incident_split": "事件拆分",
   "timeline.kind.stage_a": "阶段 A",
   "timeline.kind.research_concluded": "研判完成",
+  "timeline.kind.remediation_attempt": "自愈 PR",
   "timeline.kind.proposal": "提议",
   "timeline.kind.execution": "执行",
   "timeline.kind.feedback": "反馈",

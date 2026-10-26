@@ -6,6 +6,7 @@
   },
   "output": {
     "disposition": "act",
+    "cause_scope": "configuration",
     "hypothesis_id": "h1",
     "undetermined_reason": null,
     "situation": "发布 r2 卡住：新 Pod 等待失败的迁移，旧版本仍在服务",

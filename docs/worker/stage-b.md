@@ -93,7 +93,17 @@ conclude 返回 `hypothesis_id: null` 时，如果账本中处于支持状态的
 5. 模型给出 ignore 而第 2 步不成立：按严重度改写；
 6. 其余保持模型的取值。
 
-每一次改写都写进 `validation_notes`。
+每一次改写都写进 `validation_notes`。处置为 ignore 时研判输出的 `ignore_basis` 写明成立的依据（`stage_a`、`planned_retirement`、`external`、`evidence_normal`、`impact_normal`），自愈 PR 的告警调优按它判断（ADR 0170）。
+
+## 根因范围
+
+conclude 输出根因范围 `cause_scope`：`local`（仓库声明的组件自身的运行状态）、`configuration`（仓库声明的组件的配置、资源或参数，或经管理它的 GitOps 应用生效的发布与清单变更）、`downstream`（调用方或消费方）、`upstream`（被依赖的服务方）、`infrastructure`（节点、存储、网络）、`unknown`。代码在结论阶梯之后按顺序校正，写进 `conclusion.cause_scope`，每次改写写一条 `validation_notes`（ADR 0170）：
+
+1. 档位为 `undetermined` 或没有选中根因：`unknown`；
+2. 研判根因在处置依据的 `external` 中：`upstream`；
+3. 研判根因不在处置依据的 `repository_owned` 中（仓库声明的组件，加上管理着候选根因的 GitOps 应用与展开到由应用管理的工作负载的逻辑组件）而模型给出 `local` 或 `configuration`：`unknown`。
+
+server 只为根因范围是 `local` 或 `configuration` 的研判开修改系统本身的自愈 PR（见 `docs/server/README.md` 的"自愈 PR"）。
 
 ## 输出
 

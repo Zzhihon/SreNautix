@@ -271,6 +271,10 @@ export type ResearchConcludedEvent = OutboxEventHeader & {
  * RFC 3339 UTC 时间
  */
 export type Timestamp4 = string;
+/**
+ * 选中根因所在的范围（契约 2.38.0，ADR 0170）：模型给出，代码按确定性依据校正。根因是领域包声明在集群之外的组件时为 upstream；根因不由 GitOps 仓库负责（处置依据的 repository_owned）时不能是 local 或 configuration；结论为 undetermined 或没有选中根因时为 unknown。之前的研判输出没有这个字段
+ */
+export type CauseScope = 'local' | 'configuration' | 'downstream' | 'upstream' | 'infrastructure' | 'unknown';
 export type ResearchFailedEvent = OutboxEventHeader & {
   type: 'research.failed';
   payload: {
@@ -505,6 +509,10 @@ export type Duration6 = string;
  */
 export type EgressCategory =
   'metrics' | 'logs' | 'traces' | 'events' | 'topology' | 'changes' | 'alerts' | 'knowledge' | 'sql' | 'code';
+/**
+ * local 仓库声明的组件自身的运行状态；configuration 仓库声明的组件的配置、资源或参数，或经管理它的 GitOps 应用生效的发布与清单变更；downstream 调用方或消费方；upstream 被依赖的服务方（集群外部的服务方、其他团队的服务）；infrastructure 节点、存储、网络等基础设施；unknown 无法判断
+ */
+export type CauseScope1 = 'local' | 'configuration' | 'downstream' | 'upstream' | 'infrastructure' | 'unknown';
 
 export interface SrenautixContractIndex {
   ActionCatalog?: ActionCatalog;
@@ -777,6 +785,7 @@ export interface SrenautixContractIndex {
   EgressEntry?: EgressEntry;
   EgressCategory?: EgressCategory;
   ResearchOutput?: ResearchOutput;
+  CauseScope?: CauseScope1;
   ResearchConclusion?: ResearchConclusion;
   ConsistencyDetail?: ConsistencyDetail;
   ConsistencyChecks?: ConsistencyChecks;
@@ -2045,6 +2054,10 @@ export interface ServiceGraph {
  */
 export interface ConcludeOutput {
   disposition: 'act' | 'ignore' | 'escalate' | 'undetermined';
+  /**
+   * 选中根因所在的范围：local 仓库声明的组件自身的运行状态（进程、内存、正在服务的版本）；configuration 仓库声明的组件的配置、资源或参数，或经管理它的 GitOps 应用生效的发布与清单变更；downstream 调用方或消费方（请求量或调用方式的变化）；upstream 被依赖的服务方（集群外部的服务方、其他团队的服务）；infrastructure 节点、存储、网络等基础设施；unknown 无法判断
+   */
+  cause_scope: 'local' | 'configuration' | 'downstream' | 'upstream' | 'infrastructure' | 'unknown';
   /**
    * 选中的假设；为 null 时 undetermined_reason 必须非空
    */
@@ -3510,6 +3523,10 @@ export interface EvalDispositionFacts {
    */
   declared?: ComponentKey[];
   /**
+   * 候选根因中由 GitOps 仓库负责的组件（ADR 0170）：declared 的全部组件，加上管理着候选根因的 GitOps 应用（发布与清单的变更经它们从仓库生效），以及映射到由 GitOps 应用管理的工作负载的逻辑组件。根因范围只有在研判根因属于它们时才能是 local 或 configuration，自愈 PR 的仓库事实同样按它判断；契约 2.38.0 之前的快照没有这个字段
+   */
+  repository_owned?: ComponentKey[];
+  /**
    * 触发中的业务影响告警（ADR 0163、0166）：事件成员中状态为 firing、满足 server 的 notify.business_impact_alerts 的告警 id（契约 2.36.0 起严重度写在匹配器里，2.34.0、2.35.0 的 server 另外要求 critical）。有这些告警并且有异常卡时处置不能是 ignore；契约 2.34.0 之前的快照没有这个字段
    */
   business_impact?: string[];
@@ -3656,6 +3673,10 @@ export interface ResearchOutput {
    */
   validation_notes: string[];
   /**
+   * 处置为 ignore 时成立的确定性依据（契约 2.38.0，ADR 0138、0167、0168、0170）：stage_a 阶段 A 已判为 ignore；planned_retirement 全部成员告警由计划内的退役解释；external 研判根因是集群外部组件；evidence_normal 得出结论的卡全部正常；impact_normal 影响卡全部正常。处置不是 ignore 时不填
+   */
+  ignore_basis?: 'stage_a' | 'planned_retirement' | 'external' | 'evidence_normal' | 'impact_normal';
+  /**
    * 检验循环的停止原因：leader_supported 第一的假设得到支持且竞争假设都已推翻或检验后无法判定；no_change 连续两步没有变化或没有可执行的检查；step_limit、deadline、budget 达到步数、期限或预算上限；model_unavailable 模型不可用；指纹不变直接沿用上一次研判时为 no_change
    */
   stop_reason?: 'leader_supported' | 'no_change' | 'step_limit' | 'deadline' | 'budget' | 'model_unavailable' | null;
@@ -3687,6 +3708,7 @@ export interface ResearchConclusion {
   undetermined_reason: string | null;
   consistency: ConsistencyChecks;
   consistency_detail?: ConsistencyDetail;
+  cause_scope?: CauseScope;
 }
 /**
  * evidence_consistent 的四个条件逐项结果（DESIGN §7.3）；四项全为 true 才是 evidence_consistent

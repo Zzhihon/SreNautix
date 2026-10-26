@@ -345,6 +345,7 @@ describe('conclude 的 recommendations id 不合规（Zzhihon/SreNautix#9）', (
   });
   const concludeOut = (recommendations: unknown[]) => ({
     disposition: 'escalate',
+    cause_scope: 'unknown',
     hypothesis_id: 'h1',
     undetermined_reason: null,
     situation: 's',

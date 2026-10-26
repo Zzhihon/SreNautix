@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: SreNautix hub API
-  version: 2.37.0
+  version: 2.38.0
   license:
     name: Apache-2.0
     identifier: Apache-2.0
@@ -2183,10 +2183,12 @@ components:
               incident_split,
               stage_a,
               research_concluded,
+              remediation_attempt,
               proposal,
               execution,
               feedback,
             ]
+          description: remediation_attempt 为自愈 PR 对一次研判的处理结果（契约 2.38.0，ADR 0170）：text 写模板、结果、原因码与原因，ref 为研判的 run_id
         text: { type: string }
         ref: { type: [string, 'null'], description: 关联对象的 id（alert_id、change_id、run_id、proposal_id 等） }
         untrusted: { type: boolean, description: text 含告警、日志或变更来源的原文，只作为文本显示 }

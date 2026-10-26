@@ -99,6 +99,7 @@ const hyp = (id: string, root: string, mechanism: string, supporting: string[] =
 function conclude(over: Partial<ConcludeOutput>): ConcludeOutput {
   return {
     disposition: 'escalate',
+    cause_scope: 'unknown',
     hypothesis_id: null,
     undetermined_reason: '账本中没有处于支持状态的假设',
     situation: 's',

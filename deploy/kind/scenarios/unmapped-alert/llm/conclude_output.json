@@ -6,6 +6,7 @@
   },
   "output": {
     "disposition": "act",
+    "cause_scope": "unknown",
     "hypothesis_id": "h1",
     "undetermined_reason": null,
     "situation": "ShopCatalogStale 没有映射到组件，商品目录由 api 提供",

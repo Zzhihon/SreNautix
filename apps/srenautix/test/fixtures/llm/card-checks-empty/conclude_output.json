@@ -2,6 +2,7 @@
   "provenance": { "mode": "hand-written" },
   "output": {
     "disposition": "escalate",
+    "cause_scope": "unknown",
     "hypothesis_id": "h1",
     "undetermined_reason": null,
     "situation": "回归用例",

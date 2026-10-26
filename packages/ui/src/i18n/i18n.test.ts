@@ -75,6 +75,7 @@ const ENUMS: Record<string, readonly string[]> = {
     'incident_split',
     'stage_a',
     'research_concluded',
+    'remediation_attempt',
     'proposal',
     'execution',
     'feedback',

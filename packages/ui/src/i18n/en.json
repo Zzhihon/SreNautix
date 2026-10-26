@@ -187,6 +187,7 @@
   "timeline.kind.incident_split": "Incident split",
   "timeline.kind.stage_a": "Stage A",
   "timeline.kind.research_concluded": "Research concluded",
+  "timeline.kind.remediation_attempt": "Remediation PR",
   "timeline.kind.proposal": "Proposal",
   "timeline.kind.execution": "Execution",
   "timeline.kind.feedback": "Feedback",

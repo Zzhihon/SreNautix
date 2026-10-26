@@ -1,4 +1,4 @@
-// 时间线（DESIGN §12.2）：一条泳道。告警、变更、异常起点、阶段 A、研判、提议、执行与反馈画成标记，
+// 时间线（DESIGN §12.2）：一条泳道。告警、变更、异常起点、阶段 A、研判、自愈 PR 的处理结果、提议、执行与反馈画成标记，
 // 盲区画成斜纹；每条记录的说明列在泳道下方的有序列表里，图表与注解不叠加。来源于告警、日志或变更的
 // 原文（untrusted）放进注明来源的引用样式，只作为文本显示（不变量 9）。
 // 变更记录带有代码计算的关联分级与依据（ADR 0169），写在原文之前。
@@ -17,6 +17,7 @@ import {
   Play,
   Split,
   TrendingUp,
+  Wrench,
 } from 'lucide-react';
 import type { TimelineEntry } from '../contract';
 import { useI18n } from '../i18n';
@@ -54,6 +55,7 @@ const KIND: Record<Kind, { icon: LucideIcon; tone: Tone }> = {
   incident_split: { icon: Split, tone: 'neutral' },
   stage_a: { icon: ListChecks, tone: 'neutral' },
   research_concluded: { icon: Bot, tone: 'model' },
+  remediation_attempt: { icon: Wrench, tone: 'neutral' },
   proposal: { icon: Gavel, tone: 'warn' },
   execution: { icon: Play, tone: 'info' },
   feedback: { icon: MessageSquare, tone: 'ok' },

@@ -6,6 +6,7 @@
   },
   "output": {
     "disposition": "ignore",
+    "cause_scope": "local",
     "hypothesis_id": "h1",
     "undetermined_reason": null,
     "situation": "api 的 db-check 容器重启过一次，业务不受影响",

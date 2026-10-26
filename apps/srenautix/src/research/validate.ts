@@ -1,9 +1,16 @@
-import type { ActionCatalogAction, ConcludeOutput, ProposalDraft, ResearchOutput } from '@srenautix/contract';
+import type {
+  ActionCatalogAction,
+  ConcludeOutput,
+  ConclusionLevel,
+  ProposalDraft,
+  ResearchOutput,
+} from '@srenautix/contract';
 import { displayKey, tryNodeKey } from '@srenautix/core';
 import { validatorOf, formatErrors } from '../llm/schema.js';
 import type { EvidenceBook } from './evidence.js';
 import type { Ledger, LedgerEntry } from './ledger.js';
 import { auditText, buildCorpus, cardMaterial, type NumberCorpus } from './numbers.js';
+import type { DispositionFacts } from './types.js';
 
 // 结论的代码校验（DESIGN §7.3）：删除无效的证据引用；删除目录以外、参数不合 schema、目标与机器推导不一致的提议；
 // 修复建议按同样规则处理并按类别排序、每类最多 3 条。所有修改写入 validation_notes。处置判断在结论阶梯之后由
@@ -335,4 +342,48 @@ export function auditModelText(out: ResearchOutput, corpus: NumberCorpus): { out
     },
     notes,
   };
+}
+
+export type CauseScope = ConcludeOutput['cause_scope'];
+
+/** 根因在仓库声明的组件上的两种范围：只有它们可以由自愈 PR 处理（ADR 0170） */
+export const REPOSITORY_SCOPES: ReadonlySet<CauseScope> = new Set<CauseScope>(['local', 'configuration']);
+
+export interface CauseScopeInput {
+  /** 模型给出的取值 */
+  model: CauseScope;
+  /** 结论阶梯的档位 */
+  level: ConclusionLevel;
+  /** 选中的研判根因；没有选中假设时为 null */
+  root: string | null;
+  /** 处置推导的确定性依据（ADR 0138、0162、0170）；旧版 server 没有给出时为 null */
+  facts: Pick<DispositionFacts, 'external' | 'repository_owned'> | null | undefined;
+}
+
+/**
+ * 根因范围的校正（ADR 0170）：模型给出的取值按确定性依据改写，每次改写写一条备注。按顺序：
+ * - 结论为 undetermined 或没有选中根因：unknown；
+ * - 研判根因是领域包声明在集群之外的组件（处置依据的 external）：upstream；
+ * - 研判根因不由 GitOps 仓库负责（处置依据的 repository_owned：仓库声明的组件与管理它们的 GitOps 应用）而模型给出 local 或
+ *   configuration：unknown。
+ * 没有处置依据（或依据里没有 repository_owned）时按空处理，local 与 configuration 因此都改为 unknown。
+ */
+export function correctCauseScope(i: CauseScopeInput): { scope: CauseScope; notes: string[] } {
+  const changed = (scope: CauseScope, why: string) => ({
+    scope,
+    notes: scope === i.model ? [] : [`根因范围由 ${i.model} 改为 ${scope}：${why}`],
+  });
+  if (i.level === 'undetermined' || i.root === null) {
+    return changed('unknown', i.root === null ? '没有选中根因' : '结论为 undetermined');
+  }
+  if ((i.facts?.external ?? []).includes(i.root)) {
+    return changed('upstream', `研判根因 ${displayKey(i.root)} 是领域包声明在集群之外的组件`);
+  }
+  if (REPOSITORY_SCOPES.has(i.model) && !(i.facts?.repository_owned ?? []).includes(i.root)) {
+    return changed(
+      'unknown',
+      `研判根因 ${displayKey(i.root)} 不由 GitOps 仓库负责（不是仓库声明的组件，也不是管理它们的 GitOps 应用）`,
+    );
+  }
+  return { scope: i.model, notes: [] };
 }

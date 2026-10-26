@@ -163,6 +163,11 @@
           "description": "候选根因中由 GitOps 仓库声明的运行中组件（ADR 0162）：沿 owned_by 的顶层属主由 GitOps 应用管理（managed_by）；管理着候选根因的 GitOps 应用与逻辑组件不在其中。修改仓库中的声明就能处置这些组件；契约 2.34.0 之前的快照没有这个字段",
           "items": { "$ref": "common.schema.json#/$defs/ComponentKey" }
         },
+        "repository_owned": {
+          "type": "array",
+          "description": "候选根因中由 GitOps 仓库负责的组件（ADR 0170）：declared 的全部组件，加上管理着候选根因的 GitOps 应用（发布与清单的变更经它们从仓库生效），以及映射到由 GitOps 应用管理的工作负载的逻辑组件。根因范围只有在研判根因属于它们时才能是 local 或 configuration，自愈 PR 的仓库事实同样按它判断；契约 2.38.0 之前的快照没有这个字段",
+          "items": { "$ref": "common.schema.json#/$defs/ComponentKey" }
+        },
         "business_impact": {
           "type": "array",
           "description": "触发中的业务影响告警（ADR 0163、0166）：事件成员中状态为 firing、满足 server 的 notify.business_impact_alerts 的告警 id（契约 2.36.0 起严重度写在匹配器里，2.34.0、2.35.0 的 server 另外要求 critical）。有这些告警并且有异常卡时处置不能是 ignore；契约 2.34.0 之前的快照没有这个字段",

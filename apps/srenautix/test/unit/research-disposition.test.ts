@@ -304,6 +304,8 @@ describe('处置依据的计算', () => {
     expect(f).toEqual({
       external: [PROVIDER],
       declared: [PG],
+      // 由仓库负责的组件（ADR 0170）：web 没有管理它的应用，不在其中
+      repository_owned: [PG],
       business_impact: [],
       remediations: [{ root: PG, templates: [{ key: 'demo/db-fix', category: 'config_resource' }] }],
     });
@@ -330,6 +332,9 @@ describe('处置依据的计算', () => {
       impactAlerts: [],
     });
     expect(withApp.declared).toEqual([PG]);
+    // 由仓库负责的组件（ADR 0170）另含管理着候选根因的 GitOps 应用（两种写法）与展开后由应用管理的逻辑组件：
+    // 发布与清单的变更经它们从仓库生效
+    expect(withApp.repository_owned).toEqual([PG, APP, 'application:argocd/shop', 'component:release']);
     const off = await dispositionFacts({
       set,
       componentTypes: types,

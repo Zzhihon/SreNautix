@@ -1,5 +1,5 @@
 // 本文件由 packages/contract/scripts/gen.ts 从 contract/ 生成，不要手工修改。
-export const CONTRACT_VERSION = '2.37.0';
+export const CONTRACT_VERSION = '2.38.0';
 
 export const SCHEMAS: Record<string, Record<string, unknown>> = {
   'https://srenautix.io/contract/gateway/v1/action-catalog.schema.json': {
@@ -2018,6 +2018,7 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
     additionalProperties: false,
     required: [
       'disposition',
+      'cause_scope',
       'hypothesis_id',
       'undetermined_reason',
       'situation',
@@ -2027,6 +2028,12 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
     ],
     properties: {
       disposition: { type: 'string', enum: ['act', 'ignore', 'escalate', 'undetermined'] },
+      cause_scope: {
+        type: 'string',
+        description:
+          '选中根因所在的范围：local 仓库声明的组件自身的运行状态（进程、内存、正在服务的版本）；configuration 仓库声明的组件的配置、资源或参数，或经管理它的 GitOps 应用生效的发布与清单变更；downstream 调用方或消费方（请求量或调用方式的变化）；upstream 被依赖的服务方（集群外部的服务方、其他团队的服务）；infrastructure 节点、存储、网络等基础设施；unknown 无法判断',
+        enum: ['local', 'configuration', 'downstream', 'upstream', 'infrastructure', 'unknown'],
+      },
       hypothesis_id: {
         type: ['string', 'null'],
         description: '选中的假设；为 null 时 undetermined_reason 必须非空',
@@ -3239,6 +3246,12 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
             type: 'array',
             description:
               '候选根因中由 GitOps 仓库声明的运行中组件（ADR 0162）：沿 owned_by 的顶层属主由 GitOps 应用管理（managed_by）；管理着候选根因的 GitOps 应用与逻辑组件不在其中。修改仓库中的声明就能处置这些组件；契约 2.34.0 之前的快照没有这个字段',
+            items: { $ref: 'common.schema.json#/$defs/ComponentKey' },
+          },
+          repository_owned: {
+            type: 'array',
+            description:
+              '候选根因中由 GitOps 仓库负责的组件（ADR 0170）：declared 的全部组件，加上管理着候选根因的 GitOps 应用（发布与清单的变更经它们从仓库生效），以及映射到由 GitOps 应用管理的工作负载的逻辑组件。根因范围只有在研判根因属于它们时才能是 local 或 configuration，自愈 PR 的仓库事实同样按它判断；契约 2.38.0 之前的快照没有这个字段',
             items: { $ref: 'common.schema.json#/$defs/ComponentKey' },
           },
           business_impact: {
@@ -7376,6 +7389,12 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
         description: '代码校验的修改记录：删除的无效证据引用、删除的目录外提议、降级的结论、删除的无法核实的数值等',
         items: { type: 'string' },
       },
+      ignore_basis: {
+        type: 'string',
+        description:
+          '处置为 ignore 时成立的确定性依据（契约 2.38.0，ADR 0138、0167、0168、0170）：stage_a 阶段 A 已判为 ignore；planned_retirement 全部成员告警由计划内的退役解释；external 研判根因是集群外部组件；evidence_normal 得出结论的卡全部正常；impact_normal 影响卡全部正常。处置不是 ignore 时不填',
+        enum: ['stage_a', 'planned_retirement', 'external', 'evidence_normal', 'impact_normal'],
+      },
       stop_reason: {
         type: ['string', 'null'],
         description:
@@ -7410,6 +7429,13 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
       },
     },
     $defs: {
+      CauseScope: {
+        title: 'CauseScope',
+        description:
+          'local 仓库声明的组件自身的运行状态；configuration 仓库声明的组件的配置、资源或参数，或经管理它的 GitOps 应用生效的发布与清单变更；downstream 调用方或消费方；upstream 被依赖的服务方（集群外部的服务方、其他团队的服务）；infrastructure 节点、存储、网络等基础设施；unknown 无法判断',
+        type: 'string',
+        enum: ['local', 'configuration', 'downstream', 'upstream', 'infrastructure', 'unknown'],
+      },
       Conclusion: {
         title: 'ResearchConclusion',
         type: 'object',
@@ -7422,6 +7448,11 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
           undetermined_reason: { type: ['string', 'null'], maxLength: 400 },
           consistency: { $ref: '#/$defs/ConsistencyChecks' },
           consistency_detail: { $ref: '#/$defs/ConsistencyDetail' },
+          cause_scope: {
+            description:
+              '选中根因所在的范围（契约 2.38.0，ADR 0170）：模型给出，代码按确定性依据校正。根因是领域包声明在集群之外的组件时为 upstream；根因不由 GitOps 仓库负责（处置依据的 repository_owned）时不能是 local 或 configuration；结论为 undetermined 或没有选中根因时为 unknown。之前的研判输出没有这个字段',
+            $ref: '#/$defs/CauseScope',
+          },
         },
       },
       ConsistencyDetail: {

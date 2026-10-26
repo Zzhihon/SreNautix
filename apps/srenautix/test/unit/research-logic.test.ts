@@ -247,6 +247,7 @@ describe('结论阶梯', () => {
 function conclude(over: Partial<ConcludeOutput>): ConcludeOutput {
   return {
     disposition: 'act',
+    cause_scope: 'local',
     hypothesis_id: 'h1',
     undetermined_reason: null,
     situation: 's',

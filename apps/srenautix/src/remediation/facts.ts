@@ -20,6 +20,8 @@ import { alertsOf, cardsOf, type AlertFacts } from './render.js';
 // - external：候选根因中组件类型声明为集群外部（external）的组件；
 // - declared：候选根因中由 GitOps 仓库声明的运行中组件（ADR 0162）：展开后的对象沿 owned_by 的顶层属主由 GitOps 应用管理
 //   （managed_by）。修改仓库中的声明就能处置它们；管理着候选根因的 GitOps 应用与逻辑组件不在其中；
+// - repository_owned：候选根因中由 GitOps 仓库负责的组件（ADR 0170）：declared 加上管理着候选根因的 GitOps 应用与展开到
+//   由应用管理的工作负载的逻辑组件，根因范围的校正与自愈 PR 的仓库事实按它判断；
 // - remediations：每个候选根因上适用的修复模板，按"研判以它为根因、结论 likely、处置 act"求值，
 //   只保留启用的类别中能消除根因的两类（release_rollback、config_resource）；
 // - business_impact：触发中的业务影响告警（notify.business_impact_alerts，ADR 0163、0166），这些告警在、并且有异常卡时
@@ -257,44 +259,71 @@ export function matchTemplates(
   return applicableRemediations(set as PackSet, ctx).applicable.map((a) => ({ key: a.key, category: a.category }));
 }
 
-export async function dispositionFacts(i: FactsInput): Promise<DispositionFacts> {
-  const external = new Set(i.componentTypes.filter((t) => t.external === true).map((t) => t.id));
-  const enabled = new Set(i.categories.filter((c) => FIX_CATEGORIES.has(c)));
-  const declared: string[] = [];
-  const out: DispositionFacts = {
-    external: [],
-    declared,
-    business_impact: businessImpactAlerts(i.incident, i.alerts, i.impactAlerts),
-    remediations: [],
-  };
-  const keys = [...new Set(i.roots)].slice(0, MAX_FACT_ROOTS);
+/**
+ * 候选根因与 GitOps 仓库的关系，roots 是每个键展开后的根因：
+ * - declared：由仓库声明的运行中组件（ADR 0162），展开后的对象沿 owned_by 的顶层属主由 GitOps 应用管理。管理着候选根因的
+ *   GitOps 应用是变更的载体，排除在外（应用的应用管理它时也一样）；逻辑组件也不在其中；
+ * - owned：由仓库负责的组件（ADR 0170），declared 加上管理着候选根因的 GitOps 应用，以及展开到由 GitOps 应用管理的工作负载的
+ *   逻辑组件。发布与清单的变更经这些应用从仓库生效，根因是它们时修复同样是修改仓库。
+ * 处置依据（dispositionFacts）与自愈 PR 的仓库事实用同一个规则
+ */
+export async function repositoryRoots(
+  keys: readonly string[],
+  resolve: RootResolver,
+  scope: Pick<RootCardScope, 'resolve'>,
+): Promise<{ declared: string[]; owned: string[]; roots: Map<string, RemediationContext['root']> }> {
   const roots = new Map<string, RemediationContext['root']>();
   // 展开后对象沿 owned_by 的顶层属主与管理它的 GitOps 应用（managed_by）
   const tops = new Map<string, { top: string; managers: string[] }>();
   for (const key of keys) {
-    const root = await i.resolve(key);
+    const root = await resolve(key);
     roots.set(key, root);
     const concrete = root ? tryNodeKey(root.kind, root.namespace, root.name) : null;
     if (concrete) {
-      tops.set(key, await i.scope.resolve(concrete));
+      tops.set(key, await scope.resolve(concrete));
     }
   }
-  // 管理着候选根因的 GitOps 应用是变更的载体，排除在外（应用的应用管理它时也一样）
   // 拓扑与事件根因的写法可能不同（Application.argoproj.io 与 application），按同一个对象比较
   const apps = [...new Set([...tops.values()].flatMap((t) => t.managers))].map(parseStoredKey);
   const isApp = (key: string) => {
     const k = parseStoredKey(key);
     return apps.some((a) => sameKind(a.kind, k.kind) && a.namespace === k.namespace && a.name === k.name);
   };
+  const declared: string[] = [];
+  const owned: string[] = [];
+  for (const key of keys) {
+    const t = tops.get(key);
+    if (!t) {
+      continue;
+    }
+    // 组件键本身是 GitOps 应用时也排除：事件根因是应用时，展开后的对象是事件里的一个工作负载（根因实体）
+    const app = isApp(t.top) || isApp(key);
+    if (t.managers.length > 0 && !app && !isLogicalComponent(key)) {
+      declared.push(key);
+    }
+    if (t.managers.length > 0 || app) {
+      owned.push(key);
+    }
+  }
+  return { declared, owned, roots };
+}
+
+export async function dispositionFacts(i: FactsInput): Promise<DispositionFacts> {
+  const external = new Set(i.componentTypes.filter((t) => t.external === true).map((t) => t.id));
+  const enabled = new Set(i.categories.filter((c) => FIX_CATEGORIES.has(c)));
+  const keys = [...new Set(i.roots)].slice(0, MAX_FACT_ROOTS);
+  const { declared, owned, roots } = await repositoryRoots(keys, i.resolve, i.scope);
+  const out: DispositionFacts = {
+    external: [],
+    declared,
+    repository_owned: owned,
+    business_impact: businessImpactAlerts(i.incident, i.alerts, i.impactAlerts),
+    remediations: [],
+  };
   for (const key of keys) {
     const root = roots.get(key) ?? null;
     if (root?.component_type && external.has(root.component_type)) {
       out.external.push(key);
-    }
-    const t = tops.get(key);
-    // 组件键本身是 GitOps 应用时也排除：事件根因是应用时，展开后的对象是事件里的一个工作负载（根因实体）
-    if (t && t.managers.length > 0 && !isApp(t.top) && !isApp(key) && !isLogicalComponent(key)) {
-      declared.push(key);
     }
     if (!enabled.size || !root) {
       continue;

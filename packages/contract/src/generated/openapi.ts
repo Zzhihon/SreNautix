@@ -1913,6 +1913,12 @@ export type components = {
        */
       skipped_reason: 'rank' | 'verifying' | 'cooldown' | null;
     };
+    /**
+     * CauseScope
+     * @description local 仓库声明的组件自身的运行状态；configuration 仓库声明的组件的配置、资源或参数，或经管理它的 GitOps 应用生效的发布与清单变更；downstream 调用方或消费方；upstream 被依赖的服务方（集群外部的服务方、其他团队的服务）；infrastructure 节点、存储、网络等基础设施；unknown 无法判断
+     * @enum {string}
+     */
+    CauseScope: 'local' | 'configuration' | 'downstream' | 'upstream' | 'infrastructure' | 'unknown';
     /** ChangeEvent */
     ChangeEvent: {
       actor: string | null;
@@ -2051,6 +2057,8 @@ export type components = {
     };
     /** ResearchConclusion */
     Conclusion: {
+      /** @description 选中根因所在的范围（契约 2.38.0，ADR 0170）：模型给出，代码按确定性依据校正。根因是领域包声明在集群之外的组件时为 upstream；根因不由 GitOps 仓库负责（处置依据的 repository_owned）时不能是 local 或 configuration；结论为 undetermined 或没有选中根因时为 unknown。之前的研判输出没有这个字段 */
+      cause_scope?: components['schemas']['CauseScope'];
       consistency: components['schemas']['ConsistencyChecks'];
       consistency_detail?: components['schemas']['ConsistencyDetail'];
       hypothesis_id: string | null;
@@ -4995,6 +5003,11 @@ export type components = {
         target: string;
       }[];
       hypotheses: components['schemas']['Hypothesis'][];
+      /**
+       * @description 处置为 ignore 时成立的确定性依据（契约 2.38.0，ADR 0138、0167、0168、0170）：stage_a 阶段 A 已判为 ignore；planned_retirement 全部成员告警由计划内的退役解释；external 研判根因是集群外部组件；evidence_normal 得出结论的卡全部正常；impact_normal 影响卡全部正常。处置不是 ignore 时不填
+       * @enum {string}
+       */
+      ignore_basis?: 'stage_a' | 'planned_retirement' | 'external' | 'evidence_normal' | 'impact_normal';
       /** @description 结论由兜底路由（ModelRoute.role 为 last_resort）给出时填写：全部常规路由都因事件涉及其故障域而提前熔断（契约 2.30.0，ADR 0152）。常规路由给出结论时不填 */
       last_resort_route?: {
         model: string;
@@ -5014,8 +5027,16 @@ export type components = {
       /** @description 代码校验的修改记录：删除的无效证据引用、删除的目录外提议、降级的结论、删除的无法核实的数值等 */
       validation_notes: string[];
       $defs: {
+        /**
+         * CauseScope
+         * @description local 仓库声明的组件自身的运行状态；configuration 仓库声明的组件的配置、资源或参数，或经管理它的 GitOps 应用生效的发布与清单变更；downstream 调用方或消费方；upstream 被依赖的服务方（集群外部的服务方、其他团队的服务）；infrastructure 节点、存储、网络等基础设施；unknown 无法判断
+         * @enum {string}
+         */
+        CauseScope: 'local' | 'configuration' | 'downstream' | 'upstream' | 'infrastructure' | 'unknown';
         /** ResearchConclusion */
         Conclusion: {
+          /** @description 选中根因所在的范围（契约 2.38.0，ADR 0170）：模型给出，代码按确定性依据校正。根因是领域包声明在集群之外的组件时为 upstream；根因不由 GitOps 仓库负责（处置依据的 repository_owned）时不能是 local 或 configuration；结论为 undetermined 或没有选中根因时为 unknown。之前的研判输出没有这个字段 */
+          cause_scope?: components['schemas']['CauseScope'];
           consistency: components['schemas']['ConsistencyChecks'];
           consistency_detail?: components['schemas']['ConsistencyDetail'];
           hypothesis_id: string | null;
@@ -5564,7 +5585,10 @@ export type components = {
       at: components['schemas']['Timestamp'];
       /** @description kind 为 change 时：这个变更与事件的关联分级与依据（ADR 0169）；事件没有 change_links 时省略 */
       change_link?: components['schemas']['ChangeLink'];
-      /** @enum {string} */
+      /**
+       * @description remediation_attempt 为自愈 PR 对一次研判的处理结果（契约 2.38.0，ADR 0170）：text 写模板、结果、原因码与原因，ref 为研判的 run_id
+       * @enum {string}
+       */
       kind:
         | 'alert_firing'
         | 'alert_resolved'
@@ -5574,6 +5598,7 @@ export type components = {
         | 'incident_split'
         | 'stage_a'
         | 'research_concluded'
+        | 'remediation_attempt'
         | 'proposal'
         | 'execution'
         | 'feedback';

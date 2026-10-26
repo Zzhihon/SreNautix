@@ -8,6 +8,7 @@
   "additionalProperties": false,
   "required": [
     "disposition",
+    "cause_scope",
     "hypothesis_id",
     "undetermined_reason",
     "situation",
@@ -17,6 +18,11 @@
   ],
   "properties": {
     "disposition": { "type": "string", "enum": ["act", "ignore", "escalate", "undetermined"] },
+    "cause_scope": {
+      "type": "string",
+      "description": "选中根因所在的范围：local 仓库声明的组件自身的运行状态（进程、内存、正在服务的版本）；configuration 仓库声明的组件的配置、资源或参数，或经管理它的 GitOps 应用生效的发布与清单变更；downstream 调用方或消费方（请求量或调用方式的变化）；upstream 被依赖的服务方（集群外部的服务方、其他团队的服务）；infrastructure 节点、存储、网络等基础设施；unknown 无法判断",
+      "enum": ["local", "configuration", "downstream", "upstream", "infrastructure", "unknown"]
+    },
     "hypothesis_id": {
       "type": ["string", "null"],
       "description": "选中的假设；为 null 时 undetermined_reason 必须非空",
