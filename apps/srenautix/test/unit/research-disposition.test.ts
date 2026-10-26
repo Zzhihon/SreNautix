@@ -63,12 +63,54 @@ describe('处置推导', () => {
     expect(low.disposition).toBe('escalate');
   });
 
-  it('ignore 不带修复：有有效提议或适用的修复模板时不给 ignore', () => {
-    const withProposal = deriveDisposition(
-      input({ model: 'ignore', root: PROVIDER, proposals: 1, facts: facts({ external: [PROVIDER] }) }),
+  it('ignore 的依据成立时模型的提议不生效，处置保持 ignore（ADR 0168）', () => {
+    const external = deriveDisposition(
+      input({ model: 'escalate', root: PROVIDER, proposals: 1, facts: facts({ external: [PROVIDER] }) }),
     );
-    expect(withProposal.disposition).toBe('escalate');
-    expect(withProposal.notes[0]).toMatch(/1 条有效提议/);
+    expect(external).toMatchObject({ disposition: 'ignore', basis: 'external', dropProposals: true });
+    expect(external.notes[1]).toBe('模型给出的 1 条提议不生效（ignore 的依据成立，ignore 不带修复，ADR 0168）');
+    // 证据全部正常的良性事件，模型提议放宽 HPA 上限
+    const normal = stageACards().map((c) => ({
+      ...c,
+      verdict: c.verdict === 'abnormal' ? ('normal' as const) : c.verdict,
+    }));
+    const benign = deriveDisposition(input({ model: 'act', proposals: 2, cards: cardsOf(normal) }));
+    expect(benign).toMatchObject({ disposition: 'ignore', basis: 'evidence_normal', dropProposals: true });
+    const s = { ...stageA(), disposition: 'ignore' as const, disposition_reason: 'pack_exclude' as const };
+    expect(deriveDisposition(input({ model: 'act', proposals: 1, stageA: s }))).toMatchObject({
+      disposition: 'ignore',
+      basis: 'stage_a',
+      dropProposals: true,
+    });
+    // 依据不成立时提议保留
+    const kept = deriveDisposition(input({ model: 'act', proposals: 1 }));
+    expect(kept.disposition).toBe('act');
+    expect(kept.dropProposals).toBeUndefined();
+    // 没有提议时不写这一行
+    expect(deriveDisposition(input({ root: PROVIDER, facts: facts({ external: [PROVIDER] }) })).notes).toHaveLength(1);
+  });
+
+  it('ignore 的依据成立但有规则提议、适用的修复模板或业务影响时，模型的提议照常有效', () => {
+    const rule = { ...stageA(), rule_proposals: ['p1'] };
+    const withRule = deriveDisposition(
+      input({ model: 'act', proposals: 1, stageA: rule, root: PROVIDER, facts: facts({ external: [PROVIDER] }) }),
+    );
+    expect(withRule).toMatchObject({ disposition: 'act' });
+    expect(withRule.dropProposals).toBeUndefined();
+    // 业务影响告警在触发、有异常卡（ADR 0163）：外部组件不是依据，提议保留
+    const held = deriveDisposition(
+      input({
+        model: 'act',
+        proposals: 1,
+        root: PROVIDER,
+        facts: facts({ external: [PROVIDER], business_impact: [incident().members[0]!.alert_id] }),
+      }),
+    );
+    expect(held.disposition).toBe('act');
+    expect(held.dropProposals).toBeUndefined();
+  });
+
+  it('ignore 不带修复：适用的修复模板时不给 ignore', () => {
     const tpl = facts({
       external: [PROVIDER],
       remediations: [{ root: PROVIDER, templates: [{ key: 'gitops/x', category: 'config_resource' }] }],

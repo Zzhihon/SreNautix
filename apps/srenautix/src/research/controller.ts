@@ -290,6 +290,11 @@ export async function runStageB(input: ResearchRunInput, env: ResearchEnv, sink:
       gaps,
     });
     notes.push(...disposition.notes);
+    // ignore 的依据成立时模型的提议不生效，只记在研判备注里（ADR 0168）
+    const proposals = disposition.dropProposals ? [] : v.proposals;
+    if (disposition.dropProposals) {
+      notes.push(`不生效的提议：${v.proposals.map((p) => `${p.action_id}（${p.hypothesis_id}）`).join('、')}`);
+    }
     const leader = ledger.ranked(candidateScore)[0];
     const untested = v.chosen ? !ledger.competitorTested(v.chosen) : false;
     env.metrics.conclusions.inc({
@@ -326,7 +331,7 @@ export async function runStageB(input: ResearchRunInput, env: ResearchEnv, sink:
       situation: v.situation,
       summary: v.summary,
       recommendations: v.recommendations,
-      proposals: v.proposals.map((p) => ({ ...p, proposal_id: null })),
+      proposals: proposals.map((p) => ({ ...p, proposal_id: null })),
       validation_notes: notes,
       stop_reason: stopReason,
       // 检查产生的卡随输出发布，消息与 issue 不依赖 worker 的运行明细；序列只在运行明细中保存

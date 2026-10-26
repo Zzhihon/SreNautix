@@ -8,8 +8,8 @@ import type { DispositionFacts } from './types.js';
 // - 观测失明时一律 escalate；
 // - ignore 只在确定性依据成立时给出（不论模型给出什么）：阶段 A 已判为 ignore（全部告警由计划内的退役解释时依据记为
 //   planned_retirement，ADR 0167）；研判根因（likely 及以上）是领域包声明的集群外部组件；没有任何异常卡；影响卡全部正常。
-//   这些依据都要求没有有效提议、没有规则提议、修复模板使用的根因上没有适用的修复模板（ignore 不带修复）。证据基线判为
-//   常态的异常卡（ADR 0153）在这里按正常计；
+//   这些依据都要求没有规则提议、修复模板使用的根因上没有适用的修复模板（ignore 不带修复）；依据成立时模型给出的提议
+//   不生效，研判输出不带它们，写进研判备注（ADR 0168）。证据基线判为常态的异常卡（ADR 0153）在这里按正常计；
 // - 有触发中的业务影响告警（处置依据的 business_impact，ADR 0166），并且有规则判定的异常卡时，这些依据都不成立，
 //   模型给出的 ignore 按严重度改写（ADR 0163）；
 // - 最低取证集合没有覆盖（ADR 0153）时，除阶段 A 已判为 ignore 之外，不给 ignore，也不给 act；
@@ -66,6 +66,8 @@ export interface DispositionResult {
   /** 修复模板使用的根因上适用的修复模板 */
   templates: string[];
   notes: string[];
+  /** ignore 的依据成立而模型带了有效提议：这些提议不生效，研判输出不带它们（ADR 0168） */
+  dropProposals?: true;
 }
 
 /** 修复模板使用的根因：研判结论达到 likely 时取研判根因，否则取事件根因（ADR 0126） */
@@ -101,9 +103,12 @@ function impactHeld(i: DispositionInput): string | null {
     .join('、')}${abnormal.length > 3 ? ' 等' : ''}）`;
 }
 
-/** ignore 的确定性依据；没有时为 null。前提：没有有效提议、规则提议与适用的修复模板，也没有不能 ignore 的业务影响 */
+/**
+ * ignore 的确定性依据；没有时为 null。前提：没有规则提议与适用的修复模板，也没有不能 ignore 的业务影响。
+ * 模型给出的有效提议不是前提：依据成立时这些提议不生效（ADR 0168）
+ */
 function ignoreBasis(i: DispositionInput, templates: readonly string[]): { basis: IgnoreBasis; why: string } | null {
-  if (i.proposals > 0 || i.stageA.rule_proposals.length > 0 || templates.length > 0 || impactHeld(i)) {
+  if (i.stageA.rule_proposals.length > 0 || templates.length > 0 || impactHeld(i)) {
     return null;
   }
   if (i.stageA.disposition === 'ignore' && STAGE_A_IGNORE.has(i.stageA.disposition_reason)) {
@@ -159,6 +164,10 @@ export function deriveDisposition(i: DispositionInput): DispositionResult {
     notes.push(
       i.model === 'ignore' ? `处置为 ignore：${ignore.why}` : `处置改为 ignore（模型给出 ${i.model}）：${ignore.why}`,
     );
+    if (i.proposals > 0) {
+      notes.push(`模型给出的 ${i.proposals} 条提议不生效（ignore 的依据成立，ignore 不带修复，ADR 0168）`);
+      return { disposition: 'ignore', basis: ignore.basis, templates, notes, dropProposals: true };
+    }
     return { disposition: 'ignore', basis: ignore.basis, templates, notes };
   }
   const act = i.gaps?.length ? null : actBasis(i, templates);
@@ -170,15 +179,13 @@ export function deriveDisposition(i: DispositionInput): DispositionResult {
     const held = impactHeld(i);
     const why = held
       ? `${held}，业务受影响时不给 ignore（ADR 0163）`
-      : i.proposals > 0
-        ? `有 ${i.proposals} 条有效提议，ignore 不带修复`
-        : templates.length > 0
-          ? `根因上有适用的修复模板 ${templates.join('、')}，ignore 不带修复`
-          : i.stageA.rule_proposals.length > 0
-            ? '有规则提议，ignore 不带修复'
-            : i.gaps?.length
-              ? '最低取证集合没有覆盖（ADR 0153）'
-              : '没有确定性依据（阶段 A 没有判为 ignore，根因不是 likely 以上的集群外部组件，有异常卡，影响卡不是全部正常）';
+      : templates.length > 0
+        ? `根因上有适用的修复模板 ${templates.join('、')}，ignore 不带修复`
+        : i.stageA.rule_proposals.length > 0
+          ? '有规则提议，ignore 不带修复'
+          : i.gaps?.length
+            ? '最低取证集合没有覆盖（ADR 0153）'
+            : '没有确定性依据（阶段 A 没有判为 ignore，根因不是 likely 以上的集群外部组件，有异常卡，影响卡不是全部正常）';
     notes.push(`模型给出 ignore，但${why}，改为 ${fallback}`);
     return { disposition: fallback, basis: null, templates, notes };
   }

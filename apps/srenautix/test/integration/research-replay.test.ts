@@ -129,6 +129,58 @@ describe('录制的研判回放', () => {
     expect(res.ledger.input).toBe(sink.llm.reduce((a, c) => a + c.usage.input_tokens, 0));
   });
 
+  it('阶段 A 已判为 ignore 时模型的有效提议不生效：处置为 ignore，提议记在研判备注里（ADR 0168）', async () => {
+    // 同一段录制，conclude 的 pod_restart 指向拓扑里真实存在的 Pod，提议通过校验
+    const POD = 'Pod:shop/api-7c9d-1';
+    const responses = recorded.responses.map((r, k) =>
+      k === 3 ? (JSON.parse(JSON.stringify(r).replaceAll('<pod-name>', 'api-7c9d-1')) as LlmFixture) : r,
+    );
+    const server = new ReplayServer();
+    await server.start();
+    server.enqueue(...responses);
+    const tools = await metricsTools(mcp.url);
+    const base = researchCase();
+    const rc = {
+      ...base,
+      stageA: { ...base.stageA, disposition: 'ignore' as const, disposition_reason: 'pack_exclude' as const },
+      subgraph: {
+        ...base.subgraph,
+        nodes: [
+          ...base.subgraph.nodes,
+          {
+            component: POD,
+            kind: 'Pod',
+            namespace: 'shop',
+            name: 'api-7c9d-1',
+            role: 'neighbor' as const,
+            alerts: [],
+            hops: 2,
+          },
+        ],
+      },
+    };
+    const res = await runStageB(
+      { runId: '7a1b2c3d-0000-4000-8000-0000000000b3', rc, previous: null, signal: new AbortController().signal },
+      testEnv(testLayer([testRoute(server.baseUrl)]), tools.tools, false),
+      new MemorySink(),
+    );
+    await tools.close();
+    await server.stop();
+    expect(server.pending).toBe(0);
+    const out = res.output;
+    expect(out).not.toBeNull();
+    if (!out) {
+      return;
+    }
+    const v = validatorFor('schemas/research-output.schema.json');
+    expect(v(out), JSON.stringify(v.errors)).toBe(true);
+    expect(out.disposition).toBe('ignore');
+    expect(out.proposals).toEqual([]);
+    expect(out.validation_notes).toContain('处置改为 ignore（模型给出 act）：阶段 A 判为 ignore（pack_exclude）');
+    expect(out.validation_notes).toContain('模型给出的 1 条提议不生效（ignore 的依据成立，ignore 不带修复，ADR 0168）');
+    expect(out.validation_notes).toContain('不生效的提议：pod_restart（h1）');
+  });
+
   it('研判子图没有组件：不提出假设，直接结论为 undetermined', async () => {
     const server = new ReplayServer();
     await server.start();
