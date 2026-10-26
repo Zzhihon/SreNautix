@@ -442,6 +442,64 @@ export type paths = {
     patch?: never;
     trace?: never;
   };
+  '/v1/eval/candidates': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** @description 评测候选（ADR 0175），新的在前。state 为 all 时列出全部状态 */
+    get: operations['listEvalCandidates'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/eval/candidates/{candidate_id}/confirm': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        candidate_id: components['schemas']['Uuid'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * @description 确认一个待定的候选：选定标注类型、根因与处置。incident 必须给出根因；benign 的根因为空、处置为 ignore；
+     *     abstain 的根因为空、处置为 null。确认后的候选由 `srenautix eval candidates export` 导出为标注
+     */
+    post: operations['confirmEvalCandidate'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/eval/candidates/{candidate_id}/drop': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        candidate_id: components['schemas']['Uuid'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** @description 放弃一个待定的候选，不进入标注 */
+    post: operations['dropEvalCandidate'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/v1/eval/cases': {
     parameters: {
       query?: never;
@@ -1241,7 +1299,10 @@ export type paths = {
     };
     get?: never;
     put?: never;
-    /** @description 把这次研判所属的事件加入评测用例：固化查询邻域（DESIGN §14.2），进入"稍后标注"队列 */
+    /**
+     * @description 把这次研判所属的事件提为评测候选（来源 console，ADR 0175），进入管理员的"评测候选"列表等待确认：case_id 为候选 id，
+     *     snapshot_status 为 queued。case_type 是建议的标注类型，suite 原样记在候选上。同一事件已有控制台来源的候选时返回 409
+     */
     post: operations['promoteEvalCase'];
     delete?: never;
     options?: never;
@@ -2332,6 +2393,12 @@ export type components = {
           /** @description 没有弃权（结论不是 undetermined 或 inconclusive）的运行占比 */
           coverage: components['schemas']['Ratio'];
           disposition_accuracy: components['schemas']['Ratio'];
+          /** @description 误开 issue（ADR 0175）：benign 用例的运行中，处置为 escalate，或处置为 act 且没有提议的占比；沉默的运行计入分母 */
+          false_issue: components['schemas']['Ratio'];
+          /** @description 误开 PR（ADR 0175）：benign 用例的运行中，经过运行级准入之后仍有修复模板会开 PR 的占比；标注的标准修复是 alert_rule 时 alert_rule 类的模板不计。只有重建评测给出模板匹配，其余运行不计入 */
+          false_pr: components['schemas']['Ratio'];
+          /** @description 误推送（ADR 0175）：benign 用例的运行中，事件按通知规则会推送的占比（严重度在推送范围内、没有被抑制、不是计划内退役、不是没有业务影响的外部上游）。重建没有形成事件（沉默）的运行计入分母、不计入分子；没有推送判定的运行（评测配置没有 reconstruct 部分）不计入 */
+          false_push: components['schemas']['Ratio'];
           model: string;
           /**
            * @description 领域包早于事件或晚于事件，分两组报告
@@ -2366,6 +2433,10 @@ export type components = {
         /** EvalGate */
         Gate: {
           baseline_report_id: components['schemas']['Uuid'];
+          /** @description 候选在配对用例上的误推送（ADR 0175）；没有设上限时为 null */
+          false_push: null | components['schemas']['Ratio'];
+          /** @description 误推送的上限（命令行 --max-false-push）；候选的误推送超过它时门禁失败。默认不设上限（null） */
+          false_push_max: number | null;
           /** @description 两份报告共有的用例数 n */
           paired_cases: number;
           /** @description 新减旧的 top-1 差值（按用例配对） */
@@ -2380,6 +2451,52 @@ export type components = {
           waived_cases: string[];
         };
       };
+    };
+    /**
+     * @description 评测候选（ADR 0175）：反馈、关闭的自愈 PR、以 not planned 关闭的事件 issue 与控制台"加入评测"生成，
+     *     同一事件同一来源只有一个。管理员确认（选定类型、根因、处置）或放弃；确认的候选由命令行导出为标注
+     */
+    EvalCandidate: {
+      candidate_id: components['schemas']['Uuid'];
+      cluster_id: string;
+      created_at: components['schemas']['Timestamp'];
+      decided_at: null | components['schemas']['Timestamp'];
+      decided_by: string | null;
+      drop_reason: string | null;
+      incident_id: components['schemas']['Uuid'];
+      incident_label: string;
+      incident_version: number;
+      /** @description 确认时选定的标准答案；没有确认时为 null */
+      label: null | components['schemas']['EvalCandidateConfirm'];
+      /** @description 反馈的原因或 PR 关闭之前的最后一条评论 */
+      reason: string | null;
+      reason_code: null | components['schemas']['ReasonCode'];
+      research_run_id: null | components['schemas']['Uuid'];
+      /**
+       * @description feedback 为带原因码的反馈；pr_closed 为关闭且没有合并的自愈 PR；issue_not_planned 为以 not planned 关闭的事件 issue；console 为控制台的"加入评测"
+       * @enum {string}
+       */
+      source: 'feedback' | 'pr_closed' | 'issue_not_planned' | 'console';
+      /** @description 来源的引用：feedback 为 feedback_id，pr_closed 与 issue_not_planned 为 PR 或 issue 的链接，console 为研判的 run_id */
+      source_ref: string;
+      /** @enum {string} */
+      state: 'pending' | 'confirmed' | 'dropped';
+      /**
+       * @description 建议的标注类型；为 null 时留给人确认（修复方向错误、关闭的 PR 与 not planned 的 issue 既可能是良性告警，也可能是真实事件的错误处理）
+       * @enum {string|null}
+       */
+      suggested_type: 'incident' | 'benign' | 'abstain' | null;
+      /** @description 控制台"加入评测"时填写的用例集 */
+      suite: string | null;
+    };
+    EvalCandidateConfirm: {
+      /** @description 正确的处置判断；benign 为 ignore，abstain 为 null */
+      disposition: null | components['schemas']['Disposition'];
+      mechanism: string | null;
+      /** @description 可接受的根因组件键；incident 必须至少一个，benign 与 abstain 为空 */
+      roots: components['schemas']['ComponentKey'][];
+      /** @enum {string} */
+      type: 'incident' | 'benign' | 'abstain';
     };
     EvalCase: {
       case_id: string;
@@ -2880,10 +2997,10 @@ export type components = {
     } & components['schemas']['Header'];
     /**
      * Feedback
-     * @description 一条反馈（DESIGN §11），表只追加，同一事件以 created_at 最新的一条为准。两个维度：verdict 评价根因结论，disposition_verdict 评价处置判断。verdict=rejected 且 root_component=null 表示只否定结论、真实根因未知：不生成回放用例也不作为参考案例，计入准确率与校准统计，记为一次未命中。只有 linked=true（已绑定账号）的反馈进入评测的标准答案
+     * @description 一条反馈（DESIGN §11），表只追加，同一事件以 created_at 最新的一条为准。两个维度：verdict 评价根因结论，disposition_verdict 评价处置判断。verdict=rejected 且 root_component=null 表示只否定结论、真实根因未知：不生成回放用例也不作为参考案例，计入准确率与校准统计，记为一次未命中。reason_code 是结构化的原因（ADR 0174），自由文本 reason 是补充说明；带某些原因码的反馈生成评测候选（ADR 0175）。只有 linked=true（已绑定账号）的反馈进入评测的标准答案
      */
     'feedback.schema': {
-      channel: components['schemas']['Channel'];
+      channel: components['schemas']['FeedbackChannel'];
       created_at: components['schemas']['Timestamp'];
       /** @description disposition_verdict=rejected 时人工给出的正确处置判断 */
       disposition: null | components['schemas']['Disposition'];
@@ -2894,17 +3011,21 @@ export type components = {
       disposition_verdict: 'confirmed' | 'rejected' | null;
       feedback_id: components['schemas']['Uuid'];
       /**
-       * @description 隐式反馈的来源：批准、拒绝、撤销自动记为对应反馈；resolved_confirm 是事件恢复时的一键确认。显式反馈为 null
+       * @description 隐式反馈的来源：批准、拒绝、撤销自动记为对应反馈；resolved_confirm 是事件恢复时的一键确认；pr_closed 是自愈 PR 被关闭且没有合并，issue_not_planned 是事件 issue 以 not planned 关闭（server 的关闭跟踪写入，ADR 0174）。显式反馈为 null
        * @enum {string|null}
        */
-      implicit: 'approved' | 'rejected' | 'undone' | 'resolved_confirm' | null;
+      implicit: 'approved' | 'rejected' | 'undone' | 'resolved_confirm' | 'pr_closed' | 'issue_not_planned' | null;
       incident_id: components['schemas']['Uuid'];
       incident_version: number;
-      /** @description 提交者是已绑定的账号（控制台登录或聊天账号经 /link 绑定） */
+      /** @description 提交者是已绑定的账号（控制台登录或聊天账号经 /link 绑定）；channel=github 时为 false */
       linked: boolean;
       mechanism: string | null;
+      /** @description 提交者。channel=github 时为 github:<关闭者的登录名>，读不到关闭者时为 github */
       principal_id: string;
+      /** @description 自由文本的原因。implicit=rejected 时是提议被拒绝时填写的理由；implicit=pr_closed 时是 PR 关闭之前的最后一条评论（没有时为 null） */
       reason: string | null;
+      /** @description 原因码（ADR 0174）；没有选择时为 null */
+      reason_code: null | components['schemas']['ReasonCode'];
       /** @description 反馈针对的研判；针对阶段 A 报告时为 null */
       research_run_id: null | components['schemas']['Uuid'];
       /** @description verdict=rejected 时人工给出的真实根因组件，从本次研判的拓扑组件中选择；不知道时为 null */
@@ -2918,8 +3039,30 @@ export type components = {
       verdict: 'confirmed' | 'rejected' | null;
       $defs: {
         /**
+         * FeedbackReasonCode
+         * @description 反馈的原因码（ADR 0174）：false_positive 真误报；not_actionable 不需要处理；known_issue 已知问题；planned_change 计划内变更；transient_self_resolved 短暂、自行恢复；external_upstream 外部上游；duplicate 重复；poor_wording 措辞不佳；wrong_fix 修复方向错误（事件是真的）；worse_than_baseline 并行期评为比旧系统差；other 其他
+         * @enum {string}
+         */
+        ReasonCode:
+          | 'false_positive'
+          | 'not_actionable'
+          | 'known_issue'
+          | 'planned_change'
+          | 'transient_self_resolved'
+          | 'external_upstream'
+          | 'duplicate'
+          | 'poor_wording'
+          | 'wrong_fix'
+          | 'worse_than_baseline'
+          | 'other';
+        /**
+         * FeedbackChannel
+         * @description 反馈的来源渠道：提交渠道之一，或 github（server 从 GitHub 读到的关闭：自愈 PR 关闭且没有合并、事件 issue 以 not planned 关闭）
+         */
+        FeedbackChannel: components['schemas']['Channel'] | 'github';
+        /**
          * FeedbackCreate
-         * @description 提交反馈的请求体。channel 与主体由认证上下文决定，请求体不含
+         * @description 提交反馈的请求体。channel 与主体由认证上下文决定，请求体不含。reason_code 可以省略（等同 null）；控制台、Grafana 与聊天渠道在拒绝根因或处置时要求选择
          */
         FeedbackCreate: {
           disposition: null | components['schemas']['Disposition'];
@@ -2927,6 +3070,7 @@ export type components = {
           disposition_verdict: 'confirmed' | 'rejected' | null;
           mechanism: string | null;
           reason: string | null;
+          reason_code?: null | components['schemas']['ReasonCode'];
           research_run_id: null | components['schemas']['Uuid'];
           root_component: null | components['schemas']['ComponentKey'];
           /** @enum {string|null} */
@@ -2935,8 +3079,13 @@ export type components = {
       };
     };
     /**
+     * FeedbackChannel
+     * @description 反馈的来源渠道：提交渠道之一，或 github（server 从 GitHub 读到的关闭：自愈 PR 关闭且没有合并、事件 issue 以 not planned 关闭）
+     */
+    FeedbackChannel: components['schemas']['Channel'] | 'github';
+    /**
      * FeedbackCreate
-     * @description 提交反馈的请求体。channel 与主体由认证上下文决定，请求体不含
+     * @description 提交反馈的请求体。channel 与主体由认证上下文决定，请求体不含。reason_code 可以省略（等同 null）；控制台、Grafana 与聊天渠道在拒绝根因或处置时要求选择
      */
     FeedbackCreate: {
       disposition: null | components['schemas']['Disposition'];
@@ -2944,6 +3093,7 @@ export type components = {
       disposition_verdict: 'confirmed' | 'rejected' | null;
       mechanism: string | null;
       reason: string | null;
+      reason_code?: null | components['schemas']['ReasonCode'];
       research_run_id: null | components['schemas']['Uuid'];
       root_component: null | components['schemas']['ComponentKey'];
       /** @enum {string|null} */
@@ -3082,6 +3232,10 @@ export type components = {
     /** EvalGate */
     Gate: {
       baseline_report_id: components['schemas']['Uuid'];
+      /** @description 候选在配对用例上的误推送（ADR 0175）；没有设上限时为 null */
+      false_push: null | components['schemas']['Ratio'];
+      /** @description 误推送的上限（命令行 --max-false-push）；候选的误推送超过它时门禁失败。默认不设上限（null） */
+      false_push_max: number | null;
       /** @description 两份报告共有的用例数 n */
       paired_cases: number;
       /** @description 新减旧的 top-1 差值（按用例配对） */
@@ -4061,6 +4215,12 @@ export type components = {
       /** @description 没有弃权（结论不是 undetermined 或 inconclusive）的运行占比 */
       coverage: components['schemas']['Ratio'];
       disposition_accuracy: components['schemas']['Ratio'];
+      /** @description 误开 issue（ADR 0175）：benign 用例的运行中，处置为 escalate，或处置为 act 且没有提议的占比；沉默的运行计入分母 */
+      false_issue: components['schemas']['Ratio'];
+      /** @description 误开 PR（ADR 0175）：benign 用例的运行中，经过运行级准入之后仍有修复模板会开 PR 的占比；标注的标准修复是 alert_rule 时 alert_rule 类的模板不计。只有重建评测给出模板匹配，其余运行不计入 */
+      false_pr: components['schemas']['Ratio'];
+      /** @description 误推送（ADR 0175）：benign 用例的运行中，事件按通知规则会推送的占比（严重度在推送范围内、没有被抑制、不是计划内退役、不是没有业务影响的外部上游）。重建没有形成事件（沉默）的运行计入分母、不计入分子；没有推送判定的运行（评测配置没有 reconstruct 部分）不计入 */
+      false_push: components['schemas']['Ratio'];
       model: string;
       /**
        * @description 领域包早于事件或晚于事件，分两组报告
@@ -4688,6 +4848,23 @@ export type components = {
         | 'model_judged';
       text: string;
     };
+    /**
+     * FeedbackReasonCode
+     * @description 反馈的原因码（ADR 0174）：false_positive 真误报；not_actionable 不需要处理；known_issue 已知问题；planned_change 计划内变更；transient_self_resolved 短暂、自行恢复；external_upstream 外部上游；duplicate 重复；poor_wording 措辞不佳；wrong_fix 修复方向错误（事件是真的）；worse_than_baseline 并行期评为比旧系统差；other 其他
+     * @enum {string}
+     */
+    ReasonCode:
+      | 'false_positive'
+      | 'not_actionable'
+      | 'known_issue'
+      | 'planned_change'
+      | 'transient_self_resolved'
+      | 'external_upstream'
+      | 'duplicate'
+      | 'poor_wording'
+      | 'wrong_fix'
+      | 'worse_than_baseline'
+      | 'other';
     /** @description H 档服务签名必须携带的重新认证凭据（OIDC max_age）。auth_time 不晚于 assertion.issued_at，且两者相差不超过 300 秒。 */
     reauth: {
       auth_time: string;
@@ -5608,7 +5785,7 @@ export type components = {
       at: components['schemas']['Timestamp'];
       /** @description kind 为 change 时：这个变更与事件的关联分级与依据（ADR 0169）；事件没有 change_links 时省略 */
       change_link?: components['schemas']['ChangeLink'];
-      /** @description 原因码，取原因码登记表 contract/reason-codes.json 中所属阶段的值（契约 2.39.0，ADR 0172）；阶段由 kind 决定（stage_a_missing → stage_a，research_* → research，remediation_attempt → remediation，notify、issue → 同名阶段，incident_state → incident）。告警、变更、卡与提议等没有原因码的条目为 null，自愈 PR 提出提议（proposed）时为 null */
+      /** @description 原因码，取原因码登记表 contract/reason-codes.json 中所属阶段的值（契约 2.39.0，ADR 0172）；阶段由 kind 决定（stage_a_missing → stage_a，research_* → research，remediation_attempt → remediation，notify、issue、feedback → 同名阶段，incident_state → incident）。告警、变更、卡与提议等没有原因码的条目为 null，自愈 PR 提出提议（proposed）时为 null */
       code: string | null;
       /**
        * @description remediation_attempt：自愈 PR 对一次研判的处理结果（ADR 0170），text 写模板、结果与原因，ref 为研判的 run_id；
@@ -5617,7 +5794,8 @@ export type components = {
        *     stage_a_missing：阶段 A 执行失败（stage_a_failed，text 带错误摘要）与补跑后仍没有报告（stage_a_missing）；
        *     notify：消息送达、编辑次数用完后的最后一次编辑、放弃投递与不推送的决定，ref 为渠道与渠道目标（不推送时为空）；
        *     issue：事件 issue 开出、跳过与失败；
-       *     incident_state：事件恢复、重开、被抑制（text 带抑制的原因）与写入失败
+       *     incident_state：事件恢复、重开、被抑制（text 带抑制的原因）与写入失败；
+       *     feedback：人工反馈与隐式反馈，code 为反馈的原因码（契约 2.40.0，ADR 0174），没有原因码时为 null
        * @enum {string}
        */
       kind:
@@ -6502,6 +6680,95 @@ export interface operations {
           }[];
         };
       };
+    };
+  };
+  listEvalCandidates: {
+    parameters: {
+      query?: {
+        limit?: number;
+        state?: 'pending' | 'confirmed' | 'dropped' | 'all';
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 候选 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['EvalCandidate'][];
+        };
+      };
+      403: components['responses']['Error'];
+    };
+  };
+  confirmEvalCandidate: {
+    parameters: {
+      query?: never;
+      header: {
+        'X-CSRF-Token': components['parameters']['Csrf'];
+      };
+      path: {
+        candidate_id: components['schemas']['Uuid'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['EvalCandidateConfirm'];
+      };
+    };
+    responses: {
+      /** @description 已确认 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['EvalCandidate'];
+        };
+      };
+      400: components['responses']['Error'];
+      403: components['responses']['Error'];
+      404: components['responses']['Error'];
+      409: components['responses']['Error'];
+    };
+  };
+  dropEvalCandidate: {
+    parameters: {
+      query?: never;
+      header: {
+        'X-CSRF-Token': components['parameters']['Csrf'];
+      };
+      path: {
+        candidate_id: components['schemas']['Uuid'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          reason: string | null;
+        };
+      };
+    };
+    responses: {
+      /** @description 已放弃 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['EvalCandidate'];
+        };
+      };
+      403: components['responses']['Error'];
+      404: components['responses']['Error'];
+      409: components['responses']['Error'];
     };
   };
   listEvalCases: {

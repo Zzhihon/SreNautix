@@ -56,6 +56,9 @@
         "reliability",
         "provider_fingerprints",
         "benign_false_positive",
+        "false_push",
+        "false_issue",
+        "false_pr",
         "undetermined_ratio",
         "structured_output_failure",
         "cost_per_case",
@@ -107,6 +110,18 @@
           "items": { "type": "string" }
         },
         "benign_false_positive": { "$ref": "#/$defs/Ratio" },
+        "false_push": {
+          "description": "误推送（ADR 0175）：benign 用例的运行中，事件按通知规则会推送的占比（严重度在推送范围内、没有被抑制、不是计划内退役、不是没有业务影响的外部上游）。重建没有形成事件（沉默）的运行计入分母、不计入分子；没有推送判定的运行（评测配置没有 reconstruct 部分）不计入",
+          "$ref": "#/$defs/Ratio"
+        },
+        "false_issue": {
+          "description": "误开 issue（ADR 0175）：benign 用例的运行中，处置为 escalate，或处置为 act 且没有提议的占比；沉默的运行计入分母",
+          "$ref": "#/$defs/Ratio"
+        },
+        "false_pr": {
+          "description": "误开 PR（ADR 0175）：benign 用例的运行中，经过运行级准入之后仍有修复模板会开 PR 的占比；标注的标准修复是 alert_rule 时 alert_rule 类的模板不计。只有重建评测给出模板匹配，其余运行不计入",
+          "$ref": "#/$defs/Ratio"
+        },
         "undetermined_ratio": { "$ref": "#/$defs/Ratio" },
         "structured_output_failure": { "$ref": "#/$defs/Ratio" },
         "cost_per_case": {
@@ -138,6 +153,8 @@
         "paired_delta",
         "paired_delta_low",
         "threshold",
+        "false_push",
+        "false_push_max",
         "passed"
       ],
       "properties": {
@@ -152,6 +169,16 @@
         "paired_delta": { "type": "number", "description": "新减旧的 top-1 差值（按用例配对）" },
         "paired_delta_low": { "type": "number", "description": "新减旧的单侧 90% 下界" },
         "threshold": { "type": "number", "description": "n<100 时 -0.10，n≥100 时 -0.05" },
+        "false_push": {
+          "description": "候选在配对用例上的误推送（ADR 0175）；没有设上限时为 null",
+          "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/Ratio" }]
+        },
+        "false_push_max": {
+          "type": ["number", "null"],
+          "minimum": 0,
+          "maximum": 1,
+          "description": "误推送的上限（命令行 --max-false-push）；候选的误推送超过它时门禁失败。默认不设上限（null）"
+        },
         "passed": { "type": "boolean" }
       }
     }

@@ -72,6 +72,18 @@ export interface ReasonCodesByStage {
     | 'binding_stale';
   issue: 'opened' | 'external_root' | 'rate_limit' | 'failed';
   incident: 'resolved' | 'reopened' | 'suppressed' | 'persist_failed';
+  feedback:
+    | 'false_positive'
+    | 'not_actionable'
+    | 'known_issue'
+    | 'planned_change'
+    | 'transient_self_resolved'
+    | 'external_upstream'
+    | 'duplicate'
+    | 'poor_wording'
+    | 'wrong_fix'
+    | 'worse_than_baseline'
+    | 'other';
 }
 
 /** 各分组登记的原因码 */
@@ -139,6 +151,18 @@ export interface ReasonCodesByGroup {
     | 'binding_stale';
   issue: 'opened' | 'external_root' | 'rate_limit' | 'failed';
   incident: 'resolved' | 'reopened' | 'suppressed' | 'persist_failed';
+  feedback:
+    | 'false_positive'
+    | 'not_actionable'
+    | 'known_issue'
+    | 'planned_change'
+    | 'transient_self_resolved'
+    | 'external_upstream'
+    | 'duplicate'
+    | 'poor_wording'
+    | 'wrong_fix'
+    | 'worse_than_baseline'
+    | 'other';
 }
 
 export const REASON_CODE_GROUPS: Record<keyof ReasonCodesByGroup, ReasonCodeGroup> = {
@@ -174,6 +198,10 @@ export const REASON_CODE_GROUPS: Record<keyof ReasonCodesByGroup, ReasonCodeGrou
   remediation_template: { stage: 'remediation', description: '单个模板没有开出提议的原因' },
   issue: { stage: 'issue', description: '事件 issue 的结果' },
   incident: { stage: 'incident', description: '事件状态的变化与写入失败' },
+  feedback: {
+    stage: 'feedback',
+    description: '人工反馈与隐式反馈的原因（feedback.schema.json 的 ReasonCode，ADR 0174）',
+  },
 };
 
 export const REASON_CODES: readonly ReasonCodeEntry[] = [
@@ -754,4 +782,75 @@ export const REASON_CODES: readonly ReasonCodeEntry[] = [
       en: 'writing the incident failed; the group was rolled back and is retried next round',
     },
   },
+  {
+    code: 'false_positive',
+    stage: 'feedback',
+    level: 'warning',
+    groups: ['feedback'],
+    text: { 'zh-CN': '真误报', en: 'false positive' },
+  },
+  {
+    code: 'not_actionable',
+    stage: 'feedback',
+    level: 'warning',
+    groups: ['feedback'],
+    text: { 'zh-CN': '不需要处理', en: 'not actionable' },
+  },
+  {
+    code: 'known_issue',
+    stage: 'feedback',
+    level: 'info',
+    groups: ['feedback'],
+    text: { 'zh-CN': '已知问题', en: 'known issue' },
+  },
+  {
+    code: 'planned_change',
+    stage: 'feedback',
+    level: 'info',
+    groups: ['feedback'],
+    text: { 'zh-CN': '计划内变更', en: 'planned change' },
+  },
+  {
+    code: 'transient_self_resolved',
+    stage: 'feedback',
+    level: 'info',
+    groups: ['feedback'],
+    text: { 'zh-CN': '短暂、自行恢复', en: 'transient, self-resolved' },
+  },
+  {
+    code: 'external_upstream',
+    stage: 'feedback',
+    level: 'info',
+    groups: ['feedback'],
+    text: { 'zh-CN': '外部上游', en: 'external upstream' },
+  },
+  {
+    code: 'duplicate',
+    stage: 'feedback',
+    level: 'warning',
+    groups: ['feedback'],
+    text: { 'zh-CN': '重复', en: 'duplicate' },
+  },
+  {
+    code: 'poor_wording',
+    stage: 'feedback',
+    level: 'warning',
+    groups: ['feedback'],
+    text: { 'zh-CN': '措辞不佳', en: 'poor wording' },
+  },
+  {
+    code: 'wrong_fix',
+    stage: 'feedback',
+    level: 'warning',
+    groups: ['feedback'],
+    text: { 'zh-CN': '修复方向错误', en: 'wrong fix' },
+  },
+  {
+    code: 'worse_than_baseline',
+    stage: 'feedback',
+    level: 'warning',
+    groups: ['feedback'],
+    text: { 'zh-CN': '比旧系统差', en: 'worse than the old system' },
+  },
+  { code: 'other', stage: 'feedback', level: 'info', groups: ['feedback'], text: { 'zh-CN': '其他', en: 'other' } },
 ];

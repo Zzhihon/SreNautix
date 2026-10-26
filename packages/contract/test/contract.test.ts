@@ -117,6 +117,15 @@ describe('原因码登记表（ADR 0172）', () => {
     expect(group('notify_abandon')).toEqual([...group('notify_permanent'), 'ended_edit_cap'].sort());
   });
 
+  it('反馈的原因码与 feedback.schema.json 的 ReasonCode 相同，阶段 feedback 只有这一个分组（ADR 0174）', () => {
+    expect(group('feedback')).toEqual(schemaEnum('schemas/feedback.schema.json', '/$defs/ReasonCode'));
+    const stage = registry.codes
+      .filter((e) => e.stage === 'feedback')
+      .map((e) => e.code)
+      .sort();
+    expect(stage).toEqual(group('feedback'));
+  });
+
   it('reasonEntry 只认登记过的原因码', () => {
     expect(reasonEntry('research', 'lease_expired').level).toBe('error');
     expect(reasonText('notify', 'withheld_severity', 'zh')).toBe('不推送：严重度不在推送范围内');
@@ -150,8 +159,24 @@ describe('黄金夹具', () => {
     expect(() => assertValid('schemas/feedback.schema.json', fixture('feedback.valid.json'))).not.toThrow();
   });
 
-  it('反馈的渠道必须是已知渠道', () => {
+  it('反馈的渠道必须是已知渠道；github 只用于 server 读到的关闭', () => {
     const bad = { ...fixture('feedback.valid.json'), channel: 'pager' };
+    expect(() => assertValid('schemas/feedback.schema.json', bad)).toThrow(ContractViolation);
+    const closed = {
+      ...fixture('feedback.valid.json'),
+      verdict: null,
+      disposition_verdict: null,
+      reason_code: null,
+      channel: 'github',
+      principal_id: 'github:alice',
+      linked: false,
+      implicit: 'pr_closed',
+    };
+    expect(() => assertValid('schemas/feedback.schema.json', closed)).not.toThrow();
+  });
+
+  it('反馈的原因码只能是登记的取值', () => {
+    const bad = { ...fixture('feedback.valid.json'), reason_code: 'bad_model' };
     expect(() => assertValid('schemas/feedback.schema.json', bad)).toThrow(ContractViolation);
   });
 

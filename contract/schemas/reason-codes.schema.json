@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://srenautix.io/contract/schemas/reason-codes.schema.json",
   "title": "ReasonCodeRegistry",
-  "description": "终态原因码登记表（数据在 contract/reason-codes.json，ADR 0172）：通知、阶段 A、研判、自愈 PR、事件 issue 与事件状态的每个终态都带一个登记过的原因码。代码只能写登记表里的值（packages/contract 生成的类型保证），时间线（TimelineEntry.code、level）、群消息的说明行与指标 srenautix_terminal_states_total{stage,code,level} 用同一张表",
+  "description": "终态原因码登记表（数据在 contract/reason-codes.json，ADR 0172）：通知、阶段 A、研判、自愈 PR、事件 issue 与事件状态的每个终态都带一个登记过的原因码，人工反馈与隐式反馈的原因码（ADR 0174）也登记在这里。代码只能写登记表里的值（packages/contract 生成的类型保证），时间线（TimelineEntry.code、level）、群消息的说明行与指标 srenautix_terminal_states_total{stage,code,level} 用同一张表",
   "type": "object",
   "additionalProperties": false,
   "required": ["groups", "codes"],
@@ -24,8 +24,8 @@
     "Stage": {
       "title": "ReasonStage",
       "type": "string",
-      "description": "原因码所属的阶段：notify 通知；stage_a 阶段 A；research 阶段 B 研判与入队；remediation 自愈 PR；issue 事件 issue；incident 事件状态",
-      "enum": ["notify", "stage_a", "research", "remediation", "issue", "incident"]
+      "description": "原因码所属的阶段：notify 通知；stage_a 阶段 A；research 阶段 B 研判与入队；remediation 自愈 PR；issue 事件 issue；incident 事件状态；feedback 人工反馈与隐式反馈（ADR 0174）",
+      "enum": ["notify", "stage_a", "research", "remediation", "issue", "incident", "feedback"]
     },
     "Level": {
       "title": "ReasonLevel",

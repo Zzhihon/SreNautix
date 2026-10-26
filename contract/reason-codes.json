@@ -31,7 +31,11 @@
     "remediation_run": { "stage": "remediation", "description": "整次研判没有可处理模板的原因（模板 key 为 -）" },
     "remediation_template": { "stage": "remediation", "description": "单个模板没有开出提议的原因" },
     "issue": { "stage": "issue", "description": "事件 issue 的结果" },
-    "incident": { "stage": "incident", "description": "事件状态的变化与写入失败" }
+    "incident": { "stage": "incident", "description": "事件状态的变化与写入失败" },
+    "feedback": {
+      "stage": "feedback",
+      "description": "人工反馈与隐式反馈的原因（feedback.schema.json 的 ReasonCode，ADR 0174）"
+    }
   },
   "codes": [
     {
@@ -634,6 +638,83 @@
         "zh-CN": "事件写入失败，本组回滚，下一轮重试",
         "en": "writing the incident failed; the group was rolled back and is retried next round"
       }
+    },
+    {
+      "code": "false_positive",
+      "stage": "feedback",
+      "level": "warning",
+      "groups": ["feedback"],
+      "text": { "zh-CN": "真误报", "en": "false positive" }
+    },
+    {
+      "code": "not_actionable",
+      "stage": "feedback",
+      "level": "warning",
+      "groups": ["feedback"],
+      "text": { "zh-CN": "不需要处理", "en": "not actionable" }
+    },
+    {
+      "code": "known_issue",
+      "stage": "feedback",
+      "level": "info",
+      "groups": ["feedback"],
+      "text": { "zh-CN": "已知问题", "en": "known issue" }
+    },
+    {
+      "code": "planned_change",
+      "stage": "feedback",
+      "level": "info",
+      "groups": ["feedback"],
+      "text": { "zh-CN": "计划内变更", "en": "planned change" }
+    },
+    {
+      "code": "transient_self_resolved",
+      "stage": "feedback",
+      "level": "info",
+      "groups": ["feedback"],
+      "text": { "zh-CN": "短暂、自行恢复", "en": "transient, self-resolved" }
+    },
+    {
+      "code": "external_upstream",
+      "stage": "feedback",
+      "level": "info",
+      "groups": ["feedback"],
+      "text": { "zh-CN": "外部上游", "en": "external upstream" }
+    },
+    {
+      "code": "duplicate",
+      "stage": "feedback",
+      "level": "warning",
+      "groups": ["feedback"],
+      "text": { "zh-CN": "重复", "en": "duplicate" }
+    },
+    {
+      "code": "poor_wording",
+      "stage": "feedback",
+      "level": "warning",
+      "groups": ["feedback"],
+      "text": { "zh-CN": "措辞不佳", "en": "poor wording" }
+    },
+    {
+      "code": "wrong_fix",
+      "stage": "feedback",
+      "level": "warning",
+      "groups": ["feedback"],
+      "text": { "zh-CN": "修复方向错误", "en": "wrong fix" }
+    },
+    {
+      "code": "worse_than_baseline",
+      "stage": "feedback",
+      "level": "warning",
+      "groups": ["feedback"],
+      "text": { "zh-CN": "比旧系统差", "en": "worse than the old system" }
+    },
+    {
+      "code": "other",
+      "stage": "feedback",
+      "level": "info",
+      "groups": ["feedback"],
+      "text": { "zh-CN": "其他", "en": "other" }
     }
   ]
 }

@@ -1,5 +1,5 @@
 // 本文件由 packages/contract/scripts/gen.ts 从 contract/ 生成，不要手工修改。
-export const CONTRACT_VERSION = '2.39.0';
+export const CONTRACT_VERSION = '2.40.0';
 
 export const SCHEMAS: Record<string, Record<string, unknown>> = {
   'https://srenautix.io/contract/gateway/v1/action-catalog.schema.json': {
@@ -2966,6 +2966,9 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
           'reliability',
           'provider_fingerprints',
           'benign_false_positive',
+          'false_push',
+          'false_issue',
+          'false_pr',
           'undetermined_ratio',
           'structured_output_failure',
           'cost_per_case',
@@ -3018,6 +3021,21 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
             items: { type: 'string' },
           },
           benign_false_positive: { $ref: '#/$defs/Ratio' },
+          false_push: {
+            description:
+              '误推送（ADR 0175）：benign 用例的运行中，事件按通知规则会推送的占比（严重度在推送范围内、没有被抑制、不是计划内退役、不是没有业务影响的外部上游）。重建没有形成事件（沉默）的运行计入分母、不计入分子；没有推送判定的运行（评测配置没有 reconstruct 部分）不计入',
+            $ref: '#/$defs/Ratio',
+          },
+          false_issue: {
+            description:
+              '误开 issue（ADR 0175）：benign 用例的运行中，处置为 escalate，或处置为 act 且没有提议的占比；沉默的运行计入分母',
+            $ref: '#/$defs/Ratio',
+          },
+          false_pr: {
+            description:
+              '误开 PR（ADR 0175）：benign 用例的运行中，经过运行级准入之后仍有修复模板会开 PR 的占比；标注的标准修复是 alert_rule 时 alert_rule 类的模板不计。只有重建评测给出模板匹配，其余运行不计入',
+            $ref: '#/$defs/Ratio',
+          },
           undetermined_ratio: { $ref: '#/$defs/Ratio' },
           structured_output_failure: { $ref: '#/$defs/Ratio' },
           cost_per_case: {
@@ -3046,6 +3064,8 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
           'paired_delta',
           'paired_delta_low',
           'threshold',
+          'false_push',
+          'false_push_max',
           'passed',
         ],
         properties: {
@@ -3060,6 +3080,16 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
           paired_delta: { type: 'number', description: '新减旧的 top-1 差值（按用例配对）' },
           paired_delta_low: { type: 'number', description: '新减旧的单侧 90% 下界' },
           threshold: { type: 'number', description: 'n<100 时 -0.10，n≥100 时 -0.05' },
+          false_push: {
+            description: '候选在配对用例上的误推送（ADR 0175）；没有设上限时为 null',
+            oneOf: [{ type: 'null' }, { $ref: '#/$defs/Ratio' }],
+          },
+          false_push_max: {
+            type: ['number', 'null'],
+            minimum: 0,
+            maximum: 1,
+            description: '误推送的上限（命令行 --max-false-push）；候选的误推送超过它时门禁失败。默认不设上限（null）',
+          },
           passed: { type: 'boolean' },
         },
       },
@@ -4259,7 +4289,7 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
     $id: 'https://srenautix.io/contract/schemas/feedback.schema.json',
     title: 'Feedback',
     description:
-      '一条反馈（DESIGN §11），表只追加，同一事件以 created_at 最新的一条为准。两个维度：verdict 评价根因结论，disposition_verdict 评价处置判断。verdict=rejected 且 root_component=null 表示只否定结论、真实根因未知：不生成回放用例也不作为参考案例，计入准确率与校准统计，记为一次未命中。只有 linked=true（已绑定账号）的反馈进入评测的标准答案',
+      '一条反馈（DESIGN §11），表只追加，同一事件以 created_at 最新的一条为准。两个维度：verdict 评价根因结论，disposition_verdict 评价处置判断。verdict=rejected 且 root_component=null 表示只否定结论、真实根因未知：不生成回放用例也不作为参考案例，计入准确率与校准统计，记为一次未命中。reason_code 是结构化的原因（ADR 0174），自由文本 reason 是补充说明；带某些原因码的反馈生成评测候选（ADR 0175）。只有 linked=true（已绑定账号）的反馈进入评测的标准答案',
     type: 'object',
     additionalProperties: false,
     required: [
@@ -4273,6 +4303,7 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
       'disposition',
       'mechanism',
       'reason',
+      'reason_code',
       'principal_id',
       'channel',
       'linked',
@@ -4307,23 +4338,65 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
         oneOf: [{ type: 'null' }, { $ref: 'common.schema.json#/$defs/Disposition' }],
       },
       mechanism: { type: ['string', 'null'], maxLength: 600 },
-      reason: { type: ['string', 'null'], maxLength: 500 },
-      principal_id: { type: 'string', minLength: 1 },
-      channel: { $ref: 'common.schema.json#/$defs/Channel' },
-      linked: { type: 'boolean', description: '提交者是已绑定的账号（控制台登录或聊天账号经 /link 绑定）' },
+      reason: {
+        type: ['string', 'null'],
+        maxLength: 500,
+        description:
+          '自由文本的原因。implicit=rejected 时是提议被拒绝时填写的理由；implicit=pr_closed 时是 PR 关闭之前的最后一条评论（没有时为 null）',
+      },
+      reason_code: {
+        description: '原因码（ADR 0174）；没有选择时为 null',
+        oneOf: [{ type: 'null' }, { $ref: '#/$defs/ReasonCode' }],
+      },
+      principal_id: {
+        type: 'string',
+        minLength: 1,
+        description: '提交者。channel=github 时为 github:<关闭者的登录名>，读不到关闭者时为 github',
+      },
+      channel: { $ref: '#/$defs/FeedbackChannel' },
+      linked: {
+        type: 'boolean',
+        description: '提交者是已绑定的账号（控制台登录或聊天账号经 /link 绑定）；channel=github 时为 false',
+      },
       implicit: {
         type: ['string', 'null'],
         description:
-          '隐式反馈的来源：批准、拒绝、撤销自动记为对应反馈；resolved_confirm 是事件恢复时的一键确认。显式反馈为 null',
-        enum: ['approved', 'rejected', 'undone', 'resolved_confirm', null],
+          '隐式反馈的来源：批准、拒绝、撤销自动记为对应反馈；resolved_confirm 是事件恢复时的一键确认；pr_closed 是自愈 PR 被关闭且没有合并，issue_not_planned 是事件 issue 以 not planned 关闭（server 的关闭跟踪写入，ADR 0174）。显式反馈为 null',
+        enum: ['approved', 'rejected', 'undone', 'resolved_confirm', 'pr_closed', 'issue_not_planned', null],
       },
       stale: { type: 'boolean', description: '反馈之后又有研判完成（读取时计算）' },
       created_at: { $ref: 'common.schema.json#/$defs/Timestamp' },
     },
     $defs: {
+      ReasonCode: {
+        title: 'FeedbackReasonCode',
+        description:
+          '反馈的原因码（ADR 0174）：false_positive 真误报；not_actionable 不需要处理；known_issue 已知问题；planned_change 计划内变更；transient_self_resolved 短暂、自行恢复；external_upstream 外部上游；duplicate 重复；poor_wording 措辞不佳；wrong_fix 修复方向错误（事件是真的）；worse_than_baseline 并行期评为比旧系统差；other 其他',
+        type: 'string',
+        enum: [
+          'false_positive',
+          'not_actionable',
+          'known_issue',
+          'planned_change',
+          'transient_self_resolved',
+          'external_upstream',
+          'duplicate',
+          'poor_wording',
+          'wrong_fix',
+          'worse_than_baseline',
+          'other',
+        ],
+      },
+      FeedbackChannel: {
+        title: 'FeedbackChannel',
+        description:
+          '反馈的来源渠道：提交渠道之一，或 github（server 从 GitHub 读到的关闭：自愈 PR 关闭且没有合并、事件 issue 以 not planned 关闭）',
+        oneOf: [{ $ref: 'common.schema.json#/$defs/Channel' }, { type: 'string', enum: ['github'] }],
+      },
       FeedbackCreate: {
         title: 'FeedbackCreate',
-        description: '提交反馈的请求体。channel 与主体由认证上下文决定，请求体不含',
+        description:
+          '提交反馈的请求体。channel 与主体由认证上下文决定，请求体不含。reason_code 可以省略（等同 null）；控制台、Grafana 与聊天渠道在拒绝根因或处置时要求选择',
         type: 'object',
         additionalProperties: false,
         required: [
@@ -4343,6 +4416,7 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
           disposition: { oneOf: [{ type: 'null' }, { $ref: 'common.schema.json#/$defs/Disposition' }] },
           mechanism: { type: ['string', 'null'], maxLength: 600 },
           reason: { type: ['string', 'null'], maxLength: 500 },
+          reason_code: { oneOf: [{ type: 'null' }, { $ref: '#/$defs/ReasonCode' }] },
         },
       },
     },
@@ -6994,7 +7068,7 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
     $id: 'https://srenautix.io/contract/schemas/reason-codes.schema.json',
     title: 'ReasonCodeRegistry',
     description:
-      '终态原因码登记表（数据在 contract/reason-codes.json，ADR 0172）：通知、阶段 A、研判、自愈 PR、事件 issue 与事件状态的每个终态都带一个登记过的原因码。代码只能写登记表里的值（packages/contract 生成的类型保证），时间线（TimelineEntry.code、level）、群消息的说明行与指标 srenautix_terminal_states_total{stage,code,level} 用同一张表',
+      '终态原因码登记表（数据在 contract/reason-codes.json，ADR 0172）：通知、阶段 A、研判、自愈 PR、事件 issue 与事件状态的每个终态都带一个登记过的原因码，人工反馈与隐式反馈的原因码（ADR 0174）也登记在这里。代码只能写登记表里的值（packages/contract 生成的类型保证），时间线（TimelineEntry.code、level）、群消息的说明行与指标 srenautix_terminal_states_total{stage,code,level} 用同一张表',
     type: 'object',
     additionalProperties: false,
     required: ['groups', 'codes'],
@@ -7014,8 +7088,8 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
         title: 'ReasonStage',
         type: 'string',
         description:
-          '原因码所属的阶段：notify 通知；stage_a 阶段 A；research 阶段 B 研判与入队；remediation 自愈 PR；issue 事件 issue；incident 事件状态',
-        enum: ['notify', 'stage_a', 'research', 'remediation', 'issue', 'incident'],
+          '原因码所属的阶段：notify 通知；stage_a 阶段 A；research 阶段 B 研判与入队；remediation 自愈 PR；issue 事件 issue；incident 事件状态；feedback 人工反馈与隐式反馈（ADR 0174）',
+        enum: ['notify', 'stage_a', 'research', 'remediation', 'issue', 'incident', 'feedback'],
       },
       Level: {
         title: 'ReasonLevel',

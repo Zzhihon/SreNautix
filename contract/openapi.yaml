@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: SreNautix hub API
-  version: 2.39.0
+  version: 2.40.0
   license:
     name: Apache-2.0
     identifier: Apache-2.0
@@ -511,7 +511,9 @@ paths:
     post:
       tags: [eval]
       operationId: promoteEvalCase
-      description: 把这次研判所属的事件加入评测用例：固化查询邻域（DESIGN §14.2），进入"稍后标注"队列
+      description: |
+        把这次研判所属的事件提为评测候选（来源 console，ADR 0175），进入管理员的"评测候选"列表等待确认：case_id 为候选 id，
+        snapshot_status 为 queued。case_type 是建议的标注类型，suite 原样记在候选上。同一事件已有控制台来源的候选时返回 409
       x-srenautix-roles: [responder, approver, admin]
       x-srenautix-external: false
       parameters: [{ $ref: '#/components/parameters/Csrf' }]
@@ -1243,6 +1245,79 @@ paths:
                           model: { type: string }
                           top1: { $ref: './schemas/eval-report.schema.json#/$defs/Ratio' }
                     gate_passed: { type: [boolean, 'null'] }
+  /v1/eval/candidates:
+    get:
+      tags: [eval]
+      operationId: listEvalCandidates
+      description: 评测候选（ADR 0175），新的在前。state 为 all 时列出全部状态
+      x-srenautix-roles: [admin]
+      x-srenautix-external: false
+      parameters:
+        - {
+            name: state,
+            in: query,
+            schema: { type: string, enum: [pending, confirmed, dropped, all], default: pending },
+          }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 200 } }
+      responses:
+        '200':
+          description: 候选
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/EvalCandidate' } }
+        '403': { $ref: '#/components/responses/Error' }
+  /v1/eval/candidates/{candidate_id}/confirm:
+    parameters:
+      - { name: candidate_id, in: path, required: true, schema: { $ref: './schemas/common.schema.json#/$defs/Uuid' } }
+    post:
+      tags: [eval]
+      operationId: confirmEvalCandidate
+      description: |
+        确认一个待定的候选：选定标注类型、根因与处置。incident 必须给出根因；benign 的根因为空、处置为 ignore；
+        abstain 的根因为空、处置为 null。确认后的候选由 `srenautix eval candidates export` 导出为标注
+      x-srenautix-roles: [admin]
+      x-srenautix-external: false
+      parameters: [{ $ref: '#/components/parameters/Csrf' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EvalCandidateConfirm' }
+      responses:
+        '200':
+          description: 已确认
+          content: { application/json: { schema: { $ref: '#/components/schemas/EvalCandidate' } } }
+        '400': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+  /v1/eval/candidates/{candidate_id}/drop:
+    parameters:
+      - { name: candidate_id, in: path, required: true, schema: { $ref: './schemas/common.schema.json#/$defs/Uuid' } }
+    post:
+      tags: [eval]
+      operationId: dropEvalCandidate
+      description: 放弃一个待定的候选，不进入标注
+      x-srenautix-roles: [admin]
+      x-srenautix-external: false
+      parameters: [{ $ref: '#/components/parameters/Csrf' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [reason]
+              properties:
+                reason: { type: [string, 'null'], maxLength: 500 }
+      responses:
+        '200':
+          description: 已放弃
+          content: { application/json: { schema: { $ref: '#/components/schemas/EvalCandidate' } } }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
   /v1/eval/estimate:
     post:
       tags: [eval]
@@ -2200,11 +2275,12 @@ components:
             stage_a_missing：阶段 A 执行失败（stage_a_failed，text 带错误摘要）与补跑后仍没有报告（stage_a_missing）；
             notify：消息送达、编辑次数用完后的最后一次编辑、放弃投递与不推送的决定，ref 为渠道与渠道目标（不推送时为空）；
             issue：事件 issue 开出、跳过与失败；
-            incident_state：事件恢复、重开、被抑制（text 带抑制的原因）与写入失败
+            incident_state：事件恢复、重开、被抑制（text 带抑制的原因）与写入失败；
+            feedback：人工反馈与隐式反馈，code 为反馈的原因码（契约 2.40.0，ADR 0174），没有原因码时为 null
         code:
           type: [string, 'null']
           pattern: '^[a-z][a-z0-9_]*$'
-          description: 原因码，取原因码登记表 contract/reason-codes.json 中所属阶段的值（契约 2.39.0，ADR 0172）；阶段由 kind 决定（stage_a_missing → stage_a，research_* → research，remediation_attempt → remediation，notify、issue → 同名阶段，incident_state → incident）。告警、变更、卡与提议等没有原因码的条目为 null，自愈 PR 提出提议（proposed）时为 null
+          description: 原因码，取原因码登记表 contract/reason-codes.json 中所属阶段的值（契约 2.39.0，ADR 0172）；阶段由 kind 决定（stage_a_missing → stage_a，research_* → research，remediation_attempt → remediation，notify、issue、feedback → 同名阶段，incident_state → incident）。告警、变更、卡与提议等没有原因码的条目为 null，自愈 PR 提出提议（proposed）时为 null
         level:
           oneOf: [{ type: 'null' }, { $ref: './schemas/reason-codes.schema.json#/$defs/Level' }]
           description: 原因码在登记表中的级别；code 为 null 时为 null
@@ -2680,6 +2756,78 @@ components:
         cluster: { type: string }
         namespace: { type: [string, 'null'] }
         labels: { $ref: './schemas/common.schema.json#/$defs/Labels' }
+    EvalCandidate:
+      type: object
+      description: |
+        评测候选（ADR 0175）：反馈、关闭的自愈 PR、以 not planned 关闭的事件 issue 与控制台"加入评测"生成，
+        同一事件同一来源只有一个。管理员确认（选定类型、根因、处置）或放弃；确认的候选由命令行导出为标注
+      additionalProperties: false
+      required:
+        [
+          candidate_id,
+          cluster_id,
+          incident_id,
+          incident_label,
+          incident_version,
+          research_run_id,
+          source,
+          source_ref,
+          reason_code,
+          reason,
+          suggested_type,
+          suite,
+          state,
+          label,
+          decided_by,
+          decided_at,
+          drop_reason,
+          created_at,
+        ]
+      properties:
+        candidate_id: { $ref: './schemas/common.schema.json#/$defs/Uuid' }
+        cluster_id: { type: string }
+        incident_id: { $ref: './schemas/common.schema.json#/$defs/Uuid' }
+        incident_label: { type: string }
+        incident_version: { type: integer, minimum: 1 }
+        research_run_id: { oneOf: [{ type: 'null' }, { $ref: './schemas/common.schema.json#/$defs/Uuid' }] }
+        source:
+          type: string
+          enum: [feedback, pr_closed, issue_not_planned, console]
+          description: feedback 为带原因码的反馈；pr_closed 为关闭且没有合并的自愈 PR；issue_not_planned 为以 not planned 关闭的事件 issue；console 为控制台的"加入评测"
+        source_ref:
+          type: string
+          description: 来源的引用：feedback 为 feedback_id，pr_closed 与 issue_not_planned 为 PR 或 issue 的链接，console 为研判的 run_id
+        reason_code:
+          oneOf: [{ type: 'null' }, { $ref: './schemas/feedback.schema.json#/$defs/ReasonCode' }]
+        reason: { type: [string, 'null'], description: 反馈的原因或 PR 关闭之前的最后一条评论 }
+        suggested_type:
+          type: [string, 'null']
+          enum: [incident, benign, abstain, null]
+          description: 建议的标注类型；为 null 时留给人确认（修复方向错误、关闭的 PR 与 not planned 的 issue 既可能是良性告警，也可能是真实事件的错误处理）
+        suite: { type: [string, 'null'], description: 控制台"加入评测"时填写的用例集 }
+        state: { type: string, enum: [pending, confirmed, dropped] }
+        label:
+          description: 确认时选定的标准答案；没有确认时为 null
+          oneOf: [{ type: 'null' }, { $ref: '#/components/schemas/EvalCandidateConfirm' }]
+        decided_by: { type: [string, 'null'] }
+        decided_at: { oneOf: [{ type: 'null' }, { $ref: './schemas/common.schema.json#/$defs/Timestamp' }] }
+        drop_reason: { type: [string, 'null'] }
+        created_at: { $ref: './schemas/common.schema.json#/$defs/Timestamp' }
+    EvalCandidateConfirm:
+      type: object
+      additionalProperties: false
+      required: [type, roots, disposition, mechanism]
+      properties:
+        type: { type: string, enum: [incident, benign, abstain] }
+        roots:
+          type: array
+          maxItems: 20
+          description: 可接受的根因组件键；incident 必须至少一个，benign 与 abstain 为空
+          items: { $ref: './schemas/common.schema.json#/$defs/ComponentKey' }
+        disposition:
+          description: 正确的处置判断；benign 为 ignore，abstain 为 null
+          oneOf: [{ type: 'null' }, { $ref: './schemas/common.schema.json#/$defs/Disposition' }]
+        mechanism: { type: [string, 'null'], maxLength: 600 }
     EvalCase:
       type: object
       additionalProperties: false

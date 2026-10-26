@@ -9,6 +9,7 @@
   "disposition": null,
   "mechanism": null,
   "reason": "root unknown, not the database",
+  "reason_code": "false_positive",
   "principal_id": "oidc:alice",
   "channel": "telegram",
   "linked": true,

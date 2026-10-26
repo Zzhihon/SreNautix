@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://srenautix.io/contract/schemas/feedback.schema.json",
   "title": "Feedback",
-  "description": "一条反馈（DESIGN §11），表只追加，同一事件以 created_at 最新的一条为准。两个维度：verdict 评价根因结论，disposition_verdict 评价处置判断。verdict=rejected 且 root_component=null 表示只否定结论、真实根因未知：不生成回放用例也不作为参考案例，计入准确率与校准统计，记为一次未命中。只有 linked=true（已绑定账号）的反馈进入评测的标准答案",
+  "description": "一条反馈（DESIGN §11），表只追加，同一事件以 created_at 最新的一条为准。两个维度：verdict 评价根因结论，disposition_verdict 评价处置判断。verdict=rejected 且 root_component=null 表示只否定结论、真实根因未知：不生成回放用例也不作为参考案例，计入准确率与校准统计，记为一次未命中。reason_code 是结构化的原因（ADR 0174），自由文本 reason 是补充说明；带某些原因码的反馈生成评测候选（ADR 0175）。只有 linked=true（已绑定账号）的反馈进入评测的标准答案",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -16,6 +16,7 @@
     "disposition",
     "mechanism",
     "reason",
+    "reason_code",
     "principal_id",
     "channel",
     "linked",
@@ -50,17 +51,29 @@
       "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/Disposition" }]
     },
     "mechanism": { "type": ["string", "null"], "maxLength": 600 },
-    "reason": { "type": ["string", "null"], "maxLength": 500 },
-    "principal_id": { "type": "string", "minLength": 1 },
-    "channel": { "$ref": "common.schema.json#/$defs/Channel" },
+    "reason": {
+      "type": ["string", "null"],
+      "maxLength": 500,
+      "description": "自由文本的原因。implicit=rejected 时是提议被拒绝时填写的理由；implicit=pr_closed 时是 PR 关闭之前的最后一条评论（没有时为 null）"
+    },
+    "reason_code": {
+      "description": "原因码（ADR 0174）；没有选择时为 null",
+      "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/ReasonCode" }]
+    },
+    "principal_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "提交者。channel=github 时为 github:<关闭者的登录名>，读不到关闭者时为 github"
+    },
+    "channel": { "$ref": "#/$defs/FeedbackChannel" },
     "linked": {
       "type": "boolean",
-      "description": "提交者是已绑定的账号（控制台登录或聊天账号经 /link 绑定）"
+      "description": "提交者是已绑定的账号（控制台登录或聊天账号经 /link 绑定）；channel=github 时为 false"
     },
     "implicit": {
       "type": ["string", "null"],
-      "description": "隐式反馈的来源：批准、拒绝、撤销自动记为对应反馈；resolved_confirm 是事件恢复时的一键确认。显式反馈为 null",
-      "enum": ["approved", "rejected", "undone", "resolved_confirm", null]
+      "description": "隐式反馈的来源：批准、拒绝、撤销自动记为对应反馈；resolved_confirm 是事件恢复时的一键确认；pr_closed 是自愈 PR 被关闭且没有合并，issue_not_planned 是事件 issue 以 not planned 关闭（server 的关闭跟踪写入，ADR 0174）。显式反馈为 null",
+      "enum": ["approved", "rejected", "undone", "resolved_confirm", "pr_closed", "issue_not_planned", null]
     },
     "stale": {
       "type": "boolean",
@@ -69,9 +82,32 @@
     "created_at": { "$ref": "common.schema.json#/$defs/Timestamp" }
   },
   "$defs": {
+    "ReasonCode": {
+      "title": "FeedbackReasonCode",
+      "description": "反馈的原因码（ADR 0174）：false_positive 真误报；not_actionable 不需要处理；known_issue 已知问题；planned_change 计划内变更；transient_self_resolved 短暂、自行恢复；external_upstream 外部上游；duplicate 重复；poor_wording 措辞不佳；wrong_fix 修复方向错误（事件是真的）；worse_than_baseline 并行期评为比旧系统差；other 其他",
+      "type": "string",
+      "enum": [
+        "false_positive",
+        "not_actionable",
+        "known_issue",
+        "planned_change",
+        "transient_self_resolved",
+        "external_upstream",
+        "duplicate",
+        "poor_wording",
+        "wrong_fix",
+        "worse_than_baseline",
+        "other"
+      ]
+    },
+    "FeedbackChannel": {
+      "title": "FeedbackChannel",
+      "description": "反馈的来源渠道：提交渠道之一，或 github（server 从 GitHub 读到的关闭：自愈 PR 关闭且没有合并、事件 issue 以 not planned 关闭）",
+      "oneOf": [{ "$ref": "common.schema.json#/$defs/Channel" }, { "type": "string", "enum": ["github"] }]
+    },
     "FeedbackCreate": {
       "title": "FeedbackCreate",
-      "description": "提交反馈的请求体。channel 与主体由认证上下文决定，请求体不含",
+      "description": "提交反馈的请求体。channel 与主体由认证上下文决定，请求体不含。reason_code 可以省略（等同 null）；控制台、Grafana 与聊天渠道在拒绝根因或处置时要求选择",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -96,7 +132,8 @@
           "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/Disposition" }]
         },
         "mechanism": { "type": ["string", "null"], "maxLength": 600 },
-        "reason": { "type": ["string", "null"], "maxLength": 500 }
+        "reason": { "type": ["string", "null"], "maxLength": 500 },
+        "reason_code": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/ReasonCode" }] }
       }
     }
   }
