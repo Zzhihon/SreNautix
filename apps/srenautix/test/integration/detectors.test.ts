@@ -187,6 +187,7 @@ describe('集群状态检测器', () => {
       generatorUrl: null,
       fingerprint: fp,
       alertname: 'KubePodInitializingTooLong',
+      alertmanagerSeenAt: T(-1),
     });
     await ingest.write(C, 'am', 'alertmanager', [rule('api-1-y', 'bbbbbbbbbbbbbbbb')], {});
     expect((await detectors.scan(NOW + 30_000))[C]).toEqual({ firing: [], resolved: [], refired: [] });
@@ -208,6 +209,7 @@ describe('集群状态检测器', () => {
           generatorUrl: null,
           fingerprint: 'aaaaaaaaaaaaaaaa',
           alertname: 'KubePodInitializingTooLong',
+          alertmanagerSeenAt: T(-1),
         },
       ],
       {},

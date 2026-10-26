@@ -467,10 +467,18 @@ export class NotifyEngine {
     if (row.kind === 'incident' && first && this.source.firstMessage) {
       const f = await this.source.firstMessage(row.incidentId as string, row.id, at);
       if (f) {
+        const labels = { business_impact: String(f.businessImpact), origin: f.origin };
         this.metrics.firstMessageLatency.observe(
-          { business_impact: String(f.businessImpact), origin: f.origin },
+          { ...labels, clock: 'onset' },
           Math.max(0, (at.getTime() - f.onsetMs) / 1000),
         );
+        // 从成员告警第一次出现在 Alertmanager 起算（ADR 0165）；成员告警都不来自 Alertmanager 时不记这个口径
+        if (f.alertmanagerMs !== null) {
+          this.metrics.firstMessageLatency.observe(
+            { ...labels, clock: 'alertmanager' },
+            Math.max(0, (at.getTime() - f.alertmanagerMs) / 1000),
+          );
+        }
       }
     }
     if (row.kind === 'incident') {

@@ -166,6 +166,7 @@ export function findingAlert(clusterId: string, h: ObjectHealth, s: DetectorSett
     generatorUrl: null,
     fingerprint: fingerprintOf(clusterId, h),
     alertname: DETECTOR_ALERTS[h.state],
+    alertmanagerSeenAt: null,
   };
 }
 

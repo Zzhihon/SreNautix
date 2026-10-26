@@ -72,6 +72,12 @@ export interface RawAlert {
   generatorUrl: string | null;
   fingerprint: string;
   alertname: string;
+  /**
+   * 这次在 Alertmanager 中看到这个告警的时刻（ADR 0165）：Alertmanager 或 Grafana 的 webhook 到达、完整对账或快速轮询
+   * 读到 Alertmanager 的活动告警、reader 快照的读取时刻。不来自 Alertmanager 的告警（规则引擎的 ALERTS_FOR_STATE、
+   * 夜莺、通用 webhook、集群状态检测器）为 null
+   */
+  alertmanagerSeenAt: Date | null;
 }
 
 export function alertId(fp: string, startsAt: Date): string {
@@ -101,7 +107,8 @@ function labelsOf(v: unknown): Record<string, string> {
 
 /**
  * Alertmanager webhook（version 4）、Alertmanager API v2 的 GettableAlert，以及 Grafana 告警的 webhook
- * （与 Alertmanager 格式兼容）中的一个告警。`now` 用于判断 endsAt 是否已过（webhook 的 status 字段优先）。
+ * （与 Alertmanager 格式兼容）中的一个告警。`now` 是读到它的时刻：用于判断 endsAt 是否已过（webhook 的 status 字段优先），
+ * 也是这次在 Alertmanager 中看到它的时刻。
  */
 export function fromAlertmanager(a: AlertmanagerAlert, source: RawAlert['source'], now: Date): RawAlert {
   const labels = identityLabels(labelsOf(a.labels));
@@ -138,6 +145,7 @@ export function fromAlertmanager(a: AlertmanagerAlert, source: RawAlert['source'
     generatorUrl: a.generatorURL || null,
     fingerprint: fp,
     alertname,
+    alertmanagerSeenAt: now,
   };
 }
 
@@ -190,6 +198,7 @@ export function parseNightingale(body: unknown, now: Date): RawAlert[] {
       generatorUrl: null,
       fingerprint: fingerprint(labels),
       alertname: ruleName,
+      alertmanagerSeenAt: null,
     } satisfies RawAlert;
   });
 }
@@ -247,6 +256,7 @@ export function parseGeneric(body: unknown, m: GenericMapping, now: Date): RawAl
       generatorUrl: m.generator_url ? str(first(m.generator_url, a)) || null : null,
       fingerprint: fingerprint(labels),
       alertname,
+      alertmanagerSeenAt: null,
     } satisfies RawAlert;
   });
 }

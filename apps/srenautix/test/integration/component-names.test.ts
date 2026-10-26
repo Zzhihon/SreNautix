@@ -124,6 +124,7 @@ async function seed(inc: Incident, annotations: Record<string, string>): Promise
         generatorUrl: null,
         fingerprint: fp,
         alertname: 'CchpProviderErrorRateHigh',
+        alertmanagerSeenAt: null,
       },
       {
         classification: { role: 'cause', source: 'label', confidence: 1, catalog_entry: null, chronic: false },

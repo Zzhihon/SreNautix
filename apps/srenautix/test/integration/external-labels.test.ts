@@ -147,6 +147,7 @@ describe('Prometheus 的 external labels', () => {
       generatorUrl: null,
       fingerprint: fp,
       alertname: 'ShopPodRestarted',
+      alertmanagerSeenAt: STARTS,
     });
     await tx(db.server, (c) => upsertAlert(c, C, raw(oldLabels, oldFp, 'alertmanager'), resolved));
     await tx(db.server, (c) => upsertAlert(c, C, raw(newLabels, newFp, 'reconcile'), resolved));

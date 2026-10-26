@@ -12,7 +12,7 @@ import { canonical } from '../proposals/assertion.js';
 import { tx } from '../store/pool.js';
 import { resolveAlert, type ResolveDeps, type Resolved } from '../alerts/resolve.js';
 import { parseAlertmanagerWebhook, parseGeneric, parseNightingale, PayloadError, type RawAlert } from './normalize.js';
-import { INGEST_CHANNEL, logIngest, touchSource, upsertAlert, type AlertRow } from './store.js';
+import { INGEST_CHANNEL, logIngest, markAlertmanagerSeen, touchSource, upsertAlert, type AlertRow } from './store.js';
 
 export interface IngestOptions {
   clusterId: string;
@@ -187,6 +187,7 @@ export class IngestService {
         generatorUrl: row.generator_url,
         fingerprint: row.fingerprint,
         alertname: row.alertname,
+        alertmanagerSeenAt: row.alertmanager_seen_at,
       };
       const r = await resolveAlert(clusterId, raw, this.resolve);
       // jsonb 不保留键的顺序：按规范化的 JSON 比较
@@ -261,6 +262,11 @@ export class IngestService {
       }
       return changed;
     });
+  }
+
+  /** 已经写入的告警这一次在 Alertmanager 中被看到（ADR 0165）；返回第一次记下时刻的告警数 */
+  async markAlertmanagerSeen(alertIds: readonly string[], at: Date): Promise<number> {
+    return markAlertmanagerSeen(this.pool, alertIds, at);
   }
 
   /**

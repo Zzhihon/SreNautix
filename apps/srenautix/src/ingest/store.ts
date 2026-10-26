@@ -36,13 +36,15 @@ export async function upsertAlert(c: Queryable, clusterId: string, a: RawAlert, 
   await c.query(
     `INSERT INTO server.alert_state (alert_id, cluster_id, fingerprint, source, alertname, labels, annotations, severity, status,
        suppressed, starts_at, ends_at, generator_url, classification, entity, entity_resolution, component, received_at,
-       last_seen_at, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, now(), now(), now())
+       last_seen_at, updated_at, alertmanager_seen_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, now(), now(), now(), $18)
      ON CONFLICT (alert_id) DO UPDATE SET
        annotations = excluded.annotations, severity = excluded.severity, status = excluded.status,
        suppressed = excluded.suppressed, ends_at = excluded.ends_at, generator_url = COALESCE(excluded.generator_url, server.alert_state.generator_url),
        classification = excluded.classification, entity = excluded.entity, entity_resolution = excluded.entity_resolution,
        component = excluded.component, last_seen_at = now(),
+       -- 第一次在 Alertmanager 中看到的时刻保留最早的一次（LEAST 忽略 NULL，ADR 0165）
+       alertmanager_seen_at = LEAST(server.alert_state.alertmanager_seen_at, excluded.alertmanager_seen_at),
        updated_at = CASE WHEN server.alert_state.status IS DISTINCT FROM excluded.status
                            OR server.alert_state.suppressed IS DISTINCT FROM excluded.suppressed
                            OR server.alert_state.severity IS DISTINCT FROM excluded.severity
@@ -66,6 +68,7 @@ export async function upsertAlert(c: Queryable, clusterId: string, a: RawAlert, 
       r.entity ? JSON.stringify(r.entity) : null,
       r.entityResolution,
       r.component,
+      a.alertmanagerSeenAt,
     ],
   );
   if (a.status === 'firing') {
@@ -135,6 +138,7 @@ export interface AlertRow {
   entity_resolution: Alert['entity_resolution'];
   component: string | null;
   received_at: Date;
+  alertmanager_seen_at: Date | null;
 }
 
 export function rowToAlert(r: AlertRow): Alert {
@@ -185,24 +189,50 @@ export async function alertsById(pool: pg.Pool | Queryable, ids: readonly string
   return r.rows.map(rowToAlert);
 }
 
+/** 对账比较用的一条本地触发中告警 */
+export interface LocalFiring {
+  fingerprint: string;
+  startsAt: Date;
+  labels: Record<string, string>;
+  /** 已经在 Alertmanager 中看到过（ADR 0165） */
+  alertmanagerSeen: boolean;
+}
+
 /**
  * 对账比较用的本地触发中告警。检测器合成的告警不在任何告警源里，对账不能以"告警源中没有"结束它们，
  * 它们只由检测器恢复（ADR 0128），所以不在其中
  */
-export async function firingAlertIds(
-  pool: pg.Pool | Queryable,
-  clusterId: string,
-): Promise<Map<string, { fingerprint: string; startsAt: Date; labels: Record<string, string> }>> {
+export async function firingAlertIds(pool: pg.Pool | Queryable, clusterId: string): Promise<Map<string, LocalFiring>> {
   const r = await pool.query<{
     alert_id: string;
     fingerprint: string;
     starts_at: Date;
     labels: Record<string, string>;
+    alertmanager_seen: boolean;
   }>(
-    "SELECT alert_id, fingerprint, starts_at, labels FROM server.alert_state WHERE cluster_id = $1 AND status = 'firing' AND source <> 'detector'",
+    `SELECT alert_id, fingerprint, starts_at, labels, alertmanager_seen_at IS NOT NULL AS alertmanager_seen
+       FROM server.alert_state WHERE cluster_id = $1 AND status = 'firing' AND source <> 'detector'`,
     [clusterId],
   );
   return new Map(
-    r.rows.map((x) => [x.alert_id, { fingerprint: x.fingerprint, startsAt: x.starts_at, labels: x.labels }]),
+    r.rows.map((x) => [
+      x.alert_id,
+      { fingerprint: x.fingerprint, startsAt: x.starts_at, labels: x.labels, alertmanagerSeen: x.alertmanager_seen },
+    ]),
   );
+}
+
+/**
+ * 记录已经写入、还没有在 Alertmanager 中看到过的告警这一次在 Alertmanager 中被看到（ADR 0165）：例如先由规则引擎的
+ * ALERTS_FOR_STATE 补写、之后才出现在 Alertmanager 的告警。已经有时刻的不改。返回更新的行数
+ */
+export async function markAlertmanagerSeen(c: Queryable, alertIds: readonly string[], at: Date): Promise<number> {
+  if (!alertIds.length) {
+    return 0;
+  }
+  const r = await c.query(
+    'UPDATE server.alert_state SET alertmanager_seen_at = $2 WHERE alert_id = ANY($1::text[]) AND alertmanager_seen_at IS NULL',
+    [alertIds, at],
+  );
+  return r.rowCount ?? 0;
 }

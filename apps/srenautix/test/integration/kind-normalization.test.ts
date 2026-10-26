@@ -61,6 +61,7 @@ const raw = (alertname: string, labels: Record<string, string>, fp: string) => (
   generatorUrl: null,
   fingerprint: fp,
   alertname,
+  alertmanagerSeenAt: new Date(NOW - 10 * MIN),
 });
 
 beforeAll(async () => {

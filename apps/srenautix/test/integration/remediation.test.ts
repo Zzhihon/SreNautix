@@ -128,6 +128,7 @@ async function seed(
         generatorUrl: null,
         fingerprint: fp,
         alertname,
+        alertmanagerSeenAt: startsAt,
       },
       {
         classification: { role: 'cause', source: 'default', confidence: 0.3, catalog_entry: null, chronic: false },

@@ -83,6 +83,15 @@ describe('reader 告警快照对账', () => {
     );
     expect(r.added).toBe(2);
     expect(await firing()).toEqual(['A', 'B']);
+    // 快照的读取时刻是在 Alertmanager 中看到 A 的时刻；只在规则引擎中的 B 没有这个时刻，交给快速轮询（ADR 0165）
+    const seen = await db.server.query<{ alertname: string; alertmanager_seen_at: Date | null; alert_id: string }>(
+      "SELECT alertname, alertmanager_seen_at, alert_id FROM server.alert_state WHERE cluster_id = 'east' ORDER BY alertname",
+    );
+    expect(seen.rows.map((x) => [x.alertname, x.alertmanager_seen_at === null])).toEqual([
+      ['A', false],
+      ['B', true],
+    ]);
+    expect([...r.unseen.values()]).toEqual([[seen.rows[1]!.alert_id]]);
   });
 
   it('Alertmanager 读取失败或结果被截断时不结束任何告警', async () => {

@@ -758,6 +758,7 @@ async function ingest(clusterId: string, a: AlertInstance, topo: BundleTopology,
     generatorUrl: null,
     fingerprint: a.fingerprint,
     alertname: a.alertname,
+    alertmanagerSeenAt: null,
   };
   const r = await resolveAlert(clusterId, raw, {
     catalog: rt.alertCatalog(),

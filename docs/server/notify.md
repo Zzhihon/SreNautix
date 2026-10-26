@@ -169,9 +169,14 @@ notify:
 | `srenautix_notify_abandoned_total` | `channel`、`reason`（entities_too_long、message_too_long、parse_error、bad_request、invalid_param、content_too_long、invalid_card、ended_edit_cap） |
 | `srenautix_notify_pending` | `channel` |
 | `srenautix_notify_callbacks_total` | `channel`、`action`、`outcome` |
-| `srenautix_first_message_latency_seconds` | `business_impact`（true、false）、`origin`（new、split） |
+| `srenautix_first_message_latency_seconds` | `business_impact`（true、false）、`origin`（new、split）、`clock`（onset、alertmanager） |
 
-首条消息时延（ADR 0159）：每个事件在所有渠道目标上的第一条事件消息送达时记一次，从事件的计时起点（新事件为首个告警触发，拆分出的事件为拆分时刻）算起。送达时事件已有的成员告警中有一条是业务影响告警（`notify.business_impact_alerts`，上文“业务影响告警”）时 `business_impact="true"`；不配置时都是 `false`。进入外部上游周期汇总的事件没有事件消息，不计入。
+首条消息时延（ADR 0159、0165）：每个事件在所有渠道目标上的第一条事件消息送达时记一次，两个口径：
+
+- `clock="onset"`：从事件的计时起点算起（新事件为首个告警触发，即告警源给出的开始时刻，含规则引擎的回溯；拆分出的事件为拆分时刻）。
+- `clock="alertmanager"`：从成员告警第一次出现在 Alertmanager 的最早时刻算起（`alert_state.alertmanager_seen_at`，见 [server 说明](README.md)"一次告警的处理"）；拆分出的事件同样从拆分时刻算。送达时成员告警都没有在 Alertmanager 中出现过（集群状态检测器、夜莺、通用 webhook 的告警）的事件不记这个口径。"首条消息不超过 60 秒"按这个口径判定，规则引擎的回溯由 `srenautix_ingest_delay_seconds` 单独度量。
+
+送达时事件已有的成员告警中有一条是业务影响告警（`notify.business_impact_alerts`，上文“业务影响告警”）时 `business_impact="true"`；不配置时都是 `false`。进入外部上游周期汇总的事件没有事件消息，不计入。只看一个口径时查询加上 `clock`，例如 `histogram_quantile(0.95, sum by (le) (rate(srenautix_first_message_latency_seconds_bucket{clock="alertmanager", business_impact="true", origin="new"}[1d])))`。
 
 ## 测试
 

@@ -19,9 +19,11 @@ import { newTestDb, type TestDb } from '../support/db.js';
 import { fixture, FixtureServer } from '../support/fixture-server.js';
 import { incident as baseIncident, stageA } from '../support/scenario.js';
 
-// 首条消息时延（ADR 0159）：从事件的计时起点（新事件为首个告警触发，拆分出的事件为拆分时刻）到这个事件第一条
-// 事件消息送达；两个渠道目标只记第一条；business_impact 按 notify.business_impact_alerts 判定。
-// 原事件开始 57 分钟后拆出的事件继承原事件的首个告警时刻，从首个告警计时会记成 57 分钟。
+// 首条消息时延（ADR 0159、0165）：到这个事件第一条事件消息送达，两个口径：clock=onset 从事件的计时起点（新事件为
+// 首个告警触发，拆分出的事件为拆分时刻）算，clock=alertmanager 从成员告警第一次出现在 Alertmanager 算（拆分出的事件
+// 同样从拆分时刻算）；两个渠道目标只记第一条；business_impact 按 notify.business_impact_alerts 判定。
+// 原事件开始 57 分钟后拆出的事件继承原事件的首个告警时刻，从首个告警计时会记成 57 分钟。规则引擎把开始时刻回溯
+// 约 30 秒，告警出现在 Alertmanager 时已经比开始时刻晚 30 秒以上。
 
 const TOKEN = 'test-token';
 const CHATS = ['-1001234567890', '-1001234567891'];
@@ -55,6 +57,8 @@ async function seed(o: {
   labels: Record<string, string>;
   severity: 'critical' | 'warning';
   firstFiring: Date;
+  /** 告警第一次在 Alertmanager 中被看到的时刻；不来自 Alertmanager 时为 null */
+  seen: Date | null;
   created: Date;
   splitFrom: string | null;
 }): Promise<string> {
@@ -62,9 +66,10 @@ async function seed(o: {
   const alertId = `${fp}@${Math.floor(o.firstFiring.getTime() / 1000)}`;
   await db.server.query(
     `INSERT INTO server.alert_state (alert_id, cluster_id, fingerprint, source, alertname, labels, annotations, severity, status,
-       suppressed, starts_at, ends_at, classification, entity_resolution, component, received_at, last_seen_at, updated_at)
-     VALUES ($1, $2, $3, 'reconcile', $4, $5, '{}', $6, 'firing', 'none', $7, NULL,
-       '{"role":"symptom","source":"label","confidence":1,"catalog_entry":null,"chronic":false}', 'labels', $8, now(), now(), now())`,
+       suppressed, starts_at, ends_at, classification, entity_resolution, component, received_at, last_seen_at, updated_at,
+       alertmanager_seen_at)
+     VALUES ($1, $2, $3, $9, $4, $5, '{}', $6, 'firing', 'none', $7, NULL,
+       '{"role":"symptom","source":"label","confidence":1,"catalog_entry":null,"chronic":false}', 'labels', $8, now(), now(), now(), $10)`,
     [
       alertId,
       CLUSTER,
@@ -74,6 +79,8 @@ async function seed(o: {
       o.severity,
       o.firstFiring,
       o.root,
+      o.seen ? 'reconcile' : 'detector',
+      o.seen,
     ],
   );
   const id = randomUUID();
@@ -211,6 +218,7 @@ describe('首条消息时延', () => {
       labels: { layer: 'L3' },
       severity: 'critical',
       firstFiring: sec(0),
+      seen: sec(31),
       created: sec(42),
       splitFrom: null,
     });
@@ -220,6 +228,7 @@ describe('首条消息时延', () => {
       labels: {},
       severity: 'warning',
       firstFiring: sec(0),
+      seen: sec(58),
       created: sec(66),
       splitFrom: null,
     });
@@ -228,8 +237,17 @@ describe('首条消息时延', () => {
     await engine.deliverOnce();
     // 两个渠道目标都发出了消息，每个事件只记一次
     expect(fs.calls('POST', send).length).toBe(4);
-    expect(await observed({ business_impact: 'true', origin: 'new' })).toEqual({ count: 1, sum: 68 });
-    expect(await observed({ business_impact: 'false', origin: 'new' })).toEqual({ count: 1, sum: 68 });
+    expect(await observed({ business_impact: 'true', origin: 'new', clock: 'onset' })).toEqual({ count: 1, sum: 68 });
+    expect(await observed({ business_impact: 'false', origin: 'new', clock: 'onset' })).toEqual({ count: 1, sum: 68 });
+    // 从告警出现在 Alertmanager 算：不含规则引擎的回溯
+    expect(await observed({ business_impact: 'true', origin: 'new', clock: 'alertmanager' })).toEqual({
+      count: 1,
+      sum: 37,
+    });
+    expect(await observed({ business_impact: 'false', origin: 'new', clock: 'alertmanager' })).toEqual({
+      count: 1,
+      sum: 10,
+    });
 
     // L2 的 critical，但组件是 provider：按 exclude_labels 不算业务影响告警（在风暴窗口之外发出）
     await seed({
@@ -238,6 +256,7 @@ describe('首条消息时延', () => {
       labels: { layer: 'L2', component: 'provider' },
       severity: 'critical',
       firstFiring: sec(380),
+      seen: sec(395),
       created: sec(400),
       splitFrom: null,
     });
@@ -245,15 +264,20 @@ describe('首条消息时延', () => {
     await engine.syncOnce();
     await engine.deliverOnce();
     expect(fs.calls('POST', send).length).toBe(6);
-    expect(await observed({ business_impact: 'false', origin: 'new' })).toEqual({ count: 2, sum: 90 });
+    expect(await observed({ business_impact: 'false', origin: 'new', clock: 'onset' })).toEqual({ count: 2, sum: 90 });
+    expect(await observed({ business_impact: 'false', origin: 'new', clock: 'alertmanager' })).toEqual({
+      count: 2,
+      sum: 17,
+    });
 
-    // 57 分钟后从原事件拆分出来，成员告警的首个触发时刻仍是 10:25
+    // 57 分钟后从原事件拆分出来，成员告警的首个触发时刻仍是 10:25：两个口径都从拆分时刻算
     await seed({
       root: 'component:release',
       alertname: 'ReleaseRollbackFailed',
       labels: { component: 'release' },
       severity: 'critical',
       firstFiring: sec(0),
+      seen: sec(30),
       created: sec(57 * 60 + 12),
       splitFrom: parent,
     });
@@ -261,8 +285,37 @@ describe('首条消息时延', () => {
     await engine.syncOnce();
     await engine.deliverOnce();
     expect(fs.calls('POST', send).length).toBe(8);
-    expect(await observed({ business_impact: 'true', origin: 'split' })).toEqual({ count: 1, sum: 3 });
+    expect(await observed({ business_impact: 'true', origin: 'split', clock: 'onset' })).toEqual({ count: 1, sum: 3 });
+    expect(await observed({ business_impact: 'true', origin: 'split', clock: 'alertmanager' })).toEqual({
+      count: 1,
+      sum: 3,
+    });
     // 已有消息的事件之后的编辑与另一个渠道目标的消息不再计入
-    expect(await observed({ business_impact: 'true', origin: 'new' })).toEqual({ count: 1, sum: 68 });
+    expect(await observed({ business_impact: 'true', origin: 'new', clock: 'onset' })).toEqual({ count: 1, sum: 68 });
+    expect(await observed({ business_impact: 'true', origin: 'new', clock: 'alertmanager' })).toEqual({
+      count: 1,
+      sum: 37,
+    });
+
+    // 集群状态检测器发现的事件：成员告警不来自 Alertmanager，只记 clock=onset
+    await seed({
+      root: 'Deployment:shop/api',
+      alertname: 'SreNautixPodInitStuck',
+      labels: {},
+      severity: 'warning',
+      firstFiring: sec(64 * 60),
+      seen: null,
+      created: sec(64 * 60 + 2),
+      splitFrom: null,
+    });
+    now = sec(64 * 60 + 4).getTime();
+    await engine.syncOnce();
+    await engine.deliverOnce();
+    expect(fs.calls('POST', send).length).toBe(10);
+    expect(await observed({ business_impact: 'false', origin: 'new', clock: 'onset' })).toEqual({ count: 3, sum: 94 });
+    expect(await observed({ business_impact: 'false', origin: 'new', clock: 'alertmanager' })).toEqual({
+      count: 2,
+      sum: 17,
+    });
   });
 });

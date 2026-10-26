@@ -4,7 +4,14 @@ import type pg from 'pg';
 import { logger } from '../log.js';
 import type { ServerMetrics } from '../metrics.js';
 import { tx } from '../store/pool.js';
-import { fingerprint, fromAlertmanager, identityLabels, normalizeSeverity, type RawAlert } from './normalize.js';
+import {
+  alertId,
+  fingerprint,
+  fromAlertmanager,
+  identityLabels,
+  normalizeSeverity,
+  type RawAlert,
+} from './normalize.js';
 import type { IngestService } from './service.js';
 import { firingAlertIds, resolveMissing } from './store.js';
 
@@ -21,6 +28,8 @@ export interface ReconcileResult {
   sources: string[];
   /** 本轮之后本地触发中告警的身份指纹（快速轮询据此判断新增，ADR 0160） */
   firing: Set<string>;
+  /** 本轮之后本地触发中、还没有在 Alertmanager 中看到过的告警：身份指纹到 alert_id（快速轮询看到时记下时刻，ADR 0165） */
+  unseen: Map<string, string[]>;
 }
 
 async function getJson(url: string, token: string | null, timeoutMs: number): Promise<unknown> {
@@ -55,7 +64,6 @@ export async function reconcileOnce(
   selfLabel: string,
   watchdog: string,
 ): Promise<ReconcileResult> {
-  const now = new Date();
   const remote = new Map<string, RawAlert>();
   const ok: string[] = [];
   if (src.alertmanagerUrl) {
@@ -64,6 +72,8 @@ export async function reconcileOnce(
       src.bearerToken,
       src.timeoutMs,
     )) as AlertmanagerAlert[];
+    // 读到应答的时刻：判断 endsAt 是否已过，也是这一轮在 Alertmanager 中看到这些告警的时刻（ADR 0165）
+    const now = new Date();
     for (const a of list) {
       const r = fromAlertmanager(a, 'reconcile', now);
       if (r.status === 'firing') {
@@ -115,6 +125,7 @@ export function firingRuleAlert(metric: Record<string, string>, activeAt: Date):
     generatorUrl: null,
     fingerprint: fingerprint(labels),
     alertname: labels.alertname,
+    alertmanagerSeenAt: null,
   };
 }
 
@@ -168,6 +179,31 @@ export async function applyRemote(
     firing.delete(identity.get(id)!);
   }
   const ending = [...new Set([...duplicates, ...gone])];
+  // 本地已有、还没有在 Alertmanager 中看到过的告警（例如先由 ALERTS_FOR_STATE 补写），这一轮出现在 Alertmanager 中：
+  // 记下看到的时刻；仍然没有看到的交给快速轮询（ADR 0165）
+  const endingIds = new Set(ending);
+  const sighted = new Map<number, string[]>();
+  const unseen = new Map<string, string[]>();
+  const addUnseen = (fp: string, id: string) => unseen.set(fp, [...(unseen.get(fp) ?? []), id]);
+  for (const [id, v] of local) {
+    if (v.alertmanagerSeen || endingIds.has(id)) {
+      continue;
+    }
+    const at = remote.get(identity.get(id)!)?.alertmanagerSeenAt;
+    if (at) {
+      sighted.set(at.getTime(), [...(sighted.get(at.getTime()) ?? []), id]);
+    } else {
+      addUnseen(identity.get(id)!, id);
+    }
+  }
+  for (const a of missing) {
+    if (a.alertmanagerSeenAt === null) {
+      addUnseen(a.fingerprint, alertId(a.fingerprint, a.startsAt));
+    }
+  }
+  for (const [t, ids] of sighted) {
+    await ingest.markAlertmanagerSeen(ids, new Date(t));
+  }
   if (ending.length) {
     await tx(pool, async (c) => {
       const t = (await c.query<{ now: Date }>('SELECT now() AS now')).rows[0] as { now: Date };
@@ -193,7 +229,7 @@ export async function applyRemote(
   }
   metrics.reconcileRepairs.inc({ kind: 'added' }, missing.length);
   metrics.reconcileRepairs.inc({ kind: 'resolved' }, resolved);
-  return { added: missing.length, resolved, sources: ok, firing };
+  return { added: missing.length, resolved, sources: ok, firing, unseen };
 }
 
 function observeIngestDelay(metrics: ServerMetrics, path: 'full' | 'fast', alerts: readonly RawAlert[]): void {
@@ -207,9 +243,11 @@ function observeIngestDelay(metrics: ServerMetrics, path: 'full' | 'fast', alert
  * Alertmanager 新增告警的快速轮询（ADR 0160）：两轮完整对账之间，每 additions_interval 读一次 Alertmanager v2 的活动告警，
  * 只补写本地还没有的触发中告警，不结束任何告警，不读状态库与规则引擎。本地已有哪些告警取最近一轮完整对账的结果
  * （加上快速轮询自己补写的）；完整对账成功之前不轮询。结束告警与 ALERTS_FOR_STATE 的补写仍由完整对账负责。
+ * 补写的告警记下这一轮在 Alertmanager 中看到的时刻；本地已有、还没有在 Alertmanager 中看到过的告警出现时也记下（ADR 0165）。
  */
 export class AlertmanagerAdditions {
   private known: Set<string> | null = null;
+  private unseen = new Map<string, string[]>();
 
   constructor(
     private readonly clusterId: string,
@@ -222,14 +260,16 @@ export class AlertmanagerAdditions {
     private readonly watchdog: string,
   ) {}
 
-  /** 完整对账成功后更新本地触发中告警的身份指纹 */
-  update(firing: ReadonlySet<string>): void {
-    this.known = new Set(firing);
+  /** 完整对账成功后更新本地触发中告警的身份指纹，以及其中还没有在 Alertmanager 中看到过的告警 */
+  update(r: Pick<ReconcileResult, 'firing' | 'unseen'>): void {
+    this.known = new Set(r.firing);
+    this.unseen = new Map(r.unseen);
   }
 
   /** 不再知道本地有哪些告警（失去主实例）：下一轮完整对账成功之前不轮询 */
   reset(): void {
     this.known = null;
+    this.unseen = new Map();
   }
 
   /** 一轮快速轮询；返回补写的告警数 */
@@ -238,15 +278,22 @@ export class AlertmanagerAdditions {
     if (known === null) {
       return 0;
     }
-    const now = new Date();
     const list = (await getJson(
       `${this.alertmanagerUrl}/api/v2/alerts?active=true&silenced=true&inhibited=true&unprocessed=true`,
       this.bearerToken,
       this.timeoutMs,
     )) as AlertmanagerAlert[];
+    // 读到应答的时刻：也是这一轮在 Alertmanager 中看到这些告警的时刻（ADR 0165）
+    const now = new Date();
     const fresh = new Map<string, RawAlert>();
+    const sighted: string[] = [];
     for (const a of list) {
       const r = fromAlertmanager(a, 'reconcile', now);
+      const waiting = r.status === 'firing' ? this.unseen.get(r.fingerprint) : undefined;
+      if (waiting) {
+        sighted.push(...waiting);
+        this.unseen.delete(r.fingerprint);
+      }
       if (
         r.status === 'firing' &&
         !known.has(r.fingerprint) &&
@@ -256,6 +303,9 @@ export class AlertmanagerAdditions {
       ) {
         fresh.set(r.fingerprint, r);
       }
+    }
+    if (sighted.length) {
+      await this.ingest.markAlertmanagerSeen(sighted, now);
     }
     if (!fresh.size) {
       return 0;

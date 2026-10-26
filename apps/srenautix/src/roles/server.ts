@@ -1133,7 +1133,7 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
         if (!leader.isLeader()) {
           // 不是主实例时不知道本地有哪些告警：重新成为主实例后等一轮完整对账再快速轮询
           additions?.reset();
-          return { added: 0, resolved: 0, sources: [], firing: new Set<string>() };
+          return { added: 0, resolved: 0, sources: [], firing: new Set<string>(), unseen: new Map<string, string[]>() };
         }
         const r = await reconcileOnce(
           pool,
@@ -1149,7 +1149,7 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
           c.ingest.self_label,
           c.ingest.watchdog_alertname,
         );
-        additions?.update(r.firing);
+        additions?.update(r);
         return r;
       },
       metrics,

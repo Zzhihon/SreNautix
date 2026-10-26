@@ -56,5 +56,16 @@ CREATE TABLE server.ingest_sources (
 );
 `,
     },
+    {
+      version: 2,
+      name: 'alert first seen in alertmanager',
+      phase: 'expand',
+      sql: `
+-- 告警第一次在 Alertmanager 中被看到的时刻（ADR 0165）：webhook 到达、完整对账、快速轮询与 reader 快照中最早的一次。
+-- 已有的行：Alertmanager、Grafana 与对账来源的告警取第一次写入的时刻（对账来源里规则引擎补写的告警无法区分，同样取这个时刻）
+ALTER TABLE server.alert_state ADD COLUMN alertmanager_seen_at timestamptz;
+UPDATE server.alert_state SET alertmanager_seen_at = received_at WHERE source IN ('alertmanager', 'grafana', 'reconcile');
+`,
+    },
   ],
 };

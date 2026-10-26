@@ -102,6 +102,32 @@ describe('Grafana 告警 webhook（官方文档示例）', () => {
   });
 });
 
+describe('第一次在 Alertmanager 中看到的时刻（ADR 0165）', () => {
+  it('Alertmanager 与 Grafana 的 webhook、Alertmanager API 记为读到的时刻；夜莺与通用 webhook 为空', () => {
+    const am = parseAlertmanagerWebhook(
+      fixture('alertmanager/webhook-v4-alertmanager-0.34.1.json'),
+      'alertmanager',
+      now,
+    );
+    const grafana = parseAlertmanagerWebhook(fixture('grafana/webhook-docs-example.json'), 'grafana', now);
+    const api = fromAlertmanager(
+      { labels: { alertname: 'A' }, annotations: {}, startsAt: '2026-10-19T00:00:00Z', status: { state: 'active' } },
+      'reconcile',
+      now,
+    );
+    for (const a of [...am, ...grafana, api]) {
+      expect(a.alertmanagerSeenAt).toEqual(now);
+    }
+    expect(parseNightingale(fixture('nightingale/callback-event.json'), now)[0]!.alertmanagerSeenAt).toBeNull();
+    const generic = parseGeneric(
+      { events: [{ name: 'DiskFull', state: 'ALERT', ts: 1792439940 }] },
+      { alerts: '$.events[*]', alertname: '$.name', status: '$.state', firing_value: 'alert', starts_at: '$.ts' },
+      now,
+    );
+    expect(generic[0]!.alertmanagerSeenAt).toBeNull();
+  });
+});
+
 describe('夜莺回调', () => {
   it('rule_name 作为告警名，tags_map 作为标签，severity 2 为 warning，target_ident 补 instance', () => {
     const [a] = parseNightingale(fixture('nightingale/callback-event.json'), now);

@@ -79,6 +79,7 @@ async function catalogAlert(): Promise<Alert> {
         generatorUrl: null,
         fingerprint: 'c0ffee0000000001',
         alertname: 'ShopCatalogStale',
+        alertmanagerSeenAt: startsAt,
       },
       {
         classification: { role: 'symptom', source: 'default', confidence: 0.3, catalog_entry: null, chronic: false },

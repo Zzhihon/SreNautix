@@ -128,14 +128,20 @@ export interface MessageSource {
   externalWindow?(from: Date, to: Date): Promise<ExternalWindowStats>;
   /**
    * 一条事件消息（notify_messages.id 为 messageId）第一次送达后调用：它是这个事件在所有渠道目标上的第一条消息时，
-   * 返回计时起点与是否业务影响类（ADR 0159），之前已有消息送达时返回 null。不实现时不记录首条消息时延
+   * 返回两个计时起点与是否业务影响类（ADR 0159、0165），之前已有消息送达时返回 null。不实现时不记录首条消息时延
    */
   firstMessage?(incidentId: string, messageId: number, at: Date): Promise<FirstMessage | null>;
 }
 
-/** 事件第一条消息的时延口径（ADR 0159） */
+/** 事件第一条消息的时延口径（ADR 0159、0165） */
 export interface FirstMessage {
+  /** 事件的计时起点（告警源给出的开始时刻；拆分出的事件为拆分时刻） */
   onsetMs: number;
+  /**
+   * 从 Alertmanager 起算的计时起点：成员告警第一次在 Alertmanager 中被看到的最早时刻；拆分出的事件为拆分时刻。
+   * 送达时没有成员告警在 Alertmanager 中出现过时为 null
+   */
+  alertmanagerMs: number | null;
   origin: 'new' | 'split';
   businessImpact: boolean;
 }

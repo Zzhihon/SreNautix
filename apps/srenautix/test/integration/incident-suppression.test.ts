@@ -35,6 +35,7 @@ function alert(name: string, deployment: string, suppressed: RawAlert['suppresse
     generatorUrl: null,
     fingerprint: `${name}-${deployment}`.padEnd(16, '0').slice(0, 16),
     alertname: name,
+    alertmanagerSeenAt: at,
   } satisfies RawAlert;
 }
 

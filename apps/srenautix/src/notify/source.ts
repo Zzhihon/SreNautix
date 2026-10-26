@@ -175,8 +175,8 @@ export class PgMessageSource implements MessageSource {
   }
 
   /**
-   * 事件第一条消息的口径（ADR 0159）：所有渠道目标上更早送达过这个事件的消息时返回 null（同一时刻送达的按消息 id 取小的）；
-   * 否则返回计时起点，以及送达时已加入事件的成员告警中是否有满足业务影响类条件的
+   * 事件第一条消息的口径（ADR 0159、0165）：所有渠道目标上更早送达过这个事件的消息时返回 null（同一时刻送达的按消息 id
+   * 取小的）；否则返回两个计时起点，以及送达时已加入事件的成员告警中是否有满足业务影响类条件的
    */
   private async first(
     incidentId: string,
@@ -188,13 +188,16 @@ export class PgMessageSource implements MessageSource {
       body: Incident;
       earlier: boolean;
       labels: Array<Record<string, string>>;
+      alertmanager_seen_at: Date | null;
     }>(
       `SELECT i.body,
               EXISTS (SELECT 1 FROM server.notify_messages n
                        WHERE n.incident_id = i.incident_id AND n.kind = 'incident' AND n.id <> $2
                          AND (n.first_delivered_at < $3 OR (n.first_delivered_at = $3 AND n.id < $2))) AS earlier,
               (SELECT coalesce(jsonb_agg(a.labels), '[]'::jsonb) FROM server.incident_members m
-                 JOIN server.alert_state a USING (alert_id) WHERE m.incident_id = i.incident_id) AS labels
+                 JOIN server.alert_state a USING (alert_id) WHERE m.incident_id = i.incident_id) AS labels,
+              (SELECT min(a.alertmanager_seen_at) FROM server.incident_members m
+                 JOIN server.alert_state a USING (alert_id) WHERE m.incident_id = i.incident_id) AS alertmanager_seen_at
          FROM server.incidents i WHERE i.incident_id = $1`,
       [incidentId, messageId, at],
     );
@@ -202,9 +205,13 @@ export class PgMessageSource implements MessageSource {
     if (!row || row.earlier) {
       return null;
     }
+    const origin = incidentOrigin(row.body);
+    const onsetMs = incidentOnsetMs(row.body);
     return {
-      onsetMs: incidentOnsetMs(row.body),
-      origin: incidentOrigin(row.body),
+      onsetMs,
+      // 拆分出的事件两个口径都从拆分时刻算：拆分前这些告警已经随原事件发出过消息
+      alertmanagerMs: origin === 'split' ? onsetMs : (row.alertmanager_seen_at?.getTime() ?? null),
+      origin,
       businessImpact: row.labels.some((l) => isBusinessImpact(l, matchers)),
     };
   }

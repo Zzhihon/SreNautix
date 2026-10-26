@@ -31,6 +31,7 @@ const raw = (labels: Record<string, string>): RawAlert => ({
   generatorUrl: null,
   fingerprint: fingerprint(labels),
   alertname: labels.alertname!,
+  alertmanagerSeenAt: null,
 });
 
 /** 拓扑里只有节点 storage-01 与 storage-03、Pod observability/alloy-n6r72 */

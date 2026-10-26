@@ -213,8 +213,8 @@ export class ServerMetrics extends BaseMetrics {
 
   readonly firstMessageLatency = new Histogram({
     name: 'srenautix_first_message_latency_seconds',
-    help: '从事件的计时起点到这个事件的第一条事件消息送达渠道的时长（ADR 0159）；business_impact 按 notify.business_impact_alerts 判定',
-    labelNames: ['business_impact', 'origin'] as const,
+    help: '这个事件的第一条事件消息送达渠道的时长（ADR 0159、0165）。clock=onset 从事件的计时起点算，clock=alertmanager 从成员告警第一次出现在 Alertmanager 算；business_impact 按 notify.business_impact_alerts 判定',
+    labelNames: ['business_impact', 'origin', 'clock'] as const,
     buckets: [5, 10, 15, 20, 30, 45, 60, 75, 90, 120, 180, 300, 600],
     registers: [this.registry],
   });

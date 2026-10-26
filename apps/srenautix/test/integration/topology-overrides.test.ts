@@ -384,6 +384,7 @@ describe('拓扑覆盖的加载与告警归属', () => {
         generatorUrl: null,
         fingerprint: fingerprint(identityLabels(labels)),
         alertname,
+        alertmanagerSeenAt: at,
       };
     };
     await ingest.write(

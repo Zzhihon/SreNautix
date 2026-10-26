@@ -85,6 +85,7 @@ beforeAll(async () => {
       generatorUrl: null,
       fingerprint: a.fingerprint,
       alertname: a.alertname,
+      alertmanagerSeenAt: null,
     };
     const r = await resolveAlert(fx.cluster_id, raw, {
       catalog: rt.alertCatalog(),
