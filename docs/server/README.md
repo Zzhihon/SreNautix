@@ -127,8 +127,29 @@ audit:
 2. 事件引擎用 packages/core 重算并对账事件，写入版本、成员、别名与 outbox。事件的每个变更带关联分级（`change_links`：high、medium、low，依据与回退，ADR 0169）。
 3. 每个新版本立即出阶段 A：证据卡、规则提议、确定性的处置判断，发布 `stage_a.reported`，消息就地更新（见下面的"阶段 A 与领域包"）。时间线的变更行写"关联分级 <grade>（依据：…）"，GitHub 变更再写命中的路径前缀。
    时延从事件的计时起点算（ADR 0159）：新事件为首个成员告警的触发时刻，从已有事件拆分出的事件为拆分时刻。`srenautix_stage_a_latency_seconds{origin}` 记第一个版本的阶段 A，`origin` 为 `new` 或 `split`；拆分出的事件不计入检测延迟 `srenautix_incident_detection_seconds`。`server.stage_a_reports.first_rendered_at` 是报告第一次生成的时刻，重算只更新 `rendered_at`。
-4. 按触发原因（新事件、根因变化、严重度升高、证据指纹变化）经准入进入阶段 B 队列，worker 认领后研判；研判事件经 server 的事件流发布，消息再次更新。
+   每个事件的阶段 A 单独执行（ADR 0173）：某个事件的阶段 A 抛错时写一条终态记录 `stage_a_failed`（带错误摘要），同一轮的其余事件照常出报告；状态库连接错误照常交给降级通道。每轮流水线最后补跑当前版本超过 60 秒没有报告的事件（不含 merged，已结束的只看 6 小时内更新的，critical 在前，每轮最多 5 个），补跑成功后照常按触发原因准入阶段 B（重开的版本按 reopened）；同一版本补跑失败 3 次后记 `stage_a_missing`，不再补跑。critical 事件在 Alertmanager 中 60 秒后仍没有报告时先发不带证据卡的消息（`docs/server/notify.md`）。
+4. 按触发原因（新事件、根因变化、严重度升高、证据指纹变化）经准入进入阶段 B 队列，worker 认领后研判；研判事件经 server 的事件流发布，消息再次更新。租约过期次数超过恢复上限（2 次）的任务在下一次认领时记为结束，同时把研判镜像写为 `failed`（`error.kind` 为 `lease_expired`），消息与时间线写明原因；worker 之后仍发出结束事件时镜像按 worker 的结果覆盖。研判镜像的状态取 worker 事件里的 `state`（契约 2.39.0），出站策略禁用全部路由时与 worker 一样是 `stage_a_only`。
 5. 提议经审批签发断言，分支 gateway 长轮询取走工单并推回执行事件。
+
+## 终态原因码与事件时间线
+
+每个终态都带一个原因码（ADR 0172）。取值登记在 `contract/reason-codes.json`：每个原因码有阶段（notify、stage_a、research、remediation、issue、incident）、级别（info、warning、error）与中英文说明，分组对应代码与契约中的取值集合（例如研判失败类型、通知放弃的原因）。`packages/contract` 生成按阶段与按分组的字面量类型，写原因码的代码只能用这些类型；从库里读出的原因码不在登记表中时抛出。
+
+| 终态 | 存在哪里 | 时间线条目 |
+|---|---|---|
+| 阶段 A 失败与缺失（`stage_a_failed`、`stage_a_missing`） | `server.incident_reasons` | `stage_a_missing` |
+| 研判失败与只出阶段 A（失败类型，含 `lease_expired`） | `server.research_runs.error.kind` | `research_ended` |
+| 研判结论（停止原因） | `server.research_runs.output.stop_reason` | `research_concluded` |
+| 入队跳过（`budget`、`storm`、`capped`、`no_model_route`）与被取代（`superseded`） | `server.research_queue` | `research_ended` |
+| 不进入阶段 B（`not_researched`，每个版本一次） | `server.incident_reasons` | `research_ended` |
+| 自愈 PR 的处理结果 | `server.remediation_attempts.code` | `remediation_attempt` |
+| 通知的送达、最后一次编辑、放弃与不推送 | `server.incident_reasons` | `notify` |
+| 事件 issue 开出、跳过与失败（`opened`、`external_root`、`rate_limit`、`failed`） | `server.incident_reasons` | `issue` |
+| 事件恢复、重开、被抑制（说明为抑制规则的原因或告警源静默）与写入失败（`persist_failed`） | `server.incident_reasons` | `incident_state` |
+
+- `server.incident_reasons`（`incident` 轨道迁移 7）：事件、事件版本、阶段、原因码、说明（错误摘要等，最多 1000 字）、关联对象、时刻；`once_key` 不为空时同一事件、同一阶段、同一原因码只写一次。级别不存库，读出时按登记表。
+- `GET /v1/incidents/{ref}/timeline` 的每条记录带 `code` 与 `level`（契约 2.39.0）；没有原因码的条目（告警、变更、卡、提议等）两者都为 null。说明里有错误信息或渠道应答原文的条目按不可信文本显示。
+- 写入原因码的地方同时计数 `srenautix_terminal_states_total{stage,code,level}`，在事务里写入的在提交后计数；登记表里的每个原因码启动时导出 0。自身告警 `SreNautixAbnormalTerminalStates`：level 为 error 的原因码 15 分钟内增加 3 次以上，标签带 stage 与 code。
 
 ## 阶段 A 与领域包
 
@@ -509,7 +530,7 @@ issues:
 - **限速**：最近 1 小时已开满 `max_per_hour` 个 issue（事件 issue 与覆盖缺口 issue 合计）时，新的事件记为 `skipped`，只记录（`github.issue_skipped`、`srenautix_github_issues_total{outcome="skipped_rate_limit"}`、日志），之后不再为它开 issue。评论不受限速。
 - **外部上游**（ADR 0147）：根因是外部上游且没有业务影响的事件（判定见 `docs/server/notify.md` 的“外部上游的周期汇总”）不开 issue，进入通知的周期汇总。事件未恢复时每 10 分钟再判定一次，期间出现业务影响就照常开出；恢复后记为 `skipped`（`github.issue_skipped` 的 `reason: external_root`、`srenautix_github_issues_total{outcome="skipped_external"}`）。需要改仓库的修复提议（`repo_change`）不受影响。
 - **失败与重试**：GitHub 返回错误或不可达时按退避重试（30 秒起，每次翻倍，最长 30 分钟），最多 8 次，用尽后记为 `failed`（`github.issue_failed`）。最近 1 小时内重试 3 次以上或放弃的 issue 与评论使状态条显示 `ChannelDeliveryFailed`（channel `github-issues`）。
-- 主实例运行后台循环；控制台发起拓扑覆盖 PR、提交 gitops_pr 提议时在当前副本上立即尝试开一次。每次开出、跳过、放弃、评论与补 Refs 写入治理审计。
+- 主实例运行后台循环；控制台发起拓扑覆盖 PR、提交 gitops_pr 提议时在当前副本上立即尝试开一次。每次开出、跳过、放弃、评论与补 Refs 写入治理审计；开出、跳过与重试用尽另写一条终态记录（`opened`、`external_root`、`rate_limit`、`failed`），进入事件时间线。
 - 指标：`srenautix_github_issues_total{repo,outcome}`（opened、skipped_rate_limit、skipped_external、retry、failed、body_updated）、`srenautix_github_issue_comments_total{repo,outcome}`（posted、retry、failed）。
 
 ### 覆盖缺口 issue

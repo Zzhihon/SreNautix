@@ -6,9 +6,11 @@ server 角色把每个事件的阶段 A 报告与阶段 B 研判推送到聊天�
 
 - 一个事件在每个群里只有一条消息，内容变化时就地编辑。
 - 阶段 A 判为 ignore、原因是 `planned_retirement`（全部成员告警由计划内的退役解释，没有业务影响告警，ADR 0167）的事件不发新消息；控制台与事件 issue 照常记录，之前已经发出消息的事件照常编辑。
+- 不推送的决定写进事件的终态记录（`server.incident_reasons`，ADR 0172），每个事件每种原因一条，控制台的事件时间线显示：`withheld_planned_retirement`、`withheld_external_digest`（外部上游进入汇总）、`withheld_severity`（触发中、严重度不在 `notify.severities` 内）、`withheld_suppressed`（触发中、被抑制）。已经有消息的事件照常编辑，不算不推送。
+- 事件需要阶段 A 报告才有消息，只有一种例外（ADR 0173）：critical 事件仍在触发、首个成员告警进入 Alertmanager（成员告警都不来自 Alertmanager 时取事件创建时刻）60 秒后仍没有阶段 A 报告时，先发出不带证据卡的消息，横幅写"阶段 A 尚未生成：原因"，原因取当前版本最近一条阶段 A 记录：仍在执行、执行失败（带错误摘要）或补跑次数用完。阶段 A 生成后消息照常编辑。没有处置判断时不出处置行与处置反馈按钮。
 - 消息由 server 生成渠道无关的 `NotifyMessage`（`contract/integrations/notify/v1/notify.schema.json`，`notify/compose.ts`），渠道适配器负责渲染（ADR 0125）：
   1. 头部：配置的前缀（`notify.prefix`，例如影子部署写 `[影子]`）、严重度与加粗的一句话现状（根因组件与症状）、事件状态、稳定标签、首次触发时间；
-  2. 横幅一行：例如"模型研判中""状态库降级""模型输出无效"；
+  2. 横幅一行：例如"模型研判中""状态库降级"；研判失败、只出阶段 A 与入队跳过时写原因码登记表（`contract/reason-codes.json`）里的说明，例如"模型研判失败：模型输出无效，以下为确定性报告""只出确定性报告：当日模型预算达到研判上限"；
   3. 各段依次为现状（问题陈述与时间线）、业务关键信号（见下文）、关键问题（结论档位与四个条件的依据、处置判断）、拓扑联系（从根因到每个受影响组件的路径与边的类型）、解决方案（提议、建议与验证方法）、证据链（按假设分组的证据卡、已执行的检查、排除的信号、无法判定的卡）。
 - 变更在时间线与全文的变更清单里带关联分级与依据，例如"（强关联：作用在告警的组件上）"；"发布"与"回退到"读事件 `change_links` 的 `rollback`，契约 2.37.0 之前算出的事件按 core 的同一个回退判定对事件的变更计算（ADR 0169）。
 - 数值与时刻只取自确定性数据：事件、阶段 A 报告、研判输出（账本、检查、结论阶梯）、变更与动作目录。模型写的文字只有假设机制、结论摘要、修复建议、无法判定的原因，以斜体显示并标注【模型】，worker 已经删除其中无法核实的数值。
@@ -111,8 +113,10 @@ notify:
 - 优先级通道：审批与新的 critical 事件（urgent）→ 风暴摘要（digest）→ 编辑（edit）→ 恢复（recovery）。令牌不足时低优先级的消息推迟。
 - 同一条消息两次编辑之间至少间隔 `edit_gap`（Telegram 默认 3 秒，飞书默认 1 秒，飞书单条消息更新上限 5 QPS），间隔内的多次变化只发送最新内容。
 - 渠道返回 429（Telegram）或 230020（飞书）时按 `retry_after` 暂停整个渠道；渠道不可达时内容留在库中，恢复后补发；要编辑的消息已被删除（Telegram）或撤回、超过 14 天（飞书 230011、230031）时改为发送新消息；Telegram 的 message is not modified 按已呈现处理；token 或应用凭证无效时进程退出。
-- 渠道拒绝内容本身的永久错误（Telegram 的 400，上面几种与群不存在、没有发言权限除外，例如 `ENTITIES_TOO_LONG`、can't parse entities；飞书 230001、230025、230099）：去掉格式与链接，按纯文本重试一次（Telegram 保留键盘；飞书卡片只保留标题与正文文字）；仍被拒绝时放弃这一版内容（`abandoned_at`、`abandoned_reason`），不再重试，不计入投递失败与 `ChannelDeliveryFailed`，记 `srenautix_notify_abandoned_total`；期望内容变化后重新尝试。其他 4xx 记录在 `last_error`，5 分钟后重试。
-- 事件恢复或合并后，它的消息最多再编辑 5 次（渠道作出应答的编辑，含被拒绝的），之后的内容放弃（原因 `ended_edit_cap`）；事件重新触发后计数清零。
+- 渠道拒绝内容本身的永久错误（Telegram 的 400，上面几种与群不存在、没有发言权限除外，例如 `ENTITIES_TOO_LONG`、can't parse entities；飞书 230001、230025、230099）：去掉格式与链接，按纯文本重试一次（Telegram 保留键盘；飞书卡片只保留标题与正文文字）；仍被拒绝时放弃这一版内容（`abandoned_at`、`abandoned_reason`），不再重试，不计入投递失败与 `ChannelDeliveryFailed`；期望内容变化后重新尝试。其他 4xx 记录在 `last_error`，5 分钟后重试。
+- 事件恢复或合并后，它的消息最多再成功编辑 5 次（被拒绝、不可达与限流的尝试不计数）。之后期望内容再变化时，同步把这一版渲染成最后一次编辑的内容（ADR 0173）：保留标题、头条、现状与关键问题，现状末尾加一行"消息停止更新（原因：编辑次数达到上限），完整内容见控制台"与事件的控制台链接，只留打开控制台的按钮。最后一次编辑成功后记 `final_edited_at`，之后不再投递；被渠道拒绝（永久错误降级为纯文本后仍被拒绝，或其他 4xx）时放弃，原因 `ended_edit_cap`，事件仍是已结束时内容再变化也不重试。事件重新触发后编辑计数、最后一次编辑与 `ended_edit_cap` 的放弃都清除。
+- 放弃投递计入 `srenautix_notify_abandoned_total{channel,reason}`（自身告警 `SreNautixNotifyAbandoned`）与状态条件 `NotifyAbandoned`（最近 1 小时内某个渠道有放弃的内容时成立，subject 为渠道）；事件消息的放弃另写一条终态记录，进入事件时间线。
+- 每个群第一次送达事件消息、最后一次编辑送达时各写一条终态记录（`delivered`、`final_edit`）。
 - 每行记下产出期望内容的渲染器版本（`render_version`）。进程启动后第一次同步之前，旧版本渲染、还没有呈现、没有放弃的期望内容按当前代码重新渲染，恢复后超过保留期的事件也一样（用已结束状态的模板）——同步只渲染还需要消息的事件，不会再换掉它们的旧内容（ADR 0145）。
 - 消息第一次成功送达时，server 记下其中提议的 `first_delivered_at`，提议的 TTL 从这一刻开始计算。
 
@@ -167,7 +171,8 @@ notify:
 |---|---|
 | `srenautix_notify_messages_total` | `channel`、`op`（send、edit） |
 | `srenautix_notify_delivery_failures_total` | `channel` |
-| `srenautix_notify_abandoned_total` | `channel`、`reason`（entities_too_long、message_too_long、parse_error、bad_request、invalid_param、content_too_long、invalid_card、ended_edit_cap） |
+| `srenautix_notify_abandoned_total` | `channel`、`reason`（原因码登记表的 notify_abandon 分组：entities_too_long、message_too_long、parse_error、bad_request、invalid_param、content_too_long、invalid_card、ended_edit_cap）；启动时每个渠道、每个原因导出 0 |
+| `srenautix_terminal_states_total` | `stage`、`code`、`level`：通知的 delivered、final_edit、放弃与不推送的原因码（ADR 0172） |
 | `srenautix_notify_pending` | `channel` |
 | `srenautix_notify_callbacks_total` | `channel`、`action`、`outcome` |
 | `srenautix_first_message_latency_seconds` | `business_impact`（true、false）、`origin`（new、split）、`clock`（onset、alertmanager） |
@@ -187,3 +192,4 @@ notify:
 - 报告的黄金用例是一次真实发布事故（发布后回退失败）在本机重建的事件、阶段 A 报告与研判账本，已脱敏（`apps/srenautix/test/fixtures/report/`）；Telegram HTML 与黄金文件逐字比较。每条 Telegram 消息都按 Bot API 的 HTML 规则解析（标签、属性、嵌套、转义），不合法的 HTML 让测试失败，对应 Bot API 的 400 "can't parse entities"。
 - 业务关键信号的黄金用例是按 cchp-k8s-ops#249 那一类 gateway OOM 事件重建的卡片组合（70 个成员告警、53 张卡，`test/support/gateway-oom-fixture.ts`），内存一类的第一项是 gateway 94% 与 OOM。外部上游的汇总在真实 PostgreSQL 上测试：一小时内多个 provider 的事件只在整点后发 1 条汇总；业务告警触发后仍在触发的上游事件即时推送；汇总正文按 Bot API 的 HTML 规则严格解析。
 - 投递引擎与回调流程在真实 PostgreSQL 上测试：风暴、令牌桶、编辑合并、429 暂停、消息被删除后重发、回调去重与按钮独占、拒绝理由窗口、`/link`、未绑定账号与 H 档提议的拒绝。
+- 已结束事件的编辑上限（`notify-stale-desired.test.ts`）：成功编辑满 5 次后内容再变化时发出最后一次编辑（精简内容、说明行与控制台链接），之后不再请求渠道；最后一次编辑被拒绝时放弃（`ended_edit_cap`）且不重试；被拒绝的编辑不计数。还没有阶段 A 报告的 critical 事件（`stage-a-missing.test.ts`）在 Alertmanager 中 60 秒后先发不带证据卡的消息，阶段 A 生成后编辑为完整报告。说明行与最后一次编辑的内容在大事件上仍在 Telegram 的文字长度、实体数与实体总大小之内（`notify-reason-lines.test.ts`）。
