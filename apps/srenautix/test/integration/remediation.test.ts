@@ -1216,6 +1216,11 @@ spec:
 
   it('cause_scope：根因范围不是 local 或 configuration 时整次研判不开 PR；审计、指标与时间线带原因', async () => {
     const s = await checkout({ scope: 'downstream' });
+    const terminal = async () =>
+      (await metrics.terminalStates.get()).values.find(
+        (v) => v.labels.stage === 'remediation' && v.labels.code === 'cause_scope',
+      )?.value ?? 0;
+    const before = await terminal();
     expect(await oom.runOnce()).toBe(0);
     const reason =
       '根因范围为 downstream，只有 local 与 configuration（根因由 GitOps 仓库负责）开自愈 PR；告警调优：处置为 act，告警调优只在处置为 ignore 时提出';
@@ -1229,8 +1234,15 @@ spec:
       'srenautix_remediations_total{category="none",outcome="skipped",code="cause_scope"}',
     );
     expect(await remediationTimeline(s.inc.incident_id)).toEqual([
-      expect.objectContaining({ text: `自愈 PR：skipped（cause_scope）：${reason}`, ref: s.runId }),
+      expect.objectContaining({
+        text: `自愈 PR：skipped：${reason}`,
+        ref: s.runId,
+        code: 'cause_scope',
+        level: 'info',
+      }),
     ]);
+    // 带原因码的处理结果计入终态（ADR 0172）
+    expect(await terminal()).toBe(before + 1);
   });
 
   it('topology_only：结论只有成员告警支撑，没有证据卡', async () => {

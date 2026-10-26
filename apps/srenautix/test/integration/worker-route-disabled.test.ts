@@ -189,7 +189,8 @@ describe('出站策略禁用模型路由', () => {
       [runId],
     );
     expect(queue.rows[0]).toEqual({ state: 'done', skip_reason: 'stage_a_only' });
-    expect(await banner(skipped.incident_id)).toMatch(/^只出确定性报告：没有可用的模型路由：路由 overseas 在境外/);
+    // 横幅写失败类型在原因码登记表中的说明（ADR 0172），具体的路由与原因在研判记录里
+    expect(await banner(skipped.incident_id)).toBe('只出确定性报告：模型路由不可用（熔断，或全部被出站策略禁用）');
     const calls = await db.admin.query<{ n: number }>('SELECT count(*)::int AS n FROM worker.llm_calls');
     expect(calls.rows[0]?.n).toBe(0);
     expect(model.received).toHaveLength(0);
