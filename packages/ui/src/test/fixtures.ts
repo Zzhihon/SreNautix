@@ -176,6 +176,7 @@ export function feedback(over: Partial<Feedback> = {}): Feedback {
     disposition: 'act',
     mechanism: null,
     reason: null,
+    reason_code: null,
     principal_id: 'oncall-a',
     channel: 'console',
     linked: true,

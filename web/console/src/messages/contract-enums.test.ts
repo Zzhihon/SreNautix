@@ -57,6 +57,7 @@ const ENUMS: Array<[string, string, string]> = [
   ['condition', 'gateway/v1/reader.openapi.yaml', '/components/schemas/ReaderCondition/properties/type'],
   ['status.severity', S('common'), '/$defs/Severity'],
   ['status.disposition', S('common'), '/$defs/Disposition'],
+  ['feedback.reason_code', S('feedback'), '/$defs/ReasonCode'],
   ['status.conclusion', S('common'), '/$defs/ConclusionLevel'],
   ['status.verdict', S('evidence-result'), '/properties/display_state'],
   ['evidence.reason', S('evidence-result'), '/$defs/Reason/properties/kind'],
@@ -111,6 +112,9 @@ const ENUMS: Array<[string, string, string]> = [
   ['eval.snapshot', OPENAPI, '/components/schemas/EvalCase/properties/snapshot_status'],
   ['eval.granularity', OPENAPI, '/components/schemas/EvalCase/properties/truth/properties/granularity'],
   ['eval.mode', S('eval-report'), '/properties/mode'],
+  ['eval.candidate_source', OPENAPI, '/components/schemas/EvalCandidate/properties/source'],
+  ['eval.candidate_state', OPENAPI, '/components/schemas/EvalCandidate/properties/state'],
+  ['eval.case_type', OPENAPI, '/components/schemas/EvalCandidateConfirm/properties/type'],
 ];
 
 describe('契约枚举的文案', () => {

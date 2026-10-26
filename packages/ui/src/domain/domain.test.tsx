@@ -1,4 +1,5 @@
 import { createTheme } from '@grafana/data';
+import { SCHEMAS } from '@srenautix/contract';
 import { fireEvent, screen, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { ErrorBoundary, setRenderErrorReporter, type RenderError } from '../primitives/ErrorBoundary';
@@ -19,7 +20,7 @@ import { DEFAULT_TOKENS, TOKEN_NAMES } from '../theme/tokens';
 import { ApprovalSheet } from './ApprovalSheet';
 import { ConditionStrip } from './ConditionStrip';
 import { EvidenceCard } from './EvidenceCard';
-import { FeedbackControl } from './FeedbackControl';
+import { FeedbackControl, REASON_CODES } from './FeedbackControl';
 import { HypothesisList } from './HypothesisList';
 import { componentLabel, sortEvidence } from './model';
 import { ComponentNamesProvider } from './names';
@@ -295,7 +296,7 @@ describe('反馈', () => {
     firing: true,
   };
 
-  it('两个维度，根因错时可以选择不知道真实根因', () => {
+  it('两个维度，根因错时可以选择不知道真实根因，原因必选', () => {
     renderUi(<FeedbackControl {...base} />);
     const submit = screen.getByRole('button', { name: '提交反馈' }) as HTMLButtonElement;
     expect(submit.disabled).toBe(true);
@@ -306,13 +307,39 @@ describe('反馈', () => {
     expect([...select.options].map((o) => o.textContent)).toContain('不知道真实根因');
     fireEvent.change(select, { target: { value: '__unknown__' } });
     expect(screen.getByText(/不生成回放用例/)).toBeTruthy();
+    // 拒绝时原因必选（ADR 0174）
+    expect(submit.disabled).toBe(true);
+    const reason = screen.getByLabelText('原因') as HTMLSelectElement;
+    expect([...reason.options].map((o) => o.textContent)).toContain('修复方向错误（事件是真的）');
+    fireEvent.change(reason, { target: { value: 'false_positive' } });
     expect(submit.disabled).toBe(false);
     expect(screen.getByText('事件进行中也可以反馈，以最新一条为准。')).toBeTruthy();
   });
 
+  it('确认时原因可选；只选原因、不评价两个维度也可以提交', () => {
+    renderUi(<FeedbackControl {...base} />);
+    const submit = screen.getByRole('button', { name: '提交反馈' }) as HTMLButtonElement;
+    const disp = screen.getByRole('group', { name: '处置判断' });
+    fireEvent.click(within(disp).getByRole('button', { name: '对' }));
+    expect(submit.disabled).toBe(false);
+    fireEvent.click(within(disp).getByRole('button', { name: '对' }));
+    expect(submit.disabled).toBe(true);
+    const reason = screen.getByLabelText('原因（可选）') as HTMLSelectElement;
+    expect(reason.required).toBe(false);
+    fireEvent.change(reason, { target: { value: 'worse_than_baseline' } });
+    expect(submit.disabled).toBe(false);
+  });
+
+  it('原因的选项与契约的 FeedbackReasonCode 一致', () => {
+    const schema = SCHEMAS['https://srenautix.io/contract/schemas/feedback.schema.json'] as unknown as {
+      $defs: { ReasonCode: { enum: string[] } };
+    };
+    expect([...REASON_CODES].sort()).toEqual([...schema.$defs.ReasonCode.enum].sort());
+  });
+
   it('已反馈时显示摘要，可以修改', () => {
-    renderUi(<FeedbackControl {...base} latest={feedback()} state="given" />);
-    expect(screen.getByRole('status').textContent).toContain('处置判断对 · 根因对 · oncall-a（console）');
+    renderUi(<FeedbackControl {...base} latest={feedback({ reason_code: 'known_issue' })} state="given" />);
+    expect(screen.getByRole('status').textContent).toContain('处置判断对 · 根因对 · 已知问题 · oncall-a（console）');
     fireEvent.click(screen.getByRole('button', { name: '修改' }));
     expect(screen.getByRole('button', { name: '提交反馈' })).toBeTruthy();
   });

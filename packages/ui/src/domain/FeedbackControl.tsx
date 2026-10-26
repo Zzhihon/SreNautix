@@ -1,5 +1,6 @@
 // 两个维度的反馈（DESIGN §11）：处置判断对不对、根因组件对不对。进行中和已恢复的事件都可以反馈，
 // 以最新一条为准。"根因错"可以不选真实根因，这条反馈只计入准确率，不生成回放用例。
+// 原因码（ADR 0174）：拒绝根因或处置时必选，确认时可选；只选原因、不评价两个维度也可以提交（例如并行期评为"比旧系统差"）。
 
 import { useState, type ReactNode } from 'react';
 import type { Disposition, Feedback, FeedbackCreate } from '../contract';
@@ -13,8 +14,23 @@ import styles from './FeedbackControl.module.css';
 import { useComponentNames } from './names';
 
 type Axis = 'unset' | 'confirmed' | 'rejected';
+type ReasonCode = NonNullable<Feedback['reason_code']>;
 
 const DISPOSITIONS: readonly Disposition[] = ['act', 'escalate', 'ignore', 'undetermined'];
+/** 契约 FeedbackReasonCode 的全部取值，按选择列表的顺序 */
+export const REASON_CODES: readonly ReasonCode[] = [
+  'false_positive',
+  'not_actionable',
+  'known_issue',
+  'planned_change',
+  'transient_self_resolved',
+  'external_upstream',
+  'duplicate',
+  'poor_wording',
+  'wrong_fix',
+  'worse_than_baseline',
+  'other',
+];
 const UNKNOWN = '__unknown__';
 
 function AxisRow({
@@ -91,6 +107,7 @@ export function FeedbackControl({
   const [rightRoot, setRightRoot] = useState<string>('');
   const [mechanism, setMechanism] = useState('');
   const [reason, setReason] = useState('');
+  const [reasonCode, setReasonCode] = useState<ReasonCode | ''>('');
 
   if (!caps.feedback) {
     return <p className={styles.readonly}>{caps.readOnlyReason}</p>;
@@ -108,10 +125,12 @@ export function FeedbackControl({
     );
   }
 
+  const rejected = disp === 'rejected' || root === 'rejected';
   const valid =
-    (disp !== 'unset' || root !== 'unset') &&
+    (disp !== 'unset' || root !== 'unset' || reasonCode !== '') &&
     (disp !== 'rejected' || rightDisp !== '') &&
     (root !== 'rejected' || rightRoot !== '') &&
+    (!rejected || reasonCode !== '') &&
     reason.length <= 500 &&
     mechanism.length <= 600;
 
@@ -125,6 +144,7 @@ export function FeedbackControl({
       disposition: disp === 'confirmed' ? disposition : disp === 'rejected' ? (rightDisp as Disposition) : null,
       mechanism: mechanism.trim() || null,
       reason: reason.trim() || null,
+      reason_code: reasonCode === '' ? null : reasonCode,
     };
     create.mutate(body, { onSuccess: () => setEditing(false) });
   };
@@ -189,7 +209,16 @@ export function FeedbackControl({
           required
         />
       )}
-      {(disp === 'rejected' || root === 'rejected') && (
+      <SelectField
+        label={rejected ? t('feedback.reason_code') : t('feedback.reason_code_optional')}
+        value={reasonCode}
+        onChange={(e) => setReasonCode(e.currentTarget.value as ReasonCode | '')}
+        placeholder={rejected ? t('feedback.choose') : t('feedback.no_reason_code')}
+        options={REASON_CODES.map((c) => ({ value: c, label: t(`feedback.reason_code.${c}`) }))}
+        required={rejected}
+        disabled={create.isPending}
+      />
+      {rejected && (
         <div className={styles.more}>
           <TextField
             label={t('feedback.mechanism')}
@@ -243,6 +272,9 @@ function summary(f: Feedback, t: (id: string, v?: Record<string, string | number
           ? t('feedback.sum_root_bad', { c: componentLabel(f.root_component).name })
           : t('feedback.sum_root_unknown'),
     );
+  }
+  if (f.reason_code) {
+    parts.push(t(`feedback.reason_code.${f.reason_code}`));
   }
   parts.push(t('feedback.sum_by', { who: f.principal_id, channel: f.channel }));
   return parts.join(' · ');

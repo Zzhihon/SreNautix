@@ -24,6 +24,8 @@ import {
 } from '@srenautix/ui';
 import { CheckCircle2, OctagonX } from 'lucide-react';
 import { hub, ok } from '../api';
+import { hasRole, useSession } from '../session';
+import { CandidatesPanel } from './eval-candidates';
 import styles from './pages.module.css';
 
 type Ratio = EvalReport['rows'][number]['top1'];
@@ -76,6 +78,9 @@ function Scorecard({ report }: { report: EvalReport }) {
                   <th scope="col">{t('eval.col.passk', { k: report.runs_per_case })}</th>
                   <th scope="col">{t('eval.col.disposition')}</th>
                   <th scope="col">{t('eval.col.benign_fp')}</th>
+                  <th scope="col">{t('eval.col.false_push')}</th>
+                  <th scope="col">{t('eval.col.false_issue')}</th>
+                  <th scope="col">{t('eval.col.false_pr')}</th>
                   <th scope="col">{t('eval.col.undetermined')}</th>
                   <th scope="col">{t('eval.col.structured')}</th>
                   <th scope="col">{t('eval.col.cost')}</th>
@@ -108,6 +113,15 @@ function Scorecard({ report }: { report: EvalReport }) {
                       <RatioCell r={r.benign_false_positive} gate={0.1} lowerIsBetter />
                     </td>
                     <td>
+                      <RatioCell r={r.false_push} gate={report.gate?.false_push_max ?? undefined} lowerIsBetter />
+                    </td>
+                    <td>
+                      <RatioCell r={r.false_issue} />
+                    </td>
+                    <td>
+                      <RatioCell r={r.false_pr} />
+                    </td>
+                    <td>
                       <RatioCell r={r.undetermined_ratio} />
                     </td>
                     <td>
@@ -127,6 +141,7 @@ function Scorecard({ report }: { report: EvalReport }) {
           </div>
         )}
         <p className={styles.dim}>{t('eval.gates_note')}</p>
+        <p className={styles.dim}>{t('eval.benign_note')}</p>
       </Panel>
       <Panel title={t('eval.gate')}>
         {report.gate === null ? (
@@ -158,6 +173,24 @@ function Scorecard({ report }: { report: EvalReport }) {
                 {
                   k: t('eval.waived'),
                   v: report.gate.waived_cases.length ? report.gate.waived_cases.join(', ') : t('common.none'),
+                },
+                {
+                  k: t('eval.false_push_gate'),
+                  tone:
+                    report.gate.false_push?.value != null &&
+                    report.gate.false_push_max !== null &&
+                    report.gate.false_push.value > report.gate.false_push_max
+                      ? 'bad'
+                      : undefined,
+                  v:
+                    report.gate.false_push_max === null || report.gate.false_push === null ? (
+                      t('eval.false_push_no_limit')
+                    ) : (
+                      <span>
+                        <RatioCell r={report.gate.false_push} gate={report.gate.false_push_max} lowerIsBetter />{' '}
+                        {t('eval.false_push_limit', { max: fmt.percent(report.gate.false_push_max) })}
+                      </span>
+                    ),
                 },
                 { k: t('eval.baseline'), v: <Mono>{report.gate.baseline_report_id}</Mono> },
               ]}
@@ -356,6 +389,8 @@ function EstimatePanel({ suite, routes }: { suite: string; routes: string[] }) {
 export function EvalPage({ mode, reportId }: { mode: EvalMode; reportId?: string }) {
   const { t, fmt } = useI18n();
   const navigate = useNavigate();
+  // 评测候选的确认与放弃需要 eval.write（ADR 0175）
+  const admin = hasRole(useSession(), 'admin', 'sys-admin');
   const list = useQuery({
     queryKey: ['eval', 'reports', mode],
     queryFn: async () =>
@@ -421,6 +456,7 @@ export function EvalPage({ mode, reportId }: { mode: EvalMode; reportId?: string
           )}
         </>
       )}
+      {admin && <CandidatesPanel />}
     </div>
   );
 }
