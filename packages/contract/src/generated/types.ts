@@ -281,6 +281,9 @@ export type ResearchFailedEvent = OutboxEventHeader & {
     incident_id: Uuid;
     incident_version: number;
     run_id: Uuid;
+    /**
+     * 失败类型，取原因码登记表 contract/reason-codes.json 的 research_failure 分组
+     */
     kind:
       | 'model_unavailable'
       | 'breaker_open'
@@ -290,6 +293,10 @@ export type ResearchFailedEvent = OutboxEventHeader & {
       | 'datasource'
       | 'internal';
     message: string;
+    /**
+     * worker 写入的研判状态（契约 2.39.0，ADR 0172）：stage_a_only 为模型预算、熔断或出站策略使研判没有结论，只出阶段 A；failed 为其余失败。server 的研判镜像取这个值，与 worker 一致；契约 2.39.0 之前的 worker 不写
+     */
+    state?: 'stage_a_only' | 'failed';
   };
 };
 export type ProposalChangedEvent = OutboxEventHeader & {
@@ -504,6 +511,14 @@ export type Duration5 = string;
  * Prometheus 风格的时长，例如 30s、5m、2h、7d
  */
 export type Duration6 = string;
+/**
+ * 原因码所属的阶段：notify 通知；stage_a 阶段 A；research 阶段 B 研判与入队；remediation 自愈 PR；issue 事件 issue；incident 事件状态
+ */
+export type ReasonStage = 'notify' | 'stage_a' | 'research' | 'remediation' | 'issue' | 'incident';
+/**
+ * info 正常的终态；warning 需要留意但有其他告警或条件覆盖；error 不应发生的终态，SreNautixAbnormalTerminalStates 按它告警
+ */
+export type ReasonLevel = 'info' | 'warning' | 'error';
 /**
  * 出境数据类别。sql：规范化语句文本（常量为 $n、去掉注释）；code：业务代码片段（契约 2.28.0，ADR 0146 §3.6）
  */
@@ -773,6 +788,11 @@ export interface SrenautixContractIndex {
   ApprovalRecord?: ApprovalRecord;
   ExecutionSummary?: ExecutionSummary;
   ProposalCreate?: ProposalCreate;
+  ReasonCodeRegistry?: ReasonCodeRegistry;
+  ReasonStage?: ReasonStage;
+  ReasonLevel?: ReasonLevel;
+  ReasonCodeGroup?: ReasonCodeGroup;
+  ReasonCodeEntry?: ReasonCodeEntry;
   OptimizationRecommendation?: OptimizationRecommendation;
   RecommendationState?: RecommendationState;
   EstimateValue?: EstimateValue;
@@ -2519,7 +2539,7 @@ export interface ConditionDirectionsType {
  */
 export interface Condition {
   /**
-   * server、worker 等角色的条件；InformersFresh、TunnelConnected、QueryManifest、Datasource、AlertReconcile 由分支 reader 的心跳转来（role 为 reader，见 gateway/v1/reader.openapi.yaml 的 ReaderCondition），ClockSkew 两边都有。控制台必须容忍以后新增的类型
+   * server、worker 等角色的条件；InformersFresh、TunnelConnected、QueryManifest、Datasource、AlertReconcile 由分支 reader 的心跳转来（role 为 reader，见 gateway/v1/reader.openapi.yaml 的 ReaderCondition），ClockSkew 两边都有。NotifyAbandoned（契约 2.39.0，ADR 0173）：最近 1 小时内某个渠道放弃投递了消息内容，subject 为渠道。控制台必须容忍以后新增的类型
    */
   type:
     | 'IngestSilent'
@@ -2530,6 +2550,7 @@ export interface Condition {
     | 'PackLoadFailed'
     | 'BudgetCutoffHigh'
     | 'ChannelDeliveryFailed'
+    | 'NotifyAbandoned'
     | 'AuditExportLagging'
     | 'ClockSkew'
     | 'StateStoreDegraded'
@@ -5950,6 +5971,44 @@ export interface ProposalCreate {
 export interface Subject2 {
   type: 'incident' | 'goal';
   id: Uuid;
+}
+/**
+ * 终态原因码登记表（数据在 contract/reason-codes.json，ADR 0172）：通知、阶段 A、研判、自愈 PR、事件 issue 与事件状态的每个终态都带一个登记过的原因码。代码只能写登记表里的值（packages/contract 生成的类型保证），时间线（TimelineEntry.code、level）、群消息的说明行与指标 srenautix_terminal_states_total{stage,code,level} 用同一张表
+ */
+export interface ReasonCodeRegistry {
+  $schema?: string;
+  /**
+   * 原因码分组：一个分组对应代码或契约中的一个取值集合（例如研判失败类型、通知放弃的原因），分组内的原因码属于同一个阶段。契约中有对应枚举的分组，契约测试校验两边相同
+   */
+  groups: {
+    [k: string]: ReasonCodeGroup | undefined;
+  };
+  /**
+   * 原因码；(stage, code) 唯一
+   */
+  codes: ReasonCodeEntry[];
+}
+export interface ReasonCodeGroup {
+  stage: ReasonStage;
+  description: string;
+}
+export interface ReasonCodeEntry {
+  code: string;
+  stage: ReasonStage;
+  level: ReasonLevel;
+  /**
+   * 所属的分组（分组的阶段与原因码的阶段相同）
+   *
+   * @minItems 1
+   */
+  groups: [string, ...string[]];
+  /**
+   * 说明，用于时间线、群消息的说明行与控制台；写成能接在“原因：”之后的短语
+   */
+  text: {
+    'zh-CN': string;
+    en: string;
+  };
 }
 /**
  * 研判清单（DESIGN §8.5）：复现一次研判需要的全部版本信息，以及出境清单（§8.4）。后处理部分可以基于已保存的响应精确重放；重新采样模型得到的是一个分布

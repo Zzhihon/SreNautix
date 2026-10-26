@@ -145,6 +145,57 @@ function genConditions(): string {
   );
 }
 
+interface ReasonRegistry {
+  groups: Record<string, { stage: string; description: string }>;
+  codes: Array<{ code: string; stage: string; level: string; groups: string[]; text: Record<string, string> }>;
+}
+
+/**
+ * contract/reason-codes.json：终态原因码登记表（schema 见 schemas/reason-codes.schema.json，ADR 0172）。
+ * 除数据外生成按阶段与按分组的字面量联合类型，代码写原因码处用它们；(stage, code) 重复、分组不存在或分组的阶段
+ * 与原因码不同时生成失败
+ */
+function genReasonCodes(): string {
+  const data = JSON.parse(readFileSync(join(contractDir, 'reason-codes.json'), 'utf8')) as ReasonRegistry;
+  const schema = JSON.parse(readFileSync(join(contractDir, 'schemas/reason-codes.schema.json'), 'utf8')) as {
+    $defs: { Stage: { enum: string[] } };
+  };
+  const seen = new Set<string>();
+  for (const e of data.codes) {
+    const k = `${e.stage}/${e.code}`;
+    if (seen.has(k)) {
+      throw new Error(`reason-codes.json：原因码 ${k} 重复`);
+    }
+    seen.add(k);
+    for (const g of e.groups) {
+      const group = data.groups[g];
+      if (group === undefined) {
+        throw new Error(`reason-codes.json：原因码 ${k} 的分组 ${g} 没有定义`);
+      }
+      if (group.stage !== e.stage) {
+        throw new Error(`reason-codes.json：原因码 ${k} 属于阶段 ${e.stage}，分组 ${g} 属于阶段 ${group.stage}`);
+      }
+    }
+  }
+  const union = (codes: string[]) => (codes.length ? codes.map((c) => JSON.stringify(c)).join(' | ') : 'never');
+  const byStage = schema.$defs.Stage.enum
+    .map((s) => `  ${s}: ${union(data.codes.filter((e) => e.stage === s).map((e) => e.code))};`)
+    .join('\n');
+  const byGroup = Object.keys(data.groups)
+    .map((g) => `  ${g}: ${union(data.codes.filter((e) => e.groups.includes(g)).map((e) => e.code))};`)
+    .join('\n');
+  return (
+    BANNER +
+    "import type { ReasonCodeEntry, ReasonCodeGroup } from './types.js';\n\n" +
+    '/** 各阶段登记的原因码 */\n' +
+    `export interface ReasonCodesByStage {\n${byStage}\n}\n\n` +
+    '/** 各分组登记的原因码 */\n' +
+    `export interface ReasonCodesByGroup {\n${byGroup}\n}\n\n` +
+    `export const REASON_CODE_GROUPS: Record<keyof ReasonCodesByGroup, ReasonCodeGroup> = ${JSON.stringify(data.groups)};\n\n` +
+    `export const REASON_CODES: readonly ReasonCodeEntry[] = ${JSON.stringify(data.codes)};\n`
+  );
+}
+
 async function pretty(source: string): Promise<string> {
   return format(source, { parser: 'typescript', printWidth: 120, singleQuote: true, trailingComma: 'all' });
 }
@@ -156,6 +207,7 @@ async function main(): Promise<void> {
     'openapi.ts': await pretty(await genOpenapi()),
     'schemas.ts': await pretty(genSchemas(files)),
     'conditions.ts': await pretty(genConditions()),
+    'reason-codes.ts': await pretty(genReasonCodes()),
   };
   if (check) {
     const stale = Object.entries(outputs)

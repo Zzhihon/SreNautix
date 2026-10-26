@@ -876,7 +876,7 @@ export type paths = {
       };
       cookie?: never;
     };
-    /** @description 事件时间线（一条泳道）：告警触发与恢复、变更、异常卡、研判与提议的状态变化 */
+    /** @description 事件时间线（一条泳道）：告警触发与恢复、变更、异常卡、阶段 A、研判、通知、自愈 PR、issue、提议与事件状态的变化；每个终态带原因码（ADR 0172） */
     get: operations['getIncidentTimeline'];
     put?: never;
     post?: never;
@@ -2105,7 +2105,7 @@ export type components = {
       /** @description 条件涉及的对象，例如集成实例 id、路由 id、领域包名 */
       subject: string | null;
       /**
-       * @description server、worker 等角色的条件；InformersFresh、TunnelConnected、QueryManifest、Datasource、AlertReconcile 由分支 reader 的心跳转来（role 为 reader，见 gateway/v1/reader.openapi.yaml 的 ReaderCondition），ClockSkew 两边都有。控制台必须容忍以后新增的类型
+       * @description server、worker 等角色的条件；InformersFresh、TunnelConnected、QueryManifest、Datasource、AlertReconcile 由分支 reader 的心跳转来（role 为 reader，见 gateway/v1/reader.openapi.yaml 的 ReaderCondition），ClockSkew 两边都有。NotifyAbandoned（契约 2.39.0，ADR 0173）：最近 1 小时内某个渠道放弃投递了消息内容，subject 为渠道。控制台必须容忍以后新增的类型
        * @enum {string}
        */
       type:
@@ -2117,6 +2117,7 @@ export type components = {
         | 'PackLoadFailed'
         | 'BudgetCutoffHigh'
         | 'ChannelDeliveryFailed'
+        | 'NotifyAbandoned'
         | 'AuditExportLagging'
         | 'ClockSkew'
         | 'StateStoreDegraded'
@@ -2540,7 +2541,10 @@ export type components = {
           payload: {
             incident_id: components['schemas']['Uuid'];
             incident_version: number;
-            /** @enum {string} */
+            /**
+             * @description 失败类型，取原因码登记表 contract/reason-codes.json 的 research_failure 分组
+             * @enum {string}
+             */
             kind:
               | 'model_unavailable'
               | 'breaker_open'
@@ -2551,6 +2555,11 @@ export type components = {
               | 'internal';
             message: string;
             run_id: components['schemas']['Uuid'];
+            /**
+             * @description worker 写入的研判状态（契约 2.39.0，ADR 0172）：stage_a_only 为模型预算、熔断或出站策略使研判没有结论，只出阶段 A；failed 为其余失败。server 的研判镜像取这个值，与 worker 一致；契约 2.39.0 之前的 worker 不写
+             * @enum {string}
+             */
+            state?: 'stage_a_only' | 'failed';
           };
           /** @constant */
           type: 'research.failed';
@@ -3962,6 +3971,12 @@ export type components = {
     };
     /** @enum {string} */
     level: 'reversible' | 'reversible_recreatable' | 'compensable' | 'irreversible';
+    /**
+     * ReasonLevel
+     * @description info 正常的终态；warning 需要留意但有其他告警或条件覆盖；error 不应发生的终态，SreNautixAbnormalTerminalStates 按它告警
+     * @enum {string}
+     */
+    Level: 'info' | 'warning' | 'error';
     LlmCall: {
       at: components['schemas']['Timestamp'];
       cost: number;
@@ -5176,7 +5191,10 @@ export type components = {
       payload: {
         incident_id: components['schemas']['Uuid'];
         incident_version: number;
-        /** @enum {string} */
+        /**
+         * @description 失败类型，取原因码登记表 contract/reason-codes.json 的 research_failure 分组
+         * @enum {string}
+         */
         kind:
           | 'model_unavailable'
           | 'breaker_open'
@@ -5187,6 +5205,11 @@ export type components = {
           | 'internal';
         message: string;
         run_id: components['schemas']['Uuid'];
+        /**
+         * @description worker 写入的研判状态（契约 2.39.0，ADR 0172）：stage_a_only 为模型预算、熔断或出站策略使研判没有结论，只出阶段 A；failed 为其余失败。server 的研判镜像取这个值，与 worker 一致；契约 2.39.0 之前的 worker 不写
+         * @enum {string}
+         */
+        state?: 'stage_a_only' | 'failed';
       };
       /** @constant */
       type: 'research.failed';
@@ -5585,8 +5608,16 @@ export type components = {
       at: components['schemas']['Timestamp'];
       /** @description kind 为 change 时：这个变更与事件的关联分级与依据（ADR 0169）；事件没有 change_links 时省略 */
       change_link?: components['schemas']['ChangeLink'];
+      /** @description 原因码，取原因码登记表 contract/reason-codes.json 中所属阶段的值（契约 2.39.0，ADR 0172）；阶段由 kind 决定（stage_a_missing → stage_a，research_* → research，remediation_attempt → remediation，notify、issue → 同名阶段，incident_state → incident）。告警、变更、卡与提议等没有原因码的条目为 null，自愈 PR 提出提议（proposed）时为 null */
+      code: string | null;
       /**
-       * @description remediation_attempt 为自愈 PR 对一次研判的处理结果（契约 2.38.0，ADR 0170）：text 写模板、结果、原因码与原因，ref 为研判的 run_id
+       * @description remediation_attempt：自愈 PR 对一次研判的处理结果（ADR 0170），text 写模板、结果与原因，ref 为研判的 run_id；
+       *     research_concluded：研判结束并给出结论，code 为检验循环的停止原因；
+       *     research_ended：研判没有结论（失败或只出阶段 A，code 为失败类型）、入队时跳过、租约过期、被取代或不进入阶段 B，ref 为 run_id（不进入阶段 B 时为空）；
+       *     stage_a_missing：阶段 A 执行失败（stage_a_failed，text 带错误摘要）与补跑后仍没有报告（stage_a_missing）；
+       *     notify：消息送达、编辑次数用完后的最后一次编辑、放弃投递与不推送的决定，ref 为渠道与渠道目标（不推送时为空）；
+       *     issue：事件 issue 开出、跳过与失败；
+       *     incident_state：事件恢复、重开、被抑制（text 带抑制的原因）与写入失败
        * @enum {string}
        */
       kind:
@@ -5597,11 +5628,18 @@ export type components = {
         | 'incident_merged'
         | 'incident_split'
         | 'stage_a'
+        | 'stage_a_missing'
         | 'research_concluded'
+        | 'research_ended'
         | 'remediation_attempt'
+        | 'notify'
+        | 'issue'
+        | 'incident_state'
         | 'proposal'
         | 'execution'
         | 'feedback';
+      /** @description 原因码在登记表中的级别；code 为 null 时为 null */
+      level: null | components['schemas']['Level'];
       /** @description 关联对象的 id（alert_id、change_id、run_id、proposal_id 等） */
       ref: string | null;
       text: string;

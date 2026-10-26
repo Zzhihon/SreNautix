@@ -1,5 +1,5 @@
 // 本文件由 packages/contract/scripts/gen.ts 从 contract/ 生成，不要手工修改。
-export const CONTRACT_VERSION = '2.38.0';
+export const CONTRACT_VERSION = '2.39.0';
 
 export const SCHEMAS: Record<string, Record<string, unknown>> = {
   'https://srenautix.io/contract/gateway/v1/action-catalog.schema.json': {
@@ -2692,6 +2692,7 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
           'PackLoadFailed',
           'BudgetCutoffHigh',
           'ChannelDeliveryFailed',
+          'NotifyAbandoned',
           'AuditExportLagging',
           'ClockSkew',
           'StateStoreDegraded',
@@ -2705,7 +2706,7 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
           'AlertReconcile',
         ],
         description:
-          'server、worker 等角色的条件；InformersFresh、TunnelConnected、QueryManifest、Datasource、AlertReconcile 由分支 reader 的心跳转来（role 为 reader，见 gateway/v1/reader.openapi.yaml 的 ReaderCondition），ClockSkew 两边都有。控制台必须容忍以后新增的类型',
+          'server、worker 等角色的条件；InformersFresh、TunnelConnected、QueryManifest、Datasource、AlertReconcile 由分支 reader 的心跳转来（role 为 reader，见 gateway/v1/reader.openapi.yaml 的 ReaderCondition），ClockSkew 两边都有。NotifyAbandoned（契约 2.39.0，ADR 0173）：最近 1 小时内某个渠道放弃投递了消息内容，subject 为渠道。控制台必须容忍以后新增的类型',
       },
       status: { type: 'string', description: 'true 表示该问题正在发生', enum: ['true', 'false'] },
       role: { type: 'string', enum: ['server', 'worker', 'mcp', 'reader', 'gateway'] },
@@ -3613,8 +3614,15 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
                   'datasource',
                   'internal',
                 ],
+                description: '失败类型，取原因码登记表 contract/reason-codes.json 的 research_failure 分组',
               },
               message: { type: 'string' },
+              state: {
+                type: 'string',
+                enum: ['stage_a_only', 'failed'],
+                description:
+                  'worker 写入的研判状态（契约 2.39.0，ADR 0172）：stage_a_only 为模型预算、熔断或出站策略使研判没有结论，只出阶段 A；failed 为其余失败。server 的研判镜像取这个值，与 worker 一致；契约 2.39.0 之前的 worker 不写',
+              },
             },
           },
         },
@@ -6977,6 +6985,74 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
           hypothesis_id: { type: ['string', 'null'], pattern: '^h[1-9]$' },
           evidence_refs: { type: 'array', items: { $ref: 'common.schema.json#/$defs/EvidenceRef' } },
           expected_effect: { type: 'string', maxLength: 300 },
+        },
+      },
+    },
+  },
+  'https://srenautix.io/contract/schemas/reason-codes.schema.json': {
+    $schema: 'https://json-schema.org/draft/2020-12/schema',
+    $id: 'https://srenautix.io/contract/schemas/reason-codes.schema.json',
+    title: 'ReasonCodeRegistry',
+    description:
+      '终态原因码登记表（数据在 contract/reason-codes.json，ADR 0172）：通知、阶段 A、研判、自愈 PR、事件 issue 与事件状态的每个终态都带一个登记过的原因码。代码只能写登记表里的值（packages/contract 生成的类型保证），时间线（TimelineEntry.code、level）、群消息的说明行与指标 srenautix_terminal_states_total{stage,code,level} 用同一张表',
+    type: 'object',
+    additionalProperties: false,
+    required: ['groups', 'codes'],
+    properties: {
+      $schema: { type: 'string' },
+      groups: {
+        type: 'object',
+        description:
+          '原因码分组：一个分组对应代码或契约中的一个取值集合（例如研判失败类型、通知放弃的原因），分组内的原因码属于同一个阶段。契约中有对应枚举的分组，契约测试校验两边相同',
+        propertyNames: { pattern: '^[a-z][a-z0-9_]*$' },
+        additionalProperties: { $ref: '#/$defs/Group' },
+      },
+      codes: { type: 'array', description: '原因码；(stage, code) 唯一', items: { $ref: '#/$defs/Entry' } },
+    },
+    $defs: {
+      Stage: {
+        title: 'ReasonStage',
+        type: 'string',
+        description:
+          '原因码所属的阶段：notify 通知；stage_a 阶段 A；research 阶段 B 研判与入队；remediation 自愈 PR；issue 事件 issue；incident 事件状态',
+        enum: ['notify', 'stage_a', 'research', 'remediation', 'issue', 'incident'],
+      },
+      Level: {
+        title: 'ReasonLevel',
+        type: 'string',
+        description:
+          'info 正常的终态；warning 需要留意但有其他告警或条件覆盖；error 不应发生的终态，SreNautixAbnormalTerminalStates 按它告警',
+        enum: ['info', 'warning', 'error'],
+      },
+      Group: {
+        title: 'ReasonCodeGroup',
+        type: 'object',
+        additionalProperties: false,
+        required: ['stage', 'description'],
+        properties: { stage: { $ref: '#/$defs/Stage' }, description: { type: 'string' } },
+      },
+      Entry: {
+        title: 'ReasonCodeEntry',
+        type: 'object',
+        additionalProperties: false,
+        required: ['code', 'stage', 'level', 'groups', 'text'],
+        properties: {
+          code: { type: 'string', pattern: '^[a-z][a-z0-9_]*$' },
+          stage: { $ref: '#/$defs/Stage' },
+          level: { $ref: '#/$defs/Level' },
+          groups: {
+            type: 'array',
+            description: '所属的分组（分组的阶段与原因码的阶段相同）',
+            minItems: 1,
+            items: { type: 'string', pattern: '^[a-z][a-z0-9_]*$' },
+          },
+          text: {
+            type: 'object',
+            description: '说明，用于时间线、群消息的说明行与控制台；写成能接在“原因：”之后的短语',
+            additionalProperties: false,
+            required: ['zh-CN', 'en'],
+            properties: { 'zh-CN': { type: 'string', minLength: 1 }, en: { type: 'string', minLength: 1 } },
+          },
         },
       },
     },

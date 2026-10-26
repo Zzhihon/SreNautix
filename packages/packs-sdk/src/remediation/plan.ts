@@ -1,7 +1,7 @@
 // 修复补丁的计划（ADR 0103）：按模板与事件上下文读取仓库，修改文件，生成 git diff 格式的补丁。
 // 补丁直接作为 gitops_pr 的 params.patch；server 负责何时调用、PR 描述与提议，这里不写任何仓库。
 
-import type { LocalizedText, RepositoryLayout } from '@srenautix/contract';
+import type { LocalizedText, ReasonGroupCode, RepositoryLayout } from '@srenautix/contract';
 import { loadPromqlEngine, toIso } from '@srenautix/integration-sdk';
 import { structuredPatch } from 'diff';
 import { toCelSeries } from '../judge/data.js';
@@ -84,16 +84,8 @@ export interface RemediationTarget {
   layout: RepositoryLayout;
 }
 
-export type SkipCode =
-  | 'not_applicable'
-  | 'layout_missing'
-  | 'input_failed'
-  | 'evaluation_error'
-  | 'skip_if'
-  | 'target_not_found'
-  | 'ambiguous_target'
-  | 'no_change'
-  | 'guard';
+/** 模板计划跳过的原因：原因码登记表（contract/reason-codes.json）的 remediation_plan 分组 */
+export type SkipCode = ReasonGroupCode<'remediation_plan'>;
 
 export interface RemediationSkip {
   kind: 'skipped';

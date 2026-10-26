@@ -3,7 +3,17 @@ import { join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { parse } from 'yaml';
-import { assertValid, CONTRACT_VERSION, ContractViolation, SCHEMAS, validatorFor } from '../src/index.js';
+import {
+  assertValid,
+  CONTRACT_VERSION,
+  ContractViolation,
+  REASON_CODE_GROUPS,
+  REASON_CODES,
+  reasonEntry,
+  reasonText,
+  SCHEMAS,
+  validatorFor,
+} from '../src/index.js';
 
 const contractDir = resolve(fileURLToPath(import.meta.url), '../../../../contract');
 const fixture = (name: string): Record<string, unknown> =>
@@ -42,6 +52,75 @@ describe('schema 注册', () => {
         expect(() => validatorFor(`${f}#/$defs/${name}`)).not.toThrow();
       }
     }
+  });
+});
+
+describe('原因码登记表（ADR 0172）', () => {
+  const registry = JSON.parse(readFileSync(join(contractDir, 'reason-codes.json'), 'utf8')) as {
+    groups: Record<string, { stage: string }>;
+    codes: Array<{ code: string; stage: string; groups: string[] }>;
+  };
+  const group = (g: string) =>
+    registry.codes
+      .filter((e) => e.groups.includes(g))
+      .map((e) => e.code)
+      .sort();
+  const schemaEnum = (file: string, pointer: string): string[] => {
+    const doc = file.endsWith('.yaml')
+      ? (parse(readFileSync(join(contractDir, file), 'utf8')) as unknown)
+      : (JSON.parse(readFileSync(join(contractDir, file), 'utf8')) as unknown);
+    const node = pointer
+      .split('/')
+      .slice(1)
+      .reduce<unknown>((n, k) => (n as Record<string, unknown>)[k.replaceAll('~1', '/')], doc) as { enum: unknown[] };
+    return node.enum.filter((x): x is string => x !== null).sort();
+  };
+
+  it('符合登记表的 schema，生成的数据与文件相同', () => {
+    expect(() => assertValid('schemas/reason-codes.schema.json', registry)).not.toThrow();
+    expect(REASON_CODES).toEqual(registry.codes);
+    expect(REASON_CODE_GROUPS).toEqual(registry.groups);
+  });
+
+  it('(stage, code) 唯一，分组存在且与原因码同一阶段，每个分组至少有一个原因码', () => {
+    const keys = registry.codes.map((e) => `${e.stage}/${e.code}`);
+    expect(new Set(keys).size).toBe(keys.length);
+    for (const e of registry.codes) {
+      for (const g of e.groups) {
+        expect(registry.groups[g]?.stage, `${e.stage}/${e.code} 的分组 ${g}`).toBe(e.stage);
+      }
+    }
+    for (const g of Object.keys(registry.groups)) {
+      expect(group(g).length, g).toBeGreaterThan(0);
+    }
+  });
+
+  it('研判失败类型与 ResearchFailed.kind 相同', () => {
+    expect(group('research_failure')).toEqual(
+      schemaEnum('schemas/events.schema.json', '/$defs/ResearchFailed/properties/payload/properties/kind'),
+    );
+  });
+
+  it('停止原因与研判输出、研判运行、主动优化输出的 stop_reason 相同', () => {
+    expect(group('research_stop')).toEqual(
+      schemaEnum('schemas/research-output.schema.json', '/properties/stop_reason'),
+    );
+    expect(group('research_stop')).toEqual(
+      schemaEnum('openapi.yaml', '/components/schemas/ResearchRun/properties/stop_reason'),
+    );
+    expect(group('research_stop')).toEqual(
+      schemaEnum('schemas/optimization-output.schema.json', '/properties/stop_reason'),
+    );
+  });
+
+  it('通知放弃的原因是渠道永久错误加上编辑次数用完', () => {
+    expect(group('notify_abandon')).toEqual([...group('notify_permanent'), 'ended_edit_cap'].sort());
+  });
+
+  it('reasonEntry 只认登记过的原因码', () => {
+    expect(reasonEntry('research', 'lease_expired').level).toBe('error');
+    expect(reasonText('notify', 'withheld_severity', 'zh')).toBe('不推送：严重度不在推送范围内');
+    expect(() => reasonEntry('notify', 'lease_expired')).toThrow(/不在登记表/);
   });
 });
 

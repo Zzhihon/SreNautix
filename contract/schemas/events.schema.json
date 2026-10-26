@@ -233,9 +233,15 @@
                 "invalid_output",
                 "datasource",
                 "internal"
-              ]
+              ],
+              "description": "失败类型，取原因码登记表 contract/reason-codes.json 的 research_failure 分组"
             },
-            "message": { "type": "string" }
+            "message": { "type": "string" },
+            "state": {
+              "type": "string",
+              "enum": ["stage_a_only", "failed"],
+              "description": "worker 写入的研判状态（契约 2.39.0，ADR 0172）：stage_a_only 为模型预算、熔断或出站策略使研判没有结论，只出阶段 A；failed 为其余失败。server 的研判镜像取这个值，与 worker 一致；契约 2.39.0 之前的 worker 不写"
+            }
           }
         }
       }

@@ -18,6 +18,7 @@
         "PackLoadFailed",
         "BudgetCutoffHigh",
         "ChannelDeliveryFailed",
+        "NotifyAbandoned",
         "AuditExportLagging",
         "ClockSkew",
         "StateStoreDegraded",
@@ -30,7 +31,7 @@
         "Datasource",
         "AlertReconcile"
       ],
-      "description": "server、worker 等角色的条件；InformersFresh、TunnelConnected、QueryManifest、Datasource、AlertReconcile 由分支 reader 的心跳转来（role 为 reader，见 gateway/v1/reader.openapi.yaml 的 ReaderCondition），ClockSkew 两边都有。控制台必须容忍以后新增的类型"
+      "description": "server、worker 等角色的条件；InformersFresh、TunnelConnected、QueryManifest、Datasource、AlertReconcile 由分支 reader 的心跳转来（role 为 reader，见 gateway/v1/reader.openapi.yaml 的 ReaderCondition），ClockSkew 两边都有。NotifyAbandoned（契约 2.39.0，ADR 0173）：最近 1 小时内某个渠道放弃投递了消息内容，subject 为渠道。控制台必须容忍以后新增的类型"
     },
     "status": {
       "type": "string",

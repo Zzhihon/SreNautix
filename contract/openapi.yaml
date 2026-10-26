@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: SreNautix hub API
-  version: 2.38.0
+  version: 2.39.0
   license:
     name: Apache-2.0
     identifier: Apache-2.0
@@ -387,7 +387,7 @@ paths:
     get:
       tags: [incidents]
       operationId: getIncidentTimeline
-      description: 事件时间线（一条泳道）：告警触发与恢复、变更、异常卡、研判与提议的状态变化
+      description: 事件时间线（一条泳道）：告警触发与恢复、变更、异常卡、阶段 A、研判、通知、自愈 PR、issue、提议与事件状态的变化；每个终态带原因码（ADR 0172）
       x-srenautix-roles: [viewer, responder, approver, auditor, admin]
       x-srenautix-external: true
       responses:
@@ -2168,7 +2168,7 @@ components:
     TimelineEntry:
       type: object
       additionalProperties: false
-      required: [at, kind, text, ref, untrusted]
+      required: [at, kind, text, ref, untrusted, code, level]
       properties:
         at: { $ref: './schemas/common.schema.json#/$defs/Timestamp' }
         kind:
@@ -2182,13 +2182,32 @@ components:
               incident_merged,
               incident_split,
               stage_a,
+              stage_a_missing,
               research_concluded,
+              research_ended,
               remediation_attempt,
+              notify,
+              issue,
+              incident_state,
               proposal,
               execution,
               feedback,
             ]
-          description: remediation_attempt 为自愈 PR 对一次研判的处理结果（契约 2.38.0，ADR 0170）：text 写模板、结果、原因码与原因，ref 为研判的 run_id
+          description: |
+            remediation_attempt：自愈 PR 对一次研判的处理结果（ADR 0170），text 写模板、结果与原因，ref 为研判的 run_id；
+            research_concluded：研判结束并给出结论，code 为检验循环的停止原因；
+            research_ended：研判没有结论（失败或只出阶段 A，code 为失败类型）、入队时跳过、租约过期、被取代或不进入阶段 B，ref 为 run_id（不进入阶段 B 时为空）；
+            stage_a_missing：阶段 A 执行失败（stage_a_failed，text 带错误摘要）与补跑后仍没有报告（stage_a_missing）；
+            notify：消息送达、编辑次数用完后的最后一次编辑、放弃投递与不推送的决定，ref 为渠道与渠道目标（不推送时为空）；
+            issue：事件 issue 开出、跳过与失败；
+            incident_state：事件恢复、重开、被抑制（text 带抑制的原因）与写入失败
+        code:
+          type: [string, 'null']
+          pattern: '^[a-z][a-z0-9_]*$'
+          description: 原因码，取原因码登记表 contract/reason-codes.json 中所属阶段的值（契约 2.39.0，ADR 0172）；阶段由 kind 决定（stage_a_missing → stage_a，research_* → research，remediation_attempt → remediation，notify、issue → 同名阶段，incident_state → incident）。告警、变更、卡与提议等没有原因码的条目为 null，自愈 PR 提出提议（proposed）时为 null
+        level:
+          oneOf: [{ type: 'null' }, { $ref: './schemas/reason-codes.schema.json#/$defs/Level' }]
+          description: 原因码在登记表中的级别；code 为 null 时为 null
         text: { type: string }
         ref: { type: [string, 'null'], description: 关联对象的 id（alert_id、change_id、run_id、proposal_id 等） }
         untrusted: { type: boolean, description: text 含告警、日志或变更来源的原文，只作为文本显示 }
