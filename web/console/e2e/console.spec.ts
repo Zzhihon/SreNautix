@@ -122,7 +122,7 @@ test('事件详情：结论头、内联待审批、标签页写进 URL；不可�
   await expect(page).toHaveURL(/tab=evidence/);
 });
 
-test('反馈：进行中的事件可以对处置判断与根因分别反馈，"根因错"可以不选真实根因', async ({ page }) => {
+test('反馈：进行中的事件可以对处置判断与根因分别反馈，"根因错"可以不选真实根因，拒绝时原因必选', async ({ page }) => {
   await go(page, `/incidents/${s.incidentId}`);
   const form = page.getByRole('form', { name: '研判反馈' });
   await expect(form).toBeVisible();
@@ -132,10 +132,13 @@ test('反馈：进行中的事件可以对处置判断与根因分别反馈，"�
   await form.getByRole('group', { name: '根因组件' }).getByRole('button', { name: '错' }).click();
   await form.getByLabel('真实根因组件').selectOption({ label: '不知道真实根因' });
   await expect(form.getByText(/不生成回放用例/)).toBeVisible();
-  await form.getByLabel('原因（可选）').fill('上游依赖先出问题');
+  await expect(form.getByRole('button', { name: '提交反馈' })).toBeDisabled();
+  await form.getByLabel('原因', { exact: true }).selectOption('external_upstream');
+  await form.getByLabel('补充说明（可选）').fill('上游依赖先出问题');
   await form.getByRole('button', { name: '提交反馈' }).click();
   const done = page.getByRole('status').filter({ hasText: '处置判断错，应为升级' });
   await expect(done).toContainText('根因错，真实根因未知');
+  await expect(done).toContainText('外部上游');
   await expect(done).toContainText('（console）');
 });
 
