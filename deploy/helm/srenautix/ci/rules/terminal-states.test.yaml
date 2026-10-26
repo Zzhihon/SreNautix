@@ -1,0 +1,46 @@
+# promtool test rules：带原因码的终态（ADR 0172）、放弃投递与事件写入失败（ADR 0173）的自身告警
+# （deploy/helm/check.sh 用 observe 配置渲染的规则运行）
+rule_files:
+  - self-rules.yaml
+evaluation_interval: 1m
+tests:
+  - interval: 1m
+    input_series:
+      # error 级别：15 分钟内 4 次，告警
+      - series: 'srenautix_terminal_states_total{namespace="srenautix", stage="stage_a", code="stage_a_failed", level="error"}'
+        values: 0x5 4x5
+      # error 级别：只有 1 次，不告警
+      - series: 'srenautix_terminal_states_total{namespace="srenautix", stage="stage_a", code="stage_a_missing", level="error"}'
+        values: 0x5 1x5
+      # warning 级别：次数再多也不告警
+      - series: 'srenautix_terminal_states_total{namespace="srenautix", stage="research", code="capped", level="warning"}'
+        values: 0x5 10x5
+      # info 级别
+      - series: 'srenautix_terminal_states_total{namespace="srenautix", stage="notify", code="withheld_severity", level="info"}'
+        values: 0x5 30x5
+      - series: 'srenautix_notify_abandoned_total{namespace="srenautix", channel="telegram", reason="ended_edit_cap"}'
+        values: 0x7 1x3
+      - series: 'srenautix_notify_abandoned_total{namespace="srenautix", channel="feishu", reason="invalid_card"}'
+        values: 0x10
+      - series: 'srenautix_incident_persist_errors_total{namespace="srenautix", cluster_id="prod"}'
+        values: 0x8 1x2
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: SreNautixAbnormalTerminalStates
+        exp_alerts:
+          - exp_labels: {severity: warning, srenautix_self: "true", team: platform, namespace: srenautix, stage: stage_a, code: stage_a_failed}
+            exp_annotations: {summary: "stage_a 的异常终态 stage_a_failed 15 分钟内出现 4 次"}
+      - eval_time: 10m
+        alertname: SreNautixNotifyAbandoned
+        exp_alerts:
+          - exp_labels: {severity: warning, srenautix_self: "true", team: platform, namespace: srenautix, channel: telegram, reason: ended_edit_cap}
+            exp_annotations: {summary: "渠道 telegram 放弃投递了消息内容（ended_edit_cap），群里的消息停在旧内容"}
+      - eval_time: 10m
+        alertname: SreNautixIncidentPersistErrors
+        exp_alerts:
+          - exp_labels: {severity: warning, srenautix_self: "true", team: platform, namespace: srenautix, cluster_id: prod}
+            exp_annotations: {summary: "集群 prod 有事件写入失败，这些事件停在写入之前的版本"}
+      # 15 分钟后没有新的增加：告警结束
+      - eval_time: 30m
+        alertname: SreNautixAbnormalTerminalStates
+        exp_alerts: []

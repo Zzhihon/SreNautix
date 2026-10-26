@@ -127,6 +127,29 @@ spec:
             {{- toYaml $labels | nindent 12 }}
           annotations:
             summary: "渠道 {{ "{{" }} $labels.channel {{ "}}" }} 投递持续失败"
+        # 放弃投递的内容不重试，不计入投递失败：群里的消息停在旧内容（ADR 0145、0173）
+        - alert: SreNautixNotifyAbandoned
+          expr: sum by (namespace, channel, reason) (increase(srenautix_notify_abandoned_total{ {{- $sel -}} }[15m])) > 0
+          labels:
+            severity: warning
+            {{- toYaml $labels | nindent 12 }}
+          annotations:
+            summary: "渠道 {{ "{{" }} $labels.channel {{ "}}" }} 放弃投递了消息内容（{{ "{{" }} $labels.reason {{ "}}" }}），群里的消息停在旧内容"
+        - alert: SreNautixIncidentPersistErrors
+          expr: sum by (namespace, cluster_id) (increase(srenautix_incident_persist_errors_total{ {{- $sel -}} }[15m])) > 0
+          labels:
+            severity: warning
+            {{- toYaml $labels | nindent 12 }}
+          annotations:
+            summary: "集群 {{ "{{" }} $labels.cluster_id {{ "}}" }} 有事件写入失败，这些事件停在写入之前的版本"
+        # 带原因码的终态（ADR 0172）：原因码登记表中级别为 error 的终态 15 分钟内出现 3 次以上
+        - alert: SreNautixAbnormalTerminalStates
+          expr: sum by (namespace, stage, code) (increase(srenautix_terminal_states_total{level="error", {{ $sel }}}[15m])) >= 3
+          labels:
+            severity: warning
+            {{- toYaml $labels | nindent 12 }}
+          annotations:
+            summary: "{{ "{{" }} $labels.stage {{ "}}" }} 的异常终态 {{ "{{" }} $labels.code {{ "}}" }} 15 分钟内出现 {{ "{{" }} $value {{ "}}" }} 次"
         - alert: SreNautixUntestedCompetitorRatioHigh
           expr: max by (namespace) (srenautix_research_untested_competitor_ratio{ {{- $sel -}} }) > 0.1
           for: 1d

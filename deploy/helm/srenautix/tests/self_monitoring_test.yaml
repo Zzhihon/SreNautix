@@ -38,6 +38,29 @@ tests:
             alert: SreNautixStageALatencyHigh
           any: true
 
+  - it: 带原因码的终态：error 级别 15 分钟内 3 次以上告警，标签带阶段与原因码（ADR 0172）
+    documentSelector: {path: kind, value: PrometheusRule}
+    asserts:
+      - equal:
+          path: "spec.groups[0].rules[?(@.alert == 'SreNautixAbnormalTerminalStates')].expr"
+          value: >-
+            sum by (namespace, stage, code) (increase(srenautix_terminal_states_total{level="error", namespace="srenautix"}[15m])) >= 3
+      - equal:
+          path: "spec.groups[0].rules[?(@.alert == 'SreNautixAbnormalTerminalStates')].labels.severity"
+          value: warning
+
+  - it: 放弃投递与事件写入失败增加即告警（ADR 0173）
+    documentSelector: {path: kind, value: PrometheusRule}
+    asserts:
+      - equal:
+          path: "spec.groups[0].rules[?(@.alert == 'SreNautixNotifyAbandoned')].expr"
+          value: >-
+            sum by (namespace, channel, reason) (increase(srenautix_notify_abandoned_total{namespace="srenautix"}[15m])) > 0
+      - equal:
+          path: "spec.groups[0].rules[?(@.alert == 'SreNautixIncidentPersistErrors')].expr"
+          value: >-
+            sum by (namespace, cluster_id) (increase(srenautix_incident_persist_errors_total{namespace="srenautix"}[15m])) > 0
+
   - it: 每个启用的角色一个 ServiceMonitor
     asserts:
       - containsDocument: {kind: ServiceMonitor, apiVersion: monitoring.coreos.com/v1, name: t-srenautix-server, any: true}

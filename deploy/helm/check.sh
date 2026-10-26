@@ -48,6 +48,9 @@ helm template ci "$chart_dir" --namespace srenautix --kube-version "$kube_versio
   --set selfMonitoring.routeLabels.team=platform --show-only templates/self-monitoring.yaml |
   yq 'select(.kind == "PrometheusRule") | .spec' >"$out_dir/self-rules.yaml"
 promtool check rules "$out_dir/self-rules.yaml"
+# 带原因码的终态、放弃投递与事件写入失败的告警（observe 配置就有）
+cp "$chart_dir/ci/rules/terminal-states.test.yaml" "$out_dir/"
+promtool test rules "$out_dir/terminal-states.test.yaml"
 if $with_gateway; then
   # standard 配置有 server、worker、reader、gateway；状态条件告警按各角色的方向（files/conditions.json（契约 contract/conditions.json 的副本））
   helm template ci "$chart_dir" --namespace srenautix --kube-version "$kube_version" \
