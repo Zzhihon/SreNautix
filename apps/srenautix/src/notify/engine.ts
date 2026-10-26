@@ -164,8 +164,8 @@ export class NotifyEngine {
   private async syncChat(a: ChannelAdapter, chat: ChatTarget, all: DesiredIncidentMessage[], now: Date): Promise<void> {
     const existing = await this.store.messages(a.channel, chat.chat, 'incident');
     const byIncident = new Map(existing.map((m) => [m.incidentId as string, m]));
-    // 外部上游的事件进入周期汇总，不单独发消息；之前已经发出的消息照常编辑（ADR 0147）
-    const desired = all.filter((d) => d.digest !== 'external' || byIncident.has(d.incidentId));
+    // 外部上游的事件进入周期汇总（ADR 0147），计划内退役的事件不推送（ADR 0167），都不单独发消息；之前已经发出的消息照常编辑
+    const desired = all.filter((d) => (d.digest !== 'external' && !d.withheld) || byIncident.has(d.incidentId));
     for (const m of existing) {
       if (m.externalId) {
         this.known.set(msgKey(a.channel, chat.chat, m.incidentId as string), {

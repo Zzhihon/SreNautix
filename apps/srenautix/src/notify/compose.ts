@@ -101,6 +101,7 @@ const T = {
     dispositionReason: {
       suppressed: '命中抑制规则',
       pack_exclude: '命中领域包的排除规则',
+      planned_retirement: '全部告警由计划内的退役解释',
       forecast_or_chronic_only: '只有预测类与长期告警',
       rule_action: '有动作明确的规则提议',
       critical_ambiguous: 'critical 且根因有歧义',
@@ -326,6 +327,7 @@ const T = {
     dispositionReason: {
       suppressed: 'matched a suppression rule',
       pack_exclude: 'matched a pack exclusion rule',
+      planned_retirement: 'every alert is explained by a planned retirement',
       forecast_or_chronic_only: 'only forecast and chronic alerts',
       rule_action: 'a rule proposal with a clear action',
       critical_ambiguous: 'critical with an ambiguous root cause',

@@ -6,10 +6,11 @@ import type { DispositionFacts } from './types.js';
 
 // 处置推导（ADR 0138）：模型给出的处置是输入之一，最终处置由代码按确定性依据推导。
 // - 观测失明时一律 escalate；
-// - ignore 只在确定性依据成立时给出（不论模型给出什么）：阶段 A 已判为 ignore；研判根因（likely 及以上）是领域包声明的
-//   集群外部组件；没有任何异常卡；影响卡全部正常。四种依据都要求没有有效提议、没有规则提议、修复模板使用的根因上没有
-//   适用的修复模板（ignore 不带修复）。证据基线判为常态的异常卡（ADR 0153）在这里按正常计；
-// - 有触发中的 critical 业务影响告警（处置依据的 business_impact），并且有规则判定的异常卡时，四种依据都不成立，
+// - ignore 只在确定性依据成立时给出（不论模型给出什么）：阶段 A 已判为 ignore（全部告警由计划内的退役解释时依据记为
+//   planned_retirement，ADR 0167）；研判根因（likely 及以上）是领域包声明的集群外部组件；没有任何异常卡；影响卡全部正常。
+//   这些依据都要求没有有效提议、没有规则提议、修复模板使用的根因上没有适用的修复模板（ignore 不带修复）。证据基线判为
+//   常态的异常卡（ADR 0153）在这里按正常计；
+// - 有触发中的业务影响告警（处置依据的 business_impact，ADR 0166），并且有规则判定的异常卡时，这些依据都不成立，
 //   模型给出的 ignore 按严重度改写（ADR 0163）；
 // - 最低取证集合没有覆盖（ADR 0153）时，除阶段 A 已判为 ignore 之外，不给 ignore，也不给 act；
 // - 模型给出 ignore 而没有依据时按严重度改写（critical 为 escalate，其余为 undetermined）；
@@ -28,10 +29,15 @@ export const FIX_CATEGORIES: ReadonlySet<string> = new Set(['release_rollback', 
 /** 研判根因达到这些档位时，修复模板按研判根因匹配（与 remediation/service.ts 的 RESEARCH_ROOT_LEVELS 相同，ADR 0126） */
 const RESEARCH_ROOT_LEVELS: ReadonlySet<ConclusionLevel> = new Set(['likely', 'evidence_consistent']);
 
-/** 阶段 A 的确定性 ignore（DESIGN §7.1）：命中抑制、领域包排除，或只有预测类与长期告警 */
-const STAGE_A_IGNORE: ReadonlySet<string> = new Set(['suppressed', 'pack_exclude', 'forecast_or_chronic_only']);
+/** 阶段 A 的确定性 ignore（DESIGN §7.1）：命中抑制、领域包排除、计划内的退役（ADR 0167），或只有预测类与长期告警 */
+const STAGE_A_IGNORE: ReadonlySet<string> = new Set([
+  'suppressed',
+  'pack_exclude',
+  'planned_retirement',
+  'forecast_or_chronic_only',
+]);
 
-export type IgnoreBasis = 'stage_a' | 'external' | 'evidence_normal' | 'impact_normal';
+export type IgnoreBasis = 'stage_a' | 'planned_retirement' | 'external' | 'evidence_normal' | 'impact_normal';
 
 export interface DispositionInput {
   /** 模型给出的处置 */
@@ -78,7 +84,7 @@ export function fixTemplates(facts: DispositionFacts | null | undefined, root: s
 }
 
 /**
- * 不能 ignore 的业务影响（ADR 0163）：有触发中的 critical 业务影响告警，并且有领域包规则判定的异常卡（证据基线判为常态的
+ * 不能 ignore 的业务影响（ADR 0163、0166）：有触发中的业务影响告警，并且有领域包规则判定的异常卡（证据基线判为常态的
  * 不算）。成立时返回说明，否则为 null
  */
 function impactHeld(i: DispositionInput): string | null {
@@ -89,7 +95,7 @@ function impactHeld(i: DispositionInput): string | null {
   if (!alerts.length || !abnormal.length) {
     return null;
   }
-  return `${alerts.length} 条 critical 业务影响告警在触发，${abnormal.length} 张证据卡异常（${abnormal
+  return `${alerts.length} 条业务影响告警在触发，${abnormal.length} 张证据卡异常（${abnormal
     .slice(0, 3)
     .map((c) => c.ref)
     .join('、')}${abnormal.length > 3 ? ' 等' : ''}）`;
@@ -101,7 +107,9 @@ function ignoreBasis(i: DispositionInput, templates: readonly string[]): { basis
     return null;
   }
   if (i.stageA.disposition === 'ignore' && STAGE_A_IGNORE.has(i.stageA.disposition_reason)) {
-    return { basis: 'stage_a', why: `阶段 A 判为 ignore（${i.stageA.disposition_reason}）` };
+    return i.stageA.disposition_reason === 'planned_retirement'
+      ? { basis: 'planned_retirement', why: '阶段 A 判为 ignore：全部成员告警由计划内的退役解释，没有业务影响告警' }
+      : { basis: 'stage_a', why: `阶段 A 判为 ignore（${i.stageA.disposition_reason}）` };
   }
   if (i.gaps?.length) {
     return null;

@@ -233,6 +233,7 @@
   "verdict.no_report": "还没有阶段 A 报告。",
   "verdict.stage_a.suppressed": "命中抑制规则，SreNautix 不发送消息也不研判。",
   "verdict.stage_a.pack_exclude": "命中领域包的排除规则。",
+  "verdict.stage_a.planned_retirement": "全部告警由计划内的退役解释，没有业务影响告警，不需要处理；SreNautix 不发送消息。",
   "verdict.stage_a.forecast_or_chronic_only": "只有预测类告警和长期告警，不需要处理。",
   "verdict.stage_a.rule_action": "{root} 有动作明确的规则提议。",
   "verdict.stage_a.critical_ambiguous": "critical 事件，根因在 {root} 和其他候选之间有歧义，需要升级。",

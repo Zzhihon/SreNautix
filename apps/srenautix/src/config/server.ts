@@ -6,6 +6,8 @@ import { DEFAULT_REVISION_LABELS } from '../changes/kubernetes.js';
 import { DEFAULT_EXTERNAL_LABELS, isComponentKey } from '@srenautix/core';
 import { DEFAULT_OPTIMIZATION, optimizationConfig, pgReadConnection } from '../optimize/config.js';
 import { NOVELTY_CONFIG_DEFAULT, noveltyConfig } from './novelty.js';
+import { alertMatcher, upgradeMatchers } from '../alerts/business-impact.js';
+import { logger } from '../log.js';
 
 const duration = z.string().regex(/^\d+(ms|s|m|h|d)$/, '时长形如 30s、5m、12h');
 const url = z.string().url();
@@ -208,7 +210,6 @@ const EXTERNAL_ROOTS_DEFAULT = {
   components: [] as string[],
   alert_labels: {} as Record<string, string[]>,
   business_impact: {
-    alert_labels: {} as Record<string, string[]>,
     impact_cards: true,
     within: '30m',
     topology_hops: 6,
@@ -217,8 +218,9 @@ const EXTERNAL_ROOTS_DEFAULT = {
 
 // 外部上游的周期汇总（ADR 0147）：根因是领域包声明 external 的组件类型（例如模型服务方）、components 列出的组件，
 // 或全部成员告警都满足 alert_labels 的事件，不逐条推送、不开 issue，每个周期（按 UTC 对齐，1h 即整点）汇总一条；
-// 同时有与这个上游事件相关的业务影响（ADR 0150：business_impact 的告警或 impact_cards 为 true 时其他事件异常的影响卡，
-// 在上游事件开始后 within 之内开始，或组件沿依赖边 topology_hops 跳以内到达上游根因；本事件异常的影响卡）时照常即时推送
+// 同时有与这个上游事件相关的业务影响（ADR 0150：notify.business_impact_alerts 定义的业务影响告警（ADR 0166），或
+// impact_cards 为 true 时其他事件异常的影响卡，在上游事件开始后 within 之内开始，或组件沿依赖边 topology_hops 跳以内到达
+// 上游根因；本事件异常的影响卡）时照常即时推送
 const externalRoots = z
   .object({
     enabled: z.boolean().default(true),
@@ -227,14 +229,13 @@ const externalRoots = z
     alert_labels: labelMatch.default({}),
     business_impact: z
       .object({
-        alert_labels: labelMatch.default({}),
         impact_cards: z.boolean().default(true),
         within: duration.default('30m'),
         // 0 时不按拓扑判定
         topology_hops: z.number().int().min(0).max(12).default(6),
       })
       .strict()
-      .default({ alert_labels: {}, impact_cards: true, within: '30m', topology_hops: 6 }),
+      .default({ impact_cards: true, within: '30m', topology_hops: 6 }),
   })
   .strict();
 
@@ -638,9 +639,10 @@ export const serverConfigSchema = z
           .object({ external_roots: externalRoots.default(EXTERNAL_ROOTS_DEFAULT) })
           .strict()
           .default({ external_roots: EXTERNAL_ROOTS_DEFAULT }),
-        // 业务影响类事件的判定（ADR 0159），只用于首条消息时延指标的 business_impact 标签：第一条消息送达时，
-        // 事件有一个成员告警满足其中任一项（项内每个标签都要满足，取值之一即可）即为业务影响类
-        business_impact_alerts: z.array(labelMatch).default([{ severity: ['critical'] }]),
+        // 业务影响告警（ADR 0166）：满足任一项的告警。首条消息时延的 business_impact 标签（ADR 0159）、外部上游汇总的
+        // 业务影响（ADR 0150）、处置推导中业务受影响时不给 ignore（ADR 0163）与计划内退役判为 ignore 的前提（ADR 0167）
+        // 都用它。为空时没有业务影响告警
+        business_impact_alerts: z.array(alertMatcher).default([]),
       })
       .strict()
       .default({
@@ -648,7 +650,7 @@ export const serverConfigSchema = z
         severities: ['critical', 'warning'],
         resolved_retention: '6h',
         digest: { external_roots: EXTERNAL_ROOTS_DEFAULT },
-        business_impact_alerts: [{ severity: ['critical'] }],
+        business_impact_alerts: [],
       }),
     approvals: z
       .object({
@@ -754,13 +756,34 @@ export function loadServerConfig(path: string): ServerConfig {
 /**
  * 解析之前的兼容与明确拒绝：
  * - kind: git 的变更源不支持（hub 镜像不带 git，ADR 0096），给出改用 kind: github 的说明；
- * - 2.5 版的 topology.override_pr.github（App 身份与仓库写在一起）迁移到 github_app 与 topology.override_pr。
+ * - 2.5 版的 topology.override_pr.github（App 身份与仓库写在一起）迁移到 github_app 与 topology.override_pr；
+ * - 业务影响告警（ADR 0166）：notify.digest.external_roots.business_impact.alert_labels 与 notify.business_impact_alerts
+ *   中标签条件本身的项转换为匹配器，返回弃用说明。
  */
-function upgradeRaw(raw: unknown): unknown {
+export function upgradeRaw(raw: unknown): { raw: unknown; deprecated: string[] } {
   if (!raw || typeof raw !== 'object') {
-    return raw;
+    return { raw, deprecated: [] };
   }
   const r = structuredClone(raw) as Record<string, unknown>;
+  const deprecated: string[] = [];
+  const notify = r.notify as Record<string, unknown> | undefined;
+  if (notify && typeof notify === 'object') {
+    const xr = (notify.digest as { external_roots?: { business_impact?: Record<string, unknown> } } | undefined)
+      ?.external_roots;
+    const bi = xr?.business_impact;
+    const legacyLabels = bi && typeof bi === 'object' ? bi.alert_labels : undefined;
+    const up = upgradeMatchers(notify.business_impact_alerts, legacyLabels, {
+      current: 'notify.business_impact_alerts',
+      legacy: 'notify.digest.external_roots.business_impact.alert_labels',
+    });
+    if (up.value !== undefined) {
+      notify.business_impact_alerts = up.value;
+    }
+    if (bi && typeof bi === 'object') {
+      delete bi.alert_labels;
+    }
+    deprecated.push(...up.deprecated);
+  }
   const changes = r.changes as { sources?: Array<{ id?: unknown; kind?: unknown }> } | undefined;
   for (const src of changes?.sources ?? []) {
     if (src?.kind === 'git') {
@@ -782,11 +805,15 @@ function upgradeRaw(raw: unknown): unknown {
       Object.entries({ repo, base_branch, dir }).filter(([, v]) => v !== undefined),
     ) as typeof legacy;
   }
-  return r;
+  return { raw: r, deprecated };
 }
 
 export function parseServerConfig(raw: unknown): ServerConfig {
-  const r = serverConfigSchema.safeParse(upgradeRaw(raw));
+  const up = upgradeRaw(raw);
+  for (const d of up.deprecated) {
+    logger.warn('server 配置使用了弃用的写法', { detail: d });
+  }
+  const r = serverConfigSchema.safeParse(up.raw);
   if (!r.success) {
     throw new ConfigError(
       `server 配置不合法：${r.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('；')}`,

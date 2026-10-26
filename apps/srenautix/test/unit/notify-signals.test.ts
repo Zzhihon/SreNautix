@@ -260,7 +260,7 @@ describe('外部上游的周期汇总（ADR 0147）', () => {
         triggers: 1,
       },
     ],
-    impact: { labels: { layer: ['L0'] }, alerts: [], cards: [] },
+    impact: { condition: 'layer=L0', alerts: [], cards: [] },
   };
   const prev: ExternalWindowStats = {
     from: '2026-10-24T09:00:00.000Z',
@@ -269,7 +269,7 @@ describe('外部上游的周期汇总（ADR 0147）', () => {
       provider('01a13f9e-132d-7803-9a7e-5c8730c4f01e', 'Kimi', { triggers: 3 }),
       provider('01a154f6-c1dd-710e-b7b2-14352afe477d', '柚子'),
     ],
-    impact: { labels: { layer: ['L0'] }, alerts: [], cards: [] },
+    impact: { condition: 'layer=L0', alerts: [], cards: [] },
   };
 
   it('Telegram：一条摘要，每个上游一行，带关键数值、触发次数与上一时段、恢复情况与业务影响；按 Bot API 严格解析', () => {
@@ -303,7 +303,7 @@ describe('外部上游的周期汇总（ADR 0147）', () => {
       ...cur,
       roots: [{ ...cur.roots[0]!, immediate: true }],
       impact: {
-        labels: { layer: ['L0'] },
+        condition: 'layer=L0',
         alerts: [
           {
             alertname: 'CCHPErrorBudgetBurnFast',

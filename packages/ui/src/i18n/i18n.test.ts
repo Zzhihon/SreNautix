@@ -71,6 +71,7 @@ const ENUMS: Record<string, readonly string[]> = {
   'verdict.stage_a': [
     'suppressed',
     'pack_exclude',
+    'planned_retirement',
     'forecast_or_chronic_only',
     'rule_action',
     'critical_ambiguous',

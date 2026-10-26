@@ -270,7 +270,7 @@ describe('重放、重建阶段 A 与研判输入', () => {
       evidence_concurrency: 4,
       query_timeout_seconds: 30,
       novelty: NOVELTY_CONFIG_DEFAULT,
-      business_impact_labels: {},
+      business_impact_alerts: [],
     });
     const r = await replay(
       bundle,
@@ -322,7 +322,7 @@ describe('重放、重建阶段 A 与研判输入', () => {
         catalog: Catalog.load(),
         locale: 'zh-CN',
         signal: AbortSignal.timeout(60_000),
-        impactLabels: {},
+        impactAlerts: [],
       },
     );
     assertValid<EvalSnapshot>('schemas/eval-snapshot.schema.json', rc.snapshot);
@@ -390,7 +390,7 @@ describe('影子环境统计（只读）', () => {
       evidence_concurrency: 4,
       query_timeout_seconds: 30,
       novelty: NOVELTY_CONFIG_DEFAULT,
-      business_impact_labels: {},
+      business_impact_alerts: [],
     });
     const s = await liveStats(state, CLUSTER, new Date(T0), new Date(T0 + 60 * MIN));
     expect(s.incidents).toBe(0);

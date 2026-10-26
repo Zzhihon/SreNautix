@@ -258,7 +258,18 @@ beforeEach(async () => {
       periodMs: 3_600_000,
       components: ['component:provider'],
       alertLabels: { theme: ['provider'] },
-      impact: { alertLabels: { layer: ['L0'] }, impactCards: true, withinMs: 30 * 60_000, topologyHops: 6 },
+      impact: {
+        // 业务影响告警：L0–L2 的 critical，排除 provider 组件（ADR 0166）
+        alerts: [
+          {
+            labels: { layer: ['L0', 'L1', 'L2'], severity: ['critical'] },
+            exclude_labels: { component: ['provider'] },
+          },
+        ],
+        impactCards: true,
+        withinMs: 30 * 60_000,
+        topologyHops: 6,
+      },
     },
     externalTypeLookup(
       () => TYPES,
@@ -376,7 +387,9 @@ describe('外部上游的周期汇总', () => {
     const lines = text.split('\n');
     expect(lines[0]).toBe('[影子] 外部上游汇总 10:00–11:00 UTC');
     expect(text).toContain('本时段 4 个上游有问题（上一时段 0 个）：新增 4、持续 0；未恢复 3、已恢复 1。');
-    expect(text).toContain('业务影响：无（与上游事件相关的业务告警 layer=L0 0 条，相关的影响卡无异常）');
+    expect(text).toContain(
+      '业务影响：无（与上游事件相关的业务告警 layer=L0|L1|L2,severity=critical,component!=provider 0 条，相关的影响卡无异常）',
+    );
     const items = lines.filter((l) => l.startsWith('- '));
     expect(items).toHaveLength(4);
     expect(items[0]).toBe('- [严重] Kimi provider 故障率 35.2% · 触发 1 次 · 新增 · 未恢复');
@@ -435,12 +448,35 @@ describe('外部上游的周期汇总', () => {
     );
   });
 
-  it('上游事件开始之前就在触发的业务告警（长期的 L0 warning）不算业务影响：不即时推送，汇总写明没有相关的业务告警', async () => {
+  it('provider 组件的 L1 critical 告警按 exclude_labels 不算业务影响：不即时推送，汇总写明没有相关的业务告警', async () => {
+    const { kimi, theme } = await seedHour();
+    await insertAlert({
+      alertname: 'CCHPProviderPoolExhausted',
+      labels: { layer: 'L1', component: 'provider' },
+      severity: 'critical',
+      startsAt: min(52),
+      endsAt: null,
+      component: 'component:provider',
+    });
+    await round(min(53));
+    expect(sent()).toHaveLength(0);
+    expect(await source.externalState(kimi)).toBe('firing');
+    expect(await source.externalState(theme)).toBe('firing');
+    await round(min(61.5));
+    expect(sent()).toHaveLength(1);
+    const { text } = parseTelegramHtml(String(sent()[0]!.text));
+    expect(text).toContain(
+      '业务影响：无（与上游事件相关的业务告警 layer=L0|L1|L2,severity=critical,component!=provider 0 条，相关的影响卡无异常）',
+    );
+    expect(text).not.toContain('波及业务');
+  });
+
+  it('上游事件开始之前就在触发的业务告警（长期的 L0 critical）不算业务影响：不即时推送，汇总写明没有相关的业务告警', async () => {
     const { kimi, theme } = await seedHour();
     await insertAlert({
       alertname: 'CCHPErrorBudgetBurnSteady',
       labels: { layer: 'L0', component: 'edge-envoy' },
-      severity: 'warning',
+      severity: 'critical',
       startsAt: new Date(H10 - 18 * 3_600_000),
       endsAt: null,
       component: 'component:edge-envoy',
@@ -452,7 +488,9 @@ describe('外部上游的周期汇总', () => {
     await round(min(61.5));
     expect(sent()).toHaveLength(1);
     const { text } = parseTelegramHtml(String(sent()[0]!.text));
-    expect(text).toContain('业务影响：无（与上游事件相关的业务告警 layer=L0 0 条，相关的影响卡无异常）');
+    expect(text).toContain(
+      '业务影响：无（与上游事件相关的业务告警 layer=L0|L1|L2,severity=critical,component!=provider 0 条，相关的影响卡无异常）',
+    );
     expect(text).not.toContain('波及业务');
   });
 

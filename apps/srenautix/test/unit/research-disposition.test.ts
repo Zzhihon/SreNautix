@@ -257,7 +257,7 @@ describe('处置依据的计算', () => {
       resolve,
       scope,
       alertFacts: new Map(),
-      impactLabels: { layer: ['L0'] },
+      impactAlerts: [{ labels: { layer: ['L0'] }, exclude_labels: {} }],
     });
     expect(f).toEqual({
       external: [PROVIDER],
@@ -285,7 +285,7 @@ describe('处置依据的计算', () => {
       resolve: toPg,
       scope: appScope,
       alertFacts: new Map(),
-      impactLabels: {},
+      impactAlerts: [],
     });
     expect(withApp.declared).toEqual([PG]);
     const off = await dispositionFacts({
@@ -299,7 +299,7 @@ describe('处置依据的计算', () => {
       resolve,
       scope,
       alertFacts: new Map(),
-      impactLabels: {},
+      impactAlerts: [],
     });
     expect(off.remediations).toEqual([]);
   });

@@ -3190,11 +3190,12 @@ export interface StageAReport {
   incident_version: number;
   disposition: Disposition;
   /**
-   * suppressed：命中抑制规则；pack_exclude：命中领域包的排除规则；forecast_or_chronic_only：只有 forecast 和长期告警；rule_action：有动作明确的规则提议；critical_ambiguous：critical 且根因有歧义；observability_blind：观测失明；default：其余情况
+   * suppressed：命中抑制规则；pack_exclude：命中领域包的排除规则；planned_retirement：全部成员告警由带 planned_by 的退役解释，并且没有业务影响告警（契约 2.36.0）；forecast_or_chronic_only：只有 forecast 和长期告警；rule_action：有动作明确的规则提议；critical_ambiguous：critical 且根因有歧义；observability_blind：观测失明；default：其余情况
    */
   disposition_reason:
     | 'suppressed'
     | 'pack_exclude'
+    | 'planned_retirement'
     | 'forecast_or_chronic_only'
     | 'rule_action'
     | 'critical_ambiguous'
@@ -3470,7 +3471,7 @@ export interface EvalDispositionFacts {
    */
   declared?: ComponentKey[];
   /**
-   * 触发中的 critical 业务影响告警（ADR 0163）：事件成员中严重度为 critical、标签满足 server 的业务影响条件的告警 id。有这些告警并且有异常卡时处置不能是 ignore；契约 2.34.0 之前的快照没有这个字段
+   * 触发中的业务影响告警（ADR 0163、0166）：事件成员中状态为 firing、满足 server 的 notify.business_impact_alerts 的告警 id（契约 2.36.0 起严重度写在匹配器里，2.34.0、2.35.0 的 server 另外要求 critical）。有这些告警并且有异常卡时处置不能是 ignore；契约 2.34.0 之前的快照没有这个字段
    */
   business_impact?: string[];
   /**

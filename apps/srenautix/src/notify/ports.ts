@@ -29,6 +29,11 @@ export interface DesiredIncidentMessage {
    * 省略或 null 时照常推送
    */
   digest?: 'external' | null;
+  /**
+   * planned_retirement：阶段 A 判为 ignore，全部告警由计划内的退役解释（ADR 0167），不推送新消息；已经有消息的事件照常编辑。
+   * 省略或 null 时照常推送
+   */
+  withheld?: 'planned_retirement' | null;
 }
 
 /** 按钮作用的对象：kind 与 NotifyButton.kind 一致。 */

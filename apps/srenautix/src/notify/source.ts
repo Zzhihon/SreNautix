@@ -1,5 +1,6 @@
 import type { Alert, Feedback, Incident, NotifyMessage, Proposal, StageAReport } from '@srenautix/contract';
 import type pg from 'pg';
+import { isBusinessImpact, type AlertMatcher } from '../alerts/business-impact.js';
 import { subgraphOf } from '../console-bff/routes-incidents.js';
 import { alertsById } from '../ingest/store.js';
 import type { FeedbackService } from '../proposals/feedback.js';
@@ -19,16 +20,8 @@ export interface SourceSettings {
   consoleUrl: string;
   severities: string[];
   resolvedRetentionMs: number;
-  /** 业务影响类事件的成员告警条件（notify.business_impact_alerts，ADR 0159）；不给出时不记录首条消息时延 */
-  businessImpactAlerts?: ReadonlyArray<Record<string, string[]>>;
-}
-
-/** 告警标签满足其中一项（项内每个标签都满足、取值之一即可） */
-export function matchesAnyLabels(
-  labels: Record<string, string>,
-  matchers: ReadonlyArray<Record<string, string[]>>,
-): boolean {
-  return matchers.some((m) => Object.entries(m).every(([k, vs]) => labels[k] !== undefined && vs.includes(labels[k])));
+  /** 业务影响告警（notify.business_impact_alerts，ADR 0159、0166）；不给出时不记录首条消息时延 */
+  businessImpactAlerts?: readonly AlertMatcher[];
 }
 
 /** 报告需要的领域数据：告警目录的可读标题、动作目录的执行后校验、链接模板 */
@@ -189,7 +182,7 @@ export class PgMessageSource implements MessageSource {
     incidentId: string,
     messageId: number,
     at: Date,
-    matchers: ReadonlyArray<Record<string, string[]>>,
+    matchers: readonly AlertMatcher[],
   ): Promise<FirstMessage | null> {
     const r = await this.pool.query<{
       body: Incident;
@@ -212,7 +205,7 @@ export class PgMessageSource implements MessageSource {
     return {
       onsetMs: incidentOnsetMs(row.body),
       origin: incidentOrigin(row.body),
-      businessImpact: row.labels.some((l) => matchesAnyLabels(l, matchers)),
+      businessImpact: row.labels.some((l) => isBusinessImpact(l, matchers)),
     };
   }
 
@@ -260,6 +253,10 @@ export class PgMessageSource implements MessageSource {
       );
       return {
         ...(c?.external && !c.impact.length ? { digest: 'external' as const } : {}),
+        // 全部告警由计划内的退役解释（ADR 0167）：不推送新消息
+        ...(input.stageA.disposition_reason === 'planned_retirement'
+          ? { withheld: 'planned_retirement' as const }
+          : {}),
         incidentId: inc.incident_id,
         clusterId: inc.cluster_id,
         label: inc.label,

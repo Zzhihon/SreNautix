@@ -165,7 +165,7 @@
         },
         "business_impact": {
           "type": "array",
-          "description": "触发中的 critical 业务影响告警（ADR 0163）：事件成员中严重度为 critical、标签满足 server 的业务影响条件的告警 id。有这些告警并且有异常卡时处置不能是 ignore；契约 2.34.0 之前的快照没有这个字段",
+          "description": "触发中的业务影响告警（ADR 0163、0166）：事件成员中状态为 firing、满足 server 的 notify.business_impact_alerts 的告警 id（契约 2.36.0 起严重度写在匹配器里，2.34.0、2.35.0 的 server 另外要求 critical）。有这些告警并且有异常卡时处置不能是 ignore；契约 2.34.0 之前的快照没有这个字段",
           "items": { "type": "string" }
         },
         "remediations": {

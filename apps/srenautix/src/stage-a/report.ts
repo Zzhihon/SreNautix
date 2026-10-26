@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
-import type { Alert, Disposition, EvidenceResult, Incident, StageAReport } from '@srenautix/contract';
-import { evidenceFingerprint } from '@srenautix/core';
+import type { Alert, ChangeEvent, Disposition, EvidenceResult, Incident, StageAReport } from '@srenautix/contract';
+import { CHANGE_ONSET_TOLERANCE_MS, evidenceFingerprint } from '@srenautix/core';
+import { isBusinessImpact, type AlertMatcher } from '../alerts/business-impact.js';
 import { changeNotes } from '../changes/notes.js';
-import { matchesLabels } from '../notify/external.js';
 import { isRoutine } from './novelty.js';
 import type { RequiredEvidence } from './required.js';
 
@@ -27,32 +27,77 @@ export interface DispositionInput {
   ruleActions: number;
   /** 领域包排除规则命中的规则 id。 */
   excludedBy: string | null;
-  /** 业务影响告警的标签条件（notify.digest.external_roots.business_impact.alert_labels，ADR 0163）；空时不判断 */
-  impactLabels?: Readonly<Record<string, readonly string[]>>;
+  /** 业务影响告警（notify.business_impact_alerts，ADR 0166）；为空时没有业务影响告警 */
+  impactAlerts?: readonly AlertMatcher[];
+}
+
+/** 事件现有成员中的业务影响告警（ADR 0166），不论状态 */
+function impactMembers(
+  incident: Pick<Incident, 'members'>,
+  alerts: readonly Alert[],
+  matchers: readonly AlertMatcher[] | undefined,
+): Alert[] {
+  if (!matchers?.length) {
+    return [];
+  }
+  const members = new Set(incident.members.filter((m) => m.left_version === null).map((m) => m.alert_id));
+  return alerts.filter((a) => members.has(a.alert_id) && isBusinessImpact(a.labels, matchers));
 }
 
 /**
- * 触发中的 critical 业务影响告警（ADR 0163）：事件的成员中状态为 firing、严重度为 critical、标签满足业务影响条件的告警 id。
- * 标签条件为空时没有业务影响告警
+ * 触发中的业务影响告警（ADR 0163、0166）：事件的成员中状态为 firing、满足 notify.business_impact_alerts 的告警 id。
+ * 没有匹配器时没有业务影响告警
  */
 export function businessImpactAlerts(
   incident: Pick<Incident, 'members'>,
   alerts: readonly Alert[],
-  labels: Readonly<Record<string, readonly string[]>> | undefined,
+  matchers: readonly AlertMatcher[] | undefined,
 ): string[] {
-  if (!labels || Object.keys(labels).length === 0) {
-    return [];
+  return impactMembers(incident, alerts, matchers)
+    .filter((a) => a.status === 'firing')
+    .map((a) => a.alert_id);
+}
+
+/**
+ * 计划内退役（ADR 0167）：事件现有的每一条成员告警都由事件变更中一次带 planned_by 的退役（kind retire）解释，并且成员中
+ * 没有业务影响告警（不论状态）。一条告警由退役解释：告警不早于退役时刻减去 CHANGE_ONSET_TOLERANCE_MS 开始，并且
+ * 告警的 job 标签在退役带走的抓取 job（scrape_jobs）里，或告警的组件是被退役的工作负载（targets 中不是管理应用的那些）。
+ * 成立时返回解释这些告警的退役变更，否则为 null
+ */
+export function plannedRetirement(
+  incident: Pick<Incident, 'members' | 'changes'>,
+  alerts: readonly Alert[],
+  matchers: readonly AlertMatcher[] | undefined,
+): ChangeEvent[] | null {
+  const planned = incident.changes.filter((c) => c.kind === 'retire' && (c.planned_by?.length ?? 0) > 0);
+  if (!planned.length) {
+    return null;
   }
   const members = new Set(incident.members.filter((m) => m.left_version === null).map((m) => m.alert_id));
-  return alerts
-    .filter(
-      (a) =>
-        members.has(a.alert_id) &&
-        a.status === 'firing' &&
-        a.severity === 'critical' &&
-        matchesLabels(a.labels, labels),
-    )
-    .map((a) => a.alert_id);
+  const own = alerts.filter((a) => members.has(a.alert_id));
+  if (!own.length || own.length !== members.size || impactMembers(incident, alerts, matchers).length) {
+    return null;
+  }
+  const explains = (c: ChangeEvent, a: Alert): boolean => {
+    if (Date.parse(a.starts_at) + CHANGE_ONSET_TOLERANCE_MS < Date.parse(c.time)) {
+      return false;
+    }
+    const job = a.labels.job;
+    if (job !== undefined && (c.scrape_jobs ?? []).includes(job)) {
+      return true;
+    }
+    const managers = new Set(c.refs);
+    return a.component !== null && c.targets.some((t) => t === a.component && !managers.has(t));
+  };
+  const used = new Set<ChangeEvent>();
+  for (const a of own) {
+    const c = planned.find((x) => explains(x, a));
+    if (!c) {
+      return null;
+    }
+    used.add(c);
+  }
+  return [...used];
 }
 
 /** 显示业务受影响的证据：判为异常、并且证据基线没有判为常态的卡（ADR 0153） */
@@ -62,8 +107,8 @@ export function impactEvidence(cards: readonly EvidenceResult[]): EvidenceResult
 
 /**
  * 确定性的处置判断（DESIGN §7.1）：
- * ignore：命中抑制规则、领域包的排除规则，或者只有 forecast 和长期告警；有触发中的 critical 业务影响告警、并且有异常卡
- * 时不给 ignore（ADR 0163）；
+ * ignore：命中抑制规则、领域包的排除规则、全部成员告警由计划内的退役解释（ADR 0167），或者只有 forecast 和长期告警；
+ * 有触发中的业务影响告警、并且有异常卡时不给 ignore（ADR 0163、0166）；
  * act：有动作明确的规则提议；escalate：critical 且有歧义，或者观测失明；undetermined：其余情况。
  */
 export function disposition(i: DispositionInput): {
@@ -71,13 +116,16 @@ export function disposition(i: DispositionInput): {
   reason: StageAReport['disposition_reason'];
 } {
   const held =
-    businessImpactAlerts(i.incident, i.alerts, i.impactLabels).length > 0 && impactEvidence(i.cards).length > 0;
+    businessImpactAlerts(i.incident, i.alerts, i.impactAlerts).length > 0 && impactEvidence(i.cards).length > 0;
   if (!held) {
     if (i.incident.suppressed) {
       return { disposition: 'ignore', reason: 'suppressed' };
     }
     if (i.excludedBy) {
       return { disposition: 'ignore', reason: 'pack_exclude' };
+    }
+    if (plannedRetirement(i.incident, i.alerts, i.impactAlerts)) {
+      return { disposition: 'ignore', reason: 'planned_retirement' };
     }
     const members = new Set(i.incident.members.filter((m) => m.left_version === null).map((m) => m.alert_id));
     const own = i.alerts.filter((a) => members.has(a.alert_id));

@@ -1,6 +1,7 @@
 import type { Alert, ComponentType, EvidenceResult, Incident, TopologyEdge } from '@srenautix/contract';
 import { matchTypeByName, NAMESPACE_KIND, sameKind, tryNodeKey } from '@srenautix/core';
 import { applicableRemediations, type PackSet, type RemediationContext } from '@srenautix/packs-sdk';
+import type { AlertMatcher } from '../alerts/business-impact.js';
 import { matchesLabels } from '../notify/external.js';
 import {
   hintOf,
@@ -21,7 +22,8 @@ import { alertsOf, cardsOf, type AlertFacts } from './render.js';
 //   （managed_by）。修改仓库中的声明就能处置它们；管理着候选根因的 GitOps 应用与逻辑组件不在其中；
 // - remediations：每个候选根因上适用的修复模板，按"研判以它为根因、结论 likely、处置 act"求值，
 //   只保留启用的类别中能消除根因的两类（release_rollback、config_resource）；
-// - business_impact：触发中的 critical 业务影响告警（ADR 0163），这些告警在、并且有异常卡时处置不能是 ignore。
+// - business_impact：触发中的业务影响告警（notify.business_impact_alerts，ADR 0163、0166），这些告警在、并且有异常卡时
+//   处置不能是 ignore。
 // 模板匹配的上下文与自愈 PR（remediation/service.ts）相同：事件、根因展开后的具体对象、阶段 A 的卡与成员告警。
 
 /** 一次研判输入最多为这么多个候选根因求值修复模板 */
@@ -45,8 +47,8 @@ export interface FactsInput {
   scope: Pick<RootCardScope, 'cards' | 'resolve'>;
   /** 成员告警的拓扑事实（alertFacts） */
   alertFacts: ReadonlyMap<string, AlertFacts>;
-  /** 业务影响告警的标签条件（ADR 0163）；空时 business_impact 为空 */
-  impactLabels: Readonly<Record<string, readonly string[]>>;
+  /** 业务影响告警（ADR 0163、0166）；为空时 business_impact 为空 */
+  impactAlerts: readonly AlertMatcher[];
 }
 
 export interface RootLookup {
@@ -262,7 +264,7 @@ export async function dispositionFacts(i: FactsInput): Promise<DispositionFacts>
   const out: DispositionFacts = {
     external: [],
     declared,
-    business_impact: businessImpactAlerts(i.incident, i.alerts, i.impactLabels),
+    business_impact: businessImpactAlerts(i.incident, i.alerts, i.impactAlerts),
     remediations: [],
   };
   const keys = [...new Set(i.roots)].slice(0, MAX_FACT_ROOTS);

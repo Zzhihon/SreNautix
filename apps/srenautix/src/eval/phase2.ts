@@ -240,7 +240,7 @@ export async function runPhase2(o: Phase2Options): Promise<Phase2Result> {
       catalog,
       locale: r.locale,
       signal: AbortSignal.timeout(600_000),
-      impactLabels: r.business_impact_labels,
+      impactAlerts: r.business_impact_alerts,
     });
     const c = labelCase(o.labels, l, o.suite, sid, o.now);
     cases.push({ c, s: rc.snapshot });

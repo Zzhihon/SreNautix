@@ -9,6 +9,7 @@ import type {
 } from '@srenautix/contract';
 import { ACCESS_RELATIONS, displayKey, matchTypeByName, TopologyGraph, tryNodeKey } from '@srenautix/core';
 import type pg from 'pg';
+import { isBusinessImpact, matcherKeys, matchersText, type AlertMatcher } from '../alerts/business-impact.js';
 import { parseStoredKey } from '../topology/keys.js';
 import type { ComposeInput } from './compose.js';
 
@@ -25,9 +26,9 @@ export interface ExternalRootSettings {
   components: readonly string[];
   /** 全部成员告警都满足这些标签条件（每个键取值之一）的事件也按外部上游处理；为空时不用 */
   alertLabels: Readonly<Record<string, readonly string[]>>;
-  /** 业务影响的判定：满足这些标签条件的告警、或异常的影响卡（impact: true），并且与上游事件相关 */
+  /** 业务影响的判定：业务影响告警（notify.business_impact_alerts，ADR 0166）、或异常的影响卡（impact: true），并且与上游事件相关 */
   impact: {
-    alertLabels: Readonly<Record<string, readonly string[]>>;
+    alerts: readonly AlertMatcher[];
     impactCards: boolean;
     /** 在上游事件开始后这么久之内开始的业务告警（与其他事件）算相关；开始早于上游事件的不算 */
     withinMs: number;
@@ -289,12 +290,15 @@ export class ExternalRoots {
     );
   }
 
-  /** 满足业务告警条件的告警，按开始时间排序（[from, to) 内触发过；不给时间段时为当前触发中的） */
+  /** 业务影响告警（ADR 0166），按开始时间排序（[from, to) 内触发过；不给时间段时为当前触发中的） */
   async impactAlerts(clusterIds: readonly string[], from?: Date, to?: Date): Promise<ImpactAlert[]> {
-    const keys = Object.keys(this.s.impact.alertLabels);
-    if (!keys.length || !clusterIds.length) {
+    const matchers = this.s.impact.alerts;
+    if (!matchers.length || !clusterIds.length) {
       return [];
     }
+    // 状态库先按每项 labels 的键预先筛选（满足任一项的键集合），取值与排除在这里判断
+    const keys = JSON.stringify(matcherKeys(matchers));
+    const hasKeys = `EXISTS (SELECT 1 FROM jsonb_array_elements($2::jsonb) k WHERE labels ?& ARRAY(SELECT jsonb_array_elements_text(k)))`;
     const r = await this.pool.query<{
       cluster_id: string;
       alertname: string;
@@ -305,14 +309,14 @@ export class ExternalRoots {
     }>(
       from && to
         ? `SELECT cluster_id, alertname, labels, component, starts_at, ends_at FROM server.alert_state
-            WHERE cluster_id = ANY($1::text[]) AND labels ?& $2::text[] AND starts_at < $4
+            WHERE cluster_id = ANY($1::text[]) AND ${hasKeys} AND starts_at < $4
               AND (ends_at IS NULL OR ends_at >= $3) ORDER BY starts_at, alert_id`
         : `SELECT cluster_id, alertname, labels, component, starts_at, ends_at FROM server.alert_state
-            WHERE cluster_id = ANY($1::text[]) AND labels ?& $2::text[] AND status = 'firing' ORDER BY starts_at, alert_id`,
+            WHERE cluster_id = ANY($1::text[]) AND ${hasKeys} AND status = 'firing' ORDER BY starts_at, alert_id`,
       from && to ? [clusterIds, keys, from, to] : [clusterIds, keys],
     );
     return r.rows
-      .filter((x) => matchesLabels(x.labels, this.s.impact.alertLabels))
+      .filter((x) => isBusinessImpact(x.labels, matchers))
       .map((a) => ({
         cluster_id: a.cluster_id,
         alertname: a.alertname,
@@ -475,7 +479,7 @@ export class ExternalRoots {
           b.triggers - a.triggers ||
           a.root.localeCompare(b.root),
       ),
-      impact: { labels: this.s.impact.alertLabels, alerts: [...alerts.values()], cards },
+      impact: { condition: matchersText(this.s.impact.alerts), alerts: [...alerts.values()], cards },
     };
   }
 
@@ -536,7 +540,8 @@ export interface ExternalWindowStats {
   to: string;
   roots: ExternalRootStat[];
   impact: {
-    labels: Readonly<Record<string, readonly string[]>>;
+    /** 业务影响告警的条件（matchersText）；没有匹配器时为空字符串 */
+    condition: string;
     /** upstream 与 basis：信号相关的外部上游根因与依据（ADR 0150） */
     alerts: Array<{
       alertname: string;
@@ -657,10 +662,6 @@ const D = {
 };
 
 const hhmm = (iso: string) => new Date(iso).toISOString().slice(11, 16);
-const labelsText = (m: Readonly<Record<string, readonly string[]>>) =>
-  Object.entries(m)
-    .map(([k, v]) => `${k}=${v.join('|')}`)
-    .join(',');
 
 /**
  * 汇总消息：一行标题、一行总数与上一时段的对比、一行业务影响，每个上游一行（名称、关键数值、触发次数与上一时段、
@@ -708,7 +709,7 @@ export function composeExternalDigest(
       ]),
     );
   } else {
-    blocks.push(blk('text', [P(d.impactNone(labelsText(cur.impact.labels)))]));
+    blocks.push(blk('text', [P(d.impactNone(cur.impact.condition))]));
   }
   for (const r of cur.roots.slice(0, DIGEST_MAX_ROOTS)) {
     const runs: NotifyRun[] = [];

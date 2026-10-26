@@ -2,6 +2,7 @@ import type { Alert, ChangeEvent, EvidenceResult, Feedback, Incident, TopologyEd
 import { Ajv2020, type ValidateFunction } from 'ajv/dist/2020.js';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type pg from 'pg';
+import type { AlertMatcher } from '../alerts/business-impact.js';
 import type { OutboxListener } from '../events/listener.js';
 import { incidentTarget, visible } from '../console-bff/routes-incidents.js';
 import { principalOf, type Auth } from '../identity/auth.js';
@@ -67,8 +68,8 @@ export interface ResearchRouteDeps {
   dispositionFacts?: {
     lookup: RootLookup;
     categories: readonly string[];
-    /** 业务影响告警的标签条件（ADR 0163） */
-    impactLabels: Readonly<Record<string, readonly string[]>>;
+    /** 业务影响告警（notify.business_impact_alerts，ADR 0163、0166） */
+    impactAlerts: readonly AlertMatcher[];
   } | null;
 }
 
@@ -355,7 +356,7 @@ export function registerResearchRoutes(app: FastifyInstance, d: ResearchRouteDep
               scope: new RootCardScope(d.dispositionFacts.lookup, incident, now),
               // 处置依据只看能消除根因的两类模板（发布回退、配置与资源），它们不读告警的外部上游标记，不需要汇总配置
               alertFacts: await alertFacts(d.dispositionFacts.lookup, incident, alerts, now, NO_EXTERNAL_ALERTS),
-              impactLabels: d.dispositionFacts.impactLabels,
+              impactAlerts: d.dispositionFacts.impactAlerts,
             }),
           }
         : {}),

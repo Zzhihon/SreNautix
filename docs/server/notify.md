@@ -5,6 +5,7 @@ server 角色把每个事件的阶段 A 报告与阶段 B 研判推送到聊天�
 ## 消息模型
 
 - 一个事件在每个群里只有一条消息，内容变化时就地编辑。
+- 阶段 A 判为 ignore、原因是 `planned_retirement`（全部成员告警由计划内的退役解释，没有业务影响告警，ADR 0167）的事件不发新消息；控制台与事件 issue 照常记录，之前已经发出消息的事件照常编辑。
 - 消息由 server 生成渠道无关的 `NotifyMessage`（`contract/integrations/notify/v1/notify.schema.json`，`notify/compose.ts`），渠道适配器负责渲染（ADR 0125）：
   1. 头部：配置的前缀（`notify.prefix`，例如影子部署写 `[影子]`）、严重度与加粗的一句话现状（根因组件与症状）、事件状态、稳定标签、首次触发时间；
   2. 横幅一行：例如"模型研判中""状态库降级""模型输出无效"；
@@ -41,7 +42,7 @@ server 角色把每个事件的阶段 A 报告与阶段 B 研判推送到聊天�
 - 每个周期（`period`，默认 1 小时，按 UTC 对齐即整点）结束 1 分钟后，在每个群发一条汇总，静默发送，之后不再编辑：
   1. 标题：`外部上游汇总 10:00–11:00 UTC`；
   2. 本时段有问题的上游数与上一时段的对比（新增、持续、未恢复、已恢复）；
-  3. 业务影响：本时段触发过、与其中某个上游事件相关的业务告警（`business_impact.alert_labels`）与其他事件异常的影响卡，每项写明相关的上游与依据（例如“在上游 柚子 的事件开始后 21 分钟开始”“拓扑路径 Deployment:shop/checkout → payments”）；没有时写明“无”与所用的告警条件；
+  3. 业务影响：本时段触发过、与其中某个上游事件相关的业务影响告警（`notify.business_impact_alerts`，见下一节）与其他事件异常的影响卡，每项写明相关的上游与依据（例如“在上游 柚子 的事件开始后 21 分钟开始”“拓扑路径 Deployment:shop/checkout → payments”）；没有时写明“无”与所用的告警条件；
   4. 每个上游一行：名称、根因上的关键数值（最多 2 张有值的卡，例如故障率、首字延迟；没有时写告警名）、本时段新触发的成员告警数与上一时段的次数、恢复情况；critical 带“[严重]”，因业务影响已即时推送的写明；
   5. 上一时段有问题、本时段没有告警的上游。
 - 每个时段的统计在周期结束后算一次，存进 `server.notify_external_windows`，汇总消息与下一时段的对比用同一份；周期结束超过半个周期（例如进程停了）的时段不再补发。
@@ -61,14 +62,39 @@ notify:
       period: 1h               # 5m 到 24h
       components: [component:provider]   # 另外按外部上游处理的根因（例如按主题聚合的逻辑组件）
       alert_labels: { theme: [provider] } # 全部成员告警都满足时按外部上游处理
-      business_impact:
-        alert_labels: { layer: [L0] }     # 算作业务影响的告警（标签名 → 取值之一）；其中 critical 的在触发、证据卡异常时，阶段 A 与阶段 B 都不给 ignore（ADR 0163）
+      business_impact:                    # 业务影响告警取 notify.business_impact_alerts（下一节）
         impact_cards: true                # 异常的影响卡算业务影响
         within: 30m                       # 在上游事件开始后这么久之内开始的才算相关
         topology_hops: 6                  # 组件沿依赖边这么多跳以内到达上游根因时也算相关；0 时不按拓扑判定
 ```
 
 chart 的顶层 values `notifyDigest.externalRoots`（键名为驼峰）生成这一节，`roles.server.config.notify.digest` 中同名的键优先。
+
+## 业务影响告警
+
+`notify.business_impact_alerts` 定义哪些告警算业务影响告警（ADR 0166），下面几处都用它：
+
+- 外部上游汇总的业务影响与“上游故障已影响业务”的即时推送（上一节）；
+- 处置推导：事件里有触发中的业务影响告警、并且有异常的证据卡时，阶段 A 与阶段 B 都不给 ignore（ADR 0163）；
+- 计划内退役判为 ignore 的前提：事件成员中没有业务影响告警，不论状态（ADR 0167）；
+- 首条消息时延的 `business_impact` 标签（下文“指标”）。
+
+每项是一个匹配器：`labels` 的每个标签都取列出的值之一，并且 `exclude_labels` 中任何一个标签都不取列出的值；告警满足任一项即为业务影响告警。只看告警的标签，严重度也按 `severity` 标签写在 `labels` 里。不配置时没有业务影响告警。
+
+```yaml
+notify:
+  business_impact_alerts:
+    - labels: { layer: [L0, L1, L2], severity: [critical] }
+      exclude_labels: { component: [provider] }   # 外部上游自己的告警不算业务受影响
+```
+
+弃用的写法在解析前转换，并在日志里记一条警告，下一个版本不再接受：
+
+| 弃用的写法 | 转换为 |
+|---|---|
+| `notify.digest.external_roots.business_impact.alert_labels: X`（没有给出 `notify.business_impact_alerts` 时） | `notify.business_impact_alerts: [{labels: X}]`；不再隐含 `severity: critical`，需要时写进 `labels` |
+| `notify.digest.external_roots.business_impact.alert_labels` 与 `notify.business_impact_alerts` 都给出 | 旧键不生效 |
+| `notify.business_impact_alerts` 中标签条件本身的项，例如 `{severity: [critical]}` | `{labels: {severity: [critical]}}` |
 
 ## 发送队列与限流
 
@@ -145,7 +171,7 @@ chart 的顶层 values `notifyDigest.externalRoots`（键名为驼峰）生成�
 | `srenautix_notify_callbacks_total` | `channel`、`action`、`outcome` |
 | `srenautix_first_message_latency_seconds` | `business_impact`（true、false）、`origin`（new、split） |
 
-首条消息时延（ADR 0159）：每个事件在所有渠道目标上的第一条事件消息送达时记一次，从事件的计时起点（新事件为首个告警触发，拆分出的事件为拆分时刻）算起。送达时事件已有的成员告警中有一条满足 `notify.business_impact_alerts` 的任一项（项内每个标签都满足、取值之一即可；默认 `[{severity: [critical]}]`）时 `business_impact="true"`。进入外部上游周期汇总的事件没有事件消息，不计入。
+首条消息时延（ADR 0159）：每个事件在所有渠道目标上的第一条事件消息送达时记一次，从事件的计时起点（新事件为首个告警触发，拆分出的事件为拆分时刻）算起。送达时事件已有的成员告警中有一条是业务影响告警（`notify.business_impact_alerts`，上文“业务影响告警”）时 `business_impact="true"`；不配置时都是 `false`。进入外部上游周期汇总的事件没有事件消息，不计入。
 
 ## 测试
 

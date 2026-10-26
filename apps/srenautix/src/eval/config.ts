@@ -2,7 +2,9 @@ import { readFileSync } from 'node:fs';
 import { parse } from 'yaml';
 import { z } from 'zod';
 import type { ModelRoute } from '@srenautix/contract';
+import { alertMatcher, upgradeMatchers } from '../alerts/business-impact.js';
 import { readSecretFile } from '../config/files.js';
+import { logger } from '../log.js';
 import { NOVELTY_CONFIG_DEFAULT, noveltyConfig } from '../config/novelty.js';
 import { DEFAULT_BUDGET, type BudgetConfig } from '../llm/budget.js';
 import { resolveTimeouts, type ModelClass, type RouteTimeouts } from '../llm/timeouts.js';
@@ -141,8 +143,9 @@ const schema = z
         query_timeout_seconds: z.number().int().min(5).max(120).default(30),
         // 证据基线（ADR 0153），与 server 的 stage_a.novelty 相同
         novelty: noveltyConfig.default(NOVELTY_CONFIG_DEFAULT),
-        // 业务影响告警的标签条件（ADR 0163），与 server 的 notify.digest.external_roots.business_impact.alert_labels 相同
-        business_impact_labels: z.record(z.string().min(1), z.array(z.string().min(1)).min(1)).default({}),
+        // 业务影响告警（ADR 0163、0166），与 server 的 notify.business_impact_alerts 相同。弃用的 business_impact_labels
+        // 在解析前转换为它（loadEvalConfig）
+        business_impact_alerts: z.array(alertMatcher).default([]),
       })
       .strict()
       .optional(),
@@ -171,9 +174,30 @@ export interface EvalConfig {
 
 /** 只取重建部分（eval export 与只做发现重放时不需要模型密钥） */
 export function loadReconstructConfig(path: string): ReconstructConfig {
-  const r = schema.parse(parse(readFileSync(path, 'utf8'))).reconstruct;
+  const r = schema.parse(upgradeEvalRaw(parse(readFileSync(path, 'utf8')), path)).reconstruct;
   if (!r) {
     throw new Error(`评测配置 ${path} 没有 reconstruct 部分`);
+  }
+  return r;
+}
+
+/** 弃用写法的转换（ADR 0166）：reconstruct.business_impact_labels 转为 reconstruct.business_impact_alerts，记录弃用警告 */
+export function upgradeEvalRaw(raw: unknown, path: string): unknown {
+  const r = raw && typeof raw === 'object' ? (structuredClone(raw) as Record<string, unknown>) : null;
+  const rc = r?.reconstruct as Record<string, unknown> | undefined;
+  if (!r || !rc || typeof rc !== 'object') {
+    return raw;
+  }
+  const up = upgradeMatchers(rc.business_impact_alerts, rc.business_impact_labels, {
+    current: 'reconstruct.business_impact_alerts',
+    legacy: 'reconstruct.business_impact_labels',
+  });
+  if (up.value !== undefined) {
+    rc.business_impact_alerts = up.value;
+  }
+  delete rc.business_impact_labels;
+  for (const d of up.deprecated) {
+    logger.warn('评测配置使用了弃用的写法', { path, detail: d });
   }
   return r;
 }
@@ -187,7 +211,7 @@ export function loadEvalConfig(
   env: Record<string, string | undefined> = process.env,
   only: readonly string[] = [],
 ): EvalConfig {
-  const raw = schema.parse(parse(readFileSync(path, 'utf8')));
+  const raw = schema.parse(upgradeEvalRaw(parse(readFileSync(path, 'utf8')), path));
   const missing = only.filter((id) => !raw.routes.some((r) => r.id === id));
   if (missing.length) {
     throw new Error(

@@ -171,8 +171,11 @@ beforeAll(async () => {
       severities: ['critical', 'warning'],
       resolvedRetentionMs: 6 * 3_600_000,
       businessImpactAlerts: [
-        { severity: ['critical'], layer: ['L0', 'L1', 'L2', 'L3', 'L4'] },
-        { component: ['release'] },
+        {
+          labels: { severity: ['critical'], layer: ['L0', 'L1', 'L2', 'L3', 'L4'] },
+          exclude_labels: { component: ['provider'] },
+        },
+        { labels: { component: ['release'] }, exclude_labels: {} },
       ],
     },
     { delivered: async () => undefined } as unknown as ProposalService,
@@ -228,6 +231,22 @@ describe('首条消息时延', () => {
     expect(await observed({ business_impact: 'true', origin: 'new' })).toEqual({ count: 1, sum: 68 });
     expect(await observed({ business_impact: 'false', origin: 'new' })).toEqual({ count: 1, sum: 68 });
 
+    // L2 的 critical，但组件是 provider：按 exclude_labels 不算业务影响告警（在风暴窗口之外发出）
+    await seed({
+      root: 'component:provider',
+      alertname: 'ProviderErrorRateHigh',
+      labels: { layer: 'L2', component: 'provider' },
+      severity: 'critical',
+      firstFiring: sec(380),
+      created: sec(400),
+      splitFrom: null,
+    });
+    now = sec(402).getTime();
+    await engine.syncOnce();
+    await engine.deliverOnce();
+    expect(fs.calls('POST', send).length).toBe(6);
+    expect(await observed({ business_impact: 'false', origin: 'new' })).toEqual({ count: 2, sum: 90 });
+
     // 57 分钟后从原事件拆分出来，成员告警的首个触发时刻仍是 10:25
     await seed({
       root: 'component:release',
@@ -241,7 +260,7 @@ describe('首条消息时延', () => {
     now = sec(57 * 60 + 15).getTime();
     await engine.syncOnce();
     await engine.deliverOnce();
-    expect(fs.calls('POST', send).length).toBe(6);
+    expect(fs.calls('POST', send).length).toBe(8);
     expect(await observed({ business_impact: 'true', origin: 'split' })).toEqual({ count: 1, sum: 3 });
     // 已有消息的事件之后的编辑与另一个渠道目标的消息不再计入
     expect(await observed({ business_impact: 'true', origin: 'new' })).toEqual({ count: 1, sum: 68 });

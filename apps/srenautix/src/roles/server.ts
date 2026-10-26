@@ -472,7 +472,7 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
           components: xr.components,
           alertLabels: xr.alert_labels,
           impact: {
-            alertLabels: bi.alert_labels,
+            alerts: c.notify.business_impact_alerts,
             impactCards: bi.impact_cards,
             withinMs: parseDuration('notify.digest.external_roots.business_impact.within', bi.within),
             topologyHops: bi.topology_hops,
@@ -632,8 +632,8 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
     metrics,
     () => packs.set.lockDigest,
     (cl, ids) => ingest.reresolve(cl, ids),
-    // 业务影响告警与通知的外部上游判定用同一个定义（ADR 0150、0163）
-    c.notify.digest.external_roots.business_impact.alert_labels,
+    // 业务影响告警：处置推导、通知与首条消息时延用同一个定义（ADR 0166）
+    c.notify.business_impact_alerts,
   );
   let degraded = false;
   const pipeline = new IncidentPipeline(c.cluster_id, engine, stageA, scheduler, pool, metrics, {
@@ -808,7 +808,7 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
         managers: (clusterId, key, at) => topology.targets(clusterId, key, 'managed_by', at),
       },
       categories: c.remediation.enabled && github ? c.remediation.categories : [],
-      impactLabels: c.notify.digest.external_roots.business_impact.alert_labels,
+      impactAlerts: c.notify.business_impact_alerts,
     },
   });
   registerIncidentRoutes(app, { pool, auth, feedback, topology, evidence, worker });

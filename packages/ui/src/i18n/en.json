@@ -233,6 +233,7 @@
   "verdict.no_report": "No stage A report yet.",
   "verdict.stage_a.suppressed": "Matched a suppression; SreNautix neither messages nor researches it.",
   "verdict.stage_a.pack_exclude": "Matched a pack exclusion rule.",
+  "verdict.stage_a.planned_retirement": "Every alert is explained by a planned retirement and none is a business impact alert; nothing to act on, SreNautix sends no message.",
   "verdict.stage_a.forecast_or_chronic_only": "Only forecast and chronic alerts; nothing to act on.",
   "verdict.stage_a.rule_action": "{root} has a rule proposal with a clear action.",
   "verdict.stage_a.critical_ambiguous": "Critical incident with an ambiguous root between {root} and another candidate; escalate.",

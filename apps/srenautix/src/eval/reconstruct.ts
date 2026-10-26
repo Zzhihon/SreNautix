@@ -17,6 +17,7 @@ import {
   TopologyGraph,
   type ResolvedRcaParams,
 } from '@srenautix/core';
+import type { AlertMatcher } from '../alerts/business-impact.js';
 import { resolveAlert, type NodeLookup } from '../alerts/resolve.js';
 import { deriveRollouts, WORKLOAD_KINDS, type WorkloadEvent } from '../changes/kubernetes.js';
 import { STATEFULSET_REVISION_DEDUPE_MS } from '../changes/ksm-rollouts.js';
@@ -973,8 +974,8 @@ export interface AnalysisInputs {
   catalog: Catalog;
   locale: 'zh-CN' | 'en';
   signal: AbortSignal;
-  /** 业务影响告警的标签条件（评测配置的 reconstruct.business_impact_labels，ADR 0163） */
-  impactLabels: Readonly<Record<string, readonly string[]>>;
+  /** 业务影响告警（评测配置的 reconstruct.business_impact_alerts，ADR 0163、0166） */
+  impactAlerts: readonly AlertMatcher[];
 }
 
 export interface ReconstructedCase {
@@ -1036,7 +1037,7 @@ export async function reconstructCase(
     alerts,
     cards: run.cards,
     excludedBy,
-    impactLabels: a.impactLabels,
+    impactAlerts: a.impactAlerts,
     runbooks: run.runbooks,
     ...(run.required ? { required: run.required } : {}),
     degraded: false,
@@ -1077,7 +1078,7 @@ export async function reconstructCase(
     resolve: (key) => remediationRoot(lookup, inc, alerts, key, new Date(asOf)),
     scope: new RootCardScope(lookup, inc, new Date(asOf)),
     alertFacts: await alertFacts(lookup, inc, alerts, new Date(asOf), NO_EXTERNAL_ALERTS),
-    impactLabels: a.impactLabels,
+    impactAlerts: a.impactAlerts,
   });
   const snapshot: EvalSnapshot = {
     snapshot_id: snapshotId,
