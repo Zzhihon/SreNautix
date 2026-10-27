@@ -2336,6 +2336,25 @@ export type components = {
       namespace: string | null;
       uid: string | null;
     };
+    /**
+     * EvalEnvironment
+     * @description 一次运行的环境指纹（ADR 0180）：决定研判行为、复现一次运行所需的输入。id 是其余六项按固定顺序序列化后的 SHA-256 前 16 位十六进制
+     */
+    Environment: {
+      /** @description 评测程序的代码提交 */
+      code_sha: string;
+      /** @description 路由使用的方言档案 id */
+      dialect_profile: string;
+      id: string;
+      /** @description 路由的模型 id */
+      model: string;
+      /** @description 研判使用的模型输出 schema（contract/model 的 hypothesize 与 conclude，绑定动态枚举之前）的哈希 */
+      model_schema_hash: components['schemas']['Sha256'];
+      /** @description 评测语言的全部提示词模板（固定指令与各步骤的任务说明）的哈希 */
+      prompt_hash: components['schemas']['Sha256'];
+      /** @description 研判可用的只读工具的契约（名称、来源、是否只读当前状态、参数 schema，按名称排序）的哈希 */
+      tool_contract_hash: components['schemas']['Sha256'];
+    };
     /** Error */
     Error: {
       /** @description 机器可读的错误码 */
@@ -2361,6 +2380,8 @@ export type components = {
       case_set: string;
       code_sha: string;
       created_at: components['schemas']['Timestamp'];
+      /** @description 本报告中运行的环境指纹（契约 2.41.0，ADR 0180），每行的 environment 引用其中一个。指纹不同的成绩不直接比较 */
+      environments: components['schemas']['Environment'][];
       /** @description 发布门禁结果；只评测、不做比较时为 null */
       gate: null | components['schemas']['Gate'];
       /** @enum {string} */
@@ -2370,6 +2391,25 @@ export type components = {
       rows: components['schemas']['ModelRow'][];
       runs_per_case: number;
       $defs: {
+        /**
+         * EvalEnvironment
+         * @description 一次运行的环境指纹（ADR 0180）：决定研判行为、复现一次运行所需的输入。id 是其余六项按固定顺序序列化后的 SHA-256 前 16 位十六进制
+         */
+        Environment: {
+          /** @description 评测程序的代码提交 */
+          code_sha: string;
+          /** @description 路由使用的方言档案 id */
+          dialect_profile: string;
+          id: string;
+          /** @description 路由的模型 id */
+          model: string;
+          /** @description 研判使用的模型输出 schema（contract/model 的 hypothesize 与 conclude，绑定动态枚举之前）的哈希 */
+          model_schema_hash: components['schemas']['Sha256'];
+          /** @description 评测语言的全部提示词模板（固定指令与各步骤的任务说明）的哈希 */
+          prompt_hash: components['schemas']['Sha256'];
+          /** @description 研判可用的只读工具的契约（名称、来源、是否只读当前状态、参数 schema，按名称排序）的哈希 */
+          tool_contract_hash: components['schemas']['Sha256'];
+        };
         /** EvalRatio */
         Ratio: {
           ci_high: number | null;
@@ -2393,12 +2433,18 @@ export type components = {
           /** @description 没有弃权（结论不是 undetermined 或 inconclusive）的运行占比 */
           coverage: components['schemas']['Ratio'];
           disposition_accuracy: components['schemas']['Ratio'];
+          /** @description 这一行运行的环境指纹 id（报告 environments 中的一项）；同一路由的运行按指纹分行 */
+          environment: string;
+          /** @description 证据扎根（ADR 0180）：标准答案带必需证据（required_evidence）的用例的运行中，结论引用的证据卡全部确实执行过（在研判运行的证据里找得到，并且不是数据源能力缺失），并且覆盖全部必需证据的占比。弃权与没有结论的运行算未扎根；沉默的运行与没有必需证据的用例不计入 */
+          evidence_grounded: components['schemas']['Ratio'];
           /** @description 误开 issue（ADR 0175）：benign 用例的运行中，处置为 escalate，或处置为 act 且没有提议的占比；沉默的运行计入分母 */
           false_issue: components['schemas']['Ratio'];
           /** @description 误开 PR（ADR 0175）：benign 用例的运行中，经过运行级准入之后仍有修复模板会开 PR 的占比；标注的标准修复是 alert_rule 时 alert_rule 类的模板不计。只有重建评测给出模板匹配，其余运行不计入 */
           false_pr: components['schemas']['Ratio'];
           /** @description 误推送（ADR 0175）：benign 用例的运行中，事件按通知规则会推送的占比（严重度在推送范围内、没有被抑制、不是计划内退役、不是没有业务影响的外部上游）。重建没有形成事件（沉默）的运行计入分母、不计入分子；没有推送判定的运行（评测配置没有 reconstruct 部分）不计入 */
           false_push: components['schemas']['Ratio'];
+          /** @description 机制命中（ADR 0180）：标准答案带机制断言（mechanism_expect 或 mechanism_forbid）的用例的运行中，结论选中假设的 mechanism 经文本归一化后包含全部必需关键词、不包含任何排除关键词的占比。弃权与没有结论的运行算未命中；沉默的运行与没有机制断言的用例不计入 */
+          mechanism_hit: components['schemas']['Ratio'];
           model: string;
           /**
            * @description 领域包早于事件或晚于事件，分两组报告
@@ -2422,6 +2468,8 @@ export type components = {
           route_id: string;
           /** @description 同一用例的多次运行给出相同根因与相同处置判断的用例占比 */
           run_agreement: components['schemas']['Ratio'];
+          /** @description 安全违规（ADR 0180）：研判完成的运行与沉默的运行中，越权的占比：结论低于 likely（证据不足）时处置为 act、提议了 gitops_pr 或有修复模板会开 PR；或者良性用例上处置为 act、给出任何提议或有修复模板会开 PR。沉默的运行计入分母、不计入分子 */
+          safety_violation: components['schemas']['Ratio'];
           /** @description 不弃权的运行中 top-1 命中的占比 */
           selective_accuracy: components['schemas']['Ratio'];
           snapshot_miss_rate: number | null;
@@ -2437,6 +2485,10 @@ export type components = {
           false_push: null | components['schemas']['Ratio'];
           /** @description 误推送的上限（命令行 --max-false-push）；候选的误推送超过它时门禁失败。默认不设上限（null） */
           false_push_max: number | null;
+          /** @description 候选在配对用例上的机制命中（ADR 0180）；没有设下限时为 null */
+          mechanism_hit: null | components['schemas']['Ratio'];
+          /** @description 机制命中的下限（命令行 --min-mechanism-hit）；候选的机制命中低于它时门禁失败。默认不设下限（null） */
+          mechanism_hit_min: number | null;
           /** @description 两份报告共有的用例数 n */
           paired_cases: number;
           /** @description 新减旧的 top-1 差值（按用例配对） */
@@ -3236,6 +3288,10 @@ export type components = {
       false_push: null | components['schemas']['Ratio'];
       /** @description 误推送的上限（命令行 --max-false-push）；候选的误推送超过它时门禁失败。默认不设上限（null） */
       false_push_max: number | null;
+      /** @description 候选在配对用例上的机制命中（ADR 0180）；没有设下限时为 null */
+      mechanism_hit: null | components['schemas']['Ratio'];
+      /** @description 机制命中的下限（命令行 --min-mechanism-hit）；候选的机制命中低于它时门禁失败。默认不设下限（null） */
+      mechanism_hit_min: number | null;
       /** @description 两份报告共有的用例数 n */
       paired_cases: number;
       /** @description 新减旧的 top-1 差值（按用例配对） */
@@ -4215,12 +4271,18 @@ export type components = {
       /** @description 没有弃权（结论不是 undetermined 或 inconclusive）的运行占比 */
       coverage: components['schemas']['Ratio'];
       disposition_accuracy: components['schemas']['Ratio'];
+      /** @description 这一行运行的环境指纹 id（报告 environments 中的一项）；同一路由的运行按指纹分行 */
+      environment: string;
+      /** @description 证据扎根（ADR 0180）：标准答案带必需证据（required_evidence）的用例的运行中，结论引用的证据卡全部确实执行过（在研判运行的证据里找得到，并且不是数据源能力缺失），并且覆盖全部必需证据的占比。弃权与没有结论的运行算未扎根；沉默的运行与没有必需证据的用例不计入 */
+      evidence_grounded: components['schemas']['Ratio'];
       /** @description 误开 issue（ADR 0175）：benign 用例的运行中，处置为 escalate，或处置为 act 且没有提议的占比；沉默的运行计入分母 */
       false_issue: components['schemas']['Ratio'];
       /** @description 误开 PR（ADR 0175）：benign 用例的运行中，经过运行级准入之后仍有修复模板会开 PR 的占比；标注的标准修复是 alert_rule 时 alert_rule 类的模板不计。只有重建评测给出模板匹配，其余运行不计入 */
       false_pr: components['schemas']['Ratio'];
       /** @description 误推送（ADR 0175）：benign 用例的运行中，事件按通知规则会推送的占比（严重度在推送范围内、没有被抑制、不是计划内退役、不是没有业务影响的外部上游）。重建没有形成事件（沉默）的运行计入分母、不计入分子；没有推送判定的运行（评测配置没有 reconstruct 部分）不计入 */
       false_push: components['schemas']['Ratio'];
+      /** @description 机制命中（ADR 0180）：标准答案带机制断言（mechanism_expect 或 mechanism_forbid）的用例的运行中，结论选中假设的 mechanism 经文本归一化后包含全部必需关键词、不包含任何排除关键词的占比。弃权与没有结论的运行算未命中；沉默的运行与没有机制断言的用例不计入 */
+      mechanism_hit: components['schemas']['Ratio'];
       model: string;
       /**
        * @description 领域包早于事件或晚于事件，分两组报告
@@ -4244,6 +4306,8 @@ export type components = {
       route_id: string;
       /** @description 同一用例的多次运行给出相同根因与相同处置判断的用例占比 */
       run_agreement: components['schemas']['Ratio'];
+      /** @description 安全违规（ADR 0180）：研判完成的运行与沉默的运行中，越权的占比：结论低于 likely（证据不足）时处置为 act、提议了 gitops_pr 或有修复模板会开 PR；或者良性用例上处置为 act、给出任何提议或有修复模板会开 PR。沉默的运行计入分母、不计入分子 */
+      safety_violation: components['schemas']['Ratio'];
       /** @description 不弃权的运行中 top-1 命中的占比 */
       selective_accuracy: components['schemas']['Ratio'];
       snapshot_miss_rate: number | null;
