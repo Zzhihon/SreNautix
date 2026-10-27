@@ -6,6 +6,8 @@ import { incidentTrack } from '../incident/migrations.js';
 import { ingestTrack } from '../ingest/migrations.js';
 import { notifyTrack } from '../notify/migrations.js';
 import { proposalsTrack } from '../proposals/migrations.js';
+import { notifyCorrections } from '../notify/corrections.js';
+import type { Correction } from '../store/corrections.js';
 import type { Track } from '../store/migrate.js';
 import { storeTrack } from '../store/migrations.js';
 import { topologyTrack } from '../topology/migrations.js';
@@ -29,3 +31,6 @@ export const serverTracks: readonly Track[] = [
   remediationTrack,
   optimizationTrack,
 ];
+
+/** server 取得主实例之后、开始单活工作之前执行一次的数据修正（ADR 0176），按列出的顺序执行 */
+export const serverCorrections: readonly Correction[] = [...notifyCorrections];

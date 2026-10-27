@@ -34,6 +34,11 @@ export interface EngineOptions {
   digestRetentionMs: number;
   /** 外部上游周期汇总的周期（ADR 0147）；没有或为 null 时不汇总 */
   externalDigestPeriodMs?: number | null;
+  /**
+   * 本实例是否仍是主实例（ADR 0176）：同步与投递在写每个渠道目标、每条消息之前检查，主实例切换时一轮进行到一半也立即
+   * 停止写 notify_messages。没有给出时本实例始终写（单实例的测试与工具）
+   */
+  isLeader?: () => boolean;
   now: () => number;
 }
 
@@ -87,6 +92,10 @@ export class NotifyEngine {
     }
   }
 
+  private leader(): boolean {
+    return this.opts.isLeader?.() ?? true;
+  }
+
   limiter(channel: string): ChannelLimiter {
     const l = this.limiters.get(channel);
     if (!l) {
@@ -96,6 +105,9 @@ export class NotifyEngine {
   }
 
   async syncOnce(): Promise<void> {
+    if (!this.leader()) {
+      return;
+    }
     const now = new Date(this.opts.now());
     await this.interactions.expire(now);
     if (!this.staleRendered) {
@@ -110,6 +122,9 @@ export class NotifyEngine {
     await this.recordWithheld([...desired.values()].flat());
     for (const a of this.adapters) {
       for (const chat of a.chats) {
+        if (!this.leader()) {
+          return;
+        }
         await this.syncChat(a, chat, desired.get(chat.language) ?? [], now);
       }
     }
@@ -472,6 +487,9 @@ export class NotifyEngine {
       }
       const rows = await this.store.pending(a.channel, new Date(this.opts.now()), 50);
       for (const row of rows) {
+        if (!this.leader()) {
+          return n;
+        }
         const r = await this.deliverRow(a, limiter, row);
         if (r === 'sent') {
           n++;

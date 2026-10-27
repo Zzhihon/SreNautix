@@ -49,7 +49,7 @@ warning 不先发：没有证据卡的 warning 消息信息量很少，会增加
 - **之后**：最后一次编辑成功时记 `final_edited_at` 与终态记录 `final_edit`，这条消息之后不再投递，期望内容变化也只更新库里的期望状态。
 - **放弃**：最后一次编辑被渠道拒绝时才放弃，原因为 `ended_edit_cap`：永久错误先按纯文本重试一次，仍被拒绝时放弃；其他 4xx 直接放弃。这种放弃在事件仍是已结束时保留，内容再变化也不重试，避免对同一条消息反复请求被拒绝的编辑。
 - **事件重新触发**：编辑计数、`final_edited_at` 与 `ended_edit_cap` 的放弃都清除，消息照常编辑。
-- **已有数据**：库里已有的 `ended_edit_cap` 放弃没有尝试过最后一次编辑，迁移清除它们；渲染器版本加一，启动时这些行按当前代码重新渲染为最后一次编辑的内容。
+- **已有数据**：ADR 0173 之前的版本写下的 `ended_edit_cap` 放弃没有尝试过最后一次编辑，由数据修正 `notify/ended-edit-cap-final-edit` 在新版本取得主实例之后清除（ADR 0176），只清除没有终态记录的放弃；渲染器版本加一，这些行按当前代码重新渲染为最后一次编辑的内容。
 
 ### 5. 放弃的可见性
 
@@ -59,7 +59,7 @@ warning 不先发：没有证据卡的 warning 消息信息量很少，会增加
 
 ## 结果
 
-- 迁移：`notify` 轨道版本 4，`server.notify_messages` 增加 `final_edited_at`，清除已有的 `ended_edit_cap` 放弃；只加列，N-1 版本照常运行。渲染器版本 2。
+- 迁移：`notify` 轨道版本 4，`server.notify_messages` 增加 `final_edited_at`；只加列，N-1 版本照常运行。已有的 `ended_edit_cap` 放弃由取得主实例之后的数据修正清除（ADR 0176）。渲染器版本 2。
 - 实现：`incident/pipeline.ts`（`report`、`retryMissing` 与常量 `STAGE_A_RETRY_AFTER_MS`、`STAGE_A_MAX_RETRIES`、`STAGE_A_RETRIES_PER_ROUND`、`STAGE_A_RETRY_LOOKBACK_MS`）；`notify/source.ts`（外连接、`STAGE_A_MISSING_NOTIFY_MS`、`withheld`）；`notify/compose.ts`（`stageA` 可为 null、说明行、`finalMessage`）；`notify/engine.ts`、`notify/store.ts`（最后一次编辑、只计成功的编辑、放弃的记录）；`console-bff/conditions.ts`、`roles/server.ts`（`NotifyAbandoned`）。
 - 测试：
   - `test/integration/stage-a-missing.test.ts`（真实 PostgreSQL，阶段 A 的写入失败以触发器注入）：一轮中某些事件的阶段 A 抛错，其余事件照常出报告并进入阶段 B，失败写进记录并计数；期限之前不补跑；critical 事件在 Alertmanager 中 60 秒后先发不带证据卡、带说明行的消息，warning 与不到 60 秒的不发；补跑成功后进入阶段 B；补跑失败 3 次后记 `stage_a_missing`、计数并不再补跑；时间线的条目与级别；阶段 A 生成后消息编辑为完整报告；

@@ -49,5 +49,20 @@ CREATE TABLE server.conditions (
 ${auditDdl}
 `,
     },
+    {
+      version: 2,
+      name: 'one-time data corrections run by the leader',
+      phase: 'expand',
+      sql: `
+-- 数据修正（ADR 0176）：迁移只改 schema；会被 N-1 版本按旧语义改写的数据修正，由取得主实例之后的本版本执行一次，
+-- 每个修正一行。holder 是执行它的实例，rows 是改动的行数
+CREATE TABLE server.data_corrections (
+  name text PRIMARY KEY,
+  applied_at timestamptz NOT NULL DEFAULT now(),
+  holder text NOT NULL,
+  rows integer NOT NULL
+);
+`,
+    },
   ],
 };

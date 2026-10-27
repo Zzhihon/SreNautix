@@ -31,6 +31,8 @@ export interface NotifyDeps {
   metrics: ServerMetrics;
   /** 同步、投递与 Telegram 长轮询只在主实例上运行；回调路由在每个副本上都可以处理。 */
   isLeader: () => boolean;
+  /** 成为主实例时 resolve（Leader.acquired）；启动时还不是主实例时，成为主实例之后注册 Telegram webhook */
+  acquired?: () => Promise<void>;
   now?: () => number;
 }
 
@@ -158,6 +160,7 @@ export class NotifyService {
       externalDigestPeriodMs: deps.config.digest.external_roots.enabled
         ? parseDuration('notify.digest.external_roots.period', deps.config.digest.external_roots.period)
         : null,
+      isLeader: deps.isLeader,
       now: this.now,
     });
     if (tg?.enabled && tgAdapter) {
@@ -205,8 +208,18 @@ export class NotifyService {
   async start(signal: AbortSignal): Promise<void> {
     this.abort = new AbortController();
     const s = AbortSignal.any([signal, this.abort.signal]);
-    if (this.telegram?.mode === 'webhook' && this.deps.isLeader()) {
-      await this.telegram.updates.setWebhook(this.deps.publicUrl, this.telegram.secret as string);
+    if (this.telegram?.mode === 'webhook') {
+      const tg = this.telegram;
+      // 主实例注册 webhook：成为主实例（含数据修正完成，ADR 0176）之后注册
+      const register = () => tg.updates.setWebhook(this.deps.publicUrl, tg.secret as string);
+      if (this.deps.isLeader()) {
+        await register();
+      } else if (this.deps.acquired) {
+        void this.deps
+          .acquired()
+          .then(() => (s.aborted ? undefined : register()))
+          .catch((e: unknown) => logger.error('注册 Telegram webhook 失败', { error: e }));
+      }
     }
     this.loops.push(
       this.loop(s, this.syncKick, SYNC_INTERVAL_MS, async () => {

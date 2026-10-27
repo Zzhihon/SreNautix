@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
+import { hostname } from 'node:os';
 import type { ChangeEvent } from '@srenautix/contract';
 import { setExternalLabels, type ResolvedRcaParams } from '@srenautix/core';
 import type { FastifyInstance } from 'fastify';
@@ -72,6 +73,7 @@ import { loadEd25519Private } from '../store/audit.js';
 import { keyringFrom, type Keyring } from '../proposals/assertion.js';
 import { AuditExporter, s3Client } from '../store/audit-export.js';
 import { purgeIdempotencyKeys } from '../store/idempotency.js';
+import { afterCorrections } from '../store/corrections.js';
 import { migrateExpand, migrationsReady } from '../store/migrate.js';
 import { migrateWhenReady } from '../store/migrate-when-ready.js';
 import type { OutboxEvent } from '../store/outbox.js';
@@ -92,7 +94,7 @@ import { RemediationChanges } from '../remediation/dedupe.js';
 import { GitOpsPulls } from '../remediation/pulls.js';
 import { RemediationService } from '../remediation/service.js';
 import { GitRepositoryTargets } from '../remediation/targets.js';
-import { serverTracks } from './server-schema.js';
+import { serverCorrections, serverTracks } from './server-schema.js';
 
 export interface ServerHandle {
   app: FastifyInstance;
@@ -427,18 +429,25 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
     metrics,
   );
 
-  // 领导者
+  // 领导者：取得主实例之后先执行数据修正（ADR 0176），完成之前不做任何单活工作
+  const holder = process.env.POD_NAME ?? hostname();
   const leader =
     serve === 'console'
       ? neverLeader()
-      : c.leader.mode === 'lease'
-        ? leaseLeader({
-            namespace: c.leader.namespace,
-            name: c.leader.name,
-            durationMs: parseDuration('leader.duration', c.leader.duration),
-            kubeconfigPath: c.topology.kubeconfig,
-          })
-        : singleLeader();
+      : afterCorrections(
+          c.leader.mode === 'lease'
+            ? leaseLeader({
+                namespace: c.leader.namespace,
+                name: c.leader.name,
+                durationMs: parseDuration('leader.duration', c.leader.duration),
+                kubeconfigPath: c.topology.kubeconfig,
+                identity: holder,
+              })
+            : singleLeader(),
+          pool,
+          serverCorrections,
+          holder,
+        );
 
   // 通知与 issue 的事件报告（ADR 0125）
   reports = new ReportSource(
@@ -510,6 +519,7 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
     actions: new ServerNotifyActions(pool, proposals, feedback, chatLinks),
     metrics,
     isLeader: () => leader.isLeader(),
+    acquired: () => leader.acquired(),
     ...(o.now ? { now: o.now } : {}),
   });
   // server 判定研判结束（租约过期）后，群消息出现研判失败的说明
