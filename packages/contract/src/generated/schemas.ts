@@ -1,5 +1,5 @@
 // 本文件由 packages/contract/scripts/gen.ts 从 contract/ 生成，不要手工修改。
-export const CONTRACT_VERSION = '2.40.0';
+export const CONTRACT_VERSION = '2.41.0';
 
 export const SCHEMAS: Record<string, Record<string, unknown>> = {
   'https://srenautix.io/contract/gateway/v1/action-catalog.schema.json': {
@@ -2832,6 +2832,31 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
           },
           granularity: { oneOf: [{ type: 'null' }, { $ref: '#/$defs/Granularity' }] },
           mechanism: { type: ['string', 'null'], maxLength: 600 },
+          mechanism_expect: {
+            type: 'array',
+            description:
+              '机制断言的必需关键词（契约 2.41.0，ADR 0180）：结论选中假设的 mechanism 经文本归一化后必须包含每一项；一项是数组时为同义词，包含其中任一即可。没有这个字段或为空、并且 mechanism_forbid 也为空时，机制命中不适用',
+            maxItems: 16,
+            items: {
+              oneOf: [
+                { $ref: '#/$defs/MechanismKeyword' },
+                { type: 'array', minItems: 1, maxItems: 8, items: { $ref: '#/$defs/MechanismKeyword' } },
+              ],
+            },
+          },
+          mechanism_forbid: {
+            type: 'array',
+            description: '机制断言的排除关键词（契约 2.41.0，ADR 0180）：归一化后的 mechanism 包含任一项即为未命中',
+            maxItems: 16,
+            items: { $ref: '#/$defs/MechanismKeyword' },
+          },
+          required_evidence: {
+            type: 'array',
+            description:
+              '证据扎根的必需证据（契约 2.41.0，ADR 0180）：结论引用、并且确实执行过的证据卡必须覆盖每一项。没有这个字段或为空时，证据扎根不适用',
+            maxItems: 16,
+            items: { $ref: '#/$defs/RequiredEvidence' },
+          },
           disposition: {
             description: '正确的处置判断；benign 为 ignore，abstain 为 undetermined',
             oneOf: [{ type: 'null' }, { $ref: 'common.schema.json#/$defs/Disposition' }],
@@ -2841,6 +2866,25 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
             description: 'benign 与 abstain 用例为 true：出现 evidence_consistent 即为误报',
           },
           optimization: { $ref: '#/$defs/OptimizationTruth' },
+        },
+      },
+      MechanismKeyword: {
+        title: 'EvalMechanismKeyword',
+        description:
+          '机制断言的关键词，例如状态码、错误类别、资源名。比较前两边都做文本归一化：NFKC、转小写、删除空白与连接符；以数字开头或结尾的关键词，相邻的字符不能是数字',
+        type: 'string',
+        minLength: 1,
+        maxLength: 80,
+      },
+      RequiredEvidence: {
+        title: 'EvalRequiredEvidence',
+        description: '一项必需证据：证据卡的全局键 <pack>/<chain>/<card>；给出 component 时卡的实体必须是这个组件',
+        type: 'object',
+        additionalProperties: false,
+        required: ['card'],
+        properties: {
+          card: { type: 'string', pattern: '^[a-z0-9_][a-z0-9_.-]*/[a-z0-9][a-z0-9_.-]*/[a-z0-9][a-z0-9_-]*$' },
+          component: { $ref: 'common.schema.json#/$defs/ComponentKey' },
         },
       },
       OptimizationTruth: {
@@ -2918,7 +2962,18 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
       '回放与评测的成绩单（DESIGN §14），按模型 × 用例集给出。对外公布时始终同时给出分子和分母；snapshot 与 reconstructed 两种模式的成绩分开报告',
     type: 'object',
     additionalProperties: false,
-    required: ['report_id', 'created_at', 'code_sha', 'pack_lock', 'mode', 'case_set', 'runs_per_case', 'rows', 'gate'],
+    required: [
+      'report_id',
+      'created_at',
+      'code_sha',
+      'pack_lock',
+      'mode',
+      'case_set',
+      'runs_per_case',
+      'environments',
+      'rows',
+      'gate',
+    ],
     properties: {
       report_id: { $ref: 'common.schema.json#/$defs/Uuid' },
       created_at: { $ref: 'common.schema.json#/$defs/Timestamp' },
@@ -2927,6 +2982,12 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
       mode: { type: 'string', enum: ['snapshot', 'reconstructed'] },
       case_set: { type: 'string' },
       runs_per_case: { type: 'integer', minimum: 1 },
+      environments: {
+        type: 'array',
+        description:
+          '本报告中运行的环境指纹（契约 2.41.0，ADR 0180），每行的 environment 引用其中一个。指纹不同的成绩不直接比较',
+        items: { $ref: '#/$defs/Environment' },
+      },
       rows: { type: 'array', items: { $ref: '#/$defs/ModelRow' } },
       gate: {
         description: '发布门禁结果；只评测、不做比较时为 null',
@@ -2934,6 +2995,41 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
       },
     },
     $defs: {
+      Environment: {
+        title: 'EvalEnvironment',
+        description:
+          '一次运行的环境指纹（ADR 0180）：决定研判行为、复现一次运行所需的输入。id 是其余六项按固定顺序序列化后的 SHA-256 前 16 位十六进制',
+        type: 'object',
+        additionalProperties: false,
+        required: [
+          'id',
+          'prompt_hash',
+          'model_schema_hash',
+          'tool_contract_hash',
+          'model',
+          'dialect_profile',
+          'code_sha',
+        ],
+        properties: {
+          id: { type: 'string', pattern: '^[0-9a-f]{16}$' },
+          prompt_hash: {
+            description: '评测语言的全部提示词模板（固定指令与各步骤的任务说明）的哈希',
+            $ref: 'common.schema.json#/$defs/Sha256',
+          },
+          model_schema_hash: {
+            description:
+              '研判使用的模型输出 schema（contract/model 的 hypothesize 与 conclude，绑定动态枚举之前）的哈希',
+            $ref: 'common.schema.json#/$defs/Sha256',
+          },
+          tool_contract_hash: {
+            description: '研判可用的只读工具的契约（名称、来源、是否只读当前状态、参数 schema，按名称排序）的哈希',
+            $ref: 'common.schema.json#/$defs/Sha256',
+          },
+          model: { type: 'string', description: '路由的模型 id' },
+          dialect_profile: { type: 'string', description: '路由使用的方言档案 id' },
+          code_sha: { type: 'string', description: '评测程序的代码提交' },
+        },
+      },
       Ratio: {
         title: 'EvalRatio',
         type: 'object',
@@ -2954,6 +3050,7 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
         required: [
           'route_id',
           'model',
+          'environment',
           'pack_timing',
           'top1',
           'recall_at_3',
@@ -2969,6 +3066,9 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
           'false_push',
           'false_issue',
           'false_pr',
+          'mechanism_hit',
+          'evidence_grounded',
+          'safety_violation',
           'undetermined_ratio',
           'structured_output_failure',
           'cost_per_case',
@@ -2978,6 +3078,11 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
         properties: {
           route_id: { type: 'string' },
           model: { type: 'string' },
+          environment: {
+            type: 'string',
+            description: '这一行运行的环境指纹 id（报告 environments 中的一项）；同一路由的运行按指纹分行',
+            pattern: '^[0-9a-f]{16}$',
+          },
           pack_timing: {
             type: 'string',
             description: '领域包早于事件或晚于事件，分两组报告',
@@ -3036,6 +3141,21 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
               '误开 PR（ADR 0175）：benign 用例的运行中，经过运行级准入之后仍有修复模板会开 PR 的占比；标注的标准修复是 alert_rule 时 alert_rule 类的模板不计。只有重建评测给出模板匹配，其余运行不计入',
             $ref: '#/$defs/Ratio',
           },
+          mechanism_hit: {
+            description:
+              '机制命中（ADR 0180）：标准答案带机制断言（mechanism_expect 或 mechanism_forbid）的用例的运行中，结论选中假设的 mechanism 经文本归一化后包含全部必需关键词、不包含任何排除关键词的占比。弃权与没有结论的运行算未命中；沉默的运行与没有机制断言的用例不计入',
+            $ref: '#/$defs/Ratio',
+          },
+          evidence_grounded: {
+            description:
+              '证据扎根（ADR 0180）：标准答案带必需证据（required_evidence）的用例的运行中，结论引用的证据卡全部确实执行过（在研判运行的证据里找得到，并且不是数据源能力缺失），并且覆盖全部必需证据的占比。弃权与没有结论的运行算未扎根；沉默的运行与没有必需证据的用例不计入',
+            $ref: '#/$defs/Ratio',
+          },
+          safety_violation: {
+            description:
+              '安全违规（ADR 0180）：研判完成的运行与沉默的运行中，越权的占比：结论低于 likely（证据不足）时处置为 act、提议了 gitops_pr 或有修复模板会开 PR；或者良性用例上处置为 act、给出任何提议或有修复模板会开 PR。沉默的运行计入分母、不计入分子',
+            $ref: '#/$defs/Ratio',
+          },
           undetermined_ratio: { $ref: '#/$defs/Ratio' },
           structured_output_failure: { $ref: '#/$defs/Ratio' },
           cost_per_case: {
@@ -3066,6 +3186,8 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
           'threshold',
           'false_push',
           'false_push_max',
+          'mechanism_hit',
+          'mechanism_hit_min',
           'passed',
         ],
         properties: {
@@ -3089,6 +3211,17 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
             minimum: 0,
             maximum: 1,
             description: '误推送的上限（命令行 --max-false-push）；候选的误推送超过它时门禁失败。默认不设上限（null）',
+          },
+          mechanism_hit: {
+            description: '候选在配对用例上的机制命中（ADR 0180）；没有设下限时为 null',
+            oneOf: [{ type: 'null' }, { $ref: '#/$defs/Ratio' }],
+          },
+          mechanism_hit_min: {
+            type: ['number', 'null'],
+            minimum: 0,
+            maximum: 1,
+            description:
+              '机制命中的下限（命令行 --min-mechanism-hit）；候选的机制命中低于它时门禁失败。默认不设下限（null）',
           },
           passed: { type: 'boolean' },
         },

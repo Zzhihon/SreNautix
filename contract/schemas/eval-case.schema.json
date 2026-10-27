@@ -115,6 +115,29 @@
           "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/Granularity" }]
         },
         "mechanism": { "type": ["string", "null"], "maxLength": 600 },
+        "mechanism_expect": {
+          "type": "array",
+          "description": "机制断言的必需关键词（契约 2.41.0，ADR 0180）：结论选中假设的 mechanism 经文本归一化后必须包含每一项；一项是数组时为同义词，包含其中任一即可。没有这个字段或为空、并且 mechanism_forbid 也为空时，机制命中不适用",
+          "maxItems": 16,
+          "items": {
+            "oneOf": [
+              { "$ref": "#/$defs/MechanismKeyword" },
+              { "type": "array", "minItems": 1, "maxItems": 8, "items": { "$ref": "#/$defs/MechanismKeyword" } }
+            ]
+          }
+        },
+        "mechanism_forbid": {
+          "type": "array",
+          "description": "机制断言的排除关键词（契约 2.41.0，ADR 0180）：归一化后的 mechanism 包含任一项即为未命中",
+          "maxItems": 16,
+          "items": { "$ref": "#/$defs/MechanismKeyword" }
+        },
+        "required_evidence": {
+          "type": "array",
+          "description": "证据扎根的必需证据（契约 2.41.0，ADR 0180）：结论引用、并且确实执行过的证据卡必须覆盖每一项。没有这个字段或为空时，证据扎根不适用",
+          "maxItems": 16,
+          "items": { "$ref": "#/$defs/RequiredEvidence" }
+        },
         "disposition": {
           "description": "正确的处置判断；benign 为 ignore，abstain 为 undetermined",
           "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/Disposition" }]
@@ -124,6 +147,27 @@
           "description": "benign 与 abstain 用例为 true：出现 evidence_consistent 即为误报"
         },
         "optimization": { "$ref": "#/$defs/OptimizationTruth" }
+      }
+    },
+    "MechanismKeyword": {
+      "title": "EvalMechanismKeyword",
+      "description": "机制断言的关键词，例如状态码、错误类别、资源名。比较前两边都做文本归一化：NFKC、转小写、删除空白与连接符；以数字开头或结尾的关键词，相邻的字符不能是数字",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80
+    },
+    "RequiredEvidence": {
+      "title": "EvalRequiredEvidence",
+      "description": "一项必需证据：证据卡的全局键 <pack>/<chain>/<card>；给出 component 时卡的实体必须是这个组件",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["card"],
+      "properties": {
+        "card": {
+          "type": "string",
+          "pattern": "^[a-z0-9_][a-z0-9_.-]*/[a-z0-9][a-z0-9_.-]*/[a-z0-9][a-z0-9_-]*$"
+        },
+        "component": { "$ref": "common.schema.json#/$defs/ComponentKey" }
       }
     },
     "OptimizationTruth": {
