@@ -349,7 +349,7 @@ remediation:
 
 卡的引用按研判运行时的证据解析：检查产生的卡取研判输出的 `check_cards`，阶段 A 的卡按 `evidence_index` 的 `<卡片>@<实体>` 在研判针对的事件版本的报告里找，阶段 A 重算改变编号时仍然找到同一张卡。两类都不满足时整次研判记一行（key `-`）；只有一类不满足时，这一类的模板各记一行跳过。没有开出的修复仍然在研判的修复建议与事件 issue 里。
 
-**修改去重**（ADR 0155）：去重键是（仓库，规范化补丁的哈希），规范化补丁只含每个文件的路径与增删的行，基准提交前进、行号与上下文变化后同一个修改的哈希不变。每个提议在 `server.remediation_changes` 记一行，状态按提议、`gitops_pulls` 与 GitHub 上 PR 的当前状态（GET pulls/{n}）在判断时刷新：
+**修改去重**（ADR 0155）：去重键是（仓库，变更哈希）。变更哈希由规范化补丁与修改定位一起计算：规范化补丁只含每个文件的路径与增删的行，基准提交前进、行号与上下文变化后同一个修改的哈希不变；修改定位是模板 edits 声明的目标在变量替换之后的值（文件、`document` 的 kind 与 name、`locate`，例如 `spec.groups[*].rules[alert=<告警名>]`），同一个文件里增删的行相同、改的是不同规则的补丁哈希不同。每个提议在 `server.remediation_changes` 记一行，状态按提议、`gitops_pulls` 与 GitHub 上 PR 的当前状态（GET pulls/{n}）在判断时刷新：
 
 | 已有的同一个修改 | 原因码 | 处理 |
 |---|---|---|
@@ -358,7 +358,7 @@ remediation:
 | PR 关闭且没有合并，或提议在审批时被人拒绝 | `rejected_before` | 不再自动提出；人重新打开 PR 后按打开处理 |
 | 同一模板对同一组文件的另一个修改在 `rejected_cooldown` 内被拒绝 | `rejected_cooldown` | 冷却期内不提出 |
 
-PR 已合并、提议被策略拒绝、过期、绑定过时或执行失败（没有开出 PR）的修改不算重复。记录在 PostgreSQL 里，server 重启后照常生效；没有记录的旧提议在每轮开始时按 `remediation_attempts` 补登记。PR 评论与 issue 关联失败时退避重试，最多 8 次；写入治理审计 `remediation.trigger_comment`，状态变化写 `remediation.change_state`。
+PR 已合并、提议被策略拒绝、过期、绑定过时或执行失败（没有开出 PR）的修改不算重复。记录在 PostgreSQL 里，server 重启后照常生效；没有记录的旧提议在每轮开始时按 `remediation_attempts` 补登记。加入定位之前的记录（`hash_version` 1，只含规范化补丁）按旧哈希参与 `duplicate_open`、`duplicate_pending`；`rejected_before` 要求旧哈希相同并且定位相同，定位相同由旧补丁在它的基准提交上是否改动了新修改的每个定位确认，确认后这一行记下定位。PR 评论与 issue 关联失败时退避重试，最多 8 次；写入治理审计 `remediation.trigger_comment`，状态变化写 `remediation.change_state`。
 
 **模板上下文里的告警**（ADR 0155）：每条成员告警带归属组件对应的具体对象（`component_object`）与是否描述集群之外的上游（`external`：组件类型声明了 external，或命中 `notify.digest.external_roots` 开启时的 `components`、`alert_labels`）。`noisy-alert-relax` 不降级外部上游的告警。
 

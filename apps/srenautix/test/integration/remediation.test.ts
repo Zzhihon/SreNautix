@@ -19,6 +19,7 @@ import { Catalog, DEFAULT_CATALOG_PATH } from '../../src/proposals/catalog.js';
 import { FeedbackService } from '../../src/proposals/feedback.js';
 import { Policies, type GatewayPolicy } from '../../src/proposals/policy.js';
 import { ProposalService } from '../../src/proposals/service.js';
+import { legacyChangeHash } from '../../src/remediation/dedupe.js';
 import { GitOpsPulls } from '../../src/remediation/pulls.js';
 import { BINDING_RETRY_LIMIT, REMEDIATION_RULE, RemediationService } from '../../src/remediation/service.js';
 import { GitRepositoryTargets } from '../../src/remediation/targets.js';
@@ -291,7 +292,7 @@ spec:
             severity: critical
 `;
 // "修改去重"一组的告警单独放一个文件：被拒绝的修改的冷却期按 (模板, 文件) 计，不影响其他用例对 shop.yaml 的告警调优。
-// 去重键只含路径与增删的行（ADR 0155），ShopCacheMisses 带 for: 10m，它的调优补丁因此与 ShopCacheEvictions 的不同
+// 两条规则只差规则名：放宽它们的补丁增删的行相同，变更哈希因修改定位（规则名）不同而不同（ADR 0155）
 const CACHE_RULES_PATH = 'platform/rules/cache.yaml';
 const CACHE_RULES_FILE = `apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
@@ -306,8 +307,30 @@ spec:
           labels:
             severity: critical
         - alert: ShopCacheMisses
-          expr: rate(cache_misses_total[5m]) > 100
-          for: 10m
+          expr: rate(cache_evictions_total[5m]) > 10
+          labels:
+            severity: critical
+`;
+// "只差规则名的告警"一组：三条规则只差规则名，各自的告警调优开出各自的 PR
+const SESSION_RULES_PATH = 'platform/rules/session.yaml';
+const SESSION_RULES_FILE = `apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: session
+spec:
+  groups:
+    - name: session
+      rules:
+        - alert: ShopSessionExpired
+          expr: rate(session_errors_total[5m]) > 5
+          labels:
+            severity: critical
+        - alert: ShopSessionDropped
+          expr: rate(session_errors_total[5m]) > 5
+          labels:
+            severity: critical
+        - alert: ShopSessionLeaked
+          expr: rate(session_errors_total[5m]) > 5
           labels:
             severity: critical
 `;
@@ -353,6 +376,7 @@ beforeAll(async () => {
       [CATALOG_PATH]: CATALOG_FILE,
       [RULES_PATH]: RULES_FILE,
       [CACHE_RULES_PATH]: CACHE_RULES_FILE,
+      [SESSION_RULES_PATH]: SESSION_RULES_FILE,
       [BATCH_RULES_PATH]: BATCH_RULES_FILE,
       [PROVIDER_RULES_PATH]: PROVIDER_RULES_FILE,
       'apps/shop/release.json': '{}\n',
@@ -1321,6 +1345,62 @@ spec:
   });
 });
 
+/** 一个事件：告警 alertname 以 critical 触发，研判判为 ignore（得出结论的卡全部正常） */
+const trigger = (alertname: string) => seed('likely', { alertname, severity: 'critical', disposition: 'ignore' });
+const relaxAttempt = async (runId: string) => (await attempts(runId)).find((a) => a.key === 'gitops/noisy-alert-relax');
+const relaxProposals = async (alertname: string) =>
+  (
+    await db.server.query<{ n: number }>(
+      `SELECT count(*)::int AS n FROM server.proposals WHERE action = 'gitops_pr' AND params->>'body' LIKE $1`,
+      [`%告警 ${alertname} 的严重度由%`],
+    )
+  ).rows[0]!.n;
+const changeRow = async (proposalId: string) =>
+  (
+    await db.server.query<{
+      state: string;
+      change_hash: string;
+      hash_version: number;
+      location_hash: string | null;
+      locations: unknown;
+      pr_number: number | null;
+    }>(
+      `SELECT state, change_hash, hash_version, location_hash, locations, pr_number FROM server.remediation_changes
+        WHERE proposal_id = $1`,
+      [proposalId],
+    )
+  ).rows[0];
+
+/** gateway 开出 PR：提议进入 dispatched，执行事件带 PR 地址，FakeGitHub 里有这个 PR；GitOpsPulls 记下它 */
+const openPull = async (proposalId: string, number: number) => {
+  const p = (
+    await db.server.query<{ body: Proposal }>('SELECT body FROM server.proposals WHERE proposal_id = $1', [proposalId])
+  ).rows[0]!.body;
+  const params = p.params as { branch: string; title: string; body: string };
+  await db.server.query(
+    `UPDATE server.proposals SET state = 'dispatched', body = jsonb_set(body, '{state}', '"dispatched"') WHERE proposal_id = $1`,
+    [proposalId],
+  );
+  await db.server.query(
+    `INSERT INTO server.execution_events (event_id, cluster_id, execution_id, ticket_id, proposal_id, seq, phase, at, reason, body)
+     VALUES ($1, $2, $3, $4, $5, 1, 'verified', now(), 'checks_passed', $6)`,
+    [
+      randomUUID().replace(/-/g, ''),
+      CLUSTER,
+      randomUUID().replace(/-/g, ''),
+      randomUUID(),
+      proposalId,
+      JSON.stringify({
+        message: `pr_open: PR https://github.example.test/${REPO}/pull/${number} #${number} state=open`,
+      }),
+    ],
+  );
+  gh.pulls.push({ number, head: params.branch, base: 'main', title: params.title, body: params.body });
+  await new GitOpsPulls(db.server, app, issues, metrics).runOnce();
+  const row = await db.server.query('SELECT number FROM server.gitops_pulls WHERE proposal_id = $1', [proposalId]);
+  expect(row.rows).toEqual([{ number }]);
+};
+
 /**
  * 修改去重（ADR 0155）：同一条误报的 critical 告警在多个事件里反复触发、研判都判为 ignore，基准提交在两次触发之间前进，
  * 补丁只差上下文与行号。gateway 开出 PR 由执行事件与 FakeGitHub 里的 PR 表示（与"gateway 开出 PR 后"相同）
@@ -1336,50 +1416,8 @@ describe('修改去重', () => {
     ({ service: svc } = build(null, { issuesPerHour: 100 }));
   });
 
-  /** 一个事件：告警 alertname 以 critical 触发，研判判为 ignore（得出结论的卡全部正常） */
-  const trigger = (alertname: string) => seed('likely', { alertname, severity: 'critical', disposition: 'ignore' });
-  const relaxAttempt = async (runId: string) =>
-    (await attempts(runId)).find((a) => a.key === 'gitops/noisy-alert-relax');
   const pullComments = () => gh.comments.get(PR) ?? [];
-  const relaxProposals = async (alertname: string) =>
-    (
-      await db.server.query<{ n: number }>(
-        `SELECT count(*)::int AS n FROM server.proposals WHERE action = 'gitops_pr' AND params->>'body' LIKE $1`,
-        [`%告警 ${alertname} 的严重度由%`],
-      )
-    ).rows[0]!.n;
-
-  /** gateway 开出 PR：提议进入 dispatched，执行事件带 PR 地址，FakeGitHub 里有这个 PR；GitOpsPulls 记下它 */
-  const open = async (proposalId: string, number: number) => {
-    const p = (
-      await db.server.query<{ body: Proposal }>('SELECT body FROM server.proposals WHERE proposal_id = $1', [
-        proposalId,
-      ])
-    ).rows[0]!.body;
-    const params = p.params as { branch: string; title: string; body: string };
-    await db.server.query(
-      `UPDATE server.proposals SET state = 'dispatched', body = jsonb_set(body, '{state}', '"dispatched"') WHERE proposal_id = $1`,
-      [proposalId],
-    );
-    await db.server.query(
-      `INSERT INTO server.execution_events (event_id, cluster_id, execution_id, ticket_id, proposal_id, seq, phase, at, reason, body)
-       VALUES ($1, $2, $3, $4, $5, 1, 'verified', now(), 'checks_passed', $6)`,
-      [
-        randomUUID().replace(/-/g, ''),
-        CLUSTER,
-        randomUUID().replace(/-/g, ''),
-        randomUUID(),
-        proposalId,
-        JSON.stringify({
-          message: `pr_open: PR https://github.example.test/${REPO}/pull/${number} #${number} state=open`,
-        }),
-      ],
-    );
-    gh.pulls.push({ number, head: params.branch, base: 'main', title: params.title, body: params.body });
-    await new GitOpsPulls(db.server, app, issues, metrics).runOnce();
-    const row = await db.server.query('SELECT number FROM server.gitops_pulls WHERE proposal_id = $1', [proposalId]);
-    expect(row.rows).toEqual([{ number }]);
-  };
+  const open = openPull;
 
   it('同一个修改：提议还没有开出 PR、PR 打开时都不再提议；PR 开出后每次触发评论一次，新事件的 issue 关联到 PR', async () => {
     const first = await trigger(ALERT);
@@ -1447,18 +1485,22 @@ describe('修改去重', () => {
   });
 
   it('server 重启后照常去重：记录在 PostgreSQL；去重表建立之前的提议按尝试记录补登记', async () => {
+    expect(await changeRow(firstProposal)).toMatchObject({ hash_version: 2, location_hash: expect.any(String) });
     // 新的服务实例，并清掉修改与触发的记录（相当于升级之前已经开出的 PR）
     await db.server.query('DELETE FROM server.remediation_triggers');
     await db.server.query('DELETE FROM server.remediation_changes');
     const restarted = build(null, { issuesPerHour: 100 }).service;
     const fourth = await trigger(ALERT);
     expect(await restarted.runOnce()).toBe(0);
+    // 补登记的行按旧算法记录（提议参数里没有修改定位），按旧哈希参与 duplicate_open
     expect(await relaxAttempt(fourth.runId)).toMatchObject({ outcome: 'skipped', code: 'duplicate_open' });
-    const row = await db.server.query<{ state: string; pr_number: number }>(
-      'SELECT state, pr_number FROM server.remediation_changes WHERE proposal_id = $1',
-      [firstProposal],
-    );
-    expect(row.rows).toEqual([{ state: 'open', pr_number: PR }]);
+    expect(await changeRow(firstProposal)).toMatchObject({
+      state: 'open',
+      pr_number: PR,
+      hash_version: 1,
+      location_hash: null,
+      locations: null,
+    });
     expect(await relaxProposals(ALERT)).toBe(1);
     expect(pullComments()).toHaveLength(3);
     expect(pullComments()[2]!.body).toContain(`<!-- srenautix:trigger=${fourth.inc.incident_id} -->`);
@@ -1471,7 +1513,13 @@ describe('修改去重', () => {
     gh.comment(PR, '关闭之后补的一句', new Date());
     const fifth = await trigger(ALERT);
     expect(await svc.runOnce()).toBe(0);
+    // 被拒绝的是旧算法的行（上一个用例补登记）：旧补丁在它的基准提交上改动了这条规则，定位相同，记下定位
     expect(await relaxAttempt(fifth.runId)).toMatchObject({ outcome: 'skipped', code: 'rejected_before' });
+    const confirmed = await changeRow(firstProposal);
+    expect(confirmed).toMatchObject({ hash_version: 1, location_hash: expect.any(String) });
+    expect(confirmed!.locations).toEqual([
+      { path: CACHE_RULES_PATH, kind: null, name: null, locate: `spec.groups[*].rules[alert=${ALERT}]` },
+    ]);
     const state = await db.server.query<{ state: string; closed_at: Date | null; incident_id: string }>(
       'SELECT state, closed_at, incident_id FROM server.remediation_changes WHERE proposal_id = $1',
       [firstProposal],
@@ -1518,15 +1566,86 @@ describe('修改去重', () => {
     expect(await relaxAttempt(variant.runId)).toMatchObject({ outcome: 'skipped', code: 'rejected_cooldown' });
     expect(await relaxProposals('ShopCacheMisses')).toBe(0);
 
-    // 冷却期为 0 时只记住被拒绝的那一个修改：其他告警的调优照常提出，被拒绝的修改仍然不提
+    // 冷却期为 0 时只记住被拒绝的那一个修改：只差规则名的另一条告警（旧哈希相同、定位不同）照常提出，被拒绝的修改仍然不提
     const relaxed = build(null, { issuesPerHour: 100, cooldownMs: 0 }).service;
     const other = await trigger('ShopCacheMisses');
     expect(await relaxed.runOnce()).toBe(1);
-    expect(await relaxAttempt(other.runId)).toMatchObject({ outcome: 'proposed' });
+    const proposed = await relaxAttempt(other.runId);
+    expect(proposed).toMatchObject({ outcome: 'proposed' });
+    expect(await changeRow(proposed!.proposal_id!)).toMatchObject({
+      hash_version: 2,
+      locations: [
+        { path: CACHE_RULES_PATH, kind: null, name: null, locate: 'spec.groups[*].rules[alert=ShopCacheMisses]' },
+      ],
+    });
     const same = await trigger(ALERT);
     expect(await relaxed.runOnce()).toBe(0);
     expect(await relaxAttempt(same.runId)).toMatchObject({ outcome: 'skipped', code: 'rejected_before' });
     expect(await relaxProposals(ALERT)).toBe(1);
+  });
+});
+
+/**
+ * 同一个规则文件里只差规则名的告警（ADR 0155）：放宽它们的补丁增删的行相同，修改定位不同。一条告警的 PR 打开时另一条
+ * 告警照常提出自己的 PR；一个 PR 被拒绝不影响另一个
+ */
+describe('只差规则名的告警', () => {
+  const FIRST = 'ShopSessionExpired';
+  const SECOND = 'ShopSessionDropped';
+  let svc: RemediationService;
+  const proposals: Record<string, string> = {};
+
+  beforeAll(async () => {
+    await settle();
+    ({ service: svc } = build(null, { issuesPerHour: 100 }));
+  });
+
+  it('一条告警的 PR 打开时，另一条告警提出自己的 PR；各自的重复触发只评论在各自的 PR 上', async () => {
+    const a = await trigger(FIRST);
+    expect(await svc.runOnce()).toBe(1);
+    proposals[FIRST] = (await relaxAttempt(a.runId))!.proposal_id!;
+    await openPull(proposals[FIRST], 910);
+
+    const b = await trigger(SECOND);
+    expect(await svc.runOnce()).toBe(1);
+    const pb = await relaxAttempt(b.runId);
+    expect(pb).toMatchObject({ outcome: 'proposed', code: null });
+    proposals[SECOND] = pb!.proposal_id!;
+    await openPull(proposals[SECOND], 911);
+
+    // 两个修改的旧哈希相同（只含路径与增删的行），变更哈希不同
+    const patches = await db.server.query<{ patch: string }>(
+      `SELECT params->>'patch' AS patch FROM server.proposals WHERE proposal_id = ANY($1::uuid[]) ORDER BY created_at`,
+      [[proposals[FIRST], proposals[SECOND]]],
+    );
+    expect(legacyChangeHash(patches.rows[0]!.patch)).toBe(legacyChangeHash(patches.rows[1]!.patch));
+    const [ra, rb] = [await changeRow(proposals[FIRST]), await changeRow(proposals[SECOND])];
+    expect(ra!.change_hash).not.toBe(rb!.change_hash);
+
+    const again = await trigger(SECOND);
+    expect(await svc.runOnce()).toBe(0);
+    expect(await relaxAttempt(again.runId)).toMatchObject({ outcome: 'skipped', code: 'duplicate_open' });
+    expect((gh.comments.get(911) ?? []).map((c) => c.body).join('\n')).toContain(again.inc.incident_id);
+    expect(gh.comments.get(910) ?? []).toEqual([]);
+  });
+
+  it('一条告警的 PR 被关闭且没有合并：它不再提出，另一条告警的 PR 不受影响；冷却期为 0 时第三条告警照常提出', async () => {
+    gh.close(910, false, new Date(Date.now() - 30_000), 'ops-lead');
+    const a = await trigger(FIRST);
+    expect(await svc.runOnce()).toBe(0);
+    expect(await relaxAttempt(a.runId)).toMatchObject({ outcome: 'skipped', code: 'rejected_before' });
+    const b = await trigger(SECOND);
+    expect(await svc.runOnce()).toBe(0);
+    expect(await relaxAttempt(b.runId)).toMatchObject({ outcome: 'skipped', code: 'duplicate_open' });
+    expect(await changeRow(proposals[SECOND]!)).toMatchObject({ state: 'open', pr_number: 911 });
+
+    const relaxed = build(null, { issuesPerHour: 100, cooldownMs: 0 }).service;
+    const c = await trigger('ShopSessionLeaked');
+    expect(await relaxed.runOnce()).toBe(1);
+    expect(await relaxAttempt(c.runId)).toMatchObject({ outcome: 'proposed' });
+    expect(await relaxProposals(FIRST)).toBe(1);
+    expect(await relaxProposals(SECOND)).toBe(1);
+    expect(await relaxProposals('ShopSessionLeaked')).toBe(1);
   });
 });
 

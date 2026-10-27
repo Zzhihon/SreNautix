@@ -28,7 +28,7 @@ import type { ProposalService } from '../proposals/service.js';
 import { appendAudit } from '../store/audit.js';
 import { tx } from '../store/pool.js';
 import type { ConcreteObject, LogicalHint } from '../topology/expand.js';
-import { changeHash, RemediationChanges, triggerComment, type PullLink, type Verdict } from './dedupe.js';
+import { RemediationChanges, triggerComment, type PlannedChange, type PullLink, type Verdict } from './dedupe.js';
 import { admissionFor, repositoryFact, runAdmission } from './admission.js';
 import {
   alertFacts,
@@ -48,7 +48,7 @@ import { alertsOf, branchOf, cardsOf, keyCards, prBody, say, validatePlan, type 
  * - 提议的来源为 rule，规则名 remediation-pr：gateway 策略为 gitops_pr 列出这条自动执行规则时自动签发，否则等待人工审批；
  * - 每小时上限、分支前缀、reviewers 与 main 的守护在 gateway；冻结只约束集群写入，gitops_pr 照常；
  * - 基准分支在计划与提议之间前进时不提交，下一轮重新计划；
- * - 同一仓库的同一个修改（规范化补丁的哈希）已有未结束的提议或打开的 PR 时不再提议，在 PR 上评论新的触发并关联新事件的
+ * - 同一仓库的同一个修改（规范化补丁与修改定位的哈希）已有未结束的提议或打开的 PR 时不再提议，在 PR 上评论新的触发并关联新事件的
  *   issue；人关闭未合并的修改不再自动提出，同一模板对同一组文件的修改有冷却期（ADR 0155，dedupe.ts）；
  * - 准入条件（ADR 0170，admission.ts）：根因范围、支撑证据的类型在模板匹配之前按运行判断，仓库事实在计划校验之后按模板
  *   判断；告警调优（alert_rule）只要求处置为 ignore 且依据说明系统状态正常。不满足时记跳过代码与原因，修复留在研判的
@@ -475,10 +475,16 @@ export class RemediationService {
       );
     }
     // 同一个修改已有提议或 PR、或被人拒绝过（ADR 0155）：不再提议
-    const hash = changeHash(plan.patch);
+    const change: PlannedChange = {
+      repository: repo.repo,
+      patch: plan.patch,
+      locations: plan.locations,
+      key: a.key,
+      files,
+    };
     let verdict: Verdict | null;
     try {
-      verdict = await this.changes.verdict(repo.repo, hash, a.key, files);
+      verdict = await this.changes.verdict(change);
     } catch (e) {
       if (e instanceof GitHubError) {
         throw new Deferred(`读取 ${repo.repo} 已有 PR 的状态失败：${e.message}`);
@@ -542,14 +548,7 @@ export class RemediationService {
       const p = r.proposal;
       const rejected = p.state === 'rejected_by_policy';
       if (!rejected) {
-        await this.changes.record({
-          proposalId: p.proposal_id,
-          repository: repo.repo,
-          hash,
-          key: a.key,
-          files,
-          incidentId: inc.incident_id,
-        });
+        await this.changes.record({ proposalId: p.proposal_id, incidentId: inc.incident_id, change });
       }
       return {
         ...base,

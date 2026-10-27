@@ -4,7 +4,7 @@ import { GitHubError, type GitHubApp } from '../github/app.js';
 /**
  * 修复模板读取仓库的 GitHub REST 实现（ADR 0103、0108）：server 镜像里没有 git（ADR 0096），按 GitHub App 的安装令牌只读访问。
  * - head：base 分支当前的提交（git/ref/heads），第一次调用后固定，之后的读取都在这个提交上；
- * - read：contents?ref=<提交>，不存在或是目录时为 null；
+ * - read：contents?ref=<提交>，不存在或是目录时为 null；readAt 读指定提交（修改去重确认旧补丁的定位，ADR 0155）；
  * - list：从 glob 中第一个通配符之前的目录开始，用 contents 的目录列表逐层展开（* 不跨目录时只展开到 glob 的层数），
  *   最多 MAX_DIRS 次目录请求；
  * - history：commits?sha=<提交>&path=<路径>，再逐个读取该提交时的文件内容。
@@ -55,7 +55,7 @@ export class GitHubRepoReader implements RepoReader {
   }
 
   /** 某个提交时的文件内容；不存在或是目录时为 null */
-  private async readAt(ref: string, path: string): Promise<string | null> {
+  async readAt(ref: string, path: string): Promise<string | null> {
     try {
       const r = await this.gh.api<ContentFile | ContentEntry[]>(
         'GET',

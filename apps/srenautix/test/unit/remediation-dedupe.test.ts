@@ -1,7 +1,16 @@
+import type { RemediationLocation } from '@srenautix/packs-sdk';
 import { describe, expect, it } from 'vitest';
-import { changeHash, triggerComment } from '../../src/remediation/dedupe.js';
+import {
+  changeHash,
+  changeKeys,
+  classify,
+  legacyChangeHash,
+  locationHash,
+  triggerComment,
+  type ChangeRow,
+} from '../../src/remediation/dedupe.js';
 
-// 修改去重的键（ADR 0155）：规范化补丁只含路径与增删的行
+// 修改去重的键（ADR 0155）：规范化补丁只含路径与增删的行，变更哈希另加模板声明的修改定位
 
 const ENTRY =
   '+  - { id: shop-cache-evictions, alertname: ShopCacheEvictions, role: cause, entity: { kind: Deployment, name_labels: [ deployment ] } }';
@@ -40,20 +49,44 @@ index 1111111..2222222 100644
 +            severity: warning
 `;
 
-describe('规范化补丁的哈希', () => {
+/** 同一个规则文件里两条严重度相同的规则：放宽它们的补丁增删的行完全相同，只有上下文不同 */
+const RELAX = (alert: string) => `diff --git a/platform/rules/cache.yaml b/platform/rules/cache.yaml
+index 1111111..2222222 100644
+--- a/platform/rules/cache.yaml
++++ b/platform/rules/cache.yaml
+@@ -9,4 +9,5 @@ spec:
+         - alert: ${alert}
+           expr: rate(cache_total[5m]) > 10
+           labels:
+-            severity: critical
++            severity: warning
++          for: 1h
+`;
+const ruleAt = (alert: string): RemediationLocation[] => [
+  { path: 'platform/rules/cache.yaml', kind: null, name: null, locate: `spec.groups[*].rules[alert=${alert}]` },
+];
+const CATALOG_AT: RemediationLocation[] = [
+  { path: 'srenautix/packs/shop/alerts.yaml', kind: null, name: null, locate: 'entries' },
+];
+
+describe('规范化补丁的哈希（旧算法）', () => {
   it('基准提交前进后同一个修改的哈希不变', () => {
-    expect(changeHash(SECOND)).toBe(changeHash(FIRST));
+    expect(legacyChangeHash(SECOND)).toBe(legacyChangeHash(FIRST));
   });
 
   it('增加的行不同、路径不同时哈希不同', () => {
     expect(
-      changeHash(FIRST.replace('role: cause, entity: { kind: Deployment', 'role: symptom, entity: { kind: Deployment')),
-    ).not.toBe(changeHash(FIRST));
-    expect(changeHash(FIRST.replaceAll('srenautix/packs/shop/', 'srenautix/packs/web/'))).not.toBe(changeHash(FIRST));
+      legacyChangeHash(
+        FIRST.replace('role: cause, entity: { kind: Deployment', 'role: symptom, entity: { kind: Deployment'),
+      ),
+    ).not.toBe(legacyChangeHash(FIRST));
+    expect(legacyChangeHash(FIRST.replaceAll('srenautix/packs/shop/', 'srenautix/packs/web/'))).not.toBe(
+      legacyChangeHash(FIRST),
+    );
   });
 
   it('多个文件的补丁与文件顺序无关；新文件按新路径计', () => {
-    expect(changeHash(`${FIRST}${RULE}`)).toBe(changeHash(`${RULE}${FIRST}`));
+    expect(legacyChangeHash(`${FIRST}${RULE}`)).toBe(legacyChangeHash(`${RULE}${FIRST}`));
     const created = `diff --git a/srenautix/topology-overrides/shop.yaml b/srenautix/topology-overrides/shop.yaml
 new file mode 100644
 --- /dev/null
@@ -61,11 +94,97 @@ new file mode 100644
 @@ -0,0 +1 @@
 +overrides: []
 `;
-    expect(changeHash(created)).not.toBe(changeHash(created.replaceAll('shop.yaml', 'web.yaml')));
+    expect(legacyChangeHash(created)).not.toBe(legacyChangeHash(created.replaceAll('shop.yaml', 'web.yaml')));
   });
 
   it('补丁里没有文件时抛出', () => {
-    expect(() => changeHash('')).toThrow('补丁没有任何文件');
+    expect(() => legacyChangeHash('')).toThrow('补丁没有任何文件');
+  });
+});
+
+describe('变更哈希：规范化补丁与修改定位', () => {
+  it('同一个文件里增删的行相同、改的是不同规则：旧哈希相同，变更哈希不同', () => {
+    const a = RELAX('ShopCacheEvictions');
+    const b = RELAX('ShopCacheMisses');
+    expect(legacyChangeHash(a)).toBe(legacyChangeHash(b));
+    expect(changeHash(a, ruleAt('ShopCacheEvictions'))).not.toBe(changeHash(b, ruleAt('ShopCacheMisses')));
+  });
+
+  it('同一条规则的同一个改动：基准提交前进、上下文与行号变化后变更哈希不变', () => {
+    const moved = RELAX('ShopCacheEvictions').replace('@@ -9,4 +9,5 @@', '@@ -14,4 +14,5 @@');
+    expect(changeHash(moved, ruleAt('ShopCacheEvictions'))).toBe(
+      changeHash(RELAX('ShopCacheEvictions'), ruleAt('ShopCacheEvictions')),
+    );
+    expect(changeHash(SECOND, CATALOG_AT)).toBe(changeHash(FIRST, CATALOG_AT));
+  });
+
+  it('定位与顺序和重复无关；与旧哈希不同；没有定位时抛出', () => {
+    const two = [...ruleAt('A'), ...CATALOG_AT];
+    expect(locationHash([...two].reverse())).toBe(locationHash([...two, ...two]));
+    expect(changeHash(FIRST, CATALOG_AT)).not.toBe(legacyChangeHash(FIRST));
+    expect(() => changeHash(FIRST, [])).toThrow('修改没有任何定位');
+  });
+});
+
+describe('去重结论与过渡规则', () => {
+  const NOW = Date.UTC(2026, 9, 28, 12);
+  const DAY = 86_400_000;
+  const keys = (alert: string) =>
+    changeKeys({
+      repository: 'acme/gitops',
+      patch: RELAX(alert),
+      locations: ruleAt(alert),
+      key: 'gitops/noisy-alert-relax',
+      files: ['platform/rules/cache.yaml'],
+    });
+  const row = (over: Partial<ChangeRow>): ChangeRow => ({
+    proposal_id: 'p',
+    repository: 'acme/gitops',
+    change_hash: '',
+    hash_version: 2,
+    location_hash: null,
+    key: 'gitops/noisy-alert-relax',
+    files: ['platform/rules/cache.yaml'],
+    incident_id: 'i',
+    state: 'pending',
+    pr_number: null,
+    pr_url: null,
+    closed_at: null,
+    created_at: new Date(NOW - DAY),
+    ...over,
+  });
+  const evictions = keys('ShopCacheEvictions');
+  const misses = keys('ShopCacheMisses');
+  /** 新算法记录的 ShopCacheEvictions 修改 */
+  const located = (over: Partial<ChangeRow>) =>
+    row({ change_hash: evictions.hash, location_hash: evictions.location, ...over });
+  /** 旧算法记录的 ShopCacheEvictions 修改 */
+  const legacy = (over: Partial<ChangeRow>) => row({ hash_version: 1, change_hash: evictions.legacy, ...over });
+
+  it('新算法的行：同一条规则的修改去重，另一条规则的修改不受影响', () => {
+    const open = located({ state: 'open', pr_number: 900 });
+    expect(classify([open], evictions, NOW, 7 * DAY)).toMatchObject({ code: 'duplicate_open' });
+    expect(classify([open], misses, NOW, 7 * DAY)).toBeNull();
+    expect(classify([located({})], misses, NOW, 7 * DAY)).toBeNull();
+    const rejected = located({ state: 'rejected', closed_at: new Date(NOW - DAY) });
+    expect(classify([rejected], evictions, NOW, 0)).toMatchObject({ code: 'rejected_before' });
+    expect(classify([rejected], misses, NOW, 0)).toBeNull();
+    // 冷却期按（模板，文件）计，与定位无关
+    expect(classify([rejected], misses, NOW, 7 * DAY)).toMatchObject({ code: 'rejected_cooldown' });
+  });
+
+  it('旧算法的行按旧哈希参与 duplicate_open 与 duplicate_pending', () => {
+    expect(classify([legacy({ state: 'open' })], misses, NOW, 0)).toMatchObject({ code: 'duplicate_open' });
+    expect(classify([legacy({})], misses, NOW, 0)).toMatchObject({ code: 'duplicate_pending' });
+  });
+
+  it('旧算法被拒绝的行：只有定位确认相同时 rejected_before', () => {
+    const closed = { state: 'rejected' as const, closed_at: new Date(NOW - DAY) };
+    expect(classify([legacy(closed)], evictions, NOW, 0)).toBeNull();
+    expect(classify([legacy({ ...closed, location_hash: evictions.location })], evictions, NOW, 0)).toMatchObject({
+      code: 'rejected_before',
+    });
+    expect(classify([legacy({ ...closed, location_hash: evictions.location })], misses, NOW, 0)).toBeNull();
   });
 });
 
