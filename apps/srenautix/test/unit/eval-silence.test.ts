@@ -6,6 +6,7 @@ import { PushJudge, type PushSettings } from '../../src/eval/push.js';
 import { buildRows, evaluateGate } from '../../src/eval/report.js';
 import { scoreRun, type RunRecord } from '../../src/eval/score.js';
 import { ExternalRoots, externalTypeLookup, type ImpactAlert } from '../../src/notify/external.js';
+import { TEST_ENVIRONMENT } from '../support/eval-environment.js';
 import { incident, stageA, stageACards } from '../support/scenario.js';
 
 // 健康场景的沉默与三个良性度量（ADR 0175）：良性标注在重建中没有形成事件记为沉默、不按失败计；误推送、误开 issue、
@@ -20,6 +21,9 @@ const base: Omit<Label, 'id' | 'type' | 'roots' | 'disposition'> = {
   revisions: [],
   granularity: null,
   mechanism: null,
+  mechanism_expect: [],
+  mechanism_forbid: [],
+  required_evidence: [],
   required_members: [],
   required_change_near: null,
   legacy_case: null,
@@ -47,6 +51,7 @@ function run(caseId: string, i: number, over: Partial<RunRecord> = {}): RunRecor
     run: i,
     routeId: 'r',
     model: 'm',
+    environment: TEST_ENVIRONMENT,
     state: 'completed',
     structuredFailure: false,
     level: 'likely',

@@ -48,6 +48,7 @@ describe('真实模型上的评测', () => {
       query: null,
       maxTokens: 2_000_000,
       signal: new AbortController().signal,
+      codeSha: 'live',
     });
     await proxy.stop();
     const dir = resolve(import.meta.dirname, '../fixtures/llm/eval');

@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { parse } from 'yaml';
 import { z } from 'zod';
 import type { EvalCase } from '@srenautix/contract';
+import { normalizeMechanism } from './axes.js';
 import { stableUuid } from './import-seed.js';
 
 // 评测标注文件（第二阶段三个环节共用，ADR 0110）：每条标注是一次故障，给出故障窗口、属于这次故障的告警、
@@ -23,6 +24,12 @@ import { stableUuid } from './import-seed.js';
 //       revisions: [{date: …, change: …, reason: …}]   # 修订记录
 //       granularity: workload
 //       mechanism: …
+//       mechanism_expect:                    # 机制断言（ADR 0180，只用于 incident）：结论选中假设的 mechanism 经文本归一化后
+//         - "429"                            # 必须包含每一项；一项是数组时为同义词，包含其中任一即可
+//         - [配额, 额度, quota]
+//       mechanism_forbid: [共因]             # 排除关键词：包含任一项即为未命中
+//       required_evidence:                   # 证据扎根：结论引用、确实执行过的卡必须覆盖每一项（component 可省略）
+//         - {card: workload/http/error_ratio, component: Deployment:prod/api}
 //       disposition: act
 //       required_members: [[Deployment:prod/api, pod:prod/api-0]]   # 主事件必须覆盖的组件，每项是一组同义键
 //       required_change_near: …              # 主事件的变更中必须有这个时刻前后 2 分钟内的一条
@@ -58,6 +65,25 @@ const fixExpect = z
   })
   .strict();
 
+// 卡片全局键 <pack>/<chain>/<card>（与契约 evidence-result 的 card_id 相同）
+const CARD_KEY = /^[a-z0-9_][a-z0-9_.-]*\/[a-z0-9][a-z0-9_.-]*\/[a-z0-9][a-z0-9_-]*$/;
+// 组件键（契约 common.schema.json 的 ComponentKey）
+const COMPONENT_KEY = /^[A-Za-z][A-Za-z0-9.-]*:([a-z0-9]([-a-z0-9]*[a-z0-9])?\/)?([A-Za-z0-9._-]|%[0-9A-F]{2})+$/;
+
+// 机制断言的关键词（ADR 0180）：归一化之后不能为空
+const keyword = z
+  .string()
+  .min(1)
+  .max(80)
+  .refine((s) => normalizeMechanism(s).length > 0, '关键词归一化之后为空');
+
+const requiredEvidence = z
+  .object({
+    card: z.string().regex(CARD_KEY),
+    component: z.string().regex(COMPONENT_KEY).max(400).optional(),
+  })
+  .strict();
+
 export const FIX_CLASSES = ['release_rollback', 'config_resource', 'alert_rule', 'topology_pack'] as const;
 export type FixClass = (typeof FIX_CLASSES)[number];
 
@@ -88,6 +114,14 @@ export const label = z
       .default([]),
     granularity: z.enum(['pod', 'workload', 'component', 'node']).nullable().default(null),
     mechanism: z.string().max(600).nullable().default(null),
+    // 机制断言与必需证据（ADR 0180）：之前的标注没有这些字段，三个评分轴记为不适用
+    // 同义词数组 1–8 项：非空元组，类型与契约的 [关键词, ...关键词[]] 相同
+    mechanism_expect: z
+      .array(z.union([keyword, z.tuple([keyword], keyword).refine((xs) => xs.length <= 8, '同义词最多 8 项')]))
+      .max(16)
+      .default([]),
+    mechanism_forbid: z.array(keyword).max(16).default([]),
+    required_evidence: z.array(requiredEvidence).max(16).default([]),
     disposition: z.enum(['act', 'ignore', 'escalate', 'undetermined']).nullable().default(null),
     required_members: z.array(z.array(z.string().min(1)).min(1)).default([]),
     required_change_near: time.nullable().default(null),
@@ -96,13 +130,7 @@ export const label = z
     learned_from: z.array(z.string().min(1)).default([]),
     fix: fix.nullable().default(null),
     // 噪声信号（ADR 0153）：卡片全局键 <pack>/<chain>/<card>
-    noise: z
-      .array(
-        z
-          .object({ card: z.string().regex(/^[a-z0-9_][a-z0-9_.-]*\/[a-z0-9][a-z0-9_.-]*\/[a-z0-9][a-z0-9_-]*$/) })
-          .strict(),
-      )
-      .default([]),
+    noise: z.array(z.object({ card: z.string().regex(CARD_KEY) }).strict()).default([]),
     evidence: z
       .array(
         z
@@ -131,6 +159,15 @@ export const label = z
     }
     if (l.type === 'abstain' && (l.roots.length || l.disposition !== null || l.fix !== null)) {
       ctx.addIssue({ code: 'custom', message: `${l.id}：abstain 标注的 roots 为空，不写 disposition 与 fix` });
+    }
+    if (
+      l.type !== 'incident' &&
+      (l.mechanism_expect.length || l.mechanism_forbid.length || l.required_evidence.length)
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        message: `${l.id}：mechanism_expect、mechanism_forbid、required_evidence 只用于 incident 标注`,
+      });
     }
   });
 
@@ -172,6 +209,15 @@ export function matchesFault(l: Label, alertname: string, labels: Record<string,
   );
 }
 
+/** 标准答案中的机制断言与必需证据（ADR 0180）：标注没有写时省略，用例的三个评分轴为不适用 */
+function axisTruth(l: Label): Pick<EvalCase['truth'], 'mechanism_expect' | 'mechanism_forbid' | 'required_evidence'> {
+  return {
+    ...(l.mechanism_expect.length ? { mechanism_expect: l.mechanism_expect } : {}),
+    ...(l.mechanism_forbid.length ? { mechanism_forbid: l.mechanism_forbid } : {}),
+    ...(l.required_evidence.length ? { required_evidence: l.required_evidence } : {}),
+  };
+}
+
 /** 重建模式的评测用例：case_id 为 label:<id>，标准答案取自标注；snapshot_id 指向重建时生成的快照 */
 export function labelCase(f: LabelFile, l: Label, suite: string, snapshotId: string, createdAt: string): EvalCase {
   return {
@@ -188,6 +234,7 @@ export function labelCase(f: LabelFile, l: Label, suite: string, snapshotId: str
       root_components: l.type === 'incident' ? [...l.roots, ...l.legacy_roots] : [],
       granularity: l.granularity,
       mechanism: l.mechanism,
+      ...axisTruth(l),
       disposition: l.disposition,
       forbid_evidence_consistent: l.type !== 'incident',
     },
@@ -216,6 +263,7 @@ export function relabelLegacy(c: EvalCase, l: Label, createdAt: string): EvalCas
       root_components: l.type === 'incident' ? [...l.legacy_roots, ...l.roots] : [],
       granularity: l.granularity,
       mechanism: l.mechanism,
+      ...axisTruth(l),
       disposition: l.disposition,
       forbid_evidence_consistent: l.type !== 'incident',
     },

@@ -144,6 +144,9 @@ const label: Label = {
   revisions: [],
   granularity: 'component',
   mechanism: null,
+  mechanism_expect: [],
+  mechanism_forbid: [],
+  required_evidence: [],
   disposition: 'act',
   required_members: [
     ['Deployment:acme-prod/control'],

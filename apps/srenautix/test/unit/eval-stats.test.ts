@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { buildRows, evaluateGate, renderMarkdown, buildReport } from '../../src/eval/report.js';
 import { scoreRun, topComponents, type RunRecord } from '../../src/eval/score.js';
 import { clusteredRatio, gateThreshold, pairedDelta, quantile } from '../../src/eval/stats.js';
+import { TEST_ENVIRONMENT } from '../support/eval-environment.js';
 
 // 确定性的合成成绩表：每个用例的每次运行是否命中由表格给出，统计量与门禁的结果可以手算核对。
 
@@ -41,6 +42,7 @@ function run(caseId: string, i: number, hit: boolean, over: Partial<RunRecord> =
     run: i,
     routeId: 'r',
     model: 'm',
+    environment: TEST_ENVIRONMENT,
     state: 'completed',
     structuredFailure: false,
     level: hit ? 'evidence_consistent' : 'likely',
