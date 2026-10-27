@@ -8,6 +8,7 @@ import { discoveryRoots, loadLabels, type Label } from '../../src/eval/labels.js
 import { compareRoots } from '../../src/eval/phase2.js';
 import type { RunRecord } from '../../src/eval/score.js';
 import { BundleTopology } from '../../src/eval/reconstruct.js';
+import { TEST_ENVIRONMENT } from '../support/eval-environment.js';
 
 // 标注的发现根因与修订记录；重建包拓扑在状态库没有记录时用 kube-state-metrics 历史推导新的 ReplicaSet（ADR 0110）
 
@@ -150,6 +151,7 @@ describe('kube-state-metrics 回退', () => {
       run: i,
       routeId: 'r',
       model: 'm',
+      environment: TEST_ENVIRONMENT,
       state: 'completed',
       structuredFailure: false,
       level,

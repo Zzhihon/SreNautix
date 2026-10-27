@@ -1,4 +1,12 @@
-import type { Alert, EvalCase, EvalSnapshot, EvidenceResult, Incident, StageAReport } from '@srenautix/contract';
+import type {
+  Alert,
+  EvalCase,
+  EvalEnvironment,
+  EvalSnapshot,
+  EvidenceResult,
+  Incident,
+  StageAReport,
+} from '@srenautix/contract';
 import { logger } from '../log.js';
 import type { ModelLayer } from '../llm/session.js';
 import { ServerMetrics } from '../metrics.js';
@@ -21,6 +29,7 @@ import { rootsAgree } from '../incident/research-root.js';
 import { readBundle } from './bundle.js';
 import type { ReconstructConfig } from './config.js';
 import { discoveryCase, summarizeDiscovery, type DiscoveryCase, type DiscoverySummary } from './discovery.js';
+import { runEnvironment } from './environment.js';
 import { labelCase, reconstructedSnapshotId, type FixClass, type Label, type LabelFile } from './labels.js';
 import { pushSettings, replayPushJudge, type PushJudge } from './push.js';
 import {
@@ -320,20 +329,23 @@ export async function runPhase2(o: Phase2Options): Promise<Phase2Result> {
           maxTokens: a.maxTokens,
           signal: new AbortController().signal,
           traceDir: a.traceDir,
+          codeSha: o.codeSha,
         })
       : { runs: [], excluded: new Map(), tokens: 0, skipped: 0 };
+    // 没有研判的运行的环境指纹与研判的运行相同（ADR 0180）：重建评测没有只读工具
+    const env = (routeId: string, layer: ModelLayer) => runEnvironment(layer.route(routeId), a.language, [], o.codeSha);
     // 重建没有得到事件的标注：每条路由每次都记为失败（未命中）；良性标注记为沉默（ADR 0175）
     for (const c of missing) {
       for (const { routeId, layer } of a.layers) {
         for (let i = 0; i < a.runs; i++) {
-          analysis.runs.push(failedRun(c.case_id, routeId, layer.route(routeId).route.model, i));
+          analysis.runs.push(failedRun(c.case_id, routeId, layer.route(routeId).route.model, env(routeId, layer), i));
         }
       }
     }
     for (const c of silent) {
       for (const { routeId, layer } of a.layers) {
         for (let i = 0; i < a.runs; i++) {
-          analysis.runs.push(silentRun(c.case_id, routeId, layer.route(routeId).route.model, i));
+          analysis.runs.push(silentRun(c.case_id, routeId, layer.route(routeId).route.model, env(routeId, layer), i));
         }
       }
     }
@@ -479,12 +491,19 @@ export function opensPr(
 }
 
 /** 良性标注在重建中没有形成事件：沉默，没有研判，不推送、不开 issue、不开 PR */
-function silentRun(caseId: string, routeId: string, model: string, run: number): RunRecord {
+function silentRun(
+  caseId: string,
+  routeId: string,
+  model: string,
+  environment: EvalEnvironment,
+  run: number,
+): RunRecord {
   return {
     caseId,
     run,
     routeId,
     model,
+    environment,
     state: 'silent',
     structuredFailure: false,
     level: null,
@@ -504,12 +523,19 @@ function silentRun(caseId: string, routeId: string, model: string, run: number):
   };
 }
 
-function failedRun(caseId: string, routeId: string, model: string, run: number): RunRecord {
+function failedRun(
+  caseId: string,
+  routeId: string,
+  model: string,
+  environment: EvalEnvironment,
+  run: number,
+): RunRecord {
   return {
     caseId,
     run,
     routeId,
     model,
+    environment,
     state: 'failed',
     structuredFailure: false,
     level: null,

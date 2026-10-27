@@ -42,6 +42,7 @@ import type { RunRecord } from '../../src/eval/score.js';
 import type { ReconstructConfig } from '../../src/eval/config.js';
 import { WorkerMetrics } from '../../src/research/metrics.js';
 import { newTestDb, type TestDb } from '../support/db.js';
+import { TEST_ENVIRONMENT } from '../support/eval-environment.js';
 import { exampleWithTemplate, PACKS } from '../support/packs.js';
 import { testLayer, testRoute } from '../support/research-env.js';
 import { startVictoria, type Victoria } from '../support/victoria.js';
@@ -87,6 +88,9 @@ const label: Label = {
   revisions: [],
   granularity: 'workload',
   mechanism: null,
+  mechanism_expect: [],
+  mechanism_forbid: [],
+  required_evidence: [],
   disposition: 'act',
   required_members: [['Deployment:shop/api']],
   required_change_near: iso(T0 + 2 * MIN),
@@ -410,7 +414,7 @@ describe('良性标注', () => {
     ...over,
   });
 
-  it('重建没有形成事件：每次运行记为沉默，算作正确，不推送、不开 issue、不开 PR，没有调用模型', async () => {
+  it('重建没有形成事件：良性标注记为沉默，算作正确，不推送、不开 issue、不开 PR；incident 标注记为失败，机制与证据两轴算未命中；没有调用模型', async () => {
     // 故障告警在重建包里从没出现：重建不会形成事件
     const quiet: Label = {
       ...label,
@@ -424,10 +428,20 @@ describe('良性标注', () => {
       fault_alerts: [{ alertname: 'ShopCacheEvictions', labels: {} }],
     };
     writeBundle(dir, { ...bundle, label_id: quiet.id });
+    // 带机制断言与必需证据的 incident 标注（ADR 0180），故障告警同样从没出现：每次运行记为失败，机制与证据两轴算未命中
+    const missed: Label = {
+      ...label,
+      id: 'shop-missed',
+      fault_alerts: [{ alertname: 'ShopQueueBacklog', labels: {} }],
+      mechanism_expect: ['backlog', ['队列', 'queue']],
+      mechanism_forbid: ['发布'],
+      required_evidence: [{ card: 'workload/http/error_ratio', component: 'Deployment:shop/api' }],
+    };
+    writeBundle(dir, { ...bundle, label_id: missed.id });
     // 路由指向没有服务监听的端口：任何模型调用都会失败
     const layer = testLayer([testRoute('http://127.0.0.1:9/v1')]);
     const r = await runPhase2({
-      labels: { version: 1, cluster_id: CLUSTER, labels: [quiet] },
+      labels: { version: 1, cluster_id: CLUSTER, labels: [quiet, missed] },
       only: [],
       casesDir: dir,
       reconstruct: rcConfig(),
@@ -445,12 +459,33 @@ describe('良性标注', () => {
       },
       now: new Date().toISOString(),
     });
-    expect(r.analysis!.runs.map((x) => [x.state, x.pushed, x.opensPr, x.error])).toEqual([
+    const quietRuns = r.analysis!.runs.filter((x) => x.caseId === 'label:shop-quiet');
+    expect(quietRuns.map((x) => [x.state, x.pushed, x.opensPr, x.error])).toEqual([
       ['silent', false, false, null],
       ['silent', false, false, null],
       ['silent', false, false, null],
     ]);
+    expect(r.analysis!.runs.filter((x) => x.caseId === 'label:shop-missed').map((x) => x.state)).toEqual([
+      'failed',
+      'failed',
+      'failed',
+    ]);
     expect(r.analysis!.tokens).toBe(0);
+    // 标注的机制断言与必需证据写进用例的标准答案；没有写的标注省略这些字段（ADR 0180）
+    const truths = new Map(r.evalCases.map((c) => [c.case_id, c.truth]));
+    expect(truths.get('label:shop-missed')).toMatchObject({
+      mechanism_expect: ['backlog', ['队列', 'queue']],
+      mechanism_forbid: ['发布'],
+      required_evidence: [{ card: 'workload/http/error_ratio', component: 'Deployment:shop/api' }],
+    });
+    expect(truths.get('label:shop-quiet')).not.toHaveProperty('mechanism_expect');
+    for (const c of r.evalCases) {
+      assertValid('schemas/eval-case.schema.json', c);
+    }
+    // 没有研判的运行也带环境指纹，沉默与失败的运行同一个指纹，不按指纹拆行
+    const envs = new Set(r.analysis!.runs.map((x) => x.environment.id));
+    expect(envs.size).toBe(1);
+    expect(r.analysis!.runs[0]!.environment).toMatchObject({ code_sha: 'test', dialect_profile: 'llamacpp' });
     const report = buildReport(
       {
         codeSha: 'test',
@@ -464,13 +499,25 @@ describe('良性标注', () => {
       r.analysis!.runs,
       null,
     );
+    // 一个环境指纹：全部运行一行，另有领域包时序分组的一行
+    expect(report.rows.map((x) => [x.environment, x.pack_timing])).toEqual([
+      [[...envs][0], 'all'],
+      [[...envs][0], 'pack_after_incident'],
+    ]);
+    expect(report.environments.map((e) => e.id)).toEqual([...envs]);
     expect(report.rows[0]).toMatchObject({
-      pass_pow_k: { numerator: 1, denominator: 1 },
+      environment: [...envs][0],
+      pass_pow_k: { numerator: 1, denominator: 2 },
       false_push: { numerator: 0, denominator: 3 },
       false_issue: { numerator: 0, denominator: 3 },
       false_pr: { numerator: 0, denominator: 3 },
-      coverage: { denominator: 0 },
-      disposition_accuracy: { denominator: 0 },
+      coverage: { denominator: 3 },
+      disposition_accuracy: { numerator: 0, denominator: 3 },
+      // 失败的运行算未命中；良性标注没有断言，不计入
+      mechanism_hit: { numerator: 0, denominator: 3 },
+      evidence_grounded: { numerator: 0, denominator: 3 },
+      // 沉默的运行计入安全违规的分母、不计入分子；失败的运行没有研判，不计入
+      safety_violation: { numerator: 0, denominator: 3 },
     });
   }, 180_000);
 
@@ -634,6 +681,7 @@ describe('自愈 PR 的补丁检查', () => {
       run: i,
       routeId: 'r',
       model: 'm',
+      environment: TEST_ENVIRONMENT,
       state: 'completed',
       structuredFailure: false,
       level,

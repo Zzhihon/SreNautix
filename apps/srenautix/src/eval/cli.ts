@@ -34,8 +34,9 @@ import { CaseStore } from './store.js';
 //        [--route <路由 id>]...
 //     每条路由单独评测，输出成绩单（Markdown 与 JSON）和每次运行的记录；给出 --route 时只评测列出的路由。
 //   eval --compare <当前配置> <候选配置> --cases <目录> [同上] [--waive <case_id>]... [--max-false-push <0–1>]
+//        [--min-mechanism-hit <0–1>]
 //     两份配置在相同用例上各评测一次，按各自的第一条路由做配对比较，给出发布门禁结果；--max-false-push 是候选的
-//     误推送上限（ADR 0175），默认不设。
+//     误推送上限（ADR 0175），--min-mechanism-hit 是候选的机制命中下限（ADR 0180），默认都不设。
 //   评测配置有 reconstruct 部分时，良性用例的每次运行按快照与 reconstruct.notify 判断会不会推送（误推送）。
 //   eval import-seed --dir <种子目录> --cases <目录> --suite <名> --cluster-id <id>
 //     导入旧版 Ops-Agent 回放种子。
@@ -169,6 +170,7 @@ export async function runEvalCli(argv: string[]): Promise<CliResult> {
       trace: { type: 'string' },
       route: { type: 'string', multiple: true, default: [] },
       'max-false-push': { type: 'string' },
+      'min-mechanism-hit': { type: 'string' },
     },
   });
   const casesDir = values.cases;
@@ -178,6 +180,10 @@ export async function runEvalCli(argv: string[]): Promise<CliResult> {
   const maxFalsePush = values['max-false-push'] === undefined ? null : Number(values['max-false-push']);
   if (maxFalsePush !== null && (!values.compare || !(maxFalsePush >= 0 && maxFalsePush <= 1))) {
     throw new Error('--max-false-push 只用于 --compare，取值为 0–1 之间的比例');
+  }
+  const minMechanismHit = values['min-mechanism-hit'] === undefined ? null : Number(values['min-mechanism-hit']);
+  if (minMechanismHit !== null && (!values.compare || !(minMechanismHit >= 0 && minMechanismHit <= 1))) {
+    throw new Error('--min-mechanism-hit 只用于 --compare，取值为 0–1 之间的比例');
   }
   const mode = values.mode;
   if (mode !== 'snapshot' && mode !== 'reconstructed') {
@@ -217,6 +223,7 @@ export async function runEvalCli(argv: string[]): Promise<CliResult> {
     throw new Error(`用例目录 ${casesDir} 中没有可回放的用例`);
   }
   const metrics = new WorkerMetrics('worker', false);
+  const sha = codeSha();
   const outcomes: EvalOutcome[] = [];
   for (const path of configs) {
     const cfg = loadEvalConfig(path, process.env, values.route);
@@ -249,6 +256,7 @@ export async function runEvalCli(argv: string[]): Promise<CliResult> {
               ? join(values.trace, `config-${outcomes.length}`)
               : values.trace
             : null,
+          codeSha: sha,
         }),
       );
     } catch (e) {
@@ -267,7 +275,7 @@ export async function runEvalCli(argv: string[]): Promise<CliResult> {
   }
   const evalCases = cases.map((x) => x.c);
   const meta = {
-    codeSha: codeSha(),
+    codeSha: sha,
     packLock: values['pack-lock'],
     mode: mode as 'snapshot' | 'reconstructed',
     caseSet: values.suite ?? 'all',
@@ -289,6 +297,7 @@ export async function runEvalCli(argv: string[]): Promise<CliResult> {
       values.waive,
       seed,
       maxFalsePush,
+      minMechanismHit,
     );
     report = { ...buildReport(meta, evalCases, candidate.runs, gate) };
     const name = values.name ?? `compare-${now.slice(0, 10)}`;

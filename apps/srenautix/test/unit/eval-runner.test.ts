@@ -34,7 +34,7 @@ const completed = {
 } as unknown as ResearchRunResult;
 
 const layer = {
-  route: () => ({ route: { model: 'm', price: { currency: 'USD' } } }),
+  route: () => ({ route: { model: 'm', price: { currency: 'USD' } }, profile: { id: 'openai-chat' } }),
 } as unknown as ModelLayer;
 
 const plan = (runs: number, signal = new AbortController().signal): EvalPlan => ({
@@ -47,6 +47,7 @@ const plan = (runs: number, signal = new AbortController().signal): EvalPlan => 
   query: null,
   maxTokens: 1_000_000,
   signal,
+  codeSha: 'test',
 });
 
 beforeAll(async () => {

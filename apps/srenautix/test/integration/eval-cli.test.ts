@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -37,7 +38,16 @@ beforeAll(async () => {
   vm = await startVictoria();
   const { c, s } = await scenarioEvalCase(vm);
   const store = new CaseStore(join(ROOT, 'cases'));
-  store.writeCase(c);
+  // 用例带机制断言与必需证据（契约 2.41.0，ADR 0180），用例目录按契约校验后写入与读回
+  store.writeCase({
+    ...c,
+    truth: {
+      ...c.truth,
+      mechanism_expect: [['pvc', '数据卷'], '99.2%'],
+      mechanism_forbid: ['shop/web'],
+      required_evidence: [{ card: 'pvc/capacity/used_ratio' }],
+    },
+  });
   store.writeSnapshot(s);
 });
 
@@ -107,11 +117,32 @@ describe('srenautix eval', () => {
     await server.stop();
     expect(r.reportPath).toBe(join(ROOT, 'reports', 'one.md'));
     const md = readFileSync(r.reportPath as string, 'utf8');
-    expect(md).toMatch(/\| local \| qwen3-1\.7b \| all \| 100\.0% \(3\/3\)/);
+    expect(md).toMatch(/\| local \| qwen3-1\.7b \| `[0-9a-f]{16}` \| all \| 100\.0% \(3\/3\)/);
     const runs = readFileSync(join(ROOT, 'reports', 'one.runs.jsonl'), 'utf8')
       .trim()
-      .split('\n');
+      .split('\n')
+      .map((l) => JSON.parse(l) as { mechanism: string | null; environment: { id: string; code_sha: string } });
     expect(runs).toHaveLength(3);
+    // 运行记录带机制与环境指纹，环境指纹的代码提交是当前 HEAD（ADR 0180）
+    expect(runs.every((x) => x.mechanism?.includes('99.2%'))).toBe(true);
+    const head = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+    expect(runs.every((x) => x.environment.code_sha === head)).toBe(true);
+    const report = JSON.parse(readFileSync(join(ROOT, 'reports', 'one.json'), 'utf8')) as {
+      environments: Array<{ id: string; code_sha: string }>;
+      rows: Array<{
+        environment: string;
+        mechanism_hit: { numerator: number; denominator: number };
+        evidence_grounded: { numerator: number; denominator: number };
+        safety_violation: { numerator: number; denominator: number };
+      }>;
+    };
+    expect(report.environments.map((e) => e.id)).toEqual([runs[0]!.environment.id]);
+    expect(report.rows[0]).toMatchObject({
+      environment: runs[0]!.environment.id,
+      mechanism_hit: { numerator: 3, denominator: 3 },
+      evidence_grounded: { numerator: 3, denominator: 3 },
+      safety_violation: { numerator: 0, denominator: 3 },
+    });
   });
 
   it('路由的故障域不参与评测：事件在故障域内时照常研判，不只出阶段 A', async () => {
@@ -246,6 +277,8 @@ describe('srenautix eval', () => {
       join(ROOT, 'reports'),
       '--name',
       'cmp',
+      '--min-mechanism-hit',
+      '0.9',
     ]);
     await a.stop();
     await b.stop();
@@ -254,8 +287,16 @@ describe('srenautix eval', () => {
       gate: { paired_cases: number; threshold: number };
       rows: Array<{ false_push: { denominator: number }; false_issue: { denominator: number } }>;
     };
-    // 误推送默认不设上限（ADR 0175）；用例集里没有良性用例，三个度量没有样本
-    expect(report.gate).toMatchObject({ paired_cases: 1, threshold: -0.1, false_push: null, false_push_max: null });
+    // 误推送默认不设上限（ADR 0175）；用例集里没有良性用例，三个度量没有样本。机制命中下限 90%：候选 3/3（ADR 0180）
+    expect(report.gate).toMatchObject({
+      paired_cases: 1,
+      threshold: -0.1,
+      false_push: null,
+      false_push_max: null,
+      mechanism_hit: { numerator: 3, denominator: 3 },
+      mechanism_hit_min: 0.9,
+    });
+    expect(readFileSync(join(ROOT, 'reports', 'cmp.md'), 'utf8')).toContain('机制命中：100.0% (3/3)');
     expect(report.rows[0]).toMatchObject({ false_push: { denominator: 0 }, false_issue: { denominator: 0 } });
     expect(readFileSync(join(ROOT, 'reports', 'cmp.baseline.md'), 'utf8')).toContain('评测：当前配置');
   });
@@ -268,6 +309,12 @@ describe('srenautix eval', () => {
     ).rejects.toThrow(/--max-false-push 只用于 --compare/);
     await expect(
       runEvalCli(['--compare', 'a.yaml', 'b.yaml', '--cases', join(ROOT, 'cases'), '--max-false-push', '1.5']),
+    ).rejects.toThrow(/0–1/);
+    await expect(
+      runEvalCli(['--cases', join(ROOT, 'cases'), '--config', 'x.yaml', '--min-mechanism-hit', '0.8']),
+    ).rejects.toThrow(/--min-mechanism-hit 只用于 --compare/);
+    await expect(
+      runEvalCli(['--compare', 'a.yaml', 'b.yaml', '--cases', join(ROOT, 'cases'), '--min-mechanism-hit', '1.2']),
     ).rejects.toThrow(/0–1/);
     await expect(runEvalCli(['candidates', 'list'])).rejects.toThrow(/eval candidates export/);
     await expect(runEvalCli(['label', 'merge', '--labels', 'x.yaml'])).rejects.toThrow(/--candidates/);

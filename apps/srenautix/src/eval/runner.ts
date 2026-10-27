@@ -15,6 +15,8 @@ import type { QueryRunner } from '../research/checks.js';
 import type { Language } from '../prompts/index.js';
 import { runAdmission } from '../remediation/admission.js';
 import type { Tool } from '../tools/box.js';
+import { citedCards, conclusionMechanism } from './axes.js';
+import { runEnvironment } from './environment.js';
 import { replayCase, type Excluded } from './leakage.js';
 import { supportedCards, topComponents, type RunRecord } from './score.js';
 import { SnapshotTools } from './vcr.js';
@@ -41,6 +43,8 @@ export interface EvalPlan {
   signal: AbortSignal;
   /** 研判记录目录：每次运行写一份 <case_id>/<route>-<run>.json（步骤、模型调用的请求与响应、工具调用、检查、输出） */
   traceDir?: string | null;
+  /** 评测程序的代码提交，写进每次运行的环境指纹（ADR 0180） */
+  codeSha: string;
 }
 
 /**
@@ -118,6 +122,13 @@ export async function runEval(p: EvalPlan): Promise<EvalOutcome> {
         }
         const vcr = p.mode === 'snapshot' ? new SnapshotTools(s) : null;
         const tools = vcr ? vcr.tools() : (p.liveTools ?? []);
+        // 研判在回放中只能使用不读当前状态的工具（research/controller.ts），环境指纹按同样的工具计算
+        const environment = runEnvironment(
+          layer.route(routeId),
+          p.language,
+          tools.filter((t) => !t.live),
+          p.codeSha,
+        );
         const started = Date.now();
         const trace: Trace = { steps: [], llm_calls: [], tool_calls: [] };
         let res: ResearchRunResult;
@@ -165,6 +176,7 @@ export async function runEval(p: EvalPlan): Promise<EvalOutcome> {
             run: i,
             routeId,
             model: route.model,
+            environment,
             state: 'failed',
             structuredFailure: false,
             level: null,
@@ -219,6 +231,7 @@ export async function runEval(p: EvalPlan): Promise<EvalOutcome> {
           run: i,
           routeId,
           model: route.model,
+          environment,
           state: res.state,
           structuredFailure: res.error?.kind === 'invalid_output',
           level: out?.conclusion.level ?? null,
@@ -241,6 +254,9 @@ export async function runEval(p: EvalPlan): Promise<EvalOutcome> {
           admission: out
             ? runAdmission({ output: out, disposition: out.disposition, stageACards: s.context.stage_a.cards })
             : null,
+          // 机制命中与证据扎根（ADR 0180）
+          mechanism: out ? conclusionMechanism(out) : null,
+          citedCards: out ? citedCards(out, s.context.stage_a.cards) : [],
         });
         logger.info('评测运行完成', {
           case_id: c.case_id,
