@@ -1,39 +1,69 @@
 import { createHash } from 'node:crypto';
-import { parsePatch } from 'diff';
+import { locationChanged, type RemediationLocation } from '@srenautix/packs-sdk';
+import { applyPatch, parsePatch, type StructuredPatch } from 'diff';
 import type pg from 'pg';
 import { GitHubError, type GitHubApp } from '../github/app.js';
 import { closureDetails, type ClosureSink } from '../github/closures.js';
 import { logger } from '../log.js';
 import { appendAudit } from '../store/audit.js';
 import { tx } from '../store/pool.js';
+import { GitHubRepoReader } from './github-repo.js';
 
 /**
- * 自愈 PR 的修改去重与拒绝记忆（ADR 0155）。去重键是（仓库，规范化补丁的哈希）：
- * - 规范化补丁只保留每个文件的路径与增删的行，不含 index 行、hunk 头与上下文行，基准提交前进、行号移动后同一个修改的哈希不变；
+ * 自愈 PR 的修改去重与拒绝记忆（ADR 0155）。去重键是（仓库，变更哈希）：
+ * - 变更哈希由规范化补丁与修改定位一起计算。规范化补丁只保留每个文件的路径与增删的行，不含 index 行、hunk 头与上下文行，
+ *   基准提交前进、行号移动后同一个修改的哈希不变；修改定位是模板 edits 声明的目标（规则名、YAML 路径、资源名），
+ *   同一个文件里增删的行相同、改的是不同规则的两个补丁哈希不同；
  * - 同一个修改已有未结束的提议或打开的 PR 时不再提议，改为在这个 PR 上评论新的触发，并把新事件的 issue 关联到 PR；
  * - PR 被关闭且没有合并（或提议在审批时被人拒绝）是"人已拒绝"：同一个修改不再自动提出；同一模板对同一组文件的其他修改
  *   在 rejected_cooldown 内也不提出；
+ * - 旧算法（hash_version 1，只含规范化补丁）记录的行按原样保留：它们按旧哈希参与 duplicate_open、duplicate_pending；
+ *   rejected_before 要求旧哈希相同并且定位相同，定位相同由旧补丁在它的基准内容上是否改动了新修改的每个定位确认；
  * - 记录在 server.remediation_changes（每个提议一行）与 server.remediation_triggers（重复触发），状态在 PostgreSQL 里，
  *   server 重启后照常生效。PR 的状态在需要判断时按需从 GitHub 读取（GET pulls/{n}）。
  */
 
 const stripAB = (p: string | undefined) => (p ?? '').replace(/^[ab]\//, '');
+const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
+const pathOf = (f: StructuredPatch) =>
+  stripAB(f.newFileName && f.newFileName !== '/dev/null' ? f.newFileName : f.oldFileName);
 
-/** 规范化补丁的哈希：按路径排序的（路径，增删的行）；补丁不能解析时抛出 */
-export function changeHash(patch: string): string {
-  // 空串也会解析出一个没有文件名的条目
-  const files = parsePatch(patch)
-    .filter((f) => f.oldFileName !== undefined || f.newFileName !== undefined)
-    .map((f) => {
-      const path = stripAB(f.newFileName && f.newFileName !== '/dev/null' ? f.newFileName : f.oldFileName);
-      const lines = f.hunks.flatMap((h) => h.lines.filter((l) => l.startsWith('+') || l.startsWith('-')));
-      return [path, lines] as const;
-    })
-    .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+/** 补丁里的文件（空串也会解析出一个没有文件名的条目）；补丁不能解析或没有文件时抛出 */
+function patchFiles(patch: string): StructuredPatch[] {
+  const files = parsePatch(patch).filter((f) => f.oldFileName !== undefined || f.newFileName !== undefined);
   if (!files.length) {
     throw new Error('补丁没有任何文件');
   }
-  return createHash('sha256').update(JSON.stringify(files)).digest('hex');
+  return files;
+}
+
+/** 规范化补丁：按路径排序的（路径，增删的行） */
+function normalized(patch: string): Array<readonly [string, string[]]> {
+  return patchFiles(patch)
+    .map(
+      (f) =>
+        [pathOf(f), f.hunks.flatMap((h) => h.lines.filter((l) => l.startsWith('+') || l.startsWith('-')))] as const,
+    )
+    .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+}
+
+/** 旧算法（hash_version 1）的变更哈希：只含规范化补丁 */
+export function legacyChangeHash(patch: string): string {
+  return sha256(JSON.stringify(normalized(patch)));
+}
+
+/** 修改定位的哈希：去重后排序的（路径，kind，name，locate）；没有定位时抛出 */
+export function locationHash(locations: readonly RemediationLocation[]): string {
+  if (!locations.length) {
+    throw new Error('修改没有任何定位');
+  }
+  const keys = [...new Set(locations.map((l) => JSON.stringify([l.path, l.kind, l.name, l.locate])))].sort();
+  return sha256(JSON.stringify(keys));
+}
+
+/** 变更哈希（hash_version 2）：规范化补丁与修改定位一起 */
+export function changeHash(patch: string, locations: readonly RemediationLocation[]): string {
+  return sha256(JSON.stringify({ files: normalized(patch), locations: locationHash(locations) }));
 }
 
 export type ChangeState = 'pending' | 'open' | 'merged' | 'rejected' | 'abandoned';
@@ -42,6 +72,10 @@ export interface ChangeRow {
   proposal_id: string;
   repository: string;
   change_hash: string;
+  /** 1：change_hash 只含规范化补丁（旧算法）；2：change_hash 含修改定位 */
+  hash_version: 1 | 2;
+  /** 修改定位的哈希；旧算法的行在过渡规则确认定位之前为 null */
+  location_hash: string | null;
   key: string;
   files: string[];
   incident_id: string;
@@ -52,11 +86,87 @@ export interface ChangeRow {
   created_at: Date;
 }
 
+const COLUMNS =
+  'proposal_id, repository, change_hash, hash_version, location_hash, key, files, incident_id, state, pr_number, pr_url, closed_at, created_at';
+
+/** 计划出的一个修改 */
+export interface PlannedChange {
+  repository: string;
+  patch: string;
+  locations: readonly RemediationLocation[];
+  /** 模板键 */
+  key: string;
+  files: readonly string[];
+}
+
+/** 新修改用于比较的键 */
+export interface ChangeKeys {
+  hash: string;
+  legacy: string;
+  location: string;
+  key: string;
+  /** 排序后的文件列表的 JSON */
+  files: string;
+}
+
+export function changeKeys(c: PlannedChange): ChangeKeys {
+  return {
+    hash: changeHash(c.patch, c.locations),
+    legacy: legacyChangeHash(c.patch),
+    location: locationHash(c.locations),
+    key: c.key,
+    files: JSON.stringify([...c.files].sort()),
+  };
+}
+
 /** 新修改的去重结论：null 表示可以提议 */
 export type Verdict =
   | { code: 'duplicate_open' | 'duplicate_pending'; row: ChangeRow }
   | { code: 'rejected_before'; row: ChangeRow }
   | { code: 'rejected_cooldown'; row: ChangeRow; until: Date };
+
+/**
+ * 按已有的修改（状态已刷新，旧算法被拒绝的行已经过定位确认）给出去重结论：
+ * - 同一个修改：hash_version 2 的行变更哈希相同，或 hash_version 1 的行旧哈希相同；有打开的 PR 时 duplicate_open，
+ *   有未结束的提议时 duplicate_pending；
+ * - rejected_before：被拒绝的行变更哈希相同，或旧哈希相同并且定位相同（location_hash 相同）；
+ * - rejected_cooldown：同一模板对同一组文件的修改在冷却期内被拒绝
+ */
+export function classify(rows: readonly ChangeRow[], k: ChangeKeys, now: number, cooldownMs: number): Verdict | null {
+  const same = (x: ChangeRow) => x.hash_version === 2 && x.change_hash === k.hash;
+  const legacy = (x: ChangeRow) => x.hash_version === 1 && x.change_hash === k.legacy;
+  const duplicate = rows.filter((x) => same(x) || legacy(x));
+  const open = duplicate.find((x) => x.state === 'open');
+  if (open) {
+    return { code: 'duplicate_open', row: open };
+  }
+  const pending = duplicate.find((x) => x.state === 'pending');
+  if (pending) {
+    return { code: 'duplicate_pending', row: pending };
+  }
+  const rejected = rows.find(
+    (x) => x.state === 'rejected' && (same(x) || (legacy(x) && x.location_hash === k.location)),
+  );
+  if (rejected) {
+    return { code: 'rejected_before', row: rejected };
+  }
+  if (cooldownMs > 0) {
+    const recent = rows
+      .filter(
+        (x) =>
+          x.state === 'rejected' &&
+          x.key === k.key &&
+          JSON.stringify(x.files) === k.files &&
+          x.closed_at &&
+          now - x.closed_at.getTime() < cooldownMs,
+      )
+      .sort((a, b) => b.closed_at!.getTime() - a.closed_at!.getTime())[0];
+    if (recent) {
+      return { code: 'rejected_cooldown', row: recent, until: new Date(recent.closed_at!.getTime() + cooldownMs) };
+    }
+  }
+  return null;
+}
 
 /** 提议状态 → 没有 PR 时的修改状态：人在审批时拒绝记为 rejected；策略拒绝、过期、绑定过时、执行失败记为 abandoned */
 function stateWithoutPull(state: string, phase: string | null): ChangeState {
@@ -141,12 +251,13 @@ export class RemediationChanges {
     );
     for (const x of r.rows) {
       await this.pool.query(
+        // 提议参数里没有修改定位：补登记的行按旧算法记录，按过渡规则参与去重
         `INSERT INTO server.remediation_changes (proposal_id, repository, change_hash, key, files, incident_id, state, created_at)
          VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7) ON CONFLICT (proposal_id) DO NOTHING`,
         [
           x.proposal_id,
           x.repository,
-          changeHash(x.patch),
+          legacyChangeHash(x.patch),
           x.key,
           JSON.stringify([...x.files].sort()),
           x.incident_id,
@@ -248,7 +359,7 @@ export class RemediationChanges {
    */
   async refreshOpen(perRepo: number): Promise<number> {
     const r = await this.pool.query<ChangeRow>(
-      `SELECT proposal_id, repository, change_hash, key, files, incident_id, state, pr_number, pr_url, closed_at, created_at
+      `SELECT ${COLUMNS}
          FROM (SELECT *, row_number() OVER (PARTITION BY repository ORDER BY checked_at, proposal_id) AS n
                  FROM server.remediation_changes WHERE state = 'open') x
         WHERE n <= $1 ORDER BY checked_at, proposal_id`,
@@ -276,63 +387,95 @@ export class RemediationChanges {
 
   /**
    * 新修改能否提议：同一仓库的同一个修改有未结束的提议或打开的 PR 时是重复；同一个修改被人拒绝过时不再提；
-   * 同一模板对同一组文件的修改在冷却期内被拒绝过时等冷却期结束
+   * 同一模板对同一组文件的修改在冷却期内被拒绝过时等冷却期结束（classify）。旧算法被拒绝、旧哈希相同、还没有确认过定位的
+   * 行先确认定位：旧补丁改动了新修改的每个定位时记下这组定位，按 rejected_before 处理
    */
-  async verdict(repository: string, hash: string, key: string, files: readonly string[]): Promise<Verdict | null> {
+  async verdict(change: PlannedChange): Promise<Verdict | null> {
+    const k = changeKeys(change);
     const r = await this.pool.query<ChangeRow>(
-      `SELECT proposal_id, repository, change_hash, key, files, incident_id, state, pr_number, pr_url, closed_at, created_at
-         FROM server.remediation_changes
+      `SELECT ${COLUMNS} FROM server.remediation_changes
         WHERE repository = $1 AND state IN ('pending', 'open', 'rejected')
-          AND (change_hash = $2 OR (key = $3 AND files = $4::jsonb))
+          AND ((hash_version = 2 AND change_hash = $2) OR (hash_version = 1 AND change_hash = $3)
+               OR (key = $4 AND files = $5::jsonb))
         ORDER BY created_at`,
-      [repository, hash, key, JSON.stringify([...files].sort())],
+      [change.repository, k.hash, k.legacy, k.key, k.files],
     );
     const rows: ChangeRow[] = [];
     for (const x of r.rows) {
-      rows.push(await this.refresh(x));
-    }
-    const same = rows.filter((x) => x.change_hash === hash);
-    const open = same.find((x) => x.state === 'open');
-    if (open) {
-      return { code: 'duplicate_open', row: open };
-    }
-    const pending = same.find((x) => x.state === 'pending');
-    if (pending) {
-      return { code: 'duplicate_pending', row: pending };
-    }
-    const rejected = same.find((x) => x.state === 'rejected');
-    if (rejected) {
-      return { code: 'rejected_before', row: rejected };
-    }
-    if (this.cooldownMs > 0) {
-      const now = Date.now();
-      const recent = rows
-        .filter((x) => x.state === 'rejected' && x.closed_at && now - x.closed_at.getTime() < this.cooldownMs)
-        .sort((a, b) => b.closed_at!.getTime() - a.closed_at!.getTime())[0];
-      if (recent) {
-        return {
-          code: 'rejected_cooldown',
-          row: recent,
-          until: new Date(recent.closed_at!.getTime() + this.cooldownMs),
-        };
+      let row = await this.refresh(x);
+      if (
+        row.state === 'rejected' &&
+        row.hash_version === 1 &&
+        row.change_hash === k.legacy &&
+        row.location_hash === null &&
+        (await this.sameLocation(row, change.locations))
+      ) {
+        await this.pool.query(
+          'UPDATE server.remediation_changes SET locations = $2, location_hash = $3 WHERE proposal_id = $1',
+          [row.proposal_id, JSON.stringify(change.locations), k.location],
+        );
+        row = { ...row, location_hash: k.location };
       }
+      rows.push(row);
     }
-    return null;
+    return classify(rows, k, Date.now(), this.cooldownMs);
   }
 
-  /** 登记一个新提出的修改（提议已经创建） */
-  async record(x: {
-    proposalId: string;
-    repository: string;
-    hash: string;
-    key: string;
-    files: readonly string[];
-    incidentId: string;
-  }): Promise<void> {
+  /**
+   * 旧算法记录的修改是否与这组定位相同：把它的补丁应用到它的基准提交上的内容，每个定位上的内容都发生了变化。
+   * 基准提交取提议的尝试记录；补丁在基准内容上不能应用说明记录不一致，抛出
+   */
+  private async sameLocation(row: ChangeRow, locations: readonly RemediationLocation[]): Promise<boolean> {
+    const r = await this.pool.query<{ patch: string | null; base: string | null }>(
+      `SELECT p.params->>'patch' AS patch,
+              (SELECT a.base FROM server.remediation_attempts a
+                WHERE a.proposal_id = p.proposal_id AND a.base IS NOT NULL LIMIT 1) AS base
+         FROM server.proposals p WHERE p.proposal_id = $1`,
+      [row.proposal_id],
+    );
+    const x = r.rows[0];
+    if (!x?.patch || !x.base) {
+      throw new Error(`修改记录 ${row.proposal_id} 没有补丁或基准提交`);
+    }
+    const files = new Map(patchFiles(x.patch).map((f) => [pathOf(f), f]));
+    const reader = new GitHubRepoReader(this.github, row.repository, x.base);
+    for (const at of locations) {
+      const f = files.get(at.path);
+      if (!f) {
+        return false;
+      }
+      const before = f.oldFileName === '/dev/null' ? '' : await reader.readAt(x.base, at.path);
+      if (before === null) {
+        throw new Error(`${row.repository} 的 ${at.path} 在基准提交 ${x.base.slice(0, 12)} 上不存在`);
+      }
+      const after = applyPatch(before, f);
+      if (after === false) {
+        throw new Error(`修改记录 ${row.proposal_id} 的补丁不能应用到基准提交 ${x.base.slice(0, 12)} 上的 ${at.path}`);
+      }
+      if (!locationChanged(at, before, after)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /** 登记一个新提出的修改（提议已经创建）：按新算法记下变更哈希与修改定位 */
+  async record(x: { proposalId: string; incidentId: string; change: PlannedChange }): Promise<void> {
+    const k = changeKeys(x.change);
     await this.pool.query(
-      `INSERT INTO server.remediation_changes (proposal_id, repository, change_hash, key, files, incident_id, state)
-       VALUES ($1, $2, $3, $4, $5, $6, 'pending') ON CONFLICT (proposal_id) DO NOTHING`,
-      [x.proposalId, x.repository, x.hash, x.key, JSON.stringify([...x.files].sort()), x.incidentId],
+      `INSERT INTO server.remediation_changes (proposal_id, repository, change_hash, hash_version, locations, location_hash,
+         key, files, incident_id, state)
+       VALUES ($1, $2, $3, 2, $4, $5, $6, $7, $8, 'pending') ON CONFLICT (proposal_id) DO NOTHING`,
+      [
+        x.proposalId,
+        x.change.repository,
+        k.hash,
+        JSON.stringify(x.change.locations),
+        k.location,
+        k.key,
+        k.files,
+        x.incidentId,
+      ],
     );
   }
 

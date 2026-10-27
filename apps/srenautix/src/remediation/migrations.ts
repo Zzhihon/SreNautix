@@ -90,5 +90,20 @@ CREATE TABLE server.remediation_triggers (
 );
 `,
     },
+    {
+      version: 4,
+      name: 'change hashes that include the edit locations',
+      phase: 'expand',
+      sql: `
+-- 变更哈希加入修改定位（ADR 0155 §1）：hash_version 2 的 change_hash 由路径、增删的行与模板声明的定位一起计算，
+-- locations 是这些定位。已有的行与 N-1 版本写入的行 hash_version 为 1，change_hash 只含路径与增删的行，按旧算法保留。
+-- location_hash 是 locations 的哈希；旧算法的行在过渡规则确认它与某组定位相同之后记下 locations 与 location_hash，
+-- 没有确认过时两者都为 null
+ALTER TABLE server.remediation_changes
+  ADD COLUMN hash_version integer NOT NULL DEFAULT 1 CHECK (hash_version IN (1, 2)),
+  ADD COLUMN locations jsonb,
+  ADD COLUMN location_hash text;
+`,
+    },
   ],
 };

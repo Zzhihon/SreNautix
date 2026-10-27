@@ -30,6 +30,7 @@ const plan = (over: Partial<RemediationPlan> = {}): RemediationPlan => ({
   title: { 'zh-CN': '降低长期告警的严重度', en: 'Relax a chronic alert' },
   base: 'c'.repeat(40),
   files: [{ path: PATH, before: BEFORE, after: AFTER }],
+  locations: [{ path: PATH, kind: null, name: null, locate: 'groups[*].rules[alert=A]' }],
   patch: patchOf(PATH, BEFORE, AFTER),
   change: { 'zh-CN': '告警 A 由 critical 改为 warning', en: 'A from critical to warning' },
   verify: { say: { 'zh-CN': '同步后 A 以 warning 触发', en: 'A fires as warning' }, cards: ['x/y/z'], within: '24h' },
