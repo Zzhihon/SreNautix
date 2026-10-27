@@ -20,7 +20,7 @@ SreNautix 控制台是 server 角色提供的单页应用（DESIGN §1.1、§12�
 | 值班 | 研判运行明细 | `/runs/<run_id>`；提示词 `/runs/<run_id>/prompts`、原始提示词 `/runs/<run_id>/prompts/raw`（auditor、admin） | `getResearchRun`、`getResearchManifest`、`getRedactedPrompts`、`getRawPrompts` |
 | 处置 | 动作队列 | `/actions?tab=pending|running|history` | `listProposals`、`batchApprove`（只限同类型、同集群的 L 档） |
 | 处置 | 审批页 | `/actions/<proposal_id>` | `getProposal`（ProposalDetail）、`approveProposal`、`rejectProposal`、`undoProposal`、`reauthLocal` |
-| 度量 | 回放与评测 | `/eval?mode=snapshot|reconstructed&report` | 成绩单（含误推送、误开 issue、误开 PR）、门禁、版本趋势、成本估算、用例浏览器；管理员另有评测候选列表（`listEvalCandidates`、`confirmEvalCandidate`、`dropEvalCandidate`，ADR 0175） |
+| 度量 | 回放与评测 | `/eval?mode=snapshot|reconstructed&report` | 成绩单（含机制命中、证据扎根、安全违规、误推送、误开 issue、误开 PR，每行带环境指纹，另列各指纹的组成，ADR 0180）、门禁（误推送上限、机制命中下限）、版本趋势、成本估算、用例浏览器；管理员另有评测候选列表（`listEvalCandidates`、`confirmEvalCandidate`、`dropEvalCandidate`，ADR 0175） |
 | 度量 | Agent 健康与成本 | `/health?cost=day|incident|model` | P0 记分卡、运行指标、成本、出境账本 |
 | 系统 | 拓扑 | `/topology?view=coverage|neighborhood|diff` | 覆盖表、未映射告警与覆盖 PR、邻域图、版本差异 |
 | 系统 | 集群 | `/clusters`、`/clusters/<id>` | reader 与 gateway 的连接、版本、准入自检、熔断开关、informer 新鲜度、状态条件 |
