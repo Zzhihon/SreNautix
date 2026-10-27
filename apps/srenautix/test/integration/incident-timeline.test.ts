@@ -22,7 +22,12 @@ let ended = 0;
 const metrics = new ServerMetrics('server', false);
 const CLUSTER = 'tl';
 const id = randomUUID();
-const T = (s: number) => new Date(Date.parse('2026-10-27T01:00:00Z') + s * 1000);
+/**
+ * 时间基准取一小时之后：前两个用例让调度器与准入在测试运行时写终态记录（时间为 now()），时间线按时间排序，
+ * 这些条目排在按基准造出来的数据之前。基准写成固定的日期时，过了那个日期，顺序就随运行时刻改变
+ */
+const BASE = Date.now() + 3_600_000;
+const T = (s: number) => new Date(BASE + s * 1000);
 
 const inc = (): Incident => ({
   ...baseIncident(),
