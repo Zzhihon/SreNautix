@@ -52,6 +52,11 @@ function RatioCell({ r, gate, lowerIsBetter }: { r: Ratio; gate?: number; lowerI
   );
 }
 
+/** 环境指纹里的哈希只显示前 12 位十六进制 */
+function shortHash(h: string): string {
+  return h.replace(/^sha256:/, '').slice(0, 12);
+}
+
 function Scorecard({ report }: { report: EvalReport }) {
   const { t, fmt } = useI18n();
   return (
@@ -77,6 +82,9 @@ function Scorecard({ report }: { report: EvalReport }) {
                   <th scope="col">{t('eval.col.recall3')}</th>
                   <th scope="col">{t('eval.col.passk', { k: report.runs_per_case })}</th>
                   <th scope="col">{t('eval.col.disposition')}</th>
+                  <th scope="col">{t('eval.col.mechanism_hit')}</th>
+                  <th scope="col">{t('eval.col.evidence_grounded')}</th>
+                  <th scope="col">{t('eval.col.safety_violation')}</th>
                   <th scope="col">{t('eval.col.benign_fp')}</th>
                   <th scope="col">{t('eval.col.false_push')}</th>
                   <th scope="col">{t('eval.col.false_issue')}</th>
@@ -89,11 +97,14 @@ function Scorecard({ report }: { report: EvalReport }) {
               </thead>
               <tbody>
                 {report.rows.map((r) => (
-                  <tr key={`${r.route_id}/${r.pack_timing}`}>
+                  <tr key={`${r.route_id}/${r.environment}/${r.pack_timing}`}>
                     <th scope="row">
                       {r.route_id}
                       <div className={styles.dim}>
                         <Mono>{r.model}</Mono>
+                      </div>
+                      <div className={styles.dim}>
+                        {t('eval.environment_short')} <Mono>{r.environment}</Mono>
                       </div>
                     </th>
                     <td>{t(`eval.pack_timing.${r.pack_timing}`)}</td>
@@ -108,6 +119,15 @@ function Scorecard({ report }: { report: EvalReport }) {
                     </td>
                     <td>
                       <RatioCell r={r.disposition_accuracy} />
+                    </td>
+                    <td>
+                      <RatioCell r={r.mechanism_hit} gate={report.gate?.mechanism_hit_min ?? undefined} />
+                    </td>
+                    <td>
+                      <RatioCell r={r.evidence_grounded} />
+                    </td>
+                    <td>
+                      <RatioCell r={r.safety_violation} gate={0} lowerIsBetter />
                     </td>
                     <td>
                       <RatioCell r={r.benign_false_positive} gate={0.1} lowerIsBetter />
@@ -142,6 +162,51 @@ function Scorecard({ report }: { report: EvalReport }) {
         )}
         <p className={styles.dim}>{t('eval.gates_note')}</p>
         <p className={styles.dim}>{t('eval.benign_note')}</p>
+        <p className={styles.dim}>{t('eval.axes_note')}</p>
+      </Panel>
+      <Panel title={t('eval.environments')} meta={t('eval.environments_note')}>
+        <div className={styles.tableScroll}>
+          <table className={styles.table}>
+            <thead>
+              <tr>
+                <th scope="col">{t('eval.env.id')}</th>
+                <th scope="col">{t('eval.env.model')}</th>
+                <th scope="col">{t('eval.env.dialect_profile')}</th>
+                <th scope="col">{t('eval.env.prompt_hash')}</th>
+                <th scope="col">{t('eval.env.model_schema_hash')}</th>
+                <th scope="col">{t('eval.env.tool_contract_hash')}</th>
+                <th scope="col">{t('eval.env.code_sha')}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {report.environments.map((e) => (
+                <tr key={e.id}>
+                  <th scope="row">
+                    <Mono>{e.id}</Mono>
+                  </th>
+                  <td>
+                    <Mono>{e.model}</Mono>
+                  </td>
+                  <td>
+                    <Mono>{e.dialect_profile}</Mono>
+                  </td>
+                  <td>
+                    <Mono>{shortHash(e.prompt_hash)}</Mono>
+                  </td>
+                  <td>
+                    <Mono>{shortHash(e.model_schema_hash)}</Mono>
+                  </td>
+                  <td>
+                    <Mono>{shortHash(e.tool_contract_hash)}</Mono>
+                  </td>
+                  <td>
+                    <Mono>{e.code_sha.slice(0, 10)}</Mono>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </Panel>
       <Panel title={t('eval.gate')}>
         {report.gate === null ? (
@@ -189,6 +254,24 @@ function Scorecard({ report }: { report: EvalReport }) {
                       <span>
                         <RatioCell r={report.gate.false_push} gate={report.gate.false_push_max} lowerIsBetter />{' '}
                         {t('eval.false_push_limit', { max: fmt.percent(report.gate.false_push_max) })}
+                      </span>
+                    ),
+                },
+                {
+                  k: t('eval.mechanism_gate'),
+                  tone:
+                    report.gate.mechanism_hit?.value != null &&
+                    report.gate.mechanism_hit_min !== null &&
+                    report.gate.mechanism_hit.value < report.gate.mechanism_hit_min
+                      ? 'bad'
+                      : undefined,
+                  v:
+                    report.gate.mechanism_hit_min === null || report.gate.mechanism_hit === null ? (
+                      t('eval.mechanism_no_floor')
+                    ) : (
+                      <span>
+                        <RatioCell r={report.gate.mechanism_hit} gate={report.gate.mechanism_hit_min} />{' '}
+                        {t('eval.mechanism_floor', { min: fmt.percent(report.gate.mechanism_hit_min) })}
                       </span>
                     ),
                 },
