@@ -168,11 +168,13 @@ export {
   type RemediationAlert,
   type RemediationCard,
   type RemediationContext,
+  type RemediationLocation,
   type RemediationTarget,
   type RemediationPlan,
   type RemediationSkip,
   type SkipCode,
 } from './remediation/plan.js';
+export { locationChanged } from './remediation/location.js';
 export { GitRepoReader, globToRegExp, type RepoReader, type RepoCommit } from './remediation/repo.js';
 export type { CompiledRemediation } from './remediation/compile.js';
 export { runDoctor, type DoctorReport } from './doctor.js';

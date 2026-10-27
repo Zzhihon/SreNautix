@@ -96,6 +96,18 @@ export interface RemediationSkip {
   guard?: string;
 }
 
+/**
+ * 一处修改的定位（ADR 0155）：模板 edits 声明的目标在变量替换之后的值。path 是匹配到的文件；kind 与 name 是
+ * document 选择的资源（没有声明时为 null）；locate 是定位点路径（例如 spec.groups[*].rules[alert=ShopApiDown]），
+ * 没有声明 locate 时取第一个 set 路径的父路径或第一个 append 路径
+ */
+export interface RemediationLocation {
+  path: string;
+  kind: string | null;
+  name: string | null;
+  locate: string | null;
+}
+
 export interface RemediationPlan {
   kind: 'plan';
   key: string;
@@ -107,6 +119,8 @@ export interface RemediationPlan {
   /** 补丁基于的提交 */
   base: string;
   files: Array<{ path: string; before: string; after: string }>;
+  /** 每条 edits 的定位，去重后按 path、kind、name、locate 排序；server 的修改去重把它算进变更哈希 */
+  locations: RemediationLocation[];
   /** git diff 格式，每个文件带 diff --git 头 */
   patch: string;
   change: LocalizedText;
@@ -424,6 +438,7 @@ export async function planRemediation(
   }
 
   const subst = { ...params, ...Object.fromEntries(Object.entries(letValues).map(([k, v]) => [k, toPlain(v)])) };
+  const locations = new Map<string, RemediationLocation>();
   try {
     for (const [ei, e] of r.edits.entries()) {
       const l = target.layout[e.file]!;
@@ -477,6 +492,7 @@ export async function planRemediation(
       }
       const { path, doc } = candidates[0]!;
       let file = loaded.get(path)!;
+      const textBefore = file.text;
       for (const [si, s] of e.set.entries()) {
         let at: Concrete;
         try {
@@ -504,6 +520,11 @@ export async function planRemediation(
           throw new Error(`append 路径 ${a.path} 匹配到 ${hits.length} 处`);
         }
         file = appendValue(file, doc, hits[0]!, toPlain(a.value(vars)));
+      }
+      // 只记录真正改动了文件的修改的定位
+      if (file.text !== textBefore) {
+        const where: RemediationLocation = { path, kind: kind ?? null, name: name ?? null, locate };
+        locations.set(JSON.stringify([where.path, where.kind, where.name, where.locate]), where);
       }
       loaded.set(path, file);
     }
@@ -541,6 +562,7 @@ export async function planRemediation(
     title: def.title,
     base: await target.repo.head(),
     files: changed,
+    locations: [...locations.entries()].sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0)).map(([, l]) => l),
     patch: changed.map((c) => formatPatch(c.path, c.before, c.after)).join(''),
     change: format(r.change, msgVars),
     verify: {

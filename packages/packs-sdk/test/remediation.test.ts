@@ -28,6 +28,7 @@ import {
   type RemediationContext,
   type RemediationSkip,
 } from '../src/remediation/plan.js';
+import { locationChanged } from '../src/remediation/location.js';
 import { GitRepoReader } from '../src/remediation/repo.js';
 import { LiveDataSource } from '../src/runtime/datasource.js';
 import { CATALOG, PACKS } from './support.js';
@@ -426,6 +427,10 @@ describe.each(SHAPES)('$name', (shape) => {
       return;
     }
     expect(plan.patch).toContain('-  maxReplicas: 5\n+  maxReplicas: 7\n');
+    // 修改定位（ADR 0155）：document 选择的资源与 set 路径的父路径
+    expect(plan.locations).toEqual([
+      { path: shape.layout.autoscaling!.path, kind: 'HorizontalPodAutoscaler', name: 'api', locate: 'spec' },
+    ]);
     applyCheck(dir, plan.patch);
     const text = readFileSync(join(dir, shape.layout.autoscaling!.path), 'utf8');
     expect(text).toContain('# 上限按节点容量估算');
@@ -588,6 +593,15 @@ describe.each(SHAPES)('$name', (shape) => {
     expect(plan.kind).toBe('plan');
     if (plan.kind === 'plan') {
       expect(plan.patch).toContain('+      for: 1h\n');
+      // 修改定位是替换了告警名的 locate：同一文件里其他规则的同样改动定位不同（ADR 0155）
+      expect(plan.locations).toEqual([
+        {
+          path: plan.files[0]!.path,
+          kind: null,
+          name: null,
+          locate: 'spec.groups[*].rules[alert=ShopPodRestarted]',
+        },
+      ]);
       expect(plan.change['zh-CN']).toContain('研判结论为不需要处理');
       applyCheck(dir, plan.patch);
     }
@@ -858,4 +872,29 @@ it('布局缺少模板用到的文件角色时跳过', async () => {
     AT,
   );
   expect(plan).toMatchObject({ kind: 'skipped', code: 'layout_missing' });
+});
+
+it('定位上的内容是否被改动：同一文件里另一条规则的改动不算；按 document 选择资源（ADR 0155）', () => {
+  const before = rules('PrometheusRule', 'shop', RESTART_RULE + HPA_RULE);
+  const after = before.replace(
+    'increase(kube_pod_container_status_restarts_total{namespace="shop"}[5m]) > 0\n      labels:\n        severity: critical',
+    'increase(kube_pod_container_status_restarts_total{namespace="shop"}[5m]) > 0\n      labels:\n        severity: warning',
+  );
+  expect(after).not.toBe(before);
+  const at = (alert: string) => ({
+    path: 'rules.yaml',
+    kind: null,
+    name: null,
+    locate: `spec.groups[*].rules[alert=${alert}]`,
+  });
+  expect(locationChanged(at('ShopPodRestarted'), before, after)).toBe(true);
+  expect(locationChanged(at('KubeHpaMaxedOut'), before, after)).toBe(false);
+  expect(locationChanged(at('NoSuchAlert'), before, after)).toBe(false);
+  const hpa = `${HPA_WEB}---\n${HPA_API}`;
+  const raised = hpa.replace('maxReplicas: 5', 'maxReplicas: 7');
+  const doc = (name: string) => ({ path: 'hpa.yaml', kind: 'HorizontalPodAutoscaler', name, locate: 'spec' });
+  expect(locationChanged(doc('api'), hpa, raised)).toBe(true);
+  expect(locationChanged(doc('web'), hpa, raised)).toBe(false);
+  expect(locationChanged({ ...doc('api'), locate: null }, '', HPA_API)).toBe(true);
+  expect(() => locationChanged(doc('api'), 'a: [', HPA_API)).toThrow('无法解析');
 });
