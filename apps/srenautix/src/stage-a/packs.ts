@@ -16,6 +16,7 @@ import {
   detectLabelProfile,
   DatasourceError,
   loadPromqlEngine,
+  LokiAdapter,
   PrometheusApiAdapter,
   toIso,
   verifyMetrics,
@@ -406,6 +407,27 @@ export interface PrometheusSource {
   timeoutMs: number;
 }
 
+/** 日志数据源（Loki，ADR 0177）：证据卡的 logs 引用与错误样例读它 */
+export interface LokiSource {
+  id: string;
+  url: string;
+  bearerTokenFile: string | null;
+  tenant: string | null;
+  /** 日志流上的 Kubernetes 标签名 */
+  labels: { namespace: string; pod: string; container: string; cluster: string | null };
+  timeoutMs: number;
+}
+
+/** 证据数据源提供的能力：指标总是有；配置了日志数据源时加上 logs.match 与 logs.query */
+export function evidenceCapabilities(logs: boolean): Set<Capability> {
+  return new Set<Capability>([
+    'metrics.query',
+    'metrics.query_range',
+    'metrics.series',
+    ...(logs ? (['logs.match', 'logs.query'] as const) : []),
+  ]);
+}
+
 /** 标签档案探测失败时使用的规范标签名；查询照常发出，失败原因记在卡片的查询记录里。 */
 const CANONICAL_PROFILE: LabelProfile = {
   namespace: 'namespace',
@@ -429,6 +451,7 @@ const RESOLUTION_TTL_MS = 10 * 60_000;
  */
 export class EvidenceSource {
   private readonly adapter: PrometheusApiAdapter;
+  private readonly logs: LokiAdapter | null;
   private live: LiveDataSource | null = null;
   private profileAt = 0;
   private profileError: string | null = null;
@@ -437,6 +460,7 @@ export class EvidenceSource {
   private constructor(
     private readonly s: PrometheusSource,
     readonly engine: PromqlEngine,
+    logs: LokiSource | null,
   ) {
     this.adapter = new PrometheusApiAdapter({
       id: s.id,
@@ -445,10 +469,21 @@ export class EvidenceSource {
       dialects: s.dialect === 'metricsql' ? ['promql', 'metricsql'] : ['promql'],
       bearer_token_file: s.bearerTokenFile,
     });
+    this.logs = logs
+      ? new LokiAdapter({
+          id: logs.id,
+          url: logs.url,
+          labels: logs.labels,
+          bearer_token_file: logs.bearerTokenFile,
+          tenant: logs.tenant,
+          timeout_ms: logs.timeoutMs,
+        })
+      : null;
   }
 
-  static async create(s: PrometheusSource): Promise<EvidenceSource> {
-    return new EvidenceSource(s, await loadPromqlEngine());
+  /** logs 为 null 时证据卡没有日志能力 */
+  static async create(s: PrometheusSource, logs: LokiSource | null = null): Promise<EvidenceSource> {
+    return new EvidenceSource(s, await loadPromqlEngine(), logs);
   }
 
   /** 最近一次标签档案探测的错误；探测成功时为 null。 */
@@ -491,7 +526,10 @@ export class EvidenceSource {
       });
     }
     this.profileAt = wall;
-    this.live = new LiveDataSource({ metrics: { adapter: this.adapter, profile } });
+    this.live = new LiveDataSource({
+      metrics: { adapter: this.adapter, profile },
+      ...(this.logs ? { logs: { adapter: this.logs, profile: this.logs.config.labels } } : {}),
+    });
     return this.live;
   }
 

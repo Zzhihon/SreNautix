@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "mode": "hand-written",
+    "note": "错误样例（ADR 0177）的黄金响应：外部上游的配额耗尽。机制写出样例中的错误类别、计数与来源（上游返回的 429），mechanism_refs 引用错误样例卡"
+  },
+  "output": {
+    "hypotheses": [
+      {
+        "id": "h1",
+        "parent_id": null,
+        "root_component": "{{component:^Deployment:llm/api-gateway$}}",
+        "mechanism": "上游 provider-a 对 model-x 的每周额度耗尽，上游持续返回 429（配额耗尽 12 行），网关把错误转给调用方",
+        "mechanism_refs": ["{{ref:llm-gateway/gateway-errors/samples}}"],
+        "supporting": ["{{ref:llm-gateway/gateway-errors/samples}}"],
+        "refuting": []
+      }
+    ],
+    "next_checks": []
+  }
+}

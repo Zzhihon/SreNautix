@@ -11,6 +11,7 @@
         "parent_id": null,
         "root_component": "{{component:^(Deployment:shop/api|Pod:shop/api-.+)$}}",
         "mechanism": "api 的 db-check 边车容器正常退出一次并由 kubelet 重启，业务容器不受影响；告警规则对任何一次重启立即以 critical 触发，过于敏感",
+        "mechanism_refs": [],
         "supporting": [
           "{{ref:workload/pod-restarts/restarts}}"
         ],

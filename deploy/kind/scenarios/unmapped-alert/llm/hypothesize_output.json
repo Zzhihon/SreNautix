@@ -11,6 +11,7 @@
         "parent_id": null,
         "root_component": "{{component:^(Deployment:shop/api|Service:shop/api)$}}",
         "mechanism": "ShopCatalogStale 只带 service=catalog 标签，没有映射到拓扑；商品目录由 api 提供，目录过期指向 api",
+        "mechanism_refs": [],
         "supporting": [
           "{{ref:workload/pod-restarts/restarts}}",
           "{{ref:workload/rollout/deployment}}"

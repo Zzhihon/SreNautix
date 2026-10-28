@@ -1,4 +1,5 @@
-import type { EvidenceResult } from '@srenautix/contract';
+import type { CardSamples, EvidenceResult } from '@srenautix/contract';
+import { aggregateSamples, compileSamples, NO_REDACTION } from '@srenautix/packs-sdk';
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_BUDGET, rawEstimate } from '../../src/llm/budget.js';
 import { declaredProfile } from '../../src/llm/dialect.js';
@@ -24,7 +25,7 @@ import {
   selectCards,
   topologyView,
 } from '../../src/research/prompt.js';
-import type { Subgraph } from '../../src/research/types.js';
+import type { ResearchCase, Subgraph } from '../../src/research/types.js';
 import { researchCase, stageA, stageACards, subgraph } from '../support/scenario.js';
 
 // 研判上下文按预算裁剪（ADR 0127）：卡多的事件只完整放入结论相关的卡，其余写成摘要；根因组件的枚举不含由控制器
@@ -116,6 +117,7 @@ describe('卡多的事件', () => {
     const enums = {
       components: componentChoices(rc),
       evidence_refs: book.refs(),
+      sample_refs: book.sampleRefs(),
       check_templates: [],
       runbooks: rc.runbooks,
       actions: rc.actions.map((a) => a.id),
@@ -204,8 +206,8 @@ describe('提示词里的拓扑（ADR 0129）', () => {
 describe('上下文 16k 的路由上的 conclude', () => {
   // 本地部署的模型常见 16k 上下文：输入只能用上下文减去 conclude 输出上限的部分。估算的是整个请求体，固定指令、
   // 可移植 schema、目录与账本都不裁剪；json_object 的方言把 schema 写进系统提示，是同一份提示词最大的请求形态
-  it('六个假设的账本：可裁剪的片段全部裁掉之后，按字节估算的输入放得进上下文减去输出上限的部分', () => {
-    const rc = researchCase();
+  /** 六个假设的账本上的 conclude 请求，可裁剪的片段全部裁掉之后的请求体与它的上限 */
+  function trimmedConclude(rc: ResearchCase, mechanismRefs: string[] = []) {
     const book = incidentBook(rc);
     const ledger = new Ledger(book, rc.subgraph);
     const hyp = (id: string, root: string, mechanism: string, parent: string | null = null) => ({
@@ -213,6 +215,7 @@ describe('上下文 16k 的路由上的 conclude', () => {
       parent_id: parent,
       root_component: root,
       mechanism,
+      mechanism_refs: mechanismRefs,
       supporting: ['card:1', 'alert:1'],
       refuting: [],
     });
@@ -255,14 +258,61 @@ describe('上下文 16k 的路由上的 conclude', () => {
       maxOutputTokens,
       temperature: 0,
     };
+    const trimmed: string[] = [];
     for (let t = trimOnce(req); t; t = trimOnce(req)) {
       req = t.request;
+      trimmed.push(t.label);
     }
     const body = JSON.stringify(
       streamingParams('chat_completions', toChatParams(req, { model: 'local-model', profile, language: 'zh' })),
     );
-    expect(body).toContain('只输出一个 JSON 对象');
-    expect(rawEstimate(body, profile.tokenizer)).toBeLessThanOrEqual(context - maxOutputTokens);
+    return { body, trimmed, estimate: rawEstimate(body, profile.tokenizer), limit: context - maxOutputTokens };
+  }
+
+  it('六个假设的账本：可裁剪的片段全部裁掉之后，按字节估算的输入放得进上下文减去输出上限的部分', () => {
+    const r = trimmedConclude(researchCase());
+    expect(r.body).toContain('只输出一个 JSON 对象');
+    expect(r.estimate).toBeLessThanOrEqual(r.limit);
+  });
+
+  it('错误样例（ADR 0177）属于可裁剪的部分：三张满载的错误样例卡、每个假设都引用它们时，不可裁剪的部分与没有样例时相同', () => {
+    // 每张卡 16 个类别、每类 10 条 2000 字符的样例
+    const spec: CardSamples = {
+      ref: 'errors',
+      dimensions: [{ name: 'status', label: 'status' }],
+      classes: Array.from({ length: 16 }, (_, k) => ({
+        id: `c${k}`,
+        title: { 'zh-CN': `类别 ${k}` },
+        match: [{ dimension: 'status', regex: `^s${k}$` }],
+      })),
+      per_class: 10,
+      max_chars: 2000,
+    };
+    const c = compileSamples(spec, [{ name: 'errors', mode: 'logs' }], 'redact');
+    const lines = Array.from({ length: 16 * 10 }, (_, i) => ({
+      time: Date.parse('2026-09-01T10:00:00Z') + i * 1000,
+      labels: { status: `s${i % 16}` },
+      line: `request ${i} failed: ${'upstream error detail '.repeat(100)}`,
+    }));
+    const samples = aggregateSamples(c, { kind: 'logs', lines, truncated: true }, NO_REDACTION);
+    const base = stageACards();
+    const cards: EvidenceResult[] = [
+      ...base,
+      ...[6, 7, 8].map((n) => ({ ...base[0]!, ref: `card:${n}`, card_id: `gw/errors/samples-${n}`, samples })),
+    ];
+    const withSamples = trimmedConclude(researchCase({ stageA: stageA(cards) }), ['card:6', 'card:7', 'card:8']);
+    const without = trimmedConclude(researchCase());
+    expect(withSamples.trimmed).toEqual(
+      expect.arrayContaining([
+        '错误样例 3 张卡（每个类别只保留一条样例）',
+        '错误样例 3 张卡的样例原文（只保留计数）',
+        '错误样例 3 张卡',
+      ]),
+    );
+    expect(withSamples.body).not.toContain('upstream error detail');
+    expect(withSamples.estimate).toBeLessThanOrEqual(withSamples.limit);
+    // 裁剪之后剩下的只有不可裁剪的部分：样例卡只多出它们在动态枚举 evidence_refs 里的三个编号
+    expect(withSamples.estimate - without.estimate).toBeLessThan(20);
   });
 
   it('动作目录的参数 schema 去掉字符串的长度上下限，枚举、数值范围、格式与说明照写；同名的参数不受影响', () => {
@@ -391,6 +441,7 @@ describe('next_checks 缺少 template', () => {
     const schema = bindSchema(modelSchema('hypothesize'), {
       components: ['StatefulSet:prod/gateway', 'Deployment:prod/worker'],
       evidence_refs: [],
+      sample_refs: [],
       check_templates: templates,
       runbooks: [],
       actions: [],
@@ -400,6 +451,7 @@ describe('next_checks 缺少 template', () => {
       parent_id: null,
       root_component: root,
       mechanism: 'm',
+      mechanism_refs: [],
       supporting: [],
       refuting: [],
     });

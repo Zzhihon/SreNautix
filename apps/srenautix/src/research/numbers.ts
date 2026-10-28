@@ -148,6 +148,24 @@ export function cardMaterial(r: EvidenceResult): { texts: string[]; numbers: num
     }
   }
   const times = [r.window.from, r.window.to, ...(r.anomaly_started_at ? [r.anomaly_started_at] : [])];
+  // 错误样例（ADR 0177）：维度值、类别标题与样例原文里的数值（状态码、超时阈值）和各级计数都是证据
+  const s = r.samples;
+  if (s) {
+    numbers.push(s.lines);
+    for (const g of s.groups) {
+      numbers.push(g.count);
+      texts.push(...Object.values(g.dimensions).filter((v): v is string => v !== null));
+      times.push(g.first_at, g.last_at);
+    }
+    for (const k of s.classes) {
+      numbers.push(k.count);
+      texts.push(k.title?.['zh-CN'] ?? '', k.title?.en ?? '');
+      for (const m of k.samples) {
+        texts.push(m.text, ...Object.values(m.dimensions).filter((v): v is string => v !== null));
+        times.push(m.at);
+      }
+    }
+  }
   return { texts, numbers, times };
 }
 

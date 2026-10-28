@@ -218,6 +218,7 @@ export async function runStageB(input: ResearchRunInput, env: ResearchEnv, sink:
   const enums = (): DynamicEnums => ({
     components: componentChoices(rc),
     evidence_refs: book.refs(),
+    sample_refs: book.sampleRefs(),
     check_templates: [...rc.templates.map((t) => t.id), ...box.tools.map((t) => t.name)],
     runbooks: rc.runbooks,
     actions: rc.actions.map((a) => a.id),

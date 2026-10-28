@@ -67,7 +67,7 @@ import { Scheduler } from '../scheduler/admission.js';
 import { WorkerEventMirror } from '../scheduler/worker-events.js';
 import { DegradedLane } from '../stage-a/degraded.js';
 import { PackEvidence, PackRules } from '../stage-a/pack-evidence.js';
-import { EvidenceSource, PackRuntime } from '../stage-a/packs.js';
+import { EvidenceSource, evidenceCapabilities, PackRuntime } from '../stage-a/packs.js';
 import { StageAService } from '../stage-a/service.js';
 import { loadEd25519Private } from '../store/audit.js';
 import { keyringFrom, type Keyring } from '../proposals/assertion.js';
@@ -309,12 +309,13 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
         )
       : null;
   const prom = c.datasources.prometheus;
+  const loki = c.datasources.loki;
   const packs = await PackRuntime.load({
     dirs: c.packs.dirs,
     only: c.packs.only ?? null,
     lockFile: c.packs.lock_file ?? null,
     catalogPath: DEFAULT_CATALOG_PATH,
-    capabilities: new Set(['metrics.query', 'metrics.query_range', 'metrics.series']),
+    capabilities: evidenceCapabilities(loki !== undefined),
     oci: c.packs.oci
       ? {
           sources: c.packs.oci.sources,
@@ -333,13 +334,25 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
   const alertCatalog = packs.alertCatalog();
   const rcaParams = packs.rcaParams();
   const params = (): ResolvedRcaParams => rcaParams;
-  const evidenceSource = await EvidenceSource.create({
-    id: 'prometheus',
-    url: prom.url,
-    dialect: prom.dialect,
-    bearerTokenFile: prom.bearer_token_file ?? null,
-    timeoutMs: parseDuration('datasources.prometheus.timeout', prom.timeout),
-  });
+  const evidenceSource = await EvidenceSource.create(
+    {
+      id: 'prometheus',
+      url: prom.url,
+      dialect: prom.dialect,
+      bearerTokenFile: prom.bearer_token_file ?? null,
+      timeoutMs: parseDuration('datasources.prometheus.timeout', prom.timeout),
+    },
+    loki
+      ? {
+          id: 'loki',
+          url: loki.url,
+          bearerTokenFile: loki.bearer_token_file ?? null,
+          tenant: loki.tenant ?? null,
+          labels: loki.labels,
+          timeoutMs: parseDuration('datasources.loki.timeout', loki.timeout),
+        }
+      : null,
+  );
   const evidenceOptions = {
     locale: c.stage_a.language === 'zh' ? ('zh-CN' as const) : ('en' as const),
     concurrency: prom.concurrency,

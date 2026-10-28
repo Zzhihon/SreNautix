@@ -188,6 +188,7 @@ describe('可移植 schema 与动态枚举', () => {
   const enums = {
     components: ['Deployment:shop/api', 'StatefulSet:shop/postgres'],
     evidence_refs: ['card:1', 'card:2', 'alert:1'],
+    sample_refs: ['card:2'],
     check_templates: ['postgres/connections', 'metrics_query'],
     runbooks: [],
     actions: ['workload_scale'],

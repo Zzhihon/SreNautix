@@ -1,0 +1,13 @@
+{
+  "provenance": { "mode": "hand-written", "note": "错误样例（ADR 0177）的黄金响应：单一供给的首内容超时" },
+  "output": {
+    "disposition": "escalate",
+    "cause_scope": "upstream",
+    "hypothesis_id": "h1",
+    "undetermined_reason": null,
+    "situation": "网关转发到 provider-d 的 model-w 请求失败",
+    "summary": "model-w 只有一个供给且首内容超时后没有候选可以转移，需要增加供给或调整首内容超时阈值",
+    "recommendations": [],
+    "proposals": []
+  }
+}

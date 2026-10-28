@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "mode": "hand-written",
+    "note": "错误样例（ADR 0177）的黄金响应：能力不匹配。上游对模型不支持的能力返回 400，同时伴随 524"
+  },
+  "output": {
+    "hypotheses": [
+      {
+        "id": "h1",
+        "parent_id": null,
+        "root_component": "{{component:^Deployment:llm/api-gateway$}}",
+        "mechanism": "上游 provider-b 的 model-y 不支持工具调用，上游返回 400（能力不匹配 6 行），同时有 524 源站超时（4 行）",
+        "mechanism_refs": ["{{ref:llm-gateway/gateway-errors/samples}}"],
+        "supporting": ["{{ref:llm-gateway/gateway-errors/samples}}"],
+        "refuting": []
+      }
+    ],
+    "next_checks": []
+  }
+}

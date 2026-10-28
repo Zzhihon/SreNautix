@@ -28,6 +28,8 @@ export interface LedgerEntry {
   parentId: string | null;
   rootComponent: string;
   mechanism: string;
+  /** 支撑机制的错误样例卡（ADR 0177）：只保留带错误样例并且取得了日志行的卡 */
+  mechanismRefs: string[];
   /** 假设显式给出的症状类型（主动优化，ADR 0146 §2.3）；事件研判没有，症状类型只从机制文字归出 */
   symptoms?: readonly string[];
   supporting: string[];
@@ -49,6 +51,8 @@ export interface ModelHypothesis {
   parent_id: string | null;
   root_component: string;
   mechanism: string;
+  /** 支撑机制的错误样例卡（事件研判，ADR 0177）；主动优化没有 */
+  mechanism_refs?: string[];
   supporting: string[];
   refuting: string[];
   /** 假设所解释的对象（LedgerEntry.group）；事件研判没有 */
@@ -194,6 +198,8 @@ export class Ledger {
         parentId: h.parent_id,
         rootComponent: this.componentOf(h.root_component),
         mechanism: h.mechanism,
+        // 上一次研判的引用按那次的证据簿编号，本次不沿用
+        mechanismRefs: [],
         supporting: [],
         refuting: [],
         status: h.status,
@@ -231,6 +237,15 @@ export class Ledger {
         }
         return refs.filter((r) => !routine.includes(r));
       };
+      // 机制引用（ADR 0177）：只能是带错误样例、取得了日志行的卡
+      const samples = (refs: string[]) => {
+        const ok = refs.filter((r) => (this.book.card(r)?.result.samples?.lines ?? 0) > 0);
+        const bad = refs.filter((r) => !ok.includes(r));
+        if (bad.length) {
+          notes.push(`假设 ${h.id} 的机制引用不是取得了日志行的错误样例卡，已删除：${bad.join('、')}`);
+        }
+        return [...new Set(ok)];
+      };
       // 组件粒度：由控制器拥有的对象改为顶层属主
       const root = this.componentOf(h.root_component);
       if (root !== h.root_component) {
@@ -252,6 +267,7 @@ export class Ledger {
         parentId: h.parent_id && h.parent_id !== h.id ? h.parent_id : null,
         rootComponent: root,
         mechanism: h.mechanism,
+        mechanismRefs: samples(h.mechanism_refs ?? []),
         ...(h.symptoms ? { symptoms: h.symptoms } : {}),
         supporting: support(keep(h.supporting, '支持')),
         refuting: keep(h.refuting, '反驳'),
@@ -331,6 +347,7 @@ export class Ledger {
         parentId: null,
         rootComponent: confirmedRoot,
         mechanism: latest.mechanism ?? '',
+        mechanismRefs: [],
         supporting: [],
         refuting: [],
         status: 'supported',
@@ -616,6 +633,7 @@ export class Ledger {
       parent_id: e.parentId,
       root_component: e.rootComponent,
       mechanism: e.mechanism,
+      ...(e.mechanismRefs.length ? { mechanism_refs: e.mechanismRefs.slice(0, 4) } : {}),
       supporting: [
         ...new Set([
           ...e.supporting,

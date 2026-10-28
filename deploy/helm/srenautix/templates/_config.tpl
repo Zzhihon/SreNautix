@@ -313,6 +313,19 @@ datasources:
   prometheus:
     url: {{ $v.datasources.prometheus.url }}
     dialect: {{ $v.datasources.prometheus.dialect }}
+  {{- with $v.datasources.loki }}
+  {{- if .url }}
+  loki:
+    url: {{ .url }}
+    {{- with .tenant }}
+    tenant: {{ . }}
+    {{- end }}
+    {{- with .labels }}
+    labels:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+  {{- end }}
+  {{- end }}
 topology:
   source: {{ if $readerOn }}reader{{ else if $v.roles.server.clusterRead }}informer{{ else }}off{{ end }}
 {{- with $v.roles.server.githubApp }}

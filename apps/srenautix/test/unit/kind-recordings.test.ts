@@ -34,6 +34,7 @@ const PROMPT = JSON.stringify(
 const ENUMS = {
   components: COMPONENTS,
   evidence_refs: REFS,
+  sample_refs: [],
   check_templates: ['kube_pod_status', 'kube_workload_pods', 'kube_events', 'kube_logs'],
   runbooks: [],
   actions: [],

@@ -208,7 +208,8 @@ governance:
   # H 档审批要求的重新认证时间窗（秒）
   highTierReauthMaxAgeSeconds: 300
 
-# 数据源地址。server 用 prometheus 做证据卡查询与 ALERTS 对账，用 alertmanager 做 60 秒对账；
+# 数据源地址。server 用 prometheus 做证据卡查询与 ALERTS 对账，用 alertmanager 做 60 秒对账，
+# 设置了 loki.url 时用 loki 执行证据卡的日志引用与错误样例（ADR 0177）；
 # worker 与 reader 的数据源配置写在各自的 roles.<角色>.config 中
 datasources:
   prometheus:
@@ -216,7 +217,9 @@ datasources:
     # promql | metricsql
     dialect: promql
   alertmanager: {url: ""}
-  loki: {url: ""}
+  # labels：日志流上的 Kubernetes 标签名（namespace、pod、container、cluster），不填时为同名标签、没有 cluster；
+  # tenant：多租户 Loki 的租户
+  loki: {url: "", tenant: "", labels: {}}
   tempo: {url: ""}
 
 # 告警接入源（server 的 ingest.sources）。每个接入源一个 bearer token，

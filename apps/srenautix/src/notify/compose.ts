@@ -20,7 +20,7 @@ import type {
 } from '@srenautix/contract';
 import { reasonText, type ReasonCodeOf, type ReasonStage } from '@srenautix/contract';
 import { displayComponentName, displayKey, isRollback, tryNodeKey, type ChangeBasis } from '@srenautix/core';
-import { formatValue, type Unit } from '@srenautix/packs-sdk';
+import { formatValue, OTHER_CLASS, type Unit } from '@srenautix/packs-sdk';
 import { parseStoredKey } from '../topology/keys.js';
 import type { Subgraph } from '../research/types.js';
 import {
@@ -263,6 +263,11 @@ const T = {
     ledgerPick: '模型弃权，由代码按账本选中，档位最高为“可能”',
     notChosen: '没有选中假设',
     mechanism: '机制：',
+    samples: '样例：',
+    samplesTotal: (n: string) => `（共 ${n} 行）`,
+    samplesMore: (k: number) => `，另有 ${k} 类`,
+    samplesNone: '没有取得样例，原因：',
+    samplesOther: '其他',
     summary: '摘要：',
     undeterminedReason: '无法判定的原因：',
     hypotheses: '假设：',
@@ -493,6 +498,11 @@ const T = {
     ledgerPick: 'the model abstained; chosen from the ledger by code, at most "likely"',
     notChosen: 'no hypothesis chosen',
     mechanism: 'mechanism: ',
+    samples: 'samples: ',
+    samplesTotal: (n: string) => ` (${n} lines) `,
+    samplesMore: (k: number) => `, ${k} more classes`,
+    samplesNone: 'no samples, reason: ',
+    samplesOther: 'other',
     summary: 'summary: ',
     undeterminedReason: 'why undetermined: ',
     hypotheses: 'Hypotheses:',
@@ -673,6 +683,49 @@ function measure(t: Dict, r: EvidenceResult): NotifyRun[] {
     return obs.length ? [C(obs.join(' ')), ...extras, P(t.sep), P(t.noHit)] : [P(r.reason.text), ...extras];
   }
   return [P(r.reason.text)];
+}
+
+/** 机制引用的错误样例卡在消息里只给计数，最多这么多张卡、每张卡这么多个类别（ADR 0177） */
+const SAMPLE_CARDS = 2;
+const SAMPLE_CLASSES = 3;
+
+/**
+ * 关键问题里机制之后的样例计数（ADR 0177）：选中假设的 mechanism_refs 引用的错误样例卡，每张一行，
+ * 写卡的引用、总行数与行数最多的几个错误类别；没有取得日志行的卡写原因码的说明。日志原文不进入消息
+ */
+function sampleLines(
+  t: Dict,
+  lang: Lang,
+  refs: readonly string[],
+  cards: ReadonlyMap<string, EvidenceResult>,
+  why: (code: string) => string,
+): NotifyBlock[] {
+  const out: NotifyBlock[] = [];
+  for (const ref of refs.slice(0, SAMPLE_CARDS)) {
+    const s = cards.get(ref)?.samples;
+    if (!s) {
+      continue;
+    }
+    if (s.code) {
+      out.push(text([P(t.samples), C(ref), P(' '), P(t.samplesNone), P(why(s.code))]));
+      continue;
+    }
+    const n = (v: number) => `${s.truncated ? '≥' : ''}${v}`;
+    const title = (k: (typeof s.classes)[number]) =>
+      (k.title ? (lang === 'en' ? (k.title.en ?? k.title['zh-CN']) : (k.title['zh-CN'] ?? k.title.en)) : null) ??
+      (k.class === OTHER_CLASS ? t.samplesOther : k.class);
+    const shown = s.classes.slice(0, SAMPLE_CLASSES);
+    out.push(
+      text([
+        P(t.samples),
+        C(ref),
+        P(t.samplesTotal(n(s.lines))),
+        P(shown.map((k) => `${title(k)} ${n(k.count)}`).join(t.sep)),
+        ...(s.classes.length > shown.length ? [P(t.samplesMore(s.classes.length - shown.length))] : []),
+      ]),
+    );
+  }
+  return out;
 }
 
 /** 卡片的时间：异常起点或窗口 */
@@ -1730,6 +1783,7 @@ export function composeMessage(i: ComposeInput): { message: NotifyMessage; targe
     keyIssue.push(...ladderBlocks(x, out, chosen));
     if (chosen) {
       keyIssue.push(text([I(`${t.model}${t.mechanism}${chosen.mechanism}`)], { model: true }));
+      keyIssue.push(...sampleLines(t, i.language, chosen.mechanism_refs ?? [], cards, (c) => why('stage_a', c)));
     }
     if (out.summary) {
       keyIssue.push(text([I(`${t.model}${t.summary}${out.summary}`)], { model: true, scope: 'full' }));

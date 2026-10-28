@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "mode": "hand-written",
+    "note": "错误样例（ADR 0177）的黄金响应：单一端点返回 503"
+  },
+  "output": {
+    "hypotheses": [
+      {
+        "id": "h1",
+        "parent_id": null,
+        "root_component": "{{component:^Deployment:llm/api-gateway$}}",
+        "mechanism": "上游 provider-c 的单一端点持续返回 503（上游不可用 8 行），model-z 的请求全部失败",
+        "mechanism_refs": ["{{ref:llm-gateway/gateway-errors/samples}}"],
+        "supporting": ["{{ref:llm-gateway/gateway-errors/samples}}"],
+        "refuting": []
+      }
+    ],
+    "next_checks": []
+  }
+}

@@ -420,6 +420,28 @@ export const serverConfigSchema = z
             timeout: duration.default('10s'),
           })
           .strict(),
+        // 日志数据源（Loki，ADR 0177）：证据卡的 logs 引用与错误样例读它；不填时日志能力不可用，
+        // 声明 requires 日志能力的包禁用，optional 的卡显示能力缺失
+        loki: z
+          .object({
+            url,
+            bearer_token_file: path.optional(),
+            // 多租户 Loki 的租户（X-Scope-OrgID）
+            tenant: z.string().min(1).optional(),
+            // 日志流上的 Kubernetes 标签名，按采集器的命名填写
+            labels: z
+              .object({
+                namespace: z.string().min(1).default('namespace'),
+                pod: z.string().min(1).default('pod'),
+                container: z.string().min(1).default('container'),
+                cluster: z.string().min(1).nullable().default(null),
+              })
+              .strict()
+              .default({ namespace: 'namespace', pod: 'pod', container: 'container', cluster: null }),
+            timeout: duration.default('15s'),
+          })
+          .strict()
+          .optional(),
       })
       .strict(),
     topology: z

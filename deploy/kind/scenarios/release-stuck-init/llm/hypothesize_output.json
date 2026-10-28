@@ -11,6 +11,7 @@
         "parent_id": null,
         "root_component": "{{component:^(Application\\.argoproj\\.io:argocd/shop|Deployment:shop/api|Deployment:shop/checkout)$}}",
         "mechanism": "发布 r2 的数据库迁移 Job 失败，api 与 checkout 的新 Pod 停在等待迁移的 init 容器，旧 Pod 继续服务，发布无法完成",
+        "mechanism_refs": [],
         "supporting": [
           "{{ref:workload/release/init-waiting}}",
           "{{ref:workload/release/migration-jobs}}",

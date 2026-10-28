@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "mode": "hand-written",
+    "note": "错误样例（ADR 0177）的黄金响应：单一供给的模型在首内容超时后由网关返回 503，没有可以转移的候选。机制指出单一供给与超时阈值，与上游返回的错误区分开"
+  },
+  "output": {
+    "hypotheses": [
+      {
+        "id": "h1",
+        "parent_id": null,
+        "root_component": "{{component:^Deployment:llm/api-gateway$}}",
+        "mechanism": "model-w 只有 provider-d 一个供给（候选数 1），上游在首内容超时阈值 30s 内没有返回内容，网关自己判定超时并返回 503（首内容超时 6 行）；上游没有返回错误，也没有可以转移的候选",
+        "mechanism_refs": ["{{ref:llm-gateway/gateway-errors/samples}}"],
+        "supporting": ["{{ref:llm-gateway/gateway-errors/samples}}"],
+        "refuting": []
+      }
+    ],
+    "next_checks": []
+  }
+}

@@ -10,6 +10,7 @@ import {
   type SignalResolution,
 } from '@srenautix/packs-sdk';
 import type { PromqlEngine } from '@srenautix/integration-sdk';
+import { redactSamples } from '../stage-a/pack-evidence.js';
 import { usesDbstats } from '../stage-a/packs.js';
 import { hourly, HOUR_MS } from './stats.js';
 import type { BackendLimiter } from './limits.js';
@@ -289,6 +290,7 @@ export class GoalEvidence {
         clock: { from: new Date(now - 24 * HOUR_MS).toISOString(), to: new Date(now).toISOString() },
         locale: this.o.locale,
         timeoutMs: this.o.queryTimeoutMs,
+        redact: redactSamples,
         ...(Object.keys(params).length ? { params } : {}),
       });
     let c: Awaited<ReturnType<typeof runCard>>;
@@ -333,6 +335,7 @@ export class GoalEvidence {
       impact: c.impact ?? false,
       category: c.category ?? null,
       value_number: c.value_number ?? null,
+      ...(c.samples ? { samples: c.samples } : {}),
     };
     return { result, judgeInput: c.judgeInput };
   }

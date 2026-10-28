@@ -33,9 +33,20 @@ describe('阶段 A 的期限与补跑次数（ADR 0173）', () => {
   });
 
   it('阶段 A 没有报告的两个原因码都是 error：由 SreNautixAbnormalTerminalStates 告警', () => {
-    expect(REASON_CODES.filter((e) => e.stage === 'stage_a').map((e) => [e.code, e.level])).toEqual([
+    expect(REASON_CODES.filter((e) => e.groups.includes('stage_a')).map((e) => [e.code, e.level])).toEqual([
       ['stage_a_failed', 'error'],
       ['stage_a_missing', 'error'],
+    ]);
+  });
+
+  it('错误样例卡没有取得日志行的原因码（ADR 0177）属于阶段 A、级别为 warning：卡片照常进入报告，不触发异常终态告警', () => {
+    expect(
+      REASON_CODES.filter((e) => e.groups.includes('evidence_samples')).map((e) => [e.stage, e.code, e.level]),
+    ).toEqual([
+      ['stage_a', 'samples_deadline', 'warning'],
+      ['stage_a', 'samples_timeout', 'warning'],
+      ['stage_a', 'samples_source_error', 'warning'],
+      ['stage_a', 'samples_capability_missing', 'warning'],
     ]);
   });
 });

@@ -11,6 +11,7 @@
         "parent_id": null,
         "root_component": "{{component:^(Application\\.argoproj\\.io:argocd/shop|Deployment:shop/api)$}}",
         "mechanism": "发布 r3 把 api 的镜像换成了不提供 HTTP 服务的镜像，新 Pod 启动后立即退出并反复重启，发布卡住",
+        "mechanism_refs": [],
         "supporting": [
           "{{ref:workload/pod-restarts/restarts}}",
           "{{ref:workload/release/replicasets}}",

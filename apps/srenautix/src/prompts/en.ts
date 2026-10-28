@@ -54,6 +54,7 @@ Propose 1–6 competing root-cause hypotheses (ids h1…h6; use parent_id for re
 
 - root_component must be a component key from the topology in the context, at component granularity: for an object owned by a controller (Pod, ReplicaSet and so on) use its top-level owner; the code rewrites such keys to the owner and merges hypotheses that end up on the same component;
 - mechanism states the causal chain from the root cause to the observed symptoms and names the symptoms it predicts (for example restarts, memory, init waiting, readiness, node pressure, network, archiving, connections, sync, release); the code uses it to decide which checks can refute the hypothesis;
+- when there are error samples, mechanism states the error class, count and origin shown by the samples (an error returned by the dependency, or a local decision such as a timeout) and mechanism_refs cites those cards; error content the samples do not show stays out of the mechanism;
 - supporting / refuting reference the evidence for or against it;
 - when every member alert of the incident is meta, each hypothesis must explain the condition those alerts report (for example too many replicas: the replica floor, the metric autoscaling follows, a traffic drop), with its mechanism pointing the same way as the alerts;
 - do not repeat a hypothesis that the previous ledger refuted unless there is new evidence; statuses pinned by human feedback do not change.
