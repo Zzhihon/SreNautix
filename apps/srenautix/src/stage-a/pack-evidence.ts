@@ -316,7 +316,7 @@ export class PackEvidence implements EvidenceRunner {
     }
 
     const extend = this.extendTo(inc, now);
-    const cards = await this.execute(plan, Date.parse(inc.first_firing_at), now, signal, extend);
+    const cards = await this.execute(plan, Date.parse(inc.first_firing_at), now, signal, inc.incident_id, extend);
     // 组件名称在首次触发时求值；长期事件不早于最近一个最大窗口的起点（与卡片窗口一致）
     const namesAt = Math.max(Math.min(Date.parse(inc.first_firing_at), now), extend.until - extend.maxWindowMs);
     const names = await this.names(named, Math.min(namesAt, now), signal);
@@ -408,6 +408,7 @@ export class PackEvidence implements EvidenceRunner {
         windowTo.getTime() - after,
         windowTo.getTime(),
         signal,
+        inc.incident_id,
       );
       if (r) {
         out.push({ ...r, ref: c.ref });
@@ -440,6 +441,7 @@ export class PackEvidence implements EvidenceRunner {
       Date.parse(inc.first_firing_at),
       now,
       signal,
+      inc.incident_id,
       this.extendTo(inc, now),
     );
     if (!r) {
@@ -477,6 +479,7 @@ export class PackEvidence implements EvidenceRunner {
       Date.parse(inc.first_firing_at),
       now,
       signal,
+      inc.incident_id,
       this.extendTo(inc, now),
     );
     if (!r) {
@@ -519,6 +522,8 @@ export class PackEvidence implements EvidenceRunner {
     anchor: number,
     now: number,
     signal: AbortSignal,
+    /** 对照对象随机取样的种子（ADR 0179）：事件 id，重放同一个事件得到同一批对照对象 */
+    seed: string,
     extend: RunCardInput['extend'] = undefined,
   ): Promise<Array<Omit<EvidenceResult, 'ref'>>> {
     if (!plan.length) {
@@ -574,6 +579,7 @@ export class PackEvidence implements EvidenceRunner {
           locale: this.o.locale,
           timeoutMs: this.o.queryTimeoutMs,
           redact: redactSamples,
+          controlSeed: seed,
           ...(p.params ? { params: p.params } : {}),
           ...(p.window ? { window: p.window } : {}),
           ...(extend ? { extend } : {}),
@@ -614,6 +620,7 @@ export class PackEvidence implements EvidenceRunner {
           category: r.category ?? null,
           value_number: r.value_number ?? null,
           ...(r.samples ? { samples: r.samples } : {}),
+          ...(r.controls ? { controls: r.controls } : {}),
         };
       } catch (err) {
         // 渲染与判定的错误由运行时记在卡片里；这里只剩窗口为空等计划本身的问题
@@ -648,6 +655,7 @@ export class PackEvidence implements EvidenceRunner {
         ds,
         resolutions,
         signal,
+        seed,
       );
     }
     return done.map((x) => x.r);
@@ -718,6 +726,7 @@ export class PackEvidence implements EvidenceRunner {
     ds: EvidenceDataSource,
     resolutions: Map<string, SignalResolution>,
     signal: AbortSignal,
+    seed: string,
   ): Promise<void> {
     if (!abnormal.length) {
       return;
@@ -756,6 +765,7 @@ export class PackEvidence implements EvidenceRunner {
           locale: this.o.locale,
           timeoutMs: this.o.queryTimeoutMs,
           redact: redactSamples,
+          controlSeed: seed,
           window: { before: `${t.at - t.from}ms`, after: `${t.to - t.at}ms` },
           ...(x.p.params ? { params: x.p.params } : {}),
         });

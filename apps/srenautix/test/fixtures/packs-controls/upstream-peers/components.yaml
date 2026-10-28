@@ -1,0 +1,7 @@
+component_types:
+  - id: peers.upstream
+    match:
+      kind: Upstream
+    external: true
+    chains:
+      - upstream-errors

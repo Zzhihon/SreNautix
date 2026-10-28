@@ -291,6 +291,7 @@ export class GoalEvidence {
         locale: this.o.locale,
         timeoutMs: this.o.queryTimeoutMs,
         redact: redactSamples,
+        controlSeed: run ?? cardKey,
         ...(Object.keys(params).length ? { params } : {}),
       });
     let c: Awaited<ReturnType<typeof runCard>>;

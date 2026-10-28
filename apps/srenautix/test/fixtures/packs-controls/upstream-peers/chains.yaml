@@ -1,0 +1,53 @@
+chains:
+  - id: upstream-errors
+    title:
+      zh-CN: 上游错误率
+      en: Upstream error ratio
+    cards:
+      - id: peer-errors
+        title:
+          zh-CN: 上游错误率（含同一入口的对照对象）
+          en: Upstream error ratio with control objects on the same entry
+        note:
+          zh-CN: 故障上游的错误率；对照对象是同一入口上的其他上游，按请求量取前几个再随机取若干个
+          en: Error ratio of the failing upstream; control objects are other upstreams on the same entry
+        applies_to:
+          kinds: [Upstream]
+        window:
+          before: 30m
+          after: 5m
+        params:
+          ratio: 0.5
+        refs:
+          - name: requests
+            signal: upstream_requests
+            mode: range
+          - name: errors
+            signal: upstream_errors
+            mode: range
+        judge:
+          let:
+            - name: total
+              cel: sum(requests)
+            - name: bad
+              cel: sum(errors)
+          abnormal_if:
+            - cel: total > 0.0 && bad / total > double(params.ratio)
+              say:
+                zh-CN: '窗口内请求 {total} 次，错误 {bad} 次'
+                en: '{total} requests and {bad} errors in the window'
+              normal_say:
+                zh-CN: '窗口内请求 {total} 次，错误 {bad} 次，错误率未超过阈值'
+                en: '{total} requests and {bad} errors in the window, below the threshold'
+        display:
+          value: bad / total
+          unit: ratio
+        baseline: false
+        egress: allow
+        controls:
+          method: entry_peers
+          by: target
+          refs: [requests, errors]
+          volume: requests
+          top_n: 2
+          sample_count: 1
