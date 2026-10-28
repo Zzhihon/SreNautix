@@ -1,4 +1,10 @@
-import { reasonEntry, type ReasonCodeOf, type ReasonLevel, type ReasonStage } from '@srenautix/contract';
+import {
+  reasonEntry,
+  type ReasonCodeOf,
+  type ReasonLevel,
+  type ReasonStage,
+  type RuleConclusion,
+} from '@srenautix/contract';
 import type { ServerMetrics } from '../metrics.js';
 import type { Queryable } from '../store/pool.js';
 
@@ -41,6 +47,30 @@ export async function writeReason(c: Queryable, r: ReasonRecord): Promise<boolea
     ],
   );
   return (q.rowCount ?? 0) > 0;
+}
+
+/**
+ * 事件版本没有阶段 B 结论（研判失败、只出阶段 A、入队跳过或不进入阶段 B）时的“只有规则判定”（ADR 0178）：这个版本的
+ * 阶段 A 报告有规则结论时写一条 research/rule_only（同一版本一次），说明列出规则与根因候选。返回是否写入；
+ * 写入方在提交后计数
+ */
+export async function writeRuleOnly(c: Queryable, incidentId: string, version: number): Promise<boolean> {
+  const r = await c.query<{ rules: RuleConclusion[] | null }>(
+    `SELECT body->'rule_conclusions' AS rules FROM server.stage_a_reports WHERE incident_id = $1 AND incident_version = $2`,
+    [incidentId, version],
+  );
+  const rules = r.rows[0]?.rules ?? [];
+  if (!rules.length) {
+    return false;
+  }
+  return writeReason(c, {
+    incidentId,
+    incidentVersion: version,
+    stage: 'research',
+    code: 'rule_only',
+    detail: rules.map((x) => `${x.rule_id} → ${x.root_component}`).join('；'),
+    once: `v${version}`,
+  });
 }
 
 /** 写入（自己的语句）并在写入时计数 */

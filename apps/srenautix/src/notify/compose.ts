@@ -16,6 +16,7 @@ import type {
   NotifySection,
   Proposal,
   ResearchOutput,
+  RuleConclusion,
   StageAReport,
 } from '@srenautix/contract';
 import { reasonText, type ReasonCodeOf, type ReasonStage } from '@srenautix/contract';
@@ -261,6 +262,9 @@ const T = {
     c4rivals: (ids: string) => `竞争假设 ${ids} 同样处于支持状态，检查没有区分它们`,
     c4none: '没有检验并排除任何竞争假设',
     ledgerPick: '模型弃权，由代码按账本选中，档位最高为“可能”',
+    rulePick: '模型没有推翻规则判定（没有检查在规则的卡片条件上给出相反结果），由代码改选规则判定，档位最高为“可能”',
+    ruleJudgement: '规则判定：',
+    ruleBasis: '依据：',
     notChosen: '没有选中假设',
     mechanism: '机制：',
     samples: '样例：',
@@ -496,6 +500,10 @@ const T = {
     c4rivals: (ids: string) => `competitor ${ids} is supported too; the checks did not separate them`,
     c4none: 'no competitor was tested and ruled out',
     ledgerPick: 'the model abstained; chosen from the ledger by code, at most "likely"',
+    rulePick:
+      'the model did not refute the rule judgement (no check contradicted its card conditions); code switched to the rule judgement, at most "likely"',
+    ruleJudgement: 'Rule judgement: ',
+    ruleBasis: 'basis: ',
     notChosen: 'no hypothesis chosen',
     mechanism: 'mechanism: ',
     samples: 'samples: ',
@@ -1140,6 +1148,41 @@ function ladderBlocks(x: Ctx, out: ResearchOutput, chosen: Hypothesis | null): N
   if (d.chosen_by === 'ledger') {
     blocks.push(text([P(t.ledgerPick)]));
   }
+  if (d.chosen_by === 'rule') {
+    blocks.push(text([P(t.rulePick)]));
+  }
+  return blocks;
+}
+
+/**
+ * 没有模型结论时的规则判定（ADR 0178）：每条规则结论一行“规则判定：根因（规则标题）”，下面是机制与依据。机制取自领域包，
+ * 不是模型生成的文字
+ */
+function ruleBlocks(x: Ctx, rules: readonly RuleConclusion[]): NotifyBlock[] {
+  const t = x.t;
+  const lang = x.lang === 'zh' ? 'zh-CN' : 'en';
+  const blocks: NotifyBlock[] = [];
+  rules.forEach((r, k) => {
+    const title = r.title[lang] ?? r.title['zh-CN'] ?? r.title.en ?? r.rule_id;
+    const mechanism = r.mechanism[lang] ?? r.mechanism['zh-CN'] ?? r.mechanism.en ?? '';
+    // 第一条进入群消息，其余只在全文中
+    const scope: Scope = k === 0 ? 'all' : 'full';
+    blocks.push(
+      text(
+        [
+          B(`${t.ruleJudgement}${t.level['likely'] ?? 'likely'}（likely）`),
+          P(' · '),
+          C(shortName(r.root_component, x.names)),
+          P(`（${title}）`),
+        ],
+        { scope },
+      ),
+    );
+    blocks.push(text([P(`${t.mechanism}${mechanism}`)], { scope, indent: 1 }));
+    blocks.push(
+      text([P(t.ruleBasis), ...codeList(r.basis, t.list), P(`（${r.rule_id}）`)], { scope: 'full', indent: 1 }),
+    );
+  });
   return blocks;
 }
 
@@ -1476,7 +1519,9 @@ export function composeMessage(i: ComposeInput): { message: NotifyMessage; targe
   const changesByRef = new Map(inc.changes.map((c, k) => [`change:${k + 1}`, c]));
   const x: Ctx = { t, lang: i.language, inc, names, links, day, cards, alertsByRef, alertsById, changesByRef };
   const alerts = members.map((m) => alertsById.get(m.alert_id)).filter((a): a is Alert => !!a);
-  const root = out?.conclusion.root_component ?? inc.root.component;
+  // 没有模型结论时的规则判定（ADR 0178）：根因取第一条规则结论，消息写明“规则判定”
+  const rules = out ? [] : (report?.rule_conclusions ?? []);
+  const root = out?.conclusion.root_component ?? rules[0]?.root_component ?? inc.root.component;
   const rootShort = root ? shortName(root, names) : t.noRoot;
   /** 标题用可读名称，没有时用组件键 */
   const rootTitle = root ? (names?.[root] ?? displayKey(root)) : null;
@@ -1755,10 +1800,13 @@ export function composeMessage(i: ComposeInput): { message: NotifyMessage; targe
       );
     }
   } else {
+    // 没有模型结论时先写规则判定（ADR 0178），再写阶段 A 的根因候选
+    keyIssue.push(...ruleBlocks(x, rules));
     const top = inc.candidates[0];
     const ambiguity = inc.root.ambiguous ? `${t.sep}${t.ambiguous(inc.root.margin)}` : '';
+    const candidate = inc.root.component ? shortName(inc.root.component, names) : t.noRoot;
     keyIssue.push(
-      text([B(t.stageACandidate), C(rootShort), ...(top ? [P(`（${t.score(top.score)}${ambiguity}）`)] : [])]),
+      text([B(t.stageACandidate), C(candidate), ...(top ? [P(`（${t.score(top.score)}${ambiguity}）`)] : [])]),
     );
     inc.candidates.slice(1, 3).forEach((c, k) => {
       keyIssue.push(item([P(`${k + 2}. `), C(shortName(c.component, names)), P(`（${t.score(c.score)}）`)]));
