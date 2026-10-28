@@ -38,6 +38,7 @@ interface PatchDoc {
   chains: PackContent['chains'];
   checks: PackContent['checks'];
   rules: PackContent['rules'];
+  conclusions: PackContent['conclusions'];
   domains: PackContent['domains'];
   issues: PackContent['issues'];
   rca_params: RcaParams | null;
@@ -73,6 +74,7 @@ function applyOne(pack: LoadedPack, l: LoadedLayer): void {
   appendUnique(where, c.chains.chains, ext.chains);
   appendUnique(where, c.checks.checks, ext.checks);
   appendUnique(where, c.rules.rules, ext.rules);
+  appendUnique(where, c.conclusions.conclusions, ext.conclusions);
   // 指标、领域与业务 issue 模板（契约 2.28.0）：同 id 的领域按 DomainsFile 的规则合并进去，其余追加
   c.domains.indicators = appendUnique(where, c.domains.indicators ?? [], ext.indicators);
   const domains = c.domains.domains ?? [];
@@ -114,6 +116,7 @@ function applyOne(pack: LoadedPack, l: LoadedLayer): void {
     chains: c.chains,
     checks: c.checks,
     rules: c.rules,
+    conclusions: c.conclusions,
     domains: c.domains,
     issues: c.issues,
     rca_params: c.rca_params,
@@ -136,6 +139,7 @@ function applyOne(pack: LoadedPack, l: LoadedLayer): void {
   c.chains = doc.chains;
   c.checks = doc.checks;
   c.rules = doc.rules;
+  c.conclusions = doc.conclusions;
   c.domains = doc.domains;
   c.issues = doc.issues;
   c.rca_params = doc.rca_params;
@@ -164,6 +168,9 @@ function applyOne(pack: LoadedPack, l: LoadedLayer): void {
         break;
       case 'rules':
         c.rules.rules = drop(c.rules.rules);
+        break;
+      case 'conclusions':
+        c.conclusions.conclusions = drop(c.conclusions.conclusions);
         break;
       case 'indicators':
         c.domains.indicators = drop(c.domains.indicators ?? []);
@@ -225,6 +232,7 @@ function applyOne(pack: LoadedPack, l: LoadedLayer): void {
   check('ChainsFile', c.chains);
   check('ChecksFile', c.checks);
   check('RulesFile', c.rules);
+  check('ConclusionsFile', c.conclusions);
   check('DomainsFile', c.domains);
   check('IssuesFile', c.issues);
   if (c.rca_params) {

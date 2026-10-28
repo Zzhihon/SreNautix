@@ -12,9 +12,15 @@ describe('_example 包', () => {
     const failed = report.cases.filter((c) => !c.passed);
     expect(failed).toEqual([]);
     expect(report.packs).toEqual([{ name: '_example', maturity: 'stable', uncovered: [], passed: true }]);
-    // 每张卡都有无数据测试；每个非无法判定的夹具结果都派生了部分无数据与报错测试
+    // 每张卡都有无数据测试；每个非无法判定的夹具结果都派生了部分无数据与报错测试；结论规则有命中与不命中的测试
     const kinds = new Set(report.cases.map((c) => c.kind));
-    expect(kinds).toEqual(new Set(['fixture', 'nodata', 'partial_nodata', 'datasource_error']));
+    expect(kinds).toEqual(new Set(['fixture', 'nodata', 'partial_nodata', 'datasource_error', 'conclusion']));
+    expect(
+      report.cases.filter((c) => c.kind === 'conclusion').map((c) => [c.name, c.results.prometheus?.verdict]),
+    ).toEqual([
+      ['副本被 OOM 终止并有内存不足日志', 'hit'],
+      ['内存接近 limit 但没有被终止', 'miss'],
+    ]);
   });
 
   it('规则提议引用目录中的动作', async () => {

@@ -29,11 +29,15 @@ import { FixtureDbstats, renderDbstats, type DbstatsOperation } from '../runtime
 import { domainRows } from '../runtime/domain-rows.js';
 import { DEFAULT_WINDOW, durationSeconds, runCard, type RunCardResult } from '../runtime/run-card.js';
 import { NO_REDACTION } from '../runtime/samples.js';
+import { evaluateConclusions, type ConclusionInput } from '../runtime/conclusions.js';
 import { alertFires, primaryCardIndex, rulesForEntry, type AlertRule } from './alert-consistency.js';
 import { resolveSignal, type SignalResolution } from '../signals/resolve.js';
 
 /** 夹具的时间零点 */
 export const FIXTURE_EPOCH = Date.UTC(2026, 0, 1);
+/** 结论规则测试中求值对象与另一个组件的组件键 */
+const CONCLUSION_SUBJECT = 'subject';
+const CONCLUSION_OTHER = 'other';
 const DAY = 86_400_000;
 
 type Backend = 'prometheus' | 'victoria-metrics';
@@ -44,7 +48,8 @@ export interface CaseResult {
   file: string;
   name: string;
   card: string;
-  kind: 'fixture' | 'nodata' | 'partial_nodata' | 'datasource_error';
+  /** conclusion：结论规则测试（ADR 0178），card 为 conclusions/<pack>/<规则 id>，结论为 hit 或 miss */
+  kind: 'fixture' | 'nodata' | 'partial_nodata' | 'datasource_error' | 'conclusion';
   passed: boolean;
   /** 后端 → verdict / display_state / reason.kind */
   /** 后端 → 结论；postgres 为 input_sql 在真实 PostgreSQL 上的 dbstats（指标仍读 Prometheus） */
@@ -58,7 +63,7 @@ export interface PackTestReport {
   packs: Array<{
     name: string;
     maturity: string;
-    /** stable 包缺少夹具的卡片 */
+    /** stable 包缺少夹具的卡片，以及缺少命中或不命中测试的结论规则（conclusions/<pack>/<规则 id>（说明）） */
     uncovered: string[];
     /** 只有 input_sql、因为没有 PostgreSQL 而跳过的测试文件（它们的卡不算有夹具）；没有时不出现 */
     skipped?: string[];
@@ -253,7 +258,12 @@ function checkSamples(expected: Record<string, number | undefined>, r: RunCardRe
 }
 
 /** 测试的 rows：领域的诊断卡或份额卡在这次判定输入上得到的实体与期望一致（契约 2.28.0） */
-function checkRows(set: PackSet, t: PackTestFile['tests'][number], key: string, r: RunCardResult): string[] {
+function checkRows(
+  set: PackSet,
+  t: NonNullable<PackTestFile['tests']>[number],
+  key: string,
+  r: RunCardResult,
+): string[] {
   const [domain, item] = t.rows!.split('/') as [string, string];
   let rows;
   try {
@@ -293,7 +303,7 @@ async function sqlFixtureSource(
   resolutions: Map<string, SignalResolution>,
 ): Promise<(base: EvidenceDataSource) => EvidenceDataSource> {
   const requests = new Map<string, DbstatsRequest>();
-  for (const t of tf.tests) {
+  for (const t of tf.tests ?? []) {
     const e = set.cards.get(cardKeyFor(set, pack, t.card))!;
     for (const r of e.def.refs) {
       const sk = e.signals[r.name]!;
@@ -349,6 +359,9 @@ export async function runPackTests(opts: PackTestOptions): Promise<PackTestRepor
     const covered = new Set<string>();
     // 每张卡最近一次非无法判定的夹具结果，供自动测试变换
     const captured = new Map<string, RunCardResult>();
+    // 有命中测试、有不命中测试的结论规则 id
+    const conclusionHits = new Set<string>();
+    const conclusionMisses = new Set<string>();
 
     const skipped: string[] = [];
     for (const [file, tf] of Object.entries(pack.content.tests)) {
@@ -366,7 +379,11 @@ export async function runPackTests(opts: PackTestOptions): Promise<PackTestRepor
         const end = FIXTURE_EPOCH + fx.spanMs;
         const clock = { from: toIso(FIXTURE_EPOCH - 30 * DAY), to: toIso(end + 30 * DAY) };
         const used = new Set<string>();
-        for (const t of tf.tests) {
+        const cardRefs = [
+          ...(tf.tests ?? []).map((t) => ({ name: t.name, card: t.card })),
+          ...(tf.conclusions ?? []).flatMap((t) => t.cards.map((c) => ({ name: t.name, card: c.card }))),
+        ];
+        for (const t of cardRefs) {
           const e = set.cards.get(cardKeyFor(set, pack.name, t.card));
           if (!e) {
             throw new Error(`${where}：测试 ${t.name} 引用的卡片 ${t.card} 不存在`);
@@ -385,7 +402,7 @@ export async function runPackTests(opts: PackTestOptions): Promise<PackTestRepor
             : null;
         const dsFor = (b: Backend) => (sqlOnly && pgSource ? pgSource(env.ds[b]) : env.ds[b]);
         const pgds = pgSource && !sqlOnly ? pgSource(env.ds.prometheus) : null;
-        for (const t of tf.tests) {
+        for (const t of tf.tests ?? []) {
           const key = cardKeyFor(set, pack.name, t.card);
           covered.add(key);
           const e = set.cards.get(key)!;
@@ -509,6 +526,88 @@ export async function runPackTests(opts: PackTestOptions): Promise<PackTestRepor
             results,
             failure: failures.join('；') || null,
           });
+        }
+        // 结论规则测试（ADR 0178）：两个后端各自执行列出的卡，再按阶段 A 的方式求值规则
+        for (const t of tf.conclusions ?? []) {
+          const rule = set.conclusions.find((r) => r.pack === pack.name && r.id === t.rule);
+          if (!rule) {
+            throw new Error(`${where}：结论测试 ${t.name} 引用的规则 ${t.rule} 不存在`);
+          }
+          const anchor = FIXTURE_EPOCH + durationSeconds(t.eval_time) * 1000;
+          const results: CaseResult['results'] = {};
+          const failures: string[] = [];
+          for (const b of BACKENDS) {
+            const cards: ConclusionInput['cards'][number][] = [];
+            for (const [i, c] of t.cards.entries()) {
+              const r = await runCard({
+                set,
+                card: cardKeyFor(set, pack.name, c.card),
+                entity: {
+                  cluster_id: 'pack-test',
+                  kind: c.entity.kind,
+                  namespace: c.entity.namespace ?? null,
+                  name: c.entity.name,
+                },
+                anchor,
+                now: Number.MAX_SAFE_INTEGER,
+                ds: dsFor(b),
+                engine,
+                resolutions: res[b],
+                clock,
+              });
+              cards.push({
+                ref: `card:${i + 1}`,
+                card_id: cardKeyFor(set, pack.name, c.card),
+                component: (c.on ?? 'self') === 'self' ? CONCLUSION_SUBJECT : CONCLUSION_OTHER,
+                verdict: r.verdict,
+                routine: false,
+                observations: r.observations,
+              });
+            }
+            const owner = (on: 'self' | 'other' | undefined) =>
+              (on ?? 'self') === 'self' ? CONCLUSION_SUBJECT : CONCLUSION_OTHER;
+            const input: ConclusionInput = {
+              components: [{ key: CONCLUSION_SUBJECT, type: t.subject.component_type }],
+              cards,
+              alerts: (t.alerts ?? []).map((a, i) => ({
+                ref: `alert:${i + 1}`,
+                alertname: a.alertname,
+                labels: a.labels ?? {},
+                role: a.role ?? 'symptom',
+                component: owner(a.on),
+              })),
+              changes: (t.changes ?? []).map((c, i) => ({
+                ref: `change:${i + 1}`,
+                kind: c.kind,
+                targets: [owner(c.on)],
+                grade: c.grade,
+              })),
+            };
+            const hit = evaluateConclusions([rule], input)[0] ?? null;
+            const verdicts = cards.map((c) => `${c.ref} ${c.card_id}=${c.verdict}`).join('、');
+            results[b] = {
+              verdict: hit ? 'hit' : 'miss',
+              display_state: hit ? 'hit' : 'miss',
+              reason_kind: 'conclusion',
+              reason: hit ? `依据 ${hit.basis.join('、')}` : verdicts,
+            };
+            if (!!hit !== t.expect.hit) {
+              failures.push(
+                `${b}：期望${t.expect.hit ? '命中' : '不命中'}，实际${hit ? '命中' : '不命中'}（${verdicts}）`,
+              );
+            }
+          }
+          cases.push({
+            pack: pack.name,
+            file,
+            name: t.name,
+            card: `conclusions/${rule.key}`,
+            kind: 'conclusion',
+            passed: !failures.length,
+            results,
+            failure: failures.join('；') || null,
+          });
+          (t.expect.hit ? conclusionHits : conclusionMisses).add(rule.id);
         }
       } finally {
         await stopEnv(env);
@@ -641,7 +740,16 @@ export async function runPackTests(opts: PackTestOptions): Promise<PackTestRepor
     }
 
     const maturity = pack.content.manifest.maturity;
-    const uncovered = maturity === 'stable' ? cardKeys.filter((k) => !covered.has(k)) : [];
+    // stable 的包：每张卡都要有夹具测试，每条结论规则都要有命中与不命中的测试
+    const rules = set.conclusions.filter((r) => r.pack === pack.name);
+    const uncovered =
+      maturity === 'stable'
+        ? [
+            ...cardKeys.filter((k) => !covered.has(k)),
+            ...rules.filter((r) => !conclusionHits.has(r.id)).map((r) => `conclusions/${r.key}（缺少命中的测试）`),
+            ...rules.filter((r) => !conclusionMisses.has(r.id)).map((r) => `conclusions/${r.key}（缺少不命中的测试）`),
+          ]
+        : [];
     const packCases = cases.filter((c) => c.pack === pack.name);
     packsOut.push({
       name: pack.name,

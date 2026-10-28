@@ -8,7 +8,7 @@ import { Environment } from '@marcbachmann/cel-js';
 import { loadPromqlEngine, type PromqlEngine } from '@srenautix/integration-sdk';
 import { PackLintError } from '../cel/errors.js';
 import { createBaseEnvironment } from '../cel/library.js';
-import { compileCard, type CompiledCard } from '../judge/card.js';
+import { compileCard, MAX_OBSERVATIONS, type CompiledCard } from '../judge/card.js';
 import type { CardDefinition } from '../judge/types.js';
 import { renderMetrics } from '../signals/render.js';
 import { compileSamples } from '../runtime/samples.js';
@@ -26,6 +26,103 @@ import {
 } from '../runtime/dbstats.js';
 import { compileDomains, type CompiledDomain, type CompiledIndicator } from './domains.js';
 import { compileIssues, type CompiledIssue } from '../remediation/issues.js';
+import type { CompiledConclusion } from '../runtime/conclusions.js';
+
+/** 结论规则的条件总数上限（三类合计） */
+const MAX_CONCLUSION_CONDITIONS = 8;
+/** 结论规则机制文字每种语言的长度上限 */
+const MAX_MECHANISM_CHARS = 300;
+
+/**
+ * 结论规则（conclusions.yaml，ADR 0178）的检查与编译：
+ * - 条件三类合计 1–8 个；规则 id 在包内唯一；机制每种语言最多 300 字；
+ * - 卡片条件引用证据链中的卡（<chain>/<card> 在本包解析，<包>/<chain>/<card> 的包必须是本包或在 depends_on 中）；
+ *   observations 的名字必须是卡片前 16 个 let 绑定之一（它们才会记进 EvidenceResult.observations），大小比较的值必须是数值；
+ * - component_types 引用的组件类型必须存在。
+ */
+function compileConclusions(
+  active: readonly LoadedPack[],
+  cards: PackSet['cards'],
+  componentTypes: ReadonlySet<string>,
+): CompiledConclusion[] {
+  const out: CompiledConclusion[] = [];
+  for (const p of active) {
+    const seen = new Set<string>();
+    for (const r of p.content.conclusions.conclusions) {
+      const where = `${p.dir}/conclusions.yaml：${r.id}`;
+      if (seen.has(r.id)) {
+        throw new PackLintError(where, `结论规则 ${r.id} 重复`);
+      }
+      seen.add(r.id);
+      const when = r.when;
+      const count = (when.cards?.length ?? 0) + (when.alerts?.length ?? 0) + (when.changes?.length ?? 0);
+      if (count === 0 || count > MAX_CONCLUSION_CONDITIONS) {
+        throw new PackLintError(where, `条件三类合计要有 1–${MAX_CONCLUSION_CONDITIONS} 个，实际 ${count} 个`);
+      }
+      for (const [lang, text] of Object.entries(r.mechanism)) {
+        if (text.length > MAX_MECHANISM_CHARS) {
+          throw new PackLintError(where, `机制（${lang}）超过 ${MAX_MECHANISM_CHARS} 字`);
+        }
+      }
+      for (const t of r.component_types ?? []) {
+        if (!componentTypes.has(t)) {
+          throw new PackLintError(where, `组件类型 ${t} 不存在或所在的包被禁用`);
+        }
+      }
+      const cardConditions = (when.cards ?? []).map((c, i) => {
+        const segs = c.card.split('/');
+        const owner = segs.length === 3 ? segs[0]! : p.name;
+        if (owner !== p.name && !(p.content.manifest.depends_on ?? []).includes(owner)) {
+          throw new PackLintError(where, `卡片条件 ${c.card} 引用的包 ${owner} 不在 depends_on 中`);
+        }
+        const key = primaryCardKey(p.name, c.card);
+        const entry = cards.get(key);
+        if (!entry || entry.chain === null) {
+          throw new PackLintError(where, `卡片条件 ${c.card} 不是证据链中的卡，或所在的包被禁用`);
+        }
+        const lets = entry.compiled.lets.slice(0, MAX_OBSERVATIONS).map((l) => l.name);
+        for (const o of c.observations ?? []) {
+          if (!lets.includes(o.name)) {
+            throw new PackLintError(
+              where,
+              `卡片条件 ${i} 的 observations 引用 ${o.name}，它不是卡片 ${key} 前 ${MAX_OBSERVATIONS} 个 let 绑定之一`,
+            );
+          }
+          if (o.op !== 'eq' && o.op !== 'ne' && typeof o.value !== 'number') {
+            throw new PackLintError(where, `卡片条件 ${i} 的 observations ${o.name}：${o.op} 只能和数值比较`);
+          }
+        }
+        return {
+          card: key,
+          verdict: c.verdict ?? 'abnormal',
+          observations: c.observations ?? [],
+          on: c.on ?? 'self',
+        };
+      });
+      out.push({
+        pack: p.name,
+        id: r.id,
+        key: `${p.name}/${r.id}`,
+        title: r.title,
+        componentTypes: r.component_types ? new Set(r.component_types) : null,
+        cards: cardConditions,
+        alerts: (when.alerts ?? []).map((a) => ({
+          alertnames: new Set(a.alertnames),
+          labels: { ...(a.labels ?? {}) },
+          roles: a.roles ? new Set(a.roles) : null,
+          on: a.on ?? 'self',
+        })),
+        changes: (when.changes ?? []).map((c) => ({
+          kinds: c.kinds ? new Set<string>(c.kinds) : null,
+          minGrade: c.min_grade ?? null,
+          on: c.on ?? 'self',
+        })),
+        mechanism: r.mechanism,
+      });
+    }
+  }
+  return out;
+}
 
 export interface CardEntry {
   /** <pack>/<chain>/<card> 或 <pack>/checks/<id> */
@@ -58,6 +155,8 @@ export interface PackSet {
     when: (ctx: Record<string, unknown>) => unknown;
     params: Record<string, (ctx: Record<string, unknown>) => unknown>;
   }>;
+  /** 确定性结论规则（conclusions.yaml，ADR 0178），按包的加载顺序与声明顺序 */
+  conclusions: CompiledConclusion[];
   /** 修复补丁模板（remediations.yaml，ADR 0103） */
   remediations: CompiledRemediation[];
   /** 阶段 B 的查询模板：全局 id <pack>/<模板 id>，附带的卡在 cards 中的键为 <pack>/templates/<模板 id> */
@@ -594,6 +693,8 @@ export async function compilePackSet(loaded: LoadedPack[], opts: CompileOptions)
     }
   }
 
+  const conclusions = compileConclusions(active, cards, componentTypes);
+
   // 证据链的排除规则：上下文与规则提议相同，命中时阶段 A 的 disposition 为 ignore
   const excludes: PackSet['excludes'] = [];
   for (const [key, { pack, chain }] of chains) {
@@ -627,6 +728,7 @@ export async function compilePackSet(loaded: LoadedPack[], opts: CompileOptions)
     cards,
     chains,
     rules,
+    conclusions,
     excludes,
     remediations,
     templates,
