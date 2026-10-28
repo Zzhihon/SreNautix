@@ -245,6 +245,13 @@ export async function runStageB(input: ResearchRunInput, env: ResearchEnv, sink:
   if (previous) {
     ledger.seed(previous.output.hypotheses);
   }
+  // 阶段 A 的规则结论作为假设 h7–h9 进入账本（ADR 0178），与模型假设一样经过区分性检查
+  const ruleConclusions = rc.stageA.rule_conclusions ?? [];
+  if (ruleConclusions.length) {
+    const lang = env.language === 'zh' ? 'zh-CN' : 'en';
+    ledger.seedRules(ruleConclusions, (r) => r.mechanism[lang] ?? r.mechanism['zh-CN'] ?? r.mechanism.en ?? '', notes);
+    ledger.evaluate();
+  }
 
   const candidateScore = (c: string) => rc.incident.candidates.find((x) => x.component === c)?.score ?? 0;
 
@@ -383,7 +390,7 @@ export async function runStageB(input: ResearchRunInput, env: ResearchEnv, sink:
     return session.structured<HypothesizeOutput>(
       'hypothesize',
       {
-        items: hypothesizeItems(env.language, parts, ledger.list().length ? ledger : null, book),
+        items: hypothesizeItems(env.language, parts, ledger, book),
         maxOutputTokens: 6000,
         temperature: 0,
       },
@@ -427,9 +434,10 @@ export async function runStageB(input: ResearchRunInput, env: ResearchEnv, sink:
       stopReason = 'deadline';
       break;
     }
+    // 规则判定的假设不在其中：它们不由检查检验，只由检查推翻（ADR 0178）
     const openEntries = ledger
       .ranked(candidateScore)
-      .filter((e) => !e.pinned && e.status !== 'refuted' && e.checksRun === 0)
+      .filter((e) => !e.pinned && e.status !== 'refuted' && e.checksRun === 0 && e.rule === undefined)
       .slice(0, env.limits.checksPerStep);
     const open = new Set(openEntries.map((e) => e.id));
     // 模型一项检查都没有给出：事件的组件有适用的卡片检查时，由控制器按相关性补选（ADR 0137）

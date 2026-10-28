@@ -1,4 +1,5 @@
-import type { Feedback, Hypothesis } from '@srenautix/contract';
+import type { Feedback, Hypothesis, RuleConclusion } from '@srenautix/contract';
+import { cardConditionHolds } from '@srenautix/packs-sdk';
 import { isRoutine } from '../stage-a/novelty.js';
 import type { CardEntry, EvidenceBook } from './evidence.js';
 import { checkDefinition, INCIDENT_SYMPTOM_RULES, targets, type Targeting, type TypeRule } from './targeting.js';
@@ -44,7 +45,15 @@ export interface LedgerEntry {
   reasons: string[];
   /** 模型给出的排序位置（越小越靠前） */
   order: number;
+  /**
+   * 规则判定的假设（ADR 0178）：阶段 A 的规则结论。它的支持证据是规则的依据，只在区分性检查在规则的卡片条件上给出
+   * 不满足条件的结果时推翻；模型不能改写它
+   */
+  rule?: RuleConclusion;
 }
+
+/** 规则判定的假设的 id：模型的假设用 h1–h6（HYPOTHESIS_IDS） */
+export const RULE_HYPOTHESIS_IDS = ['h7', 'h8', 'h9'] as const;
 
 export interface ModelHypothesis {
   id: string;
@@ -189,9 +198,12 @@ export class Ledger {
     this.changes++;
   }
 
-  /** 合并上一次研判的账本（增量研判）：保留假设与状态 */
+  /** 合并上一次研判的账本（增量研判）：保留模型假设与状态；规则判定的假设按本次阶段 A 的规则结论重新加入（seedRules） */
   seed(previous: readonly Hypothesis[]): void {
     previous.forEach((h, i) => {
+      if (h.rule_id !== undefined) {
+        return;
+      }
       this.entries.set(h.id, {
         id: h.id,
         group: '',
@@ -209,6 +221,72 @@ export class Ledger {
         reasons: [`沿用上一次研判的状态 ${h.status}`],
         order: i,
       });
+    });
+  }
+
+  /**
+   * 阶段 A 的规则结论作为假设 h7–h9 进入账本（ADR 0178）：根因与机制取自规则，支持证据是规则的依据（本次运行中存在的引用）。
+   * 排在模型假设之后（order 从 100 起），排名仍按状态与支持证据
+   */
+  seedRules(rules: readonly RuleConclusion[], mechanism: (r: RuleConclusion) => string, notes: string[]): void {
+    rules.slice(0, RULE_HYPOTHESIS_IDS.length).forEach((r, i) => {
+      const id = RULE_HYPOTHESIS_IDS[i]!;
+      const missing = r.basis.filter((ref) => !this.book.has(ref));
+      if (missing.length) {
+        notes.push(`规则判定 ${r.rule_id} 的依据在本次运行中不存在，已删除：${missing.join('、')}`);
+      }
+      this.entries.set(id, {
+        id,
+        group: '',
+        parentId: null,
+        rootComponent: this.componentOf(r.root_component),
+        mechanism: mechanism(r),
+        // 规则的机制是固定文本，不引用错误样本
+        mechanismRefs: [],
+        supporting: r.basis.filter((ref) => this.book.has(ref)),
+        refuting: [],
+        status: 'pending',
+        pinned: null,
+        checksRun: 0,
+        checkRefs: [],
+        reasons: [`规则判定 ${r.rule_id}：${r.basis.join('、')}`],
+        order: 100 + i,
+        rule: r,
+      });
+    });
+  }
+
+  /** 模型提出的假设（不含规则判定的假设） */
+  modelEntries(): LedgerEntry[] {
+    return this.list().filter((e) => e.rule === undefined);
+  }
+
+  /** 规则判定的假设 */
+  ruleEntries(): LedgerEntry[] {
+    return this.list().filter((e) => e.rule !== undefined);
+  }
+
+  /**
+   * 推翻规则判定的检查卡（ADR 0178）：区分性检查（针对任何假设）测的卡片定义是规则的某个卡片条件的卡，实体在规则根因的
+   * 范围内（条件为 on: incident 时不限实体），得出了确定的结论，并且不满足这个条件。阶段 A 的卡已经满足条件，不会出现在这里
+   */
+  ruleRefutations(e: LedgerEntry): CardEntry[] {
+    const rule = e.rule;
+    if (!rule) {
+      return [];
+    }
+    const scope = this.frame.scopeOf(e.rootComponent);
+    return this.book.allCards.filter((c) => {
+      if (c.hypothesisId === null || c.check === null || c.result.verdict === 'undeterminable') {
+        return false;
+      }
+      const def = checkDefinition(c.check);
+      return rule.card_conditions.some(
+        (cond) =>
+          cond.card === def &&
+          (cond.on === 'incident' || (c.component !== null && scope.has(c.component))) &&
+          !cardConditionHolds(cond, c.result.verdict, isRoutine(c.result), c.result.observations),
+      );
     });
   }
 
@@ -492,6 +570,20 @@ export class Ledger {
       if (e.pinned) {
         continue;
       }
+      // 规则判定的假设（ADR 0178）：依据由阶段 A 按规则确定，只有在规则的卡片条件上得出不满足条件结果的检查能推翻它
+      if (e.rule) {
+        const refuting = this.ruleRefutations(e);
+        if (refuting.length) {
+          this.set(
+            e,
+            'refuted',
+            `检查在规则 ${e.rule.rule_id} 的卡片条件上不成立：${refuting.map((c) => `${c.ref} ${c.check ?? c.result.card_id}`).join('、')}`,
+          );
+        } else {
+          this.set(e, 'supported', `规则判定 ${e.rule.rule_id}：${e.supporting.join('、')}`);
+        }
+        continue;
+      }
       // 检查卡判定为正常时直接推翻假设的，只有实体是根因本身或它直接依赖的对象的卡，以及实体未知的卡（工具结果）；
       // 实体是根因拥有的某个成员（例如多副本中的一个 Pod）的正常卡只作为相反的正常卡，在没有支持证据时才推翻（ADR 0121）；
       // 测的信号不属于假设机制的检查卡记为无关，不推翻（ADR 0133）
@@ -634,6 +726,7 @@ export class Ledger {
       root_component: e.rootComponent,
       mechanism: e.mechanism,
       ...(e.mechanismRefs.length ? { mechanism_refs: e.mechanismRefs.slice(0, 4) } : {}),
+      // 契约中最多 12 个引用：规则判定的依据可能覆盖一个组件的全部实例，按先后取前 12 个
       supporting: [
         ...new Set([
           ...e.supporting,
@@ -641,11 +734,16 @@ export class Ledger {
           ...this.supportAlerts(e),
           ...this.supportChanges(e),
         ]),
-      ],
-      refuting: [...new Set([...e.refuting, ...this.contraryCards(e).map((c) => c.ref)])],
+      ].slice(0, 12),
+      refuting: e.rule
+        ? this.ruleRefutations(e)
+            .map((c) => c.ref)
+            .slice(0, 12)
+        : [...new Set([...e.refuting, ...this.contraryCards(e).map((c) => c.ref)])],
       status: e.status,
       status_reasons: e.reasons.map((r) => r.slice(0, 500)),
       checks_run: e.checksRun,
+      ...(e.rule ? { rule_id: e.rule.rule_id } : {}),
     }));
   }
 }
