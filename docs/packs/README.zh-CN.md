@@ -15,6 +15,7 @@ SDK 在 `packages/packs-sdk`（Apache-2.0），命令行入口是 `srenautix pac
 | `chains.yaml` | `ChainsFile` | 证据链：证据卡、排除规则、处置手册 |
 | `checks.yaml` | `ChecksFile` | 与告警无关、按实体种类运行的检查项 |
 | `rules.yaml` | `RulesFile` | 规则提议：条件满足时提议动作目录中的动作 |
+| `conclusions.yaml` | `ConclusionsFile` | 确定性结论规则：证据卡、告警与变更的条件全部成立时给出根因候选与机制 |
 | `remediations.yaml` | `RemediationsFile` | 修复补丁模板：条件满足时生成 GitOps 仓库的补丁，经 `gitops_pr` 开 PR |
 | `domains.yaml` | `DomainsFile` | 主动优化的指标目录与领域：诊断卡、份额卡、模板、门槛、趋势、体检计划、负载保护卡 |
 | `issues.yaml` | `IssuesFile` | 主动优化的业务仓库 issue 模板：适用条件、代码定位的锚点、建议、预期收益与验证计划 |
@@ -33,7 +34,7 @@ SDK 在 `packages/packs-sdk`（Apache-2.0），命令行入口是 `srenautix pac
 
 | 成熟度 | 要求 |
 |---|---|
-| `stable` | 每张证据卡都有夹具测试，并且在 Prometheus 与 VictoriaMetrics 上结论一致；只有 stable 的包计入"支持" |
+| `stable` | 每张证据卡都有夹具测试、每条确定性结论规则都有命中与不命中的测试，并且在 Prometheus 与 VictoriaMetrics 上结论一致；只有 stable 的包计入"支持" |
 | `beta` | 能通过 `lint`，夹具测试可以不完整 |
 | `draft` | 开发中的包 |
 
@@ -330,6 +331,58 @@ component_types:
 
 **规则提议**：`rules.yaml` 的每条规则只能引用动作目录（`contract/gateway/v1/action-catalog.yaml`）中已有的动作，参数名与类型按目录检查。`when` 与参数值都是 CEL，可用 `incident`、`root`、`cards`（键为 `<包>/<链>/<卡>`，值含 `verdict`）。`packs/workload/rules.yaml` 的 `stuck-init-recreate-pod` 是一个完整示例：Pod 卡在初始化容器、对应证据卡判定异常时提议 `pod_restart`。
 
+## 确定性结论规则
+
+`conclusions.yaml` 把几个确定的事实组合成根因候选与机制（ADR 0178）。阶段 A 在事件涉及的每个组件上求值，条件全部成立时规则在这个组件上命中，结论写进阶段 A 报告的 `rule_conclusions`，档位最高 `likely`。研判可用时它们作为假设 h7–h9 进入账本，只有区分性检查在卡片条件上得出不满足条件的结果才推翻它；没有模型结论时，群消息与事件详情显示它们并标明“规则判定”。
+
+```yaml
+conclusions:
+  - id: oom-failover
+    title: { zh-CN: 实例 OOM 引发主库切换, en: An instance OOM kill caused a primary change }
+    component_types: [postgres.cnpg-cluster, postgres.instance]
+    when:
+      cards:
+        - card: availability/oom-kills
+        - card: availability/primary-changes
+          observations: [{ name: changes, op: gt, value: 0 }]
+      alerts:
+        - { alertnames: [CNPGClusterHACritical], roles: [cause, symptom], on: incident }
+      changes:
+        - { kinds: [rollout, gitops_sync], min_grade: high }
+    mechanism:
+      zh-CN: 数据库实例的容器内存超过 limit 被 OOM 终止，主库进程退出后集群把备库提升为主库……
+      en: A database instance container exceeded its memory limit and was OOM-killed……
+```
+
+| 字段 | 说明 |
+|---|---|
+| `component_types` | 求值对象的组件类型（本包或依赖包的 `components.yaml`）；不写时在事件涉及的全部组件上求值 |
+| `when.cards` | `card` 写 `<chain>/<card>`（本包）或 `<包>/<chain>/<card>`（包在 `depends_on` 中）；`verdict` 默认 `abnormal`；`observations` 比较卡片 `let` 绑定的取值（只能用前 16 个绑定，`gt`、`gte`、`lt`、`lte` 只和数值比较）。证据基线判为常态的异常卡按正常对待，无法判定的卡两种结论都不满足 |
+| `when.alerts` | 成员告警的名字，可以再限定标签与角色；已恢复的告警也算 |
+| `when.changes` | 事件的变更，可以限定类型与最低关联分级（事件没有分级时 `min_grade` 不成立） |
+| `on` | 每个条件都可以写：`self`（默认）只看落在求值对象上的证据，`incident` 看事件里的全部证据 |
+| `mechanism` | 根因怎样造成了症状，每种语言最多 300 字 |
+
+`self` 条件里，卡属于“执行它所为的组件”：根因候选上执行的卡属于候选，告警实体上执行的卡属于告警归属的组件（例如 CNPG 实例 Pod 上的卡属于它的集群）。三类条件合计 1–8 个。用户层用 `extend.conclusions` 追加、`disable: [conclusions/<id>]` 禁用。
+
+每条规则在测试文件的 `conclusions` 里写命中与不命中的用例（stable 的包必须两种都有）：
+
+```yaml
+conclusions:
+  - name: 主库实例 OOM 后发生切换
+    eval_time: 25h
+    rule: oom-failover
+    subject: { kind: Cluster, namespace: shop, name: pg, component_type: postgres.cnpg-cluster }
+    cards:
+      - { card: availability/oom-kills, entity: { kind: Cluster, namespace: shop, name: pg } }
+      - { card: availability/primary-changes, entity: { kind: Cluster, namespace: shop, name: pg }, on: self }
+    alerts: [{ alertname: CNPGClusterHACritical, role: cause, on: other }]
+    changes: [{ kind: rollout, grade: high }]
+    expect: { hit: true }
+```
+
+卡在两个后端上各执行一遍，规则按阶段 A 的方式求值；`on: other` 表示证据落在另一个组件上。`packs/postgres/conclusions.yaml` 与 `packs/_example/conclusions.yaml` 是完整示例。
+
 ## 修复补丁模板
 
 `remediations.yaml` 的模板生成 GitOps 仓库的补丁（git diff 格式，每个文件带 `diff --git` 头），server 把它作为 `gitops_pr` 的 `params.patch` 开 PR，从不合并（ADR 0103）。模板只写仓库角色与文件角色，不写路径；同一套模板用于不同的仓库，差别全部在 server 配置的仓库布局里：
@@ -476,7 +529,7 @@ extend:
   rules: []
 ```
 
-层内的操作按 `extend → params → patch → disable` 的顺序执行，结果重新按契约校验。`disable` 接受 `alerts/<id>`、`chains/<id>`、`chains/<id>/<card>`、`checks/<id>`、`rules/<id>`、`indicators/<id>`、`issues/<id>`、`domains/<id>` 与 `domains/<id>/<诊断卡或份额卡 id>`。`extend` 另有 `indicators`、`issues` 与 `domains`；与目标包同 id 的领域按领域的合并规则并入。
+层内的操作按 `extend → params → patch → disable` 的顺序执行，结果重新按契约校验。`disable` 接受 `alerts/<id>`、`chains/<id>`、`chains/<id>/<card>`、`checks/<id>`、`rules/<id>`、`conclusions/<id>`、`indicators/<id>`、`issues/<id>`、`domains/<id>` 与 `domains/<id>/<诊断卡或份额卡 id>`。`extend` 另有 `conclusions`、`indicators`、`issues` 与 `domains`；与目标包同 id 的领域按领域的合并规则并入。
 
 ## 来源与 pack.lock
 
@@ -576,7 +629,7 @@ tests:
 | `pvc` | 卷容量；混沌实验 fill-volume |
 | `observability-self` | 抓取、Prometheus TSDB、规则评估、告警投递 |
 | `cert-manager` | 证书到期与签发失败 |
-| `postgres` | CloudNativePG 与 postgres_exporter：复制、连接、WAL、锁；混沌实验 primary-kill。主动优化的数据库领域：指标（语句执行时间、单条语句平均执行时间、事务速率、临时文件写入、缓存命中率、顺序扫描比例），dbstats 检查项（语句份额、临时文件、高频轮询、顺序扫描的表）与负载保护卡，查询模板 `statement-detail`，`pg-guc-tune`（临时文件写入时调大 `work_mem`，只允许不需要重启的参数与包内的范围），业务 issue 模板 `slow-statement` 与 `hot-polling`；夹具在 Prometheus、VictoriaMetrics 与 PostgreSQL 上执行 |
+| `postgres` | CloudNativePG 与 postgres_exporter：复制、实例 OOM、连接、语句平均耗时对比基线、WAL、锁；确定性结论规则 `oom-failover`（实例 OOM 加主库切换）与 `slow-statements-saturate-connections`（连接占满加语句变慢）；依赖 `workload` 的 OOM 信号；混沌实验 primary-kill。主动优化的数据库领域：指标（语句执行时间、单条语句平均执行时间、事务速率、临时文件写入、缓存命中率、顺序扫描比例），dbstats 检查项（语句份额、临时文件、高频轮询、顺序扫描的表）与负载保护卡，查询模板 `statement-detail`，`pg-guc-tune`（临时文件写入时调大 `work_mem`，只允许不需要重启的参数与包内的范围），业务 issue 模板 `slow-statement` 与 `hot-polling`；夹具在 Prometheus、VictoriaMetrics 与 PostgreSQL 上执行 |
 | `redis`、`mysql`、`kafka`、`rocketmq`、`nacos` | 各自 exporter 的可用性、延迟、积压与资源 |
 | `ingress-nginx`、`envoy-gateway` | 入口错误率、延迟、上游健康 |
 | `argocd`、`flux` | 同步失败与健康状态 |
