@@ -119,12 +119,15 @@ describe('录制的研判回放', () => {
       'discriminate',
       'conclude',
     ]);
+    // 录制早于假设的 mechanism_refs（契约 2.42.0，ADR 0177）：hypothesize 的输出缺这个必填数组，按字段挽救补为空数组
     expect(sink.llm.map((c) => [c.phase, c.outcome, c.repairStep])).toEqual([
-      ['hypothesize', 'succeeded', 'validate'],
-      ['hypothesize', 'succeeded', 'validate'],
+      ['hypothesize', 'succeeded', 'field_salvage'],
+      ['hypothesize', 'succeeded', 'field_salvage'],
       ['conclude', 'retried', 'parse'],
       ['conclude', 'succeeded', 'reask'],
     ]);
+    expect(notes).toMatch(/\/hypotheses\[0\]\/mechanism_refs：缺失，补为空数组/);
+    expect(out.hypotheses.every((h) => h.mechanism_refs === undefined)).toBe(true);
     expect(res.session.egress.every((e) => e.in_domain)).toBe(true);
     expect(res.ledger.input).toBe(sink.llm.reduce((a, c) => a + c.usage.input_tokens, 0));
   });
