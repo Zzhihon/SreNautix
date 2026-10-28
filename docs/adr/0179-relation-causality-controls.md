@@ -1,88 +1,106 @@
-# 0179 关系证据只构成假设：因果性标注与对照选点
+# 0179 关系证据只构成假设：因果性标注与对照对象
 
 ## 背景
 
-在并行对照第 1 轮中，三个外部上游（模型服务方）事件的摘要给出"共享网关、出口或多个上游共因"的结论，而同一入口上多数上游在同一时段请求成功，结论与指标不符。原因是阶段 B 没有做区分性检查，邻居与同入口的异常被当作因果关系。
+在并行对照第 1 轮中，三个外部上游（模型服务方）事件的摘要给出「共享网关、出口或多个上游共因」的结论，而同一入口上多数上游在同一时段请求成功，结论与指标不符。阶段 B 没有做区分性检查，邻居与同一入口上其他对象的异常被当作因果关系。
 
-拓扑证据卡与邻居检查的异常结果构成假设，但不直接证明因果。确认共因（多个对象归为同一根因，例如共享组件、共享出口）需要对照证据：同一入口上其他对象在同一时段的成功率或错误率。没有对照证据时，共因结论只能是推测，档位上限为 `inconclusive`。
+拓扑边与邻居的异常说明同一时段相关，没有证明因果。把多个对象归为同一个根因（共享组件、共享出口）的结论，需要对照证据：同一入口上其他对象在同一时段的错误率。
 
 ## 决定
 
-### 1. 拓扑边标注
+### 1. 拓扑关系的标注
 
-拓扑边（契约 2.44.0，`TopologyEdge`）写入提示词时带 `provenance`（结构性、运行时、配置引用、NetworkPolicy、命名推断）与 `observed_at`（结构性边取事件版本的拓扑时刻，运行时边取最近一次服务图样本）。固定指令在"拓扑链"片段说明中加一句："相邻两跳的异常同时出现，只构成关联，不证明因果；确认因果需要证据卡或区分性检查的结果。"
+提示词的拓扑片段带一段说明（`PromptSet.causality`，中英文各一份）：
 
-### 2. 对照对象选择
+- 边与邻居的异常只说明同一时段相关，没有证明因果；
+- 邻居与同一入口上其他对象的异常只构成假设，与本对象自身的证据卡交叉验证之后才能采信；
+- 把多个对象归为同一个根因的结论引用对照结果，对照对象多数正常时共因不成立，没有对照结果时结论档位最高为 inconclusive。
 
-证据卡增加 `controls`（`CardControls`），声明对照对象选择方式与参数：
+说明放在可裁剪的拓扑片段里，随片段一起裁掉，不计入提示词哈希。固定指令与三个步骤的任务说明的字节数与加入之前相同，`research-context-budget` 的测试断言它们不增加。
 
-```yaml
-controls:
-  method: entry_peers
-  request_metric: # 按请求量选前 N 个
-    signal_ref: requests
-    aggregation: sum
-    top_n: 2
-  sample_count: 1  # 随机取若干个，种子为事件 id
-```
+拓扑片段的每条边带 `provenance`（structural、runtime、config_ref、network_policy、naming），片段带 `topology_version` 与 `as_of`（研判输入的时刻）。
 
-`method` 取值（可扩展枚举）：
+### 2. 卡片声明对照对象
 
-- `entry_peers`（本项实现）：同一入口的其他上游，按请求量取前 N 个，再随机取若干个；随机以事件 id 为种子，保证重放可以复现。
-- `chain_siblings`（拓扑链 T1/T5 添加）：链路上与故障跳共享上一跳的兄弟跳。
+证据卡增加 `controls`（契约 2.44.0，`CardControls`）：
 
-卡片声明了 `controls` 时，卡的判定同时在故障对象与对照对象上执行，结果写在 `EvidenceResult.controls`（`EvidenceControlResults`）：
+| 字段 | 含义 |
+|---|---|
+| `method` | 对照对象的选择方式，枚举可以扩展，当前取值 `entry_peers` |
+| `by` | 区分对象的标签名，序列在这个标签上的取值就是对象的键 |
+| `refs` | 按 `by` 标签拆分后分别判定的指标引用名，mode 必须是 range 或 instant |
+| `volume` | 排序用的请求量引用名，必须在 `refs` 中，按序列取值之和排序 |
+| `top_n` | 按请求量取前几个，0–10，默认 2 |
+| `sample_count` | 再随机取几个，0–10，默认 1 |
+
+加载时校验：`refs` 中的引用存在、mode 合规、不重复，`volume` 在 `refs` 中。
+
+### 3. 选择方式 entry_peers
+
+`refs` 引用的查询返回同一入口上全部对象的序列。选点步骤：
+
+1. 取全部有数据点的对象键，排除故障对象（键等于实体名）；
+2. 按 `volume` 引用的请求量从多到少取前 `top_n` 个，请求量相同按键排序；
+3. 其余对象按种子与对象键的哈希排序，取前 `sample_count` 个。
+
+种子由执行方传入：事件研判传事件 id，主动优化传运行 id，pack test 与快照录制、回放用固定值。同一个种子与同一批对象得到同一个结果，重放可以复现。
+
+选择方式是 `selectControls` 中的一个分支。新增取值（例如拓扑链的 `chain_siblings`）在这里增加分支，结果结构不变。
+
+### 4. 对照结果
+
+结果写在 `EvidenceResult.controls`（`EvidenceControls`），与故障对象自己的判定并列：
 
 ```typescript
 {
   method: 'entry_peers',
-  selection: {
-    top_n: ['provider:xx', 'provider:yy'],  // 按请求量选出的前 N 个
-    sampled: ['provider:zz']  // 随机选出的
-  },
-  results: [
-    { component: 'provider:xx', verdict, value, value_number, ... },
-    // ...
+  by: 'target',
+  subject: 'up-0',          // 故障对象的键，它自己的判定是这张卡的主结果
+  candidates: 5,            // 同一入口上除故障对象之外可作为对照的对象数
+  results: [                // 先按请求量选出的，后随机选出的
+    {
+      subject: 'p1',
+      picked_by: 'top_n',   // top_n 或 sampled
+      volume: 1000,
+      verdict, display_state, reason, value, value_number, anomaly_started_at
+    }
   ]
 }
 ```
 
-每个对照对象的结果包含组件键、结论、主值、主值数值与阈值，不含表格、序列、查询记录与样例。对照对象不存在、无法取到信号、或判定失败时，结果的 `verdict` 为 `undeterminable`，`reason` 写明原因。
+对照对象用同一张卡、同一个判定输入，只换成这个对象的序列。对象的序列没有数据点时判定为 undeterminable，不会是 normal。结果不含表格、序列与查询记录。
 
-### 3. 选择方式实现
+### 5. 阶段 A 的执行
 
-`entry_peers`：
+`runCard` 对声明了 `controls` 的卡：故障对象自己的判定只看标签值等于实体名的序列；对照对象各判定一次，写入 `controls`。声明了 `controls` 的卡执行时必须传入种子，没有时直接报错。`PackEvidence` 把事件 id 作为种子传给阶段 A 的卡、实时重跑、查询模板、卡片检查与证据基线的样本，`controls` 写进报告。
 
-- 输入：拓扑（事件版本）、故障对象组件键、入口组件键、请求量信号、事件 id。
-- 选点：从入口沿依赖边（`relation` 为 `calls`、置信度 ≥ 0.5）找到全部下游组件，排除故障对象；按请求量信号在事件窗口的总量排序，取前 `top_n` 个；剩余的组件按组件键的哈希（以事件 id 为种子）取 `sample_count` 个。
-- 请求量从卡的 `request_metric.signal_ref` 引用取：引用必须是 `kind: metrics`、`mode: range`，按 `aggregation`（`sum`/`avg`/`max`）聚合。
-- 对照对象最多 `controls.max_results`（默认 6）个；超过时截断并记 `truncated: true`。
+### 6. 共因约束
 
-### 4. 共因约束
+共因约束只读 `controls.results`，与选择方式无关（`research/common-cause.ts`）。故障对象的卡指判为异常、带 `controls`、实体是事件中有成员告警的组件、并且不是假设根因本身的卡。假设的根因落在故障对象之外时：
 
-阶段 B 的账本增加共因约束（`research/ledger.ts`）：假设的根因放在共享跳上（例如 gateway）、而故障跳是它的下游（例如 provider）时，结论要求对照证据：
+| 对照结果 | 处理 |
+|---|---|
+| 异常数不少于有结论的对象数的一半，并且没有无法判定的对象 | 共因成立，不改变假设 |
+| 异常数少于有结论的对象数的一半 | 同一入口上的其他对象同时段多数正常，账本推翻假设 |
+| 没有对照结果，没有对象得出结论，或有对象无法判定 | 对照证据不足，假设状态不变，结论档位最高为 inconclusive |
 
-- 对照卡正常（`verdict: 'normal'`）时假设被推翻，记 `refuted_by_control`。
-- 对照卡无法判定或不存在时，档位上限为 `inconclusive`，记 `control_unavailable`。
-- 对照卡异常时共因假设可以继续。
+规则判定的假设（ADR 0178）由领域包的规则确定，不按共因检验。假设的根因就是故障对象本身时是单一对象故障，不检验。
 
-共因识别：故障对象的组件类型声明 `external: true`，选中根因的 component_type 不是外部，并且选中根因是故障对象所依赖的组件。这条约束在传播约束（`chain_deeper_first`）之后、档位计算之前执行。
+推翻在账本评估时执行，依据写入假设的状态说明。档位限制（`controlCap`）在规则判定改选之后、最低取证集合与变更分级的限制之后执行，原因写入 `validation_notes`，包含故障对象、对照对象的异常、正常与无法判定数量。
 
-没有对照证据时 `validation_notes` 记录：故障对象、共享跳、缺失的对照卡。
+### 7. 提示词与裁剪
 
-### 5. 研判提示词
+对照结果单独成一段（`controlsSegment`），列出每张卡的选择方式、故障对象、候选数，以及每个对照对象的选取方式、结论、主值与异常起始。裁剪顺序在结论相关卡减半之前整段去掉（`TRIM.controls` 为 11，`relevantCards` 为 12，`samples` 为 13，`ruleConclusions` 为 14）。裁掉之后共因约束仍由代码按账本执行，不依赖模型看到对照结果。
 
-拓扑链片段（契约 2.44.0）在边的说明中加 `provenance` 与 `observed_at`，固定指令加因果性说明（约 60 字节，在可裁剪部分的拓扑链说明里）。对照结果写在证据卡片段：对照卡的 `controls` 字段列出选择方式、选中的对照对象与每个对照对象的结论、主值与阈值，体积约 20–40 token/对照对象。
+16k 路由的 conclude 请求裁剪全部可裁剪的部分之后，带对照结果的事件与没有对照结果的事件相比，请求体不增加。
 
-裁剪顺序（与拓扑链合并）：对照结果在 `chainSiblings`（8）一步裁剪，与对照路径、共享链路同级；最后裁剪的拓扑链骨架（16）保留，它是判断"最深一跳"的唯一输入。
+### 8. 群消息
 
-### 6. 群消息
+关键问题一段在机制之后，为故障对象的卡上的对照结果写一行：对照对象的数量，以及异常、正常与无法判定各几个，例如「对照：同一入口上的其他 3 个对象，1 个异常，1 个正常，1 个无法判定」。
 
-证据段不展示对照结果（避免消息过长）。关键问题一段在假设机制之后，为根因卡中有对照结果的卡（至多 1 张）写一行：对照方法、对照对象数量、异常/正常/无法判定的对象数，例如"对照：同入口其他 3 个上游，2 个正常，1 个无法判定"。
+### 9. 领域包声明
 
-### 7. 领域包声明
-
-一个外部上游类型的卡声明 `controls`：两个指标引用按同一个标签拆分，请求量引用用来排序。
+一个外部上游类型的卡声明 `controls`，两个指标引用按同一个标签拆分，请求量引用用来排序：
 
 ```yaml
 refs:
@@ -97,36 +115,14 @@ controls:
   sample_count: 1
 ```
 
-请求量信号 `upstream_requests` 的查询写成 `sum by (target) (rate(upstream_requests_total[5m]))`，`target` 标签的取值就是对象的键，故障对象的键等于实体名。
-
-### 8. 测试
-
-- 单元测试（`packages/packs-sdk/test/controls.test.ts`）：`entry_peers` 选点逻辑、种子复现、对照判定、结果结构。
-- 集成测试（`apps/srenautix/test/integration/controls.test.ts`）：单一上游故障判为单一上游；同一入口多数上游同时失败、有对照证据时判为共因；没有对照证据时共因档位上限 `inconclusive`。
-- `research-context-budget` 测试：16k 路由 conclude 请求不可裁剪部分不增加字节数；带 3 个对照对象的卡在裁剪后放得下。
-- 契约测试：`controls` 与 `EvidenceControlResults` 的 schema，`method` 枚举可扩展。
+信号 `upstream_requests` 的查询写成 `sum by (target) (increase(upstream_requests_total[$window]))`，`target` 标签的取值就是对象的键。
 
 ## 结果
 
-- 契约 2.44.0：`evidence-card.schema.json` 的 `controls` 与 `CardControls`、`CardControlsRequestMetric`；`evidence-result.schema.json` 的 `controls` 与 `EvidenceControlResults`、`ControlSelection`、`ControlResult`；`control_method` 枚举（`entry_peers`、`chain_siblings`）；`research-output.schema.json` 的 `ConsistencyDetail` 增加 `refuted_by_control`、`control_unavailable`；`pack.schema.json` 的 `ComponentType.external`。
-- 实现：packs-sdk 的 `runtime/controls.ts`（选点、判定）、`runCard` 的 `controls`、加载校验；server 的 `PackEvidence` 对照执行；worker 的共因约束、提示词片段与裁剪、群消息；cchp 包 provider 卡的 `controls` 声明。
-- 测试：单元、集成、contract、context budget、回放（E17、E24、E25、单 provider 故障）。
+- 契约 2.44.0：`evidence-card.schema.json` 的 `controls` 与 `CardControls`；`evidence-result.schema.json` 的 `controls` 与 `EvidenceControls`、`EvidenceControlResult`。
+- 实现：packs-sdk 的 `runtime/controls.ts`（声明校验、选点、判定）、`runCard` 的 `controlSeed`、加载校验；server 的 `PackEvidence`；worker 的 `research/common-cause.ts`、账本、控制器、提示词片段与裁剪；通知的对照行。
+- 测试：`packages/packs-sdk/test/controls.test.ts`（选点、种子复现、三种对照判定、声明校验）；`apps/srenautix/test/integration/controls.test.ts`（真实 Prometheus 上外部上游事件的阶段 A：共因对照全异常、单一上游故障对照全正常、同一事件得到同一批对照对象）；`apps/srenautix/test/unit/research-common-cause.test.ts`（对照全异常不推翻，全正常推翻，部分无法判定限制档位）；`research-context-budget.test.ts`（固定指令字节数不增加，因果性说明，对照结果可裁剪）。
 
 ## 与拓扑链的接口
 
-`EvidenceControlResults` 的字段形状：
-
-```typescript
-{
-  method: 'entry_peers' | 'chain_siblings',
-  selection: {
-    top_n?: string[],      // entry_peers: 按请求量选出的前 N 个
-    sampled?: string[],    // entry_peers: 随机选出的
-    siblings?: string[]    // chain_siblings: 拓扑链添加
-  },
-  results: ControlResult[],
-  truncated?: boolean
-}
-```
-
-拓扑链实现 T1/T5 时，`chain_siblings` 方法按链路计算的对照路径选点，把选中的兄弟跳写入 `selection.siblings`，结果写入 `results`。共因约束读 `controls.results`，不依赖选择方式。
+`method` 是可扩展的枚举，对照结果的结构与故障对象的卡结果并列。拓扑链增加 `chain_siblings` 时，在 `CardControls.method` 与 `EvidenceControls.method` 的枚举中增加取值，在 `selectControls` 中增加分支，按链路的对照路径选点，结果仍写入 `results`。共因约束读 `controls.results`，不依赖选择方式。
