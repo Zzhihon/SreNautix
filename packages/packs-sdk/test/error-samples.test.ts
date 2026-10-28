@@ -258,7 +258,7 @@ describe('测试包 llm-gateway', () => {
   it('pack test 在真实 Loki 上通过：四类上游错误的类别行数与 expect.samples 一致', async () => {
     const report = await runPackTests({ set, packs: ['llm-gateway'] });
     const fixtures = report.cases.filter((x) => x.kind === 'fixture');
-    expect(fixtures.map((x) => [x.name, x.failure])).toEqual(file.tests.map((t) => [t.name, null]));
+    expect(fixtures.map((x) => [x.name, x.failure])).toEqual((file.tests ?? []).map((t) => [t.name, null]));
     expect(report.cases.filter((x) => !x.passed)).toEqual([]);
   }, 600_000);
 
