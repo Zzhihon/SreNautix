@@ -92,7 +92,7 @@ export function convertPromtoolTests(
       return;
     }
     const inputs = series.map((s) => engine.parseSeries(`${s.series} ${s.values}`).labels as Labels);
-    const cases: Array<PackTestFile['tests'][number]> = [];
+    const cases: Array<NonNullable<PackTestFile['tests']>[number]> = [];
     for (const t of g.alert_rule_test ?? []) {
       for (const e of entries.filter((x) => x.alertname === t.alertname && ruleOf.has(x.id))) {
         if (!ruleOf.get(e.id)!.every((r) => reproducible(engine, r.expr, inputs))) {

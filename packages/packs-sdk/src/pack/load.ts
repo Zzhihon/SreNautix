@@ -12,6 +12,7 @@ import {
   type ChaosFile,
   type ChecksFile,
   type ComponentsFile,
+  type ConclusionsFile,
   type DomainsFile,
   type IssuesFile,
   type KnowledgeFile,
@@ -35,6 +36,8 @@ export interface PackContent {
   chains: ChainsFile;
   checks: ChecksFile;
   rules: RulesFile;
+  /** conclusions.yaml：确定性结论规则（契约 2.43.0，ADR 0178） */
+  conclusions: ConclusionsFile;
   remediations: RemediationsFile;
   /** domains.yaml：指标与领域（契约 2.28.0） */
   domains: DomainsFile;
@@ -70,6 +73,7 @@ const TOP_FILES = new Set([
   'chains.yaml',
   'checks.yaml',
   'rules.yaml',
+  'conclusions.yaml',
   'remediations.yaml',
   'domains.yaml',
   'issues.yaml',
@@ -163,6 +167,9 @@ export function loadPackDir(dir: string, source: string): LoadedPack {
     chains: opt<ChainsFile>('chains.yaml', `${PACK_SCHEMA}#/$defs/ChainsFile`, { chains: [] }),
     checks: opt<ChecksFile>('checks.yaml', `${PACK_SCHEMA}#/$defs/ChecksFile`, { checks: [] }),
     rules: opt<RulesFile>('rules.yaml', `${PACK_SCHEMA}#/$defs/RulesFile`, { rules: [] }),
+    conclusions: opt<ConclusionsFile>('conclusions.yaml', `${PACK_SCHEMA}#/$defs/ConclusionsFile`, {
+      conclusions: [],
+    }),
     remediations: opt<RemediationsFile>('remediations.yaml', `${PACK_SCHEMA}#/$defs/RemediationsFile`, {
       remediations: [],
     }),
@@ -180,6 +187,12 @@ export function loadPackDir(dir: string, source: string): LoadedPack {
   };
   if (dir.split(sep).pop() !== manifest.name) {
     throw new PackLintError(dir, `目录名必须等于包名 ${manifest.name}`);
+  }
+  // 测试文件测证据卡（tests）或结论规则（conclusions），至少写一种
+  for (const [file, tf] of Object.entries(content.tests)) {
+    if (!tf.tests?.length && !tf.conclusions?.length) {
+      throw new PackLintError(join(dir, 'tests', file), '测试文件至少要有 tests 或 conclusions 之一');
+    }
   }
   return { name: manifest.name, source, dir, content, files: files.map(({ path, sha256 }) => ({ path, sha256 })) };
 }

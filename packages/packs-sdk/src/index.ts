@@ -155,6 +155,16 @@ export {
   type RuleProposal,
   type ExcludeEvaluation,
 } from './runtime/rules.js';
+export {
+  evaluateConclusions,
+  conclusionBasis,
+  cardConditionHolds,
+  type CardCondition,
+  type CompiledConclusion,
+  type ConclusionHit,
+  type ConclusionInput,
+  type ConclusionScope,
+} from './runtime/conclusions.js';
 export { runPackTests, FIXTURE_EPOCH, type PackTestReport, type CaseResult } from './testing/pack-test.js';
 export {
   loadAlertRules,

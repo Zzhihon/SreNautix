@@ -239,7 +239,7 @@ export async function runPackCli(
         }
         for (const p of report.packs) {
           io.out(
-            `${p.passed ? '通过' : '失败'}  ${p.name}（${p.maturity}）${p.uncovered.length ? `  缺少夹具：${p.uncovered.join('、')}` : ''}${p.skipped?.length ? `  没有 --postgres，跳过：${p.skipped.join('、')}` : ''}\n`,
+            `${p.passed ? '通过' : '失败'}  ${p.name}（${p.maturity}）${p.uncovered.length ? `  缺少测试：${p.uncovered.join('、')}` : ''}${p.skipped?.length ? `  没有 --postgres，跳过：${p.skipped.join('、')}` : ''}\n`,
           );
         }
         io.out(`${report.cases.filter((c) => c.passed).length}/${report.cases.length} 个用例通过\n`);
