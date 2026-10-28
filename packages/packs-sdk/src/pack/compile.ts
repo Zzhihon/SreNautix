@@ -11,6 +11,7 @@ import { createBaseEnvironment } from '../cel/library.js';
 import { compileCard, MAX_OBSERVATIONS, type CompiledCard } from '../judge/card.js';
 import type { CardDefinition } from '../judge/types.js';
 import { renderMetrics } from '../signals/render.js';
+import { compileControls } from '../runtime/controls.js';
 import { compileSamples } from '../runtime/samples.js';
 import type { ActionCatalog } from './catalog.js';
 import { applyLayers, type LoadedLayer } from './layers.js';
@@ -526,6 +527,14 @@ export async function compilePackSet(loaded: LoadedPack[], opts: CompileOptions)
         compileSamples(def.samples, def.refs, def.egress);
       } catch (err) {
         throw new PackLintError(where, `samples：${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+    // 对照对象（ADR 0179）：refs 与 volume 的引用、模式与重复的声明
+    if (def.controls) {
+      try {
+        compileControls(def.controls, def.refs);
+      } catch (err) {
+        throw new PackLintError(where, `controls：${err instanceof Error ? err.message : String(err)}`);
       }
     }
     // 作为阶段 B 检查时的可覆盖参数：与查询模板参数同样的约束；窗口由运行时提供，不在这里声明

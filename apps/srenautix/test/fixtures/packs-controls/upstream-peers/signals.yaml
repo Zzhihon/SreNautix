@@ -1,0 +1,12 @@
+# 入口上全部上游的请求量与错误数，target 标签的取值是上游的键
+signals:
+  - id: upstream_requests
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: sum by (target) (increase(upstream_requests_total[$window]))
+  - id: upstream_errors
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: sum by (target) (increase(upstream_errors_total[$window]))

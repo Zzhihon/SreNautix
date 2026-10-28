@@ -52,6 +52,7 @@ export async function recordSnapshot(
       resolutions,
       clock,
       redact: NO_REDACTION,
+      controlSeed: 'record',
     });
     // 没有给期望时，以录制时的结论作为期望，回放必须得出同样的结论
     out.push({ ...c, expect: c.expect ?? { verdict: r.verdict, display_state: r.display_state } });

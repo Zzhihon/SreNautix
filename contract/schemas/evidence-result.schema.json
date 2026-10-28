@@ -139,9 +139,67 @@
     "samples": {
       "description": "错误样例（契约 2.42.0，ADR 0177）：卡片声明了 samples 时出现，其余的卡不出现",
       "$ref": "#/$defs/Samples"
+    },
+    "controls": {
+      "description": "对照结果（契约 2.44.0，ADR 0179）：卡片声明了 controls 时出现。对照对象与故障对象同一时段的判定，对照对象的异常只说明同时段相关，不证明因果",
+      "$ref": "#/$defs/Controls"
     }
   },
   "$defs": {
+    "Controls": {
+      "title": "EvidenceControls",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["method", "by", "subject", "candidates", "results"],
+      "properties": {
+        "method": {
+          "type": "string",
+          "description": "选择方式，取值与卡片声明的 controls.method 相同",
+          "enum": ["entry_peers"]
+        },
+        "by": { "type": "string", "description": "区分对象的标签名" },
+        "subject": { "type": "string", "description": "故障对象的键（by 标签的取值），它自己的判定是这张卡的主结果" },
+        "candidates": { "type": "integer", "minimum": 0, "description": "同一入口上除故障对象之外可作为对照的对象数" },
+        "results": {
+          "type": "array",
+          "description": "选出的对照对象的判定，先按请求量选出的，后随机选出的",
+          "maxItems": 20,
+          "items": { "$ref": "#/$defs/ControlResult" }
+        }
+      }
+    },
+    "ControlResult": {
+      "title": "EvidenceControlResult",
+      "description": "一个对照对象的判定，字段含义与 EvidenceResult 的同名字段相同；没有对照对象的序列时 verdict 为 undeterminable",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "subject",
+        "picked_by",
+        "volume",
+        "verdict",
+        "display_state",
+        "reason",
+        "value",
+        "value_number",
+        "anomaly_started_at"
+      ],
+      "properties": {
+        "subject": { "type": "string", "description": "对照对象的键" },
+        "picked_by": {
+          "type": "string",
+          "description": "top_n 按请求量选出；sampled 以事件 id 为种子随机选出",
+          "enum": ["top_n", "sampled"]
+        },
+        "volume": { "type": ["number", "null"], "description": "排序用的请求量；没有时为 null" },
+        "verdict": { "$ref": "common.schema.json#/$defs/Verdict" },
+        "display_state": { "type": "string", "enum": ["normal", "abnormal", "undeterminable", "capability_missing"] },
+        "reason": { "$ref": "#/$defs/Reason" },
+        "value": { "type": ["string", "null"] },
+        "value_number": { "type": ["number", "null"] },
+        "anomaly_started_at": { "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/Timestamp" }] }
+      }
+    },
     "Samples": {
       "title": "EvidenceSamples",
       "description": "按依赖与错误类别聚合的错误日志：维度组合的行数、首末时间与错误类别，每个类别少量脱敏、截断的原始样例。样例与维度值是不可信文本",

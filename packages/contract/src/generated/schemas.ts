@@ -1,5 +1,5 @@
 // 本文件由 packages/contract/scripts/gen.ts 从 contract/ 生成，不要手工修改。
-export const CONTRACT_VERSION = '2.43.0';
+export const CONTRACT_VERSION = '2.44.0';
 
 export const SCHEMAS: Record<string, Record<string, unknown>> = {
   'https://srenautix.io/contract/gateway/v1/action-catalog.schema.json': {
@@ -3996,6 +3996,7 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
         items: { type: 'string', pattern: '^[a-z]+\\.[a-z_]+$' },
       },
       samples: { $ref: '#/$defs/Samples' },
+      controls: { $ref: '#/$defs/Controls' },
       check: {
         type: 'object',
         additionalProperties: false,
@@ -4145,6 +4146,40 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
           },
           sort_by: { type: 'string' },
           limit: { type: 'integer', minimum: 1, maximum: 50, default: 8 },
+        },
+      },
+      Controls: {
+        title: 'CardControls',
+        description:
+          '对照对象（契约 2.44.0，ADR 0179）：refs 列出的指标引用返回同一入口上全部对象的序列，每条序列带标签 by；卡片对故障对象（标签值等于实体名）与选出的对照对象各判定一次，每次只看标签值等于该对象的序列。结果写在 EvidenceResult.controls，共因结论按它检验。refs 与 volume 必须是 mode 为 range 或 instant 的指标引用（加载时校验）',
+        type: 'object',
+        additionalProperties: false,
+        required: ['method', 'by', 'refs', 'volume'],
+        properties: {
+          method: {
+            type: 'string',
+            description:
+              '对照对象的选择方式，枚举可以扩展。entry_peers：同一入口的其他对象，按 volume 引用的请求量从多到少取前 top_n 个，再以事件 id 为种子随机取 sample_count 个，随机结果在重放时可以复现',
+            enum: ['entry_peers'],
+          },
+          by: {
+            type: 'string',
+            description: '区分对象的标签名，序列的这个标签取值就是对象的键',
+            pattern: '^[a-zA-Z_][a-zA-Z0-9_]*$',
+          },
+          refs: {
+            type: 'array',
+            description: '按 by 标签拆分后分别判定的指标引用名',
+            minItems: 1,
+            items: { type: 'string', pattern: '^[a-z][a-zA-Z0-9_]*$' },
+          },
+          volume: {
+            type: 'string',
+            description: '用来排序的请求量引用名，必须在 refs 中；按序列取值之和排序',
+            pattern: '^[a-z][a-zA-Z0-9_]*$',
+          },
+          top_n: { type: 'integer', minimum: 0, maximum: 10, default: 2 },
+          sample_count: { type: 'integer', minimum: 0, maximum: 10, default: 1 },
         },
       },
       Samples: {
@@ -4403,8 +4438,68 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
         description: '错误样例（契约 2.42.0，ADR 0177）：卡片声明了 samples 时出现，其余的卡不出现',
         $ref: '#/$defs/Samples',
       },
+      controls: {
+        description:
+          '对照结果（契约 2.44.0，ADR 0179）：卡片声明了 controls 时出现。对照对象与故障对象同一时段的判定，对照对象的异常只说明同时段相关，不证明因果',
+        $ref: '#/$defs/Controls',
+      },
     },
     $defs: {
+      Controls: {
+        title: 'EvidenceControls',
+        type: 'object',
+        additionalProperties: false,
+        required: ['method', 'by', 'subject', 'candidates', 'results'],
+        properties: {
+          method: {
+            type: 'string',
+            description: '选择方式，取值与卡片声明的 controls.method 相同',
+            enum: ['entry_peers'],
+          },
+          by: { type: 'string', description: '区分对象的标签名' },
+          subject: { type: 'string', description: '故障对象的键（by 标签的取值），它自己的判定是这张卡的主结果' },
+          candidates: { type: 'integer', minimum: 0, description: '同一入口上除故障对象之外可作为对照的对象数' },
+          results: {
+            type: 'array',
+            description: '选出的对照对象的判定，先按请求量选出的，后随机选出的',
+            maxItems: 20,
+            items: { $ref: '#/$defs/ControlResult' },
+          },
+        },
+      },
+      ControlResult: {
+        title: 'EvidenceControlResult',
+        description:
+          '一个对照对象的判定，字段含义与 EvidenceResult 的同名字段相同；没有对照对象的序列时 verdict 为 undeterminable',
+        type: 'object',
+        additionalProperties: false,
+        required: [
+          'subject',
+          'picked_by',
+          'volume',
+          'verdict',
+          'display_state',
+          'reason',
+          'value',
+          'value_number',
+          'anomaly_started_at',
+        ],
+        properties: {
+          subject: { type: 'string', description: '对照对象的键' },
+          picked_by: {
+            type: 'string',
+            description: 'top_n 按请求量选出；sampled 以事件 id 为种子随机选出',
+            enum: ['top_n', 'sampled'],
+          },
+          volume: { type: ['number', 'null'], description: '排序用的请求量；没有时为 null' },
+          verdict: { $ref: 'common.schema.json#/$defs/Verdict' },
+          display_state: { type: 'string', enum: ['normal', 'abnormal', 'undeterminable', 'capability_missing'] },
+          reason: { $ref: '#/$defs/Reason' },
+          value: { type: ['string', 'null'] },
+          value_number: { type: ['number', 'null'] },
+          anomaly_started_at: { oneOf: [{ type: 'null' }, { $ref: 'common.schema.json#/$defs/Timestamp' }] },
+        },
+      },
       Samples: {
         title: 'EvidenceSamples',
         description:

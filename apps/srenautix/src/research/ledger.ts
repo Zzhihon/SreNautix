@@ -1,6 +1,7 @@
 import type { Feedback, Hypothesis, RuleConclusion } from '@srenautix/contract';
 import { cardConditionHolds } from '@srenautix/packs-sdk';
 import { isRoutine } from '../stage-a/novelty.js';
+import { commonCauseCheck } from './common-cause.js';
 import type { CardEntry, EvidenceBook } from './evidence.js';
 import { checkDefinition, INCIDENT_SYMPTOM_RULES, targets, type Targeting, type TypeRule } from './targeting.js';
 import type { Subgraph } from './types.js';
@@ -582,6 +583,12 @@ export class Ledger {
         } else {
           this.set(e, 'supported', `规则判定 ${e.rule.rule_id}：${e.supporting.join('、')}`);
         }
+        continue;
+      }
+      // 共因约束（ADR 0179）：根因放在故障对象之外时，对照对象多数正常就推翻假设；对照不足只限制档位（controlCap）
+      const control = commonCauseCheck(this.book, e);
+      if (control.state === 'refuted') {
+        this.set(e, 'refuted', control.reason!);
         continue;
       }
       // 检查卡判定为正常时直接推翻假设的，只有实体是根因本身或它直接依赖的对象的卡，以及实体未知的卡（工具结果）；

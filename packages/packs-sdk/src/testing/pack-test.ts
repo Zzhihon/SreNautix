@@ -427,6 +427,7 @@ export async function runPackTests(opts: PackTestOptions): Promise<PackTestRepor
               resolutions: res[b],
               clock,
               redact: NO_REDACTION,
+              controlSeed: 'pack-test',
               ...(t.params ? { params: t.params as Record<string, number | string | boolean> } : {}),
             });
             results[b] = summary(r);
@@ -496,6 +497,7 @@ export async function runPackTests(opts: PackTestOptions): Promise<PackTestRepor
               resolutions: res.prometheus,
               clock,
               redact: NO_REDACTION,
+              controlSeed: 'pack-test',
               ...(t.params ? { params: t.params as Record<string, number | string | boolean> } : {}),
             });
             results.postgres = summary(r);
@@ -651,6 +653,7 @@ export async function runPackTests(opts: PackTestOptions): Promise<PackTestRepor
               resolutions: firstAlt,
               clock,
               redact: NO_REDACTION,
+              controlSeed: 'pack-test',
             });
             results[b] = summary(r);
             if (r.verdict !== 'undeterminable') {

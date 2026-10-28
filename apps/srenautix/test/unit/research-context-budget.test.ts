@@ -3,6 +3,7 @@ import { aggregateSamples, compileSamples, NO_REDACTION } from '@srenautix/packs
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_BUDGET, rawEstimate } from '../../src/llm/budget.js';
 import { declaredProfile } from '../../src/llm/dialect.js';
+import { PROMPTS } from '../../src/prompts/index.js';
 import { repairLocally } from '../../src/llm/repair.js';
 import { bindSchema, modelSchema } from '../../src/llm/schema.js';
 import { trimOnce } from '../../src/llm/session.js';
@@ -16,6 +17,7 @@ import { renumberRecommendations } from '../../src/research/validate.js';
 import {
   componentChoices,
   concludeItems,
+  controlsSegment,
   hypothesisCards,
   hypothesizeItems,
   MAX_COMPONENT_CHOICES,
@@ -24,6 +26,7 @@ import {
   promptParts,
   selectCards,
   topologyView,
+  TRIM,
 } from '../../src/research/prompt.js';
 import type { ResearchCase, Subgraph } from '../../src/research/types.js';
 import { researchCase, stageA, stageACards, subgraph } from '../support/scenario.js';
@@ -191,13 +194,20 @@ describe('提示词里的拓扑（ADR 0129）', () => {
     });
     // 两个 Pod 所在的节点：改记为属主一条边
     expect(v.edges.filter((e) => e.to === 'Node:node-b')).toEqual([
-      { from: 'Deployment:shop/api', to: 'Node:node-b', relation: 'scheduled_on', confidence: 1 },
+      {
+        from: 'Deployment:shop/api',
+        to: 'Node:node-b',
+        relation: 'scheduled_on',
+        provenance: 'structural',
+        confidence: 1,
+      },
     ]);
     // 有关的 Pod 保留它到 ReplicaSet 的边，ReplicaSet 已并入属主
     expect(v.edges).toContainEqual({
       from: 'Pod:shop/api-7',
       to: 'Deployment:shop/api',
       relation: 'owned_by',
+      provenance: 'structural',
       confidence: 1,
     });
   });
@@ -313,6 +323,69 @@ describe('上下文 16k 的路由上的 conclude', () => {
     expect(withSamples.estimate).toBeLessThanOrEqual(withSamples.limit);
     // 裁剪之后剩下的只有不可裁剪的部分：样例卡只多出它们在动态枚举 evidence_refs 里的三个编号
     expect(withSamples.estimate - without.estimate).toBeLessThan(20);
+  });
+
+  it('固定指令与任务说明的字节数不大于加入对照约束之前（ADR 0179）', () => {
+    const base = { zh: [4391, 2056, 3386], en: [5005, 2346, 3834] };
+    for (const l of ['zh', 'en'] as const) {
+      [PROMPTS[l].system, PROMPTS[l].hypothesize, PROMPTS[l].conclude].forEach((s, i) => {
+        expect(Buffer.byteLength(s)).toBeLessThanOrEqual(base[l][i]!);
+      });
+    }
+  });
+
+  it('拓扑片段带因果性说明、拓扑版本、快照时刻与边的来源（ADR 0179）', () => {
+    const rc = researchCase();
+    const book = incidentBook(rc);
+    const t = text(hypothesizeItems('zh', promptParts('zh', rc, book, 400_000, null), null, book));
+    expect(t).toContain('拓扑关系的说明');
+    expect(t).toContain('没有证明因果');
+    expect(t).toContain('"provenance":"structural"');
+    expect(t).toContain('"as_of"');
+    expect(t).toContain(`"topology_version":${rc.subgraph.topology_version}`);
+  });
+
+  it('对照结果属于可裁剪的部分：裁剪之后请求体不含对照结果，不可裁剪的部分与没有对照结果时相同（ADR 0179）', () => {
+    const r = (
+      subject: string,
+      verdict: 'normal' | 'abnormal' | 'undeterminable',
+      pickedBy: 'top_n' | 'sampled' = 'top_n',
+    ) => ({
+      subject,
+      picked_by: pickedBy,
+      volume: 100,
+      verdict,
+      display_state: verdict,
+      reason: { kind: 'rule' as const, text: 'x' },
+      value: '0.9',
+      value_number: 0.9,
+      anomaly_started_at: null,
+    });
+    const base = stageACards();
+    const cards: EvidenceResult[] = [
+      {
+        ...base[0]!,
+        controls: {
+          method: 'entry_peers',
+          by: 'target',
+          subject: 'api',
+          candidates: 3,
+          results: [r('p1', 'abnormal'), r('p2', 'normal'), r('p3', 'undeterminable', 'sampled')],
+        },
+      },
+      ...base.slice(1),
+    ];
+    const rc = researchCase({ stageA: stageA(cards) });
+    const seg = controlsSegment(incidentBook(rc).promptCards(), 't');
+    expect(seg?.text).toContain('"picked_by":"top_n"');
+    expect(seg?.trim?.rank).toBe(TRIM.controls);
+    expect(TRIM.controls).toBeLessThan(TRIM.relevantCards);
+    const withControls = trimmedConclude(rc);
+    const without = trimmedConclude(researchCase());
+    expect(withControls.trimmed).toContain('对照结果 1 张卡');
+    expect(withControls.body).not.toContain('picked_by');
+    expect(withControls.estimate).toBeLessThanOrEqual(withControls.limit);
+    expect(withControls.estimate).toBeLessThanOrEqual(without.estimate);
   });
 
   it('动作目录的参数 schema 去掉字符串的长度上下限，枚举、数值范围、格式与说明照写；同名的参数不受影响', () => {

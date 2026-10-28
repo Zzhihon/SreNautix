@@ -53,6 +53,7 @@ export async function replaySnapshot(set: PackSet, snap: QuerySnapshot): Promise
       resolutions,
       clock: snap.clock_window,
       redact: NO_REDACTION,
+      controlSeed: snap.snapshot_id,
     });
     const expected = c.expect?.verdict ?? null;
     const passed =

@@ -99,4 +99,12 @@ h7–h9 below come from deterministic conclusion rules in the domain packs: ever
 - when your conclusion picks another root cause or abstains, code switches to the rule judgement as long as it has not been refuted;
 - the only way to refute a rule judgement is a discriminating check: run a card check on the definition of a card in card_conditions (cardcheck:<card>@<the rule root or one of its members>) whose result does not meet the condition (a different verdict, or an observations comparison that fails);
 - if you think the rule root only shows the symptom, propose such a check and explain in your hypothesis mechanism how the real root cause produced what the rule saw.`,
+
+  causality: `## About topology relations
+
+Edges in the topology and anomalies on neighbours only show correlation in the same period. They do not prove causation:
+
+- anomalies on neighbours or on other objects behind the same entry are hypotheses only; adopt them only after cross-checking against the evidence cards of the object itself;
+- a conclusion that attributes several objects to one root cause (a shared component or a shared egress) must cite the control results of other objects behind the same entry in the same period; when most control objects are normal the common cause does not hold, and without control results the conclusion level is at most inconclusive;
+- the provenance of an edge states its source: structural from resource declarations, runtime from runtime observation, config_ref from configuration references, network_policy from network policies, naming from name inference; as_of is the snapshot time of this topology.`,
 };

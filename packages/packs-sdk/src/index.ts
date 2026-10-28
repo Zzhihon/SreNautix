@@ -148,6 +148,17 @@ export {
   type SamplesCode,
 } from './runtime/samples.js';
 export {
+  compileControls,
+  controlKeys,
+  controlVolume,
+  evaluateControls,
+  refsFor,
+  selectControls,
+  CONTROLS_DEFAULTS,
+  type CompiledControls,
+  type ControlPick,
+} from './runtime/controls.js';
+export {
   evaluateRules,
   evaluateExcludes,
   type RuleContext,

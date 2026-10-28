@@ -272,6 +272,8 @@ const T = {
     samplesMore: (k: number) => `，另有 ${k} 类`,
     samplesNone: '没有取得样例，原因：',
     samplesOther: '其他',
+    controlsLine: (n: number, a: number, k: number, u: number) =>
+      `对照：同一入口上的其他 ${n} 个对象，${a} 个异常，${k} 个正常，${u} 个无法判定`,
     summary: '摘要：',
     undeterminedReason: '无法判定的原因：',
     hypotheses: '假设：',
@@ -511,6 +513,8 @@ const T = {
     samplesMore: (k: number) => `, ${k} more classes`,
     samplesNone: 'no samples, reason: ',
     samplesOther: 'other',
+    controlsLine: (n: number, a: number, k: number, u: number) =>
+      `control: ${n} other objects behind the same entry, ${a} abnormal, ${k} normal, ${u} undeterminable`,
     summary: 'summary: ',
     undeterminedReason: 'why undetermined: ',
     hypotheses: 'Hypotheses:',
@@ -734,6 +738,17 @@ function sampleLines(
     );
   }
   return out;
+}
+
+/** 关键问题里的对照行（ADR 0179）：故障对象的卡上的对照结果，只写对象数与各结论的个数，至多一张卡 */
+function controlLines(t: Dict, cards: ReadonlyMap<string, EvidenceResult>): NotifyBlock[] {
+  const card = [...cards.values()].find((c) => c.verdict === 'abnormal' && c.controls !== undefined);
+  if (!card) {
+    return [];
+  }
+  const results = card.controls!.results;
+  const count = (v: 'abnormal' | 'normal' | 'undeterminable') => results.filter((r) => r.verdict === v).length;
+  return [text([P(t.controlsLine(results.length, count('abnormal'), count('normal'), count('undeterminable')))])];
 }
 
 /** 卡片的时间：异常起点或窗口 */
@@ -1832,6 +1847,7 @@ export function composeMessage(i: ComposeInput): { message: NotifyMessage; targe
     if (chosen) {
       keyIssue.push(text([I(`${t.model}${t.mechanism}${chosen.mechanism}`)], { model: true }));
       keyIssue.push(...sampleLines(t, i.language, chosen.mechanism_refs ?? [], cards, (c) => why('stage_a', c)));
+      keyIssue.push(...controlLines(t, cards));
     }
     if (out.summary) {
       keyIssue.push(text([I(`${t.model}${t.summary}${out.summary}`)], { model: true, scope: 'full' }));

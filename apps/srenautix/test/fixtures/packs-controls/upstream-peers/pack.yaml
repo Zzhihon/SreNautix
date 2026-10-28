@@ -1,0 +1,10 @@
+# 对照对象（ADR 0179）的测试包：同一入口上多个外部上游，请求量与错误数按 target 标签拆分
+api_version: srenautix.io/pack/v1
+name: upstream-peers
+version: 0.1.0
+description: 同一入口上多个外部上游的错误率，带对照对象（测试用）
+maturity: beta
+min_srenautix_version: 0.1.0
+requires:
+  - metrics.query
+  - metrics.query_range

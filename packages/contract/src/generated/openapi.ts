@@ -2237,6 +2237,44 @@ export type components = {
       tested_competitors: string[];
       tolerance_seconds: number;
     };
+    /**
+     * EvidenceControlResult
+     * @description 一个对照对象的判定，字段含义与 EvidenceResult 的同名字段相同；没有对照对象的序列时 verdict 为 undeterminable
+     */
+    ControlResult: {
+      anomaly_started_at: null | components['schemas']['Timestamp'];
+      /** @enum {string} */
+      display_state: 'normal' | 'abnormal' | 'undeterminable' | 'capability_missing';
+      /**
+       * @description top_n 按请求量选出；sampled 以事件 id 为种子随机选出
+       * @enum {string}
+       */
+      picked_by: 'top_n' | 'sampled';
+      reason: components['schemas']['Reason'];
+      /** @description 对照对象的键 */
+      subject: string;
+      value: string | null;
+      value_number: number | null;
+      verdict: components['schemas']['Verdict'];
+      /** @description 排序用的请求量；没有时为 null */
+      volume: number | null;
+    };
+    /** EvidenceControls */
+    Controls: {
+      /** @description 区分对象的标签名 */
+      by: string;
+      /** @description 同一入口上除故障对象之外可作为对照的对象数 */
+      candidates: number;
+      /**
+       * @description 选择方式，取值与卡片声明的 controls.method 相同
+       * @enum {string}
+       */
+      method: 'entry_peers';
+      /** @description 选出的对照对象的判定，先按请求量选出的，后随机选出的 */
+      results: components['schemas']['ControlResult'][];
+      /** @description 故障对象的键（by 标签的取值），它自己的判定是这张卡的主结果 */
+      subject: string;
+    };
     /** RecommendationDelivery */
     Delivery: {
       /** @description ops_pr 的分支 srenautix/goal-… */
@@ -2892,6 +2930,8 @@ export type components = {
       category?: 'storage' | 'memory' | 'cpu' | 'traffic' | 'blocking' | null;
       /** @description 求值过的判定条件，按求值顺序：undeterminable_if 全部条件，abnormal_if 到第一条命中为止 */
       conditions?: components['schemas']['Condition'][];
+      /** @description 对照结果（契约 2.44.0，ADR 0179）：卡片声明了 controls 时出现。对照对象与故障对象同一时段的判定，对照对象的异常只说明同时段相关，不证明因果 */
+      controls?: components['schemas']['Controls'];
       /**
        * @description verdict 为 undeterminable 且原因是所需能力不可用时为 capability_missing，其余与 verdict 相同
        * @enum {string}
@@ -2944,6 +2984,44 @@ export type components = {
       verdict: components['schemas']['Verdict'];
       window: components['schemas']['TimeWindow'];
       $defs: {
+        /** EvidenceControls */
+        Controls: {
+          /** @description 区分对象的标签名 */
+          by: string;
+          /** @description 同一入口上除故障对象之外可作为对照的对象数 */
+          candidates: number;
+          /**
+           * @description 选择方式，取值与卡片声明的 controls.method 相同
+           * @enum {string}
+           */
+          method: 'entry_peers';
+          /** @description 选出的对照对象的判定，先按请求量选出的，后随机选出的 */
+          results: components['schemas']['ControlResult'][];
+          /** @description 故障对象的键（by 标签的取值），它自己的判定是这张卡的主结果 */
+          subject: string;
+        };
+        /**
+         * EvidenceControlResult
+         * @description 一个对照对象的判定，字段含义与 EvidenceResult 的同名字段相同；没有对照对象的序列时 verdict 为 undeterminable
+         */
+        ControlResult: {
+          anomaly_started_at: null | components['schemas']['Timestamp'];
+          /** @enum {string} */
+          display_state: 'normal' | 'abnormal' | 'undeterminable' | 'capability_missing';
+          /**
+           * @description top_n 按请求量选出；sampled 以事件 id 为种子随机选出
+           * @enum {string}
+           */
+          picked_by: 'top_n' | 'sampled';
+          reason: components['schemas']['Reason'];
+          /** @description 对照对象的键 */
+          subject: string;
+          value: string | null;
+          value_number: number | null;
+          verdict: components['schemas']['Verdict'];
+          /** @description 排序用的请求量；没有时为 null */
+          volume: number | null;
+        };
         /**
          * EvidenceSamples
          * @description 按依赖与错误类别聚合的错误日志：维度组合的行数、首末时间与错误类别，每个类别少量脱敏、截断的原始样例。样例与维度值是不可信文本
