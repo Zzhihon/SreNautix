@@ -1,0 +1,184 @@
+# 结论规则与它们用到的两张卡（实例 OOM、语句平均耗时对比基线）。每 5 分钟一个点，覆盖 26 小时，eval_time 25h（第 300 个点）
+# 时基线取一天前的数据；卡片窗口为 24h30m–25h10m。时间零点 2026-01-01T00:00:00Z。
+# - shop/pg：pg-1 在 24h50m 被 OOM 终止，pg-2 同时提升为主库；连接与语句耗时正常
+# - pool/db：24h35m 起连接占用 95%，语句平均耗时由平时的 0.02 秒升到 0.2 秒（24h15m 起）
+# - half/oomonly：x-1 被 OOM 终止，但主库没有切换
+# - busy/conns：连接占用 95%，语句耗时与一天前相同
+# - calm/quiet：一切正常
+api_version: srenautix.io/pack-test/v1
+interval: 5m
+input_series:
+  # ---------- shop/pg ----------
+  - { series: 'cnpg_collector_up{namespace="shop",pod="pg-1"}', values: '1x312' }
+  - { series: 'cnpg_collector_up{namespace="shop",pod="pg-2"}', values: '1x312' }
+  - { series: 'cnpg_pg_replication_in_recovery{namespace="shop",pod="pg-1"}', values: '0x297 1x14' }
+  - { series: 'cnpg_pg_replication_in_recovery{namespace="shop",pod="pg-2"}', values: '1x297 0x14' }
+  - { series: 'container_oom_events_total{namespace="shop",pod="pg-1",container="postgres"}', values: '0x297 1x14' }
+  - { series: 'container_oom_events_total{namespace="shop",pod="pg-2",container="postgres"}', values: '0x312' }
+  - {
+      series: 'cnpg_backends_total{namespace="shop",pod="pg-1",datname="app",usename="app",application_name="web",state="active"}',
+      values: '20x312',
+    }
+  - { series: 'cnpg_pg_settings_setting{namespace="shop",pod="pg-1",name="max_connections"}', values: '100x312' }
+  - {
+      series: 'pg_stat_statements_seconds_total{namespace="shop",pod="pg-1",datname="app",queryid="1"}',
+      values: '0+3x312',
+    }
+  - {
+      series: 'pg_stat_statements_calls_total{namespace="shop",pod="pg-1",datname="app",queryid="1"}',
+      values: '0+300x312',
+    }
+  # ---------- pool/db ----------
+  - { series: 'cnpg_collector_up{namespace="pool",pod="db-1"}', values: '1x312' }
+  - { series: 'cnpg_collector_up{namespace="pool",pod="db-2"}', values: '1x312' }
+  - { series: 'cnpg_pg_replication_in_recovery{namespace="pool",pod="db-1"}', values: '0x312' }
+  - { series: 'cnpg_pg_replication_in_recovery{namespace="pool",pod="db-2"}', values: '1x312' }
+  - { series: 'container_oom_events_total{namespace="pool",pod="db-1",container="postgres"}', values: '0x312' }
+  - {
+      series: 'cnpg_backends_total{namespace="pool",pod="db-1",datname="app",usename="app",application_name="api",state="active"}',
+      values: '20x294 95x17',
+    }
+  - { series: 'cnpg_pg_settings_setting{namespace="pool",pod="db-1",name="max_connections"}', values: '100x312' }
+  - {
+      series: 'pg_stat_statements_seconds_total{namespace="pool",pod="db-1",datname="app",queryid="1"}',
+      values: '0+6x290 1800+60x21',
+    }
+  - {
+      series: 'pg_stat_statements_calls_total{namespace="pool",pod="db-1",datname="app",queryid="1"}',
+      values: '0+300x312',
+    }
+  # ---------- half/oomonly ----------
+  - { series: 'cnpg_collector_up{namespace="half",pod="oomonly-1"}', values: '1x312' }
+  - { series: 'cnpg_collector_up{namespace="half",pod="oomonly-2"}', values: '1x312' }
+  - { series: 'cnpg_pg_replication_in_recovery{namespace="half",pod="oomonly-1"}', values: '1x312' }
+  - { series: 'cnpg_pg_replication_in_recovery{namespace="half",pod="oomonly-2"}', values: '0x312' }
+  - {
+      series: 'container_oom_events_total{namespace="half",pod="oomonly-1",container="postgres"}',
+      values: '0x297 1x14',
+    }
+  # ---------- busy/conns ----------
+  - { series: 'cnpg_collector_up{namespace="busy",pod="conns-1"}', values: '1x312' }
+  - {
+      series: 'cnpg_backends_total{namespace="busy",pod="conns-1",datname="app",usename="app",application_name="api",state="active"}',
+      values: '20x294 95x17',
+    }
+  - { series: 'cnpg_pg_settings_setting{namespace="busy",pod="conns-1",name="max_connections"}', values: '100x312' }
+  - {
+      series: 'pg_stat_statements_seconds_total{namespace="busy",pod="conns-1",datname="app",queryid="1"}',
+      values: '0+6x312',
+    }
+  - {
+      series: 'pg_stat_statements_calls_total{namespace="busy",pod="conns-1",datname="app",queryid="1"}',
+      values: '0+300x312',
+    }
+  # ---------- calm/quiet ----------
+  - { series: 'cnpg_collector_up{namespace="calm",pod="quiet-1"}', values: '1x312' }
+  - { series: 'cnpg_pg_replication_in_recovery{namespace="calm",pod="quiet-1"}', values: '0x312' }
+  - { series: 'container_oom_events_total{namespace="calm",pod="quiet-1",container="postgres"}', values: '0x312' }
+  - {
+      series: 'cnpg_backends_total{namespace="calm",pod="quiet-1",datname="app",usename="app",application_name="api",state="active"}',
+      values: '10x312',
+    }
+  - { series: 'cnpg_pg_settings_setting{namespace="calm",pod="quiet-1",name="max_connections"}', values: '100x312' }
+  - {
+      series: 'pg_stat_statements_seconds_total{namespace="calm",pod="quiet-1",datname="app",queryid="1"}',
+      values: '0+6x312',
+    }
+  - {
+      series: 'pg_stat_statements_calls_total{namespace="calm",pod="quiet-1",datname="app",queryid="1"}',
+      values: '0+300x312',
+    }
+tests:
+  - {
+      name: shop/pg 的主库实例被 OOM 终止,
+      eval_time: 25h,
+      card: availability/oom-kills,
+      entity: { kind: Cluster, namespace: shop, name: pg },
+      expect: { verdict: abnormal, reason_kind: rule },
+    }
+  - {
+      name: calm/quiet 没有实例被 OOM 终止,
+      eval_time: 25h,
+      card: availability/oom-kills,
+      entity: { kind: Cluster, namespace: calm, name: quiet },
+      expect: { verdict: normal, reason_kind: all_clear },
+    }
+  - {
+      name: pool/db 的语句平均耗时是一天前的 10 倍,
+      eval_time: 25h,
+      card: saturation/statement-latency,
+      entity: { kind: Cluster, namespace: pool, name: db },
+      expect: { verdict: abnormal, reason_kind: rule },
+    }
+  - {
+      name: busy/conns 的语句耗时与一天前相同,
+      eval_time: 25h,
+      card: saturation/statement-latency,
+      entity: { kind: Cluster, namespace: busy, name: conns },
+      expect: { verdict: normal, reason_kind: all_clear },
+    }
+  - {
+      name: 调高倍数后 pool/db 的语句耗时正常,
+      eval_time: 25h,
+      card: saturation/statement-latency,
+      entity: { kind: Cluster, namespace: pool, name: db },
+      params: { factor: 10.5 },
+      expect: { verdict: normal },
+    }
+conclusions:
+  - name: 主库实例 OOM 后发生切换
+    eval_time: 25h
+    rule: oom-failover
+    subject: { kind: Cluster, namespace: shop, name: pg, component_type: postgres.cnpg-cluster }
+    cards:
+      - { card: availability/oom-kills, entity: { kind: Cluster, namespace: shop, name: pg } }
+      - { card: availability/primary-changes, entity: { kind: Cluster, namespace: shop, name: pg } }
+    expect: { hit: true }
+  - name: 实例 OOM 但主库没有切换
+    eval_time: 25h
+    rule: oom-failover
+    subject: { kind: Cluster, namespace: half, name: oomonly, component_type: postgres.cnpg-cluster }
+    cards:
+      - { card: availability/oom-kills, entity: { kind: Cluster, namespace: half, name: oomonly } }
+      - { card: availability/primary-changes, entity: { kind: Cluster, namespace: half, name: oomonly } }
+    expect: { hit: false }
+  - name: 主库切换落在另一个组件上
+    eval_time: 25h
+    rule: oom-failover
+    subject: { kind: Cluster, namespace: half, name: oomonly, component_type: postgres.cnpg-cluster }
+    cards:
+      - { card: availability/oom-kills, entity: { kind: Cluster, namespace: half, name: oomonly } }
+      - { card: availability/primary-changes, entity: { kind: Cluster, namespace: shop, name: pg }, on: other }
+    expect: { hit: false }
+  - name: 组件类型不在规则的范围内
+    eval_time: 25h
+    rule: oom-failover
+    subject: { kind: Deployment, namespace: shop, name: pg, component_type: kubernetes.deployment }
+    cards:
+      - { card: availability/oom-kills, entity: { kind: Cluster, namespace: shop, name: pg } }
+      - { card: availability/primary-changes, entity: { kind: Cluster, namespace: shop, name: pg } }
+    expect: { hit: false }
+  - name: 连接占满且语句变慢
+    eval_time: 25h
+    rule: slow-statements-saturate-connections
+    subject: { kind: Cluster, namespace: pool, name: db, component_type: postgres.cnpg-cluster }
+    cards:
+      - { card: saturation/connections, entity: { kind: Cluster, namespace: pool, name: db } }
+      - { card: saturation/statement-latency, entity: { kind: Cluster, namespace: pool, name: db } }
+    expect: { hit: true }
+  - name: 连接占满但语句没有变慢
+    eval_time: 25h
+    rule: slow-statements-saturate-connections
+    subject: { kind: Cluster, namespace: busy, name: conns, component_type: postgres.cnpg-cluster }
+    cards:
+      - { card: saturation/connections, entity: { kind: Cluster, namespace: busy, name: conns } }
+      - { card: saturation/statement-latency, entity: { kind: Cluster, namespace: busy, name: conns } }
+    expect: { hit: false }
+  - name: 连接与语句耗时都正常
+    eval_time: 25h
+    rule: slow-statements-saturate-connections
+    subject: { kind: Cluster, namespace: calm, name: quiet, component_type: postgres.cnpg-cluster }
+    cards:
+      - { card: saturation/connections, entity: { kind: Cluster, namespace: calm, name: quiet } }
+      - { card: saturation/statement-latency, entity: { kind: Cluster, namespace: calm, name: quiet } }
+    expect: { hit: false }

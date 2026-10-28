@@ -1,8 +1,8 @@
 # 示例领域包：演示领域包的全部文件。编写新包时从这里复制，再按 docs/packs/ 的说明修改。
 api_version: srenautix.io/pack/v1
 name: _example
-version: 1.0.0
-description: 容器内存与 OOM 的示例包，覆盖信号备选、录制规则兜底、证据链、检查项、规则提议、runbook、知识、混沌实验与测试
+version: 1.1.0
+description: 容器内存与 OOM 的示例包，覆盖信号备选、录制规则兜底、证据链、检查项、规则提议、确定性结论规则、runbook、知识、混沌实验与测试
 maturity: stable
 min_srenautix_version: 0.1.0
 requires:
