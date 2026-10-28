@@ -58,22 +58,23 @@ export class HttpClient {
       headers['Content-Type'] = 'application/json';
       body = JSON.stringify(opts.json);
     }
-    let res: Response;
+    // 超时覆盖响应头与响应体：AbortSignal.timeout 到期时 fetch 或读取响应体以 TimeoutError 失败
     try {
-      res = await fetch(url, {
+      const res = await fetch(url, {
         method,
         headers,
         body,
         signal: AbortSignal.timeout(opts.timeoutMs),
         ...(this.dispatcher ? { dispatcher: this.dispatcher } : {}),
       } as RequestInit);
+      return { status: res.status, text: await res.text() };
     } catch (err) {
       throw new DatasourceError(
         this.integration,
         `${method} ${path} 失败：${err instanceof Error ? err.message : String(err)}`,
+        err instanceof Error && err.name === 'TimeoutError',
       );
     }
-    return { status: res.status, text: await res.text() };
   }
 
   /** 发出请求并要求 2xx 与 JSON 响应 */

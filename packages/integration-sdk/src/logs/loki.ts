@@ -11,6 +11,8 @@ export interface LokiConfig extends HttpAuthConfig {
   url: string;
   /** 日志流上的 Kubernetes 标签名；不同采集器的命名不同 */
   labels: { namespace: string; pod: string; container: string; cluster: string | null };
+  /** 单次日志查询的超时，默认 30 秒 */
+  timeout_ms?: number;
 }
 
 interface LokiStreams {
@@ -92,7 +94,7 @@ export class LokiAdapter {
         limit: String(limit + 1),
         direction: 'backward',
       }),
-      timeoutMs: 30_000,
+      timeoutMs: this.config.timeout_ms ?? 30_000,
     });
     if (body.data.resultType !== 'streams') {
       throw new DatasourceError(this.config.id, `logs 查询必须返回日志流，收到 ${body.data.resultType}`);

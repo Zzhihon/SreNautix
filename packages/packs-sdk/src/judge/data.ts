@@ -29,7 +29,7 @@ export type RefData =
   | { kind: 'metrics'; series: MetricSeries[]; truncated: boolean }
   | { kind: 'logs'; lines: LogLine[]; truncated: boolean }
   | { kind: 'traces'; traces: TraceHit[]; truncated: boolean }
-  | { kind: 'error'; message: string }
+  | { kind: 'error'; message: string; /** 数据源在超时之前没有响应 */ timeout?: boolean }
   | { kind: 'capability_missing'; capability: string };
 
 /** 引用没有任何样本（指标无点、日志无行、链路无命中） */

@@ -11,6 +11,7 @@ import { createBaseEnvironment } from '../cel/library.js';
 import { compileCard, type CompiledCard } from '../judge/card.js';
 import type { CardDefinition } from '../judge/types.js';
 import { renderMetrics } from '../signals/render.js';
+import { compileSamples } from '../runtime/samples.js';
 import type { ActionCatalog } from './catalog.js';
 import { applyLayers, type LoadedLayer } from './layers.js';
 import type { LoadedPack } from './load.js';
@@ -418,6 +419,14 @@ export async function compilePackSet(loaded: LoadedPack[], opts: CompileOptions)
         if (!(file in p.content.runbooks)) {
           throw new PackLintError(where, `runbook 链接指向不存在的文件 ${l.target}`);
         }
+      }
+    }
+    // 错误样例（ADR 0177）：引用、出境方式、维度与类别的声明
+    if (def.samples) {
+      try {
+        compileSamples(def.samples, def.refs, def.egress);
+      } catch (err) {
+        throw new PackLintError(where, `samples：${err instanceof Error ? err.message : String(err)}`);
       }
     }
     // 作为阶段 B 检查时的可覆盖参数：与查询模板参数同样的约束；窗口由运行时提供，不在这里声明

@@ -136,6 +136,18 @@ export {
   type RunCardResult,
 } from './runtime/run-card.js';
 export {
+  aggregateSamples,
+  compileSamples,
+  samplesDeadline,
+  samplesTable,
+  NO_REDACTION,
+  OTHER_CLASS,
+  SAMPLES_DEFAULTS,
+  type CompiledSamples,
+  type Redactor,
+  type SamplesCode,
+} from './runtime/samples.js';
+export {
   evaluateRules,
   evaluateExcludes,
   type RuleContext,

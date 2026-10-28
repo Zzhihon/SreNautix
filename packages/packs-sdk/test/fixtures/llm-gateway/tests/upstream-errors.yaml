@@ -1,0 +1,76 @@
+# 四类上游错误（ADR 0177），各占一段时间，卡片窗口互不重叠：
+# 1. 外部上游的配额耗尽：持续返回 429，另有两行无关的 500；
+# 2. 能力不匹配：上游对模型不支持的能力返回 400，同时伴随 524；
+# 3. 单一端点返回 503；
+# 4. 单一供给的模型在首内容超时后由网关返回 503，没有可以转移的候选（上游没有返回错误）。
+api_version: srenautix.io/pack-test/v1
+interval: 1m
+input_logs:
+  - labels: { namespace: llm, pod: api-gateway-5d8f7c9b4-x2k9p, container: gateway }
+    lines:
+      - { offset: 1m, line: 'level=error upstream=provider-a model=model-x status=429 code=upstream_error msg="upstream returned 429: weekly quota exhausted, resets in 3d"' }
+      - { offset: 2m, line: 'level=error upstream=provider-a model=model-x status=429 code=upstream_error msg="upstream returned 429: weekly quota exhausted, resets in 3d"' }
+      - { offset: 3m, line: 'level=error upstream=provider-a model=model-x status=429 code=upstream_error msg="upstream returned 429: weekly quota exhausted, resets in 3d"' }
+      - { offset: 4m, line: 'level=error upstream=provider-a model=model-x status=429 code=upstream_error msg="upstream returned 429: weekly quota exhausted, resets in 3d"' }
+      - { offset: 5m, line: 'level=error upstream=provider-a model=model-x status=429 code=upstream_error msg="upstream returned 429: weekly quota exhausted, resets in 3d"' }
+      - { offset: 6m, line: 'level=error upstream=provider-a model=model-x status=429 code=upstream_error msg="upstream returned 429: weekly quota exhausted, resets in 3d"' }
+      - { offset: 7m, line: 'level=error upstream=provider-a model=model-x status=429 code=upstream_error msg="upstream returned 429: weekly quota exhausted, resets in 3d"' }
+      - { offset: 8m, line: 'level=error upstream=provider-a model=model-x status=429 code=upstream_error msg="upstream returned 429: weekly quota exhausted, resets in 3d"' }
+      - { offset: 9m, line: 'level=error upstream=provider-a model=model-x status=429 code=upstream_error msg="upstream returned 429: weekly quota exhausted, resets in 3d"' }
+      - { offset: 10m, line: 'level=error upstream=provider-a model=model-x status=429 code=upstream_error msg="upstream returned 429: weekly quota exhausted, resets in 3d"' }
+      - { offset: 11m, line: 'level=error upstream=provider-a model=model-x status=429 code=upstream_error msg="upstream returned 429: weekly quota exhausted, resets in 3d"' }
+      - { offset: 12m, line: 'level=error upstream=provider-a model=model-x status=429 code=upstream_error request_token=Tk7f9q2LmZ8w msg="upstream returned 429: weekly quota exhausted, resets in 3d"' }
+      - { offset: 13m, line: 'level=error upstream=provider-a model=model-x status=500 code=upstream_error msg="upstream returned 500: internal error"' }
+      - { offset: 14m, line: 'level=error upstream=provider-a model=model-x status=500 code=upstream_error msg="upstream returned 500: internal error"' }
+      - { offset: 14m30s, line: 'level=info upstream=provider-b model=model-y status=200 msg="request completed"' }
+      - { offset: 101m, line: 'level=error upstream=provider-b model=model-y status=400 code=upstream_error msg="upstream returned 400: model-y does not support tool calls"' }
+      - { offset: 102m, line: 'level=error upstream=provider-b model=model-y status=524 code=upstream_error msg="upstream returned 524: a timeout occurred at the origin"' }
+      - { offset: 103m, line: 'level=error upstream=provider-b model=model-y status=400 code=upstream_error msg="upstream returned 400: model-y does not support tool calls"' }
+      - { offset: 104m, line: 'level=error upstream=provider-b model=model-y status=400 code=upstream_error msg="upstream returned 400: model-y does not support tool calls"' }
+      - { offset: 105m, line: 'level=error upstream=provider-b model=model-y status=524 code=upstream_error msg="upstream returned 524: a timeout occurred at the origin"' }
+      - { offset: 106m, line: 'level=error upstream=provider-b model=model-y status=400 code=upstream_error msg="upstream returned 400: model-y does not support tool calls"' }
+      - { offset: 107m, line: 'level=error upstream=provider-b model=model-y status=524 code=upstream_error msg="upstream returned 524: a timeout occurred at the origin"' }
+      - { offset: 108m, line: 'level=error upstream=provider-b model=model-y status=400 code=upstream_error msg="upstream returned 400: model-y does not support tool calls"' }
+      - { offset: 109m, line: 'level=error upstream=provider-b model=model-y status=400 code=upstream_error msg="upstream returned 400: model-y does not support tool calls"' }
+      - { offset: 110m, line: 'level=error upstream=provider-b model=model-y status=524 code=upstream_error msg="upstream returned 524: a timeout occurred at the origin"' }
+      - { offset: 201m, line: 'level=error upstream=provider-c model=model-z status=503 code=upstream_error endpoint=https://api.provider-c.example/v1 msg="upstream returned 503: service unavailable"' }
+      - { offset: 202m, line: 'level=error upstream=provider-c model=model-z status=503 code=upstream_error endpoint=https://api.provider-c.example/v1 msg="upstream returned 503: service unavailable"' }
+      - { offset: 203m, line: 'level=error upstream=provider-c model=model-z status=503 code=upstream_error endpoint=https://api.provider-c.example/v1 msg="upstream returned 503: service unavailable"' }
+      - { offset: 204m, line: 'level=error upstream=provider-c model=model-z status=503 code=upstream_error endpoint=https://api.provider-c.example/v1 msg="upstream returned 503: service unavailable"' }
+      - { offset: 205m, line: 'level=error upstream=provider-c model=model-z status=503 code=upstream_error endpoint=https://api.provider-c.example/v1 msg="upstream returned 503: service unavailable"' }
+      - { offset: 206m, line: 'level=error upstream=provider-c model=model-z status=503 code=upstream_error endpoint=https://api.provider-c.example/v1 msg="upstream returned 503: service unavailable"' }
+      - { offset: 207m, line: 'level=error upstream=provider-c model=model-z status=503 code=upstream_error endpoint=https://api.provider-c.example/v1 msg="upstream returned 503: service unavailable"' }
+      - { offset: 208m, line: 'level=error upstream=provider-c model=model-z status=503 code=upstream_error endpoint=https://api.provider-c.example/v1 msg="upstream returned 503: service unavailable"' }
+      - { offset: 301m, line: 'level=error upstream=provider-d model=model-w status=503 code=first_content_timeout timeout=30s msg="no content before the first content timeout 30s; candidates=1, no candidate to fail over to"' }
+      - { offset: 302m, line: 'level=error upstream=provider-d model=model-w status=503 code=first_content_timeout timeout=30s msg="no content before the first content timeout 30s; candidates=1, no candidate to fail over to"' }
+      - { offset: 303m, line: 'level=error upstream=provider-d model=model-w status=503 code=first_content_timeout timeout=30s msg="no content before the first content timeout 30s; candidates=1, no candidate to fail over to"' }
+      - { offset: 304m, line: 'level=error upstream=provider-d model=model-w status=503 code=first_content_timeout timeout=30s msg="no content before the first content timeout 30s; candidates=1, no candidate to fail over to"' }
+      - { offset: 305m, line: 'level=error upstream=provider-d model=model-w status=503 code=first_content_timeout timeout=30s msg="no content before the first content timeout 30s; candidates=1, no candidate to fail over to"' }
+      - { offset: 306m, line: 'level=error upstream=provider-d model=model-w status=503 code=first_content_timeout timeout=30s msg="no content before the first content timeout 30s; candidates=1, no candidate to fail over to"' }
+      - { offset: 400m, line: 'level=info upstream=provider-a model=model-x status=200 msg="request completed"' }
+tests:
+  - name: 配额耗尽持续返回 429
+    eval_time: 15m
+    card: gateway-errors/samples
+    entity: { kind: Deployment, namespace: llm, name: api-gateway }
+    expect: { verdict: abnormal, reason_kind: rule, samples: { classes: { quota_exhausted: 12, other: 2, upstream_unavailable: 0 } } }
+  - name: 能力不匹配返回 400 并伴随 524
+    eval_time: 112m
+    card: gateway-errors/samples
+    entity: { kind: Deployment, namespace: llm, name: api-gateway }
+    expect: { verdict: abnormal, samples: { classes: { capability_mismatch: 6, origin_timeout: 4, other: 0 } } }
+  - name: 单一端点返回 503
+    eval_time: 210m
+    card: gateway-errors/samples
+    entity: { kind: Deployment, namespace: llm, name: api-gateway }
+    expect: { verdict: abnormal, samples: { classes: { upstream_unavailable: 8, first_content_timeout: 0 } } }
+  - name: 单一供给的首内容超时由网关返回 503
+    eval_time: 308m
+    card: gateway-errors/samples
+    entity: { kind: Deployment, namespace: llm, name: api-gateway }
+    expect: { verdict: abnormal, samples: { classes: { first_content_timeout: 6, upstream_unavailable: 0 } } }
+  - name: 只有成功的请求时正常
+    eval_time: 400m
+    card: gateway-errors/samples
+    entity: { kind: Deployment, namespace: llm, name: api-gateway }
+    expect: { verdict: normal, samples: { classes: { other: 0 } } }
