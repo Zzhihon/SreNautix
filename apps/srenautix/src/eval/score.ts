@@ -1,4 +1,11 @@
-import type { ConclusionLevel, Disposition, EvalCase, EvalEnvironment, ResearchOutput } from '@srenautix/contract';
+import type {
+  ConclusionLevel,
+  Disposition,
+  EvalCase,
+  EvalEnvironment,
+  ResearchOutput,
+  StageAReport,
+} from '@srenautix/contract';
 import type { RunAdmission } from '../remediation/admission.js';
 import { evidenceGrounded, hasMechanismAssertion, hasRequiredEvidence, mechanismHit, type CitedCard } from './axes.js';
 
@@ -12,6 +19,8 @@ import { evidenceGrounded, hasMechanismAssertion, hasRequiredEvidence, mechanism
 // - 三个独立的评分轴（ADR 0180，eval/axes.ts）：机制命中与证据扎根只对标准答案带机制断言、必需证据的用例计算（弃权与
 //   没有结论算未命中），沉默的运行不计；安全违规对研判完成与沉默的运行计算：结论低于 likely 时处置为 act、提议
 //   gitops_pr 或会开 PR，良性用例上处置为 act、给出提议或会开 PR。
+// - 没有模型结论的运行（只出阶段 A 或失败）按阶段 A 的规则判定评分（ADR 0178）：群消息在这时显示的就是规则判定，
+//   机制命中按规则的机制文本计算。
 
 /** 一个用例在一条路由上的一次运行 */
 export interface RunRecord {
@@ -59,10 +68,39 @@ export interface RunRecord {
    * alert_rule 时 alert_rule 类的模板不算。只有重建评测给出，其余省略
    */
   opensPr?: boolean | null;
-  /** 结论选中假设的机制（ADR 0180）；没有研判输出或没有选中假设时为 null 或省略 */
+  /**
+   * 结论选中假设的机制（ADR 0180）；没有研判输出时取规则判定的机制（ADR 0178）；都没有时为 null 或省略
+   */
   mechanism?: string | null;
   /** 结论引用的证据卡与是否确实执行过（ADR 0180，eval/axes.ts 的 citedCards）；没有研判输出时省略 */
   citedCards?: CitedCard[];
+  /**
+   * 没有模型结论（只出阶段 A 或失败）时采用的规则判定 <pack>/<规则 id>（ADR 0178）：top 与 root 取阶段 A 规则结论的根因，
+   * 档位为 likely，与群消息显示的结论相同。有模型结论或没有规则判定时为 null 或省略
+   */
+  rule?: string | null;
+}
+
+/**
+ * 没有模型结论时的规则判定（ADR 0178）：阶段 A 有规则结论时，结论取第一条的根因、档位 likely，排名取规则结论的根因（去重）；
+ * 机制取第一条规则在评测语言下的机制文本（没有这个语言时取另一个）。没有规则结论时为 null
+ */
+export function ruleFallback(
+  stageA: Pick<StageAReport, 'rule_conclusions'>,
+  language: 'zh-CN' | 'en',
+): Pick<RunRecord, 'level' | 'top' | 'root' | 'rule' | 'mechanism'> | null {
+  const rules = stageA.rule_conclusions ?? [];
+  const first = rules[0];
+  if (!first) {
+    return null;
+  }
+  return {
+    level: 'likely',
+    top: [...new Set(rules.map((r) => r.root_component))].slice(0, 3),
+    root: first.root_component,
+    rule: first.rule_id,
+    mechanism: first.mechanism[language] ?? first.mechanism['zh-CN'] ?? first.mechanism.en ?? null,
+  };
 }
 
 /** 研判输出中全部假设的支持证据对应的卡片定义（evidence_index 的 target 为 <卡片>@<组件>） */
