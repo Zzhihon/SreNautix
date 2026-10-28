@@ -1046,6 +1046,8 @@ export async function reconstructCase(
     now: new Date(asOf),
     ruleActions: 0,
     ruleProposalIds: [],
+    // 确定性结论规则（ADR 0178）：研判不可用的运行按它评分
+    ruleConclusions: a.rules.conclude(inc, alerts, run),
   });
   const keys = [...new Set([...inc.components, ...inc.candidates.map((c) => c.component)])];
   const topo = r.topology.neighborhood(keys, asOf);

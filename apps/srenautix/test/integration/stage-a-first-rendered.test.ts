@@ -22,7 +22,7 @@ const evidence: EvidenceRunner = {
   run: async (): Promise<EvidenceRun> => ({ cards, chains: [], runbooks: [], rootComponentType: null }),
   rerun: async () => [],
 };
-const rules: RuleProposer = { evaluate: () => [], excluded: () => null };
+const rules: RuleProposer = { evaluate: () => [], excluded: () => null, conclude: () => [] };
 
 const insertIncident = async (inc: Incident) => {
   await db.admin.query(

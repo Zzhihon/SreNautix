@@ -13,7 +13,7 @@ import { logger } from '../log.js';
 import type { ServerMetrics } from '../metrics.js';
 import { composeMessage } from '../notify/compose.js';
 import type { DesiredIncidentMessage } from '../notify/ports.js';
-import type { EvidenceRunner } from './ports.js';
+import type { EvidenceRunner, RuleProposer } from './ports.js';
 import { buildReport, verdictFingerprint } from './report.js';
 
 export interface DegradedSettings {
@@ -47,6 +47,8 @@ export class DegradedLane {
     private readonly catalog: AlertCatalog,
     private readonly params: () => ResolvedRcaParams,
     private readonly evidence: EvidenceRunner,
+    /** 结论规则（ADR 0178）不依赖状态库，降级期间照常求值；规则提议与排除规则需要状态库，不在这里使用 */
+    private readonly rules: RuleProposer,
     private readonly sender: DirectSender,
     private readonly metrics: ServerMetrics,
   ) {}
@@ -138,6 +140,7 @@ export class DegradedLane {
         excludedBy: null,
         runbooks: run.runbooks,
         ruleProposalIds: [],
+        ruleConclusions: this.rules.conclude(inc, own, run),
         fingerprint: verdictFingerprint(run.cards),
         degraded: true,
         now,

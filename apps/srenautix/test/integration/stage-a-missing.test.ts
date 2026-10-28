@@ -47,7 +47,7 @@ const evidence: EvidenceRunner = {
   run: async (): Promise<EvidenceRun> => ({ cards: [], chains: [], runbooks: [], rootComponentType: null }),
   rerun: async () => [],
 };
-const rules: RuleProposer = { evaluate: () => [], excluded: () => null };
+const rules: RuleProposer = { evaluate: () => [], excluded: () => null, conclude: () => [] };
 
 class NoActions implements NotifyActions {
   private ok = async (): Promise<ActionOutcome> => ({ ok: true, message: 'ok' });

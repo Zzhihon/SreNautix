@@ -1,6 +1,7 @@
 import { cpSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { Alert, Incident } from '@srenautix/contract';
+import { validatorFor } from '@srenautix/contract';
 import { startPrometheus, type FixtureMetricSeries, type TsdbInstance } from '@srenautix/integration-sdk';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ServerMetrics } from '../../src/metrics.js';
@@ -9,6 +10,7 @@ import { serverTracks } from '../../src/roles/server-schema.js';
 import { migrateExpand } from '../../src/store/migrate.js';
 import { PackEvidence, PackRules } from '../../src/stage-a/pack-evidence.js';
 import { EvidenceSource, PackRuntime } from '../../src/stage-a/packs.js';
+import { buildReport, verdictFingerprint } from '../../src/stage-a/report.js';
 import { TopologyStore } from '../../src/topology/store.js';
 import { newTestDb, type TestDb } from '../support/db.js';
 import { exampleWithTemplate, PACKS } from '../support/packs.js';
@@ -393,6 +395,110 @@ describe('阶段 A 的领域包证据链', () => {
       ['workload/pdb/disruptions', 'pg', 'abnormal'],
       ['workload/pod-pending/pdb', 'pg', 'normal'],
     ]);
+  });
+
+  it('确定性结论规则（ADR 0178）：卡按执行它所为的组件归属，规则按组件类型筛选求值对象，命中的写进阶段 A 报告', async () => {
+    // 内置的 oom-killed 规则还要求内存不足日志：这里没有日志能力，两个事件都不命中
+    const pod = incident({ kind: 'Pod', namespace: 'shop', name: 'web-0' });
+    const podRun = await evidence.run(pod, [memoryAlert('web-0')], AbortSignal.timeout(30_000));
+    expect(rules.conclude(pod, [memoryAlert('web-0')], podRun)).toEqual([]);
+
+    const dir = join(SCRATCH, 'conclusions');
+    mkdirSync(dir, { recursive: true });
+    cpSync(join(PACKS, '_example'), join(dir, '_example'), { recursive: true });
+    writeFileSync(
+      join(dir, '_example', 'conclusions.yaml'),
+      [
+        'conclusions:',
+        '  - id: memory-pressure',
+        '    title: { zh-CN: 内存接近上限 }',
+        '    when:',
+        '      cards: [{ card: pod-memory/limit-ratio }]',
+        '      alerts: [{ alertnames: [ExampleContainerMemoryHigh], roles: [cause] }]',
+        '    mechanism: { zh-CN: 内存接近 limit }',
+        '  - id: memory-calm',
+        '    title: { zh-CN: 内存平稳 }',
+        '    component_types: [example.web]',
+        '    when:',
+        '      cards: [{ card: pod-memory/limit-ratio, verdict: normal }]',
+        '    mechanism: { zh-CN: 内存余量充足 }',
+        '',
+      ].join('\n'),
+    );
+    const r = await PackRuntime.load({
+      dirs: [dir],
+      only: ['_example'],
+      lockFile: null,
+      catalogPath: DEFAULT_CATALOG_PATH,
+      capabilities: CAPS,
+    });
+    const topology = new TopologyStore(db.server);
+    const ev = new PackEvidence(
+      r,
+      source,
+      (clusterId, key) => topology.componentType(clusterId, key),
+      { locale: 'zh-CN', concurrency: 4, queryTimeoutMs: 10_000 },
+      metrics,
+    );
+    const pr = new PackRules(r, metrics);
+    // Pod 上的内存卡属于告警归属的组件（Pod 本身）；Pod 没有组件类型，memory-calm 不在它上面求值
+    const alerts = [memoryAlert('web-0')];
+    const withMember: Incident = {
+      ...pod,
+      members: [
+        {
+          alert_id: alerts[0]!.alert_id,
+          alertname: alerts[0]!.alertname,
+          role: 'cause',
+          component: 'Pod:shop/web-0',
+          severity: 'warning',
+          status: 'firing',
+          starts_at: alerts[0]!.starts_at,
+          ends_at: null,
+          joined_version: 1,
+          left_version: null,
+        },
+      ],
+    };
+    const hot = await ev.run(withMember, alerts, AbortSignal.timeout(30_000));
+    expect(hot.cardComponents).toEqual({ 'card:1': 'Pod:shop/web-0', 'card:2': 'Pod:shop/web-0' });
+    const hit = pr.conclude(withMember, alerts, hot);
+    expect(hit).toEqual([
+      {
+        rule_id: '_example/memory-pressure',
+        title: { 'zh-CN': '内存接近上限' },
+        root_component: 'Pod:shop/web-0',
+        mechanism: { 'zh-CN': '内存接近 limit' },
+        level: 'likely',
+        basis: ['card:1', 'alert:1'],
+        card_conditions: [
+          { card: '_example/pod-memory/limit-ratio', verdict: 'abnormal', observations: [], on: 'self' },
+        ],
+      },
+    ]);
+    // Deployment 根因的组件类型是 example.web，内存平稳：memory-calm 命中，memory-pressure 不命中
+    const api = incident({ kind: 'Deployment', namespace: 'shop', name: 'api' });
+    const calm = await ev.run(api, [], AbortSignal.timeout(30_000));
+    expect(calm.componentTypes).toEqual({ 'Deployment:shop/api': 'example.web' });
+    expect(pr.conclude(api, [], calm).map((c) => [c.rule_id, c.root_component, c.basis])).toEqual([
+      ['_example/memory-calm', 'Deployment:shop/api', ['card:1']],
+    ]);
+    const report = buildReport({
+      incident: api,
+      alerts: [],
+      cards: calm.cards,
+      excludedBy: null,
+      runbooks: calm.runbooks,
+      degraded: false,
+      fingerprint: verdictFingerprint(calm.cards),
+      now: new Date(T),
+      ruleActions: 0,
+      ruleProposalIds: [],
+      ruleConclusions: pr.conclude(api, [], calm),
+    });
+    const v = validatorFor('schemas/stage-a-report.schema.json');
+    expect(v(report), JSON.stringify(v.errors)).toBe(true);
+    expect(report.rule_conclusions).toHaveLength(1);
   });
 
   it('实时重跑只重跑已声明过的卡，编号沿用原结果', async () => {

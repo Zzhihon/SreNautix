@@ -1,5 +1,13 @@
 import { randomUUID } from 'node:crypto';
-import type { Alert, ChangeEvent, Disposition, EvidenceResult, Incident, StageAReport } from '@srenautix/contract';
+import type {
+  Alert,
+  ChangeEvent,
+  Disposition,
+  EvidenceResult,
+  Incident,
+  RuleConclusion,
+  StageAReport,
+} from '@srenautix/contract';
 import { CHANGE_ONSET_TOLERANCE_MS, evidenceFingerprint } from '@srenautix/core';
 import { isBusinessImpact, type AlertMatcher } from '../alerts/business-impact.js';
 import { changeNotes } from '../changes/notes.js';
@@ -196,6 +204,8 @@ export interface BuildInput extends DispositionInput {
   now: Date;
   /** 成员告警的最低取证集合与缺口（ADR 0153）；降级通道与没有领域包时不计算 */
   required?: RequiredEvidence[];
+  /** 确定性结论规则的命中（ADR 0178），按根因候选的排名排列 */
+  ruleConclusions: RuleConclusion[];
 }
 
 export function buildReport(b: BuildInput): StageAReport {
@@ -217,5 +227,6 @@ export function buildReport(b: BuildInput): StageAReport {
     degraded: b.degraded,
     rendered_at: b.now.toISOString(),
     ...(b.required ? { required_evidence: b.required } : {}),
+    rule_conclusions: b.ruleConclusions,
   };
 }

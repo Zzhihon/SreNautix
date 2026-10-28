@@ -557,6 +557,7 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
       evidenceOptions,
       metrics,
     ),
+    rules,
     notify,
     metrics,
   );

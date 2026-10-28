@@ -270,6 +270,13 @@ export class ServerMetrics extends BaseMetrics {
     registers: [this.registry],
   });
 
+  readonly ruleConclusions = new Counter({
+    name: 'srenautix_stage_a_rule_conclusions_total',
+    help: '阶段 A 中确定性结论规则命中的次数（ADR 0178），按规则 <pack>/<规则 id>；同一事件每次出报告都计一次',
+    labelNames: ['rule'] as const,
+    registers: [this.registry],
+  });
+
   readonly researchAdmissions = new Counter({
     name: 'srenautix_research_admissions_total',
     help: '阶段 B 入队判定，按结果（queued、coalesced、capped、storm、budget、no_model_route、duplicate、not_researched）',

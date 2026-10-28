@@ -25,7 +25,7 @@ const evidence: EvidenceRunner = {
   run: async (): Promise<EvidenceRun> => ({ cards, chains: [], runbooks: [], rootComponentType: null }),
   rerun: async () => [],
 };
-const rules: RuleProposer = { evaluate: () => [], excluded: () => null };
+const rules: RuleProposer = { evaluate: () => [], excluded: () => null, conclude: () => [] };
 let stageA: StageAService;
 
 beforeAll(async () => {
