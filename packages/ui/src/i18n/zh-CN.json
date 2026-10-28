@@ -280,6 +280,8 @@
   "verdict.researching": "模型研判中：{step}",
   "verdict.researched_ago": "研判于 {ago}",
   "verdict.stage_a_only": "只有阶段 A",
+  "verdict.rule_judgement": "规则判定",
+  "verdict.rule": "根因 {root}（{title}）：{mechanism}",
   "verdict.degraded_source": "{source} 降级（{n} 张卡）",
   "verdict.state_store_degraded": "状态库降级时生成",
   "verdict.merged_into": "已并入另一事件",

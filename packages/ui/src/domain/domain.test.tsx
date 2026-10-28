@@ -385,6 +385,51 @@ describe('结论头', () => {
     expect(screen.getByText('合并自 1')).toBeTruthy();
     expect(screen.getByRole('list', { name: '影响这个判定的条件' }).textContent).toContain('Loki 超时');
   });
+
+  it('没有模型结论时显示阶段 A 的规则判定，标明“规则判定”，档位为可能', () => {
+    const inc = incident();
+    const stageA = {
+      report_id: '00000000-0000-4000-8000-0000000000a1',
+      incident_id: inc.incident_id,
+      incident_version: inc.incident_version,
+      disposition: 'escalate',
+      disposition_reason: 'critical_ambiguous',
+      candidates: [],
+      ambiguous: true,
+      cards: [],
+      evidence_fingerprint: `sha256:${'1'.repeat(64)}`,
+      observability_blind: false,
+      timeline: [],
+      runbooks: [],
+      rule_proposals: [],
+      degraded: false,
+      rendered_at: '2026-10-19T06:20:00Z',
+      rule_conclusions: [
+        {
+          rule_id: 'postgres/oom-failover',
+          title: { 'zh-CN': '实例 OOM 引发主库切换', en: 'An instance OOM kill caused a primary change' },
+          root_component: 'StatefulSet:data/pg',
+          mechanism: { 'zh-CN': '主库被 OOM 终止，集群提升备库', en: 'The primary was OOM-killed' },
+          level: 'likely',
+          basis: ['card:1', 'card:2'],
+          card_conditions: [],
+        },
+      ],
+    } as const;
+    renderUi(
+      <VerdictHeader
+        incident={inc}
+        stageA={stageA as never}
+        latestRun={researchRun({ state: 'stage_a_only', summary: null, disposition: null, conclusion_level: null })}
+        evidence={[]}
+        conditions={[]}
+        now={NOW}
+      />,
+    );
+    expect(screen.getByText('规则判定').closest('[title]')?.getAttribute('title')).toBe('postgres/oom-failover');
+    expect(screen.getByText(/（实例 OOM 引发主库切换）：主库被 OOM 终止，集群提升备库/)).toBeTruthy();
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toContain('pg');
+  });
 });
 
 describe('组件的可读名称', () => {

@@ -280,6 +280,8 @@
   "verdict.researching": "Model research in progress: {step}",
   "verdict.researched_ago": "Researched {ago}",
   "verdict.stage_a_only": "Stage A only",
+  "verdict.rule_judgement": "Rule judgement",
+  "verdict.rule": "Root cause {root} ({title}): {mechanism}",
   "verdict.degraded_source": "{source} degraded ({n} cards)",
   "verdict.state_store_degraded": "Produced while the state store was degraded",
   "verdict.merged_into": "Merged into another incident",

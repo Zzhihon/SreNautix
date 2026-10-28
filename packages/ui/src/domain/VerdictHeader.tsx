@@ -1,7 +1,7 @@
 // 事件详情首屏的结论头（DESIGN §12.2）：一句结论、处置判断、结论阶梯、证据计数与降级的数据源，
 // 以及影响这个判定的条件。阶段 B 还没有结论时用阶段 A 的确定性判断，并写明"模型研判中"或原因。
 
-import { Bot, GitMerge, Layers, Split } from 'lucide-react';
+import { Bot, GitMerge, Layers, Scale, Split } from 'lucide-react';
 import type { Condition, EvidenceResult, Incident, ResearchRunSummary, StageAReport } from '../contract';
 import { AppLink, useUiEnv } from '../data';
 import { useI18n } from '../i18n';
@@ -41,22 +41,33 @@ export function VerdictHeader({
   conditions: readonly Condition[];
   now: number;
 }) {
-  const { t, fmt } = useI18n();
+  const { t, fmt, locale } = useI18n();
   const { links } = useUiEnv();
   const concluded = latestRun && latestRun.state === 'completed' ? latestRun : null;
+  // 没有模型结论时显示阶段 A 的规则判定（ADR 0178），标明“规则判定”
+  const rule = concluded ? null : (stageA?.rule_conclusions?.[0] ?? null);
   const disposition = concluded?.disposition ?? stageA?.disposition ?? null;
-  const level = concluded?.conclusion_level ?? null;
-  const root = concluded?.root_component ?? incident.root.component;
+  const level = concluded?.conclusion_level ?? rule?.level ?? null;
+  const root = concluded?.root_component ?? rule?.root_component ?? incident.root.component;
   const names = useComponentNames();
   const rootL = root ? componentLabel(root, names) : null;
   const counts = countEvidence(evidence);
   const degraded = degradedSources(evidence);
   const affecting = affectingConditions(conditions, incident.cluster_id);
   const running = latestRun !== null && RUNNING.has(latestRun.state);
+  const localized = (v: Record<string, string | undefined>) => v[locale] ?? v['zh-CN'] ?? v.en ?? '';
 
   const sentence =
     concluded?.summary ??
-    (stageA ? t(`verdict.stage_a.${stageA.disposition_reason}`, { root: rootL?.name ?? '-' }) : t('verdict.no_report'));
+    (rule
+      ? t('verdict.rule', {
+          root: rootL?.name ?? '-',
+          title: localized(rule.title),
+          mechanism: localized(rule.mechanism),
+        })
+      : stageA
+        ? t(`verdict.stage_a.${stageA.disposition_reason}`, { root: rootL?.name ?? '-' })
+        : t('verdict.no_report'));
 
   return (
     <section className={styles.head} aria-label={t('verdict.label')}>
@@ -99,6 +110,11 @@ export function VerdictHeader({
         {concluded?.summary && (
           <StatusPill tone="model" icon={Bot}>
             {t('common.model_generated')}
+          </StatusPill>
+        )}
+        {!concluded && rule && (
+          <StatusPill tone="neutral" icon={Scale} title={rule.rule_id}>
+            {t('verdict.rule_judgement')}
           </StatusPill>
         )}{' '}
         {sentence}
