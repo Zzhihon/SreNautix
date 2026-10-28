@@ -135,9 +135,127 @@
     "novelty": {
       "description": "证据基线（契约 2.31.0，ADR 0153）：判为异常的卡在同一实体上、按同样长度的窗口在事件之前的时段重新判定，与事件窗口比较。常态（routine）的卡不能作为根因或支持证据。只对异常卡计算；正常与无法判定的卡、关闭了证据基线的部署为 null 或不出现",
       "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/Novelty" }]
+    },
+    "samples": {
+      "description": "错误样例（契约 2.42.0，ADR 0177）：卡片声明了 samples 时出现，其余的卡不出现",
+      "$ref": "#/$defs/Samples"
     }
   },
   "$defs": {
+    "Samples": {
+      "title": "EvidenceSamples",
+      "description": "按依赖与错误类别聚合的错误日志：维度组合的行数、首末时间与错误类别，每个类别少量脱敏、截断的原始样例。样例与维度值是不可信文本",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ref",
+        "code",
+        "lines",
+        "truncated",
+        "dimensions",
+        "groups",
+        "groups_omitted",
+        "classes",
+        "redactions"
+      ],
+      "properties": {
+        "ref": { "type": "string", "description": "卡片中提供日志行的引用名" },
+        "code": {
+          "description": "没有取得日志行的原因码（contract/reason-codes.json 的 evidence_samples 分组）：samples_deadline 证据期限内没有执行完；samples_timeout 日志查询超时；samples_source_error 日志数据源报错；samples_capability_missing 没有日志能力。取得了日志行（包括零行）时为 null",
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "string",
+              "enum": ["samples_deadline", "samples_timeout", "samples_source_error", "samples_capability_missing"]
+            }
+          ]
+        },
+        "lines": { "type": "integer", "minimum": 0, "description": "参与聚合的日志行数" },
+        "truncated": {
+          "type": "boolean",
+          "description": "日志查询返回的行数达到引用的 limit：窗口内还有更早的行，计数与首次时间是下限"
+        },
+        "dimensions": {
+          "type": "array",
+          "description": "维度名，按卡片声明的顺序",
+          "items": { "type": "string" }
+        },
+        "groups": {
+          "type": "array",
+          "description": "维度组合与错误类别的行数，按行数从多到少，最多为卡片的 max_groups",
+          "maxItems": 50,
+          "items": { "$ref": "#/$defs/SamplesGroup" }
+        },
+        "groups_omitted": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "超出 max_groups、没有列出的维度组合数"
+        },
+        "classes": {
+          "type": "array",
+          "description": "错误类别，按行数从多到少；没有命中任何声明的类别的行为 other",
+          "maxItems": 17,
+          "items": { "$ref": "#/$defs/SamplesClass" }
+        },
+        "redactions": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "样例与维度值中被脱敏规则替换的处数"
+        }
+      }
+    },
+    "SamplesGroup": {
+      "title": "EvidenceSamplesGroup",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dimensions", "class", "count", "first_at", "last_at"],
+      "properties": {
+        "dimensions": {
+          "type": "object",
+          "description": "维度名 → 取值（脱敏、最多 120 个字符）；标签不存在或正则不匹配时为 null",
+          "additionalProperties": { "type": ["string", "null"] }
+        },
+        "class": { "type": "string" },
+        "count": { "type": "integer", "minimum": 1 },
+        "first_at": { "$ref": "common.schema.json#/$defs/Timestamp" },
+        "last_at": { "$ref": "common.schema.json#/$defs/Timestamp" }
+      }
+    },
+    "SamplesClass": {
+      "title": "EvidenceSamplesClass",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["class", "title", "count", "samples"],
+      "properties": {
+        "class": { "type": "string" },
+        "title": {
+          "description": "卡片声明的类别标题；other 为 null",
+          "oneOf": [{ "type": "null" }, { "$ref": "evidence-card.schema.json#/$defs/LocalizedText" }]
+        },
+        "count": { "type": "integer", "minimum": 1 },
+        "samples": {
+          "type": "array",
+          "maxItems": 10,
+          "items": { "$ref": "#/$defs/Sample" }
+        }
+      }
+    },
+    "Sample": {
+      "title": "EvidenceSample",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["at", "dimensions", "text", "cut"],
+      "properties": {
+        "at": { "$ref": "common.schema.json#/$defs/Timestamp" },
+        "dimensions": {
+          "type": "object",
+          "description": "这一行的维度取值",
+          "additionalProperties": { "type": ["string", "null"] }
+        },
+        "text": { "type": "string", "maxLength": 2001, "description": "脱敏后截断的日志行" },
+        "cut": { "type": "boolean", "description": "脱敏后的行超过 max_chars，已截断" }
+      }
+    },
     "Novelty": {
       "title": "EvidenceNovelty",
       "type": "object",

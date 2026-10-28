@@ -69,6 +69,7 @@
       "description": "卡片需要的集成能力，例如 metrics.query_range、logs.match。能力不可用时卡片显示 capability_missing",
       "items": { "type": "string", "pattern": "^[a-z]+\\.[a-z_]+$" }
     },
+    "samples": { "$ref": "#/$defs/Samples" },
     "check": {
       "type": "object",
       "additionalProperties": false,
@@ -241,6 +242,102 @@
         },
         "sort_by": { "type": "string" },
         "limit": { "type": "integer", "minimum": 1, "maximum": 50, "default": 8 }
+      }
+    },
+    "Samples": {
+      "title": "CardSamples",
+      "description": "错误样例（契约 2.42.0，ADR 0177）：把 ref 指向的日志引用取回的日志行按 dimensions 聚合成维度组合，按 classes 归入错误类别，每个类别取少量原始样例；样例与维度值先脱敏再截断。声明它的卡 egress 必须是 redact 或 never（加载时校验），样例出境的数据类别为 logs。结果写在 EvidenceResult.samples，没有声明 display.table 时维度组合同时写成卡片的表格",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ref", "dimensions"],
+      "properties": {
+        "ref": {
+          "type": "string",
+          "description": "卡片中 mode 为 logs 的引用名。计数取自这个引用返回的日志行，行数达到引用的 limit 时计数是下限",
+          "pattern": "^[a-z][a-zA-Z0-9_]*$"
+        },
+        "dimensions": {
+          "type": "array",
+          "description": "聚合维度，按声明顺序组成维度组合，例如依赖方、模型、内部错误码、依赖方返回的状态码",
+          "minItems": 1,
+          "maxItems": 6,
+          "items": { "$ref": "#/$defs/SamplesDimension" }
+        },
+        "classes": {
+          "type": "array",
+          "description": "错误类别，按声明顺序取第一个命中的类别；一个都没有命中的行归入 other",
+          "maxItems": 16,
+          "items": { "$ref": "#/$defs/SamplesClass" }
+        },
+        "per_class": {
+          "type": "integer",
+          "description": "每个类别最多取几条样例；同一类别内先轮流取不同的维度组合，再按时间从新到旧",
+          "minimum": 1,
+          "maximum": 10,
+          "default": 3
+        },
+        "max_chars": {
+          "type": "integer",
+          "description": "每条样例脱敏之后保留的最多字符数，超出部分截断",
+          "minimum": 80,
+          "maximum": 2000,
+          "default": 300
+        },
+        "max_groups": {
+          "type": "integer",
+          "description": "结果里保留的维度组合数，按行数从多到少；其余的只计入 groups_omitted",
+          "minimum": 1,
+          "maximum": 50,
+          "default": 20
+        }
+      }
+    },
+    "SamplesDimension": {
+      "title": "CardSamplesDimension",
+      "description": "一个聚合维度，label 与 regex 二选一（加载时校验）",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+        "title": { "$ref": "#/$defs/LocalizedText" },
+        "label": {
+          "type": "string",
+          "description": "日志行的标签名：日志流的标签，或 LogQL 解析器（例如 | json、| logfmt）提取出的标签"
+        },
+        "regex": {
+          "type": "string",
+          "description": "在日志行上匹配的正则（ECMAScript 语法），取第一个捕获组；不匹配时这一维为 null"
+        }
+      }
+    },
+    "SamplesClass": {
+      "title": "CardSamplesClass",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "match"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "类别 id；other 保留给没有命中任何类别的行",
+          "pattern": "^[a-z][a-z0-9_]*$"
+        },
+        "title": { "$ref": "#/$defs/LocalizedText" },
+        "match": {
+          "type": "array",
+          "description": "全部条件都成立时命中：写了 dimension 时匹配这一维的取值（取值为 null 时不成立），没写时匹配整行",
+          "minItems": 1,
+          "maxItems": 4,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["regex"],
+            "properties": {
+              "dimension": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+              "regex": { "type": "string", "description": "ECMAScript 语法的正则" }
+            }
+          }
+        }
       }
     },
     "Link": {

@@ -2915,6 +2915,8 @@ export type components = {
       queries: components['schemas']['QueryRecord'][];
       reason: components['schemas']['Reason'];
       ref: components['schemas']['EvidenceRef'];
+      /** @description 错误样例（契约 2.42.0，ADR 0177）：卡片声明了 samples 时出现，其余的卡不出现 */
+      samples?: components['schemas']['Samples'];
       /** @description 每个查询引用的降采样序列（每条不超过 300 点），用于迷你图与实时重跑的并排对比。points 中每项为 [unix 秒, 值或 null] */
       series: {
         labels: components['schemas']['Labels'];
@@ -2942,6 +2944,61 @@ export type components = {
       verdict: components['schemas']['Verdict'];
       window: components['schemas']['TimeWindow'];
       $defs: {
+        /**
+         * EvidenceSamples
+         * @description 按依赖与错误类别聚合的错误日志：维度组合的行数、首末时间与错误类别，每个类别少量脱敏、截断的原始样例。样例与维度值是不可信文本
+         */
+        Samples: {
+          /** @description 错误类别，按行数从多到少；没有命中任何声明的类别的行为 other */
+          classes: components['schemas']['SamplesClass'][];
+          /** @description 没有取得日志行的原因码（contract/reason-codes.json 的 evidence_samples 分组）：samples_deadline 证据期限内没有执行完；samples_timeout 日志查询超时；samples_source_error 日志数据源报错；samples_capability_missing 没有日志能力。取得了日志行（包括零行）时为 null */
+          code: null | ('samples_deadline' | 'samples_timeout' | 'samples_source_error' | 'samples_capability_missing');
+          /** @description 维度名，按卡片声明的顺序 */
+          dimensions: string[];
+          /** @description 维度组合与错误类别的行数，按行数从多到少，最多为卡片的 max_groups */
+          groups: components['schemas']['SamplesGroup'][];
+          /** @description 超出 max_groups、没有列出的维度组合数 */
+          groups_omitted: number;
+          /** @description 参与聚合的日志行数 */
+          lines: number;
+          /** @description 样例与维度值中被脱敏规则替换的处数 */
+          redactions: number;
+          /** @description 卡片中提供日志行的引用名 */
+          ref: string;
+          /** @description 日志查询返回的行数达到引用的 limit：窗口内还有更早的行，计数与首次时间是下限 */
+          truncated: boolean;
+        };
+        /** EvidenceSamplesGroup */
+        SamplesGroup: {
+          class: string;
+          count: number;
+          /** @description 维度名 → 取值（脱敏、最多 120 个字符）；标签不存在或正则不匹配时为 null */
+          dimensions: {
+            [key: string]: string | null;
+          };
+          first_at: components['schemas']['Timestamp'];
+          last_at: components['schemas']['Timestamp'];
+        };
+        /** EvidenceSamplesClass */
+        SamplesClass: {
+          class: string;
+          count: number;
+          samples: components['schemas']['Sample'][];
+          /** @description 卡片声明的类别标题；other 为 null */
+          title: null | components['schemas']['LocalizedText'];
+        };
+        /** EvidenceSample */
+        Sample: {
+          at: components['schemas']['Timestamp'];
+          /** @description 脱敏后的行超过 max_chars，已截断 */
+          cut: boolean;
+          /** @description 这一行的维度取值 */
+          dimensions: {
+            [key: string]: string | null;
+          };
+          /** @description 脱敏后截断的日志行 */
+          text: string;
+        };
         /** EvidenceNovelty */
         Novelty: {
           /** @description 得出结论的基线样本中判为异常的比例；没有样本时为 null */
@@ -3815,6 +3872,8 @@ export type components = {
       checks_run?: number;
       id: string;
       mechanism: string;
+      /** @description 支撑机制的错误样例卡（契约 2.42.0，ADR 0177）：只保留本次运行中存在、带错误样例并且取得了日志行的卡；没有机制引用时不出现 */
+      mechanism_refs?: components['schemas']['EvidenceRef'][];
       parent_id: string | null;
       refuting: components['schemas']['EvidenceRef'][];
       root_component: components['schemas']['ComponentKey'];
@@ -5346,6 +5405,8 @@ export type components = {
           checks_run?: number;
           id: string;
           mechanism: string;
+          /** @description 支撑机制的错误样例卡（契约 2.42.0，ADR 0177）：只保留本次运行中存在、带错误样例并且取得了日志行的卡；没有机制引用时不出现 */
+          mechanism_refs?: components['schemas']['EvidenceRef'][];
           parent_id: string | null;
           refuting: components['schemas']['EvidenceRef'][];
           root_component: components['schemas']['ComponentKey'];
@@ -5609,6 +5670,61 @@ export type components = {
         [key: string]: number | string | boolean;
       };
       seed: number | null;
+    };
+    /** EvidenceSample */
+    Sample: {
+      at: components['schemas']['Timestamp'];
+      /** @description 脱敏后的行超过 max_chars，已截断 */
+      cut: boolean;
+      /** @description 这一行的维度取值 */
+      dimensions: {
+        [key: string]: string | null;
+      };
+      /** @description 脱敏后截断的日志行 */
+      text: string;
+    };
+    /**
+     * EvidenceSamples
+     * @description 按依赖与错误类别聚合的错误日志：维度组合的行数、首末时间与错误类别，每个类别少量脱敏、截断的原始样例。样例与维度值是不可信文本
+     */
+    Samples: {
+      /** @description 错误类别，按行数从多到少；没有命中任何声明的类别的行为 other */
+      classes: components['schemas']['SamplesClass'][];
+      /** @description 没有取得日志行的原因码（contract/reason-codes.json 的 evidence_samples 分组）：samples_deadline 证据期限内没有执行完；samples_timeout 日志查询超时；samples_source_error 日志数据源报错；samples_capability_missing 没有日志能力。取得了日志行（包括零行）时为 null */
+      code: null | ('samples_deadline' | 'samples_timeout' | 'samples_source_error' | 'samples_capability_missing');
+      /** @description 维度名，按卡片声明的顺序 */
+      dimensions: string[];
+      /** @description 维度组合与错误类别的行数，按行数从多到少，最多为卡片的 max_groups */
+      groups: components['schemas']['SamplesGroup'][];
+      /** @description 超出 max_groups、没有列出的维度组合数 */
+      groups_omitted: number;
+      /** @description 参与聚合的日志行数 */
+      lines: number;
+      /** @description 样例与维度值中被脱敏规则替换的处数 */
+      redactions: number;
+      /** @description 卡片中提供日志行的引用名 */
+      ref: string;
+      /** @description 日志查询返回的行数达到引用的 limit：窗口内还有更早的行，计数与首次时间是下限 */
+      truncated: boolean;
+    };
+    /** EvidenceSamplesClass */
+    SamplesClass: {
+      class: string;
+      count: number;
+      samples: components['schemas']['Sample'][];
+      /** @description 卡片声明的类别标题；other 为 null */
+      title: null | components['schemas']['LocalizedText'];
+    };
+    /** EvidenceSamplesGroup */
+    SamplesGroup: {
+      class: string;
+      count: number;
+      /** @description 维度名 → 取值（脱敏、最多 120 个字符）；标签不存在或正则不匹配时为 null */
+      dimensions: {
+        [key: string]: string | null;
+      };
+      first_at: components['schemas']['Timestamp'];
+      last_at: components['schemas']['Timestamp'];
     };
     scope: {
       clusters: string[];

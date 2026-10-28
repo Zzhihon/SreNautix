@@ -210,6 +210,12 @@
         "parent_id": { "type": ["string", "null"], "pattern": "^h[1-9]$" },
         "root_component": { "$ref": "common.schema.json#/$defs/ComponentKey" },
         "mechanism": { "type": "string", "maxLength": 600 },
+        "mechanism_refs": {
+          "type": "array",
+          "description": "支撑机制的错误样例卡（契约 2.42.0，ADR 0177）：只保留本次运行中存在、带错误样例并且取得了日志行的卡；没有机制引用时不出现",
+          "maxItems": 4,
+          "items": { "$ref": "common.schema.json#/$defs/EvidenceRef" }
+        },
         "supporting": {
           "type": "array",
           "maxItems": 12,

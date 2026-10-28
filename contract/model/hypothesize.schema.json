@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://srenautix.io/contract/model/hypothesize.schema.json",
   "title": "HypothesizeOutput",
-  "description": "阶段 B hypothesize 步骤的模型输出（DESIGN §7.2）。遵守可移植 schema 子集（§8.2）：扁平结构、所有字段必填、additionalProperties=false、使用枚举、不使用 oneOf。x-srenautix-dynamic-enum 标出的字段在每次运行时由 worker 替换为本次运行中存在的取值",
+  "description": "阶段 B hypothesize 步骤的模型输出（DESIGN §7.2）。遵守可移植 schema 子集（§8.2）：扁平结构、所有字段必填、additionalProperties=false、使用枚举、不使用 oneOf。x-srenautix-dynamic-enum 标出的字段在每次运行时由 worker 替换为本次运行中存在的取值；sample_refs 是有错误样例的卡（契约 2.42.0，ADR 0177）",
   "x-srenautix-portable": true,
   "type": "object",
   "additionalProperties": false,
@@ -16,7 +16,7 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "parent_id", "root_component", "mechanism", "supporting", "refuting"],
+        "required": ["id", "parent_id", "root_component", "mechanism", "mechanism_refs", "supporting", "refuting"],
         "properties": {
           "id": { "type": "string", "enum": ["h1", "h2", "h3", "h4", "h5", "h6"] },
           "parent_id": {
@@ -29,6 +29,12 @@
             "x-srenautix-dynamic-enum": "components"
           },
           "mechanism": { "type": "string", "maxLength": 600 },
+          "mechanism_refs": {
+            "type": "array",
+            "maxItems": 4,
+            "description": "支撑机制的错误样例卡",
+            "items": { "type": "string", "x-srenautix-dynamic-enum": "sample_refs" }
+          },
           "supporting": {
             "type": "array",
             "maxItems": 12,

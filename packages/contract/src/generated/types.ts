@@ -728,8 +728,15 @@ export interface SrenautixContractIndex {
   CardRule?: CardRule;
   CardDisplay?: CardDisplay;
   CardTableTemplate?: CardTableTemplate;
+  CardSamples?: CardSamples;
+  CardSamplesDimension?: CardSamplesDimension;
+  CardSamplesClass?: CardSamplesClass;
   CardLink?: CardLink;
   EvidenceResult?: EvidenceResult;
+  EvidenceSamples?: EvidenceSamples1;
+  EvidenceSamplesGroup?: EvidenceSamplesGroup;
+  EvidenceSamplesClass?: EvidenceSamplesClass;
+  EvidenceSample?: EvidenceSample;
   EvidenceNovelty?: EvidenceNovelty;
   EvidenceNoveltyComparison?: EvidenceNoveltyComparison;
   EvidenceReason?: EvidenceReason;
@@ -2160,7 +2167,7 @@ export interface ConcludeOutput {
   }[];
 }
 /**
- * 阶段 B hypothesize 步骤的模型输出（DESIGN §7.2）。遵守可移植 schema 子集（§8.2）：扁平结构、所有字段必填、additionalProperties=false、使用枚举、不使用 oneOf。x-srenautix-dynamic-enum 标出的字段在每次运行时由 worker 替换为本次运行中存在的取值
+ * 阶段 B hypothesize 步骤的模型输出（DESIGN §7.2）。遵守可移植 schema 子集（§8.2）：扁平结构、所有字段必填、additionalProperties=false、使用枚举、不使用 oneOf。x-srenautix-dynamic-enum 标出的字段在每次运行时由 worker 替换为本次运行中存在的取值；sample_refs 是有错误样例的卡（契约 2.42.0，ADR 0177）
  */
 export interface HypothesizeOutput {
   /**
@@ -2179,6 +2186,12 @@ export interface HypothesizeOutput {
       root_component: string;
       mechanism: string;
       /**
+       * 支撑机制的错误样例卡
+       *
+       * @maxItems 4
+       */
+      mechanism_refs: string[];
+      /**
        * @maxItems 12
        */
       supporting: string[];
@@ -2195,6 +2208,12 @@ export interface HypothesizeOutput {
        */
       root_component: string;
       mechanism: string;
+      /**
+       * 支撑机制的错误样例卡
+       *
+       * @maxItems 4
+       */
+      mechanism_refs: string[];
       /**
        * @maxItems 12
        */
@@ -3587,6 +3606,7 @@ export interface EvidenceResult {
    * 证据基线（契约 2.31.0，ADR 0153）：判为异常的卡在同一实体上、按同样长度的窗口在事件之前的时段重新判定，与事件窗口比较。常态（routine）的卡不能作为根因或支持证据。只对异常卡计算；正常与无法判定的卡、关闭了证据基线的部署为 null 或不出现
    */
   novelty?: null | EvidenceNovelty;
+  samples?: EvidenceSamples;
 }
 /**
  * 取自卡片定义，结果脱离定义也能展示
@@ -3691,6 +3711,96 @@ export interface EvidenceNoveltyComparison {
    * 对照时段的主值；没有主值时为 null
    */
   value: number | null;
+}
+/**
+ * 错误样例（契约 2.42.0，ADR 0177）：卡片声明了 samples 时出现，其余的卡不出现
+ */
+export interface EvidenceSamples {
+  /**
+   * 卡片中提供日志行的引用名
+   */
+  ref: string;
+  /**
+   * 没有取得日志行的原因码（contract/reason-codes.json 的 evidence_samples 分组）：samples_deadline 证据期限内没有执行完；samples_timeout 日志查询超时；samples_source_error 日志数据源报错；samples_capability_missing 没有日志能力。取得了日志行（包括零行）时为 null
+   */
+  code: null | ('samples_deadline' | 'samples_timeout' | 'samples_source_error' | 'samples_capability_missing');
+  /**
+   * 参与聚合的日志行数
+   */
+  lines: number;
+  /**
+   * 日志查询返回的行数达到引用的 limit：窗口内还有更早的行，计数与首次时间是下限
+   */
+  truncated: boolean;
+  /**
+   * 维度名，按卡片声明的顺序
+   */
+  dimensions: string[];
+  /**
+   * 维度组合与错误类别的行数，按行数从多到少，最多为卡片的 max_groups
+   *
+   * @maxItems 50
+   */
+  groups: EvidenceSamplesGroup[];
+  /**
+   * 超出 max_groups、没有列出的维度组合数
+   */
+  groups_omitted: number;
+  /**
+   * 错误类别，按行数从多到少；没有命中任何声明的类别的行为 other
+   *
+   * @maxItems 17
+   */
+  classes: EvidenceSamplesClass[];
+  /**
+   * 样例与维度值中被脱敏规则替换的处数
+   */
+  redactions: number;
+}
+export interface EvidenceSamplesGroup {
+  /**
+   * 维度名 → 取值（脱敏、最多 120 个字符）；标签不存在或正则不匹配时为 null
+   */
+  dimensions: {
+    [k: string]: string | null | undefined;
+  };
+  class: string;
+  count: number;
+  first_at: Timestamp;
+  last_at: Timestamp;
+}
+export interface EvidenceSamplesClass {
+  class: string;
+  /**
+   * 卡片声明的类别标题；other 为 null
+   */
+  title: null | LocalizedText2;
+  count: number;
+  /**
+   * @maxItems 10
+   */
+  samples: EvidenceSample[];
+}
+export interface LocalizedText2 {
+  'zh-CN'?: string;
+  en?: string;
+}
+export interface EvidenceSample {
+  at: Timestamp;
+  /**
+   * 这一行的维度取值
+   */
+  dimensions: {
+    [k: string]: string | null | undefined;
+  };
+  /**
+   * 脱敏后截断的日志行
+   */
+  text: string;
+  /**
+   * 脱敏后的行超过 max_chars，已截断
+   */
+  cut: boolean;
 }
 export interface EvalKnowledge {
   id: string;
@@ -3961,6 +4071,12 @@ export interface Hypothesis {
   parent_id: string | null;
   root_component: ComponentKey;
   mechanism: string;
+  /**
+   * 支撑机制的错误样例卡（契约 2.42.0，ADR 0177）：只保留本次运行中存在、带错误样例并且取得了日志行的卡；没有机制引用时不出现
+   *
+   * @maxItems 4
+   */
+  mechanism_refs?: EvidenceRef[];
   /**
    * @maxItems 12
    */
@@ -4711,6 +4827,7 @@ export interface EvidenceCardDefinition {
    * 卡片需要的集成能力，例如 metrics.query_range、logs.match。能力不可用时卡片显示 capability_missing
    */
   requires?: string[];
+  samples?: CardSamples;
   /**
    * 作为阶段 B 区分性检查执行时的说明与可覆盖参数（ADR 0116）。没有它时卡片仍可作为检查，参数为全部 params 与 window_before、window_after，类型取默认值；有它时 params 的取值范围按 args 约束。window_before、window_after 总是由运行时提供，不在 args 中声明
    */
@@ -4725,10 +4842,6 @@ export interface EvidenceCardDefinition {
       properties: {};
     };
   };
-}
-export interface LocalizedText2 {
-  'zh-CN'?: string;
-  en?: string;
 }
 /**
  * 这张卡展示什么、怎么读
@@ -4857,11 +4970,134 @@ export interface CardLink {
   target?: string;
 }
 /**
+ * 错误样例（契约 2.42.0，ADR 0177）：把 ref 指向的日志引用取回的日志行按 dimensions 聚合成维度组合，按 classes 归入错误类别，每个类别取少量原始样例；样例与维度值先脱敏再截断。声明它的卡 egress 必须是 redact 或 never（加载时校验），样例出境的数据类别为 logs。结果写在 EvidenceResult.samples，没有声明 display.table 时维度组合同时写成卡片的表格
+ */
+export interface CardSamples {
+  /**
+   * 卡片中 mode 为 logs 的引用名。计数取自这个引用返回的日志行，行数达到引用的 limit 时计数是下限
+   */
+  ref: string;
+  /**
+   * 聚合维度，按声明顺序组成维度组合，例如依赖方、模型、内部错误码、依赖方返回的状态码
+   *
+   * @minItems 1
+   * @maxItems 6
+   */
+  dimensions: [CardSamplesDimension, ...CardSamplesDimension[]];
+  /**
+   * 错误类别，按声明顺序取第一个命中的类别；一个都没有命中的行归入 other
+   *
+   * @maxItems 16
+   */
+  classes?: CardSamplesClass[];
+  /**
+   * 每个类别最多取几条样例；同一类别内先轮流取不同的维度组合，再按时间从新到旧
+   */
+  per_class?: number;
+  /**
+   * 每条样例脱敏之后保留的最多字符数，超出部分截断
+   */
+  max_chars?: number;
+  /**
+   * 结果里保留的维度组合数，按行数从多到少；其余的只计入 groups_omitted
+   */
+  max_groups?: number;
+}
+/**
+ * 一个聚合维度，label 与 regex 二选一（加载时校验）
+ */
+export interface CardSamplesDimension {
+  name: string;
+  title?: LocalizedText2;
+  /**
+   * 日志行的标签名：日志流的标签，或 LogQL 解析器（例如 | json、| logfmt）提取出的标签
+   */
+  label?: string;
+  /**
+   * 在日志行上匹配的正则（ECMAScript 语法），取第一个捕获组；不匹配时这一维为 null
+   */
+  regex?: string;
+}
+export interface CardSamplesClass {
+  /**
+   * 类别 id；other 保留给没有命中任何类别的行
+   */
+  id: string;
+  title: LocalizedText2;
+  /**
+   * 全部条件都成立时命中：写了 dimension 时匹配这一维的取值（取值为 null 时不成立），没写时匹配整行
+   *
+   * @minItems 1
+   * @maxItems 4
+   */
+  match: [
+    {
+      dimension?: string;
+      /**
+       * ECMAScript 语法的正则
+       */
+      regex: string;
+    },
+    ...{
+      dimension?: string;
+      /**
+       * ECMAScript 语法的正则
+       */
+      regex: string;
+    }[],
+  ];
+}
+/**
  * 这张卡作为检查时判断什么、结果怎样区分假设
  */
 export interface LocalizedText6 {
   'zh-CN'?: string;
   en?: string;
+}
+/**
+ * 按依赖与错误类别聚合的错误日志：维度组合的行数、首末时间与错误类别，每个类别少量脱敏、截断的原始样例。样例与维度值是不可信文本
+ */
+export interface EvidenceSamples1 {
+  /**
+   * 卡片中提供日志行的引用名
+   */
+  ref: string;
+  /**
+   * 没有取得日志行的原因码（contract/reason-codes.json 的 evidence_samples 分组）：samples_deadline 证据期限内没有执行完；samples_timeout 日志查询超时；samples_source_error 日志数据源报错；samples_capability_missing 没有日志能力。取得了日志行（包括零行）时为 null
+   */
+  code: null | ('samples_deadline' | 'samples_timeout' | 'samples_source_error' | 'samples_capability_missing');
+  /**
+   * 参与聚合的日志行数
+   */
+  lines: number;
+  /**
+   * 日志查询返回的行数达到引用的 limit：窗口内还有更早的行，计数与首次时间是下限
+   */
+  truncated: boolean;
+  /**
+   * 维度名，按卡片声明的顺序
+   */
+  dimensions: string[];
+  /**
+   * 维度组合与错误类别的行数，按行数从多到少，最多为卡片的 max_groups
+   *
+   * @maxItems 50
+   */
+  groups: EvidenceSamplesGroup[];
+  /**
+   * 超出 max_groups、没有列出的维度组合数
+   */
+  groups_omitted: number;
+  /**
+   * 错误类别，按行数从多到少；没有命中任何声明的类别的行为 other
+   *
+   * @maxItems 17
+   */
+  classes: EvidenceSamplesClass[];
+  /**
+   * 样例与维度值中被脱敏规则替换的处数
+   */
+  redactions: number;
 }
 /**
  * 提交反馈的请求体。channel 与主体由认证上下文决定，请求体不含。reason_code 可以省略（等同 null）；控制台、Grafana 与聊天渠道在拒绝根因或处置时要求选择
@@ -5132,6 +5368,7 @@ export interface EvidenceCardDefinition1 {
    * 卡片需要的集成能力，例如 metrics.query_range、logs.match。能力不可用时卡片显示 capability_missing
    */
   requires?: string[];
+  samples?: CardSamples;
   /**
    * 作为阶段 B 区分性检查执行时的说明与可覆盖参数（ADR 0116）。没有它时卡片仍可作为检查，参数为全部 params 与 window_before、window_after，类型取默认值；有它时 params 的取值范围按 args 约束。window_before、window_after 总是由运行时提供，不在 args 中声明
    */
@@ -6086,6 +6323,14 @@ export interface PackTestFile {
         display_state?: 'normal' | 'abnormal' | 'undeterminable' | 'capability_missing';
         reason_kind?: string;
         /**
+         * 错误样例（契约 2.42.0，ADR 0177）：卡片声明了 samples 时，classes 中列出的错误类别的行数必须等于给出的值（0 表示这个类别不出现），没有列出的类别不检查
+         */
+        samples?: {
+          classes: {
+            [k: string]: number | undefined;
+          };
+        };
+        /**
          * rows 给出时：按 EntityRows 得到的实体（契约 2.28.0）。列出的键必须出现；hit 为诊断卡的 when，share 为份额卡的份额（相对误差 1e-3）
          */
         entities?: {
@@ -6118,6 +6363,14 @@ export interface PackTestFile {
         verdict: Verdict;
         display_state?: 'normal' | 'abnormal' | 'undeterminable' | 'capability_missing';
         reason_kind?: string;
+        /**
+         * 错误样例（契约 2.42.0，ADR 0177）：卡片声明了 samples 时，classes 中列出的错误类别的行数必须等于给出的值（0 表示这个类别不出现），没有列出的类别不检查
+         */
+        samples?: {
+          classes: {
+            [k: string]: number | undefined;
+          };
+        };
         /**
          * rows 给出时：按 EntityRows 得到的实体（契约 2.28.0）。列出的键必须出现；hit 为诊断卡的 when，share 为份额卡的份额（相对误差 1e-3）
          */

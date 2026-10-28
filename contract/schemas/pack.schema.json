@@ -1340,6 +1340,19 @@
                     "enum": ["normal", "abnormal", "undeterminable", "capability_missing"]
                   },
                   "reason_kind": { "type": "string" },
+                  "samples": {
+                    "type": "object",
+                    "description": "错误样例（契约 2.42.0，ADR 0177）：卡片声明了 samples 时，classes 中列出的错误类别的行数必须等于给出的值（0 表示这个类别不出现），没有列出的类别不检查",
+                    "additionalProperties": false,
+                    "required": ["classes"],
+                    "properties": {
+                      "classes": {
+                        "type": "object",
+                        "propertyNames": { "pattern": "^[a-z][a-z0-9_]*$" },
+                        "additionalProperties": { "type": "integer", "minimum": 0 }
+                      }
+                    }
+                  },
                   "entities": {
                     "type": "array",
                     "description": "rows 给出时：按 EntityRows 得到的实体（契约 2.28.0）。列出的键必须出现；hit 为诊断卡的 when，share 为份额卡的份额（相对误差 1e-3）",
