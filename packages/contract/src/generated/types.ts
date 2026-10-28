@@ -752,11 +752,14 @@ export interface SrenautixContractIndex {
   CardRule?: CardRule;
   CardDisplay?: CardDisplay;
   CardTableTemplate?: CardTableTemplate;
+  CardControls?: CardControls;
   CardSamples?: CardSamples;
   CardSamplesDimension?: CardSamplesDimension;
   CardSamplesClass?: CardSamplesClass;
   CardLink?: CardLink;
   EvidenceResult?: EvidenceResult;
+  EvidenceControls?: EvidenceControls1;
+  EvidenceControlResult?: EvidenceControlResult;
   EvidenceSamples?: EvidenceSamples1;
   EvidenceSamplesGroup?: EvidenceSamplesGroup;
   EvidenceSamplesClass?: EvidenceSamplesClass;
@@ -3644,6 +3647,7 @@ export interface EvidenceResult {
    */
   novelty?: null | EvidenceNovelty;
   samples?: EvidenceSamples;
+  controls?: EvidenceControls;
 }
 /**
  * 取自卡片定义，结果脱离定义也能展示
@@ -3838,6 +3842,56 @@ export interface EvidenceSample {
    * 脱敏后的行超过 max_chars，已截断
    */
   cut: boolean;
+}
+/**
+ * 对照结果（契约 2.44.0，ADR 0179）：卡片声明了 controls 时出现。对照对象与故障对象同一时段的判定，对照对象的异常只说明同时段相关，不证明因果
+ */
+export interface EvidenceControls {
+  /**
+   * 选择方式，取值与卡片声明的 controls.method 相同
+   */
+  method: 'entry_peers';
+  /**
+   * 区分对象的标签名
+   */
+  by: string;
+  /**
+   * 故障对象的键（by 标签的取值），它自己的判定是这张卡的主结果
+   */
+  subject: string;
+  /**
+   * 同一入口上除故障对象之外可作为对照的对象数
+   */
+  candidates: number;
+  /**
+   * 选出的对照对象的判定，先按请求量选出的，后随机选出的
+   *
+   * @maxItems 20
+   */
+  results: EvidenceControlResult[];
+}
+/**
+ * 一个对照对象的判定，字段含义与 EvidenceResult 的同名字段相同；没有对照对象的序列时 verdict 为 undeterminable
+ */
+export interface EvidenceControlResult {
+  /**
+   * 对照对象的键
+   */
+  subject: string;
+  /**
+   * top_n 按请求量选出；sampled 以事件 id 为种子随机选出
+   */
+  picked_by: 'top_n' | 'sampled';
+  /**
+   * 排序用的请求量；没有时为 null
+   */
+  volume: number | null;
+  verdict: Verdict;
+  display_state: 'normal' | 'abnormal' | 'undeterminable' | 'capability_missing';
+  reason: EvidenceReason;
+  value: string | null;
+  value_number: number | null;
+  anomaly_started_at: null | Timestamp;
 }
 export interface RuleConclusion {
   /**
@@ -4906,6 +4960,7 @@ export interface EvidenceCardDefinition {
    */
   requires?: string[];
   samples?: CardSamples;
+  controls?: CardControls;
   /**
    * 作为阶段 B 区分性检查执行时的说明与可覆盖参数（ADR 0116）。没有它时卡片仍可作为检查，参数为全部 params 与 window_before、window_after，类型取默认值；有它时 params 的取值范围按 args 约束。window_before、window_after 总是由运行时提供，不在 args 中声明
    */
@@ -5126,11 +5181,60 @@ export interface CardSamplesClass {
   ];
 }
 /**
+ * 对照对象（契约 2.44.0，ADR 0179）：refs 列出的指标引用返回同一入口上全部对象的序列，每条序列带标签 by；卡片对故障对象（标签值等于实体名）与选出的对照对象各判定一次，每次只看标签值等于该对象的序列。结果写在 EvidenceResult.controls，共因结论按它检验。refs 与 volume 必须是 mode 为 range 或 instant 的指标引用（加载时校验）
+ */
+export interface CardControls {
+  /**
+   * 对照对象的选择方式，枚举可以扩展。entry_peers：同一入口的其他对象，按 volume 引用的请求量从多到少取前 top_n 个，再以事件 id 为种子随机取 sample_count 个，随机结果在重放时可以复现
+   */
+  method: 'entry_peers';
+  /**
+   * 区分对象的标签名，序列的这个标签取值就是对象的键
+   */
+  by: string;
+  /**
+   * 按 by 标签拆分后分别判定的指标引用名
+   *
+   * @minItems 1
+   */
+  refs: [string, ...string[]];
+  /**
+   * 用来排序的请求量引用名，必须在 refs 中；按序列取值之和排序
+   */
+  volume: string;
+  top_n?: number;
+  sample_count?: number;
+}
+/**
  * 这张卡作为检查时判断什么、结果怎样区分假设
  */
 export interface LocalizedText6 {
   'zh-CN'?: string;
   en?: string;
+}
+export interface EvidenceControls1 {
+  /**
+   * 选择方式，取值与卡片声明的 controls.method 相同
+   */
+  method: 'entry_peers';
+  /**
+   * 区分对象的标签名
+   */
+  by: string;
+  /**
+   * 故障对象的键（by 标签的取值），它自己的判定是这张卡的主结果
+   */
+  subject: string;
+  /**
+   * 同一入口上除故障对象之外可作为对照的对象数
+   */
+  candidates: number;
+  /**
+   * 选出的对照对象的判定，先按请求量选出的，后随机选出的
+   *
+   * @maxItems 20
+   */
+  results: EvidenceControlResult[];
 }
 /**
  * 按依赖与错误类别聚合的错误日志：维度组合的行数、首末时间与错误类别，每个类别少量脱敏、截断的原始样例。样例与维度值是不可信文本
@@ -5447,6 +5551,7 @@ export interface EvidenceCardDefinition1 {
    */
   requires?: string[];
   samples?: CardSamples;
+  controls?: CardControls;
   /**
    * 作为阶段 B 区分性检查执行时的说明与可覆盖参数（ADR 0116）。没有它时卡片仍可作为检查，参数为全部 params 与 window_before、window_after，类型取默认值；有它时 params 的取值范围按 args 约束。window_before、window_after 总是由运行时提供，不在 args 中声明
    */
