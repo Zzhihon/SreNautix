@@ -18,7 +18,7 @@ import type { Tool } from '../tools/box.js';
 import { citedCards, conclusionMechanism } from './axes.js';
 import { runEnvironment } from './environment.js';
 import { replayCase, type Excluded } from './leakage.js';
-import { supportedCards, topComponents, type RunRecord } from './score.js';
+import { ruleFallback, supportedCards, topComponents, type RunRecord } from './score.js';
 import { SnapshotTools } from './vcr.js';
 
 // 回放评测：每个用例 × 每条路由 × k 次运行，各自独立运行阶段 B（replay 模式，不提交提议，不写库）。
@@ -191,6 +191,8 @@ export async function runEval(p: EvalPlan): Promise<EvalOutcome> {
             durationMs: Date.now() - started,
             error: `model_unavailable: ${message}`,
             proposals: [],
+            // 没有模型结论时按阶段 A 的规则判定（ADR 0178）
+            ...ruleFallback(s.context.stage_a, p.language === 'zh' ? 'zh-CN' : 'en'),
           });
           if (++unreachable > MAX_UNREACHABLE_SHARE * planned) {
             throw new EvalInfrastructureError(
@@ -257,6 +259,8 @@ export async function runEval(p: EvalPlan): Promise<EvalOutcome> {
           // 机制命中与证据扎根（ADR 0180）
           mechanism: out ? conclusionMechanism(out) : null,
           citedCards: out ? citedCards(out, s.context.stage_a.cards) : [],
+          // 没有模型结论时按阶段 A 的规则判定（ADR 0178），机制也取规则的
+          ...(out ? {} : ruleFallback(s.context.stage_a, p.language === 'zh' ? 'zh-CN' : 'en')),
         });
         logger.info('评测运行完成', {
           case_id: c.case_id,
