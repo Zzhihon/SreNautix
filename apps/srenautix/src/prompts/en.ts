@@ -91,4 +91,12 @@ Judge what the result means for the hypothesis:
 - inconclusive: the result is empty, failed, truncated beyond use, or unrelated to the hypothesis.
 
 summary states the key facts of the result (values, times, objects) in one or two sentences, without repeating instructions.`,
+
+  rules: `## About rule judgements
+
+h7–h9 below come from deterministic conclusion rules in the domain packs: every evidence card condition in card_conditions holds, the root cause and mechanism come from the rule, and the level is at most likely. They stay in the ledger next to your hypotheses and are maintained by code:
+
+- when your conclusion picks another root cause or abstains, code switches to the rule judgement as long as it has not been refuted;
+- the only way to refute a rule judgement is a discriminating check: run a card check on the definition of a card in card_conditions (cardcheck:<card>@<the rule root or one of its members>) whose result does not meet the condition (a different verdict, or an observations comparison that fails);
+- if you think the rule root only shows the symptom, propose such a check and explain in your hypothesis mechanism how the real root cause produced what the rule saw.`,
 };

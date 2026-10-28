@@ -233,6 +233,105 @@ describe('录制的研判回放', () => {
     expect(kept.out.validation_notes.join('\n')).not.toMatch(/ADR 0169/);
   });
 
+  it('规则判定（ADR 0178）：与模型结论一致时不改变结论；模型选了别的根因、又没有推翻规则判定时改选规则判定', async () => {
+    const run = async (rc: ReturnType<typeof researchCase>) => {
+      const server = new ReplayServer();
+      await server.start();
+      server.enqueue(...recorded.responses);
+      const tools = await metricsTools(mcp.url);
+      const res = await runStageB(
+        { runId: '7a1b2c3d-0000-4000-8000-0000000000b5', rc, previous: null, signal: new AbortController().signal },
+        testEnv(testLayer([testRoute(server.baseUrl)]), tools.tools, false),
+        new MemorySink(),
+      );
+      await tools.close();
+      await server.stop();
+      expect(server.pending).toBe(0);
+      const v = validatorFor('schemas/research-output.schema.json');
+      expect(v(res.output), JSON.stringify(v.errors)).toBe(true);
+      return res.output!;
+    };
+    const base = researchCase();
+    const PVC = 'PersistentVolumeClaim:shop/data-postgres-0';
+    const PG = 'StatefulSet:shop/postgres';
+
+    // 规则判定落在数据卷上，与模型的结论（h1，数据卷）一致：结论、档位与四项条件都与没有规则判定时相同
+    const agree = await run({
+      ...base,
+      stageA: {
+        ...base.stageA,
+        rule_conclusions: [
+          {
+            rule_id: 'pvc/volume-full',
+            title: { 'zh-CN': '数据卷写满' },
+            root_component: PVC,
+            mechanism: { 'zh-CN': '数据卷写满，数据库写入失败' },
+            level: 'likely',
+            basis: ['card:2'],
+            card_conditions: [{ card: 'pvc/capacity/used_ratio', verdict: 'abnormal', observations: [], on: 'self' }],
+          },
+        ],
+      },
+    });
+    expect(agree.conclusion).toMatchObject({
+      level: 'likely',
+      hypothesis_id: 'h1',
+      root_component: PVC,
+      consistency: { entity_in_scope: true, onset_precedes_symptom: true, no_contrary_normal: true },
+    });
+    expect(agree.conclusion.consistency_detail?.chosen_by).toBe('model');
+    expect(agree.hypotheses.find((h) => h.id === 'h7')).toMatchObject({
+      rule_id: 'pvc/volume-full',
+      status: 'supported',
+    });
+
+    // 规则判定落在数据库上（实例 OOM 引发主库切换），模型仍选数据卷：没有检查推翻规则判定，代码改选 h7
+    const pgCard = (n: number, cardId: string, observations: Record<string, number>) => ({
+      ...base.stageA.cards[0]!,
+      ref: `card:${n}`,
+      card_id: cardId,
+      entity: { cluster_id: 'test', kind: 'StatefulSet', namespace: 'shop', name: 'postgres', uid: null },
+      value: null,
+      observations,
+      anomaly_started_at: null,
+    });
+    const corrected = await run({
+      ...base,
+      stageA: {
+        ...base.stageA,
+        cards: [
+          ...base.stageA.cards,
+          pgCard(6, 'postgres/availability/oom-kills', { ooms: 1 }),
+          pgCard(7, 'postgres/availability/primary-changes', { changes: 2 }),
+        ],
+        rule_conclusions: [
+          {
+            rule_id: 'postgres/oom-failover',
+            title: { 'zh-CN': '实例 OOM 引发主库切换' },
+            root_component: PG,
+            mechanism: { 'zh-CN': '主库实例被 OOM 终止，集群提升备库，连接全部断开' },
+            level: 'likely',
+            basis: ['card:6', 'card:7'],
+            card_conditions: [
+              { card: 'postgres/availability/oom-kills', verdict: 'abnormal', observations: [], on: 'self' },
+              {
+                card: 'postgres/availability/primary-changes',
+                verdict: 'abnormal',
+                observations: [{ name: 'changes', op: 'gt', value: 0 }],
+                on: 'self',
+              },
+            ],
+          },
+        ],
+      },
+    });
+    expect(corrected.conclusion).toMatchObject({ level: 'likely', hypothesis_id: 'h7', root_component: PG });
+    expect(corrected.conclusion.consistency_detail?.chosen_by).toBe('rule');
+    expect(corrected.validation_notes.join('\n')).toMatch(
+      /模型选中 h1（PersistentVolumeClaim:shop\/data-postgres-0），规则判定 postgres\/oom-failover（StatefulSet:shop\/postgres）没有被检查推翻/,
+    );
+  });
+
   it('研判子图没有组件：不提出假设，直接结论为 undetermined', async () => {
     const server = new ReplayServer();
     await server.start();

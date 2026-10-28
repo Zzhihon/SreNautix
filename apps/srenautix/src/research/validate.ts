@@ -8,6 +8,7 @@ import type {
 import { displayKey, tryNodeKey } from '@srenautix/core';
 import { validatorOf, formatErrors } from '../llm/schema.js';
 import type { EvidenceBook } from './evidence.js';
+import type { ChosenBy } from './ladder.js';
 import type { Ledger, LedgerEntry } from './ledger.js';
 import { auditText, buildCorpus, cardMaterial, type NumberCorpus } from './numbers.js';
 import type { DispositionFacts } from './types.js';
@@ -74,8 +75,11 @@ export function renumberRecommendations(value: unknown, notes: string[]): unknow
 
 export interface Validated {
   chosen: LedgerEntry | null;
-  /** 结论假设的来源：模型选中；模型弃权时由代码按账本选中（ADR 0120，档位最高 likely） */
-  chosenBy: 'model' | 'ledger' | null;
+  /**
+   * 结论假设的来源：模型选中；模型弃权时由代码按账本选中（ADR 0120，档位最高 likely）；规则判定没有被检查推翻、
+   * 结论的根因又不是它时由代码改选（ADR 0178，档位最高 likely）
+   */
+  chosenBy: ChosenBy | null;
   undeterminedReason: string | null;
   situation: string;
   summary: string;
@@ -167,6 +171,21 @@ export function validateConclusion(
   if (!chosen && !undeterminedReason) {
     undeterminedReason = '模型没有给出原因';
     notes.push('结论为无法判定但没有原因，补为"模型没有给出原因"');
+  }
+  // 规则判定（ADR 0178）：账本中没有被推翻的规则判定都不落在结论的根因上时（模型弃权，或选了别的根因），模型没有给出
+  // 推翻规则条件的检查结果，代码改选排名最靠前的规则判定；结论的根因与某个规则判定相同时保持原来的选择
+  const rules = ledger.ruleEntries().filter((e) => e.status !== 'refuted');
+  if (chosen?.rule) {
+    chosenBy = 'rule';
+  } else if (rules.length && !rules.some((e) => e.rootComponent === chosen?.rootComponent)) {
+    const pick = ledger.ranked().find((e) => e.rule !== undefined && e.status !== 'refuted') as LedgerEntry;
+    notes.push(
+      `${chosen ? `模型选中 ${chosen.id}（${displayKey(chosen.rootComponent)}）` : '模型弃权'}，规则判定 ${pick.rule!.rule_id}（${displayKey(
+        pick.rootComponent,
+      )}）没有被检查推翻：没有一项区分性检查在它的卡片条件上得出不满足条件的结果，代码改选规则判定 ${pick.id}（ADR 0178）`,
+    );
+    chosen = pick;
+    chosenBy = 'rule';
   }
   if (chosen) {
     undeterminedReason = null;

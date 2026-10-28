@@ -60,6 +60,7 @@ export const TRIM = {
   sampleCounts: 10,
   relevantCards: 11,
   samples: 12,
+  ruleConclusions: 13,
 } as const;
 
 /** 裁剪后保留的最近变更条数 */
@@ -936,14 +937,17 @@ function ledgerSegment(ledger: Ledger, book: EvidenceBook, p: PromptParts): Segm
     seg(
       fenced(
         '假设账本（代码维护）',
-        ledger.ranked().map((e) => ({
-          id: e.id,
-          root_component: e.rootComponent,
-          mechanism: e.mechanism,
-          status: e.status,
-          basis: e.reasons.slice(-3),
-          checks_run: e.checksRun,
-        })),
+        ledger
+          .ranked()
+          .filter((e) => e.rule === undefined)
+          .map((e) => ({
+            id: e.id,
+            root_component: e.rootComponent,
+            mechanism: e.mechanism,
+            status: e.status,
+            basis: e.reasons.slice(-3),
+            checks_run: e.checksRun,
+          })),
       ),
       [],
       'redact',
@@ -953,6 +957,41 @@ function ledgerSegment(ledger: Ledger, book: EvidenceBook, p: PromptParts): Segm
     ...[samplesSegment([...extra, ...checks], `${SAMPLES_TITLE}：假设相关的卡与区分性检查产生的卡`)].filter(
       (s): s is Segment => s !== null,
     ),
+  ];
+}
+
+/**
+ * 规则判定（ADR 0178）：阶段 A 由领域包的确定性结论规则给出的根因候选，在账本中是 h7–h9。放在可裁剪的片段里，
+ * 最后裁剪（TRIM.ruleConclusions）；裁掉之后代码照样按账本执行规则判定的检验与改选
+ */
+export function ruleSegment(ledger: Ledger, language: Language): Segment[] {
+  const rules = ledger.ruleEntries();
+  if (!rules.length) {
+    return [];
+  }
+  const view = rules.map((e) => ({
+    id: e.id,
+    rule: e.rule!.rule_id,
+    root_component: e.rootComponent,
+    mechanism: e.mechanism,
+    status: e.status,
+    basis: e.supporting,
+    card_conditions: e.rule!.card_conditions.map((c) => ({
+      card: c.card,
+      verdict: c.verdict,
+      ...(c.observations.length ? { observations: c.observations } : {}),
+      ...(c.on === 'incident' ? { on: c.on } : {}),
+    })),
+  }));
+  return [
+    {
+      ...seg(
+        `${PROMPTS[language].rules}\n${fenced(language === 'zh' ? '规则判定' : 'Rule judgements', view)}`,
+        [],
+        'redact',
+      ),
+      trim: { rank: TRIM.ruleConclusions, label: `规则判定 ${rules.length} 条`, next: () => null },
+    },
   ];
 }
 
@@ -993,7 +1032,8 @@ export function hypothesizeItems(
     {
       type: 'user',
       segments: [
-        ...(ledger && ledger.list().length ? ledgerSegment(ledger, book, p) : []),
+        ...(ledger && ledger.modelEntries().length ? ledgerSegment(ledger, book, p) : []),
+        ...(ledger ? ruleSegment(ledger, language) : []),
         seg(PROMPTS[language].hypothesize, [], 'allow'),
       ],
     },
@@ -1011,7 +1051,7 @@ export function dispositionSegment(c: ResearchCase, ledger: Ledger): Segment[] {
   }
   const roots = new Set(
     ledger
-      .list()
+      .modelEntries()
       .filter((e) => e.status !== 'refuted')
       .map((e) => e.rootComponent),
   );
@@ -1045,6 +1085,7 @@ export function concludeItems(language: Language, p: PromptParts, ledger: Ledger
       type: 'user',
       segments: [
         ...ledgerSegment(ledger, book, p),
+        ...ruleSegment(ledger, language),
         ...dispositionSegment(p.rc, ledger),
         seg(PROMPTS[language].conclude, [], 'allow'),
       ],

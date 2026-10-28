@@ -8,12 +8,16 @@ import type { Ledger, LedgerEntry } from './ledger.js';
 // 3. 该机制所需的信号上没有相反的正常卡；
 // 4. 至少检验并排除过一个竞争假设，并且没有竞争假设同样处于支持状态（ADR 0124）。
 // 只读工具结果由小模型判定的卡可以支持 likely，不能单独支撑 evidence_consistent。
-// 模型在 conclude 弃权、由代码按账本选中的假设（ADR 0120）最高为 likely；只有成员告警支持的假设（ADR 0122）为 likely。
+// 模型在 conclude 弃权、由代码按账本选中的假设（ADR 0120）最高为 likely；只有成员告警支持的假设（ADR 0122）为 likely；
+// 规则判定的假设（ADR 0178）为 likely。
 // 选中的假设有相反证据时（自己的检查给出推翻结果，或异常出现时间晚于症状），无论由模型还是代码选中，档位最高为
 // inconclusive（ADR 0134，contraryLimits）。
 // 每个条件的依据写进 consistency_detail（ADR 0125），通知与 issue 据此逐项说明档位。
 
 export const ONSET_TOLERANCE_MS = 2 * 60_000;
+
+/** 结论假设的来源：模型选中；模型弃权时代码按账本选中（ADR 0120）；规则判定没有被推翻时由代码改选（ADR 0178） */
+export type ChosenBy = 'model' | 'ledger' | 'rule';
 
 export interface Consistency {
   entity_in_scope: boolean;
@@ -108,7 +112,7 @@ function detailOf(
   ledger: Ledger,
   chosen: LedgerEntry,
   incident: Incident,
-  chosenBy: 'model' | 'ledger' | null,
+  chosenBy: ChosenBy | null,
 ): ConsistencyDetail {
   const e = evidenceConditions(ledger, chosen);
   return {
@@ -130,7 +134,7 @@ export function judgeLadder(
   chosen: LedgerEntry | null,
   incident: Incident,
   hasHypotheses: boolean,
-  chosenBy: 'model' | 'ledger' | null = 'model',
+  chosenBy: ChosenBy | null = 'model',
 ): LadderResult {
   if (!chosen) {
     return { level: hasHypotheses ? 'inconclusive' : 'undetermined', consistency: NONE, detail: null, notes: [] };
@@ -143,13 +147,33 @@ export function judgeLadder(
     if (why.length === 0 || r.level === 'inconclusive') {
       return r;
     }
-    const by = chosenBy === 'ledger' ? '代码按账本选中的' : '模型选中的';
+    const by = chosenBy === 'ledger' ? '代码按账本选中的' : chosenBy === 'rule' ? '规则判定的' : '模型选中的';
     return {
       ...r,
       level: 'inconclusive',
       notes: [...r.notes, `${by}假设 ${chosen.id} ${why.join('；')}，档位由 ${r.level} 退回 inconclusive（ADR 0134）`],
     };
   };
+  // 规则判定的假设（ADR 0178）：依据由领域包的确定性规则给出，档位为 likely，不能到 evidence_consistent；
+  // 相反证据照样退回 inconclusive（ADR 0134）
+  if (chosen.rule) {
+    const ruleSupport = support.filter((c) => c.judgedBy === 'rule');
+    const onset = symptomOnset(incident);
+    return capped({
+      level: 'likely',
+      consistency: {
+        entity_in_scope: ruleSupport.length > 0,
+        onset_precedes_symptom: ruleSupport.some((c) => {
+          const t = c.result.anomaly_started_at;
+          return t !== null && t !== undefined && Date.parse(t) <= onset + ONSET_TOLERANCE_MS;
+        }),
+        no_contrary_normal: ledger.ruleRefutations(chosen).length === 0,
+        competitor_tested: ledger.competitorTested(chosen),
+      },
+      detail,
+      notes: [`假设 ${chosen.id} 是规则判定（${chosen.rule.rule_id}），档位最高为 likely（ADR 0178）`],
+    });
+  }
   if (support.length === 0) {
     const alerts = ledger.supportAlerts(chosen);
     if (alerts.length > 0) {
