@@ -27,6 +27,21 @@ signals:
       - expr: >-
           sum by (namespace, pod) (pg_stat_activity_count{$selector})
           / max by (namespace, pod) (pg_settings_max_connections{$selector})
+  # 全部语句的平均执行耗时（pg_stat_statements，取自 postgres_exporter 的 stat_statements 采集器）与一天前同一时刻的值
+  - id: statement_mean_seconds_total
+    kind: metrics
+    unit: seconds
+    alternatives:
+      - expr: >-
+          sum by (namespace, pod) (rate(pg_stat_statements_seconds_total{$selector}[$rate_window]))
+          / sum by (namespace, pod) (rate(pg_stat_statements_calls_total{$selector}[$rate_window]))
+  - id: statement_mean_seconds_baseline
+    kind: metrics
+    unit: seconds
+    alternatives:
+      - expr: >-
+          sum by (namespace, pod) (rate(pg_stat_statements_seconds_total{$selector}[$rate_window] offset 1d))
+          / sum by (namespace, pod) (rate(pg_stat_statements_calls_total{$selector}[$rate_window] offset 1d))
   - id: connections_by_application
     kind: metrics
     unit: count

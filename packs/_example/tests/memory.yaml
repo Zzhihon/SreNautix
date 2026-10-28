@@ -72,3 +72,21 @@ tests:
     card: pod-memory/oom-logs
     entity: { kind: Pod, namespace: shop, name: web-1 }
     expect: { verdict: normal }
+# 结论规则测试：在同一份夹具上执行列出的卡，判断规则在求值对象（web）上是否命中
+conclusions:
+  - name: 副本被 OOM 终止并有内存不足日志
+    eval_time: 40m
+    rule: oom-killed
+    subject: { kind: Deployment, namespace: shop, name: web, component_type: example.web }
+    cards:
+      - { card: pod-memory/limit-ratio, entity: { kind: Pod, namespace: shop, name: web-2 } }
+      - { card: pod-memory/oom-logs, entity: { kind: Pod, namespace: shop, name: web-2 } }
+    expect: { hit: true }
+  - name: 内存接近 limit 但没有被终止
+    eval_time: 40m
+    rule: oom-killed
+    subject: { kind: Deployment, namespace: shop, name: web, component_type: example.web }
+    cards:
+      - { card: pod-memory/limit-ratio, entity: { kind: Pod, namespace: shop, name: web-0 } }
+      - { card: pod-memory/oom-logs, entity: { kind: Pod, namespace: shop, name: web-0 } }
+    expect: { hit: false }

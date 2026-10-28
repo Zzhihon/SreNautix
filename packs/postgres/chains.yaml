@@ -37,6 +37,37 @@ chains:
               - { header: { zh-CN: 实例, en: Instance }, cel: 'label(row, "pod")' }
               - { header: { zh-CN: 当前角色, en: Role }, cel: 'last(row) == 0.0 ? "primary" : "replica"' }
         egress: allow
+      - id: oom-kills
+        title: { zh-CN: 实例被 OOM 终止, en: Instances OOM-killed }
+        category: memory
+        note:
+          {
+            zh-CN: 实例容器在窗口内被 OOM 终止（cgroup 内存超过 limit）；主库被终止时集群会提升备库,
+            en: Instance containers OOM-killed in the window; killing the primary makes the cluster promote a standby,
+          }
+        applies_to: { kinds: [Cluster, Pod, StatefulSet] }
+        refs:
+          - { name: up, signal: instance_up, mode: instant }
+          - { name: oom, signal: workload/container_oom_events, mode: instant, empty_is: normal }
+        judge:
+          let:
+            - { name: ooms, cel: count(oom) }
+          abnormal_if:
+            - cel: ooms > 0
+              say:
+                {
+                  zh-CN: '{ooms} 个实例容器在窗口内被 OOM 终止',
+                  en: '{ooms} instance containers were OOM-killed in the window',
+                }
+        display:
+          value: double(ooms)
+          unit: count
+          table:
+            rows_from: oom
+            columns:
+              - { header: { zh-CN: 实例, en: Instance }, cel: 'label(row, "pod")' }
+              - { header: { zh-CN: 容器, en: Container }, cel: 'label(row, "container")' }
+        egress: allow
       - id: instances-up
         title: { zh-CN: 实例在线, en: Instances up }
         applies_to: { kinds: [Cluster, Pod, StatefulSet] }
@@ -150,6 +181,41 @@ chains:
                 }
               - { header: { zh-CN: 状态, en: State }, cel: 'label(row, "state")' }
               - { header: { zh-CN: 连接, en: Connections }, cel: last(row), unit: count }
+        egress: allow
+      - id: statement-latency
+        title: { zh-CN: 语句平均耗时对比基线, en: Mean statement time against baseline }
+        category: blocking
+        note:
+          zh-CN: 全部语句的平均执行耗时（pg_stat_statements）与一天前同一时刻相比；超过基线的 params.factor 倍且超过 params.min_seconds 秒说明查询变慢，每个连接被占用的时间变长。没有语句统计时无法判定
+          en: Mean execution time of all statements (pg_stat_statements) against the same time a day earlier; above params.factor times the baseline and params.min_seconds queries are slowing down and hold each connection longer
+        applies_to: { kinds: [Cluster, Pod, StatefulSet] }
+        params: { factor: 1.5, min_seconds: 0.05 }
+        check:
+          description:
+            zh-CN: 语句平均耗时是否高于一天前同一时刻；区分"查询变慢占住连接"与"连接数本身增加"
+            en: Whether mean statement time is above the same time a day earlier
+          args:
+            type: object
+            additionalProperties: false
+            properties:
+              factor: { type: number, minimum: 1.1, maximum: 10, description: 超过基线的这个倍数时判为变慢 }
+              min_seconds: { type: number, minimum: 0, maximum: 60, description: 平均耗时低于它时不判为异常（秒） }
+        refs:
+          - { name: mean, signal: statement_mean_seconds_total, mode: range }
+          - { name: base, signal: statement_mean_seconds_baseline, mode: range }
+        judge:
+          let:
+            - { name: peak, cel: max(mean) }
+            - { name: baseline, cel: max(base) }
+            - { name: anomaly_started_at, cel: 'first_above(mean, double(params.factor) * baseline)' }
+          abnormal_if:
+            - cel: peak > params.min_seconds && peak > params.factor * baseline
+              say:
+                {
+                  zh-CN: '语句平均耗时峰值 {peak, number} 秒，一天前同一时刻 {baseline, number} 秒',
+                  en: 'Mean statement time peaked at {peak, number} s against {baseline, number} s a day earlier',
+                }
+        display: { value: peak, unit: seconds }
         egress: allow
       - id: long-transactions
         title: { zh-CN: 最长事务, en: Longest transaction }

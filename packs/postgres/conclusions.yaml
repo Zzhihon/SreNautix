@@ -1,0 +1,27 @@
+# 确定性结论规则（ADR 0178）：阶段 A 在事件涉及的每个组件上求值，条件全部成立时给出根因候选、机制与依据。
+# 研判可用时规则结论作为一条假设进入账本，模型要选别的根因，必须用区分性检查在条件的卡片定义上给出相反结果；
+# 研判不可用时群消息与事件详情显示规则结论，标明“规则判定”，档位最高为 likely。
+conclusions:
+  - id: oom-failover
+    title: { zh-CN: 实例 OOM 引发主库切换, en: An instance OOM kill caused a primary change }
+    component_types: [postgres.cnpg-cluster, postgres.instance]
+    when:
+      cards:
+        - card: availability/oom-kills
+        - card: availability/primary-changes
+          # 角色确实发生了变化（primary-changes 另一条判定是同时有多个主库）
+          observations: [{ name: changes, op: gt, value: 0 }]
+    mechanism:
+      zh-CN: 数据库实例的容器内存超过 limit 被 OOM 终止，主库进程退出后集群把备库提升为主库；切换期间连接全部断开，应用的查询与事务失败，直到连接重新建立到新主库
+      en: A database instance container exceeded its memory limit and was OOM-killed; with the primary process gone the cluster promoted a standby, dropping every connection so application queries and transactions failed until they reconnected to the new primary
+
+  - id: slow-statements-saturate-connections
+    title: { zh-CN: 语句变慢占满连接, en: Slower statements saturated the connections }
+    component_types: [postgres.cnpg-cluster, postgres.instance]
+    when:
+      cards:
+        - card: saturation/connections
+        - card: saturation/statement-latency
+    mechanism:
+      zh-CN: 语句平均耗时高于平时，每个连接被占用的时间变长，同时在用的连接数顶到 max_connections；新的请求拿不到连接而排队或报错，应用侧表现为超时与连接错误
+      en: Statements ran slower than usual and held each connection longer, so the connections in use reached max_connections; new requests could not get a connection and queued or failed, which the application saw as timeouts and connection errors

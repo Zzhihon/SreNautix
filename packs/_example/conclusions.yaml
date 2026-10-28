@@ -1,0 +1,18 @@
+# 确定性结论规则（ADR 0178）：阶段 A 在事件涉及的每个组件上求值，when 中的条件全部成立时给出根因候选（求值对象本身）、
+# 机制与依据。条件分三类：cards（证据卡在实体上的结论，可以再比较 let 绑定的取值）、alerts（成员告警）、changes（变更与
+# 关联分级）；on: self 只看落在求值对象上的证据，on: incident 看事件里的全部证据。规则结论的档位最高为 likely。
+conclusions:
+  - id: oom-killed
+    title:
+      zh-CN: 容器内存超过 limit 被终止
+      en: Containers were killed for exceeding the memory limit
+    component_types: [example.web]
+    when:
+      cards:
+        - card: pod-memory/limit-ratio
+          # limit-ratio 在内存接近 limit 时也判为异常，这里要求确实发生了 OOM 终止
+          observations: [{ name: ooms, op: gt, value: 0 }]
+        - card: pod-memory/oom-logs
+    mechanism:
+      zh-CN: 容器的内存工作集达到 limit，内核按 cgroup 的内存上限终止进程（OOMKilled），容器重启期间这个副本上的请求失败
+      en: The container working set reached its memory limit and the kernel killed the process at the cgroup limit (OOMKilled); requests to that replica failed while the container restarted
