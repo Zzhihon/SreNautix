@@ -35,7 +35,10 @@ function fixtures(ratio: number): FixtureMetricSeries[] {
   const out = [counter('upstream_requests_total', 'up-0', 10), counter('upstream_errors_total', 'up-0', 9)];
   ['p1', 'p2', 'p3', 'p4', 'p5'].forEach((target, i) => {
     const perMin = 50 - i * 10;
-    out.push(counter('upstream_requests_total', target, perMin), counter('upstream_errors_total', target, perMin * ratio));
+    out.push(
+      counter('upstream_requests_total', target, perMin),
+      counter('upstream_errors_total', target, perMin * ratio),
+    );
   });
   return out;
 }

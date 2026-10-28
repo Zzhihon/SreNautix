@@ -62,20 +62,33 @@ export function controlKeys(c: CompiledControls, data: Readonly<Record<string, R
 }
 
 /** 一个对象在 volume 引用上的请求量：序列取值之和；这个对象没有序列时为 null */
-export function controlVolume(c: CompiledControls, data: Readonly<Record<string, RefData>>, key: string): number | null {
+export function controlVolume(
+  c: CompiledControls,
+  data: Readonly<Record<string, RefData>>,
+  key: string,
+): number | null {
   const mine = metricsOf(data[c.spec.volume]).filter((s) => s.labels[c.spec.by] === key);
   if (!mine.length) {
     return null;
   }
-  return mine.reduce((sum, s) => sum + s.values.reduce<number>((a, v) => (v !== null && Number.isFinite(v) ? a + v : a), 0), 0);
+  return mine.reduce(
+    (sum, s) => sum + s.values.reduce<number>((a, v) => (v !== null && Number.isFinite(v) ? a + v : a), 0),
+    0,
+  );
 }
 
 /** 只保留 by 标签等于 key 的序列：refs 中的引用按它过滤，其余的引用原样保留 */
-export function refsFor(c: CompiledControls, data: Readonly<Record<string, RefData>>, key: string): Record<string, RefData> {
+export function refsFor(
+  c: CompiledControls,
+  data: Readonly<Record<string, RefData>>,
+  key: string,
+): Record<string, RefData> {
   return Object.fromEntries(
     Object.entries(data).map(([name, d]) => [
       name,
-      c.refs.has(name) && d.kind === 'metrics' ? { ...d, series: d.series.filter((s) => s.labels[c.spec.by] === key) } : d,
+      c.refs.has(name) && d.kind === 'metrics'
+        ? { ...d, series: d.series.filter((s) => s.labels[c.spec.by] === key) }
+        : d,
     ]),
   );
 }

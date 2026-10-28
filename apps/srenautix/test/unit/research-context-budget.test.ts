@@ -346,7 +346,11 @@ describe('上下文 16k 的路由上的 conclude', () => {
   });
 
   it('对照结果属于可裁剪的部分：裁剪之后请求体不含对照结果，不可裁剪的部分与没有对照结果时相同（ADR 0179）', () => {
-    const r = (subject: string, verdict: 'normal' | 'abnormal' | 'undeterminable', pickedBy: 'top_n' | 'sampled' = 'top_n') => ({
+    const r = (
+      subject: string,
+      verdict: 'normal' | 'abnormal' | 'undeterminable',
+      pickedBy: 'top_n' | 'sampled' = 'top_n',
+    ) => ({
       subject,
       picked_by: pickedBy,
       volume: 100,

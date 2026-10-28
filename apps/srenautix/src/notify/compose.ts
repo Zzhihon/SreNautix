@@ -272,7 +272,8 @@ const T = {
     samplesMore: (k: number) => `，另有 ${k} 类`,
     samplesNone: '没有取得样例，原因：',
     samplesOther: '其他',
-    controlsLine: (n: number, a: number, k: number, u: number) => `对照：同一入口上的其他 ${n} 个对象，${a} 个异常，${k} 个正常，${u} 个无法判定`,
+    controlsLine: (n: number, a: number, k: number, u: number) =>
+      `对照：同一入口上的其他 ${n} 个对象，${a} 个异常，${k} 个正常，${u} 个无法判定`,
     summary: '摘要：',
     undeterminedReason: '无法判定的原因：',
     hypotheses: '假设：',
@@ -512,7 +513,8 @@ const T = {
     samplesMore: (k: number) => `, ${k} more classes`,
     samplesNone: 'no samples, reason: ',
     samplesOther: 'other',
-    controlsLine: (n: number, a: number, k: number, u: number) => `control: ${n} other objects behind the same entry, ${a} abnormal, ${k} normal, ${u} undeterminable`,
+    controlsLine: (n: number, a: number, k: number, u: number) =>
+      `control: ${n} other objects behind the same entry, ${a} abnormal, ${k} normal, ${u} undeterminable`,
     summary: 'summary: ',
     undeterminedReason: 'why undetermined: ',
     hypotheses: 'Hypotheses:',

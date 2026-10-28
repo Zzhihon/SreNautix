@@ -32,7 +32,11 @@ function subjectCards(book: EvidenceBook, e: LedgerEntry): CardEntry[] {
   );
 }
 
-function tally(results: readonly EvidenceControlResult[]): { abnormal: number; normal: number; undeterminable: number } {
+function tally(results: readonly EvidenceControlResult[]): {
+  abnormal: number;
+  normal: number;
+  undeterminable: number;
+} {
   const t = { abnormal: 0, normal: 0, undeterminable: 0 };
   for (const r of results) {
     t[r.verdict]++;

@@ -41,7 +41,16 @@ function setup(results: EvidenceControlResult[] | null, root = PG) {
   const book = incidentBook(rc);
   const ledger = new Ledger(book, rc.subgraph);
   ledger.merge(
-    [{ id: 'h1', parent_id: null, root_component: root, mechanism: '依赖的组件故障', supporting: ['card:2'], refuting: [] }],
+    [
+      {
+        id: 'h1',
+        parent_id: null,
+        root_component: root,
+        mechanism: '依赖的组件故障',
+        supporting: ['card:2'],
+        refuting: [],
+      },
+    ],
     [],
   );
   ledger.evaluate();
@@ -91,7 +100,9 @@ describe('共因约束', () => {
     expect(['likely', 'evidence_consistent']).toContain(ladder.level);
     const capped = controlCap(ladder, h1, book);
     expect(capped.level).toBe('inconclusive');
-    expect(capped.notes.at(-1)).toMatch(/部分对照对象无法判定.*档位由 (likely|evidence_consistent) 改为 inconclusive（ADR 0179）/);
+    expect(capped.notes.at(-1)).toMatch(
+      /部分对照对象无法判定.*档位由 (likely|evidence_consistent) 改为 inconclusive（ADR 0179）/,
+    );
   });
 
   it('没有对照结果或全部无法判定：对照证据不足，档位最高为 inconclusive', () => {

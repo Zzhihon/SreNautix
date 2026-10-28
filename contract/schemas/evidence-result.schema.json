@@ -152,7 +152,11 @@
       "additionalProperties": false,
       "required": ["method", "by", "subject", "candidates", "results"],
       "properties": {
-        "method": { "type": "string", "description": "选择方式，取值与卡片声明的 controls.method 相同", "enum": ["entry_peers"] },
+        "method": {
+          "type": "string",
+          "description": "选择方式，取值与卡片声明的 controls.method 相同",
+          "enum": ["entry_peers"]
+        },
         "by": { "type": "string", "description": "区分对象的标签名" },
         "subject": { "type": "string", "description": "故障对象的键（by 标签的取值），它自己的判定是这张卡的主结果" },
         "candidates": { "type": "integer", "minimum": 0, "description": "同一入口上除故障对象之外可作为对照的对象数" },
@@ -169,10 +173,24 @@
       "description": "一个对照对象的判定，字段含义与 EvidenceResult 的同名字段相同；没有对照对象的序列时 verdict 为 undeterminable",
       "type": "object",
       "additionalProperties": false,
-      "required": ["subject", "picked_by", "volume", "verdict", "display_state", "reason", "value", "value_number", "anomaly_started_at"],
+      "required": [
+        "subject",
+        "picked_by",
+        "volume",
+        "verdict",
+        "display_state",
+        "reason",
+        "value",
+        "value_number",
+        "anomaly_started_at"
+      ],
       "properties": {
         "subject": { "type": "string", "description": "对照对象的键" },
-        "picked_by": { "type": "string", "description": "top_n 按请求量选出；sampled 以事件 id 为种子随机选出", "enum": ["top_n", "sampled"] },
+        "picked_by": {
+          "type": "string",
+          "description": "top_n 按请求量选出；sampled 以事件 id 为种子随机选出",
+          "enum": ["top_n", "sampled"]
+        },
         "volume": { "type": ["number", "null"], "description": "排序用的请求量；没有时为 null" },
         "verdict": { "$ref": "common.schema.json#/$defs/Verdict" },
         "display_state": { "type": "string", "enum": ["normal", "abnormal", "undeterminable", "capability_missing"] },
