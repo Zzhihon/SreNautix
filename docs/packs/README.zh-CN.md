@@ -257,6 +257,47 @@ abnormal_if:
 - `links` 中的 `explore` 由运行时生成指标查询链接，`runbook` 指向本包的处置手册。
 - `egress: deny` 的卡片内容不进入模型上下文。
 
+**错误样例**
+
+依赖方（例如外部模型服务方）出错时，机制往往写在错误日志里：上游返回的状态码、配额耗尽、能力不支持、本侧判定的超时。`samples` 让一张卡按包声明的维度聚合错误日志，按错误类别给出少量脱敏、截断的原始样例（契约 2.42.0，ADR 0177）。研判的假设用 `mechanism_refs` 引用这类卡，群消息的关键问题写出样例计数。
+
+```yaml
+refs:
+  - { name: errors, signal: gateway_error_lines, mode: logs, limit: 1000, empty_is: normal }
+  - { name: any, signal: gateway_lines, mode: logs, limit: 1 }   # 证明日志流存在
+judge:
+  let:
+    - { name: errs, cel: size(errors) }
+  abnormal_if:
+    - cel: errs >= params.min_errors
+      say: { zh-CN: '窗口内有 {errs} 行错误日志' }
+baseline: false
+samples:
+  ref: errors
+  dimensions:
+    - { name: upstream, label: upstream, title: { zh-CN: 上游 } }     # LogQL 的 | logfmt 或 | json 提取的字段
+    - { name: status, label: status, title: { zh-CN: 状态码 } }
+    - { name: code, label: code, title: { zh-CN: 错误码 } }
+    - { name: candidates, regex: 'candidates=(\d+)' }                 # 在日志行上取第一个捕获组
+  classes:
+    - id: first_content_timeout                                       # 本侧判定的超时排在上游返回的同一状态码之前
+      title: { zh-CN: 首内容超时 }
+      match: [{ dimension: code, regex: '^first_content_timeout$' }]
+    - id: quota_exhausted
+      title: { zh-CN: 配额耗尽 }
+      match: [{ dimension: status, regex: '^429$' }]
+  per_class: 3
+  max_chars: 300
+egress: redact
+```
+
+- `ref` 必须是卡片中 mode 为 `logs` 的引用；计数取自它返回的日志行，行数达到 `limit` 时计数是下限（结果的 `truncated` 为 true，消息与表格在计数前加 `≥`）。没有错误日志行时卡片应当判为正常，所以错误日志的引用写 `empty_is: normal`，另用一个引用证明日志流存在。
+- 维度 1–6 个，`label`（日志流标签或解析器提取的字段）与 `regex`（ECMAScript 语法，至少一个捕获组）二选一；类别至多 16 个，按声明顺序取第一个命中的，`match` 的条件全部成立才命中，写了 `dimension` 时匹配这一维的取值，没写时匹配整行；都没有命中的行归入 `other`。
+- 样例与维度值按出站的脱敏规则先脱敏再截断到 `max_chars`；声明 `samples` 的卡 `egress` 必须是 `redact` 或 `never`，`lint` 检查这一条与上面的声明规则。
+- 结果写在 `samples`：维度组合与类别的行数、首末时间（最多 `max_groups` 个组合），每个类别的样例（同一类别先轮流取不同的维度组合，每个组合从新到旧）。没有写 `display.table` 时维度组合同时成为卡片的表格。
+- 证据期限内没有取完、日志查询超时、数据源报错或没有日志能力时，`samples.code` 给出原因码（`samples_deadline`、`samples_timeout`、`samples_source_error`、`samples_capability_missing`）。
+- 描述故障类型的错误样例卡写 `baseline: false`（ADR 0164）。
+
 ## 组件的可读名称
 
 组件键以对象名或 id 为名，例如上游服务的 UUID。组件类型可以声明 `display_name`，事件标题、通知、控制台与 issue 优先显示它；组件键本身不变：
@@ -513,6 +554,7 @@ tests:
 - 测试的 `params` 字段覆盖卡片参数，用于验证阈值行为。
 - dbstats 夹具写在 `input_dbstats`：每个操作若干次采样 `{offset, rows}`，读取时取不晚于判定窗口结束时刻的最近一次采样与它的前一次，过滤、排序与 `limit` 按适配器的语义作用在夹具的行上。没有 dbstats 夹具的操作读取时报数据源错误，无数据测试因此覆盖 dbstats 引用。
 - `input_sql` 在真实 PostgreSQL 上执行 dbstats 夹具：重建库（默认 `app`）并执行 `setup`，重置语句统计，以只读角色按测试用到的每个 dbstats 请求采样一次，执行 `workload`，再采样一次。`srenautix pack test --postgres <二进制目录>` 启动一个预加载 `pg_stat_statements` 的实例；只有 `input_sql` 的文件两个后端的 dbstats 都读这两次采样，同时有 `input_dbstats` 时另在 PostgreSQL 上执行一遍（结论记在 `results.postgres`）。没有 `--postgres` 时只有 `input_sql` 的文件跳过，并在报告中列出。断言写份额、比例这类与执行速度无关的量。
+- 声明了 `samples` 的卡，测试可以写 `expect.samples.classes`（类别 id → 行数，0 表示这个类别不出现），在真实 Loki 上执行夹具时核对错误样例的类别行数（ADR 0177）。
 - 测试写 `rows: <领域>/<诊断卡或份额卡 id>` 时，同时检查它按行得到的实体：`expect.entities` 中每个 `key` 必须出现，`hit` 为诊断卡的 `when`，`share` 为份额卡的份额（相对误差 1e-3）。
 - 告警目录条目可以写 `title`（`zh-CN` 与 `en`），即告警的可读症状，例如“worker 没有可用副本”。通知的标题与问题陈述用它代替告警名，没有时显示告警名。
 

@@ -201,6 +201,8 @@ packs:
 
 卡片窗口以事件首次触发时间为锚点，终点不晚于当前时间。取数经 `datasources.prometheus`（`concurrency` 张卡同时执行，单个查询超时 `timeout`），标签档案每小时自动探测一次，信号备选的选择缓存 10 分钟。整个证据链的期限是 40 秒，超过期限时未完成的卡不进入报告。PG 不可用时降级通道照样执行证据卡，组件类型取最后一次成功对账时的拓扑。
 
+日志引用读 `datasources.loki`（ADR 0177）：`url`、可选的 `tenant`（X-Scope-OrgID）与 `bearer_token_file`、日志流上的 Kubernetes 标签名 `labels`（`namespace`、`pod`、`container`、`cluster`，默认同名、没有 cluster）、单次查询超时 `timeout`（默认 `15s`）。配置了它时证据数据源有 `logs.match` 与 `logs.query` 能力，`requires` 日志能力的领域包随之启用；没有配置时这些包禁用，`optional` 的卡显示能力缺失。声明了 `samples` 的错误样例卡把日志按包声明的维度与错误类别聚合，样例在写进报告之前按出站模块的规则脱敏再截断；证据期限到达时还没有取完日志的错误样例卡照常进入报告，无法判定并带原因码 `samples_deadline`，日志查询超时、数据源报错与没有日志能力分别为 `samples_timeout`、`samples_source_error`、`samples_capability_missing`，都计入 `srenautix_terminal_states_total{stage="stage_a"}`。
+
 证据基线（ADR 0153，`stage_a.novelty`）：判为异常的卡在同一实体上、按同样长度的窗口在事件之前的时段重新执行，结果写进卡的 `novelty`。时段是对照时段 `comparisons`（默认 `1h`、`24h`、`7d`，即事件前 1 小时、24 小时、7 天的同一时段）加上 `span`（默认 `7d`）内均匀分布的 `samples`（默认 28）个时段，与事件窗口重叠的不取，早于 `stage_a.metrics_retention` 的不取。得出结论的样本少于 `min_samples`（默认 8）时为 `unknown`；否则下面任一项成立即为常态（`routine`），都不成立为明显异常（`novel`）：
 
 1. 样本中判为异常的比例不低于 `abnormal_share`（默认 0.5）；
