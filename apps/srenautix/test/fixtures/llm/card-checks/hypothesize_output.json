@@ -10,6 +10,7 @@
         "parent_id": null,
         "root_component": "{{component:^$}}",
         "mechanism": "根因组件自身的故障",
+        "mechanism_refs": [],
         "supporting": [],
         "refuting": []
       },
@@ -18,6 +19,7 @@
         "parent_id": null,
         "root_component": "{{component:^(Node|Service|StatefulSet):}}",
         "mechanism": "依赖组件的故障",
+        "mechanism_refs": [],
         "supporting": [],
         "refuting": []
       }

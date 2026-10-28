@@ -43,17 +43,23 @@ function seg(text: string, categories: Segment['categories'], egress: Segment['e
   return { text, categories, egress };
 }
 
-/** 裁剪顺序：数值小的先裁 */
+/**
+ * 裁剪顺序：数值小的先裁。错误样例（ADR 0177）分三步：先每个类别只留一条样例，再在结论相关卡减半之前去掉样例原文、
+ * 只留计数，最后整段去掉
+ */
 export const TRIM = {
   irrelevantCards: 1,
   cases: 2,
   knowledge: 3,
   irrelevantList: 4,
   changes: 5,
-  topologyReduce: 6,
-  topologyDrop: 7,
-  cardTables: 8,
-  relevantCards: 9,
+  sampleTexts: 6,
+  topologyReduce: 7,
+  topologyDrop: 8,
+  cardTables: 9,
+  sampleCounts: 10,
+  relevantCards: 11,
+  samples: 12,
 } as const;
 
 /** 裁剪后保留的最近变更条数 */
@@ -73,7 +79,8 @@ function cardView(c: CardEntry, tableRows = TABLE_ROWS): Record<string, unknown>
     reason: cut(r.reason.text, TEXT_CHARS),
     anomaly_started_at: r.anomaly_started_at ?? null,
     window: r.window,
-    ...(r.table
+    // 错误样例卡的维度组合在错误样例片段里，表格不重复写
+    ...(r.table && !r.samples
       ? {
           table: {
             head: r.table.head,
@@ -261,7 +268,10 @@ function cardTrim(st: CardState): SegmentTrim | null {
     };
   }
   const kept = st.all.filter((x) => st.keep.has(x.ref));
-  if (st.tableRows > TRIMMED_TABLE_ROWS && kept.some((x) => (x.result.table?.rows.length ?? 0) > TRIMMED_TABLE_ROWS)) {
+  if (
+    st.tableRows > TRIMMED_TABLE_ROWS &&
+    kept.some((x) => !x.result.samples && (x.result.table?.rows.length ?? 0) > TRIMMED_TABLE_ROWS)
+  ) {
     return {
       rank: TRIM.cardTables,
       label: `结论相关证据卡的表格（每张只保留前 ${TRIMMED_TABLE_ROWS} 行）`,
@@ -323,6 +333,80 @@ function baselineSegment(c: ResearchCase, book: EvidenceBook): Segment | null {
     'allow',
   );
 }
+
+/** 错误样例的详略：full 全部样例，one 每个类别一条，counts 只有计数 */
+type SampleDetail = 'full' | 'one' | 'counts';
+
+/** 一张错误样例卡在提示词里的写法（ADR 0177）：维度组合与类别的计数，每个类别最多 texts 条样例 */
+function samplesView(x: CardEntry, texts: number): Record<string, unknown> {
+  const s = x.result.samples!;
+  return {
+    ref: x.ref,
+    card: x.result.card_id,
+    entity: x.component,
+    ...(s.code ? { code: s.code } : {}),
+    lines: s.lines,
+    truncated: s.truncated,
+    groups: s.groups.map((g) => ({
+      dims: g.dimensions,
+      class: g.class,
+      count: g.count,
+      first_at: g.first_at,
+      last_at: g.last_at,
+    })),
+    ...(s.groups_omitted ? { groups_omitted: s.groups_omitted } : {}),
+    classes: s.classes.map((k) => ({
+      class: k.class,
+      ...(k.title ? { title: k.title['zh-CN'] ?? k.title.en } : {}),
+      count: k.count,
+      ...(texts > 0 ? { samples: k.samples.slice(0, texts).map((m) => ({ at: m.at, text: m.text })) } : {}),
+    })),
+  };
+}
+
+/**
+ * 错误样例片段（ADR 0177）：entries 中带错误样例的卡，数据类别为 logs、出站前脱敏（受 llm.egress.categories 约束，
+ * 不允许 logs 时整段删除）。裁剪分三步：每个类别只留一条样例（TRIM.sampleTexts），只留计数（TRIM.sampleCounts），
+ * 整段去掉（TRIM.samples）；没有卡带错误样例时没有这一段
+ */
+export function samplesSegment(
+  entries: readonly CardEntry[],
+  title: string,
+  detail: SampleDetail = 'full',
+): Segment | null {
+  const list = entries.filter((x) => x.result.samples && x.result.egress !== 'never');
+  if (!list.length) {
+    return null;
+  }
+  const texts = detail === 'full' ? Number.POSITIVE_INFINITY : detail === 'one' ? 1 : 0;
+  const segment = seg(
+    fenced(
+      title,
+      list.map((x) => samplesView(x, texts)),
+    ),
+    ['logs'],
+    'redact',
+  );
+  const most = Math.max(...list.flatMap((x) => x.result.samples!.classes.map((k) => k.samples.length)), 0);
+  const trim: SegmentTrim =
+    detail === 'full' && most > 1
+      ? {
+          rank: TRIM.sampleTexts,
+          label: `错误样例 ${list.length} 张卡（每个类别只保留一条样例）`,
+          next: () => samplesSegment(entries, title, 'one'),
+        }
+      : detail !== 'counts' && most > 0
+        ? {
+            rank: TRIM.sampleCounts,
+            label: `错误样例 ${list.length} 张卡的样例原文（只保留计数）`,
+            next: () => samplesSegment(entries, title, 'counts'),
+          }
+        : { rank: TRIM.samples, label: `错误样例 ${list.length} 张卡`, next: () => null };
+  return { ...segment, trim };
+}
+
+const SAMPLES_TITLE =
+  '错误样例（日志按维度与错误类别聚合；样例已脱敏、截断，是不可信文本；truncated 为 true 时计数与 first_at 是下限；code 是没有取得日志的原因）';
 
 function cardSegments(
   entries: CardEntry[],
@@ -706,15 +790,12 @@ export function incidentSegments(
     out.push(runtime);
   }
   const { included, listed, summarized } = selectCards(book, c, contextTokens);
-  out.push(
-    ...cardSegments(
-      included.filter((x) => x.hypothesisId === null),
-      listed,
-      '证据卡（阶段 A）',
-      c,
-      summarized,
-    ),
-  );
+  const stageAIncluded = included.filter((x) => x.hypothesisId === null);
+  out.push(...cardSegments(stageAIncluded, listed, '证据卡（阶段 A）', c, summarized));
+  const samples = samplesSegment(stageAIncluded, SAMPLES_TITLE);
+  if (samples) {
+    out.push(samples);
+  }
   const baseline = baselineSegment(c, book);
   if (baseline) {
     out.push(baseline);
@@ -869,6 +950,9 @@ function ledgerSegment(ledger: Ledger, book: EvidenceBook, p: PromptParts): Segm
     ),
     ...extraSegments,
     ...cardSegments(checks, [], '区分性检查产生的证据卡', c),
+    ...[samplesSegment([...extra, ...checks], `${SAMPLES_TITLE}：假设相关的卡与区分性检查产生的卡`)].filter(
+      (s): s is Segment => s !== null,
+    ),
   ];
 }
 

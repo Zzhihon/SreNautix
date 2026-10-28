@@ -128,6 +128,15 @@ export class EvidenceBook {
     return this.allCards.filter((c) => c.result.egress !== 'never');
   }
 
+  /**
+   * 进入提示词、有错误样例并且取得了日志行的卡（ADR 0177）：动态枚举 sample_refs，假设的 mechanism_refs 只能引用它们
+   */
+  sampleRefs(): string[] {
+    return this.promptCards()
+      .filter((c) => (c.result.samples?.lines ?? 0) > 0)
+      .map((c) => c.ref);
+  }
+
   evidenceMap(): Array<{ ref: string; target: string }> {
     return [
       ...this.allCards.map((c) => ({ ref: c.ref, target: `${c.result.card_id}@${c.component ?? ''}` })),

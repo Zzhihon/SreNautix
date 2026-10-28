@@ -1,0 +1,13 @@
+{
+  "provenance": { "mode": "hand-written", "note": "错误样例（ADR 0177）的黄金响应：能力不匹配" },
+  "output": {
+    "disposition": "escalate",
+    "cause_scope": "upstream",
+    "hypothesis_id": "h1",
+    "undetermined_reason": null,
+    "situation": "网关转发到 provider-b 的 model-y 请求失败",
+    "summary": "provider-b 的 model-y 不支持工具调用并伴随 524，需要把这类请求路由到支持该能力的供给",
+    "recommendations": [],
+    "proposals": []
+  }
+}

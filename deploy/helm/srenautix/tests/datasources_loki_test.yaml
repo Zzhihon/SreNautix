@@ -1,0 +1,34 @@
+suite: 日志数据源（datasources.loki，ADR 0177）
+templates:
+  - templates/role-resources.yaml
+  - templates/validate.yaml
+values:
+  - ../ci/base/required.yaml
+release:
+  name: t
+  namespace: srenautix
+capabilities:
+  majorVersion: "1"
+  minorVersion: "34"
+tests:
+  - it: 默认没有日志数据源：server 配置不写 loki
+    set:
+      profile: standard
+    asserts:
+      - notMatchRegex: {path: 'data["config.yaml"]', pattern: '(?m)^  loki:'}
+        template: templates/role-resources.yaml
+        documentSelector: {path: metadata.name, value: t-srenautix-server-config}
+
+  - it: 设置了地址时写入 server 配置，租户与标签名照写
+    set:
+      profile: standard
+      datasources.loki:
+        url: http://loki.logging.svc:3100
+        tenant: team-a
+        labels: {namespace: k8s_namespace_name, pod: k8s_pod_name, cluster: cluster}
+    asserts:
+      - matchRegex:
+          path: 'data["config.yaml"]'
+          pattern: '(?m)^  loki:\n    url: http://loki\.logging\.svc:3100\n    tenant: team-a\n    labels:\n      cluster: cluster\n      namespace: k8s_namespace_name\n      pod: k8s_pod_name\n'
+        template: templates/role-resources.yaml
+        documentSelector: {path: metadata.name, value: t-srenautix-server-config}

@@ -11,6 +11,7 @@
         "parent_id": null,
         "root_component": "{{component:^Deployment:shop/checkout$}}",
         "mechanism": "checkout 的 CACHE_MB 调大后内存缓存超过容器的内存上限，新 Pod 启动时被 OOMKilled 并反复重启",
+        "mechanism_refs": [],
         "supporting": [
           "{{ref:workload/pod-restarts/memory}}",
           "{{ref:workload/pod-restarts/restarts}}",

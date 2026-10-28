@@ -7,8 +7,9 @@ import { SCHEMAS } from '@srenautix/contract';
 // - 绑定后的完整 schema：动态字段替换为本次运行的枚举，保留长度、条数等约束，用于本地校验与按字段挽救；
 // - 发给模型的可移植 schema：只保留可移植子集的关键字（扁平、全部必填、additionalProperties:false、枚举、无 oneOf）。
 
-/** findings：主动优化进入分析的候选发现（ADR 0146 §2.3） */
-export type DynamicEnumName = 'components' | 'evidence_refs' | 'check_templates' | 'runbooks' | 'actions' | 'findings';
+/** findings：主动优化进入分析的候选发现（ADR 0146 §2.3）；sample_refs：有错误样例的证据卡（ADR 0177） */
+export type DynamicEnumName =
+  'components' | 'evidence_refs' | 'sample_refs' | 'check_templates' | 'runbooks' | 'actions' | 'findings';
 /** schema 用到的动态枚举都必须给出，没有用到的可以省略 */
 export type DynamicEnums = Readonly<Partial<Record<DynamicEnumName, readonly string[]>>>;
 

@@ -1,19 +1,31 @@
-import type { Alert, EntityRef, EvidenceResult, Incident, Labels } from '@srenautix/contract';
+import {
+  reasonText,
+  type Alert,
+  type EntityRef,
+  type EvidenceResult,
+  type Incident,
+  type Labels,
+} from '@srenautix/contract';
 import { matchTypeByName, sameKind, tryNodeKey } from '@srenautix/core';
 import { toIso } from '@srenautix/integration-sdk';
 import {
+  cardWindow,
+  compileSamples,
   durationSeconds,
   evaluateExcludes,
   evaluateRules,
   runCard,
+  samplesDeadline,
   DEFAULT_WINDOW,
   type EvidenceDataSource,
   type Locale,
+  type Redactor,
   resolveDisplayName,
   type RuleContext,
   type RunCardInput,
   type SignalResolution,
 } from '@srenautix/packs-sdk';
+import { countHits, redactText } from '../llm/redact.js';
 import { logger } from '../log.js';
 import type { ServerMetrics } from '../metrics.js';
 import type { EvidenceSource, PackRuntime } from './packs.js';
@@ -103,6 +115,34 @@ function strings(l: Labels | undefined): Record<string, string> {
 function entityOf(clusterId: string, key: string): EntityRef {
   const k = parseStoredKey(key);
   return { cluster_id: clusterId, kind: k.kind, namespace: k.namespace, name: k.name, uid: null };
+}
+
+/** 错误样例的脱敏（ADR 0177）：与出站模块相同的规则（DESIGN §8.4），样例写进报告之前就已脱敏 */
+export const redactSamples: Redactor = (text) => {
+  const r = redactText(text);
+  return { text: r.text, hits: countHits(r.hits) };
+};
+
+/** promise 完成时取它的结果；signal 先中止时为 null，promise 之后的失败只记日志 */
+async function untilAborted<T>(p: Promise<T>, signal: AbortSignal, what: string): Promise<T | null> {
+  if (signal.aborted) {
+    p.catch((err: unknown) => logger.warn('期限之后结束的任务失败', { task: what, error: err }));
+    return null;
+  }
+  let onAbort: () => void = () => undefined;
+  const aborted = new Promise<null>((resolve) => {
+    onAbort = () => resolve(null);
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+  try {
+    const r = await Promise.race([p, aborted]);
+    if (r === null) {
+      p.catch((err: unknown) => logger.warn('期限之后结束的任务失败', { task: what, error: err }));
+    }
+    return r;
+  } finally {
+    signal.removeEventListener('abort', onAbort);
+  }
 }
 
 /** 固定并发执行；signal 中止后不再开始新的任务，已开始的任务照常结束。 */
@@ -482,7 +522,7 @@ export class PackEvidence implements EvidenceRunner {
       anchors.set(p, at);
       const started = performance.now();
       try {
-        const r = await runCard({
+        const run = runCard({
           set: this.rt.set,
           card: p.card,
           entity: {
@@ -500,12 +540,21 @@ export class PackEvidence implements EvidenceRunner {
           clock: { from: toIso(at - before - LOOKBACK_MS), to: toIso(now) },
           locale: this.o.locale,
           timeoutMs: this.o.queryTimeoutMs,
+          redact: redactSamples,
           ...(p.params ? { params: p.params } : {}),
           ...(p.window ? { window: p.window } : {}),
           ...(extend ? { extend } : {}),
         });
+        // 错误样例卡（ADR 0177）在证据期限到达时不再等待日志查询，结果记原因码 samples_deadline
+        const r = e.def.samples ? await untilAborted(run, signal, p.card) : await run;
+        if (r === null) {
+          return this.deadline(p, at, now, extend);
+        }
         this.metrics.evidenceCards.inc({ display_state: r.display_state });
         this.metrics.evidenceCardSeconds.observe((performance.now() - started) / 1000);
+        if (r.samples?.code) {
+          this.metrics.terminal('stage_a', r.samples.code);
+        }
         // 只保留契约中的 EvidenceResult 字段（判定明细与原始数据不进入报告）
         return {
           card_id: r.card_id,
@@ -531,6 +580,7 @@ export class PackEvidence implements EvidenceRunner {
           impact: r.impact ?? false,
           category: r.category ?? null,
           value_number: r.value_number ?? null,
+          ...(r.samples ? { samples: r.samples } : {}),
         };
       } catch (err) {
         // 渲染与判定的错误由运行时记在卡片里；这里只剩窗口为空等计划本身的问题
@@ -540,13 +590,19 @@ export class PackEvidence implements EvidenceRunner {
       }
     });
     if (signal.aborted) {
-      logger.warn('证据卡执行被中止，未完成的卡不进入报告', {
+      logger.warn('证据卡执行被中止，未完成的卡不进入报告（错误样例卡记 samples_deadline）', {
         planned: plan.length,
         done: results.filter((r) => r).length,
       });
     }
+    // 期限到达时还没有开始的错误样例卡同样出结果，记原因码（ADR 0177）；其余没有开始的卡不进入报告
+    const filled = plan.map((p, i) =>
+      results[i] === undefined && signal.aborted && this.rt.set.cards.get(p.card)!.def.samples
+        ? this.deadline(p, anchorOf(p, anchor, afterOf(p)), now, extend)
+        : (results[i] ?? null),
+    );
     const done = plan
-      .map((p, i) => ({ p, r: results[i] }))
+      .map((p, i) => ({ p, r: filled[i] }))
       .filter((x): x is { p: Planned; r: Done } => x.r !== null && x.r !== undefined);
     const o = this.o.novelty;
     if (o?.enabled && !signal.aborted) {
@@ -562,6 +618,60 @@ export class PackEvidence implements EvidenceRunner {
       );
     }
     return done.map((x) => x.r);
+  }
+
+  /**
+   * 证据期限内没有执行完的错误样例卡（ADR 0177）：无法判定，原因为数据源报错，样例为空并记原因码 samples_deadline，
+   * 研判与消息据此知道错误日志没有取到。窗口为空时与其他卡一样不进入报告
+   */
+  private deadline(
+    p: Planned,
+    at: number,
+    now: number,
+    extend: RunCardInput['extend'],
+  ): Omit<EvidenceResult, 'ref'> | null {
+    const e = this.rt.set.cards.get(p.card)!;
+    let w: { from: number; to: number };
+    try {
+      w = cardWindow(e, at, now, p.window, extend);
+    } catch (err) {
+      if (!(err instanceof RangeError)) {
+        throw err;
+      }
+      logger.warn('证据卡没有执行', { card: p.card, entity: entityKey(p.entity), error: err });
+      return null;
+    }
+    this.metrics.evidenceCards.inc({ display_state: 'undeterminable' });
+    this.metrics.terminal('stage_a', 'samples_deadline');
+    return {
+      card_id: e.key,
+      title: e.def.title,
+      threshold: null,
+      series: [],
+      entity: { ...p.entity },
+      window: { from: toIso(w.from), to: toIso(w.to) },
+      verdict: 'undeterminable',
+      display_state: 'undeterminable',
+      reason: {
+        kind: 'source_error',
+        text: reasonText('stage_a', 'samples_deadline', this.o.locale),
+      },
+      value: null,
+      table: null,
+      queries: [],
+      egress: e.def.egress,
+      anomaly_started_at: null,
+      evaluated_at: new Date().toISOString(),
+      unit: e.def.display?.unit ?? 'none',
+      observations: {},
+      params: { ...(e.def.params ?? {}), ...(p.params ?? {}) },
+      conditions: [],
+      baseline: null,
+      impact: e.def.impact ?? false,
+      category: e.def.category ?? null,
+      value_number: null,
+      samples: samplesDeadline(compileSamples(e.def.samples!, e.def.refs, e.def.egress)),
+    };
   }
 
   /**
@@ -612,6 +722,7 @@ export class PackEvidence implements EvidenceRunner {
           clock: { from: toIso(t.from - shift - LOOKBACK_MS), to: toIso(Date.now()) },
           locale: this.o.locale,
           timeoutMs: this.o.queryTimeoutMs,
+          redact: redactSamples,
           window: { before: `${t.at - t.from}ms`, after: `${t.to - t.at}ms` },
           ...(x.p.params ? { params: x.p.params } : {}),
         });

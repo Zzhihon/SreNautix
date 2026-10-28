@@ -1,0 +1,13 @@
+{
+  "provenance": { "mode": "hand-written", "note": "错误样例（ADR 0177）的黄金响应：外部上游的配额耗尽" },
+  "output": {
+    "disposition": "escalate",
+    "cause_scope": "upstream",
+    "hypothesis_id": "h1",
+    "undetermined_reason": null,
+    "situation": "网关转发到 provider-a 的 model-x 请求失败",
+    "summary": "provider-a 的每周额度耗尽并持续返回 429，需要服务方恢复额度或切换供给",
+    "recommendations": [],
+    "proposals": []
+  }
+}

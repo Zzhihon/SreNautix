@@ -1,0 +1,13 @@
+{
+  "provenance": { "mode": "hand-written", "note": "错误样例（ADR 0177）的黄金响应：单一端点返回 503" },
+  "output": {
+    "disposition": "escalate",
+    "cause_scope": "upstream",
+    "hypothesis_id": "h1",
+    "undetermined_reason": null,
+    "situation": "网关转发到 provider-c 的 model-z 请求失败",
+    "summary": "provider-c 的端点持续返回 503，需要服务方恢复端点",
+    "recommendations": [],
+    "proposals": []
+  }
+}
