@@ -515,6 +515,26 @@ export type Duration2 = string;
  */
 export type PackCapability = string;
 /**
+ * self：落在求值对象上（证据卡的实体属于这个组件，告警的组件是它，变更的目标是它）；incident：事件里任何位置
+ */
+export type ConclusionScope = 'self' | 'incident';
+/**
+ * self：落在求值对象上（证据卡的实体属于这个组件，告警的组件是它，变更的目标是它）；incident：事件里任何位置
+ */
+export type ConclusionScope1 = 'self' | 'incident';
+/**
+ * 事件与变更的关联分级不低于它（ADR 0169）；事件没有关联分级时不成立
+ */
+export type ChangeGrade1 = 'high' | 'medium' | 'low';
+/**
+ * self：落在求值对象上（证据卡的实体属于这个组件，告警的组件是它，变更的目标是它）；incident：事件里任何位置
+ */
+export type ConclusionScope2 = 'self' | 'incident';
+/**
+ * self：落在求值对象上（证据卡的实体属于这个组件，告警的组件是它，变更的目标是它）；incident：事件里任何位置
+ */
+export type ConclusionScope3 = 'self' | 'incident';
+/**
  * 代码定位的锚点类型（ADR 0146 §3.5）：sql 规范化语句（按 libpg-query 指纹匹配字符串字面量与 .sql 文件）；table 表名（置信度低）；span_name、metric_name、route 字符串字面量精确匹配
  */
 export type AnchorKind = 'sql' | 'table' | 'span_name' | 'metric_name' | 'route';
@@ -546,6 +566,10 @@ export type Duration5 = string;
  * Prometheus 风格的时长，例如 30s、5m、2h、7d
  */
 export type Duration6 = string;
+/**
+ * 告警角色（DESIGN §3.2）：cause 原因；change 变更；symptom 症状；forecast 预测，不能成为活动事件的根因，也不能连接两个分组；meta 观测缺口
+ */
+export type AlertRole1 = 'cause' | 'change' | 'symptom' | 'forecast' | 'meta';
 /**
  * 原因码所属的阶段：notify 通知；stage_a 阶段 A；research 阶段 B 研判与入队；remediation 自愈 PR；issue 事件 issue；incident 事件状态；feedback 人工反馈与隐式反馈（ADR 0174）
  */
@@ -799,6 +823,12 @@ export interface SrenautixContractIndex {
   ChecksFile?: ChecksFile;
   RulesFile?: RulesFile;
   PackRule?: PackRule;
+  ConclusionsFile?: ConclusionsFile;
+  PackConclusionRule?: PackConclusionRule;
+  ConclusionScope?: ConclusionScope3;
+  PackConclusionCardCondition?: PackConclusionCardCondition;
+  PackConclusionAlertCondition?: PackConclusionAlertCondition;
+  PackConclusionChangeCondition?: PackConclusionChangeCondition;
   RemediationsFile?: RemediationsFile;
   Remediation?: Remediation;
   RemediationEdit?: RemediationEdit;
@@ -861,6 +891,7 @@ export interface SrenautixContractIndex {
   Recommendation?: Recommendation;
   ProposalDraft?: ProposalDraft;
   StageAReport?: StageAReport;
+  RuleConclusion?: RuleConclusion;
   TopologyEvent?: TopologyEvent;
   TopologyNode?: TopologyNode;
   TopologyEdge?: TopologyEdge;
@@ -3514,6 +3545,12 @@ export interface StageAReport {
      */
     missing: string[];
   }[];
+  /**
+   * 领域包的确定性结论规则（conclusions.yaml，契约 2.43.0，ADR 0178）命中的结论，按根因候选的排名排列（候选之外的组件在后），同一规则在同一组件上只出一条，最多 3 条。研判可用时它们作为假设 h7–h9 进入账本；没有阶段 B 结论时，群消息与事件详情显示它们并标明“规则判定”。契约 2.43.0 之前的报告没有这个字段
+   *
+   * @maxItems 3
+   */
+  rule_conclusions?: RuleConclusion[];
 }
 /**
  * 一张证据卡在一次研判（或阶段 A 报告）中的结果（DESIGN §6.1）。三种结论之外另有显示状态 capability_missing：所需的数据源能力不可用，和没有数据区分开
@@ -3802,6 +3839,41 @@ export interface EvidenceSample {
    */
   cut: boolean;
 }
+export interface RuleConclusion {
+  /**
+   * <pack>/<规则 id>
+   */
+  rule_id: string;
+  title: LocalizedText2;
+  root_component: ComponentKey;
+  mechanism: LocalizedText2;
+  /**
+   * 规则判定的档位，上限与 ADR 0122 只有成员告警支持时相同
+   */
+  level: 'likely';
+  /**
+   * 满足条件的证据：card:<n>（本报告的卡）、alert:<n>（成员告警，按事件成员顺序）、change:<n>（事件的变更），按条件顺序，去重
+   *
+   * @minItems 1
+   */
+  basis: [EvidenceRef, ...EvidenceRef[]];
+  /**
+   * 规则的证据卡条件（告警与变更条件是已经发生的事实，不在这里）。阶段 B 的区分性检查在其中一个卡片定义上得出确定的结论、并且不满足这个条件时（实体在根因范围内，on 为 incident 时不限实体），规则判定被推翻；没有卡片条件的规则不会被检查推翻
+   */
+  card_conditions: {
+    /**
+     * <pack>/<chain>/<card>
+     */
+    card: string;
+    verdict: 'abnormal' | 'normal';
+    observations: {
+      name: string;
+      op: 'gt' | 'gte' | 'lt' | 'lte' | 'eq' | 'ne';
+      value: number | string | boolean;
+    }[];
+    on: 'self' | 'incident';
+  }[];
+}
 export interface EvalKnowledge {
   id: string;
   components: string[];
@@ -3959,7 +4031,9 @@ export interface ResearchOutput {
   disposition: Disposition;
   conclusion: ResearchConclusion;
   /**
-   * @maxItems 6
+   * 模型的假设 h1–h6 与规则判定的假设 h7–h9（契约 2.43.0，ADR 0178）
+   *
+   * @maxItems 9
    */
   hypotheses: Hypothesis[];
   /**
@@ -4044,9 +4118,9 @@ export interface ConsistencyDetail {
    */
   supported_competitors: string[];
   /**
-   * model：模型在 conclude 中选中；ledger：模型弃权，由代码按账本选中（ADR 0120，档位最高为 likely）
+   * model：模型在 conclude 中选中；ledger：模型弃权，由代码按账本选中（ADR 0120，档位最高为 likely）；rule：模型弃权或选中了别的根因，而规则判定的假设（rule_id）没有被检查推翻，由代码改选它（契约 2.43.0，ADR 0178，档位最高为 likely）
    */
-  chosen_by: 'model' | 'ledger';
+  chosen_by: 'model' | 'ledger' | 'rule';
   /**
    * 由小模型判定的支持卡（只能支持 likely）
    */
@@ -4097,6 +4171,10 @@ export interface Hypothesis {
    * 针对这个假设执行完成的区分性检查数（失败的检查不计）
    */
   checks_run?: number;
+  /**
+   * 假设来自阶段 A 的规则判定（契约 2.43.0，ADR 0178）：<pack>/<规则 id>，id 为 h7–h9。它只在区分性检查在规则的卡片条件上给出不满足条件的结果时被推翻；模型的假设没有这个字段
+   */
+  rule_id?: string;
 }
 export interface NextCheck {
   hypothesis_id: string;
@@ -5219,7 +5297,7 @@ export interface IntegrationManifest {
   deployment_reports?: string[];
 }
 /**
- * 领域包的 pack.yaml（DESIGN §6.3）。领域包只包含数据，不包含可执行代码；其余文件的结构见本文件的 $defs：signals.yaml → SignalsFile，components.yaml → ComponentsFile，alerts.yaml → AlertsFile，chains.yaml → ChainsFile，checks.yaml → ChecksFile，rules.yaml → RulesFile，remediations.yaml → RemediationsFile，domains.yaml → DomainsFile，issues.yaml → IssuesFile，rca-params.yaml → RcaParams，knowledge/*.yaml → KnowledgeFile，action-requests.yaml → ActionRequestsFile，chaos/*.yaml → ChaosFile，tests/*.yaml → PackTestFile，用户层文件 → UserLayer，pack.lock → PackLock
+ * 领域包的 pack.yaml（DESIGN §6.3）。领域包只包含数据，不包含可执行代码；其余文件的结构见本文件的 $defs：signals.yaml → SignalsFile，components.yaml → ComponentsFile，alerts.yaml → AlertsFile，chains.yaml → ChainsFile，checks.yaml → ChecksFile，rules.yaml → RulesFile，conclusions.yaml → ConclusionsFile，remediations.yaml → RemediationsFile，domains.yaml → DomainsFile，issues.yaml → IssuesFile，rca-params.yaml → RcaParams，knowledge/*.yaml → KnowledgeFile，action-requests.yaml → ActionRequestsFile，chaos/*.yaml → ChaosFile，tests/*.yaml → PackTestFile，用户层文件 → UserLayer，pack.lock → PackLock
  */
 export interface PackManifest {
   api_version: 'srenautix.io/pack/v1';
@@ -5502,6 +5580,123 @@ export interface PackRule {
   expected_effect?: LocalizedText2;
 }
 /**
+ * conclusions.yaml：确定性结论规则（契约 2.43.0，ADR 0178）。阶段 A 在事件涉及的每个组件上求值，全部条件成立时给出根因候选、机制与依据，写进阶段 A 报告的 rule_conclusions；研判可用时规则结论作为一条假设进入假设账本
+ */
+export interface ConclusionsFile {
+  conclusions: PackConclusionRule[];
+}
+/**
+ * 一条确定性结论规则：在一个组件（求值对象）上全部条件成立时，根因候选为这个组件，机制与依据取自规则。结论档位最高为 likely
+ */
+export interface PackConclusionRule {
+  id: string;
+  title: LocalizedText2;
+  /**
+   * 求值对象的组件类型（components.yaml 的 id，可以是依赖包的）；不写时在事件涉及的全部组件上求值
+   *
+   * @minItems 1
+   */
+  component_types?: [string, ...string[]];
+  /**
+   * 条件分三类，全部成立时规则命中，三类合计至少一个、最多 8 个。依据按证据卡、告警、变更的顺序列出
+   */
+  when: {
+    cards?: PackConclusionCardCondition[];
+    alerts?: PackConclusionAlertCondition[];
+    changes?: PackConclusionChangeCondition[];
+  };
+  mechanism: LocalizedText7;
+}
+/**
+ * 阶段 A 的一张证据卡在某个实体上的结论。证据基线判为常态的异常卡按正常对待（ADR 0153）；无法判定的卡两种结论都不满足
+ */
+export interface PackConclusionCardCondition {
+  /**
+   * <chain>/<card>（本包）或 <包>/<chain>/<card>（depends_on 中的包）
+   */
+  card: string;
+  verdict?: 'abnormal' | 'normal';
+  /**
+   * 卡片判定时 let 绑定的取值（EvidenceResult.observations）还须满足的比较，全部成立；取值缺失时不成立
+   *
+   * @maxItems 4
+   */
+  observations?: {
+    name: string;
+    op: 'gt' | 'gte' | 'lt' | 'lte' | 'eq' | 'ne';
+    value: number | string | boolean;
+  }[];
+  on?: ConclusionScope;
+}
+/**
+ * 事件的一条成员告警；已恢复的也算，它记录的是故障期间的异常
+ */
+export interface PackConclusionAlertCondition {
+  /**
+   * @minItems 1
+   */
+  alertnames: [string, ...string[]];
+  labels?: Labels3;
+  /**
+   * 告警角色还须是其中之一
+   *
+   * @minItems 1
+   */
+  roles?: [AlertRole, ...AlertRole[]];
+  on?: ConclusionScope1;
+}
+/**
+ * 告警标签还须等于这些值
+ */
+export interface Labels3 {
+  [k: string]: string | undefined;
+}
+/**
+ * 事件的一次变更
+ */
+export interface PackConclusionChangeCondition {
+  /**
+   * @minItems 1
+   *
+   * Items: rollout：新 ReplicaSet/ControllerRevision；config：挂载的 ConfigMap 版本变化；cordon；scale：HPA 或手动扩缩；gitops_sync：Argo/Flux 同步；ci_deploy：CI 部署；operator：Operator 发起的切换或升级；runtime_config：经管理接口或数据库直接生效的运行时配置变更，不经过 Git 与发布（契约 2.29.0，SQL 审计表变更源读到的记录）；retire：工作负载被删除或副本缩到 0 并保持，目标是这些工作负载与管理它们的 GitOps 应用（契约 2.33.0，从 kube-state-metrics 推导）；other
+   */
+  kinds?: [
+    (
+      | 'rollout'
+      | 'config'
+      | 'cordon'
+      | 'scale'
+      | 'gitops_sync'
+      | 'ci_deploy'
+      | 'operator'
+      | 'runtime_config'
+      | 'retire'
+      | 'other'
+    ),
+    ...(
+      | 'rollout'
+      | 'config'
+      | 'cordon'
+      | 'scale'
+      | 'gitops_sync'
+      | 'ci_deploy'
+      | 'operator'
+      | 'runtime_config'
+      | 'retire'
+      | 'other'
+    )[],
+  ];
+  min_grade?: ChangeGrade1;
+  on?: ConclusionScope2;
+}
+/**
+ * 机制：根因怎样造成了事件的症状，每种语言最多 300 字
+ */
+export interface LocalizedText7 {
+  'zh-CN'?: string;
+  en?: string;
+}
+/**
  * remediations.yaml：修复补丁模板（ADR 0103）。模板生成 Git 补丁，由 server 经 gitops_pr 开 PR，从不合并
  */
 export interface RemediationsFile {
@@ -5576,7 +5771,7 @@ export interface Remediation {
    * @minItems 1
    */
   edits: [RemediationEdit, ...RemediationEdit[]];
-  change: LocalizedText9;
+  change: LocalizedText10;
   verify: {
     say: LocalizedText2;
     /**
@@ -5610,12 +5805,12 @@ export interface Estimate {
    * CEL，期望值
    */
   expected: string;
-  basis: LocalizedText7;
+  basis: LocalizedText8;
 }
 /**
  * 计算依据与前提（ICU MessageFormat，变量为 let、params、lower、expected）
  */
-export interface LocalizedText7 {
+export interface LocalizedText8 {
   'zh-CN'?: string;
   en?: string;
 }
@@ -5628,12 +5823,12 @@ export interface Guard {
    * 为 true 表示约束成立
    */
   cel: string;
-  say: LocalizedText8;
+  say: LocalizedText9;
 }
 /**
  * 约束不成立时的原因（ICU MessageFormat，变量为 let 与 params）
  */
-export interface LocalizedText8 {
+export interface LocalizedText9 {
   'zh-CN'?: string;
   en?: string;
 }
@@ -5681,7 +5876,7 @@ export interface RemediationEdit {
 /**
  * 改了什么、为什么（ICU MessageFormat，变量取自 let 与 params），写入 PR 描述
  */
-export interface LocalizedText9 {
+export interface LocalizedText10 {
   'zh-CN'?: string;
   en?: string;
 }
@@ -6018,7 +6213,7 @@ export interface Estimate1 {
    * CEL，期望值
    */
   expected: string;
-  basis: LocalizedText7;
+  basis: LocalizedText8;
 }
 /**
  * issues.yaml（契约 2.28.0，ADR 0146 §4.4）：业务仓库 issue 模板。模板只描述适用条件、锚点、建议与收益，由 server 渲染 issue 并在业务仓库创建，从不提交 PR
@@ -6065,7 +6260,7 @@ export interface IssueTemplate {
       from: string;
     }[],
   ];
-  suggestion: LocalizedText10;
+  suggestion: LocalizedText11;
   estimate: Estimate1;
   verify: {
     say: LocalizedText2;
@@ -6084,7 +6279,7 @@ export interface IssueTemplate {
 /**
  * 建议文字（ICU MessageFormat，变量为 let 与 params），写进 issue 的“建议”段
  */
-export interface LocalizedText10 {
+export interface LocalizedText11 {
   'zh-CN'?: string;
   en?: string;
 }
@@ -6162,7 +6357,7 @@ export interface PackUserLayer {
       | undefined;
   };
   /**
-   * 禁用的条目：alerts/<id>、chains/<id>、chains/<id>/<card>、checks/<id>、rules/<id>、domains/<id>、domains/<id>/<诊断卡或份额卡 id>、indicators/<id>、issues/<id>
+   * 禁用的条目：alerts/<id>、chains/<id>、chains/<id>/<card>、checks/<id>、rules/<id>、conclusions/<id>、domains/<id>、domains/<id>/<诊断卡或份额卡 id>、indicators/<id>、issues/<id>
    */
   disable?: string[];
   patch?: {
@@ -6183,6 +6378,7 @@ export interface PackUserLayer {
     chains?: EvidenceChain[];
     checks?: EvidenceCardDefinition[];
     rules?: PackRule[];
+    conclusions?: PackConclusionRule[];
     indicators?: Indicator[];
     /**
      * 与目标包同 id 的领域按 DomainsFile 的规则合并进去，其余追加
@@ -6234,7 +6430,7 @@ export interface ChaosFile {
   };
 }
 /**
- * 领域包测试（DESIGN §6.3）。input_series 使用 promtool 的序列写法，在 Prometheus 与 VictoriaMetrics 上各跑一遍，结论必须一致
+ * 领域包测试（DESIGN §6.3）。input_series 使用 promtool 的序列写法，在 Prometheus 与 VictoriaMetrics 上各跑一遍，结论必须一致。tests 测证据卡，conclusions 测结论规则，至少写一种
  */
 export interface PackTestFile {
   api_version: 'srenautix.io/pack-test/v1';
@@ -6302,7 +6498,7 @@ export interface PackTestFile {
   /**
    * @minItems 1
    */
-  tests: [
+  tests?: [
     {
       name: string;
       eval_time: Duration;
@@ -6384,6 +6580,143 @@ export interface PackTestFile {
        * 同时检查领域的诊断卡或份额卡按行得到的实体：<领域>/<诊断卡或份额卡 id>，card 必须是它引用的卡
        */
       rows?: string;
+    }[],
+  ];
+  /**
+   * 结论规则测试（契约 2.43.0，ADR 0178）：在夹具上执行列出的卡，加上列出的成员告警与变更，按阶段 A 的求值方式判断规则在求值对象上是否命中。两个后端各求值一遍，结果都必须符合期望；stable 的包要求每条结论规则都有命中与不命中的测试
+   *
+   * @minItems 1
+   */
+  conclusions?: [
+    {
+      name: string;
+      eval_time: Duration;
+      /**
+       * 本包结论规则的 id
+       */
+      rule: string;
+      /**
+       * 求值对象：组件的实体与组件类型
+       */
+      subject: {
+        kind: string;
+        namespace?: string | null;
+        name: string;
+        component_type: string | null;
+      };
+      /**
+       * 在夹具上执行的卡；on 为 self 时卡的实体属于求值对象，other 时属于另一个组件
+       */
+      cards: {
+        /**
+         * <chain>/<card> 或 <包>/<chain>/<card>
+         */
+        card: string;
+        entity: {
+          kind: string;
+          namespace?: string | null;
+          name: string;
+        };
+        on?: 'self' | 'other';
+      }[];
+      /**
+       * 事件的成员告警
+       */
+      alerts?: {
+        alertname: string;
+        labels?: Labels;
+        role?: AlertRole1;
+        on?: 'self' | 'other';
+      }[];
+      /**
+       * 事件的变更与关联分级（null 为事件没有分级）
+       */
+      changes?: {
+        /**
+         * rollout：新 ReplicaSet/ControllerRevision；config：挂载的 ConfigMap 版本变化；cordon；scale：HPA 或手动扩缩；gitops_sync：Argo/Flux 同步；ci_deploy：CI 部署；operator：Operator 发起的切换或升级；runtime_config：经管理接口或数据库直接生效的运行时配置变更，不经过 Git 与发布（契约 2.29.0，SQL 审计表变更源读到的记录）；retire：工作负载被删除或副本缩到 0 并保持，目标是这些工作负载与管理它们的 GitOps 应用（契约 2.33.0，从 kube-state-metrics 推导）；other
+         */
+        kind:
+          | 'rollout'
+          | 'config'
+          | 'cordon'
+          | 'scale'
+          | 'gitops_sync'
+          | 'ci_deploy'
+          | 'operator'
+          | 'runtime_config'
+          | 'retire'
+          | 'other';
+        grade: null | ChangeGrade;
+        on?: 'self' | 'other';
+      }[];
+      expect: {
+        hit: boolean;
+      };
+    },
+    ...{
+      name: string;
+      eval_time: Duration;
+      /**
+       * 本包结论规则的 id
+       */
+      rule: string;
+      /**
+       * 求值对象：组件的实体与组件类型
+       */
+      subject: {
+        kind: string;
+        namespace?: string | null;
+        name: string;
+        component_type: string | null;
+      };
+      /**
+       * 在夹具上执行的卡；on 为 self 时卡的实体属于求值对象，other 时属于另一个组件
+       */
+      cards: {
+        /**
+         * <chain>/<card> 或 <包>/<chain>/<card>
+         */
+        card: string;
+        entity: {
+          kind: string;
+          namespace?: string | null;
+          name: string;
+        };
+        on?: 'self' | 'other';
+      }[];
+      /**
+       * 事件的成员告警
+       */
+      alerts?: {
+        alertname: string;
+        labels?: Labels;
+        role?: AlertRole1;
+        on?: 'self' | 'other';
+      }[];
+      /**
+       * 事件的变更与关联分级（null 为事件没有分级）
+       */
+      changes?: {
+        /**
+         * rollout：新 ReplicaSet/ControllerRevision；config：挂载的 ConfigMap 版本变化；cordon；scale：HPA 或手动扩缩；gitops_sync：Argo/Flux 同步；ci_deploy：CI 部署；operator：Operator 发起的切换或升级；runtime_config：经管理接口或数据库直接生效的运行时配置变更，不经过 Git 与发布（契约 2.29.0，SQL 审计表变更源读到的记录）；retire：工作负载被删除或副本缩到 0 并保持，目标是这些工作负载与管理它们的 GitOps 应用（契约 2.33.0，从 kube-state-metrics 推导）；other
+         */
+        kind:
+          | 'rollout'
+          | 'config'
+          | 'cordon'
+          | 'scale'
+          | 'gitops_sync'
+          | 'ci_deploy'
+          | 'operator'
+          | 'runtime_config'
+          | 'retire'
+          | 'other';
+        grade: null | ChangeGrade;
+        on?: 'self' | 'other';
+      }[];
+      expect: {
+        hit: boolean;
+      };
     }[],
   ];
 }

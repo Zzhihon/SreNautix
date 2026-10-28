@@ -2213,10 +2213,10 @@ export type components = {
      */
     ConsistencyDetail: {
       /**
-       * @description model：模型在 conclude 中选中；ledger：模型弃权，由代码按账本选中（ADR 0120，档位最高为 likely）
+       * @description model：模型在 conclude 中选中；ledger：模型弃权，由代码按账本选中（ADR 0120，档位最高为 likely）；rule：模型弃权或选中了别的根因，而规则判定的假设（rule_id）没有被检查推翻，由代码改选它（契约 2.43.0，ADR 0178，档位最高为 likely）
        * @enum {string}
        */
-      chosen_by: 'model' | 'ledger';
+      chosen_by: 'model' | 'ledger' | 'rule';
       contrary_refs: components['schemas']['EvidenceRef'][];
       /** @description 由小模型判定的支持卡（只能支持 likely） */
       model_judged_refs: components['schemas']['EvidenceRef'][];
@@ -3877,6 +3877,8 @@ export type components = {
       parent_id: string | null;
       refuting: components['schemas']['EvidenceRef'][];
       root_component: components['schemas']['ComponentKey'];
+      /** @description 假设来自阶段 A 的规则判定（契约 2.43.0，ADR 0178）：<pack>/<规则 id>，id 为 h7–h9。它只在区分性检查在规则的卡片条件上给出不满足条件的结果时被推翻；模型的假设没有这个字段 */
+      rule_id?: string;
       /**
        * @description 假设账本状态：pending 待检验；supported 支持；refuted 推翻；inconclusive 检验后仍无法判定
        * @enum {string}
@@ -5317,6 +5319,7 @@ export type components = {
         ref: components['schemas']['EvidenceRef'];
         target: string;
       }[];
+      /** @description 模型的假设 h1–h6 与规则判定的假设 h7–h9（契约 2.43.0，ADR 0178） */
       hypotheses: components['schemas']['Hypothesis'][];
       /**
        * @description 处置为 ignore 时成立的确定性依据（契约 2.38.0，ADR 0138、0167、0168、0170）：stage_a 阶段 A 已判为 ignore；planned_retirement 全部成员告警由计划内的退役解释；external 研判根因是集群外部组件；evidence_normal 得出结论的卡全部正常；impact_normal 影响卡全部正常。处置不是 ignore 时不填
@@ -5365,10 +5368,10 @@ export type components = {
          */
         ConsistencyDetail: {
           /**
-           * @description model：模型在 conclude 中选中；ledger：模型弃权，由代码按账本选中（ADR 0120，档位最高为 likely）
+           * @description model：模型在 conclude 中选中；ledger：模型弃权，由代码按账本选中（ADR 0120，档位最高为 likely）；rule：模型弃权或选中了别的根因，而规则判定的假设（rule_id）没有被检查推翻，由代码改选它（契约 2.43.0，ADR 0178，档位最高为 likely）
            * @enum {string}
            */
-          chosen_by: 'model' | 'ledger';
+          chosen_by: 'model' | 'ledger' | 'rule';
           contrary_refs: components['schemas']['EvidenceRef'][];
           /** @description 由小模型判定的支持卡（只能支持 likely） */
           model_judged_refs: components['schemas']['EvidenceRef'][];
@@ -5410,6 +5413,8 @@ export type components = {
           parent_id: string | null;
           refuting: components['schemas']['EvidenceRef'][];
           root_component: components['schemas']['ComponentKey'];
+          /** @description 假设来自阶段 A 的规则判定（契约 2.43.0，ADR 0178）：<pack>/<规则 id>，id 为 h7–h9。它只在区分性检查在规则的卡片条件上给出不满足条件的结果时被推翻；模型的假设没有这个字段 */
+          rule_id?: string;
           /**
            * @description 假设账本状态：pending 待检验；supported 支持；refuted 推翻；inconclusive 检验后仍无法判定
            * @enum {string}
@@ -5671,6 +5676,36 @@ export type components = {
       };
       seed: number | null;
     };
+    /** RuleConclusion */
+    RuleConclusion: {
+      /** @description 满足条件的证据：card:<n>（本报告的卡）、alert:<n>（成员告警，按事件成员顺序）、change:<n>（事件的变更），按条件顺序，去重 */
+      basis: components['schemas']['EvidenceRef'][];
+      /** @description 规则的证据卡条件（告警与变更条件是已经发生的事实，不在这里）。阶段 B 的区分性检查在其中一个卡片定义上得出确定的结论、并且不满足这个条件时（实体在根因范围内，on 为 incident 时不限实体），规则判定被推翻；没有卡片条件的规则不会被检查推翻 */
+      card_conditions: {
+        /** @description <pack>/<chain>/<card> */
+        card: string;
+        observations: {
+          name: string;
+          /** @enum {string} */
+          op: 'gt' | 'gte' | 'lt' | 'lte' | 'eq' | 'ne';
+          value: number | string | boolean;
+        }[];
+        /** @enum {string} */
+        on: 'self' | 'incident';
+        /** @enum {string} */
+        verdict: 'abnormal' | 'normal';
+      }[];
+      /**
+       * @description 规则判定的档位，上限与 ADR 0122 只有成员告警支持时相同
+       * @constant
+       */
+      level: 'likely';
+      mechanism: components['schemas']['LocalizedText'];
+      root_component: components['schemas']['ComponentKey'];
+      /** @description <pack>/<规则 id> */
+      rule_id: string;
+      title: components['schemas']['LocalizedText'];
+    };
     /** EvidenceSample */
     Sample: {
       at: components['schemas']['Timestamp'];
@@ -5855,6 +5890,8 @@ export type components = {
         /** @description 阶段 A 没有在告警实体上得出结论（没有执行，或无法判定）的卡 */
         missing: string[];
       }[];
+      /** @description 领域包的确定性结论规则（conclusions.yaml，契约 2.43.0，ADR 0178）命中的结论，按根因候选的排名排列（候选之外的组件在后），同一规则在同一组件上只出一条，最多 3 条。研判可用时它们作为假设 h7–h9 进入账本；没有阶段 B 结论时，群消息与事件详情显示它们并标明“规则判定”。契约 2.43.0 之前的报告没有这个字段 */
+      rule_conclusions?: components['schemas']['RuleConclusion'][];
       rule_proposals: components['schemas']['Uuid'][];
       runbooks: string[];
       timeline: {
@@ -5864,6 +5901,38 @@ export type components = {
         ref: string | null;
         text: string;
       }[];
+      $defs: {
+        /** RuleConclusion */
+        RuleConclusion: {
+          /** @description 满足条件的证据：card:<n>（本报告的卡）、alert:<n>（成员告警，按事件成员顺序）、change:<n>（事件的变更），按条件顺序，去重 */
+          basis: components['schemas']['EvidenceRef'][];
+          /** @description 规则的证据卡条件（告警与变更条件是已经发生的事实，不在这里）。阶段 B 的区分性检查在其中一个卡片定义上得出确定的结论、并且不满足这个条件时（实体在根因范围内，on 为 incident 时不限实体），规则判定被推翻；没有卡片条件的规则不会被检查推翻 */
+          card_conditions: {
+            /** @description <pack>/<chain>/<card> */
+            card: string;
+            observations: {
+              name: string;
+              /** @enum {string} */
+              op: 'gt' | 'gte' | 'lt' | 'lte' | 'eq' | 'ne';
+              value: number | string | boolean;
+            }[];
+            /** @enum {string} */
+            on: 'self' | 'incident';
+            /** @enum {string} */
+            verdict: 'abnormal' | 'normal';
+          }[];
+          /**
+           * @description 规则判定的档位，上限与 ADR 0122 只有成员告警支持时相同
+           * @constant
+           */
+          level: 'likely';
+          mechanism: components['schemas']['LocalizedText'];
+          root_component: components['schemas']['ComponentKey'];
+          /** @description <pack>/<规则 id> */
+          rule_id: string;
+          title: components['schemas']['LocalizedText'];
+        };
+      };
     };
     /** StageAReportedEvent */
     StageAReported: {

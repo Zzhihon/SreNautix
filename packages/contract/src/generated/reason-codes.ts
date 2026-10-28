@@ -42,7 +42,8 @@ export interface ReasonCodesByStage {
     | 'no_model_route'
     | 'lease_expired'
     | 'superseded'
-    | 'not_researched';
+    | 'not_researched'
+    | 'rule_only';
   remediation:
     | 'not_applicable'
     | 'layout_missing'
@@ -127,6 +128,7 @@ export interface ReasonCodesByGroup {
   research_stop: 'model_unavailable' | 'deadline' | 'leader_supported' | 'no_change' | 'step_limit' | 'budget';
   research_skip: 'budget' | 'storm' | 'capped' | 'no_model_route';
   research_ended: 'lease_expired' | 'superseded' | 'not_researched';
+  research_rule_only: 'rule_only';
   remediation_plan:
     | 'not_applicable'
     | 'layout_missing'
@@ -203,6 +205,11 @@ export const REASON_CODE_GROUPS: Record<keyof ReasonCodesByGroup, ReasonCodeGrou
     description: '阶段 B 入队时跳过、只出阶段 A 的原因（server.research_queue.skip_reason）',
   },
   research_ended: { stage: 'research', description: 'server 判定的研判终态：租约过期、被取代、不进入阶段 B' },
+  research_rule_only: {
+    stage: 'research',
+    description:
+      '事件版本没有阶段 B 结论（研判失败、只出阶段 A、入队跳过或不进入阶段 B），阶段 A 有规则判定，消息与事件详情显示规则判定（ADR 0178）',
+  },
   remediation_plan: { stage: 'remediation', description: '修复模板计划跳过的原因（packs-sdk 的 SkipCode）' },
   remediation_admission: { stage: 'remediation', description: '自愈 PR 的准入条件不满足的原因（ADR 0170）' },
   remediation_dedupe: { stage: 'remediation', description: '同一个修改已有提议、PR 或被拒绝过（ADR 0155）' },
@@ -510,6 +517,16 @@ export const REASON_CODES: readonly ReasonCodeEntry[] = [
     text: {
       'zh-CN': '事件不进入阶段 B（严重度不在研判范围内、被抑制或已合并）',
       en: 'the incident does not enter stage B (severity not researched, suppressed or merged)',
+    },
+  },
+  {
+    code: 'rule_only',
+    stage: 'research',
+    level: 'info',
+    groups: ['research_rule_only'],
+    text: {
+      'zh-CN': '没有模型结论，只有规则判定：根因候选与机制取自领域包的确定性结论规则，档位最高为 likely',
+      en: "no model conclusion, rule judgement only: the root cause candidate and mechanism come from a pack's deterministic conclusion rule, at most likely",
     },
   },
   {
