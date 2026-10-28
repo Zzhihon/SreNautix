@@ -21,7 +21,8 @@
     "conclusion": { "$ref": "#/$defs/Conclusion" },
     "hypotheses": {
       "type": "array",
-      "maxItems": 6,
+      "description": "模型的假设 h1–h6 与规则判定的假设 h7–h9（契约 2.43.0，ADR 0178）",
+      "maxItems": 9,
       "items": { "$ref": "#/$defs/Hypothesis" }
     },
     "next_checks": {
@@ -148,8 +149,8 @@
         },
         "chosen_by": {
           "type": "string",
-          "description": "model：模型在 conclude 中选中；ledger：模型弃权，由代码按账本选中（ADR 0120，档位最高为 likely）",
-          "enum": ["model", "ledger"]
+          "description": "model：模型在 conclude 中选中；ledger：模型弃权，由代码按账本选中（ADR 0120，档位最高为 likely）；rule：模型弃权或选中了别的根因，而规则判定的假设（rule_id）没有被检查推翻，由代码改选它（契约 2.43.0，ADR 0178，档位最高为 likely）",
+          "enum": ["model", "ledger", "rule"]
         },
         "model_judged_refs": {
           "type": "array",
@@ -240,6 +241,11 @@
           "type": "integer",
           "minimum": 0,
           "description": "针对这个假设执行完成的区分性检查数（失败的检查不计）"
+        },
+        "rule_id": {
+          "type": "string",
+          "description": "假设来自阶段 A 的规则判定（契约 2.43.0，ADR 0178）：<pack>/<规则 id>，id 为 h7–h9。它只在区分性检查在规则的卡片条件上给出不满足条件的结果时被推翻；模型的假设没有这个字段",
+          "pattern": "^[a-z_][a-z0-9-]*/[a-z0-9][a-z0-9_-]*$"
         }
       }
     },

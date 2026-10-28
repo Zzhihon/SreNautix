@@ -107,6 +107,68 @@
           }
         }
       }
+    },
+    "rule_conclusions": {
+      "type": "array",
+      "description": "领域包的确定性结论规则（conclusions.yaml，契约 2.43.0，ADR 0178）命中的结论，按根因候选的排名排列（候选之外的组件在后），同一规则在同一组件上只出一条，最多 3 条。研判可用时它们作为假设 h7–h9 进入账本；没有阶段 B 结论时，群消息与事件详情显示它们并标明“规则判定”。契约 2.43.0 之前的报告没有这个字段",
+      "maxItems": 3,
+      "items": { "$ref": "#/$defs/RuleConclusion" }
+    }
+  },
+  "$defs": {
+    "RuleConclusion": {
+      "title": "RuleConclusion",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rule_id", "title", "root_component", "mechanism", "level", "basis", "card_conditions"],
+      "properties": {
+        "rule_id": {
+          "type": "string",
+          "description": "<pack>/<规则 id>",
+          "pattern": "^[a-z_][a-z0-9-]*/[a-z0-9][a-z0-9_-]*$"
+        },
+        "title": { "$ref": "evidence-card.schema.json#/$defs/LocalizedText" },
+        "root_component": { "$ref": "common.schema.json#/$defs/ComponentKey" },
+        "mechanism": { "$ref": "evidence-card.schema.json#/$defs/LocalizedText" },
+        "level": {
+          "type": "string",
+          "description": "规则判定的档位，上限与 ADR 0122 只有成员告警支持时相同",
+          "const": "likely"
+        },
+        "basis": {
+          "type": "array",
+          "minItems": 1,
+          "description": "满足条件的证据：card:<n>（本报告的卡）、alert:<n>（成员告警，按事件成员顺序）、change:<n>（事件的变更），按条件顺序，去重",
+          "items": { "$ref": "common.schema.json#/$defs/EvidenceRef" }
+        },
+        "card_conditions": {
+          "type": "array",
+          "description": "规则的证据卡条件（告警与变更条件是已经发生的事实，不在这里）。阶段 B 的区分性检查在其中一个卡片定义上得出确定的结论、并且不满足这个条件时（实体在根因范围内，on 为 incident 时不限实体），规则判定被推翻；没有卡片条件的规则不会被检查推翻",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["card", "verdict", "observations", "on"],
+            "properties": {
+              "card": { "type": "string", "description": "<pack>/<chain>/<card>" },
+              "verdict": { "type": "string", "enum": ["abnormal", "normal"] },
+              "observations": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["name", "op", "value"],
+                  "properties": {
+                    "name": { "type": "string" },
+                    "op": { "type": "string", "enum": ["gt", "gte", "lt", "lte", "eq", "ne"] },
+                    "value": { "type": ["number", "string", "boolean"] }
+                  }
+                }
+              },
+              "on": { "type": "string", "enum": ["self", "incident"] }
+            }
+          }
+        }
+      }
     }
   }
 }

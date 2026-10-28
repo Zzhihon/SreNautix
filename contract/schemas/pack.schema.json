@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://srenautix.io/contract/schemas/pack.schema.json",
   "title": "PackManifest",
-  "description": "领域包的 pack.yaml（DESIGN §6.3）。领域包只包含数据，不包含可执行代码；其余文件的结构见本文件的 $defs：signals.yaml → SignalsFile，components.yaml → ComponentsFile，alerts.yaml → AlertsFile，chains.yaml → ChainsFile，checks.yaml → ChecksFile，rules.yaml → RulesFile，remediations.yaml → RemediationsFile，domains.yaml → DomainsFile，issues.yaml → IssuesFile，rca-params.yaml → RcaParams，knowledge/*.yaml → KnowledgeFile，action-requests.yaml → ActionRequestsFile，chaos/*.yaml → ChaosFile，tests/*.yaml → PackTestFile，用户层文件 → UserLayer，pack.lock → PackLock",
+  "description": "领域包的 pack.yaml（DESIGN §6.3）。领域包只包含数据，不包含可执行代码；其余文件的结构见本文件的 $defs：signals.yaml → SignalsFile，components.yaml → ComponentsFile，alerts.yaml → AlertsFile，chains.yaml → ChainsFile，checks.yaml → ChecksFile，rules.yaml → RulesFile，conclusions.yaml → ConclusionsFile，remediations.yaml → RemediationsFile，domains.yaml → DomainsFile，issues.yaml → IssuesFile，rca-params.yaml → RcaParams，knowledge/*.yaml → KnowledgeFile，action-requests.yaml → ActionRequestsFile，chaos/*.yaml → ChaosFile，tests/*.yaml → PackTestFile，用户层文件 → UserLayer，pack.lock → PackLock",
   "type": "object",
   "additionalProperties": false,
   "required": ["api_version", "name", "version", "maturity", "requires"],
@@ -315,6 +315,123 @@
           "description": "参数值为 CEL 表达式文本"
         },
         "expected_effect": { "$ref": "evidence-card.schema.json#/$defs/LocalizedText" }
+      }
+    },
+    "ConclusionsFile": {
+      "title": "ConclusionsFile",
+      "description": "conclusions.yaml：确定性结论规则（契约 2.43.0，ADR 0178）。阶段 A 在事件涉及的每个组件上求值，全部条件成立时给出根因候选、机制与依据，写进阶段 A 报告的 rule_conclusions；研判可用时规则结论作为一条假设进入假设账本",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["conclusions"],
+      "properties": {
+        "conclusions": { "type": "array", "items": { "$ref": "#/$defs/ConclusionRule" } }
+      }
+    },
+    "ConclusionRule": {
+      "title": "PackConclusionRule",
+      "description": "一条确定性结论规则：在一个组件（求值对象）上全部条件成立时，根因候选为这个组件，机制与依据取自规则。结论档位最高为 likely",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "when", "mechanism"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$" },
+        "title": { "$ref": "evidence-card.schema.json#/$defs/LocalizedText" },
+        "component_types": {
+          "type": "array",
+          "minItems": 1,
+          "description": "求值对象的组件类型（components.yaml 的 id，可以是依赖包的）；不写时在事件涉及的全部组件上求值",
+          "items": { "type": "string" }
+        },
+        "when": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "条件分三类，全部成立时规则命中，三类合计至少一个、最多 8 个。依据按证据卡、告警、变更的顺序列出",
+          "properties": {
+            "cards": { "type": "array", "items": { "$ref": "#/$defs/ConclusionCardCondition" } },
+            "alerts": { "type": "array", "items": { "$ref": "#/$defs/ConclusionAlertCondition" } },
+            "changes": { "type": "array", "items": { "$ref": "#/$defs/ConclusionChangeCondition" } }
+          }
+        },
+        "mechanism": {
+          "description": "机制：根因怎样造成了事件的症状，每种语言最多 300 字",
+          "$ref": "evidence-card.schema.json#/$defs/LocalizedText"
+        }
+      }
+    },
+    "ConclusionScope": {
+      "title": "ConclusionScope",
+      "type": "string",
+      "description": "self：落在求值对象上（证据卡的实体属于这个组件，告警的组件是它，变更的目标是它）；incident：事件里任何位置",
+      "enum": ["self", "incident"]
+    },
+    "ConclusionCardCondition": {
+      "title": "PackConclusionCardCondition",
+      "description": "阶段 A 的一张证据卡在某个实体上的结论。证据基线判为常态的异常卡按正常对待（ADR 0153）；无法判定的卡两种结论都不满足",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["card"],
+      "properties": {
+        "card": {
+          "type": "string",
+          "description": "<chain>/<card>（本包）或 <包>/<chain>/<card>（depends_on 中的包）",
+          "pattern": "^([a-z_][a-z0-9-]*/)?[a-z0-9][a-z0-9_-]*/[a-z0-9][a-z0-9_-]*$"
+        },
+        "verdict": { "type": "string", "enum": ["abnormal", "normal"], "default": "abnormal" },
+        "observations": {
+          "type": "array",
+          "description": "卡片判定时 let 绑定的取值（EvidenceResult.observations）还须满足的比较，全部成立；取值缺失时不成立",
+          "maxItems": 4,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "op", "value"],
+            "properties": {
+              "name": { "type": "string", "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$" },
+              "op": { "type": "string", "enum": ["gt", "gte", "lt", "lte", "eq", "ne"] },
+              "value": { "type": ["number", "string", "boolean"] }
+            }
+          }
+        },
+        "on": { "$ref": "#/$defs/ConclusionScope", "default": "self" }
+      }
+    },
+    "ConclusionAlertCondition": {
+      "title": "PackConclusionAlertCondition",
+      "description": "事件的一条成员告警；已恢复的也算，它记录的是故障期间的异常",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["alertnames"],
+      "properties": {
+        "alertnames": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+        "labels": {
+          "description": "告警标签还须等于这些值",
+          "$ref": "common.schema.json#/$defs/Labels"
+        },
+        "roles": {
+          "type": "array",
+          "minItems": 1,
+          "description": "告警角色还须是其中之一",
+          "items": { "$ref": "common.schema.json#/$defs/AlertRole" }
+        },
+        "on": { "$ref": "#/$defs/ConclusionScope", "default": "self" }
+      }
+    },
+    "ConclusionChangeCondition": {
+      "title": "PackConclusionChangeCondition",
+      "description": "事件的一次变更",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kinds": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "../integrations/changes/v1/changes.schema.json#/$defs/ChangeEvent/properties/kind" }
+        },
+        "min_grade": {
+          "description": "事件与变更的关联分级不低于它（ADR 0169）；事件没有关联分级时不成立",
+          "$ref": "incident.schema.json#/$defs/ChangeGrade"
+        },
+        "on": { "$ref": "#/$defs/ConclusionScope", "default": "self" }
       }
     },
     "RemediationsFile": {
@@ -1122,7 +1239,7 @@
         },
         "disable": {
           "type": "array",
-          "description": "禁用的条目：alerts/<id>、chains/<id>、chains/<id>/<card>、checks/<id>、rules/<id>、domains/<id>、domains/<id>/<诊断卡或份额卡 id>、indicators/<id>、issues/<id>",
+          "description": "禁用的条目：alerts/<id>、chains/<id>、chains/<id>/<card>、checks/<id>、rules/<id>、conclusions/<id>、domains/<id>、domains/<id>/<诊断卡或份额卡 id>、indicators/<id>、issues/<id>",
           "items": { "type": "string" }
         },
         "patch": {
@@ -1149,6 +1266,7 @@
             "chains": { "type": "array", "items": { "$ref": "#/$defs/Chain" } },
             "checks": { "type": "array", "items": { "$ref": "evidence-card.schema.json" } },
             "rules": { "type": "array", "items": { "$ref": "#/$defs/Rule" } },
+            "conclusions": { "type": "array", "items": { "$ref": "#/$defs/ConclusionRule" } },
             "indicators": { "type": "array", "items": { "$ref": "#/$defs/Indicator" } },
             "domains": {
               "type": "array",
@@ -1205,10 +1323,10 @@
     },
     "PackTestFile": {
       "title": "PackTestFile",
-      "description": "领域包测试（DESIGN §6.3）。input_series 使用 promtool 的序列写法，在 Prometheus 与 VictoriaMetrics 上各跑一遍，结论必须一致",
+      "description": "领域包测试（DESIGN §6.3）。input_series 使用 promtool 的序列写法，在 Prometheus 与 VictoriaMetrics 上各跑一遍，结论必须一致。tests 测证据卡，conclusions 测结论规则，至少写一种",
       "type": "object",
       "additionalProperties": false,
-      "required": ["api_version", "interval", "tests"],
+      "required": ["api_version", "interval"],
       "properties": {
         "api_version": { "const": "srenautix.io/pack-test/v1" },
         "interval": { "$ref": "common.schema.json#/$defs/Duration" },
@@ -1373,6 +1491,95 @@
                 "type": "string",
                 "description": "同时检查领域的诊断卡或份额卡按行得到的实体：<领域>/<诊断卡或份额卡 id>，card 必须是它引用的卡",
                 "pattern": "^[a-z][a-z0-9_-]*/[a-z0-9][a-z0-9_-]*$"
+              }
+            }
+          }
+        },
+        "conclusions": {
+          "type": "array",
+          "minItems": 1,
+          "description": "结论规则测试（契约 2.43.0，ADR 0178）：在夹具上执行列出的卡，加上列出的成员告警与变更，按阶段 A 的求值方式判断规则在求值对象上是否命中。两个后端各求值一遍，结果都必须符合期望；stable 的包要求每条结论规则都有命中与不命中的测试",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "eval_time", "rule", "subject", "cards", "expect"],
+            "properties": {
+              "name": { "type": "string" },
+              "eval_time": { "$ref": "common.schema.json#/$defs/Duration" },
+              "rule": { "type": "string", "description": "本包结论规则的 id", "pattern": "^[a-z0-9][a-z0-9_-]*$" },
+              "subject": {
+                "type": "object",
+                "description": "求值对象：组件的实体与组件类型",
+                "additionalProperties": false,
+                "required": ["kind", "name", "component_type"],
+                "properties": {
+                  "kind": { "type": "string" },
+                  "namespace": { "type": ["string", "null"] },
+                  "name": { "type": "string" },
+                  "component_type": { "type": ["string", "null"] }
+                }
+              },
+              "cards": {
+                "type": "array",
+                "description": "在夹具上执行的卡；on 为 self 时卡的实体属于求值对象，other 时属于另一个组件",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["card", "entity"],
+                  "properties": {
+                    "card": { "type": "string", "description": "<chain>/<card> 或 <包>/<chain>/<card>" },
+                    "entity": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": ["kind", "name"],
+                      "properties": {
+                        "kind": { "type": "string" },
+                        "namespace": { "type": ["string", "null"] },
+                        "name": { "type": "string" }
+                      }
+                    },
+                    "on": { "type": "string", "enum": ["self", "other"], "default": "self" }
+                  }
+                }
+              },
+              "alerts": {
+                "type": "array",
+                "description": "事件的成员告警",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["alertname"],
+                  "properties": {
+                    "alertname": { "type": "string" },
+                    "labels": { "$ref": "common.schema.json#/$defs/Labels" },
+                    "role": { "$ref": "common.schema.json#/$defs/AlertRole", "default": "symptom" },
+                    "on": { "type": "string", "enum": ["self", "other"], "default": "self" }
+                  }
+                }
+              },
+              "changes": {
+                "type": "array",
+                "description": "事件的变更与关联分级（null 为事件没有分级）",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["kind", "grade"],
+                  "properties": {
+                    "kind": {
+                      "$ref": "../integrations/changes/v1/changes.schema.json#/$defs/ChangeEvent/properties/kind"
+                    },
+                    "grade": {
+                      "oneOf": [{ "type": "null" }, { "$ref": "incident.schema.json#/$defs/ChangeGrade" }]
+                    },
+                    "on": { "type": "string", "enum": ["self", "other"], "default": "self" }
+                  }
+                }
+              },
+              "expect": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["hit"],
+                "properties": { "hit": { "type": "boolean" } }
               }
             }
           }

@@ -1,5 +1,5 @@
 // 本文件由 packages/contract/scripts/gen.ts 从 contract/ 生成，不要手工修改。
-export const CONTRACT_VERSION = '2.42.0';
+export const CONTRACT_VERSION = '2.43.0';
 
 export const SCHEMAS: Record<string, Record<string, unknown>> = {
   'https://srenautix.io/contract/gateway/v1/action-catalog.schema.json': {
@@ -5831,7 +5831,7 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
     $id: 'https://srenautix.io/contract/schemas/pack.schema.json',
     title: 'PackManifest',
     description:
-      '领域包的 pack.yaml（DESIGN §6.3）。领域包只包含数据，不包含可执行代码；其余文件的结构见本文件的 $defs：signals.yaml → SignalsFile，components.yaml → ComponentsFile，alerts.yaml → AlertsFile，chains.yaml → ChainsFile，checks.yaml → ChecksFile，rules.yaml → RulesFile，remediations.yaml → RemediationsFile，domains.yaml → DomainsFile，issues.yaml → IssuesFile，rca-params.yaml → RcaParams，knowledge/*.yaml → KnowledgeFile，action-requests.yaml → ActionRequestsFile，chaos/*.yaml → ChaosFile，tests/*.yaml → PackTestFile，用户层文件 → UserLayer，pack.lock → PackLock',
+      '领域包的 pack.yaml（DESIGN §6.3）。领域包只包含数据，不包含可执行代码；其余文件的结构见本文件的 $defs：signals.yaml → SignalsFile，components.yaml → ComponentsFile，alerts.yaml → AlertsFile，chains.yaml → ChainsFile，checks.yaml → ChecksFile，rules.yaml → RulesFile，conclusions.yaml → ConclusionsFile，remediations.yaml → RemediationsFile，domains.yaml → DomainsFile，issues.yaml → IssuesFile，rca-params.yaml → RcaParams，knowledge/*.yaml → KnowledgeFile，action-requests.yaml → ActionRequestsFile，chaos/*.yaml → ChaosFile，tests/*.yaml → PackTestFile，用户层文件 → UserLayer，pack.lock → PackLock',
     type: 'object',
     additionalProperties: false,
     required: ['api_version', 'name', 'version', 'maturity', 'requires'],
@@ -6120,6 +6120,125 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
           action: { type: 'string' },
           params: { type: 'object', additionalProperties: { type: 'string' }, description: '参数值为 CEL 表达式文本' },
           expected_effect: { $ref: 'evidence-card.schema.json#/$defs/LocalizedText' },
+        },
+      },
+      ConclusionsFile: {
+        title: 'ConclusionsFile',
+        description:
+          'conclusions.yaml：确定性结论规则（契约 2.43.0，ADR 0178）。阶段 A 在事件涉及的每个组件上求值，全部条件成立时给出根因候选、机制与依据，写进阶段 A 报告的 rule_conclusions；研判可用时规则结论作为一条假设进入假设账本',
+        type: 'object',
+        additionalProperties: false,
+        required: ['conclusions'],
+        properties: { conclusions: { type: 'array', items: { $ref: '#/$defs/ConclusionRule' } } },
+      },
+      ConclusionRule: {
+        title: 'PackConclusionRule',
+        description:
+          '一条确定性结论规则：在一个组件（求值对象）上全部条件成立时，根因候选为这个组件，机制与依据取自规则。结论档位最高为 likely',
+        type: 'object',
+        additionalProperties: false,
+        required: ['id', 'title', 'when', 'mechanism'],
+        properties: {
+          id: { type: 'string', pattern: '^[a-z0-9][a-z0-9_-]*$' },
+          title: { $ref: 'evidence-card.schema.json#/$defs/LocalizedText' },
+          component_types: {
+            type: 'array',
+            minItems: 1,
+            description:
+              '求值对象的组件类型（components.yaml 的 id，可以是依赖包的）；不写时在事件涉及的全部组件上求值',
+            items: { type: 'string' },
+          },
+          when: {
+            type: 'object',
+            additionalProperties: false,
+            description:
+              '条件分三类，全部成立时规则命中，三类合计至少一个、最多 8 个。依据按证据卡、告警、变更的顺序列出',
+            properties: {
+              cards: { type: 'array', items: { $ref: '#/$defs/ConclusionCardCondition' } },
+              alerts: { type: 'array', items: { $ref: '#/$defs/ConclusionAlertCondition' } },
+              changes: { type: 'array', items: { $ref: '#/$defs/ConclusionChangeCondition' } },
+            },
+          },
+          mechanism: {
+            description: '机制：根因怎样造成了事件的症状，每种语言最多 300 字',
+            $ref: 'evidence-card.schema.json#/$defs/LocalizedText',
+          },
+        },
+      },
+      ConclusionScope: {
+        title: 'ConclusionScope',
+        type: 'string',
+        description:
+          'self：落在求值对象上（证据卡的实体属于这个组件，告警的组件是它，变更的目标是它）；incident：事件里任何位置',
+        enum: ['self', 'incident'],
+      },
+      ConclusionCardCondition: {
+        title: 'PackConclusionCardCondition',
+        description:
+          '阶段 A 的一张证据卡在某个实体上的结论。证据基线判为常态的异常卡按正常对待（ADR 0153）；无法判定的卡两种结论都不满足',
+        type: 'object',
+        additionalProperties: false,
+        required: ['card'],
+        properties: {
+          card: {
+            type: 'string',
+            description: '<chain>/<card>（本包）或 <包>/<chain>/<card>（depends_on 中的包）',
+            pattern: '^([a-z_][a-z0-9-]*/)?[a-z0-9][a-z0-9_-]*/[a-z0-9][a-z0-9_-]*$',
+          },
+          verdict: { type: 'string', enum: ['abnormal', 'normal'], default: 'abnormal' },
+          observations: {
+            type: 'array',
+            description:
+              '卡片判定时 let 绑定的取值（EvidenceResult.observations）还须满足的比较，全部成立；取值缺失时不成立',
+            maxItems: 4,
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['name', 'op', 'value'],
+              properties: {
+                name: { type: 'string', pattern: '^[a-zA-Z_][a-zA-Z0-9_]*$' },
+                op: { type: 'string', enum: ['gt', 'gte', 'lt', 'lte', 'eq', 'ne'] },
+                value: { type: ['number', 'string', 'boolean'] },
+              },
+            },
+          },
+          on: { $ref: '#/$defs/ConclusionScope', default: 'self' },
+        },
+      },
+      ConclusionAlertCondition: {
+        title: 'PackConclusionAlertCondition',
+        description: '事件的一条成员告警；已恢复的也算，它记录的是故障期间的异常',
+        type: 'object',
+        additionalProperties: false,
+        required: ['alertnames'],
+        properties: {
+          alertnames: { type: 'array', minItems: 1, items: { type: 'string' } },
+          labels: { description: '告警标签还须等于这些值', $ref: 'common.schema.json#/$defs/Labels' },
+          roles: {
+            type: 'array',
+            minItems: 1,
+            description: '告警角色还须是其中之一',
+            items: { $ref: 'common.schema.json#/$defs/AlertRole' },
+          },
+          on: { $ref: '#/$defs/ConclusionScope', default: 'self' },
+        },
+      },
+      ConclusionChangeCondition: {
+        title: 'PackConclusionChangeCondition',
+        description: '事件的一次变更',
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          kinds: {
+            type: 'array',
+            minItems: 1,
+            items: { $ref: '../integrations/changes/v1/changes.schema.json#/$defs/ChangeEvent/properties/kind' },
+          },
+          min_grade: {
+            description: '事件与变更的关联分级不低于它（ADR 0169）；事件没有关联分级时不成立',
+            $ref: 'incident.schema.json#/$defs/ChangeGrade',
+          },
+          on: { $ref: '#/$defs/ConclusionScope', default: 'self' },
         },
       },
       RemediationsFile: {
@@ -6911,7 +7030,7 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
           disable: {
             type: 'array',
             description:
-              '禁用的条目：alerts/<id>、chains/<id>、chains/<id>/<card>、checks/<id>、rules/<id>、domains/<id>、domains/<id>/<诊断卡或份额卡 id>、indicators/<id>、issues/<id>',
+              '禁用的条目：alerts/<id>、chains/<id>、chains/<id>/<card>、checks/<id>、rules/<id>、conclusions/<id>、domains/<id>、domains/<id>/<诊断卡或份额卡 id>、indicators/<id>、issues/<id>',
             items: { type: 'string' },
           },
           patch: {
@@ -6935,6 +7054,7 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
               chains: { type: 'array', items: { $ref: '#/$defs/Chain' } },
               checks: { type: 'array', items: { $ref: 'evidence-card.schema.json' } },
               rules: { type: 'array', items: { $ref: '#/$defs/Rule' } },
+              conclusions: { type: 'array', items: { $ref: '#/$defs/ConclusionRule' } },
               indicators: { type: 'array', items: { $ref: '#/$defs/Indicator' } },
               domains: {
                 type: 'array',
@@ -6989,10 +7109,10 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
       PackTestFile: {
         title: 'PackTestFile',
         description:
-          '领域包测试（DESIGN §6.3）。input_series 使用 promtool 的序列写法，在 Prometheus 与 VictoriaMetrics 上各跑一遍，结论必须一致',
+          '领域包测试（DESIGN §6.3）。input_series 使用 promtool 的序列写法，在 Prometheus 与 VictoriaMetrics 上各跑一遍，结论必须一致。tests 测证据卡，conclusions 测结论规则，至少写一种',
         type: 'object',
         additionalProperties: false,
-        required: ['api_version', 'interval', 'tests'],
+        required: ['api_version', 'interval'],
         properties: {
           api_version: { const: 'srenautix.io/pack-test/v1' },
           interval: { $ref: 'common.schema.json#/$defs/Duration' },
@@ -7154,6 +7274,94 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
                   description:
                     '同时检查领域的诊断卡或份额卡按行得到的实体：<领域>/<诊断卡或份额卡 id>，card 必须是它引用的卡',
                   pattern: '^[a-z][a-z0-9_-]*/[a-z0-9][a-z0-9_-]*$',
+                },
+              },
+            },
+          },
+          conclusions: {
+            type: 'array',
+            minItems: 1,
+            description:
+              '结论规则测试（契约 2.43.0，ADR 0178）：在夹具上执行列出的卡，加上列出的成员告警与变更，按阶段 A 的求值方式判断规则在求值对象上是否命中。两个后端各求值一遍，结果都必须符合期望；stable 的包要求每条结论规则都有命中与不命中的测试',
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['name', 'eval_time', 'rule', 'subject', 'cards', 'expect'],
+              properties: {
+                name: { type: 'string' },
+                eval_time: { $ref: 'common.schema.json#/$defs/Duration' },
+                rule: { type: 'string', description: '本包结论规则的 id', pattern: '^[a-z0-9][a-z0-9_-]*$' },
+                subject: {
+                  type: 'object',
+                  description: '求值对象：组件的实体与组件类型',
+                  additionalProperties: false,
+                  required: ['kind', 'name', 'component_type'],
+                  properties: {
+                    kind: { type: 'string' },
+                    namespace: { type: ['string', 'null'] },
+                    name: { type: 'string' },
+                    component_type: { type: ['string', 'null'] },
+                  },
+                },
+                cards: {
+                  type: 'array',
+                  description: '在夹具上执行的卡；on 为 self 时卡的实体属于求值对象，other 时属于另一个组件',
+                  items: {
+                    type: 'object',
+                    additionalProperties: false,
+                    required: ['card', 'entity'],
+                    properties: {
+                      card: { type: 'string', description: '<chain>/<card> 或 <包>/<chain>/<card>' },
+                      entity: {
+                        type: 'object',
+                        additionalProperties: false,
+                        required: ['kind', 'name'],
+                        properties: {
+                          kind: { type: 'string' },
+                          namespace: { type: ['string', 'null'] },
+                          name: { type: 'string' },
+                        },
+                      },
+                      on: { type: 'string', enum: ['self', 'other'], default: 'self' },
+                    },
+                  },
+                },
+                alerts: {
+                  type: 'array',
+                  description: '事件的成员告警',
+                  items: {
+                    type: 'object',
+                    additionalProperties: false,
+                    required: ['alertname'],
+                    properties: {
+                      alertname: { type: 'string' },
+                      labels: { $ref: 'common.schema.json#/$defs/Labels' },
+                      role: { $ref: 'common.schema.json#/$defs/AlertRole', default: 'symptom' },
+                      on: { type: 'string', enum: ['self', 'other'], default: 'self' },
+                    },
+                  },
+                },
+                changes: {
+                  type: 'array',
+                  description: '事件的变更与关联分级（null 为事件没有分级）',
+                  items: {
+                    type: 'object',
+                    additionalProperties: false,
+                    required: ['kind', 'grade'],
+                    properties: {
+                      kind: {
+                        $ref: '../integrations/changes/v1/changes.schema.json#/$defs/ChangeEvent/properties/kind',
+                      },
+                      grade: { oneOf: [{ type: 'null' }, { $ref: 'incident.schema.json#/$defs/ChangeGrade' }] },
+                      on: { type: 'string', enum: ['self', 'other'], default: 'self' },
+                    },
+                  },
+                },
+                expect: {
+                  type: 'object',
+                  additionalProperties: false,
+                  required: ['hit'],
+                  properties: { hit: { type: 'boolean' } },
                 },
               },
             },
@@ -7863,7 +8071,12 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
     properties: {
       disposition: { $ref: 'common.schema.json#/$defs/Disposition' },
       conclusion: { $ref: '#/$defs/Conclusion' },
-      hypotheses: { type: 'array', maxItems: 6, items: { $ref: '#/$defs/Hypothesis' } },
+      hypotheses: {
+        type: 'array',
+        description: '模型的假设 h1–h6 与规则判定的假设 h7–h9（契约 2.43.0，ADR 0178）',
+        maxItems: 9,
+        items: { $ref: '#/$defs/Hypothesis' },
+      },
       next_checks: { type: 'array', maxItems: 12, items: { $ref: '#/$defs/NextCheck' } },
       situation: { type: 'string', maxLength: 300 },
       summary: { type: 'string', maxLength: 400 },
@@ -7977,8 +8190,8 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
           chosen_by: {
             type: 'string',
             description:
-              'model：模型在 conclude 中选中；ledger：模型弃权，由代码按账本选中（ADR 0120，档位最高为 likely）',
-            enum: ['model', 'ledger'],
+              'model：模型在 conclude 中选中；ledger：模型弃权，由代码按账本选中（ADR 0120，档位最高为 likely）；rule：模型弃权或选中了别的根因，而规则判定的假设（rule_id）没有被检查推翻，由代码改选它（契约 2.43.0，ADR 0178，档位最高为 likely）',
+            enum: ['model', 'ledger', 'rule'],
           },
           model_judged_refs: {
             type: 'array',
@@ -8060,6 +8273,12 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
             type: 'integer',
             minimum: 0,
             description: '针对这个假设执行完成的区分性检查数（失败的检查不计）',
+          },
+          rule_id: {
+            type: 'string',
+            description:
+              '假设来自阶段 A 的规则判定（契约 2.43.0，ADR 0178）：<pack>/<规则 id>，id 为 h7–h9。它只在区分性检查在规则的卡片条件上给出不满足条件的结果时被推翻；模型的假设没有这个字段',
+            pattern: '^[a-z_][a-z0-9-]*/[a-z0-9][a-z0-9_-]*$',
           },
         },
       },
@@ -8240,6 +8459,71 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
               type: 'array',
               description: '阶段 A 没有在告警实体上得出结论（没有执行，或无法判定）的卡',
               items: { type: 'string' },
+            },
+          },
+        },
+      },
+      rule_conclusions: {
+        type: 'array',
+        description:
+          '领域包的确定性结论规则（conclusions.yaml，契约 2.43.0，ADR 0178）命中的结论，按根因候选的排名排列（候选之外的组件在后），同一规则在同一组件上只出一条，最多 3 条。研判可用时它们作为假设 h7–h9 进入账本；没有阶段 B 结论时，群消息与事件详情显示它们并标明“规则判定”。契约 2.43.0 之前的报告没有这个字段',
+        maxItems: 3,
+        items: { $ref: '#/$defs/RuleConclusion' },
+      },
+    },
+    $defs: {
+      RuleConclusion: {
+        title: 'RuleConclusion',
+        type: 'object',
+        additionalProperties: false,
+        required: ['rule_id', 'title', 'root_component', 'mechanism', 'level', 'basis', 'card_conditions'],
+        properties: {
+          rule_id: {
+            type: 'string',
+            description: '<pack>/<规则 id>',
+            pattern: '^[a-z_][a-z0-9-]*/[a-z0-9][a-z0-9_-]*$',
+          },
+          title: { $ref: 'evidence-card.schema.json#/$defs/LocalizedText' },
+          root_component: { $ref: 'common.schema.json#/$defs/ComponentKey' },
+          mechanism: { $ref: 'evidence-card.schema.json#/$defs/LocalizedText' },
+          level: {
+            type: 'string',
+            description: '规则判定的档位，上限与 ADR 0122 只有成员告警支持时相同',
+            const: 'likely',
+          },
+          basis: {
+            type: 'array',
+            minItems: 1,
+            description:
+              '满足条件的证据：card:<n>（本报告的卡）、alert:<n>（成员告警，按事件成员顺序）、change:<n>（事件的变更），按条件顺序，去重',
+            items: { $ref: 'common.schema.json#/$defs/EvidenceRef' },
+          },
+          card_conditions: {
+            type: 'array',
+            description:
+              '规则的证据卡条件（告警与变更条件是已经发生的事实，不在这里）。阶段 B 的区分性检查在其中一个卡片定义上得出确定的结论、并且不满足这个条件时（实体在根因范围内，on 为 incident 时不限实体），规则判定被推翻；没有卡片条件的规则不会被检查推翻',
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['card', 'verdict', 'observations', 'on'],
+              properties: {
+                card: { type: 'string', description: '<pack>/<chain>/<card>' },
+                verdict: { type: 'string', enum: ['abnormal', 'normal'] },
+                observations: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    additionalProperties: false,
+                    required: ['name', 'op', 'value'],
+                    properties: {
+                      name: { type: 'string' },
+                      op: { type: 'string', enum: ['gt', 'gte', 'lt', 'lte', 'eq', 'ne'] },
+                      value: { type: ['number', 'string', 'boolean'] },
+                    },
+                  },
+                },
+                on: { type: 'string', enum: ['self', 'incident'] },
+              },
             },
           },
         },
