@@ -113,6 +113,12 @@ describe('原因码登记表（ADR 0172）', () => {
     );
   });
 
+  it('错误样例的原因码与 EvidenceResult 的 Samples.code 相同（ADR 0177）', () => {
+    expect(group('evidence_samples')).toEqual(
+      schemaEnum('schemas/evidence-result.schema.json', '/$defs/Samples/properties/code/oneOf/1'),
+    );
+  });
+
   it('通知放弃的原因是渠道永久错误加上编辑次数用完', () => {
     expect(group('notify_abandon')).toEqual([...group('notify_permanent'), 'ended_edit_cap'].sort());
   });

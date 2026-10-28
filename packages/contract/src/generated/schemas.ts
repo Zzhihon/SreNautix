@@ -1,5 +1,5 @@
 // 本文件由 packages/contract/scripts/gen.ts 从 contract/ 生成，不要手工修改。
-export const CONTRACT_VERSION = '2.41.0';
+export const CONTRACT_VERSION = '2.42.0';
 
 export const SCHEMAS: Record<string, Record<string, unknown>> = {
   'https://srenautix.io/contract/gateway/v1/action-catalog.schema.json': {
@@ -2104,7 +2104,7 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
     $id: 'https://srenautix.io/contract/model/hypothesize.schema.json',
     title: 'HypothesizeOutput',
     description:
-      '阶段 B hypothesize 步骤的模型输出（DESIGN §7.2）。遵守可移植 schema 子集（§8.2）：扁平结构、所有字段必填、additionalProperties=false、使用枚举、不使用 oneOf。x-srenautix-dynamic-enum 标出的字段在每次运行时由 worker 替换为本次运行中存在的取值',
+      '阶段 B hypothesize 步骤的模型输出（DESIGN §7.2）。遵守可移植 schema 子集（§8.2）：扁平结构、所有字段必填、additionalProperties=false、使用枚举、不使用 oneOf。x-srenautix-dynamic-enum 标出的字段在每次运行时由 worker 替换为本次运行中存在的取值；sample_refs 是有错误样例的卡（契约 2.42.0，ADR 0177）',
     'x-srenautix-portable': true,
     type: 'object',
     additionalProperties: false,
@@ -2118,7 +2118,7 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
         items: {
           type: 'object',
           additionalProperties: false,
-          required: ['id', 'parent_id', 'root_component', 'mechanism', 'supporting', 'refuting'],
+          required: ['id', 'parent_id', 'root_component', 'mechanism', 'mechanism_refs', 'supporting', 'refuting'],
           properties: {
             id: { type: 'string', enum: ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'] },
             parent_id: { type: ['string', 'null'], enum: ['h1', 'h2', 'h3', 'h4', 'h5', 'h6', null] },
@@ -2128,6 +2128,12 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
               'x-srenautix-dynamic-enum': 'components',
             },
             mechanism: { type: 'string', maxLength: 600 },
+            mechanism_refs: {
+              type: 'array',
+              maxItems: 4,
+              description: '支撑机制的错误样例卡',
+              items: { type: 'string', 'x-srenautix-dynamic-enum': 'sample_refs' },
+            },
             supporting: {
               type: 'array',
               maxItems: 12,
@@ -3989,6 +3995,7 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
           '卡片需要的集成能力，例如 metrics.query_range、logs.match。能力不可用时卡片显示 capability_missing',
         items: { type: 'string', pattern: '^[a-z]+\\.[a-z_]+$' },
       },
+      samples: { $ref: '#/$defs/Samples' },
       check: {
         type: 'object',
         additionalProperties: false,
@@ -4138,6 +4145,105 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
           },
           sort_by: { type: 'string' },
           limit: { type: 'integer', minimum: 1, maximum: 50, default: 8 },
+        },
+      },
+      Samples: {
+        title: 'CardSamples',
+        description:
+          '错误样例（契约 2.42.0，ADR 0177）：把 ref 指向的日志引用取回的日志行按 dimensions 聚合成维度组合，按 classes 归入错误类别，每个类别取少量原始样例；样例与维度值先脱敏再截断。声明它的卡 egress 必须是 redact 或 never（加载时校验），样例出境的数据类别为 logs。结果写在 EvidenceResult.samples，没有声明 display.table 时维度组合同时写成卡片的表格',
+        type: 'object',
+        additionalProperties: false,
+        required: ['ref', 'dimensions'],
+        properties: {
+          ref: {
+            type: 'string',
+            description:
+              '卡片中 mode 为 logs 的引用名。计数取自这个引用返回的日志行，行数达到引用的 limit 时计数是下限',
+            pattern: '^[a-z][a-zA-Z0-9_]*$',
+          },
+          dimensions: {
+            type: 'array',
+            description: '聚合维度，按声明顺序组成维度组合，例如依赖方、模型、内部错误码、依赖方返回的状态码',
+            minItems: 1,
+            maxItems: 6,
+            items: { $ref: '#/$defs/SamplesDimension' },
+          },
+          classes: {
+            type: 'array',
+            description: '错误类别，按声明顺序取第一个命中的类别；一个都没有命中的行归入 other',
+            maxItems: 16,
+            items: { $ref: '#/$defs/SamplesClass' },
+          },
+          per_class: {
+            type: 'integer',
+            description: '每个类别最多取几条样例；同一类别内先轮流取不同的维度组合，再按时间从新到旧',
+            minimum: 1,
+            maximum: 10,
+            default: 3,
+          },
+          max_chars: {
+            type: 'integer',
+            description: '每条样例脱敏之后保留的最多字符数，超出部分截断',
+            minimum: 80,
+            maximum: 2000,
+            default: 300,
+          },
+          max_groups: {
+            type: 'integer',
+            description: '结果里保留的维度组合数，按行数从多到少；其余的只计入 groups_omitted',
+            minimum: 1,
+            maximum: 50,
+            default: 20,
+          },
+        },
+      },
+      SamplesDimension: {
+        title: 'CardSamplesDimension',
+        description: '一个聚合维度，label 与 regex 二选一（加载时校验）',
+        type: 'object',
+        additionalProperties: false,
+        required: ['name'],
+        properties: {
+          name: { type: 'string', pattern: '^[a-z][a-z0-9_]*$' },
+          title: { $ref: '#/$defs/LocalizedText' },
+          label: {
+            type: 'string',
+            description: '日志行的标签名：日志流的标签，或 LogQL 解析器（例如 | json、| logfmt）提取出的标签',
+          },
+          regex: {
+            type: 'string',
+            description: '在日志行上匹配的正则（ECMAScript 语法），取第一个捕获组；不匹配时这一维为 null',
+          },
+        },
+      },
+      SamplesClass: {
+        title: 'CardSamplesClass',
+        type: 'object',
+        additionalProperties: false,
+        required: ['id', 'title', 'match'],
+        properties: {
+          id: {
+            type: 'string',
+            description: '类别 id；other 保留给没有命中任何类别的行',
+            pattern: '^[a-z][a-z0-9_]*$',
+          },
+          title: { $ref: '#/$defs/LocalizedText' },
+          match: {
+            type: 'array',
+            description:
+              '全部条件都成立时命中：写了 dimension 时匹配这一维的取值（取值为 null 时不成立），没写时匹配整行',
+            minItems: 1,
+            maxItems: 4,
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['regex'],
+              properties: {
+                dimension: { type: 'string', pattern: '^[a-z][a-z0-9_]*$' },
+                regex: { type: 'string', description: 'ECMAScript 语法的正则' },
+              },
+            },
+          },
         },
       },
       Link: {
@@ -4293,8 +4399,112 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
           '证据基线（契约 2.31.0，ADR 0153）：判为异常的卡在同一实体上、按同样长度的窗口在事件之前的时段重新判定，与事件窗口比较。常态（routine）的卡不能作为根因或支持证据。只对异常卡计算；正常与无法判定的卡、关闭了证据基线的部署为 null 或不出现',
         oneOf: [{ type: 'null' }, { $ref: '#/$defs/Novelty' }],
       },
+      samples: {
+        description: '错误样例（契约 2.42.0，ADR 0177）：卡片声明了 samples 时出现，其余的卡不出现',
+        $ref: '#/$defs/Samples',
+      },
     },
     $defs: {
+      Samples: {
+        title: 'EvidenceSamples',
+        description:
+          '按依赖与错误类别聚合的错误日志：维度组合的行数、首末时间与错误类别，每个类别少量脱敏、截断的原始样例。样例与维度值是不可信文本',
+        type: 'object',
+        additionalProperties: false,
+        required: [
+          'ref',
+          'code',
+          'lines',
+          'truncated',
+          'dimensions',
+          'groups',
+          'groups_omitted',
+          'classes',
+          'redactions',
+        ],
+        properties: {
+          ref: { type: 'string', description: '卡片中提供日志行的引用名' },
+          code: {
+            description:
+              '没有取得日志行的原因码（contract/reason-codes.json 的 evidence_samples 分组）：samples_deadline 证据期限内没有执行完；samples_timeout 日志查询超时；samples_source_error 日志数据源报错；samples_capability_missing 没有日志能力。取得了日志行（包括零行）时为 null',
+            oneOf: [
+              { type: 'null' },
+              {
+                type: 'string',
+                enum: ['samples_deadline', 'samples_timeout', 'samples_source_error', 'samples_capability_missing'],
+              },
+            ],
+          },
+          lines: { type: 'integer', minimum: 0, description: '参与聚合的日志行数' },
+          truncated: {
+            type: 'boolean',
+            description: '日志查询返回的行数达到引用的 limit：窗口内还有更早的行，计数与首次时间是下限',
+          },
+          dimensions: { type: 'array', description: '维度名，按卡片声明的顺序', items: { type: 'string' } },
+          groups: {
+            type: 'array',
+            description: '维度组合与错误类别的行数，按行数从多到少，最多为卡片的 max_groups',
+            maxItems: 50,
+            items: { $ref: '#/$defs/SamplesGroup' },
+          },
+          groups_omitted: { type: 'integer', minimum: 0, description: '超出 max_groups、没有列出的维度组合数' },
+          classes: {
+            type: 'array',
+            description: '错误类别，按行数从多到少；没有命中任何声明的类别的行为 other',
+            maxItems: 17,
+            items: { $ref: '#/$defs/SamplesClass' },
+          },
+          redactions: { type: 'integer', minimum: 0, description: '样例与维度值中被脱敏规则替换的处数' },
+        },
+      },
+      SamplesGroup: {
+        title: 'EvidenceSamplesGroup',
+        type: 'object',
+        additionalProperties: false,
+        required: ['dimensions', 'class', 'count', 'first_at', 'last_at'],
+        properties: {
+          dimensions: {
+            type: 'object',
+            description: '维度名 → 取值（脱敏、最多 120 个字符）；标签不存在或正则不匹配时为 null',
+            additionalProperties: { type: ['string', 'null'] },
+          },
+          class: { type: 'string' },
+          count: { type: 'integer', minimum: 1 },
+          first_at: { $ref: 'common.schema.json#/$defs/Timestamp' },
+          last_at: { $ref: 'common.schema.json#/$defs/Timestamp' },
+        },
+      },
+      SamplesClass: {
+        title: 'EvidenceSamplesClass',
+        type: 'object',
+        additionalProperties: false,
+        required: ['class', 'title', 'count', 'samples'],
+        properties: {
+          class: { type: 'string' },
+          title: {
+            description: '卡片声明的类别标题；other 为 null',
+            oneOf: [{ type: 'null' }, { $ref: 'evidence-card.schema.json#/$defs/LocalizedText' }],
+          },
+          count: { type: 'integer', minimum: 1 },
+          samples: { type: 'array', maxItems: 10, items: { $ref: '#/$defs/Sample' } },
+        },
+      },
+      Sample: {
+        title: 'EvidenceSample',
+        type: 'object',
+        additionalProperties: false,
+        required: ['at', 'dimensions', 'text', 'cut'],
+        properties: {
+          at: { $ref: 'common.schema.json#/$defs/Timestamp' },
+          dimensions: {
+            type: 'object',
+            description: '这一行的维度取值',
+            additionalProperties: { type: ['string', 'null'] },
+          },
+          text: { type: 'string', maxLength: 2001, description: '脱敏后截断的日志行' },
+          cut: { type: 'boolean', description: '脱敏后的行超过 max_chars，已截断' },
+        },
+      },
       Novelty: {
         title: 'EvidenceNovelty',
         type: 'object',
@@ -6908,6 +7118,20 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
                       enum: ['normal', 'abnormal', 'undeterminable', 'capability_missing'],
                     },
                     reason_kind: { type: 'string' },
+                    samples: {
+                      type: 'object',
+                      description:
+                        '错误样例（契约 2.42.0，ADR 0177）：卡片声明了 samples 时，classes 中列出的错误类别的行数必须等于给出的值（0 表示这个类别不出现），没有列出的类别不检查',
+                      additionalProperties: false,
+                      required: ['classes'],
+                      properties: {
+                        classes: {
+                          type: 'object',
+                          propertyNames: { pattern: '^[a-z][a-z0-9_]*$' },
+                          additionalProperties: { type: 'integer', minimum: 0 },
+                        },
+                      },
+                    },
                     entities: {
                       type: 'array',
                       description:
@@ -7812,6 +8036,13 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
           parent_id: { type: ['string', 'null'], pattern: '^h[1-9]$' },
           root_component: { $ref: 'common.schema.json#/$defs/ComponentKey' },
           mechanism: { type: 'string', maxLength: 600 },
+          mechanism_refs: {
+            type: 'array',
+            description:
+              '支撑机制的错误样例卡（契约 2.42.0，ADR 0177）：只保留本次运行中存在、带错误样例并且取得了日志行的卡；没有机制引用时不出现',
+            maxItems: 4,
+            items: { $ref: 'common.schema.json#/$defs/EvidenceRef' },
+          },
           supporting: { type: 'array', maxItems: 12, items: { $ref: 'common.schema.json#/$defs/EvidenceRef' } },
           refuting: { type: 'array', maxItems: 12, items: { $ref: 'common.schema.json#/$defs/EvidenceRef' } },
           status: {

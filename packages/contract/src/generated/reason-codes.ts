@@ -18,7 +18,13 @@ export interface ReasonCodesByStage {
     | 'withheld_external_digest'
     | 'withheld_suppressed'
     | 'withheld_severity';
-  stage_a: 'stage_a_failed' | 'stage_a_missing';
+  stage_a:
+    | 'stage_a_failed'
+    | 'stage_a_missing'
+    | 'samples_deadline'
+    | 'samples_timeout'
+    | 'samples_source_error'
+    | 'samples_capability_missing';
   research:
     | 'model_unavailable'
     | 'breaker_open'
@@ -109,6 +115,7 @@ export interface ReasonCodesByGroup {
   notify_withheld:
     'withheld_planned_retirement' | 'withheld_external_digest' | 'withheld_suppressed' | 'withheld_severity';
   stage_a: 'stage_a_failed' | 'stage_a_missing';
+  evidence_samples: 'samples_deadline' | 'samples_timeout' | 'samples_source_error' | 'samples_capability_missing';
   research_failure:
     | 'model_unavailable'
     | 'breaker_open'
@@ -177,6 +184,11 @@ export const REASON_CODE_GROUPS: Record<keyof ReasonCodesByGroup, ReasonCodeGrou
   },
   notify_withheld: { stage: 'notify', description: '通知引擎决定不推送事件消息的原因' },
   stage_a: { stage: 'stage_a', description: '阶段 A 没有报告的原因' },
+  evidence_samples: {
+    stage: 'stage_a',
+    description:
+      '错误样例卡没有取得日志行的原因（evidence-result.schema.json 的 Samples.code，ADR 0177）：阶段 A 的证据卡与阶段 B 的卡片检查都由 server 执行',
+  },
   research_failure: {
     stage: 'research',
     description: 'worker 的研判失败类型（events.schema.json 的 ResearchFailed.kind）',
@@ -334,6 +346,34 @@ export const REASON_CODES: readonly ReasonCodeEntry[] = [
       'zh-CN': '阶段 A 补跑 3 次仍然失败，当前版本没有报告',
       en: 'stage A still failed after 3 retries; the current version has no report',
     },
+  },
+  {
+    code: 'samples_deadline',
+    stage: 'stage_a',
+    level: 'warning',
+    groups: ['evidence_samples'],
+    text: { 'zh-CN': '证据期限内没有取完错误日志', en: 'the error logs were not read within the evidence deadline' },
+  },
+  {
+    code: 'samples_timeout',
+    stage: 'stage_a',
+    level: 'warning',
+    groups: ['evidence_samples'],
+    text: { 'zh-CN': '错误日志的查询超时', en: 'the error log query timed out' },
+  },
+  {
+    code: 'samples_source_error',
+    stage: 'stage_a',
+    level: 'warning',
+    groups: ['evidence_samples'],
+    text: { 'zh-CN': '日志数据源报错', en: 'the logs data source returned an error' },
+  },
+  {
+    code: 'samples_capability_missing',
+    stage: 'stage_a',
+    level: 'warning',
+    groups: ['evidence_samples'],
+    text: { 'zh-CN': '日志查询能力不可用', en: 'the logs query capability is unavailable' },
   },
   {
     code: 'model_unavailable',
