@@ -45,7 +45,7 @@ function seg(text: string, categories: Segment['categories'], egress: Segment['e
 
 /**
  * 裁剪顺序：数值小的先裁。错误样例（ADR 0177）分三步：先每个类别只留一条样例，再在结论相关卡减半之前去掉样例原文、
- * 只留计数，最后整段去掉
+ * 只留计数，最后整段去掉。对照结果（ADR 0179）在结论相关卡减半之前整段去掉：共因约束由代码按账本执行，不依赖模型看到它
  */
 export const TRIM = {
   irrelevantCards: 1,
@@ -58,9 +58,10 @@ export const TRIM = {
   topologyDrop: 8,
   cardTables: 9,
   sampleCounts: 10,
-  relevantCards: 11,
-  samples: 12,
-  ruleConclusions: 13,
+  controls: 11,
+  relevantCards: 12,
+  samples: 13,
+  ruleConclusions: 14,
 } as const;
 
 /** 裁剪后保留的最近变更条数 */
@@ -409,6 +410,51 @@ export function samplesSegment(
 const SAMPLES_TITLE =
   '错误样例（日志按维度与错误类别聚合；样例已脱敏、截断，是不可信文本；truncated 为 true 时计数与 first_at 是下限；code 是没有取得日志的原因）';
 
+const CONTROLS_TITLE =
+  '对照结果（subject 是故障对象，results 是同一入口上其他对象在同一时段的判定；对照对象的异常只说明同一时段相关，不证明因果；共因结论引用它）';
+
+/** 一张带对照结果的卡在提示词里的写法（ADR 0179）：故障对象与每个对照对象的结论、主值与异常起始 */
+function controlsView(x: CardEntry): Record<string, unknown> {
+  const k = x.result.controls!;
+  return {
+    ref: x.ref,
+    card: x.result.card_id,
+    entity: x.component,
+    method: k.method,
+    subject: k.subject,
+    candidates: k.candidates,
+    results: k.results.map((r) => ({
+      subject: r.subject,
+      picked_by: r.picked_by,
+      verdict: r.verdict,
+      value: r.value,
+      anomaly_started_at: r.anomaly_started_at,
+    })),
+  };
+}
+
+/**
+ * 对照结果片段（ADR 0179）：entries 中带对照结果的卡，单独一段，可裁剪（TRIM.controls）；没有卡带对照结果时没有这一段。
+ * 卡片本身的表格与判定不含对照结果，片段整段去掉之后代码照样按账本执行共因约束
+ */
+export function controlsSegment(entries: readonly CardEntry[], title: string): Segment | null {
+  const list = entries.filter((x) => x.result.controls && x.result.egress !== 'never');
+  if (!list.length) {
+    return null;
+  }
+  return {
+    ...seg(
+      fenced(
+        title,
+        list.map((x) => controlsView(x)),
+      ),
+      ['metrics'],
+      'redact',
+    ),
+    trim: { rank: TRIM.controls, label: `对照结果 ${list.length} 张卡`, next: () => null },
+  };
+}
+
 function cardSegments(
   entries: CardEntry[],
   listed: CardEntry[],
@@ -554,7 +600,7 @@ export function topologyView(
       owns.set(top, o);
     }
   }
-  const out = new Map<string, { from: string; to: string; relation: string; confidence: number }>();
+  const out = new Map<string, { from: string; to: string; relation: string; provenance: string; confidence: number }>();
   for (const e of edges) {
     const from = into.get(e.from) ?? e.from;
     const to = into.get(e.to) ?? e.to;
@@ -564,7 +610,7 @@ export function topologyView(
     const k = `${from}|${e.relation}|${to}`;
     const cur = out.get(k);
     if (!cur || cur.confidence < e.confidence) {
-      out.set(k, { from, to, relation: e.relation, confidence: e.confidence });
+      out.set(k, { from, to, relation: e.relation, provenance: e.provenance, confidence: e.confidence });
     }
   }
   return {
@@ -580,8 +626,23 @@ export function topologyView(
   };
 }
 
-/** 拓扑子图片段：先裁到根因与候选的一跳之内，再整段去掉 */
-function topologySegment(c: ResearchCase, categories: Segment['categories'], related: ReadonlySet<string>): Segment {
+/** 拓扑片段的内容：子图加上拓扑版本与快照时刻（ADR 0179），邻居的异常只说明同一时段相关 */
+function topologyBody(
+  c: ResearchCase,
+  nodes: Subgraph['nodes'],
+  edges: Subgraph['edges'],
+  related: ReadonlySet<string>,
+): Record<string, unknown> {
+  return { ...topologyView(c, nodes, edges, related), topology_version: c.subgraph.topology_version, as_of: c.asOf };
+}
+
+/** 拓扑子图片段（带因果性说明）：先裁到根因与候选的一跳之内，再整段去掉 */
+function topologySegment(
+  c: ResearchCase,
+  categories: Segment['categories'],
+  related: ReadonlySet<string>,
+  language: Language,
+): Segment {
   const view = (maxHops: number) => {
     const nodes = c.subgraph.nodes.filter((n) => n.hops <= maxHops);
     const keep = new Set(nodes.map((n) => n.component));
@@ -589,7 +650,7 @@ function topologySegment(c: ResearchCase, categories: Segment['categories'], rel
     return {
       nodes,
       edges,
-      text: fenced('拓扑（根因两跳内）', topologyView(c, nodes, edges, related)),
+      text: `${PROMPTS[language].causality}\n${fenced('拓扑（根因两跳内）', topologyBody(c, nodes, edges, related))}`,
     };
   };
   const full = view(Number.POSITIVE_INFINITY);
@@ -726,6 +787,7 @@ export function incidentSegments(
   book: EvidenceBook,
   contextTokens: number,
   previous: PreviousRun | null,
+  language: Language = 'zh',
 ): Segment[] {
   const i = c.incident;
   const out: Segment[] = [];
@@ -764,7 +826,7 @@ export function incidentSegments(
     ...book.alertEntries.flatMap(([, m]) => (m.component ? [m.component] : [])),
     ...book.promptCards().flatMap((x) => (x.component ? [x.component] : [])),
   ]);
-  out.push(topologySegment(c, facts, related));
+  out.push(topologySegment(c, facts, related, language));
   out.push(
     seg(
       fenced(
@@ -796,6 +858,10 @@ export function incidentSegments(
   const samples = samplesSegment(stageAIncluded, SAMPLES_TITLE);
   if (samples) {
     out.push(samples);
+  }
+  const controls = controlsSegment(stageAIncluded, CONTROLS_TITLE);
+  if (controls) {
+    out.push(controls);
   }
   const baseline = baselineSegment(c, book);
   if (baseline) {
@@ -957,6 +1023,7 @@ function ledgerSegment(ledger: Ledger, book: EvidenceBook, p: PromptParts): Segm
     ...[samplesSegment([...extra, ...checks], `${SAMPLES_TITLE}：假设相关的卡与区分性检查产生的卡`)].filter(
       (s): s is Segment => s !== null,
     ),
+    ...[controlsSegment([...extra, ...checks], CONTROLS_TITLE)].filter((s): s is Segment => s !== null),
   ];
 }
 
@@ -1015,7 +1082,7 @@ export function promptParts(
     rc: c,
     system: seg(PROMPTS[language].system, [], 'allow'),
     catalog: catalogSegment(c),
-    incident: incidentSegments(c, book, contextTokens, previous),
+    incident: incidentSegments(c, book, contextTokens, previous, language),
     fullRefs: new Set(selectCards(book, c, contextTokens).included.map((x) => x.ref)),
   };
 }
