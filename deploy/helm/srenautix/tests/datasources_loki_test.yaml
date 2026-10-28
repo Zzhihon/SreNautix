@@ -29,6 +29,6 @@ tests:
     asserts:
       - matchRegex:
           path: 'data["config.yaml"]'
-          pattern: '(?m)^  loki:\n    url: http://loki\.logging\.svc:3100\n    tenant: team-a\n    labels:\n      cluster: cluster\n      namespace: k8s_namespace_name\n      pod: k8s_pod_name\n'
+          pattern: '(?m)^  loki:\n    labels:\n      cluster: cluster\n      namespace: k8s_namespace_name\n      pod: k8s_pod_name\n    tenant: team-a\n    url: http://loki\.logging\.svc:3100\n'
         template: templates/role-resources.yaml
         documentSelector: {path: metadata.name, value: t-srenautix-server-config}
