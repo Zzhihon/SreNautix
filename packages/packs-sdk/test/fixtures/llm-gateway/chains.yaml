@@ -1,0 +1,82 @@
+chains:
+  - id: gateway-errors
+    title:
+      zh-CN: 网关的上游错误
+      en: Gateway upstream errors
+    cards:
+      - id: samples
+        title:
+          zh-CN: 上游错误样例
+          en: Upstream error samples
+        note:
+          zh-CN: 网关错误日志按上游、模型、状态码、内部错误码与候选数聚合，每个错误类别给出脱敏的样例
+          en: Gateway error logs grouped by upstream, model, status, internal code and candidate count, with redacted samples per error class
+        applies_to:
+          kinds: [Deployment]
+        window:
+          before: 30m
+          after: 5m
+        params:
+          min_errors: 5
+        refs:
+          - name: errors
+            signal: gateway_error_lines
+            mode: logs
+            limit: 1000
+            empty_is: normal
+          - name: any
+            signal: gateway_lines
+            mode: logs
+            limit: 1
+        judge:
+          let:
+            - name: errs
+              cel: size(errors)
+          abnormal_if:
+            - cel: errs >= params.min_errors
+              say:
+                zh-CN: '窗口内有 {errs} 行错误日志'
+                en: '{errs} error lines in the window'
+              normal_say:
+                zh-CN: '窗口内有 {errs} 行错误日志，少于阈值'
+                en: '{errs} error lines in the window, below the threshold'
+        display:
+          value: double(errs)
+          unit: count
+        # 描述这次故障是什么类型，不和事件之前的时段比较（ADR 0164）
+        baseline: false
+        samples:
+          ref: errors
+          dimensions:
+            - { name: upstream, label: upstream, title: { zh-CN: 上游, en: Upstream } }
+            - { name: model, label: model, title: { zh-CN: 模型, en: Model } }
+            - { name: status, label: status, title: { zh-CN: 状态码, en: Status } }
+            - { name: code, label: code, title: { zh-CN: 错误码, en: Code } }
+            - { name: candidates, regex: 'candidates=(\d+)', title: { zh-CN: 候选数, en: Candidates } }
+          classes:
+            # 网关自己判定的首内容超时：状态码同样是 503，排在上游返回的 503 之前
+            - id: first_content_timeout
+              title: { zh-CN: 首内容超时, en: First content timeout }
+              match:
+                - { dimension: code, regex: '^first_content_timeout$' }
+            - id: quota_exhausted
+              title: { zh-CN: 配额耗尽, en: Quota exhausted }
+              match:
+                - { dimension: status, regex: '^429$' }
+            - id: capability_mismatch
+              title: { zh-CN: 能力不匹配, en: Capability mismatch }
+              match:
+                - { dimension: status, regex: '^4[0-9][0-9]$' }
+                - { regex: '[Nn]ot support|[Uu]nsupported' }
+            - id: origin_timeout
+              title: { zh-CN: 上游源站超时（524）, en: Origin timeout (524) }
+              match:
+                - { dimension: status, regex: '^524$' }
+            - id: upstream_unavailable
+              title: { zh-CN: 上游不可用（503）, en: Upstream unavailable (503) }
+              match:
+                - { dimension: status, regex: '^503$' }
+                - { dimension: code, regex: '^upstream_error$' }
+          per_class: 2
+          max_chars: 160
+        egress: redact

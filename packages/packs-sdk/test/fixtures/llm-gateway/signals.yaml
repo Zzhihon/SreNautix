@@ -1,0 +1,13 @@
+signals:
+  # 网关的错误日志：logfmt 解析出的字段成为日志行的标签（upstream、model、status、code）
+  - id: gateway_error_lines
+    kind: logs
+    alternatives:
+      - dialect: logql
+        expr: '{$selector} |= "level=error" | logfmt'
+  # 网关的全部日志：证明日志流存在（没有错误行时卡片判为正常，日志流本身不存在时无法判定）
+  - id: gateway_lines
+    kind: logs
+    alternatives:
+      - dialect: logql
+        expr: '{$selector}'

@@ -5,6 +5,7 @@ import { loadPromqlEngine, toIso, toMillis } from '@srenautix/integration-sdk';
 import type { PackSet } from '../pack/compile.js';
 import type { EvidenceDataSource } from '../runtime/datasource.js';
 import { durationSeconds, DEFAULT_WINDOW, runCard } from '../runtime/run-card.js';
+import { NO_REDACTION } from '../runtime/samples.js';
 import { RecordingDataSource, type QuerySnapshot, type SnapshotCase } from '../runtime/snapshot.js';
 import { resolveSignal, type SignalResolution } from '../signals/resolve.js';
 
@@ -50,6 +51,7 @@ export async function recordSnapshot(
       engine,
       resolutions,
       clock,
+      redact: NO_REDACTION,
     });
     // 没有给期望时，以录制时的结论作为期望，回放必须得出同样的结论
     out.push({ ...c, expect: c.expect ?? { verdict: r.verdict, display_state: r.display_state } });

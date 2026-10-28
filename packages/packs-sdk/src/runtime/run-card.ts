@@ -11,6 +11,7 @@ import { podPattern, renderMetrics, RenderError, substitute, type RenderEntity }
 import type { SignalResolution } from '../signals/resolve.js';
 import { CapabilityMissing, type EvidenceDataSource } from './datasource.js';
 import { dbstatsCapability, dbstatsSeries, renderDbstats } from './dbstats.js';
+import { aggregateSamples, compileSamples, samplesTable, type Redactor } from './samples.js';
 
 /** Prometheus 风格时长转秒 */
 export function durationSeconds(d: string): number {
@@ -54,6 +55,8 @@ export interface RunCardInput {
   extend?: { until: number; maxWindowMs: number; notBefore?: number };
   locale?: Locale;
   timeoutMs?: number;
+  /** 错误样例的脱敏函数（ADR 0177）；卡片声明了 samples 时必须提供 */
+  redact?: Redactor;
 }
 
 export interface RunCardResult extends Omit<EvidenceResult, 'ref'> {
@@ -101,6 +104,9 @@ export async function runCard(input: RunCardInput): Promise<RunCardResult> {
   const e = input.set.cards.get(input.card);
   if (!e) {
     throw new Error(`没有卡片 ${input.card}`);
+  }
+  if (e.def.samples && !input.redact) {
+    throw new Error(`卡片 ${e.key} 声明了错误样例，执行时必须提供脱敏函数`);
   }
   const w = cardWindow(e, input.anchor, input.now, input.window, input.extend);
   const window = { from: toIso(w.from), to: toIso(w.to) };
@@ -276,7 +282,11 @@ export async function runCard(input: RunCardInput): Promise<RunCardResult> {
         refs[r.name] = { kind: 'capability_missing', capability: err.capability };
         record(err.capability, '', 0, false, err.message, null);
       } else if (err instanceof DatasourceError || err instanceof ClockWindowViolation || err instanceof RenderError) {
-        refs[r.name] = { kind: 'error', message: err.message };
+        refs[r.name] = {
+          kind: 'error',
+          message: err.message,
+          ...(err instanceof DatasourceError && err.timeout ? { timeout: true } : {}),
+        };
         record(res.kind, '', 0, false, err.message, null);
       } else {
         throw err;
@@ -297,6 +307,11 @@ export async function runCard(input: RunCardInput): Promise<RunCardResult> {
     ...(input.locale ? { locale: input.locale } : {}),
   };
   const outcome = judgeCard(e.compiled, judgeInput);
+  // 错误样例（ADR 0177）：没有声明 display.table 时维度组合写成卡片的表格
+  const sc = e.def.samples ? compileSamples(e.def.samples, e.def.refs, e.def.egress) : null;
+  const samples = sc ? aggregateSamples(sc, refs[sc.spec.ref], input.redact!) : null;
+  const table =
+    sc && samples && !e.def.display?.table ? samplesTable(sc, samples, input.locale ?? 'zh-CN') : outcome.table;
   return {
     judgeInput,
     card_id: e.key,
@@ -315,7 +330,7 @@ export async function runCard(input: RunCardInput): Promise<RunCardResult> {
     display_state: outcome.display_state,
     reason: outcome.reason,
     value: outcome.value,
-    table: outcome.table,
+    table,
     queries,
     egress: e.def.egress,
     anomaly_started_at: outcome.anomaly_started_at === null ? null : toIso(outcome.anomaly_started_at * 1000),
@@ -328,6 +343,7 @@ export async function runCard(input: RunCardInput): Promise<RunCardResult> {
     impact: e.def.impact ?? false,
     category: e.def.category ?? null,
     value_number: outcome.value_number,
+    ...(samples ? { samples } : {}),
     outcome,
     refs,
   };

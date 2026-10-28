@@ -28,6 +28,7 @@ import { DbstatsOverlay, LiveDataSource, type EvidenceDataSource } from '../runt
 import { FixtureDbstats, renderDbstats, type DbstatsOperation } from '../runtime/dbstats.js';
 import { domainRows } from '../runtime/domain-rows.js';
 import { DEFAULT_WINDOW, durationSeconds, runCard, type RunCardResult } from '../runtime/run-card.js';
+import { NO_REDACTION } from '../runtime/samples.js';
 import { alertFires, primaryCardIndex, rulesForEntry, type AlertRule } from './alert-consistency.js';
 import { resolveSignal, type SignalResolution } from '../signals/resolve.js';
 
@@ -239,6 +240,18 @@ function cardKeyFor(set: PackSet, pack: string, ref: string): string {
   return set.cards.has(own) || !set.cards.has(ref) ? own : ref;
 }
 
+/** 测试的 expect.samples（契约 2.42.0，ADR 0177）：列出的错误类别的行数与期望相等，0 表示这个类别不出现 */
+function checkSamples(expected: Record<string, number | undefined>, r: RunCardResult): string[] {
+  if (!r.samples) {
+    return ['卡片没有声明 samples，不能检查错误样例'];
+  }
+  const got = new Map(r.samples.classes.map((c) => [c.class, c.count]));
+  return Object.entries(expected)
+    .filter((e): e is [string, number] => e[1] !== undefined)
+    .filter(([cls, n]) => (got.get(cls) ?? 0) !== n)
+    .map(([cls, n]) => `错误类别 ${cls} 期望 ${n} 行，实际 ${got.get(cls) ?? 0} 行`);
+}
+
 /** 测试的 rows：领域的诊断卡或份额卡在这次判定输入上得到的实体与期望一致（契约 2.28.0） */
 function checkRows(set: PackSet, t: PackTestFile['tests'][number], key: string, r: RunCardResult): string[] {
   const [domain, item] = t.rows!.split('/') as [string, string];
@@ -396,6 +409,7 @@ export async function runPackTests(opts: PackTestOptions): Promise<PackTestRepor
               engine,
               resolutions: res[b],
               clock,
+              redact: NO_REDACTION,
               ...(t.params ? { params: t.params as Record<string, number | string | boolean> } : {}),
             });
             results[b] = summary(r);
@@ -407,6 +421,9 @@ export async function runPackTests(opts: PackTestOptions): Promise<PackTestRepor
             }
             if (t.expect.reason_kind && r.reason.kind !== t.expect.reason_kind) {
               failures.push(`${b}：期望原因 ${t.expect.reason_kind}，实际 ${r.reason.kind}（${r.reason.text}）`);
+            }
+            if (t.expect.samples) {
+              failures.push(...checkSamples(t.expect.samples.classes, r).map((f) => `${b}：${f}`));
             }
             if (t.rows) {
               failures.push(...checkRows(set, t, key, r).map((f) => `${b}：${f}`));
@@ -461,6 +478,7 @@ export async function runPackTests(opts: PackTestOptions): Promise<PackTestRepor
               engine,
               resolutions: res.prometheus,
               clock,
+              redact: NO_REDACTION,
               ...(t.params ? { params: t.params as Record<string, number | string | boolean> } : {}),
             });
             results.postgres = summary(r);
@@ -533,6 +551,7 @@ export async function runPackTests(opts: PackTestOptions): Promise<PackTestRepor
               engine,
               resolutions: firstAlt,
               clock,
+              redact: NO_REDACTION,
             });
             results[b] = summary(r);
             if (r.verdict !== 'undeterminable') {

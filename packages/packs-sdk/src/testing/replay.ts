@@ -4,6 +4,7 @@
 import { loadPromqlEngine, toMillis } from '@srenautix/integration-sdk';
 import type { PackSet } from '../pack/compile.js';
 import { runCard } from '../runtime/run-card.js';
+import { NO_REDACTION } from '../runtime/samples.js';
 import { ReplayDataSource, type QuerySnapshot } from '../runtime/snapshot.js';
 import { resolveSignal, type SignalResolution } from '../signals/resolve.js';
 
@@ -51,6 +52,7 @@ export async function replaySnapshot(set: PackSet, snap: QuerySnapshot): Promise
       engine,
       resolutions,
       clock: snap.clock_window,
+      redact: NO_REDACTION,
     });
     const expected = c.expect?.verdict ?? null;
     const passed =

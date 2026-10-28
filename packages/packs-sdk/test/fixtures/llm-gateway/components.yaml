@@ -1,0 +1,7 @@
+component_types:
+  - id: llm.gateway
+    match:
+      kind: Deployment
+      name_pattern: '^api-gateway$'
+    chains:
+      - gateway-errors

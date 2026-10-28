@@ -1,0 +1,10 @@
+# 错误样例（ADR 0177）的测试包：一个把请求转发给外部模型服务方的网关，错误日志为 logfmt，
+# 证据卡按上游、模型、状态码、内部错误码与候选数聚合错误日志，并按错误类别取样例
+api_version: srenautix.io/pack/v1
+name: llm-gateway
+version: 0.1.0
+description: 模型网关的上游错误样例（测试用）
+maturity: beta
+min_srenautix_version: 0.1.0
+requires:
+  - logs.query
