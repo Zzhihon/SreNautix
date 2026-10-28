@@ -186,9 +186,9 @@ describe('声明校验', () => {
   it('refs 必须是卡片中 mode 为 range 或 instant 的引用，不重复，volume 在 refs 中', () => {
     const spec = def.controls!;
     expect(() => compileControls({ ...spec, refs: ['requests', 'nope'] }, def.refs)).toThrow(/不是卡片中的引用/);
-    expect(() =>
-      compileControls({ ...spec, refs: ['requests'] }, [{ name: 'requests', signal: 'entry/requests', mode: 'logs' }]),
-    ).toThrow(/必须是 range 或 instant/);
+    expect(() => compileControls({ ...spec, refs: ['requests'] }, [{ name: 'requests', mode: 'logs' }])).toThrow(
+      /必须是 range 或 instant/,
+    );
     expect(() => compileControls({ ...spec, refs: ['requests', 'requests'] }, def.refs)).toThrow(/重复/);
     expect(() => compileControls({ ...spec, refs: ['errors'] }, def.refs)).toThrow(/volume requests 必须在 refs 中/);
   });
