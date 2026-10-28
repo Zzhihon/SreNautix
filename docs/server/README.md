@@ -125,7 +125,7 @@ audit:
    每个告警记下第一次在 Alertmanager 中被看到的时刻 `alert_state.alertmanager_seen_at`（ADR 0165）：Alertmanager 或 Grafana 的 webhook 到达、完整对账或快速轮询读到 Alertmanager 应答、reader 快照的读取时刻，取最早的一次。先由规则引擎的 `ALERTS_FOR_STATE` 补写的告警没有这个时刻，之后的完整对账或快速轮询在 Alertmanager 中读到它时补上；集群状态检测器、夜莺与通用 webhook 的告警没有这个时刻。首条消息时延 `clock="alertmanager"` 从这里算起。
    对账也是接入路径：每轮完整读取成功的对账计入接入（接入源 `reconcile` 的最后到达时间与 `srenautix_ingest_last_received_timestamp_seconds{source="reconcile"}`），对账读到 Watchdog 时计为 Watchdog 到达。只用对账、不接 webhook 推送的部署因此不会误报 `IngestSilent` 与 `WatchdogMissing`；webhook 没有推送、但对账在静默阈值内成功时，`IngestSilent` 的原因为 `ReconcileOnly`（不成立）。
 2. 事件引擎用 packages/core 重算并对账事件，写入版本、成员、别名与 outbox。事件的每个变更带关联分级（`change_links`：high、medium、low，依据与回退，ADR 0169）。
-3. 每个新版本立即出阶段 A：证据卡、规则提议、确定性的处置判断，发布 `stage_a.reported`，消息就地更新（见下面的"阶段 A 与领域包"）。时间线的变更行写"关联分级 <grade>（依据：…）"，GitHub 变更再写命中的路径前缀。
+3. 每个新版本立即出阶段 A：证据卡、规则提议、确定性结论规则、确定性的处置判断，发布 `stage_a.reported`，消息就地更新（见下面的"阶段 A 与领域包"）。时间线的变更行写"关联分级 <grade>（依据：…）"，GitHub 变更再写命中的路径前缀。
    时延从事件的计时起点算（ADR 0159）：新事件为首个成员告警的触发时刻，从已有事件拆分出的事件为拆分时刻。`srenautix_stage_a_latency_seconds{origin}` 记第一个版本的阶段 A，`origin` 为 `new` 或 `split`；拆分出的事件不计入检测延迟 `srenautix_incident_detection_seconds`。`server.stage_a_reports.first_rendered_at` 是报告第一次生成的时刻，重算只更新 `rendered_at`。
    每个事件的阶段 A 单独执行（ADR 0173）：某个事件的阶段 A 抛错时写一条终态记录 `stage_a_failed`（带错误摘要），同一轮的其余事件照常出报告；状态库连接错误照常交给降级通道。每轮流水线最后补跑当前版本超过 60 秒没有报告的事件（不含 merged，已结束的只看 6 小时内更新的，critical 在前，每轮最多 5 个），补跑成功后照常按触发原因准入阶段 B（重开的版本按 reopened）；同一版本补跑失败 3 次后记 `stage_a_missing`，不再补跑。critical 事件在 Alertmanager 中 60 秒后仍没有报告时先发不带证据卡的消息（`docs/server/notify.md`）。
 4. 按触发原因（新事件、根因变化、严重度升高、证据指纹变化）经准入进入阶段 B 队列，worker 认领后研判；研判事件经 server 的事件流发布，消息再次更新。租约过期次数超过恢复上限（2 次）的任务在下一次认领时记为结束，同时把研判镜像写为 `failed`（`error.kind` 为 `lease_expired`），消息与时间线写明原因；worker 之后仍发出结束事件时镜像按 worker 的结果覆盖。研判镜像的状态取 worker 事件里的 `state`（契约 2.39.0），出站策略禁用全部路由时与 worker 一样是 `stage_a_only`。
@@ -142,6 +142,7 @@ audit:
 | 研判结论（停止原因） | `server.research_runs.output.stop_reason` | `research_concluded` |
 | 入队跳过（`budget`、`storm`、`capped`、`no_model_route`）与被取代（`superseded`） | `server.research_queue` | `research_ended` |
 | 不进入阶段 B（`not_researched`，每个版本一次） | `server.incident_reasons` | `research_ended` |
+| 没有模型结论、阶段 A 有规则判定（`rule_only`，每个版本一次，ADR 0178） | `server.incident_reasons` | `research_ended` |
 | 自愈 PR 的处理结果 | `server.remediation_attempts.code` | `remediation_attempt` |
 | 通知的送达、最后一次编辑、放弃与不推送 | `server.incident_reasons` | `notify` |
 | 事件 issue 开出、跳过与失败（`opened`、`external_root`、`rate_limit`、`failed`） | `server.incident_reasons` | `issue` |
@@ -163,6 +164,9 @@ server 启动时用 packages/packs-sdk 加载 `packs.dirs` 下的领域包（每
 | `rca-params.yaml` | 根因排序参数，按包的加载顺序叠加在默认值之上 |
 | `chains.yaml`、`signals.yaml` | 阶段 A 执行的证据卡 |
 | `rules.yaml` | 规则提议 |
+| `conclusions.yaml` | 确定性结论规则：证据卡、告警与变更的条件全部成立时给出根因候选与机制（ADR 0178） |
+
+阶段 A 在执行证据卡之后求值结论规则，命中的写进报告的 `rule_conclusions`（最多 3 条，档位 `likely`，指标 `srenautix_stage_a_rule_conclusions_total{rule}`），状态库降级时同样求值。研判可用时它们作为假设进入账本；研判不可用时群消息与控制台显示它们并标明"规则判定"，这个版本同时记原因码 `research/rule_only`（ADR 0178）。规则写在 `docs/packs/README.zh-CN.md` 的"确定性结论规则"。
 
 ### OCI 来源的包
 
