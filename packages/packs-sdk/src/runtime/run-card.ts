@@ -11,6 +11,7 @@ import { podPattern, renderMetrics, RenderError, substitute, type RenderEntity }
 import type { SignalResolution } from '../signals/resolve.js';
 import { CapabilityMissing, type EvidenceDataSource } from './datasource.js';
 import { dbstatsCapability, dbstatsSeries, renderDbstats } from './dbstats.js';
+import { compileControls, evaluateControls, refsFor } from './controls.js';
 import { aggregateSamples, compileSamples, samplesTable, type Redactor } from './samples.js';
 
 /** Prometheus 风格时长转秒 */
@@ -57,6 +58,8 @@ export interface RunCardInput {
   timeoutMs?: number;
   /** 错误样例的脱敏函数（ADR 0177）；卡片声明了 samples 时必须提供 */
   redact?: Redactor;
+  /** 对照对象随机取样的种子（ADR 0179），事件研判传事件 id，重放时同一个种子得到同一批对象；卡片声明了 controls 时必须提供 */
+  controlSeed?: string;
 }
 
 export interface RunCardResult extends Omit<EvidenceResult, 'ref'> {
@@ -107,6 +110,9 @@ export async function runCard(input: RunCardInput): Promise<RunCardResult> {
   }
   if (e.def.samples && !input.redact) {
     throw new Error(`卡片 ${e.key} 声明了错误样例，执行时必须提供脱敏函数`);
+  }
+  if (e.def.controls && input.controlSeed === undefined) {
+    throw new Error(`卡片 ${e.key} 声明了对照对象，执行时必须提供随机取样的种子`);
   }
   const w = cardWindow(e, input.anchor, input.now, input.window, input.extend);
   const window = { from: toIso(w.from), to: toIso(w.to) };
@@ -294,8 +300,10 @@ export async function runCard(input: RunCardInput): Promise<RunCardResult> {
     }
   }
 
+  // 对照对象（ADR 0179）：引用返回同一入口上全部对象的序列，故障对象自己的判定只看它自己的序列（键等于实体名）
+  const cc = e.def.controls ? compileControls(e.def.controls, e.def.refs) : null;
   const judgeInput: JudgeInput = {
-    refs,
+    refs: cc ? refsFor(cc, refs, input.entity.name) : refs,
     ...(input.params ? { params: input.params } : {}),
     entity: {
       cluster_id: input.entity.cluster_id,
@@ -307,6 +315,10 @@ export async function runCard(input: RunCardInput): Promise<RunCardResult> {
     ...(input.locale ? { locale: input.locale } : {}),
   };
   const outcome = judgeCard(e.compiled, judgeInput);
+  // 对照对象与故障对象用同一张卡、同一个判定输入，换成各自的序列；原始引用数据取全部序列
+  const controls = cc
+    ? evaluateControls(cc, e.compiled, { ...judgeInput, refs }, input.entity.name, input.controlSeed!)
+    : null;
   // 错误样例（ADR 0177）：没有声明 display.table 时维度组合写成卡片的表格
   const sc = e.def.samples ? compileSamples(e.def.samples, e.def.refs, e.def.egress) : null;
   const samples = sc ? aggregateSamples(sc, refs[sc.spec.ref], input.redact!) : null;
@@ -344,6 +356,7 @@ export async function runCard(input: RunCardInput): Promise<RunCardResult> {
     category: e.def.category ?? null,
     value_number: outcome.value_number,
     ...(samples ? { samples } : {}),
+    ...(controls ? { controls } : {}),
     outcome,
     refs,
   };
