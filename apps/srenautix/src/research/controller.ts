@@ -17,6 +17,7 @@ import {
   type QueryRunner,
 } from './checks.js';
 import { changeCap } from './change-cap.js';
+import { controlCap } from './common-cause.js';
 import type { EvidenceBook } from './evidence.js';
 import { deriveDisposition } from './disposition.js';
 import { incidentBook, incidentCorpus, incidentSupplement } from './incident.js';
@@ -282,13 +283,18 @@ export async function runStageB(input: ResearchRunInput, env: ResearchEnv, sink:
       rc.stageA.required_evidence,
       book.allCards.map((c) => c.result),
     );
-    // 档位的两项限制：最低取证集合（ADR 0153），以及把根因归到变更上时变更的关联分级（ADR 0169）
-    const ladder = changeCap(
-      requiredCap(judgeLadder(ledger, v.chosen, rc.incident, ledger.list().length > 0, v.chosenBy), gaps),
+    // 档位的三项限制：最低取证集合（ADR 0153）、把根因归到变更上时变更的关联分级（ADR 0169），
+    // 以及共因结论的对照证据（ADR 0179，规则判定改选之后执行）
+    const ladder = controlCap(
+      changeCap(
+        requiredCap(judgeLadder(ledger, v.chosen, rc.incident, ledger.list().length > 0, v.chosenBy), gaps),
+        v.chosen,
+        rc.incident,
+        book,
+        rc.subgraph,
+      ),
       v.chosen,
-      rc.incident,
       book,
-      rc.subgraph,
     );
     notes.push(...ladder.notes);
     const undeterminedReason =
