@@ -1,5 +1,6 @@
 import type { ReasonGroupCode } from '@srenautix/contract';
 import type pg from 'pg';
+import { writeRuleOnly } from '../incident/reasons.js';
 import { logger } from '../log.js';
 import type { ServerMetrics } from '../metrics.js';
 import { appendEvents } from '../store/outbox.js';
@@ -61,6 +62,7 @@ export class WorkerEventMirror {
     const updates: ResearchMirrorUpdate[] = [];
     // 新进入失败或只出阶段 A 的研判（原因码为失败类型），提交后计数
     const ended: FailureKind[] = [];
+    let ruleOnly = 0;
     await tx(this.pool, async (c) => {
       for (const e of body.events) {
         if (!e.type.startsWith('research.')) {
@@ -126,6 +128,10 @@ export class WorkerEventMirror {
         );
         if (e.type === 'research.failed' && p.kind && r.rows[0]?.prev !== state) {
           ended.push(p.kind);
+          // 这个版本没有阶段 B 结论：阶段 A 有规则判定时记 rule_only（ADR 0178），群消息与事件详情显示规则判定
+          if (await writeRuleOnly(c, p.incident_id, p.incident_version)) {
+            ruleOnly++;
+          }
         }
         updates.push({ type: e.type, incidentId: p.incident_id, incidentVersion: p.incident_version, runId: p.run_id });
       }
@@ -137,6 +143,9 @@ export class WorkerEventMirror {
     });
     for (const kind of ended) {
       this.metrics.terminal('research', kind);
+    }
+    if (ruleOnly) {
+      this.metrics.terminal('research', 'rule_only', ruleOnly);
     }
     updates.forEach((u) => this.onUpdate(u));
     return updates.length;

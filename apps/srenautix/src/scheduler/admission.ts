@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { REASON_CODES, type Incident, type ReasonGroupCode } from '@srenautix/contract';
 import type pg from 'pg';
-import { writeReason } from '../incident/reasons.js';
+import { writeReason, writeRuleOnly } from '../incident/reasons.js';
 import { logger } from '../log.js';
 import type { ServerMetrics } from '../metrics.js';
 import { appendEvents } from '../store/outbox.js';
@@ -155,6 +155,9 @@ export class Scheduler {
     if (out.recorded) {
       this.metrics.terminal('research', 'not_researched');
     }
+    if (out.ruleOnly) {
+      this.metrics.terminal('research', 'rule_only');
+    }
     return { outcome: out.outcome, runId: out.runId };
   }
 
@@ -162,8 +165,16 @@ export class Scheduler {
     c: Queryable,
     inc: Incident,
     reason: ResearchReason,
-  ): Promise<{ outcome: AdmissionOutcome; runId: string | null; superseded?: number; recorded?: boolean }> {
+  ): Promise<{
+    outcome: AdmissionOutcome;
+    runId: string | null;
+    superseded?: number;
+    recorded?: boolean;
+    /** 这个版本不会有阶段 B 结论，阶段 A 的规则判定记为 rule_only（ADR 0178） */
+    ruleOnly?: boolean;
+  }> {
     if ((inc.severity !== 'critical' && inc.severity !== 'warning') || inc.suppressed || inc.state === 'merged') {
+      const ruleOnly = await writeRuleOnly(c, inc.incident_id, inc.incident_version);
       const recorded = await writeReason(c, {
         incidentId: inc.incident_id,
         incidentVersion: inc.incident_version,
@@ -177,7 +188,7 @@ export class Scheduler {
               : `严重度为 ${inc.severity}，只研判 critical 与 warning`,
         once: `v${inc.incident_version}`,
       });
-      return { outcome: 'not_researched', runId: null, recorded };
+      return { outcome: 'not_researched', runId: null, recorded, ruleOnly };
     }
     await c.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`research:${inc.incident_id}`]);
     const dup = await c.query<{ run_id: string }>(
@@ -194,7 +205,7 @@ export class Scheduler {
          VALUES ($1, $2, $3, $4, $5, $6, 'skipped', $7, now())`,
         [randomUUID(), inc.incident_id, inc.incident_version, reason, inc.severity, isNew, why],
       );
-      return { outcome: why, runId: null };
+      return { outcome: why, runId: null, ruleOnly: await writeRuleOnly(c, inc.incident_id, inc.incident_version) };
     };
     // 没有可用的模型路由时，手动触发同样无法研判
     if (this.modelRoutes().usable === false) {
@@ -268,9 +279,10 @@ export class Scheduler {
     deadline_at: string;
   } | null> {
     let expired = 0;
+    let ruleOnly = 0;
     const claimed = await tx(this.pool, async (c) => {
       await c.query('SELECT pg_advisory_xact_lock(hashtext($1))', ['srenautix.research.claim']);
-      expired = await this.reclaimExpired(c);
+      ({ ended: expired, ruleOnly } = await this.reclaimExpired(c));
       const busy = await c.query<{ total: number; noncrit: number; goals: number }>(
         `SELECT count(*)::int AS total, count(*) FILTER (WHERE severity <> 'critical')::int AS noncrit,
                 count(*) FILTER (WHERE subject_type = 'goal')::int AS goals
@@ -321,6 +333,9 @@ export class Scheduler {
         deadline_at: lease.deadline_at.toISOString(),
       };
     });
+    if (ruleOnly) {
+      this.metrics.terminal('research', 'rule_only', ruleOnly);
+    }
     if (expired) {
       this.metrics.terminal('research', 'lease_expired', expired);
       this.onEnded();
@@ -330,9 +345,10 @@ export class Scheduler {
 
   /**
    * 租约过期的任务回到队列；超过恢复次数的记为结束（失败），事件任务同时更新 server 的研判镜像（state failed，
-   * error.kind lease_expired，ADR 0172），群消息与时间线据此说明。返回这样结束的事件任务数
+   * error.kind lease_expired，ADR 0172），群消息与时间线据此说明；版本的阶段 A 有规则判定时记 rule_only（ADR 0178）。
+   * 返回这样结束的事件任务数与写入的 rule_only 数
    */
-  private async reclaimExpired(c: Queryable): Promise<number> {
+  private async reclaimExpired(c: Queryable): Promise<{ ended: number; ruleOnly: number }> {
     const r = await c.query<{
       run_id: string;
       subject_type: string;
@@ -350,6 +366,7 @@ export class Scheduler {
       [this.s.maxRecoveries],
     );
     const ended = r.rows.filter((x) => x.attempts > this.s.maxRecoveries && x.subject_type === 'incident');
+    let ruleOnly = 0;
     for (const x of ended) {
       const message = `租约过期 ${x.attempts} 次，超过恢复次数上限 ${this.s.maxRecoveries}`;
       // worker 之后仍发出结束事件时（例如租约过期后才完成），镜像按 worker 的结果覆盖
@@ -368,13 +385,16 @@ export class Scheduler {
           x.enqueued_at,
         ],
       );
+      if (await writeRuleOnly(c, x.incident_id, x.incident_version)) {
+        ruleOnly++;
+      }
       logger.error('研判任务的租约过期次数超过上限，记为失败', {
         run_id: x.run_id,
         incident_id: x.incident_id,
         attempts: x.attempts,
       });
     }
-    return ended.length;
+    return { ended: ended.length, ruleOnly };
   }
 
   async heartbeat(runId: string, workerId: string): Promise<string> {

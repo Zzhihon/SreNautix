@@ -10,7 +10,7 @@ import { Scheduler } from '../../src/scheduler/admission.js';
 import { migrateExpand } from '../../src/store/migrate.js';
 import { responseErrors } from '../support/contract.js';
 import { newTestDb, type TestDb } from '../support/db.js';
-import { incident as baseIncident } from '../support/scenario.js';
+import { incident as baseIncident, stageA } from '../support/scenario.js';
 
 // 事件时间线的终态条目（ADR 0172）：每种新条目都带登记表中的原因码与级别，符合契约的 TimelineEntry。
 // 研判的终态来自研判镜像与队列（租约过期由 server 认领时判定并写进镜像），不进入阶段 B 来自准入，
@@ -101,11 +101,34 @@ describe('事件时间线的终态条目（ADR 0172）', () => {
     expect(ended).toBe(1);
   });
 
-  it('不进入阶段 B 的版本写一条记录，同一版本只写一次', async () => {
+  it('不进入阶段 B 的版本写一条记录，同一版本只写一次；阶段 A 有规则判定时另记“只有规则判定”（ADR 0178）', async () => {
     const info: Incident = { ...inc(), severity: 'info', incident_version: 2 };
+    const report = {
+      ...stageA([]),
+      incident_id: id,
+      incident_version: 2,
+      rule_conclusions: [
+        {
+          rule_id: 'postgres/oom-failover',
+          title: { 'zh-CN': '实例 OOM 引发主库切换' },
+          root_component: 'StatefulSet:shop/postgres',
+          mechanism: { 'zh-CN': '主库被 OOM 终止，集群提升备库' },
+          level: 'likely',
+          basis: ['card:1', 'card:2'],
+          card_conditions: [],
+        },
+      ],
+    };
+    await db.server.query(
+      `INSERT INTO server.stage_a_reports (report_id, incident_id, incident_version, disposition, evidence_fingerprint, degraded,
+         body, first_firing_at, rendered_at)
+       VALUES ($1, $2, 2, 'undetermined', $3, false, $4, $5, $5)`,
+      [randomUUID(), id, report.evidence_fingerprint, JSON.stringify(report), T(0)],
+    );
     expect((await scheduler.admit(info, 'severity_raised')).outcome).toBe('not_researched');
     expect((await scheduler.admit(info, 'fingerprint_changed')).outcome).toBe('not_researched');
     expect(await counted('research', 'not_researched')).toBe(1);
+    expect(await counted('research', 'rule_only')).toBe(1);
   });
 
   it('每种条目带原因码与级别，符合契约', async () => {
@@ -193,6 +216,7 @@ describe('事件时间线的终态条目（ADR 0172）', () => {
     // 租约过期与不进入阶段 B 在测试运行时写入，早于造的其余数据
     expect(coded.map((e) => [e.kind, e.code, e.level])).toEqual([
       ['research_ended', 'lease_expired', 'error'],
+      ['research_ended', 'rule_only', 'info'],
       ['research_ended', 'not_researched', 'info'],
       ['research_concluded', 'leader_supported', 'info'],
       ['research_ended', 'invalid_output', 'error'],
@@ -224,6 +248,9 @@ describe('事件时间线的终态条目（ADR 0172）', () => {
     expect(text('withheld_external_digest')).toBe('不推送：根因是外部上游且没有业务影响，进入周期汇总');
     expect(text('not_researched')).toBe(
       '事件不进入阶段 B（严重度不在研判范围内、被抑制或已合并）：严重度为 info，只研判 critical 与 warning',
+    );
+    expect(text('rule_only')).toBe(
+      '没有模型结论，只有规则判定：根因候选与机制取自领域包的确定性结论规则，档位最高为 likely：postgres/oom-failover → StatefulSet:shop/postgres',
     );
     // 错误与渠道应答的原文按不可信文本显示
     expect(entries.find((e) => e.code === 'entities_too_long')!.untrusted).toBe(true);
