@@ -1,4 +1,4 @@
-import type { Alert, EvidenceResult, Incident, LocalizedText } from '@srenautix/contract';
+import type { Alert, EvidenceResult, Incident, LocalizedText, RuleConclusion } from '@srenautix/contract';
 import type { RequiredEvidence } from './required.js';
 
 /** 一次证据链执行的结果。 */
@@ -18,6 +18,13 @@ export interface EvidenceRun {
   names?: Record<string, string>;
   /** 成员告警的最低取证集合与缺口（ADR 0153）；没有声明 required_cards 的告警不在其中 */
   required?: RequiredEvidence[];
+  /**
+   * 卡（card:<n>）所为的组件：根因候选上的卡属于候选，告警实体上的卡属于告警归属的组件（ADR 0178）。结论规则的 self 条件
+   * 按它判断；没有记录的卡只满足 incident 范围的条件
+   */
+  cardComponents?: Record<string, string>;
+  /** 本次执行中求出了组件类型的组件：组件键 → 组件类型（结论规则按它筛选求值对象） */
+  componentTypes?: Record<string, string>;
 }
 
 /**
@@ -54,4 +61,9 @@ export interface RuleProposer {
    * `<pack>/<chain id>#excludes[<序号>]`（disposition=ignore）。
    */
   excluded(incident: Incident, alerts: Alert[], run: EvidenceRun): string | null;
+  /**
+   * 领域包的确定性结论规则（conclusions.yaml，ADR 0178）在事件涉及的每个组件上的命中，按根因候选的排名排列，最多
+   * MAX_RULE_CONCLUSIONS 条。
+   */
+  conclude(incident: Incident, alerts: Alert[], run: EvidenceRun): RuleConclusion[];
 }

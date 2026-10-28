@@ -172,7 +172,7 @@ describe('不进入事件的告警', () => {
       },
       rerun: async () => [],
     };
-    const rules: RuleProposer = { evaluate: () => [], excluded: () => null };
+    const rules: RuleProposer = { evaluate: () => [], excluded: () => null, conclude: () => [] };
     const stageA = new StageAService(
       db.server,
       evidence,

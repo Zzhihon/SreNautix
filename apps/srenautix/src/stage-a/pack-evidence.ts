@@ -5,6 +5,7 @@ import {
   type EvidenceResult,
   type Incident,
   type Labels,
+  type RuleConclusion,
 } from '@srenautix/contract';
 import { matchTypeByName, sameKind, tryNodeKey } from '@srenautix/core';
 import { toIso } from '@srenautix/integration-sdk';
@@ -12,8 +13,10 @@ import {
   cardWindow,
   compileSamples,
   durationSeconds,
+  evaluateConclusions,
   evaluateExcludes,
   evaluateRules,
+  type ConclusionInput,
   runCard,
   samplesDeadline,
   DEFAULT_WINDOW,
@@ -68,6 +71,8 @@ export const DEFAULT_MAX_CARD_WINDOW_MS = 24 * 3600_000;
 interface Planned {
   card: string;
   entity: EntityRef;
+  /** 执行这张卡所为的组件：根因候选，或告警归属的组件（结论规则的 self 条件按它判断，ADR 0178） */
+  component?: string;
   /** 覆盖卡片默认参数（查询模板的参数） */
   params?: Record<string, number | string | boolean>;
   /** 覆盖卡片定义的窗口（卡片检查，ADR 0116） */
@@ -189,7 +194,7 @@ export class PackEvidence implements EvidenceRunner {
     const seen = new Map<string, Planned>();
     const chainsRun: string[] = [];
     const latestOf = memberLatest(alerts);
-    const add = (chains: string[], entity: EntityRef) => {
+    const add = (chains: string[], entity: EntityRef, component: string | null) => {
       for (const ck of chains) {
         const chain = this.rt.set.chains.get(ck);
         if (!chain) {
@@ -206,7 +211,12 @@ export class PackEvidence implements EvidenceRunner {
           const k = `${card}|${entityKey(entity)}`;
           if (!seen.has(k)) {
             const l = latestOf(entity);
-            const p: Planned = { card, entity, ...(l !== undefined ? { latest: l } : {}) };
+            const p: Planned = {
+              card,
+              entity,
+              ...(component !== null ? { component } : {}),
+              ...(l !== undefined ? { latest: l } : {}),
+            };
             seen.set(k, p);
             plan.push(p);
           }
@@ -218,10 +228,18 @@ export class PackEvidence implements EvidenceRunner {
     };
 
     const types = this.rt.componentTypes();
-    const typeOf = async (key: string, e: EntityRef): Promise<string | null> =>
-      (await this.componentType(inc.cluster_id, key)) ??
-      matchTypeByName(e.kind, e.namespace, e.name, types)?.id ??
-      null;
+    // 求出了组件类型的组件（结论规则按求值对象的组件类型筛选，ADR 0178）
+    const typed: Record<string, string> = {};
+    const typeOf = async (key: string, e: EntityRef): Promise<string | null> => {
+      const t =
+        (await this.componentType(inc.cluster_id, key)) ??
+        matchTypeByName(e.kind, e.namespace, e.name, types)?.id ??
+        null;
+      if (t !== null) {
+        typed[key] ??= t;
+      }
+      return t;
+    };
 
     // 要求可读名称的组件：键 → 组件类型、实体与它所在告警的标签、注解（第一个出现的告警）
     const named = new Map<string, { type: string; entity: EntityRef; alert: Alert | null }>();
@@ -247,7 +265,7 @@ export class PackEvidence implements EvidenceRunner {
       }
       wantName(key, t, entity, null);
       if (t) {
-        add(this.rt.typeChains(t), entity);
+        add(this.rt.typeChains(t), entity, key);
       }
     }
     for (const a of alerts) {
@@ -255,9 +273,11 @@ export class PackEvidence implements EvidenceRunner {
         continue;
       }
       const own = tryNodeKey(a.entity.kind, a.entity.namespace, a.entity.name);
+      // 告警实体上的卡属于告警归属的组件（例如 Pod 上的卡属于它的 StatefulSet 或 CNPG 集群）
+      const owner = a.component ?? own;
       const t = own ? await typeOf(own, a.entity) : null;
       if (t) {
-        add(this.rt.typeChains(t), a.entity);
+        add(this.rt.typeChains(t), a.entity, owner);
       }
       if (own) {
         wantName(own, t, a.entity, a);
@@ -267,12 +287,12 @@ export class PackEvidence implements EvidenceRunner {
         const ct = await typeOf(a.component, ce);
         wantName(a.component, ct, ce, a);
         if (ct) {
-          add(this.rt.typeChains(ct), a.entity);
-          add(this.rt.typeChains(ct), ce);
+          add(this.rt.typeChains(ct), a.entity, a.component);
+          add(this.rt.typeChains(ct), ce, a.component);
         }
       }
       if (a.classification.catalog_entry) {
-        add(this.rt.alertChains(a.classification.catalog_entry), a.entity);
+        add(this.rt.alertChains(a.classification.catalog_entry), a.entity, owner);
       }
     }
 
@@ -289,7 +309,7 @@ export class PackEvidence implements EvidenceRunner {
           const e = entityOf(inc.cluster_id, cand);
           const t = await typeOf(cand, e);
           if (t) {
-            add(this.rt.typeChains(t), e);
+            add(this.rt.typeChains(t), e, key);
           }
         }
       }
@@ -300,8 +320,21 @@ export class PackEvidence implements EvidenceRunner {
     // 组件名称在首次触发时求值；长期事件不早于最近一个最大窗口的起点（与卡片窗口一致）
     const namesAt = Math.max(Math.min(Date.parse(inc.first_firing_at), now), extend.until - extend.maxWindowMs);
     const names = await this.names(named, Math.min(namesAt, now), signal);
+    const planned = new Map(
+      plan.filter((p) => p.component).map((p) => [`${p.card}|${entityKey(p.entity)}`, p.component!]),
+    );
+    const refd = cards.map((c, i) => ({ ...c, ref: `card:${i + 1}` }));
+    const cardComponents: Record<string, string> = {};
+    for (const c of refd) {
+      const k = c.entity ? planned.get(`${c.card_id}|${entityKey(c.entity)}`) : undefined;
+      if (k !== undefined) {
+        cardComponents[c.ref] = k;
+      }
+    }
     return {
-      cards: cards.map((c, i) => ({ ...c, ref: `card:${i + 1}` })),
+      cards: refd,
+      cardComponents,
+      componentTypes: typed,
       chains: chainsRun,
       runbooks: this.runbooks(chainsRun),
       rootComponentType,
@@ -765,6 +798,60 @@ function commonLabels(alerts: Alert[]): Labels {
   ) as Labels;
 }
 
+/**
+ * 阶段 A 报告最多带的规则结论数（与契约 StageAReport.rule_conclusions 的 maxItems 一致）：研判中它们占用假设 h7–h9
+ */
+export const MAX_RULE_CONCLUSIONS = 3;
+
+/**
+ * 结论规则的求值输入（ADR 0178）：求值对象依次为根因候选（按排名）、根因、事件组件、成员告警的组件与卡所为的组件，去重；
+ * 成员告警按事件成员顺序编号 alert:<n>（与阶段 A 时间线、研判证据簿相同），变更按事件顺序编号 change:<n>，
+ * 关联分级取 Incident.change_links。
+ */
+export function conclusionInput(inc: Incident, alerts: readonly Alert[], run: EvidenceRun): ConclusionInput {
+  const order = [
+    ...inc.candidates.map((c) => c.component),
+    inc.root.component,
+    ...inc.components,
+    ...alerts.map((a) => a.component),
+    ...Object.values(run.cardComponents ?? {}),
+  ].filter((k): k is string => typeof k === 'string' && k !== '');
+  const byId = new Map(alerts.map((a) => [a.alert_id, a]));
+  const members = inc.members.filter((m) => m.left_version === null);
+  const grades = new Map((inc.change_links ?? []).map((l) => [l.change_id, l.grade]));
+  return {
+    components: [...new Set(order)].map((key) => ({ key, type: run.componentTypes?.[key] ?? null })),
+    cards: run.cards.map((c) => ({
+      ref: c.ref,
+      card_id: c.card_id,
+      component: run.cardComponents?.[c.ref] ?? null,
+      verdict: c.verdict,
+      routine: isRoutine(c),
+      observations: c.observations,
+    })),
+    alerts: members.flatMap((m, i) => {
+      const a = byId.get(m.alert_id);
+      return a
+        ? [
+            {
+              ref: `alert:${i + 1}`,
+              alertname: a.alertname,
+              labels: a.labels,
+              role: a.classification.role,
+              component: a.component,
+            },
+          ]
+        : [];
+    }),
+    changes: inc.changes.map((c, k) => ({
+      ref: `change:${k + 1}`,
+      kind: c.kind,
+      targets: [...c.targets, ...c.refs],
+      grade: grades.get(c.change_id) ?? null,
+    })),
+  };
+}
+
 /** 领域包的规则提议（rules.yaml）：when 与参数值都是 CEL，上下文为 incident、root、cards。 */
 export class PackRules implements RuleProposer {
   constructor(
@@ -850,5 +937,32 @@ export class PackRules implements RuleProposer {
       logger.warn('排除规则求值出错', { incident_id: inc.incident_id, rule: ref, error: e.error });
     }
     return ev.hit ? `${ev.hit.chain}#excludes[${ev.hit.index}]` : null;
+  }
+
+  /** 确定性结论规则（ADR 0178）：按根因候选的排名排列的命中，最多 MAX_RULE_CONCLUSIONS 条 */
+  conclude(inc: Incident, alerts: Alert[], run: EvidenceRun): RuleConclusion[] {
+    if (!this.rt.set.conclusions.length) {
+      return [];
+    }
+    const hits = evaluateConclusions(this.rt.set.conclusions, conclusionInput(inc, alerts, run));
+    for (const h of hits) {
+      this.metrics.ruleConclusions.inc({ rule: h.rule.key });
+    }
+    return hits.slice(0, MAX_RULE_CONCLUSIONS).map((h) => {
+      // 每个条件至少有一条满足它的证据，命中的规则必然有依据
+      const [first, ...rest] = h.basis;
+      if (first === undefined) {
+        throw new Error(`结论规则 ${h.rule.key} 命中但没有依据`);
+      }
+      return {
+        rule_id: h.rule.key,
+        title: h.rule.title,
+        root_component: h.root,
+        mechanism: h.rule.mechanism,
+        level: 'likely' as const,
+        basis: [first, ...rest],
+        card_conditions: h.rule.cards.map((c) => ({ ...c, observations: [...c.observations] })),
+      };
+    });
   }
 }

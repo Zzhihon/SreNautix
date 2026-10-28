@@ -25,7 +25,7 @@ export interface StageAOutcome {
 
 /**
  * 阶段 A 独立通道（DESIGN §7.1）：不调用模型，不经过 worker 的队列。事件创建或版本变化后立即执行证据卡、
- * 评估规则提议、做确定性的处置判断，写入报告并发布 stage_a.reported。
+ * 评估规则提议与确定性结论规则（ADR 0178）、做确定性的处置判断，写入报告并发布 stage_a.reported。
  */
 export class StageAService {
   constructor(
@@ -142,6 +142,8 @@ export class StageAService {
       impactAlerts: this.impactAlerts,
       runbooks: run.runbooks,
       ...(run.required ? { required: run.required } : {}),
+      // 确定性结论规则（ADR 0178）
+      ruleConclusions: this.rules.conclude(inc, alerts, run),
       degraded: false,
       fingerprint: fp.state.current,
       now: (now.rows[0] as { now: Date }).now,
