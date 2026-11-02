@@ -282,7 +282,7 @@ server 的每个实例每 `skills.reload_interval`（默认 60 秒）扫描一�
 
 - 迁移：新轨道 `skills`，建 `server.skill_versions`、`server.skill_overrides`、`server.skill_runs`、`server.skill_run_calls`、`server.skill_findings`、`server.skill_finding_occurrences`，只增不删。
 - 配置：server 配置新增 `skills`（`sources`、`reload_interval`、`lock_file`、`enabled`、`grants`、`scope`、`params`、`limits`、`title_prefix`、`oci.sources_file`），worker 配置新增 `budget.purposes.skill`；业务仓库的布局从 `optimization.repositories.business` 移到 `github.repositories.business`，主动优化与技能共用，旧写法由 `upgradeRaw` 迁移并记录弃用警告；仓库角色在 `optimization.enabled` 关闭时同样包含业务仓库。
-- chart：`skills.userConfigMaps`（整卷挂载）、`skills.revision`、`skills.oci`、`skills.enabled`、`skills.grants`、`skills.scope`、`skills.params`；server 的 Pod 不因技能 ConfigMap 的变化滚动。
+- chart：`skills.userConfigMaps`（整卷挂载）、`skills.revision`、`skills.oci`、`skills.enabled`、`skills.grants`、`skills.scope`、`skills.params`、`skills.titlePrefix`；server 的 Pod 不因技能 ConfigMap 的变化滚动。
 - 代码：`packages/skills-sdk`（清单与绑定的加载与校验、`analyze.*` 纯函数、`srenautix-skill lint|test` 命令）；`apps/srenautix/src/skills/`（加载与重新加载、触发、调度、`SkillContext`、各步骤类型、去重与投递、接口、指标）；`skills/oom-rootcause`；内置领域包 `go-runtime`（Go 运行时信号）与 `workload` 新增的内存信号。
 - 测试：`packages/skills-sdk` 的单元测试覆盖每个 `analyze.*`；`srenautix-skill test` 在真实的 Prometheus、VictoriaMetrics 与 Loki 上装入夹具执行整个技能，Kubernetes 与 GitHub 的读取用录制的快照（DESIGN §14.2），输出与期望的 issue 正文逐字比较；`test/integration/skills-*.test.ts`（真实 PostgreSQL 与内存中的 GitHub）覆盖重新加载与保留旧版本、授权缺失、暂停、指纹去重、找回、评论、每小时上限与共享上限；不变量 17、18 进入 `test/invariants/`。
 - 文档：`docs/skills/README.zh-CN.md`（机制与编写）、`docs/skills/oom-rootcause.zh-CN.md`（第一个技能）；DESIGN §1.1、§6.3、§16.1、§18 增加技能。
