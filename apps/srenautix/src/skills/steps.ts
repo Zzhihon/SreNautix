@@ -408,7 +408,7 @@ export async function runStep(uses: string, w: Record<string, unknown>, env: Ste
       if (!profile) {
         env.ctx.deny('logs.query', 'query', {}, 'server 没有配置日志数据源');
       }
-      const maxLines = env.ctx.params('logs.query').max_lines ?? 5000;
+      const maxLines = env.ctx.params('logs.query').max_lines ?? 1000;
       // 同一 Pod 的窗口合并
       const spans = new Map<string, Array<[number, number]>>();
       const re = subjectPods(env.subject);

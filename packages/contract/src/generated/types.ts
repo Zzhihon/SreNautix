@@ -7237,7 +7237,7 @@ export interface SkillCapabilityParams {
    */
   objects?: ('pod_status' | 'events' | 'pod_logs_previous')[];
   /**
-   * logs.query：每次查询最多返回的行数
+   * logs.query：每次查询最多返回的行数（不超过日志接口 LogsQueryRequest.limit 的上限 1000）
    */
   max_lines?: number;
   /**

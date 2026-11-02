@@ -46,7 +46,7 @@ tests:
         documentSelector: {path: metadata.name, value: t-srenautix-server}
       - matchRegex:
           path: 'data["config.yaml"]'
-          pattern: '(?m)^  sources:\n  - kind: builtin\n  - kind: dir\n    path: /etc/srenautix/skills/restart-burst\n  title_prefix: \[技能\]\n'
+          pattern: '(?m)^  sources:\n  - kind: builtin\n  - kind: dir\n    path: /etc/srenautix/skills/restart-burst\n  title_prefix: ''\[技能\]''\n'
         template: templates/role-resources.yaml
         documentSelector: {path: metadata.name, value: t-srenautix-server-config}
       - matchRegex:

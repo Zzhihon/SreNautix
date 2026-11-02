@@ -82,7 +82,7 @@ beforeAll(async () => {
       grants: {
         'oom-rootcause': {
           'metrics.query_range': {},
-          'logs.query': { max_lines: 5000 },
+          'logs.query': { max_lines: 1000 },
           'kube.read': { objects: ['pod_status', 'events', 'pod_logs_previous'] },
           'code.read': { repo_role: 'business' },
           'issue.write': { repo_role: 'business' },
@@ -119,6 +119,10 @@ afterAll(async () => {
 });
 
 async function manualRun(): Promise<Awaited<ReturnType<SkillService['run']>>> {
+  // 同一对象两次运行之间至少间隔 coalesce（2h，手动运行也一样）：把之前的运行挪到 coalesce 之前，下一次手动运行立即到期
+  await db.server.query(
+    "UPDATE server.skill_runs SET started_at = started_at - interval '3 hours' WHERE skill = 'oom-rootcause' AND started_at IS NOT NULL",
+  );
   const run = await svc.enqueue(
     'oom-rootcause',
     subject,

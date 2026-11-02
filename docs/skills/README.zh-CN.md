@@ -113,7 +113,7 @@ skills:
   grants:
     oom-rootcause:
       metrics.query_range: {}
-      logs.query: { max_lines: 5000 }
+      logs.query: { max_lines: 1000 }
       kube.read: { objects: [pod_status, events, pod_logs_previous] }
       code.read: { repo_role: business }
       issue.write: { repo_role: business }

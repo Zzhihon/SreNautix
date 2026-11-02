@@ -6242,7 +6242,7 @@ export type components = {
     SkillCapability: 'metrics.query_range' | 'logs.query' | 'kube.read' | 'code.read' | 'issue.write';
     /** SkillCapabilityParams */
     SkillCapabilityParams: {
-      /** @description logs.query：每次查询最多返回的行数 */
+      /** @description logs.query：每次查询最多返回的行数（不超过日志接口 LogsQueryRequest.limit 的上限 1000） */
       max_lines?: number;
       /** @description kube.read：可以读取的对象 */
       objects?: ('pod_status' | 'events' | 'pod_logs_previous')[];

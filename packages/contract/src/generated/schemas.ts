@@ -8964,7 +8964,12 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
             description: 'kube.read：可以读取的对象',
             items: { type: 'string', enum: ['pod_status', 'events', 'pod_logs_previous'] },
           },
-          max_lines: { type: 'integer', minimum: 1, maximum: 20000, description: 'logs.query：每次查询最多返回的行数' },
+          max_lines: {
+            type: 'integer',
+            minimum: 1,
+            maximum: 1000,
+            description: 'logs.query：每次查询最多返回的行数（不超过日志接口 LogsQueryRequest.limit 的上限 1000）',
+          },
           repo_role: {
             type: 'string',
             enum: ['business', 'ops'],
