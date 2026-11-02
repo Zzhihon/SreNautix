@@ -22,6 +22,7 @@ import {
   type RemediationsFile,
   type RulesFile,
   type SignalsFile,
+  type SkillBindingsFile,
 } from '@srenautix/contract';
 import { parse } from 'yaml';
 import { PackLintError } from '../cel/errors.js';
@@ -43,6 +44,8 @@ export interface PackContent {
   domains: DomainsFile;
   /** issues.yaml：业务 issue 模板（契约 2.28.0） */
   issues: IssuesFile;
+  /** skill-bindings.yaml：给技能的部署方数据（契约 2.45.0，ADR 0181） */
+  skill_bindings: SkillBindingsFile;
   rca_params: RcaParams | null;
   /** 文件名 → 知识条目 */
   knowledge: Record<string, KnowledgeFile>;
@@ -77,6 +80,7 @@ const TOP_FILES = new Set([
   'remediations.yaml',
   'domains.yaml',
   'issues.yaml',
+  'skill-bindings.yaml',
   'rca-params.yaml',
   'action-requests.yaml',
   'README.md',
@@ -175,6 +179,9 @@ export function loadPackDir(dir: string, source: string): LoadedPack {
     }),
     domains: opt<DomainsFile>('domains.yaml', `${PACK_SCHEMA}#/$defs/DomainsFile`, {}),
     issues: opt<IssuesFile>('issues.yaml', `${PACK_SCHEMA}#/$defs/IssuesFile`, { issues: [] }),
+    skill_bindings: opt<SkillBindingsFile>('skill-bindings.yaml', `${PACK_SCHEMA}#/$defs/SkillBindingsFile`, {
+      bindings: [],
+    }),
     rca_params: opt<RcaParams | null>('rca-params.yaml', `${PACK_SCHEMA}#/$defs/RcaParams`, null),
     knowledge: sub('knowledge', (p) => readYaml<KnowledgeFile>(p, `${PACK_SCHEMA}#/$defs/KnowledgeFile`)),
     runbooks: sub('runbooks', (p) => readFileSync(p, 'utf8')),

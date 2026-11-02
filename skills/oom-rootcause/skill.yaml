@@ -1,0 +1,304 @@
+# 内存终止根因（ADR 0181 §11，docs/skills/oom-rootcause.zh-CN.md）：容器因内存被终止、Pod 被驱逐或工作集持续贴近 limit 时，
+# 只读地分类、取证、检验相关性与反例、定位代码，在业务仓库开 issue；同一根因再次出现时在已有 issue 下评论。
+# 工作负载自己的指标、日志事件、代码路径提示与运维选项来自部署方领域包的 skill-bindings.yaml。
+api_version: srenautix.io/skill/v1
+name: oom-rootcause
+version: 1.0.0
+title: { zh-CN: 内存终止根因, en: Memory kill root cause }
+description:
+  zh-CN: 容器因内存被终止或长期贴近 limit 时，只读地分类、取证、检验相关性与反例、定位代码，在业务仓库开 issue 或在已有 issue 下评论
+  en: When a container is killed for memory or stays near its limit, classifies, collects evidence, tests correlation against counter-examples, locates code, and opens or comments on an issue in the business repository, read-only
+maturity: beta
+min_srenautix_version: 0.1.0
+contract: '>=2.45.0 <3.0.0'
+
+params:
+  rss_limit_ratio: 0.85
+  rss_sustain: 10m
+  occurrence_window: 48h
+  occurrence_step: 60s
+  pre_window: 30m
+  post_window: 30m
+  step: 30s
+  history: 48h
+  history_step: 5m
+  memory_high_ratio: 0.75
+  heap_near_limit_ratio: 0.9
+  next_gc_near_limit_ratio: 0.95
+  gc_cpu_ratio: 0.4
+  gc_cpu_sustain_seconds: 180
+  node_available_min: 0.1
+  rise_corr: 0.6
+  lift_min: 1.5
+  counter_max: 0.5
+  reverse_margin: 0.2
+  min_history_samples: 12
+  org_share_min: 0.5
+  max_profiles: 4
+
+inputs:
+  type: object
+  additionalProperties: false
+  properties: {}
+
+binding:
+  required: true
+  schema: binding.schema.json
+
+triggers:
+  - id: oom-killed
+    kind: metric
+    signal: workload/container_oom_restarts
+    window: 5m
+    interval: 60s
+  - id: near-limit
+    kind: metric
+    signal: workload/container_memory_limit_ratio
+    window: 10m
+    interval: 60s
+    condition: { op: gt, value: { param: rss_limit_ratio } }
+    for: { param: rss_sustain }
+  - id: oom-killed-status
+    kind: kube
+    match: { terminated_reasons: [OOMKilled] }
+  - id: evicted
+    kind: kube
+    match: { pod_reasons: [Evicted] }
+  - id: manual
+    kind: manual
+
+debounce:
+  settle: 5m
+  coalesce: 2h
+
+scope:
+  kinds: [Deployment, StatefulSet, DaemonSet]
+
+capabilities:
+  metrics.query_range: {}
+  logs.query: {}
+  kube.read: { objects: [pod_status, events, pod_logs_previous] }
+  code.read: { repo_role: business }
+  issue.write: { repo_role: business }
+
+budgets:
+  run:
+    duration: 10m
+    metrics_queries: 200
+    logs_queries: 60
+    log_lines: 20000
+    kube_reads: 20
+    github_requests: 80
+    code_files: 24
+    code_bytes: 2097152
+  hourly: { runs: 6, issues: 1, comments: 6 }
+
+steps:
+  - id: status
+    uses: kube.read@v1
+    with: { object: pod_status }
+
+  - id: events
+    uses: kube.read@v1
+    optional: true
+    with: { object: events }
+
+  - id: occ
+    uses: trigger.occurrences@v1
+    needs: [status]
+    with:
+      signal: workload/container_oom_restarts
+      window: { param: occurrence_window }
+      step: { param: occurrence_step }
+      pods: { step: status, field: pods }
+      container: { binding: data.container }
+
+  - id: around
+    uses: metrics.range@v1
+    needs: [occ]
+    when: { step: occ, field: occurrences }
+    with:
+      mode: around
+      occurrences: { step: occ, field: occurrences }
+      before: { param: pre_window }
+      after: { param: post_window }
+      step: { param: step }
+      signals:
+        - go-runtime/heap_inuse
+        - go-runtime/next_gc
+        - go-runtime/gomemlimit
+        - go-runtime/gc_cpu_cores
+        - go-runtime/gomaxprocs
+        - workload/container_memory_rss
+        - workload/container_memory_limit
+        - workload/container_cpu_cores
+        - workload/pod_node_memory_available
+      extra: [{ binding: data.suspects }, { binding: data.context }]
+
+  - id: history
+    uses: metrics.range@v1
+    needs: [occ]
+    when: { step: occ, field: occurrences }
+    with:
+      mode: history
+      last: { param: history }
+      step: { param: history_step }
+      signals:
+        - go-runtime/heap_inuse
+        - go-runtime/gomemlimit
+        - workload/container_memory_rss
+        - workload/container_memory_limit
+      extra: [{ binding: data.suspects }]
+
+  - id: logs
+    uses: logs.events@v1
+    needs: [occ]
+    optional: true
+    when: { step: occ, field: occurrences }
+    with:
+      events: { binding: data.logs }
+      container: { binding: data.container }
+      occurrences: { step: occ, field: occurrences }
+      before: { param: pre_window }
+      identifiers: { binding: data.identifiers }
+
+  - id: previous
+    uses: kube.read@v1
+    needs: [occ]
+    optional: true
+    when: { step: occ, field: occurrences }
+    with:
+      object: pod_logs_previous
+      pods: { step: occ, field: pods }
+      container: { binding: data.container }
+      tail_lines: 500
+
+  - id: previous_events
+    uses: logs.extract@v1
+    needs: [previous]
+    with:
+      logs: { step: previous, field: logs }
+      events: { binding: data.logs }
+      identifiers: { binding: data.identifiers }
+
+  - id: kind
+    uses: analyze.memory_kind@v1
+    needs: [occ, status, events, around]
+    when: { step: occ, field: occurrences }
+    with:
+      runtime: { binding: data.runtime }
+      occurrences: { step: occ, field: occurrences }
+      pods: { step: status, field: pods }
+      kube_events: { step: events, field: events }
+      around: { step: around, field: windows }
+      signals:
+        heap: go-runtime/heap_inuse
+        next_gc: go-runtime/next_gc
+        gomemlimit: go-runtime/gomemlimit
+        gc_cpu: go-runtime/gc_cpu_cores
+        gomaxprocs: go-runtime/gomaxprocs
+        rss: workload/container_memory_rss
+        container_limit: workload/container_memory_limit
+        cpu: workload/container_cpu_cores
+        node_memory_available: workload/pod_node_memory_available
+      thresholds:
+        heap_near_limit_ratio: { param: heap_near_limit_ratio }
+        next_gc_near_limit_ratio: { param: next_gc_near_limit_ratio }
+        gc_cpu_ratio: { param: gc_cpu_ratio }
+        gc_cpu_sustain_seconds: { param: gc_cpu_sustain_seconds }
+        node_available_min: { param: node_available_min }
+
+  - id: rank
+    uses: analyze.suspects@v1
+    needs: [kind, around, history, logs, previous_events]
+    when: { step: occ, field: occurrences }
+    with:
+      suspects: { binding: data.suspects }
+      context: { binding: data.context }
+      classified: { step: kind }
+      around: { step: around, field: windows }
+      history: { step: history, field: history }
+      logs: [{ step: logs }, { step: previous_events }]
+      thresholds:
+        rise_corr: { param: rise_corr }
+        lift_min: { param: lift_min }
+        counter_max: { param: counter_max }
+        reverse_margin: { param: reverse_margin }
+        min_history_samples: { param: min_history_samples }
+        memory_high_ratio: { param: memory_high_ratio }
+
+  - id: requests
+    uses: analyze.top@v1
+    needs: [rank, logs, previous_events]
+    when: { step: occ, field: occurrences }
+    with:
+      logs: [{ step: logs }, { step: previous_events }]
+      event: { binding: data.top_requests.event }
+      pods: { step: rank, field: main_group.pods }
+      by: { binding: data.top_requests.by }
+      limit: 10
+      columns: { binding: data.top_requests.columns }
+      group:
+        field: { binding: data.top_requests.group_field }
+        value_field: { binding: data.top_requests.value_field }
+        min_value: { binding: data.top_requests.large_bytes }
+        share_min: { param: org_share_min }
+
+  # 堆画像在发生之后才写出：窗口从发生之前一直到参考时刻，只查画像的事件
+  - id: profile_logs
+    uses: logs.events@v1
+    needs: [occ]
+    optional: true
+    when: { binding: data.profiles }
+    with:
+      events: [{ binding: data.profiles.log }]
+      container: { binding: data.container }
+      occurrences: { step: occ, field: occurrences }
+      before: { param: pre_window }
+      through: true
+      identifiers: { binding: data.identifiers }
+
+  - id: profiles
+    uses: analyze.profiles@v1
+    needs: [profile_logs, previous_events]
+    when: { binding: data.profiles }
+    with:
+      logs: [{ step: profile_logs }, { step: previous_events }]
+      profiles: { binding: data.profiles }
+      limit_per_pod: { param: max_profiles }
+      container: { binding: data.container }
+
+  - id: code
+    uses: code.locate@v1
+    needs: [rank]
+    optional: true
+    when: { step: occ, field: occurrences }
+    with:
+      items: { step: rank, field: ranked }
+
+  - id: related
+    uses: issue.related@v1
+    needs: [rank]
+    with:
+      references: { step: rank, field: references }
+
+  # 只有这个工作负载上以前没有报告过的发生才投递
+  - id: publish
+    uses: issue.publish@v1
+    needs: [occ, kind, rank, requests, profiles, code, related]
+    when: { step: occ, field: new }
+    with: { output: issue }
+
+outputs:
+  fingerprint:
+    - { binding: id }
+    - { step: rank, field: main_code_path }
+    - { step: rank, field: main_id }
+    - { step: requests, field: group.key }
+  issue:
+    title:
+      zh-CN: '{{subject.name}} 内存终止：{{steps.rank.headline}}（{{steps.kind.occurrences.length}} 次）'
+      en: '{{subject.name}} memory kills: {{steps.rank.headline}} ({{steps.kind.occurrences.length}})'
+    templates: { zh-CN: templates/issue.zh-CN.md, en: templates/issue.en.md }
+    comment_templates: { zh-CN: templates/comment.zh-CN.md, en: templates/comment.en.md }
+    labels: { binding: data.labels }

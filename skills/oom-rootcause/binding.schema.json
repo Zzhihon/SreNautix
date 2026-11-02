@@ -1,0 +1,187 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "OomRootcauseBinding",
+  "description": "oom-rootcause 的绑定数据（领域包 skill-bindings.yaml 的 data）：工作负载自己的序列、日志事件、嫌疑项、代码路径提示与运维选项。名为 signal 的字符串必须是加载的领域包中的信号",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["runtime", "container", "labels", "suspects", "logs", "identifiers", "top_requests"],
+  "properties": {
+    "runtime": {
+      "type": "string",
+      "enum": ["go", "other"],
+      "description": "go 时内存序列为 heap_inuse、上限为 GOMEMLIMIT，否则为 RSS 与容器 limit"
+    },
+    "container": { "type": "string", "minLength": 1 },
+    "labels": { "type": "array", "items": { "type": "string", "minLength": 1, "maxLength": 50 } },
+    "context": {
+      "type": "array",
+      "description": "只进入证据表的序列",
+      "items": { "$ref": "#/$defs/series" }
+    },
+    "suspects": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/suspect" } },
+    "logs": { "type": "array", "items": { "$ref": "#/$defs/event" } },
+    "identifiers": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "org": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["field", "prefix"],
+          "properties": {
+            "field": { "type": "string" },
+            "prefix": { "type": "integer", "minimum": 4, "maximum": 16 }
+          }
+        }
+      }
+    },
+    "top_requests": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["event", "by", "columns", "value_field", "group_field", "large_bytes"],
+      "properties": {
+        "event": { "type": "string" },
+        "columns": {
+          "type": "array",
+          "minItems": 1,
+          "description": "表格的列（时间与 Pod 之后）：字段（as 之后的名字）、标题、是否以代码片段展示",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["field", "title"],
+            "properties": {
+              "field": { "type": "string" },
+              "title": { "$ref": "#/$defs/text" },
+              "code": { "type": "boolean" }
+            }
+          }
+        },
+        "by": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+        "value_field": { "type": "string", "description": "请求体字节数的字段" },
+        "group_field": { "type": "string", "description": "汇总份额的字段（组织前缀）" },
+        "large_bytes": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "profiles": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["log", "field", "pattern", "fetch", "analyze"],
+      "properties": {
+        "log": { "$ref": "#/$defs/event", "description": "写出堆画像路径的日志事件；窗口从发生之前一直到参考时刻" },
+        "field": { "type": "string" },
+        "pattern": { "type": "string", "minLength": 3, "description": "文件路径的正则（锚定开头与结尾）" },
+        "fetch": { "type": "string", "description": "取出命令；占位符 {namespace} {pod} {path} {file} {container}" },
+        "analyze": { "type": "string", "description": "分析命令；占位符同上" }
+      }
+    }
+  },
+  "$defs": {
+    "text": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": { "zh-CN": { "type": "string" }, "en": { "type": "string" } }
+    },
+    "series": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["signal", "unit"],
+      "properties": {
+        "signal": { "type": "string", "pattern": "^[a-z_][a-z0-9-]*/[a-z0-9_.-]+$" },
+        "role": { "type": "string", "enum": ["indicator", "context"], "default": "context" },
+        "unit": {
+          "type": "string",
+          "enum": ["bytes", "bytes_per_second", "count", "per_second", "ratio", "cores", "seconds", "none"]
+        },
+        "high": { "type": "number", "description": "高位的门槛；没有时取 48 小时内的 p90" },
+        "title": { "$ref": "#/$defs/text" }
+      }
+    },
+    "suspect": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "mechanism", "series"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$" },
+        "title": { "$ref": "#/$defs/text" },
+        "mechanism": { "$ref": "#/$defs/text" },
+        "series": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/series" } },
+        "logs": { "type": "array", "items": { "type": "string" } },
+        "logs_required": { "type": "boolean" },
+        "code": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "pattern"],
+            "properties": {
+              "path": { "type": "string", "pattern": "^[A-Za-z0-9_./-]+$" },
+              "pattern": { "type": "string", "minLength": 3, "description": "文件中的字面量，取第一次出现的行" },
+              "before": { "type": "integer", "minimum": 0, "maximum": 40 },
+              "after": { "type": "integer", "minimum": 0, "maximum": 40 },
+              "note": { "$ref": "#/$defs/text" }
+            }
+          }
+        },
+        "fixes": { "type": "array", "items": { "$ref": "#/$defs/text" } },
+        "options": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["title", "domain", "impact", "benefit", "risk"],
+            "properties": {
+              "title": { "$ref": "#/$defs/text" },
+              "domain": { "$ref": "#/$defs/text" },
+              "impact": { "$ref": "#/$defs/text" },
+              "benefit": { "$ref": "#/$defs/text" },
+              "risk": { "$ref": "#/$defs/text" }
+            }
+          }
+        },
+        "references": { "type": "array", "items": { "type": "integer", "minimum": 1 } }
+      }
+    },
+    "event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "message", "format", "message_key", "fields"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+        "message": { "type": "string", "minLength": 3 },
+        "format": { "const": "json" },
+        "message_key": { "type": "string" },
+        "fields": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "type"],
+            "properties": {
+              "name": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_.]*$" },
+              "type": {
+                "type": "string",
+                "enum": ["bytes", "int", "float", "bool", "duration_ms", "string", "path", "request_id", "org_id"]
+              },
+              "as": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" }
+            }
+          }
+        },
+        "where": {
+          "type": "object",
+          "additionalProperties": { "type": ["string", "number", "boolean"] }
+        },
+        "min": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["field", "gt"],
+          "properties": {
+            "field": { "type": "string", "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$" },
+            "gt": { "type": "number" }
+          }
+        }
+      }
+    }
+  }
+}

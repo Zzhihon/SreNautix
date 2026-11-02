@@ -41,6 +41,7 @@ interface PatchDoc {
   conclusions: PackContent['conclusions'];
   domains: PackContent['domains'];
   issues: PackContent['issues'];
+  skill_bindings: PackContent['skill_bindings'];
   rca_params: RcaParams | null;
 }
 
@@ -119,6 +120,7 @@ function applyOne(pack: LoadedPack, l: LoadedLayer): void {
     conclusions: c.conclusions,
     domains: c.domains,
     issues: c.issues,
+    skill_bindings: c.skill_bindings,
     rca_params: c.rca_params,
   };
   for (const p of l.layer.patch ?? []) {
@@ -142,6 +144,7 @@ function applyOne(pack: LoadedPack, l: LoadedLayer): void {
   c.conclusions = doc.conclusions;
   c.domains = doc.domains;
   c.issues = doc.issues;
+  c.skill_bindings = doc.skill_bindings;
   c.rca_params = doc.rca_params;
 
   for (const d of l.layer.disable ?? []) {
@@ -177,6 +180,9 @@ function applyOne(pack: LoadedPack, l: LoadedLayer): void {
         break;
       case 'issues':
         c.issues.issues = drop(c.issues.issues);
+        break;
+      case 'skill_bindings':
+        c.skill_bindings.bindings = drop(c.skill_bindings.bindings);
         break;
       case 'domains':
         if (card === undefined) {
@@ -235,6 +241,7 @@ function applyOne(pack: LoadedPack, l: LoadedLayer): void {
   check('ConclusionsFile', c.conclusions);
   check('DomainsFile', c.domains);
   check('IssuesFile', c.issues);
+  check('SkillBindingsFile', c.skill_bindings);
   if (c.rca_params) {
     check('RcaParams', c.rca_params);
   }

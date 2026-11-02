@@ -258,6 +258,9 @@ importers:
       '@srenautix/integration-sdk':
         specifier: workspace:*
         version: link:../integration-sdk
+      ajv:
+        specifier: 8.20.0
+        version: 8.20.0
       canonicalize:
         specifier: 5.1.0
         version: 5.1.0
@@ -270,9 +273,16 @@ importers:
       jsonpointer:
         specifier: 5.0.1
         version: 5.0.1
+      mustache:
+        specifier: 4.2.0
+        version: 4.2.0
       yaml:
         specifier: 2.9.1
         version: 2.9.1
+    devDependencies:
+      '@types/mustache':
+        specifier: 4.2.6
+        version: 4.2.6
 
   packages/ui:
     dependencies:
@@ -2192,6 +2202,7 @@ packages:
   '@smithy/core@3.36.0':
     resolution: {integrity: sha512-3hJiwG1F5t1SoXqp/yOCmYXziyx7ZVqF63S5W6YU201e/qwVaHPex+E/3vvyY9a3ORq/b+BydeNZpP2saQ9X2g==}
     engines: {node: '>=18.0.0'}
+    deprecated: Deprecated due to a bug in custom logger data redaction. See https://github.com/aws/aws-sdk-js-v3/issues/8393.
 
   '@smithy/credential-provider-imds@4.5.2':
     resolution: {integrity: sha512-A9uSdn72ozbRUSit0eib0TW7nXuNPlaeM0zcGkJ+nE6tFcSDbnmtwoxbTCFBukVQcszDAyvsd7+rTduPTXpygg==}
@@ -2381,6 +2392,9 @@ packages:
 
   '@types/mailparser@3.9.0':
     resolution: {integrity: sha512-YnhrRiRVDiEAphFvd72hKa1n8y2b9Q3rgSQiONZQyhQz67h5g4MZHNApET3XWXVEFdInWtHqDHKEwnyjxU3QVw==}
+
+  '@types/mustache@4.2.6':
+    resolution: {integrity: sha512-t+8/QWTAhOFlrF1IVZqKnMRJi84EgkIK5Kh0p2JV4OLywUvCwJPFxbJAl7XAow7DVIHsF+xW9f1MVzg0L6Szjw==}
 
   '@types/node@22.20.5':
     resolution: {integrity: sha512-U2+DNr+wSjpsTS/wZGYHq7GcwfuSmKiKvoPvK22zwTlRhU91yOniN4qRR5KhIjvif7ysw/dz/hKmfDH0Ris4aA==}
@@ -3923,6 +3937,10 @@ packages:
 
   ms@2.1.3:
     resolution: {integrity: sha512-6FlzubTLZG3J2a/NVCAleEhjzq5oxgHyaCU9yYXvcLsvoVaHJq/s5xXI6/XXP6tz7R9xAOtHnSO/tXtF3WRTlA==}
+
+  mustache@4.2.0:
+    resolution: {integrity: sha512-71ippSywq5Yb7/tVYyGbkBggbU8H3u5Rz56fH60jGFgr8uHwxs+aSKeqmluIVzM0m0kB7xQjKS6qPfd0b2ZoqQ==}
+    hasBin: true
 
   nano-css@5.6.2:
     resolution: {integrity: sha512-+6bHaC8dSDGALM1HJjOHVXpuastdu2xFoZlC77Jh4cg+33Zcgm+Gxd+1xsnpZK14eyHObSp82+ll5y3SX75liw==}
@@ -7600,6 +7618,8 @@ snapshots:
       '@types/node': 22.20.5
       iconv-lite: 0.6.3
 
+  '@types/mustache@4.2.6': {}
+
   '@types/node@22.20.5':
     dependencies:
       undici-types: 6.21.0
@@ -9187,6 +9207,8 @@ snapshots:
   mrmime@2.0.1: {}
 
   ms@2.1.3: {}
+
+  mustache@4.2.0: {}
 
   nano-css@5.6.2(react-dom@19.3.1(react@19.3.1))(react@19.3.1):
     dependencies:

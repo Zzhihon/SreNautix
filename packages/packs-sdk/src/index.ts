@@ -212,3 +212,4 @@ export { GitRepoReader, globToRegExp, type RepoReader, type RepoCommit } from '.
 export type { CompiledRemediation } from './remediation/compile.js';
 export { runDoctor, type DoctorReport } from './doctor.js';
 export { runPackCli } from './cli.js';
+export * as skills from './skills/index.js';
