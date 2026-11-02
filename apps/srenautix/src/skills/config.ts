@@ -7,7 +7,7 @@ import { z } from 'zod';
 //     reload_interval: 60s
 //     enabled: [oom-rootcause]
 //     grants:
-//       oom-rootcause: {metrics.query_range: {}, logs.query: {max_lines: 5000}, kube.read: {objects: [pod_status]}, …}
+//       oom-rootcause: {metrics.query_range: {}, logs.query: {max_lines: 1000}, kube.read: {objects: [pod_status]}, …}
 //     scope:
 //       oom-rootcause: {namespaces: [shop], kinds: [StatefulSet]}
 //     params:
@@ -24,7 +24,8 @@ const capability = z.enum(['metrics.query_range', 'logs.query', 'kube.read', 'co
 export const capabilityParams = z
   .object({
     objects: z.array(z.enum(['pod_status', 'events', 'pod_logs_previous'])).optional(),
-    max_lines: z.number().int().min(1).max(20_000).optional(),
+    // 每次查询的行数，上限与日志接口 LogsQueryRequest.limit 相同
+    max_lines: z.number().int().min(1).max(1000).optional(),
     repo_role: z.enum(['business', 'ops']).optional(),
   })
   .strict();
