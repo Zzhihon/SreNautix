@@ -228,7 +228,7 @@ function analyze(lang: sdk.Lang) {
     thresholds: {
       rise_corr: P.rise_corr!,
       lift_min: P.lift_min!,
-      counter_max: P.counter_max!,
+      rule_out_lift: P.rule_out_lift!,
       reverse_margin: P.reverse_margin!,
       min_history_samples: P.min_history_samples!,
       memory_high_ratio: P.memory_high_ratio!,

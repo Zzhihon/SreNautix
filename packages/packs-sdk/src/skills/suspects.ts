@@ -1,9 +1,10 @@
 // analyze.suspects@v1（docs/skills/oom-rootcause.zh-CN.md §4.3）：嫌疑项的检验、分组、置信度与证据表。
 // 每个嫌疑项的检验序列（role: indicator）在三处检验：
-// 1. 发生之前的窗口：上涨、与内存序列相关（Pearson ≥ rise_corr）、声明了 high 时达到 high；logs_required 时窗口内还要有声明的日志事件；
+// 1. 发生之前的窗口：任何一条检验序列上涨并与内存序列相关（Pearson ≥ rise_corr）；声明了 logs_required 时窗口内还要有其中的日志事件；
 // 2. 48 小时：X 处于高位的样本中内存也高的比例（support）、相对内存高的基础比例的提升（lift）、X 高而内存不高的反例比例（counter）；
+//    内存高的时段本来就少，反例比例总是接近 1，排除看的是提升：X 高位时内存高的可能并不比平时大，X 就解释不了内存高；
 // 3. 先后：X 领先内存的错位相关（lead）与落后内存的错位相关（lag），lag 明显更高时记为反向（reverse）。
-// 反例比例超过 counter_max 或反向的嫌疑项被排除；每次发生归到支持它的、分数最高的嫌疑项，发生最多的一组给出主因。
+// 提升低于 rule_out_lift 或反向的嫌疑项被排除；每次发生归到支持它的、分数最高的嫌疑项，发生最多的一组给出主因。
 
 import type { AroundWindow, EvidenceRow, HistoryWindow, Lang, LogRecord, LogsOutput, Point } from './data.js';
 import type { ClassifiedOccurrence, MemoryKindOutput } from './memory-kind.js';
@@ -39,7 +40,8 @@ export interface SuspectDecl {
   mechanism: unknown;
   series: SuspectSeries[];
   logs?: string[];
-  logs_required?: boolean;
+  /** 一次发生之前的窗口内必须出现其中至少一个日志事件，这次发生才支持该嫌疑项 */
+  logs_required?: string[];
   code?: Array<{ path: string; pattern: string; before?: number; after?: number; note?: unknown }>;
   fixes?: unknown[];
   options?: Array<{ title: unknown; domain: unknown; impact: unknown; benefit: unknown; risk: unknown }>;
@@ -49,7 +51,7 @@ export interface SuspectDecl {
 export interface SuspectThresholds {
   rise_corr: number;
   lift_min: number;
-  counter_max: number;
+  rule_out_lift: number;
   reverse_margin: number;
   min_history_samples: number;
   memory_high_ratio: number;
@@ -206,6 +208,8 @@ interface Check {
   lastMinute: boolean;
   logHits: number;
   hasData: boolean;
+  /** 通过检验的序列中与内存最相关的一条的相关系数 */
+  corr: number;
 }
 
 function checkOccurrence(
@@ -221,11 +225,12 @@ function checkOccurrence(
     (r) => r.pod === o.pod && r.time >= from && r.time <= o.at && (sus.logs ?? []).includes(r.event),
   ).length;
   if (!w) {
-    return { supported: false, lastMinute: false, logHits, hasData: false };
+    return { supported: false, lastMinute: false, logHits, hasData: false, corr: 0 };
   }
   const m = within(podPoints(w, memoryKey), w.from, o.at);
   let hasData = false;
-  let all = true;
+  let any = false;
+  let best = 0;
   let lastMinute = false;
   for (const s of sus.series.filter((x) => x.role === 'indicator')) {
     const x = within(podPoints(w, s.signal), w.from, o.at);
@@ -238,16 +243,22 @@ function checkOccurrence(
     const peak = Math.max(...x.map((p) => p.v));
     const rise = end - start > 0.1 * Math.max(Math.abs(peak), 1e-9);
     const corr = pearson(aligned(x, m));
-    if (!(rise && corr !== null && corr >= t.rise_corr)) {
-      all = false;
+    // 任何一条检验序列上涨并与内存同步，这次发生就有指标上的支持（速率类序列常在请求开始时冲高，不一定与内存同步）
+    if (rise && corr !== null && corr >= t.rise_corr) {
+      any = true;
+      best = Math.max(best, corr);
     }
     const before = valueAt(x, o.at - TWO_MIN);
     if (before !== null && end > before) {
       lastMinute = true;
     }
   }
-  const logsOk = !sus.logs_required || logHits > 0;
-  return { supported: hasData && all && logsOk, lastMinute, logHits, hasData };
+  // logs_required 列出的事件至少出现一个：只靠指标分不开的机制（例如流量很低时的重试与大请求在途）由日志区分
+  const required = sus.logs_required ?? [];
+  const logsOk =
+    !required.length ||
+    records.some((r) => r.pod === o.pod && r.time >= from && r.time <= o.at && required.includes(r.event));
+  return { supported: hasData && any && logsOk, lastMinute, logHits, hasData, corr: best };
 }
 
 const VERDICT: Record<Verdict, [string, string]> = {
@@ -295,20 +306,20 @@ export function rankSuspects(i: {
     const primary = s.series.find((x) => x.role === 'indicator');
     const hist = primary && i.history ? historyStats(i.history, memKey, limKey, primary, t) : null;
     const checks = occs.map((o) => checkOccurrence(o, win(o), memKey, s, records, t));
-    const ruledOut = !!hist && !hist.insufficient && ((hist.counter ?? 0) > t.counter_max || hist.reverse);
-    const score = (n: number) => n * (hist?.lift ?? 1) * (1 - (hist?.counter ?? 0));
+    const ruledOut = !!hist && !hist.insufficient && ((hist.lift ?? 0) < t.rule_out_lift || hist.reverse);
+    // 一次发生上的分数：48 小时的提升 × 这次发生之前与内存的相关系数
+    const score = (k: number) => (hist && !hist.insufficient ? (hist.lift ?? 1) : 1) * checks[k]!.corr;
     return { s, hist, checks, ruledOut, score };
   });
 
-  // 每次发生归到支持它的、没有被排除的、分数最高的嫌疑项（同分时取绑定中的顺序）
+  // 每次发生归到支持它的、没有被排除的、在这次发生上分数最高的嫌疑项（同分时取绑定中的顺序）
   const groupOf = occs.map((_, k) => {
     let best: number | null = null;
     for (const [j, x] of stats.entries()) {
       if (x.ruledOut || !x.checks[k]!.supported) {
         continue;
       }
-      const sc = x.score(x.checks.filter((c) => c.supported).length);
-      if (best === null || sc > stats[best]!.score(stats[best]!.checks.filter((c) => c.supported).length)) {
+      if (best === null || x.score(k) > stats[best]!.score(k)) {
         best = j;
       }
     }
@@ -320,9 +331,9 @@ export function rankSuspects(i: {
       groups.set(g, [...(groups.get(g) ?? []), k]);
     }
   });
+  const total = (j: number, members: number[]) => members.reduce((s, k) => s + stats[j]!.score(k), 0);
   const order = [...groups.entries()].sort(
-    (a, b) =>
-      b[1].length - a[1].length || stats[b[0]]!.score(b[1].length) - stats[a[0]]!.score(a[1].length) || a[0] - b[0],
+    (a, b) => b[1].length - a[1].length || total(b[0], b[1]) - total(a[0], a[1]) || a[0] - b[0],
   );
   const mainIdx = order[0]?.[0] ?? null;
   const mainOccs = mainIdx !== null ? groups.get(mainIdx)! : [];
@@ -333,16 +344,16 @@ export function rankSuspects(i: {
     const n = members.length;
     const logs = members.some((k) => x.checks[k]!.logHits > 0);
     const lift = h?.lift ?? 0;
-    const counter = h?.counter ?? 1;
     const capped = !h || h.insufficient;
     const atLimit = members.every((k) => {
       const o = occs[k]!;
       return o.kind === 'container_limit' && (i.classified.runtime !== 'go' || o.heap === 'live_heap_at_limit');
     });
-    if (!capped && n >= 2 && lift >= 2 && counter <= 0.3 && logs && atLimit) {
+    // 高：这一组解释了全部发生，没有另一种触发与它并存
+    if (!capped && n >= 2 && n === occs.length && lift >= 3 && logs && atLimit) {
       return 'high';
     }
-    if (!capped && n >= 2 && lift >= t.lift_min && counter <= t.counter_max && logs) {
+    if (!capped && n >= 2 && lift >= t.lift_min && logs) {
       return 'medium_high';
     }
     if (lift >= t.lift_min || logs) {
@@ -360,7 +371,7 @@ export function rankSuspects(i: {
     if (x.ruledOut) {
       verdict = 'ruled_out';
       const h = x.hist!;
-      conf = (h.counter ?? 0) >= 0.6 && h.reverse ? 'high' : 'medium';
+      conf = (h.lift ?? 0) < 1 && h.x_high >= 3 * t.min_history_samples ? 'high' : 'medium';
     } else if (j === mainIdx) {
       verdict = 'main';
       conf = confidence(j, members);
@@ -380,11 +391,13 @@ export function rankSuspects(i: {
     const reason =
       verdict === 'ruled_out' && h
         ? [
-            pick(
-              L,
-              `48 小时内它处于高位的 ${h.x_high} 个样本中 ${fmtValue(h.counter, 'ratio')} 内存不高（反例）`,
-              `of the ${h.x_high} samples in 48 h where it was high, ${fmtValue(h.counter, 'ratio')} had memory that was not high (counter-examples)`,
-            ),
+            (h.lift ?? 0) < t.rule_out_lift
+              ? pick(
+                  L,
+                  `48 小时内它处于高位的 ${h.x_high} 个样本中 ${fmtValue(h.counter, 'ratio')} 内存不高（反例），提升 ${fmtRatio(h.lift)}：它处于高位时内存高的可能不比平时大`,
+                  `of the ${h.x_high} samples in 48 h where it was high, ${fmtValue(h.counter, 'ratio')} had memory that was not high (counter-examples), lift ${fmtRatio(h.lift)}: high memory was no more likely than usual while it was high`,
+                )
+              : '',
             h.reverse
               ? pick(
                   L,

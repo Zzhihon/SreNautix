@@ -107,7 +107,12 @@
         "mechanism": { "$ref": "#/$defs/text" },
         "series": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/series" } },
         "logs": { "type": "array", "items": { "type": "string" } },
-        "logs_required": { "type": "boolean" },
+        "logs_required": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string" },
+          "description": "一次发生之前的窗口内必须出现其中至少一个日志事件，这次发生才支持该嫌疑项"
+        },
         "code": {
           "type": "array",
           "items": {

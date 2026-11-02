@@ -23,14 +23,14 @@ params:
   history: 48h
   history_step: 5m
   memory_high_ratio: 0.75
-  heap_near_limit_ratio: 0.9
-  next_gc_near_limit_ratio: 0.95
+  heap_near_limit_ratio: 0.8
+  next_gc_near_limit_ratio: 0.9
   gc_cpu_ratio: 0.4
-  gc_cpu_sustain_seconds: 180
+  gc_cpu_sustain_seconds: 60
   node_available_min: 0.1
-  rise_corr: 0.6
+  rise_corr: 0.5
   lift_min: 1.5
-  counter_max: 0.5
+  rule_out_lift: 1.2
   reverse_margin: 0.2
   min_history_samples: 12
   org_share_min: 0.5
@@ -222,7 +222,7 @@ steps:
       thresholds:
         rise_corr: { param: rise_corr }
         lift_min: { param: lift_min }
-        counter_max: { param: counter_max }
+        rule_out_lift: { param: rule_out_lift }
         reverse_margin: { param: reverse_margin }
         min_history_samples: { param: min_history_samples }
         memory_high_ratio: { param: memory_high_ratio }
