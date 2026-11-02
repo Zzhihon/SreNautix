@@ -49,7 +49,7 @@
 
 | `heap`（`runtime: go`） | 条件 | 写法 |
 |---|---|---|
-| `live_heap_at_limit` | 发生之前 5 分钟内 `max(heap_inuse) / GOMEMLIMIT ≥ heap_near_limit_ratio`（0.9），`next_gc / GOMEMLIMIT ≥ next_gc_near_limit_ratio`（0.95），GC CPU 不低于 `gc_cpu_ratio`（0.4）× GOMAXPROCS 累计 `gc_cpu_sustain_seconds`（180 秒） | 存活堆贴着 GOMEMLIMIT，GC 连续运行也收不回：占用的是存活数据 |
+| `live_heap_at_limit` | 发生之前 5 分钟内 `max(heap_inuse) / GOMEMLIMIT ≥ heap_near_limit_ratio`（0.8），`next_gc / GOMEMLIMIT ≥ next_gc_near_limit_ratio`（0.9），GC CPU 不低于 `gc_cpu_ratio`（0.4）× GOMAXPROCS 累计 `gc_cpu_sustain_seconds`（60 秒）。heap_inuse 按 30 秒步长采样，峰值常落在两个样本之间，所以阈值低于 1 | 存活堆贴着 GOMEMLIMIT，GC 连续运行也收不回：占用的是存活数据 |
 | `non_heap` | `RSS / limit ≥ 0.95`，同时 `heap_inuse / GOMEMLIMIT < 0.7` | 堆之外的内存（goroutine stack、mmap、cgo）占满了 limit |
 | `no_gomemlimit` | 没有 GOMEMLIMIT，或它不小于容器 limit | GOMEMLIMIT 没有生效 |
 | `not_at_limit`、`no_data` | 其他；没有 Go 运行时指标 | — |
@@ -60,24 +60,24 @@
 
 对每个嫌疑项：
 
-1. **发生之前**（`[at − 30m, at]`）：每条检验序列都上涨（终点比起点高出峰值的 10% 以上）并且与内存序列的 Pearson 相关系数不低于 `rise_corr`（0.6）；`logs_required` 时窗口内还要出现声明的日志事件。满足时这次发生支持该嫌疑项。最后 2 分钟仍在上升时记下。
-2. **48 小时**（第一条检验序列，全部 Pod，5 分钟一个样本）：`high`（绑定声明，没有时取 p90）以上的样本中内存高（`M / L ≥ memory_high_ratio`，0.75）的比例为支持度，相对全部样本中内存高的比例为提升，`1 − 支持度`为反例比例；高位样本少于 `min_history_samples`（12）时为不足。
+1. **发生之前**（`[at − 30m, at]`）：至少一条检验序列上涨（终点比起点高出峰值的 10% 以上）并且与内存序列的 Pearson 相关系数不低于 `rise_corr`（0.5）；绑定声明了 `logs_required`（事件名列表）时窗口内还要出现其中至少一个事件。满足时这次发生支持该嫌疑项，通过检验的序列中最高的相关系数记为这次发生上的相关。速率类序列（例如请求体转换字节）在请求开始时冲高、之后回落，不一定与内存同步，所以只要求一条序列通过；只靠指标分不开的机制（同一条积压序列既可能来自大请求，也可能来自流量很低时的重试）由 `logs_required` 区分。最后 2 分钟仍在上升时记下。
+2. **48 小时**（第一条检验序列，全部 Pod，5 分钟一个样本）：`high`（绑定声明，没有时取 p90）以上的样本中内存高（`M / L ≥ memory_high_ratio`，0.75）的比例为支持度，相对全部样本中内存高的比例为提升，`1 − 支持度`为反例比例。内存高的时段本来就少（真实工作负载上常低于 1%），反例比例总是接近 1，判定只用提升，反例比例写进证据表；高位样本少于 `min_history_samples`（12）时为不足。
 3. **先后**：检验序列领先内存 1–3 个步长的最大相关系数（lead）与落后内存的最大相关系数（lag）；`lag − lead ≥ reverse_margin`（0.2）且 `lag ≥ 0.5` 时记为反向：它跟在内存后面变化。
 
 判定与分组：
 
-- 反例比例超过 `counter_max`（0.5）或反向的嫌疑项排除为主因；排除的嫌疑项在主因分组的发生之前最后 2 分钟仍在上升时写作次要加重因素（推断）。
-- 每次发生归到支持它的、没有被排除的、分数（支持的发生数 × 提升 × (1 − 反例)）最高的嫌疑项；发生最多的一组给出主因，其余组写作"另一种触发"，没有嫌疑项支持的发生写作"未解释"。
+- 提升低于 `rule_out_lift`（1.2，它处于高位时内存高的可能不比平时大）或反向的嫌疑项排除为主因；排除的嫌疑项在主因分组的发生之前最后 2 分钟仍在上升时写作次要加重因素（推断）。
+- 每次发生归到支持它的、没有被排除的、在这次发生上分数（提升 × 这次发生上的相关）最高的嫌疑项；发生最多的一组给出主因（同样多时取组内分数之和高的一组），其余组写作"另一种触发"，没有嫌疑项支持的发生写作"未解释"。
 - 置信度：
 
 | 置信度 | 条件 |
 |---|---|
-| 高 | 组内至少 2 次发生；提升 ≥ 2；反例 ≤ 0.3；有日志事件；每次发生都是容器 limit（Go 服务还要是存活堆贴着 GOMEMLIMIT） |
-| 中高 | 组内至少 2 次发生；提升 ≥ `lift_min`（1.5）；反例 ≤ `counter_max`；有日志事件 |
+| 高 | 这一组解释了全部发生（没有另一种触发）且至少 2 次；提升 ≥ 3；有日志事件；每次发生都是容器 limit（Go 服务还要是存活堆贴着 GOMEMLIMIT） |
+| 中高 | 组内至少 2 次发生；提升 ≥ `lift_min`（1.5）；有日志事件 |
 | 中 | 提升 ≥ `lift_min`，或有日志事件 |
 | 低 | 其他 |
 
-48 小时数据不足时置信度最高为中。排除的置信度：反例 ≥ 0.6 且反向时为高，否则为中。
+48 小时数据不足时置信度最高为中。排除的置信度：提升低于 1 且高位样本不少于 3 × `min_history_samples` 时为高，否则为中。
 
 ### 3.3 证据表
 
@@ -106,7 +106,7 @@
 
 ## 6. 参数
 
-`skills.params.oom-rootcause` 可以覆盖：`rss_limit_ratio`、`rss_sustain`、`occurrence_window`、`occurrence_step`、`pre_window`、`post_window`、`step`、`history`、`history_step`、`memory_high_ratio`、`heap_near_limit_ratio`、`next_gc_near_limit_ratio`、`gc_cpu_ratio`、`gc_cpu_sustain_seconds`、`node_available_min`、`rise_corr`、`lift_min`、`counter_max`、`reverse_margin`、`min_history_samples`、`org_share_min`、`max_profiles`。
+`skills.params.oom-rootcause` 可以覆盖：`rss_limit_ratio`、`rss_sustain`、`occurrence_window`、`occurrence_step`、`pre_window`、`post_window`、`step`、`history`、`history_step`、`memory_high_ratio`、`heap_near_limit_ratio`、`next_gc_near_limit_ratio`、`gc_cpu_ratio`、`gc_cpu_sustain_seconds`、`node_available_min`、`rise_corr`、`lift_min`、`rule_out_lift`、`reverse_margin`、`min_history_samples`、`org_share_min`、`max_profiles`。
 
 ## 7. 测试
 

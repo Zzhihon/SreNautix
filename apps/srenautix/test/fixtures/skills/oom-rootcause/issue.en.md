@@ -12,7 +12,7 @@ Conclusion (main / secondary / confidence):
 
 - **Main cause (confidence medium-high)**: Large request bodies converted and appended whole. Large request bodies are decoded whole and appended whole when archived; concurrent ones add up beyond the budget headroom.
 - **Another trigger (confidence medium)**: api-gateway-0 11-01 07:53:00 was driven by Non-retryable rejections retried. Non-retryable upstream rejections are retried and every attempt grows the same archive record.
-- **Ruled out as the main cause (confidence medium)**: Export task memory watchdog, an aggravating factor, see §3.
+- **Ruled out as the main cause (confidence high)**: Export task memory watchdog, an aggravating factor, see §3.
 
 ## 1. Evidence
 
@@ -73,7 +73,7 @@ Large requests in the main group (request_id, organization prefix and numbers on
 
 ## 3. Ruled out and counter-examples
 
-- **Export task memory watchdog**: of the 43 samples in 48 h where it was high, 100.0% had memory that was not high (counter-examples); it was still rising in the last 2 minutes before the main group occurrences, possibly the last straw (inferred).
+- **Export task memory watchdog**: of the 43 samples in 48 h where it was high, 100.0% had memory that was not high (counter-examples), lift 0: high memory was no more likely than usual while it was high; it was still rising in the last 2 minutes before the main group occurrences, possibly the last straw (inferred).
 
 ## 4. Fixes and operations options
 
