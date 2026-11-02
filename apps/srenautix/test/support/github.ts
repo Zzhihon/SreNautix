@@ -14,7 +14,8 @@ import { jwtVerify } from 'jose';
  *   closeIssue() 关闭；与 GitHub 相同，PR 的编号也可以按 issue 读取）、
  *   POST/GET /repos/{repo}/issues/{n}/comments（评论带 created_at，comment() 以指定时刻追加；per_page 与 page 分页）；
  * - 提交：GET /repos/{repo}/commits（sha 为分支或提交、path、since、until、per_page、page）与 GET /repos/{repo}/commits/{sha}（带 files）；
- * - contents 的 ref 可以是分支或 write() 产生的提交，路径是目录时返回目录列表；GET /repos/{repo}/pulls?head=owner:branch。
+ * - contents 的 ref 可以是分支或 write() 产生的提交，路径是目录时返回目录列表；GET /repos/{repo}/pulls?head=owner:branch；
+ * - GET /repos/{repo}/compare/{分支}...{分支}（base_commit 为分支头）与 GET /repos/{repo}/git/trees/{提交}（全部文件）。
  * fault() 注入失败：返回给定状态，或处理请求之后断开连接（客户端收不到响应）。
  */
 export class FakeGitHub {
@@ -176,6 +177,27 @@ export class FakeGitHub {
       this.branches.set(ref, new Map(this.branches.get(from[0])));
       this.heads.set(ref, String(body.sha));
       return send(res, 201, { ref: `refs/heads/${ref}`, object: { sha: body.sha } });
+    }
+    // 业务仓库的读取（ADR 0146 §3.5）：同一分支的 compare 给出分支头；git/trees/{提交}?recursive=1 给出全部文件
+    if (method === 'GET' && (m = /^compare\/([^.]+)\.\.\.([^.]+)$/.exec(rest)) && m[1] === m[2]) {
+      const head = this.heads.get(m[1] as string);
+      return head ? send(res, 200, { base_commit: { sha: head } }) : send(res, 404, { message: 'Not Found' });
+    }
+    if (method === 'GET' && (m = /^git\/trees\/([0-9a-f]{40})$/.exec(rest))) {
+      const files = this.filesAt(m[1] as string);
+      if (!files) {
+        return send(res, 404, { message: 'Not Found' });
+      }
+      return send(res, 200, {
+        sha: m[1],
+        truncated: false,
+        tree: [...files].map(([p, content]) => ({
+          path: p,
+          type: 'blob',
+          sha: sha(content),
+          size: Buffer.byteLength(content),
+        })),
+      });
     }
     if (method === 'GET' && (rest === 'contents' || rest === 'contents/')) {
       const files = this.filesAt(u.searchParams.get('ref') ?? 'main');

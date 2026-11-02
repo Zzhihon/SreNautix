@@ -194,6 +194,11 @@ spec:
             - name: bindings
               mountPath: /etc/srenautix/bindings
               readOnly: true
+            {{- range $s := $.Values.skills.userConfigMaps }}
+            - name: skill-{{ $s }}
+              mountPath: /etc/srenautix/skills/{{ $s }}/{{ $s }}
+              readOnly: true
+            {{- end }}
             {{- range $p := $.Values.packs.userConfigMaps }}
             {{- $u := include "srenautix.userPack" $p | fromYaml }}
             - name: pack-{{ $u.configMap }}
@@ -258,6 +263,11 @@ spec:
         - name: bindings
           configMap:
             name: {{ include "srenautix.bindingsConfigMap" $ }}
+        {{- range $s := $.Values.skills.userConfigMaps }}
+        - name: skill-{{ $s }}
+          configMap:
+            name: {{ $s }}
+        {{- end }}
         {{- range $p := $.Values.packs.userConfigMaps }}
         {{- $u := include "srenautix.userPack" $p | fromYaml }}
         - name: pack-{{ $u.configMap }}

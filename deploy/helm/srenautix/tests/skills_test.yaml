@@ -1,0 +1,67 @@
+suite: 技能（skills，ADR 0181）
+templates:
+  - templates/deployments.yaml
+  - templates/role-resources.yaml
+values:
+  - ../ci/base/required.yaml
+release:
+  name: t
+  namespace: srenautix
+capabilities:
+  majorVersion: "1"
+  minorVersion: "34"
+tests:
+  - it: 默认只有内置来源，没有启用任何技能
+    set:
+      profile: standard
+    asserts:
+      - matchRegex:
+          path: 'data["config.yaml"]'
+          pattern: '(?m)^skills:\n  enabled: \[\]\n  grants: \{\}\n  params: \{\}\n  scope: \{\}\n  sources:\n  - kind: builtin\n'
+        template: templates/role-resources.yaml
+        documentSelector: {path: metadata.name, value: t-srenautix-server-config}
+
+  - it: 技能的 ConfigMap 整卷挂载到 server，并作为目录来源写进配置
+    set:
+      profile: standard
+      skills:
+        userConfigMaps: [restart-burst]
+        enabled: [oom-rootcause, restart-burst]
+        grants:
+          oom-rootcause:
+            metrics.query_range: {}
+            issue.write: {repo_role: business}
+        maxIssuesPerHour: 2
+        titlePrefix: '[技能]'
+    asserts:
+      - contains:
+          path: spec.template.spec.volumes
+          content: {name: skill-restart-burst, configMap: {name: restart-burst}}
+        template: templates/deployments.yaml
+        documentSelector: {path: metadata.name, value: t-srenautix-server}
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content: {name: skill-restart-burst, mountPath: /etc/srenautix/skills/restart-burst/restart-burst, readOnly: true}
+        template: templates/deployments.yaml
+        documentSelector: {path: metadata.name, value: t-srenautix-server}
+      - matchRegex:
+          path: 'data["config.yaml"]'
+          pattern: '(?m)^  sources:\n  - kind: builtin\n  - kind: dir\n    path: /etc/srenautix/skills/restart-burst\n  title_prefix: \[技能\]\n'
+        template: templates/role-resources.yaml
+        documentSelector: {path: metadata.name, value: t-srenautix-server-config}
+      - matchRegex:
+          path: 'data["config.yaml"]'
+          pattern: '(?m)^  max_issues_per_hour: 2\n'
+        template: templates/role-resources.yaml
+        documentSelector: {path: metadata.name, value: t-srenautix-server-config}
+
+  - it: 技能的 ConfigMap 不挂载到 worker
+    set:
+      profile: standard
+      skills.userConfigMaps: [restart-burst]
+    asserts:
+      - notContains:
+          path: spec.template.spec.volumes
+          content: {name: skill-restart-burst, configMap: {name: restart-burst}}
+        template: templates/deployments.yaml
+        documentSelector: {path: metadata.name, value: t-srenautix-worker}

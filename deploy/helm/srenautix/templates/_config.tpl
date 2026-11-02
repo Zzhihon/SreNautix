@@ -309,6 +309,25 @@ packs:
       {{- toYaml . | nindent 6 }}
     cache_dir: /var/cache/srenautix/packs
   {{- end }}
+skills:
+  sources:
+    - {kind: builtin}
+    {{- range $s := $v.skills.userConfigMaps }}
+    - {kind: dir, path: /etc/srenautix/skills/{{ $s }}}
+    {{- end }}
+  enabled: {{ toJson $v.skills.enabled }}
+  grants: {{ toJson $v.skills.grants }}
+  scope: {{ toJson $v.skills.scope }}
+  params: {{ toJson $v.skills.params }}
+  {{- with $v.skills.limits }}
+  limits: {{ toJson . }}
+  {{- end }}
+  {{- with $v.skills.maxIssuesPerHour }}
+  max_issues_per_hour: {{ . }}
+  {{- end }}
+  {{- if not (kindIs "invalid" $v.skills.titlePrefix) }}
+  title_prefix: {{ $v.skills.titlePrefix | quote }}
+  {{- end }}
 datasources:
   prometheus:
     url: {{ $v.datasources.prometheus.url }}

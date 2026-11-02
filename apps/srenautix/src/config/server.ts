@@ -5,6 +5,7 @@ import { ConfigError, parseDuration } from './files.js';
 import { DEFAULT_REVISION_LABELS } from '../changes/kubernetes.js';
 import { DEFAULT_EXTERNAL_LABELS, isComponentKey } from '@srenautix/core';
 import { DEFAULT_OPTIMIZATION, optimizationConfig, pgReadConnection } from '../optimize/config.js';
+import { DEFAULT_SKILLS, skillsConfig } from '../skills/config.js';
 import { NOVELTY_CONFIG_DEFAULT, noveltyConfig } from './novelty.js';
 import { alertMatcher, upgradeMatchers, type AlertMatcher } from '../alerts/business-impact.js';
 import { logger } from '../log.js';
@@ -629,6 +630,8 @@ export const serverConfigSchema = z
     github_app: githubApp.optional(),
     // 主动优化（ADR 0146）；默认关闭
     optimization: optimizationConfig.default(DEFAULT_OPTIMIZATION),
+    // 技能（ADR 0181）；默认没有启用任何技能
+    skills: skillsConfig.default(DEFAULT_SKILLS),
     // 需要人跟进的事件在 GitHub 开 issue（ADR 0095）；默认关闭
     issues: z
       .object({

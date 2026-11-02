@@ -1,0 +1,135 @@
+bindings:
+  - skill: oom-rootcause
+    id: api-gateway
+    workloads:
+      - { kind: StatefulSet, namespace: shop, name: api-gateway }
+    data:
+      runtime: go
+      container: gateway
+      labels: [bug, area/gateway]
+      context:
+        - { signal: shop/active_requests, unit: count, title: { zh-CN: 活跃请求, en: Active requests } }
+      suspects:
+        - id: body-buffering
+          title: { zh-CN: 大请求体整体转换与整段拼接, en: Large request bodies converted and appended whole }
+          mechanism:
+            zh-CN: 大请求体整体解码进堆，归档写入时整段拼接，并发的大请求叠加，超出请求体预算预留的余量
+            en: Large request bodies are decoded whole and appended whole when archived; concurrent ones add up beyond the budget headroom
+          series:
+            - { signal: shop/body_bytes_rate, role: indicator, unit: bytes_per_second, high: 50000000, title: { zh-CN: 请求体转换字节, en: Body conversion bytes } }
+            - { signal: shop/archive_backlog_bytes, role: indicator, unit: bytes, high: 300000000, title: { zh-CN: 归档日志积压, en: Archive log backlog } }
+          logs: [request_body_budget_tuned, request_end, archive_spool_full]
+          code:
+            - { path: internal/body/limit.go, pattern: func budgetCeiling, before: 0, after: 5, note: { zh-CN: 预算容量等于上限减去余量, en: Budget ceiling } }
+            - { path: internal/body/limit.go, pattern: defaultSpikeAllowanceBytes, before: 1, after: 1 }
+            - { path: internal/capture/writer.go, pattern: 'whole = append(whole, body...)', before: 6, after: 2, note: { zh-CN: 整段拼接，没有预分配, en: Whole-buffer append } }
+          fixes:
+            - { zh-CN: 大请求体流式处理，或每个请求只转换一次, en: Stream large bodies or convert once per request }
+            - { zh-CN: 归档写入按长度预分配，单条记录内缓存的结果设上限, en: Preallocate archive writes and cap cached results }
+          options:
+            - title: { zh-CN: 降低单个请求体的转换上限, en: Lower the per-request conversion limit }
+              domain: { zh-CN: 网关请求准入, en: Gateway admission }
+              impact: { zh-CN: 超过上限的大请求返回 413, en: Oversized requests get 413 }
+              benefit: { zh-CN: 单个请求的转换内存有上限, en: Bounds conversion memory per request }
+              risk: { zh-CN: 有业务影响，长上下文请求失败, en: Business-visible; long-context requests fail }
+            - title: { zh-CN: 提高内存 limit, en: Raise the memory limit }
+              domain: { zh-CN: StatefulSet 资源, en: StatefulSet resources }
+              impact: { zh-CN: 节点内存分配，request 等于 limit, en: Node allocation (request equals limit) }
+              benefit: { zh-CN: OOM 的门槛提高, en: Higher OOM threshold }
+              risk: { zh-CN: 要和节点容量一起评估，机制仍在, en: Needs a node capacity review; the mechanism remains }
+          references: [101, 107]
+        - id: retry-backlog
+          title: { zh-CN: 不可重试的拒绝被反复重试, en: Non-retryable rejections retried }
+          mechanism:
+            zh-CN: 不可重试的上游拒绝仍被重试，每次尝试都让同一条归档记录变大，记录一直没有收尾
+            en: Non-retryable upstream rejections are retried and every attempt grows the same archive record
+          series:
+            - { signal: shop/archive_backlog_bytes, role: indicator, unit: bytes, high: 300000000, title: { zh-CN: 归档日志积压, en: Archive log backlog } }
+          logs: [upstream_failure_not_retryable]
+          logs_required: true
+          code:
+            - { path: internal/executor/retry.go, pattern: func retryConfig, before: 0, after: 2, note: { zh-CN: 重试配置, en: Retry config } }
+          fixes:
+            - { zh-CN: 不可重试的 400 终止重试, en: Stop retrying non-retryable 400s }
+          references: [98]
+        - id: export-watchdog
+          title: { zh-CN: 导出任务的内存看门狗, en: Export task memory watchdog }
+          mechanism:
+            zh-CN: 看门狗按进程的堆对象计量，把其他请求的垃圾算进导出任务
+            en: The watchdog measures process heap objects and counts other requests' garbage against the export task
+          series:
+            - { signal: shop/export_deferred_rate, role: indicator, unit: per_second, high: 0.01, title: { zh-CN: 导出推迟, en: Export deferrals } }
+          code:
+            - { path: internal/export/memory.go, pattern: heapObjectsMetric, before: 0, after: 0, note: { zh-CN: 按进程的堆对象计量, en: Process-wide heap objects } }
+          fixes:
+            - { zh-CN: 看门狗按任务自身的字节计量, en: Count per-task bytes in the watchdog }
+          options:
+            - title: { zh-CN: 导出全部交给独立的导出进程, en: Move all exports to the exporter process }
+              domain: { zh-CN: 归档导出的位置, en: Export placement }
+              impact: { zh-CN: 网关不再执行导出任务, en: The gateway no longer runs exports }
+              benefit: { zh-CN: 网关里没有导出任务的临时分配, en: No export allocations in the gateway }
+              risk: { zh-CN: 导出进程的内存与并发要够, en: The exporter must be sized }
+          references: [104]
+      logs:
+        - id: request_body_budget_tuned
+          message: request_body_budget_tuned
+          format: json
+          message_key: msg
+          fields:
+            - { name: live_heap_bytes, type: bytes }
+            - { name: held_bytes, type: bytes }
+            - { name: memory_budget_bytes, type: bytes }
+        - id: request_end
+          message: request_end
+          format: json
+          message_key: msg
+          min: { field: request_body_bytes, gt: 16777216 }
+          fields:
+            - { name: request_id, type: request_id }
+            - { name: organization_id, type: org_id, as: org }
+            - { name: path, type: path }
+            - { name: duration_ms, type: duration_ms }
+            - { name: request_body_bytes, type: bytes }
+        - id: upstream_failure_not_retryable
+          message: executor_upstream_failure
+          format: json
+          message_key: msg
+          fields:
+            - { name: request_id, type: request_id }
+            - { name: status_code, type: int }
+            - { name: retryable, type: bool }
+          where: { retryable: false }
+        - id: archive_spool_full
+          message: request_archive_spool_full
+          format: json
+          message_key: msg
+          fields:
+            - { name: log_usage_bytes, type: bytes }
+            - { name: log_budget_bytes, type: bytes }
+      identifiers:
+        org: { field: org, prefix: 8 }
+      top_requests:
+        event: request_end
+        by: [request_body_bytes, duration_ms]
+        columns:
+          - { field: request_id, title: { zh-CN: request_id, en: request_id }, code: true }
+          - { field: org, title: { zh-CN: 组织, en: Organization }, code: true }
+          - { field: path, title: { zh-CN: 路径, en: Path }, code: true }
+          - { field: request_body_bytes, title: { zh-CN: 请求体, en: Body } }
+          - { field: duration_ms, title: { zh-CN: 时长, en: Duration } }
+        value_field: request_body_bytes
+        group_field: org
+        large_bytes: 16777216
+      profiles:
+        log:
+          id: heap_profile
+          message: heap_profile_captured
+          format: json
+          message_key: msg
+          fields:
+            - { name: path, type: path }
+            - { name: heap_inuse_bytes, type: bytes }
+        field: path
+        pattern: '^/var/lib/app/heap-profiles/heap-[0-9]{8}T[0-9]{6}Z-[0-9]+MiB\.pb\.gz$'
+        fetch: 'kubectl -n {namespace} cp {pod}:{path} ./{file} -c {container}'
+        analyze: 'go tool pprof -sample_index=inuse_space -top {file}'

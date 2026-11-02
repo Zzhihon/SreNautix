@@ -52,7 +52,7 @@ import { expireSpokeConditions } from '../console-bff/spoke-conditions.js';
 import { IngestService } from '../ingest/service.js';
 import { configureLog, logger } from '../log.js';
 import type { RoleArgs } from '../main.js';
-import { ServerMetrics, startMetricsServer } from '../metrics.js';
+import { ServerMetrics, startMetricsServer, VERSION } from '../metrics.js';
 import { ServerNotifyActions } from '../notify/actions.js';
 import { NotifyService } from '../notify/index.js';
 import { ExternalRoots, externalTypeLookup, pgImpactAlerts, topologyPaths } from '../notify/external.js';
@@ -95,6 +95,9 @@ import { GitOpsPulls } from '../remediation/pulls.js';
 import { RemediationService } from '../remediation/service.js';
 import { GitRepositoryTargets } from '../remediation/targets.js';
 import { serverCorrections, serverTracks } from './server-schema.js';
+import { KubeSkillReader } from '../skills/kube.js';
+import { registerSkillRoutes } from '../skills/routes.js';
+import { SkillService } from '../skills/service.js';
 
 export interface ServerHandle {
   app: FastifyInstance;
@@ -800,6 +803,38 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
     evidence: optimization?.evidence ?? null,
     publisher: optimization?.publisher ?? null,
   });
+  // 技能（ADR 0181）：内置与挂载目录中的技能，按 skills.enabled 与 skills.grants 运行
+  const sk = c.skills;
+  const skillKube = sk.enabled.some((n) => sk.grants[n] && 'kube.read' in sk.grants[n]!)
+    ? new KubeSkillReader(c.kube_reads.kubeconfig ?? c.topology.kubeconfig)
+    : null;
+  const businessLayout = c.optimization.repositories.business;
+  const skills = new SkillService({
+    pool,
+    config: sk,
+    clusterId: c.cluster_id,
+    hostVersion: VERSION,
+    packs: () => packs.set,
+    engine: evidenceSource.engine,
+    dataSource: (at) => evidenceSource.dataSource(at),
+    kube: skillKube,
+    kubeLimits: { tailLines: c.kube_reads.tail_lines, maxBytes: c.kube_reads.max_bytes },
+    github,
+    repos: {
+      business: businessLayout ? { repo: businessLayout.repo, default_branch: businessLayout.default_branch } : null,
+      ops: c.issues?.repo ?? null,
+    },
+    logsAvailable: loki !== undefined,
+    repoMaxPerHour: sk.max_issues_per_hour ?? c.issues?.max_per_hour ?? 3,
+    lang: c.stage_a.language === 'zh' ? 'zh-CN' : 'en',
+    titlePrefix: (sk.title_prefix ?? c.notify.prefix).trim(),
+    consoleUrl: c.public_url,
+    registry: metrics.registry,
+    ownerOf: (clusterId, key) => topology.ownerOf(clusterId, key, new Date()),
+    storm: () => scheduler.stormMode,
+  });
+  await skills.reload();
+  registerSkillRoutes(app, { auth, skills, clusterId: c.cluster_id });
   registerResearchRoutes(app, {
     pool,
     auth,
@@ -991,6 +1026,37 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
       single(() => optimization.verifier.runOnce(signal)),
       '优化建议的验证',
     );
+  }
+  // 技能（ADR 0181）：重新加载在每个实例上执行（接口与控制台读取）；触发、运行与投递只在主实例上
+  {
+    const t = setInterval(() => {
+      skills.reload().catch((e: unknown) => logger.error('技能重新加载失败，下一轮重试', { error: e }));
+    }, skills.reloadMs);
+    t.unref();
+    timers.push(t);
+    let busy = false;
+    const tick = async () => {
+      if (busy) {
+        return;
+      }
+      busy = true;
+      try {
+        await skills.metricTriggersOnce();
+        await skills.alertTriggersOnce();
+        const objects = informer?.healthObjects() ?? null;
+        if (objects) {
+          await skills.kubeTriggersOnce(objects as unknown as Parameters<SkillService['kubeTriggersOnce']>[0]);
+        }
+        await skills.tickOnce(signal);
+      } finally {
+        busy = false;
+      }
+    };
+    every(skills.intervalMs, tick, '技能的触发、运行与投递');
+    void leader
+      .acquired()
+      .then(() => skills.recover())
+      .catch((e: unknown) => logger.error('技能运行的恢复失败', { error: e }));
   }
   // 自愈 PR（ADR 0108）：研判结论 → 领域包的修复模板 → 校验 → gitops_pr 提议；gateway 开出的 PR 关联到事件 issue 与通知
   const closures = (cl: Queryable, x: Closure) => feedback.recordClosure(cl, x);
@@ -1298,8 +1364,9 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
       const frozen = await pool.query<{ cluster_id: string }>(
         'SELECT cluster_id FROM server.spoke_status WHERE conditions @> \'[{"type":"Freeze","status":"True"}]\'',
       );
-      await conditions.publish(
-        serverConditions({
+      await conditions.publish([
+        ...skills.conditions(),
+        ...serverConditions({
           ingestSources: c.ingest.sources.map((s) => ({
             id: s.id,
             lastReceivedAt: srcs.rows.find((x) => x.source_id === s.id)?.last_received_at ?? null,
@@ -1333,7 +1400,7 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
           frozenClusters: frozen.rows.map((x) => x.cluster_id),
           now: new Date(),
         }),
-      );
+      ]);
       await workerConditions.publish(workerRouteConditions(scheduler.modelRoutes()));
       await expireSpokeConditions(
         pool,

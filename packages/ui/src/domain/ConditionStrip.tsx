@@ -30,6 +30,8 @@ export const CONDITION_SEVERITY: Record<ConditionType, 'critical' | 'warning'> =
   QueryManifest: 'warning',
   Datasource: 'warning',
   AlertReconcile: 'warning',
+  SkillLoadFailed: 'warning',
+  SkillCapabilityMissing: 'warning',
 };
 
 /** 条件的严重程度；不认识的类型（较新的 server 上报的类型）按 warning */

@@ -12,9 +12,12 @@ import type { Queryable } from '../store/pool.js';
 // 研判（server.research_runs、research_queue）与自愈 PR（server.remediation_attempts）的终态在各自的表里，
 // 写入处同样经 ServerMetrics.terminal 计数。
 
+/** 写进 server.incident_reasons 的阶段：技能的运行（ADR 0181）的终态在 server.skill_runs，与事件无关 */
+export type IncidentReasonStage = Exclude<ReasonStage, 'skill'>;
+
 /** 一条终态记录；stage 与 code 按登记表成对检查 */
 export type ReasonRecord = {
-  [S in ReasonStage]: {
+  [S in IncidentReasonStage]: {
     incidentId: string;
     incidentVersion?: number | null;
     stage: S;
@@ -27,7 +30,7 @@ export type ReasonRecord = {
     once?: string | null;
     at?: Date;
   };
-}[ReasonStage];
+}[IncidentReasonStage];
 
 /** 在调用方的连接（可以是事务）里写入；返回是否写入（once 重复时为 false）。事务提交后由调用方计数 */
 export async function writeReason(c: Queryable, r: ReasonRecord): Promise<boolean> {
@@ -96,7 +99,7 @@ export function countReasons(metrics: Pick<ServerMetrics, 'terminal'>, rs: reado
 export interface StoredReason {
   id: number;
   incidentVersion: number | null;
-  stage: ReasonStage;
+  stage: IncidentReasonStage;
   code: string;
   level: ReasonLevel;
   detail: string | null;
@@ -109,7 +112,7 @@ export async function reasonsOf(c: Queryable, incidentId: string): Promise<Store
   const r = await c.query<{
     id: string;
     incident_version: number | null;
-    stage: ReasonStage;
+    stage: IncidentReasonStage;
     code: string;
     detail: string | null;
     ref: string | null;

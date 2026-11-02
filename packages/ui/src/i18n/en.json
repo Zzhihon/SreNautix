@@ -109,6 +109,8 @@
   "condition.QueryManifest": "Query manifest not loaded",
   "condition.Datasource": "Reader data source unavailable",
   "condition.AlertReconcile": "Alert reconcile failed",
+  "condition.SkillLoadFailed": "Skill failed validation",
+  "condition.SkillCapabilityMissing": "Skill missing a grant",
   "conditions.label": "System status",
   "conditions.loading": "Reading system status",
   "conditions.unreadable": "System status unreadable",
