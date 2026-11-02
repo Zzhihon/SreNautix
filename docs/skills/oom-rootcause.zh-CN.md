@@ -290,11 +290,12 @@ outputs:
 | `suspects[].id`、`title`、`mechanism` | 机制 id（进入指纹）、标题与机制说明（`zh-CN`、`en`） |
 | `suspects[].series[]` | `{signal, role, unit, high}`：`role` 为 `indicator`（参与检验）或 `context`；`high` 是"高"的门槛，没有时取 48 小时内的 p90 |
 | `suspects[].logs[]` | 支持这个嫌疑项的日志事件 id |
+| `suspects[].logs_required` | `true` 时一次发生之前的窗口内必须出现 `logs` 中的事件，这次发生才支持该嫌疑项（用于只靠指标分不开的机制） |
 | `suspects[].code[]` | `{path, pattern, before, after, note}`：业务仓库中的路径与字面量模式，命中行前后各取若干行 |
 | `suspects[].fixes[]` | 业务代码的修复方向（文案） |
 | `suspects[].options[]` | 运维侧选项：`title`、`domain`（作用领域）、`impact`（影响范围）、`benefit`（收益）、`risk`（风险） |
 | `suspects[].references[]` | 业务仓库中已有的相关 issue 编号 |
-| `logs[]` | 日志事件：`id`、`message`（消息键的取值，精确匹配）、`format`（`json` 或 `logfmt`）、`message_key`、`fields[]`（`{name, type, as}`，类型为 `bytes`、`int`、`float`、`duration_ms`、`string`、`path`、`request_id`、`org_id`） |
+| `logs[]` | 日志事件：`id`、`message`（消息键的取值，精确匹配）、`format`（`json` 或 `logfmt`）、`message_key`、`fields[]`（`{name, type, as}`，类型为 `bytes`、`int`、`float`、`bool`、`duration_ms`、`string`、`path`、`request_id`、`org_id`）、可选的 `where`（字段等值条件，解析之后过滤） |
 | `identifiers.org` | 组织 id 的字段与保留的前缀长度 |
 | `top_requests` | 大请求的事件、排序字段、"大请求体"的字节门槛 |
 | `profiles` | 堆画像：事件、文件路径字段、文件名模式（RE2）、取出命令与分析命令的模板 |
@@ -340,6 +341,7 @@ bindings:
           series:
             - {signal: shop/archive_backlog_bytes, role: indicator, unit: bytes}
           logs: [attempts_exhausted]
+          logs_required: true
           code:
             - {path: internal/executor/retry.go, pattern: 'func retryConfig', before: 1, after: 10}
         - id: export-watchdog
@@ -367,7 +369,8 @@ bindings:
           fields:
             - {name: request_id, type: request_id}
             - {name: attempts, type: int}
-            - {name: retryable, type: string}
+            - {name: retryable, type: bool}
+          where: {retryable: false}
         - id: heap_profile
           message: heap_profile_captured
           format: json
@@ -417,7 +420,7 @@ bindings:
 
 对每个嫌疑项的每条 `indicator` 序列：
 
-1. **发生之前**：在 `[at − pre_window, at]` 上，`rise = X(at) − X(at − pre_window) > 0`，并且 `high` 有声明时 `max X ≥ high`；`corr` 为 X 与 M 的 Pearson 相关系数（至少 10 个点）。`rise` 且 `corr ≥ rise_corr` 时这次发生支持该嫌疑项。`[at − 2m, at]` 内 X 仍在上升时记 `last_minute`。
+1. **发生之前**：在 `[at − pre_window, at]` 上，`rise = X(at) − X(at − pre_window) > 0`，并且 `high` 有声明时 `max X ≥ high`；`corr` 为 X 与 M 的 Pearson 相关系数（至少 10 个点）。`rise` 且 `corr ≥ rise_corr`（`logs_required` 时还要求窗口内出现声明的日志事件）时这次发生支持该嫌疑项。`[at − 2m, at]` 内 X 仍在上升时记 `last_minute`。
 2. **48 小时**：工作负载全部 Pod 在 `[now − history, now]`、步长 `history_step` 的样本。`mem_high = M / L ≥ memory_high_ratio`；`x_high = X ≥ high`（没有声明时为 X 的 p90）。`support = P(mem_high | x_high)`，`lift = support / P(mem_high)`，`counter = 1 − support`（X 高而内存不高的样本比例，即反例）。`x_high` 的样本少于 `min_history_samples` 时为 `insufficient`。
 3. **先后**：`lead = max_k corr(X_t, M_{t+k})`，`lag = max_k corr(M_t, X_{t+k})`，k 为 1 到 3 个步长。`lag − lead ≥ reverse_margin` 且 `lag ≥ 0.5` 时记 `reverse`：X 跟在内存后面变化。
 4. **日志**：发生之前的窗口内，嫌疑项声明的日志事件（含上一次退出的日志）出现的次数。
