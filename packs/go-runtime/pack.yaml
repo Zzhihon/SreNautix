@@ -1,0 +1,11 @@
+# Go 运行时的信号（client_golang 的 Go collector 与 runtime/metrics）：存活堆、下一次 GC 的目标、GOMEMLIMIT、GC 占用的 CPU、
+# GOMAXPROCS。实体是 Pod 或工作负载，按 Pod 汇总；技能 oom-rootcause（ADR 0181）用它们判断存活堆是否贴着 GOMEMLIMIT。
+api_version: srenautix.io/pack/v1
+name: go-runtime
+version: 1.0.0
+description: Go 运行时：存活堆、next_gc、GOMEMLIMIT、GC CPU、GOMAXPROCS（按 Pod）
+maturity: beta
+min_srenautix_version: 0.1.0
+requires:
+  - metrics.query
+  - metrics.query_range

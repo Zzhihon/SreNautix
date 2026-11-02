@@ -512,6 +512,44 @@ signals:
           or (max by (container) (max_over_time(kube_pod_container_status_last_terminated_reason{$selector, reason="OOMKilled"}[30d])) > 0)
       - expr: max by (container) (increase(container_oom_events_total{$selector, container!=""}[30d])) > 0
       - expr: max by (container) (max_over_time(kube_pod_container_status_last_terminated_reason{$selector, reason="OOMKilled"}[30d])) > 0
+  # 技能 oom-rootcause（ADR 0181）的序列，按 Pod 与容器。
+  # 容器因 OOM 重启的时刻：重启计数在 rate 窗口内增加、最近一次终止的原因为 OOMKilled；区间查询中每段连续的点的第一个点是一次发生
+  - id: container_oom_restarts
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: >-
+          (sum by (namespace, pod, container) (increase(kube_pod_container_status_restarts_total{$selector}[$rate_window])) > 0)
+          and on (namespace, pod, container)
+          (max by (namespace, pod, container) (kube_pod_container_status_last_terminated_reason{$selector, reason="OOMKilled"}) == 1)
+      - expr: sum by (namespace, pod, container) (increase(container_oom_events_total{$selector, container!=""}[$rate_window])) > 0
+  - id: container_memory_rss
+    kind: metrics
+    unit: bytes
+    alternatives:
+      - expr: max by (namespace, pod, container) (container_memory_rss{$selector, container!="", container!="POD"})
+      - expr: max by (namespace, pod, container) (container_memory_working_set_bytes{$selector, container!="", container!="POD"})
+  - id: container_memory_limit
+    kind: metrics
+    unit: bytes
+    alternatives:
+      - expr: max by (namespace, pod, container) (kube_pod_container_resource_limits{$selector, resource="memory"})
+  - id: container_cpu_cores
+    kind: metrics
+    unit: none
+    alternatives:
+      - expr: sum by (namespace, pod, container) (rate(container_cpu_usage_seconds_total{$selector, container!="", container!="POD"}[$rate_window]))
+  # Pod 所在节点的可用内存比例
+  - id: pod_node_memory_available
+    kind: metrics
+    unit: ratio
+    alternatives:
+      - expr: >-
+          min by (namespace, pod) (
+            (max by (node) (node_memory_MemAvailable_bytes) / max by (node) (node_memory_MemTotal_bytes))
+            * on (node) group_right ()
+            (max by (namespace, pod, node) (kube_pod_info{$selector}) * 0 + 1)
+          )
   # 工作负载全部 Pod 的 request 总量（compute 领域的指标）
   - id: workload_cpu_requests_total
     kind: metrics

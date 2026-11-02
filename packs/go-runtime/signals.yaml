@@ -1,0 +1,29 @@
+# 同一个 Pod 里可能有多个 Go 容器暴露这些指标：按 Pod 取最大值
+signals:
+  - id: heap_inuse
+    kind: metrics
+    unit: bytes
+    alternatives:
+      - expr: max by (namespace, pod) (go_memstats_heap_inuse_bytes{$selector})
+  - id: next_gc
+    kind: metrics
+    unit: bytes
+    alternatives:
+      - expr: max by (namespace, pod) (go_memstats_next_gc_bytes{$selector})
+  # GOMEMLIMIT 没有设置时为 math.MaxInt64
+  - id: gomemlimit
+    kind: metrics
+    unit: bytes
+    alternatives:
+      - expr: max by (namespace, pod) (go_gc_gomemlimit_bytes{$selector} < 9.0e18)
+  # runtime/metrics 的 /cpu/classes/gc/total:cpu-seconds；client_golang 默认不导出，没有时技能用容器 CPU 代替
+  - id: gc_cpu_cores
+    kind: metrics
+    unit: none
+    alternatives:
+      - expr: max by (namespace, pod) (rate(go_cpu_classes_gc_total_cpu_seconds_total{$selector}[$rate_window]))
+  - id: gomaxprocs
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: max by (namespace, pod) (go_sched_gomaxprocs_threads{$selector})
