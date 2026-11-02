@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: SreNautix hub API
-  version: 2.44.0
+  version: 2.45.0
   license:
     name: Apache-2.0
     identifier: Apache-2.0
@@ -33,6 +33,7 @@ tags:
   - name: system
   - name: governance
   - name: optimization
+  - name: skills
 paths:
   /healthz:
     get:
@@ -2148,6 +2149,117 @@ paths:
                         title: { $ref: './schemas/evidence-card.schema.json#/$defs/LocalizedText' }
                         packs: { type: array, items: { type: string } }
                         indicators: { type: array, items: { $ref: './schemas/pack.schema.json#/$defs/IndicatorRef' } }
+  /v1/skill-host:
+    get:
+      tags: [skills]
+      operationId: getSkillHost
+      description: 宿主支持的清单版本、契约版本、能力与步骤类型（ADR 0181）
+      x-srenautix-roles: [viewer, responder, approver, auditor, admin]
+      x-srenautix-external: true
+      responses:
+        '200':
+          description: 宿主
+          content: { application/json: { schema: { $ref: './schemas/skill-run.schema.json#/$defs/SkillHost' } } }
+  /v1/skills:
+    get:
+      tags: [skills]
+      operationId: listSkills
+      description: 加载的技能与它们的状态、有效能力与最近一次加载的错误
+      x-srenautix-roles: [viewer, responder, approver, auditor, admin]
+      x-srenautix-external: true
+      responses:
+        '200':
+          description: 技能
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: './schemas/skill-run.schema.json#/$defs/SkillSummary' } }
+  /v1/skills/{name}:
+    parameters: [{ $ref: '#/components/parameters/SkillName' }]
+    get:
+      tags: [skills]
+      operationId: getSkill
+      x-srenautix-roles: [viewer, responder, approver, auditor, admin]
+      x-srenautix-external: true
+      responses:
+        '200':
+          description: 技能
+          content: { application/json: { schema: { $ref: './schemas/skill-run.schema.json#/$defs/SkillSummary' } } }
+        '404': { $ref: '#/components/responses/Error' }
+    patch:
+      tags: [skills]
+      operationId: patchSkill
+      description: 暂停或恢复技能；立即生效并写入治理审计，暂停期间不接受触发，手动运行返回 409
+      x-srenautix-roles: [admin]
+      x-srenautix-external: false
+      parameters: [{ $ref: '#/components/parameters/Csrf' }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: './schemas/skill-run.schema.json#/$defs/SkillPatch' } } }
+      responses:
+        '200':
+          description: 修改后的技能
+          content: { application/json: { schema: { $ref: './schemas/skill-run.schema.json#/$defs/SkillSummary' } } }
+        '400': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /v1/skills/{name}/runs:
+    parameters: [{ $ref: '#/components/parameters/SkillName' }]
+    get:
+      tags: [skills]
+      operationId: listSkillRuns
+      description: 技能的运行，按 created_at 从新到旧，最多 limit 条
+      x-srenautix-roles: [viewer, responder, approver, auditor, admin]
+      x-srenautix-external: true
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+      responses:
+        '200':
+          description: 运行
+          content:
+            application/json: { schema: { type: array, items: { $ref: './schemas/skill-run.schema.json' } } }
+        '404': { $ref: '#/components/responses/Error' }
+    post:
+      tags: [skills]
+      operationId: createSkillRun
+      description: |
+        手动运行：对象必须在技能与部署方的作用范围内，输入按清单的 inputs 校验；运行与触发产生的运行同样经过 settle、
+        coalesce 与每小时上限。同一对象已有等待中的运行时并入它并返回它
+      x-srenautix-roles: [responder, approver, admin]
+      x-srenautix-external: false
+      parameters: [{ $ref: '#/components/parameters/Csrf' }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: './schemas/skill-run.schema.json#/$defs/SkillRunCreate' } } }
+      responses:
+        '202':
+          description: 等待中的运行
+          content: { application/json: { schema: { $ref: './schemas/skill-run.schema.json' } } }
+        '400': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+  /v1/skill-runs/{run_id}:
+    parameters: [{ $ref: '#/components/parameters/RunId' }]
+    get:
+      tags: [skills]
+      operationId: getSkillRun
+      description: 运行明细：触发、输入、步骤、预算用量、每次外部访问与发现
+      x-srenautix-roles: [viewer, responder, approver, auditor, admin]
+      x-srenautix-external: true
+      responses:
+        '200':
+          description: 运行明细
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [run, calls, finding]
+                properties:
+                  run: { $ref: './schemas/skill-run.schema.json' }
+                  calls: { type: array, items: { $ref: './schemas/skill-run.schema.json#/$defs/SkillCall' } }
+                  finding:
+                    oneOf: [{ type: 'null' }, { $ref: './schemas/skill-run.schema.json#/$defs/SkillFinding' }]
+        '404': { $ref: '#/components/responses/Error' }
 components:
   securitySchemes:
     session:
@@ -2192,6 +2304,11 @@ components:
       in: path
       required: true
       schema: { $ref: './schemas/common.schema.json#/$defs/Uuid' }
+    SkillName:
+      name: name
+      in: path
+      required: true
+      schema: { type: string, pattern: '^[a-z][a-z0-9]*(-[a-z0-9]+)*$' }
     RecommendationId:
       name: recommendation_id
       in: path

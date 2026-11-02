@@ -1,0 +1,367 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://srenautix.io/contract/schemas/skill.schema.json",
+  "title": "SkillManifest",
+  "description": "技能的清单 skill.yaml（契约 2.45.0，ADR 0181）。技能目录只包含数据：清单、可选的 SKILL.md、绑定 schema（binding.schema.json）、输出模板（templates/<输出>.<语言>.md，Mustache）与测试（tests/）。步骤只能组合宿主内置、带版本的步骤类型；步骤的参数是常量或引用（SkillRef），技能里没有表达式语言与可执行内容。有效能力是清单声明的能力与部署方在 server 配置 skills.grants 中授予的能力的交集",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "api_version",
+    "name",
+    "version",
+    "title",
+    "description",
+    "maturity",
+    "min_srenautix_version",
+    "contract",
+    "inputs",
+    "binding",
+    "triggers",
+    "debounce",
+    "scope",
+    "capabilities",
+    "budgets",
+    "steps",
+    "outputs"
+  ],
+  "properties": {
+    "api_version": { "const": "srenautix.io/skill/v1" },
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$",
+      "maxLength": 63,
+      "description": "技能名：目录名、接口路径与指纹的一部分"
+    },
+    "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+    "title": { "$ref": "evidence-card.schema.json#/$defs/LocalizedText" },
+    "description": { "$ref": "evidence-card.schema.json#/$defs/LocalizedText" },
+    "maturity": { "type": "string", "enum": ["stable", "beta", "draft"] },
+    "min_srenautix_version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+    "contract": {
+      "type": "string",
+      "pattern": "^>=[0-9]+\\.[0-9]+\\.[0-9]+ <[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "description": "兼容的契约版本范围，形如 >=2.45.0 <3.0.0；宿主的契约版本不在范围内时不加载"
+    },
+    "params": {
+      "type": "object",
+      "description": "参数与默认值；部署方在 skills.params.<技能名> 覆盖，覆盖值的类型必须与默认值相同。时长写成 Duration 字符串",
+      "propertyNames": { "pattern": "^[a-z][a-z0-9_]*$" },
+      "additionalProperties": { "type": ["string", "number", "boolean"] }
+    },
+    "inputs": {
+      "type": "object",
+      "description": "运行输入的 JSON Schema（type: object）。触发产生的输入与手动运行的输入都按它校验；宿主另外给出运行对象 subject（namespace、kind、name）",
+      "required": ["type"],
+      "properties": { "type": { "const": "object" } }
+    },
+    "binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["required"],
+      "properties": {
+        "required": {
+          "type": "boolean",
+          "description": "true 时只在领域包 skill-bindings.yaml 绑定了的工作负载上运行"
+        },
+        "schema": {
+          "type": "string",
+          "const": "binding.schema.json",
+          "description": "绑定数据的 JSON Schema 文件；数据中名为 signal 的字符串属性必须是加载的领域包里的信号"
+        }
+      }
+    },
+    "triggers": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/SkillTrigger" } },
+    "debounce": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["settle", "coalesce"],
+      "properties": {
+        "settle": {
+          "$ref": "common.schema.json#/$defs/Duration",
+          "description": "第一次触发之后等待多久再运行；等待期间同一对象的触发并入这次运行"
+        },
+        "coalesce": {
+          "$ref": "common.schema.json#/$defs/Duration",
+          "description": "同一对象两次运行之间的最短间隔；间隔内的触发并入间隔结束时的一次运行"
+        }
+      }
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kinds"],
+      "properties": {
+        "kinds": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "enum": ["Deployment", "StatefulSet", "DaemonSet"] },
+          "description": "运行对象的种类；部署方在 skills.scope 进一步限定命名空间与种类"
+        }
+      }
+    },
+    "capabilities": {
+      "type": "object",
+      "description": "需要的能力与它们的参数；每个步骤类型需要的能力都必须在这里声明",
+      "propertyNames": { "$ref": "#/$defs/SkillCapability" },
+      "additionalProperties": { "$ref": "#/$defs/SkillCapabilityParams" }
+    },
+    "budgets": { "$ref": "#/$defs/SkillBudgets" },
+    "steps": { "type": "array", "minItems": 1, "maxItems": 40, "items": { "$ref": "#/$defs/SkillStep" } },
+    "outputs": { "$ref": "#/$defs/SkillOutputs" }
+  },
+  "$defs": {
+    "SkillCapability": {
+      "title": "SkillCapability",
+      "type": "string",
+      "description": "宿主提供的能力（ADR 0181 §7.1）。只有 issue.write 写入，范围是创建 issue、评论与读取 issue；没有写入集群、配置、Git 内容、PR、执行命令与读取 Secret 的能力",
+      "enum": ["metrics.query_range", "logs.query", "kube.read", "code.read", "issue.write"]
+    },
+    "SkillCapabilityParams": {
+      "title": "SkillCapabilityParams",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "objects": {
+          "type": "array",
+          "description": "kube.read：可以读取的对象",
+          "items": { "type": "string", "enum": ["pod_status", "events", "pod_logs_previous"] }
+        },
+        "max_lines": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20000,
+          "description": "logs.query：每次查询最多返回的行数"
+        },
+        "repo_role": {
+          "type": "string",
+          "enum": ["business", "ops"],
+          "description": "code.read、issue.write：GitHub App 的仓库角色"
+        }
+      }
+    },
+    "SkillTrigger": {
+      "title": "SkillTrigger",
+      "oneOf": [
+        { "$ref": "#/$defs/SkillMetricTrigger" },
+        { "$ref": "#/$defs/SkillAlertTrigger" },
+        { "$ref": "#/$defs/SkillKubeTrigger" },
+        { "$ref": "#/$defs/SkillManualTrigger" }
+      ]
+    },
+    "SkillMetricTrigger": {
+      "title": "SkillMetricTrigger",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "signal", "window"],
+      "description": "领域包信号：宿主每 interval 在作用范围内的工作负载上执行一次瞬时查询（$window 为 window），每条满足 condition 的序列按 Pod 解析出工作负载；for 给出时，最近 for 的每个点都要满足",
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+        "kind": { "const": "metric" },
+        "signal": { "type": "string", "description": "<pack>/<signal>，metrics 信号" },
+        "window": { "$ref": "common.schema.json#/$defs/Duration" },
+        "interval": { "$ref": "common.schema.json#/$defs/Duration", "default": "60s" },
+        "condition": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["op", "value"],
+          "properties": {
+            "op": { "type": "string", "enum": ["gt", "ge", "lt", "le"] },
+            "value": { "description": "数值或参数引用 {param: <名>}" }
+          }
+        },
+        "for": { "description": "Duration，或参数引用 {param: <名>}" }
+      }
+    },
+    "SkillAlertTrigger": {
+      "title": "SkillAlertTrigger",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "matchers"],
+      "description": "告警开始触发时：标签全部匹配（每个标签取值之一）的告警，按 namespace 与 pod、statefulset、deployment、daemonset 标签解析出工作负载",
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+        "kind": { "const": "alert" },
+        "matchers": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": { "type": "array", "minItems": 1, "items": { "type": "string" } }
+        }
+      }
+    },
+    "SkillKubeTrigger": {
+      "title": "SkillKubeTrigger",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "match"],
+      "description": "server 的 informer 缓存中 Pod 状态的变化（topology.source 为 informer 时可用）：容器以声明的原因终止（lastState.terminated.reason），或 Pod 以声明的原因结束（status.reason，例如 Evicted）",
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+        "kind": { "const": "kube" },
+        "match": {
+          "type": "object",
+          "additionalProperties": false,
+          "minProperties": 1,
+          "properties": {
+            "terminated_reasons": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+            "pod_reasons": { "type": "array", "minItems": 1, "items": { "type": "string" } }
+          }
+        }
+      }
+    },
+    "SkillManualTrigger": {
+      "title": "SkillManualTrigger",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind"],
+      "description": "POST /v1/skills/{name}/runs",
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+        "kind": { "const": "manual" }
+      }
+    },
+    "SkillBudgets": {
+      "title": "SkillBudgets",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["run", "hourly"],
+      "properties": {
+        "run": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "duration",
+            "metrics_queries",
+            "logs_queries",
+            "log_lines",
+            "kube_reads",
+            "github_requests",
+            "code_files",
+            "code_bytes"
+          ],
+          "description": "每次运行的上限，与 skills.limits 取较小者；超出时运行以 budget_exhausted 结束",
+          "properties": {
+            "duration": { "$ref": "common.schema.json#/$defs/Duration" },
+            "metrics_queries": { "type": "integer", "minimum": 0, "maximum": 2000 },
+            "logs_queries": { "type": "integer", "minimum": 0, "maximum": 500 },
+            "log_lines": { "type": "integer", "minimum": 0, "maximum": 100000 },
+            "kube_reads": { "type": "integer", "minimum": 0, "maximum": 200 },
+            "github_requests": { "type": "integer", "minimum": 0, "maximum": 1000 },
+            "code_files": { "type": "integer", "minimum": 0, "maximum": 200 },
+            "code_bytes": { "type": "integer", "minimum": 0, "maximum": 8388608 }
+          }
+        },
+        "hourly": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["runs", "issues", "comments"],
+          "description": "每个技能在滑动 1 小时窗口内的上限；新开 issue 另受同一仓库的 issues.max_per_hour 约束",
+          "properties": {
+            "runs": { "type": "integer", "minimum": 1, "maximum": 100 },
+            "issues": { "type": "integer", "minimum": 0, "maximum": 20 },
+            "comments": { "type": "integer", "minimum": 0, "maximum": 100 }
+          }
+        }
+      }
+    },
+    "SkillStep": {
+      "title": "SkillStep",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "uses"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+        "uses": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*@v[0-9]+$",
+          "description": "步骤类型与版本，例如 metrics.range@v1；宿主支持的类型见 GET /v1/skill-host"
+        },
+        "needs": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "依赖的步骤；with 与 when 引用的步骤都必须列在这里"
+        },
+        "when": {
+          "description": "引用（SkillRef）；成立（true、非空数组、非空字符串、非零数）时执行，否则记为 skipped"
+        },
+        "optional": {
+          "type": "boolean",
+          "default": false,
+          "description": "数据源错误时不终止运行：这一步记为 failed，输出为步骤类型的空值。能力、作用范围与预算的拒绝总是终止运行"
+        },
+        "with": {
+          "type": "object",
+          "description": "步骤类型的参数；值是常量或引用（SkillRef），引用可以出现在任意层级"
+        }
+      }
+    },
+    "SkillRef": {
+      "title": "SkillRef",
+      "description": "引用：恰好一个键的对象（step 可以另带 field）。param 取参数，input 取运行输入，binding 取绑定数据（点分路径），step 取步骤输出（field 为点分路径）",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["param"],
+          "properties": { "param": { "type": "string" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["input"],
+          "properties": { "input": { "type": "string" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["binding"],
+          "properties": { "binding": { "type": "string" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["step"],
+          "properties": { "step": { "type": "string" }, "field": { "type": "string" } }
+        }
+      ]
+    },
+    "SkillOutputs": {
+      "title": "SkillOutputs",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fingerprint", "issue"],
+      "properties": {
+        "fingerprint": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "description": "参与指纹的值（常量或引用）；指纹 = sha256(技能名, 集群, 这些值)",
+          "items": {}
+        },
+        "issue": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["title", "templates", "comment_templates", "labels"],
+          "properties": {
+            "title": {
+              "$ref": "evidence-card.schema.json#/$defs/LocalizedText",
+              "description": "Mustache 模板，与正文同样的变量"
+            },
+            "templates": { "$ref": "#/$defs/SkillTemplates" },
+            "comment_templates": { "$ref": "#/$defs/SkillTemplates" },
+            "labels": { "description": "标签列表（常量或引用）；宿主另加 srenautix 与 srenautix:<技能名>" }
+          }
+        }
+      }
+    },
+    "SkillTemplates": {
+      "title": "SkillTemplates",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["zh-CN", "en"],
+      "properties": {
+        "zh-CN": { "type": "string", "pattern": "^templates/[a-z0-9][A-Za-z0-9_.-]*\\.md$" },
+        "en": { "type": "string", "pattern": "^templates/[a-z0-9][A-Za-z0-9_.-]*\\.md$" }
+      }
+    }
+  }
+}

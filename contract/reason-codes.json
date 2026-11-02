@@ -43,6 +43,10 @@
     "feedback": {
       "stage": "feedback",
       "description": "人工反馈与隐式反馈的原因（feedback.schema.json 的 ReasonCode，ADR 0174）"
+    },
+    "skill_run": {
+      "stage": "skill",
+      "description": "技能运行的终态原因（skill-run.schema.json 的 SkillRunReason，ADR 0181）"
     }
   },
   "codes": [
@@ -764,6 +768,101 @@
       "level": "info",
       "groups": ["feedback"],
       "text": { "zh-CN": "其他", "en": "other" }
+    },
+    {
+      "code": "published",
+      "stage": "skill",
+      "level": "info",
+      "groups": ["skill_run"],
+      "text": { "zh-CN": "结果写成新 issue", "en": "result written as a new issue" }
+    },
+    {
+      "code": "commented",
+      "stage": "skill",
+      "level": "info",
+      "groups": ["skill_run"],
+      "text": {
+        "zh-CN": "同一根因的 issue 打开着，结果追加为评论",
+        "en": "an issue for the same root cause is open; result added as a comment"
+      }
+    },
+    {
+      "code": "counted",
+      "stage": "skill",
+      "level": "info",
+      "groups": ["skill_run"],
+      "text": {
+        "zh-CN": "同一根因的 issue 以 not planned 关闭，冷却期内只计数",
+        "en": "the issue for the same root cause was closed as not planned; counted during the cooldown"
+      }
+    },
+    {
+      "code": "no_occurrence",
+      "stage": "skill",
+      "level": "info",
+      "groups": ["skill_run"],
+      "text": { "zh-CN": "窗口内没有找到需要排查的发生", "en": "no occurrence to investigate in the window" }
+    },
+    {
+      "code": "budget_exhausted",
+      "stage": "skill",
+      "level": "warning",
+      "groups": ["skill_run"],
+      "text": { "zh-CN": "超出运行预算，结果没有投递", "en": "run budget exceeded; nothing delivered" }
+    },
+    {
+      "code": "capability_denied",
+      "stage": "skill",
+      "level": "error",
+      "groups": ["skill_run"],
+      "text": {
+        "zh-CN": "访问超出授予的能力或作用范围，请求没有发出",
+        "en": "access beyond the granted capabilities or scope; the request was not sent"
+      }
+    },
+    {
+      "code": "datasource_error",
+      "stage": "skill",
+      "level": "warning",
+      "groups": ["skill_run"],
+      "text": {
+        "zh-CN": "数据源报错，必需的步骤没有完成",
+        "en": "a datasource failed and a required step did not complete"
+      }
+    },
+    {
+      "code": "binding_missing",
+      "stage": "skill",
+      "level": "warning",
+      "groups": ["skill_run"],
+      "text": { "zh-CN": "运行对象没有领域包的绑定", "en": "the subject has no pack binding" }
+    },
+    {
+      "code": "unavailable",
+      "stage": "skill",
+      "level": "warning",
+      "groups": ["skill_run"],
+      "text": {
+        "zh-CN": "技能已暂停、没有启用、缺少授权或已卸载",
+        "en": "the skill is paused, not enabled, missing a grant or unloaded"
+      }
+    },
+    {
+      "code": "interrupted",
+      "stage": "skill",
+      "level": "warning",
+      "groups": ["skill_run"],
+      "text": {
+        "zh-CN": "server 重启或失去主实例身份，运行中断",
+        "en": "interrupted by a server restart or loss of leadership"
+      }
+    },
+    {
+      "code": "step_failed",
+      "stage": "skill",
+      "level": "error",
+      "groups": ["skill_run"],
+      "text": { "zh-CN": "步骤的输入或输出不合法", "en": "a step had invalid input or output" }
     }
   ]
 }

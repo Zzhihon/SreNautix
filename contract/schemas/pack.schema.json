@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://srenautix.io/contract/schemas/pack.schema.json",
   "title": "PackManifest",
-  "description": "领域包的 pack.yaml（DESIGN §6.3）。领域包只包含数据，不包含可执行代码；其余文件的结构见本文件的 $defs：signals.yaml → SignalsFile，components.yaml → ComponentsFile，alerts.yaml → AlertsFile，chains.yaml → ChainsFile，checks.yaml → ChecksFile，rules.yaml → RulesFile，conclusions.yaml → ConclusionsFile，remediations.yaml → RemediationsFile，domains.yaml → DomainsFile，issues.yaml → IssuesFile，rca-params.yaml → RcaParams，knowledge/*.yaml → KnowledgeFile，action-requests.yaml → ActionRequestsFile，chaos/*.yaml → ChaosFile，tests/*.yaml → PackTestFile，用户层文件 → UserLayer，pack.lock → PackLock",
+  "description": "领域包的 pack.yaml（DESIGN §6.3）。领域包只包含数据，不包含可执行代码；其余文件的结构见本文件的 $defs：signals.yaml → SignalsFile，components.yaml → ComponentsFile，alerts.yaml → AlertsFile，chains.yaml → ChainsFile，checks.yaml → ChecksFile，rules.yaml → RulesFile，conclusions.yaml → ConclusionsFile，remediations.yaml → RemediationsFile，domains.yaml → DomainsFile，issues.yaml → IssuesFile，skill-bindings.yaml → SkillBindingsFile，rca-params.yaml → RcaParams，knowledge/*.yaml → KnowledgeFile，action-requests.yaml → ActionRequestsFile，chaos/*.yaml → ChaosFile，tests/*.yaml → PackTestFile，用户层文件 → UserLayer，pack.lock → PackLock",
   "type": "object",
   "additionalProperties": false,
   "required": ["api_version", "name", "version", "maturity", "requires"],
@@ -1128,6 +1128,46 @@
         }
       }
     },
+    "SkillBindingsFile": {
+      "title": "SkillBindingsFile",
+      "description": "skill-bindings.yaml（契约 2.45.0，ADR 0181 §5）：领域包给技能提供的部署方数据（指标信号、日志事件、代码路径提示、运维选项）。data 按技能的 binding.schema.json 校验；(技能, id) 在全部加载的包中唯一，一个工作负载对同一技能最多一个绑定",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["bindings"],
+      "properties": {
+        "bindings": { "type": "array", "items": { "$ref": "#/$defs/SkillBinding" } }
+      }
+    },
+    "SkillBinding": {
+      "title": "SkillBinding",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["skill", "id", "workloads", "data"],
+      "properties": {
+        "skill": { "type": "string", "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$" },
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$",
+          "description": "绑定 id，进入技能输出的指纹"
+        },
+        "workloads": {
+          "type": "array",
+          "minItems": 1,
+          "description": "绑定的工作负载",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "namespace", "name"],
+            "properties": {
+              "kind": { "type": "string", "enum": ["Deployment", "StatefulSet", "DaemonSet"] },
+              "namespace": { "type": "string", "minLength": 1 },
+              "name": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        "data": { "type": "object" }
+      }
+    },
     "RcaParams": {
       "title": "RcaParams",
       "description": "根因排序参数（DESIGN §5）。修改需要通过回放门禁",
@@ -1239,7 +1279,7 @@
         },
         "disable": {
           "type": "array",
-          "description": "禁用的条目：alerts/<id>、chains/<id>、chains/<id>/<card>、checks/<id>、rules/<id>、conclusions/<id>、domains/<id>、domains/<id>/<诊断卡或份额卡 id>、indicators/<id>、issues/<id>",
+          "description": "禁用的条目：alerts/<id>、chains/<id>、chains/<id>/<card>、checks/<id>、rules/<id>、conclusions/<id>、domains/<id>、domains/<id>/<诊断卡或份额卡 id>、indicators/<id>、issues/<id>、skill_bindings/<id>",
           "items": { "type": "string" }
         },
         "patch": {
