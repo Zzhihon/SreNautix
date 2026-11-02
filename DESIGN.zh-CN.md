@@ -283,6 +283,7 @@
 | `rules.yaml` | 确定性规则提议，例如"卡住的 Pod"，只能引用目录中已有的动作 |
 | `conclusions.yaml` | 确定性结论规则：证据卡、告警与变更的条件全部成立时给出根因候选与机制（ADR 0178） |
 | `rca-params.yaml` | 根因排序参数 |
+| `skill-bindings.yaml` | 给技能的部署方数据：指标信号、日志事件、代码路径提示与运维选项（ADR 0181） |
 | `runbooks/*.md` | runbook |
 | `knowledge/*.yaml` | 知识条目，带 `learned_from` |
 | `prompts/*.md` | 提示词片段，低信任 |
@@ -304,7 +305,7 @@
 
 | 类别 | 包 |
 |---|---|
-| 告警与平台 | `alerts-kps`、`kubernetes-core`、`node`、`workload`、`pvc`、`observability-self`、`cert-manager` |
+| 告警与平台 | `alerts-kps`、`kubernetes-core`、`node`、`workload`、`go-runtime`、`pvc`、`observability-self`、`cert-manager` |
 | 数据库与中间件 | `postgres`、`redis`、`mysql`、`kafka`、`rocketmq`、`nacos` |
 | 入口 | `ingress-nginx`、`envoy-gateway` |
 | 变更 | `argocd`、`flux` |
@@ -323,6 +324,10 @@
 **迁移旧判定**：从命令式判定（例如参考集群原有的 TypeScript 判定）迁移时，在夹具和回放种子上新旧两套并行运行，结论一致后才切换。
 
 **参考集群也必须按这种方式运行**：内置包加参考集群的用户包，并公开这个用户包的行数。
+
+### 6.4 技能
+
+技能（ADR 0181）是"遇到某种信号就按固定步骤排查、把结果写成 issue"的过程：一个只含数据的目录（清单、绑定 schema、模板、测试），组合宿主内置、带版本的步骤类型。来源为镜像内置与 Git 同步的 ConfigMap 目录，每 60 秒重新加载，失败时保留上一个可用版本。运行只经部署方授予的能力访问外部系统（指标与日志查询、Kubernetes 只读、业务代码只读、issue 的创建与评论），每次访问都检查能力、运行对象与预算并留下记录，结果按指纹去重。部署方的数据在领域包的 `skill-bindings.yaml`。第一个技能是内存终止根因（`oom-rootcause`）。说明见 `docs/skills/`。
 
 ## 7. 研判
 
@@ -1234,6 +1239,7 @@ SreNautix/                         服务端代码 AGPL-3.0-or-later；标注 [A
 ├── web/console/                   控制台前端
 ├── plugins/grafana-app/           [Apache] Grafana 嵌入
 ├── packs/                         [Apache] 内置领域包
+├── skills/                        [Apache] 内置技能
 ├── integrations/                  核心级与官方级集成的清单与夹具
 ├── eval/                          scenarios/  cases/  reports/
 ├── test/invariants/
@@ -1248,7 +1254,7 @@ SreNautix/                         服务端代码 AGPL-3.0-or-later；标注 [A
 **许可**
 
 - 服务端代码使用 AGPL-3.0-or-later。
-- `contract/`、`packages/{packs-sdk,integration-sdk,ui,contract}`、`plugins/`、`packs/` 使用 Apache-2.0。
+- `contract/`、`packages/{packs-sdk,integration-sdk,ui,contract}`、`plugins/`、`packs/`、`skills/` 使用 Apache-2.0。
 - 服务端代码的贡献者签署 CLA；Apache-2.0 目录只要求 DCO（`Signed-off-by`）。
 
 ## 19. 版本与兼容
