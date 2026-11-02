@@ -181,6 +181,17 @@ steps:
       events: { binding: data.logs }
       identifiers: { binding: data.identifiers }
 
+  # 上一次退出的容器日志里写出堆画像路径的那一行（终止前最后一份画像）；只按画像事件提取，与 data.logs 是否声明它无关
+  - id: previous_profiles
+    uses: logs.extract@v1
+    needs: [previous]
+    optional: true
+    when: { binding: data.profiles }
+    with:
+      logs: { step: previous, field: logs }
+      events: [{ binding: data.profiles.log }]
+      identifiers: { binding: data.identifiers }
+
   - id: kind
     uses: analyze.memory_kind@v1
     needs: [occ, status, events, around]
@@ -260,10 +271,10 @@ steps:
 
   - id: profiles
     uses: analyze.profiles@v1
-    needs: [profile_logs, previous_events]
+    needs: [profile_logs, previous_profiles]
     when: { binding: data.profiles }
     with:
-      logs: [{ step: profile_logs }, { step: previous_events }]
+      logs: [{ step: profile_logs }, { step: previous_profiles }]
       profiles: { binding: data.profiles }
       limit_per_pod: { param: max_profiles }
       container: { binding: data.container }
