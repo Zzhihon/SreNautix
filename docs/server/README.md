@@ -28,6 +28,7 @@ flowchart LR
 | [audit.md](audit.md) | 治理审计链的格式、导出与校验 |
 | [notify.md](notify.md) | 消息模型、发送队列与限流、风暴、按钮、Telegram 与飞书的配置 |
 | [optimization.md](optimization.md) | 主动优化（ADR 0146）：目标运行、dbstats、建议的投递、验证循环、查询上限与负载保护、与 ADR 的差异 |
+| [../skills/README.zh-CN.md](../skills/README.zh-CN.md) | 技能（ADR 0181）：清单、绑定、部署、运行与排查 |
 | ADR 0040–0044 | 状态库与事件流、阶段 B 队列、通知队列、降级通道、审批断言签发 |
 
 ## 数据库
