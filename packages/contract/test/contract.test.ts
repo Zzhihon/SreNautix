@@ -119,6 +119,15 @@ describe('原因码登记表（ADR 0172）', () => {
     );
   });
 
+  it('技能运行的原因码与 SkillRunReason 相同，阶段 skill 只有这一个分组（ADR 0181）', () => {
+    expect(group('skill_run')).toEqual(schemaEnum('schemas/skill-run.schema.json', '/$defs/SkillRunReason'));
+    const stage = registry.codes
+      .filter((e) => e.stage === 'skill')
+      .map((e) => e.code)
+      .sort();
+    expect(stage).toEqual(group('skill_run'));
+  });
+
   it('通知放弃的原因是渠道永久错误加上编辑次数用完', () => {
     expect(group('notify_abandon')).toEqual([...group('notify_permanent'), 'ended_edit_cap'].sort());
   });

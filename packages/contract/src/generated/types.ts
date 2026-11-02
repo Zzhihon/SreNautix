@@ -571,9 +571,10 @@ export type Duration6 = string;
  */
 export type AlertRole1 = 'cause' | 'change' | 'symptom' | 'forecast' | 'meta';
 /**
- * 原因码所属的阶段：notify 通知；stage_a 阶段 A；research 阶段 B 研判与入队；remediation 自愈 PR；issue 事件 issue；incident 事件状态；feedback 人工反馈与隐式反馈（ADR 0174）
+ * 原因码所属的阶段：notify 通知；stage_a 阶段 A；research 阶段 B 研判与入队；remediation 自愈 PR；issue 事件 issue；incident 事件状态；feedback 人工反馈与隐式反馈（ADR 0174）；skill 技能的运行（ADR 0181）
  */
-export type ReasonStage = 'notify' | 'stage_a' | 'research' | 'remediation' | 'issue' | 'incident' | 'feedback';
+export type ReasonStage =
+  'notify' | 'stage_a' | 'research' | 'remediation' | 'issue' | 'incident' | 'feedback' | 'skill';
 /**
  * info 正常的终态；warning 需要留意但有其他告警或条件覆盖；error 不应发生的终态，SreNautixAbnormalTerminalStates 按它告警
  */
@@ -587,6 +588,67 @@ export type EgressCategory =
  * local 仓库声明的组件自身的运行状态；configuration 仓库声明的组件的配置、资源或参数，或经管理它的 GitOps 应用生效的发布与清单变更；downstream 调用方或消费方；upstream 被依赖的服务方（集群外部的服务方、其他团队的服务）；infrastructure 节点、存储、网络等基础设施；unknown 无法判断
  */
 export type CauseScope1 = 'local' | 'configuration' | 'downstream' | 'upstream' | 'infrastructure' | 'unknown';
+/**
+ * pending 等待 settle、coalesce 或每小时上限；running 执行中；succeeded 完成；failed 失败（reason 写明原因）
+ */
+export type SkillRunState = 'pending' | 'running' | 'succeeded' | 'failed';
+/**
+ * 运行的终态原因，登记在原因码表的 skill_run 分组（阶段 skill）
+ */
+export type SkillRunReason =
+  | 'published'
+  | 'commented'
+  | 'counted'
+  | 'no_occurrence'
+  | 'budget_exhausted'
+  | 'capability_denied'
+  | 'datasource_error'
+  | 'binding_missing'
+  | 'unavailable'
+  | 'interrupted'
+  | 'step_failed';
+/**
+ * 宿主提供的能力（ADR 0181 §7.1）。只有 issue.write 写入，范围是创建 issue、评论与读取 issue；没有写入集群、配置、Git 内容、PR、执行命令与读取 Secret 的能力
+ */
+export type SkillCapability = 'metrics.query_range' | 'logs.query' | 'kube.read' | 'code.read' | 'issue.write';
+/**
+ * active 运行中；paused 被暂停；not_enabled 不在 skills.enabled 中；missing_grant 清单要求的能力没有被授予；load_failed 没有可用的版本
+ */
+export type SkillState = 'active' | 'paused' | 'not_enabled' | 'missing_grant' | 'load_failed';
+/**
+ * RFC 3339 UTC 时间
+ */
+export type Timestamp6 = string;
+export type SkillTrigger = SkillMetricTrigger | SkillAlertTrigger | SkillKubeTrigger | SkillManualTrigger;
+/**
+ * Prometheus 风格的时长，例如 30s、5m、2h、7d
+ */
+export type Duration7 = string;
+/**
+ * Prometheus 风格的时长，例如 30s、5m、2h、7d
+ */
+export type Duration8 = string;
+/**
+ * Prometheus 风格的时长，例如 30s、5m、2h、7d
+ */
+export type Duration9 = string;
+/**
+ * 引用：恰好一个键的对象（step 可以另带 field）。param 取参数，input 取运行输入，binding 取绑定数据（点分路径），step 取步骤输出（field 为点分路径）
+ */
+export type SkillRef =
+  | {
+      param: string;
+    }
+  | {
+      input: string;
+    }
+  | {
+      binding: string;
+    }
+  | {
+      step: string;
+      field?: string;
+    };
 
 export interface SrenautixContractIndex {
   ActionCatalog?: ActionCatalog;
@@ -854,6 +916,8 @@ export interface SrenautixContractIndex {
   Guard?: Guard;
   IssuesFile?: IssuesFile;
   IssueTemplate?: IssueTemplate;
+  SkillBindingsFile?: SkillBindingsFile;
+  SkillBinding?: SkillBinding;
   RcaParams?: RcaParams;
   KnowledgeFile?: KnowledgeFile;
   ActionRequestsFile?: ActionRequestsFile;
@@ -893,6 +957,33 @@ export interface SrenautixContractIndex {
   NextCheck?: NextCheck;
   Recommendation?: Recommendation;
   ProposalDraft?: ProposalDraft;
+  SkillRun?: SkillRun;
+  SkillRunState?: SkillRunState;
+  SkillRunReason?: SkillRunReason;
+  SkillSubject?: SkillSubject;
+  SkillTriggerHit?: SkillTriggerHit;
+  SkillStepRecord?: SkillStepRecord;
+  SkillUsage?: SkillUsage;
+  SkillCall?: SkillCall;
+  SkillState?: SkillState;
+  SkillSummary?: SkillSummary;
+  SkillFinding?: SkillFinding;
+  SkillRunCreate?: SkillRunCreate;
+  SkillPatch?: SkillPatch;
+  SkillHost?: SkillHost;
+  SkillManifest?: SkillManifest;
+  SkillCapability?: SkillCapability;
+  SkillCapabilityParams?: SkillCapabilityParams;
+  SkillTrigger?: SkillTrigger;
+  SkillMetricTrigger?: SkillMetricTrigger;
+  SkillAlertTrigger?: SkillAlertTrigger;
+  SkillKubeTrigger?: SkillKubeTrigger;
+  SkillManualTrigger?: SkillManualTrigger;
+  SkillBudgets?: SkillBudgets;
+  SkillStep?: SkillStep;
+  SkillRef?: SkillRef;
+  SkillOutputs?: SkillOutputs;
+  SkillTemplates?: SkillTemplates;
   StageAReport?: StageAReport;
   RuleConclusion?: RuleConclusion;
   TopologyEvent?: TopologyEvent;
@@ -2632,7 +2723,7 @@ export interface ConditionDirectionsType {
  */
 export interface Condition {
   /**
-   * server、worker 等角色的条件；InformersFresh、TunnelConnected、QueryManifest、Datasource、AlertReconcile 由分支 reader 的心跳转来（role 为 reader，见 gateway/v1/reader.openapi.yaml 的 ReaderCondition），ClockSkew 两边都有。NotifyAbandoned（契约 2.39.0，ADR 0173）：最近 1 小时内某个渠道放弃投递了消息内容，subject 为渠道。控制台必须容忍以后新增的类型
+   * server、worker 等角色的条件；InformersFresh、TunnelConnected、QueryManifest、Datasource、AlertReconcile 由分支 reader 的心跳转来（role 为 reader，见 gateway/v1/reader.openapi.yaml 的 ReaderCondition），ClockSkew 两边都有。NotifyAbandoned（契约 2.39.0，ADR 0173）：最近 1 小时内某个渠道放弃投递了消息内容，subject 为渠道。SkillLoadFailed、SkillCapabilityMissing（契约 2.45.0，ADR 0181）：技能的最新内容没有通过校验（旧版本继续运行），或清单要求的能力没有被授予，subject 为技能名。控制台必须容忍以后新增的类型
    */
   type:
     | 'IngestSilent'
@@ -2654,7 +2745,9 @@ export interface Condition {
     | 'TunnelConnected'
     | 'QueryManifest'
     | 'Datasource'
-    | 'AlertReconcile';
+    | 'AlertReconcile'
+    | 'SkillLoadFailed'
+    | 'SkillCapabilityMissing';
   /**
    * true 表示该问题正在发生
    */
@@ -5401,7 +5494,7 @@ export interface IntegrationManifest {
   deployment_reports?: string[];
 }
 /**
- * 领域包的 pack.yaml（DESIGN §6.3）。领域包只包含数据，不包含可执行代码；其余文件的结构见本文件的 $defs：signals.yaml → SignalsFile，components.yaml → ComponentsFile，alerts.yaml → AlertsFile，chains.yaml → ChainsFile，checks.yaml → ChecksFile，rules.yaml → RulesFile，conclusions.yaml → ConclusionsFile，remediations.yaml → RemediationsFile，domains.yaml → DomainsFile，issues.yaml → IssuesFile，rca-params.yaml → RcaParams，knowledge/*.yaml → KnowledgeFile，action-requests.yaml → ActionRequestsFile，chaos/*.yaml → ChaosFile，tests/*.yaml → PackTestFile，用户层文件 → UserLayer，pack.lock → PackLock
+ * 领域包的 pack.yaml（DESIGN §6.3）。领域包只包含数据，不包含可执行代码；其余文件的结构见本文件的 $defs：signals.yaml → SignalsFile，components.yaml → ComponentsFile，alerts.yaml → AlertsFile，chains.yaml → ChainsFile，checks.yaml → ChecksFile，rules.yaml → RulesFile，conclusions.yaml → ConclusionsFile，remediations.yaml → RemediationsFile，domains.yaml → DomainsFile，issues.yaml → IssuesFile，skill-bindings.yaml → SkillBindingsFile，rca-params.yaml → RcaParams，knowledge/*.yaml → KnowledgeFile，action-requests.yaml → ActionRequestsFile，chaos/*.yaml → ChaosFile，tests/*.yaml → PackTestFile，用户层文件 → UserLayer，pack.lock → PackLock
  */
 export interface PackManifest {
   api_version: 'srenautix.io/pack/v1';
@@ -6389,6 +6482,37 @@ export interface LocalizedText11 {
   en?: string;
 }
 /**
+ * skill-bindings.yaml（契约 2.45.0，ADR 0181 §5）：领域包给技能提供的部署方数据（指标信号、日志事件、代码路径提示、运维选项）。data 按技能的 binding.schema.json 校验；(技能, id) 在全部加载的包中唯一，一个工作负载对同一技能最多一个绑定
+ */
+export interface SkillBindingsFile {
+  bindings: SkillBinding[];
+}
+export interface SkillBinding {
+  skill: string;
+  /**
+   * 绑定 id，进入技能输出的指纹
+   */
+  id: string;
+  /**
+   * 绑定的工作负载
+   *
+   * @minItems 1
+   */
+  workloads: [
+    {
+      kind: 'Deployment' | 'StatefulSet' | 'DaemonSet';
+      namespace: string;
+      name: string;
+    },
+    ...{
+      kind: 'Deployment' | 'StatefulSet' | 'DaemonSet';
+      namespace: string;
+      name: string;
+    }[],
+  ];
+  data: {};
+}
+/**
  * 根因排序参数（DESIGN §5）。修改需要通过回放门禁
  */
 export interface RcaParams {
@@ -6462,7 +6586,7 @@ export interface PackUserLayer {
       | undefined;
   };
   /**
-   * 禁用的条目：alerts/<id>、chains/<id>、chains/<id>/<card>、checks/<id>、rules/<id>、conclusions/<id>、domains/<id>、domains/<id>/<诊断卡或份额卡 id>、indicators/<id>、issues/<id>
+   * 禁用的条目：alerts/<id>、chains/<id>、chains/<id>/<card>、checks/<id>、rules/<id>、conclusions/<id>、domains/<id>、domains/<id>/<诊断卡或份额卡 id>、indicators/<id>、issues/<id>、skill_bindings/<id>
    */
   disable?: string[];
   patch?: {
@@ -6974,6 +7098,414 @@ export interface EgressEntry {
   };
   redaction_hits: number;
   bytes: number;
+}
+/**
+ * 技能的一次运行（契约 2.45.0，ADR 0181 §7）：触发、输入、每个步骤的记录、预算用量、结果与原因码。每次外部访问另记一行 SkillCall
+ */
+export interface SkillRun {
+  run_id: Uuid;
+  cluster_id: ClusterId;
+  skill: string;
+  /**
+   * 开始运行时加载的版本；还没有开始时为 null
+   */
+  version: string | null;
+  /**
+   * 开始运行时技能目录的内容摘要
+   */
+  digest: string | null;
+  subject: SkillSubject;
+  triggers: SkillTriggerHit[];
+  inputs: {};
+  state: SkillRunState;
+  reason: null | SkillRunReason;
+  /**
+   * 手动运行的主体或调用方；触发产生的运行为 null
+   */
+  requested_by: string | null;
+  /**
+   * 参考时刻：步骤的窗口都以它为终点；为 null 时取开始运行的时刻
+   */
+  at: null | Timestamp;
+  not_before: Timestamp;
+  created_at: Timestamp;
+  started_at: null | Timestamp;
+  finished_at: null | Timestamp;
+  steps: SkillStepRecord[];
+  usage: SkillUsage;
+  finding: null | {
+    fingerprint: string;
+    generation: number;
+    /**
+     * open 开新 issue；comment 在打开的 issue 下评论；counted 关闭为 not planned、冷却期内只计数
+     */
+    action: 'open' | 'comment' | 'counted';
+  };
+  error: string | null;
+}
+export interface SkillSubject {
+  kind: 'Deployment' | 'StatefulSet' | 'DaemonSet';
+  namespace: string;
+  name: string;
+}
+export interface SkillTriggerHit {
+  /**
+   * 清单中的触发 id
+   */
+  trigger: string;
+  kind: 'metric' | 'alert' | 'kube' | 'manual';
+  at: Timestamp;
+  /**
+   * 触发的对象与取值，例如 Pod 与容器、告警名
+   */
+  detail: string;
+  pod?: string | null;
+  container?: string | null;
+  /**
+   * kube 触发：oom_killed 或 evicted；指标触发：near_limit（触发的信号与 trigger.occurrences 的信号不同时）
+   */
+  cause?: 'oom_killed' | 'evicted' | 'near_limit' | null;
+}
+export interface SkillStepRecord {
+  id: string;
+  uses: string;
+  state: 'succeeded' | 'failed' | 'skipped';
+  started_at: Timestamp;
+  duration_ms: number;
+  error: string | null;
+}
+export interface SkillUsage {
+  metrics_queries: number;
+  logs_queries: number;
+  log_lines: number;
+  kube_reads: number;
+  github_requests: number;
+  code_files: number;
+  code_bytes: number;
+}
+/**
+ * 一次外部访问：被拒绝的访问同样记录（outcome 为 denied，没有发出请求）
+ */
+export interface SkillCall {
+  seq: number;
+  at: Timestamp;
+  step: string | null;
+  capability: SkillCapability;
+  operation: string;
+  /**
+   * 查询原文、时间窗、对象或路径
+   */
+  request: {};
+  result_bytes: number;
+  truncated: boolean;
+  duration_ms: number;
+  outcome: 'ok' | 'denied' | 'budget' | 'error';
+  error: string | null;
+}
+export interface SkillSummary {
+  name: string;
+  version: string | null;
+  digest: string | null;
+  /**
+   * builtin 或 dir:<目录>
+   */
+  source: string | null;
+  title: null | LocalizedText2;
+  description: null | LocalizedText2;
+  maturity: 'stable' | 'beta' | 'draft' | null;
+  state: SkillState;
+  paused_reason: string | null;
+  /**
+   * 清单要求、没有被授予的能力
+   */
+  missing: SkillCapability[];
+  /**
+   * 有效能力：清单声明与授予的交集
+   */
+  capabilities: {
+    [k: string]: SkillCapabilityParams | undefined;
+  };
+  loaded_at: null | Timestamp;
+  /**
+   * 最近一次加载失败的原因；旧版本继续运行
+   */
+  load_error: string | null;
+}
+export interface SkillCapabilityParams {
+  /**
+   * kube.read：可以读取的对象
+   */
+  objects?: ('pod_status' | 'events' | 'pod_logs_previous')[];
+  /**
+   * logs.query：每次查询最多返回的行数
+   */
+  max_lines?: number;
+  /**
+   * code.read、issue.write：GitHub App 的仓库角色
+   */
+  repo_role?: 'business' | 'ops';
+}
+export interface SkillFinding {
+  cluster_id: ClusterId;
+  skill: string;
+  fingerprint: string;
+  generation: number;
+  subject: SkillSubject;
+  /**
+   * pending 等待开出；unknown 创建结果未知、按标记找回；open 已开；completed 以 completed 关闭；not_planned 以 not planned 关闭；failed 重试用尽
+   */
+  state: 'pending' | 'unknown' | 'open' | 'completed' | 'not_planned' | 'failed';
+  repo: string;
+  number: number | null;
+  url: string | null;
+  /**
+   * 这个指纹出现过的运行数
+   */
+  occurrences: number;
+  first_seen_at: Timestamp;
+  last_seen_at: Timestamp;
+  cooldown_until: null | Timestamp;
+  /**
+   * 同一指纹上一代 issue 的编号
+   */
+  previous_number: number | null;
+}
+export interface SkillRunCreate {
+  cluster_id?: ClusterId;
+  subject: SkillSubject;
+  /**
+   * 按清单的 inputs 校验；不填时为空对象
+   */
+  inputs?: {};
+  at?: Timestamp6;
+}
+export interface SkillPatch {
+  paused: boolean;
+  reason?: string;
+}
+export interface SkillHost {
+  api_version: 'srenautix.io/skill/v1';
+  contract: string;
+  capabilities: SkillCapability[];
+  step_kinds: {
+    uses: string;
+    capabilities: SkillCapability[];
+    params: string[];
+  }[];
+}
+/**
+ * 技能的清单 skill.yaml（契约 2.45.0，ADR 0181）。技能目录只包含数据：清单、可选的 SKILL.md、绑定 schema（binding.schema.json）、输出模板（templates/<输出>.<语言>.md，Mustache）与测试（tests/）。步骤只能组合宿主内置、带版本的步骤类型；步骤的参数是常量或引用（SkillRef），技能里没有表达式语言与可执行内容。有效能力是清单声明的能力与部署方在 server 配置 skills.grants 中授予的能力的交集
+ */
+export interface SkillManifest {
+  api_version: 'srenautix.io/skill/v1';
+  /**
+   * 技能名：目录名、接口路径与指纹的一部分
+   */
+  name: string;
+  version: string;
+  title: LocalizedText2;
+  description: LocalizedText2;
+  maturity: 'stable' | 'beta' | 'draft';
+  min_srenautix_version: string;
+  /**
+   * 兼容的契约版本范围，形如 >=2.45.0 <3.0.0；宿主的契约版本不在范围内时不加载
+   */
+  contract: string;
+  /**
+   * 参数与默认值；部署方在 skills.params.<技能名> 覆盖，覆盖值的类型必须与默认值相同。时长写成 Duration 字符串
+   */
+  params?: {
+    [k: string]: string | number | boolean | undefined;
+  };
+  /**
+   * 运行输入的 JSON Schema（type: object）。触发产生的输入与手动运行的输入都按它校验；宿主另外给出运行对象 subject（namespace、kind、name）
+   */
+  inputs: {
+    type: 'object';
+  };
+  binding: {
+    /**
+     * true 时只在领域包 skill-bindings.yaml 绑定了的工作负载上运行
+     */
+    required: boolean;
+    /**
+     * 绑定数据的 JSON Schema 文件；数据中名为 signal 的字符串属性必须是加载的领域包里的信号
+     */
+    schema?: 'binding.schema.json';
+  };
+  /**
+   * @minItems 1
+   */
+  triggers: [SkillTrigger, ...SkillTrigger[]];
+  debounce: {
+    settle: Duration8;
+    coalesce: Duration9;
+  };
+  scope: {
+    /**
+     * 运行对象的种类；部署方在 skills.scope 进一步限定命名空间与种类
+     *
+     * @minItems 1
+     */
+    kinds: ['Deployment' | 'StatefulSet' | 'DaemonSet', ...('Deployment' | 'StatefulSet' | 'DaemonSet')[]];
+  };
+  /**
+   * 需要的能力与它们的参数；每个步骤类型需要的能力都必须在这里声明
+   */
+  capabilities: {
+    [k: string]: SkillCapabilityParams | undefined;
+  };
+  budgets: SkillBudgets;
+  /**
+   * @minItems 1
+   * @maxItems 40
+   */
+  steps: [SkillStep, ...SkillStep[]];
+  outputs: SkillOutputs;
+}
+/**
+ * 领域包信号：宿主每 interval 在作用范围内的工作负载上执行一次瞬时查询（$window 为 window），每条满足 condition 的序列按 Pod 解析出工作负载；for 给出时，最近 for 的每个点都要满足
+ */
+export interface SkillMetricTrigger {
+  id: string;
+  kind: 'metric';
+  /**
+   * <pack>/<signal>，metrics 信号
+   */
+  signal: string;
+  window: Duration;
+  interval?: Duration7;
+  condition?: {
+    op: 'gt' | 'ge' | 'lt' | 'le';
+    /**
+     * 数值或参数引用 {param: <名>}
+     */
+    value: {
+      [k: string]: unknown | undefined;
+    };
+  };
+  /**
+   * Duration，或参数引用 {param: <名>}
+   */
+  for?: {
+    [k: string]: unknown | undefined;
+  };
+}
+/**
+ * 告警开始触发时：标签全部匹配（每个标签取值之一）的告警，按 namespace 与 pod、statefulset、deployment、daemonset 标签解析出工作负载
+ */
+export interface SkillAlertTrigger {
+  id: string;
+  kind: 'alert';
+  matchers: {
+    /**
+     * @minItems 1
+     */
+    [k: string]: [string, ...string[]] | undefined;
+  };
+}
+/**
+ * server 的 informer 缓存中 Pod 状态的变化（topology.source 为 informer 时可用）：容器以声明的原因终止（lastState.terminated.reason），或 Pod 以声明的原因结束（status.reason，例如 Evicted）
+ */
+export interface SkillKubeTrigger {
+  id: string;
+  kind: 'kube';
+  match: {
+    /**
+     * @minItems 1
+     */
+    terminated_reasons?: [string, ...string[]];
+    /**
+     * @minItems 1
+     */
+    pod_reasons?: [string, ...string[]];
+  };
+}
+/**
+ * POST /v1/skills/{name}/runs
+ */
+export interface SkillManualTrigger {
+  id: string;
+  kind: 'manual';
+}
+export interface SkillBudgets {
+  /**
+   * 每次运行的上限，与 skills.limits 取较小者；超出时运行以 budget_exhausted 结束
+   */
+  run: {
+    duration: Duration;
+    metrics_queries: number;
+    logs_queries: number;
+    log_lines: number;
+    kube_reads: number;
+    github_requests: number;
+    code_files: number;
+    code_bytes: number;
+  };
+  /**
+   * 每个技能在滑动 1 小时窗口内的上限；新开 issue 另受同一仓库的 issues.max_per_hour 约束
+   */
+  hourly: {
+    runs: number;
+    issues: number;
+    comments: number;
+  };
+}
+export interface SkillStep {
+  id: string;
+  /**
+   * 步骤类型与版本，例如 metrics.range@v1；宿主支持的类型见 GET /v1/skill-host
+   */
+  uses: string;
+  /**
+   * 依赖的步骤；with 与 when 引用的步骤都必须列在这里
+   */
+  needs?: string[];
+  /**
+   * 引用（SkillRef）；成立（true、非空数组、非空字符串、非零数）时执行，否则记为 skipped
+   */
+  when?: {
+    [k: string]: unknown | undefined;
+  };
+  /**
+   * 数据源错误时不终止运行：这一步记为 failed，输出为步骤类型的空值。能力、作用范围与预算的拒绝总是终止运行
+   */
+  optional?: boolean;
+  /**
+   * 步骤类型的参数；值是常量或引用（SkillRef），引用可以出现在任意层级
+   */
+  with?: {};
+}
+export interface SkillOutputs {
+  /**
+   * 参与指纹的值（常量或引用）；指纹 = sha256(技能名, 集群, 这些值)
+   *
+   * @minItems 1
+   * @maxItems 8
+   */
+  fingerprint: [unknown, ...unknown[]];
+  issue: {
+    title: LocalizedText12;
+    templates: SkillTemplates;
+    comment_templates: SkillTemplates;
+    /**
+     * 标签列表（常量或引用）；宿主另加 srenautix 与 srenautix:<技能名>
+     */
+    labels: {
+      [k: string]: unknown | undefined;
+    };
+  };
+}
+/**
+ * Mustache 模板，与正文同样的变量
+ */
+export interface LocalizedText12 {
+  'zh-CN'?: string;
+  en?: string;
+}
+export interface SkillTemplates {
+  'zh-CN': string;
+  en: string;
 }
 /**
  * 事件溯源拓扑中的一条事件（DESIGN §4.1）。节点或边在 [valid_from, valid_to) 内有效；同一节点或边的新事件到达时，上一条的 valid_to 被设为新事件的 valid_from。删除事件只关闭区间。按时刻 t 查询拓扑时取 valid_from <= t 且 (valid_to 为空或 t < valid_to) 的全部节点和边

@@ -1,0 +1,342 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://srenautix.io/contract/schemas/skill-run.schema.json",
+  "title": "SkillRun",
+  "description": "技能的一次运行（契约 2.45.0，ADR 0181 §7）：触发、输入、每个步骤的记录、预算用量、结果与原因码。每次外部访问另记一行 SkillCall",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "run_id",
+    "cluster_id",
+    "skill",
+    "version",
+    "digest",
+    "subject",
+    "triggers",
+    "inputs",
+    "state",
+    "reason",
+    "requested_by",
+    "at",
+    "not_before",
+    "created_at",
+    "started_at",
+    "finished_at",
+    "steps",
+    "usage",
+    "finding",
+    "error"
+  ],
+  "properties": {
+    "run_id": { "$ref": "common.schema.json#/$defs/Uuid" },
+    "cluster_id": { "$ref": "common.schema.json#/$defs/ClusterId" },
+    "skill": { "type": "string" },
+    "version": { "type": ["string", "null"], "description": "开始运行时加载的版本；还没有开始时为 null" },
+    "digest": { "type": ["string", "null"], "description": "开始运行时技能目录的内容摘要" },
+    "subject": { "$ref": "#/$defs/SkillSubject" },
+    "triggers": { "type": "array", "items": { "$ref": "#/$defs/SkillTriggerHit" } },
+    "inputs": { "type": "object" },
+    "state": { "$ref": "#/$defs/SkillRunState" },
+    "reason": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/SkillRunReason" }] },
+    "requested_by": { "type": ["string", "null"], "description": "手动运行的主体或调用方；触发产生的运行为 null" },
+    "at": {
+      "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/Timestamp" }],
+      "description": "参考时刻：步骤的窗口都以它为终点；为 null 时取开始运行的时刻"
+    },
+    "not_before": { "$ref": "common.schema.json#/$defs/Timestamp" },
+    "created_at": { "$ref": "common.schema.json#/$defs/Timestamp" },
+    "started_at": { "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/Timestamp" }] },
+    "finished_at": { "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/Timestamp" }] },
+    "steps": { "type": "array", "items": { "$ref": "#/$defs/SkillStepRecord" } },
+    "usage": { "$ref": "#/$defs/SkillUsage" },
+    "finding": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["fingerprint", "generation", "action"],
+          "properties": {
+            "fingerprint": { "type": "string" },
+            "generation": { "type": "integer", "minimum": 1 },
+            "action": {
+              "type": "string",
+              "description": "open 开新 issue；comment 在打开的 issue 下评论；counted 关闭为 not planned、冷却期内只计数",
+              "enum": ["open", "comment", "counted"]
+            }
+          }
+        }
+      ]
+    },
+    "error": { "type": ["string", "null"], "maxLength": 1000 }
+  },
+  "$defs": {
+    "SkillRunState": {
+      "title": "SkillRunState",
+      "type": "string",
+      "description": "pending 等待 settle、coalesce 或每小时上限；running 执行中；succeeded 完成；failed 失败（reason 写明原因）",
+      "enum": ["pending", "running", "succeeded", "failed"]
+    },
+    "SkillRunReason": {
+      "title": "SkillRunReason",
+      "type": "string",
+      "description": "运行的终态原因，登记在原因码表的 skill_run 分组（阶段 skill）",
+      "enum": [
+        "published",
+        "commented",
+        "counted",
+        "no_occurrence",
+        "budget_exhausted",
+        "capability_denied",
+        "datasource_error",
+        "binding_missing",
+        "unavailable",
+        "interrupted",
+        "step_failed"
+      ]
+    },
+    "SkillSubject": {
+      "title": "SkillSubject",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "namespace", "name"],
+      "properties": {
+        "kind": { "type": "string", "enum": ["Deployment", "StatefulSet", "DaemonSet"] },
+        "namespace": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 }
+      }
+    },
+    "SkillTriggerHit": {
+      "title": "SkillTriggerHit",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["trigger", "kind", "at", "detail"],
+      "properties": {
+        "trigger": { "type": "string", "description": "清单中的触发 id" },
+        "kind": { "type": "string", "enum": ["metric", "alert", "kube", "manual"] },
+        "at": { "$ref": "common.schema.json#/$defs/Timestamp" },
+        "detail": { "type": "string", "maxLength": 500, "description": "触发的对象与取值，例如 Pod 与容器、告警名" },
+        "pod": { "type": ["string", "null"] },
+        "container": { "type": ["string", "null"] },
+        "cause": {
+          "type": ["string", "null"],
+          "description": "kube 触发：oom_killed 或 evicted；指标触发：near_limit（触发的信号与 trigger.occurrences 的信号不同时）",
+          "enum": ["oom_killed", "evicted", "near_limit", null]
+        }
+      }
+    },
+    "SkillStepRecord": {
+      "title": "SkillStepRecord",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "uses", "state", "started_at", "duration_ms", "error"],
+      "properties": {
+        "id": { "type": "string" },
+        "uses": { "type": "string" },
+        "state": { "type": "string", "enum": ["succeeded", "failed", "skipped"] },
+        "started_at": { "$ref": "common.schema.json#/$defs/Timestamp" },
+        "duration_ms": { "type": "integer", "minimum": 0 },
+        "error": { "type": ["string", "null"], "maxLength": 1000 }
+      }
+    },
+    "SkillUsage": {
+      "title": "SkillUsage",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "metrics_queries",
+        "logs_queries",
+        "log_lines",
+        "kube_reads",
+        "github_requests",
+        "code_files",
+        "code_bytes"
+      ],
+      "properties": {
+        "metrics_queries": { "type": "integer", "minimum": 0 },
+        "logs_queries": { "type": "integer", "minimum": 0 },
+        "log_lines": { "type": "integer", "minimum": 0 },
+        "kube_reads": { "type": "integer", "minimum": 0 },
+        "github_requests": { "type": "integer", "minimum": 0 },
+        "code_files": { "type": "integer", "minimum": 0 },
+        "code_bytes": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "SkillCall": {
+      "title": "SkillCall",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "seq",
+        "at",
+        "step",
+        "capability",
+        "operation",
+        "request",
+        "result_bytes",
+        "truncated",
+        "duration_ms",
+        "outcome",
+        "error"
+      ],
+      "description": "一次外部访问：被拒绝的访问同样记录（outcome 为 denied，没有发出请求）",
+      "properties": {
+        "seq": { "type": "integer", "minimum": 1 },
+        "at": { "$ref": "common.schema.json#/$defs/Timestamp" },
+        "step": { "type": ["string", "null"] },
+        "capability": { "$ref": "skill.schema.json#/$defs/SkillCapability" },
+        "operation": { "type": "string" },
+        "request": { "type": "object", "description": "查询原文、时间窗、对象或路径" },
+        "result_bytes": { "type": "integer", "minimum": 0 },
+        "truncated": { "type": "boolean" },
+        "duration_ms": { "type": "integer", "minimum": 0 },
+        "outcome": { "type": "string", "enum": ["ok", "denied", "budget", "error"] },
+        "error": { "type": ["string", "null"], "maxLength": 1000 }
+      }
+    },
+    "SkillState": {
+      "title": "SkillState",
+      "type": "string",
+      "description": "active 运行中；paused 被暂停；not_enabled 不在 skills.enabled 中；missing_grant 清单要求的能力没有被授予；load_failed 没有可用的版本",
+      "enum": ["active", "paused", "not_enabled", "missing_grant", "load_failed"]
+    },
+    "SkillSummary": {
+      "title": "SkillSummary",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "version",
+        "digest",
+        "source",
+        "title",
+        "description",
+        "maturity",
+        "state",
+        "paused_reason",
+        "missing",
+        "capabilities",
+        "loaded_at",
+        "load_error"
+      ],
+      "properties": {
+        "name": { "type": "string" },
+        "version": { "type": ["string", "null"] },
+        "digest": { "type": ["string", "null"] },
+        "source": { "type": ["string", "null"], "description": "builtin 或 dir:<目录>" },
+        "title": { "oneOf": [{ "type": "null" }, { "$ref": "evidence-card.schema.json#/$defs/LocalizedText" }] },
+        "description": {
+          "oneOf": [{ "type": "null" }, { "$ref": "evidence-card.schema.json#/$defs/LocalizedText" }]
+        },
+        "maturity": { "type": ["string", "null"], "enum": ["stable", "beta", "draft", null] },
+        "state": { "$ref": "#/$defs/SkillState" },
+        "paused_reason": { "type": ["string", "null"] },
+        "missing": {
+          "type": "array",
+          "description": "清单要求、没有被授予的能力",
+          "items": { "$ref": "skill.schema.json#/$defs/SkillCapability" }
+        },
+        "capabilities": {
+          "type": "object",
+          "description": "有效能力：清单声明与授予的交集",
+          "additionalProperties": { "$ref": "skill.schema.json#/$defs/SkillCapabilityParams" }
+        },
+        "loaded_at": { "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/Timestamp" }] },
+        "load_error": { "type": ["string", "null"], "description": "最近一次加载失败的原因；旧版本继续运行" }
+      }
+    },
+    "SkillFinding": {
+      "title": "SkillFinding",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cluster_id",
+        "skill",
+        "fingerprint",
+        "generation",
+        "subject",
+        "state",
+        "repo",
+        "number",
+        "url",
+        "occurrences",
+        "first_seen_at",
+        "last_seen_at",
+        "cooldown_until",
+        "previous_number"
+      ],
+      "properties": {
+        "cluster_id": { "$ref": "common.schema.json#/$defs/ClusterId" },
+        "skill": { "type": "string" },
+        "fingerprint": { "type": "string" },
+        "generation": { "type": "integer", "minimum": 1 },
+        "subject": { "$ref": "#/$defs/SkillSubject" },
+        "state": {
+          "type": "string",
+          "description": "pending 等待开出；unknown 创建结果未知、按标记找回；open 已开；completed 以 completed 关闭；not_planned 以 not planned 关闭；failed 重试用尽",
+          "enum": ["pending", "unknown", "open", "completed", "not_planned", "failed"]
+        },
+        "repo": { "type": "string" },
+        "number": { "type": ["integer", "null"] },
+        "url": { "type": ["string", "null"] },
+        "occurrences": { "type": "integer", "minimum": 1, "description": "这个指纹出现过的运行数" },
+        "first_seen_at": { "$ref": "common.schema.json#/$defs/Timestamp" },
+        "last_seen_at": { "$ref": "common.schema.json#/$defs/Timestamp" },
+        "cooldown_until": { "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/Timestamp" }] },
+        "previous_number": { "type": ["integer", "null"], "description": "同一指纹上一代 issue 的编号" }
+      }
+    },
+    "SkillRunCreate": {
+      "title": "SkillRunCreate",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["subject"],
+      "properties": {
+        "cluster_id": { "$ref": "common.schema.json#/$defs/ClusterId" },
+        "subject": { "$ref": "#/$defs/SkillSubject" },
+        "inputs": { "type": "object", "description": "按清单的 inputs 校验；不填时为空对象" },
+        "at": {
+          "$ref": "common.schema.json#/$defs/Timestamp",
+          "description": "参考时刻（排查过去某个时段）；不填时为开始运行的时刻。不能晚于现在，不能早于 7 天前"
+        }
+      }
+    },
+    "SkillPatch": {
+      "title": "SkillPatch",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["paused"],
+      "properties": {
+        "paused": { "type": "boolean" },
+        "reason": { "type": "string", "minLength": 1, "maxLength": 500 }
+      }
+    },
+    "SkillHost": {
+      "title": "SkillHost",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["api_version", "contract", "capabilities", "step_kinds"],
+      "properties": {
+        "api_version": { "const": "srenautix.io/skill/v1" },
+        "contract": { "type": "string" },
+        "capabilities": { "type": "array", "items": { "$ref": "skill.schema.json#/$defs/SkillCapability" } },
+        "step_kinds": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["uses", "capabilities", "params"],
+            "properties": {
+              "uses": { "type": "string" },
+              "capabilities": {
+                "type": "array",
+                "items": { "$ref": "skill.schema.json#/$defs/SkillCapability" }
+              },
+              "params": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        }
+      }
+    }
+  }
+}

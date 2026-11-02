@@ -24,8 +24,8 @@
     "Stage": {
       "title": "ReasonStage",
       "type": "string",
-      "description": "原因码所属的阶段：notify 通知；stage_a 阶段 A；research 阶段 B 研判与入队；remediation 自愈 PR；issue 事件 issue；incident 事件状态；feedback 人工反馈与隐式反馈（ADR 0174）",
-      "enum": ["notify", "stage_a", "research", "remediation", "issue", "incident", "feedback"]
+      "description": "原因码所属的阶段：notify 通知；stage_a 阶段 A；research 阶段 B 研判与入队；remediation 自愈 PR；issue 事件 issue；incident 事件状态；feedback 人工反馈与隐式反馈（ADR 0174）；skill 技能的运行（ADR 0181）",
+      "enum": ["notify", "stage_a", "research", "remediation", "issue", "incident", "feedback", "skill"]
     },
     "Level": {
       "title": "ReasonLevel",

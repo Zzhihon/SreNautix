@@ -1398,6 +1398,101 @@ export type paths = {
     patch?: never;
     trace?: never;
   };
+  '/v1/skill-host': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** @description 宿主支持的清单版本、契约版本、能力与步骤类型（ADR 0181） */
+    get: operations['getSkillHost'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/skill-runs/{run_id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        run_id: components['parameters']['RunId'];
+      };
+      cookie?: never;
+    };
+    /** @description 运行明细：触发、输入、步骤、预算用量、每次外部访问与发现 */
+    get: operations['getSkillRun'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/skills': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** @description 加载的技能与它们的状态、有效能力与最近一次加载的错误 */
+    get: operations['listSkills'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/skills/{name}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        name: components['parameters']['SkillName'];
+      };
+      cookie?: never;
+    };
+    get: operations['getSkill'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    /** @description 暂停或恢复技能；立即生效并写入治理审计，暂停期间不接受触发，手动运行返回 409 */
+    patch: operations['patchSkill'];
+    trace?: never;
+  };
+  '/v1/skills/{name}/runs': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        name: components['parameters']['SkillName'];
+      };
+      cookie?: never;
+    };
+    /** @description 技能的运行，按 created_at 从新到旧，最多 limit 条 */
+    get: operations['listSkillRuns'];
+    put?: never;
+    /**
+     * @description 手动运行：对象必须在技能与部署方的作用范围内，输入按清单的 inputs 校验；运行与触发产生的运行同样经过 settle、
+     *     coalesce 与每小时上限。同一对象已有等待中的运行时并入它并返回它
+     */
+    post: operations['createSkillRun'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/v1/topology/coverage': {
     parameters: {
       query?: never;
@@ -2166,7 +2261,7 @@ export type components = {
       /** @description 条件涉及的对象，例如集成实例 id、路由 id、领域包名 */
       subject: string | null;
       /**
-       * @description server、worker 等角色的条件；InformersFresh、TunnelConnected、QueryManifest、Datasource、AlertReconcile 由分支 reader 的心跳转来（role 为 reader，见 gateway/v1/reader.openapi.yaml 的 ReaderCondition），ClockSkew 两边都有。NotifyAbandoned（契约 2.39.0，ADR 0173）：最近 1 小时内某个渠道放弃投递了消息内容，subject 为渠道。控制台必须容忍以后新增的类型
+       * @description server、worker 等角色的条件；InformersFresh、TunnelConnected、QueryManifest、Datasource、AlertReconcile 由分支 reader 的心跳转来（role 为 reader，见 gateway/v1/reader.openapi.yaml 的 ReaderCondition），ClockSkew 两边都有。NotifyAbandoned（契约 2.39.0，ADR 0173）：最近 1 小时内某个渠道放弃投递了消息内容，subject 为渠道。SkillLoadFailed、SkillCapabilityMissing（契约 2.45.0，ADR 0181）：技能的最新内容没有通过校验（旧版本继续运行），或清单要求的能力没有被授予，subject 为技能名。控制台必须容忍以后新增的类型
        * @enum {string}
        */
       type:
@@ -2189,7 +2284,9 @@ export type components = {
         | 'TunnelConnected'
         | 'QueryManifest'
         | 'Datasource'
-        | 'AlertReconcile';
+        | 'AlertReconcile'
+        | 'SkillLoadFailed'
+        | 'SkillCapabilityMissing';
     };
     /** ConditionChangedEvent */
     ConditionChanged: {
@@ -5914,6 +6011,392 @@ export type components = {
     sha256: string;
     /** Sha256 */
     Sha256: string;
+    /**
+     * SkillRun
+     * @description 技能的一次运行（契约 2.45.0，ADR 0181 §7）：触发、输入、每个步骤的记录、预算用量、结果与原因码。每次外部访问另记一行 SkillCall
+     */
+    'skill-run.schema': {
+      /** @description 参考时刻：步骤的窗口都以它为终点；为 null 时取开始运行的时刻 */
+      at: null | components['schemas']['Timestamp'];
+      cluster_id: components['schemas']['ClusterId'];
+      created_at: components['schemas']['Timestamp'];
+      /** @description 开始运行时技能目录的内容摘要 */
+      digest: string | null;
+      error: string | null;
+      finding: null | {
+        /**
+         * @description open 开新 issue；comment 在打开的 issue 下评论；counted 关闭为 not planned、冷却期内只计数
+         * @enum {string}
+         */
+        action: 'open' | 'comment' | 'counted';
+        fingerprint: string;
+        generation: number;
+      };
+      finished_at: null | components['schemas']['Timestamp'];
+      inputs: Record<string, never>;
+      not_before: components['schemas']['Timestamp'];
+      reason: null | components['schemas']['SkillRunReason'];
+      /** @description 手动运行的主体或调用方；触发产生的运行为 null */
+      requested_by: string | null;
+      run_id: components['schemas']['Uuid'];
+      skill: string;
+      started_at: null | components['schemas']['Timestamp'];
+      state: components['schemas']['SkillRunState'];
+      steps: components['schemas']['SkillStepRecord'][];
+      subject: components['schemas']['SkillSubject'];
+      triggers: components['schemas']['SkillTriggerHit'][];
+      usage: components['schemas']['SkillUsage'];
+      /** @description 开始运行时加载的版本；还没有开始时为 null */
+      version: string | null;
+      $defs: {
+        /**
+         * SkillRunState
+         * @description pending 等待 settle、coalesce 或每小时上限；running 执行中；succeeded 完成；failed 失败（reason 写明原因）
+         * @enum {string}
+         */
+        SkillRunState: 'pending' | 'running' | 'succeeded' | 'failed';
+        /**
+         * SkillRunReason
+         * @description 运行的终态原因，登记在原因码表的 skill_run 分组（阶段 skill）
+         * @enum {string}
+         */
+        SkillRunReason:
+          | 'published'
+          | 'commented'
+          | 'counted'
+          | 'no_occurrence'
+          | 'budget_exhausted'
+          | 'capability_denied'
+          | 'datasource_error'
+          | 'binding_missing'
+          | 'unavailable'
+          | 'interrupted'
+          | 'step_failed';
+        /** SkillSubject */
+        SkillSubject: {
+          /** @enum {string} */
+          kind: 'Deployment' | 'StatefulSet' | 'DaemonSet';
+          name: string;
+          namespace: string;
+        };
+        /** SkillTriggerHit */
+        SkillTriggerHit: {
+          at: components['schemas']['Timestamp'];
+          /**
+           * @description kube 触发：oom_killed 或 evicted；指标触发：near_limit（触发的信号与 trigger.occurrences 的信号不同时）
+           * @enum {string|null}
+           */
+          cause?: 'oom_killed' | 'evicted' | 'near_limit' | null;
+          container?: string | null;
+          /** @description 触发的对象与取值，例如 Pod 与容器、告警名 */
+          detail: string;
+          /** @enum {string} */
+          kind: 'metric' | 'alert' | 'kube' | 'manual';
+          pod?: string | null;
+          /** @description 清单中的触发 id */
+          trigger: string;
+        };
+        /** SkillStepRecord */
+        SkillStepRecord: {
+          duration_ms: number;
+          error: string | null;
+          id: string;
+          started_at: components['schemas']['Timestamp'];
+          /** @enum {string} */
+          state: 'succeeded' | 'failed' | 'skipped';
+          uses: string;
+        };
+        /** SkillUsage */
+        SkillUsage: {
+          code_bytes: number;
+          code_files: number;
+          github_requests: number;
+          kube_reads: number;
+          log_lines: number;
+          logs_queries: number;
+          metrics_queries: number;
+        };
+        /**
+         * SkillCall
+         * @description 一次外部访问：被拒绝的访问同样记录（outcome 为 denied，没有发出请求）
+         */
+        SkillCall: {
+          at: components['schemas']['Timestamp'];
+          capability: components['schemas']['SkillCapability'];
+          duration_ms: number;
+          error: string | null;
+          operation: string;
+          /** @enum {string} */
+          outcome: 'ok' | 'denied' | 'budget' | 'error';
+          /** @description 查询原文、时间窗、对象或路径 */
+          request: Record<string, never>;
+          result_bytes: number;
+          seq: number;
+          step: string | null;
+          truncated: boolean;
+        };
+        /**
+         * SkillState
+         * @description active 运行中；paused 被暂停；not_enabled 不在 skills.enabled 中；missing_grant 清单要求的能力没有被授予；load_failed 没有可用的版本
+         * @enum {string}
+         */
+        SkillState: 'active' | 'paused' | 'not_enabled' | 'missing_grant' | 'load_failed';
+        /** SkillSummary */
+        SkillSummary: {
+          /** @description 有效能力：清单声明与授予的交集 */
+          capabilities: {
+            [key: string]: components['schemas']['SkillCapabilityParams'];
+          };
+          description: null | components['schemas']['LocalizedText'];
+          digest: string | null;
+          /** @description 最近一次加载失败的原因；旧版本继续运行 */
+          load_error: string | null;
+          loaded_at: null | components['schemas']['Timestamp'];
+          /** @enum {string|null} */
+          maturity: 'stable' | 'beta' | 'draft' | null;
+          /** @description 清单要求、没有被授予的能力 */
+          missing: components['schemas']['SkillCapability'][];
+          name: string;
+          paused_reason: string | null;
+          /** @description builtin 或 dir:<目录> */
+          source: string | null;
+          state: components['schemas']['SkillState'];
+          title: null | components['schemas']['LocalizedText'];
+          version: string | null;
+        };
+        /** SkillFinding */
+        SkillFinding: {
+          cluster_id: components['schemas']['ClusterId'];
+          cooldown_until: null | components['schemas']['Timestamp'];
+          fingerprint: string;
+          first_seen_at: components['schemas']['Timestamp'];
+          generation: number;
+          last_seen_at: components['schemas']['Timestamp'];
+          number: number | null;
+          /** @description 这个指纹出现过的运行数 */
+          occurrences: number;
+          /** @description 同一指纹上一代 issue 的编号 */
+          previous_number: number | null;
+          repo: string;
+          skill: string;
+          /**
+           * @description pending 等待开出；unknown 创建结果未知、按标记找回；open 已开；completed 以 completed 关闭；not_planned 以 not planned 关闭；failed 重试用尽
+           * @enum {string}
+           */
+          state: 'pending' | 'unknown' | 'open' | 'completed' | 'not_planned' | 'failed';
+          subject: components['schemas']['SkillSubject'];
+          url: string | null;
+        };
+        /** SkillRunCreate */
+        SkillRunCreate: {
+          /** @description 参考时刻（排查过去某个时段）；不填时为开始运行的时刻。不能晚于现在，不能早于 7 天前 */
+          at?: components['schemas']['Timestamp'];
+          cluster_id?: components['schemas']['ClusterId'];
+          /** @description 按清单的 inputs 校验；不填时为空对象 */
+          inputs?: Record<string, never>;
+          subject: components['schemas']['SkillSubject'];
+        };
+        /** SkillPatch */
+        SkillPatch: {
+          paused: boolean;
+          reason?: string;
+        };
+        /** SkillHost */
+        SkillHost: {
+          /** @constant */
+          api_version: 'srenautix.io/skill/v1';
+          capabilities: components['schemas']['SkillCapability'][];
+          contract: string;
+          step_kinds: {
+            capabilities: components['schemas']['SkillCapability'][];
+            params: string[];
+            uses: string;
+          }[];
+        };
+      };
+    };
+    /**
+     * SkillCall
+     * @description 一次外部访问：被拒绝的访问同样记录（outcome 为 denied，没有发出请求）
+     */
+    SkillCall: {
+      at: components['schemas']['Timestamp'];
+      capability: components['schemas']['SkillCapability'];
+      duration_ms: number;
+      error: string | null;
+      operation: string;
+      /** @enum {string} */
+      outcome: 'ok' | 'denied' | 'budget' | 'error';
+      /** @description 查询原文、时间窗、对象或路径 */
+      request: Record<string, never>;
+      result_bytes: number;
+      seq: number;
+      step: string | null;
+      truncated: boolean;
+    };
+    /**
+     * SkillCapability
+     * @description 宿主提供的能力（ADR 0181 §7.1）。只有 issue.write 写入，范围是创建 issue、评论与读取 issue；没有写入集群、配置、Git 内容、PR、执行命令与读取 Secret 的能力
+     * @enum {string}
+     */
+    SkillCapability: 'metrics.query_range' | 'logs.query' | 'kube.read' | 'code.read' | 'issue.write';
+    /** SkillCapabilityParams */
+    SkillCapabilityParams: {
+      /** @description logs.query：每次查询最多返回的行数 */
+      max_lines?: number;
+      /** @description kube.read：可以读取的对象 */
+      objects?: ('pod_status' | 'events' | 'pod_logs_previous')[];
+      /**
+       * @description code.read、issue.write：GitHub App 的仓库角色
+       * @enum {string}
+       */
+      repo_role?: 'business' | 'ops';
+    };
+    /** SkillFinding */
+    SkillFinding: {
+      cluster_id: components['schemas']['ClusterId'];
+      cooldown_until: null | components['schemas']['Timestamp'];
+      fingerprint: string;
+      first_seen_at: components['schemas']['Timestamp'];
+      generation: number;
+      last_seen_at: components['schemas']['Timestamp'];
+      number: number | null;
+      /** @description 这个指纹出现过的运行数 */
+      occurrences: number;
+      /** @description 同一指纹上一代 issue 的编号 */
+      previous_number: number | null;
+      repo: string;
+      skill: string;
+      /**
+       * @description pending 等待开出；unknown 创建结果未知、按标记找回；open 已开；completed 以 completed 关闭；not_planned 以 not planned 关闭；failed 重试用尽
+       * @enum {string}
+       */
+      state: 'pending' | 'unknown' | 'open' | 'completed' | 'not_planned' | 'failed';
+      subject: components['schemas']['SkillSubject'];
+      url: string | null;
+    };
+    /** SkillHost */
+    SkillHost: {
+      /** @constant */
+      api_version: 'srenautix.io/skill/v1';
+      capabilities: components['schemas']['SkillCapability'][];
+      contract: string;
+      step_kinds: {
+        capabilities: components['schemas']['SkillCapability'][];
+        params: string[];
+        uses: string;
+      }[];
+    };
+    /** SkillPatch */
+    SkillPatch: {
+      paused: boolean;
+      reason?: string;
+    };
+    /** SkillRunCreate */
+    SkillRunCreate: {
+      /** @description 参考时刻（排查过去某个时段）；不填时为开始运行的时刻。不能晚于现在，不能早于 7 天前 */
+      at?: components['schemas']['Timestamp'];
+      cluster_id?: components['schemas']['ClusterId'];
+      /** @description 按清单的 inputs 校验；不填时为空对象 */
+      inputs?: Record<string, never>;
+      subject: components['schemas']['SkillSubject'];
+    };
+    /**
+     * SkillRunReason
+     * @description 运行的终态原因，登记在原因码表的 skill_run 分组（阶段 skill）
+     * @enum {string}
+     */
+    SkillRunReason:
+      | 'published'
+      | 'commented'
+      | 'counted'
+      | 'no_occurrence'
+      | 'budget_exhausted'
+      | 'capability_denied'
+      | 'datasource_error'
+      | 'binding_missing'
+      | 'unavailable'
+      | 'interrupted'
+      | 'step_failed';
+    /**
+     * SkillRunState
+     * @description pending 等待 settle、coalesce 或每小时上限；running 执行中；succeeded 完成；failed 失败（reason 写明原因）
+     * @enum {string}
+     */
+    SkillRunState: 'pending' | 'running' | 'succeeded' | 'failed';
+    /**
+     * SkillState
+     * @description active 运行中；paused 被暂停；not_enabled 不在 skills.enabled 中；missing_grant 清单要求的能力没有被授予；load_failed 没有可用的版本
+     * @enum {string}
+     */
+    SkillState: 'active' | 'paused' | 'not_enabled' | 'missing_grant' | 'load_failed';
+    /** SkillStepRecord */
+    SkillStepRecord: {
+      duration_ms: number;
+      error: string | null;
+      id: string;
+      started_at: components['schemas']['Timestamp'];
+      /** @enum {string} */
+      state: 'succeeded' | 'failed' | 'skipped';
+      uses: string;
+    };
+    /** SkillSubject */
+    SkillSubject: {
+      /** @enum {string} */
+      kind: 'Deployment' | 'StatefulSet' | 'DaemonSet';
+      name: string;
+      namespace: string;
+    };
+    /** SkillSummary */
+    SkillSummary: {
+      /** @description 有效能力：清单声明与授予的交集 */
+      capabilities: {
+        [key: string]: components['schemas']['SkillCapabilityParams'];
+      };
+      description: null | components['schemas']['LocalizedText'];
+      digest: string | null;
+      /** @description 最近一次加载失败的原因；旧版本继续运行 */
+      load_error: string | null;
+      loaded_at: null | components['schemas']['Timestamp'];
+      /** @enum {string|null} */
+      maturity: 'stable' | 'beta' | 'draft' | null;
+      /** @description 清单要求、没有被授予的能力 */
+      missing: components['schemas']['SkillCapability'][];
+      name: string;
+      paused_reason: string | null;
+      /** @description builtin 或 dir:<目录> */
+      source: string | null;
+      state: components['schemas']['SkillState'];
+      title: null | components['schemas']['LocalizedText'];
+      version: string | null;
+    };
+    /** SkillTriggerHit */
+    SkillTriggerHit: {
+      at: components['schemas']['Timestamp'];
+      /**
+       * @description kube 触发：oom_killed 或 evicted；指标触发：near_limit（触发的信号与 trigger.occurrences 的信号不同时）
+       * @enum {string|null}
+       */
+      cause?: 'oom_killed' | 'evicted' | 'near_limit' | null;
+      container?: string | null;
+      /** @description 触发的对象与取值，例如 Pod 与容器、告警名 */
+      detail: string;
+      /** @enum {string} */
+      kind: 'metric' | 'alert' | 'kube' | 'manual';
+      pod?: string | null;
+      /** @description 清单中的触发 id */
+      trigger: string;
+    };
+    /** SkillUsage */
+    SkillUsage: {
+      code_bytes: number;
+      code_files: number;
+      github_requests: number;
+      kube_reads: number;
+      log_lines: number;
+      logs_queries: number;
+      metrics_queries: number;
+    };
     SpokeStatus: {
       /**
        * @description 只对 gateway 有意义
@@ -6292,6 +6775,7 @@ export type components = {
     ProposalId: components['schemas']['Uuid'];
     RecommendationId: components['schemas']['Uuid'];
     RunId: components['schemas']['Uuid'];
+    SkillName: string;
   };
   requestBodies: never;
   headers: never;
@@ -8710,6 +9194,183 @@ export interface operations {
         };
       };
       400: components['responses']['Error'];
+    };
+  };
+  getSkillHost: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 宿主 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['SkillHost'];
+        };
+      };
+    };
+  };
+  getSkillRun: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        run_id: components['parameters']['RunId'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 运行明细 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            calls: components['schemas']['SkillCall'][];
+            finding: null | components['schemas']['SkillFinding'];
+            run: components['schemas']['skill-run.schema'];
+          };
+        };
+      };
+      404: components['responses']['Error'];
+    };
+  };
+  listSkills: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 技能 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['SkillSummary'][];
+        };
+      };
+    };
+  };
+  getSkill: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        name: components['parameters']['SkillName'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 技能 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['SkillSummary'];
+        };
+      };
+      404: components['responses']['Error'];
+    };
+  };
+  patchSkill: {
+    parameters: {
+      query?: never;
+      header: {
+        'X-CSRF-Token': components['parameters']['Csrf'];
+      };
+      path: {
+        name: components['parameters']['SkillName'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['SkillPatch'];
+      };
+    };
+    responses: {
+      /** @description 修改后的技能 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['SkillSummary'];
+        };
+      };
+      400: components['responses']['Error'];
+      404: components['responses']['Error'];
+    };
+  };
+  listSkillRuns: {
+    parameters: {
+      query?: {
+        limit?: number;
+      };
+      header?: never;
+      path: {
+        name: components['parameters']['SkillName'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 运行 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['skill-run.schema'][];
+        };
+      };
+      404: components['responses']['Error'];
+    };
+  };
+  createSkillRun: {
+    parameters: {
+      query?: never;
+      header: {
+        'X-CSRF-Token': components['parameters']['Csrf'];
+      };
+      path: {
+        name: components['parameters']['SkillName'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['SkillRunCreate'];
+      };
+    };
+    responses: {
+      /** @description 等待中的运行 */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['skill-run.schema'];
+        };
+      };
+      400: components['responses']['Error'];
+      403: components['responses']['Error'];
+      404: components['responses']['Error'];
+      409: components['responses']['Error'];
     };
   };
   getTopologyCoverage: {
