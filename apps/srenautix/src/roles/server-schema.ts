@@ -14,6 +14,7 @@ import { topologyTrack } from '../topology/migrations.js';
 import { detectorTrack } from '../detectors/migrations.js';
 import { remediationTrack } from '../remediation/migrations.js';
 import { optimizationTrack } from '../optimize/migrations.js';
+import { skillsTrack } from '../skills/migrations.js';
 
 /** server schema 的全部迁移轨道，按依赖顺序排列。 */
 export const serverTracks: readonly Track[] = [
@@ -30,6 +31,7 @@ export const serverTracks: readonly Track[] = [
   detectorTrack,
   remediationTrack,
   optimizationTrack,
+  skillsTrack,
 ];
 
 /** server 取得主实例之后、开始单活工作之前执行一次的数据修正（ADR 0176），按列出的顺序执行 */

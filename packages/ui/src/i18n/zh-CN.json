@@ -109,6 +109,8 @@
   "condition.QueryManifest": "查询模板清单未加载",
   "condition.Datasource": "reader 数据源不可用",
   "condition.AlertReconcile": "告警对账失败",
+  "condition.SkillLoadFailed": "技能没有通过校验",
+  "condition.SkillCapabilityMissing": "技能缺少授权",
   "conditions.label": "系统状态",
   "conditions.loading": "正在读取系统状态",
   "conditions.unreadable": "读不到系统状态",

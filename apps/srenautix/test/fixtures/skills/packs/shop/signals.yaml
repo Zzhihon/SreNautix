@@ -1,0 +1,21 @@
+signals:
+  - id: body_bytes_rate
+    kind: metrics
+    unit: none
+    alternatives:
+      - expr: sum by (namespace, pod) (rate(shop_request_body_conversion_bytes_total{$selector}[$rate_window]))
+  - id: archive_backlog_bytes
+    kind: metrics
+    unit: bytes
+    alternatives:
+      - expr: max by (namespace, pod) (shop_archive_log_backlog_bytes{$selector})
+  - id: export_deferred_rate
+    kind: metrics
+    unit: none
+    alternatives:
+      - expr: sum by (namespace, pod) (rate(shop_archive_export_deferred_total{$selector}[$rate_window]))
+  - id: active_requests
+    kind: metrics
+    unit: count
+    alternatives:
+      - expr: max by (namespace, pod) (shop_active_requests{$selector})

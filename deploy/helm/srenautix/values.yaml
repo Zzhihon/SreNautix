@@ -372,6 +372,23 @@ packs:
     # 拉取目录（emptyDir）的容量上限
     cacheSize: 512Mi
 
+# 技能（ADR 0181）：内置技能在镜像的 /app/skills；部署方的技能以 ConfigMap 挂载（每个技能一个 ConfigMap，ConfigMap 名等于技能名，
+# 子目录中的文件以 <子目录>__<文件名> 为键，例如 templates__issue.zh-CN.md）。整卷挂载，kubelet 原地更新文件，server 每 60 秒
+# 重新加载，改技能不需要重启。enabled、grants、scope、params、limits 等原样写进 server 配置的 skills（键名见
+# apps/srenautix/src/skills/config.ts）；修改它们需要重启 server（checksum/config 随之变化）
+skills:
+  userConfigMaps: []
+  enabled: []
+  grants: {}
+  scope: {}
+  params: {}
+  # 每次运行的上限（与清单的预算取较小者）；为空时取 server 的默认值
+  limits: {}
+  # 同一仓库每小时新开 issue 的合计上限；为空时取 issues.maxPerHour
+  maxIssuesPerHour: null
+  # 标题前缀；为空时取 notify.prefix
+  titlePrefix: null
+
 identity:
   # 本地管理员（只用于首次引导与紧急入口）。Secret 的两个键：
   #   password_hash：`srenautix admin hash-password` 输出的 scrypt 哈希

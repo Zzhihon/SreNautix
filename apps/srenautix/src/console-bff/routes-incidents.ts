@@ -18,7 +18,7 @@ import type { Auth } from '../identity/auth.js';
 import { scopeMatches, type RoleBinding, type Target } from '../identity/bindings.js';
 import { withComponentNames } from '../incident/names.js';
 import { incidentVersion, latestStageA, resolveIncidentRef, type IncidentRow } from '../incident/read.js';
-import { reasonsOf } from '../incident/reasons.js';
+import { reasonsOf, type IncidentReasonStage } from '../incident/reasons.js';
 import { researchRoots } from '../incident/research-root.js';
 import { alertsById } from '../ingest/store.js';
 import type { FeedbackService } from '../proposals/feedback.js';
@@ -409,7 +409,7 @@ const KIND_STAGE: Partial<Record<TimelineKind, ReasonStage>> = {
 };
 
 /** server.incident_reasons 的阶段 → 时间线条目种类（反馈的原因码在 server.feedback，不写入 incident_reasons） */
-const RECORD_KIND: Record<ReasonStage, TimelineKind> = {
+const RECORD_KIND: Record<IncidentReasonStage, TimelineKind> = {
   notify: 'notify',
   stage_a: 'stage_a_missing',
   research: 'research_ended',

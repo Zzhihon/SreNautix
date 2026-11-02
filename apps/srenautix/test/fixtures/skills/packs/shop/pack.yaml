@@ -1,0 +1,10 @@
+# 技能 oom-rootcause 的测试包：虚构工作负载 StatefulSet shop/api-gateway 自己的序列与绑定（test/support/oom-skill-fixture.ts）
+api_version: srenautix.io/pack/v1
+name: shop
+version: 0.1.0
+description: 测试用的部署方包：api-gateway 的请求体、归档与导出序列，以及 oom-rootcause 的绑定
+maturity: draft
+min_srenautix_version: 0.1.0
+requires:
+  - metrics.query
+  - metrics.query_range

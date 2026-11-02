@@ -1,0 +1,62 @@
+# 宿主测试用的技能：读 Pod 状态与上一次退出的日志，按工作负载开 issue（ADR 0181 的去重、再次出现与能力白名单）
+api_version: srenautix.io/skill/v1
+name: kube-probe
+version: 1.0.0
+title: { zh-CN: Pod 探查, en: Pod probe }
+description: { zh-CN: 测试技能, en: Test skill }
+maturity: draft
+min_srenautix_version: 0.1.0
+contract: '>=2.45.0 <3.0.0'
+params:
+  tail: 50
+inputs:
+  type: object
+  additionalProperties: false
+  properties:
+    note: { type: string }
+binding: { required: false }
+triggers:
+  - id: manual
+    kind: manual
+  - id: oom
+    kind: kube
+    match: { terminated_reasons: [OOMKilled] }
+debounce: { settle: 5m, coalesce: 0s }
+scope: { kinds: [StatefulSet, Deployment] }
+capabilities:
+  kube.read: { objects: [pod_status, pod_logs_previous] }
+  issue.write: { repo_role: business }
+budgets:
+  run:
+    duration: 1m
+    metrics_queries: 0
+    logs_queries: 0
+    log_lines: 0
+    kube_reads: 5
+    github_requests: 10
+    code_files: 0
+    code_bytes: 0
+  hourly: { runs: 50, issues: 10, comments: 10 }
+steps:
+  - id: status
+    uses: kube.read@v1
+    with: { object: pod_status }
+  - id: previous
+    uses: kube.read@v1
+    needs: [status]
+    with:
+      object: pod_logs_previous
+      pods: { step: status, field: names }
+      container: app
+      tail_lines: { param: tail }
+  - id: publish
+    uses: issue.publish@v1
+    needs: [previous]
+    with: { output: issue }
+outputs:
+  fingerprint: [probe, { step: status, field: names.0 }]
+  issue:
+    title: { zh-CN: '{{subject.name}} 探查', en: '{{subject.name}} probe' }
+    templates: { zh-CN: templates/issue.md, en: templates/issue.md }
+    comment_templates: { zh-CN: templates/comment.md, en: templates/comment.md }
+    labels: [probe]

@@ -50,14 +50,17 @@ const EXTERNAL_NOTE = '根因是外部上游且没有业务影响：进入通知
 export const backoffMs = (attempts: number) => Math.min(30_000 * 2 ** Math.max(0, attempts - 1), 30 * 60_000);
 
 /**
- * 同一仓库最近 1 小时开出的 issue：事件 issue 与覆盖缺口 issue（ADR 0171）的合计，两者共用 issues.max_per_hour
+ * 同一仓库最近 1 小时开出的 issue：事件 issue、覆盖缺口 issue（ADR 0171）与技能的 issue（ADR 0181）的合计，共用
+ * issues.max_per_hour
  */
 export async function openedLastHour(c: Queryable, repo: string): Promise<number> {
   const r = await c.query<{ n: number }>(
     `SELECT ((SELECT count(*) FROM server.github_issues
                WHERE repo = $1 AND state = 'open' AND opened_at > now() - interval '1 hour')
            + (SELECT count(*) FROM server.coverage_gaps
-               WHERE repo = $1 AND opened_at > now() - interval '1 hour'))::int AS n`,
+               WHERE repo = $1 AND opened_at > now() - interval '1 hour')
+           + (SELECT count(*) FROM server.skill_findings
+               WHERE lower(repo) = lower($1) AND opened_at > now() - interval '1 hour'))::int AS n`,
     [repo],
   );
   return r.rows[0]!.n;
