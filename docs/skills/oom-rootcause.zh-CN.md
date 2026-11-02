@@ -30,7 +30,7 @@
 | `kind` | `analyze.memory_kind@v1` | 分类（§3.1） |
 | `rank` | `analyze.suspects@v1` | 嫌疑项的检验、分组、置信度与证据表（§3.2） |
 | `requests` | `analyze.top@v1` | 主因分组的大请求，按请求体与时长排序；请求体字节份额最高的组织 |
-| `profile_logs`、`profiles` | `logs.events@v1`、`analyze.profiles@v1` | 发生之前一直到参考时刻写出的堆画像，按文件名模式校验，每个 Pod 最近 `max_profiles` 个 |
+| `profile_logs`、`previous_profiles`、`profiles` | `logs.events@v1`、`logs.extract@v1`、`analyze.profiles@v1` | 发生之前一直到参考时刻写出的堆画像，加上上一次退出的容器日志尾部里的画像（终止前最后一份），按文件名模式校验，同一路径只列一次，每个 Pod 最近 `max_profiles` 个 |
 | `code` | `code.locate@v1` | 嫌疑项的代码路径提示在默认分支的头上的位置（可选） |
 | `related` | `issue.related@v1` | 绑定声明的已有 issue 与本技能在同一工作负载上开过的 issue |
 | `publish` | `issue.publish@v1` | 有新的发生时按指纹开 issue、评论或计数 |
