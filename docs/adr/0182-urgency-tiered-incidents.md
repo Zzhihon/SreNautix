@@ -138,3 +138,7 @@ PR 的类别是在 ADR 0170 准入条件之上的再一层约束；PR 只开不�
 2. issue 按根因位置路由：部署、配置与集群在 `CCH-HQ/cchp-k8s-ops`，应用代码在 `CCH-HQ/claude-code-hub-plus`，两边互相引用；两个仓库都装有 GitHub App「SreNautix」（5379322）。
 3. PR 只在 cchp-k8s-ops（发布回退、资源与 HPA、告警规则调优），只开不合并，经人审阅；业务仓库只有 issue。
 4. 事件按紧急度与类型自动调用匹配的技能，技能输出并入事件的 issue，不单独开 issue，共用去重指纹与每小时上限。
+5. 根因在应用代码时：事件 issue 总是开在 ops 仓库；有确定性代码位置时另开业务仓库 issue，按代码指纹去重、沿用技能发现的代际规则，两边互相引用（第 7 条）。
+6. 没有实测影响时的降级下限：CCHP 的 `pg-failover` 与 `billing-critical` 保持 U0；`core-termination`（gateway、control、worker 的 OOM、CrashLoop 与异常退出）与 `billing-warning` 至少为 U1。理由：OOM 杀掉 gateway Pod 时中断的流式请求已经返回过 200，边缘 5xx 统计不到；计费的正确性不在可用性 SLI 里。
+7. U2 不即时推送，每天 09:30（Asia/Shanghai）一条 Telegram 汇总；U2 只在带有改仓库的提议时开 issue（与 ADR 0147 不开汇总 issue 的理由相同）。
+8. 实测业务影响的指标：边缘错误率的燃烧率（全部根因）加 gateway 自身错误率的燃烧率（只用于集群内的根因），要求连续 3 分钟并有流量下限（`cchp:edge_requests:rate5m ≥ 0.02`）。
