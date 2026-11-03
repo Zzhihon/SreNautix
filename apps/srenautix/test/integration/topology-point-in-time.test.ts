@@ -258,43 +258,50 @@ describe('时间点拓扑', () => {
     expect(peak).toBe(2);
   });
 
+  // compact() 覆盖库里所有集群：其他用例的历史固定在 T0，过了保留期就会一起被删，所以用单独的库
   it('压缩删除保留期之前关闭的行，保留期内各时刻的拓扑不变；旧版本二进制没记 closed_seq 的行先补齐', async () => {
-    const store = new TopologyStore(db.server);
-    const C = 'compact';
-    const old = new Date(Date.now() - 30 * 86400_000);
-    const mid = new Date(Date.now() - 20 * 86400_000);
-    const recent = new Date(Date.now() - 3600_000);
-    await store.apply(C, [
-      { op: 'node_upsert', at: old, source: 'informer', node: node('Pod', 'a') },
-      { op: 'node_upsert', at: old, source: 'informer', node: node('Deployment', 'api', { labels: { v: '1' } }) },
-    ]);
-    await store.apply(C, [
-      { op: 'node_delete', at: mid, source: 'informer', node: node('Pod', 'a') },
-      { op: 'node_upsert', at: mid, source: 'informer', node: node('Deployment', 'api', { labels: { v: '2' } }) },
-    ]);
-    await store.apply(C, [
-      { op: 'node_upsert', at: recent, source: 'informer', node: node('Deployment', 'api', { labels: { v: '3' } }) },
-    ]);
-    // N-1 二进制关闭的行：没有 closed_seq
-    await db.admin.query(
-      "UPDATE server.topology_events SET closed_seq = NULL WHERE cluster_id = $1 AND key = 'Deployment:shop/api' AND valid_to IS NOT NULL",
-      [C],
-    );
-    const inRetention = new Date(Date.now() - 5 * 86400_000);
-    const before = await new TopologyStore(db.server).at(C, inRetention);
-    const r = await store.compact(14 * 86400_000);
-    expect(r.backfilled).toBe(2);
-    // Pod a 的 upsert 与删除事件、Deployment 的 v1（20 天前关闭）
-    expect(r.deleted).toBe(3);
-    const after = await new TopologyStore(db.server).at(C, inRetention);
-    expect(after.nodes).toEqual(before.nodes);
-    expect(after.nodes.map((n) => n.labels.v)).toEqual(['2']);
-    const left = await db.admin.query<{ n: number }>(
-      'SELECT count(*)::int AS n FROM server.topology_events WHERE cluster_id = $1 AND valid_to IS NOT NULL AND closed_seq IS NULL',
-      [C],
-    );
-    expect(left.rows[0]!.n).toBe(0);
-    expect(await store.compact(14 * 86400_000)).toEqual({ backfilled: 0, deleted: 0 });
+    const t = await newTestDb();
+    try {
+      await migrateExpand(t.server, 'server', [storeTrack, topologyTrack]);
+      const store = new TopologyStore(t.server);
+      const C = 'compact';
+      const old = new Date(Date.now() - 30 * 86400_000);
+      const mid = new Date(Date.now() - 20 * 86400_000);
+      const recent = new Date(Date.now() - 3600_000);
+      await store.apply(C, [
+        { op: 'node_upsert', at: old, source: 'informer', node: node('Pod', 'a') },
+        { op: 'node_upsert', at: old, source: 'informer', node: node('Deployment', 'api', { labels: { v: '1' } }) },
+      ]);
+      await store.apply(C, [
+        { op: 'node_delete', at: mid, source: 'informer', node: node('Pod', 'a') },
+        { op: 'node_upsert', at: mid, source: 'informer', node: node('Deployment', 'api', { labels: { v: '2' } }) },
+      ]);
+      await store.apply(C, [
+        { op: 'node_upsert', at: recent, source: 'informer', node: node('Deployment', 'api', { labels: { v: '3' } }) },
+      ]);
+      // N-1 二进制关闭的行：没有 closed_seq
+      await t.admin.query(
+        "UPDATE server.topology_events SET closed_seq = NULL WHERE cluster_id = $1 AND key = 'Deployment:shop/api' AND valid_to IS NOT NULL",
+        [C],
+      );
+      const inRetention = new Date(Date.now() - 5 * 86400_000);
+      const before = await new TopologyStore(t.server).at(C, inRetention);
+      const r = await store.compact(14 * 86400_000);
+      expect(r.backfilled).toBe(2);
+      // Pod a 的 upsert 与删除事件、Deployment 的 v1（20 天前关闭）
+      expect(r.deleted).toBe(3);
+      const after = await new TopologyStore(t.server).at(C, inRetention);
+      expect(after.nodes).toEqual(before.nodes);
+      expect(after.nodes.map((n) => n.labels.v)).toEqual(['2']);
+      const left = await t.admin.query<{ n: number }>(
+        'SELECT count(*)::int AS n FROM server.topology_events WHERE cluster_id = $1 AND valid_to IS NOT NULL AND closed_seq IS NULL',
+        [C],
+      );
+      expect(left.rows[0]!.n).toBe(0);
+      expect(await store.compact(14 * 86400_000)).toEqual({ backfilled: 0, deleted: 0 });
+    } finally {
+      await t.close();
+    }
   });
 
   it('扩展迁移为已有的历史补齐 closed_seq', async () => {
