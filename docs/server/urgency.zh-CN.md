@@ -178,7 +178,7 @@ else:
 | 紧急度 | 含义 | CCHP 规则（`label_rules` 的 id） | 下限 |
 |---|---|---|---|
 | U0 业务中断 | 用户请求大面积失败，或计费、数据的正确性正在受损 | `l0-critical`：layer=L0、critical（边缘错误预算快速与慢速燃烧、公共端点探测）<br>`core-slo-critical`：component=gateway\|control\|worker、critical、symptom（gateway 自身错误预算燃烧）<br>`billing-critical`：component=business、critical（用量写入失败、供应商成本屏障超时）<br>`pg-failover`：component=pg、alertname 为没有可写主库、没有主库、主库变化、切换卡住、PostgreSQL 宕机、postmaster 重启 | U1；`pg-failover` 与 `billing-critical` 为 U0 |
-| U1 业务降级 | 用户可感知的局部失败或变慢，或核心路径上的部件失效但还有余量 | `l0-warning`：layer=L0、warning<br>`core-termination`：OOM、驱逐与 CrashLoop 落在 `cchp-prod` 的 gateway、control、worker 容器上<br>`core-degraded`：核心组件的 symptom（critical 或 warning）<br>`core-runtime-critical`：核心组件或 workload 的 critical<br>`data-critical`：component=pg\|dragonfly\|nats、critical<br>`billing-warning`：component=business | `core-termination`、`billing-warning` 为 U1；其余 U2 |
+| U1 业务降级 | 用户可感知的局部失败或变慢，或核心路径上的部件失效但还有余量 | `l0-warning`：layer=L0、warning<br>`core-termination`：OOM、CrashLoop 与异常退出落在 `cchp-prod` 的 gateway、control、worker 容器上（CCHP 没有驱逐的告警，驱逐由技能的 `kube` 触发发现并挂到事件）<br>`core-degraded`：核心组件的 symptom（critical 或 warning）<br>`core-runtime-critical`：核心组件或 workload 的 critical<br>`data-critical`：component=pg\|dragonfly\|nats、critical<br>`billing-warning`：component=business | `core-termination`、`billing-warning` 为 U1；其余 U2 |
 | U2 有风险 | 现在没有业务影响，趋势或冗余的缺失会导致影响 | `provider-external`：component=provider（外部上游，按小时汇总，ADR 0147）<br>`forecast`：role=forecast 或 chain=capacity\|db-backup\|storage<br>`delivery`：layer=delivery（发布、GitOps、证书）<br>其余没有命中的告警按拓扑：`d ≤ 1` 为 U1，其余 U2 | — |
 | U3 无业务影响 | 只影响观测、交付流水线或 SreNautix 自身 | `meta`：layer=meta 或 chain=observability<br>`info`：severity=info<br>`e2e`：namespace=operation-* | — |
 
@@ -480,11 +480,11 @@ urgency:
   mode: shadow
   entry_components: [component:edge-caddy, component:edge-envoy]
   impact:
-    traffic_guard: { signal: cchp/edge_requests_5m, min: 0.02 }
-    indicators:
-      - { id: edge, signal_short: cchp/edge_error_ratio_5m, signal_mid: cchp/edge_error_ratio_30m,
+    traffic_guard: { signal: cchp/edge_requests, min: 0.02 }      # 已有信号
+    indicators:                                                    # *_30m、*_1h 为 cchp 包新增的信号，录制规则已有
+      - { id: edge, signal_short: cchp/edge_error_ratio, signal_mid: cchp/edge_error_ratio_30m,
           signal_long: cchp/edge_error_ratio_1h, budget: 0.005, applies_to: any }
-      - { id: gateway-own, signal_short: cchp/gateway_own_error_ratio_5m, signal_mid: cchp/gateway_own_error_ratio_30m,
+      - { id: gateway-own, signal_short: cchp/gateway_own_error_ratio, signal_mid: cchp/gateway_own_error_ratio_30m,
           signal_long: cchp/gateway_own_error_ratio_1h, budget: 0.005, applies_to: internal }
   notify: { digest: { at: "09:30", timezone: Asia/Shanghai } }
   routing: { business: { enabled: true } }
