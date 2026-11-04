@@ -427,6 +427,8 @@ export const serverConfigSchema = z
           .object({
             url,
             bearer_token_file: path.optional(),
+            // 校验 Loki 证书的 CA（PEM）；不填时用镜像的系统 CA
+            ca_file: path.optional(),
             // 多租户 Loki 的租户（X-Scope-OrgID）
             tenant: z.string().min(1).optional(),
             // 日志流上的 Kubernetes 标签名，按采集器的命名填写

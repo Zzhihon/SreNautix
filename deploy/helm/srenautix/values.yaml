@@ -218,8 +218,9 @@ datasources:
     dialect: promql
   alertmanager: {url: ""}
   # labels：日志流上的 Kubernetes 标签名（namespace、pod、container、cluster），不填时为同名标签、没有 cluster；
-  # tenant：多租户 Loki 的租户
-  loki: {url: "", tenant: "", labels: {}}
+  # tenant：多租户 Loki 的租户；caSecret：校验 Loki 证书的 CA 所在的 Secret（{name, key}，key 默认 ca.crt），
+  # 挂载到 server 的 /etc/srenautix/secrets/loki-ca；为空时用镜像的系统 CA
+  loki: {url: "", tenant: "", labels: {}, caSecret: null}
   tempo: {url: ""}
 
 # 告警接入源（server 的 ingest.sources）。每个接入源一个 bearer token，

@@ -336,6 +336,9 @@ datasources:
   {{- if .url }}
   loki:
     url: {{ .url }}
+    {{- with .caSecret }}
+    ca_file: /etc/srenautix/secrets/loki-ca/{{ .key | default "ca.crt" }}
+    {{- end }}
     {{- with .tenant }}
     tenant: {{ . }}
     {{- end }}
