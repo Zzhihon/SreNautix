@@ -350,6 +350,7 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
           id: 'loki',
           url: loki.url,
           bearerTokenFile: loki.bearer_token_file ?? null,
+          caFile: loki.ca_file ?? null,
           tenant: loki.tenant ?? null,
           labels: loki.labels,
           timeoutMs: parseDuration('datasources.loki.timeout', loki.timeout),

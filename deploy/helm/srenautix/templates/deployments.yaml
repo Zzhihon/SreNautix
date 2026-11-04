@@ -194,6 +194,11 @@ spec:
             - name: bindings
               mountPath: /etc/srenautix/bindings
               readOnly: true
+            {{- if and $.Values.datasources.loki.url $.Values.datasources.loki.caSecret }}
+            - name: loki-ca
+              mountPath: /etc/srenautix/secrets/loki-ca
+              readOnly: true
+            {{- end }}
             {{- range $s := $.Values.skills.userConfigMaps }}
             - name: skill-{{ $s }}
               mountPath: /etc/srenautix/skills/{{ $s }}/{{ $s }}
@@ -263,6 +268,15 @@ spec:
         - name: bindings
           configMap:
             name: {{ include "srenautix.bindingsConfigMap" $ }}
+        {{- with $.Values.datasources.loki.caSecret }}
+        {{- if $.Values.datasources.loki.url }}
+        - name: loki-ca
+          secret:
+            secretName: {{ .name }}
+            items:
+              - {key: {{ .key | default "ca.crt" }}, path: {{ .key | default "ca.crt" }}}
+        {{- end }}
+        {{- end }}
         {{- range $s := $.Values.skills.userConfigMaps }}
         - name: skill-{{ $s }}
           configMap:

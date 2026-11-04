@@ -32,3 +32,16 @@ tests:
           pattern: '(?m)^  loki:\n    labels:\n      cluster: cluster\n      namespace: k8s_namespace_name\n      pod: k8s_pod_name\n    tenant: team-a\n    url: http://loki\.logging\.svc:3100\n'
         template: templates/role-resources.yaml
         documentSelector: {path: metadata.name, value: t-srenautix-server-config}
+
+  - it: caSecret 挂载到 server 并写入 ca_file
+    set:
+      profile: standard
+      datasources.loki:
+        url: https://loki.logging.svc:3100
+        caSecret: {name: logging-ca}
+    asserts:
+      - matchRegex:
+          path: 'data["config.yaml"]'
+          pattern: '(?m)^  loki:\n    ca_file: /etc/srenautix/secrets/loki-ca/ca\.crt\n'
+        template: templates/role-resources.yaml
+        documentSelector: {path: metadata.name, value: t-srenautix-server-config}

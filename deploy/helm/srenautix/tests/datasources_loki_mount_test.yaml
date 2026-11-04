@@ -1,0 +1,37 @@
+suite: 日志数据源的 CA（datasources.loki.caSecret）
+templates:
+  - templates/deployments.yaml
+values:
+  - ../ci/base/required.yaml
+release:
+  name: t
+  namespace: srenautix
+capabilities:
+  majorVersion: "1"
+  minorVersion: "34"
+tests:
+  - it: 设置了 caSecret 时只给 server 挂载这个 Secret 的 CA 键
+    set:
+      profile: standard
+      datasources.loki:
+        url: https://loki.logging.svc:3100
+        caSecret: {name: logging-ca, key: tls-ca.pem}
+    documentSelector: {path: metadata.name, value: t-srenautix-server}
+    asserts:
+      - contains:
+          path: spec.template.spec.volumes
+          content: {name: loki-ca, secret: {secretName: logging-ca, items: [{key: tls-ca.pem, path: tls-ca.pem}]}}
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content: {name: loki-ca, mountPath: /etc/srenautix/secrets/loki-ca, readOnly: true}
+
+  - it: 没有 caSecret 时不挂载
+    set:
+      profile: standard
+      datasources.loki: {url: http://loki.logging.svc:3100}
+    documentSelector: {path: metadata.name, value: t-srenautix-server}
+    asserts:
+      - notContains:
+          path: spec.template.spec.volumes
+          content: {name: loki-ca}
+          any: true

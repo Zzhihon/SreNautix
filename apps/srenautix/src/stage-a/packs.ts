@@ -412,6 +412,8 @@ export interface LokiSource {
   id: string;
   url: string;
   bearerTokenFile: string | null;
+  /** 校验 Loki 证书的 CA 文件；null 时用系统 CA */
+  caFile?: string | null;
   tenant: string | null;
   /** 日志流上的 Kubernetes 标签名 */
   labels: { namespace: string; pod: string; container: string; cluster: string | null };
@@ -475,6 +477,7 @@ export class EvidenceSource {
           url: logs.url,
           labels: logs.labels,
           bearer_token_file: logs.bearerTokenFile,
+          ca_file: logs.caFile ?? null,
           tenant: logs.tenant,
           timeout_ms: logs.timeoutMs,
         })
