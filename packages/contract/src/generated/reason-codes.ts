@@ -77,7 +77,7 @@ export interface ReasonCodesByStage {
     | 'gateway_propose_only'
     | 'target_unresolved'
     | 'binding_stale';
-  issue: 'opened' | 'external_root' | 'rate_limit' | 'failed';
+  issue: 'opened' | 'reused' | 'external_root' | 'rate_limit' | 'failed';
   incident: 'resolved' | 'reopened' | 'suppressed' | 'persist_failed';
   feedback:
     | 'false_positive'
@@ -170,7 +170,7 @@ export interface ReasonCodesByGroup {
     | 'gateway_propose_only'
     | 'target_unresolved'
     | 'binding_stale';
-  issue: 'opened' | 'external_root' | 'rate_limit' | 'failed';
+  issue: 'opened' | 'reused' | 'external_root' | 'rate_limit' | 'failed';
   incident: 'resolved' | 'reopened' | 'suppressed' | 'persist_failed';
   feedback:
     | 'false_positive'
@@ -808,6 +808,13 @@ export const REASON_CODES: readonly ReasonCodeEntry[] = [
     level: 'info',
     groups: ['issue'],
     text: { 'zh-CN': '事件 issue 已开出', en: 'incident issue opened' },
+  },
+  {
+    code: 'reused',
+    stage: 'issue',
+    level: 'info',
+    groups: ['issue'],
+    text: { 'zh-CN': '复用同一系列已开的 issue', en: 'reused the open issue of the same series' },
   },
   {
     code: 'external_root',

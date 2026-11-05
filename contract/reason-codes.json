@@ -635,6 +635,16 @@
       "text": { "zh-CN": "事件 issue 已开出", "en": "incident issue opened" }
     },
     {
+      "code": "reused",
+      "stage": "issue",
+      "level": "info",
+      "groups": ["issue"],
+      "text": {
+        "zh-CN": "复用同一系列已开的 issue",
+        "en": "reused the open issue of the same series"
+      }
+    },
+    {
       "code": "external_root",
       "stage": "issue",
       "level": "info",

@@ -2431,7 +2431,7 @@ export type components = {
       evidence: string;
       from: components['schemas']['ComponentKey'];
       provenance: components['schemas']['Provenance'];
-      /** @description 关系名，例如 owned_by、runs_on、mounts、bound_to、provisioned_by、selects、routes_to、calls、references、egress_to、operator_convention、named_like */
+      /** @description 关系名，例如 owned_by、scales（HorizontalPodAutoscaler → spec.scaleTargetRef 指向的工作负载，契约 2.48.0，ADR 0184：没有 owned_by 的 HPA 归到它的组件）、runs_on、mounts、bound_to、provisioned_by、selects、routes_to、calls、references、egress_to、operator_convention、named_like */
       relation: string;
       /**
        * @description instance：只把同一实例的故障联系起来（Pod→节点、Pod→PVC→PV→CSI）；service：沿服务依赖传播

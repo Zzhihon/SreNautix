@@ -1,5 +1,5 @@
 // 本文件由 packages/contract/scripts/gen.ts 从 contract/ 生成，不要手工修改。
-export const CONTRACT_VERSION = '2.47.0';
+export const CONTRACT_VERSION = '2.48.0';
 
 export const SCHEMAS: Record<string, Record<string, unknown>> = {
   'https://srenautix.io/contract/gateway/v1/action-catalog.schema.json': {
@@ -9738,7 +9738,7 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
           relation: {
             type: 'string',
             description:
-              '关系名，例如 owned_by、runs_on、mounts、bound_to、provisioned_by、selects、routes_to、calls、references、egress_to、operator_convention、named_like',
+              '关系名，例如 owned_by、scales（HorizontalPodAutoscaler → spec.scaleTargetRef 指向的工作负载，契约 2.48.0，ADR 0184：没有 owned_by 的 HPA 归到它的组件）、runs_on、mounts、bound_to、provisioned_by、selects、routes_to、calls、references、egress_to、operator_convention、named_like',
           },
           provenance: { $ref: '#/$defs/Provenance' },
           confidence: {
