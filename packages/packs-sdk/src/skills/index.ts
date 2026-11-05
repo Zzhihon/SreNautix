@@ -26,6 +26,8 @@ export {
 export {
   rankSuspects,
   historyStats,
+  peakSignals,
+  peakExpr,
   type RankedSuspect,
   type SuspectDecl,
   type SuspectSeries,

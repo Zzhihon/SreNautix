@@ -12,6 +12,9 @@ The same root cause occurred again (run {{finding.occurrences}}, [{{run.id}}]({{
 {{#steps.rank.others}}
 - Another trigger: {{pods_and_times}}, {{title}} (confidence {{confidence_text}}).
 {{/steps.rank.others}}
+{{#steps.rank.unsupported_by_stats}}
+- Not supported by statistics (not ruled out): {{title}}.
+{{/steps.rank.unsupported_by_stats}}
 {{#steps.rank.ruled_out}}
 - Ruled out as the main cause: {{title}} (confidence {{confidence_text}}).
 {{/steps.rank.ruled_out}}

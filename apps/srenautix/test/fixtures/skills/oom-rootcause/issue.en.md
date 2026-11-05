@@ -12,7 +12,7 @@ Conclusion (main / secondary / confidence):
 
 - **Main cause (confidence medium-high)**: Large request bodies converted and appended whole. Large request bodies are decoded whole and appended whole when archived; concurrent ones add up beyond the budget headroom.
 - **Another trigger (confidence medium)**: api-gateway-0 11-01 07:53:00 was driven by Non-retryable rejections retried. Non-retryable upstream rejections are retried and every attempt grows the same archive record.
-- **Ruled out as the main cause (confidence high)**: Export task memory watchdog, an aggravating factor, see §3.
+- **Not supported by statistics (not ruled out)**: Export task memory watchdog, possibly an aggravating factor, see §3.
 
 ## 1. Evidence
 
@@ -69,15 +69,17 @@ Large requests in the main group (request_id, organization prefix and numbers on
 
 - **Large request bodies converted and appended whole** (main cause): Large request bodies are decoded whole and appended whole when archived; concurrent ones add up beyond the budget headroom (inferred, declared by the pack)
 - **Non-retryable rejections retried** (another trigger): Non-retryable upstream rejections are retried and every attempt grows the same archive record (inferred, declared by the pack)
-- **Export task memory watchdog** (ruled out as the main cause): The watchdog measures process heap objects and counts other requests' garbage against the export task (inferred, declared by the pack)
+- **Export task memory watchdog** (not supported by statistics): The watchdog measures process heap objects and counts other requests' garbage against the export task (inferred, declared by the pack)
 
-## 3. Ruled out and counter-examples
+## 3. Ruled out and statistical counter-examples
 
-- **Export task memory watchdog**: of the 43 samples in 48 h where it was high, 100.0% had memory that was not high (counter-examples), lift 0: high memory was no more likely than usual while it was high; it was still rising in the last 2 minutes before the main group occurrences, possibly the last straw (inferred).
+Only direct evidence that the mechanism was absent at the kills rules a suspect out; a missing statistical association only means it is not supported and rules nothing out.
+
+- **Export task memory watchdog** (not supported by statistics, not ruled out): of the 43 samples in 48 h where "Export deferrals" was high, 100.0% had memory that was not high (counter-examples), lift 0; no statistical association is not a rule-out: averaged or step-sampled series smooth over the spike of a single request, and nothing at the occurrences contradicts it; it was still rising in the last 2 minutes before the main group occurrences, possibly the last straw (inferred).
 
 ## 4. Fixes and operations options
 
-Code:
+Code (suspects not ruled out):
 
 - [ ] Stream large bodies or convert once per request
 - [ ] Preallocate archive writes and cap cached results

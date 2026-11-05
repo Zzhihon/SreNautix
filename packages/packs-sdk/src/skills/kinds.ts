@@ -35,7 +35,7 @@ export const STEP_KINDS: ReadonlyMap<string, StepKind> = new Map(
     kind(
       'metrics.range@v1',
       ['metrics.query_range'],
-      ['mode', 'occurrences', 'before', 'after', 'last', 'step', 'signals', 'extra'],
+      ['mode', 'occurrences', 'before', 'after', 'last', 'step', 'signals', 'extra', 'peak_resolution'],
       ['mode', 'signals', 'step'],
     ),
     // 按绑定声明的日志事件查询 Loki，只保留声明的字段

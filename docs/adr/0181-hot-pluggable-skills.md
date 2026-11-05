@@ -90,7 +90,7 @@ erDiagram
 |---|---|---|
 | `kube.read@v1` | `kube.read` | `pod_status`：运行对象的 Pod 状态摘要（容器、重启、最近一次终止、内存 limit；不含环境变量与卷）；`events`：命名空间中这些 Pod 的事件；`pod_logs_previous`：上一次退出的容器日志尾部，经脱敏与截断（ADR 0106） |
 | `trigger.occurrences@v1` | `metrics.query_range` | 窗口内的发生（Pod、容器、时刻、原因、时刻的来源）：领域包信号的区间查询，Pod 状态中最近一次终止的时刻（更精确，10 分钟内的同一 Pod 的发生改用它），以及触发带来的发生；标出这个工作负载上以前的运行没有报告过的发生（`new`） |
-| `metrics.range@v1` | `metrics.query_range` | `around`：每次发生前后的窗口，每个信号在这个 Pod 上的序列；`history`：整个工作负载的一段历史。查询只引用领域包的信号，按信号备选与标签档案渲染（DESIGN §6.2），选择器由宿主按运行对象生成；没有可用备选的信号没有数据 |
+| `metrics.range@v1` | `metrics.query_range` | `around`：每次发生前后的窗口，每个信号在这个 Pod 上的序列；`history`：整个工作负载的一段历史，绑定中声明为峰值型（`evidence: peak`）的序列按步长内的最大值取样（`max_over_time` 子查询，分辨率为 `peak_resolution`）。查询只引用领域包的信号，按信号备选与标签档案渲染（DESIGN §6.2），选择器由宿主按运行对象生成；没有可用备选的信号没有数据 |
 | `logs.events@v1` | `logs.query` | 按绑定声明的日志事件（消息、JSON 字段、可选的数值下限）生成 LogQL，选择器固定为运行对象的命名空间、Pod 与容器；只保留声明的字段，其余内容在解析之后丢弃 |
 | `logs.extract@v1` | 无 | 从已经读到的日志文本中按同样的事件声明取出字段 |
 | `analyze.memory_kind@v1`、`analyze.suspects@v1`、`analyze.top@v1`、`analyze.profiles@v1` | 无 | 确定性分析：内存终止的分类；嫌疑项的检验、分组与置信度；日志记录的排序与份额；堆画像的文件名与命令（算法见 [docs/skills/oom-rootcause.zh-CN.md](../skills/oom-rootcause.zh-CN.md)） |

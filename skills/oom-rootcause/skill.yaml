@@ -143,6 +143,8 @@ steps:
       mode: history
       last: { param: history }
       step: { param: history_step }
+      # 峰值型序列（evidence: peak）按步长内的最大值取样，子查询的分辨率与发生前后窗口的步长相同
+      peak_resolution: { param: step }
       signals:
         - go-runtime/heap_inuse
         - go-runtime/gomemlimit

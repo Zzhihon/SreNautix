@@ -94,6 +94,12 @@
           "enum": ["bytes", "bytes_per_second", "count", "per_second", "ratio", "cores", "seconds", "none"]
         },
         "high": { "type": "number", "description": "高位的门槛；没有时取 48 小时内的 p90" },
+        "evidence": {
+          "type": "string",
+          "enum": ["trend", "peak"],
+          "default": "trend",
+          "description": "检验序列的证据方式：trend 发生之前上涨并与内存同步；peak 发生之前窗口内的峰值达到 high（例如请求体预算 held），48 小时按步长内的最大值取样"
+        },
         "title": { "$ref": "#/$defs/text" }
       }
     },

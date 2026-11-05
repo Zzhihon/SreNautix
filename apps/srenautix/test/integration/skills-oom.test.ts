@@ -20,7 +20,7 @@ import { PACKS } from '../support/packs.js';
 /**
  * 技能 oom-rootcause 端到端（ADR 0181 §11）：夹具的指标装进真实的 VictoriaMetrics，日志装进真实的 Loki，业务仓库在内存中的
  * GitHub，Pod 状态与上一次退出的日志用录制的结果。手动运行（参考时刻 11-02 12:00Z）之后：
- * - 发生、分类、主因与另一种触发、反例排除、代码位置（固定到提交）、堆画像与运维侧选项写进 issue；
+ * - 发生、分类、主因与另一种触发、统计上未得到支持的嫌疑项、代码位置（固定到提交）、堆画像与运维侧选项写进 issue；
  * - 请求体、上游错误文字与环境变量不出现在 issue、运行记录与访问记录里；
  * - 每次访问都在授予的能力与运行对象之内；
  * - 同一根因再次出现时评论，不开新 issue。
@@ -167,7 +167,7 @@ describe('oom-rootcause 端到端', () => {
     expect(b).toMatch(/\| 11-01 07:5\d:00 \| api-gateway-0 \| 容器 limit 触发 \|/);
     expect(b).toContain('- **主因（置信度中高）**：大请求体整体转换与整段拼接。');
     expect(b).toContain('- **另一种触发（置信度中）**：api-gateway-0 11-01 07:5');
-    expect(b).toMatch(/- \*\*排除为主因（置信度(中|高)）\*\*：导出任务的内存看门狗，是次要加重因素/);
+    expect(b).toContain('- **统计上未得到支持（不排除）**：导出任务的内存看门狗，可能是次要加重因素，见 §3。');
     // 代码位置固定到提交；找不到的模式列为提示失效
     expect(b).toContain(
       `[\`internal/body/limit.go:6-11\`](https://github.com/${REPO}/blob/${commit}/internal/body/limit.go#L6-L11)`,

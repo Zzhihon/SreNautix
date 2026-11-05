@@ -279,16 +279,20 @@ describe('oom-rootcause 的分析', () => {
     expect(a.kind.inferred.length).toBe(3);
   });
 
-  it('主因是大请求体（11-02 的两次），E1 是另一种触发（不可重试的拒绝），导出看门狗被反例排除并是次要加重因素', () => {
+  it('主因是大请求体（11-02 的两次），E1 是另一种触发（不可重试的拒绝），导出看门狗统计上未得到支持但不排除，是次要加重因素', () => {
     const v = Object.fromEntries(
       a.rank.ranked.map((r) => [r.id, [r.verdict, r.confidence, r.group.map((g) => g.pod)]]),
     );
     expect(v['body-buffering']).toEqual(['main', 'medium_high', ['api-gateway-3', 'api-gateway-0']]);
     expect(v['retry-backlog']).toEqual(['other', 'medium', ['api-gateway-0']]);
-    expect(v['export-watchdog']?.[0]).toBe('ruled_out');
-    const w = a.rank.ruled_out.find((r) => r.id === 'export-watchdog')!;
+    // 48 小时的反例只说明统计上没有关联：不排除，没有置信度，修复方向仍然列出
+    expect(v['export-watchdog']).toEqual(['unsupported_by_stats', null, []]);
+    expect(a.rank.ruled_out).toEqual([]);
+    const w = a.rank.unsupported_by_stats.find((r) => r.id === 'export-watchdog')!;
     expect(w.aggravating).toBe(true);
     expect(w.history!.counter!).toBeGreaterThan(0.5);
+    expect(w.history!.lift!).toBeLessThan(P.rule_out_lift!);
+    expect(a.rank.fixes.map((f) => f.text)).toContain('看门狗按任务自身的字节计量');
     expect(a.rank.main_id).toBe('body-buffering');
     expect(a.rank.main_code_path).toBe('internal/body/limit.go');
     expect(a.rank.unexplained).toEqual([]);
@@ -353,5 +357,177 @@ describe('oom-rootcause 的分析', () => {
       }
       expect(body).toBe(readFileSync(golden, 'utf8'));
     }
+  });
+});
+
+// 判定分级（docs/skills/oom-rootcause.zh-CN.md §3.2）：统计上没有关联不排除；峰值型证据支持发生；只有直接反证才排除。
+// 一个 Pod、一次发生：请求体预算 held 在发生前 20 分钟冲到 700 MiB 又回落（2 分钟速率之类的平均与趋势检验看不到它），
+// 48 小时里 held 高位的样本都落在内存不高的时段（提升 0）
+describe('oom-rootcause 嫌疑项的判定分级', () => {
+  const T0 = Date.parse('2026-11-04T01:20:00Z');
+  const STEP = 30_000;
+  const MiB = 1024 ** 2;
+  const LIMIT = 3000 * MiB;
+  const pod = 'gw-0';
+  const held = (t: number, absent: boolean) =>
+    absent ? 0 : t >= T0 - 20 * MIN && t <= T0 - 15 * MIN ? 700 * MiB : MiB;
+  const heap = (t: number) => (1200 + (1600 * (t - (T0 - 30 * MIN))) / (30 * MIN)) * MiB;
+  const pts = (from: number, to: number, step: number, f: (t: number) => number) => {
+    const out: sdk.Point[] = [];
+    for (let t = from; t <= to; t += step) {
+      out.push({ t, v: f(t) });
+    }
+    return out;
+  };
+  const data = (expr: string, points: sdk.Point[]): sdk.SignalData => ({
+    expr,
+    series: [{ labels: { pod }, points }],
+  });
+
+  function run(evidence: 'trend' | 'peak', absent = false) {
+    const from = T0 - 30 * MIN;
+    const window: sdk.AroundWindow = {
+      pod,
+      container: 'gateway',
+      at: T0,
+      from,
+      to: T0,
+      signals: {
+        'm/heap': data('heap', pts(from, T0, STEP, heap)),
+        'm/limit': data(
+          'limit',
+          pts(from, T0, STEP, () => LIMIT),
+        ),
+        'm/held': data(
+          'held',
+          pts(from, T0, STEP, (t) => held(t, absent)),
+        ),
+      },
+    };
+    // 48 小时，5 分钟一个样本：内存高的 20 个样本与 held 高位的 20 个样本错开
+    const hFrom = T0 - 48 * 3600_000;
+    const h = 300_000;
+    const k = (t: number) => Math.round((t - hFrom) / h);
+    const history: sdk.HistoryWindow = {
+      from: hFrom,
+      to: T0,
+      step_seconds: 300,
+      signals: {
+        'm/heap': data(
+          'heap',
+          pts(hFrom, T0, h, (t) => (k(t) % 25 === 0 ? 2800 : 1000) * MiB),
+        ),
+        'm/limit': data(
+          'limit',
+          pts(hFrom, T0, h, () => LIMIT),
+        ),
+        'm/held': data(
+          'max_over_time((held)[300s:30s])',
+          pts(hFrom, T0, h, (t) => (k(t) % 25 === 12 ? 700 : 1) * MiB),
+        ),
+      },
+    };
+    const occ: sdk.ClassifiedOccurrence = {
+      pod,
+      container: 'gateway',
+      at: T0,
+      cause: 'oom_killed',
+      source: 'pod_status',
+      new: true,
+      at_text: sdk.fmtTime(T0),
+      kind: 'container_limit',
+      kind_text: '',
+      heap: 'live_heap_at_limit',
+      heap_text: '',
+      gc_proxy: false,
+      memory_peak: null,
+      memory_limit: null,
+      note: '',
+    };
+    return sdk.rankSuspects({
+      suspects: [
+        {
+          id: 'large-body',
+          title: { 'zh-CN': '大请求体', en: 'Large bodies' },
+          mechanism: { 'zh-CN': '大请求体整体进堆', en: 'Large bodies held whole' },
+          series: [
+            {
+              signal: 'm/held',
+              role: 'indicator',
+              unit: 'bytes',
+              high: 100 * MiB,
+              evidence,
+              title: { 'zh-CN': '请求体预算 held', en: 'Body budget held' },
+            },
+          ],
+          fixes: [{ 'zh-CN': '限制同时在途的大请求', en: 'Cap concurrent large requests' }],
+        },
+      ],
+      context: [],
+      classified: {
+        runtime: 'go',
+        memory_signal: 'm/heap',
+        limit_signal: 'm/limit',
+        occurrences: [occ],
+        facts: { limit: null, gomemlimit: null, gomaxprocs: null, image: null },
+        rows: [],
+        inferred: [],
+      },
+      around: [window],
+      history,
+      logs: [],
+      thresholds: {
+        rise_corr: P.rise_corr!,
+        lift_min: P.lift_min!,
+        rule_out_lift: P.rule_out_lift!,
+        reverse_margin: P.reverse_margin!,
+        min_history_samples: P.min_history_samples!,
+        memory_high_ratio: P.memory_high_ratio!,
+      },
+      lang: 'zh-CN',
+    });
+  }
+
+  it('统计上没有关联（提升 0、反例 100%）只记为统计上未得到支持：不排除、没有置信度、修复方向保留', () => {
+    const r = run('trend');
+    const s = r.ranked[0]!;
+    expect(s.history!.lift).toBe(0);
+    expect(s.history!.insufficient).toBe(false);
+    expect(s.verdict).toBe('unsupported_by_stats');
+    expect(s.confidence).toBeNull();
+    expect(s.reason_text).toContain('统计上看不到关联不等于排除');
+    expect(r.ruled_out).toEqual([]);
+    expect(r.unsupported_by_stats.map((x) => x.id)).toEqual(['large-body']);
+    expect(r.fixes).toEqual([{ text: '限制同时在途的大请求' }]);
+    expect(r.headline).toBe('原因未解释');
+  });
+
+  it('峰值型证据：发生前窗口内 held 的峰值达到 high，这次发生支持它，判为主因（统计上没有关联时置信度低）', () => {
+    const r = run('peak');
+    expect(r.main?.id).toBe('large-body');
+    expect(r.main!.peak_hits).toBe(1);
+    expect(r.main!.confidence).toBe('low');
+    expect(r.headline).toBe('大请求体');
+    expect(r.unexplained).toEqual([]);
+    const row = r.evidence.find((e) => e.basis === '推断（统计）')!;
+    expect(row.what).toBe('请求体预算 held（步长内峰值） 与内存高');
+    expect(row.query).toBe('max_over_time((held)[300s:30s])');
+  });
+
+  it('直接反证：发生之前的窗口里检验序列有数据并且一直为 0 才排除，排除项不给修复方向', () => {
+    const r = run('peak', true);
+    const s = r.ranked[0]!;
+    expect(s.verdict).toBe('ruled_out');
+    expect(s.confidence).toBe('high');
+    expect(s.reason_text).toContain('一直为 0');
+    expect(r.main).toBeNull();
+    expect(r.fixes).toEqual([]);
+  });
+
+  it('峰值型序列的历史按步长内的最大值取样', () => {
+    const extra = [[{ series: [{ signal: 'm/held', evidence: 'peak' }, { signal: 'm/rate' }] }], [{ signal: 'm/ctx' }]];
+    expect([...sdk.peakSignals(extra)]).toEqual(['m/held']);
+    expect(sdk.peakExpr('max by (pod) (held)', 300, 30)).toBe('max_over_time((max by (pod) (held))[300s:30s])');
+    expect(sdk.peakExpr('held', 300)).toBe('max_over_time((held)[300s:])');
   });
 });
