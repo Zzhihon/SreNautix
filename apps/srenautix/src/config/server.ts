@@ -8,6 +8,7 @@ import { DEFAULT_OPTIMIZATION, optimizationConfig, pgReadConnection } from '../o
 import { DEFAULT_SKILLS, skillsConfig } from '../skills/config.js';
 import { NOVELTY_CONFIG_DEFAULT, noveltyConfig } from './novelty.js';
 import { alertMatcher, upgradeMatchers, type AlertMatcher } from '../alerts/business-impact.js';
+import { categoryRule } from '../alerts/category.js';
 import { logger } from '../log.js';
 import type { ExternalRootSettings } from '../notify/external.js';
 
@@ -368,6 +369,9 @@ export const serverConfigSchema = z
         // Prometheus 的 external labels：Alertmanager 收到的告警带着它们，规则引擎的 ALERTS 不带。计算告警身份与指纹时
         // 去掉，webhook 与对账两条入口才能认出同一条告警（ADR 0117）
         external_labels: z.array(z.string().min(1)).default([...DEFAULT_EXTERNAL_LABELS]),
+        // 告警类别的规则表（ADR 0183）：告警没有合法的 srenautix_category 标签、命中的告警目录条目也没有声明 category 时，
+        // 取第一条命中的规则（匹配器写法同 ADR 0166）的类别；都不命中为 unclassified
+        category_rules: z.array(categoryRule).default([]),
         reconcile: z
           .object({
             enabled: z.boolean().default(true),
@@ -389,6 +393,7 @@ export const serverConfigSchema = z
         silence_threshold: '10m',
         watchdog_alertname: 'Watchdog',
         external_labels: [...DEFAULT_EXTERNAL_LABELS],
+        category_rules: [],
         reconcile: { enabled: true, interval: '60s', additions_interval: '5s' },
       }),
     // dirs 下的每个子目录是一个领域包；only 不填时加载除 `_` 开头（示例包）以外的全部包；oci 中的包总是加载

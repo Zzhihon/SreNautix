@@ -226,5 +226,17 @@ CREATE UNIQUE INDEX incident_reasons_once_idx ON server.incident_reasons (incide
   WHERE once_key IS NOT NULL;
 `,
     },
+    {
+      version: 8,
+      name: 'incident categories',
+      phase: 'expand',
+      sql: `
+-- 事件的类别与主类别（ADR 0183，契约 2.46.0），与 body 中的 categories、primary_category 相同，供 GET /v1/incidents 按类别筛选。
+-- 只加列与索引：N-1 版本写入时不认识这两列，它们保持为空；本版本取得主实例之后由数据修正 incident/categories 补上
+ALTER TABLE server.incidents ADD COLUMN categories text[];
+ALTER TABLE server.incidents ADD COLUMN primary_category text;
+CREATE INDEX incidents_categories_idx ON server.incidents USING gin (categories);
+`,
+    },
   ],
 };

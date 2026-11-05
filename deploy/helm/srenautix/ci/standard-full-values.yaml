@@ -64,6 +64,11 @@ secrets:
   auditSigningKey: {existingSecret: srenautix-audit-signing}
   datasources: {existingSecret: srenautix-datasources}
 
+ingest:
+  categoryRules:
+    - {labels: {component: [provider]}, category: provider}
+    - {labels: {layer: [L0]}, exclude_labels: {team: [infra]}, category: availability}
+
 datasources:
   prometheus: {url: http://prometheus-operated.monitoring.svc:9090}
   alertmanager: {url: http://alertmanager-operated.monitoring.svc:9093}

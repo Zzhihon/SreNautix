@@ -138,6 +138,8 @@ export async function resolveAlert(clusterId: string, a: RawAlert, deps: Resolve
     component = tryNodeKey(LOGICAL_KIND, null, a.labels.service);
   }
   if (ov && a.labels.role === undefined) {
+    // 覆盖只改角色与归属；类别照常按标签、告警目录与类别规则求出（ADR 0183）
+    const cat = deps.catalog.category(a.labels);
     return {
       classification: {
         role: ov.role,
@@ -145,6 +147,8 @@ export async function resolveAlert(clusterId: string, a: RawAlert, deps: Resolve
         confidence: 1,
         catalog_entry: `topology-overrides/${ov.ref}`,
         chronic: deps.chronic(a.alertname, component),
+        category: cat.category,
+        category_source: cat.source,
       },
       entity,
       entityResolution: resolution,

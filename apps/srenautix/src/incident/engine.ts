@@ -22,6 +22,14 @@ import { countReasons, writeReason, type ReasonRecord } from './reasons.js';
 
 export const SCHEMA_VERSION = '2.2.0';
 
+/** 事件的类别列（ADR 0183）：packages/core 重算出的事件（含合并掉的事件）总是带类别，没有时立即失败 */
+function categoriesOf(inc: Incident): { categories: string[]; primary_category: string } {
+  if (!inc.categories || !inc.primary_category) {
+    throw new Error(`事件 ${inc.incident_id} 没有类别，不能写入 server.incidents`);
+  }
+  return { categories: inc.categories, primary_category: inc.primary_category };
+}
+
 /** 版本变化时同一事务内调用：把绑定失效的提议标为 stale（由提议服务实现）。 */
 export interface StaleMarker {
   markStale(c: Queryable, b: NonNullable<Awaited<ReturnType<typeof currentBinding>>>): Promise<number>;
@@ -240,12 +248,13 @@ export class IncidentEngine {
   private async persist(c: Queryable, inc: Incident, prev: Incident | undefined): Promise<VersionReason | null> {
     await c.query(
       `INSERT INTO server.incidents (incident_id, cluster_id, label, version, state, severity, first_firing_at, ended_at, root_component,
-         suppressed, observability_blind, split_from, merged_into, body, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+         suppressed, observability_blind, split_from, merged_into, body, created_at, updated_at, categories, primary_category)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
        ON CONFLICT (incident_id) DO UPDATE SET version = excluded.version, state = excluded.state, severity = excluded.severity,
          first_firing_at = excluded.first_firing_at, ended_at = excluded.ended_at, root_component = excluded.root_component,
          suppressed = excluded.suppressed, observability_blind = excluded.observability_blind, split_from = excluded.split_from,
-         merged_into = excluded.merged_into, body = excluded.body, updated_at = excluded.updated_at`,
+         merged_into = excluded.merged_into, body = excluded.body, updated_at = excluded.updated_at,
+         categories = excluded.categories, primary_category = excluded.primary_category`,
       [
         inc.incident_id,
         inc.cluster_id,
@@ -263,6 +272,8 @@ export class IncidentEngine {
         JSON.stringify(inc),
         inc.created_at,
         inc.updated_at,
+        categoriesOf(inc).categories,
+        categoriesOf(inc).primary_category,
       ],
     );
     let reason: VersionReason | null = null;

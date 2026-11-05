@@ -1,4 +1,4 @@
-import type { Incident, StageAReport } from '@srenautix/contract';
+import type { Incident, IncidentCategory, StageAReport } from '@srenautix/contract';
 import type pg from 'pg';
 import type { Queryable } from '../store/pool.js';
 
@@ -20,6 +20,9 @@ export interface IncidentRow {
   merged_into: string | null;
   body: Incident;
   updated_at: Date;
+  /** 事件的类别（ADR 0183）；之前版本写下、数据修正 incident/categories 还没有补上的行为 null */
+  categories: IncidentCategory[] | null;
+  primary_category: IncidentCategory | null;
 }
 
 /**

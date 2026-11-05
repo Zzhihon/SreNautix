@@ -17,6 +17,7 @@ import { badRequest, notFound } from '../api/errors.js';
 import type { Auth } from '../identity/auth.js';
 import { scopeMatches, type RoleBinding, type Target } from '../identity/bindings.js';
 import { withComponentNames } from '../incident/names.js';
+import { categoryConditions, parseCategoryFilters, rowCategories } from './incident-filters.js';
 import { incidentVersion, latestStageA, resolveIncidentRef, type IncidentRow } from '../incident/read.js';
 import { reasonsOf, type IncidentReasonStage } from '../incident/reasons.js';
 import { researchRoots } from '../incident/research-root.js';
@@ -131,6 +132,7 @@ async function summaries(pool: pg.Pool, feedback: FeedbackService, topology: Top
       incident_version: r.version,
       state: r.state,
       severity: r.body.severity,
+      ...rowCategories(r),
       root_component: r.root_component,
       ambiguous: r.body.root.ambiguous,
       first_firing_at: r.first_firing_at.toISOString(),
@@ -191,6 +193,9 @@ export function registerIncidentRoutes(app: FastifyInstance, d: IncidentRouteDep
     if (q.from) add('coalesce(ended_at, now()) >= :p::timestamptz', q.from);
     if (q.to) add('first_firing_at <= :p::timestamptz', q.to);
     if (q.component) add("(root_component = :p OR jsonb_exists(body->'components', :p))", q.component);
+    for (const c of categoryConditions(parseCategoryFilters(req.query as Record<string, unknown>))) {
+      add(c.sql, c.value);
+    }
     if (q.q)
       add(
         "(label ILIKE '%' || :p || '%' OR root_component ILIKE '%' || :p || '%' OR body::text ILIKE '%' || :p || '%')",

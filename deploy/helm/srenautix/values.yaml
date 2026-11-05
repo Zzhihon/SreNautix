@@ -233,6 +233,12 @@ ingest:
   # Prometheus 的 external labels：不计入告警身份（ADR 0117）。为空时用 server 的默认值 [prometheus, prometheus_replica]；
   # 告警源加了别的 external label（例如 vmalert 的 -external.label=cluster=x）时写在这里，要包含默认的两个
   externalLabels: []
+  # 告警类别的规则表（server 的 ingest.category_rules，ADR 0183）：告警没有合法的 srenautix_category 标签、领域包的告警目录条目
+  # 也没有声明 category 时，取第一条命中的规则的类别，都不命中为 unclassified。每项是 ADR 0166 的匹配器加 category
+  # （availability | performance | provider | platform | observability），例如
+  #   - {labels: {component: [provider]}, category: provider}
+  #   - {labels: {layer: [L0]}, exclude_labels: {team: [infra]}, category: availability}
+  categoryRules: []
 
 # 外部上游的周期汇总（server 配置 notify.digest.external_roots，docs/server/notify.md，ADR 0147）：根因是领域包声明
 # external: true 的组件类型（例如模型服务方）、components 列出的组件，或全部成员告警都满足 alertLabels 的事件，不逐条推送、

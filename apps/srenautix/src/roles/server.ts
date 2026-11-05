@@ -6,6 +6,7 @@ import { setExternalLabels, type ResolvedRcaParams } from '@srenautix/core';
 import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
 import { parse as parseYaml } from 'yaml';
+import { categoryOptions } from '../alerts/category.js';
 import { registerReadLimit } from '../api/read-limit.js';
 import { createApp } from '../api/http.js';
 import { leaseLeader, neverLeader, singleLeader, type Leader } from '../api/leader.js';
@@ -94,6 +95,7 @@ import { RemediationChanges } from '../remediation/dedupe.js';
 import { GitOpsPulls } from '../remediation/pulls.js';
 import { RemediationService } from '../remediation/service.js';
 import { GitRepositoryTargets } from '../remediation/targets.js';
+import { incidentCorrections } from '../incident/corrections.js';
 import { serverCorrections, serverTracks } from './server-schema.js';
 import { KubeSkillReader } from '../skills/kube.js';
 import { registerSkillRoutes } from '../skills/routes.js';
@@ -334,7 +336,7 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
     failed: packs.failures.map((f) => f.name),
     lock_digest: packs.set.lockDigest,
   });
-  const alertCatalog = packs.alertCatalog();
+  const alertCatalog = packs.alertCatalog(categoryOptions(c.ingest.category_rules, metrics));
   const rcaParams = packs.rcaParams();
   const params = (): ResolvedRcaParams => rcaParams;
   const evidenceSource = await EvidenceSource.create(
@@ -462,7 +464,7 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
               })
             : singleLeader(),
           pool,
-          serverCorrections,
+          [...serverCorrections, ...incidentCorrections(alertCatalog)],
           holder,
         );
 

@@ -11,7 +11,7 @@ import type {
   RcaParams,
 } from '@srenautix/contract';
 import { assertValid } from '@srenautix/contract';
-import { AlertCatalog, resolveRcaParams, type ResolvedRcaParams } from '@srenautix/core';
+import { AlertCatalog, resolveRcaParams, type AlertCatalogOptions, type ResolvedRcaParams } from '@srenautix/core';
 import {
   detectLabelProfile,
   DatasourceError,
@@ -306,10 +306,11 @@ export class PackRuntime {
     return out;
   }
 
-  /** 告警目录（按包的加载顺序，同样具体时先声明的包优先）。 */
-  alertCatalog(): AlertCatalog {
+  /** 告警目录（按包的加载顺序，同样具体时先声明的包优先）；options 给出部署方的类别规则（ADR 0183）。 */
+  alertCatalog(options: AlertCatalogOptions = {}): AlertCatalog {
     return new AlertCatalog(
       this.set.packs.map((p) => ({ pack: p.name, entries: p.content.alerts.entries as AlertCatalogEntry[] })),
+      options,
     );
   }
 

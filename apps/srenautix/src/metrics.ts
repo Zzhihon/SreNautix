@@ -120,6 +120,13 @@ export class ServerMetrics extends BaseMetrics {
     registers: [this.registry],
   });
 
+  readonly alertCategoryLabelInvalid = new Counter({
+    name: 'srenautix_alert_category_label_invalid_total',
+    help: '告警的 srenautix_category 标签取值不在类别枚举里、被忽略的次数（每次分类计一次），按告警名（ADR 0183）',
+    labelNames: ['alertname'] as const,
+    registers: [this.registry],
+  });
+
   readonly alertsReresolved = new Counter({
     name: 'srenautix_alerts_reresolved_total',
     help: '重算阶段 A 之前按当前解析规则重新解析并回写的告警数（升级前接入的告警，ADR 0107）',

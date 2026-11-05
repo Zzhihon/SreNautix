@@ -158,7 +158,7 @@ export class IngestService {
   /**
    * 按当前的解析器重新解析已存储的告警（实体、kind 归一、告警目录条目、属主折叠、拓扑覆盖），有变化的行回写
    * alert_state 的分类、实体与组件，不改状态与时间（ADR 0107）。升级前接入的告警在重算阶段 A 之前用它对齐当前的
-   * 解析规则；组件有变化时通知事件流水线重算事件。返回回写的 alert_id。
+   * 解析规则；组件或类别有变化时通知事件流水线重算事件。返回回写的 alert_id。
    */
   async reresolve(clusterId: string, alertIds: readonly string[]): Promise<string[]> {
     if (!alertIds.length) {
@@ -173,7 +173,8 @@ export class IngestService {
     if (rows.rows.some((r) => isIgnorable(r.labels))) {
       await this.pool.query('SELECT pg_notify($1, $2)', [INGEST_CHANNEL, clusterId]);
     }
-    const updates: Array<{ id: string; r: Resolved; componentChanged: boolean }> = [];
+    // 组件或类别（ADR 0183）有变化时事件要重算：成员的组件决定分组，成员的类别决定事件的类别
+    const updates: Array<{ id: string; r: Resolved; recompute: boolean }> = [];
     for (const row of rows.rows.filter((r) => !isIgnorable(r.labels))) {
       const raw: RawAlert = {
         source: row.source as RawAlert['source'],
@@ -197,7 +198,11 @@ export class IngestService {
         r.entityResolution === row.entity_resolution &&
         r.component === row.component;
       if (!same) {
-        updates.push({ id: row.alert_id, r, componentChanged: r.component !== row.component });
+        updates.push({
+          id: row.alert_id,
+          r,
+          recompute: r.component !== row.component || r.classification.category !== row.classification.category,
+        });
       }
     }
     if (!updates.length) {
@@ -218,7 +223,7 @@ export class IngestService {
           ],
         );
       }
-      if (updates.some((u) => u.componentChanged)) {
+      if (updates.some((u) => u.recompute)) {
         await c.query('SELECT pg_notify($1, $2)', [INGEST_CHANNEL, clusterId]);
       }
     });

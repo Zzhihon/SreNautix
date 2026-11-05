@@ -287,6 +287,7 @@ ingest:
   {{- with $v.ingest.externalLabels }}
   external_labels: {{ toJson . }}
   {{- end }}
+  category_rules: {{ toJson ($v.ingest.categoryRules | default list) }}
   reconcile:
     enabled: true
     interval: 60s

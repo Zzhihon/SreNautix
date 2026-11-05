@@ -1,3 +1,4 @@
+import { matchesLabels } from '@srenautix/core';
 import { z } from 'zod';
 
 // 业务影响告警的定义（ADR 0166）：首条消息时延的 business_impact 标签、外部上游汇总的业务影响、处置推导中
@@ -20,21 +21,8 @@ export type AlertMatcher = z.infer<typeof alertMatcher>;
 
 type Labels = Readonly<Record<string, string | undefined>>;
 
-/** 一项匹配器：labels 全部满足，exclude_labels 一个都不满足 */
-export function matchesAlert(labels: Labels, m: AlertMatcher): boolean {
-  const include = Object.entries(m.labels);
-  return (
-    include.length > 0 &&
-    include.every(([k, vs]) => {
-      const v = labels[k];
-      return v !== undefined && vs.includes(v);
-    }) &&
-    !Object.entries(m.exclude_labels).some(([k, vs]) => {
-      const v = labels[k];
-      return v !== undefined && vs.includes(v);
-    })
-  );
-}
+/** 一项匹配器：labels 全部满足，exclude_labels 一个都不满足（与告警类别规则共用 packages/core 的 matchesLabels） */
+export const matchesAlert: (labels: Labels, m: AlertMatcher) => boolean = matchesLabels;
 
 /** 满足任一项即为业务影响告警；没有匹配器时为 false */
 export function isBusinessImpact(labels: Labels, matchers: readonly AlertMatcher[]): boolean {
