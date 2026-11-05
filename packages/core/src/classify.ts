@@ -1,8 +1,75 @@
 // 告警角色分类（DESIGN §3.2）：标签契约 → 告警目录 → 规则表达式 → 默认 symptom。
 // forecast 一律按表达式判断：目录条目或规则表达式含 predict_linear 才是 forecast。
-import type { AlertCatalogEntry, AlertClassification, AlertRole, Labels } from '@srenautix/contract';
+// 告警类别（ADR 0183）：srenautix_category 标签 → 告警目录条目 → 部署方的类别规则（第一条命中）→ unclassified。
+import type {
+  AlertCatalogEntry,
+  AlertCategory,
+  AlertClassification,
+  AlertRole,
+  IncidentCategory,
+  Labels,
+} from '@srenautix/contract';
 
 export const ALERT_ROLES: readonly AlertRole[] = ['cause', 'change', 'symptom', 'forecast', 'meta'];
+
+/** 与契约 common.schema.json 的 AlertCategory 相同（packages/core 的测试核对） */
+export const ALERT_CATEGORIES = [
+  'availability',
+  'performance',
+  'provider',
+  'platform',
+  'observability',
+] as const satisfies readonly AlertCategory[];
+
+export const UNCLASSIFIED = 'unclassified' satisfies IncidentCategory;
+
+/** 告警规则用这个标签覆盖告警目录声明的类别 */
+export const CATEGORY_LABEL = 'srenautix_category';
+
+export function isAlertCategory(v: string): v is AlertCategory {
+  return (ALERT_CATEGORIES as readonly string[]).includes(v);
+}
+
+/**
+ * 告警的标签匹配器（ADR 0166）：labels 的每个标签都取列出的值之一，并且 exclude_labels 中任何一个标签都不取列出的值。
+ * labels 为空的匹配器不匹配任何告警
+ */
+export interface LabelMatcher {
+  labels: Readonly<Record<string, readonly string[]>>;
+  exclude_labels: Readonly<Record<string, readonly string[]>>;
+}
+
+export function matchesLabels(labels: Readonly<Record<string, string | undefined>>, m: LabelMatcher): boolean {
+  const include = Object.entries(m.labels);
+  return (
+    include.length > 0 &&
+    include.every(([k, vs]) => {
+      const v = labels[k];
+      return v !== undefined && vs.includes(v);
+    }) &&
+    !Object.entries(m.exclude_labels).some(([k, vs]) => {
+      const v = labels[k];
+      return v !== undefined && vs.includes(v);
+    })
+  );
+}
+
+/** 部署方的类别规则（server 配置 ingest.category_rules 的一项） */
+export interface CategoryRule extends LabelMatcher {
+  category: AlertCategory;
+}
+
+export interface AlertCatalogOptions {
+  /** 有序的类别规则，告警目录条目没有声明类别时取第一条命中的 */
+  categoryRules?: readonly CategoryRule[];
+  /** srenautix_category 标签的取值不在枚举里时调用（标签被忽略） */
+  onInvalidCategoryLabel?: (alertname: string, value: string) => void;
+}
+
+export interface CategoryResult {
+  category: IncidentCategory;
+  source: NonNullable<AlertClassification['category_source']>;
+}
 
 export interface ExpressionClass {
   role: AlertRole;
@@ -64,8 +131,15 @@ export function isForecastExpression(expr: string): boolean {
 /** 目录中同名告警的变体，按 match_labels 的条件数从多到少排列 */
 export class AlertCatalog {
   private readonly byName = new Map<string, Array<{ pack: string; entry: AlertCatalogEntry }>>();
+  private readonly categoryRules: readonly CategoryRule[];
+  private readonly onInvalidCategoryLabel: (alertname: string, value: string) => void;
 
-  constructor(packs: ReadonlyArray<{ pack: string; entries: readonly AlertCatalogEntry[] }>) {
+  constructor(
+    packs: ReadonlyArray<{ pack: string; entries: readonly AlertCatalogEntry[] }>,
+    options: AlertCatalogOptions = {},
+  ) {
+    this.categoryRules = options.categoryRules ?? [];
+    this.onInvalidCategoryLabel = options.onInvalidCategoryLabel ?? (() => undefined);
     for (const { pack, entries } of packs) {
       for (const entry of entries) {
         const list = this.byName.get(entry.alertname) ?? [];
@@ -96,6 +170,29 @@ export class AlertCatalog {
   alertnames(): string[] {
     return [...this.byName.keys()].sort();
   }
+
+  /**
+   * 告警的类别（ADR 0183）：取值合法的 srenautix_category 标签 → 命中条目声明的 category → 第一条命中的类别规则 →
+   * unclassified。标签的取值不在枚举里时忽略标签，按后面的来源继续
+   */
+  category(labels: Labels): CategoryResult {
+    const label = labels[CATEGORY_LABEL];
+    if (label !== undefined) {
+      if (isAlertCategory(label)) {
+        return { category: label, source: 'label' };
+      }
+      this.onInvalidCategoryLabel(labels.alertname ?? '', label);
+    }
+    const declared = this.lookup(labels)?.entry.category;
+    if (declared !== undefined) {
+      return { category: declared, source: 'catalog' };
+    }
+    const rule = this.categoryRules.find((r) => matchesLabels(labels, r));
+    if (rule) {
+      return { category: rule.category, source: 'rule' };
+    }
+    return { category: UNCLASSIFIED, source: 'default' };
+  }
 }
 
 function specificity(e: AlertCatalogEntry): number {
@@ -109,9 +206,19 @@ export interface ClassifyInput {
   chronic: boolean;
 }
 
-/** 一个告警实例的角色分类 */
+/** 一个告警实例的角色分类与类别 */
 export function classifyAlert(input: ClassifyInput, catalog: AlertCatalog): AlertClassification {
   const { labels, ruleExpr, chronic } = input;
+  const cat = catalog.category(labels);
+  return { ...classifyRole(labels, ruleExpr, chronic, catalog), category: cat.category, category_source: cat.source };
+}
+
+function classifyRole(
+  labels: Labels,
+  ruleExpr: string | undefined,
+  chronic: boolean,
+  catalog: AlertCatalog,
+): Omit<AlertClassification, 'category' | 'category_source'> {
   const labelRole = labels.role;
   const hit = catalog.lookup(labels);
   if (labelRole !== undefined && (ALERT_ROLES as readonly string[]).includes(labelRole)) {

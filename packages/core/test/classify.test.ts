@@ -1,5 +1,8 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import type { AlertCatalogEntry } from '@srenautix/contract';
 import { describe, expect, it } from 'vitest';
-import { AlertCatalog, classifyAlert, classifyExpression } from '../src/index.js';
+import { ALERT_CATEGORIES, AlertCatalog, classifyAlert, classifyExpression, type CategoryRule } from '../src/index.js';
 
 // kube-prometheus-stack 92.10.1 渲染后的表达式（job 与命名空间取默认值）
 const PV_CRITICAL = `(
@@ -108,6 +111,8 @@ describe('告警目录与分类顺序', () => {
       confidence: 1,
       catalog_entry: null,
       chronic: false,
+      category: 'unclassified',
+      category_source: 'default',
     });
   });
 
@@ -123,5 +128,102 @@ describe('告警目录与分类顺序', () => {
       source: 'default',
       confidence: 0.3,
     });
+  });
+});
+
+describe('告警类别（ADR 0183）', () => {
+  const entries: AlertCatalogEntry[] = [
+    {
+      id: 'pod-crash-looping',
+      alertname: 'KubePodCrashLooping',
+      role: 'cause',
+      category: 'availability',
+      entity: { kind: 'Pod', name_labels: ['pod'] },
+    },
+    {
+      id: 'hpa-maxed-out',
+      alertname: 'KubeHpaMaxedOut',
+      role: 'symptom',
+      category: 'performance',
+      entity: { kind: 'HorizontalPodAutoscaler', name_labels: ['horizontalpodautoscaler'] },
+    },
+    {
+      // 第三方包的条目可以不声明类别，交给部署方的规则
+      id: 'shop-checkout-errors',
+      alertname: 'ShopCheckoutErrors',
+      role: 'symptom',
+      entity: { kind: 'Deployment', name_labels: ['deployment'] },
+    },
+  ];
+  const rules: CategoryRule[] = [
+    { labels: { component: ['provider'] }, exclude_labels: {}, category: 'provider' },
+    { labels: { layer: ['L0'] }, exclude_labels: { team: ['infra'] }, category: 'availability' },
+    { labels: { layer: ['L0', 'L3'] }, exclude_labels: {}, category: 'platform' },
+  ];
+  const invalid: Array<[string, string]> = [];
+  const catalog = new AlertCatalog([{ pack: 'test', entries }], {
+    categoryRules: rules,
+    onInvalidCategoryLabel: (alertname, value) => invalid.push([alertname, value]),
+  });
+  const of = (labels: Record<string, string>) => {
+    const c = classifyAlert({ labels, chronic: false }, catalog);
+    return [c.category, c.category_source];
+  };
+
+  it('类别枚举与契约相同', () => {
+    const common = JSON.parse(
+      readFileSync(fileURLToPath(new URL('../../../contract/schemas/common.schema.json', import.meta.url)), 'utf8'),
+    ) as { $defs: Record<string, { enum: string[] }> };
+    expect([...ALERT_CATEGORIES]).toEqual(common.$defs.AlertCategory!.enum);
+    expect([...ALERT_CATEGORIES, 'unclassified']).toEqual(common.$defs.IncidentCategory!.enum);
+  });
+
+  it('srenautix_category 标签优先于告警目录与规则', () => {
+    expect(of({ alertname: 'KubePodCrashLooping', srenautix_category: 'platform', component: 'provider' })).toEqual([
+      'platform',
+      'label',
+    ]);
+    expect(of({ alertname: 'NotInCatalog', srenautix_category: 'observability' })).toEqual(['observability', 'label']);
+  });
+
+  it('没有标签时取告警目录条目声明的类别，规则不覆盖目录', () => {
+    expect(of({ alertname: 'KubeHpaMaxedOut' })).toEqual(['performance', 'catalog']);
+    expect(of({ alertname: 'KubePodCrashLooping', component: 'provider' })).toEqual(['availability', 'catalog']);
+  });
+
+  it('目录没有声明类别时按规则表的顺序取第一条命中的规则，exclude_labels 命中的规则跳过', () => {
+    expect(of({ alertname: 'ShopCheckoutErrors', component: 'provider', layer: 'L0' })).toEqual(['provider', 'rule']);
+    expect(of({ alertname: 'ShopCheckoutErrors', layer: 'L0' })).toEqual(['availability', 'rule']);
+    expect(of({ alertname: 'ShopCheckoutErrors', layer: 'L0', team: 'infra' })).toEqual(['platform', 'rule']);
+    expect(of({ alertname: 'EdgeProbeFailed', layer: 'L3' })).toEqual(['platform', 'rule']);
+  });
+
+  it('标签、目录与规则都没有给出类别时为 unclassified', () => {
+    expect(of({ alertname: 'ShopCheckoutErrors', layer: 'L2' })).toEqual(['unclassified', 'default']);
+    expect(of({ alertname: 'Unknown' })).toEqual(['unclassified', 'default']);
+    expect(new AlertCatalog([]).category({ alertname: 'Unknown', layer: 'L0' })).toEqual({
+      category: 'unclassified',
+      source: 'default',
+    });
+  });
+
+  it('标签的取值不在枚举里时忽略标签、按后面的来源继续，并报告一次', () => {
+    invalid.length = 0;
+    expect(of({ alertname: 'KubeHpaMaxedOut', srenautix_category: 'latency' })).toEqual(['performance', 'catalog']);
+    expect(of({ alertname: 'ShopCheckoutErrors', srenautix_category: 'unclassified', layer: 'L0' })).toEqual([
+      'availability',
+      'rule',
+    ]);
+    expect(of({ alertname: 'Unknown', srenautix_category: '' })).toEqual(['unclassified', 'default']);
+    expect(invalid).toEqual([
+      ['KubeHpaMaxedOut', 'latency'],
+      ['ShopCheckoutErrors', 'unclassified'],
+      ['Unknown', ''],
+    ]);
+  });
+
+  it('告警自带 role 标签时类别照样按标签、目录与规则求出', () => {
+    const c = classifyAlert({ labels: { alertname: 'KubeHpaMaxedOut', role: 'cause' }, chronic: false }, catalog);
+    expect(c).toMatchObject({ role: 'cause', source: 'label', category: 'performance', category_source: 'catalog' });
   });
 });

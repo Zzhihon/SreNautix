@@ -12,10 +12,12 @@ import type {
   ClusterId,
   ComponentKey,
   Incident,
+  IncidentCategory,
   IncidentMember,
   Severity,
 } from '@srenautix/contract';
 import { changeLinks, groupChanges } from './change-grade.js';
+import { UNCLASSIFIED } from './classify.js';
 import { converge, type ConvergeInput, type AlertGroup } from './converge.js';
 import { rankRoot, silentRootTargets, type ProbeResult, type Ranking } from './rank.js';
 import { floorTo, formatTime, parseTime } from './time.js';
@@ -237,12 +239,17 @@ export function reconcileIncidents(input: ReconcileInput): ReconcileResult {
     };
     out.set(survivor.incident_id, survivor);
     changes.push({ type: 'incident.updated', incident: survivor });
+    const mergedMembers = p.members.map((m) =>
+      m.left_version === null ? { ...m, left_version: p.incident_version + 1 } : m,
+    );
     const merged: Incident = {
       ...p,
       state: 'merged',
       merged_into: survivor.incident_id,
       incident_version: p.incident_version + 1,
-      members: p.members.map((m) => (m.left_version === null ? { ...m, left_version: p.incident_version + 1 } : m)),
+      members: mergedMembers,
+      // 成员全部离开，类别取全部成员（之前版本写下的事件在这里补上类别）
+      ...incidentCategories(mergedMembers, p.root.component),
       updated_at: now,
     };
     out.set(merged.incident_id, merged);
@@ -316,6 +323,41 @@ function aggregate(c: ComputedIncident) {
   };
 }
 
+/** 告警的类别；之前版本接入、还没有重新解析的告警没有类别，按 unclassified */
+function alertCategory(a: Alert): IncidentCategory {
+  return a.classification.category ?? UNCLASSIFIED;
+}
+
+type CategoryMember = Pick<
+  IncidentMember,
+  'alert_id' | 'component' | 'severity' | 'starts_at' | 'category' | 'left_version'
+>;
+
+/**
+ * 事件的类别与主类别（ADR 0183）。categories 是当前成员（没有时取全部成员）的类别的并集，按字典序排列；
+ * primary_category 取根因组件上的成员中最严重的一个，根因组件上没有成员时取全部成员中最严重的一个，
+ * 同样严重时取开始更早的，再按 alert_id。没有类别的成员（之前版本写下的）按 unclassified
+ */
+export function incidentCategories(
+  members: readonly CategoryMember[],
+  rootComponent: ComponentKey | null,
+): { categories: IncidentCategory[]; primary_category: IncidentCategory } {
+  const current = members.filter((m) => m.left_version === null);
+  const pool = current.length > 0 ? current : members;
+  if (pool.length === 0) {
+    return { categories: [UNCLASSIFIED], primary_category: UNCLASSIFIED };
+  }
+  const categories = [...new Set(pool.map((m) => m.category ?? UNCLASSIFIED))].sort();
+  const onRoot = rootComponent === null ? [] : pool.filter((m) => m.component === rootComponent);
+  const primary = [...(onRoot.length > 0 ? onRoot : pool)].sort(
+    (a, b) =>
+      SEVERITY_RANK[b.severity] - SEVERITY_RANK[a.severity] ||
+      parseTime(a.starts_at) - parseTime(b.starts_at) ||
+      a.alert_id.localeCompare(b.alert_id),
+  )[0]!;
+  return { categories, primary_category: primary.category ?? UNCLASSIFIED };
+}
+
 function member(a: Alert, version: number): IncidentMember {
   return {
     alert_id: a.alert_id,
@@ -323,6 +365,7 @@ function member(a: Alert, version: number): IncidentMember {
     role: a.classification.role,
     component: a.component,
     severity: a.severity,
+    category: alertCategory(a),
     status: a.status,
     starts_at: a.starts_at,
     ends_at: a.ends_at,
@@ -341,6 +384,7 @@ function createIncident(
   splitFrom: string | null,
 ): Incident {
   const g = aggregate(c);
+  const members = g.alerts.map((a) => member(a, 1)).sort((a, b) => a.alert_id.localeCompare(b.alert_id));
   return {
     incident_id: id,
     cluster_id: clusterId,
@@ -352,8 +396,9 @@ function createIncident(
     ended_at: g.ended,
     root: c.ranking.root,
     candidates: g.candidates,
-    members: g.alerts.map((a) => member(a, 1)).sort((a, b) => a.alert_id.localeCompare(b.alert_id)),
+    members,
     components: g.components,
+    ...incidentCategories(members, c.ranking.root.component),
     changes: g.changes as ChangeEvent[],
     change_links: g.change_links,
     aliases: [],
@@ -386,7 +431,14 @@ function applyGroup(p: Incident, c: ComputedIncident, topologyVersion: number, n
       return m;
     }
     return a
-      ? { ...m, status: a.status, ends_at: a.ends_at, role: a.classification.role, component: a.component }
+      ? {
+          ...m,
+          status: a.status,
+          ends_at: a.ends_at,
+          role: a.classification.role,
+          component: a.component,
+          category: alertCategory(a),
+        }
       : { ...m, left_version: version };
   });
   for (const a of g.alerts) {
@@ -406,6 +458,7 @@ function applyGroup(p: Incident, c: ComputedIncident, topologyVersion: number, n
     candidates: g.candidates,
     members,
     components: g.components,
+    ...incidentCategories(members, c.ranking.root.component),
     changes: g.changes as ChangeEvent[],
     change_links: g.change_links,
     suppressed: g.suppressed,

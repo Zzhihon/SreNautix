@@ -1,9 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { assertValid, type Alert, type AlertmanagerAlert, type Incident } from '@srenautix/contract';
+import {
+  assertValid,
+  type Alert,
+  type AlertmanagerAlert,
+  type Incident,
+  type IncidentCategory,
+} from '@srenautix/contract';
 import {
   computeIncidents,
   DEFAULT_RCA_PARAMS,
   EntityResolver,
+  incidentCategories,
   incidentLabel,
   normalizeAlert,
   reconcileIncidents,
@@ -296,6 +303,92 @@ describe('持久化事件的对账：合并、拆分、别名', () => {
     expect(sameJson([1, 2], [2, 1])).toBe(false);
     expect(sameJson({ a: [1] }, { a: { 0: 1 } })).toBe(false);
     expect(sameJson({ a: '1' }, { a: 1 })).toBe(false);
+  });
+
+  it('事件的类别是当前成员类别的并集，主类别取根因组件上的成员；类别变化不改版本（ADR 0183）', async () => {
+    const store = clusterStore();
+    const graph = store.asOf(T0 + 60 * MIN);
+    const newId = ids();
+    const api = await alert(
+      store,
+      { alertname: 'ApiErrorRatioHigh', namespace: 'shop', deployment: 'api', severity: 'critical' },
+      '2026-10-15T10:02:00Z',
+      T0,
+    );
+    const pg = await alert(
+      store,
+      { alertname: 'KubeContainerOOMKilled', namespace: 'shop', pod: 'pg-1', severity: 'warning' },
+      '2026-10-15T10:01:00Z',
+      T0,
+    );
+    expect(api.classification).toMatchObject({ category: 'unclassified', category_source: 'default' });
+    expect(pg.classification).toMatchObject({ category: 'availability', category_source: 'catalog' });
+    const run = (previous: Incident[], alerts: Alert[], now: number) =>
+      reconcileIncidents({
+        clusterId: CLUSTER,
+        previous,
+        computed: computeIncidents({ alerts, changes: [], graph, params: DEFAULT_RCA_PARAMS, now }),
+        topologyVersion: graph.version,
+        now,
+        newId,
+      });
+    const r1 = run([], [api, pg], T0 + 5 * MIN);
+    const inc = r1.incidents[0]!;
+    assertValid('schemas/incident.schema.json', inc);
+    expect(inc.root.component).toBe('Cluster:shop/pg');
+    // 根因组件上的成员是 warning 的 OOM，critical 的 api 告警不在根因上：主类别取根因上的成员
+    expect(inc).toMatchObject({ categories: ['availability', 'unclassified'], primary_category: 'availability' });
+    expect(Object.fromEntries(inc.members.map((m) => [m.alertname, m.category]))).toEqual({
+      ApiErrorRatioHigh: 'unclassified',
+      KubeContainerOOMKilled: 'availability',
+    });
+
+    // 重新解析后 api 告警有了类别（例如部署方加了规则）：成员与事件的类别跟着变，成员与根因不变时版本不变
+    const reclassified: Alert = {
+      ...api,
+      classification: { ...api.classification, category: 'performance', category_source: 'rule' },
+    };
+    const r2 = run(r1.incidents, [reclassified, pg], T0 + 6 * MIN);
+    const inc2 = r2.incidents[0]!;
+    expect(inc2.incident_version).toBe(inc.incident_version);
+    expect(inc2).toMatchObject({ categories: ['availability', 'performance'], primary_category: 'availability' });
+
+    // OOM 告警离开事件后（拆分出去），类别只看剩下的成员
+    const r3 = run(r2.incidents, [reclassified], T0 + 7 * MIN);
+    const kept = r3.incidents.find((i) => i.incident_id === inc.incident_id)!;
+    expect(kept.categories).toEqual(['performance']);
+    expect(kept.primary_category).toBe('performance');
+  });
+
+  it('incidentCategories：没有根因或根因上没有成员时取最严重的成员，同样严重取开始更早的；之前版本的成员按 unclassified', () => {
+    const m = (
+      alert_id: string,
+      severity: 'critical' | 'warning',
+      starts_at: string,
+      category: IncidentCategory | undefined,
+      left_version: number | null = null,
+    ) => ({ alert_id, component: 'Deployment:shop/api', severity, starts_at, category, left_version });
+    const members = [
+      m('b@1', 'warning', '2026-10-15T10:00:00Z', 'performance'),
+      m('a@1', 'critical', '2026-10-15T10:05:00Z', 'provider'),
+      m('c@1', 'critical', '2026-10-15T10:01:00Z', 'availability'),
+      m('d@1', 'critical', '2026-10-15T09:00:00Z', 'observability', 2),
+    ];
+    expect(incidentCategories(members, null)).toEqual({
+      categories: ['availability', 'performance', 'provider'],
+      primary_category: 'availability',
+    });
+    expect(incidentCategories(members, 'Cluster:shop/pg').primary_category).toBe('availability');
+    expect(incidentCategories([m('x@1', 'warning', '2026-10-15T10:00:00Z', undefined)], null)).toEqual({
+      categories: ['unclassified'],
+      primary_category: 'unclassified',
+    });
+    // 全部成员都已离开（合并或拆分之后）：取全部成员
+    expect(incidentCategories([m('d@1', 'critical', '2026-10-15T09:00:00Z', 'observability', 2)], null)).toEqual({
+      categories: ['observability'],
+      primary_category: 'observability',
+    });
+    expect(incidentCategories([], null)).toEqual({ categories: ['unclassified'], primary_category: 'unclassified' });
   });
 
   it('标签取整到 10 分钟', () => {

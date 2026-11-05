@@ -38,6 +38,7 @@ export const CATALOG_ENTRIES: AlertCatalogEntry[] = [
     alertname: 'KubePodCrashLooping',
     expr: 'max_over_time(kube_pod_container_status_waiting_reason{reason="CrashLoopBackOff", job="kube-state-metrics"}[5m]) >= 1',
     role: 'cause',
+    category: 'availability',
     entity: { kind: 'Pod', name_labels: ['pod'] },
   },
   {
@@ -45,6 +46,7 @@ export const CATALOG_ENTRIES: AlertCatalogEntry[] = [
     alertname: 'KubeContainerOOMKilled',
     expr: 'increase(kube_pod_container_status_restarts_total[10m]) > 0 and on (namespace, pod, container) kube_pod_container_status_last_terminated_reason{reason="OOMKilled"} == 1',
     role: 'cause',
+    category: 'availability',
     entity: { kind: 'Pod', name_labels: ['pod'] },
   },
   {
@@ -53,6 +55,7 @@ export const CATALOG_ENTRIES: AlertCatalogEntry[] = [
     match_labels: { severity: 'warning' },
     expr: 'kubelet_volume_stats_available_bytes / kubelet_volume_stats_capacity_bytes < 0.15 and predict_linear(kubelet_volume_stats_available_bytes[6h], 4 * 24 * 3600) < 0',
     role: 'forecast',
+    category: 'availability',
     entity: { kind: 'PersistentVolumeClaim', name_labels: ['persistentvolumeclaim'] },
   },
   {
@@ -60,6 +63,7 @@ export const CATALOG_ENTRIES: AlertCatalogEntry[] = [
     alertname: 'KubeNodeNotReady',
     expr: 'kube_node_status_condition{job="kube-state-metrics",condition="Ready",status="true"} == 0',
     role: 'cause',
+    category: 'platform',
     entity: { kind: 'Node', name_labels: ['node'] },
   },
   {
@@ -67,6 +71,7 @@ export const CATALOG_ENTRIES: AlertCatalogEntry[] = [
     alertname: 'KubeDeploymentReplicasMismatch',
     expr: 'kube_deployment_spec_replicas != kube_deployment_status_replicas_available',
     role: 'symptom',
+    category: 'availability',
     entity: { kind: 'Deployment', name_labels: ['deployment'] },
   },
 ];
