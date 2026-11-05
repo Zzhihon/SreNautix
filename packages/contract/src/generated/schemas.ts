@@ -1,5 +1,5 @@
 // 本文件由 packages/contract/scripts/gen.ts 从 contract/ 生成，不要手工修改。
-export const CONTRACT_VERSION = '2.45.0';
+export const CONTRACT_VERSION = '2.46.0';
 
 export const SCHEMAS: Record<string, Record<string, unknown>> = {
   'https://srenautix.io/contract/gateway/v1/action-catalog.schema.json': {
@@ -2331,6 +2331,11 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
       role: { $ref: 'common.schema.json#/$defs/AlertRole' },
       role_confidence: { type: 'number', minimum: 0, maximum: 1, default: 1 },
       entity: { $ref: '#/$defs/EntityMapping' },
+      category: {
+        description:
+          '告警类别（契约 2.46.0，ADR 0183）。告警自带的 srenautix_category 标签优先；条目不写时由 server 的 ingest.category_rules 决定，都没有时为 unclassified',
+        $ref: 'common.schema.json#/$defs/AlertCategory',
+      },
       component_type: {
         type: 'string',
         description: '告警直接归属的组件类型（components.yaml 声明）；不填时归属解析出的实体本身',
@@ -2478,6 +2483,17 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
           confidence: { type: 'number', minimum: 0, maximum: 1 },
           catalog_entry: { type: ['string', 'null'], description: '命中的告警目录条目 <pack>/<entry id>' },
           chronic: { type: 'boolean', description: '长期告警：同一告警名 × 实体在 7 天内的触发率超过阈值' },
+          category: {
+            description:
+              '告警类别（契约 2.46.0，ADR 0183），按 category_source 的顺序取第一个给出类别的来源。之前版本接入的告警没有这个字段，重新解析时补上',
+            $ref: 'common.schema.json#/$defs/IncidentCategory',
+          },
+          category_source: {
+            type: 'string',
+            description:
+              '类别的来源，按优先级：label 告警自带取值合法的 srenautix_category 标签；catalog 命中的告警目录条目声明了 category；rule 第一条命中的 ingest.category_rules；default 都没有，类别为 unclassified',
+            enum: ['label', 'catalog', 'rule', 'default'],
+          },
         },
       },
     },
@@ -2504,6 +2520,20 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
       },
       Labels: { title: 'Labels', type: 'object', additionalProperties: { type: 'string' } },
       Severity: { title: 'Severity', type: 'string', enum: ['critical', 'warning', 'info'] },
+      AlertCategory: {
+        title: 'AlertCategory',
+        description:
+          '告警类别（契约 2.46.0，ADR 0183），描述告警反映的是哪一类问题，与角色、严重度、紧急度相互独立：availability 工作负载或数据服务不能正常提供服务（停止、崩溃、未就绪、副本不足、请求失败、证书过期、数据卷写满）；performance 仍在提供服务但变慢或接近容量（延迟、限流、饱和、积压、复制延迟、扩容到顶）；provider 集群外部的上游服务方（模型服务方、云厂商接口）；platform 工作负载之下的集群基础设施（节点、kubelet、控制面、etcd、存储系统、入口控制器配置、GitOps 交付、集群容量与配额）；observability 监控与告警链路自身（Prometheus、Alertmanager、kube-state-metrics、抓取目标、指标缺失）',
+        type: 'string',
+        enum: ['availability', 'performance', 'provider', 'platform', 'observability'],
+      },
+      IncidentCategory: {
+        title: 'IncidentCategory',
+        description:
+          '成员告警与事件上的类别：AlertCategory 的取值，或 unclassified（告警标签、告警目录条目与 ingest.category_rules 都没有给出类别）。按类别排除事件时 unclassified 永远不被排除',
+        type: 'string',
+        enum: ['availability', 'performance', 'provider', 'platform', 'observability', 'unclassified'],
+      },
       AlertRole: {
         title: 'AlertRole',
         description:
@@ -5339,6 +5369,18 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
         description: '成员告警涉及的组件，根因在前',
         items: { $ref: 'common.schema.json#/$defs/ComponentKey' },
       },
+      categories: {
+        type: 'array',
+        description:
+          '当前成员告警的类别的并集，按字典序排列、不重复，至少一项（契约 2.46.0，ADR 0183）；没有当前成员时取全部成员。之前版本写下的事件由数据修正 incident/categories 补上',
+        uniqueItems: true,
+        items: { $ref: 'common.schema.json#/$defs/IncidentCategory' },
+      },
+      primary_category: {
+        description:
+          '主类别（契约 2.46.0，ADR 0183）：根因组件上的当前成员告警中最严重的一个的类别；根因组件上没有成员告警（没有根因或沉默根因）时取全部当前成员中最严重的一个。同样严重时取开始更早的，再按 alert_id 的字典序',
+        $ref: 'common.schema.json#/$defs/IncidentCategory',
+      },
       changes: {
         type: 'array',
         description: '首次触发前 30 分钟到结束之间、触及事件组件的变更',
@@ -5517,6 +5559,10 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
           role: { $ref: 'common.schema.json#/$defs/AlertRole' },
           component: { oneOf: [{ type: 'null' }, { $ref: 'common.schema.json#/$defs/ComponentKey' }] },
           severity: { $ref: 'common.schema.json#/$defs/Severity' },
+          category: {
+            description: '告警的类别（Alert.classification.category，契约 2.46.0）；之前版本写下的成员没有这个字段',
+            $ref: 'common.schema.json#/$defs/IncidentCategory',
+          },
           status: { type: 'string', enum: ['firing', 'resolved'] },
           starts_at: { $ref: 'common.schema.json#/$defs/Timestamp' },
           ends_at: { oneOf: [{ type: 'null' }, { $ref: 'common.schema.json#/$defs/Timestamp' }] },

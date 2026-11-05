@@ -745,6 +745,10 @@ export type paths = {
      * @description 事件收件箱，按 first_firing_at 从新到旧。被抑制的事件不隐藏：suppressed=false（默认）时不返回明细，
      *     只在 suppressed_count 中计数。feedback=pending 表示最近一次完成的研判还没有反馈或反馈已过期。
      *     blind_spans 给出查询时段内接入静默或观测失明的时段，供收件箱画盲区色带。
+     *     类别与组件的筛选（契约 2.46.0，ADR 0183）在状态库的查询里执行，每个参数都可以重复：category 保留类别
+     *     （Incident.categories）与任一给出的取值相同的事件；exclude_category 去掉类别全部落在给出的取值中的事件，
+     *     带 unclassified 的事件因此不会被去掉；exclude_component 去掉组件（Incident.components，含根因组件）全部落在
+     *     给出的组件中的事件，没有组件的事件不去掉。
      */
     get: operations['listIncidents'];
     put?: never;
@@ -1815,6 +1819,12 @@ export type components = {
       }[];
       since: components['schemas']['Timestamp'];
     };
+    /**
+     * AlertCategory
+     * @description 告警类别（契约 2.46.0，ADR 0183），描述告警反映的是哪一类问题，与角色、严重度、紧急度相互独立：availability 工作负载或数据服务不能正常提供服务（停止、崩溃、未就绪、副本不足、请求失败、证书过期、数据卷写满）；performance 仍在提供服务但变慢或接近容量（延迟、限流、饱和、积压、复制延迟、扩容到顶）；provider 集群外部的上游服务方（模型服务方、云厂商接口）；platform 工作负载之下的集群基础设施（节点、kubelet、控制面、etcd、存储系统、入口控制器配置、GitOps 交付、集群容量与配额）；observability 监控与告警链路自身（Prometheus、Alertmanager、kube-state-metrics、抓取目标、指标缺失）
+     * @enum {string}
+     */
+    AlertCategory: 'availability' | 'performance' | 'provider' | 'platform' | 'observability';
     /** @description 按标签集查找告警所属事件的结果（契约 2.32.0，ADR 0154） */
     AlertLookup: {
       /** @description 这个指纹开始时间最晚的一条告警；outcome 为 incident 或 not_grouped 时有值 */
@@ -4072,6 +4082,8 @@ export type components = {
       aliases: components['schemas']['Alias'][];
       /** @description 前 k 个候选根因，按得分从高到低 */
       candidates: components['schemas']['RootCandidate'][];
+      /** @description 当前成员告警的类别的并集，按字典序排列、不重复，至少一项（契约 2.46.0，ADR 0183）；没有当前成员时取全部成员。之前版本写下的事件由数据修正 incident/categories 补上 */
+      categories?: components['schemas']['IncidentCategory'][];
       /** @description changes 中每个变更与事件的关联记录，顺序与 changes 相同：分级、依据、支撑 high 的成员告警与是否回退。由确定性代码计算（ADR 0169，契约 2.37.0）；之前版本的事件没有这个字段 */
       change_links?: components['schemas']['ChangeLink'][];
       /** @description 首次触发前 30 分钟到结束之间、触及事件组件的变更 */
@@ -4092,6 +4104,8 @@ export type components = {
       merged_into: null | components['schemas']['Uuid'];
       /** @description 至少 50% 的证据卡没有数据（DESIGN §7.1） */
       observability_blind: boolean;
+      /** @description 主类别（契约 2.46.0，ADR 0183）：根因组件上的当前成员告警中最严重的一个的类别；根因组件上没有成员告警（没有根因或沉默根因）时取全部当前成员中最严重的一个。同样严重时取开始更早的，再按 alert_id 的字典序 */
+      primary_category?: components['schemas']['IncidentCategory'];
       /** @description 最近一次完成的研判给出的根因，读取时由中心附上（ADR 0104 §14）；没有给出根因的研判、事件流与旧版本的事件没有这个字段 */
       research_root?: components['schemas']['ResearchRoot'];
       root: components['schemas']['Root'];
@@ -4188,6 +4202,8 @@ export type components = {
         Member: {
           alert_id: string;
           alertname: string;
+          /** @description 告警的类别（Alert.classification.category，契约 2.46.0）；之前版本写下的成员没有这个字段 */
+          category?: components['schemas']['IncidentCategory'];
           component: null | components['schemas']['ComponentKey'];
           ends_at: null | components['schemas']['Timestamp'];
           joined_version: number;
@@ -4208,6 +4224,12 @@ export type components = {
         };
       };
     };
+    /**
+     * IncidentCategory
+     * @description 成员告警与事件上的类别：AlertCategory 的取值，或 unclassified（告警标签、告警目录条目与 ingest.category_rules 都没有给出类别）。按类别排除事件时 unclassified 永远不被排除
+     * @enum {string}
+     */
+    IncidentCategory: 'availability' | 'performance' | 'provider' | 'platform' | 'observability' | 'unclassified';
     /**
      * IncidentLabel
      * @description 稳定标签 <根组件>:<首次触发时间取整到 10 分钟>，同一标签冲突时追加 ~2、~3
@@ -4235,6 +4257,8 @@ export type components = {
     } & components['schemas']['Header'];
     IncidentSummary: {
       ambiguous: boolean;
+      /** @description 事件的类别（Incident.categories，契约 2.46.0） */
+      categories: components['schemas']['IncidentCategory'][];
       cluster_id: components['schemas']['ClusterId'];
       /** @description 根因组件的可读名称（ADR 0101）；没有名称时为空对象 */
       component_names: components['schemas']['ComponentNames'];
@@ -4251,6 +4275,8 @@ export type components = {
       merged_from_count: number;
       observability_blind: boolean;
       pending_approvals: number;
+      /** @description 事件的主类别（Incident.primary_category，契约 2.46.0） */
+      primary_category: components['schemas']['IncidentCategory'];
       /** @description 最近一次研判或阶段 A 报告的时间 */
       research_fresh_at: null | components['schemas']['Timestamp'];
       /** @description 最近一次完成、给出了根因的研判的根因，及它与事件根因是否不一致（ADR 0104 §14）；没有这样的研判时为 null */
@@ -4453,6 +4479,8 @@ export type components = {
     Member: {
       alert_id: string;
       alertname: string;
+      /** @description 告警的类别（Alert.classification.category，契约 2.46.0）；之前版本写下的成员没有这个字段 */
+      category?: components['schemas']['IncidentCategory'];
       component: null | components['schemas']['ComponentKey'];
       ends_at: null | components['schemas']['Timestamp'];
       joined_version: number;
@@ -7985,10 +8013,16 @@ export interface operations {
   listIncidents: {
     parameters: {
       query?: {
+        /** @description 只返回类别与任一取值相同的事件；可以重复 */
+        category?: components['schemas']['IncidentCategory'][];
         cluster_id?: components['schemas']['ClusterId'];
         component?: components['schemas']['ComponentKey'];
         cursor?: string;
         disposition?: components['schemas']['Disposition'];
+        /** @description 去掉类别全部落在这些取值中的事件；可以重复。unclassified 不能被排除，给出时返回 400 */
+        exclude_category?: components['schemas']['AlertCategory'][];
+        /** @description 去掉组件全部落在这些组件中的事件；可以重复 */
+        exclude_component?: components['schemas']['ComponentKey'][];
         feedback?: 'pending' | 'given' | 'all';
         from?: string;
         limit?: number;

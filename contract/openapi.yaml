@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: SreNautix hub API
-  version: 2.45.0
+  version: 2.46.0
   license:
     name: Apache-2.0
     identifier: Apache-2.0
@@ -239,6 +239,10 @@ paths:
         事件收件箱，按 first_firing_at 从新到旧。被抑制的事件不隐藏：suppressed=false（默认）时不返回明细，
         只在 suppressed_count 中计数。feedback=pending 表示最近一次完成的研判还没有反馈或反馈已过期。
         blind_spans 给出查询时段内接入静默或观测失明的时段，供收件箱画盲区色带。
+        类别与组件的筛选（契约 2.46.0，ADR 0183）在状态库的查询里执行，每个参数都可以重复：category 保留类别
+        （Incident.categories）与任一给出的取值相同的事件；exclude_category 去掉类别全部落在给出的取值中的事件，
+        带 unclassified 的事件因此不会被去掉；exclude_component 去掉组件（Incident.components，含根因组件）全部落在
+        给出的组件中的事件，没有组件的事件不去掉。
       x-srenautix-roles: [viewer, responder, approver, auditor, admin]
       x-srenautix-external: true
       parameters:
@@ -249,6 +253,24 @@ paths:
         - { name: severity, in: query, schema: { $ref: './schemas/common.schema.json#/$defs/Severity' } }
         - { name: disposition, in: query, schema: { $ref: './schemas/common.schema.json#/$defs/Disposition' } }
         - { name: component, in: query, schema: { $ref: './schemas/common.schema.json#/$defs/ComponentKey' } }
+        - name: category
+          in: query
+          style: form
+          explode: true
+          description: 只返回类别与任一取值相同的事件；可以重复
+          schema: { type: array, items: { $ref: './schemas/common.schema.json#/$defs/IncidentCategory' } }
+        - name: exclude_category
+          in: query
+          style: form
+          explode: true
+          description: 去掉类别全部落在这些取值中的事件；可以重复。unclassified 不能被排除，给出时返回 400
+          schema: { type: array, items: { $ref: './schemas/common.schema.json#/$defs/AlertCategory' } }
+        - name: exclude_component
+          in: query
+          style: form
+          explode: true
+          description: 去掉组件全部落在这些组件中的事件；可以重复
+          schema: { type: array, items: { $ref: './schemas/common.schema.json#/$defs/ComponentKey' } }
         - { name: feedback, in: query, schema: { type: string, enum: [pending, given, all], default: all } }
         - { name: suppressed, in: query, schema: { type: boolean, default: false } }
         - { name: q, in: query, description: 按标签、根因组件与告警名搜索, schema: { type: string, maxLength: 200 } }
@@ -2622,6 +2644,8 @@ components:
         - updated_at
         - component_names
         - research_root
+        - categories
+        - primary_category
       properties:
         incident_id: { $ref: './schemas/common.schema.json#/$defs/Uuid' }
         cluster_id: { $ref: './schemas/common.schema.json#/$defs/ClusterId' }
@@ -2629,6 +2653,14 @@ components:
         incident_version: { type: integer, minimum: 1 }
         state: { type: string, enum: [firing, resolved, merged] }
         severity: { $ref: './schemas/common.schema.json#/$defs/Severity' }
+        categories:
+          description: 事件的类别（Incident.categories，契约 2.46.0）
+          type: array
+          uniqueItems: true
+          items: { $ref: './schemas/common.schema.json#/$defs/IncidentCategory' }
+        primary_category:
+          description: 事件的主类别（Incident.primary_category，契约 2.46.0）
+          $ref: './schemas/common.schema.json#/$defs/IncidentCategory'
         root_component:
           oneOf: [{ type: 'null' }, { $ref: './schemas/common.schema.json#/$defs/ComponentKey' }]
         ambiguous: { type: boolean }

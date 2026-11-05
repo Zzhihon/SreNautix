@@ -99,9 +99,27 @@ export type Severity = 'critical' | 'warning' | 'info';
  */
 export type AlertRole = 'cause' | 'change' | 'symptom' | 'forecast' | 'meta';
 /**
+ * 告警类别（契约 2.46.0，ADR 0183）。告警自带的 srenautix_category 标签优先；条目不写时由 server 的 ingest.category_rules 决定，都没有时为 unclassified
+ */
+export type AlertCategory = 'availability' | 'performance' | 'provider' | 'platform' | 'observability';
+/**
+ * 告警类别（契约 2.46.0，ADR 0183），按 category_source 的顺序取第一个给出类别的来源。之前版本接入的告警没有这个字段，重新解析时补上
+ */
+export type IncidentCategory =
+  'availability' | 'performance' | 'provider' | 'platform' | 'observability' | 'unclassified';
+/**
  * Prometheus 风格的时长，例如 30s、5m、2h、7d
  */
 export type Duration = string;
+/**
+ * 告警类别（契约 2.46.0，ADR 0183），描述告警反映的是哪一类问题，与角色、严重度、紧急度相互独立：availability 工作负载或数据服务不能正常提供服务（停止、崩溃、未就绪、副本不足、请求失败、证书过期、数据卷写满）；performance 仍在提供服务但变慢或接近容量（延迟、限流、饱和、积压、复制延迟、扩容到顶）；provider 集群外部的上游服务方（模型服务方、云厂商接口）；platform 工作负载之下的集群基础设施（节点、kubelet、控制面、etcd、存储系统、入口控制器配置、GitOps 交付、集群容量与配额）；observability 监控与告警链路自身（Prometheus、Alertmanager、kube-state-metrics、抓取目标、指标缺失）
+ */
+export type AlertCategory1 = 'availability' | 'performance' | 'provider' | 'platform' | 'observability';
+/**
+ * 成员告警与事件上的类别：AlertCategory 的取值，或 unclassified（告警标签、告警目录条目与 ingest.category_rules 都没有给出类别）。按类别排除事件时 unclassified 永远不被排除
+ */
+export type IncidentCategory1 =
+  'availability' | 'performance' | 'provider' | 'platform' | 'observability' | 'unclassified';
 /**
  * 主动优化的实体键（契约 2.28.0，ADR 0146 §1.1）：Kubernetes 对象或领域包组件为 ComponentKey；逻辑实体为 <类型>:<组件内的键>，例如 pg_statement:<CNPG Cluster 名>/<库>/<语句指纹>、pg_table:<Cluster 名>/<库>/<schema>.<表>、route:<服务>/<endpoint>、stage:<服务>/<阶段>。逻辑实体都挂到一个拓扑组件上
  */
@@ -186,6 +204,16 @@ export type Sha2563 = string;
  * 稳定标签 <根组件>:<首次触发时间取整到 10 分钟>，同一标签冲突时追加 ~2、~3
  */
 export type IncidentLabel = string;
+/**
+ * 成员告警与事件上的类别：AlertCategory 的取值，或 unclassified（告警标签、告警目录条目与 ingest.category_rules 都没有给出类别）。按类别排除事件时 unclassified 永远不被排除
+ */
+export type IncidentCategory2 =
+  'availability' | 'performance' | 'provider' | 'platform' | 'observability' | 'unclassified';
+/**
+ * 成员告警与事件上的类别：AlertCategory 的取值，或 unclassified（告警标签、告警目录条目与 ingest.category_rules 都没有给出类别）。按类别排除事件时 unclassified 永远不被排除
+ */
+export type IncidentCategory3 =
+  'availability' | 'performance' | 'provider' | 'platform' | 'observability' | 'unclassified';
 export type ChangeGrade = 'high' | 'medium' | 'low';
 /**
  * 判定向量的指纹（带迟滞，见 docs/core/convergence.md）
@@ -745,6 +773,8 @@ export interface SrenautixContractIndex {
   ClusterId?: ClusterId;
   Labels?: Labels;
   Severity?: Severity;
+  AlertCategory?: AlertCategory1;
+  IncidentCategory?: IncidentCategory1;
   AlertRole?: AlertRole;
   ComponentKey?: ComponentKey;
   EntityKey?: EntityKey;
@@ -2534,6 +2564,7 @@ export interface AlertCatalogEntry {
   role: AlertRole;
   role_confidence?: number;
   entity: AlertEntityMapping;
+  category?: AlertCategory;
   /**
    * 告警直接归属的组件类型（components.yaml 声明）；不填时归属解析出的实体本身
    */
@@ -2651,6 +2682,11 @@ export interface AlertClassification {
    * 长期告警：同一告警名 × 实体在 7 天内的触发率超过阈值
    */
   chronic: boolean;
+  category?: IncidentCategory;
+  /**
+   * 类别的来源，按优先级：label 告警自带取值合法的 srenautix_category 标签；catalog 命中的告警目录条目声明了 category；rule 第一条命中的 ingest.category_rules；default 都没有，类别为 unclassified
+   */
+  category_source?: 'label' | 'catalog' | 'rule' | 'default';
 }
 /**
  * 一个 Kubernetes 对象或领域包组件实例。uid 在实体解析成功时填写
@@ -3429,6 +3465,11 @@ export interface Incident {
    */
   components: ComponentKey[];
   /**
+   * 当前成员告警的类别的并集，按字典序排列、不重复，至少一项（契约 2.46.0，ADR 0183）；没有当前成员时取全部成员。之前版本写下的事件由数据修正 incident/categories 补上
+   */
+  categories?: IncidentCategory1[];
+  primary_category?: IncidentCategory3;
+  /**
    * 首次触发前 30 分钟到结束之间、触及事件组件的变更
    */
   changes: ChangeEvent[];
@@ -3517,6 +3558,7 @@ export interface IncidentMember {
   role: AlertRole;
   component: null | ComponentKey;
   severity: Severity;
+  category?: IncidentCategory2;
   status: 'firing' | 'resolved';
   starts_at: Timestamp;
   ends_at: null | Timestamp;

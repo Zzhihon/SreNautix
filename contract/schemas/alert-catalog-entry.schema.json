@@ -33,6 +33,10 @@
       "default": 1
     },
     "entity": { "$ref": "#/$defs/EntityMapping" },
+    "category": {
+      "description": "告警类别（契约 2.46.0，ADR 0183）。告警自带的 srenautix_category 标签优先；条目不写时由 server 的 ingest.category_rules 决定，都没有时为 unclassified",
+      "$ref": "common.schema.json#/$defs/AlertCategory"
+    },
     "component_type": {
       "type": "string",
       "description": "告警直接归属的组件类型（components.yaml 声明）；不填时归属解析出的实体本身"

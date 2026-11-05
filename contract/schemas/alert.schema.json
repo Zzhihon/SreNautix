@@ -96,6 +96,15 @@
         "chronic": {
           "type": "boolean",
           "description": "长期告警：同一告警名 × 实体在 7 天内的触发率超过阈值"
+        },
+        "category": {
+          "description": "告警类别（契约 2.46.0，ADR 0183），按 category_source 的顺序取第一个给出类别的来源。之前版本接入的告警没有这个字段，重新解析时补上",
+          "$ref": "common.schema.json#/$defs/IncidentCategory"
+        },
+        "category_source": {
+          "type": "string",
+          "description": "类别的来源，按优先级：label 告警自带取值合法的 srenautix_category 标签；catalog 命中的告警目录条目声明了 category；rule 第一条命中的 ingest.category_rules；default 都没有，类别为 unclassified",
+          "enum": ["label", "catalog", "rule", "default"]
         }
       }
     }

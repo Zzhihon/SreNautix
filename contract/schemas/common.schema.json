@@ -37,6 +37,18 @@
       "type": "string",
       "enum": ["critical", "warning", "info"]
     },
+    "AlertCategory": {
+      "title": "AlertCategory",
+      "description": "告警类别（契约 2.46.0，ADR 0183），描述告警反映的是哪一类问题，与角色、严重度、紧急度相互独立：availability 工作负载或数据服务不能正常提供服务（停止、崩溃、未就绪、副本不足、请求失败、证书过期、数据卷写满）；performance 仍在提供服务但变慢或接近容量（延迟、限流、饱和、积压、复制延迟、扩容到顶）；provider 集群外部的上游服务方（模型服务方、云厂商接口）；platform 工作负载之下的集群基础设施（节点、kubelet、控制面、etcd、存储系统、入口控制器配置、GitOps 交付、集群容量与配额）；observability 监控与告警链路自身（Prometheus、Alertmanager、kube-state-metrics、抓取目标、指标缺失）",
+      "type": "string",
+      "enum": ["availability", "performance", "provider", "platform", "observability"]
+    },
+    "IncidentCategory": {
+      "title": "IncidentCategory",
+      "description": "成员告警与事件上的类别：AlertCategory 的取值，或 unclassified（告警标签、告警目录条目与 ingest.category_rules 都没有给出类别）。按类别排除事件时 unclassified 永远不被排除",
+      "type": "string",
+      "enum": ["availability", "performance", "provider", "platform", "observability", "unclassified"]
+    },
     "AlertRole": {
       "title": "AlertRole",
       "description": "告警角色（DESIGN §3.2）：cause 原因；change 变更；symptom 症状；forecast 预测，不能成为活动事件的根因，也不能连接两个分组；meta 观测缺口",
