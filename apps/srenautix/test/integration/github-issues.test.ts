@@ -692,7 +692,7 @@ describe('事件 issue', () => {
     // 事件的成员与状态：一个成员告警，start 起触发，end 为 null 时仍在触发
     const occurrence = (id: string, alertId: string, start: number, end: number | null) =>
       db.admin.query(
-        `UPDATE server.incidents SET series_key = $2, state = $3, ended_at = $4, updated_at = now(),
+        `UPDATE server.incidents SET series_key = $2, state = $3, ended_at = $4::text::timestamptz, updated_at = now(),
            body = body || jsonb_build_object('state', $3::text, 'ended_at', $4::text, 'members', $5::jsonb)
          WHERE incident_id = $1`,
         [
