@@ -551,6 +551,29 @@ describe('GET /v1/incidents/export（ADR 0186）', () => {
     }
   }, 60_000);
 
+  it('研判失败的事件：队列 done 行的 skip_reason 是终态 failed，不当作原因码；原因取研判的失败类型', async () => {
+    scopes = 'all';
+    await db.server.query(
+      `WITH run AS (
+         INSERT INTO server.research_runs (run_id, incident_id, incident_version, reason, state, error, started_at, finished_at)
+         SELECT gen_random_uuid(), incident_id, version, 'new_incident', 'failed', $2, first_firing_at + interval '5 minutes',
+           first_firing_at + interval '6 minutes'
+           FROM server.incidents WHERE incident_id = $1
+         RETURNING run_id, incident_id, incident_version)
+       INSERT INTO server.research_queue (run_id, incident_id, incident_version, reason, severity, is_new, state, skip_reason, finished_at)
+       SELECT run_id, incident_id, incident_version, 'new_incident', 'warning', true, 'done', 'failed', now() FROM run`,
+      [id(7), JSON.stringify({ kind: 'internal', message: '模型输出无法解析' })],
+    );
+    const r = await get('&exclude_category=provider');
+    expect(r.statusCode).toBe(200);
+    const inc = (r.json() as IncidentExport).incidents.find((i) => i.incident_id === id(7))!;
+    const codes = inc.conclusion.undetermined?.codes ?? [];
+    expect(codes.map((c) => c.code)).not.toContain('failed');
+    expect(codes).toContainEqual(
+      expect.objectContaining({ stage: 'research', code: 'internal', detail: '模型输出无法解析' }),
+    );
+  });
+
   it('参数不合法时 400', async () => {
     expect((await app.inject({ method: 'GET', url: '/v1/incidents/export' })).statusCode).toBe(400);
     expect((await get('&exclude_category=unclassified')).statusCode).toBe(400);

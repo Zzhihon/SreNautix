@@ -340,9 +340,11 @@ async function loadFacts(pool: pg.Pool, ids: readonly string[]): Promise<Facts> 
       WHERE incident_id = ANY($1::uuid[]) ORDER BY incident_id, started_at DESC`,
     [ids],
   );
+  // 只有入队时跳过（state = skipped）的 skip_reason 是原因码；研判结束时 finish 把没有完成的研判的终态（failed、stage_a_only）
+  // 写在 done 行的 skip_reason 里，失败类型另在 research_runs.error
   const skips = await pool.query<SkipRow>(
     `SELECT DISTINCT ON (incident_id) incident_id, incident_version, skip_reason FROM server.research_queue
-      WHERE incident_id = ANY($1::uuid[]) AND skip_reason IS NOT NULL ORDER BY incident_id, enqueued_at DESC`,
+      WHERE incident_id = ANY($1::uuid[]) AND state = 'skipped' AND skip_reason IS NOT NULL ORDER BY incident_id, enqueued_at DESC`,
     [ids],
   );
   const reasons = await pool.query<ReasonRow>(
