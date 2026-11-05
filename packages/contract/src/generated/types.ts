@@ -539,6 +539,23 @@ export type OutboxEventType =
  */
 export type Duration2 = string;
 /**
+ * incident 只给出事件明细；series 另外按系列汇总
+ */
+export type IncidentExportGroupBy = 'incident' | 'series';
+/**
+ * RFC 3339 UTC 时间
+ */
+export type Timestamp6 = string;
+/**
+ * 原因码所属的阶段：notify 通知；stage_a 阶段 A；research 阶段 B 研判与入队；remediation 自愈 PR；issue 事件 issue；incident 事件状态；feedback 人工反馈与隐式反馈（ADR 0174）；skill 技能的运行（ADR 0181）
+ */
+export type ReasonStage =
+  'notify' | 'stage_a' | 'research' | 'remediation' | 'issue' | 'incident' | 'feedback' | 'skill';
+/**
+ * info 正常的终态；warning 需要留意但有其他告警或条件覆盖；error 不应发生的终态，SreNautixAbnormalTerminalStates 按它告警
+ */
+export type ReasonLevel = 'info' | 'warning' | 'error';
+/**
  * 计数的来源：events 为 Loki 里采集的 Kubernetes 事件；kube_state_metrics 为 kube-state-metrics 指标
  */
 export type KubeWarningSource = 'events' | 'kube_state_metrics';
@@ -554,6 +571,41 @@ export type Sha2569 = string;
  * 疑似同一根因的种类。node_memory_eviction：节点内存不足，kubelet 驱逐 Pod 或节点进入内存压力。以后的契约版本会增加取值，使用方必须容忍未知的种类
  */
 export type SuspectedCommonCauseKind = 'node_memory_eviction';
+/**
+ * format=ndjson 时的一行。顺序：一行 header，每个事件一行 incident，group=series 时每个系列一行 series，每个集群一行 kube_warnings，最后一行 end
+ */
+export type IncidentExportRecord =
+  | {
+      type: 'header';
+      generated_at: Timestamp;
+      window: TimeWindow;
+      filters: IncidentExportFilters;
+      group: IncidentExportGroupBy;
+      grouping: IncidentExportGroupingParams;
+    }
+  | {
+      type: 'incident';
+      incident: ExportedIncident;
+    }
+  | {
+      type: 'series';
+      series: ExportedSeries;
+    }
+  | {
+      type: 'kube_warnings';
+      kube_warnings: ExportedClusterKubeWarnings;
+    }
+  | {
+      type: 'end';
+      /**
+       * 导出的事件数
+       */
+      incidents: number;
+      suppressed_count: number;
+      complete: boolean;
+      truncated: boolean;
+      next_cursor: string | null;
+    };
 /**
  * <集成类别>.<能力>，例如 metrics.query_range、logs.match、traces.search、changes.list
  */
@@ -615,15 +667,6 @@ export type Duration6 = string;
  */
 export type AlertRole1 = 'cause' | 'change' | 'symptom' | 'forecast' | 'meta';
 /**
- * 原因码所属的阶段：notify 通知；stage_a 阶段 A；research 阶段 B 研判与入队；remediation 自愈 PR；issue 事件 issue；incident 事件状态；feedback 人工反馈与隐式反馈（ADR 0174）；skill 技能的运行（ADR 0181）
- */
-export type ReasonStage =
-  'notify' | 'stage_a' | 'research' | 'remediation' | 'issue' | 'incident' | 'feedback' | 'skill';
-/**
- * info 正常的终态；warning 需要留意但有其他告警或条件覆盖；error 不应发生的终态，SreNautixAbnormalTerminalStates 按它告警
- */
-export type ReasonLevel = 'info' | 'warning' | 'error';
-/**
  * 出境数据类别。sql：规范化语句文本（常量为 $n、去掉注释）；code：业务代码片段（契约 2.28.0，ADR 0146 §3.6）
  */
 export type EgressCategory =
@@ -662,7 +705,7 @@ export type SkillState = 'active' | 'paused' | 'not_enabled' | 'missing_grant' |
 /**
  * RFC 3339 UTC 时间
  */
-export type Timestamp6 = string;
+export type Timestamp7 = string;
 export type SkillTrigger = SkillMetricTrigger | SkillAlertTrigger | SkillKubeTrigger | SkillManualTrigger;
 /**
  * Prometheus 风格的时长，例如 30s、5m、2h、7d
@@ -898,6 +941,19 @@ export interface SrenautixContractIndex {
   GoalCreate?: GoalCreate;
   GoalRunState?: GoalRunState;
   GoalRunSummary?: GoalRunSummary;
+  IncidentExport?: IncidentExport;
+  IncidentExportGroupBy?: IncidentExportGroupBy;
+  IncidentExportFilters?: IncidentExportFilters;
+  IncidentExportGroupingParams?: IncidentExportGroupingParams;
+  ExportedIncident?: ExportedIncident;
+  ExportedConclusion?: ExportedConclusion;
+  ExportedUndetermined?: ExportedUndetermined;
+  ExportedReason?: ExportedReason;
+  ExportedEvidenceCard?: ExportedEvidenceCard;
+  ExportedIssue?: ExportedIssue;
+  ExportedSeries?: ExportedSeries;
+  ExportedClusterKubeWarnings?: ExportedClusterKubeWarnings;
+  IncidentExportRecord?: IncidentExportRecord;
   Incident?: Incident;
   ChangeLink?: ChangeLink;
   ChangeGrade?: ChangeGrade;
@@ -5482,6 +5538,429 @@ export interface GoalCreate {
   };
   expires_in?: Duration2;
 }
+/**
+ * GET /v1/incidents/export 的 JSON 结果（契约 2.49.0，ADR 0186）：时间窗内按条件筛出的事件明细、按系列的汇总（group=series 时）、每个集群的 Kubernetes Warning 查询状态与疑似同一根因的分组。告警、注解、模型与证据卡给出的文字照原样给出，与 GET /v1/incidents/{incident_ref} 相同
+ */
+export interface IncidentExport {
+  generated_at: Timestamp;
+  window: TimeWindow2;
+  filters: IncidentExportFilters;
+  group: IncidentExportGroupBy;
+  grouping: IncidentExportGroupingParams;
+  /**
+   * 事件明细，按 first_firing_at 从新到旧、同一时刻按 incident_id 从大到小
+   */
+  incidents: ExportedIncident[];
+  /**
+   * group=series 时为按系列的汇总，按最近一次触发从新到旧；group=incident 时为 null
+   */
+  series: null | ExportedSeries[];
+  /**
+   * 每个导出了事件的集群一项，按 cluster_id 排序
+   */
+  kube_warnings: ExportedClusterKubeWarnings[];
+  /**
+   * suppressed=false 时，本次导出覆盖的范围内（到最后一个导出的事件为止）被抑制、没有导出的事件数；suppressed=true 时为 0
+   */
+  suppressed_count: number;
+  /**
+   * 全部集群的 Kubernetes Warning 查询都成功且没有截断时为 true
+   */
+  complete: boolean;
+  /**
+   * 符合条件的事件多于 limit 时为 true，余下的事件用 next_cursor 继续导出
+   */
+  truncated: boolean;
+  next_cursor: string | null;
+}
+/**
+ * 请求的时间窗；与它有重叠的事件被导出
+ */
+export interface TimeWindow2 {
+  from: Timestamp;
+  to: Timestamp;
+}
+/**
+ * 实际使用的筛选条件，语义与 GET /v1/incidents 相同
+ */
+export interface IncidentExportFilters {
+  cluster_id: null | ClusterId;
+  severity: null | Severity;
+  component: null | ComponentKey;
+  category: IncidentCategory1[];
+  exclude_category: AlertCategory1[];
+  exclude_component: ComponentKey[];
+  /**
+   * 是否导出被抑制的事件
+   */
+  suppressed: boolean;
+}
+/**
+ * 疑似同一根因分组实际使用的参数（ADR 0185 §5），由查询参数 group_gap、group_before、group_after、group_min_incidents 覆盖默认值。每个分组的 criteria 另外列出它的信号 reason
+ */
+export interface IncidentExportGroupingParams {
+  gap_seconds: number;
+  before_seconds: number;
+  after_seconds: number;
+  min_incidents: number;
+}
+/**
+ * 导出的一个事件
+ */
+export interface ExportedIncident {
+  incident_id: Uuid;
+  cluster_id: ClusterId;
+  label: IncidentLabel;
+  state: 'firing' | 'resolved';
+  severity: Severity;
+  categories: IncidentCategory1[];
+  primary_category: IncidentCategory1;
+  /**
+   * 成员告警的告警名，去重排序；离开时仍在触发的成员（转到了别的事件）不算
+   */
+  alertnames: string[];
+  root: {
+    component: null | ComponentKey;
+    entity: null | EntityRef;
+    ambiguous: boolean;
+  };
+  components: ComponentKey[];
+  first_firing_at: Timestamp;
+  last_firing_at: Timestamp6;
+  /**
+   * 事件恢复的时刻；仍在触发时为 null
+   */
+  ended_at: null | Timestamp;
+  /**
+   * 累计触发时长：成员告警触发区间的并集（ADR 0184 的发生）的总长，仍在触发的区间算到 generated_at
+   */
+  firing_seconds: number;
+  /**
+   * 成员告警触发区间合并后的段数，即发生次数
+   */
+  occurrences: number;
+  /**
+   * 合并进本事件的事件数（incident_aliases）
+   */
+  merged_count: number;
+  /**
+   * 版本原因为 reopened 的版本数（ADR 0132、0184）
+   */
+  reopened_count: number;
+  /**
+   * 事件的系列键（ADR 0184）；之前版本写入的事件与没有根因的事件为 null
+   */
+  series_key: string | null;
+  conclusion: ExportedConclusion;
+  /**
+   * 最新阶段 A 报告里 abnormal 与 undeterminable 的证据卡，abnormal 在前
+   */
+  evidence: ExportedEvidenceCard[];
+  issues: ExportedIssue[];
+  kube_warnings: KubeWarningSummary;
+}
+/**
+ * 事件的研判结论：最近一次完成的阶段 B 研判；没有时取最新版本的阶段 A 处置；都没有时 source 为 none
+ */
+export interface ExportedConclusion {
+  source: 'research' | 'stage_a' | 'none';
+  disposition: null | Disposition;
+  /**
+   * 阶段 B 的结论档位；source 不是 research 时为 null
+   */
+  conclusion_level: null | ConclusionLevel;
+  /**
+   * source 为 stage_a 时为阶段 A 报告的 disposition_reason，其余为 null
+   */
+  disposition_reason: string | null;
+  run_id: null | Uuid;
+  /**
+   * 结论所针对的事件版本
+   */
+  incident_version: number | null;
+  /**
+   * 研判完成或阶段 A 报告生成的时刻
+   */
+  at: null | Timestamp;
+  /**
+   * 阶段 B 研判的摘要（模型生成）
+   */
+  summary: string | null;
+  /**
+   * 处置或结论档位为 undetermined、或者没有任何结论时，给出原因；其余为 null
+   */
+  undetermined: null | ExportedUndetermined;
+}
+export interface ExportedUndetermined {
+  /**
+   * 登记表中的原因码：研判的停止原因、研判失败的类型、入队跳过的原因，以及事件最近一个有终态记录的版本上 research、stage_a 阶段的终态记录
+   */
+  codes: ExportedReason[];
+  /**
+   * 阶段 B 研判给出的无法判定的原因（模型生成）
+   */
+  undetermined_reason: string | null;
+}
+export interface ExportedReason {
+  stage: ReasonStage;
+  code: string;
+  level: ReasonLevel;
+  /**
+   * 登记表中的中文说明
+   */
+  text: string;
+  /**
+   * 记录带的说明（错误摘要等）
+   */
+  detail: string | null;
+}
+export interface ExportedEvidenceCard {
+  ref: EvidenceRef;
+  card_id: string;
+  title: LocalizedText2;
+  verdict: 'abnormal' | 'undeterminable';
+  /**
+   * EvidenceResult.reason.kind，例如 no_data（查询没有样本）
+   */
+  reason_kind: string;
+  /**
+   * 一句摘要：主值（有时）加上判定说明的第一句
+   */
+  summary: string;
+}
+/**
+ * 事件关联的 GitHub issue（server.github_issues）；同一系列复用的 issue（ADR 0184）reused 为 true
+ */
+export interface ExportedIssue {
+  /**
+   * owner/name
+   */
+  repo: string;
+  number: number;
+  url: string;
+  /**
+   * closed 表示人已经在 GitHub 上关闭
+   */
+  state: 'open' | 'closed';
+  reused: boolean;
+}
+/**
+ * 一个事件时间窗内、事件组件的对象与组件所在节点上的 Warning 计数
+ */
+export interface KubeWarningSummary {
+  incident_id: Uuid;
+  window: TimeWindow;
+  /**
+   * 与报告的 complete 相同；单独导出一条事件时也能看到计数是否完整
+   */
+  complete: boolean;
+  /**
+   * 计数所针对的组件（请求中给出的事件组件）
+   */
+  components: ComponentKey[];
+  /**
+   * 组件自身以及拓扑中属于它的对象（Pod、ReplicaSet 等）上的计数，按 reason、source、unit 排序
+   */
+  counts: KubeWarningCount[];
+  /**
+   * 时间窗内组件所在的节点，以及每个节点上（节点对象与该节点上的全部 Pod）的计数，按节点名排序
+   */
+  nodes: KubeWarningNode[];
+  /**
+   * 组件对象的明细，按总计数从高到低，最多 20 个
+   *
+   * @maxItems 20
+   */
+  objects: KubeWarningObject[];
+  objects_truncated: boolean;
+}
+export interface KubeWarningCount {
+  /**
+   * Kubernetes 事件的 reason，例如 Evicted、FailedScheduling、BackOff、OOMKilled、EvictionThresholdMet、NodeHasInsufficientMemory、SystemOOM。kube-state-metrics 的计数使用对应的事件 reason
+   */
+  reason: string;
+  source: KubeWarningSource;
+  unit: KubeWarningUnit;
+  count: number;
+  /**
+   * count 中消息提到内存的部分（low on resource: memory、Insufficient memory、reclaim memory）；来源不带消息时为 null
+   */
+  memory: number | null;
+}
+export interface KubeWarningNode {
+  node: string;
+  /**
+   * 确定组件在这个节点上的依据：component 组件本身就是这个节点；topology 拓扑历史里组件的 Pod 在时间窗内运行在这个节点（runs_on）；events 组件对象的事件由这个节点的 kubelet 记录
+   */
+  via: ('component' | 'topology' | 'events')[];
+  counts: KubeWarningCount[];
+}
+export interface KubeWarningObject {
+  kind: string;
+  namespace: string | null;
+  name: string;
+  /**
+   * 计数归属的节点；调度失败等没有节点的计数不出现在这里
+   */
+  nodes: string[];
+  counts: KubeWarningCount[];
+}
+/**
+ * 同一系列的事件的汇总：有系列键（ADR 0184）时按系列键，没有时按 告警名集合 + 根因组件
+ */
+export interface ExportedSeries {
+  key: string;
+  /**
+   * series_key：事件的系列键；alertnames_root：事件没有系列键，按 <根因组件>|<告警名,…> 求出
+   */
+  key_source: 'series_key' | 'alertnames_root';
+  cluster_id: ClusterId;
+  root_component: null | ComponentKey;
+  alertnames: string[];
+  /**
+   * 全部事件的成员告警触发区间合并后的段数
+   */
+  occurrences: number;
+  firing_seconds: number;
+  first_firing_at: Timestamp;
+  last_firing_at: Timestamp;
+  /**
+   * 最后一个事件恢复的时刻；有事件仍在触发时为 null
+   */
+  ended_at: null | Timestamp;
+  /**
+   * 按 first_firing_at 从新到旧
+   */
+  incident_ids: Uuid[];
+  /**
+   * 按 repo 与 number 去重
+   */
+  issues: ExportedIssue[];
+}
+/**
+ * 一个集群的 KubeWarningReport（ADR 0185）去掉 summaries（摘要放在每个事件的 kube_warnings 上）
+ */
+export interface ExportedClusterKubeWarnings {
+  cluster_id: ClusterId;
+  window: TimeWindow;
+  step_seconds: number;
+  complete: boolean;
+  queries: KubeWarningQuery[];
+  groups: SuspectedCommonCauseGroup[];
+}
+/**
+ * 实际执行的一次聚合查询。每次导出每个集群执行的查询数固定，与事件数无关
+ */
+export interface KubeWarningQuery {
+  /**
+   * 查询名：events（Loki 事件计数）、oom_killed、evicted、unschedulable、crash_loop、memory_pressure（kube-state-metrics）
+   */
+  name: string;
+  source: KubeWarningSource;
+  /**
+   * 执行的 LogQL 或 PromQL
+   */
+  query: string;
+  /**
+   * ok 完整；truncated 序列数超过上限，只保留了按标签排序的前若干条；failed 查询失败或超时，这一来源的计数缺失
+   */
+  status: 'ok' | 'truncated' | 'failed';
+  /**
+   * 保留的序列数
+   */
+  series: number;
+  /**
+   * 截断或失败的说明
+   */
+  detail: string | null;
+  duration_ms: number;
+}
+/**
+ * 疑似由同一根因引起的一组事件：事件时间窗与节点信号的时间段（按 criteria 放宽）重叠、事件组件在这些节点上。分组是启发式的疑似结论，依据全部列出
+ */
+export interface SuspectedCommonCauseGroup {
+  group_id: Sha2569;
+  kind: SuspectedCommonCauseKind;
+  suspected: true;
+  window: TimeWindow3;
+  criteria: SuspectedCommonCauseCriteria;
+  /**
+   * @minItems 1
+   */
+  nodes: [SuspectedCommonCauseNode, ...SuspectedCommonCauseNode[]];
+  /**
+   * @minItems 1
+   */
+  incidents: [SuspectedCommonCauseIncident, ...SuspectedCommonCauseIncident[]];
+  /**
+   * 组内全部事件的成员告警名，排序去重
+   */
+  alertnames: string[];
+}
+/**
+ * 全部节点信号时间段的范围
+ */
+export interface TimeWindow3 {
+  from: Timestamp;
+  to: Timestamp;
+}
+/**
+ * 分组使用的判据
+ */
+export interface SuspectedCommonCauseCriteria {
+  /**
+   * 算作节点信号的 reason；Evicted、EvictionThresholdMet 只在消息提到内存时算
+   */
+  signal_reasons: string[];
+  /**
+   * 同一节点上相邻信号的间隔不超过它时并为一个时间段
+   */
+  gap_seconds: number;
+  /**
+   * 事件可以早于信号时间段开始的时长
+   */
+  before_seconds: number;
+  /**
+   * 事件可以晚于信号时间段结束的时长
+   */
+  after_seconds: number;
+  /**
+   * 成组需要的最少事件数
+   */
+  min_incidents: number;
+}
+export interface SuspectedCommonCauseNode {
+  node: string;
+  /**
+   * 这个节点上参与本组的信号时间段，按开始时间排序
+   *
+   * @minItems 1
+   */
+  signal_windows: [TimeWindow, ...TimeWindow[]];
+  /**
+   * 信号时间段内这个节点上（节点对象与其上的全部 Pod）的各原因计数
+   */
+  counts: KubeWarningCount[];
+}
+export interface SuspectedCommonCauseIncident {
+  incident_id: Uuid;
+  window: TimeWindow;
+  alertnames: string[];
+  /**
+   * 有本组信号、并且组件在事件时间窗或信号时间段内所在的节点
+   *
+   * @minItems 1
+   */
+  nodes: [string, ...string[]];
+  /**
+   * 事件时间窗与这些节点的信号时间段重叠的总秒数（时间段先取并集）；事件开始于信号结束之后、仍在 after_seconds 以内时为 0
+   */
+  overlap_seconds: number;
+  /**
+   * 事件时间窗内组件对象上的计数（与摘要的 counts 相同），例如调度失败中提到内存的次数
+   */
+  counts: KubeWarningCount[];
+}
 export interface ResearchRoot1 {
   run_id: Uuid;
   component: ComponentKey;
@@ -5569,7 +6048,7 @@ export interface IntegrationManifest {
  */
 export interface KubeWarningReport {
   cluster_id: ClusterId;
-  window: TimeWindow2;
+  window: TimeWindow4;
   /**
    * 计数的时间分桶宽度；一个分桶与事件时间窗有重叠就计入该事件
    */
@@ -5585,183 +6064,9 @@ export interface KubeWarningReport {
 /**
  * 全部事件时间窗的并集范围（终点不晚于计算时刻），查询覆盖这个范围
  */
-export interface TimeWindow2 {
+export interface TimeWindow4 {
   from: Timestamp;
   to: Timestamp;
-}
-/**
- * 实际执行的一次聚合查询。每次导出每个集群执行的查询数固定，与事件数无关
- */
-export interface KubeWarningQuery {
-  /**
-   * 查询名：events（Loki 事件计数）、oom_killed、evicted、unschedulable、crash_loop、memory_pressure（kube-state-metrics）
-   */
-  name: string;
-  source: KubeWarningSource;
-  /**
-   * 执行的 LogQL 或 PromQL
-   */
-  query: string;
-  /**
-   * ok 完整；truncated 序列数超过上限，只保留了按标签排序的前若干条；failed 查询失败或超时，这一来源的计数缺失
-   */
-  status: 'ok' | 'truncated' | 'failed';
-  /**
-   * 保留的序列数
-   */
-  series: number;
-  /**
-   * 截断或失败的说明
-   */
-  detail: string | null;
-  duration_ms: number;
-}
-/**
- * 一个事件时间窗内、事件组件的对象与组件所在节点上的 Warning 计数
- */
-export interface KubeWarningSummary {
-  incident_id: Uuid;
-  window: TimeWindow;
-  /**
-   * 与报告的 complete 相同；单独导出一条事件时也能看到计数是否完整
-   */
-  complete: boolean;
-  /**
-   * 计数所针对的组件（请求中给出的事件组件）
-   */
-  components: ComponentKey[];
-  /**
-   * 组件自身以及拓扑中属于它的对象（Pod、ReplicaSet 等）上的计数，按 reason、source、unit 排序
-   */
-  counts: KubeWarningCount[];
-  /**
-   * 时间窗内组件所在的节点，以及每个节点上（节点对象与该节点上的全部 Pod）的计数，按节点名排序
-   */
-  nodes: KubeWarningNode[];
-  /**
-   * 组件对象的明细，按总计数从高到低，最多 20 个
-   *
-   * @maxItems 20
-   */
-  objects: KubeWarningObject[];
-  objects_truncated: boolean;
-}
-export interface KubeWarningCount {
-  /**
-   * Kubernetes 事件的 reason，例如 Evicted、FailedScheduling、BackOff、OOMKilled、EvictionThresholdMet、NodeHasInsufficientMemory、SystemOOM。kube-state-metrics 的计数使用对应的事件 reason
-   */
-  reason: string;
-  source: KubeWarningSource;
-  unit: KubeWarningUnit;
-  count: number;
-  /**
-   * count 中消息提到内存的部分（low on resource: memory、Insufficient memory、reclaim memory）；来源不带消息时为 null
-   */
-  memory: number | null;
-}
-export interface KubeWarningNode {
-  node: string;
-  /**
-   * 确定组件在这个节点上的依据：component 组件本身就是这个节点；topology 拓扑历史里组件的 Pod 在时间窗内运行在这个节点（runs_on）；events 组件对象的事件由这个节点的 kubelet 记录
-   */
-  via: ('component' | 'topology' | 'events')[];
-  counts: KubeWarningCount[];
-}
-export interface KubeWarningObject {
-  kind: string;
-  namespace: string | null;
-  name: string;
-  /**
-   * 计数归属的节点；调度失败等没有节点的计数不出现在这里
-   */
-  nodes: string[];
-  counts: KubeWarningCount[];
-}
-/**
- * 疑似由同一根因引起的一组事件：事件时间窗与节点信号的时间段（按 criteria 放宽）重叠、事件组件在这些节点上。分组是启发式的疑似结论，依据全部列出
- */
-export interface SuspectedCommonCauseGroup {
-  group_id: Sha2569;
-  kind: SuspectedCommonCauseKind;
-  suspected: true;
-  window: TimeWindow3;
-  criteria: SuspectedCommonCauseCriteria;
-  /**
-   * @minItems 1
-   */
-  nodes: [SuspectedCommonCauseNode, ...SuspectedCommonCauseNode[]];
-  /**
-   * @minItems 1
-   */
-  incidents: [SuspectedCommonCauseIncident, ...SuspectedCommonCauseIncident[]];
-  /**
-   * 组内全部事件的成员告警名，排序去重
-   */
-  alertnames: string[];
-}
-/**
- * 全部节点信号时间段的范围
- */
-export interface TimeWindow3 {
-  from: Timestamp;
-  to: Timestamp;
-}
-/**
- * 分组使用的判据
- */
-export interface SuspectedCommonCauseCriteria {
-  /**
-   * 算作节点信号的 reason；Evicted、EvictionThresholdMet 只在消息提到内存时算
-   */
-  signal_reasons: string[];
-  /**
-   * 同一节点上相邻信号的间隔不超过它时并为一个时间段
-   */
-  gap_seconds: number;
-  /**
-   * 事件可以早于信号时间段开始的时长
-   */
-  before_seconds: number;
-  /**
-   * 事件可以晚于信号时间段结束的时长
-   */
-  after_seconds: number;
-  /**
-   * 成组需要的最少事件数
-   */
-  min_incidents: number;
-}
-export interface SuspectedCommonCauseNode {
-  node: string;
-  /**
-   * 这个节点上参与本组的信号时间段，按开始时间排序
-   *
-   * @minItems 1
-   */
-  signal_windows: [TimeWindow, ...TimeWindow[]];
-  /**
-   * 信号时间段内这个节点上（节点对象与其上的全部 Pod）的各原因计数
-   */
-  counts: KubeWarningCount[];
-}
-export interface SuspectedCommonCauseIncident {
-  incident_id: Uuid;
-  window: TimeWindow;
-  alertnames: string[];
-  /**
-   * 有本组信号、并且组件在事件时间窗或信号时间段内所在的节点
-   *
-   * @minItems 1
-   */
-  nodes: [string, ...string[]];
-  /**
-   * 事件时间窗与这些节点的信号时间段重叠的总秒数（时间段先取并集）；事件开始于信号结束之后、仍在 after_seconds 以内时为 0
-   */
-  overlap_seconds: number;
-  /**
-   * 事件时间窗内组件对象上的计数（与摘要的 counts 相同），例如调度失败中提到内存的次数
-   */
-  counts: KubeWarningCount[];
 }
 /**
  * 领域包的 pack.yaml（DESIGN §6.3）。领域包只包含数据，不包含可执行代码；其余文件的结构见本文件的 $defs：signals.yaml → SignalsFile，components.yaml → ComponentsFile，alerts.yaml → AlertsFile，chains.yaml → ChainsFile，checks.yaml → ChecksFile，rules.yaml → RulesFile，conclusions.yaml → ConclusionsFile，remediations.yaml → RemediationsFile，domains.yaml → DomainsFile，issues.yaml → IssuesFile，skill-bindings.yaml → SkillBindingsFile，rca-params.yaml → RcaParams，knowledge/*.yaml → KnowledgeFile，action-requests.yaml → ActionRequestsFile，chaos/*.yaml → ChaosFile，tests/*.yaml → PackTestFile，用户层文件 → UserLayer，pack.lock → PackLock
@@ -7547,7 +7852,7 @@ export interface SkillRunCreate {
    * 按清单的 inputs 校验；不填时为空对象
    */
   inputs?: {};
-  at?: Timestamp6;
+  at?: Timestamp7;
 }
 export interface SkillPatch {
   paused: boolean;

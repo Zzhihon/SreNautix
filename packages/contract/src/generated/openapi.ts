@@ -948,6 +948,34 @@ export type paths = {
     patch?: never;
     trace?: never;
   };
+  '/v1/incidents/export': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * @description 按时间窗批量导出事件（契约 2.49.0，ADR 0186）。导出与时间窗 [from, to] 有重叠的事件（合并掉的事件除外，它们计入
+     *     吸收它们的事件的 merged_count），from 与 to 必填，跨度不超过 31 天。cluster_id、severity、component、category、
+     *     exclude_category、exclude_component、suppressed 的语义与 GET /v1/incidents 相同，在状态库的同一段查询条件里执行；
+     *     授权与可见性也相同：调用方只能看到读取作用域内的事件。
+     *     每个事件带告警名、根因组件与实体、首次与末次触发、累计触发时长、发生次数、合并次数、重开次数、类别、研判结论
+     *     （无法判定时附原因码与原因）、abnormal 与 undeterminable 证据卡的一句摘要、关联的影子 issue，以及事件时间窗
+     *     （限定在导出时间窗内）里的 Kubernetes Warning 摘要（ADR 0185）。每个集群另给出 Warning 查询的状态与疑似同一根因的
+     *     分组，分组只在导出的这一批事件里计算。查询数与事件数无关：状态库按批查询，每个集群的 Warning 查询数固定。
+     *     一次最多 limit 条（默认与上限 5000），还有更多时 truncated 为 true，用 next_cursor 继续；group=series 时另按系列汇总。
+     *     format=ndjson 时逐行输出 IncidentExportRecord；format=md 给人阅读：先列疑似同一根因的分组，再按系列汇总，最后是事件明细。
+     */
+    get: operations['exportIncidents'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/v1/ingest/{source_id}': {
     parameters: {
       query?: never;
@@ -1589,6 +1617,50 @@ export type paths = {
 export type webhooks = Record<string, never>;
 export type components = {
   schemas: {
+    /** ResearchConclusion */
+    '$defs-Conclusion': {
+      /** @description 选中根因所在的范围（契约 2.38.0，ADR 0170）：模型给出，代码按确定性依据校正。根因是领域包声明在集群之外的组件时为 upstream；根因不由 GitOps 仓库负责（处置依据的 repository_owned）时不能是 local 或 configuration；结论为 undetermined 或没有选中根因时为 unknown。之前的研判输出没有这个字段 */
+      cause_scope?: components['schemas']['CauseScope'];
+      consistency: components['schemas']['ConsistencyChecks'];
+      consistency_detail?: components['schemas']['ConsistencyDetail'];
+      hypothesis_id: string | null;
+      level: components['schemas']['ConclusionLevel'];
+      root_component: null | components['schemas']['ComponentKey'];
+      undetermined_reason: string | null;
+    };
+    /** TopologyNode */
+    '$defs-Node': {
+      /** @description 领域包 components.yaml 匹配到的组件类型 */
+      component_type: string | null;
+      /** @description 集群枢纽（CoreDNS、CNI、apiserver、存储）：只有在出现针对它的证据，或至少 3 个独立依赖方同时失败时才吸收症状 */
+      hub: boolean;
+      /** @description Pod 容器的镜像（kube_pod_container_info 的 image 与 image_id），去重后按字典序；只有 Pod 节点填写，用于把发布之前的 Job 关联到发布（ADR 0104 §13） */
+      images?: string[];
+      key: components['schemas']['ComponentKey'];
+      kind: string;
+      labels: components['schemas']['Labels'];
+      name: string;
+      namespace: string | null;
+      uid: string | null;
+    };
+    /** EvidenceReason */
+    '$defs-Reason': {
+      /**
+       * @description rule：命中判定规则；no_data：查询没有样本；partial_data：部分查询没有样本；source_error：数据源报错或超时；capability_missing：所需能力不可用；observability_gap：依赖的目标有 meta 告警；evaluation_error：CEL 求值出错；all_clear：没有命中任何规则；model_judged：只读工具的结果没有 CEL 判定，由小模型对照 refutes_if 判定（可以支持 likely，不能单独支撑 evidence_consistent，展示时标注模型判定）
+       * @enum {string}
+       */
+      kind:
+        | 'rule'
+        | 'no_data'
+        | 'partial_data'
+        | 'source_error'
+        | 'capability_missing'
+        | 'observability_gap'
+        | 'evaluation_error'
+        | 'all_clear'
+        | 'model_judged';
+      text: string;
+    };
     action: {
       /**
        * @description allowed 只允许出现在 reversible 与 reversible_recreatable 动作上（不变量 7）。
@@ -2208,6 +2280,18 @@ export type components = {
      */
     ClusterId: string;
     /**
+     * ExportedClusterKubeWarnings
+     * @description 一个集群的 KubeWarningReport（ADR 0185）去掉 summaries（摘要放在每个事件的 kube_warnings 上）
+     */
+    ClusterKubeWarnings: {
+      cluster_id: components['schemas']['ClusterId'];
+      complete: boolean;
+      groups: components['schemas']['Group'][];
+      queries: components['schemas']['Query'][];
+      step_seconds: number;
+      window: components['schemas']['TimeWindow'];
+    };
+    /**
      * Comparator
      * @enum {string}
      */
@@ -2221,16 +2305,27 @@ export type components = {
     ComponentNames: {
       [key: string]: string;
     };
-    /** ResearchConclusion */
+    /**
+     * ExportedConclusion
+     * @description 事件的研判结论：最近一次完成的阶段 B 研判；没有时取最新版本的阶段 A 处置；都没有时 source 为 none
+     */
     Conclusion: {
-      /** @description 选中根因所在的范围（契约 2.38.0，ADR 0170）：模型给出，代码按确定性依据校正。根因是领域包声明在集群之外的组件时为 upstream；根因不由 GitOps 仓库负责（处置依据的 repository_owned）时不能是 local 或 configuration；结论为 undetermined 或没有选中根因时为 unknown。之前的研判输出没有这个字段 */
-      cause_scope?: components['schemas']['CauseScope'];
-      consistency: components['schemas']['ConsistencyChecks'];
-      consistency_detail?: components['schemas']['ConsistencyDetail'];
-      hypothesis_id: string | null;
-      level: components['schemas']['ConclusionLevel'];
-      root_component: null | components['schemas']['ComponentKey'];
-      undetermined_reason: string | null;
+      /** @description 研判完成或阶段 A 报告生成的时刻 */
+      at: null | components['schemas']['Timestamp'];
+      /** @description 阶段 B 的结论档位；source 不是 research 时为 null */
+      conclusion_level: null | components['schemas']['ConclusionLevel'];
+      disposition: null | components['schemas']['Disposition'];
+      /** @description source 为 stage_a 时为阶段 A 报告的 disposition_reason，其余为 null */
+      disposition_reason: string | null;
+      /** @description 结论所针对的事件版本 */
+      incident_version: number | null;
+      run_id: null | components['schemas']['Uuid'];
+      /** @enum {string} */
+      source: 'research' | 'stage_a' | 'none';
+      /** @description 阶段 B 研判的摘要（模型生成） */
+      summary: string | null;
+      /** @description 处置或结论档位为 undetermined、或者没有任何结论时，给出原因；其余为 null */
+      undetermined: null | components['schemas']['Undetermined'];
     };
     /**
      * ConclusionLevel
@@ -2357,7 +2452,7 @@ export type components = {
        * @enum {string}
        */
       picked_by: 'top_n' | 'sampled';
-      reason: components['schemas']['Reason'];
+      reason: components['schemas']['$defs-Reason'];
       /** @description 对照对象的键 */
       subject: string;
       value: string | null;
@@ -2381,6 +2476,32 @@ export type components = {
       results: components['schemas']['ControlResult'][];
       /** @description 故障对象的键（by 标签的取值），它自己的判定是这张卡的主结果 */
       subject: string;
+    };
+    /** KubeWarningCount */
+    Count: {
+      count: number;
+      /** @description count 中消息提到内存的部分（low on resource: memory、Insufficient memory、reclaim memory）；来源不带消息时为 null */
+      memory: number | null;
+      /** @description Kubernetes 事件的 reason，例如 Evicted、FailedScheduling、BackOff、OOMKilled、EvictionThresholdMet、NodeHasInsufficientMemory、SystemOOM。kube-state-metrics 的计数使用对应的事件 reason */
+      reason: string;
+      source: components['schemas']['Source'];
+      unit: components['schemas']['Unit'];
+    };
+    /**
+     * SuspectedCommonCauseCriteria
+     * @description 分组使用的判据
+     */
+    Criteria: {
+      /** @description 事件可以晚于信号时间段结束的时长 */
+      after_seconds: number;
+      /** @description 事件可以早于信号时间段开始的时长 */
+      before_seconds: number;
+      /** @description 同一节点上相邻信号的间隔不超过它时并为一个时间段 */
+      gap_seconds: number;
+      /** @description 成组需要的最少事件数 */
+      min_incidents: number;
+      /** @description 算作节点信号的 reason；Evicted、EvictionThresholdMet 只在消息提到内存时算 */
+      signal_reasons: string[];
     };
     /** RecommendationDelivery */
     Delivery: {
@@ -3060,7 +3181,7 @@ export type components = {
         [key: string]: number | string | boolean;
       };
       queries: components['schemas']['QueryRecord'][];
-      reason: components['schemas']['Reason'];
+      reason: components['schemas']['$defs-Reason'];
       ref: components['schemas']['EvidenceRef'];
       /** @description 错误样例（契约 2.42.0，ADR 0177）：卡片声明了 samples 时出现，其余的卡不出现 */
       samples?: components['schemas']['Samples'];
@@ -3120,7 +3241,7 @@ export type components = {
            * @enum {string}
            */
           picked_by: 'top_n' | 'sampled';
-          reason: components['schemas']['Reason'];
+          reason: components['schemas']['$defs-Reason'];
           /** @description 对照对象的键 */
           subject: string;
           value: string | null;
@@ -3268,6 +3389,18 @@ export type components = {
         };
       };
     };
+    /** ExportedEvidenceCard */
+    EvidenceCard: {
+      card_id: string;
+      /** @description EvidenceResult.reason.kind，例如 no_data（查询没有样本） */
+      reason_kind: string;
+      ref: components['schemas']['EvidenceRef'];
+      /** @description 一句摘要：主值（有时）加上判定说明的第一句 */
+      summary: string;
+      title: components['schemas']['LocalizedText'];
+      /** @enum {string} */
+      verdict: 'abnormal' | 'undeterminable';
+    };
     /**
      * EvidenceRef
      * @description 研判运行内的证据引用：card:<n> 指本次运行的第 n 张证据卡结果（含区分性检查产生的卡），alert:<n> 指事件成员告警，change:<n> 指关联的变更。编号由研判清单映射到定义和实体
@@ -3399,6 +3532,20 @@ export type components = {
       /** @constant */
       type: 'feedback.recorded';
     } & components['schemas']['Header'];
+    /**
+     * IncidentExportFilters
+     * @description 实际使用的筛选条件，语义与 GET /v1/incidents 相同
+     */
+    Filters: {
+      category: components['schemas']['IncidentCategory'][];
+      cluster_id: null | components['schemas']['ClusterId'];
+      component: null | components['schemas']['ComponentKey'];
+      exclude_category: components['schemas']['AlertCategory'][];
+      exclude_component: components['schemas']['ComponentKey'][];
+      severity: null | components['schemas']['Severity'];
+      /** @description 是否导出被抑制的事件 */
+      suppressed: boolean;
+    };
     /**
      * Finding
      * @description 一个实体上的一个问题（契约 2.28.0，ADR 0146 §1.4），跨分析运行持久保存；fingerprint 是去重的唯一键。每次运行先按指纹更新已有发现（last_seen、差距、份额、档位），再判断是否生成建议
@@ -4041,6 +4188,66 @@ export type components = {
           /** @constant */
           type: 'domain';
         };
+    /**
+     * SuspectedCommonCauseGroup
+     * @description 疑似由同一根因引起的一组事件：事件时间窗与节点信号的时间段（按 criteria 放宽）重叠、事件组件在这些节点上。分组是启发式的疑似结论，依据全部列出
+     */
+    Group: {
+      /** @description 组内全部事件的成员告警名，排序去重 */
+      alertnames: string[];
+      criteria: components['schemas']['Criteria'];
+      /** @description sha256:<sha256(JCS([cluster_id, kind, 各节点信号时间段]))>，同样的信号得到同样的 id */
+      group_id: components['schemas']['Sha256'];
+      incidents: components['schemas']['GroupIncident'][];
+      kind: components['schemas']['GroupKind'];
+      nodes: components['schemas']['GroupNode'][];
+      /** @constant */
+      suspected: true;
+      /** @description 全部节点信号时间段的范围 */
+      window: components['schemas']['TimeWindow'];
+    };
+    /**
+     * IncidentExportGroupBy
+     * @description incident 只给出事件明细；series 另外按系列汇总
+     * @enum {string}
+     */
+    GroupBy: 'incident' | 'series';
+    /** SuspectedCommonCauseIncident */
+    GroupIncident: {
+      alertnames: string[];
+      /** @description 事件时间窗内组件对象上的计数（与摘要的 counts 相同），例如调度失败中提到内存的次数 */
+      counts: components['schemas']['Count'][];
+      incident_id: components['schemas']['Uuid'];
+      /** @description 有本组信号、并且组件在事件时间窗或信号时间段内所在的节点 */
+      nodes: string[];
+      /** @description 事件时间窗与这些节点的信号时间段重叠的总秒数（时间段先取并集）；事件开始于信号结束之后、仍在 after_seconds 以内时为 0 */
+      overlap_seconds: number;
+      window: components['schemas']['TimeWindow'];
+    };
+    /**
+     * IncidentExportGroupingParams
+     * @description 疑似同一根因分组实际使用的参数（ADR 0185 §5），由查询参数 group_gap、group_before、group_after、group_min_incidents 覆盖默认值。每个分组的 criteria 另外列出它的信号 reason
+     */
+    GroupingParams: {
+      after_seconds: number;
+      before_seconds: number;
+      gap_seconds: number;
+      min_incidents: number;
+    };
+    /**
+     * SuspectedCommonCauseKind
+     * @description 疑似同一根因的种类。node_memory_eviction：节点内存不足，kubelet 驱逐 Pod 或节点进入内存压力。以后的契约版本会增加取值，使用方必须容忍未知的种类
+     * @enum {string}
+     */
+    GroupKind: 'node_memory_eviction';
+    /** SuspectedCommonCauseNode */
+    GroupNode: {
+      /** @description 信号时间段内这个节点上（节点对象与其上的全部 Pod）的各原因计数 */
+      counts: components['schemas']['Count'][];
+      node: string;
+      /** @description 这个节点上参与本组的信号时间段，按开始时间排序 */
+      signal_windows: components['schemas']['TimeWindow'][];
+    };
     /** OutboxEventHeader */
     Header: {
       cluster_id: components['schemas']['ClusterId'];
@@ -4072,6 +4279,291 @@ export type components = {
       /** @description 账本给出状态的依据，按时间顺序，例如“支持卡：card:31、card:38”“相反的正常卡：card:25”“人工反馈确认根因” */
       status_reasons?: string[];
       supporting: components['schemas']['EvidenceRef'][];
+    };
+    /**
+     * ExportedIncident
+     * @description 导出的一个事件
+     */
+    Incident: {
+      /** @description 成员告警的告警名，去重排序；离开时仍在触发的成员（转到了别的事件）不算 */
+      alertnames: string[];
+      categories: components['schemas']['IncidentCategory'][];
+      cluster_id: components['schemas']['ClusterId'];
+      components: components['schemas']['ComponentKey'][];
+      conclusion: components['schemas']['Conclusion'];
+      /** @description 事件恢复的时刻；仍在触发时为 null */
+      ended_at: null | components['schemas']['Timestamp'];
+      /** @description 最新阶段 A 报告里 abnormal 与 undeterminable 的证据卡，abnormal 在前 */
+      evidence: components['schemas']['EvidenceCard'][];
+      /** @description 累计触发时长：成员告警触发区间的并集（ADR 0184 的发生）的总长，仍在触发的区间算到 generated_at */
+      firing_seconds: number;
+      first_firing_at: components['schemas']['Timestamp'];
+      incident_id: components['schemas']['Uuid'];
+      issues: components['schemas']['Issue'][];
+      kube_warnings: components['schemas']['Summary'];
+      label: components['schemas']['IncidentLabel'];
+      /** @description 最后一次开始触发的时刻：成员告警 starts_at 的最大值 */
+      last_firing_at: components['schemas']['Timestamp'];
+      /** @description 合并进本事件的事件数（incident_aliases） */
+      merged_count: number;
+      /** @description 成员告警触发区间合并后的段数，即发生次数 */
+      occurrences: number;
+      primary_category: components['schemas']['IncidentCategory'];
+      /** @description 版本原因为 reopened 的版本数（ADR 0132、0184） */
+      reopened_count: number;
+      root: {
+        ambiguous: boolean;
+        component: null | components['schemas']['ComponentKey'];
+        entity: null | components['schemas']['EntityRef'];
+      };
+      /** @description 事件的系列键（ADR 0184）；之前版本写入的事件与没有根因的事件为 null */
+      series_key: string | null;
+      severity: components['schemas']['Severity'];
+      /** @enum {string} */
+      state: 'firing' | 'resolved';
+    };
+    /**
+     * IncidentExport
+     * @description GET /v1/incidents/export 的 JSON 结果（契约 2.49.0，ADR 0186）：时间窗内按条件筛出的事件明细、按系列的汇总（group=series 时）、每个集群的 Kubernetes Warning 查询状态与疑似同一根因的分组。告警、注解、模型与证据卡给出的文字照原样给出，与 GET /v1/incidents/{incident_ref} 相同
+     */
+    'incident-export.schema': {
+      /** @description 全部集群的 Kubernetes Warning 查询都成功且没有截断时为 true */
+      complete: boolean;
+      filters: components['schemas']['Filters'];
+      generated_at: components['schemas']['Timestamp'];
+      group: components['schemas']['GroupBy'];
+      grouping: components['schemas']['GroupingParams'];
+      /** @description 事件明细，按 first_firing_at 从新到旧、同一时刻按 incident_id 从大到小 */
+      incidents: components['schemas']['Incident'][];
+      /** @description 每个导出了事件的集群一项，按 cluster_id 排序 */
+      kube_warnings: components['schemas']['ClusterKubeWarnings'][];
+      next_cursor: string | null;
+      /** @description group=series 时为按系列的汇总，按最近一次触发从新到旧；group=incident 时为 null */
+      series: null | components['schemas']['Series'][];
+      /** @description suppressed=false 时，本次导出覆盖的范围内（到最后一个导出的事件为止）被抑制、没有导出的事件数；suppressed=true 时为 0 */
+      suppressed_count: number;
+      /** @description 符合条件的事件多于 limit 时为 true，余下的事件用 next_cursor 继续导出 */
+      truncated: boolean;
+      /** @description 请求的时间窗；与它有重叠的事件被导出 */
+      window: components['schemas']['TimeWindow'];
+      $defs: {
+        /**
+         * IncidentExportGroupBy
+         * @description incident 只给出事件明细；series 另外按系列汇总
+         * @enum {string}
+         */
+        GroupBy: 'incident' | 'series';
+        /**
+         * IncidentExportFilters
+         * @description 实际使用的筛选条件，语义与 GET /v1/incidents 相同
+         */
+        Filters: {
+          category: components['schemas']['IncidentCategory'][];
+          cluster_id: null | components['schemas']['ClusterId'];
+          component: null | components['schemas']['ComponentKey'];
+          exclude_category: components['schemas']['AlertCategory'][];
+          exclude_component: components['schemas']['ComponentKey'][];
+          severity: null | components['schemas']['Severity'];
+          /** @description 是否导出被抑制的事件 */
+          suppressed: boolean;
+        };
+        /**
+         * IncidentExportGroupingParams
+         * @description 疑似同一根因分组实际使用的参数（ADR 0185 §5），由查询参数 group_gap、group_before、group_after、group_min_incidents 覆盖默认值。每个分组的 criteria 另外列出它的信号 reason
+         */
+        GroupingParams: {
+          after_seconds: number;
+          before_seconds: number;
+          gap_seconds: number;
+          min_incidents: number;
+        };
+        /**
+         * ExportedIncident
+         * @description 导出的一个事件
+         */
+        Incident: {
+          /** @description 成员告警的告警名，去重排序；离开时仍在触发的成员（转到了别的事件）不算 */
+          alertnames: string[];
+          categories: components['schemas']['IncidentCategory'][];
+          cluster_id: components['schemas']['ClusterId'];
+          components: components['schemas']['ComponentKey'][];
+          conclusion: components['schemas']['Conclusion'];
+          /** @description 事件恢复的时刻；仍在触发时为 null */
+          ended_at: null | components['schemas']['Timestamp'];
+          /** @description 最新阶段 A 报告里 abnormal 与 undeterminable 的证据卡，abnormal 在前 */
+          evidence: components['schemas']['EvidenceCard'][];
+          /** @description 累计触发时长：成员告警触发区间的并集（ADR 0184 的发生）的总长，仍在触发的区间算到 generated_at */
+          firing_seconds: number;
+          first_firing_at: components['schemas']['Timestamp'];
+          incident_id: components['schemas']['Uuid'];
+          issues: components['schemas']['Issue'][];
+          kube_warnings: components['schemas']['Summary'];
+          label: components['schemas']['IncidentLabel'];
+          /** @description 最后一次开始触发的时刻：成员告警 starts_at 的最大值 */
+          last_firing_at: components['schemas']['Timestamp'];
+          /** @description 合并进本事件的事件数（incident_aliases） */
+          merged_count: number;
+          /** @description 成员告警触发区间合并后的段数，即发生次数 */
+          occurrences: number;
+          primary_category: components['schemas']['IncidentCategory'];
+          /** @description 版本原因为 reopened 的版本数（ADR 0132、0184） */
+          reopened_count: number;
+          root: {
+            ambiguous: boolean;
+            component: null | components['schemas']['ComponentKey'];
+            entity: null | components['schemas']['EntityRef'];
+          };
+          /** @description 事件的系列键（ADR 0184）；之前版本写入的事件与没有根因的事件为 null */
+          series_key: string | null;
+          severity: components['schemas']['Severity'];
+          /** @enum {string} */
+          state: 'firing' | 'resolved';
+        };
+        /**
+         * ExportedConclusion
+         * @description 事件的研判结论：最近一次完成的阶段 B 研判；没有时取最新版本的阶段 A 处置；都没有时 source 为 none
+         */
+        Conclusion: {
+          /** @description 研判完成或阶段 A 报告生成的时刻 */
+          at: null | components['schemas']['Timestamp'];
+          /** @description 阶段 B 的结论档位；source 不是 research 时为 null */
+          conclusion_level: null | components['schemas']['ConclusionLevel'];
+          disposition: null | components['schemas']['Disposition'];
+          /** @description source 为 stage_a 时为阶段 A 报告的 disposition_reason，其余为 null */
+          disposition_reason: string | null;
+          /** @description 结论所针对的事件版本 */
+          incident_version: number | null;
+          run_id: null | components['schemas']['Uuid'];
+          /** @enum {string} */
+          source: 'research' | 'stage_a' | 'none';
+          /** @description 阶段 B 研判的摘要（模型生成） */
+          summary: string | null;
+          /** @description 处置或结论档位为 undetermined、或者没有任何结论时，给出原因；其余为 null */
+          undetermined: null | components['schemas']['Undetermined'];
+        };
+        /** ExportedUndetermined */
+        Undetermined: {
+          /** @description 登记表中的原因码：研判的停止原因、研判失败的类型、入队跳过的原因，以及事件最近一个有终态记录的版本上 research、stage_a 阶段的终态记录 */
+          codes: components['schemas']['Reason'][];
+          /** @description 阶段 B 研判给出的无法判定的原因（模型生成） */
+          undetermined_reason: string | null;
+        };
+        /** ExportedReason */
+        Reason: {
+          code: string;
+          /** @description 记录带的说明（错误摘要等） */
+          detail: string | null;
+          level: components['schemas']['Level'];
+          stage: components['schemas']['Stage'];
+          /** @description 登记表中的中文说明 */
+          text: string;
+        };
+        /** ExportedEvidenceCard */
+        EvidenceCard: {
+          card_id: string;
+          /** @description EvidenceResult.reason.kind，例如 no_data（查询没有样本） */
+          reason_kind: string;
+          ref: components['schemas']['EvidenceRef'];
+          /** @description 一句摘要：主值（有时）加上判定说明的第一句 */
+          summary: string;
+          title: components['schemas']['LocalizedText'];
+          /** @enum {string} */
+          verdict: 'abnormal' | 'undeterminable';
+        };
+        /**
+         * ExportedIssue
+         * @description 事件关联的 GitHub issue（server.github_issues）；同一系列复用的 issue（ADR 0184）reused 为 true
+         */
+        Issue: {
+          number: number;
+          /** @description owner/name */
+          repo: string;
+          reused: boolean;
+          /**
+           * @description closed 表示人已经在 GitHub 上关闭
+           * @enum {string}
+           */
+          state: 'open' | 'closed';
+          url: string;
+        };
+        /**
+         * ExportedSeries
+         * @description 同一系列的事件的汇总：有系列键（ADR 0184）时按系列键，没有时按 告警名集合 + 根因组件
+         */
+        Series: {
+          alertnames: string[];
+          cluster_id: components['schemas']['ClusterId'];
+          /** @description 最后一个事件恢复的时刻；有事件仍在触发时为 null */
+          ended_at: null | components['schemas']['Timestamp'];
+          firing_seconds: number;
+          first_firing_at: components['schemas']['Timestamp'];
+          /** @description 按 first_firing_at 从新到旧 */
+          incident_ids: components['schemas']['Uuid'][];
+          /** @description 按 repo 与 number 去重 */
+          issues: components['schemas']['Issue'][];
+          key: string;
+          /**
+           * @description series_key：事件的系列键；alertnames_root：事件没有系列键，按 <根因组件>|<告警名,…> 求出
+           * @enum {string}
+           */
+          key_source: 'series_key' | 'alertnames_root';
+          last_firing_at: components['schemas']['Timestamp'];
+          /** @description 全部事件的成员告警触发区间合并后的段数 */
+          occurrences: number;
+          root_component: null | components['schemas']['ComponentKey'];
+        };
+        /**
+         * ExportedClusterKubeWarnings
+         * @description 一个集群的 KubeWarningReport（ADR 0185）去掉 summaries（摘要放在每个事件的 kube_warnings 上）
+         */
+        ClusterKubeWarnings: {
+          cluster_id: components['schemas']['ClusterId'];
+          complete: boolean;
+          groups: components['schemas']['Group'][];
+          queries: components['schemas']['Query'][];
+          step_seconds: number;
+          window: components['schemas']['TimeWindow'];
+        };
+        /**
+         * IncidentExportRecord
+         * @description format=ndjson 时的一行。顺序：一行 header，每个事件一行 incident，group=series 时每个系列一行 series，每个集群一行 kube_warnings，最后一行 end
+         */
+        Record:
+          | {
+              filters: components['schemas']['Filters'];
+              generated_at: components['schemas']['Timestamp'];
+              group: components['schemas']['GroupBy'];
+              grouping: components['schemas']['GroupingParams'];
+              /** @constant */
+              type: 'header';
+              window: components['schemas']['TimeWindow'];
+            }
+          | {
+              incident: components['schemas']['Incident'];
+              /** @constant */
+              type: 'incident';
+            }
+          | {
+              series: components['schemas']['Series'];
+              /** @constant */
+              type: 'series';
+            }
+          | {
+              kube_warnings: components['schemas']['ClusterKubeWarnings'];
+              /** @constant */
+              type: 'kube_warnings';
+            }
+          | {
+              complete: boolean;
+              /** @description 导出的事件数 */
+              incidents: number;
+              next_cursor: string | null;
+              suppressed_count: number;
+              truncated: boolean;
+              /** @constant */
+              type: 'end';
+            };
+      };
     };
     /**
      * Incident
@@ -4437,6 +4929,22 @@ export type components = {
         chains: string[];
       };
     };
+    /**
+     * ExportedIssue
+     * @description 事件关联的 GitHub issue（server.github_issues）；同一系列复用的 issue（ADR 0184）reused 为 true
+     */
+    Issue: {
+      number: number;
+      /** @description owner/name */
+      repo: string;
+      reused: boolean;
+      /**
+       * @description closed 表示人已经在 GitHub 上关闭
+       * @enum {string}
+       */
+      state: 'open' | 'closed';
+      url: string;
+    };
     /** Labels */
     Labels: {
       [key: string]: string;
@@ -4598,20 +5106,12 @@ export type components = {
       /** @enum {string} */
       type: 'query' | 'tool';
     };
-    /** TopologyNode */
+    /** KubeWarningNode */
     Node: {
-      /** @description 领域包 components.yaml 匹配到的组件类型 */
-      component_type: string | null;
-      /** @description 集群枢纽（CoreDNS、CNI、apiserver、存储）：只有在出现针对它的证据，或至少 3 个独立依赖方同时失败时才吸收症状 */
-      hub: boolean;
-      /** @description Pod 容器的镜像（kube_pod_container_info 的 image 与 image_id），去重后按字典序；只有 Pod 节点填写，用于把发布之前的 Job 关联到发布（ADR 0104 §13） */
-      images?: string[];
-      key: components['schemas']['ComponentKey'];
-      kind: string;
-      labels: components['schemas']['Labels'];
-      name: string;
-      namespace: string | null;
-      uid: string | null;
+      counts: components['schemas']['Count'][];
+      node: string;
+      /** @description 确定组件在这个节点上的依据：component 组件本身就是这个节点；topology 拓扑历史里组件的 Pod 在时间窗内运行在这个节点（runs_on）；events 组件对象的事件由这个节点的 kubelet 记录 */
+      via: ('component' | 'topology' | 'events')[];
     };
     /** EvidenceNovelty */
     Novelty: {
@@ -4649,6 +5149,15 @@ export type components = {
       value: number | null;
       verdict: components['schemas']['Verdict'];
       window: components['schemas']['TimeWindow'];
+    };
+    /** KubeWarningObject */
+    Object: {
+      counts: components['schemas']['Count'][];
+      kind: string;
+      name: string;
+      namespace: string | null;
+      /** @description 计数归属的节点；调度失败等没有节点的计数不出现在这里 */
+      nodes: string[];
     };
     /**
      * OptimizationOutput
@@ -5136,6 +5645,27 @@ export type components = {
      * @enum {string}
      */
     Provenance: 'structural' | 'runtime' | 'config_ref' | 'network_policy' | 'naming';
+    /**
+     * KubeWarningQuery
+     * @description 实际执行的一次聚合查询。每次导出每个集群执行的查询数固定，与事件数无关
+     */
+    Query: {
+      /** @description 截断或失败的说明 */
+      detail: string | null;
+      duration_ms: number;
+      /** @description 查询名：events（Loki 事件计数）、oom_killed、evicted、unschedulable、crash_loop、memory_pressure（kube-state-metrics） */
+      name: string;
+      /** @description 执行的 LogQL 或 PromQL */
+      query: string;
+      /** @description 保留的序列数 */
+      series: number;
+      source: components['schemas']['Source'];
+      /**
+       * @description ok 完整；truncated 序列数超过上限，只保留了按标签排序的前若干条；failed 查询失败或超时，这一来源的计数缺失
+       * @enum {string}
+       */
+      status: 'ok' | 'truncated' | 'failed';
+    };
     /** EvidenceQueryRecord */
     QueryRecord: {
       capability: string;
@@ -5158,22 +5688,14 @@ export type components = {
       numerator: number;
       value: number | null;
     };
-    /** EvidenceReason */
+    /** ExportedReason */
     Reason: {
-      /**
-       * @description rule：命中判定规则；no_data：查询没有样本；partial_data：部分查询没有样本；source_error：数据源报错或超时；capability_missing：所需能力不可用；observability_gap：依赖的目标有 meta 告警；evaluation_error：CEL 求值出错；all_clear：没有命中任何规则；model_judged：只读工具的结果没有 CEL 判定，由小模型对照 refutes_if 判定（可以支持 likely，不能单独支撑 evidence_consistent，展示时标注模型判定）
-       * @enum {string}
-       */
-      kind:
-        | 'rule'
-        | 'no_data'
-        | 'partial_data'
-        | 'source_error'
-        | 'capability_missing'
-        | 'observability_gap'
-        | 'evaluation_error'
-        | 'all_clear'
-        | 'model_judged';
+      code: string;
+      /** @description 记录带的说明（错误摘要等） */
+      detail: string | null;
+      level: components['schemas']['Level'];
+      stage: components['schemas']['Stage'];
+      /** @description 登记表中的中文说明 */
       text: string;
     };
     /**
@@ -5443,6 +5965,45 @@ export type components = {
       type: 'recommendation.updated';
     } & components['schemas']['Header'];
     /**
+     * IncidentExportRecord
+     * @description format=ndjson 时的一行。顺序：一行 header，每个事件一行 incident，group=series 时每个系列一行 series，每个集群一行 kube_warnings，最后一行 end
+     */
+    Record:
+      | {
+          filters: components['schemas']['Filters'];
+          generated_at: components['schemas']['Timestamp'];
+          group: components['schemas']['GroupBy'];
+          grouping: components['schemas']['GroupingParams'];
+          /** @constant */
+          type: 'header';
+          window: components['schemas']['TimeWindow'];
+        }
+      | {
+          incident: components['schemas']['Incident'];
+          /** @constant */
+          type: 'incident';
+        }
+      | {
+          series: components['schemas']['Series'];
+          /** @constant */
+          type: 'series';
+        }
+      | {
+          kube_warnings: components['schemas']['ClusterKubeWarnings'];
+          /** @constant */
+          type: 'kube_warnings';
+        }
+      | {
+          complete: boolean;
+          /** @description 导出的事件数 */
+          incidents: number;
+          next_cursor: string | null;
+          suppressed_count: number;
+          truncated: boolean;
+          /** @constant */
+          type: 'end';
+        };
+    /**
      * ResearchManifest
      * @description 研判清单（DESIGN §8.5）：复现一次研判需要的全部版本信息，以及出境清单（§8.4）。后处理部分可以基于已保存的响应精确重放；重新采样模型得到的是一个分布
      */
@@ -5515,7 +6076,7 @@ export type components = {
     'research-output.schema': {
       /** @description 区分性检查产生的证据卡（引用编号接在阶段 A 的卡之后），序列为空数组；完整序列在 worker 的运行明细中 */
       check_cards?: components['schemas']['evidence-result.schema'][];
-      conclusion: components['schemas']['Conclusion'];
+      conclusion: components['schemas']['$defs-Conclusion'];
       disposition: components['schemas']['Disposition'];
       /** @description 研判运行内的证据引用到定义与实体的映射（同研判清单的 evidence_map）：卡为 <card_id>@<实体键>，告警为 alert_id，变更为 change_id */
       evidence_index?: {
@@ -5980,6 +6541,32 @@ export type components = {
       recent_change: number;
       role_prior: number;
     };
+    /**
+     * ExportedSeries
+     * @description 同一系列的事件的汇总：有系列键（ADR 0184）时按系列键，没有时按 告警名集合 + 根因组件
+     */
+    Series: {
+      alertnames: string[];
+      cluster_id: components['schemas']['ClusterId'];
+      /** @description 最后一个事件恢复的时刻；有事件仍在触发时为 null */
+      ended_at: null | components['schemas']['Timestamp'];
+      firing_seconds: number;
+      first_firing_at: components['schemas']['Timestamp'];
+      /** @description 按 first_firing_at 从新到旧 */
+      incident_ids: components['schemas']['Uuid'][];
+      /** @description 按 repo 与 number 去重 */
+      issues: components['schemas']['Issue'][];
+      key: string;
+      /**
+       * @description series_key：事件的系列键；alertnames_root：事件没有系列键，按 <根因组件>|<告警名,…> 求出
+       * @enum {string}
+       */
+      key_source: 'series_key' | 'alertnames_root';
+      last_firing_at: components['schemas']['Timestamp'];
+      /** @description 全部事件的成员告警触发区间合并后的段数 */
+      occurrences: number;
+      root_component: null | components['schemas']['ComponentKey'];
+    };
     /** @description 服务签名。签名输入为 ASCII "srenautix-approval-v1" 加一个换行符 0x0A，再接 JCS(statement) 的 UTF-8 字节；statement 为 {"assertion": assertion}，H 档时为 {"assertion": assertion, "reauth": reauth}。 */
     serviceProof: {
       /** @description 服务签名公钥的 ID，对应 approver-keys 中 use=service 的条目。 */
@@ -6425,6 +7012,12 @@ export type components = {
       logs_queries: number;
       metrics_queries: number;
     };
+    /**
+     * KubeWarningSource
+     * @description 计数的来源：events 为 Loki 里采集的 Kubernetes 事件；kube_state_metrics 为 kube-state-metrics 指标
+     * @enum {string}
+     */
+    Source: 'events' | 'kube_state_metrics';
     SpokeStatus: {
       /**
        * @description 只对 gateway 有意义
@@ -6435,6 +7028,12 @@ export type components = {
       last_seen_at: null | components['schemas']['Timestamp'];
       version: string | null;
     };
+    /**
+     * ReasonStage
+     * @description 原因码所属的阶段：notify 通知；stage_a 阶段 A；research 阶段 B 研判与入队；remediation 自愈 PR；issue 事件 issue；incident 事件状态；feedback 人工反馈与隐式反馈（ADR 0174）；skill 技能的运行（ADR 0181）
+     * @enum {string}
+     */
+    Stage: 'notify' | 'stage_a' | 'research' | 'remediation' | 'issue' | 'incident' | 'feedback' | 'skill';
     /**
      * StageAReport
      * @description 阶段 A 的确定性报告（DESIGN §7.1）：不调用模型，不经过 worker。事件创建或版本变化后立即生成
@@ -6590,6 +7189,25 @@ export type components = {
       /** @enum {string} */
       type: 'incident' | 'goal';
     };
+    /**
+     * KubeWarningSummary
+     * @description 一个事件时间窗内、事件组件的对象与组件所在节点上的 Warning 计数
+     */
+    Summary: {
+      /** @description 与报告的 complete 相同；单独导出一条事件时也能看到计数是否完整 */
+      complete: boolean;
+      /** @description 计数所针对的组件（请求中给出的事件组件） */
+      components: components['schemas']['ComponentKey'][];
+      /** @description 组件自身以及拓扑中属于它的对象（Pod、ReplicaSet 等）上的计数，按 reason、source、unit 排序 */
+      counts: components['schemas']['Count'][];
+      incident_id: components['schemas']['Uuid'];
+      /** @description 时间窗内组件所在的节点，以及每个节点上（节点对象与该节点上的全部 Pod）的计数，按节点名排序 */
+      nodes: components['schemas']['Node'][];
+      /** @description 组件对象的明细，按总计数从高到低，最多 20 个 */
+      objects: components['schemas']['Object'][];
+      objects_truncated: boolean;
+      window: components['schemas']['TimeWindow'];
+    };
     target: {
       group: string;
       kind: string;
@@ -6726,6 +7344,19 @@ export type components = {
       proposal_id: components['schemas']['Uuid'];
       state: components['schemas']['State'];
     };
+    /** ExportedUndetermined */
+    Undetermined: {
+      /** @description 登记表中的原因码：研判的停止原因、研判失败的类型、入队跳过的原因，以及事件最近一个有终态记录的版本上 research、stage_a 阶段的终态记录 */
+      codes: components['schemas']['Reason'][];
+      /** @description 阶段 B 研判给出的无法判定的原因（模型生成） */
+      undetermined_reason: string | null;
+    };
+    /**
+     * KubeWarningUnit
+     * @description 计数的单位：occurrences 为发生次数（事件的记录次数、容器因 OOM 重启的次数）；pods 为处于该状态的不同 Pod 数；seconds 为节点处于该状态的累计秒数
+     * @enum {string}
+     */
+    Unit: 'occurrences' | 'pods' | 'seconds';
     /**
      * ModelUsage
      * @description 计量依据服务方返回的 usage
@@ -8372,6 +9003,56 @@ export interface operations {
       404: components['responses']['Error'];
     };
   };
+  exportIncidents: {
+    parameters: {
+      query: {
+        /** @description 只导出类别与任一取值相同的事件；可以重复 */
+        category?: components['schemas']['IncidentCategory'][];
+        cluster_id?: components['schemas']['ClusterId'];
+        component?: components['schemas']['ComponentKey'];
+        cursor?: string;
+        /** @description 去掉类别全部落在这些取值中的事件；可以重复。unclassified 不能被排除，给出时返回 400 */
+        exclude_category?: components['schemas']['AlertCategory'][];
+        /** @description 去掉组件全部落在这些组件中的事件；可以重复 */
+        exclude_component?: components['schemas']['ComponentKey'][];
+        format?: 'json' | 'ndjson' | 'md';
+        from: string;
+        group?: components['schemas']['GroupBy'];
+        /** @description 事件可以晚于信号时间段结束的时长，默认 30m，不超过 24h */
+        group_after?: string;
+        /** @description 事件可以早于信号时间段开始的时长，默认 30m，不超过 24h */
+        group_before?: string;
+        /** @description 疑似同一根因分组的 gap（同一节点相邻信号并为一段的最大间隔），默认 30m，不超过 24h */
+        group_gap?: string;
+        /** @description 成组需要的最少事件数，默认 2 */
+        group_min_incidents?: number;
+        limit?: number;
+        severity?: components['schemas']['Severity'];
+        suppressed?: boolean;
+        /** @description 不早于 from，与 from 相隔不超过 31 天 */
+        to: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 导出结果 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['incident-export.schema'];
+          'application/x-ndjson': components['schemas']['Record'];
+          'text/markdown': string;
+        };
+      };
+      400: components['responses']['Error'];
+      401: components['responses']['Error'];
+    };
+  };
   ingestAlerts: {
     parameters: {
       query?: never;
@@ -9451,9 +10132,9 @@ export interface operations {
         content: {
           'application/json': {
             added_edges: components['schemas']['Edge'][];
-            added_nodes: components['schemas']['Node'][];
+            added_nodes: components['schemas']['$defs-Node'][];
             removed_edges: components['schemas']['Edge'][];
-            removed_nodes: components['schemas']['Node'][];
+            removed_nodes: components['schemas']['$defs-Node'][];
           };
         };
       };

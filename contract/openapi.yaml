@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: SreNautix hub API
-  version: 2.48.0
+  version: 2.49.0
   license:
     name: Apache-2.0
     identifier: Apache-2.0
@@ -303,6 +303,81 @@ paths:
                           oneOf: [{ type: 'null' }, { $ref: './schemas/common.schema.json#/$defs/Timestamp' }]
                         reason: { type: string }
                   next_cursor: { type: [string, 'null'] }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+  /v1/incidents/export:
+    get:
+      tags: [incidents]
+      operationId: exportIncidents
+      description: |
+        按时间窗批量导出事件（契约 2.49.0，ADR 0186）。导出与时间窗 [from, to] 有重叠的事件（合并掉的事件除外，它们计入
+        吸收它们的事件的 merged_count），from 与 to 必填，跨度不超过 31 天。cluster_id、severity、component、category、
+        exclude_category、exclude_component、suppressed 的语义与 GET /v1/incidents 相同，在状态库的同一段查询条件里执行；
+        授权与可见性也相同：调用方只能看到读取作用域内的事件。
+        每个事件带告警名、根因组件与实体、首次与末次触发、累计触发时长、发生次数、合并次数、重开次数、类别、研判结论
+        （无法判定时附原因码与原因）、abnormal 与 undeterminable 证据卡的一句摘要、关联的影子 issue，以及事件时间窗
+        （限定在导出时间窗内）里的 Kubernetes Warning 摘要（ADR 0185）。每个集群另给出 Warning 查询的状态与疑似同一根因的
+        分组，分组只在导出的这一批事件里计算。查询数与事件数无关：状态库按批查询，每个集群的 Warning 查询数固定。
+        一次最多 limit 条（默认与上限 5000），还有更多时 truncated 为 true，用 next_cursor 继续；group=series 时另按系列汇总。
+        format=ndjson 时逐行输出 IncidentExportRecord；format=md 给人阅读：先列疑似同一根因的分组，再按系列汇总，最后是事件明细。
+      x-srenautix-roles: [viewer, responder, approver, auditor, admin]
+      x-srenautix-external: true
+      parameters:
+        - { name: from, in: query, required: true, schema: { type: string, format: date-time } }
+        - name: to
+          in: query
+          required: true
+          description: 不早于 from，与 from 相隔不超过 31 天
+          schema: { type: string, format: date-time }
+        - { name: cluster_id, in: query, schema: { $ref: './schemas/common.schema.json#/$defs/ClusterId' } }
+        - { name: severity, in: query, schema: { $ref: './schemas/common.schema.json#/$defs/Severity' } }
+        - { name: component, in: query, schema: { $ref: './schemas/common.schema.json#/$defs/ComponentKey' } }
+        - name: category
+          in: query
+          style: form
+          explode: true
+          description: 只导出类别与任一取值相同的事件；可以重复
+          schema: { type: array, items: { $ref: './schemas/common.schema.json#/$defs/IncidentCategory' } }
+        - name: exclude_category
+          in: query
+          style: form
+          explode: true
+          description: 去掉类别全部落在这些取值中的事件；可以重复。unclassified 不能被排除，给出时返回 400
+          schema: { type: array, items: { $ref: './schemas/common.schema.json#/$defs/AlertCategory' } }
+        - name: exclude_component
+          in: query
+          style: form
+          explode: true
+          description: 去掉组件全部落在这些组件中的事件；可以重复
+          schema: { type: array, items: { $ref: './schemas/common.schema.json#/$defs/ComponentKey' } }
+        - { name: suppressed, in: query, schema: { type: boolean, default: false } }
+        - { name: format, in: query, schema: { type: string, enum: [json, ndjson, md], default: json } }
+        - { name: group, in: query, schema: { $ref: './schemas/incident-export.schema.json#/$defs/GroupBy' } }
+        - name: group_gap
+          in: query
+          description: 疑似同一根因分组的 gap（同一节点相邻信号并为一段的最大间隔），默认 30m，不超过 24h
+          schema: { type: string, pattern: '^\d+(s|m|h)$' }
+        - name: group_before
+          in: query
+          description: 事件可以早于信号时间段开始的时长，默认 30m，不超过 24h
+          schema: { type: string, pattern: '^\d+(s|m|h)$' }
+        - name: group_after
+          in: query
+          description: 事件可以晚于信号时间段结束的时长，默认 30m，不超过 24h
+          schema: { type: string, pattern: '^\d+(s|m|h)$' }
+        - name: group_min_incidents
+          in: query
+          description: 成组需要的最少事件数，默认 2
+          schema: { type: integer, minimum: 1, maximum: 100 }
+        - { name: cursor, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 5000, default: 5000 } }
+      responses:
+        '200':
+          description: 导出结果
+          content:
+            application/json: { schema: { $ref: './schemas/incident-export.schema.json' } }
+            application/x-ndjson: { schema: { $ref: './schemas/incident-export.schema.json#/$defs/Record' } }
+            text/markdown: { schema: { type: string } }
         '400': { $ref: '#/components/responses/Error' }
         '401': { $ref: '#/components/responses/Error' }
   /v1/alerts/lookup:
