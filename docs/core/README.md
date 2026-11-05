@@ -7,6 +7,7 @@ SreNautix 的确定性核心（AGPL-3.0-or-later），纯 TypeScript，不依赖
 | 模块 | 入口 | 作用 |
 |---|---|---|
 | 告警目录与分类 | `AlertCatalog`、`classifyAlert`、`classifyExpression` | 按标签契约、目录条目、规则表达式确定角色；forecast 一律按表达式中的 `predict_linear` 判断 |
+| 告警类别 | `AlertCatalog.category`、`matchesLabels`、`incidentCategories` | `srenautix_category` 标签 → 目录条目的 `category` → 部署方的类别规则 → `unclassified`；事件的类别并集与主类别（[ADR 0183](../adr/0183-alert-categories.md)） |
 | 接入归一化 | `normalizeAlert`、`normalizeWebhook`、`labelsFingerprint` | Alertmanager webhook 与 API v2 的告警 → 契约中的 `Alert`；丢弃 Watchdog 与 `severity=none` |
 | 实体解析 | `alertEntityCandidate`、`EntityResolver`、`ksmPodFacts` | 标签 → 实体候选；按 informer、24 小时墓碑、kube-state-metrics 历史的顺序解析出 uid 与组件 |
 | 拓扑 | `buildKubeTopology`、`TopologyStore`、`TopologyGraph`、`ksmTopologyIntervals` | 由 Kubernetes 对象构建快照；事件溯源与按时刻查询；可达、组件、深度、子图；从 kube-state-metrics 历史重建 |

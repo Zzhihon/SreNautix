@@ -132,6 +132,19 @@ audit:
 4. 按触发原因（新事件、根因变化、严重度升高、证据指纹变化）经准入进入阶段 B 队列，worker 认领后研判；研判事件经 server 的事件流发布，消息再次更新。租约过期次数超过恢复上限（2 次）的任务在下一次认领时记为结束，同时把研判镜像写为 `failed`（`error.kind` 为 `lease_expired`），消息与时间线写明原因；worker 之后仍发出结束事件时镜像按 worker 的结果覆盖。研判镜像的状态取 worker 事件里的 `state`（契约 2.39.0），出站策略禁用全部路由时与 worker 一样是 `stage_a_only`。
 5. 提议经审批签发断言，分支 gateway 长轮询取走工单并推回执行事件。
 
+## 告警类别
+
+每条告警在分类时得到一个类别（ADR 0183）：取值合法的 `srenautix_category` 标签 → 告警目录条目的 `category` → `ingest.category_rules` 第一条命中的规则 → `unclassified`。规则是 ADR 0166 的匹配器加 `category`：
+
+```yaml
+ingest:
+  category_rules:
+    - { labels: { component: [provider] }, category: provider }
+    - { labels: { layer: [L0] }, exclude_labels: { team: [infra] }, category: availability }
+```
+
+标签取值不在枚举里时忽略标签并计入 `srenautix_alert_category_label_invalid_total{alertname}`。事件的 `categories` 是当前成员类别的并集，`primary_category` 取根因组件上最严重的成员；两者也写在 `server.incidents` 的同名列上（GIN 索引），之前版本的事件由数据修正 `incident/categories` 在取得主实例之后补写。`GET /v1/incidents` 的 `category`（与任一取值相同）、`exclude_category`（去掉类别全部被排除的事件，`unclassified` 不能被排除）与 `exclude_component`（去掉组件全部被排除的事件）都可以重复，在状态库的查询里筛选。chart 的 `ingest.categoryRules` 渲染为这张规则表，默认为空。
+
 ## 终态原因码与事件时间线
 
 每个终态都带一个原因码（ADR 0172）。取值登记在 `contract/reason-codes.json`：每个原因码有阶段（notify、stage_a、research、remediation、issue、incident，以及反馈的原因码 feedback，ADR 0174）、级别（info、warning、error）与中英文说明，分组对应代码与契约中的取值集合（例如研判失败类型、通知放弃的原因）。`packages/contract` 生成按阶段与按分组的字面量类型，写原因码的代码只能用这些类型；从库里读出的原因码不在登记表中时抛出。
@@ -160,7 +173,7 @@ server 启动时用 packages/packs-sdk 加载 `packs.dirs` 下的领域包（每
 
 | 内容 | 用途 |
 |---|---|
-| `alerts.yaml` | 告警目录：角色分类、实体映射、告警声明的证据链 |
+| `alerts.yaml` | 告警目录：角色分类、告警类别、实体映射、告警声明的证据链 |
 | `components.yaml` | 组件类型与 Operator 约定边，写进 informer 拓扑节点的 `component_type` |
 | `rca-params.yaml` | 根因排序参数，按包的加载顺序叠加在默认值之上 |
 | `chains.yaml`、`signals.yaml` | 阶段 A 执行的证据卡 |

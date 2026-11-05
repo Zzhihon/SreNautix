@@ -11,7 +11,7 @@ SDK 在 `packages/packs-sdk`（Apache-2.0），命令行入口是 `srenautix pac
 | `pack.yaml` | 根对象 | 名称、版本、成熟度、`requires` 与 `optional` 能力、最低 SreNautix 版本 |
 | `signals.yaml` | `SignalsFile` | 信号与备选查询 |
 | `components.yaml` | `ComponentsFile` | 组件类型（按种类与标签匹配拓扑节点）与 operator 约定 |
-| `alerts.yaml` | `AlertsFile` | 告警目录：告警名、角色、实体映射、关联的证据链 |
+| `alerts.yaml` | `AlertsFile` | 告警目录：告警名、角色、类别、实体映射、关联的证据链 |
 | `chains.yaml` | `ChainsFile` | 证据链：证据卡、排除规则、处置手册 |
 | `checks.yaml` | `ChecksFile` | 与告警无关、按实体种类运行的检查项 |
 | `rules.yaml` | `RulesFile` | 规则提议：条件满足时提议动作目录中的动作 |
@@ -610,6 +610,7 @@ tests:
 - 声明了 `samples` 的卡，测试可以写 `expect.samples.classes`（类别 id → 行数，0 表示这个类别不出现），在真实 Loki 上执行夹具时核对错误样例的类别行数（ADR 0177）。
 - 测试写 `rows: <领域>/<诊断卡或份额卡 id>` 时，同时检查它按行得到的实体：`expect.entities` 中每个 `key` 必须出现，`hit` 为诊断卡的 `when`，`share` 为份额卡的份额（相对误差 1e-3）。
 - 告警目录条目可以写 `title`（`zh-CN` 与 `en`），即告警的可读症状，例如“worker 没有可用副本”。通知的标题与问题陈述用它代替告警名，没有时显示告警名。
+- 告警目录条目写 `category`（`availability`、`performance`、`provider`、`platform`、`observability`，ADR 0183）：告警直接描述的是服务不可用、变慢或接近容量、外部上游、集群基础设施，还是监控链路自身。告警自带的 `srenautix_category` 标签优先于它；条目不写时由 server 的 `ingest.category_rules` 决定，都没有时为 `unclassified`。仓库自带包的每个条目都声明了类别，同名告警的变体类别相同。
 
 **录制与回放**：`record` 在真实数据源上执行卡片，把查询与响应写成快照（`srenautix.io/query-snapshot/v1`）。`test --replay` 用快照代替数据源重新判定，快照中没有的查询直接失败，因此修改查询的提交必须重新录制。
 
