@@ -219,8 +219,11 @@ datasources:
   alertmanager: {url: ""}
   # labels：日志流上的 Kubernetes 标签名（namespace、pod、container、cluster），不填时为同名标签、没有 cluster；
   # tenant：多租户 Loki 的租户；caSecret：校验 Loki 证书的 CA 所在的 Secret（{name, key}，key 默认 ca.crt），
-  # 挂载到 server 的 /etc/srenautix/secrets/loki-ca；为空时用镜像的系统 CA
-  loki: {url: "", tenant: "", labels: {}, caSecret: null}
+  # 挂载到 server 的 /etc/srenautix/secrets/loki-ca；为空时用镜像的系统 CA；
+  # kubeEvents：导出时 Kubernetes Warning 计数读的事件日志（server 配置 datasources.loki.kube_events，ADR 0185），
+  # 键照写：format（alloy_json | alloy_logfmt | kubernetes_event_exporter | eventrouter，默认 alloy_json）、
+  # stream（日志流选择器，标签名 → 取值；后两种格式必须填写）、fields、reasons、max_series、timeout；为空时用默认值
+  loki: {url: "", tenant: "", labels: {}, caSecret: null, kubeEvents: {}}
   tempo: {url: ""}
 
 # 告警接入源（server 的 ingest.sources）。每个接入源一个 bearer token，

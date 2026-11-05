@@ -580,6 +580,56 @@ export class TopologyStore implements NodeLookup {
     return r.rows.map((x) => x.t);
   }
 
+  /**
+   * 组件在时间段 [from, to) 内的对象与它们所在的节点（ADR 0185）：沿 owned_by 反向展开到组件拥有的对象
+   * （Deployment → ReplicaSet → Pod，最多 4 层，组件本身也算；组件是 HPA 时从它 scales 指向的工作负载展开，ADR 0184），
+   * 每个对象再取与时间段重叠的 runs_on 边。
+   * 一行是一个 (组件, 对象, runs_on 区间)；对象没有与时间段重叠的 runs_on 边时 node 为 null（例如没有调度成功的 Pod），
+   * 区间取时间段本身。node 是 runs_on 指向的 Node 键。一次查询取全部组件，按组件、对象、区间开始排序
+   */
+  async placements(
+    clusterId: string,
+    components: readonly string[],
+    from: Date,
+    to: Date,
+  ): Promise<Array<{ component: string; object: string; node: string | null; from: Date; to: Date | null }>> {
+    if (!components.length) {
+      return [];
+    }
+    const r = await this.pool.query<{
+      component: string;
+      object: string;
+      node: string | null;
+      vf: Date;
+      vt: Date | null;
+    }>(
+      `WITH RECURSIVE down(root, k, depth) AS (
+         SELECT u.c, u.c, 0 FROM unnest($2::text[]) AS u(c)
+         UNION
+         SELECT u.c, s.body->>'to', 1 FROM unnest($2::text[]) AS u(c) JOIN server.topology_events s
+             ON s.cluster_id = $1 AND s.item = 'edge' AND s.op = 'edge_upsert'
+            AND s.body->>'from' = u.c AND s.body->>'relation' = 'scales'
+            AND s.valid_from < $4 AND (s.valid_to IS NULL OR s.valid_to > $3)
+         UNION
+         SELECT d.root, e.body->>'from', d.depth + 1
+           FROM down d JOIN server.topology_events e
+             ON e.cluster_id = $1 AND e.item = 'edge' AND e.op = 'edge_upsert'
+            AND e.body->>'to' = d.k AND e.body->>'relation' = 'owned_by'
+            AND e.valid_from < $4 AND (e.valid_to IS NULL OR e.valid_to > $3)
+          WHERE d.depth < 4
+       )
+       SELECT DISTINCT d.root AS component, d.k AS object, r.body->>'to' AS node,
+              coalesce(r.valid_from, $3) AS vf, CASE WHEN r.seq IS NULL THEN $4 ELSE r.valid_to END AS vt
+         FROM down d LEFT JOIN server.topology_events r
+           ON r.cluster_id = $1 AND r.item = 'edge' AND r.op = 'edge_upsert'
+          AND r.body->>'from' = d.k AND r.body->>'relation' = 'runs_on'
+          AND r.valid_from < $4 AND (r.valid_to IS NULL OR r.valid_to > $3)
+        ORDER BY component, object, vf`,
+      [clusterId, components, from, to],
+    );
+    return r.rows.map((x) => ({ component: x.component, object: x.object, node: x.node, from: x.vf, to: x.vt }));
+  }
+
   /** 节点的 uid（时间范围与 find 相同）；节点不存在时为 undefined。 */
   async uidOf(clusterId: string, key: string, at: Date): Promise<string | null | undefined> {
     const r = await this.pool.query<{ uid: string | null }>(

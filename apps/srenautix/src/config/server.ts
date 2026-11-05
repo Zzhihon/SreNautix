@@ -9,6 +9,12 @@ import { DEFAULT_SKILLS, skillsConfig } from '../skills/config.js';
 import { NOVELTY_CONFIG_DEFAULT, noveltyConfig } from './novelty.js';
 import { alertMatcher, upgradeMatchers, type AlertMatcher } from '../alerts/business-impact.js';
 import { categoryRule } from '../alerts/category.js';
+import {
+  DEFAULT_KUBE_WARNING_REASONS,
+  KUBE_EVENT_FORMAT_NAMES,
+  KUBE_EVENT_FORMATS,
+  LOKI_LABEL_NAME,
+} from '../export/kube-events.js';
 import { logger } from '../log.js';
 import type { ExternalRootSettings } from '../notify/external.js';
 
@@ -16,6 +22,12 @@ const duration = z.string().regex(/^\d+(ms|s|m|h|d)$/, '时长形如 30s、5m、
 const url = z.string().url();
 const path = z.string().min(1);
 const clusterId = z.string().regex(/^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$/);
+// Kubernetes 事件日志的一个字段：line 为解析器从日志行取的字段（json 的路径如 involvedObject.kind，logfmt 的键），
+// label 为日志流标签
+const kubeEventField = z.union([
+  z.object({ line: z.string().regex(/^[A-Za-z_][A-Za-z0-9_.]*$/) }).strict(),
+  z.object({ label: z.string().regex(LOKI_LABEL_NAME) }).strict(),
+]);
 
 const ingestSource = z.discriminatedUnion('kind', [
   z
@@ -447,6 +459,42 @@ export const serverConfigSchema = z
               .strict()
               .default({ namespace: 'namespace', pod: 'pod', container: 'container', cluster: null }),
             timeout: duration.default('15s'),
+            // Kubernetes 事件日志（ADR 0185）：导出时的 Warning 计数与疑似同一根因的分组读它。format 是事件采集器的格式，
+            // 决定解析器与各字段的来源；stream 是事件日志流的选择器（标签名 → 取值，相等匹配），不填时用格式的默认值；
+            // fields 覆盖格式的字段来源（line 为解析器从日志行取的字段，label 为日志流标签）；reasons 是计数的事件 reason
+            kube_events: z
+              .object({
+                format: z.enum(KUBE_EVENT_FORMAT_NAMES).default('alloy_json'),
+                stream: z.record(z.string().regex(LOKI_LABEL_NAME), z.string().min(1)).optional(),
+                fields: z
+                  .object({
+                    reason: kubeEventField.optional(),
+                    kind: kubeEventField.optional(),
+                    namespace: kubeEventField.optional(),
+                    name: kubeEventField.optional(),
+                    node: kubeEventField.optional(),
+                  })
+                  .strict()
+                  .default({}),
+                reasons: z
+                  .array(z.string().regex(/^[A-Za-z][A-Za-z0-9]*$/))
+                  .min(1)
+                  .default([...DEFAULT_KUBE_WARNING_REASONS]),
+                // 单次查询保留的序列数上限，超过时结果标明截断
+                max_series: z.number().int().min(100).max(50_000).default(5000),
+                timeout: duration.default('60s'),
+              })
+              .strict()
+              .refine((k) => k.stream !== undefined || KUBE_EVENT_FORMATS[k.format].stream !== null, {
+                message: '这个格式没有约定的日志流标签，必须填写 kube_events.stream',
+              })
+              .default({
+                format: 'alloy_json',
+                fields: {},
+                reasons: [...DEFAULT_KUBE_WARNING_REASONS],
+                max_series: 5000,
+                timeout: '60s',
+              }),
           })
           .strict()
           .optional(),

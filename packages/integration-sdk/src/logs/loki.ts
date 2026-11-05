@@ -1,7 +1,15 @@
 // logs/v1 的核心级适配器：Loki。logs.match 由 K8s 选择器生成 LogQL；logs.query 执行原生 LogQL。
 // 日志行是不可信文本，原样返回，由展示层转义。
 
-import type { LogLine, LogsMatchRequest, LogsQueryRequest, LogsResult, TimeWindow } from '@srenautix/contract';
+import type {
+  LogLine,
+  LogsMatchRequest,
+  LogsQueryRequest,
+  LogsResult,
+  MetricSeries,
+  MetricsQueryResult,
+  TimeWindow,
+} from '@srenautix/contract';
 import { assertWindowInClock, toMillis } from '../clock.js';
 import { DatasourceError } from '../errors.js';
 import { HttpClient, type HttpAuthConfig } from '../http.js';
@@ -18,6 +26,23 @@ export interface LokiConfig extends HttpAuthConfig {
 interface LokiStreams {
   status: string;
   data: { resultType: string; result: Array<{ stream: Record<string, string>; values: Array<[string, string]> }> };
+}
+
+interface LokiMatrix {
+  status: string;
+  data: { resultType: string; result: Array<{ metric: Record<string, string>; values: Array<[number, string]> }> };
+}
+
+/** LogQL 指标查询（count_over_time 等）的区间查询请求 */
+export interface LokiMetricRangeRequest {
+  query: string;
+  /** 求值时刻为 window.from、window.from + step、…，不超过 window.to */
+  window: TimeWindow;
+  step_seconds: number;
+  clock_window: TimeWindow;
+  timeout_ms: number;
+  /** 保留的序列数上限；超过时按标签排序后截断，truncated 为 true */
+  max_series: number;
 }
 
 /** LogQL 字符串字面量（Go 风格双引号） */
@@ -72,6 +97,35 @@ export class LokiAdapter {
       throw new DatasourceError(this.config.id, `Loki 只接受 logql，收到 ${req.dialect}`);
     }
     return this.run(req.query, req.window, req.limit, req.clock_window);
+  }
+
+  /**
+   * LogQL 指标查询的区间查询（/loki/api/v1/query_range 返回 matrix）。结果的形状与 metrics/v1 的区间查询相同：
+   * times 为 unix 毫秒，序列按标签排序后截断，结果与后端返回的顺序无关
+   */
+  async metricRange(req: LokiMetricRangeRequest): Promise<MetricsQueryResult> {
+    assertWindowInClock(req.window, req.clock_window);
+    const body = await this.http.json<LokiMatrix>('GET', '/loki/api/v1/query_range', {
+      query: new URLSearchParams({
+        query: req.query,
+        start: nanos(req.window.from),
+        end: nanos(req.window.to),
+        step: `${req.step_seconds}s`,
+      }),
+      timeoutMs: req.timeout_ms,
+    });
+    if (body.data.resultType !== 'matrix') {
+      throw new DatasourceError(this.config.id, `LogQL 指标区间查询必须返回 matrix，收到 ${body.data.resultType}`);
+    }
+    const series: MetricSeries[] = body.data.result.map((s) => ({
+      labels: s.metric,
+      times: s.values.map(([t]) => Math.round(t * 1000)),
+      values: s.values.map(([, v]) => Number(v)),
+    }));
+    const key = (s: MetricSeries) => JSON.stringify(Object.entries(s.labels).sort());
+    series.sort((a, b) => (key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0));
+    const truncated = series.length > req.max_series;
+    return { series: truncated ? series.slice(0, req.max_series) : series, truncated, warnings: [] };
   }
 
   async labelNames(window: TimeWindow, clock: TimeWindow): Promise<string[]> {

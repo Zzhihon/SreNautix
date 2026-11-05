@@ -17,7 +17,7 @@ export {
   LABEL_CANDIDATES,
   type LabelProfileOptions,
 } from './metrics/label-profile.js';
-export { LokiAdapter, logqlString, re2Escape, type LokiConfig } from './logs/loki.js';
+export { LokiAdapter, logqlString, re2Escape, type LokiConfig, type LokiMetricRangeRequest } from './logs/loki.js';
 export { TempoAdapter, type TempoConfig } from './traces/tempo.js';
 export {
   PostgresDbstatsAdapter,

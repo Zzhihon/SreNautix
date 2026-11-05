@@ -45,3 +45,18 @@ tests:
           pattern: '(?m)^  loki:\n    ca_file: /etc/srenautix/secrets/loki-ca/ca\.crt\n'
         template: templates/role-resources.yaml
         documentSelector: {path: metadata.name, value: t-srenautix-server-config}
+
+  - it: kubeEvents 照写为 kube_events（ADR 0185）
+    set:
+      profile: standard
+      datasources.loki:
+        url: http://loki.logging.svc:3100
+        kubeEvents:
+          format: kubernetes_event_exporter
+          stream: {app: event-exporter}
+    asserts:
+      - matchRegex:
+          path: 'data["config.yaml"]'
+          pattern: '(?m)^  loki:\n    kube_events:\n      format: kubernetes_event_exporter\n      stream:\n        app: event-exporter\n    url: '
+        template: templates/role-resources.yaml
+        documentSelector: {path: metadata.name, value: t-srenautix-server-config}

@@ -347,6 +347,10 @@ datasources:
     labels:
       {{- toYaml . | nindent 6 }}
     {{- end }}
+    {{- with .kubeEvents }}
+    kube_events:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
   {{- end }}
   {{- end }}
 topology:
