@@ -1,7 +1,9 @@
 // 适配器共用的 HTTP 客户端：凭证只从挂载文件读取，可选自定义 CA，请求超时，错误转为 DatasourceError。
 
 import { readFileSync } from 'node:fs';
-import { Agent } from 'undici';
+// 自定义 CA 的 Agent 来自 undici 包，必须配同一个包的 fetch：Node 内置 fetch 绑定的 undici 版本不同，
+// 收到这个包的 dispatcher 时以 UND_ERR_INVALID_ARG 拒绝（只报 fetch failed）
+import { Agent, fetch, type RequestInit } from 'undici';
 import { DatasourceError } from './errors.js';
 
 export interface HttpAuthConfig {
@@ -66,12 +68,12 @@ export class HttpClient {
         body,
         signal: AbortSignal.timeout(opts.timeoutMs),
         ...(this.dispatcher ? { dispatcher: this.dispatcher } : {}),
-      } as RequestInit);
+      } satisfies RequestInit);
       return { status: res.status, text: await res.text() };
     } catch (err) {
       throw new DatasourceError(
         this.integration,
-        `${method} ${path} 失败：${err instanceof Error ? err.message : String(err)}`,
+        `${method} ${path} 失败：${describe(err)}`,
         err instanceof Error && err.name === 'TimeoutError',
       );
     }
@@ -93,4 +95,17 @@ export class HttpClient {
       throw new DatasourceError(this.integration, `${method} ${path} 的响应不是 JSON：${r.text.slice(0, 200)}`);
     }
   }
+}
+
+/** fetch 只报 fetch failed，真正的原因（证书、连接拒绝、DNS）在 cause 里 */
+function describe(err: unknown): string {
+  if (!(err instanceof Error)) {
+    return String(err);
+  }
+  const cause = err.cause;
+  if (cause instanceof Error) {
+    const code = (cause as Error & { code?: unknown }).code;
+    return `${err.message}（${typeof code === 'string' ? `${code} ` : ''}${cause.message}）`;
+  }
+  return err.message;
 }
