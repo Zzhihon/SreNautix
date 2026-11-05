@@ -23,6 +23,8 @@ export interface IncidentRow {
   /** 事件的类别（ADR 0183）；之前版本写下、数据修正 incident/categories 还没有补上的行为 null */
   categories: IncidentCategory[] | null;
   primary_category: IncidentCategory | null;
+  /** 系列键（ADR 0184）；之前版本写入的事件与没有根因的事件为 null */
+  series_key: string | null;
 }
 
 /**

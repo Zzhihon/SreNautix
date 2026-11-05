@@ -31,6 +31,8 @@ import { IntegrationRegistry } from '../console-bff/integrations.js';
 import { registerAlertRoutes } from '../console-bff/routes-alerts.js';
 import { registerEvalRoutes } from '../console-bff/routes-eval.js';
 import { registerIncidentRoutes } from '../console-bff/routes-incidents.js';
+import { kubeWarningsDeps } from '../export/kube-warnings-config.js';
+import { registerExportRoutes } from '../export/routes.js';
 import { apiTokenCaller, registerSystemRoutes } from '../console-bff/routes-system.js';
 import { registerConsoleStatic } from '../console-bff/static.js';
 import { registerEvents } from '../events/http.js';
@@ -878,6 +880,13 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
     },
   });
   registerIncidentRoutes(app, { pool, auth, feedback, topology, evidence, worker });
+  // 批量导出（ADR 0186）：Kubernetes Warning 的指标查询用证据数据源的适配器与标签档案，节点归属用拓扑历史
+  registerExportRoutes(app, {
+    pool,
+    auth,
+    kubeWarnings: async () =>
+      kubeWarningsDeps(c, { metrics: await evidenceSource.metrics(Date.now()), placements: topology }),
+  });
   registerEvalRoutes(app, { pool, auth, candidates: new EvalCandidates(pool) });
   registerAlertRoutes(app, {
     pool,

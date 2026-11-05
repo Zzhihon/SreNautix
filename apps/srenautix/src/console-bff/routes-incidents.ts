@@ -17,7 +17,7 @@ import { badRequest, notFound } from '../api/errors.js';
 import type { Auth } from '../identity/auth.js';
 import { scopeMatches, type RoleBinding, type Target } from '../identity/bindings.js';
 import { withComponentNames } from '../incident/names.js';
-import { categoryConditions, parseCategoryFilters, rowCategories } from './incident-filters.js';
+import { incidentConditions, parseCategoryFilters, rowCategories } from './incident-filters.js';
 import { incidentVersion, latestStageA, resolveIncidentRef, type IncidentRow } from '../incident/read.js';
 import { reasonsOf, type IncidentReasonStage } from '../incident/reasons.js';
 import { researchRoots } from '../incident/research-root.js';
@@ -62,14 +62,15 @@ export interface IncidentRouteDeps {
   worker: { url: string; token: string } | null;
 }
 
-interface Cursor {
+/** 事件列表与导出的翻页位置：上一页最后一个事件的 first_firing_at 与 incident_id */
+export interface Cursor {
   t: string;
   id: string;
 }
 
-const encodeCursor = (c: Cursor) => Buffer.from(JSON.stringify(c)).toString('base64url');
+export const encodeCursor = (c: Cursor) => Buffer.from(JSON.stringify(c)).toString('base64url');
 
-function decodeCursor(raw: string): Cursor {
+export function decodeCursor(raw: string): Cursor {
   const c = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8')) as Cursor;
   if (typeof c.t !== 'string' || typeof c.id !== 'string') {
     throw badRequest('cursor 不合法');
@@ -188,12 +189,15 @@ export function registerIncidentRoutes(app: FastifyInstance, d: IncidentRouteDep
     } else {
       add('state = :p', state);
     }
-    if (q.cluster_id) add('cluster_id = :p', q.cluster_id);
-    if (q.severity) add('severity = :p', q.severity);
-    if (q.from) add('coalesce(ended_at, now()) >= :p::timestamptz', q.from);
-    if (q.to) add('first_firing_at <= :p::timestamptz', q.to);
-    if (q.component) add("(root_component = :p OR jsonb_exists(body->'components', :p))", q.component);
-    for (const c of categoryConditions(parseCategoryFilters(req.query as Record<string, unknown>))) {
+    const filters = incidentConditions({
+      ...parseCategoryFilters(req.query as Record<string, unknown>),
+      clusterId: q.cluster_id ?? null,
+      severity: q.severity ?? null,
+      from: q.from ?? null,
+      to: q.to ?? null,
+      component: q.component ?? null,
+    });
+    for (const c of filters) {
       add(c.sql, c.value);
     }
     if (q.q)

@@ -75,6 +75,30 @@ export function categoryConditions(f: CategoryFilters): Array<{ sql: string; val
   return out;
 }
 
+/** GET /v1/incidents 与 GET /v1/incidents/export 共用的筛选条件（状态与搜索词除外） */
+export interface IncidentFilters extends CategoryFilters {
+  clusterId: string | null;
+  severity: string | null;
+  /** 与 [from, to] 有重叠的事件：仍在触发的事件按当前时刻结束 */
+  from: string | null;
+  to: string | null;
+  /** 根因组件或组件之一 */
+  component: string | null;
+}
+
+/** 筛选条件的 SQL（server.incidents 上），每项的 :p 是它的参数 */
+export function incidentConditions(f: IncidentFilters): Array<{ sql: string; value: unknown }> {
+  const out: Array<{ sql: string; value: unknown }> = [];
+  if (f.clusterId) out.push({ sql: 'cluster_id = :p', value: f.clusterId });
+  if (f.severity) out.push({ sql: 'severity = :p', value: f.severity });
+  if (f.from) out.push({ sql: 'coalesce(ended_at, now()) >= :p::timestamptz', value: f.from });
+  if (f.to) out.push({ sql: 'first_firing_at <= :p::timestamptz', value: f.to });
+  if (f.component) {
+    out.push({ sql: "(root_component = :p OR jsonb_exists(body->'components', :p))", value: f.component });
+  }
+  return [...out, ...categoryConditions(f)];
+}
+
 /** 摘要里的类别：取列；数据修正还没有补上时按 body 的成员算（没有类别的成员按 unclassified） */
 export function rowCategories(r: IncidentRow): { categories: IncidentCategory[]; primary_category: IncidentCategory } {
   if (r.categories && r.primary_category) {

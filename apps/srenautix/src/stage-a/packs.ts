@@ -456,6 +456,7 @@ export class EvidenceSource {
   private readonly adapter: PrometheusApiAdapter;
   private readonly logs: LokiAdapter | null;
   private live: LiveDataSource | null = null;
+  private profile: LabelProfile = CANONICAL_PROFILE;
   private profileAt = 0;
   private profileError: string | null = null;
   private readonly resolutions = new Map<string, { at: number; r: SignalResolution }>();
@@ -530,11 +531,18 @@ export class EvidenceSource {
       });
     }
     this.profileAt = wall;
+    this.profile = profile;
     this.live = new LiveDataSource({
       metrics: { adapter: this.adapter, profile },
       ...(this.logs ? { logs: { adapter: this.logs, profile: this.logs.config.labels } } : {}),
     });
     return this.live;
+  }
+
+  /** 指标适配器与 at 时刻探测出的标签档案（与 dataSource 共用缓存）：导出的 kube-state-metrics 查询（ADR 0185）用它 */
+  async metrics(at: number): Promise<{ adapter: PrometheusApiAdapter; profile: LabelProfile }> {
+    await this.dataSource(at);
+    return { adapter: this.adapter, profile: this.profile };
   }
 
   /** 信号键 → 选中的备选。 */
