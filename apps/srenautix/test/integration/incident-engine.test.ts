@@ -1,10 +1,11 @@
 import type { Incident } from '@srenautix/contract';
-import { AlertCatalog, DEFAULT_RCA_PARAMS } from '@srenautix/core';
+import { AlertCatalog, DEFAULT_RCA_PARAMS, labelsFingerprint } from '@srenautix/core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { ObjectHealth } from '../../src/detectors/health.js';
 import { DEFAULT_EQUIVALENTS, DetectorService, type DetectorSettings } from '../../src/detectors/service.js';
 import { IncidentEngine } from '../../src/incident/engine.js';
 import { IncidentPipeline } from '../../src/incident/pipeline.js';
+import type { RawAlert } from '../../src/ingest/normalize.js';
 import { IngestService } from '../../src/ingest/service.js';
 import { ServerMetrics } from '../../src/metrics.js';
 import { serverTracks } from '../../src/roles/server-schema.js';
@@ -18,7 +19,8 @@ import { newTestDb, type TestDb } from '../support/db.js';
 // - CCHP 7c23d70 的时序：检测器事件 resolved → 超出回看窗口 → 检测器以原来的开始时间重新触发 → 重算重开原事件，
 //   不撞 (cluster_id, label) 唯一约束；
 // - 一组事件写入失败只回滚这一组，其余照常写入；
-// - 重开的事件与新事件一样进入阶段 B 队列，受每事件上限约束（ADR 0135）。
+// - 重开的事件与新事件一样进入阶段 B 队列，受每事件上限约束（ADR 0135）；
+// - 同一系列在重开窗口内复发时重开原事件，HPA 告警归到它伸缩的 Deployment（ADR 0184）。
 
 let db: TestDb;
 let topology: TopologyStore;
@@ -418,5 +420,182 @@ describe('事件引擎', () => {
       [EAST],
     );
     expect(queued.rows[0]!.n).toBe(2);
+  });
+
+  it('同一系列复发（ADR 0184）：HPA 到顶 firing/resolved 10 次、实体交替 → 1 个事件 10 个版本；窗口外复发与不同组件是新事件', async () => {
+    const SHOP = 'shop-hpa';
+    const at = new Date(Date.now() - 30 * DAY);
+    const node = (kind: string, name: string) => ({
+      op: 'node_upsert' as const,
+      at,
+      source: 'informer' as const,
+      node: {
+        key: `${kind}:shop/${name}`,
+        kind,
+        namespace: 'shop',
+        name,
+        uid: `uid-${kind}-${name}`,
+        labels: {},
+        component_type: null,
+        hub: false,
+      },
+    });
+    const scales = (name: string) => ({
+      op: 'edge_upsert' as const,
+      at,
+      source: 'informer' as const,
+      edge: {
+        from: `HorizontalPodAutoscaler:shop/${name}`,
+        to: `Deployment:shop/${name}`,
+        relation: 'scales',
+        provenance: 'structural' as const,
+        confidence: 1,
+        scope: 'service' as const,
+        evidence: `spec.scaleTargetRef Deployment/${name}`,
+      },
+    });
+    await topology.apply(SHOP, [
+      ...['api', 'web'].flatMap((n) => [node('Deployment', n), node('HorizontalPodAutoscaler', n)]),
+      scales('api'),
+      scales('web'),
+    ]);
+    const ingest = new IngestService(
+      db.server,
+      [],
+      { clusterId: SHOP, selfLabel: 'srenautix_self', watchdogAlertname: 'Watchdog' },
+      {
+        catalog: new AlertCatalog([
+          {
+            pack: 'test',
+            entries: [
+              {
+                id: 'kube-hpa-maxed-out',
+                alertname: 'KubeHpaMaxedOut',
+                role: 'symptom',
+                entity: { kind: 'HorizontalPodAutoscaler', name_labels: ['horizontalpodautoscaler'] },
+              },
+            ],
+          },
+        ]),
+        nodes: topology,
+        ksm: null,
+        ruleExpr: () => undefined,
+        chronic: () => false,
+      },
+      metrics,
+      () => {
+        throw new Error('测试中状态库一直可用');
+      },
+    );
+    const reopening = new IncidentEngine({
+      pool: db.server,
+      topology,
+      params: () => DEFAULT_RCA_PARAMS,
+      changes: async () => [],
+      probes: async () => [],
+      stale: { markStale: async () => 0 },
+      metrics,
+      suppressedAlerts: async () => new Map<string, string>(),
+      reopen: { windowMs: 7 * DAY },
+    });
+    // via 为 deployment 时告警自带实体标签，指向被伸缩的 Deployment；为 hpa 时实体按目录条目取 HPA
+    const raw = (name: string, via: 'hpa' | 'deployment', startsAt: Date, endsAt: Date | null): RawAlert => {
+      const labels: Record<string, string> = {
+        alertname: 'KubeHpaMaxedOut',
+        namespace: 'shop',
+        horizontalpodautoscaler: name,
+        severity: 'warning',
+        ...(via === 'deployment' ? { entity_kind: 'Deployment', entity: name } : {}),
+      };
+      return {
+        source: 'alertmanager',
+        labels,
+        annotations: {},
+        severity: 'warning',
+        status: endsAt ? 'resolved' : 'firing',
+        suppressed: 'none',
+        startsAt,
+        endsAt,
+        generatorUrl: null,
+        fingerprint: labelsFingerprint(labels),
+        alertname: 'KubeHpaMaxedOut',
+        alertmanagerSeenAt: null,
+      };
+    };
+    // 告警与事件的时间整体往前挪（数据库的 now() 拨不动）：上一次发生落到回看窗口之外
+    const shift = async (hours: number) => {
+      await db.server.query(
+        `UPDATE server.alert_state SET starts_at = starts_at - make_interval(hours => $2),
+           ends_at = ends_at - make_interval(hours => $2) WHERE cluster_id = $1`,
+        [SHOP, hours],
+      );
+      await db.server.query(
+        `UPDATE server.incidents SET ended_at = ended_at - make_interval(hours => $2),
+           body = jsonb_set(body, '{ended_at}', to_jsonb(to_char((ended_at - make_interval(hours => $2)) AT TIME ZONE 'UTC',
+             'YYYY-MM-DD"T"HH24:MI:SS"Z"')))
+         WHERE cluster_id = $1 AND ended_at IS NOT NULL`,
+        [SHOP, hours],
+      );
+    };
+    // 每次的开始时间相差 11 分钟，落在不同的 10 分钟桶里：稳定标签各不相同，只能按系列认领
+    const occur = async (name: string, via: 'hpa' | 'deployment', k: number) => {
+      const start = new Date(Date.now() - 31 * 60_000 - k * 11 * 60_000);
+      await ingest.write(SHOP, 'am', 'alertmanager', [raw(name, via, start, null)], {});
+      const fired = await reopening.recompute(SHOP);
+      await ingest.write(SHOP, 'am', 'alertmanager', [raw(name, via, start, new Date())], {});
+      const resolved = await reopening.recompute(SHOP);
+      return { fired, resolved };
+    };
+    const incidents = async () =>
+      (
+        await db.server.query<{ incident_id: string; state: string; version: number; series_key: string | null }>(
+          'SELECT incident_id, state, version, series_key FROM server.incidents WHERE cluster_id = $1 ORDER BY created_at',
+          [SHOP],
+        )
+      ).rows;
+
+    for (let k = 0; k < 10; k++) {
+      const o = await occur('api', k % 2 === 0 ? 'hpa' : 'deployment', k);
+      expect(o.fired.changes.map((c) => c.type)).toEqual([k === 0 ? 'incident.created' : 'incident.updated']);
+      expect(o.resolved.changes.map((c) => c.type)).toEqual(['incident.resolved']);
+      if (k > 0) {
+        expect([...o.fired.reopened]).toEqual([o.fired.toReport[0]!.incident_id]);
+      }
+      await shift(7);
+    }
+    const one = await incidents();
+    expect(one).toEqual([
+      expect.objectContaining({ state: 'resolved', version: 10, series_key: 'Deployment:shop/api|KubeHpaMaxedOut' }),
+    ]);
+    const versions = await db.server.query<{ version: number; reason: string }>(
+      'SELECT version, reason FROM server.incident_versions WHERE incident_id = $1 ORDER BY version',
+      [one[0]!.incident_id],
+    );
+    expect(versions.rows).toEqual([
+      { version: 1, reason: 'created' },
+      ...Array.from({ length: 9 }, (_, k) => ({ version: k + 2, reason: 'reopened' })),
+    ]);
+    const body = (
+      await db.server.query<{ body: Incident }>('SELECT body FROM server.incidents WHERE incident_id = $1', [
+        one[0]!.incident_id,
+      ])
+    ).rows[0]!.body;
+    expect(body.root.component).toBe('Deployment:shop/api');
+    expect(body.members).toHaveLength(10);
+
+    // web 到顶：系列键不同，另一个事件
+    const web = await occur('web', 'hpa', 20);
+    expect(web.fired.changes.map((c) => c.type)).toEqual(['incident.created']);
+    // api 上一次结束已过 8 天：超出重开窗口，新事件
+    await shift(8 * 24);
+    const late = await occur('api', 'hpa', 21);
+    expect(late.fired.changes.map((c) => c.type)).toEqual(['incident.created']);
+    const all = await incidents();
+    expect(all.map((r) => r.series_key)).toEqual([
+      'Deployment:shop/api|KubeHpaMaxedOut',
+      'Deployment:shop/web|KubeHpaMaxedOut',
+      'Deployment:shop/api|KubeHpaMaxedOut',
+    ]);
+    expect(await persistErrors(SHOP)).toBe(0);
   });
 });

@@ -520,8 +520,8 @@ export class TopologyStore implements NodeLookup {
   }
 
   /**
-   * 对象沿 owned_by 取到的顶层属主（与 TopologyGraph.componentOf 相同，Pod → ReplicaSet → Deployment）；
-   * 边按与 find 相同的时间范围取（含 24 小时内删除的），没有属主时为 null。
+   * 对象沿成员关系取到的顶层属主（与 TopologyGraph.componentOf 相同，Pod → ReplicaSet → Deployment；没有 owned_by 的
+   * HPA 沿 scales 取伸缩对象，ADR 0184）；边按与 find 相同的时间范围取（含 24 小时内删除的），没有属主时为 null。
    */
   async ownerOf(clusterId: string, key: string, at: Date): Promise<string | null> {
     const r = await this.pool.query<{ k: string; depth: number }>(
@@ -531,10 +531,10 @@ export class TopologyStore implements NodeLookup {
          SELECT nx.t, up.depth + 1 FROM up CROSS JOIN LATERAL (
            SELECT body->>'to' AS t FROM server.topology_events
             WHERE cluster_id = $1 AND item = 'edge' AND body->>'from' = up.k AND op = 'edge_upsert'
-              AND body->>'relation' = 'owned_by'
+              AND body->>'relation' IN ('owned_by', 'scales')
               AND valid_from <= greatest($3::timestamptz, now())
               AND (valid_to IS NULL OR valid_to > least($3::timestamptz, now()) - make_interval(secs => $4))
-            ORDER BY (valid_to IS NULL) DESC, valid_from DESC LIMIT 1) nx
+            ORDER BY (body->>'relation' = 'owned_by') DESC, (valid_to IS NULL) DESC, valid_from DESC LIMIT 1) nx
          WHERE up.depth < 8 AND nx.t <> $2::text
        )
        SELECT k, depth FROM up ORDER BY depth DESC LIMIT 1`,

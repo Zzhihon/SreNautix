@@ -20,7 +20,14 @@ import type {
   StageAReport,
 } from '@srenautix/contract';
 import { reasonText, type ReasonCodeOf, type ReasonStage } from '@srenautix/contract';
-import { displayComponentName, displayKey, isRollback, tryNodeKey, type ChangeBasis } from '@srenautix/core';
+import {
+  displayComponentName,
+  displayKey,
+  isRollback,
+  memberParents,
+  tryNodeKey,
+  type ChangeBasis,
+} from '@srenautix/core';
 import { formatValue, OTHER_CLASS, type Unit } from '@srenautix/packs-sdk';
 import { parseStoredKey } from '../topology/keys.js';
 import type { Subgraph } from '../research/types.js';
@@ -800,10 +807,12 @@ function cardLine(x: Ctx, r: EvidenceResult, marker: string, scope: Scope, inden
 }
 
 // ---- 拓扑 ----
-const RELATION_REVERSE: Record<string, string> = { owned_by: 'owns', managed_by: 'manages' };
+const RELATION_REVERSE: Record<string, string> = { owned_by: 'owns', managed_by: 'manages', scales: 'scaled_by' };
 const RELATION_RANK: Record<string, number> = {
   owned_by: 0,
   owns: 0,
+  scales: 0,
+  scaled_by: 0,
   managed_by: 0,
   manages: 0,
   depends_on: 1,
@@ -1368,14 +1377,16 @@ function evidenceBlocks(
     ...x.inc.candidates.map((c) => c.component),
     ...x.inc.components,
   ]);
+  // 成员关系的上一级（owned_by，没有 owned_by 的 HPA 取伸缩对象，ADR 0184）
+  const parents = memberParents(subgraph?.edges ?? []);
   const owner = (k: string): string => {
     let cur = k;
     for (let i = 0; i < 4; i++) {
-      const e = subgraph?.edges.find((y) => y.from === cur && y.relation === 'owned_by');
-      if (!e) {
+      const next = parents.get(cur);
+      if (next === undefined) {
         break;
       }
-      cur = e.to;
+      cur = next;
     }
     return cur;
   };

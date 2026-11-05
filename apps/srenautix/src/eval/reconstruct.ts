@@ -11,9 +11,11 @@ import {
   changeInputFrom,
   computeIncidents,
   isIgnorable,
+  OWNED_BY,
   parseKey,
   sameKind,
   reconcileIncidents,
+  SCALES,
   TopologyGraph,
   type ResolvedRcaParams,
 } from '@srenautix/core';
@@ -81,7 +83,7 @@ const live = (iv: { from: number; to: number | null }, t: number) => iv.from <= 
 export class BundleTopology implements NodeLookup {
   private readonly nodes = new Map<string, Array<Interval<TopologyNode>>>();
   private readonly edges = new Map<string, Array<Interval<TopologyEdge>>>();
-  /** owned_by 边按起点（属主查找用） */
+  /** 成员关系的边（owned_by 与 HPA 的 scales，ADR 0184）按起点（属主查找用） */
   private readonly ownedBy = new Map<string, Array<Interval<TopologyEdge>>>();
   private readonly boundaries: number[];
   private readonly stateNodes: TopologyRow[];
@@ -113,7 +115,7 @@ export class BundleTopology implements NodeLookup {
         const iv = { seq: r.seq, from, to, ksm, body: r.body as TopologyEdge, kind: null, namespace: null, name: null };
         list.push(iv);
         this.edges.set(r.key, list);
-        if (iv.body.relation === 'owned_by') {
+        if (iv.body.relation === OWNED_BY || iv.body.relation === SCALES) {
           const o = this.ownedBy.get(iv.body.from) ?? [];
           o.push(iv);
           this.ownedBy.set(iv.body.from, o);
@@ -339,8 +341,8 @@ export class BundleTopology implements NodeLookup {
   }
 
   /**
-   * 顶层属主，与状态库的 ownerOf 相同（topology/store.ts）：沿 owned_by 边向上，边在 [lower, upper] 内有效，
-   * 优先未结束的、状态库的、较新的
+   * 顶层属主，与状态库的 ownerOf 相同（topology/store.ts）：沿成员关系的边向上，边在 [lower, upper] 内有效，
+   * 优先 owned_by（HPA 有控制者时跟随控制者），再优先未结束的、状态库的、较新的
    */
   private ownerOf(key: string, upper: number, lower: number): string | null {
     let cur = key;
@@ -351,10 +353,11 @@ export class BundleTopology implements NodeLookup {
         if (iv.from > upper || (iv.to !== null && iv.to <= lower)) {
           continue;
         }
-        const rank = (x: Interval<TopologyEdge>) => [Number(x.to === null), Number(!x.ksm), x.from] as const;
-        const [a1, b1, c1] = rank(iv);
-        const [a2, b2, c2] = best ? rank(best) : ([-1, -1, -1] as const);
-        if (a1 > a2 || (a1 === a2 && (b1 > b2 || (b1 === b2 && c1 > c2)))) {
+        const rank = (x: Interval<TopologyEdge>) =>
+          [Number(x.body.relation === OWNED_BY), Number(x.to === null), Number(!x.ksm), x.from] as const;
+        const [o1, a1, b1, c1] = rank(iv);
+        const [o2, a2, b2, c2] = best ? rank(best) : ([-1, -1, -1, -1] as const);
+        if (o1 > o2 || (o1 === o2 && (a1 > a2 || (a1 === a2 && (b1 > b2 || (b1 === b2 && c1 > c2)))))) {
           best = iv;
         }
       }

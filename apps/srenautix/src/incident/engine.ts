@@ -2,7 +2,9 @@ import type { Alert, ChangeEvent, Incident, TopologyEdge, TopologyNode } from '@
 import {
   changeInputFrom,
   computedLabel,
+  computedSeriesKey,
   computeIncidents,
+  incidentSeriesKey,
   reconcileIncidents,
   TopologyGraph,
   type ComputedIncident,
@@ -50,6 +52,11 @@ export interface EngineDeps {
    * （抑制规则的 reason，或 Alertmanager 静默）。事件变为被抑制时原因写进 incident_state 记录（ADR 0172）
    */
   suppressedAlerts(c: Queryable, clusterId: string, alertIds: string[]): Promise<Map<string, string>>;
+  /**
+   * 同一系列复发时重开原事件（ADR 0184，server 配置 incidents.reopen）：窗口是复发的告警开始时距上一次结束的最长间隔。
+   * 不给出时不按系列重开
+   */
+  reopen?: { windowMs: number };
 }
 
 export interface RecomputeResult {
@@ -71,8 +78,8 @@ export interface RecomputeResult {
 /**
  * 事件引擎（DESIGN §2.2）：唯一写入方。每次对账按确定性规则重算（packages/core 的收敛与根因排序），
  * 再与已持久化的事件对账（合并写别名、拆分记 split_from），在一个事务里写入事件、版本、成员、别名与 outbox。
- * 超出回看窗口、与本轮分组共享成员或标签的事件也参与对账（重开或占用标签）；每组事件在自己的保存点里写入，
- * 一组失败不影响其余（ADR 0132）。
+ * 超出回看窗口、与本轮分组共享成员或标签的事件也参与对账（重开或占用标签），重开窗口内结束、与本轮分组系列键相同的
+ * resolved 事件按系列重开（ADR 0184）；每组事件在自己的保存点里写入，一组失败不影响其余（ADR 0132）。
  */
 export class IncidentEngine {
   constructor(private readonly d: EngineDeps) {}
@@ -107,11 +114,13 @@ export class IncidentEngine {
           [clusterId, now, lookback / 1000],
         );
         const previous = prevRows.rows.map((r) => r.body);
-        const dormant = await dormantIncidents(c, clusterId, previous, computed);
+        const reopenWindowMs = this.d.reopen?.windowMs;
+        const dormant = await dormantIncidents(c, clusterId, previous, computed, now, reopenWindowMs);
         const result = reconcileIncidents({
           clusterId,
           previous,
           dormant,
+          reopenWindowMs,
           computed,
           topologyVersion: topo.version,
           now: now.getTime(),
@@ -248,13 +257,14 @@ export class IncidentEngine {
   private async persist(c: Queryable, inc: Incident, prev: Incident | undefined): Promise<VersionReason | null> {
     await c.query(
       `INSERT INTO server.incidents (incident_id, cluster_id, label, version, state, severity, first_firing_at, ended_at, root_component,
-         suppressed, observability_blind, split_from, merged_into, body, created_at, updated_at, categories, primary_category)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+         suppressed, observability_blind, split_from, merged_into, body, created_at, updated_at, categories, primary_category,
+         series_key)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
        ON CONFLICT (incident_id) DO UPDATE SET version = excluded.version, state = excluded.state, severity = excluded.severity,
          first_firing_at = excluded.first_firing_at, ended_at = excluded.ended_at, root_component = excluded.root_component,
          suppressed = excluded.suppressed, observability_blind = excluded.observability_blind, split_from = excluded.split_from,
          merged_into = excluded.merged_into, body = excluded.body, updated_at = excluded.updated_at,
-         categories = excluded.categories, primary_category = excluded.primary_category`,
+         categories = excluded.categories, primary_category = excluded.primary_category, series_key = excluded.series_key`,
       [
         inc.incident_id,
         inc.cluster_id,
@@ -274,6 +284,7 @@ export class IncidentEngine {
         inc.updated_at,
         categoriesOf(inc).categories,
         categoriesOf(inc).primary_category,
+        incidentSeriesKey(inc),
       ],
     );
     let reason: VersionReason | null = null;
@@ -336,28 +347,37 @@ function stateChanges(
 
 /**
  * 不在 previous 里、但与本轮分组相关的已持久化事件（超出回看窗口的 resolved 与 merged）：共享仍在的成员告警，
- * 或标签是某个分组的标签（含去重后缀）。对账据此重开事件、避开已占用的标签（ADR 0132）
+ * 或标签是某个分组的标签（含去重后缀）（ADR 0132）；给出重开窗口时，还有重开窗口内结束、系列键是某个分组的系列键的
+ * resolved 事件（ADR 0184）。对账据此重开事件、避开已占用的标签
  */
 async function dormantIncidents(
   c: Queryable,
   clusterId: string,
   previous: readonly Incident[],
   computed: readonly ComputedIncident[],
+  now: Date,
+  reopenWindowMs: number | undefined,
 ): Promise<Incident[]> {
   if (computed.length === 0) {
     return [];
   }
   const labels = [...new Set(computed.map(computedLabel))];
   const alertIds = [...new Set(computed.flatMap((x) => x.group.alerts.map((a) => a.alert.alert_id)))];
+  const series =
+    reopenWindowMs === undefined
+      ? []
+      : [...new Set(computed.map(computedSeriesKey).filter((k): k is string => k !== null))];
   const r = await c.query<{ body: Incident }>(
     `SELECT i.body FROM server.incidents i
       WHERE i.cluster_id = $1 AND NOT (i.incident_id = ANY($2::uuid[]))
         AND (i.label = ANY($3::text[])
              OR EXISTS (SELECT 1 FROM unnest($3::text[]) b WHERE starts_with(i.label, b || '~'))
              OR i.incident_id IN (SELECT m.incident_id FROM server.incident_members m
-                                   WHERE m.alert_id = ANY($4::text[]) AND m.left_version IS NULL))
+                                   WHERE m.alert_id = ANY($4::text[]) AND m.left_version IS NULL)
+             OR (i.series_key = ANY($5::text[]) AND i.state = 'resolved'
+                 AND i.ended_at >= $6::timestamptz - make_interval(secs => $7)))
       ORDER BY i.created_at, i.incident_id`,
-    [clusterId, previous.map((p) => p.incident_id), labels, alertIds],
+    [clusterId, previous.map((p) => p.incident_id), labels, alertIds, series, now, (reopenWindowMs ?? 0) / 1000],
   );
   return r.rows.map((x) => x.body);
 }

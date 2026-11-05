@@ -1,4 +1,5 @@
 import type { Feedback, Hypothesis, RuleConclusion } from '@srenautix/contract';
+import { memberParents } from '@srenautix/core';
 import { cardConditionHolds } from '@srenautix/packs-sdk';
 import { isRoutine } from '../stage-a/novelty.js';
 import { commonCauseCheck } from './common-cause.js';
@@ -72,16 +73,12 @@ export interface ModelHypothesis {
 }
 
 /**
- * 组件粒度（ADR 0121）：沿子图的 owned_by 向上取顶层属主，与阶段 A 的 componentOf 相同；
- * 例如 Pod → ReplicaSet → Deployment 取 Deployment，CNPG 实例 Pod 取 Cluster。子图中没有属主时就是它自己。
+ * 组件粒度（ADR 0121）：沿子图的成员关系（owned_by，没有 owned_by 的 HPA 沿 scales，ADR 0184）向上取顶层属主，
+ * 与阶段 A 的 componentOf 相同；例如 Pod → ReplicaSet → Deployment 取 Deployment，CNPG 实例 Pod 取 Cluster，
+ * HPA 取它伸缩的 Deployment。子图中没有属主时就是它自己。
  */
 export function ownerOf(key: string, subgraph: Subgraph): string {
-  const parent = new Map<string, string>();
-  for (const e of subgraph.edges) {
-    if (e.relation === 'owned_by') {
-      parent.set(e.from, e.to);
-    }
-  }
+  const parent = memberParents(subgraph.edges);
   let cur = key;
   const seen = new Set([cur]);
   for (let next = parent.get(cur); next !== undefined; next = parent.get(cur)) {
@@ -94,15 +91,18 @@ export function ownerOf(key: string, subgraph: Subgraph): string {
   return cur;
 }
 
-/** 组件本身加上沿 owned_by 向下的全部成员（例如 Deployment 的 ReplicaSet 与 Pod），与阶段 A 的 membersOf 相同 */
+/**
+ * 组件本身加上沿成员关系向下的全部成员（例如 Deployment 的 ReplicaSet、Pod 与伸缩它的 HPA），与阶段 A 的 membersOf 相同
+ */
 export function membersOf(root: string, subgraph: Subgraph): Set<string> {
+  const parent = memberParents(subgraph.edges.filter((e) => e.confidence >= SCOPE_TAU));
   const out = new Set([root]);
   const queue = [root];
   for (let i = 0; i < queue.length; i++) {
-    for (const e of subgraph.edges) {
-      if (e.relation === 'owned_by' && e.to === queue[i] && e.confidence >= SCOPE_TAU && !out.has(e.from)) {
-        out.add(e.from);
-        queue.push(e.from);
+    for (const [from, to] of parent) {
+      if (to === queue[i] && !out.has(from)) {
+        out.add(from);
+        queue.push(from);
       }
     }
   }

@@ -126,6 +126,7 @@ audit:
    每个告警记下第一次在 Alertmanager 中被看到的时刻 `alert_state.alertmanager_seen_at`（ADR 0165）：Alertmanager 或 Grafana 的 webhook 到达、完整对账或快速轮询读到 Alertmanager 应答、reader 快照的读取时刻，取最早的一次。先由规则引擎的 `ALERTS_FOR_STATE` 补写的告警没有这个时刻，之后的完整对账或快速轮询在 Alertmanager 中读到它时补上；集群状态检测器、夜莺与通用 webhook 的告警没有这个时刻。首条消息时延 `clock="alertmanager"` 从这里算起。
    对账也是接入路径：每轮完整读取成功的对账计入接入（接入源 `reconcile` 的最后到达时间与 `srenautix_ingest_last_received_timestamp_seconds{source="reconcile"}`），对账读到 Watchdog 时计为 Watchdog 到达。只用对账、不接 webhook 推送的部署因此不会误报 `IngestSilent` 与 `WatchdogMissing`；webhook 没有推送、但对账在静默阈值内成功时，`IngestSilent` 的原因为 `ReconcileOnly`（不成立）。
 2. 事件引擎用 packages/core 重算并对账事件，写入版本、成员、别名与 outbox。事件的每个变更带关联分级（`change_links`：high、medium、low，依据与回退，ADR 0169）。
+   同一系列（告警名集合 + 归一后的根因组件，`server.incidents.series_key`）在 `incidents.reopen.window`（默认 `7d`）内复发时重开原事件：incident_id 与标签不变，版本加一，版本原因 `reopened`（ADR 0184）。HPA 归到 `spec.scaleTargetRef` 指向的工作负载的组件（拓扑边 `scales`），HPA 告警的根因组件因此是被伸缩的 Deployment。`incidents.reopen.enabled: false` 关闭按系列重开。
 3. 每个新版本立即出阶段 A：证据卡、规则提议、确定性结论规则、确定性的处置判断，发布 `stage_a.reported`，消息就地更新（见下面的"阶段 A 与领域包"）。时间线的变更行写"关联分级 <grade>（依据：…）"，GitHub 变更再写命中的路径前缀。
    时延从事件的计时起点算（ADR 0159）：新事件为首个成员告警的触发时刻，从已有事件拆分出的事件为拆分时刻。`srenautix_stage_a_latency_seconds{origin}` 记第一个版本的阶段 A，`origin` 为 `new` 或 `split`；拆分出的事件不计入检测延迟 `srenautix_incident_detection_seconds`。`server.stage_a_reports.first_rendered_at` 是报告第一次生成的时刻，重算只更新 `rendered_at`。
    每个事件的阶段 A 单独执行（ADR 0173）：某个事件的阶段 A 抛错时写一条终态记录 `stage_a_failed`（带错误摘要），同一轮的其余事件照常出报告；状态库连接错误照常交给降级通道。每轮流水线最后补跑当前版本超过 60 秒没有报告的事件（不含 merged，已结束的只看 6 小时内更新的，critical 在前，每轮最多 5 个），补跑成功后照常按触发原因准入阶段 B（重开的版本按 reopened）；同一版本补跑失败 3 次后记 `stage_a_missing`，不再补跑。critical 事件在 Alertmanager 中 60 秒后仍没有报告时先发不带证据卡的消息（`docs/server/notify.md`）。
@@ -548,13 +549,14 @@ issues:
 - **正文更新**：研判结束、事件恢复或证据变化后，后台循环重新生成正文，与上次写入的不同（`server.github_issues.body_hash`）时就地更新（`srenautix_github_issues_total{outcome="body_updated"}`）；只处理 `lookback` 内更新过的事件。
 - **标题更新**（ADR 0142）：标题是根因与头条症状，它们变了就在同一次 PATCH 里改标题（`server.github_issues.title`、`github.issue_retitled`、`srenautix_github_issues_total{outcome="title_updated"}`），否则按开出时的根因搜不到这个 issue。同一事件每小时最多改一次标题，根因或症状来回抖动时不跟着来回改，没到时间的标题留到之后的轮次。按标记找回、或这一版之前开出的 issue 先读回一次 GitHub 上的标题。PATCH issue 只允许改标题与正文。
 - **去重**：每个事件最多一个 issue（`server.github_issues` 以 incident_id 为主键）。开 issue 的请求超时或连接断开时，重试先按事件标记在仓库中找回已开的 issue，不重复开。
+- **同一系列复用**（ADR 0184）：同一集群、同一系列的其他事件在仓库里有打开、还没有被人关闭的 issue 时复用它（`server.github_issues.reused_from` 记开出它的事件，`github.issue_reused`、`srenautix_github_issues_total{outcome="reused"}`），不新开，不计入每小时上限；人关闭之后的复发开新的 issue。正文与标题跟随最近接上这个 issue 的事件。每次发生恢复时，恢复评论写第几次发生、本次持续时长与累计时长（接上同一个 issue 的全部事件的成员告警触发区间合并计算）。
 - **后续进展**：issue 开出之后结束的研判（新的结论档位与根因）、事件恢复、关联的 PR 与 gitops_pr 提议各追加一条评论，按 (事件, 键) 去重；评论同样带标记，重试时找回已写入的评论。
 - **关联**：server 发起的拓扑覆盖 PR 与 gitops_pr 提议的参数描述里写 `Refs #<issue>`（跨仓库时 `owner/name#<issue>`），GitHub 在 issue 上显示关联；PR 先于 issue 开出时，issue 开出后给 PR 描述补上 Refs（`github.pr_refs`）。gitops_pr 的 Refs 在创建提议时写入参数，随参数一起被审批；幂等键按调用方给出的参数计算。
-- **限速**：最近 1 小时已开满 `max_per_hour` 个 issue（事件 issue 与覆盖缺口 issue 合计）时，新的事件记为 `skipped`，只记录（`github.issue_skipped`、`srenautix_github_issues_total{outcome="skipped_rate_limit"}`、日志），之后不再为它开 issue。评论不受限速。
+- **限速**：最近 1 小时已开满 `max_per_hour` 个 issue（事件 issue 与覆盖缺口 issue 合计，复用的不算）时，新的事件记为 `skipped`，只记录（`github.issue_skipped`、`srenautix_github_issues_total{outcome="skipped_rate_limit"}`、日志），之后不再为它开 issue。评论不受限速。
 - **外部上游**（ADR 0147）：根因是外部上游且没有业务影响的事件（判定见 `docs/server/notify.md` 的“外部上游的周期汇总”）不开 issue，进入通知的周期汇总。事件未恢复时每 10 分钟再判定一次，期间出现业务影响就照常开出；恢复后记为 `skipped`（`github.issue_skipped` 的 `reason: external_root`、`srenautix_github_issues_total{outcome="skipped_external"}`）。需要改仓库的修复提议（`repo_change`）不受影响。
 - **失败与重试**：GitHub 返回错误或不可达时按退避重试（30 秒起，每次翻倍，最长 30 分钟），最多 8 次，用尽后记为 `failed`（`github.issue_failed`）。最近 1 小时内重试 3 次以上或放弃的 issue 与评论使状态条显示 `ChannelDeliveryFailed`（channel `github-issues`）。
-- 主实例运行后台循环；控制台发起拓扑覆盖 PR、提交 gitops_pr 提议时在当前副本上立即尝试开一次。每次开出、跳过、放弃、评论与补 Refs 写入治理审计；开出、跳过与重试用尽另写一条终态记录（`opened`、`external_root`、`rate_limit`、`failed`），进入事件时间线。
-- 指标：`srenautix_github_issues_total{repo,outcome}`（opened、skipped_rate_limit、skipped_external、retry、failed、body_updated）、`srenautix_github_issue_comments_total{repo,outcome}`（posted、retry、failed）。
+- 主实例运行后台循环；控制台发起拓扑覆盖 PR、提交 gitops_pr 提议时在当前副本上立即尝试开一次。每次开出、复用、跳过、放弃、评论与补 Refs 写入治理审计；开出、复用、跳过与重试用尽另写一条终态记录（`opened`、`reused`、`external_root`、`rate_limit`、`failed`），进入事件时间线。
+- 指标：`srenautix_github_issues_total{repo,outcome}`（opened、reused、skipped_rate_limit、skipped_external、retry、failed、body_updated）、`srenautix_github_issue_comments_total{repo,outcome}`（posted、retry、failed）。
 
 ### 关闭的跟踪
 

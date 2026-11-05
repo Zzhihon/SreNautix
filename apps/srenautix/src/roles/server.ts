@@ -653,6 +653,10 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
     stale: proposals,
     metrics,
     suppressedAlerts: (cl, clusterId, ids) => suppressedAlerts(cl as pg.PoolClient, clusterId, ids),
+    // 同一系列复发时重开原事件（ADR 0184）
+    reopen: c.incidents.reopen.enabled
+      ? { windowMs: parseDuration('incidents.reopen.window', c.incidents.reopen.window) }
+      : undefined,
   });
   const stageA = new StageAService(
     pool,

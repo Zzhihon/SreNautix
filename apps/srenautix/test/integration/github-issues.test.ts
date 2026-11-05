@@ -7,6 +7,7 @@ import { stringify } from 'yaml';
 import { parseServerConfig } from '../../src/config/server.js';
 import { hashPassword } from '../../src/identity/password.js';
 import { GitHubApp } from '../../src/github/app.js';
+import { openedLastHour } from '../../src/github/issues.js';
 import { ServerMetrics } from '../../src/metrics.js';
 import { withRefs } from '../../src/proposals/service.js';
 import { GitOpsPulls } from '../../src/remediation/pulls.js';
@@ -69,16 +70,20 @@ const fastForward = () =>
      UPDATE server.github_issue_comments SET next_attempt_at = now() WHERE posted_at IS NULL`,
   );
 
-/** 复制事件 A 为另一个集群里的新事件（不受本集群事件引擎对账影响），阶段 A 处置判断为 escalate */
-async function cloneEscalated(label: string): Promise<string> {
+/**
+ * 复制事件 A 为另一个集群里的新事件（不受本集群事件引擎对账影响），阶段 A 处置判断为 escalate。系列键默认为空
+ * （每个复制出的事件各开各的 issue）；给出时同一系列的事件复用已开的 issue（ADR 0184）
+ */
+async function cloneEscalated(label: string, seriesKey: string | null = null): Promise<string> {
   const id = randomUUID();
   await db.admin.query(
     `INSERT INTO server.incidents
        SELECT * FROM jsonb_populate_record(NULL::server.incidents, (SELECT to_jsonb(i) || jsonb_build_object(
          'incident_id', $2::uuid, 'cluster_id', 'c2', 'label', $3::text, 'updated_at', now(), 'state', 'firing', 'ended_at', NULL,
+         'series_key', $4::text,
          'body', i.body || jsonb_build_object('incident_id', $2::uuid, 'cluster_id', 'c2', 'label', $3::text))
        FROM server.incidents i WHERE i.incident_id = $1))`,
-    [incidentA, id, label],
+    [incidentA, id, label, seriesKey],
   );
   await db.admin.query(
     `INSERT INTO server.stage_a_reports
@@ -678,5 +683,105 @@ describe('事件 issue', () => {
       "SELECT data FROM server.governance_audit WHERE kind = 'github.issue_failed'",
     );
     expect(audit.rows.map((x) => x.data)).toEqual([expect.objectContaining({ incident_id: e, attempts: 8 })]);
+  });
+
+  it('同一系列（ADR 0184）：复用打开的 issue，不新开、不计入每小时上限；恢复时评论第几次发生与时长；人关闭后不再复用', async () => {
+    const SERIES = 'Deployment:shop/api|ApiMemoryHigh';
+    const t0 = Date.now();
+    const iso = (ms: number) => new Date(ms).toISOString();
+    // 事件的成员与状态：一个成员告警，start 起触发，end 为 null 时仍在触发
+    const occurrence = (id: string, alertId: string, start: number, end: number | null) =>
+      db.admin.query(
+        `UPDATE server.incidents SET series_key = $2, state = $3, ended_at = $4, updated_at = now(),
+           body = body || jsonb_build_object('state', $3::text, 'ended_at', $4::text, 'members', $5::jsonb)
+         WHERE incident_id = $1`,
+        [
+          id,
+          SERIES,
+          end === null ? 'firing' : 'resolved',
+          end === null ? null : iso(end),
+          JSON.stringify([
+            {
+              alert_id: alertId,
+              alertname: 'ApiMemoryHigh',
+              role: 'symptom',
+              component: 'Deployment:shop/api',
+              severity: 'warning',
+              status: end === null ? 'firing' : 'resolved',
+              starts_at: iso(start),
+              ends_at: end === null ? null : iso(end),
+              joined_version: 1,
+              left_version: null,
+            },
+          ]),
+        ],
+      );
+    // 上一次发生：c2-recover 的事件，3 小时前起触发 30 分钟，它的 issue 仍然打开
+    const first = (
+      await db.admin.query<{ incident_id: string }>(
+        "SELECT incident_id FROM server.incidents WHERE label = 'c2-recover'",
+      )
+    ).rows[0]!.incident_id;
+    const number = (await issueRow(first))!.number!;
+    await occurrence(first, 'a1@1', t0 - 3 * 3600_000, t0 - 150 * 60_000);
+    // 最近 1 小时已开满（自己开出的行都算作刚开出）
+    await db.admin.query(
+      "UPDATE server.github_issues SET opened_at = now() WHERE state = 'open' AND reused_from IS NULL",
+    );
+    const quota = await openedLastHour(db.admin, REPO);
+    expect(quota).toBeGreaterThanOrEqual(3);
+    const issues = gh.issues.length;
+
+    // 同一系列再次发生，处置判断为 escalate：复用 first 的 issue
+    const again = await cloneEscalated('c2-recurrence', SERIES);
+    await occurrence(again, 'a2@1', t0 - 10 * 60_000, null);
+    await run();
+    expect(gh.issues).toHaveLength(issues);
+    expect(await issueRow(again)).toMatchObject({ state: 'open', number });
+    const row = await db.admin.query<{ reused_from: string | null }>(
+      'SELECT reused_from FROM server.github_issues WHERE incident_id = $1',
+      [again],
+    );
+    expect(row.rows[0]!.reused_from).toBe(first);
+    expect(await openedLastHour(db.admin, REPO)).toBe(quota);
+    const audit = await db.admin.query<{ data: Record<string, unknown> }>(
+      "SELECT data FROM server.governance_audit WHERE kind = 'github.issue_reused'",
+    );
+    expect(audit.rows.map((x) => x.data)).toEqual([
+      expect.objectContaining({ incident_id: again, repo: REPO, number, reason: 'escalate', from_incident_id: first }),
+    ]);
+    const reasons = await db.admin.query<{ code: string; ref: string | null }>(
+      "SELECT code, ref FROM server.incident_reasons WHERE incident_id = $1 AND stage = 'issue'",
+      [again],
+    );
+    expect(reasons.rows).toEqual([{ code: 'reused', ref: expect.stringContaining(`/issues/${number}`) }]);
+    expect(await srv.metrics.registry.metrics()).toContain(
+      `srenautix_github_issues_total{repo="${REPO}",outcome="reused"} 1`,
+    );
+    // 正文换成这一次事件的报告
+    const issue = () => gh.issues.find((i) => i.number === number)!;
+    expect(issue().body).toContain(`<!-- srenautix:incident=${again} -->`);
+
+    // 这一次在 10 分钟后恢复：评论写第 2 次发生、本次 10 分钟、累计 40 分钟
+    await occurrence(again, 'a2@1', t0 - 10 * 60_000, t0);
+    await db.admin.query('UPDATE server.github_issues SET opened_at = $2 WHERE incident_id = $1', [
+      again,
+      new Date(t0 - 5 * 60_000),
+    ]);
+    await run();
+    await run();
+    expect(gh.comments.get(number)!.at(-1)!.body).toContain(
+      `事件已于 ${iso(t0)} 恢复。这是同一系列第 2 次发生，本次持续 10 分钟，2 次累计 40 分钟。`,
+    );
+
+    // 人关闭了这个 issue：同一系列之后的事件不再复用，按新 issue 处理（这里达到每小时上限，记为 skipped）
+    await db.admin.query('UPDATE server.github_issues SET closed_at = now() WHERE repo = $1 AND number = $2', [
+      REPO,
+      number,
+    ]);
+    const third = await cloneEscalated('c2-after-close', SERIES);
+    await run();
+    expect(await issueRow(third)).toMatchObject({ state: 'skipped', number: null });
+    expect(gh.issues).toHaveLength(issues);
   });
 });

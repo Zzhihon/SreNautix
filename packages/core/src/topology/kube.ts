@@ -3,7 +3,7 @@
 // ConfigMap 的值只用于找出 Service DNS 名，边的依据只写键名，不写值。
 import type { ComponentType, Labels, OperatorConvention, TopologyEdge, TopologyNode } from '@srenautix/contract';
 import { nodeKey, parseKey, sameKind, scopedNamespace, tryNodeKey } from '../keys.js';
-import { OWNED_BY } from './graph.js';
+import { OWNED_BY, SCALES } from './graph.js';
 import type { TopologySnapshot } from './store.js';
 
 /** 来源对应的默认置信度（DESIGN §4.2） */
@@ -258,6 +258,20 @@ export function buildKubeTopology(all: readonly KubeObject[], opts: BuildOptions
         addVirtual(ctl.kind, o.metadata.namespace ?? null, ctl.name, false);
       }
       addEdge(keyOf(o), ownerKey, OWNED_BY, 'structural', 'service', `ownerReference ${ctl.kind}/${ctl.name}`);
+    }
+  }
+
+  // HPA → 伸缩对象：HPA 归到它伸缩的工作负载所在的组件（ADR 0184）
+  for (const h of byKind('HorizontalPodAutoscaler')) {
+    const ref = obj(obj(h.spec).scaleTargetRef);
+    const kind = str(ref.kind);
+    const name = str(ref.name);
+    if (kind && name) {
+      const target = refKey(kind, h.metadata.namespace, name);
+      if (target !== null && !nodes.has(target)) {
+        addVirtual(kind, h.metadata.namespace ?? null, name, false);
+      }
+      addEdge(keyOf(h), target, SCALES, 'structural', 'service', `spec.scaleTargetRef ${kind}/${name}`);
     }
   }
 

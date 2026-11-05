@@ -238,5 +238,17 @@ ALTER TABLE server.incidents ADD COLUMN primary_category text;
 CREATE INDEX incidents_categories_idx ON server.incidents USING gin (categories);
 `,
     },
+    {
+      version: 9,
+      name: 'incident series key for reopening recurrences and reusing their issue',
+      phase: 'expand',
+      sql: `
+-- 系列键（ADR 0184）：<根因组件>|<仍在的成员告警的告警名，去重排序>，事件引擎每次写入时按事件内容求出。同一系列在
+-- incidents.reopen.window 内复发时重开原事件，事件 issue 复用同一系列已开的 issue。只加列与索引（ADR 0176），这一版
+-- 之前写入的事件为 null，不参与按系列重开；N-1 版本照常运行
+ALTER TABLE server.incidents ADD COLUMN series_key text;
+CREATE INDEX incidents_series_idx ON server.incidents (cluster_id, series_key, ended_at) WHERE series_key IS NOT NULL;
+`,
+    },
   ],
 };

@@ -132,5 +132,16 @@ ALTER TABLE server.github_issues ADD COLUMN state_reason text;
 ALTER TABLE server.github_issues ADD COLUMN checked_at timestamptz;
 `,
     },
+    {
+      version: 6,
+      name: 'incident issues reused across the incidents of one series',
+      phase: 'expand',
+      sql: `
+-- 同一系列（ADR 0184）的事件复用已开的 issue：reused_from 是开出这个 issue 的事件，为 null 的行是自己开出的。复用的行
+-- 与开出的行有相同的 number 与 url，不计入每小时上限；正文与标题跟随同一个 issue 最近接上的事件
+ALTER TABLE server.github_issues ADD COLUMN reused_from uuid;
+CREATE INDEX github_issues_number_idx ON server.github_issues (repo, number, opened_at) WHERE state = 'open';
+`,
+    },
   ],
 };

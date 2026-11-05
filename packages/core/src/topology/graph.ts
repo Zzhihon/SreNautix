@@ -1,10 +1,37 @@
 // 某一时刻的拓扑图（DESIGN §4）。
 // 边的方向：from 依赖 to，to 的故障沿边反向传播到 from。
 // owned_by 是成员关系：沿 owned_by 向上找到的顶层对象就是组件（Pod → ReplicaSet → Deployment，CNPG 的 Pod → Cluster），
-// 收敛与根因排序都在组件上进行；其余的边是依赖边。
+// 收敛与根因排序都在组件上进行。没有控制者的 HorizontalPodAutoscaler 沿 scales 归到它伸缩的工作负载（ADR 0184）。
+// 其余的边是依赖边。
 import type { ComponentKey, TopologyEdge, TopologyNode } from '@srenautix/contract';
 
 export const OWNED_BY = 'owned_by';
+/** HorizontalPodAutoscaler → spec.scaleTargetRef 指向的工作负载 */
+export const SCALES = 'scales';
+
+/**
+ * 组件成员关系中每个对象的上一级：owned_by 的控制者；没有 owned_by 的对象取 scales 的伸缩对象（ADR 0184）。
+ * 子图与重建包里的边按这个规则求组件，与 TopologyGraph.componentOf 相同
+ */
+export function memberParents(
+  edges: Iterable<Pick<TopologyEdge, 'from' | 'to' | 'relation'>>,
+): Map<ComponentKey, ComponentKey> {
+  const owned = new Map<ComponentKey, ComponentKey>();
+  const scaled = new Map<ComponentKey, ComponentKey>();
+  for (const e of edges) {
+    if (e.relation === OWNED_BY) {
+      owned.set(e.from, e.to);
+    } else if (e.relation === SCALES) {
+      scaled.set(e.from, e.to);
+    }
+  }
+  for (const [from, to] of scaled) {
+    if (!owned.has(from)) {
+      owned.set(from, to);
+    }
+  }
+  return owned;
+}
 
 /**
  * 访问边：调用方被允许访问被访问组件（网络策略推断的 egress_to）。可达只到被访问的组件为止（含组件内部的成员），
@@ -42,22 +69,35 @@ export class TopologyGraph {
     for (const n of nodes) {
       this.nodes.set(n.key, n);
     }
+    const scales: TopologyEdge[] = [];
     for (const e of edges) {
       if (e.relation === OWNED_BY) {
         // 一个对象只有一个控制者；构建时只为控制者生成 owned_by
         if (this.owner.has(e.from) && this.owner.get(e.from) !== e.to) {
           throw new Error(`${e.from} 有两个 owned_by：${this.owner.get(e.from)} 与 ${e.to}`);
         }
-        this.owner.set(e.from, e.to);
-        const list = this.ownedMembers.get(e.to) ?? [];
-        list.push(e.from);
-        this.ownedMembers.set(e.to, list);
+        this.addMember(e.from, e.to);
+      } else if (e.relation === SCALES) {
+        scales.push(e);
       } else {
         const list = this.outEdges.get(e.from) ?? [];
         list.push(e);
         this.outEdges.set(e.from, list);
       }
     }
+    // HPA 有控制者时（例如由 KEDA 的 ScaledObject 创建）跟随控制者；没有时归到伸缩对象（ADR 0184）
+    for (const e of scales) {
+      if (!this.owner.has(e.from)) {
+        this.addMember(e.from, e.to);
+      }
+    }
+  }
+
+  private addMember(from: ComponentKey, to: ComponentKey): void {
+    this.owner.set(from, to);
+    const list = this.ownedMembers.get(to) ?? [];
+    list.push(from);
+    this.ownedMembers.set(to, list);
   }
 
   node(key: ComponentKey): TopologyNode | undefined {
@@ -72,7 +112,7 @@ export class TopologyGraph {
     return this.nodes.values();
   }
 
-  /** 沿 owned_by 向上的顶层对象；不在图中的键就是它自己 */
+  /** 沿成员关系（owned_by，HPA 的 scales）向上的顶层对象；不在图中的键就是它自己 */
   componentOf(key: ComponentKey): ComponentKey {
     const cached = this.componentCache.get(key);
     if (cached !== undefined) {
@@ -91,7 +131,7 @@ export class TopologyGraph {
     return cur;
   }
 
-  /** 对象自身加上沿 owned_by 向下的全部成员 */
+  /** 对象自身加上沿成员关系向下的全部成员 */
   membersOf(key: ComponentKey): ComponentKey[] {
     const out: ComponentKey[] = [key];
     for (let i = 0; i < out.length; i++) {

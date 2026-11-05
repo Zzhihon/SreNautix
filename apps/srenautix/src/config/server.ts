@@ -704,6 +704,21 @@ export const serverConfigSchema = z
       })
       .strict()
       .optional(),
+    // 事件的身份（ADR 0184）：同一系列（告警名集合 + 归一后的根因组件）在 reopen.window 内复发时重开原事件，
+    // incident_id 不变、版本加一；事件 issue 复用同一系列已开的 issue
+    incidents: z
+      .object({
+        reopen: z
+          .object({
+            enabled: z.boolean().default(true),
+            // 复发的告警开始时距上一次结束的最长间隔
+            window: duration.default('7d'),
+          })
+          .strict()
+          .default({ enabled: true, window: '7d' }),
+      })
+      .strict()
+      .default({ reopen: { enabled: true, window: '7d' } }),
     stage_a: z
       .object({
         language: z.enum(['zh', 'en']).default('zh'),
