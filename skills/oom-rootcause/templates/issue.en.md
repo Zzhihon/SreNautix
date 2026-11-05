@@ -18,13 +18,16 @@ Conclusion (main / secondary / confidence):
 - **Main cause (confidence {{confidence_text}})**: {{title}}. {{mechanism}}.
 {{/steps.rank.main}}
 {{^steps.rank.main}}
-- No suspect both rose before the kills and is supported over 48 h, see §5.
+- No suspect is supported by metrics and logs in the windows before the kills; the cause is not explained, see §5.
 {{/steps.rank.main}}
 {{#steps.rank.others}}
 - **Another trigger (confidence {{confidence_text}})**: {{pods_and_times}} was driven by {{title}}. {{mechanism}}.
 {{/steps.rank.others}}
+{{#steps.rank.unsupported_by_stats}}
+- **Not supported by statistics (not ruled out)**: {{title}}{{#aggravating}}, possibly an aggravating factor{{/aggravating}}, see §3.
+{{/steps.rank.unsupported_by_stats}}
 {{#steps.rank.ruled_out}}
-- **Ruled out as the main cause (confidence {{confidence_text}})**: {{title}}{{#aggravating}}, an aggravating factor{{/aggravating}}, see §3.
+- **Ruled out as the main cause (confidence {{confidence_text}})**: {{title}}, see §3.
 {{/steps.rank.ruled_out}}
 
 ## 1. Evidence
@@ -63,18 +66,25 @@ Large requests in the main group (request_id, organization prefix and numbers on
 Code read at commit `{{steps.code.commit}}`.
 {{/steps.code.commit}}
 
-## 3. Ruled out and counter-examples
+## 3. Ruled out and statistical counter-examples
+
+Only direct evidence that the mechanism was absent at the kills rules a suspect out; a missing statistical association only means it is not supported and rules nothing out.
 
 {{#steps.rank.ruled_out}}
-- **{{title}}**: {{reason_text}}.
+- **{{title}}** (ruled out): {{reason_text}}.
 {{/steps.rank.ruled_out}}
+{{#steps.rank.unsupported_by_stats}}
+- **{{title}}** (not supported by statistics, not ruled out): {{reason_text}}.
+{{/steps.rank.unsupported_by_stats}}
 {{^steps.rank.ruled_out}}
-- No suspect was ruled out by counter-examples.
+{{^steps.rank.unsupported_by_stats}}
+- No suspect was ruled out or left unsupported by statistics.
+{{/steps.rank.unsupported_by_stats}}
 {{/steps.rank.ruled_out}}
 
 ## 4. Fixes and operations options
 
-Code:
+Code (suspects not ruled out):
 
 {{#steps.rank.fixes}}
 - [ ] {{text}}

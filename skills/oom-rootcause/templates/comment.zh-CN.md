@@ -12,6 +12,9 @@
 {{#steps.rank.others}}
 - 另一种触发：{{pods_and_times}}，{{title}}（置信度{{confidence_text}}）。
 {{/steps.rank.others}}
+{{#steps.rank.unsupported_by_stats}}
+- 统计上未得到支持（不排除）：{{title}}。
+{{/steps.rank.unsupported_by_stats}}
 {{#steps.rank.ruled_out}}
 - 排除为主因：{{title}}（置信度{{confidence_text}}）。
 {{/steps.rank.ruled_out}}

@@ -110,6 +110,7 @@ async function range(
   from: number,
   to: number,
   stepSeconds: number,
+  wrap: (expr: string) => string = (e) => e,
 ): Promise<sdk.SignalData> {
   const alt = await resolveAlt(env, key);
   if (!alt) {
@@ -120,12 +121,14 @@ async function range(
   if (!profile) {
     throw new Error('指标数据源没有标签档案');
   }
-  const expr = renderMetrics(env.engine, alt, {
-    entity: { cluster_id: env.clusterId, ...entity },
-    params: {},
-    windowSeconds: Math.max(60, Math.round((to - from) / 1000)),
-    profile,
-  });
+  const expr = wrap(
+    renderMetrics(env.engine, alt, {
+      entity: { cluster_id: env.clusterId, ...entity },
+      params: {},
+      windowSeconds: Math.max(60, Math.round((to - from) / 1000)),
+      profile,
+    }),
+  );
   const clockFrom = env.at - 8 * 24 * 3600_000;
   const r = await env.ctx.call(
     'metrics.query_range',
@@ -368,9 +371,14 @@ export async function runStep(uses: string, w: Record<string, unknown>, env: Ste
       const unique = [...new Set(keys)];
       if (mode === 'history') {
         const from = env.at - dur(w.last, 'last');
+        // 绑定中声明为峰值型（evidence: peak）的序列按步长内的最大值取样，步长之间的瞬时峰值不会丢失
+        const peaks = sdk.peakSignals(w.extra ?? []);
+        const res =
+          w.peak_resolution === undefined ? null : Math.round(dur(w.peak_resolution, 'peak_resolution') / 1000);
         const signals: Record<string, sdk.SignalData> = {};
         for (const k of unique) {
-          signals[k] = await range(env, k, env.subject, from, env.at, stepS);
+          const wrap = peaks.has(k) ? (e: string) => sdk.peakExpr(e, stepS, res) : undefined;
+          signals[k] = await range(env, k, env.subject, from, env.at, stepS, wrap);
         }
         return { windows: [], history: { from, to: env.at, step_seconds: stepS, signals } };
       }

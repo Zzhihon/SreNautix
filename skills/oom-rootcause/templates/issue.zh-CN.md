@@ -18,13 +18,16 @@
 - **主因（置信度{{confidence_text}}）**：{{title}}。{{mechanism}}。
 {{/steps.rank.main}}
 {{^steps.rank.main}}
-- 没有嫌疑项同时满足发生之前的上涨与 48 小时的支持，见 §5。
+- 没有嫌疑项在发生之前的窗口里得到指标与日志的支持，原因未解释，见 §5。
 {{/steps.rank.main}}
 {{#steps.rank.others}}
 - **另一种触发（置信度{{confidence_text}}）**：{{pods_and_times}} 由{{title}}主导。{{mechanism}}。
 {{/steps.rank.others}}
+{{#steps.rank.unsupported_by_stats}}
+- **统计上未得到支持（不排除）**：{{title}}{{#aggravating}}，可能是次要加重因素{{/aggravating}}，见 §3。
+{{/steps.rank.unsupported_by_stats}}
 {{#steps.rank.ruled_out}}
-- **排除为主因（置信度{{confidence_text}}）**：{{title}}{{#aggravating}}，是次要加重因素{{/aggravating}}，见 §3。
+- **排除为主因（置信度{{confidence_text}}）**：{{title}}，见 §3。
 {{/steps.rank.ruled_out}}
 
 ## 1. 证据
@@ -63,18 +66,25 @@
 代码按提交 `{{steps.code.commit}}` 读取。
 {{/steps.code.commit}}
 
-## 3. 排除项与反例
+## 3. 排除项与统计反例
+
+只有发生时刻机制没有出现的直接反证才排除；统计上缺乏关联只说明没有得到支持，不据此排除。
 
 {{#steps.rank.ruled_out}}
-- **{{title}}**：{{reason_text}}。
+- **{{title}}**（排除）：{{reason_text}}。
 {{/steps.rank.ruled_out}}
+{{#steps.rank.unsupported_by_stats}}
+- **{{title}}**（统计上未得到支持，不排除）：{{reason_text}}。
+{{/steps.rank.unsupported_by_stats}}
 {{^steps.rank.ruled_out}}
-- 没有被反例排除的嫌疑项。
+{{^steps.rank.unsupported_by_stats}}
+- 没有排除项，也没有统计上未得到支持的嫌疑项。
+{{/steps.rank.unsupported_by_stats}}
 {{/steps.rank.ruled_out}}
 
 ## 4. 修复方向与运维侧选项
 
-业务代码：
+业务代码（没有被排除的嫌疑项）：
 
 {{#steps.rank.fixes}}
 - [ ] {{text}}
