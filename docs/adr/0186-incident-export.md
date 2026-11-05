@@ -77,7 +77,18 @@
 
 告警、注解、模型摘要、证据卡说明与错误摘要等外部来源的文字，在 `json` 与 `ndjson` 中照原样给出，与 `GET /v1/incidents/{incident_ref}` 相同；MCP 的工具按 DESIGN §16.4 把它们移进 `untrusted_text`。`md` 把它们的换行并为空格并转义 Markdown 与 HTML 的控制字符，只作为文本显示。
 
-### 8. 与 ADR 0182、0183、0184、0185 的关系
+### 8. MCP 与命令行
+
+MCP（ADR 0087）的工具名在参数变化时发布新版本：
+
+- `list_incidents_v2` 在 `list_incidents_v1` 的 `state`、`limit` 之外加上 `from`、`to`、`cluster_id`、`severity`、`component`、`category`、`exclude_category`、`exclude_component` 与 `cursor`，原样转给 `GET /v1/incidents`；`list_incidents_v1` 保留一个版本周期。
+- `export_incidents_v1` 调 `GET /v1/incidents/export`，只给 JSON：一次最多 500 个事件（中心的上限是 5000，MCP 的结果要放进调用方模型的上下文），更多的用 `cursor` 继续。中心的超时放宽到 180 秒，覆盖每个集群的 Warning 查询。
+
+两个工具都是读取工具，需要 `srenautix:read`，计入调用方的读取速率限制；结果经 `separateUntrusted` 把模型摘要、证据卡说明、原因码说明与错误摘要等文字移进 `untrusted_text`（DESIGN §16.4）。Markdown 不经 MCP 提供：整篇是一段文字，放进 `untrusted_text` 会按单段上限截断。
+
+命令行 `incidents export`（`apps/srenautix/src/export/cli.ts`，同一镜像的 `main.js` 子命令）把参数转成查询串、以 bearer token 调中心、把响应体逐块写到标准输出。token 从 `--token-file`（或 `SRENAUTIX_TOKEN_FILE`）读取，是中心已有的两种外部凭据之一：控制台创建的 API token，或调用方文件里 `kind: external` 的调用方，与 mcp 角色的 `hub_token_file` 相同，不另设凭据。时间参数另外接受 `3d` 这样相对于现在的时长，参数的合法性由中心校验。
+
+### 9. 与 ADR 0182、0183、0184、0185 的关系
 
 - 类别（ADR 0183）与紧急度（ADR 0182）是正交的筛选属性；紧急度实现之后，导出接口与列表接口一样经 `incidentConditions` 增加 `urgency` 筛选，事件上增加紧急度字段。
 - 系列键与重开（ADR 0184）给出 `series_key`、`reopened_count` 与系列汇总；ADR 0182 §5 的复发计数按同样的重开次数统计。

@@ -157,6 +157,16 @@ curl -H "Authorization: Bearer $TOKEN" \
 
 筛选参数（`cluster_id`、`severity`、`component`、`category`、`exclude_category`、`exclude_component`、`suppressed`）、授权与可见性与 `GET /v1/incidents` 相同。每个事件带告警名、根因、首次与末次触发、累计触发时长与发生次数、合并与重开次数、类别、研判结论（无法判定时附原因码与原因）、abnormal 与 undeterminable 证据卡的一句摘要、影子 issue，以及事件时间窗内的 Kubernetes Warning 摘要；每个集群另给出 Warning 查询的状态与疑似同一根因的分组（ADR 0185，分组参数用 `group_gap`、`group_before`、`group_after`、`group_min_incidents` 覆盖）。`group=series` 按系列键汇总同一问题的复发。`format=ndjson` 逐行输出（`header`、`incident`、`series`、`kube_warnings`、`end`），`format=md` 给人阅读。一次最多 `limit` 条（默认与上限 5000），更多的用 `next_cursor` 继续。
 
+同一镜像带命令行客户端 `incidents export`，调用这个接口并把结果写到标准输出，供排查会话（Claude Code、Codex 等）直接使用：
+
+```
+node /app/apps/srenautix/dist/main.js incidents export \
+  --hub-url=http://srenautix-server:8080 --token-file=/etc/srenautix/secrets/export-token \
+  --from=3d --exclude-category=provider --group=series --format=md
+```
+
+`--from`、`--to` 接受 RFC 3339 时间或 `30m`、`12h`、`3d` 这样相对于现在的时长，`--to` 默认为现在。筛选与分组参数与接口相同，写成连字符形式（`--cluster-id`、`--exclude-category`、`--exclude-component`、`--group-gap`、`--group-min-incidents` 等），`--category`、`--exclude-category`、`--exclude-component` 可以重复；`--format` 默认 `json`。`--hub-url` 与 `--token-file` 也可以由环境变量 `SRENAUTIX_HUB_URL`、`SRENAUTIX_TOKEN_FILE` 给出。token 是中心已有的 bearer token：控制台创建的 API token，或调用方文件中登记的外部调用方（`kind: external`）的 token，读取范围是它的命名空间。中心返回错误时命令以中心的说明退出。
+
 ## 终态原因码与事件时间线
 
 每个终态都带一个原因码（ADR 0172）。取值登记在 `contract/reason-codes.json`：每个原因码有阶段（notify、stage_a、research、remediation、issue、incident，以及反馈的原因码 feedback，ADR 0174）、级别（info、warning、error）与中英文说明，分组对应代码与契约中的取值集合（例如研判失败类型、通知放弃的原因）。`packages/contract` 生成按阶段与按分组的字面量类型，写原因码的代码只能用这些类型；从库里读出的原因码不在登记表中时抛出。

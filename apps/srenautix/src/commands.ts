@@ -13,6 +13,10 @@ import { waitForSchema } from './store/wait-schema.js';
 const DEFAULT_CONFIG = '/etc/srenautix/config.yaml';
 
 /**
+ * 中心的客户端子命令（不读 --config，经中心的 HTTP API 执行；未知选项报错）：
+ *   incidents export --from=<时间> [--to=<时间>] [--category=…] [--exclude-category=…] [--format=json|ndjson|md]
+ *                    [--group=series] …         按时间窗导出事件到标准输出（export/cli.ts，ADR 0186）
+ *
  * 运维子命令（每个子命令都接受 --config，默认 /etc/srenautix/config.yaml；未知选项报错）：
  *   db bootstrap --admin-password-file=<文件>   以 PGUSER（数据库管理员）建角色与 schema
  *   db wait --schema=<server|worker> [--password-file=<文件>]
@@ -27,6 +31,11 @@ export async function runCommand(args: string[]): Promise<void> {
   const key = `${group} ${cmd}`;
   const config = { type: 'string', default: DEFAULT_CONFIG } as const;
   switch (key) {
+    case 'incidents export': {
+      const { runIncidentsExport } = await import('./export/cli.js');
+      await runIncidentsExport(rest);
+      return;
+    }
     case 'db bootstrap': {
       const { values } = parseArgs({ args: rest, options: { config, 'admin-password-file': { type: 'string' } } });
       const file = values['admin-password-file'];

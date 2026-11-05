@@ -306,7 +306,14 @@ describe('mcp 角色', () => {
     const t = await as.token('holmes', resourceUrl, 'srenautix:read');
     const c = await connect(t);
     const tools = (await c.listTools()).tools.map((x) => x.name).sort();
-    expect(tools).toEqual(['get_incident_v1', 'list_actions_v1', 'list_incidents_v1', 'propose_action_v1']);
+    expect(tools).toEqual([
+      'export_incidents_v1',
+      'get_incident_v1',
+      'list_actions_v1',
+      'list_incidents_v1',
+      'list_incidents_v2',
+      'propose_action_v1',
+    ]);
     const r = await call(c, 'get_incident_v1', { incident: incidentId });
     expect(r.isError).toBe(false);
     const untrusted = r.body.untrusted_text as Array<{ path: string; text: string }>;
@@ -328,6 +335,45 @@ describe('mcp 角色', () => {
     }).catch((e: Error) => ({ isError: true, body: { error: e.message } }));
     expect(p.isError).toBe(true);
     expect(JSON.stringify(p.body)).toMatch(/srenautix:propose/);
+    await c.close();
+  });
+
+  it('list_incidents_v2 按时间窗与类别筛选；export_incidents_v1 导出结论、系列与 Warning 查询状态，文字在 untrusted_text 中', async () => {
+    const t = await as.token('holmes', resourceUrl, 'srenautix:read');
+    const c = await connect(t);
+    const from = new Date(Date.now() - 3600_000).toISOString();
+    const to = new Date(Date.now() + 60_000).toISOString();
+    type Items = { items: Array<{ incident_id: string }> };
+    const l = await call(c, 'list_incidents_v2', { state: 'all', from, to, exclude_category: ['provider'] });
+    expect(l.isError).toBe(false);
+    expect((l.body.data as Items).items.map((x) => x.incident_id)).toContain(incidentId);
+    const old = await call(c, 'list_incidents_v2', {
+      state: 'all',
+      from: new Date(Date.now() - 10 * 86_400_000).toISOString(),
+      to: new Date(Date.now() - 9 * 86_400_000).toISOString(),
+    });
+    expect((old.body.data as Items).items).toEqual([]);
+
+    const e = await call(c, 'export_incidents_v1', { from, to, group: 'series' });
+    expect(e.isError).toBe(false);
+    const data = e.body.data as {
+      incidents: Array<{ incident_id: string; conclusion: { source: string } }>;
+      series: Array<{ incident_ids: string[] }>;
+      kube_warnings: Array<{ complete: boolean; queries: Array<{ status: string }> }>;
+      truncated: boolean;
+    };
+    const inc = data.incidents.find((x) => x.incident_id === incidentId);
+    expect(inc?.conclusion.source).toMatch(/^(stage_a|research)$/);
+    expect(data.series.some((s) => s.incident_ids.includes(incidentId))).toBe(true);
+    // 测试里的 Prometheus 不可达：Warning 查询记为 failed，导出照常给出其余内容
+    expect(data.kube_warnings[0]?.complete).toBe(false);
+    expect(data.kube_warnings[0]?.queries.every((q) => q.status === 'failed')).toBe(true);
+    expect(data.truncated).toBe(false);
+    expect((e.body.untrusted_text as unknown[]).length).toBeGreaterThan(0);
+    // 中心校验参数：to 早于 from 时返回 400
+    const bad = await call(c, 'export_incidents_v1', { from: to, to: from });
+    expect(bad.isError).toBe(true);
+    expect(JSON.stringify(bad.body)).toMatch(/HTTP 400/);
     await c.close();
   });
 

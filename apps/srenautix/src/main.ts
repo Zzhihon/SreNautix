@@ -10,6 +10,7 @@ import { logger } from './log.js';
  *   main.js --role=server|worker|mcp --config=/etc/srenautix/config.yaml [--serve=all|api|console]
  *   main.js db bootstrap|contract --config=…
  *   main.js audit verify --config=…
+ *   main.js incidents export --hub-url=… --token-file=… --from=…（中心的客户端，见 export/cli.ts 与 docs/server/README.md 的“事件导出”）
  *   main.js eval [import-seed] …（参数见 eval/cli.ts 与 docs/eval/）
  *   main.js pack lint|lock|test|record|doctor …（packages/packs-sdk 的 runPackCli，见 docs/packs/）
  *   main.js llm-replay --dir <录制目录> [--listen :8080] [--record --upstream <base_url>]（llm/replay.ts）

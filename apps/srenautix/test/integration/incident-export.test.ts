@@ -18,9 +18,13 @@ import {
   type RunningProcess,
   type TsdbInstance,
 } from '@srenautix/integration-sdk';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import { Writable } from 'node:stream';
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from '../../src/api/http.js';
+import { runIncidentsExport } from '../../src/export/cli.js';
 import { kubeEventsSource } from '../../src/export/kube-events.js';
 import { DEFAULT_GROUPING, type KubeWarningsDeps } from '../../src/export/kube-warnings.js';
 import { registerExportRoutes } from '../../src/export/routes.js';
@@ -513,6 +517,38 @@ describe('GET /v1/incidents/export（ADR 0186）', () => {
     expect(i[1]).toBeGreaterThan(i[0]!);
     expect(i[2]).toBeGreaterThan(i[1]!);
     expect(md.body).toContain('节点内存驱逐');
+  }, 60_000);
+
+  it('命令行 incidents export 经 HTTP 调用导出接口，结果写到输出；中心返回错误时以中心的说明报错', async () => {
+    scopes = 'all';
+    const url = await app.listen({ host: '127.0.0.1', port: 0 });
+    const dir = resolve(import.meta.dirname, '../../../../.scratch', `export-cli-${process.pid}`);
+    mkdirSync(dir, { recursive: true });
+    const tokenFile = join(dir, 'token');
+    writeFileSync(tokenFile, 'export-token-0123456789abcdef\n');
+    try {
+      const chunks: Buffer[] = [];
+      const out = new Writable({
+        write(chunk: Buffer, _enc, done) {
+          chunks.push(Buffer.from(chunk));
+          done();
+        },
+      });
+      const args = [`--hub-url=${url}`, `--token-file=${tokenFile}`, '--from=3d', '--exclude-category=provider'];
+      await runIncidentsExport([...args, '--format=ndjson', '--group=series'], out, {});
+      const lines = Buffer.concat(chunks)
+        .toString('utf8')
+        .trimEnd()
+        .split('\n')
+        .map((l) => JSON.parse(l) as IncidentExportRecord);
+      expect(lines.filter((l) => l.type === 'incident')).toHaveLength(6);
+      expect(lines.some((l) => l.type === 'series')).toBe(true);
+      await expect(runIncidentsExport([...args, '--exclude-category=unclassified'], out, {})).rejects.toThrow(
+        /HTTP 400：unclassified 不能被排除/,
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   }, 60_000);
 
   it('参数不合法时 400', async () => {

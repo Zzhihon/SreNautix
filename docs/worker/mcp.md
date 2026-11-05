@@ -47,7 +47,9 @@ callers:
 
 | 工具 | 作用域 | 内容 |
 |---|---|---|
-| `list_incidents_v1` | `srenautix:read` | 事件摘要 |
+| `list_incidents_v1` | `srenautix:read` | 事件摘要（`state`、`limit`）；由 `list_incidents_v2` 取代，保留一个版本周期 |
+| `list_incidents_v2` | `srenautix:read` | 事件摘要：`state`、`from`、`to`、`cluster_id`、`severity`、`component`、`category`、`exclude_category`、`exclude_component`、`cursor`、`limit`（最多 100），语义与 `GET /v1/incidents` 相同 |
+| `export_incidents_v1` | `srenautix:read` | 按时间窗批量导出（`GET /v1/incidents/export`，ADR 0186）：`from`、`to` 必填，筛选同上，`group`（`incident`、`series`）与分组参数，一次最多 500 个事件，更多的用 `cursor` 继续 |
 | `get_incident_v1` | `srenautix:read` | 事件、阶段 A 报告、研判列表 |
 | `list_actions_v1` | `srenautix:read` | 动作目录与启用状态 |
 | `propose_action_v1` | `srenautix:propose` | 为事件提议一个目录中的动作；进入审批流程，不能审批 |
