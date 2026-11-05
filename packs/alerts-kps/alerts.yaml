@@ -6,6 +6,7 @@ entries:
   - {
       id: alertmanager-failed-reload,
       alertname: AlertmanagerFailedReload,
+      category: observability,
       role: cause,
       entity: { kind: Pod, name_labels: [pod] },
       chains: [observability-self/alert-delivery, kps-conditions/alertmanager-failed-reload],
@@ -15,6 +16,7 @@ entries:
   - {
       id: alertmanager-members-inconsistent,
       alertname: AlertmanagerMembersInconsistent,
+      category: observability,
       role: symptom,
       entity: { kind: Pod, name_labels: [pod] },
       chains: [observability-self/alert-delivery, kps-conditions/alertmanager-members-inconsistent],
@@ -24,6 +26,7 @@ entries:
   - {
       id: alertmanager-failed-to-send-alerts,
       alertname: AlertmanagerFailedToSendAlerts,
+      category: observability,
       role: symptom,
       entity: { kind: Pod, name_labels: [pod] },
       chains: [observability-self/alert-delivery, kps-conditions/alertmanager-failed-to-send-alerts],
@@ -33,6 +36,7 @@ entries:
   - {
       id: alertmanager-cluster-failed-to-send-alerts,
       alertname: AlertmanagerClusterFailedToSendAlerts,
+      category: observability,
       role: symptom,
       entity: { kind: Service, name_labels: [service] },
       scope: service,
@@ -43,6 +47,7 @@ entries:
   - {
       id: alertmanager-config-inconsistent,
       alertname: AlertmanagerConfigInconsistent,
+      category: observability,
       role: change,
       entity: { kind: Service, name_labels: [service] },
       scope: service,
@@ -53,6 +58,7 @@ entries:
   - {
       id: alertmanager-cluster-down,
       alertname: AlertmanagerClusterDown,
+      category: observability,
       role: cause,
       entity: { kind: Service, name_labels: [service] },
       scope: service,
@@ -63,6 +69,7 @@ entries:
   - {
       id: alertmanager-cluster-crashlooping,
       alertname: AlertmanagerClusterCrashlooping,
+      category: observability,
       role: cause,
       entity: { kind: Service, name_labels: [service] },
       scope: service,
@@ -73,6 +80,7 @@ entries:
   - {
       id: alertmanager-cluster-failed-peers,
       alertname: AlertmanagerClusterFailedPeers,
+      category: observability,
       role: symptom,
       entity: { kind: Pod, name_labels: [pod] },
       chains: [observability-self/alert-delivery, kps-conditions/alertmanager-cluster-failed-peers],
@@ -82,6 +90,7 @@ entries:
   - {
       id: config-reloader-sidecar-errors,
       alertname: ConfigReloaderSidecarErrors,
+      category: observability,
       role: cause,
       entity: { kind: Pod, name_labels: [pod] },
       chains: [observability-self/scrape, kps-conditions/config-reloader-sidecar-errors],
@@ -93,6 +102,7 @@ entries:
   - {
       id: etcd-members-down,
       alertname: etcdMembersDown,
+      category: platform,
       role: cause,
       entity: { kind: cluster, name_labels: [job] },
       component_type: kubernetes.etcd,
@@ -104,6 +114,7 @@ entries:
   - {
       id: etcd-insufficient-members,
       alertname: etcdInsufficientMembers,
+      category: platform,
       role: cause,
       entity: { kind: cluster, name_labels: [job] },
       component_type: kubernetes.etcd,
@@ -115,6 +126,7 @@ entries:
   - {
       id: etcd-no-leader,
       alertname: etcdNoLeader,
+      category: platform,
       role: cause,
       entity: { kind: Pod, name_labels: [pod] },
       component_type: kubernetes.etcd,
@@ -126,6 +138,7 @@ entries:
   - {
       id: etcd-high-number-of-leader-changes,
       alertname: etcdHighNumberOfLeaderChanges,
+      category: platform,
       role: symptom,
       entity: { kind: cluster, name_labels: [job] },
       component_type: kubernetes.etcd,
@@ -137,6 +150,7 @@ entries:
   - {
       id: etcd-high-number-of-failed-grpc-requests,
       alertname: etcdHighNumberOfFailedGRPCRequests,
+      category: platform,
       role: symptom,
       entity: { kind: Pod, name_labels: [pod] },
       component_type: kubernetes.etcd,
@@ -148,6 +162,7 @@ entries:
   - {
       id: etcd-grpc-requests-slow,
       alertname: etcdGRPCRequestsSlow,
+      category: platform,
       role: symptom,
       entity: { kind: Pod, name_labels: [pod] },
       component_type: kubernetes.etcd,
@@ -159,6 +174,7 @@ entries:
   - {
       id: etcd-member-communication-slow,
       alertname: etcdMemberCommunicationSlow,
+      category: platform,
       role: symptom,
       entity: { kind: Pod, name_labels: [pod] },
       component_type: kubernetes.etcd,
@@ -170,6 +186,7 @@ entries:
   - {
       id: etcd-high-number-of-failed-proposals,
       alertname: etcdHighNumberOfFailedProposals,
+      category: platform,
       role: symptom,
       entity: { kind: Pod, name_labels: [pod] },
       component_type: kubernetes.etcd,
@@ -181,6 +198,7 @@ entries:
   - {
       id: etcd-high-fsync-durations,
       alertname: etcdHighFsyncDurations,
+      category: platform,
       role: cause,
       entity: { kind: Pod, name_labels: [pod] },
       component_type: kubernetes.etcd,
@@ -192,6 +210,7 @@ entries:
   - {
       id: etcd-high-commit-durations,
       alertname: etcdHighCommitDurations,
+      category: platform,
       role: cause,
       entity: { kind: Pod, name_labels: [pod] },
       component_type: kubernetes.etcd,
@@ -203,6 +222,7 @@ entries:
   - {
       id: etcd-database-quota-low-space,
       alertname: etcdDatabaseQuotaLowSpace,
+      category: platform,
       role: cause,
       entity: { kind: Pod, name_labels: [pod] },
       component_type: kubernetes.etcd,
@@ -214,6 +234,7 @@ entries:
   - {
       id: etcd-excessive-database-growth,
       alertname: etcdExcessiveDatabaseGrowth,
+      category: platform,
       role: forecast,
       entity: { kind: Pod, name_labels: [pod] },
       component_type: kubernetes.etcd,
@@ -225,6 +246,7 @@ entries:
   - {
       id: etcd-database-high-fragmentation-ratio,
       alertname: etcdDatabaseHighFragmentationRatio,
+      category: platform,
       role: symptom,
       entity: { kind: Pod, name_labels: [pod] },
       component_type: kubernetes.etcd,
@@ -238,6 +260,7 @@ entries:
   - {
       id: target-down,
       alertname: TargetDown,
+      category: observability,
       role: meta,
       entity: { kind: Service, name_labels: [service] },
       scope: service,
@@ -245,10 +268,18 @@ entries:
       mixin: other,
       primary_card: kps-conditions/target-down/condition,
     }
-  - { id: watchdog, alertname: Watchdog, role: meta, entity: { kind: cluster, name_labels: [alertname] }, mixin: other }
+  - {
+      id: watchdog,
+      alertname: Watchdog,
+      category: observability,
+      role: meta,
+      entity: { kind: cluster, name_labels: [alertname] },
+      mixin: other,
+    }
   - {
       id: info-inhibitor,
       alertname: InfoInhibitor,
+      category: observability,
       role: meta,
       entity: { kind: cluster, name_labels: [alertname] },
       mixin: other,
@@ -258,6 +289,7 @@ entries:
   - {
       id: kube-api-error-budget-burn,
       alertname: KubeAPIErrorBudgetBurn,
+      category: platform,
       role: symptom,
       entity: { kind: cluster, name_labels: [alertname] },
       component_type: kubernetes.apiserver,
@@ -271,6 +303,7 @@ entries:
   - {
       id: kube-state-metrics-list-errors,
       alertname: KubeStateMetricsListErrors,
+      category: observability,
       role: meta,
       entity: { kind: cluster, name_labels: [alertname] },
       component_type: observability.kube-state-metrics,
@@ -281,6 +314,7 @@ entries:
   - {
       id: kube-state-metrics-watch-errors,
       alertname: KubeStateMetricsWatchErrors,
+      category: observability,
       role: meta,
       entity: { kind: cluster, name_labels: [alertname] },
       component_type: observability.kube-state-metrics,
@@ -291,6 +325,7 @@ entries:
   - {
       id: kube-state-metrics-sharding-mismatch,
       alertname: KubeStateMetricsShardingMismatch,
+      category: observability,
       role: meta,
       entity: { kind: cluster, name_labels: [alertname] },
       component_type: observability.kube-state-metrics,
@@ -301,6 +336,7 @@ entries:
   - {
       id: kube-state-metrics-shards-missing,
       alertname: KubeStateMetricsShardsMissing,
+      category: observability,
       role: meta,
       entity: { kind: cluster, name_labels: [alertname] },
       component_type: observability.kube-state-metrics,
@@ -313,6 +349,7 @@ entries:
   - {
       id: kube-pod-crash-looping,
       alertname: KubePodCrashLooping,
+      category: availability,
       role: cause,
       entity: { kind: Pod, name_labels: [pod] },
       chains: [workload/pod-restarts, kps-conditions/kube-pod-crash-looping],
@@ -322,6 +359,7 @@ entries:
   - {
       id: kube-pod-not-ready,
       alertname: KubePodNotReady,
+      category: availability,
       role: symptom,
       entity: { kind: Pod, name_labels: [pod] },
       chains: [workload/pod-pending, workload/pod-restarts, kps-conditions/kube-pod-not-ready],
@@ -331,6 +369,7 @@ entries:
   - {
       id: kube-deployment-generation-mismatch,
       alertname: KubeDeploymentGenerationMismatch,
+      category: availability,
       role: change,
       entity: { kind: Deployment, name_labels: [deployment] },
       chains: [workload/rollout, kps-conditions/kube-deployment-generation-mismatch],
@@ -340,6 +379,7 @@ entries:
   - {
       id: kube-deployment-replicas-mismatch,
       alertname: KubeDeploymentReplicasMismatch,
+      category: availability,
       role: symptom,
       entity: { kind: Deployment, name_labels: [deployment] },
       chains: [workload/rollout, workload/pod-pending, kps-conditions/kube-deployment-replicas-mismatch],
@@ -349,6 +389,7 @@ entries:
   - {
       id: kube-deployment-rollout-stuck,
       alertname: KubeDeploymentRolloutStuck,
+      category: availability,
       role: change,
       entity: { kind: Deployment, name_labels: [deployment] },
       chains: [workload/rollout, kps-conditions/kube-deployment-rollout-stuck],
@@ -358,6 +399,7 @@ entries:
   - {
       id: kube-statefulset-replicas-mismatch,
       alertname: KubeStatefulSetReplicasMismatch,
+      category: availability,
       role: symptom,
       entity: { kind: StatefulSet, name_labels: [statefulset] },
       chains: [workload/rollout, workload/pod-pending, kps-conditions/kube-statefulset-replicas-mismatch],
@@ -367,6 +409,7 @@ entries:
   - {
       id: kube-statefulset-generation-mismatch,
       alertname: KubeStatefulSetGenerationMismatch,
+      category: availability,
       role: change,
       entity: { kind: StatefulSet, name_labels: [statefulset] },
       chains: [workload/rollout, kps-conditions/kube-statefulset-generation-mismatch],
@@ -376,6 +419,7 @@ entries:
   - {
       id: kube-statefulset-update-not-rolled-out,
       alertname: KubeStatefulSetUpdateNotRolledOut,
+      category: availability,
       role: change,
       entity: { kind: StatefulSet, name_labels: [statefulset] },
       chains: [workload/rollout, kps-conditions/kube-statefulset-update-not-rolled-out],
@@ -385,6 +429,7 @@ entries:
   - {
       id: kube-daemonset-rollout-stuck,
       alertname: KubeDaemonSetRolloutStuck,
+      category: availability,
       role: change,
       entity: { kind: DaemonSet, name_labels: [daemonset] },
       chains: [workload/rollout, kps-conditions/kube-daemonset-rollout-stuck],
@@ -394,6 +439,7 @@ entries:
   - {
       id: kube-container-waiting,
       alertname: KubeContainerWaiting,
+      category: availability,
       role: cause,
       entity: { kind: Pod, name_labels: [pod] },
       chains: [workload/pod-pending, kps-conditions/kube-container-waiting],
@@ -403,6 +449,7 @@ entries:
   - {
       id: kube-daemonset-not-scheduled,
       alertname: KubeDaemonSetNotScheduled,
+      category: availability,
       role: symptom,
       entity: { kind: DaemonSet, name_labels: [daemonset] },
       chains: [workload/pod-pending, kps-conditions/kube-daemonset-not-scheduled],
@@ -412,6 +459,7 @@ entries:
   - {
       id: kube-daemonset-misscheduled,
       alertname: KubeDaemonSetMisScheduled,
+      category: availability,
       role: symptom,
       entity: { kind: DaemonSet, name_labels: [daemonset] },
       chains: [workload/rollout, kps-conditions/kube-daemonset-misscheduled],
@@ -421,6 +469,7 @@ entries:
   - {
       id: kube-job-not-completed,
       alertname: KubeJobNotCompleted,
+      category: availability,
       role: symptom,
       entity: { kind: Job, name_labels: [job_name] },
       chains: [workload/job, kps-conditions/kube-job-not-completed],
@@ -430,6 +479,7 @@ entries:
   - {
       id: kube-job-failed,
       alertname: KubeJobFailed,
+      category: availability,
       role: cause,
       entity: { kind: Job, name_labels: [job_name] },
       chains: [workload/job, kps-conditions/kube-job-failed],
@@ -439,6 +489,7 @@ entries:
   - {
       id: kube-hpa-replicas-mismatch,
       alertname: KubeHpaReplicasMismatch,
+      category: performance,
       role: symptom,
       entity: { kind: HorizontalPodAutoscaler, name_labels: [horizontalpodautoscaler] },
       chains: [workload/capacity, kps-conditions/kube-hpa-replicas-mismatch],
@@ -448,6 +499,7 @@ entries:
   - {
       id: kube-hpa-maxed-out,
       alertname: KubeHpaMaxedOut,
+      category: performance,
       role: symptom,
       entity: { kind: HorizontalPodAutoscaler, name_labels: [horizontalpodautoscaler] },
       chains: [workload/capacity, kps-conditions/kube-hpa-maxed-out],
@@ -457,6 +509,7 @@ entries:
   - {
       id: kube-pdb-not-enough-healthy-pods,
       alertname: KubePdbNotEnoughHealthyPods,
+      category: availability,
       role: symptom,
       entity: { kind: PodDisruptionBudget, name_labels: [poddisruptionbudget] },
       chains: [workload/pod-pending, kps-conditions/kube-pdb-not-enough-healthy-pods],
@@ -468,6 +521,7 @@ entries:
   - {
       id: kube-cpu-overcommit,
       alertname: KubeCPUOvercommit,
+      category: platform,
       role: symptom,
       entity: { kind: cluster, name_labels: [alertname] },
       chains: [workload/capacity, kps-conditions/kube-cpu-overcommit],
@@ -477,6 +531,7 @@ entries:
   - {
       id: kube-memory-overcommit,
       alertname: KubeMemoryOvercommit,
+      category: platform,
       role: symptom,
       entity: { kind: cluster, name_labels: [alertname] },
       chains: [workload/capacity, kps-conditions/kube-memory-overcommit],
@@ -486,6 +541,7 @@ entries:
   - {
       id: kube-cpu-quota-overcommit,
       alertname: KubeCPUQuotaOvercommit,
+      category: platform,
       role: symptom,
       entity: { kind: cluster, name_labels: [alertname] },
       chains: [workload/capacity, kps-conditions/kube-cpu-quota-overcommit],
@@ -495,6 +551,7 @@ entries:
   - {
       id: kube-memory-quota-overcommit,
       alertname: KubeMemoryQuotaOvercommit,
+      category: platform,
       role: symptom,
       entity: { kind: cluster, name_labels: [alertname] },
       chains: [workload/capacity, kps-conditions/kube-memory-quota-overcommit],
@@ -504,6 +561,7 @@ entries:
   - {
       id: kube-quota-almost-full,
       alertname: KubeQuotaAlmostFull,
+      category: platform,
       role: symptom,
       entity: { kind: ResourceQuota, name_labels: [resourcequota] },
       chains: [workload/capacity, kps-conditions/kube-quota-almost-full],
@@ -513,6 +571,7 @@ entries:
   - {
       id: kube-quota-fully-used,
       alertname: KubeQuotaFullyUsed,
+      category: platform,
       role: cause,
       entity: { kind: ResourceQuota, name_labels: [resourcequota] },
       chains: [workload/capacity, kps-conditions/kube-quota-fully-used],
@@ -522,6 +581,7 @@ entries:
   - {
       id: kube-quota-exceeded,
       alertname: KubeQuotaExceeded,
+      category: platform,
       role: cause,
       entity: { kind: ResourceQuota, name_labels: [resourcequota] },
       chains: [workload/capacity, kps-conditions/kube-quota-exceeded],
@@ -531,6 +591,7 @@ entries:
   - {
       id: cpu-throttling-high,
       alertname: CPUThrottlingHigh,
+      category: performance,
       role: symptom,
       entity: { kind: Pod, name_labels: [pod] },
       chains: [workload/pod-restarts, kps-conditions/cpu-throttling-high],
@@ -542,6 +603,7 @@ entries:
   - {
       id: kube-persistent-volume-filling-up,
       alertname: KubePersistentVolumeFillingUp,
+      category: availability,
       match_labels: { severity: critical },
       role: cause,
       entity: { kind: PersistentVolumeClaim, name_labels: [persistentvolumeclaim] },
@@ -552,6 +614,7 @@ entries:
   - {
       id: kube-persistent-volume-filling-up-forecast,
       alertname: KubePersistentVolumeFillingUp,
+      category: availability,
       match_labels: { severity: warning },
       role: forecast,
       entity: { kind: PersistentVolumeClaim, name_labels: [persistentvolumeclaim] },
@@ -562,6 +625,7 @@ entries:
   - {
       id: kube-persistent-volume-inodes-filling-up,
       alertname: KubePersistentVolumeInodesFillingUp,
+      category: availability,
       match_labels: { severity: critical },
       role: cause,
       entity: { kind: PersistentVolumeClaim, name_labels: [persistentvolumeclaim] },
@@ -572,6 +636,7 @@ entries:
   - {
       id: kube-persistent-volume-inodes-filling-up-forecast,
       alertname: KubePersistentVolumeInodesFillingUp,
+      category: availability,
       match_labels: { severity: warning },
       role: forecast,
       entity: { kind: PersistentVolumeClaim, name_labels: [persistentvolumeclaim] },
@@ -582,6 +647,7 @@ entries:
   - {
       id: kube-persistent-volume-errors,
       alertname: KubePersistentVolumeErrors,
+      category: platform,
       role: cause,
       entity: { kind: PersistentVolume, name_labels: [persistentvolume] },
       chains: [pvc/pvc-capacity, kps-conditions/kube-persistent-volume-errors],
@@ -593,6 +659,7 @@ entries:
   - {
       id: kube-client-certificate-expiration,
       alertname: KubeClientCertificateExpiration,
+      category: platform,
       role: cause,
       entity: { kind: cluster, name_labels: [alertname] },
       component_type: kubernetes.apiserver,
@@ -604,6 +671,7 @@ entries:
   - {
       id: kube-aggregated-api-errors,
       alertname: KubeAggregatedAPIErrors,
+      category: platform,
       role: symptom,
       entity: { kind: cluster, name_labels: [name] },
       component_type: kubernetes.apiserver,
@@ -615,6 +683,7 @@ entries:
   - {
       id: kube-aggregated-api-down,
       alertname: KubeAggregatedAPIDown,
+      category: platform,
       role: cause,
       entity: { kind: cluster, name_labels: [name] },
       component_type: kubernetes.apiserver,
@@ -626,6 +695,7 @@ entries:
   - {
       id: kube-api-down,
       alertname: KubeAPIDown,
+      category: platform,
       role: cause,
       entity: { kind: cluster, name_labels: [alertname] },
       component_type: kubernetes.apiserver,
@@ -637,6 +707,7 @@ entries:
   - {
       id: kube-api-instance-unreachable,
       alertname: KubeAPIInstanceUnreachable,
+      category: platform,
       role: cause,
       entity: { kind: cluster, name_labels: [instance] },
       component_type: kubernetes.apiserver,
@@ -648,6 +719,7 @@ entries:
   - {
       id: kube-api-terminated-requests,
       alertname: KubeAPITerminatedRequests,
+      category: platform,
       role: symptom,
       entity: { kind: cluster, name_labels: [alertname] },
       component_type: kubernetes.apiserver,
@@ -661,6 +733,7 @@ entries:
   - {
       id: kube-controller-manager-down,
       alertname: KubeControllerManagerDown,
+      category: platform,
       role: cause,
       entity: { kind: cluster, name_labels: [alertname] },
       component_type: kubernetes.controller-manager,
@@ -672,6 +745,7 @@ entries:
   - {
       id: kube-controller-manager-instance-unreachable,
       alertname: KubeControllerManagerInstanceUnreachable,
+      category: platform,
       role: cause,
       entity: { kind: cluster, name_labels: [instance] },
       component_type: kubernetes.controller-manager,
@@ -683,6 +757,7 @@ entries:
   - {
       id: kube-proxy-down,
       alertname: KubeProxyDown,
+      category: platform,
       role: cause,
       entity: { kind: cluster, name_labels: [alertname] },
       component_type: kubernetes.kube-proxy,
@@ -694,6 +769,7 @@ entries:
   - {
       id: kube-proxy-instance-unreachable,
       alertname: KubeProxyInstanceUnreachable,
+      category: platform,
       role: cause,
       entity: { kind: Pod, name_labels: [pod] },
       component_type: kubernetes.kube-proxy,
@@ -705,6 +781,7 @@ entries:
   - {
       id: kube-scheduler-down,
       alertname: KubeSchedulerDown,
+      category: platform,
       role: cause,
       entity: { kind: cluster, name_labels: [alertname] },
       component_type: kubernetes.scheduler,
@@ -716,6 +793,7 @@ entries:
   - {
       id: kube-scheduler-instance-unreachable,
       alertname: KubeSchedulerInstanceUnreachable,
+      category: platform,
       role: cause,
       entity: { kind: cluster, name_labels: [instance] },
       component_type: kubernetes.scheduler,
@@ -727,6 +805,7 @@ entries:
   - {
       id: kube-version-mismatch,
       alertname: KubeVersionMismatch,
+      category: platform,
       role: change,
       entity: { kind: cluster, name_labels: [alertname] },
       chains: [kubernetes-core/control-plane, kps-conditions/kube-version-mismatch],
@@ -736,6 +815,7 @@ entries:
   - {
       id: kube-client-errors,
       alertname: KubeClientErrors,
+      category: platform,
       role: symptom,
       entity: { kind: cluster, name_labels: [instance] },
       chains: [kubernetes-core/apiserver, kps-conditions/kube-client-errors],
@@ -747,6 +827,7 @@ entries:
   - {
       id: kube-node-not-ready,
       alertname: KubeNodeNotReady,
+      category: platform,
       role: cause,
       entity: { kind: Node, name_labels: [node] },
       chains: [node/node-health, kps-conditions/kube-node-not-ready],
@@ -756,6 +837,7 @@ entries:
   - {
       id: kube-node-pressure,
       alertname: KubeNodePressure,
+      category: platform,
       role: cause,
       entity: { kind: Node, name_labels: [node] },
       chains: [node/node-health, kps-conditions/kube-node-pressure],
@@ -765,6 +847,7 @@ entries:
   - {
       id: kube-node-unreachable,
       alertname: KubeNodeUnreachable,
+      category: platform,
       role: cause,
       entity: { kind: Node, name_labels: [node] },
       chains: [node/node-health, kps-conditions/kube-node-unreachable],
@@ -774,6 +857,7 @@ entries:
   - {
       id: kubelet-too-many-pods,
       alertname: KubeletTooManyPods,
+      category: platform,
       role: symptom,
       entity: { kind: Node, name_labels: [node] },
       chains: [node/node-health, kps-conditions/kubelet-too-many-pods],
@@ -783,6 +867,7 @@ entries:
   - {
       id: kube-node-readiness-flapping,
       alertname: KubeNodeReadinessFlapping,
+      category: platform,
       role: cause,
       entity: { kind: Node, name_labels: [node] },
       chains: [node/node-health, kps-conditions/kube-node-readiness-flapping],
@@ -792,6 +877,7 @@ entries:
   - {
       id: kube-node-eviction,
       alertname: KubeNodeEviction,
+      category: platform,
       role: symptom,
       entity: { kind: Node, name_labels: [node] },
       chains: [node/node-health, kps-conditions/kube-node-eviction],
@@ -801,6 +887,7 @@ entries:
   - {
       id: kubelet-pleg-duration-high,
       alertname: KubeletPlegDurationHigh,
+      category: platform,
       role: symptom,
       entity: { kind: Node, name_labels: [node] },
       chains: [node/node-health, kps-conditions/kubelet-pleg-duration-high],
@@ -810,6 +897,7 @@ entries:
   - {
       id: kubelet-pod-startup-latency-high,
       alertname: KubeletPodStartUpLatencyHigh,
+      category: platform,
       role: symptom,
       entity: { kind: Node, name_labels: [node, instance] },
       chains: [node/node-health, kps-conditions/kubelet-pod-startup-latency-high],
@@ -819,6 +907,7 @@ entries:
   - {
       id: kubelet-client-certificate-expiration,
       alertname: KubeletClientCertificateExpiration,
+      category: platform,
       role: cause,
       entity: { kind: Node, name_labels: [node, instance] },
       chains: [node/node-health, kps-conditions/kubelet-client-certificate-expiration],
@@ -828,6 +917,7 @@ entries:
   - {
       id: kubelet-server-certificate-expiration,
       alertname: KubeletServerCertificateExpiration,
+      category: platform,
       role: cause,
       entity: { kind: Node, name_labels: [node, instance] },
       chains: [node/node-health, kps-conditions/kubelet-server-certificate-expiration],
@@ -837,6 +927,7 @@ entries:
   - {
       id: kubelet-client-certificate-renewal-errors,
       alertname: KubeletClientCertificateRenewalErrors,
+      category: platform,
       role: cause,
       entity: { kind: Node, name_labels: [node, instance] },
       chains: [node/node-health, kps-conditions/kubelet-client-certificate-renewal-errors],
@@ -846,6 +937,7 @@ entries:
   - {
       id: kubelet-server-certificate-renewal-errors,
       alertname: KubeletServerCertificateRenewalErrors,
+      category: platform,
       role: cause,
       entity: { kind: Node, name_labels: [node, instance] },
       chains: [node/node-health, kps-conditions/kubelet-server-certificate-renewal-errors],
@@ -855,6 +947,7 @@ entries:
   - {
       id: kubelet-instance-unreachable,
       alertname: KubeletInstanceUnreachable,
+      category: platform,
       role: cause,
       entity: { kind: Node, name_labels: [node, instance] },
       chains: [node/node-health, kps-conditions/kubelet-instance-unreachable],
@@ -864,6 +957,7 @@ entries:
   - {
       id: kubelet-down,
       alertname: KubeletDown,
+      category: platform,
       role: cause,
       entity: { kind: cluster, name_labels: [alertname] },
       scope: hub,
@@ -876,6 +970,7 @@ entries:
   - {
       id: node-filesystem-space-filling-up,
       alertname: NodeFilesystemSpaceFillingUp,
+      category: platform,
       role: forecast,
       entity: { kind: Node, name_labels: [node, instance] },
       chains: [node/node-filesystem, kps-conditions/node-filesystem-space-filling-up],
@@ -885,6 +980,7 @@ entries:
   - {
       id: node-filesystem-almost-out-of-space,
       alertname: NodeFilesystemAlmostOutOfSpace,
+      category: platform,
       role: cause,
       entity: { kind: Node, name_labels: [node, instance] },
       chains: [node/node-filesystem, kps-conditions/node-filesystem-almost-out-of-space],
@@ -894,6 +990,7 @@ entries:
   - {
       id: node-filesystem-files-filling-up,
       alertname: NodeFilesystemFilesFillingUp,
+      category: platform,
       role: forecast,
       entity: { kind: Node, name_labels: [node, instance] },
       chains: [node/node-filesystem, kps-conditions/node-filesystem-files-filling-up],
@@ -903,6 +1000,7 @@ entries:
   - {
       id: node-filesystem-almost-out-of-files,
       alertname: NodeFilesystemAlmostOutOfFiles,
+      category: platform,
       role: cause,
       entity: { kind: Node, name_labels: [node, instance] },
       chains: [node/node-filesystem, kps-conditions/node-filesystem-almost-out-of-files],
@@ -912,6 +1010,7 @@ entries:
   - {
       id: node-network-receive-errs,
       alertname: NodeNetworkReceiveErrs,
+      category: platform,
       role: cause,
       entity: { kind: Node, name_labels: [node, instance] },
       chains: [node/node-network, kps-conditions/node-network-receive-errs],
@@ -921,6 +1020,7 @@ entries:
   - {
       id: node-network-transmit-errs,
       alertname: NodeNetworkTransmitErrs,
+      category: platform,
       role: cause,
       entity: { kind: Node, name_labels: [node, instance] },
       chains: [node/node-network, kps-conditions/node-network-transmit-errs],
@@ -930,6 +1030,7 @@ entries:
   - {
       id: node-high-number-conntrack-entries-used,
       alertname: NodeHighNumberConntrackEntriesUsed,
+      category: platform,
       role: cause,
       entity: { kind: Node, name_labels: [node, instance] },
       chains: [node/node-network, kps-conditions/node-high-number-conntrack-entries-used],
@@ -939,6 +1040,7 @@ entries:
   - {
       id: node-textfile-collector-scrape-error,
       alertname: NodeTextFileCollectorScrapeError,
+      category: observability,
       role: meta,
       entity: { kind: Node, name_labels: [node, instance] },
       chains: [observability-self/scrape, kps-conditions/node-textfile-collector-scrape-error],
@@ -948,6 +1050,7 @@ entries:
   - {
       id: node-clock-skew-detected,
       alertname: NodeClockSkewDetected,
+      category: platform,
       role: cause,
       entity: { kind: Node, name_labels: [node, instance] },
       chains: [node/node-time, kps-conditions/node-clock-skew-detected],
@@ -957,6 +1060,7 @@ entries:
   - {
       id: node-clock-not-synchronising,
       alertname: NodeClockNotSynchronising,
+      category: platform,
       role: cause,
       entity: { kind: Node, name_labels: [node, instance] },
       chains: [node/node-time, kps-conditions/node-clock-not-synchronising],
@@ -966,6 +1070,7 @@ entries:
   - {
       id: node-raid-degraded,
       alertname: NodeRAIDDegraded,
+      category: platform,
       role: cause,
       entity: { kind: Node, name_labels: [node, instance] },
       chains: [node/node-filesystem, kps-conditions/node-raid-degraded],
@@ -975,6 +1080,7 @@ entries:
   - {
       id: node-raid-disk-failure,
       alertname: NodeRAIDDiskFailure,
+      category: platform,
       role: cause,
       entity: { kind: Node, name_labels: [node, instance] },
       chains: [node/node-filesystem, kps-conditions/node-raid-disk-failure],
@@ -984,6 +1090,7 @@ entries:
   - {
       id: node-file-descriptor-limit,
       alertname: NodeFileDescriptorLimit,
+      category: platform,
       role: cause,
       entity: { kind: Node, name_labels: [node, instance] },
       chains: [node/node-health, kps-conditions/node-file-descriptor-limit],
@@ -993,6 +1100,7 @@ entries:
   - {
       id: node-cpu-high-usage,
       alertname: NodeCPUHighUsage,
+      category: platform,
       role: symptom,
       entity: { kind: Node, name_labels: [node, instance] },
       chains: [node/node-health, kps-conditions/node-cpu-high-usage],
@@ -1002,6 +1110,7 @@ entries:
   - {
       id: node-system-saturation,
       alertname: NodeSystemSaturation,
+      category: platform,
       role: symptom,
       entity: { kind: Node, name_labels: [node, instance] },
       chains: [node/node-health, kps-conditions/node-system-saturation],
@@ -1011,6 +1120,7 @@ entries:
   - {
       id: node-memory-major-pages-faults,
       alertname: NodeMemoryMajorPagesFaults,
+      category: platform,
       role: symptom,
       entity: { kind: Node, name_labels: [node, instance] },
       chains: [node/node-health, kps-conditions/node-memory-major-pages-faults],
@@ -1020,6 +1130,7 @@ entries:
   - {
       id: node-memory-high-utilization,
       alertname: NodeMemoryHighUtilization,
+      category: platform,
       role: cause,
       entity: { kind: Node, name_labels: [node, instance] },
       chains: [node/node-health, kps-conditions/node-memory-high-utilization],
@@ -1029,6 +1140,7 @@ entries:
   - {
       id: node-disk-io-saturation,
       alertname: NodeDiskIOSaturation,
+      category: platform,
       role: cause,
       entity: { kind: Node, name_labels: [node, instance] },
       chains: [node/node-filesystem, kps-conditions/node-disk-io-saturation],
@@ -1038,6 +1150,7 @@ entries:
   - {
       id: node-systemd-service-failed,
       alertname: NodeSystemdServiceFailed,
+      category: platform,
       role: cause,
       entity: { kind: Node, name_labels: [node, instance] },
       chains: [node/node-health, kps-conditions/node-systemd-service-failed],
@@ -1047,6 +1160,7 @@ entries:
   - {
       id: node-systemd-service-crashlooping,
       alertname: NodeSystemdServiceCrashlooping,
+      category: platform,
       role: cause,
       entity: { kind: Node, name_labels: [node, instance] },
       chains: [node/node-health, kps-conditions/node-systemd-service-crashlooping],
@@ -1056,6 +1170,7 @@ entries:
   - {
       id: node-bonding-degraded,
       alertname: NodeBondingDegraded,
+      category: platform,
       role: cause,
       entity: { kind: Node, name_labels: [node, instance] },
       chains: [node/node-network, kps-conditions/node-bonding-degraded],
@@ -1065,6 +1180,7 @@ entries:
   - {
       id: node-network-interface-flapping,
       alertname: NodeNetworkInterfaceFlapping,
+      category: platform,
       role: cause,
       entity: { kind: Node, name_labels: [node, instance] },
       chains: [node/node-network, kps-conditions/node-network-interface-flapping],
@@ -1076,6 +1192,7 @@ entries:
   - {
       id: prometheus-operator-list-errors,
       alertname: PrometheusOperatorListErrors,
+      category: observability,
       role: symptom,
       entity: { kind: Namespace, name_labels: [namespace] },
       component_type: observability.prometheus-operator,
@@ -1086,6 +1203,7 @@ entries:
   - {
       id: prometheus-operator-watch-errors,
       alertname: PrometheusOperatorWatchErrors,
+      category: observability,
       role: symptom,
       entity: { kind: Namespace, name_labels: [namespace] },
       component_type: observability.prometheus-operator,
@@ -1096,6 +1214,7 @@ entries:
   - {
       id: prometheus-operator-sync-failed,
       alertname: PrometheusOperatorSyncFailed,
+      category: observability,
       role: symptom,
       entity: { kind: Namespace, name_labels: [namespace] },
       component_type: observability.prometheus-operator,
@@ -1106,6 +1225,7 @@ entries:
   - {
       id: prometheus-operator-reconcile-errors,
       alertname: PrometheusOperatorReconcileErrors,
+      category: observability,
       role: symptom,
       entity: { kind: Namespace, name_labels: [namespace] },
       component_type: observability.prometheus-operator,
@@ -1116,6 +1236,7 @@ entries:
   - {
       id: prometheus-operator-status-update-errors,
       alertname: PrometheusOperatorStatusUpdateErrors,
+      category: observability,
       role: symptom,
       entity: { kind: Namespace, name_labels: [namespace] },
       component_type: observability.prometheus-operator,
@@ -1126,6 +1247,7 @@ entries:
   - {
       id: prometheus-operator-node-lookup-errors,
       alertname: PrometheusOperatorNodeLookupErrors,
+      category: observability,
       role: symptom,
       entity: { kind: Pod, name_labels: [pod] },
       component_type: observability.prometheus-operator,
@@ -1136,6 +1258,7 @@ entries:
   - {
       id: prometheus-operator-not-ready,
       alertname: PrometheusOperatorNotReady,
+      category: observability,
       role: cause,
       entity: { kind: Namespace, name_labels: [namespace] },
       component_type: observability.prometheus-operator,
@@ -1146,6 +1269,7 @@ entries:
   - {
       id: prometheus-operator-rejected-resources,
       alertname: PrometheusOperatorRejectedResources,
+      category: observability,
       role: cause,
       entity: { kind: Pod, name_labels: [pod] },
       component_type: observability.prometheus-operator,
@@ -1158,6 +1282,7 @@ entries:
   - {
       id: prometheus-bad-config,
       alertname: PrometheusBadConfig,
+      category: observability,
       role: cause,
       entity: { kind: Pod, name_labels: [pod] },
       chains: [observability-self/prometheus-tsdb, kps-conditions/prometheus-bad-config],
@@ -1167,6 +1292,7 @@ entries:
   - {
       id: prometheus-sd-refresh-failure,
       alertname: PrometheusSDRefreshFailure,
+      category: observability,
       role: meta,
       entity: { kind: Pod, name_labels: [pod] },
       chains: [observability-self/scrape, kps-conditions/prometheus-sd-refresh-failure],
@@ -1176,6 +1302,7 @@ entries:
   - {
       id: prometheus-kubernetes-list-watch-failures,
       alertname: PrometheusKubernetesListWatchFailures,
+      category: observability,
       role: meta,
       entity: { kind: Pod, name_labels: [pod] },
       chains: [observability-self/scrape, kps-conditions/prometheus-kubernetes-list-watch-failures],
@@ -1185,6 +1312,7 @@ entries:
   - {
       id: prometheus-notification-queue-running-full,
       alertname: PrometheusNotificationQueueRunningFull,
+      category: observability,
       role: forecast,
       entity: { kind: Pod, name_labels: [pod] },
       chains: [observability-self/alert-delivery, kps-conditions/prometheus-notification-queue-running-full],
@@ -1194,6 +1322,7 @@ entries:
   - {
       id: prometheus-error-sending-alerts-to-some-alertmanagers,
       alertname: PrometheusErrorSendingAlertsToSomeAlertmanagers,
+      category: observability,
       role: symptom,
       entity: { kind: Pod, name_labels: [pod] },
       chains: [observability-self/alert-delivery, kps-conditions/prometheus-error-sending-alerts-to-some-alertmanagers],
@@ -1203,6 +1332,7 @@ entries:
   - {
       id: prometheus-not-connected-to-alertmanagers,
       alertname: PrometheusNotConnectedToAlertmanagers,
+      category: observability,
       role: cause,
       entity: { kind: Pod, name_labels: [pod] },
       chains: [observability-self/alert-delivery, kps-conditions/prometheus-not-connected-to-alertmanagers],
@@ -1212,6 +1342,7 @@ entries:
   - {
       id: prometheus-tsdb-reloads-failing,
       alertname: PrometheusTSDBReloadsFailing,
+      category: observability,
       role: cause,
       entity: { kind: Pod, name_labels: [pod] },
       chains: [observability-self/prometheus-tsdb, kps-conditions/prometheus-tsdb-reloads-failing],
@@ -1221,6 +1352,7 @@ entries:
   - {
       id: prometheus-tsdb-compactions-failing,
       alertname: PrometheusTSDBCompactionsFailing,
+      category: observability,
       role: cause,
       entity: { kind: Pod, name_labels: [pod] },
       chains: [observability-self/prometheus-tsdb, kps-conditions/prometheus-tsdb-compactions-failing],
@@ -1230,6 +1362,7 @@ entries:
   - {
       id: prometheus-not-ingesting-samples,
       alertname: PrometheusNotIngestingSamples,
+      category: observability,
       role: meta,
       entity: { kind: Pod, name_labels: [pod] },
       chains: [observability-self/prometheus-tsdb, kps-conditions/prometheus-not-ingesting-samples],
@@ -1239,6 +1372,7 @@ entries:
   - {
       id: prometheus-duplicate-timestamps,
       alertname: PrometheusDuplicateTimestamps,
+      category: observability,
       role: meta,
       entity: { kind: Pod, name_labels: [pod] },
       chains: [observability-self/scrape, kps-conditions/prometheus-duplicate-timestamps],
@@ -1248,6 +1382,7 @@ entries:
   - {
       id: prometheus-out-of-order-timestamps,
       alertname: PrometheusOutOfOrderTimestamps,
+      category: observability,
       role: meta,
       entity: { kind: Pod, name_labels: [pod] },
       chains: [observability-self/scrape, kps-conditions/prometheus-out-of-order-timestamps],
@@ -1257,6 +1392,7 @@ entries:
   - {
       id: prometheus-remote-storage-failures,
       alertname: PrometheusRemoteStorageFailures,
+      category: observability,
       role: cause,
       entity: { kind: Pod, name_labels: [pod] },
       chains: [observability-self/prometheus-tsdb, kps-conditions/prometheus-remote-storage-failures],
@@ -1266,6 +1402,7 @@ entries:
   - {
       id: prometheus-remote-write-behind,
       alertname: PrometheusRemoteWriteBehind,
+      category: observability,
       role: symptom,
       entity: { kind: Pod, name_labels: [pod] },
       chains: [observability-self/prometheus-tsdb, kps-conditions/prometheus-remote-write-behind],
@@ -1275,6 +1412,7 @@ entries:
   - {
       id: prometheus-remote-write-desired-shards,
       alertname: PrometheusRemoteWriteDesiredShards,
+      category: observability,
       role: symptom,
       entity: { kind: Pod, name_labels: [pod] },
       chains: [observability-self/prometheus-tsdb, kps-conditions/prometheus-remote-write-desired-shards],
@@ -1284,6 +1422,7 @@ entries:
   - {
       id: prometheus-rule-failures,
       alertname: PrometheusRuleFailures,
+      category: observability,
       role: meta,
       entity: { kind: Pod, name_labels: [pod] },
       chains: [observability-self/rule-evaluation, kps-conditions/prometheus-rule-failures],
@@ -1293,6 +1432,7 @@ entries:
   - {
       id: prometheus-missing-rule-evaluations,
       alertname: PrometheusMissingRuleEvaluations,
+      category: observability,
       role: meta,
       entity: { kind: Pod, name_labels: [pod] },
       chains: [observability-self/rule-evaluation, kps-conditions/prometheus-missing-rule-evaluations],
@@ -1302,6 +1442,7 @@ entries:
   - {
       id: prometheus-target-limit-hit,
       alertname: PrometheusTargetLimitHit,
+      category: observability,
       role: meta,
       entity: { kind: Pod, name_labels: [pod] },
       chains: [observability-self/scrape, kps-conditions/prometheus-target-limit-hit],
@@ -1311,6 +1452,7 @@ entries:
   - {
       id: prometheus-label-limit-hit,
       alertname: PrometheusLabelLimitHit,
+      category: observability,
       role: meta,
       entity: { kind: Pod, name_labels: [pod] },
       chains: [observability-self/scrape, kps-conditions/prometheus-label-limit-hit],
@@ -1320,6 +1462,7 @@ entries:
   - {
       id: prometheus-scrape-body-size-limit-hit,
       alertname: PrometheusScrapeBodySizeLimitHit,
+      category: observability,
       role: meta,
       entity: { kind: Pod, name_labels: [pod] },
       chains: [observability-self/scrape, kps-conditions/prometheus-scrape-body-size-limit-hit],
@@ -1329,6 +1472,7 @@ entries:
   - {
       id: prometheus-scrape-sample-limit-hit,
       alertname: PrometheusScrapeSampleLimitHit,
+      category: observability,
       role: meta,
       entity: { kind: Pod, name_labels: [pod] },
       chains: [observability-self/scrape, kps-conditions/prometheus-scrape-sample-limit-hit],
@@ -1338,6 +1482,7 @@ entries:
   - {
       id: prometheus-target-sync-failure,
       alertname: PrometheusTargetSyncFailure,
+      category: observability,
       role: meta,
       entity: { kind: Pod, name_labels: [pod] },
       chains: [observability-self/scrape, kps-conditions/prometheus-target-sync-failure],
@@ -1347,6 +1492,7 @@ entries:
   - {
       id: prometheus-high-query-load,
       alertname: PrometheusHighQueryLoad,
+      category: observability,
       role: symptom,
       entity: { kind: Pod, name_labels: [pod] },
       chains: [observability-self/prometheus-tsdb, kps-conditions/prometheus-high-query-load],
@@ -1356,6 +1502,7 @@ entries:
   - {
       id: prometheus-error-sending-alerts-to-any-alertmanager,
       alertname: PrometheusErrorSendingAlertsToAnyAlertmanager,
+      category: observability,
       role: cause,
       entity: { kind: Pod, name_labels: [pod] },
       chains: [observability-self/alert-delivery, kps-conditions/prometheus-error-sending-alerts-to-any-alertmanager],

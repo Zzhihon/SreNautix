@@ -5,18 +5,21 @@ entries:
   # 可用副本少于 2：spec 至少 2 时 deployment_unavailable > 0
   - id: shop-api-replicas-below-minimum
     alertname: ShopApiReplicasBelowMinimum
+    category: availability
     role: symptom
     entity: { kind: Deployment, name_labels: [deployment] }
     chains: [workload/rollout, workload/release]
     primary_card: workload/rollout/deployment
   - id: shop-checkout-unavailable
     alertname: ShopCheckoutUnavailable
+    category: availability
     role: symptom
     entity: { kind: Deployment, name_labels: [deployment] }
     chains: [workload/rollout, workload/release]
     primary_card: workload/rollout/deployment
   - id: shop-migration-failed
     alertname: ShopMigrationFailed
+    category: availability
     role: cause
     entity: { kind: Job, name_labels: [job_name] }
     chains: [workload/job, workload/release]
@@ -24,12 +27,14 @@ entries:
   # 已更新的副本少于期望：新 ReplicaSet 没有达到期望的就绪副本数
   - id: shop-rollout-incomplete
     alertname: ShopRolloutIncomplete
+    category: availability
     role: change
     entity: { kind: Deployment, name_labels: [deployment] }
     chains: [workload/release, workload/rollout]
     primary_card: workload/release/replicasets
   - id: shop-pod-restarted
     alertname: ShopPodRestarted
+    category: availability
     role: symptom
     entity: { kind: Pod, name_labels: [pod] }
     chains: [workload/pod-restarts]

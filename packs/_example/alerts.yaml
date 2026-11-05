@@ -1,6 +1,8 @@
 entries:
   - id: example-container-memory-high
     alertname: ExampleContainerMemoryHigh
+    # 告警类别（ADR 0183）：容器内存接近上限，仍在提供服务，属于 performance
+    category: performance
     expr: max by (namespace, pod, container) (container_memory_working_set_bytes / kube_pod_container_resource_limits{resource="memory"}) > 0.9
     role: cause
     entity:
