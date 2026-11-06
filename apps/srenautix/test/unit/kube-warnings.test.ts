@@ -115,7 +115,7 @@ const lokiSeries: MetricSeries[] = [
 ];
 
 /** 拓扑历史：api 与 control 各有 Pod 在 node-a、node-b 上，control-2 没有调度成功；worker 在 node-c 上 */
-const placements: Placement[] = [
+const owned: Array<Omit<Placement, 'scales'>> = [
   { component: API, object: API, node: null, from: min(0), to: min(480) },
   { component: API, object: 'ReplicaSet:shop/api-7d9f', node: null, from: min(0), to: min(480) },
   { component: API, object: 'Pod:shop/api-7d9f-a1', node: 'node-a', from: min(-600), to: min(12) },
@@ -128,6 +128,7 @@ const placements: Placement[] = [
   { component: WORKER, object: WORKER, node: null, from: min(0), to: min(480) },
   { component: WORKER, object: 'Pod:jobs/worker-5c-x1', node: 'node-c', from: min(-600), to: Number.POSITIVE_INFINITY },
 ];
+const placements: Placement[] = owned.map((p) => ({ ...p, scales: null }));
 
 const ok = (name: string, source: KubeWarningQuery['source']): KubeWarningQuery => ({
   name,
@@ -320,6 +321,58 @@ describe('每个事件的 Warning 摘要', () => {
     expect(r2.summaries.every((s) => !s.complete)).toBe(true);
     expect(r2.queries[0]).toEqual(failed);
     expect(() => assertValid('schemas/kube-warnings.schema.json', r2)).not.toThrow();
+  });
+});
+
+describe('组件是 HPA：从伸缩对象展开', () => {
+  const HPA = 'HorizontalPodAutoscaler:shop/control';
+  // control 的 HPA 到顶告警以 HPA 为组件；拓扑历史在事件时间窗内没有 scales 边，placements 取最近一次已知的 scales 边
+  const hpaIncidents = incidents.map((i) => (i.incident_id === ids.controlHpa ? { ...i, components: [HPA] } : i));
+  const viaHpa = (basis: 'in_window' | 'last_known'): Placement[] =>
+    placements
+      .filter((p) => p.component === CONTROL)
+      .map((p) => ({ ...p, component: HPA, scales: { target: CONTROL, basis } }));
+  const build = (extra: Placement[]) => {
+    const windows = hpaIncidents.map((i) => ({ from: Date.parse(i.window.from), to: Date.parse(i.window.to!) }));
+    return buildKubeWarningReport({
+      clusterId: 'c1',
+      incidents: hpaIncidents,
+      windows,
+      span: { from: Math.min(...windows.map((w) => w.from)), to: Math.max(...windows.map((w) => w.to)) },
+      stepMs: STEP_MS,
+      observations: eventObservations(src, lokiSeries),
+      placements: [...placements, ...extra],
+      queries: [ok('events', 'events'), ok('oom_killed', 'kube_state_metrics')],
+      grouping: DEFAULT_GROUPING,
+    });
+  };
+
+  it('最近已知的伸缩关系：HPA 事件得到伸缩对象的节点与计数并进组，摘要标明关系的依据', () => {
+    const r = build(viaHpa('last_known'));
+    expect(() => assertValid('schemas/kube-warnings.schema.json', r)).not.toThrow();
+    const s = r.summaries.find((x) => x.incident_id === ids.controlHpa)!;
+    expect(s.scale_targets).toEqual([{ hpa: HPA, target: CONTROL, basis: 'last_known' }]);
+    expect(s.nodes.map((n) => [n.node, n.via])).toEqual([['node-b', ['topology', 'events']]]);
+    expect(s.counts).toEqual([count('Evicted', 2, 2), count('FailedScheduling', 9, 9)]);
+    expect(r.groups).toHaveLength(1);
+    const g = r.groups[0]!.incidents.find((i) => i.incident_id === ids.controlHpa)!;
+    expect(g.nodes).toEqual(['node-a', 'node-b']);
+    // 组件不是 HPA 的事件没有伸缩对象
+    expect(r.summaries.find((x) => x.incident_id === ids.schedule)!.scale_targets).toEqual([]);
+  });
+
+  it('时间窗内的伸缩关系标为 in_window', () => {
+    const s = build(viaHpa('in_window')).summaries.find((x) => x.incident_id === ids.controlHpa)!;
+    expect(s.scale_targets).toEqual([{ hpa: HPA, target: CONTROL, basis: 'in_window' }]);
+  });
+
+  it('拓扑里从来没有这个 HPA 的 scales 边时，HPA 事件没有对象与节点，不进组', () => {
+    const r = build([]);
+    const s = r.summaries.find((x) => x.incident_id === ids.controlHpa)!;
+    expect(s.scale_targets).toEqual([]);
+    expect(s.nodes).toEqual([]);
+    expect(s.objects).toEqual([]);
+    expect(r.groups[0]!.incidents.map((i) => i.incident_id)).not.toContain(ids.controlHpa);
   });
 });
 

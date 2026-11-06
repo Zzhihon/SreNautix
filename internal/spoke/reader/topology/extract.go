@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
 	networkingv1 "k8s.io/api/networking/v1"
@@ -29,6 +30,7 @@ const (
 	RelOperatorConv    = "operator_convention"
 	RelPrimary         = "primary"
 	RelReplica         = "replica"
+	RelScales          = "scales"
 	KindCSIDriver      = "CSIDriver"
 	registrarContainer = "csi-node-driver-registrar"
 )
@@ -250,6 +252,25 @@ func PV(pv *corev1.PersistentVolume) Contribution {
 		d := c.ref(KindCSIDriver, "", pv.Spec.CSI.Driver, "", true)
 		c.edge(Structural(self, d, RelProvisionedBy, ScopeInstance, "spec.csi.driver"))
 	}
+	return c
+}
+
+// HPA 贡献 HorizontalPodAutoscaler 节点、owner 边，以及 HPA → spec.scaleTargetRef 指向的工作负载（scales，ADR 0184）。
+// 伸缩对象的 kind 按 scaleTargetRef 的 apiVersion 写成 KindName 的形式，与 ownerReference 推出的键相同。
+func HPA(h *autoscalingv2.HorizontalPodAutoscaler) Contribution {
+	c, self := generic("HorizontalPodAutoscaler", h)
+	ref := h.Spec.ScaleTargetRef
+	if self == "" || ref.Kind == "" || ref.Name == "" {
+		return c
+	}
+	gv, err := schema.ParseGroupVersion(ref.APIVersion)
+	if err != nil {
+		c.fail("HorizontalPodAutoscaler", h.Namespace, h.Name, fmt.Sprintf("spec.scaleTargetRef has invalid apiVersion %q", ref.APIVersion))
+		return c
+	}
+	kind := KindName(gv.Group, ref.Kind)
+	target := c.ref(kind, OwnerNamespace(kind, h.Namespace), ref.Name, "", false)
+	c.edge(Structural(self, target, RelScales, ScopeService, "spec.scaleTargetRef "+ref.Kind+"/"+ref.Name))
 	return c
 }
 

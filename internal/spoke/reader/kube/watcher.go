@@ -11,6 +11,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	appsv1 "k8s.io/api/apps/v1"
+	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
@@ -144,6 +145,10 @@ func (w *Watcher) Start(ctx context.Context) error {
 		{name: "daemonsets", kind: "DaemonSet", informer: f.Apps().V1().DaemonSets().Informer(), extract: generic("DaemonSet")},
 		{name: "jobs", kind: "Job", informer: f.Batch().V1().Jobs().Informer(), extract: generic("Job"), affectsPods: true, affectsNP: true},
 		{name: "cronjobs", kind: "CronJob", informer: f.Batch().V1().CronJobs().Informer(), extract: generic("CronJob")},
+		{name: "horizontalpodautoscalers", kind: "HorizontalPodAutoscaler", informer: f.Autoscaling().V2().HorizontalPodAutoscalers().Informer(),
+			extract: func(o any) topology.Contribution {
+				return topology.HPA(o.(*autoscalingv2.HorizontalPodAutoscaler))
+			}},
 		// PodDisruptionBudget 只用于集群状态检测器（不进拓扑）
 		{name: "poddisruptionbudgets", kind: "PodDisruptionBudget", informer: f.Policy().V1().PodDisruptionBudgets().Informer()},
 		{name: "endpointslices", kind: "EndpointSlice", informer: f.Discovery().V1().EndpointSlices().Informer(),
@@ -508,7 +513,7 @@ func (w *Watcher) PodByIP(ip string) (*corev1.Pod, bool) {
 	return nil, false
 }
 
-// Object 返回缓存中的对象（Pod、Node、Service、PVC、PV、ReplicaSet、Job 及其上层工作负载）。
+// Object 返回缓存中的对象（Pod、Node、Service、PVC、PV、ReplicaSet、Job 及其上层工作负载、HorizontalPodAutoscaler）。
 func (w *Watcher) Object(kind, namespace, name string) (metav1.Object, bool) {
 	var obj runtime.Object
 	var err error
@@ -540,6 +545,8 @@ func (w *Watcher) Object(kind, namespace, name string) (metav1.Object, bool) {
 		var cj *batchv1.CronJob
 		cj, err = f.Batch().V1().CronJobs().Lister().CronJobs(namespace).Get(name)
 		obj = cj
+	case "HorizontalPodAutoscaler":
+		obj, err = f.Autoscaling().V2().HorizontalPodAutoscalers().Lister().HorizontalPodAutoscalers(namespace).Get(name)
 	default:
 		return nil, false
 	}

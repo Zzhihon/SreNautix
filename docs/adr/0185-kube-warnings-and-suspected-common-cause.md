@@ -22,7 +22,7 @@
 
 计数 `KubeWarningCount` 是 (reason, 来源, 单位, 次数, 其中提到内存的次数)。来源为 `events`（Loki 里的 Kubernetes 事件）或 `kube_state_metrics`；单位为 `occurrences`（发生次数）、`pods`（不同 Pod 数）或 `seconds`（节点处于某个状态的累计秒数）。不同来源与单位的计数分开列出，不相加。
 
-摘要里有三类计数：`counts` 是组件本身以及拓扑中属于它的对象（ReplicaSet、Pod）上的计数；`nodes` 是时间窗内组件所在的每个节点上的计数（节点对象与该节点上的全部 Pod），并注明确定组件在这个节点上的依据（`component` 组件本身就是节点、`topology` 拓扑历史、`events` 组件对象的事件由这个节点的 kubelet 记录）；`objects` 是组件对象的明细，最多 20 个。
+摘要里有三类计数：`counts` 是组件本身以及拓扑中属于它的对象（ReplicaSet、Pod）上的计数；`nodes` 是时间窗内组件所在的每个节点上的计数（节点对象与该节点上的全部 Pod），并注明确定组件在这个节点上的依据（`component` 组件本身就是节点、`topology` 拓扑历史、`events` 组件对象的事件由这个节点的 kubelet 记录）；`objects` 是组件对象的明细，最多 20 个。组件里有 HPA 时，`scale_targets`（契约 2.50.0）列出它展开到的伸缩对象与这个关系的依据（第 4 条）。
 
 `apps/srenautix/src/export/kube-warnings-config.ts` 的 `kubeWarningsDeps(config, ports)` 由 server 配置构造依赖，导出接口直接调用它与 `collectKubeWarnings`。
 
@@ -63,7 +63,16 @@
 
 事件本身给出的节点优先：它是实际执行驱逐或重启的 kubelet，对象被驱逐、删除之后拓扑里的边已经关闭，按事件时刻回溯拓扑也只能得到同一个节点。
 
-组件在哪些节点上取拓扑历史：`TopologyStore.placements` 沿 `owned_by` 反向展开到组件拥有的对象（最多 4 层，组件本身也算），再取与查询范围重叠的 `runs_on` 区间；组件对象上带节点的计数也算作组件在这个节点上。组件是 HPA 时，沿 ADR 0184 的 `scales` 边从它伸缩的工作负载展开。
+组件在哪些节点上取拓扑历史：`TopologyStore.placements` 沿 `owned_by` 反向展开到组件拥有的对象（最多 4 层，组件本身也算），再取与查询范围重叠的 `runs_on` 区间；组件对象上带节点的计数也算作组件在这个节点上。
+
+组件是 HPA 时，沿 ADR 0184 的 `scales` 边从它伸缩的工作负载展开：
+
+- 查询范围内有这个 HPA 的 `scales` 边时，取这些边，`scale_targets` 的 `basis` 为 `in_window`。
+- 查询范围内没有时，取这个 HPA 最近一次已知的 `scales` 边（`valid_from` 最晚的一条，不限时间），`basis` 为 `last_known`。拓扑来源开始上报 `scales` 之前的历史没有这条边（例如分支 reader 读取 HPA 之前写入的拓扑），HPA 与伸缩对象的关系又很少改变，用最近一次已知的关系才能把这些时间段里的 HPA 事件连到工作负载的 Pod 与节点。
+- 伸缩对象之下的 `owned_by` 与 `runs_on` 仍按查询范围取，节点与计数只来自事件时间窗里实际存在的 Pod。
+- 拓扑里从来没有这个 HPA 的 `scales` 边时不展开，HPA 事件只有 HPA 自身的计数，`scale_targets` 为空。
+
+`basis` 写进每条摘要，读结果的人可以分辨哪些节点与计数是按推定的伸缩关系得到的。`scale_targets` 与 `KubeWarningScaleTarget` 是契约 2.50.0 的新增字段，`TopologyStore.placements` 的每一行带上对象经由的伸缩对象与依据（`PlacementRow.scales`），仍是一次查询。
 
 ### 5. 疑似同一根因的分组
 
@@ -115,6 +124,7 @@ Kubernetes 不为容器的 OOM 终止记录事件，`OOMKilled` 只在 Pod 状�
 
 - **在引擎里按节点合并事件**：用户已经决定分组只在导出时给出。引擎里的合并会改变事件的身份、通知与 issue，启发式的误判会被放大到这些地方；导出时的疑似分组带着依据，由人判断。
 - **按事件逐个查询 Loki**：导出 3 天的事件可能有几百个，逐个查询会压垮 Loki，查询数也随事件数增长。按 (reason, 对象, 节点) 分桶的一次聚合查询覆盖全部事件，事件的归属在内存里计算。
+- **HPA 的伸缩关系只按事件时间窗取**：分支 reader 读取 HPA 之前写入的拓扑没有 `scales` 边，这段时间里的 HPA 事件既没有对象也没有节点，进不了任何分组；而这类部署里 HPA 告警正是节点内存驱逐最常见的后果之一。
 - **以拓扑历史为节点的唯一来源**：被驱逐的 Pod 在驱逐时删除，拓扑里的边随之关闭；拓扑由 informer 写入，有采集延迟，也受保留期（`topology.history_retention`）限制。事件本身带的节点是执行驱逐的 kubelet，最准确；拓扑历史补上事件不带节点的计数与组件所在的节点。
 - **把容器 OOMKilled 算作节点内存信号**：容器超过自身限制的 OOM 在节点内存充足时也会发生，算作信号会把互不相关的 OOM 事件归成一组。
 - **事件采集器的格式写成 LogQL 模板**：模板需要 SreNautix 解析或拼接部署方写的 LogQL，集群标签与字段提取都难以可靠地加入；格式表加字段覆盖可以描述常见的采集器，查询由结构拼出。

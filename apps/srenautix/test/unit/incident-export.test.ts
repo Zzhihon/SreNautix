@@ -264,9 +264,16 @@ const observations: Observation[] = [
   ev(210, 'BackOff', pod('jobs', 'worker-1'), 'node-c', false, 4),
 ];
 const placements: Placement[] = [
-  { component: API, object: 'Pod:shop/api-1', node: 'node-a', from: min(-60), to: min(12) },
-  { component: CONTROL, object: 'Pod:shop/control-0', node: 'node-a', from: min(-60), to: min(12) },
-  { component: WORKER, object: 'Pod:jobs/worker-1', node: 'node-c', from: min(-60), to: Number.POSITIVE_INFINITY },
+  { component: API, object: 'Pod:shop/api-1', node: 'node-a', from: min(-60), to: min(12), scales: null },
+  { component: CONTROL, object: 'Pod:shop/control-0', node: 'node-a', from: min(-60), to: min(12), scales: null },
+  {
+    component: WORKER,
+    object: 'Pod:jobs/worker-1',
+    node: 'node-c',
+    from: min(-60),
+    to: Number.POSITIVE_INFINITY,
+    scales: null,
+  },
 ];
 
 function exported(q: Record<string, unknown> = {}): IncidentExport {

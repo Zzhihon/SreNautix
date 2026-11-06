@@ -20,7 +20,9 @@
 - `scales` 是成员关系：没有 owned_by 的 HPA 归到伸缩对象所在的组件，`componentOf(HPA)` 就是 Deployment（或 StatefulSet、Argo Rollout 等伸缩对象的顶层属主），`membersOf(Deployment)` 包含这个 HPA。HPA 有控制者时（例如 KEDA 的 ScaledObject 创建的 HPA）跟随控制者。`scales` 不是依赖边，不参与可达与归并的展开。
 - 同一条规则在所有求组件的地方生效（`packages/core` 的 `memberParents`）：拓扑图（`TopologyGraph.componentOf`、`membersOf`）、状态库的属主查找（`TopologyStore.ownerOf`，优先 owned_by）、评测重建包的属主查找、研判账本的组件粒度与假设范围（`research/ledger.ts`），以及消息里“根因与它拥有的对象上的正常卡”。
 - 告警的实体保持告警指向的对象：`KubeHpaMaxedOut` 的实体仍是 HPA，证据卡照常按 HPA 执行；变化的是告警归属的组件，事件的发现根因随之是 Deployment。研判根因是 Deployment 或 HPA 时，按属主粒度都与发现根因一致。
-- kube-state-metrics 历史（ADR 0033）不产生 HPA 节点，不受影响。分支 reader（ADR 0030）不读取 HPA 对象，多集群部署中 reader 上报的拓扑没有 HPA 节点与 `scales` 边，那里的 HPA 告警按实体标签落到 HPA 自己。
+- 分支 reader（ADR 0030，`internal/spoke/reader`）同样列举并监听 `autoscaling/v2` 的 HPA，输出相同的 HPA 节点与 `scales` 边（`topology.HPA`）；伸缩对象的 kind 按 `scaleTargetRef.apiVersion` 写成 reader 的键格式（内置 API 组只写 Kind，其余写 `Kind.group`），与它从 ownerReference 推出的键一致。reader 的 ClusterRole（chart 的 `srenautix.readRules`）包含 `autoscaling` `horizontalpodautoscalers` 的 get、list、watch。
+- kube-state-metrics 历史（ADR 0033）不产生 HPA 节点，不受影响。
+- 拓扑来源开始输出 `scales` 之后，HPA 告警的根因组件从 HPA 变为它伸缩的工作负载，系列键随之改变：同一系列在这之后第一次复发时新建一个事件（以及一个 issue），之后的复发回到它，与第 2 条升级时的行为相同。
 
 这条归一只依赖 HPA 对象自己的声明，与告警标签、研判结果无关，同一份拓扑重放的结果相同。
 

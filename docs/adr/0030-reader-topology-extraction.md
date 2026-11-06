@@ -27,6 +27,7 @@ DESIGN §4.1–§4.2 要求拓扑以事件形式保存（`valid_from` / `valid_t
    | `selects` | EndpointSlice 的 `targetRef` → Service 选中的 Pod | structural 1.0 | service |
    | `routes_to` | Ingress 后端、HTTPRoute `backendRefs` | structural 1.0 | service |
    | `attached_to` | HTTPRoute `parentRefs` → Gateway | structural 1.0 | service |
+   | `scales` | HorizontalPodAutoscaler（`autoscaling/v2`）`spec.scaleTargetRef` → 伸缩的工作负载（ADR 0184） | structural 1.0 | service |
    | `managed_by` | Argo CD Application `status.resources`（目标为本集群时）、Flux Kustomization `status.inventory` | structural 1.0 | service |
    | `operator_convention`、`primary`、`replica` | CNPG Cluster：`<名称>-rw/-ro/-r` Service → Cluster；Cluster → `status.currentPrimary` 与其余 `status.instanceNames` | structural 1.0 | service |
    | `references` | Pod 的环境变量与 ConfigMap 值中的 Service DNS 名、ConfigMap 名、`secretKeyRef`/`envFrom`/卷中的 Secret 名 | config_ref 0.7 | service |

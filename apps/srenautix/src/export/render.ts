@@ -155,6 +155,10 @@ function incidentSection(i: ExportedIncident): string[] {
   for (const n of k.nodes) {
     out.push(`- Kubernetes Warning（节点 ${mdText(n.node)}）：${countsText(n.counts)}`);
   }
+  for (const s of k.scale_targets) {
+    const basis = s.basis === 'in_window' ? '时间窗内的伸缩关系' : '时间窗内没有伸缩关系，取最近一次已知的伸缩关系';
+    out.push(`- 伸缩对象：${mdText(s.hpa)} → ${mdText(s.target)}（${basis}）`);
+  }
   if (i.issues.length) {
     out.push(`- issue：${i.issues.map(issueText).join('，')}`);
   }

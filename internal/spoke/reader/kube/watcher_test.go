@@ -14,6 +14,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	appsv1 "k8s.io/api/apps/v1"
+	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
 	networkingv1 "k8s.io/api/networking/v1"
@@ -335,6 +336,103 @@ func installCRDs(t *testing.T, cfg *rest.Config) {
 	t.Helper()
 	if _, err := envtest.InstallCRDs(cfg, envtest.CRDInstallOptions{Paths: []string{testenv.CRDDir()}, ErrorIfPathMissing: true}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// HPA（autoscaling/v2）进入拓扑：HPA → spec.scaleTargetRef 的 scales 边与中心 informer 相同（ADR 0184）。
+// 改变伸缩对象时旧边关闭、新边打开；删除 HPA 时节点与边撤回并留下墓碑；实体解析可以从 informer 缓存取到 HPA。
+func TestWatcherHPAScales(t *testing.T) {
+	cfg, _ := testenv.StartKube(t, false)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cs := kubernetes.NewForConfigOrDie(cfg)
+	c := context.Background()
+
+	must(cs.CoreV1().Namespaces().Create(c, ns("shop", nil), metav1.CreateOptions{}))
+	for _, name := range []string{"api", "api-canary"} {
+		must(cs.AppsV1().Deployments("shop").Create(c, &appsv1.Deployment{
+			ObjectMeta: metav1.ObjectMeta{Namespace: "shop", Name: name},
+			Spec: appsv1.DeploymentSpec{Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": name}},
+				Template: corev1.PodTemplateSpec{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": name}},
+					Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: "x"}}}}},
+		}, metav1.CreateOptions{}))
+	}
+	h := must(cs.AutoscalingV2().HorizontalPodAutoscalers("shop").Create(c, &autoscalingv2.HorizontalPodAutoscaler{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "shop", Name: "api"},
+		Spec: autoscalingv2.HorizontalPodAutoscalerSpec{
+			ScaleTargetRef: autoscalingv2.CrossVersionObjectReference{APIVersion: "apps/v1", Kind: "Deployment", Name: "api"},
+			MinReplicas:    ptr.To[int32](1), MaxReplicas: 4,
+		},
+	}, metav1.CreateOptions{}))
+
+	httpc, err := rest.HTTPClientFor(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := prometheus.NewRegistry()
+	rep := newReplica(t)
+	store := topology.NewStore("c1")
+	w := New(cs, nil, store, clock.New(httpc, cfg.Host, reg), rep.sink, reg, topology.NewReporter(reg, quietLog()))
+	if err := w.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	const hpaKey = "HorizontalPodAutoscaler:shop/api"
+	const first = hpaKey + "|scales|Deployment:shop/api"
+	const second = hpaKey + "|scales|Deployment:shop/api-canary"
+	testenv.Eventually(t, 10*time.Second, func() error {
+		if !rep.hasEdge(first) {
+			return fmt.Errorf("missing edge %s; have %v", first, rep.edgeIDs())
+		}
+		return nil
+	})
+	e, _ := rep.edge(first)
+	want := topology.Edge{From: hpaKey, To: "Deployment:shop/api", Relation: "scales", Provenance: topology.ProvStructural,
+		Confidence: 1, Scope: topology.ScopeService, Evidence: "spec.scaleTargetRef Deployment/api"}
+	if e != want {
+		t.Fatalf("scales edge %+v", e)
+	}
+	if n, ok := rep.node(hpaKey); !ok || n.UID == nil || *n.UID != string(h.UID) {
+		t.Fatalf("hpa node %+v", n)
+	}
+	// 伸缩对象是 Deployment 自己的节点（带 UID），HPA 的引用只是占位贡献
+	if n, _ := rep.node("Deployment:shop/api"); n.UID == nil {
+		t.Fatalf("deployment node lost its own contribution: %+v", n)
+	}
+	for _, ev := range rep.events {
+		if ev.Op == topology.OpEdgeUpsert && ev.Edge.ID() == first && ev.ValidFrom.After(h.CreationTimestamp.Add(time.Second)) {
+			t.Fatalf("initial scales edge valid_from %s is later than the hpa creation %s", ev.ValidFrom, h.CreationTimestamp)
+		}
+	}
+	if o, ok := w.Object("HorizontalPodAutoscaler", "shop", "api"); !ok || o.GetUID() != h.UID {
+		t.Fatalf("hpa not in the informer cache lookup: %v %v", o, ok)
+	}
+
+	// 改变伸缩对象
+	h = must(cs.AutoscalingV2().HorizontalPodAutoscalers("shop").Get(c, "api", metav1.GetOptions{}))
+	h.Spec.ScaleTargetRef.Name = "api-canary"
+	must(cs.AutoscalingV2().HorizontalPodAutoscalers("shop").Update(c, h, metav1.UpdateOptions{}))
+	testenv.Eventually(t, 10*time.Second, func() error {
+		if rep.hasEdge(first) || !rep.hasEdge(second) {
+			return fmt.Errorf("retarget not applied; have %v", rep.edgeIDs())
+		}
+		return nil
+	})
+
+	// 删除 HPA
+	if err := cs.AutoscalingV2().HorizontalPodAutoscalers("shop").Delete(c, "api", metav1.DeleteOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	testenv.Eventually(t, 10*time.Second, func() error {
+		if _, ok := rep.node(hpaKey); ok || rep.hasEdge(second) {
+			return fmt.Errorf("hpa still present; have %v", rep.edgeIDs())
+		}
+		if _, ok := w.Tombstones().ByKey(hpaKey, time.Time{}); !ok {
+			return fmt.Errorf("no tombstone for the hpa")
+		}
+		return nil
+	})
+	if _, ok := rep.node("Deployment:shop/api-canary"); !ok {
+		t.Fatalf("deployment node removed with the hpa")
 	}
 }
 

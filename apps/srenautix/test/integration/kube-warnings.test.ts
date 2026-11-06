@@ -206,6 +206,7 @@ const podGone = (ns: string, name: string, owner: string, nodeName: string): Cha
 
 const RS = 'ReplicaSet:shop/api-7d9f';
 const HPA = 'HorizontalPodAutoscaler:shop/control';
+const API_HPA = 'HorizontalPodAutoscaler:shop/api';
 
 function topology(): Array<{ at: number; changes: Change[] }> {
   return [
@@ -237,6 +238,21 @@ function topology(): Array<{ at: number; changes: Change[] }> {
       changes: [...podGone('shop', 'control-1', CONTROL, 'node-b'), ...podUp('shop', 'control-2', CONTROL, null)],
     },
     { at: 30, changes: podUp('shop', 'api-7d9f-a3', RS, 'node-a') },
+    // api 的 HPA 在查询的时间段之后才有 scales 边（拓扑来源开始上报 scales 之前没有这条边），先指向 api-old，之后改为 api
+    {
+      at: 70,
+      changes: [
+        { op: 'node_upsert', node: tnode('HorizontalPodAutoscaler', 'shop', 'api') },
+        { op: 'edge_upsert', edge: tedge(API_HPA, 'scales', 'Deployment:shop/api-old') },
+      ],
+    },
+    {
+      at: 100,
+      changes: [
+        { op: 'edge_delete', edge: tedge(API_HPA, 'scales', 'Deployment:shop/api-old') },
+        { op: 'edge_upsert', edge: tedge(API_HPA, 'scales', API) },
+      ],
+    },
   ];
 }
 
@@ -329,9 +345,26 @@ describe('TopologyStore.placements', () => {
 
   it('组件是 HPA 时从 scales 指向的工作负载展开', async () => {
     const rows = await store.placements(CLUSTER, [HPA], at(0), at(60));
-    const view = rows.map((r) => [r.component, r.object, r.node]);
-    expect(view).toContainEqual([HPA, CONTROL, null]);
-    expect(view).toContainEqual([HPA, 'Pod:shop/control-1', 'Node:node-b']);
+    const view = rows.map((r) => [r.component, r.object, r.node, r.scales]);
+    const inWindow = { target: CONTROL, basis: 'in_window' };
+    expect(view).toContainEqual([HPA, HPA, null, null]);
+    expect(view).toContainEqual([HPA, CONTROL, null, inWindow]);
+    expect(view).toContainEqual([HPA, 'Pod:shop/control-1', 'Node:node-b', inWindow]);
+  });
+
+  it('时间段内没有 scales 边时取 HPA 最近一次已知的 scales 边，伸缩对象的 Pod 仍按时间段取', async () => {
+    const rows = await store.placements(CLUSTER, [API_HPA], at(0), at(60));
+    const view = rows.map((r) => [r.object, r.node, r.scales]);
+    const lastKnown = { target: API, basis: 'last_known' };
+    expect(view).toContainEqual([API, null, lastKnown]);
+    expect(view).toContainEqual(['Pod:shop/api-7d9f-a1', 'Node:node-a', lastKnown]);
+    expect(view).toContainEqual(['Pod:shop/api-7d9f-b2', 'Node:node-b', lastKnown]);
+    expect(rows.some((r) => r.object === 'Deployment:shop/api-old')).toBe(false);
+    // 时间段与 scales 边重叠时只取时间段内的边
+    const later = await store.placements(CLUSTER, [API_HPA], at(75), at(90));
+    expect([...new Set(later.flatMap((r) => (r.scales ? [JSON.stringify(r.scales)] : [])))]).toEqual([
+      JSON.stringify({ target: 'Deployment:shop/api-old', basis: 'in_window' }),
+    ]);
   });
 });
 

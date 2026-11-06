@@ -8,6 +8,7 @@ import type {
   KubeWarningObject,
   KubeWarningQuery,
   KubeWarningReport,
+  KubeWarningScaleTarget,
   KubeWarningSummary,
   LabelProfile,
   MetricsQueryRangeRequest,
@@ -29,6 +30,7 @@ import {
   type KubeEventsSource,
   type Observation,
 } from './kube-events.js';
+import type { PlacementRow } from '../topology/store.js';
 
 /** 一个事件：时间窗的终点为 null 时表示仍在触发，取计算时刻 */
 export interface KubeWarningIncident {
@@ -47,12 +49,7 @@ export interface KubeWarningsInput {
 
 /** 拓扑历史：组件在时间段内的对象与所在节点（TopologyStore.placements） */
 export interface PlacementSource {
-  placements(
-    clusterId: string,
-    components: readonly string[],
-    from: Date,
-    to: Date,
-  ): Promise<Array<{ component: string; object: string; node: string | null; from: Date; to: Date | null }>>;
+  placements(clusterId: string, components: readonly string[], from: Date, to: Date): Promise<PlacementRow[]>;
 }
 
 export interface GroupingOptions {
@@ -210,6 +207,7 @@ export async function collectKubeWarnings(
       node: x.node === null ? null : parseKey(x.node).name,
       from: x.from.getTime(),
       to: x.to === null ? Number.POSITIVE_INFINITY : x.to.getTime(),
+      scales: x.scales,
     })),
     queries,
     grouping: deps.grouping,
@@ -259,6 +257,8 @@ export interface Placement {
   from: number;
   /** 仍然有效时为 +Infinity */
   to: number;
+  /** 组件是 HPA 时对象经由的伸缩对象与关系的依据；其余为 null */
+  scales: { target: ComponentKey; basis: KubeWarningScaleTarget['basis'] } | null;
 }
 
 export interface ReportParts {
@@ -411,6 +411,15 @@ function incidentView(
   });
   objects.sort((a, b) => b.total - a.total || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
 
+  const scaleTargets = new Map<string, KubeWarningScaleTarget>();
+  for (const pl of p.placements) {
+    if (pl.scales !== null && inc.components.includes(pl.component)) {
+      const t = { hpa: pl.component, target: pl.scales.target, basis: pl.scales.basis };
+      scaleTargets.set(JSON.stringify([t.hpa, t.target, t.basis]), t);
+    }
+  }
+  const scale_targets = [...scaleTargets.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([, t]) => t);
+
   return {
     incident: inc,
     window: w,
@@ -424,6 +433,7 @@ function incidentView(
       nodes,
       objects: objects.slice(0, MAX_OBJECTS).map(({ total: _t, key: _k, ...o }) => o),
       objects_truncated: objects.length > MAX_OBJECTS,
+      scale_targets,
     },
   };
 }

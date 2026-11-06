@@ -131,6 +131,18 @@ export interface TopologyChange {
   eventId?: string;
 }
 
+/** TopologyStore.placements 的一行：组件的一个对象在一段时间所在的节点 */
+export interface PlacementRow {
+  component: string;
+  object: string;
+  /** runs_on 指向的 Node 键；对象在这段时间没有运行在节点上时为 null */
+  node: string | null;
+  from: Date;
+  to: Date | null;
+  /** 组件是 HPA 时对象经由的伸缩对象，以及这条 scales 边是在时间段内还是最近一次已知（ADR 0185）；其余为 null */
+  scales: { target: string; basis: 'in_window' | 'last_known' } | null;
+}
+
 /**
  * 事件溯源拓扑的存储（DESIGN §4.1）。server 是唯一写入方：单集群时来自内置 informer，多集群时来自各分支 reader 的推送。
  * 同一节点或边的新事件到达时，上一条的 valid_to 设为新事件的 valid_from；删除事件只关闭区间。
@@ -582,43 +594,54 @@ export class TopologyStore implements NodeLookup {
 
   /**
    * 组件在时间段 [from, to) 内的对象与它们所在的节点（ADR 0185）：沿 owned_by 反向展开到组件拥有的对象
-   * （Deployment → ReplicaSet → Pod，最多 4 层，组件本身也算；组件是 HPA 时从它 scales 指向的工作负载展开，ADR 0184），
-   * 每个对象再取与时间段重叠的 runs_on 边。
+   * （Deployment → ReplicaSet → Pod，最多 4 层，组件本身也算），每个对象再取与时间段重叠的 runs_on 边。
+   * 组件是 HPA 时从它 scales 指向的工作负载展开（ADR 0184）：时间段内有 scales 边时取这些边（basis 为 in_window）；
+   * 时间段内没有时取这个 HPA 最近一次已知的 scales 边（valid_from 最晚的一条，basis 为 last_known，ADR 0185），
+   * 伸缩对象之下的 owned_by 与 runs_on 仍按时间段取。
    * 一行是一个 (组件, 对象, runs_on 区间)；对象没有与时间段重叠的 runs_on 边时 node 为 null（例如没有调度成功的 Pod），
-   * 区间取时间段本身。node 是 runs_on 指向的 Node 键。一次查询取全部组件，按组件、对象、区间开始排序
+   * 区间取时间段本身。node 是 runs_on 指向的 Node 键；scales 是对象经由的伸缩关系，不经由 HPA 时为 null。
+   * 一次查询取全部组件，按组件、对象、区间开始排序
    */
-  async placements(
-    clusterId: string,
-    components: readonly string[],
-    from: Date,
-    to: Date,
-  ): Promise<Array<{ component: string; object: string; node: string | null; from: Date; to: Date | null }>> {
+  async placements(clusterId: string, components: readonly string[], from: Date, to: Date): Promise<PlacementRow[]> {
     if (!components.length) {
       return [];
     }
     const r = await this.pool.query<{
       component: string;
       object: string;
+      target: string | null;
+      basis: 'in_window' | 'last_known' | null;
       node: string | null;
       vf: Date;
       vt: Date | null;
     }>(
-      `WITH RECURSIVE down(root, k, depth) AS (
-         SELECT u.c, u.c, 0 FROM unnest($2::text[]) AS u(c)
-         UNION
-         SELECT u.c, s.body->>'to', 1 FROM unnest($2::text[]) AS u(c) JOIN server.topology_events s
+      `WITH RECURSIVE scales AS (
+         SELECT u.c AS root, s.body->>'to' AS target, s.valid_from, s.seq,
+                s.valid_from < $4 AND (s.valid_to IS NULL OR s.valid_to > $3) AS in_window
+           FROM unnest($2::text[]) AS u(c) JOIN server.topology_events s
              ON s.cluster_id = $1 AND s.item = 'edge' AND s.op = 'edge_upsert'
             AND s.body->>'from' = u.c AND s.body->>'relation' = 'scales'
-            AND s.valid_from < $4 AND (s.valid_to IS NULL OR s.valid_to > $3)
+       ),
+       scale_targets AS (
+         SELECT DISTINCT root, target, 'in_window'::text AS basis FROM scales WHERE in_window
+         UNION ALL
+         (SELECT DISTINCT ON (root) root, target, 'last_known'::text FROM scales s
+           WHERE NOT EXISTS (SELECT 1 FROM scales w WHERE w.root = s.root AND w.in_window)
+           ORDER BY root, valid_from DESC, seq DESC)
+       ),
+       down(root, k, depth, target, basis) AS (
+         SELECT u.c, u.c, 0, NULL::text, NULL::text FROM unnest($2::text[]) AS u(c)
          UNION
-         SELECT d.root, e.body->>'from', d.depth + 1
+         SELECT t.root, t.target, 1, t.target, t.basis FROM scale_targets t
+         UNION
+         SELECT d.root, e.body->>'from', d.depth + 1, d.target, d.basis
            FROM down d JOIN server.topology_events e
              ON e.cluster_id = $1 AND e.item = 'edge' AND e.op = 'edge_upsert'
             AND e.body->>'to' = d.k AND e.body->>'relation' = 'owned_by'
             AND e.valid_from < $4 AND (e.valid_to IS NULL OR e.valid_to > $3)
           WHERE d.depth < 4
        )
-       SELECT DISTINCT d.root AS component, d.k AS object, r.body->>'to' AS node,
+       SELECT DISTINCT d.root AS component, d.k AS object, d.target, d.basis, r.body->>'to' AS node,
               coalesce(r.valid_from, $3) AS vf, CASE WHEN r.seq IS NULL THEN $4 ELSE r.valid_to END AS vt
          FROM down d LEFT JOIN server.topology_events r
            ON r.cluster_id = $1 AND r.item = 'edge' AND r.op = 'edge_upsert'
@@ -627,7 +650,14 @@ export class TopologyStore implements NodeLookup {
         ORDER BY component, object, vf`,
       [clusterId, components, from, to],
     );
-    return r.rows.map((x) => ({ component: x.component, object: x.object, node: x.node, from: x.vf, to: x.vt }));
+    return r.rows.map((x) => ({
+      component: x.component,
+      object: x.object,
+      node: x.node,
+      from: x.vf,
+      to: x.vt,
+      scales: x.target === null || x.basis === null ? null : { target: x.target, basis: x.basis },
+    }));
   }
 
   /** 节点的 uid（时间范围与 find 相同）；节点不存在时为 undefined。 */
