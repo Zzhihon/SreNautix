@@ -2774,9 +2774,9 @@ export interface AlertClassification {
   chronic: boolean;
   category?: IncidentCategory;
   /**
-   * 类别的来源，按优先级：label 告警自带取值合法的 srenautix_category 标签；catalog 命中的告警目录条目声明了 category；rule 第一条命中的 ingest.category_rules；default 都没有，类别为 unclassified
+   * 类别的来源，按优先级：label 告警自带取值合法的 srenautix_category 标签；catalog 命中的告警目录条目声明了 category；builtin server 自己合成的告警（集群状态检测器，ADR 0105）按告警名查内置类别表（契约 2.51.0）；rule 第一条命中的 ingest.category_rules；default 都没有，类别为 unclassified
    */
-  category_source?: 'label' | 'catalog' | 'rule' | 'default';
+  category_source?: 'label' | 'catalog' | 'builtin' | 'rule' | 'default';
 }
 /**
  * 一个 Kubernetes 对象或领域包组件实例。uid 在实体解析成功时填写

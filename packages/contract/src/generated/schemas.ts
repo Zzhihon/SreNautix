@@ -1,5 +1,5 @@
 // 本文件由 packages/contract/scripts/gen.ts 从 contract/ 生成，不要手工修改。
-export const CONTRACT_VERSION = '2.50.0';
+export const CONTRACT_VERSION = '2.51.0';
 
 export const SCHEMAS: Record<string, Record<string, unknown>> = {
   'https://srenautix.io/contract/gateway/v1/action-catalog.schema.json': {
@@ -2491,8 +2491,8 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
           category_source: {
             type: 'string',
             description:
-              '类别的来源，按优先级：label 告警自带取值合法的 srenautix_category 标签；catalog 命中的告警目录条目声明了 category；rule 第一条命中的 ingest.category_rules；default 都没有，类别为 unclassified',
-            enum: ['label', 'catalog', 'rule', 'default'],
+              '类别的来源，按优先级：label 告警自带取值合法的 srenautix_category 标签；catalog 命中的告警目录条目声明了 category；builtin server 自己合成的告警（集群状态检测器，ADR 0105）按告警名查内置类别表（契约 2.51.0）；rule 第一条命中的 ingest.category_rules；default 都没有，类别为 unclassified',
+            enum: ['label', 'catalog', 'builtin', 'rule', 'default'],
           },
         },
       },
