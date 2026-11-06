@@ -564,6 +564,10 @@ export type KubeWarningSource = 'events' | 'kube_state_metrics';
  */
 export type KubeWarningUnit = 'occurrences' | 'pods' | 'seconds';
 /**
+ * 拓扑节点的键：命名空间内的对象为 <kind>:<namespace>/<名称段>，集群级对象为 <kind>:<名称段>。kind 是 Kubernetes 的 Kind（如 Pod、Node，其他 API 组写作 Kind.group）或领域包声明的组件类型（如 postgres.cluster）；namespace 是 DNS 标签。名称段由对象名编码得到（ADR 0034）：名称的 UTF-8 字节中 A–Z a–z 0–9 '-' '.' '_' 原样保留，其余每个字节写成 '%' 加两位大写十六进制，例如 RBAC 对象 system:node 写作 ClusterRole:system%3Anode；DNS 名称编码后不变。解析时只接受这种规范编码。命名空间伪组件写作 Namespace:<namespace>。黄金向量见 contract/testvectors/component-keys.json
+ */
+export type ComponentKey2 = string;
+/**
  * sha256:<sha256(JCS([cluster_id, kind, 各节点信号时间段]))>，同样的信号得到同样的 id
  */
 export type Sha2569 = string;
@@ -971,6 +975,7 @@ export interface SrenautixContractIndex {
   KubeWarningCount?: KubeWarningCount;
   KubeWarningQuery?: KubeWarningQuery;
   KubeWarningSummary?: KubeWarningSummary;
+  KubeWarningScaleTarget?: KubeWarningScaleTarget;
   KubeWarningNode?: KubeWarningNode;
   KubeWarningObject?: KubeWarningObject;
   SuspectedCommonCauseKind?: SuspectedCommonCauseKind;
@@ -5773,6 +5778,10 @@ export interface KubeWarningSummary {
    */
   objects: KubeWarningObject[];
   objects_truncated: boolean;
+  /**
+   * 组件中的 HorizontalPodAutoscaler 与它伸缩的工作负载（契约 2.50.0）：counts、nodes、objects 也包含从伸缩对象展开得到的对象与节点。按 hpa、target 排序；组件里没有 HPA 时为空
+   */
+  scale_targets: KubeWarningScaleTarget[];
 }
 export interface KubeWarningCount {
   /**
@@ -5804,6 +5813,17 @@ export interface KubeWarningObject {
    */
   nodes: string[];
   counts: KubeWarningCount[];
+}
+/**
+ * HPA 组件展开到的伸缩对象，以及确定这个关系的依据
+ */
+export interface KubeWarningScaleTarget {
+  hpa: ComponentKey;
+  target: ComponentKey2;
+  /**
+   * in_window：拓扑历史在事件时间窗内有这条 scales 边；last_known：时间窗内没有这个 HPA 的 scales 边（例如拓扑来源开始上报 scales 之前的历史），取它最近一次已知的 scales 边，伸缩对象的 Pod 与节点仍按事件时间窗取
+   */
+  basis: 'in_window' | 'last_known';
 }
 /**
  * 同一系列的事件的汇总：有系列键（ADR 0184）时按系列键，没有时按 告警名集合 + 根因组件

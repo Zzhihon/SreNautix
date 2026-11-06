@@ -1,5 +1,5 @@
 // 本文件由 packages/contract/scripts/gen.ts 从 contract/ 生成，不要手工修改。
-export const CONTRACT_VERSION = '2.49.0';
+export const CONTRACT_VERSION = '2.50.0';
 
 export const SCHEMAS: Record<string, Record<string, unknown>> = {
   'https://srenautix.io/contract/gateway/v1/action-catalog.schema.json': {
@@ -6187,6 +6187,7 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
           'nodes',
           'objects',
           'objects_truncated',
+          'scale_targets',
         ],
         properties: {
           incident_id: { $ref: 'common.schema.json#/$defs/Uuid' },
@@ -6214,6 +6215,32 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
             description: '组件对象的明细，按总计数从高到低，最多 20 个',
           },
           objects_truncated: { type: 'boolean' },
+          scale_targets: {
+            type: 'array',
+            items: { $ref: '#/$defs/ScaleTarget' },
+            description:
+              '组件中的 HorizontalPodAutoscaler 与它伸缩的工作负载（契约 2.50.0）：counts、nodes、objects 也包含从伸缩对象展开得到的对象与节点。按 hpa、target 排序；组件里没有 HPA 时为空',
+          },
+        },
+      },
+      ScaleTarget: {
+        title: 'KubeWarningScaleTarget',
+        description: 'HPA 组件展开到的伸缩对象，以及确定这个关系的依据',
+        type: 'object',
+        additionalProperties: false,
+        required: ['hpa', 'target', 'basis'],
+        properties: {
+          hpa: { $ref: 'common.schema.json#/$defs/ComponentKey' },
+          target: {
+            $ref: 'common.schema.json#/$defs/ComponentKey',
+            description: 'HPA 的 scales 边指向的工作负载（spec.scaleTargetRef）',
+          },
+          basis: {
+            type: 'string',
+            enum: ['in_window', 'last_known'],
+            description:
+              'in_window：拓扑历史在事件时间窗内有这条 scales 边；last_known：时间窗内没有这个 HPA 的 scales 边（例如拓扑来源开始上报 scales 之前的历史），取它最近一次已知的 scales 边，伸缩对象的 Pod 与节点仍按事件时间窗取',
+          },
         },
       },
       Node: {

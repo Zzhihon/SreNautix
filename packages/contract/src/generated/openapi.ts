@@ -6525,6 +6525,20 @@ export type components = {
       first_at: components['schemas']['Timestamp'];
       last_at: components['schemas']['Timestamp'];
     };
+    /**
+     * KubeWarningScaleTarget
+     * @description HPA 组件展开到的伸缩对象，以及确定这个关系的依据
+     */
+    ScaleTarget: {
+      /**
+       * @description in_window：拓扑历史在事件时间窗内有这条 scales 边；last_known：时间窗内没有这个 HPA 的 scales 边（例如拓扑来源开始上报 scales 之前的历史），取它最近一次已知的 scales 边，伸缩对象的 Pod 与节点仍按事件时间窗取
+       * @enum {string}
+       */
+      basis: 'in_window' | 'last_known';
+      hpa: components['schemas']['ComponentKey'];
+      /** @description HPA 的 scales 边指向的工作负载（spec.scaleTargetRef） */
+      target: components['schemas']['ComponentKey'];
+    };
     scope: {
       clusters: string[];
       component_labels: components['schemas']['Labels'];
@@ -7206,6 +7220,8 @@ export type components = {
       /** @description 组件对象的明细，按总计数从高到低，最多 20 个 */
       objects: components['schemas']['Object'][];
       objects_truncated: boolean;
+      /** @description 组件中的 HorizontalPodAutoscaler 与它伸缩的工作负载（契约 2.50.0）：counts、nodes、objects 也包含从伸缩对象展开得到的对象与节点。按 hpa、target 排序；组件里没有 HPA 时为空 */
+      scale_targets: components['schemas']['ScaleTarget'][];
       window: components['schemas']['TimeWindow'];
     };
     target: {
