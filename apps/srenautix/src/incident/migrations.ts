@@ -250,5 +250,23 @@ ALTER TABLE server.incidents ADD COLUMN series_key text;
 CREATE INDEX incidents_series_idx ON server.incidents (cluster_id, series_key, ended_at) WHERE series_key IS NOT NULL;
 `,
     },
+    {
+      version: 10,
+      name: 'recategorization runs keyed by the category inputs fingerprint',
+      phase: 'expand',
+      sql: `
+-- 类别解析输入变化后的重新分类（ADR 0183 §4）：每次完成的重新分类一行，记下当时的输入指纹与改动的行数。
+-- 取得主实例的进程求出的指纹与最近一行不同时重新分类；只加表，N-1 版本不读写它
+CREATE TABLE server.incident_recategorizations (
+  id bigserial PRIMARY KEY,
+  fingerprint text NOT NULL,
+  holder text NOT NULL,
+  incidents integer NOT NULL,
+  alerts integer NOT NULL,
+  started_at timestamptz NOT NULL,
+  finished_at timestamptz NOT NULL DEFAULT now()
+);
+`,
+    },
   ],
 };

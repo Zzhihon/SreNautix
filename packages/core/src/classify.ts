@@ -66,6 +66,12 @@ export interface AlertCatalogOptions {
   onInvalidCategoryLabel?: (alertname: string, value: string) => void;
 }
 
+/** 告警目录里决定类别的部分（AlertCatalog.categoryInputs） */
+export interface CategoryInputs {
+  entries: Array<{ alertname: string; match_labels: Labels; category: AlertCategory | null }>;
+  rules: CategoryRule[];
+}
+
 export interface CategoryResult {
   category: IncidentCategory;
   source: NonNullable<AlertClassification['category_source']>;
@@ -192,6 +198,28 @@ export class AlertCatalog {
       return { category: rule.category, source: 'rule' };
     }
     return { category: UNCLASSIFIED, source: 'default' };
+  }
+
+  /**
+   * 类别解析的全部输入（ADR 0183 §4）：条目按告警名排序，同名的按 lookup 的查找顺序排列，每项只取 alertname、
+   * match_labels 与 category（没有声明时为 null）；后面是有序的类别规则。两个目录的输入相同时，任何告警在两个目录里
+   * 求出的类别都相同；条目的标题、角色、证据链与包名不影响类别，不在其中
+   */
+  categoryInputs(): CategoryInputs {
+    return {
+      entries: this.alertnames().flatMap((name) =>
+        this.byName.get(name)!.map(({ entry }) => ({
+          alertname: entry.alertname,
+          match_labels: entry.match_labels ?? {},
+          category: entry.category ?? null,
+        })),
+      ),
+      rules: this.categoryRules.map((r) => ({
+        labels: r.labels,
+        exclude_labels: r.exclude_labels,
+        category: r.category,
+      })),
+    };
   }
 }
 

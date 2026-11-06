@@ -127,6 +127,19 @@ export class ServerMetrics extends BaseMetrics {
     registers: [this.registry],
   });
 
+  readonly recategorizeRuns = new Counter({
+    name: 'srenautix_recategorize_runs_total',
+    help: '取得主实例后按类别解析输入的指纹检查重新分类的次数（ADR 0183），按结果（unchanged：指纹与上次记录相同；completed：重新分类完成并记录；interrupted：失去主实例或退出时停下；failed：出错，30 秒后重试）',
+    labelNames: ['outcome'] as const,
+    registers: [this.registry],
+  });
+
+  readonly incidentsRecategorized = new Counter({
+    name: 'srenautix_incidents_recategorized_total',
+    help: '类别解析输入变化后，unclassified 成员重新分类出类别、改写了类别的事件数（ADR 0183）',
+    registers: [this.registry],
+  });
+
   readonly alertsReresolved = new Counter({
     name: 'srenautix_alerts_reresolved_total',
     help: '重算阶段 A 之前按当前解析规则重新解析并回写的告警数（升级前接入的告警，ADR 0107）',

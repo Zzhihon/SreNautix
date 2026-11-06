@@ -1,11 +1,12 @@
 import type { Incident } from '@srenautix/contract';
-import { classifyAlert } from '@srenautix/core';
+import { AlertCatalog, classifyAlert } from '@srenautix/core';
 import { describe, expect, it } from 'vitest';
 import { categoryOptions } from '../../src/alerts/category.js';
 import { HttpError } from '../../src/api/errors.js';
 import { parseServerConfig } from '../../src/config/server.js';
 import { categoryConditions, parseCategoryFilters, rowCategories } from '../../src/console-bff/incident-filters.js';
 import type { IncidentRow } from '../../src/incident/read.js';
+import { categoryInputsFingerprint } from '../../src/incident/recategorize.js';
 import { ServerMetrics } from '../../src/metrics.js';
 import { PackRuntime } from '../../src/stage-a/packs.js';
 import { DEFAULT_CATALOG_PATH } from '../../src/proposals/catalog.js';
@@ -90,6 +91,49 @@ describe('ingest.category_rules（ADR 0183）', () => {
     expect(of({ alertname: 'KubePodCrashLooping', srenautix_category: 'oops' })).toEqual(['availability', 'catalog']);
     const counted = await metrics.alertCategoryLabelInvalid.get();
     expect(counted.values).toEqual([{ labels: { alertname: 'KubePodCrashLooping' }, value: 2 }]);
+  });
+
+  it('类别解析输入的指纹：同样的包与规则相同，规则或条目的类别变化时不同', async () => {
+    const load = () =>
+      PackRuntime.load({
+        dirs: [PACKS],
+        only: null,
+        lockFile: null,
+        catalogPath: DEFAULT_CATALOG_PATH,
+        capabilities: new Set(['metrics.query', 'metrics.query_range', 'metrics.series']),
+      });
+    const metrics = new ServerMetrics('server', false);
+    const rules = parseServerConfig(
+      minimal({ category_rules: [{ labels: { team: ['shop'] }, category: 'availability' }] }),
+    ).ingest.category_rules;
+    const a = (await load()).alertCatalog(categoryOptions(rules, metrics));
+    const b = (await load()).alertCatalog(categoryOptions(rules, metrics));
+    const base = categoryInputsFingerprint(a);
+    expect(base).toMatch(/^sha256:[0-9a-f]{64}$/);
+    expect(categoryInputsFingerprint(b)).toBe(base);
+    expect(categoryInputsFingerprint((await load()).alertCatalog(categoryOptions([], metrics)))).not.toBe(base);
+    // 只保留决定类别的字段、放进一个包重建目录：指纹不变；改掉一个条目的类别：指纹变化
+    const entries = a.categoryInputs().entries;
+    const declared = entries.find((e) => e.category !== null)!;
+    const rebuild = (override: (typeof entries)[number] | null) =>
+      new AlertCatalog(
+        [
+          {
+            pack: 'p',
+            entries: entries.map((e, i) => ({
+              id: `e${i}`,
+              alertname: e.alertname,
+              role: 'symptom' as const,
+              match_labels: e.match_labels,
+              ...(e.category === null ? {} : { category: e === override ? ('provider' as const) : e.category }),
+              entity: { kind: 'Pod', name_labels: ['pod'] },
+            })),
+          },
+        ],
+        { categoryRules: rules },
+      );
+    expect(categoryInputsFingerprint(rebuild(null))).toBe(base);
+    expect(categoryInputsFingerprint(rebuild(declared))).not.toBe(base);
   });
 });
 

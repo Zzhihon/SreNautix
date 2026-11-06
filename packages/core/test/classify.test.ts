@@ -226,4 +226,55 @@ describe('告警类别（ADR 0183）', () => {
     const c = classifyAlert({ labels: { alertname: 'KubeHpaMaxedOut', role: 'cause' }, chronic: false }, catalog);
     expect(c).toMatchObject({ role: 'cause', source: 'label', category: 'performance', category_source: 'catalog' });
   });
+
+  it('类别解析的输入按告警名与查找顺序列出条目，再列出规则；与类别无关的字段不在其中', () => {
+    const variants: AlertCatalogEntry[] = [
+      {
+        id: 'slow',
+        alertname: 'ShopSlow',
+        role: 'symptom',
+        entity: { kind: 'Deployment', name_labels: ['deployment'] },
+      },
+      {
+        id: 'slow-critical',
+        alertname: 'ShopSlow',
+        role: 'symptom',
+        category: 'availability',
+        match_labels: { severity: 'critical' },
+        entity: { kind: 'Deployment', name_labels: ['deployment'] },
+      },
+    ];
+    const inputs = new AlertCatalog(
+      [
+        { pack: 'test', entries },
+        { pack: 'shop', entries: variants },
+      ],
+      { categoryRules: rules },
+    ).categoryInputs();
+    expect(inputs.entries).toEqual([
+      { alertname: 'KubeHpaMaxedOut', match_labels: {}, category: 'performance' },
+      { alertname: 'KubePodCrashLooping', match_labels: {}, category: 'availability' },
+      { alertname: 'ShopCheckoutErrors', match_labels: {}, category: null },
+      { alertname: 'ShopSlow', match_labels: { severity: 'critical' }, category: 'availability' },
+      { alertname: 'ShopSlow', match_labels: {}, category: null },
+    ]);
+    expect(inputs.rules).toEqual(rules);
+    // 包名、标题、角色与证据链变化时输入不变；包的先后决定同样具体的条目的查找顺序，输入随之变化
+    const renamed = entries.map((e) => ({ ...e, id: `${e.id}-v2`, role: 'cause' as const, title: { en: 'Renamed' } }));
+    expect(new AlertCatalog([{ pack: 'other', entries: renamed }], { categoryRules: rules }).categoryInputs()).toEqual(
+      new AlertCatalog([{ pack: 'test', entries }], { categoryRules: rules }).categoryInputs(),
+    );
+    const twin: AlertCatalogEntry = { ...entries[1]!, id: 'hpa-twin', category: 'platform' };
+    expect(
+      new AlertCatalog([
+        { pack: 'a', entries: [entries[1]!] },
+        { pack: 'b', entries: [twin] },
+      ]).categoryInputs(),
+    ).not.toEqual(
+      new AlertCatalog([
+        { pack: 'b', entries: [twin] },
+        { pack: 'a', entries: [entries[1]!] },
+      ]).categoryInputs(),
+    );
+  });
 });

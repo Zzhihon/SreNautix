@@ -55,6 +55,20 @@
 
 成员优先按完整标签重算：告警还在状态库时，完整标签能让 `srenautix_category` 标签与部署方规则对历史事件同样生效，与新事件的口径一致；只有告警已经清理掉的成员退回按告警名。修正执行之前，列表摘要的类别按 body 的成员计算（没有类别的成员为 `unclassified`），按类别包含的筛选不命中这些行，按类别排除的筛选不去掉它们。
 
+### 4.1 类别解析的输入变化后重新分类
+
+部署方给领域包补上 `category`、或者修改 `ingest.category_rules` 之后，已经写成 `unclassified` 的事件也要按新的输入分类，历史时间窗的列表与导出（ADR 0186）才和新事件一致。server 取得主实例、数据修正完成之后，在后台检查一次（`incident/recategorize.ts` 的 `startRecategorize`，不阻塞其他单活工作）：
+
+1. **输入指纹**：`AlertCatalog.categoryInputs()` 列出全部已加载领域包的目录条目的 `alertname`、`match_labels` 与 `category`（没有声明时为 null），条目按告警名排序、同名的按 `lookup` 的查找顺序排列，后面是有序的 `ingest.category_rules`；指纹是它的规范化 JSON（RFC 8785）的 sha256。条目的标题、角色、证据链与包名不决定类别，不在输入里：只改这些的升级不触发重新分类；包的先后决定同样具体的条目谁先命中，因此会改变指纹。
+2. **是否执行**：指纹与 `server.incident_recategorizations`（`incident` 迁移 10）最近一行的指纹相同时不做事；不同（包括还没有记录）时执行。全部批次完成后插入一行：指纹、执行的实例、改写的事件数、回写的告警数与起止时间。
+3. **改写的范围**：逐个集群、按 `incident_id` 分批（每批 500 个，一批一个事务）扫描 body 里有 `unclassified` 成员的事件（含已恢复与合并掉的事件）。只重算 `unclassified` 成员，规则与 `incident/categories` 相同：告警还在 `alert_state` 时用完整标签，已经不在时按告警名查目录；已有其他类别的成员不改，当时的标签覆盖与判断保留。至少一个成员重算出类别的事件改写成员的 `category`、body 的 `categories` 与 `primary_category` 和两列；事件版本、`updated_at` 与 `incident_versions` 不改（第 3 节：类别变化不改变事件版本），通知、事件 issue 与按 `updated_at` 同步的消费方不会因为重新分类再次处理这些事件。
+4. **告警状态**：成员告警还在 `alert_state`、存储的类别是 `unclassified` 而按当前输入求出了类别时，同一事务里把分类的 `category` 与 `category_source` 两个键改成新值，其余键保留。事件引擎重算回看窗口内的事件时从 `alert_state` 取成员的类别，回写之后引擎求出的类别与重新分类的结果相同；仍在触发的告警下一次接入时整份分类本来就按当前输入重写。
+5. **与事件引擎串行**：每批的事务先取事件引擎的同一把集群咨询锁（`srenautix.incident-engine.<cluster_id>`），引擎在一批执行期间等待，最多等一批；引擎写入的事件不会被一批里读到的旧 body 覆盖。
+6. **中途停下**：每批之前检查仍是主实例、进程没有退出；否则停下，不插入记录，`srenautix_recategorize_runs_total{outcome="interrupted"}`。之后每 30 秒检查一次，再次是主实例时从头扫描：已经改写的成员不再是 `unclassified`，重复执行得到相同的结果。执行出错时记 error 日志与 `outcome="failed"`，30 秒后重试；失败不暂停其他单活工作，类别是列表与导出的筛选属性，事件的分组、根因与通知都不读它。
+7. **观测**：`srenautix_recategorize_runs_total{outcome}`（`unchanged`、`completed`、`interrupted`、`failed`）与 `srenautix_incidents_recategorized_total`；执行时写一条 info 日志，带新旧指纹、结果与两个行数。
+
+重新分类只把 `unclassified` 变成类别，不把已有的类别改成别的类别：部署方把某条告警从 `performance` 改判为 `availability` 之后，历史事件保留当时的类别。已有的类别可能来自当时的 `srenautix_category` 标签，告警清理掉之后无法区分标签给出的类别与目录给出的类别，统一保留才不会覆盖规则作者的明确判断。
+
 ### 5. 列表接口
 
 `GET /v1/incidents` 增加三个可以重复的参数，条件写进状态库的查询：
@@ -79,14 +93,18 @@
 - **排除按主类别**：`primary_category` 是 `provider` 的事件里常有业务请求失败的成员，按主类别排除会把已经影响业务的上游故障一起去掉。
 - **排除按任一类别命中**：一个事件只要有一条观测类告警就会被 `exclude_category=observability` 去掉，而观测类告警经常和真正的故障进入同一个事件。
 - **迁移里回填**：ADR 0176 要求迁移只改 schema；回填依赖领域包与部署方规则，只有 server 进程里才有。
+- **重新分类做成按版本命名的数据修正**：数据修正（ADR 0176）在单活工作开始之前、在一个事务里执行一次，按名字记录。领域包的内容随部署方的配置变化，与 server 版本无关；全表重新分类放在一个事务里会长时间持有大量事件的行锁，并推迟全部单活工作。
+- **输入变化时重算全部成员**：会把当时由 `srenautix_category` 标签给出、告警已经清理掉的类别改成目录的类别。
 
 ## 结果
 
 - 契约 2.46.0：`AlertCategory`、`IncidentCategory`、`AlertCatalogEntry.category`、`AlertClassification.category` 与 `category_source`、`IncidentMember.category`、`Incident.categories` 与 `primary_category`、`GET /v1/incidents` 的三个参数、`IncidentSummary.categories` 与 `primary_category`。全部为新增的可选字段与参数（摘要的两个字段由 server 总是给出）。
-- 实现：`packages/core/src/classify.ts`（`AlertCatalog.category`、`matchesLabels`、`ALERT_CATEGORIES`）、`packages/core/src/incidents.ts`（`incidentCategories`）、`apps/srenautix/src/alerts/category.ts`（规则 schema 与非法标签的处理）、`alerts/business-impact.ts`（匹配器改用 `matchesLabels`）、`alerts/resolve.ts`、`ingest/service.ts`、`config/server.ts`（`ingest.category_rules`）、`incident/{migrations,engine,corrections,read}.ts`、`console-bff/{incident-filters,routes-incidents}.ts`、`roles/server.ts`；chart 的 `ingest.categoryRules`（默认空表）。
+- 实现：`packages/core/src/classify.ts`（`AlertCatalog.category`、`matchesLabels`、`ALERT_CATEGORIES`）、`packages/core/src/incidents.ts`（`incidentCategories`）、`apps/srenautix/src/alerts/category.ts`（规则 schema 与非法标签的处理）、`alerts/business-impact.ts`（匹配器改用 `matchesLabels`）、`alerts/resolve.ts`、`ingest/service.ts`、`config/server.ts`（`ingest.category_rules`）、`incident/{migrations,engine,corrections,recategorize,read}.ts`、`console-bff/{incident-filters,routes-incidents}.ts`、`roles/server.ts`；chart 的 `ingest.categoryRules`（默认空表）。
 - 测试：
   - `packages/core/test/classify.test.ts`：枚举与契约相同；标签优先于目录与规则；规则不覆盖目录；规则按顺序取第一条、`exclude_labels` 命中时跳过；都没有时为 `unclassified`；非法标签（不在枚举里、`unclassified`、空串）被忽略并报告；`role` 标签不影响类别；
   - `packages/core/test/incidents.test.ts`：并集与主类别取根因上的成员；类别变化不改版本；成员离开后类别只看剩下的成员；没有根因、同样严重、之前版本的成员、全部成员已离开的情况；
   - `apps/srenautix/test/unit/alert-categories.test.ts`：`ingest.category_rules` 的默认值与非法写法；内置包的目录先于规则、非法标签计入指标；三个查询参数的解析、`unclassified` 不能被排除与 400；筛选条件；摘要在修正之前按 body 计算；
   - `packages/packs-sdk/test/alert-categories.test.ts`：内置告警目录的每个条目都声明了类别，同名变体类别相同；
-  - `apps/srenautix/test/integration/incident-categories.test.ts`（真实 PostgreSQL）：事件引擎写入类别列与 body；三个参数在 SQL 里的包含与排除语义，`unclassified` 与之前版本的行不被排除；数据修正只补写之前版本的行，成员按完整标签或告警名重算，只执行一次。
+  - `apps/srenautix/test/integration/incident-categories.test.ts`（真实 PostgreSQL）：事件引擎写入类别列与 body；三个参数在 SQL 里的包含与排除语义，`unclassified` 与之前版本的行不被排除；数据修正只补写之前版本的行，成员按完整标签或告警名重算，只执行一次；
+  - `apps/srenautix/test/integration/incident-recategorize.test.ts`（真实 PostgreSQL）：指纹不变时不重新分类，包名与条目的其余字段不影响指纹；目录补上类别后 `unclassified` 成员按完整标签或告警名重算，已有类别的成员不动，事件版本与 `updated_at` 不变，`alert_state` 的分类同时回写、事件引擎之后重算得到同样的类别；分批执行，失去主实例时在批次之间停下、不记录指纹，再次执行时完成剩下的事件；
+  - `packages/core/test/classify.test.ts` 与 `apps/srenautix/test/unit/alert-categories.test.ts`：类别解析输入的排列与取舍，内置包的指纹在同样的包与规则下相同、规则或条目的类别变化时不同。

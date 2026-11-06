@@ -98,6 +98,7 @@ import { GitOpsPulls } from '../remediation/pulls.js';
 import { RemediationService } from '../remediation/service.js';
 import { GitRepositoryTargets } from '../remediation/targets.js';
 import { incidentCorrections } from '../incident/corrections.js';
+import { startRecategorize } from '../incident/recategorize.js';
 import { serverCorrections, serverTracks } from './server-schema.js';
 import { KubeSkillReader } from '../skills/kube.js';
 import { registerSkillRoutes } from '../skills/routes.js';
@@ -469,6 +470,10 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
           [...serverCorrections, ...incidentCorrections(alertCatalog)],
           holder,
         );
+  // 类别解析的输入（领域包的目录与 ingest.category_rules）有变化时重新分类历史事件的 unclassified 成员（ADR 0183）
+  if (serve !== 'console') {
+    void startRecategorize({ pool, catalog: alertCatalog, leader, holder, metrics, signal });
+  }
 
   // 通知与 issue 的事件报告（ADR 0125）
   reports = new ReportSource(
