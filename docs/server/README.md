@@ -135,7 +135,7 @@ audit:
 
 ## 告警类别
 
-每条告警在分类时得到一个类别（ADR 0183）：取值合法的 `srenautix_category` 标签 → 告警目录条目的 `category` → `ingest.category_rules` 第一条命中的规则 → `unclassified`。规则是 ADR 0166 的匹配器加 `category`：
+每条告警在分类时得到一个类别（ADR 0183）：取值合法的 `srenautix_category` 标签 → 告警目录条目的 `category` → 集群状态检测器合成告警的内置类别表（`category_source: builtin`，见"集群状态检测器"）→ `ingest.category_rules` 第一条命中的规则 → `unclassified`。规则是 ADR 0166 的匹配器加 `category`：
 
 ```yaml
 ingest:
@@ -144,7 +144,7 @@ ingest:
     - { labels: { layer: [L0] }, exclude_labels: { team: [infra] }, category: availability }
 ```
 
-标签取值不在枚举里时忽略标签并计入 `srenautix_alert_category_label_invalid_total{alertname}`。事件的 `categories` 是当前成员类别的并集，`primary_category` 取根因组件上最严重的成员；两者也写在 `server.incidents` 的同名列上（GIN 索引），之前版本的事件由数据修正 `incident/categories` 在取得主实例之后补写。领域包目录的类别或 `ingest.category_rules` 变化之后，取得主实例的 server 按输入指纹（`server.incident_recategorizations` 记录上次的指纹）在后台分批重新分类历史事件里的 `unclassified` 成员，已有类别的成员与事件版本不变，结果见 `srenautix_recategorize_runs_total{outcome}` 与 `srenautix_incidents_recategorized_total`（ADR 0183 §4.1）。`GET /v1/incidents` 的 `category`（与任一取值相同）、`exclude_category`（去掉类别全部被排除的事件，`unclassified` 不能被排除）与 `exclude_component`（去掉组件全部被排除的事件）都可以重复，在状态库的查询里筛选。chart 的 `ingest.categoryRules` 渲染为这张规则表，默认为空。
+标签取值不在枚举里时忽略标签并计入 `srenautix_alert_category_label_invalid_total{alertname}`。事件的 `categories` 是当前成员类别的并集，`primary_category` 取根因组件上最严重的成员；两者也写在 `server.incidents` 的同名列上（GIN 索引），之前版本的事件由数据修正 `incident/categories` 在取得主实例之后补写。领域包目录的类别、内置类别表或 `ingest.category_rules` 变化之后，取得主实例的 server 按输入指纹（`server.incident_recategorizations` 记录上次的指纹）在后台分批重新分类历史事件里的 `unclassified` 成员，已有类别的成员与事件版本不变，结果见 `srenautix_recategorize_runs_total{outcome}` 与 `srenautix_incidents_recategorized_total`（ADR 0183 §4.1）。`GET /v1/incidents` 的 `category`（与任一取值相同）、`exclude_category`（去掉类别全部被排除的事件，`unclassified` 不能被排除）与 `exclude_component`（去掉组件全部被排除的事件）都可以重复，在状态库的查询里筛选。chart 的 `ingest.categoryRules` 渲染为这张规则表，默认为空。
 
 ## 事件导出
 
@@ -328,6 +328,8 @@ detectors:
   interval: 30s
   equivalent_alerts: {}          # 按状态追加视为同一问题的告警规则名
 ```
+
+合成告警的类别来自 server 的内置类别表（ADR 0183 §2.1）：`SreNautixPodPending`、`SreNautixPodInitStuck`、`SreNautixCrashLoop`、`SreNautixRolloutStalled`、`SreNautixJobFailed` 为 `availability`，`SreNautixPdbBlockingEviction` 为 `platform`。领域包登记同名的目录条目并声明 `category` 时以目录为准。
 
 指标：`srenautix_detector_last_scan_timestamp_seconds{cluster_id}`、`srenautix_detector_findings{cluster_id,kind}`、`srenautix_detector_alerts_total{cluster_id,kind}`、`srenautix_detector_scan_errors_total{cluster_id}`；首个症状到事件创建的时长 `srenautix_incident_detection_seconds{source}`。
 

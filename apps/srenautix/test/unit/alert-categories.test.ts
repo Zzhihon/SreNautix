@@ -130,7 +130,7 @@ describe('ingest.category_rules（ADR 0183）', () => {
             })),
           },
         ],
-        { categoryRules: rules },
+        categoryOptions(rules, metrics),
       );
     expect(categoryInputsFingerprint(rebuild(null))).toBe(base);
     expect(categoryInputsFingerprint(rebuild(declared))).not.toBe(base);

@@ -36,8 +36,8 @@ export async function alertRows(
 }
 
 /**
- * 按当前的告警目录与 ingest.category_rules 求成员的类别：告警还在 alert_state 时用它的完整标签，已经不在时只按告警名
- * 查目录（命中没有 match_labels 的条目），按标签匹配的规则不生效
+ * 按当前的告警目录、内置类别表与 ingest.category_rules 求成员的类别：告警还在 alert_state 时用它的完整标签，已经不在时
+ * 只按告警名查目录（命中没有 match_labels 的条目）与内置类别表，按标签匹配的规则不生效
  */
 export function memberCategory(catalog: AlertCatalog, m: IncidentMember, labels: Labels | undefined): IncidentCategory {
   return catalog.category(labels ?? { alertname: m.alertname }).category;

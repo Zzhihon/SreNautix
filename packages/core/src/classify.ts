@@ -1,6 +1,7 @@
 // 告警角色分类（DESIGN §3.2）：标签契约 → 告警目录 → 规则表达式 → 默认 symptom。
 // forecast 一律按表达式判断：目录条目或规则表达式含 predict_linear 才是 forecast。
-// 告警类别（ADR 0183）：srenautix_category 标签 → 告警目录条目 → 部署方的类别规则（第一条命中）→ unclassified。
+// 告警类别（ADR 0183）：srenautix_category 标签 → 告警目录条目 → 内置类别表（server 合成的告警）→ 部署方的类别规则
+// （第一条命中）→ unclassified。
 import type {
   AlertCatalogEntry,
   AlertCategory,
@@ -60,7 +61,9 @@ export interface CategoryRule extends LabelMatcher {
 }
 
 export interface AlertCatalogOptions {
-  /** 有序的类别规则，告警目录条目没有声明类别时取第一条命中的 */
+  /** 内置类别表：server 自己合成的告警（集群状态检测器）的告警名 → 类别，告警目录没有命中条目或条目没有声明类别时采用 */
+  builtinCategories?: Readonly<Record<string, AlertCategory>>;
+  /** 有序的类别规则，告警目录与内置类别表都没有给出类别时取第一条命中的 */
   categoryRules?: readonly CategoryRule[];
   /** srenautix_category 标签的取值不在枚举里时调用（标签被忽略） */
   onInvalidCategoryLabel?: (alertname: string, value: string) => void;
@@ -69,6 +72,7 @@ export interface AlertCatalogOptions {
 /** 告警目录里决定类别的部分（AlertCatalog.categoryInputs） */
 export interface CategoryInputs {
   entries: Array<{ alertname: string; match_labels: Labels; category: AlertCategory | null }>;
+  builtin: Array<{ alertname: string; category: AlertCategory }>;
   rules: CategoryRule[];
 }
 
@@ -137,6 +141,7 @@ export function isForecastExpression(expr: string): boolean {
 /** 目录中同名告警的变体，按 match_labels 的条件数从多到少排列 */
 export class AlertCatalog {
   private readonly byName = new Map<string, Array<{ pack: string; entry: AlertCatalogEntry }>>();
+  private readonly builtinCategories: ReadonlyMap<string, AlertCategory>;
   private readonly categoryRules: readonly CategoryRule[];
   private readonly onInvalidCategoryLabel: (alertname: string, value: string) => void;
 
@@ -144,6 +149,7 @@ export class AlertCatalog {
     packs: ReadonlyArray<{ pack: string; entries: readonly AlertCatalogEntry[] }>,
     options: AlertCatalogOptions = {},
   ) {
+    this.builtinCategories = new Map(Object.entries(options.builtinCategories ?? {}));
     this.categoryRules = options.categoryRules ?? [];
     this.onInvalidCategoryLabel = options.onInvalidCategoryLabel ?? (() => undefined);
     for (const { pack, entries } of packs) {
@@ -178,8 +184,8 @@ export class AlertCatalog {
   }
 
   /**
-   * 告警的类别（ADR 0183）：取值合法的 srenautix_category 标签 → 命中条目声明的 category → 第一条命中的类别规则 →
-   * unclassified。标签的取值不在枚举里时忽略标签，按后面的来源继续
+   * 告警的类别（ADR 0183）：取值合法的 srenautix_category 标签 → 命中条目声明的 category → 内置类别表 → 第一条命中的
+   * 类别规则 → unclassified。标签的取值不在枚举里时忽略标签，按后面的来源继续
    */
   category(labels: Labels): CategoryResult {
     const label = labels[CATEGORY_LABEL];
@@ -193,6 +199,10 @@ export class AlertCatalog {
     if (declared !== undefined) {
       return { category: declared, source: 'catalog' };
     }
+    const builtin = labels.alertname === undefined ? undefined : this.builtinCategories.get(labels.alertname);
+    if (builtin !== undefined) {
+      return { category: builtin, source: 'builtin' };
+    }
     const rule = this.categoryRules.find((r) => matchesLabels(labels, r));
     if (rule) {
       return { category: rule.category, source: 'rule' };
@@ -202,8 +212,8 @@ export class AlertCatalog {
 
   /**
    * 类别解析的全部输入（ADR 0183 §4）：条目按告警名排序，同名的按 lookup 的查找顺序排列，每项只取 alertname、
-   * match_labels 与 category（没有声明时为 null）；后面是有序的类别规则。两个目录的输入相同时，任何告警在两个目录里
-   * 求出的类别都相同；条目的标题、角色、证据链与包名不影响类别，不在其中
+   * match_labels 与 category（没有声明时为 null）；后面是按告警名排序的内置类别表与有序的类别规则。两个目录的输入相同时，
+   * 任何告警在两个目录里求出的类别都相同；条目的标题、角色、证据链与包名不影响类别，不在其中
    */
   categoryInputs(): CategoryInputs {
     return {
@@ -214,6 +224,9 @@ export class AlertCatalog {
           category: entry.category ?? null,
         })),
       ),
+      builtin: [...this.builtinCategories]
+        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+        .map(([alertname, category]) => ({ alertname, category })),
       rules: this.categoryRules.map((r) => ({
         labels: r.labels,
         exclude_labels: r.exclude_labels,

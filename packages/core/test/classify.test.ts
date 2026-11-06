@@ -227,6 +227,60 @@ describe('告警类别（ADR 0183）', () => {
     expect(c).toMatchObject({ role: 'cause', source: 'label', category: 'performance', category_source: 'catalog' });
   });
 
+  it('内置类别表按告警名给出类别，排在告警目录之后、规则之前', () => {
+    const builtin = new AlertCatalog(
+      [
+        {
+          pack: 'test',
+          entries: [
+            ...entries,
+            {
+              // 领域包登记了内置表里的告警名并声明类别：以目录为准
+              id: 'synthetic-job-failed',
+              alertname: 'SyntheticJobFailed',
+              role: 'cause',
+              category: 'platform',
+              entity: { kind: 'Job', name_labels: ['job_name'] },
+            },
+          ],
+        },
+      ],
+      {
+        builtinCategories: { SyntheticPodPending: 'availability', SyntheticJobFailed: 'availability' },
+        categoryRules: rules,
+      },
+    );
+    const cat = (labels: Record<string, string>) => {
+      const c = builtin.category(labels);
+      return [c.category, c.source];
+    };
+    expect(cat({ alertname: 'SyntheticPodPending' })).toEqual(['availability', 'builtin']);
+    expect(cat({ alertname: 'SyntheticPodPending', component: 'provider' })).toEqual(['availability', 'builtin']);
+    expect(cat({ alertname: 'SyntheticPodPending', srenautix_category: 'performance' })).toEqual([
+      'performance',
+      'label',
+    ]);
+    expect(cat({ alertname: 'SyntheticJobFailed' })).toEqual(['platform', 'catalog']);
+    expect(cat({ alertname: 'ShopCheckoutErrors', layer: 'L0' })).toEqual(['availability', 'rule']);
+    expect(builtin.categoryInputs().builtin).toEqual([
+      { alertname: 'SyntheticJobFailed', category: 'availability' },
+      { alertname: 'SyntheticPodPending', category: 'availability' },
+    ]);
+  });
+
+  it('category_source 的取值与契约相同', () => {
+    const alert = JSON.parse(
+      readFileSync(fileURLToPath(new URL('../../../contract/schemas/alert.schema.json', import.meta.url)), 'utf8'),
+    ) as { $defs: { Classification: { properties: { category_source: { enum: string[] } } } } };
+    expect(alert.$defs.Classification.properties.category_source.enum).toEqual([
+      'label',
+      'catalog',
+      'builtin',
+      'rule',
+      'default',
+    ]);
+  });
+
   it('类别解析的输入按告警名与查找顺序列出条目，再列出规则；与类别无关的字段不在其中', () => {
     const variants: AlertCatalogEntry[] = [
       {

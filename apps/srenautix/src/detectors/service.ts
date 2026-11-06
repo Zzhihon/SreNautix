@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import type { AlertCategory } from '@srenautix/contract';
 import type pg from 'pg';
 import type { RawAlert } from '../ingest/normalize.js';
 import { logger } from '../log.js';
@@ -56,6 +57,26 @@ export const DETECTOR_ALERTS: Readonly<Record<HealthState, string>> = {
   pdb_blocking: 'SreNautixPdbBlockingEviction',
   job_failed: 'SreNautixJobFailed',
 };
+
+/**
+ * 合成告警的类别（ADR 0183 §2.1）：与各状态的等价告警（DEFAULT_EQUIVALENTS）在 alerts-kps 包里的类别相同，
+ * pdb_blocking 除外：disruptionsAllowed = 0 在 Pod 全部健康时同样成立，告警描述的是节点排空与驱逐被阻塞
+ */
+export const DETECTOR_CATEGORIES: Readonly<Record<HealthState, AlertCategory>> = {
+  pod_pending: 'availability',
+  pod_init: 'availability',
+  crash_loop: 'availability',
+  rollout_stalled: 'availability',
+  pdb_blocking: 'platform',
+  job_failed: 'availability',
+};
+
+/** 告警目录的内置类别表（AlertCatalogOptions.builtinCategories）：合成告警的告警名 → 类别 */
+export function detectorBuiltinCategories(): Record<string, AlertCategory> {
+  return Object.fromEntries(
+    (Object.keys(DETECTOR_ALERTS) as HealthState[]).map((st) => [DETECTOR_ALERTS[st], DETECTOR_CATEGORIES[st]]),
+  );
+}
 
 /** 常见告警规则（kube-prometheus 与 CCHP）里与各状态相同的告警名 */
 export const DEFAULT_EQUIVALENTS: Readonly<Record<HealthState, readonly string[]>> = {
