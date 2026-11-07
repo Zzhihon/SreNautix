@@ -1,6 +1,7 @@
 // srenautix pack test（DESIGN §6.3）：
 // - 夹具（promtool input_series 写法）装进真实的 Prometheus 与 VictoriaMetrics，日志夹具装进真实的 Loki；
 // - 每个测试在两个后端上各跑一遍，结论（verdict、显示状态、原因类型）必须与期望一致，两个后端之间也必须一致；
+//   卡读取的指标信号只有 MetricsQL 备选时只在 VictoriaMetrics 上执行（ADR 0187）；
 // - 每张卡自动生成三类测试：无数据（空后端）、部分无数据、数据源报错；
 // - stable 的包要求每张卡都有夹具测试，并且全部通过。
 
@@ -42,6 +43,11 @@ const DAY = 86_400_000;
 
 type Backend = 'prometheus' | 'victoria-metrics';
 const BACKENDS: Backend[] = ['prometheus', 'victoria-metrics'];
+/** 每个后端执行的指标方言 */
+const DIALECTS: Record<Backend, ReadonlyArray<'promql' | 'metricsql'>> = {
+  prometheus: ['promql'],
+  'victoria-metrics': ['promql', 'metricsql'],
+};
 
 export interface CaseResult {
   pack: string;
@@ -57,6 +63,8 @@ export interface CaseResult {
     Record<Backend | 'postgres', { verdict: string; display_state: string; reason_kind: string; reason: string }>
   >;
   failure: string | null;
+  /** 不执行卡的方言、没有运行这个用例的后端（ADR 0187）；两个后端都运行时不出现 */
+  dialect_skipped?: Backend[];
 }
 
 export interface PackTestReport {
@@ -177,7 +185,7 @@ async function startEnv(fx: Fixtures, intervalSeconds: number, withLoki: boolean
           adapter: new PrometheusApiAdapter({
             id: b,
             url: t.url,
-            dialects: b === 'prometheus' ? ['promql'] : ['promql', 'metricsql'],
+            dialects: [...DIALECTS[b]],
           }),
           profile,
         },
@@ -228,6 +236,25 @@ async function resolveAll(
   }
   return out;
 }
+
+/**
+ * 能执行这些卡的后端：卡读取的每个指标信号至少有一个备选的方言是后端执行的（ADR 0187）。只有 metricsql 备选的卡
+ * （vmalert 的 tlast_over_time 等）只在 VictoriaMetrics 上执行；没有后端能执行全部信号时仍在全部后端上执行，由信号解析报出原因
+ */
+function backendsFor(set: PackSet, cardKeys: string[]): Backend[] {
+  const signals = cardKeys.flatMap((k) => Object.values(set.cards.get(k)!.signals));
+  const able = BACKENDS.filter((b) =>
+    signals.every((sk) => {
+      const s = set.signals.get(sk)!.signal;
+      return s.kind !== 'metrics' || s.alternatives.some((a) => DIALECTS[b].some((d) => d === (a.dialect ?? 'promql')));
+    }),
+  );
+  return able.length ? able : BACKENDS;
+}
+
+/** 没有运行的后端，写进用例的 dialect_skipped */
+const skippedOf = (backends: Backend[]) =>
+  backends.length < BACKENDS.length ? { dialect_skipped: BACKENDS.filter((b) => !backends.includes(b)) } : {};
 
 const summary = (r: RunCardResult) => ({
   verdict: r.verdict,
@@ -357,8 +384,8 @@ export async function runPackTests(opts: PackTestOptions): Promise<PackTestRepor
   for (const pack of selected) {
     const cardKeys = [...set.cards.values()].filter((c) => c.pack === pack.name).map((c) => c.key);
     const covered = new Set<string>();
-    // 每张卡最近一次非无法判定的夹具结果，供自动测试变换
-    const captured = new Map<string, RunCardResult>();
+    // 每张卡最近一次非无法判定的夹具结果（取自用例运行的第一个后端），供自动测试变换
+    const captured = new Map<string, { backend: Backend; result: RunCardResult }>();
     // 有命中测试、有不命中测试的结论规则 id
     const conclusionHits = new Set<string>();
     const conclusionMisses = new Set<string>();
@@ -415,7 +442,8 @@ export async function runPackTests(opts: PackTestOptions): Promise<PackTestRepor
           const anchor = FIXTURE_EPOCH + durationSeconds(t.eval_time) * 1000;
           const results: CaseResult['results'] = {};
           const failures: string[] = [];
-          for (const b of BACKENDS) {
+          const backends = backendsFor(set, [key]);
+          for (const b of backends) {
             const r = await runCard({
               set,
               card: key,
@@ -446,8 +474,8 @@ export async function runPackTests(opts: PackTestOptions): Promise<PackTestRepor
             if (t.rows) {
               failures.push(...checkRows(set, t, key, r).map((f) => `${b}：${f}`));
             }
-            if (b === 'prometheus' && r.verdict !== 'undeterminable') {
-              captured.set(`${key}\u0000${t.name}`, r);
+            if (b === backends[0] && r.verdict !== 'undeterminable') {
+              captured.set(`${key}\u0000${t.name}`, { backend: b, result: r });
             }
             // 这张卡是某些告警的主卡：告警在卡片窗口内触发 ⇔ 主卡判为异常
             for (const { entry } of primaries.get(key) ?? []) {
@@ -494,7 +522,7 @@ export async function runPackTests(opts: PackTestOptions): Promise<PackTestRepor
               now: Number.MAX_SAFE_INTEGER,
               ds: pgds,
               engine,
-              resolutions: res.prometheus,
+              resolutions: res[backends[0]!],
               clock,
               redact: NO_REDACTION,
               controlSeed: 'pack-test',
@@ -511,9 +539,13 @@ export async function runPackTests(opts: PackTestOptions): Promise<PackTestRepor
               failures.push(...checkRows(set, t, key, r).map((f) => `postgres：${f}`));
             }
           }
-          const p = results.prometheus!;
-          const v = results['victoria-metrics']!;
-          if (p.verdict !== v.verdict || p.display_state !== v.display_state || p.reason_kind !== v.reason_kind) {
+          const p = results.prometheus;
+          const v = results['victoria-metrics'];
+          if (
+            p &&
+            v &&
+            (p.verdict !== v.verdict || p.display_state !== v.display_state || p.reason_kind !== v.reason_kind)
+          ) {
             failures.push(
               `Prometheus 与 VictoriaMetrics 的结论不一致：${p.verdict}/${p.reason_kind} 对 ${v.verdict}/${v.reason_kind}`,
             );
@@ -527,6 +559,7 @@ export async function runPackTests(opts: PackTestOptions): Promise<PackTestRepor
             passed: !failures.length,
             results,
             failure: failures.join('；') || null,
+            ...skippedOf(backends),
           });
         }
         // 结论规则测试（ADR 0178）：两个后端各自执行列出的卡，再按阶段 A 的方式求值规则
@@ -538,7 +571,11 @@ export async function runPackTests(opts: PackTestOptions): Promise<PackTestRepor
           const anchor = FIXTURE_EPOCH + durationSeconds(t.eval_time) * 1000;
           const results: CaseResult['results'] = {};
           const failures: string[] = [];
-          for (const b of BACKENDS) {
+          const backends = backendsFor(
+            set,
+            t.cards.map((c) => cardKeyFor(set, pack.name, c.card)),
+          );
+          for (const b of backends) {
             const cards: ConclusionInput['cards'][number][] = [];
             for (const [i, c] of t.cards.entries()) {
               const r = await runCard({
@@ -608,6 +645,7 @@ export async function runPackTests(opts: PackTestOptions): Promise<PackTestRepor
             passed: !failures.length,
             results,
             failure: failures.join('；') || null,
+            ...skippedOf(backends),
           });
           (t.expect.hit ? conclusionHits : conclusionMisses).add(rule.id);
         }
@@ -641,7 +679,8 @@ export async function runPackTests(opts: PackTestOptions): Promise<PackTestRepor
           };
           const results: CaseResult['results'] = {};
           const failures: string[] = [];
-          for (const b of BACKENDS) {
+          const backends = backendsFor(set, [key]);
+          for (const b of backends) {
             const r = await runCard({
               set,
               card: key,
@@ -669,6 +708,7 @@ export async function runPackTests(opts: PackTestOptions): Promise<PackTestRepor
             passed: !failures.length,
             results,
             failure: failures.join('；') || null,
+            ...skippedOf(backends),
           });
         }
       } finally {
@@ -677,7 +717,7 @@ export async function runPackTests(opts: PackTestOptions): Promise<PackTestRepor
     }
 
     // 部分无数据与数据源报错：在真实夹具结果上变换单个引用后重新判定
-    for (const [ck, r] of captured) {
+    for (const [ck, { backend, result: r }] of captured) {
       const [key, name] = ck.split('\u0000') as [string, string];
       const e = set.cards.get(key)!;
       const required = e.def.refs.filter((x) => (x.empty_is ?? 'no_data') === 'no_data');
@@ -703,7 +743,7 @@ export async function runPackTests(opts: PackTestOptions): Promise<PackTestRepor
             kind,
             passed: ok,
             results: {
-              prometheus: {
+              [backend]: {
                 verdict: out.verdict,
                 display_state: out.display_state,
                 reason_kind: out.reason.kind,
@@ -731,7 +771,7 @@ export async function runPackTests(opts: PackTestOptions): Promise<PackTestRepor
         kind: 'datasource_error',
         passed: ok,
         results: {
-          prometheus: {
+          [backend]: {
             verdict: out.verdict,
             display_state: out.display_state,
             reason_kind: out.reason.kind,

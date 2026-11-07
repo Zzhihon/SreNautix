@@ -285,8 +285,17 @@ spec:
         {{- range $p := $.Values.packs.userConfigMaps }}
         {{- $u := include "srenautix.userPack" $p | fromYaml }}
         - name: pack-{{ $u.configMap }}
+          {{- if eq (len $u.configMaps) 1 }}
           configMap:
             name: {{ $u.configMap }}
+          {{- else }}
+          # 一个包分在多个 ConfigMap 中（每个 ConfigMap 不超过 1 MiB）：投影到同一个包目录，各 ConfigMap 的键不能重复
+          projected:
+            sources:
+              {{- range $u.configMaps }}
+              - configMap: {name: {{ . }}}
+              {{- end }}
+          {{- end }}
         {{- end }}
         {{- if $.Values.packs.lockConfigMap }}
         - name: pack-lock

@@ -243,6 +243,10 @@ export async function runPackCli(
           );
         }
         io.out(`${report.cases.filter((c) => c.passed).length}/${report.cases.length} 个用例通过\n`);
+        const dialectOnly = report.cases.filter((c) => c.dialect_skipped?.length).length;
+        if (dialectOnly) {
+          io.out(`${dialectOnly} 个用例的卡只能用 MetricsQL 查询，只在 VictoriaMetrics 上执行\n`);
+        }
         if (rules) {
           io.out(`主卡与告警规则的一致性核对 ${report.alert_checks} 次\n`);
         }

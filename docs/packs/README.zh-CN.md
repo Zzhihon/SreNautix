@@ -557,7 +557,7 @@ cosign sign registry.example.org/packs/redis@sha256:<digest>
 - 一个 ConfigMap 放一个包。顶层文件以文件名为键；子目录中的文件以 `<子目录>__<文件名>` 为键，例如 `runbooks__provider.md`、`tests__edge.yaml`、`tests__replay__memory.json`。加载时还原为子目录路径，内容摘要与源目录相同。
 - chart 的 `packs.userConfigMaps` 每项是 ConfigMap 名（包名与它相同），或 `{configMap: <名>, pack: <包名>}`。ConfigMap 挂载为 `/etc/srenautix/packs/<configMap>/<包名>`，`/etc/srenautix/packs/<configMap>` 加入 server 的 `packs.dirs`。
 - 挂载点中 kubelet 生成的 `..data`、`..<时间戳>` 条目不属于包内容，加载时跳过。
-- ConfigMap 的大小上限是 1 MiB，夹具与快照较大的包改用 OCI 分发。
+- ConfigMap 的大小上限是 1 MiB（键与值的字节数之和）。超过时把包的文件分到几个 ConfigMap，写成 `{configMaps: [<名>, ...], pack: <包名>}`：chart 用投影卷把它们挂载到同一个包目录 `/etc/srenautix/packs/<第一个 ConfigMap>/<包名>`，各 ConfigMap 的键不能重复，单个文件仍不能超过 1 MiB（ADR 0187）。只写一个 ConfigMap 时挂载方式不变。夹具与快照很大的包改用 OCI 分发。
 
 用户包可以引用内置包的证据链（组件类型或告警目录条目的 `chains` 写 `<包>/<链>`），也可以为内置包没有覆盖的实体 kind 声明组件类型。内置的 node、workload、pvc 包为 Node、Pod、Deployment、StatefulSet、DaemonSet、Job、HorizontalPodAutoscaler、PodDisruptionBudget、PersistentVolumeClaim、PersistentVolume 声明了只有 kind 约束的组件类型；server 为实体选组件类型时取约束最多的一个，所以用户包中带名字或命名空间约束的类型优先。
 
@@ -599,7 +599,7 @@ tests:
 `srenautix pack test` 的执行方式：
 
 - 夹具装进真实的 Prometheus 与 VictoriaMetrics（版本与 sha256 固定在 `packages/integration-sdk/backends.json`），有日志夹具时装进真实的 Loki。
-- 每个测试在两个后端上各跑一遍，结论（verdict、显示状态、原因类型）必须与期望一致，两个后端之间也必须一致。
+- 每个测试在两个后端上各跑一遍，结论（verdict、显示状态、原因类型）必须与期望一致，两个后端之间也必须一致。卡读取的指标信号只有 `metricsql` 备选时（vmalert 规则里的 `tlast_over_time`、`default_rollup` 等），Prometheus 执行不了，这张卡的夹具测试、结论测试、无数据测试与主卡核对只在 VictoriaMetrics 上执行，用例的 `dialect_skipped` 列出没有运行的后端，命令行另输出一行这类用例的个数（ADR 0187）。
 - 每张卡自动生成三类测试：空后端上必须是无法判定；逐个把 `no_data` 引用换成空结果或数据源错误后不能得出正常；全部 `no_data` 引用报错时不能得出正常，没有判为异常时原因必须是 `source_error`。
 - `stable` 的包要求每张卡都有夹具测试。
 - 告警目录条目的 `primary_card`（`<链>/<卡>` 或 `<包>/<链>/<卡>`）是与告警条件对应的卡，告警触发时它应当判为异常。`lint` 检查卡片存在、`applies_to` 包含条目的实体 kind、卡片所在的证据链在条目的 `chains` 中。`test --alert-rules <规则文件>` 读入告警规则（Prometheus 规则文件、PrometheusRule 或 VMRule，同名告警按条目的 `match_labels` 选规则），主卡的每个夹具测试在同一份夹具上再求一次告警规则：告警在卡片窗口内触发（满足 `for`）当且仅当主卡判为异常，否则测试失败。阈值因此只在告警规则里写一次，两边漂移时 CI 失败。没有现成的卡判断告警条件时，用 `generateConditionPack` 从规则生成告警条件卡（查询与规则表达式相同、判定与 `for` 相同），作为条目的主卡（ADR 0109）。

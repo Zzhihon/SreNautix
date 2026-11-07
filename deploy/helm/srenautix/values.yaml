@@ -363,7 +363,9 @@ remediation:
 # 领域包：内置包在镜像的 /app/packs；用户的包以 ConfigMap 挂载
 packs:
   # 每项是 ConfigMap 名（包名与它相同），或 {configMap: <名>, pack: <包名>}。一个 ConfigMap 放一个包：
-  # 顶层文件以文件名为键，子目录中的文件以 <子目录>__<文件名> 为键（例如 runbooks__provider.md、tests__replay__x.json）
+  # 顶层文件以文件名为键，子目录中的文件以 <子目录>__<文件名> 为键（例如 runbooks__provider.md、tests__replay__x.json）。
+  # 包超过一个 ConfigMap 的 1 MiB 上限时写 {configMaps: [<名>, ...], pack: <包名>}：按文件分到几个 ConfigMap，
+  # 投影到同一个包目录（各 ConfigMap 的键不能重复，单个文件仍不能超过 1 MiB），packs.dirs 用第一个 ConfigMap 的名字（ADR 0187）
   userConfigMaps: []
   # 含 pack.lock 的 ConfigMap（键 pack.lock）；为空时由 server 在启动时计算
   lockConfigMap: ""

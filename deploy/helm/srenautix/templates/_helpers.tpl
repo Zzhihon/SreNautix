@@ -238,18 +238,28 @@ priorityClassName: {{ . }}
 {{- end -}}
 
 {{/*
-packs.userConfigMaps 的一项：字符串（ConfigMap 名，包名与它相同），或 {configMap, pack}。
-ConfigMap 挂载为 /etc/srenautix/packs/<configMap>/<pack>，即包目录；子目录中的文件以 <子目录>__<文件名> 为键
+packs.userConfigMaps 的一项：字符串（ConfigMap 名，包名与它相同），{configMap, pack}，或 {configMaps, pack}（ADR 0187）。
+ConfigMap 挂载为 /etc/srenautix/packs/<configMap>/<pack>，即包目录；子目录中的文件以 <子目录>__<文件名> 为键。
+configMaps 列出的多个 ConfigMap 投影到同一个包目录，configMap 取第一个
 */}}
 {{- define "srenautix.userPack" -}}
 {{- if kindIs "string" . -}}
 configMap: {{ . }}
+configMaps: [{{ . }}]
 pack: {{ . }}
 {{- else -}}
-{{- if not (and .configMap .pack) -}}
-{{- fail "packs.userConfigMaps 的对象形式需要 configMap 与 pack" -}}
+{{- if and .configMap .configMaps -}}
+{{- fail "packs.userConfigMaps 的对象形式只能写 configMap 与 configMaps 中的一个" -}}
 {{- end -}}
-configMap: {{ .configMap }}
+{{- $cms := .configMaps | default (compact (list .configMap)) -}}
+{{- if not (and $cms .pack) -}}
+{{- fail "packs.userConfigMaps 的对象形式需要 pack，以及 configMap 或 configMaps" -}}
+{{- end -}}
+{{- if ne (len $cms) (len (uniq $cms)) -}}
+{{- fail (printf "packs.userConfigMaps 中包 %s 的 configMaps 有重复" .pack) -}}
+{{- end -}}
+configMap: {{ first $cms }}
+configMaps: {{ toJson $cms }}
 pack: {{ .pack }}
 {{- end -}}
 {{- end -}}

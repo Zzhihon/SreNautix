@@ -245,6 +245,33 @@ tests:
           path: spec.template.spec.volumes
           content: {name: pack-srenautix-pack-shop, configMap: {name: srenautix-pack-shop}}
 
+  - it: configMaps 列出的多个 ConfigMap 投影到同一个包目录，挂载点与卷名取第一个 ConfigMap（ADR 0187）
+    set:
+      profile: standard
+      packs.userConfigMaps:
+        - {configMaps: [big-pack, big-pack-2], pack: big}
+    documentSelector: {path: metadata.name, value: t-srenautix-server}
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content: {name: pack-big-pack, mountPath: /etc/srenautix/packs/big-pack/big, readOnly: true}
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: pack-big-pack
+            projected:
+              sources:
+                - configMap: {name: big-pack}
+                - configMap: {name: big-pack-2}
+
+  - it: configMap 与 configMaps 同时写时渲染失败
+    set:
+      profile: standard
+      packs.userConfigMaps:
+        - {configMap: a, configMaps: [a, b], pack: big}
+    asserts:
+      - failedTemplate: {errorPattern: 只能写 configMap 与 configMaps 中的一个}
+
   - it: 合规配置下 server 与 gateway 挂载同一份审批人公钥
     values:
       - ../values-compliance.yaml
