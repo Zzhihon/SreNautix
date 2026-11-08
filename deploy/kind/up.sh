@@ -64,6 +64,7 @@ log "部署背景噪声与自身告警接收方"
 k apply -k "$KIND_DIR/workloads"
 wait_namespace_ready shop 900
 wait_namespace_ready traffic 300
+wait_client_traffic_scraped 300
 
 if $with_srenautix; then
   "$KIND_DIR/install-srenautix.sh"

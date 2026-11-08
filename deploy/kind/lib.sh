@@ -34,6 +34,22 @@ prom_query() {
   k get --raw "/api/v1/namespaces/monitoring/services/kps-prometheus:9090/proxy/api/v1/query?query=$(jq -rn --arg q "$q" '$q|@uri')"
 }
 
+# 等到 Prometheus 已经抓到外部客户端 traffic/loadgen 一个完整速率窗口的样本（1 分钟内至少 4 个）。kind-shop 包的影响卡
+# traffic/client-errors 查 shop_client_requests_total；故障在这之前注入时，影响卡因为没有样本无法判定，处置从 ignore
+# 变为 act，alert-too-sensitive 不会有调整告警规则的 PR。参数：超时秒数
+wait_client_traffic_scraped() {
+  local timeout=$1 deadline n
+  deadline=$((SECONDS + timeout))
+  while true; do
+    n=$(prom_query 'min(count_over_time(shop_client_requests_total{namespace="traffic", target="web"}[1m]))' |
+      jq -r '.data.result[0].value[1] // "0"')
+    ((n >= 4)) && break
+    ((SECONDS < deadline)) || die "${timeout}s 内 Prometheus 没有抓到 traffic/loadgen 的 shop_client_requests_total（1 分钟内 ${n} 个样本）"
+    sleep 10
+  done
+  log "Prometheus 已抓到外部客户端的请求计数"
+}
+
 # 等待指定告警出现在 ALERTS 中（pending 或 firing）；参数：超时秒数 告警名...
 wait_alerts() {
   local timeout=$1

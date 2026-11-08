@@ -5,6 +5,7 @@
 #   SRENAUTIX_ROOT              根因组件键的正则（ComponentKey，与 eval/scenarios/<场景>.yaml 的 root_components 对应）
 #   SRENAUTIX_MAX_INCIDENTS     注入之后与场景相关的事件数上限（默认 2）
 #   SRENAUTIX_CONCLUSIONS       阶段 B 允许的结论（默认 "likely evidence_consistent"）
+#   SRENAUTIX_DISPOSITION       阶段 B 期望的处置（act | ignore | escalate | undetermined）；为空时不检查
 #   SRENAUTIX_REMEDIATION       期望的修复类别（release_rollback | config_resource | alert_rule）；为空时不检查 PR
 #   SRENAUTIX_PR_FILES          修复 PR 应当改动的文件（kind/gitops 中的路径，正则）
 #   SRENAUTIX_COVERAGE_ALERT    没有告警目录条目的告警名（ADR 0171）：检查 kind/gitops 上有它的覆盖缺口 issue，列出根因事件，
@@ -51,16 +52,23 @@ describe_incidents() {
 }
 
 # 注入前提：告警投递链路正常。Alertmanager 5 分钟内没有通知失败，也没有 Alertmanager*FailedToSendAlerts 告警
-# （安装期间 SreNautix server 就绪之前的 webhook 失败会让这两条告警在随后约 5 分钟内触发，并成为第一个场景之外的事件）。
-# SRENAUTIX_QUIET_TIMEOUT 秒（默认 900）
+# （安装期间 SreNautix server 就绪之前的 webhook 失败会让这两条告警在随后约 5 分钟内触发，并成为第一个场景之外的事件），
+# SreNautix 中也没有仍在触发的这两条告警：它们的 resolved 通知晚于 Prometheus 到达，在注入之后到达时，所在事件的
+# updated_at 晚于注入时间，会被算作场景的事件。SRENAUTIX_QUIET_TIMEOUT 秒（默认 900）
 wait_alert_delivery_healthy() {
-  local timeout=${SRENAUTIX_QUIET_TIMEOUT:-900} deadline failed alerts
+  local timeout=${SRENAUTIX_QUIET_TIMEOUT:-900} deadline failed alerts open
   deadline=$((SECONDS + timeout))
   while true; do
     failed=$(prom_query 'sum(increase(alertmanager_notifications_failed_total[5m]))' | jq -r '.data.result[0].value[1] // "0"')
     alerts=$(prom_query 'ALERTS{alertname=~"Alertmanager(Cluster)?FailedToSendAlerts"}' | jq -c '[.data.result[].metric | {alertname, alertstate, integration}] | unique')
-    [[ "$alerts" == "[]" ]] && awk -v f="$failed" 'BEGIN { exit !(f + 0 == 0) }' && break
-    ((SECONDS < deadline)) || die "告警投递：${timeout}s 内 Alertmanager 仍有通知失败（5 分钟内 ${failed} 次）或告警 ${alerts}"
+    open=$(for id in $(srenautix_api '/v1/incidents?state=firing&limit=500' | jq -r '.items[].incident_id'); do
+      srenautix_api "/v1/incidents/$id" | jq -c '.members[]
+        | select((.alertname | test("^Alertmanager(Cluster)?FailedToSendAlerts$")) and .status == "firing")
+        | {alertname, component}'
+    done | jq -sc .)
+    [[ "$alerts" == "[]" && "$open" == "[]" ]] && awk -v f="$failed" 'BEGIN { exit !(f + 0 == 0) }' && break
+    ((SECONDS < deadline)) ||
+      die "告警投递：${timeout}s 内 Alertmanager 仍有通知失败（5 分钟内 ${failed} 次）、告警 ${alerts}，或 SreNautix 中仍在触发 ${open}"
     sleep 15
   done
 }
@@ -128,7 +136,12 @@ check_analysis() {
   local level
   level=$(jq -r '.conclusion_level' <<<"$run")
   [[ " $allowed " == *" $level "* ]] || die "分析：阶段 B 的结论为 ${level}，应为 ${allowed} 之一"
-  log "分析：${cards} 张证据卡，阶段 B 研判 $(jq -r .run_id <<<"$run") 结论 ${level}"
+  local disposition
+  disposition=$(jq -r '.disposition' <<<"$run")
+  [[ -z "${SRENAUTIX_DISPOSITION:-}" || "$disposition" == "$SRENAUTIX_DISPOSITION" ]] ||
+    die "分析：阶段 B 的处置为 ${disposition}，应为 ${SRENAUTIX_DISPOSITION}；证据卡：$(srenautix_api "/v1/incidents/$id/evidence" |
+      jq -c '[.[] | select(.verdict != "normal") | {card_id, verdict, reason}]')"
+  log "分析：${cards} 张证据卡，阶段 B 研判 $(jq -r .run_id <<<"$run") 结论 ${level}，处置 ${disposition}"
 }
 
 # 自愈 PR：kind/gitops 上出现 srenautix/* 分支的 PR，描述有证据、改动、验证计划、回滚四段与 Refs #<issue>，
