@@ -2890,17 +2890,7 @@ components:
             - type: 'null'
             - type: object
               additionalProperties: false
-              required:
-                [
-                  run_id,
-                  state,
-                  disposition,
-                  conclusion_level,
-                  root_component,
-                  summary,
-                  started_at,
-                  finished_at,
-                ]
+              required: [run_id, state, disposition, conclusion_level, root_component, summary, started_at, finished_at]
               properties:
                 run_id: { $ref: './schemas/common.schema.json#/$defs/Uuid' }
                 state: { type: string, description: 含 queued 等未结束状态 }

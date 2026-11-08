@@ -20,9 +20,10 @@ test('外壳：状态条不可关闭、导航分组、集群切换与搜索', as
   for (const g of ['值班', '处置', '度量', '系统', '治理']) {
     await expect(nav.getByText(g, { exact: true })).toBeVisible();
   }
-  await expect(page.getByRole('combobox', { name: '集群' })).toContainText('全部集群');
-  await page.getByRole('combobox', { name: '集群' }).selectOption('e2e');
-  await expect(page).toHaveURL(/cluster=e2e/);
+  // 单集群（CCHP 实况）：自动选中该集群，不再出现「全部集群」（DESIGN：单集群不把「全部集群」当默认）
+  const cluster = page.getByRole('combobox', { name: '集群' });
+  await expect(cluster).not.toContainText('全部集群');
+  await expect(cluster).toHaveValue('e2e');
   await page.getByRole('searchbox', { name: '搜索' }).fill('shop');
   await page.getByRole('searchbox', { name: '搜索' }).press('Enter');
   await expect(page).toHaveURL(/\/search\?.*q=shop/);
