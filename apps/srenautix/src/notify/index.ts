@@ -157,8 +157,11 @@ export class NotifyService {
       prefix: deps.config.prefix,
       consoleUrl: deps.publicUrl,
       digestRetentionMs: parseDuration('notify.resolved_retention', deps.config.resolved_retention),
-      externalDigestPeriodMs: deps.config.digest.external_roots.enabled
-        ? parseDuration('notify.digest.external_roots.period', deps.config.digest.external_roots.period)
+      externalDigest: deps.config.digest.external_roots.enabled
+        ? {
+            periodMs: parseDuration('notify.digest.external_roots.period', deps.config.digest.external_roots.period),
+            graceMs: parseDuration('notify.digest.external_roots.grace', deps.config.digest.external_roots.grace),
+          }
         : null,
       isLeader: deps.isLeader,
       now: this.now,

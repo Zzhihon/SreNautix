@@ -43,13 +43,14 @@ server 角色把每个事件的阶段 A 报告与阶段 B 研判推送到聊天�
 根因是集群之外的上游（例如模型服务方 provider、model）时，集群内没有可处置的对象，逐条推送只会刷屏（ADR 0147）。这类事件：
 
 - 不单独推送，也不开 issue（`docs/server/README.md` 的事件 issue 一节）；已经推送过的事件消息照常编辑。
-- 每个周期（`period`，默认 1 小时，按 UTC 对齐即整点）结束 1 分钟后，在每个群发一条汇总，静默发送，之后不再编辑：
+- 每个周期（`period`，默认 1 小时，按 UTC 对齐即整点）结束后等待 `grace`（默认 30s，0s 到 120s），在每个群发一条汇总，静默发送，之后不再编辑。等待给周期末尾开始的事件留出入库（关联、阶段 A 报告）的时间，汇总在整点后 30 秒加上统计与发送的耗时送达：
   1. 标题：`外部上游汇总 10:00–11:00 UTC`；
   2. 本时段有问题的上游数与上一时段的对比（新增、持续、未恢复、已恢复）；
   3. 业务影响：本时段触发过、与其中某个上游事件相关的业务影响告警（`notify.business_impact_alerts`，见下一节）与其他事件异常的影响卡，每项写明相关的上游与依据（例如“在上游 柚子 的事件开始后 21 分钟开始”“拓扑路径 Deployment:shop/checkout → payments”）；没有时写明“无”与所用的告警条件；
   4. 每个上游一行：名称、根因上的关键数值（最多 2 张有值的卡，例如故障率、首字延迟；没有时写告警名）、本时段新触发的成员告警数与上一时段的次数、恢复情况；critical 带“[严重]”，因业务影响已即时推送的写明；
-  5. 上一时段有问题、本时段没有告警的上游。
-- 每个时段的统计在周期结束后算一次，存进 `server.notify_external_windows`，汇总消息与下一时段的对比用同一份；周期结束超过半个周期（例如进程停了）的时段不再补发。
+  5. 在上一时段开始、上一时段统计之后才入库的上游另起一段：`在上一时段 10:00–11:00 开始、那一时段统计之后才入库的上游：`，每个上游一行，写触发次数（按所属的上一时段计）、开始时间与恢复情况，最多 5 个，其余写一行“见控制台”。它们并入上一时段的对比基准；仍在触发的同时出现在第 4 项；
+  6. 上一时段有问题、本时段没有告警的上游（上一项列出的不算）。
+- 每个时段的统计在周期结束后算一次，存进 `server.notify_external_windows`，汇总消息与下一时段的对比用同一份；周期结束超过半个周期（例如进程停了）的时段不再补发。统计记下当时已入库、在本时段开始的事件 id，下一时段据此找出迟到的事件（第 5 项），迟到的事件不丢。
 - 例外：外部上游的事件仍在触发、同时有与它相关的业务影响时照常即时推送，横幅写“上游故障已影响业务：<信号>（<依据>）”（ADR 0150）。业务影响按每个上游事件分别判定：
   - 本事件异常的影响卡（`impact: true`），依据写“本事件的影响卡”；
   - 同一集群里触发中的业务告警，或其他非外部上游的触发中事件里异常的影响卡，满足下面任一条才算：
@@ -64,6 +65,7 @@ notify:
     external_roots:
       enabled: true            # 默认开启；false 时全部事件照常逐条推送
       period: 1h               # 5m 到 24h
+      grace: 30s               # 周期结束后等待多久再统计与发送，0s 到 120s
       components: [component:provider]   # 另外按外部上游处理的根因（例如按主题聚合的逻辑组件）
       alert_labels: { theme: [provider] } # 全部成员告警都满足时按外部上游处理
       business_impact:                    # 业务影响告警取 notify.business_impact_alerts（下一节）
@@ -177,6 +179,7 @@ notify:
 | `srenautix_notify_pending` | `channel` |
 | `srenautix_notify_callbacks_total` | `channel`、`action`、`outcome` |
 | `srenautix_first_message_latency_seconds` | `business_impact`（true、false）、`origin`（new、split）、`clock`（onset、alertmanager） |
+| `srenautix_notify_external_digest_delay_seconds` | `channel`：外部上游汇总第一次送达渠道目标的时刻相对周期结束的秒数，包含 `grace` 的等待与统计、发送的耗时 |
 
 首条消息时延（ADR 0159、0165）：每个事件在所有渠道目标上的第一条事件消息送达时记一次，两个口径：
 
@@ -191,6 +194,6 @@ notify:
 - 飞书签名与加密用官方文档的解密向量，以及用 `openssl enc`、`shasum -a 256`、`openssl dgst -hmac` 独立生成的向量（`signature-vectors.json`）。
 - 渲染规则来自原 Go 实现的黄金用例，改写成语言无关的 JSON 夹具（`apps/srenautix/test/fixtures/render/`）。
 - 报告的黄金用例是一次真实发布事故（发布后回退失败）在本机重建的事件、阶段 A 报告与研判账本，已脱敏（`apps/srenautix/test/fixtures/report/`）；Telegram HTML 与黄金文件逐字比较。每条 Telegram 消息都按 Bot API 的 HTML 规则解析（标签、属性、嵌套、转义），不合法的 HTML 让测试失败，对应 Bot API 的 400 "can't parse entities"。
-- 业务关键信号的黄金用例是按 cchp-k8s-ops#249 那一类 gateway OOM 事件重建的卡片组合（70 个成员告警、53 张卡，`test/support/gateway-oom-fixture.ts`），内存一类的第一项是 gateway 94% 与 OOM。外部上游的汇总在真实 PostgreSQL 上测试：一小时内多个 provider 的事件只在整点后发 1 条汇总；业务告警触发后仍在触发的上游事件即时推送；汇总正文按 Bot API 的 HTML 规则严格解析。
+- 业务关键信号的黄金用例是按 cchp-k8s-ops#249 那一类 gateway OOM 事件重建的卡片组合（70 个成员告警、53 张卡，`test/support/gateway-oom-fixture.ts`），内存一类的第一项是 gateway 94% 与 OOM。外部上游的汇总在真实 PostgreSQL 上测试：一小时内多个 provider 的事件只在整点后 30 秒发 1 条汇总，发送延迟记为 30 秒；在时段末尾开始、统计之后才入库的事件进入下一条汇总并写明所属时段；业务告警触发后仍在触发的上游事件即时推送；汇总正文按 Bot API 的 HTML 规则严格解析。
 - 投递引擎与回调流程在真实 PostgreSQL 上测试：风暴、令牌桶、编辑合并、429 暂停、消息被删除后重发、回调去重与按钮独占、拒绝理由窗口、`/link`、未绑定账号与 H 档提议的拒绝。
 - 已结束事件的编辑上限（`notify-stale-desired.test.ts`）：成功编辑满 5 次后内容再变化时发出最后一次编辑（精简内容、说明行与控制台链接），之后不再请求渠道；最后一次编辑被拒绝时放弃（`ended_edit_cap`）且不重试；被拒绝的编辑不计数。还没有阶段 A 报告的 critical 事件（`stage-a-missing.test.ts`）在 Alertmanager 中 60 秒后先发不带证据卡的消息，阶段 A 生成后编辑为完整报告。说明行与最后一次编辑的内容在大事件上仍在 Telegram 的文字长度、实体数与实体总大小之内（`notify-reason-lines.test.ts`）。

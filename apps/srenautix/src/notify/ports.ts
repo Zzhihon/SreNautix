@@ -140,8 +140,11 @@ export interface MessageSource {
   withheld?(): Promise<WithheldIncident[]>;
   /** 某条消息第一次成功送达：提议的 TTL 从此开始计算。 */
   delivered(incidentId: string, proposalIds: string[], at: Date): Promise<void>;
-  /** 外部上游在 [from, to) 内的汇总统计（ADR 0147）；没有启用外部上游汇总时不实现 */
-  externalWindow?(from: Date, to: Date): Promise<ExternalWindowStats>;
+  /**
+   * 外部上游在 [from, to) 内的汇总统计（ADR 0147）；没有启用外部上游汇总时不实现。prev 是上一时段已存的统计：在上一时段
+   * 开始、没有计入 prev 的外部上游事件（统计之后才入库）放进本时段的 late；prev 为 null 或没有 considered 时不找
+   */
+  externalWindow?(from: Date, to: Date, prev: ExternalWindowStats | null): Promise<ExternalWindowStats>;
   /**
    * 一条事件消息（notify_messages.id 为 messageId）第一次送达后调用：它是这个事件在所有渠道目标上的第一条消息时，
    * 返回两个计时起点与是否业务影响类（ADR 0159、0165），之前已有消息送达时返回 null。不实现时不记录首条消息时延

@@ -417,6 +417,7 @@ notify:
     external_roots:
       enabled: {{ .enabled }}
       period: {{ .period }}
+      grace: {{ .grace }}
       components: {{ toJson .components }}
       alert_labels: {{ toJson .alertLabels }}
       business_impact:

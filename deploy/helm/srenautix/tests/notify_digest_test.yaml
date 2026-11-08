@@ -10,19 +10,20 @@ capabilities:
   majorVersion: "1"
   minorVersion: "34"
 tests:
-  - it: 默认开启，周期 1 小时，没有另外的组件与告警条件；业务影响按 30 分钟时间窗与 6 跳拓扑判定相关性
+  - it: 默认开启，周期 1 小时，周期结束后等待 30 秒，没有另外的组件与告警条件；业务影响按 30 分钟时间窗与 6 跳拓扑判定相关性
     template: templates/role-resources.yaml
     documentSelector: {path: metadata.name, value: t-srenautix-server-config}
     asserts:
       - matchRegex:
           path: 'data["config.yaml"]'
-          pattern: '(?m)^notify:\n  digest:\n    external_roots:\n      alert_labels: \{\}\n      business_impact:\n        alert_labels: \{\}\n        impact_cards: true\n        topology_hops: 6\n        within: 30m\n      components: \[\]\n      enabled: true\n      period: 1h$'
+          pattern: '(?m)^notify:\n  digest:\n    external_roots:\n      alert_labels: \{\}\n      business_impact:\n        alert_labels: \{\}\n        impact_cards: true\n        topology_hops: 6\n        within: 30m\n      components: \[\]\n      enabled: true\n      grace: 30s\n      period: 1h$'
 
   - it: values 的驼峰键写成 server 配置的下划线键
     set:
       notifyDigest:
         externalRoots:
           period: 30m
+          grace: 90s
           components: [component:provider]
           alertLabels: {theme: [provider]}
           businessImpact: {alertLabels: {layer: [L0]}, impactCards: false, within: 15m, topologyHops: 0}
@@ -30,6 +31,7 @@ tests:
     documentSelector: {path: metadata.name, value: t-srenautix-server-config}
     asserts:
       - matchRegex: {path: 'data["config.yaml"]', pattern: '(?m)^      period: 30m$'}
+      - matchRegex: {path: 'data["config.yaml"]', pattern: '(?m)^      grace: 90s$'}
       - matchRegex: {path: 'data["config.yaml"]', pattern: '(?m)^      components:\n      - component:provider$'}
       - matchRegex: {path: 'data["config.yaml"]', pattern: '(?m)^      alert_labels:\n        theme:\n        - provider$'}
       - matchRegex:

@@ -3,6 +3,8 @@ import type { Channel, EvidenceResult, Incident, TopologyEdge, TopologyNode } fr
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { TelegramAdapter } from '../../src/channels/telegram/adapter.js';
 import { TelegramClient } from '../../src/channels/telegram/client.js';
+import { parseDuration } from '../../src/config/files.js';
+import { NOTIFY_RULES_DEFAULT } from '../../src/config/server.js';
 import { ServerMetrics } from '../../src/metrics.js';
 import { NotifyEngine } from '../../src/notify/engine.js';
 import { ExternalRoots, externalTypeLookup, pgImpactAlerts, topologyPaths } from '../../src/notify/external.js';
@@ -31,6 +33,8 @@ const send = `/bot${TOKEN}/sendMessage`;
 const edit = `/bot${TOKEN}/editMessageText`;
 const H10 = Date.parse('2026-10-24T10:00:00Z');
 const min = (m: number) => new Date(H10 + m * 60_000);
+// 周期结束后的等待取 server 配置的默认值（notify.digest.external_roots.grace）
+const GRACE_MS = parseDuration('grace', NOTIFY_RULES_DEFAULT.digest.external_roots.grace);
 
 class NoActions implements NotifyActions {
   private ok = async (): Promise<ActionOutcome> => ({ ok: true, message: 'ok' });
@@ -50,6 +54,7 @@ let fs: FixtureServer;
 let now: number;
 let engine: NotifyEngine;
 let source: PgMessageSource;
+let metrics: ServerMetrics;
 
 const TYPES = [
   { id: 'cchp.provider', external: true, match: { kind: 'provider' } },
@@ -241,7 +246,7 @@ beforeEach(async () => {
   fs.on('POST', send, [fixture('telegram', 'send-message.ok')]);
   fs.on('POST', edit, [fixture('telegram', 'edit-message-text.ok')]);
   now = min(50).getTime();
-  const metrics = new ServerMetrics('server', false);
+  metrics = new ServerMetrics('server', false);
   const store = new NotifyStore(db.server);
   const reports = new ReportSource(
     db.server,
@@ -310,7 +315,7 @@ beforeEach(async () => {
       prefix: '[影子]',
       consoleUrl: 'https://srenautix.example.test',
       digestRetentionMs: 6 * 3_600_000,
-      externalDigestPeriodMs: 3_600_000,
+      externalDigest: { periodMs: 3_600_000, graceMs: GRACE_MS },
       now: () => now,
     },
   );
@@ -372,15 +377,24 @@ describe('外部上游的周期汇总', () => {
     expect(r.rows.some((x) => x.def.includes('incident_id IS NOT NULL'))).toBe(true);
   });
 
-  it('一小时内多个 provider 的事件不逐条推送，整点后只发 1 条摘要，之后不再重发', async () => {
+  it('一小时内多个 provider 的事件不逐条推送，整点后等待 30 秒只发 1 条摘要，之后不再重发；记下发送延迟', async () => {
+    expect(GRACE_MS).toBe(30_000);
     await seedHour();
     await round(min(50));
     expect(sent()).toHaveLength(0);
-    // 周期结束后等一分钟再统计
-    await round(min(60.5));
+    // 周期结束后等待 30 秒再统计与发送
+    await round(new Date(min(60).getTime() + 29_000));
     expect(sent()).toHaveLength(0);
-    await round(min(61.5));
+    await round(new Date(min(60).getTime() + 30_000));
     expect(sent()).toHaveLength(1);
+    // 汇总的发送延迟：送达时刻相对周期结束 30 秒（测试时钟在一轮之内不走）
+    const delay = (await metrics.registry.metrics())
+      .split('\n')
+      .filter((l) => l.startsWith('srenautix_notify_external_digest_delay_seconds_'));
+    expect(delay).toContain('srenautix_notify_external_digest_delay_seconds_sum{channel="telegram"} 30');
+    expect(delay).toContain('srenautix_notify_external_digest_delay_seconds_count{channel="telegram"} 1');
+    expect(delay).toContain('srenautix_notify_external_digest_delay_seconds_bucket{le="30",channel="telegram"} 1');
+    expect(delay).toContain('srenautix_notify_external_digest_delay_seconds_bucket{le="20",channel="telegram"} 0');
     const body = sent()[0]!;
     expect(body.disable_notification).toBe(true);
     const { text } = parseTelegramHtml(String(body.text));
@@ -440,7 +454,7 @@ describe('外部上游的周期汇总', () => {
     expect(await source.externalState(theme)).toBeNull();
     // 整点的摘要仍然发出，写明业务影响、相关的上游与已即时推送
     fs.requests.length = 0;
-    await round(min(61.5));
+    await round(min(60.5));
     const digest = sent()
       .map((b) => parseTelegramHtml(String(b.text)).text)
       .find((t) => t.includes('外部上游汇总'));
@@ -468,7 +482,7 @@ describe('外部上游的周期汇总', () => {
     expect(sent()).toHaveLength(0);
     expect(await source.externalState(kimi)).toBe('firing');
     expect(await source.externalState(theme)).toBe('firing');
-    await round(min(61.5));
+    await round(min(60.5));
     expect(sent()).toHaveLength(1);
     const { text } = parseTelegramHtml(String(sent()[0]!.text));
     expect(text).toContain(
@@ -491,7 +505,7 @@ describe('外部上游的周期汇总', () => {
     expect(sent()).toHaveLength(0);
     expect(await source.externalState(kimi)).toBe('firing');
     expect(await source.externalState(theme)).toBe('firing');
-    await round(min(61.5));
+    await round(min(60.5));
     expect(sent()).toHaveLength(1);
     const { text } = parseTelegramHtml(String(sent()[0]!.text));
     expect(text).toContain(
@@ -534,11 +548,69 @@ describe('外部上游的周期汇总', () => {
     expect(await source.externalState(payments)).toBeNull();
     expect(await source.externalState(kimi)).toBe('firing');
     fs.requests.length = 0;
-    await round(min(61.5));
+    await round(min(60.5));
     const digest = parseTelegramHtml(String(sent()[0]!.text)).text;
     expect(digest).toContain(
       '业务影响：ShopCheckoutErrorBudgetBurn（10:55 起，未恢复；拓扑路径 Deployment:shop/checkout → payments），相关事件已即时推送',
     );
+  });
+
+  it('在时段末尾开始、等待 30 秒之后才入库的上游事件进入下一条汇总，写明所属的时段与开始时间，不丢', async () => {
+    await seedHour();
+    await round(min(60.5));
+    expect(sent()).toHaveLength(1);
+    // 10:59:48 与 10:59:54 开始的两个上游事件在 11:00:30 统计之后才入库：一个 10:59:54 已恢复，一个仍在触发
+    const xinghe = await seedIncident({
+      root: 'provider:01a16b20-0c3e-7a51-9f4d-2b8e6a1c7d90',
+      name: '星河',
+      alertname: 'UpstreamErrorRatioHigh',
+      at: min(59.8),
+      ended: min(59.9),
+    });
+    const yunshan = await seedIncident({
+      root: 'provider:01a16b21-5d7f-7b62-8e1a-3c9f7b2d8ea1',
+      name: '云杉',
+      alertname: 'UpstreamErrorRatioHigh',
+      at: min(59.9),
+      ended: null,
+    });
+    fs.requests.length = 0;
+    await round(min(120.5));
+    expect(sent()).toHaveLength(1);
+    const { text } = parseTelegramHtml(String(sent()[0]!.text));
+    const lines = text.split('\n');
+    expect(lines[0]).toBe('[影子] 外部上游汇总 11:00–12:00 UTC');
+    // 迟到的两个属于上一时段：与上一时段的 4 个合在一起作为对比的基准
+    expect(text).toContain('本时段 4 个上游有问题（上一时段 6 个）：新增 0、持续 4；未恢复 4、已恢复 0。');
+    expect(lines).toContain('- 云杉 告警 UpstreamErrorRatioHigh · 触发 0 次（上一时段 1 次） · 未恢复');
+    const heading = lines.indexOf('在上一时段 10:00–11:00 开始、那一时段统计之后才入库的上游：');
+    expect(heading).toBeGreaterThan(0);
+    expect(lines.slice(heading + 1, heading + 3)).toEqual([
+      '- 云杉 告警 UpstreamErrorRatioHigh · 触发 1 次 · 10:59 开始 · 未恢复',
+      '- 星河 告警 UpstreamErrorRatioHigh · 触发 1 次 · 10:59 开始 · 10:59 恢复',
+    ]);
+    expect(text).toContain('上一时段有问题、本时段没有告警：lcodex');
+    // 统计里记下了计入的事件与迟到的事件：重发与重新渲染用同一份
+    const late = await db.server.query<{ stats: { late: { roots: Array<{ root: string }> } | null } }>(
+      `SELECT stats FROM server.notify_external_windows WHERE window_start = '2026-10-24T11:00:00Z'`,
+    );
+    expect(late.rows[0]!.stats.late!.roots.map((r) => r.root)).toEqual([
+      'provider:01a16b21-5d7f-7b62-8e1a-3c9f7b2d8ea1',
+      'provider:01a16b20-0c3e-7a51-9f4d-2b8e6a1c7d90',
+    ]);
+    const prior = await db.server.query<{ stats: { considered: string[] } }>(
+      `SELECT stats FROM server.notify_external_windows WHERE window_start = '2026-10-24T10:00:00Z'`,
+    );
+    expect(prior.rows[0]!.stats.considered).toHaveLength(4);
+    expect(prior.rows[0]!.stats.considered).not.toContain(xinghe);
+    expect(prior.rows[0]!.stats.considered).not.toContain(yunshan);
+    const delay = (await metrics.registry.metrics())
+      .split('\n')
+      .filter((l) => l.startsWith('srenautix_notify_external_digest_delay_seconds_'));
+    expect(delay).toContain('srenautix_notify_external_digest_delay_seconds_sum{channel="telegram"} 60');
+    expect(delay).toContain('srenautix_notify_external_digest_delay_seconds_count{channel="telegram"} 2');
+    await round(min(125));
+    expect(sent()).toHaveLength(1);
   });
 
   it('关闭外部上游汇总时照常逐条推送', async () => {

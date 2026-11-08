@@ -222,6 +222,7 @@ const labelMatch = z.record(z.string().min(1), z.array(z.string().min(1)).min(1)
 const EXTERNAL_ROOTS_DEFAULT = {
   enabled: true,
   period: '1h',
+  grace: '30s',
   components: [] as string[],
   alert_labels: {} as Record<string, string[]>,
   business_impact: {
@@ -235,11 +236,13 @@ const EXTERNAL_ROOTS_DEFAULT = {
 // 或全部成员告警都满足 alert_labels 的事件，不逐条推送、不开 issue，每个周期（按 UTC 对齐，1h 即整点）汇总一条；
 // 同时有与这个上游事件相关的业务影响（ADR 0150：notify.business_impact_alerts 定义的业务影响告警（ADR 0166），或
 // impact_cards 为 true 时其他事件异常的影响卡，在上游事件开始后 within 之内开始，或组件沿依赖边 topology_hops 跳以内到达
-// 上游根因；本事件异常的影响卡）时照常即时推送
+// 上游根因；本事件异常的影响卡）时照常即时推送。grace 是周期结束后等待多久再统计与发送（0s 到 120s），只影响 server
+// 发送汇总的时刻
 const externalRoots = z
   .object({
     enabled: z.boolean().default(true),
     period: duration.default('1h'),
+    grace: duration.default('30s'),
     components: z.array(z.string().min(1)).default([]),
     alert_labels: labelMatch.default({}),
     business_impact: z
@@ -968,6 +971,10 @@ export function parseServerConfig(raw: unknown): ServerConfig {
   const period = parseDuration('notify.digest.external_roots.period', c.notify.digest.external_roots.period);
   if (period < 5 * 60_000 || period > 24 * 3_600_000) {
     throw new ConfigError('notify.digest.external_roots.period 必须在 5m 与 24h 之间');
+  }
+  const grace = parseDuration('notify.digest.external_roots.grace', c.notify.digest.external_roots.grace);
+  if (grace > 120_000) {
+    throw new ConfigError('notify.digest.external_roots.grace 必须在 0s 与 120s 之间');
   }
   const ids = c.ingest.sources.map((s) => s.id);
   if (new Set(ids).size !== ids.length) {
