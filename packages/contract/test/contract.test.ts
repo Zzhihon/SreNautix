@@ -1,6 +1,8 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { Ajv2020 } from 'ajv/dist/2020.js';
+import addFormats from 'ajv-formats';
 import { describe, expect, it } from 'vitest';
 import { parse } from 'yaml';
 import {
@@ -11,6 +13,7 @@ import {
   REASON_CODES,
   reasonEntry,
   reasonText,
+  SCHEMA_BASE,
   SCHEMAS,
   validatorFor,
 } from '../src/index.js';
@@ -219,6 +222,39 @@ describe('黄金夹具', () => {
     expect(() => assertValid('schemas/events.schema.json', { ...merged, type: 'incident.updated' })).toThrow(
       ContractViolation,
     );
+  });
+});
+
+/** OpenAPI 组件按 openapi.yaml 校验：文档以它的 $id 注册，相对引用解析到内嵌的契约 schema */
+describe('事件摘要的问题陈述（契约 2.52.0）', () => {
+  const ID = `${SCHEMA_BASE}openapi.yaml`;
+  const ajv = new Ajv2020({ allErrors: true, strict: false, allowUnionTypes: true });
+  addFormats.default(ajv);
+  for (const s of Object.values(SCHEMAS)) {
+    ajv.addSchema(s);
+  }
+  ajv.addSchema({ $id: ID, ...(parse(readFileSync(join(contractDir, 'openapi.yaml'), 'utf8')) as object) });
+  const summary = ajv.getSchema(`${ID}#/components/schemas/IncidentSummary`)!;
+  const valid = fixture('incident-summary.valid.json');
+  const headline = valid.headline as Record<string, unknown>;
+
+  it('headline 为对象或 null；注解与研判结论可以为 null', () => {
+    expect(summary(valid), JSON.stringify(summary.errors)).toBe(true);
+    expect(summary({ ...valid, headline: null })).toBe(true);
+    expect(summary({ ...valid, headline: { ...headline, summary: null, research_summary: null } })).toBe(true);
+  });
+
+  it('headline 必填，五个字段都必填，不接受多余字段', () => {
+    const missing: Record<string, unknown> = { ...valid };
+    delete missing.headline;
+    expect(summary(missing)).toBe(false);
+    for (const k of Object.keys(headline)) {
+      const partial: Record<string, unknown> = { ...headline };
+      delete partial[k];
+      expect(summary({ ...valid, headline: partial }), k).toBe(false);
+    }
+    expect(summary({ ...valid, headline: { ...headline, severity: 'critical' } })).toBe(false);
+    expect(summary({ ...valid, headline: { ...headline, started_at: '11-08 15:40' } })).toBe(false);
   });
 });
 

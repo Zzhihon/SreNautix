@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: SreNautix hub API
-  version: 2.51.0
+  version: 2.52.0
   license:
     name: Apache-2.0
     identifier: Apache-2.0
@@ -2721,11 +2721,15 @@ components:
         - research_root
         - categories
         - primary_category
+        - headline
       properties:
         incident_id: { $ref: './schemas/common.schema.json#/$defs/Uuid' }
         cluster_id: { $ref: './schemas/common.schema.json#/$defs/ClusterId' }
         label: { $ref: './schemas/incident.schema.json#/$defs/IncidentLabel' }
         incident_version: { type: integer, minimum: 1 }
+        headline:
+          description: 这个事件出了什么问题、什么时候开始（契约 2.52.0，ADR 0190）；事件没有仍在其中的成员告警时为 null
+          oneOf: [{ type: 'null' }, { $ref: '#/components/schemas/IncidentHeadline' }]
         state: { type: string, enum: [firing, resolved, merged] }
         severity: { $ref: './schemas/common.schema.json#/$defs/Severity' }
         categories:
@@ -2766,6 +2770,25 @@ components:
         research_root:
           description: 最近一次完成、给出了根因的研判的根因，及它与事件根因是否不一致（ADR 0104 §14）；没有这样的研判时为 null
           oneOf: [{ type: 'null' }, { $ref: './schemas/incident.schema.json#/$defs/ResearchRoot' }]
+    IncidentHeadline:
+      type: object
+      additionalProperties: false
+      description: |
+        事件的问题陈述（契约 2.52.0，ADR 0190）。头条告警与通知标题的症状告警是同一组：仍在事件中、正在触发的 symptom 告警；
+        没有时取正在触发的 critical 告警；再没有时取全部仍在事件中的告警。组内取开始时间最早的一条，同时开始时取 alert_id 较小的
+      required: [alert_id, alertname, summary, started_at, research_summary]
+      properties:
+        alert_id: { type: string, description: 头条告警的 alert_id }
+        alertname: { type: string }
+        summary:
+          type: [string, 'null']
+          description: 头条告警的 summary 注解，没有时取 description 注解；都没有时为 null。告警注解原文，属于不可信文本
+        started_at:
+          description: 头条告警的开始时间
+          $ref: './schemas/common.schema.json#/$defs/Timestamp'
+        research_summary:
+          type: [string, 'null']
+          description: 最近一次完成的研判的一句话结论（ResearchRunSummary.summary）；没有完成的研判或研判没有结论时为 null
     ResearchState:
       type: string
       description: |

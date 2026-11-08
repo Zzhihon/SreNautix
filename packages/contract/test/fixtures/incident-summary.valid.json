@@ -1,0 +1,33 @@
+{
+  "incident_id": "0b7f9a52-4f0e-4b64-9e8e-1c2d3e4f5a6b",
+  "cluster_id": "shop-prod",
+  "label": "Deployment:shop/api:2026-10-15T10:20:00Z",
+  "incident_version": 3,
+  "headline": {
+    "alert_id": "a1b2c3d4e5f60718@1760523660",
+    "alertname": "ApiErrorRateHigh",
+    "summary": "api 5xx 比例 12%，超过 5%",
+    "started_at": "2026-10-15T10:21:00Z",
+    "research_summary": "pg-main 主库切换期间连接被拒绝，api 返回 5xx"
+  },
+  "state": "firing",
+  "severity": "critical",
+  "categories": ["availability"],
+  "primary_category": "availability",
+  "root_component": "Deployment:shop/api",
+  "ambiguous": false,
+  "first_firing_at": "2026-10-15T10:21:00Z",
+  "ended_at": null,
+  "disposition": "act",
+  "conclusion_level": "likely",
+  "research_fresh_at": "2026-10-15T10:25:00Z",
+  "pending_approvals": 0,
+  "feedback": null,
+  "merged_from_count": 0,
+  "split_from": null,
+  "suppressed": false,
+  "observability_blind": false,
+  "updated_at": "2026-10-15T10:25:00Z",
+  "component_names": {},
+  "research_root": null
+}

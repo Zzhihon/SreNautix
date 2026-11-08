@@ -4723,6 +4723,21 @@ export type components = {
      */
     IncidentCategory: 'availability' | 'performance' | 'provider' | 'platform' | 'observability' | 'unclassified';
     /**
+     * @description 事件的问题陈述（契约 2.52.0，ADR 0190）。头条告警与通知标题的症状告警是同一组：仍在事件中、正在触发的 symptom 告警；
+     *     没有时取正在触发的 critical 告警；再没有时取全部仍在事件中的告警。组内取开始时间最早的一条，同时开始时取 alert_id 较小的
+     */
+    IncidentHeadline: {
+      /** @description 头条告警的 alert_id */
+      alert_id: string;
+      alertname: string;
+      /** @description 最近一次完成的研判的一句话结论（ResearchRunSummary.summary）；没有完成的研判或研判没有结论时为 null */
+      research_summary: string | null;
+      /** @description 头条告警的开始时间 */
+      started_at: components['schemas']['Timestamp'];
+      /** @description 头条告警的 summary 注解，没有时取 description 注解；都没有时为 null。告警注解原文，属于不可信文本 */
+      summary: string | null;
+    };
+    /**
      * IncidentLabel
      * @description 稳定标签 <根组件>:<首次触发时间取整到 10 分钟>，同一标签冲突时追加 ~2、~3
      */
@@ -4761,6 +4776,8 @@ export type components = {
       /** @description 最新一条反馈；没有时为 null */
       feedback: null | components['schemas']['feedback.schema'];
       first_firing_at: components['schemas']['Timestamp'];
+      /** @description 这个事件出了什么问题、什么时候开始（契约 2.52.0，ADR 0190）；事件没有仍在其中的成员告警时为 null */
+      headline: null | components['schemas']['IncidentHeadline'];
       incident_id: components['schemas']['Uuid'];
       incident_version: number;
       label: components['schemas']['IncidentLabel'];
