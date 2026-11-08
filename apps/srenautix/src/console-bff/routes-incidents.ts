@@ -16,6 +16,7 @@ import type pg from 'pg';
 import { badRequest, notFound } from '../api/errors.js';
 import type { Auth } from '../identity/auth.js';
 import { scopeMatches, type RoleBinding, type Target } from '../identity/bindings.js';
+import { alertStatement, headlineMember } from '../incident/headline.js';
 import { withComponentNames } from '../incident/names.js';
 import { incidentConditions, parseCategoryFilters, rowCategories } from './incident-filters.js';
 import { incidentVersion, latestStageA, resolveIncidentRef, type IncidentRow } from '../incident/read.js';
@@ -93,13 +94,21 @@ async function summaries(pool: pg.Pool, feedback: FeedbackService, topology: Top
     state: string;
     disposition: string | null;
     conclusion_level: string | null;
+    summary: string | null;
     started_at: Date;
     finished_at: Date | null;
   }>(
-    `SELECT DISTINCT ON (incident_id) incident_id, state, disposition, conclusion_level, started_at, finished_at FROM server.research_runs
+    `SELECT DISTINCT ON (incident_id) incident_id, state, disposition, conclusion_level, summary, started_at, finished_at FROM server.research_runs
       WHERE incident_id = ANY($1::uuid[]) AND state = 'completed' ORDER BY incident_id, started_at DESC`,
     [ids],
   );
+  // 头条告警与它的注解（ADR 0190）：告警已不在告警状态表时没有注解
+  const heads = new Map(rows.map((r) => [r.incident_id, headlineMember(r.body)]));
+  const headAlerts = await alertsById(
+    pool,
+    [...heads.values()].flatMap((m) => (m ? [m.alert_id] : [])),
+  );
+  const ha = new Map(headAlerts.map((a) => [`${a.cluster_id}\0${a.alert_id}`, a]));
   const pending = await pool.query<{ incident_id: string; n: number }>(
     "SELECT incident_id, count(*)::int AS n FROM server.proposals WHERE incident_id = ANY($1::uuid[]) AND state = 'awaiting_approval' GROUP BY incident_id",
     [ids],
@@ -126,11 +135,22 @@ async function summaries(pool: pg.Pool, feedback: FeedbackService, topology: Top
       .filter((x): x is Date => !!x)
       .sort((a, b) => b.getTime() - a.getTime())[0];
     const fb: Feedback | undefined = fbs.get(r.incident_id);
+    const head = heads.get(r.incident_id) ?? null;
+    const headAlert = head ? ha.get(`${r.cluster_id}\0${head.alert_id}`) : undefined;
     return {
       incident_id: r.incident_id,
       cluster_id: r.cluster_id,
       label: r.label,
       incident_version: r.version,
+      headline: head
+        ? {
+            alert_id: head.alert_id,
+            alertname: head.alertname,
+            summary: headAlert ? alertStatement(headAlert) : null,
+            started_at: head.starts_at,
+            research_summary: run?.summary || null,
+          }
+        : null,
       state: r.state,
       severity: r.body.severity,
       ...rowCategories(r),
