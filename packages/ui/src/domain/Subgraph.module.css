@@ -1,5 +1,22 @@
+/* 画布与侧栏并排；全屏时整块铺满屏幕，侧栏留在全屏范围内 */
+.frame {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  background: var(--sn-bg);
+}
+.frame[data-open] {
+  grid-template-columns: minmax(0, 1fr) 280px;
+}
+.frame:fullscreen {
+  grid-template-rows: minmax(0, 1fr);
+  padding: 12px;
+  height: 100vh;
+  box-sizing: border-box;
+}
 .wrap {
-  height: 260px;
+  position: relative;
+  height: 320px;
   border: 1px solid var(--sn-line);
   border-radius: 6px;
   background: var(--sn-bg);
@@ -7,6 +24,32 @@
   --xy-edge-label-background-color: var(--sn-panel);
   --xy-edge-label-color: var(--sn-dim);
   --xy-background-pattern-color: var(--sn-line-soft);
+  --xy-controls-button-background-color: var(--sn-panel);
+  --xy-controls-button-background-color-hover: var(--sn-raise);
+  --xy-controls-button-color: var(--sn-text);
+  --xy-controls-button-color-hover: var(--sn-text);
+  --xy-controls-button-border-color: var(--sn-line);
+  --xy-controls-box-shadow: 0 0 0 1px var(--sn-line);
+  --xy-minimap-background-color: var(--sn-panel);
+  --xy-minimap-mask-background-color: color-mix(in srgb, var(--sn-bg) 70%, transparent);
+  --xy-minimap-mask-stroke-color: var(--sn-edge);
+  --xy-minimap-node-background-color: var(--sn-line);
+  --xy-minimap-node-stroke-color: var(--sn-edge);
+}
+.frame:fullscreen .wrap {
+  height: auto;
+  min-height: 0;
+}
+.wrap :global(.react-flow__controls-button svg) {
+  fill: currentColor;
+}
+.wrap :global(.react-flow__controls-button:focus-visible),
+.wrap :global(.react-flow__node:focus-visible) {
+  outline: 2px solid var(--sn-focus);
+  outline-offset: 2px;
+}
+.wrap :global(.react-flow__minimap) {
+  border: 1px solid var(--sn-line);
 }
 .node {
   width: 180px;
@@ -20,6 +63,7 @@
   flex-direction: column;
   justify-content: center;
   font-size: 12px;
+  cursor: pointer;
 }
 .node[data-role='root'] {
   border: 2px solid var(--sn-bad);
@@ -30,6 +74,9 @@
 .node[data-role='neighbor'] {
   border-style: dashed;
   color: var(--sn-dim);
+}
+.node[data-selected] {
+  box-shadow: 0 0 0 3px var(--sn-focus);
 }
 .name {
   font-weight: 600;
@@ -50,4 +97,132 @@
 .weak {
   opacity: 0.5;
   stroke-dasharray: 4 3;
+}
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 320px;
+  overflow: auto;
+  padding: 10px 12px;
+  border: 1px solid var(--sn-line);
+  border-radius: 6px;
+  background: var(--sn-panel);
+  color: var(--sn-text);
+  font-size: 12.5px;
+  box-sizing: border-box;
+}
+.frame:fullscreen .panel {
+  max-height: none;
+}
+.panelHead {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+.panelTitle {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.panelTitle:focus-visible {
+  outline: 2px solid var(--sn-focus);
+  outline-offset: 2px;
+}
+.close {
+  flex: none;
+  display: inline-flex;
+  padding: 2px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--sn-dim);
+  cursor: pointer;
+}
+.close:hover {
+  background: var(--sn-raise);
+  color: var(--sn-text);
+}
+.close:focus-visible {
+  outline: 2px solid var(--sn-focus);
+}
+.close svg {
+  width: 16px;
+  height: 16px;
+}
+.key {
+  overflow-wrap: anywhere;
+}
+.facts {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 3px 10px;
+  margin: 0;
+}
+.facts dt {
+  color: var(--sn-dim);
+}
+.facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.facts dd[data-role='root'] {
+  color: var(--sn-bad);
+  font-weight: 600;
+}
+.panelSub {
+  margin: 4px 0 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--sn-dim);
+}
+.alerts {
+  margin: 0;
+  padding-left: 18px;
+  overflow-wrap: anywhere;
+}
+.none {
+  margin: 0;
+  color: var(--sn-dim);
+}
+.panelLinks {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--sn-line-soft);
+}
+.link {
+  color: var(--sn-info);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.link:focus-visible {
+  outline: 2px solid var(--sn-focus);
+  outline-offset: 2px;
+}
+@media (max-width: 720px) {
+  .frame[data-open] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .panel {
+    max-height: none;
+  }
+  .frame:fullscreen[data-open] {
+    grid-template-rows: minmax(0, 1fr) auto;
+  }
+  .frame:fullscreen .panel {
+    max-height: 40vh;
+  }
 }

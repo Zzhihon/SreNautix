@@ -1,7 +1,9 @@
 import { createTheme } from '@grafana/data';
 import { SCHEMAS } from '@srenautix/contract';
-import { fireEvent, screen, within } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
+import { userEvent } from 'vitest/browser';
+import type { IncidentSubgraph } from '../contract';
 import { ErrorBoundary, setRenderErrorReporter, type RenderError } from '../primitives/ErrorBoundary';
 import { STATUS, Status } from '../primitives/Status';
 import {
@@ -9,6 +11,7 @@ import {
   evidence,
   feedback,
   incident,
+  incidentSummary,
   proposal,
   proposalDetail,
   researchOutput,
@@ -22,9 +25,11 @@ import { ConditionStrip } from './ConditionStrip';
 import { EvidenceCard } from './EvidenceCard';
 import { FeedbackControl, REASON_CODES } from './FeedbackControl';
 import { HypothesisList } from './HypothesisList';
+import { IncidentRow } from './IncidentRow';
 import { componentLabel, sortEvidence } from './model';
 import { ComponentNamesProvider } from './names';
 import { RunTrace, waterfall } from './RunTrace';
+import { MINIMAP_MIN_NODES, Subgraph } from './Subgraph';
 import { TimelineLane } from './TimelineLane';
 import { VerdictHeader } from './VerdictHeader';
 
@@ -617,5 +622,223 @@ describe('时间线', () => {
       ['研判没有结论', 'warn'],
     ]);
     expect(screen.getByText('不推送：事件被抑制')).toBeTruthy();
+  });
+});
+
+describe('收件箱的一行（ADR 0190）', () => {
+  const subRow = (row: HTMLElement, since: string) =>
+    [...(within(row).getByText(since).parentElement?.children ?? [])].slice(0, 3).map((e) => e.textContent);
+
+  it('标题是头条告警的问题陈述，副行先写开始时刻，研判结论单独一行，事件键与 ID 只在悬停提示里', () => {
+    const s = incidentSummary();
+    renderUi(<IncidentRow s={s} now={NOW} />);
+    const row = screen.getByRole('link');
+    expect(row.getAttribute('aria-label')).toBe(
+      '事件：gateway 5xx 比例 12%，超过 5%，10-19 14:18 起，根因 pg-main，集群 prod',
+    );
+    expect(within(row).getByText('gateway 5xx 比例 12%，超过 5%')).toBeTruthy();
+    expect(subRow(row, '10-19 14:18 起')).toEqual(['10-19 14:18 起', 'pg-main', 'prod']);
+    expect(within(row).getByTestId('research-summary').textContent).toBe(
+      '研判：pg-main 主库内存达到上限后重启，gateway 连接被拒绝',
+    );
+    expect(row.textContent).not.toContain(s.label);
+    expect(row.textContent).not.toContain(s.incident_id);
+    expect(row.getAttribute('title')).toBe(
+      [
+        '告警 GatewayErrorRateHigh',
+        '组件 postgres.cluster:db/pg-main',
+        `事件键 ${s.label}`,
+        `事件 ID ${s.incident_id}`,
+      ].join('\n'),
+    );
+  });
+
+  it('没有 summary 注解时标题是告警名；没有完成的研判时不显示研判行', () => {
+    const base = incidentSummary();
+    const s = incidentSummary({
+      headline: { ...base.headline!, summary: null, research_summary: null },
+    });
+    renderUi(<IncidentRow s={s} now={NOW} />);
+    const row = screen.getByRole('link');
+    expect(within(row).getByText('GatewayErrorRateHigh')).toBeTruthy();
+    expect(within(row).queryByTestId('research-summary')).toBeNull();
+    expect(row.getAttribute('title')?.split('\n')[0]).toBe('组件 postgres.cluster:db/pg-main');
+  });
+
+  it('没有头条告警时标题回到根因组件名，开始时刻取事件首次触发的时间（英文）', () => {
+    const s = incidentSummary({ headline: null, first_firing_at: '2026-10-19T06:05:00Z' });
+    renderUi(<IncidentRow s={s} now={NOW} />, { locale: 'en' });
+    const row = screen.getByRole('link');
+    expect(row.getAttribute('aria-label')).toBe('Incident: pg-main, since 10-19 14:05, root pg-main, cluster prod');
+    expect(subRow(row, 'since 10-19 14:05')).toEqual(['since 10-19 14:05', 'pg-main', 'prod']);
+    expect(within(row).queryByTestId('research-summary')).toBeNull();
+  });
+});
+
+describe('根因子图的交互（ADR 0191）', () => {
+  const ROOT = 'postgres.cluster:db/pg-main';
+  const GATEWAY = 'Deployment:app/gateway';
+  const graph: IncidentSubgraph = {
+    topology_version: 41,
+    root: ROOT,
+    nodes: [
+      {
+        component: ROOT,
+        kind: 'postgres.cluster',
+        namespace: 'db',
+        name: 'pg-main',
+        role: 'root',
+        alerts: ['a1@1'],
+        hops: 0,
+      },
+      {
+        component: GATEWAY,
+        kind: 'Deployment',
+        namespace: 'app',
+        name: 'gateway',
+        role: 'member',
+        alerts: [],
+        hops: 1,
+      },
+      {
+        component: 'StatefulSet:app/worker',
+        kind: 'StatefulSet',
+        namespace: 'app',
+        name: 'worker',
+        role: 'neighbor',
+        alerts: [],
+        hops: 2,
+      },
+    ],
+    edges: [
+      { from: GATEWAY, to: ROOT, relation: 'connects_to', provenance: 'runtime', confidence: 0.9, scope: 'instance' },
+      {
+        from: 'StatefulSet:app/worker',
+        to: GATEWAY,
+        relation: 'calls',
+        provenance: 'naming',
+        confidence: 0.4,
+        scope: 'service',
+      },
+    ],
+  };
+  const links = {
+    topology: (c: string, k: string) => `/topology?cluster=${c}&view=neighborhood&component=${encodeURIComponent(k)}`,
+    search: (q: string, c: string) => `/search?cluster=${c}&q=${encodeURIComponent(q)}`,
+  };
+  const node = (name: string) => screen.findByRole('group', { name });
+
+  it('单击节点打开侧栏：显示名与键、角色、告警，以及邻域与搜索链接；关闭按钮收起侧栏', async () => {
+    renderUi(<Subgraph graph={graph} clusterId="prod" alertLabel={(id) => `KubePodCrashLooping（${id}）`} />, {
+      links,
+    });
+    const rootEl = await node('pg-main，根因，1 条告警');
+    fireEvent.click(rootEl);
+    const panel = await screen.findByTestId('subgraph-panel');
+    expect(rootEl.querySelector('[data-selected]')).not.toBeNull();
+    expect(within(panel).getByRole('heading', { name: 'pg-main' })).toBeTruthy();
+    expect(within(panel).getByText(ROOT)).toBeTruthy();
+    expect(within(panel).getByText('根因')).toBeTruthy();
+    expect(within(panel).getByText('0 跳')).toBeTruthy();
+    expect(within(panel).getByRole('listitem').textContent).toBe('KubePodCrashLooping（a1@1）');
+    expect(within(panel).getByRole('link', { name: '以它为中心查看拓扑邻域' }).getAttribute('href')).toBe(
+      links.topology('prod', ROOT),
+    );
+    expect(within(panel).getByRole('link', { name: '搜索这个组件的事件' }).getAttribute('href')).toBe(
+      links.search(ROOT, 'prod'),
+    );
+    fireEvent.click(await node('gateway，成员，0 条告警'));
+    expect(within(await screen.findByTestId('subgraph-panel')).getByText('这个组件上没有成员告警')).toBeTruthy();
+    fireEvent.click(within(screen.getByTestId('subgraph-panel')).getByRole('button', { name: '关闭' }));
+    expect(screen.queryByTestId('subgraph-panel')).toBeNull();
+  });
+
+  it('宿主没有拓扑页与搜索页（或没有给集群）时侧栏不显示链接；告警显示 alert_id', async () => {
+    renderUi(<Subgraph graph={graph} />, { links });
+    fireEvent.click(await node('pg-main，根因，1 条告警'));
+    const panel = await screen.findByTestId('subgraph-panel');
+    expect(within(panel).queryByRole('navigation')).toBeNull();
+    expect(within(panel).getByRole('listitem').textContent).toBe('a1@1');
+  });
+
+  it('双击节点把组件键交给宿主', async () => {
+    const opened: string[] = [];
+    renderUi(<Subgraph graph={graph} clusterId="prod" onOpenComponent={(c) => opened.push(c)} />);
+    fireEvent.doubleClick(await node('gateway，成员，0 条告警'));
+    expect(opened).toEqual([GATEWAY]);
+  });
+
+  it('键盘：节点可以聚焦，回车打开侧栏并把焦点移到侧栏标题，Esc 关闭后焦点回到节点', async () => {
+    renderUi(<Subgraph graph={graph} clusterId="prod" />);
+    const root = await node('pg-main，根因，1 条告警');
+    expect(root.tabIndex).toBe(0);
+    root.focus();
+    fireEvent.keyDown(root, { key: 'Enter' });
+    const heading = within(await screen.findByTestId('subgraph-panel')).getByRole('heading', { name: 'pg-main' });
+    await waitFor(() => expect(document.activeElement).toBe(heading));
+    fireEvent.keyDown(heading, { key: 'Escape' });
+    expect(screen.queryByTestId('subgraph-panel')).toBeNull();
+    expect(document.activeElement).toBe(root);
+  });
+
+  it('缩放按钮与全屏按钮带文字标签；节点多于阈值时才显示小地图', async () => {
+    const { unmount } = renderUi(<Subgraph graph={graph} />);
+    await node('pg-main，根因，1 条告警');
+    for (const name of ['放大', '缩小', '适配视图']) {
+      expect(screen.getByRole('button', { name })).toBeTruthy();
+    }
+    expect(screen.queryByRole('button', { name: '全屏' }) !== null).toBe(document.fullscreenEnabled);
+    expect(document.querySelector('.react-flow__minimap')).toBeNull();
+    unmount();
+
+    const many: IncidentSubgraph = {
+      topology_version: 41,
+      root: null,
+      nodes: Array.from({ length: MINIMAP_MIN_NODES + 1 }, (_, i) => ({
+        component: `Deployment:app/svc-${i}`,
+        kind: 'Deployment',
+        namespace: 'app',
+        name: `svc-${i}`,
+        role: 'neighbor' as const,
+        alerts: [],
+        hops: 1,
+      })),
+      edges: [],
+    };
+    renderUi(<Subgraph graph={many} />);
+    await node('svc-0，邻居，0 条告警');
+    expect(document.querySelector('.react-flow__minimap')).not.toBeNull();
+  });
+
+  it('全屏：进入后子图与侧栏都在全屏范围内，退出后恢复进入前的缩放与位置', async () => {
+    renderUi(<Subgraph graph={graph} clusterId="prod" />);
+    const rootEl = await node('pg-main，根因，1 条告警');
+    const viewport = () => document.querySelector<HTMLElement>('.react-flow__viewport')?.style.transform;
+    await userEvent.click(screen.getByRole('button', { name: '放大' }));
+    await waitFor(() => expect(viewport()).toMatch(/scale/));
+    const before = viewport();
+    await userEvent.click(screen.getByRole('button', { name: '全屏' }));
+    await waitFor(() => expect(document.fullscreenElement).not.toBeNull());
+    expect(document.fullscreenElement?.contains(rootEl)).toBe(true);
+    fireEvent.click(rootEl);
+    expect(document.fullscreenElement?.contains(await screen.findByTestId('subgraph-panel'))).toBe(true);
+    await userEvent.click(screen.getByRole('button', { name: '退出全屏' }));
+    await waitFor(() => expect(document.fullscreenElement).toBeNull());
+    await waitFor(() => expect(viewport()).toBe(before));
+    expect(screen.getByRole('button', { name: '全屏' }).getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('浅色与深色下画布控件都取主题令牌', async () => {
+    for (const scheme of ['light', 'dark'] as const) {
+      const { unmount } = renderUi(<Subgraph graph={graph} />, { scheme });
+      await node('pg-main，根因，1 条告警');
+      const wrap = screen.getByRole('group', { name: '根因子图：3 个组件，2 条边' });
+      const css = getComputedStyle(wrap);
+      expect(css.getPropertyValue('--xy-controls-button-background-color').trim()).toBe(
+        DEFAULT_TOKENS[scheme].colors.panel,
+      );
+      expect(css.getPropertyValue('--xy-controls-button-color').trim()).toBe(DEFAULT_TOKENS[scheme].colors.text);
+      unmount();
+    }
   });
 });

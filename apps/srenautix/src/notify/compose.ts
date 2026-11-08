@@ -29,6 +29,7 @@ import {
   type ChangeBasis,
 } from '@srenautix/core';
 import { formatValue, OTHER_CLASS, type Unit } from '@srenautix/packs-sdk';
+import { headlineMembers } from '../incident/headline.js';
 import { parseStoredKey } from '../topology/keys.js';
 import type { Subgraph } from '../research/types.js';
 import {
@@ -1580,14 +1581,13 @@ export function composeMessage(i: ComposeInput): { message: NotifyMessage; targe
     banner = banner ? `${impact}${i.language === 'zh' ? '；' : '; '}${banner}` : impact;
   }
 
-  // ---- 症状短语：触发中的 symptom 告警，没有时为 critical 的告警；目录标题优先 ----
+  // ---- 症状短语：头条告警组（ADR 0190）；目录标题优先 ----
   const titleOf = (a: Alert) => i.alertTitle?.(a) ?? a.alertname;
   const firing = members.filter((m) => m.status === 'firing');
-  const pick = firing.filter((m) => m.role === 'symptom');
-  const pool = pick.length ? pick : firing.filter((m) => m.severity === 'critical');
+  const pool = headlineMembers(members);
   const symptoms = [
     ...new Set(
-      (pool.length ? pool : members).map((m) => {
+      pool.map((m) => {
         const a = alertsById.get(m.alert_id);
         return a ? titleOf(a) : m.alertname;
       }),

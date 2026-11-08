@@ -7,6 +7,7 @@ import type {
   EvidenceResult,
   Feedback,
   Incident,
+  IncidentSummary,
   Proposal,
   ProposalDetail,
   ResearchOutput,
@@ -160,6 +161,44 @@ export function proposalDetail(p: Proposal, over: Partial<ProposalDetail> = {}):
     undo: { kind: 'controller_rebuild', description: '控制器自动重建' },
     policy_rule: 'standard/l-tier-recreatable',
     model_rationale: 'worker-1 的 init 容器在等待迁移锁，重启后会重新获取。',
+    ...over,
+  };
+}
+
+/** 收件箱的一行（OpenAPI IncidentSummary，契约 2.52.0 起带 headline） */
+export function incidentSummary(over: Partial<IncidentSummary> = {}): IncidentSummary {
+  return {
+    incident_id: '3f2b8c1e-5d6a-4b7c-8d9e-0a1b2c3d4e5f',
+    cluster_id: 'prod',
+    label: 'postgres.cluster:db/pg-main:2026-10-19T06:10:00Z',
+    incident_version: 3,
+    headline: {
+      alert_id: 'f0e1d2c3b4a59687@1760854680',
+      alertname: 'GatewayErrorRateHigh',
+      summary: 'gateway 5xx 比例 12%，超过 5%',
+      started_at: '2026-10-19T06:18:00Z',
+      research_summary: 'pg-main 主库内存达到上限后重启，gateway 连接被拒绝',
+    },
+    state: 'firing',
+    severity: 'critical',
+    categories: ['availability'],
+    primary_category: 'availability',
+    root_component: 'postgres.cluster:db/pg-main',
+    ambiguous: false,
+    first_firing_at: T0,
+    ended_at: null,
+    disposition: 'act',
+    conclusion_level: 'evidence_consistent',
+    research_fresh_at: '2026-10-19T06:22:00Z',
+    pending_approvals: 0,
+    feedback: null,
+    merged_from_count: 0,
+    split_from: null,
+    suppressed: false,
+    observability_blind: false,
+    updated_at: '2026-10-19T06:24:10Z',
+    component_names: {},
+    research_root: null,
     ...over,
   };
 }

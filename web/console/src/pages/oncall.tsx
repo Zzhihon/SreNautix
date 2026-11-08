@@ -58,6 +58,9 @@ export function IncidentPage({
           replace: true,
         })
       }
+      onOpenComponent={(clusterId, component) =>
+        void navigate({ to: '/topology', search: { cluster: clusterId, view: 'neighborhood', component } })
+      }
     />
   );
 }
