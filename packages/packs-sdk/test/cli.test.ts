@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { startPrometheus, type FixtureMetricSeries, type TsdbInstance } from '@srenautix/integration-sdk';
 import { runPackCli } from '../src/cli.js';
+import { buildPackArtifact } from '../src/pack/oci.js';
 import type { QuerySnapshot } from '../src/runtime/snapshot.js';
 import { REPO } from './support.js';
 
@@ -81,6 +82,18 @@ afterAll(async () => {
 });
 
 describe('srenautix pack', () => {
+  it('digest 输出确定性制品的 digest，与 buildPackArtifact 一致；--pack 必须恰好一个', async () => {
+    const dir = join(REPO, 'packs', '_example');
+    out.length = 0;
+    expect(await runPackCli(['digest', '--pack', dir], io)).toBe(0);
+    expect(out.join('')).toBe(`${buildPackArtifact(dir).digest}\n`);
+    out.length = 0;
+    expect(await runPackCli(['digest', '--pack', dir, '--json'], io)).toBe(0);
+    expect(JSON.parse(out.join(''))).toMatchObject({ name: '_example', digest: buildPackArtifact(dir).digest });
+    await expect(runPackCli(['digest'], io)).rejects.toThrow(/一个 --pack/);
+    await expect(runPackCli(['push', '--pack', dir], io)).rejects.toThrow(/--repository/);
+  });
+
   it('lint 与 lock --check', async () => {
     out.length = 0;
     expect(await runPackCli(['lint', ...common], io)).toBe(0);

@@ -375,7 +375,8 @@ packs:
   revision: ""
   # OCI 仓库中经 cosign 签名的领域包（镜像内带 cosign 与 oras）。sources 的每一项原样写入 server 配置的 packs.oci.sources：
   # repository、digest（sha256 固定）、key_file 或 certificate_identity + certificate_oidc_issuer（见 apps/srenautix/src/config/server.ts）。
-  # key_file 写 /etc/srenautix/secrets/pack-keys/<键>，公钥放在 keySecret 指定的 Secret 中
+  # key_file 写 /etc/srenautix/secrets/pack-keys/<键>，公钥放在 keySecret 指定的 Secret 中；不上传 Rekor 的签名另写 ignore_tlog: true。
+  # 制品用 srenautix pack push 推送，digest 可以在推送前用 srenautix pack digest 从包目录算出（ADR 0188）
   oci:
     sources: []
     keySecret: ""

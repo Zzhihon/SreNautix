@@ -1,10 +1,19 @@
 import { execFile } from 'node:child_process';
-import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { backendsDir, ensureBackend, startOciRegistry, type OciRegistry } from '@srenautix/integration-sdk';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { CosignVerifier, loadOciPack, OciPackError, PACK_ARTIFACT_TYPE } from '../src/pack/oci.js';
+import {
+  buildPackArtifact,
+  CosignVerifier,
+  loadOciPack,
+  OciPackError,
+  PACK_ARTIFACT_TYPE,
+  pushPackArtifact,
+  writeOciLayout,
+} from '../src/pack/oci.js';
+import { loadPackDir } from '../src/pack/load.js';
 import { PACKS } from './support.js';
 
 const run = promisify(execFile);
@@ -19,6 +28,7 @@ let signed: string;
 let unsigned: string;
 let wrongType: string;
 let otherKey: string;
+let built: string;
 
 const env: NodeJS.ProcessEnv = { ...process.env, COSIGN_PASSWORD: 'srenautix-test', COSIGN_YES: 'true' };
 
@@ -89,6 +99,11 @@ beforeAll(async () => {
     { cwd: join(work, 'src'), env },
   );
   unsigned = (JSON.parse(stdout) as { digest: string }).digest;
+  // srenautix pack push 的路径：确定性构建，oras cp 推送，cosign 签名
+  const a = buildPackArtifact(join(work, 'src', '_example'));
+  await pushPackArtifact(a, { repository: repo, tag: 'built', oras, plain_http: true });
+  built = a.digest;
+  await sign(built);
 }, 600_000);
 
 afterAll(async () => {
@@ -179,5 +194,45 @@ describe('OCI 来源的领域包', () => {
     expect(
       () => new CosignVerifier({ cosign, certificate_identity: 'x', certificate_oidc_issuer: 'y', ignore_tlog: true }),
     ).toThrow();
+  });
+});
+
+describe('确定性的领域包制品', () => {
+  it('同样的文件内容得到同样的 digest：与修改时间、权限位无关，内容变了 digest 跟着变', () => {
+    const dir = join(work, 'det', '_example');
+    cpSync(join(PACKS, '_example'), dir, { recursive: true });
+    const a = buildPackArtifact(dir);
+    expect(a.name).toBe('_example');
+    expect(a.digest).toMatch(/^sha256:[0-9a-f]{64}$/);
+    expect(buildPackArtifact(dir).digest).toBe(a.digest);
+    utimesSync(join(dir, 'pack.yaml'), new Date(0), new Date(86_400_000));
+    expect(buildPackArtifact(dir).digest).toBe(a.digest);
+    writeFileSync(join(dir, 'pack.yaml'), readFileSync(join(dir, 'pack.yaml'), 'utf8') + '\n');
+    expect(buildPackArtifact(dir).digest).not.toBe(a.digest);
+  });
+
+  it('oras 从 OCI 布局拉取时解开成 <包名>/，文件与源目录逐字节相同', async () => {
+    const a = buildPackArtifact(join(PACKS, '_example'));
+    const layout = join(work, 'layout');
+    writeOciLayout(a, layout, 'v1');
+    const out = join(work, 'layout-pull');
+    await run(oras, ['pull', '--oci-layout', '--output', out, `${layout}:v1`], { env });
+    const src = loadPackDir(join(PACKS, '_example'), 'dir:src');
+    const got = loadPackDir(join(out, '_example'), 'dir:got');
+    expect(got.files).toEqual(src.files);
+    expect(got.files.length).toBe(a.files);
+  });
+
+  it('推送到仓库后 digest 不变，签名通过后按 digest 加载', async () => {
+    const r = await loadOciPack({
+      repository: repo,
+      digest: built,
+      verifier: verifier(join(work, 'keys', 'cosign.pub')),
+      oras,
+      dir: join(work, 'pull-built'),
+      plain_http: true,
+    });
+    expect(r.pack.name).toBe('_example');
+    expect(r.pack.files).toEqual(loadPackDir(join(PACKS, '_example'), 'dir:src').files);
   });
 });

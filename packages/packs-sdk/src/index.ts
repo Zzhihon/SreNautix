@@ -41,6 +41,9 @@ export {
 export { convertPromtoolTests, type ConvertedFixtures } from './pack/promtool-fixtures.js';
 export {
   loadOciPack,
+  buildPackArtifact,
+  pushPackArtifact,
+  writeOciLayout,
   CosignVerifier,
   OciPackError,
   PACK_ARTIFACT_TYPE,
@@ -48,6 +51,8 @@ export {
   type CosignVerifierOptions,
   type OciPullOptions,
   type LoadedOciPack,
+  type PackArtifact,
+  type OciPushOptions,
 } from './pack/oci.js';
 export {
   compilePackSet,

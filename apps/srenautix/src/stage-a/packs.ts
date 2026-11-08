@@ -73,9 +73,14 @@ export interface OciPackSources {
   cosign: string;
   oras: string;
   cacheDir: string;
+  /**
+   * 失败后重试前的等待（毫秒），每项一次重试；默认 [2000, 8000]。server 只在启动时加载领域包，
+   * 仓库或网络的短暂故障不应让包一直停用到下次重启；签名不对的来源也按此重试，启动最多多等约 10 秒
+   */
+  retryDelaysMs?: number[];
 }
 
-/** 校验并拉取 OCI 来源的包；失败（签名、制品类型、拉取、校验）时记为失败的包，不影响其他包。 */
+/** 校验并拉取 OCI 来源的包；失败（签名、制品类型、拉取、校验）时按 retryDelaysMs 重试，仍失败时记为失败的包，不影响其他包。 */
 async function loadOciSources(o: OciPackSources): Promise<{ loaded: LoadedPack[]; failures: PackFailure[] }> {
   const loaded: LoadedPack[] = [];
   const failures: PackFailure[] = [];
@@ -84,22 +89,25 @@ async function loadOciSources(o: OciPackSources): Promise<{ loaded: LoadedPack[]
     const dir = join(o.cacheDir, src.digest.replace(':', '-'));
     // 上次拉取的内容不复用：签名校验不通过时目录保持为空
     rmSync(dir, { recursive: true, force: true });
+    const delays = o.retryDelaysMs ?? [2000, 8000];
     try {
-      const r = await loadOciPack({
-        repository: src.repository,
-        digest: src.digest,
-        verifier: new CosignVerifier({
-          cosign: o.cosign,
-          ...(src.key_file ? { key: src.key_file } : {}),
-          ...(src.certificate_identity ? { certificate_identity: src.certificate_identity } : {}),
-          ...(src.certificate_oidc_issuer ? { certificate_oidc_issuer: src.certificate_oidc_issuer } : {}),
-          allow_http_registry: src.plain_http,
-          ignore_tlog: src.ignore_tlog,
+      const r = await withRetries(delays, ref, () =>
+        loadOciPack({
+          repository: src.repository,
+          digest: src.digest,
+          verifier: new CosignVerifier({
+            cosign: o.cosign,
+            ...(src.key_file ? { key: src.key_file } : {}),
+            ...(src.certificate_identity ? { certificate_identity: src.certificate_identity } : {}),
+            ...(src.certificate_oidc_issuer ? { certificate_oidc_issuer: src.certificate_oidc_issuer } : {}),
+            allow_http_registry: src.plain_http,
+            ignore_tlog: src.ignore_tlog,
+          }),
+          oras: o.oras,
+          dir,
+          plain_http: src.plain_http,
         }),
-        oras: o.oras,
-        dir,
-        plain_http: src.plain_http,
-      });
+      );
       logger.info('OCI 领域包签名校验通过并已拉取', { pack: r.pack.name, source: ref, signer: r.signer });
       loaded.push(r.pack);
     } catch (e) {
@@ -116,6 +124,24 @@ async function loadOciSources(o: OciPackSources): Promise<{ loaded: LoadedPack[]
     }
   }
   return { loaded, failures };
+}
+
+async function withRetries<T>(delays: number[], ref: string, f: () => Promise<T>): Promise<T> {
+  for (let i = 0; ; i++) {
+    try {
+      return await f();
+    } catch (e) {
+      if (i >= delays.length) {
+        throw e;
+      }
+      logger.warn('OCI 领域包加载失败，稍后重试', {
+        source: ref,
+        attempt: i + 1,
+        error: e instanceof Error ? e.message : String(e),
+      });
+      await new Promise((r) => setTimeout(r, delays[i]));
+    }
+  }
 }
 
 export type PackStatus = HubComponents['schemas']['PackStatus'];

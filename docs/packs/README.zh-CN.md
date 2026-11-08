@@ -541,14 +541,18 @@ extend:
 
 `pack.lock` 记录每个包的来源与内容哈希（文件按路径排序后逐个取 sha256），以及每个用户层文件的哈希。每次研判和评测都记录 lock 本身的哈希，回放时据此确认用的是同一批包。
 
-OCI 包是 `oras` 推送的单层制品，`artifactType` 为 `application/vnd.srenautix.pack.v1`，层是包目录本身：
+OCI 包是单层制品，`artifactType` 为 `application/vnd.srenautix.pack.v1`，层是包目录本身（tar.gz，以包名为顶层目录）。用 `srenautix pack push` 推送：制品由包目录确定性地生成（文件排序、属主与时间固定、gzip 不压缩），同一份内容总是同一个 digest，`srenautix pack digest` 不连仓库就能算出它（ADR 0188）。部署仓库提交包目录与固定的 digest，CI 在合并前用 `digest` 核对两者一致，合并后推送并签名：
 
 ```bash
-oras push --artifact-type application/vnd.srenautix.pack.v1 registry.example.org/packs/redis:1.2.0 redis
-cosign sign registry.example.org/packs/redis@sha256:<digest>
+srenautix pack digest --pack packs/redis
+srenautix pack push --pack packs/redis --repository registry.example.org/packs/redis   # 标签默认为 pack.yaml 的版本
+cosign sign --key env://COSIGN_PRIVATE_KEY --tlog-upload=false --use-signing-config=false \
+  registry.example.org/packs/redis@sha256:<digest>
 ```
 
-加载端用 `loadOciPack`：先由 `CosignVerifier` 校验签名（keyless 校验需要 `certificate_identity` 与 `certificate_oidc_issuer`；密钥对校验给出公钥文件），再检查制品类型与层数，最后拉取并加载。校验与拉取调用 `cosign` 与 `oras` 可执行文件。
+`push` 调用 `oras`（`--oras` 指定路径，`--plain-http` 用于不带 TLS 的本机仓库），推送后从仓库读回描述符核对 digest。`oras push` 推送的制品同样可以加载，但每次推送的 digest 不同。不上传 Rekor 的签名在加载端写 `ignore_tlog: true`（只能与 `key_file` 一起用）。
+
+加载端用 `loadOciPack`：先由 `CosignVerifier` 校验签名（keyless 校验需要 `certificate_identity` 与 `certificate_oidc_issuer`；密钥对校验给出公钥文件），再检查制品类型与层数，最后拉取并加载。校验与拉取调用 `cosign` 与 `oras` 可执行文件。server 启动时加载失败的 OCI 来源在 2 秒、8 秒后各重试一次，覆盖 values 先于制品推送或签名生效的间隔；仍然失败时只停用这个来源。
 
 ## 以 ConfigMap 挂载
 

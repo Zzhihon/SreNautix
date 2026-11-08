@@ -3,7 +3,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, 
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { backendsDir, ensureBackend, startOciRegistry, type OciRegistry } from '@srenautix/integration-sdk';
-import { PACK_ARTIFACT_TYPE } from '@srenautix/packs-sdk';
+import { buildPackArtifact, PACK_ARTIFACT_TYPE, pushPackArtifact } from '@srenautix/packs-sdk';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { parseServerConfig } from '../../src/config/server.js';
 import { DEFAULT_CATALOG_PATH } from '../../src/proposals/catalog.js';
@@ -141,7 +141,7 @@ describe('OCI 来源的领域包', () => {
       lockFile: null,
       catalogPath: DEFAULT_CATALOG_PATH,
       capabilities: new Set(['metrics.query', 'metrics.query_range', 'metrics.series']),
-      oci: { sources: [source(signed), source(unsigned)], cosign, oras, cacheDir },
+      oci: { sources: [source(signed), source(unsigned)], cosign, oras, cacheDir, retryDelaysMs: [] },
     });
     expect(rt.set.packs.map((p) => [p.name, p.source])).toEqual([
       ['_example', 'builtin'],
@@ -181,11 +181,48 @@ describe('OCI 来源的领域包', () => {
         cosign,
         oras,
         cacheDir: join(work, 'cache-other'),
+        retryDelaysMs: [],
       },
     });
     expect(rt.set.packs).toHaveLength(0);
     expect(rt.failures.map((f) => [f.source, f.error.includes('签名校验不通过')])).toEqual([
       [`oci://${repo}@${signed}`, true],
     ]);
+  }, 120_000);
+
+  it('启动时制品还不在仓库中：按 retryDelaysMs 重试，推送并签名之后加载', async () => {
+    // 换一个描述得到仓库中还没有的制品；digest 在推送之前就能算出（srenautix pack digest）
+    const dir = join(work, 'retry', 'redis-lite');
+    cpSync(join(work, 'src', 'redis-lite'), dir, { recursive: true });
+    writeFileSync(join(dir, 'pack.yaml'), readFileSync(join(dir, 'pack.yaml'), 'utf8') + '# retry\n');
+    const a = buildPackArtifact(dir);
+    const later = (async () => {
+      await new Promise((r) => setTimeout(r, 500));
+      await pushPackArtifact(a, { repository: repo, tag: 'retry', oras, plain_http: true });
+      await run(
+        cosign,
+        [
+          'sign',
+          '--key',
+          join(work, 'keys', 'cosign.key'),
+          '--allow-http-registry',
+          '--tlog-upload=false',
+          '--use-signing-config=false',
+          `${repo}@${a.digest}`,
+        ],
+        { env },
+      );
+    })();
+    const rt = await PackRuntime.load({
+      dirs: [],
+      only: null,
+      lockFile: null,
+      catalogPath: DEFAULT_CATALOG_PATH,
+      capabilities: new Set(['metrics.query', 'metrics.query_range', 'metrics.series']),
+      oci: { sources: [source(a.digest)], cosign, oras, cacheDir: join(work, 'cache-retry'), retryDelaysMs: [15_000] },
+    });
+    await later;
+    expect(rt.failures).toEqual([]);
+    expect(rt.set.packs.map((p) => [p.name, p.source])).toEqual([['redis-lite', `oci://${repo}@${a.digest}`]]);
   }, 120_000);
 });

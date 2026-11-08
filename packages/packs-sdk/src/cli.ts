@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// srenautix pack 命令（lint、lock、test、record、doctor）。apps/srenautix 的 `srenautix pack ...` 调用 runPackCli。
+// srenautix pack 命令（lint、lock、test、record、doctor、digest、push）。apps/srenautix 的 `srenautix pack ...` 调用 runPackCli。
 
 import { existsSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -21,6 +21,7 @@ import { compilePackSet, type PackSet } from './pack/compile.js';
 import { loadLayerFile } from './pack/layers.js';
 import type { LoadedPack } from './pack/load.js';
 import { loadPackDir } from './pack/load.js';
+import { buildPackArtifact, pushPackArtifact } from './pack/oci.js';
 import { loadBuiltinPacks } from './pack/sources.js';
 import { LiveDataSource } from './runtime/datasource.js';
 import { ReplayDataSource, writeSnapshot } from './runtime/snapshot.js';
@@ -41,6 +42,9 @@ const USAGE = `用法：srenautix pack <命令> [选项]
            --postgres <二进制目录> 启动一个预加载 pg_stat_statements 的 PostgreSQL，带 input_sql 的夹具另在它上面执行
   record   在真实数据源上执行卡片并录制查询邻域快照
   doctor   覆盖情况：已解析的信号、14 天内未映射的告警名、没有证据链的组件
+  digest   由一个 --pack 目录确定性地生成 OCI 制品，输出它的 digest（packs.oci.sources[].digest）；不访问仓库
+  push     生成同样的制品并推送到 --repository（标签 --tag，默认取 pack.yaml 的 version），核对仓库中的 digest 后输出；
+           签名另用 cosign sign <仓库>@<digest>（ADR 0188）
 
 通用选项：
   --packs <目录>       内置包目录（默认 ./packs）
@@ -60,6 +64,11 @@ record 选项：
   --entity <描述>      <kind>/<namespace>/<name>，命名空间可空，与 --card 一一对应
   --anchor <RFC3339>   事件锚点
   --out <文件>         快照输出路径
+push 选项：
+  --repository <仓库>  例如 ghcr.io/example/packs/redis，不带标签
+  --tag <标签>         默认取 pack.yaml 的 version
+  --oras <文件>        oras 可执行文件（默认 PATH 中的 oras）
+  --plain-http         仓库只提供 HTTP（仅限本机或隔离网络中的仓库）
 `;
 
 interface Io {
@@ -145,6 +154,10 @@ export async function runPackCli(
       json: { type: 'boolean' },
       'alert-rules': { type: 'string', multiple: true },
       postgres: { type: 'string' },
+      repository: { type: 'string' },
+      tag: { type: 'string' },
+      oras: { type: 'string' },
+      'plain-http': { type: 'boolean' },
     },
     strict: true,
   });
@@ -279,6 +292,31 @@ export async function runPackCli(
       );
       writeSnapshot(v.out, snap);
       io.out(`已写入 ${v.out}：${snap.entries.length} 个请求、${snap.cases.length} 个用例\n`);
+      return 0;
+    }
+    case 'digest':
+    case 'push': {
+      const dirs = v.pack ?? [];
+      if (dirs.length !== 1) {
+        throw new Error(`${cmd} 需要且只能给出一个 --pack <目录>`);
+      }
+      const a = buildPackArtifact(resolve(dirs[0]!));
+      if (cmd === 'push') {
+        if (!v.repository) {
+          throw new Error('push 需要 --repository');
+        }
+        await pushPackArtifact(a, {
+          repository: v.repository,
+          tag: v.tag ?? loadPackDir(resolve(dirs[0]!), 'dir:push').content.manifest.version,
+          oras: v.oras ?? 'oras',
+          plain_http: v['plain-http'] ?? false,
+        });
+      }
+      if (v.json) {
+        io.out(JSON.stringify({ name: a.name, digest: a.digest, files: a.files, layer_bytes: a.layer.length }) + '\n');
+      } else {
+        io.out(`${a.digest}\n`);
+      }
       return 0;
     }
     case 'doctor': {
