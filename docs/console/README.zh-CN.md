@@ -22,7 +22,7 @@ SreNautix 控制台是 server 角色提供的单页应用（DESIGN §1.1、§12�
 | 处置 | 审批页 | `/actions/<proposal_id>` | `getProposal`（ProposalDetail）、`approveProposal`、`rejectProposal`、`undoProposal`、`reauthLocal` |
 | 度量 | 回放与评测 | `/eval?mode=snapshot|reconstructed&report` | 成绩单（含机制命中、证据扎根、安全违规、误推送、误开 issue、误开 PR，每行带环境指纹，另列各指纹的组成，ADR 0180）、门禁（误推送上限、机制命中下限）、版本趋势、成本估算、用例浏览器；管理员另有评测候选列表（`listEvalCandidates`、`confirmEvalCandidate`、`dropEvalCandidate`，ADR 0175） |
 | 度量 | Agent 健康与成本 | `/health?cost=day|incident|model` | P0 记分卡、运行指标、成本、出境账本 |
-| 系统 | 拓扑 | `/topology?view=coverage|neighborhood|diff` | 覆盖表、未映射告警与覆盖 PR、邻域图、版本差异 |
+| 系统 | 拓扑 | `/topology?view=coverage|neighborhood|diff&component&cluster` | 覆盖表、未映射告警与覆盖 PR、邻域图（中心组件写在 `component`，ADR 0191）、版本差异 |
 | 系统 | 集群 | `/clusters`、`/clusters/<id>` | reader 与 gateway 的连接、版本、准入自检、熔断开关、informer 新鲜度、状态条件 |
 | 系统 | 集成、领域包、策略与目录、模型与出境 | `/integrations`、`/packs`、`/policies`、`/models` | 只读展示 Git 来源、SHA 与漂移；模拟器与软暂停；硬停止只给操作说明 |
 | 治理 | 审计、用户与角色、设置 | `/audit`、`/users`、`/settings` | 两条审计链、角色绑定与权限解释、聊天账号绑定码、渠道、保留期、订阅、API token |
@@ -56,6 +56,8 @@ Alertmanager 的模板见 `docs/console/alertmanager-links.tmpl`：把其中的 
 - 模型生成的内容（研判摘要、假设机制、修复建议、审批理由）标注"模型生成"，审批理由折叠并灰色显示"模型生成，未经验证"。
 - 证据卡默认显示研判当时的快照（模型所见）；实时重跑的结果并排显示，标注"非模型所见"。
 - 告警、日志、变更的原文只作为文本显示，放在注明来源的引用样式里。
+- 收件箱的一行以问题陈述为标题（头条告警的 summary 注解，其次告警名），副行是「MM-DD HH:mm 起」、根因组件与集群，下一行是最近一次研判的一句话结论；组件键、事件标签与事件 ID 在悬停提示里，数据来自 `IncidentSummary.headline`（ADR 0190）。
+- 根因子图：普通滚轮滚动页面，捏合或 Ctrl/⌘ + 滚轮缩放，拖动平移，控制条可以全屏；单击节点或按 Enter 打开组件侧栏（告警、邻域与事件搜索链接），Esc 关闭，双击打开以它为中心的拓扑邻域（ADR 0191）。
 - 事件详情时间线的变更记录在原文之前显示代码计算的关联分级、依据与回退（强关联、中等关联、弱关联，ADR 0169），数据来自 `TimelineEntry.change_link`。
 - 终态记录（阶段 A 缺失、研判没有结论、通知、事件 issue、事件状态、自愈 PR）在说明之前显示原因码与级别（正常、留意、异常，ADR 0172），数据来自 `TimelineEntry.code` 与 `level`；级别为留意与异常的记录，泳道标记与种类标签按级别着色。原因码的说明由 server 写在 `text` 里。
 
