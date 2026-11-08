@@ -155,11 +155,14 @@ export function IncidentView({
   tab,
   onTab,
   now,
+  onOpenComponent,
 }: {
   incidentRef: string;
   tab: IncidentTab;
   onTab: (tab: IncidentTab) => void;
   now: number;
+  /** 双击根因子图的节点：宿主打开以该组件为中心的拓扑邻域（ADR 0191） */
+  onOpenComponent?: (clusterId: string, component: string) => void;
 }) {
   const { t } = useI18n();
   const incident = useIncident(incidentRef);
@@ -193,6 +196,7 @@ export function IncidentView({
   const root = run.data?.root_component ?? i.root.component;
   const end = i.ended_at ? Date.parse(i.ended_at) : now;
   const start = Date.parse(i.first_firing_at) - 30 * 60_000;
+  const alertnames = new Map(i.members.map((m) => [m.alert_id, m.alertname]));
 
   return (
     <ComponentNamesProvider names={i.component_names}>
@@ -218,7 +222,12 @@ export function IncidentView({
               {subgraph.error ? (
                 <ErrorBox title={t('detail.subgraph_failed')} error={subgraph.error} />
               ) : subgraph.data ? (
-                <Subgraph graph={subgraph.data} />
+                <Subgraph
+                  graph={subgraph.data}
+                  clusterId={i.cluster_id}
+                  alertLabel={(id) => alertnames.get(id) ?? id}
+                  onOpenComponent={onOpenComponent && ((c) => onOpenComponent(i.cluster_id, c))}
+                />
               ) : (
                 <Loading />
               )}

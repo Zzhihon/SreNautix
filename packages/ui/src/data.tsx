@@ -24,6 +24,10 @@ export interface Links {
   approval: (proposalId: string) => string;
   /** approval 是否在当前宿主之外打开（Grafana 插件跳转到控制台）。 */
   approvalExternal: boolean;
+  /** 以某个组件为中心的拓扑邻域（ADR 0191）；宿主没有拓扑页时不提供，子图侧栏不显示这个链接。 */
+  topology?: (clusterId: string, component: string) => string;
+  /** 按关键词搜索事件（ADR 0191）；宿主没有搜索页时不提供。 */
+  search?: (q: string, clusterId: string) => string;
 }
 
 export interface Capabilities {
