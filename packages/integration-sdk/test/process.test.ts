@@ -1,8 +1,10 @@
 // 测试后端的端口竞争：freePort 释放端口到后端绑定之间，并发的测试文件可能先占用它（CI 上 Prometheus 因此
 // "bind: address already in use" 退出）。startProcess 把这种退出报告为 PortTaken，withFreePorts 换端口重试。
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:net';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
 import { backendsDir, ensureBackend } from '../src/testing/backends.js';
 import { PortTaken, startProcess, withFreePorts } from '../src/testing/process.js';
@@ -126,5 +128,54 @@ describe('测试后端的端口', () => {
     } finally {
       await Promise.all(all.map((p) => p.stop()));
     }
+  });
+});
+
+describe('测试进程异常结束时的后端', () => {
+  const alive = (pid: number) => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  // 后端的父进程被 SIGTERM（vitest 回收工作进程的方式）或 SIGKILL 结束时，exit 事件不触发，只有看门进程能清理后端
+  it.for(['SIGTERM', 'SIGKILL'] as const)('父进程被 %s 结束后，后端随之被结束', async (sig) => {
+    const dir = mkdtempSync(join(backendsDir(), 'runs', 'orphan-'));
+    scratch.push(dir);
+    const pidFile = join(dir, 'backend.pid');
+    const processTs = fileURLToPath(new URL('../src/testing/process.ts', import.meta.url));
+    // 后端：写下自己的 pid，监听 HTTP 供就绪探测
+    const backend = `require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); require('node:http').createServer((q, r) => r.end('ok')).listen(Number(process.argv[1]), '127.0.0.1')`;
+    const parent = spawn(
+      process.execPath,
+      [
+        '--import',
+        'tsx',
+        '--input-type=module',
+        '-e',
+        `const { freePort, startProcess } = await import(${JSON.stringify(processTs)});
+         const port = await freePort();
+         await startProcess({ name: 'backend', bin: process.execPath, args: ['-e', ${JSON.stringify(backend)}, String(port)], url: 'http://127.0.0.1:' + port, readyPath: '/' });
+         console.log('ready');
+         setInterval(() => {}, 1000);`,
+      ],
+      { stdio: ['ignore', 'pipe', 'inherit'] },
+    );
+    await new Promise<void>((resolve, reject) => {
+      parent.stdout!.on('data', (d: Buffer) => d.toString().includes('ready') && resolve());
+      parent.on('exit', (code) => reject(new Error(`父进程提前退出（code ${code}）`)));
+    });
+    const pid = Number(readFileSync(pidFile, 'utf8'));
+    expect(alive(pid)).toBe(true);
+    parent.kill(sig);
+    const deadline = Date.now() + 10_000;
+    while (alive(pid) && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    expect(alive(pid)).toBe(false);
+    expect(existsSync(pidFile)).toBe(true);
   });
 });

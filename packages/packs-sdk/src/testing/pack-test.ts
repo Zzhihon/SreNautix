@@ -370,6 +370,11 @@ export interface PackTestOptions {
   packs?: string[];
   /** 告警规则（loadAlertRules）：主卡的夹具测试同时核对告警规则在同一份夹具上是否触发 */
   alertRules?: Map<string, AlertRule[]>;
+  /**
+   * 中止信号（例如 vitest 测试上下文的 signal，超时或取消时触发）：每次启动后端之前检查，已触发时抛出，
+   * 已启动的后端照常在 finally 中停止。不给时超时的测试仍在后台跑完全部夹具，与后续测试争用 CPU 与端口
+   */
+  signal?: AbortSignal;
 }
 
 export async function runPackTests(opts: PackTestOptions): Promise<PackTestReport> {
@@ -401,6 +406,7 @@ export async function runPackTests(opts: PackTestOptions): Promise<PackTestRepor
       }
       const fx = expandFixtures(engine, tf, where);
       const interval = durationSeconds(tf.interval);
+      opts.signal?.throwIfAborted();
       const env = await startEnv(fx, interval, false);
       try {
         const end = FIXTURE_EPOCH + fx.spanMs;
@@ -658,6 +664,7 @@ export async function runPackTests(opts: PackTestOptions): Promise<PackTestRepor
     if (cardKeys.length) {
       // 有日志卡的包同时启动空的 Loki，无数据测试才能覆盖日志引用
       const usesLogs = cardKeys.some((k) => set.cards.get(k)!.def.refs.some((r) => r.mode === 'logs'));
+      opts.signal?.throwIfAborted();
       const env = await startEnv({ metrics: [], logs: [], dbstats: new Map(), spanMs: 3600_000 }, 60, usesLogs);
       try {
         const end = FIXTURE_EPOCH + 3600_000;

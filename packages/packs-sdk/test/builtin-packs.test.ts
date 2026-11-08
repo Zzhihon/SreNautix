@@ -20,7 +20,9 @@ describe('内置领域包', () => {
     expect(set.lockDigest).toMatch(/^sha256:[0-9a-f]{64}$/);
   });
 
-  it('kps-conditions 与生成器一致，alerts-kps 的主卡在 kubernetes-mixin 的夹具上与 chart 渲染的规则结论一致', async () => {
+  it('kps-conditions 与生成器一致，alerts-kps 的主卡在 kubernetes-mixin 的夹具上与 chart 渲染的规则结论一致', async ({
+    signal,
+  }) => {
     const g = await generateKpsConditions(REPO);
     const read = (p: string) => parse(readFileSync(join(PACKS, p), 'utf8')) as unknown;
     // 仓库内容与生成结果一致（不比较格式；更新执行 pnpm --filter @srenautix/packs-sdk run gen:kps-conditions）
@@ -43,13 +45,14 @@ describe('内置领域包', () => {
       set,
       packs: ['kps-conditions'],
       alertRules: alertRulesFrom(g.rules, 'kube-prometheus-stack', await loadPromqlEngine()),
+      signal,
     });
     expect(report.cases.filter((c) => !c.passed)).toEqual([]);
     // 每个夹具测试在两个后端上各核对一次
     expect(report.alert_checks).toBe(2 * report.cases.filter((c) => c.kind === 'fixture').length);
   });
 
-  it('upstream-conditions 与生成器一致，社区包的条目都有主卡，夹具上主卡与上游规则结论一致', async () => {
+  it('upstream-conditions 与生成器一致，社区包的条目都有主卡，夹具上主卡与上游规则结论一致', async ({ signal }) => {
     const g = await generateUpstreamConditions(REPO);
     const read = (p: string) => parse(readFileSync(join(PACKS, p), 'utf8')) as unknown;
     // 仓库内容与生成结果一致（不比较格式；更新执行 pnpm --filter @srenautix/packs-sdk run gen:upstream-conditions）
@@ -76,6 +79,7 @@ describe('内置领域包', () => {
       set,
       packs: ['upstream-conditions'],
       alertRules: alertRulesFrom(g.rules, 'community-rules', await loadPromqlEngine()),
+      signal,
     });
     expect(report.cases.filter((c) => !c.passed)).toEqual([]);
     expect(report.alert_checks).toBe(2 * report.cases.filter((c) => c.kind === 'fixture').length);
@@ -121,9 +125,10 @@ afterAll(async () => {
 describe.concurrent(
   'stable 的包：每张卡都有夹具，在 Prometheus 与 VictoriaMetrics 上结论一致，自动测试全部通过',
   () => {
-    it.each(names)('%s', async (name) => {
+    // test.for 把测试上下文传给回调：超时的包测试经 signal 中止，不再在后台占用后端
+    it.for(names)('%s', async (name, { signal }) => {
       const set = await shared;
-      const report = await runPackTests({ set, packs: [name], ...(postgres ? { postgres } : {}) });
+      const report = await runPackTests({ set, packs: [name], signal, ...(postgres ? { postgres } : {}) });
       expect(report.cases.filter((c) => !c.passed)).toEqual([]);
       expect(report.packs.filter((p) => !p.passed)).toEqual([]);
       expect(report.packs.map((p) => p.name)).toEqual([name]);
