@@ -23,7 +23,8 @@ const withGrace = (grace: string) => minimal({ digest: { external_roots: { grace
 
 describe('notify.digest.external_roots.grace', () => {
   it('默认 30s：没有 notify、没有 digest、只给出 external_roots 的其他项时都是 30s', () => {
-    const { notify: _drop, ...noNotify } = minimal({});
+    const noNotify = minimal({});
+    delete (noNotify as { notify?: unknown }).notify;
     expect(parseServerConfig(noNotify).notify.digest.external_roots.grace).toBe('30s');
     expect(parseServerConfig(minimal({})).notify.digest.external_roots.grace).toBe('30s');
     const c = parseServerConfig(minimal({ digest: { external_roots: { period: '30m' } } }));
