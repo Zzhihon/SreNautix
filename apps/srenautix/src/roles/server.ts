@@ -17,6 +17,7 @@ import { registerProposalRoutes } from '../api/routes-proposals.js';
 import { optimizationCatalog } from '../optimize/catalog.js';
 import { OptimizationStore } from '../optimize/store.js';
 import { registerResearchRoutes } from '../api/routes-research.js';
+import { registerAskRoutes } from '../api/routes-ask.js';
 import { pgConfigFromEnv } from '../config/database.js';
 import { parseDuration, parseListen, readSecretFile } from '../config/files.js';
 import { externalRootSettings, loadServerConfig, opsRepositories, type ServerConfig } from '../config/server.js';
@@ -884,6 +885,7 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
       impactAlerts: c.notify.business_impact_alerts,
     },
   });
+  registerAskRoutes(app, { pool, auth, scheduler });
   registerIncidentRoutes(app, { pool, auth, feedback, topology, evidence, worker });
   // 批量导出（ADR 0186）：Kubernetes Warning 的指标查询用证据数据源的适配器与标签档案，节点归属用拓扑历史
   registerExportRoutes(app, {

@@ -22,6 +22,19 @@ import { loadWorkerConfig, type WorkerConfig } from '../research/config.js';
 import { HubClient } from '../research/hub.js';
 import { WorkerMetrics } from '../research/metrics.js';
 import { workerTracks } from '../research/migrations.js';
+import {
+  agentCost,
+  agentHealth,
+  egressLedger,
+  emptyEvalCases,
+  emptyEvalReport,
+  emptyEvalReports,
+  emptyEvalTrend,
+  estimateEval,
+  modelRoutes,
+  parseCostGroup,
+  type PageRouteView,
+} from '../research/page-data.js';
 import { WorkerService } from '../research/service.js';
 import { WorkerStore } from '../research/store.js';
 import { migrateExpand, migrationsReady } from '../store/migrate.js';
@@ -67,6 +80,77 @@ function inboundAuth(allowed: readonly string[]): (req: FastifyRequest) => void 
       throw new HttpError(401, 'unauthorized', 'token 无效');
     }
   };
+}
+
+/**
+ * 控制台 /eval /health /models 三页经 console-bff 的 forward() 原样转发到 worker。
+ * 9 条 app.get/post 注册直接写在本文件里（不藏进 helper）：forward-route-coverage.test.ts
+ * 扫 worker.ts 源码文本断言这些 handler 存在。单测也直接调用本函数，在真实 fastify 实例上
+ * 用 mock PG pool 验证鉴权与返回形状，因此查询逻辑集中在 research/page-data.ts 复用。
+ */
+export interface RegisterPageRoutesOptions {
+  app: FastifyInstance;
+  pool: pg.Pool;
+  /** worker.ts 的 inboundAuth 返回值：每个 handler 的第一句都调用它。 */
+  auth: (req: FastifyRequest) => void;
+  routeViews: readonly PageRouteView[];
+  codeSha: string;
+  estimateTokensPerCall: number;
+  estimatePricePerMtok: number;
+  /** 测试注入的当前时间；生产用 Date.now。 */
+  now?: () => number;
+}
+
+export function registerPageRoutes(o: RegisterPageRoutesOptions): void {
+  const { app, pool, auth } = o;
+  const now = o.now ?? (() => Date.now());
+  const query = (req: FastifyRequest): Record<string, unknown> => (req.query ?? {}) as Record<string, unknown>;
+  app.get('/v1/eval/reports', async (req) => {
+    auth(req);
+    return emptyEvalReports();
+  });
+  app.get('/v1/eval/reports/:report_id', async (req) => {
+    auth(req);
+    return emptyEvalReport((req.params as { report_id: string }).report_id, o.codeSha, now());
+  });
+  app.get('/v1/eval/cases', async (req) => {
+    auth(req);
+    return emptyEvalCases();
+  });
+  app.get('/v1/eval/trend', async (req) => {
+    auth(req);
+    return emptyEvalTrend();
+  });
+  app.post('/v1/eval/estimate', async (req) => {
+    auth(req);
+    // worker 配置里没有评测用例目录，CaseStore 无从构造，按契约返回全 0；不调用模型、不查库。
+    return estimateEval(req.body, {
+      estimateTokensPerCall: o.estimateTokensPerCall,
+      estimatePricePerMtok: o.estimatePricePerMtok,
+    });
+  });
+  app.get('/v1/agent/health', async (req) => {
+    auth(req);
+    return agentHealth(pool, query(req).window, now());
+  });
+  app.get('/v1/agent/cost', async (req) => {
+    auth(req);
+    const q = query(req);
+    const group = parseCostGroup(q.group_by);
+    if (group === null) {
+      throw new HttpError(400, 'bad_request', 'group_by 必须是 day、incident 或 model');
+    }
+    return agentCost(pool, group, q.from, q.to, now());
+  });
+  app.get('/v1/egress/ledger', async (req) => {
+    auth(req);
+    const q = query(req);
+    return egressLedger(pool, o.routeViews, q.from, q.to, q.route_id, now());
+  });
+  app.get('/v1/models/routes', async (req) => {
+    auth(req);
+    return modelRoutes(pool, o.routeViews, now());
+  });
 }
 
 export async function buildWorker(o: BuildWorkerOptions): Promise<WorkerHandle> {
@@ -154,6 +238,35 @@ export async function buildWorker(o: BuildWorkerOptions): Promise<WorkerHandle> 
     metrics.condition.set({ role: 'worker', type: 'all_routes_in_topology' }, 1);
     logger.warn('所有模型路由都落在被管拓扑内：模型服务本身出事时阶段 B 全部跳过，建议保留一条拓扑之外的路由');
   }
+
+  // 控制台 /models /health 两页的路由视图：以配置为全集，补上从未出现在 route_state / llm_calls
+  // 的路由；出站策略禁用的路由如实标 enabled=false（契约没有 disabled 字段，page-data 里标成 open）。
+  const nowMs = (): number => Date.now();
+  const runtimeById = new Map(runtimes.map((r) => [r.route.id, r]));
+  const disabledById = new Map(disabled.map((d) => [d.id, d]));
+  const egressCategories = c.raw.llm.egress?.categories ?? [];
+  const routeViews: PageRouteView[] = c.routes.map(({ route }): PageRouteView => {
+    const rt = runtimeById.get(route.id);
+    const isDisabled = disabledById.has(route.id);
+    return {
+      route: {
+        id: route.id,
+        model: route.model,
+        dialect_profile: route.dialect_profile,
+        base_url: route.base_url,
+        in_domain: route.in_domain,
+        failure_domain: [...route.failure_domain],
+        price: { ...route.price },
+        retention_terms: route.retention_terms,
+      },
+      enabled: !isDisabled && rt !== undefined,
+      breaker: rt ? rt.breaker.state(nowMs()) : 'open',
+      breakerReason:
+        rt && rt.breaker.openReason ? (rt.breaker.openReason === 'failure' ? 'failures' : 'latency') : null,
+      egressCategories: [...egressCategories],
+    };
+  });
+
   const hub = new HubClient(c.raw.hub.url.replace(/\/+$/, ''), c.hubToken);
   const service = new WorkerService({
     hub,
@@ -207,6 +320,16 @@ export async function buildWorker(o: BuildWorkerOptions): Promise<WorkerHandle> 
   app.get('/v1/runs/:run_id/prompt/raw', async (req) => {
     auth(req);
     throw new HttpError(404, 'not_found', 'worker 只保存脱敏后的提示词，不保存原文');
+  });
+
+  registerPageRoutes({
+    app,
+    pool,
+    auth,
+    routeViews,
+    codeSha: c.raw.code_sha,
+    estimateTokensPerCall: c.budget.perResearchInputTokens,
+    estimatePricePerMtok: c.routes[0]?.route.price.input_per_mtok ?? 0,
   });
   app.get('/healthz', async () => ({ status: 'ok' }));
 

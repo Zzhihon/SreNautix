@@ -778,6 +778,33 @@ export type paths = {
     patch?: never;
     trace?: never;
   };
+  '/v1/incidents/{incident_ref}/ask': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description incident_id、稳定标签或别名；标签放进路径时按 RFC 3986 编码 */
+        incident_ref: components['parameters']['IncidentRef'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * @description 事件页「受控问答」（POSITIONING.zh-CN.md：不提供自由格式的执行能力，也不做「和集群聊天」；外部 Agent 只能提议）。
+     *     不调用模型、不生成新答案、不读 Secret、不给写权限。把问题与事件 ID 一起记入审计，返回该事件已存在的结构化诊断：
+     *     阶段 A 报告、最新一次阶段 B 运行结论、已存在提议的候选动作 id 与描述（只提议不执行，不创建提议）。
+     *     问题原文只回显与计长度，不拼进 SQL、不进提示词、不变成动作参数、不落审计。
+     *     两者都没有时经 scheduler.admit(..., 'manual') 复用既有阶段 B 队列触发一次研判，返回 202。
+     *     limited 固定为 true，明确这是受控解释而不是自由回答。
+     */
+    post: operations['askIncident'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/v1/incidents/{incident_ref}/evidence': {
     parameters: {
       query?: never;
@@ -2087,6 +2114,54 @@ export type components = {
       decision: 'approved' | 'rejected' | 'auto';
       principal_id: string;
       reason: string | null;
+    };
+    AskAccepted: {
+      /** @constant */
+      limited: true;
+      /** @description 与同一 (incident_id */
+      merged: boolean;
+      run_id: components['schemas']['Uuid'];
+    };
+    AskRequest: {
+      /** @description 不可信文本；只回显与计长度，不生成新答案、不进提示词、不变成动作参数、不落审计 */
+      question: string;
+    };
+    AskResponse: {
+      answered_at: components['schemas']['Timestamp'];
+      /** @description 从已存在提议读到的候选动作；只返回 id 与描述，不创建提议、不执行 */
+      candidate_actions: {
+        action_id: string;
+        reason: string;
+        title: string;
+      }[];
+      incident_id: components['schemas']['Uuid'];
+      /** @description 用户传入的 ref 原样 */
+      incident_ref: string;
+      incident_version: number;
+      /** @constant */
+      limited: true;
+      /** @description 原样回显，问题文本当不可信数据 */
+      question: string;
+      research: null | {
+        conclusion_level: string | null;
+        disposition: string | null;
+        finished_at: null | components['schemas']['Timestamp'];
+        root_component: string | null;
+        run_id: components['schemas']['Uuid'];
+        started_at: components['schemas']['Timestamp'];
+        /** @description 含 queued 等未结束状态 */
+        state: string;
+        summary: string | null;
+      };
+      stage_a: null | {
+        candidates: components['schemas']['RootCandidate'][];
+        cards: components['schemas']['evidence-result.schema'][];
+        disposition: string;
+        disposition_reason: string;
+        rendered_at: components['schemas']['Timestamp'];
+        report_id: components['schemas']['Uuid'];
+        runbooks: string[];
+      };
     };
     /** @description RFC 4648 §5 base64url，不带填充。 */
     base64url: string;
@@ -8755,6 +8830,47 @@ export interface operations {
       };
       401: components['responses']['Error'];
       404: components['responses']['Error'];
+    };
+  };
+  askIncident: {
+    parameters: {
+      query?: never;
+      header: {
+        'X-CSRF-Token': components['parameters']['Csrf'];
+      };
+      path: {
+        /** @description incident_id、稳定标签或别名；标签放进路径时按 RFC 3986 编码 */
+        incident_ref: components['parameters']['IncidentRef'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['AskRequest'];
+      };
+    };
+    responses: {
+      /** @description 既有阶段 A 报告、阶段 B 结论与候选动作的受控解释 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AskResponse'];
+        };
+      };
+      /** @description 没有任何既有诊断，已复用人工研判队列触发一次 */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AskAccepted'];
+        };
+      };
+      404: components['responses']['Error'];
+      409: components['responses']['Error'];
+      429: components['responses']['Error'];
     };
   };
   getEvidenceSnapshot: {

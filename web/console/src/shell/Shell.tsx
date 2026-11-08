@@ -17,12 +17,27 @@ interface NavItem {
   label: string;
 }
 
+/** 集群列表的查询选项；Shell 与 router 共用同一份缓存，避免重复定义请求。 */
+export const clustersQuery = {
+  queryKey: ['clusters'],
+  queryFn: async () => ok<Cluster[]>('listClusters', await hub.GET('/v1/clusters')),
+  refetchInterval: 60_000,
+};
+
 export function useClusters() {
-  return useQuery({
-    queryKey: ['clusters'],
-    queryFn: async () => ok<Cluster[]>('listClusters', await hub.GET('/v1/clusters')),
-    refetchInterval: 60_000,
-  });
+  return useQuery(clustersQuery);
+}
+
+/**
+ * 只有一个集群时，页面与集群选择器默认选中它；多集群或未加载时保持「全部集群」。
+ * URL 上显式选择的集群始终优先，避免覆盖用户分享的链接。纯函数，便于单测。
+ */
+export function resolveCluster(
+  clusters: readonly { cluster_id: string }[] | undefined,
+  current: string | undefined,
+): string | undefined {
+  if (current) return current;
+  return clusters?.length === 1 ? clusters[0]!.cluster_id : undefined;
 }
 
 function Nav({ onNavigate }: { onNavigate: () => void }) {
@@ -123,6 +138,8 @@ export function Shell() {
   const navigate = useNavigate();
   const search = useSearch({ strict: false }) as { cluster?: string };
   const clusters = useClusters();
+  // 单集群时默认选中它（不把「全部集群」当默认）；显式 URL 参数优先
+  const activeCluster = resolveCluster(clusters.data, search.cluster);
   const conditions = useConditions(search.cluster);
   const [menu, setMenu] = useState(false);
   const pathname = useRouterState({ select: (s) => s.location.pathname });
@@ -158,7 +175,7 @@ export function Shell() {
             <span className={styles.srOnly}>{t('header.cluster')}</span>
             <select
               aria-label={t('header.cluster')}
-              value={search.cluster ?? ''}
+              value={activeCluster ?? ''}
               onChange={(e) =>
                 void navigate({
                   to: pathname,
@@ -166,7 +183,7 @@ export function Shell() {
                 })
               }
             >
-              <option value="">{t('header.all_clusters')}</option>
+              {clusters.data?.length !== 1 && <option value="">{t('header.all_clusters')}</option>}
               {(clusters.data ?? []).map((c) => (
                 <option key={c.cluster_id} value={c.cluster_id}>
                   {c.display_name}

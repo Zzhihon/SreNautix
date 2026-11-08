@@ -1,7 +1,7 @@
 // 路由（TanStack Router，代码定义）。过滤条件、标签页与集群都放在带类型的 search 参数里，
 // 刷新和分享链接后页面状态不变。未登录时跳转到登录页，并带上原地址。
 
-import type { QueryClient } from '@tanstack/react-query';
+import { useQuery, type QueryClient } from '@tanstack/react-query';
 import {
   createRootRouteWithContext,
   createRoute,
@@ -28,6 +28,7 @@ import { AppFrame } from './frame';
 import { maybeOneOf, str, topologySearch } from './route-params';
 import { parseSearch, stringifySearch } from './search';
 import { SESSION_KEY } from './session';
+import { clustersQuery, resolveCluster } from './shell/Shell';
 
 export interface RouterContext {
   queryClient: QueryClient;
@@ -183,7 +184,12 @@ const topologyRoute = createRoute({
   validateSearch: topologySearch,
   component: function Topology() {
     const { cluster, view, component } = topologyRoute.useSearch();
-    return <TopologyPage cluster={cluster} view={view ?? 'coverage'} component={component} />;
+    // 单集群时自动带上该集群（不改 URL），否则 topology 页会停在「请选择集群」。
+    // 复用 Shell 的集群列表缓存与默认选中规则，不新造全局状态。
+    const clusters = useQuery(clustersQuery);
+    return (
+      <TopologyPage cluster={resolveCluster(clusters.data, cluster)} view={view ?? 'coverage'} component={component} />
+    );
   },
 });
 
