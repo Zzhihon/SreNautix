@@ -1,5 +1,5 @@
 // 拓扑（DESIGN §4.4、§12.2）：默认视图是覆盖表；未映射的告警可以直接生成覆盖规则的 gitops_pr 提议（批准后由 gateway
-// 只推送到 srenautix/* 分支并开 PR，从不合并）；邻域图每条边标注来源；版本差异。
+// 只推送到 srenautix/* 分支并开 PR，从不合并）；邻域图每条边标注来源，中心组件放在 URL 里（ADR 0191）；版本差异。
 
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
@@ -22,6 +22,7 @@ import {
 } from '@srenautix/ui';
 import { useMemo, useState } from 'react';
 import { hub, ok } from '../api';
+import type { TopologyView } from '../route-params';
 import { hasRole, useSession } from '../session';
 import { Loaded, ROLES_ALL } from './common';
 import styles from './pages.module.css';
@@ -31,7 +32,6 @@ type Unmapped = Coverage['unmapped_alerts'][number];
 type Diff = HubOperations['getTopologyDiff']['responses'][200]['content']['application/json'];
 type Graph = HubComponents['schemas']['Subgraph'];
 type Pr = HubOperations['createTopologyOverridePr']['responses'][201]['content']['application/json'];
-export type TopologyView = 'coverage' | 'neighborhood' | 'diff';
 const ROLES = ['cause', 'change', 'symptom', 'forecast', 'meta'] as const;
 
 function OverridePr({ cluster, a }: { cluster: string; a: Unmapped }) {
@@ -207,10 +207,18 @@ function CoverageView({ cluster }: { cluster: string }) {
   );
 }
 
-function NeighborhoodView({ cluster }: { cluster: string }) {
+function NeighborhoodView({ cluster, component }: { cluster: string; component: string | null }) {
   const { t } = useI18n();
-  const [input, setInput] = useState('');
-  const [component, setComponent] = useState<string | null>(null);
+  const navigate = useNavigate();
+  const [input, setInput] = useState(component ?? '');
+  // URL 里的中心组件变了（节点双击、侧栏链接、浏览器前进后退）时，输入框跟着变
+  const [shownFor, setShownFor] = useState(component);
+  if (shownFor !== component) {
+    setShownFor(component);
+    setInput(component ?? '');
+  }
+  const openComponent = (next: string | null) =>
+    void navigate({ to: '/topology', search: { cluster, view: 'neighborhood', component: next ?? undefined } });
   const q = useQuery({
     queryKey: ['topology', 'neighborhood', cluster, component],
     queryFn: async () =>
@@ -228,7 +236,7 @@ function NeighborhoodView({ cluster }: { cluster: string }) {
         className={styles.row}
         onSubmit={(e) => {
           e.preventDefault();
-          setComponent(input.trim() || null);
+          openComponent(input.trim() || null);
         }}
       >
         <TextField
@@ -243,7 +251,7 @@ function NeighborhoodView({ cluster }: { cluster: string }) {
         <EmptyState kind="not_applicable" title={t('topology.pick_title')} because={t('topology.pick')} />
       ) : (
         <Loaded q={q} what={t('topology.neighborhood_failed')} roles={ROLES_ALL}>
-          {(g) => <Subgraph graph={g} />}
+          {(g) => <Subgraph graph={g} clusterId={cluster} onOpenComponent={openComponent} />}
         </Loaded>
       )}
     </Panel>
@@ -331,7 +339,15 @@ function DiffView({ cluster }: { cluster: string }) {
   );
 }
 
-export function TopologyPage({ cluster, view }: { cluster?: string; view: TopologyView }) {
+export function TopologyPage({
+  cluster,
+  view,
+  component,
+}: {
+  cluster?: string;
+  view: TopologyView;
+  component?: string;
+}) {
   const { t } = useI18n();
   const navigate = useNavigate();
   return (
@@ -359,7 +375,7 @@ export function TopologyPage({ cluster, view }: { cluster?: string; view: Topolo
       ) : view === 'coverage' ? (
         <CoverageView cluster={cluster} />
       ) : view === 'neighborhood' ? (
-        <NeighborhoodView cluster={cluster} />
+        <NeighborhoodView cluster={cluster} component={component ?? null} />
       ) : (
         <DiffView cluster={cluster} />
       )}

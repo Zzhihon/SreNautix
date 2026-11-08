@@ -23,8 +23,9 @@ import { IncidentPage, InboxPage, RunPage } from './pages/oncall';
 import { PromptsPage } from './pages/RawPromptsPage';
 import { SearchPage } from './pages/SearchPage';
 import { IntegrationsPage, ModelsPage, PacksPage, PoliciesPage } from './pages/system';
-import { TopologyPage, type TopologyView } from './pages/topology';
+import { TopologyPage } from './pages/topology';
 import { AppFrame } from './frame';
+import { maybeOneOf, str, topologySearch } from './route-params';
 import { parseSearch, stringifySearch } from './search';
 import { SESSION_KEY } from './session';
 
@@ -32,11 +33,6 @@ export interface RouterContext {
   queryClient: QueryClient;
   session: () => Promise<Session | null>;
 }
-
-// search 参数全部可选：链接只需写出要改的字段，默认值由页面补齐，URL 保持简短
-const str = (v: unknown): string | undefined => (typeof v === 'string' && v !== '' ? v : undefined);
-const maybeOneOf = <T extends string>(v: unknown, allowed: readonly T[]): T | undefined =>
-  allowed.includes(v as T) ? (v as T) : undefined;
 
 interface ClusterSearch {
   cluster?: string;
@@ -181,18 +177,13 @@ const healthRoute = createRoute({
   },
 });
 
-const TOPOLOGY_VIEWS = ['coverage', 'neighborhood', 'diff'] as const satisfies readonly TopologyView[];
-
 const topologyRoute = createRoute({
   getParentRoute: () => appRoute,
   path: 'topology',
-  validateSearch: (s: Record<string, unknown>): ClusterSearch & { view?: TopologyView } => ({
-    cluster: str(s.cluster),
-    view: maybeOneOf(s.view, TOPOLOGY_VIEWS),
-  }),
+  validateSearch: topologySearch,
   component: function Topology() {
-    const { cluster, view } = topologyRoute.useSearch();
-    return <TopologyPage cluster={cluster} view={view ?? 'coverage'} />;
+    const { cluster, view, component } = topologyRoute.useSearch();
+    return <TopologyPage cluster={cluster} view={view ?? 'coverage'} component={component} />;
   },
 });
 
