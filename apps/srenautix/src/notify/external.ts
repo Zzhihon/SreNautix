@@ -421,52 +421,29 @@ export class ExternalRoots {
     return out;
   }
 
-  /** 一个时间段的汇总统计：时间段内触发过的外部上游事件，按根因归组 */
-  async window(inputs: readonly ComposeInput[], from: Date, to: Date): Promise<ExternalWindowStats> {
+  /**
+   * 一个时间段的汇总统计：时间段内触发过的外部上游事件，按根因归组。inputs 是 [from, to) 内触发过的事件，以及给出 prior
+   * 时在 prior.from 与 from 之间开始、不在 prior.considered 中的事件（上一时段统计之后才入库），后者中的外部上游事件按根因
+   * 归入 late：触发次数按它们所属的上一时段计，恢复情况按本时段结束时计
+   */
+  async window(
+    inputs: readonly ComposeInput[],
+    from: Date,
+    to: Date,
+    prior: { from: Date; considered: ReadonlySet<string> } | null,
+  ): Promise<ExternalWindowStats> {
     const cls = await this.classify(inputs);
-    const ext = inputs.filter((i) => cls.get(i.incident.incident_id)?.external);
-    const roots = new Map<string, ExternalRootStat>();
-    const inWindow = (at: string) => Date.parse(at) >= from.getTime() && Date.parse(at) < to.getTime();
-    // 新的事件在前：同一根因的数值取最新的事件
-    const byNewest = [...ext].sort(
-      (a, b) => Date.parse(b.incident.first_firing_at) - Date.parse(a.incident.first_firing_at),
-    );
-    for (const i of byNewest) {
-      const inc = i.incident;
-      const root = rootOf(i) ?? `incident:${inc.incident_id}`;
-      const st: ExternalRootStat = roots.get(root) ?? {
-        root,
-        name: inc.component_names?.[root] ?? null,
-        incidents: 0,
-        triggers: 0,
-        alertnames: [],
-        severity: 'info',
-        firing: false,
-        ended_at: null,
-        first_at: inc.first_firing_at,
-        immediate: false,
-        values: valuesOf(i, root),
-      };
-      st.incidents++;
-      st.triggers += inc.members.filter((m) => inWindow(m.starts_at)).length;
-      st.alertnames = [...new Set([...st.alertnames, ...inc.members.map((m) => m.alertname)])].slice(0, 3);
-      st.severity = rank(inc.severity) > rank(st.severity) ? inc.severity : st.severity;
-      const firing = inc.state === 'firing' && (!inc.ended_at || Date.parse(inc.ended_at) >= to.getTime());
-      st.firing = st.firing || firing;
-      if (!firing && inc.ended_at && (!st.ended_at || inc.ended_at > st.ended_at)) {
-        st.ended_at = inc.ended_at;
-      }
-      if (inc.first_firing_at < st.first_at) {
-        st.first_at = inc.first_firing_at;
-      }
-      st.immediate = st.immediate || (cls.get(inc.incident_id)?.impact.length ?? 0) > 0;
-      roots.set(root, st);
-    }
-    for (const st of roots.values()) {
-      if (st.firing) {
-        st.ended_at = null;
-      }
-    }
+    const startedAt = (i: ComposeInput) => Date.parse(i.incident.first_firing_at);
+    const inWindow = (i: ComposeInput) =>
+      startedAt(i) < to.getTime() && (!i.incident.ended_at || Date.parse(i.incident.ended_at) >= from.getTime());
+    const isLate = (i: ComposeInput) =>
+      prior !== null &&
+      startedAt(i) >= prior.from.getTime() &&
+      startedAt(i) < from.getTime() &&
+      !prior.considered.has(i.incident.incident_id);
+    const active = inputs.filter(inWindow);
+    const ext = active.filter((i) => cls.get(i.incident.incident_id)?.external);
+    const lateExt = inputs.filter((i) => isLate(i) && cls.get(i.incident.incident_id)?.external);
     // 业务影响：时间段内触发过、与其中某个外部上游事件相关的业务告警与其他事件的影响卡（ADR 0150）。
     // 同一集群的同名告警合成一项：最早的相关开始；有一次仍在触发时没有结束时间，否则取最晚的结束
     const clusters = [...new Set(ext.map((i) => i.incident.cluster_id))];
@@ -489,7 +466,7 @@ export class ExternalRoots {
     }
     const cards: ExternalWindowStats['impact']['cards'] = [];
     if (this.s.impact.impactCards) {
-      for (const o of inputs.filter((x) => !cls.get(x.incident.incident_id)?.external)) {
+      for (const o of active.filter((x) => !cls.get(x.incident.incident_id)?.external)) {
         const list = (o.stageA?.cards ?? []).filter(impactCard);
         const hit = list.length
           ? await this.firstRelevant(ext, (u) =>
@@ -506,14 +483,19 @@ export class ExternalRoots {
     return {
       from: from.toISOString(),
       to: to.toISOString(),
-      roots: [...roots.values()].sort(
-        (a, b) =>
-          Number(b.firing) - Number(a.firing) ||
-          rank(b.severity) - rank(a.severity) ||
-          b.triggers - a.triggers ||
-          a.root.localeCompare(b.root),
-      ),
+      roots: groupRoots(ext, cls, from, to, to),
       impact: { condition: matchersText(this.s.impact.alerts), alerts: [...alerts.values()], cards },
+      considered: inputs
+        .filter((i) => startedAt(i) >= from.getTime() && startedAt(i) < to.getTime())
+        .map((i) => i.incident.incident_id),
+      late:
+        prior && lateExt.length
+          ? {
+              from: prior.from.toISOString(),
+              to: from.toISOString(),
+              roots: groupRoots(lateExt, cls, prior.from, from, to),
+            }
+          : null,
     };
   }
 
@@ -536,6 +518,68 @@ export class ExternalRoots {
 }
 
 const rank = (s: string): number => ({ critical: 3, warning: 2, info: 1 })[s] ?? 0;
+
+/**
+ * 外部上游事件按根因归组：触发次数为 [from, to) 内开始的成员告警数，恢复情况按 statusAt 时计（这时仍在触发为未恢复，
+ * 否则取最后一个事件的恢复时间）。未恢复的在前，再按严重度、触发次数
+ */
+function groupRoots(
+  ext: readonly ComposeInput[],
+  cls: ReadonlyMap<string, Classification>,
+  from: Date,
+  to: Date,
+  statusAt: Date,
+): ExternalRootStat[] {
+  const roots = new Map<string, ExternalRootStat>();
+  const inWindow = (at: string) => Date.parse(at) >= from.getTime() && Date.parse(at) < to.getTime();
+  // 新的事件在前：同一根因的数值取最新的事件
+  const byNewest = [...ext].sort(
+    (a, b) => Date.parse(b.incident.first_firing_at) - Date.parse(a.incident.first_firing_at),
+  );
+  for (const i of byNewest) {
+    const inc = i.incident;
+    const root = rootOf(i) ?? `incident:${inc.incident_id}`;
+    const st: ExternalRootStat = roots.get(root) ?? {
+      root,
+      name: inc.component_names?.[root] ?? null,
+      incidents: 0,
+      triggers: 0,
+      alertnames: [],
+      severity: 'info',
+      firing: false,
+      ended_at: null,
+      first_at: inc.first_firing_at,
+      immediate: false,
+      values: valuesOf(i, root),
+    };
+    st.incidents++;
+    st.triggers += inc.members.filter((m) => inWindow(m.starts_at)).length;
+    st.alertnames = [...new Set([...st.alertnames, ...inc.members.map((m) => m.alertname)])].slice(0, 3);
+    st.severity = rank(inc.severity) > rank(st.severity) ? inc.severity : st.severity;
+    const firing = inc.state === 'firing' && (!inc.ended_at || Date.parse(inc.ended_at) >= statusAt.getTime());
+    st.firing = st.firing || firing;
+    if (!firing && inc.ended_at && (!st.ended_at || inc.ended_at > st.ended_at)) {
+      st.ended_at = inc.ended_at;
+    }
+    if (inc.first_firing_at < st.first_at) {
+      st.first_at = inc.first_firing_at;
+    }
+    st.immediate = st.immediate || (cls.get(inc.incident_id)?.impact.length ?? 0) > 0;
+    roots.set(root, st);
+  }
+  for (const st of roots.values()) {
+    if (st.firing) {
+      st.ended_at = null;
+    }
+  }
+  return [...roots.values()].sort(
+    (a, b) =>
+      Number(b.firing) - Number(a.firing) ||
+      rank(b.severity) - rank(a.severity) ||
+      b.triggers - a.triggers ||
+      a.root.localeCompare(b.root),
+  );
+}
 
 /** 根因上的关键数值：根因自己的卡，异常的在前，最多 2 张有主值的；根因上没有时取任意对象上异常的卡 */
 function valuesOf(i: ComposeInput, root: string): ExternalRootStat['values'] {
@@ -586,6 +630,16 @@ export interface ExternalWindowStats {
     }>;
     cards: Array<{ title: LocalizedText; value: string | null; upstream: string; basis: ImpactBasis }>;
   };
+  /**
+   * 在本时段开始、统计时已在状态库中（推送范围内、有阶段 A 报告）的事件 id：下一时段据此找出统计之后才入库的事件。
+   * 更早版本存的统计没有这一项，下一时段不找
+   */
+  considered?: string[];
+  /**
+   * 在上一时段 [from, to) 开始、上一时段统计之后才入库的外部上游事件，按根因归组：触发次数按上一时段计，恢复情况按本时段
+   * 结束时计。没有时为 null（更早版本存的统计没有这一项）
+   */
+  late?: { from: string; to: string; roots: ExternalRootStat[] } | null;
 }
 
 const minutesBetween = (from: string, to: string) => Math.floor((Date.parse(to) - Date.parse(from)) / 60_000);
@@ -633,6 +687,8 @@ const blk = (type: NotifyBlock['type'], runs: NotifyRun[]): NotifyBlock => ({
 
 /** 汇总消息最多列出的上游数，其余写一行“其余 n 个见控制台” */
 export const DIGEST_MAX_ROOTS = 15;
+/** 上一时段统计之后才入库的上游最多列出这么多，其余同样写一行“其余 n 个见控制台” */
+export const DIGEST_MAX_LATE = 5;
 
 const D = {
   zh: {
@@ -659,6 +715,8 @@ const D = {
     critical: '[严重] ',
     alerts: (names: string) => `告警 ${names}`,
     cleared: (names: string) => `上一时段有问题、本时段没有告警：${names}`,
+    late: (from: string, to: string) => `在上一时段 ${from}–${to} 开始、那一时段统计之后才入库的上游：`,
+    started: (at: string) => `${at} 开始`,
     more: (n: number) => `其余 ${n} 个上游见控制台`,
     list: '、',
     sep: ' · ',
@@ -688,6 +746,9 @@ const D = {
     critical: '[CRITICAL] ',
     alerts: (names: string) => `alerts ${names}`,
     cleared: (names: string) => `Problems in the previous period, no alerts in this one: ${names}`,
+    late: (from: string, to: string) =>
+      `Upstreams that started in the previous period ${from}–${to} and were stored after that period was counted:`,
+    started: (at: string) => `started ${at}`,
     more: (n: number) => `${n} more upstreams in the console`,
     list: ', ',
     sep: ' · ',
@@ -699,7 +760,8 @@ const hhmm = (iso: string) => new Date(iso).toISOString().slice(11, 16);
 
 /**
  * 汇总消息：一行标题、一行总数与上一时段的对比、一行业务影响，每个上游一行（名称、关键数值、触发次数与上一时段、
- * 恢复情况），最后是上一时段有问题而本时段没有告警的上游
+ * 恢复情况）；上一时段统计之后才入库的上游另起一段，写明所属的时段，每个上游一行（触发次数与开始时间）；最后是上一时段
+ * 有问题而本时段没有告警的上游
  */
 export function composeExternalDigest(
   cur: ExternalWindowStats,
@@ -708,7 +770,13 @@ export function composeExternalDigest(
   consoleUrl: string | null,
 ): ExternalDigestView {
   const d = D[lang];
+  // 上一时段统计之后才入库的上游属于上一时段：与上一时段的统计合在一起作为对比的基准
+  const late = cur.late?.roots ?? [];
   const prevRoots = new Map((prev?.roots ?? []).map((r) => [r.root, r]));
+  for (const r of late) {
+    const p = prevRoots.get(r.root);
+    prevRoots.set(r.root, p ? { ...p, triggers: p.triggers + r.triggers } : r);
+  }
   const fresh = cur.roots.filter((r) => !prevRoots.has(r.root)).length;
   const firing = cur.roots.filter((r) => r.firing).length;
   const blocks: NotifyBlock[] = [
@@ -745,7 +813,8 @@ export function composeExternalDigest(
   } else {
     blocks.push(blk('text', [P(d.impactNone(cur.impact.condition))]));
   }
-  for (const r of cur.roots.slice(0, DIGEST_MAX_ROOTS)) {
+  // 一个上游一行：名称与关键数值（没有时写告警名）、middle（触发次数等）、恢复情况、是否已即时推送
+  const rootLine = (r: ExternalRootStat, middle: string): NotifyBlock => {
     const runs: NotifyRun[] = [];
     if (r.severity === 'critical') {
       runs.push(P(d.critical));
@@ -756,18 +825,33 @@ export function composeExternalDigest(
     } else {
       runs.push(P(` ${d.alerts(r.alertnames.join(d.list))}`));
     }
-    const p = prevRoots.get(r.root);
-    runs.push(P(`${d.sep}${d.triggers(r.triggers)}${p ? d.prev(p.triggers) : `${d.sep}${d.fresh}`}`));
+    runs.push(P(middle));
     runs.push(P(`${d.sep}${r.firing ? d.firing : r.ended_at ? d.recovered(hhmm(r.ended_at)) : d.firing}`));
     if (r.immediate) {
       runs.push(P(`${d.sep}${d.immediate}`));
     }
-    blocks.push(blk('list_item', runs));
+    return blk('list_item', runs);
+  };
+  for (const r of cur.roots.slice(0, DIGEST_MAX_ROOTS)) {
+    const p = prevRoots.get(r.root);
+    blocks.push(rootLine(r, `${d.sep}${d.triggers(r.triggers)}${p ? d.prev(p.triggers) : `${d.sep}${d.fresh}`}`));
   }
   if (cur.roots.length > DIGEST_MAX_ROOTS) {
     blocks.push(blk('list_item', [P(d.more(cur.roots.length - DIGEST_MAX_ROOTS))]));
   }
-  const cleared = [...prevRoots.values()].filter((r) => !cur.roots.some((x) => x.root === r.root));
+  // 上一时段统计之后才入库的上游：写明所属的时段与开始时间，触发次数按那一时段计
+  if (cur.late && late.length) {
+    blocks.push(blk('text', [P(d.late(hhmm(cur.late.from), hhmm(cur.late.to)))]));
+    for (const r of late.slice(0, DIGEST_MAX_LATE)) {
+      blocks.push(rootLine(r, `${d.sep}${d.triggers(r.triggers)}${d.sep}${d.started(hhmm(r.first_at))}`));
+    }
+    if (late.length > DIGEST_MAX_LATE) {
+      blocks.push(blk('list_item', [P(d.more(late.length - DIGEST_MAX_LATE))]));
+    }
+  }
+  const cleared = [...prevRoots.values()].filter(
+    (r) => !cur.roots.some((x) => x.root === r.root) && !late.some((x) => x.root === r.root),
+  );
   if (cleared.length) {
     blocks.push(
       blk('text', [

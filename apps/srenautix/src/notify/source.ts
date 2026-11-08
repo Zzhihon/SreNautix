@@ -207,7 +207,7 @@ export class ReportSource {
  */
 export class PgMessageSource implements MessageSource {
   /** 外部上游汇总时实现（ADR 0147） */
-  readonly externalWindow?: (from: Date, to: Date) => Promise<ExternalWindowStats>;
+  readonly externalWindow?: (from: Date, to: Date, prev: ExternalWindowStats | null) => Promise<ExternalWindowStats>;
   /** 给出业务影响类条件时实现（ADR 0159） */
   readonly firstMessage?: (incidentId: string, messageId: number, at: Date) => Promise<FirstMessage | null>;
 
@@ -220,7 +220,7 @@ export class PgMessageSource implements MessageSource {
     private readonly external: ExternalRoots | null = null,
   ) {
     if (external?.s.enabled) {
-      this.externalWindow = (from, to) => this.window(from, to);
+      this.externalWindow = (from, to, prev) => this.window(from, to, prev);
     }
     const matchers = s.businessImpactAlerts;
     if (matchers) {
@@ -354,18 +354,29 @@ export class PgMessageSource implements MessageSource {
     await this.proposals.delivered(proposalIds, at);
   }
 
-  /** [from, to) 内触发过的事件（推送范围内的严重度、没有被抑制、没有合并）的外部上游统计 */
-  private async window(from: Date, to: Date): Promise<ExternalWindowStats> {
+  /**
+   * [from, to) 内触发过的事件（推送范围内的严重度、没有被抑制、没有合并）的外部上游统计。prev 记有统计时已入库的事件时，
+   * 另外取在 prev 时段开始、不在其中的事件（上一时段统计之后才入库），它们进入 late
+   */
+  private async window(from: Date, to: Date, prev: ExternalWindowStats | null): Promise<ExternalWindowStats> {
+    const considered = prev?.considered ?? null;
     const r = await this.pool.query<{ body: Incident; report: StageAReport }>(
       `SELECT i.body, s.body AS report FROM server.incidents i
          JOIN LATERAL (SELECT body FROM server.stage_a_reports WHERE incident_id = i.incident_id ORDER BY incident_version DESC LIMIT 1) s ON true
         WHERE i.severity = ANY($1::text[]) AND NOT i.suppressed AND i.state <> 'merged'
-          AND i.first_firing_at < $3 AND (i.ended_at IS NULL OR i.ended_at >= $2)
+          AND ((i.first_firing_at < $3 AND (i.ended_at IS NULL OR i.ended_at >= $2))
+            OR ($4::uuid[] IS NOT NULL AND i.first_firing_at >= $5 AND i.first_firing_at < $2
+                AND NOT (i.incident_id = ANY($4::uuid[]))))
         ORDER BY i.first_firing_at`,
-      [this.s.severities, from, to],
+      [this.s.severities, from, to, considered, prev ? new Date(prev.from) : null],
     );
     const inputs = await this.reports.inputs(r.rows, 'zh');
-    return (this.external as ExternalRoots).window(inputs, from, to);
+    return (this.external as ExternalRoots).window(
+      inputs,
+      from,
+      to,
+      considered && prev ? { from: new Date(prev.from), considered: new Set(considered) } : null,
+    );
   }
 
   /**

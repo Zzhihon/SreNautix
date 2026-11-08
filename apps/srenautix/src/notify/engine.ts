@@ -32,8 +32,11 @@ export interface EngineOptions {
   consoleUrl: string | null;
   /** 风暴结束后汇总消息继续编辑的时长。 */
   digestRetentionMs: number;
-  /** 外部上游周期汇总的周期（ADR 0147）；没有或为 null 时不汇总 */
-  externalDigestPeriodMs?: number | null;
+  /**
+   * 外部上游的周期汇总（ADR 0147）：周期，与周期结束后等待多久再统计与发送（让周期末尾开始的告警经过告警评估与对账进入
+   * 状态库）。没有或为 null 时不汇总
+   */
+  externalDigest?: { periodMs: number; graceMs: number } | null;
   /**
    * 本实例是否仍是主实例（ADR 0176）：同步与投递在写每个渠道目标、每条消息之前检查，主实例切换时一轮进行到一半也立即
    * 停止写 notify_messages。没有给出时本实例始终写（单实例的测试与工具）
@@ -51,8 +54,6 @@ const RESULTS_SHOWN = 5;
  * 当前内容的精简版加一行停止更新的说明与控制台链接，之后不再编辑；最后一次编辑被拒绝时放弃（ended_edit_cap）
  */
 export const MAX_ENDED_EDITS = 5;
-/** 外部上游汇总在周期结束这么久之后才统计（ADR 0147） */
-export const EXTERNAL_DIGEST_GRACE_MS = 60_000;
 
 const msgKey = (channel: string, chat: string, incidentId: string) => `${channel}|${chat}|${incidentId}`;
 
@@ -192,27 +193,30 @@ export class NotifyEngine {
   }
 
   /**
-   * 外部上游的周期汇总（ADR 0147）：上一个完整周期 [from, to) 结束后，统计一次并存库（同一周期只统计一次），
-   * 有外部上游出过问题时每个渠道目标发一条汇总消息，之后不再编辑。周期结束超过半个周期（例如进程停了）的时段不再补发
+   * 外部上游的周期汇总（ADR 0147）：上一个完整周期 [from, to) 结束 graceMs 之后，统计一次并存库（同一周期只统计一次），
+   * 有外部上游出过问题时每个渠道目标发一条汇总消息，之后不再编辑。上一时段统计之后才入库、在上一时段末尾开始的外部上游
+   * 事件计入这一条汇总，写明所属的时段。周期结束超过半个周期（例如进程停了）的时段不再补发
    */
   private async syncExternalDigest(now: Date): Promise<void> {
-    const period = this.opts.externalDigestPeriodMs;
-    if (!period || !this.source.externalWindow) {
+    const xd = this.opts.externalDigest;
+    if (!xd || !this.source.externalWindow) {
       return;
     }
+    const period = xd.periodMs;
     const { from, to } = lastWindow(now.getTime(), period);
-    // 周期结束后等一会儿，让周期末尾的告警与事件写进库；结束太久的时段不再补发
-    if (now.getTime() - to < EXTERNAL_DIGEST_GRACE_MS || now.getTime() - to > period / 2) {
+    // 周期结束后等待 graceMs，让周期末尾开始的告警经过告警评估与对账写进库；结束太久的时段不再补发
+    if (now.getTime() - to < xd.graceMs || now.getTime() - to > period / 2) {
       return;
     }
-    const statsOf = async (f: number, t: number): Promise<ExternalWindowStats> =>
+    const statsOf = async (f: number, t: number, before: ExternalWindowStats | null): Promise<ExternalWindowStats> =>
       (await this.store.externalWindow(new Date(f))) ??
-      (await this.store.saveExternalWindow(await this.source.externalWindow!(new Date(f), new Date(t)), now));
-    const cur = await statsOf(from, to);
-    if (!cur.roots.length) {
+      (await this.store.saveExternalWindow(await this.source.externalWindow!(new Date(f), new Date(t), before), now));
+    // 上一时段先统计（已有时读库）：本时段据此找出上一时段统计之后才入库的事件；上一时段这时才统计时它们已计入上一时段
+    const prev = await statsOf(from - period, from, null);
+    const cur = await statsOf(from, to, prev);
+    if (!cur.roots.length && !cur.late?.roots.length) {
       return;
     }
-    const prev = await statsOf(from - period, from);
     const subject = new Date(from).toISOString();
     const rows: DesiredRow[] = [];
     for (const a of this.adapters) {
@@ -553,6 +557,14 @@ export class NotifyEngine {
     const first = await this.store.markDelivered(row.id, externalId, row.desiredHash, at, edit, final);
     if (row.kind === 'incident') {
       await this.recordDelivery(a, row, first, final, at);
+    }
+    if (row.kind === 'external_digest' && first) {
+      // 汇总的时效（ADR 0147）：第一次送达这个渠道目标的时刻相对周期结束的延迟
+      const stats = await this.store.externalWindow(new Date(row.subject));
+      if (!stats) {
+        throw new Error(`外部上游汇总 ${row.subject} 没有时间段统计`);
+      }
+      this.metrics.externalDigestDelay.observe({ channel: a.channel }, (at.getTime() - Date.parse(stats.to)) / 1000);
     }
     if (row.kind === 'incident' && first && this.source.firstMessage) {
       const f = await this.source.firstMessage(row.incidentId as string, row.id, at);

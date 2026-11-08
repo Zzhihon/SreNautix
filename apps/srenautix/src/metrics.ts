@@ -339,6 +339,14 @@ export class ServerMetrics extends BaseMetrics {
     registers: [this.registry],
   });
 
+  readonly externalDigestDelay = new Histogram({
+    name: 'srenautix_notify_external_digest_delay_seconds',
+    help: '外部上游汇总（ADR 0147）第一次送达渠道目标的时刻相对周期结束的延迟，按渠道；包含 notify.digest.external_roots.grace 的等待与统计、发送的耗时',
+    labelNames: ['channel'] as const,
+    buckets: [1, 5, 10, 20, 30, 35, 40, 45, 50, 55, 60, 75, 90, 120, 180, 300, 600, 1800],
+    registers: [this.registry],
+  });
+
   readonly callbacks = new Counter({
     name: 'srenautix_notify_callbacks_total',
     help: '渠道按钮回调，按渠道、动作与结果',

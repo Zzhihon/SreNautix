@@ -8,6 +8,7 @@ import { composeMessage, type ComposeInput } from '../../src/notify/compose.js';
 import {
   composeExternalDigest,
   dependencyPath,
+  DIGEST_MAX_LATE,
   externalTypeLookup,
   impactLine,
   lastWindow,
@@ -453,6 +454,80 @@ describe('外部上游的周期汇总（ADR 0147）', () => {
     expect(json).toContain('[影子] 外部上游汇总 10:00–11:00 UTC');
     expect(json).toContain('- &#91;严重&#93; **Kimi** provider 故障率 `35.2%`、首字延迟 `12.3 s`');
     expect(json).toContain('**lcodex&#60;&#38;&#62;**');
+  });
+
+  it('上一时段统计之后才入库的上游另起一段，写明所属的时段与开始时间；计入上一时段的对比，不算作本时段没有告警', () => {
+    const at = (s: string) => `2026-10-24T${s}.000Z`;
+    const late = {
+      from: '2026-10-24T09:00:00.000Z',
+      to: W0,
+      roots: [
+        provider('01a16b20-0c3e-7a51-9f4d-2b8e6a1c7d90', '星河', {
+          triggers: 1,
+          first_at: at('09:59:48'),
+          values: [],
+          alertnames: ['UpstreamErrorRatioHigh'],
+        }),
+        { ...cur.roots[1]!, triggers: 1, first_at: at('09:59:40') },
+        provider('01a154f6-c1dd-710e-b7b2-14352afe477d', '柚子', {
+          triggers: 1,
+          first_at: at('09:59:50'),
+          firing: false,
+          ended_at: at('10:20:00'),
+        }),
+      ],
+    };
+    const stats: ExternalWindowStats = { ...cur, late };
+    const p = renderExternalDigest(CHAT, composeExternalDigest(stats, prev, 'zh', null), '[影子]')
+      .payload as TelegramPayload;
+    const { text } = strict(p);
+    const lines = text.split('\n');
+    // 上一时段：Kimi、柚子（2 + 1 次），加上迟到的星河、lcodex
+    expect(text).toContain('本时段 3 个上游有问题（上一时段 4 个）：新增 1、持续 2；未恢复 2、已恢复 1。');
+    const heading = lines.indexOf('在上一时段 09:00–10:00 开始、那一时段统计之后才入库的上游：');
+    expect(heading).toBeGreaterThan(0);
+    expect(lines.filter((l) => l.startsWith('- '))).toEqual([
+      '- [严重] Kimi provider 故障率 35.2%、首字延迟 12.3 s · 触发 5 次（上一时段 3 次） · 未恢复',
+      '- lcodex<&> provider 故障率 35.2%、首字延迟 12.3 s · 触发 2 次（上一时段 1 次） · 10:42 恢复',
+      '- component:provider 告警 AlertThemeEscalated · 触发 1 次 · 新增 · 未恢复',
+      '- 星河 告警 UpstreamErrorRatioHigh · 触发 1 次 · 09:59 开始 · 未恢复',
+      '- lcodex<&> provider 故障率 35.2%、首字延迟 12.3 s · 触发 1 次 · 09:59 开始 · 10:42 恢复',
+      '- 柚子 provider 故障率 35.2%、首字延迟 12.3 s · 触发 1 次 · 09:59 开始 · 10:20 恢复',
+    ]);
+    expect(lines.indexOf('- 星河 告警 UpstreamErrorRatioHigh · 触发 1 次 · 09:59 开始 · 未恢复')).toBe(heading + 1);
+    // 柚子 在上一时段统计之后又有一次触发：不写进“本时段没有告警”
+    expect(text).not.toContain('本时段没有告警');
+    const en = strict(
+      renderExternalDigest(CHAT, composeExternalDigest(stats, prev, 'en', null), '').payload as TelegramPayload,
+    );
+    expect(en.text).toContain(
+      'Upstreams that started in the previous period 09:00–10:00 and were stored after that period was counted:',
+    );
+    expect(en.text).toContain('星河 alerts UpstreamErrorRatioHigh · 1 firings · started 09:59 · firing');
+    const feishu = JSON.stringify(
+      renderExternalDigestCard(
+        { channel: 'feishu', chat: 'oc_x', language: 'zh' },
+        composeExternalDigest(stats, prev, 'zh', null),
+        '[影子]',
+      ).payload,
+    );
+    expect(feishu).toContain('在上一时段 09:00–10:00 开始、那一时段统计之后才入库的上游：');
+    expect(feishu).toContain('**星河** 告警 UpstreamErrorRatioHigh · 触发 1 次 · 09:59 开始 · 未恢复');
+    // 迟到的上游最多列出 DIGEST_MAX_LATE 个，其余写一行
+    const many: ExternalWindowStats = {
+      ...cur,
+      late: {
+        ...late,
+        roots: Array.from({ length: DIGEST_MAX_LATE + 2 }, (_, i) =>
+          provider(`late-${i}`, `上游${i}`, { triggers: 1, first_at: at('09:59:30') }),
+        ),
+      },
+    };
+    const m = strict(
+      renderExternalDigest(CHAT, composeExternalDigest(many, null, 'zh', null), '').payload as TelegramPayload,
+    ).text.split('\n');
+    expect(m.filter((l) => l.includes('09:59 开始'))).toHaveLength(DIGEST_MAX_LATE);
+    expect(m).toContain('- 其余 2 个上游见控制台');
   });
 
   it('窗口按 UTC 纪元对齐：1 小时即整点', () => {

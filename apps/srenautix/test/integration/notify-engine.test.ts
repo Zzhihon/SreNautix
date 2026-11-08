@@ -181,6 +181,7 @@ describe('NotifyService', () => {
           external_roots: {
             enabled: true,
             period: '1h',
+            grace: '30s',
             components: [],
             alert_labels: {},
             business_impact: { impact_cards: true, within: '30m', topology_hops: 6 },
