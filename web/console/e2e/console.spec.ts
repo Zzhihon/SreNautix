@@ -20,9 +20,10 @@ test('外壳：状态条不可关闭、导航分组、集群切换与搜索', as
   for (const g of ['值班', '处置', '度量', '系统', '治理']) {
     await expect(nav.getByText(g, { exact: true })).toBeVisible();
   }
-  await expect(page.getByRole('combobox', { name: '集群' })).toContainText('全部集群');
-  await page.getByRole('combobox', { name: '集群' }).selectOption('e2e');
-  await expect(page).toHaveURL(/cluster=e2e/);
+  // 单集群（CCHP 实况）：自动选中该集群，不再出现「全部集群」（DESIGN：单集群不把「全部集群」当默认）
+  const cluster = page.getByRole('combobox', { name: '集群' });
+  await expect(cluster).not.toContainText('全部集群');
+  await expect(cluster).toHaveValue('e2e');
   await page.getByRole('searchbox', { name: '搜索' }).fill('shop');
   await page.getByRole('searchbox', { name: '搜索' }).press('Enter');
   await expect(page).toHaveURL(/\/search\?.*q=shop/);
@@ -264,7 +265,7 @@ test('拓扑：没有领域包时覆盖表列出告警映射到的组件且写�
   await page.getByRole('group', { name: '视图' }).getByRole('button', { name: '邻域图' }).click();
   await page.getByLabel('组件键').fill('Deployment:shop/api');
   await page.getByRole('button', { name: '显示' }).click();
-  await expect(page.getByRole('img', { name: /根因子图：\d+ 个组件/ })).toBeVisible();
+  await expect(page.getByRole('group', { name: /根因子图：\d+ 个组件/ })).toBeVisible();
 });
 
 test('策略与目录：从 Git 渲染的策略、模拟器、软暂停与硬停止说明', async ({ page }) => {
