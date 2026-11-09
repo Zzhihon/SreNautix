@@ -265,7 +265,7 @@ test('拓扑：没有领域包时覆盖表列出告警映射到的组件且写�
   await page.getByRole('group', { name: '视图' }).getByRole('button', { name: '邻域图' }).click();
   await page.getByLabel('组件键').fill('Deployment:shop/api');
   await page.getByRole('button', { name: '显示' }).click();
-  await expect(page.getByRole('img', { name: /根因子图：\d+ 个组件/ })).toBeVisible();
+  await expect(page.getByRole('group', { name: /根因子图：\d+ 个组件/ })).toBeVisible();
 });
 
 test('策略与目录：从 Git 渲染的策略、模拟器、软暂停与硬停止说明', async ({ page }) => {
