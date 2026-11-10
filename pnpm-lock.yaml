@@ -203,6 +203,9 @@ importers:
       '@srenautix/contract':
         specifier: workspace:*
         version: link:../contract
+      '@srenautix/packs-sdk':
+        specifier: workspace:*
+        version: link:../packs-sdk
       canonicalize:
         specifier: 5.1.0
         version: 5.1.0

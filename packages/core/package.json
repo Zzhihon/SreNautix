@@ -21,6 +21,7 @@
   },
   "dependencies": {
     "@srenautix/contract": "workspace:*",
+    "@srenautix/packs-sdk": "workspace:*",
     "canonicalize": "5.1.0"
   },
   "devDependencies": {

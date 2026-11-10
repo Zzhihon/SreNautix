@@ -37,6 +37,10 @@
       "description": "告警类别（契约 2.46.0，ADR 0183）。告警自带的 srenautix_category 标签优先；条目不写时由 server 的 ingest.category_rules 决定，都没有时为 unclassified",
       "$ref": "common.schema.json#/$defs/AlertCategory"
     },
+    "service": {
+      "description": "告警描述的业务所在的服务（契约 2.53.0，ADR 0193 §2），引用全部启用的包中声明的服务 id。只给描述的业务与所在对象不同的告警声明；汇总其他告警的告警不声明",
+      "$ref": "common.schema.json#/$defs/ServiceId"
+    },
     "component_type": {
       "type": "string",
       "description": "告警直接归属的组件类型（components.yaml 声明）；不填时归属解析出的实体本身"

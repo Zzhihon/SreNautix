@@ -103,10 +103,26 @@ export type AlertRole = 'cause' | 'change' | 'symptom' | 'forecast' | 'meta';
  */
 export type AlertCategory = 'availability' | 'performance' | 'provider' | 'platform' | 'observability';
 /**
+ * 告警描述的业务所在的服务（契约 2.53.0，ADR 0193 §2），引用全部启用的包中声明的服务 id。只给描述的业务与所在对象不同的告警声明；汇总其他告警的告警不声明
+ */
+export type ServiceId = string;
+/**
  * 告警类别（契约 2.46.0，ADR 0183），按 category_source 的顺序取第一个给出类别的来源。之前版本接入的告警没有这个字段，重新解析时补上
  */
 export type IncidentCategory =
   'availability' | 'performance' | 'provider' | 'platform' | 'observability' | 'unclassified';
+/**
+ * 服务的 id（契约 2.53.0，ADR 0193）：业务领域里一个可以单独出问题的部分，在全部启用的领域包中唯一
+ */
+export type ServiceId1 = string;
+/**
+ * 告警服务归属的来源（ADR 0193 §3），按优先级：label 取值为已声明服务的 srenautix_service 标签；catalog 命中的告警目录条目声明了 service；component 告警归属的组件命中服务成员；entity 告警实体命中服务成员；owner 告警实体的顶层属主命中服务成员；namespace 告警的命名空间是某个服务的默认命名空间（推定）；default 都没有，服务为 null
+ */
+export type ServiceSource = 'label' | 'catalog' | 'component' | 'entity' | 'owner' | 'namespace' | 'default';
+/**
+ * 业务领域的 id（契约 2.53.0，ADR 0193），在全部启用的领域包中唯一。与主动优化的领域（PackDomain，ADR 0146）是两个概念
+ */
+export type BusinessDomainId = string;
 /**
  * Prometheus 风格的时长，例如 30s、5m、2h、7d
  */
@@ -120,6 +136,10 @@ export type AlertCategory1 = 'availability' | 'performance' | 'provider' | 'plat
  */
 export type IncidentCategory1 =
   'availability' | 'performance' | 'provider' | 'platform' | 'observability' | 'unclassified';
+/**
+ * 业务领域对业务的重要程度（ADR 0193）：core 核心业务；supporting 支撑业务；foundation 集群底座与交付；self 运维与观测系统自身
+ */
+export type BusinessTier = 'core' | 'supporting' | 'foundation' | 'self';
 /**
  * 主动优化的实体键（契约 2.28.0，ADR 0146 §1.1）：Kubernetes 对象或领域包组件为 ComponentKey；逻辑实体为 <类型>:<组件内的键>，例如 pg_statement:<CNPG Cluster 名>/<库>/<语句指纹>、pg_table:<Cluster 名>/<库>/<schema>.<表>、route:<服务>/<endpoint>、stage:<服务>/<阶段>。逻辑实体都挂到一个拓扑组件上
  */
@@ -838,6 +858,10 @@ export interface SrenautixContractIndex {
   Severity?: Severity;
   AlertCategory?: AlertCategory1;
   IncidentCategory?: IncidentCategory1;
+  ServiceId?: ServiceId1;
+  BusinessDomainId?: BusinessDomainId;
+  BusinessTier?: BusinessTier;
+  ServiceSource?: ServiceSource;
   AlertRole?: AlertRole;
   ComponentKey?: ComponentKey;
   EntityKey?: EntityKey;
@@ -999,6 +1023,10 @@ export interface SrenautixContractIndex {
   SignalAlternative?: SignalAlternative;
   QueryTemplate?: QueryTemplate;
   ComponentsFile?: ComponentsFile;
+  ComponentMatch?: ComponentMatch;
+  BusinessFile?: BusinessFile;
+  BusinessDomain?: BusinessDomain;
+  BusinessService?: BusinessService;
   ComponentType?: ComponentType;
   OperatorConvention?: OperatorConvention;
   ObjectPattern?: ObjectPattern;
@@ -2655,6 +2683,7 @@ export interface AlertCatalogEntry {
   role_confidence?: number;
   entity: AlertEntityMapping;
   category?: AlertCategory;
+  service?: ServiceId;
   /**
    * 告警直接归属的组件类型（components.yaml 声明）；不填时归属解析出的实体本身
    */
@@ -2777,6 +2806,15 @@ export interface AlertClassification {
    * 类别的来源，按优先级：label 告警自带取值合法的 srenautix_category 标签；catalog 命中的告警目录条目声明了 category；builtin server 自己合成的告警（集群状态检测器，ADR 0105）按告警名查内置类别表（契约 2.51.0）；rule 第一条命中的 ingest.category_rules；default 都没有，类别为 unclassified
    */
   category_source?: 'label' | 'catalog' | 'builtin' | 'rule' | 'default';
+  /**
+   * 告警归属的服务（契约 2.53.0，ADR 0193）；没有任何来源给出服务时为 null。之前版本接入的告警没有这个字段，重新解析时补上
+   */
+  service?: null | ServiceId1;
+  service_source?: ServiceSource;
+  /**
+   * service 所属的业务领域（契约 2.53.0）；service 为 null 时为 null
+   */
+  business_domain?: null | BusinessDomainId;
 }
 /**
  * 一个 Kubernetes 对象或领域包组件实例。uid 在实体解析成功时填写
@@ -3560,6 +3598,22 @@ export interface Incident {
   categories?: IncidentCategory1[];
   primary_category?: IncidentCategory3;
   /**
+   * 当前成员告警的服务的并集，按字典序排列、不重复，不含 null（契约 2.53.0，ADR 0193 §4）；没有当前成员时取全部成员。之前版本写下的事件没有这个字段，由数据修正补上
+   */
+  services?: ServiceId1[];
+  /**
+   * 主服务（契约 2.53.0，ADR 0193 §4）：先在服务来源不是 namespace 的成员中取，没有时再在 namespace 来源的成员中取；每一轮取根因组件上最严重的成员的服务，根因组件上没有这样的成员时取全部这样的成员中最严重的一个。都没有服务时为 null
+   */
+  primary_service?: null | ServiceId1;
+  /**
+   * primary_service 取自的成员的服务来源；primary_service 为 null 时为 null。namespace 表示推定
+   */
+  primary_service_source?: null | ServiceSource;
+  /**
+   * primary_service 所属的业务领域（契约 2.53.0）；primary_service 为 null 时为 null
+   */
+  business_domain?: null | BusinessDomainId;
+  /**
    * 首次触发前 30 分钟到结束之间、触及事件组件的变更
    */
   changes: ChangeEvent[];
@@ -3649,6 +3703,12 @@ export interface IncidentMember {
   component: null | ComponentKey;
   severity: Severity;
   category?: IncidentCategory2;
+  /**
+   * 告警的服务（Alert.classification.service，契约 2.53.0）；之前版本写下的成员没有这个字段
+   */
+  service?: null | ServiceId1;
+  service_source?: ServiceSource;
+  business_domain?: null | BusinessDomainId;
   status: 'firing' | 'resolved';
   starts_at: Timestamp;
   ends_at: null | Timestamp;
@@ -6089,7 +6149,7 @@ export interface TimeWindow4 {
   to: Timestamp;
 }
 /**
- * 领域包的 pack.yaml（DESIGN §6.3）。领域包只包含数据，不包含可执行代码；其余文件的结构见本文件的 $defs：signals.yaml → SignalsFile，components.yaml → ComponentsFile，alerts.yaml → AlertsFile，chains.yaml → ChainsFile，checks.yaml → ChecksFile，rules.yaml → RulesFile，conclusions.yaml → ConclusionsFile，remediations.yaml → RemediationsFile，domains.yaml → DomainsFile，issues.yaml → IssuesFile，skill-bindings.yaml → SkillBindingsFile，rca-params.yaml → RcaParams，knowledge/*.yaml → KnowledgeFile，action-requests.yaml → ActionRequestsFile，chaos/*.yaml → ChaosFile，tests/*.yaml → PackTestFile，用户层文件 → UserLayer，pack.lock → PackLock
+ * 领域包的 pack.yaml（DESIGN §6.3）。领域包只包含数据，不包含可执行代码；其余文件的结构见本文件的 $defs：signals.yaml → SignalsFile，components.yaml → ComponentsFile，alerts.yaml → AlertsFile，chains.yaml → ChainsFile，checks.yaml → ChecksFile，rules.yaml → RulesFile，conclusions.yaml → ConclusionsFile，remediations.yaml → RemediationsFile，domains.yaml → DomainsFile，business.yaml → BusinessFile，issues.yaml → IssuesFile，skill-bindings.yaml → SkillBindingsFile，rca-params.yaml → RcaParams，knowledge/*.yaml → KnowledgeFile，action-requests.yaml → ActionRequestsFile，chaos/*.yaml → ChaosFile，tests/*.yaml → PackTestFile，用户层文件 → UserLayer，pack.lock → PackLock
  */
 export interface PackManifest {
   api_version: 'srenautix.io/pack/v1';
@@ -6269,16 +6329,7 @@ export interface ComponentType {
    * 组件在集群之外（例如外部 API 服务方），集群内没有可处置的对象：研判根因落在这种组件上、结论为 likely 及以上时，处置推导以它为 ignore 的依据（ADR 0138）
    */
   external?: boolean;
-  match: {
-    kind: string;
-    api_group?: string;
-    labels?: Labels;
-    /**
-     * RE2 正则
-     */
-    name_pattern?: string;
-    namespaces?: string[];
-  };
+  match: ComponentMatch;
   chains?: string[];
   /**
    * 组件的可读名称来源（只影响显示，组件键不变）：按顺序尝试，取第一个非空且不等于实体名的值；都没有时显示组件键。alert_annotation、alert_label 取实体所在告警的注解或标签；signal 在事件锚点对本包的 metrics 信号做 instant 查询，取第一条序列的 label 标签
@@ -6312,6 +6363,19 @@ export interface ComponentType {
     )[],
   ];
 }
+/**
+ * 按 kind、API 组、标签、名称与命名空间匹配对象；组件类型与服务成员（ADR 0193）共用。同时命中多条时，写出的条件多（更具体）的优先
+ */
+export interface ComponentMatch {
+  kind: string;
+  api_group?: string;
+  labels?: Labels;
+  /**
+   * RE2 正则
+   */
+  name_pattern?: string;
+  namespaces?: string[];
+}
 export interface OperatorConvention {
   id: string;
   from: ObjectPattern;
@@ -6327,6 +6391,46 @@ export interface ObjectPattern {
   name_pattern?: string;
   name?: string;
   same_namespace?: boolean;
+}
+/**
+ * business.yaml（契约 2.53.0，ADR 0193）：部署方的业务领域与服务。服务的 id 在全部启用的包中唯一；同一 id 的业务领域在几个包中声明时合并
+ */
+export interface BusinessFile {
+  business_domains: BusinessDomain[];
+}
+/**
+ * 一块业务（ADR 0193 §1）。同一 id 的业务领域可以在几个包中声明，服务合并；title 与 tier 至少有一处给出，给出多处时必须相同
+ */
+export interface BusinessDomain {
+  id: BusinessDomainId;
+  title?: LocalizedText2;
+  tier?: BusinessTier;
+  /**
+   * @minItems 1
+   */
+  services: [BusinessService, ...BusinessService[]];
+}
+/**
+ * 业务领域里一个可以单独出问题的部分（ADR 0193 §1）
+ */
+export interface BusinessService {
+  id: ServiceId1;
+  title: LocalizedText2;
+  /**
+   * 服务的成员：组件类型 id（可以是其他包的），或与组件类型同一模式的 match。一个对象命中多个服务的成员时取最具体的；同样具体时取先加载的包、先声明的成员
+   */
+  members: (
+    | {
+        component_type: string;
+      }
+    | {
+        match: ComponentMatch;
+      }
+  )[];
+  /**
+   * 默认命名空间：这些命名空间里归属不到任何服务的告警推定归这个服务（服务来源 namespace）。一个命名空间最多是一个服务的默认命名空间
+   */
+  namespaces?: string[];
 }
 export interface AlertsFile {
   entries: AlertCatalogEntry[];

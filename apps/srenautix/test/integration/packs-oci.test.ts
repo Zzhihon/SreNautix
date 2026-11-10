@@ -66,6 +66,8 @@ beforeAll(async () => {
   cpSync(join(PACKS, '_example'), join(work, 'src', 'redis-lite'), { recursive: true });
   const manifest = join(work, 'src', 'redis-lite', 'pack.yaml');
   writeFileSync(manifest, readFileSync(manifest, 'utf8').replace(/^name: _example$/m, 'name: redis-lite'));
+  // 服务 id 在全部启用的包中唯一（ADR 0193）：改名的副本与示例包一起加载，不能再声明同一个服务
+  rmSync(join(work, 'src', 'redis-lite', 'business.yaml'));
   mkdirSync(join(work, 'keys'));
   await run(cosign, ['generate-key-pair'], { cwd: join(work, 'keys'), env });
   signed = await push(join(work, 'src'), 'v1', 'signed');

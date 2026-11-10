@@ -49,6 +49,32 @@
       "type": "string",
       "enum": ["availability", "performance", "provider", "platform", "observability", "unclassified"]
     },
+    "ServiceId": {
+      "title": "ServiceId",
+      "description": "服务的 id（契约 2.53.0，ADR 0193）：业务领域里一个可以单独出问题的部分，在全部启用的领域包中唯一",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$",
+      "maxLength": 63
+    },
+    "BusinessDomainId": {
+      "title": "BusinessDomainId",
+      "description": "业务领域的 id（契约 2.53.0，ADR 0193），在全部启用的领域包中唯一。与主动优化的领域（PackDomain，ADR 0146）是两个概念",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$",
+      "maxLength": 63
+    },
+    "BusinessTier": {
+      "title": "BusinessTier",
+      "description": "业务领域对业务的重要程度（ADR 0193）：core 核心业务；supporting 支撑业务；foundation 集群底座与交付；self 运维与观测系统自身",
+      "type": "string",
+      "enum": ["core", "supporting", "foundation", "self"]
+    },
+    "ServiceSource": {
+      "title": "ServiceSource",
+      "description": "告警服务归属的来源（ADR 0193 §3），按优先级：label 取值为已声明服务的 srenautix_service 标签；catalog 命中的告警目录条目声明了 service；component 告警归属的组件命中服务成员；entity 告警实体命中服务成员；owner 告警实体的顶层属主命中服务成员；namespace 告警的命名空间是某个服务的默认命名空间（推定）；default 都没有，服务为 null",
+      "type": "string",
+      "enum": ["label", "catalog", "component", "entity", "owner", "namespace", "default"]
+    },
     "AlertRole": {
       "title": "AlertRole",
       "description": "告警角色（DESIGN §3.2）：cause 原因；change 变更；symptom 症状；forecast 预测，不能成为活动事件的根因，也不能连接两个分组；meta 观测缺口",

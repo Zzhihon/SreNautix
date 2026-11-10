@@ -105,6 +105,15 @@
           "type": "string",
           "description": "类别的来源，按优先级：label 告警自带取值合法的 srenautix_category 标签；catalog 命中的告警目录条目声明了 category；builtin server 自己合成的告警（集群状态检测器，ADR 0105）按告警名查内置类别表（契约 2.51.0）；rule 第一条命中的 ingest.category_rules；default 都没有，类别为 unclassified",
           "enum": ["label", "catalog", "builtin", "rule", "default"]
+        },
+        "service": {
+          "description": "告警归属的服务（契约 2.53.0，ADR 0193）；没有任何来源给出服务时为 null。之前版本接入的告警没有这个字段，重新解析时补上",
+          "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/ServiceId" }]
+        },
+        "service_source": { "$ref": "common.schema.json#/$defs/ServiceSource" },
+        "business_domain": {
+          "description": "service 所属的业务领域（契约 2.53.0）；service 为 null 时为 null",
+          "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/BusinessDomainId" }]
         }
       }
     }

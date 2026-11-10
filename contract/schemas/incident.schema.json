@@ -64,6 +64,24 @@
       "description": "主类别（契约 2.46.0，ADR 0183）：根因组件上的当前成员告警中最严重的一个的类别；根因组件上没有成员告警（没有根因或沉默根因）时取全部当前成员中最严重的一个。同样严重时取开始更早的，再按 alert_id 的字典序",
       "$ref": "common.schema.json#/$defs/IncidentCategory"
     },
+    "services": {
+      "type": "array",
+      "description": "当前成员告警的服务的并集，按字典序排列、不重复，不含 null（契约 2.53.0，ADR 0193 §4）；没有当前成员时取全部成员。之前版本写下的事件没有这个字段，由数据修正补上",
+      "uniqueItems": true,
+      "items": { "$ref": "common.schema.json#/$defs/ServiceId" }
+    },
+    "primary_service": {
+      "description": "主服务（契约 2.53.0，ADR 0193 §4）：先在服务来源不是 namespace 的成员中取，没有时再在 namespace 来源的成员中取；每一轮取根因组件上最严重的成员的服务，根因组件上没有这样的成员时取全部这样的成员中最严重的一个。都没有服务时为 null",
+      "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/ServiceId" }]
+    },
+    "primary_service_source": {
+      "description": "primary_service 取自的成员的服务来源；primary_service 为 null 时为 null。namespace 表示推定",
+      "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/ServiceSource" }]
+    },
+    "business_domain": {
+      "description": "primary_service 所属的业务领域（契约 2.53.0）；primary_service 为 null 时为 null",
+      "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/BusinessDomainId" }]
+    },
     "changes": {
       "type": "array",
       "description": "首次触发前 30 分钟到结束之间、触及事件组件的变更",
@@ -270,6 +288,14 @@
         "category": {
           "description": "告警的类别（Alert.classification.category，契约 2.46.0）；之前版本写下的成员没有这个字段",
           "$ref": "common.schema.json#/$defs/IncidentCategory"
+        },
+        "service": {
+          "description": "告警的服务（Alert.classification.service，契约 2.53.0）；之前版本写下的成员没有这个字段",
+          "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/ServiceId" }]
+        },
+        "service_source": { "$ref": "common.schema.json#/$defs/ServiceSource" },
+        "business_domain": {
+          "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/BusinessDomainId" }]
         },
         "status": { "type": "string", "enum": ["firing", "resolved"] },
         "starts_at": { "$ref": "common.schema.json#/$defs/Timestamp" },

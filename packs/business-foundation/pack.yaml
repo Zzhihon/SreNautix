@@ -1,0 +1,7 @@
+api_version: srenautix.io/pack/v1
+name: business-foundation
+version: 1.0.0
+description: 内置的业务领域（ADR 0193）：集群底座、发布与交付、运维与观测系统；部署方往这三个领域里加自己的服务，再声明自己的业务领域
+maturity: beta
+min_srenautix_version: 0.1.0
+requires: []

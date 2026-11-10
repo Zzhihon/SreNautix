@@ -40,6 +40,7 @@ interface PatchDoc {
   rules: PackContent['rules'];
   conclusions: PackContent['conclusions'];
   domains: PackContent['domains'];
+  business: PackContent['business'];
   issues: PackContent['issues'];
   skill_bindings: PackContent['skill_bindings'];
   rca_params: RcaParams | null;
@@ -119,6 +120,7 @@ function applyOne(pack: LoadedPack, l: LoadedLayer): void {
     rules: c.rules,
     conclusions: c.conclusions,
     domains: c.domains,
+    business: c.business,
     issues: c.issues,
     skill_bindings: c.skill_bindings,
     rca_params: c.rca_params,
@@ -143,6 +145,7 @@ function applyOne(pack: LoadedPack, l: LoadedLayer): void {
   c.rules = doc.rules;
   c.conclusions = doc.conclusions;
   c.domains = doc.domains;
+  c.business = doc.business;
   c.issues = doc.issues;
   c.skill_bindings = doc.skill_bindings;
   c.rca_params = doc.rca_params;
@@ -240,6 +243,7 @@ function applyOne(pack: LoadedPack, l: LoadedLayer): void {
   check('RulesFile', c.rules);
   check('ConclusionsFile', c.conclusions);
   check('DomainsFile', c.domains);
+  check('BusinessFile', c.business);
   check('IssuesFile', c.issues);
   check('SkillBindingsFile', c.skill_bindings);
   if (c.rca_params) {
