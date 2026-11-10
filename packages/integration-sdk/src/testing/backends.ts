@@ -83,11 +83,35 @@ export function backendsDir(): string {
   }
 }
 
-/** 下载并校验 sha256；不符时报错 */
-export async function fetchVerified(url: string, sha256: string): Promise<Buffer> {
-  const res = await fetch(url);
-  if (!res.ok) {
-    throw new Error(`下载 ${url} 失败：HTTP ${res.status}`);
+/** 下载失败（网络错误、429、5xx）时的重试次数与首次等待；等待每次翻倍 */
+const FETCH_ATTEMPTS = 5;
+const FETCH_BACKOFF_MS = 2_000;
+
+/** 下载并校验 sha256；不符时报错。网络错误、429 与 5xx 按指数退避重试，其余 HTTP 错误直接报错 */
+export async function fetchVerified(
+  url: string,
+  sha256: string,
+  { backoffMs = FETCH_BACKOFF_MS }: { backoffMs?: number } = {},
+): Promise<Buffer> {
+  let res: Response | undefined;
+  let lastError = '';
+  for (let attempt = 1; attempt <= FETCH_ATTEMPTS; attempt++) {
+    try {
+      res = await fetch(url);
+      if (res.ok || (res.status !== 429 && res.status < 500)) {
+        break;
+      }
+      lastError = `HTTP ${res.status}`;
+    } catch (e) {
+      res = undefined;
+      lastError = e instanceof Error ? e.message : String(e);
+    }
+    if (attempt < FETCH_ATTEMPTS) {
+      await new Promise((r) => setTimeout(r, backoffMs * 2 ** (attempt - 1)));
+    }
+  }
+  if (!res?.ok) {
+    throw new Error(`下载 ${url} 失败（${FETCH_ATTEMPTS} 次）：${res ? `HTTP ${res.status}` : lastError}`);
   }
   const body = Buffer.from(await res.arrayBuffer());
   const actual = createHash('sha256').update(body).digest('hex');

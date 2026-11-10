@@ -21,7 +21,17 @@
    kubectl -n srenautix create secret generic srenautix-llm --from-literal=api_key=<模型密钥>
    ```
 
-2. 写一份最小的 values（`my-values.yaml`）：
+2. 创建本地管理员的 Secret。chart 不生成它；没有这个 Secret，控制台没有可用的登录方式。口令至少 12 个字符：
+
+   ```bash
+   hash=$(printf '%s' '<口令>' | docker run --rm -i ghcr.io/zzhihon/srenautix:<版本> admin hash-password)
+   totp=$(python3 -c 'import base64, os; print(base64.b32encode(os.urandom(20)).decode())')
+   kubectl -n srenautix create secret generic srenautix-local-admin \
+     --from-literal=password_hash="$hash" --from-literal=totp_secret="$totp"
+   echo "$totp"   # 在验证器应用中添加（SHA1、6 位、30 秒）
+   ```
+
+3. 写一份最小的 values（`my-values.yaml`）：
 
    ```yaml
    profile: observe
@@ -33,6 +43,8 @@
        url: http://alertmanager-operated.monitoring.svc:9093
    secrets:
      llm: {existingSecret: srenautix-llm}
+   identity:
+     localAdmin: {existingSecret: srenautix-local-admin}
    roles:
      worker:
        config:
@@ -45,7 +57,7 @@
                api_key_file: /etc/srenautix/secrets/llm/api_key
    ```
 
-3. 安装：
+4. 安装：
 
    ```bash
    helm install srenautix oci://ghcr.io/zzhihon/charts/srenautix \
@@ -54,9 +66,9 @@
 
    等价的最短写法是 `--set profile=observe` 加上数据源与密钥；未设置的开关按 profile 取默认值。
 
-4. 把 Alertmanager 的告警发给 SreNautix：在 Alertmanager 中加一个 webhook 接收方，地址与 token 见 `helm status srenautix` 的输出。使用 prometheus-operator 时设置 `alertmanagerConfig.enabled=true`（需要同时设置 `selfMonitoring.receiver` 与 `alertmanagerConfig.selfReceiverSpec`）。
+5. 把 Alertmanager 的告警发给 SreNautix：在 Alertmanager 中加一个 webhook 接收方，地址与 token 见 `helm status srenautix` 的输出。使用 prometheus-operator 时设置 `alertmanagerConfig.enabled=true`（需要同时设置 `selfMonitoring.receiver` 与 `alertmanagerConfig.selfReceiverSpec`）。
 
-5. 打开控制台：`kubectl -n srenautix port-forward svc/srenautix-server 8080:8080`，访问 `http://127.0.0.1:8080`。首次登录使用本地管理员（见 [README.zh-CN.md](README.zh-CN.md) 与 `docs/server/identity.md`）。成绩单在"回放与评测"页。
+6. 打开控制台：`kubectl -n srenautix port-forward svc/srenautix-server 8080:8080`，访问 `http://127.0.0.1:8080`。用户名 `admin`，口令与 TOTP 来自第 2 步（细节见 [../server/identity.md](../server/identity.md)）。成绩单在"回放与评测"页。
 
 ## 外部 PostgreSQL
 

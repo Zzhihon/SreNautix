@@ -27,7 +27,7 @@ PG_DBSTATS_MAJORS="16 17 18"
 
 fetch() {
   local url=$1 sha=$2 out=$3
-  curl -fsSLo "$out" "$url"
+  curl --retry 5 --retry-all-errors --retry-delay 5 -fsSLo "$out" "$url"
   echo "$sha  $out" | sha256sum --check --quiet
 }
 
