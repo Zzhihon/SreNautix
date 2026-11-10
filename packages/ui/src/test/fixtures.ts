@@ -187,6 +187,7 @@ export function incidentSummary(over: Partial<IncidentSummary> = {}): IncidentSu
     primary_service: 'postgres',
     primary_service_source: 'component',
     business_domain: 'data',
+    business_impact: [],
     root_component: 'postgres.cluster:db/pg-main',
     ambiguous: false,
     first_firing_at: T0,

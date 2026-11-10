@@ -2,7 +2,7 @@
 // 再下一行是最近一次完成的研判的一句话结论；右侧是处置判断、结论阶梯、严重度、持续时长、研判新鲜度、待审批数、反馈状态，
 // 以及"合并自 N"或"拆分自"。组件键与事件标签只在悬停提示里。标题前是事件的主服务（ADR 0193），按命名空间推定的标出推定。
 
-import { Bot, Clock, GitMerge, Hourglass, Split } from 'lucide-react';
+import { Bot, Clock, GitMerge, Hourglass, Split, TriangleAlert } from 'lucide-react';
 import type { IncidentSummary } from '../contract';
 import { AppLink, useUiEnv } from '../data';
 import { useI18n } from '../i18n';
@@ -69,6 +69,11 @@ export function IncidentRow({ s, now, service }: { s: IncidentSummary; now: numb
             </span>
           )}
           <Truncate text={problem} />
+          {s.business_impact.length > 0 && (
+            <StatusPill tone="bad" icon={TriangleAlert} title={s.business_impact.join('、')}>
+              {t('incident.business_impact')}
+            </StatusPill>
+          )}
           {s.ambiguous && <span className={styles.flag}>{t('incident.ambiguous')}</span>}
           {s.research_root?.mismatch && <span className={styles.flag}>{t('incident.root_mismatch')}</span>}
         </span>

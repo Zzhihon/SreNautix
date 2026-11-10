@@ -203,6 +203,7 @@ beforeAll(async () => {
     evidence,
     worker: null,
     services: () => new ServiceCatalog([], []),
+    businessImpactAlerts: () => [],
   });
 }, 180_000);
 

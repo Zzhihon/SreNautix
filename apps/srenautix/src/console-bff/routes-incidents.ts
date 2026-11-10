@@ -14,6 +14,7 @@ import { NAMESPACE_KIND } from '@srenautix/core';
 import type { ServiceCatalog } from '@srenautix/packs-sdk/business';
 import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
+import { isBusinessImpact, type AlertMatcher } from '../alerts/business-impact.js';
 import { badRequest, notFound } from '../api/errors.js';
 import type { Auth } from '../identity/auth.js';
 import { scopeMatches, type RoleBinding, type Target } from '../identity/bindings.js';
@@ -64,6 +65,8 @@ export interface IncidentRouteDeps {
   worker: { url: string; token: string } | null;
   /** 领域包 business.yaml 的服务目录（ADR 0193） */
   services: () => ServiceCatalog;
+  /** 业务影响告警的定义（notify.business_impact_alerts，ADR 0166） */
+  businessImpactAlerts: () => readonly AlertMatcher[];
 }
 
 /** 收件箱的一行（summaries 的结果） */
@@ -88,7 +91,8 @@ export function decodeCursor(raw: string): Cursor {
   return c;
 }
 
-async function summaries(pool: pg.Pool, feedback: FeedbackService, topology: TopologyStore, rows: IncidentRow[]) {
+async function summaries(d: IncidentRouteDeps, rows: IncidentRow[]) {
+  const { pool, feedback, topology } = d;
   const ids = rows.map((r) => r.incident_id);
   if (!ids.length) {
     return [];
@@ -121,6 +125,7 @@ async function summaries(pool: pg.Pool, feedback: FeedbackService, topology: Top
     [ids],
   );
   const fbs = await feedback.latest(pool, ids);
+  const impact = await businessImpactOf(pool, rows, d.businessImpactAlerts());
   const names = await pool.query<{ cluster_id: string; component: string; display_name: string }>(
     `SELECT n.cluster_id, n.component, n.display_name FROM server.component_names n
       JOIN unnest($1::text[], $2::text[]) AS w(cluster_id, component) USING (cluster_id, component)`,
@@ -166,8 +171,39 @@ async function summaries(pool: pg.Pool, feedback: FeedbackService, topology: Top
         nm.get(`${r.cluster_id}\0${r.root_component ?? ''}`),
       ),
       research_root: roots.get(r.incident_id) ?? null,
+      business_impact: impact.get(r.incident_id) ?? [],
     };
   });
+}
+
+/**
+ * 每个事件仍在其中的成员告警里属于业务影响告警（ADR 0166）的告警名，去重排序。告警已经不在告警状态表时按不上标签，不计
+ */
+async function businessImpactOf(
+  pool: pg.Pool,
+  rows: readonly IncidentRow[],
+  matchers: readonly AlertMatcher[],
+): Promise<Map<string, string[]>> {
+  if (!matchers.length) {
+    return new Map();
+  }
+  const current = rows.flatMap((r) =>
+    r.body.members.filter((m) => m.left_version === null).map((m) => ({ id: r.incident_id, alertId: m.alert_id })),
+  );
+  const impacting = new Set(
+    (await alertsById(pool, [...new Set(current.map((c) => c.alertId))]))
+      .filter((a) => isBusinessImpact(a.labels, matchers))
+      .map((a) => a.alert_id),
+  );
+  const out = new Map<string, Set<string>>();
+  for (const r of rows) {
+    for (const m of r.body.members) {
+      if (m.left_version === null && impacting.has(m.alert_id)) {
+        out.set(r.incident_id, (out.get(r.incident_id) ?? new Set()).add(m.alertname));
+      }
+    }
+  }
+  return new Map([...out].map(([k, v]) => [k, [...v].sort()]));
 }
 
 /**
@@ -316,7 +352,7 @@ export function registerIncidentRoutes(app: FastifyInstance, d: IncidentRouteDep
     let page: Summary[];
     let more: boolean;
     if (bySummary) {
-      let items = await summaries(d.pool, d.feedback, d.topology, matched);
+      let items = await summaries(d, matched);
       if (q.disposition) {
         items = items.filter((x) => x.disposition === q.disposition);
       }
@@ -331,7 +367,7 @@ export function registerIncidentRoutes(app: FastifyInstance, d: IncidentRouteDep
       more = rest.length > limit;
     } else {
       total = matched.length;
-      page = await summaries(d.pool, d.feedback, d.topology, rows.slice(0, limit));
+      page = await summaries(d, rows.slice(0, limit));
       more = rows.length > limit;
     }
     const last = page[page.length - 1];
