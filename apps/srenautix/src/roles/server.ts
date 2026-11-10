@@ -57,6 +57,7 @@ import { ReaderClock, ReaderRequestQueue, registerReaderRoutes } from '../topolo
 import { expireSpokeConditions } from '../console-bff/spoke-conditions.js';
 import { IngestService } from '../ingest/service.js';
 import { configureLog, logger } from '../kernel/log.js';
+import { Loops } from '../kernel/loops.js';
 import type { RoleArgs } from '../main.js';
 import { ServerMetrics, startMetricsServer, VERSION } from '../kernel/metrics.js';
 import { ServerNotifyActions } from '../notify/actions.js';
@@ -87,8 +88,8 @@ import { createPool, type PgConfig, type Queryable } from '../kernel/store/pool.
 import { ComponentExpander, hintOf } from '../topology/expand.js';
 import { startInformerTopology } from '../topology/informer.js';
 import { KubeTools } from '../research/kube-tools.js';
-import { FirstSeen, objectHealth, type K8sObject } from '../detectors/health.js';
-import { DetectorService, detectorSettings } from '../detectors/service.js';
+import type { DetectorService } from '../detectors/service.js';
+import { startDetectors } from '../detectors/wire.js';
 import { GitHubApp, RepoRoles } from '../github/app.js';
 import { ClosureTracker } from '../github/closures.js';
 import { CoverageIssues } from '../github/coverage-issues.js';
@@ -1018,18 +1019,9 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
     aux.push(probes);
   }
 
-  // 后台循环（只在主实例上做事）
-  const timers: NodeJS.Timeout[] = [];
-  const every = (ms: number, fn: () => Promise<unknown>, what: string) => {
-    const t = setInterval(() => {
-      if (!leader.isLeader()) {
-        return;
-      }
-      fn().catch((e: unknown) => logger.error(`${what}失败，下一轮重试`, { error: e }));
-    }, ms);
-    t.unref();
-    timers.push(t);
-  };
+  // 后台循环（默认只在主实例上做事；上一轮没有结束时跳过这一轮，kernel/loops.ts）
+  const loops = new Loops(leader, (what) => metrics.loopSkipped.inc({ loop: what }));
+  const every = (ms: number, fn: () => Promise<unknown>, what: string) => loops.every(ms, fn, what);
   every(15_000, () => pipeline.kick(), '事件流水线');
   listenIngest(
     o.pg,
@@ -1078,18 +1070,10 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
   }
   // 技能（ADR 0181）：重新加载在每个实例上执行（接口与控制台读取）；触发、运行与投递只在主实例上
   {
-    const t = setInterval(() => {
-      skills.reload().catch((e: unknown) => logger.error('技能重新加载失败，下一轮重试', { error: e }));
-    }, skills.reloadMs);
-    t.unref();
-    timers.push(t);
-    let busy = false;
-    const tick = async () => {
-      if (busy) {
-        return;
-      }
-      busy = true;
-      try {
+    loops.every(skills.reloadMs, () => skills.reload(), '技能重新加载', { leaderOnly: false });
+    every(
+      skills.intervalMs,
+      async () => {
         await skills.metricTriggersOnce();
         await skills.alertTriggersOnce();
         const objects = informer?.healthObjects() ?? null;
@@ -1097,11 +1081,9 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
           await skills.kubeTriggersOnce(objects as unknown as Parameters<SkillService['kubeTriggersOnce']>[0]);
         }
         await skills.tickOnce(signal);
-      } finally {
-        busy = false;
-      }
-    };
-    every(skills.intervalMs, tick, '技能的触发、运行与投递');
+      },
+      '技能的触发、运行与投递',
+    );
     void leader
       .acquired()
       .then(() => skills.recover())
@@ -1357,38 +1339,16 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
   }
 
   // 集群状态检测器（ADR 0105）：单集群时由本进程的 informer 计算对象状态，多集群时由各 reader 上报
-  const detectors = c.detectors.enabled
-    ? new DetectorService(
-        pool,
-        detectorSettings(c.detectors),
-        async (clusterId, alerts) => {
-          await ingest.write(clusterId, 'detector', 'detector', alerts, { detector: alerts.length });
-        },
-        metrics,
-        // 退出或失去主实例身份时不写入检测器告警（ADR 0128）
-        () => leader.isLeader() && !signal.aborted,
-      )
-    : null;
-  if (detectors) {
-    const firstSeen = new FirstSeen();
-    every(
-      parseDuration('detectors.interval', c.detectors.interval),
-      async () => {
-        const objects = informer?.healthObjects() ?? null;
-        if (objects) {
-          const now = Date.now();
-          await detectors.report(
-            c.cluster_id,
-            objectHealth(objects as unknown as K8sObject[], firstSeen, now),
-            true,
-            new Date(now),
-          );
-        }
-        await detectors.scan();
-      },
-      '集群状态检测',
-    );
-  }
+  const detectors = startDetectors({
+    pool,
+    config: c.detectors,
+    clusterId: c.cluster_id,
+    ingest,
+    metrics,
+    active: () => leader.isLeader() && !signal.aborted,
+    healthObjects: () => informer?.healthObjects() ?? null,
+    loops,
+  });
 
   const conditions = new ConditionPublisher(pool, 'server', c.cluster_id, metrics);
   const workerConditions = new ConditionPublisher(pool, 'worker', c.cluster_id, metrics);
@@ -1481,7 +1441,7 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
     apiUrl,
     async stop() {
       abort.abort();
-      timers.forEach(clearInterval);
+      loops.stop();
       await notify.stop();
       await informer?.stop();
       await leader.stop();

@@ -120,6 +120,13 @@ export class ServerMetrics extends BaseMetrics {
     registers: [this.registry],
   });
 
+  readonly loopSkipped = new Counter({
+    name: 'srenautix_loop_skipped_total',
+    help: '后台循环因上一轮还没有结束而跳过的次数，按循环名称（kernel/loops.ts）',
+    labelNames: ['loop'] as const,
+    registers: [this.registry],
+  });
+
   readonly alertCategoryLabelInvalid = new Counter({
     name: 'srenautix_alert_category_label_invalid_total',
     help: '告警的 srenautix_category 标签取值不在类别枚举里、被忽略的次数（每次分类计一次），按告警名（ADR 0183）',
