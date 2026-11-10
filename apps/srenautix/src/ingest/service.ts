@@ -201,7 +201,10 @@ export class IngestService {
         updates.push({
           id: row.alert_id,
           r,
-          recompute: r.component !== row.component || r.classification.category !== row.classification.category,
+          recompute:
+            r.component !== row.component ||
+            r.classification.category !== row.classification.category ||
+            r.classification.service !== row.classification.service,
         });
       }
     }

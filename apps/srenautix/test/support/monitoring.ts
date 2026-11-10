@@ -5,7 +5,7 @@ import { join, resolve } from 'node:path';
 
 /**
  * 测试用的真实 Alertmanager 与 Prometheus（二进制放在 worktree 的 .scratch/bin，
- * 版本见 docs/server/testing.md）。每个实例的数据目录在 .scratch 下，停止时删除。
+ * 版本见 .github/scripts/install-test-binaries.sh）。每个实例的数据目录在 .scratch 下，停止时删除。
  */
 const ROOT = resolve(import.meta.dirname, '../../../../.scratch');
 const BIN = process.env.SRENAUTIX_TEST_BIN ?? join(ROOT, 'bin');
@@ -68,7 +68,9 @@ export interface Proc {
 function start(bin: string, args: string[], dir: string): { p: ChildProcess; log: () => string } {
   const path = join(BIN, bin);
   if (!existsSync(path)) {
-    throw new Error(`找不到 ${path}；按 docs/server/testing.md 下载`);
+    throw new Error(
+      `找不到 ${path}；按 .github/scripts/install-test-binaries.sh 的版本放到这个目录，或用 SRENAUTIX_TEST_BIN 指定`,
+    );
   }
   const p = spawn(path, args, { cwd: dir, stdio: ['ignore', 'ignore', 'pipe'] });
   const lines: string[] = [];

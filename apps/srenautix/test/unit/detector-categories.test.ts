@@ -10,7 +10,7 @@ import {
   findingAlert,
   type DetectorSettings,
 } from '../../src/detectors/service.js';
-import { categoryInputsFingerprint } from '../../src/incident/recategorize.js';
+import { classificationInputsFingerprint } from '../../src/incident/recategorize.js';
 import { ServerMetrics } from '../../src/metrics.js';
 import { DEFAULT_CATALOG_PATH } from '../../src/proposals/catalog.js';
 import { PackRuntime } from '../../src/stage-a/packs.js';
@@ -152,9 +152,9 @@ describe('检测器合成告警的类别（ADR 0183 §2.1）', () => {
         a.alertname < b.alertname ? -1 : 1,
       ),
     );
-    expect(categoryInputsFingerprint(withTable)).not.toBe(categoryInputsFingerprint(without));
-    expect(categoryInputsFingerprint(rt.alertCatalog(categoryOptions([], metrics)))).toBe(
-      categoryInputsFingerprint(withTable),
+    expect(classificationInputsFingerprint(withTable)).not.toBe(classificationInputsFingerprint(without));
+    expect(classificationInputsFingerprint(rt.alertCatalog(categoryOptions([], metrics)))).toBe(
+      classificationInputsFingerprint(withTable),
     );
   });
 });

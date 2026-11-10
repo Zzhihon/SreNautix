@@ -7,7 +7,9 @@ import {
   tryNodeKey,
   type AlertCatalog,
 } from '@srenautix/core';
+import type { ServiceResolution } from '@srenautix/packs-sdk/business';
 import type { RawAlert } from '../ingest/normalize.js';
+import { NO_SERVICE, type ServiceSubject } from './service.js';
 
 /** 逻辑组件的 kind：不对应 Kubernetes 对象，与领域包告警目录里的 `kind: component` 相同 */
 export const LOGICAL_KIND = 'component';
@@ -49,6 +51,8 @@ export interface ResolveDeps {
     clusterId: string,
     labels: Record<string, string>,
   ): { component: string; role: AlertClassification['role']; ref: string } | null;
+  /** 告警的服务（ADR 0193，alerts/service.ts 的 alertService）；不给出时服务为 null */
+  service?(clusterId: string, s: ServiceSubject): Promise<ServiceResolution>;
 }
 
 /**
@@ -86,6 +90,7 @@ export async function resolveAlert(clusterId: string, a: RawAlert, deps: Resolve
   let entity: EntityRef | null = null;
   let resolution: Resolved['entityResolution'] = 'unresolved';
   let component: string | null = null;
+  let owner: string | null = null;
   if (mapped) {
     const node = await deps.nodes.find(clusterId, mapped.kind, mapped.namespace, mapped.name, a.startsAt);
     if (node) {
@@ -96,6 +101,7 @@ export async function resolveAlert(clusterId: string, a: RawAlert, deps: Resolve
       // 告警归属的组件是对象沿 owned_by 的顶层属主（Pod 归到它的 Deployment）：对象删除之后（新版本替换了 Pod），
       // 仍在回看窗口内的告警凭它留在原来的事件里，而不是因为拓扑里找不到 Pod 被拆成新的事件（ADR 0104）
       component = node.owner ?? node.key;
+      owner = node.owner ?? null;
     } else if (deps.ksm && mapped.kind === 'Pod' && mapped.namespace) {
       const p = await deps.ksm.podByName(clusterId, mapped.namespace, mapped.name, a.startsAt);
       if (p) {
@@ -137,6 +143,16 @@ export async function resolveAlert(clusterId: string, a: RawAlert, deps: Resolve
     // 与领域包告警目录按 service 标签建条目（name_labels [service]）一致（ADR 0104 §6）
     component = tryNodeKey(LOGICAL_KIND, null, a.labels.service);
   }
+  const service = deps.service
+    ? await deps.service(clusterId, {
+        alertname: a.alertname,
+        labels: a.labels,
+        catalogService: hit?.entry.service,
+        component,
+        entity: entity ? { kind: entity.kind, namespace: entity.namespace, name: entity.name } : null,
+        owner,
+      })
+    : NO_SERVICE;
   if (ov && a.labels.role === undefined) {
     // 覆盖只改角色与归属；类别照常按标签、告警目录与类别规则求出（ADR 0183）
     const cat = deps.catalog.category(a.labels);
@@ -149,6 +165,7 @@ export async function resolveAlert(clusterId: string, a: RawAlert, deps: Resolve
         chronic: deps.chronic(a.alertname, component),
         category: cat.category,
         category_source: cat.source,
+        ...service,
       },
       entity,
       entityResolution: resolution,
@@ -156,9 +173,12 @@ export async function resolveAlert(clusterId: string, a: RawAlert, deps: Resolve
       chains: hit?.entry.chains ?? [],
     };
   }
-  const classification = classifyAlert(
-    { labels: a.labels, ruleExpr: deps.ruleExpr(a.alertname), chronic: deps.chronic(a.alertname, component) },
-    deps.catalog,
-  );
+  const classification = {
+    ...classifyAlert(
+      { labels: a.labels, ruleExpr: deps.ruleExpr(a.alertname), chronic: deps.chronic(a.alertname, component) },
+      deps.catalog,
+    ),
+    ...service,
+  };
   return { classification, entity, entityResolution: resolution, component, chains: hit?.entry.chains ?? [] };
 }

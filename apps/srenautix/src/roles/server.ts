@@ -7,6 +7,7 @@ import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
 import { parse as parseYaml } from 'yaml';
 import { categoryOptions } from '../alerts/category.js';
+import { alertService, type ServiceDeps } from '../alerts/service.js';
 import { registerReadLimit } from '../api/read-limit.js';
 import { createApp } from '../api/http.js';
 import { leaseLeader, neverLeader, singleLeader, type Leader } from '../api/leader.js';
@@ -341,6 +342,13 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
     lock_digest: packs.set.lockDigest,
   });
   const alertCatalog = packs.alertCatalog(categoryOptions(c.ingest.category_rules, metrics));
+  // 告警的服务（ADR 0193）：领域包 business.yaml 的服务目录，组件类型取拓扑节点上的记录、没有时按名称匹配
+  const serviceDeps: ServiceDeps = {
+    services: () => packs.set.services,
+    componentTypes: () => packs.componentTypes(),
+    componentType: (clusterId, key) => topology.componentType(clusterId, key),
+    metrics,
+  };
   const rcaParams = packs.rcaParams();
   const params = (): ResolvedRcaParams => rcaParams;
   const evidenceSource = await EvidenceSource.create(
@@ -471,9 +479,10 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
           [...serverCorrections, ...incidentCorrections(alertCatalog)],
           holder,
         );
-  // 类别解析的输入（领域包的目录与 ingest.category_rules）有变化时重新分类历史事件的 unclassified 成员（ADR 0183）
+  // 归类的输入（领域包的目录、business.yaml 与 ingest.category_rules）有变化时重新归类历史事件：unclassified 成员的类别
+  // （ADR 0183）与没有服务的成员的服务（ADR 0193）
   if (serve !== 'console') {
-    void startRecategorize({ pool, catalog: alertCatalog, leader, holder, metrics, signal });
+    void startRecategorize({ pool, catalog: alertCatalog, service: serviceDeps, leader, holder, metrics, signal });
   }
 
   // 通知与 issue 的事件报告（ADR 0125）
@@ -588,6 +597,7 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
       ruleExpr: () => undefined,
       chronic: () => false,
       override: (clusterId, labels) => overrides.match(clusterId, labels),
+      service: (clusterId, s) => alertService(serviceDeps, clusterId, s),
     },
     metrics,
     (_clusterId, raws) => {

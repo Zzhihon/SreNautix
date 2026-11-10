@@ -175,6 +175,11 @@ export class AlertCatalog {
       ?.find(({ entry }) => Object.entries(entry.match_labels ?? {}).every(([k, v]) => labels[k] === v));
   }
 
+  /** 同名告警的全部条目，按 lookup 的查找顺序 */
+  entries(alertname: string): AlertCatalogEntry[] {
+    return (this.byName.get(alertname) ?? []).map((x) => x.entry);
+  }
+
   has(alertname: string): boolean {
     return this.byName.has(alertname);
   }
@@ -234,6 +239,21 @@ export class AlertCatalog {
       })),
     };
   }
+}
+
+/**
+ * 告警目录条目声明的服务（ADR 0193 §5），按 categoryInputs 的条目顺序；并入归类输入的指纹，条目的 service 改了就重新归类
+ */
+export function catalogServiceInputs(
+  catalog: AlertCatalog,
+): Array<{ alertname: string; match_labels: Labels; service: string | null }> {
+  return catalog.alertnames().flatMap((name) =>
+    catalog.entries(name).map((entry) => ({
+      alertname: entry.alertname,
+      match_labels: entry.match_labels ?? {},
+      service: entry.service ?? null,
+    })),
+  );
 }
 
 function specificity(e: AlertCatalogEntry): number {
