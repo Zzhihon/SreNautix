@@ -4,7 +4,7 @@
 
 SreNautix takes alerts from your existing stack, groups them into incidents, ranks root-cause candidates on your cluster's topology, and judges deterministic evidence before any model is involved. Only then does it ask a model, and it checks every citation in the model's output with code. Fixes go through a separate gateway that can only run typed, pre-declared actions. The Kubernetes API server confines those writes, each one is checked afterwards, and it is reverted if possible. How accurate SreNautix is gets measured on your own past incidents, with the model you actually use.
 
-> **Status: design stage.** There is no runnable code yet. Public releases start only after the project has met its own production bar on a reference cluster for two consecutive weeks (see [POSITIONING.zh-CN.md](POSITIONING.zh-CN.md)).
+> **Status: pre-release.** All roles build, are signed and install from the Helm chart. A reference cluster runs SreNautix in shadow mode: it researches and notifies, and its gateway is frozen. The first public release comes after the project meets its own production bar on that cluster for two consecutive weeks (see [POSITIONING.zh-CN.md](POSITIONING.zh-CN.md)). To try it, start with [docs/install](docs/install/README.zh-CN.md).
 
 ![Architecture](architecture.svg)
 
@@ -25,8 +25,10 @@ Twelve safety invariants are stated in the positioning document, and each one is
 | [POSITIONING.zh-CN.md](POSITIONING.zh-CN.md) | Who it is for, the jobs it does, its invariants, falsifiable claims, and licensing |
 | [DESIGN.zh-CN.md](DESIGN.zh-CN.md) | Architecture and design (v2), reviewed by 11 adversarial reviewers in two rounds |
 | [architecture.svg](architecture.svg) | Architecture diagram |
+| [docs/install](docs/install/README.zh-CN.md) | Installation: observe, standard and compliance profiles, offline install |
+| [AGENTS.md](AGENTS.md) | Map of the repository and the checks to run before a change |
 
-The design documents are in Chinese for now. English versions will be published before the first release.
+The design and installation documents are in Chinese for now. English versions will be published before the first release.
 
 ## License
 

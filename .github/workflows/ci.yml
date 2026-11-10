@@ -169,7 +169,7 @@ jobs:
           "$(go env GOPATH)/bin/govulncheck" ./...
       - name: osv-scanner（pnpm-lock.yaml、go.mod）
         run: |
-          curl -fsSLo osv-scanner "https://github.com/google/osv-scanner/releases/download/${OSV_SCANNER_VERSION}/osv-scanner_linux_amd64"
+          curl --retry 5 --retry-all-errors --retry-delay 5 -fsSLo osv-scanner "https://github.com/google/osv-scanner/releases/download/${OSV_SCANNER_VERSION}/osv-scanner_linux_amd64"
           echo "${OSV_SCANNER_SHA256}  osv-scanner" | sha256sum --check
           chmod +x osv-scanner
           lockfiles=()
@@ -193,13 +193,13 @@ jobs:
           plugin_dir="$(helm env HELM_PLUGINS)/helm-unittest"
           mkdir -p "$plugin_dir" "$HOME/.local/bin"
           ver=${HELM_UNITTEST_VERSION#v}
-          curl -fsSLo unittest.tgz "https://github.com/helm-unittest/helm-unittest/releases/download/${HELM_UNITTEST_VERSION}/helm-unittest-linux-amd64-${ver}.tgz"
+          curl --retry 5 --retry-all-errors --retry-delay 5 -fsSLo unittest.tgz "https://github.com/helm-unittest/helm-unittest/releases/download/${HELM_UNITTEST_VERSION}/helm-unittest-linux-amd64-${ver}.tgz"
           echo "${HELM_UNITTEST_SHA256}  unittest.tgz" | sha256sum --check
           tar -xzf unittest.tgz -C "$plugin_dir"
-          curl -fsSLo kubeconform.tgz "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
+          curl --retry 5 --retry-all-errors --retry-delay 5 -fsSLo kubeconform.tgz "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
           echo "${KUBECONFORM_SHA256}  kubeconform.tgz" | sha256sum --check
           tar -xzf kubeconform.tgz -C "$HOME/.local/bin" kubeconform
-          curl -fsSLo prometheus.tgz "https://github.com/prometheus/prometheus/releases/download/v${PROMETHEUS_VERSION}/prometheus-${PROMETHEUS_VERSION}.linux-amd64.tar.gz"
+          curl --retry 5 --retry-all-errors --retry-delay 5 -fsSLo prometheus.tgz "https://github.com/prometheus/prometheus/releases/download/v${PROMETHEUS_VERSION}/prometheus-${PROMETHEUS_VERSION}.linux-amd64.tar.gz"
           echo "${PROMETHEUS_SHA256}  prometheus.tgz" | sha256sum --check
           tar -xzf prometheus.tgz -C "$HOME/.local/bin" --strip-components=1 "prometheus-${PROMETHEUS_VERSION}.linux-amd64/promtool"
           echo "$HOME/.local/bin" >>"$GITHUB_PATH"
@@ -240,7 +240,7 @@ jobs:
       - name: 安装 Grafana（官方发行包，校验 sha256）
         if: hashFiles('plugins/grafana-app/playwright.config.ts') != ''
         run: |
-          curl -fsSLo grafana.tgz "https://dl.grafana.com/oss/release/grafana-${GRAFANA_VERSION}.linux-amd64.tar.gz"
+          curl --retry 5 --retry-all-errors --retry-delay 5 -fsSLo grafana.tgz "https://dl.grafana.com/oss/release/grafana-${GRAFANA_VERSION}.linux-amd64.tar.gz"
           echo "${GRAFANA_SHA256}  grafana.tgz" | sha256sum --check
           mkdir -p "$RUNNER_TEMP/grafana"
           tar -xzf grafana.tgz -C "$RUNNER_TEMP/grafana" --strip-components=1
@@ -322,7 +322,7 @@ jobs:
         run: |
           source deploy/kind/versions.env
           mkdir -p "$HOME/.local/bin"
-          curl -fsSLo "$HOME/.local/bin/kind" "https://github.com/kubernetes-sigs/kind/releases/download/${KIND_VERSION}/kind-linux-amd64"
+          curl --retry 5 --retry-all-errors --retry-delay 5 -fsSLo "$HOME/.local/bin/kind" "https://github.com/kubernetes-sigs/kind/releases/download/${KIND_VERSION}/kind-linux-amd64"
           echo "${KIND_SHA256}  $HOME/.local/bin/kind" | sha256sum --check
           chmod +x "$HOME/.local/bin/kind"
           echo "$HOME/.local/bin" >>"$GITHUB_PATH"
@@ -351,7 +351,7 @@ jobs:
       - name: 创建单节点 Kind 集群（版本见 deploy/kind/versions.env）
         run: |
           source deploy/kind/versions.env
-          curl -fsSLo kind "https://github.com/kubernetes-sigs/kind/releases/download/${KIND_VERSION}/kind-linux-amd64"
+          curl --retry 5 --retry-all-errors --retry-delay 5 -fsSLo kind "https://github.com/kubernetes-sigs/kind/releases/download/${KIND_VERSION}/kind-linux-amd64"
           echo "${KIND_SHA256}  kind" | sha256sum --check
           chmod +x kind
           ./kind create cluster --name dry-run --image "$KIND_NODE_IMAGE" --wait 120s
@@ -367,10 +367,10 @@ jobs:
           persist-credentials: false
       - name: 安装 actionlint 与 shellcheck（校验 sha256）
         run: |
-          curl -fsSLo actionlint.tgz "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          curl --retry 5 --retry-all-errors --retry-delay 5 -fsSLo actionlint.tgz "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
           echo "${ACTIONLINT_SHA256}  actionlint.tgz" | sha256sum --check
           tar -xzf actionlint.tgz actionlint
-          curl -fsSLo shellcheck.txz "https://github.com/koalaman/shellcheck/releases/download/${SHELLCHECK_VERSION}/shellcheck-${SHELLCHECK_VERSION}.linux.x86_64.tar.xz"
+          curl --retry 5 --retry-all-errors --retry-delay 5 -fsSLo shellcheck.txz "https://github.com/koalaman/shellcheck/releases/download/${SHELLCHECK_VERSION}/shellcheck-${SHELLCHECK_VERSION}.linux.x86_64.tar.xz"
           echo "${SHELLCHECK_SHA256}  shellcheck.txz" | sha256sum --check
           tar -xJf shellcheck.txz --strip-components=1 "shellcheck-${SHELLCHECK_VERSION}/shellcheck"
       - name: actionlint（含工作流内的 shell）
@@ -394,6 +394,8 @@ jobs:
           done
       - name: Kind 场景与标准答案一致，并满足 EvalTruth
         run: deploy/kind/check-scenarios.sh
+      - name: 仓库地图引用的路径都存在
+        run: .github/scripts/check-doc-paths.sh AGENTS.md
       - name: shellcheck（deploy/ 与 .github/scripts/ 下的脚本）
         run: git ls-files 'deploy/**/*.sh' '.github/scripts/*.sh' | xargs ./shellcheck -x
 

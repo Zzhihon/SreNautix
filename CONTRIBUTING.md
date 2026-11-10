@@ -1,6 +1,6 @@
 # Contributing to SreNautix
 
-SreNautix is in the design stage. Design discussion is welcome in issues. Code contributions open once the repository layout described in [DESIGN.zh-CN.md](DESIGN.zh-CN.md) §18 exists.
+SreNautix is pre-release. Issues and pull requests are welcome. Read [AGENTS.md](AGENTS.md) first: it maps the repository and lists the checks to run before you open a pull request. Every change reaches `main` through a pull request with green CI.
 
 ## Licensing of contributions
 

@@ -10,7 +10,7 @@ SreNautix 的处理流程：
 4. 修复只能通过一个独立的网关执行，而且只能是目录里事先声明过的类型化动作。写操作受 Kubernetes 准入策略约束；执行后会校验结果，能撤销的会撤销。
 5. 它的准确率在你自己的历史事件上测量，使用你实际在用的模型。
 
-> **状态：设计阶段，目前还没有可以运行的代码。** 要等项目在参考集群上连续 2 周达到自己定下的生产标准，才会发布第一个公开版本（标准见 [POSITIONING.zh-CN.md](POSITIONING.zh-CN.md)）。
+> **状态：预发布。** 全部角色都能构建、签名，并用 Helm chart 安装。一个参考集群以影子模式运行 SreNautix：研判并发送通知，gateway 冻结。项目在这个集群上连续 2 周达到自己定下的生产标准后，才发布第一个公开版本（标准见 [POSITIONING.zh-CN.md](POSITIONING.zh-CN.md)）。试用从 [docs/install](docs/install/README.zh-CN.md) 开始。
 
 ![架构](architecture.svg)
 
@@ -31,6 +31,8 @@ SreNautix 的处理流程：
 | [POSITIONING.zh-CN.md](POSITIONING.zh-CN.md) | 为谁服务、解决什么问题、不变量、可证伪的主张、许可 |
 | [DESIGN.zh-CN.md](DESIGN.zh-CN.md) | 架构与设计 v2，经过两轮共 11 位质疑者推敲 |
 | [architecture.svg](architecture.svg) | 架构图 |
+| [docs/install](docs/install/README.zh-CN.md) | 安装：observe、standard、compliance 三种配置与离线安装 |
+| [AGENTS.md](AGENTS.md) | 仓库地图与改动前要运行的检查 |
 
 ## 许可
 
