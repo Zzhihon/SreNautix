@@ -1,5 +1,5 @@
 // 本文件由 packages/contract/scripts/gen.ts 从 contract/ 生成，不要手工修改。
-export const CONTRACT_VERSION = '2.54.0';
+export const CONTRACT_VERSION = '2.55.0';
 
 export const SCHEMAS: Record<string, Record<string, unknown>> = {
   'https://srenautix.io/contract/gateway/v1/action-catalog.schema.json': {
@@ -1759,6 +1759,13 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
             type: 'array',
             description: '一句话现状（严重度、根因组件、症状、状态），渠道放在最上面并加粗',
             items: { $ref: '#/$defs/Run' },
+          },
+          brief: {
+            type: 'array',
+            maxItems: 3,
+            description:
+              '结论块（契约 2.55.0，ADR 0194）：标题之下依次是处置、影响、下一步，各一行，取自各段已有的块；没有的行不出现。渠道放在标题之后、各段之前，不折叠、不省略。之前版本的消息没有这个字段',
+            items: { $ref: '#/$defs/Block' },
           },
           sections: { type: 'array', items: { $ref: '#/$defs/Section' } },
           buttons: { type: 'array', items: { $ref: '#/$defs/Button' } },

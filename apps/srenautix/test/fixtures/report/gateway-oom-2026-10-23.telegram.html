@@ -1,6 +1,9 @@
 [影子] <b>[严重] StatefulSet:cchp-prod/gateway：CCHPMetricsTargetDown、KubeStatefulSetReplicasNotReady</b>
 未恢复 · 事件 <code>StatefulSet:cchp-prod/gateway:2026-10-23T15:45:00Z</code>
 首次触发 2026-10-23 15:48 UTC
+处置：<b>升级</b> · 阶段 A：critical 且根因有歧义
+影响 · 内存：gateway 内存占 limit 与 OOM <code>94.0%</code> / 阈值 <code>90.0%</code> · 2 个容器被 OOM 终止 · 自 10-24 14:37
+下一步 · runbook：<code>workload/workload.md</code>
 
 <b>现状</b>
 <code>cchp/cchp-prod</code>：<b>StatefulSet:cchp-prod/gateway</b>：CCHPMetricsTargetDown、KubeStatefulSetReplicasNotReady。<code>15:48:30</code> 起首个告警，<code>16:08:30</code> 起出现症状，截至 <code>10-24 14:45:30</code> 未恢复。70 条告警（4 条触发中），1 个组件。
@@ -24,7 +27,6 @@
 
 <b>关键问题</b>
 <b>阶段 A 根因候选：</b><code>StatefulSet:cchp-prod/gateway</code>（得分 0.65）
-处置：<b>升级</b> · 阶段 A：critical 且根因有歧义
 
 <b>拓扑联系</b>
 <b>StatefulSet:cchp-prod/gateway</b> ⇒ 告警 KubeContainerOOMKilled、CCHPMetricsTargetDown、KubePodCrashLooping、CCHPGatewayContainerTerminated、KubeStatefulSetReplicasNotReady、KubePodCrashLoopingCritical

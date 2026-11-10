@@ -1,6 +1,9 @@
 [影子] <b>[严重] StatefulSet:acme-prod/gateway：KubeContainerOOMKilled、KubePdbBlockingEviction</b>
 未恢复 · 事件 <code>StatefulSet:acme-prod/gateway:2026-10-20T15:50:00Z</code>
 首次触发 2026-10-20 15:50 UTC
+处置：<b>升级</b> · 阶段 A：critical 且根因有歧义（3 个候选，第一名得分 0.35，与第二名分差 0.00）
+影响 · 内存：gateway 内存占 limit 与 OOM <code>96.5%</code> / 阈值 <code>90.0%</code> · working set 峰值 97% · 自 15:55
+下一步 · <code>r1</code> <i>【模型】暂停 acme-prod 中 control、worker、gateway 所在 Application 的 rollout</i>
 
 <b>现状</b>
 <code>prod/acme-prod</code>：发布 <code>rel-9a8c9cd6</code>（15:59:52）与回退到 <code>rel-fd8097cf</code>（16:24:25）期间，<b>StatefulSet:acme-prod/gateway</b>：KubeContainerOOMKilled、KubePdbBlockingEviction。<code>15:50:30</code> 起首个告警，<code>16:25</code> 起出现症状，截至 <code>17:07:40</code> 未恢复。70 条告警（41 条触发中），7 个组件。
@@ -25,7 +28,6 @@
 
 <b>关键问题</b>
 <b>结论：可能（likely）</b> · <code>StatefulSet:acme-prod/gateway</code>（h3）
-处置：<b>升级</b> · 阶段 A：critical 且根因有歧义（3 个候选，第一名得分 0.35，与第二名分差 0.00）
 为什么是“可能”（代码判定，四项条件满足 2 项）：
 - <b>满足</b>：支持卡实体在假设范围内：30 张规则判定的卡（检查卡 1 张）
 - <b>满足</b>：最早异常 <code>15:55</code>（<code>card:38</code>）不晚于症状起点 <code>16:25</code> + 2 分钟
@@ -45,9 +47,9 @@
 <b>解决方案</b>
 - <code>r1</code> <i>【模型】暂停 acme-prod 中 control、worker、gateway 所在 Application 的 rollout</i>
   验证：card:31 重跑后转为正常
-- <code>r2</code> <i>【模型】重建 gateway-4 并确认就绪</i> · <code>pod_restart</code>
+- <code>r2</code> <i>【模型】重建 gateway-4 并确认就绪</i> · pod_restart
   验证：执行后 300 秒内：原 Pod 已移除，控制器有新的就绪 Pod，就绪副本数回到驱逐前
-- <code>r3</code> <i>【模型】检查 gateway 内存 limit 与 canary 镜像的常驻内存</i>
+- r3 <i>【模型】检查 gateway 内存 limit 与 canary 镜像的常驻内存</i>
   验证：card:38 重跑后转为正常
 runbook：argocd/argocd.md、workload/workload.md
 
@@ -62,6 +64,4 @@ runbook：argocd/argocd.md、workload/workload.md
   - 其余 1 张见控制台
   - 成员告警 4 条：<a href="https://grafana.example.test/explore?schemaVersion=1&amp;orgId=1&amp;panes=%7B%22a%22%3A%7B%22datasource%22%3A%22victoriametrics%22%2C%22queries%22%3A%5B%7B%22refId%22%3A%22A%22%2C%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22victoriametrics%22%7D%2C%22expr%22%3A%22sum%20by%20(namespace%2C%20pod)%20(rate(container_cpu_cfs_throttled_periods_total%7Bnamespace%3D%5C%22acme-prod%5C%22%2Cpod%3D%5C%22gateway-3-0%5C%22%2Ccontainer!%3D%5C%22%5C%22%7D%5B5m%5D))%20%2F%20sum%20by%20(namespace%2C%20pod)%20(rate(container_cpu_cfs_periods_total%7Bnamespace%3D%5C%22acme-prod%5C%22%2Cpod%3D%5C%22gateway-3-0%5C%22%7D%5B5m%5D))%20%3E%200.25%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22now-6h%22%2C%22to%22%3A%22now%22%7D%7D%7D">KubeContainerOOMKilled</a>、<a href="https://grafana.example.test/explore?schemaVersion=1&amp;orgId=1&amp;panes=%7B%22a%22%3A%7B%22datasource%22%3A%22victoriametrics%22%2C%22queries%22%3A%5B%7B%22refId%22%3A%22A%22%2C%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22victoriametrics%22%7D%2C%22expr%22%3A%22sum%20by%20(namespace%2C%20pod)%20(rate(container_cpu_cfs_throttled_periods_total%7Bnamespace%3D%5C%22acme-prod%5C%22%2Cpod%3D%5C%22gateway-4%5C%22%2Ccontainer!%3D%5C%22%5C%22%7D%5B5m%5D))%20%2F%20sum%20by%20(namespace%2C%20pod)%20(rate(container_cpu_cfs_periods_total%7Bnamespace%3D%5C%22acme-prod%5C%22%2Cpod%3D%5C%22gateway-4%5C%22%7D%5B5m%5D))%20%3E%200.25%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22now-6h%22%2C%22to%22%3A%22now%22%7D%7D%7D">KubeStatefulSetReplicasNotReady</a>、<a href="https://grafana.example.test/explore?schemaVersion=1&amp;orgId=1&amp;panes=%7B%22a%22%3A%7B%22datasource%22%3A%22victoriametrics%22%2C%22queries%22%3A%5B%7B%22refId%22%3A%22A%22%2C%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22victoriametrics%22%7D%2C%22expr%22%3A%22sum%20by%20(namespace%2C%20pod)%20(rate(container_cpu_cfs_throttled_periods_total%7Bnamespace%3D%5C%22acme-prod%5C%22%2Cpod%3D%5C%22gateway-6%5C%22%2Ccontainer!%3D%5C%22%5C%22%7D%5B5m%5D))%20%2F%20sum%20by%20(namespace%2C%20pod)%20(rate(container_cpu_cfs_periods_total%7Bnamespace%3D%5C%22acme-prod%5C%22%2Cpod%3D%5C%22gateway-6%5C%22%7D%5B5m%5D))%20%3E%200.25%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22now-6h%22%2C%22to%22%3A%22now%22%7D%7D%7D">KubePdbBlockingEviction</a>、AcmePostDeployAnomaly
 <b>已执行的检查</b>
-- h1 · <b>健康与同步状态</b> @ Application.argoproj.io:argocd/acme-prod → 推翻（card:134 正常：degraded=0 outOfSync=0 seen=1，未命中异常条件） 控制台 查询
-- h3 · <b>重启与终止原因</b> @ StatefulSet:acme-prod/gateway → 支持（card:135 异常：窗口内重启 1 次） 控制台 查询
 …其余内容见控制台</blockquote>
