@@ -29,36 +29,69 @@
     "updated_at"
   ],
   "properties": {
-    "incident_id": { "$ref": "common.schema.json#/$defs/Uuid" },
-    "cluster_id": { "$ref": "common.schema.json#/$defs/ClusterId" },
-    "label": { "$ref": "#/$defs/IncidentLabel" },
-    "incident_version": { "type": "integer", "minimum": 1 },
-    "state": { "type": "string", "enum": ["firing", "resolved", "merged"] },
-    "severity": { "$ref": "common.schema.json#/$defs/Severity" },
-    "first_firing_at": { "$ref": "common.schema.json#/$defs/Timestamp" },
-    "ended_at": {
-      "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/Timestamp" }]
+    "incident_id": {
+      "$ref": "common.schema.json#/$defs/Uuid"
     },
-    "root": { "$ref": "#/$defs/Root" },
+    "cluster_id": {
+      "$ref": "common.schema.json#/$defs/ClusterId"
+    },
+    "label": {
+      "$ref": "#/$defs/IncidentLabel"
+    },
+    "incident_version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "state": {
+      "type": "string",
+      "enum": ["firing", "resolved", "merged"]
+    },
+    "severity": {
+      "$ref": "common.schema.json#/$defs/Severity"
+    },
+    "first_firing_at": {
+      "$ref": "common.schema.json#/$defs/Timestamp"
+    },
+    "ended_at": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "common.schema.json#/$defs/Timestamp"
+        }
+      ]
+    },
+    "root": {
+      "$ref": "#/$defs/Root"
+    },
     "candidates": {
       "type": "array",
       "description": "前 k 个候选根因，按得分从高到低",
-      "items": { "$ref": "#/$defs/RootCandidate" }
+      "items": {
+        "$ref": "#/$defs/RootCandidate"
+      }
     },
     "members": {
       "type": "array",
-      "items": { "$ref": "#/$defs/Member" }
+      "items": {
+        "$ref": "#/$defs/Member"
+      }
     },
     "components": {
       "type": "array",
       "description": "成员告警涉及的组件，根因在前",
-      "items": { "$ref": "common.schema.json#/$defs/ComponentKey" }
+      "items": {
+        "$ref": "common.schema.json#/$defs/ComponentKey"
+      }
     },
     "categories": {
       "type": "array",
       "description": "当前成员告警的类别的并集，按字典序排列、不重复，至少一项（契约 2.46.0，ADR 0183）；没有当前成员时取全部成员。之前版本写下的事件由数据修正 incident/categories 补上",
       "uniqueItems": true,
-      "items": { "$ref": "common.schema.json#/$defs/IncidentCategory" }
+      "items": {
+        "$ref": "common.schema.json#/$defs/IncidentCategory"
+      }
     },
     "primary_category": {
       "description": "主类别（契约 2.46.0，ADR 0183）：根因组件上的当前成员告警中最严重的一个的类别；根因组件上没有成员告警（没有根因或沉默根因）时取全部当前成员中最严重的一个。同样严重时取开始更早的，再按 alert_id 的字典序",
@@ -68,19 +101,42 @@
       "type": "array",
       "description": "当前成员告警的服务的并集，按字典序排列、不重复，不含 null（契约 2.53.0，ADR 0193 §4）；没有当前成员时取全部成员。之前版本写下的事件没有这个字段，由数据修正补上",
       "uniqueItems": true,
-      "items": { "$ref": "common.schema.json#/$defs/ServiceId" }
+      "items": {
+        "$ref": "common.schema.json#/$defs/ServiceId"
+      }
     },
     "primary_service": {
       "description": "主服务（契约 2.53.0，ADR 0193 §4）：先在服务来源不是 namespace 的成员中取，没有时再在 namespace 来源的成员中取；每一轮取根因组件上最严重的成员的服务，根因组件上没有这样的成员时取全部这样的成员中最严重的一个。都没有服务时为 null",
-      "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/ServiceId" }]
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "common.schema.json#/$defs/ServiceId"
+        }
+      ]
     },
     "primary_service_source": {
       "description": "primary_service 取自的成员的服务来源；primary_service 为 null 时为 null。namespace 表示推定",
-      "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/ServiceSource" }]
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "common.schema.json#/$defs/ServiceSource"
+        }
+      ]
     },
     "business_domain": {
       "description": "primary_service 所属的业务领域（契约 2.53.0）；primary_service 为 null 时为 null",
-      "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/BusinessDomainId" }]
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "common.schema.json#/$defs/BusinessDomainId"
+        }
+      ]
     },
     "changes": {
       "type": "array",
@@ -92,20 +148,38 @@
     "change_links": {
       "type": "array",
       "description": "changes 中每个变更与事件的关联记录，顺序与 changes 相同：分级、依据、支撑 high 的成员告警与是否回退。由确定性代码计算（ADR 0169，契约 2.37.0）；之前版本的事件没有这个字段",
-      "items": { "$ref": "#/$defs/ChangeLink" }
+      "items": {
+        "$ref": "#/$defs/ChangeLink"
+      }
     },
     "aliases": {
       "type": "array",
       "description": "合并进本事件的旧事件（incident_aliases：from → into）。旧 URL 与旧标签经别名解析到本事件",
-      "items": { "$ref": "#/$defs/Alias" }
+      "items": {
+        "$ref": "#/$defs/Alias"
+      }
     },
     "split_from": {
       "description": "本事件由哪个事件拆分而来",
-      "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/Uuid" }]
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "common.schema.json#/$defs/Uuid"
+        }
+      ]
     },
     "merged_into": {
       "description": "state=merged 时指向吸收本事件的事件",
-      "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/Uuid" }]
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "common.schema.json#/$defs/Uuid"
+        }
+      ]
     },
     "suppressed": {
       "type": "boolean",
@@ -120,8 +194,12 @@
       "minimum": 0,
       "description": "本版本使用的拓扑事件 seq"
     },
-    "created_at": { "$ref": "common.schema.json#/$defs/Timestamp" },
-    "updated_at": { "$ref": "common.schema.json#/$defs/Timestamp" },
+    "created_at": {
+      "$ref": "common.schema.json#/$defs/Timestamp"
+    },
+    "updated_at": {
+      "$ref": "common.schema.json#/$defs/Timestamp"
+    },
     "component_names": {
       "$ref": "common.schema.json#/$defs/ComponentNames",
       "description": "根因、候选与成员组件的可读名称；读取时由中心附上，事件流与旧版本的事件没有这个字段"
@@ -130,12 +208,51 @@
       "description": "最近一次完成的研判给出的根因，读取时由中心附上（ADR 0104 §14）；没有给出根因的研判、事件流与旧版本的事件没有这个字段",
       "$ref": "#/$defs/ResearchRoot"
     },
+    "claim": {
+      "description": "处理人，读取最新版本时由中心附上（契约 2.59.0，ADR 0195）；没有人认领时为 null。事件流与历史版本没有这个字段",
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/Claim"
+        }
+      ]
+    },
     "headline": {
       "description": "问题陈述，读取最新版本时由中心附上（契约 2.56.0，ADR 0190）；事件没有仍在其中的成员告警时为 null。事件流与历史版本没有这个字段",
-      "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/Headline" }]
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/Headline"
+        }
+      ]
     }
   },
   "$defs": {
+    "Claim": {
+      "title": "IncidentClaim",
+      "description": "事件的处理人（ADR 0195）",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["principal_id", "channel", "claimed_at"],
+      "properties": {
+        "principal_id": {
+          "type": "string",
+          "description": "认领人的主体 id（与反馈、审批相同）"
+        },
+        "channel": {
+          "type": "string",
+          "enum": ["console", "grafana", "telegram", "feishu"],
+          "description": "认领时所用的渠道"
+        },
+        "claimed_at": {
+          "$ref": "common.schema.json#/$defs/Timestamp"
+        }
+      }
+    },
     "Headline": {
       "title": "IncidentHeadline",
       "description": "事件的问题陈述（ADR 0190）。头条告警与通知标题的症状告警是同一组：仍在事件中、正在触发的 symptom 告警；没有时取正在触发的 critical 告警；再没有时取全部仍在事件中的告警。组内取开始时间最早的一条，同时开始时取 alert_id 较小的",
@@ -143,13 +260,21 @@
       "additionalProperties": false,
       "required": ["alert_id", "alertname", "summary", "started_at", "research_summary"],
       "properties": {
-        "alert_id": { "type": "string", "description": "头条告警的 alert_id" },
-        "alertname": { "type": "string" },
+        "alert_id": {
+          "type": "string",
+          "description": "头条告警的 alert_id"
+        },
+        "alertname": {
+          "type": "string"
+        },
         "summary": {
           "type": ["string", "null"],
           "description": "头条告警的 summary 注解，没有时取 description 注解；都没有时为 null。告警注解原文，属于不可信文本"
         },
-        "started_at": { "description": "头条告警的开始时间", "$ref": "common.schema.json#/$defs/Timestamp" },
+        "started_at": {
+          "description": "头条告警的开始时间",
+          "$ref": "common.schema.json#/$defs/Timestamp"
+        },
         "research_summary": {
           "type": ["string", "null"],
           "description": "最近一次完成的研判的一句话结论（ResearchRunSummary.summary）；没有完成的研判或研判没有结论时为 null"
@@ -163,8 +288,12 @@
       "additionalProperties": false,
       "required": ["change_id", "grade", "basis", "new_signals", "rollback"],
       "properties": {
-        "change_id": { "type": "string" },
-        "grade": { "$ref": "#/$defs/ChangeGrade" },
+        "change_id": {
+          "type": "string"
+        },
+        "grade": {
+          "$ref": "#/$defs/ChangeGrade"
+        },
         "basis": {
           "type": "array",
           "description": "关联依据，按枚举顺序排列，不重复。component_match：成员告警的组件就是变更目标所属的组件；acts_on：成员告警落在变更中按强依据挂上的 Job 经 egress_to 访问的组件上；topology_reach：成员告警的组件沿置信度不低于归并阈值的边可达变更目标；namespace：没有对象的告警按命名空间归到变更；logical_owner：没有对象的告警按逻辑归属（同一逻辑组件，或没有对象的变更类告警）归到变更；retire_scrape_job：告警报的抓取 job 随这次退役失去全部目标；pending_sync：已合并、尚未同步的提交落在告警所在的应用上；late：变更晚于它自己目标上已经开始的问题",
@@ -186,7 +315,9 @@
         "new_signals": {
           "type": "array",
           "description": "grade 为 high 时支撑它的成员告警 alert_id（排序）；其余分级为空",
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
         },
         "rollback": {
           "type": "boolean",
@@ -205,8 +336,12 @@
       "additionalProperties": false,
       "required": ["run_id", "component", "mismatch"],
       "properties": {
-        "run_id": { "$ref": "common.schema.json#/$defs/Uuid" },
-        "component": { "$ref": "common.schema.json#/$defs/ComponentKey" },
+        "run_id": {
+          "$ref": "common.schema.json#/$defs/Uuid"
+        },
+        "component": {
+          "$ref": "common.schema.json#/$defs/ComponentKey"
+        },
         "mismatch": {
           "type": "boolean",
           "description": "研判根因与事件根因按属主粒度比较不一致（Pod 与它所属的 Deployment 算一致）。只标记，事件不拆分，分组与根因不变"
@@ -227,10 +362,24 @@
       "properties": {
         "component": {
           "description": "排名第一的候选；没有候选时为 null",
-          "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/ComponentKey" }]
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "common.schema.json#/$defs/ComponentKey"
+            }
+          ]
         },
         "entity": {
-          "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/EntityRef" }]
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "common.schema.json#/$defs/EntityRef"
+            }
+          ]
         },
         "ambiguous": {
           "type": "boolean",
@@ -252,9 +401,15 @@
       "additionalProperties": false,
       "required": ["component", "score", "terms", "depth", "explains", "source"],
       "properties": {
-        "component": { "$ref": "common.schema.json#/$defs/ComponentKey" },
-        "score": { "type": "number" },
-        "terms": { "$ref": "#/$defs/ScoreTerms" },
+        "component": {
+          "$ref": "common.schema.json#/$defs/ComponentKey"
+        },
+        "score": {
+          "type": "number"
+        },
+        "terms": {
+          "$ref": "#/$defs/ScoreTerms"
+        },
         "depth": {
           "type": "integer",
           "description": "在折叠强连通分量后的依赖图上的深度，只用于平分时排序"
@@ -262,7 +417,9 @@
         "explains": {
           "type": "array",
           "description": "能解释的症状告警 alert_id",
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
         },
         "source": {
           "type": "string",
@@ -278,11 +435,31 @@
       "additionalProperties": false,
       "required": ["coverage", "precedence", "role_prior", "recent_change", "chronic_penalty"],
       "properties": {
-        "coverage": { "type": "number", "minimum": 0, "maximum": 1 },
-        "precedence": { "type": "number", "minimum": 0, "maximum": 1 },
-        "role_prior": { "type": "number", "minimum": 0, "maximum": 1 },
-        "recent_change": { "type": "number", "minimum": 0, "maximum": 1 },
-        "chronic_penalty": { "type": "number", "minimum": 0, "maximum": 1 }
+        "coverage": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "precedence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "role_prior": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "recent_change": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "chronic_penalty": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
       }
     },
     "Member": {
@@ -302,31 +479,77 @@
         "left_version"
       ],
       "properties": {
-        "alert_id": { "type": "string" },
-        "alertname": { "type": "string" },
-        "role": { "$ref": "common.schema.json#/$defs/AlertRole" },
-        "component": {
-          "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/ComponentKey" }]
+        "alert_id": {
+          "type": "string"
         },
-        "severity": { "$ref": "common.schema.json#/$defs/Severity" },
+        "alertname": {
+          "type": "string"
+        },
+        "role": {
+          "$ref": "common.schema.json#/$defs/AlertRole"
+        },
+        "component": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "common.schema.json#/$defs/ComponentKey"
+            }
+          ]
+        },
+        "severity": {
+          "$ref": "common.schema.json#/$defs/Severity"
+        },
         "category": {
           "description": "告警的类别（Alert.classification.category，契约 2.46.0）；之前版本写下的成员没有这个字段",
           "$ref": "common.schema.json#/$defs/IncidentCategory"
         },
         "service": {
           "description": "告警的服务（Alert.classification.service，契约 2.53.0）；之前版本写下的成员没有这个字段",
-          "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/ServiceId" }]
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "common.schema.json#/$defs/ServiceId"
+            }
+          ]
         },
-        "service_source": { "$ref": "common.schema.json#/$defs/ServiceSource" },
+        "service_source": {
+          "$ref": "common.schema.json#/$defs/ServiceSource"
+        },
         "business_domain": {
-          "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/BusinessDomainId" }]
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "common.schema.json#/$defs/BusinessDomainId"
+            }
+          ]
         },
-        "status": { "type": "string", "enum": ["firing", "resolved"] },
-        "starts_at": { "$ref": "common.schema.json#/$defs/Timestamp" },
+        "status": {
+          "type": "string",
+          "enum": ["firing", "resolved"]
+        },
+        "starts_at": {
+          "$ref": "common.schema.json#/$defs/Timestamp"
+        },
         "ends_at": {
-          "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/Timestamp" }]
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "common.schema.json#/$defs/Timestamp"
+            }
+          ]
         },
-        "joined_version": { "type": "integer", "minimum": 1 },
+        "joined_version": {
+          "type": "integer",
+          "minimum": 1
+        },
         "left_version": {
           "type": ["integer", "null"],
           "minimum": 1,
@@ -340,10 +563,19 @@
       "additionalProperties": false,
       "required": ["from_incident_id", "from_label", "at_version", "merged_at"],
       "properties": {
-        "from_incident_id": { "$ref": "common.schema.json#/$defs/Uuid" },
-        "from_label": { "$ref": "#/$defs/IncidentLabel" },
-        "at_version": { "type": "integer", "minimum": 1 },
-        "merged_at": { "$ref": "common.schema.json#/$defs/Timestamp" }
+        "from_incident_id": {
+          "$ref": "common.schema.json#/$defs/Uuid"
+        },
+        "from_label": {
+          "$ref": "#/$defs/IncidentLabel"
+        },
+        "at_version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "merged_at": {
+          "$ref": "common.schema.json#/$defs/Timestamp"
+        }
       }
     }
   }

@@ -41,6 +41,7 @@ export type RoleBinding = z.infer<typeof bindingSchema>;
 export const PERMISSIONS = [
   'read',
   'feedback',
+  'claim',
   'propose',
   'research.request',
   'evidence.rerun',
@@ -58,7 +59,7 @@ export const PERMISSIONS = [
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
-const RESPONDER: Permission[] = ['read', 'feedback', 'propose', 'research.request', 'evidence.rerun'];
+const RESPONDER: Permission[] = ['read', 'feedback', 'claim', 'propose', 'research.request', 'evidence.rerun'];
 const APPROVER: Permission[] = [...RESPONDER, 'approve', 'reject', 'undo'];
 
 /** 标准配置的 5 种角色；合规配置把 admin 拆成 sys-admin 与 security-admin，与 auditor 三权分立。 */

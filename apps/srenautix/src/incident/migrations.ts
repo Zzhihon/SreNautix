@@ -284,5 +284,23 @@ CREATE INDEX incidents_services_idx ON server.incidents USING gin (services);
 CREATE INDEX incidents_business_domain_idx ON server.incidents (cluster_id, business_domain, first_firing_at DESC);
 `,
     },
+    {
+      version: 12,
+      name: 'incident claims',
+      phase: 'expand',
+      sql: `
+-- 事件的认领与放下（ADR 0195）：只追加。当前处理人是每个事件最近一条记录为 claim 时的主体；放下记 release。
+-- 只加表（ADR 0176），N-1 版本不读写它
+CREATE TABLE server.incident_claim_events (
+  id bigserial PRIMARY KEY,
+  incident_id uuid NOT NULL,
+  action text NOT NULL CHECK (action IN ('claim', 'release')),
+  principal_id text NOT NULL,
+  channel text NOT NULL,
+  at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX incident_claim_events_incident_idx ON server.incident_claim_events (incident_id, id DESC);
+`,
+    },
   ],
 };

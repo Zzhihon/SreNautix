@@ -3,12 +3,10 @@
   "common.forbidden": "Only these roles can see this: {roles}. Role bindings come from Git; Users and roles explains a permission.",
   "git.in_sync": "In sync with the cluster",
   "git.drift": "Drift: cluster runs {live}",
-
   "prompts.title": "Redacted prompts",
   "prompts.back": "Back to the research run",
   "prompts.none_because": "This research has not called a model yet, or the worker did not keep prompts.",
   "prompts.no_calls": "This research made no model call.",
-
   "eval.cases": "Case browser",
   "eval.cases_failed": "Failed to read cases",
   "eval.no_cases_title": "Empty suite",
@@ -41,7 +39,6 @@
   "eval.do_estimate": "Estimate ({n} routes)",
   "eval.estimate_v": "{cases} cases · {calls} model calls · about {tokens} input tokens · about {cost}",
   "eval.estimate_failed": "Estimate failed",
-
   "health.title": "Agent health and cost",
   "health.failed": "Failed to read agent health",
   "health.scorecard": "P0 scorecard",
@@ -94,7 +91,6 @@
   "health.egress.run": "Research",
   "health.egress.empty_title": "No outbound requests",
   "health.egress.empty": "Nothing was sent to a model route in the last 7 days.",
-
   "topology.title": "Topology",
   "topology.view": "View",
   "topology.views.coverage": "Coverage",
@@ -157,7 +153,6 @@
   "topology.diff_failed": "Failed to read the diff",
   "topology.no_diff_title": "No difference",
   "topology.no_diff": "Topology v{from} and v{to} have identical nodes and edges.",
-
   "integrations.title": "Integrations",
   "integrations.supported_note": "Only core and official tiers are called supported",
   "integrations.failed": "Failed to read integrations",
@@ -192,7 +187,6 @@
   "integrations.ok": "ok",
   "integrations.failed_cap": "failed",
   "integrations.test_failed": "Connection test failed",
-
   "packs.title": "Packs",
   "packs.authoring_note": "Author packs with the CLI and Git; the console never runs draft queries",
   "packs.failed": "Failed to read packs",
@@ -216,7 +210,6 @@
   "packs.user_lines": "User layer lines",
   "packs.empty_title": "No packs",
   "packs.empty": "The server loaded no pack; built-in packs ship with the image, so check the server log for load errors.",
-
   "policies.title": "Policies and catalog",
   "policies.git_note": "Policies, enabled actions and the kill switch come from Git; the console is read-only",
   "policies.need_cluster_title": "Pick a cluster",
@@ -262,7 +255,6 @@
   "policies.freeze_failed": "Failed to read the kill switch",
   "policies.freeze_how": "Engage the kill switch with kubectl:",
   "policies.freeze_gitops": "Or change {path} through GitOps. Deleting the ConfigMap rejects every write as well.",
-
   "models.title": "Models and egress",
   "models.failed": "Failed to read model routes",
   "models.empty_title": "No model routes",
@@ -289,7 +281,6 @@
   "models.egress": "Data categories leaving",
   "models.retention": "Provider data retention",
   "models.fingerprint": "Provider fingerprint",
-
   "audit.title": "Audit",
   "audit.cli_note": "Verify with: srenautix audit verify",
   "audit.failed": "Failed to read audit chains",
@@ -318,7 +309,6 @@
   "audit.records_failed": "Failed to read audit records",
   "audit.no_records_title": "No records",
   "audit.no_records": "Nothing has been written to this chain yet.",
-
   "users.title": "Users and roles",
   "users.git_note": "Role bindings come from Git; the console is read-only",
   "users.my_links": "My chat account links",
@@ -359,6 +349,7 @@
   "users.permission": "Permission",
   "users.perm.read": "Read",
   "users.perm.feedback": "Give feedback",
+  "users.perm.claim": "Claim incidents",
   "users.perm.propose": "Propose manually",
   "users.perm.research.request": "Request research",
   "users.perm.evidence.rerun": "Rerun evidence live",
@@ -388,7 +379,6 @@
   "users.reason": "Note",
   "users.yes": "yes",
   "users.no": "no",
-
   "settings.title": "Settings",
   "settings.secret_note": "Secrets never pass through the console; channel tokens are mounted files",
   "settings.failed": "Failed to read settings",

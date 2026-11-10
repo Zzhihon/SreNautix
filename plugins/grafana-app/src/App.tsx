@@ -211,7 +211,7 @@ export default function App(props: AppRootProps<AppSettings>) {
         actions: false,
       }),
       links,
-      caps: { feedback: true, rerun: false, approve: false, readOnlyReason: '' },
+      caps: { feedback: true, rerun: false, approve: false, claim: false, readOnlyReason: '' },
       Link: GrafanaLink,
     };
   }, [base, consoleUrl]);

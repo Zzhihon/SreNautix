@@ -1,5 +1,5 @@
 // 本文件由 packages/contract/scripts/gen.ts 从 contract/ 生成，不要手工修改。
-export const CONTRACT_VERSION = '2.58.0';
+export const CONTRACT_VERSION = '2.59.0';
 
 export const SCHEMAS: Record<string, Record<string, unknown>> = {
   'https://srenautix.io/contract/gateway/v1/action-catalog.schema.json': {
@@ -5911,6 +5911,11 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
           '最近一次完成的研判给出的根因，读取时由中心附上（ADR 0104 §14）；没有给出根因的研判、事件流与旧版本的事件没有这个字段',
         $ref: '#/$defs/ResearchRoot',
       },
+      claim: {
+        description:
+          '处理人，读取最新版本时由中心附上（契约 2.59.0，ADR 0195）；没有人认领时为 null。事件流与历史版本没有这个字段',
+        oneOf: [{ type: 'null' }, { $ref: '#/$defs/Claim' }],
+      },
       headline: {
         description:
           '问题陈述，读取最新版本时由中心附上（契约 2.56.0，ADR 0190）；事件没有仍在其中的成员告警时为 null。事件流与历史版本没有这个字段',
@@ -5918,6 +5923,22 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
       },
     },
     $defs: {
+      Claim: {
+        title: 'IncidentClaim',
+        description: '事件的处理人（ADR 0195）',
+        type: 'object',
+        additionalProperties: false,
+        required: ['principal_id', 'channel', 'claimed_at'],
+        properties: {
+          principal_id: { type: 'string', description: '认领人的主体 id（与反馈、审批相同）' },
+          channel: {
+            type: 'string',
+            enum: ['console', 'grafana', 'telegram', 'feishu'],
+            description: '认领时所用的渠道',
+          },
+          claimed_at: { $ref: 'common.schema.json#/$defs/Timestamp' },
+        },
+      },
       Headline: {
         title: 'IncidentHeadline',
         description:

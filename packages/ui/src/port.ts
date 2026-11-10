@@ -5,6 +5,7 @@
 
 import type {
   BusinessDomainList,
+  IncidentClaim,
   Condition,
   EvidenceRef,
   EvidenceResult,
@@ -92,6 +93,10 @@ export interface ActionPort {
   undo(id: string): Promise<Proposal>;
   /** requestResearch。 */
   requestResearch(ref: string): Promise<{ run_id: string; merged: boolean }>;
+  /** claimIncident：调用方成为处理人（ADR 0195）。 */
+  claim(ref: string): Promise<IncidentClaim>;
+  /** releaseIncident：放下事件。 */
+  release(ref: string): Promise<void>;
   /** rerunEvidence：结果不是模型所见，只用于并排对比。 */
   rerunEvidence(
     ref: string,

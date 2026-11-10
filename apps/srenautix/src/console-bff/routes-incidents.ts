@@ -19,6 +19,7 @@ import { badRequest, notFound } from '../kernel/errors.js';
 import type { Auth } from '../identity/auth.js';
 import { scopeMatches, type RoleBinding, type Target } from '../identity/bindings.js';
 import { alertStatement, headlineMember } from '../incident/headline.js';
+import { claimEvents, claimIncident, currentClaims, releaseIncident } from '../incident/claims.js';
 import { withComponentNames } from '../incident/names.js';
 import { incidentConditions, parseClassificationFilters, rowCategories, rowServices } from './incident-filters.js';
 import { incidentVersion, latestStageA, resolveIncidentRef, type IncidentRow } from '../incident/read.js';
@@ -126,6 +127,7 @@ async function summaries(d: IncidentRouteDeps, rows: IncidentRow[]) {
   );
   const fbs = await feedback.latest(pool, ids);
   const impact = await businessImpactOf(pool, rows, d.businessImpactAlerts());
+  const claims = await currentClaims(pool, ids);
   const names = await pool.query<{ cluster_id: string; component: string; display_name: string }>(
     `SELECT n.cluster_id, n.component, n.display_name FROM server.component_names n
       JOIN unnest($1::text[], $2::text[]) AS w(cluster_id, component) USING (cluster_id, component)`,
@@ -172,6 +174,7 @@ async function summaries(d: IncidentRouteDeps, rows: IncidentRow[]) {
       ),
       research_root: roots.get(r.incident_id) ?? null,
       business_impact: impact.get(r.incident_id) ?? [],
+      claim: claims.get(r.incident_id) ?? null,
     };
   });
 }
@@ -434,7 +437,8 @@ export function registerIncidentRoutes(app: FastifyInstance, d: IncidentRouteDep
         row.incident_id,
       ) ?? null;
     const named = await withComponentNames(d.pool, row.body);
-    return { ...named, headline, ...(rr ? { research_root: rr } : {}) };
+    const claim = (await currentClaims(d.pool, [row.incident_id])).get(row.incident_id) ?? null;
+    return { ...named, headline, claim, ...(rr ? { research_root: rr } : {}) };
   });
 
   app.get('/v1/incidents/:ref/stage-a', async (req) => {
@@ -529,6 +533,22 @@ export function registerIncidentRoutes(app: FastifyInstance, d: IncidentRouteDep
     const { scopes } = await d.auth.reader(req);
     const row = await load(scopes, (req.params as { ref: string }).ref);
     return d.feedback.list(row.incident_id);
+  });
+
+  // 认领与放下（ADR 0195）：有 claim 权限的人都可以认领（已有处理人时接手）或放下，每次都记录
+  app.post('/v1/incidents/:ref/claim', async (req) => {
+    const { scopes } = await d.auth.reader(req);
+    const row = await load(scopes, (req.params as { ref: string }).ref);
+    const c = await d.auth.user(req, 'claim', incidentTarget(row.body));
+    return claimIncident(d.pool, row.incident_id, c.subject.id, c.channel);
+  });
+
+  app.delete('/v1/incidents/:ref/claim', async (req, reply) => {
+    const { scopes } = await d.auth.reader(req);
+    const row = await load(scopes, (req.params as { ref: string }).ref);
+    const c = await d.auth.user(req, 'claim', incidentTarget(row.body));
+    await releaseIncident(d.pool, row.incident_id, c.subject.id, c.channel);
+    return reply.code(204).send();
   });
 
   app.post('/v1/incidents/:ref/feedback', async (req, reply) => {
@@ -818,6 +838,19 @@ export async function timelineOf(pool: pg.Pool, row: IncidentRow): Promise<Timel
         f.feedback_id,
         false,
         f.reason_code,
+      ),
+    );
+  }
+  // 认领与放下（ADR 0195）
+  for (const e of await claimEvents(pool, row.incident_id)) {
+    out.push(
+      entry(
+        e.at.toISOString(),
+        'claim',
+        e.action === 'claim' ? `${e.principal_id} 认领（${e.channel}）` : `${e.principal_id} 放下（${e.channel}）`,
+        e.principal_id,
+        false,
+        null,
       ),
     );
   }

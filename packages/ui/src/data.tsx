@@ -37,6 +37,8 @@ export interface Capabilities {
   rerun: boolean;
   /** 可以审批（approver、admin，且宿主提供 actions）。 */
   approve: boolean;
+  /** 可以认领与放下事件（responder、approver、admin，且宿主提供 actions，ADR 0195）。 */
+  claim: boolean;
   /** 只读时的说明，例如"只读：反馈需要 responder 角色"。 */
   readOnlyReason: string;
 }
@@ -338,6 +340,26 @@ export function useCreateFeedback(ref: string) {
       Promise.all([
         qc.invalidateQueries({ queryKey: qk.incident(ref) }),
         qc.invalidateQueries({ queryKey: qk.incidents() }),
+      ]),
+  });
+}
+
+/** 认领或放下事件（ADR 0195）；只有独立控制台提供 */
+export function useClaim(ref: string) {
+  const { port } = useUiEnv();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (claim: boolean) => {
+      if (!port.actions) {
+        throw new Error('当前宿主不提供认领');
+      }
+      return claim ? port.actions.claim(ref).then(() => undefined) : port.actions.release(ref);
+    },
+    onSuccess: () =>
+      Promise.all([
+        qc.invalidateQueries({ queryKey: qk.incident(ref) }),
+        qc.invalidateQueries({ queryKey: qk.incidents() }),
+        qc.invalidateQueries({ queryKey: qk.timeline(ref) }),
       ]),
   });
 }

@@ -125,6 +125,7 @@
   "incident.no_root": "根因未定位",
   "incident.ambiguous": "根因有歧义",
   "incident.business_impact": "影响业务",
+  "incident.claimed_by": "处理人 {who}",
   "incident.service_presumed": "按命名空间推定的服务",
   "incident.root_mismatch": "研判根因不同",
   "incident.merged_from": "合并自 {n}",
@@ -200,6 +201,7 @@
   "timeline.kind.proposal": "提议",
   "timeline.kind.execution": "执行",
   "timeline.kind.feedback": "反馈",
+  "timeline.kind.claim": "认领",
   "timeline.level.info": "正常",
   "timeline.level.warning": "留意",
   "timeline.level.error": "异常",
@@ -565,5 +567,10 @@
   "detail.col.disposition": "处置判断",
   "detail.col.level": "结论阶梯",
   "detail.col.root": "根因",
-  "error_boundary.failed": "{area} 显示出错，页面其他部分不受影响"
+  "error_boundary.failed": "{area} 显示出错，页面其他部分不受影响",
+  "claim.take": "我来处理",
+  "claim.take_over": "接手",
+  "claim.release": "放下",
+  "claim.none": "还没有人认领",
+  "claim.failed": "认领失败"
 }

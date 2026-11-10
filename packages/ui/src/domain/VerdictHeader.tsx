@@ -6,6 +6,7 @@ import type { Condition, EvidenceResult, Incident, ResearchRunSummary, StageARep
 import { AppLink, useBusinessDomains, useUiEnv } from '../data';
 import { localizedText, useI18n } from '../i18n';
 import { Status, StatusPill } from '../primitives/Status';
+import { ClaimControl } from './ClaimControl';
 import { activeConditions } from './ConditionStrip';
 import { componentLabel, countEvidence, degradedSources, incidentDuration } from './model';
 import styles from './VerdictHeader.module.css';
@@ -166,6 +167,8 @@ export function VerdictHeader({
         {incident.observability_blind && <Status domain="incident" value="blind" />}
         {stageA?.degraded && <span className={styles.degraded}>{t('verdict.state_store_degraded')}</span>}
       </div>
+
+      <ClaimControl incidentId={incident.incident_id} claim={incident.claim} />
 
       {(incident.aliases.length > 0 || incident.split_from || incident.merged_into) && (
         <div className={styles.lineage}>

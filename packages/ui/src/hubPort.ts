@@ -95,6 +95,21 @@ export function createHubPort(o: HubPortOptions): DataPort {
         'undoProposal',
         await c.POST('/v1/proposals/{proposal_id}/undo', { params: { path: { proposal_id: id }, header: csrfHeader } }),
       ),
+    claim: async (incident) =>
+      unwrap(
+        'claimIncident',
+        await c.POST('/v1/incidents/{incident_ref}/claim', {
+          params: { path: { incident_ref: incident }, header: csrfHeader },
+        }),
+      ),
+    release: async (incident) => {
+      const r = await c.DELETE('/v1/incidents/{incident_ref}/claim', {
+        params: { path: { incident_ref: incident }, header: csrfHeader },
+      });
+      if (r.error !== undefined) {
+        unwrap('releaseIncident', r);
+      }
+    },
     requestResearch: async (incident) =>
       unwrap(
         'requestResearch',

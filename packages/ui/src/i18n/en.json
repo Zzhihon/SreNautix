@@ -125,6 +125,7 @@
   "incident.no_root": "Root cause not located",
   "incident.ambiguous": "Ambiguous root",
   "incident.business_impact": "Business impact",
+  "incident.claimed_by": "Handled by {who}",
   "incident.service_presumed": "Service presumed from the namespace",
   "incident.root_mismatch": "Research root differs",
   "incident.merged_from": "Merged from {n}",
@@ -200,6 +201,7 @@
   "timeline.kind.proposal": "Proposal",
   "timeline.kind.execution": "Execution",
   "timeline.kind.feedback": "Feedback",
+  "timeline.kind.claim": "Claim",
   "timeline.level.info": "normal",
   "timeline.level.warning": "attention",
   "timeline.level.error": "abnormal",
@@ -565,5 +567,10 @@
   "detail.col.disposition": "Disposition",
   "detail.col.level": "Conclusion",
   "detail.col.root": "Root",
-  "error_boundary.failed": "{area} failed to render; the rest of the page is unaffected"
+  "error_boundary.failed": "{area} failed to render; the rest of the page is unaffected",
+  "claim.take": "I'll take it",
+  "claim.take_over": "Take over",
+  "claim.release": "Release",
+  "claim.none": "Nobody has claimed it",
+  "claim.failed": "Claim failed"
 }
