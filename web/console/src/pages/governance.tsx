@@ -231,26 +231,28 @@ function MyChatLinks() {
   );
 }
 
-// 角色绑定授予的权限（server 的授权模型）；契约里这个字段只写了 string，取值写在这里并请契约补上枚举
-const PERMISSIONS = [
-  'read',
-  'feedback',
-  'propose',
-  'research.request',
-  'evidence.rerun',
-  'approve',
-  'reject',
-  'undo',
-  'audit.read',
-  'prompt.raw',
-  'users.read',
-  'settings.write',
-  'suppression.write',
-  'pause.write',
-  'eval.write',
-  'api_tokens.write',
-] as const;
-type Permission = (typeof PERMISSIONS)[number];
+// 角色绑定授予的权限（契约的 Permission 枚举，DESIGN §13）。按 Record 写出：契约加了权限而这里没有时类型检查失败
+type Permission = HubComponents['schemas']['Permission'];
+const PERMISSION_SET: Record<Permission, true> = {
+  read: true,
+  feedback: true,
+  claim: true,
+  propose: true,
+  'research.request': true,
+  'evidence.rerun': true,
+  approve: true,
+  reject: true,
+  undo: true,
+  'audit.read': true,
+  'prompt.raw': true,
+  'users.read': true,
+  'settings.write': true,
+  'suppression.write': true,
+  'pause.write': true,
+  'eval.write': true,
+  'api_tokens.write': true,
+};
+const PERMISSIONS = Object.keys(PERMISSION_SET) as Permission[];
 
 function ExplainPanel() {
   const { t } = useI18n();

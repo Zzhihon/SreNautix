@@ -23,6 +23,7 @@ type Body<O extends keyof HubOperations> = HubOperations[O] extends {
 
 export type IncidentSummary = S['IncidentSummary'];
 export type BusinessDomainStatus = S['BusinessDomainStatus'];
+export type IncidentClaim = S['IncidentClaim'];
 export type BusinessDomainList = Ok<'listBusinessDomains'>;
 export type ResearchRun = S['ResearchRun'];
 export type ResearchRunSummary = S['ResearchRunSummary'];

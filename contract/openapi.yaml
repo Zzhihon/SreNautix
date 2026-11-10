@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: SreNautix hub API
-  version: 2.58.0
+  version: 2.59.0
   license:
     name: Apache-2.0
     identifier: Apache-2.0
@@ -792,6 +792,34 @@ paths:
           content: { application/json: { schema: { $ref: './schemas/feedback.schema.json' } } }
         '400': { $ref: '#/components/responses/Error' }
         '403': { $ref: '#/components/responses/Error' }
+  /v1/incidents/{incident_ref}/claim:
+    parameters: [{ $ref: '#/components/parameters/IncidentRef' }]
+    post:
+      tags: [incidents]
+      operationId: claimIncident
+      description: |
+        认领事件（契约 2.59.0，ADR 0195）：调用方成为处理人。已有处理人时改为调用方（接手），记一条认领。
+        认领与放下都进入事件时间线（kind claim）
+      x-srenautix-roles: [responder, approver, admin]
+      x-srenautix-external: false
+      parameters: [{ $ref: '#/components/parameters/CsrfOptional' }]
+      responses:
+        '200':
+          description: 当前的处理人
+          content: { application/json: { schema: { $ref: '#/components/schemas/IncidentClaim' } } }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+    delete:
+      tags: [incidents]
+      operationId: releaseIncident
+      description: 放下事件：事件不再有处理人。没有处理人时不做事
+      x-srenautix-roles: [responder, approver, admin]
+      x-srenautix-external: false
+      parameters: [{ $ref: '#/components/parameters/CsrfOptional' }]
+      responses:
+        '204': { description: 已放下 }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
   /v1/proposals:
     get:
       tags: [proposals]
@@ -2584,8 +2612,10 @@ components:
               proposal,
               execution,
               feedback,
+              claim,
             ]
           description: |
+            claim：认领与放下（ADR 0195），text 写认领人或"放下"，ref 为认领人的主体 id；
             remediation_attempt：自愈 PR 对一次研判的处理结果（ADR 0170），text 写模板、结果与原因，ref 为研判的 run_id；
             research_concluded：研判结束并给出结论，code 为检验循环的停止原因；
             research_ended：研判没有结论（失败或只出阶段 A，code 为失败类型）、入队时跳过、租约过期、被取代或不进入阶段 B，ref 为 run_id（不进入阶段 B 时为空）；
@@ -2796,6 +2826,9 @@ components:
           type: [string, 'null']
           description: 只对 gateway 有意义
           enum: [passed, failed, unknown, null]
+    IncidentClaim:
+      description: 事件的处理人（ADR 0195），定义在 incident.schema.json
+      $ref: './schemas/incident.schema.json#/$defs/Claim'
     BusinessDomainStatus:
       type: object
       additionalProperties: false
@@ -2848,6 +2881,7 @@ components:
         - primary_service_source
         - business_domain
         - business_impact
+        - claim
       properties:
         incident_id: { $ref: './schemas/common.schema.json#/$defs/Uuid' }
         cluster_id: { $ref: './schemas/common.schema.json#/$defs/ClusterId' }
@@ -2878,6 +2912,9 @@ components:
           oneOf: [{ type: 'null' }, { $ref: './schemas/common.schema.json#/$defs/ServiceSource' }]
         business_domain:
           oneOf: [{ type: 'null' }, { $ref: './schemas/common.schema.json#/$defs/BusinessDomainId' }]
+        claim:
+          description: 事件的处理人（契约 2.59.0，ADR 0195）；没有人认领时为 null
+          oneOf: [{ type: 'null' }, { $ref: '#/components/schemas/IncidentClaim' }]
         business_impact:
           description: |
             仍在事件中的成员告警里属于业务影响告警（notify.business_impact_alerts，ADR 0166）的告警名，去重排序（契约 2.58.0）；
@@ -3187,11 +3224,12 @@ components:
         linked_at: { $ref: './schemas/common.schema.json#/$defs/Timestamp' }
     Permission:
       type: string
-      description: 角色绑定授予的权限名（DESIGN §13）；server 只接受这 16 个取值，其他值返回 400
+      description: 角色绑定授予的权限名（DESIGN §13）；server 只接受这 17 个取值，其他值返回 400
       enum:
         [
           read,
           feedback,
+          claim,
           propose,
           research.request,
           evidence.rerun,

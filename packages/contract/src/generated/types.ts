@@ -987,6 +987,7 @@ export interface SrenautixContractIndex {
   ExportedClusterKubeWarnings?: ExportedClusterKubeWarnings;
   IncidentExportRecord?: IncidentExportRecord;
   Incident?: Incident;
+  IncidentClaim?: IncidentClaim;
   IncidentHeadline?: IncidentHeadline;
   ChangeLink?: ChangeLink;
   ChangeGrade?: ChangeGrade;
@@ -3661,6 +3662,10 @@ export interface Incident {
   component_names?: CommonComponentNames1;
   research_root?: ResearchRoot;
   /**
+   * 处理人，读取最新版本时由中心附上（契约 2.59.0，ADR 0195）；没有人认领时为 null。事件流与历史版本没有这个字段
+   */
+  claim?: null | IncidentClaim;
+  /**
    * 问题陈述，读取最新版本时由中心附上（契约 2.56.0，ADR 0190）；事件没有仍在其中的成员告警时为 null。事件流与历史版本没有这个字段
    */
   headline?: null | IncidentHeadline;
@@ -3783,6 +3788,20 @@ export interface ResearchRoot {
    * 研判根因与事件根因按属主粒度比较不一致（Pod 与它所属的 Deployment 算一致）。只标记，事件不拆分，分组与根因不变
    */
   mismatch: boolean;
+}
+/**
+ * 事件的处理人（ADR 0195）
+ */
+export interface IncidentClaim {
+  /**
+   * 认领人的主体 id（与反馈、审批相同）
+   */
+  principal_id: string;
+  /**
+   * 认领时所用的渠道
+   */
+  channel: 'console' | 'grafana' | 'telegram' | 'feishu';
+  claimed_at: Timestamp;
 }
 /**
  * 事件的问题陈述（ADR 0190）。头条告警与通知标题的症状告警是同一组：仍在事件中、正在触发的 symptom 告警；没有时取正在触发的 critical 告警；再没有时取全部仍在事件中的告警。组内取开始时间最早的一条，同时开始时取 alert_id 较小的

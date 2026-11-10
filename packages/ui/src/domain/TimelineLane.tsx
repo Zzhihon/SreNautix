@@ -12,19 +12,20 @@ import {
   CheckCircle2,
   CircleDot,
   FileWarning,
+  Gavel,
   GitCommitHorizontal,
   GitMerge,
-  Gavel,
   Link2,
   ListChecks,
-  type LucideIcon,
   MessageSquare,
   Play,
   Send,
   Split,
   Tag,
   TrendingUp,
+  UserCheck,
   Wrench,
+  type LucideIcon,
 } from 'lucide-react';
 import type { TimelineEntry } from '../contract';
 import { useI18n } from '../i18n';
@@ -71,6 +72,7 @@ const KIND: Record<Kind, { icon: LucideIcon; tone: Tone }> = {
   proposal: { icon: Gavel, tone: 'warn' },
   execution: { icon: Play, tone: 'info' },
   feedback: { icon: MessageSquare, tone: 'ok' },
+  claim: { icon: UserCheck, tone: 'info' },
 };
 
 type Level = NonNullable<TimelineEntry['level']>;

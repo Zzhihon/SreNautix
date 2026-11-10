@@ -825,6 +825,30 @@ export type paths = {
     patch?: never;
     trace?: never;
   };
+  '/v1/incidents/{incident_ref}/claim': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description incident_id、稳定标签或别名；标签放进路径时按 RFC 3986 编码 */
+        incident_ref: components['parameters']['IncidentRef'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * @description 认领事件（契约 2.59.0，ADR 0195）：调用方成为处理人。已有处理人时改为调用方（接手），记一条认领。
+     *     认领与放下都进入事件时间线（kind claim）
+     */
+    post: operations['claimIncident'];
+    /** @description 放下事件：事件不再有处理人。没有处理人时不做事 */
+    delete: operations['releaseIncident'];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/v1/incidents/{incident_ref}/evidence': {
     parameters: {
       query?: never;
@@ -2374,6 +2398,20 @@ export type components = {
        * @enum {string}
        */
       method: 'code' | 'identity';
+    };
+    /**
+     * IncidentClaim
+     * @description 事件的处理人（ADR 0195）
+     */
+    Claim: {
+      /**
+       * @description 认领时所用的渠道
+       * @enum {string}
+       */
+      channel: 'console' | 'grafana' | 'telegram' | 'feishu';
+      claimed_at: components['schemas']['Timestamp'];
+      /** @description 认领人的主体 id（与反馈、审批相同） */
+      principal_id: string;
     };
     Cluster: {
       cluster_id: components['schemas']['ClusterId'];
@@ -4729,6 +4767,8 @@ export type components = {
       change_links?: components['schemas']['ChangeLink'][];
       /** @description 首次触发前 30 分钟到结束之间、触及事件组件的变更 */
       changes: components['schemas']['ChangeEvent'][];
+      /** @description 处理人，读取最新版本时由中心附上（契约 2.59.0，ADR 0195）；没有人认领时为 null。事件流与历史版本没有这个字段 */
+      claim?: null | components['schemas']['Claim'];
       cluster_id: components['schemas']['ClusterId'];
       /** @description 根因、候选与成员组件的可读名称；读取时由中心附上，事件流与旧版本的事件没有这个字段 */
       component_names?: components['schemas']['ComponentNames'];
@@ -4769,6 +4809,20 @@ export type components = {
       topology_version: number;
       updated_at: components['schemas']['Timestamp'];
       $defs: {
+        /**
+         * IncidentClaim
+         * @description 事件的处理人（ADR 0195）
+         */
+        Claim: {
+          /**
+           * @description 认领时所用的渠道
+           * @enum {string}
+           */
+          channel: 'console' | 'grafana' | 'telegram' | 'feishu';
+          claimed_at: components['schemas']['Timestamp'];
+          /** @description 认领人的主体 id（与反馈、审批相同） */
+          principal_id: string;
+        };
         /**
          * IncidentHeadline
          * @description 事件的问题陈述（ADR 0190）。头条告警与通知标题的症状告警是同一组：仍在事件中、正在触发的 symptom 告警；没有时取正在触发的 critical 告警；再没有时取全部仍在事件中的告警。组内取开始时间最早的一条，同时开始时取 alert_id 较小的
@@ -4898,6 +4952,8 @@ export type components = {
      * @enum {string}
      */
     IncidentCategory: 'availability' | 'performance' | 'provider' | 'platform' | 'observability' | 'unclassified';
+    /** @description 事件的处理人（ADR 0195），定义在 incident.schema.json */
+    IncidentClaim: components['schemas']['Claim'];
     /** @description 事件的问题陈述（契约 2.52.0，ADR 0190），定义在 incident.schema.json */
     IncidentHeadline: components['schemas']['Headline'];
     /**
@@ -4935,6 +4991,8 @@ export type components = {
       business_impact: string[];
       /** @description 事件的类别（Incident.categories，契约 2.46.0） */
       categories: components['schemas']['IncidentCategory'][];
+      /** @description 事件的处理人（契约 2.59.0，ADR 0195）；没有人认领时为 null */
+      claim: null | components['schemas']['Claim'];
       cluster_id: components['schemas']['ClusterId'];
       /** @description 根因组件的可读名称（ADR 0101）；没有名称时为空对象 */
       component_names: components['schemas']['ComponentNames'];
@@ -5573,12 +5631,13 @@ export type components = {
       since: null | components['schemas']['Timestamp'];
     };
     /**
-     * @description 角色绑定授予的权限名（DESIGN §13）；server 只接受这 16 个取值，其他值返回 400
+     * @description 角色绑定授予的权限名（DESIGN §13）；server 只接受这 17 个取值，其他值返回 400
      * @enum {string}
      */
     Permission:
       | 'read'
       | 'feedback'
+      | 'claim'
       | 'propose'
       | 'research.request'
       | 'evidence.rerun'
@@ -7466,7 +7525,8 @@ export type components = {
       /** @description 原因码，取原因码登记表 contract/reason-codes.json 中所属阶段的值（契约 2.39.0，ADR 0172）；阶段由 kind 决定（stage_a_missing → stage_a，research_* → research，remediation_attempt → remediation，notify、issue、feedback → 同名阶段，incident_state → incident）。告警、变更、卡与提议等没有原因码的条目为 null，自愈 PR 提出提议（proposed）时为 null */
       code: string | null;
       /**
-       * @description remediation_attempt：自愈 PR 对一次研判的处理结果（ADR 0170），text 写模板、结果与原因，ref 为研判的 run_id；
+       * @description claim：认领与放下（ADR 0195），text 写认领人或"放下"，ref 为认领人的主体 id；
+       *     remediation_attempt：自愈 PR 对一次研判的处理结果（ADR 0170），text 写模板、结果与原因，ref 为研判的 run_id；
        *     research_concluded：研判结束并给出结论，code 为检验循环的停止原因；
        *     research_ended：研判没有结论（失败或只出阶段 A，code 为失败类型）、入队时跳过、租约过期、被取代或不进入阶段 B，ref 为 run_id（不进入阶段 B 时为空）；
        *     stage_a_missing：阶段 A 执行失败（stage_a_failed，text 带错误摘要）与补跑后仍没有报告（stage_a_missing）；
@@ -7493,7 +7553,8 @@ export type components = {
         | 'incident_state'
         | 'proposal'
         | 'execution'
-        | 'feedback';
+        | 'feedback'
+        | 'claim';
       /** @description 原因码在登记表中的级别；code 为 null 时为 null */
       level: null | components['schemas']['Level'];
       /** @description 关联对象的 id（alert_id、change_id、run_id、proposal_id 等） */
@@ -9021,6 +9082,60 @@ export interface operations {
       404: components['responses']['Error'];
       409: components['responses']['Error'];
       429: components['responses']['Error'];
+    };
+  };
+  claimIncident: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description 会话认证时必填；Bearer 认证时不需要 */
+        'X-CSRF-Token'?: components['parameters']['CsrfOptional'];
+      };
+      path: {
+        /** @description incident_id、稳定标签或别名；标签放进路径时按 RFC 3986 编码 */
+        incident_ref: components['parameters']['IncidentRef'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 当前的处理人 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Claim'];
+        };
+      };
+      403: components['responses']['Error'];
+      404: components['responses']['Error'];
+    };
+  };
+  releaseIncident: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description 会话认证时必填；Bearer 认证时不需要 */
+        'X-CSRF-Token'?: components['parameters']['CsrfOptional'];
+      };
+      path: {
+        /** @description incident_id、稳定标签或别名；标签放进路径时按 RFC 3986 编码 */
+        incident_ref: components['parameters']['IncidentRef'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 已放下 */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      403: components['responses']['Error'];
+      404: components['responses']['Error'];
     };
   };
   getEvidenceSnapshot: {

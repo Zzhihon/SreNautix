@@ -14,6 +14,13 @@
   font-weight: 650;
   overflow-wrap: anywhere;
 }
+.claim {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 8px;
+}
 .service {
   color: var(--sn-dim);
   margin-right: 8px;
@@ -73,4 +80,7 @@
   background: var(--sn-warn-soft);
   border-radius: 6px;
   font-size: 12.5px;
+}
+.dim {
+  color: var(--sn-dim);
 }

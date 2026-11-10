@@ -20,7 +20,13 @@ export const LINKS: Links = {
   approvalExternal: false,
 };
 
-export const ALL_CAPS: Capabilities = { feedback: true, rerun: true, approve: true, readOnlyReason: '只读' };
+export const ALL_CAPS: Capabilities = {
+  feedback: true,
+  rerun: true,
+  approve: true,
+  claim: true,
+  readOnlyReason: '只读',
+};
 
 export function renderUi(
   node: ReactNode,

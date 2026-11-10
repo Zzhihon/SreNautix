@@ -50,6 +50,7 @@ export function capabilities(s: Session, t: (id: string) => string): Capabilitie
     feedback: write,
     rerun: write,
     approve,
+    claim: write,
     readOnlyReason: approve ? '' : write ? t('caps.no_approve') : t('caps.read_only'),
   };
 }

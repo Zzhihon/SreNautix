@@ -21,6 +21,7 @@ import { renderUi } from '../test/render';
 import { tokensFromGrafana } from '../theme/grafana';
 import { DEFAULT_TOKENS, TOKEN_NAMES } from '../theme/tokens';
 import { ApprovalSheet } from './ApprovalSheet';
+import { ClaimControl } from './ClaimControl';
 import { ConditionStrip } from './ConditionStrip';
 import { EvidenceCard } from './EvidenceCard';
 import { FeedbackControl, REASON_CODES } from './FeedbackControl';
@@ -487,6 +488,42 @@ describe('收件箱翻页（契约 2.57.0）', () => {
     expect(screen.getAllByRole('link')).toHaveLength(3);
     expect(screen.queryByRole('button', { name: '加载更多' })).toBeNull();
     expect(asked).toEqual([undefined, 'c1']);
+  });
+});
+
+describe('事件的处理人（ADR 0195）', () => {
+  it('没有处理人时可以认领；有处理人时显示并可以接手或放下；点击调用宿主的动作', async () => {
+    const calls: string[] = [];
+    const actions = {
+      claim: async (ref: string) => {
+        calls.push(`claim ${ref}`);
+        return { principal_id: 'user:alice', channel: 'console' as const, claimed_at: '2026-10-19T06:30:00Z' };
+      },
+      release: async (ref: string) => {
+        calls.push(`release ${ref}`);
+      },
+    } as unknown as NonNullable<DataPort['actions']>;
+    const { unmount } = renderUi(<ClaimControl incidentId="i-1" claim={null} />, { port: { actions } });
+    expect(screen.getByText('还没有人认领')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '我来处理' }));
+    await waitFor(() => expect(calls).toEqual(['claim i-1']));
+    unmount();
+    renderUi(
+      <ClaimControl
+        incidentId="i-1"
+        claim={{ principal_id: 'user:bob', channel: 'telegram', claimed_at: '2026-10-19T06:30:00Z' }}
+      />,
+      { port: { actions } },
+    );
+    expect(screen.getByText('处理人 user:bob')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '接手' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '放下' }));
+    await waitFor(() => expect(calls).toEqual(['claim i-1', 'release i-1']));
+  });
+
+  it('没有认领权限（例如 Grafana 插件）时只显示处理人，没有按钮', () => {
+    renderUi(<ClaimControl incidentId="i-1" claim={null} />, { caps: { claim: false } });
+    expect(screen.queryByRole('button')).toBeNull();
   });
 });
 

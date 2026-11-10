@@ -3,12 +3,10 @@
   "common.forbidden": "这一项只对以下角色开放：{roles}。角色绑定来自 Git，在用户与角色页可以查看权限解释。",
   "git.in_sync": "与集群一致",
   "git.drift": "漂移：集群上为 {live}",
-
   "prompts.title": "脱敏后的提示词",
   "prompts.back": "返回研判运行明细",
   "prompts.none_because": "这次研判还没有调用模型，或 worker 没有保存提示词。",
   "prompts.no_calls": "这次研判没有调用模型。",
-
   "eval.cases": "用例浏览器",
   "eval.cases_failed": "读取用例失败",
   "eval.no_cases_title": "用例集为空",
@@ -41,7 +39,6 @@
   "eval.do_estimate": "估算（{n} 条路由）",
   "eval.estimate_v": "{cases} 个用例 · {calls} 次模型调用 · 约 {tokens} 输入 token · 约 {cost}",
   "eval.estimate_failed": "估算失败",
-
   "health.title": "Agent 健康与成本",
   "health.failed": "读取 Agent 健康失败",
   "health.scorecard": "P0 记分卡",
@@ -94,7 +91,6 @@
   "health.egress.run": "研判",
   "health.egress.empty_title": "没有出站请求",
   "health.egress.empty": "最近 7 天没有任何数据发往模型路由。",
-
   "topology.title": "拓扑",
   "topology.view": "视图",
   "topology.views.coverage": "覆盖表",
@@ -157,7 +153,6 @@
   "topology.diff_failed": "读取版本差异失败",
   "topology.no_diff_title": "没有差异",
   "topology.no_diff": "拓扑 v{from} 与 v{to} 的节点和边完全相同。",
-
   "integrations.title": "集成",
   "integrations.supported_note": "只有核心级和官方级称为支持",
   "integrations.failed": "读取集成失败",
@@ -192,7 +187,6 @@
   "integrations.ok": "正常",
   "integrations.failed_cap": "失败",
   "integrations.test_failed": "连接测试失败",
-
   "packs.title": "领域包",
   "packs.authoring_note": "编写只用 CLI 与 Git，控制台从不执行草稿查询",
   "packs.failed": "读取领域包失败",
@@ -216,7 +210,6 @@
   "packs.user_lines": "用户层行数",
   "packs.empty_title": "没有领域包",
   "packs.empty": "server 没有加载任何领域包；内置包随镜像发布，检查 server 日志中的加载错误。",
-
   "policies.title": "策略与目录",
   "policies.git_note": "策略、动作启用与熔断开关都来自 Git，控制台只读",
   "policies.need_cluster_title": "请选择集群",
@@ -262,7 +255,6 @@
   "policies.freeze_failed": "读取熔断开关失败",
   "policies.freeze_how": "用 kubectl 打开熔断开关：",
   "policies.freeze_gitops": "或者经 GitOps 修改 {path}。ConfigMap 被删除时，所有写入同样被拒绝。",
-
   "models.title": "模型与出境",
   "models.failed": "读取模型路由失败",
   "models.empty_title": "没有模型路由",
@@ -289,7 +281,6 @@
   "models.egress": "出境的数据类别",
   "models.retention": "服务方的数据保留条款",
   "models.fingerprint": "服务方指纹",
-
   "audit.title": "审计",
   "audit.cli_note": "校验工具：srenautix audit verify",
   "audit.failed": "读取审计链失败",
@@ -318,7 +309,6 @@
   "audit.records_failed": "读取审计记录失败",
   "audit.no_records_title": "没有记录",
   "audit.no_records": "这条链还没有写入任何记录。",
-
   "users.title": "用户与角色",
   "users.git_note": "角色绑定来自 Git，控制台只读",
   "users.my_links": "我的聊天账号绑定",
@@ -359,6 +349,7 @@
   "users.permission": "权限",
   "users.perm.read": "读取",
   "users.perm.feedback": "提交反馈",
+  "users.perm.claim": "认领事件",
   "users.perm.propose": "人工提议",
   "users.perm.research.request": "请求重新研判",
   "users.perm.evidence.rerun": "实时重跑证据卡",
@@ -388,7 +379,6 @@
   "users.reason": "说明",
   "users.yes": "是",
   "users.no": "否",
-
   "settings.title": "设置",
   "settings.secret_note": "密钥永远不经过控制台：渠道 token 等以挂载文件提供",
   "settings.failed": "读取设置失败",
