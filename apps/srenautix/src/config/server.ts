@@ -1,13 +1,16 @@
 import { readFileSync } from 'node:fs';
 import { parse as parseYaml } from 'yaml';
 import { z } from 'zod';
+import { clusterId, duration, path, url } from '../kernel/config-schema.js';
+import { changesConfig } from '../changes/config.js';
+import { detectorsConfig } from '../detectors/config.js';
+import { notifyConfig } from '../notify/config.js';
 import { ConfigError, parseDuration } from '../kernel/files.js';
-import { DEFAULT_REVISION_LABELS } from '../changes/kubernetes.js';
-import { DEFAULT_EXTERNAL_LABELS, isComponentKey } from '@srenautix/core';
-import { DEFAULT_OPTIMIZATION, optimizationConfig, pgReadConnection } from '../optimize/config.js';
+import { DEFAULT_EXTERNAL_LABELS } from '@srenautix/core';
+import { DEFAULT_OPTIMIZATION, optimizationConfig } from '../optimize/config.js';
 import { DEFAULT_SKILLS, skillsConfig } from '../skills/config.js';
 import { NOVELTY_CONFIG_DEFAULT, noveltyConfig } from './novelty.js';
-import { alertMatcher, upgradeMatchers, type AlertMatcher } from '../alerts/business-impact.js';
+import { upgradeMatchers } from '../alerts/business-impact.js';
 import { categoryRule } from '../alerts/category.js';
 import {
   DEFAULT_KUBE_WARNING_REASONS,
@@ -16,12 +19,7 @@ import {
   LOKI_LABEL_NAME,
 } from '../export/kube-events.js';
 import { logger } from '../kernel/log.js';
-import type { ExternalRootSettings } from '../notify/external.js';
 
-const duration = z.string().regex(/^\d+(ms|s|m|h|d)$/, '时长形如 30s、5m、12h');
-const url = z.string().url();
-const path = z.string().min(1);
-const clusterId = z.string().regex(/^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$/);
 // Kubernetes 事件日志的一个字段：line 为解析器从日志行取的字段（json 的路径如 involvedObject.kind，logfmt 的键），
 // label 为日志流标签
 const kubeEventField = z.union([
@@ -78,93 +76,6 @@ const ingestSource = z.discriminatedUnion('kind', [
  * 托管在 GitHub 上的仓库作为变更源（integrations/github）：经 GitHub App 的安装令牌用 REST API 读取分支上的提交与改动的文件，
  * 按路径前缀映射到拓扑节点。hub 镜像不带 git，通用 git 远端暂不支持（ADR 0096）。
  */
-const changesSource = z
-  .object({
-    id: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,62}$/),
-    kind: z.literal('github'),
-    // 变更所属的集群；不填时为本 server 的 cluster_id
-    cluster_id: clusterId.optional(),
-    // owner/name
-    repo: z.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/),
-    branch: z.string().min(1).default('main'),
-    paths: z
-      .array(
-        z
-          .object({
-            prefix: z.string().min(1),
-            targets: z.array(z.string().min(1)).min(1),
-            kind: z.enum(['rollout', 'config', 'gitops_sync', 'ci_deploy', 'other']),
-          })
-          .strict(),
-      )
-      .min(1),
-  })
-  .strict();
-
-// SQL 审计表变更源（ADR 0151）的列名与关系名：只接受小写的普通标识符，SQL 里一律加双引号引用
-const sqlIdentifier = z
-  .string()
-  .regex(/^[a-z_][a-z0-9_]{0,62}$/, '列名只能是小写的普通标识符（字母、数字、下划线，不以数字开头）');
-const sqlRelation = z
-  .string()
-  .regex(/^[a-z_][a-z0-9_]{0,62}\.[a-z_][a-z0-9_]{0,62}$/, '关系写成 <schema>.<名称>，两段都是小写的普通标识符');
-
-/**
- * 一组审计记录的声明（ADR 0151）：读取 table 中时间列落在回看窗口内的行，每行是一次运行时配置变更。
- * function 为 true 时 table 是返回审计记录的函数，以回看窗口的起止两个 timestamptz 为参数调用。
- * components 按顺序取第一条匹配的规则决定变更的目标，没有匹配的行不是任何组件的变更
- */
-const sqlAuditQuery = z
-  .object({
-    id: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,62}$/),
-    table: sqlRelation,
-    function: z.boolean().default(false),
-    // 行的唯一键：change_id 为 <来源 id>:<查询 id>:<键>
-    key: sqlIdentifier,
-    time: sqlIdentifier,
-    object: sqlIdentifier,
-    action: sqlIdentifier,
-    actor: sqlIdentifier.optional(),
-    // 变更之后对象的取值与变更之前的取值：写进版本，并用于判定没有变化与短时间内的往返
-    value: sqlIdentifier.optional(),
-    previous_value: sqlIdentifier.optional(),
-    // 另外写进摘要的列（不可信文本，截断）
-    details: z.array(sqlIdentifier).max(8).default([]),
-    components: z
-      .array(
-        z
-          .object({
-            // 动作或对象取值之一；不写时匹配全部
-            match: z
-              .object({
-                action: z.array(z.string().min(1)).min(1).optional(),
-                object: z.array(z.string().min(1)).min(1).optional(),
-              })
-              .strict()
-              .default({}),
-            targets: z
-              .array(z.string().refine(isComponentKey, '组件键形如 <kind>:<namespace>/<名称> 或 <kind>:<名称>'))
-              .min(1),
-          })
-          .strict(),
-      )
-      .min(1),
-  })
-  .strict();
-
-/** 一个业务库上的 SQL 审计表变更源：只读连接（与 optimization.dbstats 同样的写法）加一组查询声明 */
-const sqlAuditSource = z
-  .object({
-    id: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,62}$/),
-    cluster_id: clusterId.optional(),
-    connection: pgReadConnection,
-    queries: z.array(sqlAuditQuery).min(1),
-    // 同一对象在这段时间内改动之后又回到原来的取值，这几次都不算变更（与发布的标签抖动相同，ADR 0142）
-    group_within: duration.default('2m'),
-  })
-  .strict();
-
-/** GitHub App（安装令牌，不用个人令牌）：拓扑覆盖 PR、事件 issue 与 GitHub 变更源共用。 */
 const githubApp = z
   .object({
     api_base: url.default('https://api.github.com'),
@@ -201,129 +112,6 @@ const ociPackSource = z
     },
   )
   .refine((s) => !s.ignore_tlog || s.key_file, { message: 'ignore_tlog 只能与 key_file 一起使用' });
-
-const telegram = z
-  .object({
-    enabled: z.boolean().default(false),
-    bot_token_file: path,
-    api_base: url.default('https://api.telegram.org'),
-    chats: z.array(z.object({ id: z.number().int(), language: z.enum(['zh', 'en']).default('zh') }).strict()).min(1),
-    // none：只发送和编辑，不接收更新（与其他服务共用同一个 bot 时使用）；webhook：Telegram 推送到 /v1/channels/telegram/webhook；polling：长轮询 getUpdates（选主）
-    updates: z.enum(['none', 'webhook', 'polling']).default('none'),
-    webhook_secret_file: path.optional(),
-    messages_per_minute: z.number().int().min(1).max(30).default(20),
-    edit_gap: duration.default('3s'),
-  })
-  .strict();
-
-// 标签条件：标签名 → 允许的取值（每个键都要满足，取值之一即可）
-const labelMatch = z.record(z.string().min(1), z.array(z.string().min(1)).min(1));
-
-const EXTERNAL_ROOTS_DEFAULT = {
-  enabled: true,
-  period: '1h',
-  grace: '30s',
-  components: [] as string[],
-  alert_labels: {} as Record<string, string[]>,
-  business_impact: {
-    impact_cards: true,
-    within: '30m',
-    topology_hops: 6,
-  },
-};
-
-// 外部上游的周期汇总（ADR 0147）：根因是领域包声明 external 的组件类型（例如模型服务方）、components 列出的组件，
-// 或全部成员告警都满足 alert_labels 的事件，不逐条推送、不开 issue，每个周期（按 UTC 对齐，1h 即整点）汇总一条；
-// 同时有与这个上游事件相关的业务影响（ADR 0150：notify.business_impact_alerts 定义的业务影响告警（ADR 0166），或
-// impact_cards 为 true 时其他事件异常的影响卡，在上游事件开始后 within 之内开始，或组件沿依赖边 topology_hops 跳以内到达
-// 上游根因；本事件异常的影响卡）时照常即时推送。grace 是周期结束后等待多久再统计与发送（0s 到 120s），只影响 server
-// 发送汇总的时刻
-const externalRoots = z
-  .object({
-    enabled: z.boolean().default(true),
-    period: duration.default('1h'),
-    grace: duration.default('30s'),
-    components: z.array(z.string().min(1)).default([]),
-    alert_labels: labelMatch.default({}),
-    business_impact: z
-      .object({
-        impact_cards: z.boolean().default(true),
-        within: duration.default('30m'),
-        // 0 时不按拓扑判定
-        topology_hops: z.number().int().min(0).max(12).default(6),
-      })
-      .strict()
-      .default({ impact_cards: true, within: '30m', topology_hops: 6 }),
-  })
-  .strict();
-
-/** IANA 时区名：Intl 能用它格式化时间 */
-function validTimeZone(tz: string): boolean {
-  try {
-    new Intl.DateTimeFormat('en', { timeZone: tz });
-    return true;
-  } catch {
-    return false;
-  }
-}
-export type ExternalRootsConfig = z.infer<typeof externalRoots>;
-
-/**
- * 推送规则中可以复用的两项：推送的严重度与外部上游的周期汇总。server 的 notify 与重建评测的 reconstruct.notify
- * （ADR 0175）同一写法
- */
-export const notifySeverities = z.array(z.enum(['critical', 'warning', 'info'])).default(['critical', 'warning']);
-export const notifyDigest = z
-  .object({ external_roots: externalRoots.default(EXTERNAL_ROOTS_DEFAULT) })
-  .strict()
-  .default({ external_roots: EXTERNAL_ROOTS_DEFAULT });
-
-/** 重建评测的 reconstruct.notify（ADR 0175）：推送的严重度与外部上游的周期汇总，默认值与 server 相同 */
-export const notifyRules = z.object({ severities: notifySeverities, digest: notifyDigest }).strict();
-export type NotifyRulesConfig = z.infer<typeof notifyRules>;
-export const NOTIFY_RULES_DEFAULT: NotifyRulesConfig = {
-  severities: ['critical', 'warning'],
-  digest: { external_roots: EXTERNAL_ROOTS_DEFAULT },
-};
-
-/** notify.digest.external_roots 与业务影响告警 → 外部上游的分类设置（notify/external.ts 的 ExternalRoots） */
-export function externalRootSettings(
-  xr: ExternalRootsConfig,
-  businessImpactAlerts: readonly AlertMatcher[],
-  path = 'notify.digest.external_roots',
-): ExternalRootSettings {
-  return {
-    enabled: xr.enabled,
-    periodMs: parseDuration(`${path}.period`, xr.period),
-    components: xr.components,
-    alertLabels: xr.alert_labels,
-    impact: {
-      alerts: businessImpactAlerts,
-      impactCards: xr.business_impact.impact_cards,
-      withinMs: parseDuration(`${path}.business_impact.within`, xr.business_impact.within),
-      topologyHops: xr.business_impact.topology_hops,
-    },
-  };
-}
-
-const feishu = z
-  .object({
-    enabled: z.boolean().default(false),
-    api_base: url.default('https://open.feishu.cn'),
-    app_id: z.string().min(1),
-    app_secret_file: path,
-    encrypt_key_file: path.optional(),
-    verification_token_file: path,
-    chats: z
-      .array(z.object({ chat_id: z.string().min(1), language: z.enum(['zh', 'en']).default('zh') }).strict())
-      .min(1),
-    messages_per_minute: z.number().int().min(1).max(100).default(100),
-    messages_per_second: z.number().int().min(1).max(5).default(5),
-    edit_gap: duration.default('1s'),
-    // 聊天账号与控制台使用同一个飞书身份源时，按 union_id 自动绑定
-    auto_link_union_id: z.boolean().default(false),
-  })
-  .strict();
 
 export const serverConfigSchema = z
   .object({
@@ -536,102 +324,8 @@ export const serverConfigSchema = z
       .strict()
       .default({ source: 'informer', reader_offline_after: '60s', history_retention: '14d' }),
     // 变更源（changes/v1，DESIGN §5 的"30 分钟内的变更"）：server 维护只读克隆，定期 fetch 后按路径映射到拓扑节点
-    changes: z
-      .object({
-        sources: z.array(changesSource).default([]),
-        // SQL 审计表变更源（ADR 0151）：业务库里运行时配置的审计记录作为 runtime_config 变更；默认没有，不连接任何业务库
-        sql_audit: z.array(sqlAuditSource).default([]),
-        interval: duration.default('60s'),
-        // 首次同步与每次同步回看的时长（与上一次同步重叠，按 change_id 去重）
-        lookback: duration.default('24h'),
-        // 从拓扑事件推导 Kubernetes 的发布（ADR 0104）：工作负载的版本标签变化与新的 ReplicaSet
-        kubernetes: z
-          .object({
-            enabled: z.boolean().default(true),
-            // 表示版本的标签；默认 app.kubernetes.io/version、helm.sh/chart，可追加，例如 cchp.io/release-id
-            revision_labels: z.array(z.string().min(1)).default([...DEFAULT_REVISION_LABELS]),
-            // 这段时间内同一版本或同一个管理应用的变化合成一次发布
-            group_within: duration.default('2m'),
-            // informer 空窗时（重启、断连、刚安装）从证据数据源的 kube-state-metrics 推导拓扑里没有的发布（ADR 0104 §11）
-            ksm_fallback: z.boolean().default(true),
-            // 发布之前的 Job 按这些标签的取值关联到发布（ADR 0104 §13）：Job 上的取值等于发布新 ReplicaSet 或工作负载上的
-            // 同名标签时挂上。默认不启用；CCHP 配 cchp.io/release-id
-            pre_step_labels: z.array(z.string().min(1)).default([]),
-            // 工作负载被删除或副本缩到 0 并保持是一次退役变更（ADR 0161），从证据数据源的 kube-state-metrics 与 up 序列推导，
-            // 带上随之失去目标的抓取 job 与之前合并的 Git 提交
-            retirements: z.boolean().default(true),
-          })
-          .strict()
-          .default({
-            enabled: true,
-            revision_labels: [...DEFAULT_REVISION_LABELS],
-            group_within: '2m',
-            ksm_fallback: true,
-            pre_step_labels: [],
-            retirements: true,
-          }),
-        // 已合并、尚未同步的提交（ADR 0161）：按证据数据源的 argocd_app_info 找出 OutOfSync 的 Argo CD 应用，
-        // 从它最后一次 Synced 起合并的、触及它的变更源提交列进应用上的告警所在的事件
-        pending_sync: z
-          .object({
-            enabled: z.boolean().default(true),
-            // 往前找最后一次 Synced 的范围；更早就一直未同步时，取这个范围内的提交
-            lookback: duration.default('72h'),
-          })
-          .strict()
-          .default({ enabled: true, lookback: '72h' }),
-      })
-      .strict()
-      .default({
-        sources: [],
-        sql_audit: [],
-        interval: '60s',
-        lookback: '24h',
-        kubernetes: {
-          enabled: true,
-          revision_labels: [...DEFAULT_REVISION_LABELS],
-          group_within: '2m',
-          ksm_fallback: true,
-          pre_step_labels: [],
-          retirements: true,
-        },
-        pending_sync: { enabled: true, lookback: '72h' },
-      }),
-    // 集群状态检测器（ADR 0105）：没有告警规则时也发现卡住的 Pod、停滞的发布、CrashLoop、阻塞驱逐的 PDB 与失败的 Job，
-    // 合成为 source=detector 的告警进入事件。对象状态由 reader（多集群）或 server 的 informer（单集群）上报
-    detectors: z
-      .object({
-        enabled: z.boolean().default(false),
-        // "*" 为全部命名空间
-        namespaces: z.array(z.string().min(1)).default(['*']),
-        exclude_namespaces: z.array(z.string().min(1)).default([]),
-        pod_init_after: duration.default('10m'),
-        pod_pending_after: duration.default('10m'),
-        rollout_stalled_after: duration.default('15m'),
-        crash_loop_after: duration.default('5m'),
-        pdb_blocked_after: duration.default('10m'),
-        job_failed: z.boolean().default(true),
-        severity: z.enum(['critical', 'warning', 'info']).default('warning'),
-        // 检测间隔
-        interval: duration.default('30s'),
-        // 同一对象上已有这些告警规则在触发时不再合成（按状态列出告警名；用户层追加）
-        equivalent_alerts: z.record(z.string(), z.array(z.string().min(1))).default({}),
-      })
-      .strict()
-      .default({
-        enabled: false,
-        namespaces: ['*'],
-        exclude_namespaces: [],
-        pod_init_after: '10m',
-        pod_pending_after: '10m',
-        rollout_stalled_after: '15m',
-        crash_loop_after: '5m',
-        pdb_blocked_after: '10m',
-        job_failed: true,
-        severity: 'warning',
-        interval: '30s',
-        equivalent_alerts: {},
-      }),
+    changes: changesConfig,
+    detectors: detectorsConfig,
     // 阶段 B 的 Kubernetes 只读检查（ADR 0106）：Pod 状态、事件、Pod 列表与容器日志尾部，只对本集群的事件提供。
     // 需要 server 的集群只读权限（chart 的 roles.server.clusterRead，含 pods/log）；默认关闭
     kube_reads: z
@@ -776,31 +470,7 @@ export const serverConfigSchema = z
         storm_window: '5m',
         storm_top_roots: 3,
       }),
-    notify: z
-      .object({
-        // 每条消息开头的前缀，例如 "[影子]"
-        prefix: z.string().default(''),
-        // 消息里时间的时区（IANA 名，例如 Asia/Shanghai）；时间后面写 UTC 或与 UTC 的偏移（UTC+8）
-        time_zone: z.string().default('UTC').refine(validTimeZone, { message: 'notify.time_zone 不是 IANA 时区名' }),
-        severities: notifySeverities,
-        resolved_retention: duration.default('6h'),
-        telegram: telegram.optional(),
-        feishu: feishu.optional(),
-        digest: notifyDigest,
-        // 业务影响告警（ADR 0166）：满足任一项的告警。首条消息时延的 business_impact 标签（ADR 0159）、外部上游汇总的
-        // 业务影响（ADR 0150）、处置推导中业务受影响时不给 ignore（ADR 0163）与计划内退役判为 ignore 的前提（ADR 0167）
-        // 都用它。为空时没有业务影响告警
-        business_impact_alerts: z.array(alertMatcher).default([]),
-      })
-      .strict()
-      .default({
-        prefix: '',
-        time_zone: 'UTC',
-        severities: ['critical', 'warning'],
-        resolved_retention: '6h',
-        digest: { external_roots: EXTERNAL_ROOTS_DEFAULT },
-        business_impact_alerts: [],
-      }),
+    notify: notifyConfig,
     approvals: z
       .object({
         signing_key_file: path,
@@ -888,8 +558,6 @@ export function opsRepositories(c: ServerConfig): string[] {
     ...(c.topology.override_pr ? [c.topology.override_pr.repo] : []),
   ];
 }
-export type TelegramConfig = z.infer<typeof telegram>;
-export type FeishuConfig = z.infer<typeof feishu>;
 export type IngestSourceConfig = z.infer<typeof ingestSource>;
 
 export function loadServerConfig(path: string): ServerConfig {

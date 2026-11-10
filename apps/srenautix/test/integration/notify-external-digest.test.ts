@@ -4,7 +4,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { TelegramAdapter } from '../../src/channels/telegram/adapter.js';
 import { TelegramClient } from '../../src/channels/telegram/client.js';
 import { parseDuration } from '../../src/kernel/files.js';
-import { NOTIFY_RULES_DEFAULT } from '../../src/config/server.js';
+import { NOTIFY_RULES_DEFAULT } from '../../src/notify/config.js';
 import { ServerMetrics } from '../../src/kernel/metrics.js';
 import { NotifyEngine } from '../../src/notify/engine.js';
 import { ExternalRoots, externalTypeLookup, pgImpactAlerts, topologyPaths } from '../../src/notify/external.js';

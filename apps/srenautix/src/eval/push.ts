@@ -1,6 +1,6 @@
 import type { Alert, ComponentType, EvalSnapshot, Incident, StageAReport } from '@srenautix/contract';
 import { isBusinessImpact } from '../alerts/business-impact.js';
-import { externalRootSettings } from '../config/server.js';
+import { externalRootSettings } from '../notify/config.js';
 import {
   dependencyPath,
   ExternalRoots,

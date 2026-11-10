@@ -6,7 +6,7 @@ import { DEFAULT_RCA_PARAMS } from '@srenautix/core';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest';
 import { changesInWindow, ChangesService } from '../../src/changes/service.js';
-import type { SqlAuditSourceConfig } from '../../src/changes/sql-audit.js';
+import type { SqlAuditSourceConfig } from '../../src/changes/config.js';
 import { IncidentEngine } from '../../src/incident/engine.js';
 import { alertsById } from '../../src/ingest/store.js';
 import { ServerMetrics } from '../../src/kernel/metrics.js';

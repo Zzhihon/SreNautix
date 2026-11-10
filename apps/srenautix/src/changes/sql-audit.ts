@@ -4,7 +4,7 @@ import type { ChangeEvent } from '@srenautix/contract';
 import { DatasourceError, READABLE_RELATIONS_SQL } from '@srenautix/integration-sdk';
 import canonicalize from 'canonicalize';
 import pg from 'pg';
-import type { ServerConfig } from '../config/server.js';
+import type { SqlAuditSourceConfig } from './config.js';
 
 // SQL 审计表变更源（ADR 0151）：业务库里运行时配置的审计记录（经管理接口或直接写库生效、不经过 Git 与发布的改动）
 // 作为 runtime_config 变更，和其他变更一起进入事件收敛、根因排序与阶段 A 时间线。
@@ -13,7 +13,6 @@ import type { ServerConfig } from '../config/server.js';
 // - 权限自检：角色能读取声明之外的任何业务关系时不读取（与 dbstats 的不变量 14 相同）；
 // - 没有变化（新旧取值相同）与短时间内改回原来取值的记录不算变更（与发布的标签抖动相同，ADR 0142）。
 
-export type SqlAuditSourceConfig = ServerConfig['changes']['sql_audit'][number];
 export type SqlAuditQuery = SqlAuditSourceConfig['queries'][number];
 
 /** 每个查询每次最多读取的行数；超过时只取最早的这么多行并标记截断 */

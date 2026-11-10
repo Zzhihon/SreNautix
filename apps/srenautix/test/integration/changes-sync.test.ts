@@ -1,6 +1,7 @@
 import { generateKeyPairSync } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { changesInWindow, ChangesService, type ChangeSourceConfig } from '../../src/changes/service.js';
+import type { ChangeSourceConfig } from '../../src/changes/config.js';
+import { changesInWindow, ChangesService } from '../../src/changes/service.js';
 import { parseServerConfig } from '../../src/config/server.js';
 import { serverConditions } from '../../src/console-bff/conditions.js';
 import { GitHubApp } from '../../src/github/app.js';
