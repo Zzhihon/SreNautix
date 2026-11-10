@@ -7,7 +7,7 @@ import { largeIncidentInput } from '../support/report-fixture.js';
 const situationText = (m: ReturnType<typeof composeMessage>['message']) =>
   m.sections
     .find((s) => s.kind === 'situation')!
-    .blocks.flatMap((b) => ('runs' in b ? b.runs.map((r) => r.text) : []))
+    .blocks.flatMap((b) => ('runs' in b && b.runs ? b.runs.map((r) => r.text) : []))
     .join('\n');
 
 describe('消息上的认领', () => {
