@@ -22,6 +22,8 @@ type Body<O extends keyof HubOperations> = HubOperations[O] extends {
     : never;
 
 export type IncidentSummary = S['IncidentSummary'];
+export type BusinessDomainStatus = S['BusinessDomainStatus'];
+export type BusinessDomainList = Ok<'listBusinessDomains'>;
 export type ResearchRun = S['ResearchRun'];
 export type ResearchRunSummary = S['ResearchRunSummary'];
 export type ResearchState = S['ResearchState'];

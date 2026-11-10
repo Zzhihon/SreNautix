@@ -117,6 +117,8 @@ export interface ComposeInput {
    * 上游事件相关的依据（ADR 0150），横幅写“上游故障已影响业务”。其余事件为 null 或省略
    */
   upstreamImpact?: string[] | null;
+  /** 事件主服务与它所属业务领域的名称（ADR 0193）；有时消息头条以 [业务领域/服务] 开头 */
+  service?: { domain: string; service: string } | null;
 }
 
 const T = {
@@ -1593,7 +1595,10 @@ export function composeMessage(i: ComposeInput): { message: NotifyMessage; targe
       }),
     ),
   ].slice(0, 3);
-  const headline: NotifyRun[] = [P(`${rootShort}${t.colon}${symptoms.join(t.list)}`)];
+  const headline: NotifyRun[] = [
+    ...(i.service ? [P(`[${i.service.domain}/${i.service.service}] `)] : []),
+    P(`${rootShort}${t.colon}${symptoms.join(t.list)}`),
+  ];
 
   // ---- 现状：问题陈述 ----
   const relevant = new Set([...inc.components, ...inc.candidates.map((c) => c.component), ...(root ? [root] : [])]);

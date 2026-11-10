@@ -5,7 +5,7 @@ import { Eye, EyeOff, RefreshCw } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import type { EvidenceRef, EvidenceResult } from '../contract';
 import { useRerunEvidence, useUiEnv } from '../data';
-import { useI18n } from '../i18n';
+import { localizedText, useI18n } from '../i18n';
 import { Button, ErrorBox, Mono } from '../primitives/basic';
 import { Chart } from '../primitives/Chart';
 import { EmptyState } from '../primitives/EmptyState';
@@ -23,8 +23,7 @@ export function evidenceAnchor(ref: string): string {
 }
 
 export function evidenceTitle(r: EvidenceResult, locale: string): string {
-  const t = r.title as Record<string, string | undefined>;
-  return t[locale] ?? t['zh-CN'] ?? t['en'] ?? r.card_id;
+  return localizedText(r.title as Record<string, string | undefined>, locale) || r.card_id;
 }
 
 function entityText(r: EvidenceResult): string | null {

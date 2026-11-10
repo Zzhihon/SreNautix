@@ -35,6 +35,16 @@
   font-weight: 600;
   min-width: 0;
 }
+.service {
+  color: var(--sn-dim);
+  white-space: nowrap;
+}
+.service::after {
+  content: ' ·';
+}
+.service[data-presumed]::before {
+  content: '~';
+}
 .flag {
   font-size: 11.5px;
   font-weight: 500;

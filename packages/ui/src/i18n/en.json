@@ -13,12 +13,10 @@
   "common.open": "Open",
   "common.more": "More",
   "common.model_generated": "Model-generated",
-
   "fmt.duration.s": "{s}s",
   "fmt.duration.m": "{m}m",
   "fmt.duration.hm": "{m, plural, =0 {{h}h} other {{h}h {m}m}}",
   "fmt.duration.dh": "{h, plural, =0 {{d}d} other {{d}d {h}h}}",
-
   "status.verdict.abnormal": "Abnormal",
   "status.verdict.undeterminable": "Undeterminable",
   "status.verdict.capability_missing": "Capability missing",
@@ -88,7 +86,6 @@
   "status.condition.warning": "Warning",
   "status.condition.ok": "OK",
   "status.condition.frozen": "Frozen",
-
   "condition.IngestSilent": "Ingest silent",
   "condition.WatchdogMissing": "Watchdog alert missing",
   "condition.DatasourceUnavailable": "Data source unavailable",
@@ -118,7 +115,6 @@
   "conditions.propose_only": "Cluster {cluster} is propose-only",
   "conditions.propose_only_all": "All clusters are propose-only",
   "conditions.since": "since {at} · {role} · {cluster}",
-
   "incident.row_label": "Incident: {title}, {since}, root {root}, cluster {cluster}",
   "incident.since": "since {t}",
   "incident.research_line": "Research: {s}",
@@ -128,6 +124,7 @@
   "incident.hover_id": "Incident ID {id}",
   "incident.no_root": "Root cause not located",
   "incident.ambiguous": "Ambiguous root",
+  "incident.service_presumed": "Service presumed from the namespace",
   "incident.root_mismatch": "Research root differs",
   "incident.merged_from": "Merged from {n}",
   "incident.split_from": "Split from another incident",
@@ -137,7 +134,6 @@
   "incident.fresh": "Researched {ago}",
   "incident.not_researched": "Not researched yet",
   "incident.pending_approvals": "{n} awaiting approval",
-
   "evidence.live_not_model": "Live rerun · not what the model saw",
   "evidence.snapshot_model_saw": "Research snapshot · what the model saw",
   "evidence.evaluated_at": "Evaluated {at}",
@@ -167,7 +163,6 @@
   "evidence.rerun_again": "Rerun again",
   "evidence.rerun_forbidden": "Live rerun needs the responder, approver or admin role",
   "evidence.rerun_failed": "Live rerun failed",
-
   "hypothesis.refutes_if": "Refuted if: {cond}",
   "hypothesis.leader": "Concluded",
   "hypothesis.supporting": "Supporting",
@@ -187,7 +182,6 @@
   "hypothesis.empty_because": "This incident only has the deterministic stage A report: model research has not finished, or was skipped for a breaker, budget or storm mode. The runs tab lists each research state.",
   "hypothesis.none_title": "The model proposed no hypotheses",
   "hypothesis.none_because": "Research completed with an empty hypothesis tree; the conclusion is undetermined.",
-
   "timeline.kind.alert_firing": "Alert firing",
   "timeline.kind.alert_resolved": "Alert resolved",
   "timeline.kind.change": "Change",
@@ -227,7 +221,6 @@
   "timeline.change_basis.late": "after the problem started",
   "timeline.change_rollback": "rollback",
   "timeline.change_link_title": "Computed by code from timing, the object acted on and new alerts after the change",
-
   "feedback.title": "Is this research right?",
   "feedback.label": "Research feedback",
   "feedback.axis_disposition": "Disposition",
@@ -269,7 +262,6 @@
   "feedback.sum_root_bad": "Root wrong, should be {c}",
   "feedback.sum_root_unknown": "Root wrong, actual root unknown",
   "feedback.sum_by": "{who} ({channel})",
-
   "verdict.label": "Verdict",
   "verdict.version": "v{v} · topology v{topo}",
   "verdict.duration": "Lasting {d}",
@@ -294,7 +286,6 @@
   "verdict.state_store_degraded": "Produced while the state store was degraded",
   "verdict.merged_into": "Merged into another incident",
   "verdict.affecting": "Conditions affecting this verdict",
-
   "research.state.queued": "Queued",
   "research.state.hypothesize": "Hypothesizing",
   "research.state.discriminate": "Discriminating",
@@ -312,7 +303,6 @@
   "research.reason.model_recovered": "Model recovered",
   "research.reason.resumed": "Resumed after restart",
   "research.reason.reopened": "Incident reopened",
-
   "approval.title": "Approve: {action} · {target}",
   "approval.load_failed": "Failed to read the proposal",
   "approval.no_actions": "This entry point cannot approve",
@@ -383,7 +373,6 @@
   "approval.approve_failed": "Approval failed",
   "approval.reject_failed": "Rejection failed",
   "approval.undo_failed": "Undo failed",
-
   "run.title": "Research run",
   "run.load_failed": "Failed to read the research run",
   "run.manifest_failed": "Failed to read the research manifest",
@@ -467,7 +456,6 @@
   "run.m.topology": "Topology version",
   "run.m.redaction": "Redaction rules",
   "run.m.routes": "Routes",
-
   "subgraph.role.root": "root",
   "subgraph.role.candidate": "candidate",
   "subgraph.role.member": "member",
@@ -499,11 +487,16 @@
   "subgraph.panel.links": "Component links",
   "subgraph.panel.open_neighborhood": "Open the topology neighborhood around it",
   "subgraph.panel.search_incidents": "Search incidents for this component",
-
   "inbox.title": "Incident inbox",
   "inbox.meta": "{n} incidents · {suppressed} suppressed",
   "inbox.filters": "Filters",
   "inbox.f.state": "State",
+  "inbox.f.group": "Group",
+  "inbox.group.domain": "By business domain",
+  "inbox.group.none": "None",
+  "inbox.f.business_domain": "Business domain",
+  "inbox.domain_unassigned": "No business domain",
+  "inbox.domain_group": "{title} · {n} incidents",
   "inbox.f.feedback": "Feedback",
   "inbox.f.severity": "Severity",
   "inbox.f.disposition": "Disposition",
@@ -535,7 +528,6 @@
   "inbox.empty_none": "Ingest is healthy and conditions were checked at {at}; alert sources pushed nothing to act on.",
   "inbox.suppressed": "{n} incidents suppressed (affects only SreNautix's own messages and research, never alert routing)",
   "inbox.show_suppressed": "Show suppressed incidents",
-
   "detail.load_failed": "Failed to read the incident",
   "detail.partial_failed": "Some data failed to load",
   "detail.pending": "Proposals awaiting approval ({n})",
@@ -568,6 +560,5 @@
   "detail.col.disposition": "Disposition",
   "detail.col.level": "Conclusion",
   "detail.col.root": "Root",
-
   "error_boundary.failed": "{area} failed to render; the rest of the page is unaffected"
 }
