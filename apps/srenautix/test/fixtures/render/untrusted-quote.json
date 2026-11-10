@@ -42,7 +42,7 @@
   "expect": {
     "starts_with": "[shadow] [CRITICAL] api error ratio above 5%",
     "order": [
-      "firing · Incident Deployment:shop/api:2026-10-16T10:00:00Z",
+      "Firing · Incident Deployment:shop/api:2026-10-16T10:00:00Z",
       "4. Evidence",
       "Source: alert annotation description"
     ],

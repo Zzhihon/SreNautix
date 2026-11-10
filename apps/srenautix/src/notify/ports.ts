@@ -24,6 +24,8 @@ export interface DesiredIncidentMessage {
   /** 消息中按钮作用的对象，渠道把它们登记到按钮表，回调时原样交回。 */
   targets: ButtonTarget[];
   language: 'zh' | 'en';
+  /** 消息里时间的时区（IANA 名，notify.time_zone）；之前写下的消息没有，按 UTC */
+  timeZone?: string;
   /**
    * external：根因是外部上游且没有业务影响（ADR 0147），不单独推送，进入周期汇总；已经有消息的事件照常编辑。
    * 省略或 null 时照常推送

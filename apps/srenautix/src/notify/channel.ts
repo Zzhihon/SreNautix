@@ -43,6 +43,8 @@ export interface ActionResultView {
 export interface DigestInput {
   stormId: number;
   startedAt: Date;
+  /** 时间的时区：取成员消息的（notify.time_zone）；没有时按 UTC */
+  timeZone?: string;
   members: Array<{
     incidentId: string;
     label: string;

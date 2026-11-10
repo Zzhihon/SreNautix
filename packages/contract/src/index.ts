@@ -15,3 +15,4 @@ export {
 export { reasonEntry, reasonText, type ReasonCodeOf, type ReasonGroupCode } from './reason-codes.js';
 export { SCHEMA_BASE, contractAjv, validatorFor, assertValid, ContractViolation } from './validate.js';
 export { createHubClient } from './client.js';
+export { TERMS, type TermLocale } from './terms.js';

@@ -96,7 +96,7 @@ export class ReportSource {
     private readonly feedback: FeedbackService,
     private readonly topology: TopologyStore,
     private readonly domain: ReportDomain,
-    private readonly s: { prefix: string; consoleUrl: string },
+    private readonly s: { prefix: string; consoleUrl: string; timeZone?: string },
     /** 研判根因与事件根因按属主粒度比较时取顶层属主（ADR 0104 §14）；不提供时只按键比较 */
     private readonly ownerOf: OwnerLookup = async () => null,
   ) {}
@@ -181,6 +181,7 @@ export class ReportSource {
         feedback: fbs.get(inc.incident_id) ?? null,
         prefix: this.s.prefix,
         consoleUrl: this.s.consoleUrl,
+        timeZone: this.s.timeZone,
         language,
         subgraph: await subgraphOf(this.topology, inc, 2),
         alertTitle: (a) => this.domain.alertTitle(a, language),
@@ -349,6 +350,7 @@ export class PgMessageSource implements MessageSource {
         message,
         targets,
         language,
+        timeZone: input.timeZone,
       };
     });
   }

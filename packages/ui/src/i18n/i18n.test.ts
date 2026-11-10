@@ -2,7 +2,8 @@ import { IntlMessageFormat } from 'intl-messageformat';
 import { describe, expect, it } from 'vitest';
 import { CONDITION_SEVERITY } from '../domain/ConditionStrip';
 import { STATUS } from '../primitives/Status';
-import { createI18n, setMissingMessageReporter, UI_MESSAGES, type MissingMessage } from './index';
+import { TERMS } from '@srenautix/contract';
+import { createI18n, LOCALES, setMissingMessageReporter, UI_MESSAGES, type MissingMessage } from './index';
 
 // 按枚举值拼接的文案键：每个取值在两种语言里都必须存在
 const ENUMS: Record<string, readonly string[]> = {
@@ -100,6 +101,23 @@ const ENUMS: Record<string, readonly string[]> = {
 };
 
 describe('文案', () => {
+  it('严重度、事件状态与处置用共用术语（packages/contract 的 TERMS），与消息里的名称相同', () => {
+    for (const locale of LOCALES) {
+      const m = UI_MESSAGES[locale];
+      const terms = TERMS[locale];
+      for (const [k, v] of Object.entries(terms.severity)) {
+        expect(m[`status.severity.${k}`], `${locale} severity ${k}`).toBe(v);
+      }
+      for (const [k, v] of Object.entries(terms.state)) {
+        expect(m[`status.incident.${k}`], `${locale} state ${k}`).toBe(v);
+      }
+      for (const [k, v] of Object.entries(terms.disposition)) {
+        expect(m[`status.disposition.${k}`], `${locale} disposition ${k}`).toBe(v);
+      }
+      expect([m['inbox.state.firing'], m['inbox.state.resolved']]).toEqual([terms.state.firing, terms.state.resolved]);
+    }
+  });
+
   it('两种语言的键集合相同', () => {
     expect(Object.keys(UI_MESSAGES.en).sort()).toEqual(Object.keys(UI_MESSAGES['zh-CN']).sort());
   });

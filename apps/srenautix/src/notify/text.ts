@@ -1,18 +1,20 @@
+import { TERMS, type TermLocale } from '@srenautix/contract';
 import type { Language } from './channel.js';
 
 /** 消息模板中的固定文案（中英文），各渠道的渲染共用。不可信文本从不拼进这里的模板。 */
 type Dict = Record<string, string>;
 
+/** 共用术语（packages/contract 的 TERMS）在消息里的语言 */
+const TERM: Record<Language, (typeof TERMS)[TermLocale]> = { zh: TERMS['zh-CN'], en: TERMS.en };
+
+// 英文消息标题里的严重度全大写（[CRITICAL]），是写法不是另一个名称
 const SEVERITY: Record<Language, Dict> = {
-  zh: { critical: '严重', warning: '警告', info: '提示' },
-  en: { critical: 'CRITICAL', warning: 'WARNING', info: 'INFO' },
+  zh: TERM.zh.severity,
+  en: Object.fromEntries(Object.entries(TERM.en.severity).map(([k, v]) => [k, v.toUpperCase()])),
 };
+const STATE: Record<Language, Dict> = { zh: TERM.zh.state, en: TERM.en.state };
 
-const STATE: Record<Language, Dict> = {
-  zh: { firing: '未恢复', resolved: '已恢复', merged: '已合并' },
-  en: { firing: 'firing', resolved: 'resolved', merged: 'merged' },
-};
-
+/** 没有标题的旧四段结构消息按 kind 取的段名；compose 写出的消息每段都带标题 */
 const SECTION: Record<Language, Dict> = {
   zh: { situation: '1. 现状与背景', root_cause: '2. 问题根源', remedy: '3. 解决方案', evidence: '4. 相关证据' },
   en: { situation: '1. Situation', root_cause: '2. Root cause', remedy: '3. Remedy', evidence: '4. Evidence' },
@@ -35,10 +37,7 @@ const OMITTED: Record<Language, Dict> = {
   },
 };
 
-const DISPOSITION: Record<Language, Dict> = {
-  zh: { act: '处理', ignore: '忽略', escalate: '升级', undetermined: '无法判定' },
-  en: { act: 'Act', ignore: 'Ignore', escalate: 'Escalate', undetermined: 'Undetermined' },
-};
+const DISPOSITION: Record<Language, Dict> = { zh: TERM.zh.disposition, en: TERM.en.disposition };
 
 /** 反馈的原因码（ADR 0174），与控制台的文案相同 */
 const REASON: Record<Language, Dict> = {
@@ -142,12 +141,44 @@ export const t = {
     (MISC[l][key] as string).replace(/\{(\w+)\}/g, (_, k: string) => String(vars[k] ?? '')),
 };
 
-export function hm(d: Date): string {
-  return `${d.toISOString().slice(11, 16)} UTC`;
+/** 时区写法：UTC 写 UTC，其余写与 UTC 的偏移（UTC+8、UTC-3:30），取 at 时刻的偏移 */
+export function tzLabel(tz: string, at: Date): string {
+  if (tz === 'UTC' || tz === 'Etc/UTC') {
+    return 'UTC';
+  }
+  const off =
+    new Intl.DateTimeFormat('en-US', { timeZone: tz, timeZoneName: 'shortOffset' })
+      .formatToParts(at)
+      .find((p) => p.type === 'timeZoneName')?.value ?? 'GMT';
+  return off === 'GMT' ? 'UTC' : off.replace('GMT', 'UTC');
 }
 
-export function ymdhm(d: Date): string {
-  return `${d.toISOString().slice(0, 10)} ${d.toISOString().slice(11, 16)} UTC`;
+/** 时刻在时区 tz 中的日期与时刻：YYYY-MM-DD 与 HH:MM:SS */
+export function wallClock(d: Date, tz: string): { date: string; time: string } {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat('en-CA', {
+      timeZone: tz,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hourCycle: 'h23',
+    })
+      .formatToParts(d)
+      .map((p) => [p.type, p.value]),
+  );
+  return { date: `${parts.year}-${parts.month}-${parts.day}`, time: `${parts.hour}:${parts.minute}:${parts.second}` };
+}
+
+export function hm(d: Date, tz = 'UTC'): string {
+  return `${wallClock(d, tz).time.slice(0, 5)} ${tzLabel(tz, d)}`;
+}
+
+export function ymdhm(d: Date, tz = 'UTC'): string {
+  const w = wallClock(d, tz);
+  return `${w.date} ${w.time.slice(0, 5)} ${tzLabel(tz, d)}`;
 }
 
 /** 单个字段限制在 max 个字符（code point）以内，超出时以“…”结尾。 */
