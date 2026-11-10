@@ -76,7 +76,7 @@ interface Member {
   matches(o: TypedObject): boolean;
 }
 
-/** 服务目录的声明错误：重复的 id、引用不存在的组件类型、重复的默认命名空间 */
+/** 服务目录的声明错误：重复的服务 id、业务领域的 title 或 tier 缺失或不一致、引用不存在的组件类型、重复的默认命名空间 */
 export class ServiceCatalogError extends Error {
   constructor(
     readonly pack: string,
@@ -99,13 +99,34 @@ export class ServiceCatalog {
   ) {
     this.declared = packs.map((p) => ({ pack: p.pack, domains: p.domains }));
     const typeById = new Map(types.map((t) => [t.id, t]));
-    const domainIds = new Set<BusinessDomainId>();
+    // 同一 id 的业务领域在几个包中声明时合并（与 ADR 0146 的领域相同）：title、tier 给出多处时必须相同
+    const heads = new Map<BusinessDomainId, { title?: LocalizedText; tier?: BusinessTier; pack: string }>();
     for (const { pack, domains } of packs) {
       for (const d of domains) {
-        if (domainIds.has(d.id)) {
-          throw new ServiceCatalogError(pack, `业务领域 ${d.id} 重复声明`);
+        const head = heads.get(d.id) ?? { pack };
+        for (const k of ['title', 'tier'] as const) {
+          if (d[k] === undefined) {
+            continue;
+          }
+          if (head[k] !== undefined && JSON.stringify(head[k]) !== JSON.stringify(d[k])) {
+            throw new ServiceCatalogError(pack, `业务领域 ${d.id} 的 ${k} 与 ${head.pack} 中的声明不同`);
+          }
+          (head as Record<string, unknown>)[k] = d[k];
         }
-        domainIds.add(d.id);
+        heads.set(d.id, head);
+      }
+    }
+    for (const [id, head] of heads) {
+      if (head.title === undefined || head.tier === undefined) {
+        throw new ServiceCatalogError(
+          head.pack,
+          `业务领域 ${id} 在任何包中都没有给出 ${head.title === undefined ? 'title' : 'tier'}`,
+        );
+      }
+    }
+    for (const { pack, domains } of packs) {
+      for (const d of domains) {
+        const head = heads.get(d.id)!;
         for (const s of d.services) {
           if (this.byId.has(s.id)) {
             throw new ServiceCatalogError(pack, `服务 ${s.id} 重复声明`);
@@ -114,8 +135,8 @@ export class ServiceCatalog {
             id: s.id,
             title: s.title,
             business_domain: d.id,
-            business_domain_title: d.title,
-            tier: d.tier,
+            business_domain_title: head.title!,
+            tier: head.tier!,
             pack,
           });
           for (const m of s.members) {

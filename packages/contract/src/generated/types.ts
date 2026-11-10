@@ -6393,18 +6393,18 @@ export interface ObjectPattern {
   same_namespace?: boolean;
 }
 /**
- * business.yaml（契约 2.53.0，ADR 0193）：部署方的业务领域与服务。领域与服务的 id 在全部启用的包中唯一
+ * business.yaml（契约 2.53.0，ADR 0193）：部署方的业务领域与服务。服务的 id 在全部启用的包中唯一；同一 id 的业务领域在几个包中声明时合并
  */
 export interface BusinessFile {
   business_domains: BusinessDomain[];
 }
 /**
- * 一块业务（ADR 0193 §1）
+ * 一块业务（ADR 0193 §1）。同一 id 的业务领域可以在几个包中声明，服务合并；title 与 tier 至少有一处给出，给出多处时必须相同
  */
 export interface BusinessDomain {
   id: BusinessDomainId;
-  title: LocalizedText2;
-  tier: BusinessTier;
+  title?: LocalizedText2;
+  tier?: BusinessTier;
   /**
    * @minItems 1
    */

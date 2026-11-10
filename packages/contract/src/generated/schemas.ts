@@ -6897,7 +6897,7 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
       BusinessFile: {
         title: 'BusinessFile',
         description:
-          'business.yaml（契约 2.53.0，ADR 0193）：部署方的业务领域与服务。领域与服务的 id 在全部启用的包中唯一',
+          'business.yaml（契约 2.53.0，ADR 0193）：部署方的业务领域与服务。服务的 id 在全部启用的包中唯一；同一 id 的业务领域在几个包中声明时合并',
         type: 'object',
         additionalProperties: false,
         required: ['business_domains'],
@@ -6905,10 +6905,11 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
       },
       BusinessDomain: {
         title: 'BusinessDomain',
-        description: '一块业务（ADR 0193 §1）',
+        description:
+          '一块业务（ADR 0193 §1）。同一 id 的业务领域可以在几个包中声明，服务合并；title 与 tier 至少有一处给出，给出多处时必须相同',
         type: 'object',
         additionalProperties: false,
-        required: ['id', 'title', 'tier', 'services'],
+        required: ['id', 'services'],
         properties: {
           id: { $ref: 'common.schema.json#/$defs/BusinessDomainId' },
           title: { $ref: 'evidence-card.schema.json#/$defs/LocalizedText' },

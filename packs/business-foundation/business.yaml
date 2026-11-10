@@ -1,0 +1,82 @@
+# 内置的业务领域（ADR 0193 §2）。成员都用 match 写，不引用其他包的组件类型：其他内置包被禁用时这里照样可用。
+# 部署方往这些领域里加服务时只写领域 id 与服务；部署方的成员比这里的 match 更具体时优先。
+business_domains:
+  - id: platform
+    title: { zh-CN: 集群底座, en: Cluster foundation }
+    tier: foundation
+    services:
+      - id: nodes
+        title: { zh-CN: 节点, en: Nodes }
+        members:
+          - match: { kind: Node }
+      - id: control-plane
+        title: { zh-CN: 控制面, en: Control plane }
+        members:
+          - match:
+              kind: Pod
+              namespaces: [kube-system]
+              name_pattern: '^(kube-apiserver|etcd|kube-scheduler|kube-controller-manager|cloud-controller-manager)-'
+      - id: cluster-network
+        title: { zh-CN: 集群网络与 DNS, en: Cluster network and DNS }
+        members:
+          - match:
+              {
+                kind: DaemonSet,
+                namespaces: [kube-system],
+                name_pattern: '^(kube-proxy|cilium|calico-node|kube-flannel|canal)',
+              }
+          - match: { kind: Deployment, namespaces: [kube-system], name_pattern: '(coredns|kube-dns)' }
+      - id: storage
+        title: { zh-CN: 存储, en: Storage }
+        members:
+          - match: { kind: PersistentVolume }
+          - match: { kind: PersistentVolumeClaim }
+          - match: { kind: DaemonSet, name_pattern: '^longhorn-manager$' }
+        namespaces: [longhorn-system]
+      - id: ingress
+        title: { zh-CN: 入口, en: Ingress }
+        members:
+          - match: { kind: Deployment, name_pattern: 'ingress-nginx-controller$' }
+          - match: { kind: Deployment, namespaces: [envoy-gateway-system] }
+        namespaces: [ingress-nginx, envoy-gateway-system]
+      - id: certificates
+        title: { zh-CN: 证书, en: Certificates }
+        members:
+          - match: { kind: Certificate, api_group: cert-manager.io }
+          - match: { kind: Deployment, namespaces: [cert-manager] }
+        namespaces: [cert-manager]
+
+  - id: delivery
+    title: { zh-CN: 发布与交付, en: Delivery }
+    tier: foundation
+    services:
+      - id: gitops
+        title: { zh-CN: GitOps 同步, en: GitOps sync }
+        members:
+          - match: { kind: Application, api_group: argoproj.io }
+          - match: { kind: Kustomization, api_group: kustomize.toolkit.fluxcd.io }
+          - match: { kind: HelmRelease, api_group: helm.toolkit.fluxcd.io }
+          - match: { kind: GitRepository, api_group: source.toolkit.fluxcd.io }
+        namespaces: [argocd, flux-system]
+
+  - id: observability
+    title: { zh-CN: 运维与观测系统, en: Operations and observability }
+    tier: self
+    services:
+      - id: monitoring
+        title: { zh-CN: 监控与告警, en: Monitoring and alerting }
+        members:
+          - match: { kind: StatefulSet, name_pattern: '^(prometheus|alertmanager)-' }
+          - match:
+              {
+                kind: Deployment,
+                name_pattern: '(kube-state-metrics|prometheus-operator|kube-prometheus-stack-operator)$',
+              }
+          - match: { kind: Deployment, name_pattern: '^(vmsingle-|victoria-metrics|vmalert-)' }
+        namespaces: [monitoring]
+      - id: srenautix
+        title: { zh-CN: SreNautix 自身, en: SreNautix itself }
+        members:
+          - match: { kind: Deployment, name_pattern: '^srenautix-' }
+          - match: { kind: StatefulSet, name_pattern: '^srenautix-' }
+        namespaces: [srenautix]

@@ -104,8 +104,20 @@ describe('服务目录（ADR 0193）', () => {
       services: s as BusinessDomain['services'],
     });
     const build = (packs: Array<{ pack: string; domains: BusinessDomain[] }>) => () => new ServiceCatalog(packs, TYPES);
-    expect(build([{ pack: 'a', domains: [domain('x', [svc('s1')]), domain('x', [svc('s2')])] }])).toThrow(
-      /业务领域 x 重复声明/,
+    // 同一 id 的业务领域合并服务；title、tier 只在一处给出也可以
+    const merged = build([
+      { pack: 'a', domains: [domain('x', [svc('s1')])] },
+      { pack: 'b', domains: [{ id: 'x', services: [svc('s2')] } as BusinessDomain] },
+    ])();
+    expect(merged.service('s2')).toMatchObject({ business_domain: 'x', tier: 'supporting', pack: 'b' });
+    expect(
+      build([
+        { pack: 'a', domains: [domain('x', [svc('s1')])] },
+        { pack: 'b', domains: [{ ...domain('x', [svc('s2')]), tier: 'core' }] },
+      ]),
+    ).toThrow(/业务领域 x 的 tier 与 a 中的声明不同/);
+    expect(build([{ pack: 'b', domains: [{ id: 'x', services: [svc('s2')] } as BusinessDomain] }])).toThrow(
+      /业务领域 x 在任何包中都没有给出 title/,
     );
     expect(
       build([
@@ -244,5 +256,38 @@ describe('business.yaml 的编译（ADR 0193 §2）', () => {
       expect(err).toBeInstanceOf(PackLintError);
       expect((err as Error).message).toMatch(pattern);
     }
+  });
+});
+
+describe('内置包 business-foundation', () => {
+  it('单独加载即可编译：成员不引用其他包；与示例包一起加载时领域与服务都在', async () => {
+    const alone = await compilePackSet(loadBuiltinPacks(PACKS, ['business-foundation']), { catalog: CATALOG });
+    expect(alone.services.services().map((s) => s.id)).toEqual([
+      'nodes',
+      'control-plane',
+      'cluster-network',
+      'storage',
+      'ingress',
+      'certificates',
+      'gitops',
+      'monitoring',
+      'srenautix',
+    ]);
+    const o = (kind: string, namespace: string | null, name: string) => ({
+      kind,
+      namespace,
+      name,
+      componentType: null,
+    });
+    expect(alone.services.ofObject(o('Node', null, 'worker-1'))).toBe('nodes');
+    expect(alone.services.ofObject(o('Application.argoproj.io', 'argocd', 'shop'))).toBe('gitops');
+    expect(alone.services.ofObject(o('Deployment', 'kube-system', 'coredns'))).toBe('cluster-network');
+    expect(alone.services.ofObject(o('Pod', 'kube-system', 'etcd-cp-1'))).toBe('control-plane');
+    expect(alone.services.service('srenautix')).toMatchObject({ business_domain: 'observability', tier: 'self' });
+    const both = await compilePackSet(loadBuiltinPacks(PACKS, ['business-foundation', '_example']), {
+      catalog: CATALOG,
+    });
+    expect(both.services.service('web')?.business_domain).toBe('storefront');
+    expect(both.services.service('gitops')?.business_domain).toBe('delivery');
   });
 });
