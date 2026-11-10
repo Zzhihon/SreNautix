@@ -4,7 +4,7 @@
 import { Bot, GitMerge, Layers, Scale, Split } from 'lucide-react';
 import type { Condition, EvidenceResult, Incident, ResearchRunSummary, StageAReport } from '../contract';
 import { AppLink, useUiEnv } from '../data';
-import { useI18n } from '../i18n';
+import { localizedText, useI18n } from '../i18n';
 import { Mono } from '../primitives/basic';
 import { Status, StatusPill } from '../primitives/Status';
 import { activeConditions } from './ConditionStrip';
@@ -55,7 +55,7 @@ export function VerdictHeader({
   const degraded = degradedSources(evidence);
   const affecting = affectingConditions(conditions, incident.cluster_id);
   const running = latestRun !== null && RUNNING.has(latestRun.state);
-  const localized = (v: Record<string, string | undefined>) => v[locale] ?? v['zh-CN'] ?? v.en ?? '';
+  const localized = (v: Record<string, string | undefined>) => localizedText(v, locale);
 
   const sentence =
     concluded?.summary ??

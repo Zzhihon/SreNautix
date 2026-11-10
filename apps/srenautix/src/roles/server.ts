@@ -497,6 +497,12 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
           ? ((language === 'zh' ? (title['zh-CN'] ?? title.en) : (title.en ?? title['zh-CN'])) ?? null)
           : null;
       },
+      serviceTitle: (id, language) => {
+        const s = packs.set.services.service(id);
+        const pick = (v: { 'zh-CN'?: string; en?: string }) =>
+          (language === 'zh' ? (v['zh-CN'] ?? v.en) : (v.en ?? v['zh-CN'])) ?? id;
+        return s ? { domain: pick(s.business_domain_title), service: pick(s.title) } : null;
+      },
       actionVerify: (actionId) => {
         const v = catalog.get(actionId)?.verify;
         return v ? { windowSeconds: v.window_seconds, checks: v.checks.map((x) => x.description) } : null;

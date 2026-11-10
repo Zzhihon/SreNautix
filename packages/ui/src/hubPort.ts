@@ -115,6 +115,8 @@ export function createHubPort(o: HubPortOptions): DataPort {
     listConditions: async (cluster_id) =>
       unwrap('listConditions', await c.GET('/v1/conditions', { params: { query: { cluster_id } } })),
     listIncidents: async (q) => unwrap('listIncidents', await c.GET('/v1/incidents', { params: { query: q } })),
+    listBusinessDomains: async (cluster_id) =>
+      unwrap('listBusinessDomains', await c.GET('/v1/business-domains', { params: { query: { cluster_id } } })),
     getIncident: async (r) => unwrap('getIncident', await c.GET('/v1/incidents/{incident_ref}', { params: ref(r) })),
     getStageAReport: async (r) =>
       unwrapOrNull('getStageAReport', await c.GET('/v1/incidents/{incident_ref}/stage-a', { params: ref(r) })),

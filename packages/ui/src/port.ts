@@ -4,6 +4,7 @@
 // 方法与 contract/openapi.yaml 的 operationId 一一对应。
 
 import type {
+  BusinessDomainList,
   Condition,
   EvidenceRef,
   EvidenceResult,
@@ -28,6 +29,8 @@ export interface IncidentQuery {
   disposition?: 'act' | 'escalate' | 'ignore' | 'undetermined';
   feedback: 'pending' | 'given' | 'all';
   suppressed: boolean;
+  /** 只要主业务领域是其中之一的事件（ADR 0193） */
+  business_domain?: string[];
   q?: string;
   from?: string;
   to?: string;
@@ -48,6 +51,8 @@ export interface DataPort {
   listConditions(clusterId?: string): Promise<Condition[]>;
   /** listIncidents：明细、被折叠的抑制数、盲区时段。 */
   listIncidents(q: IncidentQuery): Promise<IncidentList>;
+  /** listBusinessDomains：业务领域与服务的名称、层级，每个服务正在触发的事件数（ADR 0193）。 */
+  listBusinessDomains(clusterId?: string): Promise<BusinessDomainList>;
   /** getIncident；ref 接受 incident_id、标签或别名。 */
   getIncident(ref: string): Promise<Incident>;
   /** getStageAReport；还没有阶段 A 报告时为 null（404）。 */

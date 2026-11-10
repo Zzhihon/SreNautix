@@ -82,6 +82,8 @@ export interface ReportDomain {
   alertTitle: (a: Alert, language: 'zh' | 'en') => string | null;
   actionVerify: (actionId: string) => ActionVerify | null;
   links: Omit<LinkSettings, 'consoleUrl'>;
+  /** 服务与它所属业务领域的名称（ADR 0193）；服务没有声明时为 null。不提供时消息标题不带业务领域 */
+  serviceTitle?: (service: string, language: 'zh' | 'en') => { domain: string; service: string } | null;
 }
 
 /**
@@ -182,6 +184,7 @@ export class ReportSource {
         language,
         subgraph: await subgraphOf(this.topology, inc, 2),
         alertTitle: (a) => this.domain.alertTitle(a, language),
+        service: inc.primary_service ? (this.domain.serviceTitle?.(inc.primary_service, language) ?? null) : null,
         actionVerify: this.domain.actionVerify,
         links: this.domain.links,
       });

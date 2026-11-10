@@ -16,6 +16,7 @@ func TestMatchAllowsReadsAndFeedbackOnly(t *testing.T) {
 	const id = "3f2b8c1e-5d6a-4b7c-8d9e-0a1b2c3d4e5f"
 	allowedCases := []struct{ method, path string }{
 		{"GET", "/v1/incidents"},
+		{"GET", "/v1/business-domains"},
 		{"GET", "/v1/incidents/postgres.cluster:db%2Fpg-main:2026-10-19T06:10:00Z"},
 		{"GET", "/v1/incidents/" + id + "/evidence"},
 		{"GET", "/v1/incidents/" + id + "/timeline"},

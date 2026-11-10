@@ -142,6 +142,11 @@ let missingReporter: (m: MissingMessage) => void = () => undefined;
 const reportedMissing = new Set<string>();
 
 /** 宿主登记缺少文案时的上报函数（例如发往前端错误收集）；默认只打 console.warn。 */
+/** 契约里的多语言文本（LocalizedText）按当前语言取值：没有这种语言时取中文，再取英文 */
+export function localizedText(v: Readonly<Record<string, string | undefined>>, locale: string): string {
+  return v[locale] ?? v['zh-CN'] ?? v.en ?? '';
+}
+
 export function setMissingMessageReporter(fn: (m: MissingMessage) => void): void {
   missingReporter = fn;
 }

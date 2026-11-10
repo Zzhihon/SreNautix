@@ -81,6 +81,7 @@ export function AppLink(props: LinkProps) {
 export const qk = {
   conditions: (cluster?: string) => ['conditions', cluster ?? null] as const,
   incidents: (q?: IncidentQuery) => (q ? (['incidents', q] as const) : (['incidents'] as const)),
+  businessDomains: (cluster?: string) => ['business-domains', cluster ?? null] as const,
   incident: (ref: string) => ['incident', ref] as const,
   stageA: (ref: string) => ['incident', ref, 'stage-a'] as const,
   evidence: (ref: string, runId: string | null) => ['incident', ref, 'evidence', runId] as const,
@@ -243,6 +244,12 @@ export function useConditions(cluster?: string) {
 export function useIncidents(q: IncidentQuery) {
   const { port } = useUiEnv();
   return useQuery({ queryKey: qk.incidents(q), queryFn: () => port.listIncidents(q) });
+}
+
+/** 业务领域与服务（ADR 0193）：名称不常变，事件数随收件箱一起刷新 */
+export function useBusinessDomains(cluster?: string) {
+  const { port } = useUiEnv();
+  return useQuery({ queryKey: qk.businessDomains(cluster), queryFn: () => port.listBusinessDomains(cluster) });
 }
 
 export function useIncident(ref: string) {

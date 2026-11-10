@@ -37,6 +37,7 @@ var allowed = []route{
 	r(http.MethodGet, `/v1/conditions`, "listConditions"),
 	r(http.MethodGet, `/v1/clusters`, "listClusters"),
 	r(http.MethodGet, `/v1/incidents`, "listIncidents"),
+	r(http.MethodGet, `/v1/business-domains`, "listBusinessDomains"),
 	r(http.MethodGet, `/v1/incidents/`+seg, "getIncident"),
 	r(http.MethodGet, `/v1/incidents/`+seg+`/stage-a`, "getStageAReport"),
 	r(http.MethodGet, `/v1/incidents/`+seg+`/evidence`, "getEvidenceSnapshot"),

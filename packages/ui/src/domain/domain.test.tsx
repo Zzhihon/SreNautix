@@ -3,7 +3,7 @@ import { SCHEMAS } from '@srenautix/contract';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { userEvent } from 'vitest/browser';
-import type { IncidentSubgraph } from '../contract';
+import type { BusinessDomainList, IncidentSubgraph } from '../contract';
 import { ErrorBoundary, setRenderErrorReporter, type RenderError } from '../primitives/ErrorBoundary';
 import { STATUS, Status } from '../primitives/Status';
 import {
@@ -26,6 +26,7 @@ import { EvidenceCard } from './EvidenceCard';
 import { FeedbackControl, REASON_CODES } from './FeedbackControl';
 import { HypothesisList } from './HypothesisList';
 import { IncidentRow } from './IncidentRow';
+import { groupByDomain } from '../views/InboxView';
 import { componentLabel, sortEvidence } from './model';
 import { ComponentNamesProvider } from './names';
 import { RunTrace, waterfall } from './RunTrace';
@@ -672,6 +673,56 @@ describe('收件箱的一行（ADR 0190）', () => {
     expect(row.getAttribute('aria-label')).toBe('Incident: pg-main, since 10-19 14:05, root pg-main, cluster prod');
     expect(subRow(row, 'since 10-19 14:05')).toEqual(['since 10-19 14:05', 'pg-main', 'prod']);
     expect(within(row).queryByTestId('research-summary')).toBeNull();
+  });
+});
+
+describe('业务领域与服务（ADR 0193）', () => {
+  const domains: BusinessDomainList = {
+    items: [
+      {
+        id: 'forwarding',
+        title: { 'zh-CN': '请求转发' },
+        tier: 'core',
+        services: [{ id: 'gateway', title: { 'zh-CN': '网关' }, firing: 1 }],
+      },
+      {
+        id: 'data',
+        title: { 'zh-CN': '数据存储', en: 'Data' },
+        tier: 'core',
+        services: [{ id: 'postgres', title: { 'zh-CN': 'PostgreSQL' }, firing: 1 }],
+      },
+    ],
+    unassigned_firing: 1,
+  };
+  const title = (d: BusinessDomainList['items'][number]) => d.title['zh-CN'] ?? d.id;
+
+  it('分组按声明顺序，组内保持列表顺序，没有业务领域的在最后；空组不出现；没有声明时不分组', () => {
+    const pg = incidentSummary({ incident_id: 'a', business_domain: 'data' });
+    const none = incidentSummary({ incident_id: 'b', business_domain: null, primary_service: null, services: [] });
+    const gone = incidentSummary({ incident_id: 'c', business_domain: 'retired' });
+    const pg2 = incidentSummary({ incident_id: 'd', business_domain: 'data' });
+    const groups = groupByDomain([pg, none, gone, pg2], domains, title, '未归属');
+    expect(groups?.map((g) => [g.id, g.title, g.rows.map((r) => r.incident_id)])).toEqual([
+      ['data', '数据存储', ['a', 'd']],
+      [null, '未归属', ['b', 'c']],
+    ]);
+    expect(groupByDomain([pg], { items: [], unassigned_firing: 0 }, title, '未归属')).toBeNull();
+    expect(groupByDomain([pg], undefined, title, '未归属')).toBeNull();
+  });
+
+  it('行标题前是主服务；按命名空间推定的服务带提示', () => {
+    const s = incidentSummary();
+    renderUi(<IncidentRow s={s} now={NOW} service={{ title: 'PostgreSQL', presumed: false }} />);
+    const row = screen.getByRole('link');
+    expect(row.getAttribute('aria-label')).toBe(
+      '事件：PostgreSQL · gateway 5xx 比例 12%，超过 5%，10-19 14:18 起，根因 pg-main，集群 prod',
+    );
+    expect(within(row).getByText('PostgreSQL').getAttribute('title')).toBeNull();
+  });
+
+  it('推定的服务：title 写明按命名空间推定', () => {
+    renderUi(<IncidentRow s={incidentSummary()} now={NOW} service={{ title: '网关', presumed: true }} />);
+    expect(within(screen.getByRole('link')).getByText('网关').getAttribute('title')).toBe('按命名空间推定的服务');
   });
 });
 

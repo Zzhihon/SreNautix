@@ -13,12 +13,10 @@
   "common.open": "打开",
   "common.more": "更多",
   "common.model_generated": "模型生成",
-
   "fmt.duration.s": "{s} 秒",
   "fmt.duration.m": "{m} 分钟",
   "fmt.duration.hm": "{m, plural, =0 {{h} 小时} other {{h} 小时 {m} 分}}",
   "fmt.duration.dh": "{h, plural, =0 {{d} 天} other {{d} 天 {h} 小时}}",
-
   "status.verdict.abnormal": "异常",
   "status.verdict.undeterminable": "无法判定",
   "status.verdict.capability_missing": "能力缺失",
@@ -88,7 +86,6 @@
   "status.condition.warning": "注意",
   "status.condition.ok": "正常",
   "status.condition.frozen": "已冻结",
-
   "condition.IngestSilent": "接入静默",
   "condition.WatchdogMissing": "Watchdog 告警缺失",
   "condition.DatasourceUnavailable": "数据源不可用",
@@ -118,7 +115,6 @@
   "conditions.propose_only": "集群 {cluster} 仅提议",
   "conditions.propose_only_all": "全部集群仅提议",
   "conditions.since": "{at} 起 · {role} · {cluster}",
-
   "incident.row_label": "事件：{title}，{since}，根因 {root}，集群 {cluster}",
   "incident.since": "{t} 起",
   "incident.research_line": "研判：{s}",
@@ -128,6 +124,7 @@
   "incident.hover_id": "事件 ID {id}",
   "incident.no_root": "根因未定位",
   "incident.ambiguous": "根因有歧义",
+  "incident.service_presumed": "按命名空间推定的服务",
   "incident.root_mismatch": "研判根因不同",
   "incident.merged_from": "合并自 {n}",
   "incident.split_from": "拆分自另一事件",
@@ -137,7 +134,6 @@
   "incident.fresh": "研判于 {ago}",
   "incident.not_researched": "尚未研判",
   "incident.pending_approvals": "{n} 个待审批",
-
   "evidence.live_not_model": "实时重跑 · 非模型所见",
   "evidence.snapshot_model_saw": "研判快照 · 模型所见",
   "evidence.evaluated_at": "{at} 求值",
@@ -167,7 +163,6 @@
   "evidence.rerun_again": "再次重跑",
   "evidence.rerun_forbidden": "实时重跑需要 responder、approver 或 admin 角色",
   "evidence.rerun_failed": "实时重跑失败",
-
   "hypothesis.refutes_if": "推翻条件：{cond}",
   "hypothesis.leader": "结论采用",
   "hypothesis.supporting": "支持",
@@ -187,7 +182,6 @@
   "hypothesis.empty_because": "这个事件只有阶段 A 的确定性报告：模型研判还没有完成，或因熔断、预算、风暴模式被跳过。运行标签页列出了每次研判的状态。",
   "hypothesis.none_title": "模型没有提出假设",
   "hypothesis.none_because": "研判完成但假设树为空，结论阶梯为无法判定。",
-
   "timeline.kind.alert_firing": "告警触发",
   "timeline.kind.alert_resolved": "告警恢复",
   "timeline.kind.change": "变更",
@@ -227,7 +221,6 @@
   "timeline.change_basis.late": "晚于问题开始",
   "timeline.change_rollback": "回退",
   "timeline.change_link_title": "变更与事件的关联由代码按时间、作用对象与变更之后的新告警计算",
-
   "feedback.title": "这个研判对吗？",
   "feedback.label": "研判反馈",
   "feedback.axis_disposition": "处置判断",
@@ -269,7 +262,6 @@
   "feedback.sum_root_bad": "根因错，应为 {c}",
   "feedback.sum_root_unknown": "根因错，真实根因未知",
   "feedback.sum_by": "{who}（{channel}）",
-
   "verdict.label": "结论",
   "verdict.version": "v{v} · 拓扑 v{topo}",
   "verdict.duration": "持续 {d}",
@@ -294,7 +286,6 @@
   "verdict.state_store_degraded": "状态库降级时生成",
   "verdict.merged_into": "已并入另一事件",
   "verdict.affecting": "影响这个判定的条件",
-
   "research.state.queued": "排队中",
   "research.state.hypothesize": "提出假设",
   "research.state.discriminate": "区分性检查",
@@ -312,7 +303,6 @@
   "research.reason.model_recovered": "模型恢复",
   "research.reason.resumed": "重启后续跑",
   "research.reason.reopened": "事件重开",
-
   "approval.title": "审批：{action} · {target}",
   "approval.load_failed": "读取提议失败",
   "approval.no_actions": "当前入口不提供审批",
@@ -383,7 +373,6 @@
   "approval.approve_failed": "批准失败",
   "approval.reject_failed": "拒绝失败",
   "approval.undo_failed": "撤销失败",
-
   "run.title": "研判运行明细",
   "run.load_failed": "读取研判失败",
   "run.manifest_failed": "读取研判清单失败",
@@ -467,7 +456,6 @@
   "run.m.topology": "拓扑版本",
   "run.m.redaction": "脱敏规则版本",
   "run.m.routes": "路由",
-
   "subgraph.role.root": "根因",
   "subgraph.role.candidate": "候选",
   "subgraph.role.member": "成员",
@@ -499,11 +487,16 @@
   "subgraph.panel.links": "组件跳转",
   "subgraph.panel.open_neighborhood": "以它为中心查看拓扑邻域",
   "subgraph.panel.search_incidents": "搜索这个组件的事件",
-
   "inbox.title": "事件收件箱",
   "inbox.meta": "{n} 个事件 · 已抑制 {suppressed}",
   "inbox.filters": "过滤条件",
   "inbox.f.state": "状态",
+  "inbox.f.group": "分组",
+  "inbox.group.domain": "按业务领域",
+  "inbox.group.none": "不分组",
+  "inbox.f.business_domain": "业务领域",
+  "inbox.domain_unassigned": "未归属业务领域",
+  "inbox.domain_group": "{title} · {n} 个事件",
   "inbox.f.feedback": "反馈",
   "inbox.f.severity": "严重度",
   "inbox.f.disposition": "处置判断",
@@ -535,7 +528,6 @@
   "inbox.empty_none": "接入正常，状态条件在 {at} 检查过；告警源没有推送需要处理的告警。",
   "inbox.suppressed": "{n} 个事件被抑制（只影响 SreNautix 自己的消息与研判，不影响告警分派）",
   "inbox.show_suppressed": "显示被抑制的事件",
-
   "detail.load_failed": "读取事件失败",
   "detail.partial_failed": "部分数据读取失败",
   "detail.pending": "待审批的提议（{n}）",
@@ -568,6 +560,5 @@
   "detail.col.disposition": "处置判断",
   "detail.col.level": "结论阶梯",
   "detail.col.root": "根因",
-
   "error_boundary.failed": "{area} 显示出错，页面其他部分不受影响"
 }

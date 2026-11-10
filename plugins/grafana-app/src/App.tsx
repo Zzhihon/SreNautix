@@ -140,6 +140,8 @@ function Pages({ base }: { base: string }) {
       severity: (params.get('severity') as InboxFilters['severity']) ?? undefined,
       disposition: (params.get('disposition') as InboxFilters['disposition']) ?? undefined,
       suppressed: params.get('suppressed') === 'true',
+      business_domain: params.get('business_domain') ?? undefined,
+      group: params.get('group') === 'none' ? 'none' : DEFAULT_INBOX_FILTERS.group,
     };
     page = (
       <InboxView
@@ -153,6 +155,8 @@ function Pages({ base }: { base: string }) {
             severity: f.severity,
             disposition: f.disposition,
             suppressed: f.suppressed ? 'true' : undefined,
+            business_domain: f.business_domain,
+            group: f.group === DEFAULT_INBOX_FILTERS.group ? undefined : f.group,
           })
         }
       />

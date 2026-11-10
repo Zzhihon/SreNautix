@@ -83,6 +83,7 @@ const STATES = ['firing', 'resolved', 'all'] as const;
 const FEEDBACK = ['pending', 'given', 'all'] as const;
 const SEVERITIES = ['critical', 'warning', 'info'] as const;
 const DISPOSITIONS = ['act', 'escalate', 'ignore', 'undetermined'] as const;
+const GROUPS = ['domain', 'none'] as const;
 
 const incidentsRoute = createRoute({
   getParentRoute: () => appRoute,
@@ -94,15 +95,20 @@ const incidentsRoute = createRoute({
     severity: maybeOneOf(s.severity, SEVERITIES),
     disposition: maybeOneOf(s.disposition, DISPOSITIONS),
     suppressed: s.suppressed === true || s.suppressed === 'true' ? true : undefined,
+    business_domain: str(s.business_domain),
+    group: maybeOneOf(s.group, GROUPS),
   }),
   component: function Incidents() {
-    const { cluster, state, feedback, severity, disposition, suppressed } = incidentsRoute.useSearch();
+    const { cluster, state, feedback, severity, disposition, suppressed, business_domain, group } =
+      incidentsRoute.useSearch();
     const filters: InboxFilters = {
       state: state ?? DEFAULT_INBOX_FILTERS.state,
       feedback: feedback ?? DEFAULT_INBOX_FILTERS.feedback,
       severity,
       disposition,
       suppressed: suppressed ?? false,
+      business_domain,
+      group: group ?? DEFAULT_INBOX_FILTERS.group,
     };
     return <InboxPage cluster={cluster} filters={filters} />;
   },

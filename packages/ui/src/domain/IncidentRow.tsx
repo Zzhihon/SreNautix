@@ -1,6 +1,6 @@
 // 收件箱的一行（DESIGN §12.2、ADR 0190）：标题是问题陈述（头条告警的注解，其次告警名），副行是开始时刻、根因组件与集群，
 // 再下一行是最近一次完成的研判的一句话结论；右侧是处置判断、结论阶梯、严重度、持续时长、研判新鲜度、待审批数、反馈状态，
-// 以及"合并自 N"或"拆分自"。组件键与事件标签只在悬停提示里。
+// 以及"合并自 N"或"拆分自"。组件键与事件标签只在悬停提示里。标题前是事件的主服务（ADR 0193），按命名空间推定的标出推定。
 
 import { Bot, Clock, GitMerge, Hourglass, Split } from 'lucide-react';
 import type { IncidentSummary } from '../contract';
@@ -19,7 +19,13 @@ export function incidentProblem(s: IncidentSummary, rootName: string | null, noR
   return rootName ?? noRoot;
 }
 
-export function IncidentRow({ s, now }: { s: IncidentSummary; now: number }) {
+/** 一行的主服务：名称由宿主按 GET /v1/business-domains 取出；presumed 为按默认命名空间推定 */
+export interface RowService {
+  title: string;
+  presumed: boolean;
+}
+
+export function IncidentRow({ s, now, service }: { s: IncidentSummary; now: number; service?: RowService | null }) {
   const { t, fmt } = useI18n();
   const { links } = useUiEnv();
   const root = s.root_component ? componentLabel(s.root_component, s.component_names) : null;
@@ -41,13 +47,27 @@ export function IncidentRow({ s, now }: { s: IncidentSummary; now: number }) {
       href={links.incident(s.incident_id)}
       className={styles.row}
       title={hover}
-      aria-label={t('incident.row_label', { title: problem, since, root: rootText, cluster: s.cluster_id })}
+      aria-label={t('incident.row_label', {
+        title: service ? `${service.title} · ${problem}` : problem,
+        since,
+        root: rootText,
+        cluster: s.cluster_id,
+      })}
     >
       <span className={styles.sev} data-severity={s.severity}>
         <Status domain="severity" value={s.severity} />
       </span>
       <span className={styles.main}>
         <span className={styles.title}>
+          {service && (
+            <span
+              className={styles.service}
+              data-presumed={service.presumed || undefined}
+              title={service.presumed ? t('incident.service_presumed') : undefined}
+            >
+              {service.title}
+            </span>
+          )}
           <Truncate text={problem} />
           {s.ambiguous && <span className={styles.flag}>{t('incident.ambiguous')}</span>}
           {s.research_root?.mismatch && <span className={styles.flag}>{t('incident.root_mismatch')}</span>}
