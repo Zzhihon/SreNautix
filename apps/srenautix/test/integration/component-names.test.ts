@@ -1,4 +1,5 @@
 import { appendFileSync, cpSync, mkdirSync, rmSync } from 'node:fs';
+import { ServiceCatalog } from '@srenautix/packs-sdk/business';
 import { join, resolve } from 'node:path';
 import type { Incident } from '@srenautix/contract';
 import { startPrometheus, type TsdbInstance } from '@srenautix/integration-sdk';
@@ -201,6 +202,7 @@ beforeAll(async () => {
     topology: {} as TopologyStore,
     evidence,
     worker: null,
+    services: () => new ServiceCatalog([], []),
   });
 }, 180_000);
 

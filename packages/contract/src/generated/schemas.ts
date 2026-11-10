@@ -1,5 +1,5 @@
 // 本文件由 packages/contract/scripts/gen.ts 从 contract/ 生成，不要手工修改。
-export const CONTRACT_VERSION = '2.53.0';
+export const CONTRACT_VERSION = '2.54.0';
 
 export const SCHEMAS: Record<string, Record<string, unknown>> = {
   'https://srenautix.io/contract/gateway/v1/action-catalog.schema.json': {
@@ -5435,6 +5435,9 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
           'category',
           'exclude_category',
           'exclude_component',
+          'business_domain',
+          'exclude_business_domain',
+          'service',
           'suppressed',
         ],
         properties: {
@@ -5444,6 +5447,9 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
           category: { type: 'array', items: { $ref: 'common.schema.json#/$defs/IncidentCategory' } },
           exclude_category: { type: 'array', items: { $ref: 'common.schema.json#/$defs/AlertCategory' } },
           exclude_component: { type: 'array', items: { $ref: 'common.schema.json#/$defs/ComponentKey' } },
+          business_domain: { type: 'array', items: { $ref: 'common.schema.json#/$defs/BusinessDomainId' } },
+          exclude_business_domain: { type: 'array', items: { $ref: 'common.schema.json#/$defs/BusinessDomainId' } },
+          service: { type: 'array', items: { $ref: 'common.schema.json#/$defs/ServiceId' } },
           suppressed: { type: 'boolean', description: '是否导出被抑制的事件' },
         },
       },
@@ -5474,6 +5480,10 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
           'severity',
           'categories',
           'primary_category',
+          'services',
+          'primary_service',
+          'primary_service_source',
+          'business_domain',
           'alertnames',
           'root',
           'components',
@@ -5498,6 +5508,14 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
           severity: { $ref: 'common.schema.json#/$defs/Severity' },
           categories: { type: 'array', items: { $ref: 'common.schema.json#/$defs/IncidentCategory' } },
           primary_category: { $ref: 'common.schema.json#/$defs/IncidentCategory' },
+          services: {
+            type: 'array',
+            description: '事件的服务（契约 2.54.0，ADR 0193）',
+            items: { $ref: 'common.schema.json#/$defs/ServiceId' },
+          },
+          primary_service: { oneOf: [{ type: 'null' }, { $ref: 'common.schema.json#/$defs/ServiceId' }] },
+          primary_service_source: { oneOf: [{ type: 'null' }, { $ref: 'common.schema.json#/$defs/ServiceSource' }] },
+          business_domain: { oneOf: [{ type: 'null' }, { $ref: 'common.schema.json#/$defs/BusinessDomainId' }] },
           alertnames: {
             type: 'array',
             description: '成员告警的告警名，去重排序；离开时仍在触发的成员（转到了别的事件）不算',

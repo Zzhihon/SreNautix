@@ -12,8 +12,16 @@
   },
   "state": "firing",
   "severity": "critical",
-  "categories": ["availability"],
+  "categories": [
+    "availability"
+  ],
   "primary_category": "availability",
+  "services": [
+    "postgres"
+  ],
+  "primary_service": "postgres",
+  "primary_service_source": "component",
+  "business_domain": "data",
   "root_component": "Deployment:shop/api",
   "ambiguous": false,
   "first_firing_at": "2026-10-15T10:21:00Z",

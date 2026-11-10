@@ -1,4 +1,5 @@
 import type { AlertCatalogEntry, Incident } from '@srenautix/contract';
+import { ServiceCatalog } from '@srenautix/packs-sdk/business';
 import { AlertCatalog, DEFAULT_RCA_PARAMS, labelsFingerprint } from '@srenautix/core';
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -200,6 +201,7 @@ beforeAll(async () => {
     topology,
     evidence: {} as EvidenceRunner,
     worker: null,
+    services: () => new ServiceCatalog([], []),
   });
 }, 120_000);
 

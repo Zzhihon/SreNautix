@@ -11,6 +11,7 @@ import type {
 } from '@srenautix/contract';
 import { reasonEntry, reasonText, validatorFor } from '@srenautix/contract';
 import { NAMESPACE_KIND } from '@srenautix/core';
+import type { ServiceCatalog } from '@srenautix/packs-sdk/business';
 import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
 import { badRequest, notFound } from '../api/errors.js';
@@ -18,7 +19,7 @@ import type { Auth } from '../identity/auth.js';
 import { scopeMatches, type RoleBinding, type Target } from '../identity/bindings.js';
 import { alertStatement, headlineMember } from '../incident/headline.js';
 import { withComponentNames } from '../incident/names.js';
-import { incidentConditions, parseCategoryFilters, rowCategories } from './incident-filters.js';
+import { incidentConditions, parseClassificationFilters, rowCategories, rowServices } from './incident-filters.js';
 import { incidentVersion, latestStageA, resolveIncidentRef, type IncidentRow } from '../incident/read.js';
 import { reasonsOf, type IncidentReasonStage } from '../incident/reasons.js';
 import { researchRoots } from '../incident/research-root.js';
@@ -61,6 +62,8 @@ export interface IncidentRouteDeps {
   topology: TopologyStore;
   evidence: EvidenceRunner;
   worker: { url: string; token: string } | null;
+  /** 领域包 business.yaml 的服务目录（ADR 0193） */
+  services: () => ServiceCatalog;
 }
 
 /** 事件列表与导出的翻页位置：上一页最后一个事件的 first_firing_at 与 incident_id */
@@ -154,6 +157,7 @@ async function summaries(pool: pg.Pool, feedback: FeedbackService, topology: Top
       state: r.state,
       severity: r.body.severity,
       ...rowCategories(r),
+      ...rowServices(r),
       root_component: r.root_component,
       ambiguous: r.body.root.ambiguous,
       first_firing_at: r.first_firing_at.toISOString(),
@@ -188,6 +192,43 @@ export function registerIncidentRoutes(app: FastifyInstance, d: IncidentRouteDep
     return row;
   };
 
+  // 业务领域与服务，每个服务带读取作用域内正在触发、没有被抑制的事件数（按主服务计，ADR 0193）。正在触发的事件
+  // 数量有限，按与收件箱相同的可见性在内存里过滤
+  app.get('/v1/business-domains', async (req) => {
+    const { scopes } = await d.auth.reader(req);
+    const q = req.query as Record<string, string | undefined>;
+    const rows = await d.pool.query<{ primary_service: string | null; body: Incident }>(
+      `SELECT primary_service, body FROM server.incidents
+        WHERE state = 'firing' AND NOT suppressed AND ($1::text IS NULL OR cluster_id = $1)`,
+      [q.cluster_id ?? null],
+    );
+    const firing = new Map<string, number>();
+    let unassigned = 0;
+    for (const r of rows.rows) {
+      if (!visible(scopes, incidentTarget(r.body))) {
+        continue;
+      }
+      const s = r.primary_service ?? r.body.primary_service ?? null;
+      if (s === null) {
+        unassigned++;
+      } else {
+        firing.set(s, (firing.get(s) ?? 0) + 1);
+      }
+    }
+    const domains = new Map<string, BusinessDomainStatus>();
+    for (const s of d.services().services()) {
+      const dom = domains.get(s.business_domain) ?? {
+        id: s.business_domain,
+        title: s.business_domain_title,
+        tier: s.tier,
+        services: [],
+      };
+      dom.services.push({ id: s.id, title: s.title, firing: firing.get(s.id) ?? 0 });
+      domains.set(s.business_domain, dom);
+    }
+    return { items: [...domains.values()], unassigned_firing: unassigned };
+  });
+
   app.get('/v1/incidents', async (req) => {
     const { scopes } = await d.auth.reader(req);
     const q = req.query as Record<string, string | undefined>;
@@ -210,7 +251,7 @@ export function registerIncidentRoutes(app: FastifyInstance, d: IncidentRouteDep
       add('state = :p', state);
     }
     const filters = incidentConditions({
-      ...parseCategoryFilters(req.query as Record<string, unknown>),
+      ...parseClassificationFilters(req.query as Record<string, unknown>),
       clusterId: q.cluster_id ?? null,
       severity: q.severity ?? null,
       from: q.from ?? null,
@@ -423,6 +464,7 @@ export function registerIncidentRoutes(app: FastifyInstance, d: IncidentRouteDep
 }
 
 type TimelineEntry = HubComponents['schemas']['TimelineEntry'];
+type BusinessDomainStatus = HubComponents['schemas']['BusinessDomainStatus'];
 type TimelineKind = TimelineEntry['kind'];
 
 /** 带原因码的条目种类 → 原因码所属的阶段（ADR 0172；反馈的原因码见 ADR 0174） */

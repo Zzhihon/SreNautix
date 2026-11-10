@@ -256,6 +256,18 @@ describe('事件摘要的问题陈述（契约 2.52.0）', () => {
     expect(summary({ ...valid, headline: { ...headline, severity: 'critical' } })).toBe(false);
     expect(summary({ ...valid, headline: { ...headline, started_at: '11-08 15:40' } })).toBe(false);
   });
+
+  it('服务与业务领域（契约 2.54.0）：四个字段必填，没有服务时为空数组与 null，id 按模式校验', () => {
+    for (const k of ['services', 'primary_service', 'primary_service_source', 'business_domain']) {
+      const missing: Record<string, unknown> = { ...valid };
+      delete missing[k];
+      expect(summary(missing), k).toBe(false);
+    }
+    const none = { ...valid, services: [], primary_service: null, primary_service_source: null, business_domain: null };
+    expect(summary(none), JSON.stringify(summary.errors)).toBe(true);
+    expect(summary({ ...valid, primary_service: 'Gateway' })).toBe(false);
+    expect(summary({ ...valid, primary_service_source: 'guess' })).toBe(false);
+  });
 });
 
 /** contract/testvectors/optimization.json：Go 与 TS 对每个用例给出相同的结果（契约 2.28.0） */

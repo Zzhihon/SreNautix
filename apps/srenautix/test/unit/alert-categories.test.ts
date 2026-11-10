@@ -4,7 +4,11 @@ import { describe, expect, it } from 'vitest';
 import { categoryOptions } from '../../src/alerts/category.js';
 import { HttpError } from '../../src/api/errors.js';
 import { parseServerConfig } from '../../src/config/server.js';
-import { categoryConditions, parseCategoryFilters, rowCategories } from '../../src/console-bff/incident-filters.js';
+import {
+  classificationConditions,
+  parseClassificationFilters,
+  rowCategories,
+} from '../../src/console-bff/incident-filters.js';
 import type { IncidentRow } from '../../src/incident/read.js';
 import { classificationInputsFingerprint } from '../../src/incident/recategorize.js';
 import { ServerMetrics } from '../../src/metrics.js';
@@ -139,9 +143,16 @@ describe('ingest.category_rules（ADR 0183）', () => {
 
 describe('GET /v1/incidents 的类别与组件参数', () => {
   it('三个参数都可以不给、给一次或重复', () => {
-    expect(parseCategoryFilters({})).toEqual({ category: [], excludeCategory: [], excludeComponent: [] });
+    expect(parseClassificationFilters({})).toEqual({
+      category: [],
+      excludeCategory: [],
+      excludeComponent: [],
+      businessDomain: [],
+      excludeBusinessDomain: [],
+      service: [],
+    });
     expect(
-      parseCategoryFilters({
+      parseClassificationFilters({
         category: ['availability', 'unclassified'],
         exclude_category: 'provider',
         exclude_component: ['component:provider', 'Deployment:shop/api'],
@@ -150,24 +161,42 @@ describe('GET /v1/incidents 的类别与组件参数', () => {
       category: ['availability', 'unclassified'],
       excludeCategory: ['provider'],
       excludeComponent: ['component:provider', 'Deployment:shop/api'],
+      businessDomain: [],
+      excludeBusinessDomain: [],
+      service: [],
     });
   });
 
   it('unclassified 不能被排除；不合法的类别、空值与组件键返回 400', () => {
-    rejects(() => parseCategoryFilters({ exclude_category: ['provider', 'unclassified'] }), 'unclassified 不能被排除');
-    rejects(() => parseCategoryFilters({ category: 'latency' }), 'category 只能是');
-    rejects(() => parseCategoryFilters({ exclude_category: 'latency' }), 'exclude_category 只能是');
-    rejects(() => parseCategoryFilters({ category: '' }), 'category 不能为空');
-    rejects(() => parseCategoryFilters({ exclude_component: 'not a key' }), 'exclude_component 的组件键不合法');
+    rejects(
+      () => parseClassificationFilters({ exclude_category: ['provider', 'unclassified'] }),
+      'unclassified 不能被排除',
+    );
+    rejects(() => parseClassificationFilters({ category: 'latency' }), 'category 只能是');
+    rejects(() => parseClassificationFilters({ exclude_category: 'latency' }), 'exclude_category 只能是');
+    rejects(() => parseClassificationFilters({ category: '' }), 'category 不能为空');
+    rejects(() => parseClassificationFilters({ exclude_component: 'not a key' }), 'exclude_component 的组件键不合法');
   });
 
   it('筛选条件：包含按交集，排除只去掉类别或组件全部被排除的事件，没有给参数时没有条件', () => {
-    expect(categoryConditions({ category: [], excludeCategory: [], excludeComponent: [] })).toEqual([]);
     expect(
-      categoryConditions({
+      classificationConditions({
+        category: [],
+        excludeCategory: [],
+        excludeComponent: [],
+        businessDomain: [],
+        excludeBusinessDomain: [],
+        service: [],
+      }),
+    ).toEqual([]);
+    expect(
+      classificationConditions({
         category: ['availability'],
         excludeCategory: ['provider'],
         excludeComponent: ['component:provider'],
+        businessDomain: [],
+        excludeBusinessDomain: [],
+        service: [],
       }),
     ).toEqual([
       { sql: 'categories && :p::text[]', value: ['availability'] },
@@ -177,6 +206,26 @@ describe('GET /v1/incidents 的类别与组件参数', () => {
         value: ['component:provider'],
       },
     ]);
+  });
+
+  it('业务领域与服务（ADR 0193）：可以重复，id 不合法返回 400；没有业务领域的事件不被排除', () => {
+    const f = parseClassificationFilters({
+      business_domain: 'forwarding',
+      exclude_business_domain: ['self', 'platform'],
+      service: ['gateway'],
+    });
+    expect([f.businessDomain, f.excludeBusinessDomain, f.service]).toEqual([
+      ['forwarding'],
+      ['self', 'platform'],
+      ['gateway'],
+    ]);
+    expect(classificationConditions(f)).toEqual([
+      { sql: 'business_domain = ANY(:p::text[])', value: ['forwarding'] },
+      { sql: 'NOT coalesce(business_domain = ANY(:p::text[]), false)', value: ['self', 'platform'] },
+      { sql: 'services && :p::text[]', value: ['gateway'] },
+    ]);
+    rejects(() => parseClassificationFilters({ business_domain: 'Forwarding' }), 'business_domain 不是合法的 id');
+    rejects(() => parseClassificationFilters({ service: 'a b' }), 'service 不是合法的 id');
   });
 
   it('摘要的类别取列；之前版本写下、还没有补上的行按 body 的成员算', () => {
