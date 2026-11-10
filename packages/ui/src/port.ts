@@ -32,6 +32,8 @@ export interface IncidentQuery {
   /** 只要主业务领域是其中之一的事件（ADR 0193） */
   business_domain?: string[];
   q?: string;
+  /** 翻页位置：上一页的 next_cursor */
+  cursor?: string;
   from?: string;
   to?: string;
   limit?: number;

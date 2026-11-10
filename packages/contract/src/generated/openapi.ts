@@ -8938,6 +8938,10 @@ export interface operations {
             items: components['schemas']['IncidentSummary'][];
             next_cursor: string | null;
             suppressed_count: number;
+            /** @description 符合全部筛选条件的事件数，不受 cursor 与 limit 影响（契约 2.57.0）；被抑制的事件只在 suppressed=true 时计入 */
+            total: number;
+            /** @description 状态库一次最多取 2000 个事件；为 true 时 total 只统计了这 2000 个，实际更多 */
+            total_truncated: boolean;
           };
         };
       };
