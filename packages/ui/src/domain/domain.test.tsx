@@ -975,7 +975,7 @@ describe('根因子图的交互（ADR 0191）', () => {
     expect(document.fullscreenElement?.contains(rootEl)).toBe(true);
     fireEvent.click(rootEl);
     expect(document.fullscreenElement?.contains(await screen.findByTestId('subgraph-panel'))).toBe(true);
-    await userEvent.click(screen.getByRole('button', { name: '退出全屏' }));
+    await userEvent.click(await screen.findByRole('button', { name: '退出全屏' }));
     await waitFor(() => expect(document.fullscreenElement).toBeNull());
     await waitFor(() => expect(viewport()).toBe(before));
     expect(screen.getByRole('button', { name: '全屏' }).getAttribute('aria-pressed')).toBe('false');
