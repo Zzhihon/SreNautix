@@ -3,9 +3,8 @@
 
 import { Bot, GitMerge, Layers, Scale, Split } from 'lucide-react';
 import type { Condition, EvidenceResult, Incident, ResearchRunSummary, StageAReport } from '../contract';
-import { AppLink, useUiEnv } from '../data';
+import { AppLink, useBusinessDomains, useUiEnv } from '../data';
 import { localizedText, useI18n } from '../i18n';
-import { Mono } from '../primitives/basic';
 import { Status, StatusPill } from '../primitives/Status';
 import { activeConditions } from './ConditionStrip';
 import { componentLabel, countEvidence, degradedSources, incidentDuration } from './model';
@@ -56,6 +55,13 @@ export function VerdictHeader({
   const affecting = affectingConditions(conditions, incident.cluster_id);
   const running = latestRun !== null && RUNNING.has(latestRun.state);
   const localized = (v: Record<string, string | undefined>) => localizedText(v, locale);
+  // 标题与收件箱的一行相同（ADR 0190、0193）：主服务与问题陈述；没有头条告警时取根因组件名
+  const domains = useBusinessDomains(incident.cluster_id);
+  const serviceInfo = domains.data?.items.flatMap((d) => d.services).find((s) => s.id === incident.primary_service);
+  const service = serviceInfo ? localized(serviceInfo.title) : null;
+  const problem = incident.headline
+    ? (incident.headline.summary ?? incident.headline.alertname)
+    : (rootL?.name ?? incident.label);
 
   const sentence =
     concluded?.summary ??
@@ -72,14 +78,29 @@ export function VerdictHeader({
   return (
     <section className={styles.head} aria-label={t('verdict.label')}>
       <div className={styles.titleRow}>
-        <h1 className={styles.title}>{rootL ? rootL.name : incident.label}</h1>
-        {rootL && <span className={styles.sub}>{rootL.sub}</span>}
+        <h1 className={styles.title}>
+          {service && (
+            <span
+              className={styles.service}
+              title={incident.primary_service_source === 'namespace' ? t('incident.service_presumed') : undefined}
+            >
+              {service}
+            </span>
+          )}
+          {problem}
+        </h1>
+        {rootL && <span className={styles.sub}>{t('verdict.root_line', { root: rootL.name, sub: rootL.sub })}</span>}
         <Status domain="incident" value={incident.state} />
         <Status domain="severity" value={incident.severity} />
         <span className={styles.meta}>
-          <Mono>{incident.label}</Mono>
-          <span>{t('verdict.version', { v: incident.incident_version, topo: incident.topology_version })}</span>
-          <span>{incident.cluster_id}</span>
+          <span
+            title={[
+              t('incident.hover_label', { label: incident.label }),
+              t('verdict.version', { v: incident.incident_version, topo: incident.topology_version }),
+            ].join('\n')}
+          >
+            {incident.cluster_id}
+          </span>
           <span title={fmt.dateTime(incident.first_firing_at)}>
             {t('verdict.duration', { d: fmt.duration(incidentDuration(incident, now)) })}
           </span>

@@ -215,6 +215,8 @@ export function IncidentView({
             </Panel>
             {firstErr !== undefined && <ErrorBox title={t('detail.partial_failed')} error={firstErr} />}
             <PendingApprovals list={proposals.data ?? []} now={now} />
+            {/* 修复建议紧跟结论与待审批（下一步做什么），不放在侧栏：窄屏时侧栏排在页面最后 */}
+            {run.data?.output && <Recommendations recs={run.data.output.recommendations} />}
             <Panel
               title={t('detail.subgraph')}
               meta={subgraph.data ? t('detail.topology_v', { v: subgraph.data.topology_version }) : undefined}
@@ -290,7 +292,6 @@ export function IncidentView({
                 firing={i.state === 'firing'}
               />
             </Panel>
-            {run.data?.output && <Recommendations recs={run.data.output.recommendations} />}
           </aside>
         </div>
       </div>

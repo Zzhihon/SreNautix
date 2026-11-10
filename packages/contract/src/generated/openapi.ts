@@ -4377,6 +4377,21 @@ export type components = {
       /** @description 所有者 outbox 内单调递增；游标形如 <owner>:<seq> */
       seq: number;
     };
+    /**
+     * IncidentHeadline
+     * @description 事件的问题陈述（ADR 0190）。头条告警与通知标题的症状告警是同一组：仍在事件中、正在触发的 symptom 告警；没有时取正在触发的 critical 告警；再没有时取全部仍在事件中的告警。组内取开始时间最早的一条，同时开始时取 alert_id 较小的
+     */
+    Headline: {
+      /** @description 头条告警的 alert_id */
+      alert_id: string;
+      alertname: string;
+      /** @description 最近一次完成的研判的一句话结论（ResearchRunSummary.summary）；没有完成的研判或研判没有结论时为 null */
+      research_summary: string | null;
+      /** @description 头条告警的开始时间 */
+      started_at: components['schemas']['Timestamp'];
+      /** @description 头条告警的 summary 注解，没有时取 description 注解；都没有时为 null。告警注解原文，属于不可信文本 */
+      summary: string | null;
+    };
     /** Hypothesis */
     Hypothesis: {
       /** @description 针对这个假设执行完成的区分性检查数（失败的检查不计） */
@@ -4722,6 +4737,8 @@ export type components = {
       created_at: components['schemas']['Timestamp'];
       ended_at: null | components['schemas']['Timestamp'];
       first_firing_at: components['schemas']['Timestamp'];
+      /** @description 问题陈述，读取最新版本时由中心附上（契约 2.56.0，ADR 0190）；事件没有仍在其中的成员告警时为 null。事件流与历史版本没有这个字段 */
+      headline?: null | components['schemas']['Headline'];
       incident_id: components['schemas']['Uuid'];
       incident_version: number;
       label: components['schemas']['IncidentLabel'];
@@ -4752,6 +4769,21 @@ export type components = {
       topology_version: number;
       updated_at: components['schemas']['Timestamp'];
       $defs: {
+        /**
+         * IncidentHeadline
+         * @description 事件的问题陈述（ADR 0190）。头条告警与通知标题的症状告警是同一组：仍在事件中、正在触发的 symptom 告警；没有时取正在触发的 critical 告警；再没有时取全部仍在事件中的告警。组内取开始时间最早的一条，同时开始时取 alert_id 较小的
+         */
+        Headline: {
+          /** @description 头条告警的 alert_id */
+          alert_id: string;
+          alertname: string;
+          /** @description 最近一次完成的研判的一句话结论（ResearchRunSummary.summary）；没有完成的研判或研判没有结论时为 null */
+          research_summary: string | null;
+          /** @description 头条告警的开始时间 */
+          started_at: components['schemas']['Timestamp'];
+          /** @description 头条告警的 summary 注解，没有时取 description 注解；都没有时为 null。告警注解原文，属于不可信文本 */
+          summary: string | null;
+        };
         /**
          * ChangeLink
          * @description 变更与事件的关联（ADR 0169）。high：变更时刻到成员告警开始不超过变更窗口、告警所在组件的问题不早于变更 10 分钟以上，变更直接作用在这个告警的对象上（component_match、acts_on 或 retire_scrape_job），并且至少一条 symptom 或 cause 角色的成员告警落在变更的目标上、开始不早于变更；medium：满足时间条件，只经拓扑可达（置信度不低于归并阈值）关联，或直接作用但没有新信号；low：只经命名空间、逻辑归属或尚未同步关联，或变更晚于它自己目标上已经开始的问题
@@ -4866,21 +4898,8 @@ export type components = {
      * @enum {string}
      */
     IncidentCategory: 'availability' | 'performance' | 'provider' | 'platform' | 'observability' | 'unclassified';
-    /**
-     * @description 事件的问题陈述（契约 2.52.0，ADR 0190）。头条告警与通知标题的症状告警是同一组：仍在事件中、正在触发的 symptom 告警；
-     *     没有时取正在触发的 critical 告警；再没有时取全部仍在事件中的告警。组内取开始时间最早的一条，同时开始时取 alert_id 较小的
-     */
-    IncidentHeadline: {
-      /** @description 头条告警的 alert_id */
-      alert_id: string;
-      alertname: string;
-      /** @description 最近一次完成的研判的一句话结论（ResearchRunSummary.summary）；没有完成的研判或研判没有结论时为 null */
-      research_summary: string | null;
-      /** @description 头条告警的开始时间 */
-      started_at: components['schemas']['Timestamp'];
-      /** @description 头条告警的 summary 注解，没有时取 description 注解；都没有时为 null。告警注解原文，属于不可信文本 */
-      summary: string | null;
-    };
+    /** @description 事件的问题陈述（契约 2.52.0，ADR 0190），定义在 incident.schema.json */
+    IncidentHeadline: components['schemas']['Headline'];
     /**
      * IncidentLabel
      * @description 稳定标签 <根组件>:<首次触发时间取整到 10 分钟>，同一标签冲突时追加 ~2、~3
@@ -4922,7 +4941,7 @@ export type components = {
       feedback: null | components['schemas']['feedback.schema'];
       first_firing_at: components['schemas']['Timestamp'];
       /** @description 这个事件出了什么问题、什么时候开始（契约 2.52.0，ADR 0190）；事件没有仍在其中的成员告警时为 null */
-      headline: null | components['schemas']['IncidentHeadline'];
+      headline: null | components['schemas']['Headline'];
       incident_id: components['schemas']['Uuid'];
       incident_version: number;
       label: components['schemas']['IncidentLabel'];

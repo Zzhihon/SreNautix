@@ -236,6 +236,10 @@ export type IncidentCategory3 =
   'availability' | 'performance' | 'provider' | 'platform' | 'observability' | 'unclassified';
 export type ChangeGrade = 'high' | 'medium' | 'low';
 /**
+ * RFC 3339 UTC 时间
+ */
+export type Timestamp4 = string;
+/**
  * 判定向量的指纹（带迟滞，见 docs/core/convergence.md）
  */
 export type Sha2564 = string;
@@ -334,7 +338,7 @@ export type ResearchConcludedEvent = OutboxEventHeader & {
 /**
  * RFC 3339 UTC 时间
  */
-export type Timestamp4 = string;
+export type Timestamp5 = string;
 /**
  * 选中根因所在的范围（契约 2.38.0，ADR 0170）：模型给出，代码按确定性依据校正。根因是领域包声明在集群之外的组件时为 upstream；根因不由 GitOps 仓库负责（处置依据的 repository_owned）时不能是 local 或 configuration；结论为 undetermined 或没有选中根因时为 unknown。之前的研判输出没有这个字段
  */
@@ -451,7 +455,7 @@ export type GoalState =
 /**
  * RFC 3339 UTC 时间
  */
-export type Timestamp5 = string;
+export type Timestamp6 = string;
 /**
  * queued 排队；deferred 被准入推迟（defer_reason）；running 执行中；concluded 结束（result）；failed 失败；cancelled 目标取消
  */
@@ -565,7 +569,7 @@ export type IncidentExportGroupBy = 'incident' | 'series';
 /**
  * RFC 3339 UTC 时间
  */
-export type Timestamp6 = string;
+export type Timestamp7 = string;
 /**
  * 原因码所属的阶段：notify 通知；stage_a 阶段 A；research 阶段 B 研判与入队；remediation 自愈 PR；issue 事件 issue；incident 事件状态；feedback 人工反馈与隐式反馈（ADR 0174）；skill 技能的运行（ADR 0181）
  */
@@ -729,7 +733,7 @@ export type SkillState = 'active' | 'paused' | 'not_enabled' | 'missing_grant' |
 /**
  * RFC 3339 UTC 时间
  */
-export type Timestamp7 = string;
+export type Timestamp8 = string;
 export type SkillTrigger = SkillMetricTrigger | SkillAlertTrigger | SkillKubeTrigger | SkillManualTrigger;
 /**
  * Prometheus 风格的时长，例如 30s、5m、2h、7d
@@ -983,6 +987,7 @@ export interface SrenautixContractIndex {
   ExportedClusterKubeWarnings?: ExportedClusterKubeWarnings;
   IncidentExportRecord?: IncidentExportRecord;
   Incident?: Incident;
+  IncidentHeadline?: IncidentHeadline;
   ChangeLink?: ChangeLink;
   ChangeGrade?: ChangeGrade;
   ResearchRoot?: ResearchRoot1;
@@ -3655,6 +3660,10 @@ export interface Incident {
   updated_at: Timestamp;
   component_names?: CommonComponentNames1;
   research_root?: ResearchRoot;
+  /**
+   * 问题陈述，读取最新版本时由中心附上（契约 2.56.0，ADR 0190）；事件没有仍在其中的成员告警时为 null。事件流与历史版本没有这个字段
+   */
+  headline?: null | IncidentHeadline;
 }
 export interface IncidentRoot {
   /**
@@ -3774,6 +3783,25 @@ export interface ResearchRoot {
    * 研判根因与事件根因按属主粒度比较不一致（Pod 与它所属的 Deployment 算一致）。只标记，事件不拆分，分组与根因不变
    */
   mismatch: boolean;
+}
+/**
+ * 事件的问题陈述（ADR 0190）。头条告警与通知标题的症状告警是同一组：仍在事件中、正在触发的 symptom 告警；没有时取正在触发的 critical 告警；再没有时取全部仍在事件中的告警。组内取开始时间最早的一条，同时开始时取 alert_id 较小的
+ */
+export interface IncidentHeadline {
+  /**
+   * 头条告警的 alert_id
+   */
+  alert_id: string;
+  alertname: string;
+  /**
+   * 头条告警的 summary 注解，没有时取 description 注解；都没有时为 null。告警注解原文，属于不可信文本
+   */
+  summary: string | null;
+  started_at: Timestamp4;
+  /**
+   * 最近一次完成的研判的一句话结论（ResearchRunSummary.summary）；没有完成的研判或研判没有结论时为 null
+   */
+  research_summary: string | null;
 }
 /**
  * 阶段 A 的确定性报告（DESIGN §7.1）：不调用模型，不经过 worker。事件创建或版本变化后立即生成
@@ -4477,7 +4505,7 @@ export interface ConsistencyDetail {
     ref: EvidenceRef;
     at: Timestamp;
   };
-  symptom_onset_at: Timestamp4;
+  symptom_onset_at: Timestamp5;
   tolerance_seconds: number;
   contrary_refs: EvidenceRef[];
   /**
@@ -4770,7 +4798,7 @@ export interface Goal {
    * 状态的机器可读原因，例如 failed 的 baseline_insufficient、cancelled 的 user
    */
   state_reason: string | null;
-  expires_at: Timestamp5;
+  expires_at: Timestamp6;
   /**
    * 最近一次运行；还没有运行时为 null
    */
@@ -5707,7 +5735,7 @@ export interface ExportedIncident {
   };
   components: ComponentKey[];
   first_firing_at: Timestamp;
-  last_firing_at: Timestamp6;
+  last_firing_at: Timestamp7;
   /**
    * 事件恢复的时刻；仍在触发时为 null
    */
@@ -7992,7 +8020,7 @@ export interface SkillRunCreate {
    * 按清单的 inputs 校验；不填时为空对象
    */
   inputs?: {};
-  at?: Timestamp7;
+  at?: Timestamp8;
 }
 export interface SkillPatch {
   paused: boolean;

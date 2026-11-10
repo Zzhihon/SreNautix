@@ -49,5 +49,5 @@ test('未登录时打开告警链接：登录后回到链接，再打开告警�
   await page.getByLabel('口令').fill(ADMIN.password);
   await page.getByRole('button', { name: '登录' }).click();
   await expect(page).toHaveURL(new RegExp(`/incidents/${s.incidentId}\\?`));
-  await expect(page.getByRole('region', { name: '结论' })).toContainText(s.label);
+  await expect(page.getByRole('region', { name: '结论' }).locator(`[title*="${s.label}"]`)).toHaveCount(1);
 });

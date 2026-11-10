@@ -105,13 +105,7 @@ async function summaries(pool: pg.Pool, feedback: FeedbackService, topology: Top
       WHERE incident_id = ANY($1::uuid[]) AND state = 'completed' ORDER BY incident_id, started_at DESC`,
     [ids],
   );
-  // 头条告警与它的注解（ADR 0190）：告警已不在告警状态表时没有注解
-  const heads = new Map(rows.map((r) => [r.incident_id, headlineMember(r.body)]));
-  const headAlerts = await alertsById(
-    pool,
-    [...heads.values()].flatMap((m) => (m ? [m.alert_id] : [])),
-  );
-  const ha = new Map(headAlerts.map((a) => [`${a.cluster_id}\0${a.alert_id}`, a]));
+  const headlines = await incidentHeadlines(pool, rows, new Map(runs.rows.map((x) => [x.incident_id, x.summary])));
   const pending = await pool.query<{ incident_id: string; n: number }>(
     "SELECT incident_id, count(*)::int AS n FROM server.proposals WHERE incident_id = ANY($1::uuid[]) AND state = 'awaiting_approval' GROUP BY incident_id",
     [ids],
@@ -138,22 +132,12 @@ async function summaries(pool: pg.Pool, feedback: FeedbackService, topology: Top
       .filter((x): x is Date => !!x)
       .sort((a, b) => b.getTime() - a.getTime())[0];
     const fb: Feedback | undefined = fbs.get(r.incident_id);
-    const head = heads.get(r.incident_id) ?? null;
-    const headAlert = head ? ha.get(`${r.cluster_id}\0${head.alert_id}`) : undefined;
     return {
       incident_id: r.incident_id,
       cluster_id: r.cluster_id,
       label: r.label,
       incident_version: r.version,
-      headline: head
-        ? {
-            alert_id: head.alert_id,
-            alertname: head.alertname,
-            summary: headAlert ? alertStatement(headAlert) : null,
-            started_at: head.starts_at,
-            research_summary: run?.summary || null,
-          }
-        : null,
+      headline: headlines.get(r.incident_id) ?? null,
       state: r.state,
       severity: r.body.severity,
       ...rowCategories(r),
@@ -178,6 +162,41 @@ async function summaries(pool: pg.Pool, feedback: FeedbackService, topology: Top
       research_root: roots.get(r.incident_id) ?? null,
     };
   });
+}
+
+/**
+ * 事件的问题陈述（ADR 0190），收件箱与事件详情共用：头条告警、它的注解（告警已不在告警状态表时没有注解）与最近一次完成的
+ * 研判的一句话结论（research 以 incident_id 为键）
+ */
+export async function incidentHeadlines(
+  pool: pg.Pool,
+  rows: ReadonlyArray<Pick<IncidentRow, 'incident_id' | 'cluster_id' | 'body'>>,
+  research: ReadonlyMap<string, string | null>,
+): Promise<Map<string, IncidentHeadline | null>> {
+  const heads = new Map(rows.map((r) => [r.incident_id, headlineMember(r.body)]));
+  const headAlerts = await alertsById(
+    pool,
+    [...heads.values()].flatMap((m) => (m ? [m.alert_id] : [])),
+  );
+  const ha = new Map(headAlerts.map((a) => [`${a.cluster_id}\0${a.alert_id}`, a]));
+  return new Map(
+    rows.map((r) => {
+      const head = heads.get(r.incident_id) ?? null;
+      const a = head ? ha.get(`${r.cluster_id}\0${head.alert_id}`) : undefined;
+      return [
+        r.incident_id,
+        head
+          ? {
+              alert_id: head.alert_id,
+              alertname: head.alertname,
+              summary: a ? alertStatement(a) : null,
+              started_at: head.starts_at,
+              research_summary: research.get(r.incident_id) || null,
+            }
+          : null,
+      ];
+    }),
+  );
 }
 
 /** 事件收件箱与事件详情（contract/openapi.yaml 的 incidents、evidence、feedback 标签）。 */
@@ -345,10 +364,19 @@ export function registerIncidentRoutes(app: FastifyInstance, d: IncidentRouteDep
       }
       return withComponentNames(d.pool, body);
     }
-    // 最新版本附上研判根因与是否不一致（ADR 0104 §14）；历史版本不附
+    // 最新版本附上研判根因与是否不一致（ADR 0104 §14）与问题陈述（ADR 0190）；历史版本不附
     const rr = (await researchRoots(d.pool, (c, k, at) => d.topology.ownerOf(c, k, at), [row])).get(row.incident_id);
+    const run = await d.pool.query<{ summary: string | null }>(
+      `SELECT summary FROM server.research_runs WHERE incident_id = $1 AND state = 'completed'
+        ORDER BY started_at DESC LIMIT 1`,
+      [row.incident_id],
+    );
+    const headline =
+      (await incidentHeadlines(d.pool, [row], new Map([[row.incident_id, run.rows[0]?.summary ?? null]]))).get(
+        row.incident_id,
+      ) ?? null;
     const named = await withComponentNames(d.pool, row.body);
-    return rr ? { ...named, research_root: rr } : named;
+    return { ...named, headline, ...(rr ? { research_root: rr } : {}) };
   });
 
   app.get('/v1/incidents/:ref/stage-a', async (req) => {
@@ -465,6 +493,7 @@ export function registerIncidentRoutes(app: FastifyInstance, d: IncidentRouteDep
 
 type TimelineEntry = HubComponents['schemas']['TimelineEntry'];
 type BusinessDomainStatus = HubComponents['schemas']['BusinessDomainStatus'];
+type IncidentHeadline = HubComponents['schemas']['IncidentHeadline'];
 type TimelineKind = TimelineEntry['kind'];
 
 /** 带原因码的条目种类 → 原因码所属的阶段（ADR 0172；反馈的原因码见 ADR 0174） */

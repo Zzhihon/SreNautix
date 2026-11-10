@@ -1,5 +1,5 @@
 // 本文件由 packages/contract/scripts/gen.ts 从 contract/ 生成，不要手工修改。
-export const CONTRACT_VERSION = '2.55.0';
+export const CONTRACT_VERSION = '2.56.0';
 
 export const SCHEMAS: Record<string, Record<string, unknown>> = {
   'https://srenautix.io/contract/gateway/v1/action-catalog.schema.json': {
@@ -5911,8 +5911,36 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
           '最近一次完成的研判给出的根因，读取时由中心附上（ADR 0104 §14）；没有给出根因的研判、事件流与旧版本的事件没有这个字段',
         $ref: '#/$defs/ResearchRoot',
       },
+      headline: {
+        description:
+          '问题陈述，读取最新版本时由中心附上（契约 2.56.0，ADR 0190）；事件没有仍在其中的成员告警时为 null。事件流与历史版本没有这个字段',
+        oneOf: [{ type: 'null' }, { $ref: '#/$defs/Headline' }],
+      },
     },
     $defs: {
+      Headline: {
+        title: 'IncidentHeadline',
+        description:
+          '事件的问题陈述（ADR 0190）。头条告警与通知标题的症状告警是同一组：仍在事件中、正在触发的 symptom 告警；没有时取正在触发的 critical 告警；再没有时取全部仍在事件中的告警。组内取开始时间最早的一条，同时开始时取 alert_id 较小的',
+        type: 'object',
+        additionalProperties: false,
+        required: ['alert_id', 'alertname', 'summary', 'started_at', 'research_summary'],
+        properties: {
+          alert_id: { type: 'string', description: '头条告警的 alert_id' },
+          alertname: { type: 'string' },
+          summary: {
+            type: ['string', 'null'],
+            description:
+              '头条告警的 summary 注解，没有时取 description 注解；都没有时为 null。告警注解原文，属于不可信文本',
+          },
+          started_at: { description: '头条告警的开始时间', $ref: 'common.schema.json#/$defs/Timestamp' },
+          research_summary: {
+            type: ['string', 'null'],
+            description:
+              '最近一次完成的研判的一句话结论（ResearchRunSummary.summary）；没有完成的研判或研判没有结论时为 null',
+          },
+        },
+      },
       ChangeLink: {
         title: 'ChangeLink',
         description:
