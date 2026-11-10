@@ -896,7 +896,7 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
     },
   });
   registerAskRoutes(app, { pool, auth, scheduler });
-  registerIncidentRoutes(app, { pool, auth, feedback, topology, evidence, worker });
+  registerIncidentRoutes(app, { pool, auth, feedback, topology, evidence, worker, services: () => packs.set.services });
   // 批量导出（ADR 0186）：Kubernetes Warning 的指标查询用证据数据源的适配器与标签档案，节点归属用拓扑历史
   registerExportRoutes(app, {
     pool,

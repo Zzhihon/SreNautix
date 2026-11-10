@@ -23,8 +23,9 @@ import type pg from 'pg';
 import { badRequest } from '../api/errors.js';
 import {
   incidentConditions,
-  parseCategoryFilters,
+  parseClassificationFilters,
   rowCategories,
+  rowServices,
   type IncidentFilters,
 } from '../console-bff/incident-filters.js';
 import {
@@ -162,7 +163,7 @@ export function parseExportQuery(query: Record<string, unknown>): ExportRequest 
     from: new Date(from).toISOString(),
     to: new Date(to).toISOString(),
     filters: {
-      ...parseCategoryFilters(query),
+      ...parseClassificationFilters(query),
       clusterId: single(query, 'cluster_id'),
       severity,
       from: new Date(from).toISOString(),
@@ -524,6 +525,7 @@ export function exportedIncident(row: IncidentRow, f: Facts, now: number): Omit<
     severity: row.body.severity,
     categories: cats.categories,
     primary_category: cats.primary_category,
+    ...rowServices(row),
     alertnames: [...new Set(members.map((m) => m.alertname))].sort(),
     root: { component: row.body.root.component, entity: row.body.root.entity, ambiguous: row.body.root.ambiguous },
     components: row.body.components,
@@ -617,6 +619,9 @@ function filtersOf(req: ExportRequest): IncidentExportFilters {
     category: req.filters.category,
     exclude_category: req.filters.excludeCategory,
     exclude_component: req.filters.excludeComponent,
+    business_domain: req.filters.businessDomain,
+    exclude_business_domain: req.filters.excludeBusinessDomain,
+    service: req.filters.service,
     suppressed: req.filters.suppressed,
   };
 }

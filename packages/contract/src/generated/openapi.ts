@@ -321,6 +321,26 @@ export type paths = {
     patch?: never;
     trace?: never;
   };
+  '/v1/business-domains': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * @description 领域包 business.yaml 声明的业务领域与服务（契约 2.54.0，ADR 0193），按声明顺序；每个服务带调用方读取作用域内
+     *     正在触发、没有被抑制的事件数（按主服务计）。控制台用它显示服务与业务领域的名称，并按业务领域分组收件箱
+     */
+    get: operations['listBusinessDomains'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/v1/catalog/actions': {
     parameters: {
       query?: never;
@@ -2210,6 +2230,22 @@ export type components = {
      * @description 业务领域的 id（契约 2.53.0，ADR 0193），在全部启用的领域包中唯一。与主动优化的领域（PackDomain，ADR 0146）是两个概念
      */
     BusinessDomainId: string;
+    BusinessDomainStatus: {
+      id: components['schemas']['BusinessDomainId'];
+      services: {
+        firing: number;
+        id: components['schemas']['ServiceId'];
+        title: components['schemas']['LocalizedText'];
+      }[];
+      tier: components['schemas']['BusinessTier'];
+      title: components['schemas']['LocalizedText'];
+    };
+    /**
+     * BusinessTier
+     * @description 业务领域对业务的重要程度（ADR 0193）：core 核心业务；supporting 支撑业务；foundation 集群底座与交付；self 运维与观测系统自身
+     * @enum {string}
+     */
+    BusinessTier: 'core' | 'supporting' | 'foundation' | 'self';
     /** OptimizationCandidate */
     Candidate: {
       card_ref: components['schemas']['EvidenceRef'];
@@ -3617,11 +3653,14 @@ export type components = {
      * @description 实际使用的筛选条件，语义与 GET /v1/incidents 相同
      */
     Filters: {
+      business_domain: components['schemas']['BusinessDomainId'][];
       category: components['schemas']['IncidentCategory'][];
       cluster_id: null | components['schemas']['ClusterId'];
       component: null | components['schemas']['ComponentKey'];
+      exclude_business_domain: components['schemas']['BusinessDomainId'][];
       exclude_category: components['schemas']['AlertCategory'][];
       exclude_component: components['schemas']['ComponentKey'][];
+      service: components['schemas']['ServiceId'][];
       severity: null | components['schemas']['Severity'];
       /** @description 是否导出被抑制的事件 */
       suppressed: boolean;
@@ -4367,6 +4406,7 @@ export type components = {
     Incident: {
       /** @description 成员告警的告警名，去重排序；离开时仍在触发的成员（转到了别的事件）不算 */
       alertnames: string[];
+      business_domain: null | components['schemas']['BusinessDomainId'];
       categories: components['schemas']['IncidentCategory'][];
       cluster_id: components['schemas']['ClusterId'];
       components: components['schemas']['ComponentKey'][];
@@ -4389,6 +4429,8 @@ export type components = {
       /** @description 成员告警触发区间合并后的段数，即发生次数 */
       occurrences: number;
       primary_category: components['schemas']['IncidentCategory'];
+      primary_service: null | components['schemas']['ServiceId'];
+      primary_service_source: null | components['schemas']['ServiceSource'];
       /** @description 版本原因为 reopened 的版本数（ADR 0132、0184） */
       reopened_count: number;
       root: {
@@ -4398,6 +4440,8 @@ export type components = {
       };
       /** @description 事件的系列键（ADR 0184）；之前版本写入的事件与没有根因的事件为 null */
       series_key: string | null;
+      /** @description 事件的服务（契约 2.54.0，ADR 0193） */
+      services: components['schemas']['ServiceId'][];
       severity: components['schemas']['Severity'];
       /** @enum {string} */
       state: 'firing' | 'resolved';
@@ -4438,11 +4482,14 @@ export type components = {
          * @description 实际使用的筛选条件，语义与 GET /v1/incidents 相同
          */
         Filters: {
+          business_domain: components['schemas']['BusinessDomainId'][];
           category: components['schemas']['IncidentCategory'][];
           cluster_id: null | components['schemas']['ClusterId'];
           component: null | components['schemas']['ComponentKey'];
+          exclude_business_domain: components['schemas']['BusinessDomainId'][];
           exclude_category: components['schemas']['AlertCategory'][];
           exclude_component: components['schemas']['ComponentKey'][];
+          service: components['schemas']['ServiceId'][];
           severity: null | components['schemas']['Severity'];
           /** @description 是否导出被抑制的事件 */
           suppressed: boolean;
@@ -4464,6 +4511,7 @@ export type components = {
         Incident: {
           /** @description 成员告警的告警名，去重排序；离开时仍在触发的成员（转到了别的事件）不算 */
           alertnames: string[];
+          business_domain: null | components['schemas']['BusinessDomainId'];
           categories: components['schemas']['IncidentCategory'][];
           cluster_id: components['schemas']['ClusterId'];
           components: components['schemas']['ComponentKey'][];
@@ -4486,6 +4534,8 @@ export type components = {
           /** @description 成员告警触发区间合并后的段数，即发生次数 */
           occurrences: number;
           primary_category: components['schemas']['IncidentCategory'];
+          primary_service: null | components['schemas']['ServiceId'];
+          primary_service_source: null | components['schemas']['ServiceSource'];
           /** @description 版本原因为 reopened 的版本数（ADR 0132、0184） */
           reopened_count: number;
           root: {
@@ -4495,6 +4545,8 @@ export type components = {
           };
           /** @description 事件的系列键（ADR 0184）；之前版本写入的事件与没有根因的事件为 null */
           series_key: string | null;
+          /** @description 事件的服务（契约 2.54.0，ADR 0193） */
+          services: components['schemas']['ServiceId'][];
           severity: components['schemas']['Severity'];
           /** @enum {string} */
           state: 'firing' | 'resolved';
@@ -4856,6 +4908,7 @@ export type components = {
     } & components['schemas']['Header'];
     IncidentSummary: {
       ambiguous: boolean;
+      business_domain: null | components['schemas']['BusinessDomainId'];
       /** @description 事件的类别（Incident.categories，契约 2.46.0） */
       categories: components['schemas']['IncidentCategory'][];
       cluster_id: components['schemas']['ClusterId'];
@@ -4878,11 +4931,16 @@ export type components = {
       pending_approvals: number;
       /** @description 事件的主类别（Incident.primary_category，契约 2.46.0） */
       primary_category: components['schemas']['IncidentCategory'];
+      primary_service: null | components['schemas']['ServiceId'];
+      /** @description 主服务的来源；namespace 表示按默认命名空间推定，界面标注推定 */
+      primary_service_source: null | components['schemas']['ServiceSource'];
       /** @description 最近一次研判或阶段 A 报告的时间 */
       research_fresh_at: null | components['schemas']['Timestamp'];
       /** @description 最近一次完成、给出了根因的研判的根因，及它与事件根因是否不一致（ADR 0104 §14）；没有这样的研判时为 null */
       research_root: null | components['schemas']['ResearchRoot'];
       root_component: null | components['schemas']['ComponentKey'];
+      /** @description 事件的服务（Incident.services，契约 2.54.0，ADR 0193）；名称见 GET /v1/business-domains */
+      services: components['schemas']['ServiceId'][];
       severity: components['schemas']['Severity'];
       split_from: null | components['schemas']['Uuid'];
       /** @enum {string} */
@@ -8120,6 +8178,32 @@ export interface operations {
       409: components['responses']['Error'];
     };
   };
+  listBusinessDomains: {
+    parameters: {
+      query?: {
+        cluster_id?: components['schemas']['ClusterId'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 业务领域与服务 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            items: components['schemas']['BusinessDomainStatus'][];
+            /** @description 没有主服务的正在触发的事件数 */
+            unassigned_firing: number;
+          };
+        };
+      };
+    };
+  };
   listCatalogActions: {
     parameters: {
       query?: never;
@@ -8784,12 +8868,16 @@ export interface operations {
   listIncidents: {
     parameters: {
       query?: {
+        /** @description 只返回主业务领域（Incident.business_domain）与任一取值相同的事件；可以重复（契约 2.54.0，ADR 0193） */
+        business_domain?: components['schemas']['BusinessDomainId'][];
         /** @description 只返回类别与任一取值相同的事件；可以重复 */
         category?: components['schemas']['IncidentCategory'][];
         cluster_id?: components['schemas']['ClusterId'];
         component?: components['schemas']['ComponentKey'];
         cursor?: string;
         disposition?: components['schemas']['Disposition'];
+        /** @description 去掉主业务领域落在这些取值中的事件；没有业务领域的事件不去掉。可以重复 */
+        exclude_business_domain?: components['schemas']['BusinessDomainId'][];
         /** @description 去掉类别全部落在这些取值中的事件；可以重复。unclassified 不能被排除，给出时返回 400 */
         exclude_category?: components['schemas']['AlertCategory'][];
         /** @description 去掉组件全部落在这些组件中的事件；可以重复 */
@@ -8799,6 +8887,8 @@ export interface operations {
         limit?: number;
         /** @description 按标签、根因组件与告警名搜索 */
         q?: string;
+        /** @description 只返回服务（Incident.services）与任一取值相同的事件；可以重复 */
+        service?: components['schemas']['ServiceId'][];
         severity?: components['schemas']['Severity'];
         state?: 'firing' | 'resolved' | 'all';
         suppressed?: boolean;
@@ -9187,11 +9277,15 @@ export interface operations {
   exportIncidents: {
     parameters: {
       query: {
+        /** @description 只导出主业务领域（Incident.business_domain）与任一取值相同的事件；可以重复（契约 2.54.0，ADR 0193） */
+        business_domain?: components['schemas']['BusinessDomainId'][];
         /** @description 只导出类别与任一取值相同的事件；可以重复 */
         category?: components['schemas']['IncidentCategory'][];
         cluster_id?: components['schemas']['ClusterId'];
         component?: components['schemas']['ComponentKey'];
         cursor?: string;
+        /** @description 去掉主业务领域落在这些取值中的事件；没有业务领域的事件不去掉。可以重复 */
+        exclude_business_domain?: components['schemas']['BusinessDomainId'][];
         /** @description 去掉类别全部落在这些取值中的事件；可以重复。unclassified 不能被排除，给出时返回 400 */
         exclude_category?: components['schemas']['AlertCategory'][];
         /** @description 去掉组件全部落在这些组件中的事件；可以重复 */
@@ -9208,6 +9302,8 @@ export interface operations {
         /** @description 成组需要的最少事件数，默认 2 */
         group_min_incidents?: number;
         limit?: number;
+        /** @description 只导出服务（Incident.services）与任一取值相同的事件；可以重复 */
+        service?: components['schemas']['ServiceId'][];
         severity?: components['schemas']['Severity'];
         suppressed?: boolean;
         /** @description 不早于 from，与 from 相隔不超过 31 天 */

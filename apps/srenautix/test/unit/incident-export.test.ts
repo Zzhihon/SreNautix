@@ -107,6 +107,10 @@ function row(n: number, component: string, members: MemberSpec[], seriesKey: str
     categories: ['performance'],
     primary_category: 'performance',
     series_key: seriesKey,
+    services: [],
+    primary_service: null,
+    primary_service_source: null,
+    business_domain: null,
   };
 }
 

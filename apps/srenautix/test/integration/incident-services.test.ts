@@ -1,7 +1,13 @@
 import type { AlertCatalogEntry, BusinessDomain, Incident } from '@srenautix/contract';
 import { AlertCatalog, DEFAULT_RCA_PARAMS, labelsFingerprint } from '@srenautix/core';
 import { ServiceCatalog } from '@srenautix/packs-sdk/business';
+import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { createApp } from '../../src/api/http.js';
+import { registerIncidentRoutes } from '../../src/console-bff/routes-incidents.js';
+import type { Auth } from '../../src/identity/auth.js';
+import type { FeedbackService } from '../../src/proposals/feedback.js';
+import type { EvidenceRunner } from '../../src/stage-a/ports.js';
 import { alertService, type ServiceDeps } from '../../src/alerts/service.js';
 import { IncidentEngine } from '../../src/incident/engine.js';
 import { classificationInputsFingerprint, recategorizeIncidents } from '../../src/incident/recategorize.js';
@@ -279,5 +285,70 @@ describe('事件的服务（ADR 0193）', () => {
     expect(classificationInputsFingerprint(catalog, more)).not.toBe(base);
     const renamedService = new AlertCatalog([{ pack: 'shop', entries: [{ ...ARCHIVE, service: 'gateway' }] }]);
     expect(classificationInputsFingerprint(renamedService, service)).not.toBe(base);
+  });
+});
+
+describe('事件的服务经接口（ADR 0193 §6）', () => {
+  let app: FastifyInstance;
+  beforeAll(async () => {
+    app = await createApp({ bodyLimit: 1 << 20, trustProxy: false });
+    registerIncidentRoutes(app, {
+      pool: db.server,
+      auth: { reader: async () => ({ scopes: 'all' }) } as unknown as Auth,
+      feedback: { latest: async () => new Map() } as unknown as FeedbackService,
+      topology,
+      evidence: {} as EvidenceRunner,
+      worker: null,
+      services: () => service.services(),
+    });
+  });
+  afterAll(async () => {
+    await app?.close();
+  });
+
+  type Item = {
+    headline: { alertname: string } | null;
+    services: string[];
+    primary_service: string | null;
+    business_domain: string | null;
+  };
+  const names = async (query: string) => {
+    const r = await app.inject({ method: 'GET', url: `/v1/incidents?state=all&cluster_id=${CLUSTER}${query}` });
+    expect(r.statusCode).toBe(200);
+    return (r.json() as { items: Item[] }).items;
+  };
+
+  it('列表按业务领域与服务筛选，摘要带服务字段', async () => {
+    const archive = await names('&business_domain=archive');
+    expect(archive.map((i) => [i.primary_service, i.business_domain])).toEqual([['archive-exporter', 'archive']]);
+    expect((await names('&service=gateway')).every((i) => i.services.includes('gateway'))).toBe(true);
+    expect(await names('&service=gateway')).toHaveLength(2);
+    const rest = await names('&exclude_business_domain=archive');
+    expect(rest.some((i) => i.business_domain === 'archive')).toBe(false);
+    expect(rest).toHaveLength(2);
+    const bad = await app.inject({ method: 'GET', url: `/v1/incidents?business_domain=Bad%20Id` });
+    expect(bad.statusCode).toBe(400);
+  });
+
+  it('GET /v1/business-domains：按声明顺序，每个服务带正在触发的事件数', async () => {
+    const r = await app.inject({ method: 'GET', url: `/v1/business-domains?cluster_id=${CLUSTER}` });
+    expect(r.statusCode).toBe(200);
+    expect(r.json()).toEqual({
+      items: [
+        {
+          id: 'forwarding',
+          title: { 'zh-CN': '请求转发' },
+          tier: 'core',
+          services: [{ id: 'gateway', title: { 'zh-CN': '网关' }, firing: 1 }],
+        },
+        {
+          id: 'archive',
+          title: { 'zh-CN': '请求归档' },
+          tier: 'supporting',
+          services: [{ id: 'archive-exporter', title: { 'zh-CN': '归档导出' }, firing: 1 }],
+        },
+      ],
+      unassigned_firing: 0,
+    });
   });
 });

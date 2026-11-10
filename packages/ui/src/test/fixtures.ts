@@ -165,7 +165,7 @@ export function proposalDetail(p: Proposal, over: Partial<ProposalDetail> = {}):
   };
 }
 
-/** 收件箱的一行（OpenAPI IncidentSummary，契约 2.52.0 起带 headline） */
+/** 收件箱的一行（OpenAPI IncidentSummary，契约 2.52.0 起带 headline，2.54.0 起带服务与业务领域） */
 export function incidentSummary(over: Partial<IncidentSummary> = {}): IncidentSummary {
   return {
     incident_id: '3f2b8c1e-5d6a-4b7c-8d9e-0a1b2c3d4e5f',
@@ -183,6 +183,10 @@ export function incidentSummary(over: Partial<IncidentSummary> = {}): IncidentSu
     severity: 'critical',
     categories: ['availability'],
     primary_category: 'availability',
+    services: ['postgres'],
+    primary_service: 'postgres',
+    primary_service_source: 'component',
+    business_domain: 'data',
     root_component: 'postgres.cluster:db/pg-main',
     ambiguous: false,
     first_firing_at: T0,

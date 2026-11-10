@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: SreNautix hub API
-  version: 2.53.0
+  version: 2.54.0
   license:
     name: Apache-2.0
     identifier: Apache-2.0
@@ -271,6 +271,24 @@ paths:
           explode: true
           description: 去掉组件全部落在这些组件中的事件；可以重复
           schema: { type: array, items: { $ref: './schemas/common.schema.json#/$defs/ComponentKey' } }
+        - name: business_domain
+          in: query
+          style: form
+          explode: true
+          description: 只返回主业务领域（Incident.business_domain）与任一取值相同的事件；可以重复（契约 2.54.0，ADR 0193）
+          schema: { type: array, items: { $ref: './schemas/common.schema.json#/$defs/BusinessDomainId' } }
+        - name: exclude_business_domain
+          in: query
+          style: form
+          explode: true
+          description: 去掉主业务领域落在这些取值中的事件；没有业务领域的事件不去掉。可以重复
+          schema: { type: array, items: { $ref: './schemas/common.schema.json#/$defs/BusinessDomainId' } }
+        - name: service
+          in: query
+          style: form
+          explode: true
+          description: 只返回服务（Incident.services）与任一取值相同的事件；可以重复
+          schema: { type: array, items: { $ref: './schemas/common.schema.json#/$defs/ServiceId' } }
         - { name: feedback, in: query, schema: { type: string, enum: [pending, given, all], default: all } }
         - { name: suppressed, in: query, schema: { type: boolean, default: false } }
         - { name: q, in: query, description: 按标签、根因组件与告警名搜索, schema: { type: string, maxLength: 200 } }
@@ -350,6 +368,24 @@ paths:
           explode: true
           description: 去掉组件全部落在这些组件中的事件；可以重复
           schema: { type: array, items: { $ref: './schemas/common.schema.json#/$defs/ComponentKey' } }
+        - name: business_domain
+          in: query
+          style: form
+          explode: true
+          description: 只导出主业务领域（Incident.business_domain）与任一取值相同的事件；可以重复（契约 2.54.0，ADR 0193）
+          schema: { type: array, items: { $ref: './schemas/common.schema.json#/$defs/BusinessDomainId' } }
+        - name: exclude_business_domain
+          in: query
+          style: form
+          explode: true
+          description: 去掉主业务领域落在这些取值中的事件；没有业务领域的事件不去掉。可以重复
+          schema: { type: array, items: { $ref: './schemas/common.schema.json#/$defs/BusinessDomainId' } }
+        - name: service
+          in: query
+          style: form
+          explode: true
+          description: 只导出服务（Incident.services）与任一取值相同的事件；可以重复
+          schema: { type: array, items: { $ref: './schemas/common.schema.json#/$defs/ServiceId' } }
         - { name: suppressed, in: query, schema: { type: boolean, default: false } }
         - { name: format, in: query, schema: { type: string, enum: [json, ndjson, md], default: json } }
         - { name: group, in: query, schema: { $ref: './schemas/incident-export.schema.json#/$defs/GroupBy' } }
@@ -1725,6 +1761,32 @@ paths:
                         duration_ms: { type: integer, minimum: 0 }
                         error: { type: [string, 'null'] }
         '404': { $ref: '#/components/responses/Error' }
+  /v1/business-domains:
+    get:
+      tags: [incidents]
+      operationId: listBusinessDomains
+      description: |
+        领域包 business.yaml 声明的业务领域与服务（契约 2.54.0，ADR 0193），按声明顺序；每个服务带调用方读取作用域内
+        正在触发、没有被抑制的事件数（按主服务计）。控制台用它显示服务与业务领域的名称，并按业务领域分组收件箱
+      x-srenautix-roles: [viewer, responder, approver, auditor, admin]
+      x-srenautix-external: true
+      parameters:
+        - { name: cluster_id, in: query, schema: { $ref: './schemas/common.schema.json#/$defs/ClusterId' } }
+      responses:
+        '200':
+          description: 业务领域与服务
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [items, unassigned_firing]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/BusinessDomainStatus' } }
+                  unassigned_firing:
+                    type: integer
+                    minimum: 0
+                    description: 没有主服务的正在触发的事件数
   /v1/packs:
     get:
       tags: [system]
@@ -2727,6 +2789,24 @@ components:
           type: [string, 'null']
           description: 只对 gateway 有意义
           enum: [passed, failed, unknown, null]
+    BusinessDomainStatus:
+      type: object
+      additionalProperties: false
+      required: [id, title, tier, services]
+      properties:
+        id: { $ref: './schemas/common.schema.json#/$defs/BusinessDomainId' }
+        title: { $ref: './schemas/evidence-card.schema.json#/$defs/LocalizedText' }
+        tier: { $ref: './schemas/common.schema.json#/$defs/BusinessTier' }
+        services:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [id, title, firing]
+            properties:
+              id: { $ref: './schemas/common.schema.json#/$defs/ServiceId' }
+              title: { $ref: './schemas/evidence-card.schema.json#/$defs/LocalizedText' }
+              firing: { type: integer, minimum: 0 }
     IncidentSummary:
       type: object
       additionalProperties: false
@@ -2756,6 +2836,10 @@ components:
         - categories
         - primary_category
         - headline
+        - services
+        - primary_service
+        - primary_service_source
+        - business_domain
       properties:
         incident_id: { $ref: './schemas/common.schema.json#/$defs/Uuid' }
         cluster_id: { $ref: './schemas/common.schema.json#/$defs/ClusterId' }
@@ -2774,6 +2858,18 @@ components:
         primary_category:
           description: 事件的主类别（Incident.primary_category，契约 2.46.0）
           $ref: './schemas/common.schema.json#/$defs/IncidentCategory'
+        services:
+          description: 事件的服务（Incident.services，契约 2.54.0，ADR 0193）；名称见 GET /v1/business-domains
+          type: array
+          uniqueItems: true
+          items: { $ref: './schemas/common.schema.json#/$defs/ServiceId' }
+        primary_service:
+          oneOf: [{ type: 'null' }, { $ref: './schemas/common.schema.json#/$defs/ServiceId' }]
+        primary_service_source:
+          description: 主服务的来源；namespace 表示按默认命名空间推定，界面标注推定
+          oneOf: [{ type: 'null' }, { $ref: './schemas/common.schema.json#/$defs/ServiceSource' }]
+        business_domain:
+          oneOf: [{ type: 'null' }, { $ref: './schemas/common.schema.json#/$defs/BusinessDomainId' }]
         root_component:
           oneOf: [{ type: 'null' }, { $ref: './schemas/common.schema.json#/$defs/ComponentKey' }]
         ambiguous: { type: boolean }

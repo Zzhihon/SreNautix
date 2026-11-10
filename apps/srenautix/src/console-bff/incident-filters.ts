@@ -1,17 +1,35 @@
 import type { AlertCategory, IncidentCategory } from '@srenautix/contract';
-import { ALERT_CATEGORIES, incidentCategories, isAlertCategory, isComponentKey, UNCLASSIFIED } from '@srenautix/core';
+import {
+  ALERT_CATEGORIES,
+  incidentCategories,
+  incidentServices,
+  isAlertCategory,
+  isComponentKey,
+  UNCLASSIFIED,
+  type IncidentServices,
+} from '@srenautix/core';
 import { badRequest } from '../api/errors.js';
 import type { IncidentRow } from '../incident/read.js';
 
-// GET /v1/incidents 的类别与组件筛选（ADR 0183）。三个参数都可以重复；取值不合法时返回 400。
+// GET /v1/incidents 与导出的归类筛选：类别与组件（ADR 0183），业务领域与服务（ADR 0193）。参数都可以重复；取值不合法时
+// 返回 400。
 
-export interface CategoryFilters {
+/** 业务领域与服务的 id：与契约的 BusinessDomainId、ServiceId 相同 */
+const BUSINESS_ID = /^[a-z][a-z0-9-]{0,62}$/;
+
+export interface ClassificationFilters {
   /** 保留类别与任一取值相同的事件 */
   category: IncidentCategory[];
   /** 去掉类别全部落在这些取值中的事件；unclassified 不能被排除 */
   excludeCategory: AlertCategory[];
   /** 去掉组件全部落在这些组件中的事件 */
   excludeComponent: string[];
+  /** 保留主业务领域与任一取值相同的事件 */
+  businessDomain: string[];
+  /** 去掉主业务领域落在这些取值中的事件；没有业务领域的事件不去掉 */
+  excludeBusinessDomain: string[];
+  /** 保留服务与任一取值相同的事件 */
+  service: string[];
 }
 
 /** 查询参数的全部取值：没有时为空，出现一次为一个，重复时为多个 */
@@ -29,7 +47,7 @@ function values(query: Record<string, unknown>, key: string): string[] {
   });
 }
 
-export function parseCategoryFilters(query: Record<string, unknown>): CategoryFilters {
+export function parseClassificationFilters(query: Record<string, unknown>): ClassificationFilters {
   const category = values(query, 'category').map((v) => {
     if (v !== UNCLASSIFIED && !isAlertCategory(v)) {
       throw badRequest(`category 只能是 ${[...ALERT_CATEGORIES, UNCLASSIFIED].join('、')}：${v}`);
@@ -51,14 +69,28 @@ export function parseCategoryFilters(query: Record<string, unknown>): CategoryFi
     }
     return v;
   });
-  return { category, excludeCategory, excludeComponent };
+  const ids = (key: string) =>
+    values(query, key).map((v) => {
+      if (!BUSINESS_ID.test(v)) {
+        throw badRequest(`${key} 不是合法的 id：${v}`);
+      }
+      return v;
+    });
+  return {
+    category,
+    excludeCategory,
+    excludeComponent,
+    businessDomain: ids('business_domain'),
+    excludeBusinessDomain: ids('exclude_business_domain'),
+    service: ids('service'),
+  };
 }
 
 /**
  * 筛选条件的 SQL（server.incidents 上），每项的 :p 是它的参数。categories 为空的行（数据修正还没有补上）不满足 category，
  * 也不被 exclude_category 去掉
  */
-export function categoryConditions(f: CategoryFilters): Array<{ sql: string; value: string[] }> {
+export function classificationConditions(f: ClassificationFilters): Array<{ sql: string; value: string[] }> {
   const out: Array<{ sql: string; value: string[] }> = [];
   if (f.category.length) {
     out.push({ sql: 'categories && :p::text[]', value: f.category });
@@ -72,11 +104,21 @@ export function categoryConditions(f: CategoryFilters): Array<{ sql: string; val
       value: f.excludeComponent,
     });
   }
+  // 服务列为空的行（重新归类还没有补上）不满足 business_domain 与 service，也不被 exclude_business_domain 去掉
+  if (f.businessDomain.length) {
+    out.push({ sql: 'business_domain = ANY(:p::text[])', value: f.businessDomain });
+  }
+  if (f.excludeBusinessDomain.length) {
+    out.push({ sql: 'NOT coalesce(business_domain = ANY(:p::text[]), false)', value: f.excludeBusinessDomain });
+  }
+  if (f.service.length) {
+    out.push({ sql: 'services && :p::text[]', value: f.service });
+  }
   return out;
 }
 
 /** GET /v1/incidents 与 GET /v1/incidents/export 共用的筛选条件（状态与搜索词除外） */
-export interface IncidentFilters extends CategoryFilters {
+export interface IncidentFilters extends ClassificationFilters {
   clusterId: string | null;
   severity: string | null;
   /** 与 [from, to] 有重叠的事件：仍在触发的事件按当前时刻结束 */
@@ -96,7 +138,7 @@ export function incidentConditions(f: IncidentFilters): Array<{ sql: string; val
   if (f.component) {
     out.push({ sql: "(root_component = :p OR jsonb_exists(body->'components', :p))", value: f.component });
   }
-  return [...out, ...categoryConditions(f)];
+  return [...out, ...classificationConditions(f)];
 }
 
 /** 摘要里的类别：取列；数据修正还没有补上时按 body 的成员算（没有类别的成员按 unclassified） */
@@ -105,4 +147,17 @@ export function rowCategories(r: IncidentRow): { categories: IncidentCategory[];
     return { categories: r.categories, primary_category: r.primary_category };
   }
   return incidentCategories(r.body.members, r.body.root.component);
+}
+
+/** 摘要里的服务：取列；重新归类还没有补上时按 body 的成员算（没有服务的成员不计） */
+export function rowServices(r: IncidentRow): IncidentServices {
+  if (r.services) {
+    return {
+      services: r.services,
+      primary_service: r.primary_service,
+      primary_service_source: r.primary_service_source,
+      business_domain: r.business_domain,
+    };
+  }
+  return incidentServices(r.body.members, r.body.root.component);
 }
