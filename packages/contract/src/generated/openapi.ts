@@ -2205,6 +2205,11 @@ export type components = {
       incident_version: number;
       root_component: components['schemas']['ComponentKey'];
     };
+    /**
+     * BusinessDomainId
+     * @description 业务领域的 id（契约 2.53.0，ADR 0193），在全部启用的领域包中唯一。与主动优化的领域（PackDomain，ADR 0146）是两个概念
+     */
+    BusinessDomainId: string;
     /** OptimizationCandidate */
     Candidate: {
       card_ref: components['schemas']['EvidenceRef'];
@@ -4647,6 +4652,8 @@ export type components = {
     'incident.schema': {
       /** @description 合并进本事件的旧事件（incident_aliases：from → into）。旧 URL 与旧标签经别名解析到本事件 */
       aliases: components['schemas']['Alias'][];
+      /** @description primary_service 所属的业务领域（契约 2.53.0）；primary_service 为 null 时为 null */
+      business_domain?: null | components['schemas']['BusinessDomainId'];
       /** @description 前 k 个候选根因，按得分从高到低 */
       candidates: components['schemas']['RootCandidate'][];
       /** @description 当前成员告警的类别的并集，按字典序排列、不重复，至少一项（契约 2.46.0，ADR 0183）；没有当前成员时取全部成员。之前版本写下的事件由数据修正 incident/categories 补上 */
@@ -4673,9 +4680,15 @@ export type components = {
       observability_blind: boolean;
       /** @description 主类别（契约 2.46.0，ADR 0183）：根因组件上的当前成员告警中最严重的一个的类别；根因组件上没有成员告警（没有根因或沉默根因）时取全部当前成员中最严重的一个。同样严重时取开始更早的，再按 alert_id 的字典序 */
       primary_category?: components['schemas']['IncidentCategory'];
+      /** @description 主服务（契约 2.53.0，ADR 0193 §4）：先在服务来源不是 namespace 的成员中取，没有时再在 namespace 来源的成员中取；每一轮取根因组件上最严重的成员的服务，根因组件上没有这样的成员时取全部这样的成员中最严重的一个。都没有服务时为 null */
+      primary_service?: null | components['schemas']['ServiceId'];
+      /** @description primary_service 取自的成员的服务来源；primary_service 为 null 时为 null。namespace 表示推定 */
+      primary_service_source?: null | components['schemas']['ServiceSource'];
       /** @description 最近一次完成的研判给出的根因，读取时由中心附上（ADR 0104 §14）；没有给出根因的研判、事件流与旧版本的事件没有这个字段 */
       research_root?: components['schemas']['ResearchRoot'];
       root: components['schemas']['Root'];
+      /** @description 当前成员告警的服务的并集，按字典序排列、不重复，不含 null（契约 2.53.0，ADR 0193 §4）；没有当前成员时取全部成员。之前版本写下的事件没有这个字段，由数据修正补上 */
+      services?: components['schemas']['ServiceId'][];
       severity: components['schemas']['Severity'];
       /** @description 本事件由哪个事件拆分而来 */
       split_from: null | components['schemas']['Uuid'];
@@ -4769,6 +4782,7 @@ export type components = {
         Member: {
           alert_id: string;
           alertname: string;
+          business_domain?: null | components['schemas']['BusinessDomainId'];
           /** @description 告警的类别（Alert.classification.category，契约 2.46.0）；之前版本写下的成员没有这个字段 */
           category?: components['schemas']['IncidentCategory'];
           component: null | components['schemas']['ComponentKey'];
@@ -4777,6 +4791,9 @@ export type components = {
           /** @description 拆分时离开本事件的版本；仍是成员时为 null */
           left_version: number | null;
           role: components['schemas']['AlertRole'];
+          /** @description 告警的服务（Alert.classification.service，契约 2.53.0）；之前版本写下的成员没有这个字段 */
+          service?: null | components['schemas']['ServiceId'];
+          service_source?: components['schemas']['ServiceSource'];
           severity: components['schemas']['Severity'];
           starts_at: components['schemas']['Timestamp'];
           /** @enum {string} */
@@ -5079,6 +5096,7 @@ export type components = {
     Member: {
       alert_id: string;
       alertname: string;
+      business_domain?: null | components['schemas']['BusinessDomainId'];
       /** @description 告警的类别（Alert.classification.category，契约 2.46.0）；之前版本写下的成员没有这个字段 */
       category?: components['schemas']['IncidentCategory'];
       component: null | components['schemas']['ComponentKey'];
@@ -5087,6 +5105,9 @@ export type components = {
       /** @description 拆分时离开本事件的版本；仍是成员时为 null */
       left_version: number | null;
       role: components['schemas']['AlertRole'];
+      /** @description 告警的服务（Alert.classification.service，契约 2.53.0）；之前版本写下的成员没有这个字段 */
+      service?: null | components['schemas']['ServiceId'];
+      service_source?: components['schemas']['ServiceSource'];
       severity: components['schemas']['Severity'];
       starts_at: components['schemas']['Timestamp'];
       /** @enum {string} */
@@ -6673,6 +6694,11 @@ export type components = {
       occurrences: number;
       root_component: null | components['schemas']['ComponentKey'];
     };
+    /**
+     * ServiceId
+     * @description 服务的 id（契约 2.53.0，ADR 0193）：业务领域里一个可以单独出问题的部分，在全部启用的领域包中唯一
+     */
+    ServiceId: string;
     /** @description 服务签名。签名输入为 ASCII "srenautix-approval-v1" 加一个换行符 0x0A，再接 JCS(statement) 的 UTF-8 字节；statement 为 {"assertion": assertion}，H 档时为 {"assertion": assertion, "reauth": reauth}。 */
     serviceProof: {
       /** @description 服务签名公钥的 ID，对应 approver-keys 中 use=service 的条目。 */
@@ -6683,6 +6709,12 @@ export type components = {
       /** @constant */
       type: 'service_ed25519';
     };
+    /**
+     * ServiceSource
+     * @description 告警服务归属的来源（ADR 0193 §3），按优先级：label 取值为已声明服务的 srenautix_service 标签；catalog 命中的告警目录条目声明了 service；component 告警归属的组件命中服务成员；entity 告警实体命中服务成员；owner 告警实体的顶层属主命中服务成员；namespace 告警的命名空间是某个服务的默认命名空间（推定）；default 都没有，服务为 null
+     * @enum {string}
+     */
+    ServiceSource: 'label' | 'catalog' | 'component' | 'entity' | 'owner' | 'namespace' | 'default';
     Session: {
       /** @description 最近一次认证或重新认证的时间；H 档审批要求在 5 分钟内 */
       auth_time: components['schemas']['Timestamp'];

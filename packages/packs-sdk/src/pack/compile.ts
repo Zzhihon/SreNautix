@@ -28,6 +28,7 @@ import {
 import { compileDomains, type CompiledDomain, type CompiledIndicator } from './domains.js';
 import { compileIssues, type CompiledIssue } from '../remediation/issues.js';
 import type { CompiledConclusion } from '../runtime/conclusions.js';
+import { ServiceCatalog, ServiceCatalogError } from '../business.js';
 
 /** 结论规则的条件总数上限（三类合计） */
 const MAX_CONCLUSION_CONDITIONS = 8;
@@ -168,6 +169,8 @@ export interface PackSet {
   domains: Map<string, CompiledDomain>;
   /** 业务 issue 模板（issues.yaml） */
   issues: CompiledIssue[];
+  /** 业务领域与服务（business.yaml，ADR 0193） */
+  services: ServiceCatalog;
   lock: PackLock;
   lockDigest: string;
 }
@@ -704,6 +707,31 @@ export async function compilePackSet(loaded: LoadedPack[], opts: CompileOptions)
 
   const conclusions = compileConclusions(active, cards, componentTypes);
 
+  // 业务领域与服务（ADR 0193）：id 全局唯一、成员引用的组件类型存在、默认命名空间不重复；告警目录条目的 service 必须已声明
+  let services: ServiceCatalog;
+  try {
+    services = new ServiceCatalog(
+      active.map((p) => ({ pack: p.name, domains: p.content.business.business_domains })),
+      active.flatMap((p) => p.content.components.component_types),
+    );
+  } catch (err) {
+    if (err instanceof ServiceCatalogError) {
+      const p = active.find((x) => x.name === err.pack)!;
+      throw new PackLintError(`${p.dir}/business.yaml`, err.message);
+    }
+    throw err;
+  }
+  for (const p of active) {
+    for (const e of p.content.alerts.entries) {
+      if (e.service !== undefined && !services.service(e.service)) {
+        throw new PackLintError(
+          `${p.dir}/alerts.yaml：${e.id}`,
+          `服务 ${e.service} 没有在任何启用的包的 business.yaml 中声明`,
+        );
+      }
+    }
+  }
+
   // 证据链的排除规则：上下文与规则提议相同，命中时阶段 A 的 disposition 为 ignore
   const excludes: PackSet['excludes'] = [];
   for (const [key, { pack, chain }] of chains) {
@@ -744,6 +772,7 @@ export async function compilePackSet(loaded: LoadedPack[], opts: CompileOptions)
     indicators,
     domains,
     issues,
+    services,
     lock,
     lockDigest: lockDigest(lock),
   };

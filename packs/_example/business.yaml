@@ -1,0 +1,14 @@
+# 业务领域与服务（ADR 0193）：部署方声明哪些对象属于哪块业务。服务成员是组件类型 id，或与组件类型同一写法的 match；
+# 组件类型比服务粗时（一个组件类型覆盖几个服务）用 match 区分。领域与服务的 id 在全部启用的包中唯一。
+business_domains:
+  - id: storefront
+    title: { zh-CN: 商城, en: Storefront }
+    tier: core
+    services:
+      - id: web
+        title: { zh-CN: 前端, en: Web }
+        members:
+          - component_type: example.web
+          - match: { kind: PodDisruptionBudget, name_pattern: '^web$' }
+        # 这个命名空间里归属不到任何服务的告警推定归前端
+        namespaces: [shop]

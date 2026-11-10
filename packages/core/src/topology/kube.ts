@@ -2,7 +2,8 @@
 // 只读取对象的名称与结构；Secret 的内容永远不读，只记录 secretKeyRef 引用的名称。
 // ConfigMap 的值只用于找出 Service DNS 名，边的依据只写键名，不写值。
 import type { ComponentType, Labels, OperatorConvention, TopologyEdge, TopologyNode } from '@srenautix/contract';
-import { nodeKey, parseKey, sameKind, scopedNamespace, tryNodeKey } from '../keys.js';
+import { matchesByName, matchSpecificity } from '@srenautix/packs-sdk/business';
+import { nodeKey, parseKey, scopedNamespace, tryNodeKey } from '../keys.js';
 import { OWNED_BY, SCALES } from './graph.js';
 import type { TopologySnapshot } from './store.js';
 
@@ -115,13 +116,7 @@ function apiGroup(apiVersion: string): string {
  * （例如通用包为 Node、Pod 声明的类型），不会抢走领域包里更具体的类型。约束个数相同时按声明顺序。
  */
 export function typeSpecificity(t: ComponentType): number {
-  const m = t.match;
-  return (
-    Object.keys(m.labels ?? {}).length +
-    (m.name_pattern === undefined ? 0 : 1) +
-    (m.namespaces === undefined ? 0 : 1) +
-    (m.api_group === undefined ? 0 : 1)
-  );
+  return matchSpecificity(t.match);
 }
 
 /**
@@ -134,19 +129,7 @@ export function matchTypeByName(
   name: string,
   types: readonly ComponentType[],
 ): ComponentType | undefined {
-  return mostSpecific(
-    types.filter((t) => {
-      const m = t.match;
-      return (
-        // 实体的 kind 可能带 API 组（Application.argoproj.io），类型按不带组的 kind 声明
-        sameKind(m.kind, kind) &&
-        (m.api_group === undefined || !kind.includes('.') || kind.slice(kind.indexOf('.') + 1) === m.api_group) &&
-        Object.keys(m.labels ?? {}).length === 0 &&
-        (m.name_pattern === undefined || new RegExp(m.name_pattern).test(name)) &&
-        (m.namespaces === undefined || m.namespaces.includes(namespace ?? ''))
-      );
-    }),
-  );
+  return mostSpecific(types.filter((t) => matchesByName(t.match, kind, namespace, name)));
 }
 
 function mostSpecific(matches: ComponentType[]): ComponentType | undefined {

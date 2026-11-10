@@ -18,7 +18,7 @@
 
 | 概念 | 含义 | 键 |
 |---|---|---|
-| 业务领域（Domain） | 一块业务，例如请求转发、请求归档 | `id`，部署内唯一 |
+| 业务领域（BusinessDomain） | 一块业务，例如请求转发、请求归档 | `id`，部署内唯一 |
 | 服务（Service） | 领域里一个可以单独出问题的部分，例如网关、归档导出器 | `id`，部署内唯一，属于一个领域 |
 | 层级（tier） | 领域对业务的重要程度：`core` 核心业务，`supporting` 支撑业务，`foundation` 集群底座与交付，`self` 运维与观测系统自身 | 每个领域一个 |
 
@@ -27,14 +27,16 @@
 - `component_type`：领域包已有的组件类型 id。组件类型与服务一样细时用这种写法。
 - `match`：与组件类型的 `match` 同一模式（kind、`api_group`、命名空间、名称正则），用同一个匹配函数求值。组件类型比服务粗时用这种写法，例如一个组件类型同时覆盖三个服务的逻辑组件，或者内置的 `kubernetes.deployment` 覆盖全部 Deployment。
 
-一个对象命中多个成员时，取最具体的成员：`match` 按它写出的条件数计，`component_type` 按那个组件类型的 `match` 计；同样具体时报包加载错误。
+一个对象命中多个成员时，取最具体的成员：`match` 按它写出的条件数计，`component_type` 按那个组件类型的 `match` 计。同样具体时 `match` 优先于 `component_type`，因为它是为区分这个服务写的；写法也相同时取先加载的包、先声明的成员。
+
+“业务领域”与主动优化的领域（ADR 0146 的 `Domain`、`domains.yaml`，例如 `compute`、`database`）是两个概念。为了不让一个词有两个含义，本 ADR 的类型、文件与字段都带 `business` 前缀。
 
 ### 2. 领域包的声明
 
-领域包增加可选文件 `domains.yaml`：
+领域包增加可选文件 `business.yaml`：
 
 ```yaml
-domains:
+business_domains:
   - id: forwarding
     title: 请求转发
     tier: core
@@ -52,12 +54,12 @@ domains:
 加载规则：
 
 - 领域 `id` 与服务 `id` 在全部启用的包中唯一；重复时包加载失败。
-- 两个服务的成员同样具体地命中同一组对象时包加载失败（§1）。
+- 成员引用的组件类型必须存在于启用的包中。
 - 一个命名空间最多是一个服务的默认命名空间；重复时包加载失败。
 - 告警目录条目可以声明 `service: <服务 id>`，引用的服务必须存在。只给描述的业务与所在对象不同的告警声明，例如归档导出的告警挂在网关的 Pod 上。
 - 汇总其他告警的告警（例如按主题升级的告警，它继承源主题的 `component` 标签）不声明 `service`，按它带的组件归属。为它声明固定的服务会把它汇总的业务全部拉到这个服务下。
 
-仓库自带的包声明三个内置领域：`platform`（集群底座，`foundation`）、`delivery`（发布与交付，`foundation`）、`observability`（观测系统，`self`）。部署方的包可以把内置包的组件类型改归自己的服务：部署方包里的成员关系优先于内置包。
+内置包 `business-foundation` 声明三个领域：`platform`（集群底座，`foundation`）、`delivery`（发布与交付，`foundation`）、`observability`（观测系统，`self`），成员是其他内置包的组件类型。部署方要用自己的领域划分时，按包的启用配置禁用 `business-foundation`，在自己的包里声明全部领域。包之间没有覆盖规则。
 
 ### 3. 一条告警的服务
 
@@ -80,7 +82,7 @@ domains:
 - `services`：当前成员（没有时取全部成员）的服务的并集，按字典序排列，不含 `null`。
 - `primary_service`：先在服务来源不是 `namespace` 的成员中取，没有时再在 `namespace` 来源的成员中取。每一轮里，取根因组件上的成员中最严重的一个的服务；根因组件上没有这样的成员时，取全部这样的成员中最严重的一个。都没有服务时为 `null`。
 - `primary_service_source`：`primary_service` 取自的成员的服务来源，控制台据此标注推定。
-- `primary_domain`：`primary_service` 所属的领域。
+- `business_domain`：`primary_service` 所属的业务领域。成员也带上告警的 `business_domain`，求事件的服务时不需要服务目录。
 
 事件引擎写 `server.incidents` 时一并写这三项，不增加新的写入方。
 
@@ -91,8 +93,8 @@ domains:
 ### 6. 显示与接口
 
 - 事件标题：`<服务名> · <问题陈述>`（问题陈述见 ADR 0190）；没有服务时只显示问题陈述。组件键与事件键移到详情。
-- `GET /v1/incidents` 增加筛选 `domain`、`service`、`exclude_domain`（可以重复），与已有筛选是"且"。
-- `GET /v1/domains` 返回领域、服务、层级与每个服务的进行中事件数。
+- `GET /v1/incidents` 增加筛选 `business_domain`、`service`、`exclude_business_domain`（可以重复），与已有筛选是"且"。
+- `GET /v1/business-domains` 返回业务领域、服务、层级与每个服务的进行中事件数。
 - 收件箱默认按领域分组，组内按首次触发时间倒序。
 - 导出（ADR 0186）与 MCP 增加同样的筛选与字段。
 - Telegram 与飞书的消息标题以 `[<领域名>/<服务名>]` 开头。
@@ -113,8 +115,9 @@ domains:
 
 ## 结果
 
-- 契约增加 `Domain`、`Service`、`AlertClassification.service`、`service_source`，`Incident.services`、`primary_service`、`primary_domain`，以及 §6 的接口；契约 minor 版本加一。
-- `server.incidents` 增加 `services text[]`、`primary_service text`、`primary_service_source text`、`primary_domain text` 四列，只改 schema（ADR 0176）；历史事件由数据修正回填。
+- 契约 2.53.0 增加 `BusinessDomain`、`BusinessService`、`ComponentMatch`（从 `ComponentType.match` 抽出，两者共用），`AlertClassification` 与 `IncidentMember` 的 `service`、`service_source`、`business_domain`，`Incident` 的 `services`、`primary_service`、`primary_service_source`、`business_domain`。§6 的接口在后续版本加入。
+- 服务目录与匹配函数在 `@srenautix/packs-sdk/business`（Apache-2.0）：部署方用 `pack lint` 校验自己的 `business.yaml`。`packages/core` 只做事件的折叠，并从这里取匹配函数。
+- `server.incidents` 增加 `services text[]`、`primary_service text`、`primary_service_source text`、`business_domain text` 四列，只改 schema（ADR 0176）；历史事件由数据修正回填。
 - 验收：在参考部署 11-02 至 11-05 的导出上重算，未归属为 0，网关的 6 种根因组件键归到同一个服务；不改声明，在 11-06 至 11-10 上重算，未归属不超过 5%。
 
 ### 设计时的重放

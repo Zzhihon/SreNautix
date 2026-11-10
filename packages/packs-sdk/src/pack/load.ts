@@ -13,6 +13,7 @@ import {
   type ChecksFile,
   type ComponentsFile,
   type ConclusionsFile,
+  type BusinessFile,
   type DomainsFile,
   type IssuesFile,
   type KnowledgeFile,
@@ -42,6 +43,8 @@ export interface PackContent {
   remediations: RemediationsFile;
   /** domains.yaml：指标与领域（契约 2.28.0） */
   domains: DomainsFile;
+  /** business.yaml：业务领域与服务（契约 2.53.0，ADR 0193） */
+  business: BusinessFile;
   /** issues.yaml：业务 issue 模板（契约 2.28.0） */
   issues: IssuesFile;
   /** skill-bindings.yaml：给技能的部署方数据（契约 2.45.0，ADR 0181） */
@@ -79,6 +82,7 @@ const TOP_FILES = new Set([
   'conclusions.yaml',
   'remediations.yaml',
   'domains.yaml',
+  'business.yaml',
   'issues.yaml',
   'skill-bindings.yaml',
   'rca-params.yaml',
@@ -178,6 +182,7 @@ export function loadPackDir(dir: string, source: string): LoadedPack {
       remediations: [],
     }),
     domains: opt<DomainsFile>('domains.yaml', `${PACK_SCHEMA}#/$defs/DomainsFile`, {}),
+    business: opt<BusinessFile>('business.yaml', `${PACK_SCHEMA}#/$defs/BusinessFile`, { business_domains: [] }),
     issues: opt<IssuesFile>('issues.yaml', `${PACK_SCHEMA}#/$defs/IssuesFile`, { issues: [] }),
     skill_bindings: opt<SkillBindingsFile>('skill-bindings.yaml', `${PACK_SCHEMA}#/$defs/SkillBindingsFile`, {
       bindings: [],

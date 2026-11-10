@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://srenautix.io/contract/schemas/pack.schema.json",
   "title": "PackManifest",
-  "description": "领域包的 pack.yaml（DESIGN §6.3）。领域包只包含数据，不包含可执行代码；其余文件的结构见本文件的 $defs：signals.yaml → SignalsFile，components.yaml → ComponentsFile，alerts.yaml → AlertsFile，chains.yaml → ChainsFile，checks.yaml → ChecksFile，rules.yaml → RulesFile，conclusions.yaml → ConclusionsFile，remediations.yaml → RemediationsFile，domains.yaml → DomainsFile，issues.yaml → IssuesFile，skill-bindings.yaml → SkillBindingsFile，rca-params.yaml → RcaParams，knowledge/*.yaml → KnowledgeFile，action-requests.yaml → ActionRequestsFile，chaos/*.yaml → ChaosFile，tests/*.yaml → PackTestFile，用户层文件 → UserLayer，pack.lock → PackLock",
+  "description": "领域包的 pack.yaml（DESIGN §6.3）。领域包只包含数据，不包含可执行代码；其余文件的结构见本文件的 $defs：signals.yaml → SignalsFile，components.yaml → ComponentsFile，alerts.yaml → AlertsFile，chains.yaml → ChainsFile，checks.yaml → ChecksFile，rules.yaml → RulesFile，conclusions.yaml → ConclusionsFile，remediations.yaml → RemediationsFile，domains.yaml → DomainsFile，business.yaml → BusinessFile，issues.yaml → IssuesFile，skill-bindings.yaml → SkillBindingsFile，rca-params.yaml → RcaParams，knowledge/*.yaml → KnowledgeFile，action-requests.yaml → ActionRequestsFile，chaos/*.yaml → ChaosFile，tests/*.yaml → PackTestFile，用户层文件 → UserLayer，pack.lock → PackLock",
   "type": "object",
   "additionalProperties": false,
   "required": ["api_version", "name", "version", "maturity", "requires"],
@@ -158,6 +158,79 @@
         }
       }
     },
+    "ComponentMatch": {
+      "title": "ComponentMatch",
+      "description": "按 kind、API 组、标签、名称与命名空间匹配对象；组件类型与服务成员（ADR 0193）共用。同时命中多条时，写出的条件多（更具体）的优先",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": { "type": "string" },
+        "api_group": { "type": "string" },
+        "labels": { "$ref": "common.schema.json#/$defs/Labels" },
+        "name_pattern": { "type": "string", "description": "RE2 正则" },
+        "namespaces": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "BusinessFile": {
+      "title": "BusinessFile",
+      "description": "business.yaml（契约 2.53.0，ADR 0193）：部署方的业务领域与服务。领域与服务的 id 在全部启用的包中唯一",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["business_domains"],
+      "properties": {
+        "business_domains": { "type": "array", "items": { "$ref": "#/$defs/BusinessDomain" } }
+      }
+    },
+    "BusinessDomain": {
+      "title": "BusinessDomain",
+      "description": "一块业务（ADR 0193 §1）",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "tier", "services"],
+      "properties": {
+        "id": { "$ref": "common.schema.json#/$defs/BusinessDomainId" },
+        "title": { "$ref": "evidence-card.schema.json#/$defs/LocalizedText" },
+        "tier": { "$ref": "common.schema.json#/$defs/BusinessTier" },
+        "services": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/BusinessService" } }
+      }
+    },
+    "BusinessService": {
+      "title": "BusinessService",
+      "description": "业务领域里一个可以单独出问题的部分（ADR 0193 §1）",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "members"],
+      "properties": {
+        "id": { "$ref": "common.schema.json#/$defs/ServiceId" },
+        "title": { "$ref": "evidence-card.schema.json#/$defs/LocalizedText" },
+        "members": {
+          "type": "array",
+          "description": "服务的成员：组件类型 id（可以是其他包的），或与组件类型同一模式的 match。一个对象命中多个服务的成员时取最具体的；同样具体时取先加载的包、先声明的成员",
+          "items": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["component_type"],
+                "properties": { "component_type": { "type": "string" } }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["match"],
+                "properties": { "match": { "$ref": "#/$defs/ComponentMatch" } }
+              }
+            ]
+          }
+        },
+        "namespaces": {
+          "type": "array",
+          "description": "默认命名空间：这些命名空间里归属不到任何服务的告警推定归这个服务（服务来源 namespace）。一个命名空间最多是一个服务的默认命名空间",
+          "items": { "type": "string" }
+        }
+      }
+    },
     "ComponentType": {
       "title": "ComponentType",
       "type": "object",
@@ -171,18 +244,7 @@
           "default": false,
           "description": "组件在集群之外（例如外部 API 服务方），集群内没有可处置的对象：研判根因落在这种组件上、结论为 likely 及以上时，处置推导以它为 ignore 的依据（ADR 0138）"
         },
-        "match": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["kind"],
-          "properties": {
-            "kind": { "type": "string" },
-            "api_group": { "type": "string" },
-            "labels": { "$ref": "common.schema.json#/$defs/Labels" },
-            "name_pattern": { "type": "string", "description": "RE2 正则" },
-            "namespaces": { "type": "array", "items": { "type": "string" } }
-          }
-        },
+        "match": { "$ref": "#/$defs/ComponentMatch" },
         "chains": { "type": "array", "items": { "type": "string" } },
         "display_name": {
           "type": "array",

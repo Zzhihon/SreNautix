@@ -9,6 +9,11 @@
       "@srenautix/source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./business": {
+      "@srenautix/source": "./src/business.ts",
+      "types": "./dist/business.d.ts",
+      "default": "./dist/business.js"
     }
   },
   "bin": {

@@ -1,5 +1,5 @@
 // 本文件由 packages/contract/scripts/gen.ts 从 contract/ 生成，不要手工修改。
-export const CONTRACT_VERSION = '2.52.0';
+export const CONTRACT_VERSION = '2.53.0';
 
 export const SCHEMAS: Record<string, Record<string, unknown>> = {
   'https://srenautix.io/contract/gateway/v1/action-catalog.schema.json': {
@@ -2336,6 +2336,11 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
           '告警类别（契约 2.46.0，ADR 0183）。告警自带的 srenautix_category 标签优先；条目不写时由 server 的 ingest.category_rules 决定，都没有时为 unclassified',
         $ref: 'common.schema.json#/$defs/AlertCategory',
       },
+      service: {
+        description:
+          '告警描述的业务所在的服务（契约 2.53.0，ADR 0193 §2），引用全部启用的包中声明的服务 id。只给描述的业务与所在对象不同的告警声明；汇总其他告警的告警不声明',
+        $ref: 'common.schema.json#/$defs/ServiceId',
+      },
       component_type: {
         type: 'string',
         description: '告警直接归属的组件类型（components.yaml 声明）；不填时归属解析出的实体本身',
@@ -2494,6 +2499,16 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
               '类别的来源，按优先级：label 告警自带取值合法的 srenautix_category 标签；catalog 命中的告警目录条目声明了 category；builtin server 自己合成的告警（集群状态检测器，ADR 0105）按告警名查内置类别表（契约 2.51.0）；rule 第一条命中的 ingest.category_rules；default 都没有，类别为 unclassified',
             enum: ['label', 'catalog', 'builtin', 'rule', 'default'],
           },
+          service: {
+            description:
+              '告警归属的服务（契约 2.53.0，ADR 0193）；没有任何来源给出服务时为 null。之前版本接入的告警没有这个字段，重新解析时补上',
+            oneOf: [{ type: 'null' }, { $ref: 'common.schema.json#/$defs/ServiceId' }],
+          },
+          service_source: { $ref: 'common.schema.json#/$defs/ServiceSource' },
+          business_domain: {
+            description: 'service 所属的业务领域（契约 2.53.0）；service 为 null 时为 null',
+            oneOf: [{ type: 'null' }, { $ref: 'common.schema.json#/$defs/BusinessDomainId' }],
+          },
         },
       },
     },
@@ -2533,6 +2548,35 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
           '成员告警与事件上的类别：AlertCategory 的取值，或 unclassified（告警标签、告警目录条目与 ingest.category_rules 都没有给出类别）。按类别排除事件时 unclassified 永远不被排除',
         type: 'string',
         enum: ['availability', 'performance', 'provider', 'platform', 'observability', 'unclassified'],
+      },
+      ServiceId: {
+        title: 'ServiceId',
+        description: '服务的 id（契约 2.53.0，ADR 0193）：业务领域里一个可以单独出问题的部分，在全部启用的领域包中唯一',
+        type: 'string',
+        pattern: '^[a-z][a-z0-9-]*$',
+        maxLength: 63,
+      },
+      BusinessDomainId: {
+        title: 'BusinessDomainId',
+        description:
+          '业务领域的 id（契约 2.53.0，ADR 0193），在全部启用的领域包中唯一。与主动优化的领域（PackDomain，ADR 0146）是两个概念',
+        type: 'string',
+        pattern: '^[a-z][a-z0-9-]*$',
+        maxLength: 63,
+      },
+      BusinessTier: {
+        title: 'BusinessTier',
+        description:
+          '业务领域对业务的重要程度（ADR 0193）：core 核心业务；supporting 支撑业务；foundation 集群底座与交付；self 运维与观测系统自身',
+        type: 'string',
+        enum: ['core', 'supporting', 'foundation', 'self'],
+      },
+      ServiceSource: {
+        title: 'ServiceSource',
+        description:
+          '告警服务归属的来源（ADR 0193 §3），按优先级：label 取值为已声明服务的 srenautix_service 标签；catalog 命中的告警目录条目声明了 service；component 告警归属的组件命中服务成员；entity 告警实体命中服务成员；owner 告警实体的顶层属主命中服务成员；namespace 告警的命名空间是某个服务的默认命名空间（推定）；default 都没有，服务为 null',
+        type: 'string',
+        enum: ['label', 'catalog', 'component', 'entity', 'owner', 'namespace', 'default'],
       },
       AlertRole: {
         title: 'AlertRole',
@@ -5780,6 +5824,26 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
           '主类别（契约 2.46.0，ADR 0183）：根因组件上的当前成员告警中最严重的一个的类别；根因组件上没有成员告警（没有根因或沉默根因）时取全部当前成员中最严重的一个。同样严重时取开始更早的，再按 alert_id 的字典序',
         $ref: 'common.schema.json#/$defs/IncidentCategory',
       },
+      services: {
+        type: 'array',
+        description:
+          '当前成员告警的服务的并集，按字典序排列、不重复，不含 null（契约 2.53.0，ADR 0193 §4）；没有当前成员时取全部成员。之前版本写下的事件没有这个字段，由数据修正补上',
+        uniqueItems: true,
+        items: { $ref: 'common.schema.json#/$defs/ServiceId' },
+      },
+      primary_service: {
+        description:
+          '主服务（契约 2.53.0，ADR 0193 §4）：先在服务来源不是 namespace 的成员中取，没有时再在 namespace 来源的成员中取；每一轮取根因组件上最严重的成员的服务，根因组件上没有这样的成员时取全部这样的成员中最严重的一个。都没有服务时为 null',
+        oneOf: [{ type: 'null' }, { $ref: 'common.schema.json#/$defs/ServiceId' }],
+      },
+      primary_service_source: {
+        description: 'primary_service 取自的成员的服务来源；primary_service 为 null 时为 null。namespace 表示推定',
+        oneOf: [{ type: 'null' }, { $ref: 'common.schema.json#/$defs/ServiceSource' }],
+      },
+      business_domain: {
+        description: 'primary_service 所属的业务领域（契约 2.53.0）；primary_service 为 null 时为 null',
+        oneOf: [{ type: 'null' }, { $ref: 'common.schema.json#/$defs/BusinessDomainId' }],
+      },
       changes: {
         type: 'array',
         description: '首次触发前 30 分钟到结束之间、触及事件组件的变更',
@@ -5962,6 +6026,12 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
             description: '告警的类别（Alert.classification.category，契约 2.46.0）；之前版本写下的成员没有这个字段',
             $ref: 'common.schema.json#/$defs/IncidentCategory',
           },
+          service: {
+            description: '告警的服务（Alert.classification.service，契约 2.53.0）；之前版本写下的成员没有这个字段',
+            oneOf: [{ type: 'null' }, { $ref: 'common.schema.json#/$defs/ServiceId' }],
+          },
+          service_source: { $ref: 'common.schema.json#/$defs/ServiceSource' },
+          business_domain: { oneOf: [{ type: 'null' }, { $ref: 'common.schema.json#/$defs/BusinessDomainId' }] },
           status: { type: 'string', enum: ['firing', 'resolved'] },
           starts_at: { $ref: 'common.schema.json#/$defs/Timestamp' },
           ends_at: { oneOf: [{ type: 'null' }, { $ref: 'common.schema.json#/$defs/Timestamp' }] },
@@ -6661,7 +6731,7 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
     $id: 'https://srenautix.io/contract/schemas/pack.schema.json',
     title: 'PackManifest',
     description:
-      '领域包的 pack.yaml（DESIGN §6.3）。领域包只包含数据，不包含可执行代码；其余文件的结构见本文件的 $defs：signals.yaml → SignalsFile，components.yaml → ComponentsFile，alerts.yaml → AlertsFile，chains.yaml → ChainsFile，checks.yaml → ChecksFile，rules.yaml → RulesFile，conclusions.yaml → ConclusionsFile，remediations.yaml → RemediationsFile，domains.yaml → DomainsFile，issues.yaml → IssuesFile，skill-bindings.yaml → SkillBindingsFile，rca-params.yaml → RcaParams，knowledge/*.yaml → KnowledgeFile，action-requests.yaml → ActionRequestsFile，chaos/*.yaml → ChaosFile，tests/*.yaml → PackTestFile，用户层文件 → UserLayer，pack.lock → PackLock',
+      '领域包的 pack.yaml（DESIGN §6.3）。领域包只包含数据，不包含可执行代码；其余文件的结构见本文件的 $defs：signals.yaml → SignalsFile，components.yaml → ComponentsFile，alerts.yaml → AlertsFile，chains.yaml → ChainsFile，checks.yaml → ChecksFile，rules.yaml → RulesFile，conclusions.yaml → ConclusionsFile，remediations.yaml → RemediationsFile，domains.yaml → DomainsFile，business.yaml → BusinessFile，issues.yaml → IssuesFile，skill-bindings.yaml → SkillBindingsFile，rca-params.yaml → RcaParams，knowledge/*.yaml → KnowledgeFile，action-requests.yaml → ActionRequestsFile，chaos/*.yaml → ChaosFile，tests/*.yaml → PackTestFile，用户层文件 → UserLayer，pack.lock → PackLock',
     type: 'object',
     additionalProperties: false,
     required: ['api_version', 'name', 'version', 'maturity', 'requires'],
@@ -6809,6 +6879,81 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
           },
         },
       },
+      ComponentMatch: {
+        title: 'ComponentMatch',
+        description:
+          '按 kind、API 组、标签、名称与命名空间匹配对象；组件类型与服务成员（ADR 0193）共用。同时命中多条时，写出的条件多（更具体）的优先',
+        type: 'object',
+        additionalProperties: false,
+        required: ['kind'],
+        properties: {
+          kind: { type: 'string' },
+          api_group: { type: 'string' },
+          labels: { $ref: 'common.schema.json#/$defs/Labels' },
+          name_pattern: { type: 'string', description: 'RE2 正则' },
+          namespaces: { type: 'array', items: { type: 'string' } },
+        },
+      },
+      BusinessFile: {
+        title: 'BusinessFile',
+        description:
+          'business.yaml（契约 2.53.0，ADR 0193）：部署方的业务领域与服务。领域与服务的 id 在全部启用的包中唯一',
+        type: 'object',
+        additionalProperties: false,
+        required: ['business_domains'],
+        properties: { business_domains: { type: 'array', items: { $ref: '#/$defs/BusinessDomain' } } },
+      },
+      BusinessDomain: {
+        title: 'BusinessDomain',
+        description: '一块业务（ADR 0193 §1）',
+        type: 'object',
+        additionalProperties: false,
+        required: ['id', 'title', 'tier', 'services'],
+        properties: {
+          id: { $ref: 'common.schema.json#/$defs/BusinessDomainId' },
+          title: { $ref: 'evidence-card.schema.json#/$defs/LocalizedText' },
+          tier: { $ref: 'common.schema.json#/$defs/BusinessTier' },
+          services: { type: 'array', minItems: 1, items: { $ref: '#/$defs/BusinessService' } },
+        },
+      },
+      BusinessService: {
+        title: 'BusinessService',
+        description: '业务领域里一个可以单独出问题的部分（ADR 0193 §1）',
+        type: 'object',
+        additionalProperties: false,
+        required: ['id', 'title', 'members'],
+        properties: {
+          id: { $ref: 'common.schema.json#/$defs/ServiceId' },
+          title: { $ref: 'evidence-card.schema.json#/$defs/LocalizedText' },
+          members: {
+            type: 'array',
+            description:
+              '服务的成员：组件类型 id（可以是其他包的），或与组件类型同一模式的 match。一个对象命中多个服务的成员时取最具体的；同样具体时取先加载的包、先声明的成员',
+            items: {
+              oneOf: [
+                {
+                  type: 'object',
+                  additionalProperties: false,
+                  required: ['component_type'],
+                  properties: { component_type: { type: 'string' } },
+                },
+                {
+                  type: 'object',
+                  additionalProperties: false,
+                  required: ['match'],
+                  properties: { match: { $ref: '#/$defs/ComponentMatch' } },
+                },
+              ],
+            },
+          },
+          namespaces: {
+            type: 'array',
+            description:
+              '默认命名空间：这些命名空间里归属不到任何服务的告警推定归这个服务（服务来源 namespace）。一个命名空间最多是一个服务的默认命名空间',
+            items: { type: 'string' },
+          },
+        },
+      },
       ComponentType: {
         title: 'ComponentType',
         type: 'object',
@@ -6823,18 +6968,7 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
             description:
               '组件在集群之外（例如外部 API 服务方），集群内没有可处置的对象：研判根因落在这种组件上、结论为 likely 及以上时，处置推导以它为 ignore 的依据（ADR 0138）',
           },
-          match: {
-            type: 'object',
-            additionalProperties: false,
-            required: ['kind'],
-            properties: {
-              kind: { type: 'string' },
-              api_group: { type: 'string' },
-              labels: { $ref: 'common.schema.json#/$defs/Labels' },
-              name_pattern: { type: 'string', description: 'RE2 正则' },
-              namespaces: { type: 'array', items: { type: 'string' } },
-            },
-          },
+          match: { $ref: '#/$defs/ComponentMatch' },
           chains: { type: 'array', items: { type: 'string' } },
           display_name: {
             type: 'array',

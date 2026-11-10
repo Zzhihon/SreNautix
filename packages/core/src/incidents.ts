@@ -16,6 +16,9 @@ import type {
   IncidentCategory,
   IncidentMember,
   Severity,
+  BusinessDomainId,
+  ServiceId,
+  ServiceSource,
 } from '@srenautix/contract';
 import { changeLinks, groupChanges } from './change-grade.js';
 import { UNCLASSIFIED } from './classify.js';
@@ -346,7 +349,7 @@ export function reconcileIncidents(input: ReconcileInput): ReconcileResult {
       incident_version: p.incident_version + 1,
       members: mergedMembers,
       // 成员全部离开，类别取全部成员（之前版本写下的事件在这里补上类别）
-      ...incidentCategories(mergedMembers, p.root.component),
+      ...incidentClassification(mergedMembers, p.root.component),
       updated_at: now,
     };
     out.set(merged.incident_id, merged);
@@ -430,29 +433,99 @@ type CategoryMember = Pick<
   'alert_id' | 'component' | 'severity' | 'starts_at' | 'category' | 'left_version'
 >;
 
+type PrimaryCandidate = Pick<IncidentMember, 'alert_id' | 'component' | 'severity' | 'starts_at'>;
+
+/** 当前成员；没有当前成员时取全部成员 */
+function currentPool<T extends Pick<IncidentMember, 'left_version'>>(members: readonly T[]): readonly T[] {
+  const current = members.filter((m) => m.left_version === null);
+  return current.length > 0 ? current : members;
+}
+
+/**
+ * 决定事件主属性的成员（类别与服务共用）：根因组件上的成员中最严重的一个，根因组件上没有成员时取全部中最严重的一个，
+ * 同样严重时取开始更早的，再按 alert_id；pool 为空时为 undefined
+ */
+function primaryMember<T extends PrimaryCandidate>(
+  pool: readonly T[],
+  rootComponent: ComponentKey | null,
+): T | undefined {
+  const onRoot = rootComponent === null ? [] : pool.filter((m) => m.component === rootComponent);
+  return [...(onRoot.length > 0 ? onRoot : pool)].sort(
+    (a, b) =>
+      SEVERITY_RANK[b.severity] - SEVERITY_RANK[a.severity] ||
+      parseTime(a.starts_at) - parseTime(b.starts_at) ||
+      a.alert_id.localeCompare(b.alert_id),
+  )[0];
+}
+
 /**
  * 事件的类别与主类别（ADR 0183）。categories 是当前成员（没有时取全部成员）的类别的并集，按字典序排列；
- * primary_category 取根因组件上的成员中最严重的一个，根因组件上没有成员时取全部成员中最严重的一个，
- * 同样严重时取开始更早的，再按 alert_id。没有类别的成员（之前版本写下的）按 unclassified
+ * primary_category 取 primaryMember 的类别。没有类别的成员（之前版本写下的）按 unclassified
  */
 export function incidentCategories(
   members: readonly CategoryMember[],
   rootComponent: ComponentKey | null,
 ): { categories: IncidentCategory[]; primary_category: IncidentCategory } {
-  const current = members.filter((m) => m.left_version === null);
-  const pool = current.length > 0 ? current : members;
-  if (pool.length === 0) {
+  const pool = currentPool(members);
+  const primary = primaryMember(pool, rootComponent);
+  if (!primary) {
     return { categories: [UNCLASSIFIED], primary_category: UNCLASSIFIED };
   }
   const categories = [...new Set(pool.map((m) => m.category ?? UNCLASSIFIED))].sort();
-  const onRoot = rootComponent === null ? [] : pool.filter((m) => m.component === rootComponent);
-  const primary = [...(onRoot.length > 0 ? onRoot : pool)].sort(
-    (a, b) =>
-      SEVERITY_RANK[b.severity] - SEVERITY_RANK[a.severity] ||
-      parseTime(a.starts_at) - parseTime(b.starts_at) ||
-      a.alert_id.localeCompare(b.alert_id),
-  )[0]!;
   return { categories, primary_category: primary.category ?? UNCLASSIFIED };
+}
+
+type ServiceMember = PrimaryCandidate &
+  Pick<IncidentMember, 'left_version' | 'service' | 'service_source' | 'business_domain'>;
+
+export interface IncidentServices {
+  services: ServiceId[];
+  primary_service: ServiceId | null;
+  primary_service_source: ServiceSource | null;
+  business_domain: BusinessDomainId | null;
+}
+
+/**
+ * 事件的服务（ADR 0193 §4）。services 是当前成员（没有时取全部成员）的服务的并集，按字典序排列，不含 null；
+ * 主服务先在服务来源不是 namespace 的成员中按 primaryMember 取，没有时再在 namespace 来源的成员中取
+ */
+export function incidentServices(
+  members: readonly ServiceMember[],
+  rootComponent: ComponentKey | null,
+): IncidentServices {
+  const pool = currentPool(members).filter((m) => m.service != null);
+  const services = [...new Set(pool.map((m) => m.service!))].sort();
+  const primary =
+    primaryMember(
+      pool.filter((m) => m.service_source !== 'namespace'),
+      rootComponent,
+    ) ?? primaryMember(pool, rootComponent);
+  return {
+    services,
+    primary_service: primary?.service ?? null,
+    primary_service_source: primary ? (primary.service_source ?? null) : null,
+    business_domain: primary?.business_domain ?? null,
+  };
+}
+
+/** 事件按成员求出的归类：类别与服务 */
+export function incidentClassification(
+  members: readonly (CategoryMember & ServiceMember)[],
+  rootComponent: ComponentKey | null,
+): ReturnType<typeof incidentCategories> & IncidentServices {
+  return { ...incidentCategories(members, rootComponent), ...incidentServices(members, rootComponent) };
+}
+
+/** 成员从告警复制的归类字段：类别与服务 */
+function memberClassification(
+  a: Alert,
+): Pick<IncidentMember, 'category' | 'service' | 'service_source' | 'business_domain'> {
+  return {
+    category: alertCategory(a),
+    service: a.classification.service ?? null,
+    service_source: a.classification.service_source ?? 'default',
+    business_domain: a.classification.business_domain ?? null,
+  };
 }
 
 function member(a: Alert, version: number): IncidentMember {
@@ -462,7 +535,7 @@ function member(a: Alert, version: number): IncidentMember {
     role: a.classification.role,
     component: a.component,
     severity: a.severity,
-    category: alertCategory(a),
+    ...memberClassification(a),
     status: a.status,
     starts_at: a.starts_at,
     ends_at: a.ends_at,
@@ -495,7 +568,7 @@ function createIncident(
     candidates: g.candidates,
     members,
     components: g.components,
-    ...incidentCategories(members, c.ranking.root.component),
+    ...incidentClassification(members, c.ranking.root.component),
     changes: g.changes as ChangeEvent[],
     change_links: g.change_links,
     aliases: [],
@@ -534,7 +607,7 @@ function applyGroup(p: Incident, c: ComputedIncident, topologyVersion: number, n
           ends_at: a.ends_at,
           role: a.classification.role,
           component: a.component,
-          category: alertCategory(a),
+          ...memberClassification(a),
         }
       : { ...m, left_version: version };
   });
@@ -555,7 +628,7 @@ function applyGroup(p: Incident, c: ComputedIncident, topologyVersion: number, n
     candidates: g.candidates,
     members,
     components: g.components,
-    ...incidentCategories(members, c.ranking.root.component),
+    ...incidentClassification(members, c.ranking.root.component),
     changes: g.changes as ChangeEvent[],
     change_links: g.change_links,
     suppressed: g.suppressed,

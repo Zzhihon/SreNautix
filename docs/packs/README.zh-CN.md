@@ -18,6 +18,7 @@ SDK 在 `packages/packs-sdk`（Apache-2.0），命令行入口是 `srenautix pac
 | `conclusions.yaml` | `ConclusionsFile` | 确定性结论规则：证据卡、告警与变更的条件全部成立时给出根因候选与机制 |
 | `remediations.yaml` | `RemediationsFile` | 修复补丁模板：条件满足时生成 GitOps 仓库的补丁，经 `gitops_pr` 开 PR |
 | `domains.yaml` | `DomainsFile` | 主动优化的指标目录与领域：诊断卡、份额卡、模板、门槛、趋势、体检计划、负载保护卡 |
+| `business.yaml` | `BusinessFile` | 部署方的业务领域与服务（ADR 0193）：服务的成员（组件类型或 `match`）与默认命名空间；事件按它归属到服务 |
 | `issues.yaml` | `IssuesFile` | 主动优化的业务仓库 issue 模板：适用条件、代码定位的锚点、建议、预期收益与验证计划 |
 | `rca-params.yaml` | `RcaParams` | 根因排序参数；修改需要通过回放门禁 |
 | `action-requests.yaml` | `ActionRequestsFile` | 动作启用申请，经 Git PR 合入策略后生效 |
