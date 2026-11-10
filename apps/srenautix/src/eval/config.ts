@@ -4,7 +4,7 @@ import { z } from 'zod';
 import type { ModelRoute } from '@srenautix/contract';
 import { alertMatcher, upgradeMatchers } from '../alerts/business-impact.js';
 import { readSecretFile } from '../kernel/files.js';
-import { NOTIFY_RULES_DEFAULT, notifyRules } from '../config/server.js';
+import { NOTIFY_RULES_DEFAULT, notifyRules } from '../notify/config.js';
 import { logger } from '../kernel/log.js';
 import { NOVELTY_CONFIG_DEFAULT, noveltyConfig } from '../config/novelty.js';
 import { DEFAULT_BUDGET, type BudgetConfig } from '../llm/budget.js';

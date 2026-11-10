@@ -9,7 +9,7 @@ import { TelegramAdapter } from '../channels/telegram/adapter.js';
 import { TelegramClient } from '../channels/telegram/client.js';
 import { TelegramUpdates } from '../channels/telegram/updates.js';
 import { parseDuration, readSecretFile } from '../kernel/files.js';
-import type { ServerConfig } from '../config/server.js';
+import type { NotifyConfig } from './config.js';
 import { logger } from '../kernel/log.js';
 import type { ServerMetrics } from '../kernel/metrics.js';
 import type { ChannelAdapter } from './channel.js';
@@ -24,7 +24,7 @@ export type * from './ports.js';
 
 export interface NotifyDeps {
   pool: pg.Pool;
-  config: ServerConfig['notify'];
+  config: NotifyConfig;
   publicUrl: string;
   source: MessageSource;
   actions: NotifyActions;

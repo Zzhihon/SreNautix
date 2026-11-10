@@ -5,7 +5,7 @@ import type { RawAlert } from '../ingest/normalize.js';
 import { logger } from '../kernel/log.js';
 import type { ServerMetrics } from '../kernel/metrics.js';
 import { tx, type Queryable } from '../kernel/store/pool.js';
-import type { ServerConfig } from '../config/server.js';
+import type { DetectorsConfig } from './config.js';
 import { parseDuration } from '../kernel/files.js';
 import type { HealthState, ObjectHealth } from './health.js';
 
@@ -24,7 +24,7 @@ export interface DetectorSettings {
 }
 
 /** server 配置的 detectors → 检测设置 */
-export function detectorSettings(d: ServerConfig['detectors']): DetectorSettings {
+export function detectorSettings(d: DetectorsConfig): DetectorSettings {
   const ms = (k: string, v: string) => parseDuration(`detectors.${k}`, v);
   const equivalentAlerts = Object.fromEntries(
     (Object.keys(DEFAULT_EQUIVALENTS) as HealthState[]).map((st) => [

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { parseDuration } from '../../src/kernel/files.js';
-import { NOTIFY_RULES_DEFAULT, parseServerConfig } from '../../src/config/server.js';
+import { parseServerConfig } from '../../src/config/server.js';
+import { NOTIFY_RULES_DEFAULT } from '../../src/notify/config.js';
 import { ServerMetrics } from '../../src/kernel/metrics.js';
 
 // 外部上游汇总的等待（ADR 0147）：notify.digest.external_roots.grace 是周期结束后等待多久再统计与发送，默认 30s，

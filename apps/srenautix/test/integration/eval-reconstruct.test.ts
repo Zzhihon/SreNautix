@@ -13,7 +13,7 @@ import {
 } from '@srenautix/contract';
 import { DEFAULT_REVISION_LABELS } from '../../src/changes/kubernetes.js';
 import { NOVELTY_CONFIG_DEFAULT } from '../../src/config/novelty.js';
-import { NOTIFY_RULES_DEFAULT } from '../../src/config/server.js';
+import { NOTIFY_RULES_DEFAULT } from '../../src/notify/config.js';
 import { ServerMetrics } from '../../src/kernel/metrics.js';
 import { Catalog } from '../../src/proposals/catalog.js';
 import { serverTracks } from '../../src/roles/server-schema.js';

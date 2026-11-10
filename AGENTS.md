@@ -66,7 +66,7 @@ Alertmanager webhook ─► ingest ─► incident engine ─► stage A (determ
 |---|---|---|
 | API and shared types | `contract/openapi.yaml`, `contract/schemas` | Bump the version in `contract/VERSION`, `contract/openapi.yaml` (`info.version`) and `packages/contract/package.json`; run `pnpm contract:gen` |
 | Gateway CRD, admission policy, test vectors | Go types in `internal/spoke/gateway/execution` | `make gateway-generate`; never edit `contract/gateway/v1/crd` by hand |
-| Server config keys | `apps/srenautix/src/config/server.ts` | Add the Helm value, its mapping in `_config.tpl` and a helm unittest |
+| Server config keys | The owning module's `config.ts` (`apps/srenautix/src/notify/config.ts`, `apps/srenautix/src/changes/config.ts`, `apps/srenautix/src/detectors/config.ts`, `apps/srenautix/src/optimize/config.ts`, `apps/srenautix/src/skills/config.ts`); other sections in `apps/srenautix/src/config/server.ts`, which only composes | Add the Helm value, its mapping in `_config.tpl` and a helm unittest |
 | Database schema | the module's `migrations.ts` | Migrations only add schema (ADR 0176); rewrite rows in a data correction listed in `apps/srenautix/src/roles/server-schema.ts` |
 | Console text | `packages/ui/src/i18n/zh-CN.json` and `en.json` | `rg` the old text in `web/console/e2e` and update the assertions |
 | Test backend versions | `packages/integration-sdk/backends.json` | CI caches `.scratch/backends` by the file hash |
