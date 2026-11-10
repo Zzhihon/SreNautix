@@ -302,5 +302,17 @@ CREATE TABLE server.incident_claim_events (
 CREATE INDEX incident_claim_events_incident_idx ON server.incident_claim_events (incident_id, id DESC);
 `,
     },
+    {
+      version: 13,
+      name: 'research mirror state check',
+      phase: 'expand',
+      sql: `
+-- 状态列只接受契约里的取值（契约枚举与这里的列表由 test/unit/state-checks.test.ts 核对）。NOT VALID：只约束新写入，
+-- 不扫描已有的行，已有数据里出现意外取值时迁移也不会失败（ADR 0176：N-1 版本写入的取值相同）
+ALTER TABLE server.research_runs ADD CONSTRAINT research_runs_state_check
+  CHECK (state IN ('queued', 'hypothesize', 'discriminate', 'conclude', 'completed', 'stage_a_only', 'failed', 'superseded'))
+  NOT VALID;
+`,
+    },
   ],
 };

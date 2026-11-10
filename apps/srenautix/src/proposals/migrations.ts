@@ -170,5 +170,17 @@ CREATE TABLE server.eval_candidates (
 CREATE INDEX eval_candidates_state_idx ON server.eval_candidates (state, created_at DESC);
 `,
     },
+    {
+      version: 5,
+      name: 'proposal state check',
+      phase: 'expand',
+      sql: `
+-- 状态列只接受契约里的取值（契约枚举与这里的列表由 test/unit/state-checks.test.ts 核对）。NOT VALID：只约束新写入，
+-- 不扫描已有的行，已有数据里出现意外取值时迁移也不会失败（ADR 0176：N-1 版本写入的取值相同）
+ALTER TABLE server.proposals ADD CONSTRAINT proposals_state_check
+  CHECK (state IN ('rejected_by_policy', 'awaiting_approval', 'approved', 'held', 'dispatched', 'rejected', 'expired', 'stale', 'duplicate'))
+  NOT VALID;
+`,
+    },
   ],
 };
