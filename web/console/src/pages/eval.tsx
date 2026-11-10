@@ -285,7 +285,7 @@ function Scorecard({ report }: { report: EvalReport }) {
   );
 }
 
-type EvalCase = HubComponents['schemas']['EvalCase'];
+type EvalCaseSummary = HubComponents['schemas']['EvalCaseSummary'];
 type Trend = HubOperations['getEvalTrend']['responses'][200]['content']['application/json'];
 type Estimate = HubOperations['estimateEval']['responses'][200]['content']['application/json'];
 
@@ -295,7 +295,7 @@ function CaseBrowser({ suite, mode }: { suite: string; mode: EvalMode }) {
   const q = useQuery({
     queryKey: ['eval', 'cases', suite, mode],
     queryFn: async () =>
-      ok<{ items: EvalCase[]; next_cursor: string | null }>(
+      ok<{ items: EvalCaseSummary[]; next_cursor: string | null }>(
         'listEvalCases',
         await hub.GET('/v1/eval/cases', { params: { query: { suite, mode, limit: 200 } } }),
       ),
