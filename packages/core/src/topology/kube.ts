@@ -2,7 +2,7 @@
 // 只读取对象的名称与结构；Secret 的内容永远不读，只记录 secretKeyRef 引用的名称。
 // ConfigMap 的值只用于找出 Service DNS 名，边的依据只写键名，不写值。
 import type { ComponentType, Labels, OperatorConvention, TopologyEdge, TopologyNode } from '@srenautix/contract';
-import { matchesByName, matchSpecificity } from '@srenautix/packs-sdk/business';
+import { byNameSpecificity, matchSpecificity } from '@srenautix/packs-sdk/business';
 import { nodeKey, parseKey, scopedNamespace, tryNodeKey } from '../keys.js';
 import { OWNED_BY, SCALES } from './graph.js';
 import type { TopologySnapshot } from './store.js';
@@ -121,7 +121,8 @@ export function typeSpecificity(t: ComponentType): number {
 
 /**
  * 按 kind、命名空间与名称匹配组件类型：没有拓扑节点的实体（例如领域包的自定义 kind、告警里的 CRD 对象）用它。
- * 带 labels 约束的类型无法核对，跳过；api_group 无法核对，视为满足（kind 已经限定），仍计入具体度。
+ * 带 labels 约束的类型无法核对，跳过；kind 不带 API 组时 api_group 无法核对，视为满足，但不计入具体度
+ * （byNameSpecificity）。具体度相同时按声明顺序。
  */
 export function matchTypeByName(
   kind: string,
@@ -129,7 +130,14 @@ export function matchTypeByName(
   name: string,
   types: readonly ComponentType[],
 ): ComponentType | undefined {
-  return mostSpecific(types.filter((t) => matchesByName(t.match, kind, namespace, name)));
+  let best: { type: ComponentType; specificity: number } | undefined;
+  for (const type of types) {
+    const specificity = byNameSpecificity(type.match, kind, namespace, name);
+    if (specificity !== null && (!best || specificity > best.specificity)) {
+      best = { type, specificity };
+    }
+  }
+  return best?.type;
 }
 
 function mostSpecific(matches: ComponentType[]): ComponentType | undefined {

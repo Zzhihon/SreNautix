@@ -27,7 +27,7 @@
 - `component_type`：领域包已有的组件类型 id。组件类型与服务一样细时用这种写法。
 - `match`：与组件类型的 `match` 同一模式（kind、`api_group`、命名空间、名称正则），用同一个匹配函数求值。组件类型比服务粗时用这种写法，例如一个组件类型同时覆盖三个服务的逻辑组件，或者内置的 `kubernetes.deployment` 覆盖全部 Deployment。
 
-一个对象命中多个成员时，取最具体的成员：`match` 按它写出的条件数计，`component_type` 按那个组件类型的 `match` 计。同样具体时 `match` 优先于 `component_type`，因为它是为区分这个服务写的；写法也相同时取先加载的包、先声明的成员。
+一个对象命中多个成员时，取最具体的成员：`match` 按它写出的条件数计，`component_type` 按那个组件类型的 `match` 计。只按 kind 与名称核对的对象（组件键、告警里的实体）只计实际核对过的条件：kind 不带 API 组时 `api_group` 没有核对，不计入（组件类型的按名称匹配同样如此）。同样具体时 `match` 优先于 `component_type`，因为它是为区分这个服务写的；写法也相同时取先加载的包、先声明的成员。
 
 “业务领域”与主动优化的领域（ADR 0146 的 `Domain`、`domains.yaml`，例如 `compute`、`database`）是两个概念。为了不让一个词有两个含义，本 ADR 的类型、文件与字段都带 `business` 前缀。
 
