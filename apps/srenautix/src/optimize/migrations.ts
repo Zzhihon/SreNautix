@@ -137,5 +137,20 @@ ALTER TABLE server.optimization_recommendations ADD COLUMN issue_state text
   CHECK (issue_state IN ('pending', 'unknown', 'open', 'closed'));
 `,
     },
+    {
+      version: 3,
+      name: 'finding and recommendation state checks',
+      phase: 'expand',
+      sql: `
+-- 状态列只接受契约里的取值（契约枚举与这里的列表由 test/unit/state-checks.test.ts 核对）。NOT VALID：只约束新写入，
+-- 不扫描已有的行，已有数据里出现意外取值时迁移也不会失败（ADR 0176：N-1 版本写入的取值相同）
+ALTER TABLE server.optimization_findings ADD CONSTRAINT optimization_findings_status_check
+  CHECK (status IN ('open', 'recommended', 'accepted', 'verifying', 'fixed', 'no_effect', 'regressed', 'rejected', 'suppressed'))
+  NOT VALID;
+ALTER TABLE server.optimization_recommendations ADD CONSTRAINT optimization_recommendations_state_check
+  CHECK (state IN ('blocked', 'open', 'recommended', 'verifying', 'improved', 'no_effect', 'regressed', 'rejected', 'superseded', 'failed'))
+  NOT VALID;
+`,
+    },
   ],
 };
