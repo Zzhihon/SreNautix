@@ -438,6 +438,29 @@ describe('结论头', () => {
   });
 });
 
+describe('详情页的标题（ADR 0190、0193）', () => {
+  it('标题是问题陈述，根因写在副行；事件键与版本只在集群的悬停提示里', () => {
+    const inc = incident({
+      headline: {
+        alert_id: 'f0e1d2c3b4a59687@1760854680',
+        alertname: 'GatewayErrorRateHigh',
+        summary: 'gateway 5xx 比例 12%，超过 5%',
+        started_at: '2026-10-19T06:18:00Z',
+        research_summary: null,
+      },
+    });
+    renderUi(<VerdictHeader incident={inc} stageA={null} latestRun={null} evidence={[]} conditions={[]} now={NOW} />);
+    const h1 = screen.getByRole('heading', { level: 1 });
+    expect(h1.textContent).toBe('gateway 5xx 比例 12%，超过 5%');
+    expect(screen.getByText(/^根因 pg-main（/)).toBeTruthy();
+    const head = screen.getByRole('region', { name: '结论' });
+    expect(head.textContent).not.toContain(inc.label);
+    expect(screen.getByText('prod').getAttribute('title')).toBe(
+      `事件键 ${inc.label}\nv3 · 拓扑 v${inc.topology_version}`,
+    );
+  });
+});
+
 describe('组件的可读名称', () => {
   it('有名称时显示名称，副标题带对象名；组件键不变；没有名称时显示对象名', () => {
     expect(componentLabel('postgres.cluster:db/pg-main', { 'postgres.cluster:db/pg-main': '订单主库' })).toEqual({

@@ -264,6 +264,7 @@
   "feedback.sum_by": "{who} ({channel})",
   "verdict.label": "Verdict",
   "verdict.version": "v{v} · topology v{topo}",
+  "verdict.root_line": "Root {root} ({sub})",
   "verdict.duration": "Lasting {d}",
   "verdict.ambiguous": "Ambiguous root (margin {margin})",
   "verdict.silent_root": "Silent root: no alert points at it; found by a probe card",

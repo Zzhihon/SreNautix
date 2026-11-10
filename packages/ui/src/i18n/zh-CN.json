@@ -264,6 +264,7 @@
   "feedback.sum_by": "{who}（{channel}）",
   "verdict.label": "结论",
   "verdict.version": "v{v} · 拓扑 v{topo}",
+  "verdict.root_line": "根因 {root}（{sub}）",
   "verdict.duration": "持续 {d}",
   "verdict.ambiguous": "根因有歧义（分差 {margin}）",
   "verdict.silent_root": "沉默根因：没有告警指向它，由探测卡发现",
