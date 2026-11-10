@@ -4,6 +4,7 @@
 # 用法：check-doc-paths.sh <文档>...
 set -euo pipefail
 
+tick=$(printf '\x60')
 status=0
 for doc in "$@"; do
   while IFS= read -r p; do
@@ -12,6 +13,7 @@ for doc in "$@"; do
       echo "::error file=$doc::$doc 引用的路径不存在：$p"
       status=1
     fi
-  done < <(grep -oE '`[^` ]+`' "$doc" | tr -d '`' | grep '/' | grep -vE '^[-/.~$]|://|[*<>{}()=|]|^@|^[A-Z_]+=' | sort -u)
+  done < <(grep -oE "${tick}[^${tick} ]+${tick}" "$doc" | tr -d "$tick" | grep '/' |
+    grep -vE '^[-/.~$]|://|[*<>{}()=|]|^@|^[A-Z_]+=' | sort -u)
 done
 exit "$status"
