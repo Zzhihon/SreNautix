@@ -396,6 +396,8 @@ jobs:
         run: deploy/kind/check-scenarios.sh
       - name: 仓库地图引用的路径都存在
         run: .github/scripts/check-doc-paths.sh AGENTS.md
+      - name: ADR 索引与 ADR 一致，没有悬空的 ADR 引用
+        run: node hack/adr-index.mjs --check
       - name: shellcheck（deploy/ 与 .github/scripts/ 下的脚本）
         run: git ls-files 'deploy/**/*.sh' '.github/scripts/*.sh' | xargs ./shellcheck -x
 

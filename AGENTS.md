@@ -83,7 +83,7 @@ Alertmanager webhook ─► ingest ─► incident engine ─► stage A (determ
 ## Rules
 
 - Every change reaches `main` through a pull request. Merge only when CI is green; a red required job is a real failure until you prove otherwise.
-- One decision per ADR. Give a new ADR the next free number after the highest in `docs/adr`. When a new ADR changes an old one, say so in both.
+- One decision per ADR. Give a new ADR the next free number after the highest in `docs/adr`. When a new ADR changes an old one, add `状态：部分取代（见 NNNN）` or `状态：已取代（见 NNNN）` under the old one's title, then run `node hack/adr-index.mjs`; CI checks `docs/adr/README.md` is current and no ADR cites a missing one.
 - Write user-facing text, comments and ADRs in Simplified Chinese, in short sentences. Keep identifiers in their original form.
 - Use Conventional Commits: `type(scope): subject`.
 - Never weaken a safety invariant (`POSITIONING.zh-CN.md`, `test/invariants`) without a test for it in the same pull request.
