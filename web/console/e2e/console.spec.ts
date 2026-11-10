@@ -105,7 +105,9 @@ test('事件详情：结论头、内联待审批、标签页写进 URL；不可�
   const head = page.getByRole('region', { name: '结论' });
   await expect(head).toBeVisible();
   await expect(head).toContainText('进行中');
-  await expect(head).toContainText(s.label);
+  // 标题写问题（ADR 0193 的 headline），内部标签只在悬停说明里
+  await expect(head.getByRole('heading', { level: 1 })).not.toContainText(s.label);
+  await expect(head.locator(`[title*="${s.label}"]`)).toHaveCount(1);
   await expect(page.getByText('待审批的提议（2）')).toBeVisible();
   await expect(page.getByRole('link', { name: '打开审批页' })).toHaveCount(2);
 
@@ -151,7 +153,7 @@ test('告警链接：按告警的全部标签打开所属事件；找不到时�
       '&l.prometheus=monitoring%2Fkps-prometheus&l.severity=critical',
   );
   await expect(page).toHaveURL(new RegExp(`/incidents/${s.incidentId}\\?`));
-  await expect(page.getByRole('region', { name: '结论' })).toContainText(s.label);
+  await expect(page.getByRole('region', { name: '结论' }).locator(`[title*="${s.label}"]`)).toHaveCount(1);
   // 替换了历史记录：后退不回到告警链接
   await page.goBack();
   await expect(page).not.toHaveURL(/\/alerts\?/);
