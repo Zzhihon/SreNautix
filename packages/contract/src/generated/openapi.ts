@@ -2970,7 +2970,7 @@ export type components = {
       /** @enum {string} */
       type: 'incident' | 'benign' | 'abstain';
     };
-    EvalCase: {
+    EvalCaseSummary: {
       case_id: string;
       created_at: components['schemas']['Timestamp'];
       excluded: {
@@ -8571,7 +8571,7 @@ export interface operations {
         };
         content: {
           'application/json': {
-            items: components['schemas']['EvalCase'][];
+            items: components['schemas']['EvalCaseSummary'][];
             next_cursor: string | null;
           };
         };

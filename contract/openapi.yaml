@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: SreNautix hub API
-  version: 2.60.0
+  version: 2.60.1
   license:
     name: Apache-2.0
     identifier: Apache-2.0
@@ -1411,7 +1411,7 @@ paths:
                 additionalProperties: false
                 required: [items, next_cursor]
                 properties:
-                  items: { type: array, items: { $ref: '#/components/schemas/EvalCase' } }
+                  items: { type: array, items: { $ref: '#/components/schemas/EvalCaseSummary' } }
                   next_cursor: { type: [string, 'null'] }
   /v1/eval/trend:
     get:
@@ -3325,7 +3325,7 @@ components:
           description: 正确的处置判断；benign 为 ignore，abstain 为 null
           oneOf: [{ type: 'null' }, { $ref: './schemas/common.schema.json#/$defs/Disposition' }]
         mechanism: { type: [string, 'null'], maxLength: 600 }
-    EvalCase:
+    EvalCaseSummary:
       type: object
       additionalProperties: false
       required:
