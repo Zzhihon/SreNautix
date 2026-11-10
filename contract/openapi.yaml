@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: SreNautix hub API
-  version: 2.56.0
+  version: 2.57.0
   license:
     name: Apache-2.0
     identifier: Apache-2.0
@@ -302,10 +302,17 @@ paths:
               schema:
                 type: object
                 additionalProperties: false
-                required: [items, suppressed_count, blind_spans, next_cursor]
+                required: [items, suppressed_count, blind_spans, next_cursor, total, total_truncated]
                 properties:
                   items: { type: array, items: { $ref: '#/components/schemas/IncidentSummary' } }
                   suppressed_count: { type: integer, minimum: 0 }
+                  total:
+                    type: integer
+                    minimum: 0
+                    description: 符合全部筛选条件的事件数，不受 cursor 与 limit 影响（契约 2.57.0）；被抑制的事件只在 suppressed=true 时计入
+                  total_truncated:
+                    type: boolean
+                    description: 状态库一次最多取 2000 个事件；为 true 时 total 只统计了这 2000 个，实际更多
                   blind_spans:
                     type: array
                     items:

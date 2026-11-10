@@ -26,7 +26,8 @@ import { EvidenceCard } from './EvidenceCard';
 import { FeedbackControl, REASON_CODES } from './FeedbackControl';
 import { HypothesisList } from './HypothesisList';
 import { IncidentRow } from './IncidentRow';
-import { groupByDomain } from '../views/InboxView';
+import { DEFAULT_INBOX_FILTERS, groupByDomain, InboxView } from '../views/InboxView';
+import type { DataPort } from '../port';
 import { componentLabel, sortEvidence } from './model';
 import { ComponentNamesProvider } from './names';
 import { RunTrace, waterfall } from './RunTrace';
@@ -458,6 +459,34 @@ describe('详情页的标题（ADR 0190、0193）', () => {
     expect(screen.getByText('prod').getAttribute('title')).toBe(
       `事件键 ${inc.label}\nv3 · 拓扑 v${inc.topology_version}`,
     );
+  });
+});
+
+describe('收件箱翻页（契约 2.57.0）', () => {
+  it('显示已加载数与总数；加载更多取下一页并拼在后面，最后一页之后没有按钮', async () => {
+    const row = (n: number) => incidentSummary({ incident_id: `00000000-0000-4000-8000-00000000000${n}` });
+    const asked: Array<string | undefined> = [];
+    const listIncidents: DataPort['listIncidents'] = async (q) => {
+      asked.push(q.cursor);
+      const base = { suppressed_count: 0, blind_spans: [], total: 3, total_truncated: false };
+      return q.cursor === 'c1'
+        ? { ...base, items: [row(3)], next_cursor: null }
+        : { ...base, items: [row(1), row(2)], next_cursor: 'c1' };
+    };
+    renderUi(<InboxView filters={DEFAULT_INBOX_FILTERS} onFilters={() => undefined} now={NOW} />, {
+      port: {
+        listIncidents,
+        listConditions: async () => [],
+        listBusinessDomains: async () => ({ items: [], unassigned_firing: 0 }),
+      },
+    });
+    expect(await screen.findByText('显示 2 / 共 3 个事件 · 已抑制 0')).toBeTruthy();
+    expect(screen.getAllByRole('link')).toHaveLength(2);
+    fireEvent.click(screen.getByRole('button', { name: '加载更多' }));
+    expect(await screen.findByText('显示 3 / 共 3 个事件 · 已抑制 0')).toBeTruthy();
+    expect(screen.getAllByRole('link')).toHaveLength(3);
+    expect(screen.queryByRole('button', { name: '加载更多' })).toBeNull();
+    expect(asked).toEqual([undefined, 'c1']);
   });
 });
 

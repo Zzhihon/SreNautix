@@ -58,6 +58,12 @@
   margin: 0;
   padding: 0;
 }
+.loadMore {
+  display: flex;
+  justify-content: center;
+  padding: 8px 12px;
+  border-top: 1px solid var(--sn-line-soft);
+}
 .suppressed {
   display: flex;
   gap: 8px;

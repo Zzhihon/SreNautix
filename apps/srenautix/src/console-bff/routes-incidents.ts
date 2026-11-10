@@ -66,6 +66,12 @@ export interface IncidentRouteDeps {
   services: () => ServiceCatalog;
 }
 
+/** 收件箱的一行（summaries 的结果） */
+type Summary = Awaited<ReturnType<typeof summaries>>[number];
+
+/** GET /v1/incidents 一次从状态库取的事件数上限：筛选、可见性与抑制在这些事件里执行，total 也只统计它们 */
+const LIST_SCAN_LIMIT = 2000;
+
 /** 事件列表与导出的翻页位置：上一页最后一个事件的 first_firing_at 与 incident_id */
 export interface Cursor {
   t: string;
@@ -288,31 +294,46 @@ export function registerIncidentRoutes(app: FastifyInstance, d: IncidentRouteDep
     const suppressedWanted = q.suppressed === 'true';
     const r = await d.pool.query<IncidentRow>(
       `SELECT * FROM server.incidents ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
-        ORDER BY first_firing_at DESC, incident_id DESC LIMIT 2000`,
+        ORDER BY first_firing_at DESC, incident_id DESC LIMIT ${LIST_SCAN_LIMIT}`,
       params,
     );
-    let rows = r.rows.filter((x) => visible(scopes, incidentTarget(x.body)));
-    const suppressedCount = rows.filter((x) => x.suppressed).length;
+    let matched = r.rows.filter((x) => visible(scopes, incidentTarget(x.body)));
+    const suppressedCount = matched.filter((x) => x.suppressed).length;
     if (!suppressedWanted) {
-      rows = rows.filter((x) => !x.suppressed);
+      matched = matched.filter((x) => !x.suppressed);
     }
-    if (cursor) {
-      rows = rows.filter(
-        (x) =>
-          x.first_firing_at.toISOString() < cursor.t ||
-          (x.first_firing_at.toISOString() === cursor.t && x.incident_id < cursor.id),
-      );
+    const afterCursor = <T extends { first_firing_at: string | Date; incident_id: string }>(xs: T[]): T[] =>
+      cursor
+        ? xs.filter((x) => {
+            const t = typeof x.first_firing_at === 'string' ? x.first_firing_at : x.first_firing_at.toISOString();
+            return t < cursor.t || (t === cursor.t && x.incident_id < cursor.id);
+          })
+        : xs;
+    const rows = afterCursor(matched);
+    // 处置与反馈是摘要里求出的字段：按它们筛选时要先求全部摘要；不按它们筛选时只求这一页的摘要
+    const bySummary = Boolean(q.disposition) || q.feedback === 'pending' || q.feedback === 'given';
+    let total: number;
+    let page: Summary[];
+    let more: boolean;
+    if (bySummary) {
+      let items = await summaries(d.pool, d.feedback, d.topology, matched);
+      if (q.disposition) {
+        items = items.filter((x) => x.disposition === q.disposition);
+      }
+      if (q.feedback === 'pending') {
+        items = items.filter((x) => x.feedback === null || x.feedback.stale);
+      } else if (q.feedback === 'given') {
+        items = items.filter((x) => x.feedback !== null && !x.feedback.stale);
+      }
+      total = items.length;
+      const rest = afterCursor(items);
+      page = rest.slice(0, limit);
+      more = rest.length > limit;
+    } else {
+      total = matched.length;
+      page = await summaries(d.pool, d.feedback, d.topology, rows.slice(0, limit));
+      more = rows.length > limit;
     }
-    let items = await summaries(d.pool, d.feedback, d.topology, rows);
-    if (q.disposition) {
-      items = items.filter((x) => x.disposition === q.disposition);
-    }
-    if (q.feedback === 'pending') {
-      items = items.filter((x) => x.feedback === null || x.feedback.stale);
-    } else if (q.feedback === 'given') {
-      items = items.filter((x) => x.feedback !== null && !x.feedback.stale);
-    }
-    const page = items.slice(0, limit);
     const last = page[page.length - 1];
     const spans = await d.pool.query<{
       cluster_id: string;
@@ -348,8 +369,9 @@ export function registerIncidentRoutes(app: FastifyInstance, d: IncidentRouteDep
           reason: x.label,
         })),
       ],
-      next_cursor:
-        items.length > limit && last ? encodeCursor({ t: last.first_firing_at, id: last.incident_id }) : null,
+      next_cursor: more && last ? encodeCursor({ t: last.first_firing_at, id: last.incident_id }) : null,
+      total,
+      total_truncated: r.rows.length >= LIST_SCAN_LIMIT,
     };
   });
 

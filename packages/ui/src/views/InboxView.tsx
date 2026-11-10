@@ -169,7 +169,15 @@ export function InboxView({
     <div className={styles.page}>
       <PageHeader
         title={t('inbox.title')}
-        meta={list.data ? t('inbox.meta', { n: rows.length, suppressed: list.data.suppressed_count }) : undefined}
+        meta={
+          list.data
+            ? t(list.data.total_truncated ? 'inbox.meta_truncated' : 'inbox.meta', {
+                n: rows.length,
+                total: list.data.total,
+                suppressed: list.data.suppressed_count,
+              })
+            : undefined
+        }
       />
       <Toolbar label={t('inbox.filters')}>
         <Segmented
@@ -287,6 +295,13 @@ export function InboxView({
           ))
         ) : (
           renderRows(rows)
+        )}
+        {list.hasNextPage && (
+          <div className={styles.loadMore}>
+            <Button size="sm" onClick={() => void list.fetchNextPage()} disabled={list.isFetchingNextPage}>
+              {list.isFetchingNextPage ? t('inbox.loading_more') : t('inbox.load_more')}
+            </Button>
+          </div>
         )}
         {list.data && list.data.suppressed_count > 0 && !filters.suppressed && (
           <div className={styles.suppressed}>

@@ -1,7 +1,7 @@
 // 宿主注入的环境（数据端口、链接、权限）与基于 TanStack Query 的数据钩子。查询键集中在 qk，
 // 事件流的每种事件对应要失效的键（invalidationKeys），独立控制台用 SSE 驱动，Grafana 插件用长轮询驱动。
 
-import { useMutation, useQuery, useQueryClient, type QueryKey } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient, type QueryKey } from '@tanstack/react-query';
 import { createContext, useContext, type ComponentType, type ReactNode } from 'react';
 import type { EvidenceRef, FeedbackCreate, OutboxEvent } from './contract';
 import type { DataPort, IncidentQuery, ProposalQuery } from './port';
@@ -241,9 +241,23 @@ export function useConditions(cluster?: string) {
   });
 }
 
+/**
+ * 收件箱：按 next_cursor 一页一页地取，已取的页合成一个列表（items 依次拼接，next_cursor 取最后一页的）；
+ * total 与盲区时段取第一页的。fetchNextPage 取下一页
+ */
 export function useIncidents(q: IncidentQuery) {
   const { port } = useUiEnv();
-  return useQuery({ queryKey: qk.incidents(q), queryFn: () => port.listIncidents(q) });
+  return useInfiniteQuery({
+    queryKey: qk.incidents(q),
+    initialPageParam: null as string | null,
+    queryFn: ({ pageParam }) => port.listIncidents(pageParam === null ? q : { ...q, cursor: pageParam }),
+    getNextPageParam: (last) => last.next_cursor,
+    select: (d) => ({
+      ...d.pages[0]!,
+      items: d.pages.flatMap((p) => p.items),
+      next_cursor: d.pages[d.pages.length - 1]!.next_cursor,
+    }),
+  });
 }
 
 /** 业务领域与服务（ADR 0193）：名称不常变，事件数随收件箱一起刷新 */

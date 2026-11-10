@@ -7,6 +7,7 @@ import type { ReactNode } from 'react';
 import type { Capabilities, Links, UiEnv } from '../data';
 import { UiEnvProvider } from '../data';
 import { createHubPort } from '../hubPort';
+import type { DataPort } from '../port';
 import { I18nProvider, type Locale } from '../i18n';
 import { ThemeRoot } from '../theme/ThemeRoot';
 import { DEFAULT_TOKENS, type ColorScheme } from '../theme/tokens';
@@ -29,10 +30,15 @@ export function renderUi(
     caps?: Partial<Capabilities>;
     links?: Partial<Links>;
     actions?: boolean;
+    /** 替换数据端口的部分方法（其余方法照常连到不可达的中心） */
+    port?: Partial<DataPort>;
   } = {},
 ): RenderResult {
   const env: UiEnv = {
-    port: createHubPort({ baseUrl: 'http://127.0.0.1:9', csrf: () => null, actions: opts.actions ?? true }),
+    port: {
+      ...createHubPort({ baseUrl: 'http://127.0.0.1:9', csrf: () => null, actions: opts.actions ?? true }),
+      ...opts.port,
+    },
     links: { ...LINKS, ...opts.links },
     caps: { ...ALL_CAPS, ...opts.caps },
   };
