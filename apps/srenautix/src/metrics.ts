@@ -127,6 +127,20 @@ export class ServerMetrics extends BaseMetrics {
     registers: [this.registry],
   });
 
+  readonly alertServiceLabelInvalid = new Counter({
+    name: 'srenautix_alert_service_label_invalid_total',
+    help: '告警的 srenautix_service 标签不是已声明的服务、被忽略的次数（每次解析计一次），按告警名（ADR 0193）',
+    labelNames: ['alertname'] as const,
+    registers: [this.registry],
+  });
+
+  readonly incidentsUnassigned = new Counter({
+    name: 'srenautix_incident_unassigned_total',
+    help: '新建时没有主服务的事件数（ADR 0193 §7）：成员告警都没有归属到 business.yaml 声明的服务',
+    labelNames: ['cluster_id'] as const,
+    registers: [this.registry],
+  });
+
   readonly recategorizeRuns = new Counter({
     name: 'srenautix_recategorize_runs_total',
     help: '取得主实例后按类别解析输入的指纹检查重新分类的次数（ADR 0183），按结果（unchanged：指纹与上次记录相同；completed：重新分类完成并记录；interrupted：失去主实例或退出时停下；failed：出错，30 秒后重试）',

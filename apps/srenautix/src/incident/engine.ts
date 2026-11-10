@@ -32,6 +32,16 @@ function categoriesOf(inc: Incident): { categories: string[]; primary_category: 
   return { categories: inc.categories, primary_category: inc.primary_category };
 }
 
+/** 事件的服务列（ADR 0193）：packages/core 重算出的事件总是带服务字段（没有服务时为空数组与 null） */
+function servicesOf(inc: Incident): [string[], string | null, string | null, string | null] {
+  return [
+    inc.services ?? [],
+    inc.primary_service ?? null,
+    inc.primary_service_source ?? null,
+    inc.business_domain ?? null,
+  ];
+}
+
 /** 版本变化时同一事务内调用：把绑定失效的提议标为 stale（由提议服务实现）。 */
 export interface StaleMarker {
   markStale(c: Queryable, b: NonNullable<Awaited<ReturnType<typeof currentBinding>>>): Promise<number>;
@@ -258,13 +268,15 @@ export class IncidentEngine {
     await c.query(
       `INSERT INTO server.incidents (incident_id, cluster_id, label, version, state, severity, first_firing_at, ended_at, root_component,
          suppressed, observability_blind, split_from, merged_into, body, created_at, updated_at, categories, primary_category,
-         series_key)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+         series_key, services, primary_service, primary_service_source, business_domain)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
        ON CONFLICT (incident_id) DO UPDATE SET version = excluded.version, state = excluded.state, severity = excluded.severity,
          first_firing_at = excluded.first_firing_at, ended_at = excluded.ended_at, root_component = excluded.root_component,
          suppressed = excluded.suppressed, observability_blind = excluded.observability_blind, split_from = excluded.split_from,
          merged_into = excluded.merged_into, body = excluded.body, updated_at = excluded.updated_at,
-         categories = excluded.categories, primary_category = excluded.primary_category, series_key = excluded.series_key`,
+         categories = excluded.categories, primary_category = excluded.primary_category, series_key = excluded.series_key,
+         services = excluded.services, primary_service = excluded.primary_service,
+         primary_service_source = excluded.primary_service_source, business_domain = excluded.business_domain`,
       [
         inc.incident_id,
         inc.cluster_id,
@@ -285,8 +297,12 @@ export class IncidentEngine {
         categoriesOf(inc).categories,
         categoriesOf(inc).primary_category,
         incidentSeriesKey(inc),
+        ...servicesOf(inc),
       ],
     );
+    if (!prev && !inc.primary_service) {
+      this.d.metrics.incidentsUnassigned.inc({ cluster_id: inc.cluster_id });
+    }
     let reason: VersionReason | null = null;
     if (!prev || prev.incident_version !== inc.incident_version) {
       reason = !prev ? 'created' : prev.state === 'resolved' && inc.state === 'firing' ? 'reopened' : 'updated';

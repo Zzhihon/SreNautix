@@ -5,7 +5,7 @@ import { categoryOptions } from '../../src/alerts/category.js';
 import type { ObjectHealth } from '../../src/detectors/health.js';
 import { DEFAULT_EQUIVALENTS, findingAlert, type DetectorSettings } from '../../src/detectors/service.js';
 import { IncidentEngine } from '../../src/incident/engine.js';
-import { categoryInputsFingerprint, recategorizeIncidents } from '../../src/incident/recategorize.js';
+import { classificationInputsFingerprint, recategorizeIncidents } from '../../src/incident/recategorize.js';
 import { IngestService } from '../../src/ingest/service.js';
 import { ServerMetrics } from '../../src/metrics.js';
 import { serverTracks } from '../../src/roles/server-schema.js';
@@ -151,7 +151,7 @@ describe('内置类别表变化后重新分类历史检测器成员（ADR 0183�
     // 之前的版本取得主实例时记下的指纹
     const old = await recategorizeIncidents(db.server, before, { holder: 'server-a', active: always });
     expect(old).toMatchObject({ outcome: 'completed', incidents: 0 });
-    expect(categoryInputsFingerprint(current)).not.toBe(old.fingerprint);
+    expect(classificationInputsFingerprint(current)).not.toBe(old.fingerprint);
 
     // 告警已经清理掉的历史事件：按告警名查内置类别表
     const purged = await seed(1, [

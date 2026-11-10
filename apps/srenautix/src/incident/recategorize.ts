@@ -1,6 +1,15 @@
 import { createHash } from 'node:crypto';
-import type { AlertClassification, Incident, IncidentCategory, IncidentMember, Labels } from '@srenautix/contract';
-import { incidentCategories, UNCLASSIFIED, type AlertCatalog } from '@srenautix/core';
+import type {
+  AlertClassification,
+  EntityRef,
+  Incident,
+  IncidentCategory,
+  IncidentMember,
+  Labels,
+} from '@srenautix/contract';
+import { catalogServiceInputs, incidentClassification, UNCLASSIFIED, type AlertCatalog } from '@srenautix/core';
+import type { ServiceResolution } from '@srenautix/packs-sdk/business';
+import { alertService, type ServiceDeps } from '../alerts/service.js';
 import canonicalize from 'canonicalize';
 import type pg from 'pg';
 import type { Leader } from '../api/leader.js';
@@ -14,25 +23,46 @@ export const RECATEGORIZE_BATCH = 500;
 /** 重新分类出错或失去主实例之后再次检查的间隔 */
 export const RECATEGORIZE_RETRY_MS = 30_000;
 
-/** 类别解析输入（AlertCatalog.categoryInputs）的指纹：规范化 JSON 的 sha256 */
-export function categoryInputsFingerprint(catalog: AlertCatalog): string {
-  const json = canonicalize(catalog.categoryInputs());
+/**
+ * 归类输入的指纹（规范化 JSON 的 sha256）：类别解析的输入（AlertCatalog.categoryInputs，ADR 0183）；给出服务目录时
+ * 再加上业务领域的声明与告警目录条目的 service（ADR 0193 §5），两者任一变化都重新归类
+ */
+export function classificationInputsFingerprint(catalog: AlertCatalog, service?: ServiceDeps): string {
+  const json = canonicalize(
+    service
+      ? {
+          categories: catalog.categoryInputs(),
+          business: service.services().inputs(),
+          catalog_services: catalogServiceInputs(catalog),
+        }
+      : catalog.categoryInputs(),
+  );
   if (json === undefined) {
-    throw new Error('类别解析的输入无法规范化');
+    throw new Error('归类的输入无法规范化');
   }
   return `sha256:${createHash('sha256').update(json).digest('hex')}`;
 }
 
-/** 成员告警在 alert_state 中的标签与分类；已经清理掉的告警不在结果里 */
-export async function alertRows(
-  c: Queryable,
-  alertIds: readonly string[],
-): Promise<Map<string, { labels: Labels; classification: AlertClassification }>> {
-  const rows = await c.query<{ alert_id: string; labels: Labels; classification: AlertClassification }>(
-    'SELECT alert_id, labels, classification FROM server.alert_state WHERE alert_id = ANY($1::text[])',
+interface AlertRow {
+  labels: Labels;
+  classification: AlertClassification;
+  entity: EntityRef | null;
+}
+
+/** 成员告警在 alert_state 中的标签、分类与实体；已经清理掉的告警不在结果里 */
+export async function alertRows(c: Queryable, alertIds: readonly string[]): Promise<Map<string, AlertRow>> {
+  const rows = await c.query<AlertRow & { alert_id: string }>(
+    'SELECT alert_id, labels, classification, entity FROM server.alert_state WHERE alert_id = ANY($1::text[])',
     [alertIds],
   );
-  return new Map(rows.rows.map((r) => [r.alert_id, { labels: r.labels, classification: r.classification }]));
+  return new Map(
+    rows.rows.map((r) => [r.alert_id, { labels: r.labels, classification: r.classification, entity: r.entity }]),
+  );
+}
+
+/** 成员还没有服务：之前版本写下的（没有 service 字段），或上次没有任何来源给出服务 */
+function needsService(m: IncidentMember): boolean {
+  return m.service === undefined || m.service === null;
 }
 
 /**
@@ -67,9 +97,9 @@ export interface RecategorizeResult {
 export async function recategorizeIncidents(
   pool: pg.Pool,
   catalog: AlertCatalog,
-  o: { holder: string; active: () => boolean; batch?: number },
+  o: { holder: string; active: () => boolean; batch?: number; service?: ServiceDeps },
 ): Promise<RecategorizeResult> {
-  const fingerprint = categoryInputsFingerprint(catalog);
+  const fingerprint = classificationInputsFingerprint(catalog, o.service);
   const last = await pool.query<{ fingerprint: string }>(
     'SELECT fingerprint FROM server.incident_recategorizations ORDER BY id DESC LIMIT 1',
   );
@@ -91,7 +121,7 @@ export async function recategorizeIncidents(
       }
       const r = await tx(pool, async (c) => {
         await c.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`srenautix.incident-engine.${clusterId}`]);
-        return recategorizeBatch(c, catalog, clusterId, after, size);
+        return recategorizeBatch(c, catalog, o.service, clusterId, after, size);
       });
       out.incidents += r.incidents;
       out.alerts += r.alerts;
@@ -109,45 +139,85 @@ export async function recategorizeIncidents(
   return { ...out, outcome: 'completed' };
 }
 
-/** 一批：incident_id 大于 after 的有 unclassified 成员的事件；last 为本批最后一个事件，不满一批时为 null */
+/**
+ * 一批：incident_id 大于 after 的有 unclassified 成员的事件；给出服务目录时，还有成员没有服务、或服务列为空（之前版本
+ * 写下）的事件。last 为本批最后一个事件，不满一批时为 null
+ */
 async function recategorizeBatch(
   c: pg.PoolClient,
   catalog: AlertCatalog,
+  service: ServiceDeps | undefined,
   clusterId: string,
   after: string,
   size: number,
 ): Promise<{ incidents: number; alerts: number; last: string | null }> {
-  const batch = await c.query<{ incident_id: string; body: Incident }>(
-    `SELECT incident_id, body FROM server.incidents
-      WHERE cluster_id = $1 AND incident_id > $2::uuid AND body @? '$.members[*] ? (@.category == "unclassified")'
+  const batch = await c.query<{ incident_id: string; body: Incident; services_missing: boolean }>(
+    `SELECT incident_id, body, services IS NULL AS services_missing FROM server.incidents
+      WHERE cluster_id = $1 AND incident_id > $2::uuid
+        AND (body @? '$.members[*] ? (@.category == "unclassified")'
+             OR ($4 AND (services IS NULL OR body @? '$.members[*] ? (!exists(@.service) || @.service == null)')))
       ORDER BY incident_id LIMIT $3`,
-    [clusterId, after, size],
+    [clusterId, after, size, service !== undefined],
   );
   const unclassified = (m: IncidentMember) => (m.category ?? UNCLASSIFIED) === UNCLASSIFIED;
-  const ids = [...new Set(batch.rows.flatMap((r) => r.body.members.filter(unclassified).map((m) => m.alert_id)))];
+  const pending = (m: IncidentMember) => unclassified(m) || (service !== undefined && needsService(m));
+  const ids = [...new Set(batch.rows.flatMap((r) => r.body.members.filter(pending).map((m) => m.alert_id)))];
   const alerts = await alertRows(c, ids);
+  /** 告警还在 alert_state 时重算出的服务：回写分类，事件引擎之后重算这些事件时成员仍带这个服务 */
+  const serviceOf = new Map<string, ServiceResolution>();
   let incidents = 0;
   for (const r of batch.rows) {
-    let changed = false;
-    const members = r.body.members.map((m) => {
-      if (!unclassified(m)) {
-        return m;
+    let changed = r.services_missing && service !== undefined;
+    const members: IncidentMember[] = [];
+    for (const m of r.body.members) {
+      let next = m;
+      const a = alerts.get(m.alert_id);
+      if (unclassified(m)) {
+        const category = memberCategory(catalog, m, a?.labels);
+        if (category !== UNCLASSIFIED) {
+          next = { ...next, category };
+        }
       }
-      const category = memberCategory(catalog, m, alerts.get(m.alert_id)?.labels);
-      if (category === UNCLASSIFIED) {
-        return m;
+      if (service && needsService(m)) {
+        const labels = a?.labels ?? { alertname: m.alertname };
+        const s = await alertService(service, clusterId, {
+          alertname: m.alertname,
+          labels,
+          catalogService: catalog.lookup(labels)?.entry.service,
+          component: m.component,
+          entity: a?.entity ?? null,
+          owner: null,
+        });
+        // 之前版本写下的成员即使仍没有服务也补上三个字段，之后按 null 识别
+        if (s.service !== null || m.service === undefined) {
+          next = { ...next, ...s };
+        }
+        if (a && s.service !== null) {
+          serviceOf.set(m.alert_id, s);
+        }
       }
-      changed = true;
-      return { ...m, category };
-    });
+      changed ||= next !== m;
+      members.push(next);
+    }
     if (!changed) {
       continue;
     }
-    const cats = incidentCategories(members, r.body.root.component);
-    const body: Incident = { ...r.body, members, ...cats };
+    const k = incidentClassification(members, r.body.root.component);
+    const body: Incident = { ...r.body, members, ...k };
     await c.query(
-      'UPDATE server.incidents SET categories = $2, primary_category = $3, body = $4 WHERE incident_id = $1',
-      [r.incident_id, cats.categories, cats.primary_category, JSON.stringify(body)],
+      `UPDATE server.incidents SET categories = $2, primary_category = $3, body = $4, services = $5, primary_service = $6,
+         primary_service_source = $7, business_domain = $8
+        WHERE incident_id = $1`,
+      [
+        r.incident_id,
+        k.categories,
+        k.primary_category,
+        JSON.stringify(body),
+        k.services,
+        k.primary_service,
+        k.primary_service_source,
+        k.business_domain,
+      ],
     );
     incidents++;
   }
@@ -168,6 +238,17 @@ async function recategorizeBatch(
     );
     written += u.rowCount ?? 0;
   }
+  for (const [alertId, s] of serviceOf) {
+    // 只补没有服务的分类：接入之后求出的服务以接入为准
+    const u = await c.query(
+      `UPDATE server.alert_state
+          SET classification = classification || jsonb_build_object('service', $2::text, 'service_source', $3::text,
+                'business_domain', $4::text)
+        WHERE alert_id = $1 AND classification->>'service' IS NULL`,
+      [alertId, s.service, s.service_source, s.business_domain],
+    );
+    written += u.rowCount ?? 0;
+  }
   return {
     incidents,
     alerts: written,
@@ -182,6 +263,7 @@ async function recategorizeBatch(
 export function startRecategorize(o: {
   pool: pg.Pool;
   catalog: AlertCatalog;
+  service?: ServiceDeps;
   leader: Leader;
   holder: string;
   metrics: ServerMetrics;
@@ -195,7 +277,7 @@ export function startRecategorize(o: {
     while (!o.signal.aborted) {
       if (active()) {
         try {
-          const r = await recategorizeIncidents(o.pool, o.catalog, { holder: o.holder, active });
+          const r = await recategorizeIncidents(o.pool, o.catalog, { holder: o.holder, active, service: o.service });
           o.metrics.recategorizeRuns.inc({ outcome: r.outcome });
           o.metrics.incidentsRecategorized.inc(r.incidents);
           if (r.outcome !== 'unchanged') {

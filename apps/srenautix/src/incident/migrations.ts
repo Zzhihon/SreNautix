@@ -268,5 +268,21 @@ CREATE TABLE server.incident_recategorizations (
 );
 `,
     },
+    {
+      version: 11,
+      name: 'incident services and business domain',
+      phase: 'expand',
+      sql: `
+-- 事件的服务与业务领域（ADR 0193，契约 2.53.0），与 body 中的同名字段相同，供 GET /v1/incidents 按业务领域与服务筛选、
+-- 收件箱按业务领域分组。只加列与索引（ADR 0176）：N-1 版本写入时不认识这四列，它们保持为空；本版本取得主实例之后
+-- 由重新归类（incident/recategorize.ts）补上
+ALTER TABLE server.incidents ADD COLUMN services text[];
+ALTER TABLE server.incidents ADD COLUMN primary_service text;
+ALTER TABLE server.incidents ADD COLUMN primary_service_source text;
+ALTER TABLE server.incidents ADD COLUMN business_domain text;
+CREATE INDEX incidents_services_idx ON server.incidents USING gin (services);
+CREATE INDEX incidents_business_domain_idx ON server.incidents (cluster_id, business_domain, first_firing_at DESC);
+`,
+    },
   ],
 };
