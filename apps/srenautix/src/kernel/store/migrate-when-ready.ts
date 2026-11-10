@@ -6,18 +6,41 @@ import { logger } from '../log.js';
 // 不退出，按退避重试扩展迁移；等待期间临时的探针端口 /healthz 为 200（进程活着，kubelet 不重启它），
 // /readyz 为 503 并写明原因。其他迁移错误（SQL 错误、收缩迁移不兼容）照常抛出，进程退出。
 
-/** 数据库还没准备好的 PostgreSQL 错误码：schema 不存在、数据库不存在、角色或口令不对、没有授权、正在启动 */
-const NOT_READY_PG = new Set(['3F000', '3D000', '28000', '28P01', '42501', '57P03']);
+/**
+ * 数据库还没准备好的 PostgreSQL 错误码：schema 不存在、数据库不存在、角色或口令不对、没有授权、正在启动、
+ * 正在停机（管理员停机、崩溃恢复），以及连接异常（08 类）
+ */
+const NOT_READY_PG = new Set([
+  '3F000',
+  '3D000',
+  '28000',
+  '28P01',
+  '42501',
+  '57P01',
+  '57P02',
+  '57P03',
+  '08000',
+  '08001',
+  '08003',
+  '08006',
+]);
 /** 连接层的错误：数据库暂时连不上 */
 const NOT_READY_NET = new Set(['ECONNREFUSED', 'ECONNRESET', 'ENOTFOUND', 'ETIMEDOUT', 'EHOSTUNREACH', 'EAI_AGAIN']);
+/**
+ * pg 与 pg-pool 抛出的连接错误不带错误码，只能按消息识别：连接超时（pool 的 connectionTimeoutMillis），
+ * 以及数据库重启时已建立的连接被断开
+ */
+const NOT_READY_MESSAGE =
+  /^(Connection terminated due to connection timeout|Connection terminated unexpectedly|timeout exceeded when trying to connect)$/;
 
 export function databaseNotReady(e: unknown): string | null {
   const code = (e as { code?: unknown } | null)?.code;
-  if (typeof code !== 'string') {
-    return null;
-  }
-  if (NOT_READY_PG.has(code) || NOT_READY_NET.has(code)) {
+  if (typeof code === 'string' && (NOT_READY_PG.has(code) || NOT_READY_NET.has(code))) {
     return `${code}: ${(e as Error).message}`;
+  }
+  const message = e instanceof Error ? e.message : '';
+  if (code === undefined && NOT_READY_MESSAGE.test(message)) {
+    return message;
   }
   return null;
 }

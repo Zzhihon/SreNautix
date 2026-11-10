@@ -21,6 +21,14 @@ describe('启动时等待数据库', () => {
     expect(databaseNotReady(pgError('3F000', 'schema "server" does not exist'))).toMatch(/^3F000/);
     expect(databaseNotReady(pgError('28P01', 'password authentication failed'))).toMatch(/^28P01/);
     expect(databaseNotReady(pgError('ECONNREFUSED', 'connect ECONNREFUSED'))).toMatch(/^ECONNREFUSED/);
+    // 数据库重启或停机：停机错误码、连接异常，以及 pg-pool 不带错误码的连接超时与断开
+    expect(databaseNotReady(pgError('57P01', 'terminating connection due to administrator command'))).toMatch(/^57P01/);
+    expect(databaseNotReady(pgError('08006', 'connection failure'))).toMatch(/^08006/);
+    expect(databaseNotReady(new Error('Connection terminated due to connection timeout'))).toBe(
+      'Connection terminated due to connection timeout',
+    );
+    expect(databaseNotReady(new Error('Connection terminated unexpectedly'))).not.toBeNull();
+    expect(databaseNotReady(new Error('Connection terminated unexpectedly (wrapped)'))).toBeNull();
     expect(databaseNotReady(pgError('42601', 'syntax error'))).toBeNull();
     expect(databaseNotReady(new Error('收缩迁移不兼容'))).toBeNull();
   });
