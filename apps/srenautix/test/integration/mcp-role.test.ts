@@ -310,6 +310,7 @@ describe('mcp 角色', () => {
       'export_incidents_v1',
       'get_incident_v1',
       'list_actions_v1',
+      'list_business_domains_v1',
       'list_incidents_v1',
       'list_incidents_v2',
       'propose_action_v1',
