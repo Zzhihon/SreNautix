@@ -1,7 +1,7 @@
 import { validatorFor, type SkillPatch, type SkillRunCreate } from '@srenautix/contract';
 import type { FastifyInstance } from 'fastify';
 import { Ajv2020 } from 'ajv/dist/2020.js';
-import { badRequest, conflict, HttpError, notFound } from '../api/errors.js';
+import { badRequest, conflict, HttpError, notFound } from '../kernel/errors.js';
 import type { Auth } from '../identity/auth.js';
 import { SkillRejected, type SkillService } from './service.js';
 

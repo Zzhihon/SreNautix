@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import type { SkillCapability, SkillCapabilityParams, SkillState, SkillSummary } from '@srenautix/contract';
 import type { PromqlEngine } from '@srenautix/integration-sdk';
 import { renderMetrics, skills as sdk, type PackSet } from '@srenautix/packs-sdk';
-import { logger } from '../log.js';
+import { logger } from '../kernel/log.js';
 import type { SkillsConfig } from './config.js';
 
 // 技能的加载与重新加载（ADR 0181 §6）：来源是镜像内置的 skills/ 与挂载的目录（每个技能一个 ConfigMap，整卷挂载），

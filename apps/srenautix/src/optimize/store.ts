@@ -9,7 +9,7 @@ import type {
   RecommendationState,
 } from '@srenautix/contract';
 import type pg from 'pg';
-import type { Queryable } from '../store/pool.js';
+import type { Queryable } from '../kernel/store/pool.js';
 
 // 主动优化的存储（server schema，迁移见 migrations.ts）。目标、运行、发现与建议的契约对象从行拼出；
 // 列表接口按时间倒序、游标为上一页最后一行的时间与 id。

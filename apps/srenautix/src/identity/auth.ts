@@ -1,5 +1,5 @@
 import type { FastifyRequest } from 'fastify';
-import { forbidden, unauthorized } from '../api/errors.js';
+import { forbidden, unauthorized } from '../kernel/errors.js';
 import type { Bindings, Permission, RoleBinding, Subject, Target } from './bindings.js';
 import type { CallerRegistry, ServiceCaller } from './callers.js';
 import { csrfMatches, SESSION_COOKIE, type Session, type Sessions } from './sessions.js';

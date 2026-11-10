@@ -1,8 +1,8 @@
 import type pg from 'pg';
-import { logger } from '../log.js';
+import { logger } from '../kernel/log.js';
 import { recommendationMarker } from '../optimize/render.js';
-import { appendAudit } from '../store/audit.js';
-import { tx } from '../store/pool.js';
+import { appendAudit } from '../kernel/store/audit.js';
+import { tx } from '../kernel/store/pool.js';
 import { GitHubError, type GitHubApp } from './app.js';
 import { backoffMs, MAX_ATTEMPTS } from './issues.js';
 

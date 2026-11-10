@@ -1,15 +1,15 @@
 import type { EvidenceResult } from '@srenautix/contract';
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createApp } from '../../src/api/http.js';
+import { createApp } from '../../src/kernel/http.js';
 import { registerResearchRoutes, type ResearchRouteDeps } from '../../src/api/routes-research.js';
 import type { Auth } from '../../src/identity/auth.js';
-import { ServerMetrics } from '../../src/metrics.js';
+import { ServerMetrics } from '../../src/kernel/metrics.js';
 import type { ProposalService } from '../../src/proposals/service.js';
 import { serverTracks } from '../../src/roles/server-schema.js';
 import type { EvidenceRun, EvidenceRunner, RuleProposer } from '../../src/stage-a/ports.js';
 import { StageAService } from '../../src/stage-a/service.js';
-import { migrateExpand } from '../../src/store/migrate.js';
+import { migrateExpand } from '../../src/kernel/store/migrate.js';
 import { newTestDb, type TestDb } from '../support/db.js';
 import { incident, stageACards } from '../support/scenario.js';
 

@@ -17,12 +17,12 @@ import {
   verifyRecords,
   type AuditCheckpoint,
   type AuditRecord,
-} from '../../src/store/audit.js';
-import { AuditExporter, readSink, s3Client } from '../../src/store/audit-export.js';
-import { verifyChain } from '../../src/store/audit-verify.js';
-import { migrateExpand } from '../../src/store/migrate.js';
-import { storeTrack } from '../../src/store/migrations.js';
-import { tx } from '../../src/store/pool.js';
+} from '../../src/kernel/store/audit.js';
+import { AuditExporter, readSink, s3Client } from '../../src/kernel/store/audit-export.js';
+import { verifyChain } from '../../src/audit/verify.js';
+import { migrateExpand } from '../../src/kernel/store/migrate.js';
+import { storeTrack } from '../../src/kernel/store/migrations.js';
+import { tx } from '../../src/kernel/store/pool.js';
 import { newTestDb, type TestDb } from '../support/db.js';
 import { startMinio, type TestMinio } from '../support/minio.js';
 

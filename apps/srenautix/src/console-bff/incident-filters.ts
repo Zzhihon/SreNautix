@@ -8,7 +8,7 @@ import {
   UNCLASSIFIED,
   type IncidentServices,
 } from '@srenautix/core';
-import { badRequest } from '../api/errors.js';
+import { badRequest } from '../kernel/errors.js';
 import type { IncidentRow } from '../incident/read.js';
 
 // GET /v1/incidents 与导出的归类筛选：类别与组件（ADR 0183），业务领域与服务（ADR 0193）。参数都可以重复；取值不合法时

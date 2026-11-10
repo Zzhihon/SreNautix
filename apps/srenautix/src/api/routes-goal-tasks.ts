@@ -6,8 +6,8 @@ import { formatErrors, validatorOf } from '../llm/schema.js';
 import { GoalDataUnavailable, type GoalEvidence } from '../optimize/evidence.js';
 import type { GoalPublisher } from '../optimize/publisher.js';
 import type { GoalRunContext } from '../optimize/runner.js';
-import { tx } from '../store/pool.js';
-import { badRequest, forbidden, HttpError, notFound } from './errors.js';
+import { tx } from '../kernel/store/pool.js';
+import { badRequest, forbidden, HttpError, notFound } from '../kernel/errors.js';
 
 // worker 的目标任务接口（ADR 0146 §2.3、§3.1）：目标运行的输入、区分性检查与输出。只有 worker 可以调用。
 // 区分性检查只能用这次运行的查询模板（runner 写入 context 的领域模板），参数按模板 schema 校验，在发现挂到的组件上执行；

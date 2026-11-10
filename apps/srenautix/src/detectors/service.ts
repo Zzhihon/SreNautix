@@ -2,11 +2,11 @@ import { createHash } from 'node:crypto';
 import type { AlertCategory } from '@srenautix/contract';
 import type pg from 'pg';
 import type { RawAlert } from '../ingest/normalize.js';
-import { logger } from '../log.js';
-import type { ServerMetrics } from '../metrics.js';
-import { tx, type Queryable } from '../store/pool.js';
+import { logger } from '../kernel/log.js';
+import type { ServerMetrics } from '../kernel/metrics.js';
+import { tx, type Queryable } from '../kernel/store/pool.js';
 import type { ServerConfig } from '../config/server.js';
-import { parseDuration } from '../config/files.js';
+import { parseDuration } from '../kernel/files.js';
 import type { HealthState, ObjectHealth } from './health.js';
 
 // 集群状态检测器（ADR 0105）：按阈值把不健康对象合成为告警（source detector），与告警规则同样进入接入、收敛与研判。

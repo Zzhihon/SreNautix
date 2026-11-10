@@ -2,7 +2,7 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { extname, join, resolve, sep } from 'node:path';
 import type { FastifyInstance } from 'fastify';
-import { notFound } from '../api/errors.js';
+import { notFound } from '../kernel/errors.js';
 
 const TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',

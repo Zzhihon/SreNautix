@@ -2,10 +2,10 @@ import { randomUUID } from 'node:crypto';
 import { REASON_CODES, type Incident, type ReasonGroupCode } from '@srenautix/contract';
 import type pg from 'pg';
 import { writeReason, writeRuleOnly } from '../incident/reasons.js';
-import { logger } from '../log.js';
-import type { ServerMetrics } from '../metrics.js';
-import { appendEvents } from '../store/outbox.js';
-import { tx, type Queryable } from '../store/pool.js';
+import { logger } from '../kernel/log.js';
+import type { ServerMetrics } from '../kernel/metrics.js';
+import { appendEvents } from '../kernel/store/outbox.js';
+import { tx, type Queryable } from '../kernel/store/pool.js';
 
 export const SCHEMA_VERSION = '2.2.0';
 

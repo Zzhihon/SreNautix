@@ -7,8 +7,8 @@ import {
 } from '@srenautix/integration-sdk';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ksmRollouts } from '../../src/changes/ksm-rollouts.js';
-import { migrateExpand } from '../../src/store/migrate.js';
-import { storeTrack } from '../../src/store/migrations.js';
+import { migrateExpand } from '../../src/kernel/store/migrate.js';
+import { storeTrack } from '../../src/kernel/store/migrations.js';
 import { topologyTrack } from '../../src/topology/migrations.js';
 import { TopologyStore } from '../../src/topology/store.js';
 import { newTestDb, type TestDb } from '../support/db.js';

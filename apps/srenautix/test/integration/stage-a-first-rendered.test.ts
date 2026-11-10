@@ -1,12 +1,12 @@
 import type { EvidenceResult, Incident } from '@srenautix/contract';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { incidentTrack } from '../../src/incident/migrations.js';
-import { ServerMetrics } from '../../src/metrics.js';
+import { ServerMetrics } from '../../src/kernel/metrics.js';
 import type { ProposalService } from '../../src/proposals/service.js';
 import type { EvidenceRun, EvidenceRunner, RuleProposer } from '../../src/stage-a/ports.js';
 import { StageAService } from '../../src/stage-a/service.js';
 import { serverTracks } from '../../src/roles/server-schema.js';
-import { migrateExpand } from '../../src/store/migrate.js';
+import { migrateExpand } from '../../src/kernel/store/migrate.js';
 import { newTestDb, type TestDb } from '../support/db.js';
 import { incident, stageACards } from '../support/scenario.js';
 

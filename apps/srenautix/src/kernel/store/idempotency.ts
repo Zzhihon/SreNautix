@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import type pg from 'pg';
-import { HttpError } from '../api/errors.js';
+import { HttpError } from '../errors.js';
 import { tx } from './pool.js';
 
 export interface IdempotentResult<T> {

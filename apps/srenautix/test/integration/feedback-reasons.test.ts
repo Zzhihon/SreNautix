@@ -1,10 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import type { FeedbackCreate, Incident } from '@srenautix/contract';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { ServerMetrics } from '../../src/metrics.js';
+import { ServerMetrics } from '../../src/kernel/metrics.js';
 import { FeedbackService, type FeedbackActor } from '../../src/proposals/feedback.js';
 import { serverTracks } from '../../src/roles/server-schema.js';
-import { migrateExpand } from '../../src/store/migrate.js';
+import { migrateExpand } from '../../src/kernel/store/migrate.js';
 import { newTestDb, type TestDb } from '../support/db.js';
 import { incident as baseIncident } from '../support/scenario.js';
 

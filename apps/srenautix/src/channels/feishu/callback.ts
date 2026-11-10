@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
-import { badRequest, unauthorized } from '../../api/errors.js';
-import { rawBody } from '../../api/http.js';
-import { logger } from '../../log.js';
+import { badRequest, unauthorized } from '../../kernel/errors.js';
+import { rawBody } from '../../kernel/http.js';
+import { logger } from '../../kernel/log.js';
 import type { Interactions } from '../../notify/interactions.js';
 import type { NotifyActions } from '../../notify/ports.js';
 import type { NotifyStore } from '../../notify/store.js';

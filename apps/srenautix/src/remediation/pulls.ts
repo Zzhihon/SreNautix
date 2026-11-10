@@ -2,10 +2,10 @@ import type { Proposal } from '@srenautix/contract';
 import type pg from 'pg';
 import { GitHubError, type GitHubApp } from '../github/app.js';
 import type { IssueService } from '../github/issues.js';
-import { logger } from '../log.js';
-import type { ServerMetrics } from '../metrics.js';
-import { appendAudit } from '../store/audit.js';
-import { tx } from '../store/pool.js';
+import { logger } from '../kernel/log.js';
+import type { ServerMetrics } from '../kernel/metrics.js';
+import { appendAudit } from '../kernel/store/audit.js';
+import { tx } from '../kernel/store/pool.js';
 
 /**
  * gitops_pr 开出的 PR（ADR 0108）：gateway 在执行事件的消息里写 "PR <url> #<n>"（执行结果与 pr_open 检查）；

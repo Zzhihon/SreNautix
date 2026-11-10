@@ -1,8 +1,8 @@
 import { EventEmitter } from 'node:events';
 import pg from 'pg';
-import { logger } from '../log.js';
-import type { PgConfig } from '../store/pool.js';
-import { NOTIFY_CHANNEL, type Owner } from '../store/outbox.js';
+import { logger } from '../kernel/log.js';
+import type { PgConfig } from '../kernel/store/pool.js';
+import { NOTIFY_CHANNEL, type Owner } from '../kernel/store/outbox.js';
 
 /**
  * 用一条专用连接 LISTEN outbox 频道，把通知转成进程内的 `wake` 事件（参数为所有者与 seq）。

@@ -2,7 +2,7 @@ import type { Incident } from '@srenautix/contract';
 import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
 import { z } from 'zod';
-import { badRequest, notFound } from '../api/errors.js';
+import { badRequest, notFound } from '../kernel/errors.js';
 import { checkBody, openapiValidator } from '../api/openapi-schemas.js';
 import type { Auth } from '../identity/auth.js';
 import type { CandidateState, EvalCandidateConfirm, EvalCandidates } from '../proposals/candidates.js';

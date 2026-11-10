@@ -1,10 +1,10 @@
 import type { ChangeEvent } from '@srenautix/contract';
 import { DatasourceError, toIso } from '@srenautix/integration-sdk';
 import type pg from 'pg';
-import { parseDuration } from '../config/files.js';
+import { parseDuration } from '../kernel/files.js';
 import type { ServerConfig } from '../config/server.js';
 import type { GitHubApp } from '../github/app.js';
-import { logger } from '../log.js';
+import { logger } from '../kernel/log.js';
 import { GitHubChangesAdapter } from './github.js';
 import { SqlAuditReader, type SqlAuditSourceConfig } from './sql-audit.js';
 

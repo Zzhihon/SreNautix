@@ -1,5 +1,5 @@
 import type { Incident } from '@srenautix/contract';
-import type { Queryable } from '../store/pool.js';
+import type { Queryable } from '../kernel/store/pool.js';
 
 // 组件的可读名称（ADR 0101）：阶段 A 按领域包的 display_name 来源求出，存在 server.component_names。
 // 只用于显示（标题、通知、控制台、issue），组件键不变。

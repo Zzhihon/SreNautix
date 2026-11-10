@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { ChangeEvent, MetricSeries, MetricsQueryRequest } from '@srenautix/contract';
 import { tryNodeKey } from '@srenautix/core';
-import type { Queryable } from '../store/pool.js';
+import type { Queryable } from '../kernel/store/pool.js';
 import { deriveRollouts, type RolloutOptions, type WorkloadEvent } from './kubernetes.js';
 
 /**

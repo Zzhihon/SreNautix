@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import type { Feedback, FeedbackReasonCode, HubComponents } from '@srenautix/contract';
 import type pg from 'pg';
-import { badRequest, conflict, notFound } from '../api/errors.js';
-import { appendAudit } from '../store/audit.js';
-import { tx, type Queryable } from '../store/pool.js';
+import { badRequest, conflict, notFound } from '../kernel/errors.js';
+import { appendAudit } from '../kernel/store/audit.js';
+import { tx, type Queryable } from '../kernel/store/pool.js';
 
 // 评测候选（ADR 0175）：反馈、关闭的自愈 PR、以 not planned 关闭的事件 issue 与控制台"加入评测"生成候选，
 // 同一事件同一来源只生成一个。管理员确认（选定类型、根因、处置）或放弃；确认的候选由命令行导出为标注。

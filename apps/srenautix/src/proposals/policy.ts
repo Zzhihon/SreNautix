@@ -3,7 +3,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { assertValid } from '@srenautix/contract';
 import { parse as parseYaml } from 'yaml';
-import { ConfigError } from '../config/files.js';
+import { ConfigError } from '../kernel/files.js';
 
 /** gateway 策略（contract/gateway/v1/gateway-policy.schema.json）中 server 用到的部分。 */
 export interface GatewayPolicy {

@@ -1,7 +1,7 @@
 import type { KeyObject } from 'node:crypto';
 import { parseArgs } from 'node:util';
-import { pgConfigFromEnv } from '../config/database.js';
-import { readSecretFile } from '../config/files.js';
+import { pgConfigFromEnv } from '../kernel/store/pg-env.js';
+import { readSecretFile } from '../kernel/files.js';
 import { loadServerConfig } from '../config/server.js';
 import {
   GENESIS_HASH,
@@ -12,9 +12,9 @@ import {
   verifyRecords,
   type AuditCheckpoint,
   type AuditRecord,
-} from './audit.js';
-import { readSink, s3Client } from './audit-export.js';
-import { createPool } from './pool.js';
+} from '../kernel/store/audit.js';
+import { readSink, s3Client } from '../kernel/store/audit-export.js';
+import { createPool } from '../kernel/store/pool.js';
 
 export interface VerifyReport {
   records: number;

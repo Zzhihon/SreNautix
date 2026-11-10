@@ -1,6 +1,6 @@
 import type { Incident, IncidentCategory, ServiceSource, StageAReport } from '@srenautix/contract';
 import type pg from 'pg';
-import type { Queryable } from '../store/pool.js';
+import type { Queryable } from '../kernel/store/pool.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 

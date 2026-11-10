@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { join } from 'node:path';
-import { logger } from '../log.js';
+import { logger } from '../kernel/log.js';
 
 /**
  * 录制回放的模型服务（`srenautix llm-replay`，kind-e2e 与离线演示用，OpenAI 兼容：POST /v1/responses、/v1/chat/completions）。

@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import OpenAI from 'openai';
 import type { ModelRoute } from '@srenautix/contract';
-import { logger } from '../log.js';
+import { logger } from '../kernel/log.js';
 import { findSecrets, mergeHits, redactText, type RedactionHits, type RedactionKind } from './redact.js';
 import { DEFAULT_EGRESS_CATEGORIES, type EgressCategory, type Item, type LlmRequest, type Segment } from './types.js';
 

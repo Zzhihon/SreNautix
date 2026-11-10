@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { HttpError } from '../api/errors.js';
+import { HttpError } from '../kernel/errors.js';
 import { GitHubError, type GitHubApp } from '../github/app.js';
 import { GitHubRepoReader } from '../remediation/github-repo.js';
 import { filePatch } from '../remediation/patch.js';

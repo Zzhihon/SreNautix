@@ -1,10 +1,10 @@
 import type { ReasonGroupCode } from '@srenautix/contract';
 import type pg from 'pg';
 import { writeRuleOnly } from '../incident/reasons.js';
-import { logger } from '../log.js';
-import type { ServerMetrics } from '../metrics.js';
-import { appendEvents } from '../store/outbox.js';
-import { tx } from '../store/pool.js';
+import { logger } from '../kernel/log.js';
+import type { ServerMetrics } from '../kernel/metrics.js';
+import { appendEvents } from '../kernel/store/outbox.js';
+import { tx } from '../kernel/store/pool.js';
 
 type FailureKind = ReasonGroupCode<'research_failure'>;
 

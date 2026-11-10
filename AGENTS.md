@@ -56,7 +56,8 @@ Alertmanager webhook ─► ingest ─► incident engine ─► stage A (determ
 | `export`, `mcp`, `console-bff` | Incident export, MCP server, console backend |
 | `identity` | Local admin, OIDC, WebAuthn approvals, role bindings |
 | `eval`, `events` | Replay and eval candidates; outbox listeners |
-| `store`, `api`, `config` | PostgreSQL pool, migrations, outbox; HTTP plumbing; zod config schemas |
+| `kernel` | Base layer: logging, metrics, HTTP app and errors, leader election, PostgreSQL pool, migrations, outbox, data corrections. A lint rule forbids it to import anything outside `apps/srenautix/src/kernel` |
+| `api`, `config` | HTTP routes of the server roles; zod config schemas |
 | `roles` | Process assembly: `apps/srenautix/src/roles/server.ts` wires every module |
 
 ## Sources of truth

@@ -1,6 +1,6 @@
 import type { Incident } from '@srenautix/contract';
 import { incidentCategories, type AlertCatalog } from '@srenautix/core';
-import type { Correction } from '../store/corrections.js';
+import type { Correction } from '../kernel/store/corrections.js';
 import { alertRows, memberCategory } from './recategorize.js';
 
 /** 每批补写的事件数 */

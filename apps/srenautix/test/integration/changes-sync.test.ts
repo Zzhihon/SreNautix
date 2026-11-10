@@ -5,7 +5,7 @@ import { parseServerConfig } from '../../src/config/server.js';
 import { serverConditions } from '../../src/console-bff/conditions.js';
 import { GitHubApp } from '../../src/github/app.js';
 import { serverTracks } from '../../src/roles/server-schema.js';
-import { migrateExpand } from '../../src/store/migrate.js';
+import { migrateExpand } from '../../src/kernel/store/migrate.js';
 import { newTestDb, type TestDb } from '../support/db.js';
 import { FakeGitHub } from '../support/github.js';
 

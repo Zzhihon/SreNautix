@@ -1,10 +1,10 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type pg from 'pg';
 import { z } from 'zod';
-import { badRequest, forbidden, HttpError, notFound, unauthorized } from '../api/errors.js';
-import type { ServerMetrics } from '../metrics.js';
-import { appendAudit } from '../store/audit.js';
-import { tx } from '../store/pool.js';
+import { badRequest, forbidden, HttpError, notFound, unauthorized } from '../kernel/errors.js';
+import type { ServerMetrics } from '../kernel/metrics.js';
+import { appendAudit } from '../kernel/store/audit.js';
+import { tx } from '../kernel/store/pool.js';
 import type { Auth, Caller } from './auth.js';
 import { PERMISSIONS, type Permission, type RoleBinding } from './bindings.js';
 import { upsertUser, type ChatLinks } from './chat-links.js';

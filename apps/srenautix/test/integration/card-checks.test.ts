@@ -12,7 +12,7 @@ import {
   replay,
 } from '../../src/eval/reconstruct.js';
 import { LlmReplay } from '../../src/llm/replay.js';
-import { ServerMetrics } from '../../src/metrics.js';
+import { ServerMetrics } from '../../src/kernel/metrics.js';
 import { Catalog, DEFAULT_CATALOG_PATH } from '../../src/proposals/catalog.js';
 import { runStageB } from '../../src/research/controller.js';
 import type { ResearchCase } from '../../src/research/types.js';

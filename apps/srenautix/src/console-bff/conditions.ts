@@ -1,10 +1,10 @@
 import type { Condition } from '@srenautix/contract';
 import type { ChangeSourceStatus } from '../changes/service.js';
 import type pg from 'pg';
-import { logger } from '../log.js';
-import type { BaseMetrics } from '../metrics.js';
-import { appendEvents } from '../store/outbox.js';
-import { tx } from '../store/pool.js';
+import { logger } from '../kernel/log.js';
+import type { BaseMetrics } from '../kernel/metrics.js';
+import { appendEvents } from '../kernel/store/outbox.js';
+import { tx } from '../kernel/store/pool.js';
 
 export const SCHEMA_VERSION = '2.4.0';
 

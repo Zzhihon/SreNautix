@@ -8,9 +8,9 @@ import { ksmTopologyIntervals, ksmTopologyQueries, type KsmTopologyResults } fro
 import { PrometheusApiAdapter } from '@srenautix/integration-sdk';
 import { ARGOCD_SYNC_QUERY, DEFAULT_PENDING_SYNC_LOOKBACK_MS, PENDING_SYNC_STEP_MS } from '../changes/pending-sync.js';
 import { RETIRE_QUERIES, RETIRE_STEP_MS, type RetireSeries } from '../changes/retire.js';
-import { readSecretFile } from '../config/files.js';
+import { readSecretFile } from '../kernel/files.js';
 import { fingerprint, identityLabels } from '../ingest/normalize.js';
-import { logger } from '../log.js';
+import { logger } from '../kernel/log.js';
 import type { Label } from './labels.js';
 
 // 重建包（ADR 0110）：重建一次故障需要的全部输入，按标注逐个从数据源只读导出，保存在用例目录的 bundles/ 下。

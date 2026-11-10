@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { referenceCases } from '../../src/api/research-materials.js';
 import { serverTracks } from '../../src/roles/server-schema.js';
-import { migrateExpand } from '../../src/store/migrate.js';
+import { migrateExpand } from '../../src/kernel/store/migrate.js';
 import { newTestDb, type TestDb } from '../support/db.js';
 
 /** 阶段 B 的参考案例：同集群已结束、经人工确认根因的历史事件（真实 PostgreSQL）。 */

@@ -3,7 +3,7 @@ import type { TopologyEdge, TopologyNode } from '@srenautix/contract';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { researchRoots } from '../../src/incident/research-root.js';
 import { serverTracks } from '../../src/roles/server-schema.js';
-import { migrateExpand } from '../../src/store/migrate.js';
+import { migrateExpand } from '../../src/kernel/store/migrate.js';
 import { TopologyStore } from '../../src/topology/store.js';
 import { newTestDb, type TestDb } from '../support/db.js';
 

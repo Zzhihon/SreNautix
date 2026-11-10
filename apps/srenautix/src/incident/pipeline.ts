@@ -1,11 +1,11 @@
 import type { Incident } from '@srenautix/contract';
 import pg from 'pg';
-import { logger } from '../log.js';
-import type { ServerMetrics } from '../metrics.js';
+import { logger } from '../kernel/log.js';
+import type { ServerMetrics } from '../kernel/metrics.js';
 import type { Scheduler, ResearchReason } from '../scheduler/admission.js';
 import type { StageAService } from '../stage-a/service.js';
-import { isConnectionError } from '../store/health.js';
-import type { PgConfig } from '../store/pool.js';
+import { isConnectionError } from '../kernel/store/health.js';
+import type { PgConfig } from '../kernel/store/pool.js';
 import type { IncidentEngine } from './engine.js';
 import { incidentOnsetMs, incidentOrigin } from './onset.js';
 import { incidentVersion } from './read.js';

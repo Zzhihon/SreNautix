@@ -3,7 +3,7 @@ import { AlertCatalog, DEFAULT_RCA_PARAMS, labelsFingerprint } from '@srenautix/
 import { ServiceCatalog } from '@srenautix/packs-sdk/business';
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createApp } from '../../src/api/http.js';
+import { createApp } from '../../src/kernel/http.js';
 import { registerIncidentRoutes } from '../../src/console-bff/routes-incidents.js';
 import type { Auth } from '../../src/identity/auth.js';
 import type { FeedbackService } from '../../src/proposals/feedback.js';
@@ -13,9 +13,9 @@ import { IncidentEngine } from '../../src/incident/engine.js';
 import { classificationInputsFingerprint, recategorizeIncidents } from '../../src/incident/recategorize.js';
 import { IngestService } from '../../src/ingest/service.js';
 import type { RawAlert } from '../../src/ingest/normalize.js';
-import { ServerMetrics } from '../../src/metrics.js';
+import { ServerMetrics } from '../../src/kernel/metrics.js';
 import { serverTracks } from '../../src/roles/server-schema.js';
-import { migrateExpand } from '../../src/store/migrate.js';
+import { migrateExpand } from '../../src/kernel/store/migrate.js';
 import { TopologyStore } from '../../src/topology/store.js';
 import { newTestDb, type TestDb } from '../support/db.js';
 

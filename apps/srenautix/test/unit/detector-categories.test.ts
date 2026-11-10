@@ -11,7 +11,7 @@ import {
   type DetectorSettings,
 } from '../../src/detectors/service.js';
 import { classificationInputsFingerprint } from '../../src/incident/recategorize.js';
-import { ServerMetrics } from '../../src/metrics.js';
+import { ServerMetrics } from '../../src/kernel/metrics.js';
 import { DEFAULT_CATALOG_PATH } from '../../src/proposals/catalog.js';
 import { PackRuntime } from '../../src/stage-a/packs.js';
 import { PACKS } from '../support/packs.js';

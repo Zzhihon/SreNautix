@@ -3,7 +3,7 @@ import type { TopologyEdge, TopologyEvent, TopologyNode } from '@srenautix/contr
 import canonicalize from 'canonicalize';
 import type pg from 'pg';
 import type { NodeLookup } from '../alerts/resolve.js';
-import { tx, type Queryable } from '../store/pool.js';
+import { tx, type Queryable } from '../kernel/store/pool.js';
 
 const TOMBSTONE_MS = 24 * 3600_000;
 

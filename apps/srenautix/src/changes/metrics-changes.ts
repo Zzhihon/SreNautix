@@ -3,7 +3,7 @@ import { TopologyGraph } from '@srenautix/core';
 import { DatasourceError } from '@srenautix/integration-sdk';
 import type { EvidenceDataSource } from '@srenautix/packs-sdk';
 import type pg from 'pg';
-import { logger } from '../log.js';
+import { logger } from '../kernel/log.js';
 import type { TopologyStore } from '../topology/store.js';
 import { managersOf } from './ksm-rollouts.js';
 import { ARGOCD_SYNC_QUERY, outOfSyncApplications, PENDING_SYNC_STEP_MS, pendingSyncChanges } from './pending-sync.js';

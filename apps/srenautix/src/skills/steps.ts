@@ -8,7 +8,7 @@ import {
   type EvidenceDataSource,
   type PackSet,
 } from '@srenautix/packs-sdk';
-import { parseDuration } from '../config/files.js';
+import { parseDuration } from '../kernel/files.js';
 import type { GitHubApp } from '../github/app.js';
 import { RepoCodeCache } from '../optimize/code/tree.js';
 import { SkillDenied, type SkillContext } from './context.js';

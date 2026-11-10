@@ -3,7 +3,7 @@ import { LlmError } from '../llm/types.js';
 import { probeRoute } from '../llm/probe.js';
 import type { RouteRuntime } from '../llm/session.js';
 import { shortCallTimeoutMs } from '../llm/timeouts.js';
-import { logger } from '../log.js';
+import { logger } from '../kernel/log.js';
 import { EvidenceSource } from '../stage-a/packs.js';
 import { EvalInfrastructureError } from './runner.js';
 

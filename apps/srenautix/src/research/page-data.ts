@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import type pg from 'pg';
-import { badRequest } from '../api/errors.js';
+import { badRequest } from '../kernel/errors.js';
 import { CaseStore } from '../eval/store.js';
 
 // 控制台 /eval /health /models 三页经 console-bff 的 forward() 原样转发到 worker。

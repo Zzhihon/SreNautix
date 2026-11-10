@@ -7,11 +7,11 @@ import {
   type ResearchOutput,
   type Severity,
 } from '@srenautix/contract';
-import { logger } from '../log.js';
+import { logger } from '../kernel/log.js';
 import { dailyGate, type BudgetConfig } from '../llm/budget.js';
 import { REDACTION_VERSION } from '../llm/redact.js';
 import type { ModelLayer } from '../llm/session.js';
-import type { NewEvent } from '../store/outbox.js';
+import type { NewEvent } from '../kernel/store/outbox.js';
 import type { Tool } from '../tools/box.js';
 import {
   runStageB,

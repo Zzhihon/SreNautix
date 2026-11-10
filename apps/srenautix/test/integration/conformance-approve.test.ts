@@ -22,7 +22,7 @@ import { hashPassword } from '../../src/identity/password.js';
 import { feishuButtonKey } from '../../src/notify/index.js';
 import { buildServer, type ServerHandle } from '../../src/roles/server.js';
 import { serverTracks } from '../../src/roles/server-schema.js';
-import { migrateExpand } from '../../src/store/migrate.js';
+import { migrateExpand } from '../../src/kernel/store/migrate.js';
 import { TopologyStore } from '../../src/topology/store.js';
 import { newTestDb, type TestDb } from '../support/db.js';
 import { fixture, fixtureFile, FixtureServer } from '../support/fixture-server.js';

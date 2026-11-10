@@ -1,9 +1,9 @@
 import type pg from 'pg';
-import { logger } from '../log.js';
+import { logger } from '../kernel/log.js';
 import type { Closure } from '../proposals/feedback.js';
 import type { RemediationChanges } from '../remediation/dedupe.js';
-import { appendAudit } from '../store/audit.js';
-import { tx, type Queryable } from '../store/pool.js';
+import { appendAudit } from '../kernel/store/audit.js';
+import { tx, type Queryable } from '../kernel/store/pool.js';
 import { GitHubError, type GitHubApp } from './app.js';
 
 // 关闭的跟踪（ADR 0174）：人在 GitHub 上关闭自愈 PR 与事件 issue 也是对研判的反馈。

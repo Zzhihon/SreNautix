@@ -11,11 +11,11 @@ import type {
 import type { PromqlEngine } from '@srenautix/integration-sdk';
 import { skills as sdk, type EvidenceDataSource, type PackSet } from '@srenautix/packs-sdk';
 import type pg from 'pg';
-import { parseDuration } from '../config/files.js';
+import { parseDuration } from '../kernel/files.js';
 import type { GitHubApp } from '../github/app.js';
-import { logger } from '../log.js';
-import { appendAudit, jcs } from '../store/audit.js';
-import { tx } from '../store/pool.js';
+import { logger } from '../kernel/log.js';
+import { appendAudit, jcs } from '../kernel/store/audit.js';
+import { tx } from '../kernel/store/pool.js';
 import type { SkillsConfig } from './config.js';
 import { Semaphore, SkillBudgetExceeded, SkillContext, SkillDenied, type Backend } from './context.js';
 import type { SkillKube } from './kube.js';

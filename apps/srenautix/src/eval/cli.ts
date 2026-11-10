@@ -3,7 +3,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 import type { EvalCase, EvalSnapshot } from '@srenautix/contract';
-import { logger } from '../log.js';
+import { logger } from '../kernel/log.js';
 import { Egress } from '../llm/egress.js';
 import { buildRuntimes } from '../llm/routes.js';
 import { ModelLayer } from '../llm/session.js';

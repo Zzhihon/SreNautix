@@ -21,11 +21,11 @@ import {
 import type pg from 'pg';
 import type { Registry } from 'prom-client';
 import type { Observed } from '../console-bff/conditions.js';
-import { parseDuration } from '../config/files.js';
+import { parseDuration } from '../kernel/files.js';
 import type { GitHubApp } from '../github/app.js';
-import { logger } from '../log.js';
-import { appendAudit } from '../store/audit.js';
-import { tx } from '../store/pool.js';
+import { logger } from '../kernel/log.js';
+import { appendAudit } from '../kernel/store/audit.js';
+import { tx } from '../kernel/store/pool.js';
 import type { SkillsConfig } from './config.js';
 import type { SkillKube } from './kube.js';
 import { SkillMetrics } from './metrics.js';

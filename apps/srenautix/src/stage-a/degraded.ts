@@ -9,8 +9,8 @@ import {
 } from '@srenautix/core';
 import { incidentOnsetMs, incidentOrigin } from '../incident/onset.js';
 import { alertId, type RawAlert } from '../ingest/normalize.js';
-import { logger } from '../log.js';
-import type { ServerMetrics } from '../metrics.js';
+import { logger } from '../kernel/log.js';
+import type { ServerMetrics } from '../kernel/metrics.js';
 import { composeMessage } from '../notify/compose.js';
 import type { DesiredIncidentMessage } from '../notify/ports.js';
 import type { EvidenceRunner, RuleProposer } from './ports.js';

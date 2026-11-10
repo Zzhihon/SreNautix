@@ -3,7 +3,7 @@ import { hostname } from 'node:os';
 import { parse } from 'yaml';
 import { z } from 'zod';
 import type { ModelRoute } from '@srenautix/contract';
-import { readSecretFile } from '../config/files.js';
+import { readSecretFile } from '../kernel/files.js';
 import { DEFAULT_BUDGET, type BudgetConfig } from '../llm/budget.js';
 import { EGRESS_CATEGORIES, type EgressCategory } from '../llm/types.js';
 import { resolveTimeouts, type ModelClass, type RouteTimeouts } from '../llm/timeouts.js';

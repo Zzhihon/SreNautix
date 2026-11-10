@@ -8,8 +8,8 @@ import { LocalAdmin } from '../../src/identity/local-admin.js';
 import { Oidc } from '../../src/identity/oidc.js';
 import { hashPassword } from '../../src/identity/password.js';
 import type { AuthenticatedPrincipal } from '../../src/identity/sessions.js';
-import { migrateExpand } from '../../src/store/migrate.js';
-import { storeTrack } from '../../src/store/migrations.js';
+import { migrateExpand } from '../../src/kernel/store/migrate.js';
+import { storeTrack } from '../../src/kernel/store/migrations.js';
 import { newTestDb, type TestDb } from '../support/db.js';
 import { browseUntil, startIdp, type TestAccount, type TestIdp } from '../support/oidc.js';
 

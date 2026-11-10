@@ -12,10 +12,10 @@ import type { ServiceResolution } from '@srenautix/packs-sdk/business';
 import { alertService, type ServiceDeps } from '../alerts/service.js';
 import canonicalize from 'canonicalize';
 import type pg from 'pg';
-import type { Leader } from '../api/leader.js';
-import { logger } from '../log.js';
-import type { ServerMetrics } from '../metrics.js';
-import { tx, type Queryable } from '../store/pool.js';
+import type { Leader } from '../kernel/leader.js';
+import { logger } from '../kernel/log.js';
+import type { ServerMetrics } from '../kernel/metrics.js';
+import { tx, type Queryable } from '../kernel/store/pool.js';
 
 /** 每批重新分类的事件数；每批一个事务 */
 export const RECATEGORIZE_BATCH = 500;

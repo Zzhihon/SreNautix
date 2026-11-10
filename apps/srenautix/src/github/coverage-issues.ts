@@ -1,8 +1,8 @@
 import type pg from 'pg';
-import { logger } from '../log.js';
-import type { ServerMetrics } from '../metrics.js';
-import { appendAudit } from '../store/audit.js';
-import { tx, type Queryable } from '../store/pool.js';
+import { logger } from '../kernel/log.js';
+import type { ServerMetrics } from '../kernel/metrics.js';
+import { appendAudit } from '../kernel/store/audit.js';
+import { tx, type Queryable } from '../kernel/store/pool.js';
 import { GitHubError, type GitHubApp } from './app.js';
 import { backoffMs, MAX_ATTEMPTS, openedLastHour } from './issues.js';
 

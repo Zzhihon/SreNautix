@@ -4,7 +4,7 @@ import { SCHEMAS } from '@srenautix/contract';
 import { Ajv2020, type ValidateFunction } from 'ajv/dist/2020.js';
 import addFormats from 'ajv-formats';
 import { parse as parseYaml } from 'yaml';
-import { badRequest } from './errors.js';
+import { badRequest } from '../kernel/errors.js';
 
 const CONTRACT_DIR = resolve(import.meta.dirname, '../../../../contract');
 const BASE = 'https://srenautix.io/contract/';

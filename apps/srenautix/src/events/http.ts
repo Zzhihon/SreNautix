@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type pg from 'pg';
-import { badRequest } from '../api/errors.js';
-import { logger } from '../log.js';
+import { badRequest } from '../kernel/errors.js';
+import { logger } from '../kernel/log.js';
 import {
   CursorError,
   formatCursor,
@@ -10,7 +10,7 @@ import {
   readEvents,
   type OutboxEvent,
   type Owner,
-} from '../store/outbox.js';
+} from '../kernel/store/outbox.js';
 import type { OutboxListener } from './listener.js';
 
 export interface EventsDeps {

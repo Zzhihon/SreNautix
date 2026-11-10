@@ -1,6 +1,6 @@
 import type { FeedbackReasonCode } from '@srenautix/contract';
 import type pg from 'pg';
-import { tx } from '../store/pool.js';
+import { tx } from '../kernel/store/pool.js';
 import { RENDER_VERSION, type ActionResultView, type RegisteredButton } from './channel.js';
 import type { ExternalWindowStats } from './external.js';
 import type { ButtonTarget } from './ports.js';

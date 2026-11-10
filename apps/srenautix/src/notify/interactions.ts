@@ -1,6 +1,6 @@
 import type { Channel, Disposition, FeedbackReasonCode } from '@srenautix/contract';
-import { logger } from '../log.js';
-import type { ServerMetrics } from '../metrics.js';
+import { logger } from '../kernel/log.js';
+import type { ServerMetrics } from '../kernel/metrics.js';
 import { isReasonCode } from '../proposals/feedback.js';
 import type { ActionOutcome, ChannelActor, NotifyActions } from './ports.js';
 import type { ButtonRow, NotifyStore, PendingReply } from './store.js';

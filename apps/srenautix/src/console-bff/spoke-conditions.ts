@@ -1,5 +1,5 @@
 import { CONDITION_DIRECTIONS, type ConditionDirections } from '@srenautix/contract';
-import type { Queryable } from '../store/pool.js';
+import type { Queryable } from '../kernel/store/pool.js';
 
 // 分支角色（gateway、reader）上报的状态条件（ADR 0098 之后的契约 2.10.0，contract/conditions.json）：
 // - 方向：每个角色的条件哪个取值表示正常，由契约的方向表给出，server、控制台与 chart 的告警规则都按这张表判断；

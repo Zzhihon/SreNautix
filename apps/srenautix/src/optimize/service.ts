@@ -5,7 +5,7 @@ import type { Registry } from 'prom-client';
 import type { ServerConfig } from '../config/server.js';
 import type { GitHubApp } from '../github/app.js';
 import { OptimizationIssues } from '../github/optimization-issues.js';
-import { logger } from '../log.js';
+import { logger } from '../kernel/log.js';
 import type { ProposalService } from '../proposals/service.js';
 import type { EvidenceSource } from '../stage-a/packs.js';
 import type { TopologyStore } from '../topology/store.js';

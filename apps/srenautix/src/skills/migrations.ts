@@ -1,4 +1,4 @@
-import type { Track } from '../store/migrate.js';
+import type { Track } from '../kernel/store/migrate.js';
 
 // 技能（ADR 0181）的状态：暂停、运行与外部访问的记录、按指纹去重的发现、发现的评论、已报告过的发生、触发的游标
 export const skillsTrack: Track = {

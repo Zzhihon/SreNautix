@@ -9,7 +9,7 @@ import { IncidentPipeline, STAGE_A_MAX_RETRIES } from '../../src/incident/pipeli
 import { resolveIncidentRef } from '../../src/incident/read.js';
 import { IngestService } from '../../src/ingest/service.js';
 import type { RawAlert } from '../../src/ingest/normalize.js';
-import { ServerMetrics } from '../../src/metrics.js';
+import { ServerMetrics } from '../../src/kernel/metrics.js';
 import { NotifyEngine } from '../../src/notify/engine.js';
 import { Interactions } from '../../src/notify/interactions.js';
 import { NO_LINKS } from '../../src/notify/links.js';
@@ -22,7 +22,7 @@ import { serverTracks } from '../../src/roles/server-schema.js';
 import { Scheduler } from '../../src/scheduler/admission.js';
 import type { EvidenceRun, EvidenceRunner, RuleProposer } from '../../src/stage-a/ports.js';
 import { StageAService } from '../../src/stage-a/service.js';
-import { migrateExpand } from '../../src/store/migrate.js';
+import { migrateExpand } from '../../src/kernel/store/migrate.js';
 import { TopologyStore } from '../../src/topology/store.js';
 import { newTestDb, type TestDb } from '../support/db.js';
 import { fixture, FixtureServer } from '../support/fixture-server.js';

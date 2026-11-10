@@ -1,9 +1,9 @@
 import type { AlertmanagerAlert } from '@srenautix/contract';
 import { isIgnorable } from '@srenautix/core';
 import type pg from 'pg';
-import { logger } from '../log.js';
-import type { ServerMetrics } from '../metrics.js';
-import { tx } from '../store/pool.js';
+import { logger } from '../kernel/log.js';
+import type { ServerMetrics } from '../kernel/metrics.js';
+import { tx } from '../kernel/store/pool.js';
 import {
   alertId,
   fingerprint,

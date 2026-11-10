@@ -3,7 +3,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import { z } from 'zod';
-import { ConfigError } from '../config/files.js';
+import { ConfigError } from '../kernel/files.js';
 
 /**
  * 角色绑定来自 Git 挂载的目录（DESIGN §12.3、§13）。目录下每个 *.yaml 文件：

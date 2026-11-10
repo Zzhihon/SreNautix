@@ -2,7 +2,7 @@ import type { Incident } from '@srenautix/contract';
 import { AlertCatalog, classifyAlert } from '@srenautix/core';
 import { describe, expect, it } from 'vitest';
 import { categoryOptions } from '../../src/alerts/category.js';
-import { HttpError } from '../../src/api/errors.js';
+import { HttpError } from '../../src/kernel/errors.js';
 import { parseServerConfig } from '../../src/config/server.js';
 import {
   classificationConditions,
@@ -11,7 +11,7 @@ import {
 } from '../../src/console-bff/incident-filters.js';
 import type { IncidentRow } from '../../src/incident/read.js';
 import { classificationInputsFingerprint } from '../../src/incident/recategorize.js';
-import { ServerMetrics } from '../../src/metrics.js';
+import { ServerMetrics } from '../../src/kernel/metrics.js';
 import { PackRuntime } from '../../src/stage-a/packs.js';
 import { DEFAULT_CATALOG_PATH } from '../../src/proposals/catalog.js';
 import { PACKS } from '../support/packs.js';

@@ -1,7 +1,7 @@
 import { REASON_CODES } from '@srenautix/contract';
 import { recordReason, writeReason } from '../incident/reasons.js';
-import { logger } from '../log.js';
-import type { ServerMetrics } from '../metrics.js';
+import { logger } from '../kernel/log.js';
+import type { ServerMetrics } from '../kernel/metrics.js';
 import {
   RENDER_VERSION,
   type AbandonReason,

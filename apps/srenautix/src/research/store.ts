@@ -9,8 +9,8 @@ import type {
 import { CONTRACT_VERSION } from '@srenautix/contract';
 import type { Calibration } from '../llm/budget.js';
 import type { LlmCallRecord, RouteUsage } from '../llm/session.js';
-import { appendEvents, type NewEvent } from '../store/outbox.js';
-import { tx } from '../store/pool.js';
+import { appendEvents, type NewEvent } from '../kernel/store/outbox.js';
+import { tx } from '../kernel/store/pool.js';
 import type { ToolCallRecord } from '../tools/box.js';
 import type { ResearchState } from './controller.js';
 import type { PreviousRun } from './types.js';

@@ -21,11 +21,11 @@ import {
 } from '../optimize/goals.js';
 import { decodeCursor, OPEN_GOAL_STATES, type OptimizationStore } from '../optimize/store.js';
 import { durationMs } from '../optimize/stats.js';
-import { appendAudit } from '../store/audit.js';
-import { appendEvents } from '../store/outbox.js';
-import { tx } from '../store/pool.js';
+import { appendAudit } from '../kernel/store/audit.js';
+import { appendEvents } from '../kernel/store/outbox.js';
+import { tx } from '../kernel/store/pool.js';
 import { parseStoredKey } from '../topology/keys.js';
-import { badRequest, conflict, forbidden, HttpError, notFound, unavailable } from './errors.js';
+import { badRequest, conflict, forbidden, HttpError, notFound, unavailable } from '../kernel/errors.js';
 
 // 主动优化的接口（contract/openapi.yaml 的 optimization 标签，ADR 0146 §5.1）：目标的下达、列表、读取与取消，运行明细，
 // 发现与建议的列表，"建议无用"，以及新建目标时的指标与领域目录。主动优化关闭时写接口返回 503。

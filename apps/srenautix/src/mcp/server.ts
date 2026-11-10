@@ -6,7 +6,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 import type { Incident, StageAReport } from '@srenautix/contract';
-import { logger } from '../log.js';
+import { logger } from '../kernel/log.js';
 import type { WorkerMetrics } from '../research/metrics.js';
 import { AuthFailure, requireScope, SCOPE_PROPOSE, SCOPE_READ, type Principal, type ResourceServer } from './auth.js';
 import type { Quotas } from './quota.js';

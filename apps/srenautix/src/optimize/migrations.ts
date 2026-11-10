@@ -1,4 +1,4 @@
-import type { Track } from '../store/migrate.js';
+import type { Track } from '../kernel/store/migrate.js';
 
 // 主动优化的 server 表（ADR 0146 §1、§4.5、§5.5）。新表都以目标 id 或发现指纹建索引（§6.3）；
 // 验证循环只读 verifying 与 recommended 状态的建议。

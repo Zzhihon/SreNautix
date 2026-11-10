@@ -1,6 +1,6 @@
 import { createServer } from 'node:net';
 import { describe, expect, it } from 'vitest';
-import { databaseNotReady, migrateWhenReady } from '../../src/store/migrate-when-ready.js';
+import { databaseNotReady, migrateWhenReady } from '../../src/kernel/store/migrate-when-ready.js';
 
 // 启动时数据库还没准备好（ADR 0102）：重试并保持 not ready，进程不退出；其他错误照常抛出
 

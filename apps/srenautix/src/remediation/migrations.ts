@@ -1,4 +1,4 @@
-import type { Track } from '../store/migrate.js';
+import type { Track } from '../kernel/store/migrate.js';
 
 export const remediationTrack: Track = {
   track: 'remediation',

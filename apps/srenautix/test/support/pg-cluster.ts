@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { join, resolve } from 'node:path';
 import pg from 'pg';
-import { bootstrap, DEFAULT_DB_ROLES } from '../../src/store/bootstrap.js';
+import { bootstrap, DEFAULT_DB_ROLES } from '../../src/kernel/store/bootstrap.js';
 
 /**
  * 测试用的一次性 PostgreSQL：在仓库的 .scratch/ 下 initdb 并用 pg_ctl 启动，测试结束后停止并删除。

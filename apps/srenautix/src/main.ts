@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { logger } from './log.js';
+import { logger } from './kernel/log.js';
 
 /**
  * 同一镜像的三个角色与运维子命令：

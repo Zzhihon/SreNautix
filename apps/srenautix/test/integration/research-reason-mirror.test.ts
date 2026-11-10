@@ -3,10 +3,10 @@ import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { incidentTrack } from '../../src/incident/migrations.js';
-import { ServerMetrics } from '../../src/metrics.js';
+import { ServerMetrics } from '../../src/kernel/metrics.js';
 import { WorkerEventMirror } from '../../src/scheduler/worker-events.js';
-import { migrateExpand } from '../../src/store/migrate.js';
-import { storeTrack } from '../../src/store/migrations.js';
+import { migrateExpand } from '../../src/kernel/store/migrate.js';
+import { storeTrack } from '../../src/kernel/store/migrations.js';
 import { newTestDb, type TestDb } from '../support/db.js';
 
 // server.research_runs.reason 与队列里的入队原因一致（ADR 0142）。CCHP 2026-10-23 的 gateway 事件 b18629a6：

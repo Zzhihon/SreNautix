@@ -2,7 +2,7 @@ import type { Alert } from '@srenautix/contract';
 import { isIgnorable } from '@srenautix/core';
 import type pg from 'pg';
 import type { Resolved } from '../alerts/resolve.js';
-import type { Queryable } from '../store/pool.js';
+import type { Queryable } from '../kernel/store/pool.js';
 import { alertId, type RawAlert } from './normalize.js';
 
 /** 接入写入后唤醒事件引擎（单活实例）的频道。 */
