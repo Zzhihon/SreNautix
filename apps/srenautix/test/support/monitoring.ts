@@ -68,7 +68,9 @@ export interface Proc {
 function start(bin: string, args: string[], dir: string): { p: ChildProcess; log: () => string } {
   const path = join(BIN, bin);
   if (!existsSync(path)) {
-    throw new Error(`找不到 ${path}；按 .github/scripts/install-test-binaries.sh 的版本放到这个目录，或用 SRENAUTIX_TEST_BIN 指定`);
+    throw new Error(
+      `找不到 ${path}；按 .github/scripts/install-test-binaries.sh 的版本放到这个目录，或用 SRENAUTIX_TEST_BIN 指定`,
+    );
   }
   const p = spawn(path, args, { cwd: dir, stdio: ['ignore', 'ignore', 'pipe'] });
   const lines: string[] = [];
