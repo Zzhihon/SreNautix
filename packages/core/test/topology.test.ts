@@ -240,4 +240,17 @@ describe('集群级属主与组件类型的优先级', () => {
     expect(matchTypeByName('cluster', 'cchp-data', 'dragonfly', types)?.id).toBe('dragonfly');
     expect(matchTypeByName('cluster', null, 'seaweedfs', types)).toBeUndefined();
   });
+
+  it('kind 不带 API 组时 api_group 没有核对，不计入具体度：先声明的内置类型不抢走部署方按名称写的类型', () => {
+    // CCHP 11-06 的 CCHPDragonflySlowQuota：组件 cluster:dragonfly 被内置 postgres 包的 CNPG Cluster 类型抢走，事件没有服务
+    const types = [
+      { id: 'postgres.cnpg-cluster', match: { kind: 'Cluster', api_group: 'postgresql.cnpg.io' }, chains: [] },
+      { id: 'cchp.dragonfly', match: { kind: 'cluster', name_pattern: '^dragonfly$' }, chains: [] },
+    ];
+    expect(matchTypeByName('cluster', null, 'dragonfly', types)?.id).toBe('cchp.dragonfly');
+    // 带 API 组的 kind 核对了 api_group，计入具体度
+    expect(matchTypeByName('Cluster.postgresql.cnpg.io', 'db', 'dragonfly', types)?.id).toBe('postgres.cnpg-cluster');
+    // 只有它命中时仍然取它
+    expect(matchTypeByName('cluster', null, 'cchp-postgres', types)?.id).toBe('postgres.cnpg-cluster');
+  });
 });

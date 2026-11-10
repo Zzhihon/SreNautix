@@ -73,6 +73,12 @@ business_domains:
                 name_pattern: '(kube-state-metrics|prometheus-operator|kube-prometheus-stack-operator)$',
               }
           - match: { kind: Deployment, name_pattern: '^(vmsingle-|victoria-metrics|vmalert-)' }
+          # VictoriaMetrics operator 的资源：告警的根因常是这些 CR 本身（例如 VMSingle 的容器 OOM）
+          - match: { kind: VMSingle, api_group: operator.victoriametrics.com }
+          - match: { kind: VMCluster, api_group: operator.victoriametrics.com }
+          - match: { kind: VMAgent, api_group: operator.victoriametrics.com }
+          - match: { kind: VMAlert, api_group: operator.victoriametrics.com }
+          - match: { kind: VMAlertmanager, api_group: operator.victoriametrics.com }
         namespaces: [monitoring]
       - id: srenautix
         title: { zh-CN: SreNautix 自身, en: SreNautix itself }

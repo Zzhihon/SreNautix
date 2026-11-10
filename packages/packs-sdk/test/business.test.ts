@@ -90,6 +90,31 @@ describe('服务目录（ADR 0193）', () => {
     expect(c.service('orders-api')).toMatchObject({ business_domain: 'orders', tier: 'core', pack: 'shop' });
   });
 
+  it('match 成员的具体度按这个对象实际核对的条件计：kind 不带 API 组时 api_group 不计', () => {
+    const domains: BusinessDomain[] = [
+      {
+        id: 'data',
+        title: { 'zh-CN': '数据存储', en: 'Data' },
+        tier: 'core',
+        services: [
+          {
+            id: 'cnpg',
+            title: { 'zh-CN': 'CNPG', en: 'CNPG' },
+            members: [{ match: { kind: 'Cluster', api_group: 'postgresql.cnpg.io' } }],
+          },
+          {
+            id: 'dragonfly',
+            title: { 'zh-CN': 'Dragonfly', en: 'Dragonfly' },
+            members: [{ match: { kind: 'cluster', name_pattern: '^dragonfly$' } }],
+          },
+        ],
+      },
+    ];
+    const c = new ServiceCatalog([{ pack: 'p', domains }], []);
+    expect(c.ofObject(obj('cluster', null, 'dragonfly', null))).toBe('dragonfly');
+    expect(c.ofObject(obj('Cluster.postgresql.cnpg.io', 'db', 'dragonfly', null))).toBe('cnpg');
+  });
+
   it('重复的 id、不存在的组件类型、重复的默认命名空间是声明错误', () => {
     const svc = (id: string, extra: Partial<BusinessDomain['services'][number]> = {}) => ({
       id,
