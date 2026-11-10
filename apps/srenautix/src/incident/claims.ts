@@ -3,7 +3,13 @@ import type { Queryable } from '../kernel/store/pool.js';
 // 事件的认领（ADR 0195）：server.incident_claim_events 只追加，每个事件最近一条为 claim 时它的主体是处理人。
 // 认领时已有处理人就是接手；放下记 release。认领与放下都进入事件时间线。
 
-export type ClaimChannel = 'console' | 'grafana' | 'telegram' | 'feishu';
+const CLAIM_CHANNELS = ['console', 'grafana', 'telegram', 'feishu'] as const;
+export type ClaimChannel = (typeof CLAIM_CHANNELS)[number];
+
+/** 契约里认领记录的渠道（Claim.channel）只有这几种 */
+export function isClaimChannel(c: string): c is ClaimChannel {
+  return (CLAIM_CHANNELS as readonly string[]).includes(c);
+}
 
 export interface IncidentClaim {
   principal_id: string;

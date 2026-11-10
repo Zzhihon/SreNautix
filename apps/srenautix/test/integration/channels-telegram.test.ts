@@ -79,6 +79,9 @@ class RecordingActions implements NotifyActions {
   async resolvedConfirm(a: ChannelActor, id: string, version: number) {
     return this.rec('resolvedConfirm', a, id, version);
   }
+  async claim(a: ChannelActor, id: string) {
+    return this.rec('claim', a, id);
+  }
   async link(channel: Channel, user: string, code: string): Promise<ActionOutcome> {
     this.calls.push({ op: 'link', principal: null, args: [channel, user, code] });
     const p = this.codes.get(code);
@@ -140,6 +143,7 @@ function desired(): DesiredIncidentMessage {
         { kind: 'feedback_reject', label: '结论错', callback: 'fb:bad', url: null },
         { kind: 'disposition_confirm', label: '处置对', callback: 'dp:ok', url: null },
         { kind: 'disposition_reject', label: '处置错', callback: 'dp:bad', url: null },
+        { kind: 'claim', label: '我来处理', callback: 'cl', url: null },
       ],
     },
     targets: [
@@ -152,6 +156,7 @@ function desired(): DesiredIncidentMessage {
       }),
       target('dp:ok', 'disposition_confirm'),
       target('dp:bad', 'disposition_reject'),
+      target('cl', 'claim'),
     ],
   };
 }
@@ -343,6 +348,15 @@ describe('Telegram webhook 与按钮', () => {
     await engine.deliverOnce();
     const text = String((fs.calls('POST', `/bot${TOKEN}/editMessageText`).at(-1)!.body as { text: string }).text);
     expect(text).toContain('00:00 UTC @alice_oncall 批准：已完成');
+  });
+
+  it('我来处理：未绑定时提示绑定；绑定后以绑定主体认领这个事件', async () => {
+    expect(await click('我来处理')).toBe(NOT_LINKED_TEXT);
+    link();
+    expect(await click('我来处理')).toBe('已提交，结果见消息');
+    expect(actions.calls.filter((c) => c.op === 'claim')).toEqual([
+      { op: 'claim', principal: 'oidc:alice', args: [INCIDENT] },
+    ]);
   });
 
   it('H 档提议不能在聊天里批准', async () => {

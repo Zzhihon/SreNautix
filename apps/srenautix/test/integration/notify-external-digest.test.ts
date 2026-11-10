@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { Channel, EvidenceResult, Incident, TopologyEdge, TopologyNode } from '@srenautix/contract';
+import type { EvidenceResult, Incident, TopologyEdge, TopologyNode } from '@srenautix/contract';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { TelegramAdapter } from '../../src/channels/telegram/adapter.js';
 import { TelegramClient } from '../../src/channels/telegram/client.js';
@@ -10,7 +10,6 @@ import { NotifyEngine } from '../../src/notify/engine.js';
 import { ExternalRoots, externalTypeLookup, pgImpactAlerts, topologyPaths } from '../../src/notify/external.js';
 import { Interactions } from '../../src/notify/interactions.js';
 import { NO_LINKS } from '../../src/notify/links.js';
-import type { ActionOutcome, NotifyActions } from '../../src/notify/ports.js';
 import { PgMessageSource, ReportSource } from '../../src/notify/source.js';
 import { NotifyStore } from '../../src/notify/store.js';
 import { FeedbackService } from '../../src/proposals/feedback.js';
@@ -22,6 +21,7 @@ import { newTestDb, type TestDb } from '../support/db.js';
 import { fixture, FixtureServer } from '../support/fixture-server.js';
 import { incident as baseIncident, stageA } from '../support/scenario.js';
 import { parseTelegramHtml } from '../support/telegram-html.js';
+import { NoActions } from '../support/notify-actions.js';
 
 // 外部上游的周期汇总（ADR 0147）与业务影响的相关性（ADR 0150）：真实 PostgreSQL 上的事件、阶段 A 报告、告警与拓扑，
 // 经 PgMessageSource 分类，由投递引擎发到本地回放的 Bot API
@@ -35,19 +35,6 @@ const H10 = Date.parse('2026-10-24T10:00:00Z');
 const min = (m: number) => new Date(H10 + m * 60_000);
 // 周期结束后的等待取 server 配置的默认值（notify.digest.external_roots.grace）
 const GRACE_MS = parseDuration('grace', NOTIFY_RULES_DEFAULT.digest.external_roots.grace);
-
-class NoActions implements NotifyActions {
-  private ok = async (): Promise<ActionOutcome> => ({ ok: true, message: 'ok' });
-  approve = this.ok;
-  reject = this.ok;
-  undo = this.ok;
-  feedbackRoot = this.ok;
-  feedbackDisposition = this.ok;
-  resolvedConfirm = this.ok;
-  link = async (_c: Channel, _u: string, _code: string): Promise<ActionOutcome> => ({ ok: true, message: 'ok' });
-  linkedPrincipal = async (): Promise<string | null> => null;
-  linkByUnionId = async (): Promise<string | null> => null;
-}
 
 let db: TestDb;
 let fs: FixtureServer;

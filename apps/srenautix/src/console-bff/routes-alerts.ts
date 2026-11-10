@@ -7,7 +7,7 @@ import type { Auth } from '../identity/auth.js';
 import type { RoleBinding } from '../identity/bindings.js';
 import { resolveIncidentRef } from '../incident/read.js';
 import { fingerprint, identityLabels } from '../ingest/normalize.js';
-import { componentTarget, incidentTarget, visible } from './routes-incidents.js';
+import { componentTarget, incidentTarget, visible } from '../incident/target.js';
 
 export type AlertLookup = HubComponents['schemas']['AlertLookup'];
 

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { Channel, Incident, StageAReport } from '@srenautix/contract';
+import type { Incident, StageAReport } from '@srenautix/contract';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { TelegramAdapter } from '../../src/channels/telegram/adapter.js';
 import { TelegramClient } from '../../src/channels/telegram/client.js';
@@ -7,7 +7,6 @@ import { ServerMetrics } from '../../src/kernel/metrics.js';
 import { NotifyEngine } from '../../src/notify/engine.js';
 import { Interactions } from '../../src/notify/interactions.js';
 import { NO_LINKS } from '../../src/notify/links.js';
-import type { ActionOutcome, NotifyActions } from '../../src/notify/ports.js';
 import { PgMessageSource, ReportSource } from '../../src/notify/source.js';
 import { NotifyStore } from '../../src/notify/store.js';
 import { FeedbackService } from '../../src/proposals/feedback.js';
@@ -19,6 +18,7 @@ import { newTestDb, type TestDb } from '../support/db.js';
 import { fixture, FixtureServer } from '../support/fixture-server.js';
 import { parseTelegramHtml } from '../support/telegram-html.js';
 import { incident as baseIncident, stageA } from '../support/scenario.js';
+import { NoActions } from '../support/notify-actions.js';
 
 // 计划内退役的事件不推送（ADR 0167）：阶段 A 判为 ignore、原因 planned_retirement 的事件不发新消息，控制台照常可见；
 // 之前已经发出消息的事件（退役解释是后来才成立的）照常编辑
@@ -29,19 +29,6 @@ const CLUSTER = 'east';
 const send = `/bot${TOKEN}/sendMessage`;
 const edit = `/bot${TOKEN}/editMessageText`;
 const T0 = Date.parse('2026-10-24T03:02:00Z');
-
-class NoActions implements NotifyActions {
-  private ok = async (): Promise<ActionOutcome> => ({ ok: true, message: 'ok' });
-  approve = this.ok;
-  reject = this.ok;
-  undo = this.ok;
-  feedbackRoot = this.ok;
-  feedbackDisposition = this.ok;
-  resolvedConfirm = this.ok;
-  link = async (_c: Channel, _u: string, _code: string): Promise<ActionOutcome> => ({ ok: true, message: 'ok' });
-  linkedPrincipal = async (): Promise<string | null> => null;
-  linkByUnionId = async (): Promise<string | null> => null;
-}
 
 let db: TestDb;
 let fs: FixtureServer;

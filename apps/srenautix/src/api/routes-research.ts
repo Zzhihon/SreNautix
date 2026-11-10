@@ -4,7 +4,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type pg from 'pg';
 import type { AlertMatcher } from '../alerts/business-impact.js';
 import type { OutboxListener } from '../events/listener.js';
-import { incidentTarget, visible } from '../console-bff/routes-incidents.js';
+import { incidentTarget, visible } from '../incident/target.js';
 import { principalOf, type Auth } from '../identity/auth.js';
 import { incidentVersion, latestStageA, resolveIncidentRef } from '../incident/read.js';
 import { alertsById } from '../ingest/store.js';

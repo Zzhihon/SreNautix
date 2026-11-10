@@ -115,6 +115,8 @@ export interface NotifyActions {
   ): Promise<ActionOutcome>;
   /** 事件恢复时的一键确认。 */
   resolvedConfirm(actor: ChannelActor, incidentId: string, incidentVersion: number): Promise<ActionOutcome>;
+  /** 认领事件（ADR 0195）：点击者成为处理人；需要 claim 权限 */
+  claim(actor: ChannelActor, incidentId: string): Promise<ActionOutcome>;
   /** `/link <code>`。 */
   link(channel: Channel, channelUserId: string, code: string): Promise<ActionOutcome>;
   /** 按渠道账号查绑定主体。 */

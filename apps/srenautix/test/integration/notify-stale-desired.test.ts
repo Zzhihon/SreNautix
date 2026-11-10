@@ -1,6 +1,5 @@
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import type { Channel } from '@srenautix/contract';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { TelegramAdapter } from '../../src/channels/telegram/adapter.js';
 import { TelegramClient } from '../../src/channels/telegram/client.js';
@@ -14,7 +13,7 @@ import { MAX_ENDED_EDITS, NotifyEngine } from '../../src/notify/engine.js';
 import { Interactions } from '../../src/notify/interactions.js';
 import { incidentTrack } from '../../src/incident/migrations.js';
 import { notifyTrack } from '../../src/notify/migrations.js';
-import type { ActionOutcome, DesiredIncidentMessage, MessageSource, NotifyActions } from '../../src/notify/ports.js';
+import type { DesiredIncidentMessage, MessageSource } from '../../src/notify/ports.js';
 import { NotifyStore } from '../../src/notify/store.js';
 import { t } from '../../src/notify/text.js';
 import { migrateExpand } from '../../src/kernel/store/migrate.js';
@@ -22,6 +21,7 @@ import { storeTrack } from '../../src/kernel/store/migrations.js';
 import { newTestDb, type TestDb } from '../support/db.js';
 import { largeIncidentInput } from '../support/report-fixture.js';
 import { parseTelegramHtml, serializedEntityBytes, TELEGRAM_ENTITY_BYTES_LIMIT } from '../support/telegram-html.js';
+import { NoActions } from '../support/notify-actions.js';
 
 // ADR 0145：旧渲染器留下的期望内容、永久 4xx 与已结束事件的编辑上限；ADR 0173：编辑次数用完后的最后一次编辑。
 // CCHP 影子 0ead2c9：22 行旧代码渲染的期望内容（14–25 KB，事件都已恢复）的 editMessageText 每次都返回
@@ -147,19 +147,6 @@ class MapSource implements MessageSource {
     return ids.map((id) => this.all.get(id)).filter((d): d is DesiredIncidentMessage => d?.language === language);
   }
   async delivered(): Promise<void> {}
-}
-
-class NoActions implements NotifyActions {
-  private ok = async (): Promise<ActionOutcome> => ({ ok: true, message: 'ok' });
-  approve = this.ok;
-  reject = this.ok;
-  undo = this.ok;
-  feedbackRoot = this.ok;
-  feedbackDisposition = this.ok;
-  resolvedConfirm = this.ok;
-  link = async (_c: Channel, _u: string, _code: string): Promise<ActionOutcome> => ({ ok: true, message: 'ok' });
-  linkedPrincipal = async (): Promise<string | null> => null;
-  linkByUnionId = async (): Promise<string | null> => null;
 }
 
 let n = 0;

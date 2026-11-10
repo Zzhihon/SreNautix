@@ -122,6 +122,8 @@ export interface ComposeInput {
   timeZone?: string;
   /** 事件主服务与它所属业务领域的名称（ADR 0193）；有时消息头条以 [业务领域/服务] 开头 */
   service?: { domain: string; service: string } | null;
+  /** 事件的处理人（ADR 0195）：有时现状段写处理人，没有时未恢复的事件带“我来处理”按钮 */
+  claim?: { principal_id: string } | null;
 }
 
 const T = {
@@ -348,6 +350,7 @@ const T = {
     value: '值 ',
     noHit: '未命中异常条件',
     feedback: (v: string, who: string) => `已反馈：${v} · ${who}`,
+    claimed: (who: string) => `处理人 · ${who}`,
     fbConfirm: '结论对',
     fbReject: '结论错',
     dpConfirm: '处置对',
@@ -357,6 +360,7 @@ const T = {
     undo: (n: number) => `撤销 #${n}`,
     approveInConsole: (n: number) => `在控制台审批 #${n}`,
     resolved: '恢复确认',
+    claim: '我来处理',
     open: '在控制台打开',
     stop: '停止原因：',
     finalNote: '消息停止更新（原因：编辑次数达到上限），完整内容见',
@@ -588,6 +592,7 @@ const T = {
     value: 'value ',
     noHit: 'no abnormal condition matched',
     feedback: (v: string, who: string) => `Feedback: ${v} · ${who}`,
+    claimed: (who: string) => `Handled by · ${who}`,
     fbConfirm: 'Root correct',
     fbReject: 'Root wrong',
     dpConfirm: 'Disposition correct',
@@ -597,6 +602,7 @@ const T = {
     undo: (n: number) => `Undo #${n}`,
     approveInConsole: (n: number) => `Approve #${n} in console`,
     resolved: 'Confirm recovery',
+    claim: "I'll take it",
     open: 'Open in console',
     stop: 'Stop reason: ',
     finalNote: 'This message stopped updating (reason: edit limit reached); full content in the',
@@ -1682,6 +1688,9 @@ export function composeMessage(i: ComposeInput): { message: NotifyMessage; targe
   }
   statement.push(P(t.statementTail(members.length, firing.length, inc.components.length)));
   const situation: NotifyBlock[] = [text(statement)];
+  if (i.claim) {
+    situation.push(text([P(t.claimed(i.claim.principal_id))]));
+  }
   if (i.feedback && !i.feedback.stale) {
     situation.push(text([P(t.feedback(fbVerdict(i.feedback), i.feedback.principal_id))]));
   }
@@ -2069,6 +2078,8 @@ export function composeMessage(i: ComposeInput): { message: NotifyMessage; targe
   }
   if (inc.state === 'resolved') {
     add('resolved_confirm', t.resolved, `rc:${inc.incident_id}`);
+  } else if (inc.state === 'firing' && !i.claim) {
+    add('claim', t.claim, `cl:${inc.incident_id}`);
   }
   buttons.push({
     kind: 'open_console',

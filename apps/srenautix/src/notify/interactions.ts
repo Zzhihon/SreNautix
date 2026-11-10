@@ -51,6 +51,7 @@ const RELEASE_AFTER = new Set([
   'disposition_confirm',
   'disposition_reject',
   'resolved_confirm',
+  'claim',
 ]);
 const FINAL_CODES = new Set(['already_decided', 'expired', 'stale', 'not_found']);
 
@@ -64,6 +65,7 @@ const ACTION_OF: Record<string, string> = {
   disposition_reject: 'feedback_disposition',
   disposition_pick: 'feedback_disposition',
   resolved_confirm: 'resolved_confirm',
+  claim: 'claim',
 };
 
 export const NOT_LINKED_TEXT = '账号未绑定：先在控制台获取绑定码，再发送 /link <绑定码>';
@@ -166,6 +168,12 @@ export class Interactions {
           c,
           btn,
           run(() => this.actions.resolvedConfirm(actor, t.incidentId, t.incidentVersion)),
+        );
+      case 'claim':
+        return this.started(
+          c,
+          btn,
+          run(() => this.actions.claim(actor, t.incidentId)),
         );
       case 'disposition_pick':
         return this.started(

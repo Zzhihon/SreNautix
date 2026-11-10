@@ -133,7 +133,8 @@
             "feedback_reject",
             "disposition_confirm",
             "disposition_reject",
-            "resolved_confirm"
+            "resolved_confirm",
+            "claim"
           ]
         },
         "label": { "type": "string" },
