@@ -268,12 +268,13 @@ func (w *Watcher) remove(t typed, obj any) {
 	now := w.clock.Now()
 	// 键无法生成的对象从未进入存储，也不留墓碑
 	if id, err := contributorID(t.kind, mo); err == nil {
+		// 先留墓碑再发出删除：看到对象消失的消费方按 IP 或键一定能解析到墓碑
+		w.addTombstone(t.kind, obj, now)
 		if t.extract != nil {
 			w.applyMu.Lock()
 			w.emit(w.store.Remove(id, now))
 			w.applyMu.Unlock()
 		}
-		w.addTombstone(t.kind, obj, now)
 	}
 	w.markDirty(t.affectsPods, t.affectsNP)
 }
