@@ -1,5 +1,5 @@
-import type { Track } from '../store/migrate.js';
-import { outboxDdl } from '../store/outbox.js';
+import type { Track } from '../kernel/store/migrate.js';
+import { outboxDdl } from '../kernel/store/outbox.js';
 
 /**
  * worker schema（DESIGN §2.1：research_runs、hypotheses、llm_calls、tool_calls、evidence_snapshots、research_manifests、outbox）。

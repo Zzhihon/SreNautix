@@ -1,5 +1,5 @@
 import type { ChangeEvent, TopologyNode } from '@srenautix/contract';
-import type { Queryable } from '../store/pool.js';
+import type { Queryable } from '../kernel/store/pool.js';
 
 // 从拓扑事件推导 Kubernetes 的发布变更（ADR 0104）：不需要额外的集成，informer 与 reader 写入的拓扑事件里
 // 已经有工作负载的版本信号：

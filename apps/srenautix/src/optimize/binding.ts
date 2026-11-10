@@ -1,7 +1,7 @@
 import type { Proposal } from '@srenautix/contract';
 import type pg from 'pg';
 import { currentBinding, type CurrentBinding } from '../incident/read.js';
-import type { Queryable } from '../store/pool.js';
+import type { Queryable } from '../kernel/store/pool.js';
 import { OPEN_GOAL_STATES } from './store.js';
 
 // 提议的绑定对象扩展为事件或目标（ADR 0146 §8，契约 Subject）。主体为 goal 时沿用的绑定字段语义为：

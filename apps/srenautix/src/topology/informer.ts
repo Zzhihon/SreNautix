@@ -14,7 +14,7 @@ import {
 } from '@kubernetes/client-node';
 import type { ComponentType, OperatorConvention, TopologyEdge, TopologyNode } from '@srenautix/contract';
 import { buildKubeTopology, type KubeObject } from '@srenautix/core';
-import { logger } from '../log.js';
+import { logger } from '../kernel/log.js';
 import { edgeKey, sameContent, type TopologyChange, type TopologyStore } from './store.js';
 
 /** 一种被 watch 的资源：apiVersion 与 kind 写回对象（list 返回的条目不带它们）。 */

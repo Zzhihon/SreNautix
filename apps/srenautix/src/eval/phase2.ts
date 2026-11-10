@@ -7,9 +7,9 @@ import type {
   Incident,
   StageAReport,
 } from '@srenautix/contract';
-import { logger } from '../log.js';
+import { logger } from '../kernel/log.js';
 import type { ModelLayer } from '../llm/session.js';
-import { ServerMetrics } from '../metrics.js';
+import { ServerMetrics } from '../kernel/metrics.js';
 import { Catalog, DEFAULT_CATALOG_PATH } from '../proposals/catalog.js';
 import type { QueryRunner } from '../research/checks.js';
 import type { WorkerMetrics } from '../research/metrics.js';

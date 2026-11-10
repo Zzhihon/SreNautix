@@ -5,8 +5,8 @@ import {
   type ReasonStage,
   type RuleConclusion,
 } from '@srenautix/contract';
-import type { ServerMetrics } from '../metrics.js';
-import type { Queryable } from '../store/pool.js';
+import type { ServerMetrics } from '../kernel/metrics.js';
+import type { Queryable } from '../kernel/store/pool.js';
 
 // 终态记录（ADR 0172）：server.incident_reasons 保存没有别的表承载的终态，每条带登记表里的原因码。
 // 研判（server.research_runs、research_queue）与自愈 PR（server.remediation_attempts）的终态在各自的表里，

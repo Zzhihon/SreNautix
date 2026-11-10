@@ -1,6 +1,6 @@
 import { hostname } from 'node:os';
 import { ApiException, CoordinationV1Api, KubeConfig, V1MicroTime, type V1Lease } from '@kubernetes/client-node';
-import { logger } from '../log.js';
+import { logger } from './log.js';
 
 export interface Leader {
   isLeader(): boolean;

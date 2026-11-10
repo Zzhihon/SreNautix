@@ -1,6 +1,6 @@
 import type { Channel, Disposition, FeedbackReasonCode, Incident } from '@srenautix/contract';
 import type pg from 'pg';
-import { HttpError } from '../api/errors.js';
+import { HttpError } from '../kernel/errors.js';
 import type { ChatLinks } from '../identity/chat-links.js';
 import { incidentVersion } from '../incident/read.js';
 import type { FeedbackService } from '../proposals/feedback.js';

@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ingestTrack } from '../../src/ingest/migrations.js';
 import { serverTracks } from '../../src/roles/server-schema.js';
-import { migrateExpand } from '../../src/store/migrate.js';
+import { migrateExpand } from '../../src/kernel/store/migrate.js';
 import { newTestDb, type TestDb } from '../support/db.js';
 
 // 告警第一次在 Alertmanager 中被看到的时刻（ADR 0165）：升级前写入的 Alertmanager、Grafana 与对账来源的告警

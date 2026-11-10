@@ -1,13 +1,13 @@
 import type { Channel, Disposition, FeedbackReasonCode } from '@srenautix/contract';
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { createApp } from '../../src/api/http.js';
+import { createApp } from '../../src/kernel/http.js';
 import { FeishuAdapter } from '../../src/channels/feishu/adapter.js';
 import { CALLBACK_PATH, registerFeishuCallback } from '../../src/channels/feishu/callback.js';
 import { FeishuClient } from '../../src/channels/feishu/client.js';
 import { ButtonSigner } from '../../src/channels/feishu/render.js';
 import { identityTrack } from '../../src/identity/migrations.js';
-import { ServerMetrics } from '../../src/metrics.js';
+import { ServerMetrics } from '../../src/kernel/metrics.js';
 import { NotifyEngine } from '../../src/notify/engine.js';
 import { feishuButtonKey } from '../../src/notify/index.js';
 import { Interactions, NOT_LINKED_TEXT } from '../../src/notify/interactions.js';
@@ -21,8 +21,8 @@ import type {
   NotifyActions,
 } from '../../src/notify/ports.js';
 import { NotifyStore } from '../../src/notify/store.js';
-import { migrateExpand } from '../../src/store/migrate.js';
-import { storeTrack } from '../../src/store/migrations.js';
+import { migrateExpand } from '../../src/kernel/store/migrate.js';
+import { storeTrack } from '../../src/kernel/store/migrations.js';
 import { newTestDb, type TestDb } from '../support/db.js';
 import { fixture, fixtureFile, FixtureServer } from '../support/fixture-server.js';
 

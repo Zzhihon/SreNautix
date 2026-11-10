@@ -5,10 +5,10 @@ import type pg from 'pg';
 import { countReasons, writeReason, type ReasonRecord } from '../incident/reasons.js';
 import { researchRoots, type OwnerLookup } from '../incident/research-root.js';
 import { issueMarkdown } from '../notify/markdown.js';
-import { logger } from '../log.js';
-import type { ServerMetrics } from '../metrics.js';
-import { appendAudit } from '../store/audit.js';
-import { tx, type Queryable } from '../store/pool.js';
+import { logger } from '../kernel/log.js';
+import type { ServerMetrics } from '../kernel/metrics.js';
+import { appendAudit } from '../kernel/store/audit.js';
+import { tx, type Queryable } from '../kernel/store/pool.js';
 import { GitHubApp, GitHubError } from './app.js';
 
 /**

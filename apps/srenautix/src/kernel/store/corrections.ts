@@ -1,5 +1,5 @@
 import type pg from 'pg';
-import type { Leader } from '../api/leader.js';
+import type { Leader } from '../leader.js';
 import { logger } from '../log.js';
 
 /**

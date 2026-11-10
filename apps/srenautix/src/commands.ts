@@ -1,14 +1,14 @@
 import { readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
-import { DEFAULT_DB_PASSWORD_FILE, pgConfigFromEnv } from './config/database.js';
+import { DEFAULT_DB_PASSWORD_FILE, pgConfigFromEnv } from './kernel/store/pg-env.js';
 import { loadServerConfig } from './config/server.js';
 import { hashPassword } from './identity/password.js';
-import { logger } from './log.js';
+import { logger } from './kernel/log.js';
 import { serverTracks } from './roles/server-schema.js';
-import { bootstrap, DEFAULT_DB_ROLES, SCHEMAS } from './store/bootstrap.js';
-import { migrateContract, migrateExpand } from './store/migrate.js';
-import { createPool } from './store/pool.js';
-import { waitForSchema } from './store/wait-schema.js';
+import { bootstrap, DEFAULT_DB_ROLES, SCHEMAS } from './kernel/store/bootstrap.js';
+import { migrateContract, migrateExpand } from './kernel/store/migrate.js';
+import { createPool } from './kernel/store/pool.js';
+import { waitForSchema } from './kernel/store/wait-schema.js';
 
 const DEFAULT_CONFIG = '/etc/srenautix/config.yaml';
 
@@ -87,7 +87,7 @@ export async function runCommand(args: string[]): Promise<void> {
     }
     case 'audit verify': {
       const { values } = parseArgs({ args: rest, options: { config, source: { type: 'string' } } });
-      const { verifyCommand } = await import('./store/audit-verify.js');
+      const { verifyCommand } = await import('./audit/verify.js');
       await verifyCommand(values.config, values.source === undefined ? [] : [`--source=${values.source}`]);
       return;
     }

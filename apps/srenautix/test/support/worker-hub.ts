@@ -7,7 +7,7 @@ import { hashPassword } from '../../src/identity/password.js';
 import { resolveWorkerConfig, workerConfigSchema, type WorkerConfig } from '../../src/research/config.js';
 import { buildServer, type ServerHandle } from '../../src/roles/server.js';
 import { serverTracks } from '../../src/roles/server-schema.js';
-import { migrateExpand } from '../../src/store/migrate.js';
+import { migrateExpand } from '../../src/kernel/store/migrate.js';
 import { TopologyStore } from '../../src/topology/store.js';
 import type { TestDb } from './db.js';
 

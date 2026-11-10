@@ -8,10 +8,10 @@ import type {
   Incident,
 } from '@srenautix/contract';
 import type pg from 'pg';
-import { HttpError } from '../api/errors.js';
-import type { ServerMetrics } from '../metrics.js';
-import { appendEvents } from '../store/outbox.js';
-import { tx, type Queryable } from '../store/pool.js';
+import { HttpError } from '../kernel/errors.js';
+import type { ServerMetrics } from '../kernel/metrics.js';
+import { appendEvents } from '../kernel/store/outbox.js';
+import { tx, type Queryable } from '../kernel/store/pool.js';
 import { candidateFromFeedback } from './candidates.js';
 import { SCHEMA_VERSION } from './service.js';
 

@@ -1,14 +1,14 @@
 import type { Proposal } from '@srenautix/contract';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type pg from 'pg';
-import { forbidden, HttpError, notFound } from '../api/errors.js';
+import { forbidden, HttpError, notFound } from '../kernel/errors.js';
 import { replaceSpokeConditions } from '../console-bff/spoke-conditions.js';
 import { checkBody, openapiValidator } from '../api/openapi-schemas.js';
 import type { Auth } from '../identity/auth.js';
 import type { OutboxListener } from '../events/listener.js';
 import { currentBinding } from '../incident/read.js';
-import { appendEvents } from '../store/outbox.js';
-import { tx, type Queryable } from '../store/pool.js';
+import { appendEvents } from '../kernel/store/outbox.js';
+import { tx, type Queryable } from '../kernel/store/pool.js';
 import { bindingMatches, SCHEMA_VERSION } from './service.js';
 import type { ApprovalEnvelope } from './assertion.js';
 import type { Catalog } from './catalog.js';

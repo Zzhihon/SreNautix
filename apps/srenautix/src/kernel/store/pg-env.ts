@@ -1,5 +1,5 @@
-import type { PgConfig, PgSslMode } from '../store/pool.js';
-import { ConfigError, readPemCert, readSecretFile } from './files.js';
+import type { PgConfig, PgSslMode } from './pool.js';
+import { ConfigError, readPemCert, readSecretFile } from '../files.js';
 
 export const DEFAULT_DB_PASSWORD_FILE = '/etc/srenautix/secrets/db/password';
 

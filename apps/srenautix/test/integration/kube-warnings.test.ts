@@ -18,8 +18,8 @@ import {
   type KubeWarningIncident,
   type KubeWarningsDeps,
 } from '../../src/export/kube-warnings.js';
-import { migrateExpand } from '../../src/store/migrate.js';
-import { storeTrack } from '../../src/store/migrations.js';
+import { migrateExpand } from '../../src/kernel/store/migrate.js';
+import { storeTrack } from '../../src/kernel/store/migrations.js';
 import { topologyTrack } from '../../src/topology/migrations.js';
 import { TopologyStore, type TopologyChange } from '../../src/topology/store.js';
 import { newTestDb, type TestDb } from '../support/db.js';

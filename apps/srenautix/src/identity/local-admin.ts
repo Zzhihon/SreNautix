@@ -1,7 +1,7 @@
 import { Secret, TOTP } from 'otpauth';
 import type pg from 'pg';
-import { appendAudit } from '../store/audit.js';
-import { tx } from '../store/pool.js';
+import { appendAudit } from '../kernel/store/audit.js';
+import { tx } from '../kernel/store/pool.js';
 import { verifyPassword } from './password.js';
 import type { AuthenticatedPrincipal } from './sessions.js';
 

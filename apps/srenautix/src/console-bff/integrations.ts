@@ -5,13 +5,13 @@ import type { HubComponents, IntegrationManifest } from '@srenautix/contract';
 import { loadIntegrationManifest } from '@srenautix/integration-sdk';
 import type pg from 'pg';
 import type { ChangesService } from '../changes/service.js';
-import { parseDuration } from '../config/files.js';
+import { parseDuration } from '../kernel/files.js';
 import type { ServerConfig } from '../config/server.js';
 import type { FeishuClient } from '../channels/feishu/client.js';
 import type { TelegramClient } from '../channels/telegram/client.js';
 import type { Oidc } from '../identity/oidc.js';
 import type { Keyring } from '../proposals/assertion.js';
-import { logger } from '../log.js';
+import { logger } from '../kernel/log.js';
 import type { Catalog } from '../proposals/catalog.js';
 import type { EvidenceSource, PackRuntime } from '../stage-a/packs.js';
 

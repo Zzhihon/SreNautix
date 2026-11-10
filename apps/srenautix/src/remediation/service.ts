@@ -17,16 +17,16 @@ import {
   type RemediationPlan,
 } from '@srenautix/packs-sdk';
 import type pg from 'pg';
-import { HttpError } from '../api/errors.js';
+import { HttpError } from '../kernel/errors.js';
 import { GitHubError, type GitHubApp } from '../github/app.js';
 import type { ClosureSink } from '../github/closures.js';
 import { componentNames } from '../incident/names.js';
 import { alertsById } from '../ingest/store.js';
-import { logger } from '../log.js';
-import type { ServerMetrics } from '../metrics.js';
+import { logger } from '../kernel/log.js';
+import type { ServerMetrics } from '../kernel/metrics.js';
 import type { ProposalService } from '../proposals/service.js';
-import { appendAudit } from '../store/audit.js';
-import { tx } from '../store/pool.js';
+import { appendAudit } from '../kernel/store/audit.js';
+import { tx } from '../kernel/store/pool.js';
 import type { ConcreteObject, LogicalHint } from '../topology/expand.js';
 import { RemediationChanges, triggerComment, type PlannedChange, type PullLink, type Verdict } from './dedupe.js';
 import { admissionFor, repositoryFact, runAdmission } from './admission.js';

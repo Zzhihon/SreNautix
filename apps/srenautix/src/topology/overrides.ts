@@ -5,7 +5,7 @@ import type { AlertRole } from '@srenautix/contract';
 import { parse as parseYaml, stringify } from 'yaml';
 import { isComponentKey } from '@srenautix/core';
 import { z } from 'zod';
-import { ConfigError } from '../config/files.js';
+import { ConfigError } from '../kernel/files.js';
 
 /**
  * 拓扑覆盖（DESIGN §4.4、§12.3）：Git 挂载的目录，给领域包没有映射到组件的告警指定组件与角色。每个 *.yaml 文件：

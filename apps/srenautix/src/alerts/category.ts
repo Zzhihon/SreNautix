@@ -1,8 +1,8 @@
 import { ALERT_CATEGORIES, type AlertCatalogOptions, type CategoryRule } from '@srenautix/core';
 import { z } from 'zod';
 import { detectorBuiltinCategories } from '../detectors/service.js';
-import { logger } from '../log.js';
-import type { ServerMetrics } from '../metrics.js';
+import { logger } from '../kernel/log.js';
+import type { ServerMetrics } from '../kernel/metrics.js';
 import { alertMatcher } from './business-impact.js';
 
 // 告警类别（ADR 0183）：srenautix_category 标签 → 告警目录条目的 category → 检测器合成告警的内置类别表 →

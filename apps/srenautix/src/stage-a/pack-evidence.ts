@@ -29,8 +29,8 @@ import {
   type SignalResolution,
 } from '@srenautix/packs-sdk';
 import { countHits, redactText } from '../llm/redact.js';
-import { logger } from '../log.js';
-import type { ServerMetrics } from '../metrics.js';
+import { logger } from '../kernel/log.js';
+import type { ServerMetrics } from '../kernel/metrics.js';
 import type { EvidenceSource, PackRuntime } from './packs.js';
 import type { EvidenceRun, EvidenceRunner, RuleHit, RuleProposer } from './ports.js';
 import { isLogicalComponent } from '../topology/expand.js';

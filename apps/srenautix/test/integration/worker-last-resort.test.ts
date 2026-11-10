@@ -8,7 +8,7 @@ import type { FeedbackService } from '../../src/proposals/feedback.js';
 import type { ProposalService } from '../../src/proposals/service.js';
 import type { ServerHandle } from '../../src/roles/server.js';
 import { buildWorker, type WorkerHandle } from '../../src/roles/worker.js';
-import { DEFAULT_DB_ROLES } from '../../src/store/bootstrap.js';
+import { DEFAULT_DB_ROLES } from '../../src/kernel/store/bootstrap.js';
 import { TopologyStore } from '../../src/topology/store.js';
 import { newTestDb, type TestDb } from '../support/db.js';
 import { ReplayServer, type LlmFixture } from '../support/llm-fixtures.js';

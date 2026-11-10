@@ -4,7 +4,7 @@ import { GitHubApp, GitHubDenied, RepoRoles } from '../../src/github/app.js';
 import { OptimizationIssues, type IssueContent } from '../../src/github/optimization-issues.js';
 import { recommendationMarker } from '../../src/optimize/render.js';
 import { serverTracks } from '../../src/roles/server-schema.js';
-import { migrateExpand } from '../../src/store/migrate.js';
+import { migrateExpand } from '../../src/kernel/store/migrate.js';
 import { newTestDb, type TestDb } from '../support/db.js';
 import { FakeGitHub } from '../support/github.js';
 

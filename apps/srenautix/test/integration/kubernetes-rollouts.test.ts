@@ -2,8 +2,8 @@ import type { Alert, ChangeEvent, TopologyEdge, TopologyNode } from '@srenautix/
 import { computeIncidents, DEFAULT_RCA_PARAMS, TopologyGraph } from '@srenautix/core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { kubernetesRollouts } from '../../src/changes/kubernetes.js';
-import { migrateExpand } from '../../src/store/migrate.js';
-import { storeTrack } from '../../src/store/migrations.js';
+import { migrateExpand } from '../../src/kernel/store/migrate.js';
+import { storeTrack } from '../../src/kernel/store/migrations.js';
 import { topologyTrack } from '../../src/topology/migrations.js';
 import { TopologyStore } from '../../src/topology/store.js';
 import { newTestDb, type TestDb } from '../support/db.js';

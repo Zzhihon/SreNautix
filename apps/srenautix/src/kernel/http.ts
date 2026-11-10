@@ -1,6 +1,6 @@
 import cookie from '@fastify/cookie';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
-import { logger } from '../log.js';
+import { logger } from './log.js';
 import { HttpError } from './errors.js';
 
 export interface AppOptions {

@@ -4,9 +4,9 @@ import { applyPatch, parsePatch, type StructuredPatch } from 'diff';
 import type pg from 'pg';
 import { GitHubError, type GitHubApp } from '../github/app.js';
 import { closureDetails, type ClosureSink } from '../github/closures.js';
-import { logger } from '../log.js';
-import { appendAudit } from '../store/audit.js';
-import { tx } from '../store/pool.js';
+import { logger } from '../kernel/log.js';
+import { appendAudit } from '../kernel/store/audit.js';
+import { tx } from '../kernel/store/pool.js';
 import { GitHubRepoReader } from './github-repo.js';
 
 /**

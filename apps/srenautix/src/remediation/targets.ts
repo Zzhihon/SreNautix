@@ -1,5 +1,5 @@
 import { GitHubError, type GitHubApp } from '../github/app.js';
-import { logger } from '../log.js';
+import { logger } from '../kernel/log.js';
 import type { TargetInfo, TargetResolver } from '../proposals/service.js';
 
 /**

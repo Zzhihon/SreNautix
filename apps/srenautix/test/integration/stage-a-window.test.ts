@@ -1,7 +1,7 @@
 import type { Alert, EvidenceResult, Incident } from '@srenautix/contract';
 import { startPrometheus, type TsdbInstance } from '@srenautix/integration-sdk';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { ServerMetrics } from '../../src/metrics.js';
+import { ServerMetrics } from '../../src/kernel/metrics.js';
 import { DEFAULT_CATALOG_PATH } from '../../src/proposals/catalog.js';
 import { PackEvidence } from '../../src/stage-a/pack-evidence.js';
 import { EvidenceSource, PackRuntime } from '../../src/stage-a/packs.js';

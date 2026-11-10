@@ -10,7 +10,7 @@ import { serverTracks } from '../../src/roles/server-schema.js';
 import { skillsConfig } from '../../src/skills/config.js';
 import { SkillService } from '../../src/skills/service.js';
 import { EvidenceSource } from '../../src/stage-a/packs.js';
-import { migrateExpand } from '../../src/store/migrate.js';
+import { migrateExpand } from '../../src/kernel/store/migrate.js';
 import { newTestDb, type TestDb } from '../support/db.js';
 import { FakeGitHub } from '../support/github.js';
 import { AT, CODE, logStreams, metricSeries, NS, pods, previousLogs, STS } from '../support/oom-skill-fixture.js';

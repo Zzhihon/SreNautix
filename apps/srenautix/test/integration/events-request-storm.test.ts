@@ -1,15 +1,15 @@
 import type { FastifyInstance } from 'fastify';
 import { Counter, Registry } from 'prom-client';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createApp } from '../../src/api/http.js';
+import { createApp } from '../../src/kernel/http.js';
 import { ReadLimiter, registerReadLimit } from '../../src/api/read-limit.js';
 import { registerEvents } from '../../src/events/http.js';
 import { OutboxListener } from '../../src/events/listener.js';
 import { SESSION_COOKIE } from '../../src/identity/sessions.js';
-import { migrateExpand } from '../../src/store/migrate.js';
-import { storeTrack } from '../../src/store/migrations.js';
-import { appendEvents } from '../../src/store/outbox.js';
-import { tx } from '../../src/store/pool.js';
+import { migrateExpand } from '../../src/kernel/store/migrate.js';
+import { storeTrack } from '../../src/kernel/store/migrations.js';
+import { appendEvents } from '../../src/kernel/store/outbox.js';
+import { tx } from '../../src/kernel/store/pool.js';
 import { newTestDb, type TestDb } from '../support/db.js';
 
 // 控制台请求风暴的两道防线：

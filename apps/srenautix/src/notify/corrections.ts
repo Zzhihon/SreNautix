@@ -1,4 +1,4 @@
-import type { Correction } from '../store/corrections.js';
+import type { Correction } from '../kernel/store/corrections.js';
 
 /**
  * 通知层的数据修正（ADR 0176）。

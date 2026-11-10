@@ -9,9 +9,9 @@ import type {
 } from '@srenautix/contract';
 import type { PackSet } from '@srenautix/packs-sdk';
 import type pg from 'pg';
-import { logger } from '../log.js';
-import { appendEvents } from '../store/outbox.js';
-import { tx, type Queryable } from '../store/pool.js';
+import { logger } from '../kernel/log.js';
+import { appendEvents } from '../kernel/store/outbox.js';
+import { tx, type Queryable } from '../kernel/store/pool.js';
 import type { TopologySnapshot } from '../topology/store.js';
 import { baselineAndGap, seriesKey, type BaselineResult, type IndicatorSeries } from './baseline.js';
 import { rankCandidates, type DiagnosedEntity, type KnownFinding } from './candidates.js';

@@ -14,13 +14,13 @@ import {
 import { DEFAULT_REVISION_LABELS } from '../../src/changes/kubernetes.js';
 import { NOVELTY_CONFIG_DEFAULT } from '../../src/config/novelty.js';
 import { NOTIFY_RULES_DEFAULT } from '../../src/config/server.js';
-import { ServerMetrics } from '../../src/metrics.js';
+import { ServerMetrics } from '../../src/kernel/metrics.js';
 import { Catalog } from '../../src/proposals/catalog.js';
 import { serverTracks } from '../../src/roles/server-schema.js';
 import { DEFAULT_CATALOG_PATH } from '../../src/proposals/catalog.js';
 import { PackEvidence, PackRules } from '../../src/stage-a/pack-evidence.js';
 import { EvidenceSource, PackRuntime } from '../../src/stage-a/packs.js';
-import { migrateExpand } from '../../src/store/migrate.js';
+import { migrateExpand } from '../../src/kernel/store/migrate.js';
 import { TopologyStore } from '../../src/topology/store.js';
 import { summarizeAgreement } from '../../src/eval/agreement.js';
 import { exportBundle, readBundle, readOnlyClient, writeBundle, type Bundle } from '../../src/eval/bundle.js';

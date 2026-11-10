@@ -1,6 +1,6 @@
 import { createHash, randomInt } from 'node:crypto';
 import type pg from 'pg';
-import { tx } from '../store/pool.js';
+import { tx } from '../kernel/store/pool.js';
 import type { Subject } from './bindings.js';
 
 const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';

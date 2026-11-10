@@ -13,7 +13,7 @@ import type {
   MetricSeries,
   StageAReport,
 } from '@srenautix/contract';
-import { logger } from '../log.js';
+import { logger } from '../kernel/log.js';
 import type { CaseStore } from './store.js';
 
 // 旧版 Ops-Agent 回放种子（format=cchp-srenautix-seed，version 1，自描述的 zstd JSON Lines，说明见种子目录的 FORMAT.md）

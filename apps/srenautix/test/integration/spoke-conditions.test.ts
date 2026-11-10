@@ -8,9 +8,9 @@ import {
   stripType,
 } from '../../src/console-bff/spoke-conditions.js';
 import { proposalsTrack } from '../../src/proposals/migrations.js';
-import { migrateExpand } from '../../src/store/migrate.js';
-import { storeTrack } from '../../src/store/migrations.js';
-import { tx } from '../../src/store/pool.js';
+import { migrateExpand } from '../../src/kernel/store/migrate.js';
+import { storeTrack } from '../../src/kernel/store/migrations.js';
+import { tx } from '../../src/kernel/store/pool.js';
 import { topologyTrack } from '../../src/topology/migrations.js';
 import { newTestDb, type TestDb } from '../support/db.js';
 

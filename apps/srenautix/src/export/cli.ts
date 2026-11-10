@@ -1,5 +1,5 @@
 import { parseArgs } from 'node:util';
-import { readSecretFile } from '../config/files.js';
+import { readSecretFile } from '../kernel/files.js';
 
 // srenautix incidents export（ADR 0186）：调中心的 GET /v1/incidents/export，结果原样写到标准输出。鉴权用中心登记的
 // 外部调用方 token 或控制台创建的 API token（与 mcp 角色的 hub_token_file 相同的 bearer token），从文件读取。

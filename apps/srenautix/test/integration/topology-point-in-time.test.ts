@@ -1,8 +1,8 @@
 import type { TopologyEdge, TopologyNode } from '@srenautix/contract';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { migrateExpand } from '../../src/store/migrate.js';
-import { createPool, isStatementTimeout } from '../../src/store/pool.js';
-import { storeTrack } from '../../src/store/migrations.js';
+import { migrateExpand } from '../../src/kernel/store/migrate.js';
+import { createPool, isStatementTimeout } from '../../src/kernel/store/pool.js';
+import { storeTrack } from '../../src/kernel/store/migrations.js';
 import { topologyTrack } from '../../src/topology/migrations.js';
 import { edgeKey, TopologyStore, type TopologyChange } from '../../src/topology/store.js';
 import { newTestDb, type TestDb } from '../support/db.js';

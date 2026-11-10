@@ -1,8 +1,8 @@
 import { randomBytes } from 'node:crypto';
 import type pg from 'pg';
 import { inject } from 'vitest';
-import { DEFAULT_DB_ROLES } from '../../src/store/bootstrap.js';
-import { createPool, type PgConfig } from '../../src/store/pool.js';
+import { DEFAULT_DB_ROLES } from '../../src/kernel/store/bootstrap.js';
+import { createPool, type PgConfig } from '../../src/kernel/store/pool.js';
 import { createDatabase } from './pg-cluster.js';
 
 export interface TestDb {

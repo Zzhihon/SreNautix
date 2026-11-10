@@ -2,13 +2,13 @@ import type { Incident, StageAReport } from '@srenautix/contract';
 import { isIgnorable, observeFingerprint, type FingerprintState } from '@srenautix/core';
 import type pg from 'pg';
 import type { AlertMatcher } from '../alerts/business-impact.js';
-import { HttpError } from '../api/errors.js';
+import { HttpError } from '../kernel/errors.js';
 import { alertsById } from '../ingest/store.js';
-import { logger } from '../log.js';
-import type { ServerMetrics } from '../metrics.js';
+import { logger } from '../kernel/log.js';
+import type { ServerMetrics } from '../kernel/metrics.js';
 import type { ProposalService } from '../proposals/service.js';
-import { appendEvents } from '../store/outbox.js';
-import { tx } from '../store/pool.js';
+import { appendEvents } from '../kernel/store/outbox.js';
+import { tx } from '../kernel/store/pool.js';
 import type { EvidenceRunner, RuleProposer } from './ports.js';
 import { buildReport, verdictFingerprint } from './report.js';
 

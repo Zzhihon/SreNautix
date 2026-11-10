@@ -20,7 +20,7 @@ import type {
 import { reasonEntry } from '@srenautix/contract';
 import { incidentOccurrences, isComponentKey, type Occurrence } from '@srenautix/core';
 import type pg from 'pg';
-import { badRequest } from '../api/errors.js';
+import { badRequest } from '../kernel/errors.js';
 import {
   incidentConditions,
   parseClassificationFilters,

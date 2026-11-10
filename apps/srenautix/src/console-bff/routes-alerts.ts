@@ -2,7 +2,7 @@ import type { HubComponents } from '@srenautix/contract';
 import { isIdentityLabel, isIgnorable } from '@srenautix/core';
 import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
-import { badRequest } from '../api/errors.js';
+import { badRequest } from '../kernel/errors.js';
 import type { Auth } from '../identity/auth.js';
 import type { RoleBinding } from '../identity/bindings.js';
 import { resolveIncidentRef } from '../incident/read.js';

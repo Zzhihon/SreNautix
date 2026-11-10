@@ -23,7 +23,7 @@ import { join, resolve } from 'node:path';
 import { Writable } from 'node:stream';
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createApp } from '../../src/api/http.js';
+import { createApp } from '../../src/kernel/http.js';
 import { runIncidentsExport } from '../../src/export/cli.js';
 import { kubeEventsSource } from '../../src/export/kube-events.js';
 import { DEFAULT_GROUPING, type KubeWarningsDeps } from '../../src/export/kube-warnings.js';
@@ -31,7 +31,7 @@ import { registerExportRoutes } from '../../src/export/routes.js';
 import type { Auth } from '../../src/identity/auth.js';
 import type { RoleBinding } from '../../src/identity/bindings.js';
 import { serverTracks } from '../../src/roles/server-schema.js';
-import { migrateExpand } from '../../src/store/migrate.js';
+import { migrateExpand } from '../../src/kernel/store/migrate.js';
 import { TopologyStore, type TopologyChange } from '../../src/topology/store.js';
 import { newTestDb, type TestDb } from '../support/db.js';
 

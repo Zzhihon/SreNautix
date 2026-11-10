@@ -6,8 +6,8 @@ import {
   type ServiceResolution,
   type TypedObject,
 } from '@srenautix/packs-sdk/business';
-import { logger } from '../log.js';
-import type { ServerMetrics } from '../metrics.js';
+import { logger } from '../kernel/log.js';
+import type { ServerMetrics } from '../kernel/metrics.js';
 
 // 一条告警的服务（ADR 0193 §3）：接入与重新归类共用。对象的组件类型按阶段 A 的方式求出：拓扑节点上的
 // component_type，没有时按 kind、命名空间与名称匹配领域包的组件类型。

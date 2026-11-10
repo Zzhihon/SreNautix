@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { DEFAULT_DB_ROLES } from '../../src/store/bootstrap.js';
-import { waitForSchema } from '../../src/store/wait-schema.js';
+import { DEFAULT_DB_ROLES } from '../../src/kernel/store/bootstrap.js';
+import { waitForSchema } from '../../src/kernel/store/wait-schema.js';
 import { newTestDb, type TestDb } from '../support/db.js';
 
 /**

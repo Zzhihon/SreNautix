@@ -7,8 +7,8 @@ import { scopeMatches } from '../identity/bindings.js';
 import type { Catalog } from '../proposals/catalog.js';
 import type { Policies } from '../proposals/policy.js';
 import type { Approver, ProposalCaller, ProposalService } from '../proposals/service.js';
-import { idempotent } from '../store/idempotency.js';
-import { badRequest, forbidden, notFound } from './errors.js';
+import { idempotent } from '../kernel/store/idempotency.js';
+import { badRequest, forbidden, notFound } from '../kernel/errors.js';
 
 /**
  * 控制台会话的审批人；H 档的重新认证凭据来自会话的认证时间（OIDC max_age 或本地管理员 TOTP）。

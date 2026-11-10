@@ -1,13 +1,13 @@
 import type { Finding, OptimizationRecommendation, RecommendationOutcome, TopologyNode } from '@srenautix/contract';
 import type { PackSet } from '@srenautix/packs-sdk';
 import type pg from 'pg';
-import { HttpError } from '../api/errors.js';
+import { HttpError } from '../kernel/errors.js';
 import { GitHubError, type GitHubApp } from '../github/app.js';
-import { logger } from '../log.js';
+import { logger } from '../kernel/log.js';
 import type { ProposalService } from '../proposals/service.js';
-import { appendAudit } from '../store/audit.js';
-import { appendEvents, type NewEvent } from '../store/outbox.js';
-import { tx } from '../store/pool.js';
+import { appendAudit } from '../kernel/store/audit.js';
+import { appendEvents, type NewEvent } from '../kernel/store/outbox.js';
+import { tx } from '../kernel/store/pool.js';
 import { managingApplications, type ArgoReader } from './argo.js';
 import { GoalDataUnavailable, type GoalEvidence } from './evidence.js';
 import { OPTIMIZATION_RULE } from './publisher.js';

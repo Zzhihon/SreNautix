@@ -1,6 +1,6 @@
 # 治理审计链（server）
 
-server 维护治理审计链（DESIGN §16.3），记录登录与失败、角色与策略变更、审批断言、聊天账号绑定、MCP 调用、出境清单等治理事件。每个集群的 gateway 另有一条执行审计链，格式见 `contract/gateway/v1/audit-record.schema.json`。代码在 `apps/srenautix/src/store/audit*.ts`。
+server 维护治理审计链（DESIGN §16.3），记录登录与失败、角色与策略变更、审批断言、聊天账号绑定、MCP 调用、出境清单等治理事件。每个集群的 gateway 另有一条执行审计链，格式见 `contract/gateway/v1/audit-record.schema.json`。代码在 `apps/srenautix/src/kernel/store/audit*.ts`，校验命令在 `apps/srenautix/src/audit/verify.ts`。
 
 ## 记录格式
 

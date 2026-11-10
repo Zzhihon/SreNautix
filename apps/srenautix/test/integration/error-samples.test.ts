@@ -7,7 +7,7 @@ import { durationSeconds } from '@srenautix/packs-sdk';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { parse } from 'yaml';
 import { LlmReplay } from '../../src/llm/replay.js';
-import { ServerMetrics } from '../../src/metrics.js';
+import { ServerMetrics } from '../../src/kernel/metrics.js';
 import { composeMessage, type ComposeInput } from '../../src/notify/compose.js';
 import { DEFAULT_CATALOG_PATH } from '../../src/proposals/catalog.js';
 import { runStageB } from '../../src/research/controller.js';

@@ -1,7 +1,7 @@
 import { REASON_CODES, reasonText } from '@srenautix/contract';
 import { describe, expect, it } from 'vitest';
 import { STAGE_A_MAX_RETRIES, STAGE_A_RETRY_AFTER_MS } from '../../src/incident/pipeline.js';
-import { ServerMetrics } from '../../src/metrics.js';
+import { ServerMetrics } from '../../src/kernel/metrics.js';
 import { MAX_ENDED_EDITS } from '../../src/notify/engine.js';
 import { STAGE_A_MISSING_NOTIFY_MS } from '../../src/notify/source.js';
 

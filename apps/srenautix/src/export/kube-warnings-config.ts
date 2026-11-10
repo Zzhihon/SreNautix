@@ -2,7 +2,7 @@
 // 指标来自调用方传入的 Prometheus 适配器与标签档案（证据数据源探测出的档案），拓扑历史来自 TopologyStore。
 import type { LabelProfile, MetricsQueryRangeRequest, MetricsQueryResult } from '@srenautix/contract';
 import { LokiAdapter } from '@srenautix/integration-sdk';
-import { parseDuration } from '../config/files.js';
+import { parseDuration } from '../kernel/files.js';
 import type { ServerConfig } from '../config/server.js';
 import { kubeEventsSource } from './kube-events.js';
 import { DEFAULT_GROUPING, type KubeWarningsDeps, type PlacementSource } from './kube-warnings.js';

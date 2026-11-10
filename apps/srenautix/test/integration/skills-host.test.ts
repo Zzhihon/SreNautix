@@ -12,7 +12,7 @@ import { serverTracks } from '../../src/roles/server-schema.js';
 import { skillsConfig, type SkillsConfig } from '../../src/skills/config.js';
 import { NOT_PLANNED_COOLDOWN_MS } from '../../src/skills/publisher.js';
 import { SkillRejected, SkillService } from '../../src/skills/service.js';
-import { migrateExpand } from '../../src/store/migrate.js';
+import { migrateExpand } from '../../src/kernel/store/migrate.js';
 import { newTestDb, type TestDb } from '../support/db.js';
 import { FakeGitHub } from '../support/github.js';
 import { RecordedKube } from '../support/recorded-kube.js';

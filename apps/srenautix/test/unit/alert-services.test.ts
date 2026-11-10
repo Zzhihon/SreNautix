@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { resolveAlert, type NodeLookup, type ResolveDeps } from '../../src/alerts/resolve.js';
 import { alertService, type ServiceDeps } from '../../src/alerts/service.js';
 import { fingerprint, type RawAlert } from '../../src/ingest/normalize.js';
-import { ServerMetrics } from '../../src/metrics.js';
+import { ServerMetrics } from '../../src/kernel/metrics.js';
 
 // 接入时一条告警的服务（ADR 0193 §3）：真实的告警解析 + 服务目录，拓扑与组件类型记录用内存替身
 

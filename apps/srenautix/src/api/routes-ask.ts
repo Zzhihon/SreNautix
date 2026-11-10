@@ -5,9 +5,9 @@ import { checkBody, openapiValidator } from './openapi-schemas.js';
 import { latestStageA, resolveIncidentRef } from '../incident/read.js';
 import { principalOf, type Auth } from '../identity/auth.js';
 import type { Scheduler } from '../scheduler/admission.js';
-import { appendAudit } from '../store/audit.js';
-import { tx } from '../store/pool.js';
-import { HttpError, notFound } from './errors.js';
+import { appendAudit } from '../kernel/store/audit.js';
+import { tx } from '../kernel/store/pool.js';
+import { HttpError, notFound } from '../kernel/errors.js';
 
 /**
  * 事件页「受控问答」的依赖。只复用已有的阶段 A / 阶段 B 数据与人工研判队列，

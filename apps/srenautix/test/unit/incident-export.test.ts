@@ -1,7 +1,7 @@
 import type { EvidenceResult, Incident, IncidentExport, IncidentExportRecord } from '@srenautix/contract';
 import { assertValid } from '@srenautix/contract';
 import { describe, expect, it } from 'vitest';
-import { HttpError } from '../../src/api/errors.js';
+import { HttpError } from '../../src/kernel/errors.js';
 import {
   assembleExport,
   conclusionOf,

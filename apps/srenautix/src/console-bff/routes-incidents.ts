@@ -15,7 +15,7 @@ import type { ServiceCatalog } from '@srenautix/packs-sdk/business';
 import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
 import { isBusinessImpact, type AlertMatcher } from '../alerts/business-impact.js';
-import { badRequest, notFound } from '../api/errors.js';
+import { badRequest, notFound } from '../kernel/errors.js';
 import type { Auth } from '../identity/auth.js';
 import { scopeMatches, type RoleBinding, type Target } from '../identity/bindings.js';
 import { alertStatement, headlineMember } from '../incident/headline.js';

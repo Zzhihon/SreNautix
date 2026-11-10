@@ -2,13 +2,13 @@ import type { EvidenceResult, RootCandidate, StageAReport } from '@srenautix/con
 import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createApp } from '../../src/api/http.js';
+import { createApp } from '../../src/kernel/http.js';
 import { registerAskRoutes, type AskResponse } from '../../src/api/routes-ask.js';
-import { HttpError } from '../../src/api/errors.js';
+import { HttpError } from '../../src/kernel/errors.js';
 import type { Auth } from '../../src/identity/auth.js';
 import type { Scheduler } from '../../src/scheduler/admission.js';
-import { appendAudit } from '../../src/store/audit.js';
-import { tx } from '../../src/store/pool.js';
+import { appendAudit } from '../../src/kernel/store/audit.js';
+import { tx } from '../../src/kernel/store/pool.js';
 
 // 事件页「受控问答」：复用既有阶段 A / 阶段 B 结论，不新调模型；问题文本当不可信数据
 
@@ -23,11 +23,11 @@ vi.mock('../../src/incident/read.js', () => ({
   incidentVersion: vi.fn(),
 }));
 
-vi.mock('../../src/store/pool.js', () => ({
+vi.mock('../../src/kernel/store/pool.js', () => ({
   tx: vi.fn(async (_pool: unknown, cb: (c: unknown) => Promise<unknown>) => cb({})),
 }));
 
-vi.mock('../../src/store/audit.js', () => ({
+vi.mock('../../src/kernel/store/audit.js', () => ({
   appendAudit: vi.fn(async () => ({})),
 }));
 

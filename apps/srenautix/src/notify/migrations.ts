@@ -1,4 +1,4 @@
-import type { Track } from '../store/migrate.js';
+import type { Track } from '../kernel/store/migrate.js';
 
 /** 通知层的表（schema server）。notify_messages 是持久化的发送队列：期望状态与已呈现状态不同即待发送或待编辑。 */
 export const notifyTrack: Track = {

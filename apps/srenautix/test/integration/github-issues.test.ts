@@ -8,7 +8,7 @@ import { parseServerConfig } from '../../src/config/server.js';
 import { hashPassword } from '../../src/identity/password.js';
 import { GitHubApp } from '../../src/github/app.js';
 import { openedLastHour } from '../../src/github/issues.js';
-import { ServerMetrics } from '../../src/metrics.js';
+import { ServerMetrics } from '../../src/kernel/metrics.js';
 import { withRefs } from '../../src/proposals/service.js';
 import { GitOpsPulls } from '../../src/remediation/pulls.js';
 import { buildServer, type ServerHandle } from '../../src/roles/server.js';

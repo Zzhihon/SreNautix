@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { parse as parseYaml } from 'yaml';
 import { z } from 'zod';
-import { ConfigError, parseDuration } from './files.js';
+import { ConfigError, parseDuration } from '../kernel/files.js';
 import { DEFAULT_REVISION_LABELS } from '../changes/kubernetes.js';
 import { DEFAULT_EXTERNAL_LABELS, isComponentKey } from '@srenautix/core';
 import { DEFAULT_OPTIMIZATION, optimizationConfig, pgReadConnection } from '../optimize/config.js';
@@ -15,7 +15,7 @@ import {
   KUBE_EVENT_FORMATS,
   LOKI_LABEL_NAME,
 } from '../export/kube-events.js';
-import { logger } from '../log.js';
+import { logger } from '../kernel/log.js';
 import type { ExternalRootSettings } from '../notify/external.js';
 
 const duration = z.string().regex(/^\d+(ms|s|m|h|d)$/, '时长形如 30s、5m、12h');

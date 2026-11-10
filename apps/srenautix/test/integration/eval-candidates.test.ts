@@ -8,12 +8,12 @@ import { readCandidates } from '../../src/eval/candidates.js';
 import { runEvalCli } from '../../src/eval/cli.js';
 import { loadLabels } from '../../src/eval/labels.js';
 import { upsertAlert } from '../../src/ingest/store.js';
-import { ServerMetrics } from '../../src/metrics.js';
+import { ServerMetrics } from '../../src/kernel/metrics.js';
 import { EvalCandidates } from '../../src/proposals/candidates.js';
 import { FeedbackService } from '../../src/proposals/feedback.js';
 import { serverTracks } from '../../src/roles/server-schema.js';
-import { migrateExpand } from '../../src/store/migrate.js';
-import { tx } from '../../src/store/pool.js';
+import { migrateExpand } from '../../src/kernel/store/migrate.js';
+import { tx } from '../../src/kernel/store/pool.js';
 import { newTestDb, type TestDb } from '../support/db.js';
 import { incident as baseIncident } from '../support/scenario.js';
 

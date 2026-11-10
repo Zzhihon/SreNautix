@@ -8,8 +8,8 @@ import {
 } from '@kubernetes/client-node';
 import type { TopologyEdge } from '@srenautix/contract';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { migrateExpand } from '../../src/store/migrate.js';
-import { storeTrack } from '../../src/store/migrations.js';
+import { migrateExpand } from '../../src/kernel/store/migrate.js';
+import { storeTrack } from '../../src/kernel/store/migrations.js';
 import { FirstSeen, objectHealth, type K8sObject } from '../../src/detectors/health.js';
 import { startInformerTopology, type InformerTopology } from '../../src/topology/informer.js';
 import { topologyTrack } from '../../src/topology/migrations.js';

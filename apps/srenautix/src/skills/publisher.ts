@@ -1,9 +1,9 @@
 import type pg from 'pg';
 import { GitHubError, type GitHubApp } from '../github/app.js';
 import { backoffMs, MAX_ATTEMPTS, openedLastHour } from '../github/issues.js';
-import { logger } from '../log.js';
-import { appendAudit } from '../store/audit.js';
-import { tx, type Queryable } from '../store/pool.js';
+import { logger } from '../kernel/log.js';
+import { appendAudit } from '../kernel/store/audit.js';
+import { tx, type Queryable } from '../kernel/store/pool.js';
 import type { SkillMetrics } from './metrics.js';
 
 // 技能的 issue（ADR 0181 §7.6，用户决定 2026-11-02）：按指纹去重。

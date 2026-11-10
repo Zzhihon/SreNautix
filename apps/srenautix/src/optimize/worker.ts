@@ -1,5 +1,5 @@
 import type { EvidenceResult } from '@srenautix/contract';
-import { logger } from '../log.js';
+import { logger } from '../kernel/log.js';
 import { dailyGate } from '../llm/budget.js';
 import type { CheckTemplate } from '../research/catalog.js';
 import type { QueryRunContext, QueryRunner } from '../research/checks.js';

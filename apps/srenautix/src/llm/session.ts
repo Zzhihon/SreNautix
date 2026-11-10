@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { APIConnectionError, APIConnectionTimeoutError, APIError, APIUserAbortError } from 'openai';
 import type OpenAI from 'openai';
 import type { DialectProfile, ModelRoute } from '@srenautix/contract';
-import { logger } from '../log.js';
+import { logger } from '../kernel/log.js';
 import type { WorkerMetrics } from '../research/metrics.js';
 import {
   callCost,

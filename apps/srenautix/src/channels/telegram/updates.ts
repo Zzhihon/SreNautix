@@ -1,8 +1,8 @@
 import { timingSafeEqual } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
-import { unauthorized } from '../../api/errors.js';
-import { logger } from '../../log.js';
-import type { ServerMetrics } from '../../metrics.js';
+import { unauthorized } from '../../kernel/errors.js';
+import { logger } from '../../kernel/log.js';
+import type { ServerMetrics } from '../../kernel/metrics.js';
 import { DISPOSITIONS, type ClickResult, type Interactions } from '../../notify/interactions.js';
 import { FEEDBACK_REASON_CODES } from '../../proposals/feedback.js';
 import type { ChannelLimiter } from '../../notify/ratelimit.js';

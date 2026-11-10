@@ -1,5 +1,5 @@
 import { Counter, Gauge, Histogram } from 'prom-client';
-import { BaseMetrics } from '../metrics.js';
+import { BaseMetrics } from '../kernel/metrics.js';
 
 /** worker 角色的指标（阶段 B、模型层、出站、评测） */
 export class WorkerMetrics extends BaseMetrics {

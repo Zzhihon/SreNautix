@@ -2,7 +2,7 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { parse as parseYaml } from 'yaml';
 import { z } from 'zod';
-import { ConfigError } from '../config/files.js';
+import { ConfigError } from '../kernel/files.js';
 
 /**
  * 服务调用方（非人类）的 bearer token。文件只保存 token 的 sha256，由 Secret 挂载：

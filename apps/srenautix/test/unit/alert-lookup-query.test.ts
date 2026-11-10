@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { HttpError } from '../../src/api/errors.js';
+import { HttpError } from '../../src/kernel/errors.js';
 import { parseLookupQuery } from '../../src/console-bff/routes-alerts.js';
 import { fingerprint, fromAlertmanager } from '../../src/ingest/normalize.js';
 

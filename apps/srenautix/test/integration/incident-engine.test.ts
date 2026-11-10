@@ -7,11 +7,11 @@ import { IncidentEngine } from '../../src/incident/engine.js';
 import { IncidentPipeline } from '../../src/incident/pipeline.js';
 import type { RawAlert } from '../../src/ingest/normalize.js';
 import { IngestService } from '../../src/ingest/service.js';
-import { ServerMetrics } from '../../src/metrics.js';
+import { ServerMetrics } from '../../src/kernel/metrics.js';
 import { serverTracks } from '../../src/roles/server-schema.js';
 import { Scheduler } from '../../src/scheduler/admission.js';
 import type { StageAService } from '../../src/stage-a/service.js';
-import { migrateExpand } from '../../src/store/migrate.js';
+import { migrateExpand } from '../../src/kernel/store/migrate.js';
 import { TopologyStore } from '../../src/topology/store.js';
 import { newTestDb, type TestDb } from '../support/db.js';
 

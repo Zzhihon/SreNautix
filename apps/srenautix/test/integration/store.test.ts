@@ -1,17 +1,17 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { OutboxListener } from '../../src/events/listener.js';
-import { DEFAULT_DB_ROLES, schemaIsolationViolations } from '../../src/store/bootstrap.js';
-import { idempotent } from '../../src/store/idempotency.js';
+import { DEFAULT_DB_ROLES, schemaIsolationViolations } from '../../src/kernel/store/bootstrap.js';
+import { idempotent } from '../../src/kernel/store/idempotency.js';
 import {
   migrateContract,
   migrateExpand,
   MigrationError,
   migrationsReady,
   type Track,
-} from '../../src/store/migrate.js';
-import { storeTrack } from '../../src/store/migrations.js';
-import { appendEvents, lastSeq, outboxDdl, readEvents } from '../../src/store/outbox.js';
-import { tx } from '../../src/store/pool.js';
+} from '../../src/kernel/store/migrate.js';
+import { storeTrack } from '../../src/kernel/store/migrations.js';
+import { appendEvents, lastSeq, outboxDdl, readEvents } from '../../src/kernel/store/outbox.js';
+import { tx } from '../../src/kernel/store/pool.js';
 import { newTestDb, type TestDb } from '../support/db.js';
 
 let db: TestDb;

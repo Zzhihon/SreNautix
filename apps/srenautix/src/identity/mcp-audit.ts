@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type pg from 'pg';
-import { appendAudit } from '../store/audit.js';
-import { tx } from '../store/pool.js';
+import { appendAudit } from '../kernel/store/audit.js';
+import { tx } from '../kernel/store/pool.js';
 import type { CallerRegistry, ServiceCaller } from './callers.js';
 
 type McpCaller = Extract<ServiceCaller, { kind: 'external' }>;

@@ -41,7 +41,7 @@ import {
   type SignalResolution,
 } from '@srenautix/packs-sdk';
 import { parse as parseYaml, parseDocument } from 'yaml';
-import { logger } from '../log.js';
+import { logger } from '../kernel/log.js';
 
 export interface PackRuntimeOptions {
   /** 每个目录下的子目录各是一个领域包。 */
