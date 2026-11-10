@@ -124,6 +124,7 @@
   "incident.hover_id": "Incident ID {id}",
   "incident.no_root": "Root cause not located",
   "incident.ambiguous": "Ambiguous root",
+  "incident.business_impact": "Business impact",
   "incident.service_presumed": "Service presumed from the namespace",
   "incident.root_mismatch": "Research root differs",
   "incident.merged_from": "Merged from {n}",

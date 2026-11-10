@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: SreNautix hub API
-  version: 2.57.0
+  version: 2.58.0
   license:
     name: Apache-2.0
     identifier: Apache-2.0
@@ -2847,6 +2847,7 @@ components:
         - primary_service
         - primary_service_source
         - business_domain
+        - business_impact
       properties:
         incident_id: { $ref: './schemas/common.schema.json#/$defs/Uuid' }
         cluster_id: { $ref: './schemas/common.schema.json#/$defs/ClusterId' }
@@ -2877,6 +2878,12 @@ components:
           oneOf: [{ type: 'null' }, { $ref: './schemas/common.schema.json#/$defs/ServiceSource' }]
         business_domain:
           oneOf: [{ type: 'null' }, { $ref: './schemas/common.schema.json#/$defs/BusinessDomainId' }]
+        business_impact:
+          description: |
+            仍在事件中的成员告警里属于业务影响告警（notify.business_impact_alerts，ADR 0166）的告警名，去重排序（契约 2.58.0）；
+            没有时为空数组。控制台据此标出"影响业务"，与消息使用同一组定义
+          type: array
+          items: { type: string }
         root_component:
           oneOf: [{ type: 'null' }, { $ref: './schemas/common.schema.json#/$defs/ComponentKey' }]
         ambiguous: { type: boolean }

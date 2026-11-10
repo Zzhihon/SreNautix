@@ -4928,6 +4928,11 @@ export type components = {
     IncidentSummary: {
       ambiguous: boolean;
       business_domain: null | components['schemas']['BusinessDomainId'];
+      /**
+       * @description 仍在事件中的成员告警里属于业务影响告警（notify.business_impact_alerts，ADR 0166）的告警名，去重排序（契约 2.58.0）；
+       *     没有时为空数组。控制台据此标出"影响业务"，与消息使用同一组定义
+       */
+      business_impact: string[];
       /** @description 事件的类别（Incident.categories，契约 2.46.0） */
       categories: components['schemas']['IncidentCategory'][];
       cluster_id: components['schemas']['ClusterId'];

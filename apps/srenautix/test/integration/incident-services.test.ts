@@ -300,6 +300,7 @@ describe('事件的服务经接口（ADR 0193 §6）', () => {
       evidence: {} as EvidenceRunner,
       worker: null,
       services: () => service.services(),
+      businessImpactAlerts: () => [{ labels: { alertname: ['ArchiveDeadLetters'] }, exclude_labels: {} }],
     });
   });
   afterAll(async () => {
@@ -311,6 +312,7 @@ describe('事件的服务经接口（ADR 0193 §6）', () => {
     services: string[];
     primary_service: string | null;
     business_domain: string | null;
+    business_impact: string[];
   };
   const names = async (query: string) => {
     const r = await app.inject({ method: 'GET', url: `/v1/incidents?state=all&cluster_id=${CLUSTER}${query}` });
@@ -321,6 +323,9 @@ describe('事件的服务经接口（ADR 0193 §6）', () => {
   it('列表按业务领域与服务筛选，摘要带服务字段', async () => {
     const archive = await names('&business_domain=archive');
     expect(archive.map((i) => [i.primary_service, i.business_domain])).toEqual([['archive-exporter', 'archive']]);
+    // 业务影响告警按 notify.business_impact_alerts 求出（ADR 0166）：只有归档事件的成员命中
+    expect(archive[0]!.business_impact).toEqual(['ArchiveDeadLetters']);
+    expect((await names('&service=gateway')).every((i) => i.business_impact.length === 0)).toBe(true);
     expect((await names('&service=gateway')).every((i) => i.services.includes('gateway'))).toBe(true);
     expect(await names('&service=gateway')).toHaveLength(2);
     const rest = await names('&exclude_business_domain=archive');

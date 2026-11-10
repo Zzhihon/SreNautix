@@ -124,6 +124,7 @@
   "incident.hover_id": "事件 ID {id}",
   "incident.no_root": "根因未定位",
   "incident.ambiguous": "根因有歧义",
+  "incident.business_impact": "影响业务",
   "incident.service_presumed": "按命名空间推定的服务",
   "incident.root_mismatch": "研判根因不同",
   "incident.merged_from": "合并自 {n}",

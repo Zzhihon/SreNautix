@@ -202,6 +202,7 @@ beforeAll(async () => {
     evidence: {} as EvidenceRunner,
     worker: null,
     services: () => new ServiceCatalog([], []),
+    businessImpactAlerts: () => [],
   });
 }, 120_000);
 

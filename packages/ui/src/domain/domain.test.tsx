@@ -772,6 +772,19 @@ describe('业务领域与服务（ADR 0193）', () => {
     expect(within(row).getByText('PostgreSQL').getAttribute('title')).toBeNull();
   });
 
+  it('有业务影响告警时标出影响业务，悬停提示列出告警名', () => {
+    renderUi(
+      <IncidentRow s={incidentSummary({ business_impact: ['CCHPErrorBudgetBurnFast', 'GatewayDown'] })} now={NOW} />,
+    );
+    const pill = within(screen.getByRole('link')).getByText('影响业务');
+    expect(pill.closest('[title]')?.getAttribute('title')).toBe('CCHPErrorBudgetBurnFast、GatewayDown');
+  });
+
+  it('没有业务影响告警时不标出', () => {
+    renderUi(<IncidentRow s={incidentSummary()} now={NOW} />);
+    expect(within(screen.getByRole('link')).queryByText('影响业务')).toBeNull();
+  });
+
   it('推定的服务：title 写明按命名空间推定', () => {
     renderUi(<IncidentRow s={incidentSummary()} now={NOW} service={{ title: '网关', presumed: true }} />);
     expect(within(screen.getByRole('link')).getByText('网关').getAttribute('title')).toBe('按命名空间推定的服务');
