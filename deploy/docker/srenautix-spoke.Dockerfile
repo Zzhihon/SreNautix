@@ -10,9 +10,11 @@ FROM --platform=$BUILDPLATFORM ${GO_BUILDER} AS build
 ARG TARGETOS
 ARG TARGETARCH
 ARG VERSION=dev
+# GOPROXY 用 | 分隔：代理出任何错误（不只是 404/410）都改从源仓库取，代理的瞬时故障不会让构建失败
 ENV CGO_ENABLED=0 \
     GOTOOLCHAIN=local \
-    GOFLAGS=-mod=readonly
+    GOFLAGS=-mod=readonly \
+    GOPROXY=https://proxy.golang.org|direct
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod go mod download && go mod verify
