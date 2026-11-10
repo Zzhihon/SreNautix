@@ -38,7 +38,11 @@ diagnose() {
   yq '.status' "$work/pg-cluster.yaml" >&2 || true
   for p in $(k -n "$ns" get pods -o name 2>/dev/null); do
     k -n "$ns" logs "$p" --all-containers --tail=300 >"$work/$(basename "$p").log" 2>&1 || true
-    k -n "$ns" logs "$p" --all-containers --previous --tail=300 >"$work/$(basename "$p").previous.log" 2>&1 || true
+    # --all-containers --previous 在第一个没有上一次运行的容器上就失败，按容器逐个取，只留重启过的容器
+    for c in $(k -n "$ns" get "$p" -o jsonpath='{.spec.initContainers[*].name} {.spec.containers[*].name}'); do
+      k -n "$ns" logs "$p" -c "$c" --previous --tail=300 >"$work/$(basename "$p").$c.previous.log" 2>/dev/null ||
+        rm -f "$work/$(basename "$p").$c.previous.log"
+    done
   done
   tail -n 40 "$work"/*.log >&2 || true
 }
@@ -112,7 +116,11 @@ log "检查启动顺序：server、worker 的 initContainer 等到 schema 就绪
 for role in server worker; do
   pod=$(k -n "$ns" get pod -l "app.kubernetes.io/component=$role" -o jsonpath='{.items[0].metadata.name}')
   restarts=$(k -n "$ns" get pod "$pod" -o jsonpath='{.status.containerStatuses[0].restartCount}')
-  [[ "$restarts" == 0 ]] || { log "srenautix-$role 的主容器重启了 ${restarts} 次"; exit 1; }
+  if [[ "$restarts" != 0 ]]; then
+    log "srenautix-$role 的主容器重启了 ${restarts} 次，上一次退出：$(k -n "$ns" get pod "$pod" -o jsonpath='{.status.containerStatuses[0].lastState.terminated}')"
+    k -n "$ns" logs "$pod" -c "$role" --previous --tail=50 >&2 || true
+    exit 1
+  fi
   k -n "$ns" logs "$pod" -c wait-for-schema | grep -q 'schema 已就绪' ||
     { log "srenautix-$role 的 wait-for-schema 没有记录 schema 已就绪"; exit 1; }
 done
