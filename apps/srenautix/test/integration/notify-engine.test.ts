@@ -1,6 +1,5 @@
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import type { Channel } from '@srenautix/contract';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from '../../src/kernel/http.js';
 import { NotifyService } from '../../src/notify/index.js';
@@ -13,13 +12,14 @@ import { NotifyEngine, NotifyFatalError } from '../../src/notify/engine.js';
 import { Interactions } from '../../src/notify/interactions.js';
 import { incidentTrack } from '../../src/incident/migrations.js';
 import { notifyTrack } from '../../src/notify/migrations.js';
-import type { ActionOutcome, DesiredIncidentMessage, MessageSource, NotifyActions } from '../../src/notify/ports.js';
+import type { DesiredIncidentMessage, MessageSource } from '../../src/notify/ports.js';
 import { NotifyStore } from '../../src/notify/store.js';
 import { migrateExpand } from '../../src/kernel/store/migrate.js';
 import { storeTrack } from '../../src/kernel/store/migrations.js';
 import { newTestDb, type TestDb } from '../support/db.js';
 import { fixture, FixtureServer } from '../support/fixture-server.js';
 import { parseTelegramHtml } from '../support/telegram-html.js';
+import { NoActions } from '../support/notify-actions.js';
 
 /** 发给 Bot API 的 HTML 解析后的文字（不合法的 HTML 在这里就失败） */
 const visible = (html: unknown) => parseTelegramHtml(String(html)).text;
@@ -43,19 +43,6 @@ class ListSource implements MessageSource {
 }
 
 /** 投递测试不涉及按钮操作：没有绑定任何账号，所有操作都成功。 */
-class NoActions implements NotifyActions {
-  private ok = async (): Promise<ActionOutcome> => ({ ok: true, message: 'ok' });
-  approve = this.ok;
-  reject = this.ok;
-  undo = this.ok;
-  feedbackRoot = this.ok;
-  feedbackDisposition = this.ok;
-  resolvedConfirm = this.ok;
-  link = async (_c: Channel, _u: string, _code: string): Promise<ActionOutcome> => ({ ok: true, message: 'ok' });
-  linkedPrincipal = async (): Promise<string | null> => null;
-  linkByUnionId = async (): Promise<string | null> => null;
-}
-
 let n = 0;
 function incident(over: Partial<DesiredIncidentMessage> & { title?: string } = {}): DesiredIncidentMessage {
   n++;

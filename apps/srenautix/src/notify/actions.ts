@@ -1,8 +1,11 @@
 import type { Channel, Disposition, FeedbackReasonCode, Incident } from '@srenautix/contract';
 import type pg from 'pg';
 import { HttpError } from '../kernel/errors.js';
+import type { Bindings } from '../identity/bindings.js';
 import type { ChatLinks } from '../identity/chat-links.js';
+import { claimIncident, isClaimChannel } from '../incident/claims.js';
 import { incidentVersion } from '../incident/read.js';
+import { incidentTarget } from '../incident/target.js';
 import type { FeedbackService } from '../proposals/feedback.js';
 import type { Approver, ProposalService } from '../proposals/service.js';
 import type { ActionOutcome, ChannelActor, NotifyActions } from './ports.js';
@@ -47,6 +50,7 @@ export class ServerNotifyActions implements NotifyActions {
     private readonly proposals: ProposalService,
     private readonly feedback: FeedbackService,
     private readonly links: ChatLinks,
+    private readonly bindings: () => Bindings,
   ) {}
 
   private async approver(a: ChannelActor): Promise<Approver | null> {
@@ -185,6 +189,29 @@ export class ServerNotifyActions implements NotifyActions {
     }
     await this.feedback.resolvedConfirm({ principalId: actor.principalId, channel: actor.channel, linked: true }, inc);
     return { ok: true, message: '已确认恢复' };
+  }
+
+  async claim(actor: ChannelActor, incidentId: string): Promise<ActionOutcome> {
+    const who = await this.approver(actor);
+    if (!who) {
+      return this.notLinked();
+    }
+    const r = await this.pool.query<{ body: Incident }>('SELECT body FROM server.incidents WHERE incident_id = $1', [
+      incidentId,
+    ]);
+    const inc = r.rows[0]?.body;
+    if (!inc) {
+      return { ok: false, code: 'not_found', message: '事件不存在' };
+    }
+    // 与控制台的 POST /v1/incidents/{ref}/claim 相同：按绑定主体的角色判断 claim 权限
+    if (!this.bindings().allowed(who.subject, 'claim', incidentTarget(inc))) {
+      return { ok: false, code: 'forbidden', message: '没有认领这个事件的权限' };
+    }
+    if (!isClaimChannel(actor.channel)) {
+      return { ok: false, code: 'invalid', message: '这个渠道不能认领事件，请在控制台认领' };
+    }
+    await claimIncident(this.pool, incidentId, who.principalId, actor.channel);
+    return { ok: true, message: '已认领：你是这个事件的处理人' };
   }
 
   async link(channel: Channel, channelUserId: string, code: string): Promise<ActionOutcome> {

@@ -28,16 +28,10 @@ import {
   rowServices,
   type IncidentFilters,
 } from '../console-bff/incident-filters.js';
-import {
-  decodeCursor,
-  encodeCursor,
-  incidentTarget,
-  sortCards,
-  visible,
-  type Cursor,
-} from '../console-bff/routes-incidents.js';
+import { decodeCursor, encodeCursor, sortCards, type Cursor } from '../console-bff/routes-incidents.js';
 import type { RoleBinding } from '../identity/bindings.js';
 import type { IncidentRow } from '../incident/read.js';
+import { incidentTarget, visible } from '../incident/target.js';
 import {
   collectKubeWarnings,
   DEFAULT_GROUPING,

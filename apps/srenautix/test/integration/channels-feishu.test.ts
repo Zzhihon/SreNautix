@@ -87,6 +87,9 @@ class RecordingActions implements NotifyActions {
   async resolvedConfirm(a: ChannelActor, id: string) {
     return this.rec('resolvedConfirm', a, id);
   }
+  async claim(a: ChannelActor, id: string) {
+    return this.rec('claim', a, id);
+  }
   async link(channel: Channel, user: string, code: string): Promise<ActionOutcome> {
     this.calls.push({ op: 'link', principal: null, args: [channel, user, code] });
     this.links.set(`${channel}:${user}`, 'oidc:alice');

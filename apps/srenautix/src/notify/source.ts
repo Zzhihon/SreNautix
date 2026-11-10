@@ -18,6 +18,7 @@ import {
 import { impactLine, type Classification, type ExternalRoots, type ExternalWindowStats } from './external.js';
 import type { LinkSettings } from './links.js';
 import type { DesiredIncidentMessage, FirstMessage, MessageSource, WithheldIncident } from './ports.js';
+import { currentClaims } from '../incident/claims.js';
 import { withComponentNames } from '../incident/names.js';
 import { incidentOnsetMs, incidentOrigin } from '../incident/onset.js';
 import { researchRoots, type OwnerLookup } from '../incident/research-root.js';
@@ -133,6 +134,7 @@ export class ReportSource {
       })),
     );
     const pulls = await pullsOf(this.pool, ids);
+    const claims = await currentClaims(this.pool, ids);
     const propMap = new Map<string, Proposal[]>();
     for (const x of props.rows) {
       propMap.set(x.incident_id, [...(propMap.get(x.incident_id) ?? []), x.body]);
@@ -179,6 +181,7 @@ export class ReportSource {
         proposals: propMap.get(inc.incident_id) ?? [],
         pulls,
         feedback: fbs.get(inc.incident_id) ?? null,
+        claim: claims.get(inc.incident_id) ?? null,
         prefix: this.s.prefix,
         consoleUrl: this.s.consoleUrl,
         timeZone: this.s.timeZone,

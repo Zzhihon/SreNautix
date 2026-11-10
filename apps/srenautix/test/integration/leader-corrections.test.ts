@@ -1,7 +1,6 @@
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { CoreV1Api, KubeConfig } from '@kubernetes/client-node';
-import type { Channel } from '@srenautix/contract';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { leaseLeader, type Leader } from '../../src/kernel/leader.js';
 import { TelegramAdapter } from '../../src/channels/telegram/adapter.js';
@@ -13,13 +12,14 @@ import { notifyCorrections } from '../../src/notify/corrections.js';
 import { MAX_ENDED_EDITS, NotifyEngine } from '../../src/notify/engine.js';
 import { Interactions } from '../../src/notify/interactions.js';
 import { notifyTrack } from '../../src/notify/migrations.js';
-import type { ActionOutcome, DesiredIncidentMessage, MessageSource, NotifyActions } from '../../src/notify/ports.js';
+import type { DesiredIncidentMessage, MessageSource } from '../../src/notify/ports.js';
 import { NotifyStore } from '../../src/notify/store.js';
 import { afterCorrections, runCorrections } from '../../src/kernel/store/corrections.js';
 import { migrateExpand, type Track } from '../../src/kernel/store/migrate.js';
 import { storeTrack } from '../../src/kernel/store/migrations.js';
 import { newTestDb, type TestDb } from '../support/db.js';
 import { startEnvTest, type EnvTest } from '../support/envtest.js';
+import { NoActions } from '../support/notify-actions.js';
 
 /**
  * 升级交接（ADR 0176）：真实 PostgreSQL 与真实的 Kubernetes Lease（envtest）。旧实例（ADR 0173 之前的版本）先持有租约，
@@ -95,19 +95,6 @@ class OneSource implements MessageSource {
     return ids.includes(this.d.incidentId) && language === this.d.language ? [this.d] : [];
   }
   async delivered(): Promise<void> {}
-}
-
-class NoActions implements NotifyActions {
-  private ok = async (): Promise<ActionOutcome> => ({ ok: true, message: 'ok' });
-  approve = this.ok;
-  reject = this.ok;
-  undo = this.ok;
-  feedbackRoot = this.ok;
-  feedbackDisposition = this.ok;
-  resolvedConfirm = this.ok;
-  link = async (_c: Channel, _u: string, _code: string): Promise<ActionOutcome> => ({ ok: true, message: 'ok' });
-  linkedPrincipal = async (): Promise<string | null> => null;
-  linkByUnionId = async (): Promise<string | null> => null;
 }
 
 /** 已经恢复的事件：恢复之后又更新了一次（期望内容与渠道上的不同） */

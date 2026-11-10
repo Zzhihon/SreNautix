@@ -384,7 +384,7 @@ export function renderCard(
         ),
       );
     } else {
-      rowButtons.push(button(b.kind === 'approve' ? 'primary' : 'default', false));
+      rowButtons.push(button(b.kind === 'approve' || b.kind === 'claim' ? 'primary' : 'default', false));
     }
   }
   flushRow();

@@ -10,16 +10,16 @@ import type {
   StageAReport,
 } from '@srenautix/contract';
 import { reasonEntry, reasonText, validatorFor } from '@srenautix/contract';
-import { NAMESPACE_KIND } from '@srenautix/core';
 import type { ServiceCatalog } from '@srenautix/packs-sdk/business';
 import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
 import { isBusinessImpact, type AlertMatcher } from '../alerts/business-impact.js';
 import { badRequest, notFound } from '../kernel/errors.js';
 import type { Auth } from '../identity/auth.js';
-import { scopeMatches, type RoleBinding, type Target } from '../identity/bindings.js';
+import type { RoleBinding } from '../identity/bindings.js';
 import { alertStatement, headlineMember } from '../incident/headline.js';
 import { claimEvents, claimIncident, currentClaims, releaseIncident } from '../incident/claims.js';
+import { incidentTarget, visible } from '../incident/target.js';
 import { withComponentNames } from '../incident/names.js';
 import { incidentConditions, parseClassificationFilters, rowCategories, rowServices } from './incident-filters.js';
 import { incidentVersion, latestStageA, resolveIncidentRef, type IncidentRow } from '../incident/read.js';
@@ -30,24 +30,6 @@ import type { FeedbackService } from '../proposals/feedback.js';
 import type { EvidenceRunner } from '../stage-a/ports.js';
 import type { TopologyStore } from '../topology/store.js';
 import { parseStoredKey } from '../topology/keys.js';
-
-/** 组件的授权对象：组件所在的命名空间；没有组件时为集群级对象。 */
-export function componentTarget(clusterId: string, key: string | null): Target {
-  if (!key) {
-    return { cluster: clusterId, namespace: null, labels: {} };
-  }
-  const k = parseStoredKey(key);
-  return { cluster: clusterId, namespace: k.kind === NAMESPACE_KIND ? k.name : k.namespace, labels: {} };
-}
-
-/** 事件的授权对象：根因组件（没有时取第一个组件）所在的命名空间。 */
-export function incidentTarget(inc: Pick<Incident, 'cluster_id' | 'root' | 'components'>): Target {
-  return componentTarget(inc.cluster_id, inc.root.component ?? inc.components[0] ?? null);
-}
-
-export function visible(scopes: RoleBinding[] | 'all', t: Target): boolean {
-  return scopes === 'all' || scopes.some((b) => scopeMatches(b, t));
-}
 
 const VERDICT_ORDER: Record<string, number> = { abnormal: 0, undeterminable: 1, normal: 2 };
 

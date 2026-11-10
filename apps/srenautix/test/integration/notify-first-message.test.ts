@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { Channel, Incident } from '@srenautix/contract';
+import type { Incident } from '@srenautix/contract';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { TelegramAdapter } from '../../src/channels/telegram/adapter.js';
 import { TelegramClient } from '../../src/channels/telegram/client.js';
@@ -7,7 +7,6 @@ import { ServerMetrics } from '../../src/kernel/metrics.js';
 import { NotifyEngine } from '../../src/notify/engine.js';
 import { Interactions } from '../../src/notify/interactions.js';
 import { NO_LINKS } from '../../src/notify/links.js';
-import type { ActionOutcome, NotifyActions } from '../../src/notify/ports.js';
 import { PgMessageSource, ReportSource } from '../../src/notify/source.js';
 import { NotifyStore } from '../../src/notify/store.js';
 import { FeedbackService } from '../../src/proposals/feedback.js';
@@ -18,6 +17,7 @@ import { TopologyStore } from '../../src/topology/store.js';
 import { newTestDb, type TestDb } from '../support/db.js';
 import { fixture, FixtureServer } from '../support/fixture-server.js';
 import { incident as baseIncident, stageA } from '../support/scenario.js';
+import { NoActions } from '../support/notify-actions.js';
 
 // 首条消息时延（ADR 0159、0165）：到这个事件第一条事件消息送达，两个口径：clock=onset 从事件的计时起点（新事件为
 // 首个告警触发，拆分出的事件为拆分时刻）算，clock=alertmanager 从成员告警第一次出现在 Alertmanager 算（拆分出的事件
@@ -31,19 +31,6 @@ const CLUSTER = 'east';
 const send = `/bot${TOKEN}/sendMessage`;
 const T0 = Date.parse('2026-10-25T10:25:00Z');
 const sec = (s: number) => new Date(T0 + s * 1000);
-
-class NoActions implements NotifyActions {
-  private ok = async (): Promise<ActionOutcome> => ({ ok: true, message: 'ok' });
-  approve = this.ok;
-  reject = this.ok;
-  undo = this.ok;
-  feedbackRoot = this.ok;
-  feedbackDisposition = this.ok;
-  resolvedConfirm = this.ok;
-  link = async (_c: Channel, _u: string, _code: string): Promise<ActionOutcome> => ({ ok: true, message: 'ok' });
-  linkedPrincipal = async (): Promise<string | null> => null;
-  linkByUnionId = async (): Promise<string | null> => null;
-}
 
 let db: TestDb;
 let fs: FixtureServer;

@@ -560,7 +560,7 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
     config: c.notify,
     publicUrl: c.public_url,
     source,
-    actions: new ServerNotifyActions(pool, proposals, feedback, chatLinks),
+    actions: new ServerNotifyActions(pool, proposals, feedback, chatLinks, () => bindings),
     metrics,
     isLeader: () => leader.isLeader(),
     acquired: () => leader.acquired(),

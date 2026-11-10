@@ -2323,7 +2323,8 @@ export interface NotifyButton {
     | 'feedback_reject'
     | 'disposition_confirm'
     | 'disposition_reject'
-    | 'resolved_confirm';
+    | 'resolved_confirm'
+    | 'claim';
   label: string;
   /**
    * 回调数据，由 server 签名

@@ -1,4 +1,4 @@
-import type { Channel, Incident } from '@srenautix/contract';
+import type { Incident } from '@srenautix/contract';
 import { AlertCatalog, DEFAULT_RCA_PARAMS } from '@srenautix/core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { TelegramAdapter } from '../../src/channels/telegram/adapter.js';
@@ -13,7 +13,6 @@ import { ServerMetrics } from '../../src/kernel/metrics.js';
 import { NotifyEngine } from '../../src/notify/engine.js';
 import { Interactions } from '../../src/notify/interactions.js';
 import { NO_LINKS } from '../../src/notify/links.js';
-import type { ActionOutcome, NotifyActions } from '../../src/notify/ports.js';
 import { PgMessageSource, ReportSource } from '../../src/notify/source.js';
 import { NotifyStore } from '../../src/notify/store.js';
 import { FeedbackService } from '../../src/proposals/feedback.js';
@@ -26,6 +25,7 @@ import { migrateExpand } from '../../src/kernel/store/migrate.js';
 import { TopologyStore } from '../../src/topology/store.js';
 import { newTestDb, type TestDb } from '../support/db.js';
 import { fixture, FixtureServer } from '../support/fixture-server.js';
+import { NoActions } from '../support/notify-actions.js';
 
 // 阶段 A 缺失（ADR 0173），经真实 PG 与流水线：
 // - 一轮流水线里某个事件的阶段 A 抛错（以 stage_a_reports 上的触发器注入写入失败），其余事件照常出报告、进入阶段 B 队列，
@@ -48,19 +48,6 @@ const evidence: EvidenceRunner = {
   rerun: async () => [],
 };
 const rules: RuleProposer = { evaluate: () => [], excluded: () => null, conclude: () => [] };
-
-class NoActions implements NotifyActions {
-  private ok = async (): Promise<ActionOutcome> => ({ ok: true, message: 'ok' });
-  approve = this.ok;
-  reject = this.ok;
-  undo = this.ok;
-  feedbackRoot = this.ok;
-  feedbackDisposition = this.ok;
-  resolvedConfirm = this.ok;
-  link = async (_c: Channel, _u: string, _code: string): Promise<ActionOutcome> => ({ ok: true, message: 'ok' });
-  linkedPrincipal = async (): Promise<string | null> => null;
-  linkByUnionId = async (): Promise<string | null> => null;
-}
 
 let db: TestDb;
 let fs: FixtureServer;

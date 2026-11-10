@@ -6,7 +6,7 @@ import { badRequest, notFound } from '../kernel/errors.js';
 import { checkBody, openapiValidator } from '../api/openapi-schemas.js';
 import type { Auth } from '../identity/auth.js';
 import type { CandidateState, EvalCandidateConfirm, EvalCandidates } from '../proposals/candidates.js';
-import { incidentTarget } from './routes-incidents.js';
+import { incidentTarget } from '../incident/target.js';
 
 export interface EvalRouteDeps {
   pool: pg.Pool;
