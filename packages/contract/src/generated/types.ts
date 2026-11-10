@@ -2238,6 +2238,12 @@ export interface NotifyMessage {
    * 一句话现状（严重度、根因组件、症状、状态），渠道放在最上面并加粗
    */
   headline?: NotifyRun[];
+  /**
+   * 结论块（契约 2.55.0，ADR 0194）：标题之下依次是处置、影响、下一步，各一行，取自各段已有的块；没有的行不出现。渠道放在标题之后、各段之前，不折叠、不省略。之前版本的消息没有这个字段
+   *
+   * @maxItems 3
+   */
+  brief?: NotifyBlock[];
   sections: NotifySection[];
   buttons: NotifyButton[];
   /**
@@ -2252,29 +2258,6 @@ export interface NotifyRun {
   text: string;
   style: 'plain' | 'bold' | 'code' | 'italic';
   href: string | null;
-}
-export interface NotifySection {
-  /**
-   * situation 现状；signals 业务关键信号（存储、内存、CPU、流量负载、阻塞中异常或接近阈值的卡，在现状之后、关键问题之前）；key_issue 关键问题（结论、结论档位的依据、假设）；topology 拓扑联系；remedy 解决方案；evidence 证据链；root_cause 是旧的四段结构中的问题根源
-   */
-  kind: 'situation' | 'signals' | 'key_issue' | 'topology' | 'remedy' | 'evidence' | 'root_cause';
-  /**
-   * 段标题；没有时渠道按 kind 取固定文案
-   */
-  title?: string;
-  /**
-   * 聊天渠道折叠显示（Telegram 可展开引用块、飞书折叠面板）
-   */
-  folded?: boolean;
-  /**
-   * 超长时的省略顺序：数字越小越先省略；0 不省略
-   */
-  priority?: number;
-  /**
-   * 整段被省略时显示的一行
-   */
-  omitted?: string;
-  blocks: NotifyBlock[];
 }
 /**
  * text 是 SreNautix 渲染的模板文本（runs 的纯文本形式）；quote 是引用的不可信原文，source 注明来源；model_generated=true 的块标注模型生成
@@ -2300,6 +2283,29 @@ export interface NotifyBlock {
     head: string[];
     rows: NotifyRun[][][];
   };
+}
+export interface NotifySection {
+  /**
+   * situation 现状；signals 业务关键信号（存储、内存、CPU、流量负载、阻塞中异常或接近阈值的卡，在现状之后、关键问题之前）；key_issue 关键问题（结论、结论档位的依据、假设）；topology 拓扑联系；remedy 解决方案；evidence 证据链；root_cause 是旧的四段结构中的问题根源
+   */
+  kind: 'situation' | 'signals' | 'key_issue' | 'topology' | 'remedy' | 'evidence' | 'root_cause';
+  /**
+   * 段标题；没有时渠道按 kind 取固定文案
+   */
+  title?: string;
+  /**
+   * 聊天渠道折叠显示（Telegram 可展开引用块、飞书折叠面板）
+   */
+  folded?: boolean;
+  /**
+   * 超长时的省略顺序：数字越小越先省略；0 不省略
+   */
+  priority?: number;
+  /**
+   * 整段被省略时显示的一行
+   */
+  omitted?: string;
+  blocks: NotifyBlock[];
 }
 export interface NotifyButton {
   kind:

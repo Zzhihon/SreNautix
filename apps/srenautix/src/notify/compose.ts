@@ -253,6 +253,8 @@ const T = {
     candidates: (n: number, s: number, m: number | null) =>
       `${n} 个候选，第一名得分 ${s.toFixed(2)}，与第二名分差 ${m === null ? '-' : m.toFixed(2)}`,
     dispositionLine: '处置：',
+    briefImpact: '影响 · ',
+    briefNext: '下一步 · ',
     stageAReason: '阶段 A：',
     why: (lvl: string, ok: number) => `为什么是“${lvl}”（代码判定，四项条件满足 ${ok} 项）：`,
     whyAll: '四项条件全部满足（代码判定）',
@@ -493,6 +495,8 @@ const T = {
     candidates: (n: number, s: number, m: number | null) =>
       `${n} candidates, top score ${s.toFixed(2)}, margin to the second ${m === null ? '-' : m.toFixed(2)}`,
     dispositionLine: 'Disposition: ',
+    briefImpact: 'Impact · ',
+    briefNext: 'Next · ',
     stageAReason: 'stage A: ',
     why: (lvl: string, ok: number) => `Why "${lvl}" (judged by code, ${ok} of 4 conditions hold):`,
     whyAll: 'All four conditions hold (judged by code)',
@@ -1846,17 +1850,18 @@ export function composeMessage(i: ComposeInput): { message: NotifyMessage; targe
   // 还没有阶段 A 报告时没有处置判断，处置行与处置反馈按钮都不出现
   const disposition = out?.disposition ?? i.stageA?.disposition ?? null;
   const stageA = i.stageA;
+  let dispositionBlock: NotifyBlock | null = null;
   if (disposition !== null && stageA) {
-    keyIssue.push(
-      text([
-        P(t.dispositionLine),
-        B(t.disposition[disposition] ?? disposition),
-        P(` · ${t.stageAReason}${t.dispositionReason[stageA.disposition_reason] ?? stageA.disposition_reason}`),
-        ...(inc.root.ambiguous && inc.candidates[0]
-          ? [P(`（${t.candidates(inc.candidates.length, inc.candidates[0].score, inc.root.margin)}）`)]
-          : []),
-      ]),
-    );
+    dispositionBlock = text([
+      P(t.dispositionLine),
+      B(t.disposition[disposition] ?? disposition),
+      P(` · ${t.stageAReason}${t.dispositionReason[stageA.disposition_reason] ?? stageA.disposition_reason}`),
+      ...(inc.root.ambiguous && inc.candidates[0]
+        ? [P(`（${t.candidates(inc.candidates.length, inc.candidates[0].score, inc.root.margin)}）`)]
+        : []),
+    ]);
+    // 聊天渠道在结论块里写处置（ADR 0194），关键问题段只在完整报告（GitHub issue）里重复
+    keyIssue.push({ ...dispositionBlock, scope: 'full' });
   }
   if (out) {
     keyIssue.push(...ladderBlocks(x, out, chosen));
@@ -1964,6 +1969,15 @@ export function composeMessage(i: ComposeInput): { message: NotifyMessage; targe
   // ---- 业务关键信号：现状之后、关键问题之前；没有异常或接近阈值的信号时整段不出现 ----
   const signals = signalsBlocks(x, [...cards.values()]);
 
+  // ---- 结论块（ADR 0194）：标题之下依次是处置、影响、下一步，各一行，取自下面各段已经写好的块；没有的行不出现 ----
+  const brief: NotifyBlock[] = [
+    ...(dispositionBlock ? [dispositionBlock] : []),
+    ...(signals[0]?.runs ? [text([P(t.briefImpact), ...signals[0].runs])] : []),
+    ...(remedy[0]?.runs && (nums.length > 0 || i.stageA?.runbooks.length)
+      ? [text([P(t.briefNext), ...remedy[0].runs])]
+      : []),
+  ];
+
   const sections: NotifySection[] = [
     { kind: 'situation', title: t.sec.situation, priority: 0, blocks: situation },
     ...(signals.length
@@ -2064,6 +2078,7 @@ export function composeMessage(i: ComposeInput): { message: NotifyMessage; targe
       severity: inc.severity,
       title: `${t.title(rootTitle, members.length)} · ${t.state[inc.state] ?? inc.state}`.slice(0, 200),
       headline,
+      brief,
       sections,
       buttons,
       banner,

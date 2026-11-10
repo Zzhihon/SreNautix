@@ -150,6 +150,8 @@ export function renderIncident(
   if (m.banner) {
     head.push({ runs: [bold(clip(oneLine(m.banner), 200))] });
   }
+  // 结论块（ADR 0194）：处置、影响、下一步，与标题同在不省略的头部
+  head.push(...(m.brief ?? []).flatMap((b) => blockLines(b, l)));
   const parts: Part[] = [{ priority: 0, omitted: '', more: '', title: null, folded: false, lines: head }];
   for (const sec of m.sections) {
     const blocks = sec.blocks.filter((b) => (b.scope ?? 'all') !== 'full');

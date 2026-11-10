@@ -59,6 +59,10 @@ export function issueMarkdown(m: NotifyMessage, marker: string, footer: string):
   if (m.banner) {
     out.push(`> **${escapeMarkdown(m.banner)}**`, '');
   }
+  // 结论块（ADR 0194）：标题之下、各段之前
+  if (m.brief?.length) {
+    out.push(...m.brief.map(blockMarkdown), '');
+  }
   for (const sec of m.sections) {
     const blocks = sec.blocks.filter((b) => (b.scope ?? 'all') !== 'summary');
     if (!blocks.length) {

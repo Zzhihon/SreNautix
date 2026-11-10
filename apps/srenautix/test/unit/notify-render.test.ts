@@ -345,17 +345,28 @@ describe('事件报告：2026-10-20 发布事故（黄金用例）', () => {
     const { payload } = telegramOf(releaseRolloutInput());
     const { text, entities } = parsed(payload);
     await expect(payload.text).toMatchFileSnapshot('../fixtures/report/release-rollout-2026-10-20.telegram.html');
-    // 主线顺序：现状 → 关键问题 → 拓扑联系 → 解决方案 → 证据链
+    // 标题之下是结论块（ADR 0194），之后主线顺序：现状 → 关键问题 → 拓扑联系 → 解决方案 → 证据链
     checkText(text, {
       starts_with: '[影子] [严重] StatefulSet:acme-prod/gateway：worker 没有可用副本',
-      order: ['现状', '时间线（UTC，10-20）', '关键问题', '拓扑联系', '解决方案', '证据链'],
+      order: [
+        '处置：升级',
+        '影响 · 内存',
+        '下一步 · r1',
+        '现状',
+        '时间线（UTC，10-20）',
+        '关键问题',
+        '拓扑联系',
+        '解决方案',
+        '证据链',
+      ],
       contains: [
         '发布 rel-9a8c9cd6（15:59:52）与回退到 rel-fd8097cf（16:24:25）期间',
         '结论：可能（likely）',
         '不满足：同一信号上有 5 张相反的正常卡',
         '【模型】机制：',
         '—managed_by→ Application.argoproj.io:argocd/acme-prod —manages→ Deployment:acme-prod/control',
-        '已执行的检查',
+        // 这条消息超过 Telegram 的上限：证据链末尾（已执行的检查）让给结论块，省略处写明在控制台
+        '其余内容见控制台',
       ],
     });
     // 证据链在可展开的引用块里；每张卡带控制台卡片详情与数据源查询的链接

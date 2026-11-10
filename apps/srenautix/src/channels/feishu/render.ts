@@ -242,6 +242,11 @@ export function renderCard(
   if (m.banner) {
     head.push(plain(clip(oneLine(m.banner), 200), { text_color: 'red' }));
   }
+  // 结论块（ADR 0194）：处置、影响、下一步，在不省略的头部
+  const brief = (m.brief ?? []).filter((b) => b.runs?.length);
+  if (brief.length) {
+    head.push({ tag: 'markdown', content: brief.map((b) => feishuMarkdown(b.runs!)).join('\n') });
+  }
   parts.push({ priority: 0, omitted: '', elements: head });
   for (const sec of m.sections) {
     const blocks = sec.blocks.filter((b) => (b.scope ?? 'all') !== 'full');
