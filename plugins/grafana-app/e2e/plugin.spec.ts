@@ -53,7 +53,7 @@ test('收件箱与事件详情经插件后端读取中心的数据；"批准"打
   await login(page);
   await page.goto(`${app}/incidents`);
   const row = page.getByRole('list', { name: 'Incidents' }).getByRole('link').first();
-  await expect(row).toContainText('critical');
+  await expect(row).toContainText('Critical');
   await row.click();
   await expect(page).toHaveURL(new RegExp(`/a/${PLUGIN_ID}/incidents/`));
   await expect(page.getByText('Proposals awaiting approval (2)')).toBeVisible();

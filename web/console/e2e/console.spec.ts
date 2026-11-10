@@ -82,7 +82,7 @@ test('收件箱：事件行带处置判断、严重度、持续时长与待审�
   const list = page.getByRole('list', { name: '事件列表' });
   const row = list.getByRole('link').first();
   await expect(row).toBeVisible();
-  await expect(row).toContainText('critical');
+  await expect(row).toContainText('严重');
   await expect(row).toContainText('2 个待审批');
   await expect(row).toContainText(/已持续/);
   await expect(page.getByText(/接入连续性 · 最近 6 小时/)).toBeVisible();
@@ -92,7 +92,7 @@ test('收件箱：事件行带处置判断、严重度、持续时长与待审�
   await expect(page.getByText('没有已恢复的事件')).toBeVisible();
   await expect(page.getByText(/接入正常，状态条件在 .* 检查过/)).toBeVisible();
 
-  await page.getByRole('group', { name: '状态' }).getByRole('button', { name: '进行中' }).click();
+  await page.getByRole('group', { name: '状态' }).getByRole('button', { name: '未恢复' }).click();
   await page.getByLabel('处置判断').selectOption('ignore');
   await expect(page).toHaveURL(/disposition=ignore/);
   await expect(page.getByText('没有符合过滤条件的事件')).toBeVisible();
@@ -104,7 +104,7 @@ test('事件详情：结论头、内联待审批、标签页写进 URL；不可�
   await go(page, `/incidents/${s.incidentId}`);
   const head = page.getByRole('region', { name: '结论' });
   await expect(head).toBeVisible();
-  await expect(head).toContainText('进行中');
+  await expect(head).toContainText('未恢复');
   // 标题写问题（ADR 0193 的 headline），内部标签只在悬停说明里
   await expect(head.getByRole('heading', { level: 1 })).not.toContainText(s.label);
   await expect(head.locator(`[title*="${s.label}"]`)).toHaveCount(1);
@@ -129,7 +129,7 @@ test('反馈：进行中的事件可以对处置判断与根因分别反馈，"�
   await go(page, `/incidents/${s.incidentId}`);
   const form = page.getByRole('form', { name: '研判反馈' });
   await expect(form).toBeVisible();
-  await expect(form).toContainText('事件进行中也可以反馈');
+  await expect(form).toContainText('事件未恢复时也可以反馈');
   await form.getByRole('group', { name: '处置判断' }).getByRole('button', { name: '错' }).click();
   await form.getByLabel('正确的处置判断').selectOption('escalate');
   await form.getByRole('group', { name: '根因组件' }).getByRole('button', { name: '错' }).click();

@@ -362,6 +362,7 @@ export class NotifyEngine {
     return {
       stormId: st.id,
       startedAt: st.startedAt,
+      timeZone: members[0]?.timeZone,
       members: members.map((d) => ({
         incidentId: d.incidentId,
         label: d.label,

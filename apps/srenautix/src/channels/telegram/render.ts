@@ -108,7 +108,7 @@ function clipLine(runs: NotifyRun[]): NotifyRun[] {
   return out;
 }
 
-function resultsPart(l: Language, results: readonly ActionResultView[]): Part | null {
+function resultsPart(l: Language, results: readonly ActionResultView[], tz: string): Part | null {
   if (!results.length) {
     return null;
   }
@@ -119,7 +119,7 @@ function resultsPart(l: Language, results: readonly ActionResultView[]): Part | 
     title: t.misc(l, 'results'),
     folded: false,
     lines: results.slice(0, MAX_RESULTS_SHOWN).map((r) => ({
-      runs: [plain(`${hm(r.at)} ${clip(r.actor, 40)} ${t.action(l, r.action)}：${clip(oneLine(r.message), 160)}`)],
+      runs: [plain(`${hm(r.at, tz)} ${clip(r.actor, 40)} ${t.action(l, r.action)}：${clip(oneLine(r.message), 160)}`)],
     })),
   };
 }
@@ -134,6 +134,7 @@ export function renderIncident(
 ): Rendered {
   const l = chat.language;
   const m = d.message;
+  const tz = d.timeZone ?? 'UTC';
   const head: Line[] = [];
   const headline = m.headline?.length ? m.headline.map((r) => r.text).join('') : m.title;
   head.push({
@@ -143,9 +144,9 @@ export function renderIncident(
     ],
   });
   head.push({ runs: [plain(`${t.state(l, d.state)} · ${t.misc(l, 'incident')} `), code(clip(d.label, 120))] });
-  head.push({ runs: [plain(`${t.misc(l, 'first_firing')} ${ymdhm(d.firstFiringAt)}`)] });
+  head.push({ runs: [plain(`${t.misc(l, 'first_firing')} ${ymdhm(d.firstFiringAt, tz)}`)] });
   if (storm) {
-    head.push({ runs: [plain(t.misc(l, 'storm', { at: hm(storm.startedAt) }))] });
+    head.push({ runs: [plain(t.misc(l, 'storm', { at: hm(storm.startedAt, tz) }))] });
   }
   if (m.banner) {
     head.push({ runs: [bold(clip(oneLine(m.banner), 200))] });
@@ -167,7 +168,7 @@ export function renderIncident(
       lines: blocks.flatMap((b) => blockLines(b, l)),
     });
   }
-  const res = resultsPart(l, results);
+  const res = resultsPart(l, results, tz);
   if (res) {
     parts.push(res);
   }
@@ -222,7 +223,7 @@ export function renderDigest(chat: ChatTarget, d: DigestInput, prefix: string): 
     {
       runs: [
         ...(prefix ? [plain(`${prefix} `)] : []),
-        bold(t.misc(l, 'digest_title', { at: hm(d.startedAt), n: d.members.length })),
+        bold(t.misc(l, 'digest_title', { at: hm(d.startedAt, d.timeZone ?? 'UTC'), n: d.members.length })),
       ],
     },
     { runs: [plain(t.misc(l, 'digest_note'))] },

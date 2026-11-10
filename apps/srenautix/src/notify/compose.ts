@@ -19,7 +19,7 @@ import type {
   RuleConclusion,
   StageAReport,
 } from '@srenautix/contract';
-import { reasonText, type ReasonCodeOf, type ReasonStage } from '@srenautix/contract';
+import { reasonText, TERMS, type ReasonCodeOf, type ReasonStage } from '@srenautix/contract';
 import {
   displayComponentName,
   displayKey,
@@ -30,6 +30,7 @@ import {
 } from '@srenautix/core';
 import { formatValue, OTHER_CLASS, type Unit } from '@srenautix/packs-sdk';
 import { headlineMembers } from '../incident/headline.js';
+import { tzLabel, wallClock } from './text.js';
 import { parseStoredKey } from '../topology/keys.js';
 import type { Subgraph } from '../research/types.js';
 import {
@@ -117,13 +118,15 @@ export interface ComposeInput {
    * 上游事件相关的依据（ADR 0150），横幅写“上游故障已影响业务”。其余事件为 null 或省略
    */
   upstreamImpact?: string[] | null;
+  /** 消息里时间的时区（IANA 名，notify.time_zone）；不给时为 UTC */
+  timeZone?: string;
   /** 事件主服务与它所属业务领域的名称（ADR 0193）；有时消息头条以 [业务领域/服务] 开头 */
   service?: { domain: string; service: string } | null;
 }
 
 const T = {
   zh: {
-    disposition: { act: '处理', ignore: '忽略', escalate: '升级', undetermined: '无法判定' } as Record<string, string>,
+    disposition: TERMS['zh-CN'].disposition as Record<string, string>,
     dispositionReason: {
       suppressed: '命中抑制规则',
       pack_exclude: '命中领域包的排除规则',
@@ -200,7 +203,7 @@ const T = {
     query: '查询',
     source: '来源',
     noRoot: '未定位根因',
-    timelineHead: (d: string) => `时间线（UTC，${d}）`,
+    timelineHead: (d: string, z: string) => `时间线（${z}，${d}）`,
     firstAlert: '首个告警',
     created: '检测器建事件',
     firstCard: '首张异常卡',
@@ -359,10 +362,7 @@ const T = {
     finalNote: '消息停止更新（原因：编辑次数达到上限），完整内容见',
   },
   en: {
-    disposition: { act: 'Act', ignore: 'Ignore', escalate: 'Escalate', undetermined: 'Undetermined' } as Record<
-      string,
-      string
-    >,
+    disposition: TERMS.en.disposition as Record<string, string>,
     dispositionReason: {
       suppressed: 'matched a suppression rule',
       pack_exclude: 'matched a pack exclusion rule',
@@ -441,7 +441,7 @@ const T = {
     query: 'query',
     source: 'source',
     noRoot: 'root not located',
-    timelineHead: (d: string) => `Timeline (UTC, ${d})`,
+    timelineHead: (d: string, z: string) => `Timeline (${z}, ${d})`,
     firstAlert: 'first alert',
     created: 'incident created',
     firstCard: 'first abnormal card',
@@ -649,11 +649,17 @@ function codeList(items: readonly string[], sep: string): NotifyRun[] {
 
 // ---- 格式 ----
 const ms = (iso: string) => Date.parse(iso);
+/** 消息的参照日：事件首次触发那天（在消息时区里）与消息时区；时刻都写成这个时区的墙上时间 */
+interface Day {
+  date: string;
+  tz: string;
+}
+
 /** HH:MM:SS（秒为 0 时 HH:MM）；日期与参照日不同时前面加 MM-DD */
-function clock(iso: string, day?: string): string {
-  const d = new Date(iso).toISOString();
-  const hm = d.slice(11, 19).endsWith(':00') ? d.slice(11, 16) : d.slice(11, 19);
-  return day && d.slice(0, 10) !== day ? `${d.slice(5, 10)} ${hm}` : hm;
+function clock(iso: string, day: Day): string {
+  const w = wallClock(new Date(iso), day.tz);
+  const hm = w.time.endsWith(':00') ? w.time.slice(0, 5) : w.time;
+  return w.date !== day.date ? `${w.date.slice(5)} ${hm}` : hm;
 }
 
 /** 组件在消息中的写法（ADR 0101）：有可读名称时为“名称（组件键）”，否则为组件键；组件键可以直接在控制台搜索 */
@@ -766,7 +772,7 @@ function controlLines(t: Dict, cards: ReadonlyMap<string, EvidenceResult>): Noti
 }
 
 /** 卡片的时间：异常起点或窗口 */
-function cardTime(t: Dict, r: EvidenceResult, day: string): NotifyRun[] {
+function cardTime(t: Dict, r: EvidenceResult, day: Day): NotifyRun[] {
   if (r.verdict === 'abnormal' && r.anomaly_started_at) {
     return [P(t.since2), C(clock(r.anomaly_started_at, day))];
   }
@@ -779,7 +785,7 @@ interface Ctx {
   inc: Incident;
   names: Readonly<Record<string, string | undefined>> | undefined;
   links: LinkSettings;
-  day: string;
+  day: Day;
   cards: Map<string, EvidenceResult>;
   alertsByRef: Map<string, Alert>;
   alertsById: Map<string, Alert>;
@@ -942,7 +948,7 @@ function changeTitle(t: Dict, c: ChangeEvent, inc: Incident): string {
 function changeRuns(
   t: Dict,
   changes: readonly ChangeEvent[],
-  day: string,
+  day: Day,
 ): { each: ChangeEvent[]; pending: NotifyRun[] | null } {
   const pending = changes.filter(pendingSync);
   return {
@@ -1539,7 +1545,8 @@ export function composeMessage(i: ComposeInput): { message: NotifyMessage; targe
   const stageCards = report?.cards ?? [];
   const members = inc.members.filter((m) => m.left_version === null);
   const alertsById = new Map(i.alerts.map((a) => [a.alert_id, a]));
-  const day = new Date(inc.first_firing_at).toISOString().slice(0, 10);
+  const tz = i.timeZone ?? 'UTC';
+  const day: Day = { date: wallClock(new Date(inc.first_firing_at), tz).date, tz };
   // 证据编号：阶段 A 的卡、检查卡、成员告警（按事件成员顺序）、变更
   const cards = new Map<string, EvidenceResult>([...stageCards, ...(out?.check_cards ?? [])].map((c) => [c.ref, c]));
   const alertsByRef = new Map<string, Alert>();
@@ -1993,7 +2000,7 @@ export function composeMessage(i: ComposeInput): { message: NotifyMessage; targe
       : []),
     {
       kind: 'situation',
-      title: t.timelineHead(day.slice(5)),
+      title: t.timelineHead(day.date.slice(5), tzLabel(tz, new Date(inc.first_firing_at))),
       priority: 4,
       omitted: t.omitted.timeline,
       blocks: timeline,

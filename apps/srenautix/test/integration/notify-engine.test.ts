@@ -165,6 +165,7 @@ describe('NotifyService', () => {
       pool: db.server,
       config: {
         prefix: '[影子]',
+        time_zone: 'UTC',
         severities: ['critical', 'warning'],
         resolved_retention: '6h',
         telegram: {

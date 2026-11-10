@@ -257,6 +257,15 @@ const externalRoots = z
   })
   .strict();
 
+/** IANA 时区名：Intl 能用它格式化时间 */
+function validTimeZone(tz: string): boolean {
+  try {
+    new Intl.DateTimeFormat('en', { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+}
 export type ExternalRootsConfig = z.infer<typeof externalRoots>;
 
 /**
@@ -771,6 +780,8 @@ export const serverConfigSchema = z
       .object({
         // 每条消息开头的前缀，例如 "[影子]"
         prefix: z.string().default(''),
+        // 消息里时间的时区（IANA 名，例如 Asia/Shanghai）；时间后面写 UTC 或与 UTC 的偏移（UTC+8）
+        time_zone: z.string().default('UTC').refine(validTimeZone, { message: 'notify.time_zone 不是 IANA 时区名' }),
         severities: notifySeverities,
         resolved_retention: duration.default('6h'),
         telegram: telegram.optional(),
@@ -784,6 +795,7 @@ export const serverConfigSchema = z
       .strict()
       .default({
         prefix: '',
+        time_zone: 'UTC',
         severities: ['critical', 'warning'],
         resolved_retention: '6h',
         digest: { external_roots: EXTERNAL_ROOTS_DEFAULT },

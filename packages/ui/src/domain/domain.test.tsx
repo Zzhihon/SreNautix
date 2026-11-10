@@ -320,7 +320,7 @@ describe('反馈', () => {
     expect([...reason.options].map((o) => o.textContent)).toContain('修复方向错误（事件是真的）');
     fireEvent.change(reason, { target: { value: 'false_positive' } });
     expect(submit.disabled).toBe(false);
-    expect(screen.getByText('事件进行中也可以反馈，以最新一条为准。')).toBeTruthy();
+    expect(screen.getByText('事件未恢复时也可以反馈，以最新一条为准。')).toBeTruthy();
   });
 
   it('确认时原因可选；只选原因、不评价两个维度也可以提交', () => {

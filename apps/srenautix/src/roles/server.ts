@@ -515,7 +515,7 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
         gitCommitUrl: c.links.git_commit_url ?? null,
       },
     },
-    { prefix: c.notify.prefix, consoleUrl: c.public_url },
+    { prefix: c.notify.prefix, consoleUrl: c.public_url, timeZone: c.notify.time_zone },
     (clusterId, key, at) => topology.ownerOf(clusterId, key, at),
   );
   // 外部上游的周期汇总（ADR 0147）：组件类型取拓扑节点上匹配出的类型，节点不在拓扑里（provider、model 这类

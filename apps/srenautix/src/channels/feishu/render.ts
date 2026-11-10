@@ -199,7 +199,7 @@ export function plainCard(card: unknown): El {
   };
 }
 
-function writeResults(l: Language, results: readonly ActionResultView[]): El[] {
+function writeResults(l: Language, results: readonly ActionResultView[], tz: string): El[] {
   if (!results.length) {
     return [];
   }
@@ -207,7 +207,9 @@ function writeResults(l: Language, results: readonly ActionResultView[]): El[] {
     heading(t.misc(l, 'results')),
     ...results
       .slice(0, MAX_RESULTS_SHOWN)
-      .map((r) => plain(`${hm(r.at)} ${clip(r.actor, 40)} ${t.action(l, r.action)}：${clip(oneLine(r.message), 160)}`)),
+      .map((r) =>
+        plain(`${hm(r.at, tz)} ${clip(r.actor, 40)} ${t.action(l, r.action)}：${clip(oneLine(r.message), 160)}`),
+      ),
   ];
 }
 
@@ -224,20 +226,21 @@ export function renderCard(
 ): Rendered {
   const l = chat.language;
   const m = d.message;
+  const tz = d.timeZone ?? 'UTC';
   const headline = m.headline?.length ? m.headline.map((r) => r.text).join('') : m.title;
   const title = `${m.prefix ? `${m.prefix} ` : ''}[${t.severity(l, m.severity)}] ${clip(oneLine(headline), 160)}`;
   const header: El = {
     title: { tag: 'plain_text', content: title },
     subtitle: {
       tag: 'plain_text',
-      content: `${t.state(l, d.state)} · ${t.misc(l, 'incident')} ${clip(d.label, 120)} · ${t.misc(l, 'first_firing')} ${ymdhm(d.firstFiringAt)}`,
+      content: `${t.state(l, d.state)} · ${t.misc(l, 'incident')} ${clip(d.label, 120)} · ${t.misc(l, 'first_firing')} ${ymdhm(d.firstFiringAt, tz)}`,
     },
     template: d.state === 'resolved' ? 'green' : (TEMPLATE[m.severity] ?? 'grey'),
   };
   const parts: Part[] = [];
   const head: El[] = [];
   if (storm) {
-    head.push(plain(t.misc(l, 'storm', { at: hm(storm.startedAt) })));
+    head.push(plain(t.misc(l, 'storm', { at: hm(storm.startedAt, tz) })));
   }
   if (m.banner) {
     head.push(plain(clip(oneLine(m.banner), 200), { text_color: 'red' }));
@@ -302,7 +305,7 @@ export function renderCard(
       elements,
     });
   }
-  parts.push({ priority: 1, omitted: t.omitted(l, 'results'), elements: writeResults(l, results) });
+  parts.push({ priority: 1, omitted: t.omitted(l, 'results'), elements: writeResults(l, results, tz) });
 
   const registered: RegisteredButton[] = [];
   const tail: El[] = [];
@@ -418,7 +421,7 @@ export function renderDigestCard(chat: ChatTarget, d: DigestInput, prefix: strin
   const header: El = {
     title: {
       tag: 'plain_text',
-      content: `${prefix ? `${prefix} ` : ''}${t.misc(l, 'digest_title', { at: hm(d.startedAt), n: d.members.length })}`,
+      content: `${prefix ? `${prefix} ` : ''}${t.misc(l, 'digest_title', { at: hm(d.startedAt, d.timeZone ?? 'UTC'), n: d.members.length })}`,
     },
     template: 'orange',
   };
