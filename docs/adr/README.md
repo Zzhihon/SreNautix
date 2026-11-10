@@ -132,7 +132,7 @@
 | [0181](0181-hot-pluggable-skills.md) | 可热插拔的技能：清单、能力白名单、预算与热加载 | 已采纳 | [0182](0182-urgency-tiered-incidents.md) |
 | [0182](0182-urgency-tiered-incidents.md) | 按紧急度分级处理事件：标签首轮、拓扑距离与实测业务影响的校正 | 提议 | [0183](0183-alert-categories.md) [0184](0184-stable-incident-identity-on-recurrence.md) [0185](0185-kube-warnings-and-suspected-common-cause.md) [0186](0186-incident-export.md) |
 | [0183](0183-alert-categories.md) | 告警类别：领域包声明、标签覆盖、部署方规则，事件的类别与列表筛选 | 已采纳 | [0185](0185-kube-warnings-and-suspected-common-cause.md) [0186](0186-incident-export.md) [0193](0193-business-domains-and-services.md) |
-| [0184](0184-stable-incident-identity-on-recurrence.md) | 告警复发时事件身份保持稳定，同一系列复用事件 issue | 已采纳 | [0185](0185-kube-warnings-and-suspected-common-cause.md) [0186](0186-incident-export.md) |
+| [0184](0184-stable-incident-identity-on-recurrence.md) | 告警复发时事件身份保持稳定，同一系列复用事件 issue | 已采纳 | [0185](0185-kube-warnings-and-suspected-common-cause.md) [0186](0186-incident-export.md) [0196](0196-series-key-stays-on-root-component.md) |
 | [0185](0185-kube-warnings-and-suspected-common-cause.md) | 导出时的 Kubernetes Warning 摘要与疑似同一根因分组 | 已采纳 | [0186](0186-incident-export.md) |
 | [0186](0186-incident-export.md) | 按时间窗批量导出事件 | 已采纳 | [0193](0193-business-domains-and-services.md) |
 | [0187](0187-metricsql-cards-and-split-configmap-packs.md) | 只能用 MetricsQL 查询的卡与分在多个 ConfigMap 中的包 | 已采纳 | [0188](0188-deterministic-oci-pack-artifacts.md) |
@@ -140,6 +140,7 @@
 | [0190](0190-incident-summary-headline.md) | 收件箱的一行显示问题陈述 | 已采纳 | [0193](0193-business-domains-and-services.md) |
 | [0191](0191-subgraph-zoom-and-node-navigation.md) | 根因子图的缩放、全屏与节点导航 | 已采纳 | — |
 | [0192](0192-controlled-incident-qa.md) | 受控事件问答与标注反哺 | 已采纳 | — |
-| [0193](0193-business-domains-and-services.md) | 业务领域与服务：领域包声明，告警与事件的服务归属 | 已采纳 | — |
+| [0193](0193-business-domains-and-services.md) | 业务领域与服务：领域包声明，告警与事件的服务归属 | 已采纳 | [0196](0196-series-key-stays-on-root-component.md) |
 | [0194](0194-notify-brief-block.md) | 事件消息的结论块：处置、影响、下一步紧跟标题 | 已采纳 | — |
 | [0195](0195-incident-claims.md) | 事件的认领：谁在处理 | 已采纳 | — |
+| [0196](0196-series-key-stays-on-root-component.md) | 系列键保持根因组件加告警名，不改用服务 | 已采纳 | — |
