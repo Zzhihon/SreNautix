@@ -277,6 +277,10 @@ test('拓扑：没有领域包时覆盖表列出告警映射到的组件且写�
   await page.getByLabel('组件键').fill('Deployment:shop/api');
   await page.getByRole('button', { name: '显示' }).click();
   await expect(page.getByRole('group', { name: /根因子图：\d+ 个组件/ })).toBeVisible();
+  // 邻域范围写进 URL（ADR 0197）：1 跳的邻域仍然画出中心组件
+  await page.getByRole('group', { name: '邻域范围' }).getByRole('button', { name: '1 跳' }).click();
+  await expect(page).toHaveURL(/hops=1/);
+  await expect(page.getByRole('group', { name: /根因子图：\d+ 个组件/ })).toBeVisible();
 });
 
 test('策略与目录：从 Git 渲染的策略、模拟器、软暂停与硬停止说明', async ({ page }) => {

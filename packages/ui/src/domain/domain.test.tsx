@@ -1004,14 +1004,14 @@ describe('根因子图的交互（ADR 0191）', () => {
         kind: 'Deployment',
         namespace: 'app',
         name: `svc-${i}`,
-        role: 'neighbor' as const,
+        role: 'member' as const,
         alerts: [],
         hops: 1,
       })),
       edges: [],
     };
     renderUi(<Subgraph graph={many} />);
-    await node('svc-0，邻居，0 条告警');
+    await node('svc-0，成员，0 条告警');
     expect(document.querySelector('.react-flow__minimap')).not.toBeNull();
   });
 

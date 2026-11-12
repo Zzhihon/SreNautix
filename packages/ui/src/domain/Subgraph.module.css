@@ -1,5 +1,6 @@
 /* 画布与侧栏并排；全屏时整块铺满屏幕，侧栏留在全屏范围内 */
 .frame {
+  --sg-height: 320px;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 10px;
@@ -7,6 +8,10 @@
 }
 .frame[data-open] {
   grid-template-columns: minmax(0, 1fr) 280px;
+}
+/* 画布是页面的主要内容：占满视口里页头与表单之下的高度 */
+.frame[data-primary] {
+  --sg-height: max(420px, calc(100dvh - 300px));
 }
 .frame:fullscreen {
   grid-template-rows: minmax(0, 1fr);
@@ -16,7 +21,7 @@
 }
 .wrap {
   position: relative;
-  height: 320px;
+  height: var(--sg-height);
   border: 1px solid var(--sn-line);
   border-radius: 6px;
   background: var(--sn-bg);
@@ -33,7 +38,7 @@
   --xy-minimap-background-color: var(--sn-panel);
   --xy-minimap-mask-background-color: color-mix(in srgb, var(--sn-bg) 70%, transparent);
   --xy-minimap-mask-stroke-color: var(--sn-edge);
-  --xy-minimap-node-background-color: var(--sn-line);
+  --xy-minimap-node-background-color: var(--sn-edge);
   --xy-minimap-node-stroke-color: var(--sn-edge);
 }
 .frame:fullscreen .wrap {
@@ -52,8 +57,9 @@
   border: 1px solid var(--sn-line);
 }
 .node {
-  width: 180px;
-  height: 52px;
+  box-sizing: border-box;
+  width: 204px;
+  height: 68px;
   border: 1px solid var(--sn-line);
   border-radius: 6px;
   background: var(--sn-panel);
@@ -75,8 +81,21 @@
   border-style: dashed;
   color: var(--sn-dim);
 }
+/* 合并的同类组件：右下角露出一层，像一叠卡片 */
+.node[data-fold] {
+  border-style: solid;
+  box-shadow:
+    4px 4px 0 -1px var(--sn-panel),
+    4px 4px 0 0 var(--sn-line);
+}
+.node[data-hit] {
+  box-shadow: 0 0 0 2px var(--sn-info);
+}
 .node[data-selected] {
   box-shadow: 0 0 0 3px var(--sn-focus);
+}
+.node[data-dim] {
+  opacity: 0.25;
 }
 .name {
   font-weight: 600;
@@ -98,6 +117,71 @@
   opacity: 0.5;
   stroke-dasharray: 4 3;
 }
+/* 指向或选中的节点上的边 */
+.on {
+  opacity: 1;
+  --xy-edge-stroke: var(--sn-info);
+  --xy-edge-stroke-width: 2;
+}
+.dim {
+  opacity: 0.12;
+}
+.tools {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 12px;
+}
+.find,
+.tool {
+  height: 26px;
+  box-sizing: border-box;
+  border: 1px solid var(--sn-line);
+  border-radius: 4px;
+  background: var(--sn-panel);
+  color: var(--sn-text);
+  font: inherit;
+}
+.find {
+  width: 170px;
+  padding: 0 8px;
+}
+.tool {
+  padding: 0 10px;
+  cursor: pointer;
+}
+.tool:hover {
+  background: var(--sn-raise);
+}
+.tool[aria-pressed='true'] {
+  border-color: var(--sn-info);
+  color: var(--sn-info);
+}
+.find:focus-visible,
+.tool:focus-visible {
+  outline: 2px solid var(--sn-focus);
+  outline-offset: 1px;
+}
+.findCount {
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--sn-panel);
+  color: var(--sn-dim);
+}
+.wheelHint {
+  position: absolute;
+  left: 50%;
+  top: 12px;
+  transform: translateX(-50%);
+  padding: 6px 12px;
+  border: 1px solid var(--sn-line);
+  border-radius: 6px;
+  background: var(--sn-panel);
+  color: var(--sn-text);
+  font-size: 12.5px;
+  pointer-events: none;
+  white-space: nowrap;
+}
 .srOnly {
   position: absolute;
   width: 1px;
@@ -110,7 +194,7 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-  max-height: 320px;
+  max-height: var(--sg-height);
   overflow: auto;
   padding: 10px 12px;
   border: 1px solid var(--sn-line);

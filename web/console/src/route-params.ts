@@ -14,10 +14,17 @@ export interface TopologySearch {
   view?: TopologyView;
   /** 邻域视图的中心组件键（ADR 0191）：输入框提交与子图节点双击都写进这里，刷新和分享后仍然打开同一个邻域 */
   component?: string;
+  /** 邻域只画 1 跳（ADR 0197）；不写时是 2 跳 */
+  hops?: 1;
 }
 
 export function topologySearch(s: Record<string, unknown>): TopologySearch {
-  return { cluster: str(s.cluster), view: maybeOneOf(s.view, TOPOLOGY_VIEWS), component: str(s.component) };
+  return {
+    cluster: str(s.cluster),
+    view: maybeOneOf(s.view, TOPOLOGY_VIEWS),
+    component: str(s.component),
+    hops: s.hops === 1 || s.hops === '1' ? 1 : undefined,
+  };
 }
 
 /** 以某个组件为中心的拓扑邻域 */

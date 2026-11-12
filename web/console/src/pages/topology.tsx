@@ -1,10 +1,12 @@
 // 拓扑（DESIGN §4.4、§12.2）：默认视图是覆盖表；未映射的告警可以直接生成覆盖规则的 gitops_pr 提议（批准后由 gateway
-// 只推送到 srenautix/* 分支并开 PR，从不合并）；邻域图每条边标注来源，中心组件放在 URL 里（ADR 0191）；版本差异。
+// 只推送到 srenautix/* 分支并开 PR，从不合并）；邻域图每条边标注来源，中心组件与跳数放在 URL 里（ADR 0191、ADR 0197），
+// 覆盖表的组件链接到它的邻域；版本差异。
 
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
 import type { HubComponents, HubOperations } from '@srenautix/contract';
 import {
+  AppLink,
   Button,
   DataTable,
   EmptyState,
@@ -22,7 +24,7 @@ import {
 } from '@srenautix/ui';
 import { useMemo, useState } from 'react';
 import { hub, ok } from '../api';
-import type { TopologyView } from '../route-params';
+import { topologyHref, type TopologyView } from '../route-params';
 import { hasRole, useSession } from '../session';
 import { Loaded, ROLES_ALL } from './common';
 import styles from './pages.module.css';
@@ -106,7 +108,9 @@ function CoverageView({ cluster }: { cluster: string }) {
         enableSorting: true,
         cell: ({ row }) => (
           <span className={styles.stack}>
-            <span>{componentLabel(row.original.component).name}</span>
+            <AppLink href={topologyHref(cluster, row.original.component)}>
+              {componentLabel(row.original.component).name}
+            </AppLink>
             <span className={styles.dim}>{componentLabel(row.original.component).sub}</span>
           </span>
         ),
@@ -119,7 +123,7 @@ function CoverageView({ cluster }: { cluster: string }) {
       },
       { header: t('topology.mapped_alerts'), cell: ({ row }) => row.original.mapped_alerts.length },
     ],
-    [t],
+    [t, cluster],
   );
   const unmappedCols = useMemo<ColumnDef<Unmapped>[]>(
     () => [
@@ -207,7 +211,7 @@ function CoverageView({ cluster }: { cluster: string }) {
   );
 }
 
-function NeighborhoodView({ cluster, component }: { cluster: string; component: string | null }) {
+function NeighborhoodView({ cluster, component, hops }: { cluster: string; component: string | null; hops: 1 | 2 }) {
   const { t } = useI18n();
   const navigate = useNavigate();
   const [input, setInput] = useState(component ?? '');
@@ -217,15 +221,19 @@ function NeighborhoodView({ cluster, component }: { cluster: string; component: 
     setShownFor(component);
     setInput(component ?? '');
   }
-  const openComponent = (next: string | null) =>
-    void navigate({ to: '/topology', search: { cluster, view: 'neighborhood', component: next ?? undefined } });
+  const open = (next: string | null, nextHops: 1 | 2) =>
+    void navigate({
+      to: '/topology',
+      search: { cluster, view: 'neighborhood', component: next ?? undefined, hops: nextHops === 1 ? 1 : undefined },
+    });
+  const openComponent = (next: string | null) => open(next, hops);
   const q = useQuery({
-    queryKey: ['topology', 'neighborhood', cluster, component],
+    queryKey: ['topology', 'neighborhood', cluster, component, hops],
     queryFn: async () =>
       ok<Graph>(
         'getTopologyNeighborhood',
         await hub.GET('/v1/topology/neighborhood', {
-          params: { query: { cluster_id: cluster, component: component as string } },
+          params: { query: { cluster_id: cluster, component: component as string, hops } },
         }),
       ),
     enabled: component !== null,
@@ -246,12 +254,18 @@ function NeighborhoodView({ cluster, component }: { cluster: string; component: 
           onChange={(e) => setInput(e.currentTarget.value)}
         />
         <Button type="submit">{t('topology.show')}</Button>
+        <Segmented
+          label={t('topology.hops')}
+          value={String(hops) as '1' | '2'}
+          onChange={(v) => open(component, v === '1' ? 1 : 2)}
+          options={(['1', '2'] as const).map((v) => ({ value: v, label: t('topology.hops_n', { n: Number(v) }) }))}
+        />
       </form>
       {component === null ? (
         <EmptyState kind="not_applicable" title={t('topology.pick_title')} because={t('topology.pick')} />
       ) : (
         <Loaded q={q} what={t('topology.neighborhood_failed')} roles={ROLES_ALL}>
-          {(g) => <Subgraph graph={g} clusterId={cluster} onOpenComponent={openComponent} />}
+          {(g) => <Subgraph graph={g} clusterId={cluster} onOpenComponent={openComponent} primary />}
         </Loaded>
       )}
     </Panel>
@@ -343,10 +357,12 @@ export function TopologyPage({
   cluster,
   view,
   component,
+  hops,
 }: {
   cluster?: string;
   view: TopologyView;
   component?: string;
+  hops: 1 | 2;
 }) {
   const { t } = useI18n();
   const navigate = useNavigate();
@@ -375,7 +391,7 @@ export function TopologyPage({
       ) : view === 'coverage' ? (
         <CoverageView cluster={cluster} />
       ) : view === 'neighborhood' ? (
-        <NeighborhoodView cluster={cluster} component={component ?? null} />
+        <NeighborhoodView cluster={cluster} component={component ?? null} hops={hops} />
       ) : (
         <DiffView cluster={cluster} />
       )}

@@ -138,9 +138,10 @@
 | [0187](0187-metricsql-cards-and-split-configmap-packs.md) | 只能用 MetricsQL 查询的卡与分在多个 ConfigMap 中的包 | 已采纳 | [0188](0188-deterministic-oci-pack-artifacts.md) |
 | [0188](0188-deterministic-oci-pack-artifacts.md) | 确定性的 OCI 领域包制品与测试后端的回收 | 已采纳 | — |
 | [0190](0190-incident-summary-headline.md) | 收件箱的一行显示问题陈述 | 已采纳 | [0193](0193-business-domains-and-services.md) |
-| [0191](0191-subgraph-zoom-and-node-navigation.md) | 根因子图的缩放、全屏与节点导航 | 已采纳 | — |
+| [0191](0191-subgraph-zoom-and-node-navigation.md) | 根因子图的缩放、全屏与节点导航 | 部分取代（见 [0197](0197-subgraph-large-graph-browsing.md)） | [0197](0197-subgraph-large-graph-browsing.md) |
 | [0192](0192-controlled-incident-qa.md) | 受控事件问答与标注反哺 | 已采纳 | — |
 | [0193](0193-business-domains-and-services.md) | 业务领域与服务：领域包声明，告警与事件的服务归属 | 已采纳 | [0196](0196-series-key-stays-on-root-component.md) |
 | [0194](0194-notify-brief-block.md) | 事件消息的结论块：处置、影响、下一步紧跟标题 | 已采纳 | — |
 | [0195](0195-incident-claims.md) | 事件的认领：谁在处理 | 已采纳 | — |
 | [0196](0196-series-key-stays-on-root-component.md) | 系列键保持根因组件加告警名，不改用服务 | 已采纳 | — |
+| [0197](0197-subgraph-large-graph-browsing.md) | 组件多的子图：滚轮缩放、同类合并、突出与查找 | 已采纳 | — |

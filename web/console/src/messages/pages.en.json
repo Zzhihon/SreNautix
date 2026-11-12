@@ -141,6 +141,8 @@
   "topology.neighborhood": "Neighbourhood",
   "topology.component_key": "Component key",
   "topology.show": "Show",
+  "topology.hops": "Neighborhood range",
+  "topology.hops_n": "{n, plural, one {# hop} other {# hops}}",
   "topology.pick_title": "Enter a component",
   "topology.pick": "Enter a component key such as StatefulSet:db/pg-main (kind:namespace/name) to see neighbours up to 2 hops, each edge labelled with its source.",
   "topology.neighborhood_failed": "Failed to read the neighbourhood",
