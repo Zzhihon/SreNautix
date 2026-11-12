@@ -145,3 +145,4 @@
 | [0195](0195-incident-claims.md) | 事件的认领：谁在处理 | 已采纳 | — |
 | [0196](0196-series-key-stays-on-root-component.md) | 系列键保持根因组件加告警名，不改用服务 | 已采纳 | — |
 | [0197](0197-subgraph-large-graph-browsing.md) | 组件多的子图：滚轮缩放、同类合并、突出与查找 | 已采纳 | — |
+| [0198](0198-evidence-chain-view.md) | 证据标签页：按论证分组的证据链 | 已采纳 | — |

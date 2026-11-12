@@ -2,7 +2,7 @@
 // 固定的反馈框；下方四个标签页：证据、假设、时间线、运行。当前标签由宿主保存在 URL 中。
 
 import { Bot, Gavel } from 'lucide-react';
-import { useMemo } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import type { Proposal, Recommendation, ResearchRunSummary } from '../contract';
 import {
   AppLink,
@@ -20,6 +20,8 @@ import {
   type IncidentTab,
 } from '../data';
 import { EvidenceList } from '../domain/EvidenceCard';
+import { mergeEvidence } from '../domain/evidence-chain';
+import { EvidenceNavProvider, type EvidenceNav } from '../domain/evidence-nav';
 import { FeedbackControl } from '../domain/FeedbackControl';
 import { HypothesisList } from '../domain/HypothesisList';
 import { componentLabel, feedbackState } from '../domain/model';
@@ -171,12 +173,32 @@ export function IncidentView({
   const latest = runs.data?.[0] ?? null;
   const concludedId = runs.data?.find((r) => r.state === 'completed')?.run_id ?? null;
   const run = useRun(concludedId);
-  const evidence = useEvidence(incidentRef, concludedId);
+  const snapshot = useEvidence(incidentRef, concludedId);
   const timeline = useTimeline(incidentRef);
   const subgraph = useSubgraph(incidentRef);
   const feedback = useFeedback(incidentRef);
   const conditions = useConditions(incident.data?.cluster_id);
   const proposals = useProposals({ incident_id: incident.data?.incident_id });
+
+  // 研判明细里的证据是模型所见的全部：该事件版本的阶段 A 卡加区分性检查产生的卡，都带序列。快照接口的结果合并在后，
+  // 只补研判明细里没有的卡；没有完成的研判时快照就是最新阶段 A 的卡。
+  const cards = useMemo(
+    () => mergeEvidence(run.data?.evidence, run.data?.output?.check_cards, snapshot.data),
+    [run.data, snapshot.data],
+  );
+  const evidence = { data: snapshot.data || run.data ? cards : undefined, error: snapshot.error };
+  const [focus, setFocus] = useState<{ ref: string; seq: number } | null>(null);
+  const openEvidence = useCallback(
+    (ref: string) => {
+      setFocus((f) => ({ ref, seq: (f?.seq ?? 0) + 1 }));
+      onTab('evidence');
+    },
+    [onTab],
+  );
+  const nav = useMemo<EvidenceNav>(
+    () => ({ card: (ref) => cards.find((r) => r.ref === ref), open: openEvidence }),
+    [cards, openEvidence],
+  );
 
   const components = useMemo(
     () => subgraph.data?.nodes.map((n) => n.component) ?? incident.data?.components ?? [],
@@ -200,101 +222,112 @@ export function IncidentView({
 
   return (
     <ComponentNamesProvider names={i.component_names}>
-      <div className={styles.page}>
-        <div className={styles.detail}>
-          <div className={styles.detailMain}>
-            <Panel>
-              <VerdictHeader
-                incident={i}
-                stageA={stageA.data ?? null}
-                latestRun={latest}
-                evidence={evidence.data ?? []}
-                conditions={conditions.data ?? []}
-                now={now}
-              />
-            </Panel>
-            {firstErr !== undefined && <ErrorBox title={t('detail.partial_failed')} error={firstErr} />}
-            <PendingApprovals list={proposals.data ?? []} now={now} />
-            {/* 修复建议紧跟结论与待审批（下一步做什么），不放在侧栏：窄屏时侧栏排在页面最后 */}
-            {run.data?.output && <Recommendations recs={run.data.output.recommendations} />}
-            <Panel
-              title={t('detail.subgraph')}
-              meta={subgraph.data ? t('detail.topology_v', { v: subgraph.data.topology_version }) : undefined}
-            >
-              {subgraph.error ? (
-                <ErrorBox title={t('detail.subgraph_failed')} error={subgraph.error} />
-              ) : subgraph.data ? (
-                <Subgraph
-                  graph={subgraph.data}
-                  clusterId={i.cluster_id}
-                  alertLabel={(id) => alertnames.get(id) ?? id}
-                  onOpenComponent={onOpenComponent && ((c) => onOpenComponent(i.cluster_id, c))}
+      <EvidenceNavProvider nav={nav}>
+        <div className={styles.page}>
+          <div className={styles.detail}>
+            <div className={styles.detailMain}>
+              <Panel>
+                <VerdictHeader
+                  incident={i}
+                  stageA={stageA.data ?? null}
+                  latestRun={latest}
+                  evidence={evidence.data ?? []}
+                  conditions={conditions.data ?? []}
+                  now={now}
                 />
-              ) : (
-                <Loading />
-              )}
-            </Panel>
-            <Tabs
-              label={t('detail.tabs')}
-              value={tab}
-              onChange={(v) => onTab(v as IncidentTab)}
-              tabs={[
-                {
-                  id: 'evidence',
-                  label: t('detail.tab.evidence'),
-                  badge: evidence.data?.length,
-                  content: evidence.data ? (
-                    <EvidenceList incidentRef={incidentRef} runId={concludedId} results={evidence.data} />
-                  ) : (
-                    <Loading />
-                  ),
-                },
-                {
-                  id: 'hypotheses',
-                  label: t('detail.tab.hypotheses'),
-                  badge: run.data?.output?.hypotheses.length,
-                  content:
-                    concludedId === null ? (
-                      <HypothesisList output={null} />
-                    ) : run.data ? (
-                      <HypothesisList output={run.data.output} />
-                    ) : run.error ? (
-                      <ErrorBox title={t('detail.run_failed')} error={run.error} />
+              </Panel>
+              {firstErr !== undefined && <ErrorBox title={t('detail.partial_failed')} error={firstErr} />}
+              <PendingApprovals list={proposals.data ?? []} now={now} />
+              {/* 修复建议紧跟结论与待审批（下一步做什么），不放在侧栏：窄屏时侧栏排在页面最后 */}
+              {run.data?.output && <Recommendations recs={run.data.output.recommendations} />}
+              <Panel
+                title={t('detail.subgraph')}
+                meta={subgraph.data ? t('detail.topology_v', { v: subgraph.data.topology_version }) : undefined}
+              >
+                {subgraph.error ? (
+                  <ErrorBox title={t('detail.subgraph_failed')} error={subgraph.error} />
+                ) : subgraph.data ? (
+                  <Subgraph
+                    graph={subgraph.data}
+                    clusterId={i.cluster_id}
+                    alertLabel={(id) => alertnames.get(id) ?? id}
+                    onOpenComponent={onOpenComponent && ((c) => onOpenComponent(i.cluster_id, c))}
+                  />
+                ) : (
+                  <Loading />
+                )}
+              </Panel>
+              <Tabs
+                label={t('detail.tabs')}
+                value={tab}
+                onChange={(v) => onTab(v as IncidentTab)}
+                tabs={[
+                  {
+                    id: 'evidence',
+                    label: t('detail.tab.evidence'),
+                    badge: evidence.data?.length,
+                    content: evidence.data ? (
+                      <EvidenceList
+                        incidentRef={incidentRef}
+                        runId={concludedId}
+                        results={evidence.data}
+                        output={run.data?.output ?? null}
+                        incident={i}
+                        concludedAt={run.data?.finished_at ?? null}
+                        focus={focus}
+                        onShowHypotheses={run.data?.output ? () => onTab('hypotheses') : undefined}
+                      />
                     ) : (
                       <Loading />
                     ),
-                },
-                {
-                  id: 'timeline',
-                  label: t('detail.tab.timeline'),
-                  badge: timeline.data?.length,
-                  content: timeline.data ? <TimelineLane items={timeline.data} from={start} to={end} /> : <Loading />,
-                },
-                {
-                  id: 'runs',
-                  label: t('detail.tab.runs'),
-                  badge: runs.data?.length,
-                  content: runs.data ? <RunsTab runs={runs.data} /> : <Loading />,
-                },
-              ]}
-            />
-          </div>
-          <aside className={styles.detailSide} aria-label={t('detail.side')}>
-            <Panel title={t('feedback.title')}>
-              <FeedbackControl
-                incidentRef={incidentRef}
-                runId={concludedId}
-                disposition={disposition}
-                rootComponent={root}
-                components={components}
-                latest={latestFb}
-                state={feedbackState(latestFb, disposition !== null)}
-                firing={i.state === 'firing'}
+                  },
+                  {
+                    id: 'hypotheses',
+                    label: t('detail.tab.hypotheses'),
+                    badge: run.data?.output?.hypotheses.length,
+                    content:
+                      concludedId === null ? (
+                        <HypothesisList output={null} />
+                      ) : run.data ? (
+                        <HypothesisList output={run.data.output} />
+                      ) : run.error ? (
+                        <ErrorBox title={t('detail.run_failed')} error={run.error} />
+                      ) : (
+                        <Loading />
+                      ),
+                  },
+                  {
+                    id: 'timeline',
+                    label: t('detail.tab.timeline'),
+                    badge: timeline.data?.length,
+                    content: timeline.data ? <TimelineLane items={timeline.data} from={start} to={end} /> : <Loading />,
+                  },
+                  {
+                    id: 'runs',
+                    label: t('detail.tab.runs'),
+                    badge: runs.data?.length,
+                    content: runs.data ? <RunsTab runs={runs.data} /> : <Loading />,
+                  },
+                ]}
               />
-            </Panel>
-          </aside>
+            </div>
+            <aside className={styles.detailSide} aria-label={t('detail.side')}>
+              <Panel title={t('feedback.title')}>
+                <FeedbackControl
+                  incidentRef={incidentRef}
+                  runId={concludedId}
+                  disposition={disposition}
+                  rootComponent={root}
+                  components={components}
+                  latest={latestFb}
+                  state={feedbackState(latestFb, disposition !== null)}
+                  firing={i.state === 'firing'}
+                />
+              </Panel>
+            </aside>
+          </div>
         </div>
-      </div>
+      </EvidenceNavProvider>
     </ComponentNamesProvider>
   );
 }

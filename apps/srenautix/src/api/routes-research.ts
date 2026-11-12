@@ -1,4 +1,4 @@
-import type { Alert, ChangeEvent, EvidenceResult, Feedback, Incident, TopologyEdge } from '@srenautix/contract';
+import type { Alert, ChangeEvent, Feedback, Incident, TopologyEdge } from '@srenautix/contract';
 import { Ajv2020, type ValidateFunction } from 'ajv/dist/2020.js';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type pg from 'pg';
@@ -6,7 +6,13 @@ import type { AlertMatcher } from '../alerts/business-impact.js';
 import type { OutboxListener } from '../events/listener.js';
 import { incidentTarget, visible } from '../incident/target.js';
 import { principalOf, type Auth } from '../identity/auth.js';
-import { incidentVersion, latestStageA, resolveIncidentRef } from '../incident/read.js';
+import {
+  incidentVersion,
+  latestStageA,
+  resolveIncidentRef,
+  runEvidence,
+  type RunEvidenceSource,
+} from '../incident/read.js';
 import { alertsById } from '../ingest/store.js';
 import type { Catalog } from '../proposals/catalog.js';
 import { cardApplies, cardCheckArgs, cardChecks, parseCardCheckId } from '../stage-a/card-checks.js';
@@ -689,20 +695,10 @@ export function registerResearchRoutes(app: FastifyInstance, d: ResearchRouteDep
     });
   }
 
-  /**
-   * worker 的运行明细只含区分性检查产生的卡；控制台需要整次研判的证据，server 在前面合并该事件版本的阶段 A 卡。
-   * 阶段 A 卡保留报告中的编号，检查卡的编号在其后，按 ref 去重。
-   */
-  const withStageACards = async (run: RunDetail): Promise<RunDetail> => {
-    const report = await latestStageA(d.pool, run.incident_id, run.incident_version);
-    const stageA = report?.cards ?? [];
-    const refs = new Set(stageA.map((c) => c.ref));
-    return { ...run, evidence: [...stageA, ...run.evidence.filter((c) => !refs.has(c.ref))] };
-  };
+  const withStageACards = async (run: RunDetail): Promise<RunDetail> => ({
+    ...run,
+    evidence: await runEvidence(d.pool, run),
+  });
 }
 
-interface RunDetail {
-  incident_id: string;
-  incident_version: number;
-  evidence: EvidenceResult[];
-}
+type RunDetail = RunEvidenceSource;

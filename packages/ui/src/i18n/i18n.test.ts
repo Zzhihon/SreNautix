@@ -1,6 +1,7 @@
 import { IntlMessageFormat } from 'intl-messageformat';
 import { describe, expect, it } from 'vitest';
 import { CONDITION_SEVERITY } from '../domain/ConditionStrip';
+import { CHAIN_GROUPS } from '../domain/evidence-chain';
 import { STATUS } from '../primitives/Status';
 import { TERMS } from '@srenautix/contract';
 import { createI18n, LOCALES, setMissingMessageReporter, UI_MESSAGES, type MissingMessage } from './index';
@@ -14,7 +15,15 @@ const ENUMS: Record<string, readonly string[]> = {
   'approval.undo': ['auto_restore', 'controller_rebuild', 'compensation', 'none'],
   'detail.rec_kind': ['mitigation', 'root_fix', 'prevention', 'investigation'],
   'detail.risk': ['low', 'medium', 'high'],
+  'evidence.condition_kind': ['abnormal', 'undeterminable'],
+  'evidence.condition_outcome': ['hit', 'miss', 'unavailable'],
   'evidence.egress': ['allow', 'redact', 'never'],
+  'evidence.group': [...CHAIN_GROUPS],
+  'evidence.group_hint': [...CHAIN_GROUPS],
+  'evidence.moment': ['onset', 'firing', 'concluded', 'resolved'],
+  'evidence.novelty': ['novel', 'routine', 'unknown'],
+  'evidence.offset': ['m', 'h', 'd'],
+  'evidence.role': ['supports', 'refutes', 'checked'],
   'evidence.reason': [
     'rule',
     'no_data',

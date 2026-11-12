@@ -7,7 +7,7 @@ import { useI18n } from '../i18n';
 import { Mono } from '../primitives/basic';
 import { EmptyState } from '../primitives/EmptyState';
 import { Status, StatusPill } from '../primitives/Status';
-import { evidenceAnchor } from './EvidenceCard';
+import { EvidenceRefChip } from './evidence-nav';
 import { componentLabel } from './model';
 import styles from './HypothesisList.module.css';
 import { useComponentNames } from './names';
@@ -20,9 +20,7 @@ function RefChips({ refs, label }: { refs: readonly string[]; label: string }) {
     <span className={styles.refs} aria-label={label}>
       <span className={styles.refsLabel}>{label}</span>
       {refs.map((r) => (
-        <a key={r} href={`#${evidenceAnchor(r)}`} className={styles.ref}>
-          {r}
-        </a>
+        <EvidenceRefChip key={r} refId={r} />
       ))}
     </span>
   );
@@ -37,11 +35,7 @@ function Check1({ c }: { c: NextCheck }) {
       <span className={styles.checkMeta}>
         <Mono>{`${c.type}:${c.template}`}</Mono>
         {t('hypothesis.refutes_if', { cond: c.refutes_if })}
-        {c.result_ref && (
-          <a href={`#${evidenceAnchor(c.result_ref)}`} className={styles.ref}>
-            {c.result_ref}
-          </a>
-        )}
+        {c.result_ref && <EvidenceRefChip refId={c.result_ref} />}
       </span>
     </li>
   );
@@ -100,7 +94,7 @@ function Node({
   );
 }
 
-const CONSISTENCY_KEYS = [
+export const CONSISTENCY_KEYS = [
   'entity_in_scope',
   'onset_precedes_symptom',
   'no_contrary_normal',
