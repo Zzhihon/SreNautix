@@ -24,6 +24,13 @@ export const PROVENANCE_CONFIDENCE: Record<TopologyEdge['provenance'], number> =
  */
 export const POLICY_ALLOWED_CONFIDENCE = 0.5;
 
+/**
+ * PodDisruptionBudget → 被保护对象（SreNautix ADR 0203）。驱逐被阻塞在 Pod 全部健康时同样成立，不说明被保护的工作负载出了问题：
+ * 置信度低于 τ，PDB 的事件不并入工作负载的事件；全集群地图沿这条边把 PDB 的事件放到被保护的组件上
+ */
+export const PROTECTS = 'protects';
+export const PROTECTS_CONFIDENCE = 0.5;
+
 export interface KubeObject {
   apiVersion: string;
   kind: string;
@@ -495,6 +502,19 @@ export function buildKubeTopology(all: readonly KubeObject[], opts: BuildOptions
         (p) => !everyone || p.namespaceSelector !== undefined || p.podSelector === undefined || !empty(p.podSelector),
       );
       allow(peerPods(ns, from), selected, POLICY_ALLOWED_CONFIDENCE, `networkpolicy ${np.metadata.name} ingress`);
+    }
+  }
+
+  // PodDisruptionBudget → 选中的 Pod（与 reader 的 PDB 相同；reader 的边指向 Pod 的顶层对象，求组件后一致）
+  for (const pdb of byKind('PodDisruptionBudget')) {
+    const sel = obj(pdb.spec).selector;
+    if (sel === undefined) {
+      continue;
+    }
+    for (const p of pods) {
+      if (p.metadata.namespace === pdb.metadata.namespace && selectorMatches(p.metadata.labels, obj(sel))) {
+        addEdge(keyOf(pdb), keyOf(p), PROTECTS, 'structural', 'service', 'spec.selector', PROTECTS_CONFIDENCE);
+      }
     }
   }
 

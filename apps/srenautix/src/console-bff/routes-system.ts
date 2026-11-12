@@ -435,7 +435,7 @@ export function registerSystemRoutes(app: FastifyInstance, d: SystemRouteDeps): 
   });
 
   // 全集群地图（ADR 0199）：结构只随拓扑版本与领域包变化，现在时刻的结构按集群缓存一份；
-  // 事件每次重新读取：那一刻正在触发、没有被抑制、调用方读取作用域内的事件，根因经内存里的拓扑放到地图的组件上（mapPlacer）
+  // 事件每次重新读取：那一刻正在触发、没有被抑制、调用方读取作用域内的事件，根因经内存里的拓扑放到地图的组件或节点上（mapPlacer，ADR 0203）
   type Built = { value: ClusterMapStructure; place: ReturnType<typeof mapPlacer> };
   const maps = new Map<string, { version: number; packs: object; built: Built }>();
   app.get('/v1/topology/map', async (req) => {
@@ -471,6 +471,7 @@ export function registerSystemRoutes(app: FastifyInstance, d: SystemRouteDeps): 
     for (const r of shown) {
       const root = r.root_component;
       const service = r.body.primary_service ?? null;
+      const at = place(root, service);
       incidents.push({
         incident_id: r.incident_id,
         label: r.label,
@@ -478,7 +479,8 @@ export function registerSystemRoutes(app: FastifyInstance, d: SystemRouteDeps): 
         headline: headlines.get(r.incident_id) ?? null,
         first_firing_at: r.first_firing_at.toISOString(),
         root,
-        component: place(root, service),
+        component: at?.component ?? null,
+        placement: at?.placement ?? null,
         service,
       });
     }

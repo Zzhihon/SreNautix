@@ -8349,7 +8349,7 @@ export interface TopologyEdge {
   from: ComponentKey;
   to: ComponentKey;
   /**
-   * 关系名，例如 owned_by、scales（HorizontalPodAutoscaler → spec.scaleTargetRef 指向的工作负载，契约 2.48.0，ADR 0184：没有 owned_by 的 HPA 归到它的组件）、runs_on、mounts、bound_to、provisioned_by、selects、routes_to、calls、references、egress_to、operator_convention、named_like
+   * 关系名，例如 owned_by、scales（HorizontalPodAutoscaler → spec.scaleTargetRef 指向的工作负载，契约 2.48.0，ADR 0184：没有 owned_by 的 HPA 归到它的组件）、runs_on、mounts、bound_to、provisioned_by、selects、routes_to、calls、references、egress_to、operator_convention、named_like、protects（PodDisruptionBudget → 被保护的对象，契约 2.64.0，ADR 0203：置信度 0.5，只用于地图定位事件）
    */
   relation: string;
   provenance: EdgeProvenance;

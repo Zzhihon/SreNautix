@@ -5,6 +5,8 @@ import {
   matchTypeByName,
   OWNED_BY,
   POLICY_ALLOWED_CONFIDENCE,
+  PROTECTS,
+  PROTECTS_CONFIDENCE,
   TopologyStore,
 } from '../src/index.js';
 import { CLUSTER, clusterObjects, clusterStore, COMPONENT_TYPES, CONVENTIONS, MIN, T0 } from './fixtures.js';
@@ -287,5 +289,35 @@ describe('NetworkPolicy 的入站规则（ADR 0200）', () => {
     expect(POLICY_ALLOWED_CONFIDENCE).toBeLessThan(0.6);
     // worker-egress 推出的边不变
     expect(np.filter((e) => e.from.startsWith('Pod:shop/worker')).every((e) => e.confidence === 0.6)).toBe(true);
+  });
+});
+
+describe('PodDisruptionBudget（ADR 0203）', () => {
+  it('PDB → 选中的同命名空间 Pod，置信度低于归并阈值', () => {
+    const { edges } = buildKubeTopology(
+      [
+        ...clusterObjects(),
+        {
+          apiVersion: 'policy/v1',
+          kind: 'PodDisruptionBudget',
+          metadata: { name: 'pg-primary', namespace: 'shop' },
+          spec: { maxUnavailable: 0, selector: { matchLabels: { 'cnpg.io/cluster': 'pg' } } },
+        },
+        {
+          apiVersion: 'policy/v1',
+          kind: 'PodDisruptionBudget',
+          metadata: { name: 'no-selector', namespace: 'shop' },
+          spec: {},
+        },
+      ],
+      { componentTypes: COMPONENT_TYPES, conventions: CONVENTIONS },
+    );
+    expect(
+      edges.filter((e) => e.relation === PROTECTS).map((e) => `${e.from} -> ${e.to} ${e.provenance} ${e.confidence}`),
+    ).toEqual([
+      `PodDisruptionBudget:shop/pg-primary -> Pod:shop/pg-1 structural ${PROTECTS_CONFIDENCE}`,
+      `PodDisruptionBudget:shop/pg-primary -> Pod:shop/pg-2 structural ${PROTECTS_CONFIDENCE}`,
+    ]);
+    expect(PROTECTS_CONFIDENCE).toBeLessThan(0.6);
   });
 });

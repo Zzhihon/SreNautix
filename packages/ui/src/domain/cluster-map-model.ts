@@ -150,8 +150,10 @@ export function buildMapModel(
 }
 
 /**
- * 事件叠加：根因组件按严重度着色；沿依赖边反向能到达根因的组件（依赖它的组件）标为受影响（只走 BLAST_MIN_CONFIDENCE 以上的边）。
- * 根因不在地图上的事件按主服务计入服务框。
+ * 事件叠加：落在组件上的事件按严重度给组件着色；沿依赖边反向能到达根因的组件（依赖它的组件）标为受影响（只走
+ * BLAST_MIN_CONFIDENCE 以上的边）。只有根因本身（root）或按名称认出的根因（named）向外传播：经 PodDisruptionBudget
+ * 定位的事件（protects）只说明保护对象不能再中断，节点上的事件（node）放在节点条上，两者都只给自己的位置着色（ADR 0203）。
+ * 落在节点上或放不到地图上的事件按主服务计入服务框。
  */
 export function incidentOverlay(
   map: Pick<ClusterMap, 'components' | 'edges'>,
@@ -160,19 +162,32 @@ export function incidentOverlay(
   tone: ReadonlyMap<string, Tone>;
   byComponent: ReadonlyMap<string, MapIncident[]>;
   byService: ReadonlyMap<string, MapIncident[]>;
+  byNode: ReadonlyMap<string, MapIncident[]>;
+  nodeTone: ReadonlyMap<string, Tone>;
 } {
   const tone = new Map<string, Tone>();
   const byComponent = new Map<string, MapIncident[]>();
   const byService = new Map<string, MapIncident[]>();
+  const byNode = new Map<string, MapIncident[]>();
+  const nodeTone = new Map<string, Tone>();
   const serviceOf = new Map(map.components.map((c) => [c.key, c.service]));
+  const seeds: string[] = [];
+  const mark = (list: Map<string, MapIncident[]>, tones: Map<string, Tone>, key: string, i: MapIncident) => {
+    list.set(key, [...(list.get(key) ?? []), i]);
+    if (tones.get(key) !== 'bad') {
+      tones.set(key, i.severity === 'critical' ? 'bad' : 'warn');
+    }
+  };
   for (const i of incidents) {
-    if (i.component) {
-      byComponent.set(i.component, [...(byComponent.get(i.component) ?? []), i]);
-      if (tone.get(i.component) !== 'bad') {
-        tone.set(i.component, i.severity === 'critical' ? 'bad' : 'warn');
+    if (i.component && i.placement === 'node') {
+      mark(byNode, nodeTone, i.component, i);
+    } else if (i.component) {
+      mark(byComponent, tone, i.component, i);
+      if (i.placement !== 'protects') {
+        seeds.push(i.component);
       }
     }
-    const s = i.component ? (serviceOf.get(i.component) ?? null) : i.service;
+    const s = i.component && serviceOf.has(i.component) ? serviceOf.get(i.component)! : i.service;
     if (s) {
       byService.set(s, [...(byService.get(s) ?? []), i]);
     }
@@ -183,7 +198,7 @@ export function incidentOverlay(
       dependents.set(e.to, [...(dependents.get(e.to) ?? []), e.from]);
     }
   }
-  const queue = [...byComponent.keys()];
+  const queue = [...new Set(seeds)];
   while (queue.length) {
     for (const d of dependents.get(queue.pop()!) ?? []) {
       if (!tone.has(d)) {
@@ -192,7 +207,7 @@ export function incidentOverlay(
       }
     }
   }
-  return { tone, byComponent, byService };
+  return { tone, byComponent, byService, byNode, nodeTone };
 }
 
 /** 合并的组取成员中最重的状态 */

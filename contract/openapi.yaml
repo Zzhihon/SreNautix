@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: SreNautix hub API
-  version: 2.63.0
+  version: 2.64.0
   license:
     name: Apache-2.0
     identifier: Apache-2.0
@@ -2850,7 +2850,7 @@ components:
           items:
             type: object
             additionalProperties: false
-            required: [incident_id, label, severity, headline, first_firing_at, root, component, service]
+            required: [incident_id, label, severity, headline, first_firing_at, root, component, placement, service]
             properties:
               incident_id: { $ref: './schemas/common.schema.json#/$defs/Uuid' }
               label: { $ref: './schemas/incident.schema.json#/$defs/IncidentLabel' }
@@ -2862,8 +2862,14 @@ components:
                 description: 事件的根因组件键
                 oneOf: [{ type: 'null' }, { $ref: './schemas/common.schema.json#/$defs/ComponentKey' }]
               component:
-                description: 根因在地图上的组件；根因不在拓扑里（例如领域包的伪组件）时为 null
+                description: 事件在地图上的位置：组件的键，placement 为 node 时是节点条上的节点键；放不到地图上时为 null
                 oneOf: [{ type: 'null' }, { $ref: './schemas/common.schema.json#/$defs/ComponentKey' }]
+              placement:
+                description: >-
+                  事件怎样放到地图上（契约 2.64.0，ADR 0203）：root 根因或它的顶层对象是组件；named 根因是领域包的伪组件，按名称放到同名组件；
+                  protects 根因是 PodDisruptionBudget，放到它保护的组件；node 根因是节点，放到节点条。component 为 null 时为 null。
+                  只有 root 与 named 的事件向依赖它的组件传播“受影响”：PDB 阻塞驱逐与节点问题不说明组件本身出了问题
+                oneOf: [{ type: 'null' }, { type: string, enum: [root, named, protects, node] }]
               service:
                 oneOf: [{ type: 'null' }, { $ref: './schemas/common.schema.json#/$defs/ServiceId' }]
     ProposalDetail:

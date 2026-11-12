@@ -142,6 +142,19 @@
   background: var(--sn-info-soft);
   color: var(--sn-info);
 }
+.nodeChip[data-tone='bad'] {
+  border-color: var(--sn-bad);
+  background: var(--sn-bad-soft);
+  color: var(--sn-bad);
+}
+.nodeChip[data-tone='warn'] {
+  border-color: var(--sn-warn);
+  background: var(--sn-warn-soft);
+  color: var(--sn-warn);
+}
+.nodeChip b {
+  font-size: 10.5px;
+}
 .nodeChip[data-dim] {
   opacity: 0.4;
 }

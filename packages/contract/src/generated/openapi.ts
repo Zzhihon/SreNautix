@@ -2523,13 +2523,15 @@ export type components = {
         namespace: string | null;
       }[];
       incidents: {
-        /** @description 根因在地图上的组件；根因不在拓扑里（例如领域包的伪组件）时为 null */
+        /** @description 事件在地图上的位置：组件的键，placement 为 node 时是节点条上的节点键；放不到地图上时为 null */
         component: null | components['schemas']['ComponentKey'];
         /** Format: date-time */
         first_firing_at: string;
         headline: null | components['schemas']['Headline'];
         incident_id: components['schemas']['Uuid'];
         label: components['schemas']['IncidentLabel'];
+        /** @description 事件怎样放到地图上（契约 2.64.0，ADR 0203）：root 根因或它的顶层对象是组件；named 根因是领域包的伪组件，按名称放到同名组件； protects 根因是 PodDisruptionBudget，放到它保护的组件；node 根因是节点，放到节点条。component 为 null 时为 null。 只有 root 与 named 的事件向依赖它的组件传播“受影响”：PDB 阻塞驱逐与节点问题不说明组件本身出了问题 */
+        placement: null | ('root' | 'named' | 'protects' | 'node');
         /** @description 事件的根因组件键 */
         root: null | components['schemas']['ComponentKey'];
         service: null | components['schemas']['ServiceId'];
@@ -2806,7 +2808,7 @@ export type components = {
       evidence: string;
       from: components['schemas']['ComponentKey'];
       provenance: components['schemas']['Provenance'];
-      /** @description 关系名，例如 owned_by、scales（HorizontalPodAutoscaler → spec.scaleTargetRef 指向的工作负载，契约 2.48.0，ADR 0184：没有 owned_by 的 HPA 归到它的组件）、runs_on、mounts、bound_to、provisioned_by、selects、routes_to、calls、references、egress_to、operator_convention、named_like */
+      /** @description 关系名，例如 owned_by、scales（HorizontalPodAutoscaler → spec.scaleTargetRef 指向的工作负载，契约 2.48.0，ADR 0184：没有 owned_by 的 HPA 归到它的组件）、runs_on、mounts、bound_to、provisioned_by、selects、routes_to、calls、references、egress_to、operator_convention、named_like、protects（PodDisruptionBudget → 被保护的对象，契约 2.64.0，ADR 0203：置信度 0.5，只用于地图定位事件） */
       relation: string;
       /**
        * @description instance：只把同一实例的故障联系起来（Pod→节点、Pod→PVC→PV→CSI）；service：沿服务依赖传播

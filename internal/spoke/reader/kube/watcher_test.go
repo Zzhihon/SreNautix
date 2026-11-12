@@ -18,12 +18,14 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	policyv1 "k8s.io/api/policy/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
@@ -761,6 +763,89 @@ func TestWatcherBuildsTopologyFromLiveCluster(t *testing.T) {
 		}
 		if snap.Seq != rep.lastSeq {
 			return fmt.Errorf("snapshot seq %d, replica %d", snap.Seq, rep.lastSeq)
+		}
+		return nil
+	})
+}
+
+// PodDisruptionBudget 进入拓扑：PDB → 选中 Pod 的顶层对象（protects，置信度 0.5，SreNautix ADR 0203）。
+// 后来出现的匹配 Pod 让 PDB 重新贡献；删除 PDB 时节点与边撤回。
+func TestWatcherPDBProtects(t *testing.T) {
+	cfg, _ := testenv.StartKube(t, false)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cs := kubernetes.NewForConfigOrDie(cfg)
+	c := context.Background()
+
+	must(cs.CoreV1().Namespaces().Create(c, ns("shop", nil), metav1.CreateOptions{}))
+	sts := map[string]*appsv1.StatefulSet{}
+	for _, name := range []string{"pg", "cache"} {
+		sts[name] = must(cs.AppsV1().StatefulSets("shop").Create(c, &appsv1.StatefulSet{
+			ObjectMeta: metav1.ObjectMeta{Namespace: "shop", Name: name},
+			Spec: appsv1.StatefulSetSpec{Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": name}},
+				Template: corev1.PodTemplateSpec{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": name}},
+					Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: "x"}}}}},
+		}, metav1.CreateOptions{}))
+	}
+	pod := func(owner, name string) {
+		must(cs.CoreV1().Pods("shop").Create(c, &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Namespace: "shop", Name: name, Labels: map[string]string{"app": owner, "tier": "data"},
+				OwnerReferences: []metav1.OwnerReference{ctrlRef("apps/v1", "StatefulSet", owner, sts[owner].UID)}},
+			Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: "x"}}},
+		}, metav1.CreateOptions{}))
+	}
+	pod("pg", "pg-0")
+	must(cs.PolicyV1().PodDisruptionBudgets("shop").Create(c, &policyv1.PodDisruptionBudget{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "shop", Name: "data"},
+		Spec: policyv1.PodDisruptionBudgetSpec{MaxUnavailable: ptr.To(intstr.FromInt32(0)),
+			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"tier": "data"}}},
+	}, metav1.CreateOptions{}))
+
+	httpc, err := rest.HTTPClientFor(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := prometheus.NewRegistry()
+	rep := newReplica(t)
+	w := New(cs, nil, topology.NewStore("c1"), clock.New(httpc, cfg.Host, reg), rep.sink, reg, topology.NewReporter(reg, quietLog()))
+	if err := w.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	const pdbKey = "PodDisruptionBudget:shop/data"
+	const toPG = pdbKey + "|protects|StatefulSet:shop/pg"
+	const toCache = pdbKey + "|protects|StatefulSet:shop/cache"
+	testenv.Eventually(t, 10*time.Second, func() error {
+		if !rep.hasEdge(toPG) {
+			return fmt.Errorf("missing edge %s; have %v", toPG, rep.edgeIDs())
+		}
+		return nil
+	})
+	e, _ := rep.edge(toPG)
+	want := topology.Edge{From: pdbKey, To: "StatefulSet:shop/pg", Relation: topology.RelProtects, Provenance: topology.ProvStructural,
+		Confidence: topology.ConfProtects, Scope: topology.ScopeService, Evidence: "spec.selector"}
+	if e != want {
+		t.Fatalf("protects edge %+v", e)
+	}
+	if rep.hasEdge(toCache) {
+		t.Fatalf("cache has no matching pod yet; have %v", rep.edgeIDs())
+	}
+
+	// 后来出现的匹配 Pod
+	pod("cache", "cache-0")
+	testenv.Eventually(t, 10*time.Second, func() error {
+		if !rep.hasEdge(toCache) {
+			return fmt.Errorf("pdb not re-contributed for the new pod; have %v", rep.edgeIDs())
+		}
+		return nil
+	})
+
+	// 删除 PDB
+	if err := cs.PolicyV1().PodDisruptionBudgets("shop").Delete(c, "data", metav1.DeleteOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	testenv.Eventually(t, 10*time.Second, func() error {
+		if _, ok := rep.node(pdbKey); ok || rep.hasEdge(toPG) || rep.hasEdge(toCache) {
+			return fmt.Errorf("pdb still present; have %v", rep.edgeIDs())
 		}
 		return nil
 	})

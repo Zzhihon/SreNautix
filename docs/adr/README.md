@@ -132,7 +132,7 @@
 | [0181](0181-hot-pluggable-skills.md) | 可热插拔的技能：清单、能力白名单、预算与热加载 | 已采纳 | [0182](0182-urgency-tiered-incidents.md) |
 | [0182](0182-urgency-tiered-incidents.md) | 按紧急度分级处理事件：标签首轮、拓扑距离与实测业务影响的校正 | 提议 | [0183](0183-alert-categories.md) [0184](0184-stable-incident-identity-on-recurrence.md) [0185](0185-kube-warnings-and-suspected-common-cause.md) [0186](0186-incident-export.md) |
 | [0183](0183-alert-categories.md) | 告警类别：领域包声明、标签覆盖、部署方规则，事件的类别与列表筛选 | 已采纳 | [0185](0185-kube-warnings-and-suspected-common-cause.md) [0186](0186-incident-export.md) [0193](0193-business-domains-and-services.md) |
-| [0184](0184-stable-incident-identity-on-recurrence.md) | 告警复发时事件身份保持稳定，同一系列复用事件 issue | 已采纳 | [0185](0185-kube-warnings-and-suspected-common-cause.md) [0186](0186-incident-export.md) [0196](0196-series-key-stays-on-root-component.md) |
+| [0184](0184-stable-incident-identity-on-recurrence.md) | 告警复发时事件身份保持稳定，同一系列复用事件 issue | 已采纳 | [0185](0185-kube-warnings-and-suspected-common-cause.md) [0186](0186-incident-export.md) [0196](0196-series-key-stays-on-root-component.md) [0203](0203-pdb-protects-and-map-placement.md) |
 | [0185](0185-kube-warnings-and-suspected-common-cause.md) | 导出时的 Kubernetes Warning 摘要与疑似同一根因分组 | 已采纳 | [0186](0186-incident-export.md) |
 | [0186](0186-incident-export.md) | 按时间窗批量导出事件 | 已采纳 | [0193](0193-business-domains-and-services.md) |
 | [0187](0187-metricsql-cards-and-split-configmap-packs.md) | 只能用 MetricsQL 查询的卡与分在多个 ConfigMap 中的包 | 已采纳 | [0188](0188-deterministic-oci-pack-artifacts.md) |
@@ -146,7 +146,8 @@
 | [0196](0196-series-key-stays-on-root-component.md) | 系列键保持根因组件加告警名，不改用服务 | 已采纳 | — |
 | [0197](0197-subgraph-large-graph-browsing.md) | 组件多的子图：滚轮缩放、同类合并、突出与查找 | 已采纳 | [0199](0199-cluster-map.md) |
 | [0198](0198-evidence-chain-view.md) | 证据标签页：按论证分组的证据链 | 已采纳 | — |
-| [0199](0199-cluster-map.md) | 全集群地图 | 已采纳 | [0200](0200-policy-allowed-and-declared-dependencies.md) |
-| [0200](0200-policy-allowed-and-declared-dependencies.md) | 网络策略放行的边与领域包声明的依赖 | 已采纳 | — |
+| [0199](0199-cluster-map.md) | 全集群地图 | 已采纳 | [0200](0200-policy-allowed-and-declared-dependencies.md) [0203](0203-pdb-protects-and-map-placement.md) |
+| [0200](0200-policy-allowed-and-declared-dependencies.md) | 网络策略放行的边与领域包声明的依赖 | 已采纳 | [0203](0203-pdb-protects-and-map-placement.md) |
 | [0201](0201-anthropic-messages-routes.md) | Anthropic Messages API 路由 | 已采纳 | — |
 | [0202](0202-probe-before-failure-domain-prebreak.md) | 故障域提前熔断前先发一次探测调用 | 已采纳 | — |
+| [0203](0203-pdb-protects-and-map-placement.md) | PodDisruptionBudget 的保护边与事件在地图上的落点 | 已采纳 | — |
