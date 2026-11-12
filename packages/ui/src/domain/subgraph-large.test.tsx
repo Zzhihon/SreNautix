@@ -159,8 +159,9 @@ describe('组件多的子图（ADR 0197）', () => {
     for (const el of [worker, root, group]) {
       expect(card(el).hasAttribute('data-dim')).toBe(false);
     }
-    const labels = [...document.querySelectorAll('.react-flow__edge-text')].map((e) => e.textContent);
-    expect(labels.sort()).toEqual(['runs_on · 结构 0.5', 'runs_on · 结构 1']);
+    // 边经 xyflow 的 store 更新，比节点上的 context 晚一帧
+    const labels = () => [...document.querySelectorAll('.react-flow__edge-text')].map((e) => e.textContent).sort();
+    await waitFor(() => expect(labels()).toEqual(['runs_on · 结构 0.5', 'runs_on · 结构 1']));
     await userEvent.unhover(worker);
     await waitFor(() => expect(card(svc0).hasAttribute('data-dim')).toBe(false));
   });
@@ -228,7 +229,7 @@ describe('组件多的子图（ADR 0197）', () => {
     renderUi(<Subgraph graph={graph} primary />);
     await node('gateway，根因，1 条告警');
     const zoomIn = screen.getByRole('button', { name: '放大' });
-    for (let i = 0; i < 12 && !(zoomIn as HTMLButtonElement).disabled; i++) {
+    for (let i = 0; i < 30 && !(zoomIn as HTMLButtonElement).disabled; i++) {
       await userEvent.click(zoomIn);
     }
     await waitFor(() => expect(scale()).toBe(4));
