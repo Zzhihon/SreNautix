@@ -36,7 +36,7 @@
 | [0071](0071-console-routing-and-live-data.md) | 控制台的路由、页面状态与实时数据 | 已采纳 | — |
 | [0072](0072-grafana-plugin-packaging.md) | Grafana 插件的打包与后端代理 | 已采纳 | — |
 | [0073](0073-console-end-to-end-tests.md) | 控制台与插件的端到端测试 | 已采纳 | [0154](0154-alert-link-to-incident.md) |
-| [0080](0080-model-layer.md) | 模型层：方言档案、结构化输出与修复阶梯、熔断与故障域 | 部分取代（见 [0098](0098-streaming-model-calls-with-per-route-timeouts.md)） | [0083](0083-stage-b-ledger-and-ladder.md) [0136](0136-renumber-recommendation-ids.md) [0152](0152-last-resort-model-route.md) [0178](0178-deterministic-conclusion-rules.md) |
+| [0080](0080-model-layer.md) | 模型层：方言档案、结构化输出与修复阶梯、熔断与故障域 | 部分取代（见 [0098](0098-streaming-model-calls-with-per-route-timeouts.md)） | [0083](0083-stage-b-ledger-and-ladder.md) [0136](0136-renumber-recommendation-ids.md) [0152](0152-last-resort-model-route.md) [0178](0178-deterministic-conclusion-rules.md) [0201](0201-probe-before-failure-domain-prebreak.md) |
 | [0081](0081-egress-and-redaction.md) | 唯一出口、脱敏与蜜标 | 已采纳 | [0158](0158-route-thinking-setting.md) [0177](0177-error-samples-evidence.md) |
 | [0082](0082-token-accounting-and-budgets.md) | token 计量与预算 | 已采纳 | [0129](0129-research-input-budget-for-large-incidents.md) |
 | [0083](0083-stage-b-ledger-and-ladder.md) | 阶段 B：代码维护的假设账本、区分性检查与结论阶梯 | 已采纳 | [0169](0169-change-link-grades.md) |
@@ -102,11 +102,11 @@
 | [0149](0149-long-running-incident-card-windows.md) | 长期事件的卡片窗口以评估时刻为终点 | 已采纳 | — |
 | [0150](0150-external-upstream-impact-relevance.md) | 外部上游事件的业务影响按相关性判定 | 已采纳 | [0163](0163-inhibited-alerts-and-business-impact-disposition.md) [0166](0166-business-impact-alert-matchers.md) [0182](0182-urgency-tiered-incidents.md) |
 | [0151](0151-sql-audit-change-source.md) | SQL 审计表作为变更来源：运行时配置变更进入时间线、根因排序与研判的首要假设 | 已采纳 | [0161](0161-retirement-and-pending-sync-changes.md) |
-| [0152](0152-last-resort-model-route.md) | 兜底模型路由：只在全部常规路由因故障域提前熔断时使用 | 已采纳 | [0158](0158-route-thinking-setting.md) [0182](0182-urgency-tiered-incidents.md) |
+| [0152](0152-last-resort-model-route.md) | 兜底模型路由：只在全部常规路由因故障域提前熔断时使用 | 已采纳 | [0158](0158-route-thinking-setting.md) [0182](0182-urgency-tiered-incidents.md) [0201](0201-probe-before-failure-domain-prebreak.md) |
 | [0153](0153-evidence-baseline-and-minimum-evidence.md) | 证据先过基线；告警的最低取证集合由阶段 A 执行，没覆盖完时结论为 undetermined | 已采纳 | [0162](0162-disposition-act-on-declared-components.md) [0163](0163-inhibited-alerts-and-business-impact-disposition.md) [0164](0164-cards-that-describe-the-failure-skip-the-baseline.md) [0169](0169-change-link-grades.md) [0178](0178-deterministic-conclusion-rules.md) [0180](0180-eval-mechanism-grounding-safety-and-environment.md) |
 | [0154](0154-alert-link-to-incident.md) | 告警链接：按标签集打开告警所属的事件 | 已采纳 | — |
 | [0155](0155-remediation-change-dedupe-and-alert-facts.md) | 自愈 PR 按修改去重并记住被拒绝的修改，目录条目与告警调优模板只用告警能确认的事实 | 已采纳 | [0170](0170-remediation-pr-admission.md) [0171](0171-coverage-gaps-become-issues.md) |
-| [0158](0158-route-thinking-setting.md) | 路由的思考模式设置 | 已采纳 | — |
+| [0158](0158-route-thinking-setting.md) | 路由的思考模式设置 | 已采纳 | [0200](0200-anthropic-messages-routes.md) |
 | [0159](0159-incident-timing-onset-and-first-message-latency.md) | 事件的计时起点、阶段 A 报告第一次生成的时刻与首条消息时延 | 已采纳 | [0160](0160-alertmanager-additions-fast-poll.md) [0165](0165-first-message-latency-from-alertmanager.md) [0166](0166-business-impact-alert-matchers.md) |
 | [0160](0160-alertmanager-additions-fast-poll.md) | 两轮完整对账之间快速轮询 Alertmanager 的新增告警 | 已采纳 | [0165](0165-first-message-latency-from-alertmanager.md) |
 | [0161](0161-retirement-and-pending-sync-changes.md) | 退役与已合并、尚未同步的提交进入变更时间线；meta 告警的研判方向 | 已采纳 | [0167](0167-planned-retirement-is-ignored.md) [0169](0169-change-link-grades.md) |
@@ -148,3 +148,5 @@
 | [0198](0198-evidence-chain-view.md) | 证据标签页：按论证分组的证据链 | 已采纳 | — |
 | [0199](0199-cluster-map.md) | 全集群地图 | 已采纳 | [0200](0200-policy-allowed-and-declared-dependencies.md) |
 | [0200](0200-policy-allowed-and-declared-dependencies.md) | 网络策略放行的边与领域包声明的依赖 | 已采纳 | — |
+| [0201](0201-anthropic-messages-routes.md) | Anthropic Messages API 路由 | 已采纳 | — |
+| [0202](0202-probe-before-failure-domain-prebreak.md) | 故障域提前熔断前先发一次探测调用 | 已采纳 | — |
