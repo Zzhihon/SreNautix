@@ -304,7 +304,8 @@ export class KubeTools {
             this.s.tailLines * 5,
             typeof args.tail_lines === 'number' ? args.tail_lines : this.s.tailLines,
           );
-          return readLogTail(this.core, {
+          // await：读取失败要落进下面的 catch，转成 KubeToolError
+          return await readLogTail(this.core, {
             namespace: ns,
             pod: String(args.pod),
             container: String(args.container),
