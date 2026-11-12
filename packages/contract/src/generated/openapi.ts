@@ -1629,6 +1629,26 @@ export type paths = {
     patch?: never;
     trace?: never;
   };
+  '/v1/topology/map': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * @description 全集群地图（契约 2.61.0，ADR 0198）：某一时刻按组件归并的拓扑，组件按业务领域与服务归属，节点与集群枢纽单独列出，
+     *     并带上调用方读取作用域内正在触发、没有被抑制的事件在地图上的位置。结构只随拓扑版本变化，事件每次重新读取
+     */
+    get: operations['getClusterMap'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/v1/topology/neighborhood': {
     parameters: {
       query?: never;
@@ -2444,6 +2464,86 @@ export type components = {
       queries: components['schemas']['Query'][];
       step_seconds: number;
       window: components['schemas']['TimeWindow'];
+    };
+    ClusterMap: {
+      /** Format: date-time */
+      at: string;
+      /** @description 有 Pod 的顶层对象与路由入口（ADR 0198 §1），按键排序 */
+      components: {
+        /** @description 组件引用、挂载而不画在地图上的对象（ConfigMap、Secret、PersistentVolumeClaim 等）按类型计数 */
+        attachments: {
+          [key: string]: number;
+        };
+        component_type: string | null;
+        key: components['schemas']['ComponentKey'];
+        kind: string;
+        /** @description 沿成员关系归入组件的对象按类型计数，不含组件自己 */
+        members: {
+          [key: string]: number;
+        };
+        name: string;
+        namespace: string | null;
+        /** @description 成员 Pod 运行的节点 */
+        nodes: components['schemas']['ComponentKey'][];
+        service: null | components['schemas']['ServiceId'];
+        /**
+         * @description component 组件自己命中服务成员；member 它的某个成员（例如 Pod）命中；namespace 命名空间默认服务；default 没有归属
+         * @enum {string}
+         */
+        service_source: 'component' | 'member' | 'namespace' | 'default';
+      }[];
+      /** @description 地图上有组件的业务领域与服务，按声明顺序 */
+      domains: {
+        id: components['schemas']['BusinessDomainId'];
+        services: {
+          id: components['schemas']['ServiceId'];
+          title: components['schemas']['LocalizedText'];
+        }[];
+        tier: components['schemas']['BusinessTier'];
+        title: components['schemas']['LocalizedText'];
+      }[];
+      /** @description 组件之间的依赖，from 依赖 to；经 Service 的边接到 Service 选中的组件，同一对组件只有一条 */
+      edges: {
+        /** @description 合并的边中最高的置信度，provenance 是这条边的来源 */
+        confidence: number;
+        /** @description 合并的对象级边数 */
+        count: number;
+        from: components['schemas']['ComponentKey'];
+        provenance: components['schemas']['Provenance'];
+        relations: string[];
+        to: components['schemas']['ComponentKey'];
+      }[];
+      /** @description 集群枢纽（CoreDNS、CNI 等），全部组件都依赖，不画边 */
+      hubs: {
+        /** @description 直接依赖它的地图组件数 */
+        dependents: number;
+        key: components['schemas']['ComponentKey'];
+        kind: string;
+        name: string;
+        namespace: string | null;
+      }[];
+      incidents: {
+        /** @description 根因在地图上的组件；根因不在拓扑里（例如领域包的伪组件）时为 null */
+        component: null | components['schemas']['ComponentKey'];
+        /** Format: date-time */
+        first_firing_at: string;
+        headline: null | components['schemas']['Headline'];
+        incident_id: components['schemas']['Uuid'];
+        label: components['schemas']['IncidentLabel'];
+        /** @description 事件的根因组件键 */
+        root: null | components['schemas']['ComponentKey'];
+        service: null | components['schemas']['ServiceId'];
+        severity: components['schemas']['Severity'];
+      }[];
+      nodes: {
+        components: number;
+        key: components['schemas']['ComponentKey'];
+        name: string;
+        pods: number;
+      }[];
+      /** @description 不画在地图上、也没有被组件引用的顶层对象数（RBAC、CRD、策略、GitOps 对象等） */
+      omitted: number;
+      topology_version: number;
     };
     /**
      * Comparator
@@ -10556,6 +10656,30 @@ export interface operations {
             removed_edges: components['schemas']['Edge'][];
             removed_nodes: components['schemas']['$defs-Node'][];
           };
+        };
+      };
+    };
+  };
+  getClusterMap: {
+    parameters: {
+      query: {
+        /** @description 不写时为现在 */
+        at?: string;
+        cluster_id: components['schemas']['ClusterId'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 集群地图 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ClusterMap'];
         };
       };
     };

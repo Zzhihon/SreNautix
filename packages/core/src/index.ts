@@ -9,6 +9,7 @@ export * from './topology/graph.js';
 export * from './topology/store.js';
 export * from './topology/kube.js';
 export * from './topology/ksm.js';
+export * from './topology/map.js';
 export * from './converge.js';
 export * from './change-grade.js';
 export * from './rank.js';

@@ -1,5 +1,6 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
-import type { Condition, Proposal } from '@srenautix/contract';
+import type { Condition, HubComponents, Proposal } from '@srenautix/contract';
+import { clusterMap, type ClusterMapStructure } from '@srenautix/core';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type pg from 'pg';
 import { z } from 'zod';
@@ -17,7 +18,8 @@ import type { PackRuntime } from '../stage-a/packs.js';
 import type { GitHubApp } from '../github/app.js';
 import type { IssueService } from '../github/issues.js';
 import { approverFromSession } from '../api/routes-proposals.js';
-import { currentBinding } from '../incident/read.js';
+import { currentBinding, type IncidentRow } from '../incident/read.js';
+import { incidentTarget, visible } from '../incident/target.js';
 import { planOverridePr } from '../topology/override-pr.js';
 import { overrideSchema } from '../topology/overrides.js';
 import type { IntegrationRegistry } from './integrations.js';
@@ -25,7 +27,7 @@ import { appendAudit, readAudit, verifyRecords, GENESIS_HASH } from '../kernel/s
 import type { AuditExporter } from '../kernel/store/audit-export.js';
 import { tx } from '../kernel/store/pool.js';
 import type { TopologyStore } from '../topology/store.js';
-import { subgraphOf } from './routes-incidents.js';
+import { incidentHeadlines, subgraphOf } from './routes-incidents.js';
 import { isHealthy } from './spoke-conditions.js';
 
 export interface SystemRouteDeps {
@@ -430,6 +432,55 @@ export function registerSystemRoutes(app: FastifyInstance, d: SystemRouteDeps): 
       topology_version: 0,
     } as unknown as Parameters<typeof subgraphOf>[1];
     return subgraphOf(d.topology, pseudo, hops);
+  });
+
+  // 全集群地图（ADR 0198）：结构只随拓扑版本与领域包变化，现在时刻的结构按集群缓存一份；
+  // 事件每次重新读取：那一刻正在触发、没有被抑制、调用方读取作用域内的事件，根因放到地图的组件上
+  const maps = new Map<string, { version: number; packs: object; value: ClusterMapStructure }>();
+  app.get('/v1/topology/map', async (req) => {
+    const { scopes } = await d.auth.reader(req);
+    const q = req.query as { cluster_id?: string; at?: string };
+    const cluster = q.cluster_id ?? d.config.cluster_id;
+    const at = q.at ? new Date(q.at) : new Date();
+    if (Number.isNaN(at.getTime())) {
+      throw badRequest('at 不是合法的时刻');
+    }
+    const snapshot = await d.topology.at(cluster, at);
+    const packs = d.packs.set;
+    const cached = q.at ? undefined : maps.get(cluster);
+    let structure = cached?.version === snapshot.version && cached.packs === packs ? cached.value : undefined;
+    if (!structure) {
+      structure = clusterMap(snapshot, packs.services, d.packs.componentTypes());
+      if (!q.at) {
+        maps.set(cluster, { version: snapshot.version, packs, value: structure });
+      }
+    }
+    const rows = await d.pool.query<IncidentRow>(
+      `SELECT * FROM server.incidents
+        WHERE cluster_id = $1 AND state <> 'merged' AND NOT suppressed
+          AND first_firing_at <= $2 AND (ended_at IS NULL OR ended_at > $2)
+        ORDER BY first_firing_at DESC LIMIT 500`,
+      [cluster, at],
+    );
+    const shown = rows.rows.filter((r) => visible(scopes, incidentTarget(r.body)));
+    const headlines = await incidentHeadlines(d.pool, shown, new Map());
+    const onMap = new Set(structure.components.map((c) => c.key));
+    const incidents: HubComponents['schemas']['ClusterMap']['incidents'] = [];
+    for (const r of shown) {
+      const root = r.root_component;
+      const owner = root && !onMap.has(root) ? await d.topology.ownerOf(cluster, root, at) : root;
+      incidents.push({
+        incident_id: r.incident_id,
+        label: r.label,
+        severity: r.body.severity,
+        headline: headlines.get(r.incident_id) ?? null,
+        first_firing_at: r.first_firing_at.toISOString(),
+        root,
+        component: owner && onMap.has(owner) ? owner : null,
+        service: r.body.primary_service ?? null,
+      });
+    }
+    return { ...structure, at: at.toISOString(), incidents };
   });
 
   app.get('/v1/topology/diff', async (req) => {
