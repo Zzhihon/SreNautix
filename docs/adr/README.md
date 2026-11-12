@@ -36,8 +36,8 @@
 | [0071](0071-console-routing-and-live-data.md) | 控制台的路由、页面状态与实时数据 | 已采纳 | — |
 | [0072](0072-grafana-plugin-packaging.md) | Grafana 插件的打包与后端代理 | 已采纳 | — |
 | [0073](0073-console-end-to-end-tests.md) | 控制台与插件的端到端测试 | 已采纳 | [0154](0154-alert-link-to-incident.md) |
-| [0080](0080-model-layer.md) | 模型层：方言档案、结构化输出与修复阶梯、熔断与故障域 | 部分取代（见 [0098](0098-streaming-model-calls-with-per-route-timeouts.md)） | [0083](0083-stage-b-ledger-and-ladder.md) [0136](0136-renumber-recommendation-ids.md) [0152](0152-last-resort-model-route.md) [0178](0178-deterministic-conclusion-rules.md) [0202](0202-probe-before-failure-domain-prebreak.md) |
-| [0081](0081-egress-and-redaction.md) | 唯一出口、脱敏与蜜标 | 已采纳 | [0158](0158-route-thinking-setting.md) [0177](0177-error-samples-evidence.md) |
+| [0080](0080-model-layer.md) | 模型层：方言档案、结构化输出与修复阶梯、熔断与故障域 | 部分取代（见 [0098](0098-streaming-model-calls-with-per-route-timeouts.md)） | [0083](0083-stage-b-ledger-and-ladder.md) [0136](0136-renumber-recommendation-ids.md) [0152](0152-last-resort-model-route.md) [0178](0178-deterministic-conclusion-rules.md) [0201](0201-anthropic-messages-routes.md) [0202](0202-probe-before-failure-domain-prebreak.md) |
+| [0081](0081-egress-and-redaction.md) | 唯一出口、脱敏与蜜标 | 已采纳 | [0158](0158-route-thinking-setting.md) [0177](0177-error-samples-evidence.md) [0201](0201-anthropic-messages-routes.md) |
 | [0082](0082-token-accounting-and-budgets.md) | token 计量与预算 | 已采纳 | [0129](0129-research-input-budget-for-large-incidents.md) |
 | [0083](0083-stage-b-ledger-and-ladder.md) | 阶段 B：代码维护的假设账本、区分性检查与结论阶梯 | 已采纳 | [0169](0169-change-link-grades.md) |
 | [0084](0084-eval-replay-and-gate.md) | 回放评测：用例与快照、防泄漏、统计与发布门禁 | 已采纳 | [0110](0110-reconstruction-and-loop-metrics.md) |
@@ -54,7 +54,7 @@
 | [0095](0095-incident-issues-linked-to-prs.md) | 需要人跟进的事件在 GitHub 开 issue，并与修复 PR 互相关联 | 已采纳 | [0096](0096-github-change-sources-over-rest.md) [0108](0108-remediation-prs.md) [0146](0146-goal-driven-optimization.md) [0155](0155-remediation-change-dedupe-and-alert-facts.md) [0162](0162-disposition-act-on-declared-components.md) [0171](0171-coverage-gaps-become-issues.md) [0181](0181-hot-pluggable-skills.md) [0182](0182-urgency-tiered-incidents.md) [0184](0184-stable-incident-identity-on-recurrence.md) |
 | [0096](0096-github-change-sources-over-rest.md) | 变更源经 GitHub REST API 读取，不在 hub 镜像里带 git | 已采纳 | [0103](0103-remediation-patch-templates.md) [0108](0108-remediation-prs.md) [0151](0151-sql-audit-change-source.md) [0161](0161-retirement-and-pending-sync-changes.md) |
 | [0097](0097-evidence-chains-by-entity-type.md) | 证据链按实体的组件类型执行，告警目录只作补充 | 已采纳 | [0126](0126-remediation-follows-the-research-root.md) |
-| [0098](0098-streaming-model-calls-with-per-route-timeouts.md) | 模型调用改为流式，超时按路由配置，延迟熔断只看成功调用的首 token | 已采纳 | — |
+| [0098](0098-streaming-model-calls-with-per-route-timeouts.md) | 模型调用改为流式，超时按路由配置，延迟熔断只看成功调用的首 token | 已采纳 | [0201](0201-anthropic-messages-routes.md) |
 | [0099](0099-trim-prompts-to-route-window-and-budget.md) | 提示词按路由窗口与输入预算裁剪，不因超限让研判失败 | 已采纳 | [0127](0127-research-context-for-large-incidents.md) [0129](0129-research-input-budget-for-large-incidents.md) [0170](0170-remediation-pr-admission.md) |
 | [0100](0100-condition-directions-in-the-contract.md) | 状态条件的方向由契约定义，分支条件只保留当前实例并随心跳过期 | 已采纳 | [0161](0161-retirement-and-pending-sync-changes.md) |
 | [0101](0101-component-display-names.md) | 组件的可读名称只用于显示，由阶段 A 求出并随事件读取 | 已采纳 | — |

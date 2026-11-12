@@ -1,6 +1,8 @@
 # 0202 故障域提前熔断前先发一次探测调用
 
-状态：已采纳；修改 [0080](0080-model-layer.md) 的故障域提前熔断与 [0152](0152-last-resort-model-route.md) 决定第 2 条
+状态：已采纳
+
+本 ADR 修改 [0080](0080-model-layer.md) 的故障域提前熔断与 [0152](0152-last-resort-model-route.md) 决定第 2 条。
 
 ## 背景
 
