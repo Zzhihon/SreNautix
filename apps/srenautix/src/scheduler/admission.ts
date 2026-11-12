@@ -126,6 +126,43 @@ export class Scheduler {
     return { usable: fresh.some((w) => w.routes.some((r) => r.enabled)), disabled: [...disabled.values()] };
   }
 
+  /**
+   * 模型恢复后补研判（触发原因 model_recovered）：仍在触发的 critical 与 warning 事件，当前版本最近一次研判因模型不可用
+   * 或输出无效而失败、或准入时因没有可用路由或预算不足而跳过，并且现在没有排队中的研判。只在有可用路由、预算低于 80%、
+   * 不在风暴模式时运行；(事件, 版本, 原因) 唯一，所以每个版本最多补一次，每事件的研判上限照常生效。
+   * 之前这类事件停在阶段 A 的"无法判定"，模型恢复后也不再研判（CCHP 11-09..11-11 余额不足期间的 89 次失败）。
+   */
+  async recoverModelFailures(limit: number): Promise<Array<{ incidentId: string; outcome: AdmissionOutcome }>> {
+    if (this.modelRoutes().usable !== true || this.budgetRatio >= 0.8 || this.storm) {
+      return [];
+    }
+    const r = await this.pool.query<{ body: Incident }>(
+      `SELECT i.body FROM server.incidents i
+        WHERE i.state = 'firing' AND NOT i.suppressed AND i.severity IN ('critical', 'warning')
+          AND NOT EXISTS (SELECT 1 FROM server.research_queue q
+                           WHERE q.incident_id = i.incident_id
+                             AND (q.state IN ('queued', 'leased') OR (q.incident_version = i.version AND q.reason = 'model_recovered')))
+          AND (
+            EXISTS (SELECT 1 FROM (SELECT r.state, r.error FROM server.research_runs r
+                                     WHERE r.incident_id = i.incident_id AND r.incident_version = i.version
+                                     ORDER BY r.started_at DESC LIMIT 1) last
+                     WHERE last.state = 'failed' AND last.error->>'code' IN ('model_unavailable', 'invalid_output'))
+            OR EXISTS (SELECT 1 FROM (SELECT q.state, q.skip_reason FROM server.research_queue q
+                                        WHERE q.incident_id = i.incident_id AND q.incident_version = i.version
+                                        ORDER BY q.enqueued_at DESC LIMIT 1) lq
+                        WHERE lq.state = 'skipped' AND lq.skip_reason IN ('no_model_route', 'budget'))
+          )
+        ORDER BY i.severity = 'critical' DESC, i.first_firing_at DESC
+        LIMIT $1`,
+      [limit],
+    );
+    const out: Array<{ incidentId: string; outcome: AdmissionOutcome }> = [];
+    for (const { body } of r.rows) {
+      out.push({ incidentId: body.incident_id, outcome: (await this.admit(body, 'model_recovered')).outcome });
+    }
+    return out;
+  }
+
   /** 风暴判定（中心恢复后补推的积压不计入：只数 created_at 在窗口内、首次触发也在窗口内的事件）。 */
   async refreshStorm(clusterId: string): Promise<boolean> {
     const r = await this.pool.query<{ alerts: number; fresh: number }>(

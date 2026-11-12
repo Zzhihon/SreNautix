@@ -27,7 +27,7 @@ import { EvidenceCard } from './EvidenceCard';
 import { FeedbackControl, REASON_CODES } from './FeedbackControl';
 import { HypothesisList } from './HypothesisList';
 import { IncidentRow } from './IncidentRow';
-import { DEFAULT_INBOX_FILTERS, groupByDomain, InboxView } from '../views/InboxView';
+import { DEFAULT_INBOX_FILTERS, DomainOverview, groupByDomain, InboxView } from '../views/InboxView';
 import type { DataPort } from '../port';
 import { componentLabel, sortEvidence } from './model';
 import { ComponentNamesProvider } from './names';
@@ -215,7 +215,7 @@ describe('状态条', () => {
     expect(screen.getByRole('alert').textContent).toContain('读不到系统状态');
   });
 
-  it('准入自检失败的集群显示仅提议', () => {
+  it('准入自检失败的集群显示仅提议', async () => {
     renderUi(
       <ConditionStrip
         conditions={[
@@ -229,12 +229,36 @@ describe('状态条', () => {
     );
     const strip = screen.getByRole('alert');
     expect(strip.textContent).toContain('集群 prod 仅提议');
+    // 收起时一行：条件数与最严重的一条
+    expect(strip.textContent).toContain('2 个条件需要关注');
     expect(strip.textContent).toContain('准入自检失败');
+    expect(strip.textContent).not.toContain('模型路由熔断');
+    await userEvent.click(screen.getByRole('button', { name: /展开/ }));
     expect(strip.textContent).toContain('模型路由熔断');
     expect(strip.textContent).not.toContain('时钟偏差');
   });
 
-  it('reader 的条件与控制台不认识的类型：照常显示，不认识的类型按 warning 并显示类型名', () => {
+  it('冻结是运行模式：只显示仅提议标记，不算条件，不把状态条染红；外壳给出的仅提议集群合成同一个标记', () => {
+    renderUi(
+      <ConditionStrip
+        conditions={[
+          condition({ type: 'Frozen', role: 'server', subject: 'prod', message: 'srenautix-freeze 处于冻结' }),
+          condition({ type: 'Frozen', role: 'gateway', subject: 'gw-1', message: 'frozen=true' }),
+        ]}
+        proposalOnly={['prod']}
+        checkedAt={NOW}
+        now={NOW}
+      />,
+    );
+    const strip = screen.getByRole('status');
+    expect(strip.getAttribute('data-level')).toBe('ok');
+    expect(strip.textContent).toContain('集群 prod 仅提议');
+    expect(strip.textContent?.match(/仅提议/g)).toHaveLength(1);
+    expect(strip.textContent).toContain('各角色的状态条件正常');
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('reader 的条件与控制台不认识的类型：照常显示，不认识的类型按 warning 并显示类型名', async () => {
     renderUi(
       <ConditionStrip
         conditions={[
@@ -254,8 +278,10 @@ describe('状态条', () => {
         now={NOW}
       />,
     );
-    const strip = screen.getByRole('alert');
+    // 只有 warning 条件：不打断读屏（status），只用左侧色条
+    const strip = screen.getByRole('status');
     expect(strip.getAttribute('data-level')).toBe('warning');
+    await userEvent.click(screen.getByRole('button', { name: /展开/ }));
     expect(strip.textContent).toContain('查询模板清单未加载');
     expect(strip.textContent).toContain('SomethingNew');
     expect(strip.textContent).toContain('较新的 server 上报的类型');
@@ -797,6 +823,32 @@ describe('业务领域与服务（ADR 0193）', () => {
     ]);
     expect(groupByDomain([pg], { items: [], unassigned_firing: 0 }, title, '未归属')).toBeNull();
     expect(groupByDomain([pg], undefined, title, '未归属')).toBeNull();
+  });
+
+  it('业务领域一览：每个领域一张卡写未恢复事件数与事件最多的服务；点卡片只看这个领域，再点取消；未归属单独一张', async () => {
+    let selected: string | undefined;
+    const props = { domains, onSelect: (id: string | undefined) => (selected = id) };
+    const { rerender } = renderUi(<DomainOverview {...props} selected={undefined} />);
+    const nav = screen.getByRole('navigation', { name: '业务领域' });
+    const cards = within(nav)
+      .getAllByRole('button')
+      .map((b) => [b.textContent, b.getAttribute('aria-pressed')]);
+    expect(cards).toEqual([
+      ['全部领域3 个未恢复', 'true'],
+      ['请求转发1 个未恢复网关 1', 'false'],
+      ['数据存储1 个未恢复PostgreSQL 1', 'false'],
+    ]);
+    expect(nav.textContent).toContain('未归属业务领域1 个未恢复');
+    await userEvent.click(within(nav).getByRole('button', { name: /请求转发/ }));
+    expect(selected).toBe('forwarding');
+    rerender(<DomainOverview {...props} selected="forwarding" />);
+    expect(
+      within(nav)
+        .getByRole('button', { name: /请求转发/ })
+        .getAttribute('aria-pressed'),
+    ).toBe('true');
+    await userEvent.click(within(nav).getByRole('button', { name: /请求转发/ }));
+    expect(selected).toBeUndefined();
   });
 
   it('行标题前是主服务；按命名空间推定的服务带提示', () => {

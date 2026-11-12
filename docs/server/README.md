@@ -131,7 +131,7 @@ audit:
 3. 每个新版本立即出阶段 A：证据卡、规则提议、确定性结论规则、确定性的处置判断，发布 `stage_a.reported`，消息就地更新（见下面的"阶段 A 与领域包"）。时间线的变更行写"关联分级 <grade>（依据：…）"，GitHub 变更再写命中的路径前缀。
    时延从事件的计时起点算（ADR 0159）：新事件为首个成员告警的触发时刻，从已有事件拆分出的事件为拆分时刻。`srenautix_stage_a_latency_seconds{origin}` 记第一个版本的阶段 A，`origin` 为 `new` 或 `split`；拆分出的事件不计入检测延迟 `srenautix_incident_detection_seconds`。`server.stage_a_reports.first_rendered_at` 是报告第一次生成的时刻，重算只更新 `rendered_at`。
    每个事件的阶段 A 单独执行（ADR 0173）：某个事件的阶段 A 抛错时写一条终态记录 `stage_a_failed`（带错误摘要），同一轮的其余事件照常出报告；状态库连接错误照常交给降级通道。每轮流水线最后补跑当前版本超过 60 秒没有报告的事件（不含 merged，已结束的只看 6 小时内更新的，critical 在前，每轮最多 5 个），补跑成功后照常按触发原因准入阶段 B（重开的版本按 reopened）；同一版本补跑失败 3 次后记 `stage_a_missing`，不再补跑。critical 事件在 Alertmanager 中 60 秒后仍没有报告时先发不带证据卡的消息（`docs/server/notify.md`）。
-4. 按触发原因（新事件、根因变化、严重度升高、证据指纹变化）经准入进入阶段 B 队列，worker 认领后研判；研判事件经 server 的事件流发布，消息再次更新。租约过期次数超过恢复上限（2 次）的任务在下一次认领时记为结束，同时把研判镜像写为 `failed`（`error.kind` 为 `lease_expired`），消息与时间线写明原因；worker 之后仍发出结束事件时镜像按 worker 的结果覆盖。研判镜像的状态取 worker 事件里的 `state`（契约 2.39.0），出站策略禁用全部路由时与 worker 一样是 `stage_a_only`。
+4. 按触发原因（新事件、根因变化、严重度升高、证据指纹变化）经准入进入阶段 B 队列，worker 认领后研判；研判事件经 server 的事件流发布，消息再次更新。租约过期次数超过恢复上限（2 次）的任务在下一次认领时记为结束，同时把研判镜像写为 `failed`（`error.kind` 为 `lease_expired`），消息与时间线写明原因；worker 之后仍发出结束事件时镜像按 worker 的结果覆盖。研判镜像的状态取 worker 事件里的 `state`（契约 2.39.0），出站策略禁用全部路由时与 worker 一样是 `stage_a_only`。模型恢复后补研判（触发原因 `model_recovered`）：主实例每 5 分钟挑出仍在触发的 critical 与 warning 事件中，当前版本最近一次研判因模型不可用（`model_unavailable`）或输出无效（`invalid_output`）而失败、或准入时因没有可用路由或预算不足跳过、并且没有排队中研判的事件，按 critical 在前每轮最多 5 个重新准入；只在有可用路由、预算用量低于 80%、不在风暴模式时运行，每个版本最多补一次。
 5. 提议经审批签发断言，分支 gateway 长轮询取走工单并推回执行事件。
 
 ## 告警类别

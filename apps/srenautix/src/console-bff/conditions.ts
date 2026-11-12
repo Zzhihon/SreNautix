@@ -24,6 +24,7 @@ const key = (o: { type: string; subject: string | null }) => `${o.type}\0${o.sub
  */
 export class ConditionPublisher {
   private last = new Map<string, Observed>();
+  private seeded = false;
 
   constructor(
     private readonly pool: pg.Pool,
@@ -32,8 +33,30 @@ export class ConditionPublisher {
     private readonly metrics: BaseMetrics,
   ) {}
 
-  /** 一轮观察的全部条件；本轮没有列出、上一轮成立的条件视为已恢复。 */
+  /**
+   * 一轮观察的全部条件；本轮没有列出、上一轮成立的条件视为已恢复。第一轮的“上一轮”取库里这个角色仍成立的条件：
+   * 重启或换主实例之后，上一个进程留下、本轮不再观察到的条件（例如已经能加载的包的 PackLoadFailed）也会恢复，
+   * 不会一直留在状态条上。
+   */
   async publish(observed: Observed[]): Promise<void> {
+    if (!this.seeded) {
+      const r = await this.pool.query<{ type: Condition['type']; subject: string; reason: string; message: string }>(
+        `SELECT type, subject, reason, message FROM server.conditions
+          WHERE role = $1 AND cluster_id = $2 AND status = 'true'`,
+        [this.role, this.clusterId],
+      );
+      for (const x of r.rows) {
+        const o: Observed = {
+          type: x.type,
+          subject: x.subject || null,
+          active: true,
+          reason: x.reason,
+          message: x.message,
+        };
+        this.last.set(key(o), o);
+      }
+      this.seeded = true;
+    }
     const now = new Map(observed.map((o) => [key(o), o]));
     for (const [k, prev] of this.last) {
       if (!now.has(k) && prev.active) {

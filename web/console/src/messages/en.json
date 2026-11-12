@@ -30,7 +30,6 @@
   "header.theme_light": "Light",
   "header.theme_dark": "Dark",
   "header.logout": "Sign out",
-  "header.proposal_only": "{cluster} is propose-only",
   "header.break_glass": "You are signed in as the local admin break-glass account; every action is audited.",
 
   "caps.read_only": "Read-only: feedback and reruns need the responder, approver or admin role",

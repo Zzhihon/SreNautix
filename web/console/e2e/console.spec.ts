@@ -12,10 +12,14 @@ test.describe.configure({ mode: 'serial' });
 
 test('外壳：状态条不可关闭、导航分组、集群切换与搜索', async ({ page }) => {
   await go(page, '/incidents');
-  // 状态条以 alert 或 status 角色呈现（有问题时为 alert），没有关闭按钮
+  // 状态条以 alert 或 status 角色呈现（有 critical 条件时为 alert），没有关闭按钮；展开与收起只改变详略，状态条一直在
   const strip = page.locator('[aria-label="系统状态"]');
   await expect(strip).toBeVisible();
-  await expect(strip.getByRole('button')).toHaveCount(0);
+  await expect(strip.getByRole('button', { name: /关闭|忽略/ })).toHaveCount(0);
+  for (const b of await strip.getByRole('button', { name: /展开|收起/ }).all()) {
+    await b.click();
+    await expect(strip).toBeVisible();
+  }
   const nav = page.getByRole('navigation', { name: '主导航' });
   for (const g of ['值班', '处置', '度量', '系统', '治理']) {
     await expect(nav.getByText(g, { exact: true })).toBeVisible();
@@ -55,6 +59,9 @@ test('状态条：server 上报控制台不认识的条件类型或坏数据时�
   );
   await go(page, '/incidents');
   const strip = page.locator('[aria-label="系统状态"]');
+  // 收起时只写条件数与第一条，展开后逐条列出
+  await expect(strip).toContainText('2 个条件需要关注');
+  await strip.getByRole('button', { name: '展开' }).click();
   await expect(strip).toContainText('查询模板清单未加载');
   await expect(strip).toContainText('SomethingNewFromAFutureServer');
   await expect(page.getByRole('navigation', { name: '主导航' })).toBeVisible();
@@ -70,6 +77,8 @@ test('状态条：server 上报控制台不认识的条件类型或坏数据时�
     }),
   );
   await go(page, '/incidents');
+  // 坏的时间只在展开后的明细里渲染
+  await page.locator('[aria-label="系统状态"]').getByRole('button', { name: '展开' }).click();
   await expect(page.locator('[data-error-boundary="ConditionStrip"]')).toBeVisible();
   await expect(page.getByRole('navigation', { name: '主导航' })).toBeVisible();
   await expect(page.getByRole('list', { name: '事件列表' }).getByRole('link').first()).toBeVisible();
@@ -243,7 +252,7 @@ test('集群：gateway 心跳正常时已连接、准入自检通过、未冻结
   await expect(page.getByText('gateway 已连接')).toBeVisible();
   await expect(page.getByText('准入自检通过')).toBeVisible();
   await expect(page.getByText(/未冻结/)).toBeVisible();
-  await expect(page.getByText('e2e 仅提议，不执行')).toHaveCount(0);
+  await expect(page.getByText('集群 e2e 仅提议')).toHaveCount(0);
   await expect(page.getByText('仅提议', { exact: true })).toHaveCount(0);
 });
 

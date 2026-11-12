@@ -1033,6 +1033,17 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
     signal,
   );
   every(30_000, () => proposals.expire(), '提议过期检查');
+  // 模型恢复后补研判：之前因模型不可用、输出无效、没有路由或预算不足而停在阶段 A 的未恢复事件，每轮最多补 5 个
+  every(
+    5 * 60_000,
+    async () => {
+      const recovered = await scheduler.recoverModelFailures(5);
+      if (recovered.length) {
+        logger.info('模型恢复后补研判', { incidents: recovered });
+      }
+    },
+    '模型恢复后补研判',
+  );
   // 主动优化（ADR 0146）：目标运行、建议与投递每 loop_interval 一轮，验证循环每 10 分钟一轮（§6.3）；上一轮没有结束时跳过
   if (optimization) {
     const single = (fn: () => Promise<unknown>) => {

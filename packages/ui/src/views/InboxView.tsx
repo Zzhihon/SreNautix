@@ -107,6 +107,70 @@ function BlindBand({ spans, from, to }: { spans: readonly BlindSpan[]; from: num
   );
 }
 
+/**
+ * 业务领域一览：每个领域一张卡，写正在触发的事件数（各服务按主服务计数之和，GET /v1/business-domains）与
+ * 事件最多的服务；点卡片只看这个领域，再点一次取消。卡片的计数与上面的状态筛选无关，始终是未恢复的事件。
+ * 没有业务领域的事件另有一张不可点的卡（列表接口没有"只看未归属"的筛选），各卡之和等于"全部领域"。
+ */
+export function DomainOverview({
+  domains,
+  selected,
+  onSelect,
+}: {
+  domains: BusinessDomainList;
+  selected: string | undefined;
+  onSelect: (id: string | undefined) => void;
+}) {
+  const { t, locale } = useI18n();
+  const cards = domains.items.map((d) => ({
+    id: d.id,
+    title: localizedText(d.title, locale),
+    firing: d.services.reduce((n, s) => n + s.firing, 0),
+    top: d.services
+      .filter((s) => s.firing > 0)
+      .sort((a, b) => b.firing - a.firing)
+      .slice(0, 2)
+      .map((s) => `${localizedText(s.title, locale)} ${s.firing}`),
+  }));
+  const total = cards.reduce((n, c) => n + c.firing, 0) + domains.unassigned_firing;
+  return (
+    <nav className={styles.domains} aria-label={t('inbox.domains')}>
+      <button
+        type="button"
+        className={styles.domainCard}
+        aria-pressed={selected === undefined}
+        onClick={() => onSelect(undefined)}
+      >
+        <span className={styles.domainName}>{t('inbox.domain_all')}</span>
+        <span className={styles.domainCount} data-zero={total === 0 ? '' : undefined}>
+          {t('inbox.domain_firing', { n: total })}
+        </span>
+      </button>
+      {cards.map((c) => (
+        <button
+          key={c.id}
+          type="button"
+          className={styles.domainCard}
+          aria-pressed={selected === c.id}
+          onClick={() => onSelect(selected === c.id ? undefined : c.id)}
+        >
+          <span className={styles.domainName}>{c.title}</span>
+          <span className={styles.domainCount} data-zero={c.firing === 0 ? '' : undefined}>
+            {t('inbox.domain_firing', { n: c.firing })}
+          </span>
+          {c.top.length > 0 && <span className={styles.domainTop}>{c.top.join(' · ')}</span>}
+        </button>
+      ))}
+      {domains.unassigned_firing > 0 && (
+        <div className={styles.domainCard} data-static="">
+          <span className={styles.domainName}>{t('inbox.domain_unassigned')}</span>
+          <span className={styles.domainCount}>{t('inbox.domain_firing', { n: domains.unassigned_firing })}</span>
+        </div>
+      )}
+    </nav>
+  );
+}
+
 export function InboxView({
   cluster,
   filters,
@@ -179,6 +243,13 @@ export function InboxView({
             : undefined
         }
       />
+      {domains.data && domains.data.items.length > 0 && (
+        <DomainOverview
+          domains={domains.data}
+          selected={filters.business_domain}
+          onSelect={(business_domain) => onFilters({ ...filters, business_domain })}
+        />
+      )}
       <Toolbar label={t('inbox.filters')}>
         <Segmented
           label={t('inbox.f.state')}
@@ -210,17 +281,6 @@ export function InboxView({
               { value: 'none', label: t('inbox.group.none') },
             ]}
           />
-        )}
-        {(domains.data?.items.length ?? 0) > 0 && (
-          <div className={styles.filterSelect}>
-            <SelectField
-              label={t('inbox.f.business_domain')}
-              value={filters.business_domain ?? ''}
-              placeholder={t('inbox.any')}
-              onChange={(e) => onFilters({ ...filters, business_domain: e.currentTarget.value || undefined })}
-              options={(domains.data?.items ?? []).map((d) => ({ value: d.id, label: localizedText(d.title, locale) }))}
-            />
-          </div>
         )}
         <div className={styles.filterSelect}>
           <SelectField

@@ -30,7 +30,6 @@
   "header.theme_light": "浅色",
   "header.theme_dark": "深色",
   "header.logout": "退出登录",
-  "header.proposal_only": "{cluster} 仅提议，不执行",
   "header.break_glass": "你正以本地管理员作为紧急入口登录，所有操作都会被审计。",
 
   "caps.read_only": "只读：反馈与重跑需要 responder、approver 或 admin 角色",
