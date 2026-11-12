@@ -103,7 +103,7 @@ function layer(
   });
 }
 
-/** 服务端收到的请求里哪些是故障域探测调用（ADR 0201） */
+/** 服务端收到的请求里哪些是故障域探测调用（ADR 0202） */
 const probes = (srv: ReplayServer) => srv.received.filter((x) => x.body.includes(DOMAIN_PROBE.prompt));
 /** 探测调用的应答：一次很短的普通回答 */
 const PROBE_OK = fixture('openai-docs', 'chat-default');

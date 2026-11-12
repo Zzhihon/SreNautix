@@ -222,7 +222,7 @@ export async function runStageB(input: ResearchRunInput, env: ResearchEnv, sink:
     }
   }
 
-  // 确定路由组（事件涉及常规路由的故障域时先发探测调用，ADR 0201）。放在指纹门控之后：不调用模型的研判不探测
+  // 确定路由组（事件涉及常规路由的故障域时先发探测调用，ADR 0202）。放在指纹门控之后：不调用模型的研判不探测
   await session.plan();
   // 本次研判可能使用的路由中最小的上下文：常规路由，或全部常规路由因故障域提前熔断时的兜底路由（ADR 0152）
   const contextTokens = Math.min(...session.pool.map((r) => r.profile.context_tokens));

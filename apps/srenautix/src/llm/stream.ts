@@ -181,7 +181,7 @@ export class ChatAccumulator {
   }
 }
 
-/** Messages API 的流事件（ADR 0200）；只声明用到的字段 */
+/** Messages API 的流事件（ADR 0201）；只声明用到的字段 */
 interface MessagesStreamEvent {
   type: string;
   index?: number;

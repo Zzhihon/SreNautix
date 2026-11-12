@@ -135,7 +135,7 @@ export class Egress {
 
   /**
    * 为一条路由构造 OpenAI 客户端；所有请求经过 guardedFetch。
-   * api: messages 的路由也用这个客户端发请求（`client.post('/messages')`，ADR 0200）：密钥除了 SDK 的 Authorization: Bearer，
+   * api: messages 的路由也用这个客户端发请求（`client.post('/messages')`，ADR 0201）：密钥除了 SDK 的 Authorization: Bearer，
    * 再放进 Anthropic 的 x-api-key 请求头。请求头不进入调用记录与日志
    */
   client(route: ModelRoute, apiKey: string, timeoutMs: number): OpenAI {

@@ -1,5 +1,5 @@
 // 本文件由 packages/contract/scripts/gen.ts 从 contract/ 生成，不要手工修改。
-export const CONTRACT_VERSION = '2.62.0';
+export const CONTRACT_VERSION = '2.63.0';
 
 export const SCHEMAS: Record<string, Record<string, unknown>> = {
   'https://srenautix.io/contract/gateway/v1/action-catalog.schema.json': {
@@ -1648,7 +1648,7 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
           api: {
             type: 'string',
             description:
-              'responses：OpenAI 的 POST /responses；chat_completions：OpenAI 兼容的 POST /chat/completions；messages：Anthropic Messages API 的 POST /messages（契约 2.62.0，ADR 0200）',
+              'responses：OpenAI 的 POST /responses；chat_completions：OpenAI 兼容的 POST /chat/completions；messages：Anthropic Messages API 的 POST /messages（契约 2.63.0，ADR 0201）',
             enum: ['responses', 'chat_completions', 'messages'],
           },
           model: { type: 'string' },
@@ -1667,7 +1667,7 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
           failure_domain: {
             type: 'array',
             description:
-              '这条路由依赖的被管拓扑组件；事件涉及这些组件时先在这条路由上发一次探测调用，探测失败才对本次研判提前熔断（ADR 0201）',
+              '这条路由依赖的被管拓扑组件；事件涉及这些组件时先在这条路由上发一次探测调用，探测失败才对本次研判提前熔断（ADR 0202）',
             items: { $ref: '../../../schemas/common.schema.json#/$defs/ComponentKey' },
           },
           in_domain: { type: 'boolean', description: '服务方是否在境内' },

@@ -77,7 +77,7 @@ export class WorkerMetrics extends BaseMetrics {
 
   readonly failureDomainProbes = new Counter({
     name: 'srenautix_llm_failure_domain_probes_total',
-    help: '事件涉及路由的故障域时发出的探测调用次数，按结果（ok、failed）；缓存命中不计（ADR 0201）',
+    help: '事件涉及路由的故障域时发出的探测调用次数，按结果（ok、failed）；缓存命中不计（ADR 0202）',
     labelNames: ['route', 'outcome'] as const,
     registers: [this.registry],
   });

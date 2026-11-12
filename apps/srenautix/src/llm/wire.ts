@@ -213,7 +213,7 @@ export function toChatParams(req: LlmRequest, opts: WireOptions): ChatParams {
   return params;
 }
 
-// Anthropic Messages API（ADR 0200）的请求与响应。请求经路由的 OpenAI 客户端发出（`client.post('/messages')`），
+// Anthropic Messages API（ADR 0201）的请求与响应。请求经路由的 OpenAI 客户端发出（`client.post('/messages')`），
 // 不引入 Anthropic SDK，这里只声明用到的字段
 
 export type MessagesBlock =

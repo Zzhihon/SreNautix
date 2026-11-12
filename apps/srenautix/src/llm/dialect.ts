@@ -69,7 +69,7 @@ export const DECLARED_PROFILES: Readonly<Record<string, Omit<DialectProfile, 'me
       chinese: 'native',
       tokenizer: 'byte_estimate',
     },
-    // Anthropic Messages API（api: messages，ADR 0200）：结构化输出声明为 strict 输出工具（wire.ts 的 OUTPUT_TOOL_PREFIX），
+    // Anthropic Messages API（api: messages，ADR 0201）：结构化输出声明为 strict 输出工具（wire.ts 的 OUTPUT_TOOL_PREFIX），
     // 推理内容在 thinking 内容块；output_config.format 的严格 json_schema 以能力探测为准
     'anthropic-messages': {
       id: 'anthropic-messages',

@@ -23,7 +23,7 @@ import { workerConfigSchema } from '../../src/research/config.js';
 import { WorkerMetrics } from '../../src/research/metrics.js';
 import { fixture, ReplayServer } from '../support/llm-fixtures.js';
 
-// Anthropic Messages API（api: messages，ADR 0200）：请求与响应的映射、流事件的归并、经路由的 OpenAI 客户端发出的研判调用与能力探测。
+// Anthropic Messages API（api: messages，ADR 0201）：请求与响应的映射、流事件的归并、经路由的 OpenAI 客户端发出的研判调用与能力探测。
 // 夹具是 2026-11-12 经模型网关取得的 claude-fable-5-2 响应与流事件
 
 const P = 'gateway-claude-fable-5-2';

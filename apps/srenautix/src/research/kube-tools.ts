@@ -150,7 +150,7 @@ export interface LogTailRequest {
 export async function readLogTail(core: CoreV1Api, r: LogTailRequest): Promise<KubeToolResult> {
   const limitBytes = r.maxBytes * 4;
   let tail = r.tailLines;
-  let text = '';
+  let text: string;
   for (let attempt = 1; ; attempt++) {
     text = String(
       (await core.readNamespacedPodLog({

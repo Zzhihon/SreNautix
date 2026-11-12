@@ -37,11 +37,11 @@ llm:
   routes:
     - id: primary
       base_url: https://llm.example.com/v1
-      api: responses                 # responses | chat_completions | messages（Anthropic Messages API，ADR 0200）
+      api: responses                 # responses | chat_completions | messages（Anthropic Messages API，ADR 0201）
       model: example-large
       dialect_profile: openai-responses   # openai-responses | openai-chat | deepseek | qwen-vllm | llamacpp | openai-compatible | anthropic-messages
       price: { currency: USD, input_per_mtok: 1.25, output_per_mtok: 10, cached_input_per_mtok: 0.125 }
-      failure_domain: []             # 这条路由依赖的被管组件，例如 Namespace:llm-gateway；事件涉及时先发一次探测调用，失败才提前熔断（ADR 0201）
+      failure_domain: []             # 这条路由依赖的被管组件，例如 Namespace:llm-gateway；事件涉及时先发一次探测调用，失败才提前熔断（ADR 0202）
       in_domain: true
       tier: large                    # large：hypothesize、conclude；small：工具结果判定
       retention_terms: "服务方的数据保留条款"
@@ -105,7 +105,7 @@ mcp:                                 # 只读 MCP 服务器与工具白名单（
 
 常规路由（`role` 为 `regular` 或不填）都经过同一个模型网关时，网关真的不可用时，常规路由全部失效，阶段 B 只能跳过。兜底路由（`role: last_resort`，ADR 0152）是一条不经过这个故障域的路由，通常直连另一家服务方的 OpenAI 兼容接口（`api: chat_completions`、`dialect_profile: openai-compatible`）：
 
-- 平时不选。每次事件研判开始时，worker 用事件涉及的组件（成员与候选根因）对照常规路由的 `failure_domain`。事件涉及某条常规路由的故障域时，先在这条路由上发一次探测调用（固定文本、16 个输出 token、合计 30 秒超时，结论按路由缓存 60 秒，ADR 0201）：探测成功则照常使用这条路由，失败才对本次研判提前熔断。全部常规路由都这样提前熔断时，本次研判的路由组换成兜底路由，否则只用常规路由。探测结果计入 `srenautix_llm_failure_domain_probes_total{route, outcome}`。
+- 平时不选。每次事件研判开始时，worker 用事件涉及的组件（成员与候选根因）对照常规路由的 `failure_domain`。事件涉及某条常规路由的故障域时，先在这条路由上发一次探测调用（固定文本、16 个输出 token、合计 30 秒超时，结论按路由缓存 60 秒，ADR 0202）：探测成功则照常使用这条路由，失败才对本次研判提前熔断。全部常规路由都这样提前熔断时，本次研判的路由组换成兜底路由，否则只用常规路由。探测结果计入 `srenautix_llm_failure_domain_probes_total{route, outcome}`。
 - 常规路由因真实调用失败（网络、超时、408、429、5xx）熔断或不可用时不切到兜底路由，研判按原有方式在常规路由之间切换，全部失败时只出阶段 A。
 - 用量单独记账：`worker.daily_usage_last_resort` 按天、按路由记录，同时计入 `daily_usage`。每次调用前检查当日已用加本次的输入估算与输出上限是否超过 `budget.last_resort.daily_tokens`，超过时不发出请求，研判以 `budget_exhausted` 只出阶段 A，横幅写明兜底路由的当日用量。
 - 主动优化的目标任务与评测不使用兜底路由；评测把兜底路由当作常规路由单独评测（`srenautix eval --route <id>`）。
@@ -118,7 +118,7 @@ mcp:                                 # 只读 MCP 服务器与工具白名单（
 
 ### Anthropic Messages 路由
 
-`api: messages` 的路由把请求发往 `<base_url>/messages`（ADR 0200），方言档案用 `anthropic-messages`。密钥同时放进 `Authorization: Bearer` 与 `x-api-key`，请求头带 `anthropic-version: 2023-06-01`。请求体不带采样参数（当前的 Claude 模型拒绝 `temperature`），`thinking` 设置不能用于这类路由。
+`api: messages` 的路由把请求发往 `<base_url>/messages`（ADR 0201），方言档案用 `anthropic-messages`。密钥同时放进 `Authorization: Bearer` 与 `x-api-key`，请求头带 `anthropic-version: 2023-06-01`。请求体不带采样参数（当前的 Claude 模型拒绝 `temperature`）；路由的 `thinking: disabled` 照常发出。有输出 schema 的阶段把 schema 声明为一个 strict 输出工具 `output__<名称>`、`tool_choice: auto`，模型调用这个工具提交输出（ADR 0201）。
 
 ## 主动优化的目标任务
 

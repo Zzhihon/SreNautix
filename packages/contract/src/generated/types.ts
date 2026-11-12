@@ -2170,7 +2170,7 @@ export interface ModelRoute {
   id: string;
   base_url: string;
   /**
-   * responses：OpenAI 的 POST /responses；chat_completions：OpenAI 兼容的 POST /chat/completions；messages：Anthropic Messages API 的 POST /messages（契约 2.62.0，ADR 0200）
+   * responses：OpenAI 的 POST /responses；chat_completions：OpenAI 兼容的 POST /chat/completions；messages：Anthropic Messages API 的 POST /messages（契约 2.63.0，ADR 0201）
    */
   api: 'responses' | 'chat_completions' | 'messages';
   model: string;
@@ -2182,7 +2182,7 @@ export interface ModelRoute {
     cached_input_per_mtok: number | null;
   };
   /**
-   * 这条路由依赖的被管拓扑组件；事件涉及这些组件时先在这条路由上发一次探测调用，探测失败才对本次研判提前熔断（ADR 0201）
+   * 这条路由依赖的被管拓扑组件；事件涉及这些组件时先在这条路由上发一次探测调用，探测失败才对本次研判提前熔断（ADR 0202）
    */
   failure_domain: ComponentKey[];
   /**

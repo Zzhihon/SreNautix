@@ -13,7 +13,7 @@
 
 ## 决定
 
-1. **路由协议 `api: messages`**（契约 2.62.0，`ModelRoute.api`）：请求发往 `<base_url>/messages`。
+1. **路由协议 `api: messages`**（契约 2.63.0，`ModelRoute.api`）：请求发往 `<base_url>/messages`。
    - 不引入 Anthropic SDK。请求经这条路由已有的 OpenAI 客户端发出（`client.post('/messages')`），因此出站检查、蜜标、计量、超时（ADR 0098）与熔断都和其他路由相同；
    - 密钥除了 SDK 的 `Authorization: Bearer`，还放进 `x-api-key` 请求头，并带 `anthropic-version: 2023-06-01`；请求头不进入调用记录与日志；
    - 请求体：系统提示放进 `system`；Messages API 要求 user 与 assistant 交替，相邻的同角色内容合成一条消息（助手文本与 `tool_use` 合成一条 assistant，连续的 `tool_result` 与随后的用户输入合成一条 user）；空文本不成块；
