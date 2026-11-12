@@ -5995,10 +5995,10 @@ export type components = {
     };
     /**
      * EdgeProvenance
-     * @description 边的来源（DESIGN §4.2）
+     * @description 边的来源（DESIGN §4.2）；declared 是领域包 business.yaml 声明的依赖（契约 2.62.0，ADR 0200），只出现在全集群地图上
      * @enum {string}
      */
-    Provenance: 'structural' | 'runtime' | 'config_ref' | 'network_policy' | 'naming';
+    Provenance: 'structural' | 'runtime' | 'config_ref' | 'network_policy' | 'naming' | 'declared';
     /**
      * KubeWarningQuery
      * @description 实际执行的一次聚合查询。每次导出每个集群执行的查询数固定，与事件数无关

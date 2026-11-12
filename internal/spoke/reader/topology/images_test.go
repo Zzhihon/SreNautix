@@ -39,6 +39,7 @@ func (noLookup) PV(string) (*corev1.PersistentVolume, bool)               { retu
 func (noLookup) CSINodePlugin(string, string) (*corev1.Pod, bool)         { return nil, false }
 func (noLookup) Namespaces(labels.Selector) []string                      { return nil }
 func (noLookup) Pods(string, labels.Selector) []*corev1.Pod               { return nil }
+func (noLookup) NamespaceLabels(string) (map[string]string, bool)         { return nil, false }
 
 // Pod 节点带普通容器的 image 和 status 中的 imageID（digest），去重排序；init 容器（例如等待迁移的容器，
 // 它与迁移 Job 可能是同一个镜像）与临时容器的镜像不计入，与 kube_pod_container_info 一致；

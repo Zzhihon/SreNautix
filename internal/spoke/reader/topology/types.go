@@ -46,6 +46,9 @@ const (
 	ConfStructural    = 1.0
 	ConfConfigRef     = 0.7
 	ConfNetworkPolicy = 0.6
+	// ConfPolicyAllowed 是 NetworkPolicy 入站规则与 CiliumNetworkPolicy 推出的边（SreNautix ADR 0200）：只说明流量被放行。
+	// 低于归并阈值 τ（0.6），这些边画在拓扑与地图上，不参与事件归并、根因排序与影响范围。
+	ConfPolicyAllowed = 0.5
 )
 
 // Node 是拓扑节点。

@@ -1,5 +1,5 @@
 // 本文件由 packages/contract/scripts/gen.ts 从 contract/ 生成，不要手工修改。
-export const CONTRACT_VERSION = '2.61.0';
+export const CONTRACT_VERSION = '2.62.0';
 
 export const SCHEMAS: Record<string, Record<string, unknown>> = {
   'https://srenautix.io/contract/gateway/v1/action-catalog.schema.json': {
@@ -6976,7 +6976,40 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
         type: 'object',
         additionalProperties: false,
         required: ['business_domains'],
-        properties: { business_domains: { type: 'array', items: { $ref: '#/$defs/BusinessDomain' } } },
+        properties: {
+          business_domains: { type: 'array', items: { $ref: '#/$defs/BusinessDomain' } },
+          dependencies: {
+            type: 'array',
+            description:
+              '部署方声明的依赖（契约 2.62.0，ADR 0200）：from 命中的对象依赖 to 命中的对象。拓扑推不出、但部署方确知的依赖（例如连接串写在 Secret 里）写在这里。全集群地图把它画成来源为 declared、置信度 1 的边，影响范围沿它传播；不进入拓扑存储，也不参与事件归并',
+            items: { $ref: '#/$defs/BusinessDependency' },
+          },
+        },
+      },
+      BusinessDependency: {
+        title: 'BusinessDependency',
+        type: 'object',
+        additionalProperties: false,
+        required: ['from', 'to', 'reason'],
+        properties: {
+          from: {
+            type: 'array',
+            minItems: 1,
+            items: { $ref: '#/$defs/ComponentMatch' },
+            description: '依赖方：命中任一条的对象',
+          },
+          to: {
+            type: 'array',
+            minItems: 1,
+            items: { $ref: '#/$defs/ComponentMatch' },
+            description: '被依赖方：命中任一条的对象',
+          },
+          reason: {
+            type: 'string',
+            minLength: 1,
+            description: '依据，例如“四个工作负载都从 Secret cchp-runtime 读取 DATABASE_URL”',
+          },
+        },
       },
       BusinessDomain: {
         title: 'BusinessDomain',
@@ -10398,9 +10431,10 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
       },
       Provenance: {
         title: 'EdgeProvenance',
-        description: '边的来源（DESIGN §4.2）',
+        description:
+          '边的来源（DESIGN §4.2）；declared 是领域包 business.yaml 声明的依赖（契约 2.62.0，ADR 0200），只出现在全集群地图上',
         type: 'string',
-        enum: ['structural', 'runtime', 'config_ref', 'network_policy', 'naming'],
+        enum: ['structural', 'runtime', 'config_ref', 'network_policy', 'naming', 'declared'],
       },
     },
   },

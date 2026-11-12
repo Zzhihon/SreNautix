@@ -244,9 +244,9 @@ export type Timestamp4 = string;
  */
 export type Sha2564 = string;
 /**
- * 边的来源（DESIGN §4.2）
+ * 边的来源（DESIGN §4.2）；declared 是领域包 business.yaml 声明的依赖（契约 2.62.0，ADR 0200），只出现在全集群地图上
  */
-export type EdgeProvenance = 'structural' | 'runtime' | 'config_ref' | 'network_policy' | 'naming';
+export type EdgeProvenance = 'structural' | 'runtime' | 'config_ref' | 'network_policy' | 'naming' | 'declared';
 /**
  * 事件流中的一条事件（DESIGN §2.3）。每个所有者（server、worker）各有一张只追加的 outbox，与状态变更写在同一事务里。消费者按游标调用 GET /v1/events?after=，投递语义是至少一次，按 event_id 幂等处理。type 决定 payload 的结构
  */
@@ -1031,6 +1031,7 @@ export interface SrenautixContractIndex {
   ComponentsFile?: ComponentsFile;
   ComponentMatch?: ComponentMatch;
   BusinessFile?: BusinessFile;
+  BusinessDependency?: BusinessDependency;
   BusinessDomain?: BusinessDomain;
   BusinessService?: BusinessService;
   ComponentType?: ComponentType;
@@ -6461,6 +6462,10 @@ export interface ObjectPattern {
  */
 export interface BusinessFile {
   business_domains: BusinessDomain[];
+  /**
+   * 部署方声明的依赖（契约 2.62.0，ADR 0200）：from 命中的对象依赖 to 命中的对象。拓扑推不出、但部署方确知的依赖（例如连接串写在 Secret 里）写在这里。全集群地图把它画成来源为 declared、置信度 1 的边，影响范围沿它传播；不进入拓扑存储，也不参与事件归并
+   */
+  dependencies?: BusinessDependency[];
 }
 /**
  * 一块业务（ADR 0193 §1）。同一 id 的业务领域可以在几个包中声明，服务合并；title 与 tier 至少有一处给出，给出多处时必须相同
@@ -6495,6 +6500,24 @@ export interface BusinessService {
    * 默认命名空间：这些命名空间里归属不到任何服务的告警推定归这个服务（服务来源 namespace）。一个命名空间最多是一个服务的默认命名空间
    */
   namespaces?: string[];
+}
+export interface BusinessDependency {
+  /**
+   * 依赖方：命中任一条的对象
+   *
+   * @minItems 1
+   */
+  from: [ComponentMatch, ...ComponentMatch[]];
+  /**
+   * 被依赖方：命中任一条的对象
+   *
+   * @minItems 1
+   */
+  to: [ComponentMatch, ...ComponentMatch[]];
+  /**
+   * 依据，例如“四个工作负载都从 Secret cchp-runtime 读取 DATABASE_URL”
+   */
+  reason: string;
 }
 export interface AlertsFile {
   entries: AlertCatalogEntry[];

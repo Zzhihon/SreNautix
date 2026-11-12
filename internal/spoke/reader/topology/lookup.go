@@ -28,6 +28,8 @@ type Lookup interface {
 	CSINodePlugin(driver, node string) (*corev1.Pod, bool)
 	// Namespaces 返回标签满足 selector 的命名空间名。
 	Namespaces(selector labels.Selector) []string
+	// NamespaceLabels 返回命名空间的标签；命名空间不在缓存中时 ok 为 false。
+	NamespaceLabels(name string) (map[string]string, bool)
 	// Pods 返回命名空间 namespace 中标签满足 selector 的 Pod。
 	Pods(namespace string, selector labels.Selector) []*corev1.Pod
 }

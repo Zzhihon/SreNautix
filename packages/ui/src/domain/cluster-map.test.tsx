@@ -242,6 +242,28 @@ describe('全集群地图（ADR 0199）', () => {
     expect(opened).toEqual([API]);
   });
 
+  it('侧栏里声明的依赖带标注；只被网络策略放行的组件只计数（ADR 0200）', async () => {
+    const declared = {
+      ...map,
+      edges: [
+        { ...edge(API, PG, 1, 'depends_on'), provenance: 'declared' as const },
+        edge(WORKER, PG, 0.6, 'egress_to'),
+        edge(FRONT, PG, 0.5, 'egress_to'),
+        edge(ING, PG, 0.5, 'egress_to'),
+      ],
+    };
+    renderUi(<ClusterMap map={declared} clusterId="prod" />, { links });
+    fireEvent.click(await item(/^api，/));
+    expect(within(await screen.findByTestId('subgraph-panel')).getByText('pg（领域包声明）')).toBeTruthy();
+    fireEvent.click(await item(/^pg，/));
+    // 进来的边同样标出声明
+    expect(
+      within(await screen.findByTestId('subgraph-panel')).getByText(
+        'api（领域包声明）、worker、另有 2 个只被网络策略放行',
+      ),
+    ).toBeTruthy();
+  });
+
   it('没有组件时说明原因', async () => {
     renderUi(<ClusterMap map={{ ...map, components: [], edges: [] }} clusterId="prod" />);
     expect(await screen.findByText('地图上没有组件')).toBeTruthy();

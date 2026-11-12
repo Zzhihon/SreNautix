@@ -711,7 +711,11 @@ export async function compilePackSet(loaded: LoadedPack[], opts: CompileOptions)
   let services: ServiceCatalog;
   try {
     services = new ServiceCatalog(
-      active.map((p) => ({ pack: p.name, domains: p.content.business.business_domains })),
+      active.map((p) => ({
+        pack: p.name,
+        domains: p.content.business.business_domains,
+        dependencies: p.content.business.dependencies,
+      })),
       active.flatMap((p) => p.content.components.component_types),
     );
   } catch (err) {

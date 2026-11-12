@@ -2,8 +2,9 @@
 // 地图上的组件是有 Pod 的顶层对象（Deployment、StatefulSet、CNPG Cluster……，静态 Pod 的属主是 Node，这时 Pod 自己是组件）
 // 与路由入口（有 routes_to 的对象）。Service 与带 Operator 约定的对象只是连接：经过它们的边接到它们选中的组件上。
 // 组件引用、挂载的其余对象（ConfigMap、Secret、PVC……）不画，按类型计数；节点与集群枢纽单独列出，不画边。
+// 领域包 business.yaml 声明的依赖（ADR 0200）画成来源为 declared、置信度 1 的边，与推出的边合并。
 import type { ComponentKey, ComponentType, HubComponents, TopologyEdge, TopologyNode } from '@srenautix/contract';
-import type { ServiceCatalog, TypedObject } from '@srenautix/packs-sdk/business';
+import { matchesByName, type ServiceCatalog, type TypedObject } from '@srenautix/packs-sdk/business';
 import { parseKey } from '../keys.js';
 import { OWNED_BY, SCALES, TopologyGraph } from './graph.js';
 import { matchTypeByName } from './kube.js';
@@ -30,11 +31,7 @@ export function clusterMap(
 ): ClusterMapStructure {
   const g = new TopologyGraph(snapshot.nodes, snapshot.edges, snapshot.version);
   const kindOf = (k: ComponentKey) => g.node(k)?.kind ?? parseKey(k).kind;
-  // 静态 Pod 的属主是 Node：Node 在节点条上，Pod 自己作为组件
-  const top = (k: ComponentKey) => {
-    const c = g.componentOf(k);
-    return c !== k && kindOf(c) === NODE_KIND ? k : c;
-  };
+  const top = topOf(g);
 
   const placed = new Map<ComponentKey, ComponentKey>();
   const outgoing = new Map<ComponentKey, TopologyEdge[]>();
@@ -199,6 +196,36 @@ export function clusterMap(
     });
   }
 
+  // 声明的依赖：命中 from 与 to 的组件之间一条 depends_on 边；已有推出的边时并入它，来源与置信度取声明
+  for (const d of catalog?.dependencies() ?? []) {
+    const hit = (ms: typeof d.from) =>
+      out.filter((c) => ms.some((m) => matchesByName(m, c.kind, c.namespace, c.name))).map((c) => c.key);
+    for (const from of hit(d.from)) {
+      for (const to of hit(d.to)) {
+        if (from === to) {
+          continue;
+        }
+        const seen = edges.get(`${from}\0${to}`);
+        if (seen) {
+          seen.rel.add('depends_on');
+          seen.count++;
+          seen.provenance = 'declared';
+          seen.confidence = 1;
+        } else {
+          edges.set(`${from}\0${to}`, {
+            from,
+            to,
+            relations: [],
+            rel: new Set(['depends_on']),
+            count: 1,
+            provenance: 'declared',
+            confidence: 1,
+          });
+        }
+      }
+    }
+  }
+
   const used = new Set(out.map((c) => c.service));
   const domains: MapSchema['domains'] = [];
   for (const s of catalog?.services() ?? []) {
@@ -249,6 +276,46 @@ export function clusterMap(
       return { key: k, kind: p.kind, namespace: p.namespace, name: p.name, dependents: dependents.get(k)?.size ?? 0 };
     }),
     omitted,
+  };
+}
+
+/** 对象在地图上归入的顶层对象。静态 Pod 的属主是 Node：Node 在节点条上，Pod 自己作为组件 */
+function topOf(g: TopologyGraph): (k: ComponentKey) => ComponentKey {
+  return (k) => {
+    const c = g.componentOf(k);
+    return c !== k && (g.node(c)?.kind ?? parseKey(c).kind) === NODE_KIND ? k : c;
+  };
+}
+
+/** 领域包告警用的伪组件（component:gateway）的 kind */
+const PSEUDO_KIND = 'component';
+
+/**
+ * 事件的根因放到地图的哪个组件上：根因本身是组件，或者它的顶层对象是组件；根因是领域包的伪组件（component:gateway）时，
+ * 取主服务里同名的组件，没有时取全图唯一同名的组件。都不命中时为 null，事件按主服务计入服务框。
+ */
+export function mapPlacer(
+  snapshot: { nodes: readonly TopologyNode[]; edges: readonly TopologyEdge[]; version: number },
+  map: Pick<ClusterMapStructure, 'components'>,
+): (root: ComponentKey | null, service: string | null) => ComponentKey | null {
+  const top = topOf(new TopologyGraph(snapshot.nodes, snapshot.edges, snapshot.version));
+  const onMap = new Set(map.components.map((c) => c.key));
+  return (root, service) => {
+    if (!root) {
+      return null;
+    }
+    const t = top(root);
+    if (onMap.has(t)) {
+      return t;
+    }
+    const k = parseKey(root);
+    if (k.kind !== PSEUDO_KIND) {
+      return null;
+    }
+    const named = map.components.filter((c) => c.name === k.name);
+    const inService = named.filter((c) => c.service !== null && c.service === service);
+    const pick = inService.length ? inService : named;
+    return pick.length === 1 ? pick[0]!.key : null;
   };
 }
 

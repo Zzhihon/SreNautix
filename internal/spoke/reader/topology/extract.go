@@ -324,39 +324,42 @@ func Ingress(ing *networkingv1.Ingress) Contribution {
 	return c
 }
 
-// NetworkPolicyEgress 贡献 NetworkPolicy 出站规则推出的边（DESIGN §4.2，置信度 0.6）：
-// 被策略选中的 Pod 的顶层 owner → 出站规则允许的对端 Pod 的顶层 owner。ipBlock 对端不产生边；没有 to 的规则（放行全部）也不产生边。
-func NetworkPolicyEgress(lk Lookup, np *networkingv1.NetworkPolicy) Contribution {
+// NetworkPolicyEdges 贡献 NetworkPolicy 推出的边（DESIGN §4.2），都是 egress_to：from 的 Pod 被允许访问 to 的 Pod，两端取顶层 owner。
+//   - 出站规则：被策略选中的 Pod → 规则允许的对端 Pod，置信度 0.6。
+//   - 入站规则：规则允许的来源 Pod → 被策略选中的 Pod，置信度 ConfPolicyAllowed（SreNautix ADR 0200）。数据库一侧按命名空间放行
+//     （"允许 cchp-prod 访问 PostgreSQL"）是最常见的写法，只写出站时这条依赖看不到。
+//
+// ipBlock 对端不产生边；没有对端的规则（放行全部）也不产生边。入站规则里"命名空间内全部 Pod 互相放行"
+// （策略与对端的 podSelector 都为空、对端不跨命名空间）不说明依赖，也不产生边：参考部署的观测命名空间一条这样的规则就有 650 对。
+func NetworkPolicyEdges(lk Lookup, np *networkingv1.NetworkPolicy) Contribution {
 	var c Contribution
-	if !hasEgress(np) {
-		return c
-	}
 	fail := func(field string, err error) Contribution {
 		c.fail("NetworkPolicy", np.Namespace, np.Name, field+": "+err.Error())
 		return c
 	}
-	root := func(p *corev1.Pod, into map[string]bool) {
-		k, err := RootOwner(lk, "Pod", p.Namespace, p.Name)
-		if err != nil {
-			c.Problems = append(c.Problems, KeyProblem(err))
-			return
+	roots := func(pods []*corev1.Pod) map[string]bool {
+		out := map[string]bool{}
+		for _, p := range pods {
+			k, err := RootOwner(lk, "Pod", p.Namespace, p.Name)
+			if err != nil {
+				c.Problems = append(c.Problems, KeyProblem(err))
+				continue
+			}
+			out[k] = true
 		}
-		into[k] = true
+		return out
 	}
-	srcSel, err := metav1.LabelSelectorAsSelector(&np.Spec.PodSelector)
+	selSel, err := metav1.LabelSelectorAsSelector(&np.Spec.PodSelector)
 	if err != nil {
 		return fail("podSelector", err)
 	}
-	sources := map[string]bool{}
-	for _, p := range lk.Pods(np.Namespace, srcSel) {
-		root(p, sources)
-	}
-	if len(sources) == 0 {
+	selected := roots(lk.Pods(np.Namespace, selSel))
+	if len(selected) == 0 {
 		return c
 	}
-	dests := map[string]bool{}
-	for _, rule := range np.Spec.Egress {
-		for _, peer := range rule.To {
+	peers := func(list []networkingv1.NetworkPolicyPeer, field string) (map[string]bool, error) {
+		out := map[string]bool{}
+		for _, peer := range list {
 			if peer.PodSelector == nil && peer.NamespaceSelector == nil {
 				continue
 			}
@@ -364,7 +367,7 @@ func NetworkPolicyEgress(lk Lookup, np *networkingv1.NetworkPolicy) Contribution
 			if peer.NamespaceSelector != nil {
 				nsSel, err := metav1.LabelSelectorAsSelector(peer.NamespaceSelector)
 				if err != nil {
-					return fail("egress namespaceSelector", err)
+					return nil, fmt.Errorf("%s namespaceSelector: %w", field, err)
 				}
 				namespaces = lk.Namespaces(nsSel)
 			}
@@ -372,26 +375,78 @@ func NetworkPolicyEgress(lk Lookup, np *networkingv1.NetworkPolicy) Contribution
 			if peer.PodSelector != nil {
 				podSel, err = metav1.LabelSelectorAsSelector(peer.PodSelector)
 				if err != nil {
-					return fail("egress podSelector", err)
+					return nil, fmt.Errorf("%s podSelector: %w", field, err)
 				}
 			}
 			for _, ns := range namespaces {
-				for _, p := range lk.Pods(ns, podSel) {
-					root(p, dests)
+				for k := range roots(lk.Pods(ns, podSel)) {
+					out[k] = true
 				}
 			}
 		}
+		return out, nil
 	}
 	ev := "NetworkPolicy " + np.Namespace + "/" + np.Name
-	for _, s := range sortedKeys(sources) {
-		for _, d := range sortedKeys(dests) {
-			if s == d {
-				continue
+	if hasEgress(np) {
+		for _, rule := range np.Spec.Egress {
+			to, err := peers(rule.To, "egress")
+			if err != nil {
+				return fail("egress", err)
 			}
-			c.Edges = append(c.Edges, Edge{From: s, To: d, Relation: RelEgressTo, Provenance: ProvNetworkPolicy, Confidence: ConfNetworkPolicy, Scope: ScopeService, Evidence: ev})
+			c.allow(selected, to, ConfNetworkPolicy, ev)
+		}
+	}
+	if hasIngress(np) {
+		everyone := emptySelector(&np.Spec.PodSelector)
+		for _, rule := range np.Spec.Ingress {
+			list := rule.From
+			if everyone {
+				list = nil
+				for _, p := range rule.From {
+					if p.NamespaceSelector != nil || p.PodSelector == nil || !emptySelector(p.PodSelector) {
+						list = append(list, p)
+					}
+				}
+			}
+			from, err := peers(list, "ingress")
+			if err != nil {
+				return fail("ingress", err)
+			}
+			c.allow(from, selected, ConfPolicyAllowed, ev+" ingress")
 		}
 	}
 	return c
+}
+
+// allow 为 from × to 的每一对不同的顶层 owner 加一条 egress_to 边；同一对已有边时保留置信度高的一条。
+func (c *Contribution) allow(from, to map[string]bool, conf float64, ev string) {
+	for _, s := range sortedKeys(from) {
+		for _, d := range sortedKeys(to) {
+			if s == d {
+				continue
+			}
+			e := Edge{From: s, To: d, Relation: RelEgressTo, Provenance: ProvNetworkPolicy, Confidence: conf, Scope: ScopeService, Evidence: ev}
+			dup := false
+			for i, x := range c.Edges {
+				if x.ID() == e.ID() {
+					dup = true
+					if conf > x.Confidence {
+						c.Edges[i] = e
+					}
+					break
+				}
+			}
+			if !dup {
+				c.Edges = append(c.Edges, e)
+			}
+		}
+	}
+}
+
+func hasIngress(np *networkingv1.NetworkPolicy) bool { return len(np.Spec.Ingress) > 0 }
+
+func emptySelector(s *metav1.LabelSelector) bool {
+	return len(s.MatchLabels) == 0 && len(s.MatchExpressions) == 0
 }
 
 func hasEgress(np *networkingv1.NetworkPolicy) bool {

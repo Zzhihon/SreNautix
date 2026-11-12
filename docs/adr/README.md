@@ -146,4 +146,5 @@
 | [0196](0196-series-key-stays-on-root-component.md) | 系列键保持根因组件加告警名，不改用服务 | 已采纳 | — |
 | [0197](0197-subgraph-large-graph-browsing.md) | 组件多的子图：滚轮缩放、同类合并、突出与查找 | 已采纳 | [0199](0199-cluster-map.md) |
 | [0198](0198-evidence-chain-view.md) | 证据标签页：按论证分组的证据链 | 已采纳 | — |
-| [0199](0199-cluster-map.md) | 全集群地图 | 已采纳 | — |
+| [0199](0199-cluster-map.md) | 全集群地图 | 已采纳 | [0200](0200-policy-allowed-and-declared-dependencies.md) |
+| [0200](0200-policy-allowed-and-declared-dependencies.md) | 网络策略放行的边与领域包声明的依赖 | 已采纳 | — |

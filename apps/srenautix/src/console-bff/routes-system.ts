@@ -1,6 +1,6 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import type { Condition, HubComponents, Proposal } from '@srenautix/contract';
-import { clusterMap, type ClusterMapStructure } from '@srenautix/core';
+import { clusterMap, mapPlacer, type ClusterMapStructure } from '@srenautix/core';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type pg from 'pg';
 import { z } from 'zod';
@@ -435,8 +435,9 @@ export function registerSystemRoutes(app: FastifyInstance, d: SystemRouteDeps): 
   });
 
   // 全集群地图（ADR 0199）：结构只随拓扑版本与领域包变化，现在时刻的结构按集群缓存一份；
-  // 事件每次重新读取：那一刻正在触发、没有被抑制、调用方读取作用域内的事件，根因放到地图的组件上
-  const maps = new Map<string, { version: number; packs: object; value: ClusterMapStructure }>();
+  // 事件每次重新读取：那一刻正在触发、没有被抑制、调用方读取作用域内的事件，根因经内存里的拓扑放到地图的组件上（mapPlacer）
+  type Built = { value: ClusterMapStructure; place: ReturnType<typeof mapPlacer> };
+  const maps = new Map<string, { version: number; packs: object; built: Built }>();
   app.get('/v1/topology/map', async (req) => {
     const { scopes } = await d.auth.reader(req);
     const q = req.query as { cluster_id?: string; at?: string };
@@ -448,13 +449,15 @@ export function registerSystemRoutes(app: FastifyInstance, d: SystemRouteDeps): 
     const snapshot = await d.topology.at(cluster, at);
     const packs = d.packs.set;
     const cached = q.at ? undefined : maps.get(cluster);
-    let structure = cached?.version === snapshot.version && cached.packs === packs ? cached.value : undefined;
-    if (!structure) {
-      structure = clusterMap(snapshot, packs.services, d.packs.componentTypes());
+    let built = cached?.version === snapshot.version && cached.packs === packs ? cached.built : undefined;
+    if (!built) {
+      const value = clusterMap(snapshot, packs.services, d.packs.componentTypes());
+      built = { value, place: mapPlacer(snapshot, value) };
       if (!q.at) {
-        maps.set(cluster, { version: snapshot.version, packs, value: structure });
+        maps.set(cluster, { version: snapshot.version, packs, built });
       }
     }
+    const { value: structure, place } = built;
     const rows = await d.pool.query<IncidentRow>(
       `SELECT * FROM server.incidents
         WHERE cluster_id = $1 AND state <> 'merged' AND NOT suppressed
@@ -464,11 +467,10 @@ export function registerSystemRoutes(app: FastifyInstance, d: SystemRouteDeps): 
     );
     const shown = rows.rows.filter((r) => visible(scopes, incidentTarget(r.body)));
     const headlines = await incidentHeadlines(d.pool, shown, new Map());
-    const onMap = new Set(structure.components.map((c) => c.key));
     const incidents: HubComponents['schemas']['ClusterMap']['incidents'] = [];
     for (const r of shown) {
       const root = r.root_component;
-      const owner = root && !onMap.has(root) ? await d.topology.ownerOf(cluster, root, at) : root;
+      const service = r.body.primary_service ?? null;
       incidents.push({
         incident_id: r.incident_id,
         label: r.label,
@@ -476,8 +478,8 @@ export function registerSystemRoutes(app: FastifyInstance, d: SystemRouteDeps): 
         headline: headlines.get(r.incident_id) ?? null,
         first_firing_at: r.first_firing_at.toISOString(),
         root,
-        component: owner && onMap.has(owner) ? owner : null,
-        service: r.body.primary_service ?? null,
+        component: place(root, service),
+        service,
       });
     }
     return { ...structure, at: at.toISOString(), incidents };

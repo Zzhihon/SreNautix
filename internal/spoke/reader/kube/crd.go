@@ -30,6 +30,8 @@ type crdInformer struct {
 	cancel   context.CancelFunc
 	informer cache.SharedIndexInformer
 	kind     string
+	// derived 不为 nil 时对象的贡献依赖 Pod 与命名空间，与 NetworkPolicy 一起重算
+	derived topology.LookupRecognizer
 }
 
 type crdWatcher struct {
@@ -101,7 +103,11 @@ func (c *crdWatcher) start(ctx context.Context, r topology.Recognizer, name stri
 	gvr := r.Resource()
 	kind := topology.KindName(gvr.Group, r.Kind())
 	inf := dynamicinformer.NewFilteredDynamicInformer(c.src.Dynamic, gvr, metav1.NamespaceAll, 0, cache.Indexers{}, nil).Informer()
+	derived, _ := r.(topology.LookupRecognizer)
 	t := typed{name: name, kind: kind, informer: inf, extract: func(o any) topology.Contribution {
+		if derived != nil {
+			return derived.ExtractWith(c.w, o.(*unstructured.Unstructured))
+		}
 		return r.Extract(o.(*unstructured.Unstructured))
 	}}
 	if err := c.w.register(t); err != nil {
@@ -111,7 +117,7 @@ func (c *crdWatcher) start(ctx context.Context, r topology.Recognizer, name stri
 	}
 	cctx, cancel := context.WithCancel(ctx)
 	c.mu.Lock()
-	c.running[gvr] = &crdInformer{cancel: cancel, informer: inf, kind: kind}
+	c.running[gvr] = &crdInformer{cancel: cancel, informer: inf, kind: kind, derived: derived}
 	c.mu.Unlock()
 	go inf.Run(cctx.Done())
 	go func() {
@@ -138,6 +144,28 @@ func (c *crdWatcher) stop(gvr schema.GroupVersionResource, name string, cur *crd
 	c.mu.Lock()
 	delete(c.running, gvr)
 	c.mu.Unlock()
+}
+
+// recompute 重算依赖 Pod 与命名空间的自定义资源（LookupRecognizer）的贡献。initial 为 true 时用对象的创建时间作为 valid_from。
+func (c *crdWatcher) recompute(initial bool) {
+	c.mu.Lock()
+	running := make([]*crdInformer, 0, len(c.running))
+	for _, r := range c.running {
+		if r.derived != nil {
+			running = append(running, r)
+		}
+	}
+	c.mu.Unlock()
+	for _, r := range running {
+		for _, o := range r.informer.GetStore().List() {
+			u := o.(*unstructured.Unstructured)
+			at := c.w.clock.Now()
+			if initial {
+				at = u.GetCreationTimestamp().UTC()
+			}
+			c.w.contribute(r.kind, r.kind, u, func() topology.Contribution { return r.derived.ExtractWith(c.w, u) }, at)
+		}
+	}
 }
 
 // RunningCRDs 返回当前已启动 informer 的自定义资源。
