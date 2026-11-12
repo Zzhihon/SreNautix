@@ -116,15 +116,6 @@
 .refsLabel {
   color: var(--sn-dim);
 }
-.ref {
-  font-family: var(--sn-font-mono);
-  font-size: 11.5px;
-  color: var(--sn-info);
-  border: 1px solid var(--sn-line);
-  border-radius: 3px;
-  padding: 0 4px;
-  text-decoration: none;
-}
 .checks {
   list-style: none;
   margin: 8px 0 0;

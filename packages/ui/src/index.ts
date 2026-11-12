@@ -1,4 +1,4 @@
-export { DEFAULT_TOKENS, TOKEN_NAMES, cssVariables, tokenVar } from './theme/tokens';
+export { DEFAULT_TOKENS, SERIES_SLOTS, TOKEN_NAMES, cssVariables, tokenVar } from './theme/tokens';
 export type { ColorScheme, DesignTokens, Token } from './theme/tokens';
 export { ThemeRoot, usePortalContainer } from './theme/ThemeRoot';
 
@@ -52,12 +52,15 @@ export { ErrorBoundary, setRenderErrorReporter } from './primitives/ErrorBoundar
 export type { RenderError } from './primitives/ErrorBoundary';
 export type { ColumnDef } from './primitives/DataTable';
 export { Chart, gaps } from './primitives/Chart';
-export type { Series } from './primitives/Chart';
+export type { ChartBand, ChartMark, Series } from './primitives/Chart';
 
 export * from './domain/model';
 export { ConditionStrip, CONDITION_SEVERITY, PROPOSE_ONLY, activeConditions } from './domain/ConditionStrip';
 export { IncidentRow } from './domain/IncidentRow';
-export { EvidenceCard, EvidenceList, evidenceAnchor, evidenceTitle } from './domain/EvidenceCard';
+export { EvidenceCard, EvidenceList } from './domain/EvidenceCard';
+export * from './domain/evidence-chain';
+export { EvidenceNavProvider, EvidenceRefChip, evidenceAnchor, evidenceTitle } from './domain/evidence-nav';
+export type { EvidenceNav } from './domain/evidence-nav';
 export { HypothesisList } from './domain/HypothesisList';
 export { TimelineLane } from './domain/TimelineLane';
 export { FeedbackControl } from './domain/FeedbackControl';

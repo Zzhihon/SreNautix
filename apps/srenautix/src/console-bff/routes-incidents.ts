@@ -22,7 +22,14 @@ import { claimEvents, claimIncident, currentClaims, releaseIncident } from '../i
 import { incidentTarget, visible } from '../incident/target.js';
 import { withComponentNames } from '../incident/names.js';
 import { incidentConditions, parseClassificationFilters, rowCategories, rowServices } from './incident-filters.js';
-import { incidentVersion, latestStageA, resolveIncidentRef, type IncidentRow } from '../incident/read.js';
+import {
+  incidentVersion,
+  latestStageA,
+  resolveIncidentRef,
+  runEvidence,
+  type IncidentRow,
+  type RunEvidenceSource,
+} from '../incident/read.js';
 import { reasonsOf, type IncidentReasonStage } from '../incident/reasons.js';
 import { researchRoots } from '../incident/research-root.js';
 import { alertsById } from '../ingest/store.js';
@@ -433,6 +440,25 @@ export function registerIncidentRoutes(app: FastifyInstance, d: IncidentRouteDep
     return r;
   });
 
+  /** 一次研判的全部证据（模型所见）：阶段 A 的卡加区分性检查产生的卡；研判必须属于这个事件 */
+  const runCards = async (row: IncidentRow, runId: string): Promise<EvidenceResult[]> => {
+    if (!d.worker) {
+      throw notFound('研判明细不可用（没有配置 worker）');
+    }
+    const res = await fetch(`${d.worker.url}/v1/runs/${encodeURIComponent(runId)}`, {
+      headers: { authorization: `Bearer ${d.worker.token}`, accept: 'application/json' },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (res.status === 404) {
+      throw notFound(`没有研判 ${runId}`);
+    }
+    const run = (await res.json()) as RunEvidenceSource;
+    if (run.incident_id !== row.incident_id) {
+      throw notFound(`研判 ${runId} 不属于这个事件`);
+    }
+    return runEvidence(d.pool, run);
+  };
+
   app.get('/v1/incidents/:ref/evidence', async (req) => {
     const { scopes } = await d.auth.reader(req);
     const row = await load(scopes, (req.params as { ref: string }).ref);
@@ -444,21 +470,7 @@ export function registerIncidentRoutes(app: FastifyInstance, d: IncidentRouteDep
       }
       return sortCards(r.cards);
     }
-    if (!d.worker) {
-      throw notFound('研判明细不可用（没有配置 worker）');
-    }
-    const res = await fetch(`${d.worker.url}/v1/runs/${encodeURIComponent(runId)}`, {
-      headers: { authorization: `Bearer ${d.worker.token}`, accept: 'application/json' },
-      signal: AbortSignal.timeout(10_000),
-    });
-    if (res.status === 404) {
-      throw notFound(`没有研判 ${runId}`);
-    }
-    const run = (await res.json()) as { incident_id: string; evidence: EvidenceResult[] };
-    if (run.incident_id !== row.incident_id) {
-      throw notFound(`研判 ${runId} 不属于这个事件`);
-    }
-    return sortCards(run.evidence);
+    return sortCards(await runCards(row, runId));
   });
 
   app.post('/v1/incidents/:ref/evidence/rerun', async (req) => {
@@ -475,14 +487,7 @@ export function registerIncidentRoutes(app: FastifyInstance, d: IncidentRouteDep
     }
     let declared: EvidenceResult[];
     if (body.run_id) {
-      if (!d.worker) {
-        throw notFound('研判明细不可用（没有配置 worker）');
-      }
-      const res = await fetch(`${d.worker.url}/v1/runs/${encodeURIComponent(body.run_id)}`, {
-        headers: { authorization: `Bearer ${d.worker.token}`, accept: 'application/json' },
-        signal: AbortSignal.timeout(10_000),
-      });
-      declared = ((await res.json()) as { evidence: EvidenceResult[] }).evidence;
+      declared = await runCards(row, body.run_id);
     } else {
       declared = (await latestStageA(d.pool, row.incident_id))?.cards ?? [];
     }

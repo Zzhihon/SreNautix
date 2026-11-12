@@ -1,7 +1,7 @@
 // GrafanaTheme2 → 设计令牌。Grafana 插件在外壳层调用，组件本身不依赖 @grafana/*。
 
 import type { GrafanaTheme2 } from '@grafana/data';
-import type { DesignTokens } from './tokens';
+import { seriesColors, type DesignTokens } from './tokens';
 
 export function tokensFromGrafana(theme: GrafanaTheme2): DesignTokens {
   const c = theme.colors;
@@ -32,6 +32,7 @@ export function tokensFromGrafana(theme: GrafanaTheme2): DesignTokens {
       model: c.text.secondary,
       'model-soft': c.background.secondary,
       'on-strong': c.primary.contrastText,
+      ...seriesColors(theme.isDark ? 'dark' : 'light'),
     },
   };
 }

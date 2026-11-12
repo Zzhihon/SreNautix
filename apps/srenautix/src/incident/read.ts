@@ -1,4 +1,4 @@
-import type { Incident, IncidentCategory, ServiceSource, StageAReport } from '@srenautix/contract';
+import type { EvidenceResult, Incident, IncidentCategory, ServiceSource, StageAReport } from '@srenautix/contract';
 import type pg from 'pg';
 import type { Queryable } from '../kernel/store/pool.js';
 
@@ -100,6 +100,31 @@ export async function latestStageA(
     [incidentId, version],
   );
   return r.rows[0]?.body ?? null;
+}
+
+/**
+ * 一次研判的全部证据（模型所见）：worker 的运行明细只含区分性检查产生的卡，前面合并阶段 A 的卡。
+ * 阶段 A 卡保留报告中的编号，检查卡的编号在其后，按 ref 去重。
+ */
+export function mergeRunEvidence(
+  stageA: readonly EvidenceResult[],
+  checks: readonly EvidenceResult[],
+): EvidenceResult[] {
+  const refs = new Set(stageA.map((c) => c.ref));
+  return [...stageA, ...checks.filter((c) => !refs.has(c.ref))];
+}
+
+/** worker 的运行明细里与证据有关的字段。 */
+export interface RunEvidenceSource {
+  incident_id: string;
+  incident_version: number;
+  evidence: EvidenceResult[];
+}
+
+/** 研判的全部证据：该研判所在事件版本的阶段 A 卡加它的检查卡。 */
+export async function runEvidence(db: pg.Pool | Queryable, run: RunEvidenceSource): Promise<EvidenceResult[]> {
+  const report = await latestStageA(db, run.incident_id, run.incident_version);
+  return mergeRunEvidence(report?.cards ?? [], run.evidence);
 }
 
 /** 提议绑定的当前值（DESIGN §2.4）：事件版本、根因组件、当前版本有效的证据指纹（阶段 A 与已完成的研判）。 */
