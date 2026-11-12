@@ -127,8 +127,8 @@ export class Scheduler {
   }
 
   /**
-   * 模型恢复后补研判（触发原因 model_recovered）：仍在触发的 critical 与 warning 事件，当前版本最近一次研判因模型不可用
-   * 或输出无效而失败、或准入时因没有可用路由或预算不足而跳过，并且现在没有排队中的研判。只在有可用路由、预算低于 80%、
+   * 模型恢复后补研判（触发原因 model_recovered）：仍在触发的 critical 与 warning 事件，最近一次研判因模型不可用
+   * 或输出无效而失败、或最近一次入队因没有可用路由或预算不足而跳过，并且现在没有排队中的研判。只在有可用路由、预算低于 80%、
    * 不在风暴模式时运行；(事件, 版本, 原因) 唯一，所以每个版本最多补一次，每事件的研判上限照常生效。
    * 之前这类事件停在阶段 A 的"无法判定"，模型恢复后也不再研判（CCHP 11-09..11-11 余额不足期间的 89 次失败）。
    */
@@ -137,6 +137,8 @@ export class Scheduler {
       return [];
     }
     const r = await this.pool.query<{ body: Incident }>(
+      // 看事件最近一次研判与最近一次入队，不限当前版本：版本常在研判失败之后变化（成员进出），新版本没有触发研判。
+      // 研判镜像的错误是 {kind, message}（契约 ResearchRun.error）
       `SELECT i.body FROM server.incidents i
         WHERE i.state = 'firing' AND NOT i.suppressed AND i.severity IN ('critical', 'warning')
           AND NOT EXISTS (SELECT 1 FROM server.research_queue q
@@ -144,12 +146,11 @@ export class Scheduler {
                              AND (q.state IN ('queued', 'leased') OR (q.incident_version = i.version AND q.reason = 'model_recovered')))
           AND (
             EXISTS (SELECT 1 FROM (SELECT r.state, r.error FROM server.research_runs r
-                                     WHERE r.incident_id = i.incident_id AND r.incident_version = i.version
-                                     ORDER BY r.started_at DESC LIMIT 1) last
-                     WHERE last.state = 'failed' AND last.error->>'code' IN ('model_unavailable', 'invalid_output'))
+                                     WHERE r.incident_id = i.incident_id ORDER BY r.started_at DESC LIMIT 1) last
+                     WHERE last.state IN ('failed', 'stage_a_only')
+                       AND last.error->>'kind' IN ('model_unavailable', 'invalid_output'))
             OR EXISTS (SELECT 1 FROM (SELECT q.state, q.skip_reason FROM server.research_queue q
-                                        WHERE q.incident_id = i.incident_id AND q.incident_version = i.version
-                                        ORDER BY q.enqueued_at DESC LIMIT 1) lq
+                                        WHERE q.incident_id = i.incident_id ORDER BY q.enqueued_at DESC LIMIT 1) lq
                         WHERE lq.state = 'skipped' AND lq.skip_reason IN ('no_model_route', 'budget'))
           )
         ORDER BY i.severity = 'critical' DESC, i.first_firing_at DESC

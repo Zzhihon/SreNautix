@@ -34,13 +34,27 @@ const routes = (enabled: boolean) =>
     routes: [{ id: 'primary', enabled, reason: null, message: null }],
   });
 
-/** 一个未恢复事件，版本 1 上有一次研判，状态与错误码按参数 */
-async function incidentWithRun(state: 'failed' | 'completed', code: string | null): Promise<string> {
+/**
+ * 一个未恢复事件与它的一次研判，状态与失败类型按参数。错误的形状与线上研判镜像相同：{kind, message}（契约 ResearchRun.error）
+ */
+async function incidentWithRun(
+  state: 'failed' | 'stage_a_only' | 'completed',
+  kind: string | null,
+  runVersion = 1,
+): Promise<string> {
   const id = await seedFiringIncident(db.server, CLUSTER, ++n);
   await db.server.query(
     `INSERT INTO server.research_runs (run_id, incident_id, incident_version, reason, state, error, started_at, finished_at)
-     VALUES ($1, $2, 1, 'new_incident', $3, $4, now() - interval '1 hour', now() - interval '1 hour')`,
-    [randomUUID(), id, state, code ? JSON.stringify({ code, message: code }) : null],
+     VALUES ($1, $2, $3, 'new_incident', $4, $5, now() - interval '1 hour', now() - interval '1 hour')`,
+    [
+      randomUUID(),
+      id,
+      runVersion,
+      state,
+      kind
+        ? JSON.stringify({ kind, message: 'primary：模型服务返回 HTTP 402：402 billing/reserve: insufficient balance' })
+        : null,
+    ],
   );
   return id;
 }
@@ -68,20 +82,24 @@ afterAll(async () => {
 });
 
 describe('模型恢复后补研判', () => {
-  it('研判因模型不可用或输出无效而失败的未恢复事件入队一次；成功研判过的与其他失败原因不补', async () => {
+  it('研判因模型不可用或输出无效而失败的未恢复事件入队一次；成功研判过的、确定性失败（单次研判超限、内部错误）不补', async () => {
     routes(true);
     const unavailable = await incidentWithRun('failed', 'model_unavailable');
     const invalid = await incidentWithRun('failed', 'invalid_output');
+    const stageAOnly = await incidentWithRun('stage_a_only', 'model_unavailable');
     const done = await incidentWithRun('completed', null);
     const other = await incidentWithRun('failed', 'internal');
+    const tooLarge = await incidentWithRun('stage_a_only', 'budget_exhausted');
 
     const r = await scheduler.recoverModelFailures(10);
     expect(r.map((x) => [x.incidentId, x.outcome]).sort()).toEqual(
       [
         [invalid, 'queued'],
         [unavailable, 'queued'],
+        [stageAOnly, 'queued'],
       ].sort(),
     );
+    expect(await queued(tooLarge)).toEqual([]);
     expect(await queued(unavailable)).toEqual([{ reason: 'model_recovered', state: 'queued' }]);
     expect(await queued(done)).toEqual([]);
     expect(await queued(other)).toEqual([]);
@@ -90,6 +108,21 @@ describe('模型恢复后补研判', () => {
     expect(await scheduler.recoverModelFailures(10)).toEqual([]);
     await db.admin.query("UPDATE server.research_queue SET state = 'done'");
     expect(await scheduler.recoverModelFailures(10)).toEqual([]);
+  });
+
+  it('研判失败之后事件版本变了（成员进出）、新版本没有研判：按当前版本补', async () => {
+    routes(true);
+    const id = await incidentWithRun('failed', 'model_unavailable');
+    await db.server.query(
+      "UPDATE server.incidents SET version = 3, body = jsonb_set(body, '{incident_version}', '3') WHERE incident_id = $1",
+      [id],
+    );
+    expect(await scheduler.recoverModelFailures(10)).toContainEqual({ incidentId: id, outcome: 'queued' });
+    const q = await db.admin.query<{ incident_version: number }>(
+      "SELECT incident_version FROM server.research_queue WHERE incident_id = $1 AND reason = 'model_recovered'",
+      [id],
+    );
+    expect(q.rows).toEqual([{ incident_version: 3 }]);
   });
 
   it('准入时因没有可用路由而跳过的事件同样补研判', async () => {
