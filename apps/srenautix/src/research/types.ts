@@ -75,4 +75,9 @@ export interface PreviousRun {
   output: ResearchOutput;
   /** 上一次研判中区分性检查产生的卡（引用编号按上一次运行） */
   checkCards: EvidenceResult[];
+  /**
+   * 得出这个结论的那次研判（沿用结论的 no_change 运行往前找第一次调用了模型的运行）在清单里记录的模型，去重；
+   * 读不到清单时为空
+   */
+  models: string[];
 }

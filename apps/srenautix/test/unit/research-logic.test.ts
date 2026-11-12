@@ -4,12 +4,13 @@ import { DEFAULT_BUDGET } from '../../src/llm/budget.js';
 import { Egress } from '../../src/llm/egress.js';
 import { buildRuntimes } from '../../src/llm/routes.js';
 import { ModelLayer } from '../../src/llm/session.js';
-import { DEFAULT_LIMITS, runStageB } from '../../src/research/controller.js';
+import { DEFAULT_LIMITS, runStageB, undecidedUnderOtherModels } from '../../src/research/controller.js';
 import { incidentBook, incidentSupplement } from '../../src/research/incident.js';
 import { judgeLadder, symptomOnset } from '../../src/research/ladder.js';
 import { Ledger, ownerOf, scopeOf } from '../../src/research/ledger.js';
 import { WorkerMetrics } from '../../src/research/metrics.js';
 import { validateConclusion } from '../../src/research/validate.js';
+import type { PreviousRun } from '../../src/research/types.js';
 import { MemorySink, testRoute } from '../support/research-env.js';
 import { feedback, incident, researchCase, stageA, stageACards, subgraph, T0 } from '../support/scenario.js';
 
@@ -674,9 +675,9 @@ describe('next_checks 为空时控制器补选（ADR 0137）', () => {
 });
 
 describe('指纹门控', () => {
-  it('证据指纹不变且没有新的反馈：不调用模型，追加"仍然一致"', async () => {
+  const gateLayer = () => {
     const egress = new Egress({ allowCrossBorder: false, honeytokens: [] }, () => undefined);
-    const layer = new ModelLayer({
+    return new ModelLayer({
       routes: buildRuntimes(
         [
           {
@@ -694,6 +695,23 @@ describe('指纹门控', () => {
       onCalibration: async () => undefined,
       onDrift: async () => undefined,
     });
+  };
+
+  it('上一次没有判定根因、得出它的模型不在现在的常规路由里：不沿用，重新研判', () => {
+    const layer = gateLayer();
+    const model = layer.regular[0]!.route.model;
+    const prev = (level: string, models: string[]) =>
+      ({ output: { conclusion: { level } }, models }) as unknown as PreviousRun;
+    expect(undecidedUnderOtherModels(prev('inconclusive', ['old-model']), layer)).toBe(true);
+    expect(undecidedUnderOtherModels(prev('undetermined', [model, 'old-model']), layer)).toBe(true);
+    // 读不到当时的模型（清单缺失）按不同处理
+    expect(undecidedUnderOtherModels(prev('inconclusive', []), layer)).toBe(true);
+    expect(undecidedUnderOtherModels(prev('inconclusive', [model]), layer)).toBe(false);
+    expect(undecidedUnderOtherModels(prev('likely', ['old-model']), layer)).toBe(false);
+  });
+
+  it('证据指纹不变且没有新的反馈：不调用模型，追加"仍然一致"', async () => {
+    const layer = gateLayer();
     const rc = researchCase();
     const prevOutput = { validation_notes: ['旧'], conclusion: { root_component: PG } } as unknown as ResearchOutput;
     const sink = new MemorySink();
@@ -708,6 +726,7 @@ describe('指纹门控', () => {
           finishedAt: new Date(T0 + 50 * 60_000).toISOString(),
           output: prevOutput,
           checkCards: [],
+          models: [],
         },
         signal: new AbortController().signal,
       },

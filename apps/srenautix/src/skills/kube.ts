@@ -1,6 +1,6 @@
 import { AppsV1Api, CoreV1Api, KubeConfig, type V1Pod } from '@kubernetes/client-node';
 import type { skills as sdk } from '@srenautix/packs-sdk';
-import { finish } from '../research/kube-tools.js';
+import { finish, readLogTail } from '../research/kube-tools.js';
 
 // 技能的 Kubernetes 只读访问（ADR 0181 §7.1）：工作负载的 Pod 状态摘要、Pod 的事件、上一次退出的容器日志尾部。
 // 不读环境变量、卷与 Secret；日志经脱敏与截断（与阶段 B 的只读检查相同，ADR 0106）。调用方（SkillContext）负责能力、
@@ -122,14 +122,6 @@ export class KubeSkillReader implements SkillKube {
   }
 
   async previousLog(namespace: string, pod: string, container: string, tailLines: number, maxBytes: number) {
-    const text = await this.core.readNamespacedPodLog({
-      namespace,
-      name: pod,
-      container,
-      previous: true,
-      tailLines,
-      limitBytes: maxBytes * 4,
-    });
-    return finish(String(text ?? ''), maxBytes);
+    return readLogTail(this.core, { namespace, pod, container, previous: true, tailLines, maxBytes });
   }
 }

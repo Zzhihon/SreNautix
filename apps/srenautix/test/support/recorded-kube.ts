@@ -36,6 +36,6 @@ export class RecordedKube implements SkillKube {
         code: 400,
       });
     }
-    return finish(text.split('\n').slice(-tailLines).join('\n'), maxBytes);
+    return finish(text.split('\n').slice(-tailLines).join('\n'), maxBytes, 'tail');
   }
 }

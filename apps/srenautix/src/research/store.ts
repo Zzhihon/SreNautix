@@ -284,6 +284,18 @@ export class WorkerStore {
       'SELECT result FROM worker.evidence_snapshots WHERE run_id = $1 ORDER BY ref',
       [row.run_id],
     );
+    // 沿用结论的运行（no_change）没有调用模型，结论来自它之前最近一次调用了模型的运行
+    const models = await this.pool.query<{ model: string }>(
+      `SELECT DISTINCT r->>'model' AS model
+         FROM (SELECT run_id FROM worker.research_runs
+                WHERE incident_id = $1 AND subject_type = 'incident' AND state = 'completed' AND output IS NOT NULL
+                  AND output->>'stop_reason' IS DISTINCT FROM 'no_change'
+                ORDER BY finished_at DESC LIMIT 1) src
+         JOIN worker.research_manifests m ON m.run_id = src.run_id,
+              jsonb_array_elements(m.manifest->'routes') r
+        ORDER BY 1`,
+      [incidentId],
+    );
     return {
       runId: row.run_id,
       evidenceFingerprint: row.evidence_fingerprint,
@@ -291,6 +303,7 @@ export class WorkerStore {
       finishedAt: row.finished_at.toISOString(),
       output: row.output,
       checkCards: cards.rows.map((x) => x.result),
+      models: models.rows.map((x) => x.model),
     };
   }
 
