@@ -75,7 +75,6 @@
 .menuBtn {
   display: none;
 }
-.proposalOnly,
 .breakGlass {
   display: flex;
   gap: 8px;

@@ -3,7 +3,7 @@
 
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, Outlet, useNavigate, useRouterState, useSearch } from '@tanstack/react-router';
-import { ConditionStrip, ErrorBoundary, StatusPill, STATUS, useConditions, useI18n, type Cluster } from '@srenautix/ui';
+import { ConditionStrip, ErrorBoundary, useConditions, useI18n, type Cluster } from '@srenautix/ui';
 import { LogOut, Menu, Search, ShieldAlert } from 'lucide-react';
 import { useState, type FormEvent } from 'react';
 import { hub, ok } from '../api';
@@ -224,18 +224,10 @@ export function Shell() {
           checkedAt={conditions.dataUpdatedAt || null}
           now={now}
           error={conditions.error ?? undefined}
+          proposalOnly={proposalOnly.map((c) => c.display_name)}
         />
       </ErrorBoundary>
       <ErrorBoundary area="Banners" resetKeys={[clusters.dataUpdatedAt]}>
-        {proposalOnly.length > 0 && (
-          <div className={styles.proposalOnly} role="alert">
-            {proposalOnly.map((c) => (
-              <StatusPill key={c.cluster_id} tone="bad" icon={STATUS.condition.frozen.icon} strong>
-                {t('header.proposal_only', { cluster: c.display_name })}
-              </StatusPill>
-            ))}
-          </div>
-        )}
         {session.break_glass && (
           <div className={styles.breakGlass} role="alert">
             <ShieldAlert aria-hidden="true" />
