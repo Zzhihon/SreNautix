@@ -157,7 +157,7 @@ func (w *Watcher) Start(ctx context.Context) error {
 			extract: func(o any) topology.Contribution { return topology.Ingress(o.(*networkingv1.Ingress)) }},
 		{name: "networkpolicies", kind: "NetworkPolicy", informer: npInf,
 			extract: func(o any) topology.Contribution {
-				return topology.NetworkPolicyEgress(w, o.(*networkingv1.NetworkPolicy))
+				return topology.NetworkPolicyEdges(w, o.(*networkingv1.NetworkPolicy))
 			}},
 	}
 	for _, t := range list {
@@ -358,7 +358,10 @@ func (w *Watcher) recompute(pods, nps, initial bool) {
 			if initial {
 				at = np.CreationTimestamp.UTC()
 			}
-			w.contribute("networkpolicies", "NetworkPolicy", np, func() topology.Contribution { return topology.NetworkPolicyEgress(w, np) }, at)
+			w.contribute("networkpolicies", "NetworkPolicy", np, func() topology.Contribution { return topology.NetworkPolicyEdges(w, np) }, at)
+		}
+		if w.crds != nil {
+			w.crds.recompute(initial)
 		}
 	}
 }
@@ -489,6 +492,15 @@ func (w *Watcher) Namespaces(selector labels.Selector) []string {
 		out = append(out, n.Name)
 	}
 	return out
+}
+
+// NamespaceLabels 实现 topology.Lookup。
+func (w *Watcher) NamespaceLabels(name string) (map[string]string, bool) {
+	n, err := w.nss.Get(name)
+	if err != nil {
+		return nil, false
+	}
+	return n.Labels, true
 }
 
 // Pods 实现 topology.Lookup。

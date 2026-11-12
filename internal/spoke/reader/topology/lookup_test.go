@@ -21,6 +21,7 @@ func (owners) PV(string) (*corev1.PersistentVolume, bool)               { return
 func (owners) CSINodePlugin(string, string) (*corev1.Pod, bool)         { return nil, false }
 func (owners) Namespaces(labels.Selector) []string                      { return nil }
 func (owners) Pods(string, labels.Selector) []*corev1.Pod               { return nil }
+func (owners) NamespaceLabels(string) (map[string]string, bool)         { return nil, false }
 
 func TestRootOwnerClusterScopedOwnerHasNoNamespace(t *testing.T) {
 	lk := owners{

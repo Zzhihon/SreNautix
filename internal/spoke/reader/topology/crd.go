@@ -22,9 +22,10 @@ type Recognizer interface {
 	Extract(obj *unstructured.Unstructured) Contribution
 }
 
-// BuiltinRecognizers 返回内置的自定义资源识别器：Argo CD Application、Flux Kustomization、Gateway API HTTPRoute、CNPG Cluster。
+// BuiltinRecognizers 返回内置的自定义资源识别器：Argo CD Application、Flux Kustomization、Gateway API HTTPRoute、CNPG Cluster、
+// CiliumNetworkPolicy。
 func BuiltinRecognizers() []Recognizer {
-	return []Recognizer{argoApplication{}, fluxKustomization{}, httpRoute{}, cnpgCluster{}}
+	return []Recognizer{argoApplication{}, fluxKustomization{}, httpRoute{}, cnpgCluster{}, ciliumPolicy{}}
 }
 
 func crdKind(r Recognizer) string { return KindName(r.Resource().Group, r.Kind()) }
