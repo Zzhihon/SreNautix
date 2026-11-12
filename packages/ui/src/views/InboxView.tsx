@@ -111,7 +111,7 @@ function BlindBand({ spans, from, to }: { spans: readonly BlindSpan[]; from: num
  * 业务领域一览：每个领域一张卡，写正在触发的事件数（各服务按主服务计数之和，GET /v1/business-domains）与
  * 事件最多的服务；点卡片只看这个领域，再点一次取消。卡片的计数与上面的状态筛选无关，始终是未恢复的事件。
  * 没有业务领域的事件另有一张不可点的卡（列表接口没有"只看未归属"的筛选），各卡之和等于"全部领域"。
- * 宿主有拓扑页时最后一张卡链接到全集群地图，选中了领域时地图对准这个领域（ADR 0198）。
+ * 宿主有拓扑页时最后一张卡链接到全集群地图，选中了领域时地图对准这个领域（ADR 0199）。
  */
 export function DomainOverview({
   domains,

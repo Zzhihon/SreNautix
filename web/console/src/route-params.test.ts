@@ -36,7 +36,7 @@ describe('拓扑页的 search 参数（ADR 0191）', () => {
     });
   });
 
-  it('全集群地图是默认视图，链接只写集群与要对准的业务领域（ADR 0198）', () => {
+  it('全集群地图是默认视图，链接只写集群与要对准的业务领域（ADR 0199）', () => {
     expect(topologySearch({ view: 'map' }).view).toBe('map');
     const href = clusterMapHref('prod', 'forwarding');
     expect(href.startsWith('/topology?')).toBe(true);

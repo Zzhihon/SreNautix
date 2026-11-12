@@ -1,4 +1,4 @@
-// 全集群地图（ADR 0198）：把某一时刻的对象图归并成地图。
+// 全集群地图（ADR 0199）：把某一时刻的对象图归并成地图。
 // 地图上的组件是有 Pod 的顶层对象（Deployment、StatefulSet、CNPG Cluster……，静态 Pod 的属主是 Node，这时 Pod 自己是组件）
 // 与路由入口（有 routes_to 的对象）。Service 与带 Operator 约定的对象只是连接：经过它们的边接到它们选中的组件上。
 // 组件引用、挂载的其余对象（ConfigMap、Secret、PVC……）不画，按类型计数；节点与集群枢纽单独列出，不画边。

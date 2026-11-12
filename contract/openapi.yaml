@@ -1725,7 +1725,7 @@ paths:
       tags: [topology]
       operationId: getClusterMap
       description: |
-        全集群地图（契约 2.61.0，ADR 0198）：某一时刻按组件归并的拓扑，组件按业务领域与服务归属，节点与集群枢纽单独列出，
+        全集群地图（契约 2.61.0，ADR 0199）：某一时刻按组件归并的拓扑，组件按业务领域与服务归属，节点与集群枢纽单独列出，
         并带上调用方读取作用域内正在触发、没有被抑制的事件在地图上的位置。结构只随拓扑版本变化，事件每次重新读取
       x-srenautix-roles: [viewer, responder, approver, auditor, admin]
       x-srenautix-external: false
@@ -2773,7 +2773,7 @@ components:
                     title: { $ref: './schemas/evidence-card.schema.json#/$defs/LocalizedText' }
         components:
           type: array
-          description: 有 Pod 的顶层对象与路由入口（ADR 0198 §1），按键排序
+          description: 有 Pod 的顶层对象与路由入口（ADR 0199 §1），按键排序
           items:
             type: object
             additionalProperties: false

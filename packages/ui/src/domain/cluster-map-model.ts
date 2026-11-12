@@ -1,4 +1,4 @@
-// 全集群地图的画法（ADR 0198）：GET /v1/topology/map 的结构加上事件，整理成要画的框与节点。纯函数，布局与渲染在 ClusterMap.tsx。
+// 全集群地图的画法（ADR 0199）：GET /v1/topology/map 的结构加上事件，整理成要画的框与节点。纯函数，布局与渲染在 ClusterMap.tsx。
 // 业务领域 → 服务 → 组件；没有归属的组件放进"未归属"领域，按命名空间分组。同一服务里类型、命名空间、名称词干与连接都相同、
 // 没有事件根因的组件合并（三个控制面节点上的同名静态 Pod、每次运行一个的 Workflow）。
 
@@ -224,7 +224,7 @@ export const PACK = {
 const TIER_ORDER = ['core', 'supporting', 'foundation', 'self'];
 
 /**
- * 确定的排布（ADR 0198 §3）：服务框里组件按名称排成网格，服务框在领域框里上下叠放；领域框按重要程度（核心、支撑、底座、
+ * 确定的排布（ADR 0199 §3）：服务框里组件按名称排成网格，服务框在领域框里上下叠放；领域框按重要程度（核心、支撑、底座、
  * 运维自身，未归属最后）依次填进若干列，列数取外框最接近 16:10 的。同一结构每次得到同样的位置，值班的人能记住位置。
  */
 export function packMap(model: MapModel, tierOf: (domain: string) => string | undefined): Map<string, Placed> {

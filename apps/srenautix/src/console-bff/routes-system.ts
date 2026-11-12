@@ -434,7 +434,7 @@ export function registerSystemRoutes(app: FastifyInstance, d: SystemRouteDeps): 
     return subgraphOf(d.topology, pseudo, hops);
   });
 
-  // 全集群地图（ADR 0198）：结构只随拓扑版本与领域包变化，现在时刻的结构按集群缓存一份；
+  // 全集群地图（ADR 0199）：结构只随拓扑版本与领域包变化，现在时刻的结构按集群缓存一份；
   // 事件每次重新读取：那一刻正在触发、没有被抑制、调用方读取作用域内的事件，根因放到地图的组件上
   const maps = new Map<string, { version: number; packs: object; value: ClusterMapStructure }>();
   app.get('/v1/topology/map', async (req) => {

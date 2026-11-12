@@ -95,7 +95,7 @@ const map: MapData = {
   ],
 };
 
-describe('全集群地图的画法（ADR 0198）', () => {
+describe('全集群地图的画法（ADR 0199）', () => {
   it('名称词干去掉节点、运行编号与哈希后缀，普通的词保留', () => {
     expect(nameStem({ name: 'kube-apiserver-control-plane-01', nodes: ['Node:control-plane-01'] })).toBe(
       'kube-apiserver',
@@ -165,7 +165,7 @@ describe('全集群地图的画法（ADR 0198）', () => {
   });
 });
 
-describe('全集群地图（ADR 0198）', () => {
+describe('全集群地图（ADR 0199）', () => {
   const links = {
     topology: (c: string, k: string) => `/topology?cluster=${c}&component=${encodeURIComponent(k)}`,
   };

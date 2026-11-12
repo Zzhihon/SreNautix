@@ -1637,7 +1637,7 @@ export type paths = {
       cookie?: never;
     };
     /**
-     * @description 全集群地图（契约 2.61.0，ADR 0198）：某一时刻按组件归并的拓扑，组件按业务领域与服务归属，节点与集群枢纽单独列出，
+     * @description 全集群地图（契约 2.61.0，ADR 0199）：某一时刻按组件归并的拓扑，组件按业务领域与服务归属，节点与集群枢纽单独列出，
      *     并带上调用方读取作用域内正在触发、没有被抑制的事件在地图上的位置。结构只随拓扑版本变化，事件每次重新读取
      */
     get: operations['getClusterMap'];
@@ -2468,7 +2468,7 @@ export type components = {
     ClusterMap: {
       /** Format: date-time */
       at: string;
-      /** @description 有 Pod 的顶层对象与路由入口（ADR 0198 §1），按键排序 */
+      /** @description 有 Pod 的顶层对象与路由入口（ADR 0199 §1），按键排序 */
       components: {
         /** @description 组件引用、挂载而不画在地图上的对象（ConfigMap、Secret、PersistentVolumeClaim 等）按类型计数 */
         attachments: {

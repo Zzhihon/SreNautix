@@ -260,7 +260,7 @@ test('拓扑：默认的集群地图画出 informer 写入的组件；没有领�
   page,
 }) => {
   await go(page, '/topology?cluster=e2e');
-  // 默认视图是全集群地图（ADR 0198）：informer 写入的 Pod 归并到 Deployment:shop/api，画在地图上
+  // 默认视图是全集群地图（ADR 0199）：informer 写入的 Pod 归并到 Deployment:shop/api，画在地图上
   await expect(page.getByRole('group', { name: /^集群地图：\d+ 个组件/ })).toBeVisible();
   await expect(page.getByRole('group', { name: /^api，Deployment，/ })).toBeVisible();
   await page.getByRole('group', { name: '视图' }).getByRole('button', { name: '覆盖表' }).click();

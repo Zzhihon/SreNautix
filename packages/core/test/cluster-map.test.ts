@@ -45,7 +45,7 @@ const catalog = new ServiceCatalog(
   COMPONENT_TYPES,
 );
 
-describe('全集群地图（ADR 0198）', () => {
+describe('全集群地图（ADR 0199）', () => {
   const m = () => clusterMap(snapshot(), catalog, COMPONENT_TYPES);
   const edge = (e: ReturnType<typeof m>['edges'][number]) =>
     `${e.from} -> ${e.to} [${e.relations.join(',')} ×${e.count} ${e.provenance} ${e.confidence}]`;

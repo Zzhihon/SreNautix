@@ -1,4 +1,4 @@
-// 全集群地图（ADR 0198）：GET /v1/topology/map 画成 业务领域 → 服务 → 组件 的嵌套框，elkjs 分层布局（依赖从左到右）。
+// 全集群地图（ADR 0199）：GET /v1/topology/map 画成 业务领域 → 服务 → 组件 的嵌套框。
 // 正在触发的事件叠加在组件上：根因按严重度着色，依赖根因的组件标为受影响，框的标题写事件数。依赖边默认只画事件的传播路径，
 // 其余在指向或选中组件、或打开"全部依赖"时画出。排布是确定的（packMap），不用 elkjs。画布交互在 GraphCanvas；
 // 下方的节点条列出节点，指向组件时标出它所在的节点，指向节点时只突出上面的组件。双击组件交给宿主打开它的邻域。
@@ -230,7 +230,7 @@ export function ClusterMap({ map, clusterId, onOpenComponent, focusDomain, prima
     return { tone: overlay.tone, incidents, nodeTone };
   }, [model, overlay]);
 
-  // 依赖边默认只画事件的传播路径（两端都是根因或受影响的组件），其余在指向或选中组件时才画（ADR 0198 §4）
+  // 依赖边默认只画事件的传播路径（两端都是根因或受影响的组件），其余在指向或选中组件时才画（ADR 0199 §4）
   const edges = useMemo<CanvasEdge[]>(() => {
     const tone = (id: string) => ctx.nodeTone.get(id);
     return model.edges.map((e, i) => {

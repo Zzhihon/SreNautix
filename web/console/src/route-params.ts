@@ -16,7 +16,7 @@ export interface TopologySearch {
   component?: string;
   /** 邻域只画 1 跳（ADR 0197）；不写时是 2 跳 */
   hops?: 1;
-  /** 全集群地图初次显示时对准的业务领域（ADR 0198） */
+  /** 全集群地图初次显示时对准的业务领域（ADR 0199） */
   domain?: string;
 }
 
