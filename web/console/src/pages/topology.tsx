@@ -1,4 +1,4 @@
-// 拓扑（DESIGN §4.4、§12.2）：默认视图是覆盖表；未映射的告警可以直接生成覆盖规则的 gitops_pr 提议（批准后由 gateway
+// 拓扑（DESIGN §4.4、§12.2）：默认视图是全集群地图（ADR 0199），每 15 秒刷新事件；覆盖表里未映射的告警可以直接生成覆盖规则的 gitops_pr 提议（批准后由 gateway
 // 只推送到 srenautix/* 分支并开 PR，从不合并）；邻域图每条边标注来源，中心组件与跳数放在 URL 里（ADR 0191、ADR 0197），
 // 覆盖表的组件链接到它的邻域；版本差异。
 
@@ -8,6 +8,7 @@ import type { HubComponents, HubOperations } from '@srenautix/contract';
 import {
   AppLink,
   Button,
+  ClusterMap,
   DataTable,
   EmptyState,
   ErrorBox,
@@ -24,7 +25,7 @@ import {
 } from '@srenautix/ui';
 import { useMemo, useState } from 'react';
 import { hub, ok } from '../api';
-import { topologyHref, type TopologyView } from '../route-params';
+import { TOPOLOGY_VIEWS, topologyHref, type TopologyView } from '../route-params';
 import { hasRole, useSession } from '../session';
 import { Loaded, ROLES_ALL } from './common';
 import styles from './pages.module.css';
@@ -33,6 +34,7 @@ type Coverage = HubComponents['schemas']['TopologyCoverage'];
 type Unmapped = Coverage['unmapped_alerts'][number];
 type Diff = HubOperations['getTopologyDiff']['responses'][200]['content']['application/json'];
 type Graph = HubComponents['schemas']['Subgraph'];
+type MapData = HubComponents['schemas']['ClusterMap'];
 type Pr = HubOperations['createTopologyOverridePr']['responses'][201]['content']['application/json'];
 const ROLES = ['cause', 'change', 'symptom', 'forecast', 'meta'] as const;
 
@@ -211,6 +213,38 @@ function CoverageView({ cluster }: { cluster: string }) {
   );
 }
 
+function MapView({ cluster, domain }: { cluster: string; domain?: string }) {
+  const { t } = useI18n();
+  const navigate = useNavigate();
+  const q = useQuery({
+    queryKey: ['topology', 'map', cluster],
+    queryFn: async () =>
+      ok<MapData>('getClusterMap', await hub.GET('/v1/topology/map', { params: { query: { cluster_id: cluster } } })),
+    // 结构按拓扑版本缓存在服务端，轮询主要取最新的事件；地图只在结构变化时重新排布
+    refetchInterval: 15_000,
+  });
+  return (
+    <Panel
+      title={t('topology.views.map')}
+      meta={q.data ? t('topology.map_meta', { v: q.data.topology_version, n: q.data.incidents.length }) : undefined}
+    >
+      <Loaded q={q} what={t('topology.map_failed')} roles={ROLES_ALL}>
+        {(m) => (
+          <ClusterMap
+            map={m}
+            clusterId={cluster}
+            focusDomain={domain}
+            primary
+            onOpenComponent={(component) =>
+              void navigate({ to: '/topology', search: { cluster, view: 'neighborhood', component } })
+            }
+          />
+        )}
+      </Loaded>
+    </Panel>
+  );
+}
+
 function NeighborhoodView({ cluster, component, hops }: { cluster: string; component: string | null; hops: 1 | 2 }) {
   const { t } = useI18n();
   const navigate = useNavigate();
@@ -358,11 +392,13 @@ export function TopologyPage({
   view,
   component,
   hops,
+  domain,
 }: {
   cluster?: string;
   view: TopologyView;
   component?: string;
   hops: 1 | 2;
+  domain?: string;
 }) {
   const { t } = useI18n();
   const navigate = useNavigate();
@@ -375,7 +411,7 @@ export function TopologyPage({
             label={t('topology.view')}
             value={view}
             onChange={(v) => void navigate({ to: '/topology', search: { cluster, view: v } })}
-            options={(['coverage', 'neighborhood', 'diff'] as const).map((v) => ({
+            options={TOPOLOGY_VIEWS.map((v) => ({
               value: v,
               label: t(`topology.views.${v}`),
             }))}
@@ -388,6 +424,8 @@ export function TopologyPage({
           title={t('topology.need_cluster_title')}
           because={t('topology.need_cluster')}
         />
+      ) : view === 'map' ? (
+        <MapView cluster={cluster} domain={domain} />
       ) : view === 'coverage' ? (
         <CoverageView cluster={cluster} />
       ) : view === 'neighborhood' ? (

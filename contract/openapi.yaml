@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: SreNautix hub API
-  version: 2.60.1
+  version: 2.61.0
   license:
     name: Apache-2.0
     identifier: Apache-2.0
@@ -1720,6 +1720,27 @@ paths:
         '200':
           description: 邻域图，每条边标注来源
           content: { application/json: { schema: { $ref: '#/components/schemas/Subgraph' } } }
+  /v1/topology/map:
+    get:
+      tags: [topology]
+      operationId: getClusterMap
+      description: |
+        全集群地图（契约 2.61.0，ADR 0199）：某一时刻按组件归并的拓扑，组件按业务领域与服务归属，节点与集群枢纽单独列出，
+        并带上调用方读取作用域内正在触发、没有被抑制的事件在地图上的位置。结构只随拓扑版本变化，事件每次重新读取
+      x-srenautix-roles: [viewer, responder, approver, auditor, admin]
+      x-srenautix-external: false
+      parameters:
+        - {
+            name: cluster_id,
+            in: query,
+            required: true,
+            schema: { $ref: './schemas/common.schema.json#/$defs/ClusterId' },
+          }
+        - { name: at, in: query, description: 不写时为现在, schema: { type: string, format: date-time } }
+      responses:
+        '200':
+          description: 集群地图
+          content: { application/json: { schema: { $ref: '#/components/schemas/ClusterMap' } } }
   /v1/topology/diff:
     get:
       tags: [topology]
@@ -2723,6 +2744,128 @@ components:
               provenance: { $ref: './schemas/topology-event.schema.json#/$defs/Provenance' }
               confidence: { type: number, minimum: 0, maximum: 1 }
               scope: { type: string, enum: [instance, service] }
+    ClusterMap:
+      type: object
+      additionalProperties: false
+      required: [topology_version, at, domains, components, edges, nodes, hubs, omitted, incidents]
+      properties:
+        topology_version: { type: integer, minimum: 0 }
+        at: { type: string, format: date-time }
+        domains:
+          type: array
+          description: 地图上有组件的业务领域与服务，按声明顺序
+          items:
+            type: object
+            additionalProperties: false
+            required: [id, title, tier, services]
+            properties:
+              id: { $ref: './schemas/common.schema.json#/$defs/BusinessDomainId' }
+              title: { $ref: './schemas/evidence-card.schema.json#/$defs/LocalizedText' }
+              tier: { $ref: './schemas/common.schema.json#/$defs/BusinessTier' }
+              services:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: false
+                  required: [id, title]
+                  properties:
+                    id: { $ref: './schemas/common.schema.json#/$defs/ServiceId' }
+                    title: { $ref: './schemas/evidence-card.schema.json#/$defs/LocalizedText' }
+        components:
+          type: array
+          description: 有 Pod 的顶层对象与路由入口（ADR 0199 §1），按键排序
+          items:
+            type: object
+            additionalProperties: false
+            required: [key, kind, namespace, name, component_type, service, service_source, members, attachments, nodes]
+            properties:
+              key: { $ref: './schemas/common.schema.json#/$defs/ComponentKey' }
+              kind: { type: string }
+              namespace: { type: [string, 'null'] }
+              name: { type: string }
+              component_type: { type: [string, 'null'] }
+              service:
+                oneOf: [{ type: 'null' }, { $ref: './schemas/common.schema.json#/$defs/ServiceId' }]
+              service_source:
+                type: string
+                enum: [component, member, namespace, default]
+                description: component 组件自己命中服务成员；member 它的某个成员（例如 Pod）命中；namespace 命名空间默认服务；default 没有归属
+              members:
+                type: object
+                additionalProperties: { type: integer, minimum: 1 }
+                description: 沿成员关系归入组件的对象按类型计数，不含组件自己
+              attachments:
+                type: object
+                additionalProperties: { type: integer, minimum: 1 }
+                description: 组件引用、挂载而不画在地图上的对象（ConfigMap、Secret、PersistentVolumeClaim 等）按类型计数
+              nodes:
+                type: array
+                items: { $ref: './schemas/common.schema.json#/$defs/ComponentKey' }
+                description: 成员 Pod 运行的节点
+        edges:
+          type: array
+          description: 组件之间的依赖，from 依赖 to；经 Service 的边接到 Service 选中的组件，同一对组件只有一条
+          items:
+            type: object
+            additionalProperties: false
+            required: [from, to, relations, count, provenance, confidence]
+            properties:
+              from: { $ref: './schemas/common.schema.json#/$defs/ComponentKey' }
+              to: { $ref: './schemas/common.schema.json#/$defs/ComponentKey' }
+              relations: { type: array, items: { type: string }, minItems: 1 }
+              count: { type: integer, minimum: 1, description: 合并的对象级边数 }
+              provenance: { $ref: './schemas/topology-event.schema.json#/$defs/Provenance' }
+              confidence:
+                { type: number, minimum: 0, maximum: 1, description: 合并的边中最高的置信度，provenance 是这条边的来源 }
+        nodes:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [key, name, components, pods]
+            properties:
+              key: { $ref: './schemas/common.schema.json#/$defs/ComponentKey' }
+              name: { type: string }
+              components: { type: integer, minimum: 0 }
+              pods: { type: integer, minimum: 0 }
+        hubs:
+          type: array
+          description: 集群枢纽（CoreDNS、CNI 等），全部组件都依赖，不画边
+          items:
+            type: object
+            additionalProperties: false
+            required: [key, kind, namespace, name, dependents]
+            properties:
+              key: { $ref: './schemas/common.schema.json#/$defs/ComponentKey' }
+              kind: { type: string }
+              namespace: { type: [string, 'null'] }
+              name: { type: string }
+              dependents: { type: integer, minimum: 0, description: 直接依赖它的地图组件数 }
+        omitted:
+          type: integer
+          minimum: 0
+          description: 不画在地图上、也没有被组件引用的顶层对象数（RBAC、CRD、策略、GitOps 对象等）
+        incidents:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [incident_id, label, severity, headline, first_firing_at, root, component, service]
+            properties:
+              incident_id: { $ref: './schemas/common.schema.json#/$defs/Uuid' }
+              label: { $ref: './schemas/incident.schema.json#/$defs/IncidentLabel' }
+              severity: { $ref: './schemas/common.schema.json#/$defs/Severity' }
+              headline:
+                oneOf: [{ type: 'null' }, { $ref: '#/components/schemas/IncidentHeadline' }]
+              first_firing_at: { type: string, format: date-time }
+              root:
+                description: 事件的根因组件键
+                oneOf: [{ type: 'null' }, { $ref: './schemas/common.schema.json#/$defs/ComponentKey' }]
+              component:
+                description: 根因在地图上的组件；根因不在拓扑里（例如领域包的伪组件）时为 null
+                oneOf: [{ type: 'null' }, { $ref: './schemas/common.schema.json#/$defs/ComponentKey' }]
+              service:
+                oneOf: [{ type: 'null' }, { $ref: './schemas/common.schema.json#/$defs/ServiceId' }]
     ProposalDetail:
       type: object
       additionalProperties: false

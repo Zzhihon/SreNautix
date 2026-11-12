@@ -4,7 +4,7 @@
 
 import { EyeOff } from 'lucide-react';
 import type { BlindSpan, BusinessDomainList, Disposition, IncidentSummary } from '../contract';
-import { useBusinessDomains, useConditions, useIncidents } from '../data';
+import { AppLink, useBusinessDomains, useConditions, useIncidents, useUiEnv } from '../data';
 import { activeConditions } from '../domain/ConditionStrip';
 import { IncidentRow, type RowService } from '../domain/IncidentRow';
 import { localizedText, useI18n } from '../i18n';
@@ -111,15 +111,18 @@ function BlindBand({ spans, from, to }: { spans: readonly BlindSpan[]; from: num
  * 业务领域一览：每个领域一张卡，写正在触发的事件数（各服务按主服务计数之和，GET /v1/business-domains）与
  * 事件最多的服务；点卡片只看这个领域，再点一次取消。卡片的计数与上面的状态筛选无关，始终是未恢复的事件。
  * 没有业务领域的事件另有一张不可点的卡（列表接口没有"只看未归属"的筛选），各卡之和等于"全部领域"。
+ * 宿主有拓扑页时最后一张卡链接到全集群地图，选中了领域时地图对准这个领域（ADR 0199）。
  */
 export function DomainOverview({
   domains,
   selected,
   onSelect,
+  mapHref,
 }: {
   domains: BusinessDomainList;
   selected: string | undefined;
   onSelect: (id: string | undefined) => void;
+  mapHref?: string;
 }) {
   const { t, locale } = useI18n();
   const cards = domains.items.map((d) => ({
@@ -167,6 +170,12 @@ export function DomainOverview({
           <span className={styles.domainCount}>{t('inbox.domain_firing', { n: domains.unassigned_firing })}</span>
         </div>
       )}
+      {mapHref && (
+        <AppLink href={mapHref} className={styles.domainCard}>
+          <span className={styles.domainName}>{t('inbox.open_map')}</span>
+          <span className={styles.domainTop}>{t('inbox.open_map_sub')}</span>
+        </AppLink>
+      )}
     </nav>
   );
 }
@@ -197,6 +206,7 @@ export function InboxView({
   };
   const list = useIncidents(q);
   const domains = useBusinessDomains(cluster);
+  const { links } = useUiEnv();
   const serviceTitle = new Map(
     (domains.data?.items ?? []).flatMap((d) => d.services.map((s) => [s.id, localizedText(s.title, locale)] as const)),
   );
@@ -248,6 +258,7 @@ export function InboxView({
           domains={domains.data}
           selected={filters.business_domain}
           onSelect={(business_domain) => onFilters({ ...filters, business_domain })}
+          mapHref={cluster && links.clusterMap ? links.clusterMap(cluster, filters.business_domain) : undefined}
         />
       )}
       <Toolbar label={t('inbox.filters')}>

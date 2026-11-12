@@ -6,7 +6,7 @@ export const str = (v: unknown): string | undefined => (typeof v === 'string' &&
 export const maybeOneOf = <T extends string>(v: unknown, allowed: readonly T[]): T | undefined =>
   allowed.includes(v as T) ? (v as T) : undefined;
 
-export const TOPOLOGY_VIEWS = ['coverage', 'neighborhood', 'diff'] as const;
+export const TOPOLOGY_VIEWS = ['map', 'coverage', 'neighborhood', 'diff'] as const;
 export type TopologyView = (typeof TOPOLOGY_VIEWS)[number];
 
 export interface TopologySearch {
@@ -16,6 +16,8 @@ export interface TopologySearch {
   component?: string;
   /** 邻域只画 1 跳（ADR 0197）；不写时是 2 跳 */
   hops?: 1;
+  /** 全集群地图初次显示时对准的业务领域（ADR 0199） */
+  domain?: string;
 }
 
 export function topologySearch(s: Record<string, unknown>): TopologySearch {
@@ -24,7 +26,13 @@ export function topologySearch(s: Record<string, unknown>): TopologySearch {
     view: maybeOneOf(s.view, TOPOLOGY_VIEWS),
     component: str(s.component),
     hops: s.hops === 1 || s.hops === '1' ? 1 : undefined,
+    domain: str(s.domain),
   };
+}
+
+/** 全集群地图（拓扑页的默认视图），可以对准一个业务领域 */
+export function clusterMapHref(cluster: string, domain?: string): string {
+  return `/topology${stringifySearch({ cluster, domain })}`;
 }
 
 /** 以某个组件为中心的拓扑邻域 */

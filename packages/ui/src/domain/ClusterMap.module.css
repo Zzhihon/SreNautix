@@ -1,0 +1,211 @@
+/* 全集群地图：领域框、服务框、组件节点与画布下方的节点条；画布、侧栏与工具条的样式在 GraphCanvas.module.css */
+.box {
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--sn-line);
+  border-radius: 8px;
+}
+.box[data-box='domain'] {
+  background: color-mix(in srgb, var(--sn-panel) 55%, transparent);
+}
+.box[data-box='service'] {
+  border-style: dashed;
+  border-radius: 6px;
+}
+.box[data-tone='bad'] {
+  border: 2px solid var(--sn-bad);
+}
+.box[data-tone='warn'] {
+  border: 2px solid var(--sn-warn);
+}
+.boxHead {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 7px 10px 0;
+  font-size: 13px;
+  white-space: nowrap;
+}
+.box[data-box='service'] .boxHead {
+  padding: 4px 8px 0;
+  font-size: 11.5px;
+  color: var(--sn-dim);
+}
+.box[data-box='domain'] .boxTitle {
+  font-weight: 600;
+  color: var(--sn-text);
+}
+.boxTitle {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.boxCount {
+  color: var(--sn-bad);
+  font-weight: 600;
+}
+.item {
+  box-sizing: border-box;
+  width: 184px;
+  height: 46px;
+  border: 1px solid var(--sn-line);
+  border-radius: 6px;
+  background: var(--sn-panel);
+  color: var(--sn-text);
+  padding: 4px 9px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  font-size: 12px;
+  cursor: pointer;
+}
+.item[data-src='namespace'] {
+  border-style: dashed;
+}
+.item[data-fold] {
+  box-shadow:
+    3px 3px 0 -1px var(--sn-panel),
+    3px 3px 0 0 var(--sn-line);
+}
+.item[data-tone='bad'] {
+  border: 2px solid var(--sn-bad);
+  background: var(--sn-bad-soft);
+}
+.item[data-tone='warn'] {
+  border: 2px solid var(--sn-warn);
+  background: var(--sn-warn-soft);
+}
+.item[data-tone='hit'] {
+  border-color: var(--sn-warn);
+  background: var(--sn-warn-soft);
+}
+.item[data-hit] {
+  box-shadow: 0 0 0 2px var(--sn-info);
+}
+.item[data-selected] {
+  box-shadow: 0 0 0 3px var(--sn-focus);
+}
+.item[data-dim] {
+  opacity: 0.25;
+}
+.name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sub {
+  color: var(--sn-dim);
+  font-size: 10.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.handle {
+  opacity: 0;
+}
+.footer {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 8px;
+  font-size: 12px;
+}
+.strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.stripLabel {
+  color: var(--sn-dim);
+}
+.nodeChip {
+  display: inline-flex;
+  gap: 5px;
+  align-items: baseline;
+  padding: 2px 7px;
+  border: 1px solid var(--sn-line);
+  border-radius: 5px;
+  background: var(--sn-panel);
+  color: var(--sn-dim);
+  font-family: var(--sn-font-mono);
+  font-size: 11.5px;
+}
+.nodeChip small {
+  color: var(--sn-faint);
+  font-size: 10.5px;
+}
+.nodeChip[data-on] {
+  border-color: var(--sn-info);
+  background: var(--sn-info-soft);
+  color: var(--sn-info);
+}
+.nodeChip[data-dim] {
+  opacity: 0.4;
+}
+.nodeChip:focus-visible {
+  outline: 2px solid var(--sn-focus);
+  outline-offset: 1px;
+}
+.note {
+  margin: 0;
+  color: var(--sn-dim);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  color: var(--sn-dim);
+}
+.legend i {
+  display: inline-block;
+  width: 14px;
+  height: 10px;
+  margin-right: 5px;
+  vertical-align: -1px;
+  border: 1px solid var(--sn-line);
+  border-radius: 3px;
+  background: var(--sn-panel);
+}
+.legend i[data-tone='bad'] {
+  border: 2px solid var(--sn-bad);
+  background: var(--sn-bad-soft);
+}
+.legend i[data-tone='warn'] {
+  border: 2px solid var(--sn-warn);
+  background: var(--sn-warn-soft);
+}
+.legend i[data-tone='hit'] {
+  border-color: var(--sn-warn);
+  background: var(--sn-warn-soft);
+}
+.legend i[data-src='namespace'] {
+  border-style: dashed;
+}
+.legend i[data-fold] {
+  box-shadow: 2px 2px 0 0 var(--sn-line);
+}
+.sev {
+  padding: 0 5px;
+  border-radius: 4px;
+  font-size: 11px;
+}
+.sev[data-tone='bad'] {
+  background: var(--sn-bad-soft);
+  color: var(--sn-bad);
+}
+.sev[data-tone='warn'] {
+  background: var(--sn-warn-soft);
+  color: var(--sn-warn);
+}
+/* 事件的传播路径：两端都是根因或受影响的组件 */
+.path {
+  --xy-edge-stroke: var(--sn-warn);
+  --xy-edge-stroke-width: 1.6;
+  stroke-dasharray: 5 3;
+}

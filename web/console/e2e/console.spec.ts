@@ -256,10 +256,14 @@ test('集群：gateway 心跳正常时已连接、准入自检通过、未冻结
   await expect(page.getByText('仅提议', { exact: true })).toHaveCount(0);
 });
 
-test('拓扑：没有领域包时覆盖表列出告警映射到的组件且写明没有证据链，未映射的告警给出推断，邻域图显示 informer 写入的对象', async ({
+test('拓扑：默认的集群地图画出 informer 写入的组件；没有领域包时覆盖表列出告警映射到的组件且写明没有证据链，未映射的告警给出推断，邻域图显示 informer 写入的对象', async ({
   page,
 }) => {
   await go(page, '/topology?cluster=e2e');
+  // 默认视图是全集群地图（ADR 0199）：informer 写入的 Pod 归并到 Deployment:shop/api，画在地图上
+  await expect(page.getByRole('group', { name: /^集群地图：\d+ 个组件/ })).toBeVisible();
+  await expect(page.getByRole('group', { name: /^api，Deployment，/ })).toBeVisible();
+  await page.getByRole('group', { name: '视图' }).getByRole('button', { name: '覆盖表' }).click();
   // KubePodCrashLooping 按 namespace、pod 标签解析到 informer 写入的 Pod（ADR 0097），告警的组件是 Pod 沿 owned_by 的
   // 顶层属主 Deployment:shop/api（ADR 0104）：覆盖表里它是 api 这一行（没有类型、没有证据链、映射 1 条告警），没有 Pod 行
   const coverage = page.getByRole('table', { name: '覆盖表' });

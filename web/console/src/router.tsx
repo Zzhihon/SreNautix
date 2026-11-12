@@ -189,16 +189,17 @@ const topologyRoute = createRoute({
   path: 'topology',
   validateSearch: topologySearch,
   component: function Topology() {
-    const { cluster, view, component, hops } = topologyRoute.useSearch();
+    const { cluster, view, component, hops, domain } = topologyRoute.useSearch();
     // 单集群时自动带上该集群（不改 URL），否则 topology 页会停在「请选择集群」。
     // 复用 Shell 的集群列表缓存与默认选中规则，不新造全局状态。
     const clusters = useQuery(clustersQuery);
     return (
       <TopologyPage
         cluster={resolveCluster(clusters.data, cluster)}
-        view={view ?? 'coverage'}
+        view={view ?? 'map'}
         component={component}
         hops={hops ?? 2}
+        domain={domain}
       />
     );
   },
