@@ -1,6 +1,7 @@
 // 业务领域与服务（契约 2.53.0，ADR 0193）：business.yaml 编译成的服务目录与一条告警的服务归属，以及组件类型与服务成员
 // 共用的匹配条件（ComponentMatch）。只依赖契约：server 与部署方的领域包工具都用它。
 import type {
+  BusinessDependency,
   BusinessDomain,
   BusinessDomainId,
   BusinessTier,
@@ -108,12 +109,26 @@ export class ServiceCatalog {
   private readonly members: Member[] = [];
   private readonly namespaceDefault = new Map<string, ServiceId>();
   private readonly declared: Array<{ pack: string; domains: readonly BusinessDomain[] }>;
+  private readonly deps: Array<BusinessDependency & { pack: string }>;
 
   constructor(
-    packs: ReadonlyArray<{ pack: string; domains: readonly BusinessDomain[] }>,
+    packs: ReadonlyArray<{
+      pack: string;
+      domains: readonly BusinessDomain[];
+      dependencies?: readonly BusinessDependency[];
+    }>,
     types: readonly ComponentType[],
   ) {
     this.declared = packs.map((p) => ({ pack: p.pack, domains: p.domains }));
+    // 声明的依赖按 kind、命名空间与名称核对（matchesByName），带 labels 的条件永远不命中，加载时就拒绝
+    this.deps = packs.flatMap((p) =>
+      (p.dependencies ?? []).map((d) => {
+        if ([...d.from, ...d.to].some((m) => Object.keys(m.labels ?? {}).length > 0)) {
+          throw new ServiceCatalogError(p.pack, `依赖"${d.reason}"的条件带 labels：依赖只按 kind、命名空间与名称匹配`);
+        }
+        return { ...d, pack: p.pack };
+      }),
+    );
     const typeById = new Map(types.map((t) => [t.id, t]));
     // 同一 id 的业务领域在几个包中声明时合并（与 ADR 0146 的领域相同）：title、tier 给出多处时必须相同
     const heads = new Map<BusinessDomainId, { title?: LocalizedText; tier?: BusinessTier; pack: string }>();
@@ -221,6 +236,11 @@ export class ServiceCatalog {
   /** 以这个命名空间为默认命名空间的服务 */
   ofNamespace(namespace: string | null): ServiceId | null {
     return namespace === null ? null : (this.namespaceDefault.get(namespace) ?? null);
+  }
+
+  /** 部署方声明的依赖（ADR 0200），按包的加载顺序；不影响服务归属，不在 inputs() 里 */
+  dependencies(): ReadonlyArray<BusinessDependency & { pack: string }> {
+    return this.deps;
   }
 
   /** 服务归属的声明输入（ADR 0193 §5），并入归类输入的指纹 */

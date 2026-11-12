@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { assertValid, type TopologyEdge } from '@srenautix/contract';
-import { buildKubeTopology, matchTypeByName, OWNED_BY, TopologyStore } from '../src/index.js';
+import {
+  buildKubeTopology,
+  matchTypeByName,
+  OWNED_BY,
+  POLICY_ALLOWED_CONFIDENCE,
+  TopologyStore,
+} from '../src/index.js';
 import { CLUSTER, clusterObjects, clusterStore, COMPONENT_TYPES, CONVENTIONS, MIN, T0 } from './fixtures.js';
 
 const snapshot = () =>
@@ -252,5 +258,34 @@ describe('集群级属主与组件类型的优先级', () => {
     expect(matchTypeByName('Cluster.postgresql.cnpg.io', 'db', 'dragonfly', types)?.id).toBe('postgres.cnpg-cluster');
     // 只有它命中时仍然取它
     expect(matchTypeByName('cluster', null, 'cchp-postgres', types)?.id).toBe('postgres.cnpg-cluster');
+  });
+});
+
+describe('NetworkPolicy 的入站规则（ADR 0200）', () => {
+  const objs = () => [
+    ...clusterObjects(),
+    {
+      apiVersion: 'networking.k8s.io/v1',
+      kind: 'NetworkPolicy',
+      metadata: { name: 'pg-ingress', namespace: 'shop' },
+      spec: {
+        podSelector: { matchLabels: { 'cnpg.io/cluster': 'pg' } },
+        policyTypes: ['Ingress'],
+        ingress: [{ from: [{ namespaceSelector: { matchLabels: { 'kubernetes.io/metadata.name': 'web' } } }] }],
+      },
+    },
+  ];
+
+  it('允许的来源 Pod → 被选中的 Pod，置信度低于归并阈值；出站规则推出的同一条边保持 0.6', () => {
+    const { edges } = buildKubeTopology(objs(), { componentTypes: COMPONENT_TYPES, conventions: CONVENTIONS });
+    const np = edges.filter((e) => e.provenance === 'network_policy');
+    const ingress = np.filter((e) => e.evidence === 'networkpolicy pg-ingress ingress');
+    expect(ingress.map((e) => `${e.from} -> ${e.to} ${e.confidence}`)).toEqual([
+      `Pod:web/frontend-9a8b7c6d5-p4n8z -> Pod:shop/pg-1 ${POLICY_ALLOWED_CONFIDENCE}`,
+      `Pod:web/frontend-9a8b7c6d5-p4n8z -> Pod:shop/pg-2 ${POLICY_ALLOWED_CONFIDENCE}`,
+    ]);
+    expect(POLICY_ALLOWED_CONFIDENCE).toBeLessThan(0.6);
+    // worker-egress 推出的边不变
+    expect(np.filter((e) => e.from.startsWith('Pod:shop/worker')).every((e) => e.confidence === 0.6)).toBe(true);
   });
 });

@@ -91,9 +91,9 @@
     },
     "Provenance": {
       "title": "EdgeProvenance",
-      "description": "边的来源（DESIGN §4.2）",
+      "description": "边的来源（DESIGN §4.2）；declared 是领域包 business.yaml 声明的依赖（契约 2.62.0，ADR 0200），只出现在全集群地图上",
       "type": "string",
-      "enum": ["structural", "runtime", "config_ref", "network_policy", "naming"]
+      "enum": ["structural", "runtime", "config_ref", "network_policy", "naming", "declared"]
     }
   }
 }

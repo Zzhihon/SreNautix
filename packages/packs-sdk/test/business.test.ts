@@ -7,7 +7,7 @@ import { compilePackSet } from '../src/pack/compile.js';
 import { loadPackDir } from '../src/pack/load.js';
 import { loadBuiltinPacks } from '../src/pack/sources.js';
 import { CATALOG, PACKS } from './support.js';
-import type { BusinessDomain, ComponentType } from '@srenautix/contract';
+import type { BusinessDependency, BusinessDomain, ComponentType } from '@srenautix/contract';
 import {
   resolveService,
   ServiceCatalog,
@@ -158,6 +158,30 @@ describe('服务目录（ADR 0193）', () => {
         { pack: 'a', domains: [domain('x', [svc('s1', { namespaces: ['n'] }), svc('s2', { namespaces: ['n'] })])] },
       ]),
     ).toThrow(/命名空间 n 已经是服务 s1 的默认命名空间/);
+  });
+
+  it('声明的依赖（ADR 0200）按包的顺序给出，不进入归属的输入；带 labels 的条件是声明错误', () => {
+    const dep: BusinessDependency = {
+      from: [{ kind: 'Deployment', name_pattern: '^api$' }],
+      to: [{ kind: 'Cluster', api_group: 'postgresql.cnpg.io' }],
+      reason: 'api 从 Secret 读取 DATABASE_URL',
+    };
+    const c = new ServiceCatalog([{ pack: 'shop', domains: DOMAINS, dependencies: [dep] }], TYPES);
+    expect(c.dependencies()).toEqual([{ ...dep, pack: 'shop' }]);
+    expect(c.inputs()).toEqual([{ pack: 'shop', domains: DOMAINS }]);
+    expect(
+      () =>
+        new ServiceCatalog(
+          [
+            {
+              pack: 'shop',
+              domains: DOMAINS,
+              dependencies: [{ ...dep, to: [{ kind: 'Pod', labels: { app: 'pg' } }] }],
+            },
+          ],
+          TYPES,
+        ),
+    ).toThrow(/依赖"api 从 Secret 读取 DATABASE_URL"的条件带 labels/);
   });
 });
 

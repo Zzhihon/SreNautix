@@ -14,7 +14,15 @@ export const PROVENANCE_CONFIDENCE: Record<TopologyEdge['provenance'], number> =
   config_ref: 0.7,
   network_policy: 0.6,
   naming: 0.3,
+  // 领域包声明的依赖（ADR 0200），只在全集群地图上
+  declared: 1,
 };
+
+/**
+ * NetworkPolicy 入站规则与 CiliumNetworkPolicy 推出的边（SreNautix ADR 0200）：只说明流量被放行，低于归并阈值 τ（0.6），
+ * 画在拓扑与地图上，不参与事件归并、根因排序与影响范围
+ */
+export const POLICY_ALLOWED_CONFIDENCE = 0.5;
 
 export interface KubeObject {
   apiVersion: string;
@@ -193,14 +201,16 @@ export function buildKubeTopology(all: readonly KubeObject[], opts: BuildOptions
     provenance: TopologyEdge['provenance'],
     scope: TopologyEdge['scope'],
     evidence: string,
+    confidence = PROVENANCE_CONFIDENCE[provenance],
   ) => {
     // 端点不能构成合法的键（ADR 0034）时不建这条边
     if (from === null || to === null || from === to) {
       return;
     }
+    // 同一条边从几处推出时保留置信度最高的一处（NetworkPolicy 的出站 0.6 高于入站 0.5）
     const k = `${from}|${relation}|${to}`;
-    if (!edges.has(k)) {
-      edges.set(k, { from, to, relation, provenance, confidence: PROVENANCE_CONFIDENCE[provenance], scope, evidence });
+    if ((edges.get(k)?.confidence ?? -1) < confidence) {
+      edges.set(k, { from, to, relation, provenance, confidence, scope, evidence });
     }
   };
   const addVirtual = (kind: string, ns: string | null, name: string, hub: boolean) => {
@@ -433,39 +443,58 @@ export function buildKubeTopology(all: readonly KubeObject[], opts: BuildOptions
     }
   }
 
-  // NetworkPolicy 出站规则：被选中的 Pod → 允许访问的 Pod
+  // NetworkPolicy（与 reader 的 NetworkPolicyEdges 相同，SreNautix ADR 0200）：出站规则 被选中的 Pod → 允许访问的 Pod（0.6）；
+  // 入站规则 允许的来源 Pod → 被选中的 Pod（POLICY_ALLOWED_CONFIDENCE，低于归并阈值，只画在拓扑与地图上）
+  const peerPods = (ns: string, peers: unknown) =>
+    arr(peers).flatMap((peer) => {
+      if (peer.podSelector === undefined && peer.namespaceSelector === undefined) {
+        return [];
+      }
+      return pods.filter((p) => {
+        const pns = p.metadata.namespace!;
+        const nsOk =
+          peer.namespaceSelector === undefined
+            ? pns === ns
+            : selectorMatches(
+                { 'kubernetes.io/metadata.name': pns, ...(namespaces.get(pns) ?? {}) },
+                obj(peer.namespaceSelector),
+              );
+        return nsOk && (peer.podSelector === undefined || selectorMatches(p.metadata.labels, obj(peer.podSelector)));
+      });
+    });
   for (const np of byKind('NetworkPolicy')) {
     const ns = np.metadata.namespace!;
     const spec = obj(np.spec);
     const types = (spec.policyTypes as string[] | undefined) ?? [];
-    if (!types.includes('Egress')) {
-      continue;
-    }
-    const sources = pods.filter(
+    const selected = pods.filter(
       (p) => p.metadata.namespace === ns && selectorMatches(p.metadata.labels, obj(spec.podSelector)),
     );
-    for (const rule of arr(spec.egress)) {
-      for (const peer of arr(rule.to)) {
-        if (peer.podSelector === undefined && peer.namespaceSelector === undefined) {
-          continue;
-        }
-        const targets = pods.filter((p) => {
-          const pns = p.metadata.namespace!;
-          const nsOk =
-            peer.namespaceSelector === undefined
-              ? pns === ns
-              : selectorMatches(
-                  { 'kubernetes.io/metadata.name': pns, ...(namespaces.get(pns) ?? {}) },
-                  obj(peer.namespaceSelector),
-                );
-          return nsOk && (peer.podSelector === undefined || selectorMatches(p.metadata.labels, obj(peer.podSelector)));
-        });
-        for (const s of sources) {
-          for (const t of targets) {
-            addEdge(keyOf(s), keyOf(t), 'egress_to', 'network_policy', 'service', `networkpolicy ${np.metadata.name}`);
-          }
+    const allow = (from: KubeObject[], to: KubeObject[], confidence: number, evidence: string) => {
+      for (const s of from) {
+        for (const t of to) {
+          addEdge(keyOf(s), keyOf(t), 'egress_to', 'network_policy', 'service', evidence, confidence);
         }
       }
+    };
+    if (types.includes('Egress')) {
+      for (const rule of arr(spec.egress)) {
+        allow(
+          selected,
+          peerPods(ns, rule.to),
+          PROVENANCE_CONFIDENCE.network_policy,
+          `networkpolicy ${np.metadata.name}`,
+        );
+      }
+    }
+    // 入站规则里"命名空间内全部 Pod 互相放行"（策略与对端的 podSelector 都为空、对端不跨命名空间）不说明依赖，不产生边
+    const empty = (sel: unknown) =>
+      Object.keys(obj(obj(sel).matchLabels)).length === 0 && arr(obj(sel).matchExpressions).length === 0;
+    const everyone = empty(spec.podSelector);
+    for (const rule of arr(spec.ingress)) {
+      const from = arr(rule.from).filter(
+        (p) => !everyone || p.namespaceSelector !== undefined || p.podSelector === undefined || !empty(p.podSelector),
+      );
+      allow(peerPods(ns, from), selected, POLICY_ALLOWED_CONFIDENCE, `networkpolicy ${np.metadata.name} ingress`);
     }
   }
 

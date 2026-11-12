@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { TopologyEdge, TopologyNode } from '@srenautix/contract';
 import { ServiceCatalog } from '@srenautix/packs-sdk/business';
-import { buildKubeTopology, clusterMap } from '../src/index.js';
+import { buildKubeTopology, clusterMap, mapPlacer } from '../src/index.js';
 import { clusterObjects, COMPONENT_TYPES, CONVENTIONS } from './fixtures.js';
 
 const snapshot = () => ({
@@ -136,6 +136,46 @@ describe('全集群地图（ADR 0199）', () => {
     expect(map.components.find((c) => c.key === pod.key)).toMatchObject({ members: {}, nodes: ['Node:node-1'] });
     expect(map.components.some((c) => c.kind === 'Node')).toBe(false);
     expect(map.nodes[0]).toMatchObject({ components: 3, pods: 3 });
+  });
+
+  it('声明的依赖（ADR 0200）：命中的组件之间一条 declared 边；已有推出的边时并入它', () => {
+    const declared = new ServiceCatalog(
+      [
+        {
+          pack: 'test',
+          domains: catalog.inputs()[0]!.domains,
+          dependencies: [
+            {
+              from: [
+                { kind: 'StatefulSet', namespaces: ['shop'], name_pattern: '^search$' },
+                { kind: 'Deployment', name_pattern: '^api$' },
+              ],
+              to: [{ kind: 'Cluster', api_group: 'postgresql.cnpg.io' }],
+              reason: 'search 与 api 从 Secret 读取 DATABASE_URL',
+            },
+          ],
+        },
+      ],
+      COMPONENT_TYPES,
+    );
+    const edges = clusterMap(snapshot(), declared, COMPONENT_TYPES).edges.map(edge);
+    expect(edges).toContain('StatefulSet:shop/search -> Cluster:shop/pg [depends_on ×1 declared 1]');
+    expect(edges).toContain('Deployment:shop/api -> Cluster:shop/pg [depends_on,references ×5 declared 1]');
+    expect(edges).toHaveLength(5);
+  });
+
+  it('根因放到地图上：组件、它的顶层对象、主服务里同名的伪组件；都不命中时为 null', () => {
+    const s = snapshot();
+    const place = mapPlacer(s, m());
+    expect(place('Cluster:shop/pg', 'orders-db')).toBe('Cluster:shop/pg');
+    expect(place('Pod:shop/api-7c9d8f6b4-k2x9q', null)).toBe('Deployment:shop/api');
+    // 两个组件都叫 frontend：按主服务挑；主服务没有同名组件时全图不唯一，不放
+    expect(place('component:frontend', 'frontend')).toBe('Deployment:web/frontend');
+    expect(place('component:frontend', 'orders-db')).toBeNull();
+    expect(place('component:worker', null)).toBe('Deployment:shop/worker');
+    expect(place('component:provider', 'orders-api')).toBeNull();
+    expect(place('Namespace:shop', 'orders-api')).toBeNull();
+    expect(place(null, 'orders-api')).toBeNull();
   });
 
   it('结果与输入顺序无关', () => {
