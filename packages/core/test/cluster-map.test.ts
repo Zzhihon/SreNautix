@@ -167,15 +167,60 @@ describe('全集群地图（ADR 0199）', () => {
   it('根因放到地图上：组件、它的顶层对象、主服务里同名的伪组件；都不命中时为 null', () => {
     const s = snapshot();
     const place = mapPlacer(s, m());
-    expect(place('Cluster:shop/pg', 'orders-db')).toBe('Cluster:shop/pg');
-    expect(place('Pod:shop/api-7c9d8f6b4-k2x9q', null)).toBe('Deployment:shop/api');
+    expect(place('Cluster:shop/pg', 'orders-db')).toEqual({ component: 'Cluster:shop/pg', placement: 'root' });
+    expect(place('Pod:shop/api-7c9d8f6b4-k2x9q', null)).toEqual({
+      component: 'Deployment:shop/api',
+      placement: 'root',
+    });
     // 两个组件都叫 frontend：按主服务挑；主服务没有同名组件时全图不唯一，不放
-    expect(place('component:frontend', 'frontend')).toBe('Deployment:web/frontend');
+    expect(place('component:frontend', 'frontend')).toEqual({
+      component: 'Deployment:web/frontend',
+      placement: 'named',
+    });
     expect(place('component:frontend', 'orders-db')).toBeNull();
-    expect(place('component:worker', null)).toBe('Deployment:shop/worker');
+    expect(place('component:worker', null)).toEqual({ component: 'Deployment:shop/worker', placement: 'named' });
     expect(place('component:provider', 'orders-api')).toBeNull();
     expect(place('Namespace:shop', 'orders-api')).toBeNull();
     expect(place(null, 'orders-api')).toBeNull();
+  });
+
+  it('PodDisruptionBudget 的事件放到它保护的组件上，节点的事件放到节点条上（ADR 0203）', () => {
+    const pdb = (name: string, matchLabels: Record<string, string>) => ({
+      apiVersion: 'policy/v1',
+      kind: 'PodDisruptionBudget',
+      metadata: { name, namespace: 'shop' },
+      spec: { maxUnavailable: 0, selector: { matchLabels } },
+    });
+    const s = {
+      ...buildKubeTopology(
+        [
+          ...clusterObjects(),
+          pdb('pg-primary', { 'cnpg.io/cluster': 'pg' }),
+          pdb('everything', {}),
+          pdb('none', { app: 'nope' }),
+        ],
+        { componentTypes: COMPONENT_TYPES, conventions: CONVENTIONS },
+      ),
+      version: 7,
+    };
+    const map = clusterMap(s, catalog, COMPONENT_TYPES);
+    const place = mapPlacer(s, map);
+    expect(place('PodDisruptionBudget:shop/pg-primary', null)).toEqual({
+      component: 'Cluster:shop/pg',
+      placement: 'protects',
+    });
+    // 保护多个组件时按主服务挑；主服务（orders-api 有 api 与 worker）里也不唯一时不放
+    expect(place('PodDisruptionBudget:shop/everything', 'orders-db')).toEqual({
+      component: 'Cluster:shop/pg',
+      placement: 'protects',
+    });
+    expect(place('PodDisruptionBudget:shop/everything', 'orders-api')).toBeNull();
+    expect(place('PodDisruptionBudget:shop/everything', null)).toBeNull();
+    expect(place('PodDisruptionBudget:shop/none', 'orders-db')).toBeNull();
+    expect(place('Node:node-1', 'orders-api')).toEqual({ component: 'Node:node-1', placement: 'node' });
+    // protects 低于 τ，不改变地图的组件与依赖边
+    expect(map.components).toEqual(m().components);
+    expect(map.edges.some((e) => e.relations.includes('protects'))).toBe(false);
   });
 
   it('结果与输入顺序无关', () => {

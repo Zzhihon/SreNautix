@@ -67,13 +67,14 @@ type Watcher struct {
 	rss     listersappsv1.ReplicaSetLister
 	jobs    listersbatchv1.JobLister
 	nps     cache.Indexer
+	pdbs    cache.Indexer
 
 	fresh *freshness
 	crds  *crdWatcher
 
 	dirtyMu  sync.Mutex
 	dirtyPod bool
-	dirtyNP  bool
+	dirtySel bool
 	synced   bool
 }
 
@@ -100,8 +101,8 @@ type typed struct {
 	informer cache.SharedIndexInformer
 	// extract 为 nil 的对象不贡献拓扑，只用作派生贡献的查询来源
 	extract func(obj any) topology.Contribution
-	// affects 列出这种对象变化后需要重算的派生贡献
-	affectsPods, affectsNP bool
+	// affects 列出这种对象变化后需要重算的派生贡献：Pod 的贡献，或按选择器求出的边（NetworkPolicy、PodDisruptionBudget 与 CRD 识别器）
+	affectsPods, affectsSel bool
 }
 
 // Start 启动 informer 并等待首次同步。之后的变化通过 Sink 输出。
@@ -124,33 +125,35 @@ func (w *Watcher) Start(ctx context.Context) error {
 	w.rss = f.Apps().V1().ReplicaSets().Lister()
 	w.jobs = f.Batch().V1().Jobs().Lister()
 	w.nps = npInf.GetIndexer()
+	pdbInf := f.Policy().V1().PodDisruptionBudgets().Informer()
+	w.pdbs = pdbInf.GetIndexer()
 
 	generic := func(kind string) func(any) topology.Contribution {
 		return func(obj any) topology.Contribution { return topology.Generic(kind, obj.(metav1.Object)) }
 	}
 	list := []typed{
-		{name: "pods", kind: "Pod", informer: podInf, affectsPods: true, affectsNP: true,
+		{name: "pods", kind: "Pod", informer: podInf, affectsPods: true, affectsSel: true,
 			extract: func(o any) topology.Contribution { return topology.Pod(w, o.(*corev1.Pod)) }},
 		{name: "nodes", kind: "Node", informer: f.Core().V1().Nodes().Informer(), extract: generic("Node")},
-		{name: "namespaces", kind: "Namespace", informer: f.Core().V1().Namespaces().Informer(), affectsNP: true},
+		{name: "namespaces", kind: "Namespace", informer: f.Core().V1().Namespaces().Informer(), affectsSel: true},
 		{name: "services", kind: "Service", informer: f.Core().V1().Services().Informer(), extract: generic("Service"), affectsPods: true},
 		{name: "configmaps", kind: "ConfigMap", informer: f.Core().V1().ConfigMaps().Informer(), affectsPods: true},
 		{name: "persistentvolumeclaims", kind: "PersistentVolumeClaim", informer: f.Core().V1().PersistentVolumeClaims().Informer(), affectsPods: true,
 			extract: func(o any) topology.Contribution { return topology.PVC(o.(*corev1.PersistentVolumeClaim)) }},
 		{name: "persistentvolumes", kind: "PersistentVolume", informer: f.Core().V1().PersistentVolumes().Informer(), affectsPods: true,
 			extract: func(o any) topology.Contribution { return topology.PV(o.(*corev1.PersistentVolume)) }},
-		{name: "replicasets", kind: "ReplicaSet", informer: f.Apps().V1().ReplicaSets().Informer(), extract: generic("ReplicaSet"), affectsPods: true, affectsNP: true},
+		{name: "replicasets", kind: "ReplicaSet", informer: f.Apps().V1().ReplicaSets().Informer(), extract: generic("ReplicaSet"), affectsPods: true, affectsSel: true},
 		{name: "deployments", kind: "Deployment", informer: f.Apps().V1().Deployments().Informer(), extract: generic("Deployment")},
 		{name: "statefulsets", kind: "StatefulSet", informer: f.Apps().V1().StatefulSets().Informer(), extract: generic("StatefulSet")},
 		{name: "daemonsets", kind: "DaemonSet", informer: f.Apps().V1().DaemonSets().Informer(), extract: generic("DaemonSet")},
-		{name: "jobs", kind: "Job", informer: f.Batch().V1().Jobs().Informer(), extract: generic("Job"), affectsPods: true, affectsNP: true},
+		{name: "jobs", kind: "Job", informer: f.Batch().V1().Jobs().Informer(), extract: generic("Job"), affectsPods: true, affectsSel: true},
 		{name: "cronjobs", kind: "CronJob", informer: f.Batch().V1().CronJobs().Informer(), extract: generic("CronJob")},
 		{name: "horizontalpodautoscalers", kind: "HorizontalPodAutoscaler", informer: f.Autoscaling().V2().HorizontalPodAutoscalers().Informer(),
 			extract: func(o any) topology.Contribution {
 				return topology.HPA(o.(*autoscalingv2.HorizontalPodAutoscaler))
 			}},
-		// PodDisruptionBudget 只用于集群状态检测器（不进拓扑）
-		{name: "poddisruptionbudgets", kind: "PodDisruptionBudget", informer: f.Policy().V1().PodDisruptionBudgets().Informer()},
+		{name: "poddisruptionbudgets", kind: "PodDisruptionBudget", informer: pdbInf,
+			extract: func(o any) topology.Contribution { return topology.PDB(w, o.(*policyv1.PodDisruptionBudget)) }},
 		{name: "endpointslices", kind: "EndpointSlice", informer: f.Discovery().V1().EndpointSlices().Informer(),
 			extract: func(o any) topology.Contribution { return topology.EndpointSlice(o.(*discoveryv1.EndpointSlice)) }},
 		{name: "ingresses", kind: "Ingress", informer: f.Networking().V1().Ingresses().Informer(),
@@ -227,7 +230,7 @@ func (w *Watcher) upsert(t typed, obj any, at time.Time) {
 	if t.extract != nil {
 		w.contribute(t.name, t.kind, obj.(metav1.Object), func() topology.Contribution { return t.extract(obj) }, at)
 	}
-	w.markDirty(t.affectsPods, t.affectsNP)
+	w.markDirty(t.affectsPods, t.affectsSel)
 }
 
 // contribute 提取一个对象的贡献并写入存储。对象自己的键无法生成时整个对象跳过；贡献中的问题（某个引用的键无法生成、
@@ -276,7 +279,7 @@ func (w *Watcher) remove(t typed, obj any) {
 			w.applyMu.Unlock()
 		}
 	}
-	w.markDirty(t.affectsPods, t.affectsNP)
+	w.markDirty(t.affectsPods, t.affectsSel)
 }
 
 func (w *Watcher) addTombstone(kind string, obj any, now time.Time) {
@@ -329,15 +332,15 @@ func (w *Watcher) emit(evs []topology.Event) {
 	w.sink(evs)
 }
 
-func (w *Watcher) markDirty(pods, np bool) {
+func (w *Watcher) markDirty(pods, sel bool) {
 	w.dirtyMu.Lock()
 	defer w.dirtyMu.Unlock()
 	w.dirtyPod = w.dirtyPod || pods
-	w.dirtyNP = w.dirtyNP || np
+	w.dirtySel = w.dirtySel || sel
 }
 
 // recompute 重算派生贡献。initial 为 true 时用对象的创建时间作为 valid_from。
-func (w *Watcher) recompute(pods, nps, initial bool) {
+func (w *Watcher) recompute(pods, sel, initial bool) {
 	if pods {
 		all, err := w.pods.List(labels.Everything())
 		if err != nil {
@@ -351,7 +354,7 @@ func (w *Watcher) recompute(pods, nps, initial bool) {
 			w.contribute("pods", "Pod", p, func() topology.Contribution { return topology.Pod(w, p) }, at)
 		}
 	}
-	if nps {
+	if sel {
 		for _, o := range w.nps.List() {
 			np := o.(*networkingv1.NetworkPolicy)
 			at := w.clock.Now()
@@ -359,6 +362,14 @@ func (w *Watcher) recompute(pods, nps, initial bool) {
 				at = np.CreationTimestamp.UTC()
 			}
 			w.contribute("networkpolicies", "NetworkPolicy", np, func() topology.Contribution { return topology.NetworkPolicyEdges(w, np) }, at)
+		}
+		for _, o := range w.pdbs.List() {
+			p := o.(*policyv1.PodDisruptionBudget)
+			at := w.clock.Now()
+			if initial {
+				at = p.CreationTimestamp.UTC()
+			}
+			w.contribute("poddisruptionbudgets", "PodDisruptionBudget", p, func() topology.Contribution { return topology.PDB(w, p) }, at)
 		}
 		if w.crds != nil {
 			w.crds.recompute(initial)
@@ -379,10 +390,10 @@ func (w *Watcher) loop(ctx context.Context, list []typed) {
 			return
 		case <-recompute.C:
 			w.dirtyMu.Lock()
-			pods, nps := w.dirtyPod, w.dirtyNP
-			w.dirtyPod, w.dirtyNP = false, false
+			pods, sel := w.dirtyPod, w.dirtySel
+			w.dirtyPod, w.dirtySel = false, false
 			w.dirtyMu.Unlock()
-			w.recompute(pods, nps, false)
+			w.recompute(pods, sel, false)
 		case <-fresh.C:
 			w.fresh.poll()
 		case <-expire.C:

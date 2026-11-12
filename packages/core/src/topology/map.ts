@@ -7,7 +7,7 @@ import type { ComponentKey, ComponentType, HubComponents, TopologyEdge, Topology
 import { matchesByName, type ServiceCatalog, type TypedObject } from '@srenautix/packs-sdk/business';
 import { parseKey } from '../keys.js';
 import { OWNED_BY, SCALES, TopologyGraph } from './graph.js';
-import { matchTypeByName } from './kube.js';
+import { matchTypeByName, PROTECTS } from './kube.js';
 
 type MapSchema = HubComponents['schemas']['ClusterMap'];
 /** 地图的结构部分：只随拓扑版本与领域包变化；时刻与事件由调用方补上 */
@@ -290,32 +290,61 @@ function topOf(g: TopologyGraph): (k: ComponentKey) => ComponentKey {
 /** 领域包告警用的伪组件（component:gateway）的 kind */
 const PSEUDO_KIND = 'component';
 
+/** 事件怎样放到地图上（ADR 0203）；只有 root 与 named 的事件向依赖它的组件传播“受影响” */
+export type MapPlacement = NonNullable<MapSchema['incidents'][number]['placement']>;
+
 /**
- * 事件的根因放到地图的哪个组件上：根因本身是组件，或者它的顶层对象是组件；根因是领域包的伪组件（component:gateway）时，
- * 取主服务里同名的组件，没有时取全图唯一同名的组件。都不命中时为 null，事件按主服务计入服务框。
+ * 事件的根因放到地图的哪里（ADR 0199、0203），依次：
+ * - root：根因本身是组件，或者它的顶层对象是组件；
+ * - node：根因是节点，放到节点条上；
+ * - protects：根因是 PodDisruptionBudget，放到它保护的组件上（有几个时取主服务里的唯一一个）；
+ * - named：根因是领域包的伪组件（component:gateway），取主服务里同名的组件，没有时取全图唯一同名的组件。
+ * 都不命中时为 null，事件按主服务计入服务框。
  */
 export function mapPlacer(
   snapshot: { nodes: readonly TopologyNode[]; edges: readonly TopologyEdge[]; version: number },
-  map: Pick<ClusterMapStructure, 'components'>,
-): (root: ComponentKey | null, service: string | null) => ComponentKey | null {
+  map: Pick<ClusterMapStructure, 'components' | 'nodes'>,
+): (root: ComponentKey | null, service: string | null) => { component: ComponentKey; placement: MapPlacement } | null {
   const top = topOf(new TopologyGraph(snapshot.nodes, snapshot.edges, snapshot.version));
-  const onMap = new Set(map.components.map((c) => c.key));
+  const byKey = new Map(map.components.map((c) => [c.key, c]));
+  const nodes = new Set(map.nodes.map((n) => n.key));
+  const protects = new Map<ComponentKey, Set<ComponentKey>>();
+  for (const e of snapshot.edges) {
+    const t = top(e.to);
+    if (e.relation === PROTECTS && byKey.has(t)) {
+      protects.set(e.from, (protects.get(e.from) ?? new Set()).add(t));
+    }
+  }
+  // 候选里取唯一一个：先看主服务里的，主服务里没有时看全部
+  const only = (candidates: readonly ComponentKey[], service: string | null) => {
+    const inService = candidates.filter((k) => service !== null && byKey.get(k)?.service === service);
+    const pick = inService.length ? inService : candidates;
+    return pick.length === 1 ? pick[0]! : null;
+  };
   return (root, service) => {
     if (!root) {
       return null;
     }
     const t = top(root);
-    if (onMap.has(t)) {
-      return t;
+    if (byKey.has(t)) {
+      return { component: t, placement: 'root' };
+    }
+    if (nodes.has(root)) {
+      return { component: root, placement: 'node' };
+    }
+    const guarded = only([...(protects.get(root) ?? [])], service);
+    if (guarded) {
+      return { component: guarded, placement: 'protects' };
     }
     const k = parseKey(root);
     if (k.kind !== PSEUDO_KIND) {
       return null;
     }
-    const named = map.components.filter((c) => c.name === k.name);
-    const inService = named.filter((c) => c.service !== null && c.service === service);
-    const pick = inService.length ? inService : named;
-    return pick.length === 1 ? pick[0]!.key : null;
+    const named = only(
+      map.components.filter((c) => c.name === k.name).map((c) => c.key),
+      service,
+    );
+    return named ? { component: named, placement: 'named' } : null;
   };
 }
 

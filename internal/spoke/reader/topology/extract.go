@@ -9,6 +9,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	policyv1 "k8s.io/api/policy/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -31,6 +32,7 @@ const (
 	RelPrimary         = "primary"
 	RelReplica         = "replica"
 	RelScales          = "scales"
+	RelProtects        = "protects"
 	KindCSIDriver      = "CSIDriver"
 	registrarContainer = "csi-node-driver-registrar"
 )
@@ -340,12 +342,7 @@ func NetworkPolicyEdges(lk Lookup, np *networkingv1.NetworkPolicy) Contribution 
 	roots := func(pods []*corev1.Pod) map[string]bool {
 		out := map[string]bool{}
 		for _, p := range pods {
-			k, err := RootOwner(lk, "Pod", p.Namespace, p.Name)
-			if err != nil {
-				c.Problems = append(c.Problems, KeyProblem(err))
-				continue
-			}
-			out[k] = true
+			c.addRoot(lk, out, p)
 		}
 		return out
 	}
@@ -441,6 +438,42 @@ func (c *Contribution) allow(from, to map[string]bool, conf float64, ev string) 
 			}
 		}
 	}
+}
+
+// addRoot 把 Pod 的顶层 owner 加入集合；键无法生成时记一个问题，跳过这个 Pod。
+func (c *Contribution) addRoot(lk Lookup, set map[string]bool, p *corev1.Pod) {
+	k, err := RootOwner(lk, "Pod", p.Namespace, p.Name)
+	if err != nil {
+		c.Problems = append(c.Problems, KeyProblem(err))
+		return
+	}
+	set[k] = true
+}
+
+// PDB 贡献 PodDisruptionBudget 节点与 PDB → 被保护的顶层对象（protects，SreNautix ADR 0203）。
+//
+// 置信度 ConfProtects（0.5，低于归并阈值 τ）：驱逐被阻塞（disruptionsAllowed = 0）在 Pod 全部健康时同样成立，
+// 不说明被保护的工作负载出了问题，PDB 的事件不并入工作负载的事件。全集群地图沿这条边把 PDB 的事件放到被保护的组件上。
+func PDB(lk Lookup, p *policyv1.PodDisruptionBudget) Contribution {
+	c, self := generic("PodDisruptionBudget", p)
+	if self == "" || p.Spec.Selector == nil {
+		return c
+	}
+	sel, err := metav1.LabelSelectorAsSelector(p.Spec.Selector)
+	if err != nil {
+		c.fail("PodDisruptionBudget", p.Namespace, p.Name, "spec.selector: "+err.Error())
+		return c
+	}
+	targets := map[string]bool{}
+	for _, pod := range lk.Pods(p.Namespace, sel) {
+		c.addRoot(lk, targets, pod)
+	}
+	for _, t := range sortedKeys(targets) {
+		e := Structural(self, t, RelProtects, ScopeService, "spec.selector")
+		e.Confidence = ConfProtects
+		c.edge(e)
+	}
+	return c
 }
 
 func hasIngress(np *networkingv1.NetworkPolicy) bool { return len(np.Spec.Ingress) > 0 }

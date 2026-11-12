@@ -151,12 +151,7 @@ func ciliumSelect(lk Lookup, c *Contribution, policyNS string, raw any) (map[str
 			if !selector.Matches(ciliumLabels(p, nsLabels)) {
 				continue
 			}
-			k, err := RootOwner(lk, "Pod", p.Namespace, p.Name)
-			if err != nil {
-				c.Problems = append(c.Problems, KeyProblem(err))
-				continue
-			}
-			out[k] = true
+			c.addRoot(lk, out, p)
 		}
 	}
 	return out, true

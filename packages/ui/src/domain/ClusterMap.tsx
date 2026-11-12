@@ -41,8 +41,17 @@ interface Overlay {
   incidents: ReadonlyMap<string, MapIncident[]>;
   /** 画布节点的状态：组取成员中最重的，框取框内最重的根因 */
   nodeTone: ReadonlyMap<string, Tone>;
+  /** 节点条上的 Kubernetes 节点（按节点键）的事件与状态 */
+  hostIncidents: ReadonlyMap<string, MapIncident[]>;
+  hostTone: ReadonlyMap<string, Tone>;
 }
-const OverlayContext = createContext<Overlay>({ tone: new Map(), incidents: new Map(), nodeTone: new Map() });
+const OverlayContext = createContext<Overlay>({
+  tone: new Map(),
+  incidents: new Map(),
+  nodeTone: new Map(),
+  hostIncidents: new Map(),
+  hostTone: new Map(),
+});
 
 function BoxNode({ id, data }: NodeProps<Node<BoxData>>) {
   const { t } = useI18n();
@@ -229,7 +238,7 @@ export function ClusterMap({ map, clusterId, onOpenComponent, focusDomain, prima
         nodeTone.set(d.id, dt);
       }
     }
-    return { tone: overlay.tone, incidents, nodeTone };
+    return { tone: overlay.tone, incidents, nodeTone, hostIncidents: overlay.byNode, hostTone: overlay.nodeTone };
   }, [model, overlay]);
 
   // 依赖边默认只画事件的传播路径（两端都是根因或受影响的组件），其余在指向或选中组件时才画（ADR 0199 §4）
@@ -397,6 +406,7 @@ function Footer({
     }
   }
   const unplaced = map.incidents.filter((i) => !i.component);
+  const onNodes = map.incidents.filter((i) => i.placement === 'node');
   return (
     <div className={styles.footer}>
       <div className={styles.strip} role="list" aria-label={t('map.nodes')}>
@@ -409,6 +419,7 @@ function Footer({
             className={styles.nodeChip}
             data-on={placed.has(n.key) || hoverNode === n.key ? '' : undefined}
             data-dim={view.focusId && !placed.has(n.key) ? '' : undefined}
+            data-tone={o.hostTone.get(n.key)}
             onMouseEnter={() => onHoverNode(n.key)}
             onMouseLeave={() => onHoverNode(null)}
             onFocus={() => onHoverNode(n.key)}
@@ -417,6 +428,11 @@ function Footer({
           >
             {n.name}
             <small>{n.pods}</small>
+            {o.hostIncidents.has(n.key) && (
+              <b aria-label={t('map.node_incidents', { n: o.hostIncidents.get(n.key)!.length })}>
+                {o.hostIncidents.get(n.key)!.length}
+              </b>
+            )}
           </span>
         ))}
       </div>
@@ -427,6 +443,16 @@ function Footer({
         {' · '}
         {t('map.omitted', { n: map.omitted })}
       </p>
+      {onNodes.length > 0 && (
+        <p className={styles.note}>
+          {t('map.on_nodes', { n: onNodes.length })}{' '}
+          {onNodes.slice(0, 5).map((i) => (
+            <AppLink key={i.incident_id} href={links.incident(i.label)} className={canvasStyles.link}>
+              {`${i.component!.slice(i.component!.indexOf(':') + 1)} · ${i.headline?.alertname ?? i.label}`}
+            </AppLink>
+          ))}
+        </p>
+      )}
       {unplaced.length > 0 && (
         <p className={styles.note}>
           {t('map.unplaced', { n: unplaced.length })}{' '}
@@ -542,6 +568,7 @@ function ItemPanel({
               <span className={styles.sev} data-tone={i.severity === 'critical' ? 'bad' : 'warn'}>
                 {i.severity}
               </span>
+              {i.placement === 'protects' && <span className={canvasStyles.none}> {t('map.panel.via_pdb')}</span>}
             </li>
           ))}
         </ul>

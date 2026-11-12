@@ -90,9 +90,27 @@ const map: MapData = {
       first_firing_at: '2026-11-12T12:50:00Z',
       root: `Pod:shop/pg-1`,
       component: PG,
+      placement: 'root',
       service: 'orders-db',
     },
   ],
+};
+const pdbBlocked: MapData['incidents'][number] = {
+  ...map.incidents[0]!,
+  incident_id: '00000000-0000-4000-8000-000000000002',
+  label: 'pdb-blocking',
+  severity: 'warning',
+  root: 'PodDisruptionBudget:shop/pg-primary',
+  placement: 'protects',
+};
+const nodeDown: MapData['incidents'][number] = {
+  ...map.incidents[0]!,
+  incident_id: '00000000-0000-4000-8000-000000000003',
+  label: 'node-not-ready',
+  root: 'Node:node-2',
+  component: 'Node:node-2',
+  placement: 'node',
+  service: 'orders-api',
 };
 
 describe('全集群地图的画法（ADR 0199）', () => {
@@ -133,6 +151,17 @@ describe('全集群地图的画法（ADR 0199）', () => {
     const loose = incidentOverlay(map, [{ ...map.incidents[0]!, component: null, service: 'frontend' }]);
     expect(loose.tone.size).toBe(0);
     expect(loose.byService.get('frontend')).toHaveLength(1);
+  });
+
+  it('经 PodDisruptionBudget 定位与落在节点上的事件只给自己的位置着色，不向外传播（ADR 0203）', () => {
+    const o = incidentOverlay(map, [pdbBlocked, nodeDown]);
+    expect(Object.fromEntries(o.tone)).toEqual({ [PG]: 'warn' });
+    expect(o.byComponent.get(PG)?.map((i) => i.label)).toEqual(['pdb-blocking']);
+    expect(Object.fromEntries(o.nodeTone)).toEqual({ 'Node:node-2': 'bad' });
+    expect(o.byNode.get('Node:node-2')?.map((i) => i.label)).toEqual(['node-not-ready']);
+    // 节点上的事件按主服务计入服务框
+    expect(o.byService.get('orders-api')?.map((i) => i.label)).toEqual(['node-not-ready']);
+    expect(o.byService.get('orders-db')?.map((i) => i.label)).toEqual(['pdb-blocking']);
   });
 
   it('排布是确定的：核心领域在前，框互不重叠，组件在服务框里', () => {
@@ -209,6 +238,25 @@ describe('全集群地图（ADR 0199）', () => {
     fireEvent.click(await item(/^pg，/));
     const pgPanel = await screen.findByTestId('subgraph-panel');
     expect(within(pgPanel).getByRole('link', { name: 'pg-down' }).getAttribute('href')).toContain('pg-down');
+  });
+
+  it('节点上的事件标在节点条上并列出；经 PodDisruptionBudget 定位的事件在侧栏注明', async () => {
+    renderUi(<ClusterMap map={{ ...map, incidents: [pdbBlocked, nodeDown] }} clusterId="prod" />, { links });
+    const strip = screen.getByRole('list', { name: '节点' });
+    const chip = within(strip).getByText('node-2').closest('[role="listitem"]')!;
+    expect(chip.getAttribute('data-tone')).toBe('bad');
+    expect(within(chip as HTMLElement).getByLabelText('1 个未恢复的事件')).toBeTruthy();
+    expect(screen.getByText(/1 个事件的根因是节点/)).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'node-2 · node-not-ready' }).getAttribute('href')).toContain(
+      'node-not-ready',
+    );
+    expect(screen.queryByText(/根因不在拓扑里/)).toBeNull();
+    const pg = await item(/^pg，/);
+    expect(card(pg).getAttribute('data-tone')).toBe('warn');
+    expect((await item(/^api，/)).getAttribute('aria-label')).toContain('正常');
+    fireEvent.click(pg);
+    const panel = await screen.findByTestId('subgraph-panel');
+    expect(within(panel).getByText(/经 PodDisruptionBudget 定位/)).toBeTruthy();
   });
 
   it('指向节点条上的节点：只突出运行在它上面的组件', async () => {
