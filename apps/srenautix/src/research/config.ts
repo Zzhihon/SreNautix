@@ -46,7 +46,7 @@ const route = z
   .object({
     id: z.string().regex(/^[a-z0-9][a-z0-9-]*$/),
     base_url: z.string().url(),
-    api: z.enum(['responses', 'chat_completions']),
+    api: z.enum(['responses', 'chat_completions', 'messages']),
     model: z.string().min(1),
     dialect_profile: z.string().min(1),
     price: z

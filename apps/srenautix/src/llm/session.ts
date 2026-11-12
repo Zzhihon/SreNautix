@@ -20,25 +20,49 @@ import { turnFingerprint, type Drift, type FingerprintTracker } from './fingerpr
 import { countHits, type RedactionHits } from './redact.js';
 import { isLastResort, type DisabledRoute } from './routes.js';
 import { reaskText, repairLocally, type Prepare, type RepairStep } from './repair.js';
-import { StreamTimeout, streamingParams, streamTurn } from './stream.js';
+import { StreamTimeout, streamingParams, streamTurn, type StreamParams, type StreamedTurn } from './stream.js';
 import type { ModelClass, RouteTimeouts } from './timeouts.js';
 import {
   LlmError,
   type EgressCategory,
+  type LlmApi,
   type LlmPhase,
   type LlmRequest,
   type LlmTurn,
   type OutputFormat,
   type Segment,
+  type TurnUsage,
 } from './types.js';
-import { requestCategories, toChatParams, toResponsesParams, type ChatThinking } from './wire.js';
+import { buildParams, requestCategories, type ChatThinking } from './wire.js';
 
 // 一次研判的模型会话（DESIGN §7.2、§8）：按阶段选模型档位、按路由优先级与熔断状态选路由、
 // 驱动修复阶梯、按 usage 记账，并产出每次调用的记录、研判清单中的路由使用与出境清单。
-// 兜底路由（role: last_resort，ADR 0152）只在全部常规路由都因事件涉及其故障域而提前熔断时成为本次会话的路由组。
+// 事件涉及常规路由的故障域时先在这条路由上发一次探测调用，探测失败才对本次会话提前熔断（ADR 0201）。
+// 兜底路由（role: last_resort，ADR 0152）只在全部常规路由都这样提前熔断时成为本次会话的路由组。
 
 /** 剩余时间少于这个值时不再发起模型调用 */
 export const MIN_CALL_WINDOW_MS = 5_000;
+
+/**
+ * 故障域探测调用（ADR 0201）：固定的一句提示、16 个输出 token，流式发出；超时比研判调用短。
+ * 结论在模型层按路由缓存 ttlMs，并行的会话与同一会话的各阶段共用一次探测
+ */
+export const DOMAIN_PROBE = {
+  prompt: 'Reply with the single word: ok',
+  maxOutputTokens: 16,
+  timeouts: { firstTokenMs: 20_000, idleMs: 10_000, totalMs: 30_000 },
+  ttlMs: 60_000,
+} as const;
+
+/** 一次故障域探测的结论与用量 */
+export interface DomainProbe {
+  ok: boolean;
+  /** 失败原因；成功时为空串 */
+  detail: string;
+  usage: TurnUsage;
+  cost: number;
+  bytes: number;
+}
 
 export interface RouteRuntime {
   route: ModelRoute;
@@ -61,7 +85,7 @@ export interface LlmCallRecord {
   phase: LlmPhase;
   routeId: string;
   model: string;
-  api: 'responses' | 'chat_completions';
+  api: LlmApi;
   promptHash: string;
   outcome: 'succeeded' | 'retried' | 'switched' | 'failed';
   repairStep: RepairStep | null;
@@ -115,11 +139,13 @@ export interface ModelLayerOptions {
   onCalibration(c: Calibration): Promise<void>;
   /** 服务方指纹确认变化 */
   onDrift(d: Drift): Promise<void>;
+  /** 故障域探测结论的缓存时长；省略时为 DOMAIN_PROBE.ttlMs */
+  domainProbeTtlMs?: number;
 }
 
 export interface SessionContext {
   runId: string | null;
-  /** 事件涉及的组件键（成员告警的实体与候选根因），用于故障域提前熔断 */
+  /** 事件涉及的组件键（成员告警的实体与候选根因），用于故障域探测与提前熔断 */
   incidentComponents: readonly string[];
   /** 阶段 B 的硬期限（毫秒时间戳） */
   deadline: number;
@@ -140,11 +166,25 @@ export interface RouteUsage {
   cost: number;
 }
 
+/** 因事件涉及其故障域而对本次会话提前熔断的路由 */
+export interface PreOpenedRoute {
+  routeId: string;
+  component: string;
+  /** 探测调用失败的原因；兜底路由不探测，为 null */
+  probe: string | null;
+}
+
 /** 本次会话使用的路由组 */
 interface RoutePlan {
   /** 常规路由；全部常规路由都因故障域提前熔断且本次会话有兜底额度时为兜底路由 */
   pool: readonly RouteRuntime[];
   lastResort: boolean;
+  preOpened: readonly PreOpenedRoute[];
+}
+
+function skipText(p: PreOpenedRoute): string {
+  const why = p.probe === null ? '' : `探测调用失败（${p.probe}），`;
+  return `${p.routeId}：事件涉及该路由的故障域组件 ${p.component}，${why}提前熔断`;
 }
 
 export type StructuredFailure =
@@ -253,6 +293,8 @@ export function isNetworkError(e: unknown): boolean {
 }
 
 export class ModelLayer {
+  private readonly domainProbes = new Map<string, { expires: number; result: Promise<DomainProbe> }>();
+
   constructor(readonly opts: ModelLayerOptions) {}
 
   get routes(): readonly RouteRuntime[] {
@@ -308,8 +350,117 @@ export class ModelLayer {
     return [...pool.filter((r) => r.route.tier === tier), ...pool.filter((r) => r.route.tier !== tier)];
   }
 
+  /** 新会话；发出第一次调用或读取路由组之前要先 `await session.plan()`（structured 会自己调用） */
   session(ctx: SessionContext): ModelSession {
     return new ModelSession(this, ctx);
+  }
+
+  /**
+   * 在一条路由上发出一次流式调用并更新熔断器；meter 累计实际发出的字节数（失败时同样有效）。
+   * 熔断器不放行时抛 LlmError llm_breaker_open，不发出请求；其余错误按 classifyError 归类后抛出
+   */
+  async call(
+    rt: RouteRuntime,
+    params: StreamParams,
+    timeouts: RouteTimeouts,
+    capMs: number,
+    signal: AbortSignal,
+    meter: { bytes: number },
+  ): Promise<StreamedTurn> {
+    const id = rt.route.id;
+    const admission = rt.breaker.admit(Date.now());
+    if (!admission.allowed) {
+      throw new LlmError('llm_breaker_open', null, `路由 ${id} 熔断中（${admission.reason}）`, id);
+    }
+    try {
+      const r = await this.opts.egress.track(meter, () =>
+        streamTurn(rt.client, rt.route.api, params, rt.profile, timeouts, capMs, signal, id),
+      );
+      rt.breaker.success(Date.now(), r.firstTokenMs, admission.probe);
+      this.syncBreaker(rt);
+      return r;
+    } catch (rawErr) {
+      const e = classifyError(rawErr, id, signal);
+      if (e instanceof LlmError && e.countsAsFailure) {
+        rt.breaker.failure(Date.now(), admission.probe);
+      } else {
+        rt.breaker.neutral(admission.probe);
+      }
+      this.syncBreaker(rt);
+      throw e;
+    }
+  }
+
+  /**
+   * 路由的故障域探测结论（ADR 0201）。缓存有效时直接返回（fresh 为 false）；否则发一次探测调用，
+   * 进行中的探测由同时到达的会话共用。fresh 为 true 的调用方把这次探测的用量记到自己的研判上
+   */
+  domainProbe(rt: RouteRuntime): { result: Promise<DomainProbe>; fresh: boolean } {
+    const id = rt.route.id;
+    const hit = this.domainProbes.get(id);
+    if (hit && Date.now() < hit.expires) {
+      return { result: hit.result, fresh: false };
+    }
+    const entry = { expires: Number.POSITIVE_INFINITY, result: this.runDomainProbe(rt) };
+    this.domainProbes.set(id, entry);
+    entry.result.then(
+      () => {
+        entry.expires = Date.now() + (this.opts.domainProbeTtlMs ?? DOMAIN_PROBE.ttlMs);
+      },
+      () => {
+        this.domainProbes.delete(id);
+      },
+    );
+    return { result: entry.result, fresh: true };
+  }
+
+  /** 发一次探测调用：只含固定文本，不含事件数据；与研判调用走同一个客户端、同一套出站检查、计量与熔断器 */
+  private async runDomainProbe(rt: RouteRuntime): Promise<DomainProbe> {
+    const { metrics } = this.opts;
+    const route = rt.route;
+    const req: LlmRequest = {
+      items: [{ type: 'user', segments: [{ text: DOMAIN_PROBE.prompt, categories: [], egress: 'allow' }] }],
+      maxOutputTokens: DOMAIN_PROBE.maxOutputTokens,
+    };
+    const wire = { model: route.model, profile: rt.profile, language: 'en' as const, thinking: rt.thinking };
+    const params = streamingParams(route.api, buildParams(route.api, req, wire));
+    const meter = { bytes: 0 };
+    const none: TurnUsage = { input: 0, cachedInput: 0, output: 0, reasoning: 0 };
+    const finish = (ok: boolean, detail: string, usage: TurnUsage): DomainProbe => {
+      const cost = callCost(route.price, usage);
+      metrics.failureDomainProbes.inc({ route: route.id, outcome: ok ? 'ok' : 'failed' });
+      metrics.egressBytes.inc({ route: route.id, in_domain: String(route.in_domain) }, meter.bytes);
+      metrics.llmTokens.inc({ route: route.id, direction: 'input' }, usage.input);
+      metrics.llmTokens.inc({ route: route.id, direction: 'output' }, usage.output);
+      metrics.llmCost.inc({ route: route.id, currency: route.price.currency }, cost);
+      logger.info('故障域探测调用', { route: route.id, ok, ...(ok ? {} : { error: detail }) });
+      return { ok, detail, usage, cost, bytes: meter.bytes };
+    };
+    try {
+      const { turn } = await this.call(
+        rt,
+        params,
+        DOMAIN_PROBE.timeouts,
+        DOMAIN_PROBE.timeouts.totalMs,
+        new AbortController().signal,
+        meter,
+      );
+      return finish(true, '', turn.usage);
+    } catch (e) {
+      if (e instanceof LlmError || e instanceof EgressBlocked) {
+        return finish(false, e.message.slice(0, 300), none);
+      }
+      throw e;
+    }
+  }
+
+  private syncBreaker(rt: RouteRuntime): void {
+    const open = rt.breaker.openReason;
+    const metrics = this.opts.metrics;
+    metrics.breakerOpen.set({ route: rt.route.id }, open ? 1 : 0);
+    if (open && rt.breaker.consumeOpened()) {
+      metrics.breakerOpened.inc({ route: rt.route.id, reason: open });
+    }
   }
 }
 
@@ -361,40 +512,91 @@ export class ModelSession {
   readonly routeUses: RouteUse[] = [];
   readonly egress: EgressEntry[] = [];
   private seq = 0;
-  private readonly plan: RoutePlan;
+  private planned: RoutePlan | null = null;
+  private planning: Promise<RoutePlan> | null = null;
   private readonly spareUsage = new Map<string, RouteUsage>();
 
   constructor(
     private readonly layer: ModelLayer,
     private readonly ctx: SessionContext,
-  ) {
-    this.plan = this.planRoutes();
-  }
+  ) {}
 
   /**
-   * 本次会话的路由组（ADR 0152）：全部常规路由都因事件涉及其故障域而提前熔断、本次会话有兜底额度、配置了兜底路由时
-   * 为兜底路由，否则为常规路由。常规路由因真实调用失败而熔断不会让兜底路由进入路由组。
+   * 确定本次会话的路由组，可以重复调用，只执行一次。
+   * 事件涉及常规路由的故障域时先在这条路由上发一次探测调用（ADR 0201）：成功则照常使用这条路由，失败则对本次会话提前熔断。
+   * 兜底路由不探测，事件涉及它的故障域时直接提前熔断。
+   * 路由组（ADR 0152）：全部常规路由都提前熔断、本次会话有兜底额度、配置了兜底路由时为兜底路由，否则为常规路由。
+   * 常规路由因真实调用失败而熔断不会让兜底路由进入路由组。
    */
-  private planRoutes(): RoutePlan {
+  async plan(): Promise<void> {
+    this.planning ??= this.planRoutes();
+    this.planned = await this.planning;
+  }
+
+  private async planRoutes(): Promise<RoutePlan> {
     const regular = this.layer.regular;
     const spare = this.layer.lastResort;
-    const allOpened =
-      regular.length > 0 &&
-      regular.every((r) => touchesFailureDomain(this.ctx.incidentComponents, r.route.failure_domain) !== null);
+    const checked = await Promise.all(
+      this.layer.routes.map(async (rt): Promise<PreOpenedRoute | null> => {
+        const component = touchesFailureDomain(this.ctx.incidentComponents, rt.route.failure_domain);
+        if (!component) {
+          return null;
+        }
+        const routeId = rt.route.id;
+        if (isLastResort(rt.route)) {
+          return { routeId, component, probe: null };
+        }
+        const { result, fresh } = this.layer.domainProbe(rt);
+        const probe = await result;
+        if (fresh) {
+          this.recordProbe(rt, probe);
+        }
+        return probe.ok ? null : { routeId, component, probe: probe.detail };
+      }),
+    );
+    const preOpened = checked.filter((p): p is PreOpenedRoute => p !== null);
+    const opened = new Set(preOpened.map((p) => p.routeId));
+    const allOpened = regular.length > 0 && regular.every((r) => opened.has(r.route.id));
     if (spare.length && this.ctx.lastResort && allOpened) {
-      return { pool: spare, lastResort: true };
+      return { pool: spare, lastResort: true, preOpened };
     }
-    return { pool: regular, lastResort: false };
+    return { pool: regular, lastResort: false, preOpened };
   }
 
-  /** 本次会话使用兜底路由 */
+  /** 本次会话发起的探测调用计入研判的用量与出境清单；探测不写调用记录 */
+  private recordProbe(rt: RouteRuntime, probe: DomainProbe): void {
+    this.ctx.ledger.record(probe.usage, probe.cost);
+    if (probe.bytes > 0) {
+      this.egress.push({
+        route_id: rt.route.id,
+        in_domain: rt.route.in_domain,
+        categories: [],
+        redaction_hits: 0,
+        bytes: probe.bytes,
+      });
+    }
+  }
+
+  private get routePlan(): RoutePlan {
+    if (!this.planned) {
+      throw new Error('会话的路由组还没有确定：先调用 plan()');
+    }
+    return this.planned;
+  }
+
+  /** 本次会话使用兜底路由；路由组还没有确定（没有发出过调用）时为 false */
   get usingLastResort(): boolean {
-    return this.plan.lastResort;
+    return this.planned?.lastResort ?? false;
   }
 
-  /** 本次会话可能使用的路由（提示词按其中最小的上下文组装） */
+  /** 本次会话可能使用的路由（提示词按其中最小的上下文组装）；plan() 之后可用 */
   get pool(): readonly RouteRuntime[] {
-    return this.plan.pool;
+    return this.routePlan.pool;
+  }
+
+  /** 本次会话成本的币种：路由组第一条路由的币种；路由组还没有确定（没有发出过调用）时按常规路由 */
+  get currency(): string {
+    return (this.planned?.pool ?? this.layer.regular)[0]?.route.price.currency ?? 'USD';
   }
 
   /** 兜底路由在本次会话中的用量，按路由；没有使用兜底路由时为空 */
@@ -402,16 +604,9 @@ export class ModelSession {
     return [...this.spareUsage.values()];
   }
 
-  /** 因事件涉及其故障域而对本次研判提前熔断的路由 */
-  preOpened(): Array<{ routeId: string; component: string }> {
-    const out: Array<{ routeId: string; component: string }> = [];
-    for (const r of this.layer.routes) {
-      const c = touchesFailureDomain(this.ctx.incidentComponents, r.route.failure_domain);
-      if (c) {
-        out.push({ routeId: r.route.id, component: c });
-      }
-    }
-    return out;
+  /** 因事件涉及其故障域而对本次会话提前熔断的路由；plan() 之后可用 */
+  preOpened(): readonly PreOpenedRoute[] {
+    return this.routePlan.preOpened;
   }
 
   /**
@@ -429,18 +624,22 @@ export class ModelSession {
       // 所有路由都被出站策略禁用：不发出任何请求
       return { ok: false, reason: 'egress_blocked', detail: unavailable, attempts: [unavailable] };
     }
+    await this.plan();
+    const plan = this.routePlan;
     const attempts: string[] = [];
-    const preOpened = new Map(this.preOpened().map((p) => [p.routeId, p.component]));
+    const preOpened = new Map(plan.preOpened.map((p) => [p.routeId, p]));
     const { metrics } = this.layer.opts;
-    if (this.plan.lastResort) {
+    const skip = (p: PreOpenedRoute) => {
+      metrics.failureDomainSkips.inc({ route: p.routeId });
+      attempts.push(skipText(p));
+    };
+    if (plan.lastResort) {
       // 常规路由全部因故障域提前熔断，本次会话改用兜底路由；尝试记录照样写明每条常规路由被跳过的原因
       for (const rt of this.layer.ordered(phase)) {
-        const id = rt.route.id;
-        metrics.failureDomainSkips.inc({ route: id });
-        attempts.push(`${id}：事件涉及该路由的故障域组件 ${preOpened.get(id) as string}，提前熔断`);
+        skip(preOpened.get(rt.route.id) as PreOpenedRoute);
       }
     }
-    const order = this.layer.ordered(phase, this.plan.pool);
+    const order = this.layer.ordered(phase, plan.pool);
     let sawInvalid = false;
     let sawEgress = false;
     let candidates = 0;
@@ -449,8 +648,7 @@ export class ModelSession {
       const last = ri === order.length - 1;
       const domain = preOpened.get(id);
       if (domain) {
-        metrics.failureDomainSkips.inc({ route: id });
-        attempts.push(`${id}：事件涉及该路由的故障域组件 ${domain}，提前熔断`);
+        skip(domain);
         continue;
       }
       candidates++;
@@ -533,13 +731,13 @@ export class ModelSession {
     }
     metrics.repair.inc({ phase, route: '', level: 'deterministic_only', outcome: 'failed' });
     if (candidates === 0) {
-      const spare = this.plan.lastResort ? [] : this.layer.lastResort.map((r) => r.route.id);
+      const spare = plan.lastResort ? [] : this.layer.lastResort.map((r) => r.route.id);
       return {
         ok: false,
         reason: 'failure_domain',
         detail: spare.length
-          ? `所有常规路由都因事件涉及其故障域而提前熔断；兜底路由 ${spare.join('、')} 只用于事件研判`
-          : '所有路由都因事件涉及其故障域而提前熔断',
+          ? `所有常规路由都因事件涉及其故障域、探测调用失败而提前熔断；兜底路由 ${spare.join('、')} 只用于事件研判`
+          : '所有路由都因事件涉及其故障域而提前熔断（常规路由的探测调用失败）',
         attempts,
       };
     }
@@ -574,10 +772,7 @@ export class ModelSession {
         ...prepared.request,
         maxOutputTokens: Math.min(prepared.request.maxOutputTokens, stage.outputTokens),
       };
-      const params = streamingParams(
-        route.api,
-        route.api === 'responses' ? toResponsesParams(sized, wire) : toChatParams(sized, wire),
-      );
+      const params = streamingParams(route.api, buildParams(route.api, sized, wire));
       const body = JSON.stringify(params);
       const raw = rawEstimate(body, rt.profile.tokenizer);
       return { prepared, sized, params, body, raw, estimated: estimateTokens(rt.calibration, raw) };
@@ -600,6 +795,7 @@ export class ModelSession {
       metrics.promptTrims.inc({ phase, route: route.id }, trimmed.length);
     }
     const { prepared, sized, params, body, raw, estimated } = built;
+    const sentTemperature = 'temperature' in params ? params.temperature : undefined;
     const dropped = Object.entries(prepared.dropped);
     for (const [category, n] of dropped) {
       metrics.egressDropped.inc({ category }, n);
@@ -658,31 +854,18 @@ export class ModelSession {
       metrics.budgetStops.inc({ reason: 'last_resort' });
       throw new BudgetStop(spareOver);
     }
-    const admission = rt.breaker.admit(started);
-    if (!admission.allowed) {
-      throw new CallFailed(
-        { ...draft, errorKind: 'llm_breaker_open' },
-        new LlmError('llm_breaker_open', null, `路由 ${route.id} 熔断中（${admission.reason}）`, route.id),
-      );
-    }
     const cap = Math.min(rt.timeouts.totalMs ?? Number.POSITIVE_INFINITY, remaining);
     let turn: LlmTurn;
     let firstTokenMs: number | null;
     const meter = { bytes: 0 };
     try {
-      ({ turn, firstTokenMs } = await egress.track(meter, () =>
-        streamTurn(rt.client, route.api, params, rt.profile, rt.timeouts, cap, this.ctx.signal, route.id),
-      ));
-    } catch (rawErr) {
-      const e = classifyError(rawErr, route.id, this.ctx.signal);
+      ({ turn, firstTokenMs } = await this.layer.call(rt, params, rt.timeouts, cap, this.ctx.signal, meter));
+    } catch (e) {
       const ms = Date.now() - started;
       if (e instanceof LlmError) {
-        if (e.countsAsFailure) {
-          rt.breaker.failure(Date.now(), admission.probe);
-        } else {
-          rt.breaker.neutral(admission.probe);
+        if (e.kind === 'llm_breaker_open') {
+          throw new CallFailed({ ...draft, errorKind: e.kind }, e);
         }
-        this.syncBreaker(rt);
         metrics.llmCalls.inc({ phase, route: route.id, outcome: 'failed', error_kind: e.kind });
         if (meter.bytes > 0) {
           metrics.egressBytes.inc({ route: route.id, in_domain: String(route.in_domain) }, meter.bytes);
@@ -707,7 +890,6 @@ export class ModelSession {
           e,
         );
       }
-      rt.breaker.neutral(admission.probe);
       if (e instanceof EgressBlocked) {
         throw new CallFailed({ ...draft, errorKind: `egress_${e.reason}`, durationMs: ms, note: e.message }, e);
       }
@@ -715,8 +897,6 @@ export class ModelSession {
     }
     const bytes = meter.bytes;
     const ms = Date.now() - started;
-    rt.breaker.success(Date.now(), firstTokenMs, admission.probe);
-    this.syncBreaker(rt);
     const cost = callCost(route.price, turn.usage);
     // 服务方没有在流里给出 usage 时按估算记账，研判预算照样生效
     this.ctx.ledger.record(turn.usage.input > 0 ? turn.usage : { ...turn.usage, input: estimated }, cost);
@@ -766,7 +946,8 @@ export class ModelSession {
       provider_fingerprint: fp,
       sampling: {
         max_output_tokens: sized.maxOutputTokens,
-        ...(sized.temperature === undefined ? {} : { temperature: sized.temperature }),
+        // 以实际发出的请求体为准：api: messages 不带采样参数
+        ...(typeof sentTemperature === 'number' ? { temperature: sentTemperature } : {}),
       },
       seed: sized.seed ?? null,
     });
@@ -815,15 +996,6 @@ export class ModelSession {
       return `兜底路由当日已用 ${used} token，再发送约 ${estimated} token 输入（输出上限 ${maxOutput}）会超过每日上限 ${quota.dailyTokens}`;
     }
     return null;
-  }
-
-  private syncBreaker(rt: RouteRuntime): void {
-    const open = rt.breaker.openReason;
-    const metrics = this.layer.opts.metrics;
-    metrics.breakerOpen.set({ route: rt.route.id }, open ? 1 : 0);
-    if (open && rt.breaker.consumeOpened()) {
-      metrics.breakerOpened.inc({ route: rt.route.id, reason: open });
-    }
   }
 }
 

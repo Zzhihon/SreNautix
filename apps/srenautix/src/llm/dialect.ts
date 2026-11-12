@@ -69,6 +69,17 @@ export const DECLARED_PROFILES: Readonly<Record<string, Omit<DialectProfile, 'me
       chinese: 'native',
       tokenizer: 'byte_estimate',
     },
+    // Anthropic Messages API（api: messages，ADR 0200）：结构化输出声明为提示词中的 schema，
+    // 推理内容在 thinking 内容块；output_config.format 的严格 json_schema 以能力探测为准
+    'anthropic-messages': {
+      id: 'anthropic-messages',
+      strict_json_schema: false,
+      native_tools: true,
+      reasoning_channel: 'separate_field',
+      context_tokens: 200_000,
+      chinese: 'native',
+      tokenizer: 'byte_estimate',
+    },
   };
 
 /**

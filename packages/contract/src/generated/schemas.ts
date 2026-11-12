@@ -1645,7 +1645,12 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
         properties: {
           id: { type: 'string', pattern: '^[a-z0-9][a-z0-9-]*$' },
           base_url: { type: 'string', format: 'uri' },
-          api: { type: 'string', enum: ['responses', 'chat_completions'] },
+          api: {
+            type: 'string',
+            description:
+              'responses：OpenAI 的 POST /responses；chat_completions：OpenAI 兼容的 POST /chat/completions；messages：Anthropic Messages API 的 POST /messages（契约 2.62.0，ADR 0200）',
+            enum: ['responses', 'chat_completions', 'messages'],
+          },
           model: { type: 'string' },
           dialect_profile: { type: 'string' },
           price: {
@@ -1661,7 +1666,8 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
           },
           failure_domain: {
             type: 'array',
-            description: '这条路由依赖的被管拓扑组件；事件涉及这些组件时提前打开熔断器',
+            description:
+              '这条路由依赖的被管拓扑组件；事件涉及这些组件时先在这条路由上发一次探测调用，探测失败才对本次研判提前熔断（ADR 0201）',
             items: { $ref: '../../../schemas/common.schema.json#/$defs/ComponentKey' },
           },
           in_domain: { type: 'boolean', description: '服务方是否在境内' },

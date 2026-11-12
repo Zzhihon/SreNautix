@@ -362,7 +362,7 @@ export class WorkerService {
       output_tokens: res.ledger.output,
       cost: res.ledger.cost,
       // 使用兜底路由时全部调用都在兜底路由上，成本按它的币种记
-      currency: res.session.pool[0]?.route.price.currency ?? 'USD',
+      currency: res.session.currency,
       steps,
       manifest,
       checkCards: res.book.allCards

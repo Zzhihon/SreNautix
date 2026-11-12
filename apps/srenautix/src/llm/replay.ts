@@ -4,10 +4,12 @@ import { join } from 'node:path';
 import { logger } from '../kernel/log.js';
 
 /**
- * 录制回放的模型服务（`srenautix llm-replay`，kind-e2e 与离线演示用，OpenAI 兼容：POST /v1/responses、/v1/chat/completions）。
+ * 录制回放的模型服务（`srenautix llm-replay`，kind-e2e 与离线演示用）：OpenAI 兼容的 POST /v1/responses、/v1/chat/completions，
+ * 以及 Anthropic Messages API 的 POST /v1/messages。
  *
  * - 按"结构化输出的名称 + 第几次出现"取录制：目录中的 `<名称>-<n>.json`（n 从 1 开始），没有时取 `<名称>.json`（任意次）；
- *   名称是 Responses 的 text.format.name 或 Chat 的 response_format.json_schema.name，没有结构化输出时为 `text`。
+ *   名称是 Responses 的 text.format.name 或 Chat 的 response_format.json_schema.name，没有结构化输出时为 `text`
+ *   （Messages 的请求体不带名称，一律为 `text`）。
  *   提示中的易变内容（时间、Pod 名、卡片编号）不参与匹配。没有可用的录制时返回 503，worker 视为模型不可用。
  * - 录制文件两种形态：录制得到的 `{status, body}`（服务方的原始响应），或手写的 `{output: <结构化输出对象>}`，
  *   回放时包成对应协议的响应。
@@ -47,7 +49,8 @@ function pieces(text: string): string[] {
 /**
  * 非流式响应体 → 服务方会发出的流式事件（SSE 的 data 部分，按顺序）：
  * Responses 为 response.created、各输出增量、response.completed（或 incomplete）；
- * Chat 为逐块的 delta、带 finish_reason 的块、只有 usage 的块与 [DONE]。
+ * Chat 为逐块的 delta、带 finish_reason 的块、只有 usage 的块与 [DONE]；
+ * Messages 为 message_start、各内容块的 start、delta、stop、带 stop_reason 与累计 usage 的 message_delta、message_stop。
  */
 export function toStreamEvents(path: string, body: any): string[] {
   const out: unknown[] = [];
@@ -97,6 +100,38 @@ export function toStreamEvents(path: string, body: any): string[] {
       sequence_number: seq++,
       response: body,
     });
+    return out.map((x) => JSON.stringify(x));
+  }
+  if (path.endsWith('/messages')) {
+    out.push({
+      type: 'message_start',
+      message: { ...body, content: [], stop_reason: null, usage: { ...body.usage, output_tokens: 0 } },
+    });
+    (body.content ?? []).forEach((b: any, index: number) => {
+      const delta = (d: unknown) => out.push({ type: 'content_block_delta', index, delta: d });
+      if (b.type === 'text') {
+        out.push({ type: 'content_block_start', index, content_block: { type: 'text', text: '' } });
+        pieces(b.text ?? '').forEach((d) => delta({ type: 'text_delta', text: d }));
+      } else if (b.type === 'thinking') {
+        out.push({ type: 'content_block_start', index, content_block: { type: 'thinking', thinking: '' } });
+        pieces(b.thinking ?? '').forEach((d) => delta({ type: 'thinking_delta', thinking: d }));
+        if (b.signature) {
+          delta({ type: 'signature_delta', signature: b.signature });
+        }
+      } else if (b.type === 'tool_use') {
+        out.push({ type: 'content_block_start', index, content_block: { ...b, input: {} } });
+        pieces(JSON.stringify(b.input ?? {})).forEach((d) => delta({ type: 'input_json_delta', partial_json: d }));
+      } else {
+        out.push({ type: 'content_block_start', index, content_block: b });
+      }
+      out.push({ type: 'content_block_stop', index });
+    });
+    out.push({
+      type: 'message_delta',
+      delta: { stop_reason: body.stop_reason ?? 'end_turn', stop_details: body.stop_details ?? null },
+      usage: body.usage,
+    });
+    out.push({ type: 'message_stop' });
     return out.map((x) => JSON.stringify(x));
   }
   const head = {
@@ -161,7 +196,7 @@ function requestText(req: any): string {
       }
     }
   };
-  walk([req?.instructions, req?.input, req?.messages]);
+  walk([req?.instructions, req?.system, req?.input, req?.messages]);
   return parts.join('\n');
 }
 
@@ -181,7 +216,7 @@ function schemaEnums(req: any): Set<string> {
       }
     }
   };
-  walk(req?.text?.format?.schema ?? req?.response_format?.json_schema?.schema);
+  walk(req?.text?.format?.schema ?? req?.response_format?.json_schema?.schema ?? req?.output_config?.format?.schema);
   return out;
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */
@@ -277,6 +312,17 @@ export function wrapOutput(path: string, model: string, output: unknown, n: numb
       usage: { input_tokens: 1000, output_tokens: 200, total_tokens: 1200 },
     };
   }
+  if (path.endsWith('/messages')) {
+    return {
+      id: `msg_replay_${n}`,
+      type: 'message',
+      role: 'assistant',
+      model,
+      content: [{ type: 'text', text }],
+      stop_reason: 'end_turn',
+      usage: { input_tokens: 1000, output_tokens: 200 },
+    };
+  }
   return {
     id: `chatcmpl-replay-${n}`,
     object: 'chat.completion',
@@ -287,12 +333,18 @@ export function wrapOutput(path: string, model: string, output: unknown, n: numb
   };
 }
 
-/** 响应体中结构化输出的文本：Responses 的 output_text 或 Chat 的 message.content */
+/** 响应体中结构化输出的文本：Responses 的 output_text、Chat 的 message.content 或 Messages 的 text 内容块 */
 function replaceOutputText(body: unknown, fn: (text: string) => string): unknown {
   const b = structuredClone(body) as {
     output?: Array<{ type: string; content?: Array<{ type: string; text?: string }> }>;
     choices?: Array<{ message?: { content?: string | null } }>;
+    content?: Array<{ type: string; text?: string }>;
   };
+  for (const c of Array.isArray(b.content) ? b.content : []) {
+    if (c.type === 'text' && typeof c.text === 'string') {
+      c.text = fn(c.text);
+    }
+  }
   for (const item of b.output ?? []) {
     for (const c of item.content ?? []) {
       if (c.type === 'output_text' && typeof c.text === 'string') {
@@ -361,6 +413,12 @@ export class LlmReplay {
         headers: {
           'content-type': 'application/json',
           ...(this.o.record.apiKey ? { authorization: `Bearer ${this.o.record.apiKey}` } : {}),
+          ...(path.endsWith('/messages')
+            ? {
+                'anthropic-version': '2023-06-01',
+                ...(this.o.record.apiKey ? { 'x-api-key': this.o.record.apiKey } : {}),
+              }
+            : {}),
         },
         body: JSON.stringify(rest),
       });
@@ -410,7 +468,7 @@ export class LlmReplay {
     if (req.method === 'GET' && (path === '/healthz' || path === '/readyz')) {
       return json(res, 200, { recordings: this.recordings().length, served: this.served, missing: this.missing });
     }
-    if (req.method !== 'POST' || !/\/(responses|chat\/completions)$/.test(path)) {
+    if (req.method !== 'POST' || !/\/(responses|chat\/completions|messages)$/.test(path)) {
       return json(res, 404, { error: { message: `llm-replay 不提供 ${req.method} ${path}` } });
     }
     const r = await this.respond(path, raw);

@@ -70,8 +70,15 @@ export class WorkerMetrics extends BaseMetrics {
 
   readonly failureDomainSkips = new Counter({
     name: 'srenautix_llm_failure_domain_skips_total',
-    help: '因事件涉及路由的故障域而提前熔断的次数',
+    help: '因事件涉及路由的故障域（常规路由的探测调用失败）而提前熔断的次数',
     labelNames: ['route'] as const,
+    registers: [this.registry],
+  });
+
+  readonly failureDomainProbes = new Counter({
+    name: 'srenautix_llm_failure_domain_probes_total',
+    help: '事件涉及路由的故障域时发出的探测调用次数，按结果（ok、failed）；缓存命中不计（ADR 0201）',
+    labelNames: ['route', 'outcome'] as const,
     registers: [this.registry],
   });
 

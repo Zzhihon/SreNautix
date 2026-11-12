@@ -4,7 +4,7 @@ import { DEFAULT_BUDGET, ResearchLedger, type BudgetConfig } from '../../src/llm
 import { declaredProfile } from '../../src/llm/dialect.js';
 import { Egress, EgressBlocked } from '../../src/llm/egress.js';
 import { buildRuntimes, partitionRoutes } from '../../src/llm/routes.js';
-import { classifyError, ModelLayer, type LlmCallRecord } from '../../src/llm/session.js';
+import { classifyError, DOMAIN_PROBE, ModelLayer, type LlmCallRecord } from '../../src/llm/session.js';
 import { resolveTimeouts, type RouteTimeouts } from '../../src/llm/timeouts.js';
 import type { LlmRequest, Segment } from '../../src/llm/types.js';
 import { WorkerMetrics } from '../../src/research/metrics.js';
@@ -69,7 +69,12 @@ afterEach(async () => {
 
 function layer(
   routes: ModelRoute[],
-  opts: { budget?: BudgetConfig; timeouts?: Partial<RouteTimeouts>; allowCrossBorder?: boolean } = {},
+  opts: {
+    budget?: BudgetConfig;
+    timeouts?: Partial<RouteTimeouts>;
+    allowCrossBorder?: boolean;
+    domainProbeTtlMs?: number;
+  } = {},
 ) {
   const egress = new Egress({ allowCrossBorder: opts.allowCrossBorder ?? false, honeytokens: [HONEYTOKEN] }, (r) =>
     halted.push(r),
@@ -94,8 +99,18 @@ function layer(
     language: 'en',
     onCalibration: async () => undefined,
     onDrift: async () => undefined,
+    ...(opts.domainProbeTtlMs === undefined ? {} : { domainProbeTtlMs: opts.domainProbeTtlMs }),
   });
 }
+
+/** 服务端收到的请求里哪些是故障域探测调用（ADR 0201） */
+const probes = (srv: ReplayServer) => srv.received.filter((x) => x.body.includes(DOMAIN_PROBE.prompt));
+/** 探测调用的应答：一次很短的普通回答 */
+const PROBE_OK = fixture('openai-docs', 'chat-default');
+const SKIPPED = (id: string) =>
+  new RegExp(
+    `^${id}：事件涉及该路由的故障域组件 Deployment:llm-gateway/gateway，探测调用失败（模型服务返回 HTTP 599.*），提前熔断$`,
+  );
 
 function session(l: ModelLayer, components: string[] = [], deadlineMs = 480_000) {
   return l.session({
@@ -294,20 +309,103 @@ describe('结构化调用', () => {
     await a.start();
   });
 
-  it('事件涉及路由的故障域时提前熔断这条路由', async () => {
+  it('事件涉及路由的故障域、探测调用失败：这条路由对本次会话提前熔断，只收到探测调用', async () => {
     b.enqueue(fixture(P, 'chat-json-schema'));
     const l = layer([route('a', a.baseUrl, { failure_domain: ['Namespace:llm-gateway'] }), route('b', b.baseUrl)]);
     const s = session(l, ['Deployment:llm-gateway/gateway']);
-    expect(s.preOpened()).toEqual([{ routeId: 'a', component: 'Deployment:llm-gateway/gateway' }]);
-    const r = await s.structured('conclude', base('x'), OUTPUT);
+    await s.plan();
+    expect(s.preOpened()).toEqual([
+      { routeId: 'a', component: 'Deployment:llm-gateway/gateway', probe: expect.stringContaining('HTTP 599') },
+    ]);
+    const r = await s.structured('conclude', base('card:1 says api errors'), OUTPUT);
     expect(r).toMatchObject({ ok: true, routeId: 'b' });
-    expect(a.received).toHaveLength(0);
+    // a 只收到一次探测调用：固定文本、16 个输出 token，不含事件数据
+    expect(a.received).toHaveLength(1);
+    const probe = JSON.parse(a.received[0]?.body as string) as Record<string, unknown>;
+    expect(probe).toMatchObject({
+      stream: true,
+      max_completion_tokens: DOMAIN_PROBE.maxOutputTokens,
+      messages: [{ role: 'user', content: DOMAIN_PROBE.prompt }],
+    });
+    expect(probes(b)).toHaveLength(0);
+    const metrics = await l.opts.metrics.registry.metrics();
+    expect(metrics).toMatch(/srenautix_llm_failure_domain_probes_total\{route="a",outcome="failed"\} 1/);
+    expect(metrics).toMatch(/srenautix_llm_failure_domain_skips_total\{route="a"\} 1/);
   });
 
-  it('所有路由都落在故障域内：跳过阶段 B', async () => {
+  it('事件涉及路由的故障域、探测调用成功：照常在这条路由上研判，探测用量计入研判与出境清单', async () => {
+    a.enqueue(PROBE_OK, fixture(P, 'chat-json-schema'));
+    const l = layer([route('a', a.baseUrl, { failure_domain: ['Namespace:llm-gateway'] }), route('b', b.baseUrl)]);
+    const ledger = new ResearchLedger(l.opts.budget);
+    const s = l.session({
+      runId: null,
+      incidentComponents: ['Deployment:llm-gateway/gateway'],
+      deadline: Date.now() + 480_000,
+      signal: new AbortController().signal,
+      ledger,
+      record: async (r) => {
+        records.push(r);
+      },
+    });
+    const r = await s.structured('conclude', base('card:1 says api errors'), OUTPUT);
+    expect(r).toMatchObject({ ok: true, routeId: 'a' });
+    expect(s.preOpened()).toEqual([]);
+    expect(a.received).toHaveLength(2);
+    expect(probes(a)).toHaveLength(1);
+    expect(b.received).toHaveLength(0);
+    // 调用记录只有研判调用；探测的 19 + 10 token 计入研判用量，出境清单多一条没有数据类别的记录
+    expect(records.map((x) => [x.routeId, x.outcome])).toEqual([['a', 'succeeded']]);
+    expect(ledger.input).toBe(19 + 62);
+    expect(ledger.output).toBe(10 + 1249);
+    expect(s.egress.map((e) => [e.route_id, e.categories])).toEqual([
+      ['a', []],
+      ['a', ['metrics']],
+    ]);
+    const metrics = await l.opts.metrics.registry.metrics();
+    expect(metrics).toMatch(/srenautix_llm_failure_domain_probes_total\{route="a",outcome="ok"\} 1/);
+    expect(metrics).not.toMatch(/srenautix_llm_failure_domain_skips_total\{route="a"\}/);
+  });
+
+  it('探测结论按路由缓存：有效期内的其他会话不再探测，过期后重新探测', async () => {
+    const routes = [route('a', a.baseUrl, { failure_domain: ['Namespace:llm-gateway'] })];
+    const cached = layer(routes);
+    a.enqueue(PROBE_OK, fixture(P, 'chat-json-schema'), fixture(P, 'chat-json-schema'));
+    const first = session(cached, ['Deployment:llm-gateway/gateway']);
+    const second = session(cached, ['Deployment:llm-gateway/gateway']);
+    // 两个会话同时开始：共用一次进行中的探测
+    await Promise.all([first.plan(), second.plan()]);
+    expect(await first.structured('conclude', base('x'), OUTPUT)).toMatchObject({ ok: true, routeId: 'a' });
+    expect(await second.structured('conclude', base('x'), OUTPUT)).toMatchObject({ ok: true, routeId: 'a' });
+    expect(probes(a)).toHaveLength(1);
+
+    const expiring = layer(routes, { domainProbeTtlMs: 0 });
+    a.enqueue(PROBE_OK, PROBE_OK);
+    await session(expiring, ['Deployment:llm-gateway/gateway']).plan();
+    await session(expiring, ['Deployment:llm-gateway/gateway']).plan();
+    expect(probes(a)).toHaveLength(3);
+  });
+
+  it('事件不涉及路由的故障域：不发探测调用', async () => {
+    a.enqueue(fixture(P, 'chat-json-schema'));
+    const l = layer([route('a', a.baseUrl, { failure_domain: ['Namespace:llm-gateway'] })]);
+    const r = await session(l, ['Deployment:shop/api']).structured('conclude', base('x'), OUTPUT);
+    expect(r).toMatchObject({ ok: true, routeId: 'a' });
+    expect(probes(a)).toHaveLength(0);
+  });
+
+  it('所有路由都落在故障域内、探测调用都失败：跳过阶段 B，尝试记录写明探测失败的原因', async () => {
     const l = layer([route('a', a.baseUrl, { failure_domain: ['Deployment:llm-gateway/gateway'] })]);
     const r = await session(l, ['Deployment:llm-gateway/gateway']).structured('conclude', base('x'), OUTPUT);
-    expect(r).toMatchObject({ ok: false, reason: 'failure_domain' });
+    expect(r).toMatchObject({
+      ok: false,
+      reason: 'failure_domain',
+      detail: '所有路由都因事件涉及其故障域而提前熔断（常规路由的探测调用失败）',
+    });
+    if (r.ok) {
+      throw new Error('unreachable');
+    }
+    expect(r.attempts).toEqual([expect.stringMatching(SKIPPED('a'))]);
+    expect(records).toHaveLength(0);
   });
 
   it('小模型阶段优先使用小模型路由', async () => {
@@ -357,16 +455,21 @@ describe('兜底路由（ADR 0152）', () => {
     });
   }
 
-  it('全部常规路由因故障域提前熔断：改用兜底路由完成调用，常规路由收不到请求，用量单独记账', async () => {
+  it('全部常规路由的探测调用都失败：改用兜底路由完成调用，常规路由只收到探测调用，用量单独记账', async () => {
     c.enqueue(fixture(P, 'chat-json-schema'));
     const s = spareSession(layer(routes()), INCIDENT, { dailyTokens: 100_000, usedToday: 0 });
+    expect(s.usingLastResort).toBe(false);
+    await s.plan();
     expect(s.usingLastResort).toBe(true);
     expect(s.pool.map((r) => r.route.id)).toEqual(['spare']);
     const r = await s.structured('conclude', base('x'), OUTPUT);
     expect(r).toMatchObject({ ok: true, routeId: 'spare' });
-    expect(a.received).toHaveLength(0);
-    expect(b.received).toHaveLength(0);
+    expect(a.received).toHaveLength(1);
+    expect(b.received).toHaveLength(1);
+    expect(probes(a)).toHaveLength(1);
+    expect(probes(b)).toHaveLength(1);
     expect(c.received).toHaveLength(1);
+    expect(probes(c)).toHaveLength(0);
     expect(records.map((x) => [x.routeId, x.outcome])).toEqual([['spare', 'succeeded']]);
     expect(s.lastResortUsage).toEqual([{ routeId: 'spare', tokens: 62 + 1249, cost: (62 * 1 + 1249 * 2) / 1e6 }]);
     expect(s.routeUses.map((u) => u.route_id)).toEqual(['spare']);
@@ -386,10 +489,24 @@ describe('兜底路由（ADR 0152）', () => {
     expect(body.response_format).toEqual({ type: 'json_object' });
   });
 
+  it('一条常规路由的探测调用成功：照常在常规路由上研判，不选兜底路由', async () => {
+    a.enqueue(PROBE_OK, fixture(P, 'chat-json-schema'));
+    const s = spareSession(layer(routes()), INCIDENT, { dailyTokens: 100_000, usedToday: 0 });
+    await s.plan();
+    expect(s.usingLastResort).toBe(false);
+    expect(s.pool.map((r) => r.route.id)).toEqual(['a', 'b']);
+    expect(s.preOpened().map((p) => p.routeId)).toEqual(['b']);
+    const r = await s.structured('conclude', base('x'), OUTPUT);
+    expect(r).toMatchObject({ ok: true, routeId: 'a' });
+    expect(c.received).toHaveLength(0);
+    expect(s.lastResortUsage).toEqual([]);
+  });
+
   it('还有一条常规路由不在故障域内：照常使用常规路由，不选兜底路由', async () => {
     b.enqueue(fixture(P, 'chat-json-schema'));
     const l = layer([routes()[0] as ModelRoute, route('b', b.baseUrl), routes()[2] as ModelRoute]);
     const s = spareSession(l, INCIDENT, { dailyTokens: 100_000, usedToday: 0 });
+    await s.plan();
     expect(s.usingLastResort).toBe(false);
     const r = await s.structured('conclude', base('x'), OUTPUT);
     expect(r).toMatchObject({ ok: true, routeId: 'b' });
@@ -414,12 +531,12 @@ describe('兜底路由（ADR 0152）', () => {
 
   it('会话没有兜底额度（主动优化）：全部常规路由熔断时只出阶段 A，说明兜底路由只用于事件研判', async () => {
     const s = spareSession(layer(routes()), INCIDENT, undefined);
-    expect(s.usingLastResort).toBe(false);
     const r = await s.structured('conclude', base('x'), OUTPUT);
+    expect(s.usingLastResort).toBe(false);
     expect(r).toMatchObject({
       ok: false,
       reason: 'failure_domain',
-      detail: '所有常规路由都因事件涉及其故障域而提前熔断；兜底路由 spare 只用于事件研判',
+      detail: '所有常规路由都因事件涉及其故障域、探测调用失败而提前熔断；兜底路由 spare 只用于事件研判',
     });
     expect(c.received).toHaveLength(0);
   });
@@ -431,10 +548,7 @@ describe('兜底路由（ADR 0152）', () => {
     if (r.ok) {
       throw new Error('unreachable');
     }
-    expect(r.attempts.slice(0, 2)).toEqual([
-      'a：事件涉及该路由的故障域组件 Deployment:llm-gateway/gateway，提前熔断',
-      'b：事件涉及该路由的故障域组件 Deployment:llm-gateway/gateway，提前熔断',
-    ]);
+    expect(r.attempts.slice(0, 2)).toEqual([expect.stringMatching(SKIPPED('a')), expect.stringMatching(SKIPPED('b'))]);
     expect(r.detail).toMatch(
       /^兜底路由当日已用 99000 token，再发送约 \d+ token 输入（输出上限 4096）会超过每日上限 100000$/,
     );

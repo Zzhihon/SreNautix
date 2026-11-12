@@ -11,10 +11,11 @@ import type {
   ResponseInputItem,
 } from 'openai/resources/responses/responses';
 import { chatMaxTokensField, type DialectProfile } from './dialect.js';
-import type { Item, LlmRequest, LlmTurn, Segment } from './types.js';
+import type { Item, LlmApi, LlmRequest, LlmTurn, Segment } from './types.js';
 
-// 内部消息与两种 OpenAI 协议之间的映射。方言档案决定结构化输出的方式：
-// 支持严格 json_schema 的路由直接约束解码；不支持的路由用 json_object，并把 schema 写进系统提示。
+// 内部消息与三种协议（OpenAI Responses、Chat Completions、Anthropic Messages）之间的映射。
+// 方言档案决定结构化输出的方式：支持严格 json_schema 的路由直接约束解码；不支持的路由把 schema 写进系统提示
+// （Chat 与 Responses 同时要求 json_object）。
 
 export function segmentsText(segments: readonly Segment[]): string {
   return segments.map((s) => s.text).join('\n\n');
@@ -189,6 +190,134 @@ export function toChatParams(req: LlmRequest, opts: WireOptions): ChatParams {
   return params;
 }
 
+// Anthropic Messages API（ADR 0200）的请求与响应。请求经路由的 OpenAI 客户端发出（`client.post('/messages')`），
+// 不引入 Anthropic SDK，这里只声明用到的字段
+
+export type MessagesBlock =
+  | { type: 'text'; text: string }
+  | { type: 'thinking'; thinking: string; signature?: string }
+  | { type: 'tool_use'; id: string; name: string; input: Record<string, unknown> }
+  | { type: 'tool_result'; tool_use_id: string; content: string };
+
+export interface MessagesMessage {
+  role: 'user' | 'assistant';
+  content: MessagesBlock[];
+}
+
+export interface MessagesParams {
+  model: string;
+  max_tokens: number;
+  messages: MessagesMessage[];
+  system?: string;
+  tools?: Array<{ name: string; description: string; input_schema: Record<string, unknown> }>;
+  tool_choice?: { type: 'auto' | 'any' | 'none' };
+  output_config?: { format: { type: 'json_schema'; schema: Record<string, unknown> } };
+  stream: false;
+}
+
+export interface MessagesUsage {
+  input_tokens?: number | null;
+  cache_read_input_tokens?: number | null;
+  cache_creation_input_tokens?: number | null;
+  output_tokens?: number | null;
+}
+
+/** `POST /messages` 的响应；内容块里不认识的类型原样保留、映射时跳过 */
+export interface MessagesResponse {
+  id?: string;
+  model?: string;
+  content: Array<MessagesBlock | { type: string }>;
+  stop_reason: string | null;
+  stop_details?: { category?: string | null; explanation?: string | null } | null;
+  usage?: MessagesUsage | null;
+}
+
+/** 函数调用的参数（JSON 文本）→ tool_use 的 input 对象；不是 JSON 对象时原文放进 `_raw`，不丢内容 */
+export function toolInput(args: string): Record<string, unknown> {
+  try {
+    const v: unknown = JSON.parse(args);
+    if (v && typeof v === 'object' && !Array.isArray(v)) {
+      return v as Record<string, unknown>;
+    }
+  } catch {
+    // 落到下面
+  }
+  return { _raw: args };
+}
+
+const MESSAGES_TOOL_CHOICE = { auto: 'auto', required: 'any', none: 'none' } as const;
+
+/**
+ * 内部消息 → `POST /messages` 请求体（非流式）。Messages API 要求 user 与 assistant 交替：相邻的同角色内容合成一条消息
+ * （助手文本与函数调用合成一条 assistant；连续的工具结果与随后的用户输入合成一条 user），空文本不成块。
+ * 不带采样参数：当前的 Claude 模型拒绝 temperature 等采样参数（HTTP 400）。
+ */
+export function toMessagesParams(req: LlmRequest, opts: WireOptions): MessagesParams {
+  const messages: MessagesMessage[] = [];
+  const push = (role: MessagesMessage['role'], block: MessagesBlock) => {
+    const last = messages.at(-1);
+    if (last?.role === role) {
+      last.content.push(block);
+    } else {
+      messages.push({ role, content: [block] });
+    }
+  };
+  const text = (role: MessagesMessage['role'], t: string) => {
+    if (t !== '') {
+      push(role, { type: 'text', text: t });
+    }
+  };
+  for (const i of req.items) {
+    switch (i.type) {
+      case 'system':
+        break;
+      case 'user':
+        text('user', segmentsText(i.segments));
+        break;
+      case 'assistant':
+        text('assistant', i.text);
+        break;
+      case 'tool_call':
+        push('assistant', { type: 'tool_use', id: i.callId, name: i.name, input: toolInput(i.arguments) });
+        break;
+      case 'tool_result':
+        push('user', { type: 'tool_result', tool_use_id: i.callId, content: i.output.text });
+        break;
+    }
+  }
+  const params: MessagesParams = { model: opts.model, max_tokens: req.maxOutputTokens, messages, stream: false };
+  const system = systemText(req, opts);
+  if (system) {
+    params.system = system;
+  }
+  if (req.tools?.length) {
+    // toolChoice 为 none 时仍然带上工具定义：历史消息里有 tool_use 块时服务方要求工具存在
+    params.tools = req.tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.parameters }));
+    if (req.toolChoice) {
+      params.tool_choice = { type: MESSAGES_TOOL_CHOICE[req.toolChoice] };
+    }
+  }
+  if (req.output && opts.profile.strict_json_schema) {
+    params.output_config = { format: { type: 'json_schema', schema: req.output.schema } };
+  }
+  return params;
+}
+
+/** 三种协议的请求体（非流式） */
+export type WireParams = ResponseCreateParamsNonStreaming | ChatParams | MessagesParams;
+
+/** 内部消息 → 路由协议的请求体 */
+export function buildParams(api: LlmApi, req: LlmRequest, opts: WireOptions): WireParams {
+  switch (api) {
+    case 'responses':
+      return toResponsesParams(req, opts);
+    case 'chat_completions':
+      return toChatParams(req, opts);
+    case 'messages':
+      return toMessagesParams(req, opts);
+  }
+}
+
 /** 推理内容以 <think> 标签内联在正文里的方言：去掉标签部分，只保留最终输出 */
 export function stripInlineReasoning(text: string): { text: string; reasoningChars: number } {
   let reasoningChars = 0;
@@ -295,6 +424,42 @@ export function fromChatCompletion(res: ChatCompletion, profile: DialectProfile)
     },
     responseModel: typeof res.model === 'string' ? res.model : null,
     systemFingerprint: res.system_fingerprint ?? null,
+  };
+}
+
+/** `POST /messages` 的响应 → 内部回合；输入 token 是未缓存、缓存读取与缓存写入三项之和 */
+export function fromMessage(res: MessagesResponse, profile: DialectProfile): LlmTurn {
+  const texts: string[] = [];
+  const toolCalls: LlmTurn['toolCalls'] = [];
+  let reasoningChars = 0;
+  for (const b of res.content ?? []) {
+    const block = b as MessagesBlock;
+    if (block.type === 'text') {
+      texts.push(block.text);
+    } else if (block.type === 'thinking') {
+      reasoningChars += block.thinking.length;
+    } else if (block.type === 'tool_use') {
+      toolCalls.push({ callId: block.id, name: block.name, arguments: JSON.stringify(block.input ?? {}) });
+    }
+  }
+  const final = finalText(texts.length ? texts.join('') : null, profile);
+  const u = res.usage;
+  const cached = u?.cache_read_input_tokens ?? 0;
+  return {
+    text: final.text,
+    reasoningChars: reasoningChars + final.reasoningChars,
+    refusal:
+      res.stop_reason === 'refusal' ? (res.stop_details?.explanation ?? res.stop_details?.category ?? 'refusal') : null,
+    toolCalls,
+    incomplete: res.stop_reason === 'max_tokens' ? 'length' : null,
+    usage: {
+      input: (u?.input_tokens ?? 0) + cached + (u?.cache_creation_input_tokens ?? 0),
+      cachedInput: cached,
+      output: u?.output_tokens ?? 0,
+      reasoning: 0,
+    },
+    responseModel: typeof res.model === 'string' ? res.model : null,
+    systemFingerprint: null,
   };
 }
 

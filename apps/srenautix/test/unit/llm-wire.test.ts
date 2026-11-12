@@ -1,7 +1,11 @@
 import type { ChatCompletion } from 'openai/resources/chat/completions/completions';
 import type { Response } from 'openai/resources/responses/responses';
+import type { ChatCompletionChunk } from 'openai/resources/chat/completions/completions';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { declaredProfile } from '../../src/llm/dialect.js';
+import { ChatAccumulator } from '../../src/llm/stream.js';
 import type { LlmRequest } from '../../src/llm/types.js';
 import {
   fromChatCompletion,
@@ -138,6 +142,52 @@ describe('llama.cpp（Qwen3 1.7B）录制的响应', () => {
     const t = fromResponse(fixture(P, 'responses-json-schema').body as Response, p);
     const out = JSON.parse(t.text as string) as Record<string, unknown>;
     expect(Object.keys(out)).not.toEqual(['component', 'verdict', 'refs']);
+  });
+});
+
+describe('chat 流块归并', () => {
+  const chunk = (delta: Record<string, unknown>): ChatCompletionChunk =>
+    ({ id: 'c', object: 'chat.completion.chunk', created: 1, model: 'm', choices: [{ index: 0, delta }] }) as never;
+
+  it('带 index 的函数调用增量按 index 归并', () => {
+    const acc = new ChatAccumulator();
+    acc.push(chunk({ tool_calls: [{ index: 1, id: 'b', function: { name: 'second', arguments: '{"y"' } }] }));
+    acc.push(chunk({ tool_calls: [{ index: 0, id: 'a', function: { name: 'first', arguments: '{"x":' } }] }));
+    acc.push(chunk({ tool_calls: [{ index: 0, function: { arguments: '1}' } }] }));
+    acc.push(chunk({ tool_calls: [{ index: 1, function: { arguments: ':2}' } }] }));
+    expect(fromChatCompletion(acc.result(), loose).toolCalls).toEqual([
+      { callId: 'a', name: 'first', arguments: '{"x":1}' },
+      { callId: 'b', name: 'second', arguments: '{"y":2}' },
+    ]);
+  });
+
+  it('不带 index 的函数调用增量（经网关的 gemini-4-carbon）：id 不同就是新的调用，usage 以最后一块为准', () => {
+    const file = resolve(import.meta.dirname, '../fixtures/llm/gateway-gemini-4-carbon/chat-stream-tool-calls.json');
+    const { events } = JSON.parse(readFileSync(file, 'utf8')) as { events: ChatCompletionChunk[] };
+    const acc = new ChatAccumulator();
+    events.forEach((e) => acc.push(e));
+    // finish_reason 是 stop，函数调用照样读出
+    const t = fromChatCompletion(acc.result(), declaredProfile('openai-compatible'));
+    expect(t.toolCalls).toEqual([
+      { callId: 'call_…', name: 'query_metrics', arguments: '{"minutes":30,"query":"sum(rate(…))"}' },
+      {
+        callId: 'call_3149893764841019248',
+        name: 'get_pod_restarts',
+        arguments: '{"workload":"gateway","namespace":"cchp-prod"}',
+      },
+    ]);
+    expect(t.usage).toMatchObject({ input: 220, output: 136 });
+    expect(t.incomplete).toBeNull();
+  });
+
+  it('不带 index、也不带新 id 的增量接在最后一个调用上', () => {
+    const acc = new ChatAccumulator();
+    acc.push(chunk({ tool_calls: [{ id: 'a', function: { name: 'first', arguments: '{"x":' } }] }));
+    acc.push(chunk({ tool_calls: [{ function: { arguments: '1}' } }] }));
+    acc.push(chunk({ tool_calls: [{ id: 'a', function: { arguments: '' } }] }));
+    expect(fromChatCompletion(acc.result(), loose).toolCalls).toEqual([
+      { callId: 'a', name: 'first', arguments: '{"x":1}' },
+    ]);
   });
 });
 
