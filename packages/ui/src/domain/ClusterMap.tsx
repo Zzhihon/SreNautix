@@ -30,6 +30,8 @@ type BoxData = { box: 'domain' | 'service'; title: string; item?: undefined };
 type ItemData = { item: MapNodeItem; box?: undefined };
 type MapNode = Node<BoxData | ItemData>;
 
+/** 归并阈值 τ：低于它的边只说明流量被放行（ADR 0200） */
+const MERGE_CONFIDENCE = 0.6;
 /** 缩放到这个值以下只显示组件名称（领域层） */
 const DETAIL_ZOOM = 0.45;
 
@@ -487,6 +489,14 @@ function ItemPanel({
   const service = map.domains.flatMap((d) => d.services.map((s) => ({ d, s }))).find((x) => x.s.id === c.service);
   const deps = map.edges.filter((e) => e.from === c.key);
   const users = map.edges.filter((e) => e.to === c.key);
+  // 只被网络策略放行（置信度低于归并阈值）的组件只计数：观测与发布命名空间放行访问的组件动辄几十个
+  const listed = (list: typeof deps, end: 'from' | 'to') => {
+    const named = list
+      .filter((e) => e.confidence >= MERGE_CONFIDENCE)
+      .map((e) => (e.provenance === 'declared' ? t('map.panel.declared', { name: name(e[end]) }) : name(e[end])));
+    const allowed = list.length - named.length;
+    return [...named, ...(allowed ? [t('map.panel.allowed', { n: allowed })] : [])].join('、') || '-';
+  };
   const incidents = o.incidents.get(id) ?? [];
   const count = (r: Record<string, number>) =>
     Object.entries(r)
@@ -515,9 +525,9 @@ function ItemPanel({
             <dt>{t('map.panel.nodes')}</dt>
             <dd>{c.nodes.map((n) => n.slice(n.indexOf(':') + 1)).join('、') || t('map.panel.no_nodes')}</dd>
             <dt>{t('map.panel.depends_on')}</dt>
-            <dd>{deps.map((e) => name(e.to)).join('、') || '-'}</dd>
+            <dd>{listed(deps, 'to')}</dd>
             <dt>{t('map.panel.used_by')}</dt>
-            <dd>{users.map((e) => name(e.from)).join('、') || '-'}</dd>
+            <dd>{listed(users, 'from')}</dd>
           </>
         )}
       </dl>

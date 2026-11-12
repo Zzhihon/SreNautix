@@ -111,6 +111,20 @@ describe('组件多的子图（ADR 0197）', () => {
         document.querySelector<HTMLElement>('.react-flow__viewport')?.style.transform ?? '',
       )?.[1],
     );
+  // 初次适配视图在节点量出尺寸之后才执行：连续两次读到同一个缩放才算稳定
+  const settled = async () => {
+    let last = -1;
+    await waitFor(
+      () => {
+        const now = scale();
+        const same = now > 0 && now === last;
+        last = now;
+        expect(same).toBe(true);
+      },
+      { interval: 100 },
+    );
+    return last;
+  };
 
   it('合并的组是一个节点：侧栏列出成员并链接到各自的邻域；展开后成员单独画出，开关把它们合并回去', async () => {
     renderUi(<Subgraph graph={graph} clusterId="prod" />, { links });
@@ -209,8 +223,7 @@ describe('组件多的子图（ADR 0197）', () => {
       });
     const inline = renderUi(<Subgraph graph={graph} />);
     await node('gateway，根因，1 条告警');
-    await waitFor(() => expect(scale()).toBeGreaterThan(0));
-    const before = scale();
+    const before = await settled();
     wheel();
     expect(await screen.findByText('按住 Ctrl 或 ⌘ 再滚动，可以缩放画布')).toBeTruthy();
     expect(scale()).toBe(before);
@@ -218,8 +231,7 @@ describe('组件多的子图（ADR 0197）', () => {
 
     renderUi(<Subgraph graph={graph} primary />);
     await node('gateway，根因，1 条告警');
-    await waitFor(() => expect(scale()).toBeGreaterThan(0));
-    const fitted = scale();
+    const fitted = await settled();
     wheel();
     await waitFor(() => expect(scale()).toBeGreaterThan(fitted));
     expect(screen.queryByText('按住 Ctrl 或 ⌘ 再滚动，可以缩放画布')).toBeNull();
