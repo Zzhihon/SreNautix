@@ -40,8 +40,12 @@ const TG_SECRET = 'webhook-secret-0123456789abcdef';
 const BOT = '123456:TEST-bot-token';
 const INGEST = 'ingest-token-conformance-0123456789';
 const APPROVER = 'oidc:approver';
-/** 提议的有效期：Telegram 回调没有时间戳，过期由提议 TTL 判定（从消息首次送达起算）。 */
-const PROPOSAL_TTL_MS = 6_000;
+/**
+ * 提议的有效期：Telegram 回调没有时间戳，过期由提议 TTL 判定（从消息首次送达起算），过期用例按它真实等待。
+ * 有效期按数据库的真实时间计算，两个渠道的"审批成功"用例都要在提议创建后、通知引擎登记按钮之后才点击：
+ * 6 秒时 CI 负载高就会在点击前过期（飞书审批得到 expired），所以留 30 秒
+ */
+const PROPOSAL_TTL_MS = 30_000;
 
 interface FeishuVectors {
   encrypt_key: string;
