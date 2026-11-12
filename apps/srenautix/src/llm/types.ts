@@ -1,4 +1,6 @@
-// 模型层的内部类型：两种 OpenAI 协议共用的消息模型、请求与回合
+import type { ModelRoute } from '@srenautix/contract';
+
+// 模型层的内部类型：三种协议（OpenAI Responses、OpenAI 兼容的 Chat Completions、Anthropic Messages）共用的消息模型、请求与回合
 
 /**
  * 出境数据类别（研判清单 EgressEntry.categories）。sql（规范化语句文本）与 code（业务代码片段）只来自主动优化
@@ -71,7 +73,8 @@ export interface OutputFormat {
   schema: Record<string, unknown>;
 }
 
-export type LlmApi = 'responses' | 'chat_completions';
+/** 路由的协议，取值以契约 ModelRoute.api 为准 */
+export type LlmApi = ModelRoute['api'];
 
 export interface LlmRequest {
   items: Item[];

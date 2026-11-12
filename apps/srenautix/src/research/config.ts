@@ -28,7 +28,7 @@ import { DEFAULT_LIMITS, type ResearchLimits } from './controller.js';
 //     probe_on_start: true
 //     routes: [ … 与 eval 配置相同 … ]      # 每条路由可选 model_class 与 timeouts: { first_token, idle, total }（ADR 0098）
 //                                          # 以及 role: regular | last_resort（兜底路由，ADR 0152）
-//                                          # 与 thinking: disabled（Chat 路由关闭服务方默认的思考模式，ADR 0158）
+//                                          # 与 thinking: disabled（Chat 与 Messages 路由关闭服务方默认的思考模式，ADR 0158）
 //   budget: { daily_tokens: 15000000, daily_warn_ratio: 0.8, on_exhausted: critical_only, per_research_input_tokens: 150000,
 //             purposes: { optimization: { daily_tokens: 3000000 } },   # 主动优化的每日用量上限（ADR 0146 §5.3）
 //             last_resort: { daily_tokens: 2000000 } }                 # 兜底路由合计的每日上限，配置了兜底路由时必填（ADR 0152）
@@ -46,7 +46,7 @@ const route = z
   .object({
     id: z.string().regex(/^[a-z0-9][a-z0-9-]*$/),
     base_url: z.string().url(),
-    api: z.enum(['responses', 'chat_completions']),
+    api: z.enum(['responses', 'chat_completions', 'messages']),
     model: z.string().min(1),
     dialect_profile: z.string().min(1),
     price: z

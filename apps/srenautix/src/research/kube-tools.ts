@@ -103,18 +103,72 @@ export const KUBE_TOOLS: readonly HubToolSpec[] = [
 
 const enc = new TextEncoder();
 
-/** 截断到 maxBytes（按 UTF-8 字节，不切开字符）并脱敏 */
-export function finish(text: string, maxBytes: number): KubeToolResult {
+/**
+ * 脱敏后截断到 maxBytes（按 UTF-8 字节，不切开字符）。keep 为 tail 时保留末尾，从完整的一行开始：
+ * 日志尾部最新的行在最后，报错通常就在那里
+ */
+export function finish(text: string, maxBytes: number, keep: 'head' | 'tail' = 'head'): KubeToolResult {
   const red = redactText(text).text;
-  const bytes = enc.encode(red).length;
+  const b = enc.encode(red);
+  const bytes = b.length;
   if (bytes <= maxBytes) {
     return { text: red, truncated: false, bytes };
+  }
+  if (keep === 'tail') {
+    let start = bytes - maxBytes;
+    const nl = b.indexOf(0x0a, start);
+    if (nl !== -1 && nl + 1 < bytes) {
+      start = nl + 1;
+    } else {
+      // 末尾没有完整的行（单行超长）：从字符边界开始
+      while (((b[start] as number) & 0xc0) === 0x80) {
+        start++;
+      }
+    }
+    return { text: new TextDecoder().decode(b.subarray(start)), truncated: true, bytes };
   }
   let cut = red.slice(0, maxBytes);
   while (enc.encode(cut).length > maxBytes) {
     cut = cut.slice(0, -1);
   }
   return { text: cut, truncated: true, bytes };
+}
+
+export interface LogTailRequest {
+  namespace: string;
+  pod: string;
+  container: string;
+  previous: boolean;
+  tailLines: number;
+  maxBytes: number;
+}
+
+/**
+ * 容器日志的尾部，以最新的行结尾。kubelet 的 limitBytes 从所选尾部的开头计数，读满上限时返回的是其中最旧的部分：
+ * 这时按读到的行数缩小 tailLines 重读（最多 3 次），最后按 maxBytes 保留末尾
+ */
+export async function readLogTail(core: CoreV1Api, r: LogTailRequest): Promise<KubeToolResult> {
+  const limitBytes = r.maxBytes * 4;
+  let tail = r.tailLines;
+  let text: string;
+  for (let attempt = 1; ; attempt++) {
+    text = String(
+      (await core.readNamespacedPodLog({
+        namespace: r.namespace,
+        name: r.pod,
+        container: r.container,
+        previous: r.previous,
+        tailLines: tail,
+        limitBytes,
+      })) ?? '',
+    );
+    // limitBytes 允许略多或略少于上限，留 10% 余量判断是否读满
+    if (enc.encode(text).length < limitBytes * 0.9 || attempt === 3 || tail <= 1) {
+      break;
+    }
+    tail = Math.max(1, Math.min(tail - 1, Math.floor(text.split('\n').length / 2)));
+  }
+  return finish(text, r.maxBytes, 'tail');
 }
 
 /** Pod 的状态摘要（不含 spec 中的环境变量、卷内容） */
@@ -250,15 +304,15 @@ export class KubeTools {
             this.s.tailLines * 5,
             typeof args.tail_lines === 'number' ? args.tail_lines : this.s.tailLines,
           );
-          const text = await this.core.readNamespacedPodLog({
+          // await：读取失败要落进下面的 catch，转成 KubeToolError
+          return await readLogTail(this.core, {
             namespace: ns,
-            name: String(args.pod),
+            pod: String(args.pod),
             container: String(args.container),
             previous: args.previous === true,
             tailLines: tail,
-            limitBytes: this.s.maxBytes * 4,
+            maxBytes: this.s.maxBytes,
           });
-          return finish(String(text ?? ''), this.s.maxBytes);
         }
         default:
           throw new KubeToolError(`没有工具 ${name}`);

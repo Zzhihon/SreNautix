@@ -152,6 +152,16 @@ export function lastResortRoute(
   return isLastResort(r) ? { last_resort_route: { route_id: r.id, model: r.model } } : {};
 }
 
+/** 上一次结论没有判定根因，并且得出它的模型不全在现在的常规路由里（读不到当时的模型时按不同处理） */
+export function undecidedUnderOtherModels(previous: PreviousRun, layer: ModelLayer): boolean {
+  const level = previous.output.conclusion?.level;
+  if (level !== 'inconclusive' && level !== 'undetermined') {
+    return false;
+  }
+  const current = new Set(layer.regular.map((r) => r.route.model));
+  return previous.models.length === 0 || previous.models.some((m) => !current.has(m));
+}
+
 export async function runStageB(input: ResearchRunInput, env: ResearchEnv, sink: RunSink): Promise<ResearchRunResult> {
   const { rc, previous, runId } = input;
   const started = env.now();
@@ -193,10 +203,12 @@ export async function runStageB(input: ResearchRunInput, env: ResearchEnv, sink:
     return { ...base, ...r };
   };
 
-  // 指纹门控（DESIGN §7.4）：证据指纹不变、之后没有新的反馈时，只刷新证据卡并追加"仍然一致"，不调用模型
+  // 指纹门控（DESIGN §7.4）：证据指纹不变、之后没有新的反馈时，只刷新证据卡并追加"仍然一致"，不调用模型。
+  // 上一次结论没有判定根因（inconclusive、undetermined）、并且当时的模型不全在现在的常规路由里时不沿用：
+  // 换了模型的路由重新研判一次，之后同样的证据照常沿用
   if (previous && previous.evidenceFingerprint === rc.stageA.evidence_fingerprint) {
     const newFeedback = rc.feedback.some((f) => f.linked && Date.parse(f.created_at) > Date.parse(previous.finishedAt));
-    if (!newFeedback) {
+    if (!newFeedback && !undecidedUnderOtherModels(previous, env.layer)) {
       const output: ResearchOutput = {
         ...previous.output,
         validation_notes: [
@@ -210,6 +222,8 @@ export async function runStageB(input: ResearchRunInput, env: ResearchEnv, sink:
     }
   }
 
+  // 确定路由组（事件涉及常规路由的故障域时先发探测调用，ADR 0202）。放在指纹门控之后：不调用模型的研判不探测
+  await session.plan();
   // 本次研判可能使用的路由中最小的上下文：常规路由，或全部常规路由因故障域提前熔断时的兜底路由（ADR 0152）
   const contextTokens = Math.min(...session.pool.map((r) => r.profile.context_tokens));
   const parts = promptParts(env.language, rc, book, contextTokens, previous);

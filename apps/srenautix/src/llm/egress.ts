@@ -30,6 +30,9 @@ export interface EgressPolicy {
   categories?: readonly EgressCategory[];
 }
 
+/** Anthropic Messages API 的版本请求头 */
+const ANTHROPIC_VERSION = '2023-06-01';
+
 export interface EgressCall {
   bytes: number;
 }
@@ -130,7 +133,11 @@ export class Egress {
     }
   }
 
-  /** 为一条路由构造 OpenAI 客户端；所有请求经过 guardedFetch */
+  /**
+   * 为一条路由构造 OpenAI 客户端；所有请求经过 guardedFetch。
+   * api: messages 的路由也用这个客户端发请求（`client.post('/messages')`，ADR 0201）：密钥除了 SDK 的 Authorization: Bearer，
+   * 再放进 Anthropic 的 x-api-key 请求头。请求头不进入调用记录与日志
+   */
   client(route: ModelRoute, apiKey: string, timeoutMs: number): OpenAI {
     this.assertRouteAllowed(route);
     const base = new URL(route.base_url);
@@ -150,7 +157,16 @@ export class Egress {
       }
       return fetch(input, init);
     };
-    return new OpenAI({ apiKey, baseURL: route.base_url, timeout: timeoutMs, maxRetries: 0, fetch: guardedFetch });
+    return new OpenAI({
+      apiKey,
+      baseURL: route.base_url,
+      timeout: timeoutMs,
+      maxRetries: 0,
+      fetch: guardedFetch,
+      ...(route.api === 'messages'
+        ? { defaultHeaders: { 'anthropic-version': ANTHROPIC_VERSION, 'x-api-key': apiKey } }
+        : {}),
+    });
   }
 
   /** 在出站计量上下文中执行一次调用；call.bytes 累计实际发出的字节数（调用失败时同样有效） */

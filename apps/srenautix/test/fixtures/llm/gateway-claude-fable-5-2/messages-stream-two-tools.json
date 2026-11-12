@@ -1,0 +1,101 @@
+{
+  "provenance": {
+    "provider": "model gateway (CCHP reference deployment)",
+    "model": "claude-fable-5-2",
+    "path": "/v1/messages",
+    "recorded_at": "2026-11-12",
+    "note": "2026-11-12 从网关取样的事件序列；取样时省略的内容保留为 …，message_start 取自同日的录制，message_delta 的 iterations 省略",
+    "mode": "sampled, stream"
+  },
+  "events": [
+    {
+      "type": "message_start",
+      "message": {
+        "model": "claude-fable-5-2",
+        "id": "msg_011C1fQEwcS9WE63KLJrJAja",
+        "type": "message",
+        "role": "assistant",
+        "content": [],
+        "stop_reason": null,
+        "stop_sequence": null,
+        "stop_details": null,
+        "usage": {
+          "input_tokens": 318,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 0,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 0
+          },
+          "output_tokens": 36,
+          "service_tier": "standard",
+          "inference_geo": "global"
+        }
+      }
+    },
+    {
+      "type": "ping"
+    },
+    {
+      "type": "content_block_start",
+      "index": 0,
+      "content_block": {
+        "type": "tool_use",
+        "id": "toolu_01G8…",
+        "name": "query_metrics",
+        "input": {}
+      }
+    },
+    {
+      "type": "content_block_delta",
+      "index": 0,
+      "delta": {
+        "type": "input_json_delta",
+        "partial_json": "{\"query\":\"sum by (pod) (…)\",\"minutes\":30}"
+      }
+    },
+    {
+      "type": "content_block_stop",
+      "index": 0
+    },
+    {
+      "type": "content_block_start",
+      "index": 1,
+      "content_block": {
+        "type": "tool_use",
+        "id": "toolu_01DK…",
+        "name": "get_pod_restarts",
+        "input": {}
+      }
+    },
+    {
+      "type": "content_block_delta",
+      "index": 1,
+      "delta": {
+        "type": "input_json_delta",
+        "partial_json": "{\"namespace\":\"cchp-prod\",\"workload\":\"gateway\"}"
+      }
+    },
+    {
+      "type": "content_block_stop",
+      "index": 1
+    },
+    {
+      "type": "message_delta",
+      "delta": {
+        "stop_reason": "tool_use",
+        "stop_sequence": null,
+        "stop_details": null
+      },
+      "usage": {
+        "input_tokens": 680,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "output_tokens": 262
+      }
+    },
+    {
+      "type": "message_stop"
+    }
+  ]
+}

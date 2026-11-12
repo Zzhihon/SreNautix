@@ -11,10 +11,11 @@ import type {
   ResponseInputItem,
 } from 'openai/resources/responses/responses';
 import { chatMaxTokensField, type DialectProfile } from './dialect.js';
-import type { Item, LlmRequest, LlmTurn, Segment } from './types.js';
+import type { Item, LlmApi, LlmRequest, LlmTurn, Segment } from './types.js';
 
-// 内部消息与两种 OpenAI 协议之间的映射。方言档案决定结构化输出的方式：
-// 支持严格 json_schema 的路由直接约束解码；不支持的路由用 json_object，并把 schema 写进系统提示。
+// 内部消息与三种协议（OpenAI Responses、Chat Completions、Anthropic Messages）之间的映射。
+// 方言档案决定结构化输出的方式：支持严格 json_schema 的路由直接约束解码；不支持的 Messages 路由把 schema 作为一个
+// strict 输出工具（见 OUTPUT_TOOL_PREFIX）；其余路由把 schema 写进系统提示（Chat 与 Responses 同时要求 json_object）。
 
 export function segmentsText(segments: readonly Segment[]): string {
   return segments.map((s) => s.text).join('\n\n');
@@ -30,6 +31,27 @@ export function schemaInstruction(schema: Record<string, unknown>, language: 'zh
 }
 
 /**
+ * 不支持严格 json_schema 的 Messages 路由上，结构化输出声明为一个 strict 输出工具，名称是这个前缀加输出名称；
+ * 模型调用它时，参数对象就是输出（映射回正文）。tool_choice 用 auto：ccx 上的 claude-fable-5-2 在强制调用
+ * （tool_choice 为 tool 或 any）时把提示词原文填进每个字段，auto 时遵守枚举与 maxItems（2026-11-13 探测）。
+ * 模型不调用而直接输出文本时，正文照常走本地修复阶梯。
+ */
+export const OUTPUT_TOOL_PREFIX = 'output__';
+
+/** Messages 请求上的输出工具名称；请求不用输出工具时为 null */
+export function messagesOutputTool(req: LlmRequest, profile: DialectProfile): string | null {
+  return req.output && !profile.strict_json_schema && profile.native_tools
+    ? `${OUTPUT_TOOL_PREFIX}${req.output.name}`
+    : null;
+}
+
+function outputToolInstruction(name: string, language: 'zh' | 'en'): string {
+  return language === 'zh'
+    ? `调用 ${name} 工具提交结果：参数对象就是输出，所有字段都要出现，取值遵守枚举。不要在正文里输出结果。`
+    : `Submit the result by calling the ${name} tool: its input object is the output, with every field present and values within the enums. Do not write the result as text.`;
+}
+
+/**
  * 路由的思考模式设置（ADR 0158）：`disabled` 在 Chat 请求体里加 `thinking: {type: "disabled"}`，关闭服务方默认开启的思考模式。
  * 默认思考的服务方把推理 token 计入 max_tokens，阶段的输出上限会被推理用完，正文为空。
  */
@@ -39,16 +61,18 @@ export interface WireOptions {
   model: string;
   profile: DialectProfile;
   language: 'zh' | 'en';
-  /** 只用于 Chat 接口；不给或为 null 时请求体不带 thinking 字段 */
+  /** 只用于 Chat 与 Messages 接口；不给或为 null 时请求体不带 thinking 字段 */
   thinking?: ChatThinking | null;
 }
 
 /** OpenAI SDK 的 Chat 请求类型没有服务方扩展的 thinking 字段 */
 export type ChatParams = ChatCompletionCreateParamsNonStreaming & { thinking?: { type: ChatThinking } };
 
-function systemText(req: LlmRequest, opts: WireOptions): string {
+function systemText(req: LlmRequest, opts: WireOptions, outputTool: string | null = null): string {
   const parts = req.items.filter((i) => i.type === 'system').map((i) => segmentsText(i.segments));
-  if (req.output && !opts.profile.strict_json_schema) {
+  if (outputTool) {
+    parts.push(outputToolInstruction(outputTool, opts.language));
+  } else if (req.output && !opts.profile.strict_json_schema) {
     parts.push(schemaInstruction(req.output.schema, opts.language));
   }
   return parts.join('\n\n');
@@ -189,6 +213,155 @@ export function toChatParams(req: LlmRequest, opts: WireOptions): ChatParams {
   return params;
 }
 
+// Anthropic Messages API（ADR 0201）的请求与响应。请求经路由的 OpenAI 客户端发出（`client.post('/messages')`），
+// 不引入 Anthropic SDK，这里只声明用到的字段
+
+export type MessagesBlock =
+  | { type: 'text'; text: string }
+  | { type: 'thinking'; thinking: string; signature?: string }
+  | { type: 'tool_use'; id: string; name: string; input: Record<string, unknown> }
+  | { type: 'tool_result'; tool_use_id: string; content: string };
+
+export interface MessagesMessage {
+  role: 'user' | 'assistant';
+  content: MessagesBlock[];
+}
+
+export interface MessagesParams {
+  model: string;
+  max_tokens: number;
+  messages: MessagesMessage[];
+  system?: string;
+  tools?: Array<{ name: string; description: string; input_schema: Record<string, unknown>; strict?: true }>;
+  tool_choice?: { type: 'auto' | 'any' | 'none' };
+  thinking?: { type: ChatThinking };
+  output_config?: { format: { type: 'json_schema'; schema: Record<string, unknown> } };
+  stream: false;
+}
+
+export interface MessagesUsage {
+  input_tokens?: number | null;
+  cache_read_input_tokens?: number | null;
+  cache_creation_input_tokens?: number | null;
+  output_tokens?: number | null;
+}
+
+/** `POST /messages` 的响应；内容块里不认识的类型原样保留、映射时跳过 */
+export interface MessagesResponse {
+  id?: string;
+  model?: string;
+  content: Array<MessagesBlock | { type: string }>;
+  stop_reason: string | null;
+  stop_details?: { category?: string | null; explanation?: string | null } | null;
+  usage?: MessagesUsage | null;
+}
+
+/** 函数调用的参数（JSON 文本）→ tool_use 的 input 对象；不是 JSON 对象时原文放进 `_raw`，不丢内容 */
+export function toolInput(args: string): Record<string, unknown> {
+  try {
+    const v: unknown = JSON.parse(args);
+    if (v && typeof v === 'object' && !Array.isArray(v)) {
+      return v as Record<string, unknown>;
+    }
+  } catch {
+    // 落到下面
+  }
+  return { _raw: args };
+}
+
+const MESSAGES_TOOL_CHOICE = { auto: 'auto', required: 'any', none: 'none' } as const;
+
+/**
+ * 内部消息 → `POST /messages` 请求体（非流式）。Messages API 要求 user 与 assistant 交替：相邻的同角色内容合成一条消息
+ * （助手文本与函数调用合成一条 assistant；连续的工具结果与随后的用户输入合成一条 user），空文本不成块。
+ * 不带采样参数：当前的 Claude 模型拒绝 temperature 等采样参数（HTTP 400）。
+ * 结构化输出见 OUTPUT_TOOL_PREFIX。
+ */
+export function toMessagesParams(req: LlmRequest, opts: WireOptions): MessagesParams {
+  const messages: MessagesMessage[] = [];
+  const push = (role: MessagesMessage['role'], block: MessagesBlock) => {
+    const last = messages.at(-1);
+    if (last?.role === role) {
+      last.content.push(block);
+    } else {
+      messages.push({ role, content: [block] });
+    }
+  };
+  const text = (role: MessagesMessage['role'], t: string) => {
+    if (t !== '') {
+      push(role, { type: 'text', text: t });
+    }
+  };
+  for (const i of req.items) {
+    switch (i.type) {
+      case 'system':
+        break;
+      case 'user':
+        text('user', segmentsText(i.segments));
+        break;
+      case 'assistant':
+        text('assistant', i.text);
+        break;
+      case 'tool_call':
+        push('assistant', { type: 'tool_use', id: i.callId, name: i.name, input: toolInput(i.arguments) });
+        break;
+      case 'tool_result':
+        push('user', { type: 'tool_result', tool_use_id: i.callId, content: i.output.text });
+        break;
+    }
+  }
+  const params: MessagesParams = { model: opts.model, max_tokens: req.maxOutputTokens, messages, stream: false };
+  const outputTool = messagesOutputTool(req, opts.profile);
+  const system = systemText(req, opts, outputTool);
+  if (system) {
+    params.system = system;
+  }
+  if (opts.thinking) {
+    params.thinking = { type: opts.thinking };
+  }
+  if (req.tools?.length) {
+    if (outputTool && req.tools.some((t) => t.name.startsWith(OUTPUT_TOOL_PREFIX))) {
+      throw new Error(`工具名称不能以 ${OUTPUT_TOOL_PREFIX} 开头，这个前缀留给结构化输出`);
+    }
+    // toolChoice 为 none 时仍然带上工具定义：历史消息里有 tool_use 块时服务方要求工具存在
+    params.tools = req.tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.parameters }));
+    if (req.toolChoice) {
+      params.tool_choice = { type: MESSAGES_TOOL_CHOICE[req.toolChoice] };
+    }
+  }
+  if (outputTool && req.output) {
+    params.tools = [
+      ...(params.tools ?? []),
+      {
+        name: outputTool,
+        description: `Submit the ${req.output.name} output.`,
+        input_schema: req.output.schema,
+        strict: true,
+      },
+    ];
+    params.tool_choice ??= { type: 'auto' };
+  }
+  if (req.output && opts.profile.strict_json_schema) {
+    params.output_config = { format: { type: 'json_schema', schema: req.output.schema } };
+  }
+  return params;
+}
+
+/** 三种协议的请求体（非流式） */
+export type WireParams = ResponseCreateParamsNonStreaming | ChatParams | MessagesParams;
+
+/** 内部消息 → 路由协议的请求体 */
+export function buildParams(api: LlmApi, req: LlmRequest, opts: WireOptions): WireParams {
+  switch (api) {
+    case 'responses':
+      return toResponsesParams(req, opts);
+    case 'chat_completions':
+      return toChatParams(req, opts);
+    case 'messages':
+      return toMessagesParams(req, opts);
+  }
+}
+
 /** 推理内容以 <think> 标签内联在正文里的方言：去掉标签部分，只保留最终输出 */
 export function stripInlineReasoning(text: string): { text: string; reasoningChars: number } {
   let reasoningChars = 0;
@@ -295,6 +468,47 @@ export function fromChatCompletion(res: ChatCompletion, profile: DialectProfile)
     },
     responseModel: typeof res.model === 'string' ? res.model : null,
     systemFingerprint: res.system_fingerprint ?? null,
+  };
+}
+
+/**
+ * `POST /messages` 的响应 → 内部回合；输入 token 是未缓存、缓存读取与缓存写入三项之和。
+ * 输出工具（OUTPUT_TOOL_PREFIX）的调用参数作为正文，不算工具调用。
+ */
+export function fromMessage(res: MessagesResponse, profile: DialectProfile): LlmTurn {
+  const texts: string[] = [];
+  const toolCalls: LlmTurn['toolCalls'] = [];
+  let reasoningChars = 0;
+  for (const b of res.content ?? []) {
+    const block = b as MessagesBlock;
+    if (block.type === 'text') {
+      texts.push(block.text);
+    } else if (block.type === 'thinking') {
+      reasoningChars += block.thinking.length;
+    } else if (block.type === 'tool_use' && block.name.startsWith(OUTPUT_TOOL_PREFIX)) {
+      texts.push(JSON.stringify(block.input ?? {}));
+    } else if (block.type === 'tool_use') {
+      toolCalls.push({ callId: block.id, name: block.name, arguments: JSON.stringify(block.input ?? {}) });
+    }
+  }
+  const final = finalText(texts.length ? texts.join('') : null, profile);
+  const u = res.usage;
+  const cached = u?.cache_read_input_tokens ?? 0;
+  return {
+    text: final.text,
+    reasoningChars: reasoningChars + final.reasoningChars,
+    refusal:
+      res.stop_reason === 'refusal' ? (res.stop_details?.explanation ?? res.stop_details?.category ?? 'refusal') : null,
+    toolCalls,
+    incomplete: res.stop_reason === 'max_tokens' ? 'length' : null,
+    usage: {
+      input: (u?.input_tokens ?? 0) + cached + (u?.cache_creation_input_tokens ?? 0),
+      cachedInput: cached,
+      output: u?.output_tokens ?? 0,
+      reasoning: 0,
+    },
+    responseModel: typeof res.model === 'string' ? res.model : null,
+    systemFingerprint: null,
   };
 }
 

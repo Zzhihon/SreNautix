@@ -7,6 +7,7 @@ import { PgMessageSource, ReportSource } from '../../src/notify/source.js';
 import type { FeedbackService } from '../../src/proposals/feedback.js';
 import type { ProposalService } from '../../src/proposals/service.js';
 import type { ServerHandle } from '../../src/roles/server.js';
+import { DOMAIN_PROBE } from '../../src/llm/session.js';
 import { buildWorker, type WorkerHandle } from '../../src/roles/worker.js';
 import { DEFAULT_DB_ROLES } from '../../src/kernel/store/bootstrap.js';
 import { TopologyStore } from '../../src/topology/store.js';
@@ -159,9 +160,12 @@ describe('兜底路由', () => {
     );
     expect(run.state, JSON.stringify(run.error)).toBe('completed');
 
-    // 常规路由的服务端全程收不到请求；兜底路由收到全部调用，走 OpenAI 兼容的 Chat 接口
-    expect(primary.received).toHaveLength(0);
-    expect(secondary.received).toHaveLength(0);
+    // 常规路由的服务端只收到一次故障域探测调用（ADR 0202；回放服务没有排队的响应，探测失败），不收到研判调用；
+    // 兜底路由收到全部研判调用，走 OpenAI 兼容的 Chat 接口
+    for (const regular of [primary, secondary]) {
+      expect(regular.received).toHaveLength(1);
+      expect(regular.received[0]?.body).toContain(DOMAIN_PROBE.prompt);
+    }
     expect(direct.received.length).toBeGreaterThanOrEqual(2);
     for (const req of direct.received) {
       expect(req.path).toBe('/v1/chat/completions');
@@ -215,5 +219,7 @@ describe('兜底路由', () => {
     expect(metrics).toMatch(/srenautix_llm_budget_used_ratio\{scope="last_resort"\} /);
     expect(metrics).toMatch(/srenautix_llm_failure_domain_skips_total\{route="primary"\} [1-9]/);
     expect(metrics).toMatch(/srenautix_llm_failure_domain_skips_total\{route="secondary"\} [1-9]/);
+    expect(metrics).toMatch(/srenautix_llm_failure_domain_probes_total\{route="primary",outcome="failed"\} 1/);
+    expect(metrics).toMatch(/srenautix_llm_failure_domain_probes_total\{route="secondary",outcome="failed"\} 1/);
   }, 120_000);
 });

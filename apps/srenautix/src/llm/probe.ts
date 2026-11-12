@@ -1,8 +1,9 @@
 import type OpenAI from 'openai';
 import type { DialectProfile, ModelRoute } from '@srenautix/contract';
 import { classifyError } from './session.js';
+import { completeTurn } from './stream.js';
 import { LlmError, type LlmRequest, type LlmTurn } from './types.js';
-import { fromChatCompletion, fromResponse, toChatParams, toResponsesParams, type ChatThinking } from './wire.js';
+import { buildParams, type ChatThinking } from './wire.js';
 
 // 能力探测（DESIGN §8.2）：启动时和评测时逐条路由测量方言档案的各项能力。
 // 探测请求只含固定文本，不含任何事件数据。每一项给出测得的值与来源：
@@ -68,12 +69,10 @@ function sender(
     // 探测请求与研判请求带同样的 thinking 设置，测到的是研判时的行为
     const wire = { model: route.model, profile: p, language: 'en' as const, thinking };
     try {
-      return route.api === 'responses'
-        ? fromResponse(await client.responses.create(toResponsesParams(req, wire), { signal, timeout: timeoutMs }), p)
-        : fromChatCompletion(
-            await client.chat.completions.create(toChatParams(req, wire), { signal, timeout: timeoutMs }),
-            p,
-          );
+      return await completeTurn(client, route.api, buildParams(route.api, req, wire), p, {
+        signal,
+        timeout: timeoutMs,
+      });
     } catch (e) {
       throw classifyError(e, route.id, signal);
     }
@@ -134,11 +133,15 @@ export async function probeStrictJsonSchema(send: Send): Promise<ProbeItem<boole
   };
 }
 
-export async function probeNativeTools(send: Send): Promise<ProbeItem<boolean>> {
+/**
+ * 原生工具调用。forced 为 false 时不强制工具调用（tool_choice 为 auto，提示里已经点名工具）：
+ * 当前的 Claude 模型不接受强制工具调用，经网关强制时参数不可靠
+ */
+export async function probeNativeTools(send: Send, forced = true): Promise<ProbeItem<boolean>> {
   const req: LlmRequest = {
     items: [user('Look up order 4182 using the available tool.')],
     tools: [PROBE_TOOL],
-    toolChoice: 'required',
+    toolChoice: forced ? 'required' : 'auto',
     maxOutputTokens: 512,
     temperature: 0,
   };
@@ -254,7 +257,7 @@ export async function probeRoute(
 ): Promise<ProbeReport> {
   const send = sender(route, declared, client, timeoutMs, signal, thinking);
   const strictJsonSchema = await probeStrictJsonSchema(send);
-  const nativeTools = await probeNativeTools(send);
+  const nativeTools = await probeNativeTools(send, route.api !== 'messages');
   const reasoningChannel = await probeReasoning(send);
   const chinese = await probeChinese(send);
   const contextTokens = await probeContext(route, client, declared.context_tokens, signal);

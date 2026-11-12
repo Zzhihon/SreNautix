@@ -16,26 +16,27 @@ import type { DialectProfile } from './dialect.js';
 import { EgressBlocked } from './egress.js';
 import type { RouteTimeouts } from './timeouts.js';
 import { LlmError, type LlmApi, type LlmTurn } from './types.js';
-import { fromChatCompletion, fromResponse } from './wire.js';
+import {
+  fromChatCompletion,
+  fromMessage,
+  fromResponse,
+  toolInput,
+  type MessagesBlock,
+  type MessagesParams,
+  type MessagesResponse,
+  type MessagesUsage,
+  type WireParams,
+} from './wire.js';
 
-// 流式调用（ADR 0098）：两种协议都以流式发出，按首 token 超时与空闲超时判断"卡住"，不再用一个总时长。
+// 流式调用（ADR 0098）：三种协议都以流式发出，按首 token 超时与空闲超时判断"卡住"，不再用一个总时长。
 // 流结束后拼回与非流式相同的响应对象，交给 wire.ts 的同一套映射。
 
-export type StreamParams = ResponseCreateParamsStreaming | ChatCompletionCreateParamsStreaming;
+export type MessagesStreamParams = Omit<MessagesParams, 'stream'> & { stream: true };
+export type StreamParams = ResponseCreateParamsStreaming | ChatCompletionCreateParamsStreaming | MessagesStreamParams;
 
 /** 非流式请求体 → 流式请求体；chat 要求服务方在最后一个块里给出 usage */
-export function streamingParams(
-  api: LlmApi,
-  params: ResponseCreateParamsNonStreaming | ChatCompletionCreateParamsNonStreaming,
-): StreamParams {
-  if (api === 'responses') {
-    return { ...(params as ResponseCreateParamsNonStreaming), stream: true };
-  }
-  return {
-    ...(params as ChatCompletionCreateParamsNonStreaming),
-    stream: true,
-    stream_options: { include_usage: true },
-  };
+export function streamingParams(api: LlmApi, params: WireParams): StreamParams {
+  return PROTOCOLS[api].streaming(params);
 }
 
 /** 流式调用因超时被中止；which 说明是哪一项 */
@@ -90,7 +91,7 @@ export class ChatAccumulator {
   private refusal: string | null = null;
   private finish: string | null = null;
   private usage: ChatCompletion['usage'] = undefined;
-  private readonly tools = new Map<number, { id: string; name: string; arguments: string }>();
+  private readonly tools: Array<{ index: number | null; id: string; name: string; arguments: string }> = [];
 
   push(c: ChatCompletionChunk): void {
     this.id ||= c.id;
@@ -117,21 +118,43 @@ export class ChatAccumulator {
       this.refusal = (this.refusal ?? '') + d.refusal;
     }
     for (const t of d.tool_calls ?? []) {
-      const cur = this.tools.get(t.index) ?? { id: '', name: '', arguments: '' };
+      const cur = this.toolCall(t);
       cur.id ||= t.id ?? '';
       cur.name += t.function?.name ?? '';
       cur.arguments += t.function?.arguments ?? '';
-      this.tools.set(t.index, cur);
     }
     if (choice.finish_reason) {
       this.finish = choice.finish_reason;
     }
   }
 
+  /**
+   * 增量所属的函数调用。带 index 的增量按 index 归并。有的服务方（经网关的 Gemini）不给 index，每个块是一个完整的调用、
+   * 各有自己的 id：这时 id 与最后一个调用不同（或还没有调用）就开始新的调用，否则接在最后一个调用上
+   */
+  private toolCall(t: { index?: number; id?: string }): (typeof this.tools)[number] {
+    const index = typeof t.index === 'number' ? t.index : null;
+    const last = this.tools.at(-1);
+    const cur =
+      index !== null
+        ? this.tools.find((x) => x.index === index)
+        : last && (!t.id || t.id === last.id)
+          ? last
+          : undefined;
+    if (cur) {
+      return cur;
+    }
+    const created = { index, id: '', name: '', arguments: '' };
+    this.tools.push(created);
+    return created;
+  }
+
   result(): ChatCompletion {
-    const tool_calls = [...this.tools.entries()]
-      .sort(([a], [b]) => a - b)
-      .map(([, t]) => ({ id: t.id, type: 'function' as const, function: { name: t.name, arguments: t.arguments } }));
+    // 带 index 的按 index 排序，不带 index 的按到达顺序
+    const tool_calls = this.tools
+      .map((t, order) => ({ t, key: t.index ?? order }))
+      .sort((a, b) => a.key - b.key)
+      .map(({ t }) => ({ id: t.id, type: 'function' as const, function: { name: t.name, arguments: t.arguments } }));
     const message = {
       role: 'assistant' as const,
       content: this.hasContent ? this.content : null,
@@ -156,6 +179,250 @@ export class ChatAccumulator {
       usage: this.usage,
     } as ChatCompletion;
   }
+}
+
+/** Messages API 的流事件（ADR 0201）；只声明用到的字段 */
+interface MessagesStreamEvent {
+  type: string;
+  index?: number;
+  message?: { id?: string; model?: string; usage?: MessagesUsage | null };
+  content_block?: MessagesBlock | { type: string };
+  delta?: {
+    type?: string;
+    text?: string;
+    thinking?: string;
+    partial_json?: string;
+    signature?: string;
+    stop_reason?: string | null;
+    stop_details?: MessagesResponse['stop_details'];
+  };
+  usage?: MessagesUsage | null;
+  error?: { type?: string; message?: string };
+}
+
+/** 把 Messages API 的流事件拼回 `POST /messages` 的响应 */
+export class MessagesAccumulator {
+  private id = '';
+  private model = '';
+  private usage: MessagesUsage = {};
+  private stopReason: string | null = null;
+  private stopDetails: MessagesResponse['stop_details'] = null;
+  private readonly blocks = new Map<number, { block: MessagesBlock | { type: string }; json: string }>();
+  private stopped = false;
+
+  constructor(private readonly routeId: string) {}
+
+  /** 流是否以 message_stop 正常结束 */
+  get complete(): boolean {
+    return this.stopped;
+  }
+
+  /** 处理一个事件；返回它是否是模型输出的增量（正文、推理、工具参数，或一个 tool_use 块的开始） */
+  push(ev: MessagesStreamEvent): boolean {
+    switch (ev.type) {
+      case 'message_start':
+        this.id = ev.message?.id ?? '';
+        this.model = ev.message?.model ?? '';
+        this.mergeUsage(ev.message?.usage);
+        return false;
+      case 'content_block_start': {
+        if (ev.index === undefined || !ev.content_block) {
+          return false;
+        }
+        this.blocks.set(ev.index, { block: structuredClone(ev.content_block), json: '' });
+        return ev.content_block.type === 'tool_use';
+      }
+      case 'content_block_delta': {
+        const cur = ev.index === undefined ? undefined : this.blocks.get(ev.index);
+        const d = ev.delta;
+        if (!cur || !d) {
+          return false;
+        }
+        const b = cur.block as MessagesBlock;
+        if (d.type === 'text_delta' && b.type === 'text') {
+          b.text += d.text ?? '';
+          return true;
+        }
+        if (d.type === 'thinking_delta' && b.type === 'thinking') {
+          b.thinking += d.thinking ?? '';
+          return true;
+        }
+        if (d.type === 'input_json_delta' && b.type === 'tool_use') {
+          cur.json += d.partial_json ?? '';
+          return true;
+        }
+        if (d.type === 'signature_delta' && b.type === 'thinking') {
+          b.signature = (b.signature ?? '') + (d.signature ?? '');
+        }
+        return false;
+      }
+      case 'content_block_stop': {
+        const cur = ev.index === undefined ? undefined : this.blocks.get(ev.index);
+        const b = cur?.block as MessagesBlock | undefined;
+        if (cur && b?.type === 'tool_use' && cur.json !== '') {
+          // 输出被截断时拼出的参数不是完整的 JSON，原文留在 `_raw`
+          b.input = toolInput(cur.json);
+        }
+        return false;
+      }
+      case 'message_delta':
+        this.stopReason = ev.delta?.stop_reason ?? this.stopReason;
+        this.stopDetails = ev.delta?.stop_details ?? this.stopDetails;
+        this.mergeUsage(ev.usage);
+        return false;
+      case 'message_stop':
+        this.stopped = true;
+        return false;
+      case 'error':
+        throw new LlmError(
+          'llm_http',
+          null,
+          `模型服务在流中报错：${ev.error?.type ?? ''} ${ev.error?.message ?? ''}`.trim(),
+          this.routeId,
+        );
+      default:
+        // ping 与不认识的事件
+        return false;
+    }
+  }
+
+  /** message_delta 的 usage 是累计值：出现的字段覆盖 message_start 给出的值 */
+  private mergeUsage(u: MessagesUsage | null | undefined): void {
+    for (const k of [
+      'input_tokens',
+      'cache_read_input_tokens',
+      'cache_creation_input_tokens',
+      'output_tokens',
+    ] as const) {
+      const v = u?.[k];
+      if (typeof v === 'number') {
+        this.usage[k] = v;
+      }
+    }
+  }
+
+  result(): MessagesResponse {
+    return {
+      id: this.id,
+      model: this.model,
+      content: [...this.blocks.entries()].sort(([a], [b]) => a - b).map(([, v]) => v.block),
+      stop_reason: this.stopReason,
+      stop_details: this.stopDetails,
+      usage: this.usage,
+    };
+  }
+}
+
+interface CallOptions {
+  signal: AbortSignal;
+  timeout?: number;
+}
+
+/** 一次流式调用的事件归并器：push 返回事件是否是模型输出的增量；turn 在流读完后给出回合，流不完整时抛出 */
+interface TurnReader {
+  push(ev: unknown): boolean;
+  turn(): LlmTurn;
+}
+
+/** 一种协议的收发方式：流式与非流式各一种，映射都走 wire.ts */
+interface Protocol {
+  streaming(params: WireParams): StreamParams;
+  open(client: OpenAI, params: StreamParams, opts: CallOptions): Promise<AsyncIterable<unknown>>;
+  reader(profile: DialectProfile, routeId: string): TurnReader;
+  complete(client: OpenAI, params: WireParams, profile: DialectProfile, opts: CallOptions): Promise<LlmTurn>;
+}
+
+const PROTOCOLS: Record<LlmApi, Protocol> = {
+  responses: {
+    streaming: (params) => ({ ...(params as ResponseCreateParamsNonStreaming), stream: true }),
+    open: (client, params, opts) => client.responses.create(params as ResponseCreateParamsStreaming, opts),
+    reader: (profile, routeId) => {
+      let final: Response | null = null;
+      return {
+        push: (e) => {
+          const ev = e as ResponseStreamEvent;
+          if (ev.type === 'response.completed' || ev.type === 'response.incomplete') {
+            final = ev.response;
+          } else if (ev.type === 'response.failed') {
+            const err = ev.response.error;
+            throw new LlmError(
+              'llm_http',
+              null,
+              `模型服务报告失败：${err?.code ?? ''} ${err?.message ?? ''}`.trim(),
+              routeId,
+            );
+          } else if (ev.type === 'error') {
+            throw new LlmError('llm_http', null, `模型服务在流中报错：${ev.code ?? ''} ${ev.message}`.trim(), routeId);
+          }
+          return responsesToken(ev);
+        },
+        turn: () => {
+          if (!final) {
+            throw new LlmError('llm_network', null, '流在 response.completed 之前结束', routeId);
+          }
+          return fromResponse(final, profile);
+        },
+      };
+    },
+    complete: async (client, params, profile, opts) =>
+      fromResponse(await client.responses.create(params as ResponseCreateParamsNonStreaming, opts), profile),
+  },
+  chat_completions: {
+    streaming: (params) => ({
+      ...(params as ChatCompletionCreateParamsNonStreaming),
+      stream: true,
+      stream_options: { include_usage: true },
+    }),
+    open: (client, params, opts) => client.chat.completions.create(params as ChatCompletionCreateParamsStreaming, opts),
+    reader: (profile) => {
+      const acc = new ChatAccumulator();
+      return {
+        push: (e) => {
+          const chunk = e as ChatCompletionChunk;
+          acc.push(chunk);
+          return chatToken(chunk);
+        },
+        turn: () => fromChatCompletion(acc.result(), profile),
+      };
+    },
+    complete: async (client, params, profile, opts) =>
+      fromChatCompletion(
+        await client.chat.completions.create(params as ChatCompletionCreateParamsNonStreaming, opts),
+        profile,
+      ),
+  },
+  // Messages API 经同一个 OpenAI 客户端的通用 post 发出（出站检查、计量与超时都在同一条路径上）；
+  // SDK 的通用 SSE 流对每个事件给出 JSON.parse(data)，Messages 的事件类型就在 data.type 里
+  messages: {
+    streaming: (params) => ({ ...(params as MessagesParams), stream: true }),
+    open: (client, params, opts) =>
+      client.post<AsyncIterable<unknown>>('/messages', { body: params, stream: true, ...opts }),
+    reader: (profile, routeId) => {
+      const acc = new MessagesAccumulator(routeId);
+      return {
+        push: (e) => acc.push(e as MessagesStreamEvent),
+        turn: () => {
+          if (!acc.complete) {
+            throw new LlmError('llm_network', null, '流在 message_stop 之前结束', routeId);
+          }
+          return fromMessage(acc.result(), profile);
+        },
+      };
+    },
+    complete: async (client, params, profile, opts) =>
+      fromMessage(await client.post<MessagesResponse>('/messages', { body: params, ...opts }), profile),
+  },
+};
+
+/** 发出一次非流式调用（能力探测用），返回内部回合；错误原样抛出 */
+export function completeTurn(
+  client: OpenAI,
+  api: LlmApi,
+  params: WireParams,
+  profile: DialectProfile,
+  opts: CallOptions,
+): Promise<LlmTurn> {
+  return PROTOCOLS[api].complete(client, params, profile, opts);
 }
 
 /**
@@ -227,49 +494,18 @@ export async function streamTurn(
     );
   };
   try {
-    let turn: LlmTurn;
-    if (api === 'responses') {
-      const stream = await client.responses.create(params as ResponseCreateParamsStreaming, opts);
-      let final: Response | null = null;
-      try {
-        for await (const ev of stream) {
-          progress(responsesToken(ev));
-          if (ev.type === 'response.completed' || ev.type === 'response.incomplete') {
-            final = ev.response;
-          } else if (ev.type === 'response.failed') {
-            const err = ev.response.error;
-            throw new LlmError(
-              'llm_http',
-              null,
-              `模型服务报告失败：${err?.code ?? ''} ${err?.message ?? ''}`.trim(),
-              routeId,
-            );
-          } else if (ev.type === 'error') {
-            throw new LlmError('llm_http', null, `模型服务在流中报错：${ev.code ?? ''} ${ev.message}`.trim(), routeId);
-          }
-        }
-      } catch (e) {
-        throw midStream(e);
+    const protocol = PROTOCOLS[api];
+    const stream = await protocol.open(client, params, opts);
+    const reader = protocol.reader(profile, routeId);
+    try {
+      for await (const ev of stream) {
+        progress(reader.push(ev));
       }
-      throwIfAborted();
-      if (!final) {
-        throw new LlmError('llm_network', null, '流在 response.completed 之前结束', routeId);
-      }
-      turn = fromResponse(final, profile);
-    } else {
-      const stream = await client.chat.completions.create(params as ChatCompletionCreateParamsStreaming, opts);
-      const acc = new ChatAccumulator();
-      try {
-        for await (const chunk of stream) {
-          progress(chatToken(chunk));
-          acc.push(chunk);
-        }
-      } catch (e) {
-        throw midStream(e);
-      }
-      throwIfAborted();
-      turn = fromChatCompletion(acc.result(), profile);
+    } catch (e) {
+      throw midStream(e);
     }
+    throwIfAborted();
+    const turn = reader.turn();
     return { turn, firstTokenMs: st.firstTokenAt === null ? null : st.firstTokenAt - started };
   } catch (e) {
     if (st.fired && !signal.aborted) {

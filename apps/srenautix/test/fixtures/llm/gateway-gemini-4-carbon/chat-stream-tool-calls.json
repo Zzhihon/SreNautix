@@ -1,0 +1,95 @@
+{
+  "provenance": {
+    "provider": "model gateway (CCHP reference deployment)",
+    "model": "gemini-4-carbon",
+    "path": "/v1/chat/completions",
+    "recorded_at": "2026-11-12",
+    "mode": "sampled, stream",
+    "note": "取样时省略的内容保留为 …；created、id 与第一块的 usage 在取样里被省略，这里是占位值"
+  },
+  "events": [
+    {
+      "choices": [
+        {
+          "delta": {
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "extra_content": {
+                  "google": {
+                    "thought_signature": "…"
+                  }
+                },
+                "function": {
+                  "arguments": "{\"minutes\":30,\"query\":\"sum(rate(…))\"}",
+                  "name": "query_metrics"
+                },
+                "id": "call_…",
+                "type": "function"
+              }
+            ]
+          },
+          "index": 0
+        }
+      ],
+      "created": 1794441600,
+      "id": "…",
+      "model": "gemini-4-carbon",
+      "object": "chat.completion.chunk",
+      "usage": {
+        "completion_tokens": 64,
+        "prompt_tokens": 190,
+        "total_tokens": 254
+      }
+    },
+    {
+      "choices": [
+        {
+          "delta": {
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"workload\":\"gateway\",\"namespace\":\"cchp-prod\"}",
+                  "name": "get_pod_restarts"
+                },
+                "id": "call_3149893764841019248",
+                "type": "function"
+              }
+            ]
+          },
+          "index": 0
+        }
+      ],
+      "created": 1794441600,
+      "id": "…",
+      "model": "gemini-4-carbon",
+      "object": "chat.completion.chunk",
+      "usage": {
+        "completion_tokens": 128,
+        "prompt_tokens": 190,
+        "total_tokens": 318
+      }
+    },
+    {
+      "choices": [
+        {
+          "delta": {
+            "role": "assistant"
+          },
+          "finish_reason": "stop",
+          "index": 0
+        }
+      ],
+      "created": 1794441600,
+      "id": "…",
+      "model": "gemini-4-carbon",
+      "object": "chat.completion.chunk",
+      "usage": {
+        "completion_tokens": 136,
+        "prompt_tokens": 220,
+        "total_tokens": 356
+      }
+    }
+  ]
+}

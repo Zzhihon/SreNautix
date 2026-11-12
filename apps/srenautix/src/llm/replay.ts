@@ -2,12 +2,15 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { join } from 'node:path';
 import { logger } from '../kernel/log.js';
+import { OUTPUT_TOOL_PREFIX } from './wire.js';
 
 /**
- * 录制回放的模型服务（`srenautix llm-replay`，kind-e2e 与离线演示用，OpenAI 兼容：POST /v1/responses、/v1/chat/completions）。
+ * 录制回放的模型服务（`srenautix llm-replay`，kind-e2e 与离线演示用）：OpenAI 兼容的 POST /v1/responses、/v1/chat/completions，
+ * 以及 Anthropic Messages API 的 POST /v1/messages。
  *
  * - 按"结构化输出的名称 + 第几次出现"取录制：目录中的 `<名称>-<n>.json`（n 从 1 开始），没有时取 `<名称>.json`（任意次）；
- *   名称是 Responses 的 text.format.name 或 Chat 的 response_format.json_schema.name，没有结构化输出时为 `text`。
+ *   名称是 Responses 的 text.format.name 或 Chat 的 response_format.json_schema.name，没有结构化输出时为 `text`
+ *   （Messages 的请求体不带名称，一律为 `text`）。
  *   提示中的易变内容（时间、Pod 名、卡片编号）不参与匹配。没有可用的录制时返回 503，worker 视为模型不可用。
  * - 录制文件两种形态：录制得到的 `{status, body}`（服务方的原始响应），或手写的 `{output: <结构化输出对象>}`，
  *   回放时包成对应协议的响应。
@@ -47,7 +50,8 @@ function pieces(text: string): string[] {
 /**
  * 非流式响应体 → 服务方会发出的流式事件（SSE 的 data 部分，按顺序）：
  * Responses 为 response.created、各输出增量、response.completed（或 incomplete）；
- * Chat 为逐块的 delta、带 finish_reason 的块、只有 usage 的块与 [DONE]。
+ * Chat 为逐块的 delta、带 finish_reason 的块、只有 usage 的块与 [DONE]；
+ * Messages 为 message_start、各内容块的 start、delta、stop、带 stop_reason 与累计 usage 的 message_delta、message_stop。
  */
 export function toStreamEvents(path: string, body: any): string[] {
   const out: unknown[] = [];
@@ -99,6 +103,38 @@ export function toStreamEvents(path: string, body: any): string[] {
     });
     return out.map((x) => JSON.stringify(x));
   }
+  if (path.endsWith('/messages')) {
+    out.push({
+      type: 'message_start',
+      message: { ...body, content: [], stop_reason: null, usage: { ...body.usage, output_tokens: 0 } },
+    });
+    (body.content ?? []).forEach((b: any, index: number) => {
+      const delta = (d: unknown) => out.push({ type: 'content_block_delta', index, delta: d });
+      if (b.type === 'text') {
+        out.push({ type: 'content_block_start', index, content_block: { type: 'text', text: '' } });
+        pieces(b.text ?? '').forEach((d) => delta({ type: 'text_delta', text: d }));
+      } else if (b.type === 'thinking') {
+        out.push({ type: 'content_block_start', index, content_block: { type: 'thinking', thinking: '' } });
+        pieces(b.thinking ?? '').forEach((d) => delta({ type: 'thinking_delta', thinking: d }));
+        if (b.signature) {
+          delta({ type: 'signature_delta', signature: b.signature });
+        }
+      } else if (b.type === 'tool_use') {
+        out.push({ type: 'content_block_start', index, content_block: { ...b, input: {} } });
+        pieces(JSON.stringify(b.input ?? {})).forEach((d) => delta({ type: 'input_json_delta', partial_json: d }));
+      } else {
+        out.push({ type: 'content_block_start', index, content_block: b });
+      }
+      out.push({ type: 'content_block_stop', index });
+    });
+    out.push({
+      type: 'message_delta',
+      delta: { stop_reason: body.stop_reason ?? 'end_turn', stop_details: body.stop_details ?? null },
+      usage: body.usage,
+    });
+    out.push({ type: 'message_stop' });
+    return out.map((x) => JSON.stringify(x));
+  }
   const head = {
     id: body.id,
     object: 'chat.completion.chunk',
@@ -136,11 +172,19 @@ export function toStreamEvents(path: string, body: any): string[] {
   return [...out.map((x) => JSON.stringify(x)), '[DONE]'];
 }
 
+/** Messages 请求上的输出工具（wire.ts 的 OUTPUT_TOOL_PREFIX）；没有时为 undefined */
+function outputTool(req: any): { name: string; input_schema?: unknown } | undefined {
+  return Array.isArray(req?.tools)
+    ? req.tools.find((t: any) => typeof t?.name === 'string' && t.name.startsWith(OUTPUT_TOOL_PREFIX))
+    : undefined;
+}
+
 /** 请求的结构化输出名称；没有结构化输出时为 text */
 export function outputName(req: any): string {
   return (
     (typeof req?.text?.format?.name === 'string' && req.text.format.name) ||
     (typeof req?.response_format?.json_schema?.name === 'string' && req.response_format.json_schema.name) ||
+    outputTool(req)?.name.slice(OUTPUT_TOOL_PREFIX.length) ||
     'text'
   );
 }
@@ -161,7 +205,7 @@ function requestText(req: any): string {
       }
     }
   };
-  walk([req?.instructions, req?.input, req?.messages]);
+  walk([req?.instructions, req?.system, req?.input, req?.messages]);
   return parts.join('\n');
 }
 
@@ -181,7 +225,12 @@ function schemaEnums(req: any): Set<string> {
       }
     }
   };
-  walk(req?.text?.format?.schema ?? req?.response_format?.json_schema?.schema);
+  walk(
+    req?.text?.format?.schema ??
+      req?.response_format?.json_schema?.schema ??
+      req?.output_config?.format?.schema ??
+      outputTool(req)?.input_schema,
+  );
   return out;
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */
@@ -254,8 +303,8 @@ export function resolvePlaceholders(output: unknown, req: unknown): unknown {
   return r === DROP ? null : r;
 }
 
-/** 手写录制的结构化输出 → 对应协议的响应体 */
-export function wrapOutput(path: string, model: string, output: unknown, n: number): unknown {
+/** 手写录制的结构化输出 → 对应协议的响应体；Messages 请求带输出工具时（toolName）输出放在该工具的调用里 */
+export function wrapOutput(path: string, model: string, output: unknown, n: number, toolName?: string): unknown {
   const text = typeof output === 'string' ? output : JSON.stringify(output);
   const created = 1_767_225_600 + n;
   if (path.endsWith('/responses')) {
@@ -277,6 +326,20 @@ export function wrapOutput(path: string, model: string, output: unknown, n: numb
       usage: { input_tokens: 1000, output_tokens: 200, total_tokens: 1200 },
     };
   }
+  if (path.endsWith('/messages')) {
+    const asTool = toolName !== undefined && output !== null && typeof output === 'object' && !Array.isArray(output);
+    return {
+      id: `msg_replay_${n}`,
+      type: 'message',
+      role: 'assistant',
+      model,
+      content: asTool
+        ? [{ type: 'tool_use', id: `toolu_replay_${n}`, name: toolName, input: output }]
+        : [{ type: 'text', text }],
+      stop_reason: asTool ? 'tool_use' : 'end_turn',
+      usage: { input_tokens: 1000, output_tokens: 200 },
+    };
+  }
   return {
     id: `chatcmpl-replay-${n}`,
     object: 'chat.completion',
@@ -287,12 +350,23 @@ export function wrapOutput(path: string, model: string, output: unknown, n: numb
   };
 }
 
-/** 响应体中结构化输出的文本：Responses 的 output_text 或 Chat 的 message.content */
+/**
+ * 响应体中结构化输出的文本：Responses 的 output_text、Chat 的 message.content，
+ * 或 Messages 的 text 内容块与输出工具的调用参数
+ */
 function replaceOutputText(body: unknown, fn: (text: string) => string): unknown {
   const b = structuredClone(body) as {
     output?: Array<{ type: string; content?: Array<{ type: string; text?: string }> }>;
     choices?: Array<{ message?: { content?: string | null } }>;
+    content?: Array<{ type: string; text?: string; name?: string; input?: unknown }>;
   };
+  for (const c of Array.isArray(b.content) ? b.content : []) {
+    if (c.type === 'text' && typeof c.text === 'string') {
+      c.text = fn(c.text);
+    } else if (c.type === 'tool_use' && c.name?.startsWith(OUTPUT_TOOL_PREFIX)) {
+      c.input = JSON.parse(fn(JSON.stringify(c.input ?? {}))) as unknown;
+    }
+  }
   for (const item of b.output ?? []) {
     for (const c of item.content ?? []) {
       if (c.type === 'output_text' && typeof c.text === 'string') {
@@ -361,6 +435,12 @@ export class LlmReplay {
         headers: {
           'content-type': 'application/json',
           ...(this.o.record.apiKey ? { authorization: `Bearer ${this.o.record.apiKey}` } : {}),
+          ...(path.endsWith('/messages')
+            ? {
+                'anthropic-version': '2023-06-01',
+                ...(this.o.record.apiKey ? { 'x-api-key': this.o.record.apiKey } : {}),
+              }
+            : {}),
         },
         body: JSON.stringify(rest),
       });
@@ -399,7 +479,8 @@ export class LlmReplay {
     };
     if (hit.rec.output !== undefined) {
       const model = typeof req.model === 'string' ? req.model : 'replay';
-      return { status: 200, body: wrapOutput(path, model, resolvePlaceholders(hit.rec.output, req), n), key };
+      const body = wrapOutput(path, model, resolvePlaceholders(hit.rec.output, req), n, outputTool(req)?.name);
+      return { status: 200, body, key };
     }
     const status = hit.rec.status ?? 200;
     return { status, body: status === 200 ? replaceOutputText(hit.rec.body, resolve) : hit.rec.body, key };
@@ -410,7 +491,7 @@ export class LlmReplay {
     if (req.method === 'GET' && (path === '/healthz' || path === '/readyz')) {
       return json(res, 200, { recordings: this.recordings().length, served: this.served, missing: this.missing });
     }
-    if (req.method !== 'POST' || !/\/(responses|chat\/completions)$/.test(path)) {
+    if (req.method !== 'POST' || !/\/(responses|chat\/completions|messages)$/.test(path)) {
       return json(res, 404, { error: { message: `llm-replay 不提供 ${req.method} ${path}` } });
     }
     const r = await this.respond(path, raw);
