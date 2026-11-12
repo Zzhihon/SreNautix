@@ -141,6 +141,8 @@
   "topology.neighborhood": "邻域图",
   "topology.component_key": "组件键",
   "topology.show": "显示",
+  "topology.hops": "邻域范围",
+  "topology.hops_n": "{n} 跳",
   "topology.pick_title": "输入组件",
   "topology.pick": "输入组件键（类型:命名空间/名称，例如 StatefulSet:db/pg-main），显示它不超过 2 跳的邻居，每条边标注来源。",
   "topology.neighborhood_failed": "读取邻域失败",

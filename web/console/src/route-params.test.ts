@@ -17,6 +17,14 @@ describe('拓扑页的 search 参数（ADR 0191）', () => {
     expect(topologySearch({ component: 42 }).component).toBeUndefined();
   });
 
+  it('邻域范围只记 1 跳（ADR 0197）：不写或写别的值都是默认的 2 跳', () => {
+    expect(topologySearch({ hops: 1 }).hops).toBe(1);
+    expect(topologySearch(parseSearch('?hops=1')).hops).toBe(1);
+    for (const hops of [2, '2', 0, 'x', undefined]) {
+      expect(topologySearch({ hops }).hops).toBeUndefined();
+    }
+  });
+
   it('子图侧栏的邻域链接经路由解析后回到同一个集群、视图与组件', () => {
     const key = 'postgres.cluster:db/pg-main';
     const href = topologyHref('prod', key);
