@@ -34,6 +34,7 @@ export type Session = S['Session'];
 export type Profile = S['Profile'];
 export type ProposalDetail = S['ProposalDetail'];
 export type IncidentSubgraph = S['Subgraph'];
+export type ClusterMap = S['ClusterMap'];
 export type TimelineEntry = S['TimelineEntry'];
 export type Cluster = S['Cluster'];
 export type SpokeStatus = S['SpokeStatus'];

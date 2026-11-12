@@ -6,7 +6,7 @@ import { Loading, UiEnvProvider, useI18n, type LinkProps, type Links, type UiEnv
 import { useMemo, type MouseEvent } from 'react';
 import { port } from './api';
 import { useEventStream } from './events';
-import { searchHref, topologyHref } from './route-params';
+import { clusterMapHref, searchHref, topologyHref } from './route-params';
 import { capabilities, SessionProvider, useSessionQuery } from './session';
 import { Shell } from './shell/Shell';
 
@@ -18,6 +18,7 @@ const links: Links = {
   approvalExternal: false,
   topology: topologyHref,
   search: searchHref,
+  clusterMap: clusterMapHref,
 };
 
 /** 普通的 <a>，点击时交给路由导航（保留中键、Ctrl 点击在新标签页打开）。 */
