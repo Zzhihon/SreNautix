@@ -195,6 +195,6 @@ describe('配置', () => {
   it('Responses 接口的路由配置 thinking 时拒绝构造', () => {
     expect(() =>
       runtimes([{ route: route('direct', 'http://m/v1', { api: 'responses' }), thinking: 'disabled' }]),
-    ).toThrow(/路由 direct 的 thinking 只用于 api: chat_completions，当前是 responses/);
+    ).toThrow(/路由 direct 的 thinking 只用于 api: chat_completions 或 messages，当前是 responses/);
   });
 });

@@ -71,7 +71,7 @@ export interface RouteRuntime {
   /** 流式调用的首 token、空闲与总时长超时（ADR 0098） */
   timeouts: RouteTimeouts;
   modelClass: ModelClass;
-  /** Chat 请求体的思考模式设置（ADR 0158）；null 时不带 thinking 字段 */
+  /** Chat 与 Messages 请求体的思考模式设置（ADR 0158）；null 时不带 thinking 字段 */
   thinking: ChatThinking | null;
   breaker: RouteBreaker;
   calibration: Calibration;

@@ -21,7 +21,7 @@ export interface RouteInput {
   state: RouteState;
   /** 生效的超时与模型类别（配置解析时得出）；省略时按模型类别默认值（ADR 0098） */
   timeouts?: { modelClass: ModelClass; timeouts: RouteTimeouts };
-  /** 配置的 thinking（ADR 0158），只允许 Chat 接口的路由；省略时请求体不带 thinking 字段 */
+  /** 配置的 thinking（ADR 0158），只允许 Chat 与 Messages 接口的路由；省略时请求体不带 thinking 字段 */
   thinking?: ChatThinking | null;
 }
 
@@ -67,8 +67,8 @@ export function partitionRoutes(
   const runtimes: RouteRuntime[] = [];
   const disabled: DisabledRoute[] = [];
   for (const i of inputs) {
-    if (i.thinking && i.route.api !== 'chat_completions') {
-      throw new Error(`路由 ${i.route.id} 的 thinking 只用于 api: chat_completions，当前是 ${i.route.api}`);
+    if (i.thinking && i.route.api === 'responses') {
+      throw new Error(`路由 ${i.route.id} 的 thinking 只用于 api: chat_completions 或 messages，当前是 ${i.route.api}`);
     }
     const t = i.timeouts ?? resolveTimeouts(i.route, {});
     let client: RouteRuntime['client'];

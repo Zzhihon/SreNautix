@@ -14,8 +14,8 @@ import { chatMaxTokensField, type DialectProfile } from './dialect.js';
 import type { Item, LlmApi, LlmRequest, LlmTurn, Segment } from './types.js';
 
 // 内部消息与三种协议（OpenAI Responses、Chat Completions、Anthropic Messages）之间的映射。
-// 方言档案决定结构化输出的方式：支持严格 json_schema 的路由直接约束解码；不支持的路由把 schema 写进系统提示
-// （Chat 与 Responses 同时要求 json_object）。
+// 方言档案决定结构化输出的方式：支持严格 json_schema 的路由直接约束解码；不支持的 Messages 路由把 schema 作为一个
+// strict 输出工具（见 OUTPUT_TOOL_PREFIX）；其余路由把 schema 写进系统提示（Chat 与 Responses 同时要求 json_object）。
 
 export function segmentsText(segments: readonly Segment[]): string {
   return segments.map((s) => s.text).join('\n\n');
@@ -31,6 +31,27 @@ export function schemaInstruction(schema: Record<string, unknown>, language: 'zh
 }
 
 /**
+ * 不支持严格 json_schema 的 Messages 路由上，结构化输出声明为一个 strict 输出工具，名称是这个前缀加输出名称；
+ * 模型调用它时，参数对象就是输出（映射回正文）。tool_choice 用 auto：ccx 上的 claude-fable-5-2 在强制调用
+ * （tool_choice 为 tool 或 any）时把提示词原文填进每个字段，auto 时遵守枚举与 maxItems（2026-11-13 探测）。
+ * 模型不调用而直接输出文本时，正文照常走本地修复阶梯。
+ */
+export const OUTPUT_TOOL_PREFIX = 'output__';
+
+/** Messages 请求上的输出工具名称；请求不用输出工具时为 null */
+export function messagesOutputTool(req: LlmRequest, profile: DialectProfile): string | null {
+  return req.output && !profile.strict_json_schema && profile.native_tools
+    ? `${OUTPUT_TOOL_PREFIX}${req.output.name}`
+    : null;
+}
+
+function outputToolInstruction(name: string, language: 'zh' | 'en'): string {
+  return language === 'zh'
+    ? `调用 ${name} 工具提交结果：参数对象就是输出，所有字段都要出现，取值遵守枚举。不要在正文里输出结果。`
+    : `Submit the result by calling the ${name} tool: its input object is the output, with every field present and values within the enums. Do not write the result as text.`;
+}
+
+/**
  * 路由的思考模式设置（ADR 0158）：`disabled` 在 Chat 请求体里加 `thinking: {type: "disabled"}`，关闭服务方默认开启的思考模式。
  * 默认思考的服务方把推理 token 计入 max_tokens，阶段的输出上限会被推理用完，正文为空。
  */
@@ -40,16 +61,18 @@ export interface WireOptions {
   model: string;
   profile: DialectProfile;
   language: 'zh' | 'en';
-  /** 只用于 Chat 接口；不给或为 null 时请求体不带 thinking 字段 */
+  /** 只用于 Chat 与 Messages 接口；不给或为 null 时请求体不带 thinking 字段 */
   thinking?: ChatThinking | null;
 }
 
 /** OpenAI SDK 的 Chat 请求类型没有服务方扩展的 thinking 字段 */
 export type ChatParams = ChatCompletionCreateParamsNonStreaming & { thinking?: { type: ChatThinking } };
 
-function systemText(req: LlmRequest, opts: WireOptions): string {
+function systemText(req: LlmRequest, opts: WireOptions, outputTool: string | null = null): string {
   const parts = req.items.filter((i) => i.type === 'system').map((i) => segmentsText(i.segments));
-  if (req.output && !opts.profile.strict_json_schema) {
+  if (outputTool) {
+    parts.push(outputToolInstruction(outputTool, opts.language));
+  } else if (req.output && !opts.profile.strict_json_schema) {
     parts.push(schemaInstruction(req.output.schema, opts.language));
   }
   return parts.join('\n\n');
@@ -209,8 +232,9 @@ export interface MessagesParams {
   max_tokens: number;
   messages: MessagesMessage[];
   system?: string;
-  tools?: Array<{ name: string; description: string; input_schema: Record<string, unknown> }>;
+  tools?: Array<{ name: string; description: string; input_schema: Record<string, unknown>; strict?: true }>;
   tool_choice?: { type: 'auto' | 'any' | 'none' };
+  thinking?: { type: ChatThinking };
   output_config?: { format: { type: 'json_schema'; schema: Record<string, unknown> } };
   stream: false;
 }
@@ -251,6 +275,7 @@ const MESSAGES_TOOL_CHOICE = { auto: 'auto', required: 'any', none: 'none' } as 
  * 内部消息 → `POST /messages` 请求体（非流式）。Messages API 要求 user 与 assistant 交替：相邻的同角色内容合成一条消息
  * （助手文本与函数调用合成一条 assistant；连续的工具结果与随后的用户输入合成一条 user），空文本不成块。
  * 不带采样参数：当前的 Claude 模型拒绝 temperature 等采样参数（HTTP 400）。
+ * 结构化输出见 OUTPUT_TOOL_PREFIX。
  */
 export function toMessagesParams(req: LlmRequest, opts: WireOptions): MessagesParams {
   const messages: MessagesMessage[] = [];
@@ -286,16 +311,35 @@ export function toMessagesParams(req: LlmRequest, opts: WireOptions): MessagesPa
     }
   }
   const params: MessagesParams = { model: opts.model, max_tokens: req.maxOutputTokens, messages, stream: false };
-  const system = systemText(req, opts);
+  const outputTool = messagesOutputTool(req, opts.profile);
+  const system = systemText(req, opts, outputTool);
   if (system) {
     params.system = system;
   }
+  if (opts.thinking) {
+    params.thinking = { type: opts.thinking };
+  }
   if (req.tools?.length) {
+    if (outputTool && req.tools.some((t) => t.name.startsWith(OUTPUT_TOOL_PREFIX))) {
+      throw new Error(`工具名称不能以 ${OUTPUT_TOOL_PREFIX} 开头，这个前缀留给结构化输出`);
+    }
     // toolChoice 为 none 时仍然带上工具定义：历史消息里有 tool_use 块时服务方要求工具存在
     params.tools = req.tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.parameters }));
     if (req.toolChoice) {
       params.tool_choice = { type: MESSAGES_TOOL_CHOICE[req.toolChoice] };
     }
+  }
+  if (outputTool && req.output) {
+    params.tools = [
+      ...(params.tools ?? []),
+      {
+        name: outputTool,
+        description: `Submit the ${req.output.name} output.`,
+        input_schema: req.output.schema,
+        strict: true,
+      },
+    ];
+    params.tool_choice ??= { type: 'auto' };
   }
   if (req.output && opts.profile.strict_json_schema) {
     params.output_config = { format: { type: 'json_schema', schema: req.output.schema } };
@@ -427,7 +471,10 @@ export function fromChatCompletion(res: ChatCompletion, profile: DialectProfile)
   };
 }
 
-/** `POST /messages` 的响应 → 内部回合；输入 token 是未缓存、缓存读取与缓存写入三项之和 */
+/**
+ * `POST /messages` 的响应 → 内部回合；输入 token 是未缓存、缓存读取与缓存写入三项之和。
+ * 输出工具（OUTPUT_TOOL_PREFIX）的调用参数作为正文，不算工具调用。
+ */
 export function fromMessage(res: MessagesResponse, profile: DialectProfile): LlmTurn {
   const texts: string[] = [];
   const toolCalls: LlmTurn['toolCalls'] = [];
@@ -438,6 +485,8 @@ export function fromMessage(res: MessagesResponse, profile: DialectProfile): Llm
       texts.push(block.text);
     } else if (block.type === 'thinking') {
       reasoningChars += block.thinking.length;
+    } else if (block.type === 'tool_use' && block.name.startsWith(OUTPUT_TOOL_PREFIX)) {
+      texts.push(JSON.stringify(block.input ?? {}));
     } else if (block.type === 'tool_use') {
       toolCalls.push({ callId: block.id, name: block.name, arguments: JSON.stringify(block.input ?? {}) });
     }

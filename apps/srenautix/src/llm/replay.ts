@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { join } from 'node:path';
 import { logger } from '../kernel/log.js';
+import { OUTPUT_TOOL_PREFIX } from './wire.js';
 
 /**
  * 录制回放的模型服务（`srenautix llm-replay`，kind-e2e 与离线演示用）：OpenAI 兼容的 POST /v1/responses、/v1/chat/completions，
@@ -171,11 +172,19 @@ export function toStreamEvents(path: string, body: any): string[] {
   return [...out.map((x) => JSON.stringify(x)), '[DONE]'];
 }
 
+/** Messages 请求上的输出工具（wire.ts 的 OUTPUT_TOOL_PREFIX）；没有时为 undefined */
+function outputTool(req: any): { name: string; input_schema?: unknown } | undefined {
+  return Array.isArray(req?.tools)
+    ? req.tools.find((t: any) => typeof t?.name === 'string' && t.name.startsWith(OUTPUT_TOOL_PREFIX))
+    : undefined;
+}
+
 /** 请求的结构化输出名称；没有结构化输出时为 text */
 export function outputName(req: any): string {
   return (
     (typeof req?.text?.format?.name === 'string' && req.text.format.name) ||
     (typeof req?.response_format?.json_schema?.name === 'string' && req.response_format.json_schema.name) ||
+    outputTool(req)?.name.slice(OUTPUT_TOOL_PREFIX.length) ||
     'text'
   );
 }
@@ -216,7 +225,12 @@ function schemaEnums(req: any): Set<string> {
       }
     }
   };
-  walk(req?.text?.format?.schema ?? req?.response_format?.json_schema?.schema ?? req?.output_config?.format?.schema);
+  walk(
+    req?.text?.format?.schema ??
+      req?.response_format?.json_schema?.schema ??
+      req?.output_config?.format?.schema ??
+      outputTool(req)?.input_schema,
+  );
   return out;
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */
@@ -289,8 +303,8 @@ export function resolvePlaceholders(output: unknown, req: unknown): unknown {
   return r === DROP ? null : r;
 }
 
-/** 手写录制的结构化输出 → 对应协议的响应体 */
-export function wrapOutput(path: string, model: string, output: unknown, n: number): unknown {
+/** 手写录制的结构化输出 → 对应协议的响应体；Messages 请求带输出工具时（toolName）输出放在该工具的调用里 */
+export function wrapOutput(path: string, model: string, output: unknown, n: number, toolName?: string): unknown {
   const text = typeof output === 'string' ? output : JSON.stringify(output);
   const created = 1_767_225_600 + n;
   if (path.endsWith('/responses')) {
@@ -313,13 +327,16 @@ export function wrapOutput(path: string, model: string, output: unknown, n: numb
     };
   }
   if (path.endsWith('/messages')) {
+    const asTool = toolName !== undefined && output !== null && typeof output === 'object' && !Array.isArray(output);
     return {
       id: `msg_replay_${n}`,
       type: 'message',
       role: 'assistant',
       model,
-      content: [{ type: 'text', text }],
-      stop_reason: 'end_turn',
+      content: asTool
+        ? [{ type: 'tool_use', id: `toolu_replay_${n}`, name: toolName, input: output }]
+        : [{ type: 'text', text }],
+      stop_reason: asTool ? 'tool_use' : 'end_turn',
       usage: { input_tokens: 1000, output_tokens: 200 },
     };
   }
@@ -333,16 +350,21 @@ export function wrapOutput(path: string, model: string, output: unknown, n: numb
   };
 }
 
-/** 响应体中结构化输出的文本：Responses 的 output_text、Chat 的 message.content 或 Messages 的 text 内容块 */
+/**
+ * 响应体中结构化输出的文本：Responses 的 output_text、Chat 的 message.content，
+ * 或 Messages 的 text 内容块与输出工具的调用参数
+ */
 function replaceOutputText(body: unknown, fn: (text: string) => string): unknown {
   const b = structuredClone(body) as {
     output?: Array<{ type: string; content?: Array<{ type: string; text?: string }> }>;
     choices?: Array<{ message?: { content?: string | null } }>;
-    content?: Array<{ type: string; text?: string }>;
+    content?: Array<{ type: string; text?: string; name?: string; input?: unknown }>;
   };
   for (const c of Array.isArray(b.content) ? b.content : []) {
     if (c.type === 'text' && typeof c.text === 'string') {
       c.text = fn(c.text);
+    } else if (c.type === 'tool_use' && c.name?.startsWith(OUTPUT_TOOL_PREFIX)) {
+      c.input = JSON.parse(fn(JSON.stringify(c.input ?? {}))) as unknown;
     }
   }
   for (const item of b.output ?? []) {
@@ -457,7 +479,8 @@ export class LlmReplay {
     };
     if (hit.rec.output !== undefined) {
       const model = typeof req.model === 'string' ? req.model : 'replay';
-      return { status: 200, body: wrapOutput(path, model, resolvePlaceholders(hit.rec.output, req), n), key };
+      const body = wrapOutput(path, model, resolvePlaceholders(hit.rec.output, req), n, outputTool(req)?.name);
+      return { status: 200, body, key };
     }
     const status = hit.rec.status ?? 200;
     return { status, body: status === 200 ? replaceOutputText(hit.rec.body, resolve) : hit.rec.body, key };

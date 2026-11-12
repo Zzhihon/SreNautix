@@ -6,6 +6,7 @@ import { DEFAULT_BUDGET, ResearchLedger } from '../../src/llm/budget.js';
 import { declaredProfile } from '../../src/llm/dialect.js';
 import { Egress } from '../../src/llm/egress.js';
 import { probeRoute } from '../../src/llm/probe.js';
+import { outputName, resolvePlaceholders, wrapOutput } from '../../src/llm/replay.js';
 import { buildRuntimes } from '../../src/llm/routes.js';
 import { DOMAIN_PROBE, ModelLayer, type LlmCallRecord } from '../../src/llm/session.js';
 import { MessagesAccumulator } from '../../src/llm/stream.js';
@@ -13,6 +14,7 @@ import type { LlmRequest } from '../../src/llm/types.js';
 import {
   buildParams,
   fromMessage,
+  OUTPUT_TOOL_PREFIX,
   schemaInstruction,
   toMessagesParams,
   type MessagesResponse,
@@ -74,9 +76,10 @@ describe('请求映射', () => {
     temperature: 0,
   };
 
-  it('system 合成顶层 system 并附上 schema 说明；相邻的同角色内容合成一条消息，user 与 assistant 交替', () => {
+  it('system 合成顶层 system 并附上输出工具说明；相邻的同角色内容合成一条消息，user 与 assistant 交替', () => {
     const p = toMessagesParams(request, wire);
-    expect(p.system).toBe(`固定指令\n\n${schemaInstruction(schema, 'en')}`);
+    expect(p.system).toMatch(/^固定指令\n\nSubmit the result by calling the output__out tool/);
+    expect(p.system).not.toContain(schemaInstruction(schema, 'en'));
     expect(p.messages).toEqual([
       { role: 'user', content: [{ type: 'text', text: '证据' }] },
       {
@@ -98,11 +101,13 @@ describe('请求映射', () => {
       },
     ]);
     expect(p).toMatchObject({ model: 'claude-fable-5-2', max_tokens: 1000, stream: false });
+    // 声明档案不支持严格 schema：输出 schema 是排在最后的 strict 输出工具
     expect(p.tools).toEqual([
       { name: 'query_metrics', description: 'q', input_schema: request.tools?.[0]?.parameters },
+      { name: 'output__out', description: 'Submit the out output.', input_schema: schema, strict: true },
     ]);
     expect(p.tool_choice).toEqual({ type: 'any' });
-    // 不带采样参数，也不带 Chat 的 thinking 字段；声明档案不支持严格 schema，不带 output_config
+    // 不带采样参数；路由没有配置 thinking 时不带 thinking 字段；不带 output_config
     expect(p).not.toHaveProperty('temperature');
     expect(p).not.toHaveProperty('thinking');
     expect(p).not.toHaveProperty('output_config');
@@ -110,16 +115,42 @@ describe('请求映射', () => {
   });
 
   it('toolChoice 的三个取值；none 时仍然带工具定义', () => {
-    expect(toMessagesParams({ ...request, toolChoice: 'auto' }, wire).tool_choice).toEqual({ type: 'auto' });
-    const none = toMessagesParams({ ...request, toolChoice: 'none' }, wire);
+    const plain = { ...request, output: undefined };
+    expect(toMessagesParams({ ...plain, toolChoice: 'auto' }, wire).tool_choice).toEqual({ type: 'auto' });
+    const none = toMessagesParams({ ...plain, toolChoice: 'none' }, wire);
     expect(none.tool_choice).toEqual({ type: 'none' });
     expect(none.tools).toHaveLength(1);
   });
 
-  it('探测到严格 schema 的路由用 output_config.format，系统提示不再附 schema 说明', () => {
+  it('只有结构化输出的请求：唯一的工具是输出工具，tool_choice 为 auto，从不强制调用', () => {
+    const p = toMessagesParams(
+      { items: request.items.slice(0, 2), output: { name: 'out', schema }, maxOutputTokens: 100 },
+      wire,
+    );
+    expect(p.tools?.map((t) => t.name)).toEqual([`${OUTPUT_TOOL_PREFIX}out`]);
+    expect(p.tool_choice).toEqual({ type: 'auto' });
+  });
+
+  it('普通工具的名称占用输出工具前缀时拒绝构造', () => {
+    const tools = [{ name: 'output__x', description: 'q', parameters: { type: 'object', properties: {} } }];
+    expect(() => toMessagesParams({ ...request, tools }, wire)).toThrow(/output__/);
+  });
+
+  it('thinking: disabled 时请求体带 thinking 字段', () => {
+    expect(toMessagesParams(request, { ...wire, thinking: 'disabled' }).thinking).toEqual({ type: 'disabled' });
+  });
+
+  it('探测到严格 schema 的路由用 output_config.format，不带输出工具，系统提示不附 schema 说明', () => {
     const p = toMessagesParams(request, { ...wire, profile: { ...profile, strict_json_schema: true } });
     expect(p.output_config).toEqual({ format: { type: 'json_schema', schema } });
     expect(p.system).toBe('固定指令');
+    expect(p.tools?.map((t) => t.name)).toEqual(['query_metrics']);
+  });
+
+  it('不支持原生工具的档案：schema 写进系统提示', () => {
+    const p = toMessagesParams(request, { ...wire, profile: { ...profile, native_tools: false } });
+    expect(p.system).toBe(`固定指令\n\n${schemaInstruction(schema, 'en')}`);
+    expect(p.tools?.map((t) => t.name)).toEqual(['query_metrics']);
   });
 
   it('重新请求的历史：空的助手文本不成块，前后的用户输入合成一条 user 消息', () => {
@@ -164,6 +195,30 @@ describe('响应映射', () => {
     });
   });
 
+  it('输出工具的调用参数是正文，不算工具调用；其他 tool_use 照常是工具调用', () => {
+    // 形状取自 2026-11-13 经模型网关取得的 claude-fable-5-2 响应（tool_choice: auto）
+    const t = fromMessage(
+      {
+        content: [
+          { type: 'thinking', thinking: 'worker 的内存增长先于驱逐' },
+          { type: 'tool_use', id: 'toolu_1', name: 'query_metrics', input: { query: 'up' } },
+          {
+            type: 'tool_use',
+            id: 'toolu_2',
+            name: 'output__out',
+            input: { component: 'Deployment:shop/api', refs: [] },
+          },
+        ],
+        stop_reason: 'tool_use',
+        usage: { input_tokens: 341, output_tokens: 1550 },
+      },
+      profile,
+    );
+    expect(JSON.parse(t.text as string)).toEqual({ component: 'Deployment:shop/api', refs: [] });
+    expect(t.toolCalls).toEqual([{ callId: 'toolu_1', name: 'query_metrics', arguments: '{"query":"up"}' }]);
+    expect(t.incomplete).toBeNull();
+  });
+
   it('输入 token 是未缓存、缓存读取与缓存写入之和；max_tokens 记为 length，refusal 记为拒绝', () => {
     const body = (over: Partial<MessagesResponse>): MessagesResponse => ({
       content: [{ type: 'text', text: 'x' }],
@@ -183,6 +238,25 @@ describe('响应映射', () => {
       profile,
     );
     expect(refused).toMatchObject({ text: null, refusal: 'cyber' });
+  });
+});
+
+describe('回放', () => {
+  it('带输出工具的请求按输出名称取录制；手写输出放进输出工具的调用，映射回同一个正文', () => {
+    const p = toMessagesParams(
+      { items: [{ type: 'user', segments: [seg('证据')] }], output: { name: 'out', schema }, maxOutputTokens: 100 },
+      wire,
+    );
+    expect(outputName(p)).toBe('out');
+    // 占位符只从输出工具 schema 的枚举里取值
+    const out = resolvePlaceholders(
+      { component: '{{component:StatefulSet}}', verdict: '{{enum:normal}}', refs: [] },
+      p,
+    );
+    expect(out).toEqual({ component: 'StatefulSet:shop/postgres', verdict: 'normal', refs: [] });
+    const body = wrapOutput('/v1/messages', 'claude-fable-5-2', out, 1, 'output__out') as MessagesResponse;
+    expect(body.content[0]).toMatchObject({ type: 'tool_use', name: 'output__out' });
+    expect(JSON.parse(fromMessage(body, profile).text as string)).toEqual(out);
   });
 });
 
@@ -322,7 +396,12 @@ describe('经路由的客户端调用', () => {
     const body = JSON.parse(req?.body as string) as Record<string, unknown>;
     expect(body).toMatchObject({ model: 'claude-fable-5-2', stream: true, max_tokens: 4096 });
     expect(body).not.toHaveProperty('temperature');
-    expect(body.system).toBe(`You are an SRE assistant.\n\n${schemaInstruction(schema, 'en')}`);
+    // 模型直接输出 JSON 文本而不调用输出工具时，正文照常走本地修复
+    expect(body.system).toMatch(/^You are an SRE assistant\.\n\nSubmit the result by calling the output__verdict tool/);
+    expect(body.tools).toEqual([
+      { name: 'output__verdict', description: 'Submit the verdict output.', input_schema: schema, strict: true },
+    ]);
+    expect(body.tool_choice).toEqual({ type: 'auto' });
     expect(records).toHaveLength(1);
     expect(records[0]).toMatchObject({
       api: 'messages',
@@ -413,7 +492,7 @@ describe('配置', () => {
     expect(() => workerConfigSchema.parse(worker({ api: 'completions' }))).toThrow();
   });
 
-  it('api: messages 的路由配置 thinking 时拒绝构造', () => {
+  it('api: messages 的路由接受 thinking', () => {
     const egress = new Egress({ allowCrossBorder: false, honeytokens: [] }, () => undefined);
     expect(() =>
       buildRuntimes(
@@ -438,6 +517,6 @@ describe('配置', () => {
         ],
         egress,
       ),
-    ).toThrow(/路由 primary 的 thinking 只用于 api: chat_completions，当前是 messages/);
+    ).not.toThrow();
   });
 });
