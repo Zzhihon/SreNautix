@@ -318,7 +318,11 @@ describe('模型不可用：两条常规路由都因故障域熔断，兜底路�
       const body = flat(message);
       expect(body).toContain('规则判定：可能（likely） · ');
       expect(body).toContain(truth);
-      expect(message.banner).toBe('只出确定性报告：当日模型预算达到研判上限');
+      // 结论行先写规则判定的根因，再写没有模型研判的原因（ADR 0204）
+      expect(message.banner).toBeNull();
+      expect(message.brief?.[0]?.text).toMatch(
+        /^结论：可能 · 规则判定 · 根因 .+ · 没有模型研判 · 当日模型预算达到研判上限 · 处置：.+$/,
+      );
 
       const fallback = ruleFallback(rc.stageA, 'zh-CN')!;
       expect(fallback).toMatchObject({ level: 'likely', root: PG, top: [PG] });

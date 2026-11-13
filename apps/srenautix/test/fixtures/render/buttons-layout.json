@@ -158,8 +158,8 @@
   "expect": {
     "contains": [
       "[严重] Deployment shop/worker 不可用",
-      "未恢复 · 事件 Deployment:shop/worker:2026-10-16T10:00:00Z",
-      "首次触发 2026-10-16 10:00 UTC",
+      "未恢复 · 首次触发 2026-10-16 10:00 UTC",
+      "事件 Deployment:shop/worker:2026-10-16T10:00:00Z",
       "3. 解决方案"
     ],
     "not_contains": ["控制台："],

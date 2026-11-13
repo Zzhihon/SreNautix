@@ -14,7 +14,7 @@ import type { ButtonTarget, DesiredIncidentMessage } from '../../notify/ports.js
 import { linkTarget } from '../../notify/markdown.js';
 import { FEEDBACK_REASON_CODES } from '../../proposals/feedback.js';
 import { shortId } from '../../notify/shortid.js';
-import { clip, hm, oneLine, publicHttpsUrl, t, ymdhm } from '../../notify/text.js';
+import { clip, hm, oneLine, publicHttpsUrl, stateText, t } from '../../notify/text.js';
 import { payloadHash, MAX_RESULTS_SHOWN } from '../telegram/render.js';
 import { displayKey } from '@srenautix/core';
 
@@ -233,7 +233,7 @@ export function renderCard(
     title: { tag: 'plain_text', content: title },
     subtitle: {
       tag: 'plain_text',
-      content: `${t.state(l, d.state)} · ${t.misc(l, 'incident')} ${clip(d.label, 120)} · ${t.misc(l, 'first_firing')} ${ymdhm(d.firstFiringAt, tz)}`,
+      content: `${stateText(l, d)} · ${t.misc(l, 'incident')} ${clip(d.label, 120)}`,
     },
     template: d.state === 'resolved' ? 'green' : (TEMPLATE[m.severity] ?? 'grey'),
   };

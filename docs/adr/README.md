@@ -141,7 +141,7 @@
 | [0191](0191-subgraph-zoom-and-node-navigation.md) | 根因子图的缩放、全屏与节点导航 | 部分取代（见 [0197](0197-subgraph-large-graph-browsing.md)） | [0197](0197-subgraph-large-graph-browsing.md) [0199](0199-cluster-map.md) |
 | [0192](0192-controlled-incident-qa.md) | 受控事件问答与标注反哺 | 已采纳 | — |
 | [0193](0193-business-domains-and-services.md) | 业务领域与服务：领域包声明，告警与事件的服务归属 | 已采纳 | [0196](0196-series-key-stays-on-root-component.md) [0199](0199-cluster-map.md) |
-| [0194](0194-notify-brief-block.md) | 事件消息的结论块：处置、影响、下一步紧跟标题 | 已采纳 | — |
+| [0194](0194-notify-brief-block.md) | 事件消息的结论块：处置、影响、下一步紧跟标题 | 部分取代（见 [0204](0204-chat-first-screen-and-output-truncated.md)） | [0204](0204-chat-first-screen-and-output-truncated.md) |
 | [0195](0195-incident-claims.md) | 事件的认领：谁在处理 | 已采纳 | — |
 | [0196](0196-series-key-stays-on-root-component.md) | 系列键保持根因组件加告警名，不改用服务 | 已采纳 | — |
 | [0197](0197-subgraph-large-graph-browsing.md) | 组件多的子图：滚轮缩放、同类合并、突出与查找 | 已采纳 | [0199](0199-cluster-map.md) |
@@ -151,3 +151,4 @@
 | [0201](0201-anthropic-messages-routes.md) | Anthropic Messages API 路由 | 已采纳 | — |
 | [0202](0202-probe-before-failure-domain-prebreak.md) | 故障域提前熔断前先发一次探测调用 | 已采纳 | — |
 | [0203](0203-pdb-protects-and-map-placement.md) | PodDisruptionBudget 的保护边与事件在地图上的落点 | 已采纳 | — |
+| [0204](0204-chat-first-screen-and-output-truncated.md) | 聊天消息的首屏只有五行；模型输出被截断单独记为失败原因 | 已采纳 | — |

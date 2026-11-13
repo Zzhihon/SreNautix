@@ -191,15 +191,17 @@ function lineHtml(l: Line, b: Budget, inFold: boolean): string {
   return l.quote && !inFold && b.take('struct') ? `<blockquote>${html}</blockquote>` : html;
 }
 
-/** 保留下来的内容需要的实体数 */
+/** 保留下来的内容需要的实体数；相邻的折叠段共用一个折叠引用块 */
 function demandOf(parts: Part[], kept: number[]): Demand {
   const d: Demand = { struct: 0, emph: 0, code: 0, links: [] };
+  let prevFolded = false;
   parts.forEach((p, i) => {
     const lines = p.lines.slice(0, kept[i]);
     if (!lines.length) {
       return;
     }
-    d.struct += (p.title ? 1 : 0) + (p.folded ? 1 : 0);
+    d.struct += (p.title ? 1 : 0) + (p.folded && !prevFolded ? 1 : 0);
+    prevFolded = p.folded;
     for (const l of lines) {
       if (l.quote && !p.folded) {
         d.struct++;
@@ -224,6 +226,7 @@ function demandOf(parts: Part[], kept: number[]): Demand {
 
 /**
  * 组装 HTML。返回 HTML 与解析后的文字长度；文字长度不超过 limit。
+ * 相邻的折叠段合成一个 <blockquote expandable>（ADR 0204）：消息展开前只看到折叠段之前的内容
  */
 export function buildHtml(parts: Part[], limit = MAX_TEXT_UNITS): { html: string; units: number } {
   const kept = parts.map((p) => p.lines.length);
@@ -274,6 +277,14 @@ export function buildHtml(parts: Part[], limit = MAX_TEXT_UNITS): { html: string
   }
   const b = new Budget(demandOf(parts, kept));
   const chunks: string[] = [];
+  // 正在拼的折叠引用块里的段；null 表示当前不在折叠块中
+  let fold: string[] | null = null;
+  const close = () => {
+    if (fold) {
+      chunks.push(`<blockquote expandable>${fold.join('\n\n')}</blockquote>`);
+      fold = null;
+    }
+  };
   let units = 0;
   parts.forEach((p, i) => {
     const lines = p.lines.slice(0, kept[i]);
@@ -283,16 +294,27 @@ export function buildHtml(parts: Part[], limit = MAX_TEXT_UNITS): { html: string
     }
     units += len + (units ? 2 : 0);
     if (!lines.length) {
-      chunks.push(escapeHtml(p.omitted));
+      if (p.folded && fold) {
+        fold.push(escapeHtml(p.omitted));
+      } else {
+        close();
+        chunks.push(escapeHtml(p.omitted));
+      }
       return;
     }
-    // 段标题与折叠引用块先取实体，正文再按类别分配
+    // 折叠引用块与段标题先取实体，正文再按类别分配；实体不够开折叠块时按普通段输出
+    const folded = p.folded && (fold !== null || b.take('struct'));
     const title = p.title ? `${wrap('bold', escapeHtml(p.title), b, 'struct')}\n` : '';
-    const fold = p.folded && b.take('struct');
     const body = lines.map((l) => lineHtml(l, b, p.folded)).join('\n');
     const tail = trimmed[i] ? `\n${escapeHtml(p.more)}` : '';
-    chunks.push(fold ? `${title}<blockquote expandable>${body}${tail}</blockquote>` : `${title}${body}${tail}`);
+    if (folded) {
+      (fold ??= []).push(`${title}${body}${tail}`);
+    } else {
+      close();
+      chunks.push(`${title}${body}${tail}`);
+    }
   });
+  close();
   return { html: chunks.join('\n\n'), units };
 }
 

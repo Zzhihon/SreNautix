@@ -148,7 +148,7 @@ export class Scheduler {
             EXISTS (SELECT 1 FROM (SELECT r.state, r.error FROM server.research_runs r
                                      WHERE r.incident_id = i.incident_id ORDER BY r.started_at DESC LIMIT 1) last
                      WHERE last.state IN ('failed', 'stage_a_only')
-                       AND last.error->>'kind' IN ('model_unavailable', 'invalid_output'))
+                       AND last.error->>'kind' IN ('model_unavailable', 'invalid_output', 'output_truncated'))
             OR EXISTS (SELECT 1 FROM (SELECT q.state, q.skip_reason FROM server.research_queue q
                                         WHERE q.incident_id = i.incident_id ORDER BY q.enqueued_at DESC LIMIT 1) lq
                         WHERE lq.state = 'skipped' AND lq.skip_reason IN ('no_model_route', 'budget'))

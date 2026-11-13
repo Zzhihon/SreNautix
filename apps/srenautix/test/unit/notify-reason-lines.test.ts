@@ -57,24 +57,28 @@ const run = (state: string, kind: string | null) => ({
 describe('研判的说明行带原因码的文字', () => {
   const base = () => releaseRolloutInput();
 
+  // 研判的状态写在结论块的结论行（ADR 0204），横幅只留状态库降级、观测盲区与上游影响
+  const head = (m: { brief?: Array<{ text: string }>; banner: string | null }) => {
+    expect(m.banner).toBeNull();
+    return m.brief?.[0]?.text ?? '';
+  };
+
   it('研判失败：每种失败类型（含 server 判定的租约过期）写登记表的文字', () => {
     for (const e of REASON_CODES.filter((x) => x.groups.includes('research_failure') || x.code === 'lease_expired')) {
       const { message } = composeMessage({ ...base(), research: run('failed', e.code) });
-      expect(message.banner).toBe(`模型研判失败：${e.text['zh-CN']}，以下为确定性报告`);
+      expect(head(message)).toContain(`结论：模型研判失败 · ${e.text['zh-CN']}`);
     }
     const en = composeMessage({ ...base(), language: 'en', research: run('failed', 'lease_expired') }).message;
-    expect(en.banner).toBe(
-      `Model research failed: ${reasonText('research', 'lease_expired', 'en')}; deterministic report below`,
-    );
+    expect(head(en)).toContain(`model research failed · ${reasonText('research', 'lease_expired', 'en')}`);
   });
 
   it('只出阶段 A：研判镜像的失败类型与入队跳过的原因都写登记表的文字，不写原始说明', () => {
     const egress = composeMessage({ ...base(), research: run('stage_a_only', 'model_unavailable') }).message;
-    expect(egress.banner).toBe('只出确定性报告：模型不可用');
-    expect(egress.banner).not.toContain('原始的失败说明');
+    expect(head(egress)).toContain('结论：没有模型研判 · 模型不可用');
+    expect(JSON.stringify(egress)).not.toContain('原始的失败说明');
     for (const e of REASON_CODES.filter((x) => x.groups.includes('research_skip'))) {
       const { message } = composeMessage({ ...base(), research: null, stageAOnlyReason: e.code });
-      expect(message.banner).toBe(`只出确定性报告：${e.text['zh-CN']}`);
+      expect(head(message)).toContain(`结论：没有模型研判 · ${e.text['zh-CN']}`);
     }
   });
 

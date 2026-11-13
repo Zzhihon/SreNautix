@@ -1,4 +1,5 @@
 import { TERMS, type TermLocale } from '@srenautix/contract';
+import type { DesiredIncidentMessage } from './ports.js';
 import type { Language } from './channel.js';
 
 /** 消息模板中的固定文案（中英文），各渠道的渲染共用。不可信文本从不拼进这里的模板。 */
@@ -179,6 +180,33 @@ export function hm(d: Date, tz = 'UTC'): string {
 export function ymdhm(d: Date, tz = 'UTC'): string {
   const w = wallClock(d, tz);
   return `${w.date} ${w.time.slice(0, 5)} ${tzLabel(tz, d)}`;
+}
+
+const SPAN: Record<Language, (h: number, m: number) => string> = {
+  zh: (h, m) => (h ? `${h} 小时 ${m} 分` : `${m} 分钟`),
+  en: (h, m) => (h ? `${h} h ${m} min` : `${m} min`),
+};
+
+/** 两个时刻之间的时长，与报告正文的写法相同：2 小时 59 分、47 分钟 */
+export function span(l: Language, from: Date, to: Date): string {
+  const m = Math.max(0, Math.round((to.getTime() - from.getTime()) / 60_000));
+  return SPAN[l](Math.floor(m / 60), m % 60);
+}
+
+/**
+ * 消息头部的状态行（ADR 0204）：恢复后写起止时刻与时长，未恢复写首次触发时刻。
+ * 只取事件自身的时刻，不依赖渲染时的当前时间，同一状态重复渲染得到同一行
+ */
+export function stateText(
+  l: Language,
+  d: Pick<DesiredIncidentMessage, 'state' | 'firstFiringAt' | 'endedAt' | 'timeZone'>,
+): string {
+  const tz = d.timeZone ?? 'UTC';
+  const when =
+    d.state === 'resolved' && d.endedAt
+      ? `${ymdhm(d.firstFiringAt, tz)} → ${hm(d.endedAt, tz)}（${span(l, d.firstFiringAt, d.endedAt)}）`
+      : `${t.misc(l, 'first_firing')} ${ymdhm(d.firstFiringAt, tz)}`;
+  return `${t.state(l, d.state)} · ${when}`;
 }
 
 /** 单个字段限制在 max 个字符（code point）以内，超出时以“…”结尾。 */

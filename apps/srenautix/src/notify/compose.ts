@@ -163,9 +163,6 @@ const T = {
     >,
     banner: {
       degraded: '状态库降级：本消息由内存中的数据生成，恢复后补写',
-      pending: '模型研判中，以下为确定性报告',
-      failed: (why: string) => `模型研判失败：${why}，以下为确定性报告`,
-      stageAOnly: '只出确定性报告：',
       blind: '观测失明：至少一半的证据卡没有数据',
       stageAMissing: (why: string) => `阶段 A 尚未生成：${why}`,
       stageARunning: '阶段 A 仍在执行',
@@ -258,8 +255,21 @@ const T = {
     candidates: (n: number, s: number, m: number | null) =>
       `${n} 个候选，第一名得分 ${s.toFixed(2)}，与第二名分差 ${m === null ? '-' : m.toFixed(2)}`,
     dispositionLine: '处置：',
-    briefImpact: '影响 · ',
-    briefNext: '下一步 · ',
+    briefImpact: '影响：',
+    briefNext: '下一步：',
+    head: {
+      pending: '模型研判中',
+      failed: '模型研判失败',
+      none: '没有模型研判',
+      rule: '规则判定',
+      root: '根因 ',
+      candidate: '候选根因 ',
+      lastResort: (route: string) => `兜底路由 ${route}`,
+      threshold: (v: string) => `（阈值 ${v}）`,
+      item: '；',
+      proposal: (n: number) => `提议 ${n}：`,
+      runbook: '按 runbook ',
+    },
     stageAReason: '阶段 A：',
     why: (lvl: string, ok: number) => `为什么是“${lvl}”（代码判定，四项条件满足 ${ok} 项）：`,
     whyAll: '四项条件全部满足（代码判定）',
@@ -403,9 +413,6 @@ const T = {
     } as Record<string, string>,
     banner: {
       degraded: 'State store degraded: built from in-memory data, written back on recovery',
-      pending: 'Model research in progress; deterministic report below',
-      failed: (why: string) => `Model research failed: ${why}; deterministic report below`,
-      stageAOnly: 'Deterministic report only: ',
       blind: 'Observability blind: at least half of the cards have no data',
       stageAMissing: (why: string) => `Stage A not generated yet: ${why}`,
       stageARunning: 'stage A is still running',
@@ -499,8 +506,21 @@ const T = {
     candidates: (n: number, s: number, m: number | null) =>
       `${n} candidates, top score ${s.toFixed(2)}, margin to the second ${m === null ? '-' : m.toFixed(2)}`,
     dispositionLine: 'Disposition: ',
-    briefImpact: 'Impact · ',
-    briefNext: 'Next · ',
+    briefImpact: 'Impact: ',
+    briefNext: 'Next: ',
+    head: {
+      pending: 'model research in progress',
+      failed: 'model research failed',
+      none: 'no model research',
+      rule: 'rule judgement',
+      root: 'root cause ',
+      candidate: 'root candidate ',
+      lastResort: (route: string) => `last-resort route ${route}`,
+      threshold: (v: string) => ` (threshold ${v})`,
+      item: '; ',
+      proposal: (n: number) => `proposal ${n}: `,
+      runbook: 'follow runbook ',
+    },
     stageAReason: 'stage A: ',
     why: (lvl: string, ok: number) => `Why "${lvl}" (judged by code, ${ok} of 4 conditions hold):`,
     whyAll: 'All four conditions hold (judged by code)',
@@ -1085,6 +1105,36 @@ function signalsBlocks(x: Ctx, cards: readonly EvidenceResult[]): NotifyBlock[] 
   return out;
 }
 
+/** 结论块的影响行最多列出的项数 */
+const HEAD_IMPACT_ITEMS = 3;
+
+/**
+ * 结论块的影响行：影响面上异常的卡在前，其次是异常的业务关键信号（已按类别与严重程度排序），每种检查一项。
+ * 只列有主值与阈值的卡，读者在首屏就能看出超出多少；接近阈值的正常卡、没有阈值的卡与告警条件卡
+ * （card_id 以 /condition 结尾，只复述告警本身）留在折叠的详情里。每项为“对象 卡片标题 数值（阈值 x）”
+ */
+function impactRuns(x: Ctx, cards: readonly EvidenceResult[]): NotifyRun[] {
+  const t = x.t;
+  const seen = new Set<string>();
+  const parts: NotifyRun[][] = [];
+  for (const r of cards) {
+    if (parts.length >= HEAD_IMPACT_ITEMS) {
+      break;
+    }
+    // 同一检查在多个对象上异常时（例如 gateway 与它的各个 Pod）只写最先排到的一项
+    const title = cardTitle(r, x.lang);
+    if (seen.has(title) || r.card_id.endsWith('/condition') || !r.value || typeof r.threshold !== 'number') {
+      continue;
+    }
+    seen.add(title);
+    const obj = signalObject(x, r);
+    const runs: NotifyRun[] = [P(obj ? `${obj} ${title}` : title)];
+    runs.push(P(' '), C(r.value), P(t.head.threshold(fmtNum(r.threshold, r.unit))));
+    parts.push(runs);
+  }
+  return joinRuns(parts, t.head.item);
+}
+
 // ---- 研判 ----
 function hypLabel(x: Ctx, h: Hypothesis): string {
   return `${h.id} ${shortName(h.root_component, x.names)}`;
@@ -1584,16 +1634,20 @@ export function composeMessage(i: ComposeInput): { message: NotifyMessage; targe
     );
   } else if (i.stageA.degraded) {
     banner = t.banner.degraded;
-  } else if (i.researchPending) {
-    banner = t.banner.pending;
-  } else if (i.research?.state === 'failed') {
-    banner = t.banner.failed(why('research', researchFailure(i.research)));
-  } else if (i.research?.state === 'stage_a_only') {
-    banner = `${t.banner.stageAOnly}${why('research', researchFailure(i.research))}`;
-  } else if (i.stageAOnlyReason) {
-    banner = `${t.banner.stageAOnly}${why('research', i.stageAOnlyReason)}`;
   } else if (i.stageA.observability_blind) {
     banner = t.banner.blind;
+  }
+  // 没有模型结论时，结论行写研判的状态（粗体）与原因；原因的文字自身可能带括号，用“ · ”接在状态之后
+  let researchStatus: NotifyRun[] | null = null;
+  const status = (label: string, reason?: string) => [B(label), ...(reason ? [P(` · ${reason}`)] : [])];
+  if (i.researchPending) {
+    researchStatus = status(t.head.pending);
+  } else if (i.research?.state === 'failed') {
+    researchStatus = status(t.head.failed, why('research', researchFailure(i.research)));
+  } else if (i.research?.state === 'stage_a_only') {
+    researchStatus = status(t.head.none, why('research', researchFailure(i.research)));
+  } else if (i.stageAOnlyReason) {
+    researchStatus = status(t.head.none, why('research', i.stageAOnlyReason));
   }
   if (i.upstreamImpact?.length) {
     const impact = t.upstreamImpact(i.upstreamImpact.slice(0, 3).join(t.list));
@@ -1866,18 +1920,18 @@ export function composeMessage(i: ComposeInput): { message: NotifyMessage; targe
   // 还没有阶段 A 报告时没有处置判断，处置行与处置反馈按钮都不出现
   const disposition = out?.disposition ?? i.stageA?.disposition ?? null;
   const stageA = i.stageA;
-  let dispositionBlock: NotifyBlock | null = null;
   if (disposition !== null && stageA) {
-    dispositionBlock = text([
-      P(t.dispositionLine),
-      B(t.disposition[disposition] ?? disposition),
-      P(` · ${t.stageAReason}${t.dispositionReason[stageA.disposition_reason] ?? stageA.disposition_reason}`),
-      ...(inc.root.ambiguous && inc.candidates[0]
-        ? [P(`（${t.candidates(inc.candidates.length, inc.candidates[0].score, inc.root.margin)}）`)]
-        : []),
-    ]);
-    // 聊天渠道在结论块里写处置（ADR 0194），关键问题段只在完整报告（GitHub issue）里重复
-    keyIssue.push({ ...dispositionBlock, scope: 'full' });
+    // 结论块只写处置本身（无法判定时不写，ADR 0204），处置的原因在关键问题段
+    keyIssue.push(
+      text([
+        P(t.dispositionLine),
+        B(t.disposition[disposition] ?? disposition),
+        P(` · ${t.stageAReason}${t.dispositionReason[stageA.disposition_reason] ?? stageA.disposition_reason}`),
+        ...(inc.root.ambiguous && inc.candidates[0]
+          ? [P(`（${t.candidates(inc.candidates.length, inc.candidates[0].score, inc.root.margin)}）`)]
+          : []),
+      ]),
+    );
   }
   if (out) {
     keyIssue.push(...ladderBlocks(x, out, chosen));
@@ -1985,13 +2039,61 @@ export function composeMessage(i: ComposeInput): { message: NotifyMessage; targe
   // ---- 业务关键信号：现状之后、关键问题之前；没有异常或接近阈值的信号时整段不出现 ----
   const signals = signalsBlocks(x, [...cards.values()]);
 
-  // ---- 结论块（ADR 0194）：标题之下依次是处置、影响、下一步，各一行，取自下面各段已经写好的块；没有的行不出现 ----
+  // ---- 结论块（ADR 0204）：标题之下的结论、影响、下一步各一行，聊天渠道的首屏只有它们；没有的行不出现 ----
+  const shownDisposition = disposition !== null && disposition !== 'undetermined' ? disposition : null;
+  const dispositionRuns: NotifyRun[] = shownDisposition
+    ? [P(` · ${t.dispositionLine}`), B(t.disposition[shownDisposition] ?? shownDisposition)]
+    : [];
+  const conclusionRuns: NotifyRun[] = [P(t.conclusion)];
+  if (out && chosen) {
+    conclusionRuns.push(
+      B(t.level[out.conclusion.level] ?? out.conclusion.level),
+      P(` · ${t.head.root}`),
+      C(shortName(chosen.root_component, names)),
+    );
+    if (out.last_resort_route) {
+      conclusionRuns.push(P(` · ${t.head.lastResort(out.last_resort_route.route_id)}`));
+    }
+  } else if (rules[0]) {
+    conclusionRuns.push(
+      B(t.level['likely'] ?? 'likely'),
+      P(` · ${t.head.rule} · ${t.head.root}`),
+      C(shortName(rules[0].root_component, names)),
+      ...(researchStatus ? [P(' · '), ...researchStatus] : []),
+    );
+  } else {
+    conclusionRuns.push(
+      ...(out ? [B(t.level[out.conclusion.level] ?? out.conclusion.level)] : (researchStatus ?? [B(t.head.none)])),
+    );
+    if (inc.root.component) {
+      conclusionRuns.push(P(` · ${t.head.candidate}`), C(shortName(inc.root.component, names)));
+    }
+  }
+  conclusionRuns.push(...dispositionRuns);
+  const headImpact = impactRuns(x, [
+    ...impactCards,
+    ...businessSignals([...cards.values()])
+      .filter((s) => !s.near)
+      .map((s) => s.card),
+  ]);
+  const firstRecommendation = out?.recommendations[0];
+  const nextByModel = !nums[0] && firstRecommendation?.generated_by === 'model';
+  let nextRuns: NotifyRun[] | null = null;
+  if (nums[0]) {
+    const { n, p } = nums[0];
+    nextRuns = [P(t.head.proposal(n)), C(p.action), P(' → '), C(p.target.display)];
+  } else if (firstRecommendation) {
+    nextRuns =
+      firstRecommendation.generated_by === 'model'
+        ? [I(`${t.model}${firstRecommendation.title}`)]
+        : [B(firstRecommendation.title)];
+  } else if (i.stageA?.runbooks.length) {
+    nextRuns = [P(t.head.runbook), ...codeList(i.stageA.runbooks.slice(0, 2), t.list)];
+  }
   const brief: NotifyBlock[] = [
-    ...(dispositionBlock ? [dispositionBlock] : []),
-    ...(signals[0]?.runs ? [text([P(t.briefImpact), ...signals[0].runs])] : []),
-    ...(remedy[0]?.runs && (nums.length > 0 || i.stageA?.runbooks.length)
-      ? [text([P(t.briefNext), ...remedy[0].runs])]
-      : []),
+    text(conclusionRuns),
+    ...(headImpact.length ? [text([P(t.briefImpact), ...headImpact])] : []),
+    ...(nextRuns ? [text([P(t.briefNext), ...nextRuns], { model: nextByModel })] : []),
   ];
 
   const sections: NotifySection[] = [

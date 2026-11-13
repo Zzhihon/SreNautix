@@ -169,11 +169,17 @@ describe('结构化调用', () => {
     ]);
   });
 
-  it('两次输出都无效、没有其他路由：模型输出无效，只出确定性报告', async () => {
+  it('两次输出都被截断、没有其他路由：失败原因写模型输出被截断', async () => {
     a.enqueue(fixture(P, 'chat-length'), fixture(P, 'chat-length'));
     const r = await session(layer([route('a', a.baseUrl)])).structured('conclude', base('x'), OUTPUT);
-    expect(r).toMatchObject({ ok: false, reason: 'model_output_invalid' });
+    expect(r).toMatchObject({ ok: false, reason: 'model_output_truncated' });
     expect(records.map((x) => x.outcome)).toEqual(['retried', 'failed']);
+  });
+
+  it('一次截断、一次不是 JSON：失败原因写模型输出无效', async () => {
+    a.enqueue(fixture(P, 'chat-length'), fixture(P, 'chat-chinese'));
+    const r = await session(layer([route('a', a.baseUrl)])).structured('conclude', base('x'), OUTPUT);
+    expect(r).toMatchObject({ ok: false, reason: 'model_output_invalid' });
   });
 
   it('首 token 超时计入失败型熔断', async () => {

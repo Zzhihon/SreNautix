@@ -202,7 +202,7 @@ export class GoalPublisher {
    */
   async failRun(runId: string, kind: string, message: string): Promise<void> {
     const reason =
-      kind === 'breaker_open' || kind === 'invalid_output'
+      kind === 'breaker_open' || kind === 'invalid_output' || kind === 'output_truncated'
         ? 'model_unavailable'
         : ['model_unavailable', 'budget_exhausted', 'deadline', 'datasource'].includes(kind)
           ? kind

@@ -114,7 +114,8 @@
   },
   "expect": {
     "contains": [
-      "已恢复 · 事件 postgres.cluster:data/pg:2026-10-16T10:00:00Z",
+      "已恢复 · 2026-10-16 10:00 UTC → ",
+      "事件 postgres.cluster:data/pg:2026-10-16T10:00:00Z",
       "已反馈：对 · alice · 2026-10-16 10:21 UTC",
       "【模型生成】根因 postgres.cluster:data/pg"
     ],

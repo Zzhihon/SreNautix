@@ -298,7 +298,8 @@ describe('Telegram HTML 组装', () => {
     }));
     const r = buildHtml([part({ priority: 0, title: '证据', folded: true, lines: many })]);
     const p = parseTelegramHtml(r.html);
-    expect(r.html.startsWith('<b>证据</b>\n<blockquote expandable>')).toBe(true);
+    // 段标题在折叠块里，展开前只看到折叠块之前的内容（ADR 0204）
+    expect(r.html.startsWith('<blockquote expandable><b>证据</b>\n')).toBe(true);
     expect(p.entities).toHaveLength(MAX_ENTITIES);
     const count = (t: string) => p.entities.filter((e) => e.type === t).length;
     // 段标题与引用块 2 个，链接 80 个，加粗 18 个，等宽 0 个
@@ -316,42 +317,91 @@ describe('Telegram HTML 组装', () => {
   });
 });
 
-describe('事件报告：2026-10-20 发布事故（黄金用例）', () => {
-  const telegramOf = (input: ComposeInput) => {
-    const { message, targets } = composeMessage(input);
-    const inc = input.incident;
-    const d: DesiredIncidentMessage = {
-      incidentId: inc.incident_id,
-      clusterId: inc.cluster_id,
-      label: inc.label,
-      severity: inc.severity,
-      state: inc.state,
-      firstFiringAt: new Date(inc.first_firing_at),
-      endedAt: inc.ended_at ? new Date(inc.ended_at) : null,
-      lane: 'urgent',
-      message,
-      targets,
-      language: 'zh',
-    };
-    return {
-      message,
-      payload: renderIncident({ channel: 'telegram', chat: '-1001234567890', language: 'zh' }, d, [], null, {
-        callbacks: true,
-      }).payload as TelegramPayload,
-    };
+/** 事件报告输入经 compose 与 Telegram 渲染得到的消息 */
+const telegramOf = (input: ComposeInput, storm: { startedAt: Date } | null = null) => {
+  const { message, targets } = composeMessage(input);
+  const inc = input.incident;
+  const d: DesiredIncidentMessage = {
+    incidentId: inc.incident_id,
+    clusterId: inc.cluster_id,
+    label: inc.label,
+    severity: inc.severity,
+    state: inc.state,
+    firstFiringAt: new Date(inc.first_firing_at),
+    endedAt: inc.ended_at ? new Date(inc.ended_at) : null,
+    lane: 'urgent',
+    message,
+    targets,
+    language: 'zh',
   };
+  return {
+    message,
+    payload: renderIncident({ channel: 'telegram', chat: '-1001234567890', language: 'zh' }, d, [], storm, {
+      callbacks: true,
+    }).payload as TelegramPayload,
+  };
+};
 
+/** Telegram 消息的首屏：第一个折叠引用块之前的各行 */
+const firstScreen = (html: string) => html.split('<blockquote expandable>')[0]!.trim().split('\n');
+/** 首屏各行去掉标签后的前缀：第三行起依次是结论、影响、下一步 */
+const headKeys = (lines: string[]) => lines.slice(2).map((l) => l.replace(/<[^>]+>/g, '').split('：')[0]);
+
+describe('Telegram 首屏（ADR 0204）', () => {
+  it('报告黄金文件的首屏不超过 5 行：标题、状态、结论、影响、下一步', () => {
+    const dir = resolve(import.meta.dirname, '../fixtures/report');
+    const files = readdirSync(dir).filter((f) => f.endsWith('.telegram.html'));
+    expect(files.length).toBeGreaterThanOrEqual(3);
+    for (const f of files) {
+      const lines = firstScreen(readFileSync(join(dir, f), 'utf8'));
+      expect(lines.length, f).toBeLessThanOrEqual(5);
+      expect(lines[1], f).toMatch(/^(未恢复|已恢复|已合并) · /);
+      expect(headKeys(lines), f).toEqual(['结论', '影响', '下一步'].slice(0, lines.length - 2));
+    }
+  });
+
+  it('渲染黄金用例（事件消息）的首屏不超过 5 行', () => {
+    for (const c of cases.filter((x) => x.kind === 'incident' && x.channels.includes('telegram'))) {
+      const lines = firstScreen((telegram(c).payload as TelegramPayload).text);
+      expect(lines.length, c.file).toBeLessThanOrEqual(5);
+    }
+  });
+
+  it('研判失败、事件风暴与恢复同时出现时首屏仍不超过 5 行，研判失败的原因写在结论行', () => {
+    const failed = {
+      ...releaseRolloutInput('end'),
+      research: {
+        run_id: '0b9a4e1c-0000-4000-8000-000000000001',
+        state: 'failed',
+        disposition: null,
+        conclusion_level: null,
+        root_component: null,
+        output: null,
+        error: { kind: 'output_truncated', message: 'x' },
+      },
+    } as ComposeInput;
+    const { payload } = telegramOf(failed, { startedAt: new Date('2026-10-20T15:40:00Z') });
+    const lines = firstScreen(payload.text);
+    expect(lines.length).toBeLessThanOrEqual(5);
+    expect(lines[1]).toMatch(
+      /^已恢复 · 2026-10-20 15:50 UTC → 18:49 UTC（2 小时 59 分） · 属于 15:40 UTC 开始的事件风暴/,
+    );
+    expect(lines[2]).toContain('结论：<b>模型研判失败</b> · 模型输出达到输出上限被截断');
+  });
+});
+
+describe('事件报告：2026-10-20 发布事故（黄金用例）', () => {
   it('Telegram HTML 与黄金文件一致，并能按 Bot API 的规则解析', async () => {
     const { payload } = telegramOf(releaseRolloutInput());
     const { text, entities } = parsed(payload);
     await expect(payload.text).toMatchFileSnapshot('../fixtures/report/release-rollout-2026-10-20.telegram.html');
-    // 标题之下是结论块（ADR 0194），之后主线顺序：现状 → 关键问题 → 拓扑联系 → 解决方案 → 证据链
+    // 标题与状态行之下是结论、影响、下一步三行（ADR 0204），之后的折叠块里主线顺序：现状 → 关键问题 → 拓扑联系 → 解决方案 → 证据链
     checkText(text, {
-      starts_with: '[影子] [严重] StatefulSet:acme-prod/gateway：worker 没有可用副本',
+      starts_with: '[影子] [严重] StatefulSet:acme-prod/gateway：worker 没有可用副本\n未恢复 · 首次触发',
       order: [
-        '处置：升级',
-        '影响 · 内存',
-        '下一步 · r1',
+        '结论：可能 · 根因 StatefulSet:acme-prod/gateway · 处置：升级',
+        '影响：worker 5xx 来自哪一层 4.1%（阈值 0.5%）',
+        '下一步：【模型】暂停',
         '现状',
         '时间线（UTC，10-20）',
         '关键问题',
@@ -434,7 +484,7 @@ describe('事件报告：2026-10-20 发布事故（黄金用例）', () => {
     const { payload } = telegramOf(releaseRolloutInput('end'));
     const { text } = parsed(payload);
     expect(text).toContain('18:49 恢复，持续 2 小时 59 分');
-    expect(text).toContain('已恢复 · 事件');
+    expect(text).toContain('已恢复 · 2026-10-20 15:50 UTC → 18:49 UTC（2 小时 59 分）');
   });
 
   it('issue 正文是全文：每个假设的全部证据、成员告警与变更带来源链接，Markdown 特殊字符已转义', () => {
