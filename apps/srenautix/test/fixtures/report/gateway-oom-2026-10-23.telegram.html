@@ -1,14 +1,15 @@
 [影子] <b>[严重] StatefulSet:cchp-prod/gateway：CCHPMetricsTargetDown、KubeStatefulSetReplicasNotReady</b>
-未恢复 · 事件 <code>StatefulSet:cchp-prod/gateway:2026-10-23T15:45:00Z</code>
-首次触发 2026-10-23 15:48 UTC
-处置：<b>升级</b> · 阶段 A：critical 且根因有歧义
-影响 · 内存：gateway 内存占 limit 与 OOM <code>94.0%</code> / 阈值 <code>90.0%</code> · 2 个容器被 OOM 终止 · 自 10-24 14:37
-下一步 · runbook：<code>workload/workload.md</code>
+未恢复 · 首次触发 2026-10-23 15:48 UTC
+结论：<b>没有模型研判</b> · 候选根因 <code>StatefulSet:cchp-prod/gateway</code> · 处置：<b>升级</b>
+影响：gateway 内存占 limit 与 OOM <code>94.0%</code>（阈值 90.0%）
+下一步：按 runbook <code>workload/workload.md</code>
+
+<blockquote expandable>事件 <code>StatefulSet:cchp-prod/gateway:2026-10-23T15:45:00Z</code>
 
 <b>现状</b>
 <code>cchp/cchp-prod</code>：<b>StatefulSet:cchp-prod/gateway</b>：CCHPMetricsTargetDown、KubeStatefulSetReplicasNotReady。<code>15:48:30</code> 起首个告警，<code>16:08:30</code> 起出现症状，截至 <code>10-24 14:45:30</code> 未恢复。70 条告警（4 条触发中），1 个组件。
 来源：告警 KubePodCrashLoopingCritical
-<blockquote>生产 cchp-prod/gateway-1 容器 gateway CrashLoopBackOff</blockquote>
+生产 cchp-prod/gateway-1 容器 gateway CrashLoopBackOff
 
 <b>业务关键信号</b>
 - 内存：gateway 内存占 limit 与 OOM <code>94.0%</code> / 阈值 <code>90.0%</code> · 2 个容器被 OOM 终止 · 自 10-24 14:37
@@ -27,6 +28,7 @@
 
 <b>关键问题</b>
 <b>阶段 A 根因候选：</b><code>StatefulSet:cchp-prod/gateway</code>（得分 0.65）
+处置：<b>升级</b> · 阶段 A：critical 且根因有歧义
 
 <b>拓扑联系</b>
 <b>StatefulSet:cchp-prod/gateway</b> ⇒ 告警 KubeContainerOOMKilled、CCHPMetricsTargetDown、KubePodCrashLooping、CCHPGatewayContainerTerminated、KubeStatefulSetReplicasNotReady、KubePodCrashLoopingCritical
@@ -36,7 +38,7 @@
 runbook：<code>workload/workload.md</code>
 
 <b>证据链</b>
-<blockquote expandable><b>阶段 A 的异常卡（8 张）</b>
+<b>阶段 A 的异常卡（8 张）</b>
 - + <code>card:8</code> <b>就绪</b> · <code>StatefulSet:cchp-prod/gateway</code>：1 个 Pod 在窗口内未就绪 · 自 <code>10-24 14:12:30</code> · 异常 <a href="https://srenautix.example.test/incidents/b18629a6-0000-4000-8000-b18629a6f249?tab=evidence#card-8">控制台</a>
 - + <code>card:7</code> <b>重启与终止原因</b> · <code>StatefulSet:cchp-prod/gateway</code>：1 个容器处于 CrashLoopBackOff，值 <code>6</code> · 自 <code>10-24 14:33:30</code> · 异常 <a href="https://srenautix.example.test/incidents/b18629a6-0000-4000-8000-b18629a6f249?tab=evidence#card-7">控制台</a>
 - + <code>card:1</code> <b>内存占 limit 与 OOM</b> · <code>StatefulSet:cchp-prod/gateway</code>：2 个容器被 OOM 终止，值 <code>94.0%</code>，阈值 <code>90.0%</code> · 自 <code>10-24 14:37</code> · 异常 <a href="https://srenautix.example.test/incidents/b18629a6-0000-4000-8000-b18629a6f249?tab=evidence#card-1">控制台</a>

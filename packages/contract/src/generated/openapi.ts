@@ -3242,6 +3242,7 @@ export type components = {
               | 'budget_exhausted'
               | 'deadline'
               | 'invalid_output'
+              | 'output_truncated'
               | 'datasource'
               | 'internal';
             message: string;
@@ -6628,6 +6629,7 @@ export type components = {
           | 'budget_exhausted'
           | 'deadline'
           | 'invalid_output'
+          | 'output_truncated'
           | 'datasource'
           | 'internal';
         message: string;

@@ -1,9 +1,10 @@
 [影子] <b>[严重] StatefulSet:acme-prod/gateway：worker 没有可用副本</b>
-未恢复 · 事件 <code>StatefulSet:acme-prod/gateway:2026-10-20T15:50:00Z</code>
-首次触发 2026-10-20 15:50 UTC
-处置：<b>升级</b> · 阶段 A：critical 且根因有歧义（3 个候选，第一名得分 0.35，与第二名分差 0.00）
-影响 · 内存：gateway-4 内存占 limit 与 OOM <code>97.7%</code> / 阈值 <code>90.0%</code> · working set 峰值 98% · 自 15:55
-下一步 · <code>r1</code> <i>【模型】暂停 acme-prod 中 control、worker、gateway 所在 Application 的 rollout</i>
+未恢复 · 首次触发 2026-10-20 15:50 UTC
+结论：<b>可能</b> · 根因 <code>StatefulSet:acme-prod/gateway</code> · 处置：<b>升级</b>
+影响：worker 5xx 来自哪一层 <code>4.1%</code>（阈值 0.5%）；gateway-4 内存占 limit 与 OOM <code>97.7%</code>（阈值 90.0%）；control CPU 限流 <code>79.8%</code>（阈值 25.0%）
+下一步：<i>【模型】暂停 acme-prod 中 control、worker、gateway 所在 Application 的 rollout</i>
+
+<blockquote expandable>事件 <code>StatefulSet:acme-prod/gateway:2026-10-20T15:50:00Z</code>
 
 <b>现状</b>
 <code>prod/acme-prod</code>：发布 <code>rel-9a8c9cd6</code>（15:59:52）与回退到 <code>rel-fd8097cf</code>（16:24:25）期间，<b>StatefulSet:acme-prod/gateway</b>：worker 没有可用副本。<code>15:50:30</code> 起首个告警，<code>16:25</code> 起出现症状，截至 <code>17:07:40</code> 未恢复。影响：5xx 来自哪一层 <code>4.1%</code>（阈值 <code>0.5%</code>）。23 条告警（18 条触发中），7 个组件。
@@ -30,6 +31,7 @@
 
 <b>关键问题</b>
 <b>结论：可能（likely）</b> · <code>StatefulSet:acme-prod/gateway</code>（h3）
+处置：<b>升级</b> · 阶段 A：critical 且根因有歧义（3 个候选，第一名得分 0.35，与第二名分差 0.00）
 为什么是“可能”（代码判定，四项条件满足 2 项）：
 - <b>满足</b>：支持卡实体在假设范围内：30 张规则判定的卡（检查卡 1 张）
 - <b>满足</b>：最早异常 <code>15:55</code>（<code>card:38</code>）不晚于症状起点 <code>16:25</code> + 2 分钟
@@ -56,12 +58,10 @@
 runbook：argocd/argocd.md、workload/workload.md
 
 <b>证据链</b>
-<blockquote expandable><b>h3 StatefulSet:acme-prod/gateway</b> · 支持 · 支持证据 34、相反卡 5、检查 1 项
+<b>h3 StatefulSet:acme-prod/gateway</b> · 支持 · 支持证据 34、相反卡 5、检查 1 项
   - + card:135 <b>重启与终止原因</b> · StatefulSet:acme-prod/gateway：窗口内重启 1 次 · 15:20:30–16:00:30 · 异常 <a href="https://srenautix.example.test/incidents/e88a2a7c-0000-4000-8000-e88a2a7ca284?tab=evidence#card-135">控制台</a> <a href="https://vm.example.test/vmui/#/?g0.expr=sum%20by%20(namespace%2C%20pod%2C%20container)%20(increase(kube_pod_container_status_restarts_total%7Bcluster%3D~%22acme%7C%22%2Cnamespace%3D%22acme-prod%22%2Cpod%3D~%22gateway-%5B0-9%5D%2B%22%7D%5B40m%5D))&amp;g0.range_input=40m&amp;g0.end_input=2026-10-20T16%3A00%3A30.000Z">查询</a>
   - + card:38 <b>内存占 limit 与 OOM</b> · StatefulSet:acme-prod/gateway：working set 峰值 97%，值 96.5%，阈值 90.0% · 自 15:55 · 异常 <a href="https://srenautix.example.test/incidents/e88a2a7c-0000-4000-8000-e88a2a7ca284?tab=evidence#card-38">控制台</a> <a href="https://vm.example.test/vmui/#/?g0.expr=max%20by%20(namespace%2C%20pod%2C%20container)%20(container_memory_working_set_bytes%7Bcluster%3D~%22acme%7C%22%2Ccontainer!%3D%22%22%2Ccontainer!%3D%22POD%22%2Cnamespace%3D%22acme-prod%22%2Cpod%3D~%22gateway-%5B0-9%5D%2B%22%7D%20%2F%20on%20(namespace%2C%20pod%2C%20container)%20kube_pod_container_resource_limits%7Bcluster%3D~%22acme%7C%22%2Cnamespace%3D%22acme-prod%22%2Cpod%3D~%22gateway-%5B0-9%5D%2B%22%2Cresource%3D%22memory%22%7D)&amp;g0.range_input=40m&amp;g0.end_input=2026-10-20T16%3A12%3A30.000Z">查询</a>
   - + card:74 <b>内存占 limit 与 OOM</b> · Pod:acme-prod/gateway-4：working set 峰值 98%，值 97.7%，阈值 90.0% · 自 15:55 · 异常 <a href="https://srenautix.example.test/incidents/e88a2a7c-0000-4000-8000-e88a2a7ca284?tab=evidence#card-74">控制台</a> <a href="https://vm.example.test/vmui/#/?g0.expr=max%20by%20(namespace%2C%20pod%2C%20container)%20(container_memory_working_set_bytes%7Bcluster%3D~%22acme%7C%22%2Ccontainer!%3D%22%22%2Ccontainer!%3D%22POD%22%2Cnamespace%3D%22acme-prod%22%2Cpod%3D%22gateway-4%22%7D%20%2F%20on%20(namespace%2C%20pod%2C%20container)%20kube_pod_container_resource_limits%7Bcluster%3D~%22acme%7C%22%2Cnamespace%3D%22acme-prod%22%2Cpod%3D%22gateway-4%22%2Cresource%3D%22memory%22%7D)&amp;g0.range_input=40m&amp;g0.end_input=2026-10-20T16%3A25%3A30.000Z">查询</a>
   - 其余 27 张见控制台
   - − card:25 <b>持续 Pending</b> · Pod:acme-prod/gateway-3：值 0，未命中异常条件 · 15:36–16:16 · 正常 <a href="https://srenautix.example.test/incidents/e88a2a7c-0000-4000-8000-e88a2a7ca284?tab=evidence#card-25">控制台</a> <a href="https://vm.example.test/vmui/#/?g0.expr=max%20by%20(namespace%2C%20pod)%20(kube_pod_status_phase%7Bcluster%3D~%22acme%7C%22%2Cnamespace%3D%22acme-prod%22%2Cphase%3D%22Pending%22%2Cpod%3D%22gateway-3%22%7D)&amp;g0.range_input=40m&amp;g0.end_input=2026-10-20T16%3A16%3A00.000Z">查询</a>
-  - − card:51 <b>持续 Pending</b> · Pod:acme-prod/gateway-0：值 0，未命中异常条件 · 15:34–16:14 · 正常 <a href="https://srenautix.example.test/incidents/e88a2a7c-0000-4000-8000-e88a2a7ca284?tab=evidence#card-51">控制台</a> <a href="https://vm.example.test/vmui/#/?g0.expr=max%20by%20(namespace%2C%20pod)%20(kube_pod_status_phase%7Bcluster%3D~%22acme%7C%22%2Cnamespace%3D%22acme-prod%22%2Cphase%3D%22Pending%22%2Cpod%3D%22gateway-0%22%7D)&amp;g0.range_input=40m&amp;g0.end_input=2026-10-20T16%3A14%3A00.000Z">查询</a>
-  - 其余 3 张见控制台
 …其余内容见控制台</blockquote>

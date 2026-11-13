@@ -43,6 +43,9 @@ import { buildParams, requestCategories, type ChatThinking } from './wire.js';
 /** 剩余时间少于这个值时不再发起模型调用 */
 export const MIN_CALL_WINDOW_MS = 5_000;
 
+/** 输出达到上限而结束的 incomplete 取值：Chat 与 Messages 接口为 length，Responses 接口为 max_output_tokens */
+const TRUNCATED: ReadonlySet<string> = new Set(['length', 'max_output_tokens']);
+
 /**
  * 故障域探测调用（ADR 0202）：固定的一句提示、16 个输出 token，流式发出；超时比研判调用短。
  * 结论在模型层按路由缓存 ttlMs，并行的会话与同一会话的各阶段共用一次探测
@@ -188,7 +191,13 @@ function skipText(p: PreOpenedRoute): string {
 }
 
 export type StructuredFailure =
-  'model_output_invalid' | 'model_unavailable' | 'budget' | 'failure_domain' | 'deadline' | 'egress_blocked';
+  | 'model_output_invalid'
+  | 'model_output_truncated'
+  | 'model_unavailable'
+  | 'budget'
+  | 'failure_domain'
+  | 'deadline'
+  | 'egress_blocked';
 
 export type StructuredResult<T> =
   | { ok: true; value: T; routeId: string; step: RepairStep; notes: string[] }
@@ -641,6 +650,8 @@ export class ModelSession {
     }
     const order = this.layer.ordered(phase, plan.pool);
     let sawInvalid = false;
+    // 输出无效的调用里有没有截断以外的原因（不是 JSON、不符合 schema、拒绝、内容过滤）；全部是截断时失败原因写截断
+    let sawMalformed = false;
     let sawEgress = false;
     let candidates = 0;
     for (const [ri, rt] of order.entries()) {
@@ -699,6 +710,7 @@ export class ModelSession {
           return { ok: true, value: local.value as T, routeId: id, step, notes };
         }
         sawInvalid = true;
+        sawMalformed ||= !TRUNCATED.has(sent.turn.incomplete ?? '');
         const willReask = !reasked && !local.refusal;
         metrics.repair.inc({ phase, route: id, level: reasked ? 'reask' : local.step, outcome: 'failed' });
         await this.ctx.record({
@@ -742,7 +754,9 @@ export class ModelSession {
       };
     }
     if (sawInvalid) {
-      return { ok: false, reason: 'model_output_invalid', detail: '模型输出无效', attempts };
+      return sawMalformed
+        ? { ok: false, reason: 'model_output_invalid', detail: '模型输出无效', attempts }
+        : { ok: false, reason: 'model_output_truncated', detail: '模型输出被截断', attempts };
     }
     return {
       ok: false,

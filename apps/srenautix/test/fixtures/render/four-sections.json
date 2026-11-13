@@ -79,9 +79,9 @@
       "gateway-2 自 07:28 停在初始化阶段",
       "【模型生成】根因 Deployment:shop/gateway",
       "- 【模型生成】前滚到与当前 schema 匹配的镜像",
-      "来源：Loki {namespace=\"shop\", pod=\"gateway-2\"}"
+      "来源：Loki {namespace=\"shop\", pod=\"gateway-2\"}",
+      "waiting for migrations: schema version 41 != 42"
     ],
-    "entities": [{ "type": "blockquote", "text": "waiting for migrations: schema version 41 != 42" }],
     "buttons": [],
     "max_units": 4096
   }

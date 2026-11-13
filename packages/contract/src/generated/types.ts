@@ -358,6 +358,7 @@ export type ResearchFailedEvent = OutboxEventHeader & {
       | 'budget_exhausted'
       | 'deadline'
       | 'invalid_output'
+      | 'output_truncated'
       | 'datasource'
       | 'internal';
     message: string;

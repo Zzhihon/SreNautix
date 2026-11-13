@@ -12,7 +12,7 @@ import type {
 import type { ExternalDigestView } from '../../notify/external.js';
 import type { ButtonTarget, DesiredIncidentMessage } from '../../notify/ports.js';
 import { shortId } from '../../notify/shortid.js';
-import { clip, hm, oneLine, publicHttpsUrl, t, ymdhm } from '../../notify/text.js';
+import { clip, hm, oneLine, publicHttpsUrl, stateText, t } from '../../notify/text.js';
 import { buildHtml, htmlToPlain, MAX_TEXT_UNITS, type Line, type Part } from './html.js';
 import type { TgButton, TgInlineKeyboard } from './types.js';
 
@@ -143,17 +143,27 @@ export function renderIncident(
       bold(`[${t.severity(l, m.severity)}] ${clip(oneLine(headline), 200)}`),
     ],
   });
-  head.push({ runs: [plain(`${t.state(l, d.state)} · ${t.misc(l, 'incident')} `), code(clip(d.label, 120))] });
-  head.push({ runs: [plain(`${t.misc(l, 'first_firing')} ${ymdhm(d.firstFiringAt, tz)}`)] });
+  // 首屏（ADR 0204）：标题、状态行、结论块的结论 / 影响 / 下一步；其余内容都在一个折叠引用块里
+  const state: NotifyRun[] = [plain(stateText(l, d))];
   if (storm) {
-    head.push({ runs: [plain(t.misc(l, 'storm', { at: hm(storm.startedAt, tz) }))] });
+    state.push(plain(` · ${t.misc(l, 'storm', { at: hm(storm.startedAt, tz) })}`));
   }
   if (m.banner) {
-    head.push({ runs: [bold(clip(oneLine(m.banner), 200))] });
+    state.push(plain(' · '), bold(clip(oneLine(m.banner), 200)));
   }
-  // 结论块（ADR 0194）：处置、影响、下一步，与标题同在不省略的头部
+  head.push({ runs: state });
   head.push(...(m.brief ?? []).flatMap((b) => blockLines(b, l)));
-  const parts: Part[] = [{ priority: 0, omitted: '', more: '', title: null, folded: false, lines: head }];
+  const parts: Part[] = [
+    { priority: 0, omitted: '', more: '', title: null, folded: false, lines: head },
+    {
+      priority: 0,
+      omitted: '',
+      more: '',
+      title: null,
+      folded: true,
+      lines: [{ runs: [plain(`${t.misc(l, 'incident')} `), code(clip(d.label, 120))] }],
+    },
+  ];
   for (const sec of m.sections) {
     const blocks = sec.blocks.filter((b) => (b.scope ?? 'all') !== 'full');
     if (!blocks.length) {
@@ -164,7 +174,7 @@ export function renderIncident(
       omitted: sec.omitted ?? t.omitted(l, sec.kind),
       more: t.misc(l, 'more'),
       title: sec.title ?? t.section(l, sec.kind),
-      folded: sec.folded ?? false,
+      folded: true,
       lines: blocks.flatMap((b) => blockLines(b, l)),
     });
   }

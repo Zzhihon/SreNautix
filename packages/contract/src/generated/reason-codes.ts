@@ -31,6 +31,7 @@ export interface ReasonCodesByStage {
     | 'budget_exhausted'
     | 'deadline'
     | 'invalid_output'
+    | 'output_truncated'
     | 'datasource'
     | 'internal'
     | 'leader_supported'
@@ -135,6 +136,7 @@ export interface ReasonCodesByGroup {
     | 'budget_exhausted'
     | 'deadline'
     | 'invalid_output'
+    | 'output_truncated'
     | 'datasource'
     | 'internal';
   research_stop: 'model_unavailable' | 'deadline' | 'leader_supported' | 'no_change' | 'step_limit' | 'budget';
@@ -444,6 +446,13 @@ export const REASON_CODES: readonly ReasonCodeEntry[] = [
     level: 'error',
     groups: ['research_failure'],
     text: { 'zh-CN': '模型输出无效', en: 'model output invalid' },
+  },
+  {
+    code: 'output_truncated',
+    stage: 'research',
+    level: 'error',
+    groups: ['research_failure'],
+    text: { 'zh-CN': '模型输出达到输出上限被截断', en: 'model output truncated at the output limit' },
   },
   {
     code: 'datasource',

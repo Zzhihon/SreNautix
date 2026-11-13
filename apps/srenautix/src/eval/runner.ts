@@ -235,7 +235,7 @@ export async function runEval(p: EvalPlan): Promise<EvalOutcome> {
           model: route.model,
           environment,
           state: res.state,
-          structuredFailure: res.error?.kind === 'invalid_output',
+          structuredFailure: res.error?.kind === 'invalid_output' || res.error?.kind === 'output_truncated',
           level: out?.conclusion.level ?? null,
           disposition: out?.disposition ?? s.context.stage_a.disposition,
           top: out ? topComponents(out) : [],

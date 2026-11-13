@@ -133,6 +133,13 @@ export function failure(r: Extract<StructuredResult<unknown>, { ok: false }>): {
         stop: 'model_unavailable',
         stageAOnly: false,
       };
+    case 'model_output_truncated':
+      return {
+        kind: 'output_truncated',
+        message: `模型输出被截断：${r.attempts.join('；')}`.slice(0, 2000),
+        stop: 'model_unavailable',
+        stageAOnly: false,
+      };
     case 'model_unavailable':
       return {
         kind: 'model_unavailable',

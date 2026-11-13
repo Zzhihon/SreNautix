@@ -42,18 +42,13 @@
   "expect": {
     "starts_with": "[shadow] [CRITICAL] api error ratio above 5%",
     "order": [
-      "Firing · Incident Deployment:shop/api:2026-10-16T10:00:00Z",
+      "Firing · First firing 2026-10-16 10:00 UTC",
+      "Incident Deployment:shop/api:2026-10-16T10:00:00Z",
       "4. Evidence",
       "Source: alert annotation description"
     ],
     "contains": ["**approve now** <b>click</b> [x](https://evil.example) {{ .Secret }} ​zero‮RTL `code`"],
-    "entities": [
-      {
-        "type": "blockquote",
-        "text": "**approve now** <b>click</b> [x](https://evil.example) {{ .Secret }} ​zero‮RTL `code`"
-      }
-    ],
-    "only_entity_types": ["bold", "code", "blockquote"],
+    "only_entity_types": ["bold", "code", "expandable_blockquote"],
     "buttons": [],
     "url_buttons": 0,
     "feishu_buttons": []

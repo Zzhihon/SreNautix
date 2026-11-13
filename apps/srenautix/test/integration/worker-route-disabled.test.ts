@@ -84,7 +84,8 @@ afterAll(async () => {
   rmSync(ROOT, { recursive: true, force: true });
 });
 
-const banner = async (incidentId: string): Promise<string | null> => {
+/** 消息结论块的结论行：没有模型研判时写原因（ADR 0204） */
+const conclusion = async (incidentId: string): Promise<string | null> => {
   const source = new PgMessageSource(
     db.admin,
     {
@@ -103,7 +104,7 @@ const banner = async (incidentId: string): Promise<string | null> => {
     ),
   );
   const m = (await source.desired('zh')).find((x) => x.incidentId === incidentId);
-  return m?.message.banner ?? null;
+  return m?.message.brief?.[0]?.text ?? null;
 };
 
 describe('出站策略禁用模型路由', () => {
@@ -162,7 +163,9 @@ describe('出站策略禁用模型路由', () => {
       30_000,
     );
     expect(skipped.skip_reason).toBe('no_model_route');
-    expect(await banner(skipped.incident_id)).toBe('只出确定性报告：没有可用的模型路由（全部被出站策略禁用）');
+    expect(await conclusion(skipped.incident_id)).toContain(
+      '结论：没有模型研判 · 没有可用的模型路由（全部被出站策略禁用）',
+    );
 
     // 上报到达之前已入队的任务：worker 认领后不调用模型，记为只出阶段 A，原因写进研判记录与通知横幅
     const runId = randomUUID();
@@ -190,7 +193,9 @@ describe('出站策略禁用模型路由', () => {
     );
     expect(queue.rows[0]).toEqual({ state: 'done', skip_reason: 'stage_a_only' });
     // 横幅写失败类型在原因码登记表中的说明（ADR 0172），具体的路由与原因在研判记录里
-    expect(await banner(skipped.incident_id)).toBe('只出确定性报告：模型路由不可用（熔断，或全部被出站策略禁用）');
+    expect(await conclusion(skipped.incident_id)).toContain(
+      '结论：没有模型研判 · 模型路由不可用（熔断，或全部被出站策略禁用）',
+    );
     const calls = await db.admin.query<{ n: number }>('SELECT count(*)::int AS n FROM worker.llm_calls');
     expect(calls.rows[0]?.n).toBe(0);
     expect(model.received).toHaveLength(0);

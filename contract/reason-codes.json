@@ -250,6 +250,13 @@
       "text": { "zh-CN": "模型输出无效", "en": "model output invalid" }
     },
     {
+      "code": "output_truncated",
+      "stage": "research",
+      "level": "error",
+      "groups": ["research_failure"],
+      "text": { "zh-CN": "模型输出达到输出上限被截断", "en": "model output truncated at the output limit" }
+    },
+    {
       "code": "datasource",
       "stage": "research",
       "level": "error",
