@@ -96,6 +96,20 @@ export class WorkerMetrics extends BaseMetrics {
     registers: [this.registry],
   });
 
+  readonly routeBalance = new Gauge({
+    name: 'srenautix_llm_route_balance',
+    help: '路由账户的余额（服务方余额接口，每 10 分钟读取一次，ADR 0207），按币种',
+    labelNames: ['route', 'currency'] as const,
+    registers: [this.registry],
+  });
+
+  readonly routeBalanceCheck = new Gauge({
+    name: 'srenautix_llm_route_balance_check_success',
+    help: '最近一次读取路由账户余额是否成功（1 成功）',
+    labelNames: ['route'] as const,
+    registers: [this.registry],
+  });
+
   readonly budgetUsedRatio = new Gauge({
     name: 'srenautix_llm_budget_used_ratio',
     help: '已用 token 占上限的比例，scope=daily 为当天（UTC），scope=optimization 为主动优化用途的当天，scope=last_resort 为兜底路由合计的当天',

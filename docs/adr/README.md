@@ -154,3 +154,4 @@
 | [0204](0204-chat-first-screen-and-output-truncated.md) | 聊天消息的首屏只有五行；模型输出被截断单独记为失败原因 | 已采纳 | — |
 | [0205](0205-map-core-links-visual-encoding-replay.md) | 地图的核心链路、视觉编码与时间回放 | 已采纳 | [0206](0206-map-replay-change-track.md) |
 | [0206](0206-map-replay-change-track.md) | 地图回放的变更轨道 | 已采纳 | — |
+| [0207](0207-route-account-balance.md) | 读取模型路由的账户余额，按余额与消耗速度预警 | 已采纳 | — |
