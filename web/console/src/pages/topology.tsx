@@ -1,4 +1,4 @@
-// 拓扑（DESIGN §4.4、§12.2）：默认视图是全集群地图（ADR 0199），每 15 秒刷新事件，上方的时间轴回放最近 24 小时（ADR 0205）；覆盖表里未映射的告警可以直接生成覆盖规则的 gitops_pr 提议（批准后由 gateway
+// 拓扑（DESIGN §4.4、§12.2）：默认视图是全集群地图（ADR 0199），每 15 秒刷新事件，上方的时间轴回放最近 24 小时，变更画在事件下方并标在地图上（ADR 0205、0206）；覆盖表里未映射的告警可以直接生成覆盖规则的 gitops_pr 提议（批准后由 gateway
 // 只推送到 srenautix/* 分支并开 PR，从不合并）；邻域图每条边标注来源，中心组件与跳数放在 URL 里（ADR 0191、ADR 0197），
 // 覆盖表的组件链接到它的邻域；版本差异。
 
@@ -271,6 +271,7 @@ function MapView({ cluster, domain, at }: { cluster: string; domain?: string; at
         {(m) => (
           <ClusterMap
             map={m}
+            changes={timeline.data?.changes}
             clusterId={cluster}
             focusDomain={domain}
             primary

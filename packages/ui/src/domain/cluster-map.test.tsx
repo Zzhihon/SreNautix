@@ -12,6 +12,7 @@ import {
   MAP_FOLD_MIN,
   nameStem,
   packMap,
+  recentChanges,
   SINK_MIN_SERVICES,
   UNASSIGNED,
 } from './cluster-map-model';
@@ -276,6 +277,47 @@ describe('核心链路与组件角色（ADR 0205）', () => {
     expect(componentRole(comp(etcd(1), null, [], { kind: 'Pod' }), none, none)).toBe('node');
     expect(componentRole(comp(ING, null, []), new Set([ING]), none)).toBe('entry');
     expect(componentRole(comp(API, 'orders-api', []), none, none)).toBe('service');
+  });
+});
+
+describe('地图上的变更（ADR 0206）', () => {
+  const ch = (n: number, minutesBefore: number, components: string[]) => ({
+    change_id: `c${n}`,
+    kind: 'rollout' as const,
+    source: 'kubernetes',
+    time: new Date(Date.parse(map.at) - minutesBefore * 60_000).toISOString(),
+    summary: `rollout ${n}`,
+    link: null,
+    revision: null,
+    actor: null,
+    components,
+  });
+
+  it('只取所看时刻之前 1 小时内的变更，最新的在前；变更早于落在这里的事件时是嫌疑', () => {
+    // pg-down 在 12:50 首次触发，map.at 是 13:00
+    const r = recentChanges(
+      [ch(1, 30, [PG]), ch(2, 5, [PG, API]), ch(3, 90, [API]), ch(4, -5, [API])],
+      map.incidents,
+      Date.parse(map.at),
+    );
+    expect(r.byComponent.get(PG)?.map((c) => c.change_id)).toEqual(['c2', 'c1']);
+    expect(r.byComponent.get(API)?.map((c) => c.change_id)).toEqual(['c2']);
+    expect([...r.suspects]).toEqual([PG]);
+    // 变更晚于事件首次触发时不是嫌疑
+    expect([...recentChanges([ch(2, 5, [PG])], map.incidents, Date.parse(map.at)).suspects]).toEqual([]);
+  });
+
+  it('组件与节点条标出变更数，先变更、后出事件的加重；侧栏列出变更', async () => {
+    renderUi(<ClusterMap map={map} clusterId="prod" changes={[ch(1, 30, [PG]), ch(2, 5, ['Node:node-1'])]} />);
+    const pg = await screen.findByRole('group', { name: /^pg，/ });
+    const mark = within(pg).getByLabelText('所看时刻之前 1 小时内有 1 个变更，之后这里出了事件');
+    expect(mark.hasAttribute('data-suspect')).toBe(true);
+    const strip = screen.getByRole('list', { name: '节点' });
+    expect(within(strip).getByLabelText('所看时刻之前 1 小时内有 1 个变更')).toBeTruthy();
+    fireEvent.click(pg);
+    const panel = await screen.findByTestId('subgraph-panel');
+    expect(within(panel).getByText('之前 1 小时内的 1 个变更（之后这里出了事件）')).toBeTruthy();
+    expect(within(panel).getByText('rollout 1')).toBeTruthy();
   });
 });
 

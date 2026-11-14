@@ -1,0 +1,60 @@
+/* 地图上的变更列表（ADR 0206） */
+.list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 12px;
+}
+.item {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 6px;
+  align-items: baseline;
+  min-width: 0;
+}
+.time {
+  flex: none;
+  color: var(--sn-faint);
+  font-family: var(--sn-font-mono);
+  font-size: 11px;
+}
+.group {
+  flex: none;
+  padding: 0 5px;
+  border-radius: 4px;
+  font-size: 11px;
+  color: var(--sn-on-strong);
+  background: var(--sn-series-1);
+}
+.group[data-group='config'] {
+  background: var(--sn-series-7);
+}
+.group[data-group='capacity'] {
+  background: var(--sn-faint);
+}
+.group[data-group='other'] {
+  background: var(--sn-series-5);
+}
+.summary {
+  flex: 1 1 14em;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--sn-text);
+}
+.rev {
+  flex: none;
+  color: var(--sn-dim);
+  font-size: 10.5px;
+}
+.link {
+  flex: none;
+  color: var(--sn-info);
+}
+.more {
+  color: var(--sn-dim);
+}

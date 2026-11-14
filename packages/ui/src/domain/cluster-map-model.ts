@@ -3,7 +3,7 @@
 // 没有事件根因的组件合并（三个控制面节点上的同名静态 Pod、每次运行一个的 Workflow）。
 // 边分三档（ADR 0205）：核心链路（默认画出）、全部依赖（不低于 τ）、网络策略放行；组件按角色（入口、服务、数据、任务、静态 Pod）区分颜色。
 
-import type { ClusterMap } from '../contract';
+import type { ClusterMap, MapChange } from '../contract';
 
 type MapComponent = ClusterMap['components'][number];
 type MapIncident = ClusterMap['incidents'][number];
@@ -32,6 +32,54 @@ const SELF_TIER = 'self';
 export const UNASSIGNED = '';
 
 export type Tone = 'bad' | 'warn' | 'hit';
+
+/** 地图上标出的变更：所看时刻之前这么久之内的变更（ADR 0206） */
+export const CHANGE_WINDOW_MS = 60 * 60_000;
+/** 变更按用途分组，决定时间轴与地图上的颜色：发布、配置、容量（扩缩、cordon）、其他（退役等） */
+export type ChangeGroup = 'release' | 'config' | 'capacity' | 'other';
+export const CHANGE_GROUPS: readonly ChangeGroup[] = ['release', 'config', 'capacity', 'other'];
+const GROUP_OF: Record<MapChange['kind'], ChangeGroup> = {
+  rollout: 'release',
+  ci_deploy: 'release',
+  gitops_sync: 'release',
+  operator: 'release',
+  config: 'config',
+  runtime_config: 'config',
+  scale: 'capacity',
+  cordon: 'capacity',
+  retire: 'other',
+  other: 'other',
+};
+export const changeGroup = (kind: MapChange['kind']): ChangeGroup => GROUP_OF[kind];
+
+/**
+ * 时刻 at 之前 CHANGE_WINDOW_MS 之内的变更，按地图上的位置（组件键或节点键）分组，最新的在前。
+ * 同时找出"变更之后出了事件"的位置：变更早于落在这里的某个事件的首次触发
+ */
+export function recentChanges(
+  changes: readonly MapChange[],
+  incidents: readonly ClusterMap['incidents'][number][],
+  at: number,
+): { byComponent: ReadonlyMap<string, MapChange[]>; suspects: ReadonlySet<string> } {
+  const byComponent = new Map<string, MapChange[]>();
+  for (const c of changes) {
+    const t = Date.parse(c.time);
+    if (t > at || t <= at - CHANGE_WINDOW_MS) {
+      continue;
+    }
+    for (const k of c.components) {
+      byComponent.set(k, [c, ...(byComponent.get(k) ?? [])]);
+    }
+  }
+  const suspects = new Set<string>();
+  for (const i of incidents) {
+    const first = Date.parse(i.first_firing_at);
+    if (i.component && byComponent.get(i.component)?.some((c) => Date.parse(c.time) <= first)) {
+      suspects.add(i.component);
+    }
+  }
+  return { byComponent, suspects };
+}
 
 /** 边的种类，决定颜色与线型：declared 领域包声明，route 路由入口，reference 配置引用，allowed 网络策略放行 */
 export type EdgeKind = 'declared' | 'route' | 'reference' | 'allowed';

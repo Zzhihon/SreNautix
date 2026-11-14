@@ -6,7 +6,7 @@
 
 import { Handle, Position, ReactFlowProvider, useStore, type Node, type NodeProps } from '@xyflow/react';
 import { createContext, useCallback, useContext, useMemo, useState } from 'react';
-import type { ClusterMap as MapData } from '../contract';
+import type { ClusterMap as MapData, MapChange } from '../contract';
 import { AppLink, useUiEnv } from '../data';
 import { localizedText, useI18n } from '../i18n';
 import { EmptyState } from '../primitives/EmptyState';
@@ -18,6 +18,7 @@ import {
   EDGE_LEVELS,
   incidentOverlay,
   MERGE_CONFIDENCE,
+  recentChanges,
   shownAt,
   UNASSIGNED,
   worstTone,
@@ -30,6 +31,7 @@ import {
   type Placed,
   type Tone,
 } from './cluster-map-model';
+import { MapChangeList } from './MapChanges';
 import { canvasStyles, GraphCanvas, SidePanel, useCanvasView, viewAttrs, type CanvasEdge } from './GraphCanvas';
 
 type MapComponent = MapData['components'][number];
@@ -50,6 +52,10 @@ interface Overlay {
   /** 节点条上的 Kubernetes 节点（按节点键）的事件与状态 */
   hostIncidents: ReadonlyMap<string, MapIncident[]>;
   hostTone: ReadonlyMap<string, Tone>;
+  /** 画布节点与节点条上的节点在所看时刻之前 1 小时内的变更，最新的在前（ADR 0206） */
+  changes: ReadonlyMap<string, MapChange[]>;
+  /** 先变更、后出事件的画布节点与节点 */
+  suspects: ReadonlySet<string>;
 }
 const OverlayContext = createContext<Overlay>({
   tone: new Map(),
@@ -57,7 +63,26 @@ const OverlayContext = createContext<Overlay>({
   nodeTone: new Map(),
   hostIncidents: new Map(),
   hostTone: new Map(),
+  changes: new Map(),
+  suspects: new Set(),
 });
+
+/** 组件或节点上的变更标记：变更数；先变更、后出事件时加重 */
+function ChangeMark({ id }: { id: string }) {
+  const { t } = useI18n();
+  const o = useContext(OverlayContext);
+  const list = o.changes.get(id);
+  if (!list?.length) {
+    return null;
+  }
+  const suspect = o.suspects.has(id);
+  const label = t(suspect ? 'map.changed_before' : 'map.changed', { n: list.length });
+  return (
+    <span className={styles.changed} data-suspect={suspect ? '' : undefined} title={label} aria-label={label}>
+      ◆{list.length}
+    </span>
+  );
+}
 
 function BoxNode({ id, data }: NodeProps<Node<BoxData>>) {
   const { t } = useI18n();
@@ -104,6 +129,7 @@ function ItemNode({ id, data }: NodeProps<Node<ItemData>>) {
       ))}
       <div className={styles.name} title={folded ? undefined : it.members[0]?.key}>
         {folded ? `${it.name} × ${it.members.length}` : it.name}
+        <ChangeMark id={id} />
         {it.sinkServices !== undefined && (
           <span className={styles.sink} title={t('map.sink_title', { n: it.sinkServices })}>
             {t('map.sink', { n: it.sinkServices })}
@@ -216,13 +242,15 @@ export interface ClusterMapProps {
   focusDomain?: string;
   /** 画布是页面的主要内容：占满视口剩余的高度，普通滚轮直接缩放 */
   primary?: boolean;
+  /** 时间轴上的变更（ADR 0206）：地图标出所看时刻（map.at）之前 1 小时内的变更 */
+  changes?: readonly MapChange[];
 }
 
 /** 结构的指纹：拓扑版本、组件与归属、边；事件不在其中 */
 const structureKey = (m: MapData) =>
   [m.topology_version, m.components.map((c) => `${c.key}=${c.service ?? ''}`).join(','), m.edges.length].join('|');
 
-export function ClusterMap({ map, clusterId, onOpenComponent, focusDomain, primary }: ClusterMapProps) {
+export function ClusterMap({ map, clusterId, onOpenComponent, focusDomain, primary, changes }: ClusterMapProps) {
   const { t, locale } = useI18n();
   // 结构只在指纹变化时换新：轮询拿到的新对象不会触发重新布局
   const [structure, setStructure] = useState(map);
@@ -300,8 +328,30 @@ export function ClusterMap({ map, clusterId, onOpenComponent, focusDomain, prima
         nodeTone.set(d.id, dt);
       }
     }
-    return { tone: overlay.tone, incidents, nodeTone, hostIncidents: overlay.byNode, hostTone: overlay.nodeTone };
-  }, [model, overlay]);
+    // 变更按组件键给出，合并的组取全部成员的；节点键原样留给节点条
+    const recent = recentChanges(changes ?? [], map.incidents, Date.parse(map.at));
+    const changed = new Map<string, MapChange[]>();
+    const suspects = new Set<string>();
+    for (const [key, list] of recent.byComponent) {
+      const id = model.nodeOf.get(key) ?? key;
+      changed.set(
+        id,
+        [...(changed.get(id) ?? []), ...list].sort((a, b) => b.time.localeCompare(a.time)),
+      );
+      if (recent.suspects.has(key)) {
+        suspects.add(id);
+      }
+    }
+    return {
+      tone: overlay.tone,
+      incidents,
+      nodeTone,
+      hostIncidents: overlay.byNode,
+      hostTone: overlay.nodeTone,
+      changes: changed,
+      suspects,
+    };
+  }, [model, overlay, changes, map.incidents, map.at]);
 
   // 画出档位以内的边与事件的传播路径（两端都是根因或受影响的组件，沿 BLAST_MIN_CONFIDENCE 以上的边）；指向或选中组件时
   // 再画出它不低于 τ 的边。只被网络策略放行的边只在"网络放行"档画出（ADR 0199 §4、ADR 0205）
@@ -506,6 +556,7 @@ function Footer({
                 {o.hostIncidents.get(n.key)!.length}
               </b>
             )}
+            <ChangeMark id={n.key} />
           </span>
         ))}
       </div>
@@ -556,6 +607,16 @@ function Footer({
         <span>
           <i data-fold="" />
           {t('map.legend.fold')}
+        </span>
+        <span>
+          <b className={styles.changed}>◆</b>
+          {t('map.legend.changed')}
+        </span>
+        <span>
+          <b className={styles.changed} data-suspect="">
+            ◆
+          </b>
+          {t('map.legend.changed_before')}
         </span>
         {o.tone.size === 0 && <span>{t('map.none_firing')}</span>}
       </div>
@@ -665,6 +726,16 @@ function ItemPanel({
         <p className={canvasStyles.none}>
           {o.tone.get(c.key) === 'hit' ? t('map.panel.hit') : t('map.panel.no_incidents')}
         </p>
+      )}
+      {(o.changes.get(id)?.length ?? 0) > 0 && (
+        <>
+          <h4 className={canvasStyles.panelSub}>
+            {t(o.suspects.has(id) ? 'map.panel.changes_before' : 'map.panel.changes', {
+              n: o.changes.get(id)!.length,
+            })}
+          </h4>
+          <MapChangeList changes={o.changes.get(id)!} limit={8} />
+        </>
       )}
       {folded ? (
         <>
