@@ -94,7 +94,7 @@
 | [0141](0141-access-edges-stop-at-the-accessed-component.md) | 访问边只到被访问的组件为止：失败的迁移 Job 不经数据库的 Pod 并入节点告警 | 已采纳 | [0142](0142-late-and-no-op-changes-issue-titles-research-reason.md) |
 | [0142](0142-late-and-no-op-changes-issue-titles-research-reason.md) | 没有改动、晚于症状的变更不参与根因排序；issue 标题跟随事件；研判镜像的原因取自队列 | 已采纳 | [0151](0151-sql-audit-change-source.md) [0169](0169-change-link-grades.md) |
 | [0143](0143-pack-revision-rolls-server-and-worker.md) | 用户包变化时滚动更新：由 GitOps 侧填写的 packs.revision | 已采纳 | [0181](0181-hot-pluggable-skills.md) |
-| [0144](0144-point-in-time-topology-queries.md) | 时间点拓扑查询按索引取、子图逐跳取、并发合并与缓存；拓扑历史按保留期压缩 | 已采纳 | [0146](0146-goal-driven-optimization.md) [0150](0150-external-upstream-impact-relevance.md) [0182](0182-urgency-tiered-incidents.md) |
+| [0144](0144-point-in-time-topology-queries.md) | 时间点拓扑查询按索引取、子图逐跳取、并发合并与缓存；拓扑历史按保留期压缩 | 已采纳 | [0146](0146-goal-driven-optimization.md) [0150](0150-external-upstream-impact-relevance.md) [0182](0182-urgency-tiered-incidents.md) [0205](0205-map-core-links-visual-encoding-replay.md) |
 | [0145](0145-telegram-entity-size-budget.md) | Telegram 消息按实体总大小分配链接 | 已采纳 | [0148](0148-business-signals-in-incident-messages.md) |
 | [0146](0146-goal-driven-optimization.md) | 目标驱动的主动优化：目标、领域体检与趋势触发，业务 issue 与 ops PR | 已采纳 | [0153](0153-evidence-baseline-and-minimum-evidence.md) [0162](0162-disposition-act-on-declared-components.md) [0171](0171-coverage-gaps-become-issues.md) [0181](0181-hot-pluggable-skills.md) [0182](0182-urgency-tiered-incidents.md) [0193](0193-business-domains-and-services.md) |
 | [0147](0147-external-upstream-digest.md) | 外部上游的事件按周期汇总，不逐条推送、不开 issue | 已采纳 | [0150](0150-external-upstream-impact-relevance.md) [0155](0155-remediation-change-dedupe-and-alert-facts.md) [0159](0159-incident-timing-onset-and-first-message-latency.md) [0182](0182-urgency-tiered-incidents.md) |
@@ -146,9 +146,10 @@
 | [0196](0196-series-key-stays-on-root-component.md) | 系列键保持根因组件加告警名，不改用服务 | 已采纳 | — |
 | [0197](0197-subgraph-large-graph-browsing.md) | 组件多的子图：滚轮缩放、同类合并、突出与查找 | 已采纳 | [0199](0199-cluster-map.md) |
 | [0198](0198-evidence-chain-view.md) | 证据标签页：按论证分组的证据链 | 已采纳 | — |
-| [0199](0199-cluster-map.md) | 全集群地图 | 已采纳 | [0200](0200-policy-allowed-and-declared-dependencies.md) [0203](0203-pdb-protects-and-map-placement.md) |
+| [0199](0199-cluster-map.md) | 全集群地图 | 已采纳 | [0200](0200-policy-allowed-and-declared-dependencies.md) [0203](0203-pdb-protects-and-map-placement.md) [0205](0205-map-core-links-visual-encoding-replay.md) |
 | [0200](0200-policy-allowed-and-declared-dependencies.md) | 网络策略放行的边与领域包声明的依赖 | 已采纳 | [0203](0203-pdb-protects-and-map-placement.md) |
 | [0201](0201-anthropic-messages-routes.md) | Anthropic Messages API 路由 | 已采纳 | — |
 | [0202](0202-probe-before-failure-domain-prebreak.md) | 故障域提前熔断前先发一次探测调用 | 已采纳 | — |
 | [0203](0203-pdb-protects-and-map-placement.md) | PodDisruptionBudget 的保护边与事件在地图上的落点 | 已采纳 | — |
 | [0204](0204-chat-first-screen-and-output-truncated.md) | 聊天消息的首屏只有五行；模型输出被截断单独记为失败原因 | 已采纳 | — |
+| [0205](0205-map-core-links-visual-encoding-replay.md) | 地图的核心链路、视觉编码与时间回放 | 已采纳 | — |

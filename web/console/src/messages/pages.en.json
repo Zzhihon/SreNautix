@@ -96,6 +96,7 @@
   "topology.views.map": "Cluster map",
   "topology.map_meta": "Topology version {v} · {n} firing incidents",
   "topology.map_failed": "Failed to load the cluster map",
+  "topology.replay_failed": "Failed to load the replay timeline; the map still shows now",
   "topology.views.coverage": "Coverage",
   "topology.views.neighborhood": "Neighbourhood",
   "topology.views.diff": "Version diff",

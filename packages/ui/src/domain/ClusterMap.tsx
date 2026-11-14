@@ -1,6 +1,6 @@
 // 全集群地图（ADR 0199）：GET /v1/topology/map 画成 业务领域 → 服务 → 组件 的嵌套框。
-// 正在触发的事件叠加在组件上：根因按严重度着色，依赖根因的组件标为受影响，框的标题写事件数。依赖边默认只画事件的传播路径，
-// 其余在指向或选中组件、或打开"全部依赖"时画出。排布是确定的（packMap），不用 elkjs。画布交互在 GraphCanvas；
+// 正在触发的事件叠加在组件上：根因按严重度着色，依赖根因的组件标为受影响，框的标题写事件数。边默认只画核心链路与事件的传播路径，
+// "全部依赖""网络放行"两档画出更多（ADR 0205）；组件按角色着色，边按种类着色。排布是确定的（packMap），不用 elkjs。画布交互在 GraphCanvas；
 // 下方的节点条列出节点，指向组件时标出它所在的节点，指向节点时只突出上面的组件。双击组件交给宿主打开它的邻域。
 // 结构（组件、边、归属）只在拓扑版本或归属变化时重新布局；事件经 context 更新，节点对象不变。
 
@@ -13,25 +13,31 @@ import { EmptyState } from '../primitives/EmptyState';
 import { Mono } from '../primitives/basic';
 import styles from './ClusterMap.module.css';
 import {
+  BLAST_MIN_CONFIDENCE,
   buildMapModel,
+  EDGE_LEVELS,
   incidentOverlay,
+  MERGE_CONFIDENCE,
+  shownAt,
   UNASSIGNED,
   worstTone,
+  type ComponentRole,
+  type EdgeKind,
+  type EdgeLevel,
   type MapModel,
   packMap,
   type MapNodeItem,
+  type Placed,
   type Tone,
 } from './cluster-map-model';
 import { canvasStyles, GraphCanvas, SidePanel, useCanvasView, viewAttrs, type CanvasEdge } from './GraphCanvas';
 
 type MapComponent = MapData['components'][number];
 type MapIncident = MapData['incidents'][number];
-type BoxData = { box: 'domain' | 'service'; title: string; item?: undefined };
+type BoxData = { box: 'domain' | 'service'; title: string; tier?: string; item?: undefined };
 type ItemData = { item: MapNodeItem; box?: undefined };
 type MapNode = Node<BoxData | ItemData>;
 
-/** 归并阈值 τ：低于它的边只说明流量被放行（ADR 0200） */
-const MERGE_CONFIDENCE = 0.6;
 /** 缩放到这个值以下只显示组件名称（领域层） */
 const DETAIL_ZOOM = 0.45;
 
@@ -61,12 +67,15 @@ function BoxNode({ id, data }: NodeProps<Node<BoxData>>) {
   const zoom = useStore((s) => s.transform[2]);
   const scale = data.box === 'domain' && zoom < 1 ? Math.min(1 / zoom, 4) : 1;
   return (
-    <div className={styles.box} data-box={data.box} data-tone={o.nodeTone.get(id)}>
+    <div className={styles.box} data-box={data.box} data-tier={data.tier} data-tone={o.nodeTone.get(id)}>
       <div
         className={styles.boxHead}
         style={scale > 1 ? { fontSize: `${13 * scale}px`, transform: `translateY(${-(scale - 1) * 12}px)` } : undefined}
       >
-        <span className={styles.boxTitle}>{data.title}</span>
+        <span className={styles.boxTitle}>
+          {data.tier && <span className={styles.tier}>{t(`map.tier.${data.tier}`)}</span>}
+          {data.title}
+        </span>
         {n > 0 && <span className={styles.boxCount}>{t('map.firing', { n })}</span>}
       </div>
     </div>
@@ -87,32 +96,84 @@ function ItemNode({ id, data }: NodeProps<Node<ItemData>>) {
       data-tone={tone}
       data-fold={folded ? '' : undefined}
       data-src={!folded && it.members[0]?.service_source === 'namespace' ? 'namespace' : undefined}
+      data-role={it.role}
       {...viewAttrs(view, id)}
     >
-      <Handle type="target" position={Position.Left} className={styles.handle} />
+      {SIDES.map((side) => (
+        <Handle key={`t${side}`} id={`t${side}`} type="target" position={side} className={styles.handle} />
+      ))}
       <div className={styles.name} title={folded ? undefined : it.members[0]?.key}>
         {folded ? `${it.name} × ${it.members.length}` : it.name}
+        {it.sinkServices !== undefined && (
+          <span className={styles.sink} title={t('map.sink_title', { n: it.sinkServices })}>
+            {t('map.sink', { n: it.sinkServices })}
+          </span>
+        )}
       </div>
       {detail && (
         <div className={styles.sub}>
-          {[it.kind.split('.')[0], it.namespace].filter(Boolean).join(' · ')}
+          {[t(`map.role.${it.role}`), it.kind.split('.')[0], it.namespace].filter(Boolean).join(' · ')}
           {tone && ` · ${t(`map.tone.${tone}`)}`}
         </div>
       )}
-      <Handle type="source" position={Position.Right} className={styles.handle} />
+      {SIDES.map((side) => (
+        <Handle key={`s${side}`} id={`s${side}`} type="source" position={side} className={styles.handle} />
+      ))}
     </div>
   );
 }
 
 const nodeTypes = { box: BoxNode, item: ItemNode };
+const SIDES = [Position.Left, Position.Right, Position.Top, Position.Bottom] as const;
+
+/**
+ * 边从哪一侧出、进哪一侧：按两个组件中心的相对位置，左右错开为主时走左右两侧，上下为主时走上下两侧。
+ * 同一列里上下排着的组件之间的边不再绕到右侧再折回左侧（ADR 0205）
+ */
+export function edgeSides(placed: ReadonlyMap<string, Placed>, from: string, to: string) {
+  const center = (id: string) => {
+    let p = placed.get(id);
+    let x = (p?.w ?? 0) / 2;
+    let y = (p?.h ?? 0) / 2;
+    while (p) {
+      x += p.x;
+      y += p.y;
+      p = p.parent ? placed.get(p.parent) : undefined;
+    }
+    return { x, y };
+  };
+  const a = center(from);
+  const b = center(to);
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const [s, t] =
+    Math.abs(dx) > Math.abs(dy)
+      ? dx > 0
+        ? [Position.Right, Position.Left]
+        : [Position.Left, Position.Right]
+      : dy > 0
+        ? [Position.Bottom, Position.Top]
+        : [Position.Top, Position.Bottom];
+  return { sourceHandle: `s${s}`, targetHandle: `t${t}` };
+}
+const ROLES: readonly ComponentRole[] = ['entry', 'service', 'data', 'batch', 'node'];
+const EDGE_KINDS: readonly EdgeKind[] = ['declared', 'route', 'reference', 'allowed'];
+/** 边的种类决定颜色与线型 */
+const EDGE_CLASS: Record<EdgeKind, string | undefined> = {
+  declared: styles.edgeDeclared,
+  route: styles.edgeRoute,
+  reference: styles.edgeReference,
+  allowed: styles.edgeAllowed,
+};
 
 /** 画布节点：领域框、服务框（父节点在前）与组件，位置来自 packMap */
 export function mapNodes(
   model: MapModel,
+  placed: ReadonlyMap<string, Placed>,
   title: (boxId: string) => string,
   tierOf: (d: string) => string | undefined,
 ): MapNode[] {
-  const placed = packMap(model, tierOf);
+  // 领域框标出档次（核心、支撑、底座、运维自身），核心领域的框底色更深，值班的人先看到业务链路
   const out: MapNode[] = [];
   const at = (id: string) => {
     const p = placed.get(id)!;
@@ -124,7 +185,7 @@ export function mapNodes(
       id: d.id,
       type: 'box',
       ...at(d.id),
-      data: { box: 'domain', title: title(d.id) },
+      data: { box: 'domain', title: title(d.id), tier: d.domain === UNASSIGNED ? undefined : tierOf(d.domain) },
       style: { pointerEvents: 'none' },
       zIndex: -2,
     });
@@ -204,8 +265,9 @@ export function ClusterMap({ map, clusterId, onOpenComponent, focusDomain, prima
     [structure, t, locale],
   );
   const tierOf = useCallback((d: string) => structure.domains.find((x) => x.id === d)?.tier, [structure]);
-  const nodes = useMemo(() => mapNodes(model, title, tierOf), [model, title, tierOf]);
-  const [allEdges, setAllEdges] = useState(false);
+  const placed = useMemo(() => packMap(model, tierOf), [model, tierOf]);
+  const nodes = useMemo(() => mapNodes(model, placed, title, tierOf), [model, placed, title, tierOf]);
+  const [level, setLevel] = useState<EdgeLevel>('core');
 
   const ctx = useMemo<Overlay>(() => {
     const incidents = new Map<string, MapIncident[]>();
@@ -241,20 +303,25 @@ export function ClusterMap({ map, clusterId, onOpenComponent, focusDomain, prima
     return { tone: overlay.tone, incidents, nodeTone, hostIncidents: overlay.byNode, hostTone: overlay.nodeTone };
   }, [model, overlay]);
 
-  // 依赖边默认只画事件的传播路径（两端都是根因或受影响的组件），其余在指向或选中组件时才画（ADR 0199 §4）
+  // 画出档位以内的边与事件的传播路径（两端都是根因或受影响的组件，沿 BLAST_MIN_CONFIDENCE 以上的边）；指向或选中组件时
+  // 再画出它不低于 τ 的边。只被网络策略放行的边只在"网络放行"档画出（ADR 0199 §4、ADR 0205）
   const edges = useMemo<CanvasEdge[]>(() => {
     const tone = (id: string) => ctx.nodeTone.get(id);
-    return model.edges.map((e, i) => {
-      const path = Boolean(tone(e.from) && tone(e.to));
-      return {
-        id: `e${i}`,
-        source: e.from,
-        target: e.to,
-        className: path ? styles.path : undefined,
-        data: { quiet: !allEdges && !path },
-      };
-    });
-  }, [model, ctx, allEdges]);
+    const reach: EdgeLevel = level === 'allowed' ? 'allowed' : 'deps';
+    return model.edges
+      .filter((e) => shownAt(e.level, reach))
+      .map((e, i) => {
+        const path = Boolean(tone(e.from) && tone(e.to)) && e.confidence >= BLAST_MIN_CONFIDENCE;
+        return {
+          id: `e${i}`,
+          source: e.from,
+          target: e.to,
+          ...edgeSides(placed, e.from, e.to),
+          className: [EDGE_CLASS[e.kind], path && styles.path].filter(Boolean).join(' '),
+          data: { quiet: !path && !shownAt(e.level, level) },
+        };
+      });
+  }, [model, placed, ctx, level]);
 
   const [hoverNode, setHoverNode] = useState<string | null>(null);
   const highlight = useMemo(() => {
@@ -341,14 +408,20 @@ export function ClusterMap({ map, clusterId, onOpenComponent, focusDomain, prima
                   {t('subgraph.fold')}
                 </button>
               )}
-              <button
-                type="button"
-                className={canvasStyles.tool}
-                aria-pressed={allEdges}
-                onClick={() => setAllEdges(!allEdges)}
-              >
-                {t('map.all_edges')}
-              </button>
+              <span role="group" aria-label={t('map.edges_level')} className={styles.levels}>
+                {EDGE_LEVELS.map((l) => (
+                  <button
+                    key={l}
+                    type="button"
+                    className={canvasStyles.tool}
+                    aria-pressed={level === l}
+                    title={t(`map.level_hint.${l}`)}
+                    onClick={() => setLevel(l)}
+                  >
+                    {t(`map.level.${l}`)}
+                  </button>
+                ))}
+              </span>
               <button
                 type="button"
                 className={canvasStyles.tool}
@@ -485,6 +558,22 @@ function Footer({
           {t('map.legend.fold')}
         </span>
         {o.tone.size === 0 && <span>{t('map.none_firing')}</span>}
+      </div>
+      <div className={styles.legend} aria-hidden="true">
+        {ROLES.map((r) => (
+          <span key={r}>
+            <i data-role={r} />
+            {t(`map.role.${r}`)}
+          </span>
+        ))}
+        {EDGE_KINDS.map((k) => (
+          <span key={k}>
+            <svg className={styles.legendEdge} data-kind={k} viewBox="0 0 22 6" width="22" height="6">
+              <line x1="0" y1="3" x2="22" y2="3" />
+            </svg>
+            {t(`map.edge_kind.${k}`)}
+          </span>
+        ))}
       </div>
     </div>
   );

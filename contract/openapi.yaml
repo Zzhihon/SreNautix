@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: SreNautix hub API
-  version: 2.65.0
+  version: 2.66.0
   license:
     name: Apache-2.0
     identifier: Apache-2.0
@@ -1741,6 +1741,28 @@ paths:
         '200':
           description: 集群地图
           content: { application/json: { schema: { $ref: '#/components/schemas/ClusterMap' } } }
+  /v1/topology/map/timeline:
+    get:
+      tags: [topology]
+      operationId: getClusterMapTimeline
+      description: |
+        地图回放的时间轴（契约 2.66.0，ADR 0205）：[from, to) 之间触发过的事件与它们的触发区间，作用域与过滤和 getClusterMap 相同
+        （没有合并、没有被抑制、调用方读取作用域内）。某一刻的地图用 getClusterMap 的 at 取；区间不超过 7 天，最多 2000 个事件，按首次触发排序
+      x-srenautix-roles: [viewer, responder, approver, auditor, admin]
+      x-srenautix-external: false
+      parameters:
+        - {
+            name: cluster_id,
+            in: query,
+            required: true,
+            schema: { $ref: './schemas/common.schema.json#/$defs/ClusterId' },
+          }
+        - { name: from, in: query, required: true, schema: { type: string, format: date-time } }
+        - { name: to, in: query, description: 不写时为现在, schema: { type: string, format: date-time } }
+      responses:
+        '200':
+          description: 时间轴
+          content: { application/json: { schema: { $ref: '#/components/schemas/ClusterMapTimeline' } } }
   /v1/topology/diff:
     get:
       tags: [topology]
@@ -2870,6 +2892,30 @@ components:
                   protects 根因是 PodDisruptionBudget，放到它保护的组件；node 根因是节点，放到节点条。component 为 null 时为 null。
                   只有 root 与 named 的事件向依赖它的组件传播“受影响”：PDB 阻塞驱逐与节点问题不说明组件本身出了问题
                 oneOf: [{ type: 'null' }, { type: string, enum: [root, named, protects, node] }]
+              service:
+                oneOf: [{ type: 'null' }, { $ref: './schemas/common.schema.json#/$defs/ServiceId' }]
+    ClusterMapTimeline:
+      type: object
+      additionalProperties: false
+      required: [from, to, truncated, incidents]
+      properties:
+        from: { type: string, format: date-time }
+        to: { type: string, format: date-time }
+        truncated: { type: boolean, description: 事件超过 2000 个，只返回最早触发的 2000 个 }
+        incidents:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [incident_id, label, severity, first_firing_at, ended_at, service]
+            properties:
+              incident_id: { $ref: './schemas/common.schema.json#/$defs/Uuid' }
+              label: { $ref: './schemas/incident.schema.json#/$defs/IncidentLabel' }
+              severity: { $ref: './schemas/common.schema.json#/$defs/Severity' }
+              first_firing_at: { type: string, format: date-time }
+              ended_at:
+                description: 恢复的时刻；仍在触发时为 null
+                oneOf: [{ type: 'null' }, { type: string, format: date-time }]
               service:
                 oneOf: [{ type: 'null' }, { $ref: './schemas/common.schema.json#/$defs/ServiceId' }]
     ProposalDetail:
