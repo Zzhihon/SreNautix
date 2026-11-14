@@ -332,3 +332,18 @@
   stroke-dasharray: 5 3;
   opacity: 1;
 }
+
+/* 所看时刻之前 1 小时内的变更（ADR 0206）；先变更、后出事件时用状态色加重 */
+.changed {
+  margin-left: 6px;
+  padding: 0 4px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--sn-info);
+  background: var(--sn-info-soft);
+}
+.changed[data-suspect] {
+  color: var(--sn-on-strong);
+  background: var(--sn-bad);
+}

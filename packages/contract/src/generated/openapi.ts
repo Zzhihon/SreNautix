@@ -1658,7 +1658,8 @@ export type paths = {
     };
     /**
      * @description 地图回放的时间轴（契约 2.66.0，ADR 0205）：[from, to) 之间触发过的事件与它们的触发区间，作用域与过滤和 getClusterMap 相同
-     *     （没有合并、没有被抑制、调用方读取作用域内）。某一刻的地图用 getClusterMap 的 at 取；区间不超过 7 天，最多 2000 个事件，按首次触发排序
+     *     （没有合并、没有被抑制、调用方读取作用域内）。某一刻的地图用 getClusterMap 的 at 取；区间不超过 7 天，最多 2000 个事件，按首次触发排序。
+     *     变更（契约 2.67.0，ADR 0206）：区间里的变更，与事件引擎关联变更用同一个定义，只返回调用方读取作用域内至少一个目标的变更
      */
     get: operations['getClusterMapTimeline'];
     put?: never;
@@ -2568,6 +2569,40 @@ export type components = {
       topology_version: number;
     };
     ClusterMapTimeline: {
+      /** @description 区间里的变更，按时间排序 */
+      changes: {
+        actor: string | null;
+        change_id: string;
+        /** @description 变更的目标放到现在的地图上：组件的键，或节点条上的节点键（cordon）；目标不在地图上时为空 */
+        components: components['schemas']['ComponentKey'][];
+        /**
+         * @description 与 changes/v1 的 ChangeEvent.kind 相同
+         * @enum {string}
+         */
+        kind:
+          | 'rollout'
+          | 'config'
+          | 'cordon'
+          | 'scale'
+          | 'gitops_sync'
+          | 'ci_deploy'
+          | 'operator'
+          | 'runtime_config'
+          | 'retire'
+          | 'other';
+        link: string | null;
+        revision: string | null;
+        source: string;
+        /** @description 不可信文本，只作为文本显示 */
+        summary: string;
+        /** Format: date-time */
+        time: string;
+      }[];
+      /**
+       * @description truncated 变更超过 2000 个，只返回最近的 2000 个；unavailable 读取变更失败，changes 为空
+       * @enum {string}
+       */
+      changes_status: 'ok' | 'truncated' | 'unavailable';
       /** Format: date-time */
       from: string;
       incidents: {

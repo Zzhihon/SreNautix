@@ -1,10 +1,11 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
-import type { Condition, HubComponents, Proposal } from '@srenautix/contract';
+import type { ChangeEvent, Condition, HubComponents, Proposal } from '@srenautix/contract';
 import { clusterMap, mapPlacer, type ClusterMapStructure } from '@srenautix/core';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type pg from 'pg';
 import { z } from 'zod';
 import { badRequest, HttpError, notFound } from '../kernel/errors.js';
+import { logger } from '../kernel/log.js';
 import type { ServerConfig } from '../config/server.js';
 import type { Auth } from '../identity/auth.js';
 import { ROLE_PERMISSIONS, scopeMatches, tierCeiling } from '../identity/bindings.js';
@@ -19,7 +20,7 @@ import type { GitHubApp } from '../github/app.js';
 import type { IssueService } from '../github/issues.js';
 import { approverFromSession } from '../api/routes-proposals.js';
 import { currentBinding, type IncidentRow } from '../incident/read.js';
-import { incidentTarget, visible } from '../incident/target.js';
+import { componentTarget, incidentTarget, visible } from '../incident/target.js';
 import { planOverridePr } from '../topology/override-pr.js';
 import { overrideSchema } from '../topology/overrides.js';
 import type { IntegrationRegistry } from './integrations.js';
@@ -47,6 +48,8 @@ export interface SystemRouteDeps {
   github: GitHubApp | null;
   /** 事件 issue（issues.enabled）；关闭时为 null */
   issues: IssueService | null;
+  /** 时间窗口里的变更：与事件引擎关联变更用同一个定义（变更源、拓扑推导的发布、退役与待同步的提交） */
+  changesIn: (clusterId: string, from: Date, to: Date) => Promise<ChangeEvent[]>;
 }
 
 /** contract/openapi.yaml 的 createTopologyOverridePr 请求体 */
@@ -60,6 +63,9 @@ const fmt = (d: Date | null | undefined) => (d ? d.toISOString() : null);
 /** 地图回放时间轴（ADR 0205）的区间上限与事件数上限：拓扑历史保留 14 天（topology.history_retention），回放看最近 7 天以内 */
 const TIMELINE_MAX_SPAN_MS = 7 * 24 * 3600_000;
 const TIMELINE_MAX_INCIDENTS = 2000;
+/** 时间轴上的变更数上限；同一 (集群, 区间) 的变更缓存 60 秒，控制台每分钟取一次时间轴 */
+const TIMELINE_MAX_CHANGES = 2000;
+const TIMELINE_CHANGES_TTL_MS = 60_000;
 
 /** 控制台创建的 API token：外部调用方，只能提议（DESIGN §9.3），动作与命名空间不限，每小时 60 个提议。 */
 export async function apiTokenCaller(pool: pg.Pool, token: string): Promise<ServiceCaller | null> {
@@ -442,6 +448,21 @@ export function registerSystemRoutes(app: FastifyInstance, d: SystemRouteDeps): 
   // 事件每次重新读取：那一刻正在触发、没有被抑制、调用方读取作用域内的事件，根因经内存里的拓扑放到地图的组件或节点上（mapPlacer，ADR 0203）
   type Built = { value: ClusterMapStructure; place: ReturnType<typeof mapPlacer> };
   const maps = new Map<string, { version: number; packs: object; built: Built }>();
+  /** 某一刻的地图结构与落点函数；at 为 null 时是现在，按集群缓存 */
+  const mapAt = async (cluster: string, at: Date | null): Promise<Built> => {
+    const snapshot = await d.topology.at(cluster, at ?? new Date());
+    const packs = d.packs.set;
+    const cached = at ? undefined : maps.get(cluster);
+    if (cached?.version === snapshot.version && cached.packs === packs) {
+      return cached.built;
+    }
+    const value = clusterMap(snapshot, packs.services, d.packs.componentTypes());
+    const built = { value, place: mapPlacer(snapshot, value) };
+    if (!at) {
+      maps.set(cluster, { version: snapshot.version, packs, built });
+    }
+    return built;
+  };
   app.get('/v1/topology/map', async (req) => {
     const { scopes } = await d.auth.reader(req);
     const q = req.query as { cluster_id?: string; at?: string };
@@ -450,18 +471,7 @@ export function registerSystemRoutes(app: FastifyInstance, d: SystemRouteDeps): 
     if (Number.isNaN(at.getTime())) {
       throw badRequest('at 不是合法的时刻');
     }
-    const snapshot = await d.topology.at(cluster, at);
-    const packs = d.packs.set;
-    const cached = q.at ? undefined : maps.get(cluster);
-    let built = cached?.version === snapshot.version && cached.packs === packs ? cached.built : undefined;
-    if (!built) {
-      const value = clusterMap(snapshot, packs.services, d.packs.componentTypes());
-      built = { value, place: mapPlacer(snapshot, value) };
-      if (!q.at) {
-        maps.set(cluster, { version: snapshot.version, packs, built });
-      }
-    }
-    const { value: structure, place } = built;
+    const { value: structure, place } = await mapAt(cluster, q.at ? at : null);
     const rows = await d.pool.query<IncidentRow>(
       `SELECT * FROM server.incidents
         WHERE cluster_id = $1 AND state <> 'merged' AND NOT suppressed
@@ -491,7 +501,27 @@ export function registerSystemRoutes(app: FastifyInstance, d: SystemRouteDeps): 
     return { ...structure, at: at.toISOString(), incidents };
   });
 
-  // 地图回放的时间轴（ADR 0205）：区间里触发过的事件与触发区间，过滤与地图相同；某一刻的地图由 /v1/topology/map?at 取
+  // 时间轴上的变更（ADR 0206）：同一 (集群, 区间) 60 秒内只算一次；24 小时的发布推导要扫当天的拓扑事件
+  const timelineChanges = new Map<string, { expires: number; value: Promise<ChangeEvent[]> }>();
+  const changesFor = (cluster: string, from: Date, to: Date) => {
+    const key = `${cluster}|${from.getTime()}|${Math.floor(to.getTime() / 60_000)}`;
+    const now = Date.now();
+    for (const [k, v] of timelineChanges) {
+      if (v.expires <= now) {
+        timelineChanges.delete(k);
+      }
+    }
+    let hit = timelineChanges.get(key);
+    if (!hit) {
+      hit = { expires: now + TIMELINE_CHANGES_TTL_MS, value: d.changesIn(cluster, from, to) };
+      hit.value.catch(() => timelineChanges.delete(key));
+      timelineChanges.set(key, hit);
+    }
+    return hit.value;
+  };
+
+  // 地图回放的时间轴（ADR 0205）：区间里触发过的事件与触发区间，过滤与地图相同；某一刻的地图由 /v1/topology/map?at 取。
+  // 变更（ADR 0206）：区间里的变更与它触及的地图组件（按现在的地图放置），调用方读取作用域内至少一个目标的变更
   app.get('/v1/topology/map/timeline', async (req) => {
     const { scopes } = await d.auth.reader(req);
     const q = req.query as { cluster_id?: string; from?: string; to?: string };
@@ -512,10 +542,35 @@ export function registerSystemRoutes(app: FastifyInstance, d: SystemRouteDeps): 
       [cluster, from, to, TIMELINE_MAX_INCIDENTS + 1],
     );
     const shown = rows.rows.filter((r) => visible(scopes, incidentTarget(r.body)));
+    let changes: HubComponents['schemas']['ClusterMapTimeline']['changes'] = [];
+    let changesStatus: HubComponents['schemas']['ClusterMapTimeline']['changes_status'];
+    try {
+      const [all, { place }] = await Promise.all([changesFor(cluster, from, to), mapAt(cluster, null)]);
+      const seen = all.filter((c) => c.targets.some((k) => visible(scopes, componentTarget(cluster, k))));
+      changesStatus = seen.length > TIMELINE_MAX_CHANGES ? 'truncated' : 'ok';
+      changes = seen.slice(-TIMELINE_MAX_CHANGES).map((c) => ({
+        change_id: c.change_id,
+        kind: c.kind,
+        source: c.source,
+        time: c.time,
+        summary: c.summary,
+        link: c.link,
+        revision: c.revision,
+        actor: c.actor,
+        components: [
+          ...new Set(c.targets.map((k) => place(k, null)?.component).filter((k): k is string => Boolean(k))),
+        ].sort(),
+      }));
+    } catch (e) {
+      logger.warn('时间轴读取变更失败', { error: e instanceof Error ? e.message : e });
+      changesStatus = 'unavailable';
+    }
     return {
       from: from.toISOString(),
       to: to.toISOString(),
       truncated: rows.rows.length > TIMELINE_MAX_INCIDENTS,
+      changes_status: changesStatus,
+      changes,
       incidents: shown.slice(0, TIMELINE_MAX_INCIDENTS).map((r) => ({
         incident_id: r.incident_id,
         label: r.label,

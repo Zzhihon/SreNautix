@@ -60,7 +60,7 @@
 | [0101](0101-component-display-names.md) | 组件的可读名称只用于显示，由阶段 A 求出并随事件读取 | 已采纳 | — |
 | [0102](0102-wait-for-the-database-instead-of-exiting.md) | 启动时数据库没准备好：重试并保持 not ready，不退出 | 已采纳 | [0176](0176-schema-only-migrations-and-leader-data-corrections.md) |
 | [0103](0103-remediation-patch-templates.md) | 修复补丁模板：领域包声明改什么，server 配置改哪里 | 已采纳 | [0108](0108-remediation-prs.md) [0146](0146-goal-driven-optimization.md) |
-| [0104](0104-release-convergence.md) | 发布事故收敛：从拓扑推导发布变更，Pod 告警归到工作负载，没有锚点的告警归到变更 | 已采纳 | [0110](0110-reconstruction-and-loop-metrics.md) [0130](0130-logical-components-map-to-workloads.md) [0139](0139-remediation-templates-judge-their-own-root.md) [0140](0140-failed-pre-step-releases.md) [0141](0141-access-edges-stop-at-the-accessed-component.md) [0142](0142-late-and-no-op-changes-issue-titles-research-reason.md) [0151](0151-sql-audit-change-source.md) [0155](0155-remediation-change-dedupe-and-alert-facts.md) [0161](0161-retirement-and-pending-sync-changes.md) [0169](0169-change-link-grades.md) |
+| [0104](0104-release-convergence.md) | 发布事故收敛：从拓扑推导发布变更，Pod 告警归到工作负载，没有锚点的告警归到变更 | 已采纳 | [0110](0110-reconstruction-and-loop-metrics.md) [0130](0130-logical-components-map-to-workloads.md) [0139](0139-remediation-templates-judge-their-own-root.md) [0140](0140-failed-pre-step-releases.md) [0141](0141-access-edges-stop-at-the-accessed-component.md) [0142](0142-late-and-no-op-changes-issue-titles-research-reason.md) [0151](0151-sql-audit-change-source.md) [0155](0155-remediation-change-dedupe-and-alert-facts.md) [0161](0161-retirement-and-pending-sync-changes.md) [0169](0169-change-link-grades.md) [0206](0206-map-replay-change-track.md) |
 | [0105](0105-cluster-state-detectors.md) | 集群状态检测器：对象状态由 reader 或 informer 上报，server 按阈值合成告警 | 已采纳 | [0128](0128-detector-findings-across-leader-handover.md) [0146](0146-goal-driven-optimization.md) [0161](0161-retirement-and-pending-sync-changes.md) [0181](0181-hot-pluggable-skills.md) [0182](0182-urgency-tiered-incidents.md) [0183](0183-alert-categories.md) |
 | [0106](0106-kubernetes-read-checks-and-related-changes.md) | 阶段 B 的 Kubernetes 只读检查与相关变更 | 已采纳 | [0116](0116-evidence-cards-as-checks.md) [0146](0146-goal-driven-optimization.md) [0151](0151-sql-audit-change-source.md) [0181](0181-hot-pluggable-skills.md) |
 | [0107](0107-stage-a-recompute.md) | 阶段 A 按当前领域包重算 | 已采纳 | [0131](0131-check-windows-share-the-stage-a-anchor.md) [0149](0149-long-running-incident-card-windows.md) |
@@ -109,7 +109,7 @@
 | [0158](0158-route-thinking-setting.md) | 路由的思考模式设置 | 已采纳 | [0201](0201-anthropic-messages-routes.md) |
 | [0159](0159-incident-timing-onset-and-first-message-latency.md) | 事件的计时起点、阶段 A 报告第一次生成的时刻与首条消息时延 | 已采纳 | [0160](0160-alertmanager-additions-fast-poll.md) [0165](0165-first-message-latency-from-alertmanager.md) [0166](0166-business-impact-alert-matchers.md) |
 | [0160](0160-alertmanager-additions-fast-poll.md) | 两轮完整对账之间快速轮询 Alertmanager 的新增告警 | 已采纳 | [0165](0165-first-message-latency-from-alertmanager.md) |
-| [0161](0161-retirement-and-pending-sync-changes.md) | 退役与已合并、尚未同步的提交进入变更时间线；meta 告警的研判方向 | 已采纳 | [0167](0167-planned-retirement-is-ignored.md) [0169](0169-change-link-grades.md) |
+| [0161](0161-retirement-and-pending-sync-changes.md) | 退役与已合并、尚未同步的提交进入变更时间线；meta 告警的研判方向 | 已采纳 | [0167](0167-planned-retirement-is-ignored.md) [0169](0169-change-link-grades.md) [0206](0206-map-replay-change-track.md) |
 | [0162](0162-disposition-act-on-declared-components.md) | 处置 act 的确定性依据：研判根因上的修复模板与仓库声明的运行中组件 | 已采纳 | [0163](0163-inhibited-alerts-and-business-impact-disposition.md) [0168](0168-model-proposals-dropped-on-benign-ignore.md) [0170](0170-remediation-pr-admission.md) |
 | [0163](0163-inhibited-alerts-and-business-impact-disposition.md) | 告警源的抑制规则不使事件被抑制；业务影响告警在触发、证据卡异常时处置不能是 ignore | 已采纳 | [0166](0166-business-impact-alert-matchers.md) [0167](0167-planned-retirement-is-ignored.md) [0168](0168-model-proposals-dropped-on-benign-ignore.md) |
 | [0164](0164-cards-that-describe-the-failure-skip-the-baseline.md) | 描述故障类型的卡不取证据基线 | 已采纳 | — |
@@ -117,7 +117,7 @@
 | [0166](0166-business-impact-alert-matchers.md) | 业务影响告警的统一匹配器 | 已采纳 | [0167](0167-planned-retirement-is-ignored.md) [0182](0182-urgency-tiered-incidents.md) [0183](0183-alert-categories.md) |
 | [0167](0167-planned-retirement-is-ignored.md) | 计划内退役判为 ignore，不推送消息 | 已采纳 | [0169](0169-change-link-grades.md) |
 | [0168](0168-model-proposals-dropped-on-benign-ignore.md) | ignore 的确定性依据成立时模型的提议不生效 | 已采纳 | — |
-| [0169](0169-change-link-grades.md) | 变更与事件关联的确定性分级 | 已采纳 | [0178](0178-deterministic-conclusion-rules.md) |
+| [0169](0169-change-link-grades.md) | 变更与事件关联的确定性分级 | 已采纳 | [0178](0178-deterministic-conclusion-rules.md) [0206](0206-map-replay-change-track.md) |
 | [0170](0170-remediation-pr-admission.md) | 自愈 PR 的准入条件 | 已采纳 | [0175](0175-eval-candidates-and-benign-silence.md) [0182](0182-urgency-tiered-incidents.md) |
 | [0171](0171-coverage-gaps-become-issues.md) | 覆盖缺口改为 issue | 已采纳 | [0181](0181-hot-pluggable-skills.md) [0193](0193-business-domains-and-services.md) |
 | [0172](0172-reason-code-registry-and-timeline.md) | 终态原因码登记表与事件时间线 | 已采纳 | [0173](0173-stage-a-retry-and-final-edit.md) [0174](0174-feedback-reason-codes-and-closure-tracking.md) [0176](0176-schema-only-migrations-and-leader-data-corrections.md) [0181](0181-hot-pluggable-skills.md) [0182](0182-urgency-tiered-incidents.md) [0186](0186-incident-export.md) |
@@ -152,4 +152,5 @@
 | [0202](0202-probe-before-failure-domain-prebreak.md) | 故障域提前熔断前先发一次探测调用 | 已采纳 | — |
 | [0203](0203-pdb-protects-and-map-placement.md) | PodDisruptionBudget 的保护边与事件在地图上的落点 | 已采纳 | — |
 | [0204](0204-chat-first-screen-and-output-truncated.md) | 聊天消息的首屏只有五行；模型输出被截断单独记为失败原因 | 已采纳 | — |
-| [0205](0205-map-core-links-visual-encoding-replay.md) | 地图的核心链路、视觉编码与时间回放 | 已采纳 | — |
+| [0205](0205-map-core-links-visual-encoding-replay.md) | 地图的核心链路、视觉编码与时间回放 | 已采纳 | [0206](0206-map-replay-change-track.md) |
+| [0206](0206-map-replay-change-track.md) | 地图回放的变更轨道 | 已采纳 | — |

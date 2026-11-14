@@ -61,7 +61,7 @@
 }
 .bars {
   width: 100%;
-  height: 48px;
+  height: 60px;
   cursor: pointer;
 }
 .critical {
@@ -85,4 +85,48 @@
   justify-content: space-between;
   color: var(--sn-faint);
   font-size: 11px;
+}
+/* 变更行与分组图例（ADR 0206）：发布蓝、配置紫、容量灰、其他粉，与地图上的变更标记一致 */
+.change,
+.groups i {
+  --group: var(--sn-series-1);
+}
+.change[data-group='config'],
+.groups i[data-group='config'] {
+  --group: var(--sn-series-7);
+}
+.change[data-group='capacity'],
+.groups i[data-group='capacity'] {
+  --group: var(--sn-faint);
+}
+.change[data-group='other'],
+.groups i[data-group='other'] {
+  --group: var(--sn-series-5);
+}
+.change {
+  fill: var(--group);
+}
+.groups {
+  display: inline-flex;
+  gap: 10px;
+  margin-left: auto;
+  color: var(--sn-dim);
+}
+.groups i {
+  display: inline-block;
+  width: 10px;
+  height: 8px;
+  margin-right: 4px;
+  border-radius: 2px;
+  background: var(--group);
+}
+.slot {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding-top: 4px;
+  border-top: 1px solid var(--sn-line-soft);
+}
+.slotTitle {
+  color: var(--sn-dim);
 }

@@ -942,6 +942,7 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
     packs,
     github,
     issues,
+    changesIn: engineChanges,
     integrations: IntegrationRegistry.fromConfig({
       pool,
       config: c,
