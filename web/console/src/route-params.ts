@@ -18,7 +18,14 @@ export interface TopologySearch {
   hops?: 1;
   /** 全集群地图初次显示时对准的业务领域（ADR 0199） */
   domain?: string;
+  /** 地图回放的时刻（ADR 0205）；不写时是现在 */
+  at?: string;
 }
+
+const isoTime = (v: unknown): string | undefined => {
+  const s = str(v);
+  return s && !Number.isNaN(Date.parse(s)) ? s : undefined;
+};
 
 export function topologySearch(s: Record<string, unknown>): TopologySearch {
   return {
@@ -27,6 +34,7 @@ export function topologySearch(s: Record<string, unknown>): TopologySearch {
     component: str(s.component),
     hops: s.hops === 1 || s.hops === '1' ? 1 : undefined,
     domain: str(s.domain),
+    at: isoTime(s.at),
   };
 }
 

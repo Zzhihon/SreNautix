@@ -4,7 +4,17 @@ import { userEvent } from 'vitest/browser';
 import type { ClusterMap as MapData } from '../contract';
 import { renderUi } from '../test/render';
 import { ClusterMap } from './ClusterMap';
-import { buildMapModel, incidentOverlay, MAP_FOLD_MIN, nameStem, packMap, UNASSIGNED } from './cluster-map-model';
+import {
+  buildMapModel,
+  classifyEdges,
+  componentRole,
+  incidentOverlay,
+  MAP_FOLD_MIN,
+  nameStem,
+  packMap,
+  SINK_MIN_SERVICES,
+  UNASSIGNED,
+} from './cluster-map-model';
 
 const t = (zh: string) => ({ 'zh-CN': zh, en: zh });
 type C = MapData['components'][number];
@@ -194,6 +204,81 @@ describe('全集群地图的画法（ADR 0199）', () => {
   });
 });
 
+describe('核心链路与组件角色（ADR 0205）', () => {
+  const lv = (m: Pick<MapData, 'domains' | 'components' | 'edges'>) =>
+    Object.fromEntries([...classifyEdges(m).edges].map(([k, c]) => [k.replace('\0', ' -> '), `${c.level}/${c.kind}`]));
+
+  it('入口、业务领域之间的配置引用进核心链路；网络策略推出的边只在全部依赖，低于 τ 的只在网络放行', () => {
+    expect(lv(map)).toEqual({
+      [`${API} -> ${PG}`]: 'core/reference',
+      [`${WORKER} -> ${PG}`]: 'deps/allowed',
+      [`${FRONT} -> ${API}`]: 'core/reference',
+      [`${ING} -> ${FRONT}`]: 'core/route',
+    });
+    expect(lv({ ...map, edges: [edge(FRONT, PG, 0.5, 'egress_to')] })).toEqual({
+      [`${FRONT} -> ${PG}`]: 'allowed/allowed',
+    });
+  });
+
+  it('不进核心链路：指向共享汇与运维自身领域的引用、能经别的组件到达的引用；声明的边保留', () => {
+    const k = (n: string) => `Deployment:app/${n}`;
+    const services = ['a', 'b', 'c', 'd', 'db'];
+    const m = {
+      domains: [
+        { id: 'app', title: t('应用'), tier: 'core' as const, services: services.map((id) => ({ id, title: t(id) })) },
+        { id: 'ops', title: t('观测'), tier: 'self' as const, services: [{ id: 'metrics', title: t('指标') }] },
+        { id: 'base', title: t('底座'), tier: 'foundation' as const, services: [{ id: 'git', title: t('GitOps') }] },
+      ],
+      components: [...services.map((s) => comp(k(s), s, [])), comp(k('vm'), 'metrics', []), comp(k('repo'), 'git', [])],
+      edges: [
+        edge(k('a'), k('b'), 0.7),
+        edge(k('b'), k('c'), 0.7),
+        edge(k('a'), k('c'), 0.7),
+        edge(k('a'), k('vm'), 0.7),
+        ...['a', 'b', 'c'].map((s) => edge(k(s), k('db'), 0.7)),
+        { ...edge(k('d'), k('db'), 1, 'depends_on'), provenance: 'declared' as const },
+        edge(k('repo'), k('c'), 0.7),
+      ],
+    };
+    const got = lv(m);
+    expect(got[`${k('a')} -> ${k('b')}`]).toBe('core/reference');
+    expect(got[`${k('b')} -> ${k('c')}`]).toBe('core/reference');
+    // a 经 b 能到 c：传递约简
+    expect(got[`${k('a')} -> ${k('c')}`]).toBe('deps/reference');
+    // 业务组件上报指标
+    expect(got[`${k('a')} -> ${k('vm')}`]).toBe('deps/reference');
+    // db 被 a、b、c、d 四个服务依赖，是共享汇；声明的 d -> db 仍在核心链路
+    expect(classifyEdges(m).sinks.get(k('db'))).toBe(SINK_MIN_SERVICES);
+    expect(got[`${k('a')} -> ${k('db')}`]).toBe('deps/reference');
+    expect(got[`${k('d')} -> ${k('db')}`]).toBe('core/declared');
+    // 从底座出发的引用不是业务链路
+    expect(got[`${k('repo')} -> ${k('c')}`]).toBe('deps/reference');
+    // 领域包没有声明领域时不按档次筛选
+    expect(lv({ ...m, domains: [] })[`${k('repo')} -> ${k('c')}`]).toBe('core/reference');
+    // 画布上的组件带上共享汇的服务数
+    const model = buildMapModel(m, { fold: false, expanded: new Set(), roots: new Set() });
+    const db = model.domains[0]!.services.find((x) => x.service === 'db')!.items[0]!;
+    expect(db.sinkServices).toBe(4);
+  });
+
+  it('组件角色：入口、任务、静态 Pod 按类型；有状态而且只依赖共享汇的是数据', () => {
+    const sts = comp('StatefulSet:app/nats', 'a', [], { kind: 'StatefulSet' });
+    const gw = comp('StatefulSet:app/gateway', 'a', [], { kind: 'StatefulSet' });
+    const none = new Set<string>();
+    expect(componentRole(sts, none, none)).toBe('data');
+    expect(componentRole(gw, none, new Set([gw.key]))).toBe('service');
+    expect(componentRole(comp(PG, 'x', [], { members: { PersistentVolumeClaim: 3, Pod: 3 } }), none, none)).toBe(
+      'data',
+    );
+    expect(
+      componentRole(comp('Workflow.argoproj.io:ci/run-1', null, [], { kind: 'Workflow.argoproj.io' }), none, none),
+    ).toBe('batch');
+    expect(componentRole(comp(etcd(1), null, [], { kind: 'Pod' }), none, none)).toBe('node');
+    expect(componentRole(comp(ING, null, []), new Set([ING]), none)).toBe('entry');
+    expect(componentRole(comp(API, 'orders-api', []), none, none)).toBe('service');
+  });
+});
+
 describe('全集群地图（ADR 0199）', () => {
   const links = {
     topology: (c: string, k: string) => `/topology?cluster=${c}&component=${encodeURIComponent(k)}`,
@@ -310,6 +395,20 @@ describe('全集群地图（ADR 0199）', () => {
         'api（领域包声明）、worker、另有 2 个只被网络策略放行',
       ),
     ).toBeTruthy();
+  });
+
+  it('边分三档：默认只画核心链路，全部依赖加上网络策略推出的边；组件按角色、领域按档次标出（ADR 0205）', async () => {
+    const { container } = renderUi(<ClusterMap map={{ ...map, incidents: [] }} clusterId="prod" />);
+    await item(/^worker，/);
+    const drawn = () => container.querySelectorAll('.react-flow__edge').length;
+    await waitFor(() => expect(drawn()).toBe(3));
+    expect(screen.getByRole('button', { name: '核心链路' }).getAttribute('aria-pressed')).toBe('true');
+    await userEvent.click(screen.getByRole('button', { name: '全部依赖' }));
+    await waitFor(() => expect(drawn()).toBe(4));
+    expect(card(await item(/^frontend，Ingress/)).getAttribute('data-role')).toBe('entry');
+    expect(card(await item(/^api，/)).getAttribute('data-role')).toBe('service');
+    expect(screen.getAllByText('核心').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText('支撑').length).toBeGreaterThanOrEqual(1);
   });
 
   it('没有组件时说明原因', async () => {

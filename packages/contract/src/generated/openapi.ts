@@ -1649,6 +1649,26 @@ export type paths = {
     patch?: never;
     trace?: never;
   };
+  '/v1/topology/map/timeline': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * @description 地图回放的时间轴（契约 2.66.0，ADR 0205）：[from, to) 之间触发过的事件与它们的触发区间，作用域与过滤和 getClusterMap 相同
+     *     （没有合并、没有被抑制、调用方读取作用域内）。某一刻的地图用 getClusterMap 的 at 取；区间不超过 7 天，最多 2000 个事件，按首次触发排序
+     */
+    get: operations['getClusterMapTimeline'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/v1/topology/neighborhood': {
     parameters: {
       query?: never;
@@ -2546,6 +2566,24 @@ export type components = {
       /** @description 不画在地图上、也没有被组件引用的顶层对象数（RBAC、CRD、策略、GitOps 对象等） */
       omitted: number;
       topology_version: number;
+    };
+    ClusterMapTimeline: {
+      /** Format: date-time */
+      from: string;
+      incidents: {
+        /** @description 恢复的时刻；仍在触发时为 null */
+        ended_at: null | string;
+        /** Format: date-time */
+        first_firing_at: string;
+        incident_id: components['schemas']['Uuid'];
+        label: components['schemas']['IncidentLabel'];
+        service: null | components['schemas']['ServiceId'];
+        severity: components['schemas']['Severity'];
+      }[];
+      /** Format: date-time */
+      to: string;
+      /** @description 事件超过 2000 个，只返回最早触发的 2000 个 */
+      truncated: boolean;
     };
     /**
      * Comparator
@@ -10684,6 +10722,31 @@ export interface operations {
         };
         content: {
           'application/json': components['schemas']['ClusterMap'];
+        };
+      };
+    };
+  };
+  getClusterMapTimeline: {
+    parameters: {
+      query: {
+        cluster_id: components['schemas']['ClusterId'];
+        from: string;
+        /** @description 不写时为现在 */
+        to?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 时间轴 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ClusterMapTimeline'];
         };
       };
     };

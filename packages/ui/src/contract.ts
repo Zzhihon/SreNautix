@@ -35,6 +35,7 @@ export type Profile = S['Profile'];
 export type ProposalDetail = S['ProposalDetail'];
 export type IncidentSubgraph = S['Subgraph'];
 export type ClusterMap = S['ClusterMap'];
+export type ClusterMapTimeline = S['ClusterMapTimeline'];
 export type TimelineEntry = S['TimelineEntry'];
 export type Cluster = S['Cluster'];
 export type SpokeStatus = S['SpokeStatus'];

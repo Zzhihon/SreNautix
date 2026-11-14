@@ -96,6 +96,7 @@
   "topology.views.map": "集群地图",
   "topology.map_meta": "拓扑版本 {v} · {n} 个未恢复的事件",
   "topology.map_failed": "读取集群地图失败",
+  "topology.replay_failed": "读取地图回放的时间轴失败，地图照常显示现在",
   "topology.views.coverage": "覆盖表",
   "topology.views.neighborhood": "邻域图",
   "topology.views.diff": "版本差异",

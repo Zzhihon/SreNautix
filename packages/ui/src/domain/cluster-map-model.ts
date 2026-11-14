@@ -1,6 +1,7 @@
 // 全集群地图的画法（ADR 0199）：GET /v1/topology/map 的结构加上事件，整理成要画的框与节点。纯函数，布局与渲染在 ClusterMap.tsx。
 // 业务领域 → 服务 → 组件；没有归属的组件放进"未归属"领域，按命名空间分组。同一服务里类型、命名空间、名称词干与连接都相同、
 // 没有事件根因的组件合并（三个控制面节点上的同名静态 Pod、每次运行一个的 Workflow）。
+// 边分三档（ADR 0205）：核心链路（默认画出）、全部依赖（不低于 τ）、网络策略放行；组件按角色（入口、服务、数据、任务、静态 Pod）区分颜色。
 
 import type { ClusterMap } from '../contract';
 
@@ -14,10 +15,159 @@ export const MAP_FOLD_MIN = 3;
  * 沿它传播会把同一命名空间里互相放行的组件都标成受影响
  */
 export const BLAST_MIN_CONFIDENCE = 0.7;
+/** 归并阈值 τ：低于它的边只说明流量被放行（ADR 0200） */
+export const MERGE_CONFIDENCE = 0.6;
+/**
+ * 被至少这么多个服务引用的组件是共享的汇（指标库、OTel Collector）：指向它的边不进核心链路，组件上标出引用它的服务数。
+ * 参考部署上 vmsingle 被 7 个服务引用，OTel Collector 4 个；业务链路上的 PostgreSQL、Dragonfly、NATS 由领域包声明，声明的边不受影响
+ */
+export const SINK_MIN_SERVICES = 4;
+/**
+ * 核心链路从这些档次的业务领域出发（核心、支撑），不指向运维自身（self）的领域：业务组件上报指标、日志与链路不是业务链路。
+ * 领域包没有声明领域时不按档次筛选
+ */
+const CORE_TIERS: ReadonlySet<string> = new Set(['core', 'supporting']);
+const SELF_TIER = 'self';
 /** 没有业务领域的组件所在的领域 id */
 export const UNASSIGNED = '';
 
 export type Tone = 'bad' | 'warn' | 'hit';
+
+/** 边的种类，决定颜色与线型：declared 领域包声明，route 路由入口，reference 配置引用，allowed 网络策略放行 */
+export type EdgeKind = 'declared' | 'route' | 'reference' | 'allowed';
+/** 画边的档位：core 核心链路，deps 全部依赖（不低于 τ），allowed 再加上只被网络策略放行的边 */
+export type EdgeLevel = 'core' | 'deps' | 'allowed';
+export const EDGE_LEVELS: readonly EdgeLevel[] = ['core', 'deps', 'allowed'];
+/** 组件的角色：entry 路由入口，service 常驻服务，data 带持久卷或有状态的组件，batch 一次性任务，node 静态 Pod */
+export type ComponentRole = 'entry' | 'service' | 'data' | 'batch' | 'node';
+
+type MapEdge = ClusterMap['edges'][number];
+export interface EdgeClass {
+  kind: EdgeKind;
+  level: EdgeLevel;
+}
+
+const KIND_RANK: Record<EdgeKind, number> = { declared: 0, route: 1, reference: 2, allowed: 3 };
+const LEVEL_RANK: Record<EdgeLevel, number> = { core: 0, deps: 1, allowed: 2 };
+/** 档位 level 下画出这条边（低档的边在高档里都画） */
+export const shownAt = (edge: EdgeLevel, level: EdgeLevel) => LEVEL_RANK[edge] <= LEVEL_RANK[level];
+const edgeKey = (from: string, to: string) => `${from}\0${to}`;
+
+export function edgeKind(e: Pick<MapEdge, 'provenance' | 'relations'>): EdgeKind {
+  if (e.provenance === 'declared') {
+    return 'declared';
+  }
+  if (e.relations.includes('routes_to')) {
+    return 'route';
+  }
+  return e.provenance === 'network_policy' ? 'allowed' : 'reference';
+}
+
+/**
+ * 每条边的种类与档位，以及共享的汇（ADR 0205）。核心链路是：领域包声明的依赖、路由入口，以及从核心与支撑领域出发、
+ * 不指向运维自身领域与共享汇、置信度不低于 BLAST_MIN_CONFIDENCE 的配置引用；再去掉能由其余核心边经别的组件到达的边（传递约简），
+ * 只留下链路本身。网络策略推出的边不进核心链路，低于 τ 的边只在"网络放行"档画出。
+ */
+export function classifyEdges(map: Pick<ClusterMap, 'domains' | 'components' | 'edges'>): {
+  edges: ReadonlyMap<string, EdgeClass>;
+  /** 共享汇的组件键 → 引用它的服务数 */
+  sinks: ReadonlyMap<string, number>;
+} {
+  const byKey = new Map(map.components.map((c) => [c.key, c]));
+  const serviceOf = (k: string) => {
+    const c = byKey.get(k);
+    return c?.service ?? `ns:${c?.namespace ?? '-'}`;
+  };
+  const tierOf = new Map<string, string>();
+  for (const d of map.domains) {
+    for (const s of d.services) {
+      tierOf.set(s.id, d.tier);
+    }
+  }
+  const fanIn = new Map<string, Set<string>>();
+  for (const e of map.edges) {
+    if (e.confidence >= MERGE_CONFIDENCE) {
+      fanIn.set(e.to, (fanIn.get(e.to) ?? new Set()).add(serviceOf(e.from)));
+    }
+  }
+  const sinks = new Map<string, number>();
+  for (const [k, s] of fanIn) {
+    if (s.size >= SINK_MIN_SERVICES) {
+      sinks.set(k, s.size);
+    }
+  }
+  const out = new Map<string, EdgeClass>();
+  const core: MapEdge[] = [];
+  for (const e of map.edges) {
+    const kind = edgeKind(e);
+    const tier = (k: string) => tierOf.get(byKey.get(k)?.service ?? '');
+    const business = tierOf.size === 0 || (CORE_TIERS.has(tier(e.from) ?? '') && tier(e.to) !== SELF_TIER);
+    const isCore =
+      kind === 'declared' ||
+      kind === 'route' ||
+      (kind === 'reference' && e.confidence >= BLAST_MIN_CONFIDENCE && business && !sinks.has(e.to));
+    if (isCore) {
+      core.push(e);
+    }
+    out.set(edgeKey(e.from, e.to), {
+      kind,
+      level: isCore ? 'core' : e.confidence >= MERGE_CONFIDENCE ? 'deps' : 'allowed',
+    });
+  }
+  // 传递约简：from 经别的核心边也能到达 to 时，这条边不是链路的一环；声明的边与入口保留
+  const next = new Map<string, string[]>();
+  for (const e of core) {
+    next.set(e.from, [...(next.get(e.from) ?? []), e.to]);
+  }
+  const reachable = (from: string, to: string, skip: string) => {
+    const seen = new Set([from]);
+    const stack = (next.get(from) ?? []).filter((x) => x !== skip);
+    while (stack.length) {
+      const x = stack.pop()!;
+      if (x === to) {
+        return true;
+      }
+      if (!seen.has(x)) {
+        seen.add(x);
+        stack.push(...(next.get(x) ?? []));
+      }
+    }
+    return false;
+  };
+  for (const e of core) {
+    const c = out.get(edgeKey(e.from, e.to))!;
+    if (c.kind === 'reference' && reachable(e.from, e.to, e.to)) {
+      c.level = 'deps';
+    }
+  }
+  return { edges: out, sinks };
+}
+
+const BATCH_KINDS: ReadonlySet<string> = new Set(['Job', 'CronJob', 'Workflow', 'CronWorkflow']);
+
+/**
+ * 组件的角色：有路由出边的是入口；一次性任务、静态 Pod 按类型；有状态（StatefulSet 或持久卷）而且除共享汇外不依赖别的组件的是数据；
+ * 其余是服务。参考部署的网关是带临时卷的 StatefulSet，但它依赖数据库，所以是服务
+ */
+export function componentRole(
+  c: MapComponent,
+  entries: ReadonlySet<string>,
+  dependsOnOthers: ReadonlySet<string>,
+): ComponentRole {
+  const kind = c.kind.split('.')[0]!;
+  if (entries.has(c.key)) {
+    return 'entry';
+  }
+  if (BATCH_KINDS.has(kind)) {
+    return 'batch';
+  }
+  if (kind === 'Pod') {
+    return 'node';
+  }
+  const has = (k: string) => (c.members[k] ?? 0) > 0 || (c.attachments[k] ?? 0) > 0;
+  const stateful = kind === 'StatefulSet' || has('PersistentVolumeClaim') || has('StatefulSet');
+  return stateful && !dependsOnOthers.has(c.key) ? 'data' : 'service';
+}
 
 export interface MapNodeItem {
   id: string;
@@ -27,6 +177,16 @@ export interface MapNodeItem {
   name: string;
   kind: string;
   namespace: string | null;
+  role: ComponentRole;
+  /** 共享汇：引用它的服务数（ADR 0205）；不是汇时没有 */
+  sinkServices?: number;
+}
+
+/** 画布上两个节点之间的边：合并的组之间去重，取最低的档位、最强的种类与最高的置信度 */
+export interface MapModelEdge extends EdgeClass {
+  from: string;
+  to: string;
+  confidence: number;
 }
 
 export interface MapService {
@@ -47,7 +207,7 @@ export interface MapDomain {
 export interface MapModel {
   domains: MapDomain[];
   /** 画布上的节点之间的边，合并的组之间去重 */
-  edges: Array<{ from: string; to: string }>;
+  edges: MapModelEdge[];
   /** 组件键 → 画布上的节点 id */
   nodeOf: ReadonlyMap<string, string>;
 }
@@ -76,6 +236,15 @@ export function buildMapModel(
   },
 ): MapModel {
   const keep = opts.keep ?? (() => true);
+  const classes = classifyEdges(map);
+  const entries = new Set(map.edges.filter((e) => edgeKind(e) === 'route').map((e) => e.from));
+  const upstream = new Set(
+    map.edges.filter((e) => e.confidence >= MERGE_CONFIDENCE && !classes.sinks.has(e.to)).map((e) => e.from),
+  );
+  const facts = (c: MapComponent) => ({
+    role: componentRole(c, entries, upstream),
+    sinkServices: classes.sinks.get(c.key),
+  });
   const links = new Map<string, string[]>();
   for (const e of map.edges) {
     links.set(e.from, [...(links.get(e.from) ?? []), `>${e.to}`]);
@@ -103,11 +272,11 @@ export function buildMapModel(
       const first = members[0] as MapComponent;
       const id = `fold:${first.key}`;
       if (opts.fold && members.length >= MAP_FOLD_MIN && !opts.expanded.has(id)) {
-        out.push({ id, members, name: nameStem(first), kind: first.kind, namespace: first.namespace });
+        out.push({ id, members, name: nameStem(first), kind: first.kind, namespace: first.namespace, ...facts(first) });
         members.forEach((m) => nodeOf.set(m.key, id));
       } else {
         for (const c of members) {
-          out.push({ id: c.key, members: [c], name: c.name, kind: c.kind, namespace: c.namespace });
+          out.push({ id: c.key, members: [c], name: c.name, kind: c.kind, namespace: c.namespace, ...facts(c) });
           nodeOf.set(c.key, c.key);
         }
       }
@@ -136,17 +305,28 @@ export function buildMapModel(
       })),
     });
   }
-  const seen = new Set<string>();
-  const edges: MapModel['edges'] = [];
+  const merged = new Map<string, MapModelEdge>();
   for (const e of map.edges) {
     const from = nodeOf.get(e.from);
     const to = nodeOf.get(e.to);
-    if (from && to && from !== to && !seen.has(`${from}\0${to}`)) {
-      seen.add(`${from}\0${to}`);
-      edges.push({ from, to });
+    if (!from || !to || from === to) {
+      continue;
     }
+    const c = classes.edges.get(edgeKey(e.from, e.to))!;
+    const seen = merged.get(edgeKey(from, to));
+    if (!seen) {
+      merged.set(edgeKey(from, to), { from, to, ...c, confidence: e.confidence });
+      continue;
+    }
+    if (LEVEL_RANK[c.level] < LEVEL_RANK[seen.level]) {
+      seen.level = c.level;
+    }
+    if (KIND_RANK[c.kind] < KIND_RANK[seen.kind]) {
+      seen.kind = c.kind;
+    }
+    seen.confidence = Math.max(seen.confidence, e.confidence);
   }
-  return { domains, edges, nodeOf };
+  return { domains, edges: [...merged.values()], nodeOf };
 }
 
 /**

@@ -1,8 +1,8 @@
-// 拓扑（DESIGN §4.4、§12.2）：默认视图是全集群地图（ADR 0199），每 15 秒刷新事件；覆盖表里未映射的告警可以直接生成覆盖规则的 gitops_pr 提议（批准后由 gateway
+// 拓扑（DESIGN §4.4、§12.2）：默认视图是全集群地图（ADR 0199），每 15 秒刷新事件，上方的时间轴回放最近 24 小时（ADR 0205）；覆盖表里未映射的告警可以直接生成覆盖规则的 gitops_pr 提议（批准后由 gateway
 // 只推送到 srenautix/* 分支并开 PR，从不合并）；邻域图每条边标注来源，中心组件与跳数放在 URL 里（ADR 0191、ADR 0197），
 // 覆盖表的组件链接到它的邻域；版本差异。
 
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useMutation, useQuery } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
 import type { HubComponents, HubOperations } from '@srenautix/contract';
 import {
@@ -12,9 +12,11 @@ import {
   DataTable,
   EmptyState,
   ErrorBox,
+  MapReplay,
   Mono,
   PageHeader,
   Panel,
+  REPLAY_STEP_MS,
   Segmented,
   SelectField,
   Subgraph,
@@ -35,6 +37,9 @@ type Unmapped = Coverage['unmapped_alerts'][number];
 type Diff = HubOperations['getTopologyDiff']['responses'][200]['content']['application/json'];
 type Graph = HubComponents['schemas']['Subgraph'];
 type MapData = HubComponents['schemas']['ClusterMap'];
+type MapTimeline = HubComponents['schemas']['ClusterMapTimeline'];
+/** 地图回放的区间：最近 24 小时 */
+const REPLAY_SPAN_MS = 24 * 3600_000;
 type Pr = HubOperations['createTopologyOverridePr']['responses'][201]['content']['application/json'];
 const ROLES = ['cause', 'change', 'symptom', 'forecast', 'meta'] as const;
 
@@ -213,21 +218,55 @@ function CoverageView({ cluster }: { cluster: string }) {
   );
 }
 
-function MapView({ cluster, domain }: { cluster: string; domain?: string }) {
+function MapView({ cluster, domain, at }: { cluster: string; domain?: string; at?: string }) {
   const { t } = useI18n();
   const navigate = useNavigate();
+  const [playing, setPlaying] = useState(false);
   const q = useQuery({
-    queryKey: ['topology', 'map', cluster],
+    queryKey: ['topology', 'map', cluster, at ?? 'now'],
     queryFn: async () =>
-      ok<MapData>('getClusterMap', await hub.GET('/v1/topology/map', { params: { query: { cluster_id: cluster } } })),
-    // 结构按拓扑版本缓存在服务端，轮询主要取最新的事件；地图只在结构变化时重新排布
-    refetchInterval: 15_000,
+      ok<MapData>(
+        'getClusterMap',
+        await hub.GET('/v1/topology/map', { params: { query: { cluster_id: cluster, ...(at ? { at } : {}) } } }),
+      ),
+    // 结构按拓扑版本缓存在服务端，轮询主要取最新的事件；地图只在结构变化时重新排布。回放的时刻不再变，不轮询；
+    // 换时刻时先留着上一刻的地图，取到新的再换，播放时画面不闪
+    refetchInterval: at ? false : 15_000,
+    placeholderData: keepPreviousData,
   });
+  // 时间轴：从对齐到格子边界的时刻起 24 小时到现在，每分钟取一次
+  const timeline = useQuery({
+    queryKey: ['topology', 'map', 'timeline', cluster],
+    queryFn: async () => {
+      const now = Date.now();
+      const from = new Date(Math.floor(now / REPLAY_STEP_MS) * REPLAY_STEP_MS - REPLAY_SPAN_MS).toISOString();
+      return ok<MapTimeline>(
+        'getClusterMapTimeline',
+        await hub.GET('/v1/topology/map/timeline', {
+          params: { query: { cluster_id: cluster, from, to: new Date(now).toISOString() } },
+        }),
+      );
+    },
+    refetchInterval: 60_000,
+  });
+  const setAt = (next: string | null) =>
+    void navigate({ to: '/topology', search: { cluster, view: 'map', domain, at: next ?? undefined }, replace: true });
   return (
     <Panel
       title={t('topology.views.map')}
       meta={q.data ? t('topology.map_meta', { v: q.data.topology_version, n: q.data.incidents.length }) : undefined}
     >
+      {timeline.data ? (
+        <MapReplay
+          timeline={timeline.data}
+          at={at ?? null}
+          playing={playing}
+          onChange={setAt}
+          onPlayingChange={setPlaying}
+        />
+      ) : (
+        timeline.error && <ErrorBox title={t('topology.replay_failed')} error={timeline.error} />
+      )}
       <Loaded q={q} what={t('topology.map_failed')} roles={ROLES_ALL}>
         {(m) => (
           <ClusterMap
@@ -393,12 +432,14 @@ export function TopologyPage({
   component,
   hops,
   domain,
+  at,
 }: {
   cluster?: string;
   view: TopologyView;
   component?: string;
   hops: 1 | 2;
   domain?: string;
+  at?: string;
 }) {
   const { t } = useI18n();
   const navigate = useNavigate();
@@ -425,7 +466,7 @@ export function TopologyPage({
           because={t('topology.need_cluster')}
         />
       ) : view === 'map' ? (
-        <MapView cluster={cluster} domain={domain} />
+        <MapView cluster={cluster} domain={domain} at={at} />
       ) : view === 'coverage' ? (
         <CoverageView cluster={cluster} />
       ) : view === 'neighborhood' ? (

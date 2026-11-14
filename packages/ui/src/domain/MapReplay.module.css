@@ -1,0 +1,88 @@
+/* 地图回放的时间轴（ADR 0205）：按钮行、触发事件数的直方图与滑块 */
+.replay {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  border: 1px solid var(--sn-line);
+  border-radius: 8px;
+  background: var(--sn-panel);
+  font-size: 12px;
+}
+.replay:not([data-live]) {
+  border-color: var(--sn-info);
+  box-shadow: inset 3px 0 0 var(--sn-info);
+}
+.head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.btn {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  padding: 3px 8px;
+  border: 1px solid var(--sn-line);
+  border-radius: 5px;
+  background: var(--sn-raise);
+  color: var(--sn-text);
+  font: inherit;
+  cursor: pointer;
+}
+.btn svg {
+  width: 13px;
+  height: 13px;
+}
+.btn[aria-pressed='true'] {
+  border-color: var(--sn-info);
+  color: var(--sn-info);
+}
+.btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.btn:focus-visible,
+.range:focus-visible {
+  outline: 2px solid var(--sn-focus);
+  outline-offset: 1px;
+}
+.at {
+  font-weight: 600;
+  color: var(--sn-text);
+}
+.replay:not([data-live]) .at {
+  color: var(--sn-info);
+}
+.note {
+  color: var(--sn-warn);
+}
+.bars {
+  width: 100%;
+  height: 48px;
+  cursor: pointer;
+}
+.critical {
+  fill: var(--sn-bad);
+}
+.other {
+  fill: var(--sn-warn);
+  opacity: 0.75;
+}
+.cursor {
+  fill: var(--sn-info);
+  opacity: 0.25;
+}
+.range {
+  width: 100%;
+  margin: 0;
+  accent-color: var(--sn-info);
+}
+.ticks {
+  display: flex;
+  justify-content: space-between;
+  color: var(--sn-faint);
+  font-size: 11px;
+}

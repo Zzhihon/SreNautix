@@ -57,6 +57,10 @@ const overridePrBody = overrideSchema
 
 const fmt = (d: Date | null | undefined) => (d ? d.toISOString() : null);
 
+/** 地图回放时间轴（ADR 0205）的区间上限与事件数上限：拓扑历史保留 14 天（topology.history_retention），回放看最近 7 天以内 */
+const TIMELINE_MAX_SPAN_MS = 7 * 24 * 3600_000;
+const TIMELINE_MAX_INCIDENTS = 2000;
+
 /** 控制台创建的 API token：外部调用方，只能提议（DESIGN §9.3），动作与命名空间不限，每小时 60 个提议。 */
 export async function apiTokenCaller(pool: pg.Pool, token: string): Promise<ServiceCaller | null> {
   const sha = createHash('sha256').update(token).digest('hex');
@@ -485,6 +489,42 @@ export function registerSystemRoutes(app: FastifyInstance, d: SystemRouteDeps): 
       });
     }
     return { ...structure, at: at.toISOString(), incidents };
+  });
+
+  // 地图回放的时间轴（ADR 0205）：区间里触发过的事件与触发区间，过滤与地图相同；某一刻的地图由 /v1/topology/map?at 取
+  app.get('/v1/topology/map/timeline', async (req) => {
+    const { scopes } = await d.auth.reader(req);
+    const q = req.query as { cluster_id?: string; from?: string; to?: string };
+    const cluster = q.cluster_id ?? d.config.cluster_id;
+    const to = q.to ? new Date(q.to) : new Date();
+    const from = q.from ? new Date(q.from) : new Date(Number.NaN);
+    if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime()) || from >= to) {
+      throw badRequest('from、to 是合法的时刻，from 早于 to');
+    }
+    if (to.getTime() - from.getTime() > TIMELINE_MAX_SPAN_MS) {
+      throw badRequest('区间不超过 7 天');
+    }
+    const rows = await d.pool.query<IncidentRow>(
+      `SELECT * FROM server.incidents
+        WHERE cluster_id = $1 AND state <> 'merged' AND NOT suppressed
+          AND first_firing_at < $3 AND (ended_at IS NULL OR ended_at > $2)
+        ORDER BY first_firing_at LIMIT $4`,
+      [cluster, from, to, TIMELINE_MAX_INCIDENTS + 1],
+    );
+    const shown = rows.rows.filter((r) => visible(scopes, incidentTarget(r.body)));
+    return {
+      from: from.toISOString(),
+      to: to.toISOString(),
+      truncated: rows.rows.length > TIMELINE_MAX_INCIDENTS,
+      incidents: shown.slice(0, TIMELINE_MAX_INCIDENTS).map((r) => ({
+        incident_id: r.incident_id,
+        label: r.label,
+        severity: r.body.severity,
+        first_firing_at: r.first_firing_at.toISOString(),
+        ended_at: fmt(r.ended_at),
+        service: r.body.primary_service ?? null,
+      })),
+    };
   });
 
   app.get('/v1/topology/diff', async (req) => {
