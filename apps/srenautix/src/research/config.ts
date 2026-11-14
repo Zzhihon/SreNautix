@@ -7,6 +7,7 @@ import { readSecretFile } from '../kernel/files.js';
 import { DEFAULT_BUDGET, type BudgetConfig } from '../llm/budget.js';
 import { EGRESS_CATEGORIES, type EgressCategory } from '../llm/types.js';
 import { resolveTimeouts, type ModelClass, type RouteTimeouts } from '../llm/timeouts.js';
+import type { BalanceKind } from '../llm/balance.js';
 import type { ChatThinking } from '../llm/wire.js';
 import type { McpServerConfig } from '../tools/mcp.js';
 import { DEFAULT_LIMITS, type ResearchLimits } from './controller.js';
@@ -29,6 +30,7 @@ import { DEFAULT_LIMITS, type ResearchLimits } from './controller.js';
 //     routes: [ … 与 eval 配置相同 … ]      # 每条路由可选 model_class 与 timeouts: { first_token, idle, total }（ADR 0098）
 //                                          # 以及 role: regular | last_resort（兜底路由，ADR 0152）
 //                                          # 与 thinking: disabled（Chat 与 Messages 路由关闭服务方默认的思考模式，ADR 0158）
+//                                          # 与 balance: deepseek（读取服务方账户余额，导出 srenautix_llm_route_balance，ADR 0207）
 //   budget: { daily_tokens: 15000000, daily_warn_ratio: 0.8, on_exhausted: critical_only, per_research_input_tokens: 150000,
 //             purposes: { optimization: { daily_tokens: 3000000 } },   # 主动优化的每日用量上限（ADR 0146 §5.3）
 //             last_resort: { daily_tokens: 2000000 } }                 # 兜底路由合计的每日上限，配置了兜底路由时必填（ADR 0152）
@@ -42,7 +44,7 @@ const ms = (d: string) => {
   return Number(m[1]) * (UNIT[m[2] as string] as number);
 };
 
-const route = z
+export const workerRouteSchema = z
   .object({
     id: z.string().regex(/^[a-z0-9][a-z0-9-]*$/),
     base_url: z.string().url(),
@@ -69,6 +71,8 @@ const route = z
       .strict()
       .optional(),
     thinking: z.enum(['disabled']).optional(),
+    // 服务方的余额接口（ADR 0207）：worker 定期读取，导出 srenautix_llm_route_balance
+    balance: z.enum(['deepseek']).optional(),
   })
   .strict();
 
@@ -126,7 +130,7 @@ export const workerConfigSchema = z
         probe_on_start: z.boolean().default(true),
         // 旧配置：只作为没有声明 timeouts.total 的路由的总时长上限；首 token 与空闲超时按模型类别（ADR 0098）
         call_timeout: duration.optional(),
-        routes: z.array(route).min(1),
+        routes: z.array(workerRouteSchema).min(1),
       })
       .strict(),
     budget: z
@@ -201,6 +205,7 @@ export interface WorkerConfig {
     apiKey: string;
     timeouts: { modelClass: ModelClass; timeouts: RouteTimeouts };
     thinking: ChatThinking | null;
+    balance: BalanceKind | null;
   }>;
   hubToken: string;
   inboundTokenSha256: string[];
@@ -214,10 +219,11 @@ export interface WorkerConfig {
 export function resolveWorkerConfig(raw: WorkerConfigRaw): WorkerConfig {
   return {
     raw,
-    routes: raw.llm.routes.map(({ api_key_file, model_class, timeouts, thinking, ...r }) => ({
+    routes: raw.llm.routes.map(({ api_key_file, model_class, timeouts, thinking, balance, ...r }) => ({
       route: r,
       apiKey: readSecretFile(`路由 ${r.id} 的 api_key_file`, api_key_file),
       thinking: thinking ?? null,
+      balance: balance ?? null,
       timeouts: resolveTimeouts(
         r,
         {

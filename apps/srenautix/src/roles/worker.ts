@@ -9,6 +9,7 @@ import { parseListen } from '../kernel/files.js';
 import { registerEvents } from '../events/http.js';
 import { OutboxListener } from '../events/listener.js';
 import { configureLog, logger } from '../kernel/log.js';
+import { watchBalances } from '../llm/balance.js';
 import { Egress } from '../llm/egress.js';
 import { declaredProfile } from '../llm/dialect.js';
 import { applyProbe, probeRoute } from '../llm/probe.js';
@@ -363,6 +364,34 @@ export async function buildWorker(o: BuildWorkerOptions): Promise<WorkerHandle> 
   }
   const loopCtrl = new AbortController();
   const loop = o.noLoop ? Promise.resolve() : service.run(loopCtrl.signal);
+  // 配置了 balance 的可用路由定期读取账户余额（ADR 0207）
+  const balanceTargets = c.routes.flatMap((r) =>
+    r.balance && runtimeById.has(r.route.id) ? [{ route: r.route, apiKey: r.apiKey, kind: r.balance }] : [],
+  );
+  const balances =
+    o.noLoop || !balanceTargets.length
+      ? Promise.resolve()
+      : watchBalances(
+          balanceTargets,
+          (route) => {
+            try {
+              egress.assertRouteAllowed(route);
+              return !egress.halted;
+            } catch {
+              return false;
+            }
+          },
+          {
+            readings: (route, rs) => {
+              for (const b of rs) {
+                metrics.routeBalance.set({ route, currency: b.currency }, b.amount);
+              }
+            },
+            outcome: (route, ok) => metrics.routeBalanceCheck.set({ route }, ok ? 1 : 0),
+          },
+          loopCtrl.signal,
+          (route, e) => logger.warn('读取模型路由账户余额失败', { route, error: e.message }),
+        );
   logger.info('worker 已启动', {
     api: apiUrl,
     routes: runtimes.map((r) => r.route.id),
@@ -381,6 +410,7 @@ export async function buildWorker(o: BuildWorkerOptions): Promise<WorkerHandle> 
       service.stop();
       loopCtrl.abort(new Error('shutdown'));
       await loop;
+      await balances;
       await app.close();
       await listener.stop();
       for (const s of aux) {
