@@ -221,3 +221,13 @@
 .domainCard[data-static]:hover {
   border-color: var(--sn-line);
 }
+.mapAction {
+  color: var(--sn-info);
+  font-size: 12.5px;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.mapAction:focus-visible {
+  outline: 2px solid var(--sn-focus);
+  outline-offset: 2px;
+}

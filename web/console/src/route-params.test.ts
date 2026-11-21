@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { clusterMapHref, searchHref, topologyHref, topologySearch } from './route-params';
+import {
+  clusterMapHref,
+  defaultReplaySpan,
+  searchHref,
+  topologyHref,
+  topologySearch,
+  widerReplaySpan,
+} from './route-params';
 import { parseSearch } from './search';
 
 describe('拓扑页的 search 参数（ADR 0191）', () => {
@@ -54,5 +61,34 @@ describe('拓扑页的 search 参数（ADR 0191）', () => {
     const href = searchHref('Deployment:app/gateway', 'prod');
     expect(href.startsWith('/search?')).toBe(true);
     expect(parseSearch(href.slice('/search'.length))).toEqual({ cluster: 'prod', q: 'Deployment:app/gateway' });
+  });
+
+  it('历史事件跳转到全集群地图发生时刻，并按时刻距今自动选择 24h / 3d / 7d 回放跨度（ADR 0208）', () => {
+    const at = '2026-11-18T10:00:00Z';
+    const href = clusterMapHref('cchp', 'forwarding', at);
+    expect(topologySearch(parseSearch(href.slice('/topology'.length)))).toEqual({
+      cluster: 'cchp',
+      view: 'map',
+      component: undefined,
+      hops: undefined,
+      domain: 'forwarding',
+      at,
+      span: undefined,
+    });
+    // 非法时间戳被忽略，回退为默认实时地图链接
+    expect(clusterMapHref('cchp', 'forwarding', 'invalid')).toBe('/topology?cluster=cchp&domain=forwarding');
+
+    expect(topologySearch({ span: '3d' }).span).toBe('3d');
+    expect(topologySearch({ span: '7d' }).span).toBe('7d');
+    expect(topologySearch({ span: '30d' }).span).toBeUndefined();
+
+    const now = Date.parse('2026-11-22T00:00:00Z');
+    const H = 3600_000;
+    expect(defaultReplaySpan(undefined, now)).toBe('24h');
+    expect(defaultReplaySpan(new Date(now - 6 * H).toISOString(), now)).toBe('24h');
+    expect(defaultReplaySpan(new Date(now - 36 * H).toISOString(), now)).toBe('3d');
+    expect(defaultReplaySpan(new Date(now - 5 * 24 * H).toISOString(), now)).toBe('7d');
+    expect(widerReplaySpan('24h', '3d')).toBe('3d');
+    expect(widerReplaySpan('7d', '24h')).toBe('7d');
   });
 });

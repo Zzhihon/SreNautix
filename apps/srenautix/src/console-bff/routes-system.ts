@@ -441,7 +441,10 @@ export function registerSystemRoutes(app: FastifyInstance, d: SystemRouteDeps): 
       updated_at: at.toISOString(),
       topology_version: 0,
     } as unknown as Parameters<typeof subgraphOf>[1];
-    return subgraphOf(d.topology, pseudo, hops);
+    return subgraphOf(d.topology, pseudo, hops, {
+      services: d.packs.set.services,
+      componentTypes: d.packs.componentTypes(),
+    });
   });
 
   // 全集群地图（ADR 0199）：结构只随拓扑版本与领域包变化，现在时刻的结构按集群缓存一份；

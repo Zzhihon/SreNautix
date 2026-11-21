@@ -14,10 +14,21 @@ import styles from './MapReplay.module.css';
 
 type TimelineIncident = ClusterMapTimeline['incidents'][number];
 
-/** 一格的时长：24 小时 96 格 */
+/** 一格的默认时长：24 小时 96 格 */
 export const REPLAY_STEP_MS = 15 * 60_000;
 /** 播放时每格停留的时长 */
 export const REPLAY_FRAME_MS = 1200;
+
+/** 按时间轴总时长选格子宽度（ADR 0208）：24 小时内 15 分钟一格，3 天内 1 小时一格，7 天内 2 小时一格 */
+export function replayStepMs(spanMs: number): number {
+  if (spanMs <= 24 * 3600_000) {
+    return REPLAY_STEP_MS;
+  }
+  if (spanMs <= 3 * 24 * 3600_000) {
+    return 60 * 60_000;
+  }
+  return 2 * 60 * 60_000;
+}
 
 export interface ReplayBucket {
   /** 格子结束的时刻（毫秒） */
@@ -89,29 +100,26 @@ export interface MapReplayProps {
   playing: boolean;
   onChange: (at: string | null) => void;
   onPlayingChange: (playing: boolean) => void;
+  /** 每格时长（毫秒）；省略时按 timeline 跨度自动选择（24h→15m，3d→1h，7d→2h） */
+  stepMs?: number;
 }
 
-export function MapReplay({ timeline, at, playing, onChange, onPlayingChange }: MapReplayProps) {
+export function MapReplay({ timeline, at, playing, onChange, onPlayingChange, stepMs }: MapReplayProps) {
   const { t, fmt } = useI18n();
   const from = Date.parse(timeline.from);
   const to = Date.parse(timeline.to);
+  const step = stepMs ?? replayStepMs(to - from);
   const buckets = useMemo(
-    () => firingBuckets(timeline.incidents, timeline.changes, from, to),
-    [timeline.incidents, timeline.changes, from, to],
+    () => firingBuckets(timeline.incidents, timeline.changes, from, to, step),
+    [timeline.incidents, timeline.changes, from, to, step],
   );
   const last = buckets.length - 1;
-  const atMs = at ? Date.parse(at) : null;
+  const parsedAt = at ? Date.parse(at) : Number.NaN;
+  const atMs = Number.isNaN(parsedAt) ? null : parsedAt;
+  const outsideWindow = atMs !== null && atMs < from;
   // 当前格：时刻落在哪一格的结束上；现在是最后一格
-  const index =
-    atMs === null
-      ? last
-      : Math.max(
-          0,
-          Math.min(
-            last,
-            buckets.findIndex((b) => b.at >= atMs),
-          ),
-        );
+  const foundIdx = atMs === null ? last : buckets.findIndex((b) => b.at >= atMs);
+  const index = atMs === null ? last : foundIdx < 0 ? last : Math.max(0, Math.min(last, foundIdx));
   const select = (i: number) => onChange(i >= last ? null : new Date(buckets[i]!.at).toISOString());
 
   // 播放：每 REPLAY_FRAME_MS 前进一格，到现在为止；从现在开始播放时从最左一格开始。只随播放状态与当前格重新计时，
@@ -185,12 +193,22 @@ export function MapReplay({ timeline, at, playing, onChange, onPlayingChange }: 
         <span className={styles.at} role="status">
           {atMs === null
             ? t('map.replay.live')
-            : t('map.replay.at', {
-                at: fmt.clock(cur.at),
-                n: cur.critical + cur.other,
-                started: cur.started,
-                changes: CHANGE_GROUPS.reduce((n, g) => n + cur.changes[g], 0),
-              })}
+            : outsideWindow
+              ? t('map.replay.at_outside', { at: fmt.dateTime(atMs) })
+              : step === REPLAY_STEP_MS
+                ? t('map.replay.at', {
+                    at: fmt.clock(cur.at),
+                    n: cur.critical + cur.other,
+                    started: cur.started,
+                    changes: CHANGE_GROUPS.reduce((n, g) => n + cur.changes[g], 0),
+                  })
+                : t('map.replay.at_step', {
+                    at: fmt.clock(cur.at),
+                    step: fmt.duration(step),
+                    n: cur.critical + cur.other,
+                    started: cur.started,
+                    changes: CHANGE_GROUPS.reduce((n, g) => n + cur.changes[g], 0),
+                  })}
         </span>
         {atMs !== null && (
           <button

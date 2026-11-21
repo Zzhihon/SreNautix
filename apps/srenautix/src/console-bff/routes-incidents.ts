@@ -1,5 +1,6 @@
 import type {
   ChangeLink,
+  ComponentType,
   EvidenceResult,
   Feedback,
   FeedbackCreate,
@@ -10,6 +11,7 @@ import type {
   StageAReport,
 } from '@srenautix/contract';
 import { reasonEntry, reasonText, validatorFor } from '@srenautix/contract';
+import { buildIncidentSubgraph, type SubgraphBuildOptions } from '@srenautix/core';
 import type { ServiceCatalog } from '@srenautix/packs-sdk/business';
 import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
@@ -55,6 +57,8 @@ export interface IncidentRouteDeps {
   worker: { url: string; token: string } | null;
   /** 领域包 business.yaml 的服务目录（ADR 0193） */
   services: () => ServiceCatalog;
+  /** 领域包 components.yaml 的组件类型（ADR 0208） */
+  componentTypes?: () => readonly ComponentType[];
   /** 业务影响告警的定义（notify.business_impact_alerts，ADR 0166） */
   businessImpactAlerts: () => readonly AlertMatcher[];
 }
@@ -513,7 +517,10 @@ export function registerIncidentRoutes(app: FastifyInstance, d: IncidentRouteDep
       throw notFound('没有这个版本');
     }
     const hops = Math.min(2, Math.max(1, Number(q.hops ?? 2)));
-    return subgraphOf(d.topology, inc, hops);
+    return subgraphOf(d.topology, inc, hops, {
+      services: d.services(),
+      componentTypes: d.componentTypes?.(),
+    });
   });
 
   app.get('/v1/incidents/:ref/feedback', async (req) => {
@@ -846,9 +853,14 @@ export async function timelineOf(pool: pg.Pool, row: IncidentRow): Promise<Timel
 
 /**
  * 根因子图：根因（没有时取候选与组件）加不超过 hops 跳的邻居，取该事件版本使用的拓扑版本。
- * 只按跳取相连的边，不取整张拓扑（通知与事件 issue 每一轮为每个事件调用一次，ADR 0144）。
+ * 传入领域包服务目录时（控制台子图与邻域接口，ADR 0208），按时间点快照展开逻辑伪组件、注入 business.yaml 声明的依赖，
+ * 并为工作负载补上宿主机 runs_on 边且避免非根因 Node 与弱网络策略边扩散；未传时保持逐跳查询（通知与事件 issue，ADR 0144）。
  */
-export async function subgraphOf(topology: TopologyStore, inc: Incident, hops: number) {
+export async function subgraphOf(topology: TopologyStore, inc: Incident, hops: number, opts?: SubgraphBuildOptions) {
+  if (opts?.services) {
+    const snapshot = await topology.at(inc.cluster_id, new Date(inc.updated_at), inc.topology_version || null);
+    return buildIncidentSubgraph(snapshot, inc, hops, opts);
+  }
   const seeds = inc.root.component
     ? [inc.root.component]
     : inc.candidates.length

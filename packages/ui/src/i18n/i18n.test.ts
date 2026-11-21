@@ -64,7 +64,10 @@ const ENUMS: Record<string, readonly string[]> = {
   'run.repair': ['parse', 'jsonrepair', 'validate', 'field_salvage', 'reask', 'next_route', 'deterministic_only'],
   'run.stop_reason': ['leader_supported', 'no_change', 'step_limit', 'deadline', 'budget', 'model_unavailable'],
   'subgraph.role': ['root', 'candidate', 'member', 'neighbor'],
-  'subgraph.source': ['structural', 'runtime', 'config_ref', 'network_policy', 'naming'],
+  'subgraph.source': ['structural', 'runtime', 'config_ref', 'network_policy', 'naming', 'declared'],
+  'subgraph.level': ['core', 'deps', 'allowed'],
+  'subgraph.level_hint': ['core', 'deps', 'allowed'],
+  'subgraph.edge_kind': ['declared', 'route', 'substrate', 'runtime', 'allowed'],
   'timeline.change_grade': ['high', 'medium', 'low'],
   'timeline.change_basis': [
     'component_match',

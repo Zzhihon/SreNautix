@@ -16,7 +16,7 @@ import {
   Mono,
   PageHeader,
   Panel,
-  REPLAY_STEP_MS,
+  replayStepMs,
   Segmented,
   SelectField,
   Subgraph,
@@ -27,7 +27,16 @@ import {
 } from '@srenautix/ui';
 import { useMemo, useState } from 'react';
 import { hub, ok } from '../api';
-import { TOPOLOGY_VIEWS, topologyHref, type TopologyView } from '../route-params';
+import {
+  defaultReplaySpan,
+  REPLAY_SPAN_MS,
+  REPLAY_SPANS,
+  TOPOLOGY_VIEWS,
+  topologyHref,
+  widerReplaySpan,
+  type ReplaySpan,
+  type TopologyView,
+} from '../route-params';
 import { hasRole, useSession } from '../session';
 import { Loaded, ROLES_ALL } from './common';
 import styles from './pages.module.css';
@@ -38,8 +47,6 @@ type Diff = HubOperations['getTopologyDiff']['responses'][200]['content']['appli
 type Graph = HubComponents['schemas']['Subgraph'];
 type MapData = HubComponents['schemas']['ClusterMap'];
 type MapTimeline = HubComponents['schemas']['ClusterMapTimeline'];
-/** 地图回放的区间：最近 24 小时 */
-const REPLAY_SPAN_MS = 24 * 3600_000;
 type Pr = HubOperations['createTopologyOverridePr']['responses'][201]['content']['application/json'];
 const ROLES = ['cause', 'change', 'symptom', 'forecast', 'meta'] as const;
 
@@ -218,10 +225,14 @@ function CoverageView({ cluster }: { cluster: string }) {
   );
 }
 
-function MapView({ cluster, domain, at }: { cluster: string; domain?: string; at?: string }) {
+function MapView({ cluster, domain, at, span }: { cluster: string; domain?: string; at?: string; span?: ReplaySpan }) {
   const { t } = useI18n();
   const navigate = useNavigate();
   const [playing, setPlaying] = useState(false);
+  // 历史事件深链带 ?at= 且早于 24 小时时自动扩展到 3d 或 7d，不改写用户明确选定的更宽跨度（ADR 0208）
+  const activeSpan = widerReplaySpan(span ?? '24h', defaultReplaySpan(at));
+  const spanMs = REPLAY_SPAN_MS[activeSpan];
+  const stepMs = replayStepMs(spanMs);
   const q = useQuery({
     queryKey: ['topology', 'map', cluster, at ?? 'now'],
     queryFn: async () =>
@@ -234,12 +245,12 @@ function MapView({ cluster, domain, at }: { cluster: string; domain?: string; at
     refetchInterval: at ? false : 15_000,
     placeholderData: keepPreviousData,
   });
-  // 时间轴：从对齐到格子边界的时刻起 24 小时到现在，每分钟取一次
+  // 时间轴：对齐到格子边界且跨度不超过后端 7 天上限（Math.ceil 向上对齐，保证 to - from ≤ spanMs），每分钟取一次
   const timeline = useQuery({
-    queryKey: ['topology', 'map', 'timeline', cluster],
+    queryKey: ['topology', 'map', 'timeline', cluster, activeSpan],
     queryFn: async () => {
       const now = Date.now();
-      const from = new Date(Math.floor(now / REPLAY_STEP_MS) * REPLAY_STEP_MS - REPLAY_SPAN_MS).toISOString();
+      const from = new Date(Math.ceil((now - spanMs) / stepMs) * stepMs).toISOString();
       return ok<MapTimeline>(
         'getClusterMapTimeline',
         await hub.GET('/v1/topology/map/timeline', {
@@ -250,15 +261,44 @@ function MapView({ cluster, domain, at }: { cluster: string; domain?: string; at
     refetchInterval: 60_000,
   });
   const setAt = (next: string | null) =>
-    void navigate({ to: '/topology', search: { cluster, view: 'map', domain, at: next ?? undefined }, replace: true });
+    void navigate({
+      to: '/topology',
+      search: {
+        cluster,
+        view: 'map',
+        domain,
+        at: next ?? undefined,
+        span: activeSpan === '24h' ? undefined : activeSpan,
+      },
+      replace: true,
+    });
+  const setSpan = (next: ReplaySpan) => {
+    setPlaying(false);
+    // 缩窄跨度时若当前回放时刻已落在新窗口外，切回现在；否则保留原时刻
+    const keepAt = at && Date.now() - Date.parse(at) <= REPLAY_SPAN_MS[next] ? at : undefined;
+    void navigate({
+      to: '/topology',
+      search: { cluster, view: 'map', domain, at: keepAt, span: next === '24h' ? undefined : next },
+      replace: true,
+    });
+  };
   return (
     <Panel
       title={t('topology.views.map')}
       meta={q.data ? t('topology.map_meta', { v: q.data.topology_version, n: q.data.incidents.length }) : undefined}
+      actions={
+        <Segmented
+          label={t('topology.replay_span')}
+          value={activeSpan}
+          onChange={setSpan}
+          options={REPLAY_SPANS.map((s) => ({ value: s, label: t(`topology.span.${s}`) }))}
+        />
+      }
     >
       {timeline.data ? (
         <MapReplay
           timeline={timeline.data}
+          stepMs={stepMs}
           at={at ?? null}
           playing={playing}
           onChange={setAt}
@@ -434,6 +474,7 @@ export function TopologyPage({
   hops,
   domain,
   at,
+  span,
 }: {
   cluster?: string;
   view: TopologyView;
@@ -441,6 +482,7 @@ export function TopologyPage({
   hops: 1 | 2;
   domain?: string;
   at?: string;
+  span?: ReplaySpan;
 }) {
   const { t } = useI18n();
   const navigate = useNavigate();
@@ -467,7 +509,7 @@ export function TopologyPage({
           because={t('topology.need_cluster')}
         />
       ) : view === 'map' ? (
-        <MapView cluster={cluster} domain={domain} at={at} />
+        <MapView cluster={cluster} domain={domain} at={at} span={span} />
       ) : view === 'coverage' ? (
         <CoverageView cluster={cluster} />
       ) : view === 'neighborhood' ? (

@@ -2,7 +2,7 @@ import { fireEvent, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import type { ClusterMapTimeline } from '../contract';
 import { renderUi } from '../test/render';
-import { firingBuckets, MapReplay, REPLAY_STEP_MS } from './MapReplay';
+import { firingBuckets, MapReplay, REPLAY_STEP_MS, replayStepMs } from './MapReplay';
 
 const FROM = Date.parse('2026-11-13T00:00:00Z');
 const H = 3600_000;
@@ -123,5 +123,39 @@ describe('时间轴上的变更（ADR 0206）', () => {
       />,
     );
     expect(screen.getByText('读取变更失败，时间轴上没有变更行')).toBeTruthy();
+  });
+
+  it('3 天与 7 天跨度按 1 小时、2 小时切格；早于窗口的历史时刻显式写出时刻', () => {
+    expect(replayStepMs(24 * H)).toBe(REPLAY_STEP_MS);
+    expect(replayStepMs(3 * 24 * H)).toBe(H);
+    expect(replayStepMs(7 * 24 * H)).toBe(2 * H);
+
+    const longTimeline: ClusterMapTimeline = {
+      ...timeline,
+      from: iso(FROM),
+      to: iso(FROM + 3 * 24 * H),
+    };
+    const view = renderUi(
+      <MapReplay
+        timeline={longTimeline}
+        at={iso(FROM + H)}
+        playing={false}
+        onChange={() => {}}
+        onPlayingChange={() => {}}
+      />,
+    );
+    expect(screen.getByRole('status').textContent).toMatch(/这 1 小时新触发 1 个、变更 3 个$/);
+
+    // 8 天前的历史事件深链早于回放时间轴：仍清晰标出历史时刻
+    view.rerender(
+      <MapReplay
+        timeline={longTimeline}
+        at={iso(FROM - 24 * H)}
+        playing={false}
+        onChange={() => {}}
+        onPlayingChange={() => {}}
+      />,
+    );
+    expect(screen.getByRole('status').textContent).toMatch(/早于当前回放时间轴/);
   });
 });

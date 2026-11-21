@@ -28,8 +28,8 @@ export interface Links {
   topology?: (clusterId: string, component: string) => string;
   /** 按关键词搜索事件（ADR 0191）；宿主没有搜索页时不提供。 */
   search?: (q: string, clusterId: string) => string;
-  /** 全集群地图，可以对准一个业务领域（ADR 0199）；宿主没有拓扑页时不提供，收件箱不显示地图链接。 */
-  clusterMap?: (clusterId: string, domain?: string) => string;
+  /** 全集群地图，可以对准一个业务领域或历史回放时刻（ADR 0199、ADR 0208）；宿主没有拓扑页时不提供。 */
+  clusterMap?: (clusterId: string, domain?: string, at?: string) => string;
 }
 
 export interface Capabilities {

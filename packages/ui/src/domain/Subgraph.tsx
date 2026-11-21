@@ -23,11 +23,28 @@ import {
 import styles from './Subgraph.module.css';
 import { useComponentNames } from './names';
 import { foldSubgraph, type FoldGroup } from './subgraph-fold';
+import {
+  filterSubgraph,
+  SUBGRAPH_EDGE_LEVELS,
+  subgraphEdgeKind,
+  type SubgraphEdgeKind,
+  type SubgraphEdgeLevel,
+} from './subgraph-model';
 
 type SubNode = IncidentSubgraph['nodes'][number];
 type SubData =
   | { n: SubNode; group?: undefined; roleText: string; alertsText: string }
   | { group: FoldGroup; n?: undefined; countText: string };
+
+const EDGE_CLASS: Partial<Record<SubgraphEdgeKind, string>> = {
+  declared: styles.edgeDeclared,
+  route: styles.edgeRoute,
+  substrate: styles.edgeSubstrate,
+  runtime: styles.edgeRuntime,
+  allowed: styles.edgeAllowed,
+};
+
+const LEGEND_EDGE_KINDS: readonly SubgraphEdgeKind[] = ['declared', 'route', 'substrate', 'runtime', 'allowed'];
 
 // 节点的外框尺寸，与 Subgraph.module.css 的 .node 相同；布局、小地图与查找定位都用它
 const NODE_W = 204;
@@ -44,6 +61,7 @@ function ComponentNode({ id, data }: NodeProps<Node<SubData>>) {
     <div
       className={styles.node}
       data-role={data.group ? 'neighbor' : data.n.role}
+      data-substrate={!data.group && data.n.kind === 'Node' ? '' : undefined}
       data-fold={data.group ? '' : undefined}
       {...viewAttrs(view, id)}
     >
@@ -107,12 +125,14 @@ export interface SubgraphProps {
 export function Subgraph(props: SubgraphProps) {
   const { graph } = props;
   const { t, fmt } = useI18n();
+  const [level, setLevel] = useState<SubgraphEdgeLevel>('deps');
   const [fold, setFold] = useState(true);
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
-  const folded = useMemo(() => foldSubgraph(graph, expanded), [graph, expanded]);
+  const filtered = useMemo(() => filterSubgraph(graph, level), [graph, level]);
+  const folded = useMemo(() => foldSubgraph(filtered.graph, expanded), [filtered.graph, expanded]);
   const drawn = useMemo(
-    () => (fold ? folded : { nodes: graph.nodes, groups: [], edges: graph.edges }),
-    [fold, folded, graph],
+    () => (fold ? folded : { nodes: filtered.graph.nodes, groups: [], edges: filtered.graph.edges }),
+    [fold, folded, filtered.graph],
   );
   const [laid, setLaid] = useState<{ nodes: Node<SubData>[]; edges: CanvasEdge[] } | null>(null);
   useEffect(() => {
@@ -140,15 +160,19 @@ export function Subgraph(props: SubgraphProps) {
           // 写明宽高：小地图只画有尺寸的节点，而这里的节点不经 onNodesChange 回写测量结果
           return { id, type: 'component', position: p, width: NODE_W, height: NODE_H, data, draggable: false };
         }),
-        edges: drawn.edges.map((e, i) => ({
-          id: `e${i}`,
-          source: e.from,
-          target: e.to,
-          data: {
-            text: `${e.relation} · ${t(`subgraph.source.${e.provenance}`)} ${fmt.number(e.confidence, 1)}`,
-            weak: e.confidence < 0.6,
-          },
-        })),
+        edges: drawn.edges.map((e, i) => {
+          const kind = subgraphEdgeKind(e);
+          return {
+            id: `e${i}`,
+            source: e.from,
+            target: e.to,
+            className: EDGE_CLASS[kind],
+            data: {
+              text: `${e.relation} · ${t(`subgraph.source.${e.provenance}`)} ${fmt.number(e.confidence, 1)}`,
+              weak: e.confidence < 0.6 && kind !== 'allowed',
+            },
+          };
+        }),
       });
     });
     return () => {
@@ -167,6 +191,13 @@ export function Subgraph(props: SubgraphProps) {
         {...props}
         nodes={laid.nodes}
         edges={laid.edges}
+        level={level}
+        onLevel={(next) => {
+          setLevel(next);
+          setExpanded(new Set());
+        }}
+        hiddenEdges={filtered.hiddenEdges}
+        visibleKinds={filtered.kinds}
         fold={folded.foldable > 0 ? fold : null}
         onFold={() => {
           setFold(!fold);
@@ -186,12 +217,20 @@ function SubgraphCanvas({
   primary = false,
   nodes,
   edges,
+  level,
+  onLevel,
+  hiddenEdges,
+  visibleKinds,
   fold,
   onFold,
   onExpand,
 }: SubgraphProps & {
   nodes: Node<SubData>[];
   edges: CanvasEdge[];
+  level: SubgraphEdgeLevel;
+  onLevel: (level: SubgraphEdgeLevel) => void;
+  hiddenEdges: number;
+  visibleKinds: ReadonlySet<SubgraphEdgeKind>;
   /** 同类合并是否打开；null 表示这张图没有可以合并的组件，不显示开关 */
   fold: boolean | null;
   onFold: () => void;
@@ -222,6 +261,9 @@ function SubgraphCanvas({
       ).join('\n'),
     [nameKey],
   );
+  const legendKinds = LEGEND_EDGE_KINDS.filter((k) => visibleKinds.has(k));
+  const hasSubstrateNode = nodes.some((n) => !n.data.group && n.data.n.kind === 'Node');
+  const showTools = fold !== null || graph.edges.length > 0;
   return (
     <GraphCanvas
       label={t('subgraph.label', { n: graph.nodes.length, e: graph.edges.length })}
@@ -235,10 +277,60 @@ function SubgraphCanvas({
       primary={primary}
       onOpen={(n) => (n.data.group ? onExpand(n.id) : onOpenComponent?.(n.id))}
       tools={
-        fold !== null && (
-          <button type="button" className={canvasStyles.tool} aria-pressed={fold} onClick={onFold}>
-            {t('subgraph.fold')}
-          </button>
+        showTools && (
+          <>
+            {graph.edges.length > 0 && (
+              <span role="group" aria-label={t('subgraph.edges_level')} className={styles.levels}>
+                {SUBGRAPH_EDGE_LEVELS.map((l) => (
+                  <button
+                    key={l}
+                    type="button"
+                    className={canvasStyles.tool}
+                    aria-pressed={level === l}
+                    title={t(`subgraph.level_hint.${l}`)}
+                    onClick={() => onLevel(l)}
+                  >
+                    {t(`subgraph.level.${l}`)}
+                  </button>
+                ))}
+              </span>
+            )}
+            {hiddenEdges > 0 && (
+              <button
+                type="button"
+                className={styles.hiddenBadge}
+                title={t('subgraph.hidden_edges_hint')}
+                onClick={() => onLevel('allowed')}
+              >
+                {t('subgraph.hidden_edges', { n: hiddenEdges })}
+              </button>
+            )}
+            {fold !== null && (
+              <button type="button" className={canvasStyles.tool} aria-pressed={fold} onClick={onFold}>
+                {t('subgraph.fold')}
+              </button>
+            )}
+          </>
+        )
+      }
+      footer={
+        (legendKinds.length > 0 || hasSubstrateNode) && (
+          <div className={styles.legend} aria-hidden="true">
+            {legendKinds.map((k) => (
+              <span key={k}>
+                <svg className={styles.legendEdge} data-kind={k} viewBox="0 0 22 6" width="22" height="6">
+                  <line x1="0" y1="3" x2="22" y2="3" />
+                </svg>
+                {t(`subgraph.edge_kind.${k}`)}
+              </span>
+            ))}
+            {hasSubstrateNode && (
+              <span>
+                <i className={styles.legendSubstrate} />
+                {t('subgraph.substrate_host')}
+              </span>
+            )}
+          </div>
         )
       }
       panel={(n, close) =>
