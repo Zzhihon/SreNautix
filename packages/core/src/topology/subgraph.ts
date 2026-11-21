@@ -1,12 +1,14 @@
 // 事件根因子图与邻域的富化（ADR 0208）：
 // 1. 逻辑伪组件（component:gateway、component:pg 等）按全集群地图的落点规则与业务服务目录展开为真实工作负载，避免单点孤立图；
 // 2. 注入领域包 business.yaml 声明的依赖（provenance: declared, confidence: 1），使根因子图与全集群地图一致；
-// 3. 为工作负载补上直连宿主节点的 runs_on 边，同时在 BFS 展开时阻止非根因 Node 反向拉入无关 Pod，
-//    并阻止 <0.6 的网络策略放行边在第二跳扩散成蛛网。
+// 3. 为工作负载补上直连宿主节点的 runs_on 边，并在第 2 跳设置叶子与弱边屏障：
+//    - 仅经 network_policy 到达的 1 跳节点不向外扩散，第 2 跳也不再沿任何 network_policy 边展开；
+//    - 非根因共享叶子/枢纽类型（ConfigMap、Secret、Application、PDB、HPA、Node、Service、ReplicaSet）保留为 1 跳上下文，
+//      不向第 2 跳扩散（Pod 根因沿 ReplicaSet 的 owned_by 向上找 Deployment、同宿主机上已有事件成员/候选除外）。
 import type { ComponentKey, ComponentType, HubComponents, TopologyEdge, TopologyNode } from '@srenautix/contract';
 import { matchesByName, type ServiceCatalog } from '@srenautix/packs-sdk/business';
 import { parseKey, type ParsedKey } from '../keys.js';
-import { TopologyGraph } from './graph.js';
+import { OWNED_BY, TopologyGraph } from './graph.js';
 import { clusterMap, mapPlacer } from './map.js';
 
 export type SubgraphResult = HubComponents['schemas']['Subgraph'];
@@ -27,8 +29,19 @@ export interface SubgraphBuildOptions {
 const PSEUDO_KIND = 'component';
 const NODE_KIND = 'Node';
 const POD_KIND = 'Pod';
+const REPLICA_SET_KIND = 'ReplicaSet';
 const RUNS_ON = 'runs_on';
-const POLICY_WEAK_THRESHOLD = 0.6;
+/** 非根因节点在第 2 跳停止继续展开的共享叶子/枢纽类型（保留为第 1 跳上下文，不穿过它们扩散成蛛网） */
+const LEAF_EXPANSION_STOPS: ReadonlySet<string> = new Set([
+  'ConfigMap',
+  'Secret',
+  'Application',
+  'PodDisruptionBudget',
+  'HorizontalPodAutoscaler',
+  'Node',
+  'Service',
+  REPLICA_SET_KIND,
+]);
 /** 逻辑组件按服务兜底展开的最多工作负载数：避免把含几十个组件的系统服务全部当成根因 */
 const SERVICE_FALLBACK_MAX = 4;
 
@@ -66,6 +79,11 @@ export function buildIncidentSubgraph(
     }
   }
   const kindOf = (key: string) => byKey.get(key)?.kind ?? safeParseKey(key).kind;
+  const baseKindOf = (key: string) => {
+    const k = kindOf(key);
+    const dot = k.indexOf('.');
+    return dot < 0 ? k : k.slice(0, dot);
+  };
 
   /** 将逻辑伪组件（component:*）映射到拓扑里的真实工作负载；已有真实节点或映射不出时原样返回 */
   const resolveKey = (key: ComponentKey, serviceHint: string | null): ComponentKey[] => {
@@ -218,10 +236,13 @@ export function buildIncidentSubgraph(
   }
 
   // 有界逐跳展开：
-  // - 非根因 Node 不沿 runs_on 反向拉入无关 Pod（同宿主机上已有事件成员/候选时照常连上）；
-  // - 低于 0.6 的网络策略放行边只在第 1 跳出现，不在第 2 跳扩散；
+  // - 仅经 network_policy 到达的 1 跳节点不进入 strong，第 2 跳跳过展开；第 2 跳不再遍历任何 network_policy 边；
+  // - 非根因共享叶子/枢纽（ConfigMap、Secret、Application、PDB、HPA、Node、Service、ReplicaSet）保留为 1 跳上下文，不在第 2 跳扩散；
+  //   例外：非根因 ReplicaSet 允许沿 owned_by 向上走到所属 Deployment（保留 Pod -> ReplicaSet -> Deployment），
+  //   非根因 Node 仅允许沿 runs_on 连上同宿主机的事件成员或候选；
   // - 不穿过集群枢纽继续向外展开。
   const seedSet = new Set<string>(seeds);
+  const strong = new Set<string>(seeds);
   const incidentKeys = new Set<string>([...seeds, ...resolvedCandidates, ...memberComponents.keys()]);
   const dist = new Map<string, number>(seeds.map((s) => [s, 0]));
   let frontier = [...seedSet];
@@ -229,19 +250,31 @@ export function buildIncidentSubgraph(
     const inFrontier = new Set(frontier);
     const next: string[] = [];
     for (const a of frontier) {
-      if (h > 1 && g.isHub(a)) {
+      if (h > 1 && (g.isHub(a) || !strong.has(a))) {
         continue;
       }
-      const aIsNonSeedNode = kindOf(a) === NODE_KIND && !seedSet.has(a);
+      const aBaseKind = baseKindOf(a);
+      const aIsNonSeedLeaf = h > 1 && !seedSet.has(a) && LEAF_EXPANSION_STOPS.has(aBaseKind);
+      const aIsNonSeedReplicaSet = aIsNonSeedLeaf && aBaseKind === REPLICA_SET_KIND;
+      const aIsNonSeedNode = aIsNonSeedLeaf && aBaseKind === NODE_KIND;
+      if (aIsNonSeedLeaf && !aIsNonSeedReplicaSet && !aIsNonSeedNode) {
+        continue;
+      }
       for (const e of touching.get(a) ?? []) {
-        if (h > 1 && e.provenance === 'network_policy' && e.confidence < POLICY_WEAK_THRESHOLD) {
+        if (h > 1 && e.provenance === 'network_policy') {
+          continue;
+        }
+        if (aIsNonSeedReplicaSet && !(e.relation === OWNED_BY && e.from === a)) {
           continue;
         }
         const b = e.from === a ? e.to : e.from;
-        if (inFrontier.has(b) || dist.has(b)) {
+        if (aIsNonSeedNode && !(e.relation === RUNS_ON && incidentKeys.has(b))) {
           continue;
         }
-        if (aIsNonSeedNode && e.relation === RUNS_ON && !incidentKeys.has(b)) {
+        if (e.provenance !== 'network_policy' && !inFrontier.has(b) && (!dist.has(b) || dist.get(b) === h)) {
+          strong.add(b);
+        }
+        if (inFrontier.has(b) || dist.has(b)) {
           continue;
         }
         dist.set(b, h);
