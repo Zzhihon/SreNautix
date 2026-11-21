@@ -152,6 +152,22 @@ function RunsTab({ runs }: { runs: readonly ResearchRunSummary[] }) {
   );
 }
 
+/** 构造「在集群拓扑图查看发生时刻」链接（ADR 0208）；first_firing_at 缺失或非法时回退为实时地图 */
+export function incidentMapLink(
+  clusterMap: ((clusterId: string, domain?: string, at?: string) => string) | undefined,
+  incident: { cluster_id: string; business_domain?: string | null; first_firing_at?: string | null },
+): { href: string; hasOnset: boolean } | null {
+  if (!clusterMap) {
+    return null;
+  }
+  const raw = incident.first_firing_at ?? undefined;
+  const onsetAt = raw && !Number.isNaN(Date.parse(raw)) ? raw : undefined;
+  return {
+    href: clusterMap(incident.cluster_id, incident.business_domain ?? undefined, onsetAt),
+    hasOnset: onsetAt !== undefined,
+  };
+}
+
 export function IncidentView({
   incidentRef,
   tab,
@@ -167,6 +183,7 @@ export function IncidentView({
   onOpenComponent?: (clusterId: string, component: string) => void;
 }) {
   const { t } = useI18n();
+  const { links } = useUiEnv();
   const incident = useIncident(incidentRef);
   const stageA = useStageA(incidentRef);
   const runs = useRuns(incidentRef);
@@ -219,6 +236,7 @@ export function IncidentView({
   const end = i.ended_at ? Date.parse(i.ended_at) : now;
   const start = Date.parse(i.first_firing_at) - 30 * 60_000;
   const alertnames = new Map(i.members.map((m) => [m.alert_id, m.alertname]));
+  const mapLink = incidentMapLink(links.clusterMap, i);
 
   return (
     <ComponentNamesProvider names={i.component_names}>
@@ -243,6 +261,13 @@ export function IncidentView({
               <Panel
                 title={t('detail.subgraph')}
                 meta={subgraph.data ? t('detail.topology_v', { v: subgraph.data.topology_version }) : undefined}
+                actions={
+                  mapLink ? (
+                    <AppLink href={mapLink.href} className={styles.mapAction}>
+                      {t(mapLink.hasOnset ? 'detail.open_map_at_onset' : 'detail.open_map')}
+                    </AppLink>
+                  ) : undefined
+                }
               >
                 {subgraph.error ? (
                   <ErrorBox title={t('detail.subgraph_failed')} error={subgraph.error} />

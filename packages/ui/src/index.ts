@@ -70,8 +70,10 @@ export type { PasskeyHook, ReauthHook } from './domain/ApprovalSheet';
 export { RunTrace, waterfall } from './domain/RunTrace';
 export type { Bar, BarKind } from './domain/RunTrace';
 export { Subgraph, layoutSubgraph } from './domain/Subgraph';
+export { SUBGRAPH_EDGE_LEVELS, filterSubgraph, subgraphEdgeKind, subgraphEdgeLevel } from './domain/subgraph-model';
+export type { FilteredSubgraph, SubgraphEdgeKind, SubgraphEdgeLevel } from './domain/subgraph-model';
 export { ClusterMap } from './domain/ClusterMap';
-export { MapReplay, REPLAY_STEP_MS } from './domain/MapReplay';
+export { MapReplay, REPLAY_STEP_MS, replayStepMs } from './domain/MapReplay';
 
 export { InboxView, DEFAULT_INBOX_FILTERS, BAND_MS } from './views/InboxView';
 export type { InboxFilters } from './views/InboxView';
