@@ -24,6 +24,7 @@ import styles from './Subgraph.module.css';
 import { useComponentNames } from './names';
 import { foldSubgraph, type FoldGroup } from './subgraph-fold';
 import {
+  defaultSubgraphLevel,
   filterSubgraph,
   SUBGRAPH_EDGE_LEVELS,
   subgraphEdgeKind,
@@ -125,9 +126,18 @@ export interface SubgraphProps {
 export function Subgraph(props: SubgraphProps) {
   const { graph } = props;
   const { t, fmt } = useI18n();
-  const [level, setLevel] = useState<SubgraphEdgeLevel>('deps');
+  const graphKey = `${graph.root ?? ''}\0${graph.topology_version}`;
+  const defaultLevel = useMemo(() => defaultSubgraphLevel(graph), [graph]);
+  const [prevKey, setPrevKey] = useState(graphKey);
+  const [pickedLevel, setPickedLevel] = useState<SubgraphEdgeLevel | null>(null);
   const [fold, setFold] = useState(true);
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
+  if (prevKey !== graphKey) {
+    setPrevKey(graphKey);
+    setPickedLevel(null);
+    setExpanded(new Set());
+  }
+  const level = pickedLevel ?? defaultLevel;
   const filtered = useMemo(() => filterSubgraph(graph, level), [graph, level]);
   const folded = useMemo(() => foldSubgraph(filtered.graph, expanded), [filtered.graph, expanded]);
   const drawn = useMemo(
@@ -193,7 +203,7 @@ export function Subgraph(props: SubgraphProps) {
         edges={laid.edges}
         level={level}
         onLevel={(next) => {
-          setLevel(next);
+          setPickedLevel(next);
           setExpanded(new Set());
         }}
         hiddenEdges={filtered.hiddenEdges}

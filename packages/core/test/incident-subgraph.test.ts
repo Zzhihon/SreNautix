@@ -358,4 +358,162 @@ describe('事件根因子图富化（ADR 0208）', () => {
       },
     ]);
   });
+
+  it('仅经 network_policy（含 0.6）到达的 1 跳节点在第 2 跳不扩散，第 2 跳不穿越任何策略边；同时有强边时仍照常展开', () => {
+    const snap = {
+      version: 90,
+      nodes: [...SNAPSHOT.nodes, n('Deployment', 'observability', 'alloy'), n('Pod', 'observability', 'alloy-0')],
+      edges: [
+        // 故意把 0.6 的 network_policy 边放在前面，验证 PG 同时有 declared 边时仍能进入 strong 集合
+        e(GW, 'egress_to', PG, 'network_policy', 0.6, 'service'),
+        e(GW, 'egress_to', 'Deployment:observability/alloy', 'network_policy', 0.6, 'service'),
+        e('Pod:observability/alloy-0', 'owned_by', 'Deployment:observability/alloy'),
+        e('Deployment:observability/alloy', 'egress_to', DISTANT, 'network_policy', 0.6, 'service'),
+        e(PG, 'primary', PG_POD),
+        e(PG, 'egress_to', DISTANT, 'network_policy', 0.6, 'service'),
+        ...SNAPSHOT.edges,
+      ],
+    };
+
+    const g = buildIncidentSubgraph(
+      snap,
+      {
+        root: { component: GW },
+        candidates: [],
+        members: [],
+        components: [GW],
+        primary_service: 'gateway',
+      },
+      2,
+      { services: CATALOG, componentTypes: TYPES },
+    );
+
+    const keys = g.nodes.map((x) => x.component);
+    // 1 跳策略邻居保留为叶子，但绝不向第 2 跳扩散其 Pod 或远端节点
+    expect(keys).toContain('Deployment:observability/alloy');
+    expect(keys).not.toContain('Pod:observability/alloy-0');
+    expect(keys).not.toContain(SCRAPER_POD);
+    expect(keys).not.toContain(DISTANT);
+    // PG 同时通过 declared 到达，因此第 2 跳照常沿 primary 展开到 PG_POD，但不沿 0.6 network_policy 去往 DISTANT
+    expect(keys).toContain(PG);
+    expect(keys).toContain(PG_POD);
+    expect(g.edges.some((x) => x.from === PG && x.to === PG_POD && x.relation === 'primary')).toBe(true);
+  });
+
+  it('非根因共享叶子（ConfigMap、Secret、Application、PDB、HPA、Service、ReplicaSet）保留为 1 跳上下文，不在第 2 跳扩散成蛛网', () => {
+    const CM = 'ConfigMap:cchp-prod/cchp-runtime';
+    const SEC = 'Secret:cchp-prod/cchp-db';
+    const APP = 'Application.argoproj.io:argocd/cchp-prod';
+    const PDB = 'PodDisruptionBudget:cchp-prod/exp-pdb';
+    const HPA = 'HorizontalPodAutoscaler:cchp-prod/exp-hpa';
+    const SVC = 'Service:cchp-prod/exp-svc';
+    const OLD_RS = 'ReplicaSet:cchp-prod/archive-exporter-old';
+    const OLD_POD = 'Pod:cchp-prod/archive-exporter-old-xyz';
+    const WF = 'Workflow.argoproj.io:cchp-prod/release-old-1';
+    const SEC_PEER = 'Deployment:cchp-prod/secret-peer';
+    const APP_PEER = 'Deployment:cchp-prod/app-peer';
+    const PDB_PEER = 'Deployment:cchp-prod/pdb-peer';
+    const KEDA = 'ScaledObject.keda.sh:cchp-prod/exp-keda';
+    const SVC_CLIENT = 'Deployment:cchp-prod/svc-client';
+
+    const snap = {
+      version: 91,
+      nodes: [
+        ...SNAPSHOT.nodes,
+        n('ConfigMap', 'cchp-prod', 'cchp-runtime'),
+        n('Secret', 'cchp-prod', 'cchp-db'),
+        n('Application.argoproj.io', 'argocd', 'cchp-prod'),
+        n('PodDisruptionBudget', 'cchp-prod', 'exp-pdb'),
+        n('HorizontalPodAutoscaler', 'cchp-prod', 'exp-hpa'),
+        n('Service', 'cchp-prod', 'exp-svc'),
+        n('ReplicaSet', 'cchp-prod', 'archive-exporter-old'),
+        n('Pod', 'cchp-prod', 'archive-exporter-old-xyz'),
+        n('Workflow.argoproj.io', 'cchp-prod', 'release-old-1'),
+        n('Deployment', 'cchp-prod', 'secret-peer'),
+        n('Deployment', 'cchp-prod', 'app-peer'),
+        n('Deployment', 'cchp-prod', 'pdb-peer'),
+        n('ScaledObject.keda.sh', 'cchp-prod', 'exp-keda'),
+        n('Deployment', 'cchp-prod', 'svc-client'),
+      ],
+      edges: [
+        ...SNAPSHOT.edges,
+        e(EXP, 'references', CM, 'config_ref', 0.7, 'service'),
+        e(WF, 'references', CM, 'config_ref', 0.7, 'service'),
+        e(EXP, 'references', SEC, 'config_ref', 0.7, 'service'),
+        e(SEC_PEER, 'references', SEC, 'config_ref', 0.7, 'service'),
+        e(EXP, 'managed_by', APP),
+        e(APP_PEER, 'managed_by', APP),
+        e(PDB, 'protects', EXP),
+        e(PDB, 'protects', PDB_PEER),
+        e(HPA, 'scales', EXP),
+        e(HPA, 'owned_by', KEDA),
+        e(SVC, 'selects', EXP),
+        e(SVC_CLIENT, 'references', SVC, 'config_ref', 0.7, 'service'),
+        e(OLD_RS, 'owned_by', EXP),
+        e(OLD_POD, 'owned_by', OLD_RS),
+      ],
+    };
+
+    const g = buildIncidentSubgraph(
+      snap,
+      {
+        root: { component: EXP },
+        candidates: [],
+        members: [{ component: EXP, alert_id: 'a-exp@1', left_version: null }],
+        components: [EXP],
+        primary_service: 'archive-exporter',
+      },
+      2,
+      { services: CATALOG, componentTypes: TYPES },
+    );
+
+    const byComp = new Map(g.nodes.map((x) => [x.component, x]));
+    // 所有共享叶子都在第 1 跳保留为上下文
+    for (const leaf of [CM, SEC, APP, PDB, HPA, SVC, OLD_RS, NODE_OBS]) {
+      expect(byComp.get(leaf)?.hops, leaf).toBe(1);
+    }
+    // 第 2 跳绝不穿过这些共享叶子拉入无关对象或历史 Pod/Workflow
+    for (const blocked of [WF, SEC_PEER, APP_PEER, PDB_PEER, KEDA, SVC_CLIENT, OLD_POD, EXP_POD, UNRELATED_POD]) {
+      expect(byComp.has(blocked), blocked).toBe(false);
+    }
+  });
+
+  it('Pod 根因保留 Pod -> ReplicaSet -> Deployment 向上归属及存储链路，不拉入同 ReplicaSet 兄弟 Pod', () => {
+    const SIBLING_POD = 'Pod:cchp-prod/archive-exporter-rs1-def';
+    const PVC = 'PersistentVolumeClaim:cchp-prod/archive-spool';
+    const PV = 'PersistentVolume:pvc-123';
+    const snap = {
+      version: 92,
+      nodes: [
+        ...SNAPSHOT.nodes,
+        n('Pod', 'cchp-prod', 'archive-exporter-rs1-def'),
+        n('PersistentVolumeClaim', 'cchp-prod', 'archive-spool'),
+        n('PersistentVolume', null, 'pvc-123'),
+      ],
+      edges: [...SNAPSHOT.edges, e(SIBLING_POD, 'owned_by', EXP_RS), e(EXP_POD, 'mounts', PVC), e(PVC, 'bound_to', PV)],
+    };
+
+    const g = buildIncidentSubgraph(
+      snap,
+      {
+        root: { component: EXP_POD },
+        candidates: [],
+        members: [{ component: EXP_POD, alert_id: 'a-pod@1', left_version: null }],
+        components: [EXP_POD],
+        primary_service: 'archive-exporter',
+      },
+      2,
+      { services: CATALOG, componentTypes: TYPES },
+    );
+
+    const byComp = new Map(g.nodes.map((x) => [x.component, x]));
+    expect(byComp.get(EXP_POD)?.hops).toBe(0);
+    expect(byComp.get(EXP_RS)?.hops).toBe(1);
+    expect(byComp.get(EXP)?.hops).toBe(2);
+    expect(byComp.get(PVC)?.hops).toBe(1);
+    expect(byComp.get(PV)?.hops).toBe(2);
+    expect(byComp.get(NODE_OBS)?.hops).toBe(1);
+    expect(byComp.has(SIBLING_POD)).toBe(false);
+    expect(byComp.has(UNRELATED_POD)).toBe(false);
+  });
 });

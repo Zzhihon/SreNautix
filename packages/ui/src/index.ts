@@ -70,7 +70,13 @@ export type { PasskeyHook, ReauthHook } from './domain/ApprovalSheet';
 export { RunTrace, waterfall } from './domain/RunTrace';
 export type { Bar, BarKind } from './domain/RunTrace';
 export { Subgraph, layoutSubgraph } from './domain/Subgraph';
-export { SUBGRAPH_EDGE_LEVELS, filterSubgraph, subgraphEdgeKind, subgraphEdgeLevel } from './domain/subgraph-model';
+export {
+  SUBGRAPH_EDGE_LEVELS,
+  defaultSubgraphLevel,
+  filterSubgraph,
+  subgraphEdgeKind,
+  subgraphEdgeLevel,
+} from './domain/subgraph-model';
 export type { FilteredSubgraph, SubgraphEdgeKind, SubgraphEdgeLevel } from './domain/subgraph-model';
 export { ClusterMap } from './domain/ClusterMap';
 export { MapReplay, REPLAY_STEP_MS, replayStepMs } from './domain/MapReplay';

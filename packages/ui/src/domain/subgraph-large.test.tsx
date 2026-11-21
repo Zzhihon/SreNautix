@@ -128,6 +128,9 @@ describe('组件多的子图（ADR 0197）', () => {
 
   it('合并的组是一个节点：侧栏列出成员并链接到各自的邻域；展开后成员单独画出，开关把它们合并回去', async () => {
     renderUi(<Subgraph graph={graph} clusterId="prod" />, { links });
+    await node('gateway，根因，1 条告警');
+    // 同宿主机的非事件 2 跳邻居 Pod 属于 deps 档，切到全部依赖后合并成组
+    fireEvent.click(screen.getByRole('button', { name: '全部依赖' }));
     const group = await node('Pod，6 个同类组件已合并');
     expect(group.textContent).toContain('6 个同类组件 · batch');
     expect(screen.queryByRole('group', { name: 'job-0，邻居，0 条告警' })).toBeNull();
@@ -156,6 +159,8 @@ describe('组件多的子图（ADR 0197）', () => {
   it('双击合并的组在图上展开它，不交给宿主', async () => {
     const opened: string[] = [];
     renderUi(<Subgraph graph={graph} onOpenComponent={(c) => opened.push(c)} />);
+    await node('gateway，根因，1 条告警');
+    fireEvent.click(screen.getByRole('button', { name: '全部依赖' }));
     fireEvent.doubleClick(await node('Pod，6 个同类组件已合并'));
     await node('job-0，邻居，0 条告警');
     expect(opened).toEqual([]);
@@ -163,6 +168,8 @@ describe('组件多的子图（ADR 0197）', () => {
 
   it('指向一个节点只突出它和直接相连的组件；组件多时边的标注只出现在这个节点的边上', async () => {
     renderUi(<Subgraph graph={graph} />);
+    await node('gateway，根因，1 条告警');
+    fireEvent.click(screen.getByRole('button', { name: '全部依赖' }));
     const worker = await node('worker-1，邻居，0 条告警');
     const root = await node('gateway，根因，1 条告警');
     const group = await node('Pod，6 个同类组件已合并');
@@ -182,6 +189,8 @@ describe('组件多的子图（ADR 0197）', () => {
 
   it('查找：按名称与组件键匹配，合并的组按成员匹配；回车依次定位，Esc 清空', async () => {
     renderUi(<Subgraph graph={graph} />);
+    await node('gateway，根因，1 条告警');
+    fireEvent.click(screen.getByRole('button', { name: '全部依赖' }));
     const group = await node('Pod，6 个同类组件已合并');
     const svc3 = await node('svc-3，成员，0 条告警');
     const find = screen.getByRole('searchbox', { name: '查找组件' });
