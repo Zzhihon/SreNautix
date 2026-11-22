@@ -6,7 +6,8 @@ templates:
   - templates/audit-minio.yaml
   - templates/networkpolicy.yaml
   - templates/rbac.yaml
-  - templates/admission.yaml
+  - templates/gateway/admission.yaml
+  - templates/gateway/gateway-extra.yaml
   - templates/self-monitoring.yaml
   - templates/validate.yaml
 values:
@@ -116,7 +117,7 @@ tests:
                 app.kubernetes.io/name: srenautix
         documentSelector: {path: metadata.name, value: t-srenautix-minio}
 
-  - it: 不生成 gateway RBAC 与准入策略
+  - it: 不生成 gateway RBAC、准入策略与熔断/暂存扩展资源
     asserts:
       - containsDocument: {kind: Role, apiVersion: rbac.authorization.k8s.io/v1, name: t-srenautix-gateway}
         template: templates/rbac.yaml
@@ -125,7 +126,9 @@ tests:
         template: templates/rbac.yaml
         not: true
       - hasDocuments: {count: 0}
-        template: templates/admission.yaml
+        template: templates/gateway/admission.yaml
+      - hasDocuments: {count: 0}
+        template: templates/gateway/gateway-extra.yaml
 
   - it: 自身监控不含 gateway ServiceMonitor、gateway 告警规则及 gateway 状态条件
     template: templates/self-monitoring.yaml
