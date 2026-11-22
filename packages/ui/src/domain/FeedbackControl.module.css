@@ -3,15 +3,40 @@
   flex-direction: column;
   gap: 8px;
 }
+.formInline {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.inlineRow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+}
+.inlineTitle {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--sn-text);
+  white-space: nowrap;
+}
 .axis {
   display: grid;
   grid-template-columns: 6.5em minmax(0, 1fr) auto;
   gap: 8px;
   align-items: center;
 }
+.axisInline {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
 .axisLabel {
   color: var(--sn-dim);
   font-size: 12.5px;
+  white-space: nowrap;
 }
 .shown {
   min-width: 0;
@@ -25,13 +50,13 @@
 .yes,
 .no {
   border: 1px solid var(--sn-line);
-  background: var(--sn-raise);
+  background: var(--sn-panel);
   color: var(--sn-text);
   border-radius: 5px;
-  padding: 3px 14px;
+  padding: 2px 12px;
   cursor: pointer;
   font-weight: 600;
-  min-height: 32px;
+  min-height: 28px;
 }
 .yes[aria-pressed='true'] {
   background: var(--sn-ok-soft);
@@ -48,6 +73,39 @@
   opacity: 0.5;
   cursor: not-allowed;
 }
+.sep {
+  width: 1px;
+  height: 18px;
+  background: var(--sn-line);
+}
+.inlineHint {
+  margin-left: auto;
+  color: var(--sn-faint);
+  font-size: 12px;
+}
+.inlineExpand {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--sn-line);
+}
+.confirmRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px;
+}
+.reasonInline {
+  flex: 0 1 280px;
+  min-width: 180px;
+  max-width: 100%;
+}
+.detailGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+}
 .more {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -61,6 +119,7 @@
 }
 .hint,
 .note {
+  margin: 0;
   color: var(--sn-dim);
   font-size: 12px;
 }
@@ -72,6 +131,16 @@
   font-size: 13px;
 }
 .readonly {
+  margin: 0;
   color: var(--sn-dim);
   font-size: 13px;
+}
+@media (max-width: 720px) {
+  .sep {
+    display: none;
+  }
+  .inlineHint {
+    margin-left: 0;
+    flex-basis: 100%;
+  }
 }

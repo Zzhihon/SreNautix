@@ -3,23 +3,39 @@
   flex-direction: column;
   gap: 8px;
 }
-.titleRow {
+.topRow {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px 16px;
+}
+.titleBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1 1 360px;
+  min-width: 0;
+}
+.title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 650;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+.metaRow {
   display: flex;
   flex-wrap: wrap;
   gap: 6px 10px;
   align-items: center;
-}
-.title {
-  font-size: 20px;
-  font-weight: 650;
-  overflow-wrap: anywhere;
 }
 .claim {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   align-items: center;
-  margin-top: 8px;
+  flex: none;
 }
 .service {
   color: var(--sn-dim);
@@ -42,7 +58,7 @@
 .verdictRow {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px 10px;
   align-items: center;
 }
 .flag {
@@ -50,16 +66,21 @@
   font-size: 12.5px;
 }
 .sentence {
-  font-size: 15px;
-  line-height: 1.55;
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--sn-line-soft);
+  border-radius: 6px;
+  background: var(--sn-raise);
+  font-size: 14.5px;
+  line-height: 1.6;
   overflow-wrap: anywhere;
 }
 .facts {
-  display: flex;
+  display: inline-flex;
   flex-wrap: wrap;
-  gap: 4px 14px;
+  gap: 4px 12px;
   color: var(--sn-dim);
-  font-size: 13px;
+  font-size: 12.5px;
   align-items: center;
 }
 .degraded {
@@ -80,6 +101,54 @@
   background: var(--sn-warn-soft);
   border-radius: 6px;
   font-size: 12.5px;
+}
+.affectingBox {
+  border: 1px solid var(--sn-warn);
+  background: var(--sn-warn-soft);
+  border-radius: 6px;
+  font-size: 12.5px;
+  overflow: hidden;
+}
+.affectingToggle {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--sn-text);
+  font: inherit;
+  padding: 6px 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  text-align: left;
+  cursor: pointer;
+}
+.affectingPreview {
+  flex: 1 1 200px;
+  min-width: 0;
+  color: var(--sn-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.affectingAction {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--sn-dim);
+  white-space: nowrap;
+}
+.affectingAction svg {
+  width: 14px;
+  height: 14px;
+}
+.affectingList {
+  margin: 0;
+  padding: 0 10px 8px 26px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
 }
 .dim {
   color: var(--sn-dim);

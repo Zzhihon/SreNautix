@@ -28,6 +28,7 @@ import { FeedbackControl, REASON_CODES } from './FeedbackControl';
 import { HypothesisList } from './HypothesisList';
 import { IncidentRow } from './IncidentRow';
 import { DEFAULT_INBOX_FILTERS, DomainOverview, groupByDomain, InboxView } from '../views/InboxView';
+import { IncidentView } from '../views/IncidentView';
 import type { DataPort } from '../port';
 import { componentLabel, sortEvidence } from './model';
 import { ComponentNamesProvider } from './names';
@@ -384,6 +385,37 @@ describe('反馈', () => {
     });
     expect(screen.getByText('只读：反馈需要 responder 角色')).toBeTruthy();
   });
+
+  it('内联布局默认收起原因与提交按钮；点选对/错或只填原因后原地展开', () => {
+    renderUi(<FeedbackControl {...base} layout="inline" />);
+    expect(screen.getByText('这个研判对吗？')).toBeTruthy();
+    expect(screen.getByText('事件未恢复时也可以反馈，以最新一条为准。')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '提交反馈' })).toBeNull();
+    expect(screen.queryByLabelText('原因（可选）')).toBeNull();
+
+    // 点选「对」展开原因（可选）与可点的提交按钮，再点一次取消并收起
+    const disp = screen.getByRole('group', { name: '处置判断' });
+    fireEvent.click(within(disp).getByRole('button', { name: '对' }));
+    const submit = screen.getByRole('button', { name: '提交反馈' }) as HTMLButtonElement;
+    expect(submit.disabled).toBe(false);
+    expect(screen.getByLabelText('原因（可选）')).toBeTruthy();
+    fireEvent.click(within(disp).getByRole('button', { name: '对' }));
+    expect(screen.queryByRole('button', { name: '提交反馈' })).toBeNull();
+
+    // 只填原因（ADR 0174）：不评价两个维度也可以展开并提交
+    fireEvent.click(screen.getByRole('button', { name: '只填原因' }));
+    const submitOnly = screen.getByRole('button', { name: '提交反馈' }) as HTMLButtonElement;
+    expect(submitOnly.disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText('原因（可选）'), { target: { value: 'worse_than_baseline' } });
+    expect(submitOnly.disabled).toBe(false);
+
+    // 点选「错」时展开必填修正项与必填原因
+    const root = screen.getByRole('group', { name: '根因组件' });
+    fireEvent.click(within(root).getByRole('button', { name: '错' }));
+    expect(screen.getByLabelText('真实根因组件')).toBeTruthy();
+    expect(screen.getByLabelText('原因')).toBeTruthy();
+    expect(screen.getByLabelText('机制（可选）')).toBeTruthy();
+  });
 });
 
 describe('结论头', () => {
@@ -463,6 +495,66 @@ describe('结论头', () => {
     expect(screen.getByText('规则判定').closest('[title]')?.getAttribute('title')).toBe('postgres/oom-failover');
     expect(screen.getByText(/（实例 OOM 引发主库切换）：主库被 OOM 终止，集群提升备库/)).toBeTruthy();
     expect(screen.getByRole('heading', { level: 1 }).textContent).toContain('pg');
+  });
+
+  it('冻结条件不列在影响判定的条件里；多条影响条件默认收成一行，展开后列出全部', async () => {
+    renderUi(
+      <VerdictHeader
+        incident={incident()}
+        stageA={null}
+        latestRun={null}
+        evidence={[]}
+        conditions={[
+          condition({ type: 'Frozen', role: 'server', subject: 'prod', message: 'srenautix-freeze 处于冻结' }),
+          condition({ type: 'DatasourceUnavailable', subject: 'loki', message: 'Loki 超时' }),
+          condition({
+            type: 'QueryManifest',
+            role: 'reader',
+            subject: null,
+            message: 'declared evidence queries are rejected',
+          }),
+        ]}
+        now={NOW}
+      />,
+    );
+    expect(screen.queryByText(/srenautix-freeze/)).toBeNull();
+    const toggle = screen.getByRole('button', { name: /2 个影响这个判定的条件/ });
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(screen.queryByRole('list', { name: '影响这个判定的条件' })).toBeNull();
+    await userEvent.click(toggle);
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    const list = screen.getByRole('list', { name: '影响这个判定的条件' });
+    expect(list.textContent).toContain('Loki 超时');
+    expect(list.textContent).toContain('declared evidence queries are rejected');
+    expect(list.textContent).not.toContain('srenautix-freeze');
+  });
+});
+
+describe('事件详情单栏布局', () => {
+  it('不渲染右侧常驻侧栏，把内联反馈条放进结论卡片底部', async () => {
+    const inc = incident();
+    const { container } = renderUi(
+      <IncidentView incidentRef={inc.incident_id} tab="evidence" onTab={() => undefined} now={NOW} />,
+      {
+        port: {
+          getIncident: async () => inc,
+          getStageAReport: async () => null,
+          listResearchRuns: async () => [],
+          getEvidenceSnapshot: async () => [],
+          getIncidentTimeline: async () => [],
+          getIncidentSubgraph: async () => ({ topology_version: 1, root: null, nodes: [], edges: [] }),
+          listFeedback: async () => [],
+          listConditions: async () => [],
+          listProposals: async () => [],
+          listBusinessDomains: async () => ({ items: [], unassigned_firing: 0 }),
+        },
+      },
+    );
+    const verdict = await screen.findByRole('region', { name: '结论' });
+    const form = screen.getByRole('form', { name: '研判反馈' });
+    expect(container.querySelector('aside')).toBeNull();
+    expect(verdict.parentElement?.contains(form)).toBe(true);
+    expect(screen.queryByRole('button', { name: '提交反馈' })).toBeNull();
   });
 });
 

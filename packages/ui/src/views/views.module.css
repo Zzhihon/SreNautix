@@ -75,29 +75,20 @@
 }
 
 .detail {
-  display: grid;
-  grid-template-columns: minmax(0, 1.55fr) minmax(300px, 1fr);
-  gap: 12px;
-  align-items: start;
-}
-.detailMain,
-.detailSide {
   display: flex;
   flex-direction: column;
   gap: 12px;
   min-width: 0;
 }
-.detailSide {
-  position: sticky;
-  top: 8px;
+.verdictPanel {
+  padding-bottom: 0;
 }
-@media (max-width: 1000px) {
-  .detail {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .detailSide {
-    position: static;
-  }
+.feedbackBar {
+  margin: 12px -14px 0;
+  padding: 10px 14px;
+  border-top: 1px solid var(--sn-line-soft);
+  background: var(--sn-raise);
+  border-radius: 0 0 7px 7px;
 }
 .pendingList {
   list-style: none;
