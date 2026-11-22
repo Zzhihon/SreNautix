@@ -19,6 +19,9 @@ export const GENERIC_ALERT_CONDITION_PREFIX = 'builtin/alert-condition/';
 /** 单次事件最多合成的通用告警条件卡数量（按不同 alertname 计），防止告警风暴下放大 Prometheus 查询。 */
 export const MAX_GENERIC_ALERT_CONDITIONS = 15;
 
+/** 单次事件最多合成的通用告警条件卡总数（跨全部实体），防止单个 alertname 扇出到大量实体时放大查询。 */
+export const MAX_GENERIC_ALERT_CONDITION_CARDS = 30;
+
 const LOOKBACK_MS = 24 * 3600_000;
 const SKETCH_POINTS = 300;
 const SKETCH_SERIES = 20;
@@ -82,6 +85,7 @@ function buildMatchers(
   alert: Alert,
   entry: AlertCatalogEntry,
   entity: EntityRef,
+  clusterLabel: string | null,
 ): {
   base: string[];
   scoped: string[];
@@ -91,6 +95,12 @@ function buildMatchers(
   const seen = new Set<string>(['alertname', 'alertstate']);
   const base = [`alertname=${JSON.stringify(alert.alertname)}`, 'alertstate="firing"'];
   const forStateBase = [`alertname=${JSON.stringify(alert.alertname)}`];
+  if (clusterLabel && PROM_LABEL_NAME.test(clusterLabel) && entity.cluster_id) {
+    seen.add(clusterLabel);
+    const clusterMatcher = `${clusterLabel}=${JSON.stringify(entity.cluster_id)}`;
+    base.push(clusterMatcher);
+    forStateBase.push(clusterMatcher);
+  }
   const extra: string[] = [];
 
   for (const [k, v] of Object.entries(entry.match_labels ?? {})) {
@@ -200,7 +210,6 @@ export async function runGenericAlertCondition(
   const clock = { from: toIso(at - DEFAULT_BEFORE_MS - LOOKBACK_MS), to: toIso(now) };
   const title = titleOf(alert, entry);
   const queries: EvidenceResult['queries'] = [];
-  const matchers = buildMatchers(alert, entry, entity);
 
   const makeResult = (
     verdict: EvidenceResult['verdict'],
@@ -226,9 +235,9 @@ export async function runGenericAlertCondition(
     value: extra.value ?? null,
     table: null,
     queries,
-    egress: 'allow',
+    egress: 'redact',
     anomaly_started_at: extra.anomalyStartedAt ?? null,
-    evaluated_at: new Date().toISOString(),
+    evaluated_at: toIso(now),
     unit: 'none',
     observations: extra.observations ?? {},
     params: {},
@@ -249,6 +258,8 @@ export async function runGenericAlertCondition(
           : 'Metrics datasource lacks metrics.query_range capability to query ALERTS state',
     });
   }
+
+  const matchers = buildMatchers(alert, entry, entity, profile.cluster ?? null);
 
   const step = stepSeconds(w.to - w.from, profile);
   const runRange = async (name: string, expr: string) => {

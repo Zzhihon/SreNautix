@@ -11,6 +11,7 @@ import type {
 import { CHANGE_ONSET_TOLERANCE_MS, evidenceFingerprint } from '@srenautix/core';
 import { isBusinessImpact, type AlertMatcher } from '../alerts/business-impact.js';
 import { changeNotes } from '../changes/notes.js';
+import { isGenericAlertConditionCard } from './alert-condition.js';
 import { isRoutine } from './novelty.js';
 import type { RequiredEvidence } from './required.js';
 
@@ -108,9 +109,9 @@ export function plannedRetirement(
   return [...used];
 }
 
-/** 显示业务受影响的证据：判为异常、并且证据基线没有判为常态的卡（ADR 0153） */
+/** 显示业务受影响的证据：判为异常、不是常态（ADR 0153）、且不是运行时合成的通用告警条件卡 */
 export function impactEvidence(cards: readonly EvidenceResult[]): EvidenceResult[] {
-  return cards.filter((c) => c.verdict === 'abnormal' && !isRoutine(c));
+  return cards.filter((c) => c.verdict === 'abnormal' && !isRoutine(c) && !isGenericAlertConditionCard(c.card_id));
 }
 
 /**

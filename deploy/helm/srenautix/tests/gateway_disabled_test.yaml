@@ -85,9 +85,14 @@ tests:
         documentSelector: {path: kind, value: ConfigMap}
       - notMatchRegex: {path: 'data["setup.sh"]', pattern: 'gateway'}
         documentSelector: {path: kind, value: ConfigMap}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: server_ACCESS_KEY}
+          any: true
+        documentSelector: {path: kind, value: Job}
       - notContains:
           path: spec.template.spec.containers[0].env
-          content: {name: GATEWAY_ACCESS}
+          content: {name: gateway_ACCESS_KEY}
           any: true
         documentSelector: {path: kind, value: Job}
 

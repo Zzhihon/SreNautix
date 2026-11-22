@@ -37,6 +37,7 @@ import { isLogicalComponent } from '../topology/expand.js';
 import { parseStoredKey } from '../topology/keys.js';
 import {
   genericAlertConditionCardId,
+  MAX_GENERIC_ALERT_CONDITION_CARDS,
   MAX_GENERIC_ALERT_CONDITIONS,
   runGenericAlertCondition,
   type GenericAlertConditionTask,
@@ -349,6 +350,9 @@ export class PackEvidence implements EvidenceRunner {
         const entryChains = this.rt.alertChains(a.classification.catalog_entry);
         if (entryChains.some((ck) => plan.some((p) => p.card === `${ck}/condition` && entityKey(p.entity) === eKey))) {
           continue;
+        }
+        if (genericTasks.length >= MAX_GENERIC_ALERT_CONDITION_CARDS) {
+          break;
         }
         if (!seenAlertnames.has(a.alertname) && seenAlertnames.size >= MAX_GENERIC_ALERT_CONDITIONS) {
           continue;

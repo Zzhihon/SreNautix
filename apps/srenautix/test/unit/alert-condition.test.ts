@@ -8,16 +8,22 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { stringify } from 'yaml';
 import { agreeAlerts } from '../../src/eval/agreement.js';
 import { ServerMetrics } from '../../src/kernel/metrics.js';
+import { deriveDisposition } from '../../src/research/disposition.js';
+import { incidentBook } from '../../src/research/incident.js';
+import { Ledger } from '../../src/research/ledger.js';
 import {
   GENERIC_ALERT_CONDITION_PREFIX,
   genericAlertConditionCardId,
   isGenericAlertConditionCard,
+  MAX_GENERIC_ALERT_CONDITION_CARDS,
   MAX_GENERIC_ALERT_CONDITIONS,
   runGenericAlertCondition,
 } from '../../src/stage-a/alert-condition.js';
 import { DEFAULT_NOVELTY } from '../../src/stage-a/novelty.js';
 import { PackEvidence } from '../../src/stage-a/pack-evidence.js';
 import { evidenceCapabilities, PackRuntime, type EvidenceSource } from '../../src/stage-a/packs.js';
+import { impactEvidence } from '../../src/stage-a/report.js';
+import { incident as scenarioIncident, researchCase, stageA, stageACards } from '../support/scenario.js';
 
 const REPO_ROOT = resolve(import.meta.dirname, '../../../..');
 const CATALOG_PATH = resolve(REPO_ROOT, 'contract/gateway/v1/action-catalog.yaml');
@@ -261,6 +267,8 @@ describe('runGenericAlertCondition', () => {
     ]);
     expect(full.verdict).toBe('abnormal');
     expect(full.display_state).toBe('abnormal');
+    expect(full.egress).toBe('redact');
+    expect(full.evaluated_at).toBe(new Date(NOW).toISOString());
     expect(full.anomaly_started_at).toBe(new Date(forStateEpochSec * 1000).toISOString());
     expect(full.reason.text).toContain('Gateway 5xx rate elevated');
     expect(full.reason.text).toContain('5xx exceeded 5% over 5m');
@@ -322,9 +330,61 @@ describe('runGenericAlertCondition', () => {
       'ALERTS{alertname="CchpGatewayHigh5xx", alertstate="firing"}',
     ]);
     expect(full.verdict).toBe('abnormal');
+    expect(full.egress).toBe('redact');
+    expect(full.evaluated_at).toBe(new Date(NOW).toISOString());
     expect(full.anomaly_started_at).toBe(alert.starts_at);
     expect(full.reason.text).toContain('未按实体标签精确匹配');
     expect(full.observations).toMatchObject({ label_precision: 'alertname_only' });
+  });
+
+  it('多集群标签档案（labelProfile.cluster）在精确查询、回退查询与 ALERTS_FOR_STATE 中都注入集群限定', async () => {
+    const seenRangeExprs: string[] = [];
+    const seenInstantExprs: string[] = [];
+    const ds = mockDataSource({
+      labelProfile: { ...PROFILE, cluster: 'cluster' },
+      queryRange: async (req) => {
+        seenRangeExprs.push(req.expr);
+        if (seenRangeExprs.length === 1) {
+          return { series: [], truncated: false, warnings: [] };
+        }
+        return {
+          series: [
+            {
+              labels: { alertname: 'CchpGatewayHigh5xx', alertstate: 'firing', cluster: 'cchp' },
+              times: [FIRST, NOW],
+              values: [1, 1],
+            },
+          ],
+          truncated: false,
+          warnings: [],
+        };
+      },
+      query: async (req) => {
+        seenInstantExprs.push(req.expr);
+        return { series: [], truncated: false, warnings: [] };
+      },
+    });
+
+    const res = await runGenericAlertCondition({
+      task: {
+        cardId: genericAlertConditionCardId('cchp-gateway-high-5xx'),
+        alert: makeAlert(),
+        entry: makeEntry(),
+        entity: makeEntity({ cluster_id: 'cchp' }),
+        component: 'Pod:cchp-prod/gateway-0',
+      },
+      anchor: FIRST,
+      now: NOW,
+      ds,
+      locale: 'zh-CN',
+      timeoutMs: 5_000,
+    });
+    expect(res?.verdict).toBe('abnormal');
+    expect(seenRangeExprs).toEqual([
+      'ALERTS{alertname="CchpGatewayHigh5xx", alertstate="firing", cluster="cchp", namespace="cchp-prod", pod="gateway-0"}',
+      'ALERTS{alertname="CchpGatewayHigh5xx", alertstate="firing", cluster="cchp"}',
+    ]);
+    expect(seenInstantExprs).toEqual(['ALERTS_FOR_STATE{alertname="CchpGatewayHigh5xx", cluster="cchp"}']);
   });
 
   it('无 ALERTS firing 序列时必须判为 undeterminable（绝不误判为 normal）', async () => {
@@ -660,5 +720,115 @@ describe('PackEvidence 集成：通用条件卡兜底、上限保护、跳过 no
     const stormRun = await evidence.run(inc, stormAlerts, new AbortController().signal, NOW);
     const stormGeneric = stormRun.cards.filter((c) => isGenericAlertConditionCard(c.card_id));
     expect(stormGeneric).toHaveLength(MAX_GENERIC_ALERT_CONDITIONS);
+
+    // 单个告警名扇出到大量实体时，总卡数上限为 MAX_GENERIC_ALERT_CONDITION_CARDS (30)
+    const fanoutAlerts = Array.from({ length: MAX_GENERIC_ALERT_CONDITION_CARDS + 8 }, (_, i) =>
+      makeAlert({
+        alert_id: `fp-fanout-${i}@${FIRST / 1000}`,
+        fingerprint: `fp-fanout-${i}`,
+        alertname: 'NoPrimaryAlert',
+        labels: { alertname: 'NoPrimaryAlert', namespace: 'cchp-prod', pod: `gateway-${i}` },
+        entity: makeEntity({ name: `gateway-${i}` }),
+        classification: {
+          role: 'symptom',
+          source: 'catalog',
+          confidence: 1,
+          catalog_entry: 'testpack/no-primary-alert',
+          chronic: false,
+        },
+      }),
+    );
+    const fanoutRun = await evidence.run(inc, fanoutAlerts, new AbortController().signal, NOW);
+    const fanoutGeneric = fanoutRun.cards.filter((c) => isGenericAlertConditionCard(c.card_id));
+    expect(fanoutGeneric).toHaveLength(MAX_GENERIC_ALERT_CONDITION_CARDS);
   }, 30_000);
+});
+
+describe('通用条件卡不作为独立规则证据自证：impactEvidence / deriveDisposition / Ledger.supportCards', () => {
+  const PG = 'StatefulSet:shop/postgres';
+
+  function genericCardOnPg(ref: string): EvidenceResult {
+    return {
+      ref,
+      card_id: 'builtin/alert-condition/postgres-down',
+      title: { 'zh-CN': '告警 PostgresDown 状态', en: 'Alert PostgresDown state' },
+      threshold: null,
+      series: [],
+      entity: { cluster_id: 'east', kind: 'StatefulSet', namespace: 'shop', name: 'postgres', uid: null },
+      window: { from: new Date(FIRST).toISOString(), to: new Date(NOW).toISOString() },
+      verdict: 'abnormal',
+      display_state: 'abnormal',
+      reason: { kind: 'rule', text: '告警 PostgresDown 在窗口内处于 firing 状态' },
+      value: '触发中',
+      table: null,
+      queries: [],
+      egress: 'redact',
+      anomaly_started_at: new Date(FIRST).toISOString(),
+      evaluated_at: new Date(NOW).toISOString(),
+      unit: 'none',
+      observations: { alertname: 'PostgresDown', alertstate: 'firing' },
+      params: {},
+      conditions: [],
+      baseline: null,
+      impact: false,
+      category: null,
+      value_number: 1,
+    };
+  }
+
+  it('impactEvidence 排除合成通用条件卡，不阻止良性事件的 ignore 处置', () => {
+    const generic = genericCardOnPg('card:99');
+    expect(impactEvidence([generic])).toEqual([]);
+
+    const normalRuleCards = stageACards().map((c) => ({
+      ...c,
+      verdict: c.verdict === 'abnormal' ? ('normal' as const) : c.verdict,
+      display_state: c.display_state === 'abnormal' ? ('normal' as const) : c.display_state,
+    }));
+    const cardsWithGeneric = [...normalRuleCards, generic];
+    const rc = researchCase({ stageA: stageA(cardsWithGeneric) });
+    const book = incidentBook(rc);
+
+    // 即使存在业务影响告警，仅靠合成的通用条件卡异常也不会触发 impactHeld，也不会阻止 evidence_normal ignore
+    const inc = scenarioIncident();
+    const disp = deriveDisposition({
+      model: 'escalate',
+      incident: inc,
+      stageA: rc.stageA,
+      level: 'likely',
+      root: PG,
+      ruleSupport: 0,
+      proposals: 0,
+      cards: book.allCards,
+      facts: {
+        external: [],
+        remediations: [],
+        business_impact: [inc.members[0]!.alert_id],
+      },
+    });
+    expect(disp).toMatchObject({ disposition: 'ignore', basis: 'evidence_normal' });
+  });
+
+  it('Ledger.supportCards 排除合成通用条件卡（即使模型显式引用），避免与 supportAlerts 双重计票', () => {
+    const generic = genericCardOnPg('card:1');
+    const rc = researchCase({ stageA: stageA([generic]) });
+    const book = incidentBook(rc);
+    const ledger = new Ledger(book, rc.subgraph);
+    ledger.merge(
+      [
+        {
+          id: 'h1',
+          parent_id: null,
+          root_component: PG,
+          mechanism: 'postgres 故障',
+          supporting: ['card:1', 'alert:1'],
+          refuting: [],
+        },
+      ],
+      [],
+    );
+    const entry = ledger.entries.get('h1')!;
+    expect(ledger.supportCards(entry)).toEqual([]);
+    expect(ledger.supportAlerts(entry).length).toBeGreaterThan(0);
+  });
 });
