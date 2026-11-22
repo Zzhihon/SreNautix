@@ -1,14 +1,16 @@
-// 根因子图（DESIGN §12.2、§12.5、ADR 0191、ADR 0197）：只画根因加不超过 2 跳的邻居，用 elkjs 的分层布局，每条边标注来源与置信度。
-// 缩放、全屏、突出、查找与侧栏的交互在 GraphCanvas；这里是组件节点、同类合并（subgraph-fold.ts）与组件侧栏。
-// 双击组件交给宿主打开以它为中心的邻域（onOpenComponent），双击合并的组在图上展开它。
+// 根因子图（DESIGN §12.2、§12.5、ADR 0191、ADR 0197、ADR 0208）：
+// 支持五层垂直语义因果泳道（L0 入口/边缘 → L1 业务负载 → L2 数据与存储 → L3 节点与底座 → external 外部依赖，默认）
+// 与自动 ELK 布局切换；突出症状到最高怀疑根因的关键因果路径，在节点内展示状态胶囊，并在悬停/聚焦时呈现运维本体说明。
 
 import { Handle, Position, ReactFlowProvider, type Node, type NodeProps } from '@xyflow/react';
+import { Tooltip } from 'radix-ui';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { IncidentSubgraph } from '../contract';
-import { AppLink, useUiEnv } from '../data';
+import type { IncidentSubgraph, OntologyGlossary } from '../contract';
+import { AppLink, useOntologyGlossary, useUiEnv } from '../data';
 import { useI18n } from '../i18n';
 import { EmptyState } from '../primitives/EmptyState';
-import { Loading, Mono } from '../primitives/basic';
+import { Mono } from '../primitives/basic';
+import { usePortalContainer } from '../theme/ThemeRoot';
 import { componentLabel, displayComponent } from './model';
 import {
   canvasStyles,
@@ -20,22 +22,72 @@ import {
   viewAttrs,
   type CanvasEdge,
 } from './GraphCanvas';
+import { lookupNodeOntology } from './ontology';
 import styles from './Subgraph.module.css';
 import { useComponentNames } from './names';
 import { foldSubgraph, type FoldGroup } from './subgraph-fold';
 import {
+  classifySwimlane,
+  computeCriticalCausalPath,
+  criticalEdgeKey,
   defaultSubgraphLevel,
   filterSubgraph,
+  layoutSwimlanes,
   SUBGRAPH_EDGE_LEVELS,
   subgraphEdgeKind,
+  SWIMLANE_METRICS,
   type SubgraphEdgeKind,
   type SubgraphEdgeLevel,
+  type SubgraphLayoutMode,
+  type SwimlaneId,
 } from './subgraph-model';
 
 type SubNode = IncidentSubgraph['nodes'][number];
+
+interface NeighborSummary {
+  upstream: string[];
+  downstream: string[];
+}
+
+type LaneNodeData = {
+  lane: SwimlaneId;
+  code: string;
+  title: string;
+  count: number;
+};
+
 type SubData =
-  | { n: SubNode; group?: undefined; roleText: string; alertsText: string }
-  | { group: FoldGroup; n?: undefined; countText: string };
+  | {
+      n: SubNode;
+      group?: undefined;
+      lane: SwimlaneId;
+      laneCode: string;
+      laneTitle: string;
+      roleText: string;
+      alertsText: string;
+      onCriticalPath: boolean;
+      hasCriticalPath: boolean;
+      changed: boolean;
+      ontologyTitle: string;
+      ontologyDesc: string;
+      neighbors: NeighborSummary;
+    }
+  | {
+      group: FoldGroup;
+      n?: undefined;
+      lane: SwimlaneId;
+      laneCode: string;
+      laneTitle: string;
+      countText: string;
+      onCriticalPath: boolean;
+      hasCriticalPath: boolean;
+      changed: boolean;
+      ontologyTitle: string;
+      ontologyDesc: string;
+      neighbors: NeighborSummary;
+    };
+
+type SubgraphFlowNode = Node<SubData, 'component'> | Node<LaneNodeData, 'lane'>;
 
 const EDGE_CLASS: Partial<Record<SubgraphEdgeKind, string>> = {
   declared: styles.edgeDeclared,
@@ -46,46 +98,146 @@ const EDGE_CLASS: Partial<Record<SubgraphEdgeKind, string>> = {
 };
 
 const LEGEND_EDGE_KINDS: readonly SubgraphEdgeKind[] = ['declared', 'route', 'substrate', 'runtime', 'allowed'];
+const SIDES = [Position.Top, Position.Bottom, Position.Left, Position.Right] as const;
 
-// 节点的外框尺寸，与 Subgraph.module.css 的 .node 相同；布局、小地图与查找定位都用它
-const NODE_W = 204;
-const NODE_H = 68;
+const LANE_CODE: Record<SwimlaneId, string> = {
+  L0: 'L0',
+  L1: 'L1',
+  L2: 'L2',
+  L3: 'L3',
+  external: 'EXT',
+};
+
+// 节点的外框尺寸，与 Subgraph.module.css 的 .node 及 SWIMLANE_METRICS 一致
+const NODE_W = SWIMLANE_METRICS.nodeW;
+const NODE_H = SWIMLANE_METRICS.nodeH;
 export { MINIMAP_MIN_NODES };
 
-function ComponentNode({ id, data }: NodeProps<Node<SubData>>) {
-  const names = useComponentNames();
-  const view = useCanvasView();
-  const l = data.group
-    ? { name: data.group.kind, sub: [data.countText, data.group.namespace].filter(Boolean).join(' · '), title: '' }
-    : { ...componentLabel(data.n.component, names), title: displayComponent(data.n.component) };
+function LaneBandNode({ data }: NodeProps<Node<LaneNodeData, 'lane'>>) {
   return (
-    <div
-      className={styles.node}
-      data-role={data.group ? 'neighbor' : data.n.role}
-      data-substrate={!data.group && data.n.kind === 'Node' ? '' : undefined}
-      data-fold={data.group ? '' : undefined}
-      {...viewAttrs(view, id)}
-    >
-      <Handle type="target" position={Position.Left} className={styles.handle} />
-      <div className={styles.name} title={l.title || undefined}>
-        {l.name}
+    <div className={styles.lane} data-lane={data.lane} aria-hidden="true">
+      <div className={styles.laneHeader}>
+        <div className={styles.laneCode}>
+          <span>{data.code}</span>
+          <span className={styles.laneCount}>{data.count}</span>
+        </div>
+        <div className={styles.laneTitle}>{data.title}</div>
       </div>
-      <div className={styles.sub}>
-        {data.group ? (
-          l.sub
-        ) : (
-          <>
-            {data.roleText} · {l.sub}
-            {data.n.alerts.length > 0 && ` · ${data.alertsText}`}
-          </>
-        )}
-      </div>
-      <Handle type="source" position={Position.Right} className={styles.handle} />
     </div>
   );
 }
 
-const nodeTypes = { component: ComponentNode };
+function summarizeList(items: readonly string[]): string {
+  if (items.length <= 3) {
+    return items.join('、');
+  }
+  return `${items.slice(0, 3).join('、')} +${items.length - 3}`;
+}
+
+function ComponentNode({ id, data }: NodeProps<Node<SubData, 'component'>>) {
+  const { t } = useI18n();
+  const names = useComponentNames();
+  const view = useCanvasView();
+  const container = usePortalContainer();
+  const l = data.group
+    ? { name: data.group.kind, sub: [data.countText, data.group.namespace].filter(Boolean).join(' · '), title: '' }
+    : { ...componentLabel(data.n.component, names), title: displayComponent(data.n.component) };
+
+  const pathDim = data.hasCriticalPath && !data.onCriticalPath && view.lit === null;
+  const roleTone = data.group
+    ? undefined
+    : data.n.role === 'root'
+      ? 'bad'
+      : data.n.role === 'candidate'
+        ? 'warn'
+        : data.n.role === 'member'
+          ? 'info'
+          : data.n.alerts.length === 0
+            ? 'ok'
+            : 'bad';
+
+  return (
+    <Tooltip.Root>
+      <Tooltip.Trigger asChild>
+        <div
+          className={styles.node}
+          data-role={data.group ? 'neighbor' : data.n.role}
+          data-lane={data.lane}
+          data-substrate={!data.group && data.n.kind === 'Node' ? '' : undefined}
+          data-fold={data.group ? '' : undefined}
+          data-critical-path={data.onCriticalPath ? '' : undefined}
+          data-path-dim={pathDim ? '' : undefined}
+          {...viewAttrs(view, id)}
+        >
+          {SIDES.map((side) => (
+            <Handle key={`t${side}`} id={`t${side}`} type="target" position={side} className={styles.handle} />
+          ))}
+          <div className={styles.headRow}>
+            <div className={styles.name} title={l.title || undefined}>
+              {l.name}
+            </div>
+            <span className={styles.layerTag}>{data.laneCode}</span>
+          </div>
+          <div className={styles.capsules}>
+            {data.group ? (
+              <span className={styles.capsule}>{data.countText}</span>
+            ) : (
+              <>
+                <span className={styles.capsule} data-tone={roleTone}>
+                  {data.n.role === 'neighbor' && data.n.alerts.length === 0
+                    ? t('subgraph.capsule.healthy')
+                    : data.roleText}
+                </span>
+                {data.n.alerts.length > 0 && (
+                  <span className={styles.capsule} data-tone="bad">
+                    {data.alertsText}
+                  </span>
+                )}
+                {data.changed && (
+                  <span className={styles.capsule} data-tone="warn">
+                    ◆ {t('subgraph.capsule.changed')}
+                  </span>
+                )}
+              </>
+            )}
+          </div>
+          <div className={styles.sub}>{l.sub}</div>
+          {SIDES.map((side) => (
+            <Handle key={`s${side}`} id={`s${side}`} type="source" position={side} className={styles.handle} />
+          ))}
+        </div>
+      </Tooltip.Trigger>
+      <Tooltip.Portal container={container}>
+        <Tooltip.Content className={styles.ontologyTip} side="right" sideOffset={10} collisionPadding={12}>
+          <div className={styles.tipHead}>
+            <span className={styles.tipTitle}>{data.ontologyTitle}</span>
+            <span className={styles.tipBadge}>
+              {data.laneCode} · {data.laneTitle}
+            </span>
+            {!data.group && <span className={styles.tipBadge}>{data.roleText}</span>}
+          </div>
+          <p className={styles.tipDesc}>{data.ontologyDesc}</p>
+          {(data.neighbors.upstream.length > 0 || data.neighbors.downstream.length > 0) && (
+            <div className={styles.tipRel}>
+              {data.neighbors.upstream.length > 0 && (
+                <span>
+                  {t('subgraph.tooltip.upstream')}: {summarizeList(data.neighbors.upstream)}
+                </span>
+              )}
+              {data.neighbors.downstream.length > 0 && (
+                <span>
+                  {t('subgraph.tooltip.downstream')}: {summarizeList(data.neighbors.downstream)}
+                </span>
+              )}
+            </div>
+          )}
+        </Tooltip.Content>
+      </Tooltip.Portal>
+    </Tooltip.Root>
+  );
+}
+
+const nodeTypes = { component: ComponentNode, lane: LaneBandNode };
 
 /** elkjs 分层布局，返回每个节点的左上角坐标。 */
 export async function layoutSubgraph(g: {
@@ -111,6 +263,26 @@ export async function layoutSubgraph(g: {
   return out;
 }
 
+function edgeHandles(
+  mode: SubgraphLayoutMode,
+  a: { x: number; y: number } | undefined,
+  b: { x: number; y: number } | undefined,
+) {
+  if (mode === 'elk' || !a || !b) {
+    return { sourceHandle: `s${Position.Right}`, targetHandle: `t${Position.Left}` };
+  }
+  const dy = b.y - a.y;
+  const dx = b.x - a.x;
+  if (Math.abs(dy) >= 24) {
+    return dy > 0
+      ? { sourceHandle: `s${Position.Bottom}`, targetHandle: `t${Position.Top}` }
+      : { sourceHandle: `s${Position.Top}`, targetHandle: `t${Position.Bottom}` };
+  }
+  return dx >= 0
+    ? { sourceHandle: `s${Position.Right}`, targetHandle: `t${Position.Left}` }
+    : { sourceHandle: `s${Position.Left}`, targetHandle: `t${Position.Right}` };
+}
+
 export interface SubgraphProps {
   graph: IncidentSubgraph;
   /** 侧栏链接所属的集群；不提供时侧栏不显示邻域与搜索链接 */
@@ -121,15 +293,27 @@ export interface SubgraphProps {
   onOpenComponent?: (component: string) => void;
   /** 画布是页面的主要内容（拓扑页的邻域图）：画布占满视口剩余的高度，普通滚轮直接缩放 */
   primary?: boolean;
+  /** 可选：最近发生过变更的组件键集合，用于在节点上渲染变更胶囊 */
+  changedComponents?: ReadonlySet<string>;
+  /** 可选：本体词汇表（不传时自动经 DataPort 拉取，缺省时优雅降级） */
+  glossary?: OntologyGlossary | null;
+  /** 可选：初始布局模式，默认五层垂直因果泳道（swimlane） */
+  defaultLayout?: SubgraphLayoutMode;
 }
 
 export function Subgraph(props: SubgraphProps) {
-  const { graph } = props;
-  const { t, fmt } = useI18n();
+  const { graph, changedComponents, defaultLayout = 'swimlane' } = props;
+  const { t, fmt, locale } = useI18n();
+  const names = useComponentNames();
+  const glossaryQuery = useOntologyGlossary(props.glossary === undefined);
+  const glossary = props.glossary !== undefined ? props.glossary : (glossaryQuery.data ?? null);
+  const lang = locale === 'en' ? 'en' : 'zh-CN';
+
   const graphKey = `${graph.root ?? ''}\0${graph.topology_version}`;
   const defaultLevel = useMemo(() => defaultSubgraphLevel(graph), [graph]);
   const [prevKey, setPrevKey] = useState(graphKey);
   const [pickedLevel, setPickedLevel] = useState<SubgraphEdgeLevel | null>(null);
+  const [layoutMode, setLayoutMode] = useState<SubgraphLayoutMode>(defaultLayout);
   const [fold, setFold] = useState(true);
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
   if (prevKey !== graphKey) {
@@ -144,78 +328,216 @@ export function Subgraph(props: SubgraphProps) {
     () => (fold ? folded : { nodes: filtered.graph.nodes, groups: [], edges: filtered.graph.edges }),
     [fold, folded, filtered.graph],
   );
-  const [laid, setLaid] = useState<{ nodes: Node<SubData>[]; edges: CanvasEdge[] } | null>(null);
-  useEffect(() => {
-    let live = true;
-    const items: { id: string; data: SubData }[] = [
-      ...drawn.nodes.map((n) => ({
+  const critical = useMemo(() => computeCriticalCausalPath(filtered.graph), [filtered.graph]);
+
+  // 合并组映射到画布节点 id，确保折叠后的关键路径与上下游摘要一致
+  const displayNameOf = useCallback(
+    (id: string) => {
+      const grp = drawn.groups.find((g) => g.id === id);
+      if (grp) {
+        return `${grp.kind} × ${grp.members.length}`;
+      }
+      return componentLabel(id, names).name;
+    },
+    [drawn.groups, names],
+  );
+
+  const items = useMemo(() => {
+    const up = new Map<string, Set<string>>();
+    const down = new Map<string, Set<string>>();
+    for (const e of drawn.edges) {
+      down.set(e.from, (down.get(e.from) ?? new Set()).add(displayNameOf(e.to)));
+      up.set(e.to, (up.get(e.to) ?? new Set()).add(displayNameOf(e.from)));
+    }
+    const nodeItems = drawn.nodes.map((n) => {
+      const lane = classifySwimlane(n, glossary);
+      const onto = lookupNodeOntology(n, glossary, lang);
+      const onCriticalPath = critical.hasPath && critical.nodes.has(n.component);
+      const priority = n.role === 'root' ? 0 : onCriticalPath || n.role !== 'neighbor' ? 1 : 2;
+      return {
         id: n.component,
-        data: { n, roleText: t(`subgraph.role.${n.role}`), alertsText: t('subgraph.alerts', { n: n.alerts.length }) },
-      })),
-      ...drawn.groups.map((group) => ({
+        lane,
+        priority,
+        label: componentLabel(n.component, names).name,
+        data: {
+          n,
+          lane,
+          laneCode: LANE_CODE[lane],
+          laneTitle: t(`subgraph.lane.${lane}`),
+          roleText: t(`subgraph.role.${n.role}`),
+          alertsText: t('subgraph.alerts', { n: n.alerts.length }),
+          onCriticalPath,
+          hasCriticalPath: critical.hasPath,
+          changed: Boolean(changedComponents?.has(n.component)),
+          ontologyTitle: onto.title,
+          ontologyDesc: onto.description,
+          neighbors: {
+            upstream: [...(up.get(n.component) ?? [])],
+            downstream: [...(down.get(n.component) ?? [])],
+          },
+        } satisfies SubData,
+      };
+    });
+    const groupItems = drawn.groups.map((group) => {
+      const first = group.members[0]!;
+      const lane = classifySwimlane(first, glossary);
+      const onto = lookupNodeOntology(first, glossary, lang);
+      const onCriticalPath = critical.hasPath && group.members.some((m) => critical.nodes.has(m.component));
+      return {
         id: group.id,
-        data: { group, countText: t('subgraph.fold_count', { n: group.members.length }) },
-      })),
-    ];
+        lane,
+        priority: 2,
+        label: group.kind,
+        data: {
+          group,
+          lane,
+          laneCode: LANE_CODE[lane],
+          laneTitle: t(`subgraph.lane.${lane}`),
+          countText: t('subgraph.fold_count', { n: group.members.length }),
+          onCriticalPath,
+          hasCriticalPath: critical.hasPath,
+          changed: group.members.some((m) => Boolean(changedComponents?.has(m.component))),
+          ontologyTitle: `${group.kind} × ${group.members.length}`,
+          ontologyDesc: onto.description,
+          neighbors: {
+            upstream: [...(up.get(group.id) ?? [])],
+            downstream: [...(down.get(group.id) ?? [])],
+          },
+        } satisfies SubData,
+      };
+    });
+    return [...nodeItems, ...groupItems];
+  }, [drawn, glossary, lang, critical, names, t, changedComponents, displayNameOf]);
+
+  const buildEdges = useCallback(
+    (positions: ReadonlyMap<string, { x: number; y: number }>, mode: SubgraphLayoutMode): CanvasEdge[] => {
+      const groupMembers = new Map<string, readonly string[]>(
+        drawn.groups.map((g) => [g.id, g.members.map((m) => m.component)]),
+      );
+      return drawn.edges.map((e, i) => {
+        const kind = subgraphEdgeKind(e);
+        const fromIds = groupMembers.get(e.from) ?? [e.from];
+        const toIds = groupMembers.get(e.to) ?? [e.to];
+        const isCrit =
+          critical.hasPath &&
+          fromIds.some((from) =>
+            toIds.some((to) => critical.edges.has(criticalEdgeKey({ from, to, relation: e.relation }))),
+          );
+        const handles = edgeHandles(mode, positions.get(e.from), positions.get(e.to));
+        return {
+          id: `e${i}`,
+          source: e.from,
+          target: e.to,
+          ...handles,
+          className: [
+            EDGE_CLASS[kind],
+            isCrit ? styles.edgeCritical : critical.hasPath ? styles.edgeSecondary : undefined,
+          ]
+            .filter(Boolean)
+            .join(' '),
+          zIndex: isCrit ? 2 : 0,
+          data: {
+            text: `${e.relation} · ${t(`subgraph.source.${e.provenance}`)} ${fmt.number(e.confidence, 1)}`,
+            weak: !isCrit && e.confidence < 0.6 && kind !== 'allowed',
+          },
+        };
+      });
+    },
+    [drawn.edges, drawn.groups, critical, t, fmt],
+  );
+
+  // 泳道布局是纯同步确定的，首帧即可渲染（零闪烁）；ELK 布局保持异步计算，计算期间复用泳道帧避免画布卸载闪烁
+  const swimlaneLaid = useMemo<{ nodes: SubgraphFlowNode[]; edges: CanvasEdge[] }>(() => {
+    const { positions, lanes } = layoutSwimlanes(
+      items.map((it) => ({ id: it.id, lane: it.lane, priority: it.priority, label: it.label })),
+      drawn.edges,
+    );
+    const laneNodes: SubgraphFlowNode[] = lanes.map((band) => ({
+      id: `lane:${band.id}`,
+      type: 'lane',
+      position: { x: band.x, y: band.y },
+      width: band.w,
+      height: band.h,
+      draggable: false,
+      selectable: false,
+      style: { width: band.w, height: band.h, pointerEvents: 'none' },
+      zIndex: -2,
+      data: {
+        lane: band.id,
+        code: LANE_CODE[band.id],
+        title: t(`subgraph.lane.${band.id}`),
+        count: band.count,
+      },
+    }));
+    const compNodes: SubgraphFlowNode[] = items.map(({ id, data }) => {
+      const p = positions.get(id)!;
+      return { id, type: 'component', position: p, width: NODE_W, height: NODE_H, data, draggable: false };
+    });
+    return {
+      nodes: [...laneNodes, ...compNodes],
+      edges: buildEdges(positions, 'swimlane'),
+    };
+  }, [items, drawn.edges, t, buildEdges]);
+
+  const [elkLaid, setElkLaid] = useState<{ nodes: SubgraphFlowNode[]; edges: CanvasEdge[] } | null>(null);
+  useEffect(() => {
+    if (layoutMode !== 'elk') {
+      return;
+    }
+    let live = true;
     layoutSubgraph({ ids: items.map((i) => i.id), edges: drawn.edges }).then((pos) => {
       if (!live) {
         return;
       }
-      setLaid({
+      setElkLaid({
         nodes: items.map(({ id, data }) => {
           const p = pos.get(id);
           if (!p) {
             throw new Error(`布局缺少节点 ${id}`);
           }
-          // 写明宽高：小地图只画有尺寸的节点，而这里的节点不经 onNodesChange 回写测量结果
           return { id, type: 'component', position: p, width: NODE_W, height: NODE_H, data, draggable: false };
         }),
-        edges: drawn.edges.map((e, i) => {
-          const kind = subgraphEdgeKind(e);
-          return {
-            id: `e${i}`,
-            source: e.from,
-            target: e.to,
-            className: EDGE_CLASS[kind],
-            data: {
-              text: `${e.relation} · ${t(`subgraph.source.${e.provenance}`)} ${fmt.number(e.confidence, 1)}`,
-              weak: e.confidence < 0.6 && kind !== 'allowed',
-            },
-          };
-        }),
+        edges: buildEdges(pos, 'elk'),
       });
     });
     return () => {
       live = false;
     };
-  }, [drawn, t, fmt]);
+  }, [layoutMode, items, drawn.edges, buildEdges]);
+
+  const laid = layoutMode === 'elk' ? (elkLaid ?? swimlaneLaid) : swimlaneLaid;
+
   if (!graph.nodes.length) {
     return <EmptyState kind="none" title={t('subgraph.empty_title')} because={t('subgraph.empty_because')} />;
   }
-  if (!laid) {
-    return <Loading />;
-  }
   return (
-    <ReactFlowProvider>
-      <SubgraphCanvas
-        {...props}
-        nodes={laid.nodes}
-        edges={laid.edges}
-        level={level}
-        onLevel={(next) => {
-          setPickedLevel(next);
-          setExpanded(new Set());
-        }}
-        hiddenEdges={filtered.hiddenEdges}
-        visibleKinds={filtered.kinds}
-        fold={folded.foldable > 0 ? fold : null}
-        onFold={() => {
-          setFold(!fold);
-          setExpanded(new Set());
-        }}
-        onExpand={(id) => setExpanded(new Set([...expanded, id]))}
-      />
-    </ReactFlowProvider>
+    <Tooltip.Provider delayDuration={180}>
+      <div className={layoutMode === 'swimlane' && !props.primary ? styles.swimlaneWrap : undefined}>
+        <ReactFlowProvider>
+          <SubgraphCanvas
+            {...props}
+            nodes={laid.nodes}
+            edges={laid.edges}
+            layoutMode={layoutMode}
+            onLayoutMode={setLayoutMode}
+            hasCriticalPath={critical.hasPath}
+            level={level}
+            onLevel={(next) => {
+              setPickedLevel(next);
+              setExpanded(new Set());
+            }}
+            hiddenEdges={filtered.hiddenEdges}
+            visibleKinds={filtered.kinds}
+            fold={folded.foldable > 0 ? fold : null}
+            onFold={() => {
+              setFold(!fold);
+              setExpanded(new Set());
+            }}
+            onExpand={(id) => setExpanded(new Set([...expanded, id]))}
+          />
+        </ReactFlowProvider>
+      </div>
+    </Tooltip.Provider>
   );
 }
 
@@ -227,6 +549,9 @@ function SubgraphCanvas({
   primary = false,
   nodes,
   edges,
+  layoutMode,
+  onLayoutMode,
+  hasCriticalPath,
   level,
   onLevel,
   hiddenEdges,
@@ -235,8 +560,11 @@ function SubgraphCanvas({
   onFold,
   onExpand,
 }: SubgraphProps & {
-  nodes: Node<SubData>[];
+  nodes: SubgraphFlowNode[];
   edges: CanvasEdge[];
+  layoutMode: SubgraphLayoutMode;
+  onLayoutMode: (m: SubgraphLayoutMode) => void;
+  hasCriticalPath: boolean;
   level: SubgraphEdgeLevel;
   onLevel: (level: SubgraphEdgeLevel) => void;
   hiddenEdges: number;
@@ -248,32 +576,41 @@ function SubgraphCanvas({
 }) {
   const { t } = useI18n();
   const names = useComponentNames();
-  // 节点的可访问名称与查找文字随可读名称变化，按取值比较，节点数组本身不换新（ADR 0191 §7）
-  const nameKey = nodes.map((n) => (n.data.group ? '' : componentLabel(n.id, names).name)).join('\0');
+  const interactive = useCallback((n: SubgraphFlowNode) => n.type === 'component', []);
+  const nameKey = nodes
+    .filter((n): n is Node<SubData, 'component'> => n.type === 'component')
+    .map((n) => (n.data.group ? '' : componentLabel(n.id, names).name))
+    .join('\0');
   const ariaLabel = useCallback(
-    (n: Node<SubData>) =>
-      n.data.group
+    (n: SubgraphFlowNode) => {
+      if (n.type === 'lane') {
+        return `${n.data.code} ${n.data.title}`;
+      }
+      return n.data.group
         ? t('subgraph.fold_label', { kind: n.data.group.kind, n: n.data.group.members.length })
         : t('subgraph.node_label', {
             name: componentLabel(n.id, names).name,
             role: n.data.roleText,
             alerts: n.data.alertsText,
-          }),
-    // names 每次渲染都是新对象，按取值 nameKey 比较
+          });
+    },
     [t, nameKey],
   );
-  // 查找：按显示名与组件键匹配，合并的组按成员匹配
   const findText = useCallback(
-    (n: Node<SubData>) =>
-      (n.data.group
-        ? [n.data.group.kind, ...n.data.group.members.map((m) => m.component)]
-        : [componentLabel(n.id, names).name, n.id]
-      ).join('\n'),
+    (n: SubgraphFlowNode) => {
+      if (n.type === 'lane') {
+        return null;
+      }
+      return (
+        n.data.group
+          ? [n.data.group.kind, ...n.data.group.members.map((m) => m.component)]
+          : [componentLabel(n.id, names).name, n.id]
+      ).join('\n');
+    },
     [nameKey],
   );
   const legendKinds = LEGEND_EDGE_KINDS.filter((k) => visibleKinds.has(k));
-  const hasSubstrateNode = nodes.some((n) => !n.data.group && n.data.n.kind === 'Node');
-  const showTools = fold !== null || graph.edges.length > 0;
+  const hasSubstrateNode = nodes.some((n) => n.type === 'component' && !n.data.group && n.data.n.kind === 'Node');
   return (
     <GraphCanvas
       label={t('subgraph.label', { n: graph.nodes.length, e: graph.edges.length })}
@@ -281,51 +618,80 @@ function SubgraphCanvas({
       nodes={nodes}
       edges={edges}
       nodeTypes={nodeTypes}
+      interactive={interactive}
       ariaLabel={ariaLabel}
       findText={findText}
       showFind={graph.nodes.length > MINIMAP_MIN_NODES}
       primary={primary}
-      onOpen={(n) => (n.data.group ? onExpand(n.id) : onOpenComponent?.(n.id))}
+      onOpen={(n) => {
+        if (n.type !== 'component') {
+          return;
+        }
+        if (n.data.group) {
+          onExpand(n.id);
+        } else {
+          onOpenComponent?.(n.id);
+        }
+      }}
       tools={
-        showTools && (
-          <>
-            {graph.edges.length > 0 && (
-              <span role="group" aria-label={t('subgraph.edges_level')} className={styles.levels}>
-                {SUBGRAPH_EDGE_LEVELS.map((l) => (
-                  <button
-                    key={l}
-                    type="button"
-                    className={canvasStyles.tool}
-                    aria-pressed={level === l}
-                    title={t(`subgraph.level_hint.${l}`)}
-                    onClick={() => onLevel(l)}
-                  >
-                    {t(`subgraph.level.${l}`)}
-                  </button>
-                ))}
-              </span>
-            )}
-            {hiddenEdges > 0 && (
+        <>
+          <span role="group" aria-label={t('subgraph.layout_mode')} className={styles.levels}>
+            {(['swimlane', 'elk'] as const).map((m) => (
               <button
+                key={m}
                 type="button"
-                className={styles.hiddenBadge}
-                title={t('subgraph.hidden_edges_hint')}
-                onClick={() => onLevel('allowed')}
+                className={canvasStyles.tool}
+                aria-pressed={layoutMode === m}
+                onClick={() => onLayoutMode(m)}
               >
-                {t('subgraph.hidden_edges', { n: hiddenEdges })}
+                {t(`subgraph.layout.${m}`)}
               </button>
-            )}
-            {fold !== null && (
-              <button type="button" className={canvasStyles.tool} aria-pressed={fold} onClick={onFold}>
-                {t('subgraph.fold')}
-              </button>
-            )}
-          </>
-        )
+            ))}
+          </span>
+          {graph.edges.length > 0 && (
+            <span role="group" aria-label={t('subgraph.edges_level')} className={styles.levels}>
+              {SUBGRAPH_EDGE_LEVELS.map((l) => (
+                <button
+                  key={l}
+                  type="button"
+                  className={canvasStyles.tool}
+                  aria-pressed={level === l}
+                  title={t(`subgraph.level_hint.${l}`)}
+                  onClick={() => onLevel(l)}
+                >
+                  {t(`subgraph.level.${l}`)}
+                </button>
+              ))}
+            </span>
+          )}
+          {hiddenEdges > 0 && (
+            <button
+              type="button"
+              className={styles.hiddenBadge}
+              title={t('subgraph.hidden_edges_hint')}
+              onClick={() => onLevel('allowed')}
+            >
+              {t('subgraph.hidden_edges', { n: hiddenEdges })}
+            </button>
+          )}
+          {fold !== null && (
+            <button type="button" className={canvasStyles.tool} aria-pressed={fold} onClick={onFold}>
+              {t('subgraph.fold')}
+            </button>
+          )}
+        </>
       }
       footer={
-        (legendKinds.length > 0 || hasSubstrateNode) && (
+        (legendKinds.length > 0 || hasSubstrateNode || hasCriticalPath) && (
           <div className={styles.legend} aria-hidden="true">
+            {hasCriticalPath && (
+              <span>
+                <svg className={styles.legendEdge} data-kind="critical" viewBox="0 0 22 6" width="22" height="6">
+                  <line x1="0" y1="3" x2="22" y2="3" />
+                </svg>
+                {t('subgraph.critical_path')}
+              </span>
+            )}
             {legendKinds.map((k) => (
               <span key={k}>
                 <svg className={styles.legendEdge} data-kind={k} viewBox="0 0 22 6" width="22" height="6">
@@ -344,28 +710,29 @@ function SubgraphCanvas({
         )
       }
       panel={(n, close) =>
-        n.data.group ? (
+        n.type !== 'component' ? null : n.data.group ? (
           <GroupPanel key={n.id} group={n.data.group} clusterId={clusterId} onExpand={onExpand} onClose={close} />
         ) : (
-          <ComponentPanel key={n.id} n={n.data.n} clusterId={clusterId} alertLabel={alertLabel} onClose={close} />
+          <ComponentPanel key={n.id} data={n.data} clusterId={clusterId} alertLabel={alertLabel} onClose={close} />
         )
       }
     />
   );
 }
 
-/** 组件侧栏：显示名与键、角色、成员告警，以及打开邻域、搜索事件的链接 */
+/** 组件侧栏：显示名与键、泳道层级、本体说明、角色、上下游、成员告警，以及打开邻域、搜索事件的链接 */
 function ComponentPanel({
-  n,
+  data,
   clusterId,
   alertLabel,
   onClose,
 }: {
-  n: SubNode;
+  data: Extract<SubData, { n: SubNode }>;
   clusterId?: string;
   alertLabel?: (alertId: string) => string;
   onClose: () => void;
 }) {
+  const { n } = data;
   const { t } = useI18n();
   const { links } = useUiEnv();
   const names = useComponentNames();
@@ -375,13 +742,30 @@ function ComponentPanel({
   return (
     <SidePanel title={l.name} onClose={onClose}>
       <Mono className={canvasStyles.key}>{n.component}</Mono>
+      <p className={styles.panelOntology}>{data.ontologyDesc}</p>
       <dl className={canvasStyles.facts}>
+        <dt>{t('subgraph.panel.layer')}</dt>
+        <dd>
+          {data.laneCode} · {data.laneTitle}
+        </dd>
         <dt>{t('subgraph.panel.role')}</dt>
         <dd data-role={n.role}>{t(`subgraph.role.${n.role}`)}</dd>
         <dt>{t('subgraph.panel.kind')}</dt>
         <dd>{l.sub}</dd>
         <dt>{t('subgraph.panel.hops')}</dt>
         <dd>{t('subgraph.panel.hops_n', { n: n.hops })}</dd>
+        {data.neighbors.upstream.length > 0 && (
+          <>
+            <dt>{t('subgraph.tooltip.upstream')}</dt>
+            <dd>{data.neighbors.upstream.join('、')}</dd>
+          </>
+        )}
+        {data.neighbors.downstream.length > 0 && (
+          <>
+            <dt>{t('subgraph.tooltip.downstream')}</dt>
+            <dd>{data.neighbors.downstream.join('、')}</dd>
+          </>
+        )}
       </dl>
       <h4 className={canvasStyles.panelSub}>{t('subgraph.alerts', { n: n.alerts.length })}</h4>
       {n.alerts.length ? (

@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: SreNautix hub API
-  version: 2.68.0
+  version: 2.69.0
   license:
     name: Apache-2.0
     identifier: Apache-2.0
@@ -1861,6 +1861,23 @@ paths:
                   removed_nodes: { type: array, items: { $ref: './schemas/topology-event.schema.json#/$defs/Node' } }
                   added_edges: { type: array, items: { $ref: './schemas/topology-event.schema.json#/$defs/Edge' } }
                   removed_edges: { type: array, items: { $ref: './schemas/topology-event.schema.json#/$defs/Edge' } }
+  /v1/ontology/glossary:
+    get:
+      tags: [topology]
+      operationId: getOntologyGlossary
+      description: 领域包组件类型、证据卡与常见运维指标概念的只读词汇表，供控制台拓扑与证据卡悬停提示使用
+      x-srenautix-roles: [viewer, responder, approver, auditor, admin]
+      x-srenautix-external: false
+      parameters:
+        - { name: lang, in: query, schema: { type: string, enum: [zh-CN, en], default: zh-CN } }
+      responses:
+        '200':
+          description: 运维本体词汇表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OntologyGlossary' }
+        '304':
+          description: ETag 未变化
   /v1/integrations:
     get:
       tags: [system]
@@ -3014,6 +3031,54 @@ components:
                 oneOf: [{ type: 'null' }, { type: string, format: date-time }]
               service:
                 oneOf: [{ type: 'null' }, { $ref: './schemas/common.schema.json#/$defs/ServiceId' }]
+    OntologyGlossary:
+      type: object
+      additionalProperties: false
+      required: [pack_lock, component_types, cards, concepts]
+      properties:
+        pack_lock: { type: [string, 'null'] }
+        component_types:
+          type: object
+          additionalProperties:
+            type: object
+            additionalProperties: false
+            required: [title, description, external, hub]
+            properties:
+              title: { type: string }
+              description: { type: string }
+              layer: { type: [string, 'null'], enum: [L0, L1, L2, L3, external, null] }
+              external: { type: boolean }
+              hub: { type: boolean }
+              match:
+                type: object
+                additionalProperties: false
+                required: [kind]
+                properties:
+                  kind: { type: string }
+                  api_group: { type: string }
+                  namespaces: { type: array, items: { type: string } }
+                  name_pattern: { type: string }
+                  has_labels: { type: boolean }
+        cards:
+          type: object
+          additionalProperties:
+            type: object
+            additionalProperties: false
+            required: [title, description]
+            properties:
+              title: { type: string }
+              description: { type: string }
+              unit: { type: [string, 'null'] }
+              category: { type: [string, 'null'] }
+        concepts:
+          type: object
+          additionalProperties:
+            type: object
+            additionalProperties: false
+            required: [title, description]
+            properties:
+              title: { type: string }
+              description: { type: string }
     ProposalDetail:
       type: object
       additionalProperties: false

@@ -21,6 +21,8 @@ export {
   useFeedback,
   useIncident,
   useIncidents,
+  useOntologyGlossary,
+  usePromoteIncidentKnowledge,
   createInvalidator,
   retryDelay,
   shouldRetry,
@@ -64,6 +66,9 @@ export type { EvidenceNav } from './domain/evidence-nav';
 export { HypothesisList } from './domain/HypothesisList';
 export { TimelineLane } from './domain/TimelineLane';
 export { FeedbackControl } from './domain/FeedbackControl';
+export { PromoteCaseButton, defaultKnowledgeDraft } from './domain/PromoteCaseButton';
+export { lookupConcept, lookupEvidenceOntology, lookupNodeOntology } from './domain/ontology';
+export type { ConceptMatch, EvidenceOntologyInfo, NodeOntologyInfo, SwimlaneLayer } from './domain/ontology';
 export { VerdictHeader, affectingConditions } from './domain/VerdictHeader';
 export { ApprovalSheet } from './domain/ApprovalSheet';
 export type { PasskeyHook, ReauthHook } from './domain/ApprovalSheet';
@@ -72,12 +77,28 @@ export type { Bar, BarKind } from './domain/RunTrace';
 export { Subgraph, layoutSubgraph } from './domain/Subgraph';
 export {
   SUBGRAPH_EDGE_LEVELS,
+  SWIMLANE_METRICS,
+  SWIMLANE_ORDER,
+  classifySwimlane,
+  computeCriticalCausalPath,
+  criticalEdgeKey,
   defaultSubgraphLevel,
   filterSubgraph,
+  layoutSwimlanes,
   subgraphEdgeKind,
   subgraphEdgeLevel,
 } from './domain/subgraph-model';
-export type { FilteredSubgraph, SubgraphEdgeKind, SubgraphEdgeLevel } from './domain/subgraph-model';
+export type {
+  CriticalCausalPath,
+  FilteredSubgraph,
+  SubgraphEdgeKind,
+  SubgraphEdgeLevel,
+  SubgraphLayoutMode,
+  SwimlaneBand,
+  SwimlaneId,
+  SwimlaneLayoutItem,
+  SwimlaneLayoutResult,
+} from './domain/subgraph-model';
 export { ClusterMap } from './domain/ClusterMap';
 export { MapReplay, REPLAY_STEP_MS, replayStepMs } from './domain/MapReplay';
 

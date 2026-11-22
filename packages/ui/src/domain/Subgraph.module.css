@@ -1,19 +1,95 @@
-/* 根因子图与拓扑邻域的组件节点；画布、侧栏与工具条的样式在 GraphCanvas.module.css */
-.node {
-  position: relative;
+/* 根因子图与拓扑邻域的五层垂直因果泳道、组件节点状态胶囊与本体悬停浮层；画布、侧栏与工具条在 GraphCanvas.module.css */
+.swimlaneWrap {
+  --sn-sg-height: 480px;
+}
+.lane {
+  width: 100%;
+  height: 100%;
   box-sizing: border-box;
-  width: 204px;
-  height: 68px;
   border: 1px solid var(--sn-line);
-  border-radius: 6px;
-  background: var(--sn-panel);
-  color: var(--sn-text);
-  padding: 6px 10px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--sn-panel) 55%, var(--sn-bg));
+  display: flex;
+  align-items: stretch;
+  overflow: hidden;
+}
+.lane[data-lane='L0'] {
+  --lane-accent: var(--sn-series-7);
+  background: color-mix(in srgb, var(--sn-series-7) 4%, var(--sn-panel));
+}
+.lane[data-lane='L1'] {
+  --lane-accent: var(--sn-series-1);
+  background: color-mix(in srgb, var(--sn-series-1) 4%, var(--sn-panel));
+}
+.lane[data-lane='L2'] {
+  --lane-accent: var(--sn-series-3);
+  background: color-mix(in srgb, var(--sn-series-3) 4%, var(--sn-panel));
+}
+.lane[data-lane='L3'] {
+  --lane-accent: var(--sn-series-4);
+  background: color-mix(in srgb, var(--sn-series-4) 5%, var(--sn-panel));
+}
+.lane[data-lane='external'] {
+  --lane-accent: var(--sn-faint);
+  border-style: dashed;
+  background: color-mix(in srgb, var(--sn-raise) 70%, var(--sn-panel));
+}
+.laneHeader {
+  width: 144px;
+  flex: none;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border-right: 1px solid var(--sn-line-soft);
+  border-left: 4px solid var(--lane-accent, var(--sn-line));
   display: flex;
   flex-direction: column;
   justify-content: center;
+  gap: 3px;
+  background: color-mix(in srgb, var(--sn-panel) 80%, transparent);
+}
+.laneCode {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: var(--lane-accent, var(--sn-dim));
+}
+.laneCount {
+  font-weight: 500;
+  font-size: 10.5px;
+  color: var(--sn-dim);
+  background: var(--sn-raise);
+  border-radius: 999px;
+  padding: 0 6px;
+}
+.laneTitle {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--sn-text);
+  line-height: 1.25;
+}
+
+.node {
+  position: relative;
+  box-sizing: border-box;
+  width: 224px;
+  height: 80px;
+  border: 1px solid var(--sn-line);
+  border-radius: 7px;
+  background: var(--sn-panel);
+  color: var(--sn-text);
+  padding: 7px 10px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 3px;
   font-size: 12px;
   cursor: pointer;
+  transition:
+    opacity 0.15s ease,
+    box-shadow 0.15s ease;
 }
 .node[data-role='root'] {
   border: 2px solid var(--sn-bad);
@@ -29,6 +105,23 @@
 .node[data-role='neighbor'] {
   border-style: dashed;
   color: var(--sn-dim);
+}
+/* 关键因果路径上的节点强调 */
+.node[data-critical-path] {
+  border-style: solid;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--sn-bad) 40%, transparent);
+}
+.node[data-critical-path][data-role='root'] {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--sn-bad) 55%, transparent);
+}
+/* 存在关键路径时，非路径上下文节点轻微淡化（不使用 data-dim，避免与悬停/搜索冲突） */
+.node[data-path-dim] {
+  opacity: 0.56;
+}
+.node[data-path-dim]:hover,
+.node[data-selected],
+.node[data-hit] {
+  opacity: 1;
 }
 /* 宿主机 Node 底座标识：左侧色条，便于辨认共享节点/磁盘底座（ADR 0208） */
 .node[data-substrate] {
@@ -60,15 +153,70 @@
 .node[data-dim] {
   opacity: 0.25;
 }
+.headRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
 .name {
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+.layerTag {
+  flex: none;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: var(--sn-raise);
+  color: var(--sn-dim);
+  line-height: 1.5;
+}
+.capsules {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+}
+.capsule {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1.55;
+  white-space: nowrap;
+  background: var(--sn-raise);
+  color: var(--sn-dim);
+}
+.capsule[data-tone='bad'] {
+  background: var(--sn-bad);
+  color: var(--sn-on-strong);
+}
+.capsule[data-tone='warn'] {
+  background: var(--sn-warn-soft);
+  color: var(--sn-warn);
+  border: 1px solid color-mix(in srgb, var(--sn-warn) 40%, transparent);
+}
+.capsule[data-tone='info'] {
+  background: var(--sn-info-soft);
+  color: var(--sn-info);
+}
+.capsule[data-tone='ok'] {
+  background: var(--sn-ok-soft);
+  color: var(--sn-ok);
 }
 .sub {
   color: var(--sn-dim);
-  font-size: 11px;
+  font-size: 10.5px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -123,6 +271,16 @@
   stroke-dasharray: 1 3;
   opacity: 0.7;
 }
+/* 关键因果路径：粗红/琥珀实线，盖过普通边语义色 */
+.edgeCritical {
+  --xy-edge-stroke: var(--sn-bad);
+  --xy-edge-stroke-width: 2.8;
+  stroke-dasharray: none;
+  opacity: 1;
+}
+.edgeSecondary {
+  opacity: 0.45;
+}
 .legend {
   display: flex;
   flex-wrap: wrap;
@@ -135,6 +293,10 @@
   margin-right: 5px;
   vertical-align: 1px;
   stroke-width: 2;
+}
+.legendEdge[data-kind='critical'] {
+  stroke: var(--sn-bad);
+  stroke-width: 3;
 }
 .legendEdge[data-kind='declared'] {
   stroke: var(--sn-series-1);
@@ -163,4 +325,64 @@
   border-left: 4px solid var(--sn-series-3);
   border-radius: 3px;
   background: var(--sn-panel);
+}
+/* 本体悬停提示浮层（纯文本，不阻挡点击与画布拖拽） */
+.ontologyTip {
+  max-width: 340px;
+  padding: 9px 11px;
+  border-radius: 7px;
+  border: 1px solid var(--sn-line);
+  background: var(--sn-panel);
+  color: var(--sn-text);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.16);
+  font-size: 12px;
+  line-height: 1.45;
+  z-index: 1200;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.tipHead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.tipTitle {
+  font-weight: 650;
+  color: var(--sn-text);
+}
+.tipBadge {
+  font-size: 10.5px;
+  font-weight: 600;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: var(--sn-raise);
+  color: var(--sn-dim);
+}
+.tipDesc {
+  margin: 0;
+  color: var(--sn-dim);
+  overflow-wrap: anywhere;
+}
+.tipRel {
+  margin: 0;
+  padding-top: 4px;
+  border-top: 1px solid var(--sn-line-soft);
+  font-size: 11px;
+  color: var(--sn-dim);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.panelOntology {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--sn-raise);
+  color: var(--sn-dim);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
 }

@@ -1179,6 +1179,23 @@ export type paths = {
     patch?: never;
     trace?: never;
   };
+  '/v1/ontology/glossary': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** @description 领域包组件类型、证据卡与常见运维指标概念的只读词汇表，供控制台拓扑与证据卡悬停提示使用 */
+    get: operations['getOntologyGlossary'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/v1/optimization/catalog': {
     parameters: {
       query?: never;
@@ -5683,6 +5700,40 @@ export type components = {
       /** @description 计数归属的节点；调度失败等没有节点的计数不出现在这里 */
       nodes: string[];
     };
+    OntologyGlossary: {
+      cards: {
+        [key: string]: {
+          category?: string | null;
+          description: string;
+          title: string;
+          unit?: string | null;
+        };
+      };
+      component_types: {
+        [key: string]: {
+          description: string;
+          external: boolean;
+          hub: boolean;
+          /** @enum {string|null} */
+          layer?: 'L0' | 'L1' | 'L2' | 'L3' | 'external' | null;
+          match?: {
+            api_group?: string;
+            has_labels?: boolean;
+            kind: string;
+            name_pattern?: string;
+            namespaces?: string[];
+          };
+          title: string;
+        };
+      };
+      concepts: {
+        [key: string]: {
+          description: string;
+          title: string;
+        };
+      };
+      pack_lock: string | null;
+    };
     /**
      * OptimizationOutput
      * @description 一次目标运行经代码校验后的输出（契约 2.28.0，ADR 0146 §2）：基线、差距、候选发现、按发现分组的账本、每个发现的结论、建议与门槛记录、validation_notes。baseline、gap、candidates 与 recommendations 的数值全部由代码从信号卡计算；模型只提出假设、选择检查并写说明。没有差距时整次运行不调用模型，ledger 与 conclusions 为空
@@ -9956,6 +10007,35 @@ export interface operations {
         content: {
           'application/json': components['schemas']['ModelRouteStatus'][];
         };
+      };
+    };
+  };
+  getOntologyGlossary: {
+    parameters: {
+      query?: {
+        lang?: 'zh-CN' | 'en';
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 运维本体词汇表 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['OntologyGlossary'];
+        };
+      };
+      /** @description ETag 未变化 */
+      304: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
     };
   };

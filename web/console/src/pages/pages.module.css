@@ -155,3 +155,108 @@
   padding: 8px;
   border-radius: 4px;
 }
+.knowledgeToolbar {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.knowledgeSearch {
+  position: relative;
+  flex: 1 1 220px;
+  max-width: 340px;
+}
+.knowledgeSearch input {
+  width: 100%;
+  border: 1px solid var(--sn-line);
+  background: var(--sn-bg);
+  color: var(--sn-text);
+  border-radius: 6px;
+  padding: 5px 8px 5px 28px;
+  font-size: 13px;
+}
+.knowledgeSearchIcon {
+  position: absolute;
+  left: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 14px;
+  height: 14px;
+  color: var(--sn-dim);
+}
+.knowledgeList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.knowledgeCard {
+  border: 1px solid var(--sn-line-soft);
+  border-radius: 8px;
+  background: var(--sn-bg);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.knowledgeCard[data-origin='learned'] {
+  border-left: 3px solid var(--sn-info);
+}
+.knowledgeHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.knowledgePills {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+.knowledgeTitle {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--sn-text);
+  flex: 1 1 220px;
+}
+.knowledgeActions {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+.knowledgeBody {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--sn-text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.knowledgeTags {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.knowledgeTagGroup {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.tagChip {
+  font-size: 11.5px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--sn-raise);
+  border: 1px solid var(--sn-line-soft);
+}
+.knowledgeFoot {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  font-size: 12px;
+  padding-top: 6px;
+  border-top: 1px solid var(--sn-line-soft);
+}

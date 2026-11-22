@@ -21,8 +21,15 @@ test('外壳：状态条不可关闭、导航分组、集群切换与搜索', as
     await expect(strip).toBeVisible();
   }
   const nav = page.getByRole('navigation', { name: '主导航' });
-  for (const g of ['值班', '处置', '度量', '系统', '治理']) {
-    await expect(nav.getByText(g, { exact: true })).toBeVisible();
+  for (const label of ['事件收件箱', '拓扑与地图', '知识与评测']) {
+    await expect(nav.getByRole('link', { name: label, exact: true })).toBeVisible();
+  }
+  const sysToggle = nav.getByRole('button', { name: '系统与调试' });
+  await expect(sysToggle).toHaveAttribute('aria-expanded', 'false');
+  await sysToggle.click();
+  await expect(sysToggle).toHaveAttribute('aria-expanded', 'true');
+  for (const label of ['动作队列', '领域包', '审计']) {
+    await expect(nav.getByRole('link', { name: label, exact: true })).toBeVisible();
   }
   // 单集群（CCHP 实况）：自动选中该集群，不再出现「全部集群」（DESIGN：单集群不把「全部集群」当默认）
   const cluster = page.getByRole('combobox', { name: '集群' });

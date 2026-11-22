@@ -268,6 +268,15 @@
       "required": ["id", "match"],
       "properties": {
         "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_.-]*$" },
+        "description": {
+          "$ref": "evidence-card.schema.json#/$defs/LocalizedText",
+          "description": "组件类型职责与架构层级说明，用于控制台拓扑悬停提示"
+        },
+        "layer": {
+          "type": "string",
+          "enum": ["L0", "L1", "L2", "L3", "external"],
+          "description": "组件在五层因果泳道中的默认层级（L0 入口与边缘、L1 业务负载、L2 数据与存储、L3 节点与底座、external 外部依赖）"
+        },
         "hub": { "type": "boolean", "default": false },
         "external": {
           "type": "boolean",

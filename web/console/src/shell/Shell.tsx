@@ -1,20 +1,70 @@
 // 全局外壳（DESIGN §12.1）：头部有集群切换、搜索、语言、主题与用户；头部下方是不可关闭的状态条；
-// 左侧导航按值班、处置、度量、系统、治理分组。本地管理员作为紧急入口登录时显示横幅。
+// 左侧导航精简为 3 个核心视图（事件收件箱、拓扑与地图、知识与评测），并将次级运维、平台配置与治理入口收纳在可折叠的
+// 「系统与调试」抽屉内，同时保留全部既有 URL 路由可直达。本地管理员作为紧急入口登录时显示横幅。
 
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, Outlet, useNavigate, useRouterState, useSearch } from '@tanstack/react-router';
 import { ConditionStrip, ErrorBoundary, useConditions, useI18n, type Cluster } from '@srenautix/ui';
-import { LogOut, Menu, Search, ShieldAlert } from 'lucide-react';
-import { useState, type FormEvent } from 'react';
+import {
+  BookOpen,
+  ChevronDown,
+  ChevronRight,
+  Inbox,
+  LogOut,
+  Menu,
+  Network,
+  Search,
+  ShieldAlert,
+  SlidersHorizontal,
+} from 'lucide-react';
+import { useEffect, useState, type ComponentType, type FormEvent } from 'react';
 import { hub, ok } from '../api';
 import { setPrefs, usePrefs, type ThemePref } from '../prefs';
 import { useNow } from '../now';
 import { SESSION_KEY, useSession } from '../session';
 import styles from './Shell.module.css';
 
+interface PrimaryNavItem {
+  to: '/incidents' | '/topology' | '/eval';
+  label: string;
+  Icon: ComponentType<{ className?: string; 'aria-hidden'?: boolean | 'true' | 'false' }>;
+}
+
 interface NavItem {
   to: string;
   label: string;
+}
+
+const SECONDARY_PREFIXES = [
+  '/actions',
+  '/health',
+  '/clusters',
+  '/integrations',
+  '/packs',
+  '/policies',
+  '/models',
+  '/audit',
+  '/users',
+  '/settings',
+] as const;
+
+/** 判断当前路径是否属于折叠「系统与调试」抽屉内的次级页面；纯函数，便于单测。 */
+export function isSecondaryRoute(pathname: string): boolean {
+  return SECONDARY_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`));
+}
+
+/** 计算三个核心视图的激活态（事件详情、研判运行、告警查找归入事件收件箱）。 */
+export function isPrimaryNavActive(to: '/incidents' | '/topology' | '/eval', pathname: string): boolean {
+  if (to === '/incidents') {
+    return (
+      pathname === '/' ||
+      pathname === '/incidents' ||
+      pathname.startsWith('/incidents/') ||
+      pathname.startsWith('/runs/') ||
+      pathname === '/alerts'
+    );
+  }
+  return pathname === to || pathname.startsWith(`${to}/`);
 }
 
 /** 集群列表的查询选项；Shell 与 router 共用同一份缓存，避免重复定义请求。 */
@@ -40,26 +90,36 @@ export function resolveCluster(
   return clusters?.length === 1 ? clusters[0]!.cluster_id : undefined;
 }
 
-function Nav({ onNavigate }: { onNavigate: () => void }) {
+function Nav({ pathname, onNavigate }: { pathname: string; onNavigate: () => void }) {
   const { t } = useI18n();
-  const groups: Array<{ label: string; items: NavItem[] }> = [
+  const inSecondary = isSecondaryRoute(pathname);
+  const [systemOpen, setSystemOpen] = useState(inSecondary);
+
+  // 通过深链或搜索跳转到次级页面时自动展开「系统与调试」，让用户立刻看到当前所在位置
+  useEffect(() => {
+    if (inSecondary) {
+      setSystemOpen(true);
+    }
+  }, [inSecondary]);
+
+  const primary: PrimaryNavItem[] = [
+    { to: '/incidents', label: t('nav.incidents'), Icon: Inbox },
+    { to: '/topology', label: t('nav.topology'), Icon: Network },
+    { to: '/eval', label: t('nav.eval'), Icon: BookOpen },
+  ];
+
+  const secondaryGroups: Array<{ label: string; items: NavItem[] }> = [
     {
-      label: t('nav.group.oncall'),
-      items: [{ to: '/incidents', label: t('nav.incidents') }],
-    },
-    { label: t('nav.group.remediation'), items: [{ to: '/actions', label: t('nav.actions') }] },
-    {
-      label: t('nav.group.measure'),
+      label: t('nav.sub.ops'),
       items: [
-        { to: '/eval', label: t('nav.eval') },
+        { to: '/actions', label: t('nav.actions') },
         { to: '/health', label: t('nav.health') },
+        { to: '/clusters', label: t('nav.clusters') },
       ],
     },
     {
-      label: t('nav.group.system'),
+      label: t('nav.sub.platform'),
       items: [
-        { to: '/topology', label: t('nav.topology') },
-        { to: '/clusters', label: t('nav.clusters') },
         { to: '/integrations', label: t('nav.integrations') },
         { to: '/packs', label: t('nav.packs') },
         { to: '/policies', label: t('nav.policies') },
@@ -67,7 +127,7 @@ function Nav({ onNavigate }: { onNavigate: () => void }) {
       ],
     },
     {
-      label: t('nav.group.governance'),
+      label: t('nav.sub.governance'),
       items: [
         { to: '/audit', label: t('nav.audit') },
         { to: '/users', label: t('nav.users') },
@@ -75,28 +135,78 @@ function Nav({ onNavigate }: { onNavigate: () => void }) {
       ],
     },
   ];
+
   return (
     <nav className={styles.nav} aria-label={t('nav.label')}>
-      {groups.map((g) => (
-        <div key={g.label} className={styles.navGroup}>
-          <div className={styles.navGroupLabel}>{g.label}</div>
-          <ul>
-            {g.items.map((i) => (
-              <li key={i.to}>
-                <Link
-                  to={i.to}
-                  search={(prev: { cluster?: string }) => ({ cluster: prev.cluster })}
-                  className={styles.navLink}
-                  activeProps={{ 'aria-current': 'page', className: `${styles.navLink} ${styles.navActive}` }}
-                  onClick={onNavigate}
-                >
-                  {i.label}
-                </Link>
-              </li>
+      <ul className={styles.primaryList}>
+        {primary.map(({ to, label, Icon }) => {
+          const active = isPrimaryNavActive(to, pathname);
+          return (
+            <li key={to}>
+              <Link
+                to={to}
+                search={(prev: { cluster?: string }) => ({ cluster: prev.cluster })}
+                className={
+                  active
+                    ? `${styles.navLink} ${styles.primaryLink} ${styles.navActive}`
+                    : `${styles.navLink} ${styles.primaryLink}`
+                }
+                aria-current={active ? 'page' : undefined}
+                onClick={onNavigate}
+              >
+                <Icon aria-hidden="true" className={styles.navIcon} />
+                <span>{label}</span>
+              </Link>
+            </li>
+          );
+        })}
+      </ul>
+
+      <div className={styles.drawerWrap}>
+        <button
+          type="button"
+          className={inSecondary ? `${styles.drawerToggle} ${styles.drawerToggleActive}` : styles.drawerToggle}
+          aria-expanded={systemOpen}
+          aria-controls="nav-system-drawer"
+          onClick={() => setSystemOpen((o) => !o)}
+        >
+          <SlidersHorizontal aria-hidden="true" className={styles.navIcon} />
+          <span className={styles.drawerLabel}>{t('nav.system_drawer')}</span>
+          {systemOpen ? (
+            <ChevronDown aria-hidden="true" className={styles.chevron} />
+          ) : (
+            <ChevronRight aria-hidden="true" className={styles.chevron} />
+          )}
+        </button>
+
+        {systemOpen && (
+          <div id="nav-system-drawer" className={styles.drawerBody}>
+            {secondaryGroups.map((g) => (
+              <div key={g.label} className={styles.navGroup}>
+                <div className={styles.navGroupLabel}>{g.label}</div>
+                <ul>
+                  {g.items.map((i) => (
+                    <li key={i.to}>
+                      <Link
+                        to={i.to}
+                        search={(prev: { cluster?: string }) => ({ cluster: prev.cluster })}
+                        className={`${styles.navLink} ${styles.secondaryLink}`}
+                        activeProps={{
+                          'aria-current': 'page',
+                          className: `${styles.navLink} ${styles.secondaryLink} ${styles.navActive}`,
+                        }}
+                        onClick={onNavigate}
+                      >
+                        {i.label}
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              </div>
             ))}
-          </ul>
-        </div>
-      ))}
+          </div>
+        )}
+      </div>
     </nav>
   );
 }
@@ -238,7 +348,7 @@ export function Shell() {
       <div className={styles.body}>
         <div className={styles.navWrap} data-open={menu ? '' : undefined}>
           <ErrorBoundary area="Nav">
-            <Nav onNavigate={() => setMenu(false)} />
+            <Nav pathname={pathname} onNavigate={() => setMenu(false)} />
           </ErrorBoundary>
         </div>
         <main className={styles.main} id="main">

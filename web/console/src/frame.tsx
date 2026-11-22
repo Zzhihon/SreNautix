@@ -19,6 +19,7 @@ const links: Links = {
   topology: topologyHref,
   search: searchHref,
   clusterMap: clusterMapHref,
+  knowledge: () => '/eval?tab=knowledge',
 };
 
 /** 普通的 <a>，点击时交给路由导航（保留中键、Ctrl 点击在新标签页打开）。 */

@@ -5260,7 +5260,8 @@ export interface EvidenceCardDefinition {
    */
   id: string;
   title: LocalizedText2;
-  note?: LocalizedText3;
+  description?: LocalizedText3;
+  note?: LocalizedText4;
   /**
    * 卡片对哪些实体执行；不填时对证据链所属组件执行
    */
@@ -5309,7 +5310,7 @@ export interface EvidenceCardDefinition {
    * 作为阶段 B 区分性检查执行时的说明与可覆盖参数（ADR 0116）。没有它时卡片仍可作为检查，参数为全部 params 与 window_before、window_after，类型取默认值；有它时 params 的取值范围按 args 约束。window_before、window_after 总是由运行时提供，不在 args 中声明
    */
   check?: {
-    description?: LocalizedText6;
+    description?: LocalizedText7;
     /**
      * 可覆盖参数的 JSON Schema（type: object、additionalProperties: false）：每个属性都是卡片 params 的键，带 description；字符串用 enum 或 pattern 限定，数字有 minimum 与 maximum，卡片的默认值满足它
      */
@@ -5321,9 +5322,16 @@ export interface EvidenceCardDefinition {
   };
 }
 /**
- * 这张卡展示什么、怎么读
+ * 证据卡与指标含义说明（控制台悬停提示用；未填写时回退到 note）
  */
 export interface LocalizedText3 {
+  'zh-CN'?: string;
+  en?: string;
+}
+/**
+ * 这张卡展示什么、怎么读
+ */
+export interface LocalizedText4 {
   'zh-CN'?: string;
   en?: string;
 }
@@ -5379,20 +5387,20 @@ export interface CardBinding {
 }
 export interface CardRule {
   cel: string;
-  say: LocalizedText4;
-  normal_say?: LocalizedText5;
+  say: LocalizedText5;
+  normal_say?: LocalizedText6;
 }
 /**
  * 命中时的理由，ICU MessageFormat，可引用 CEL 变量
  */
-export interface LocalizedText4 {
+export interface LocalizedText5 {
   'zh-CN'?: string;
   en?: string;
 }
 /**
  * 求值为 false 时的说明（例如“连接池峰值 {poolPeak, number, percent}，未超过 95%”），ICU MessageFormat，可引用的参数与 say 相同
  */
-export interface LocalizedText5 {
+export interface LocalizedText6 {
   'zh-CN'?: string;
   en?: string;
 }
@@ -5552,7 +5560,7 @@ export interface CardControls {
 /**
  * 这张卡作为检查时判断什么、结果怎样区分假设
  */
-export interface LocalizedText6 {
+export interface LocalizedText7 {
   'zh-CN'?: string;
   en?: string;
 }
@@ -6324,7 +6332,8 @@ export interface EvidenceCardDefinition1 {
    */
   id: string;
   title: LocalizedText2;
-  note?: LocalizedText3;
+  description?: LocalizedText3;
+  note?: LocalizedText4;
   /**
    * 卡片对哪些实体执行；不填时对证据链所属组件执行
    */
@@ -6373,7 +6382,7 @@ export interface EvidenceCardDefinition1 {
    * 作为阶段 B 区分性检查执行时的说明与可覆盖参数（ADR 0116）。没有它时卡片仍可作为检查，参数为全部 params 与 window_before、window_after，类型取默认值；有它时 params 的取值范围按 args 约束。window_before、window_after 总是由运行时提供，不在 args 中声明
    */
   check?: {
-    description?: LocalizedText6;
+    description?: LocalizedText7;
     /**
      * 可覆盖参数的 JSON Schema（type: object、additionalProperties: false）：每个属性都是卡片 params 的键，带 description；字符串用 enum 或 pattern 限定，数字有 minimum 与 maximum，卡片的默认值满足它
      */
@@ -6393,6 +6402,11 @@ export interface ComponentsFile {
 }
 export interface ComponentType {
   id: string;
+  description?: LocalizedText8;
+  /**
+   * 组件在五层因果泳道中的默认层级（L0 入口与边缘、L1 业务负载、L2 数据与存储、L3 节点与底座、external 外部依赖）
+   */
+  layer?: 'L0' | 'L1' | 'L2' | 'L3' | 'external';
   hub?: boolean;
   /**
    * 组件在集群之外（例如外部 API 服务方），集群内没有可处置的对象：研判根因落在这种组件上、结论为 likely 及以上时，处置推导以它为 ignore 的依据（ADR 0138）
@@ -6431,6 +6445,13 @@ export interface ComponentType {
         }
     )[],
   ];
+}
+/**
+ * 组件类型职责与架构层级说明，用于控制台拓扑悬停提示
+ */
+export interface LocalizedText8 {
+  'zh-CN'?: string;
+  en?: string;
 }
 /**
  * 按 kind、API 组、标签、名称与命名空间匹配对象；组件类型与服务成员（ADR 0193）共用。同时命中多条时，写出的条件多（更具体）的优先
@@ -6593,7 +6614,7 @@ export interface PackConclusionRule {
     alerts?: PackConclusionAlertCondition[];
     changes?: PackConclusionChangeCondition[];
   };
-  mechanism: LocalizedText7;
+  mechanism: LocalizedText9;
 }
 /**
  * 阶段 A 的一张证据卡在某个实体上的结论。证据基线判为常态的异常卡按正常对待（ADR 0153）；无法判定的卡两种结论都不满足
@@ -6680,7 +6701,7 @@ export interface PackConclusionChangeCondition {
 /**
  * 机制：根因怎样造成了事件的症状，每种语言最多 300 字
  */
-export interface LocalizedText7 {
+export interface LocalizedText9 {
   'zh-CN'?: string;
   en?: string;
 }
@@ -6759,7 +6780,7 @@ export interface Remediation {
    * @minItems 1
    */
   edits: [RemediationEdit, ...RemediationEdit[]];
-  change: LocalizedText10;
+  change: LocalizedText12;
   verify: {
     say: LocalizedText2;
     /**
@@ -6793,12 +6814,12 @@ export interface Estimate {
    * CEL，期望值
    */
   expected: string;
-  basis: LocalizedText8;
+  basis: LocalizedText10;
 }
 /**
  * 计算依据与前提（ICU MessageFormat，变量为 let、params、lower、expected）
  */
-export interface LocalizedText8 {
+export interface LocalizedText10 {
   'zh-CN'?: string;
   en?: string;
 }
@@ -6811,12 +6832,12 @@ export interface Guard {
    * 为 true 表示约束成立
    */
   cel: string;
-  say: LocalizedText9;
+  say: LocalizedText11;
 }
 /**
  * 约束不成立时的原因（ICU MessageFormat，变量为 let 与 params）
  */
-export interface LocalizedText9 {
+export interface LocalizedText11 {
   'zh-CN'?: string;
   en?: string;
 }
@@ -6864,7 +6885,7 @@ export interface RemediationEdit {
 /**
  * 改了什么、为什么（ICU MessageFormat，变量取自 let 与 params），写入 PR 描述
  */
-export interface LocalizedText10 {
+export interface LocalizedText12 {
   'zh-CN'?: string;
   en?: string;
 }
@@ -7201,7 +7222,7 @@ export interface Estimate1 {
    * CEL，期望值
    */
   expected: string;
-  basis: LocalizedText8;
+  basis: LocalizedText10;
 }
 /**
  * issues.yaml（契约 2.28.0，ADR 0146 §4.4）：业务仓库 issue 模板。模板只描述适用条件、锚点、建议与收益，由 server 渲染 issue 并在业务仓库创建，从不提交 PR
@@ -7248,7 +7269,7 @@ export interface IssueTemplate {
       from: string;
     }[],
   ];
-  suggestion: LocalizedText11;
+  suggestion: LocalizedText13;
   estimate: Estimate1;
   verify: {
     say: LocalizedText2;
@@ -7267,7 +7288,7 @@ export interface IssueTemplate {
 /**
  * 建议文字（ICU MessageFormat，变量为 let 与 params），写进 issue 的“建议”段
  */
-export interface LocalizedText11 {
+export interface LocalizedText13 {
   'zh-CN'?: string;
   en?: string;
 }
@@ -8275,7 +8296,7 @@ export interface SkillOutputs {
    */
   fingerprint: [unknown, ...unknown[]];
   issue: {
-    title: LocalizedText12;
+    title: LocalizedText14;
     templates: SkillTemplates;
     comment_templates: SkillTemplates;
     /**
@@ -8289,7 +8310,7 @@ export interface SkillOutputs {
 /**
  * Mustache 模板，与正文同样的变量
  */
-export interface LocalizedText12 {
+export interface LocalizedText14 {
   'zh-CN'?: string;
   en?: string;
 }

@@ -10,6 +10,7 @@ import {
   useEvidence,
   useFeedback,
   useIncident,
+  useOntologyGlossary,
   useProposals,
   useRun,
   useRuns,
@@ -25,6 +26,7 @@ import { EvidenceNavProvider, type EvidenceNav } from '../domain/evidence-nav';
 import { FeedbackControl } from '../domain/FeedbackControl';
 import { HypothesisList } from '../domain/HypothesisList';
 import { componentLabel, feedbackState } from '../domain/model';
+import { PromoteCaseButton } from '../domain/PromoteCaseButton';
 import { Subgraph } from '../domain/Subgraph';
 import { TimelineLane } from '../domain/TimelineLane';
 import { VerdictHeader } from '../domain/VerdictHeader';
@@ -196,6 +198,7 @@ export function IncidentView({
   const feedback = useFeedback(incidentRef);
   const conditions = useConditions(incident.data?.cluster_id);
   const proposals = useProposals({ incident_id: incident.data?.incident_id });
+  const glossary = useOntologyGlossary();
 
   // 研判明细里的证据是模型所见的全部：该事件版本的阶段 A 卡加区分性检查产生的卡，都带序列。快照接口的结果合并在后，
   // 只补研判明细里没有的卡；没有完成的研判时快照就是最新阶段 A 的卡。
@@ -221,6 +224,15 @@ export function IncidentView({
     () => subgraph.data?.nodes.map((n) => n.component) ?? incident.data?.components ?? [],
     [subgraph.data, incident.data],
   );
+  const changedComponents = useMemo(() => {
+    const set = new Set<string>();
+    for (const c of incident.data?.changes ?? []) {
+      for (const target of c.targets ?? []) {
+        set.add(target);
+      }
+    }
+    return set;
+  }, [incident.data]);
 
   if (incident.isPending) {
     return <Loading />;
@@ -253,17 +265,29 @@ export function IncidentView({
                 now={now}
               />
               <div className={styles.feedbackBar}>
-                <FeedbackControl
-                  layout="inline"
-                  incidentRef={incidentRef}
-                  runId={concludedId}
-                  disposition={disposition}
-                  rootComponent={root}
-                  components={components}
-                  latest={latestFb}
-                  state={feedbackState(latestFb, disposition !== null)}
-                  firing={i.state === 'firing'}
-                />
+                <div className={styles.feedbackMain}>
+                  <FeedbackControl
+                    layout="inline"
+                    incidentRef={incidentRef}
+                    runId={concludedId}
+                    disposition={disposition}
+                    rootComponent={root}
+                    components={components}
+                    latest={latestFb}
+                    state={feedbackState(latestFb, disposition !== null)}
+                    firing={i.state === 'firing'}
+                  />
+                </div>
+                <div className={styles.feedbackPromote}>
+                  <PromoteCaseButton
+                    incidentRef={incidentRef}
+                    incident={i}
+                    disposition={disposition}
+                    rootComponent={root}
+                    run={run.data ?? null}
+                    latestFeedback={latestFb}
+                  />
+                </div>
               </div>
             </Panel>
             {firstErr !== undefined && <ErrorBox title={t('detail.partial_failed')} error={firstErr} />}
@@ -287,6 +311,8 @@ export function IncidentView({
                   graph={subgraph.data}
                   clusterId={i.cluster_id}
                   alertLabel={(id) => alertnames.get(id) ?? id}
+                  changedComponents={changedComponents}
+                  glossary={glossary.data ?? null}
                   onOpenComponent={onOpenComponent && ((c) => onOpenComponent(i.cluster_id, c))}
                 />
               ) : (
@@ -311,6 +337,7 @@ export function IncidentView({
                       incident={i}
                       concludedAt={run.data?.finished_at ?? null}
                       focus={focus}
+                      glossary={glossary.data ?? null}
                       onShowHypotheses={run.data?.output ? () => onTab('hypotheses') : undefined}
                     />
                   ) : (

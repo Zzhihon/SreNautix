@@ -6,14 +6,15 @@
 
 import { Bot, ChevronRight, CircleHelp, Eye, EyeOff, RefreshCw, Repeat, TrendingUp } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
-import type { EvidenceRef, EvidenceResult, Incident, ResearchOutput } from '../contract';
-import { useRerunEvidence, useUiEnv } from '../data';
+import type { EvidenceRef, EvidenceResult, Incident, OntologyGlossary, ResearchOutput } from '../contract';
+import { useOntologyGlossary, useRerunEvidence, useUiEnv } from '../data';
 import { useI18n } from '../i18n';
 import { Button, ErrorBox, Mono } from '../primitives/basic';
 import { Chart, type ChartBand, type ChartMark } from '../primitives/Chart';
 import { EmptyState } from '../primitives/EmptyState';
-import { Collapsible } from '../primitives/overlays';
+import { Collapsible, Tip } from '../primitives/overlays';
 import { Status, StatusIcon, StatusPill } from '../primitives/Status';
+import { lookupConcept, lookupEvidenceOntology } from './ontology';
 import {
   buildEvidenceChain,
   cardCharts,
@@ -254,8 +255,8 @@ function Roles({ roles }: { roles: readonly EvidenceRole[] }) {
   );
 }
 
-/** 判定依据：求值过的条件、观测值与生效的参数。 */
-function Basis({ r }: { r: EvidenceResult }) {
+/** 判定依据：求值过的条件、观测值与生效的参数。观测键命中本体词汇表时可悬停查看指标说明。 */
+function Basis({ r, glossary }: { r: EvidenceResult; glossary?: OntologyGlossary | null }) {
   const { t } = useI18n();
   const conditions = r.conditions ?? [];
   const pairs = (o: Record<string, unknown> | undefined) => Object.entries(o ?? {}).filter(([, v]) => v !== null);
@@ -284,11 +285,23 @@ function Basis({ r }: { r: EvidenceResult }) {
             list.length > 0 && (
               <dl key={name} className={styles.kv}>
                 <dt>{name}</dt>
-                {list.map(([k, v]) => (
-                  <dd key={k}>
-                    <Mono>{k}</Mono> {String(v)}
-                  </dd>
-                ))}
+                {list.map(([k, v]) => {
+                  const concept = lookupConcept(k, glossary);
+                  return (
+                    <dd key={k}>
+                      {concept ? (
+                        <Tip text={`${concept.title}\n${concept.description}`}>
+                          <span tabIndex={0} className={styles.conceptWrap}>
+                            <Mono className={styles.conceptTerm}>{k}</Mono>
+                          </span>
+                        </Tip>
+                      ) : (
+                        <Mono>{k}</Mono>
+                      )}{' '}
+                      {String(v)}
+                    </dd>
+                  );
+                })}
               </dl>
             ),
         )}
@@ -302,6 +315,7 @@ export function EvidenceCard({
   live,
   roles,
   marks,
+  glossary,
   open = true,
   onToggle,
 }: {
@@ -310,6 +324,8 @@ export function EvidenceCard({
   roles?: readonly EvidenceRole[];
   /** 画在每张图上的时刻（告警触发）。 */
   marks?: readonly ChartMark[];
+  /** 运维本体词汇表：提供卡片与指标术语的悬停说明。 */
+  glossary?: OntologyGlossary | null;
   /** 收起时只有一行：判定、标题、实体、主值与理由。 */
   open?: boolean;
   /** 给出时标题行可以点击展开与收起。 */
@@ -319,6 +335,17 @@ export function EvidenceCard({
   const entity = entityText(r);
   const title = evidenceTitle(r, locale);
   const changed = live !== undefined && live.display_state !== r.display_state;
+  const ontology = useMemo(() => lookupEvidenceOntology(r, glossary), [r, glossary]);
+  const ontologyTipText = useMemo(() => {
+    const lines: string[] = [];
+    if (ontology.cardDescription) {
+      lines.push(ontology.cardDescription);
+    }
+    for (const c of ontology.concepts) {
+      lines.push(`${c.title}：${c.description}`);
+    }
+    return lines.join('\n');
+  }, [ontology]);
   return (
     <article
       className={styles.card}
@@ -330,6 +357,18 @@ export function EvidenceCard({
       <header className={styles.head} data-clickable={onToggle ? '' : undefined} onClick={onToggle}>
         <StatusIcon domain="verdict" value={r.display_state} />
         <h3 className={styles.title}>{title}</h3>
+        {ontologyTipText && (
+          <Tip text={ontologyTipText}>
+            <button
+              type="button"
+              className={styles.infoBtn}
+              aria-label={t('evidence.ontology_tip')}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <CircleHelp aria-hidden="true" />
+            </button>
+          </Tip>
+        )}
         {entity && <span className={styles.entity}>{entity}</span>}
         {!open && (
           <span className={styles.brief}>
@@ -368,7 +407,7 @@ export function EvidenceCard({
             <Side r={r} live={false} paired={live !== undefined} marks={marks} />
             {live && <Side r={live} live paired marks={marks} />}
           </div>
-          <Basis r={r} />
+          <Basis r={r} glossary={glossary} />
           <Collapsible summary={t('evidence.queries', { n: r.queries.length })}>
             <ul className={styles.queries}>
               {r.queries.map((q) => (
@@ -518,6 +557,7 @@ export function EvidenceList({
   incident,
   concludedAt = null,
   focus,
+  glossary,
   onShowHypotheses,
 }: {
   incidentRef: string;
@@ -531,10 +571,14 @@ export function EvidenceList({
   concludedAt?: string | null;
   /** 要展开并滚动到的卡；seq 变化时重新定位。 */
   focus?: { ref: string; seq: number } | null;
+  /** 运维本体词汇表（不传时自动经 DataPort 拉取）。 */
+  glossary?: OntologyGlossary | null;
   onShowHypotheses?: () => void;
 }) {
   const { t } = useI18n();
   const { caps } = useUiEnv();
+  const glossaryQuery = useOntologyGlossary(glossary === undefined);
+  const activeGlossary = glossary !== undefined ? glossary : (glossaryQuery.data ?? null);
   const rerun = useRerunEvidence(incidentRef);
   const [live, setLive] = useState<Map<string, EvidenceResult> | null>(null);
   const [toggled, setToggled] = useState<ReadonlyMap<string, boolean>>(new Map());
@@ -634,6 +678,7 @@ export function EvidenceList({
                   live={live?.get(r.ref)}
                   roles={chain.roles.get(r.ref)}
                   marks={marks}
+                  glossary={activeGlossary}
                   open={isOpen(g.id, r)}
                   onToggle={() => setToggled((m) => new Map(m).set(r.ref, !isOpen(g.id, r)))}
                 />

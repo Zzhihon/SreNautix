@@ -1,6 +1,6 @@
 /* GraphCanvas：画布与侧栏并排，节点条在下方；全屏时整块铺满屏幕，侧栏与节点条留在全屏范围内 */
 .frame {
-  --sg-height: 320px;
+  --sg-height: var(--sn-sg-height, 320px);
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 10px;

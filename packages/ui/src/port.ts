@@ -14,6 +14,9 @@ import type {
   Incident,
   IncidentList,
   IncidentSubgraph,
+  LearnedKnowledgeItem,
+  OntologyGlossary,
+  PromoteKnowledgeRequest,
   Proposal,
   ProposalDetail,
   ResearchManifest,
@@ -49,6 +52,8 @@ export interface ProposalQuery {
   limit?: number;
 }
 
+export type { LearnedKnowledgeItem, PromoteKnowledgeRequest } from './contract';
+
 export interface DataPort {
   /** listConditions。 */
   listConditions(clusterId?: string): Promise<Condition[]>;
@@ -80,6 +85,8 @@ export interface DataPort {
   listProposals(q: ProposalQuery): Promise<Proposal[]>;
   /** getProposal：提议加审批页需要的机器推导字段。 */
   getProposal(id: string): Promise<ProposalDetail>;
+  /** getOntologyGlossary：只读运维本体词汇表（组件类型、证据卡与常见运维指标说明）。可选，便于旧宿主与单测降级。 */
+  getOntologyGlossary?(lang?: 'zh-CN' | 'en'): Promise<OntologyGlossary>;
   /** 写操作（反馈除外）；只有独立控制台提供。 */
   actions?: ActionPort;
 }
@@ -102,6 +109,8 @@ export interface ActionPort {
     ref: string,
     body: { run_id: string | null; refs: EvidenceRef[]; window_to: string },
   ): Promise<EvidenceResult[]>;
+  /** promoteIncidentKnowledge：一键将事件沉淀为 Stage B RAG 可检索的知识案例。 */
+  promoteIncidentKnowledge?(ref: string, body: PromoteKnowledgeRequest): Promise<LearnedKnowledgeItem>;
 }
 
 /** 接口错误：保留 HTTP 状态与契约里的错误码，界面据此给出具体说明。 */

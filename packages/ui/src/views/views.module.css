@@ -89,6 +89,20 @@
   border-top: 1px solid var(--sn-line-soft);
   background: var(--sn-raise);
   border-radius: 0 0 7px 7px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px 16px;
+  flex-wrap: wrap;
+}
+.feedbackMain {
+  flex: 1 1 420px;
+  min-width: 0;
+}
+.feedbackPromote {
+  flex: none;
+  display: flex;
+  align-items: center;
 }
 .pendingList {
   list-style: none;

@@ -5,7 +5,7 @@
 import type { HubPaths } from '@srenautix/contract';
 import createClient, { type Client, type Middleware } from 'openapi-fetch';
 import type { Proposal } from './contract';
-import { ApiError, type ActionPort, type DataPort } from './port';
+import { ApiError, type ActionPort, type DataPort, type LearnedKnowledgeItem } from './port';
 import { RequestGuard, type RequestGuardOptions } from './requestGuard';
 
 // 只引用契约的类型：@srenautix/contract 的运行时入口带着全部 JSON Schema 与 Ajv，浏览器端不需要
@@ -125,6 +125,14 @@ export function createHubPort(o: HubPortOptions): DataPort {
           body,
         }),
       ),
+    promoteIncidentKnowledge: async (incident, body) =>
+      unwrap<LearnedKnowledgeItem>(
+        'promoteIncidentKnowledge',
+        await c.POST('/v1/incidents/{incident_ref}/knowledge', {
+          params: { path: { incident_ref: incident }, header: csrfHeader },
+          body,
+        }),
+      ),
   };
   return {
     listConditions: async (cluster_id) =>
@@ -165,6 +173,8 @@ export function createHubPort(o: HubPortOptions): DataPort {
     listProposals: async (q) => unwrap('listProposals', await c.GET('/v1/proposals', { params: { query: q } })),
     getProposal: async (id) =>
       unwrap('getProposal', await c.GET('/v1/proposals/{proposal_id}', { params: { path: { proposal_id: id } } })),
+    getOntologyGlossary: async (lang) =>
+      unwrap('getOntologyGlossary', await c.GET('/v1/ontology/glossary', { params: { query: lang ? { lang } : {} } })),
     actions: o.actions ? actions : undefined,
   };
 }

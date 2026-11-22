@@ -97,24 +97,96 @@
   min-height: 0;
 }
 .navWrap {
-  width: 196px;
+  width: 204px;
   flex: none;
   border-right: 1px solid var(--sn-line);
   background: var(--sn-panel);
 }
 .nav {
-  padding: 10px 8px;
+  padding: 12px 8px;
   position: sticky;
   top: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
-.navGroup + .navGroup {
-  margin-top: 12px;
+.primaryList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.primaryLink {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  font-size: 13.5px;
+  font-weight: 500;
+}
+.navIcon {
+  width: 15px;
+  height: 15px;
+  flex: none;
+  opacity: 0.85;
+}
+.drawerWrap {
+  margin-top: 6px;
+  padding-top: 10px;
+  border-top: 1px solid var(--sn-line-soft);
+}
+.drawerToggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--sn-dim);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  text-align: left;
+}
+.drawerToggle:hover {
+  background: var(--sn-raise);
+  color: var(--sn-text);
+}
+.drawerToggleActive {
+  color: var(--sn-text);
+  font-weight: 600;
+}
+.drawerLabel {
+  flex: 1;
+}
+.chevron {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  opacity: 0.7;
+}
+.drawerBody {
+  margin-top: 6px;
+  padding-left: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.navGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 .navGroupLabel {
-  font-size: 11.5px;
+  font-size: 11px;
   color: var(--sn-faint);
-  padding: 0 8px 4px;
+  padding: 0 8px 2px;
   font-weight: 600;
+  letter-spacing: 0.02em;
 }
 .nav ul {
   list-style: none;
@@ -127,7 +199,15 @@
   border-radius: 5px;
   color: var(--sn-text);
   text-decoration: none;
-  font-size: 13.5px;
+  font-size: 13px;
+}
+.secondaryLink {
+  padding: 5px 8px 5px 10px;
+  font-size: 12.5px;
+  color: var(--sn-dim);
+}
+.secondaryLink:hover {
+  color: var(--sn-text);
 }
 .navLink:hover {
   background: var(--sn-raise);

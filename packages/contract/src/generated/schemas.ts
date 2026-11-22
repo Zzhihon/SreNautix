@@ -1,5 +1,5 @@
 // 本文件由 packages/contract/scripts/gen.ts 从 contract/ 生成，不要手工修改。
-export const CONTRACT_VERSION = '2.68.0';
+export const CONTRACT_VERSION = '2.69.0';
 
 export const SCHEMAS: Record<string, Record<string, unknown>> = {
   'https://srenautix.io/contract/gateway/v1/action-catalog.schema.json': {
@@ -4037,6 +4037,10 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
         pattern: '^[a-z0-9][a-z0-9_-]*$',
       },
       title: { $ref: '#/$defs/LocalizedText' },
+      description: {
+        description: '证据卡与指标含义说明（控制台悬停提示用；未填写时回退到 note）',
+        $ref: '#/$defs/LocalizedText',
+      },
       note: { description: '这张卡展示什么、怎么读', $ref: '#/$defs/LocalizedText' },
       applies_to: {
         type: 'object',
@@ -7077,6 +7081,16 @@ export const SCHEMAS: Record<string, Record<string, unknown>> = {
         required: ['id', 'match'],
         properties: {
           id: { type: 'string', pattern: '^[a-z0-9][a-z0-9_.-]*$' },
+          description: {
+            $ref: 'evidence-card.schema.json#/$defs/LocalizedText',
+            description: '组件类型职责与架构层级说明，用于控制台拓扑悬停提示',
+          },
+          layer: {
+            type: 'string',
+            enum: ['L0', 'L1', 'L2', 'L3', 'external'],
+            description:
+              '组件在五层因果泳道中的默认层级（L0 入口与边缘、L1 业务负载、L2 数据与存储、L3 节点与底座、external 外部依赖）',
+          },
           hub: { type: 'boolean', default: false },
           external: {
             type: 'boolean',
