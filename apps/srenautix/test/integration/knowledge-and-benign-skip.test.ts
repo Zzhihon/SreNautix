@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { Incident } from '@srenautix/contract';
@@ -28,6 +28,7 @@ import { incident as baseIncident } from '../support/scenario.js';
 const CLUSTER = 'east';
 const PUBLIC = 'https://console.test';
 const ORIGIN = { origin: PUBLIC };
+const EXTERNAL_TOKEN = 'ext-caller-secret-token';
 
 let db: TestDb;
 let app: FastifyInstance;
@@ -38,6 +39,9 @@ let metrics: ServerMetrics;
 let adminSession: { cookie: string; csrf: string };
 let responderSession: { cookie: string; csrf: string };
 let viewerSession: { cookie: string; csrf: string };
+let eastShopViewerSession: { cookie: string; csrf: string };
+let eastPayResponderSession: { cookie: string; csrf: string };
+let westViewerSession: { cookie: string; csrf: string };
 
 async function makeSession(
   sessions: Sessions,
@@ -154,6 +158,15 @@ beforeAll(async () => {
       '  - subject: { kind: group, name: viewers }',
       '    role: viewer',
       '    scope: { clusters: ["*"], namespaces: ["*"], component_labels: {} }',
+      '  - subject: { kind: group, name: east-shop-viewers }',
+      '    role: viewer',
+      '    scope: { clusters: ["east"], namespaces: ["shop"], component_labels: {} }',
+      '  - subject: { kind: group, name: east-pay-responders }',
+      '    role: responder',
+      '    scope: { clusters: ["east"], namespaces: ["pay"], component_labels: {} }',
+      '  - subject: { kind: group, name: west-viewers }',
+      '    role: viewer',
+      '    scope: { clusters: ["west"], namespaces: ["*"], component_labels: {} }',
       '',
     ].join('\n'),
   );
@@ -169,10 +182,24 @@ beforeAll(async () => {
     capabilities: new Set(['metrics.query', 'metrics.query_range']),
   });
   const sessions = new Sessions(db.server, { idleMs: 30 * 60_000, absoluteMs: 12 * 3_600_000 });
-  const auth = new Auth(sessions, new CallerRegistry([]), Bindings.load(dir), PUBLIC);
+  const callers = new CallerRegistry([
+    {
+      id: 'ext-bot',
+      kind: 'external',
+      channel: 'api',
+      actions: ['pod_restart'],
+      namespaces: ['shop'],
+      proposals_per_hour: 60,
+      token_sha256: createHash('sha256').update(EXTERNAL_TOKEN).digest('hex'),
+    },
+  ]);
+  const auth = new Auth(sessions, callers, Bindings.load(dir), PUBLIC);
   adminSession = await makeSession(sessions, 'oidc:admin', ['admins']);
   responderSession = await makeSession(sessions, 'oidc:alice', ['responders']);
   viewerSession = await makeSession(sessions, 'oidc:bob', ['viewers']);
+  eastShopViewerSession = await makeSession(sessions, 'oidc:shop-viewer', ['east-shop-viewers']);
+  eastPayResponderSession = await makeSession(sessions, 'oidc:pay-responder', ['east-pay-responders']);
+  westViewerSession = await makeSession(sessions, 'oidc:west-viewer', ['west-viewers']);
 
   app = await createApp({ bodyLimit: 1 << 20, trustProxy: false });
   registerKnowledgeRoutes(app, { pool: db.server, auth, knowledge, packs, locale: 'zh-CN' });
@@ -321,6 +348,132 @@ describe('P0-2 在线反馈一键沉淀知识案例 + 检索 + 归档（真实 P
         (a) => a.kind === 'knowledge.archived' && (a.data as Record<string, unknown>).case_id === item.case_id,
       ),
     ).toBe(true);
+  });
+
+  it('鉴权顺序、禁止 external 服务调用方、按作用域隔离列表与 SQL LIKE 精确转义', async () => {
+    const eastShopInc = await seedIncident({
+      cluster: 'east',
+      root: 'StatefulSet:shop/pg_alpha',
+      alertnames: ['Pg_Slow_Query'],
+    });
+    const eastPayInc = await seedIncident({
+      cluster: 'east',
+      root: 'Deployment:pay/checkout',
+      alertnames: ['PayTimeout'],
+    });
+    const eastNodeInc = await seedIncident({
+      cluster: 'east',
+      root: 'Node:node-a',
+      alertnames: ['NodeDiskPressure'],
+    });
+    const westShopInc = await seedIncident({
+      cluster: 'west',
+      root: 'StatefulSet:shop/pg-west',
+      alertnames: ['WestPgAlert'],
+    });
+
+    // 1. 未认证请求 POST /v1/incidents/:ref/knowledge 先返回 401（即使事件不存在也不泄漏存在性）
+    const unauthMissing = await app.inject({
+      method: 'POST',
+      url: `/v1/incidents/${randomUUID()}/knowledge`,
+      headers: { ...ORIGIN },
+      payload: {},
+    });
+    expect(unauthMissing.statusCode).toBe(401);
+
+    // 2. external 服务调用方在三个接口均被拒绝（403，符合 x-srenautix-external: false）
+    const extGet = await app.inject({
+      method: 'GET',
+      url: '/v1/knowledge',
+      headers: { authorization: `Bearer ${EXTERNAL_TOKEN}` },
+    });
+    expect(extGet.statusCode).toBe(403);
+    const extPost = await app.inject({
+      method: 'POST',
+      url: `/v1/incidents/${eastShopInc.incident_id}/knowledge`,
+      headers: { authorization: `Bearer ${EXTERNAL_TOKEN}` },
+      payload: {},
+    });
+    expect(extPost.statusCode).toBe(403);
+    const extDel = await app.inject({
+      method: 'DELETE',
+      url: `/v1/knowledge/${randomUUID()}`,
+      headers: { authorization: `Bearer ${EXTERNAL_TOKEN}` },
+    });
+    expect(extDel.statusCode).toBe(403);
+
+    // 3. 对作用域外事件调用 POST /v1/incidents/:ref/knowledge 返回 404（不泄漏存在性）
+    const outOfScopePromote = await app.inject({
+      method: 'POST',
+      url: `/v1/incidents/${eastShopInc.incident_id}/knowledge`,
+      headers: {
+        cookie: eastPayResponderSession.cookie,
+        ...ORIGIN,
+        'x-csrf-token': eastPayResponderSession.csrf,
+      },
+      payload: {},
+    });
+    expect(outOfScopePromote.statusCode).toBe(404);
+
+    // 管理员沉淀 4 条不同集群/命名空间/集群级知识案例（其中 eastShopInc 故意只传类型名以验证关联事件作用域）
+    const promote = async (inc: Incident, payload: Record<string, unknown> = {}) => {
+      const res = await app.inject({
+        method: 'POST',
+        url: `/v1/incidents/${inc.incident_id}/knowledge`,
+        headers: { cookie: adminSession.cookie, ...ORIGIN, 'x-csrf-token': adminSession.csrf },
+        payload,
+      });
+      expect(res.statusCode, res.body).toBe(201);
+      return res.json() as { case_id: string };
+    };
+    const kEastShop = await promote(eastShopInc, {
+      components: ['postgres'],
+      title: 'pg_alpha_exact_case',
+      text: '只匹配字面下划线 pg_alpha_exact',
+    });
+    const kEastPay = await promote(eastPayInc, { title: 'pay_checkout_case' });
+    const kEastNode = await promote(eastNodeInc, { title: 'node_cluster_case' });
+    const kWestShop = await promote(westShopInc, { title: 'west_pg_case' });
+
+    // 4. east/shop viewer 只能看到 east/shop 的沉淀条目，看不到 east/pay、east/Node 与 west/shop
+    const shopList = await app.inject({
+      method: 'GET',
+      url: '/v1/knowledge?origin=learned&limit=100',
+      headers: { cookie: eastShopViewerSession.cookie },
+    });
+    expect(shopList.statusCode).toBe(200);
+    const shopIds = (shopList.json().items as Array<{ case_id: string }>).map((x) => x.case_id);
+    expect(shopIds).toContain(kEastShop.case_id);
+    expect(shopIds).not.toContain(kEastPay.case_id);
+    expect(shopIds).not.toContain(kEastNode.case_id);
+    expect(shopIds).not.toContain(kWestShop.case_id);
+
+    // west/* viewer 只能看到 west 集群条目
+    const westList = await app.inject({
+      method: 'GET',
+      url: '/v1/knowledge?origin=learned&limit=100',
+      headers: { cookie: westViewerSession.cookie },
+    });
+    expect(westList.statusCode).toBe(200);
+    const westIds = (westList.json().items as Array<{ case_id: string }>).map((x) => x.case_id);
+    expect(westIds).toEqual([kWestShop.case_id]);
+
+    // 5. SQL ILIKE 对 `_` 做字面量转义，不作为单字符通配符误匹配
+    const likeLiteral = await app.inject({
+      method: 'GET',
+      url: '/v1/knowledge?origin=learned&q=pg_alpha_exact',
+      headers: { cookie: eastShopViewerSession.cookie },
+    });
+    expect(likeLiteral.statusCode).toBe(200);
+    expect((likeLiteral.json().items as Array<{ case_id: string }>).map((x) => x.case_id)).toEqual([kEastShop.case_id]);
+    const likeWildcardNoMatch = await app.inject({
+      method: 'GET',
+      url: '/v1/knowledge?origin=learned&q=pg_west',
+      headers: { cookie: westViewerSession.cookie },
+    });
+    expect(likeWildcardNoMatch.statusCode).toBe(200);
+    // westShopInc 的组件包含 pg-west，`_` 被转义为字面量后不应通配 `-`
+    expect(likeWildcardNoMatch.json().items).toEqual([]);
   });
 });
 

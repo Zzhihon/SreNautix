@@ -2,6 +2,8 @@ import type { EvalCase, EvalSnapshot } from '@srenautix/contract';
 import { describe, expect, it } from 'vitest';
 import { parseServerConfig } from '../../src/config/server.js';
 import { replayCase } from '../../src/eval/leakage.js';
+import type { RoleBinding } from '../../src/identity/bindings.js';
+import { knowledgeTargets, knowledgeVisible } from '../../src/knowledge/service.js';
 import { evaluateBenignPattern, type BenignHistoryRow } from '../../src/scheduler/admission.js';
 import { incident, stageA, subgraph } from '../support/scenario.js';
 
@@ -213,5 +215,44 @@ describe('P0-2 server 配置项 scheduler.auto_benign_skip', () => {
         .scheduler.auto_benign_skip,
     ).toEqual({ enabled: false, min_confirmations: 5, window: '14d' });
     expect(() => parseServerConfig(minimal({ auto_benign_skip: { min_confirmations: 0 } }))).toThrow();
+  });
+});
+
+describe('P0-2 知识列表作用域隔离（knowledgeTargets / knowledgeVisible）', () => {
+  const scope = (clusters: string[], namespaces: string[]): RoleBinding[] => [
+    {
+      subject: { kind: 'group', name: 'g' },
+      role: 'viewer',
+      scope: { clusters, namespaces, component_labels: {} },
+    },
+  ];
+
+  it('按集群与命名空间隔离，忽略纯类型名，对集群级与跨命名空间条目 fail-closed', () => {
+    const eastShop = scope(['east'], ['shop']);
+    const eastPay = scope(['east'], ['pay']);
+    const eastAll = scope(['east'], ['*']);
+    const westAll = scope(['west'], ['*']);
+
+    // 组件包含类型名 + 带命名空间的组件键
+    expect(knowledgeVisible(eastShop, 'east', ['postgres', 'StatefulSet:shop/pg-main'])).toBe(true);
+    expect(knowledgeVisible(eastPay, 'east', ['postgres', 'StatefulSet:shop/pg-main'])).toBe(false);
+    expect(knowledgeVisible(westAll, 'east', ['postgres', 'StatefulSet:shop/pg-main'])).toBe(false);
+
+    // 仅传类型名但关联了事件根因组件时仍按事件命名空间授权
+    expect(knowledgeVisible(eastShop, 'east', ['postgres'], 'StatefulSet:shop/pg-main')).toBe(true);
+    expect(knowledgeVisible(eastPay, 'east', ['postgres'], 'StatefulSet:shop/pg-main')).toBe(false);
+
+    // 集群级组件或无组件键：需要 namespaces: ['*']
+    expect(knowledgeTargets('east', ['Node:node-a'])).toEqual([{ cluster: 'east', namespace: null, labels: {} }]);
+    expect(knowledgeVisible(eastShop, 'east', ['Node:node-a'])).toBe(false);
+    expect(knowledgeVisible(eastAll, 'east', ['Node:node-a'])).toBe(true);
+    expect(knowledgeVisible(eastShop, 'east', ['postgres'], null)).toBe(false);
+    expect(knowledgeVisible(eastAll, 'east', ['postgres'], null)).toBe(true);
+
+    // 跨命名空间组件条目要求同时具备两个命名空间的读权限
+    expect(knowledgeVisible(eastShop, 'east', ['Deployment:shop/api', 'Deployment:pay/checkout'])).toBe(false);
+    expect(
+      knowledgeVisible(scope(['east'], ['shop', 'pay']), 'east', ['Deployment:shop/api', 'Deployment:pay/checkout']),
+    ).toBe(true);
   });
 });

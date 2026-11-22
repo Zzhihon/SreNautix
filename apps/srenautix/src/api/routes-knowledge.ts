@@ -3,8 +3,8 @@ import type pg from 'pg';
 import { z } from 'zod';
 import { principalOf, type Auth } from '../identity/auth.js';
 import { resolveIncidentRef } from '../incident/read.js';
-import { incidentTarget } from '../incident/target.js';
-import { badRequest, notFound } from '../kernel/errors.js';
+import { incidentTarget, visible } from '../incident/target.js';
+import { badRequest, forbidden, notFound } from '../kernel/errors.js';
 import {
   packKnowledgeCatalog,
   type LearnedKnowledgeService,
@@ -43,8 +43,12 @@ const promoteBodySchema = z
  */
 export function registerKnowledgeRoutes(app: FastifyInstance, d: KnowledgeRouteDeps): void {
   app.post('/v1/incidents/:ref/knowledge', async (req, reply) => {
+    const { caller, scopes } = await d.auth.reader(req);
+    if (caller.kind === 'service') {
+      throw forbidden(`服务调用方 ${caller.caller.id} 不能调用这个接口`);
+    }
     const inc = await resolveIncidentRef(d.pool, (req.params as { ref: string }).ref);
-    if (!inc) {
+    if (!inc || !visible(scopes, incidentTarget(inc.body))) {
       throw notFound('没有这个事件');
     }
     const c = await d.auth.user(req, 'feedback', incidentTarget(inc.body));
@@ -59,7 +63,10 @@ export function registerKnowledgeRoutes(app: FastifyInstance, d: KnowledgeRouteD
   });
 
   app.get('/v1/knowledge', async (req) => {
-    await d.auth.reader(req);
+    const { caller, scopes } = await d.auth.reader(req);
+    if (caller.kind === 'service' && caller.caller.kind === 'external') {
+      throw forbidden(`外部调用方 ${caller.caller.id} 不能调用这个接口`);
+    }
     const q = req.query as { origin?: string; kind?: string; q?: string; limit?: string };
     const origin = q.origin ?? 'all';
     if (!ORIGINS.has(origin)) {
@@ -79,6 +86,7 @@ export function registerKnowledgeRoutes(app: FastifyInstance, d: KnowledgeRouteD
         ...(q.kind ? { kind: q.kind as 'incident' | 'benign' } : {}),
         ...(q.q ? { q: q.q } : {}),
         limit,
+        scopes,
       },
       packItems,
     );

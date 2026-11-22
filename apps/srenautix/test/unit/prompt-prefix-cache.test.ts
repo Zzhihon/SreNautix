@@ -14,7 +14,7 @@ import {
   hypothesizeItems,
   promptParts,
 } from '../../src/research/prompt.js';
-import { incident, researchCase, stageA, stageACards, subgraph } from '../support/scenario.js';
+import { catalogActions, incident, researchCase, stageA, stageACards, subgraph } from '../support/scenario.js';
 
 const deepseek = declaredProfile('deepseek');
 const openaiCompat = declaredProfile('openai-compatible');
@@ -41,6 +41,8 @@ function makeIncidentA() {
       { name: 'kube_pod_status', description: 'Pod 状态', parameters: { type: 'object', properties: {} } },
       { name: 'kube_events', description: '事件', parameters: { type: 'object', properties: {} } },
     ],
+    // 不同子图会有完全不同的动作集合（例如 StatefulSet/Pod 动作 vs Deployment 动作）
+    actions: catalogActions(['workload_scale', 'pod_restart']),
     runbooks: ['runbooks/postgres-wal-full.md', 'runbooks/pvc-expand.md'],
   });
 }
@@ -73,6 +75,7 @@ function makeIncidentB() {
       { name: 'kube_events', description: '事件', parameters: { type: 'object', properties: {} } },
       { name: 'kube_pod_status', description: 'Pod 状态', parameters: { type: 'object', properties: {} } },
     ],
+    actions: catalogActions(['rollout_pause']),
     runbooks: ['runbooks/api-5xx.md'],
   });
 }
@@ -144,18 +147,28 @@ describe('P0-1 提示词前缀缓存优化', () => {
       expect(respA.instructions).toBe(respB.instructions);
     }
 
-    // 静态目录段跨事件字节完全一致，不含 cardcheck: 与 runbook
+    // 静态目录段跨事件字节完全一致，不含 cardcheck:、runbook 与按子图过滤的可用动作
     const catA = catalogSegment(rcA).text;
     const catB = catalogSegment(rcB).text;
     expect(catA).toBe(catB);
     expect(catA).not.toContain('cardcheck:');
     expect(catA).not.toContain('runbooks/');
+    expect(catA).not.toContain('可用动作（proposals）');
+    expect(catA).not.toContain('workload_scale');
+    expect(catA).not.toContain('rollout_pause');
 
-    // 动态卡片检查与 runbook 落在事件数据段（user[0] 的事件部分）
+    // 动态卡片检查、按子图过滤的可用动作（按 id 排序）与 runbook 落在事件数据段
     const partsA = promptParts('zh', rcA, incidentBook(rcA), 128_000, null);
+    const partsB = promptParts('zh', rcB, incidentBook(rcB), 128_000, null);
     const incidentTextA = segmentsText(partsA.incident);
+    const incidentTextB = segmentsText(partsB.incident);
     expect(incidentTextA).toContain('cardcheck:pvc/pvc-usage/fill@PersistentVolumeClaim:shop/data-postgres-0');
+    expect(incidentTextA).toContain('可用动作（proposals）');
+    expect(incidentTextA.indexOf('pod_restart')).toBeGreaterThan(-1);
+    expect(incidentTextA.indexOf('workload_scale')).toBeGreaterThan(incidentTextA.indexOf('pod_restart'));
     expect(incidentTextA).toContain('runbooks/postgres-wal-full.md');
+    expect(incidentTextB).toContain('rollout_pause');
+    expect(incidentTextB).not.toContain('workload_scale');
   });
 
   it('同一事件的 hypothesize 与 conclude 在 deepseek 上共享字节完全一致的 system 与 user[0]（catalog + incident）前缀', () => {
