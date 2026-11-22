@@ -15,7 +15,7 @@ import type { Session } from './api';
 import { ActionsPage, ApprovalPage, type QueueTab } from './pages/actions';
 import { AlertLookupPage } from './pages/AlertLookupPage';
 import { ClusterPage, ClustersPage } from './pages/clusters';
-import { EvalPage, type EvalMode } from './pages/eval';
+import { EvalPage, type EvalMode, type EvalTab } from './pages/eval';
 import { LoginPage } from './pages/LoginPage';
 import { AuditPage, SettingsPage, UsersPage } from './pages/governance';
 import { HealthPage, type CostGroup } from './pages/health';
@@ -251,18 +251,22 @@ const approvalRoute = createRoute({
 });
 
 const MODES = ['snapshot', 'reconstructed'] as const satisfies readonly EvalMode[];
+const EVAL_TABS = ['reports', 'candidates', 'knowledge'] as const satisfies readonly EvalTab[];
 
 const evalRoute = createRoute({
   getParentRoute: () => appRoute,
   path: 'eval',
-  validateSearch: (s: Record<string, unknown>): ClusterSearch & { mode?: EvalMode; report?: string } => ({
+  validateSearch: (
+    s: Record<string, unknown>,
+  ): ClusterSearch & { tab?: EvalTab; mode?: EvalMode; report?: string } => ({
     cluster: str(s.cluster),
+    tab: maybeOneOf(s.tab, EVAL_TABS),
     mode: maybeOneOf(s.mode, MODES),
     report: str(s.report),
   }),
   component: function Eval() {
-    const { mode, report } = evalRoute.useSearch();
-    return <EvalPage mode={mode ?? 'snapshot'} reportId={report} />;
+    const { tab, mode, report } = evalRoute.useSearch();
+    return <EvalPage tab={tab ?? 'reports'} mode={mode ?? 'snapshot'} reportId={report} />;
   },
 });
 

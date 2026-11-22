@@ -71,6 +71,7 @@ const ENUMS: Array<[string, string, string]> = [
   ['timeline.kind', OPENAPI, '/components/schemas/TimelineEntry/properties/kind'],
   ['timeline.level', S('reason-codes'), '/$defs/Level'],
   ['subgraph.role', OPENAPI, '/components/schemas/Subgraph/properties/nodes/items/properties/role'],
+  ['subgraph.lane', S('pack'), '/$defs/ComponentType/properties/layer'],
   ['subgraph.source', S('topology-event'), '/$defs/Provenance'],
   [
     'inbox.blind',

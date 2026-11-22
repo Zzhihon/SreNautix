@@ -13,6 +13,10 @@
       "pattern": "^[a-z0-9][a-z0-9_-]*$"
     },
     "title": { "$ref": "#/$defs/LocalizedText" },
+    "description": {
+      "description": "证据卡与指标含义说明（控制台悬停提示用；未填写时回退到 note）",
+      "$ref": "#/$defs/LocalizedText"
+    },
     "note": {
       "description": "这张卡展示什么、怎么读",
       "$ref": "#/$defs/LocalizedText"

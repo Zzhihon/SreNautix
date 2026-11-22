@@ -68,6 +68,9 @@ const ENUMS: Record<string, readonly string[]> = {
   'subgraph.level': ['core', 'deps', 'allowed'],
   'subgraph.level_hint': ['core', 'deps', 'allowed'],
   'subgraph.edge_kind': ['declared', 'route', 'substrate', 'runtime', 'allowed'],
+  'subgraph.lane': ['L0', 'L1', 'L2', 'L3', 'external'],
+  'subgraph.layout': ['swimlane', 'elk'],
+  'knowledge.kind': ['incident', 'benign'],
   'timeline.change_grade': ['high', 'medium', 'low'],
   'timeline.change_basis': [
     'component_match',

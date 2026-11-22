@@ -17,6 +17,7 @@ func TestMatchAllowsReadsAndFeedbackOnly(t *testing.T) {
 	allowedCases := []struct{ method, path string }{
 		{"GET", "/v1/incidents"},
 		{"GET", "/v1/business-domains"},
+		{"GET", "/v1/ontology/glossary"},
 		{"GET", "/v1/incidents/postgres.cluster:db%2Fpg-main:2026-10-19T06:10:00Z"},
 		{"GET", "/v1/incidents/" + id + "/evidence"},
 		{"GET", "/v1/incidents/" + id + "/timeline"},
@@ -41,6 +42,7 @@ func TestMatchAllowsReadsAndFeedbackOnly(t *testing.T) {
 		{"POST", "/v1/proposals"},
 		{"POST", "/v1/incidents/" + id + "/research"},
 		{"POST", "/v1/incidents/" + id + "/evidence/rerun"},
+		{"POST", "/v1/incidents/" + id + "/knowledge"},
 		{"GET", "/v1/runs/" + id + "/prompt/raw"},
 		{"GET", "/v1/events"},
 		{"PUT", "/v1/pause"},

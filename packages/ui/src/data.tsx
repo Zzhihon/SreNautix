@@ -4,7 +4,8 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient, type QueryKey } from '@tanstack/react-query';
 import { createContext, useContext, type ComponentType, type ReactNode } from 'react';
 import type { EvidenceRef, FeedbackCreate, OutboxEvent } from './contract';
-import type { DataPort, IncidentQuery, ProposalQuery } from './port';
+import { useI18n } from './i18n';
+import type { DataPort, IncidentQuery, PromoteKnowledgeRequest, ProposalQuery } from './port';
 
 export interface LinkProps {
   href: string;
@@ -30,6 +31,8 @@ export interface Links {
   search?: (q: string, clusterId: string) => string;
   /** 全集群地图，可以对准一个业务领域或历史回放时刻（ADR 0199、ADR 0208）；宿主没有拓扑页时不提供。 */
   clusterMap?: (clusterId: string, domain?: string, at?: string) => string;
+  /** 知识库页面链接；沉淀为知识案例后可直接跳转查看。 */
+  knowledge?: () => string;
 }
 
 export interface Capabilities {
@@ -97,6 +100,7 @@ export const qk = {
   manifest: (runId: string) => ['run', runId, 'manifest'] as const,
   proposals: (q?: ProposalQuery) => (q ? (['proposals', q] as const) : (['proposals'] as const)),
   proposal: (id: string) => ['proposal', id] as const,
+  ontologyGlossary: (lang: string) => ['ontology-glossary', lang] as const,
 };
 
 /**
@@ -375,5 +379,34 @@ export function useRerunEvidence(ref: string) {
       }
       return port.actions.rerunEvidence(ref, body);
     },
+  });
+}
+
+/** 只读运维本体词汇表：用于拓扑节点与证据卡悬停提示；端口未提供或加载失败时静默降级为 undefined，不阻断页面。 */
+export function useOntologyGlossary(enabled = true) {
+  const { port } = useUiEnv();
+  const { locale } = useI18n();
+  const lang = locale === 'en' ? 'en' : 'zh-CN';
+  return useQuery({
+    queryKey: qk.ontologyGlossary(lang),
+    queryFn: async () => (port.getOntologyGlossary ? port.getOntologyGlossary(lang) : null),
+    enabled: enabled && Boolean(port.getOntologyGlossary),
+    staleTime: 5 * 60_000,
+    retry: false,
+  });
+}
+
+/** 一键将事件沉淀为知识案例（POST /v1/incidents/{ref}/knowledge）。 */
+export function usePromoteIncidentKnowledge(ref: string) {
+  const { port } = useUiEnv();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: PromoteKnowledgeRequest) => {
+      if (!port.actions?.promoteIncidentKnowledge) {
+        throw new Error('当前宿主不提供知识案例沉淀');
+      }
+      return port.actions.promoteIncidentKnowledge(ref, body);
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['knowledge'] }),
   });
 }

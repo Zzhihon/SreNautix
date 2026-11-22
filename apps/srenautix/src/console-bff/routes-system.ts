@@ -29,6 +29,7 @@ import type { AuditExporter } from '../kernel/store/audit-export.js';
 import { tx } from '../kernel/store/pool.js';
 import type { TopologyStore } from '../topology/store.js';
 import { incidentHeadlines, subgraphOf } from './routes-incidents.js';
+import { registerOntologyRoutes } from './routes-ontology.js';
 import { isHealthy } from './spoke-conditions.js';
 
 export interface SystemRouteDeps {
@@ -992,6 +993,7 @@ export function registerSystemRoutes(app: FastifyInstance, d: SystemRouteDeps): 
   forward('GET', '/v1/agent/cost', read);
   forward('GET', '/v1/egress/ledger', (req) => d.auth.user(req, 'audit.read'));
   forward('GET', '/v1/models/routes', read);
+  registerOntologyRoutes(app, { auth: d.auth, packs: d.packs });
 }
 
 function assertValidSettings(v: unknown) {

@@ -205,6 +205,41 @@
   white-space: normal;
   min-width: 0;
 }
+.infoBtn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--sn-dim);
+  cursor: help;
+  padding: 0;
+}
+.infoBtn:hover,
+.infoBtn:focus-visible {
+  background: var(--sn-info-soft);
+  color: var(--sn-info);
+}
+.infoBtn:focus-visible {
+  outline: 2px solid var(--sn-focus);
+  outline-offset: 1px;
+}
+.infoBtn svg {
+  width: 14px;
+  height: 14px;
+}
+.conceptWrap {
+  display: inline-flex;
+  cursor: help;
+}
+.conceptTerm {
+  text-decoration: underline dotted var(--sn-info);
+  text-underline-offset: 2px;
+}
 .entity {
   color: var(--sn-dim);
   font-size: 12px;

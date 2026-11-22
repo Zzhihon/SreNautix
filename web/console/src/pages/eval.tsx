@@ -18,6 +18,7 @@ import {
   Segmented,
   SelectField,
   StatusPill,
+  Tabs,
   TextField,
   useI18n,
   type EvalReport,
@@ -26,10 +27,12 @@ import { CheckCircle2, OctagonX } from 'lucide-react';
 import { hub, ok } from '../api';
 import { hasRole, useSession } from '../session';
 import { CandidatesPanel } from './eval-candidates';
+import { KnowledgePanel } from './knowledge-panel';
 import styles from './pages.module.css';
 
 type Ratio = EvalReport['rows'][number]['top1'];
 export type EvalMode = 'snapshot' | 'reconstructed';
+export type EvalTab = 'reports' | 'candidates' | 'knowledge';
 
 function RatioCell({ r, gate, lowerIsBetter }: { r: Ratio; gate?: number; lowerIsBetter?: boolean }) {
   const { fmt, t } = useI18n();
@@ -469,11 +472,9 @@ function EstimatePanel({ suite, routes }: { suite: string; routes: string[] }) {
   );
 }
 
-export function EvalPage({ mode, reportId }: { mode: EvalMode; reportId?: string }) {
+function ReportsPanel({ tab, mode, reportId }: { tab: EvalTab; mode: EvalMode; reportId?: string }) {
   const { t, fmt } = useI18n();
   const navigate = useNavigate();
-  // 评测候选的确认与放弃需要 eval.write（ADR 0175）
-  const admin = hasRole(useSession(), 'admin', 'sys-admin');
   const list = useQuery({
     queryKey: ['eval', 'reports', mode],
     queryFn: async () =>
@@ -486,22 +487,6 @@ export function EvalPage({ mode, reportId }: { mode: EvalMode; reportId?: string
   const report = list.data?.find((r) => r.report_id === chosen);
   return (
     <div className={styles.page}>
-      <PageHeader
-        title={t('eval.title')}
-        actions={
-          <Segmented
-            label={t('eval.mode_label')}
-            value={mode}
-            onChange={(m) =>
-              void navigate({ to: '/eval', search: (p: { cluster?: string }) => ({ cluster: p.cluster, mode: m }) })
-            }
-            options={[
-              { value: 'snapshot', label: t('eval.mode.snapshot') },
-              { value: 'reconstructed', label: t('eval.mode.reconstructed') },
-            ]}
-          />
-        }
-      />
       <p className={styles.dim}>{t(`eval.mode_note.${mode}`)}</p>
       {list.isPending ? (
         <Loading />
@@ -518,7 +503,12 @@ export function EvalPage({ mode, reportId }: { mode: EvalMode; reportId?: string
               onChange={(e) =>
                 void navigate({
                   to: '/eval',
-                  search: (p: { cluster?: string }) => ({ cluster: p.cluster, mode, report: e.currentTarget.value }),
+                  search: (p: { cluster?: string }) => ({
+                    cluster: p.cluster,
+                    tab,
+                    mode,
+                    report: e.currentTarget.value,
+                  }),
                 })
               }
               options={list.data.map((r) => ({
@@ -539,7 +529,78 @@ export function EvalPage({ mode, reportId }: { mode: EvalMode; reportId?: string
           )}
         </>
       )}
-      {admin && <CandidatesPanel />}
+    </div>
+  );
+}
+
+export function EvalPage({ tab, mode, reportId }: { tab: EvalTab; mode: EvalMode; reportId?: string }) {
+  const { t } = useI18n();
+  const navigate = useNavigate();
+  // 评测候选的确认与放弃需要 eval.write（ADR 0175）
+  const admin = hasRole(useSession(), 'admin', 'sys-admin');
+  return (
+    <div className={styles.page}>
+      <PageHeader
+        title={t('eval.hub_title')}
+        actions={
+          tab === 'reports' ? (
+            <Segmented
+              label={t('eval.mode_label')}
+              value={mode}
+              onChange={(m) =>
+                void navigate({
+                  to: '/eval',
+                  search: (p: { cluster?: string }) => ({ cluster: p.cluster, tab, mode: m }),
+                })
+              }
+              options={[
+                { value: 'snapshot', label: t('eval.mode.snapshot') },
+                { value: 'reconstructed', label: t('eval.mode.reconstructed') },
+              ]}
+            />
+          ) : undefined
+        }
+      />
+      <Tabs
+        label={t('eval.tabs')}
+        value={tab}
+        onChange={(next) =>
+          void navigate({
+            to: '/eval',
+            search: (p: { cluster?: string; mode?: EvalMode; report?: string }) => ({
+              cluster: p.cluster,
+              tab: next as EvalTab,
+              mode: next === 'reports' ? p.mode : undefined,
+              report: next === 'reports' ? p.report : undefined,
+            }),
+          })
+        }
+        tabs={[
+          {
+            id: 'reports',
+            label: t('eval.tab.reports'),
+            content: <ReportsPanel tab={tab} mode={mode} reportId={reportId} />,
+          },
+          {
+            id: 'candidates',
+            label: t('eval.tab.candidates'),
+            content: admin ? (
+              <CandidatesPanel />
+            ) : (
+              <EmptyState
+                kind="forbidden"
+                title={t('eval.cand.forbidden_title')}
+                because={t('eval.cand.forbidden_because')}
+              />
+            ),
+          },
+          {
+            id: 'knowledge',
+            label: t('eval.tab.knowledge'),
+            content: <KnowledgePanel />,
+          },
+        ]}
+      />
     </div>
   );
 }
