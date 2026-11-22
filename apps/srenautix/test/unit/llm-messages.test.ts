@@ -147,9 +147,13 @@ describe('请求映射', () => {
     expect(p.tools?.map((t) => t.name)).toEqual(['query_metrics']);
   });
 
-  it('不支持原生工具的档案：schema 写进系统提示', () => {
+  it('不支持原生工具的档案：system 保持静态，schema 写进首个助手回合前的最后一条 user 消息', () => {
     const p = toMessagesParams(request, { ...wire, profile: { ...profile, native_tools: false } });
-    expect(p.system).toBe(`固定指令\n\n${schemaInstruction(schema, 'en')}`);
+    expect(p.system).toBe('固定指令');
+    expect(p.messages[0]).toEqual({
+      role: 'user',
+      content: [{ type: 'text', text: `证据\n\n${schemaInstruction(schema, 'en')}` }],
+    });
     expect(p.tools?.map((t) => t.name)).toEqual(['query_metrics']);
   });
 
