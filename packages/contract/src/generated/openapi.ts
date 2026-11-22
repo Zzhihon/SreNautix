@@ -916,6 +916,29 @@ export type paths = {
     patch?: never;
     trace?: never;
   };
+  '/v1/incidents/{incident_ref}/knowledge': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description incident_id、稳定标签或别名；标签放进路径时按 RFC 3986 编码 */
+        incident_ref: components['parameters']['IncidentRef'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * @description 把该事件及最新反馈一键沉淀为可检索的知识案例（支持 incident 根因案例与 benign 误报模式）。
+     *     所有请求字段均可省略，由服务端按事件、最新已绑定反馈与最新研判自动推导；同一集群、同一事件、同一种类已存在未归档条目时幂等返回 200
+     */
+    post: operations['promoteIncidentKnowledge'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/v1/incidents/{incident_ref}/research': {
     parameters: {
       query?: never;
@@ -1099,6 +1122,42 @@ export type paths = {
     /** @description 服务端连接测试：逐项执行声明能力的 verify() */
     post: operations['testIntegration'];
     delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/knowledge': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** @description 列出知识库条目，合并数据库中的人工沉淀案例（origin=learned）与已加载领域包的静态知识条目（origin=pack） */
+    get: operations['listKnowledge'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/knowledge/{case_id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        case_id: components['schemas']['Uuid'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /** @description 软归档一条人工沉淀的知识案例（写入 archived_at 与治理审计），不再进入阶段 B 检索 */
+    delete: operations['archiveLearnedKnowledge'];
     options?: never;
     head?: never;
     patch?: never;
@@ -5370,9 +5429,45 @@ export type components = {
       state: 'open' | 'closed';
       url: string;
     };
+    KnowledgeCatalogItem: {
+      alertnames: string[];
+      case_id: string;
+      cluster_id: string | null;
+      components: string[];
+      created_at: null | components['schemas']['Timestamp'];
+      created_by: string | null;
+      feedback_id: null | components['schemas']['Uuid'];
+      incident_id: null | components['schemas']['Uuid'];
+      /** @enum {string} */
+      kind: 'incident' | 'benign';
+      /** @enum {string} */
+      origin: 'learned' | 'pack';
+      /** @enum {string} */
+      source: 'human' | 'model';
+      text: string;
+      title: string;
+    };
     /** Labels */
     Labels: {
       [key: string]: string;
+    };
+    LearnedKnowledgeItem: {
+      alertnames: string[];
+      case_id: components['schemas']['Uuid'];
+      cluster_id: string;
+      components: string[];
+      created_at: components['schemas']['Timestamp'];
+      created_by: string;
+      feedback_id: null | components['schemas']['Uuid'];
+      incident_id: null | components['schemas']['Uuid'];
+      /** @enum {string} */
+      kind: 'incident' | 'benign';
+      /** @enum {string} */
+      origin: 'learned';
+      /** @enum {string} */
+      source: 'human' | 'model';
+      text: string;
+      title: string;
     };
     /** @enum {string} */
     level: 'reversible' | 'reversible_recreatable' | 'compensable' | 'irreversible';
@@ -5847,6 +5942,15 @@ export type components = {
      * @enum {string}
      */
     Profile: 'observe' | 'standard' | 'compliance';
+    PromoteIncidentKnowledgeRequest: {
+      alertnames?: string[];
+      components?: string[];
+      feedback_id?: null | components['schemas']['Uuid'];
+      /** @enum {string} */
+      kind?: 'incident' | 'benign';
+      text?: string;
+      title?: string;
+    };
     /**
      * Proposal
      * @description server 持有的提议（DESIGN §2.4、§9）。提交时带幂等键，并绑定 {incident_version, root_component, evidence_fingerprint}；三者任一变化即标为 stale，gateway 执行前经中心再检查一次。审批断言、工单与 ActionExecution 的格式以 contract/gateway/ 为准
@@ -9437,6 +9541,47 @@ export interface operations {
       403: components['responses']['Error'];
     };
   };
+  promoteIncidentKnowledge: {
+    parameters: {
+      query?: never;
+      header: {
+        'X-CSRF-Token': components['parameters']['Csrf'];
+      };
+      path: {
+        /** @description incident_id、稳定标签或别名；标签放进路径时按 RFC 3986 编码 */
+        incident_ref: components['parameters']['IncidentRef'];
+      };
+      cookie?: never;
+    };
+    requestBody?: {
+      content: {
+        'application/json': components['schemas']['PromoteIncidentKnowledgeRequest'];
+      };
+    };
+    responses: {
+      /** @description 同一事件与种类的未归档知识案例已存在（幂等返回） */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['LearnedKnowledgeItem'];
+        };
+      };
+      /** @description 已沉淀知识案例 */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['LearnedKnowledgeItem'];
+        };
+      };
+      400: components['responses']['Error'];
+      403: components['responses']['Error'];
+      404: components['responses']['Error'];
+    };
+  };
   listResearchRuns: {
     parameters: {
       query?: never;
@@ -9740,6 +9885,57 @@ export interface operations {
           };
         };
       };
+      404: components['responses']['Error'];
+    };
+  };
+  listKnowledge: {
+    parameters: {
+      query?: {
+        kind?: 'incident' | 'benign';
+        limit?: number;
+        origin?: 'all' | 'learned' | 'pack';
+        q?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 知识条目列表 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            items: components['schemas']['KnowledgeCatalogItem'][];
+          };
+        };
+      };
+    };
+  };
+  archiveLearnedKnowledge: {
+    parameters: {
+      query?: never;
+      header: {
+        'X-CSRF-Token': components['parameters']['Csrf'];
+      };
+      path: {
+        case_id: components['schemas']['Uuid'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 已归档 */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      403: components['responses']['Error'];
       404: components['responses']['Error'];
     };
   };

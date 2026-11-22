@@ -47,10 +47,11 @@ describe('请求映射', () => {
     expect(input.map((i) => i.type)).toEqual(['message', 'message', 'function_call', 'function_call_output']);
   });
 
-  it('不支持严格 schema 的方言：json_object，schema 写在系统提示末尾', () => {
+  it('不支持严格 schema 的方言：json_object，system 保持静态，schema 写在首个助手回合前的最后一条 user 消息末尾', () => {
     const p = toChatParams(request, { model: 'm', profile: loose, language: 'zh' });
     expect(p.response_format).toEqual({ type: 'json_object' });
-    expect(p.messages[0]).toEqual({ role: 'system', content: `固定指令\n\n${schemaInstruction(schema, 'zh')}` });
+    expect(p.messages[0]).toEqual({ role: 'system', content: '固定指令' });
+    expect(p.messages[1]).toEqual({ role: 'user', content: `证据\n\n${schemaInstruction(schema, 'zh')}` });
     expect(p.messages.map((m) => m.role)).toEqual(['system', 'user', 'assistant', 'tool']);
     expect(p.messages[2]).toMatchObject({ content: '先查一下', tool_calls: [{ id: 'c1', type: 'function' }] });
   });

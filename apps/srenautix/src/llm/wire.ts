@@ -15,13 +15,14 @@ import type { Item, LlmApi, LlmRequest, LlmTurn, Segment } from './types.js';
 
 // 内部消息与三种协议（OpenAI Responses、Chat Completions、Anthropic Messages）之间的映射。
 // 方言档案决定结构化输出的方式：支持严格 json_schema 的路由直接约束解码；不支持的 Messages 路由把 schema 作为一个
-// strict 输出工具（见 OUTPUT_TOOL_PREFIX）；其余路由把 schema 写进系统提示（Chat 与 Responses 同时要求 json_object）。
+// strict 输出工具（见 OUTPUT_TOOL_PREFIX）；其余路由把 schema 附在首个助手回合之前的最后一条 user 消息末尾
+// （Chat 与 Responses 同时要求 json_object），保持 system 提示在跨事件与跨步骤之间字节完全一致以命中前缀缓存。
 
 export function segmentsText(segments: readonly Segment[]): string {
   return segments.map((s) => s.text).join('\n\n');
 }
 
-/** 不支持严格 json_schema 时附在系统提示末尾的 schema 说明 */
+/** 不支持严格 json_schema 时附在任务 user 消息末尾的 schema 说明 */
 export function schemaInstruction(schema: Record<string, unknown>, language: 'zh' | 'en'): string {
   const head =
     language === 'zh'
@@ -72,26 +73,59 @@ function systemText(req: LlmRequest, opts: WireOptions, outputTool: string | nul
   const parts = req.items.filter((i) => i.type === 'system').map((i) => segmentsText(i.segments));
   if (outputTool) {
     parts.push(outputToolInstruction(outputTool, opts.language));
-  } else if (req.output && !opts.profile.strict_json_schema) {
-    parts.push(schemaInstruction(req.output.schema, opts.language));
   }
   return parts.join('\n\n');
+}
+
+/** 不支持严格 json_schema 且不用输出工具时，需要附加到用户任务消息末尾的 schema 说明 */
+function inlineSchemaText(req: LlmRequest, opts: WireOptions, outputTool: string | null = null): string | null {
+  if (!outputTool && req.output && !opts.profile.strict_json_schema) {
+    return schemaInstruction(req.output.schema, opts.language);
+  }
+  return null;
+}
+
+/**
+ * 找到第一个 assistant/tool_call 之前的最后一条 user 消息索引：把按步骤与事件变化的 schema 说明附在这里，
+ * 既保证 system 与共享事件前缀字节稳定，又让 reask（追加 assistant + user）不改写首轮消息以命中整段前缀缓存。
+ */
+function schemaUserIndex(items: readonly Item[]): number {
+  let idx = -1;
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i]!;
+    if (item.type === 'assistant' || item.type === 'tool_call') {
+      break;
+    }
+    if (item.type === 'user') {
+      idx = i;
+    }
+  }
+  return idx;
+}
+
+function appendBlock(base: string, extra: string): string {
+  return base ? `${base}\n\n${extra}` : extra;
 }
 
 /** 内部消息 → `POST /v1/responses` 请求体（非流式、不在服务方存储） */
 export function toResponsesParams(req: LlmRequest, opts: WireOptions): ResponseCreateParamsNonStreaming {
   const input: ResponseInputItem[] = [];
-  for (const i of req.items) {
+  const schemaText = inlineSchemaText(req, opts);
+  const schemaIdx = schemaText ? schemaUserIndex(req.items) : -1;
+  req.items.forEach((i, idx) => {
     switch (i.type) {
       case 'system':
         break;
-      case 'user':
+      case 'user': {
+        const raw = segmentsText(i.segments);
+        const text = idx === schemaIdx && schemaText ? appendBlock(raw, schemaText) : raw;
         input.push({
           type: 'message',
           role: 'user',
-          content: [{ type: 'input_text', text: segmentsText(i.segments) }],
+          content: [{ type: 'input_text', text }],
         });
         break;
+      }
       case 'assistant':
         input.push({ type: 'message', role: 'assistant', content: i.text });
         break;
@@ -102,6 +136,9 @@ export function toResponsesParams(req: LlmRequest, opts: WireOptions): ResponseC
         input.push({ type: 'function_call_output', call_id: i.callId, output: i.output.text });
         break;
     }
+  });
+  if (schemaText && schemaIdx < 0) {
+    input.push({ type: 'message', role: 'user', content: [{ type: 'input_text', text: schemaText }] });
   }
   const params: ResponseCreateParamsNonStreaming = {
     model: opts.model,
@@ -144,6 +181,8 @@ export function toChatParams(req: LlmRequest, opts: WireOptions): ChatParams {
   if (system) {
     messages.push({ role: 'system', content: system });
   }
+  const schemaText = inlineSchemaText(req, opts);
+  const schemaIdx = schemaText ? schemaUserIndex(req.items) : -1;
   let assistant: ChatCompletionAssistantMessageParam | null = null;
   const flush = () => {
     if (assistant) {
@@ -151,14 +190,17 @@ export function toChatParams(req: LlmRequest, opts: WireOptions): ChatParams {
       assistant = null;
     }
   };
-  for (const i of req.items) {
+  req.items.forEach((i, idx) => {
     switch (i.type) {
       case 'system':
         break;
-      case 'user':
+      case 'user': {
         flush();
-        messages.push({ role: 'user', content: segmentsText(i.segments) });
+        const raw = segmentsText(i.segments);
+        const content = idx === schemaIdx && schemaText ? appendBlock(raw, schemaText) : raw;
+        messages.push({ role: 'user', content });
         break;
+      }
       case 'assistant':
         flush();
         assistant = { role: 'assistant', content: i.text };
@@ -177,8 +219,11 @@ export function toChatParams(req: LlmRequest, opts: WireOptions): ChatParams {
         messages.push({ role: 'tool', tool_call_id: i.callId, content: i.output.text });
         break;
     }
-  }
+  });
   flush();
+  if (schemaText && schemaIdx < 0) {
+    messages.push({ role: 'user', content: schemaText });
+  }
   const params: ChatParams = {
     model: opts.model,
     messages,
@@ -292,13 +337,18 @@ export function toMessagesParams(req: LlmRequest, opts: WireOptions): MessagesPa
       push(role, { type: 'text', text: t });
     }
   };
-  for (const i of req.items) {
+  const outputTool = messagesOutputTool(req, opts.profile);
+  const schemaText = inlineSchemaText(req, opts, outputTool);
+  const schemaIdx = schemaText ? schemaUserIndex(req.items) : -1;
+  req.items.forEach((i, idx) => {
     switch (i.type) {
       case 'system':
         break;
-      case 'user':
-        text('user', segmentsText(i.segments));
+      case 'user': {
+        const raw = segmentsText(i.segments);
+        text('user', idx === schemaIdx && schemaText ? appendBlock(raw, schemaText) : raw);
         break;
+      }
       case 'assistant':
         text('assistant', i.text);
         break;
@@ -309,9 +359,11 @@ export function toMessagesParams(req: LlmRequest, opts: WireOptions): MessagesPa
         push('user', { type: 'tool_result', tool_use_id: i.callId, content: i.output.text });
         break;
     }
+  });
+  if (schemaText && schemaIdx < 0) {
+    text('user', schemaText);
   }
   const params: MessagesParams = { model: opts.model, max_tokens: req.maxOutputTokens, messages, stream: false };
-  const outputTool = messagesOutputTool(req, opts.profile);
   const system = systemText(req, opts, outputTool);
   if (system) {
     params.system = system;

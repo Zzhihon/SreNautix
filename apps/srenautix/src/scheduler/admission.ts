@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
-import { REASON_CODES, type Incident, type ReasonGroupCode } from '@srenautix/contract';
+import { REASON_CODES, type FeedbackReasonCode, type Incident, type ReasonGroupCode } from '@srenautix/contract';
 import type pg from 'pg';
+import { isBusinessImpact, type AlertMatcher } from '../alerts/business-impact.js';
+import { headlineMember } from '../incident/headline.js';
 import { writeReason, writeRuleOnly } from '../incident/reasons.js';
 import { logger } from '../kernel/log.js';
 import type { ServerMetrics } from '../kernel/metrics.js';
@@ -8,6 +10,65 @@ import { appendEvents } from '../kernel/store/outbox.js';
 import { tx, type Queryable } from '../kernel/store/pool.js';
 
 export const SCHEMA_VERSION = '2.2.0';
+
+/** 允许自动降级为 stage_a_only 的人工反馈原因码（排除 planned_change，因其仅在变更窗口内有效） */
+export const AUTO_BENIGN_REASON_CODES: ReadonlySet<FeedbackReasonCode> = new Set<FeedbackReasonCode>([
+  'false_positive',
+  'not_actionable',
+]);
+
+export const DEFAULT_AUTO_BENIGN_SKIP = {
+  enabled: true,
+  minConfirmations: 3,
+  windowMs: 30 * 24 * 3600_000,
+} as const;
+
+export interface BenignHistoryRow {
+  incident_id: string;
+  reason_code: FeedbackReasonCode | null;
+  created_at: Date;
+  members: unknown;
+}
+
+/**
+ * 纯函数判定：给定同一 (cluster_id, headline_alertname, root_component) 窗口内每个历史事件最新的显式已绑定反馈，
+ * 是否满足自动跳过阶段 B 的全部护栏：
+ * 1. 最近一条显式反馈之后没有更新的非良性反馈（任一更新的非良性反馈都会清零计数）；
+ * 2. 位于最新非良性反馈之后的确认良性事件（false_positive / not_actionable）至少 minConfirmations 个；
+ * 3. 子集护栏：当前事件的全部活跃成员告警名都曾在这些已确认良性事件中出现过（新增任何未见症状告警即不跳过）。
+ */
+export function evaluateBenignPattern(
+  rows: readonly BenignHistoryRow[],
+  activeAlertnames: readonly string[],
+  minConfirmations: number,
+): boolean {
+  if (!activeAlertnames.length || rows.length < minConfirmations) {
+    return false;
+  }
+  const isBenign = (code: FeedbackReasonCode | null): boolean => code !== null && AUTO_BENIGN_REASON_CODES.has(code);
+  let latestNonBenignMs = Number.NEGATIVE_INFINITY;
+  for (const r of rows) {
+    if (!isBenign(r.reason_code)) {
+      latestNonBenignMs = Math.max(latestNonBenignMs, r.created_at.getTime());
+    }
+  }
+  const confirmed = rows.filter((r) => isBenign(r.reason_code) && r.created_at.getTime() > latestNonBenignMs);
+  if (confirmed.length < minConfirmations) {
+    return false;
+  }
+  const confirmedAlertnames = new Set<string>();
+  for (const r of confirmed) {
+    if (!Array.isArray(r.members)) {
+      continue;
+    }
+    for (const m of r.members) {
+      if (m && typeof m === 'object' && typeof (m as { alertname?: unknown }).alertname === 'string') {
+        confirmedAlertnames.add((m as { alertname: string }).alertname);
+      }
+    }
+  }
+  return activeAlertnames.every((name) => confirmedAlertnames.has(name));
+}
 
 export type ResearchReason =
   | 'new_incident'
@@ -35,6 +96,14 @@ export interface SchedulerSettings {
   stormTopRoots: number;
   /** 每次研判最多因租约过期恢复的次数（DESIGN §15.2）。 */
   maxRecoveries: number;
+  /** 历史人工确认良性模式自动降级配置；省略时按默认开启（阈值 3 次、窗口 30 天） */
+  autoBenignSkip?: {
+    enabled: boolean;
+    minConfirmations: number;
+    windowMs: number;
+  };
+  /** 业务影响告警匹配器（notify.business_impact_alerts）：命中任一活跃成员告警时禁止自动良性跳过 */
+  businessImpactAlerts?: readonly AlertMatcher[];
 }
 
 /** 入队时跳过、只出阶段 A 的原因（server.research_queue.skip_reason），取原因码登记表的 research_skip 分组 */
@@ -250,6 +319,15 @@ export class Scheduler {
       return skip('no_model_route');
     }
     if (reason !== 'manual') {
+      const benign = this.s.autoBenignSkip ?? DEFAULT_AUTO_BENIGN_SKIP;
+      if (
+        reason !== 'feedback' &&
+        inc.severity !== 'critical' &&
+        benign.enabled &&
+        (await this.matchesBenignPattern(c, inc, benign.minConfirmations, benign.windowMs))
+      ) {
+        return skip('benign_pattern');
+      }
       if (this.budgetRatio >= 1 && inc.severity !== 'critical') {
         return skip('budget');
       }
@@ -288,6 +366,67 @@ export class Scheduler {
     ]);
     const n = superseded.rowCount ?? 0;
     return { outcome: n > 0 ? 'coalesced' : 'queued', runId, superseded: n };
+  }
+
+  /**
+   * 良性模式自动跳过检查（仅 warning、非 manual/feedback 时调用）：
+   * - 任一活跃成员告警命中 businessImpactAlerts 时返回 false；
+   * - 按精确键 (cluster_id, headline_alertname, root_component) 查窗口内历史事件的最新显式已绑定反馈，
+   *   交由 evaluateBenignPattern 执行确认次数、无更新非良性反馈与告警名子集护栏检查。
+   */
+  private async matchesBenignPattern(
+    c: Queryable,
+    inc: Incident,
+    minConfirmations: number,
+    windowMs: number,
+  ): Promise<boolean> {
+    const rootComponent = inc.root.component;
+    const activeMembers = inc.members.filter((m) => m.left_version === null);
+    if (!rootComponent || !activeMembers.length) {
+      return false;
+    }
+    const headline = headlineMember(inc);
+    if (!headline) {
+      return false;
+    }
+    const matchers = this.s.businessImpactAlerts ?? [];
+    if (matchers.length) {
+      const ids = activeMembers.map((m) => m.alert_id);
+      const alertRows = await c.query<{ alert_id: string; labels: Record<string, string> }>(
+        'SELECT alert_id, labels FROM server.alert_state WHERE alert_id = ANY($1::text[])',
+        [ids],
+      );
+      const byId = new Map(alertRows.rows.map((r) => [r.alert_id, r.labels]));
+      for (const m of activeMembers) {
+        const labels = byId.get(m.alert_id) ?? { alertname: m.alertname, severity: m.severity };
+        if (isBusinessImpact(labels, matchers)) {
+          return false;
+        }
+      }
+    }
+    const activeAlertnames = [...new Set(activeMembers.map((m) => m.alertname))];
+    const history = await c.query<BenignHistoryRow>(
+      `SELECT DISTINCT ON (f.incident_id)
+              f.incident_id,
+              f.reason_code,
+              f.created_at,
+              i.body->'members' AS members
+         FROM server.feedback f
+         JOIN server.incidents i ON i.incident_id = f.incident_id
+        WHERE i.cluster_id = $1
+          AND i.incident_id <> $2
+          AND i.root_component = $3
+          AND f.linked = true
+          AND f.implicit IS NULL
+          AND f.created_at >= now() - make_interval(secs => $4)
+          AND EXISTS (
+            SELECT 1 FROM jsonb_array_elements(coalesce(i.body->'members', '[]'::jsonb)) AS m
+             WHERE m->>'alertname' = $5
+          )
+        ORDER BY f.incident_id, f.created_at DESC, f.feedback_id DESC`,
+      [inc.cluster_id, inc.incident_id, rootComponent, windowMs / 1000, headline.alertname],
+    );
+    return evaluateBenignPattern(history.rows, activeAlertnames, minConfirmations);
   }
 
   /** 风暴模式下只有排名前 N 的根因进入阶段 B：按严重度、吸收的症状数排名。 */

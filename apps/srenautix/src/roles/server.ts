@@ -18,7 +18,9 @@ import { registerProposalRoutes } from '../api/routes-proposals.js';
 import { optimizationCatalog } from '../optimize/catalog.js';
 import { OptimizationStore } from '../optimize/store.js';
 import { registerResearchRoutes } from '../api/routes-research.js';
+import { registerKnowledgeRoutes } from '../api/routes-knowledge.js';
 import { registerAskRoutes } from '../api/routes-ask.js';
+import { LearnedKnowledgeService } from '../knowledge/service.js';
 import { pgConfigFromEnv } from '../kernel/store/pg-env.js';
 import { parseDuration, parseListen, readSecretFile } from '../kernel/files.js';
 import { loadServerConfig, opsRepositories, type ServerConfig } from '../config/server.js';
@@ -442,6 +444,7 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
     metrics,
   );
   const feedback = new FeedbackService(pool, metrics);
+  const knowledge = new LearnedKnowledgeService(pool, topology);
 
   // 研判调度
   const sc = c.scheduler;
@@ -458,6 +461,12 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
       stormWindowMs: parseDuration('scheduler.storm_window', sc.storm_window),
       stormTopRoots: sc.storm_top_roots,
       maxRecoveries: 2,
+      autoBenignSkip: {
+        enabled: sc.auto_benign_skip.enabled,
+        minConfirmations: sc.auto_benign_skip.min_confirmations,
+        windowMs: parseDuration('scheduler.auto_benign_skip.window', sc.auto_benign_skip.window),
+      },
+      businessImpactAlerts: c.notify.business_impact_alerts,
     },
     metrics,
   );
@@ -878,6 +887,7 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
     listener,
     worker,
     packs,
+    knowledge,
     templates: evidence,
     locale: evidenceOptions.locale,
     clusterId: c.cluster_id,
@@ -904,6 +914,7 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
     },
   });
   registerAskRoutes(app, { pool, auth, scheduler });
+  registerKnowledgeRoutes(app, { pool, auth, knowledge, packs, locale: evidenceOptions.locale });
   registerIncidentRoutes(app, {
     pool,
     auth,
