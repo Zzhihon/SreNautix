@@ -332,6 +332,16 @@
       }
     },
     {
+      "code": "benign_pattern",
+      "stage": "research",
+      "level": "info",
+      "groups": ["research_skip"],
+      "text": {
+        "zh-CN": "命中历史人工确认的良性告警模式，跳过阶段 B（可手动触发研判）",
+        "en": "matched a human-confirmed benign alert pattern; skipped stage B (manual trigger still allowed)"
+      }
+    },
+    {
       "code": "lease_expired",
       "stage": "research",
       "level": "error",

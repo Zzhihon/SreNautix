@@ -24,15 +24,30 @@ export function replayCase(c: EvalCase, s: EvalSnapshot): { rc: ResearchCase; ex
     ...(c.incident_id ? [c.incident_id] : []),
     ...c.leakage.exclude_incident_ids,
   ]);
+  const started = Date.parse(c.started_at);
   const knowledge = s.context.knowledge.filter((k) => {
     const hit = k.learned_from.find((x) => keys.has(x));
     if (hit) {
       excluded.push({ kind: 'pack_knowledge', ref: k.id, reason: `learned_from 含本用例的 ${hit}` });
       return false;
     }
+    if (k.id.startsWith('learned/') && k.learned_at === null) {
+      excluded.push({ kind: 'pack_knowledge', ref: k.id, reason: '人工沉淀条目缺少 learned_at，默认排除以防未来泄漏' });
+      return false;
+    }
+    if (k.learned_at !== null) {
+      const learnedAt = Date.parse(k.learned_at);
+      if (!Number.isFinite(learnedAt) || learnedAt >= started) {
+        excluded.push({
+          kind: 'pack_knowledge',
+          ref: k.id,
+          reason: `知识沉淀时间 ${k.learned_at} 不早于用例开始时间`,
+        });
+        return false;
+      }
+    }
     return true;
   });
-  const started = Date.parse(c.started_at);
   const excludeIds = new Set([...c.leakage.exclude_incident_ids, ...(c.incident_id ? [c.incident_id] : [])]);
   const roots = new Set(c.truth.root_components);
   const cases = s.context.cases.filter((x) => {

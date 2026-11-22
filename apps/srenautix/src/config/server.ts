@@ -457,6 +457,15 @@ export const serverConfigSchema = z
         storm_new_incidents: z.number().int().min(1).default(20),
         storm_window: duration.default('5m'),
         storm_top_roots: z.number().int().min(1).default(3),
+        // 历史人工确认良性模式自动降级（仅 warning 且无活跃业务影响告警时跳过阶段 B；手动触发与反馈触发不受影响）
+        auto_benign_skip: z
+          .object({
+            enabled: z.boolean().default(true),
+            min_confirmations: z.number().int().min(1).max(100).default(3),
+            window: duration.default('30d'),
+          })
+          .strict()
+          .default({ enabled: true, min_confirmations: 3, window: '30d' }),
       })
       .strict()
       .default({
@@ -469,6 +478,7 @@ export const serverConfigSchema = z
         storm_new_incidents: 20,
         storm_window: '5m',
         storm_top_roots: 3,
+        auto_benign_skip: { enabled: true, min_confirmations: 3, window: '30d' },
       }),
     notify: notifyConfig,
     approvals: z

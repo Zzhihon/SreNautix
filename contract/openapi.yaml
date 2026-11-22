@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: SreNautix hub API
-  version: 2.67.0
+  version: 2.68.0
   license:
     name: Apache-2.0
     identifier: Apache-2.0
@@ -28,6 +28,7 @@ tags:
   - name: proposals
   - name: events
   - name: eval
+  - name: knowledge
   - name: ingest
   - name: topology
   - name: system
@@ -1448,6 +1449,73 @@ paths:
                           model: { type: string }
                           top1: { $ref: './schemas/eval-report.schema.json#/$defs/Ratio' }
                     gate_passed: { type: [boolean, 'null'] }
+  /v1/incidents/{incident_ref}/knowledge:
+    parameters: [{ $ref: '#/components/parameters/IncidentRef' }]
+    post:
+      tags: [knowledge]
+      operationId: promoteIncidentKnowledge
+      description: |
+        把该事件及最新反馈一键沉淀为可检索的知识案例（支持 incident 根因案例与 benign 误报模式）。
+        所有请求字段均可省略，由服务端按事件、最新已绑定反馈与最新研判自动推导；同一集群、同一事件、同一种类已存在未归档条目时幂等返回 200
+      x-srenautix-roles: [responder, approver, admin]
+      x-srenautix-external: false
+      parameters: [{ $ref: '#/components/parameters/Csrf' }]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PromoteIncidentKnowledgeRequest' }
+      responses:
+        '200':
+          description: 同一事件与种类的未归档知识案例已存在（幂等返回）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LearnedKnowledgeItem' }
+        '201':
+          description: 已沉淀知识案例
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LearnedKnowledgeItem' }
+        '400': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /v1/knowledge:
+    get:
+      tags: [knowledge]
+      operationId: listKnowledge
+      description: 列出知识库条目，合并数据库中的人工沉淀案例（origin=learned）与已加载领域包的静态知识条目（origin=pack）
+      x-srenautix-roles: [viewer, responder, approver, auditor, admin]
+      x-srenautix-external: false
+      parameters:
+        - { name: origin, in: query, schema: { type: string, enum: [all, learned, pack], default: all } }
+        - { name: kind, in: query, schema: { type: string, enum: [incident, benign] } }
+        - { name: q, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 100 } }
+      responses:
+        '200':
+          description: 知识条目列表
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/KnowledgeCatalogItem' } }
+  /v1/knowledge/{case_id}:
+    parameters:
+      - { name: case_id, in: path, required: true, schema: { $ref: './schemas/common.schema.json#/$defs/Uuid' } }
+    delete:
+      tags: [knowledge]
+      operationId: archiveLearnedKnowledge
+      description: 软归档一条人工沉淀的知识案例（写入 archived_at 与治理审计），不再进入阶段 B 检索
+      x-srenautix-roles: [admin]
+      x-srenautix-external: false
+      parameters: [{ $ref: '#/components/parameters/Csrf' }]
+      responses:
+        '204': { description: 已归档 }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
   /v1/eval/candidates:
     get:
       tags: [eval]
@@ -3922,3 +3990,75 @@ components:
         created_at: { $ref: './schemas/common.schema.json#/$defs/Timestamp' }
         last_used_at: { oneOf: [{ type: 'null' }, { $ref: './schemas/common.schema.json#/$defs/Timestamp' }] }
         expires_at: { oneOf: [{ type: 'null' }, { $ref: './schemas/common.schema.json#/$defs/Timestamp' }] }
+    PromoteIncidentKnowledgeRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        kind: { type: string, enum: [incident, benign] }
+        title: { type: string, minLength: 1, maxLength: 200 }
+        text: { type: string, minLength: 1, maxLength: 2000 }
+        components: { type: array, maxItems: 20, items: { type: string, minLength: 1 } }
+        alertnames: { type: array, maxItems: 20, items: { type: string, minLength: 1 } }
+        feedback_id: { oneOf: [{ type: 'null' }, { $ref: './schemas/common.schema.json#/$defs/Uuid' }] }
+    LearnedKnowledgeItem:
+      type: object
+      additionalProperties: false
+      required:
+        - case_id
+        - origin
+        - cluster_id
+        - incident_id
+        - feedback_id
+        - kind
+        - title
+        - components
+        - alertnames
+        - text
+        - source
+        - created_by
+        - created_at
+      properties:
+        case_id: { $ref: './schemas/common.schema.json#/$defs/Uuid' }
+        origin: { type: string, enum: [learned] }
+        cluster_id: { type: string }
+        incident_id: { oneOf: [{ type: 'null' }, { $ref: './schemas/common.schema.json#/$defs/Uuid' }] }
+        feedback_id: { oneOf: [{ type: 'null' }, { $ref: './schemas/common.schema.json#/$defs/Uuid' }] }
+        kind: { type: string, enum: [incident, benign] }
+        title: { type: string, maxLength: 200 }
+        components: { type: array, items: { type: string } }
+        alertnames: { type: array, items: { type: string } }
+        text: { type: string, maxLength: 2000 }
+        source: { type: string, enum: [human, model] }
+        created_by: { type: string }
+        created_at: { $ref: './schemas/common.schema.json#/$defs/Timestamp' }
+    KnowledgeCatalogItem:
+      type: object
+      additionalProperties: false
+      required:
+        - case_id
+        - origin
+        - cluster_id
+        - incident_id
+        - feedback_id
+        - kind
+        - title
+        - components
+        - alertnames
+        - text
+        - source
+        - created_by
+        - created_at
+      properties:
+        case_id: { type: string }
+        origin: { type: string, enum: [learned, pack] }
+        cluster_id: { type: [string, 'null'] }
+        incident_id: { oneOf: [{ type: 'null' }, { $ref: './schemas/common.schema.json#/$defs/Uuid' }] }
+        feedback_id: { oneOf: [{ type: 'null' }, { $ref: './schemas/common.schema.json#/$defs/Uuid' }] }
+        kind: { type: string, enum: [incident, benign] }
+        title: { type: string }
+        components: { type: array, items: { type: string } }
+        alertnames: { type: array, items: { type: string } }
+        text: { type: string }
+        source: { type: string, enum: [human, model] }
+        created_by: { type: [string, 'null'] }
+        created_at: { oneOf: [{ type: 'null' }, { $ref: './schemas/common.schema.json#/$defs/Timestamp' }] }

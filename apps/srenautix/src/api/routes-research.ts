@@ -26,6 +26,7 @@ import { hintOf, isLogicalComponent, type ComponentExpander } from '../topology/
 import type { TopologyStore } from '../topology/store.js';
 import { badRequest, conflict, forbidden, HttpError, notFound } from '../kernel/errors.js';
 import { KubeToolError, type KubeTools } from '../research/kube-tools.js';
+import type { LearnedKnowledgeService } from '../knowledge/service.js';
 import type { StageAService } from '../stage-a/service.js';
 import { referenceCases } from './research-materials.js';
 import { parseStoredKey } from '../topology/keys.js';
@@ -53,6 +54,8 @@ export interface ResearchRouteDeps {
   worker: { url: string; token: string } | null;
   /** 领域包：知识条目、查询模板与 pack.lock。 */
   packs: PackRuntime;
+  /** 数据库沉淀的知识案例（在线反馈 RAG）；未提供时只注入领域包静态知识 */
+  knowledge?: Pick<LearnedKnowledgeService, 'retrieveForResearch'>;
   /** 查询模板的执行（阶段 A 的证据卡运行时）。 */
   templates: Pick<PackEvidence, 'runTemplate' | 'runCardCheck'>;
   /** 知识条目的语言。 */
@@ -321,14 +324,30 @@ export function registerResearchRoutes(app: FastifyInstance, d: ResearchRouteDep
     const stageA = await latestStageA(d.pool, t.incident_id, t.incident_version);
     const feedback: Feedback[] = await d.feedback.list(t.incident_id);
     const types = new Set(topo.nodes.map((n) => n.component_type).filter((x): x is string => x !== null));
+    const now = new Date();
     const cases = await referenceCases(d.pool, {
       clusterId: incident.cluster_id,
       incidentId: incident.incident_id,
       keys: new Set(topo.nodes.map((n) => n.key)),
       namespaces: new Set(topo.nodes.map((n) => n.namespace).filter((x): x is string => x !== null)),
-      before: new Date(),
+      before: now,
     });
-    const now = new Date();
+    const packKnowledge = d.packs.knowledge(types, d.locale);
+    const learnedKnowledge = d.knowledge
+      ? await d.knowledge.retrieveForResearch({
+          clusterId: incident.cluster_id,
+          incidentId: incident.incident_id,
+          componentKeys: topo.nodes.map((n) => n.key),
+          componentTypes: [...types],
+          alertnames: [
+            ...new Set([
+              ...alerts.map((a) => a.alertname),
+              ...incident.members.filter((m) => m.left_version === null).map((m) => m.alertname),
+            ]),
+          ],
+          before: now,
+        })
+      : [];
     return {
       run_id: runId,
       reason: t.reason,
@@ -338,7 +357,7 @@ export function registerResearchRoutes(app: FastifyInstance, d: ResearchRouteDep
       topology: { version: topo.version, nodes: topo.nodes, edges: topo.edges },
       feedback,
       catalog: d.catalog.raw,
-      knowledge: d.packs.knowledge(types, d.locale),
+      knowledge: [...packKnowledge, ...learnedKnowledge],
       cases,
       // 领域包的查询模板，加上子图组件 × 适用的证据链卡（卡片即检查，ADR 0116）
       templates: [

@@ -41,6 +41,7 @@ export interface ReasonCodesByStage {
     | 'storm'
     | 'capped'
     | 'no_model_route'
+    | 'benign_pattern'
     | 'lease_expired'
     | 'superseded'
     | 'not_researched'
@@ -140,7 +141,7 @@ export interface ReasonCodesByGroup {
     | 'datasource'
     | 'internal';
   research_stop: 'model_unavailable' | 'deadline' | 'leader_supported' | 'no_change' | 'step_limit' | 'budget';
-  research_skip: 'budget' | 'storm' | 'capped' | 'no_model_route';
+  research_skip: 'budget' | 'storm' | 'capped' | 'no_model_route' | 'benign_pattern';
   research_ended: 'lease_expired' | 'superseded' | 'not_researched';
   research_rule_only: 'rule_only';
   remediation_plan:
@@ -521,6 +522,16 @@ export const REASON_CODES: readonly ReasonCodeEntry[] = [
     text: {
       'zh-CN': '没有可用的模型路由（全部被出站策略禁用）',
       en: 'no usable model route (all disabled by the egress policy)',
+    },
+  },
+  {
+    code: 'benign_pattern',
+    stage: 'research',
+    level: 'info',
+    groups: ['research_skip'],
+    text: {
+      'zh-CN': '命中历史人工确认的良性告警模式，跳过阶段 B（可手动触发研判）',
+      en: 'matched a human-confirmed benign alert pattern; skipped stage B (manual trigger still allowed)',
     },
   },
   {
