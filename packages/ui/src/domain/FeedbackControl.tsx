@@ -39,16 +39,18 @@ function AxisRow({
   value,
   onChange,
   disabled,
+  compact,
 }: {
   label: string;
   shown: ReactNode;
   value: Axis;
   onChange: (v: Axis) => void;
   disabled: boolean;
+  compact?: boolean;
 }) {
   const { t } = useI18n();
   return (
-    <div className={styles.axis} role="group" aria-label={label}>
+    <div className={compact ? styles.axisInline : styles.axis} role="group" aria-label={label}>
       <span className={styles.axisLabel}>{label}</span>
       <span className={styles.shown}>{shown}</span>
       <span className={styles.btns}>
@@ -84,6 +86,7 @@ export function FeedbackControl({
   latest,
   state,
   firing,
+  layout = 'stacked',
 }: {
   incidentRef: string;
   /** 反馈针对的研判；只有阶段 A 时为 null。 */
@@ -95,12 +98,15 @@ export function FeedbackControl({
   latest: Feedback | null;
   state: FeedbackState;
   firing: boolean;
+  /** stacked：独立卡片竖排；inline：结论卡底部单行渐进展开（默认收起原因与提交按钮）。 */
+  layout?: 'stacked' | 'inline';
 }) {
   const { t } = useI18n();
   const names = useComponentNames();
   const { caps } = useUiEnv();
   const create = useCreateFeedback(incidentRef);
   const [editing, setEditing] = useState(false);
+  const [reasonOpen, setReasonOpen] = useState(false);
   const [disp, setDisp] = useState<Axis>('unset');
   const [root, setRoot] = useState<Axis>('unset');
   const [rightDisp, setRightDisp] = useState<string>('');
@@ -108,6 +114,7 @@ export function FeedbackControl({
   const [mechanism, setMechanism] = useState('');
   const [reason, setReason] = useState('');
   const [reasonCode, setReasonCode] = useState<ReasonCode | ''>('');
+  const inline = layout === 'inline';
 
   if (!caps.feedback) {
     return <p className={styles.readonly}>{caps.readOnlyReason}</p>;
@@ -116,6 +123,7 @@ export function FeedbackControl({
   if (latest && !editing && !create.isPending) {
     return (
       <div className={styles.given} role="status">
+        {inline && <span className={styles.inlineTitle}>{t('feedback.title')}</span>}
         <Status domain="feedback" value={state === 'stale' ? 'stale' : 'given'} />
         <span>{summary(latest, t)}</span>
         <Button variant="link" onClick={() => setEditing(true)}>
@@ -126,6 +134,7 @@ export function FeedbackControl({
   }
 
   const rejected = disp === 'rejected' || root === 'rejected';
+  const expanded = !inline || editing || disp !== 'unset' || root !== 'unset' || reasonCode !== '' || reasonOpen;
   const valid =
     (disp !== 'unset' || root !== 'unset' || reasonCode !== '') &&
     (disp !== 'rejected' || rightDisp !== '') &&
@@ -146,12 +155,111 @@ export function FeedbackControl({
       reason: reason.trim() || null,
       reason_code: reasonCode === '' ? null : reasonCode,
     };
-    create.mutate(body, { onSuccess: () => setEditing(false) });
+    create.mutate(body, {
+      onSuccess: () => {
+        setEditing(false);
+        setReasonOpen(false);
+      },
+    });
   };
+
+  const hintText = firing ? t('feedback.firing_ok') : t('feedback.latest_wins');
+  const dispAxis = (
+    <AxisRow
+      compact={inline}
+      label={t('feedback.axis_disposition')}
+      shown={disposition ? <Status domain="disposition" value={disposition} /> : t('feedback.no_disposition')}
+      value={disp}
+      onChange={setDisp}
+      disabled={disposition === null || create.isPending}
+    />
+  );
+  const rootAxis = (
+    <AxisRow
+      compact={inline}
+      label={t('feedback.axis_root')}
+      shown={rootComponent ? componentLabel(rootComponent, names).name : t('feedback.no_root')}
+      value={root}
+      onChange={setRoot}
+      disabled={create.isPending}
+    />
+  );
+  const rightDispField = disp === 'rejected' && (
+    <SelectField
+      label={t('feedback.right_disposition')}
+      value={rightDisp}
+      onChange={(e) => setRightDisp(e.currentTarget.value)}
+      placeholder={t('feedback.choose')}
+      options={DISPOSITIONS.filter((d) => d !== disposition).map((d) => ({
+        value: d,
+        label: t(`status.disposition.${d}`),
+      }))}
+      required
+    />
+  );
+  const confirmNeedsRoot = root === 'confirmed' && rootComponent === null && (
+    <p className={styles.note}>{t('feedback.confirm_needs_root')}</p>
+  );
+  const rightRootField = root === 'rejected' && (
+    <SelectField
+      label={t('feedback.right_root')}
+      value={rightRoot}
+      onChange={(e) => setRightRoot(e.currentTarget.value)}
+      placeholder={t('feedback.choose')}
+      hint={rightRoot === UNKNOWN ? t('feedback.unknown_hint') : undefined}
+      options={[
+        ...components
+          .filter((c) => c !== rootComponent)
+          .map((c) => ({ value: c, label: `${componentLabel(c, names).name}（${componentLabel(c, names).sub}）` })),
+        { value: UNKNOWN, label: t('feedback.unknown_root') },
+      ]}
+      required
+    />
+  );
+  const reasonCodeField = (
+    <SelectField
+      label={rejected ? t('feedback.reason_code') : t('feedback.reason_code_optional')}
+      value={reasonCode}
+      onChange={(e) => setReasonCode(e.currentTarget.value as ReasonCode | '')}
+      placeholder={rejected ? t('feedback.choose') : t('feedback.no_reason_code')}
+      options={REASON_CODES.map((c) => ({ value: c, label: t(`feedback.reason_code.${c}`) }))}
+      required={rejected}
+      disabled={create.isPending}
+    />
+  );
+  const submitActions = (
+    <div className={styles.actions}>
+      <Button
+        type="submit"
+        variant="primary"
+        disabled={!valid || (root === 'confirmed' && rootComponent === null)}
+        busy={create.isPending}
+      >
+        {t('feedback.submit')}
+      </Button>
+      {editing && (
+        <Button
+          variant="ghost"
+          onClick={() => {
+            setEditing(false);
+            setReasonOpen(false);
+          }}
+        >
+          {t('common.cancel')}
+        </Button>
+      )}
+      {inline && !editing && reasonOpen && disp === 'unset' && root === 'unset' && reasonCode === '' && (
+        <Button variant="ghost" onClick={() => setReasonOpen(false)}>
+          {t('common.cancel')}
+        </Button>
+      )}
+      {!inline && <span className={styles.hint}>{hintText}</span>}
+    </div>
+  );
 
   return (
     <form
-      className={styles.form}
+      className={inline ? styles.formInline : styles.form}
       aria-label={t('feedback.label')}
       onSubmit={(e) => {
         e.preventDefault();
@@ -163,93 +271,80 @@ export function FeedbackControl({
       {state === 'stale' && latest && (
         <p className={styles.note}>{t('feedback.stale_note', { prev: summary(latest, t) })}</p>
       )}
-      <AxisRow
-        label={t('feedback.axis_disposition')}
-        shown={disposition ? <Status domain="disposition" value={disposition} /> : t('feedback.no_disposition')}
-        value={disp}
-        onChange={setDisp}
-        disabled={disposition === null || create.isPending}
-      />
-      {disp === 'rejected' && (
-        <SelectField
-          label={t('feedback.right_disposition')}
-          value={rightDisp}
-          onChange={(e) => setRightDisp(e.currentTarget.value)}
-          placeholder={t('feedback.choose')}
-          options={DISPOSITIONS.filter((d) => d !== disposition).map((d) => ({
-            value: d,
-            label: t(`status.disposition.${d}`),
-          }))}
-          required
-        />
+      {inline ? (
+        <>
+          <div className={styles.inlineRow}>
+            <span className={styles.inlineTitle}>{t('feedback.title')}</span>
+            {dispAxis}
+            <span className={styles.sep} aria-hidden="true" />
+            {rootAxis}
+            {!expanded && (
+              <Button variant="link" size="sm" onClick={() => setReasonOpen(true)}>
+                {t('feedback.only_reason')}
+              </Button>
+            )}
+            <span className={styles.inlineHint}>{hintText}</span>
+          </div>
+          {confirmNeedsRoot}
+          {expanded && (
+            <div className={styles.inlineExpand}>
+              {rejected ? (
+                <>
+                  <div className={styles.detailGrid}>
+                    {rightDispField}
+                    {rightRootField}
+                    {reasonCodeField}
+                    <TextField
+                      label={t('feedback.mechanism')}
+                      value={mechanism}
+                      maxLength={600}
+                      onChange={(e) => setMechanism(e.currentTarget.value)}
+                    />
+                    <TextField
+                      label={t('feedback.reason')}
+                      value={reason}
+                      maxLength={500}
+                      onChange={(e) => setReason(e.currentTarget.value)}
+                    />
+                  </div>
+                  {submitActions}
+                </>
+              ) : (
+                <div className={styles.confirmRow}>
+                  <div className={styles.reasonInline}>{reasonCodeField}</div>
+                  {submitActions}
+                </div>
+              )}
+            </div>
+          )}
+        </>
+      ) : (
+        <>
+          {dispAxis}
+          {rightDispField}
+          {rootAxis}
+          {confirmNeedsRoot}
+          {rightRootField}
+          {reasonCodeField}
+          {rejected && (
+            <div className={styles.more}>
+              <TextField
+                label={t('feedback.mechanism')}
+                value={mechanism}
+                maxLength={600}
+                onChange={(e) => setMechanism(e.currentTarget.value)}
+              />
+              <TextField
+                label={t('feedback.reason')}
+                value={reason}
+                maxLength={500}
+                onChange={(e) => setReason(e.currentTarget.value)}
+              />
+            </div>
+          )}
+          {submitActions}
+        </>
       )}
-      <AxisRow
-        label={t('feedback.axis_root')}
-        shown={rootComponent ? componentLabel(rootComponent, names).name : t('feedback.no_root')}
-        value={root}
-        onChange={setRoot}
-        disabled={create.isPending}
-      />
-      {root === 'confirmed' && rootComponent === null && (
-        <p className={styles.note}>{t('feedback.confirm_needs_root')}</p>
-      )}
-      {root === 'rejected' && (
-        <SelectField
-          label={t('feedback.right_root')}
-          value={rightRoot}
-          onChange={(e) => setRightRoot(e.currentTarget.value)}
-          placeholder={t('feedback.choose')}
-          hint={rightRoot === UNKNOWN ? t('feedback.unknown_hint') : undefined}
-          options={[
-            ...components
-              .filter((c) => c !== rootComponent)
-              .map((c) => ({ value: c, label: `${componentLabel(c, names).name}（${componentLabel(c, names).sub}）` })),
-            { value: UNKNOWN, label: t('feedback.unknown_root') },
-          ]}
-          required
-        />
-      )}
-      <SelectField
-        label={rejected ? t('feedback.reason_code') : t('feedback.reason_code_optional')}
-        value={reasonCode}
-        onChange={(e) => setReasonCode(e.currentTarget.value as ReasonCode | '')}
-        placeholder={rejected ? t('feedback.choose') : t('feedback.no_reason_code')}
-        options={REASON_CODES.map((c) => ({ value: c, label: t(`feedback.reason_code.${c}`) }))}
-        required={rejected}
-        disabled={create.isPending}
-      />
-      {rejected && (
-        <div className={styles.more}>
-          <TextField
-            label={t('feedback.mechanism')}
-            value={mechanism}
-            maxLength={600}
-            onChange={(e) => setMechanism(e.currentTarget.value)}
-          />
-          <TextField
-            label={t('feedback.reason')}
-            value={reason}
-            maxLength={500}
-            onChange={(e) => setReason(e.currentTarget.value)}
-          />
-        </div>
-      )}
-      <div className={styles.actions}>
-        <Button
-          type="submit"
-          variant="primary"
-          disabled={!valid || (root === 'confirmed' && rootComponent === null)}
-          busy={create.isPending}
-        >
-          {t('feedback.submit')}
-        </Button>
-        {editing && (
-          <Button variant="ghost" onClick={() => setEditing(false)}>
-            {t('common.cancel')}
-          </Button>
-        )}
-        <span className={styles.hint}>{firing ? t('feedback.firing_ok') : t('feedback.latest_wins')}</span>
-      </div>
       {create.error && <ErrorBox title={t('feedback.failed')} error={create.error} />}
     </form>
   );

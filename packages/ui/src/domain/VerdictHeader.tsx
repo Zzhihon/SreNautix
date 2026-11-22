@@ -1,7 +1,8 @@
 // 事件详情首屏的结论头（DESIGN §12.2）：一句结论、处置判断、结论阶梯、证据计数与降级的数据源，
 // 以及影响这个判定的条件。阶段 B 还没有结论时用阶段 A 的确定性判断，并写明"模型研判中"或原因。
 
-import { Bot, GitMerge, Layers, Scale, Split } from 'lucide-react';
+import { Bot, ChevronDown, ChevronUp, GitMerge, Layers, Scale, Split } from 'lucide-react';
+import { useState } from 'react';
 import type { Condition, EvidenceResult, Incident, ResearchRunSummary, StageAReport } from '../contract';
 import { AppLink, useBusinessDomains, useUiEnv } from '../data';
 import { localizedText, useI18n } from '../i18n';
@@ -19,9 +20,11 @@ const RUNNING: ReadonlySet<ResearchRunSummary['state']> = new Set([
   'conclude',
 ]);
 
-/** 影响判定的条件：与本事件同集群、或不分集群的条件。 */
+/** 影响判定的条件：与本事件同集群、或不分集群的条件。冻结只限制执行（顶部状态条已标“仅提议”），不影响研判判定。 */
 export function affectingConditions(conditions: readonly Condition[], clusterId: string): Condition[] {
-  return activeConditions(conditions).filter((c) => c.cluster_id === null || c.cluster_id === clusterId);
+  return activeConditions(conditions).filter(
+    (c) => c.type !== 'Frozen' && (c.cluster_id === null || c.cluster_id === clusterId),
+  );
 }
 
 export function VerdictHeader({
@@ -41,8 +44,9 @@ export function VerdictHeader({
   conditions: readonly Condition[];
   now: number;
 }) {
-  const { t, fmt, locale } = useI18n();
+  const { t, fmt, has, locale } = useI18n();
   const { links } = useUiEnv();
+  const [condOpen, setCondOpen] = useState(false);
   const concluded = latestRun && latestRun.state === 'completed' ? latestRun : null;
   // 没有模型结论时显示阶段 A 的规则判定（ADR 0178），标明“规则判定”
   const rule = concluded ? null : (stageA?.rule_conclusions?.[0] ?? null);
@@ -56,6 +60,7 @@ export function VerdictHeader({
   const affecting = affectingConditions(conditions, incident.cluster_id);
   const running = latestRun !== null && RUNNING.has(latestRun.state);
   const localized = (v: Record<string, string | undefined>) => localizedText(v, locale);
+  const condTitle = (c: Condition) => (has(`condition.${c.type}`) ? t(`condition.${c.type}`) : c.type);
   // 标题与收件箱的一行相同（ADR 0190、0193）：主服务与问题陈述；没有头条告警时取根因组件名
   const domains = useBusinessDomains(incident.cluster_id);
   const serviceInfo = domains.data?.items.flatMap((d) => d.services).find((s) => s.id === incident.primary_service);
@@ -78,34 +83,41 @@ export function VerdictHeader({
 
   return (
     <section className={styles.head} aria-label={t('verdict.label')}>
-      <div className={styles.titleRow}>
-        <h1 className={styles.title}>
-          {service && (
-            <span
-              className={styles.service}
-              title={incident.primary_service_source === 'namespace' ? t('incident.service_presumed') : undefined}
-            >
-              {service}
+      <div className={styles.topRow}>
+        <div className={styles.titleBlock}>
+          <h1 className={styles.title}>
+            {service && (
+              <span
+                className={styles.service}
+                title={incident.primary_service_source === 'namespace' ? t('incident.service_presumed') : undefined}
+              >
+                {service}
+              </span>
+            )}
+            {problem}
+          </h1>
+          <div className={styles.metaRow}>
+            {rootL && (
+              <span className={styles.sub}>{t('verdict.root_line', { root: rootL.name, sub: rootL.sub })}</span>
+            )}
+            <Status domain="incident" value={incident.state} />
+            <Status domain="severity" value={incident.severity} />
+            <span className={styles.meta}>
+              <span
+                title={[
+                  t('incident.hover_label', { label: incident.label }),
+                  t('verdict.version', { v: incident.incident_version, topo: incident.topology_version }),
+                ].join('\n')}
+              >
+                {incident.cluster_id}
+              </span>
+              <span title={fmt.dateTime(incident.first_firing_at)}>
+                {t('verdict.duration', { d: fmt.duration(incidentDuration(incident, now)) })}
+              </span>
             </span>
-          )}
-          {problem}
-        </h1>
-        {rootL && <span className={styles.sub}>{t('verdict.root_line', { root: rootL.name, sub: rootL.sub })}</span>}
-        <Status domain="incident" value={incident.state} />
-        <Status domain="severity" value={incident.severity} />
-        <span className={styles.meta}>
-          <span
-            title={[
-              t('incident.hover_label', { label: incident.label }),
-              t('verdict.version', { v: incident.incident_version, topo: incident.topology_version }),
-            ].join('\n')}
-          >
-            {incident.cluster_id}
-          </span>
-          <span title={fmt.dateTime(incident.first_firing_at)}>
-            {t('verdict.duration', { d: fmt.duration(incidentDuration(incident, now)) })}
-          </span>
-        </span>
+          </div>
+        </div>
+        <ClaimControl incidentId={incident.incident_id} claim={incident.claim} />
       </div>
 
       <div className={styles.verdictRow}>
@@ -115,6 +127,31 @@ export function VerdictHeader({
           <Status domain="disposition" value="undetermined" strong />
         )}
         {level && <Status domain="conclusion" value={level} />}
+        <div className={styles.facts}>
+          <span>
+            {running
+              ? t('verdict.researching', { step: t(`research.state.${latestRun.state}`) })
+              : concluded?.finished_at
+                ? t('verdict.researched_ago', { ago: fmt.relative(concluded.finished_at, now) })
+                : latestRun
+                  ? t(`research.state.${latestRun.state}`)
+                  : t('verdict.stage_a_only')}
+          </span>
+          <span>
+            {t('evidence.counts', {
+              abnormal: counts.abnormal,
+              undeterminable: counts.undeterminable,
+              normal: counts.normal,
+            })}
+          </span>
+          {degraded.map((d) => (
+            <span key={d.integration} className={styles.degraded} title={d.reason}>
+              {t('verdict.degraded_source', { source: d.integration, n: d.cards })}
+            </span>
+          ))}
+          {incident.observability_blind && <Status domain="incident" value="blind" />}
+          {stageA?.degraded && <span className={styles.degraded}>{t('verdict.state_store_degraded')}</span>}
+        </div>
         {incident.root.ambiguous && (
           <span className={styles.flag}>
             {t('verdict.ambiguous', { margin: fmt.number(incident.root.margin ?? 0, 2) })}
@@ -142,34 +179,6 @@ export function VerdictHeader({
         {sentence}
       </p>
 
-      <div className={styles.facts}>
-        <span>
-          {running
-            ? t('verdict.researching', { step: t(`research.state.${latestRun.state}`) })
-            : concluded?.finished_at
-              ? t('verdict.researched_ago', { ago: fmt.relative(concluded.finished_at, now) })
-              : latestRun
-                ? t(`research.state.${latestRun.state}`)
-                : t('verdict.stage_a_only')}
-        </span>
-        <span>
-          {t('evidence.counts', {
-            abnormal: counts.abnormal,
-            undeterminable: counts.undeterminable,
-            normal: counts.normal,
-          })}
-        </span>
-        {degraded.map((d) => (
-          <span key={d.integration} className={styles.degraded} title={d.reason}>
-            {t('verdict.degraded_source', { source: d.integration, n: d.cards })}
-          </span>
-        ))}
-        {incident.observability_blind && <Status domain="incident" value="blind" />}
-        {stageA?.degraded && <span className={styles.degraded}>{t('verdict.state_store_degraded')}</span>}
-      </div>
-
-      <ClaimControl incidentId={incident.incident_id} claim={incident.claim} />
-
       {(incident.aliases.length > 0 || incident.split_from || incident.merged_into) && (
         <div className={styles.lineage}>
           {incident.aliases.length > 0 && (
@@ -194,14 +203,47 @@ export function VerdictHeader({
         </div>
       )}
 
-      {affecting.length > 0 && (
+      {affecting.length === 1 && (
         <ul className={styles.affecting} aria-label={t('verdict.affecting')}>
           {affecting.map((c) => (
             <li key={`${c.type}/${c.subject ?? ''}`}>
-              <strong>{t(`condition.${c.type}`)}</strong> {c.subject ?? ''} · {c.message}
+              <strong>{condTitle(c)}</strong>
+              {c.subject ? ` ${c.subject}` : ''} · {c.message}
             </li>
           ))}
         </ul>
+      )}
+      {affecting.length > 1 && (
+        <div className={styles.affectingBox}>
+          <button
+            type="button"
+            className={styles.affectingToggle}
+            aria-expanded={condOpen}
+            onClick={() => setCondOpen((v) => !v)}
+          >
+            <strong>{t('verdict.affecting_count', { n: affecting.length })}</strong>
+            {!condOpen && (
+              <span className={styles.affectingPreview}>
+                {condTitle(affecting[0]!)}
+                {affecting[0]!.subject ? ` ${affecting[0]!.subject}` : ''} · {affecting[0]!.message}
+              </span>
+            )}
+            <span className={styles.affectingAction}>
+              {condOpen ? t('conditions.collapse') : t('conditions.expand')}
+              {condOpen ? <ChevronUp aria-hidden="true" /> : <ChevronDown aria-hidden="true" />}
+            </span>
+          </button>
+          {condOpen && (
+            <ul className={styles.affectingList} aria-label={t('verdict.affecting')}>
+              {affecting.map((c) => (
+                <li key={`${c.type}/${c.subject ?? ''}`}>
+                  <strong>{condTitle(c)}</strong>
+                  {c.subject ? ` ${c.subject}` : ''} · {c.message}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       )}
     </section>
   );

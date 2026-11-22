@@ -1,5 +1,5 @@
-// 事件详情（DESIGN §12.2）。首屏回答"10 分钟内怎么办"：结论头、内联的待审批提议、根因子图、
-// 固定的反馈框；下方四个标签页：证据、假设、时间线、运行。当前标签由宿主保存在 URL 中。
+// 事件详情（DESIGN §12.2）。全宽单栏布局：顶部结论卡内置内联渐进式反馈条，下方依次为待审批提议、
+// 修复建议、根因子图以及四个标签页（证据、假设、时间线、运行）。当前标签由宿主保存在 URL 中。
 
 import { Bot, Gavel } from 'lucide-react';
 import { useCallback, useMemo, useState } from 'react';
@@ -243,102 +243,18 @@ export function IncidentView({
       <EvidenceNavProvider nav={nav}>
         <div className={styles.page}>
           <div className={styles.detail}>
-            <div className={styles.detailMain}>
-              <Panel>
-                <VerdictHeader
-                  incident={i}
-                  stageA={stageA.data ?? null}
-                  latestRun={latest}
-                  evidence={evidence.data ?? []}
-                  conditions={conditions.data ?? []}
-                  now={now}
-                />
-              </Panel>
-              {firstErr !== undefined && <ErrorBox title={t('detail.partial_failed')} error={firstErr} />}
-              <PendingApprovals list={proposals.data ?? []} now={now} />
-              {/* 修复建议紧跟结论与待审批（下一步做什么），不放在侧栏：窄屏时侧栏排在页面最后 */}
-              {run.data?.output && <Recommendations recs={run.data.output.recommendations} />}
-              <Panel
-                title={t('detail.subgraph')}
-                meta={subgraph.data ? t('detail.topology_v', { v: subgraph.data.topology_version }) : undefined}
-                actions={
-                  mapLink ? (
-                    <AppLink href={mapLink.href} className={styles.mapAction}>
-                      {t(mapLink.hasOnset ? 'detail.open_map_at_onset' : 'detail.open_map')}
-                    </AppLink>
-                  ) : undefined
-                }
-              >
-                {subgraph.error ? (
-                  <ErrorBox title={t('detail.subgraph_failed')} error={subgraph.error} />
-                ) : subgraph.data ? (
-                  <Subgraph
-                    graph={subgraph.data}
-                    clusterId={i.cluster_id}
-                    alertLabel={(id) => alertnames.get(id) ?? id}
-                    onOpenComponent={onOpenComponent && ((c) => onOpenComponent(i.cluster_id, c))}
-                  />
-                ) : (
-                  <Loading />
-                )}
-              </Panel>
-              <Tabs
-                label={t('detail.tabs')}
-                value={tab}
-                onChange={(v) => onTab(v as IncidentTab)}
-                tabs={[
-                  {
-                    id: 'evidence',
-                    label: t('detail.tab.evidence'),
-                    badge: evidence.data?.length,
-                    content: evidence.data ? (
-                      <EvidenceList
-                        incidentRef={incidentRef}
-                        runId={concludedId}
-                        results={evidence.data}
-                        output={run.data?.output ?? null}
-                        incident={i}
-                        concludedAt={run.data?.finished_at ?? null}
-                        focus={focus}
-                        onShowHypotheses={run.data?.output ? () => onTab('hypotheses') : undefined}
-                      />
-                    ) : (
-                      <Loading />
-                    ),
-                  },
-                  {
-                    id: 'hypotheses',
-                    label: t('detail.tab.hypotheses'),
-                    badge: run.data?.output?.hypotheses.length,
-                    content:
-                      concludedId === null ? (
-                        <HypothesisList output={null} />
-                      ) : run.data ? (
-                        <HypothesisList output={run.data.output} />
-                      ) : run.error ? (
-                        <ErrorBox title={t('detail.run_failed')} error={run.error} />
-                      ) : (
-                        <Loading />
-                      ),
-                  },
-                  {
-                    id: 'timeline',
-                    label: t('detail.tab.timeline'),
-                    badge: timeline.data?.length,
-                    content: timeline.data ? <TimelineLane items={timeline.data} from={start} to={end} /> : <Loading />,
-                  },
-                  {
-                    id: 'runs',
-                    label: t('detail.tab.runs'),
-                    badge: runs.data?.length,
-                    content: runs.data ? <RunsTab runs={runs.data} /> : <Loading />,
-                  },
-                ]}
+            <Panel className={styles.verdictPanel}>
+              <VerdictHeader
+                incident={i}
+                stageA={stageA.data ?? null}
+                latestRun={latest}
+                evidence={evidence.data ?? []}
+                conditions={conditions.data ?? []}
+                now={now}
               />
-            </div>
-            <aside className={styles.detailSide} aria-label={t('detail.side')}>
-              <Panel title={t('feedback.title')}>
+              <div className={styles.feedbackBar}>
                 <FeedbackControl
+                  layout="inline"
                   incidentRef={incidentRef}
                   runId={concludedId}
                   disposition={disposition}
@@ -348,8 +264,88 @@ export function IncidentView({
                   state={feedbackState(latestFb, disposition !== null)}
                   firing={i.state === 'firing'}
                 />
-              </Panel>
-            </aside>
+              </div>
+            </Panel>
+            {firstErr !== undefined && <ErrorBox title={t('detail.partial_failed')} error={firstErr} />}
+            <PendingApprovals list={proposals.data ?? []} now={now} />
+            {run.data?.output && <Recommendations recs={run.data.output.recommendations} />}
+            <Panel
+              title={t('detail.subgraph')}
+              meta={subgraph.data ? t('detail.topology_v', { v: subgraph.data.topology_version }) : undefined}
+              actions={
+                mapLink ? (
+                  <AppLink href={mapLink.href} className={styles.mapAction}>
+                    {t(mapLink.hasOnset ? 'detail.open_map_at_onset' : 'detail.open_map')}
+                  </AppLink>
+                ) : undefined
+              }
+            >
+              {subgraph.error ? (
+                <ErrorBox title={t('detail.subgraph_failed')} error={subgraph.error} />
+              ) : subgraph.data ? (
+                <Subgraph
+                  graph={subgraph.data}
+                  clusterId={i.cluster_id}
+                  alertLabel={(id) => alertnames.get(id) ?? id}
+                  onOpenComponent={onOpenComponent && ((c) => onOpenComponent(i.cluster_id, c))}
+                />
+              ) : (
+                <Loading />
+              )}
+            </Panel>
+            <Tabs
+              label={t('detail.tabs')}
+              value={tab}
+              onChange={(v) => onTab(v as IncidentTab)}
+              tabs={[
+                {
+                  id: 'evidence',
+                  label: t('detail.tab.evidence'),
+                  badge: evidence.data?.length,
+                  content: evidence.data ? (
+                    <EvidenceList
+                      incidentRef={incidentRef}
+                      runId={concludedId}
+                      results={evidence.data}
+                      output={run.data?.output ?? null}
+                      incident={i}
+                      concludedAt={run.data?.finished_at ?? null}
+                      focus={focus}
+                      onShowHypotheses={run.data?.output ? () => onTab('hypotheses') : undefined}
+                    />
+                  ) : (
+                    <Loading />
+                  ),
+                },
+                {
+                  id: 'hypotheses',
+                  label: t('detail.tab.hypotheses'),
+                  badge: run.data?.output?.hypotheses.length,
+                  content:
+                    concludedId === null ? (
+                      <HypothesisList output={null} />
+                    ) : run.data ? (
+                      <HypothesisList output={run.data.output} />
+                    ) : run.error ? (
+                      <ErrorBox title={t('detail.run_failed')} error={run.error} />
+                    ) : (
+                      <Loading />
+                    ),
+                },
+                {
+                  id: 'timeline',
+                  label: t('detail.tab.timeline'),
+                  badge: timeline.data?.length,
+                  content: timeline.data ? <TimelineLane items={timeline.data} from={start} to={end} /> : <Loading />,
+                },
+                {
+                  id: 'runs',
+                  label: t('detail.tab.runs'),
+                  badge: runs.data?.length,
+                  content: runs.data ? <RunsTab runs={runs.data} /> : <Loading />,
+                },
+              ]}
+            />
           </div>
         </div>
       </EvidenceNavProvider>
