@@ -4,14 +4,12 @@ import type {
   EvidenceResult,
   Feedback,
   Incident,
-  OptimizationOutput,
   Proposal,
   ProposalCreate,
   StageAReport,
   TopologyEdge,
   TopologyNode,
 } from '@srenautix/contract';
-import type { GoalRunContext } from '../optimize/runner.js';
 import type { CatalogAction } from '../proposals/catalog.js';
 import type { RouteReport } from '../scheduler/admission.js';
 import type { CheckTemplate, DispositionFacts, KnowledgeItem, ReferenceCase } from './types.js';
@@ -173,37 +171,7 @@ export class HubClient {
     await this.call('POST', '/v1/research/budget', { used_ratio: usedRatio, ...(purposes ? { purposes } : {}) });
   }
 
-  /** 目标运行的输入（server 的 runner 准备好的基线、差距、候选、诊断卡与模板） */
-  async goalContext(runId: string): Promise<GoalRunContext> {
-    const r = await this.call<GoalRunContext>('GET', `/v1/research/tasks/${runId}/goal-context`, undefined, {
-      timeoutMs: 60_000,
-    });
-    return r.body as GoalRunContext;
-  }
-
-  /** 目标运行的区分性检查：server 在发现挂到的组件上执行领域的查询模板（经主动分析的信号量与负载保护） */
-  async goalQuery(
-    runId: string,
-    template: string,
-    args: Record<string, unknown>,
-    finding: string,
-    signal: AbortSignal,
-  ): Promise<EvidenceResult> {
-    const r = await this.call<EvidenceResult>(
-      'POST',
-      `/v1/research/tasks/${runId}/goal-query`,
-      { template, args, finding },
-      { timeoutMs: 45_000, signal },
-    );
-    return r.body as EvidenceResult;
-  }
-
-  /** 交回目标运行的输出：server 校验之后计算门槛与建议 */
-  async submitOptimization(runId: string, output: OptimizationOutput): Promise<void> {
-    await this.call('POST', `/v1/research/tasks/${runId}/optimization`, output);
-  }
-
-  /** 目标运行没有输出就结束（模型不可用、预算、期限、内部错误）：server 把运行与目标记为 failed */
+  /** 目标运行没有输出就结束（主动优化已退役时用于清理遗留任务） */
   async failOptimization(runId: string, kind: string, message: string): Promise<void> {
     await this.call('POST', `/v1/research/tasks/${runId}/optimization-failed`, {
       kind,

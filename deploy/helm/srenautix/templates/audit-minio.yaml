@@ -4,6 +4,10 @@
 {{- $name := include "srenautix.minio.name" . }}
 {{- $rootSecret := printf "%s-root" $name }}
 {{- $selector := dict "app.kubernetes.io/name" (include "srenautix.name" .) "app.kubernetes.io/instance" .Release.Name "app.kubernetes.io/component" "audit-store" }}
+{{- $auditRoles := list "server" }}
+{{- if include "srenautix.roleEnabled" (dict "ctx" . "role" "gateway") }}
+{{- $auditRoles = append $auditRoles "gateway" }}
+{{- end }}
 # 审计汇：单实例 MinIO，存储桶在创建时开启对象锁（WORM），默认保留期由 audit.objectLock 决定
 apiVersion: v1
 kind: Secret
@@ -19,7 +23,7 @@ type: Opaque
 stringData:
   rootUser: {{ include "srenautix.persistentRandom" (dict "ctx" $ "name" $rootSecret "key" "rootUser" "length" 16) | quote }}
   rootPassword: {{ include "srenautix.persistentRandom" (dict "ctx" $ "name" $rootSecret "key" "rootPassword" "length" 40) | quote }}
-{{- range $role := list "server" "gateway" }}
+{{- range $role := $auditRoles }}
 {{- $secret := include "srenautix.audit.credentialsSecret" (dict "ctx" $ "role" $role) }}
 ---
 # {{ $role }} 写入审计汇使用的服务账号，只能读写对象，不能删除，也不能绕过保留期
@@ -166,7 +170,7 @@ data:
     {{- if $a.objectLock.enabled }}
     mc retention set --default "${LOCK_MODE}" "${LOCK_DAYS}d" "local/${BUCKET}"
     {{- end }}
-    for role in server gateway; do
+    for role in {{ join " " $auditRoles }}; do
       eval "ak=\${${role}_ACCESS_KEY}"
       eval "sk=\${${role}_SECRET_KEY}"
       if mc admin user svcacct info local "${ak}" >/dev/null 2>&1; then
@@ -233,7 +237,7 @@ spec:
                 secretKeyRef: {name: {{ $rootSecret }}, key: rootPassword}
             - name: MC_HOST_local
               value: http://$(MINIO_ROOT_USER):$(MINIO_ROOT_PASSWORD)@{{ $name }}.{{ .Release.Namespace }}.svc:9000
-            {{- range $role := list "server" "gateway" }}
+            {{- range $role := $auditRoles }}
             {{- $secret := include "srenautix.audit.credentialsSecret" (dict "ctx" $ "role" $role) }}
             - name: {{ $role }}_ACCESS_KEY
               valueFrom:

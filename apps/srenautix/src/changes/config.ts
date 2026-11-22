@@ -3,7 +3,7 @@
 import { isComponentKey } from '@srenautix/core';
 import { z } from 'zod';
 import { clusterId, duration } from '../kernel/config-schema.js';
-import { pgReadConnection } from '../optimize/config.js';
+import { pgReadConnection } from '../shared/pg-connection.js';
 import { DEFAULT_REVISION_LABELS } from './kubernetes.js';
 
 const changesSource = z

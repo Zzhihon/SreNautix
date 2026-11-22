@@ -1,5 +1,5 @@
 import type { EvidenceNovelty, EvidenceResult, Verdict } from '@srenautix/contract';
-import { durationMs } from '../optimize/stats.js';
+import { durationMs } from '../shared/duration.js';
 
 // 证据基线（ADR 0153）：判为异常的卡在同一实体上、按同样长度的窗口在事件之前的时段重新判定（基线样本），
 // 与事件窗口比较。和基线相比没有明显升高的信号判为常态（routine）：不能作为根因或支持证据，只作背景。

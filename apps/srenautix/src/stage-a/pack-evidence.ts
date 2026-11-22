@@ -35,6 +35,12 @@ import type { EvidenceSource, PackRuntime } from './packs.js';
 import type { EvidenceRun, EvidenceRunner, RuleHit, RuleProposer } from './ports.js';
 import { isLogicalComponent } from '../topology/expand.js';
 import { parseStoredKey } from '../topology/keys.js';
+import {
+  genericAlertConditionCardId,
+  MAX_GENERIC_ALERT_CONDITIONS,
+  runGenericAlertCondition,
+  type GenericAlertConditionTask,
+} from './alert-condition.js';
 import { cardApplies, splitCardCheckArgs } from './card-checks.js';
 import { decideNovelty, isRoutine, sampleOffsets, type NoveltyOptions, type NoveltySample } from './novelty.js';
 import { requiredEvidence } from './required.js';
@@ -63,6 +69,8 @@ export interface PackEvidenceOptions {
   metricsRetentionMs?: number | null;
   /** 证据基线（ADR 0153）：异常卡在事件之前的时段取基线样本；不填时不取 */
   novelty?: NoveltyOptions;
+  /** 目录条目未声明主卡且未在实体上执行静态条件卡时，从 ALERTS / ALERTS_FOR_STATE 合成通用条件卡（默认开启） */
+  genericAlertCondition?: boolean;
 }
 
 /** 长期事件的卡片窗口默认最长 24 小时：区间查询最多约 300 个点，步长不超过 5 分钟 */
@@ -317,13 +325,66 @@ export class PackEvidence implements EvidenceRunner {
 
     const extend = this.extendTo(inc, now);
     const cards = await this.execute(plan, Date.parse(inc.first_firing_at), now, signal, inc.incident_id, extend);
+
+    // 通用告警条件卡兜底：目录条目未声明 primary_card 且未在实体上执行静态 /condition 卡时，从 ALERTS / ALERTS_FOR_STATE 合成
+    // （跳过 detector 合成告警；绝不走 novelty 基线；单事件上限 MAX_GENERIC_ALERT_CONDITIONS 个不同告警名）
+    const genericTasks: GenericAlertConditionTask[] = [];
+    if (this.o.genericAlertCondition !== false) {
+      const seenGeneric = new Set<string>();
+      const seenAlertnames = new Set<string>();
+      for (const a of alerts) {
+        if (
+          !a.entity ||
+          !a.classification.catalog_entry ||
+          a.source === 'detector' ||
+          a.labels.srenautix_detector !== undefined
+        ) {
+          continue;
+        }
+        const found = this.rt.alertEntry(a.classification.catalog_entry);
+        if (!found || found.entry.primary_card) {
+          continue;
+        }
+        const eKey = entityKey(a.entity);
+        const entryChains = this.rt.alertChains(a.classification.catalog_entry);
+        if (entryChains.some((ck) => plan.some((p) => p.card === `${ck}/condition` && entityKey(p.entity) === eKey))) {
+          continue;
+        }
+        if (!seenAlertnames.has(a.alertname) && seenAlertnames.size >= MAX_GENERIC_ALERT_CONDITIONS) {
+          continue;
+        }
+        const cardId = genericAlertConditionCardId(found.entry.id);
+        const dedupeKey = `${cardId}|${eKey}`;
+        if (seenGeneric.has(dedupeKey)) {
+          continue;
+        }
+        seenGeneric.add(dedupeKey);
+        seenAlertnames.add(a.alertname);
+        const own = tryNodeKey(a.entity.kind, a.entity.namespace, a.entity.name);
+        const l = latestOf(a.entity);
+        genericTasks.push({
+          cardId,
+          alert: a,
+          entry: found.entry,
+          entity: a.entity,
+          component: a.component ?? own,
+          ...(l !== undefined ? { latest: l } : {}),
+        });
+      }
+    }
+    const genericCards = await this.executeGeneric(genericTasks, Date.parse(inc.first_firing_at), now, signal, extend);
+
     // 组件名称在首次触发时求值；长期事件不早于最近一个最大窗口的起点（与卡片窗口一致）
     const namesAt = Math.max(Math.min(Date.parse(inc.first_firing_at), now), extend.until - extend.maxWindowMs);
     const names = await this.names(named, Math.min(namesAt, now), signal);
-    const planned = new Map(
-      plan.filter((p) => p.component).map((p) => [`${p.card}|${entityKey(p.entity)}`, p.component!]),
-    );
-    const refd = cards.map((c, i) => ({ ...c, ref: `card:${i + 1}` }));
+    const planned = new Map<string, string>([
+      ...plan.filter((p) => p.component).map((p) => [`${p.card}|${entityKey(p.entity)}`, p.component!] as const),
+      ...genericTasks
+        .filter((t) => t.component !== null)
+        .map((t) => [`${t.cardId}|${entityKey(t.entity)}`, t.component!] as const),
+    ]);
+    const allCards = [...cards, ...genericCards];
+    const refd = allCards.map((c, i) => ({ ...c, ref: `card:${i + 1}` }));
     const cardComponents: Record<string, string> = {};
     for (const c of refd) {
       const k = c.entity ? planned.get(`${c.card_id}|${entityKey(c.entity)}`) : undefined;
@@ -339,7 +400,7 @@ export class PackEvidence implements EvidenceRunner {
       runbooks: this.runbooks(chainsRun),
       rootComponentType,
       names,
-      required: requiredEvidence((entry) => this.rt.requiredCards(entry), alerts, cards),
+      required: requiredEvidence((entry) => this.rt.requiredCards(entry), alerts, allCards),
     };
   }
 
@@ -659,6 +720,53 @@ export class PackEvidence implements EvidenceRunner {
       );
     }
     return done.map((x) => x.r);
+  }
+
+  /** 执行通用告警条件卡兜底（跳过 novelty 基线，避免在 1/缺失型 ALERTS 序列上跑基线查询）。 */
+  private async executeGeneric(
+    tasks: GenericAlertConditionTask[],
+    anchor: number,
+    now: number,
+    signal: AbortSignal,
+    extend: RunCardInput['extend'],
+  ): Promise<Array<Omit<EvidenceResult, 'ref'>>> {
+    if (!tasks.length || signal.aborted) {
+      return [];
+    }
+    const defaultAfterMs = durationSeconds(DEFAULT_WINDOW.after) * 1000;
+    const anchoredOf = (t: GenericAlertConditionTask) => {
+      const at = t.latest !== undefined && t.latest > anchor + defaultAfterMs ? t.latest : anchor;
+      return at + defaultAfterMs;
+    };
+    const endOf = (t: GenericAlertConditionTask) =>
+      extend && extend.until > anchoredOf(t) ? extend.until : anchoredOf(t);
+    const probeAt = Math.min(now, Math.max(...tasks.map(endOf)));
+    const fallbackAt = Math.min(now, Math.max(...tasks.map(anchoredOf)));
+    const ds: EvidenceDataSource = await this.source.dataSource(probeAt, Date.now(), fallbackAt);
+    const results = await pool(tasks, this.o.concurrency, signal, async (task) => {
+      const started = performance.now();
+      try {
+        const r = await runGenericAlertCondition({
+          task,
+          anchor,
+          now,
+          ds,
+          locale: this.o.locale,
+          timeoutMs: this.o.queryTimeoutMs,
+          ...(extend ? { extend } : {}),
+        });
+        if (r) {
+          this.metrics.evidenceCards.inc({ display_state: r.display_state });
+          this.metrics.evidenceCardSeconds.observe((performance.now() - started) / 1000);
+        }
+        return r;
+      } catch (err) {
+        this.metrics.evidenceCards.inc({ display_state: 'runtime_error' });
+        logger.warn('通用告警条件卡没有执行', { card: task.cardId, entity: entityKey(task.entity), error: err });
+        return null;
+      }
+    });
+    return results.filter((r): r is Omit<EvidenceResult, 'ref'> => r !== null && r !== undefined);
   }
 
   /**

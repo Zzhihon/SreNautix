@@ -208,11 +208,12 @@ export const serverConfigSchema = z
         category_rules: [],
         reconcile: { enabled: true, interval: '60s', additions_interval: '5s' },
       }),
-    // dirs 下的每个子目录是一个领域包；only 不填时加载除 `_` 开头（示例包）以外的全部包；oci 中的包总是加载
+    // dirs 下的每个子目录是一个领域包；only 不填时加载除 `_` 开头（示例包）与 disabled 以外的全部包；oci 中的包总是加载
     packs: z
       .object({
         dirs: z.array(path).default([]),
         only: z.array(z.string().min(1)).optional(),
+        disabled: z.array(z.string().min(1)).default([]),
         lock_file: path.optional(),
         oci: z
           .object({
@@ -437,6 +438,8 @@ export const serverConfigSchema = z
         metrics_retention: duration.optional(),
         // 证据基线（ADR 0153）：异常卡在事件之前的时段取基线样本，常态的卡不作为根因或支持证据
         novelty: noveltyConfig.default(NOVELTY_CONFIG_DEFAULT),
+        // 目录条目未声明主卡且未在实体上执行静态条件卡时，从 Prometheus/VM 的 ALERTS / ALERTS_FOR_STATE 合成通用条件卡
+        generic_alert_condition: z.boolean().default(true),
       })
       .strict()
       .default({
@@ -445,6 +448,7 @@ export const serverConfigSchema = z
         recompute_per_minute: 10,
         card_window_max: '24h',
         novelty: NOVELTY_CONFIG_DEFAULT,
+        generic_alert_condition: true,
       }),
     scheduler: z
       .object({
@@ -665,6 +669,12 @@ export function parseServerConfig(raw: unknown): ServerConfig {
   }
   if (c.scheduler.critical_reserved >= c.scheduler.slots) {
     throw new ConfigError('scheduler.critical_reserved 必须小于 slots');
+  }
+  if (c.packs.only !== undefined && c.packs.disabled.length > 0) {
+    throw new ConfigError('packs.only 与 packs.disabled 不能同时设置');
+  }
+  if (c.optimization.enabled) {
+    throw new ConfigError('主动优化（optimization.enabled）已退役，请设为 false 或移除该开关');
   }
   if (!c.github_app) {
     if (c.issues?.enabled) {

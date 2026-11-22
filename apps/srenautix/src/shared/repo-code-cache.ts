@@ -1,4 +1,4 @@
-// 业务仓库的目录树与文件内容缓存（ADR 0146 §3.5）：每个提交读取一次目录树（GET git/trees/{sha}?recursive=1），
+// 业务仓库的目录树与文件内容缓存：每个提交读取一次目录树（GET git/trees/{sha}?recursive=1），
 // 在 server 内存中保留最近 3 个提交；文件内容按 blob sha 缓存，内容不变就不再读取。请求都经 GitHub App 的
 // 业务仓库角色白名单（只读 contents 与 git/trees）。
 

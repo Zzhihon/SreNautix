@@ -12,9 +12,7 @@ import { newTestDb, type TestDb } from '../support/db.js';
 import { fileWriter, sha256 } from '../support/worker-hub.js';
 
 /**
- * 主动优化的接口（ADR 0146 §5.1）：真实的 server 与 PG，领域包为测试包 optdb。下达目标只能引用领域包的指标与领域，
- * 参数与预算按契约与指标 schema 校验（不能提交自由查询）；每个主体每天最多 5 个目标、每个集群最多 10 个未结束的目标；
- * 取消、运行列表与发现、建议、目录；响应都符合 openapi。
+ * 主动优化运行时已退役：保留 OpenAPI 兼容的只读空响应与写接口 503/404，保留数据库迁移轨道（optimization v1-v3）与鉴权。
  */
 const PUBLIC = 'https://srenautix.example.test';
 const ROOT = resolve(import.meta.dirname, '../../../../.scratch', `optimization-api-${process.pid}`);
@@ -77,7 +75,7 @@ beforeAll(async () => {
       packs: { dirs: [join(ROOT, 'packs')], only: ['optdb'] },
       datasources: { prometheus: { url: 'http://127.0.0.1:9' } },
       topology: { source: 'off' },
-      optimization: { enabled: true },
+      optimization: { enabled: false },
       approvals: { signing_key_file: file('signing.pem', ed()), key_id: 'k' },
       callers: {
         tokens_file: file(
@@ -139,100 +137,53 @@ afterAll(async () => {
   rmSync(ROOT, { recursive: true, force: true });
 });
 
-describe('目标接口', () => {
-  let goalId = '';
-
-  it('目录只含领域包的指标与领域', async () => {
-    const r = await api('GET', '/v1/optimization/catalog');
-    expect(r.status).toBe(200);
-    expect(responseErrors('/v1/optimization/catalog', 'get', 200, r.body)).toBeNull();
-    expect((r.body.indicators as Array<{ id: string }>).map((x) => x.id)).toEqual(['optdb/db-time', 'optdb/xact']);
-  });
-
-  it('下达指标目标：入队、写治理审计与事件；读取、列表与运行列表符合契约', async () => {
-    const r = await api('POST', '/v1/goals', goal());
-    expect(r.status).toBe(201);
-    expect(responseErrors('/v1/goals', 'post', 201, r.body)).toBeNull();
-    goalId = r.body.goal_id as string;
-    expect(r.body).toMatchObject({
-      state: 'queued',
-      revision: 1,
-      spec: { origin: { kind: 'manual', channel: 'console' }, budget: { tokens: 400000, dbstats_queries: 30 } },
-      last_run: { state: 'queued', goal_revision: 1 },
-    });
-    const one = await api('GET', `/v1/goals/${goalId}`);
-    expect(responseErrors('/v1/goals/{goal_id}', 'get', 200, one.body)).toBeNull();
-    const list = await api('GET', '/v1/goals?open=true');
-    expect(responseErrors('/v1/goals', 'get', 200, list.body)).toBeNull();
-    expect((list.body.items as Array<{ goal_id: string }>).map((g) => g.goal_id)).toContain(goalId);
-    const runs = await api('GET', `/v1/goals/${goalId}/runs`);
-    expect(responseErrors('/v1/goals/{goal_id}/runs', 'get', 200, runs.body)).toBeNull();
-    const runId = (runs.body as unknown as Array<{ run_id: string }>)[0]!.run_id;
-    const detail = await api('GET', `/v1/goals/${goalId}/runs/${runId}`);
-    expect(responseErrors('/v1/goals/{goal_id}/runs/{run_id}', 'get', 200, detail.body)).toBeNull();
-    expect(detail.body.output).toBeNull();
-    const audit = await db.admin.query(
-      "SELECT 1 FROM server.governance_audit WHERE kind = 'optimization.goal_created'",
+describe('目标接口（主动优化退役后的兼容桩）', () => {
+  it('保留数据库 optimization 迁移轨道（v1-v3）不破坏历史表结构', async () => {
+    const r = await db.admin.query<{ version: number }>(
+      "SELECT version FROM server.schema_migrations WHERE track = 'optimization' ORDER BY version",
     );
-    expect(audit.rowCount).toBe(1);
-    const ev = await db.admin.query("SELECT payload FROM server.outbox WHERE type = 'goal.created'");
-    expect(ev.rows[0]?.payload).toMatchObject({ goal_id: goalId });
+    expect(r.rows.map((x) => x.version)).toEqual([1, 2, 3]);
   });
 
-  it('不能提交自由查询、未知指标或不合法的参数与预算', async () => {
-    const subject = goal().subject;
-    for (const [body, pattern] of [
-      [goal({ subject: { ...subject, indicator: 'optdb/unknown' } }), /没有指标/],
-      [goal({ subject: { ...subject, params: { database: 'x"} or vector(1)' } } }), /参数不合法/],
-      [goal({ subject: { ...subject, params: { promql: 'up' } } }), /参数不合法/],
-      [goal({ query: 'sum(rate(x[5m]))' }), /must NOT have additional properties/],
-      [goal({ subject: { ...subject, sql: 'SELECT * FROM usage_logs' } }), /must/],
-      [goal({ budget: { dbstats_queries: 1000 } }), /must be <= 60/],
-      [goal({ outputs: ['ops_pr', 'shell'] }), /must be equal to one of the allowed values/],
-    ] as Array<[unknown, RegExp]>) {
-      const r = await api('POST', '/v1/goals', body);
-      expect(r.status, JSON.stringify(body)).toBe(400);
-      expect(r.body.message).toMatch(pattern);
-    }
+  it('未鉴权请求返回 401', async () => {
+    const res = await fetch(`${srv.apiUrl}/v1/goals`);
+    expect(res.status).toBe(401);
   });
 
-  it('外部 API 调用方只能为它的命名空间下达目标', async () => {
-    const r = await api('POST', '/v1/goals', goal(), TOKENS.external);
-    expect(r.status).toBe(403);
-    const ok = await api(
-      'POST',
-      '/v1/goals',
-      goal({
-        subject: { type: 'domain', domain: 'database', scope: { components: [], namespaces: ['shop'] } },
-        objective: null,
-      }),
-      TOKENS.external,
-    );
-    expect(ok.status).toBe(201);
-    expect(ok.body.spec).toMatchObject({ origin: { kind: 'manual', channel: 'api', principal: 'ext-api' } });
+  it('只读列表与目录接口返回空结果且符合 openapi 契约', async () => {
+    const cat = await api('GET', '/v1/optimization/catalog');
+    expect(cat.status).toBe(200);
+    expect(responseErrors('/v1/optimization/catalog', 'get', 200, cat.body)).toBeNull();
+    expect(cat.body).toEqual({ indicators: [], domains: [] });
+
+    const goals = await api('GET', '/v1/goals?open=true');
+    expect(goals.status).toBe(200);
+    expect(responseErrors('/v1/goals', 'get', 200, goals.body)).toBeNull();
+    expect(goals.body).toEqual({ items: [], next_cursor: null });
+
+    const findings = await api('GET', '/v1/findings?domain=database');
+    expect(findings.status).toBe(200);
+    expect(responseErrors('/v1/findings', 'get', 200, findings.body)).toBeNull();
+    expect(findings.body).toEqual({ items: [], next_cursor: null });
+
+    const recs = await api('GET', '/v1/recommendations');
+    expect(recs.status).toBe(200);
+    expect(responseErrors('/v1/recommendations', 'get', 200, recs.body)).toBeNull();
+    expect(recs.body).toEqual({ items: [], next_cursor: null });
   });
 
-  it('每个主体每天最多 5 个目标', async () => {
-    for (let i = 0; i < 4; i++) {
-      expect((await api('POST', '/v1/goals', goal())).status).toBe(201);
-    }
-    const r = await api('POST', '/v1/goals', goal());
-    expect(r.status).toBe(429);
-    expect(r.body.error).toBe('goal_limit');
-  });
+  it('POST /v1/goals 返回 503，详情与取消/拒绝接口返回 404', async () => {
+    const created = await api('POST', '/v1/goals', goal());
+    expect(created.status).toBe(503);
+    expect(created.body.error).toBe('unavailable');
 
-  it('取消未结束的目标：排队的运行一并取消；再取消返回 409', async () => {
-    const r = await api('POST', `/v1/goals/${goalId}/cancel`, {});
-    expect(r.status).toBe(200);
-    expect(r.body).toMatchObject({ state: 'cancelled', state_reason: 'user', last_run: { state: 'cancelled' } });
-    expect((await api('POST', `/v1/goals/${goalId}/cancel`, {})).status).toBe(409);
-  });
+    const createdExt = await api('POST', '/v1/goals', goal(), TOKENS.external);
+    expect(createdExt.status).toBe(503);
 
-  it('发现与建议的列表符合契约', async () => {
-    const f = await api('GET', '/v1/findings?domain=database');
-    expect(f.status).toBe(200);
-    expect(responseErrors('/v1/findings', 'get', 200, f.body)).toBeNull();
-    const r = await api('GET', `/v1/recommendations?goal_id=${goalId}`);
-    expect(responseErrors('/v1/recommendations', 'get', 200, r.body)).toBeNull();
+    expect((await api('GET', '/v1/goals/g-missing')).status).toBe(404);
+    expect((await api('GET', '/v1/goals/g-missing/runs')).status).toBe(404);
+    expect((await api('GET', '/v1/goals/g-missing/runs/r-missing')).status).toBe(404);
+    expect((await api('POST', '/v1/goals/g-missing/cancel', {})).status).toBe(404);
+    expect((await api('POST', '/v1/recommendations/rec-missing/reject', {})).status).toBe(404);
   });
 });

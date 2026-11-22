@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { durationMs } from '../optimize/stats.js';
+import { durationMs } from '../shared/duration.js';
 import { DEFAULT_NOVELTY, type NoveltyOptions } from '../stage-a/novelty.js';
 
 // 证据基线的配置（ADR 0153）：server 的 stage_a.novelty 与评测配置的 reconstruct.novelty 相同，默认值即 ADR 中的取值

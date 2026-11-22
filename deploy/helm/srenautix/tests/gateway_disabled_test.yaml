@@ -1,0 +1,142 @@
+suite: roles.gateway.enabled=false 时不产生任何 gateway 残留资源
+templates:
+  - templates/deployments.yaml
+  - templates/role-resources.yaml
+  - templates/secrets.yaml
+  - templates/audit-minio.yaml
+  - templates/networkpolicy.yaml
+  - templates/rbac.yaml
+  - templates/admission.yaml
+  - templates/self-monitoring.yaml
+  - templates/validate.yaml
+values:
+  - ../ci/base/required.yaml
+release:
+  name: t
+  namespace: srenautix
+capabilities:
+  majorVersion: "1"
+  minorVersion: "34"
+set:
+  profile: standard
+  roles.gateway.enabled: false
+  selfMonitoring:
+    serviceMonitor: {enabled: true}
+    prometheusRule: {enabled: true}
+    receiver: platform-oncall
+    routeLabels: {team: platform}
+tests:
+  - it: validate.yaml 在 standard + roles.gateway.enabled=false 下通过校验
+    template: templates/validate.yaml
+    asserts:
+      - hasDocuments: {count: 0}
+
+  - it: 不生成 gateway Deployment，server 不挂载 gateway 策略目录
+    template: templates/deployments.yaml
+    asserts:
+      - containsDocument: {kind: Deployment, apiVersion: apps/v1, name: t-srenautix-server, any: true}
+      - containsDocument: {kind: Deployment, apiVersion: apps/v1, name: t-srenautix-worker, any: true}
+      - containsDocument: {kind: Deployment, apiVersion: apps/v1, name: t-srenautix-reader, any: true}
+      - containsDocument: {kind: Deployment, apiVersion: apps/v1, name: t-srenautix-gateway}
+        not: true
+      - notContains:
+          path: spec.template.spec.volumes
+          content: {name: policies}
+        documentSelector: {path: metadata.name, value: t-srenautix-server}
+
+  - it: 不生成 gateway ServiceAccount、ConfigMap、Service、PDB 与审计暂存 PVC，server 配置不含 policies_dir
+    template: templates/role-resources.yaml
+    asserts:
+      - containsDocument: {kind: ServiceAccount, apiVersion: v1, name: t-srenautix-gateway}
+        not: true
+      - containsDocument: {kind: ConfigMap, apiVersion: v1, name: t-srenautix-gateway-config}
+        not: true
+      - containsDocument: {kind: Service, apiVersion: v1, name: t-srenautix-gateway}
+        not: true
+      - containsDocument: {kind: PersistentVolumeClaim, apiVersion: v1, name: t-srenautix-gateway-audit-staging}
+        not: true
+      - notMatchRegex: {path: 'data["config.yaml"]', pattern: 'policies_dir:'}
+        documentSelector: {path: metadata.name, value: t-srenautix-server-config}
+
+  - it: 不生成 gateway 策略/冻结/审计密钥/GitHub App ConfigMap，service-tokens 与 callers 不含 gateway
+    template: templates/secrets.yaml
+    asserts:
+      - containsDocument: {kind: ConfigMap, apiVersion: v1, name: t-srenautix-gateway-policy}
+        not: true
+      - containsDocument: {kind: ConfigMap, apiVersion: v1, name: t-srenautix-gateway-freeze}
+        not: true
+      - containsDocument: {kind: Secret, apiVersion: v1, name: t-srenautix-gateway-audit-key}
+        not: true
+      - containsDocument: {kind: ConfigMap, apiVersion: v1, name: t-srenautix-gateway-github-app}
+        not: true
+      - notExists: {path: stringData.gateway}
+        documentSelector: {path: metadata.name, value: t-srenautix-service-tokens}
+      - notMatchRegex: {path: 'stringData["callers.yaml"]', pattern: 'spoke-default-gateway'}
+        documentSelector: {path: metadata.name, value: t-srenautix-callers}
+
+  - it: audit.sink=minio 时不生成 gateway MinIO 审计凭证，初始化脚本与 Job 只初始化 server
+    template: templates/audit-minio.yaml
+    asserts:
+      - containsDocument: {kind: Secret, apiVersion: v1, name: t-srenautix-minio-audit-server, any: true}
+      - containsDocument: {kind: Secret, apiVersion: v1, name: t-srenautix-minio-audit-gateway}
+        not: true
+      - matchRegex: {path: 'data["setup.sh"]', pattern: 'for role in server; do'}
+        documentSelector: {path: kind, value: ConfigMap}
+      - notMatchRegex: {path: 'data["setup.sh"]', pattern: 'gateway'}
+        documentSelector: {path: kind, value: ConfigMap}
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content: {name: GATEWAY_ACCESS}
+          any: true
+        documentSelector: {path: kind, value: Job}
+
+  - it: audit.sink=s3 时只需 server 凭证即可通过校验
+    template: templates/validate.yaml
+    set:
+      audit.sink: s3
+      audit.s3.endpoint: https://s3.example.com
+      audit.s3.existingSecrets.server: gov-s3
+      networkPolicy.auditEgressTo:
+        - ipBlock: {cidr: 203.0.113.10/32}
+    asserts:
+      - hasDocuments: {count: 0}
+
+  - it: 不生成 gateway NetworkPolicy，MinIO 入站策略不含 gateway
+    template: templates/networkpolicy.yaml
+    asserts:
+      - containsDocument: {kind: NetworkPolicy, apiVersion: networking.k8s.io/v1, name: t-srenautix-gateway}
+        not: true
+      - notContains:
+          path: spec.ingress[0].from
+          content:
+            podSelector:
+              matchLabels:
+                app.kubernetes.io/component: gateway
+                app.kubernetes.io/instance: t
+                app.kubernetes.io/name: srenautix
+        documentSelector: {path: metadata.name, value: t-srenautix-minio}
+
+  - it: 不生成 gateway RBAC 与准入策略
+    asserts:
+      - containsDocument: {kind: Role, apiVersion: rbac.authorization.k8s.io/v1, name: t-srenautix-gateway}
+        template: templates/rbac.yaml
+        not: true
+      - containsDocument: {kind: ClusterRole, apiVersion: rbac.authorization.k8s.io/v1, name: t-srenautix-gateway}
+        template: templates/rbac.yaml
+        not: true
+      - hasDocuments: {count: 0}
+        template: templates/admission.yaml
+
+  - it: 自身监控不含 gateway ServiceMonitor、gateway 告警规则及 gateway 状态条件
+    template: templates/self-monitoring.yaml
+    asserts:
+      - containsDocument: {kind: ServiceMonitor, apiVersion: monitoring.coreos.com/v1, name: t-srenautix-gateway}
+        not: true
+      - notMatchRegex:
+          path: 'spec.groups[0].rules[*].alert'
+          pattern: '^(SreNautixAdmissionSelfCheckFailed|SreNautixGatewayNeedsHuman)$'
+        documentSelector: {path: kind, value: PrometheusRule}
+      - notMatchRegex:
+          path: "spec.groups[0].rules[?(@.alert == 'SreNautixConditionActive')].expr"
+          pattern: 'role="gateway"'
+        documentSelector: {path: kind, value: PrometheusRule}

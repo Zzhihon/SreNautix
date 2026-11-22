@@ -1,4 +1,5 @@
 import type { Alert, EvidenceResult } from '@srenautix/contract';
+import { isGenericAlertConditionCard } from '../stage-a/alert-condition.js';
 import type { PackRuntime } from '../stage-a/packs.js';
 
 // 证据卡与告警结论的一致率（ADR 0110）：告警正在触发时，它在告警目录中对应的卡应当判为异常。
@@ -71,8 +72,11 @@ export function agreeAlerts(
     }
     const entryKey = `${hit.pack}/${hit.entry.id}`;
     const declared = hit.entry.primary_card ?? null;
-    const primaryKey =
+    const resolvedPrimary =
       declared === null ? null : declared.split('/').length === 3 ? declared : `${hit.pack}/${declared}`;
+    // 合成的 ALERTS 通用条件卡不参与主卡一致率统计，防止告警自身循环自证
+    const primaryKey =
+      resolvedPrimary !== null && isGenericAlertConditionCard(resolvedPrimary) ? null : resolvedPrimary;
     if (!a.entity) {
       return {
         alertname: a.alertname,
@@ -84,7 +88,7 @@ export function agreeAlerts(
         primary_reason: null,
       };
     }
-    const onEntity = cards.filter((c) => sameEntity(a.entity!, c.entity));
+    const onEntity = cards.filter((c) => !isGenericAlertConditionCard(c.card_id) && sameEntity(a.entity!, c.entity));
     const chains = rt.alertChains(entryKey).map((c) => `${c}/`);
     const chainCards = onEntity.filter((c) => chains.some((p) => c.card_id.startsWith(p)));
     const primaryCards = primaryKey === null ? [] : onEntity.filter((c) => c.card_id === primaryKey);

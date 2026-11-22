@@ -200,7 +200,9 @@ spec:
   ingress:
     - from:
         - {{- toYaml (index $peer "server") | nindent 10 }}
+        {{- if include "srenautix.roleEnabled" (dict "ctx" . "role" "gateway") }}
         - {{- toYaml (index $peer "gateway") | nindent 10 }}
+        {{- end }}
         - {{- toYaml $minioSetupPeer | nindent 10 }}
       ports:
         - {protocol: TCP, port: 9000}

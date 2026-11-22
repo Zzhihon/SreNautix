@@ -1,5 +1,8 @@
 import { z } from 'zod';
 import { validatorFor, type AnchorKind, type CodeLayout } from '@srenautix/contract';
+import { pgReadConnection } from '../shared/pg-connection.js';
+
+export { pgReadConnection };
 
 // server 的主动优化配置（ADR 0146）：optimization.*。默认关闭；关闭时不创建目标、不访问业务仓库、不连接 dbstats。
 //
@@ -60,23 +63,6 @@ const businessRepository = z
     repo: repoName,
     default_branch: z.string().min(1).default('main'),
     code: codeLayout,
-  })
-  .strict();
-
-/**
- * 业务库的只读连接：专用只读角色（默认 srenautix_stats），口令文件挂载自 Secret。dbstats 与 SQL 审计表变更源
- * （changes.sql_audit，ADR 0151）用同样的写法
- */
-export const pgReadConnection = z
-  .object({
-    host: z.string().min(1),
-    port: z.number().int().min(1).max(65535).default(5432),
-    database: z.string().min(1),
-    user: z.string().min(1).default('srenautix_stats'),
-    password_file: z.string().min(1),
-    ssl: z
-      .union([z.boolean(), z.object({ ca_file: z.string().optional(), servername: z.string().optional() }).strict()])
-      .default(false),
   })
   .strict();
 
