@@ -156,6 +156,47 @@ describe('对象健康判定', () => {
     ]);
     expect(hs.find((h) => h.state === 'pdb_blocking')?.targets).toEqual(['Deployment:shop/api']);
   });
+
+  it('PDB 阻塞驱逐：跳过健康的单副本保护型 PDB，保留单副本不健康与多副本阻塞', () => {
+    const pdb = (
+      name: string,
+      status: { expectedPods: number; currentHealthy: number; desiredHealthy: number; disruptionsAllowed: number },
+    ): K8sObject => ({
+      ...meta('PodDisruptionBudget', name),
+      spec: { selector: { matchLabels: { app: name } } },
+      status: {
+        ...status,
+        conditions: [
+          { type: 'DisruptionAllowed', status: 'False', reason: 'InsufficientPods', lastTransitionTime: T(-15) },
+        ],
+      },
+    });
+    const objs: K8sObject[] = [
+      // 健康单副本保护型 PDB（如 CNPG 主库、Longhorn 单节点实例）：不应误报
+      pdb('single-healthy', { expectedPods: 1, currentHealthy: 1, desiredHealthy: 1, disruptionsAllowed: 0 }),
+      // 单副本但不健康：仍应上报
+      pdb('single-unhealthy', { expectedPods: 1, currentHealthy: 0, desiredHealthy: 1, disruptionsAllowed: 0 }),
+      // 多副本全部健康但阻塞驱逐：仍应上报
+      pdb('multi-blocking', { expectedPods: 2, currentHealthy: 2, desiredHealthy: 2, disruptionsAllowed: 0 }),
+    ];
+    const hs = objectHealth(objs, new FirstSeen(), NOW);
+    expect(hs.map((h) => [h.key, h.state, h.reason, h.since, h.details])).toEqual([
+      [
+        'PodDisruptionBudget:shop/multi-blocking',
+        'pdb_blocking',
+        'InsufficientPods',
+        T(-15),
+        { disruptions_allowed: 0, expected_pods: 2, current_healthy: 2, desired_healthy: 2 },
+      ],
+      [
+        'PodDisruptionBudget:shop/single-unhealthy',
+        'pdb_blocking',
+        'InsufficientPods',
+        T(-15),
+        { disruptions_allowed: 0, expected_pods: 1, current_healthy: 0, desired_healthy: 1 },
+      ],
+    ]);
+  });
 });
 
 describe('阈值与合成告警', () => {

@@ -12,7 +12,7 @@
    - `pod_init`：有 init 容器未完成；since 为创建时间与 Initialized 条件变化时间中较晚的；
    - `crash_loop`：任一容器 waiting.reason 为 CrashLoopBackOff；since 为第一次看到的时间；
    - `rollout_stalled`：Deployment 的 Progressing 为 ProgressDeadlineExceeded（since 为条件时间），或 updated、available 少于期望（since 为第一次看到）；StatefulSet 的 ready 少于期望或 updateRevision 未滚完；DaemonSet 的 updated、available 少于 desired；
-   - `pdb_blocking`：expectedPods > 0 且 disruptionsAllowed = 0；since 为 DisruptionAllowed=False 的时间；附带它选中的工作负载；
+   - `pdb_blocking`：expectedPods > 0 且 disruptionsAllowed = 0，排除单副本健康保护型 PDB（expectedPods = 1 且 currentHealthy >= desiredHealthy，如单副本 `minAvailable: 1` 的主库或节点组件）；since 为 DisruptionAllowed=False 的时间；附带它选中的工作负载；
    - `job_failed`：Failed 条件为 True。
    "第一次看到"只在内存里记录，进程重启后从重启时间算起，偏向晚报而不是误报。
 3. **阈值与合成告警**（server 配置 `detectors`，默认关闭）：状态持续超过阈值（`pod_init_after`、`pod_pending_after` 默认 10m，`rollout_stalled_after` 15m，`crash_loop_after` 5m，`pdb_blocked_after` 10m，`job_failed` 立即）时，合成一条 `source: detector` 的告警：告警名 `SreNautixPodPending`、`SreNautixPodInitStuck`、`SreNautixCrashLoop`、`SreNautixRolloutStalled`、`SreNautixPdbBlockingEviction`、`SreNautixJobFailed`；开始时间是"进入状态 + 阈值"，与告警规则的 `for` 相同；标签带标签契约的 `entity`、`entity_kind` 与对象标签，`role: cause`；摘要与说明写明原因、停住的容器、副本数等。合成告警走与告警规则相同的接入路径（实体解析、alert_state、唤醒事件引擎）。

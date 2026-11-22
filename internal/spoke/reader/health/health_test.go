@@ -14,6 +14,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	k8slabels "k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -213,4 +214,74 @@ func TestScanUnhealthyObjects(t *testing.T) {
 		}
 		return nil
 	})
+}
+
+type fakePDBSource struct {
+	pdbs []*policyv1.PodDisruptionBudget
+}
+
+func (f fakePDBSource) ControllerOf(string, string, string) (topology.OwnerRef, bool) {
+	return topology.OwnerRef{}, false
+}
+func (f fakePDBSource) ServiceExists(string, string) bool                  { return false }
+func (f fakePDBSource) ConfigMap(string, string) (*corev1.ConfigMap, bool) { return nil, false }
+func (f fakePDBSource) PVC(string, string) (*corev1.PersistentVolumeClaim, bool) {
+	return nil, false
+}
+func (f fakePDBSource) PV(string) (*corev1.PersistentVolume, bool)       { return nil, false }
+func (f fakePDBSource) CSINodePlugin(string, string) (*corev1.Pod, bool) { return nil, false }
+func (f fakePDBSource) Namespaces(k8slabels.Selector) []string           { return nil }
+func (f fakePDBSource) NamespaceLabels(string) (map[string]string, bool) { return nil, false }
+func (f fakePDBSource) Pods(string, k8slabels.Selector) []*corev1.Pod    { return nil }
+func (f fakePDBSource) ListPods() []*corev1.Pod                          { return nil }
+func (f fakePDBSource) ListDeployments() []*appsv1.Deployment            { return nil }
+func (f fakePDBSource) ListStatefulSets() []*appsv1.StatefulSet          { return nil }
+func (f fakePDBSource) ListDaemonSets() []*appsv1.DaemonSet              { return nil }
+func (f fakePDBSource) ListJobs() []*batchv1.Job                         { return nil }
+func (f fakePDBSource) ListPDBs() []*policyv1.PodDisruptionBudget        { return f.pdbs }
+
+// 单副本保护型 PDB 健康时不报 pdb_blocking；单副本不健康与多副本阻塞照常上报。
+func TestScanPDBSingleReplica(t *testing.T) {
+	t0 := metav1.NewTime(time.Date(2026, 10, 20, 16, 45, 0, 0, time.UTC))
+	mkPDB := func(name string, expected, healthy, desired, allowed int32) *policyv1.PodDisruptionBudget {
+		return &policyv1.PodDisruptionBudget{
+			ObjectMeta: metav1.ObjectMeta{Namespace: "shop", Name: name},
+			Status: policyv1.PodDisruptionBudgetStatus{
+				ExpectedPods:       expected,
+				CurrentHealthy:     healthy,
+				DesiredHealthy:     desired,
+				DisruptionsAllowed: allowed,
+				Conditions: []metav1.Condition{{
+					Type:               policyv1.DisruptionAllowedCondition,
+					Status:             metav1.ConditionFalse,
+					Reason:             policyv1.InsufficientPodsReason,
+					LastTransitionTime: t0,
+				}},
+			},
+		}
+	}
+	src := fakePDBSource{
+		pdbs: []*policyv1.PodDisruptionBudget{
+			mkPDB("single-healthy", 1, 1, 1, 0),
+			mkPDB("single-unhealthy", 1, 0, 1, 0),
+			mkPDB("multi-blocking", 2, 2, 2, 0),
+		},
+	}
+	objs, complete := health.NewScanner().Scan(src, t0.Add(15*time.Minute))
+	if !complete {
+		t.Fatal("scan not complete")
+	}
+	if len(objs) != 2 {
+		t.Fatalf("want 2 pdb_blocking objects, got %d: %v", len(objs), objs)
+	}
+	if objs[0].Key != "PodDisruptionBudget:shop/multi-blocking" || objs[0].State != health.PDBBlocking ||
+		*objs[0].Details.ExpectedPods != 2 || *objs[0].Details.CurrentHealthy != 2 || *objs[0].Details.DesiredHealthy != 2 ||
+		!objs[0].Since.Equal(t0.Time) {
+		t.Fatalf("unexpected multi-blocking object: %+v (%+v)", objs[0], objs[0].Details)
+	}
+	if objs[1].Key != "PodDisruptionBudget:shop/single-unhealthy" || objs[1].State != health.PDBBlocking ||
+		*objs[1].Details.ExpectedPods != 1 || *objs[1].Details.CurrentHealthy != 0 || *objs[1].Details.DesiredHealthy != 1 ||
+		!objs[1].Since.Equal(t0.Time) {
+		t.Fatalf("unexpected single-unhealthy object: %+v (%+v)", objs[1], objs[1].Details)
+	}
 }

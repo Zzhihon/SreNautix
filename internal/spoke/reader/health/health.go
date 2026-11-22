@@ -314,6 +314,11 @@ func (s *scan) pdb(p *policyv1.PodDisruptionBudget) {
 	if p.Status.DisruptionsAllowed != 0 || p.Status.ExpectedPods <= 0 {
 		return
 	}
+	// 单副本保护型 PDB（minAvailable: 1 / maxUnavailable: 0）在唯一 Pod 健康时 disruptionsAllowed 恒为 0，
+	// 属于正常保护状态，不算阻塞驱逐；仅当该副本不健康或多副本 PDB 阻塞时才上报。
+	if p.Status.ExpectedPods == 1 && p.Status.CurrentHealthy >= p.Status.DesiredHealthy {
+		return
+	}
 	since := s.now
 	reason, msg := "", ""
 	found := false

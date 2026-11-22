@@ -301,7 +301,11 @@ export function objectHealth(objects: readonly K8sObject[], firstSeen: FirstSeen
       case 'PodDisruptionBudget': {
         const expected = num(o.status?.expectedPods);
         const allowed = num(o.status?.disruptionsAllowed);
-        if (expected > 0 && allowed === 0) {
+        const healthy = num(o.status?.currentHealthy);
+        const desired = num(o.status?.desiredHealthy);
+        // 单副本保护型 PDB（minAvailable: 1 / maxUnavailable: 0）在唯一 Pod 健康时 disruptionsAllowed 恒为 0，
+        // 属于正常保护状态，不算阻塞驱逐；仅当该副本不健康或多副本 PDB 阻塞时才上报。
+        if (expected > 0 && allowed === 0 && !(expected === 1 && healthy >= desired)) {
           const c = condition(o, 'DisruptionAllowed');
           out.push({
             ...b,
@@ -314,8 +318,8 @@ export function objectHealth(objects: readonly K8sObject[], firstSeen: FirstSeen
             details: {
               disruptions_allowed: allowed,
               expected_pods: expected,
-              current_healthy: num(o.status?.currentHealthy),
-              desired_healthy: num(o.status?.desiredHealthy),
+              current_healthy: healthy,
+              desired_healthy: desired,
             },
           });
         }
