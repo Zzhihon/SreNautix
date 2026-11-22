@@ -1,0 +1,51 @@
+suite: 领域包过滤配置（packs.disabled 与 packs.only）
+templates:
+  - templates/role-resources.yaml
+  - templates/validate.yaml
+values:
+  - ../ci/base/required.yaml
+release:
+  name: t
+  namespace: srenautix
+capabilities:
+  majorVersion: "1"
+  minorVersion: "34"
+tests:
+  - it: 默认不渲染 packs.disabled 与 packs.only
+    set:
+      profile: standard
+    template: templates/role-resources.yaml
+    documentSelector: {path: metadata.name, value: t-srenautix-server-config}
+    asserts:
+      - notMatchRegex: {path: 'data["config.yaml"]', pattern: '(?m)^  (disabled|only):'}
+
+  - it: packs.disabled 写入 server 配置的 packs.disabled
+    set:
+      profile: standard
+      packs.disabled: [kafka, mysql, nacos, rocketmq, flux, ingress-nginx]
+    template: templates/role-resources.yaml
+    documentSelector: {path: metadata.name, value: t-srenautix-server-config}
+    asserts:
+      - matchRegex:
+          path: 'data["config.yaml"]'
+          pattern: '(?m)^  disabled:\n  - kafka\n  - mysql\n  - nacos\n  - rocketmq\n  - flux\n  - ingress-nginx$'
+
+  - it: packs.only 写入 server 配置的 packs.only
+    set:
+      profile: observe
+      packs.only: [kubernetes, node]
+    template: templates/role-resources.yaml
+    documentSelector: {path: metadata.name, value: t-srenautix-server-config}
+    asserts:
+      - matchRegex:
+          path: 'data["config.yaml"]'
+          pattern: '(?m)^  only:\n  - kubernetes\n  - node$'
+
+  - it: packs.only 与 packs.disabled 同时设置时模板校验失败
+    set:
+      profile: standard
+      packs.only: [kubernetes]
+      packs.disabled: [kafka]
+    template: templates/validate.yaml
+    asserts:
+      - failedTemplate: {errorPattern: packs\.only 与 packs\.disabled 不能同时设置}

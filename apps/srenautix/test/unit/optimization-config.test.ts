@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { opsRepositories, parseServerConfig, serverConfigSchema } from '../../src/config/server.js';
 import { DEFAULT_OPTIMIZATION } from '../../src/optimize/config.js';
 
-// 主动优化的 server 配置（ADR 0146）：默认关闭；业务仓库需要 github_app，并且不能同时是 ops 仓库
+// 主动优化已退役（optimization.enabled 必须为 false）；optimization.repositories.business 仍保留供 oom-rootcause 技能定位业务代码
 
 const minimal = (extra: Record<string, unknown>) => ({
   cluster_id: 'c1',
@@ -30,7 +30,7 @@ const code = {
 };
 
 describe('optimization 配置', () => {
-  it('默认关闭，没有业务仓库；后端上限为 ADR 0146 §6.1 的默认值', () => {
+  it('默认关闭，没有业务仓库；开启 optimization.enabled 时拒绝启动', () => {
     const o = serverConfigSchema.shape.optimization.parse(undefined);
     expect(o).toEqual(DEFAULT_OPTIMIZATION);
     expect(o.enabled).toBe(false);
@@ -39,11 +39,14 @@ describe('optimization 配置', () => {
     expect(o.limits.dbstats).toEqual({ concurrency: 1, per_hour: 60, statement_text_per_hour: 6 });
     expect(o.limits.metrics).toEqual({ concurrency: 2, per_hour: 600 });
     expect(o.limits.github).toEqual({ concurrency: 2, per_hour: 1000 });
+    expect(() => parseServerConfig(minimal({ optimization: { enabled: true } }))).toThrow(
+      /主动优化（optimization\.enabled）已退役/,
+    );
   });
 
-  it('业务仓库的代码布局按契约 CodeLayout 校验，未知键被拒绝', () => {
+  it('业务仓库的代码布局按契约 CodeLayout 校验（enabled=false 时供 oom-rootcause 使用），未知键被拒绝', () => {
     const o = serverConfigSchema.shape.optimization.parse({
-      enabled: true,
+      enabled: false,
       repositories: { business: { repo: 'CCH-HQ/claude-code-hub-plus', default_branch: 'dev', code } },
     });
     expect(o.repositories.business).toEqual({ repo: 'CCH-HQ/claude-code-hub-plus', default_branch: 'dev', code });

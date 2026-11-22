@@ -13,10 +13,7 @@ import { createApp } from '../kernel/http.js';
 import { leaseLeader, neverLeader, singleLeader, type Leader } from '../kernel/leader.js';
 import { registerGoalRoutes } from '../api/routes-goals.js';
 import { registerGoalTaskRoutes } from '../api/routes-goal-tasks.js';
-import { createOptimization } from '../optimize/service.js';
 import { registerProposalRoutes } from '../api/routes-proposals.js';
-import { optimizationCatalog } from '../optimize/catalog.js';
-import { OptimizationStore } from '../optimize/store.js';
 import { registerResearchRoutes } from '../api/routes-research.js';
 import { registerKnowledgeRoutes } from '../api/routes-knowledge.js';
 import { registerAskRoutes } from '../api/routes-ask.js';
@@ -327,6 +324,7 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
   const packs = await PackRuntime.load({
     dirs: c.packs.dirs,
     only: c.packs.only ?? null,
+    disabled: c.packs.disabled,
     lockFile: c.packs.lock_file ?? null,
     catalogPath: DEFAULT_CATALOG_PATH,
     capabilities: evidenceCapabilities(loki !== undefined),
@@ -342,6 +340,7 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
   logger.info('领域包已加载', {
     packs: packs.set.packs.map((p) => p.name),
     disabled: packs.set.disabled,
+    skipped_disabled: packs.skippedDisabled,
     failed: packs.failures.map((f) => f.name),
     lock_digest: packs.set.lockDigest,
   });
@@ -386,6 +385,7 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
       : null,
     // 证据基线（ADR 0153）
     novelty: noveltyOptions(c.stage_a.novelty),
+    genericAlertCondition: c.stage_a.generic_alert_condition,
   };
   const evidence = new PackEvidence(
     packs,
@@ -809,42 +809,9 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
     },
   });
   registerProposalRoutes(app, { pool, auth, proposals, catalog, policies: () => policies });
-  // 主动优化（ADR 0146）：读取接口总是可用，写接口在 optimization.enabled 关闭时返回 503
-  const goalCatalog = optimizationCatalog(packs.set);
-  const goalStore = new OptimizationStore(pool);
-  registerGoalRoutes(app, {
-    pool,
-    auth,
-    store: goalStore,
-    enabled: c.optimization.enabled,
-    catalog: () => goalCatalog,
-    cooldown: (domain) => packs.set.domains.get(domain)?.gates.cooldown ?? '30d',
-  });
-  // 目标运行的数据源、runner、建议与投递、验证循环：只在 optimization.enabled 时创建（关闭时不连接 dbstats、不读业务仓库）
-  const optimization = c.optimization.enabled
-    ? await createOptimization({
-        config: c,
-        pool,
-        store: goalStore,
-        set: () => packs.set,
-        evidenceSource,
-        topology,
-        github,
-        proposals,
-        registry: metrics.registry,
-        storm: () => scheduler.stormMode,
-        budgetExhausted: () => scheduler.optimizationBudgetExhausted(),
-        locale: evidenceOptions.locale,
-        queryTimeoutMs: evidenceOptions.queryTimeoutMs,
-        auditRelations: (conn) => changes.auditRelations(conn),
-      })
-    : null;
-  registerGoalTaskRoutes(app, {
-    pool,
-    auth,
-    evidence: optimization?.evidence ?? null,
-    publisher: optimization?.publisher ?? null,
-  });
+  // 主动优化已退役：保留 OpenAPI 兼容桩路由
+  registerGoalRoutes(app, { auth });
+  registerGoalTaskRoutes(app, { pool, auth });
   // 技能（ADR 0181）：内置与挂载目录中的技能，按 skills.enabled 与 skills.grants 运行
   const sk = c.skills;
   const skillKube = sk.enabled.some((n) => sk.grants[n] && 'kube.read' in sk.grants[n]!)
@@ -1057,41 +1024,6 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
     },
     '模型恢复后补研判',
   );
-  // 主动优化（ADR 0146）：目标运行、建议与投递每 loop_interval 一轮，验证循环每 10 分钟一轮（§6.3）；上一轮没有结束时跳过
-  if (optimization) {
-    const single = (fn: () => Promise<unknown>) => {
-      let busy = false;
-      return async () => {
-        if (busy) {
-          return;
-        }
-        busy = true;
-        try {
-          await fn();
-        } finally {
-          busy = false;
-        }
-      };
-    };
-    every(
-      optimization.loopMs,
-      single(() => optimization.runner.runOnce(signal)),
-      '目标运行',
-    );
-    every(
-      optimization.loopMs,
-      single(async () => {
-        await optimization.publisher.recommendOnce();
-        await optimization.publisher.deliverOnce();
-      }),
-      '优化建议与投递',
-    );
-    every(
-      10 * 60_000,
-      single(() => optimization.verifier.runOnce(signal)),
-      '优化建议的验证',
-    );
-  }
   // 技能（ADR 0181）：重新加载在每个实例上执行（接口与控制台读取）；触发、运行与投递只在主实例上
   {
     loops.every(skills.reloadMs, () => skills.reload(), '技能重新加载', { leaderOnly: false });
@@ -1474,7 +1406,6 @@ export async function buildServer(o: BuildOptions): Promise<ServerHandle> {
         s.close();
       }
       await listener.stop();
-      await optimization?.close();
       await changes.close();
       await pool.end();
     },

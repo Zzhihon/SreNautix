@@ -301,6 +301,12 @@ packs:
     {{- range $p := $v.packs.userConfigMaps }}
     - /etc/srenautix/packs/{{ (include "srenautix.userPack" $p | fromYaml).configMap }}
     {{- end }}
+  {{- with $v.packs.only }}
+  only: {{ toJson . }}
+  {{- end }}
+  {{- with $v.packs.disabled }}
+  disabled: {{ toJson . }}
+  {{- end }}
   {{- if $v.packs.lockConfigMap }}
   lock_file: /etc/srenautix/pack-lock/pack.lock
   {{- end }}

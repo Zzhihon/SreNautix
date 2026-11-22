@@ -131,6 +131,10 @@
 {{- end }}
 {{- end }}
 
+{{- if and $v.packs.only $v.packs.disabled }}
+{{- fail "packs.only 与 packs.disabled 不能同时设置" }}
+{{- end }}
+
 {{- /* 审计汇 */}}
 {{- $sink := include "srenautix.auditSink" . }}
 {{- $lockMode := include "srenautix.auditLockMode" . }}

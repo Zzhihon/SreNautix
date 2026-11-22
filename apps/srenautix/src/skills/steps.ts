@@ -10,7 +10,7 @@ import {
 } from '@srenautix/packs-sdk';
 import { parseDuration } from '../kernel/files.js';
 import type { GitHubApp } from '../github/app.js';
-import { RepoCodeCache } from '../optimize/code/tree.js';
+import { RepoCodeCache } from '../shared/repo-code-cache.js';
 import { SkillDenied, type SkillContext } from './context.js';
 import { podSummary, type SkillKube } from './kube.js';
 

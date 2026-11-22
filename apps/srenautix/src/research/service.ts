@@ -28,7 +28,6 @@ import type { WorkerStore } from './store.js';
 import type { ResearchCase, Subgraph } from './types.js';
 import { parseStoredKey } from '../topology/keys.js';
 import { hubTools } from '../tools/hub.js';
-import { optimizationRatio, runGoalTask } from '../optimize/worker.js';
 
 // worker 的阶段 B 循环：认领 → 读取输入 → 预算门控 → 研判（续租）→ 提议中转 → 写结果与事件 → 释放任务。
 // 一次研判的任何错误只影响这一个任务：记为 failed 并发布 research.failed，阶段 A 的消息依然有效。
@@ -244,9 +243,13 @@ export class WorkerService {
     beat.unref();
     try {
       if (task.subject_type === 'goal') {
-        const state = await runGoalTask(this.d, task, ctrl.signal);
+        logger.warn('收到已退役的目标运行任务，直接标记失败', { run_id: task.run_id });
+        await this.d.hub
+          .failOptimization(task.run_id, 'retired', '主动优化已退役')
+          .catch((e: unknown) => logger.warn('上报遗留目标任务失败状态出错', { run_id: task.run_id, error: e }));
+        await this.d.hub.finish(task.run_id, task.worker_id, 'failed');
         await this.reportBudget();
-        return state;
+        return 'failed';
       }
       return await this.research(task, ctrl.signal);
     } finally {
@@ -415,9 +418,8 @@ export class WorkerService {
     const ratio = used / this.d.budget.dailyTokens;
     this.d.metrics.budgetUsedRatio.set({ scope: 'daily' }, ratio);
     await this.lastResortQuota();
-    const optimization = await optimizationRatio(this.d);
-    this.d.metrics.budgetUsedRatio.set({ scope: 'optimization' }, optimization);
-    await this.d.hub.reportBudget(ratio, { optimization });
+    this.d.metrics.budgetUsedRatio.set({ scope: 'optimization' }, 1);
+    await this.d.hub.reportBudget(ratio, { optimization: 1 });
   }
 
   private async finishFailed(

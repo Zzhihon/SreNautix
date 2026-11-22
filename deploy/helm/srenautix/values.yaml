@@ -364,6 +364,10 @@ remediation:
 
 # 领域包：内置包在镜像的 /app/packs；用户的包以 ConfigMap 挂载
 packs:
+  # 仅加载列出的领域包（白名单；为空时加载除 `_` 开头与 disabled 以外的全部包，与 packs.disabled 互斥）
+  only: []
+  # 跳过加载的领域包名列表（黑名单，例如 [kafka, mysql, nacos, rocketmq, flux, ingress-nginx]；与 packs.only 互斥）
+  disabled: []
   # 每项是 ConfigMap 名（包名与它相同），或 {configMap: <名>, pack: <包名>}。一个 ConfigMap 放一个包：
   # 顶层文件以文件名为键，子目录中的文件以 <子目录>__<文件名> 为键（例如 runbooks__provider.md、tests__replay__x.json）。
   # 包超过一个 ConfigMap 的 1 MiB 上限时写 {configMaps: [<名>, ...], pack: <包名>}：按文件分到几个 ConfigMap，

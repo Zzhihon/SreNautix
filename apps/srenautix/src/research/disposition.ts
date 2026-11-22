@@ -1,5 +1,6 @@
 import type { ConclusionLevel, Disposition, Incident, StageAReport } from '@srenautix/contract';
 import { displayKey } from '@srenautix/core';
+import { isGenericAlertConditionCard } from '../stage-a/alert-condition.js';
 import { isRoutine } from '../stage-a/novelty.js';
 import type { CardEntry } from './evidence.js';
 import type { DispositionFacts } from './types.js';
@@ -92,7 +93,11 @@ export function fixTemplates(facts: DispositionFacts | null | undefined, root: s
 function impactHeld(i: DispositionInput): string | null {
   const alerts = i.facts?.business_impact ?? [];
   const abnormal = i.cards.filter(
-    (c) => c.judgedBy === 'rule' && c.result.verdict === 'abnormal' && !isRoutine(c.result),
+    (c) =>
+      c.judgedBy === 'rule' &&
+      !isGenericAlertConditionCard(c.result.card_id) &&
+      c.result.verdict === 'abnormal' &&
+      !isRoutine(c.result),
   );
   if (!alerts.length || !abnormal.length) {
     return null;
@@ -125,8 +130,8 @@ function ignoreBasis(i: DispositionInput, templates: readonly string[]): { basis
       why: `研判根因 ${displayKey(i.root)}（${i.level}）是领域包声明的集群外部组件，集群内没有可处置的对象`,
     };
   }
-  // 只有领域包规则判定的卡算确定性证据；只读工具结果由小模型判定的卡不算。常态的异常卡按正常计（ADR 0153）
-  const rule = i.cards.filter((c) => c.judgedBy === 'rule');
+  // 只有领域包规则判定的卡算确定性证据；只读工具结果由小模型判定的卡与运行时合成的通用告警条件卡不算。常态的异常卡按正常计（ADR 0153）
+  const rule = i.cards.filter((c) => c.judgedBy === 'rule' && !isGenericAlertConditionCard(c.result.card_id));
   const normal = (c: CardEntry) => c.result.verdict === 'normal' || isRoutine(c.result);
   const routine = (list: readonly CardEntry[]) => {
     const r = list.filter((c) => isRoutine(c.result)).map((c) => c.ref);

@@ -82,6 +82,7 @@ spec:
             {{- toYaml $labels | nindent 12 }}
           annotations:
             summary: "SreNautix {{ "{{" }} $labels.role {{ "}}" }} 的状态条件 {{ "{{" }} $labels.type {{ "}}" }} 持续异常"
+        {{- if include "srenautix.roleEnabled" (dict "ctx" $ "role" "gateway") }}
         - alert: SreNautixAdmissionSelfCheckFailed
           expr: max by (namespace) (srenautix_admission_selfcheck_ok{ {{- $sel -}} }) == 0
           for: 2m
@@ -97,6 +98,7 @@ spec:
             {{- toYaml $labels | nindent 12 }}
           annotations:
             summary: "有 {{ "{{" }} $value {{ "}}" }} 个执行处于 needs_human 或 indeterminate，需要人工处理"
+        {{- end }}
         - alert: SreNautixAuditExportLag
           expr: max by (namespace, chain) (srenautix_audit_export_lag_seconds{ {{- $sel -}} }) > 900
           for: 5m

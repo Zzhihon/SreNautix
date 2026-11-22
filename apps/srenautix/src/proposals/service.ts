@@ -4,7 +4,7 @@ import type pg from 'pg';
 import { HttpError } from '../kernel/errors.js';
 import type { Bindings, Subject } from '../identity/bindings.js';
 import type { CurrentBinding } from '../incident/read.js';
-import { subjectBinding } from '../optimize/binding.js';
+import { subjectBinding } from '../shared/binding.js';
 import type { ServerMetrics } from '../kernel/metrics.js';
 import { appendAudit } from '../kernel/store/audit.js';
 import { appendEvents, type NewEvent } from '../kernel/store/outbox.js';

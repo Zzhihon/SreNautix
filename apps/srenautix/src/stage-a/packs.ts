@@ -46,8 +46,10 @@ import { logger } from '../kernel/log.js';
 export interface PackRuntimeOptions {
   /** 每个目录下的子目录各是一个领域包。 */
   dirs: string[];
-  /** 只加载这些包；不填时加载除 `_` 开头（示例包）以外的全部包。 */
+  /** 只加载这些包；不填时加载除 `_` 开头（示例包）与 disabled 以外的全部包。 */
   only: string[] | null;
+  /** 明确跳过加载的包名（与 only 互斥）；跳过的包不参与编译，也不发布 PackLoadFailed 条件。 */
+  disabled?: readonly string[];
   /** 已提交的 pack.lock；给出时加载结果必须与之一致，不一致时不加载任何包。 */
   lockFile: string | null;
   /** 动作目录（contract/gateway/v1/action-catalog.yaml）。 */
@@ -223,6 +225,8 @@ export class PackRuntime {
     private readonly inputs: LoadedPack[],
     readonly failures: PackFailure[],
     private readonly capabilities: ReadonlySet<Capability>,
+    /** 因配置 packs.disabled 明确跳过加载的包名（按字母排序）。 */
+    readonly skippedDisabled: readonly string[] = [],
   ) {}
 
   /**
@@ -234,14 +238,29 @@ export class PackRuntime {
   }
 
   static async load(o: PackRuntimeOptions): Promise<PackRuntime> {
+    const disabledList = o.disabled ?? [];
+    if (o.only && disabledList.length > 0) {
+      throw new Error('packs.only 与 packs.disabled 不能同时设置');
+    }
+    const disabledSet = new Set(disabledList);
+    const skippedSet = new Set<string>();
     const catalog = loadActionCatalog(o.catalogPath);
     const failures: PackFailure[] = [];
     let active: LoadedPack[] = [];
     for (const root of o.dirs) {
-      const names = readdirSync(root)
+      const discovered = readdirSync(root)
         .filter((n) => statSync(join(root, n)).isDirectory() && !n.startsWith('.'))
-        .filter((n) => (o.only ? o.only.includes(n) : !n.startsWith('_')))
         .sort();
+      const names: string[] = [];
+      for (const n of discovered) {
+        if (disabledSet.has(n)) {
+          skippedSet.add(n);
+          continue;
+        }
+        if (o.only ? o.only.includes(n) : !n.startsWith('_')) {
+          names.push(n);
+        }
+      }
       for (const n of names) {
         try {
           active.push(loadPackDir(join(root, n), 'builtin'));
@@ -253,6 +272,11 @@ export class PackRuntime {
           failures.push(failureOf(join(root, n), n, 'builtin', e.message));
         }
       }
+    }
+    const skippedDisabled = [...skippedSet].sort();
+    const unknownDisabled = [...disabledSet].filter((n) => !skippedSet.has(n)).sort();
+    if (unknownDisabled.length > 0) {
+      logger.warn('packs.disabled 中的部分包不在 packs.dirs 中，已忽略', { unknown: unknownDisabled });
     }
     for (const n of o.only ?? []) {
       if (!active.some((p) => p.name === n) && !failures.some((f) => f.name === n)) {
@@ -275,7 +299,7 @@ export class PackRuntime {
           capabilities: o.capabilities,
           ...(expectedLock ? { expectedLock } : {}),
         });
-        return new PackRuntime(set, active, failures, o.capabilities);
+        return new PackRuntime(set, active, failures, o.capabilities, skippedDisabled);
       } catch (e) {
         if (e instanceof PackLockMismatch) {
           logger.error('pack.lock 与加载的领域包不一致，不加载任何包', { error: e.message });
@@ -285,6 +309,7 @@ export class PackRuntime {
             [],
             [...failures, ...active.map((p) => failureOf(p.dir, p.name, p.source, e.message))],
             o.capabilities,
+            skippedDisabled,
           );
         }
         if (!(e instanceof PackLintError)) {
@@ -338,6 +363,17 @@ export class PackRuntime {
       this.set.packs.map((p) => ({ pack: p.name, entries: p.content.alerts.entries as AlertCatalogEntry[] })),
       options,
     );
+  }
+
+  /** 告警目录条目 `<pack>/<entry id>`；所在包未加载或条目不存在时为 null。 */
+  alertEntry(catalogEntry: string): { pack: string; entry: AlertCatalogEntry } | null {
+    const i = catalogEntry.indexOf('/');
+    if (i <= 0) {
+      return null;
+    }
+    const pack = this.set.packs.find((p) => p.name === catalogEntry.slice(0, i));
+    const entry = pack?.content.alerts.entries.find((e) => e.id === catalogEntry.slice(i + 1));
+    return pack && entry ? { pack: pack.name, entry: entry as AlertCatalogEntry } : null;
   }
 
   /** 告警目录条目 `<pack>/<entry id>` 声明的证据链（全局键 `<pack>/<chain id>`）。 */

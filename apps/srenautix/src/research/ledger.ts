@@ -1,6 +1,7 @@
 import type { Feedback, Hypothesis, RuleConclusion } from '@srenautix/contract';
 import { memberParents } from '@srenautix/core';
 import { cardConditionHolds } from '@srenautix/packs-sdk';
+import { isGenericAlertConditionCard } from '../stage-a/alert-condition.js';
 import { isRoutine } from '../stage-a/novelty.js';
 import { commonCauseCheck } from './common-cause.js';
 import type { CardEntry, EvidenceBook } from './evidence.js';
@@ -459,7 +460,12 @@ export class Ledger {
     );
     const all = new Map([...fromRefs, ...fromChecks, ...ownCards].map((c) => [c.ref, c]));
     return [...all.values()].filter(
-      (c) => c.result.verdict === 'abnormal' && !isRoutine(c.result) && c.component !== null && scope.has(c.component),
+      (c) =>
+        !isGenericAlertConditionCard(c.result.card_id) &&
+        c.result.verdict === 'abnormal' &&
+        !isRoutine(c.result) &&
+        c.component !== null &&
+        scope.has(c.component),
     );
   }
 
